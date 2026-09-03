@@ -18,7 +18,8 @@ unnötig erschwert.
 - [x] Freigaberunde 2: ADR-0005, 0010, 0014, 0016 entschieden · ADR-0019 Projektsprache
 - [x] **V1.1 — Next.js-Grundgerüst** (siehe unten)
 - [x] **V1.2A/B — Datenbankschema ausgeführt und strukturell verifiziert**
-- [ ] Freigabe für V1.2C
+- [x] **V1.2C — RLS funktional verifiziert (31/31)**
+- [ ] Freigabe für V1.3
 
 Noch nicht: Supabase verbinden, SQL, Datenimport, Bilder kopieren, Auth, Deployment.
 
@@ -41,8 +42,9 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
 - **V1.2A** ✅ Migration `0001_initial_schema.sql` geschrieben und statisch geprüft
 - **V1.2B** ✅ Supabase-Projekt in EU-Region angelegt (ADR-0015), Migration ausgeführt und
   strukturell verifiziert
-- **V1.2C** Verbindung im Code (`@supabase/ssr`) und **funktionale** RLS-Verifikation mit zwei
-  echten Testkonten
+- **V1.2C** ✅ Funktionale RLS-Verifikation mit zwei echten JWT-Sessions: 31/31 bestanden
+  (`npm run verify:rls`). `@supabase/ssr` bewusst offen gelassen — es wird erst für das
+  Auth-UI (V1.5) gebraucht.
 - Tabellen: `series`, `categories`, `skylanders`, `profiles`, `collection_items`
 - RLS-Policies und Trigger für die Profilanlage
 - Verifikation mit zwei Testkonten: fremde Sammlung weder lesbar noch änderbar

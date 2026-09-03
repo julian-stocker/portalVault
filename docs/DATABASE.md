@@ -419,10 +419,11 @@ der sichere Ausgangszustand, auf den wir uns stützen.
 `UPDATE`, `DELETE` und `MERGE`; `TRUNCATE` wird ausschließlich über das Tabellenrecht
 kontrolliert. Deshalb ist es auf allen fünf Tabellen für `anon` und `authenticated` entzogen.
 
-**Was verifiziert ist und was nicht:** Die Konfiguration oben ist **strukturell** verifiziert —
-Policies, Rechte und RLS-Flags wurden aus der laufenden Datenbank gelesen. Ein **funktionaler
-Zwei-Benutzer-Test** mit echten authentifizierten Sessions steht noch aus (V1.2C). Bis dahin
-gilt: die Regeln sind nachweislich *so konfiguriert*, aber nicht nachweislich *wirksam*.
+**Verifikationsstand.** Die Konfiguration oben ist **strukturell** verifiziert (2026-09-03,
+Policies, Rechte und RLS-Flags aus der laufenden Datenbank gelesen) **und funktional**
+(2026-09-04, `npm run verify:rls` mit zwei echten JWT-Sessions, **31/31 bestanden**).
+Die Regeln sind damit nachweislich *so konfiguriert* **und** nachweislich *wirksam*.
+Aufschlüsselung der Prüfungen: `docs/AUTH.md`, Abschnitt 8.
 
 **Die Service Role umgeht RLS.** Sie schreibt den Katalog (Import, V1.3) und wird ausschließlich
 lokal verwendet. Sie umgeht jedoch **weder Constraints noch Trigger** — dort liegt der Schutz

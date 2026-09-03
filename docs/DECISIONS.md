@@ -344,6 +344,12 @@ ergänzt werden, sobald Auth und Sammlung stabil existieren.
 **Begründung.** Getestet wird dort, wo ein Fehler teuer ist: falsche Zahlen und offene
 Zugriffsrechte. Rendering-Details sind über Typecheck und Build ausreichend abgesichert.
 
+**Umsetzung Punkt 5 (RLS).** `tools/verify-rls.mts`, gestartet mit `npm run verify:rls`.
+Bewusst ein eigenständiges Node-Skript statt eines Test-Frameworks: der Test braucht echte
+HTTP-Sessions gegen ein laufendes Supabase-Projekt, legt Benutzer an und räumt sie wieder ab.
+Das gehört nicht in einen Unit-Test-Lauf, der bei jeder Änderung durchläuft. Node führt die
+`.mts`-Datei dank Type-Stripping direkt aus — kein zusätzliches Werkzeug nötig.
+
 **Offen:** Werkzeug für Unit-Tests (Vitest ist der naheliegende Kandidat) — wird bei der ersten
 zu testenden Geschäftslogik festgelegt, nicht vorher.
 

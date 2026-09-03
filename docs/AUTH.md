@@ -41,7 +41,9 @@ Der Trigger setzt **keinen** Benutzernamen, damit die Kontoanlage nie an einem N
 scheitern kann. Die Eindeutigkeit prüft die Datenbank beim späteren `UPDATE`
 (`unique` auf `profiles.username`), nicht die Anwendung.
 
-Umgesetzt in `supabase/migrations/0001_initial_schema.sql` (geschrieben, noch nicht ausgeführt):
+Umgesetzt in `supabase/migrations/0001_initial_schema.sql`, ausgeführt und **funktional
+verifiziert**: der Trigger legt nachweislich je neuem Auth-Benutzer genau eine Profilzeile an
+(Abschnitt 8).
 
 ```sql
 create or replace function public.handle_new_user()
@@ -192,7 +194,77 @@ eine öffentliche Beta nicht geeignet.
 eingerichtet werden (Anbieter, Absenderdomain, SPF/DKIM, Zustellbarkeit). Das ist ein
 kostenpflichtiger externer Dienst und braucht die ausdrückliche Freigabe des Nutzers.
 
-## 8. Offene Punkte
+## 8. Funktionale Verifikation (V1.2C) — **bestanden**
+
+`tools/verify-rls.mts`, ausführbar mit `npm run verify:rls`.
+
+**Ausgeführt am 2026-09-04 gegen das PortalVault-Supabase-Projekt: 31/31 Prüfungen bestanden,
+`Functional RLS verification passed.`**
+
+**Zweck.** Beweisen, dass die Policies mit **echten authentifizierten Sessions** greifen und
+dass `on_auth_user_created` bei jedem neuen Auth-Benutzer genau eine Profilzeile anlegt.
+Die strukturelle Verifikation aus V1.2B zeigte nur, dass die Regeln *so konfiguriert sind* —
+dieser Lauf zeigt, dass sie *wirken*.
+
+**Rollentrennung — der Kern des Tests.**
+
+| Rolle | wofür | wofür ausdrücklich nicht |
+|---|---|---|
+| Service Role | Testfixture anlegen, zwei Testbenutzer erzeugen, alles wieder aufräumen | **keine einzige Prüfaussage** — sie umgeht RLS und würde nichts beweisen |
+| Anon-Key + Benutzer-JWT | **jede** Prüfaussage | — |
+
+**Anlage der Testbenutzer.** Das Skript versucht zuerst den normalen Weg
+`supabase.auth.signUp()`. Verlangt das Projekt eine E-Mail-Bestätigung, liefert `signUp` keine
+Session; dann legt das Skript den Benutzer über `auth.admin.createUser({ email_confirm: true })`
+an und meldet ihn anschließend **normal per `signInWithPassword` an**. In beiden Fällen trägt
+der Client danach ein echtes Benutzer-JWT, und in beiden Fällen feuert `on_auth_user_created`,
+weil der Trigger an `INSERT ON auth.users` hängt.
+
+**Im Lauf vom 2026-09-04 griff der zweite Weg** (`admin.createUser + signInWithPassword`) —
+das Projekt verlangt also E-Mail-Bestätigung. Für das Auth-UI (V1.5) heißt das: nach der
+Registrierung gibt es **keine** sofortige Session, der Benutzer muss erst den Bestätigungslink
+öffnen. Das entspricht dem in Abschnitt 2 beschriebenen Ablauf.
+
+**Testfixture** (minimal, kontrolliert, **keine Legacy-Daten**):
+
+| Tabelle | Datensatz |
+|---|---|
+| `series` | `code='TEST'`, `label='RLS Test Series'`, `release_year=2026`, `position=99` |
+| `categories` | `series_code='TEST'`, `position=0`, `name='RLS Test Category'` |
+| `skylanders` | `sky_id='SKY-9999'`, `name='RLS Test Figure'`, `slug='rls-test-figure'`, `market_price=9.99` |
+
+`SKY-9999` ist die höchste vom Format erlaubte ID und wird vom Legacy-Ledger nie vergeben
+(`highest_issued = 820`) — eine Kollision mit echten Katalogdaten ist damit ausgeschlossen.
+Das Skript räumt in einem `finally`-Block alles wieder ab: Sammlungseinträge, beide Auth-Benutzer,
+Figur, Kategorie, Serie.
+
+**Teardown im Lauf vom 2026-09-04 vollständig erfolgreich.** Zeilenzahlen danach:
+`series=0, categories=0, skylanders=0, profiles=0, collection_items=0`. Weder Testfixture noch
+Test-Auth-Benutzer sind in der Datenbank verblieben; sie ist wieder im Zustand direkt nach der
+Migration.
+
+**Geprüfte Fälle — alle 31 bestanden:**
+
+| Gruppe | Prüfungen | Ergebnis |
+|---|---:|---|
+| `on_auth_user_created`: je Benutzer genau **ein** Profil, `username` startet `NULL` | 4 | ✅ |
+| Eigenes Profil lesen und ändern (beide Benutzer) | 3 | ✅ |
+| Fremdes Profil weder lesen noch ändern (beide Richtungen) | 4 | ✅ |
+| Eigenes Profil nicht löschbar (keine DELETE-Policy) | 1 | ✅ |
+| Fremdes Profil nach allen Versuchen nachweislich unverändert | 1 | ✅ |
+| Eigene `collection_items` anlegen, ändern, lesen | 4 | ✅ |
+| Fremde Einträge weder lesen, ändern, löschen noch für andere anlegen | 4 | ✅ |
+| Eintrag nicht auf eine fremde `user_id` umschreiben (`WITH CHECK`, beide Richtungen) | 2 | ✅ |
+| Fremder Eintrag nach allen Versuchen intakt · eigener löschbar | 2 | ✅ |
+| Katalog für Angemeldete lesbar, aber weder änderbar noch erweiterbar | 3 | ✅ |
+| Anonym: Katalog lesbar, Profile und Sammlungen nicht | 3 | ✅ |
+| **Summe** | **31** | **31/31** |
+
+**Damit ist bewiesen, nicht nur konfiguriert:** Ein angemeldeter Benutzer kommt an fremde
+Profil- und Sammlungsdaten weder lesend noch schreibend heran, kann den Katalog nicht
+verändern, und ein anonymer Besucher sieht ausschließlich den Katalog.
+
+## 9. Offene Punkte
 
 - **OPEN:** Darf ein Benutzername später geändert werden?
 - **OPEN:** Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später.

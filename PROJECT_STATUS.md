@@ -7,17 +7,22 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**V1.2B — Datenbank steht.** V1.1 (Fundament) und V1.2A (Schemaentwurf) sind abgeschlossen.
+**V1.2 abgeschlossen — Datenbankfundament steht und ist bewiesen.**
+V1.1 (Fundament), V1.2A (Schemaentwurf), V1.2B (Ausführung) und V1.2C (funktionale
+RLS-Verifikation) sind fertig.
 
-`0001_initial_schema.sql` wurde am 2026-09-03 im Supabase-SQL-Editor **erfolgreich ausgeführt**
-und anschließend mit rein lesenden Abfragen **strukturell verifiziert**. Das Supabase-Projekt
-existiert in einer EU-Region; die Datenbank enthält das vollständige V1-Schema und **keine
-Daten** (alle Rowcounts 0).
+`0001_initial_schema.sql` wurde am 2026-09-03 im Supabase-SQL-Editor ausgeführt und strukturell
+verifiziert. Am 2026-09-04 hat `npm run verify:rls` mit **zwei echten JWT-Sessions**
+**31 von 31 Prüfungen bestanden** (`Functional RLS verification passed.`).
 
-**Noch nicht bewiesen:** dass die RLS-Regeln bei echten Sessions greifen. Der funktionale
-Zwei-Benutzer-Test ist V1.2C.
+Die Sicherheitsregeln sind damit nicht nur konfiguriert, sondern **nachgewiesen wirksam**:
+`on_auth_user_created` legt je Benutzer genau ein Profil an, und ein angemeldeter Benutzer kommt
+an fremde Profil- und Sammlungsdaten weder lesend noch schreibend heran.
 
-Wartet auf Freigabe für **V1.2C — Verbindung im Code und RLS-Verifikation mit zwei Testkonten**.
+Testfixture und beide Test-Auth-Benutzer wurden anschließend vollständig entfernt; alle fünf
+Tabellen standen danach wieder auf **0 Zeilen**.
+
+Wartet auf Freigabe für **V1.3 — Katalogimport**.
 
 ---
 
@@ -39,12 +44,14 @@ Wartet auf Freigabe für **V1.2C — Verbindung im Code und RLS-Verifikation mit
 | Vorläufige Startseite | ✅ |
 | Vollständige Projektdokumentation in `docs/` | ✅ |
 | `supabase/migrations/0001_initial_schema.sql` — geschrieben, **ausgeführt und strukturell verifiziert** | ✅ |
+| `@supabase/supabase-js` als Abhängigkeit | ✅ |
+| `tools/verify-rls.mts` — 31 funktionale RLS-Prüfungen, `npm run verify:rls` | ✅ **ausgeführt, 31/31 bestanden** |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 
 ## Noch nicht implementiert
 
-- Verbindung von Next.js zu Supabase (`@supabase/ssr`, Client- und Server-Clients)
-- **Funktionaler RLS-Test mit zwei echten Benutzern** (V1.2C) — bislang nur strukturell verifiziert
+- `@supabase/ssr` und die Cookie-basierte Session-Anbindung in Next.js — **bewusst offen**,
+  kommt mit dem Auth-UI (V1.5); für den RLS-Test war sie nicht nötig
 - Supabase CLI (nicht initialisiert, kein Remote-Link — Migration lief über den SQL-Editor)
 - Import-Werkzeug, importierte Katalogdaten, kopierte Bilder
 - Katalog-UI, Suche, Filter, Figurenseiten
@@ -62,9 +69,9 @@ Wartet auf Freigabe für **V1.2C — Verbindung im Code und RLS-Verifikation mit
 |---|---|
 | Frontend | Grundgerüst lauffähig, eine statische Seite |
 | Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
-| Auth | nicht begonnen — Konzept in `docs/AUTH.md` |
+| Auth | Kein UI. Die Datenbankseite ist fertig und funktional verifiziert: Trigger, Policies und Rechte greifen nachweislich (`tools/verify-rls.mts`, 31/31). Konzept in `docs/AUTH.md` |
 | Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
-| Tests | nur Lint / Typecheck / Build — Unit- und RLS-Tests folgen mit der Fachlogik |
+| Tests | Lint / Typecheck / Build plus der funktionale RLS-Test (`npm run verify:rls`). Unit-Tests folgen mit der ersten Geschäftslogik (ADR-0013) |
 
 Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
 ADR-0015). Vercel ist weiterhin nicht eingerichtet.
@@ -74,6 +81,35 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, V1.2C — funktionaler RLS-Test mit zwei echten JWT-Sessions:**
+
+`npm run verify:rls` → **31/31 checks passed**, `Functional RLS verification passed.`
+
+| Prüfgruppe | Prüfungen | Ergebnis |
+|---|---:|---|
+| `on_auth_user_created` legt je Benutzer genau ein Profil an, `username` startet `NULL` | 4 | ✅ |
+| Eigenes Profil lesen und ändern | 3 | ✅ |
+| Fremdes Profil weder lesen noch ändern (beide Richtungen) | 4 | ✅ |
+| Eigenes Profil nicht löschbar (keine DELETE-Policy) | 1 | ✅ |
+| Fremdes Profil nach allen Versuchen nachweislich unverändert | 1 | ✅ |
+| Eigene `collection_items` anlegen, ändern, lesen | 4 | ✅ |
+| Fremde Einträge weder lesen, ändern, löschen noch für andere anlegen | 4 | ✅ |
+| Eintrag nicht auf fremde `user_id` umschreiben (`WITH CHECK`) | 2 | ✅ |
+| Fremder Eintrag intakt, eigener löschbar | 2 | ✅ |
+| Katalog für `authenticated` lesbar, weder änderbar noch erweiterbar | 3 | ✅ |
+| `anon`: Katalog lesbar, Profile und Sammlungen nicht | 3 | ✅ |
+| **Summe** | **31** | **31/31** |
+
+Die beiden Testbenutzer entstanden über `admin.createUser + signInWithPassword` — das Projekt
+verlangt E-Mail-Bestätigung, weshalb `signUp` keine sofortige Session liefert. Der Trigger
+feuerte trotzdem, weil er an `INSERT ON auth.users` hängt. Für das Auth-UI (V1.5) bedeutet das:
+nach der Registrierung gibt es keine sofortige Session.
+
+**Aufräumen nach dem Lauf:** Testfixture (Serie `TEST`, eine Kategorie, `SKY-9999`) und beide
+Test-Auth-Benutzer vollständig entfernt. Zeilenzahlen danach:
+`series=0, categories=0, skylanders=0, profiles=0, collection_items=0`.
+Es sind **keine Testartefakte** in der Datenbank verblieben.
 
 **2026-09-03, V1.2B — gegen die laufende Supabase-Datenbank:**
 
@@ -136,16 +172,14 @@ read-only; sie wurden zuletzt am 2026-08-11 grün gemeldet.
 
 ### Ausdrücklich NICHT verifiziert
 
-- **Der funktionale RLS-Test mit zwei echten Benutzern steht aus (V1.2C).**
-  Verifiziert ist, dass Policies, Rechte und RLS-Flags **so konfiguriert sind** wie beabsichtigt.
-  **Nicht** verifiziert ist, dass sie bei echten authentifizierten Sessions greifen — dass also
-  Benutzer A weder lesend noch schreibend an die Daten von Benutzer B kommt. Der Security-Review
-  in `docs/SECURITY.md`, Abschnitt 5a, ist damit strukturell belegt, aber nicht
-  sicherheitsfunktional bewiesen. Bis dahin wird nichts deployt.
-- Der Profil-Trigger `on_auth_user_created` **existiert**, hat aber noch nie gefeuert — es gibt
-  keine Benutzer. Ob er bei einer echten Registrierung eine Profilzeile anlegt, zeigt erst V1.2C.
+- **Cookie-basierte Sessions in Next.js.** Der RLS-Test spricht Supabase direkt an.
+  `@supabase/ssr`, Middleware, Server-Clients und geschützte Routen existieren noch nicht und
+  brauchen mit dem Auth-UI (V1.5) eine eigene Verifikation.
+- **Der Registrierungsablauf aus Benutzersicht.** Bestätigungsmail, Callback und Passwort-Reset
+  sind nie durchlaufen worden; der Test hat die Benutzer über die Admin-API angelegt.
+- **Katalogimport.** Es sind nie echte Katalogdaten in der Datenbank gewesen — nur eine
+  Testfixture aus drei Zeilen, die wieder entfernt wurde.
 - Keine Supabase CLI initialisiert, kein Remote-Link (die Migration lief über den SQL-Editor).
-- Keine Verbindung zwischen Next.js und Supabase.
 
 ---
 
@@ -224,9 +258,10 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**V1.2C — Supabase im Code anbinden und die RLS-Regeln funktional verifizieren.**
-`@supabase/ssr` einrichten (Browser-Client, Server-Client, Middleware), zwei Testkonten anlegen
-und nachweisen, dass Benutzer A weder lesend noch schreibend an Profil und Sammlung von
-Benutzer B kommt. Erst dieser Nachweis macht aus „so konfiguriert" ein „nachweislich wirksam".
+**V1.3 — Katalogimport.** Das Importwerkzeug `tools/import-catalog.ts` bauen: den validierten
+öffentlichen Legacy-Export einlesen, per `sky_id` upserten, vorher als Dry-Run anzeigen und in
+einer Transaktion schreiben. Regeln vollständig in `docs/SKYLANDERS_DATA.md`, Abschnitt 12.
+
+Vorher zu klären: die genaue Slug-Kollisionsregel (ADR-0011).
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**

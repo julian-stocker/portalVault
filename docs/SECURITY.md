@@ -234,10 +234,10 @@ Weitere Regeln:
 
 ## 5a. Security-Review der ersten Migration
 
-Am 2026-09-03 zuerst **statisch** gegen `0001_initial_schema.sql` geprüft, danach die
-Migration ausgeführt und der Ist-Zustand mit rein lesenden Abfragen aus der laufenden Datenbank
-gelesen. Die Antworten unten sind damit **strukturell belegt** — Policies, Rechte und RLS-Flags
-sind nachweislich so konfiguriert:
+Dreistufig belegt: **statisch** gegen `0001_initial_schema.sql` (2026-09-03), **strukturell**
+durch rein lesende Abfragen gegen die laufende Datenbank (2026-09-03), und **funktional** durch
+`npm run verify:rls` mit zwei echten JWT-Sessions (2026-09-04, **31/31 bestanden**).
+Die Antworten unten sind damit nicht nur konfiguriert, sondern nachgewiesen:
 
 | # | Frage | Antwort | Warum |
 |---|---|---|---|
@@ -264,13 +264,35 @@ Anlegen einer Tabelle die tatsächlichen Rechte auslesen, nicht die geschriebene
 
 | | Status |
 |---|---|
-| Policies, Rechte, RLS-Flags sind wie beabsichtigt konfiguriert | ✅ **strukturell verifiziert** gegen die laufende Datenbank |
-| Die Regeln greifen bei echten authentifizierten Sessions | ❌ **noch nicht getestet** |
+| Policies, Rechte, RLS-Flags sind wie beabsichtigt konfiguriert | ✅ **strukturell verifiziert** gegen die laufende Datenbank (2026-09-03) |
+| Die Regeln greifen bei echten authentifizierten Sessions | ✅ **funktional verifiziert**, 31/31 (2026-09-04) |
+| Cookie-Sessions in Next.js (`@supabase/ssr`, Middleware, geschützte Routen) | ❌ existiert noch nicht — V1.5 |
 
-Der **funktionale Zwei-Benutzer-Test** steht aus (V1.2C): zwei echte Konten anlegen und prüfen,
-dass Benutzer A weder lesend noch schreibend an die Profil- und Sammlungsdaten von Benutzer B
-kommt. Bis dahin gilt keine dieser Antworten als sicherheitsfunktional bewiesen, und es wird
-nichts deployt.
+**Der funktionale Zwei-Benutzer-Test (V1.2C) ist am 2026-09-04 bestanden.**
+`tools/verify-rls.mts`, Start mit `npm run verify:rls` — **31 Prüfungen, 31 bestanden**,
+`Functional RLS verification passed.` Aufschlüsselung: `docs/AUTH.md`, Abschnitt 8.
+
+Nachgewiesen mit zwei echten authentifizierten Sessions:
+
+- `on_auth_user_created` legt je neuem Auth-Benutzer **genau eine** Profilzeile an
+- ein Benutzer liest und ändert ausschließlich sein eigenes Profil
+- ein Benutzer liest, ändert, erzeugt und löscht ausschließlich seine eigenen `collection_items`
+- `WITH CHECK` verhindert, dass ein Eintrag auf eine fremde `user_id` umgeschrieben wird
+- `authenticated` kann den Katalog lesen, aber weder ändern noch erweitern
+- `anon` sieht den Katalog, aber weder Profile noch Sammlungen
+
+**Regel für den Test selbst:** Die Service Role dient ausschließlich dazu, die Testfixture und
+die Testbenutzer anzulegen und wieder abzuräumen. **Keine einzige Prüfaussage** läuft über sie —
+sie umgeht RLS und würde damit exakt das nicht prüfen, worum es geht. Jede der 31 Aussagen nutzt
+den Anon-Key plus ein echtes Benutzer-JWT.
+
+**Nach dem Lauf.** Testfixture und beide Test-Auth-Benutzer wurden vollständig entfernt;
+alle fünf Tabellen standen danach wieder auf 0 Zeilen. In der Datenbank sind keine Testartefakte
+verblieben.
+
+**Was weiterhin nicht bewiesen ist:** die Cookie-basierte Session-Handhabung in Next.js.
+Der Test spricht Supabase direkt an; `@supabase/ssr`, Middleware und geschützte Routen kommen
+mit dem Auth-UI (V1.5) und brauchen dann eine eigene Verifikation.
 
 ---
 
