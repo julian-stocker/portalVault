@@ -10,8 +10,10 @@ Sie ist bewusst kurz. Architekturdetails stehen in `docs/`, nicht hier.
 Webplattform für Skylanders-Sammler. Zentraler öffentlicher Katalog mit Marktpreisen,
 Benutzerkonten und persönlicher Sammlungsverwaltung.
 
-**Produktziel V1:** Katalog + Accounts + Sammlung. **Kein Marketplace.**
-Handel, Tausch, Angebote und Zahlungen kommen deutlich später (siehe `docs/ROADMAP.md`).
+**Produktziel V1:** Sammler- und Analyseplattform — visueller Katalog, persönliche Sammlung,
+schneller Owned/Not-Owned-Toggle, Fortschritt. **Kein Marketplace** (ADR-0021).
+Handel, Tausch, Angebote und Zahlungen werden erst wieder bewertet, wenn PortalVault
+nachweislich Nutzer gewinnt. Produktvision und -prinzipien: `docs/ROADMAP.md`.
 
 PortalVault löst ein bestehendes, funktionierendes Legacy-Projekt ab (statische Seite,
 Excel als Source of Truth). Das Legacy-Projekt liegt unter `../webpage`.

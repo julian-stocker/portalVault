@@ -586,3 +586,138 @@ create unique index profiles_username_lower_uniq
 **Verworfen:** `citext` (siehe oben) · nicht-deterministische ICU-Collation (elegant, aber
 schließt Musteroperatoren und Präfix-Indizes auf der Spalte aus, die eine spätere
 Benutzersuche brauchen könnte).
+
+---
+
+## ADR-0021 — PortalVault V1 ist eine Sammler- und Analyseplattform, kein Marketplace
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Entscheidung.** V1 ist eine Skylanders-**Sammler- und Analyseplattform**. Marketplace,
+Trading, Seller-Funktionen, Payments, Versand, Bewertungen und Disputes gehören ausdrücklich
+**nicht** zum ersten Produkt.
+
+**Der V1-Kern:**
+
+1. visueller Skylanders-Katalog als zentraler Einstieg
+2. persönliche Sammlung
+3. schneller Owned/Not-Owned-Toggle — antippen, erneut antippen, Zustand sofort sichtbar
+4. Fortschritt gesamt und je Serie
+5. mehrere Sammlungsansichten (Grid, kompakt, Tabelle) — Grid zuerst
+6. Analytics und optionale Premium-Funktionen später
+
+**Bedingung statt Datum.** Die Marketplace-Richtung wird **erst dann erneut bewertet, wenn
+PortalVault nachweislich echte Nutzer gewinnt** und die Sammlungsplattform angenommen wird.
+Das ist bewusst keine Zeitangabe: „deutlich später" lädt dazu ein, doch schon einmal etwas
+vorzubereiten. Vor diesem Nachweis wird an Marketplace-Funktionen nicht gearbeitet — auch nicht
+konzeptionell, auch nicht „nur das Datenmodell".
+
+**Begründung.** Ein Marketplace braucht Angebot **und** Nachfrage gleichzeitig. Eine
+Sammlungsplattform ist ab dem ersten Nutzer nützlich. Der Weg von einer angenommenen
+Sammlungsplattform zu einem Marketplace ist gangbar; der umgekehrte nicht.
+
+**Konsequenzen.**
+
+- Das Datenmodell bleibt wie in ADR-0005 und `docs/DATABASE.md`, Abschnitt 7: die Andockpunkte
+  für `listings`, `wishlist_items` und Zustände je Exemplar sind dokumentiert, aber **nicht
+  gebaut**.
+- Die zentrale UX-Anforderung von V1 ist **Erfassungsgeschwindigkeit**, nicht Funktionsumfang.
+- Die Roadmap führt Marketplace ab sofort unter einer Bedingung, nicht unter einem Zeitpunkt.
+
+**Acquisition (Teil derselben Entscheidung).** Erster realistischer Nutzerkanal ist der
+bestehende eBay-Skylanders-Shop: QR-Codes oder Hinweise in Paketen bringen Käufer genau in dem
+Moment zur Plattform, in dem sie neue Figuren in der Hand halten. **Daraus folgt eine technische
+Anforderung, keine Marketing-Notiz:** Mehrere frisch gekaufte Figuren müssen sich **mobil sehr
+schnell** erfassen lassen. Das begründet den Owned-Toggle als Anforderung an das Katalog-UI.
+
+---
+
+## ADR-0022 — Free und Premium: Richtung festgelegt, Grenze und Preis offen
+
+**Status:** TEILWEISE ANGENOMMEN (2026-09-04) — die Richtung steht, die Ausgestaltung ist
+**OPEN DECISION**
+
+**Angenommen:**
+
+- **Free muss ein eigenständiges, dauerhaft nützliches Produkt sein.** Keine Demo, keine
+  künstlich beschnittene Testversion, kein Zeitlimit.
+- **Free-Kern mindestens:** Katalog, persönliche Sammlung, Owned/Not-Owned, grundlegender
+  Fortschritt.
+- Eine **optionale günstige Premium-Stufe** ist als spätere Monetarisierungsrichtung vorgesehen.
+
+**Aktuelle Tendenz (2026-09-04) — ausdrücklich noch keine Entscheidung:**
+
+| Stufe | Tendenz |
+|---|---|
+| **Free** | vollständiges **Sammeln und Organisieren** |
+| **PortalVault+** | **Preise, Werte und Analytics** |
+
+Diese Trennlinie ist schlüssig, weil sie Free nicht verstümmelt: Wer sammelt und organisiert,
+hat ein vollständiges Produkt. Der Mehrwert liegt dann in der Bewertung, nicht im Grundnutzen.
+Sie ist aber **noch keine endgültige Feature- oder Preisentscheidung** — insbesondere ist damit
+nicht entschieden, auf welcher Seite Mengen/Duplikate landen.
+
+**Offen — ausdrücklich NICHT entschieden:**
+
+- **Welche Funktionen Premium sind.** Denkbar: Mengen/Duplikate · Marktpreise · Gesamtwert ·
+  Wert je Serie · erweiterte Analytics · Preisentwicklung · Export. „Denkbar" heißt hier
+  wörtlich denkbar, nicht vorgesehen.
+- **Der Preis.** „0,99 €/Monat" ist bisher **nur eine Idee**, keine Produktentscheidung.
+- **Ob Mengen/Duplikate Free oder Premium werden.** Technisch unterstützt das Datenmodell sie
+  bereits (`collection_items.quantity`) — das ist eine Datenmodell-Eigenschaft, keine
+  Produktzusage.
+
+**Konsequenz für die Implementierung.** Solange die Grenze nicht entschieden ist, wird **keine
+Zahlungsschranke, kein Feature-Flag-System und keine Abrechnungslogik** gebaut. Alle V1-
+Funktionen werden zunächst ohne Stufenlogik implementiert. Eine spätere Trennung ist billig,
+solange die Fachlogik gebündelt in `src/lib/` liegt (ADR-0014); eine vorschnell eingezogene
+Schranke wäre teuer und würde Free unnötig verstümmeln.
+
+**Zu entscheiden vor:** jeder Arbeit an Zahlungen oder Zugriffsstufen. Nicht vor V1.7.
+
+---
+
+## ADR-0023 — Reihenfolge der Meilensteine: Auth vor dem Katalog-UI
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Kontext.** Die ursprüngliche Reihenfolge war V1.3 Import → V1.4 Katalog → V1.5 Auth →
+V1.6 Sammlung. Der End-to-End-Fluss (Registrieren → Einloggen → Katalog → Antippen → eigene
+Sammlung) wäre damit erst am Ende von V1.6 erlebbar gewesen. ADR-0021 macht genau diesen Fluss
+zum Kern des Produkts.
+
+**Entscheidung — die Reihenfolge lautet:**
+
+| Meilenstein | Inhalt |
+|---|---|
+| **V1.3** | Katalogimport |
+| **V1.4** | Auth + `@supabase/ssr`: Registrierung, E-Mail-Bestätigung, Login, Logout, Passwort vergessen/Reset, Onboarding/Username, geschützter Bereich |
+| **V1.5** | Visueller Katalog + Owned/Not-Owned-Toggle + minimale Seite „Meine Sammlung" — **erster vollständiger End-to-End-Produktfluss** |
+| **V1.6** | Ausbau: mehrere Sammlungsansichten, Fortschritt gesamt und pro Serie, Mengen/Duplikate, Mobile-Feinschliff, weitere Collection-UX |
+| **V1.7** | Beta-Reife |
+
+**Begründung.**
+
+1. **Der Import bleibt unstrittig zuerst.** Ohne die 600 Zeilen und 475 Bilder hat jede
+   Oberfläche nichts zu zeigen, und der Import validiert zugleich die Datenqualität.
+2. **Die Katalogkarte trägt den Owned-Zustand und ist damit sitzungsabhängig.** Ohne Auth
+   gebaut, müsste sie später umgebaut werden — genau die Nacharbeit, die dieses Projekt
+   vermeidet. Mit Auth zuerst entsteht sie einmal, in Endform.
+3. **`@supabase/ssr` steht, bevor Seiten davon abhängen.** Session-Handling nachträglich in
+   fertige Seiten einzuziehen, ist teurer als es vorher zu haben.
+4. **Der E2E-Fluss ist eine Stufe früher erlebbar** — Ende V1.5 statt Ende V1.6.
+
+**Bewusst in Kauf genommen.** V1.4 liefert kein für Besucher sichtbares Ergebnis. Der
+öffentliche Katalog wäre auch anonym lesbar (ADR-0016) und ließe sich früher zeigen. Der
+Preis ist ein Meilenstein ohne Vorzeigbares; der Gegenwert ist, dass V1.5 sofort den
+vollständigen Fluss liefert statt nur einen Katalog zum Anschauen.
+
+**Konsequenzen.**
+
+- Verweise auf „Auth-UI (V1.5)" in `docs/AUTH.md`, `docs/SECURITY.md` und `PROJECT_STATUS.md`
+  lauten jetzt V1.4; Verweise auf „Katalog-UI (V1.4)" lauten V1.5.
+- Die Sammlungsseite in V1.5 ist ausdrücklich **minimal** — nur das visuelle Grid. Ansichten,
+  Fortschritt und Mengen kommen in V1.6. Das hält V1.5 klein genug, um den Fluss zu erreichen,
+  ohne ihn mit Ausbaufunktionen zu überladen.
+- Premium-Grenzen bleiben unberührt und offen (ADR-0022); Marketplace bleibt außerhalb von V1
+  (ADR-0021).

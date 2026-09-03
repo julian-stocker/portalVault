@@ -1,11 +1,64 @@
 # Roadmap
 
-Stand: 2026-09-03.
+Stand: 2026-09-04.
 
 Diese Datei begrenzt den Umfang. **Was hier unter LATER oder MARKETPLACE steht, wird jetzt
 nicht gebaut** — auch nicht „schnell nebenbei", auch nicht „als Vorbereitung".
 Vorbereitung heißt hier ausschließlich: keine Entscheidung treffen, die den späteren Schritt
 unnötig erschwert.
+
+---
+
+## Produktvision
+
+**PortalVault V1 ist eine Skylanders-Sammler- und Analyseplattform — kein Marketplace.**
+
+Marketplace, Trading, Seller-Funktionen und Payments gehören ausdrücklich **nicht** zum ersten
+Produkt (ADR-0021).
+
+### Produktprinzipien für V1
+
+1. **Der zentrale Einstieg ist ein visueller Skylanders-Katalog.** Nicht eine Suchmaske, nicht
+   eine Tabelle — Bilder.
+2. **Figuren sind nach Spiel/Serie und Kategorie organisiert**, in der Reihenfolge aus dem
+   Legacy-System (`docs/SKYLANDERS_DATA.md`, Abschnitt 3).
+3. **Benutzer sollen ihre Sammlung sehr schnell erfassen können.** Das ist die zentrale
+   Anforderung, aus der die übrigen folgen.
+4. **Kerninteraktion im Katalog:** Figur antippen → als owned markieren. Erneut antippen →
+   aus der Sammlung entfernen. **Der Zustand muss visuell sofort eindeutig sein.**
+5. **Das UI wird besonders auf Mobile für schnelles Erfassen optimiert.**
+6. **Es gibt eine eigene Seite „Meine Sammlung".**
+7. **Für die Sammlung sind langfristig mehrere Darstellungen vorgesehen:** visuelles Grid mit
+   Bildern · kompakte Ansicht · Tabellenansicht.
+8. **Fortschritt wird insgesamt und pro Serie sichtbar.**
+9. **Mengen und Duplikate werden technisch unterstützt.** Das Datenmodell kann es bereits
+   (`collection_items.quantity`, ADR-0005). **Ob die Funktion Free oder Premium wird, ist noch
+   keine Produktentscheidung.**
+10. **Analytics später:** Marktwerte, gesamter Sammlungswert, Wert pro Serie und weitere
+    Sammlungsstatistiken.
+
+### Free und Premium — Richtung, keine Entscheidung
+
+- **Free muss ein eigenständiges, dauerhaft nützliches Produkt sein** — keine Demo, keine
+  künstlich beschnittene Testversion.
+- **Free-Kern mindestens:** Katalog, persönliche Sammlung, Owned/Not-Owned, grundlegender
+  Fortschritt.
+- Eine **optionale günstige Premium-Stufe** ist als spätere Monetarisierungsrichtung vorgesehen.
+- **Denkbare** Premium-Mehrwerte: Mengen/Duplikate · Marktpreise · Gesamtwert · Wert je Serie ·
+  erweiterte Analytics · Preisentwicklung · Export.
+- ⚠️ **Die Feature-Grenze und der Preis sind ausdrücklich NICHT entschieden.**
+  Insbesondere „0,99 €/Monat" ist bisher **nur eine Idee**, keine Produktentscheidung (ADR-0022).
+
+### Acquisition
+
+Erster realistischer Nutzerkanal ist der **bestehende eBay-Skylanders-Shop** des Nutzers:
+kleine PortalVault-QR-Codes oder Hinweise können Paketen beigelegt werden. Käufer gelangen
+dadurch **genau in dem Moment** zur Plattform, in dem sie neue Figuren in der Hand halten.
+
+**Daraus folgt eine harte UX-Anforderung, keine Marketing-Notiz:** Das Hinzufügen mehrerer
+frisch gekaufter Figuren muss **mobil sehr schnell und einfach** sein. Wer gerade ein Paket
+auspackt, tippt am Handy — nicht am Schreibtisch. Genau deshalb ist der Owned-Toggle aus
+Prinzip 4 eine Anforderung an das Katalog-UI und nicht an eine spätere Ausbaustufe.
 
 ---
 
@@ -27,8 +80,14 @@ Noch nicht: Supabase verbinden, SQL, Datenimport, Bilder kopieren, Auth, Deploym
 
 ## V1 — erste nutzbare Version
 
-Ziel: Ein Sammler kann den Katalog durchsuchen, ein Konto anlegen und seine Sammlung
-verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
+**Zielbild als ein Satz:** Ein Sammler öffnet PortalVault am Handy, sieht den visuellen
+Katalog, tippt die Figuren an, die er besitzt, und sieht seinen Fortschritt.
+
+Kein Handel, kein Marketplace, keine Community-Funktionen.
+
+**Die Reihenfolge der Meilensteine ist auf den End-to-End-Fluss ausgerichtet** (ADR-0023):
+zuerst die Daten, dann die Sitzung, dann der Fluss selbst. Nach **V1.5** ist
+*Registrieren → Einloggen → Katalog → Figur antippen → Sammlung sehen* vollständig erlebbar.
 
 ### V1.1 Fundament — **abgeschlossen 2026-09-03**
 - [x] Next.js (App Router) + TypeScript + Tailwind, lokal lauffähig
@@ -36,7 +95,7 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
 - [x] npm-Skripte: `dev`, `build`, `start`, `lint`, `typecheck`, `check`
 - [x] Grundlayout (`lang="de"`), zentrale Texte (`src/lib/i18n/de.ts`), Formatierung
       (`src/lib/format.ts`, `de-AT`)
-- [ ] Navigation, Fehler- und Ladezustände — kommen mit dem Katalog-UI (V1.4)
+- [ ] Navigation, Fehler- und Ladezustände — kommen mit dem Katalog-UI (V1.5)
 
 ### V1.2 Datenbank
 - **V1.2A** ✅ Migration `0001_initial_schema.sql` geschrieben und statisch geprüft
@@ -44,7 +103,7 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
   strukturell verifiziert
 - **V1.2C** ✅ Funktionale RLS-Verifikation mit zwei echten JWT-Sessions: 31/31 bestanden
   (`npm run verify:rls`). `@supabase/ssr` bewusst offen gelassen — es wird erst für das
-  Auth-UI (V1.5) gebraucht.
+  Auth-UI (V1.4) gebraucht.
 - Tabellen: `series`, `categories`, `skylanders`, `profiles`, `collection_items`
 - RLS-Policies und Trigger für die Profilanlage
 - Verifikation mit zwei Testkonten: fremde Sammlung weder lesbar noch änderbar
@@ -55,24 +114,51 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
 - 475 WebP-Derivate nach `public/images/skylanders/`
 - Nachprüfung: Anzahl, keine doppelte ID, alle Bildreferenzen auflösbar
 
-### V1.4 Öffentlicher Katalog
+### V1.4 Auth + `@supabase/ssr`
+
+Die Sitzungsschicht steht, bevor Seiten entstehen, die von ihr abhängen (ADR-0023).
+
+- `@supabase/ssr` einbinden: Browser-Client, Server-Client, Middleware
+- Registrierung
+- E-Mail-Bestätigung
+- Login
+- Logout
+- Passwort vergessen / zurücksetzen (und ändern im eingeloggten Zustand)
+- Onboarding: eindeutigen Benutzernamen setzen
+- Geschützter Bereich (Middleware als Komfort, RLS als Grenze)
+
+Konzept vollständig in `docs/AUTH.md`. Beleg aus V1.2C: das Projekt verlangt
+E-Mail-Bestätigung, `signUp` liefert also **keine** sofortige Session.
+
+**Sichtbares Ergebnis:** noch keines für Besucher — das ist der bewusst in Kauf genommene Preis
+dafür, dass V1.5 den vollständigen Fluss liefert statt nur einen Katalog zum Anschauen.
+
+### V1.5 Visueller Katalog + Owned-Toggle + „Meine Sammlung"
+
+**Ziel: der erste vollständige End-to-End-Produktfluss.**
+
+> Registrieren → Einloggen → Katalog öffnen → Figur antippen → eigene Sammlung sehen
+
 - Startseite
+- **Visuelles Grid mit Bildern** als zentraler Einstieg (Prinzip 1)
 - Katalogseite: Serien, Kategorien, Suche, Filter, Sortierung (Reihenfolge wie im Legacy)
 - Detailseite je Figur (`/skylanders/<slug>`) mit Bild, Serie, Kategorie, Marktpreis
-- Ohne Login vollständig nutzbar
+- **Owned/Not-Owned-Toggle**: antippen → owned, erneut antippen → entfernt.
+  Zustand sofort visuell eindeutig, optimistisches UI ohne spürbare Wartezeit (Prinzip 4)
+- **Mobile-first**: Touch-Ziele groß genug zum schnellen Antippen (Prinzip 5)
+- **Minimale Seite „Meine Sammlung"** (Prinzip 6) — visuelles Grid, mehr noch nicht
+- Katalog ohne Login vollständig durchsuchbar; der Toggle erscheint nur eingeloggt
 
-### V1.5 Benutzerkonten
-- Registrierung, E-Mail-Verifizierung, Login, Logout
-- Passwort vergessen / zurücksetzen / ändern
-- Onboarding: eindeutigen Benutzernamen setzen
-- Profilseite, geschütztes Dashboard
+### V1.6 Ausbau
 
-### V1.6 Persönliche Sammlung
-- Figur hinzufügen / entfernen, Menge ändern
-- Sammlungsansicht mit Filter und Suche
-- Kennzahlen: verschiedene Figuren, Gesamtanzahl, geschätzter Marktwert
-- Fortschritt je Serie und gesamt
-- Wert immer aus dem zentralen Marktpreis berechnet, nie gespeichert
+- **Mehrere Sammlungsansichten**: kompakte Ansicht und Tabellenansicht neben dem Grid (Prinzip 7)
+- **Fortschritt gesamt und pro Serie** (Prinzip 8)
+- **Mengen/Duplikate technisch unterstützen** (Prinzip 9) — das Datenmodell kann es bereits
+  (`collection_items.quantity`, ADR-0005). **Ob Free oder Premium: offen** (ADR-0022)
+- **Mobile-Feinschliff**
+- Weitere Collection-UX: Filter und Suche innerhalb der eigenen Sammlung, Sortierung
+- Kennzahlen: verschiedene Figuren, Gesamtanzahl
+- Wert immer aus dem zentralen Marktpreis berechnet, nie gespeichert (ADR-0010)
 
 ### V1.7 Beta-Reife
 - Tests für Berechnungen und Importregeln
@@ -86,9 +172,31 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
 
 ## LATER — nach V1, vor dem Marketplace
 
+**Analytics und Premium**
+
+- Sammlungsanalytik: Gesamtwert der Sammlung, Wert je Serie, Marktwerte je Figur, weitere
+  Sammlungsstatistiken (Prinzip 10)
+- Preisentwicklung über die Zeit (setzt `price_history` voraus)
+- Export der eigenen Sammlung
+- Optionale Premium-Stufe — **Feature-Grenze und Preis nicht entschieden** (ADR-0022)
+
+**Sammlungsdarstellung**
+
+- Kompakte Ansicht und Tabellenansicht neben dem visuellen Grid (Prinzip 7)
+- Filter und Suche innerhalb der eigenen Sammlung
+
+**Community-Ebene — ausdrücklich nicht in V1**
+
+Denkbar, aber **jetzt nicht zu implementieren**: „Gesucht" und „Abzugeben" als Zustände an der
+eigenen Sammlung, Matching zwischen Sammlern und direkte Kommunikation zwischen ihnen.
+
+Das ist bewusst von der Marketplace-Ebene getrennt: Community heißt hier *finden und reden*,
+nicht *kaufen und bezahlen*. Ob und wann daraus etwas wird, hängt an derselben Bedingung wie
+beim Marketplace — nachweisliche Nutzung der Sammlungsplattform (ADR-0021).
+
+**Weitere**
+
 - Öffentliche Benutzerprofile und öffentlich schaltbare Sammlungen (in V1 ausgeschlossen)
-- Wunschliste („Suche ich")
-- „Verkaufe ich" / „Tausche ich" als Zustandskennzeichnung ohne Handelsabwicklung
 - Zustand je Exemplar (OVP, lose, beschädigt) → Unique-Index auf `collection_items` entfernen
 - Preisverlauf und historische Marktpreise (`price_history`)
 - Mehrere Preisquellen, teilautomatisierte Preisermittlung
@@ -102,7 +210,16 @@ verwalten. Kein Handel, kein Marketplace, keine Community-Funktionen.
 
 ---
 
-## MARKETPLACE — deutlich später, eigenes Projekt innerhalb des Projekts
+## MARKETPLACE — an eine Bedingung geknüpft, nicht nur an einen Zeitpunkt
+
+**Marketplace, Trading, Seller-Funktionen, Payments, Versand, Bewertungen und Disputes sind
+nicht Bestandteil von PortalVault V1** (ADR-0021).
+
+**Diese Richtung wird erst dann erneut bewertet, wenn PortalVault nachweislich echte Nutzer
+gewinnt und die Sammlungsplattform angenommen wird.** Das ist bewusst eine Bedingung und kein
+Datum: „später" lädt dazu ein, doch schon mal etwas vorzubereiten. Vor diesem Nachweis wird an
+Marketplace-Funktionen **nicht** gearbeitet — auch nicht konzeptionell, auch nicht „nur das
+Datenmodell".
 
 Nichts davon beeinflusst V1 über die in `docs/DATABASE.md`, Abschnitt 7 dokumentierten
 Andockpunkte hinaus.
@@ -114,6 +231,7 @@ Andockpunkte hinaus.
 - Preisvergleich zwischen Anbietern
 - Verkäuferprofile, Bewertungen, Nachrichten
 - Bestellungen, Versand, Zahlungsabwicklung über einen externen Payment-Provider
+- Streitfälle und Rückabwicklung
 - Mobile App
 - Bilderkennung von Skylanders
 

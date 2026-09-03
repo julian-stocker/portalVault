@@ -221,7 +221,7 @@ der Client danach ein echtes Benutzer-JWT, und in beiden Fällen feuert `on_auth
 weil der Trigger an `INSERT ON auth.users` hängt.
 
 **Im Lauf vom 2026-09-04 griff der zweite Weg** (`admin.createUser + signInWithPassword`) —
-das Projekt verlangt also E-Mail-Bestätigung. Für das Auth-UI (V1.5) heißt das: nach der
+das Projekt verlangt also E-Mail-Bestätigung. Für das Auth-UI (V1.4) heißt das: nach der
 Registrierung gibt es **keine** sofortige Session, der Benutzer muss erst den Bestätigungslink
 öffnen. Das entspricht dem in Abschnitt 2 beschriebenen Ablauf.
 

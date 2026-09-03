@@ -22,6 +22,15 @@ an fremde Profil- und Sammlungsdaten weder lesend noch schreibend heran.
 Testfixture und beide Test-Auth-Benutzer wurden anschließend vollständig entfernt; alle fünf
 Tabellen standen danach wieder auf **0 Zeilen**.
 
+**Produktrichtung festgelegt (2026-09-04):** PortalVault V1 ist eine Sammler- und
+Analyseplattform, **kein Marketplace** (ADR-0021). Zielbild: ein Sammler öffnet PortalVault am
+Handy, sieht den visuellen Katalog, tippt die Figuren an, die er besitzt, und sieht seinen
+Fortschritt. Details in `docs/ROADMAP.md`, Abschnitt „Produktvision".
+
+**Meilenstein-Reihenfolge entschieden (ADR-0023):** V1.3 Import → V1.4 Auth + `@supabase/ssr`
+→ V1.5 Katalog mit Owned-Toggle und minimaler Sammlungsseite (**dort steht der
+End-to-End-Fluss**) → V1.6 Ausbau → V1.7 Beta-Reife.
+
 Wartet auf Freigabe für **V1.3 — Katalogimport**.
 
 ---
@@ -51,7 +60,7 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 ## Noch nicht implementiert
 
 - `@supabase/ssr` und die Cookie-basierte Session-Anbindung in Next.js — **bewusst offen**,
-  kommt mit dem Auth-UI (V1.5); für den RLS-Test war sie nicht nötig
+  kommt mit dem Auth-UI (V1.4); für den RLS-Test war sie nicht nötig
 - Supabase CLI (nicht initialisiert, kein Remote-Link — Migration lief über den SQL-Editor)
 - Import-Werkzeug, importierte Katalogdaten, kopierte Bilder
 - Katalog-UI, Suche, Filter, Figurenseiten
@@ -103,7 +112,7 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 
 Die beiden Testbenutzer entstanden über `admin.createUser + signInWithPassword` — das Projekt
 verlangt E-Mail-Bestätigung, weshalb `signUp` keine sofortige Session liefert. Der Trigger
-feuerte trotzdem, weil er an `INSERT ON auth.users` hängt. Für das Auth-UI (V1.5) bedeutet das:
+feuerte trotzdem, weil er an `INSERT ON auth.users` hängt. Für das Auth-UI (V1.4) bedeutet das:
 nach der Registrierung gibt es keine sofortige Session.
 
 **Aufräumen nach dem Lauf:** Testfixture (Serie `TEST`, eine Kategorie, `SKY-9999`) und beide
@@ -174,7 +183,7 @@ read-only; sie wurden zuletzt am 2026-08-11 grün gemeldet.
 
 - **Cookie-basierte Sessions in Next.js.** Der RLS-Test spricht Supabase direkt an.
   `@supabase/ssr`, Middleware, Server-Clients und geschützte Routen existieren noch nicht und
-  brauchen mit dem Auth-UI (V1.5) eine eigene Verifikation.
+  brauchen mit dem Auth-UI (V1.4) eine eigene Verifikation.
 - **Der Registrierungsablauf aus Benutzersicht.** Bestätigungsmail, Callback und Passwort-Reset
   sind nie durchlaufen worden; der Test hat die Benutzer über die Admin-API angelegt.
 - **Katalogimport.** Es sind nie echte Katalogdaten in der Datenbank gewesen — nur eine
@@ -242,6 +251,9 @@ Zwei Hinweise ohne Handlungsbedarf:
 | 0018 | SMTP-Anbieter erst vor der öffentlichen Beta |
 | **0019** | **Technische Projektsprache ist Englisch. Oberflächensprache von V1 ist Deutsch.** |
 | 0020 | Case-insensitive Benutzernamen über `unique index on lower(username)` statt `citext` |
+| **0021** | **V1 ist Sammler- und Analyseplattform, kein Marketplace. Marketplace erst nach nachweislichem Nutzerwachstum** |
+| 0022 | Free bleibt eigenständig nützlich; optionale Premium-Stufe als Richtung — Grenze und Preis **offen** |
+| **0023** | **Meilenstein-Reihenfolge: Import → Auth → Katalog+Toggle+Sammlung → Ausbau → Beta** |
 
 ## Offene Entscheidungen
 
@@ -249,7 +261,8 @@ Keine davon blockiert V1.2.
 
 | ADR | Frage | nötig vor |
 |---|---|---|
-| 0016 | Darf ein Benutzername später geändert werden? | V1.5 |
+| 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
+| 0016 | Darf ein Benutzername später geändert werden? | V1.4 |
 | 0013 | Unit-Test-Werkzeug (Vitest naheliegend) | erste testbare Geschäftslogik |
 | 0011 | genaue Slug-Kollisionsregel | V1.3 |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
@@ -261,6 +274,9 @@ Keine davon blockiert V1.2.
 **V1.3 — Katalogimport.** Das Importwerkzeug `tools/import-catalog.ts` bauen: den validierten
 öffentlichen Legacy-Export einlesen, per `sky_id` upserten, vorher als Dry-Run anzeigen und in
 einer Transaktion schreiben. Regeln vollständig in `docs/SKYLANDERS_DATA.md`, Abschnitt 12.
+
+Danach folgt V1.4 (Auth + `@supabase/ssr`), dann V1.5 mit dem vollständigen
+End-to-End-Fluss (ADR-0023).
 
 Vorher zu klären: die genaue Slug-Kollisionsregel (ADR-0011).
 

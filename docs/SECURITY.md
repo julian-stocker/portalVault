@@ -266,7 +266,7 @@ Anlegen einer Tabelle die tatsächlichen Rechte auslesen, nicht die geschriebene
 |---|---|
 | Policies, Rechte, RLS-Flags sind wie beabsichtigt konfiguriert | ✅ **strukturell verifiziert** gegen die laufende Datenbank (2026-09-03) |
 | Die Regeln greifen bei echten authentifizierten Sessions | ✅ **funktional verifiziert**, 31/31 (2026-09-04) |
-| Cookie-Sessions in Next.js (`@supabase/ssr`, Middleware, geschützte Routen) | ❌ existiert noch nicht — V1.5 |
+| Cookie-Sessions in Next.js (`@supabase/ssr`, Middleware, geschützte Routen) | ❌ existiert noch nicht — V1.4 |
 
 **Der funktionale Zwei-Benutzer-Test (V1.2C) ist am 2026-09-04 bestanden.**
 `tools/verify-rls.mts`, Start mit `npm run verify:rls` — **31 Prüfungen, 31 bestanden**,
@@ -292,7 +292,7 @@ verblieben.
 
 **Was weiterhin nicht bewiesen ist:** die Cookie-basierte Session-Handhabung in Next.js.
 Der Test spricht Supabase direkt an; `@supabase/ssr`, Middleware und geschützte Routen kommen
-mit dem Auth-UI (V1.5) und brauchen dann eine eigene Verifikation.
+mit dem Auth-UI (V1.4) und brauchen dann eine eigene Verifikation.
 
 ---
 
