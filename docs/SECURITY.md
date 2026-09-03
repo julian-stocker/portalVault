@@ -64,7 +64,9 @@ keine internen Namenssuffixe, nur die sechs öffentlichen Serien, keine verboten
 4. Schreibrechte auf Katalogtabellen gibt es für Clients gar nicht — nur die Service Role
    (lokales Import-Werkzeug) schreibt dort.
 
-**Entwurf (noch nicht angelegt):**
+**Umgesetzt in `supabase/migrations/0001_initial_schema.sql`**, am 2026-09-03 gegen die
+PortalVault-Entwicklungsdatenbank ausgeführt und strukturell verifiziert.
+Vollständige Policy-Tabelle: `docs/DATABASE.md`, Abschnitt 5.
 
 ```sql
 alter table public.series           enable row level security;
@@ -73,27 +75,79 @@ alter table public.skylanders       enable row level security;
 alter table public.profiles         enable row level security;
 alter table public.collection_items enable row level security;
 
--- Katalog: für alle lesbar, für niemanden über die API schreibbar
-create policy "catalog readable"  on public.skylanders for select using (true);
-create policy "series readable"   on public.series     for select using (true);
-create policy "categories readable" on public.categories for select using (true);
+-- Katalog: fuer alle lesbar, ueber die API fuer niemanden schreibbar.
+-- Es existiert nirgends eine INSERT/UPDATE/DELETE-Policy fuer diese Tabellen.
+create policy series_select_public on public.series
+  for select to anon, authenticated using (true);
+-- ... analog fuer categories und skylanders
 
--- Profile: in V1 privat - nur das eigene Profil lesen und aendern (ADR-0016)
-create policy "own profile read"   on public.profiles for select
-  using (auth.uid() = id);
-create policy "own profile update" on public.profiles for update
-  using (auth.uid() = id) with check (auth.uid() = id);
+-- Profile: privat, nur der Eigentuemer (ADR-0016)
+create policy profiles_select_own on public.profiles
+  for select to authenticated using ((select auth.uid()) = id);
+create policy profiles_insert_own on public.profiles
+  for insert to authenticated with check ((select auth.uid()) = id);
+create policy profiles_update_own on public.profiles
+  for update to authenticated
+  using ((select auth.uid()) = id) with check ((select auth.uid()) = id);
+-- keine DELETE-Policy: Profile verschwinden mit dem Auth-Benutzer
 
 -- Sammlung: strikt privat
-create policy "own collection read"   on public.collection_items for select
-  using (auth.uid() = user_id);
-create policy "own collection insert" on public.collection_items for insert
-  with check (auth.uid() = user_id);
-create policy "own collection update" on public.collection_items for update
-  using (auth.uid() = user_id) with check (auth.uid() = user_id);
-create policy "own collection delete" on public.collection_items for delete
-  using (auth.uid() = user_id);
+create policy collection_items_select_own on public.collection_items
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy collection_items_insert_own on public.collection_items
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy collection_items_update_own on public.collection_items
+  for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy collection_items_delete_own on public.collection_items
+  for delete to authenticated using ((select auth.uid()) = user_id);
 ```
+
+**Zweite Schicht: explizite Tabellenrechte — und zwar durch ENTZIEHEN.**
+
+Supabase setzt `ALTER DEFAULT PRIVILEGES` auf das Schema `public`: `anon`, `authenticated` und
+`service_role` bekommen bei **jedem** `create table` automatisch `ALL`. **`GRANT` ist additiv
+und entzieht nichts.** Die gewünschten Rechte zu vergeben genügt deshalb nicht — alles
+Unerwünschte muss ausdrücklich entzogen werden:
+
+```sql
+grant select on public.series, public.categories, public.skylanders to anon, authenticated;
+revoke insert, update, delete, truncate, references, trigger
+  on public.series, public.categories, public.skylanders from anon, authenticated;
+
+revoke all on public.profiles, public.collection_items from anon;
+
+grant select, insert, update on public.profiles to authenticated;
+revoke delete, truncate, references, trigger
+  on public.profiles from authenticated;
+
+grant select, insert, update, delete on public.collection_items to authenticated;
+revoke truncate, references, trigger
+  on public.collection_items from authenticated;
+```
+
+**`TRUNCATE` ist dabei der kritische Fall: Row Level Security gilt nicht dafür.** Policies
+greifen bei `SELECT`, `INSERT`, `UPDATE`, `DELETE` und `MERGE`. `TRUNCATE` ist eine Operation
+auf Tabellenebene und wird ausschließlich über das Privileg kontrolliert — das Recht ist also
+das Einzige, was zwischen einem Client und einer geleerten Tabelle steht. `REFERENCES` und
+`TRIGGER` haben für Endbenutzer keinen legitimen Zweck.
+
+Eine Operation ist damit nur erlaubt, wenn **beide** Schichten sie zulassen. Ein Fehler in
+einer Schicht öffnet allein noch keine Lücke — mit der genannten Ausnahme `TRUNCATE`, wo es
+keine zweite Schicht gibt.
+
+**Dritte Schicht: Constraints und Trigger.** Die Service Role umgeht RLS und Tabellenrechte —
+aber **weder Constraints noch Trigger**. Genau dort liegt der Schutz der wichtigsten
+Projektinvariante: `skylanders_sky_id_immutable` verweigert jede Änderung einer SKY-ID, auch
+durch das Importwerkzeug (ADR-0001).
+
+**`SECURITY DEFINER` — genau eine Funktion.** `public.handle_new_user()` legt die Profilzeile
+für neue Auth-Benutzer an. Sie braucht erhöhte Rechte, weil der INSERT in `auth.users` als
+`supabase_auth_admin` läuft, das keine Rechte auf `public.profiles` hat. Härtung:
+`set search_path = ''` mit vollständig qualifizierten Namen, **ausschließlich `new.id`**
+(eine von Supabase erzeugte UUID) als Eingabe — kein benutzerkontrollierter Wert wie E-Mail
+oder `raw_user_meta_data` — und `revoke all ... from public, anon, authenticated`, damit sie
+für Clients nicht aufrufbar ist.
 
 **Vor jedem Deployment zu prüfen:** Für jede Tabelle mit `anon`-Zugriff wird ausdrücklich
 festgehalten, welche Spalten öffentlich sind. Eine neue Spalte auf einer öffentlich lesbaren
@@ -175,6 +229,48 @@ Weitere Regeln:
 - Das Repository ist derzeit privat bzw. wird als solches behandelt — das ersetzt keine der
   Regeln oben. Ein Repository kann versehentlich öffentlich werden.
 - Niemals `../webpage` in dieses Repository einbinden (kein Submodul, kein Symlink, kein Kopieren).
+
+---
+
+## 5a. Security-Review der ersten Migration
+
+Am 2026-09-03 zuerst **statisch** gegen `0001_initial_schema.sql` geprüft, danach die
+Migration ausgeführt und der Ist-Zustand mit rein lesenden Abfragen aus der laufenden Datenbank
+gelesen. Die Antworten unten sind damit **strukturell belegt** — Policies, Rechte und RLS-Flags
+sind nachweislich so konfiguriert:
+
+| # | Frage | Antwort | Warum |
+|---|---|---|---|
+| 1 | Kann `anon` Katalogdaten verändern? | **nein** | kein Schreibrecht, keine schreibende Policy |
+| 2 | Kann Benutzer A das Profil von B lesen? | **nein** | `profiles_select_own` bindet an `auth.uid() = id` |
+| 3 | Kann A das Profil von B verändern? | **nein** | `USING` und `WITH CHECK` binden beide an `auth.uid() = id` |
+| 4 | Kann A `collection_items` von B lesen? | **nein** | `auth.uid() = user_id` |
+| 5 | Kann A `collection_items` für B anlegen? | **nein** | INSERT-`WITH CHECK` erzwingt die eigene `user_id` |
+| 6 | Kann A `collection_items` von B ändern? | **nein** | UPDATE mit `USING` **und** `WITH CHECK` |
+| 7 | Kann A `collection_items` von B löschen? | **nein** | DELETE-`USING` bindet an `auth.uid()` |
+| 8 | Kann ein Client SKY-IDs/Katalogdaten ändern? | **nein** | keine Policy, kein Recht — und zusätzlich der Immutability-Trigger |
+| 9 | Gibt es einen `SECURITY DEFINER`-Pfad zu fremden Daten? | **nein** | eine Funktion, leerer `search_path`, nur `new.id`, für Clients nicht aufrufbar |
+| 10 | Gibt es RLS-Tabellen mit zu breiten Policies? | **nein** | `using (true)` nur auf den drei Katalogtabellen und nur für SELECT |
+| 11 | Gibt es Tabellenrechte, die RLS umgehen könnten? | **nein (nach Korrektur)** | `TRUNCATE`, `REFERENCES`, `TRIGGER` sind `anon` und `authenticated` auf allen fünf Tabellen entzogen — verifiziert |
+
+Frage 11 kam erst durch die Ausführung ans Licht: der statische Review hatte sie nicht
+abgedeckt, weil sie sich nicht aus dem SQL allein ergibt, sondern erst aus dem Zusammenspiel
+mit den Default-Privilegien der Plattform. **Prüfpunkt für jede künftige Migration:** nach dem
+Anlegen einer Tabelle die tatsächlichen Rechte auslesen, nicht die geschriebenen annehmen.
+
+---
+
+**Was damit belegt ist — und was nicht:**
+
+| | Status |
+|---|---|
+| Policies, Rechte, RLS-Flags sind wie beabsichtigt konfiguriert | ✅ **strukturell verifiziert** gegen die laufende Datenbank |
+| Die Regeln greifen bei echten authentifizierten Sessions | ❌ **noch nicht getestet** |
+
+Der **funktionale Zwei-Benutzer-Test** steht aus (V1.2C): zwei echte Konten anlegen und prüfen,
+dass Benutzer A weder lesend noch schreibend an die Profil- und Sammlungsdaten von Benutzer B
+kommt. Bis dahin gilt keine dieser Antworten als sicherheitsfunktional bewiesen, und es wird
+nichts deployt.
 
 ---
 

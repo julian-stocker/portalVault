@@ -41,148 +41,203 @@ Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`
 
 ---
 
-## 3. Entwurf
+## 3. Umsetzung
+
+**Implementiert in `supabase/migrations/0001_initial_schema.sql`.**
+Am 2026-09-03 im Supabase-SQL-Editor **erfolgreich ausgeführt** und anschließend mit rein
+lesenden Abfragen **strukturell verifiziert** (siehe `PROJECT_STATUS.md`). Die Migration ist
+die maßgebliche Quelle; dieser Abschnitt erklärt sie. Weichen beide voneinander ab, gilt das
+SQL — und der Widerspruch ist zu melden.
 
 ### 3.1 `series`
 
-```sql
-create table public.series (
-  code        text primary key,                     -- 'SA','G','SF','T','SC','I'
-  label       text not null,                        -- "Spyro's Adventure"
-  release_year smallint not null,
-  position    smallint not null unique,             -- Reihenfolge der Tabs (0..5)
-  created_at  timestamptz not null default now()
-);
-```
+| Spalte | Typ | Regel |
+|---|---|---|
+| `code` | `text` **PK** | `^[A-Z]{1,4}$` — `SA`, `G`, `SF`, `T`, `SC`, `I` |
+| `label` | `text not null` | nicht leer; exakt wie gepflegt, nie normalisiert |
+| `release_year` | `smallint not null` | 1990–2100 |
+| `position` | `smallint not null unique` | deterministische Anzeigereihenfolge, `>= 0` |
+| `created_at` | `timestamptz not null default now()` | |
 
-Der Serien-Code ist bereits im Legacy-System stabil und wird überall verwendet (Mapping-
-Schlüssel, Excel-Sheetname, Export). Deshalb natürlicher Schlüssel statt Surrogat.
+Der Serien-Code ist im Legacy-System bereits stabil (Sheetname, Mapping-Schlüssel, Export) —
+deshalb natürlicher Schlüssel statt Surrogat. `position` ist in PostgreSQL ein
+*non-reserved keyword* und als Spaltenname unproblematisch.
 
 ### 3.2 `categories`
 
-```sql
-create table public.categories (
-  id          bigint generated always as identity primary key,
-  series_code text not null references public.series(code) on update cascade,
-  position    smallint not null,                    -- entspricht categoryIndex aus dem Export
-  name        text not null,                        -- exakt der Name aus etl/categories.py
-  created_at  timestamptz not null default now(),
-  unique (series_code, position),
-  unique (series_code, name)
-);
-```
+| Spalte | Typ | Regel |
+|---|---|---|
+| `id` | `bigint generated always as identity` **PK** | |
+| `series_code` | `text not null` | FK → `series(code)`, `on update cascade on delete restrict` |
+| `position` | `smallint not null` | entspricht `categoryIndex` im Legacy-Export, `>= 0` |
+| `name` | `text not null` | nicht leer; **nie** automatisch umbenannt oder vereinheitlicht |
+| `created_at` | `timestamptz not null default now()` | |
 
-**Warum eine eigene Tabelle:** Die Reihenfolge der Kategorien stammt aus der Blockreihenfolge
-der Excel und ist eine bewusste fachliche Entscheidung des Nutzers. Als Tabelle ist sie
-explizit, filterbar und ohne Code-Änderung pflegbar. Kategorienamen werden **nie** automatisch
-umbenannt oder vereinheitlicht.
+Unique: `(series_code, position)` · `(series_code, name)` · `(id, series_code)`.
+
+Der dritte Unique-Constraint ist für die Eindeutigkeit redundant (`id` ist bereits PK), aber
+syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `skylanders`.
 
 ### 3.3 `skylanders` — die kanonische Figur
 
-```sql
-create table public.skylanders (
-  sky_id        text primary key
-                check (sky_id ~ '^SKY-[0-9]{4}$'),  -- Identität, siehe SKYLANDERS_DATA.md
-  name          text not null,                      -- roh aus Spalte B, nie normalisiert
-  slug          text not null unique,               -- einmalig erzeugt, danach stabil
-  series_code   text not null references public.series(code) on update cascade,
-  category_id   bigint not null references public.categories(id),
-  market_price  numeric(10,2),                      -- NULL erlaubt: 15 Artikel ohne Preis
-  price_updated_at timestamptz,
-  image_file    text,                               -- '<sha256[:16]>.webp', NULL erlaubt
-  is_active     boolean not null default true,      -- statt Löschen
-  created_at    timestamptz not null default now(),
-  updated_at    timestamptz not null default now()
-);
+| Spalte | Typ | Regel |
+|---|---|---|
+| `sky_id` | `text` **PK** | `^SKY-[0-9]{4}$` — identisch zur Legacy-Validierung |
+| `name` | `text not null` | nicht leer; roh übernommen, kein `strip()`, keine Korrektur |
+| `slug` | `text not null unique` | `^[a-z0-9]+(-[a-z0-9]+)*$`; nur Navigation |
+| `series_code` | `text not null` | Teil des zusammengesetzten FK (siehe unten) |
+| `category_id` | `bigint not null` | Teil des zusammengesetzten FK |
+| `market_price` | `numeric(10,2)` **nullbar** | `null` **oder** `> 0` |
+| `price_updated_at` | `timestamptz` | nur gesetzt, wenn ein Preis existiert |
+| `image_file` | `text` | `^[0-9a-f]{16}\.webp$`, nur Dateiname, nie URL |
+| `is_active` | `boolean not null default true` | statt Löschen |
+| `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
-create index on public.skylanders (series_code, category_id);
-create index on public.skylanders (is_active);
-```
+Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)`.
 
-Feldbegründungen:
+**Feldbegründungen**
 
 | Feld | Warum so |
 |---|---|
-| `sky_id` als PK | Die Identität ist per Projektregel unveränderlich — das ist genau der Fall, in dem ein natürlicher Schlüssel richtig ist. Er macht jede Zeile, jedes Log und jede Fremdschlüsselbeziehung ohne Join lesbar. **OPEN**, siehe ADR-0002. |
-| `name` roh | Legacy-Regel: kein `strip()`, keine Korrektur, keine Übersetzung. |
-| `slug` gespeichert | **Entschieden (ADR-0011).** Der Slug dient ausschließlich Navigation und Darstellung (`/skylanders/drobot`); **keine Datenbeziehung hängt vom Slug ab**. Er wird einmalig beim Import erzeugt und danach gespeichert, nicht bei jedem Import neu abgeleitet. Namen sind global nicht eindeutig (32 Mehrfachnamen) — bei Kollision wird deterministisch qualifiziert (`bash-giants`, notfalls mit SKY-ID). |
-| `category_id` statt Text | Erzwingt gültige Kategorien und liefert die Reihenfolge mit. |
-| `market_price` `numeric(10,2)`, **nullbar** | **Entschieden (ADR-0010).** Niemals `float` für Geld. `NULL` heißt ausdrücklich „derzeit kein Marktpreis bekannt" — **niemals 0 als Ersatz**, sonst wäre „geschenkt" von „unbekannt" nicht unterscheidbar und jede Wertsumme stillschweigend falsch. 15 der 600 Artikel haben keinen Preis; sie werden im Sammlungswert gesondert ausgewiesen. Keine `price_history`-Tabelle in V1. |
-| `image_file` | Nur der content-adressierte Dateiname, keine URL. Mehrere Figuren dürfen dieselbe Datei referenzieren (n:1, im Legacy 44 Dateien für 103 öffentliche Artikel). |
-| `is_active` | Der Import löscht nie. Benutzersammlungen zeigen auf diese Zeilen. |
+| `sky_id` als PK | **ADR-0002.** Die Identität ist per Projektregel unveränderlich — genau der Fall für einen natürlichen Schlüssel. Kein UUID-Surrogat; andere Entitäten verwenden UUIDs. |
+| Format `^SKY-[0-9]{4}$` | **Bestätigt für V1.** Identisch zu `etl/articles.py::ID_PATTERN`. Alle 820 bestehenden IDs erfüllen es. Das Format wird **nicht vorsorglich** erweitert. Sollte der Legacy-ID-Raum je überschritten werden, ist das eine bewusste gemeinsame Migration von Legacy-Projekt **und** PortalVault — keine stille Lockerung des Constraints. |
+| `name` roh | Legacy-Regel: keine Normalisierung, keine Übersetzung. |
+| `slug` gespeichert | **ADR-0011.** Nur Navigation und Darstellung. **Kein Fremdschlüssel referenziert den Slug** — statisch geprüft. Einmalig beim Import erzeugt, danach stabil. |
+| `market_price` `> 0` statt `>= 0` | **ADR-0010** verlangt, dass 0 nie für „unbekannt" steht. Der Constraint setzt das durch und schließt Negativwerte mit ein. Der Legacy-Export bildet einen 0-Preis ohnehin bereits auf `null` ab, ein gültiger Import löst den Constraint also nie aus — tut er es doch, sind die Daten falsch und der Import muss abbrechen. |
+| `price_updated_at` | Constraint: nur setzbar, wenn `market_price` nicht `null` ist. Ein Preiszeitstempel ohne Preis wäre bedeutungslos. |
+| `image_file` | Content-adressierter Dateiname (`<sha256[:16]>.webp`), n:1 teilbar. Nie eine URL — der Speicherort bleibt austauschbar (ADR-0009). |
+| `is_active` | Der Import löscht nie; Benutzersammlungen zeigen auf diese Zeilen. |
 
-**Nicht enthalten und nicht vorgesehen:** Lagerbestand, `available`, Ankaufpreis, eBay-Daten,
-externe Titel, Mapping-Informationen. `available` beschreibt den eigenen Legacy-Lagerbestand
-und gehört nicht zum kanonischen PortalVault-Modell — eine Figur existiert hier unabhängig
-davon, ob sie im persönlichen Lager verfügbar ist (ADR-0008).
-
-### 3.4 `profiles`
+**Zusammengesetzter Fremdschlüssel statt zweier einzelner:**
 
 ```sql
-create extension if not exists citext;
-
-create table public.profiles (
-  id          uuid primary key references auth.users(id) on delete cascade,
-  username    citext unique
-              check (username is null or username ~ '^[a-zA-Z0-9_]{3,20}$'),
-  display_name text,
-  avatar_url  text,
-  country     text,                                  -- ISO-3166-1 alpha-2, optional
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
-);
+foreign key (category_id, series_code)
+  references public.categories (id, series_code)
 ```
 
-- `id` **ist** die Supabase-User-ID (1:1, kein zweiter Schlüssel, keine Synchronisation nötig).
-- `citext` macht Benutzernamen case-insensitive eindeutig (`Julian` und `julian` kollidieren).
-- `username` ist zunächst `NULL` und wird beim Onboarding gesetzt — so kann die Anlage per
-  Trigger nie an einem Namenskonflikt scheitern (siehe `docs/AUTH.md`).
-- **Reservierte Systemnamen** werden von Anfang an abgelehnt: `admin`, `api`, `support`,
-  `portalvault` und weitere technisch kritische Namen (ADR-0016). Die Liste darf bei der
-  Implementierung sinnvoll ergänzt werden; sie wird an einer Stelle im Code gepflegt und
-  zusätzlich per Datenbank-Constraint durchgesetzt.
-- **Keine E-Mail-Adresse in `profiles`.** Die liegt in `auth.users` und ist nicht öffentlich.
+`series_code` steht auf der Zeile, weil fast jede Katalogabfrage danach filtert — das ist eine
+bewusste Denormalisierung. Der zusammengesetzte FK verhindert die Kehrseite davon: eine Figur
+der Serie `SA` kann keine Kategorie der Serie `G` referenzieren. Ein separater FK auf
+`series(code)` wäre dadurch redundant und entfällt; die Gültigkeit des Serien-Codes ergibt sich
+transitiv über `categories`.
+
+**Nicht enthalten und nicht vorgesehen:** Lagerbestand, `available`, Ankaufpreis, eBay-Daten,
+externe Titel, Mapping-Informationen (ADR-0008). Statisch geprüft: keine dieser Spalten
+existiert.
+
+### 3.4 `profiles` — 1:1 zu `auth.users`
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `id` | `uuid` **PK** | FK → `auth.users(id)`, `on delete cascade` |
+| `username` | `text` nullbar | `^[a-zA-Z0-9_]{3,20}$`, nicht reserviert, case-insensitiv eindeutig |
+| `display_name`, `avatar_url` | `text` | optional |
+| `country` | `text` | `^[A-Z]{2}$` (ISO 3166-1 alpha-2), optional |
+| `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
+
+- `id` **ist** die Supabase-User-ID — kein zweiter Schlüssel, keine Synchronisation.
+- `username` ist zunächst `NULL` und wird beim Onboarding gesetzt, damit die Profilanlage per
+  Trigger nie an einem Namenskonflikt scheitern kann.
+- **Case-insensitive Eindeutigkeit ohne `citext`** (ADR-0020):
+
+  ```sql
+  create unique index profiles_username_lower_uniq
+    on public.profiles (lower(username))
+    where username is not null;
+  ```
+
+  Die getippte Schreibweise bleibt für die Anzeige erhalten, `Julian` und `julian` kollidieren.
+  **Konvention:** jede Abfrage muss `lower(username) = lower($1)` verwenden, sonst greift der
+  Index nicht.
+- **Reservierte Systemnamen** werden per CHECK-Constraint abgelehnt (case-insensitiv), aktuell
+  58 Namen: `admin`, `api`, `auth`, `support`, `portalvault`, `skylanders`, `collection`,
+  `profile`, `settings`, `impressum`, `datenschutz` und weitere. Die Liste zu erweitern
+  erfordert eine neue Migration — das ist beabsichtigt: einen Namen zu sperren ist eine
+  bewusste Entscheidung, keine Nebenwirkung. Zwei Einträge (`me`, `no-reply`) sind durch den
+  Format-Constraint ohnehin unerreichbar und bleiben nur als Absicherung stehen, falls das
+  erlaubte Zeichenformat je erweitert wird.
+- **Keine E-Mail-Adresse in `profiles`.** Sie liegt in `auth.users`.
 
 ### 3.5 `collection_items`
 
-```sql
-create table public.collection_items (
-  id         uuid primary key default gen_random_uuid(),
-  user_id    uuid not null references auth.users(id) on delete cascade,
-  sky_id     text not null references public.skylanders(sky_id) on update cascade,
-  quantity   integer not null default 1 check (quantity > 0),
-  note       text,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
+| Spalte | Typ | Regel |
+|---|---|---|
+| `id` | `uuid` **PK** `default gen_random_uuid()` | Surrogat (ADR-0005) |
+| `user_id` | `uuid not null` | FK → `auth.users(id)`, `on delete cascade` |
+| `sky_id` | `text not null` | FK → `skylanders(sky_id)`, `on delete restrict`, `on update restrict` |
+| `quantity` | `integer not null default 1` | `> 0` und `<= 10000` |
+| `note` | `text` | höchstens 500 Zeichen |
+| `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
--- V1: genau eine Zeile je Benutzer und Figur.
-create unique index collection_items_user_sky_uniq
-  on public.collection_items (user_id, sky_id);
+Unique: `(user_id, sky_id)`. Index zusätzlich auf `(sky_id)`.
 
-create index on public.collection_items (user_id);
-create index on public.collection_items (sky_id);
-```
+Ein separater Index auf `(user_id)` entfällt: der Unique-Index `(user_id, sky_id)` hat
+`user_id` bereits als führende Spalte und deckt diese Abfragen ab.
 
-**Die wichtigste Modellierungsentscheidung — angenommen (ADR-0005).** V1 behandelt einen
-Skylander je Benutzer als **einen aggregierten Sammlungsdatensatz**. Später soll ein Benutzer mit
-3× SKY-0148 ein Exemplar behalten, eines verkaufen, eines tauschen (`keep` / `sell` / `trade`) —
-das wird **jetzt nicht** umgesetzt, darf aber nicht verbaut werden.
+**Modellierung (ADR-0005).** V1 speichert **eine aggregierte Zeile je Benutzer und Figur**;
+`quantity` deckt Mehrfachbesitz ab. Sollen später einzelne Exemplare eigene Zustände bekommen
+(`keep` / `sell` / `trade`), wird der Unique-Constraint entfernt und eine Spalte ergänzt — aus
+einer Zeile werden mehrere Posten derselben Figur. Additive Migration, kein Schlüsselumbau.
+Mit `primary key (user_id, sky_id)` wäre derselbe Schritt ein Umbau aller Schlüssel.
 
-Warum Surrogatschlüssel **plus** Unique-Constraint statt `primary key (user_id, sky_id)`:
+`quantity > 0`: „besitzt nicht" bedeutet **keine Zeile**. Ein Nullwert wird nie gespeichert.
 
-- In V1 verhält sich die Tabelle exakt wie ein zusammengesetzter Schlüssel — eine Zeile je
-  Benutzer und Figur, `quantity` deckt Mehrfachbesitz ab.
-- Sollen später einzelne Exemplare unterschiedliche Eigenschaften haben (Zustand, OVP,
-  „behalten/verkaufen/tauschen"), wird der Unique-Index **gelöscht** und eine Spalte ergänzt —
-  aus einer Zeile werden mehrere „Posten" derselben Figur. Das ist eine additive,
-  nicht-destruktive Migration; Primär- und Fremdschlüssel bleiben unverändert.
-- Mit `primary key (user_id, sky_id)` wäre derselbe Schritt ein Umbau aller Schlüssel.
+**`quantity <= 10000` ist eine technische Schutzgrenze, keine fachliche Aussage.**
+Die Unterscheidung ist wichtig genug, um sie festzuhalten:
 
-Die Erweiterung ist damit möglich, ohne heute Marketplace-Komplexität zu bauen.
-`quantity > 0` — „besitzt nicht" bedeutet: keine Zeile. Ein Nullwert wird nie gespeichert.
+| | |
+|---|---|
+| **Was der Constraint ist** | Eine Plausibilitätsbremse gegen fehlerhafte Clients, versehentliche Massenschreibvorgänge und offensichtlich unsinnige Werte. Sie schützt Datenbank und Wertberechnung vor Unfug. |
+| **Was er *nicht* ist** | Keine Definition eines maximal erlaubten Besitzes. PortalVault legt nicht fest, wie viele Exemplare einer Figur ein Sammler besitzen darf. Die Zahl ist bewusst so hoch gewählt, dass sie keine reale Sammlung begrenzt. |
 
-### 3.6 Abgeleitete Werte — immer berechnet, nie gespeichert
+Stößt jemals eine echte Sammlung an diese Grenze, wird der Wert angehoben — das ist eine
+Betriebsentscheidung, keine Änderung des Datenmodells.
+
+### 3.6 `ON DELETE` / `ON UPDATE` — bewusste Entscheidungen
+
+| Fremdschlüssel | ON DELETE | ON UPDATE | Warum |
+|---|---|---|---|
+| `profiles.id → auth.users.id` | `cascade` | – | Konto gelöscht → Profil verschwindet. DSGVO-konform, keine Waisen. |
+| `collection_items.user_id → auth.users.id` | `cascade` | `cascade` | Konto gelöscht → Sammlung verschwindet mit. |
+| `collection_items.sky_id → skylanders.sky_id` | **`restrict`** | **`restrict`** | Ein Katalogeintrag darf nicht unter einer Sammlung wegbrechen. `restrict` lässt ein versehentliches Löschen **laut scheitern**, statt still Benutzerdaten mitzunehmen. Der Import löscht ohnehin nie, sondern setzt `is_active = false`. `on update restrict` statt `cascade`: eine SKY-ID ändert sich nie — ein Änderungsversuch soll fehlschlagen, nicht stillschweigend durch alle Sammlungen propagieren. |
+| `categories.series_code → series.code` | `restrict` | `cascade` | Eine Serie mit Kategorien ist nicht löschbar. Der Serien-Code ist Präsentationsmetadatum, keine Identitätsverankerung wie die SKY-ID — eine Umbenennung darf daher propagieren. |
+| `skylanders.(category_id, series_code) → categories.(id, series_code)` | `restrict` | `cascade` | Eine benutzte Kategorie ist nicht löschbar; Umbenennungen propagieren. |
+
+### 3.7 Trigger
+
+**Fünf Trigger insgesamt** — `skylanders` trägt zwei davon:
+
+| Trigger | Tabelle | Zweck |
+|---|---|---|
+| `skylanders_set_updated_at` | `skylanders` | setzt `updated_at` bei jedem UPDATE |
+| `profiles_set_updated_at` | `profiles` | dito |
+| `collection_items_set_updated_at` | `collection_items` | dito |
+| `skylanders_sky_id_immutable` | `skylanders` | verweigert jede Änderung von `sky_id` (ADR-0001), `before update of sky_id` |
+| `on_auth_user_created` | `auth.users` | legt die 1:1-Profilzeile für neue Auth-Benutzer an |
+
+Die drei `*_set_updated_at`-Trigger verwenden dieselbe Funktion `public.set_updated_at()`.
+Sie ist **kein** `SECURITY DEFINER` — sie schreibt nur `NEW` und braucht keine erhöhten Rechte.
+
+**Warum ein Trigger für die SKY-ID-Unveränderlichkeit.** RLS verhindert bereits, dass Clients
+den Katalog schreiben — aber die Service Role umgeht RLS, und genau als Service Role läuft das
+Importwerkzeug. **Trigger und Constraints werden nicht umgangen.** Das ist also die Schicht,
+die die wichtigste Projektinvariante gegen ein fehlerhaftes Importskript schützt.
+
+**Der Profil-Trigger (`handle_new_user`).** `SECURITY DEFINER` ist hier **notwendig**: der
+INSERT in `auth.users` läuft als `supabase_auth_admin`, und diese Rolle hat keine Rechte auf
+`public.profiles`. Härtung:
+
+- `set search_path = ''` und vollständig qualifizierte Objektnamen — kein Schema im
+  `search_path` eines Aufrufers kann etwas unterschieben.
+- **Es wird ausschließlich `new.id` verwendet**, eine von Supabase Auth erzeugte UUID. Weder
+  E-Mail noch `raw_user_meta_data` werden gelesen — **kein benutzerkontrollierter Wert
+  gelangt in den privilegierten Kontext**. Der Benutzername wird später vom Benutzer selbst
+  über ein RLS-geprüftes UPDATE gesetzt.
+- `on conflict (id) do nothing` — die Registrierung scheitert nicht, wenn die Zeile schon existiert.
+- `revoke all on function public.handle_new_user() from public, anon, authenticated` — die
+  Funktion ist für Clients nicht aufrufbar.
+
+### 3.8 Abgeleitete Werte — immer berechnet, nie gespeichert
 
 ```sql
 -- Sammlungswert und Kennzahlen eines Benutzers
@@ -211,9 +266,75 @@ group by s.series_code;
 ```
 
 Ändert sich ein zentraler Marktpreis, ändert sich der angezeigte Sammlungswert automatisch —
-es gibt keine zweite Preiskopie, die synchron gehalten werden müsste.
-**OPEN:** Ob Artikel ohne Preis mit 0 in die Summe eingehen (Legacy-Verhalten) oder gesondert
-ausgewiesen werden — Legacy weist sie gesondert aus; das übernehmen wir.
+es gibt keine zweite Preiskopie.
+**Entschieden (ADR-0010):** Artikel ohne Preis gehen **nicht** mit 0 in die Summe ein, sondern
+werden gesondert ausgewiesen — wie im Legacy-Frontend. `NULL` heißt „unbekannt", nie „wertlos".
+
+---
+
+### 3.9 Supabase-Kompatibilität — Ergebnis der ersten Ausführung
+
+Pre-Flight-Review am 2026-09-03, Ausführung am selben Tag. **Beide vorhergesagten Risiken sind
+nicht eingetreten**, dafür kam ein drittes, nicht vorhergesehenes Problem ans Licht.
+
+**Risiko 1 — Rechte für `create trigger ... on auth.users`: nicht eingetreten.**
+Die Rolle `postgres`, unter der der SQL-Editor läuft, durfte den Trigger anlegen.
+`on_auth_user_created` existiert auf `auth.users` und ist verifiziert. Dasselbe gilt für die
+beiden Fremdschlüssel auf `auth.users`, die das `REFERENCES`-Recht benötigen.
+
+**Risiko 2 — Reihenfolge von `revoke` und `create trigger`: nicht eingetreten.**
+Da der Trigger als `postgres` (Eigentümer der Funktion) angelegt wurde, spielte die
+vorangehende `revoke`-Anweisung keine Rolle. Die Reihenfolge blieb unverändert.
+
+**Neuer Befund — Supabase-Default-Privilegien (behoben).**
+Supabase setzt `ALTER DEFAULT PRIVILEGES` auf das Schema `public`, sodass `anon`,
+`authenticated` und `service_role` bei **jedem** `create table` automatisch `ALL` erhalten —
+also auch `TRUNCATE`, `REFERENCES` und `TRIGGER`.
+
+Die erste Fassung der Migration formulierte für `profiles` und `collection_items` nur
+`grant select, insert, update …`. **`GRANT` ist additiv und entzieht nichts**, die
+Default-Privilegien blieben also bestehen. Die Verifikation zeigte für
+`profiles / authenticated` tatsächlich `DELETE, INSERT, REFERENCES, SELECT, TRIGGER,
+TRUNCATE, UPDATE`.
+
+Warum das mehr als kosmetisch ist: **Row Level Security gilt nicht für `TRUNCATE`.**
+RLS-Policies greifen bei `SELECT`, `INSERT`, `UPDATE`, `DELETE` und `MERGE`; `TRUNCATE` ist
+eine Operation auf Tabellenebene und wird ausschließlich über das Privileg kontrolliert. Ein
+`truncate public.profiles` hätte alle Profile gelöscht, unabhängig von jeder Policy — und
+keine der beiden Tabellen wird von einem Fremdschlüssel referenziert, der das verhindert hätte.
+
+Über PostgREST war das nicht erreichbar (kein HTTP-Verb bildet auf `TRUNCATE` ab), also ein
+latentes und kein akutes Risiko. Latent bleibt es aber nur, bis irgendwann eine
+`SECURITY INVOKER`-RPC mit dynamischem SQL existiert.
+
+**Behoben durch explizite `REVOKE`:**
+
+```sql
+grant select, insert, update on public.profiles to authenticated;
+revoke delete, truncate, references, trigger
+  on public.profiles from authenticated;
+
+grant select, insert, update, delete on public.collection_items to authenticated;
+revoke truncate, references, trigger
+  on public.collection_items from authenticated;
+```
+
+Danach zurückgesetzt und neu ausgeführt; verifiziert ist jetzt genau:
+`profiles / authenticated` → `INSERT, SELECT, UPDATE` · `collection_items / authenticated` →
+`DELETE, INSERT, SELECT, UPDATE`.
+
+**Die Lehre, die für jede künftige Migration gilt:**
+
+> In Supabase genügt es nicht, die gewünschten Rechte zu **vergeben**. Jede neue Tabelle in
+> `public` startet mit `ALL` für `anon`, `authenticated` und `service_role`. Alles Unerwünschte
+> muss **ausdrücklich entzogen** werden — und `TRUNCATE` besonders, weil RLS es nicht abdeckt.
+
+Für die Katalogtabellen und für `anon` war das von Anfang an richtig gelöst; genau deshalb
+zeigten diese in der Verifikation sofort die beabsichtigten Rechte.
+
+**Unauffällig geblieben:** `gen_random_uuid()` (Kern seit PG 13) · keine Extension nötig ·
+`generated always as identity` · zusammengesetzter Fremdschlüssel · Statement-Reihenfolge ·
+`search_path = ''` in allen drei Funktionen.
 
 ---
 
@@ -223,38 +344,102 @@ ausgewiesen werden — Legacy weist sie gesondert aus; das übernehmen wir.
 auth.users ──1:1──▶ profiles
      │
      └──1:n──▶ collection_items ──n:1──▶ skylanders ──n:1──▶ categories ──n:1──▶ series
-                                                     └──n:1──▶ series
 ```
 
-- `collection_items.user_id → auth.users(id) ON DELETE CASCADE`: löscht ein Benutzer sein Konto,
-  verschwindet seine Sammlung. Der Katalog bleibt unberührt.
-- `collection_items.sky_id → skylanders(sky_id)`: **kein** `ON DELETE CASCADE`. Ein Katalog-
-  eintrag darf nicht gelöscht werden, solange Benutzer ihn referenzieren — deshalb `is_active`.
+**Fünf Fremdschlüssel insgesamt:**
+
+| Fremdschlüssel | von → nach |
+|---|---|
+| `categories_series_fk` | `categories.series_code` → `series.code` |
+| `skylanders_category_fk` | `skylanders (category_id, series_code)` → `categories (id, series_code)` — zusammengesetzt |
+| `profiles_id_fkey` | `profiles.id` → `auth.users.id` (inline deklariert, daher der von PostgreSQL vergebene Name) |
+| `collection_items_user_fk` | `collection_items.user_id` → `auth.users.id` |
+| `collection_items_sky_fk` | `collection_items.sky_id` → `skylanders.sky_id` |
+
+`skylanders` trägt `series_code` zusätzlich als Spalte (bewusste Denormalisierung für
+Katalogabfragen); die Konsistenz zur Kategorie erzwingt der zusammengesetzte Fremdschlüssel
+aus Abschnitt 3.3. `ON DELETE`/`ON UPDATE`-Verhalten: Abschnitt 3.6.
 
 ---
 
-## 5. Row Level Security (Kurzfassung)
+## 5. Row Level Security
 
-Vollständig in `docs/SECURITY.md`.
+Vollständige Begründung: `docs/SECURITY.md`. Umgesetzt in der Migration, Abschnitte 7 und 8.
 
-| Tabelle | SELECT | INSERT / UPDATE / DELETE |
-|---|---|---|
-| `series`, `categories`, `skylanders` | `true` (anon + authenticated) | **keine Policy** → nur Service Role (Import). Normale Benutzer können Katalogdaten nie ändern. |
-| `profiles` | `auth.uid() = id` — **privat in V1** | `auth.uid() = id`, INSERT über Trigger |
-| `collection_items` | `auth.uid() = user_id` — **privat in V1** | `auth.uid() = user_id` (mit `WITH CHECK`) |
+**Zwei unabhängige Schichten.** Eine Operation ist nur erlaubt, wenn **sowohl** das
+Tabellenrecht **als auch** eine RLS-Policy sie zulässt.
 
-**Entschieden (ADR-0016):** Profile und Sammlungen sind in V1 **privat** — ein Benutzer liest
-und ändert ausschließlich seine eigenen. Es gibt **keine öffentlichen Benutzerprofile** in V1.
-Katalogdaten sind öffentlich lesbar und für normale Benutzer niemals änderbar.
+⚠️ **Wichtig, weil es beim ersten Anlauf schiefging:** Rechte zu *vergeben* genügt in Supabase
+nicht. `ALTER DEFAULT PRIVILEGES` gibt `anon`, `authenticated` und `service_role` bei jedem
+`create table` in `public` automatisch `ALL`, und `GRANT` ist additiv — es entzieht nichts.
+Jedes unerwünschte Recht muss **ausdrücklich entzogen** werden. Details und Hergang:
+Abschnitt 3.9.
 
-RLS wird auf **jeder** Tabelle aktiviert. Eine Tabelle ohne Policy ist damit für Clients
-vollständig gesperrt — das ist der sichere Ausgangszustand.
+**Verifizierter Ist-Zustand** (2026-09-03, gegen die laufende Datenbank gelesen):
+
+| Tabelle | anon | authenticated | service_role | Policies |
+|---|---|---|---|---|
+| `series`, `categories`, `skylanders` | nur `SELECT` | nur `SELECT` | Schreibrechte (für den Import) | je eine SELECT-Policy `using (true)`; **keine** schreibende Policy existiert |
+| `profiles` | **keine Rechte** | exakt `INSERT, SELECT, UPDATE` | — | SELECT/INSERT/UPDATE, alle gegen `auth.uid() = id` |
+| `collection_items` | **keine Rechte** | exakt `DELETE, INSERT, SELECT, UPDATE` | — | alle vier gegen `auth.uid() = user_id` |
+
+Kein `TRUNCATE`, kein `REFERENCES`, kein `TRIGGER` für `anon` oder `authenticated` — auf keiner
+der fünf Tabellen.
+
+**Die zehn Policies im Einzelnen**
+
+| Policy | Tabelle | Aktion | Rollen | Bedingung |
+|---|---|---|---|---|
+| `series_select_public` | `series` | SELECT | anon, authenticated | `true` |
+| `categories_select_public` | `categories` | SELECT | anon, authenticated | `true` |
+| `skylanders_select_public` | `skylanders` | SELECT | anon, authenticated | `true` |
+| `profiles_select_own` | `profiles` | SELECT | authenticated | `USING (auth.uid() = id)` |
+| `profiles_insert_own` | `profiles` | INSERT | authenticated | `WITH CHECK (auth.uid() = id)` |
+| `profiles_update_own` | `profiles` | UPDATE | authenticated | `USING` **und** `WITH CHECK (auth.uid() = id)` |
+| `collection_items_select_own` | `collection_items` | SELECT | authenticated | `USING (auth.uid() = user_id)` |
+| `collection_items_insert_own` | `collection_items` | INSERT | authenticated | `WITH CHECK (auth.uid() = user_id)` |
+| `collection_items_update_own` | `collection_items` | UPDATE | authenticated | `USING` **und** `WITH CHECK (auth.uid() = user_id)` |
+| `collection_items_delete_own` | `collection_items` | DELETE | authenticated | `USING (auth.uid() = user_id)` |
+
+**Warum `USING` und `WITH CHECK` bei jedem UPDATE.** `USING` bestimmt, welche Zeilen geändert
+werden dürfen; `WITH CHECK`, was aus ihnen werden darf. Ohne `WITH CHECK` könnte ein Benutzer
+seine eigene Zeile auf eine fremde `user_id` umschreiben und sie damit verschieben.
+
+**Warum keine DELETE-Policy auf `profiles`.** Profile verschwinden mit dem Auth-Benutzer
+(`on delete cascade`), nicht einzeln. Andernfalls entstünde ein Benutzer ohne Profil.
+
+`auth.uid()` steht in allen Policies als `(select auth.uid())`. PostgreSQL wertet die
+Unterabfrage dann einmal je Statement aus statt einmal je Zeile.
+
+RLS ist auf **allen fünf** Tabellen aktiviert (`rowsecurity = true`, `forced = false`,
+verifiziert). Eine Tabelle mit RLS und ohne passende Policy verweigert den Zugriff — das ist
+der sichere Ausgangszustand, auf den wir uns stützen.
+
+**Eine Grenze, die RLS nicht zieht:** `TRUNCATE`. Policies greifen bei `SELECT`, `INSERT`,
+`UPDATE`, `DELETE` und `MERGE`; `TRUNCATE` wird ausschließlich über das Tabellenrecht
+kontrolliert. Deshalb ist es auf allen fünf Tabellen für `anon` und `authenticated` entzogen.
+
+**Was verifiziert ist und was nicht:** Die Konfiguration oben ist **strukturell** verifiziert —
+Policies, Rechte und RLS-Flags wurden aus der laufenden Datenbank gelesen. Ein **funktionaler
+Zwei-Benutzer-Test** mit echten authentifizierten Sessions steht noch aus (V1.2C). Bis dahin
+gilt: die Regeln sind nachweislich *so konfiguriert*, aber nicht nachweislich *wirksam*.
+
+**Die Service Role umgeht RLS.** Sie schreibt den Katalog (Import, V1.3) und wird ausschließlich
+lokal verwendet. Sie umgeht jedoch **weder Constraints noch Trigger** — dort liegt der Schutz
+der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
 
 ---
 
 ## 6. Migrationen und Import
 
 - SQL-Dateien unter `supabase/migrations/`, aufsteigend nummeriert, **additiv**.
+- Erste Migration: `0001_initial_schema.sql` — **am 2026-09-03 erfolgreich ausgeführt** und
+  strukturell verifiziert. Zuvor einmal zurückgesetzt und korrigiert neu ausgeführt
+  (Abschnitt 3.9); die Datei im Repository und der Datenbankstand sind identisch.
+  Sie erzeugt ausschließlich Struktur: keine Daten, keine Secrets, keine hartkodierten
+  Benutzer-IDs, keine Abhängigkeit von vorhandenen Zeilen. Ein erneuter Lauf auf einer
+  bestehenden Datenbank scheitert bewusst laut (`create table` ohne `if not exists`), statt
+  eine abweichende Tabelle stillschweigend zu übergehen.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.ts`) läuft lokal mit Service-Role-Key, macht zuerst einen
   **Dry-Run** und schreibt in **einer Transaktion**. Regeln vollständig in
@@ -294,7 +479,14 @@ EU-Region (ADR-0015).
 
 **Damit ist die erste Migration schreibbereit.**
 
+Dazu bei der Umsetzung präzisiert: case-insensitive Benutzernamen ohne `citext` (ADR-0020),
+`market_price > 0` statt `>= 0` zur Durchsetzung von ADR-0010, zusammengesetzter Fremdschlüssel
+Kategorie↔Serie, `on delete restrict` zwischen Sammlung und Katalog, Trigger für die
+SKY-ID-Unveränderlichkeit.
+
 **Noch offen — blockiert die Migration nicht:**
 
 - **OPEN:** Darf ein Benutzername später geändert werden? (dann Sperrfrist und Historie nötig)
 - **OPEN:** Genaue Slug-Kollisionsregel — wird beim Importwerkzeug (V1.3) festgelegt.
+- **OPEN:** Reicht die Obergrenze `quantity <= 10000`? Sie ist als Schutz gegen einen
+  fehlerhaften Client gedacht, nicht als fachliche Grenze.

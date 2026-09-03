@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-03 (Freigaberunde 2 des Nutzers).
+Letzte Aktualisierung: 2026-09-03 (V1.2B Pre-Flight-Review).
 
 ---
 
@@ -32,6 +32,20 @@ lückenlos verwaltet. Eine neue Identität einzuführen würde jede bestehende Z
 **Konsequenzen.** Der Import upsertet ausschließlich über `sky_id`. Der Import erfindet keine
 IDs. Neue Figuren erhalten ihre ID weiterhin im Legacy-Projekt über `etl/assign_ids.py`,
 solange die Excel den Katalog führt (siehe ADR-0006).
+
+**Formatgrenze bestätigt (2026-09-03).** Das Format `^SKY-[0-9]{4}$` bleibt für V1 unverändert
+und wird **nicht vorsorglich** erweitert. Sollte der bestehende Legacy-ID-Raum je überschritten
+werden, ist das eine bewusste, gemeinsame Migration von Legacy-Projekt **und** PortalVault —
+keine stille Lockerung des Constraints.
+
+**Umsetzung in der Datenbank (0001_initial_schema.sql).** Zusätzlich zum Format-CHECK
+`^SKY-[0-9]{4}$` verweigert der Trigger `skylanders_sky_id_immutable` jede Änderung einer
+SKY-ID. Das ist bewusst ein Trigger und keine Policy: RLS verhindert bereits Client-Schreibzugriffe,
+**aber die Service Role umgeht RLS** — und genau als Service Role läuft das Importwerkzeug.
+Trigger und Constraints werden nicht umgangen. Ebenso ist der Fremdschlüssel
+`collection_items.sky_id → skylanders.sky_id` auf `on update restrict` gesetzt: ein
+Änderungsversuch soll fehlschlagen, nicht stillschweigend durch alle Benutzersammlungen
+propagieren.
 
 ---
 
@@ -123,6 +137,13 @@ Schlüssel.
 **Konsequenzen.** Verkaufsangebote kommen trotzdem in eine eigene Tabelle (`listings`), nicht in
 `collection_items`. Zustandswerte werden erst eingeführt, wenn sie gebraucht werden — die
 Bezeichner sind bereits als `keep` / `sell` / `trade` vorgesehen (englisch, ADR-0019).
+
+**Zur Obergrenze `quantity <= 10000` (bestätigt 2026-09-03).** Das ist eine **technische
+Schutzgrenze** gegen fehlerhafte Clients und unplausible Schreibvorgänge — **keine fachliche
+Definition maximalen Besitzes.** PortalVault legt nicht fest, wie viele Exemplare einer Figur
+ein Sammler besitzen darf; der Wert ist bewusst so hoch gewählt, dass er keine reale Sammlung
+begrenzt. Stößt jemals eine echte Sammlung daran, wird der Wert angehoben — eine
+Betriebsentscheidung, keine Änderung des Datenmodells.
 
 **Verworfen:** eine Zeile je physischem Exemplar in V1 (unnötig kompliziert in UI und Abfragen);
 `owned boolean` (verletzt die Mengen-Anforderung).
@@ -237,6 +258,12 @@ automatisch — es gibt keine zweite Preiskopie. `numeric` statt `float`, weil e
 - Aggregationen zählen `NULL`-Preise nicht mit und weisen sie gesondert aus (wie im
   Legacy-Frontend): `sum(quantity * market_price) filter (where market_price is not null)`.
 - `formatPrice(null)` gibt „–" zurück, nie „0,00 €" (`src/lib/format.ts`).
+- **Umsetzung in der Datenbank:** der Constraint lautet `market_price is null or
+  market_price > 0`, nicht `>= 0`. Damit ist 0 als Ersatz für „unbekannt" strukturell
+  ausgeschlossen — und Negativwerte gleich mit. Der Legacy-Export bildet einen 0-Preis ohnehin
+  bereits auf `null` ab, ein gültiger Import löst den Constraint also nie aus; tut er es doch,
+  sind die Daten falsch und der Import muss abbrechen. Zusätzlich: `price_updated_at` ist nur
+  setzbar, wenn ein Preis existiert.
 - Ein späterer Preisverlauf kommt als eigene Tabelle `price_history` dazu; `market_price` wird
   dann der zwischengespeicherte aktuelle Wert. Damit das ohne UI-Änderung möglich bleibt, liest
   die Anwendung den Preis nur an **einer** Stelle (`src/lib/catalog`).
@@ -507,3 +534,49 @@ werden, ist das eine eigene Entscheidung und eine reine Textarbeit ohne Codeänd
   seine Schlüssel sind englisch, seine Werte deutsch.
 - Commit-Messages sind englisch.
 - Die Regel steht dauerhaft in `CLAUDE.md` und `docs/ARCHITECTURE.md`.
+
+---
+
+## ADR-0020 — Case-insensitive Benutzernamen ohne `citext`
+
+**Status:** ANGENOMMEN (2026-09-03) — **ersetzt den `citext`-Plan** aus `docs/DATABASE.md`
+
+**Kontext.** `docs/DATABASE.md` sah ursprünglich `username citext unique` vor. Bei der
+Umsetzung der ersten Migration war ausdrücklich zu prüfen, ob das für Supabase/PostgreSQL
+sauber ist.
+
+**Entscheidung.** `username` ist eine gewöhnliche `text`-Spalte. Die case-insensitive
+Eindeutigkeit erzwingt ein partieller Unique-Index:
+
+```sql
+create unique index profiles_username_lower_uniq
+  on public.profiles (lower(username))
+  where username is not null;
+```
+
+**Begründung — drei Gründe gegen `citext`:**
+
+1. **Musteroperatoren bleiben case-sensitiv.** `citext` überlädt die Vergleichsoperatoren,
+   **nicht** aber `~` und `LIKE`. Der Format-CHECK `username ~ '^[a-zA-Z0-9_]{3,20}$'` würde
+   sich also anders verhalten als die Eindeutigkeitsregel — ein Widerspruch, der beim Lesen
+   des Schemas nicht sichtbar ist.
+2. **Erweiterungsabhängigkeit.** `citext` müsste installiert werden; im Schema `public`
+   beanstandet Supabases Linter das, im Schema `extensions` hängt die Auflösung am
+   `search_path` — beides zusätzliche bewegliche Teile für einen Zweck, den ein Index erfüllt.
+3. **`citext` gilt als Auslaufmodell** und wird in der PostgreSQL-Dokumentation zugunsten
+   nicht-deterministischer Collations relativiert.
+
+**Konsequenzen.**
+
+- Die **getippte Schreibweise bleibt erhalten** (`JulianStocker` wird so angezeigt), während
+  `julianstocker` und `JULIANSTOCKER` kollidieren. Das ist besser als `citext`, das die
+  Schreibweise zwar speichert, aber zu Verwechslungen einlädt.
+- **Konvention, die eingehalten werden muss:** jede Suche nach einem Benutzernamen verwendet
+  `lower(username) = lower($1)`. Ohne `lower()` greift der Index nicht und die Suche wäre
+  case-sensitiv. Dokumentiert in `docs/DATABASE.md` und `docs/AUTH.md`.
+- Der Index ist partiell (`where username is not null`), weil `username` bis zum Onboarding
+  `NULL` ist.
+
+**Verworfen:** `citext` (siehe oben) · nicht-deterministische ICU-Collation (elegant, aber
+schließt Musteroperatoren und Präfix-Indizes auf der Spalte aus, die eine spätere
+Benutzersuche brauchen könnte).

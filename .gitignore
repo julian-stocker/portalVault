@@ -55,6 +55,14 @@ yarn-error.log*
 # --- Deployment / tooling -------------------------------------------------
 .vercel
 
+# --- Editor artefacts -----------------------------------------------------
+# nano writes <file>.save when an edit is aborted. Such a copy next to a
+# migration is dangerous: it is a second, outdated version of a file that is
+# meant to be executed exactly once.
+*.save
+*.swp
+*~
+
 # --- OS -------------------------------------------------------------------
 .DS_Store
 Thumbs.db

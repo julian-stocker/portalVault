@@ -7,12 +7,17 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**V1.1 — Fundament. Abgeschlossen.**
+**V1.2B — Datenbank steht.** V1.1 (Fundament) und V1.2A (Schemaentwurf) sind abgeschlossen.
 
-Das Next.js-Grundgerüst steht, baut und läuft. Es gibt noch keine Fachlogik, keine
-Datenbankanbindung und keine Katalogdaten.
+`0001_initial_schema.sql` wurde am 2026-09-03 im Supabase-SQL-Editor **erfolgreich ausgeführt**
+und anschließend mit rein lesenden Abfragen **strukturell verifiziert**. Das Supabase-Projekt
+existiert in einer EU-Region; die Datenbank enthält das vollständige V1-Schema und **keine
+Daten** (alle Rowcounts 0).
 
-Wartet auf Freigabe für **V1.2 — Datenbank**.
+**Noch nicht bewiesen:** dass die RLS-Regeln bei echten Sessions greifen. Der funktionale
+Zwei-Benutzer-Test ist V1.2C.
+
+Wartet auf Freigabe für **V1.2C — Verbindung im Code und RLS-Verifikation mit zwei Testkonten**.
 
 ---
 
@@ -33,10 +38,14 @@ Wartet auf Freigabe für **V1.2 — Datenbank**.
 | Formatierung `src/lib/format.ts`, Locale `de-AT` | ✅ |
 | Vorläufige Startseite | ✅ |
 | Vollständige Projektdokumentation in `docs/` | ✅ |
+| `supabase/migrations/0001_initial_schema.sql` — geschrieben, **ausgeführt und strukturell verifiziert** | ✅ |
+| Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 
 ## Noch nicht implementiert
 
-- Supabase-Projekt, Datenbankschema, RLS-Policies, Migrationen
+- Verbindung von Next.js zu Supabase (`@supabase/ssr`, Client- und Server-Clients)
+- **Funktionaler RLS-Test mit zwei echten Benutzern** (V1.2C) — bislang nur strukturell verifiziert
+- Supabase CLI (nicht initialisiert, kein Remote-Link — Migration lief über den SQL-Editor)
 - Import-Werkzeug, importierte Katalogdaten, kopierte Bilder
 - Katalog-UI, Suche, Filter, Figurenseiten
 - Auth, Profile, Onboarding, geschützte Routen
@@ -52,17 +61,50 @@ Wartet auf Freigabe für **V1.2 — Datenbank**.
 | Bereich | Zustand |
 |---|---|
 | Frontend | Grundgerüst lauffähig, eine statische Seite |
-| Datenbank | nicht begonnen — Schema in `docs/DATABASE.md` ist **freigegeben und schreibbereit** |
+| Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
 | Auth | nicht begonnen — Konzept in `docs/AUTH.md` |
 | Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
 | Tests | nur Lint / Typecheck / Build — Unit- und RLS-Tests folgen mit der Fachlogik |
 
-Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist noch nicht angelegt
-(**EU-Region**, ADR-0015).
+Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
+ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 
 ---
 
 ## Zuletzt verifizierte Prüfungen
+
+### Tatsächlich ausgeführt
+
+**2026-09-03, V1.2B — gegen die laufende Supabase-Datenbank:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `0001_initial_schema.sql` im SQL-Editor ausgeführt | ✅ `Success. No rows returned` |
+| Tabellen | ✅ 5: `series`, `categories`, `skylanders`, `profiles`, `collection_items` |
+| RLS | ✅ aktiviert auf 5/5, `forced = false` |
+| Policies | ✅ 10, alle wie in `docs/DATABASE.md` Abschnitt 5 |
+| Trigger | ✅ **5** (4 auf `public`, 1 auf `auth.users`) |
+| Foreign Keys | ✅ **5** |
+| Funktionen | ✅ 3, davon eine `SECURITY DEFINER` mit `search_path = ''` |
+| `skylanders_sky_id_immutable` | ✅ korrekt als `BEFORE UPDATE OF sky_id` |
+| Rechte `profiles / authenticated` | ✅ exakt `INSERT, SELECT, UPDATE` |
+| Rechte `collection_items / authenticated` | ✅ exakt `DELETE, INSERT, SELECT, UPDATE` |
+| Rechte Katalog / `anon` + `authenticated` | ✅ nur `SELECT` |
+| Rechte `service_role` auf Katalog | ✅ Schreibrechte vorhanden (für den Import in V1.3) |
+| Rowcounts | ✅ überall 0 |
+| Kanonische Datei: Kopfzeile, Kodierung | ✅ erste Zeile `-- …`, kein BOM, nur LF, endet mit Zeilenumbruch |
+
+Zwischenschritt: Ein erster Lauf ergab überzählige Rechte für `authenticated`
+(`TRUNCATE, REFERENCES, TRIGGER`) aus Supabases Default-Privilegien. Die Migration wurde um
+explizite `REVOKE` ergänzt, die Datenbank zurückgesetzt und die korrigierte Fassung erneut
+ausgeführt. Hergang: `docs/DATABASE.md`, Abschnitt 3.9.
+
+**2026-09-03, statisch vor der Ausführung:**
+
+| Prüfung | Befehl | Ergebnis |
+|---|---|---|
+| Migration statisch geprüft | eigenes Prüfskript (nicht im Repo) | ✅ zuletzt 20 Prüfungen, 0 Fehler |
+| Spaltenaudit der Migration | eigenes Prüfskript | ✅ 35 Spalten, alle englisch/snake_case, keine verbotene Spalte (`available`, `stock`, `ebay`, …) |
 
 **2026-09-03, nach V1.1:**
 
@@ -92,11 +134,29 @@ Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist noch nicht 
 Die fünf Legacy-Testsuiten (134 Prüfungen) wurden **nicht** ausgeführt — das Legacy-Projekt ist
 read-only; sie wurden zuletzt am 2026-08-11 grün gemeldet.
 
+### Ausdrücklich NICHT verifiziert
+
+- **Der funktionale RLS-Test mit zwei echten Benutzern steht aus (V1.2C).**
+  Verifiziert ist, dass Policies, Rechte und RLS-Flags **so konfiguriert sind** wie beabsichtigt.
+  **Nicht** verifiziert ist, dass sie bei echten authentifizierten Sessions greifen — dass also
+  Benutzer A weder lesend noch schreibend an die Daten von Benutzer B kommt. Der Security-Review
+  in `docs/SECURITY.md`, Abschnitt 5a, ist damit strukturell belegt, aber nicht
+  sicherheitsfunktional bewiesen. Bis dahin wird nichts deployt.
+- Der Profil-Trigger `on_auth_user_created` **existiert**, hat aber noch nie gefeuert — es gibt
+  keine Benutzer. Ob er bei einer echten Registrierung eine Profilzeile anlegt, zeigt erst V1.2C.
+- Keine Supabase CLI initialisiert, kein Remote-Link (die Migration lief über den SQL-Editor).
+- Keine Verbindung zwischen Next.js und Supabase.
+
 ---
 
 ## Bekannte Probleme
 
-Keine. Lint, Typecheck und Build sind grün.
+**Keine offenen.** Die beiden im Pre-Flight vermuteten Supabase-Risiken rund um den Trigger auf
+`auth.users` sind **nicht eingetreten**; das dabei tatsächlich gefundene Problem (überzählige
+Rechte aus Supabases Default-Privilegien) ist behoben und verifiziert. Hergang:
+`docs/DATABASE.md`, Abschnitt 3.9.
+
+Lint, Typecheck und Build sind grün.
 
 Zwei Hinweise ohne Handlungsbedarf:
 
@@ -147,6 +207,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | 0017 | Anon-Key ist kein Secret; Grenze sind Auth, RLS und Policies |
 | 0018 | SMTP-Anbieter erst vor der öffentlichen Beta |
 | **0019** | **Technische Projektsprache ist Englisch. Oberflächensprache von V1 ist Deutsch.** |
+| 0020 | Case-insensitive Benutzernamen über `unique index on lower(username)` statt `citext` |
 
 ## Offene Entscheidungen
 
@@ -163,12 +224,9 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**V1.2 — Datenbankfundament.** Supabase-Projekt in der EU-Region anlegen, erste Migration
-(`series`, `categories`, `skylanders`, `profiles`, `collection_items`) mit RLS-Policies und
-Profil-Trigger schreiben, Verbindung im Code herstellen und mit zwei Testkonten prüfen, dass
-fremde Sammlungen weder lesbar noch änderbar sind.
-
-Alle dafür nötigen Entscheidungen sind freigegeben; das Schema in `docs/DATABASE.md` ist
-schreibbereit.
+**V1.2C — Supabase im Code anbinden und die RLS-Regeln funktional verifizieren.**
+`@supabase/ssr` einrichten (Browser-Client, Server-Client, Middleware), zwei Testkonten anlegen
+und nachweisen, dass Benutzer A weder lesend noch schreibend an Profil und Sammlung von
+Benutzer B kommt. Erst dieser Nachweis macht aus „so konfiguriert" ein „nachweislich wirksam".
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**

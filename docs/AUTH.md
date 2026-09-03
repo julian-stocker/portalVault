@@ -41,20 +41,46 @@ Der Trigger setzt **keinen** Benutzernamen, damit die Kontoanlage nie an einem N
 scheitern kann. Die Eindeutigkeit prüft die Datenbank beim späteren `UPDATE`
 (`unique` auf `profiles.username`), nicht die Anwendung.
 
+Umgesetzt in `supabase/migrations/0001_initial_schema.sql` (geschrieben, noch nicht ausgeführt):
+
 ```sql
--- Entwurf, noch nicht angelegt
-create function public.handle_new_user() returns trigger
-language plpgsql security definer set search_path = public as $$
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
 begin
-  insert into public.profiles (id) values (new.id)
+  insert into public.profiles (id)
+  values (new.id)
   on conflict (id) do nothing;
   return new;
-end $$;
+end;
+$$;
+
+revoke all on function public.handle_new_user() from public, anon, authenticated;
 
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 ```
+
+**Warum `SECURITY DEFINER` hier notwendig ist:** Der INSERT in `auth.users` läuft als
+`supabase_auth_admin`. Diese Rolle hat keine Rechte auf `public.profiles` — ohne erhöhte
+Rechte würde jede Registrierung fehlschlagen.
+
+**Härtung:**
+
+- `set search_path = ''` und vollständig qualifizierte Objektnamen. Kein Schema im
+  `search_path` eines Aufrufers kann eine eigene `profiles`-Tabelle unterschieben.
+- **Es wird ausschließlich `new.id` verwendet** — eine von Supabase Auth erzeugte UUID.
+  Weder E-Mail noch `raw_user_meta_data` werden gelesen: **kein benutzerkontrollierter Wert
+  gelangt in den privilegierten Kontext.** Der Benutzername wird anschließend vom Benutzer
+  selbst über ein RLS-geprüftes UPDATE gesetzt.
+- `on conflict (id) do nothing` — die Registrierung scheitert nicht an einer bereits
+  vorhandenen Zeile.
+- `revoke all ... from public, anon, authenticated` — die Funktion ist für Clients nicht
+  direkt aufrufbar.
 
 ### Login
 
@@ -97,19 +123,24 @@ serverseitig gerenderten Seiten, damit keine Benutzerdaten aus dem Cache stehen 
 | Feld | Regel |
 |---|---|
 | `id` | = `auth.users.id`, 1:1, `ON DELETE CASCADE` |
-| `username` | `citext unique`, `^[a-zA-Z0-9_]{3,20}$`, case-insensitive eindeutig, reservierte Namen ausgeschlossen |
+| `username` | `text`, nullbar, `^[a-zA-Z0-9_]{3,20}$`, case-insensitiv eindeutig, reservierte Namen ausgeschlossen |
 | `display_name`, `avatar_url`, `country` | optional |
 
 - **Keine E-Mail-Adresse in `profiles`** — sie bleibt in `auth.users` und wird nie öffentlich.
 - Der Benutzername ist die spätere öffentliche Identität (öffentliche Profile, Marketplace).
   Er wird deshalb von Anfang an eindeutig und mit fester Zeichenmenge geführt (ADR-0016).
-- **Reservierte Systemnamen werden von Anfang an abgelehnt** (ADR-0016): mindestens `admin`,
-  `api`, `support`, `portalvault`; dazu weitere technisch kritische Namen (`root`, `system`,
-  `auth`, `login`, `logout`, `register`, `settings`, `profile`, `skylanders`, `collection`,
-  `static`, `assets`, `www`, `mail`, `help`, `about`, `legal`, `impressum`, `datenschutz`).
-  Die Liste darf bei der Implementierung sinnvoll ergänzt werden. Sie wird an **einer** Stelle
-  im Code gepflegt und zusätzlich per Datenbank-Constraint durchgesetzt — eine reine
-  Client-Prüfung genügt nicht.
+- **Case-insensitive Eindeutigkeit ohne `citext`** (ADR-0020): ein Unique-Index auf
+  `lower(username)`. Die getippte Schreibweise bleibt für die Anzeige erhalten, `Julian` und
+  `julian` kollidieren. **Konvention für den Code:** jede Suche nach einem Benutzernamen muss
+  `lower(username) = lower($1)` verwenden, sonst greift der Index nicht.
+- **Reservierte Systemnamen werden von Anfang an abgelehnt** (ADR-0016). Umgesetzt als
+  CHECK-Constraint `profiles_username_not_reserved` mit derzeit 58 Namen, case-insensitiv
+  verglichen: `admin`, `api`, `auth`, `login`, `support`, `portalvault`, `skylanders`,
+  `collection`, `profile`, `settings`, `dashboard`, `impressum`, `datenschutz` und weitere.
+  Die Durchsetzung liegt in der **Datenbank**, nicht im Client. Die Liste zu erweitern
+  erfordert eine neue Migration — beabsichtigt: einen Namen zu sperren ist eine bewusste
+  Entscheidung. Das UI sollte dieselbe Liste zusätzlich vorab prüfen, um eine bessere
+  Fehlermeldung zu zeigen.
 - **Profile und Sammlungen sind in V1 privat** (ADR-0016): ein Benutzer liest und ändert
   ausschließlich seine eigenen. Öffentliche Benutzerprofile sind kein V1-Feature.
 - **OPEN:** Darf ein Benutzername später geändert werden? Wenn ja, braucht es eine
