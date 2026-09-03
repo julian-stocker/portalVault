@@ -1,0 +1,509 @@
+# Architecture Decision Log
+
+Jede wichtige Entscheidung bekommt hier einen Eintrag. Nichts Wichtiges bleibt nur im
+Session-Kontext von Claude.
+
+**Status-Werte**
+
+| Status | Bedeutung |
+|---|---|
+| `ANGENOMMEN` | vom Nutzer vorgegeben oder ausdrücklich freigegeben |
+| `VORGESCHLAGEN` | von Claude empfohlen, wartet auf Freigabe — noch nicht umgesetzt |
+| `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
+| `ERSETZT DURCH ADR-XXXX` | überholt |
+
+Letzte Aktualisierung: 2026-09-03 (Freigaberunde 2 des Nutzers).
+
+---
+
+## ADR-0001 — Bestehende SKY-IDs bleiben die kanonische Identität
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** `SKY-0001` … `SKY-0820` bleiben unverändert die Identität jeder Figur, auch
+in PortalVault. Sie werden nie aus Name, Slug, Bild, Zeile oder Kategorie abgeleitet, nie neu
+vergeben, nie wiederverwendet, nie automatisch geändert. Benutzersammlungen referenzieren die
+SKY-ID.
+
+**Begründung.** Die ID verbindet im Legacy-System bereits Excel, Bild, Marktpreis, Mapping,
+Lagerbestand und Ankauf. Sie ist per Regel unveränderlich und in `data/id_ledger.json`
+lückenlos verwaltet. Eine neue Identität einzuführen würde jede bestehende Zuordnung entwerten.
+
+**Konsequenzen.** Der Import upsertet ausschließlich über `sky_id`. Der Import erfindet keine
+IDs. Neue Figuren erhalten ihre ID weiterhin im Legacy-Projekt über `etl/assign_ids.py`,
+solange die Excel den Katalog führt (siehe ADR-0006).
+
+---
+
+## ADR-0002 — `sky_id` ist der Primärschlüssel der Tabelle `skylanders`
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** `skylanders.sky_id text primary key check (sky_id ~ '^SKY-[0-9]{4}$')`.
+**Kein** zusätzlicher UUID-Surrogatschlüssel für `skylanders`.
+
+Andere Entitäten — `profiles` (= `auth.users.id`), später `listings`, `trades`, `orders` —
+verwenden UUIDs. Die Regel gilt ausschließlich für den kanonischen Katalog.
+
+**Begründung.** Die SKY-ID ist per Projektregel dauerhaft unveränderlich; das ist genau der
+Fall, in dem ein natürlicher Schlüssel richtig ist. Jede Zeile, jedes Log und jeder
+Fremdschlüssel ist ohne Join lesbar, und der Abgleich mit dem Legacy-System bleibt direkt
+möglich.
+
+**Konsequenzen.** `collection_items.sky_id` ist ein `text`-Fremdschlüssel. Alle künftigen
+Tabellen, die auf Figuren zeigen (`wishlist_items`, `listings`, …), verwenden ebenfalls
+`sky_id text`.
+
+**Verworfen:** `id uuid` + `sky_id text unique` — ein zweiter Schlüssel ohne fachlichen Nutzen.
+
+---
+
+## ADR-0003 — PostgreSQL ist Source of Truth für die Webplattform, Excel für interne Daten
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Die Zuständigkeit wird **pro Datenbereich** getrennt, nicht dupliziert:
+
+| Bereich | Source of Truth | Datenfluss |
+|---|---|---|
+| Katalogstammdaten (Name, Serie, Kategorie, Marktpreis, Bildzuordnung) | in V1 Excel; PostgreSQL ist die veröffentlichte Kopie | Excel → Postgres, einbahnig |
+| Benutzerdaten (Profile, Sammlungen) | **ausschließlich PostgreSQL** | nirgendwohin |
+| Interne Geschäftsdaten (Lager, Order, EÜR, Mappings, Ankauffaktor) | **ausschließlich Legacy/Excel** | nirgendwohin |
+
+**Begründung.** Zwei widersprüchliche Quellen entstehen nur, wenn dasselbe Feld an zwei Stellen
+geschrieben wird. Deshalb hat jedes Feld genau einen Schreiber, und der Datenfluss ist
+einbahnig. Nichts fließt aus PortalVault zurück in die Excel.
+
+**Konsequenzen.** Preis- und Namensänderungen macht der Nutzer weiterhin in der Excel und
+spielt sie per Import ein. Die Anwendung ändert Katalogdaten nie. Langfristige Ablösung: ADR-0006.
+
+---
+
+## ADR-0004 — PortalVault liest niemals `skylanders.xlsx` direkt
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Der einzige zulässige Eingang für Katalogdaten ist der validierte öffentliche
+Export `../webpage/site/data/products.json`, der im Legacy-Projekt bereits `guard_public()`
+durchlaufen hat. Der Import prüft zusätzlich noch einmal selbst.
+
+**Begründung.** Die Excel enthält Käuferdaten, EÜR, private Sammlung und Lagerzahlen. Über den
+geprüften Export ist die Trennung strukturell gegeben: was nicht im Export steht, kann nicht
+importiert werden.
+
+**Konsequenzen.** Der Nutzer führt vor jedem Import im Legacy-Projekt `webpage build` aus und
+kopiert die Exportdatei. Zwei Schritte statt einem — bewusst, zugunsten der Sicherheitsgrenze.
+
+**Verworfen:** direkter XLSX-Import in PortalVault; Legacy als Git-Submodul einbinden.
+
+---
+
+## ADR-0005 — Sammlungsmodell: Surrogatschlüssel plus Unique-Constraint
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** `collection_items` besteht in V1 aus:
+
+- **Surrogat-Primärschlüssel** (`id uuid`)
+- **`user_id`** — Fremdschlüssel auf den Benutzer
+- **`sky_id`** — Fremdschlüssel auf `skylanders`
+- **`quantity`**
+- **Unique-Constraint/Index auf `(user_id, sky_id)`**
+
+**V1 behandelt einen Skylander je Benutzer als einen aggregierten Sammlungsdatensatz.**
+
+**Begründung.** In V1 verhält sich die Tabelle wie ein zusammengesetzter Schlüssel: eine Zeile
+je Benutzer und Figur, `quantity` deckt Mehrfachbesitz ab. Das Design muss eine spätere
+Entwicklung hin zu **einzelnen Exemplaren und Zuständen** (`keep`, `sell`, `trade`) erlauben —
+**ohne das jetzt umzusetzen**. Dafür wird später der Unique-Constraint entfernt und eine Spalte
+ergänzt; aus einer Zeile werden mehrere Posten derselben Figur. Das ist eine additive Migration
+ohne Schlüsselumbau. Mit `primary key (user_id, sky_id)` wäre derselbe Schritt ein Umbau aller
+Schlüssel.
+
+**Konsequenzen.** Verkaufsangebote kommen trotzdem in eine eigene Tabelle (`listings`), nicht in
+`collection_items`. Zustandswerte werden erst eingeführt, wenn sie gebraucht werden — die
+Bezeichner sind bereits als `keep` / `sell` / `trade` vorgesehen (englisch, ADR-0019).
+
+**Verworfen:** eine Zeile je physischem Exemplar in V1 (unnötig kompliziert in UI und Abfragen);
+`owned boolean` (verletzt die Mengen-Anforderung).
+
+---
+
+## ADR-0006 — Katalogpflege: V1 im Legacy-System, langfristig offen
+
+**Status:** ANGENOMMEN für V1 (2026-09-03) · langfristiger Teil bleibt OPEN
+
+**Entscheidung für V1.** Katalog- und Preispflege bleiben vollständig im Legacy-System.
+Der Datenfluss ist:
+
+```
+Legacy Excel / ETL  →  validierter öffentlicher Export  →  kontrollierter PortalVault-Import  →  PostgreSQL
+```
+
+- PortalVault liest niemals die vollständige Excel direkt (ADR-0004).
+- Benutzerdaten existieren ausschließlich in PostgreSQL.
+- Interne Legacy-Daten bleiben ausschließlich im Legacy-System.
+
+**Offen (LATER).** Ein PortalVault-Admin-System kann PostgreSQL später zur vollständigen
+Source of Truth für den öffentlichen Katalog machen. Diese Migration wird **jetzt nicht**
+durchgeführt und ist auch nicht Teil von V1.
+
+**Konsequenzen für heute.** Das Importwerkzeug wird so gebaut, dass es wiederholt laufen kann
+(idempotenter Upsert über `sky_id`) — das ist die Voraussetzung dafür, dass die Excel später
+ohne Datenverlust abgelöst werden kann.
+
+---
+
+## ADR-0007 — Preisupdate bleibt im Legacy-Projekt
+
+**Status:** ANGENOMMEN (2026-09-03, mit ADR-0006)
+
+**Entscheidung.** `etl/update_prices.py` mit seinem expliziten Mapping läuft unverändert im
+Legacy-Projekt weiter. Aktualisierte Preise kommen über denselben Importweg wie alle anderen
+Katalogdaten nach PortalVault.
+
+**Begründung.** Die Logik ist erprobt, durch 17 Zuordnungstests abgesichert und trägt eine
+wichtige Sicherheitsregel: kein Fuzzy-Matching, ein fehlendes Update ist besser als eine falsche
+Zuordnung. Sie enthält außerdem Scraping-Details und Quell-URLs, die nicht in ein Repository
+gehören, das später öffentlich werden könnte.
+
+**Konsequenzen.** Scraper-Code, Mappings und Logs bleiben im Legacy-Projekt. PortalVault
+bekommt nur das Ergebnis: den Preis.
+
+---
+
+## ADR-0008 — Ankauffaktor, `available` und eBay-Daten werden nicht migriert
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Aus dem Legacy-Export werden `available`, `ebay` und der Ankauffaktor aus
+`config.json` **nicht** importiert.
+
+**Begründung (Wortlaut des Nutzers).** Das Feld `available` beschreibt den **eigenen
+Legacy-Lagerbestand** und gehört nicht zum kanonischen PortalVault-Sammlungsmodell. Ein
+Skylander existiert in PortalVault unabhängig davon, ob er im persönlichen Lager gerade
+verfügbar ist. Der Ankauffaktor (33,36 %) ist Ausgaben ÷ Marktwert des Einkaufs — eine
+abgeleitete Geschäftskennzahl ohne Funktion in einer Sammlerplattform. `ebay` betrifft eigene
+Verkäufe.
+
+**Konsequenzen.** Es gibt in PortalVault keinen Verfügbarkeitsstatus und keinen Ankaufsrechner.
+Damit existiert auch kein Informationskanal, über den aus der öffentlichen Datenbank auf
+interne Geschäftsdaten geschlossen werden könnte. Sollte Ankauf je zum Thema werden, ist das
+eine neue Entscheidung.
+
+---
+
+## ADR-0009 — Bilder: statische Assets im Repository für V1
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Die öffentlichen WebP-Derivate liegen unter `public/images/skylanders/` im
+PortalVault-Repository und werden vom Vercel-CDN ausgeliefert.
+
+- **Die bestehenden Dateinamen bleiben unverändert** (content-adressiert, `<sha256[:16]>.webp`).
+- Die Master-PNGs (430 MB) bleiben ausschließlich im Legacy-Projekt und dürfen nicht ins
+  PortalVault-Repository.
+- Supabase Storage wird in V1 **nicht** für die kanonischen Skylander-Bilder verwendet.
+- Supabase Storage ist später für **Benutzer-Uploads** vorgesehen (Avatare, Marketplace-Bilder).
+
+**Begründung.** Kein zusätzlicher Dienst, keine Zugriffsregeln, keine Kosten. Content-adressierte
+Namen erlauben unveränderliche Caches und bewahren die Bildidentität aus dem Legacy-System.
+
+**Konsequenzen.** Die Datenbank speichert **nur den stabilen Dateinamen**, nie eine vollständige
+URL und nie einen infrastrukturspezifischen Pfad. Die URL wird an genau einer Stelle im Code
+gebildet. Ein späterer Wechsel des Speicherorts ist damit ein Wechsel des Präfixes.
+
+---
+
+## ADR-0010 — Marktpreis in V1: ein nullbarer Wert direkt auf `skylanders`
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.**
+
+- `skylanders.market_price numeric(10,2)` — der Preis steht in V1 **direkt auf der Tabelle**.
+- **`market_price` MUSS nullbar sein.**
+- `NULL` bedeutet: **„Derzeit ist kein Marktpreis bekannt."**
+- **Niemals 0 als Ersatz für einen unbekannten Preis verwenden.**
+- **Keine `price_history`-Tabelle in V1.**
+
+**Begründung.** Ändert sich der zentrale Preis, ändert sich der angezeigte Sammlungswert
+automatisch — es gibt keine zweite Preiskopie. `numeric` statt `float`, weil es um Geld geht.
+15 der 600 Artikel haben keinen Preis; würde man dort 0 schreiben, wäre „geschenkt" von
+„unbekannt" nicht mehr unterscheidbar und jede Wertsumme stillschweigend falsch.
+
+**Konsequenzen.**
+
+- Aggregationen zählen `NULL`-Preise nicht mit und weisen sie gesondert aus (wie im
+  Legacy-Frontend): `sum(quantity * market_price) filter (where market_price is not null)`.
+- `formatPrice(null)` gibt „–" zurück, nie „0,00 €" (`src/lib/format.ts`).
+- Ein späterer Preisverlauf kommt als eigene Tabelle `price_history` dazu; `market_price` wird
+  dann der zwischengespeicherte aktuelle Wert. Damit das ohne UI-Änderung möglich bleibt, liest
+  die Anwendung den Preis nur an **einer** Stelle (`src/lib/catalog`).
+
+---
+
+## ADR-0011 — Lesbare Slugs für die Navigation, SKY-ID für die Identität
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.**
+
+- Öffentliche Figurenseiten verwenden lesbare URLs: `/skylanders/drobot`.
+- Der Slug dient **ausschließlich der Navigation und Darstellung**.
+- Die SKY-ID bleibt die Identität und die Grundlage aller Fremdschlüssel.
+- **Keine Datenbeziehung darf vom Slug abhängen.**
+- Das Datenmodell muss spätere Redirects bei Slug-Änderungen ermöglichen, ohne dass jetzt ein
+  Redirect-System gebaut wird.
+
+**Umsetzung.** `skylanders.slug text not null unique`, einmalig beim Import erzeugt und danach
+gespeichert — nicht bei jedem Import aus dem Namen neu abgeleitet. Eine Umbenennung ändert den
+Slug also nicht automatisch, genau wie sie die SKY-ID nicht ändert.
+
+**Kollisionen.** Artikelnamen sind **innerhalb einer Serie** eindeutig, **global nicht**:
+32 Namen kommen mehrfach vor (`Bash` in SA und G, `Game (Xbox 360)` sechsmal). Der Slug wird
+deshalb aus dem Namen gebildet und bei Kollision **deterministisch qualifiziert** — Vorschlag:
+zuerst der reine Name (`drobot`), bei Konflikt mit Seriensuffix (`bash-giants`), bei weiterem
+Konflikt mit der SKY-ID (`game-xbox-360-sky-0002`). Der erzeugte Wert wird gespeichert.
+Die genaue Regel wird beim Import-Werkzeug (V1.3) festgelegt und dort dokumentiert.
+
+**Vorbereitung für Redirects.** Kein Redirect-System in V1. Vorgesehener Andockpunkt später:
+eine schlanke Tabelle `skylander_slug_history (slug primary key, sky_id, replaced_at)`.
+Weil der Slug nirgends Fremdschlüssel ist, kostet das später nichts.
+
+---
+
+## ADR-0012 — Sprache: V1 ausschließlich Deutsch, spätere Internationalisierung offenhalten
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** V1 wird ausschließlich auf Deutsch umgesetzt. Es wird **kein** vollständiges
+i18n-System gebaut und keine zweite Sprache angelegt. Entscheidungen, die eine spätere englische
+Version unnötig erschweren würden, werden vermieden.
+
+**Konkrete Vorkehrungen (billig, heute umsetzbar):**
+
+1. **Keine Sprachkennung in URLs** in V1 (`/skylanders/…`, nicht `/de/skylanders/…`).
+   Eine spätere Einführung von `/[locale]/…` bleibt möglich.
+2. **Benutzersichtbare Texte werden nicht im JSX verstreut**, sondern zentral gehalten
+   (`src/lib/i18n/de.ts` o. ä. — eine einfache Objektkonstante, kein Framework).
+3. **Kategorie- und Seriennamen liegen in der Datenbank**, nicht im Code. Eine Übersetzungs-
+   spalte oder -tabelle lässt sich später additiv ergänzen.
+4. **Zahlen-, Datums- und Währungsformatierung** an einer Stelle (`src/lib/format.ts`) mit
+   explizitem Locale `de-AT` — wie im Legacy-Projekt (`site/js/format.js`).
+5. **Keine sprachabhängigen Slugs oder Schlüssel** in der Datenbank.
+
+**Ausdrücklich nicht:** `next-intl`, `react-i18next`, Übersetzungsdateien, Sprachumschalter.
+
+---
+
+## ADR-0013 — Schlanker Testansatz für V1
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Pflicht bei jeder relevanten Änderung:
+
+1. **TypeScript Typecheck** (`npm run typecheck`)
+2. **ESLint** (`npm run lint`)
+3. **Next.js Production Build** (`npm run build`)
+4. **Unit-Tests für kritische reine Geschäftslogik** — Sammlungswert, Fortschritt, Umgang mit
+   fehlendem Preis, Slug-Erzeugung, Importregeln
+5. **Tests für sicherheitskritische Datenbank-/RLS-Regeln** — ein zweites Testkonto kommt an
+   fremde Sammlungen weder lesend noch schreibend heran
+
+**Ausdrücklich nicht zu Beginn:** ein umfangreiches End-to-End-Testsystem. Playwright kann
+ergänzt werden, sobald Auth und Sammlung stabil existieren.
+
+**Begründung.** Getestet wird dort, wo ein Fehler teuer ist: falsche Zahlen und offene
+Zugriffsrechte. Rendering-Details sind über Typecheck und Build ausreichend abgesichert.
+
+**Offen:** Werkzeug für Unit-Tests (Vitest ist der naheliegende Kandidat) — wird bei der ersten
+zu testenden Geschäftslogik festgelegt, nicht vorher.
+
+---
+
+## ADR-0014 — Kein zusätzlicher Backend-Service
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Next.js kommuniziert direkt mit Supabase über die dafür vorgesehenen
+Mechanismen:
+
+- Server Components
+- Server Actions
+- Route Handlers
+- Supabase SSR (`@supabase/ssr`)
+
+**Ohne konkreten Bedarf wird keine zusätzliche API-/Backend-Schicht eingeführt.** Es gibt
+keinen eigenen API-Server, kein ORM mit eigener Abstraktionsschicht, kein GraphQL und keine
+State-Management-Bibliothek.
+
+**Die tatsächliche Sicherheitsgrenze ist:**
+
+1. Supabase Auth
+2. PostgreSQL Row Level Security
+3. korrekte Policies
+
+**Begründung.** Möglichst wenig technische Komplexität. Jede zusätzliche Schicht ist eine
+weitere Stelle, an der Autorisierung falsch sein kann — und sie verleitet dazu, Prüfungen dort
+statt in der Datenbank zu machen.
+
+**Konsequenzen.** Datenzugriff und Berechnungen liegen gebündelt unter `src/lib/`, damit sie
+testbar bleiben und später austauschbar sind.
+
+---
+
+## ADR-0015 — Supabase-Projekt in der EU-Region
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Das Supabase-Projekt wird in einer EU-Region angelegt.
+
+**Begründung.** Benutzerkonten bedeuten personenbezogene Daten; der Nutzer und die erwartete
+Zielgruppe sind im DACH-Raum. Die Region ist nachträglich nur mit einer vollständigen Migration
+änderbar — deshalb wird sie vor der Projektanlage festgelegt, nicht danach.
+
+**Konsequenzen.** Bei der Projektanlage in V1.2 ist die Region ausdrücklich zu prüfen. Die
+konkrete Region wird nach der Anlage hier und in `docs/SECURITY.md` nachgetragen.
+
+---
+
+## ADR-0016 — V1: private Profile, private Sammlungen, öffentlich lesbarer Katalog
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.**
+
+| Daten | Lesen | Schreiben |
+|---|---|---|
+| `profiles` | **nur das eigene Profil** | nur das eigene Profil |
+| `collection_items` | **nur die eigene Sammlung** | nur die eigene Sammlung |
+| `series`, `categories`, `skylanders` | **öffentlich lesbar** (auch anonym) | **niemals durch normale Benutzer** |
+
+- **Profile sind in V1 privat.** Es gibt **keine öffentlichen Benutzerprofile** in V1.
+- **Sammlungen sind in V1 privat.**
+- **Katalogdaten sind öffentlich lesbar.** Normale Benutzer dürfen sie **niemals** ändern —
+  Katalogtabellen bekommen gar keine schreibende Policy, geschrieben wird ausschließlich durch
+  das lokale Importwerkzeug mit der Service Role.
+- V1 benötigt Profile mit **eindeutigem Benutzernamen**.
+- **Reservierte Systemnamen werden von Anfang an abgelehnt**: `admin`, `api`, `support`,
+  `portalvault` sowie weitere technisch kritische Namen. Die Liste darf bei der Implementierung
+  sinnvoll ergänzt werden.
+
+**Begründung.** Restriktiv zu starten ist deutlich leichter, als eine zu offene Policy
+nachträglich einzuschränken — eine einmal öffentlich gewesene Sammlung lässt sich nicht
+zurückholen.
+
+**Konsequenzen.** `collection_items` und `profiles` bekommen in V1 **keine** öffentliche
+SELECT-Policy; gelesen wird ausschließlich mit `auth.uid() = user_id` bzw. `auth.uid() = id`.
+Öffentliche Profile und öffentliche Sammlungen werden später über ein Flag
+(`profiles.is_public`, `profiles.collection_public`) und erweiterte Policies ergänzt.
+
+**Offen:** Darf ein Benutzername später geändert werden? Wenn ja, braucht es eine Sperrfrist und
+eine Historie, damit alte Profil-Links nachvollziehbar bleiben.
+
+---
+
+## ADR-0017 — Sicherheitsgrenze: Auth und RLS, nicht die Geheimhaltung des Anon-Keys
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Der Supabase Publishable-/Anon-Key ist **kein Secret**. Die Sicherheit des
+Systems darf **niemals** davon abhängen, dass dieser Key verborgen ist.
+
+Die tatsächliche Sicherheitsgrenze besteht aus:
+
+1. Supabase Auth
+2. PostgreSQL Row Level Security
+3. korrekten Policies
+4. serverseitiger Geheimhaltung privilegierter Keys
+
+**Der Service-Role-Key darf niemals in Client-Code oder öffentliche Bundles gelangen.**
+
+**Konsequenzen.** Der Anon-Key darf in `.env.example` als Platzhalter, im Browser-Bundle und in
+der Vercel-Konfiguration erscheinen. Jede Policy wird so geschrieben, als wäre der Key öffentlich
+bekannt — denn das ist er. Der Service-Role-Key existiert ausschließlich lokal in `.env.local`
+für das Import-Werkzeug und wird nicht in Vercel hinterlegt, solange es dort keinen
+Anwendungsfall gibt.
+
+---
+
+## ADR-0018 — E-Mail-Versand: kein externer SMTP-Anbieter in der lokalen Entwicklung
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.** Für die lokale Entwicklung wird **kein** externer SMTP-Anbieter integriert;
+der Supabase-Standardversand genügt zum Testen. Vor einer öffentlichen Beta muss der produktive
+E-Mail-Versand **separat entschieden und eingerichtet** werden.
+
+**Begründung.** Ein externer Anbieter ist ein kostenpflichtiger Dienst mit eigener
+Absenderdomain und Zustellbarkeitskonfiguration — das gehört nicht in die Aufbauphase.
+Der Standardversand ist stark limitiert und für eine öffentliche Beta nicht geeignet.
+
+**Konsequenzen.** Registrierung und Passwort-Reset funktionieren lokal, aber mit engen
+Versandlimits. Der Punkt steht als Voraussetzung in `docs/ROADMAP.md`, V1.7.
+
+---
+
+## ADR-0019 — Projektsprache: englischer Code, deutsche Oberfläche
+
+**Status:** ANGENOMMEN (2026-09-03)
+
+**Entscheidung.**
+
+> **Die technische Projektsprache ist Englisch. Die Oberflächensprache von V1 ist Deutsch.**
+
+**Englisch — verbindlich für alle technischen Projektartefakte:**
+
+Ordnernamen · Dateinamen · Variablen · Funktionen · Klassen · Typen · Interfaces ·
+Datenbanktabellen · Datenbankspalten · routeninterne Benennung · API-Benennung · Kommentare ·
+Code-Dokumentation · Testnamen · Migrationsnamen · Skriptnamen · Commit-Messages ·
+technische Dokumentationsinhalte, sofern es keinen starken Grund dagegen gibt.
+
+**Keine deutschen technischen Bezeichner einführen.**
+
+| So | Nicht so |
+|---|---|
+| `collection_items` | `sammlung` |
+| `market_price` | `marktpreis` |
+| `image_file` | `bild_datei` |
+| `user_id` | `benutzer_id` |
+| `sky_id` | — |
+| `formatPrice()` | — |
+| `getCollectionValue()` | `berechneSammlungswert()` |
+
+**Deutsch — erlaubt für benutzersichtbare Inhalte:**
+
+Navigationsbeschriftungen · Buttons · Überschriften · Formularbeschriftungen ·
+Validierungsmeldungen für Benutzer · Erklärtexte · benutzersichtbare Seitenmetadaten.
+
+Der umgebende Code bleibt dabei englisch:
+
+```ts
+// Schlüssel englisch, Wert deutsch
+auth: { loginButton: "Anmelden" }
+```
+
+**Internationalisierung.** V1 ist deutschsprachig. Es wird **kein** vollständiges
+i18n-Framework eingeführt, solange es nicht wirklich nötig ist (ADR-0012). Aber: benutzersichtbare
+deutsche Strings werden nicht über die Komponenten verstreut, sondern zentral gehalten. Der
+aktuelle schlanke Ansatz mit `src/lib/i18n/de.ts` ist für V1 ausdrücklich in Ordnung.
+**Eine spätere englische Version muss möglich sein, ohne den technischen Codebase umzubenennen** —
+genau deshalb ist er von Anfang an englisch.
+
+**Bewusste Ausnahme: `docs/` und `CLAUDE.md` bleiben auf Deutsch.** Das ist der „starke Grund"
+im Sinne der Regel: Diese Dateien sind die Arbeitsgrundlage des Nutzers und beschreiben ein
+gewachsenes deutschsprachiges Legacy-System, dessen Regeln und Kategorienamen wörtlich zitiert
+werden. **Alle technischen Bezeichner darin sind trotzdem englisch** (Tabellen, Spalten, Pfade,
+Funktionen) — das ist der Teil, auf den es ankommt. Sollen die Dokumente später übersetzt
+werden, ist das eine eigene Entscheidung und eine reine Textarbeit ohne Codeänderung.
+
+**Konsequenzen und bereits umgesetzt.**
+
+- Alle Bezeichner in `src/` waren bereits englisch und wurden **nicht** umbenannt.
+- Code-Kommentare, `.gitignore`, `.env.example` und die `package.json`-Beschreibung wurden von
+  Deutsch auf Englisch umgestellt.
+- `src/lib/i18n/de.ts` behält den Dateinamen (`de` ist ein Locale-Code, kein deutsches Wort);
+  seine Schlüssel sind englisch, seine Werte deutsch.
+- Commit-Messages sind englisch.
+- Die Regel steht dauerhaft in `CLAUDE.md` und `docs/ARCHITECTURE.md`.

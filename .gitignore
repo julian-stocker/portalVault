@@ -1,0 +1,60 @@
+# ---------------------------------------------------------------------------
+# PortalVault .gitignore
+#
+# Security rule: secrets and internal legacy data must never reach this
+# repository. Rationale and full list: docs/SECURITY.md
+# ---------------------------------------------------------------------------
+
+# --- Secrets --------------------------------------------------------------
+# .env* is never committed. Only exception: .env.example with placeholders.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Internal legacy data -------------------------------------------------
+# These patterns are an extra brake, not a permission: the legacy project
+# ../webpage is never copied into this repository in the first place.
+*.xlsx
+*.xlsm
+*.xls
+**/inventory.json
+**/id_ledger.json
+**/ebay.json
+**/mappings/
+images/master/
+data/internal/
+
+# --- Dependencies ---------------------------------------------------------
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# --- Next.js / build ------------------------------------------------------
+/.next/
+/out/
+/build
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Tests ----------------------------------------------------------------
+/coverage
+
+# --- Logs -----------------------------------------------------------------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Deployment / tooling -------------------------------------------------
+.vercel
+
+# --- OS -------------------------------------------------------------------
+.DS_Store
+Thumbs.db

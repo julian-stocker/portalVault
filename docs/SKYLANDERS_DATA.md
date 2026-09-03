@@ -1,0 +1,407 @@
+# Skylanders-Daten — Legacy-System, Regeln und Migration
+
+Diese Datei beschreibt, **welche Daten es gibt, welche Regeln daran hängen und was bei der
+Migration nach PortalVault gilt**. Sie ist aus der tatsächlichen Analyse des Legacy-Projekts
+unter `../webpage` entstanden (Stand der Analyse: 2026-09-03; Legacy-Datenstand: 2026-08-11).
+
+`../webpage` ist STRICT READ-ONLY. Alle hier genannten Legacy-Befehle sind Dokumentation des
+Bestehenden, **keine Aufforderung, sie auszuführen**.
+
+---
+
+## 1. SKY-ID-System
+
+Format `SKY-0001` … `SKY-0820`, Regex `^SKY-\d{4}$`, **Spalte A** der Master-Excel.
+
+**Identitätsregeln (unverändert nach PortalVault übernommen):**
+
+- Eine SKY-ID wird **niemals** abgeleitet aus: Name, Slug, Bilddatei, Zeilennummer, Kategorie,
+  Serie oder Excel-Position.
+- Eine SKY-ID wird **niemals wiederverwendet**. Eine gelöschte Zeile gibt ihre Nummer nicht frei.
+- Eine Umbenennung (Spalte B) ändert die Identität **nicht**.
+- Ein Bild ist **kein** Bestandteil der Identität — austauschbar, ohne die SKY-ID zu berühren.
+- Der Legacy-Build **erfindet niemals eine ID**. Fehlt eine, bricht er ab und nennt Sheet + Zeile
+  (`etl/articles.py::require_valid_ids`). Vergabe ausschließlich über `etl/assign_ids.py`.
+- Nächste Nummer = Maximum aus `data/id_ledger.json` (`highest_issued: 820`) und der höchsten
+  ID in der Mappe. Der Ledger wird nur erhöht, nie zurückgesetzt.
+
+**Was die SKY-ID verbindet:** Excel-Zeile · Masterbild · Website-Bild · Marktpreis ·
+externe Preisquelle/Mapping · Lagerbestand · Ankauf · später eBay · **künftig: Benutzersammlungen
+in PortalVault**.
+
+Genau deshalb ist sie in PortalVault der kanonische Schlüssel: Benutzer referenzieren die
+zentrale Figur über die SKY-ID, nicht über Name oder Kopien.
+
+---
+
+## 2. Excel als bisherige Source of Truth
+
+`../webpage/skylanders.xlsx` (≈ 687 KB, 13 Sheets, keine eingebetteten Bilder mehr).
+
+| Sheet | Inhalt | öffentlich |
+|---|---|---|
+| `Summary` | Kennzahlen, u. a. Ankauffaktor in `E23` | nein (nur der Faktor wurde exportiert) |
+| `SA` | Spyro's Adventure (2011) | ja |
+| `G` | Giants (2012) | ja |
+| `SF` | Swap Force (2013) | ja |
+| `T` | Trap Team (2014) | ja |
+| `SC` | SuperChargers (2015) | ja |
+| `I` | Imaginators (2016) | ja |
+| `ZB` | Zubehör — hat SKY-IDs | **nein** |
+| `DI A` | Disney Infinity — hat SKY-IDs | **nein** |
+| `Order 2025`, `Order 2026` | Einkauf/Verkauf, **Käuferdaten** | **niemals** |
+| `EÜR 2025`, `EÜR 2026` | Buchhaltung | **niemals** |
+
+### Spaltenbelegung der Artikel-Sheets
+
+| Spalte | Bedeutung | Verwendung |
+|---|---|---|
+| **A** | **SKY-ID** | Identität |
+| **B** | Artikelname | roh übernommen, kein `strip()`, keine Korrektur |
+| D | O = gekauft (Total) | intern |
+| E | S = verkauft (Sold) | intern |
+| F | D = verfügbar (`D − E`) | intern; öffentlich nur als Boolean |
+| H | Trendpfeil | wird vom Preisupdate geschrieben |
+| **I** | **Marktpreis** | der Preis auf der Website |
+| J | `= I × 0,9` eBay-Erlös nach Gebühren | **kein** Kundenpreis, nie exportiert |
+| L/M/N | OVERALL / SOLD / DUPLICATES (Werte) | intern, finanziell |
+| P/Q/R/S | **private Sammlung** (O/C/S/D) | wird nie gelesen |
+| U/V/W/X | private Sammlung (Werte) | wird nie gelesen |
+
+Zeile 1 = Kopfzeile, Zeile 2 = Summen, Artikel ab Zeile 3/4.
+Fettgedruckte Zeilen in `ZB` / `DI A` sind Rubriküberschriften, keine Artikel.
+
+### Excel-Schreibregeln (Legacy, technisch relevant)
+
+Excel-Schreibzugriffe erfolgen **chirurgisch am XML**, nie über `openpyxl`: die Order-Sheets
+enthalten 5.464 `cm=`-Zellen mit dynamischen Array-Metadaten (`XLDAPR`), die `openpyxl` beim
+Speichern verlieren würde. Ablauf: Backup → temporäre Datei → vollständige Integritätsprüfung →
+atomares `os.replace`. Schlägt eine Prüfung fehl, bleibt die Master-Datei unverändert.
+
+---
+
+## 3. Serien und Kategorien
+
+Sechs öffentliche Serien, feste Reihenfolge (`etl/extract.py::SERIES`):
+
+| Code | Label | Jahr | öffentliche Artikel |
+|---|---|---:|---:|
+| `SA` | Spyro's Adventure | 2011 | 108 |
+| `G` | Giants | 2012 | 86 |
+| `SF` | Swap Force | 2013 | 96 |
+| `T` | Trap Team | 2014 | 149 |
+| `SC` | SuperChargers | 2015 | 76 |
+| `I` | Imaginators | 2016 | 85 |
+
+**Kategorien** benennt die Excel nicht — sie trennt Blöcke nur durch Leerzeilen.
+`etl/categories.py` vergibt Namen **in Blockreihenfolge des Sheets**; diese Reihenfolge ist
+die Reihenfolge auf der Website. Jeder Eintrag hat einen **Anker** (Name des ersten Artikels im
+Block). Passt der Anker nicht mehr, **bricht der Build ab**, statt still falsche Kategorien zu
+vergeben.
+
+```
+SA  Spiele · Figuren · Sidekicks · Magic Items
+G   Spiele · Giants große Figuren · Giants neue Figuren · Giants Series 2 Figuren · Sidekicks · Magic Items
+SF  Spiele · SWAP Force · Swap Force neue Figuren · Varianten & LightCore · Magic Items
+T   Spiele · Trap Masters · Trap Team neue Figuren · Trap Team Series Figuren · Minis · Trap Items · Traps
+SC  Spiele · Figuren · Trophies · Fahrzeuge
+I   Spiele · Senseis · Locations & Truhen · Kreationskristalle
+```
+
+**Regel: Kategorienamen kommen ausschließlich vom Nutzer.** Sie werden nicht umbenannt,
+nicht vereinheitlicht, nicht übersetzt und nicht umsortiert — auch dann nicht, wenn der Nutzer
+in einer Nachricht beiläufig eine andere Bezeichnung verwendet. Sortierung innerhalb einer
+Kategorie: alphabetisch (`localeCompare` mit `de`).
+
+---
+
+## 4. Öffentlich vs. intern
+
+Über Sichtbarkeit entscheidet **ausschließlich `etl/articles.py::is_public()`**:
+
+```python
+PUBLIC = ['SA', 'G', 'SF', 'T', 'SC', 'I']
+INTERNAL_SUFFIXES = (' - BESCHÄDIGT', ' - OBERTEIL', ' - UNTERTEIL')
+
+def is_public(article):
+    if article['sheet'] not in PUBLIC:      return False
+    if article['name'].endswith(INTERNAL_SUFFIXES): return False
+    return True
+```
+
+820 SKY-IDs gesamt → 614 in den sechs Serien → **minus 14 interne Lagerpositionen** = **600
+öffentliche Artikel**. `ZB` und `DI A` haben IDs, sind aber nicht öffentlich.
+
+| | öffentlich | intern |
+|---|---|---|
+| Bild, Name, Serie, Kategorie, Marktpreis | ✅ | ✅ |
+| Verfügbarkeit | nur `true`/`false` | echte Stückzahl |
+| Gesamt / Verkauft / Verfügbar | ❌ | ✅ |
+| `- BESCHÄDIGT` / `- OBERTEIL` / `- UNTERTEIL` | ❌ | ✅ |
+| Disney Infinity (`DI A`), Zubehör (`ZB`) | ❌ | ✅ |
+| private Sammlung (P/Q/R/S, U/V/W/X) | ❌ | in der Excel |
+| Order 2025/2026 (Käuferdaten), EÜR | ❌ | in der Excel |
+| Mappings, Logs, Scraper-Logik | ❌ | ✅ |
+
+**Durchsetzung, nicht Verstecken:** Keine UI-Komponente filtert eigenständig, nichts wird per
+CSS ausgeblendet. Interne Daten sind gar nicht erst im Bundle. `etl/extract.py::guard_public()`
+ist die letzte Bremse vor dem Schreiben: verbotene Feldnamen (`stock`, `total`, `sold`,
+`inventory`, `collection`, `duplicates`, `buyer`, `quantity`), `available` muss **boolesch**
+sein (ein `int` würde die Stückzahl verraten), keine fremden Serien, keine internen Suffixe,
+keine ID-losen Artikel.
+
+**Dieses Prinzip gilt in PortalVault weiter** — dort als: interne Daten kommen gar nicht erst
+in die PostgreSQL-Datenbank.
+
+---
+
+## 5. Öffentlicher Export (`site/data/products.json`)
+
+Der einzige Datensatz aus dem Legacy-Projekt, der bereits vollständig öffentlich ist.
+
+```json
+{"generated":"2026-08-10 23:50","currency":"EUR",
+ "series":[{"code":"SA","label":"Spyro's Adventure","year":2011,"categories":[...]}],
+ "items":[{"id":"SKY-0001","name":"Game (PC)","series":"SA","category":"Spiele",
+           "categoryIndex":0,"price":null,"image":null,"available":false,
+           "ebay":{"itemId":null,"url":null}}]}
+```
+
+Zahlen (Datenstand 2026-08-10):
+
+| | |
+|---|---:|
+| öffentliche Artikel | 600 |
+| davon mit Marktpreis | 585 |
+| davon mit Bild | 534 |
+| `available: true` | 226 |
+| Preisspanne | 0,89 € – 999,00 € |
+
+**Namenseigenheiten (nicht korrigieren!):**
+- Namen sind **innerhalb einer Serie eindeutig**, **global aber nicht** (32 Mehrfachnamen,
+  z. B. `Bash` in SA und G, `Game (Xbox 360)` 6×). → Slugs müssen serienabhängig gebildet werden.
+- 72 Namen mit Klammern (`Game (PC)`, `Elite Boomer (2)`), 22 mit ` - ` (`Elite Boomer - ohne OVP`).
+- Einziges Nicht-ASCII-Zeichen: `ü`. Keine führenden/abschließenden Leerzeichen.
+- `Elite … - ohne OVP` ist **öffentlich** — nur die drei Suffixe aus `INTERNAL_SUFFIXES` sind intern.
+
+---
+
+## 6. Bilder
+
+```
+images/master/<sha256[:16]>.png    verlustfrei, Master, wird nie ersetzt   (554 Dateien, 430 MB)
+site/img/<sha256[:16]>.webp        Derivat, max. 640 px, cwebp -q 80       (475 Dateien, 11 MB)
+data/images.json                   SKY-ID → Masterdatei                    (634 Zuordnungen)
+```
+
+- Der Dateiname ist der **SHA-256 des Bildinhalts** (erste 16 Hexzeichen). Er hängt nie vom
+  Artikelnamen ab, beweist den Inhalt und dedupliziert geteilte Bilder automatisch.
+- **63 Masterdateien werden von 143 Artikeln geteilt** (n:1), z. B. vier *Fire Bone Hot Dog*-
+  Varianten. Unter den 600 öffentlichen Artikeln: 44 Dateien werden von 103 Artikeln geteilt.
+- 534 Zuordnungen betreffen öffentliche Artikel, 100 gehören zu `ZB` / `DI A` → für diese
+  entstehen bewusst **keine** Website-Bilder.
+- Eine Masterdatei wird nur gelöscht, wenn **kein** Artikel sie mehr referenziert.
+- Verwaltung: `etl/set_image.py show|set|remove <SKY-ID>`, Derivate erzeugt `etl/build.py`.
+- Verwaiste Derivate in `site/img/` werden beim Build entfernt.
+
+**Migrationsregel:** Die Zuordnung SKY-ID → Dateiname ist ein Datenwert, kein Ableitungsergebnis.
+Sie muss 1:1 erhalten bleiben. Der content-adressierte Dateiname wird **nicht** umbenannt —
+er ist die Bildidentität und macht unveränderliche Caches und einen späteren Wechsel des
+Speicherorts trivial.
+
+---
+
+## 7. Marktpreise und Preisupdate
+
+**Marktpreis = Spalte I.** Spalte J (`= I × 0,9`) ist der eBay-Erlös nach Gebühren und
+**kein** Kundenpreis — wird nie exportiert.
+
+Preisupdate (`etl/update_prices.py`, Admin-CLI, nie im Browser):
+
+```
+externer Artikel → explizites Mapping → SKY-ID → Excel-Zeile → Spalten H und I
+```
+
+- Quelle: `easybuy-shop.de`, je Serie eine oder mehrere Collection-Seiten.
+- **Mapping-Schlüssel ist `(Serie, externer Titel)`** — derselbe Figurenname existiert in
+  mehreren Serien (`Bash` in SA und G), ein globaler Index wäre mehrdeutig.
+- Mapping-Datei: `data/mappings/easybuy-shop.de.json` — 393 gemappt, 8 unmatched, 0 ignored.
+- **Kein Fuzzy-Matching, keine Ähnlichkeitssuche, kein Namensvergleich.**
+  Nicht auflösbar → Artikel überspringen, in `data/logs/price-updates/*_unmatched.json`
+  protokollieren (`reason: "no_mapping"`), Lauf läuft normal weiter.
+  **Ein fehlendes Preisupdate ist ausdrücklich besser als eine falsche Zuordnung.**
+- **Harte Abbrüche** (technische Fehler): doppelte SKY-ID, Mapping auf nicht existierende
+  SKY-ID, ein Titel auf zwei SKY-IDs derselben Serie, beschädigte XLSX, Änderung außerhalb H/I.
+- Externe Titel sind reine Matching-Daten und ersetzen **niemals** den Namen aus Spalte B.
+- Die Zeile wird immer über die SKY-ID bestimmt, **nie** über den Namen.
+
+Letzter produktiver Lauf (2026-08-10 23:18:59): 401 gefunden, 393 gemappt, 8 unmatched,
+**1 Preisänderung** (SKY-0148 Bash 32,99 → 29,99 ↓). Hash vorher/nachher protokolliert.
+
+---
+
+## 8. Ankauffaktor (Legacy-Geschäftslogik)
+
+`Summary!E23` → `='Order 2026'!I2` → `=1/(H2/B2)` = Ausgaben ÷ Marktwert der eingekauften Ware.
+Aktuell **0,3336060810658524 (33,36 %)**. Bewusst wird `Summary!E23` gelesen, nicht das
+Order-Sheet direkt — die Summary-Zelle ist der fachliche Anker und zeigt aufs jeweils aktuelle Jahr.
+
+Validierung beim Build: vorhanden, numerisch, `0 < x < 1` — sonst **Abbruch**. Nie ein
+Standardwert, nie eine Schätzung, nie der letzte bekannte Wert.
+
+Frontend (`site/js/pricing.js`):
+
+```
+Marktwert      = Σ round2(Preis × Menge)
+Ankaufangebot  = round2(Marktwert × Ankauffaktor)
+```
+
+> **Für PortalVault:** Der Ankauffaktor ist eine **abgeleitete Geschäftskennzahl des Nutzers**
+> (Ausgaben ÷ Marktwert seines Einkaufs). Er gehört nicht in eine Sammlerplattform und wird in
+> V1 **nicht** migriert. Siehe `docs/DECISIONS.md` ADR-0008.
+
+---
+
+## 9. Sammlungs-/Selection-Logik (Legacy-Frontend)
+
+`site/js/selection.js`: Auswahl im `localStorage`, Schlüssel `skylanders.selection.v1`,
+Inhalt ausschließlich `{ SKY-ID: Menge }` — keine Produktdaten, keine Filter.
+Leere Auswahl → Eintrag wird entfernt. Beschädigter Eintrag → leere Auswahl.
+`localStorage`-Fehler (privater Modus) werden abgefangen.
+
+`site/js/pricing.js` ist **DOM-frei** und liefert mit `Pricing.evaluate()` bereits die
+vollständige Struktur inkl. `purchaseRate`, damit ein altes Angebot nachvollziehbar bleibt.
+
+**Wichtige fachliche Regel, die in PortalVault gilt:**
+Die Stückzahl des Nutzers ist **nicht** der Lagerbestand. Sie beschreibt seine eigene Sammlung,
+ist nach oben nicht begrenzt, und Figuren mit `available: false` bleiben auswählbar.
+
+In PortalVault ersetzt die Datenbank den `localStorage` als Speicherort der Sammlung.
+Das Konzept „Auswahl ist nur `{SKY-ID: Menge}`, Produktdaten werden nie kopiert" bleibt.
+
+---
+
+## 10. Legacy-Tests (134 Prüfungen, 5 Suiten)
+
+| Suite | Umfang |
+|---|---|
+| `migration/verify.py` | 41 Daten- und Migrationsprüfungen |
+| `migration/build_checks.py` | 18 Ankauffaktor-Tests |
+| `migration/mapping_checks.py` | 17 Zuordnungstests |
+| `migration/frontend_checks.js` | 18 Bundle-Prüfungen |
+| `migration/ui_checks.js` | 40 UI-/Rechentests |
+
+`verify.py` prüft u. a.: 820 IDs, keine fehlende/doppelte/ungültige ID, exakt 600 öffentliche
+Artikel, 14 ausgeschlossene interne Positionen, `available` überall boolesch, keine
+Lagerbegriffe/Scraper-Details/Order-Daten in deployten Dateien, Bildzuordnungen vollständig
+und ohne Waisen, geteilte Bilder erhalten (63/143), Excel-Struktur unverändert
+(nur A/H/I geändert, `XLDAPR` erhalten, 5.464 `cm=`-Zellen intakt), Backup-Hash unverändert.
+
+**Diese Prüfideen sind wertvoller als der Code.** Sie werden in PortalVault als Import-
+Validierung neu implementiert, nicht kopiert (siehe Abschnitt 12).
+
+---
+
+## 11. Was niemals nach PortalVault / GitHub darf
+
+| Legacy-Pfad | Grund |
+|---|---|
+| `skylanders.xlsx` | enthält Käuferdaten (Order), EÜR, private Sammlung, Lagerzahlen |
+| `backup/*.xlsx` | 430 MB Original mit allen Bildern und denselben internen Daten |
+| `data/inventory.json` | 820 echte Lagerstückzahlen |
+| `data/mappings/` | Zuordnung zur externen Preisquelle (Geschäftsgeheimnis) |
+| `data/logs/price-updates/` | Laufprotokolle inkl. Quell-URLs und Datei-Hashes |
+| `data/ebay.json` | Verkaufslistings |
+| `etl/update_prices.py` | Scraping-Logik, Quell-URLs, User-Agent |
+| `images/master/` | 430 MB — gehört nicht in Git (die Derivate genügen) |
+| Spalten D/E/F, L/M/N, P/Q/R/S, U/V/W/X | Lager, Werte, private Sammlung |
+| Sheets `Order 2025/2026`, `EÜR 2025/2026` | Käuferdaten, Buchhaltung |
+| Serien `ZB`, `DI A` | in V1 nicht öffentlich |
+| Ankauffaktor `Summary!E23` | abgeleitete Geschäftskennzahl |
+
+Vollständige Security-Regeln: `docs/SECURITY.md`.
+
+---
+
+## 12. Migrationsregeln für PortalVault
+
+**Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**
+Der Import geht ausschließlich über den bereits durch `guard_public()` geprüften öffentlichen
+Export `site/data/products.json`. Damit kann strukturell keine interne Spalte in die neue
+Plattform gelangen.
+
+Vorgesehener Ablauf (noch nicht implementiert):
+
+```
+[Legacy, read-only]                        [PortalVault]
+skylanders.xlsx
+   └─ webpage build  (nur der Nutzer)
+        └─ site/data/products.json  ──kopieren──▶  data/catalog/products.<datum>.json
+        └─ site/img/*.webp          ──kopieren──▶  public/images/skylanders/
+                                                      │
+                                                      ▼
+                                        Import-Skript  →  PostgreSQL (upsert per SKY-ID)
+```
+
+**Verbindliche Importregeln:**
+
+1. **Upsert ausschließlich über `sky_id`.** Niemals über Name, Slug oder Bild.
+2. **Der Import erfindet niemals eine SKY-ID.** Unbekanntes Format → Abbruch.
+3. **Der Import löscht niemals automatisch.** Ein Artikel, der im Export fehlt, wird
+   protokolliert und ggf. auf `is_active = false` gesetzt — nie gelöscht (Sammlungen von
+   Benutzern zeigen darauf).
+4. **Namen roh übernehmen.** Kein `strip()`, keine Normalisierung, keine Übersetzung.
+5. **Kategoriereihenfolge übernehmen** (`categoryIndex`), nicht neu sortieren.
+6. **Slugs werden einmalig erzeugt und danach gespeichert**, nie bei jedem Import neu abgeleitet.
+   Ein umbenannter Artikel behält seinen Slug, bis das ausdrücklich entschieden wird.
+   Der Slug dient nur der Navigation; **keine Datenbeziehung hängt von ihm ab** (ADR-0011).
+   Bei Namenskollision wird deterministisch qualifiziert (Namen sind global nicht eindeutig).
+7. **Bildzuordnung 1:1 übernehmen**, Dateinamen nicht umbenennen, n:1-Teilung erhalten.
+8. **Nicht importiert werden:** `available`, `ebay`, `purchaseRate` (ADR-0008). `available`
+   beschreibt den eigenen Legacy-Lagerbestand; eine Figur existiert in PortalVault unabhängig
+   davon, ob sie im persönlichen Lager verfügbar ist.
+9. **Dry-Run zuerst.** Jeder Import zeigt erst, was er täte; Schreiben nur nach Bestätigung.
+10. **Nach dem Import validieren:** Anzahl, keine doppelte SKY-ID, kein interner Suffix,
+    nur öffentliche Serien, alle Bildreferenzen auflösbar. Fehlschlag → Transaktion zurückrollen.
+
+---
+
+## 13. Bewertung der Legacy-Bestandteile
+
+| Bestandteil | Umgang |
+|---|---|
+| SKY-IDs, `id_ledger.json` | **A — unverändert erhalten**, kanonische Identität auch in PortalVault |
+| `skylanders.xlsx` | **E — Legacy-Werkzeug**, bleibt Source of Truth für interne Geschäftsdaten |
+| Produktstammdaten (Name/Serie/Kategorie/Preis) | **C — migrieren** nach PostgreSQL |
+| Serien und Kategoriereihenfolge | **C — migrieren**, Namen unverändert |
+| `data/images.json` | **C — migrieren** als Spalte auf der Skylanders-Tabelle |
+| `site/img/*.webp` | **C — migrieren** nach `public/images/skylanders/`, Dateinamen unverändert (ADR-0009) |
+| `images/master/*.png` | **E — Legacy**, bleibt Archiv/Quelle für Derivate; nie in Git |
+| ETL (`xl.py`, `articles.py`, `extract.py`) | **E — Legacy-Werkzeug**, läuft weiter im alten Projekt |
+| `is_public()`-Prinzip | **B — konzeptionell übernehmen**, in PortalVault als „gar nicht erst importieren" |
+| `guard_public()`-Prinzip | **B — konzeptionell übernehmen** als Importvalidierung |
+| Preisupdate + Mapping | **E — Legacy-Werkzeug** (kurzfristig), **D — langfristig ersetzen** |
+| `data/inventory.json`, Lagerlogik | **F — niemals ins neue Repository** |
+| `data/mappings/`, Logs, Scraper | **F — niemals ins neue Repository** |
+| Ankauffaktor / Ankaufslogik | **F für V1** (Geschäftskennzahl), Neubewertung wenn Ankauf je Thema wird |
+| `site/js/selection.js` | **B — Konzept übernehmen**, neu in TypeScript, Speicher = Datenbank |
+| `site/js/pricing.js` | **B — Konzept übernehmen** (DOM-freie Rechenschicht), Formel V1 = nur Summe |
+| `site/js/catalog.js`, HTML/CSS | **D — ersetzen** durch Next.js/Tailwind |
+| Legacy-Tests | **B — Prüfideen übernehmen**, Code nicht kopieren |
+| `bin/webpage` CLI | **E — Legacy**, PortalVault nutzt npm-Skripte |
+
+Legende: A unverändert · B konzeptionell neu implementieren · C migrieren · D ersetzen ·
+E Legacy-Werkzeug · F niemals ins neue Repository.
+
+---
+
+## 14. Bekannte Legacy-Eigenheiten (dokumentiert, nicht „repariert")
+
+- `site/js/catalog.js:190` liest `item.alt`, das es in `products.json` nicht gibt. Die
+  `escape()`-Funktion fängt `null`/`undefined` ab → Katalogkarten haben `alt=""`.
+  Kein Fehler, aber ein Accessibility-Punkt, der in PortalVault besser gelöst werden sollte.
+- Die `__pycache__`-Dateien im Legacy-Projekt stammen von Python 3.7.
+- `cwebp` (`brew install webp`) ist die einzige externe Abhängigkeit der Bildpipeline.
+- Offene Legacy-Punkte, die der Nutzer noch entscheiden wollte: 8 unmatched Artikel
+  (Portale/Karten) als `ignored` markieren? · 108 Artikel mit Klammerzusätzen manuell mappen? ·
+  `ZB`/`DI A` später integrieren? Diese Fragen betreffen das Legacy-Projekt, nicht PortalVault.
