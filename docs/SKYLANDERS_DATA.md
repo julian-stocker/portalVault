@@ -238,6 +238,48 @@ externer Artikel → explizites Mapping → SKY-ID → Excel-Zeile → Spalten H
 Letzter produktiver Lauf (2026-08-10 23:18:59): 401 gefunden, 393 gemappt, 8 unmatched,
 **1 Preisänderung** (SKY-0148 Bash 32,99 → 29,99 ↓). Hash vorher/nachher protokolliert.
 
+### Analyse der Preisquelle (2026-09-04, read-only)
+
+**Drei Generationen derselben Aufgabe:**
+
+| | Ort | Matching | Zustand |
+|---|---|---|---|
+| 1. Generation | `~/Documents/update.py` (228 Zeilen, Stand 2026-07-28) | `items[title]` gegen Spalte B — **rein über den Namen, kein persistentes Mapping** | existiert noch, historische Referenz, bleibt unverändert |
+| 2. Generation | `../webpage/etl/update_prices.py` (906 Zeilen) | explizites, persistentes Mapping `(Serie, externer Titel) → SKY-ID` | im Einsatz |
+| 3. Generation | PortalVault — **noch nicht gebaut** | `Handle → SKY-ID` (ADR-0024) | Zielmodell |
+
+Die 1. Generation nutzte `openpyxl` und schrieb über `wb.save()` — genau das, was die
+2. Generation bewusst ersetzt hat, weil es die dynamischen Array-Metadaten der Order-Sheets
+zerstört hätte.
+
+**Zentraler Befund.** Das heutige Mapping ist explizit und dauerhaft, aber sein **Schlüssel ist
+der Titel**. Benennt Easybuy ein Produkt um, bricht die Zuordnung und der Artikel landet
+stillschweigend in `unmatched` — der Preis bleibt einfach alt, ohne dass etwas fehlschlägt.
+
+Zugleich speichert das Mapping für **alle 393** Einträge bereits eine Produkt-URL. Der daraus
+extrahierbare **Shopify-Handle ist über alle 393 hinweg eindeutig** — anders als der Titel, der
+ohne die Serie mehrdeutig ist. Schematisch, ohne konkrete Zuordnung:
+
+```
+Titel  'Bash'  ->  mehrdeutig, kommt in zwei Serien vor
+Handle .../products/<...>-<serie>-<figur>  ->  eindeutig, die Serie steckt meist im Pfad
+```
+
+Der Titel allein braucht die Serie als zweiten Schlüsselteil; der Handle nicht.
+Die konkreten Zuordnungen bleiben im Legacy-Projekt (`docs/SECURITY.md`).
+
+**Der Handle wird also bereits erfasst, aber nicht zum Matching verwendet.** Die stabilere
+Kennung liegt vor; sie muss nur zum Schlüssel werden. Die Query-Parameter `_pos`, `_fid`, `_ss`
+in den gespeicherten URLs sind Paginierungsartefakte und gehören abgeschnitten.
+
+In 358 von 393 Handles steckt die Serie bereits im Pfad, bei 35 nicht — der Handle ersetzt also
+nicht die Serienzuordnung, ist aber ein eindeutiger Schlüssel.
+
+**Die 8 offenen `unmatched`-Einträge** sind Portale (5×) und Elite-Karten (3×) — Artikel, die es
+im PortalVault-Katalog so nicht gibt. Sie sind kein Mapping-Fehler, sondern Sortimentsdifferenz.
+
+Zielmodell und Konsequenzen: **ADR-0024**.
+
 ---
 
 ## 8. Ankauffaktor (Legacy-Geschäftslogik)
@@ -353,9 +395,10 @@ skylanders.xlsx
 4. **Namen roh übernehmen.** Kein `strip()`, keine Normalisierung, keine Übersetzung.
 5. **Kategoriereihenfolge übernehmen** (`categoryIndex`), nicht neu sortieren.
 6. **Slugs werden einmalig erzeugt und danach gespeichert**, nie bei jedem Import neu abgeleitet.
-   Ein umbenannter Artikel behält seinen Slug, bis das ausdrücklich entschieden wird.
-   Der Slug dient nur der Navigation; **keine Datenbeziehung hängt von ihm ab** (ADR-0011).
-   Bei Namenskollision wird deterministisch qualifiziert (Namen sind global nicht eindeutig).
+   Vollständige Regel: **ADR-0011**. Kurz: Umlaute ausschreiben, Apostrophe streichen,
+   Klammerzeichen weg aber Inhalt behalten, Rest zu `-`; bei Kollision Serien-Slug aus dem
+   Label anhängen, notfalls die SKY-ID. **Bestehende Slugs werden bei späteren Importen nie
+   neu berechnet** — nur ein neu hinzukommender Artikel erhält bei Konflikt die qualifizierte Form.
 7. **Bildzuordnung 1:1 übernehmen**, Dateinamen nicht umbenennen, n:1-Teilung erhalten.
 8. **Nicht importiert werden:** `available`, `ebay`, `purchaseRate` (ADR-0008). `available`
    beschreibt den eigenen Legacy-Lagerbestand; eine Figur existiert in PortalVault unabhängig

@@ -272,31 +272,79 @@ automatisch — es gibt keine zweite Preiskopie. `numeric` statt `float`, weil e
 
 ## ADR-0011 — Lesbare Slugs für die Navigation, SKY-ID für die Identität
 
-**Status:** ANGENOMMEN (2026-09-03)
+**Status:** ANGENOMMEN (2026-09-04) — Regel vollständig, an den echten 600 Legacy-Artikeln geprüft
 
-**Entscheidung.**
+**Grundsatz.**
 
 - Öffentliche Figurenseiten verwenden lesbare URLs: `/skylanders/drobot`.
 - Der Slug dient **ausschließlich der Navigation und Darstellung**.
-- Die SKY-ID bleibt die Identität und die Grundlage aller Fremdschlüssel.
-- **Keine Datenbeziehung darf vom Slug abhängen.**
-- Das Datenmodell muss spätere Redirects bei Slug-Änderungen ermöglichen, ohne dass jetzt ein
-  Redirect-System gebaut wird.
+- **Die SKY-ID bleibt die technische Identität.** Kein Fremdschlüssel, keine Datenbeziehung und
+  keine Berechnung hängt vom Slug ab.
+- **Ein einmal vergebener Slug ist stabil.** Eine spätere Änderung des Anzeigenamens verändert
+  ihn **nicht** automatisch. Eine bewusste Slug-Änderung erfordert einen Redirect.
 
-**Umsetzung.** `skylanders.slug text not null unique`, einmalig beim Import erzeugt und danach
-gespeichert — nicht bei jedem Import aus dem Namen neu abgeleitet. Eine Umbenennung ändert den
-Slug also nicht automatisch, genau wie sie die SKY-ID nicht ändert.
+### Normalisierung
 
-**Kollisionen.** Artikelnamen sind **innerhalb einer Serie** eindeutig, **global nicht**:
-32 Namen kommen mehrfach vor (`Bash` in SA und G, `Game (Xbox 360)` sechsmal). Der Slug wird
-deshalb aus dem Namen gebildet und bei Kollision **deterministisch qualifiziert** — Vorschlag:
-zuerst der reine Name (`drobot`), bei Konflikt mit Seriensuffix (`bash-giants`), bei weiterem
-Konflikt mit der SKY-ID (`game-xbox-360-sky-0002`). Der erzeugte Wert wird gespeichert.
-Die genaue Regel wird beim Import-Werkzeug (V1.3) festgelegt und dort dokumentiert.
+In dieser Reihenfolge auf den rohen Namen angewandt:
 
-**Vorbereitung für Redirects.** Kein Redirect-System in V1. Vorgesehener Andockpunkt später:
-eine schlanke Tabelle `skylander_slug_history (slug primary key, sky_id, replaced_at)`.
-Weil der Slug nirgends Fremdschlüssel ist, kostet das später nichts.
+1. Umlaute ausschreiben: `ä`→`ae`, `ö`→`oe`, `ü`→`ue`, `ß`→`ss`
+2. Übrige diakritische Zeichen über Unicode-Zerlegung entfernen
+3. Kleinschreibung
+4. **Apostrophe ersatzlos entfernen** — `Spyro's` → `spyros`, **nicht** `spyro-s`
+5. Jede verbleibende Nicht-`[a-z0-9]`-Folge wird zu **einem** `-`.
+   **Klammerzeichen verschwinden, ihr Inhalt bleibt erhalten:**
+   `Spyro (Series 2)` → `spyro-series-2`, `Game (Xbox 360)` → `game-xbox-360`
+6. Mehrfach-Bindestriche zusammenfassen, führende und abschließende entfernen
+
+### Eindeutigkeit — drei Stufen
+
+| Stufe | Regel | Beispiel |
+|---|---|---|
+| 1 | Slug aus dem Namen | `Drobot` → `drobot` |
+| 2 | bei Kollision **Serien-Slug aus dem Series-Label** anhängen, nicht aus dem Code | `drobot-giants`, nicht `drobot-g` |
+| 3 | falls `name + series` weiterhin kollidiert: **SKY-ID** anhängen | `pop-fizz-giants-sky-0123` |
+
+Serien-Slugs: `spyros-adventure` · `giants` · `swap-force` · `trap-team` · `superchargers` ·
+`imaginators`.
+
+### Stabilitätsregel für spätere Importe
+
+> **Bestehende Slugs werden nie neu berechnet.** Der Slug wird gegen die bereits vergebenen
+> Slugs geprüft. Kollidiert ein **neu hinzukommender** Artikel mit einem bestehenden, erhält
+> **nur der neue** die qualifizierte Form; der bestehende behält seinen Slug.
+
+Beim Erstimport liegen alle 600 gleichzeitig vor — dort bekommen deshalb **beide** Seiten eines
+Paares den Serien-Zusatz (`drobot-spyros-adventure` **und** `drobot-giants`). Danach gilt die
+asymmetrische Regel. Ohne sie würde ein späterer Import bestehende URLs umbenennen und damit
+die Stabilitätszusage brechen.
+
+### Prüfung an den echten Daten (2026-09-04, read-only)
+
+| Stufe | Ergebnis |
+|---|---|
+| 1 — nur Name | 547 Slugs, **32 Kollisionen**, 85 betroffene Artikel |
+| 2 — + Serien-Slug | **600 / 600 eindeutig**, alle 85 aufgelöst |
+| 3 — + SKY-ID | **nie ausgelöst** |
+
+**Neue Kollisionen durch die Normalisierung: null.** Alle 32 Kollisionen stammen aus tatsächlich
+identischen Namen — sieben Spiele-Titel über alle Serien (`Game (Xbox 360)` 6×,
+`Spiel für Sony Playstation 3 PS3` 6×, `Wii U Spiel` 6×, …) und 25 Figuren mit genau zwei
+Vorkommen, davon 24 als SA/G-Paar und `Kaos` in T/I.
+
+Slug-Längen: min 4, Median 14, p90 25, max 50
+(`spiel-fuer-sony-playstation-3-ps3-spyros-adventure`).
+
+**Bekannte Fragilität, dokumentiert statt behoben.** Der Bestand enthält uneinheitliche
+Schreibweisen derselben Figur: `Eye Brawl` neben `Eye-Brawl (Pumpkin)`, `Wham-Shell` neben
+`Wham Shell - Lightcore`. Die Normalisierung macht `-` und Leerzeichen gleich. Heute kollidiert
+nichts, weil jeweils ein Zusatz dahintersteht. Käme ein blankes `Eye Brawl` in derselben Serie
+neben das bestehende `Eye-Brawl`, griffe Stufe 2 nicht (gleiche Serie) und Stufe 3 wäre nötig.
+**Stufe 3 hat also einen realistischen Auslöser und bleibt nicht theoretisch.**
+Die Schreibweisen werden **nicht** angeglichen — Namen kommen roh aus der Legacy-Quelle.
+
+**Verworfen:** Serien-Code statt Label im Slug (`drobot-g` ist kryptisch) · Slug bei jedem
+Import neu berechnen (bricht die Stabilitätszusage) · Klammerinhalt verwerfen (er ist
+durchgehend bedeutungstragend: `(2)`, `(Clear Crystal)`, `(Xbox 360)`, `(Legendary)` …).
 
 ---
 
@@ -721,3 +769,68 @@ vollständigen Fluss liefert statt nur einen Katalog zum Anschauen.
   ohne ihn mit Ausbaufunktionen zu überladen.
 - Premium-Grenzen bleiben unberührt und offen (ADR-0022); Marketplace bleibt außerhalb von V1
   (ADR-0021).
+
+---
+
+## ADR-0024 — Marktpreise gehören PortalVault; externe Quellen werden über eine stabile Kennung gemappt
+
+**Status:** Richtung ANGENOMMEN (2026-09-04) · **Umsetzung ausdrücklich noch nicht begonnen**
+
+**Grundsatz.**
+
+> **PortalVault-Preise gehören PortalVault. Easybuy ist zunächst nur eine externe Preisquelle.
+> Die dauerhafte interne Identität ist immer `sky_id`.**
+
+**Zielmodell.**
+
+```
+Easybuy External Identifier / URL  →  gespeichertes Mapping  →  SKY-ID  →  market_price
+```
+
+Ein **Name darf höchstens beim erstmaligen Matching helfen** und niemals dauerhaft die
+Identität bestimmen.
+
+**Begründung aus der Legacy-Analyse (2026-09-04, read-only).** Das bestehende Mapping ist
+bereits explizit und persistent, aber sein **Schlüssel ist der Titel**:
+`(Serie, externer Titel) → SKY-ID`. Benennt Easybuy ein Produkt um, bricht die Zuordnung und
+der Artikel landet stillschweigend in `unmatched` — der Preis bleibt dann einfach alt.
+
+Die Analyse zeigte jedoch: Für **alle 393** gemappten Einträge ist bereits eine Produkt-URL
+gespeichert, und der daraus extrahierte **Shopify-Handle ist über alle 393 hinweg eindeutig** —
+im Gegensatz zum Titel, der ohne die Serie mehrdeutig ist (`Bash` existiert zweimal).
+Der Handle wird heute **gespeichert, aber nicht zum Matching verwendet**. Damit liegt die
+stabilere Kennung bereits vor; sie muss nur zum Schlüssel werden.
+
+**Konsequenzen für die spätere Umsetzung.**
+
+- Der Mapping-Schlüssel wird der **Handle** (`/products/<handle>`), nicht der Titel.
+  Query-Parameter (`_pos`, `_fid`, `_ss`) sind Paginierungsartefakte und werden beim Speichern
+  **abgeschnitten**.
+- Der Titel wird weiterhin gespeichert — als Anzeigehilfe und für das **Erkennen von
+  Umbenennungen**: gleicher Handle, geänderter Titel → Hinweis, kein Fehler.
+- Eine noch stabilere Kennung wäre die numerische Shopify-Produkt-ID. Sie ist über
+  `/products/<handle>.js` abrufbar, wird heute aber nicht erfasst. **Offen**, ob sie zusätzlich
+  gespeichert wird — sie überlebt auch eine Handle-Änderung.
+- **Der Preis wird in PortalVault gehalten** (`skylanders.market_price`, ADR-0010), nicht in der
+  Quelle. Ein manuelles Setzen einzelner Preise muss möglich sein, ohne die externe Quelle zu
+  berühren.
+
+**Vorgesehener Terminal-Workflow (noch nicht gebaut).** Dry-Run → ungeklärte und umbenannte
+Einträge anzeigen → Preisänderungen prüfen → erst mit **explizitem Apply** nach Supabase
+schreiben. Dazu das manuelle Setzen einzelner Preise.
+
+**Aus dem Legacy-Werkzeug konzeptionell zu übernehmen** (Code nicht kopieren):
+ausschließlich explizite Zuordnungen, **kein Fuzzy-Matching** · unauflösbare Einträge
+überspringen und protokollieren statt raten · technische Inkonsistenzen brechen hart ab ·
+Dry-Run vor jedem Schreibvorgang · vollständige Protokollierung jedes Laufs.
+
+> Ein fehlendes Preisupdate ist ausdrücklich besser als eine falsche Zuordnung.
+
+**Verhältnis zu ADR-0007.** ADR-0007 hält fest, dass das Preisupdate **vorerst** im
+Legacy-Projekt bleibt. Das gilt unverändert. ADR-0024 beschreibt das Zielmodell für den
+Zeitpunkt, an dem PortalVault die Preishoheit übernimmt — **frühestens nach V1**.
+
+**Offen:** ob die numerische Shopify-Produkt-ID zusätzlich gespeichert wird · wann die
+Preishoheit tatsächlich übergeht · ob Scraping-Logik und Quell-URLs überhaupt jemals ins
+PortalVault-Repository wandern (heute untersagt, `docs/SECURITY.md`).
+

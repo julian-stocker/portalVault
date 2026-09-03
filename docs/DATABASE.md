@@ -102,7 +102,7 @@ Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)`.
 | `sky_id` als PK | **ADR-0002.** Die Identität ist per Projektregel unveränderlich — genau der Fall für einen natürlichen Schlüssel. Kein UUID-Surrogat; andere Entitäten verwenden UUIDs. |
 | Format `^SKY-[0-9]{4}$` | **Bestätigt für V1.** Identisch zu `etl/articles.py::ID_PATTERN`. Alle 820 bestehenden IDs erfüllen es. Das Format wird **nicht vorsorglich** erweitert. Sollte der Legacy-ID-Raum je überschritten werden, ist das eine bewusste gemeinsame Migration von Legacy-Projekt **und** PortalVault — keine stille Lockerung des Constraints. |
 | `name` roh | Legacy-Regel: keine Normalisierung, keine Übersetzung. |
-| `slug` gespeichert | **ADR-0011.** Nur Navigation und Darstellung. **Kein Fremdschlüssel referenziert den Slug** — statisch geprüft. Einmalig beim Import erzeugt, danach stabil. |
+| `slug` gespeichert | **ADR-0011, vollständig.** Nur Navigation und Darstellung. **Kein Fremdschlüssel referenziert den Slug** — statisch geprüft. Einmalig beim Import erzeugt, danach stabil; bestehende Slugs werden nie neu berechnet. Kollisionsregel: Name → bei Konflikt Serien-Slug aus dem **Label** (`drobot-giants`) → notfalls SKY-ID. An den echten 600 Artikeln geprüft: Stufe 2 löst alle 32 Kollisionen, Stufe 3 feuert nie. |
 | `market_price` `> 0` statt `>= 0` | **ADR-0010** verlangt, dass 0 nie für „unbekannt" steht. Der Constraint setzt das durch und schließt Negativwerte mit ein. Der Legacy-Export bildet einen 0-Preis ohnehin bereits auf `null` ab, ein gültiger Import löst den Constraint also nie aus — tut er es doch, sind die Daten falsch und der Import muss abbrechen. |
 | `price_updated_at` | Constraint: nur setzbar, wenn `market_price` nicht `null` ist. Ein Preiszeitstempel ohne Preis wäre bedeutungslos. |
 | `image_file` | Content-adressierter Dateiname (`<sha256[:16]>.webp`), n:1 teilbar. Nie eine URL — der Speicherort bleibt austauschbar (ADR-0009). |
@@ -488,6 +488,6 @@ SKY-ID-Unveränderlichkeit.
 **Noch offen — blockiert die Migration nicht:**
 
 - **OPEN:** Darf ein Benutzername später geändert werden? (dann Sperrfrist und Historie nötig)
-- **OPEN:** Genaue Slug-Kollisionsregel — wird beim Importwerkzeug (V1.3) festgelegt.
+- ~~Slug-Kollisionsregel~~ — **entschieden (ADR-0011)**, an den echten Daten verifiziert.
 - **OPEN:** Reicht die Obergrenze `quantity <= 10000`? Sie ist als Schutz gegen einen
   fehlerhaften Client gedacht, nicht als fachliche Grenze.

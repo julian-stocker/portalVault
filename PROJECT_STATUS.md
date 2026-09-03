@@ -254,6 +254,8 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0021** | **V1 ist Sammler- und Analyseplattform, kein Marketplace. Marketplace erst nach nachweislichem Nutzerwachstum** |
 | 0022 | Free bleibt eigenständig nützlich; optionale Premium-Stufe als Richtung — Grenze und Preis **offen** |
 | **0023** | **Meilenstein-Reihenfolge: Import → Auth → Katalog+Toggle+Sammlung → Ausbau → Beta** |
+| **0011** | **Slug-Regel vollständig, an den echten 600 Artikeln verifiziert** |
+| 0024 | Marktpreise gehören PortalVault; externe Quellen über stabile Kennung (Handle) statt Name — Umsetzung nach V1 |
 
 ## Offene Entscheidungen
 
@@ -264,7 +266,6 @@ Keine davon blockiert V1.2.
 | 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
 | 0016 | Darf ein Benutzername später geändert werden? | V1.4 |
 | 0013 | Unit-Test-Werkzeug (Vitest naheliegend) | erste testbare Geschäftslogik |
-| 0011 | genaue Slug-Kollisionsregel | V1.3 |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
 
 ---
@@ -278,6 +279,7 @@ einer Transaktion schreiben. Regeln vollständig in `docs/SKYLANDERS_DATA.md`, A
 Danach folgt V1.4 (Auth + `@supabase/ssr`), dann V1.5 mit dem vollständigen
 End-to-End-Fluss (ADR-0023).
 
-Vorher zu klären: die genaue Slug-Kollisionsregel (ADR-0011).
+Die Slug-Regel ist entschieden und an den echten Daten verifiziert (ADR-0011) — es blockiert
+nichts mehr.
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**
