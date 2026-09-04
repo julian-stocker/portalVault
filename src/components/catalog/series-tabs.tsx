@@ -37,7 +37,10 @@ export function SeriesTabs({
             aria-selected={isActive}
             onClick={() => onSelect(option.code)}
             className={
-              "shrink-0 snap-start rounded-full px-4 py-2 text-sm whitespace-nowrap " +
+              // min-h-11 is the only change here: 44 px touch target. The
+              // visual redesign of the series navigation is a later phase.
+              "flex min-h-11 shrink-0 snap-start items-center rounded-full px-4 " +
+              "text-sm whitespace-nowrap " +
               (isActive
                 ? "bg-foreground text-background"
                 : "border border-border text-muted hover:text-foreground")

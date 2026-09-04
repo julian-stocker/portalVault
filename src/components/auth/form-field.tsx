@@ -1,6 +1,8 @@
 /** Shared form primitives for the auth screens. Presentation only. */
 import type { ReactNode } from "react";
 
+import { ACTION_PRIMARY } from "@/components/ui/action";
+
 export function Field({
   label,
   name,
@@ -38,7 +40,7 @@ export function Field({
         required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}
-        className="rounded-md border border-border bg-background px-3 py-2 text-base outline-none focus:border-foreground"
+        className="min-h-11 rounded-sky-md border border-border bg-background px-3 py-2 text-base focus:border-foreground"
       />
       {hint ? (
         <p id={`${name}-hint`} className="text-xs text-muted">
@@ -46,7 +48,7 @@ export function Field({
         </p>
       ) : null}
       {error ? (
-        <p id={`${name}-error`} className="text-sm text-red-600 dark:text-red-400">
+        <p id={`${name}-error`} className="text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -56,11 +58,12 @@ export function Field({
 
 export function FormMessage({ tone, children }: { tone: "error" | "success"; children: ReactNode }) {
   const classes =
-    tone === "error"
-      ? "border-red-300 text-red-700 dark:border-red-900 dark:text-red-400"
-      : "border-border text-foreground";
+    tone === "error" ? "border-danger/40 text-danger" : "border-border text-foreground";
   return (
-    <p className={`rounded-md border px-3 py-2 text-sm ${classes}`} role={tone === "error" ? "alert" : "status"}>
+    <p
+      className={`rounded-sky-md border px-3 py-2 text-sm ${classes}`}
+      role={tone === "error" ? "alert" : "status"}
+    >
       {children}
     </p>
   );
@@ -68,10 +71,13 @@ export function FormMessage({ tone, children }: { tone: "error" | "success"; chi
 
 export function SubmitButton({ label, pending }: { label: string; pending: boolean }) {
   return (
+    // A form submit genuinely must not run twice, so unlike the card actions
+    // this one does disable while pending.
     <button
       type="submit"
       disabled={pending}
-      className="rounded-md bg-foreground px-4 py-2 text-base font-medium text-background disabled:opacity-60"
+      aria-busy={pending || undefined}
+      className={`${ACTION_PRIMARY} disabled:opacity-60`}
     >
       {pending ? "…" : label}
     </button>

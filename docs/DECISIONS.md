@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-04 (ADR-0034, Charakteridentität).
+Letzte Aktualisierung: 2026-09-04 (ADR-0035, visuelle Richtung).
 
 ---
 
@@ -1428,3 +1428,69 @@ einen Kurator gibt.
 Laufzeit ableiten · Charaktername als Schlüssel · generische Metadatenstruktur (EAV/JSON) ·
 `characters` per Katalogimport pflegen · Admin-UI mit Rolle (setzt eine Rolle voraus, die es
 nicht gibt) · gespeicherte `debut`-Spalte.
+
+---
+
+## ADR-0035 — Visuelle Richtung „Skylands Vitrine" und ein Token-System
+
+**Status:** ANGENOMMEN (2026-09-04) · umgesetzt als Phase A (Tokens und Shell)
+
+**Problem.** Die Oberfläche hatte vier Farbvariablen, keine Tokens für Radius, Schatten, Akzent
+oder Flächen, und praktisch keine Focus-Zustände. Für einen Sammler-Tracker, der Figuren in den
+Mittelpunkt stellen soll, ist das zu wenig Grundlage.
+
+**Entscheidung.** Richtung **„Skylands Vitrine"**: eine ruhige, neutrale Collector-Oberfläche.
+Die Figuren tragen die Farbe, das Interface hält sich zurück.
+
+### Warum die Bildassets die Richtung bestimmen
+
+Die 534 Katalogbilder sind 640×640-Produktfotos: **435 opak auf weißem Grund, 40 mit
+Alphakanal.** Die Master-PNGs liegen im read-only Legacy-Projekt, und die Dateinamen sind die
+Bildidentität (ADR-0009) — freistellen oder neu rendern ist hier nicht möglich.
+
+Daraus folgt zwingend:
+
+- **kein Elementfarbverlauf und keine dunkle Bühne hinter der Figur** — das Weiß deckt sie ab
+- **`--plate`**: eine bewusst **helle** Präsentationsfläche in **beiden** Themes. Sie normalisiert
+  außerdem den Unterschied zwischen den 435 weißen und den 40 transparenten Bildern, die sonst
+  im Dark Mode völlig verschieden aussähen
+- Das Weiß wird nicht bekämpft, sondern **gerahmt**: weiche Ecken, Haarlinie, sanfte Erhebung
+
+### Das System
+
+| Gruppe | Tokens |
+|---|---|
+| Flächen | `canvas` · `surface` · `surface-raised` · **`plate`** |
+| Text | `foreground` · `muted` · `on-accent` |
+| Linien | `border` · `border-strong` · `ring` |
+| Akzent | `accent` · `accent-hover` · `accent-subtle` — warmer Bernstein, sparsam |
+| Status | `success` · `danger` |
+| Form | `radius-sm/md/lg` (6/10/14 px) · `shadow-card` · `shadow-raised` |
+| Element | zehn Farben, **definiert und bewusst noch nirgends verwendet** |
+
+**Light:** warmes Off-White als Canvas, keine reinen Extremwerte.
+**Dark:** kühles Schiefer-Nachtblau statt Schwarz — neben einer hellen Platte erzeugt reines
+Schwarz eine Blendkante und flacht jede Fläche darüber ab.
+
+**Alle Werte sind auf Kontrast geprüft**; die Verhältnisse stehen als Kommentar an jedem Wert.
+Elementfarben liegen bei ≥ 4,5:1 auf `surface`, damit sie später Text tragen können.
+
+### Verbindliche Regeln
+
+1. **Elementfarben werden ausschließlich aus kuratiertem `characters.element` gespeist**
+   (ADR-0034). Keine Ableitung aus Namen, keine Heuristik, kein Fallback.
+2. **Farbe allein kommuniziert nie ein Element.** `earth` und `tech` liegen 1,06:1 in der
+   Helligkeit auseinander und unterscheiden sich nur im Farbton — ein Badge muss das Element
+   immer benennen.
+3. **Die neutrale Karte ist der Standard.** 457 der 561 Sammelobjekte haben keinen Charakter;
+   ohne Element gibt es keinen leeren Platzhalter, die Karte ist schlicht ruhiger.
+4. **Ein Focus-Stil für alles:** `:focus-visible` mit Outline und Offset — ein Element, das
+   erscheint, statt einer Farbe, die sich ändert.
+5. **Keine dekorativen Animationen**, und `prefers-reduced-motion` schaltet global ab.
+6. **Keine externe Schrift, keine Component Library.** Systemschrift und Tailwind genügen.
+7. **Kein Theme-Umschalter.** `prefers-color-scheme` bleibt die Quelle.
+
+**Verworfen:** Elementrahmen um die ganze Karte (10 Farben × 561 Karten = Flickenteppich) ·
+Glow (teuer, wirkt nach Gaming, müsste bei reduzierter Bewegung weg) · Hintergrundgradient und
+Bildbühne (technisch unmöglich, siehe oben) · Trading-Card-Look · reines Schwarz/Weiß als
+Grundflächen.

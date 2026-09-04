@@ -76,6 +76,7 @@ export function CollectionView({
             <div key={entry.figure.skyId} className={isRemoved ? "opacity-60" : undefined}>
               <FigureCard
                 figure={entry.figure}
+                collected={!isRemoved}
                 action={
                   <>
                     {/* Says out loud what the dimming only hints at. */}

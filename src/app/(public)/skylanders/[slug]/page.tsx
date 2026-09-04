@@ -102,7 +102,11 @@ export default async function FigurePage({ params }: Params) {
           <h2 className="text-sm font-medium">{de.character.related}</h2>
           <div className="mt-3 grid grid-cols-2 gap-3">
             {detail.related.map((sibling) => (
-              <FigureCard key={sibling.skyId} figure={sibling} />
+              <FigureCard
+                key={sibling.skyId}
+                figure={sibling}
+                collected={owned.has(sibling.skyId)}
+              />
             ))}
           </div>
         </section>

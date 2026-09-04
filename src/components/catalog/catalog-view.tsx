@@ -70,7 +70,7 @@ export function CatalogView({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={de.catalog.searchPlaceholder}
-          className="w-full rounded-md border border-border bg-background px-3 py-2.5 text-base outline-none focus:border-foreground"
+          className="min-h-11 w-full rounded-sky-md border border-border bg-background px-3 py-2.5 text-base focus:border-foreground"
         />
         <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
         <p className="text-sm text-muted">
@@ -87,6 +87,7 @@ export function CatalogView({
         <FigureGrid
           figures={visible}
           highlightSkyId={highlightSkyId}
+          collectedSkyIds={owned}
           renderAction={(figure) => (
             <CollectButton
               skyId={figure.skyId}

@@ -6,12 +6,22 @@
  * (ADR-0027). The action is deliberately not replayed afterwards.
  *
  * Signed in it updates immediately and reverts if the server disagrees.
+ *
+ * A collector's action, not a purchase. Neutral rather than filled: this
+ * button repeats on up to 561 cards, and a wall of amber would put the
+ * interface in front of the figures. The accent stays an accent — reserved
+ * for a single real primary action, never for the grid (ADR-0035).
  */
 "use client";
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
+import {
+  ACTION_CONFIRMED,
+  ACTION_NEUTRAL,
+  ACTION_PENDING,
+} from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import { de } from "@/lib/i18n/de";
 
@@ -25,14 +35,13 @@ type Props = {
 export function CollectButton({ skyId, initialCollected, signInHref }: Props) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
 
   if (signInHref) {
+    // Same intent, same affordance: a visitor should not have to learn that
+    // this button looks different before they have an account.
     return (
-      <Link
-        href={signInHref}
-        className="block rounded-md border border-border px-3 py-2 text-center text-sm text-muted hover:text-foreground"
-      >
+      <Link href={signInHref} className={ACTION_NEUTRAL}>
         {de.catalog.collectSignedOut}
       </Link>
     );
@@ -60,17 +69,14 @@ export function CollectButton({ skyId, initialCollected, signInHref }: Props) {
         type="button"
         onClick={onClick}
         aria-pressed={collected}
-        className={
-          "w-full rounded-md px-3 py-2 text-center text-sm font-medium " +
-          (collected
-            ? "bg-foreground text-background"
-            : "border border-border text-foreground hover:bg-border/40")
-        }
+        // Not disabled while pending, on purpose — see ACTION_PENDING.
+        aria-busy={pending || undefined}
+        className={`${collected ? ACTION_CONFIRMED : ACTION_NEUTRAL} ${pending ? ACTION_PENDING : ""}`}
       >
         {collected ? de.catalog.collected : de.catalog.collect}
       </button>
       {failed ? (
-        <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-1 text-xs text-danger">
           {de.catalog.collectFailed}
         </p>
       ) : null}

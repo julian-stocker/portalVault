@@ -3,11 +3,16 @@
  *
  * Shows `displayName`, the derived spelling — "Astroblast (Legendary)" where
  * the canonical name is "Legendary Astroblast" (ADR-0030). The raw name stays
- * in the database untouched.
+ * in the database untouched, and no name is parsed here.
  *
- * Shared by the catalog and the collection so both stay in step. The action
- * arrives as a prop rather than being wired in here — that is what would let
- * a different action sit beside it later, without any of it existing today.
+ * The card is the vitrine (ADR-0035): canvas → surface → plate. The middle
+ * tone matters most in the dark theme, where a light plate straight on the
+ * near-black canvas has nothing to sit on.
+ *
+ * Shared by the catalog, the collection and the related figures on a detail
+ * page. Every context-specific part arrives as a prop — the action, whether
+ * the figure is collected, whether it is highlighted — so the card never
+ * assumes where it is being rendered.
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -21,34 +26,79 @@ export function FigureCard({
   figure,
   action,
   highlighted = false,
+  collected = false,
 }: {
   figure: CatalogFigure;
   action?: ReactNode;
   highlighted?: boolean;
+  /**
+   * Comes from the real collection state the caller already holds. The card
+   * neither reads nor writes anything — it only shows what it is given.
+   */
+  collected?: boolean;
 }) {
   return (
+    /* h-full + flex-col so a row of cards ends at the same height, and the
+       action lands on one line no matter how long the names above it are. */
     <article
       className={
-        "flex flex-col gap-2 rounded-lg border p-2 " +
-        (highlighted ? "border-foreground" : "border-border")
+        "flex h-full flex-col gap-2 rounded-sky-lg border bg-surface p-2 shadow-card " +
+        (highlighted ? "border-accent ring-2 ring-accent" : "border-border")
       }
     >
       {/* The whole card leads to the detail page; the action sits outside the
           link so a tap on it cannot navigate away by accident. */}
-      <Link href={`/skylanders/${figure.slug}`} className="flex flex-col gap-2">
-        <FigureImage file={figure.imageFile} name={figure.displayName} />
-        <div className="flex flex-col gap-0.5">
-          <span className="text-xs text-muted">{figure.seriesLabel}</span>
-          <span className="text-sm leading-snug font-medium">{figure.displayName}</span>
-          <span className={figure.marketPrice === null ? "text-sm text-muted" : "text-sm"}>
-            {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+      <Link href={`/skylanders/${figure.slug}`} className="flex flex-1 flex-col gap-2">
+        <div className="relative">
+          <FigureImage file={figure.imageFile} name={figure.displayName} />
+          {collected ? (
+            /* Readable while scrolling, without a second big action and
+               without covering the figure. A glyph plus a dark pill, not
+               colour alone — and `--on-plate` is fixed because the plate is
+               light in both themes. */
+            <span className="absolute top-1.5 right-1.5 rounded-full bg-on-plate/90 px-1.5 py-0.5 text-[11px] leading-none font-medium text-plate">
+              <span aria-hidden="true">✓</span>
+              <span className="sr-only">{de.catalog.collectedBadge}</span>
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-1 flex-col gap-1">
+          {/* Two lines at most. `title` keeps the full name reachable — the
+              longest in the catalog is 39 characters. */}
+          <span
+            className="line-clamp-2 text-sm leading-snug font-medium"
+            title={figure.displayName}
+          >
+            {figure.displayName}
           </span>
-          {figure.isActive ? null : (
-            <span className="text-xs text-muted">{de.catalog.inactive}</span>
-          )}
+
+          {/* Pinned to the bottom of the text area, so price and series line
+              up across a row whether a name took one line or two. */}
+          <div className="mt-auto flex flex-col items-start gap-1">
+            {/* A reference market value, not a shop price (ADR-0033): same
+                size as the name, no emphasis, tabular figures so a column of
+                them reads as a column. */}
+            <span
+              className={
+                "text-sm tabular-nums " + (figure.marketPrice === null ? "text-muted" : "")
+              }
+            >
+              {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+            </span>
+
+            <span className="max-w-full truncate rounded-full border border-border px-1.5 py-0.5 text-[11px] text-muted">
+              {figure.seriesLabel}
+            </span>
+
+            {figure.isActive ? null : (
+              <span className="text-[11px] text-muted">{de.catalog.inactive}</span>
+            )}
+          </div>
         </div>
       </Link>
-      {action}
+
+      {action ? <div className="mt-auto">{action}</div> : null}
     </article>
   );
 }

@@ -1,35 +1,219 @@
 @import "tailwindcss";
 
-/* Color values in one place. Tailwind utilities reach them via
-   bg-background / text-foreground / text-muted / border-border. */
+/* ===========================================================================
+   SkyIsles — "Skylands Vitrine"
+   ---------------------------------------------------------------------------
+   A quiet collector surface. The figures carry the colour; the interface
+   stays out of their way.
+
+   The whole system follows from one property of the assets: the 475 figure
+   images are lossy WebP without an alpha channel, 640x640, photographed on
+   WHITE. That cannot be changed here — the masters live in the read-only
+   legacy project and the file names are the image identity (ADR-0009).
+
+   So the white is not fought, it is framed. `--plate` is a deliberately
+   light presentation surface in BOTH themes: in the dark theme a white
+   figure then reads as a lit display case rather than a stray white square.
+
+   Element colours are defined here but deliberately used nowhere yet. They
+   are a later, secondary accent layer, driven only by curated
+   `characters.element` data — never derived from a name (ADR-0034).
+
+   Every value below was checked for contrast; the ratios are noted.
+   =========================================================================== */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-  --muted: #6b7280;
-  --border: #e5e7eb;
+  color-scheme: light dark;
+
+  /* --- Surfaces -------------------------------------------------------- */
+  /* Warm off-white rather than pure white: it gives cards something to sit
+     on, and it keeps the plate distinguishable in the light theme. */
+  --canvas: #f4f1ec;
+  --surface: #fbf9f6;
+  --surface-raised: #ffffff;
+
+  /* The image stage. Matches the photographed background exactly, so the
+     image edge dissolves into the plate instead of showing a seam. */
+  --plate: #ffffff;
+
+  /* The plate is light in BOTH themes, so anything drawn on it needs a fixed
+     dark tone — `--foreground` would invert with the theme and vanish.
+     Checked against both plate values: 15.0:1 / 13.8:1 and 5.9:1 / 5.4:1. */
+  --on-plate: #2b2621;
+  --on-plate-muted: #6a635b;
+
+  /* --- Text ------------------------------------------------------------ */
+  --foreground: #191714; /* 15.9:1 on canvas */
+  --muted: #6a635b; /*  5.3:1 on canvas, 5.6:1 on surface */
+  --on-accent: #ffffff; /*  5.0:1 on accent */
+
+  /* --- Lines ----------------------------------------------------------- */
+  --border: #e2ddd4;
+  --border-strong: #c9c2b6;
+  --ring: #9a6316;
+
+  /* --- Accent — warm amber, used sparingly ----------------------------- */
+  --accent: #9a6316; /*  4.5:1 on canvas, 4.8:1 on surface */
+  --accent-hover: #7f5111;
+  --accent-subtle: #f3e7d3;
+
+  /* --- Status ---------------------------------------------------------- */
+  --success: #1f7a45; /*  5.1:1 on surface */
+  --danger: #b3261e; /*  6.2:1 on surface */
+
+  /* --- Depth — soft, never a hard drop shadow --------------------------
+     Named `elevation-*` here because @theme maps them to `--shadow-*`
+     below, and a token cannot reference itself. */
+  --elevation-card: 0 1px 2px rgb(25 23 20 / 0.04), 0 4px 12px rgb(25 23 20 / 0.05);
+  --elevation-raised: 0 2px 4px rgb(25 23 20 / 0.05), 0 12px 28px rgb(25 23 20 / 0.08);
+
+  /* --- Elements — defined, not yet used --------------------------------
+     Ten canonical elements (ADR-0034). All at least 4.5:1 on --surface, so
+     they can carry text later. Colour alone never conveys the element:
+     "earth" and "tech" sit 1.06:1 apart in luminance and differ only in
+     hue, which is exactly why a badge must always name the element. */
+  --element-magic: #6d4bab; /* 6.2:1 */
+  --element-tech: #8a5a12; /* 5.6:1 */
+  --element-water: #1a6c93; /* 5.5:1 */
+  --element-fire: #b23b1e; /* 5.7:1 */
+  --element-life: #2c7a3f; /* 5.0:1 */
+  --element-undead: #5f6b78; /* 5.2:1 */
+  --element-earth: #8a5f2c; /* 5.3:1 */
+  --element-air: #446f88; /* 5.2:1 */
+  --element-light: #8a6d13; /* 4.7:1 */
+  --element-dark: #4a4a8a; /* 7.6:1 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0b0b0c;
-    --foreground: #ededed;
-    --muted: #9ca3af;
-    --border: #26262a;
+    /* Cool slate night, not black: pure black beside a white plate is a
+       glare edge, and it flattens every surface above it. */
+    --canvas: #0d1219;
+    --surface: #151c26;
+    --surface-raised: #1d2532;
+
+    /* Stays light. This is the point of the whole direction. */
+    --plate: #f7f5f1;
+
+    --foreground: #e9ecef; /* 15.8:1 on canvas */
+    --muted: #9aa4b2; /*  7.5:1 on canvas, 6.8:1 on surface */
+    --on-accent: #1a1206; /*  8.5:1 on accent */
+
+    --border: #26303d;
+    --border-strong: #3a4657;
+    --ring: #e0a44a;
+
+    --accent: #e0a44a; /*  8.6:1 on canvas */
+    --accent-hover: #eeb864;
+    --accent-subtle: #2a2113;
+
+    --success: #5ad18d; /*  8.9:1 on surface */
+    --danger: #ff9b93; /*  8.5:1 on surface */
+
+    /* Deeper and wider on a dark ground, where a shadow has to do more
+       work to read as depth at all. */
+    --elevation-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px rgb(0 0 0 / 0.35);
+    --elevation-raised: 0 2px 6px rgb(0 0 0 / 0.45), 0 16px 40px rgb(0 0 0 / 0.45);
+
+    /* Lightened for a dark ground; all at least 7:1 on --surface. */
+    --element-magic: #b79bea;
+    --element-tech: #e0ab52;
+    --element-water: #66c2e8;
+    --element-fire: #ff9776;
+    --element-life: #72d089;
+    --element-undead: #a9b6c4;
+    --element-earth: #d9a86a;
+    --element-air: #9dc9df;
+    --element-light: #e5cd6d;
+    --element-dark: #a3a3e0;
   }
 }
 
 @theme inline {
-  --color-background: var(--background);
+  /* Existing names keep working — every component already uses
+     bg-background / text-foreground / text-muted / border-border. */
+  --color-background: var(--canvas);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
   --color-border: var(--border);
+
+  /* New surfaces */
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-plate: var(--plate);
+
+  --color-border-strong: var(--border-strong);
+  --color-ring: var(--ring);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-on-accent: var(--on-accent);
+
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+
+  --color-on-plate: var(--on-plate);
+  --color-on-plate-muted: var(--on-plate-muted);
+
+  --color-element-magic: var(--element-magic);
+  --color-element-tech: var(--element-tech);
+  --color-element-water: var(--element-water);
+  --color-element-fire: var(--element-fire);
+  --color-element-life: var(--element-life);
+  --color-element-undead: var(--element-undead);
+  --color-element-earth: var(--element-earth);
+  --color-element-air: var(--element-air);
+  --color-element-light: var(--element-light);
+  --color-element-dark: var(--element-dark);
+
+  /* The SkyIsles radius scale, under its own name.
+     Deliberately NOT `--radius-sm/md/lg`: those would silently redefine
+     Tailwind's own `rounded-sm/md/lg` for every component that already uses
+     them. Migration happens per component, by writing `rounded-sky-*`. */
+  --radius-sky-sm: 0.375rem; /*  6px — chips, small controls */
+  --radius-sky-md: 0.625rem; /* 10px — the image plate, buttons */
+  --radius-sky-lg: 0.875rem; /* 14px — cards, panels */
+
+  --shadow-card: var(--elevation-card);
+  --shadow-raised: var(--elevation-raised);
 }
 
-/* Deliberately no next/font: a system font stack saves a dependency, a network
-   fetch at build time, and renders immediately. */
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+@layer base {
+  /* Deliberately no next/font: a system font stack saves a dependency, a
+     network fetch at build time, and renders immediately. */
+  body {
+    background: var(--canvas);
+    color: var(--foreground);
+    font-family:
+      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+      Arial, sans-serif;
+  }
+
+  /*
+   * One focus style for everything reachable by keyboard.
+   *
+   * An outline rather than a colour change: it appears where nothing was,
+   * so it reads without relying on colour perception, and the 2px offset
+   * keeps it visible even on a filled button where a coloured ring inside
+   * would vanish.
+   */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  /* Nothing here animates by decoration. This covers whatever transitions
+     components carry, now and later. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }

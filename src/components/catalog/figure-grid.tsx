@@ -14,10 +14,13 @@ export function FigureGrid({
   figures,
   renderAction,
   highlightSkyId,
+  collectedSkyIds,
 }: {
   figures: readonly CatalogFigure[];
   renderAction?: (figure: CatalogFigure) => ReactNode;
   highlightSkyId?: string | null;
+  /** Real collection state, passed through to the card. Nothing is derived. */
+  collectedSkyIds?: ReadonlySet<string>;
 }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
@@ -27,6 +30,7 @@ export function FigureGrid({
           figure={figure}
           action={renderAction?.(figure)}
           highlighted={highlightSkyId === figure.skyId}
+          collected={collectedSkyIds?.has(figure.skyId) ?? false}
         />
       ))}
     </div>

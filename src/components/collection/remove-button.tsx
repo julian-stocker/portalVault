@@ -7,12 +7,21 @@
  *
  * A removed card stays on screen in a spent state with an undo, rather than
  * vanishing. That is what makes a confirmation dialog unnecessary: the action
- * is trivially reversible for as long as the page is open.
+ * is trivially reversible for as long as the page is open (ADR-0031).
+ *
+ * Same geometry as the collect action, different weight: "Entfernen" is
+ * available but it is not what the collection page is for, so it stays
+ * neutral. "Rückgängig" is the reached state and steps forward again.
  */
 "use client";
 
 import { useState, useTransition } from "react";
 
+import {
+  ACTION_CONFIRMED,
+  ACTION_NEUTRAL,
+  ACTION_PENDING,
+} from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import { de } from "@/lib/i18n/de";
 
@@ -28,7 +37,7 @@ export function RemoveButton({
   onRemovedChange: (skyId: string, removed: boolean) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const [, startTransition] = useTransition();
+  const [pending, startTransition] = useTransition();
 
   function apply(nextRemoved: boolean) {
     onRemovedChange(skyId, nextRemoved); // optimistic
@@ -49,19 +58,13 @@ export function RemoveButton({
         type="button"
         onClick={() => apply(!removed)}
         aria-label={removed ? de.collection.undo : de.collection.removeLabel(name)}
-        // min-h-11 keeps the target at 44 px, so a thumb cannot miss it or
-        // hit it by accident on a neighbouring card.
-        className={
-          "min-h-11 w-full rounded-md px-3 py-2 text-center text-sm font-medium " +
-          (removed
-            ? "bg-foreground text-background"
-            : "border border-border text-muted hover:text-foreground")
-        }
+        aria-busy={pending || undefined}
+        className={`${removed ? ACTION_CONFIRMED : ACTION_NEUTRAL} ${pending ? ACTION_PENDING : ""}`}
       >
         {removed ? de.collection.undo : de.collection.remove}
       </button>
       {failed ? (
-        <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">
+        <p role="alert" className="mt-1 text-xs text-danger">
           {de.collection.removeFailed}
         </p>
       ) : null}

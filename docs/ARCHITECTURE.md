@@ -134,6 +134,31 @@ docs/
   Berechnungen (Sammlungswert, Fortschritt) in reinen Funktionen unter `lib/`, ohne
   DOM-/React-Bezug, damit sie testbar bleiben und die Formel ohne UI-Änderung erweiterbar ist.
 
+### 3b. Visuelle Grundlage — „Skylands Vitrine" (ADR-0035)
+
+Ein Token-System in `src/app/globals.css` trägt die gesamte Oberfläche. Keine externe Schrift,
+keine Component Library — Tailwind und die Systemschrift genügen.
+
+| Gruppe | Tokens |
+|---|---|
+| Flächen | `canvas` · `surface` · `surface-raised` · **`plate`** |
+| Text | `foreground` · `muted` · `on-accent` |
+| Linien | `border` · `border-strong` · `ring` |
+| Akzent / Status | `accent`, `accent-hover`, `accent-subtle` · `success`, `danger` |
+| Form | `radius-sm/md/lg` · `shadow-card`, `shadow-raised` |
+| Element | zehn Farben, definiert und noch nicht verwendet |
+
+**`plate` ist der tragende Token.** Die Katalogbilder sind Produktfotos auf weißem Grund
+(435 opak, 40 mit Alpha), und die Master liegen unveränderlich im Legacy-Projekt (ADR-0009).
+Deshalb ist die Bildfläche in **beiden** Themes hell: Im Dark Mode wird das Weiß dadurch zur
+beleuchteten Vitrine statt zum versehentlichen Quadrat, und die beiden Bildsorten sehen gleich
+aus.
+
+Theme-Quelle ist `prefers-color-scheme`; einen Umschalter gibt es bewusst nicht.
+Ein einziger `:focus-visible`-Stil gilt global, und `prefers-reduced-motion` schaltet jede
+Bewegung ab. Elementfarben stammen ausschließlich aus kuratiertem `characters.element`
+(ADR-0034) — nie aus Namen.
+
 ### 3a. Projektsprache (ADR-0019)
 
 > **Die technische Projektsprache ist Englisch. Die Oberflächensprache von V1 ist Deutsch.**

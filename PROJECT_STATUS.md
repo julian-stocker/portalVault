@@ -41,6 +41,13 @@ NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis d
 jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
 meldet 31/32 mit genau diesem Hinweis.
 
+**Visual Pass Phase A implementiert (2026-09-04, ADR-0035).** Die Oberfläche hat eine
+Token-Grundlage: Flächen, Text, Linien, Akzent, Status, Radius, Schatten und die zehn
+Elementfarben (definiert, noch nicht verwendet). Tragender Token ist **`plate`** — die helle
+Bildbühne, die die weißen Produktfotos im Dark Mode zur Vitrine macht statt zum weißen Quadrat.
+Dazu ein globaler `:focus-visible`-Stil, der die größte Accessibility-Lücke schließt, und
+`prefers-reduced-motion`. **Keine Funktionalität verändert.** Phasen B–I folgen nach Review.
+
 **Charakter-Pilot implementiert (2026-09-04, ADR-0034).** Der Katalog hat eine zweite
 Identitätsebene: den Charakter. 19 kuratierte Charaktere verbinden 104 der 561 Sammelobjekte —
 Drobot über drei Auflagen, Spyro über drei Serien inklusive Eon's Elite, `Fire Bone Hot Dog`
@@ -463,6 +470,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0032** | **Collector- und First-Party-Shop-Domäne sind getrennt; Berechtigung über eine echte Rolle, nie über eine E-Mail-Adresse** — dokumentiert, **nicht implementiert** |
 | **0033** | **Fünf Preisebenen; Marktpreis ≠ Shoppreis; Bestellpositionen speichern einen Preis-Snapshot** — dokumentiert, **nicht implementiert** |
 | **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
+| **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
 
 ## Offene Entscheidungen
 

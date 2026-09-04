@@ -33,6 +33,8 @@ export const de = {
     noPrice: "Preis offen",
     collect: "+ Sammlung",
     collected: "✓ Gesammelt",
+    // Screenreader-Text des Statusabzeichens auf der Karte — ohne Glyphe.
+    collectedBadge: "Gesammelt",
     collectSignedOut: "+ Sammlung",
     collectFailed: "Das hat nicht geklappt.",
     inactive: "Nicht mehr im Katalog",
