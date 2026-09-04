@@ -265,9 +265,11 @@ Migration.
 Profil- und Sammlungsdaten weder lesend noch schreibend heran, kann den Katalog nicht
 verändern, und ein anonymer Besucher sieht ausschließlich den Katalog.
 
-## 9. Umsetzungsplan V1.4 — geplant, noch nicht gebaut
+## 9. Umsetzung V1.4 — **gebaut**
 
-Stand 2026-09-04. Alle Entscheidungen liegen vor; dieser Abschnitt beschreibt, was gebaut wird.
+Umgesetzt am 2026-09-04 und **vollständig verifiziert** — automatisiert und in einem
+manuellen Durchlauf mit einer echten E-Mail-Adresse. Abweichungen vom Plan stehen in 9.10,
+die Verifikation in 9.11.
 
 ### 9.1 Was bereits steht
 
@@ -388,21 +390,23 @@ Nach ADR-0013, ohne E2E:
   Kleinschreibung) · Zuordnung Fehlercode → Meldung · Berechnung des Redirect-Ziels nach
   Anmeldung (`next`-Parameter, Onboarding-Zwang, offene Weiterleitungen ausschließen)
 - **Bestehend:** `npm run verify:rls` bleibt der Nachweis, dass die Datenbankgrenze hält
-- **Manuell einmalig:** vollständiger Durchlauf mit einer echten Adresse — Registrierung,
-  Bestätigungsmail, Login, Reset, Namensänderung. Der Supabase-Standardversand ist stark
-  limitiert (ADR-0018).
+- **Manuell einmalig:** vollständiger Durchlauf mit einer echten Adresse — **am 2026-09-04
+  erfolgreich absolviert**, siehe 9.11. Der Supabase-Standardversand ist stark limitiert und
+  reicht nur für die Entwicklung (ADR-0018).
 - **Später:** Playwright, sobald Auth und Sammlung stabil sind
 
 ### 9.9 Neue Dateien und Routen
 
 ```
-src/middleware.ts                      Token-Erneuerung, Schutz der (app)-Routen
+src/proxy.ts                           Token-Erneuerung, Schutz der (app)-Routen
 src/lib/supabase/client.ts             Browser-Client
 src/lib/supabase/server.ts             Server-Client, pro Request
 src/lib/supabase/middleware.ts         Cookie-Anbindung für die Middleware
 src/lib/auth/username.ts               Format, reservierte Namen, Validierung   + Test
 src/lib/auth/errors.ts                 Fehlercode -> deutsche Meldung           + Test
 src/lib/auth/redirect.ts               sicheres Redirect-Ziel                   + Test
+src/lib/auth/actions.ts                Server Actions fuer alle Schreibvorgaenge
+vitest.config.mts                      Alias @/ fuer die Tests
 
 src/app/(auth)/login/page.tsx          Anmeldung
 src/app/(auth)/register/page.tsx       Registrierung
@@ -420,13 +424,80 @@ src/app/(app)/dashboard/page.tsx       geschützte Startseite
 src/app/(app)/settings/page.tsx        Benutzername und Passwort ändern
 src/app/(app)/layout.tsx               prüft getUser(), erzwingt Onboarding
 
-src/components/auth/…                  Formulare
+src/components/auth/auth-form.tsx      Client-Wrapper um eine Server Action
+src/components/auth/form-field.tsx     Feld, Meldung, Button, Karte
 ```
 
 Ergänzt wird `src/lib/i18n/de.ts` um alle Beschriftungen und Meldungen — kein Text im JSX
 (ADR-0019).
 
-### 9.10 Ausdrücklich nicht in V1.4
+### 9.10 Was beim Bauen anders kam als geplant
+
+Drei Punkte, die der Plan nicht vorhersah:
+
+**1. `middleware` heißt in Next 16 `proxy`.** Der Build meldete die alte Dateikonvention als
+veraltet. Statt auf einer abgekündigten Schnittstelle aufzusetzen, liegt die Datei als
+`src/proxy.ts` mit `export async function proxy(...)`. Ausführungsmodell und `config.matcher`
+sind unverändert; der Build weist sie als `ƒ Proxy (Middleware)` aus.
+
+**2. Formularfelder sind Daten, keine Render-Funktion.** Der erste Entwurf gab `AuthForm` eine
+Render-Prop mit. Der Build brach ab: *„Functions cannot be passed directly to Client
+Components."* Eine Funktion überquert die Server/Client-Grenze nicht. `AuthForm` bekommt
+stattdessen eine serialisierbare Feldbeschreibung (`FieldConfig[]`) — dieselbe gemeinsame
+Fehler- und Pending-Behandlung, ohne den Grenzverstoß.
+
+**3. Eine `"use server"`-Datei darf nur async Funktionen exportieren.** Die Konstante
+`NO_ERROR` und ein Re-Export von `ONBOARDING_PATH` in `actions.ts` ließen den Build scheitern.
+Beides gehört ohnehin in die Module, aus denen es stammt.
+
+Alle drei fielen erst im **Production Build** auf, nicht in Lint oder Typecheck. Der Build
+gehört deshalb weiter zur Pflichtprüfung (ADR-0013).
+
+### 9.11 Verifikation
+
+**Automatisiert:** `npm test` 46 Tests · `npm run lint` · `npm run typecheck` ·
+`npm run build` (13 Routen) — alle grün.
+
+**Smoke-Test gegen den Produktionsserver (2026-09-04):**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `/`, `/login`, `/register`, `/forgot-password`, `/verify-email`, `/auth-error` | ✅ alle 200 |
+| `/dashboard` ohne Session | ✅ 307 → `/login?next=%2Fdashboard` |
+| `/settings` ohne Session | ✅ 307 → `/login?next=%2Fsettings` |
+| `/onboarding` ohne Session | ✅ 307 → `/login?next=%2Fonboarding` |
+| `/auth/callback` ohne Code | ✅ → `/auth-error` |
+| `?next=https://evil.example` | ✅ verworfen, Formular trägt `/dashboard` |
+| `?next=//evil.example` | ✅ verworfen, Formular trägt `/dashboard` |
+| `?next=/dashboard` | ✅ übernommen |
+
+**Manueller Durchlauf mit echter E-Mail-Adresse (2026-09-04) — vollständig erfolgreich:**
+
+| Schritt | Ergebnis |
+|---|---|
+| Registrierung mit echter Adresse | ✅ |
+| Bestätigungsmail erhalten, Link geöffnet | ✅ |
+| Weiterleitung ins Onboarding | ✅ |
+| Benutzernamen gesetzt | ✅ |
+| Dashboard als angemeldeter Benutzer erreichbar | ✅ |
+| Abmelden | ✅ |
+| Erneut anmelden | ✅ |
+| Passwort-Reset-Mail erhalten | ✅ |
+| Passwort geändert | ✅ |
+| Anmeldung mit dem neuen Passwort | ✅ |
+| Benutzernamen unter Einstellungen geändert (ADR-0016) | ✅ |
+| Dashboard und Einstellungen danach weiterhin funktionsfähig | ✅ |
+
+Damit ist auch die **E-Mail-Zustellstrecke belegt**: Bestätigungs- und Rücksetzmail kommen an,
+die Links funktionieren, und `exchangeCodeForSession` im Callback liefert eine gültige Sitzung.
+Das gilt für den **Supabase-Standardversand in der Entwicklung**. Für eine öffentliche Beta
+sagt es nichts über Zustellraten aus — dafür braucht es einen eigenen Anbieter (ADR-0018).
+
+Die Namensänderung im letzten Schritt ist zugleich der praktische Beleg für ADR-0016: Nach dem
+Umbenennen funktionieren Dashboard und Einstellungen unverändert, weil alle Beziehungen an der
+UUID hängen und nicht am Namen.
+
+### 9.12 Ausdrücklich nicht in V1.4
 
 Google-/Apple-Login · Zwei-Faktor · öffentliche Profile · Avatar-Upload · Sperrfrist für
 Namensänderungen · Self-Service-Kontolöschung · eigener SMTP-Anbieter (ADR-0018) · jede Form

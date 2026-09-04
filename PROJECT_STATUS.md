@@ -27,6 +27,12 @@ Analyseplattform, **kein Marketplace** (ADR-0021). Zielbild: ein Sammler öffnet
 Handy, sieht den visuellen Katalog, tippt die Figuren an, die er besitzt, und sieht seinen
 Fortschritt. Details in `docs/ROADMAP.md`, Abschnitt „Produktvision".
 
+**V1.4 abgeschlossen und vollständig verifiziert.** Auth steht: Registrierung,
+E-Mail-Bestätigung, Login, Logout, Passwort vergessen und zurücksetzen, Onboarding mit
+Benutzernamen, geschützter Bereich, Einstellungen zum Ändern von Benutzername und Passwort.
+46 Unit-Tests, 13 Routen im Build, Smoke-Test gegen den Produktionsserver **und ein manueller
+Durchlauf mit einer echten E-Mail-Adresse** — alles grün. Die Zustellstrecke ist damit belegt.
+
 **V1.3 abgeschlossen.** Der Katalog steht in der Datenbank: am 2026-09-04 wurden
 **6 Serien, 30 Kategorien und 600 Figuren** importiert und mit 18 rein lesenden Prüfungen
 verifiziert. Ein zweiter Dry-Run direkt danach belegte die **Idempotenz** (`new 0, changed 0`).
@@ -65,7 +71,12 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
 | `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
 | `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
-| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ |
+| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 46 Tests |
+| `@supabase/ssr`, Browser-/Server-/Proxy-Clients | ✅ |
+| Auth-Routen: Registrierung, Login, Logout, Bestätigung, Passwort-Reset | ✅ |
+| Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
+| Geschützter Bereich `/dashboard`, `/settings` über `src/proxy.ts` | ✅ |
+| Sichere Redirect-Validierung gegen offene Weiterleitungen | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 
 ## Noch nicht implementiert
@@ -101,6 +112,31 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, V1.4 — Auth gebaut und verifiziert:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `npm test` | ✅ 46 Tests (15 Slug, 31 Auth) |
+| `npm run lint` / `typecheck` / `build` | ✅ alle exit 0, 13 Routen |
+| Öffentliche Routen erreichbar | ✅ `/`, `/login`, `/register`, `/forgot-password`, `/verify-email`, `/auth-error` → 200 |
+| Geschützte Routen ohne Sitzung | ✅ `/dashboard`, `/settings`, `/onboarding` → 307 auf `/login?next=…` |
+| `/auth/callback` ohne Code | ✅ → `/auth-error` |
+| Offene Weiterleitung `https://evil.example` | ✅ verworfen |
+| Offene Weiterleitung `//evil.example` | ✅ verworfen |
+| Zulässiges Ziel `/dashboard` | ✅ übernommen |
+| `getSession()` im Code | ✅ kommt nicht vor, nur `getUser()` |
+| Deutscher Text direkt im JSX | ✅ keiner, alles über `de.*` (ADR-0019) |
+
+**Manueller Durchlauf mit echter E-Mail-Adresse — 12 von 12 Schritten erfolgreich:**
+Registrierung · Bestätigungsmail erhalten und Link geöffnet · Onboarding erreicht ·
+Benutzernamen gesetzt · Dashboard erreichbar · Abmelden · erneut anmelden ·
+Passwort-Reset-Mail erhalten · Passwort geändert · Anmeldung mit neuem Passwort ·
+Benutzernamen unter Einstellungen geändert · Dashboard und Einstellungen danach weiterhin
+funktionsfähig.
+
+Der letzte Schritt belegt zugleich ADR-0016 in der Praxis: Nach dem Umbenennen funktioniert
+alles unverändert, weil die Beziehungen an der UUID hängen und nicht am Namen.
 
 **2026-09-04, V1.3 — Katalogimport ausgeführt und verifiziert:**
 
@@ -238,11 +274,10 @@ read-only; sie wurden zuletzt am 2026-08-11 grün gemeldet.
 
 ### Ausdrücklich NICHT verifiziert
 
-- **Cookie-basierte Sessions in Next.js.** Der RLS-Test spricht Supabase direkt an.
-  `@supabase/ssr`, Middleware, Server-Clients und geschützte Routen existieren noch nicht und
-  brauchen mit dem Auth-UI (V1.4) eine eigene Verifikation.
-- **Der Registrierungsablauf aus Benutzersicht.** Bestätigungsmail, Callback und Passwort-Reset
-  sind nie durchlaufen worden; der Test hat die Benutzer über die Admin-API angelegt.
+- **Zustellraten unter echter Last.** Der manuelle Durchlauf belegt, dass Bestätigungs- und
+  Rücksetzmail ankommen — über den **Supabase-Standardversand in der Entwicklung**. Für eine
+  öffentliche Beta sagt das nichts über Zustellbarkeit und Limits aus; dafür braucht es einen
+  eigenen Anbieter (ADR-0018).
 - **Echte Atomarität des Imports.** Der Supabase-JS-Client kann keine Transaktion über mehrere
   Anweisungen aufspannen. Für den Erstimport in die leere Datenbank ist das ausdrücklich
   akzeptiert; vor regelmäßigen produktiven Importen wird es erneut bewertet
@@ -330,10 +365,9 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**V1.4 — Auth + `@supabase/ssr`.** Registrierung, E-Mail-Bestätigung, Login, Logout,
-Passwort vergessen/Reset, Onboarding mit eindeutigem Benutzernamen, geschützter Bereich.
-Danach V1.5 mit dem vollständigen End-to-End-Fluss (ADR-0023).
-
-Alle Entscheidungen für V1.4 sind getroffen. Der Plan steht in `docs/AUTH.md`, Abschnitt 9.
+**V1.5 — visueller Katalog mit Owned-Toggle und minimaler Sammlungsseite.**
+Dort schließt sich der End-to-End-Fluss: Registrieren → Einloggen → Katalog → Figur antippen →
+eigene Sammlung sehen (ADR-0023). Alle Voraussetzungen stehen: 600 Figuren in der Datenbank,
+Auth verifiziert, RLS funktional bewiesen.
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**

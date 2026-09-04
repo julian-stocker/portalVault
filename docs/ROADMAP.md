@@ -72,7 +72,9 @@ Prinzip 4 eine Anforderung an das Katalog-UI und nicht an eine spätere Ausbaust
 - [x] **V1.1 — Next.js-Grundgerüst** (siehe unten)
 - [x] **V1.2A/B — Datenbankschema ausgeführt und strukturell verifiziert**
 - [x] **V1.2C — RLS funktional verifiziert (31/31)**
-- [ ] Freigabe für V1.3
+- [x] **V1.3 — Katalog importiert und verifiziert**
+- [x] **V1.4 — Auth gebaut und vollständig verifiziert**
+- [ ] Freigabe für V1.5
 
 Noch nicht: Supabase verbinden, SQL, Datenimport, Bilder kopieren, Auth, Deployment.
 
@@ -114,10 +116,11 @@ zuerst die Daten, dann die Sitzung, dann der Fluss selbst. Nach **V1.5** ist
 - 475 WebP-Derivate nach `public/images/skylanders/`
 - Nachprüfung: Anzahl, keine doppelte ID, alle Bildreferenzen auflösbar
 
-### V1.4 Auth + `@supabase/ssr`
+### V1.4 Auth + `@supabase/ssr` — **abgeschlossen 2026-09-04**
 
 Die Sitzungsschicht steht, bevor Seiten entstehen, die von ihr abhängen (ADR-0023).
-**Detaillierter Umsetzungsplan: `docs/AUTH.md`, Abschnitt 9.**
+Automatisiert und in einem manuellen Durchlauf mit echter E-Mail-Adresse verifiziert.
+**Umsetzung und Verifikation: `docs/AUTH.md`, Abschnitt 9.**
 
 - `@supabase/ssr` einbinden: Browser-Client, Server-Client, Middleware
 - Registrierung
