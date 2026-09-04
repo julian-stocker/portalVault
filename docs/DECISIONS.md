@@ -398,8 +398,19 @@ HTTP-Sessions gegen ein laufendes Supabase-Projekt, legt Benutzer an und räumt 
 Das gehört nicht in einen Unit-Test-Lauf, der bei jeder Änderung durchläuft. Node führt die
 `.mts`-Datei dank Type-Stripping direkt aus — kein zusätzliches Werkzeug nötig.
 
-**Offen:** Werkzeug für Unit-Tests (Vitest ist der naheliegende Kandidat) — wird bei der ersten
-zu testenden Geschäftslogik festgelegt, nicht vorher.
+**Entschieden bei der ersten testbaren Geschäftslogik (2026-09-04): Vitest.**
+`npm test` → `vitest run`. Ausgelöst durch die Slug-Regel aus ADR-0011: sie ist reine,
+DOM-freie Logik mit klar formulierbaren Erwartungen — genau der Fall, für den Punkt 4 oben
+Unit-Tests verlangt.
+
+Der Nutzen war sofort messbar: **der erste Testlauf deckte einen echten Fehler auf.**
+Großbuchstaben-Umlaute wurden nicht ausgeschrieben (`Öl` → `ol` statt `oel`), weil die
+Ersetzungstabelle nur Kleinbuchstaben kannte. Die 600 Legacy-Artikel enthalten ausschließlich
+ein kleingeschriebenes `ü`, der Fehler wäre also durch jede Prüfung an den echten Daten
+unentdeckt durchgerutscht und erst bei einem künftigen Namen aufgefallen.
+
+`@types/node` wurde dabei von `^20` auf `^26` gehoben — Vitest 5 verlangt mindestens 22, und
+die Laufzeit ist ohnehin Node 26. Die Typen passten vorher schlicht nicht zur Realität.
 
 ---
 

@@ -372,7 +372,11 @@ Der Import geht ausschließlich über den bereits durch `guard_public()` geprüf
 Export `site/data/products.json`. Damit kann strukturell keine interne Spalte in die neue
 Plattform gelangen.
 
-Vorgesehener Ablauf (noch nicht implementiert):
+**Implementiert in V1.3:** `tools/import-catalog.mts`, gestartet mit `npm run catalog:import`.
+Modi: Dry-Run (Standard, schreibt nichts) · `--validate-only` (ohne jeden Datenbankzugriff) ·
+`--apply` (schreibt) · `--input <pfad>` (für Prüfungen gegen absichtlich kaputte Fixtures).
+
+Ablauf:
 
 ```
 [Legacy, read-only]                        [PortalVault]
@@ -405,7 +409,49 @@ skylanders.xlsx
    davon, ob sie im persönlichen Lager verfügbar ist.
 9. **Dry-Run zuerst.** Jeder Import zeigt erst, was er täte; Schreiben nur nach Bestätigung.
 10. **Nach dem Import validieren:** Anzahl, keine doppelte SKY-ID, kein interner Suffix,
-    nur öffentliche Serien, alle Bildreferenzen auflösbar. Fehlschlag → Transaktion zurückrollen.
+    nur öffentliche Serien, alle Bildreferenzen auflösbar.
+
+### Was das Importwerkzeug prüft
+
+Die Validierung läuft **vollständig vor dem ersten Schreibvorgang**. Eine abgelehnte Eingabe
+erreicht die Datenbank nie.
+
+| Prüfung | Verhalten bei Verstoß |
+|---|---|
+| Struktur: `series[]` und `items[]` mit den erwarteten Feldtypen | Abbruch |
+| Serien-Code `^[A-Z]{1,4}$`, Label nicht leer, Jahr 1990–2100, Code eindeutig | Abbruch |
+| Zwei Serien mit demselben Slug | Abbruch |
+| SKY-ID-Format `^SKY-[0-9]{4}$` | Abbruch |
+| **Doppelte SKY-ID** (mit Angabe beider Positionen) | Abbruch |
+| Name nicht leer, Serie bekannt | Abbruch |
+| Kategorie für die Serie deklariert, `categoryIndex` passt zur Position | Abbruch |
+| Preis `null` **oder** > 0, endlich, höchstens zwei Nachkommastellen | Abbruch |
+| Bilddateiname content-adressiert (`^[0-9a-f]{16}\.webp$`) | Abbruch |
+| Bilddateien tatsächlich unter `public/images/skylanders/` vorhanden | Warnung |
+| Slug-Eindeutigkeit nach ADR-0011 | Abbruch |
+
+**Erstmaliger Import am 2026-09-04 durchgeführt.** Eingabe: `products.json`, erzeugt vom
+Legacy-Build am 2026-09-04 07:40. Geschrieben: 6 Serien, 30 Kategorien, 600 Figuren.
+Anschließend mit 18 rein lesenden Prüfungen gegen die Datenbank verifiziert und die Idempotenz
+durch einen zweiten Dry-Run belegt (`new 0, changed 0`). Details: `PROJECT_STATUS.md`.
+
+**Verifiziert am 2026-09-04:** Neun absichtlich manipulierte Eingaben (doppelte SKY-ID,
+ungültiges ID-Format, Preis 0, negativer Preis, Pfad statt Bildname, unbekannte Kategorie,
+falscher `categoryIndex`, unbekannte Serie, leerer Name) wurden **alle** mit Exit-Code 1 und
+einer präzisen Meldung abgelehnt; die echte Eingabe mit Exit-Code 0 akzeptiert.
+
+### Sicherheitseigenschaften des Werkzeugs
+
+- **Identität immer über `sky_id`**, niemals über den Namen.
+- **Es wird nie gelöscht.** Figuren, die in der Datenbank stehen, aber im Export fehlen, werden
+  aufgelistet und unangetastet gelassen.
+- **Bestehende Slugs werden nie überschrieben.** Weicht der aus dem Namen berechnete Slug vom
+  gespeicherten ab, gewinnt der gespeicherte; die Abweichung wird nur gemeldet (ADR-0011).
+- **`profiles` und `collection_items` werden nicht angefasst.**
+- **Idempotent:** Upserts über `sky_id`, Serien-Code und `(Serie, Kategoriename)`. Ein
+  abgebrochener Lauf wird durch einen erneuten Lauf vollendet.
+- Die Service Role ist nötig, weil der Katalog für Client-Rollen bewusst nicht schreibbar ist
+  (ADR-0016).
 
 ---
 

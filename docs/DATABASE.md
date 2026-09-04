@@ -442,9 +442,32 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   bestehenden Datenbank scheitert bewusst laut (`create table` ohne `if not exists`), statt
   eine abweichende Tabelle stillschweigend zu übergehen.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
-- Der Import (`tools/import-catalog.ts`) läuft lokal mit Service-Role-Key, macht zuerst einen
-  **Dry-Run** und schreibt in **einer Transaktion**. Regeln vollständig in
+- Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
+  Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in
   `docs/SKYLANDERS_DATA.md`, Abschnitt 12.
+
+**Zur Transaktionalität — ehrlich benannt.** Der Supabase-JS-Client kann keine Transaktion über
+mehrere Anweisungen aufspannen. Statt dessen gilt:
+
+1. **Die Validierung läuft vollständig durch, bevor irgendetwas geschrieben wird.** Der
+   häufigste Fehlerfall — eine fehlerhafte Eingabe — kann die Datenbank also gar nicht erreichen.
+2. **Alle Schreibvorgänge sind idempotente Upserts** über `sky_id`, Serien-Code und
+   `(Serie, Kategoriename)`. Bricht ein Lauf mittendrin ab, vollendet ihn ein erneuter Lauf;
+   es entsteht kein Zustand, der sich nicht durch Wiederholung reparieren ließe.
+3. Geschrieben wird in Abhängigkeitsreihenfolge: Serien → Kategorien → Figuren.
+
+**Das ist keine echte Atomarität.** Ein Abbruch zwischen Kategorien und Figuren hinterlässt
+einen Katalog ohne Figuren — sichtbar, aber durch Wiederholung behebbar.
+
+**Entschieden (2026-09-04):** Für den **erstmaligen Import in die leere Datenbank** wird diese
+Einschränkung ausdrücklich akzeptiert. **Vor regelmäßigen produktiven Importen** gegen eine
+benutzte Datenbank wird sie erneut bewertet. Eine serverseitige
+`import_catalog(payload jsonb)`-Funktion würde echte Atomarität liefern, bedeutete aber eine
+PL/pgSQL-Implementierung der gesamten Importlogik — sie wird **jetzt nicht** gebaut.
+
+**Nachgewiesen am 2026-09-04:** Der Import ist idempotent. Ein zweiter Lauf unmittelbar nach
+dem Apply meldete `new 0, changed 0` auf allen drei Tabellen und übernahm alle 600 Slugs
+unverändert aus der Datenbank.
 - Nach jedem Import: Anzahl prüfen, keine doppelte SKY-ID, kein interner Namenssuffix,
   nur öffentliche Serien, alle Bildreferenzen auflösbar. Fehlschlag → Rollback.
 

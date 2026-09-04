@@ -27,6 +27,11 @@ Analyseplattform, **kein Marketplace** (ADR-0021). Zielbild: ein Sammler öffnet
 Handy, sieht den visuellen Katalog, tippt die Figuren an, die er besitzt, und sieht seinen
 Fortschritt. Details in `docs/ROADMAP.md`, Abschnitt „Produktvision".
 
+**V1.3 abgeschlossen.** Der Katalog steht in der Datenbank: am 2026-09-04 wurden
+**6 Serien, 30 Kategorien und 600 Figuren** importiert und mit 18 rein lesenden Prüfungen
+verifiziert. Ein zweiter Dry-Run direkt danach belegte die **Idempotenz** (`new 0, changed 0`).
+Benutzerdaten blieben unberührt: `profiles` und `collection_items` stehen weiterhin auf 0.
+
 **Meilenstein-Reihenfolge entschieden (ADR-0023):** V1.3 Import → V1.4 Auth + `@supabase/ssr`
 → V1.5 Katalog mit Owned-Toggle und minimaler Sammlungsseite (**dort steht der
 End-to-End-Fluss**) → V1.6 Ausbau → V1.7 Beta-Reife.
@@ -55,6 +60,12 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | `supabase/migrations/0001_initial_schema.sql` — geschrieben, **ausgeführt und strukturell verifiziert** | ✅ |
 | `@supabase/supabase-js` als Abhängigkeit | ✅ |
 | `tools/verify-rls.mts` — 31 funktionale RLS-Prüfungen, `npm run verify:rls` | ✅ **ausgeführt, 31/31 bestanden** |
+| `src/lib/catalog/slug.ts` — Slug-Regel nach ADR-0011, 15 Unit-Tests | ✅ |
+| `tools/import-catalog.mts` — Katalogimport, `npm run catalog:import` | ✅ **ausgeführt**, 636 Zeilen geschrieben |
+| Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
+| `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
+| `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
+| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 
 ## Noch nicht implementiert
@@ -90,6 +101,52 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, V1.3 — Katalogimport ausgeführt und verifiziert:**
+
+Eingabe: `products.json` vom Legacy-Build am 2026-09-04 07:40. Gegenüber dem vorherigen
+Snapshot (2026-08-10 23:50) änderte sich **ausschließlich das Feld `generated`** — 0 Artikel
+neu oder entfallen, 0 geänderte Namen, Preise, Bilder, Serien oder Kategorien. Die 475 WebP
+waren bereits identisch.
+
+| Prüfung nach dem Apply | Ergebnis |
+|---|---|
+| `series` | ✅ 6 |
+| `categories` | ✅ 30 |
+| `skylanders` | ✅ 600 |
+| `profiles` | ✅ **0, unverändert** |
+| `collection_items` | ✅ **0, unverändert** |
+| eindeutige SKY-IDs | ✅ 600 |
+| eindeutige Slugs | ✅ 600 |
+| mit Preis / ohne | ✅ 585 / 15 |
+| Bildzuordnungen / ohne | ✅ 534 / 66 |
+| verschiedene Bilddateien | ✅ 475 (44 werden geteilt) |
+| SKY-ID- und Slug-Format | ✅ alle gültig |
+| kein Preis ≤ 0 | ✅ |
+| nur die 6 öffentlichen Serien | ✅ G, I, SA, SC, SF, T |
+| kein interner Namenssuffix (`- BESCHÄDIGT` usw.) | ✅ |
+| jede Figur hat eine Kategorie | ✅ |
+| **Summe** | **18/18** |
+
+**Idempotenz belegt:** Zweiter Dry-Run unmittelbar danach → `series new 0 / changed 0 /
+unchanged 6`, `categories 0 / 0 / 30`, `figures 0 / 0 / 600`. Alle 600 Slugs kamen aus der
+Datenbank statt neu berechnet zu werden — die Stabilitätsregel aus ADR-0011 greift nachweislich.
+
+**Dry-Run und Validierung vor dem Apply:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| Eingabe `data/catalog/products.json` | ✅ 6 Serien, 600 Artikel, Stand 2026-08-10 23:50 |
+| Strukturvalidierung, Identität, Kategorien, Preise, Bildnamen | ✅ 0 Fehler, 0 Warnungen |
+| Bildreferenzen | ✅ 475 referenziert, 475 auf der Platte vorhanden |
+| Artikel mit Preis / mit Bild | ✅ 585 / 534 (entspricht dem Legacy-Export) |
+| Slugs nach ADR-0011 | ✅ 515 aus dem Namen, 85 mit Serie qualifiziert, 0 mit SKY-ID, **600 eindeutig** |
+| Geplante Änderungen | 6 neue Serien, 30 neue Kategorien, 600 neue Figuren, 0 geändert |
+| Ablehnung kaputter Eingaben | ✅ 9 von 9 Fixtures mit Exit-Code 1 und präziser Meldung abgelehnt |
+| `--validate-only` ohne Datenbankzugriff | ✅ belegt |
+| Unit-Tests der Slug-Regel | ✅ 15/15 (`npm test`) |
+
+
 
 **2026-09-04, V1.2C — funktionaler RLS-Test mit zwei echten JWT-Sessions:**
 
@@ -186,8 +243,10 @@ read-only; sie wurden zuletzt am 2026-08-11 grün gemeldet.
   brauchen mit dem Auth-UI (V1.4) eine eigene Verifikation.
 - **Der Registrierungsablauf aus Benutzersicht.** Bestätigungsmail, Callback und Passwort-Reset
   sind nie durchlaufen worden; der Test hat die Benutzer über die Admin-API angelegt.
-- **Katalogimport.** Es sind nie echte Katalogdaten in der Datenbank gewesen — nur eine
-  Testfixture aus drei Zeilen, die wieder entfernt wurde.
+- **Echte Atomarität des Imports.** Der Supabase-JS-Client kann keine Transaktion über mehrere
+  Anweisungen aufspannen. Für den Erstimport in die leere Datenbank ist das ausdrücklich
+  akzeptiert; vor regelmäßigen produktiven Importen wird es erneut bewertet
+  (`docs/DATABASE.md`, Abschnitt 6).
 - Keine Supabase CLI initialisiert, kein Remote-Link (die Migration lief über den SQL-Editor).
 
 ---
@@ -265,21 +324,16 @@ Keine davon blockiert V1.2.
 |---|---|---|
 | 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
 | 0016 | Darf ein Benutzername später geändert werden? | V1.4 |
-| 0013 | Unit-Test-Werkzeug (Vitest naheliegend) | erste testbare Geschäftslogik |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
 
 ---
 
 ## Nächster geplanter Schritt
 
-**V1.3 — Katalogimport.** Das Importwerkzeug `tools/import-catalog.ts` bauen: den validierten
-öffentlichen Legacy-Export einlesen, per `sky_id` upserten, vorher als Dry-Run anzeigen und in
-einer Transaktion schreiben. Regeln vollständig in `docs/SKYLANDERS_DATA.md`, Abschnitt 12.
+**V1.4 — Auth + `@supabase/ssr`.** Registrierung, E-Mail-Bestätigung, Login, Logout,
+Passwort vergessen/Reset, Onboarding mit eindeutigem Benutzernamen, geschützter Bereich.
+Danach V1.5 mit dem vollständigen End-to-End-Fluss (ADR-0023).
 
-Danach folgt V1.4 (Auth + `@supabase/ssr`), dann V1.5 mit dem vollständigen
-End-to-End-Fluss (ADR-0023).
-
-Die Slug-Regel ist entschieden und an den echten Daten verifiziert (ADR-0011) — es blockiert
-nichts mehr.
+Zu klären vor V1.4: ob ein Benutzername später geändert werden darf (ADR-0016).
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**
