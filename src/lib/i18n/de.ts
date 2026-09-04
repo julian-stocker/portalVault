@@ -59,6 +59,11 @@ export const de = {
       count === 1
         ? "1 Figur in deiner Sammlung ist nicht mehr im Katalog."
         : `${count} Figuren in deiner Sammlung sind nicht mehr im Katalog.`,
+    remove: "Entfernen",
+    removeLabel: (name: string) => `${name} aus der Sammlung entfernen`,
+    removed: "Entfernt",
+    undo: "Rückgängig",
+    removeFailed: "Konnte nicht entfernt werden.",
     empty: "Deine Sammlung ist noch leer.",
     emptyHint: "Öffne den Katalog und tippe die Figuren an, die du besitzt.",
     emptyAction: "Zum Katalog",

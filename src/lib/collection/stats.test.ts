@@ -29,6 +29,78 @@ function entry(
   return { figure, quantity };
 }
 
+/** Mirrors what CollectionView does when a card is removed optimistically. */
+function withoutFigures(entries: CollectionEntry[], removed: ReadonlySet<number>): CollectionEntry[] {
+  return entries.filter((_, index) => !removed.has(index));
+}
+
+describe("statistics after removing a figure", () => {
+  it("drops count, pieces, progress and value together", () => {
+    const entries = [entry(10), entry(20, 2), entry(5)];
+    const before = collectionStats(entries, 561);
+    expect(before).toMatchObject({ distinctFigures: 3, totalPieces: 4, estimatedValue: 55 });
+
+    const after = collectionStats(withoutFigures(entries, new Set([1])), 561);
+    expect(after.distinctFigures).toBe(2);
+    expect(after.totalPieces).toBe(2);
+    expect(after.estimatedValue).toBe(15);
+    expect(after.progress).toBeCloseTo(2 / 561);
+    expect(after.progress).toBeLessThan(before.progress);
+  });
+
+  it("removing a priceless figure lowers the count but not the value", () => {
+    const entries = [entry(10), entry(null)];
+    const before = collectionStats(entries, 561);
+    expect(before).toMatchObject({ distinctFigures: 2, estimatedValue: 10, withoutPrice: 1 });
+
+    const after = collectionStats(withoutFigures(entries, new Set([1])), 561);
+    expect(after.distinctFigures).toBe(1);
+    expect(after.estimatedValue).toBe(10);
+    // The note about priceless figures disappears with the last one.
+    expect(after.withoutPrice).toBe(0);
+  });
+
+  it("removing a figure held more than once removes all of its pieces", () => {
+    // V1.5 deletes the whole row; there is no quantity control yet.
+    const entries = [entry(12.5, 4), entry(10)];
+    expect(collectionStats(entries, 561)).toMatchObject({ totalPieces: 5, estimatedValue: 60 });
+
+    const after = collectionStats(withoutFigures(entries, new Set([0])), 561);
+    expect(after.totalPieces).toBe(1);
+    expect(after.estimatedValue).toBe(10);
+    expect(after.distinctFigures).toBe(1);
+  });
+
+  it("removing an inactive figure works and clears its note", () => {
+    const entries = [entry(10, 1, false), entry(10)];
+    expect(collectionStats(entries, 561).inactiveOwned).toBe(1);
+
+    const after = collectionStats(withoutFigures(entries, new Set([0])), 561);
+    expect(after.inactiveOwned).toBe(0);
+    expect(after.distinctFigures).toBe(1);
+  });
+
+  it("removing the last figure returns to the empty state", () => {
+    const after = collectionStats(withoutFigures([entry(10)], new Set([0])), 561);
+    expect(after).toMatchObject({
+      distinctFigures: 0,
+      totalPieces: 0,
+      progress: 0,
+      estimatedValue: 0,
+      withoutPrice: 0,
+    });
+  });
+
+  it("undoing a removal restores the numbers exactly", () => {
+    const entries = [entry(10), entry(20)];
+    const full = collectionStats(entries, 561);
+    const reduced = collectionStats(withoutFigures(entries, new Set([0])), 561);
+    const restored = collectionStats(withoutFigures(entries, new Set()), 561);
+    expect(reduced.estimatedValue).toBe(20);
+    expect(restored).toEqual(full);
+  });
+});
+
 describe("collectionStats", () => {
   it("counts distinct figures and total pieces separately", () => {
     const stats = collectionStats([entry(10, 3), entry(5, 2)], 600);

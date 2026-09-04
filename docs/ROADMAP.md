@@ -157,6 +157,9 @@ Automatisiert und in einem manuellen Browser-Durchlauf über 34 Punkte verifizie
 - Detailseite `/skylanders/<slug>` — minimal, nur kanonische Daten
 - **`/collection`** (geschützt): Anzahl unterschiedlicher Figuren, Gesamtzahl aktiver
   Katalogfiguren, Fortschritt, Sammlungswert aus `market_price`, Figurenraster
+- **Entfernen an jeder gesammelten Figur, auch auf `/collection`** (ADR-0031) — kein
+  Bestätigungsdialog, dafür „Rückgängig" an der abgeblendeten Karte; die Zahlen rechnen
+  sofort mit. Dieselbe Server Action wie im Katalog, keine eigene Toggle-Logik
 - `/dashboard` leitet auf `/collection` weiter, damit alte Links nicht brechen
 - Fehlendes Bild → stabiler Platzhalter · fehlender Preis → `–` und nicht in der Wertsumme
 - Bereits besessene, inaktive Figuren verschwinden **nicht** still aus der Sammlung
@@ -164,7 +167,8 @@ Automatisiert und in einem manuellen Browser-Durchlauf über 34 Punkte verifizie
 - **SkyIsles** als sichtbarer Produktname (ADR-0028)
 
 **Nicht in V1.5:** Mengen-/Duplikat-UI (`quantity` wird aber in allen Berechnungen korrekt
-berücksichtigt) · weitere Sammlungsansichten · Fortschritt je Serie · Playwright.
+berücksichtigt; Entfernen löscht deshalb immer die ganze Zeile) · weitere Sammlungsansichten ·
+Fortschritt je Serie · Playwright.
 
 ### V1.6 Ausbau
 
@@ -174,7 +178,9 @@ berücksichtigt) · weitere Sammlungsansichten · Fortschritt je Serie · Playwr
 - Filter und Sortierung innerhalb der eigenen Sammlung
 - **Playwright**, sobald die Sammlungs-UX steht (ADR-0013)
 - **Mengen/Duplikate technisch unterstützen** (Prinzip 9) — das Datenmodell kann es bereits
-  (`collection_items.quantity`, ADR-0005). **Ob Free oder Premium: offen** (ADR-0022)
+  (`collection_items.quantity`, ADR-0005). **Ob Free oder Premium: offen** (ADR-0022).
+  Dabei die offene Grenze aus ADR-0031 mitlösen: Entfernen löscht heute die ganze Zeile und
+  ein „Rückgängig" fügt mit `quantity: 1` wieder ein — mit einer Mengen-UI wäre das Datenverlust
 - **Mobile-Feinschliff**
 - Weitere Collection-UX: Filter und Suche innerhalb der eigenen Sammlung, Sortierung
 - Kennzahlen: verschiedene Figuren, Gesamtanzahl

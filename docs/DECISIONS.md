@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-03 (V1.2B Pre-Flight-Review).
+Letzte Aktualisierung: 2026-09-04 (ADR-0031, Entfernen aus der Sammlung).
 
 ---
 
@@ -1118,3 +1118,56 @@ dieselbe Figur.
 `(2)` oder `(Clear Crystal)`, und der Tippfehler `Legendary Grim Creemper`. Alles eigene
 Datenqualitätsfälle.
 
+
+---
+
+## ADR-0031 — Entfernen ist rückgängig zu machen, statt bestätigt zu werden
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Problem.** Eine Figur ließ sich nur im Katalog wieder entfernen. Wer in seiner Sammlung
+stand und einen Fehleintrag sah, musste erst zurück in den Katalog navigieren und die Figur
+dort suchen. Auf `/collection` fehlte die Aktion vollständig.
+
+**Entscheidung.** Jede gesammelte Figur trägt auf `/collection` eine eigene Remove-Aktion.
+Ein Bestätigungsdialog gibt es **nicht**. Stattdessen bleibt die entfernte Karte stehen —
+abgeblendet, mit „Rückgängig".
+
+### Warum kein Dialog
+
+Ein Dialog schützt vor **unumkehrbaren** Aktionen. Diese ist umkehrbar: Ein Tipp stellt den
+Eintrag wieder her, und `collection_items` trägt außer der Menge keine Daten, die verloren
+gehen könnten. Ein Dialog würde hier jeden absichtlichen Klick bestrafen, um den seltenen
+versehentlichen abzufangen — auf dem Handy, wo entfernt wird, doppelt lästig.
+
+Der Fehlgriff wird stattdessen an der Quelle verhindert: **44 px Mindesthöhe** (`min-h-11`)
+für die Schaltfläche, und sie liegt außerhalb des Kartenlinks, damit ein Tipp darauf nicht
+zur Detailseite führt.
+
+### Keine neue Serverlogik
+
+Beide Wege rufen dieselbe Server Action `setCollected(skyId, collected)`. Sie war bereits
+vollständig korrekt und wurde **nicht angefasst**:
+
+- Sie nennt den **Zielzustand**, nicht „umschalten" — schnelles Mehrfachtippen kann daher
+  keinen Zählerdrift erzeugen (ADR-0027).
+- Das `DELETE` filtert nur auf `user_id` und `sky_id`. Kein `is_active`-Filter: eine nicht
+  mehr erhältliche Figur bleibt entfernbar. Kein Mengenfilter: die **ganze Zeile** geht,
+  auch bei `quantity > 1`.
+- Ein `DELETE` ohne Treffer meldet keinen Fehler — das Entfernen ist idempotent.
+
+### Die Zahlen rechnen im Client mit
+
+`/collection` ist eine dünne Server-Komponente; Zählung, Fortschritt, Sammlungswert und die
+Hinweise („ohne Preis", „nicht mehr erhältlich") entstehen in `CollectionView` aus
+**derselben** getesteten Funktion `collectionStats`, die auch der Server benutzt. Optimistische
+Ansicht und neu geladene Seite können deshalb nicht auseinanderlaufen. Scheitert der
+Serveraufruf, wird die Karte zurückgesetzt und ein Fehler an der Schaltfläche angezeigt.
+
+**Bekannte Grenze.** Ein „Rückgängig" fügt mit `quantity: 1` wieder ein. Bei einer Figur mit
+`quantity > 1` ginge die Menge verloren. Heute existiert keine solche Zeile und V1.5 hat keine
+Mengen-UI — **mit der Mengen-UI in V1.6 muss das mit gelöst werden.**
+
+**Verworfen:** Bestätigungsdialog (bestraft den Normalfall) · Toast mit Undo (verschwindet
+nach Sekunden, auf dem Handy leicht zu verpassen) · sofortiges Ausblenden der Karte (nimmt dem
+Rückgängig den Ankerpunkt) · Mengen-Stepper (gehört zu V1.6, nicht in diese Änderung).

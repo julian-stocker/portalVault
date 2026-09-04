@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-03 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-04 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -35,6 +35,12 @@ Sammlungswert, gemeinsame responsive Navigation. Die sichtbare Anwendung heißt 
 
 Damit steht der **erste vollständige End-to-End-Produktfluss**: Katalog öffnen → Figur finden →
 antippen → anmelden → eigene Sammlung sehen.
+
+**Nachtrag 2026-09-04 — Entfernen ist vollständig (ADR-0031).** Eine Figur lässt sich jetzt
+auch **auf `/collection`** direkt entfernen, ohne den Umweg über den Katalog. Ohne
+Bestätigungsdialog, dafür mit „Rückgängig" an der abgeblendeten Karte und 44 px Tippfläche.
+Zählung, Fortschritt, Sammlungswert und die Hinweiszeilen aktualisieren sich sofort mit.
+Die Server Action `setCollected` war bereits korrekt und wurde **nicht verändert**.
 
 **V1.4 abgeschlossen und vollständig verifiziert.** Auth steht: Registrierung,
 E-Mail-Bestätigung, Login, Logout, Passwort vergessen und zurücksetzen, Onboarding mit
@@ -80,7 +86,7 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
 | `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
 | `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
-| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 46 Tests |
+| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 136 Tests |
 | `@supabase/ssr`, Browser-/Server-/Proxy-Clients | ✅ |
 | Auth-Routen: Registrierung, Login, Logout, Bestätigung, Passwort-Reset | ✅ |
 | Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
@@ -91,6 +97,7 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Owned-Toggle, Mutation als Endzustand (ADR-0027) | ✅ |
 | Detailseite `/skylanders/<slug>` | ✅ |
 | `/collection` mit Fortschritt und Sammlungswert | ✅ |
+| Entfernen im Katalog **und** auf `/collection`, mit Rückgängig (ADR-0031) | ✅ |
 | Gemeinsame responsive Navigation, mobile-first | ✅ |
 | SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
@@ -100,12 +107,10 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 - `@supabase/ssr` und die Cookie-basierte Session-Anbindung in Next.js — **bewusst offen**,
   kommt mit dem Auth-UI (V1.4); für den RLS-Test war sie nicht nötig
 - Supabase CLI (nicht initialisiert, kein Remote-Link — Migration lief über den SQL-Editor)
-- Import-Werkzeug, importierte Katalogdaten, kopierte Bilder
-- Katalog-UI, Suche, Filter, Figurenseiten
-- Auth, Profile, Onboarding, geschützte Routen
-- Sammlung, Fortschritt, Sammlungswert
-- Unit-Tests, RLS-Tests
-- Navigation, Fehler- und Ladezustände (kommen mit dem Katalog-UI)
+- Mengen-/Duplikat-UI — `quantity` wird korrekt gerechnet, ist aber nicht bedienbar (V1.6).
+  Entfernen löscht deshalb immer die ganze Zeile, und ein „Rückgängig" setzt auf 1 zurück
+- LightCore-Normalisierung und weitere Datenqualitätsfälle (ADR-0030, „bewusst nicht behandelt")
+- Playwright-End-to-End-Tests (ADR-0013, sobald die Sammlungs-UX steht)
 - Vercel-Projekt, Deployment
 
 ---
@@ -114,11 +119,11 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 
 | Bereich | Zustand |
 |---|---|
-| Frontend | Grundgerüst lauffähig, eine statische Seite |
+| Frontend | Katalog, Detailseiten, Auth-UI und Sammlung lauffähig; 15 Routen im Build |
 | Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
 | Auth | Kein UI. Die Datenbankseite ist fertig und funktional verifiziert: Trigger, Policies und Rechte greifen nachweislich (`tools/verify-rls.mts`, 31/31). Konzept in `docs/AUTH.md` |
 | Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
-| Tests | Lint / Typecheck / Build plus der funktionale RLS-Test (`npm run verify:rls`). Unit-Tests folgen mit der ersten Geschäftslogik (ADR-0013) |
+| Tests | Lint / Typecheck / Build, 136 Unit-Tests (`npm test`) und der funktionale RLS-Test (`npm run verify:rls`, 31/31) |
 
 Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
 ADR-0015). Vercel ist weiterhin nicht eingerichtet.
@@ -128,6 +133,25 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, Entfernen aus der Sammlung (ADR-0031) — technisch verifiziert:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `npm test` | ✅ 136 Tests (11 Dateien), davon 19 neu für das Entfernen |
+| `npm run verify:rls` | ✅ 31/31 |
+| lint / typecheck / build | ✅ alle exit 0, 15 Routen |
+| Smoke-Test am Datenweg, echte Session, RLS aktiv | ✅ 23/23 Prüfungen |
+| → hinzufügen → neu lesen → im Katalog entfernen → erneut hinzufügen → auf `/collection` entfernen | ✅ jeder Schritt wirksam |
+| → zweimal hinzufügen, zweimal entfernen | ✅ kein Fehler, keine Doppelzeile, idempotent |
+| → Figur ohne `market_price` | ✅ hinzufügbar und entfernbar |
+| → Figur mit `quantity = 4` | ✅ die **ganze Zeile** verschwindet, nicht ein Stück |
+| → nicht mehr erhältliche Figur (`is_active = false`) | ✅ entfernbar — eigens angelegte Testfigur, danach entfernt |
+| Sammlung nach dem Durchlauf | ✅ 0 Zeilen, Testkonten gelöscht, `skylanders` wieder 600 |
+
+Der Smoke-Test lief als eigenständiges Skript im Scratchpad, nicht im Repository. **Nicht
+verifiziert:** der Browser-Durchlauf mit echtem Tippen auf dem Handy — Tippfläche (44 px),
+Abblenden und „Rückgängig" sind nur im Code belegt, nicht visuell.
 
 **2026-09-04, V1.5 — Katalog und Sammlung, technisch verifiziert:**
 
@@ -397,6 +421,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0011** | **Slug-Regel vollständig, an den echten 600 Artikeln verifiziert** |
 | **0016** | **Benutzernamen sind änderbar; die UUID ist die Identität, `username` nie Schlüssel** |
 | 0024 | Marktpreise gehören PortalVault; externe Quellen über stabile Kennung (Handle) statt Name — Umsetzung nach V1 |
+| **0031** | **Entfernen ohne Bestätigungsdialog, dafür rückgängig zu machen; keine neue Toggle-Serverlogik** |
 
 ## Offene Entscheidungen
 
@@ -412,7 +437,8 @@ Keine davon blockiert V1.2.
 ## Nächster geplanter Schritt
 
 **V1.6 — Ausbau.** Weitere Sammlungsansichten (kompakt, Tabelle), Fortschritt je Serie,
-Mengen-/Duplikat-UI, Kategorie-Zwischenüberschriften im Katalog, Filter und Sortierung
+Mengen-/Duplikat-UI (**dabei die offene Grenze aus ADR-0031 mitlösen: ein „Rückgängig" setzt
+die Menge heute auf 1 zurück**), Kategorie-Zwischenüberschriften im Katalog, Filter und Sortierung
 innerhalb der Sammlung, Mobile-Feinschliff. Und Playwright, sobald die Sammlungs-UX steht
 (ADR-0013).
 
