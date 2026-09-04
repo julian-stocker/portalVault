@@ -54,11 +54,18 @@ Es gibt genau **vier** Bereiche, und die Grenzen zwischen ihnen sind bewusst har
 |---|---|---|---|
 | **Legacy** (`../webpage`) | Excel, Lager, Order/EÜR, Mappings, Masterbilder | nur der Nutzer, lokal | Claude nur lesend |
 | **Öffentlicher Katalog** (Postgres `skylanders`, `series`, `categories`) | Name, Serie, Kategorie, Marktpreis, Bild | Import-Werkzeug (Service Role) | alle, auch anonym |
+| **Charaktermetadaten** (Postgres `characters`) | Element, Spezies, Rolle, eigene Kurzbeschreibung, Quelle | Kuratierungswerkzeug (Service Role) | alle, auch anonym |
 | **Benutzerdaten** (Postgres `profiles`, `collection_items`) | Profil, Sammlung | der jeweilige Benutzer | der jeweilige Benutzer (RLS) |
 | **Secrets** (`.env.local`, Vercel/Supabase-Konsole) | Keys | nur der Nutzer | niemand sonst |
 
 **Regel:** Daten fließen nur in eine Richtung — Legacy → Katalog. Es fließt **nichts** von
 PortalVault zurück in die Excel. Damit gibt es für jedes Feld genau einen Schreiber.
+
+**Charaktermetadaten sind ein zweiter, getrennter Eingang** und stammen nicht aus dem
+Legacy-System: `data/characters/characters.json` → `tools/import-characters.mts` →
+`characters`. Auch hier hat jedes Feld genau einen Schreiber — der Katalogimport kennt
+`character_id` nicht, das Kuratierungswerkzeug rührt Name, Preis und Bild nicht an
+(ADR-0034).
 
 ### Ein späterer fünfter Bereich: die Shop-Domäne
 
@@ -211,6 +218,17 @@ verlässlich.
 Browser → Next.js Server Component / Server Action → Supabase (ANON-Key + Session) → RLS prüft
 `auth.uid()` → Postgres. Kein eigener Backend-Service, keine eigene API-Schicht dazwischen.
 
+### Charaktermetadaten (selten, manuell, kuratiert)
+
+```
+öffentliche Quelle (Faktenprüfung)  →  Mensch  →  data/characters/characters.json
+      →  npm run characters:import -- --apply  →  characters + skylanders.character_id
+```
+
+Kein Scraping, keine automatische Zuordnung, keine Namensheuristik. Beschreibungen entstehen
+bei SkyIsles selbst. Das Werkzeug prüft vollständig, bevor es schreibt, löscht nie und setzt
+keine bestehende Verknüpfung zurück.
+
 ### Marktpreise
 
 V1: der importierte Wert aus der Excel. Später optional Preisverlauf; die Anwendung liest den
@@ -259,7 +277,8 @@ Client-Code.
 | Komponente | verantwortlich für | ausdrücklich nicht |
 |---|---|---|
 | Legacy `../webpage` | Excel-Pflege, interne Geschäftsdaten, Masterbilder, Preisupdate | Benutzerkonten, Sammlungen |
-| `tools/import-catalog.ts` | Katalogdaten in die DB bringen, validieren | Benutzerdaten anfassen |
+| `tools/import-catalog.ts` | Katalogdaten in die DB bringen, validieren | Benutzerdaten oder `character_id` anfassen |
+| `tools/import-characters.mts` | kuratierte Charakterdaten anwenden | Katalogfelder ändern, Verknüpfungen löschen, Namen raten |
 | Postgres + RLS | Datenhaltung **und** Zugriffsschutz | Präsentationslogik |
 | Next.js Server | Rendern, Auth-Callback, Datenzugriff im Benutzerkontext | Autorisierungsentscheidungen ersetzen |
 | Client Components | Interaktion, Anzeige | Sicherheitsentscheidungen |

@@ -48,3 +48,20 @@ export function formatNumber(value: number | null | undefined): string {
 export function formatPercent(value: number | null | undefined): string {
   return percentFormat.format(typeof value === "number" ? value : 0);
 }
+
+const dateFormat = new Intl.DateTimeFormat(LOCALE, {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/**
+ * Formats an ISO date (YYYY-MM-DD).
+ *
+ * Parsed as UTC noon rather than midnight: a date-only string is midnight UTC,
+ * which in a negative-offset timezone would render as the previous day.
+ */
+export function formatDate(value: string | null | undefined): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "–";
+  return dateFormat.format(new Date(`${value}T12:00:00Z`));
+}

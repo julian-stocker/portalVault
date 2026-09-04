@@ -17,6 +17,9 @@
  *   - Nothing is ever deleted. Figures missing from the export are reported
  *     and left untouched (docs/SKYLANDERS_DATA.md, import rule 3).
  *   - profiles and collection_items are never touched.
+ *   - skylanders.character_id is never touched: the upsert names only the
+ *     columns the export owns, and curated character links are not among
+ *     them (ADR-0034).
  *
  * The service role is required because the catalog is deliberately not
  * writable by any client role (ADR-0016).
@@ -499,6 +502,14 @@ async function main(): Promise<void> {
     if (id === undefined) {
       throw new Error(`${item.id}: no category id for ${item.series}/${item.category} - aborting before write`);
     }
+    // The payload names exactly the columns the legacy export owns. PostgREST
+    // turns this into ON CONFLICT DO UPDATE SET for these columns and no
+    // others, so anything not listed here survives an import untouched.
+    //
+    // character_id is deliberately absent. Character metadata is curated by
+    // hand (data/characters/characters.json, ADR-0034) and the legacy export
+    // knows nothing about it — adding it here would wipe the curation on the
+    // next run. src/lib/catalog/import-payload.test.ts pins this list.
     figures.push({
       sky_id: item.id,
       name: item.name,

@@ -21,6 +21,7 @@ function figure(
     marketPrice: null,
     imageFile: null,
     isActive: true,
+    characterId: null,
     displayName: variant ? `${variant.base} (${variant.label})` : name,
     sortBaseName: variant ? variant.base : name,
     sortVariantLabel: variant ? variant.label : null,

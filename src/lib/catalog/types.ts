@@ -37,6 +37,14 @@ export type CatalogFigure = {
   /** Content-addressed WebP file name, or null when no image exists. */
   imageFile: string | null;
   isActive: boolean;
+  /**
+   * Curated character link, or null.
+   *
+   * NULL is the normal case, not missing data: traps, vehicles, crystals and
+   * magic items are not characters at all, and only a curated subset of the
+   * figures is assigned so far. Never derived from the name (ADR-0034).
+   */
+  characterId: number | null;
 };
 
 export type SeriesOption = {

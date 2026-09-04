@@ -83,6 +83,32 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
 **Nichts davon ist implementiert.** Es gibt keine Shop-Tabelle, keinen Shop-Import und keine
 Shop-Rolle.
 
+### `data/characters/characters.json` gehört ausdrücklich **nicht** auf die Verbotsliste
+
+Diese Datei liegt im Repository und darf das. Sie ist **öffentliche Produktinformation über
+Spielfiguren** — Element, Spezies, Produktlinie, eine selbst geschriebene Kurzbeschreibung und
+eine Quellenangabe. Sie ist mit den privaten Legacy-Geschäftsdaten aus Abschnitt 2 **nicht
+gleichzusetzen**.
+
+| | `data/characters/characters.json` | `data/inventory.json`, Excel D/E/F, Order, EÜR |
+|---|---|---|
+| Inhalt | Charaktermetadaten der Marke | Lagerzahlen, Käufer, Buchhaltung |
+| Herkunft | von Hand kuratiert, gegen öffentliche Quellen geprüft | interne Geschäftsführung |
+| Wäre sie öffentlich ein Problem? | **nein** — sie wird ohnehin ausgeliefert | **ja** |
+| Im Repository | **erlaubt** | **verboten** |
+
+**Was auch für diese Datei unverändert gilt:**
+
+1. **Keine Stückzahlen, keine Preise, keine Käufer, keine Bestellungen** — sie enthält
+   ausschließlich die in `docs/DATABASE.md` Abschnitt 3.0 aufgeführten Felder.
+2. **Keine übernommenen Fremdtexte.** Externe Quellen dienen der Faktenprüfung. Jede
+   Beschreibung ist selbst formuliert, und der CHECK auf 600 Zeichen setzt das strukturell
+   durch statt per Richtlinie (ADR-0034).
+3. **Kein Scraping.** Quellen werden gelesen und als `source_url` vermerkt, nicht automatisiert
+   abgeerntet.
+4. **Sie fließt nicht über den Katalogpfad.** `products.json` und `characters.json` sind zwei
+   getrennte Eingänge mit zwei getrennten Werkzeugen.
+
 ---
 
 ## 3. Row Level Security

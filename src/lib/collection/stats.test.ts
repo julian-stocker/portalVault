@@ -25,6 +25,7 @@ function entry(
     sortVariantLabel: null,
     searchIndex: "drobot",
     isActive,
+    characterId: null,
   };
   return { figure, quantity };
 }

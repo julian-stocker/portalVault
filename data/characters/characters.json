@@ -1,0 +1,294 @@
+{
+  "note": "Curated SkyIsles character metadata. Public product information only - no business data, no stock, no buyers, no prices. Facts checked against the source named per character; every short_description is written by SkyIsles and copied from nowhere. NULL means 'not reliably known', never 'none'. Applied with: npm run characters:import -- --apply",
+  "characters": [
+    {
+      "canonical_name": "Drobot",
+      "element": "Tech",
+      "species": "Drache",
+      "role_type": "core",
+      "short_description": "Ein Tech-Drache, der in einem selbst gebauten Roboteranzug aus Arkeyan-Technik kämpft. Sein Anzug trägt Laser und eine gepanzerte Flügelkonstruktion; angetrieben wird er von Neugier und Logik.",
+      "source_url": "https://skylanders.fandom.com/wiki/Drobot",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0028", "SKY-0156", "SKY-0157"]
+    },
+    {
+      "canonical_name": "Spyro",
+      "element": "Magic",
+      "species": "Purpurdrache",
+      "role_type": "core",
+      "short_description": "Der violette Drache, der der ersten Serie ihren Namen gab. Purpurdrachen sind in Skylands selten und können die Kräfte der übrigen Elemente anzapfen - Spyro selbst bleibt am liebsten beim Feuer.",
+      "source_url": "https://skylanders.fandom.com/wiki/Spyro",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0053",
+        "SKY-0054",
+        "SKY-0055",
+        "SKY-0056",
+        "SKY-0057",
+        "SKY-0058",
+        "SKY-0177",
+        "SKY-0285",
+        "SKY-0286"
+      ]
+    },
+    {
+      "canonical_name": "Gill Grunt",
+      "element": "Water",
+      "species": "Gillman",
+      "role_type": "core",
+      "short_description": "Ein Gillman und einer der drei Skylander aus dem allerersten Starter Pack. Er kämpft mit Harpune und Wasserstrahl und gilt als jemand, der niemals aufgibt.",
+      "source_url": "https://skylanders.fandom.com/wiki/Gill_Grunt",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0038",
+        "SKY-0039",
+        "SKY-0040",
+        "SKY-0041",
+        "SKY-0042",
+        "SKY-0162",
+        "SKY-0163",
+        "SKY-0270",
+        "SKY-0368",
+        "SKY-0467"
+      ]
+    },
+    {
+      "canonical_name": "Stealth Elf",
+      "element": "Life",
+      "species": "Elfe",
+      "role_type": "core",
+      "short_description": "Eine Elfen-Ninja, die seit der ersten Serie dabei ist. Sie kämpft mit zwei Dolchen und kann sich dabei kurzzeitig unsichtbar machen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Stealth_Elf",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0059",
+        "SKY-0060",
+        "SKY-0061",
+        "SKY-0062",
+        "SKY-0178",
+        "SKY-0179",
+        "SKY-0287",
+        "SKY-0288",
+        "SKY-0489",
+        "SKY-0490"
+      ]
+    },
+    {
+      "canonical_name": "Trigger Happy",
+      "element": "Tech",
+      "species": "Gremlin",
+      "role_type": "core",
+      "short_description": "Ein Gremlin-Revolverheld aus dem ersten Starter Pack. Er verschießt Goldmünzen als Munition und schießt grundsätzlich zuerst.",
+      "source_url": "https://skylanders.fandom.com/wiki/Trigger_Happy",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0069",
+        "SKY-0070",
+        "SKY-0071",
+        "SKY-0072",
+        "SKY-0073",
+        "SKY-0182",
+        "SKY-0271",
+        "SKY-0272",
+        "SKY-0470",
+        "SKY-0471"
+      ]
+    },
+    {
+      "canonical_name": "Eruptor",
+      "element": "Fire",
+      "species": "Lavawesen",
+      "role_type": "core",
+      "short_description": "Ein Lavawesen aus der ersten Serie, das Magma spuckt und im Nahkampf mit bloßen Fäusten arbeitet. Für ein Geschöpf aus flüssigem Gestein gilt er als ausgesprochen besonnen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Eruptor",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0029",
+        "SKY-0030",
+        "SKY-0031",
+        "SKY-0032",
+        "SKY-0158",
+        "SKY-0159",
+        "SKY-0283",
+        "SKY-0284",
+        "SKY-0479"
+      ]
+    },
+    {
+      "canonical_name": "Hot Dog",
+      "element": "Fire",
+      "species": "Feuerhund",
+      "role_type": "core",
+      "short_description": "Ein junger Feuerhund, eingeführt mit Giants. Seine außergewöhnlich empfindliche Nase spürt Ärger über weite Entfernungen auf.",
+      "source_url": "https://skylanders.fandom.com/wiki/Hot_Dog",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0136",
+        "SKY-0137",
+        "SKY-0138",
+        "SKY-0274",
+        "SKY-0275",
+        "SKY-0276",
+        "SKY-0277"
+      ]
+    },
+    {
+      "canonical_name": "Pop Fizz",
+      "element": "Magic",
+      "species": "Gremlin",
+      "role_type": "core",
+      "short_description": "Ein blauer Gremlin-Alchemist, eingeführt mit Giants. Er braut Tränke und trinkt sie meist gleich selbst, was ihn kurzzeitig in eine deutlich wildere Gestalt verwandelt.",
+      "source_url": "https://skylanders.fandom.com/wiki/Pop_Fizz",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0142",
+        "SKY-0143",
+        "SKY-0144",
+        "SKY-0290",
+        "SKY-0363",
+        "SKY-0364",
+        "SKY-0463",
+        "SKY-0464"
+      ]
+    },
+    {
+      "canonical_name": "Chill",
+      "element": "Water",
+      "species": null,
+      "role_type": "core",
+      "short_description": "Ehemalige Gardistin des Eiskönigreichs und Leibwächterin der Schneekönigin, eingeführt mit Giants. Sie kämpft mit Eislanze und Schild. Ihre Spezies ist nicht gesichert - der Helm verdeckt die Ohren, und die Quelle legt sich ausdrücklich nicht fest.",
+      "source_url": "https://skylanders.fandom.com/wiki/Chill",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0128", "SKY-0129", "SKY-0130", "SKY-0273"]
+    },
+    {
+      "canonical_name": "Whirlwind",
+      "element": "Air",
+      "species": "Drache-Einhorn-Mischling",
+      "role_type": "core",
+      "short_description": "Halb Luftdrache, halb Einhorn - und deshalb lange von beiden Seiten gemieden. Ihr Markenzeichen ist ein Regenbogenangriff, den sie aus Gewitterwolken gelernt hat.",
+      "source_url": "https://skylanders.fandom.com/wiki/Whirlwind",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": [
+        "SKY-0081",
+        "SKY-0082",
+        "SKY-0083",
+        "SKY-0084",
+        "SKY-0085",
+        "SKY-0183",
+        "SKY-0184",
+        "SKY-0279",
+        "SKY-0280"
+      ]
+    },
+    {
+      "canonical_name": "Bash",
+      "element": "Earth",
+      "species": "Felsendrache",
+      "role_type": "core",
+      "short_description": "Ein Felsendrache aus der ersten Serie, der nicht fliegen kann. Statt es weiter zu versuchen, hat er gelernt, sich einzurollen und als Kugel durch seine Gegner zu walzen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Bash",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0007", "SKY-0008", "SKY-0009", "SKY-0148"]
+    },
+    {
+      "canonical_name": "Roller Brawl",
+      "element": "Undead",
+      "species": "Vampirin",
+      "role_type": "core",
+      "short_description": "Vampirin und Roller-Derby-Kämpferin, eingeführt mit Swap Force. Als jüngstes von sechs Geschwistern setzt sie auf Tempo und Wendigkeit statt auf Kraft.",
+      "source_url": "https://skylanders.fandom.com/wiki/Roller_Brawl",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0256", "SKY-0465", "SKY-0466"]
+    },
+    {
+      "canonical_name": "Star Strike",
+      "element": "Magic",
+      "species": null,
+      "role_type": "core",
+      "short_description": "Magie-Skylander aus Swap Force, die mit Sternen und einem schwebenden Spiegel kämpft. Eine Spezies wurde für sie nie offiziell festgelegt.",
+      "source_url": "https://skylanders.fandom.com/wiki/Star_Strike",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0264", "SKY-0265", "SKY-0266"]
+    },
+    {
+      "canonical_name": "Grim Creeper",
+      "element": "Undead",
+      "species": "Sensenmann",
+      "role_type": "core",
+      "short_description": "Ein junger Sensenmann aus Swap Force, der noch in Ausbildung ist. Er kann seine Rüstung verlassen und als Geist weiterkämpfen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Grim_Creeper",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0250", "SKY-0251", "SKY-0252"]
+    },
+    {
+      "canonical_name": "Turbo Charge Donkey Kong",
+      "element": "Life",
+      "species": "Affe",
+      "role_type": "supercharger",
+      "short_description": "Nintendo-Gastfigur in SuperChargers, spielbar ausschließlich auf Nintendo-Konsolen. Sein Fahrzeug ist der Barrel Blaster - eines von nur zwei SuperCharger-Gespannen, dessen Element nicht zur Figur passt.",
+      "source_url": "https://skylanders.fandom.com/wiki/Turbo_Charge_Donkey_Kong",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0493", "SKY-0494"]
+    },
+    {
+      "canonical_name": "Dino-Rang",
+      "element": "Earth",
+      "species": "Saurier",
+      "role_type": "core",
+      "short_description": "Ein Bumerang werfender Saurier aus der ersten Serie, ruhig und beherrscht. Nur wer ihn versehentlich für einen Drachen hält, bekommt beide Bumerangs zu sehen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Dino-Rang",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0021", "SKY-0022", "SKY-0023", "SKY-0024"]
+    },
+    {
+      "canonical_name": "Kaos",
+      "element": null,
+      "species": null,
+      "role_type": "sensei",
+      "short_description": "Der Erzfeind der Reihe, seit Spyro's Adventure ihr wiederkehrender Bösewicht. Mit Imaginators wurde er selbst als Sensei spielbar - mit einem eigenen Kaos-Element, das neben den zehn regulären Elementen steht und deshalb hier nicht eingetragen ist.",
+      "source_url": "https://skylanders.fandom.com/wiki/Kaos_(Sensei)",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0563", "SKY-0564"]
+    },
+    {
+      "canonical_name": "Ninjini",
+      "element": "Magic",
+      "species": "Dschinn",
+      "role_type": "giant",
+      "short_description": "Dschinn und Ninja zugleich, und die einzige weibliche Figur unter den acht Giants. Sie kämpft mit zwei Schwertern und kann sich in ihre Flasche zurückziehen.",
+      "source_url": "https://skylanders.fandom.com/wiki/Ninjini",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0122", "SKY-0123"]
+    },
+    {
+      "canonical_name": "Mini Jini",
+      "element": "Magic",
+      "species": "Dschinn",
+      "role_type": "sidekick",
+      "short_description": "Die Mini-Ausgabe von Ninjini und ein eigener Charakter, nicht deren Variante. Sie erschien zuerst als Sidekick zu Giants und später erneut als Mini zu Trap Team.",
+      "source_url": "https://skylanders.fandom.com/wiki/Mini-Jini",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-04",
+      "sky_ids": ["SKY-0190", "SKY-0377"]
+    }
+  ]
+}

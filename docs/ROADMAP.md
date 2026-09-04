@@ -188,6 +188,13 @@ Fortschritt je Serie · Playwright.
 - Kategorie-Zwischenüberschriften im Katalog
 - Filter und Sortierung innerhalb der eigenen Sammlung
 - **Playwright**, sobald die Sammlungs-UX steht (ADR-0013)
+- **Charaktermetadaten ausweiten** — der Pilot deckt 19 Charaktere und 104 der 561
+  Sammelobjekte ab (ADR-0034). Weitere Wellen kuratieren, beginnend mit den größten Gruppen
+- **`skylanders.element` für Nicht-Charakter-Objekte** — Traps (55/57) und Kreationskristalle
+  (27/27) tragen das Element bereits im offiziellen Produktnamen: einmalig vorschlagen,
+  manuell bestätigen, nie zur Laufzeit raten
+- **Elementfarben, Badges und Elementfilter** — erst wenn genug kanonische Elementdaten
+  vorliegen. Ohne sie entstünde genau die UI-Heuristik, die ADR-0034 ausschließt
 - **Mengen/Duplikate technisch unterstützen** (Prinzip 9) — das Datenmodell kann es bereits
   (`collection_items.quantity`, ADR-0005). **Ob Free oder Premium: offen** (ADR-0022).
   Dabei die offene Grenze aus ADR-0031 mitlösen: Entfernen löscht heute die ganze Zeile und

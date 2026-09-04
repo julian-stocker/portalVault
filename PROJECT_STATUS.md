@@ -36,6 +36,18 @@ Sammlungswert, gemeinsame responsive Navigation. Die sichtbare Anwendung heißt 
 Damit steht der **erste vollständige End-to-End-Produktfluss**: Katalog öffnen → Figur finden →
 antippen → anmelden → eigene Sammlung sehen.
 
+⚠️ **Offen und blockierend: `supabase/migrations/0002_characters.sql` ist geschrieben, aber
+NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis dahin schlägt
+jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
+meldet 31/32 mit genau diesem Hinweis.
+
+**Charakter-Pilot implementiert (2026-09-04, ADR-0034).** Der Katalog hat eine zweite
+Identitätsebene: den Charakter. 19 kuratierte Charaktere verbinden 104 der 561 Sammelobjekte —
+Drobot über drei Auflagen, Spyro über drei Serien inklusive Eon's Elite, `Fire Bone Hot Dog`
+zum Charakter Hot Dog. Detailseiten zeigen einen optionalen Charakterbereich und „Weitere
+Figuren dieses Charakters"; die Suche kennt den Charakternamen als vierte Schreibweise.
+Zuordnungen sind **kuratiert, nicht geraten** — an den echten Daten scheitert jede Namensregel.
+
 **Fachliche Shop-Architektur festgehalten (2026-09-04, ADR-0032/0033) — nichts implementiert.**
 Die Domänengrenze zum späteren First-Party-Shop, das Rollenkonzept `shop_admin` und die fünf
 Preisebenen sind dokumentiert, damit ein späterer Shop auf dem Tracker aufsetzt statt in ihn
@@ -92,7 +104,7 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
 | `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
 | `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
-| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 136 Tests |
+| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 211 Tests |
 | `@supabase/ssr`, Browser-/Server-/Proxy-Clients | ✅ |
 | Auth-Routen: Registrierung, Login, Logout, Bestätigung, Passwort-Reset | ✅ |
 | Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
@@ -104,6 +116,10 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Detailseite `/skylanders/<slug>` | ✅ |
 | `/collection` mit Fortschritt und Sammlungswert | ✅ |
 | Entfernen im Katalog **und** auf `/collection`, mit Rückgängig (ADR-0031) | ✅ |
+| `characters` + `skylanders.character_id`, RLS und Grants (Migration 0002) | ⚠️ geschrieben, **nicht ausgeführt** |
+| 19 kuratierte Pilotcharaktere, 104 verknüpfte SKY-IDs (ADR-0034) | ✅ Datei + Werkzeug |
+| `tools/import-characters.mts`, `npm run characters:import` | ✅ Dry-Run geprüft |
+| Charakterbereich und verwandte Figuren auf der Detailseite | ✅ |
 | Gemeinsame responsive Navigation, mobile-first | ✅ |
 | SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
@@ -129,7 +145,7 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
 | Auth | Kein UI. Die Datenbankseite ist fertig und funktional verifiziert: Trigger, Policies und Rechte greifen nachweislich (`tools/verify-rls.mts`, 31/31). Konzept in `docs/AUTH.md` |
 | Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
-| Tests | Lint / Typecheck / Build, 136 Unit-Tests (`npm test`) und der funktionale RLS-Test (`npm run verify:rls`, 31/31) |
+| Tests | Lint / Typecheck / Build, 211 Unit-Tests (`npm test`) und der funktionale RLS-Test (`npm run verify:rls`) |
 
 Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
 ADR-0015). Vercel ist weiterhin nicht eingerichtet.
@@ -139,6 +155,22 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, Charakter-Pilot (ADR-0034) — teilweise verifiziert:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `npm test` | ✅ 211 Tests (15 Dateien), davon 75 neu für Charaktere |
+| lint / typecheck / build | ✅ alle exit 0, 15 Routen |
+| `characters:import -- --validate-only` | ✅ 19 Charaktere, 104 Zuordnungen, 0 Probleme |
+| kuratierte Datei gegen den echten Katalog | ✅ alle 104 SKY-IDs existieren, sind sammelbar und liegen in Figurenkategorien |
+| abgeleitete „Erste Figur" für alle 19 | ✅ 19/19 korrekt |
+| `npm run verify:rls` | ⚠️ **31/32** — die eine Fehlmeldung ist die noch nicht ausgeführte Migration 0002 |
+
+**NICHT verifiziert, weil die Migration noch aussteht:** RLS und Grants auf `characters`,
+der Fremdschlüssel samt `on delete restrict`, die vier CHECK-Constraints, der Import mit
+`--apply`, Idempotenz gegen die Datenbank und die Detailseite im Browser. Die 13 zusätzlichen
+Prüfungen in `tools/verify-rls.mts` stehen bereit und laufen, sobald die Tabelle existiert.
 
 **2026-09-04, Entfernen aus der Sammlung (ADR-0031) — technisch verifiziert:**
 
@@ -430,6 +462,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0031** | **Entfernen ohne Bestätigungsdialog, dafür rückgängig zu machen; keine neue Toggle-Serverlogik** |
 | **0032** | **Collector- und First-Party-Shop-Domäne sind getrennt; Berechtigung über eine echte Rolle, nie über eine E-Mail-Adresse** — dokumentiert, **nicht implementiert** |
 | **0033** | **Fünf Preisebenen; Marktpreis ≠ Shoppreis; Bestellpositionen speichern einen Preis-Snapshot** — dokumentiert, **nicht implementiert** |
+| **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
 
 ## Offene Entscheidungen
 
@@ -451,6 +484,9 @@ Keine davon blockiert V1.2.
 ---
 
 ## Nächster geplanter Schritt
+
+**Zuerst: `supabase/migrations/0002_characters.sql` im Supabase-SQL-Editor ausführen**, danach
+`npm run verify:rls` (erwartet 44/44) und `npm run characters:import -- --apply`.
 
 **V1.6 — Ausbau.** Weitere Sammlungsansichten (kompakt, Tabelle), Fortschritt je Serie,
 Mengen-/Duplikat-UI (**dabei die offene Grenze aus ADR-0031 mitlösen: ein „Rückgängig" setzt

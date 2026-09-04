@@ -21,6 +21,7 @@ function entry(skyId: string, marketPrice: number | null = 10, quantity = 1): Co
     sortVariantLabel: null,
     searchIndex: "drobot",
     isActive: true,
+    characterId: null,
   };
   return { figure, quantity };
 }

@@ -45,6 +45,8 @@ npm run lint       # ESLint
 npm run typecheck  # tsc --noEmit
 npm run build      # Production Build
 npm run check      # lint + typecheck + build  ← nach jeder relevanten Änderung
+npm test           # Unit-Tests
+npm run verify:rls # funktionale RLS-Prüfung gegen die echte Datenbank
 ```
 
 ---
@@ -68,6 +70,12 @@ aus Name, Slug, Bild, Zeilennummer oder Kategorie abgeleitet · neu vergeben ·
 wiederverwendet · automatisch geändert.
 
 Eine Umbenennung ändert die Identität nicht. Details: `docs/SKYLANDERS_DATA.md`.
+
+**Drei Identitäten, die nie zusammengelegt werden (ADR-0034):** die SKY-ID des Sammelobjekts
+(daran hängen Sammlung, Preis und späterer Shop) · die `character_id` des Charakters (daran
+hängen Element, Spezies, Beschreibung) · der abgeleitete Anzeigename (reine Darstellung,
+ADR-0030). **Charakterzuordnungen werden kuratiert, niemals aus Namen geraten** —
+`data/characters/characters.json`, angewendet mit `npm run characters:import`.
 
 ### 3. Keine Secrets, keine internen Daten
 
@@ -138,6 +146,7 @@ Code soll lesbar, modular und kommentiert sein.
 | Auth / Sessions / Profile | `docs/AUTH.md` |
 | Security / RLS / Secrets | `docs/SECURITY.md` |
 | Skylanders-Datenregeln, Import, Bilder, Preise | `docs/SKYLANDERS_DATA.md` |
+| Charaktermetadaten, Kuratierung, Quellen | `docs/SKYLANDERS_DATA.md` + `docs/DATABASE.md` |
 | Gesamtarchitektur, Systemgrenzen, Datenfluss | `docs/ARCHITECTURE.md` |
 | Abgeschlossenes größeres Feature | `PROJECT_STATUS.md` |
 | Wichtige Architekturentscheidung | `docs/DECISIONS.md` |
@@ -192,3 +201,13 @@ umsetzen. Schwer reversibel oder sicherheitskritisch → **erst fragen**.
 | `docs/SKYLANDERS_DATA.md` | SKY-ID-System, Legacy-Datenregeln, Migration |
 | `docs/ROADMAP.md` | NOW / V1 / LATER / MARKETPLACE |
 | `docs/DECISIONS.md` | Architecture Decision Log |
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

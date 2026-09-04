@@ -24,6 +24,7 @@ function figure(overrides: Partial<CatalogFigure> = {}, namesInSeries: string[] 
     marketPrice: 12.99,
     imageFile: "00ef420dacfdcd4f.webp",
     isActive: true,
+    characterId: null,
     displayName: displayNameFor(name, variant),
     sortBaseName: parts.sortBaseName,
     sortVariantLabel: parts.sortVariantLabel,

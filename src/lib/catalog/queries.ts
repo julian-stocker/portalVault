@@ -13,6 +13,7 @@
  *
  * The browser never talks to the database — it receives the result (ADR-0026).
  */
+import type { Character } from "@/lib/catalog/character";
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
@@ -34,10 +35,11 @@ type FigureRow = {
   market_price: string | number | null;
   image_file: string | null;
   is_active: boolean;
+  character_id: number | null;
 };
 
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, is_active";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, is_active, character_id";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
@@ -93,6 +95,7 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     marketPrice: row.market_price === null ? null : Number(row.market_price),
     imageFile: row.image_file,
     isActive: row.is_active,
+    characterId: row.character_id,
   };
 }
 
@@ -130,6 +133,37 @@ export function withVariants(
       searchIndex: buildSearchIndex(searchFormsFor(figure.name, variant)),
     };
   });
+}
+
+/**
+ * Adds the curated character name to the search haystack.
+ *
+ * "Hot Dog" then also finds "Fire Bone Hot Dog", because the two are linked
+ * by character_id — not because the names look alike. Nothing fuzzy happens
+ * here: only the exact canonical name of the linked character is added, so
+ * "Drobot" still never reaches "Mini Drobit" (a different character), and a
+ * figure without a character keeps the index it already had.
+ */
+export function withCharacterSearch(
+  figures: readonly CatalogFigure[],
+  characterNames: ReadonlyMap<number, string>,
+): CatalogFigure[] {
+  return figures.map((figure) => {
+    if (figure.characterId === null) return figure;
+    const name = characterNames.get(figure.characterId);
+    if (name === undefined) return figure;
+    const extra = buildSearchIndex([name]);
+    if (figure.searchIndex.includes(extra)) return figure;
+    return { ...figure, searchIndex: `${figure.searchIndex} | ${extra}` };
+  });
+}
+
+/** id -> canonical name for every curated character. Nineteen rows today. */
+export async function fetchCharacterNames(): Promise<Map<number, string>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("characters").select("id, canonical_name");
+  if (error) throw new Error(`characters: ${error.message}`);
+  return new Map((data ?? []).map((row) => [row.id as number, row.canonical_name as string]));
 }
 
 /**
@@ -179,7 +213,8 @@ export async function fetchCatalog(): Promise<CatalogFigure[]> {
   );
   // The catalog already holds every collectible name, so the variant rule
   // needs no extra query here.
-  return sortFigures(withVariants(figures, buildNameIndex(figures)));
+  const withNames = withVariants(figures, buildNameIndex(figures));
+  return sortFigures(withCharacterSearch(withNames, await fetchCharacterNames()));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */
@@ -196,6 +231,83 @@ export async function fetchFigureBySlug(slug: string): Promise<CatalogFigure | n
   const figure = toFigure(result.data as FigureRow, lookups);
   const nameIndex = await fetchNameIndex();
   return withVariants([figure], nameIndex)[0];
+}
+
+type CharacterRow = {
+  id: number;
+  canonical_name: string;
+  element: string | null;
+  species: string | null;
+  role_type: string | null;
+  short_description: string | null;
+  source_url: string | null;
+  source_label: string | null;
+  verified_at: string | null;
+};
+
+const CHARACTER_COLUMNS =
+  "id, canonical_name, element, species, role_type, short_description, source_url, source_label, verified_at";
+
+function toCharacter(row: CharacterRow): Character {
+  return {
+    id: row.id,
+    canonicalName: row.canonical_name,
+    // The database CHECK already restricts these to the known values, so the
+    // cast repeats a guarantee rather than assuming one.
+    element: row.element as Character["element"],
+    roleType: row.role_type as Character["roleType"],
+    species: row.species,
+    shortDescription: row.short_description,
+    sourceUrl: row.source_url,
+    sourceLabel: row.source_label,
+    verifiedAt: row.verified_at,
+  };
+}
+
+/** Everything a detail page shows. Character and related figures are optional. */
+export type FigureDetail = {
+  figure: CatalogFigure;
+  character: Character | null;
+  /** Other collectibles of the same character. Never contains `figure`. */
+  related: CatalogFigure[];
+};
+
+/**
+ * One figure with its character context.
+ *
+ * Two extra queries, and only when the figure actually carries a character:
+ * 457 of the 561 collectibles have none today, and those pay nothing.
+ */
+export async function fetchFigureDetail(slug: string): Promise<FigureDetail | null> {
+  const figure = await fetchFigureBySlug(slug);
+  if (!figure) return null;
+  if (figure.characterId === null) return { figure, character: null, related: [] };
+
+  const supabase = await createClient();
+  const [lookups, characterResult, siblingResult] = await Promise.all([
+    loadLookups(),
+    supabase.from("characters").select(CHARACTER_COLUMNS).eq("id", figure.characterId).maybeSingle(),
+    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("character_id", figure.characterId),
+  ]);
+
+  if (characterResult.error) throw new Error(`character: ${characterResult.error.message}`);
+  if (siblingResult.error) throw new Error(`related figures: ${siblingResult.error.message}`);
+
+  // Same collector rule as everywhere else: software never appears, and the
+  // figure the page is about is not listed beside itself.
+  const siblings = collectibleOnly(
+    ((siblingResult.data ?? []) as FigureRow[])
+      .map((row) => toFigure(row, lookups))
+      .filter((row) => row.skyId !== figure.skyId),
+  );
+  const nameIndex = await fetchNameIndex();
+  const related = sortFigures(withVariants(siblings, nameIndex));
+
+  return {
+    figure,
+    character: characterResult.data ? toCharacter(characterResult.data as CharacterRow) : null,
+    related,
+  };
 }
 
 export async function fetchSeries(): Promise<SeriesOption[]> {

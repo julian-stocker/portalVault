@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-04 (ADR-0032/0033, Shop-Domäne fachlich festgehalten).
+Letzte Aktualisierung: 2026-09-04 (ADR-0034, Charakteridentität).
 
 ---
 
@@ -1319,3 +1319,112 @@ ein Fakt und kein berechneter Wert.
 
 **Verworfen:** ein einziges Preisfeld für Markt- und Shoppreis · Rabatt durch Herabsetzen von
 `market_price` · Bestellpositionen, die den Preis zur Anzeigezeit neu berechnen.
+
+---
+
+## ADR-0034 — Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante
+
+**Status:** ANGENOMMEN (2026-09-04) · umgesetzt als Pilot mit 19 Charakteren
+
+**Problem.** Der Katalog kennt bisher genau eine Identität: die SKY-ID des Sammelobjekts.
+Damit lässt sich nicht ausdrücken, dass SKY-0028, SKY-0156 und SKY-0157 **dieselbe Figur**
+meinen — Drobot, dreimal aufgelegt, zu Preisen zwischen 1,49 € und 104,71 €. Detailseiten
+können deshalb weder Charakterdaten zeigen noch auf andere Figuren desselben Charakters
+verweisen.
+
+### Drei Identitäten, drei Zuständigkeiten
+
+| Konzept | Träger | Beantwortet | Wer hängt daran |
+|---|---|---|---|
+| **Sammelobjekt** | `sky_id` | „Welches physische Objekt?" | Sammlung, Shop, Preis, Bild, Slug |
+| **Charakter** | `character_id` | „Welche Figur der Marke?" | Element, Spezies, Rolle, Beschreibung |
+| **Anzeigevariante** | abgeleitet, nichts gespeichert | „Wie schreiben wir den Namen?" | nur die Darstellung (ADR-0030) |
+
+**Diese drei fallen nicht zusammen, und die Umsetzung darf sie nie zusammenlegen.**
+
+- `collection_items` und späterer Shopbestand hängen **weiterhin ausschließlich an der SKY-ID**
+  (ADR-0005, ADR-0032). Der Fortschritt zählt Sammelobjekte, nicht Charaktere.
+- ADR-0030 bleibt **reine Darstellung**. `Dark Barrel Blaster` ist eine korrekt erkannte
+  Anzeigevariante **eines Fahrzeugs** — dort gibt es überhaupt keinen Charakter.
+- Umgekehrt ist `Fire Bone Hot Dog` **keine** Anzeigevariante — „Fire Bone" ist kein
+  Varianten-Token, und das ist richtig so — gehört aber zum Charakter Hot Dog.
+- **`character_id = NULL` ist der Normalfall**, nicht fehlende Daten: 159 der 561 Sammelobjekte
+  sind gar keine Charaktere (Traps, Fahrzeuge, Kreationskristalle, Magic Items, Locations,
+  Trophies), und von den übrigen ist erst ein kurierter Teil zugeordnet.
+
+### Zuordnungen werden kuratiert, nicht geraten
+
+**Keine Namensregel löst das.** An den echten 561 Einträgen gemessen scheitert jede:
+
+| Fall | Beispiel | Warum die Regel scheitert |
+|---|---|---|
+| Charakter steht vorn | `Drobot Light Core` | Suffix-Regel greift strukturell nicht |
+| Drei LightCore-Schreibweisen | `Chill Light Core` · `Grim Creeper - Lightcore` · `Start Strike (LC, Enchanted)` | eine Regel deckt nicht alle drei |
+| Zustand im Namen | `Elite Boomer - ohne OVP`, `Kaos in OVP` | das Suffix ist „OVP" |
+| Abkürzung | `Dark Turbo Charge D.K.` | keine Zeichenüberlappung mit `Turbo Charge Donkey Kong` |
+| Tippfehler in der Quelle | `Legendary Grim Creemper` · `Horn Blast Whirwind` · `Start Strike` | exakter Vergleich scheitert |
+| Interpunktion | `Dino-Rang` vs. `Elite Dino Rang` | Bindestrich mal ja, mal nein |
+| Präfix zerreißt den Charakter | `Mini Jini` vs. `Sidekick Mini Jini` | Strippen ergibt „Jini" und „Mini Jini" |
+| Gleicher Name, anderes Objekt | `Kaos` als Trap, als Trophy **und** als Sensei | Namensgleichheit beweist nichts |
+| Substring trifft daneben | `Bone Bash Roller Brawl` enthält „Bash" | gehört zu Roller Brawl, nicht zu Bash |
+| Ähnlicher Name, anderer Charakter | `Mini Drobit` | Drobit ist Drobots Mini — ein **eigener** Charakter |
+
+Deshalb: **kuratierte Datei, geprüftes Werkzeug, keine Laufzeitheuristik.**
+`data/characters/characters.json` → `tools/import-characters.mts` → Datenbank.
+
+### Warum das Modell so klein ist
+
+**`element` liegt am Charakter (Modell A).** Alle Drobot-Figuren sind Tech; das dreimal zu
+speichern wäre dreimal die Chance, dass es auseinanderläuft. Ein späteres
+`skylanders.element` für Traps und Kristalle ist die logische Ergänzung — und beide Spalten
+treffen sich nie auf derselben Zeile, weil ein Objekt mit Charakter kein Trap ist. Genau das
+macht eine generische EAV-Struktur überflüssig.
+
+**`gender` gibt es nicht.** Es testet nichts am Modell und ist selten sicher belegbar. Eine
+nullbare Spalte später zu ergänzen kostet nichts.
+
+**`debut` wird nicht gespeichert, sondern abgeleitet** — und zwar bewusst mit einer anderen
+Bedeutung, als der Name „Debüt" nahelegt:
+
+> `firstReleaseSeries()` beantwortet **„welche Serie brachte die erste Figur dieses
+> Charakters"**, nicht „wann trat der Charakter zuerst auf".
+
+Für 18 der 19 Pilotcharaktere fällt beides zusammen. **Kaos ist der Gegenbeleg:** Er ist seit
+Spyro's Adventure (2011) der Bösewicht der Reihe, seine erste **Figur** ist aber der
+Imaginators-Sensei. Statt daraus eine Spalte oder eine Ausnahmeliste zu machen, heißt das Feld
+in der Oberfläche **„Erste Figur"** — eine Aussage, die für alle 19 wahr ist. Eine
+`debut`-Spalte käme erst, wenn die Story-Bedeutung wirklich gebraucht wird, und dann als
+bewusste Entscheidung.
+
+**`NULL` heißt „nicht zuverlässig bekannt", nie „keins"** — dieselbe Regel wie beim Marktpreis
+(ADR-0010). Kaos' Element ist der Musterfall: Als Sensei gehört er einem eigenen
+**Kaos-Element** an, das nicht zu den zehn regulären zählt. Geraten wird nicht.
+
+**`short_description` ist auf 600 Zeichen begrenzt — als CHECK, nicht als Richtlinie.**
+SkyIsles schreibt eigene Kurzfassungen; ein eingefügter Wiki-Artikel passt strukturell nicht
+hinein. Externe Quellen dienen der **Faktenprüfung**, nicht als Textlieferant.
+
+### Sicherheit
+
+`characters` ist öffentlich lesbar und für **keine** Client-Rolle schreibbar: keine
+schreibende Policy, kein Schreibrecht, explizite REVOKEs. Kuratiert wird ausschließlich lokal
+über die Service Role.
+
+**Es wird keine Rolle eingeführt und nichts an `profiles` ergänzt.** `profiles` ist vom
+Benutzer selbst beschreibbar; eine Berechtigung dort könnte sich jeder selbst geben
+(ADR-0032). Der Pflegeweg umgeht das Problem, statt es zu lösen — richtig, solange es genau
+einen Kurator gibt.
+
+### Konsequenzen
+
+- Additiv: eine Tabelle, eine nullbare Spalte. Keine Zeile geändert, keine gelöscht.
+- Der Katalogimport bleibt unverändert und schreibt `character_id` nie — sein Upsert benennt
+  nur die Spalten der Legacy-Quelle. `src/lib/catalog/import-payload.test.ts` nagelt das fest.
+- Die Suche bekommt den Charakternamen als **vierte** Schreibweise. „Hot Dog" findet damit auch
+  `Fire Bone Hot Dog`. Nichts Unscharfes: „Drobot" erreicht `Mini Drobit` weiterhin nicht.
+- Detailseiten zeigen den Charakterbereich nur, wenn es einen gibt.
+
+**Verworfen:** Charakterdaten auf jeder SKY-ID duplizieren · Charakter aus dem Namen zur
+Laufzeit ableiten · Charaktername als Schlüssel · generische Metadatenstruktur (EAV/JSON) ·
+`characters` per Katalogimport pflegen · Admin-UI mit Rolle (setzt eine Rolle voraus, die es
+nicht gibt) · gespeicherte `debut`-Spalte.

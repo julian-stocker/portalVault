@@ -25,6 +25,7 @@ function figure(categoryName: string, name = "Drobot"): CatalogFigure {
     sortVariantLabel: null,
     searchIndex: name.toLowerCase(),
     isActive: true,
+    characterId: null,
   };
 }
 

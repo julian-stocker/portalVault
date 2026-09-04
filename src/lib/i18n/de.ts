@@ -41,6 +41,30 @@ export const de = {
     series: "Serie",
   },
 
+  character: {
+    heading: "Charakter",
+    element: "Element",
+    species: "Spezies",
+    role: "Rolle",
+    // Deliberately not "Debüt": the value is derived from the linked figures
+    // and answers which series brought the first figure. Kaos exists since
+    // 2011 but his first figure is from Imaginators (ADR-0034).
+    firstRelease: "Erste Figur",
+    related: "Weitere Figuren dieses Charakters",
+    source: (label: string) => `Quelle: ${label}`,
+    verified: (date: string) => `geprüft am ${date}`,
+    roles: {
+      core: "Core",
+      giant: "Giant",
+      swapper: "Swapper",
+      "trap-master": "Trap Master",
+      supercharger: "SuperCharger",
+      sensei: "Sensei",
+      mini: "Mini",
+      sidekick: "Sidekick",
+    } as Record<string, string>,
+  },
+
   collection: {
     title: "Meine Sammlung",
     distinctFigures: "Verschiedene Figuren",

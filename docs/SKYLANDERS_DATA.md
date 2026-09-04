@@ -438,6 +438,47 @@ und sie ist nicht freigegeben.**
 
 ---
 
+## 11a. Charaktermetadaten (Pilot, seit 2026-09-04)
+
+Der Katalog kennt seit Migration 0002 eine zweite Identitätsebene: den **Charakter**
+(ADR-0034). Sie beantwortet, dass SKY-0028, SKY-0156 und SKY-0157 dieselbe Figur meinen —
+Drobot, dreimal aufgelegt.
+
+**Kuratierungsregeln:**
+
+1. **Zuordnungen werden von Hand gemacht, nie aus Namen abgeleitet.** An den echten Daten
+   scheitert jede Namensregel: `Drobot Light Core` (Charakter steht vorn), `Dark Turbo Charge
+   D.K.` (Abkürzung), `Legendary Grim Creemper` (Tippfehler), `Dino-Rang` vs. `Elite Dino Rang`
+   (Bindestrich), `Bone Bash Roller Brawl` (enthält „Bash", gehört zu Roller Brawl),
+   `Mini Drobit` (eigener Charakter). Vollständige Liste in ADR-0034.
+2. **Eine SKY-ID gehört zu höchstens einem Charakter.** Das Werkzeug weist Doppelzuordnungen ab.
+3. **`NULL` heißt „nicht zuverlässig bekannt", nie „keins".** Kaos hat als Sensei ein eigenes
+   Kaos-Element außerhalb der zehn — deshalb steht dort `null` und keine Erfindung. Chill und
+   Star Strike haben keine gesicherte Spezies.
+4. **Beschreibungen schreibt SkyIsles selbst.** Externe Quellen dienen der Faktenprüfung; kein
+   Absatz, kein Satz wird übernommen. Der 600-Zeichen-CHECK setzt das durch.
+5. **Jeder Charakter trägt eine primäre Quelle** (`source_url`, `source_label`, `verified_at`).
+   Eine Quellentabelle gibt es bewusst nicht — eine Quelle je Charakter reicht, bis das
+   Gegenteil belegt ist.
+6. **Nicht-Charakter-Objekte bleiben `character_id = NULL`.** Traps, Fahrzeuge,
+   Kreationskristalle, Magic Items, Locations und Trophies sind keine Charaktere mit fehlenden
+   Feldern.
+
+**Pflegeweg:** `data/characters/characters.json` → `npm run characters:import -- --apply`.
+Die Datei liegt versioniert im Repository; Git ist damit die Änderungshistorie. Sie enthält
+ausschließlich öffentliche Produktinformation und fällt **nicht** unter Abschnitt 11
+(`docs/SECURITY.md` erläutert die Abgrenzung).
+
+**Der Katalogimport rührt sie nicht an** und kennt `character_id` nicht. Ein Reset der
+Datenbank löscht die Charaktere; die JSON-Datei ist der Wiederherstellungsweg.
+
+**Pilotumfang:** 19 Charaktere, 104 der 561 Sammelobjekte (18,5 %). Bewusst nach Schwierigkeit
+ausgewählt, nicht nach Bekanntheit — Eon's Elite, LightCore in drei Schreibweisen,
+Series-2/3-Umbenennungen, Tippfehler, Abkürzungen und zwei Fälle, in denen derselbe Name
+verschiedene Objekte meint.
+
+---
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

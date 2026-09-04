@@ -35,6 +35,7 @@ werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migratio
 | `skylanders` | 600 | kanonischer Katalog | öffentlich lesbar |
 | `profiles` | = Benutzer | Benutzername, Profil | öffentlich lesbar, selbst schreibbar |
 | `collection_items` | wächst | Sammlung: Benutzer × Figur × Menge | nur der Eigentümer |
+| `characters` | 19 (Pilot) | kuratierte Charaktermetadaten | öffentlich lesbar, nur kuratiert schreibbar |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -48,6 +49,49 @@ Am 2026-09-03 im Supabase-SQL-Editor **erfolgreich ausgeführt** und anschließe
 lesenden Abfragen **strukturell verifiziert** (siehe `PROJECT_STATUS.md`). Die Migration ist
 die maßgebliche Quelle; dieser Abschnitt erklärt sie. Weichen beide voneinander ab, gilt das
 SQL — und der Widerspruch ist zu melden.
+
+### 3.0 `characters` — der Charakter hinter der Figur (Migration 0002)
+
+**Ein Charakter ist kein Sammelobjekt.** „Drobot" ist ein Charakter; SKY-0028, SKY-0156 und
+SKY-0157 sind drei Sammelobjekte davon, mit Marktpreisen zwischen 1,49 € und 104,71 €.
+Drei Identitäten bleiben getrennt (ADR-0034):
+
+| Konzept | Träger | Wer hängt daran |
+|---|---|---|
+| Sammelobjekt | `sky_id` | Sammlung, späterer Shop, Preis, Bild, Slug |
+| Charakter | `characters.id` über `skylanders.character_id` | Element, Spezies, Rolle, Beschreibung |
+| Anzeigevariante | abgeleitet, nichts gespeichert | nur die Darstellung (ADR-0030) |
+
+**Spalten:** `id` (Surrogat, `bigint generated always as identity`) · `canonical_name`
+(Attribut, **nie** Schlüssel) · `element` · `species` · `role_type` · `short_description` ·
+`source_url` · `source_label` · `verified_at` · `created_at` · `updated_at`.
+
+**Constraints:**
+
+| Constraint | Wirkung |
+|---|---|
+| `characters_name_not_blank` | leerer Name unmöglich |
+| `characters_canonical_name_key` | Unique-**Index** auf `lower(canonical_name)`, case-insensitiv — Duplikatschutz, kein Schlüssel (Muster aus ADR-0020) |
+| `characters_element_known` | nur `Magic Tech Water Fire Life Undead Earth Air Light Dark` |
+| `characters_role_known` | nur `core giant swapper trap-master supercharger sensei mini sidekick` |
+| `characters_description_short` | `≤ 600` Zeichen — erzwingt die eigene Kurzfassung strukturell statt per Richtlinie |
+| `characters_source_url_https` | eine Quellenangabe, die nicht abrufbar ist, ist keine |
+
+**`element`, `species` und `role_type` sind nullbar. `NULL` heißt „nicht zuverlässig bekannt",
+nie „keins"** — dieselbe Regel wie beim Marktpreis (ADR-0010). Kaos ist der Musterfall: Als
+Sensei gehört er einem eigenen Kaos-Element an, das nicht zu den zehn zählt.
+
+**`skylanders.character_id`** — `bigint`, nullbar, `references characters (id) on delete
+restrict`, Teilindex `where character_id is not null`.
+
+> **`character_id = NULL` ist der Normalfall.** 159 der 561 Sammelobjekte sind gar keine
+> Charaktere (Traps, Fahrzeuge, Kreationskristalle, Magic Items, Locations, Trophies), und von
+> den übrigen ist bisher nur der kuratierte Pilot zugeordnet. Ein Kreationskristall ist kein
+> Charakter mit fehlenden Feldern.
+
+**Gepflegt wird ausschließlich über `data/characters/characters.json` und
+`tools/import-characters.mts`** — nie über den Katalogimport, der `character_id` gar nicht
+kennt, und nie aus Namen abgeleitet.
 
 ### 3.1 `series`
 
@@ -352,9 +396,11 @@ zeigten diese in der Verifikation sofort die beabsichtigten Rechte.
 auth.users ──1:1──▶ profiles
      │
      └──1:n──▶ collection_items ──n:1──▶ skylanders ──n:1──▶ categories ──n:1──▶ series
+                                             │
+                                             └──n:1──▶ characters   (nullbar)
 ```
 
-**Fünf Fremdschlüssel insgesamt:**
+**Sechs Fremdschlüssel insgesamt:**
 
 | Fremdschlüssel | von → nach |
 |---|---|
@@ -363,6 +409,7 @@ auth.users ──1:1──▶ profiles
 | `profiles_id_fkey` | `profiles.id` → `auth.users.id` (inline deklariert, daher der von PostgreSQL vergebene Name) |
 | `collection_items_user_fk` | `collection_items.user_id` → `auth.users.id` |
 | `collection_items_sky_fk` | `collection_items.sky_id` → `skylanders.sky_id` |
+| `skylanders_character_id_fkey` | `skylanders.character_id` → `characters.id`, `on delete restrict`, **nullbar** (Migration 0002, inline deklariert) |
 
 `skylanders` trägt `series_code` zusätzlich als Spalte (bewusste Denormalisierung für
 Katalogabfragen); die Konsistenz zur Kategorie erzwingt der zusammengesetzte Fremdschlüssel
@@ -393,6 +440,16 @@ Abschnitt 3.9.
 
 Kein `TRUNCATE`, kein `REFERENCES`, kein `TRIGGER` für `anon` oder `authenticated` — auf keiner
 der fünf Tabellen.
+
+**Sechste Tabelle, Migration 0002 (`characters`)** — dieselbe Haltung wie beim Katalog:
+
+| Tabelle | anon | authenticated | Policies |
+|---|---|---|---|
+| `characters` | nur `SELECT` | nur `SELECT` | eine SELECT-Policy `using (true)`; **keine** schreibende Policy |
+
+Geschrieben wird ausschließlich über die Service Role aus `tools/import-characters.mts`.
+**Es wird keine Rolle eingeführt und `profiles` bleibt unberührt** — dort könnte sich ein
+Benutzer eine Berechtigung selbst setzen (ADR-0032, `docs/AUTH.md` Abschnitt 6).
 
 **Die zehn Policies im Einzelnen**
 
@@ -449,10 +506,22 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   Benutzer-IDs, keine Abhängigkeit von vorhandenen Zeilen. Ein erneuter Lauf auf einer
   bestehenden Datenbank scheitert bewusst laut (`create table` ohne `if not exists`), statt
   eine abweichende Tabelle stillschweigend zu übergehen.
+- Zweite Migration: `0002_characters.sql` — legt `characters` an und ergänzt die nullbare
+  Spalte `skylanders.character_id`. **Rein additiv:** keine Zeile geändert, keine gelöscht,
+  kein Typ geändert. Rücknahme wäre `drop column` + `drop table`.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in
   `docs/SKYLANDERS_DATA.md`, Abschnitt 12.
+- **Zweiter, getrennter Pflegeweg:** `tools/import-characters.mts` (`npm run
+  characters:import`) wendet `data/characters/characters.json` an. Ebenfalls Dry-Run per
+  Vorgabe, `--apply` schreibt, `--validate-only` öffnet gar keine Verbindung. Er rührt
+  ausschließlich `characters` und die `character_id` der kuratierten SKY-IDs an — **er setzt
+  nie eine Verknüpfung auf NULL zurück** und löscht nichts.
+- **Der Katalogimport schreibt `character_id` nie.** Sein Upsert benennt exakt die acht
+  Spalten der Legacy-Quelle, und PostgREST aktualisiert nur benannte Spalten. Das ist Sicherheit
+  durch Auslassung und damit leicht zu verlieren — `src/lib/catalog/import-payload.test.ts`
+  nagelt die Spaltenliste deshalb fest.
 
 **Zur Transaktionalität — ehrlich benannt.** Der Supabase-JS-Client kann keine Transaktion über
 mehrere Anweisungen aufspannen. Statt dessen gilt:
@@ -489,6 +558,8 @@ Entscheidungen sie nicht verbauen:
 | Später | Wie es andockt | Was heute schon passt |
 |---|---|---|
 | `wishlist_items` | `(user_id, sky_id, priority)` | referenziert dieselbe `skylanders`-Tabelle |
+| ~~`characters`~~ | **existiert seit Migration 0002** (Abschnitt 3.0) | — |
+| `skylanders.element` | Element für Nicht-Charakter-Objekte (Traps 55/57, Kristalle 27/27 tragen es im Produktnamen) | Modell A: `characters.element` und `skylanders.element` treffen sich nie auf derselben Zeile, weil ein Objekt mit Charakter kein Trap ist (ADR-0034) |
 | `listings` (Verkauf) | `(id, user_id, sky_id, quantity, price, status)` | eigene Tabelle, `collection_items` bleibt unverändert |
 | Zustand je Exemplar | Unique-Index auf `collection_items` löschen, Spalte ergänzen | Surrogat-PK existiert bereits |
 | `price_history` | `(sky_id, price, source, valid_from)`; `skylanders.market_price` wird zum Cache des jüngsten Werts | Preis wird schon heute nur an einer Stelle gelesen |

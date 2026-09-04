@@ -32,6 +32,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 const TEST_SERIES = { code: "TEST", label: "RLS Test Series", release_year: 2026, position: 99 };
 const TEST_CATEGORY = { name: "RLS Test Category", position: 0 };
 const TEST_SKY_ID = "SKY-9999";
+const TEST_CHARACTER = "RLS Test Character";
 const TEST_SKYLANDER = {
   sky_id: TEST_SKY_ID,
   name: "RLS Test Figure",
@@ -119,6 +120,7 @@ async function createSignedInUser(
 async function main(): Promise<void> {
   const admin = serviceClient();
   let categoryId: number | null = null;
+  let characterId: number | null = null;
   let userA: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
   let userB: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
 
@@ -143,7 +145,25 @@ async function main(): Promise<void> {
       .select()
       .single();
     if (skylander.error) throw new Error(`seed skylander: ${skylander.error.message}`);
-    console.log(`  seeded series ${TEST_SERIES.code}, one category, ${TEST_SKY_ID}`);
+
+    // Migration 0002 may not be applied yet. Rather than crashing setup, note
+    // it and let the other checks run — the character section then reports a
+    // single, unmistakable failure instead of a stack trace.
+    const character = await admin
+      .from("characters")
+      .insert({ canonical_name: TEST_CHARACTER, element: "Tech", role_type: "core" })
+      .select()
+      .single();
+    if (character.error) {
+      console.log(`  ! characters unavailable: ${character.error.message}`);
+    } else {
+      characterId = character.data.id as number;
+    }
+
+    console.log(
+      `  seeded series ${TEST_SERIES.code}, one category, ${TEST_SKY_ID}` +
+        (characterId === null ? "" : `, character #${characterId}`),
+    );
 
     console.log("\nSetup — two real auth users");
     userA = await createSignedInUser(admin, USER_A);
@@ -412,6 +432,142 @@ async function main(): Promise<void> {
       !!anonItems.error || anonItems.data?.length === 0,
       anonItems.error ? `rejected: ${anonItems.error.code}` : `${anonItems.data?.length ?? 0} row(s)`,
     );
+
+    // ------------------------------------------- 8. characters (migration 0002)
+    console.log("\n8. Character metadata is public but curated");
+
+    if (characterId === null) {
+      // Every check below would either crash or pass for the wrong reason
+      // (a missing table rejects writes too). One clear failure instead.
+      check(
+        "migration 0002_characters.sql is applied",
+        false,
+        "the characters fixture could not be created - run the migration first",
+      );
+    } else {
+    const charRead = await a.from("characters").select("id, canonical_name").limit(1);
+    check(
+      "an authenticated user can read characters",
+      !charRead.error,
+      charRead.error ? charRead.error.message : `${charRead.data?.length ?? 0} row(s)`,
+    );
+
+    const anonChar = await anon.from("characters").select("id, canonical_name").limit(1);
+    check(
+      "anonymous can read characters",
+      !anonChar.error,
+      anonChar.error ? anonChar.error.message : `${anonChar.data?.length ?? 0} row(s)`,
+    );
+
+    const charInsert = await a
+      .from("characters")
+      .insert({ canonical_name: `RLS Injected ${Date.now()}` });
+    check(
+      "an authenticated user cannot insert a character",
+      !!charInsert.error,
+      charInsert.error ? `rejected: ${charInsert.error.code}` : "INSERT SUCCEEDED - RLS HOLE",
+    );
+
+    const anonInsert = await anon
+      .from("characters")
+      .insert({ canonical_name: `RLS Injected ${Date.now()}` });
+    check(
+      "anonymous cannot insert a character",
+      !!anonInsert.error,
+      anonInsert.error ? `rejected: ${anonInsert.error.code}` : "INSERT SUCCEEDED - RLS HOLE",
+    );
+
+      const charUpdate = await a
+        .from("characters")
+        .update({ element: "Dark" })
+        .eq("id", characterId)
+        .select();
+      check(
+        "an authenticated user cannot change a character",
+        !!charUpdate.error || charUpdate.data?.length === 0,
+        charUpdate.error
+          ? `rejected: ${charUpdate.error.code}`
+          : `${charUpdate.data?.length ?? 0} row(s) changed`,
+      );
+
+      const charDelete = await a.from("characters").delete().eq("id", characterId).select();
+      check(
+        "an authenticated user cannot delete a character",
+        !!charDelete.error || charDelete.data?.length === 0,
+        charDelete.error
+          ? `rejected: ${charDelete.error.code}`
+          : `${charDelete.data?.length ?? 0} row(s) deleted`,
+      );
+
+      const linkWrite = await a
+        .from("skylanders")
+        .update({ character_id: characterId })
+        .eq("sky_id", TEST_SKY_ID)
+        .select();
+      check(
+        "an authenticated user cannot link a figure to a character",
+        !!linkWrite.error || linkWrite.data?.length === 0,
+        linkWrite.error
+          ? `rejected: ${linkWrite.error.code}`
+          : `${linkWrite.data?.length ?? 0} row(s) changed`,
+      );
+
+      // The curated path itself must work: the service role writes the link.
+      const adminLink = await admin
+        .from("skylanders")
+        .update({ character_id: characterId })
+        .eq("sky_id", TEST_SKY_ID)
+        .select("sky_id, character_id");
+      check(
+        "the service role can link a figure to a character",
+        !adminLink.error && adminLink.data?.[0]?.character_id === characterId,
+        adminLink.error ? adminLink.error.message : `linked ${adminLink.data?.[0]?.sky_id ?? "-"}`,
+      );
+
+      const restrict = await admin.from("characters").delete().eq("id", characterId);
+      check(
+        "a character still linked to a figure cannot be deleted (on delete restrict)",
+        !!restrict.error,
+        restrict.error ? `rejected: ${restrict.error.code}` : "DELETE SUCCEEDED - FK NOT ENFORCED",
+      );
+
+      const badElement = await admin
+        .from("characters")
+        .insert({ canonical_name: `RLS Element ${Date.now()}`, element: "Banana" });
+      check(
+        "an element outside the ten is rejected by the CHECK",
+        !!badElement.error,
+        badElement.error ? `rejected: ${badElement.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
+      );
+
+      const badRole = await admin
+        .from("characters")
+        .insert({ canonical_name: `RLS Role ${Date.now()}`, role_type: "villain" });
+      check(
+        "a role_type outside the eight is rejected by the CHECK",
+        !!badRole.error,
+        badRole.error ? `rejected: ${badRole.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
+      );
+
+      const longText = await admin.from("characters").insert({
+        canonical_name: `RLS Text ${Date.now()}`,
+        short_description: "x".repeat(601),
+      });
+      check(
+        "a description longer than 600 characters is rejected by the CHECK",
+        !!longText.error,
+        longText.error ? `rejected: ${longText.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
+      );
+
+      const badUrl = await admin
+        .from("characters")
+        .insert({ canonical_name: `RLS Url ${Date.now()}`, source_url: "http://example.org" });
+      check(
+        "a non-https source_url is rejected by the CHECK",
+        !!badUrl.error,
+        badUrl.error ? `rejected: ${badUrl.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
+      );
+    }
   } finally {
     // ------------------------------------------------------------- teardown
     console.log("\nTeardown");
@@ -425,12 +581,15 @@ async function main(): Promise<void> {
     }
 
     await admin2.from("skylanders").delete().eq("sky_id", TEST_SKY_ID);
+    // With the figure gone nothing references the character any more, so the
+    // restrict constraint lets it go.
+    await admin2.from("characters").delete().eq("canonical_name", TEST_CHARACTER);
     if (categoryId !== null) await admin2.from("categories").delete().eq("id", categoryId);
     await admin2.from("series").delete().eq("code", TEST_SERIES.code);
     console.log("  catalog fixture removed");
 
     const counts = await Promise.all(
-      (["series", "categories", "skylanders", "profiles", "collection_items"] as const).map(
+      (["series", "categories", "skylanders", "profiles", "collection_items", "characters"] as const).map(
         async (table) => {
           const { count } = await admin2.from(table).select("*", { count: "exact", head: true });
           return `${table}=${count ?? "?"}`;
