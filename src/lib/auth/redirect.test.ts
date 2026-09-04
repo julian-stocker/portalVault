@@ -10,7 +10,7 @@ import {
 
 describe("safeRedirect", () => {
   it("accepts a same-site path", () => {
-    expect(safeRedirect("/dashboard")).toBe("/dashboard");
+    expect(safeRedirect("/collection")).toBe("/collection");
     expect(safeRedirect("/settings?tab=account")).toBe("/settings?tab=account");
   });
 
@@ -43,7 +43,7 @@ describe("safeRedirect", () => {
   });
 
   it("rejects anything not rooted at a slash", () => {
-    expect(safeRedirect("dashboard")).toBe(DEFAULT_SIGNED_IN_PATH);
+    expect(safeRedirect("collection")).toBe(DEFAULT_SIGNED_IN_PATH);
     expect(safeRedirect("evil.example")).toBe(DEFAULT_SIGNED_IN_PATH);
   });
 
@@ -68,9 +68,21 @@ describe("destinationAfterSignIn", () => {
   });
 });
 
+describe("catalog context survives sign-in (ADR-0027)", () => {
+  it("keeps series and search in the return target", () => {
+    const target = "/?series=g&q=bash";
+    expect(safeRedirect(target)).toBe(target);
+    expect(destinationAfterSignIn(true, target)).toBe(target);
+  });
+
+  it("still refuses an off-site target dressed up as catalog context", () => {
+    expect(safeRedirect("//evil.example/?series=g")).toBe(DEFAULT_SIGNED_IN_PATH);
+  });
+});
+
 describe("signInUrlFor", () => {
   it("preserves the requested target", () => {
-    expect(signInUrlFor("/dashboard")).toBe("/login?next=%2Fdashboard");
+    expect(signInUrlFor("/collection")).toBe("/login?next=%2Fcollection");
     expect(signInUrlFor("/settings", "?tab=account")).toBe("/login?next=%2Fsettings%3Ftab%3Daccount");
   });
 

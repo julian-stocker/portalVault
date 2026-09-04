@@ -871,3 +871,124 @@ Zeitpunkt, an dem PortalVault die Preishoheit übernimmt — **frühestens nach 
 Preishoheit tatsächlich übergeht · ob Scraping-Logik und Quell-URLs überhaupt jemals ins
 PortalVault-Repository wandern (heute untersagt, `docs/SECURITY.md`).
 
+---
+
+## ADR-0025 — `/` ist der Katalog, keine Landingpage
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Entscheidung.** Die öffentliche Startseite ist unmittelbar der Skylanders-Katalog. Es gibt
+keine vorgeschaltete Landingpage, kein Marketing-Intro, keinen Zwischenschritt.
+
+**Begründung.** Der erste geplante Nutzerkanal ist der eBay-Shop: Paket → QR-Code → SkyIsles
+(ADR-0021). Wer gerade Figuren auspackt, will sie erfassen, nicht lesen, worum es geht. Eine
+Landingpage wäre genau ein Klick zwischen Absicht und Handlung — an der Stelle, an der die
+Absicht am stärksten ist.
+
+**Konsequenzen.**
+
+- Der Katalog muss **ohne Konto vollständig nutzbar** sein: alle aktiven Figuren, Suche,
+  Serienfilter, Detailseiten. Erst die Sammlungsaktion verlangt eine Anmeldung (ADR-0027).
+- `/` ist damit die meistbesuchte Seite und bestimmt den ersten Eindruck. Sie ist mobile-first
+  ausgelegt, weil der QR-Einstieg immer am Handy stattfindet.
+- Erklärende Inhalte („Was ist SkyIsles?") brauchen später einen eigenen Platz. Sie zurück auf
+  `/` zu holen wäre eine Rücknahme dieser Entscheidung.
+
+---
+
+## ADR-0026 — Katalog vollständig serverseitig laden, im Browser filtern
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Entscheidung.** Die Server Component lädt **alle** aktiven Figuren in einer Abfrage und
+übergibt sie an eine Client Component. Suche und Serienfilter laufen vollständig im Browser.
+**Keine Pagination, kein Infinite Scroll, keine Virtualisierung, kein Suchendpunkt.**
+
+**Begründung — gemessen, nicht geschätzt (2026-09-04):**
+
+```
+600 aktive Figuren
+Katalog-Payload:  103 KB roh  ->  13,6 KB gzip  ->  ~11 KB brotli
+```
+
+Die vollständige Katalogantwort ist kleiner als ein einzelnes Figurenbild (Median 21 KB). Jede
+Serverrunde für einen Tastendruck wäre langsamer als das Filtern selbst und würde Last
+erzeugen, ohne irgendetwas zu verbessern.
+
+**Konsequenzen.**
+
+- Zwei Abfragen je Seitenaufruf: Katalog und — nur für Angemeldete — die eigenen
+  Sammlungseinträge. Kein N+1, keine Abfrage pro Karte.
+- Der Browser bekommt Daten, nie eine Datenbankverbindung. RLS bleibt unberührt.
+- Suche über `useDeferredValue` statt Debounce: kein Timer, kein verlorener Tastendruck.
+- **Diese Entscheidung hängt an der Größe.** Sie gilt, solange der Katalog in dieser
+  Größenordnung bleibt. Käme das Zehnfache dazu — etwa durch Disney Infinity oder mehrere
+  Bilder je Figur — ist sie neu zu bewerten.
+- Optimierungen werden **nicht vorsorglich** eingebaut. Zeigt eine Messung auf einem echten
+  mobilen Gerät ein Problem, wird es dann behandelt.
+
+---
+
+## ADR-0027 — Die Sammlungsaktion: Anmeldung mit Kontext, Mutation als Endzustand
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+### Ohne Anmeldung
+
+`+ Sammlung` führt über die bestehende sichere Redirect-Logik zu Login oder Registrierung und
+anschließend **in denselben Katalogkontext** zurück — gleiche Serie, gleiche Suche.
+
+**Die begonnene Aktion wird nicht automatisch nachgeholt.** Kein `?add=…`, keine
+Zustandsänderung durch einen GET-Aufruf, kein Intent-Cookie.
+
+**Begründung.** Ein automatisch ausgeführter GET-Parameter wäre eine ungefragte Änderung: Ein
+präparierter Link könnte fremden Konten Figuren hinzufügen. Ein Intent-Cookie wiederum
+scheitert genau im wichtigsten Fall — die Registrierung verlangt eine E-Mail-Bestätigung, der
+Mensch verlässt die Seite und kommt womöglich Tage später auf einem anderen Gerät zurück. Das
+Cookie ist dann weg oder falsch. Ein zweiter Tipp nach der Anmeldung ist der ehrlichere Handel.
+
+Optional darf die zuvor gemeinte Figur nach dem Rücksprung hervorgehoben werden, wenn das ohne
+zusätzliche Komplexität geht. **Kein Pflichtbestandteil.**
+
+### Mit Anmeldung: die Mutation drückt den Endzustand aus
+
+`setCollected(skyId, true | false)` — **kein Toggle**, der erst liest und dann entscheidet.
+
+| Wunsch | Umsetzung |
+|---|---|
+| `true` | `INSERT` mit `quantity: 1`; ein Unique-Verstoß (`23505`) gilt als Erfolg |
+| `false` | `DELETE` auf die eigene Zeile |
+
+**Warum kein Toggle.** Ein „lies den Zustand, dann kehre ihn um" ist bei zwei schnellen Tipps
+nicht vorhersagbar: Beide Anfragen lesen denselben Ausgangszustand und schreiben dasselbe
+Ergebnis. Eine Mutation, die den **gewünschten Endzustand** benennt, ist dagegen bei jeder
+Wiederholung identisch — genau das, was optimistisches UI braucht.
+
+**Warum `INSERT` statt `UPSERT`.** Ein Upsert würde `quantity` auf 1 zurücksetzen. Sobald V1.6
+Mengen einführt, hätte ein doppelter Tipp stillschweigend eine Menge von 5 auf 1 reduziert.
+Der ignorierte Unique-Verstoß erhält den bestehenden Wert.
+
+**Sicherheit.** `user_id` kommt ausschließlich aus `getUser()`, nie aus dem Formular. Die
+SKY-ID wird serverseitig gegen `^SKY-[0-9]{4}$` geprüft. RLS bleibt die Grenze; im
+Produktcode existiert kein Service-Role-Key.
+
+---
+
+## ADR-0028 — SkyIsles ist der öffentliche Produktname, PortalVault der technische
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Entscheidung.** Ab V1.5 heißt die sichtbare Anwendung **SkyIsles**. Technisch bleibt alles
+**PortalVault**: Repository, GitHub-Projekt, Paketname, Verzeichnisstruktur, Bezeichner.
+
+**Umfang der Änderung:** `de.app.name` und davon abgeleitete sichtbare Texte. Sonst nichts.
+
+**Begründung.** Ein sichtbarer Name lässt sich an einer Stelle ändern; ein technisches
+Umbenennen berührt Repository-URL, Remotes, Paketnamen, Importpfade und jede Referenz in der
+Dokumentation. Beides zu vermischen würde eine reine Textänderung zu einem Umbau machen — und
+die Vergleichbarkeit der Git-Historie beschädigen.
+
+**Konsequenz.** In `docs/` und im Code darf „PortalVault" weiterhin stehen, wo das technische
+Projekt gemeint ist. Wo Nutzer etwas lesen, steht „SkyIsles". Ein späteres vollständiges
+Renaming ist eine eigene Entscheidung.
+

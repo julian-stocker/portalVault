@@ -121,6 +121,14 @@ der Serie `SA` kann keine Kategorie der Serie `G` referenzieren. Ein separater F
 `series(code)` wäre dadurch redundant und entfällt; die Gültigkeit des Serien-Codes ergibt sich
 transitiv über `categories`.
 
+> **Folge für PostgREST, beim Bau von V1.5 aufgefallen.** Weil es **keinen direkten
+> Fremdschlüssel** von `skylanders` auf `series` gibt, kann PostgREST auch keine Beziehung
+> zwischen beiden ableiten. Ein eingebetteter Select `skylanders(..., series(label))` scheitert
+> mit *„Could not find a relationship between 'skylanders' and 'series' in the schema cache"*.
+> Die Anwendung lädt Serien und Kategorien deshalb als eigene kleine Abfragen (6 und 30 Zeilen)
+> und verknüpft sie im Code. Das ist kein Mangel des Schemas, sondern der Preis der bewussten
+> Entscheidung oben — und bei dieser Datenmenge kostenlos.
+
 **Nicht enthalten und nicht vorgesehen:** Lagerbestand, `available`, Ankaufpreis, eBay-Daten,
 externe Titel, Mapping-Informationen (ADR-0008). Statisch geprüft: keine dieser Spalten
 existiert.

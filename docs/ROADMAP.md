@@ -74,7 +74,8 @@ Prinzip 4 eine Anforderung an das Katalog-UI und nicht an eine spätere Ausbaust
 - [x] **V1.2C — RLS funktional verifiziert (31/31)**
 - [x] **V1.3 — Katalog importiert und verifiziert**
 - [x] **V1.4 — Auth gebaut und vollständig verifiziert**
-- [ ] Freigabe für V1.5
+- [x] **V1.5 — Katalog und Sammlung, End-to-End-Fluss verifiziert**
+- [ ] Freigabe für V1.6
 
 Noch nicht: Supabase verbinden, SQL, Datenimport, Bilder kopieren, Auth, Deployment.
 
@@ -137,26 +138,41 @@ E-Mail-Bestätigung, `signUp` liefert also **keine** sofortige Session.
 **Sichtbares Ergebnis:** noch keines für Besucher — das ist der bewusst in Kauf genommene Preis
 dafür, dass V1.5 den vollständigen Fluss liefert statt nur einen Katalog zum Anschauen.
 
-### V1.5 Visueller Katalog + Owned-Toggle + „Meine Sammlung"
+### V1.5 Öffentlicher Katalog + Sammlung — **abgeschlossen 2026-09-04**
 
-**Ziel: der erste vollständige End-to-End-Produktfluss.**
+Automatisiert und in einem manuellen Browser-Durchlauf über 34 Punkte verifiziert.
+**Der End-to-End-Fluss steht.**
 
-> Registrieren → Einloggen → Katalog öffnen → Figur antippen → eigene Sammlung sehen
+> Katalog öffnen → Figur finden → als gesammelt markieren → falls nötig anmelden →
+> eigene Sammlung sehen
 
-- Startseite
-- **Visuelles Grid mit Bildern** als zentraler Einstieg (Prinzip 1)
-- Katalogseite: Serien, Kategorien, Suche, Filter, Sortierung (Reihenfolge wie im Legacy)
-- Detailseite je Figur (`/skylanders/<slug>`) mit Bild, Serie, Kategorie, Marktpreis
-- **Owned/Not-Owned-Toggle**: antippen → owned, erneut antippen → entfernt.
-  Zustand sofort visuell eindeutig, optimistisches UI ohne spürbare Wartezeit (Prinzip 4)
-- **Mobile-first**: Touch-Ziele groß genug zum schnellen Antippen (Prinzip 5)
-- **Minimale Seite „Meine Sammlung"** (Prinzip 6) — visuelles Grid, mehr noch nicht
-- Katalog ohne Login vollständig durchsuchbar; der Toggle erscheint nur eingeloggt
+- **`/` ist der Katalog** (ADR-0025), ohne Konto vollständig nutzbar: alle aktiven Figuren,
+  Bild, Name, Serie, Marktwert
+- Suche und Serienfilter clientseitig, Katalog vollständig serverseitig geladen (ADR-0026)
+- Sortierung Serie → Kategorie → Name, wie im Legacy-System
+- **Owned-Toggle**: `+ Sammlung` / `✓ Gesammelt`, optimistisch, Mutation als Endzustand
+  (ADR-0027). Keine Wunschlisten-Semantik
+- Ohne Anmeldung führt die Aktion zu Login/Registrierung und **zurück in denselben Kontext**;
+  die Aktion wird nicht automatisch nachgeholt (ADR-0027)
+- Detailseite `/skylanders/<slug>` — minimal, nur kanonische Daten
+- **`/collection`** (geschützt): Anzahl unterschiedlicher Figuren, Gesamtzahl aktiver
+  Katalogfiguren, Fortschritt, Sammlungswert aus `market_price`, Figurenraster
+- `/dashboard` leitet auf `/collection` weiter, damit alte Links nicht brechen
+- Fehlendes Bild → stabiler Platzhalter · fehlender Preis → `–` und nicht in der Wertsumme
+- Bereits besessene, inaktive Figuren verschwinden **nicht** still aus der Sammlung
+- Gemeinsame responsive Navigation, mobile-first, ein Komponentensatz
+- **SkyIsles** als sichtbarer Produktname (ADR-0028)
+
+**Nicht in V1.5:** Mengen-/Duplikat-UI (`quantity` wird aber in allen Berechnungen korrekt
+berücksichtigt) · weitere Sammlungsansichten · Fortschritt je Serie · Playwright.
 
 ### V1.6 Ausbau
 
 - **Mehrere Sammlungsansichten**: kompakte Ansicht und Tabellenansicht neben dem Grid (Prinzip 7)
-- **Fortschritt gesamt und pro Serie** (Prinzip 8)
+- **Fortschritt pro Serie** (gesamt bereits in V1.5)
+- Kategorie-Zwischenüberschriften im Katalog
+- Filter und Sortierung innerhalb der eigenen Sammlung
+- **Playwright**, sobald die Sammlungs-UX steht (ADR-0013)
 - **Mengen/Duplikate technisch unterstützen** (Prinzip 9) — das Datenmodell kann es bereits
   (`collection_items.quantity`, ADR-0005). **Ob Free oder Premium: offen** (ADR-0022)
 - **Mobile-Feinschliff**

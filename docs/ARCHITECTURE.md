@@ -82,9 +82,9 @@ src/
     layout.tsx           ✓ Wurzellayout, <html lang="de">
     page.tsx             ✓ vorläufige Startseite
     globals.css          ✓ Tailwind
-    (public)/            Startseite, Katalog, Detailseiten  — ohne Login erreichbar
+    (public)/            Katalog (= /), Detailseiten  — ohne Login erreichbar
     (auth)/              login, register, verify, reset
-    (app)/               dashboard, collection, profile     — geschützt
+    (app)/               collection, settings, onboarding    — geschützt
     auth/callback/       Supabase-Auth-Callback (Route Handler)
   components/            wiederverwendbare UI-Bausteine
   lib/
@@ -171,7 +171,17 @@ Auch ein direkter API-Aufruf mit gültigem Token darf fremde Sammlungen weder le
 
 ## 6. Datenfluss
 
-### Katalogdaten (selten, manuell, kontrolliert)
+### Katalog im Browser
+
+Die Startseite ist der Katalog (ADR-0025). Eine Server Component lädt **alle** aktiven Figuren
+in einer Abfrage und — nur für Angemeldete — deren eigene Sammlungseinträge; Suche und Filter
+laufen anschließend vollständig im Browser (ADR-0026, gemessen: 13,6 KB gzip für 600 Figuren).
+
+Der Sammlungs-Toggle geht über eine Server Action, die den **gewünschten Endzustand** ausdrückt
+statt umzuschalten (ADR-0027). Damit ist ein doppelter Tipp unschädlich und optimistisches UI
+verlässlich.
+
+### Katalogdaten aus dem Legacy-System (selten, manuell, kontrolliert)
 
 1. Nutzer pflegt die Excel im Legacy-Projekt und führt dort `webpage build` aus.
 2. Nutzer kopiert `site/data/products.json` und geänderte `site/img/*.webp` nach PortalVault.

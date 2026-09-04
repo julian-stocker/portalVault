@@ -8,8 +8,8 @@
 
 /** Where a signed-in user without a username has to go first. */
 export const ONBOARDING_PATH = "/onboarding";
-/** Default landing page after signing in. */
-export const DEFAULT_SIGNED_IN_PATH = "/dashboard";
+/** Default landing page after signing in: the visitor's own collection. */
+export const DEFAULT_SIGNED_IN_PATH = "/collection";
 /** Where the middleware sends anonymous visitors. */
 export const SIGN_IN_PATH = "/login";
 

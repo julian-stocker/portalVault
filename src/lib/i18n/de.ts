@@ -12,10 +12,52 @@ export const de = {
   locale: "de-AT",
 
   app: {
-    name: "PortalVault",
+    // SkyIsles is the public product name; PortalVault stays the technical
+    // project name in the repository and the code (ADR-0028).
+    name: "SkyIsles",
     tagline: "Die Plattform für Skylanders-Sammler",
     description:
       "Katalog, Marktpreise und persönliche Sammlungsverwaltung für Skylanders.",
+  },
+
+  catalog: {
+    title: "Katalog",
+    searchLabel: "Figur suchen",
+    searchPlaceholder: "Name eingeben …",
+    allSeries: "Alle",
+    resultCount: (shown: number, total: number) =>
+      shown === total ? `${total} Figuren` : `${shown} von ${total} Figuren`,
+    empty: "Keine Figur gefunden.",
+    emptyHint: "Versuche einen anderen Namen oder eine andere Serie.",
+    noImage: "Kein Bild",
+    noPrice: "Preis offen",
+    collect: "+ Sammlung",
+    collected: "✓ Gesammelt",
+    collectSignedOut: "+ Sammlung",
+    collectFailed: "Das hat nicht geklappt.",
+    inactive: "Nicht mehr im Katalog",
+    backToCatalog: "Zurück zum Katalog",
+    marketValue: "Marktwert",
+    series: "Serie",
+  },
+
+  collection: {
+    title: "Meine Sammlung",
+    distinctFigures: "Verschiedene Figuren",
+    catalogTotal: "Figuren im Katalog",
+    progress: "Fortschritt",
+    estimatedValue: "Geschätzter Sammlungswert",
+    withoutPrice: (count: number) =>
+      count === 1
+        ? "1 Figur ohne Marktpreis ist nicht in der Summe enthalten."
+        : `${count} Figuren ohne Marktpreis sind nicht in der Summe enthalten.`,
+    inactiveOwned: (count: number) =>
+      count === 1
+        ? "1 Figur in deiner Sammlung ist nicht mehr im Katalog."
+        : `${count} Figuren in deiner Sammlung sind nicht mehr im Katalog.`,
+    empty: "Deine Sammlung ist noch leer.",
+    emptyHint: "Öffne den Katalog und tippe die Figuren an, die du besitzt.",
+    emptyAction: "Zum Katalog",
   },
 
   dashboard: {
@@ -24,9 +66,11 @@ export const de = {
   },
 
   nav: {
-    dashboard: "Übersicht",
-    settings: "Einstellungen",
+    catalog: "Katalog",
+    collection: "Sammlung",
+    settings: "Profil",
     signOut: "Abmelden",
+    signIn: "Anmelden",
   },
 
   auth: {

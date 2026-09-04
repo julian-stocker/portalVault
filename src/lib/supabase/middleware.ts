@@ -15,8 +15,15 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { ONBOARDING_PATH, signInUrlFor } from "@/lib/auth/redirect";
 
-/** Routes that require a session. */
-const PROTECTED_PREFIXES = ["/dashboard", "/settings", "/onboarding"];
+/**
+ * Routes that require a session.
+ *
+ * /dashboard is deliberately absent: it only redirects to /collection, so
+ * letting it through first means an anonymous visitor ends up at
+ * /login?next=/collection rather than being sent back to a path that no
+ * longer exists.
+ */
+const PROTECTED_PREFIXES = ["/collection", "/settings", "/onboarding"];
 
 /** Routes a signed-in user has no reason to see. */
 const SIGNED_OUT_ONLY_PREFIXES = ["/login", "/register", "/forgot-password"];

@@ -27,6 +27,15 @@ Analyseplattform, **kein Marketplace** (ADR-0021). Zielbild: ein Sammler öffnet
 Handy, sieht den visuellen Katalog, tippt die Figuren an, die er besitzt, und sieht seinen
 Fortschritt. Details in `docs/ROADMAP.md`, Abschnitt „Produktvision".
 
+**V1.5 abgeschlossen und vollständig verifiziert.** Der Katalog ist die Startseite: 600
+Figuren ohne Konto sichtbar, Suche und Serienfilter im Browser, Owned-Toggle mit optimistischem
+UI, Detailseiten unter `/skylanders/<slug>`, geschützte Sammlungsseite mit Fortschritt und
+Sammlungswert, gemeinsame responsive Navigation. Die sichtbare Anwendung heißt **SkyIsles**
+(ADR-0028).
+
+Damit steht der **erste vollständige End-to-End-Produktfluss**: Katalog öffnen → Figur finden →
+antippen → anmelden → eigene Sammlung sehen.
+
 **V1.4 abgeschlossen und vollständig verifiziert.** Auth steht: Registrierung,
 E-Mail-Bestätigung, Login, Logout, Passwort vergessen und zurücksetzen, Onboarding mit
 Benutzernamen, geschützter Bereich, Einstellungen zum Ändern von Benutzername und Passwort.
@@ -77,6 +86,13 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
 | Geschützter Bereich `/dashboard`, `/settings` über `src/proxy.ts` | ✅ |
 | Sichere Redirect-Validierung gegen offene Weiterleitungen | ✅ |
+| Katalog als Startseite `/`, ohne Konto nutzbar (ADR-0025) | ✅ |
+| Suche und Serienfilter clientseitig (ADR-0026) | ✅ |
+| Owned-Toggle, Mutation als Endzustand (ADR-0027) | ✅ |
+| Detailseite `/skylanders/<slug>` | ✅ |
+| `/collection` mit Fortschritt und Sammlungswert | ✅ |
+| Gemeinsame responsive Navigation, mobile-first | ✅ |
+| SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 
 ## Noch nicht implementiert
@@ -112,6 +128,36 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-04, V1.5 — Katalog und Sammlung, technisch verifiziert:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| `npm test` | ✅ 76 Tests (15 Slug, 31 Auth, 30 Katalog/Sammlung) |
+| `npm run verify:rls` | ✅ 31/31, jetzt gegen den gefüllten Katalog |
+| lint / typecheck / build | ✅ alle exit 0, 15 Routen |
+| `/` ohne Konto | ✅ 200, **600 Kartenlinks**, 534 Lazy-Bilder, 66 Platzhalter, 15 „Preis offen" |
+| Login-Links für Gäste | ✅ 600, jeweils mit Serien-, Such- und Figurenkontext |
+| Kontext aus der URL | ✅ `?series=G` → 86 · `?q=drobot` → 3 · `?series=G&q=bash` → 1 · `?series=UNSINN` → 600 (Rückfall) |
+| Hervorhebung | ✅ gültige SKY-ID markiert genau eine Karte, ungültige keine |
+| Detailseiten | ✅ 200 für echte Slugs, **404** für unbekannte |
+| `/collection`, `/settings` anonym | ✅ 307 auf `/login?next=…` |
+| `/dashboard` | ✅ leitet weiter, alte Links brechen nicht |
+| Bild-Caching | ✅ `public, max-age=31536000, immutable` |
+| Serverantwort `/` | ✅ 0,20 s, 619 KB HTML → 43,9 KB über den Draht |
+| Fehler im Serverlog | ✅ 0 |
+
+**Manueller Browser-Durchlauf (2026-09-04) — vollständig erfolgreich.** 34 Punkte über sechs
+Bereiche: Katalog ohne Anmeldung, Anmeldung mit Kontextrückkehr, Sammeln, Sammlungsseite,
+Detailseite, Navigation und Darstellung.
+
+Drei Punkte waren dabei die eigentliche Prüfung, weil sie sich technisch nicht abdecken lassen:
+
+| Punkt | Ergebnis |
+|---|---|
+| Scrollen mit 600 gerenderten Karten am Handy | ✅ flüssig — **keine Virtualisierung nötig**, ADR-0026 bestätigt sich in der Praxis |
+| Sehr schnelles Mehrfachtippen auf den Toggle | ✅ endet im zuletzt gewünschten Zustand — die Mutation als Endzustand wirkt (ADR-0027) |
+| Fehlerfall ohne Netz | ✅ springt zurück und meldet, statt falsch stehenzubleiben |
 
 **2026-09-04, V1.4 — Auth gebaut und verifiziert:**
 
@@ -365,9 +411,12 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**V1.5 — visueller Katalog mit Owned-Toggle und minimaler Sammlungsseite.**
-Dort schließt sich der End-to-End-Fluss: Registrieren → Einloggen → Katalog → Figur antippen →
-eigene Sammlung sehen (ADR-0023). Alle Voraussetzungen stehen: 600 Figuren in der Datenbank,
-Auth verifiziert, RLS funktional bewiesen.
+**V1.6 — Ausbau.** Weitere Sammlungsansichten (kompakt, Tabelle), Fortschritt je Serie,
+Mengen-/Duplikat-UI, Kategorie-Zwischenüberschriften im Katalog, Filter und Sortierung
+innerhalb der Sammlung, Mobile-Feinschliff. Und Playwright, sobald die Sammlungs-UX steht
+(ADR-0013).
+
+Danach **V1.7** — Beta-Reife: Impressum, Datenschutzerklärung, produktiver E-Mail-Versand
+(ADR-0018) und erst dann ein Deployment.
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**
