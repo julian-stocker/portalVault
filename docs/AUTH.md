@@ -183,6 +183,32 @@ ausdrücklich nicht genügte — interne Daten wurden gar nicht erst ausgeliefer
 - Kontolöschung: `auth.users` löschen kaskadiert auf `profiles` und `collection_items`.
   **OPEN:** Self-Service-Löschung in V1 anbieten? (DSGVO-relevant, siehe `docs/SECURITY.md`.)
 
+### Rollen und Berechtigungen — heute keine, später `shop_admin`
+
+**In V1 gibt es keine Rollen.** Jeder angemeldete Benutzer hat exakt dieselben Rechte, und
+Autorisierung heißt heute ausschließlich: *„gehört diese Zeile mir?"* — durchgesetzt von RLS
+über `auth.uid()`.
+
+Der spätere First-Party-Shop bringt die **erste echte Rollenunterscheidung** (ADR-0032).
+Damit sie nicht falsch gebaut wird, stehen die Randbedingungen schon jetzt fest:
+
+1. **Die E-Mail-Adresse ist keine Berechtigung.** `yulezcollectibles@gmail.com` identifiziert
+   ein Konto, mehr nicht. Eine hart codierte Adresse als Autorisierungsregel — im Client, im
+   Server-Code, in einer Policy oder in einer Umgebungsvariable — ist ausgeschlossen.
+2. **Die Rolle darf nicht auf `profiles` liegen.** `profiles` ist vom Benutzer selbst
+   beschreibbar: `grant select, insert, update … to authenticated` plus `profiles_update_own`.
+   Eine Spalte `role` oder `is_shop_admin` dort **könnte sich jeder Benutzer selbst setzen** —
+   Rechteausweitung mit einem einzigen PostgREST-Aufruf.
+3. **Vergeben wird sie außerhalb des Benutzerpfads**, über `service_role` oder eine
+   `security definer`-Funktion — nie durch den Benutzer, nie durch den Client.
+4. **Geprüft wird sie serverseitig, aus `getUser()`**, nie aus einem Claim, den der Browser
+   mitschickt, und nie erst im UI. Ein ausgeblendeter Button ist keine Berechtigung.
+5. **Ohne Rolle keine Wirkung:** Ein normaler Benutzer, der eine Shop-Admin-Aktion direkt
+   aufruft, muss abgewiesen werden — von RLS und von der Server Action, nicht von der Anzeige.
+
+**Nichts davon ist implementiert.** Es gibt keine Rollenspalte, keine Rollentabelle und keine
+Shop-Policy.
+
 ---
 
 ## 7. E-Mail-Versand
@@ -512,3 +538,6 @@ von Katalog- oder Sammlungs-UI (das ist V1.5).
   Änderung technisch. Eine Sperrfrist ist keine V1-Anforderung — sie wird erst relevant, wenn
   Profile öffentlich werden.
 - **OPEN:** Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später.
+- **OPEN:** Wie wird die spätere Rolle `shop_admin` getragen und vergeben? Fest steht nur, wo
+  sie **nicht** hingehört (Abschnitt 6, ADR-0032). Nötig vor der ersten Shop-Schreiboperation,
+  nicht vorher.

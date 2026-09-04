@@ -60,6 +60,17 @@ frisch gekaufter Figuren muss **mobil sehr schnell und einfach** sein. Wer gerad
 auspackt, tippt am Handy — nicht am Schreibtisch. Genau deshalb ist der Owned-Toggle aus
 Prinzip 4 eine Anforderung an das Katalog-UI und nicht an eine spätere Ausbaustufe.
 
+**Wohin der QR-Code führt:** primär in den **Katalog/Tracker**, nicht in einen Shop. Der Käufer
+soll SkyIsles kennenlernen, seine Sammlung erfassen und den First-Party-Shop erst danach
+entdecken.
+
+**Offene Acquisition-Idee, kein freigegebener Prozess:** Zusätzlich könnte dem Paket ein
+Rabattcode für einen späteren Direkteinkauf beiliegen.
+
+> ⚠️ Werbemittel oder Rabatte für einen **eigenen** Shop in einer **eBay**-Bestellung berühren
+> die Plattformrichtlinien von eBay. Das ist **vor** einer Einführung anhand der dann geltenden
+> eBay-Richtlinien zu prüfen. Bis dahin gilt das ausdrücklich als Idee, nicht als Plan.
+
 ---
 
 ## NOW — der aktuelle Abschnitt
@@ -241,6 +252,76 @@ Ein Berührungspunkt, der dann neu zu entscheiden wäre: Ein Shop braucht Lagerb
 Verfügbarkeit. Beides existiert im Legacy-System (Spalten D/E/F, `available`) und wurde per
 ADR-0008 bewusst nicht übernommen. Das wieder aufzugreifen wäre eine **neue** Entscheidung,
 keine Rücknahme von ADR-0008.
+
+#### Fachlich festgehalten (2026-09-04) — ADR-0032 und ADR-0033
+
+Der folgende Abschnitt ist **Dokumentation, keine Planung eines nächsten Schritts.** Nichts
+davon ist gebaut, eingeplant oder freigegeben. Er existiert, damit der Shop später korrekt
+auf dem Tracker aufsetzt statt in ihn hinein.
+
+**Zwei Nutzungskontexte.** Der private Account des Betreibers bleibt ein normaler
+Collector-Account (gesammelt, entfernen, später Mengen, später Wanted). Der Geschäftsaccount
+`yulezcollectibles@gmail.com` trägt später **zusätzlich** Shop-Admin-Rechte: Lagerbestand,
+Verkaufspreise, Verfügbarkeit, später Bestellungen, ggf. Referenz-Marktpreise.
+
+> **Die E-Mail-Adresse ist niemals die Berechtigungsregel.** Sie identifiziert nur das Konto.
+> Später braucht es eine echte, serverseitig geprüfte Rolle wie `shop_admin`, die ein Benutzer
+> sich nicht selbst geben kann. Normale Benutzer können Shop-Admin-Aktionen nicht ausführen —
+> nicht nur nicht sehen. Details und die konkrete Fallgrube in ADR-0032.
+
+**Eine Figur, vier unabhängige Zustände.** Katalog · eigene Sammlung · fremde Sammlungen ·
+Shopbestand. Alle vier hängen an derselben `sky_id`, keiner impliziert einen anderen.
+**Keine zweite Produktdatenbank** für dieselben Skylanders.
+
+**Öffentlicher Shopzustand an der Figur.** Der Shop ist grundsätzlich öffentlich erreichbar;
+der bestehende kanonische Katalog wird wiederverwendet.
+
+| Lagerbestand | Anzeige |
+|---|---|
+| **> 0** | Kaufmöglichkeit, deutlich sichtbarer aktiver „Kaufen"-Button, aktueller Shoppreis |
+| **= 0** | deaktivierter Zustand „Nicht auf Lager" — **der Shoppreis bleibt trotzdem sichtbar** |
+
+Das visuelle Design, einschließlich der genauen Farben, wird später festgelegt.
+
+**Preisebenen (ADR-0033).** Referenz-Marktwert → Shop-Basispreis → automatischer Lager-Rabatt
+→ optionaler Coupon → finaler Bestellpreis. `skylanders.market_price` bleibt der
+Referenzmarktwert; der Shoppreis ist eine eigene Größe und wird von einem Marktpreis-Update
+**nicht still überschrieben**. Rabatte rechnen auf dem Shop-Basispreis, nie auf dem Marktpreis.
+Bestellpositionen speichern einen **Preis-Snapshot** — eine bezahlte Bestellung ändert sich
+nicht, weil später ein Preis oder eine Regel geändert wird.
+
+**Lagerbasierte Rabatte — Idee, keine Regel.** Bestand > 5 → 5 %, > 10 → 10 %, > 15 → 15 %.
+**Beispielwerte, nicht entschieden.** Schwellen und Prozentsätze müssen später konfigurierbar
+sein, ohne Produktcode an vielen Stellen umzubauen.
+
+**Initialer Shop-Import aus der Legacy-Excel — nur der Store-Bereich.** Der erste O/S/D-Block
+ist Geschäftsinventar: `O` = insgesamt jemals eingekauft, `S` = insgesamt verkauft,
+`D` = aktueller Lagerbestand. **Für einen späteren Shop-Import ist `D` die relevante Größe**;
+`O` und `S` sind historische Kennzahlen und höchstens für spätere Analytics interessant.
+Die **weiter hinten liegenden O/C/S/D-Blöcke (OVERALL / COLLECTION / SOLD / DUPLICATES) sind
+die private Sammlung und müssen beim Shop-Import ignoriert werden.** Keine Importlogik jetzt.
+
+**Später wahrscheinlich nötige Strukturen** — konzeptionelle Richtung, **keine Migration,
+keine Tabelle jetzt**: Shop-Inventar · Shoppreise · Shop-Admin-Berechtigungen · Rabattregeln ·
+Coupons · Bestellungen · Bestellpositionen mit Preis-Snapshot.
+
+**Integration statt zweiter Anwendung.** Katalog, Sammlung und Shop nutzen dieselbe kanonische
+Figur. Langfristig denkbar, ausdrücklich **nicht** Bestandteil der aktuellen Version:
+eine fehlende Figur in der Sammlung zeigt „Im SkyIsles-Shop verfügbar"; nach einem Kauf bietet
+SkyIsles an, die gekauften Figuren zur Sammlung hinzuzufügen.
+
+**Offen — bewusst jetzt nicht entschieden:**
+
+| Frage | nötig vor |
+|---|---|
+| Sind Coupons mit automatischen Lager-Rabatten kombinierbar? | jeder Rabattlogik |
+| Welche Rabattart hat Vorrang, wenn beide greifen? | jeder Rabattlogik |
+| Endgültige Rabattschwellen und Prozentsätze | jeder Rabattlogik |
+| Coupon-Details: Gültigkeitszeitraum, Mindestbestellwert, Nutzungslimit, kundenspezifische Einmalcodes | jeder Coupon-Struktur |
+| Wie wird `shop_admin` technisch getragen und vergeben? | jeder Shop-Schreiboperation |
+| Welcher Payment-Provider, und welche Daten liegen dann bei ihm statt bei uns? | jedem Checkout |
+| Wird der öffentliche Lagerbestand als Zahl oder nur als Zustand ausgeliefert? | jeder öffentlichen Shop-Anzeige |
+| Ist der Shop an dieselbe Wachstumsbedingung geknüpft wie der Marketplace (ADR-0021)? | jeder Umsetzungsplanung |
 
 **Community-Ebene — ausdrücklich nicht in V1**
 

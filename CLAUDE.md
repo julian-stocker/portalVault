@@ -15,6 +15,12 @@ schneller Owned/Not-Owned-Toggle, Fortschritt. **Kein Marketplace** (ADR-0021).
 Handel, Tausch, Angebote und Zahlungen werden erst wieder bewertet, wenn PortalVault
 nachweislich Nutzer gewinnt. Produktvision und -prinzipien: `docs/ROADMAP.md`.
 
+Ein späterer **First-Party-Shop** (ein Verkäufer: der Betreiber) ist fachlich festgehalten,
+aber **nicht gebaut und nicht eingeplant** — ADR-0032 und ADR-0033. Er ist kein Marketplace;
+der Marketplace-Stopp aus ADR-0021 gilt unverändert. **Solange du nicht ausdrücklich dazu
+beauftragt wirst, implementierst du davon nichts** — keine Tabelle, keine Rolle, kein Preisfeld,
+keinen Import.
+
 PortalVault löst ein bestehendes, funktionierendes Legacy-Projekt ab (statische Seite,
 Excel als Source of Truth). Das Legacy-Projekt liegt unter `../webpage`.
 
@@ -135,6 +141,7 @@ Code soll lesbar, modular und kommentiert sein.
 | Gesamtarchitektur, Systemgrenzen, Datenfluss | `docs/ARCHITECTURE.md` |
 | Abgeschlossenes größeres Feature | `PROJECT_STATUS.md` |
 | Wichtige Architekturentscheidung | `docs/DECISIONS.md` |
+| Rollen, Berechtigungen, Shop-Domäne | `docs/AUTH.md` + `docs/SECURITY.md` + `docs/DECISIONS.md` |
 
 Weitere Regeln:
 - Dokumentation muss den **tatsächlichen** Codezustand widerspiegeln. Veraltete Aussagen
@@ -164,6 +171,9 @@ Begründung umgeworfen. Neue Entscheidung → neuer Eintrag mit Status, Begründ
 - Einführung kostenpflichtiger externer Dienste
 - Übertragung sensibler Daten an externe APIs
 - Entscheidungen mit erheblichen Marketplace-Auswirkungen
+- **irgendetwas am First-Party-Shop**: Shop-Tabellen, Shoppreise, Rabatte, Coupons,
+  Bestellungen, Shop-Import aus der Legacy-Excel — und **jede Form von Rolle oder
+  Admin-Berechtigung** (ADR-0032)
 
 Unklar, aber leicht reversibel und risikoarm → sinnvolle Standardlösung vorschlagen und
 umsetzen. Schwer reversibel oder sicherheitskritisch → **erst fragen**.

@@ -58,15 +58,20 @@ zentrale Figur über die SKY-ID, nicht über Name oder Kopien.
 |---|---|---|
 | **A** | **SKY-ID** | Identität |
 | **B** | Artikelname | roh übernommen, kein `strip()`, keine Korrektur |
-| D | O = gekauft (Total) | intern |
-| E | S = verkauft (Sold) | intern |
-| F | D = verfügbar (`D − E`) | intern; öffentlich nur als Boolean |
+| D | **O = Owned** — insgesamt jemals eingekauft | intern (Geschäftsinventar) |
+| E | **S = Sold** — insgesamt verkauft | intern (Geschäftsinventar) |
+| F | **D = Difference** — aktueller Lagerbestand (`D − E`) | intern; öffentlich nur als Boolean |
 | H | Trendpfeil | wird vom Preisupdate geschrieben |
 | **I** | **Marktpreis** | der Preis auf der Website |
 | J | `= I × 0,9` eBay-Erlös nach Gebühren | **kein** Kundenpreis, nie exportiert |
 | L/M/N | OVERALL / SOLD / DUPLICATES (Werte) | intern, finanziell |
-| P/Q/R/S | **private Sammlung** (O/C/S/D) | wird nie gelesen |
+| P/Q/R/S | **private Sammlung** (O/C/S/D = OVERALL / COLLECTION / SOLD / DUPLICATES) | wird nie gelesen |
 | U/V/W/X | private Sammlung (Werte) | wird nie gelesen |
+
+> **Zwei O/S/D-artige Blöcke, zwei völlig verschiedene Bedeutungen.** Der **erste** Block
+> (D/E/F) ist das **Geschäftsinventar** des Stores. Die **weiter hinten** liegenden Blöcke
+> (P/Q/R/S, U/V/W/X) sind die **private Sammlung** des Betreibers. Sie sehen ähnlich aus und
+> meinen Gegenteiliges — die häufigste Verwechslungsgefahr in dieser Datei.
 
 Zeile 1 = Kopfzeile, Zeile 2 = Summen, Artikel ab Zeile 3/4.
 Fettgedruckte Zeilen in `ZB` / `DI A` sind Rubriküberschriften, keine Artikel.
@@ -417,6 +422,19 @@ Validierung neu implementiert, nicht kopiert (siehe Abschnitt 12).
 | Ankauffaktor `Summary!E23` | abgeleitete Geschäftskennzahl |
 
 Vollständige Security-Regeln: `docs/SECURITY.md`.
+
+**Diese Liste bleibt vollständig gültig, auch wenn später ein First-Party-Shop kommt**
+(ADR-0032). Ein späterer Shop-Import würde **eine** Größe brauchen — den aktuellen
+Lagerbestand `D` aus dem **Store**-Block (Spalte F) — und zwar direkt in die Datenbank,
+niemals über das Repository und niemals über den Katalogpfad `products.json`. `O` und `S`
+(Spalten D/E) sind historische Geschäftskennzahlen und höchstens für spätere Analytics
+interessant. **Die privaten O/C/S/D-Blöcke (P/Q/R/S, U/V/W/X) sind dabei zu ignorieren** —
+sie beschreiben die persönliche Sammlung, nicht das Geschäftsinventar.
+
+Bevor so ein Import je gebaut wird, ist die Spaltenzuordnung **read-only neu zu verifizieren**
+statt aus dieser Tabelle übernommen zu werden: Sie stammt aus der Legacy-Analyse vom
+2026-09-03, und eine Excel-Struktur kann sich ändern. **Es existiert keine solche Importlogik,
+und sie ist nicht freigegeben.**
 
 ---
 

@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-04 (ADR-0031, Entfernen aus der Sammlung).
+Letzte Aktualisierung: 2026-09-04 (ADR-0032/0033, Shop-Domäne fachlich festgehalten).
 
 ---
 
@@ -1171,3 +1171,151 @@ Mengen-UI — **mit der Mengen-UI in V1.6 muss das mit gelöst werden.**
 **Verworfen:** Bestätigungsdialog (bestraft den Normalfall) · Toast mit Undo (verschwindet
 nach Sekunden, auf dem Handy leicht zu verpassen) · sofortiges Ausblenden der Karte (nimmt dem
 Rückgängig den Ankerpunkt) · Mengen-Stepper (gehört zu V1.6, nicht in diese Änderung).
+
+---
+
+## ADR-0032 — Collector-Domain und First-Party-Shop-Domain sind getrennt
+
+**Status:** Fachliche Richtung ANGENOMMEN (2026-09-04) · **Nichts davon ist implementiert.**
+Keine Migration, keine Tabelle, keine Rolle, kein Checkout. Dieser Eintrag hält Entscheidungen
+fest, damit ein späterer Shop korrekt auf dem bestehenden Tracker aufsetzt.
+
+**Problem.** SkyIsles soll später zusätzlich ein **First-Party-Shop** des Betreibers werden.
+Ohne festgehaltene Grenze wäre der naheliegende Fehler, den Shop in die vorhandenen Tabellen
+hineinzubauen: Lagerbestand in `collection_items`, Verkaufspreis in `skylanders.market_price`,
+Berechtigung an einer E-Mail-Adresse. Jede dieser Abkürzungen wäre später nur noch mit einer
+Datenmigration zu korrigieren.
+
+### Die Grenze
+
+Es gibt **zwei fachliche Domänen über demselben kanonischen Katalog**:
+
+| | Collector-Domain (existiert) | Shop-Domain (später) |
+|---|---|---|
+| Frage | „Was besitzt **dieser Nutzer**?" | „Was hat **das Geschäft** auf Lager?" |
+| Träger | `collection_items` | eigene Struktur, z. B. `shop_inventory` |
+| Eigentümer der Zeile | ein Benutzerkonto | der Betreiber |
+| Sichtbarkeit | privat, nur der Eigentümer (ADR-0016) | öffentlich lesbar |
+| Preisgröße | keine — Wert wird aus `market_price` berechnet | eigener Verkaufspreis |
+| Schreibrecht | der Benutzer selbst | ausschließlich Shop-Admin |
+
+**Verbindlich:** `collection_items` beschreibt ausschließlich persönliche Sammlungen.
+**Shopbestand wird dort niemals gespeichert** — auch nicht „vorübergehend", auch nicht über
+eine Zusatzspalte, auch nicht über einen technischen Betreiber-Account.
+
+**Beide Domänen referenzieren dieselbe `sky_id`.** Keine zweite Produktdatenbank für dieselben
+Figuren. Eine SKY-ID kann gleichzeitig im öffentlichen Katalog stehen, in der Sammlung des
+Betreibers liegen, in den Sammlungen beliebig vieler anderer Nutzer liegen und im Shop auf
+Lager sein. **Diese vier Zustände sind vollständig unabhängig voneinander** und dürfen sich
+gegenseitig nicht implizieren.
+
+### Zwei Nutzungskontexte, ein Kontomodell
+
+Der private Account des Betreibers ist ein **normaler Collector-Account** und bleibt es.
+Der Geschäftsaccount `yulezcollectibles@gmail.com` soll später **zusätzlich** Shop-Admin-Rechte
+tragen: Lagerbestand, Verkaufspreise, Verfügbarkeit schalten, später Bestellungen, ggf.
+Referenz-Marktpreise.
+
+**Die E-Mail-Adresse ist niemals die Autorisierungsregel.** Sie identifiziert nur das Konto.
+Eine hart codierte Adresse — im Client, im Server-Code, in einer Policy oder in einer
+Umgebungsvariable — ist als Berechtigungsprüfung **ausgeschlossen**: sie ist änderbar, sie
+steht in Klartext im Repository, und sie erzwingt ein Deployment, sobald sich etwas ändert.
+
+Stattdessen braucht es später eine **echte, serverseitig geprüfte Rolle** (z. B. `shop_admin`).
+Anforderungen an sie:
+
+1. **Serverseitig durchgesetzt, nicht im UI.** Ein ausgeblendeter Button ist keine Berechtigung.
+   Die Grenze ist RLS plus geprüfte Server Actions — dieselbe Regel wie überall sonst.
+2. **Nicht vom Benutzer schreibbar.** Das ist keine Theorie: `profiles` trägt heute
+   `grant select, insert, update … to authenticated` zusammen mit `profiles_update_own`.
+   **Eine Rollenspalte auf `profiles` könnte sich jeder Benutzer selbst setzen.** Die Rolle
+   gehört deshalb in eine Struktur, auf die `authenticated` **kein** `INSERT`/`UPDATE` hat, und
+   wird ausschließlich über `service_role` oder eine `security definer`-Funktion vergeben.
+3. **Ohne Rolle keine Wirkung.** Normale Benutzer können Shop-Admin-Aktionen nicht ausführen —
+   nicht nur nicht sehen.
+4. **Prüfung serverseitig, nie aus einem Client-Claim.** Die Identität kommt wie überall aus
+   `getUser()`, nie aus etwas, das der Browser mitschickt.
+
+### Was das für heute bedeutet
+
+- **ADR-0021 bleibt unverändert.** Ein First-Party-Shop ist kein Marketplace: ein Verkäufer,
+  eigener Geschäftsbestand, keine Verkäuferprofile, kein Matching, keine Bewertungen, keine
+  Streitfälle. Der Marketplace-Stopp — auch konzeptionell, auch „nur das Datenmodell" — gilt
+  unverändert weiter und wird durch diesen Eintrag nicht gelockert.
+- **ADR-0008 bleibt unverändert.** `available`, `ebay` und der Ankauffaktor werden weiterhin
+  nicht importiert. Ein späterer Shop-Import ist eine **neue, ausdrücklich freizugebende**
+  Entscheidung, keine Rücknahme von ADR-0008.
+- **Die Priorität bleibt vollständig beim kostenlosen Collection Tracker.**
+
+**Verworfen:** Shopbestand als Zeile in `collection_items` eines Betreiber-Accounts (vermischt
+zwei Bedeutungen in einer Tabelle und macht jede Sammlungsstatistik falsch) · Wiederbelebung
+von `skylanders.available` (ADR-0008, und der Katalog ist benutzerseitig nicht schreibbar) ·
+Autorisierung über eine E-Mail-Konstante · zweite Produkttabelle für dieselben Figuren
+(zwei Wahrheiten über denselben Skylander).
+
+---
+
+## ADR-0033 — Fünf Preisebenen; die Bestellung speichert einen Snapshot
+
+**Status:** Fachliche Richtung ANGENOMMEN (2026-09-04) · **Nichts davon ist implementiert.**
+Schwellen, Prozentsätze und Kombinierbarkeit sind **ausdrücklich noch offen**.
+
+**Problem.** „Der Preis" ist im Shopkontext fünf verschiedene Dinge. Werden sie in einem Feld
+zusammengefasst, überschreibt ein Preisupdate stillschweigend eine bewusste Geschäftsentscheidung
+— und eine Bestellung von gestern ändert rückwirkend ihren Betrag.
+
+### Die fünf Ebenen
+
+| # | Ebene | Wer setzt sie | Wo sie später lebt |
+|---|---|---|---|
+| 1 | **Referenz-Marktwert** | Preisquelle / Betreiber | `skylanders.market_price` (existiert, ADR-0010) |
+| 2 | **Shop-Basispreis** | Shop-Admin, manuell | z. B. `shop_inventory.sale_price` |
+| 3 | **automatischer Lager-Rabatt** | Regel, aus dem Bestand abgeleitet | konfigurierbare Rabattregel |
+| 4 | **Coupon / Rabattcode** | Betreiber, kundenseitig eingelöst | eigene Coupon-Struktur |
+| 5 | **finaler Bestellpreis** | ergibt sich, wird **festgeschrieben** | Bestellposition |
+
+**Marktpreis und Shoppreis sind verschiedene fachliche Größen.** `market_price` bleibt der
+SkyIsles-Referenzmarktwert und der Wert, aus dem Sammlungswerte berechnet werden.
+
+**Ein Marktpreis-Update darf einen bewusst gesetzten Shoppreis niemals still überschreiben.**
+Der Marktpreis darf als Orientierung oder als **Vorschlag** beim erstmaligen Anlegen dienen —
+danach ist der Shoppreis eigenständig.
+
+**Ein Rabatt verändert den Referenz-Marktpreis nicht.** Rabatte rechnen auf Ebene 2, nie auf
+Ebene 1. Sonst würde ein Shopangebot die Sammlungswerte aller anderen Nutzer verschieben.
+
+### Lagerbasierte Rabatte — geplante Idee, keine feste Regel
+
+Bei hohem Lagerbestand soll SkyIsles automatisch einen Rabatt anzeigen können. **Beispielidee,
+noch nicht entschieden:**
+
+| Bestand | Rabatt |
+|---|---|
+| > 5 | 5 % |
+| > 10 | 10 % |
+| > 15 | 15 % |
+
+**Diese Schwellen sind ausdrücklich keine endgültige Geschäftsregel.** Die Architektur muss
+später erlauben, Schwellen und Prozentsätze zu ändern, **ohne Produktcode an vielen Stellen
+umzubauen**: die Regel gehört an **eine** Stelle (Konfiguration oder Regeltabelle plus eine
+Rechenfunktion), nicht verteilt in Komponenten.
+
+**Zu beachten, wenn es so weit ist:** Eine sichtbare Rabattstufe verrät grobe Lagerbestände.
+Für einen eigenen Shop ist das eine legitime Betreiberentscheidung — aber eine **bewusste**.
+Die genaue Stückzahl bleibt davon unberührt und gehört nicht ins öffentliche Lesefenster
+(siehe `docs/SECURITY.md`, Abschnitt 2).
+
+### Bestellungen sind unveränderlich
+
+Bei einer Bestellung muss **nachvollziehbar festgehalten** werden, welcher Preis und welche
+Rabatte **zum Kaufzeitpunkt** galten. Bestellpositionen speichern deshalb einen
+**Preis-Snapshot**, keinen Verweis auf den heutigen Preis.
+
+> **Eine historische Bestellung darf sich nicht ändern, nur weil später der Marktpreis, der
+> Shoppreis oder eine Rabattregel geändert wird.**
+
+Das ist keine Bequemlichkeit, sondern Buchhaltung: Der Betrag, den ein Kunde bezahlt hat, ist
+ein Fakt und kein berechneter Wert.
+
+**Verworfen:** ein einziges Preisfeld für Markt- und Shoppreis · Rabatt durch Herabsetzen von
+`market_price` · Bestellpositionen, die den Preis zur Anzeigezeit neu berechnen.

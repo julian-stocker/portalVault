@@ -36,6 +36,12 @@ Sammlungswert, gemeinsame responsive Navigation. Die sichtbare Anwendung heißt 
 Damit steht der **erste vollständige End-to-End-Produktfluss**: Katalog öffnen → Figur finden →
 antippen → anmelden → eigene Sammlung sehen.
 
+**Fachliche Shop-Architektur festgehalten (2026-09-04, ADR-0032/0033) — nichts implementiert.**
+Die Domänengrenze zum späteren First-Party-Shop, das Rollenkonzept `shop_admin` und die fünf
+Preisebenen sind dokumentiert, damit ein späterer Shop auf dem Tracker aufsetzt statt in ihn
+hinein. **Keine Migration, keine Tabelle, keine Rolle, kein Checkout, keine Importlogik.**
+ADR-0021 (kein Marketplace) und ADR-0008 (kein Legacy-Lagerbestand) bleiben unverändert.
+
 **Nachtrag 2026-09-04 — Entfernen ist vollständig (ADR-0031).** Eine Figur lässt sich jetzt
 auch **auf `/collection`** direkt entfernen, ohne den Umweg über den Katalog. Ohne
 Bestätigungsdialog, dafür mit „Rückgängig" an der abgeblendeten Karte und 44 px Tippfläche.
@@ -422,6 +428,8 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0016** | **Benutzernamen sind änderbar; die UUID ist die Identität, `username` nie Schlüssel** |
 | 0024 | Marktpreise gehören PortalVault; externe Quellen über stabile Kennung (Handle) statt Name — Umsetzung nach V1 |
 | **0031** | **Entfernen ohne Bestätigungsdialog, dafür rückgängig zu machen; keine neue Toggle-Serverlogik** |
+| **0032** | **Collector- und First-Party-Shop-Domäne sind getrennt; Berechtigung über eine echte Rolle, nie über eine E-Mail-Adresse** — dokumentiert, **nicht implementiert** |
+| **0033** | **Fünf Preisebenen; Marktpreis ≠ Shoppreis; Bestellpositionen speichern einen Preis-Snapshot** — dokumentiert, **nicht implementiert** |
 
 ## Offene Entscheidungen
 
@@ -431,6 +439,14 @@ Keine davon blockiert V1.2.
 |---|---|---|
 | 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
+| 0032 | Wie wird `shop_admin` technisch getragen und vergeben? Fest steht nur, wo **nicht**: nicht an einer E-Mail, nicht auf `profiles` | vor jeder Shop-Schreiboperation |
+| 0032 | Ist der Shop an dieselbe Wachstumsbedingung geknüpft wie der Marketplace (ADR-0021)? | vor jeder Umsetzungsplanung |
+| 0033 | Sind Coupons mit automatischen Lager-Rabatten kombinierbar, und was hat Vorrang? | vor jeder Rabattlogik |
+| 0033 | Endgültige Rabattschwellen und Prozentsätze (5/10/15 % sind Beispielwerte) | vor jeder Rabattlogik |
+| 0033 | Coupon-Details: Gültigkeitszeitraum, Mindestbestellwert, Nutzungslimit, Einmalcodes | vor jeder Coupon-Struktur |
+| — | Liefert das öffentliche Shop-Lesefenster eine Stückzahl oder nur einen Zustand? | vor jeder öffentlichen Shop-Anzeige |
+| — | Welcher Payment-Provider? | vor jedem Checkout |
+| — | Sind eBay-beigelegte Rabattcodes nach den dann geltenden eBay-Richtlinien zulässig? | vor jedem Werbemittel in eBay-Paketen |
 
 ---
 

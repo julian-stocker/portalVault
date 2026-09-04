@@ -496,6 +496,40 @@ Entscheidungen sie nicht verbauen:
 | Zustände `keep` / `sell` / `trade` | Spalte auf `collection_items`, Unique-Constraint entfernen | Surrogat-PK und Fremdschlüssel bleiben unverändert |
 | mehrere Bilder je Figur | `skylander_images (sky_id, file, position)`; `image_file` wird zum Primärbild | Bildidentität ist der Dateiname, nicht die URL |
 
+### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
+
+Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**
+Die Spaltennamen sind Platzhalter zur Verständigung, kein Entwurf.
+
+| Später | Wofür | Wie es andockt |
+|---|---|---|
+| Shop-Inventar (`shop_inventory`) | Lagerbestand des Geschäfts | `sky_id` als Fremdschlüssel auf `skylanders`; **völlig getrennt von `collection_items`** |
+| Shoppreis | Verkaufspreis, eigene Größe | Feld an derselben Struktur, z. B. `sale_price` — nicht `skylanders.market_price` |
+| Shop-Admin-Berechtigung | wer darf schreiben | eigene Struktur, für `authenticated` **nicht** schreibbar (siehe unten) |
+| Rabattregeln | Lager-Schwellen und Prozentsätze | konfigurierbar an einer Stelle, nicht im Produktcode verteilt |
+| Coupons | Rabattcodes | eigene Struktur; Regeln offen (ADR-0033) |
+| Bestellungen | Kaufvorgang | eigene Struktur; personenbezogene Daten → DSGVO-relevant |
+| Bestellpositionen | was gekauft wurde | **Preis-Snapshot**, kein Verweis auf den heutigen Preis |
+
+**Drei Randbedingungen, die heute schon gelten und nicht verletzt werden dürfen:**
+
+1. **`collection_items` bleibt ausschließlich persönliche Sammlung.** Kein Shopbestand, keine
+   Zusatzspalte dafür, kein technischer Betreiber-Account als Umweg.
+2. **`skylanders.market_price` bleibt der Referenzmarktwert.** Der Shoppreis ist eine andere
+   fachliche Größe. Ein Marktpreis-Update darf einen gesetzten Shoppreis nicht überschreiben,
+   und ein Shop-Rabatt verändert `market_price` nicht — sonst verschöbe ein Angebot die
+   Sammlungswerte aller anderen Nutzer.
+3. **Eine Rollenspalte darf nicht auf `profiles`.** `profiles` trägt heute
+   `grant select, insert, update … to authenticated` zusammen mit `profiles_update_own`
+   (Abschnitt 5). Eine Rolle dort **könnte sich jeder Benutzer selbst setzen.** Sie gehört in
+   eine Struktur ohne `INSERT`/`UPDATE` für `authenticated`, vergeben über `service_role` oder
+   eine `security definer`-Funktion.
+
+Was heute schon passt: Der Katalog ist für Benutzer nicht schreibbar (ADR-0016), `sky_id` ist
+die stabile Identität (ADR-0001), und Werte werden konsequent berechnet statt gespeichert
+(Abschnitt 3.8) — der Shop bringt mit dem Preis-Snapshot die erste begründete Ausnahme davon
+mit, und zwar genau dort, wo Unveränderlichkeit fachlich gefordert ist.
+
 ---
 
 ## 8. Entschieden und offen
@@ -523,3 +557,7 @@ SKY-ID-Unveränderlichkeit.
 - ~~Slug-Kollisionsregel~~ — **entschieden (ADR-0011)**, an den echten Daten verifiziert.
 - **OPEN:** Reicht die Obergrenze `quantity <= 10000`? Sie ist als Schutz gegen einen
   fehlerhaften Client gedacht, nicht als fachliche Grenze.
+- **OPEN:** Wie wird die spätere Shop-Admin-Berechtigung getragen und vergeben? Fest steht nur,
+  **wo sie nicht hingehört** (ADR-0032): nicht an eine E-Mail-Adresse, nicht auf `profiles`.
+- **OPEN:** Liefert das öffentliche Shop-Lesefenster später eine Stückzahl oder nur einen
+  Zustand? Eine sichtbare Rabattstufe verrät bereits einen groben Bestand (ADR-0033).

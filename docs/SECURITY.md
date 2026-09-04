@@ -49,6 +49,40 @@ Zusätzlich prüft der Import in PortalVault erneut (nicht auf die Quelle vertra
 keine internen Namenssuffixe, nur die sechs öffentlichen Serien, keine verbotenen Feldnamen
 (`stock`, `total`, `sold`, `inventory`, `buyer`, `available`, `purchaseRate`, …).
 
+### Abgrenzung: Legacy-Lagerzahlen vs. ein späterer eigener Shopbestand
+
+Die Tabelle oben verbietet **Legacy-Geschäftsdaten**. Ein späterer First-Party-Shop (ADR-0032)
+würde eigenen Lagerbestand führen — das ist kein Widerspruch, aber die Grenze muss präzise sein,
+sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
+
+| | Legacy-Lagerzahlen | Shopbestand eines späteren SkyIsles-Shops |
+|---|---|---|
+| Quelle | `skylanders.xlsx` D/E/F, `data/inventory.json` | vom Betreiber bewusst in SkyIsles gepflegt |
+| Zweck | interne Geschäftsführung | ein öffentliches Verkaufsangebot |
+| Status | **verboten** in Repository, Datenbank und Deployment | zulässig **in der Datenbank**, nach ausdrücklicher Freigabe |
+| Im Repository | **niemals** | **niemals** — auch Shopdaten sind Daten, kein Code |
+
+**Was unverändert gilt, auch wenn der Shop kommt:**
+
+1. **Der Katalogimport bleibt wie er ist.** `guard_public()` im Legacy-Projekt und die
+   Feldnamenprüfung im PortalVault-Import bleiben unangetastet. Über den Katalogpfad kommt
+   **kein** Bestand in die Datenbank — ein Shop-Import wäre ein **eigener, getrennter, eigens
+   freizugebender** Weg.
+2. **Keine Bestandsdatei im Repository.** Weder `inventory.json` noch ein Export daraus. Der
+   Shopbestand lebt in der Datenbank, nie in Git.
+3. **Die privaten O/C/S/D-Blöcke der Excel bleiben tabu** — OVERALL, COLLECTION, SOLD,
+   DUPLICATES (P/Q/R/S, U/V/W/X). Das ist die private Sammlung des Betreibers, nicht das
+   Geschäftsinventar, und sie darf auch bei einem Shop-Import nicht mitkommen.
+4. **Käuferdaten und EÜR bleiben tabu.** Bestellungen entstünden später in SkyIsles selbst und
+   sind dann personenbezogene Daten mit eigenen DSGVO-Pflichten (Abschnitt 7) — sie werden
+   **nicht** aus der Legacy-Excel übernommen.
+5. **Das öffentliche Lesefenster ist zu entscheiden, nicht zu erben.** Eine sichtbare
+   Rabattstufe verrät bereits einen groben Bestand (ADR-0033). Ob überhaupt eine Stückzahl
+   öffentlich wird oder nur ein Zustand, ist eine bewusste Entscheidung — **OPEN**.
+
+**Nichts davon ist implementiert.** Es gibt keine Shop-Tabelle, keinen Shop-Import und keine
+Shop-Rolle.
+
 ---
 
 ## 3. Row Level Security

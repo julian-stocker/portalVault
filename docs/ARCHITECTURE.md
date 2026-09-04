@@ -60,6 +60,24 @@ Es gibt genau **vier** Bereiche, und die Grenzen zwischen ihnen sind bewusst har
 **Regel:** Daten fließen nur in eine Richtung — Legacy → Katalog. Es fließt **nichts** von
 PortalVault zurück in die Excel. Damit gibt es für jedes Feld genau einen Schreiber.
 
+### Ein späterer fünfter Bereich: die Shop-Domäne
+
+**Existiert nicht und ist nicht gebaut.** Hier steht nur, wohin er gehört, wenn er kommt
+(ADR-0032):
+
+| Bereich | Inhalt | Wer schreibt | Wer liest |
+|---|---|---|---|
+| **Shop** (später, eigene Strukturen) | Lagerbestand, Verkaufspreis, Rabattregeln, Coupons, Bestellungen | ausschließlich Shop-Admin, serverseitig geprüft | Bestand/Preis öffentlich; Bestellungen nur Käufer und Shop-Admin |
+
+**Die Grenze zwischen Benutzerdaten und Shop ist genauso hart wie die übrigen drei.**
+`collection_items` beantwortet „Was besitzt dieser Nutzer?", die Shop-Domäne beantwortet
+„Was hat das Geschäft auf Lager?". Beide hängen an derselben `sky_id`, sonst an nichts.
+Dasselbe Konto kann beides tun — der Betreiber ist gleichzeitig Sammler und Shop-Admin —,
+aber die **Daten** vermischen sich nie.
+
+**Der Katalog bleibt der einzige kanonische Produktbestand.** Kein zweiter Produktdatensatz
+für dieselben Skylanders, weder für den Shop noch für Bestellungen.
+
 ---
 
 ## 3. Frontend — Next.js
@@ -245,6 +263,7 @@ Client-Code.
 | Postgres + RLS | Datenhaltung **und** Zugriffsschutz | Präsentationslogik |
 | Next.js Server | Rendern, Auth-Callback, Datenzugriff im Benutzerkontext | Autorisierungsentscheidungen ersetzen |
 | Client Components | Interaktion, Anzeige | Sicherheitsentscheidungen |
+| **Shop-Domäne** (später) | Lagerbestand, Verkaufspreis, Rabatte, Bestellungen | den kanonischen Katalog oder fremde Sammlungen verändern |
 
 ---
 
@@ -267,3 +286,9 @@ Anon-Key ist kein Secret (ADR-0017) · SMTP erst vor der Beta (ADR-0018).
 - **OPEN:** Darf ein Benutzername später geändert werden? → ADR-0016
 - **OPEN:** Genaue Slug-Kollisionsregel — wird beim Importwerkzeug festgelegt → ADR-0011
 - **OPEN:** Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später
+
+**Fachlich festgehalten, aber nicht gebaut (2026-09-04).** Die Domänengrenze zum späteren
+First-Party-Shop (ADR-0032) und die fünf Preisebenen (ADR-0033) sind dokumentiert, damit heutige
+Entscheidungen sie nicht verbauen. **Keine Struktur, keine Rolle und keine Zeile Code davon
+existiert.** Der Marketplace-Stopp aus ADR-0021 bleibt unverändert bestehen — ein
+First-Party-Shop mit genau einem Verkäufer ist etwas anderes als ein Marktplatz.
