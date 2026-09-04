@@ -16,6 +16,7 @@ function figure(
     seriesLabel: "X",
     seriesPosition,
     categoryPosition,
+    categoryName: "Figuren",
     marketPrice: null,
     imageFile: null,
     isActive: true,

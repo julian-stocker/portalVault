@@ -12,6 +12,7 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
     seriesLabel: "Spyro's Adventure",
     seriesPosition: 0,
     categoryPosition: 1,
+    categoryName: "Figuren",
     marketPrice: 12.99,
     imageFile: "00ef420dacfdcd4f.webp",
     isActive: true,

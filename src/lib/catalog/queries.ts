@@ -13,6 +13,7 @@
  *
  * The browser never talks to the database — it receives the result (ADR-0026).
  */
+import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
@@ -33,14 +34,14 @@ const FIGURE_COLUMNS =
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
-  categoryPosition: Map<number, number>;
+  categories: Map<number, { position: number; name: string }>;
 };
 
 async function loadLookups(): Promise<Lookups> {
   const supabase = await createClient();
   const [seriesResult, categoryResult] = await Promise.all([
     supabase.from("series").select("code, label, position"),
-    supabase.from("categories").select("id, position"),
+    supabase.from("categories").select("id, position, name"),
   ]);
 
   if (seriesResult.error) throw new Error(`series: ${seriesResult.error.message}`);
@@ -53,8 +54,11 @@ async function loadLookups(): Promise<Lookups> {
         { label: row.label as string, position: row.position as number },
       ]),
     ),
-    categoryPosition: new Map(
-      (categoryResult.data ?? []).map((row) => [row.id as number, row.position as number]),
+    categories: new Map(
+      (categoryResult.data ?? []).map((row) => [
+        row.id as number,
+        { position: row.position as number, name: row.name as string },
+      ]),
     ),
   };
 }
@@ -72,14 +76,20 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     seriesCode: row.series_code,
     seriesLabel: series?.label ?? row.series_code,
     seriesPosition: series?.position ?? 0,
-    categoryPosition: lookups.categoryPosition.get(row.category_id) ?? 0,
+    categoryPosition: lookups.categories.get(row.category_id)?.position ?? 0,
+    categoryName: lookups.categories.get(row.category_id)?.name ?? "",
     marketPrice: row.market_price === null ? null : Number(row.market_price),
     imageFile: row.image_file,
     isActive: row.is_active,
   };
 }
 
-/** All active figures, in catalog order. */
+/**
+ * All active, collectible figures, in catalog order.
+ *
+ * Console games stay in the database but never reach the collector catalog
+ * (src/lib/catalog/collectible.ts).
+ */
 export async function fetchCatalog(): Promise<CatalogFigure[]> {
   const supabase = await createClient();
   const [lookups, result] = await Promise.all([
@@ -88,7 +98,8 @@ export async function fetchCatalog(): Promise<CatalogFigure[]> {
   ]);
 
   if (result.error) throw new Error(`catalog: ${result.error.message}`);
-  return sortFigures(((result.data ?? []) as FigureRow[]).map((row) => toFigure(row, lookups)));
+  const figures = ((result.data ?? []) as FigureRow[]).map((row) => toFigure(row, lookups));
+  return sortFigures(collectibleOnly(figures));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */
@@ -118,14 +129,29 @@ export async function fetchSeries(): Promise<SeriesOption[]> {
   }));
 }
 
-/** How many active figures the catalog holds — the progress denominator. */
-export async function countActiveFigures(): Promise<number> {
+/**
+ * How many active, collectible figures the catalog holds — the denominator of
+ * the collection progress. Software is excluded, so owning every figure can
+ * actually reach 100 %.
+ */
+export async function countCollectibleFigures(): Promise<number> {
   const supabase = await createClient();
-  const { count, error } = await supabase
+  const lookups = await loadLookups();
+
+  const excluded = [...lookups.categories.entries()]
+    .filter(([, category]) => !isCollectibleCategory(category.name))
+    .map(([id]) => id);
+
+  let query = supabase
     .from("skylanders")
     .select("*", { count: "exact", head: true })
     .eq("is_active", true);
 
+  if (excluded.length > 0) {
+    query = query.not("category_id", "in", `(${excluded.join(",")})`);
+  }
+
+  const { count, error } = await query;
   if (error) throw new Error(`catalog count: ${error.message}`);
   return count ?? 0;
 }

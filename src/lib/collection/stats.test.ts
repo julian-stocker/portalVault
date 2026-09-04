@@ -3,7 +3,12 @@ import { describe, expect, it } from "vitest";
 import { collectionStats } from "./stats.ts";
 import type { CatalogFigure, CollectionEntry } from "@/lib/catalog/types";
 
-function entry(price: number | null, quantity = 1, isActive = true): CollectionEntry {
+function entry(
+  price: number | null,
+  quantity = 1,
+  isActive = true,
+  categoryName = "Figuren",
+): CollectionEntry {
   const figure: CatalogFigure = {
     skyId: "SKY-0001",
     name: "Drobot",
@@ -12,6 +17,7 @@ function entry(price: number | null, quantity = 1, isActive = true): CollectionE
     seriesLabel: "Spyro's Adventure",
     seriesPosition: 0,
     categoryPosition: 0,
+    categoryName,
     marketPrice: price,
     imageFile: null,
     isActive,
@@ -59,6 +65,25 @@ describe("collectionStats", () => {
       withoutPrice: 0,
       inactiveOwned: 0,
     });
+  });
+
+  it("excludes games from the count, the value and the progress", () => {
+    // Someone may own a game; it simply counts towards nothing, because the
+    // catalog no longer offers games and 100 % must stay reachable.
+    const stats = collectionStats(
+      [entry(30, 1, true, "Spiele"), entry(10, 2, true, "Figuren")],
+      561,
+    );
+    expect(stats.nonCollectibleOwned).toBe(1);
+    expect(stats.distinctFigures).toBe(1);
+    expect(stats.totalPieces).toBe(2);
+    expect(stats.estimatedValue).toBe(20);
+    expect(stats.progress).toBeCloseTo(1 / 561);
+  });
+
+  it("can reach full progress once every collectible figure is owned", () => {
+    const owned = Array.from({ length: 561 }, () => entry(1));
+    expect(collectionStats(owned, 561).progress).toBe(1);
   });
 
   it("counts owned figures that are no longer active", () => {

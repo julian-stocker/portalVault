@@ -17,6 +17,8 @@ export type CatalogFigure = {
   seriesPosition: number;
   /** Display order of the category within its series. */
   categoryPosition: number;
+  /** Category name, verbatim from the legacy source. Decides collectibility. */
+  categoryName: string;
   /** null means "no known market price" — never 0 (ADR-0010). */
   marketPrice: number | null;
   /** Content-addressed WebP file name, or null when no image exists. */

@@ -51,6 +51,10 @@ export const de = {
       count === 1
         ? "1 Figur ohne Marktpreis ist nicht in der Summe enthalten."
         : `${count} Figuren ohne Marktpreis sind nicht in der Summe enthalten.`,
+    nonCollectibleOwned: (count: number) =>
+      count === 1
+        ? "1 Eintrag in deiner Sammlung ist ein Spiel und zählt nicht zum Sammelfortschritt."
+        : `${count} Einträge in deiner Sammlung sind Spiele und zählen nicht zum Sammelfortschritt.`,
     inactiveOwned: (count: number) =>
       count === 1
         ? "1 Figur in deiner Sammlung ist nicht mehr im Katalog."

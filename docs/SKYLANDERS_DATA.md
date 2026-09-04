@@ -108,6 +108,36 @@ SC  Spiele · Figuren · Trophies · Fahrzeuge
 I   Spiele · Senseis · Locations & Truhen · Kreationskristalle
 ```
 
+### Sammelbar vs. Software
+
+**Die Kategorie `Spiele` enthält keine Sammelobjekte, sondern Konsolenspiele.** Sie existiert
+genau einmal je Serie, immer an Position 0, und umfasst **39 der 600 öffentlichen Einträge**.
+
+| | |
+|---|---:|
+| aktive Einträge gesamt | 600 |
+| davon Kategorie `Spiele` | 39 |
+| **sammelbar** | **561** |
+
+Diese Einträge bleiben kanonische Daten — sie haben SKY-IDs, Preise und stehen in der Excel.
+Sie sind aber **kein Teil des Sammlerkatalogs** und dürfen keinen Sammlungsfortschritt
+verfälschen. PortalVault filtert sie über die **Kategorie**, nicht über Namen:
+`src/lib/catalog/collectible.ts`.
+
+**An den echten Daten geprüft (2026-09-04):** genau 6 Kategorien heißen `Spiele`, alle an
+Position 0; sie enthalten 39 Einträge, ausnahmslos Konsolensoftware; **kein** spielartiger
+Eintrag steht in einer anderen Kategorie; **kein** Sammelobjekt steht in `Spiele`.
+
+**Unabhängige Bestätigung:** Alle 39 Spiele haben **kein Bild**, während 534 der 561
+sammelbaren Einträge eines haben. Die Legacy-Bildpipeline hat Software nie ein Bild zugeordnet
+— ein zweites, völlig anderes Signal, das dieselbe Menge markiert.
+
+> ⚠️ **Kopplung:** Die Kategorienamen kommen aus `etl/categories.py` im Legacy-Projekt. Wird
+> `Spiele` dort umbenannt, gelangt Software stillschweigend zurück in den Katalog. Bei einer
+> Umbenennung ist `NON_COLLECTIBLE_CATEGORIES` in `src/lib/catalog/collectible.ts`
+> mitzuführen. Der Test `collectible.test.ts` hält die Menge bewusst auf genau einem Eintrag
+> fest, damit eine Erweiterung eine bewusste Handlung bleibt.
+
 **Regel: Kategorienamen kommen ausschließlich vom Nutzer.** Sie werden nicht umbenannt,
 nicht vereinheitlicht, nicht übersetzt und nicht umsortiert — auch dann nicht, wenn der Nutzer
 in einer Nachricht beiläufig eine andere Bezeichnung verwendet. Sortierung innerhalb einer

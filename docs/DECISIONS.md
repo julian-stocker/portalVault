@@ -992,3 +992,48 @@ die Vergleichbarkeit der Git-Historie beschädigen.
 Projekt gemeint ist. Wo Nutzer etwas lesen, steht „SkyIsles". Ein späteres vollständiges
 Renaming ist eine eigene Entscheidung.
 
+---
+
+## ADR-0029 — Sammelbarkeit entscheidet die Kategorie, nicht der Name
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Problem.** Der öffentliche Katalog zeigte 39 Konsolenspiele zwischen den Figuren. Sie
+verfälschen den Sammlungsfortschritt: Wer alle Figuren besäße, käme nie auf 100 %, weil ihm
+noch Software fehlte.
+
+**Entscheidung.** Ein Eintrag ist sammelbar, **außer seine Kategorie sagt etwas anderes**.
+Nicht sammelbar ist derzeit genau eine Kategorie: `Spiele`.
+
+Die Regel liegt zentral in `src/lib/catalog/collectible.ts` und wird von Katalog, Detailseite
+und Sammlungsstatistik gemeinsam benutzt — eine Definition, drei Verwendungsstellen.
+
+**Warum die Kategorie und nicht der Name.** Eine Namensliste über 39 Einträge wäre bei jedem
+neuen Spiel unvollständig und bei jeder Umbenennung falsch. Die Kategorie ist die vom Nutzer
+selbst gepflegte fachliche Einordnung (`etl/categories.py`) und trennt die Menge exakt.
+
+**An den echten Daten belegt.** 6 Kategorien `Spiele`, alle an Position 0, 39 Einträge, alle
+Software · 0 spielartige Einträge außerhalb · 0 Sammelobjekte innerhalb. Unabhängige
+Bestätigung: alle 39 haben **kein Bild**, 534 der 561 sammelbaren haben eines.
+
+**Konsequenzen.**
+
+- Kataloggesamtzahl **600 → 561**. Der Fortschritt bezieht sich auf 561, ist also erreichbar.
+- **Keine Daten gelöscht, kein Schema geändert.** Die 39 Zeilen bleiben unverändert stehen.
+- **Detailseiten nicht sammelbarer Einträge liefern 404.** Blieben sie erreichbar, böten sie
+  einen Sammeln-Button für etwas, das anschließend zu nichts zählt — ein sichtbar
+  widersprüchlicher Zustand. Die Zeilen bleiben trotzdem erhalten: Konsolenspiele sind genau
+  die Art Bestand, die ein späterer First-Party-Shop verkaufen könnte.
+- **Bereits gesammelte Spiele verschwinden nicht.** Sie werden weiter angezeigt und gesondert
+  ausgewiesen, zählen aber nicht in Anzahl, Fortschritt oder Wert — dieselbe Behandlung wie
+  Figuren, die den Katalog verlassen haben.
+
+**Bekannte Kopplung.** Die Kategorienamen stammen aus dem Legacy-Projekt. Eine Umbenennung dort
+muss hier nachgezogen werden; der Test hält die Ausschlussmenge auf genau einem Eintrag fest,
+damit eine Erweiterung nie beiläufig passiert.
+
+**Verworfen:** Namens-Blacklist (unvollständig, brüchig) · Filter über `categoryPosition === 0`
+(bricht, sobald sich die Blockreihenfolge in der Excel ändert) · Spalte
+`categories.is_collectible` (Schemaänderung, die die Abhängigkeit von den Kategorienamen nur
+in den Import verschiebt, statt sie aufzulösen).
+

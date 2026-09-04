@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { currentProfile } from "@/lib/auth/actions";
 import { ONBOARDING_PATH } from "@/lib/auth/redirect";
-import { countActiveFigures } from "@/lib/catalog/queries";
+import { countCollectibleFigures } from "@/lib/catalog/queries";
 import { fetchCollection } from "@/lib/collection/queries";
 import { collectionStats } from "@/lib/collection/stats";
 import { formatNumber, formatPercent, formatPrice } from "@/lib/format";
@@ -26,7 +26,10 @@ export default async function CollectionPage() {
   const profile = await currentProfile();
   if (!profile?.username) redirect(ONBOARDING_PATH);
 
-  const [entries, catalogTotal] = await Promise.all([fetchCollection(), countActiveFigures()]);
+  const [entries, catalogTotal] = await Promise.all([
+    fetchCollection(),
+    countCollectibleFigures(),
+  ]);
   const stats = collectionStats(entries, catalogTotal);
 
   return (
@@ -43,6 +46,11 @@ export default async function CollectionPage() {
 
       {stats.withoutPrice > 0 ? (
         <p className="mt-2 text-sm text-muted">{de.collection.withoutPrice(stats.withoutPrice)}</p>
+      ) : null}
+      {stats.nonCollectibleOwned > 0 ? (
+        <p className="mt-1 text-sm text-muted">
+          {de.collection.nonCollectibleOwned(stats.nonCollectibleOwned)}
+        </p>
       ) : null}
       {stats.inactiveOwned > 0 ? (
         <p className="mt-1 text-sm text-muted">{de.collection.inactiveOwned(stats.inactiveOwned)}</p>

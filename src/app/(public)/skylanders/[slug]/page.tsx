@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { CollectButton } from "@/components/catalog/collect-button";
+import { isCollectible } from "@/lib/catalog/collectible";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { fetchFigureBySlug } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
@@ -15,7 +16,7 @@ type Params = { params: Promise<{ slug: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params;
   const figure = await fetchFigureBySlug(slug);
-  return { title: figure?.name ?? de.catalog.title };
+  return { title: figure && isCollectible(figure) ? figure.name : de.catalog.title };
 }
 
 /**
@@ -24,11 +25,19 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * Deliberately minimal: only canonical data that actually exists. No invented
  * descriptions, no speculative metadata. The slug addresses the page, the
  * SKY-ID remains the identity (ADR-0011).
+ *
+ * Non-collectible entries return 404 here. The rows are not deleted — they
+ * stay canonical data, and console games are exactly the kind of stock a
+ * first-party shop might sell later. They simply are not part of the public
+ * collector catalog.
  */
 export default async function FigurePage({ params }: Params) {
   const { slug } = await params;
   const figure = await fetchFigureBySlug(slug);
-  if (!figure) notFound();
+  // Software is canonical data but not part of the collector surface. A
+  // reachable page would offer a collect button for something that counts
+  // towards nothing — see the note above.
+  if (!figure || !isCollectible(figure)) notFound();
 
   const supabase = await createClient();
   const [{ data: auth }, owned] = await Promise.all([supabase.auth.getUser(), fetchOwnedSkyIds()]);
