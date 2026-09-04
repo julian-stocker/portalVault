@@ -145,8 +145,9 @@ serverseitig gerenderten Seiten, damit keine Benutzerdaten aus dem Cache stehen 
   Fehlermeldung zu zeigen.
 - **Profile und Sammlungen sind in V1 privat** (ADR-0016): ein Benutzer liest und ändert
   ausschließlich seine eigenen. Öffentliche Benutzerprofile sind kein V1-Feature.
-- **OPEN:** Darf ein Benutzername später geändert werden? Wenn ja, braucht es eine
-  Sperrfrist und eine Historie, damit alte Profil-Links nachvollziehbar bleiben.
+- **Entschieden (ADR-0016):** Ein Benutzername darf geändert werden. Weil
+  `collection_items.user_id` auf `auth.users(id)` zeigt und nicht auf den Namen, kann eine
+  Umbenennung strukturell keine Daten verlieren.
 
 ---
 
@@ -264,7 +265,179 @@ Migration.
 Profil- und Sammlungsdaten weder lesend noch schreibend heran, kann den Katalog nicht
 verändern, und ein anonymer Besucher sieht ausschließlich den Katalog.
 
-## 9. Offene Punkte
+## 9. Umsetzungsplan V1.4 — geplant, noch nicht gebaut
 
-- **OPEN:** Darf ein Benutzername später geändert werden?
+Stand 2026-09-04. Alle Entscheidungen liegen vor; dieser Abschnitt beschreibt, was gebaut wird.
+
+### 9.1 Was bereits steht
+
+Die Datenbankseite ist fertig und funktional verifiziert (V1.2C, 31/31): `profiles` mit
+`username`-Constraints, Unique-Index auf `lower(username)`, die 58 reservierten Namen, die drei
+RLS-Policies und der Trigger `on_auth_user_created`. **V1.4 baut ausschließlich die
+Anwendungsseite.**
+
+### 9.2 Abhängigkeit
+
+`@supabase/ssr` — die einzige neue Abhängigkeit. Sie liefert `createBrowserClient` und
+`createServerClient` samt Cookie-Anbindung. `@supabase/supabase-js` ist bereits vorhanden.
+
+### 9.3 Session-Verhalten im App Router
+
+Drei Clients, drei Zuständigkeiten. Sie zu vermischen ist der häufigste Fehler:
+
+| Client | Datei | Läuft in | Cookie-Zugriff |
+|---|---|---|---|
+| Browser | `src/lib/supabase/client.ts` | Client Components | über den Browser |
+| Server | `src/lib/supabase/server.ts` | Server Components, Server Actions, Route Handlers | `cookies()` aus `next/headers`, **pro Request neu** |
+| Middleware | `src/lib/supabase/middleware.ts` | Middleware | liest und schreibt Request- und Response-Cookies |
+
+**Kein Client wird zwischen Requests wiederverwendet.** Ein modulweit gehaltener Server-Client
+würde die Session eines Benutzers an den nächsten weiterreichen.
+
+**Die wichtigste Einzelregel:**
+
+> **In Server-Kontexten immer `supabase.auth.getUser()`, niemals `getSession()`.**
+> `getSession()` liest das Cookie und vertraut ihm; der Inhalt ist manipulierbar.
+> `getUser()` lässt das Token vom Auth-Server prüfen.
+
+Die Middleware erneuert bei jedem Request das Access-Token und schreibt die Cookies zurück.
+Sie läuft für alle Routen außer statischen Assets und Bilddateien.
+
+### 9.4 Abläufe im Detail
+
+**Registrierung.** Formular → `signUp({ email, password })`. Das Projekt verlangt
+E-Mail-Bestätigung (in V1.2C belegt), also kommt **keine Session zurück**. Die Seite zeigt
+danach ausschließlich „Prüfe dein Postfach" — kein automatischer Login, kein Weiterleiten auf
+das Dashboard. Der Trigger legt die Profilzeile mit `username = NULL` an.
+
+**E-Mail-Bestätigung.** Der Link führt auf `/auth/callback`, das den Code gegen eine Session
+tauscht und dann weiterleitet: auf `/onboarding`, wenn `username IS NULL`, sonst auf das Ziel
+aus `next` oder das Dashboard.
+
+**Login.** `signInWithPassword`. Fehlermeldung immer allgemein: „E-Mail oder Passwort ist
+falsch" — auch bei unbestätigter Adresse, damit nicht erkennbar wird, ob ein Konto existiert.
+
+**Logout.** `signOut()`, danach Redirect und Revalidierung, damit keine serverseitig
+gerenderten Benutzerdaten im Cache stehen bleiben.
+
+**Passwort vergessen.** `resetPasswordForEmail(email, { redirectTo })`. **Immer dieselbe
+Bestätigungsmeldung**, unabhängig davon, ob die Adresse existiert.
+
+**Passwort zurücksetzen.** Link → `/auth/callback` → temporäre Session → `/auth/reset` →
+`updateUser({ password })`.
+
+**Passwort ändern.** Im geschützten Bereich, ebenfalls `updateUser`.
+
+**Onboarding.** `UPDATE profiles SET username = ... WHERE id = auth.uid()`, durch die
+`profiles_update_own`-Policy abgesichert.
+
+**Benutzernamen ändern.** Technisch derselbe UPDATE (ADR-0016). Keine Sperrfrist in V1.
+
+### 9.5 Ein Befund, der die Umsetzung prägt
+
+**Es kann keine Live-Verfügbarkeitsprüfung für Benutzernamen geben.**
+
+`profiles` ist privat (ADR-0016) — ein Benutzer sieht per RLS **ausschließlich seine eigene
+Zeile**. Eine Abfrage „ist `julian` schon vergeben?" liefert deshalb immer 0 Zeilen, egal ob
+der Name frei ist oder nicht. Die Eindeutigkeit kann nur die Datenbank beantworten, und zwar
+erst beim Schreiben.
+
+**Umsetzung in V1.4:** Der UPDATE läuft, und der Fehlercode entscheidet die Meldung:
+
+| Code | Ursache | Meldung |
+|---|---|---|
+| `23505` | Unique-Verletzung auf `lower(username)` | „Dieser Benutzername ist bereits vergeben." |
+| `23514` | `profiles_username_format` oder `profiles_username_not_reserved` | „Dieser Benutzername ist nicht zulässig." (Format bzw. reserviert unterscheiden) |
+
+**Verworfen für V1.4:** eine `SECURITY DEFINER`-Funktion `username_available(text)`. Sie würde
+Live-Feedback ermöglichen, aber genau das aushebeln, was ADR-0016 schützt — sie erlaubte, den
+Bestand an Benutzernamen abzufragen. **Sobald Profile öffentlich werden, kostet das nichts
+mehr** und kann nachgeliefert werden.
+
+Das Format (`^[a-zA-Z0-9_]{3,20}$`) und die Liste reservierter Namen werden im Client
+gespiegelt, damit offensichtlich Ungültiges ohne Serverrunde abgefangen wird. **Die Spiegelung
+ist eine Komfortprüfung, keine Grenze** — die Datenbank entscheidet. Beide Listen müssen
+gemeinsam gepflegt werden; die Duplizierung wird in `src/lib/auth/username.ts` vermerkt.
+
+### 9.6 Geschützter Bereich
+
+Zwei Ebenen, wie in Abschnitt 5: Middleware leitet ohne Session auf `/login?next=…` um
+(Komfort), RLS entscheidet über die Daten (Grenze). Zusätzlich prüft jede geschützte Seite
+serverseitig mit `getUser()` — die Middleware allein ist kein Zugriffsschutz.
+
+Wer eingeloggt ist, aber noch keinen Benutzernamen hat, landet auf `/onboarding`.
+
+### 9.7 Fehlerzustände
+
+| Situation | Verhalten |
+|---|---|
+| Falsche Anmeldedaten | allgemeine Meldung, kein Hinweis auf die Existenz des Kontos |
+| E-Mail nicht bestätigt | dieselbe allgemeine Meldung, plus Möglichkeit, die Mail erneut zu senden |
+| Bestätigungslink abgelaufen oder schon benutzt | eigene Seite mit der Möglichkeit, neu anzufordern |
+| Reset-Link abgelaufen | wie oben |
+| Benutzername vergeben / unzulässig | Feldfehler nach Fehlercode (9.5) |
+| Rate Limit von Supabase erreicht | „Zu viele Versuche, bitte später erneut" |
+| Netzwerk- oder Supabase-Ausfall | allgemeiner Fehler, **niemals** SQL-Meldungen oder Stacktraces |
+| Trigger hat kein Profil angelegt | `/onboarding` legt es über `profiles_insert_own` selbst an — der bereits vorhandene Fallback |
+
+### 9.8 Tests
+
+Nach ADR-0013, ohne E2E:
+
+- **Unit (Vitest):** Benutzernamen-Validierung (Format, Länge, reservierte Namen, Groß-/
+  Kleinschreibung) · Zuordnung Fehlercode → Meldung · Berechnung des Redirect-Ziels nach
+  Anmeldung (`next`-Parameter, Onboarding-Zwang, offene Weiterleitungen ausschließen)
+- **Bestehend:** `npm run verify:rls` bleibt der Nachweis, dass die Datenbankgrenze hält
+- **Manuell einmalig:** vollständiger Durchlauf mit einer echten Adresse — Registrierung,
+  Bestätigungsmail, Login, Reset, Namensänderung. Der Supabase-Standardversand ist stark
+  limitiert (ADR-0018).
+- **Später:** Playwright, sobald Auth und Sammlung stabil sind
+
+### 9.9 Neue Dateien und Routen
+
+```
+src/middleware.ts                      Token-Erneuerung, Schutz der (app)-Routen
+src/lib/supabase/client.ts             Browser-Client
+src/lib/supabase/server.ts             Server-Client, pro Request
+src/lib/supabase/middleware.ts         Cookie-Anbindung für die Middleware
+src/lib/auth/username.ts               Format, reservierte Namen, Validierung   + Test
+src/lib/auth/errors.ts                 Fehlercode -> deutsche Meldung           + Test
+src/lib/auth/redirect.ts               sicheres Redirect-Ziel                   + Test
+
+src/app/(auth)/login/page.tsx          Anmeldung
+src/app/(auth)/register/page.tsx       Registrierung
+src/app/(auth)/verify-email/page.tsx   "Prüfe dein Postfach"
+src/app/(auth)/forgot-password/page.tsx
+src/app/(auth)/reset-password/page.tsx neues Passwort setzen
+src/app/(auth)/auth-error/page.tsx     abgelaufener oder ungültiger Link
+src/app/(auth)/layout.tsx
+
+src/app/auth/callback/route.ts         Code gegen Session tauschen, dann weiterleiten
+src/app/auth/signout/route.ts          Logout (POST)
+
+src/app/(app)/onboarding/page.tsx      Benutzernamen setzen
+src/app/(app)/dashboard/page.tsx       geschützte Startseite
+src/app/(app)/settings/page.tsx        Benutzername und Passwort ändern
+src/app/(app)/layout.tsx               prüft getUser(), erzwingt Onboarding
+
+src/components/auth/…                  Formulare
+```
+
+Ergänzt wird `src/lib/i18n/de.ts` um alle Beschriftungen und Meldungen — kein Text im JSX
+(ADR-0019).
+
+### 9.10 Ausdrücklich nicht in V1.4
+
+Google-/Apple-Login · Zwei-Faktor · öffentliche Profile · Avatar-Upload · Sperrfrist für
+Namensänderungen · Self-Service-Kontolöschung · eigener SMTP-Anbieter (ADR-0018) · jede Form
+von Katalog- oder Sammlungs-UI (das ist V1.5).
+
+---
+
+## 10. Offene Punkte
+
+- **Entschieden (ADR-0016):** Benutzernamen **dürfen** geändert werden. Die technische
+  Identität ist ausschließlich die UUID; `username` ist nie Schlüssel. V1.4 ermöglicht die
+  Änderung technisch. Eine Sperrfrist ist keine V1-Anforderung — sie wird erst relevant, wenn
+  Profile öffentlich werden.
 - **OPEN:** Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später.

@@ -510,7 +510,8 @@ SKY-ID-Unveränderlichkeit.
 
 **Noch offen — blockiert die Migration nicht:**
 
-- **OPEN:** Darf ein Benutzername später geändert werden? (dann Sperrfrist und Historie nötig)
+- ~~Benutzernamenänderung~~ — **entschieden (ADR-0016)**: erlaubt. `username` ist nie Schlüssel,
+  die UUID ist die Identität. Eine Sperrfrist ist keine V1-Anforderung.
 - ~~Slug-Kollisionsregel~~ — **entschieden (ADR-0011)**, an den echten Daten verifiziert.
 - **OPEN:** Reicht die Obergrenze `quantity <= 10000`? Sie ist als Schutz gegen einen
   fehlerhaften Client gedacht, nicht als fachliche Grenze.

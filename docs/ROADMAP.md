@@ -117,6 +117,7 @@ zuerst die Daten, dann die Sitzung, dann der Fluss selbst. Nach **V1.5** ist
 ### V1.4 Auth + `@supabase/ssr`
 
 Die Sitzungsschicht steht, bevor Seiten entstehen, die von ihr abhängen (ADR-0023).
+**Detaillierter Umsetzungsplan: `docs/AUTH.md`, Abschnitt 9.**
 
 - `@supabase/ssr` einbinden: Browser-Client, Server-Client, Middleware
 - Registrierung
@@ -124,7 +125,7 @@ Die Sitzungsschicht steht, bevor Seiten entstehen, die von ihr abhängen (ADR-00
 - Login
 - Logout
 - Passwort vergessen / zurücksetzen (und ändern im eingeloggten Zustand)
-- Onboarding: eindeutigen Benutzernamen setzen
+- Onboarding: eindeutigen Benutzernamen setzen; Änderung des Namens technisch möglich (ADR-0016)
 - Geschützter Bereich (Middleware als Komfort, RLS als Grenze)
 
 Konzept vollständig in `docs/AUTH.md`. Beleg aus V1.2C: das Projekt verlangt
@@ -184,6 +185,37 @@ dafür, dass V1.5 den vollständigen Fluss liefert statt nur einen Katalog zum A
 
 - Kompakte Ansicht und Tabellenansicht neben dem visuellen Grid (Prinzip 7)
 - Filter und Suche innerhalb der eigenen Sammlung
+
+**Eigener Shop (First Party) — ausdrücklich nicht in V1**
+
+PortalVault kann später **zusätzlich einen eigenen Shop** enthalten, über den der Betreiber
+seinen eigenen Skylanders-Bestand direkt verkauft.
+
+**Das ist ausdrücklich kein Peer-to-Peer-Marketplace.** Der Unterschied ist strukturell, nicht
+graduell:
+
+| | Eigener Shop | Marketplace |
+|---|---|---|
+| Verkäufer | **einer** — der Betreiber | viele Sammler |
+| Bestand | eigener Geschäftsbestand | fremde Sammlungen |
+| Nötig | Artikelbestand, Bestellung, Versand | zusätzlich Verkäuferprofile, Matching, Bewertungen, Streitfälle |
+
+**Verbindliche Randbedingungen:**
+
+- **Shop-Inventar ist strikt getrennt von der persönlichen Sammlung.** `collection_items`
+  beschreibt, was ein Sammler besitzt — niemals, was verkäuflich ist.
+- **Die Legacy-Felder `inventory` und `available` werden jetzt nicht migriert** (ADR-0008 gilt
+  unverändert).
+- **Wird der Shop umgesetzt, bekommt er ein eigenes Datenmodell und eine neue
+  Architekturentscheidung.** Er wird nicht in bestehende Tabellen hineingebaut.
+- **Der Shop darf V1, Auth und den Collection Tracker jetzt nicht beeinflussen** — weder im
+  Datenmodell noch in der Meilensteinplanung.
+- **Die Priorität bleibt vollständig beim kostenlosen Collection Tracker.**
+
+Ein Berührungspunkt, der dann neu zu entscheiden wäre: Ein Shop braucht Lagerbestand und
+Verfügbarkeit. Beides existiert im Legacy-System (Spalten D/E/F, `available`) und wurde per
+ADR-0008 bewusst nicht übernommen. Das wieder aufzugreifen wäre eine **neue** Entscheidung,
+keine Rücknahme von ADR-0008.
 
 **Community-Ebene — ausdrücklich nicht in V1**
 

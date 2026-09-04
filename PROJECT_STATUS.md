@@ -314,6 +314,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | 0022 | Free bleibt eigenständig nützlich; optionale Premium-Stufe als Richtung — Grenze und Preis **offen** |
 | **0023** | **Meilenstein-Reihenfolge: Import → Auth → Katalog+Toggle+Sammlung → Ausbau → Beta** |
 | **0011** | **Slug-Regel vollständig, an den echten 600 Artikeln verifiziert** |
+| **0016** | **Benutzernamen sind änderbar; die UUID ist die Identität, `username` nie Schlüssel** |
 | 0024 | Marktpreise gehören PortalVault; externe Quellen über stabile Kennung (Handle) statt Name — Umsetzung nach V1 |
 
 ## Offene Entscheidungen
@@ -323,7 +324,6 @@ Keine davon blockiert V1.2.
 | ADR | Frage | nötig vor |
 |---|---|---|
 | 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
-| 0016 | Darf ein Benutzername später geändert werden? | V1.4 |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
 
 ---
@@ -334,6 +334,6 @@ Keine davon blockiert V1.2.
 Passwort vergessen/Reset, Onboarding mit eindeutigem Benutzernamen, geschützter Bereich.
 Danach V1.5 mit dem vollständigen End-to-End-Fluss (ADR-0023).
 
-Zu klären vor V1.4: ob ein Benutzername später geändert werden darf (ADR-0016).
+Alle Entscheidungen für V1.4 sind getroffen. Der Plan steht in `docs/AUTH.md`, Abschnitt 9.
 
 **Wartet auf die ausdrückliche Freigabe des Nutzers.**

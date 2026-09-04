@@ -491,8 +491,34 @@ SELECT-Policy; gelesen wird ausschließlich mit `auth.uid() = user_id` bzw. `aut
 Öffentliche Profile und öffentliche Sammlungen werden später über ein Flag
 (`profiles.is_public`, `profiles.collection_public`) und erweiterte Policies ergänzt.
 
-**Offen:** Darf ein Benutzername später geändert werden? Wenn ja, braucht es eine Sperrfrist und
-eine Historie, damit alte Profil-Links nachvollziehbar bleiben.
+### Benutzernamen sind änderbar (entschieden 2026-09-04)
+
+**Ein Benutzername darf später geändert werden.** Die technische Identität eines Kontos ist
+**ausschließlich die UUID** (`auth.users.id` = `profiles.id`).
+
+| Regel | |
+|---|---|
+| `username` als Primär- oder Fremdschlüssel | **niemals** |
+| Sammlungen und alle späteren Beziehungen | referenzieren **immer die UUID** |
+| Eindeutigkeit | case-insensitiv über `unique index on lower(username)` (ADR-0020) |
+| V1.4 | ermöglicht Namensänderungen technisch |
+| Sperrfrist (z. B. 30 Tage) | **keine V1-Anforderung**, später ergänzbar |
+
+**Begründung.** Dieselbe Trennung wie bei der SKY-ID: Was Menschen lesen, ist nicht, was das
+System zum Verknüpfen benutzt. `collection_items.user_id` zeigt auf `auth.users(id)`, nicht auf
+den Namen — eine Umbenennung kann deshalb strukturell keine Daten verlieren. Das Schema aus
+`0001_initial_schema.sql` erfüllt das bereits: `username` ist eine gewöhnliche, nullbare
+Spalte mit Unique-Index, kein Schlüssel.
+
+**Was eine Sperrfrist bräuchte und warum sie jetzt fehlt.** Sinn ergibt sie erst, wenn ein
+Benutzername öffentlich sichtbar ist — bei öffentlichen Profilen, Community-Funktionen oder
+einem Marketplace. Solange Profile privat sind (siehe oben), kann eine Umbenennung niemanden
+in die Irre führen: es gibt keine öffentlichen Profil-Links, die ins Leere zeigen könnten, und
+niemand kann sich unter einem gerade freigewordenen Namen als jemand anderes ausgeben, weil
+niemand fremde Profile sieht.
+
+**Zu entscheiden, sobald Profile öffentlich werden:** Sperrfrist, Historie freigewordener
+Namen, und ob ein alter Name für eine Karenzzeit gesperrt bleibt.
 
 ---
 
