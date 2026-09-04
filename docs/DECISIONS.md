@@ -1037,3 +1037,84 @@ damit eine Erweiterung nie beiläufig passiert.
 `categories.is_collectible` (Schemaänderung, die die Abhängigkeit von den Kategorienamen nur
 in den Import verschiebt, statt sie aufzulösen).
 
+---
+
+## ADR-0030 — Variantenanzeige wird abgeleitet, nicht gespeichert
+
+**Status:** ANGENOMMEN (2026-09-04)
+
+**Problem.** Der Katalog schreibt Varianten uneinheitlich: `Legendary Astroblast` als Präfix,
+aber `Hex (Pearl)` als Suffix. Dadurch stehen Basisfigur und Variante im Katalog auseinander,
+und dieselbe Sache heißt zweimal anders.
+
+**Entscheidung.** Der Anzeigename wird **beim Lesen abgeleitet**. `skylanders.name` bleibt
+unverändert.
+
+### Warum nichts in der Datenbank geändert wird
+
+Zwei unabhängige Gründe, beide zwingend:
+
+1. **Der Import würde es überschreiben.** `tools/import-catalog.mts` schreibt bei jedem Lauf
+   `name: item.name` per Upsert. Eine Umbenennung in der Datenbank wäre beim nächsten
+   `catalog:import --apply` still verschwunden.
+2. **Es widerspräche einer Kernregel.** CLAUDE.md Regel 4 und `docs/SKYLANDERS_DATA.md`
+   Importregel 4: Namen kommen roh aus der Legacy-Quelle, ohne Normalisierung oder Korrektur.
+
+Die Namenshoheit liegt bei der Excel. PortalVault darf sie anders **darstellen**, nicht anders
+**speichern**.
+
+### Die Regel
+
+Ein führendes Token gilt nur dann als Variante, wenn **der verbleibende Basisname als
+sammelbarer Eintrag in derselben Serie existiert**.
+
+Tokens: `Legendary` · `Dark` · `Nitro` · `Golden` · `Power Blue` · `Blue` · `Mystical` ·
+`Metallic`. Längere zuerst, damit `Power Blue` vor `Blue` greift.
+
+**`Elite` und `Enchanted` gehören ausdrücklich nicht dazu** — Eon's Elite ist eine eigene
+Produktlinie, und das einzige `Enchanted`-Präfix ist eine Location.
+
+Die zweite Bedingung trägt die ganze Sicherheit:
+
+| Name | Basis in der Serie? | Ergebnis |
+|---|---|---|
+| `Legendary Astroblast` | `Astroblast` ✓ | `Astroblast (Legendary)` |
+| `Dark Spyro` | `Spyro` ✓ | `Spyro (Dark)` |
+| `Dark Sword` | `Sword` ✗ | unverändert — Traps heißen `<Element> <Form>`: `Air Sword`, `Earth Hammer`, `Dark Sword`. „Dark" ist hier das Element |
+| `Golden Queen` | `Queen` ✗ | unverändert |
+| `Legendary Grim Creemper` | `Grim Creemper` ✗ | unverändert — die Basis heißt `Grim Creeper`, ein Tippfehler in der Quelle |
+
+**An den echten Daten gemessen:** 55 Einträge erkannt, 11 Kandidaten korrekt abgelehnt,
+**0 Kollisionen** im Anzeigenamen innerhalb einer Serie. Alle 55 Varianten liegen in derselben
+Kategorie wie ihre Basis, die Blockreihenfolge bleibt also unangetastet.
+
+### Sortierung
+
+Innerhalb einer Kategorie wird nach **Basisname** sortiert, dann Basis vor Variante, dann nach
+Variantenlabel. Die Teile werden **getrennt verglichen**, nicht zu einem String verkettet: Ein
+zusammengesetzter Schlüssel bräuchte ein Trennzeichen, und wie ein Collator Satzzeichen gegen
+Buchstaben einordnet, ist genau die Art Detail, die still umsortiert.
+
+So bleibt eine Familie zusammen, auch wenn eine andere Figur mit demselben Wort beginnt:
+`Bash`, `Bash (Blue)`, `Bash (Legendary)`, danach erst `Bash Junior`.
+
+### Suche
+
+Der Suchindex enthält **drei Schreibweisen**: den kanonischen Namen, den Anzeigenamen und die
+Wortfolge dazwischen. `Legendary Bash`, `Bash (Legendary)` und `Bash Legendary` finden alle
+dieselbe Figur.
+
+### Konsequenzen
+
+- **Keine Migration, keine Schemaänderung, kein Schreibvorgang.**
+- **Slugs unverändert** — `/skylanders/legendary-bash` bleibt gültig (ADR-0011).
+- **`collection_items` unberührt** — alles hängt an der SKY-ID.
+- Kein `display_name`-Feld: Die Ableitungsregel läge ohnehin im Code, eine Spalte brächte nur
+  eine zweite Wahrheit. Sie wäre erst richtig, wenn Einzelfälle **von Hand** kuratiert werden
+  sollen.
+
+**Bewusst nicht behandelt:** die drei LightCore-Schreibweisen (`Chill Light Core`,
+`Grim Creeper - Lightcore`, `Start Strike (LC, Enchanted)`), die bestehenden Klammersuffixe wie
+`(2)` oder `(Clear Crystal)`, und der Tippfehler `Legendary Grim Creemper`. Alles eigene
+Datenqualitätsfälle.
+

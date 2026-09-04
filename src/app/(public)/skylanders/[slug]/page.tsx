@@ -16,7 +16,7 @@ type Params = { params: Promise<{ slug: string }> };
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug } = await params;
   const figure = await fetchFigureBySlug(slug);
-  return { title: figure && isCollectible(figure) ? figure.name : de.catalog.title };
+  return { title: figure && isCollectible(figure) ? figure.displayName : de.catalog.title };
 }
 
 /**
@@ -49,11 +49,11 @@ export default async function FigurePage({ params }: Params) {
       </Link>
 
       <div className="mt-4 flex flex-col gap-4">
-        <FigureImage file={figure.imageFile} name={figure.name} />
+        <FigureImage file={figure.imageFile} name={figure.displayName} />
 
         <div className="flex flex-col gap-1">
           <span className="text-sm text-muted">{figure.seriesLabel}</span>
-          <h1 className="text-2xl font-semibold tracking-tight">{figure.name}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{figure.displayName}</h1>
           {figure.isActive ? null : (
             <span className="text-sm text-muted">{de.catalog.inactive}</span>
           )}

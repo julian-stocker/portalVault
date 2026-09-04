@@ -1,6 +1,10 @@
 /**
  * One figure.
  *
+ * Shows `displayName`, the derived spelling — "Astroblast (Legendary)" where
+ * the canonical name is "Legendary Astroblast" (ADR-0030). The raw name stays
+ * in the database untouched.
+ *
  * Shared by the catalog and the collection so both stay in step. The action
  * arrives as a prop rather than being wired in here — that is what would let
  * a different action sit beside it later, without any of it existing today.
@@ -32,10 +36,10 @@ export function FigureCard({
       {/* The whole card leads to the detail page; the action sits outside the
           link so a tap on it cannot navigate away by accident. */}
       <Link href={`/skylanders/${figure.slug}`} className="flex flex-col gap-2">
-        <FigureImage file={figure.imageFile} name={figure.name} />
+        <FigureImage file={figure.imageFile} name={figure.displayName} />
         <div className="flex flex-col gap-0.5">
           <span className="text-xs text-muted">{figure.seriesLabel}</span>
-          <span className="text-sm leading-snug font-medium">{figure.name}</span>
+          <span className="text-sm leading-snug font-medium">{figure.displayName}</span>
           <span className={figure.marketPrice === null ? "text-sm text-muted" : "text-sm"}>
             {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
           </span>

@@ -30,10 +30,22 @@ export function normalizeForSearch(text: string): string {
     .trim();
 }
 
-/** Substring match on the name. Nothing clever — the catalog is small. */
+/**
+ * Substring match. Nothing clever — the catalog is small.
+ *
+ * Matches against `searchIndex`, which already holds every spelling of the
+ * name: the canonical one, the displayed one and the plain word order in
+ * between. So "Legendary Bash", "Bash (Legendary)" and "Bash Legendary" all
+ * find the same figure (ADR-0030).
+ */
 export function matchesQuery(figure: CatalogFigure, normalizedQuery: string): boolean {
   if (normalizedQuery === "") return true;
-  return normalizeForSearch(figure.name).includes(normalizedQuery);
+  return figure.searchIndex.includes(normalizedQuery);
+}
+
+/** Builds the pre-normalised haystack stored on each figure. */
+export function buildSearchIndex(forms: readonly string[]): string {
+  return forms.map(normalizeForSearch).join(" | ");
 }
 
 export function matchesSeries(figure: CatalogFigure, seriesCode: string): boolean {

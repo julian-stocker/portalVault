@@ -1,9 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { ALL_SERIES, filterFigures, matchesQuery, normalizeForSearch } from "./search.ts";
+import { ALL_SERIES, buildSearchIndex, filterFigures, matchesQuery, normalizeForSearch } from "./search.ts";
 import type { CatalogFigure } from "./types.ts";
+import { displayNameFor, parseVariant, searchFormsFor, sortPartsFor } from "./variant.ts";
 
-function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
+/**
+ * Builds a figure the way the query layer does, so the derived fields are
+ * real rather than hand-written.
+ */
+function figure(overrides: Partial<CatalogFigure> = {}, namesInSeries: string[] = []): CatalogFigure {
+  const name = overrides.name ?? "Drobot";
+  const variant = parseVariant(name, new Set(namesInSeries));
+  const parts = sortPartsFor(name, variant);
   return {
     skyId: "SKY-0001",
     name: "Drobot",
@@ -16,6 +24,10 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
     marketPrice: 12.99,
     imageFile: "00ef420dacfdcd4f.webp",
     isActive: true,
+    displayName: displayNameFor(name, variant),
+    sortBaseName: parts.sortBaseName,
+    sortVariantLabel: parts.sortVariantLabel,
+    searchIndex: buildSearchIndex(searchFormsFor(name, variant)),
     ...overrides,
   };
 }
@@ -60,6 +72,31 @@ describe("matchesQuery", () => {
 
   it("does not match something absent", () => {
     expect(matchesQuery(figure({ name: "Drobot" }), "bash")).toBe(false);
+  });
+});
+
+describe("matchesQuery across variant spellings (ADR-0030)", () => {
+  const legendaryBash = figure({ skyId: "SKY-0008", name: "Legendary Bash" }, ["Bash"]);
+
+  it("finds the figure by its canonical name", () => {
+    expect(matchesQuery(legendaryBash, normalizeForSearch("Legendary Bash"))).toBe(true);
+    expect(matchesQuery(legendaryBash, normalizeForSearch("legendary"))).toBe(true);
+  });
+
+  it("finds it by the displayed name", () => {
+    expect(matchesQuery(legendaryBash, normalizeForSearch("Bash (Legendary)"))).toBe(true);
+  });
+
+  it("finds it by the plain word order in between", () => {
+    expect(matchesQuery(legendaryBash, normalizeForSearch("Bash Legendary"))).toBe(true);
+  });
+
+  it("still finds it by the base name alone", () => {
+    expect(matchesQuery(legendaryBash, normalizeForSearch("bash"))).toBe(true);
+  });
+
+  it("does not match an unrelated query", () => {
+    expect(matchesQuery(legendaryBash, normalizeForSearch("spyro"))).toBe(false);
   });
 });
 

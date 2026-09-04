@@ -20,6 +20,10 @@ function entry(
     categoryName,
     marketPrice: price,
     imageFile: null,
+    displayName: "Drobot",
+    sortBaseName: "Drobot",
+    sortVariantLabel: null,
+    searchIndex: "drobot",
     isActive,
   };
   return { figure, quantity };

@@ -5,7 +5,14 @@
  * is no filter on user_id in the code because there does not need to be one —
  * and relying on the database for it is the point (docs/SECURITY.md).
  */
-import { FIGURE_COLUMNS, loadLookups, toFigure, type FigureRow } from "@/lib/catalog/queries";
+import {
+  FIGURE_COLUMNS,
+  fetchNameIndex,
+  loadLookups,
+  toFigure,
+  withVariants,
+  type FigureRow,
+} from "@/lib/catalog/queries";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CollectionEntry } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
@@ -43,8 +50,9 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return [];
 
-  const [lookups, result] = await Promise.all([
+  const [lookups, nameIndex, result] = await Promise.all([
     loadLookups(),
+    fetchNameIndex(),
     // skylanders(...) embeds fine: collection_items has a direct foreign key
     // to it. Only the series would need a hop that does not exist.
     supabase.from("collection_items").select(`sky_id, quantity, skylanders(${FIGURE_COLUMNS})`),
@@ -56,6 +64,12 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
     if (!row.skylanders) continue;
     entries.push({ quantity: row.quantity, figure: toFigure(row.skylanders, lookups) });
   }
+
+  // Same derived display name as the catalog, from the same function.
+  const enriched = withVariants(entries.map((e) => e.figure), nameIndex);
+  entries.forEach((entry, index) => {
+    entry.figure = enriched[index];
+  });
 
   const order = new Map(sortFigures(entries.map((e) => e.figure)).map((f, i) => [f.skyId, i]));
   return entries.sort((a, b) => (order.get(a.figure.skyId) ?? 0) - (order.get(b.figure.skyId) ?? 0));

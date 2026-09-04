@@ -138,6 +138,31 @@ sammelbaren Einträge eines haben. Die Legacy-Bildpipeline hat Software nie ein 
 > mitzuführen. Der Test `collectible.test.ts` hält die Menge bewusst auf genau einem Eintrag
 > fest, damit eine Erweiterung eine bewusste Handlung bleibt.
 
+### Varianten: uneinheitliche Schreibweise in der Quelle
+
+Dieselbe Art Information steht im Katalog in zwei Formen:
+
+```
+Legendary Astroblast     Präfix
+Hex (Pearl)              Suffix in Klammern
+Grim Creeper - Lightcore Suffix mit Bindestrich
+Chill Light Core         Suffix ohne Trennzeichen
+```
+
+PortalVault **ändert daran nichts** — die Namen bleiben roh. Für die Anzeige wird eine
+einheitliche Form **abgeleitet** (ADR-0030): Ein führendes Token wird zum Klammersuffix, aber
+nur wenn die Basisfigur in derselben Serie existiert. 55 der 561 sammelbaren Einträge sind
+betroffen.
+
+Bewusst **nicht** angetastet: `Dark Sword` (Traps heißen `<Element> <Form>`), `Golden Queen`,
+`Elite …` (eigene Produktlinie), und `Legendary Grim Creemper` — dort ist die Basis als
+`Grim Creeper` geschrieben, ein **Tippfehler in der Excel**. Wird er dort korrigiert, greift
+die Regel von selbst.
+
+Offen als eigene Datenqualitätsfälle: die drei LightCore-Schreibweisen und die uneinheitliche
+Bindestrich-/Leerzeichen-Schreibung bei `Eye Brawl` / `Eye-Brawl` und `Wham Shell` /
+`Wham-Shell`.
+
 **Regel: Kategorienamen kommen ausschließlich vom Nutzer.** Sie werden nicht umbenannt,
 nicht vereinheitlicht, nicht übersetzt und nicht umsortiert — auch dann nicht, wenn der Nutzer
 in einer Nachricht beiläufig eine andere Bezeichnung verwendet. Sortierung innerhalb einer

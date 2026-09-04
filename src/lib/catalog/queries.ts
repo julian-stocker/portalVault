@@ -14,7 +14,14 @@
  * The browser never talks to the database — it receives the result (ADR-0026).
  */
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
+import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
+import {
+  displayNameFor,
+  parseVariant,
+  searchFormsFor,
+  sortPartsFor,
+} from "@/lib/catalog/variant";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -78,10 +85,79 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     seriesPosition: series?.position ?? 0,
     categoryPosition: lookups.categories.get(row.category_id)?.position ?? 0,
     categoryName: lookups.categories.get(row.category_id)?.name ?? "",
+    // Filled in by withVariants() once the series context is known.
+    displayName: row.name,
+    sortBaseName: row.name,
+    sortVariantLabel: null,
+    searchIndex: buildSearchIndex([row.name]),
     marketPrice: row.market_price === null ? null : Number(row.market_price),
     imageFile: row.image_file,
     isActive: row.is_active,
   };
+}
+
+/**
+ * Index of collectible names per series — the lookup the variant rule needs
+ * to tell a variant from a name that merely starts with the same word.
+ */
+export function buildNameIndex(figures: readonly CatalogFigure[]): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
+  for (const figure of figures) {
+    let names = index.get(figure.seriesCode);
+    if (!names) {
+      names = new Set();
+      index.set(figure.seriesCode, names);
+    }
+    names.add(figure.name);
+  }
+  return index;
+}
+
+/** Derives display name, sort parts and search index (ADR-0030). */
+export function withVariants(
+  figures: readonly CatalogFigure[],
+  nameIndex: ReadonlyMap<string, ReadonlySet<string>>,
+): CatalogFigure[] {
+  return figures.map((figure) => {
+    const namesInSeries = nameIndex.get(figure.seriesCode) ?? new Set<string>();
+    const variant = parseVariant(figure.name, namesInSeries);
+    const { sortBaseName, sortVariantLabel } = sortPartsFor(figure.name, variant);
+    return {
+      ...figure,
+      displayName: displayNameFor(figure.name, variant),
+      sortBaseName,
+      sortVariantLabel,
+      searchIndex: buildSearchIndex(searchFormsFor(figure.name, variant)),
+    };
+  });
+}
+
+/**
+ * Names of all active collectible figures, grouped by series.
+ *
+ * Used where the caller does not already hold the whole catalog — a detail
+ * page or a collection. One small query rather than loading everything.
+ */
+export async function fetchNameIndex(): Promise<Map<string, Set<string>>> {
+  const supabase = await createClient();
+  const [lookups, result] = await Promise.all([
+    loadLookups(),
+    supabase.from("skylanders").select("name, series_code, category_id").eq("is_active", true),
+  ]);
+  if (result.error) throw new Error(`name index: ${result.error.message}`);
+
+  const index = new Map<string, Set<string>>();
+  for (const row of (result.data ?? []) as { name: string; series_code: string; category_id: number }[]) {
+    const category = lookups.categories.get(row.category_id);
+    if (!category || !isCollectibleCategory(category.name)) continue;
+    let names = index.get(row.series_code);
+    if (!names) {
+      names = new Set();
+      index.set(row.series_code, names);
+    }
+    names.add(row.name);
+  }
+  return index;
 }
 
 /**
@@ -98,8 +174,12 @@ export async function fetchCatalog(): Promise<CatalogFigure[]> {
   ]);
 
   if (result.error) throw new Error(`catalog: ${result.error.message}`);
-  const figures = ((result.data ?? []) as FigureRow[]).map((row) => toFigure(row, lookups));
-  return sortFigures(collectibleOnly(figures));
+  const figures = collectibleOnly(
+    ((result.data ?? []) as FigureRow[]).map((row) => toFigure(row, lookups)),
+  );
+  // The catalog already holds every collectible name, so the variant rule
+  // needs no extra query here.
+  return sortFigures(withVariants(figures, buildNameIndex(figures)));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */
@@ -111,7 +191,11 @@ export async function fetchFigureBySlug(slug: string): Promise<CatalogFigure | n
   ]);
 
   if (result.error) throw new Error(`figure: ${result.error.message}`);
-  return result.data ? toFigure(result.data as FigureRow, lookups) : null;
+  if (!result.data) return null;
+
+  const figure = toFigure(result.data as FigureRow, lookups);
+  const nameIndex = await fetchNameIndex();
+  return withVariants([figure], nameIndex)[0];
 }
 
 export async function fetchSeries(): Promise<SeriesOption[]> {

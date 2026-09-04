@@ -19,6 +19,19 @@ export type CatalogFigure = {
   categoryPosition: number;
   /** Category name, verbatim from the legacy source. Decides collectibility. */
   categoryName: string;
+  /**
+   * What the collector area shows: "Astroblast (Legendary)" where the raw
+   * name is "Legendary Astroblast". Equals `name` when no variant is
+   * recognised. Derived at read time — the database keeps the raw name
+   * (src/lib/catalog/variant.ts).
+   */
+  displayName: string;
+  /** Base figure of a variant, or the name itself. Used for sorting. */
+  sortBaseName: string;
+  /** Variant label, or null for a base figure. Sorts after the base. */
+  sortVariantLabel: string | null;
+  /** Pre-normalised text a search matches against, covering every spelling. */
+  searchIndex: string;
   /** null means "no known market price" — never 0 (ADR-0010). */
   marketPrice: number | null;
   /** Content-addressed WebP file name, or null when no image exists. */

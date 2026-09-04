@@ -20,6 +20,10 @@ function figure(categoryName: string, name = "Drobot"): CatalogFigure {
     categoryName,
     marketPrice: 12.99,
     imageFile: null,
+    displayName: name,
+    sortBaseName: name,
+    sortVariantLabel: null,
+    searchIndex: name.toLowerCase(),
     isActive: true,
   };
 }

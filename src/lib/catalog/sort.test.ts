@@ -7,6 +7,7 @@ function figure(
   name: string,
   seriesPosition: number,
   categoryPosition: number,
+  variant?: { base: string; label: string },
 ): CatalogFigure {
   return {
     skyId: `SKY-${String(seriesPosition * 100 + categoryPosition).padStart(4, "0")}`,
@@ -20,6 +21,10 @@ function figure(
     marketPrice: null,
     imageFile: null,
     isActive: true,
+    displayName: variant ? `${variant.base} (${variant.label})` : name,
+    sortBaseName: variant ? variant.base : name,
+    sortVariantLabel: variant ? variant.label : null,
+    searchIndex: name.toLowerCase(),
   };
 }
 
@@ -38,6 +43,42 @@ describe("sortFigures", () => {
     const result = sortFigures([figure("Zook", 0, 0), figure("Ätna", 0, 0), figure("Bash", 0, 0)]);
     // "Ä" sorts next to "A", not after "Z".
     expect(result.map((f) => f.name)).toEqual(["Ätna", "Bash", "Zook"]);
+  });
+
+  it("puts a base figure before its variants (ADR-0030)", () => {
+    const result = sortFigures([
+      figure("Legendary Astroblast", 0, 0, { base: "Astroblast", label: "Legendary" }),
+      figure("Astroblast", 0, 0),
+    ]);
+    expect(result.map((f) => f.displayName)).toEqual(["Astroblast", "Astroblast (Legendary)"]);
+  });
+
+  it("orders several variants of one figure by their label", () => {
+    const result = sortFigures([
+      figure("Legendary Bash", 0, 0, { base: "Bash", label: "Legendary" }),
+      figure("Bash", 0, 0),
+      figure("Blue Bash", 0, 0, { base: "Bash", label: "Blue" }),
+    ]);
+    expect(result.map((f) => f.displayName)).toEqual([
+      "Bash",
+      "Bash (Blue)",
+      "Bash (Legendary)",
+    ]);
+  });
+
+  it("is not split apart by another figure starting with the same word", () => {
+    // "Bash Junior" sorts after the whole Bash family rather than between
+    // the base and its variant.
+    const result = sortFigures([
+      figure("Bash Junior", 0, 0),
+      figure("Legendary Bash", 0, 0, { base: "Bash", label: "Legendary" }),
+      figure("Bash", 0, 0),
+    ]);
+    expect(result.map((f) => f.displayName)).toEqual([
+      "Bash",
+      "Bash (Legendary)",
+      "Bash Junior",
+    ]);
   });
 
   it("does not mutate the input", () => {
