@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import type { CatalogFigure, CollectionEntry, SeriesOption } from "@/lib/catalog/types";
+import type { CatalogFigure, CollectionEntry } from "@/lib/catalog/types";
 import { collectionStats } from "./stats.ts";
 import {
+  COLLECTION_ALL,
+  COLLECTION_DUPLICATES,
   buildCollectionRows,
   filterCollection,
-  matchesStatus,
+  matchesCollectionFilter,
   ownedEntries,
-  seriesProgress,
+  segmentSummary,
+  showcaseRows,
 } from "./view.ts";
 
 function figure(
@@ -39,11 +42,6 @@ function figure(
 function entry(figureValue: CatalogFigure, quantity: number): CollectionEntry {
   return { figure: figureValue, quantity };
 }
-
-const SERIES: SeriesOption[] = [
-  { code: "SA", label: "Spyro's Adventure", position: 0 },
-  { code: "G", label: "Giants", position: 1 },
-];
 
 describe("buildCollectionRows", () => {
   it("gives every catalog figure a row, missing ones at zero", () => {
@@ -84,41 +82,64 @@ describe("buildCollectionRows", () => {
   });
 });
 
-describe("the four filters", () => {
-  const catalog = [figure("SKY-0001"), figure("SKY-0002"), figure("SKY-0003")];
-  const rows = buildCollectionRows(catalog, [entry(catalog[0], 1), entry(catalog[1], 3)]);
+describe("the showcase holds only what is owned", () => {
+  const catalog = [
+    figure("SKY-0001"),
+    figure("SKY-0002"),
+    figure("SKY-0003"),
+    figure("SKY-0004", { seriesCode: "G", seriesLabel: "Giants" }),
+  ];
+  const rows = buildCollectionRows(catalog, [
+    entry(catalog[0], 1),
+    entry(catalog[1], 3),
+    entry(catalog[3], 1),
+  ]);
 
-  it("shows everything under 'all'", () => {
-    expect(filterCollection(rows, "all")).toHaveLength(3);
+  it("drops every missing figure, whatever the filter says", () => {
+    // The point of the catalog/collection split (ADR-0038): a collection
+    // page shows a collection. What is missing is a catalog question.
+    expect(showcaseRows(rows).map((row) => row.figure.skyId)).toEqual([
+      "SKY-0001",
+      "SKY-0002",
+      "SKY-0004",
+    ]);
+    expect(showcaseRows(rows).every((row) => row.quantity > 0)).toBe(true);
   });
 
-  it("'owned' is quantity at least one", () => {
-    expect(filterCollection(rows, "owned").map((row) => row.figure.skyId)).toEqual([
+  it("'Alle' means every owned figure, not every catalog figure", () => {
+    const visible = filterCollection(rows, COLLECTION_ALL);
+    expect(visible).toHaveLength(3);
+    expect(visible.some((row) => row.figure.skyId === "SKY-0003")).toBe(false);
+  });
+
+  it("a series filter narrows to that game", () => {
+    expect(filterCollection(rows, "G").map((row) => row.figure.skyId)).toEqual(["SKY-0004"]);
+    expect(filterCollection(rows, "SA").map((row) => row.figure.skyId)).toEqual([
       "SKY-0001",
       "SKY-0002",
     ]);
   });
 
-  it("'missing' is quantity zero", () => {
-    expect(filterCollection(rows, "missing").map((row) => row.figure.skyId)).toEqual(["SKY-0003"]);
-  });
-
-  it("'duplicates' is quantity above one — never one", () => {
-    expect(filterCollection(rows, "duplicates").map((row) => row.figure.skyId)).toEqual([
+  it("'Duplikate' is quantity above one — never one", () => {
+    expect(filterCollection(rows, COLLECTION_DUPLICATES).map((row) => row.figure.skyId)).toEqual([
       "SKY-0002",
     ]);
   });
 
-  it("owned and missing together are the whole collection", () => {
-    const owned = filterCollection(rows, "owned").length;
-    const missing = filterCollection(rows, "missing").length;
-    expect(owned + missing).toBe(rows.length);
+  it("a missing figure matches no filter at all", () => {
+    const missing = rows.find((row) => row.figure.skyId === "SKY-0003")!;
+    for (const filter of [COLLECTION_ALL, COLLECTION_DUPLICATES, "SA"]) {
+      expect(filterCollection([missing], filter)).toEqual([]);
+    }
   });
 
-  it("a duplicate is also owned, never missing", () => {
-    const duplicate = rows.find((row) => row.quantity === 3)!;
-    expect(matchesStatus(duplicate, "owned")).toBe(true);
-    expect(matchesStatus(duplicate, "missing")).toBe(false);
+  it("keeps the filter predicate usable for a row the caller decided to keep", () => {
+    // The view keeps a just-removed row on screen so undo stays reachable,
+    // and asks the predicate separately. Series still matches at quantity 0.
+    const removed = { ...rows[0], quantity: 0 };
+    expect(matchesCollectionFilter(removed, "SA")).toBe(true);
+    expect(matchesCollectionFilter(removed, COLLECTION_ALL)).toBe(true);
+    expect(matchesCollectionFilter(removed, COLLECTION_DUPLICATES)).toBe(false);
   });
 });
 
@@ -199,51 +220,7 @@ describe("statistics over the rows", () => {
 
     expect(stats.progress).toBe(1);
     expect(stats.totalPieces).toBe(9);
-    expect(filterCollection(rows, "missing")).toEqual([]);
-  });
-});
-
-describe("seriesProgress", () => {
-  const catalog = [
-    figure("SKY-0001", { seriesCode: "SA" }),
-    figure("SKY-0002", { seriesCode: "SA" }),
-    figure("SKY-0003", { seriesCode: "G", seriesLabel: "Giants" }),
-  ];
-
-  it("counts owned against the size of each series", () => {
-    const rows = buildCollectionRows(catalog, [entry(catalog[0], 2)]);
-    const progress = seriesProgress(rows, SERIES);
-
-    expect(progress[0]).toMatchObject({ code: "SA", owned: 1, total: 2, ratio: 0.5 });
-    expect(progress[1]).toMatchObject({ code: "G", owned: 0, total: 1, ratio: 0 });
-  });
-
-  it("counts a duplicate once", () => {
-    const rows = buildCollectionRows(catalog, [entry(catalog[0], 9)]);
-    expect(seriesProgress(rows, SERIES)[0].owned).toBe(1);
-  });
-
-  it("leaves software and inactive figures out of both sides", () => {
-    const withExtras = [
-      ...catalog,
-      figure("SKY-0004", { seriesCode: "SA", categoryName: "Spiele" }),
-      figure("SKY-0005", { seriesCode: "SA", isActive: false }),
-    ];
-    const rows = buildCollectionRows(withExtras, []);
-    expect(seriesProgress(rows, SERIES)[0].total).toBe(2);
-  });
-
-  it("reports zero rather than NaN for a series with nothing in it", () => {
-    const progress = seriesProgress([], SERIES);
-    expect(progress.every((entryValue) => entryValue.ratio === 0)).toBe(true);
-    expect(progress.every((entryValue) => !Number.isNaN(entryValue.ratio))).toBe(true);
-  });
-
-  it("never exceeds 100 %", () => {
-    const rows = buildCollectionRows(catalog, catalog.map((one) => entry(one, 5)));
-    for (const entryValue of seriesProgress(rows, SERIES)) {
-      expect(entryValue.ratio).toBeLessThanOrEqual(1);
-    }
+    expect(filterCollection(rows, COLLECTION_ALL)).toHaveLength(3);
   });
 });
 
@@ -256,10 +233,141 @@ describe("the undo contract", () => {
     const removed = { ...rows[0], quantity: 0 };
 
     expect(removed.initialQuantity).toBe(4);
-    expect(matchesStatus(removed, "missing")).toBe(true);
+    // Out of the showcase the moment it is removed — the view keeps the card
+    // itself on screen so the undo stays reachable.
+    expect(showcaseRows([removed])).toEqual([]);
 
     const restored = { ...removed, quantity: removed.initialQuantity };
     expect(restored.quantity).toBe(4);
-    expect(matchesStatus(restored, "duplicates")).toBe(true);
+    expect(showcaseRows([restored])).toHaveLength(1);
+    expect(matchesCollectionFilter(restored, COLLECTION_DUPLICATES)).toBe(true);
+  });
+});
+
+describe("what the summary counts", () => {
+  it("a game owned but not shown still has to reach the statistics", () => {
+    // buildCollectionRows drops software from the showcase (ADR-0029), so
+    // feeding only the rows into collectionStats hid the very entries the
+    // "these are games" note exists to explain. The view adds them back.
+    const game = figure("SKY-9001", { categoryName: "Spiele", marketPrice: 60 });
+    const owned = [entry(figure("SKY-0001"), 1), entry(game, 1)];
+    const rows = buildCollectionRows([figure("SKY-0001")], owned);
+
+    expect(collectionStats(ownedEntries(rows), 561).nonCollectibleOwned).toBe(0);
+
+    const counted = [...ownedEntries(rows), ...owned.filter((e) => e.figure.categoryName === "Spiele")];
+    const stats = collectionStats(counted, 561);
+    expect(stats.nonCollectibleOwned).toBe(1);
+    expect(stats.distinctFigures).toBe(1);
+    expect(stats.estimatedValue).toBe(10); // the game never joins the value
+  });
+});
+
+describe("segmentSummary — the hero follows the tabs", () => {
+  // Two games, priced, plus a game (software) and a retired figure.
+  const sa1 = figure("SKY-0001", { marketPrice: 10 });
+  const sa2 = figure("SKY-0002", { marketPrice: 5 });
+  const sa3 = figure("SKY-0003", { marketPrice: null });
+  const g1 = figure("SKY-0100", { seriesCode: "G", seriesLabel: "Giants", marketPrice: 20 });
+  const g2 = figure("SKY-0101", { seriesCode: "G", seriesLabel: "Giants", marketPrice: 8 });
+  const game = figure("SKY-9001", { categoryName: "Spiele", marketPrice: 60 });
+  const retired = figure("SKY-9000", { isActive: false, marketPrice: 30 });
+
+  const catalog = [sa1, sa2, sa3, g1, g2, game];
+  const owned = [entry(sa1, 3), entry(sa2, 1), entry(g1, 2), entry(game, 1), entry(retired, 1)];
+  const rows = buildCollectionRows(catalog, owned);
+
+  it("'Alle' measures against the catalog count from the database", () => {
+    const summary = segmentSummary(rows, COLLECTION_ALL, 561);
+    expect(summary).toMatchObject({ kind: "completion", total: 561, missing: 561 - 3 });
+    // Three active collectibles owned; the game counts towards nothing and
+    // the retired figure is out of the denominator and the numerator.
+    expect(summary.kind === "completion" && summary.owned).toBe(3);
+  });
+
+  it("'Alle' agrees with collectionStats on the same collection", () => {
+    const counted = [...ownedEntries(rows), ...owned.filter((e) => e.figure.categoryName === "Spiele")];
+    const stats = collectionStats(counted, 561);
+    const summary = segmentSummary(rows, COLLECTION_ALL, 561);
+    expect(summary.kind === "completion" && summary.owned).toBe(stats.countedFigures);
+    expect(summary.kind === "completion" && summary.value).toBe(stats.estimatedValue);
+    expect(summary.kind === "completion" && summary.ratio).toBeCloseTo(stats.progress);
+  });
+
+  it("a series segment counts only that game, on both sides of the fraction", () => {
+    const summary = segmentSummary(rows, "G", 561);
+    // Giants holds two active collectibles; one of them is owned, twice.
+    expect(summary).toMatchObject({ kind: "completion", owned: 1, total: 2, missing: 1 });
+    expect(summary.kind === "completion" && summary.ratio).toBeCloseTo(0.5);
+    expect(summary.kind === "completion" && summary.value).toBe(40); // 2 × 20
+  });
+
+  it("the other series is unaffected by it", () => {
+    const summary = segmentSummary(rows, "SA", 561);
+    // Three active SA collectibles, two of them owned.
+    expect(summary).toMatchObject({ kind: "completion", owned: 2, total: 3, missing: 1 });
+  });
+
+  it("a retired figure counts in the value but in neither half of the fraction", () => {
+    // SKY-9000 is an owned SA figure the catalog no longer offers. Owning it
+    // is still owning it, so 30 € belongs in the value — but counting it as
+    // collected against a denominator that excludes it could push completion
+    // past 100 %.
+    const summary = segmentSummary(rows, "SA", 561);
+    expect(summary.kind === "completion" && summary.owned).toBe(2);
+    expect(summary.kind === "completion" && summary.total).toBe(3);
+    expect(summary.kind === "completion" && summary.value).toBe(3 * 10 + 5 + 30);
+  });
+
+  it("a figure without a price is left out of the value, never counted as zero", () => {
+    const rowsWithUnpriced = buildCollectionRows(catalog, [entry(sa3, 2), entry(sa1, 1)]);
+    const summary = segmentSummary(rowsWithUnpriced, "SA", 561);
+    expect(summary.kind === "completion" && summary.value).toBe(10);
+    expect(summary.kind === "completion" && summary.owned).toBe(2);
+  });
+
+  it("software never reaches a segment, in the numerator or the value", () => {
+    const summary = segmentSummary(rows, COLLECTION_ALL, 561);
+    expect(summary.kind === "completion" && summary.value).toBe(3 * 10 + 5 + 2 * 20 + 30);
+  });
+
+  it("an empty segment is zero everywhere, never NaN", () => {
+    const summary = segmentSummary([], "SC", 561);
+    expect(summary).toMatchObject({ kind: "completion", owned: 0, total: 0, missing: 0, value: 0 });
+    expect(summary.kind === "completion" && Number.isNaN(summary.ratio)).toBe(false);
+  });
+
+  it("duplicates get their own shape — no total, no completion", () => {
+    const summary = segmentSummary(rows, COLLECTION_DUPLICATES, 561);
+    expect(summary.kind).toBe("duplicates");
+    // sa1 at 3 and g1 at 2 are the only figures held more than once.
+    expect(summary).toMatchObject({ figures: 2, extraCopies: 3 });
+  });
+
+  it("the duplicate value counts only the copies beyond the first", () => {
+    // sa1: (3-1) x 10 = 20, g1: (2-1) x 20 = 20. The first copy of each is
+    // part of the collection's value, not of what the duplicates are worth.
+    const summary = segmentSummary(rows, COLLECTION_DUPLICATES, 561);
+    expect(summary.kind === "duplicates" && summary.value).toBe(40);
+  });
+
+  it("a duplicate without a price adds copies but no value", () => {
+    const rowsUnpriced = buildCollectionRows([sa3], [entry(sa3, 4)]);
+    const summary = segmentSummary(rowsUnpriced, COLLECTION_DUPLICATES, 561);
+    expect(summary).toMatchObject({ kind: "duplicates", figures: 1, extraCopies: 3, value: 0 });
+  });
+
+  it("a figure owned once is not a duplicate", () => {
+    const single = buildCollectionRows([sa1], [entry(sa1, 1)]);
+    expect(segmentSummary(single, COLLECTION_DUPLICATES, 561)).toMatchObject({
+      figures: 0,
+      extraCopies: 0,
+      value: 0,
+    });
+  });
+
+  it("the summary ignores the search box by construction", () => {
+    // It takes rows and a filter, never a query — so no keystroke can move it.
+    expect(segmentSummary.length).toBe(3);
   });
 });

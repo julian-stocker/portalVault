@@ -29,25 +29,30 @@ export default function CatalogLoading() {
       <Block className="mb-4 h-7 w-56 md:mb-3" />
       <div className="flex flex-col gap-3">
         <Block className="h-11 w-full" />
-        <div className="flex gap-1.5">
-          {[0, 1, 2, 3, 4, 5, 6].map((index) => (
-            <Block key={index} className="h-11 w-14 shrink-0" />
+        {/* Six games, spelled out, on a shared track — the geometry the
+            segmented bar actually has since V2 (ADR-0038). */}
+        <div className="flex w-fit gap-1 rounded-sky-lg bg-border/40 p-1">
+          {/* Written out, not interpolated: Tailwind only emits classes it
+              sees literally, so `w-${n}` would produce no width at all. */}
+          {["w-32", "w-16", "w-28", "w-24", "w-32", "w-28"].map((width, index) => (
+            <Block key={index} className={`h-9 shrink-0 ${width}`} />
           ))}
         </div>
         <Block className="h-5 w-32" />
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+      <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 xl:grid-cols-5">
         {Array.from({ length: 8 }, (_, index) => (
           <div
             key={index}
             aria-hidden="true"
-            className="flex flex-col gap-2 rounded-sky-lg border border-border bg-surface p-2"
+            className="flex flex-col gap-2.5 rounded-sky-lg bg-surface p-2.5 shadow-card"
           >
             <div className="aspect-square w-full rounded-sky-md bg-border/50" />
             <Block className="h-4 w-3/4" />
-            <Block className="h-4 w-1/2" />
-            <Block className="mt-1 h-11 w-full" />
+            <Block className="h-4 w-1/3" />
+            <Block className="h-3 w-1/2" />
+            <Block className="mt-1 h-10 w-full" />
           </div>
         ))}
       </div>

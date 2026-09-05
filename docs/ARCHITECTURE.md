@@ -107,6 +107,12 @@ Legacy-System: `data/characters/characters.json` → `tools/import-characters.mt
   (keine Client-Rechte)   (security definer)
 ```
 
+**Katalog und Sammlung sind zwei Aufgaben, nicht zwei Ansichten derselben Liste** (ADR-0038):
+`/` zeigt alle aktiven Sammelobjekte **einer gewählten Serie** — entdecken, nachschlagen,
+ergänzen. `/collection` zeigt ausschließlich Figuren mit `quantity >= 1` — Besitz, Fortschritt,
+Wert. „Was fehlt mir" ist eine Katalogfrage; die Completion-Zahl misst weiterhin gegen den
+vollständigen aktiven Katalog.
+
 **Die Grenze zwischen Benutzerdaten und Shop ist genauso hart wie die übrigen drei.**
 `collection_items` beantwortet „Was besitzt dieser Nutzer?", die Shop-Domäne beantwortet
 „Was hat das Geschäft auf Lager?". Beide hängen an derselben `sky_id`, sonst an nichts.

@@ -1,65 +1,53 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-import { knownSeriesCodes, seriesShort } from "./series-nav.ts";
+import catalog from "../../../data/catalog/products.json" with { type: "json" };
+import type { SeriesOption } from "@/lib/catalog/types";
+import { defaultSeriesCode } from "./series-nav.ts";
 
-/**
- * The short codes in the series tabs.
- *
- * The point of the table is that all seven tabs fit a 360 px screen, so the
- * tests care about two things: that it covers the real series, and that the
- * forms stay short and distinct.
- */
-const catalog = JSON.parse(readFileSync("data/catalog/products.json", "utf8")) as {
-  series: { code: string; label: string }[];
-};
+const SERIES: SeriesOption[] = [
+  { code: "SA", label: "Spyro's Adventure", position: 0 },
+  { code: "G", label: "Giants", position: 1 },
+  { code: "T", label: "Trap Team", position: 3 },
+];
 
-describe("seriesShort", () => {
-  it("covers exactly the six series the catalog holds", () => {
-    expect(knownSeriesCodes().sort()).toEqual(catalog.series.map((s) => s.code).sort());
+describe("defaultSeriesCode", () => {
+  it("takes the first series, which is the earliest game", () => {
+    expect(defaultSeriesCode(SERIES)).toBe("SA");
   });
 
-  it("gives Trap Team a readable form — 'T' alone says nothing", () => {
-    expect(seriesShort("T")).toBe("TT");
+  it("keeps the order a database decision rather than sorting again", () => {
+    // Handed a differently ordered list, it takes that list's first entry.
+    expect(defaultSeriesCode([SERIES[1], SERIES[0]])).toBe("G");
   });
 
-  it("keeps the other codes as they are", () => {
-    expect(seriesShort("SA")).toBe("SA");
-    expect(seriesShort("G")).toBe("G");
-    expect(seriesShort("SF")).toBe("SF");
-    expect(seriesShort("SC")).toBe("SC");
-    expect(seriesShort("I")).toBe("I");
+  it("returns an empty code for an empty catalog rather than inventing one", () => {
+    expect(defaultSeriesCode([])).toBe("");
   });
 
-  it("keeps every form short enough for a tab", () => {
+  it("resolves to a real series of the actual catalog", () => {
+    // The export carries no `position`; the database supplies it, and the
+    // order of the array is the same order.
+    const fromCatalog = catalog.series.map((series, index) => ({
+      code: series.code,
+      label: series.label,
+      position: index,
+    }));
+    expect(catalog.series.map((series) => series.code)).toContain(defaultSeriesCode(fromCatalog));
+  });
+});
+
+describe("the catalog series navigation", () => {
+  it("offers exactly the six games, and no 'all' option", () => {
+    // ADR-0038: the catalog always has a game selected. "Alle" was removed
+    // together with the short codes.
+    expect(catalog.series).toHaveLength(6);
+    expect(catalog.series.map((series) => series.code)).not.toContain("all");
+  });
+
+  it("every series carries a full title for the tab to show", () => {
     for (const series of catalog.series) {
-      expect(seriesShort(series.code).length, series.label).toBeLessThanOrEqual(3);
+      expect(series.label.length, series.code).toBeGreaterThan(1);
+      expect(series.label).not.toBe(series.code);
     }
-  });
-
-  it("gives every series its own form", () => {
-    const shorts = catalog.series.map((series) => seriesShort(series.code));
-    expect(new Set(shorts).size).toBe(catalog.series.length);
-  });
-
-  it("shows the raw code for a series it does not know", () => {
-    // Visible and slightly ugly beats vanishing: a new series announces
-    // itself instead of rendering an empty tab.
-    expect(seriesShort("ZB")).toBe("ZB");
-    expect(seriesShort("")).toBe("");
-  });
-
-  it("defines no colours — series is navigation, element is data", () => {
-    // Guards the boundary in ADR-0035: a hue table creeping in here would
-    // put series and element colour on the same screen.
-    const source = readFileSync("src/lib/catalog/series-nav.ts", "utf8");
-    const code = source
-      .split("\n")
-      .filter((line) => {
-        const trimmed = line.trimStart();
-        return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
-      })
-      .join("\n");
-    expect(code).not.toMatch(/#[0-9a-f]{6}|bg-|text-element|--series/i);
   });
 });

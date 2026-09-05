@@ -24,8 +24,8 @@
 import { useState, useTransition } from "react";
 
 import {
-  ACTION_CONFIRMED,
-  ACTION_NEUTRAL,
+  ACTION_CARD,
+  ACTION_OWNED,
   ACTION_PENDING,
 } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
@@ -85,7 +85,7 @@ export function CollectionAction({
         onClick={() => apply(owned ? 0 : Math.max(initialQuantity, 1))}
         aria-label={owned ? de.collection.removeLabel(name) : undefined}
         aria-busy={pending || undefined}
-        className={`${justRemoved ? ACTION_CONFIRMED : ACTION_NEUTRAL} ${pending ? ACTION_PENDING : ""}`}
+        className={`${justRemoved ? ACTION_OWNED : ACTION_CARD} ${pending ? ACTION_PENDING : ""}`}
       >
         {label}
       </button>

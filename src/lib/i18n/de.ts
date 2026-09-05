@@ -27,6 +27,8 @@ export const de = {
     allSeries: "Alle",
     heading: "Skylanders Katalog",
     seriesNav: "Serie wählen",
+    /** Untertitel unter dem Wortzeichen im Katalogkopf. */
+    intro: "Alle Figuren, Marktpreise und was dir noch fehlt.",
     /** "1 Figur" / "561 Figuren". No grammar engine, just the one plural. */
     figureCount: (count: number) => (count === 1 ? "1 Figur" : `${count} Figuren`),
     /** With a series chosen: "Swap Force · 89 Figuren". */
@@ -41,11 +43,17 @@ export const de = {
     retry: "Erneut versuchen",
     noImage: "Kein Bild",
     noPrice: "Preis offen",
-    collect: "+ Sammlung",
-    collected: "✓ Gesammelt",
-    // Screenreader-Text des Statusabzeichens auf der Karte — ohne Glyphe.
-    collectedBadge: "Gesammelt",
-    collectSignedOut: "+ Sammlung",
+    collect: "Zur Sammlung hinzufügen",
+    // Kein Häkchen und kein „erledigt": Besitz ist ein Zustand der Vitrine,
+    // keine abgehakte Aufgabe (ADR-0038). Sichtbar trägt ihn seit V2.1 der
+    // Kartenrahmen; diese Texte sind für Screenreader und Tooltips.
+    collected: "In deiner Sammlung",
+    collectedBadge: "In deiner Sammlung",
+    collectedHint: "Aus der Sammlung entfernen",
+    collectSignedOut: "Zur Sammlung hinzufügen",
+    /** Beschriftung der separaten Navigationsaktion auf der Karte. */
+    info: "Info",
+    infoFor: (name: string) => `Info zu ${name}`,
     collectFailed: "Das hat nicht geklappt.",
     inactive: "Nicht mehr im Katalog",
     backToCatalog: "Zurück zum Katalog",
@@ -85,20 +93,42 @@ export const de = {
   collection: {
     title: "Meine Sammlung",
     overview: "Überblick",
-    seriesProgress: "Serienfortschritt",
     statusFilter: "Sammlung filtern",
     collectedOf: (owned: number, total: number) => `${owned} von ${total} gesammelt`,
     complete: (percent: string) => `${percent} vollständig`,
+    /** Kurzform als Beschriftung über der Prozentzahl in der Vitrine. */
+    completeLabel: "Vollständig",
     resetFilters: "Filter zurücksetzen",
-    status: {
+    /** Die Vitrine zeigt nur Besitz — „Fehlend" und „Gesammelt" gibt es hier
+        nicht mehr, weil beides in der Sammlung keine Unterscheidung wäre
+        (ADR-0038). Serien kommen zur Laufzeit dazu. */
+    filter: {
       all: "Alle",
-      owned: "Gesammelt",
-      missing: "Fehlend",
       duplicates: "Duplikate",
     } as Record<string, string>,
+    /** Kopfzeile der Vitrine. */
+    heroLabel: "Deine Sammlung",
+    ownedFigures: "Figuren in deiner Vitrine",
+    ofTotal: (total: number) => `von ${total} im Katalog`,
+    /** Der Hero folgt dem aktiven Segment, nicht dem Suchtext. */
+    ofSeries: (total: number, series: string) => `von ${total} in ${series}`,
+    ownedInSeries: (series: string) => `Figuren aus ${series}`,
+    duplicateFigures: "Figuren mit Duplikaten",
+    extraCopies: "Zusätzliche Exemplare",
+    extraCopiesValue: "Marktwert der Zusätze",
+    /** Grid-Zähler, wenn eine Suche das Segment weiter einschränkt. */
+    searchCount: (visible: number, total: number) =>
+      `${visible} von ${total === 1 ? "1 Figur" : `${total} Figuren`}`,
+    stillMissing: (count: number) =>
+      count === 1 ? "1 Figur fehlt noch" : `${count} Figuren fehlen noch`,
+    missingLabel: "Fehlen noch",
+    showcaseEmpty: "Deine Vitrine ist noch leer.",
+    showcaseEmptyHint:
+      "Im Katalog fügst du mit einem Tippen die erste Figur hinzu.",
+    toCatalog: "Zum Katalog",
     noMatch: (status: string) =>
       status === "duplicates" ? "Keine Duplikate" : "Keine Figuren gefunden.",
-    noMatchHint: "Ändere Filter, Serie oder Suchbegriff.",
+    noMatchHint: "Wähle eine andere Serie oder setze den Filter zurück.",
     distinctFigures: "Verschiedene Figuren",
     catalogTotal: "Figuren im Katalog",
     progress: "Fortschritt",

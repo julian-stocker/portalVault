@@ -61,6 +61,28 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**Design V2.1 umgesetzt (2026-09-05, ADR-0038).** Besitz trägt **ausschließlich im Katalog** der
+Kartenrahmen (warmes Amber, `aria-pressed` plus `sr-only`-Text), nicht mehr ein Text-Chip; in
+`/collection` bleiben die Karten neutral, weil dort ohnehin alles Besitz ist. **Die Karte selbst
+ist der Umschalter**; „Info" ist eine eigene Aktion im Kartenfuß und als Geschwisterelement
+sauber davon getrennt. In `/collection` sind die sechs Serienfortschrittskarten entfallen; der
+Hero folgt stattdessen dem aktiven Filter — je Serie eigene Zahlen, für `Duplikate` eine eigene
+Form (Figuren mit Duplikaten, zusätzliche Exemplare, Marktwert nur der Zusätze). Die Suche
+filtert das Raster, verändert aber die Hero-Zahlen nicht.
+
+**Design V2 umgesetzt (2026-09-05, ADR-0038).** Katalog und Sammlung sind fachlich getrennt:
+Der Katalog zeigt alle Sammelobjekte **einer immer gewählten Serie** (kein „Alle", ausgeschriebene
+Namen), die Sammlung ausschließlich Figuren mit `quantity >= 1`. Das Häkchen über der Figur und
+der `✓ Gesammelt`-Button sind weg; Besitz ist ein ruhiger Chip „In deiner Sammlung", der zugleich
+die Aktion zum Entfernen bleibt. Karten ohne Rahmen, Bild als Hero, Preis vor Metadaten. Die
+Sammlung hat einen dunklen Vitrinen-Kopfbereich mit Anzahl, Fortschritt, Marktwert und „fehlen
+noch", darunter kompakte Serienfortschrittskarten, die zugleich der Serienfilter sind. Neue
+Wortmarke mit Monogramm, getönter Aktivzustand in der Navigation. Keine neue Abhängigkeit, keine
+Migration, keine Änderung an Datenmodell, Auth, RLS oder Shop-Fundament.
+
+Dabei gefunden und behoben: Der Hinweis „… Einträge sind Spiele" konnte nie erscheinen, weil die
+Statistik die bereits herausgefilterten Zeilen bekam.
+
 **Shop Foundation implementiert (2026-09-05, `supabase/migrations/0003_shop_foundation.sql`).**
 Drei Tabellen (`shop_admins`, `shop_inventory`, `inventory_movements`), eine Reconciliation-View
 und sieben Funktionen. Kein Client hat ein Tabellenrecht; der gesamte Schreibzugriff sind
@@ -534,6 +556,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
 | **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
 | **0036** | **Hauptnavigation mit drei Zielen; Abmelden gehört nach `/settings`; aktive Route aus dem Pfad** |
+| **0038** | **Design V2: Katalog entdeckt (immer eine Serie), Sammlung zeigt nur Besitz; Karten ohne Rahmen, Besitz als Vitrinen-Chip statt Häkchen, dunkler Sammlungs-Kopfbereich** |
 | **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — **umgesetzt in `0003`** |
 
 ## Offene Entscheidungen

@@ -1,6 +1,10 @@
 /**
  * The grid.
  *
+ * Layout only since V2.1: the cards differ between catalog and collection —
+ * one is a toggle, the other carries a remove action — but the geometry is
+ * the same, and it used to be written out twice.
+ *
  * Two columns on the narrowest phones, growing with the viewport. No
  * virtualisation: 600 cards with lazily loaded images measured fine, and
  * adding it before a problem exists would be optimising a guess (ADR-0026).
@@ -11,32 +15,22 @@
  */
 import type { ReactNode } from "react";
 
-import { FigureCard } from "@/components/catalog/figure-card";
-import type { CatalogFigure } from "@/lib/catalog/types";
-
 export function FigureGrid({
-  figures,
-  renderAction,
-  highlightSkyId,
-  collectedSkyIds,
+  children,
+  /** The collection shows fewer figures, so it gives them more room. */
+  dense = true,
 }: {
-  figures: readonly CatalogFigure[];
-  renderAction?: (figure: CatalogFigure) => ReactNode;
-  highlightSkyId?: string | null;
-  /** Real collection state, passed through to the card. Nothing is derived. */
-  collectedSkyIds?: ReadonlySet<string>;
+  children: ReactNode;
+  dense?: boolean;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
-      {figures.map((figure) => (
-        <FigureCard
-          key={figure.skyId}
-          figure={figure}
-          action={renderAction?.(figure)}
-          highlighted={highlightSkyId === figure.skyId}
-          collected={collectedSkyIds?.has(figure.skyId) ?? false}
-        />
-      ))}
+    <div
+      className={
+        "grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4 " +
+        (dense ? "xl:grid-cols-5" : "")
+      }
+    >
+      {children}
     </div>
   );
 }

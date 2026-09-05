@@ -4,7 +4,6 @@ import { ELEMENTS } from "./character.ts";
 import {
   ELEMENT_LABELS,
   asElement,
-  elementAccentClass,
   elementChipClass,
   elementLabel,
 } from "./element.ts";
@@ -42,13 +41,11 @@ describe("the element table", () => {
   it("gives every element a label, an accent and a chip", () => {
     for (const element of ELEMENTS) {
       expect(elementLabel(element), element).toBeTruthy();
-      expect(elementAccentClass(element), element).toContain("element-");
       expect(elementChipClass(element), element).toContain("element-");
     }
   });
 
   it("keeps accent and chip apart — one paints, one writes", () => {
-    expect(elementAccentClass("Fire")).toMatch(/^bg-/);
     expect(elementChipClass("Fire")).toMatch(/^text-/);
   });
 

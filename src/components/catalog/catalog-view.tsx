@@ -9,11 +9,12 @@
 
 import { useDeferredValue, useMemo, useState } from "react";
 
-import { CollectButton } from "@/components/catalog/collect-button";
+import { CatalogCard } from "@/components/catalog/catalog-card";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
-import { ALL_SERIES, filterFigures } from "@/lib/catalog/search";
+import { filterFigures } from "@/lib/catalog/search";
+import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { de } from "@/lib/i18n/de";
 
@@ -35,8 +36,11 @@ export function CatalogView({
   initialSeriesCode?: string;
   initialQuery?: string;
 }) {
+  // A series is always chosen (ADR-0038). The first one is the default, so
+  // the catalog opens on Spyro's Adventure rather than on all 561 at once.
+  const defaultSeries = defaultSeriesCode(series);
   const [query, setQuery] = useState(initialQuery);
-  const [seriesCode, setSeriesCode] = useState<string>(initialSeriesCode ?? ALL_SERIES);
+  const [seriesCode, setSeriesCode] = useState<string>(initialSeriesCode ?? defaultSeries);
   const deferredQuery = useDeferredValue(query);
 
   const owned = useMemo(() => new Set(ownedSkyIds), [ownedSkyIds]);
@@ -52,18 +56,19 @@ export function CatalogView({
    */
   function signInHref(skyId: string): string {
     const params = new URLSearchParams();
-    if (seriesCode !== ALL_SERIES) params.set("series", seriesCode);
+    params.set("series", seriesCode);
     if (query.trim() !== "") params.set("q", query.trim());
     params.set("figure", skyId);
     return `/login?next=${encodeURIComponent(`/?${params.toString()}`)}`;
   }
 
   const activeSeries = series.find((option) => option.code === seriesCode) ?? null;
-  const filtered = query.trim() !== "" || seriesCode !== ALL_SERIES;
+  // Only the search is resettable now — a series is always chosen, so
+  // "clear the series" is not a state the catalog can be in.
+  const filtered = query.trim() !== "";
 
   function reset() {
     setQuery("");
-    setSeriesCode(ALL_SERIES);
   }
 
   return (
@@ -80,6 +85,8 @@ export function CatalogView({
         <label className="sr-only" htmlFor="catalog-search">
           {de.catalog.searchLabel}
         </label>
+        {/* Filled rather than outlined: one less line on a page that had too
+            many, and the surface already separates it from the canvas. */}
         <input
           id="catalog-search"
           type="search"
@@ -87,13 +94,16 @@ export function CatalogView({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder={de.catalog.searchPlaceholder}
-          className="min-h-11 w-full rounded-sky-md border border-border bg-surface px-3 py-2.5 text-base focus:border-border-strong"
+          className={
+            "min-h-11 w-full rounded-sky-md bg-surface px-3.5 py-2.5 text-base " +
+            "shadow-card placeholder:text-muted"
+          }
         />
         <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
 
         {/*
-         * The context line. Carries the full name of the chosen series — the
-         * tabs only have room for a short code — and the count, quietly.
+         * The count, quietly. The series name is on the active tab now, so
+         * repeating it here would say the same thing twice.
          * `aria-live` so a filter change is announced without moving focus.
          */}
         <p className="text-sm text-muted" aria-live="polite">
@@ -104,7 +114,7 @@ export function CatalogView({
       </div>
 
       {visible.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-sky-lg border border-border px-4 py-10 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface px-4 py-12 text-center shadow-card">
           <p className="font-medium">{de.catalog.empty}</p>
           <p className="text-sm text-muted">{de.catalog.emptyHint}</p>
           {filtered ? (
@@ -114,18 +124,17 @@ export function CatalogView({
           ) : null}
         </div>
       ) : (
-        <FigureGrid
-          figures={visible}
-          highlightSkyId={highlightSkyId}
-          collectedSkyIds={owned}
-          renderAction={(figure) => (
-            <CollectButton
-              skyId={figure.skyId}
+        <FigureGrid>
+          {visible.map((figure) => (
+            <CatalogCard
+              key={figure.skyId}
+              figure={figure}
               initialCollected={owned.has(figure.skyId)}
               signInHref={signedIn ? null : signInHref(figure.skyId)}
+              highlighted={highlightSkyId === figure.skyId}
             />
-          )}
-        />
+          ))}
+        </FigureGrid>
       )}
     </div>
   );

@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-05 (ADR-0037, Shop-Fundament).
+Letzte Aktualisierung: 2026-09-05 (ADR-0038, Design V2).
 
 ---
 
@@ -2193,3 +2193,174 @@ Anforderung nicht an fehlenden Daten scheitert.
 | Steuerverfahren, `order_items`-Steuerfelder, Rechnungsnummern | vor den ersten Bestellungen |
 
 **Die Shop Foundation ist dadurch nicht blockiert, und der Bestandsimport ebenso wenig.**
+
+---
+
+## ADR-0038 — Katalog entdeckt, Sammlung zeigt: Design V2
+
+**Status:** ANGENOMMEN und umgesetzt (2026-09-05).
+
+Der Katalog funktionierte, sah aber aus wie ein Verwaltungswerkzeug: viel gleichförmige helle
+Fläche, sichtbare Rahmen auf jeder Karte, ein Häkchen über jeder gesammelten Figur und ein
+`✓ Gesammelt`-Button darunter. Die Sammlung zeigte dieselben 561 Karten wie der Katalog, nur
+mit Statistik darüber. Beides zusammen ergab eine Checkliste, keine Sammlervitrine.
+
+### 1. Zwei Seiten, zwei Aufgaben
+
+| | Aufgabe | Inhalt |
+|---|---|---|
+| `/` Katalog | entdecken, nachschlagen, Preise sehen, ergänzen | **alle** aktiven Sammelobjekte der gewählten Serie |
+| `/collection` Sammlung | Besitz, Fortschritt, Wert, Duplikate | **ausschließlich** Figuren mit `quantity >= 1` |
+
+**Fehlende Figuren erscheinen nicht mehr in der Sammlung.** Sie waren dort der Grund, warum die
+Seite ein zweiter Katalog war — dieselben Karten, dieselbe Rasterdichte, eine andere
+Überschrift. „Was fehlt mir" ist eine Katalogfrage.
+
+**Die Completion-Zahl bleibt davon unberührt.** `buildCollectionRows` deckt weiterhin jedes
+Sammelobjekt ab, weil 448 von 561 nur dann etwas bedeutet, wenn beide Hälften dieselbe Menge
+zählen. Neu ist nur, was auf den Bildschirm kommt: `showcaseRows` und `filterCollection` geben
+ausschließlich besessene Zeilen heraus.
+
+**Eine gerade entfernte Figur bleibt sichtbar**, bis die Seite neu geladen wird. Sonst
+verschwände die Karte mit dem „Rückgängig" genau in dem Moment, in dem es gebraucht wird.
+
+### 2. Filter folgen der Aufgabe
+
+Katalog: **kein „Alle"**, keine Kürzel. Eine Serie ist immer gewählt, ausgeschrieben, und die
+erste ist der Startzustand (`defaultSeriesCode`, Reihenfolge aus der Datenbank). 561 Figuren auf
+einmal sind eine Wand, die niemand scrollt, und `SA · G · SF · TT · SC · I` verlangte eine
+Codetabelle, bevor man blättern durfte.
+
+Sammlung: **Alle · sechs Serien · Duplikate** in einer Leiste. `Gesammelt` und `Fehlend` sind
+ersatzlos entfallen — in einer Ansicht, die nur Besitz enthält, ist „gesammelt" jede Zeile und
+„fehlend" keine.
+
+Beide nutzen dieselbe segmentierte `FilterBar`: gemeinsame Bausteine, getrennte Aufgaben.
+
+### 3. Besitz ist ein Zustand, keine erledigte Aufgabe
+
+Entfernt: das dauerhafte `✓` über der Figur, der `✓ Gesammelt`-Button — und in V2.1 auch der
+Text-Chip, der beide ersetzt hatte. „In deiner Sammlung" wurde auf schmalen Karten
+abgeschnitten und sagte in sechs Wörtern, was ein Rahmen auf einen Blick sagt.
+
+**Besitz trägt im Katalog der Kartenrahmen:** ein warmer Amber-Ring und eine leicht wärmere
+Fläche. Kein Grün, kein Häkchen, kein Glühen, kein zweites Randgewicht — ein gesammeltes Stück
+soll aussehen wie ein Stück in der Vitrine, nicht wie eine erledigte Aufgabe.
+
+Farbe allein trägt den Zustand nicht: Die Karte ist ein `button` mit `aria-pressed`, und ein
+`sr-only`-Text nennt sowohl den Zustand als auch, was ein Druck bewirken würde.
+
+**Der Rahmen ist ausdrücklich eine Katalog-Semantik.** Er beantwortet genau eine Frage —
+*„Besitze ich diese Figur schon?"* — und die stellt sich nur dort, wo vorhandene und fehlende
+Sammelobjekte nebeneinander liegen. **In `/collection` gibt es ihn nicht:** Dort ist jede Figur
+Besitz, ein Rahmen um jede Karte sagte also nichts und würde zugleich verwässern, was er im
+Katalog bedeutet. Die Karten der Vitrine bleiben neutral und hochwertig — kein Rahmen, kein
+Besitztext, kein Häkchen. Die Mengenkennzeichnung `2×` bleibt, weil sie etwas sagt, das die
+Seitenzugehörigkeit nicht schon impliziert.
+
+Die Unterscheidung liegt **im Verwendungskontext, nicht in zufälligen CSS-Unterschieden**:
+`FigureCard` nimmt ein `ownership`-Prop (`"catalog"` | `"showcase"`, Standard `"showcase"`), und
+nur `CatalogCard` fordert `"catalog"` an. Die Regel selbst steht als reine Funktion in
+`src/lib/catalog/card.ts` und ist dort geprüft, damit sie zwischen beiden Seiten nicht
+auseinanderlaufen kann.
+
+### 3a. Die Karte ist die Aktion (V2.1)
+
+**Tippen auf die Katalogkarte schaltet den Sammlungszustand um** — hinzufügen, erneut tippen
+entfernt. Das ersetzt einen Button auf jeder der 561 Karten, die größte einzelne Quelle
+visuellen Rauschens im Raster. Mutation und Undo-Semantik sind unverändert (ADR-0027): gesetzt
+wird ein gewünschter Endzustand, kein Toggle, und die Aktion wird nach einer Anmeldung **nicht**
+wiederholt.
+
+**„Info" ist eine eigene Aktion** im Kartenfuß und führt zur Detailseite. Sie ist ein
+**Geschwisterelement** des klickbaren Körpers, kein Kind — damit kann eine Navigation den
+Zustand nicht mitschalten, ganz ohne Event-Behandlung, und nichts Interaktives ist ineinander
+verschachtelt. Beide sind mit der Tastatur erreichbar.
+
+Abgemeldet ist der Kartenkörper stattdessen ein Link in den Anmeldefluss, der den Katalogkontext
+mitnimmt. Es gibt dann nichts umzuschalten, und derselbe Tipp führt dorthin, wo es weitergeht.
+
+Die Aktion ist auf **jedem** Viewport verfügbar. Sie erst bei Hover zu zeigen wäre leiser
+gewesen und genau die Falle: Ein Telefon hat keinen Hover, und die eine Aktion, für die der
+Katalog existiert, darf nicht an einem Zeigegerät hängen.
+
+In `/collection` trägt **keine** Karte den Rahmen (siehe oben). Der Kartenkörper führt dort zur
+Detailseite, und der Fuß trägt „Entfernen"/„Rückgängig": Der Katalog sammelt ein, die Sammlung
+pflegt. Zwei Aufgaben, zwei Gesten.
+
+### 4. Die Karte verliert ihren Rahmen
+
+Weg: Rahmen, farbige Elementkappe, Häkchen-Badge, umrandete Serien-Pille, umrandeter Button.
+Geblieben: Figur, Name, Preis, eine leise Metazeile — getragen von Fläche und weichem Schatten
+statt von Linien.
+
+Hierarchie: **Figur → Name → Preis → Serie/Element → Aktion.** Der Preis ist größer und
+tabellarisch gesetzt, bleibt aber neutraler Marktwert und wird nicht als Preisschild inszeniert
+(ADR-0033). Serie und Element stehen klein darunter; **im Katalog entfällt die Serie ganz**,
+weil der aktive Tab sie bereits nennt.
+
+Die **Elementkappe** ist entfallen. Ohne Rahmen, auf dem sie saß, schwebte sie über der
+gerundeten Ecke und las sich wie ein Darstellungsfehler — und sie sagte in Farbe allein, was
+die Zeile darunter in Worten sagt. Die Elementfarbe lebt weiter dort, wo sie auch benannt ist.
+
+**Duplikate** erscheinen als kleines `2×` auf der Bildplatte — das einzige, was je über einer
+Figur liegt, und nur, weil es etwas sagt, das kein Label unterhalb ausdrücken könnte.
+
+### 5. Die Sammlung bekommt eine Rückwand — und sie folgt den Tabs
+
+Der Kopfbereich ist eine dunkle Fläche (`--deep`), die einzige Verwendung dieses Tons im
+Produkt. Eine Vitrine hat eine dunkle Rückwand; dieser Kontrast ist der Unterschied zwischen
+einer Anzeige und einem ausgefüllten Formular.
+
+**V2.1: Der Hero beschreibt das aktive Segment, nicht immer die ganze Sammlung.** Die sechs
+Serienfortschrittskarten darunter sind **ersatzlos entfallen** — sie sagten dasselbe in
+Miniatur, gaben der Seite eine zweite Art, eine Serie zu wählen, und ließen sie wie ein
+Dashboard aussehen. Der Aufbau ist jetzt: Hero → Filterleiste → Suche → Anzahl → Raster.
+
+| Aktives Segment | Hero zeigt |
+|---|---|
+| `Alle` | gesammelt / Katalogtotal (aus der Datenbank), Prozent, Marktwert, wie viele fehlen |
+| eine Serie | dasselbe, aber **nur** für diese Serie — Zähler, Nenner, Wert und Fehlende alle aus deren aktiven Sammelobjekten |
+| `Duplikate` | eigene Form: Figuren mit Duplikaten, zusätzliche Exemplare, Marktwert **nur der Zusätze** |
+
+`Duplikate` ist keine Completion-Serie. Es gibt kein Ziel zu erreichen, also kein „x von y" und
+keinen Fortschrittsbalken. Der Wert zählt ausdrücklich **`(quantity − 1) × market_price`**: Ein
+Bereich, der „Duplikate" heißt, darf nicht den Wert der jeweils ersten Exemplare mitzählen. Das
+widerspricht `collectionStats.estimatedValue` nicht — das beantwortet die andere Frage, was die
+gesamte Sammlung wert ist, und bleibt unverändert.
+
+**Der Hero reagiert nicht auf die Suche.** `segmentSummary(rows, filter, catalogTotal)` bekommt
+den Suchtext gar nicht erst. Sonst würde „Wie vollständig ist Trap Team" zu einer Zahl, die beim
+Tippen springt. Die Suche filtert ausschließlich das Raster; der Zähler darunter sagt dann
+„12 von 130 Figuren" statt einer nackten Zahl.
+
+Alles abgeleitet, **keine neue Datenbankspalte**, die Marktwertsemantik unverändert.
+
+### 6. Kopfbereich
+
+Statt eines 6-px-Punktes ein Monogramm-Kachel plus Wortmarke mit Gewichtskontrast
+(**Sky**Isles). Der aktive Navigationspunkt ist auf dem Desktop eine getönte Pille statt einer
+Haarlinie; in der Telefonleiste bleibt der Balken, weil dort eine Pille mit den Beschriftungen
+konkurriert. Kein externes Asset, keine zweite Schrift, kein Logo-Entwurf.
+
+### 7. Was ausdrücklich nicht passiert ist
+
+Keine Komponentenbibliothek, kein UI-Framework, keine neue Abhängigkeit. Keine Änderung an
+Datenmodell, Auth, RLS, Shop-Fundament, SKY-IDs, Charaktermodell, Marktpreisberechnung,
+Mengensemantik, Softwareausschluss (ADR-0029) oder am Auth-Rücksprung (ADR-0027). Keine
+Migration. Kein Shopangebot und kein Verkaufspreis im Katalog.
+
+### 8. Ein dabei gefundener Fehler
+
+Die Sammlung konnte den Hinweis „… Einträge sind Spiele und zählen nicht zum Sammelfortschritt"
+**nie** anzeigen: `buildCollectionRows` entfernt Software (ADR-0029), und genau dieses Ergebnis
+ging in `collectionStats`. Die Statistik bekommt die ausgelassenen Einträge jetzt wieder
+hinzugefügt — die Vitrine bleibt frei von Spielkarten, die Zusammenfassung zählt aber wieder
+jeden besessenen Eintrag. Bestand seit V1.5, gefunden bei der Sichtprüfung dieses Schritts.
+
+### 9. Offen
+
+Serienfarben als reine UI-Konvention · Sortierung der Vitrine (Serie, Wert, zuletzt
+hinzugefügt) · Mengenpflege über `2×` hinaus direkt auf der Karte · Shopangebot im Katalog,
+sobald der Shop öffentlich ist (ADR-0037) · ob die Sammlungskarte langfristig dieselbe
+Tipp-Geste bekommt wie die Katalogkarte.

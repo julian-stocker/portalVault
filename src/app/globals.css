@@ -57,6 +57,15 @@
   --accent-hover: #7f5111;
   --accent-subtle: #f3e7d3;
 
+  /* --- The showcase panel ----------------------------------------------
+     One deep surface, used for the collection hero and nothing else. A
+     vitrine has a dark back wall; that contrast is what makes the numbers on
+     it read as a display rather than as a form. Fixed in both themes, like
+     `--plate`, so the panel is a constant of the product. */
+  --deep: #221f1b;
+  --on-deep: #f6f3ee; /* 14.8:1 on deep */
+  --on-deep-muted: #a9a196; /*  5.3:1 on deep */
+
   /* --- Status ---------------------------------------------------------- */
   --success: #1f7a45; /*  5.1:1 on surface */
   --danger: #b3261e; /*  6.2:1 on surface */
@@ -106,6 +115,12 @@
     --accent: #e0a44a; /*  8.6:1 on canvas */
     --accent-hover: #eeb864;
     --accent-subtle: #2a2113;
+
+    /* A touch lighter than the near-black canvas, so the panel still lifts
+       off the page in the dark theme instead of merging with it. */
+    --deep: #1b232f;
+    --on-deep: #eef1f4;
+    --on-deep-muted: #9aa4b2;
 
     --success: #5ad18d; /*  8.9:1 on surface */
     --danger: #ff9b93; /*  8.5:1 on surface */
@@ -157,6 +172,10 @@
   --color-on-plate: var(--on-plate);
   --color-on-plate-muted: var(--on-plate-muted);
 
+  --color-deep: var(--deep);
+  --color-on-deep: var(--on-deep);
+  --color-on-deep-muted: var(--on-deep-muted);
+
   --color-element-magic: var(--element-magic);
   --color-element-tech: var(--element-tech);
   --color-element-water: var(--element-water);
@@ -202,6 +221,23 @@
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+
+  /*
+   * A filter bar that scrolls sideways should not show a scrollbar.
+   *
+   * The bar is the one element in the product allowed to scroll horizontally,
+   * and on a trackpad Mac a permanent grey track across it looks like a
+   * defect. Scrolling itself is untouched: touch, wheel, keyboard and
+   * `scroll-into-view` all keep working, and the active chip is scrolled into
+   * view by the browser when it receives focus.
+   */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 
   /* Nothing here animates by decoration. This covers whatever transitions

@@ -9,9 +9,10 @@
  *
  * The variants carry meaning, not decoration:
  *
- *   PRIMARY    the one action worth taking here — "+ Sammlung"
- *   CONFIRMED  a state that has been reached — "✓ Gesammelt", "Rückgängig"
- *   NEUTRAL    available, but not what the card is for — "Entfernen"
+ *   PRIMARY  the one action worth taking here — the detail page's collect
+ *   OWNED    a state that has been reached, stated rather than ticked
+ *   NEUTRAL  an action on the canvas — an empty state, a reset
+ *   CARD     the action inside a card — "Info", "Entfernen"
  *
  * `min-h-11` is 44 px: the touch target size, applied to every one of them.
  */
@@ -23,28 +24,43 @@ const BASE =
 
 /**
  * The warm accent. Reserved for a single, genuinely primary action on a
- * screen — a form submit today, a detail page action later. Deliberately NOT
- * used on figure cards: repeated across a grid it would stop being an accent
- * and become the background noise of the catalog.
+ * screen — a form submit, a detail page action. Deliberately NOT used on
+ * figure cards: repeated across a grid it would stop being an accent and
+ * become the background noise of the catalog.
  */
 export const ACTION_PRIMARY = `${BASE} bg-accent text-on-accent hover:bg-accent-hover`;
 
 /**
- * Tonal rather than filled: reached states stay legible and clickable but
- * stop competing with the primary action. The glyph in the label carries the
- * state as well, so it never rests on colour alone.
- */
-export const ACTION_CONFIRMED = `${BASE} border border-accent/40 bg-accent-subtle text-foreground`;
-
-/**
- * Bordered and quiet. The workhorse: this is what a card action looks like,
- * repeated hundreds of times down the catalog.
- *
- * `border-strong` and full-strength text rather than `muted` — it has to read
- * as a real, tappable action at a glance while scrolling, it just must not
- * shout. That is the whole reason the accent is not used here.
+ * Bordered and quiet. Used where an action stands on the canvas rather than
+ * inside a card — an empty state, a reset.
  */
 export const ACTION_NEUTRAL = `${BASE} border border-border-strong text-foreground hover:bg-border/40`;
+
+/**
+ * The card action (ADR-0038).
+ *
+ * Filled with a tone rather than outlined: on a borderless card an outline
+ * would put back the frame the card just lost, and a full-width bordered
+ * button on 561 cards was a large part of why the grid read as a checklist.
+ * Tonal reads as tappable while staying behind the figure.
+ *
+ * Always visible, on every viewport. Revealing it on hover would have been
+ * quieter still and is exactly the trap: a phone has no hover, and the one
+ * action the catalog exists for must not depend on a pointer.
+ */
+export const ACTION_CARD =
+  `${BASE} min-h-10 bg-border/40 text-foreground hover:bg-border/70`;
+
+/**
+ * Owning something is a state of the showcase, not a completed task
+ * (ADR-0038). So it is not a filled success button and carries no check
+ * glyph — it is a quiet chip that happens to also be the way to undo.
+ *
+ * Same height as ACTION_CARD so a row of cards stays level whichever state
+ * each one is in.
+ */
+export const ACTION_OWNED =
+  `${BASE} min-h-10 gap-1.5 bg-accent-subtle text-foreground hover:bg-accent-subtle/70`;
 
 /**
  * While a mutation is in flight.

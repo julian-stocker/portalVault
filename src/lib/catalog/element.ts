@@ -36,23 +36,11 @@ export const ELEMENT_LABELS: Readonly<Record<Element, string>> = {
   Dark: "Dunkel",
 };
 
-/** The 2 px accent bar. Sits on `surface`, so the theme-aware token fits. */
-const ACCENT: Readonly<Record<Element, string>> = {
-  Magic: "bg-element-magic",
-  Tech: "bg-element-tech",
-  Water: "bg-element-water",
-  Fire: "bg-element-fire",
-  Life: "bg-element-life",
-  Undead: "bg-element-undead",
-  Earth: "bg-element-earth",
-  Air: "bg-element-air",
-  Light: "bg-element-light",
-  Dark: "bg-element-dark",
-};
-
 /**
- * The badge text colour. The badge outline is drawn from `currentColor`, so
- * one token carries both and the pair can never disagree.
+ * The element's text colour, and the only place its colour is used since V2
+ * (ADR-0038). The 2 px card cap is gone: colour on its own said what the
+ * label beside it already says in words, and on a borderless card it read as
+ * a stray line rather than as identity.
  */
 const CHIP: Readonly<Record<Element, string>> = {
   Magic: "text-element-magic",
@@ -81,10 +69,6 @@ export function asElement(value: string | null | undefined): Element | null {
 
 export function elementLabel(element: Element): string {
   return ELEMENT_LABELS[element];
-}
-
-export function elementAccentClass(element: Element): string {
-  return ACCENT[element];
 }
 
 export function elementChipClass(element: Element): string {

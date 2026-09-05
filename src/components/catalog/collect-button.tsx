@@ -7,10 +7,15 @@
  *
  * Signed in it updates immediately and reverts if the server disagrees.
  *
- * A collector's action, not a purchase. Neutral rather than filled: this
- * button repeats on up to 561 cards, and a wall of amber would put the
- * interface in front of the figures. The accent stays an accent — reserved
- * for a single real primary action, never for the grid (ADR-0035).
+ * Only the detail page uses it since V2.1 (ADR-0038): in the grid the card
+ * itself is the toggle, so the button that used to repeat on 561 cards is
+ * gone. A detail page has exactly one thing to do, and that is what the
+ * accent was reserved for (ADR-0035).
+ *
+ * Two states, and neither of them is a checkbox. Not collected is the accent;
+ * collected is a chip reading "In deiner Sammlung" with a small case glyph —
+ * no check mark, no green, no "done". The chip is still the button, so the
+ * state can be taken back where it was set.
  */
 "use client";
 
@@ -18,13 +23,32 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import {
-  ACTION_CONFIRMED,
-  ACTION_NEUTRAL,
+  ACTION_CARD,
+  ACTION_OWNED,
   ACTION_PENDING,
   ACTION_PRIMARY,
 } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import { de } from "@/lib/i18n/de";
+
+/** A display case, drawn rather than ticked. Decorative; the label speaks. */
+function CaseGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="h-3.5 w-3.5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2.25" y="3.25" width="11.5" height="9.5" rx="1.5" />
+      <path d="M2.25 9.75h11.5" />
+    </svg>
+  );
+}
 
 type Props = {
   skyId: string;
@@ -34,7 +58,7 @@ type Props = {
   /**
    * Where the button sits.
    *
-   * "card" is neutral, because the same button repeats on up to 561 cards.
+   * "card" is tonal, because the same button repeats on up to 561 cards.
    * "page" is the accent: a detail page has exactly one thing to do, and
    * that is what the accent was reserved for (ADR-0035).
    */
@@ -47,7 +71,7 @@ export function CollectButton({
   signInHref,
   variant = "card",
 }: Props) {
-  const idle = variant === "page" ? ACTION_PRIMARY : ACTION_NEUTRAL;
+  const idle = variant === "page" ? ACTION_PRIMARY : ACTION_CARD;
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -84,11 +108,22 @@ export function CollectButton({
         type="button"
         onClick={onClick}
         aria-pressed={collected}
+        // What a second press would do — the visible label states the state,
+        // not the action, so the action is named here.
+        title={collected ? de.catalog.collectedHint : undefined}
         // Not disabled while pending, on purpose — see ACTION_PENDING.
         aria-busy={pending || undefined}
-        className={`${collected ? ACTION_CONFIRMED : idle} ${pending ? ACTION_PENDING : ""}`}
+        className={`${collected ? ACTION_OWNED : idle} ${pending ? ACTION_PENDING : ""}`}
       >
-        {collected ? de.catalog.collected : de.catalog.collect}
+        {collected ? (
+          <>
+            <CaseGlyph />
+            <span className="truncate">{de.catalog.collected}</span>
+            <span className="sr-only">— {de.catalog.collectedHint}</span>
+          </>
+        ) : (
+          de.catalog.collect
+        )}
       </button>
       {failed ? (
         <p role="alert" className="mt-1 text-xs text-danger">
