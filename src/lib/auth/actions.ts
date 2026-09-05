@@ -16,12 +16,13 @@ import {
   passwordUpdateError,
   profileWriteError,
   signInError,
-  signUpError,
+  signUpOutcome,
   type FieldError,
 } from "@/lib/auth/errors";
 import {
   DEFAULT_SIGNED_IN_PATH,
   destinationAfterSignIn,
+  safeOrigin,
   safeRedirect,
 } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
@@ -69,14 +70,19 @@ export async function signUpAction(_prev: ActionState, formData: FormData): Prom
   if (password === "") return fieldError("password", de.auth.errors.passwordRequired);
 
   const supabase = await createClient();
-  const origin = String(formData.get("origin") ?? "");
-  const { error } = await supabase.auth.signUp({
+  const origin = safeOrigin(formData.get("origin") as string | null);
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { emailRedirectTo: `${origin}/auth/callback` },
+    // Without a usable origin the option is left out rather than sent as a
+    // relative string: Supabase then uses its configured Site URL.
+    options: origin ? { emailRedirectTo: `${origin}/auth/callback` } : undefined,
   });
 
-  if (error) return { error: signUpError(error) };
+  // The whole response decides, not just `error` — an address that already has
+  // an account comes back without one (docs/AUTH.md, section 9.13).
+  const problem = signUpOutcome(data, error);
+  if (problem) return { error: problem };
 
   // The project requires email confirmation, so signUp returns no session
   // (proven in V1.2C). Never pretend the user is signed in here.
@@ -130,10 +136,14 @@ export async function requestPasswordResetAction(
   if (!email) return fieldError("email", de.auth.errors.emailInvalid);
 
   const supabase = await createClient();
-  const origin = String(formData.get("origin") ?? "");
-  await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}`,
-  });
+  const origin = safeOrigin(formData.get("origin") as string | null);
+  await supabase.auth.resetPasswordForEmail(
+    email,
+    // Same rule as the sign-up: a relative redirect is worse than none.
+    origin
+      ? { redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/reset-password")}` }
+      : undefined,
+  );
 
   // The same answer whether or not the address exists. Reporting the real
   // outcome would turn this form into an account checker.

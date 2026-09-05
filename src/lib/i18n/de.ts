@@ -226,6 +226,11 @@ export const de = {
       usernameTaken: "Dieser Benutzername ist bereits vergeben.",
       usernameUnchanged: "Das ist bereits dein Benutzername.",
       rateLimited: "Zu viele Versuche. Bitte versuche es später noch einmal.",
+      // Shown when Supabase answers a sign-up without creating anything — most
+      // often because the address already has an account. Worded so that it
+      // helps without confirming that the account exists (docs/AUTH.md 9.13).
+      signUpNotCompleted:
+        "Die Registrierung konnte nicht abgeschlossen werden. Falls du hier schon ein Konto hast, melde dich an oder setze dein Passwort zurück.",
       sessionExpired: "Deine Sitzung ist abgelaufen. Bitte fordere einen neuen Link an.",
       generic: "Das hat nicht geklappt. Bitte versuche es noch einmal.",
     },

@@ -49,6 +49,38 @@ export function destinationAfterSignIn(
   return safeRedirect(next);
 }
 
+/**
+ * Normalises the origin a form sent us, or reports that there is none.
+ *
+ * The value arrives in a hidden field filled by `window.location.origin`,
+ * which means two things: it is client-controlled, and it is empty until the
+ * page has hydrated. Both end up in the confirmation link Supabase mails out,
+ * so neither may be passed through unchecked.
+ *
+ * Anything that is not a plain http(s) origin becomes `null`. The caller then
+ * omits the redirect option entirely and lets Supabase fall back to the Site
+ * URL configured in its console — which is also where the redirect allowlist
+ * lives. Guessing an origin here would be worse than having none.
+ */
+export function safeOrigin(value: string | null | undefined): string | null {
+  if (!value) return null;
+
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+  // Credentials in an origin are never legitimate here and would travel into
+  // an email link.
+  if (url.username !== "" || url.password !== "") return null;
+
+  // `url.origin` drops any path, query or fragment that was smuggled along.
+  return url.origin;
+}
+
 /** Builds the sign-in URL the middleware redirects to, preserving the target. */
 export function signInUrlFor(pathname: string, search = ""): string {
   const target = `${pathname}${search}`;

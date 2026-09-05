@@ -533,47 +533,73 @@ von Katalog- oder Sammlungs-UI (das ist V1.5).
 
 ---
 
-## 9.13 Bekannte Lücke: `signUp` wertet `data` nicht aus (Befund 2026-09-05)
+## 9.13 Die Signup-Antwort wird vollständig ausgewertet (Befund und Fix, 2026-09-05)
 
-`signUpAction` liest ausschließlich `error` aus `supabase.auth.signUp()`:
+**Vorher.** `signUpAction` las aus `supabase.auth.signUp()` ausschließlich `error`. `data` wurde
+nie betrachtet — weder `data.user` noch `data.user.identities`.
 
-```ts
-const { error } = await supabase.auth.signUp({ ... });
-if (error) return { error: signUpError(error) };
-redirect("/verify-email");
-```
+**Zwei Folgen.**
 
-`data` wird nie betrachtet — weder `data.user`, noch `data.session`, noch `data.user.identities`.
-Daraus folgt zweierlei.
+**1. `error: null` war nie ein Erfolgsnachweis.** Ein erfolgreicher Aufruf endet in `redirect()`,
+das eine Ausnahme wirft; die Aktion **gibt bei Erfolg gar keinen Zustand zurück**. Ein
+`{"error":null}` im Server-Log ist der Startwert von `useActionState`. Steht dort eine
+Fehlermeldung, hat sie der **vorige** Versuch erzeugt — beim Lesen der Logs leicht zu verwechseln.
 
-**1. `error: null` ist kein Erfolgsnachweis.** Ein erfolgreicher Aufruf endet in `redirect()`,
-das eine Ausnahme wirft; die Aktion **gibt bei Erfolg gar keinen Zustand zurück**. Das
-`{"error":null}` im Server-Log ist der Startwert von `useActionState`, nicht das Ergebnis.
-Erscheint es als *erstes Argument* eines Aufrufs, heißt das nur „dies ist der erste Versuch";
-steht dort eine Fehlermeldung, hat der **vorige** Versuch sie erzeugt.
+**2. Eine bereits registrierte Adresse war von einer neuen nicht zu unterscheiden.** Bei
+aktivierter E-Mail-Bestätigung antwortet Supabase auf eine Registrierung mit vorhandener Adresse
+absichtlich **ohne Fehler** und liefert einen Benutzer mit **leerem `identities`-Array**. Das ist
+Supabases Schutz gegen Konto-Enumeration und richtig — die Oberfläche schickte den Besucher
+dann aber auf „Prüfe dein Postfach", obwohl **keine Mail** kommt.
 
-**2. Ein bereits registriertes Konto ist von einer echten Neuanmeldung nicht zu unterscheiden.**
-Verlangt ein Projekt E-Mail-Bestätigung, antwortet Supabase auf eine Registrierung mit
-vorhandener Adresse absichtlich **ohne Fehler** und liefert stattdessen einen Benutzer mit
-**leerem `identities`-Array**. Das ist Supabases Schutz gegen Konto-Enumeration und aus
-Sicherheitssicht richtig — aber die Oberfläche schickt den Besucher dann auf „Prüfe dein
-Postfach", obwohl **keine Mail** kommt. Für die betroffene Person sieht ein Fehlschlag wie ein
-Erfolg aus.
+Kein Rechte- oder Sitzungsproblem: Es entstand keine Sitzung, kein Konto, keine Berechtigung.
+Ein **UX-Fehler**, der wie ein Auth-Fehler aussieht.
 
-**Sicherheitsbewertung:** kein Rechte- oder Sitzungsproblem. Es entsteht keine Sitzung, kein
-Konto, keine Berechtigung. Es ist ein **UX-Fehler**, der wie ein Auth-Fehler aussieht — und
-genau deshalb beim Support teuer wird.
+### Was jetzt entscheidet
 
-**Noch nicht behoben.** Die Korrektur gehört zu einem eigenen Auth-Schritt, nicht in die
-Shop-Arbeit. Richtung: `data` auswerten, den Fall „leere `identities`" erkennen und eine
-Meldung zeigen, die **weder** ein Konto bestätigt **noch** einen Erfolg vortäuscht — etwa der
-Hinweis, dass bei bestehendem Konto eine Anmeldung oder ein Passwort-Reset der richtige Weg
-ist. Die Meldung darf die Enumerationsfreiheit aus Abschnitt 6 nicht aufgeben.
+`signUpOutcome(data, error)` in `src/lib/auth/errors.ts` — eine reine Funktion, `null` heißt
+„darf auf `/verify-email`":
 
-**Zweiter, kleinerer Befund:** Das versteckte `origin`-Feld in `AuthForm` rendert
-serverseitig als leerer String und wird erst bei der Hydration gesetzt. Ein Absenden vor
-abgeschlossener Hydration schickt `origin=""` und damit ein relatives `emailRedirectTo`.
-Bisher nicht beobachtet, aber dieselbe Klasse von Problem.
+| Antwort von Supabase | Ergebnis |
+|---|---|
+| `error` gesetzt | bisherige Übersetzung über `signUpError` — 429 bleibt „Zu viele Versuche…" |
+| kein `error`, `user` vorhanden, `identities` nicht leer | **Erfolg** → `/verify-email` |
+| kein `error`, `user` vorhanden, `identities` ist `[]` | neutrale Meldung, **kein** Erfolg |
+| kein `error`, kein `user` | generischer Fehler, **kein** Erfolg |
+
+**Eine fehlende Session ist ausdrücklich kein Fehler.** Bei aktivierter Bestätigung ist genau das
+die Form des Erfolgs; `data.session` wird deshalb nicht geprüft.
+
+**`identities` fehlt ≠ `identities` ist leer.** Nur ein vorhandenes, leeres Array zählt; ein
+nicht mitgeliefertes Feld würde sonst echte Registrierungen abweisen.
+
+**Die Meldung bestätigt kein Konto:** „Die Registrierung konnte nicht abgeschlossen werden.
+Falls du hier schon ein Konto hast, melde dich an oder setze dein Passwort zurück."
+Sie passt auf jede der beiden Ursachen und verrät keine, bleibt aber handlungsfähig. Die
+Enumerationsfreiheit aus Abschnitt 6 bleibt damit erhalten.
+
+### Origin: entschärft, nicht endgültig gelöst
+
+Das versteckte `origin`-Feld in `AuthForm` rendert serverseitig als leerer String und wird erst
+bei der Hydration gesetzt — im ausgelieferten HTML steht nachweislich `name="origin" value=""`.
+Ein Absenden davor erzeugte ein **relatives** `emailRedirectTo` (`"/auth/callback"`).
+
+`safeOrigin()` in `src/lib/auth/redirect.ts` normalisiert den Wert jetzt und liefert `null` für
+alles, was kein einfacher http(s)-Origin ist — leer, relativ, protokoll-relativ, mit
+Zugangsdaten, mit angehängtem Pfad. Ist er `null`, wird die Redirect-Option **weggelassen**
+statt kaputt gesendet; Supabase nimmt dann die in der Konsole konfigurierte Site URL, wo auch
+die Redirect-Allowlist liegt. Das gilt für Registrierung **und** Passwort-Reset.
+
+Der Wert kommt weiterhin vom Client und wird deshalb nur noch als Vorschlag behandelt, nie
+ungeprüft. **Die saubere Lösung wäre eine konfigurierte Site-URL** statt eines Formularfelds;
+das berührt Umgebungsvariablen und das noch nicht eingerichtete Deployment und bleibt daher ein
+eigener Schritt (`docs/ROADMAP.md`, V1.7).
+
+### Was unverändert bleibt
+
+Der Ablauf ist derselbe: `/register` → `signUp` → Bestätigungsmail → `/auth/callback` →
+Onboarding. Der **Geschäftsaccount durchläuft genau diesen Weg wie jeder andere Nutzer** — keine
+Sonderbehandlung, keine zweite Registrierung, keine hart codierte Adresse. Das Rate-Limit-Verhalten
+ist unverändert, es gibt keine automatischen Wiederholungen.
 
 ## 10. Offene Punkte
 

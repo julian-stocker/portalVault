@@ -4,6 +4,7 @@ import {
   DEFAULT_SIGNED_IN_PATH,
   ONBOARDING_PATH,
   destinationAfterSignIn,
+  safeOrigin,
   safeRedirect,
   signInUrlFor,
 } from "./redirect.ts";
@@ -89,5 +90,37 @@ describe("signInUrlFor", () => {
   it("does not add a pointless next for the home page or the login page itself", () => {
     expect(signInUrlFor("/")).toBe("/login");
     expect(signInUrlFor("/login")).toBe("/login");
+  });
+});
+
+describe("safeOrigin", () => {
+  it("keeps a normal origin", () => {
+    expect(safeOrigin("https://skyisles.example")).toBe("https://skyisles.example");
+    expect(safeOrigin("http://localhost:3000")).toBe("http://localhost:3000");
+  });
+
+  it("reports nothing for the empty value a form sends before hydration", () => {
+    // The hidden field renders as "" on the server. Passing that through built
+    // a relative emailRedirectTo; the caller now omits the option instead.
+    expect(safeOrigin("")).toBeNull();
+    expect(safeOrigin(null)).toBeNull();
+    expect(safeOrigin(undefined)).toBeNull();
+    expect(safeOrigin("   ")).toBeNull();
+  });
+
+  it("rejects anything that is not an http(s) origin", () => {
+    expect(safeOrigin("/auth/callback")).toBeNull();
+    expect(safeOrigin("//evil.example")).toBeNull();
+    expect(safeOrigin("javascript:alert(1)")).toBeNull();
+    expect(safeOrigin("data:text/html,x")).toBeNull();
+    expect(safeOrigin("ftp://example.com")).toBeNull();
+  });
+
+  it("rejects credentials, which would travel into an email link", () => {
+    expect(safeOrigin("https://user:pass@evil.example")).toBeNull();
+  });
+
+  it("drops a smuggled path, query or fragment", () => {
+    expect(safeOrigin("https://skyisles.example/evil?a=1#b")).toBe("https://skyisles.example");
   });
 });
