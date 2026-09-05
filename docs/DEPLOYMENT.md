@@ -2,8 +2,12 @@
 
 Wie SkyIsles öffentlich erreichbar wird — und was dabei **nicht** mitfliegt.
 
-Stand: 2026-09-06. Aktuelle Stufe: **temporäre Testadresse auf `*.vercel.app`**,
-kein offizieller Start, `skyisles.de` noch nicht verbunden.
+Stand: 2026-09-06. Aktuelle Stufe: **temporäre Testadresse**
+
+    https://portal-vault-lovat.vercel.app
+
+Production-Deployment vom Branch `main`. Kein offizieller Start, `skyisles.de`
+noch nicht verbunden — die endgültige Domain ist weiterhin offen.
 
 ---
 
@@ -61,13 +65,16 @@ Einzutragen unter **Authentication → URL Configuration**:
 
 | Feld | Wert |
 |---|---|
-| Site URL | `https://<projekt>.vercel.app` |
-| Redirect URLs | `https://<projekt>.vercel.app/**` |
+| Site URL | `https://portal-vault-lovat.vercel.app` |
+| Redirect URLs | `https://portal-vault-lovat.vercel.app/**` |
 | Redirect URLs | `http://localhost:3000/**` |
 
 Die Site URL ist der Rückfall, wenn die App keine gültige Origin mitschickt
 (Formular ohne Hydration). Sie zeigt deshalb auf die Testadresse, nicht auf
 localhost. Der localhost-Eintrag hält die lokale Entwicklung am Leben.
+
+Sollte der Reset-Link am Query-String scheitern, zusätzlich exakt
+`https://portal-vault-lovat.vercel.app/auth/callback` eintragen.
 
 Beim späteren Wechsel auf `skyisles.de` kommt die neue Domain hinzu, und die
 Site URL wandert dorthin; der `vercel.app`-Eintrag darf bleiben oder gehen.
@@ -112,8 +119,9 @@ Deployments, nicht auf Production. Deshalb muss es aus der App kommen.
 ## Deployment-Prozess
 
 **Production von `main`, keine Previews als Testadresse.** Vercel gibt einem
-Production-Deployment eine stabile Adresse (`https://<projekt>.vercel.app`),
-die bei jedem Push auf `main` aktualisiert wird. Preview-URLs enthalten den
+Production-Deployment eine stabile Adresse — hier
+`https://portal-vault-lovat.vercel.app` — die bei jedem Push auf `main`
+automatisch neu gebaut wird. Preview-URLs enthalten den
 Commit-Hash, ändern sich also bei jedem Push, und Vercel schützt sie
 standardmäßig hinter einer Anmeldung — beides ist für „auf dem Handy öffnen"
 das Falsche.

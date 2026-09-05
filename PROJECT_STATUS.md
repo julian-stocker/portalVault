@@ -62,8 +62,9 @@ wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei null
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
 **Deployment vorbereitet (2026-09-06).** Das Repository ist bereit für ein erstes Vercel-Deployment
-auf eine temporäre `*.vercel.app`-Testadresse (Production von `main`, damit die Adresse stabil
-bleibt). Keine hartkodierten Entwicklungsadressen im Anwendungscode: Auth-Rücksprünge entstehen
+auf eine temporäre Testadresse. Sie läuft seit 2026-09-06 unter
+`https://portal-vault-lovat.vercel.app` als Production-Deployment von `main`, damit die Adresse
+stabil bleibt. Keine hartkodierten Entwicklungsadressen im Anwendungscode: Auth-Rücksprünge entstehen
 zur Laufzeit aus der Origin (`safeOrigin()`), Redirects im Callback und in der Middleware sind
 relativ. Vercel braucht **nur** `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
 der Service-Role-Key wird von keinem ausgelieferten Codepfad gelesen und bleibt lokal.
