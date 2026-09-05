@@ -626,6 +626,30 @@ SKY-ID-Unveränderlichkeit.
 - ~~Benutzernamenänderung~~ — **entschieden (ADR-0016)**: erlaubt. `username` ist nie Schlüssel,
   die UUID ist die Identität. Eine Sperrfrist ist keine V1-Anforderung.
 - ~~Slug-Kollisionsregel~~ — **entschieden (ADR-0011)**, an den echten Daten verifiziert.
+### Sammlungssemantik (Phase H, 2026-09-05)
+
+Vier Regeln, alle in `src/lib/collection/` implementiert und getestet:
+
+| Frage | Antwort |
+|---|---|
+| **Besitz** | eine Zeile in `collection_items` mit `quantity >= 1`. „Besitzt nicht" heißt: keine Zeile. `quantity = 0` wird nie gespeichert (CHECK). |
+| **Fortschritt** | zählt eine SKY-ID **einmal**, egal wie viele Exemplare. Drei Drobots sind eine Figur von 561, nicht drei. |
+| **Sammlungswert** | zählt **jedes Exemplar**: `market_price × quantity`. Ohne Marktpreis fließt eine Figur nicht mit 0 € ein, sondern gar nicht — und wird separat ausgewiesen (ADR-0010). |
+| **Duplikat** | `quantity > 1`. Das ist eine reine Bestandsaussage — kein Verkaufs-, Tausch- oder Shopstatus (ADR-0032). |
+
+**Zähler und Nenner beschreiben dieselbe Menge.** Der Nenner sind die aktiven,
+sammelbaren Figuren (561). Deshalb zählt `countedFigures` im Zähler nur aktive Figuren; eine
+besessene, nicht mehr aktive Figur bleibt in der Sammlung und in `distinctFigures`, könnte den
+Fortschritt aber sonst über 100 % treiben. Software zählt nirgends mit (ADR-0029) und bekommt
+auch keine Karte — sie wird als Hinweiszeile ausgewiesen.
+
+**Entfernen und Rückgängig.** Entfernen löscht die ganze Zeile, auch bei `quantity > 1`.
+Damit „Rückgängig" nicht stillschweigend auf 1 zurückfällt, nennt die Server Action jetzt
+optional die Menge: `setCollected(skyId, true, 4)`. Das bleibt ein Zielzustand und keine
+Umschaltung — „gesammelt, vier Stück" ist genauso wiederholbar wie „gesammelt". Ohne Angabe
+verhält sich der Aufruf wie bisher und lässt eine bestehende Menge unangetastet, damit ein
+doppelter Tipp im Katalog keinen Zähler zurücksetzt.
+
 - **OPEN:** Reicht die Obergrenze `quantity <= 10000`? Sie ist als Schutz gegen einen
   fehlerhaften Client gedacht, nicht als fachliche Grenze.
 - **OPEN:** Wie wird die spätere Shop-Admin-Berechtigung getragen und vergeben? Fest steht nur,

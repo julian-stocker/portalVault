@@ -9,8 +9,18 @@ import { isCollectible } from "@/lib/catalog/collectible";
 import type { CollectionEntry } from "@/lib/catalog/types";
 
 export type CollectionStats = {
-  /** Distinct figures owned, regardless of quantity. */
+  /** Distinct collectibles owned, regardless of quantity. */
   distinctFigures: number;
+  /**
+   * Owned collectibles that the catalog currently offers — the numerator of
+   * the progress.
+   *
+   * Differs from `distinctFigures` only for figures that left the catalog.
+   * They stay in the collection and stay counted in `distinctFigures`, but
+   * the denominator counts active collectibles only, so including them here
+   * could push completion past 100 %.
+   */
+  countedFigures: number;
   /** Total pieces owned, quantities included. */
   totalPieces: number;
   /** Active figures in the catalog — the denominator of the progress. */
@@ -32,14 +42,23 @@ function roundToCents(value: number): number {
 }
 
 /**
- * `quantity` is honoured from the start, even though V1.5 has no UI for it
- * (ADR-0027). When quantities arrive in V1.6 the value is already right.
+ * Two rules decide every number here:
+ *
+ *   completion counts a SKY-ID once, however many copies are owned — three
+ *   Drobots are one figure out of 561, not three;
+ *
+ *   value counts every copy, because owning three of them is worth three
+ *   times as much.
+ *
+ * A collectible without a market price is left out of the sum and reported in
+ * `withoutPrice` instead. It is never treated as 0 € (ADR-0010).
  */
 export function collectionStats(
   entries: readonly CollectionEntry[],
   catalogTotal: number,
 ): CollectionStats {
   let distinctFigures = 0;
+  let countedFigures = 0;
   let totalPieces = 0;
   let estimatedValue = 0;
   let withoutPrice = 0;
@@ -56,6 +75,7 @@ export function collectionStats(
     }
 
     distinctFigures += 1;
+    if (entry.figure.isActive) countedFigures += 1;
     totalPieces += entry.quantity;
     if (entry.figure.marketPrice === null) {
       withoutPrice += 1;
@@ -67,9 +87,10 @@ export function collectionStats(
 
   return {
     distinctFigures,
+    countedFigures,
     totalPieces,
     catalogTotal,
-    progress: catalogTotal > 0 ? distinctFigures / catalogTotal : 0,
+    progress: catalogTotal > 0 ? countedFigures / catalogTotal : 0,
     estimatedValue: roundToCents(estimatedValue),
     withoutPrice,
     inactiveOwned,

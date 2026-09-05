@@ -1164,9 +1164,12 @@ Hinweise („ohne Preis", „nicht mehr erhältlich") entstehen in `CollectionVi
 Ansicht und neu geladene Seite können deshalb nicht auseinanderlaufen. Scheitert der
 Serveraufruf, wird die Karte zurückgesetzt und ein Fehler an der Schaltfläche angezeigt.
 
-**Bekannte Grenze.** Ein „Rückgängig" fügt mit `quantity: 1` wieder ein. Bei einer Figur mit
-`quantity > 1` ginge die Menge verloren. Heute existiert keine solche Zeile und V1.5 hat keine
-Mengen-UI — **mit der Mengen-UI in V1.6 muss das mit gelöst werden.**
+**~~Bekannte Grenze~~ — behoben (2026-09-05).** Ein „Rückgängig" fügte mit `quantity: 1`
+wieder ein und hätte die Menge verloren. `setCollected` nimmt jetzt optional die Menge entgegen,
+und der Sammlungsbereich reicht die ursprüngliche durch. Das bleibt ein Zielzustand: „gesammelt,
+vier Stück" ist so wiederholbar wie „gesammelt". Ohne Mengenangabe verhält sich der Aufruf
+unverändert, damit ein doppelter Tipp im Katalog keinen Zähler zurücksetzt. Semantik in
+`docs/DATABASE.md`.
 
 **Verworfen:** Bestätigungsdialog (bestraft den Normalfall) · Toast mit Undo (verschwindet
 nach Sekunden, auf dem Handy leicht zu verpassen) · sofortiges Ausblenden der Karte (nimmt dem

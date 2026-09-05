@@ -28,6 +28,7 @@ export function FigureCard({
   action,
   highlighted = false,
   collected = false,
+  quantity,
 }: {
   figure: CatalogFigure;
   action?: ReactNode;
@@ -37,6 +38,11 @@ export function FigureCard({
    * neither reads nor writes anything — it only shows what it is given.
    */
   collected?: boolean;
+  /**
+   * How many are owned. Only shown above one: a "1×" on every card would be
+   * noise, and the check badge already says "owned".
+   */
+  quantity?: number;
 }) {
   return (
     /* h-full + flex-col so a row of cards ends at the same height, and the
@@ -71,6 +77,12 @@ export function FigureCard({
             <span className="absolute top-1.5 right-1.5 rounded-full bg-on-plate/90 px-1.5 py-0.5 text-[11px] leading-none font-medium text-plate">
               <span aria-hidden="true">✓</span>
               <span className="sr-only">{de.catalog.collectedBadge}</span>
+              {quantity !== undefined && quantity > 1 ? (
+                <span className="ml-1 tabular-nums">
+                  <span aria-hidden="true">{quantity}×</span>
+                  <span className="sr-only">, {de.collection.copies(quantity)}</span>
+                </span>
+              ) : null}
             </span>
           ) : null}
         </div>

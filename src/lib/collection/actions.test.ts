@@ -15,10 +15,21 @@ import { setCollected } from "./actions.ts";
 // browser smoke test.
 describe("setCollected — the contract", () => {
   it("takes the desired end state, not a toggle", () => {
-    // Two parameters: which figure, and whether it should be collected.
-    // A toggle would take one, read the current state and flip it — which is
-    // exactly what races when two taps arrive together.
-    expect(setCollected.length).toBe(2);
+    // Which figure, whether it should be collected, and optionally how many.
+    // A toggle would take one argument, read the current state and flip it —
+    // which is exactly what races when two taps arrive together. The count is
+    // part of the end state, not an exception to it: "collected, four of
+    // them" is as repeatable as "collected".
+    expect(setCollected.length).toBe(3);
+  });
+
+  it("rejects a quantity that could not be a real count", async () => {
+    for (const bad of [0, -1, 1.5, Number.NaN, 10001]) {
+      await expect(setCollected("SKY-0028", true, bad)).resolves.toEqual({
+        ok: false,
+        reason: "invalid",
+      });
+    }
   });
 
   it("rejects anything that is not a SKY-ID before touching the database", async () => {

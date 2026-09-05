@@ -41,6 +41,13 @@ NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis d
 jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
 meldet 31/32 mit genau diesem Hinweis.
 
+**Collection Experience implementiert (Phase H, 2026-09-05).** `/collection` ist eine
+Sammlerübersicht statt einer Liste: Gesamtfortschritt, geschätzter Marktwert, Serienfortschritt
+für alle sechs Spiele, die Filter **Alle · Gesammelt · Fehlend · Duplikate** und alle 561
+Sammelobjekte — fehlende inbegriffen. Mengen werden ab 2 auf der Karte gezeigt.
+**Der V1.5-Fehler ist behoben:** „Rückgängig" nach dem Entfernen stellt die ursprüngliche Menge
+wieder her, nicht 1. Semantik vollständig in `docs/DATABASE.md` festgehalten.
+
 **Visual Pass Phase F implementiert (2026-09-05).** Der Katalog hat einen kompakten Kopf
 („Skylanders Katalog"), eine Serienleiste aus Kurzcodes — **alle sieben Tabs passen auf 360 px**,
 statt „Swap Forc…" als Dauerzustand —, eine Kontextzeile („Trap Team · 141 Figuren"), einen

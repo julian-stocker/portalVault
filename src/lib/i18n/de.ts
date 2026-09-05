@@ -84,10 +84,27 @@ export const de = {
 
   collection: {
     title: "Meine Sammlung",
+    overview: "Überblick",
+    seriesProgress: "Serienfortschritt",
+    statusFilter: "Sammlung filtern",
+    collectedOf: (owned: number, total: number) => `${owned} von ${total} gesammelt`,
+    complete: (percent: string) => `${percent} vollständig`,
+    resetFilters: "Filter zurücksetzen",
+    status: {
+      all: "Alle",
+      owned: "Gesammelt",
+      missing: "Fehlend",
+      duplicates: "Duplikate",
+    } as Record<string, string>,
+    noMatch: (status: string) =>
+      status === "duplicates" ? "Keine Duplikate" : "Keine Figuren gefunden.",
+    noMatchHint: "Ändere Filter, Serie oder Suchbegriff.",
     distinctFigures: "Verschiedene Figuren",
     catalogTotal: "Figuren im Katalog",
     progress: "Fortschritt",
-    estimatedValue: "Geschätzter Sammlungswert",
+    // Summe der Referenz-Marktwerte der gesammelten Exemplare — kein Kauf-,
+    // Verkaufs- oder Versicherungswert (ADR-0033).
+    estimatedValue: "Geschätzter Marktwert",
     withoutPrice: (count: number) =>
       count === 1
         ? "1 Figur ohne Marktpreis ist nicht in der Summe enthalten."
@@ -100,13 +117,15 @@ export const de = {
       count === 1
         ? "1 Figur in deiner Sammlung ist nicht mehr im Katalog."
         : `${count} Figuren in deiner Sammlung sind nicht mehr im Katalog.`,
+    /** Screenreader-Text der Mengenangabe auf der Karte. */
+    copies: (count: number) => `${count} Exemplare`,
     remove: "Entfernen",
     removeLabel: (name: string) => `${name} aus der Sammlung entfernen`,
     removed: "Entfernt",
     undo: "Rückgängig",
     removeFailed: "Konnte nicht entfernt werden.",
-    empty: "Deine Sammlung ist noch leer.",
-    emptyHint: "Öffne den Katalog und tippe die Figuren an, die du besitzt.",
+    empty: "Noch keine Figuren gesammelt",
+    emptyHint: "Wechsle auf „Alle“ — der ganze Katalog steht schon hier, tippe bei einer Figur auf „+ Sammlung“.",
     emptyAction: "Zum Katalog",
   },
 
