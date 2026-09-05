@@ -21,6 +21,7 @@ import {
   ACTION_CONFIRMED,
   ACTION_NEUTRAL,
   ACTION_PENDING,
+  ACTION_PRIMARY,
 } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import { de } from "@/lib/i18n/de";
@@ -30,9 +31,23 @@ type Props = {
   initialCollected: boolean;
   /** null when nobody is signed in; then this renders as a sign-in link. */
   signInHref: string | null;
+  /**
+   * Where the button sits.
+   *
+   * "card" is neutral, because the same button repeats on up to 561 cards.
+   * "page" is the accent: a detail page has exactly one thing to do, and
+   * that is what the accent was reserved for (ADR-0035).
+   */
+  variant?: "card" | "page";
 };
 
-export function CollectButton({ skyId, initialCollected, signInHref }: Props) {
+export function CollectButton({
+  skyId,
+  initialCollected,
+  signInHref,
+  variant = "card",
+}: Props) {
+  const idle = variant === "page" ? ACTION_PRIMARY : ACTION_NEUTRAL;
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -41,7 +56,7 @@ export function CollectButton({ skyId, initialCollected, signInHref }: Props) {
     // Same intent, same affordance: a visitor should not have to learn that
     // this button looks different before they have an account.
     return (
-      <Link href={signInHref} className={ACTION_NEUTRAL}>
+      <Link href={signInHref} className={idle}>
         {de.catalog.collectSignedOut}
       </Link>
     );
@@ -71,7 +86,7 @@ export function CollectButton({ skyId, initialCollected, signInHref }: Props) {
         aria-pressed={collected}
         // Not disabled while pending, on purpose — see ACTION_PENDING.
         aria-busy={pending || undefined}
-        className={`${collected ? ACTION_CONFIRMED : ACTION_NEUTRAL} ${pending ? ACTION_PENDING : ""}`}
+        className={`${collected ? ACTION_CONFIRMED : idle} ${pending ? ACTION_PENDING : ""}`}
       >
         {collected ? de.catalog.collected : de.catalog.collect}
       </button>

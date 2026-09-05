@@ -51,18 +51,23 @@ export const de = {
     backToCatalog: "Zurück zum Katalog",
     marketValue: "Marktwert",
     series: "Serie",
+    /** Screenreader-Vorspann für die SKY-ID auf der Detailseite. */
+    reference: "Sammlerreferenz",
   },
 
   character: {
     heading: "Charakter",
     element: "Element",
     species: "Spezies",
-    role: "Rolle",
+    // Nicht "Rolle": Mini Jini erschien zuerst als Sidekick und später als
+    // Mini. Gespeichert ist die Debütrolle des Charakters, nicht die des
+    // Sammelobjekts (ADR-0034).
+    role: "Ursprüngliche Rolle",
     // Deliberately not "Debüt": the value is derived from the linked figures
     // and answers which series brought the first figure. Kaos exists since
     // 2011 but his first figure is from Imaginators (ADR-0034).
     firstRelease: "Erste Figur",
-    related: "Weitere Figuren dieses Charakters",
+    related: "Weitere Versionen",
     source: (label: string) => `Quelle: ${label}`,
     verified: (date: string) => `geprüft am ${date}`,
     roles: {
