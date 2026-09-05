@@ -1,4 +1,5 @@
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
+import { WorldZone } from "@/components/layout/world-zone";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -10,7 +11,11 @@ export default async function PublicLayout({ children }: { children: React.React
   const { data } = await supabase.auth.getUser();
 
   return (
-    <div className="min-h-screen">
+    <div className="relative min-h-screen">
+      {/* The world starts behind the header, not below it (ADR-0038, V3.3).
+          Owned by the layout so it survives navigation between the two
+          route groups. */}
+      <WorldZone />
       <SiteNav signedIn={Boolean(data.user)} />
       {children}
       <NavSpacer />

@@ -21,14 +21,12 @@
  */
 "use client";
 
-import { useState, useTransition } from "react";
-
 import {
   ACTION_CARD,
   ACTION_OWNED,
   ACTION_PENDING,
 } from "@/components/ui/action";
-import { setCollected } from "@/lib/collection/actions";
+import { useCollectionMutation } from "@/components/collection/use-collection-mutation";
 import { de } from "@/lib/i18n/de";
 
 export function CollectionAction({
@@ -46,31 +44,10 @@ export function CollectionAction({
   initialQuantity: number;
   onQuantityChange: (skyId: string, quantity: number) => void;
 }) {
-  const [failed, setFailed] = useState(false);
-  const [pending, startTransition] = useTransition();
+  const { apply, pending, failed } = useCollectionMutation(skyId, quantity, onQuantityChange);
 
   const owned = quantity > 0;
   const justRemoved = !owned && initialQuantity > 0;
-
-  function apply(nextQuantity: number) {
-    const previous = quantity;
-    onQuantityChange(skyId, nextQuantity); // optimistic
-    setFailed(false);
-
-    startTransition(async () => {
-      const result =
-        nextQuantity > 0
-          ? // State the count, not just "owned": that is what brings a
-            // removed row of four back as four.
-            await setCollected(skyId, true, nextQuantity)
-          : await setCollected(skyId, false);
-
-      if (!result.ok) {
-        onQuantityChange(skyId, previous); // a wrong state is worse than an error
-        setFailed(true);
-      }
-    });
-  }
 
   const label = owned
     ? de.collection.remove

@@ -37,12 +37,29 @@ export const ELEMENT_LABELS: Readonly<Record<Element, string>> = {
 };
 
 /**
- * The element's text colour, and the only place its colour is used since V2
- * (ADR-0038). The 2 px card cap is gone: colour on its own said what the
- * label beside it already says in words, and on a borderless card it read as
- * a stray line rather than as identity.
+ * The element's colour on the ivory collectible card.
+ *
+ * Two scales exist because there are two grounds (ADR-0038, V3): `ink` is
+ * tuned for the card and the plate, the plain names for dark panels. Neither
+ * follows the colour scheme, because neither of their grounds does.
+ *
+ * Colour is never the only signal — the label always names the element.
  */
 const CHIP: Readonly<Record<Element, string>> = {
+  Magic: "text-element-ink-magic",
+  Tech: "text-element-ink-tech",
+  Water: "text-element-ink-water",
+  Fire: "text-element-ink-fire",
+  Life: "text-element-ink-life",
+  Undead: "text-element-ink-undead",
+  Earth: "text-element-ink-earth",
+  Air: "text-element-ink-air",
+  Light: "text-element-ink-light",
+  Dark: "text-element-ink-dark",
+};
+
+/** The same ten, tuned for the dark panels: detail page, character panel. */
+const PANEL: Readonly<Record<Element, string>> = {
   Magic: "text-element-magic",
   Tech: "text-element-tech",
   Water: "text-element-water",
@@ -71,6 +88,12 @@ export function elementLabel(element: Element): string {
   return ELEMENT_LABELS[element];
 }
 
+/** On the ivory card. */
 export function elementChipClass(element: Element): string {
   return CHIP[element];
+}
+
+/** On a dark panel — the detail page and the character panel. */
+export function elementPanelClass(element: Element): string {
+  return PANEL[element];
 }

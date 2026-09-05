@@ -12,8 +12,10 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { CatalogCard } from "@/components/catalog/catalog-card";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
+import { OwnedToggle } from "@/components/catalog/owned-toggle";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
-import { filterFigures } from "@/lib/catalog/search";
+import { filterFigures, groupSearchResults, ownedFigures } from "@/lib/catalog/search";
+import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { de } from "@/lib/i18n/de";
@@ -44,9 +46,44 @@ export function CatalogView({
   const deferredQuery = useDeferredValue(query);
 
   const owned = useMemo(() => new Set(ownedSkyIds), [ownedSkyIds]);
+  const searching = deferredQuery.trim() !== "";
+
+  /**
+   * "In Besitz": display only (ADR-0038, V4.2). Off by default — the catalog
+   * is the catalog first — and never offered signed out, where it has no
+   * answer.
+   */
+  const [ownedOnly, setOwnedOnly] = useState(false);
+
+  /**
+   * The pool everything else works from.
+   *
+   * Narrowing here rather than inside the search means the filter applies to
+   * the grid and to the cross-series results by construction: there is no
+   * second code path that could forget it.
+   */
+  const pool = useMemo(
+    () => (ownedOnly ? ownedFigures(figures, owned) : figures),
+    [ownedOnly, figures, owned],
+  );
+
   const visible = useMemo(
-    () => filterFigures(figures, { query: deferredQuery, seriesCode }),
-    [figures, deferredQuery, seriesCode],
+    () => filterFigures(pool, { query: deferredQuery, seriesCode }),
+    [pool, deferredQuery, seriesCode],
+  );
+
+  /**
+   * While searching, the whole catalog answers — the active game first, the
+   * others as their own sections below it (ADR-0038, V4.1). The tab does not
+   * move: clearing the search has to return the visitor to the view they
+   * left, and a tab that changed itself would not.
+   */
+  const groups = useMemo(
+    () =>
+      searching
+        ? groupSearchResults(pool, { query: deferredQuery, seriesCode, series })
+        : null,
+    [searching, pool, deferredQuery, seriesCode, series],
   );
 
   /**
@@ -63,30 +100,43 @@ export function CatalogView({
   }
 
   const activeSeries = series.find((option) => option.code === seriesCode) ?? null;
-  // Only the search is resettable now — a series is always chosen, so
-  // "clear the series" is not a state the catalog can be in.
-  const filtered = query.trim() !== "";
+  // The series is not resettable — one is always chosen — so what is left is
+  // the search box and the ownership filter.
+  const filtered = query.trim() !== "" || ownedOnly;
 
   function reset() {
     setQuery("");
+    setOwnedOnly(false);
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-7">
       {/*
-       * The catalog tools.
+       * The intro. No panel and no picture of its own (ADR-0038, V3.3): the
+       * world is already behind this whole block, painted by the layout's
+       * WorldZone, so anything with a ground here would cut a rectangle out
+       * of it. The title carries its own shadow instead.
        *
-       * Sticky from `md:` upwards only: on a desktop the figure grid runs far
-       * past the fold, and losing the search on the way down is the actual
-       * annoyance. On a phone the same bar would eat a fifth of the viewport
-       * for the whole scroll, so it stays put there.
+       * The column is capped at half the width on desktop so it never
+       * reaches the portal on the right.
        */}
-      <div className="flex flex-col gap-3 md:sticky md:top-0 md:z-10 md:-mx-4 md:bg-canvas md:px-4 md:pt-4 md:pb-3">
+      <div className="md:max-w-[52%]">
+        <h1
+          className="text-3xl leading-tight font-semibold tracking-tight md:text-5xl"
+          style={{ textShadow: "0 2px 20px rgb(10 9 24 / 0.85), 0 1px 3px rgb(10 9 24 / 0.95)" }}
+        >
+          {de.catalog.heading}
+        </h1>
+        <p
+          className="mt-2 text-sm text-on-deep-muted md:text-base"
+          style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
+        >
+          {de.catalog.intro}
+        </p>
+
         <label className="sr-only" htmlFor="catalog-search">
           {de.catalog.searchLabel}
         </label>
-        {/* Filled rather than outlined: one less line on a page that had too
-            many, and the surface already separates it from the canvas. */}
         <input
           id="catalog-search"
           type="search"
@@ -95,27 +145,77 @@ export function CatalogView({
           onChange={(event) => setQuery(event.target.value)}
           placeholder={de.catalog.searchPlaceholder}
           className={
-            "min-h-11 w-full rounded-sky-md bg-surface px-3.5 py-2.5 text-base " +
-            "shadow-card placeholder:text-muted"
+            // A dark bar in the world, not a form field on a panel.
+            "mt-5 min-h-12 w-full rounded-full bg-deep/80 px-5 py-3 text-base " +
+            "shadow-raised ring-1 ring-border-strong/70 backdrop-blur-sm " +
+            "placeholder:text-muted focus:ring-accent/70"
           }
         />
+      </div>
+
+      {/* Still inside the world, at the point where it turns into the
+          vitrine — so there is no bright gap between the two. */}
+      <div className="flex flex-col gap-3">
         <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
 
         {/*
-         * The count, quietly. The series name is on the active tab now, so
-         * repeating it here would say the same thing twice.
+         * The section header (ADR-0038, V4.2): what is being shown on the
+         * left, what can be done about it on the right. The count line was
+         * already here; it gains the controls rather than a bar of its own,
+         * because a second bar under the tabs would read as a second
+         * navigation.
+         *
          * `aria-live` so a filter change is announced without moving focus.
+         *
+         * There is deliberately no "Specials" toggle. Nothing in the data
+         * says which figures are specials — deriving it from names would be
+         * guessing (ADR-0034) — so the control is absent rather than present
+         * and wrong.
          */}
-        <p className="text-sm text-muted" aria-live="polite">
-          {activeSeries
-            ? de.catalog.countInSeries(activeSeries.label, visible.length)
-            : de.catalog.figureCount(visible.length)}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p className="text-sm text-muted" aria-live="polite">
+            {searching
+              ? de.catalog.searchTotal(groups?.reduce((n, g) => n + g.figures.length, 0) ?? 0)
+              : activeSeries
+                ? de.catalog.countInSeries(activeSeries.label, visible.length)
+                : de.catalog.figureCount(visible.length)}
+          </p>
+          {signedIn ? <OwnedToggle active={ownedOnly} onChange={setOwnedOnly} /> : null}
+        </div>
       </div>
 
-      {visible.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface px-4 py-12 text-center shadow-card">
-          <p className="font-medium">{de.catalog.empty}</p>
+      {groups ? (
+        /* Searching: sections, the active game first. */
+        <div className="flex flex-col gap-9">
+          {groups.map((group) => (
+            <section key={group.code} className="flex flex-col gap-4">
+              <SeriesSectionHeader
+                label={group.label}
+                count={de.catalog.hitCount(group.figures.length)}
+              />
+              {group.figures.length === 0 ? (
+                <p className="text-sm text-muted">{de.catalog.noHitsHere}</p>
+              ) : (
+                <FigureGrid>
+                  {group.figures.map((figure) => (
+                    <CatalogCard
+                      key={figure.skyId}
+                      figure={figure}
+                      initialCollected={owned.has(figure.skyId)}
+                      signInHref={signedIn ? null : signInHref(figure.skyId)}
+                      highlighted={highlightSkyId === figure.skyId}
+                    />
+                  ))}
+                </FigureGrid>
+              )}
+            </section>
+          ))}
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
+          <p className="font-medium">
+            {ownedOnly && !searching ? de.catalog.ownedEmpty : de.catalog.empty}
+          </p>
           <p className="text-sm text-muted">{de.catalog.emptyHint}</p>
           {filtered ? (
             <button type="button" onClick={reset} className={`${ACTION_NEUTRAL} w-auto`}>

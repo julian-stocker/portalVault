@@ -16,7 +16,7 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState, useSyncExternalStore } from "react";
 
 import { FigureCard } from "@/components/catalog/figure-card";
 import { CollectionAction } from "@/components/collection/collection-action";
@@ -28,13 +28,29 @@ import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CatalogFigure, CollectionEntry, SeriesOption } from "@/lib/catalog/types";
 import { collectionStats } from "@/lib/collection/stats";
 import { FigureGrid } from "@/components/catalog/figure-grid";
+import { CollectionTable } from "@/components/collection/collection-table";
+import { SeriesSectionHeader } from "@/components/collection/series-section";
+import { ViewToggle } from "@/components/collection/view-toggle";
+import {
+  readViewMode,
+  serverViewMode,
+  subscribeViewMode,
+  writeViewMode,
+  type ViewMode,
+} from "@/components/collection/view-mode";
+import { FilterMenu } from "@/components/collection/filter-menu";
 import {
   COLLECTION_ALL,
-  COLLECTION_DUPLICATES,
+  NO_FILTERS,
   buildCollectionRows,
-  matchesCollectionFilter,
+  duplicateSummary,
+  groupBySeries,
+  hasActiveFilter,
+  matchesFilters,
+  matchesScope,
   ownedEntries,
   segmentSummary,
+  type CollectionFilters,
 } from "@/lib/collection/view";
 import { de } from "@/lib/i18n/de";
 
@@ -53,8 +69,26 @@ export function CollectionView({
 
   /** Optimistic quantities, keyed by SKY-ID. Absent means "as the server said". */
   const [changed, setChanged] = useState<ReadonlyMap<string, number>>(new Map());
-  const [filter, setFilter] = useState<string>(COLLECTION_ALL);
+  /** The game being looked at — navigation, not a filter. */
+  const [scope, setScope] = useState<string>(COLLECTION_ALL);
+  /** What narrows it further. */
+  const [filters, setFilters] = useState<CollectionFilters>(NO_FILTERS);
   const [query, setQuery] = useState("");
+
+  /**
+   * Symbols or table.
+   *
+   * `useSyncExternalStore` rather than an effect: the remembered choice lives
+   * outside React, the server's answer differs from the browser's, and that
+   * is precisely what this hook is for. The server snapshot is the default,
+   * so the first paint matches what was rendered and React swaps in the
+   * stored value immediately after hydration — no mismatch, and no render
+   * triggered from inside another one.
+   */
+  const mode = useSyncExternalStore(subscribeViewMode, readViewMode, serverViewMode);
+  function selectMode(next: ViewMode) {
+    writeViewMode(next);
+  }
   const deferredQuery = useDeferredValue(query);
 
   function onQuantityChange(skyId: string, quantity: number) {
@@ -95,8 +129,14 @@ export function CollectionView({
   // Follows the tabs, never the search box: a summary that moved while you
   // typed would stop being a fact about the segment.
   const summary = useMemo(
-    () => segmentSummary(rows, filter, catalogTotal),
-    [rows, filter, catalogTotal],
+    () => segmentSummary(rows, scope, catalogTotal),
+    [rows, scope, catalogTotal],
+  );
+
+  // Only while the filter is on: an extra line, never a second summary.
+  const duplicates = useMemo(
+    () => (filters.duplicatesOnly ? duplicateSummary(rows, scope) : null),
+    [filters.duplicatesOnly, rows, scope],
   );
 
   const normalized = normalizeForSearch(deferredQuery);
@@ -116,17 +156,21 @@ export function CollectionView({
     return rows.filter(
       (row) =>
         (row.quantity > 0 || justRemoved.has(row.figure.skyId)) &&
-        matchesCollectionFilter(row, filter) &&
+        matchesScope(row, scope) &&
+        // A row kept for undo has dropped to zero and would fail the
+        // duplicates test; it stays so the undo does not vanish under the
+        // filter that was on when it was removed.
+        (justRemoved.has(row.figure.skyId) || matchesFilters(row, filters)) &&
         matchesQuery(row.figure, normalized),
     );
-  }, [rows, changed, filter, normalized]);
+  }, [rows, changed, scope, filters, normalized]);
 
-  // "Alle", the six games, then duplicates. One bar, because they answer the
-  // same question: which slice of my collection am I looking at.
-  const filterOptions: FilterOption[] = [
+  // "Alle" and the six games. Duplicates left this bar in V4.2: a duplicate
+  // is not a game, and putting it here made "Giants and duplicates"
+  // unreachable (ADR-0038).
+  const scopeOptions: FilterOption[] = [
     { value: COLLECTION_ALL, label: de.collection.filter.all },
     ...series.map((option) => ({ value: option.code, label: option.label })),
-    { value: COLLECTION_DUPLICATES, label: de.collection.filter.duplicates },
   ];
 
   // How many the segment holds before the search narrows it — so the count
@@ -136,29 +180,77 @@ export function CollectionView({
       rows.filter(
         (row) =>
           (row.quantity > 0 || changed.get(row.figure.skyId) === 0) &&
-          matchesCollectionFilter(row, filter),
+          matchesScope(row, scope) &&
+          matchesFilters(row, filters),
       ).length,
-    [rows, changed, filter],
+    [rows, changed, scope, filters],
   );
 
   const searching = query.trim() !== "";
-  const filtered = filter !== COLLECTION_ALL || searching;
+  /**
+   * The grouped view, or null for a flat one.
+   *
+   * "Alle" becomes six sections; a chosen series becomes exactly one. V4.1
+   * kept the heading for the single case as well — the same shape whichever
+   * tab is active, and the section states how far that game has come, which
+   * the tab does not.
+   *
+   * Duplicates stay flat: they are a cross-section of every game, so
+   * splitting them by game would scatter the very thing being looked at.
+   */
+  const sections = useMemo(
+    () => groupBySeries(visible, rows, series),
+    [visible, rows, series],
+  );
+
+  const filtered = hasActiveFilter(scope, query, filters);
   // `changed.size` keeps the empty state away while an undo is still on
   // screen: emptying the last card should not swap the grid out from under it.
   const nothingCollected = stats.distinctFigures === 0 && changed.size === 0;
 
   function reset() {
-    setFilter(COLLECTION_ALL);
+    setScope(COLLECTION_ALL);
+    setFilters(NO_FILTERS);
     setQuery("");
+  }
+
+  /** One card, however the view chose to arrange them. */
+  function showcaseCard(row: (typeof rows)[number]) {
+    return (
+      <FigureCard
+        key={row.figure.skyId}
+        figure={row.figure}
+        quantity={row.quantity}
+        // No ownership frame and no crown: everything on this page is owned,
+        // so marking every card would say nothing and would water down what
+        // the gold means in the catalog (ADR-0038). The card keeps its
+        // default `ownership="showcase"`.
+        footer={
+          <>
+            {row.quantity === 0 && row.initialQuantity > 0 ? (
+              <p className="mb-1 text-center text-xs text-muted">{de.collection.removed}</p>
+            ) : null}
+            <CollectionAction
+              skyId={row.figure.skyId}
+              name={row.figure.displayName}
+              quantity={row.quantity}
+              initialQuantity={row.initialQuantity}
+              onQuantityChange={onQuantityChange}
+            />
+          </>
+        }
+      />
+    );
   }
 
   return (
     <div className="flex flex-col gap-6">
       <CollectionOverview
         summary={summary}
+        duplicates={duplicates}
         stats={stats}
         segmentLabel={
-          filterOptions.find((option) => option.value === filter)?.label ??
+          scopeOptions.find((option) => option.value === scope)?.label ??
           de.collection.filter.all
         }
       />
@@ -166,7 +258,7 @@ export function CollectionView({
       {/* An empty showcase gets one clear way forward instead of a filter bar
           over nothing. */}
       {nothingCollected ? (
-        <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface px-4 py-12 text-center shadow-card">
+        <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
           <p className="font-medium">{de.collection.showcaseEmpty}</p>
           <p className="text-sm text-muted">{de.collection.showcaseEmptyHint}</p>
           <Link href="/" className={`${ACTION_NEUTRAL} w-auto`}>
@@ -176,12 +268,18 @@ export function CollectionView({
       ) : (
         <>
           <div className="flex flex-col gap-3">
-            <FilterBar
-              label={de.collection.statusFilter}
-              options={filterOptions}
-              active={filter}
-              onSelect={setFilter}
-            />
+            {/* Two controls, two jobs: the bar picks the game, the menu
+                narrows it. They share a row on a wide screen and stack on a
+                phone, where the bar needs the full width to scroll. */}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <FilterBar
+                label={de.collection.statusFilter}
+                options={scopeOptions}
+                active={scope}
+                onSelect={setScope}
+              />
+              <FilterMenu filters={filters} onChange={setFilters} />
+            </div>
 
             <label className="sr-only" htmlFor="collection-search">
               {de.catalog.searchLabel}
@@ -194,69 +292,72 @@ export function CollectionView({
               onChange={(event) => setQuery(event.target.value)}
               placeholder={de.catalog.searchPlaceholder}
               className={
-                "min-h-11 w-full rounded-sky-md bg-surface px-3.5 py-2.5 text-base " +
-                "shadow-card placeholder:text-muted"
+                "min-h-11 w-full rounded-sky-md bg-surface/80 px-3.5 py-2.5 text-base " +
+                "ring-1 ring-border/70 placeholder:text-muted focus:ring-border-strong"
               }
             />
 
-            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <p className="text-sm text-muted" aria-live="polite">
                 {searching
                   ? de.collection.searchCount(visible.length, inSegment)
                   : de.catalog.figureCount(visible.length)}
               </p>
-              {filtered ? (
-                <button
-                  type="button"
-                  onClick={reset}
-                  className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
-                >
-                  {de.collection.resetFilters}
-                </button>
-              ) : null}
+              <div className="flex items-center gap-4">
+                {filtered ? (
+                  <button
+                    type="button"
+                    onClick={reset}
+                    className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
+                  >
+                    {de.collection.resetFilters}
+                  </button>
+                ) : null}
+                <ViewToggle mode={mode} onSelect={selectMode} />
+              </div>
             </div>
           </div>
 
           {visible.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface px-4 py-12 text-center shadow-card">
-              <p className="font-medium">{de.collection.noMatch(filter)}</p>
+            <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
+              <p className="font-medium">{de.collection.noMatch(scope)}</p>
               <p className="text-sm text-muted">{de.collection.noMatchHint}</p>
-              <button type="button" onClick={reset} className={`${ACTION_NEUTRAL} w-auto`}>
-                {de.collection.resetFilters}
-              </button>
+              {/* Only when there is something to reset: an empty showcase with
+                  no filter set has nothing this button could undo. */}
+              {filtered ? (
+                <button type="button" onClick={reset} className={`${ACTION_NEUTRAL} w-auto`}>
+                  {de.collection.resetFilters}
+                </button>
+              ) : null}
             </div>
-          ) : (
-            /* Roomier than the catalog: this grid holds what someone owns,
-               and there is less of it, so the figures get more room. */
-            <FigureGrid dense={false}>
-              {visible.map((row) => (
-                <FigureCard
-                  key={row.figure.skyId}
-                  figure={row.figure}
-                  quantity={row.quantity}
-                  // No ownership frame: everything on this page is owned, so
-                  // marking every card would say nothing and would water down
-                  // what the frame means in the catalog (ADR-0038). The card
-                  // keeps its default `ownership="showcase"`.
-                  footer={
-                    <>
-                      {row.quantity === 0 && row.initialQuantity > 0 ? (
-                        <p className="mb-1 text-center text-xs text-muted">
-                          {de.collection.removed}
-                        </p>
-                      ) : null}
-                      <CollectionAction
-                        skyId={row.figure.skyId}
-                        name={row.figure.displayName}
-                        quantity={row.quantity}
-                        initialQuantity={row.initialQuantity}
-                        onQuantityChange={onQuantityChange}
-                      />
-                    </>
-                  }
-                />
+          ) : sections.length > 0 ? (
+            /* Always by game, whatever is selected (ADR-0038, V4.1): "Alle"
+               yields six sections, one game yields one, and the duplicates
+               filter yields whichever games hold duplicates. One structure
+               means the page does not rearrange itself under a filter. */
+            <div className="flex flex-col gap-9">
+              {sections.map((section) => (
+                <section key={section.code} className="flex flex-col gap-4">
+                  <SeriesSectionHeader
+                    label={section.label}
+                    owned={section.owned}
+                    total={section.total}
+                    ratio={section.ratio}
+                  />
+                  {mode === "table" ? (
+                    <CollectionTable rows={section.rows} onRemove={onQuantityChange} />
+                  ) : (
+                    <FigureGrid>{section.rows.map(showcaseCard)}</FigureGrid>
+                  )}
+                </section>
               ))}
-            </FigureGrid>
+            </div>
+          ) : mode === "table" ? (
+            /* Only reachable for rows no game claims — an owned figure whose
+               series left the catalog. Rare, but it must not vanish. */
+            <CollectionTable rows={visible} onRemove={onQuantityChange} />
+          ) : (
+            <FigureGrid dense={false}>{visible.map(showcaseCard)}</FigureGrid>
           )}
         </>
       )}

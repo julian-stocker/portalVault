@@ -1,38 +1,31 @@
 /**
- * The SkyIsles wordmark.
+ * The SkyIsles mark and wordmark.
  *
- * Type only — no image, no icon font, no additional typeface. The system
- * stack does the work; the character comes from a small monogram tile, weight
- * contrast inside the name and tight tracking.
+ * V4 replaced the "S" tile with the product's own emblem — a floating island
+ * with three peaks over an arc of sky, drawn as an SVG in
+ * `public/images/brand/skyisles-mark.svg`. It is ours: nothing in it comes
+ * from any franchise, and at under a kilobyte it stays sharp at header size.
  *
- * The monogram replaces the bare amber dot the header used to lead with. A
- * dot is not a mark: at 6 px it reads as a bullet point or a notification,
- * and it gave the header the look of an unbranded admin tool. A rounded tile
- * with the initial in it is the smallest thing that reads as a logo, and it
- * still costs no asset and no font.
- *
- * Deliberately not a fantasy script, a gradient or a glow: the figures are
- * the colourful part of SkyIsles, the frame around them is not.
+ * The name is set in the display serif rather than the interface sans. A
+ * collector's platform is allowed a little age in its wordmark, and the
+ * weight contrast — "Sky" solid, "Isles" lighter — gives it a shape of its
+ * own without a second file to download.
  */
 export function Wordmark({ className = "" }: { className?: string }) {
   return (
     <span className={`flex items-center gap-2.5 ${className}`}>
-      {/* aria-hidden: the name beside it already says SkyIsles, and a screen
-          reader announcing a stray "S" would be noise. */}
-      <span
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/images/brand/skyisles-mark.svg"
+        alt=""
         aria-hidden="true"
-        className={
-          "flex h-7 w-7 shrink-0 items-center justify-center rounded-sky-sm " +
-          "bg-accent text-[13px] leading-none font-bold text-on-accent"
-        }
-      >
-        S
-      </span>
-      {/* Weight contrast inside one word, so the name has a shape of its own
-          without a second typeface. */}
-      <span className="text-[17px] leading-none tracking-tight">
-        <span className="font-semibold">Sky</span>
-        <span className="font-normal">Isles</span>
+        width={32}
+        height={32}
+        className="h-7 w-7 shrink-0 md:h-8 md:w-8"
+      />
+      <span className="font-display text-[19px] leading-none tracking-tight md:text-[22px]">
+        <span className="font-semibold text-on-deep">Sky</span>
+        <span className="font-normal text-accent">Isles</span>
       </span>
     </span>
   );

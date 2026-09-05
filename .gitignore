@@ -66,3 +66,7 @@ yarn-error.log*
 # --- OS -------------------------------------------------------------------
 .DS_Store
 Thumbs.db
+
+# Source artwork. The shipped derivatives live in public/images/brand/ and are
+# committed; the multi-megabyte originals are kept out of the repository.
+/artwork/

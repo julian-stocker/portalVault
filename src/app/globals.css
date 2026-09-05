@@ -1,146 +1,185 @@
 @import "tailwindcss";
 
 /* ===========================================================================
-   SkyIsles — "Skylands Vitrine"
+   SkyIsles — Visual V3, "the Skylands at dusk"
    ---------------------------------------------------------------------------
-   A quiet collector surface. The figures carry the colour; the interface
-   stays out of their way.
+   V1 and V2 framed the figures on a warm off-white page. It read as a tidy
+   tool. V3 turns the page itself into the place the figures come from: a deep
+   sky with a warm horizon, islands in the distance, and the collectibles lit
+   in front of it.
 
-   The whole system follows from one property of the assets: the 475 figure
-   images are lossy WebP without an alpha channel, 640x640, photographed on
-   WHITE. That cannot be changed here — the masters live in the read-only
-   legacy project and the file names are the image identity (ADR-0009).
+   Two constants follow from the assets and stay true in BOTH colour schemes:
 
-   So the white is not fought, it is framed. `--plate` is a deliberately
-   light presentation surface in BOTH themes: in the dark theme a white
-   figure then reads as a lit display case rather than a stray white square.
+     --plate  the image stage. The 475 figure photographs are lossy WebP
+              without an alpha channel, shot on WHITE, and the masters live in
+              the read-only legacy project (ADR-0009). So the white is framed
+              rather than fought.
 
-   Element colours are defined here but deliberately used nowhere yet. They
-   are a later, secondary accent layer, driven only by curated
-   `characters.element` data — never derived from a name (ADR-0034).
+     --card   the collectible card. Ivory, always — a lit display piece in
+              front of a dark room. "Cards brighter than their surround" is
+              the whole composition, and a card that inverted with the theme
+              would take that away.
+
+   The colour scheme therefore no longer flips the world; it changes the hour.
+   Light preference is dusk, dark preference is night. Both are dark grounds,
+   both carry the same ivory cards, and the difference is atmosphere rather
+   than polarity (ADR-0038).
 
    Every value below was checked for contrast; the ratios are noted.
    =========================================================================== */
 
 :root {
-  color-scheme: light dark;
+  /*
+   * Dark in both preferences, on purpose.
+   *
+   * SkyIsles is a dark world with ivory cards in it; `light dark` told the
+   * browser it might be otherwise, which is how a UA-painted white canvas or
+   * a white form control could appear in an OS light theme and take the art
+   * direction apart. The preference still changes the hour — dusk or night,
+   * see the sky tokens — it just never changes the polarity (ADR-0038).
+   */
+  color-scheme: dark;
 
-  /* --- Surfaces -------------------------------------------------------- */
-  /* Warm off-white rather than pure white: it gives cards something to sit
-     on, and it keeps the plate distinguishable in the light theme. */
-  --canvas: #f4f1ec;
-  --surface: #fbf9f6;
-  --surface-raised: #ffffff;
+  /* --- The sky ---------------------------------------------------------
+     Four stops, painted by SkyBackdrop: high sky, mid sky, a warm band at
+     the horizon, and the deep water below it. Dusk. */
+  --sky-high: #1b1b42;
+  --sky-mid: #35316e;
+  --sky-horizon: #c8883f;
+  --sky-deep: #15142b;
 
-  /* The image stage. Matches the photographed background exactly, so the
-     image edge dissolves into the plate instead of showing a seam. */
+  /* The flat ground under everything, for when the gradient cannot paint
+     (print, forced colours, a failed layer). The page stays legible on it,
+     and it is also the colour the content zone settles to. */
+  --canvas: #15142b;
+
+  /* --- Panels on the sky ------------------------------------------------
+     Translucent glass: auth cards, empty states, the character panel,
+     settings sections. Not the collectible card — that is `--card`. */
+  --surface: #1e1c3c;
+  --surface-raised: #282549;
+
+  /* --- The collectible card -------------------------------------------- */
+  --card: #f7f3ea; /* warm ivory, light in both schemes */
+  --card-raised: #fffdf8;
+  --card-border: #d8cfbe;
+  --on-card: #241f19; /* 14.6:1 on card */
+  --on-card-muted: #6b6153; /*  4.9:1 on card */
+
+  /* The image stage. Matches the photographed background, so the image edge
+     dissolves into the plate instead of showing a seam. */
   --plate: #ffffff;
+  --on-plate: #2b2621; /* 13.8:1 */
+  --on-plate-muted: #6a635b; /*  5.4:1 */
 
-  /* The plate is light in BOTH themes, so anything drawn on it needs a fixed
-     dark tone — `--foreground` would invert with the theme and vanish.
-     Checked against both plate values: 15.0:1 / 13.8:1 and 5.9:1 / 5.4:1. */
-  --on-plate: #2b2621;
-  --on-plate-muted: #6a635b;
+  /* --- Text on the sky and on dark panels ------------------------------ */
+  --foreground: #f0eff8; /* 14.2:1 on canvas, 12.1:1 on surface */
+  --muted: #aeacca; /*  7.2:1 on canvas, 6.2:1 on surface */
+  --on-accent: #1a1206;
 
-  /* --- Text ------------------------------------------------------------ */
-  --foreground: #191714; /* 15.9:1 on canvas */
-  --muted: #6a635b; /*  5.3:1 on canvas, 5.6:1 on surface */
-  --on-accent: #ffffff; /*  5.0:1 on accent */
+  /* --- Lines ------------------------------------------------------------ */
+  --border: #363363;
+  --border-strong: #514c8c;
+  --ring: #e6b463;
 
-  /* --- Lines ----------------------------------------------------------- */
-  --border: #e2ddd4;
-  --border-strong: #c9c2b6;
-  --ring: #9a6316;
+  /* --- Accent — warm amber, the one colour that is not the sky ---------- */
+  --accent: #e0a44a; /*  7.4:1 on canvas */
+  --accent-hover: #f0bd6e;
+  --accent-subtle: #33261a;
+  /* Gold as a line, and gold as light. Alpha throughout, so both sit on
+     whatever is behind them rather than needing a matching solid.
+     V3.1 raised the line from 0.35: at a third of an already dim gold it was
+     a suggestion of an edge rather than an edge. */
+  --gold-line: rgb(230 176 92 / 0.55);
+  --gold-line-strong: rgb(233 183 104 / 0.8);
+  /* The collector's frame — struck, not lit (ADR-0038, V4.2).
+     V3.4 wrapped an owned card in a 34 px bloom and a 74 px halo. It did read
+     from two metres, and up close it read as a glowing card: the light spread
+     onto the neighbours, softened the card's own edge, and made the grid look
+     backlit. Every radius here is zero. Three hard lines instead — a pale
+     highlight against the frame, the frame's own body, and a dark seat under
+     it — which is how metal is seen: by its edges, not by what it emits. The
+     last entry is depth, the same drop every card has. */
+  --gold-frame:
+    0 0 0 1px rgb(255 236 196 / 0.95), 0 0 0 4px rgb(198 143 55 / 0.85),
+    0 10px 26px rgb(0 0 0 / 0.5);
+  /* Four still points of light on the frame — top left, top right and the two
+     lower corners. Static: a frame that twinkles is a slot machine. */
+  --gold-sparkle:
+    radial-gradient(2.5px 2.5px at 14% 4%, rgb(255 246 224 / 0.95), transparent 60%),
+    radial-gradient(2px 2px at 88% 7%, rgb(255 240 208 / 0.85), transparent 60%),
+    radial-gradient(2px 2px at 7% 92%, rgb(255 240 208 / 0.7), transparent 60%),
+    radial-gradient(2.5px 2.5px at 94% 88%, rgb(255 246 224 / 0.8), transparent 60%);
 
-  /* --- Accent — warm amber, used sparingly ----------------------------- */
-  --accent: #9a6316; /*  4.5:1 on canvas, 4.8:1 on surface */
-  --accent-hover: #7f5111;
-  --accent-subtle: #f3e7d3;
-
-  /* --- The showcase panel ----------------------------------------------
-     One deep surface, used for the collection hero and nothing else. A
-     vitrine has a dark back wall; that contrast is what makes the numbers on
-     it read as a display rather than as a form. Fixed in both themes, like
-     `--plate`, so the panel is a constant of the product. */
-  --deep: #221f1b;
-  --on-deep: #f6f3ee; /* 14.8:1 on deep */
-  --on-deep-muted: #a9a196; /*  5.3:1 on deep */
+  /* --- The showcase panel ---------------------------------------------- */
+  --deep: #14122c;
+  --on-deep: #f3f2fa;
+  --on-deep-muted: #a8a6c6;
 
   /* --- Status ---------------------------------------------------------- */
-  --success: #1f7a45; /*  5.1:1 on surface */
-  --danger: #b3261e; /*  6.2:1 on surface */
+  --success: #5ad18d;
+  --danger: #ff9b93;
 
-  /* --- Depth — soft, never a hard drop shadow --------------------------
-     Named `elevation-*` here because @theme maps them to `--shadow-*`
-     below, and a token cannot reference itself. */
-  --elevation-card: 0 1px 2px rgb(25 23 20 / 0.04), 0 4px 12px rgb(25 23 20 / 0.05);
-  --elevation-raised: 0 2px 4px rgb(25 23 20 / 0.05), 0 12px 28px rgb(25 23 20 / 0.08);
+  /* --- Depth ------------------------------------------------------------
+     Named `elevation-*` because @theme maps them to `--shadow-*` below, and
+     a token cannot reference itself. Deep, because everything now sits on a
+     dark ground where a shadow has to work harder to read as depth. */
+  --elevation-card: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 20px rgb(0 0 0 / 0.30);
+  --elevation-raised: 0 2px 6px rgb(0 0 0 / 0.40), 0 18px 44px rgb(0 0 0 / 0.42);
 
-  /* --- Elements — defined, not yet used --------------------------------
-     Ten canonical elements (ADR-0034). All at least 4.5:1 on --surface, so
-     they can carry text later. Colour alone never conveys the element:
-     "earth" and "tech" sit 1.06:1 apart in luminance and differ only in
-     hue, which is exactly why a badge must always name the element. */
-  --element-magic: #6d4bab; /* 6.2:1 */
-  --element-tech: #8a5a12; /* 5.6:1 */
-  --element-water: #1a6c93; /* 5.5:1 */
-  --element-fire: #b23b1e; /* 5.7:1 */
-  --element-life: #2c7a3f; /* 5.0:1 */
-  --element-undead: #5f6b78; /* 5.2:1 */
-  --element-earth: #8a5f2c; /* 5.3:1 */
-  --element-air: #446f88; /* 5.2:1 */
-  --element-light: #8a6d13; /* 4.7:1 */
-  --element-dark: #4a4a8a; /* 7.6:1 */
+  /* --- Elements, two scales ---------------------------------------------
+     Ten canonical elements (ADR-0034), and two grounds to sit on. `ink` is
+     for the ivory card and the plate; the plain names are for dark panels.
+     Both are constant across colour schemes, because both of their grounds
+     are. Colour alone never conveys the element — "earth" and "tech" differ
+     only in hue, which is why a label always names it. */
+  --element-ink-magic: #6d4bab;
+  --element-ink-tech: #8a5a12;
+  --element-ink-water: #1a6c93;
+  --element-ink-fire: #b23b1e;
+  --element-ink-life: #2c7a3f;
+  --element-ink-undead: #5f6b78;
+  --element-ink-earth: #8a5f2c;
+  --element-ink-air: #446f88;
+  --element-ink-light: #8a6d13;
+  --element-ink-dark: #4a4a8a;
+
+  --element-magic: #b79bea;
+  --element-tech: #e0ab52;
+  --element-water: #66c2e8;
+  --element-fire: #ff9776;
+  --element-life: #72d089;
+  --element-undead: #a9b6c4;
+  --element-earth: #d9a86a;
+  --element-air: #9dc9df;
+  --element-light: #e5cd6d;
+  --element-dark: #a3a3e0;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    /* Cool slate night, not black: pure black beside a white plate is a
-       glare edge, and it flattens every surface above it. */
-    --canvas: #0d1219;
-    --surface: #151c26;
-    --surface-raised: #1d2532;
+    /* Night rather than dusk: the same world, a few hours later. Cooler,
+       deeper, with the horizon burned down to an ember. */
+    --sky-high: #0e0d24;
+    --sky-mid: #1e1b46;
+    --sky-horizon: #8f5f2c;
+    --sky-deep: #0a0918;
 
-    /* Stays light. This is the point of the whole direction. */
-    --plate: #f7f5f1;
+    --canvas: #0a0918;
 
-    --foreground: #e9ecef; /* 15.8:1 on canvas */
-    --muted: #9aa4b2; /*  7.5:1 on canvas, 6.8:1 on surface */
-    --on-accent: #1a1206; /*  8.5:1 on accent */
+    --surface: #171531;
+    --surface-raised: #201d3f;
 
-    --border: #26303d;
-    --border-strong: #3a4657;
-    --ring: #e0a44a;
+    --foreground: #e9eaf4; /* 16.3:1 on canvas */
+    --muted: #a3a2c2; /*  8.1:1 on canvas */
 
-    --accent: #e0a44a; /*  8.6:1 on canvas */
-    --accent-hover: #eeb864;
-    --accent-subtle: #2a2113;
+    --border: #2b2851;
+    --border-strong: #453f77;
 
-    /* A touch lighter than the near-black canvas, so the panel still lifts
-       off the page in the dark theme instead of merging with it. */
-    --deep: #1b232f;
-    --on-deep: #eef1f4;
-    --on-deep-muted: #9aa4b2;
+    --deep: #0c0b1e;
 
-    --success: #5ad18d; /*  8.9:1 on surface */
-    --danger: #ff9b93; /*  8.5:1 on surface */
-
-    /* Deeper and wider on a dark ground, where a shadow has to do more
-       work to read as depth at all. */
-    --elevation-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 6px 16px rgb(0 0 0 / 0.35);
-    --elevation-raised: 0 2px 6px rgb(0 0 0 / 0.45), 0 16px 40px rgb(0 0 0 / 0.45);
-
-    /* Lightened for a dark ground; all at least 7:1 on --surface. */
-    --element-magic: #b79bea;
-    --element-tech: #e0ab52;
-    --element-water: #66c2e8;
-    --element-fire: #ff9776;
-    --element-life: #72d089;
-    --element-undead: #a9b6c4;
-    --element-earth: #d9a86a;
-    --element-air: #9dc9df;
-    --element-light: #e5cd6d;
-    --element-dark: #a3a3e0;
+    --elevation-card: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 22px rgb(0 0 0 / 0.45);
+    --elevation-raised: 0 2px 8px rgb(0 0 0 / 0.55), 0 20px 50px rgb(0 0 0 / 0.55);
   }
 }
 
@@ -152,11 +191,16 @@
   --color-muted: var(--muted);
   --color-border: var(--border);
 
-  /* New surfaces */
   --color-canvas: var(--canvas);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-plate: var(--plate);
+
+  --color-card: var(--card);
+  --color-card-raised: var(--card-raised);
+  --color-card-border: var(--card-border);
+  --color-on-card: var(--on-card);
+  --color-on-card-muted: var(--on-card-muted);
 
   --color-border-strong: var(--border-strong);
   --color-ring: var(--ring);
@@ -165,6 +209,8 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-subtle: var(--accent-subtle);
   --color-on-accent: var(--on-accent);
+  --color-gold-line: var(--gold-line);
+  --color-gold-line-strong: var(--gold-line-strong);
 
   --color-success: var(--success);
   --color-danger: var(--danger);
@@ -175,6 +221,17 @@
   --color-deep: var(--deep);
   --color-on-deep: var(--on-deep);
   --color-on-deep-muted: var(--on-deep-muted);
+
+  --color-element-ink-magic: var(--element-ink-magic);
+  --color-element-ink-tech: var(--element-ink-tech);
+  --color-element-ink-water: var(--element-ink-water);
+  --color-element-ink-fire: var(--element-ink-fire);
+  --color-element-ink-life: var(--element-ink-life);
+  --color-element-ink-undead: var(--element-ink-undead);
+  --color-element-ink-earth: var(--element-ink-earth);
+  --color-element-ink-air: var(--element-ink-air);
+  --color-element-ink-light: var(--element-ink-light);
+  --color-element-ink-dark: var(--element-ink-dark);
 
   --color-element-magic: var(--element-magic);
   --color-element-tech: var(--element-tech);
@@ -197,11 +254,34 @@
 
   --shadow-card: var(--elevation-card);
   --shadow-raised: var(--elevation-raised);
+  --shadow-gold: var(--gold-frame);
 }
 
 @layer base {
-  /* Deliberately no next/font: a system font stack saves a dependency, a
-     network fetch at build time, and renders immediately. */
+  /*
+   * Two stacks, no downloads.
+   *
+   * The interface keeps the system sans it always had. The brand — wordmark,
+   * page titles, series headings — gets a serif with some age to it, which is
+   * what gives SkyIsles a collector's character rather than a product one
+   * (ADR-0038, V4).
+   *
+   * Deliberately no webfont: a licensed display face would mean a file in the
+   * repository, a licence to honour and a network fetch before the name of
+   * the site can be read. These faces ship with macOS and Windows and fall
+   * back through Georgia to the platform serif.
+   */
+  :root {
+    --font-display:
+      "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
+      "Hoefler Text", Georgia, "Times New Roman", serif;
+  }
+
+  .font-display {
+    font-family: var(--font-display);
+    font-feature-settings: "liga" 1, "kern" 1;
+  }
+
   body {
     background: var(--canvas);
     color: var(--foreground);

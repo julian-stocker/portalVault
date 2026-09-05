@@ -40,7 +40,7 @@ export function Field({
         required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}
-        className="min-h-11 rounded-sky-md border border-border bg-background px-3 py-2 text-base focus:border-foreground"
+        className="min-h-11 rounded-sky-md bg-surface/80 px-3 py-2 text-base ring-1 ring-border/70 focus:ring-border-strong"
       />
       {hint ? (
         <p id={`${name}-hint`} className="text-xs text-muted">
@@ -86,9 +86,14 @@ export function SubmitButton({ label, pending }: { label: string; pending: boole
 
 export function AuthCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center gap-6 px-6 py-16">
-      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-      {children}
+    <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center px-6 py-16">
+      {/* A panel rather than text on the sky (ADR-0038, V3): a sign-in form
+          floating on a gradient has nothing to sit on, and the deep ground
+          is what keeps the inputs legible over the horizon glow. */}
+      <div className="flex flex-col gap-6 rounded-sky-lg bg-deep/80 p-6 ring-1 ring-gold-line backdrop-blur-sm">
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {children}
+      </div>
     </main>
   );
 }

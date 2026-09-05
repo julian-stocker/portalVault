@@ -18,7 +18,7 @@
 import type { ReactNode } from "react";
 
 import type { Character } from "@/lib/catalog/character";
-import { elementChipClass, elementLabel } from "@/lib/catalog/element";
+import { elementPanelClass, elementLabel } from "@/lib/catalog/element";
 import { de } from "@/lib/i18n/de";
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
@@ -36,7 +36,7 @@ export function ElementChip({ element, size = "sm" }: { element: string; size?: 
       className={
         "inline-block rounded-full border border-current/40 leading-none font-medium " +
         (size === "xs" ? "px-1.5 py-0.5 text-[11px] " : "px-2 py-1 text-xs ") +
-        elementChipClass(element as Parameters<typeof elementChipClass>[0])
+        elementPanelClass(element as Parameters<typeof elementPanelClass>[0])
       }
     >
       {elementLabel(element as Parameters<typeof elementLabel>[0])}
@@ -72,7 +72,7 @@ export function CharacterPanel({
   return (
     <section
       aria-labelledby="character-heading"
-      className="rounded-sky-lg border border-border bg-surface-raised p-5 shadow-card md:p-6"
+      className="rounded-sky-lg bg-surface/80 p-5 ring-1 ring-border/70 backdrop-blur-sm md:p-6"
     >
       <p className="text-xs tracking-wide text-muted uppercase">{de.character.heading}</p>
       <h2 id="character-heading" className="mt-1 text-lg font-semibold tracking-tight">

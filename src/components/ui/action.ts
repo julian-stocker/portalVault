@@ -48,8 +48,16 @@ export const ACTION_NEUTRAL = `${BASE} border border-border-strong text-foregrou
  * quieter still and is exactly the trap: a phone has no hover, and the one
  * action the catalog exists for must not depend on a pointer.
  */
+/**
+ * The card action, on the ivory collectible card (ADR-0038, V3).
+ *
+ * Dark on light, which is the only way round that works there: the card is
+ * the bright object, so its footer button has to be the quiet dark shape
+ * inside it rather than a lighter patch on an already light ground.
+ */
 export const ACTION_CARD =
-  `${BASE} min-h-10 bg-border/40 text-foreground hover:bg-border/70`;
+  `${BASE} min-h-10 rounded-full bg-[#3b2a17] text-[#f4e3c4] ring-1 ring-inset ` +
+  `ring-white/10 shadow-card hover:bg-[#4a3520]`;
 
 /**
  * Owning something is a state of the showcase, not a completed task
@@ -60,7 +68,8 @@ export const ACTION_CARD =
  * each one is in.
  */
 export const ACTION_OWNED =
-  `${BASE} min-h-10 gap-1.5 bg-accent-subtle text-foreground hover:bg-accent-subtle/70`;
+  `${BASE} min-h-10 gap-1.5 bg-accent-subtle text-accent ring-1 ring-gold-line ` +
+  `hover:bg-accent-subtle/70`;
 
 /**
  * While a mutation is in flight.

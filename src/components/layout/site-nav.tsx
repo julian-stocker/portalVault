@@ -14,6 +14,10 @@
  * used to be. A 2 px underline is what a documentation site uses; on a
  * product header it read as unfinished. The bottom bar keeps the bar shape,
  * because there a pill under the thumb competes with the labels beside it.
+ *
+ * V3 seats it in the world: a dark glass bar with a gold hairline under it,
+ * rather than a white strip laid on the sky. The blur keeps the sky present
+ * behind it without letting anything through that would fight the labels.
  */
 "use client";
 
@@ -44,19 +48,26 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
       aria-current={active ? "page" : undefined}
       className={
         "relative flex min-h-11 flex-1 items-center justify-center px-3 text-sm " +
-        "transition-colors md:flex-none md:rounded-sky-md md:px-3.5 " +
+        "transition-colors md:flex-none md:px-1 md:py-2 md:text-[15px] " +
         (active
-          ? "font-medium text-foreground md:bg-accent-subtle"
-          : "text-muted hover:text-foreground md:hover:bg-border/50")
+          ? // A gold underline, not a filled pill. The pill was the last
+            // thing on the page that still looked like a web app toolbar
+            // (ADR-0038, V3.2); the reference underlines instead.
+            "font-medium text-on-deep"
+          : "text-on-deep-muted hover:text-on-deep")
       }
     >
       {item.label}
-      {/* A shape as well as a colour, and only where the pill is not: on the
-          phone bar, above the label so the thumb never covers it. */}
+      {/* A shape as well as a colour. Above the label in the phone bar so
+          the thumb never covers it, under it in the header. */}
       {active ? (
         <span
           aria-hidden="true"
-          className="absolute inset-x-4 top-0 h-0.5 rounded-full bg-accent md:hidden"
+          className={
+            "absolute inset-x-3 top-0 h-0.5 rounded-full bg-accent " +
+            "md:inset-x-0 md:top-auto md:-bottom-1 md:h-[3px] " +
+            "md:shadow-[0_0_12px_rgb(224_164_74/0.75)]"
+          }
         />
       ) : null}
     </Link>
@@ -69,17 +80,38 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
   const items = itemsFor(signedIn);
 
   return (
-    // Surface plus a hairline rather than a full border on the canvas: the
-    // header should sit on the page, not be drawn onto it.
+    // Dark glass over the sky, closed by a gold hairline. `border-b` carries
+    // the gold rather than a separate element, so nothing can drift out of
+    // alignment with the bar.
     <header
       className={
-        "border-b border-border/70 bg-surface/80 backdrop-blur-sm " +
-        "md:flex md:items-center md:justify-between md:px-6"
+        // Glass in the world, not a bar above it (ADR-0038, V3.3). The gold
+        // edge stays — it is what closes the header — but the ground is
+        // translucent so the sky behind it is the same sky as below it.
+        //
+        // V4 pulled the navigation over to the wordmark: it used to sit at
+        // the far right of a 1152 px bar, which is a web app's layout, not a
+        // masthead's. Now the two read as one lockup on the left.
+        "relative sticky top-0 z-30 border-b border-accent/50 bg-deep/80 backdrop-blur-md " +
+        "shadow-[0_8px_28px_rgb(0_0_0/0.4)] " +
+        "md:flex md:items-center md:gap-8 md:px-6"
       }
     >
+      {/* A thin warm line inside the top edge: the bar catches the light of
+          the sky above it rather than sitting flat on it. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/12"
+      />
+      {/* A second, warmer line just inside the gold edge: the bar reads as a
+          struck plate rather than a rectangle with a border. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-accent/25"
+      />
       <Link
         href="/"
-        className="flex items-center px-4 py-3 md:px-0 md:py-3.5"
+        className="relative flex shrink-0 items-center px-4 py-3 md:px-0 md:py-4"
         aria-label={de.app.name}
       >
         <Wordmark />
@@ -91,9 +123,9 @@ export function SiteNav({ signedIn }: { signedIn: boolean }) {
           // Out of flow on phones, so the header above collapses to just the
           // wordmark. The safe-area padding keeps the labels clear of the
           // home indicator.
-          "fixed inset-x-0 bottom-0 z-20 flex border-t border-border bg-surface " +
-          "pb-[env(safe-area-inset-bottom)] " +
-          "md:static md:gap-1 md:border-t-0 md:bg-transparent md:pb-0"
+          "fixed inset-x-0 bottom-0 z-20 flex border-t border-gold-line bg-deep/95 " +
+          "backdrop-blur-md pb-[env(safe-area-inset-bottom)] " +
+          "md:static md:gap-7 md:border-t-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
         }
       >
         {items.map((item) => (

@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-04 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-06 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -61,14 +61,71 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**V4.2 umgesetzt (2026-09-06, ADR-0038).** Der Besitzrahmen im Katalog ist **scharf**: kein
+Weichzeichner mehr, `--gold-glow` heißt `--gold-frame` und enthält keinen Unschärferadius (ein
+Test liest das aus `globals.css`); Rahmen, feine Innenlinie, vier Funken und Krone bleiben. Der
+Katalog-Abschnittskopf trägt neben `Serie · n Figuren` den Anzeigefilter **„In Besitz"**
+(standardmäßig aus, abgemeldet gar nicht vorhanden, wirkt auch in der serienübergreifenden
+Suche, ändert nichts an den Daten). Die Sammlungsseite heißt **„Sammlung"**, öffnet in der
+**Tabelle** (gespeicherte Wahl schlägt den Standard) und die Tabelle hat eine Spalte **„Aktion"**
+mit zurückhaltendem `Entfernen` — dieselbe Mutation und dasselbe Rückgängig wie auf der Karte,
+weiterhin ohne Bestätigungsdialog. **Duplikate sind kein Serien-Tab mehr, sondern ein Filter**,
+kombinierbar mit `Alle` und mit einer einzelnen Serie, in beiden Ansichten und mit der Suche;
+die Duplikatzahlen erscheinen als eine kompakte Zusatzzeile in der bestehenden
+Zusammenfassung. Serienabschnitte gelten jetzt überall, auch unter Filter; die Abschnittszahlen
+bleiben Sammlungsstand. **Ein Elementfilter und der Special-Umschalter fehlen weiterhin
+bewusst** (Datenlage, ADR-0034); die Filterkomponente ist auf Erweiterung angelegt. Ohne
+Migration, ohne Datenänderung.
+
+**V4.1 umgesetzt (2026-09-06, ADR-0038).** Gesammelte Katalogkarten behalten Bild und Fläche
+unverändert — das Gold liegt um die Karte, nicht als Filter darüber. „Filter zurücksetzen"
+erscheint nur bei echtem Filter. Serienabschnitte auch bei einzelner Serie. Tabellenansicht mit
+44-px-Miniaturen und zentrierten Werten. Katalogsuche findet über den aktiven Tab hinaus, ohne
+ihn zu wechseln: aktive Serie zuerst, weitere Serien als eigene Abschnitte.
+
+**Audit ergab: Special-Umschalter ist noch nicht baubar.** Nur 104 von 561 aktiven
+Sammelobjekten (18,5 %) haben einen Charakterlink, 19 Charaktere existieren insgesamt, und kein
+Feld unterscheidet Basisausgabe von Sonderedition. Vor dem Umschalter braucht es einen eigenen
+Daten-/Klassifikationsschritt (ADR-0038, Abschnitt 10d). **V4.1 selbst kam ohne Migration aus.**
+
+**Visual V4 umgesetzt (2026-09-06, ADR-0038).** Eigenes SkyIsles-Emblem als SVG, Wortmarke und
+Titel in einer System-Display-Serif, Navigation links neben der Wortmarke. Gesammelte
+Katalogkarten tragen Gold über die **ganze** Karte plus eine goldene Krone als Siegel; in
+`/collection` bleibt beides aus. Katalog und Sammlung nutzen **dauerhaft verschiedene Artworks**
+(Portal gegen Weltblick). Neu in der Sammlung: Umschalter **Symbole / Tabelle** (seit V4.2
+öffnet die Tabelle; echte Tabelle
+auf Desktop, gestapelte Zeilen mobil, Wahl im `localStorage` über `useSyncExternalStore`) und
+eine Gruppierung der Ansicht **Alle nach Spielen** mit Abschnittsüberschrift und `owned / total`.
+Basis-/Special-Klassifikation bewusst nicht vorbereitet.
+
+**Visual V3.3 umgesetzt (2026-09-05, ADR-0038).** Das eigene **Portal-Artwork** liegt als
+`WorldZone` hinter der gesamten oberen Seite — hinter Kopf, Titel, Suche und Serienpillen — und
+verläuft in eine ruhige **Deep-Navy-Vitrine**, auf der die elfenbeinfarbenen Karten stehen;
+keine sichtbare Bildkante mehr. Gemountet von beiden Collector-Layouts, damit die Navigation
+zwischen den Route Groups sie nicht verliert (struktureller Test). `color-scheme: dark` plus ein
+dunkler Inline-Grund am `<html>`, damit weder ein helles Systemthema noch ein fehlendes
+Stylesheet die Seite weiß werden lässt. Die Detailseite hat eine eigene Deep-Fläche für Name und
+Preis. Der Besitzrahmen ist auf Sichtweite verstärkt (drei Ringe, Lichtkante, Schein), die
+Overlays über dem Artwork sind lokal statt flächig, und die Sammlungs-Zusammenfassung ist rund
+40 % flacher — eine Zeile aus Segment, Zahl und drei Kennzahlen statt fünf gestapelter Zeilen. Das allgemeine Weltbild trägt jetzt die Auth-Seiten. Fehlende Figuren bekommen
+eine **Bronzekante**, eigene eine doppelte **Goldfassung** mit Schein. Der Sammlungs-Hero ist
+eine nahezu deckende Vitrinenplatte mit doppeltem Goldrahmen, Eckwinkeln, goldenem
+Fortschrittsbalken und getrennten Kennzahlen. Kopf mit Goldkante und goldener Unterstreichung
+statt heller Pille. Assets: 135 KB / 45 KB (Portal), 112 KB / 43 KB (Welt), Quellen unter
+`artwork/` unversioniert. Das
+Farbschema kippt nicht mehr die Welt, sondern die Tageszeit — hell ist Dämmerung, dunkel ist
+Nacht, beide mit denselben hellen Karten. Der Besitzrahmen im Katalog ist deutlich verstärkt
+(Goldrand plus innere Haarlinie); in `/collection` gibt es ihn weiterhin nicht.
+
 **Design V2.1 umgesetzt (2026-09-05, ADR-0038).** Besitz trägt **ausschließlich im Katalog** der
 Kartenrahmen (warmes Amber, `aria-pressed` plus `sr-only`-Text), nicht mehr ein Text-Chip; in
 `/collection` bleiben die Karten neutral, weil dort ohnehin alles Besitz ist. **Die Karte selbst
 ist der Umschalter**; „Info" ist eine eigene Aktion im Kartenfuß und als Geschwisterelement
 sauber davon getrennt. In `/collection` sind die sechs Serienfortschrittskarten entfallen; der
-Hero folgt stattdessen dem aktiven Filter — je Serie eigene Zahlen, für `Duplikate` eine eigene
-Form (Figuren mit Duplikaten, zusätzliche Exemplare, Marktwert nur der Zusätze). Die Suche
-filtert das Raster, verändert aber die Hero-Zahlen nicht.
+Hero folgt stattdessen dem aktiven Filter — je Serie eigene Zahlen; die Duplikatzahlen (Figuren
+mit Duplikaten, zusätzliche Exemplare, Marktwert nur der Zusätze) sind seit V4.2 eine Zusatzzeile
+in derselben Zusammenfassung statt einer eigenen Form. Die Suche filtert das Raster, verändert
+aber die Hero-Zahlen nicht.
 
 **Design V2 umgesetzt (2026-09-05, ADR-0038).** Katalog und Sammlung sind fachlich getrennt:
 Der Katalog zeigt alle Sammelobjekte **einer immer gewählten Serie** (kein „Alle", ausgeschriebene

@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-05 (ADR-0038, Design V2).
+Letzte Aktualisierung: 2026-09-06 (ADR-0038, Design V4.2).
 
 ---
 
@@ -2358,9 +2358,296 @@ ging in `collectionStats`. Die Statistik bekommt die ausgelassenen Einträge jet
 hinzugefügt — die Vitrine bleibt frei von Spielkarten, die Zusammenfassung zählt aber wieder
 jeden besessenen Eintrag. Bestand seit V1.5, gefunden bei der Sichtprüfung dieses Schritts.
 
-### 9. Offen
+### 10. Visual V3 — die Markenwelt
+
+V2.1 war aufgeräumt und blieb neutral: eine helle Seite mit Karten darauf, austauschbar mit
+jedem anderen Tailwind-Produkt. V3 macht die Seite selbst zu dem Ort, aus dem die Figuren
+kommen — ein tiefer Himmel mit warmem Horizont, Inselsilhouetten in der Ferne, und die
+Sammelstücke davor im Licht.
+
+**Das Farbschema kippt nicht mehr die Welt, es ändert die Tageszeit.** Hell heißt Dämmerung,
+Dunkel heißt Nacht. Beide sind dunkle Gründe, beide tragen dieselben elfenbeinfarbenen Karten.
+Das ist die konsequente Fortsetzung von `--plate`, das seit ADR-0035 in beiden Schemata hell
+ist: „Karten heller als ihre Umgebung" **ist** die Komposition, und eine Karte, die mit dem
+Schema umschlägt, nähme sie weg. Die Kartentexte nutzen deshalb feste `--on-card`-Tinte statt
+`--foreground`.
+
+**Der Hintergrund ist eigenes SkyIsles-Artwork — aber begrenzt (V3.2).** V3.1 hängte das große
+Weltbild hinter jede Seite, und das Ergebnis war Oberfläche auf einem Wallpaper: Text über
+sonnenbeschienenen Wolken, Karten auf unruhiger Landschaft, die Kennzahlen der Sammlung quer
+über einem Portal. Ein Bild als Tapete wird kein Design.
+
+Deshalb hat die Welt jetzt einen Ort — aber keinen Rahmen. V3.2 setzte `portal-hero-v2.png`
+als begrenztes Band **in** den Seiteninhalt, und genau so las es sich: Kopf, dann ein Bild, dann
+eine Suchleiste, dann ein Raster. Fünf Webbausteine, kein Ort.
+
+**V3.3: `WorldZone`.** Das Artwork liegt jetzt hinter der gesamten oberen Seite — hinter dem
+Kopf, dem Titel, der Suche und den Serienpillen — und endet in einem dreistufigen Verlauf, der
+die Deep-Navy-Vitrine erreicht, bevor die erste Kartenreihe beginnt. Zwischen Kopf und Raster
+hat **kein einziges Element einen eigenen Grund**, also gibt es auch keine Bildkante zu sehen.
+Der Kopf ist dunkles Glas *in* der Welt statt einer Leiste darüber.
+
+Titel, Subline und Suche stehen in einer Spalte, die auf Desktop bei 52 % Breite endet — das
+**Portal rechts bleibt frei**. Das Artwork ist rechts verankert, damit das Portal jede Breite
+überlebt; unter `md:` gewinnt der Text, und die ruhige linke Bildhälfte wird abgeschnitten.
+
+**Mit `WorldZone` in den beiden Collector-Layouts** statt in einer Seite: `/` und `/collection`
+liegen in verschiedenen Route Groups, und was einer Seite gehört, wird beim Wechsel zwischen
+ihnen ausgehängt. Ein struktureller Test hält beides fest.
+
+`artwork/background.png` bleibt die volle Welt und trägt jetzt die Seiten, die nichts anderes zu
+tun haben: Anmeldung, Registrierung, Passwort-Reset. Nichts davon stammt aus den Spielen;
+verboten bleibt ausschließlich fremdes Material: offizielle Skylanders-Hintergründe,
+Spiel-Screenshots, fremde Fantasy-Artworks, fremde Logos (`docs/SECURITY.md`, ADR-0009).
+
+**Ausgeliefert werden nur die optimierten Ableitungen:** `skyisles-backdrop.webp` (112 KB) und
+`skyisles-backdrop-sm.webp` (43 KB) unter `public/images/brand/`, ausgewählt per `srcset` — ein
+Telefon lädt nie die große Datei. Aus 2,1 MB PNG werden damit 43–112 KB. Die Quelldateien unter
+`artwork/` sind **nicht** versioniert (`.gitignore`): mehrere Megabyte Rohmaterial gehören nicht
+in die Historie eines Repositories, das sonst aus Text besteht. Sollen sie es doch, ist das eine
+bewusste Entscheidung und kein Nebeneffekt.
+
+**Die CSS-Ebenen aus V3 sind geblieben, jetzt als Unterbau:** Lädt das Bild nicht, ist die Seite
+ein Dämmerungshimmel in den Farben der Palette statt eines grauen Rechtecks. Darüber liegen ein
+violetter Schleier, der das Bild hinter die Oberfläche zieht, und die Beruhigung nach unten,
+damit ein langes Raster über ruhigem Grund scrollt statt über Burgen.
+
+**Nichts bewegt sich** — ein wandernder Himmel hinter einem Text ist Ablenkung, keine
+Atmosphäre, und ein stehender braucht keine Reduced-Motion-Ausnahme. Die Seite bleibt ohne die
+Kulisse vollständig lesbar: `--canvas` ist eine einfarbige Fläche, und jede Fläche darüber setzt
+ihren eigenen Grund.
+
+**V3.1 hat die Welt sichtbar gemacht.** V3 hielt den Himmel an den Rändern und deckte den Rest
+mit undurchsichtigen Flächen zu — technisch sauber, im Ergebnis eine aufgeräumte dunkle App
+statt eines Ortes. Jetzt liegt das Artwork offen: Der Kataloghero hat **gar keine Fläche mehr**,
+sondern Titel und Subline mit eigenem Textschatten direkt auf der Welt, darunter die Suche als
+dunkle Pille und die Serien als einzelne Pillen statt in einer eingefassten Schiene. Jede
+Panel-Fassung davon — erst undurchsichtig, dann Glas — war ein Deckel auf dem Bild.
+
+**Karten wie im Entwurf:** Elfenbein für jedes Stück, **Bronze** für die Kante einer fehlenden
+Figur und **Gold** für die eigene — drei Ringe, eine hellere Lichtkante oben, ein warmer
+Elfenbeinton und ein weicher Schein. Der Prüfstein ist, ob eine gesammelte Figur aus zwei Metern
+Entfernung als gesammelt liest; bis V3.3 tat sie das nicht. Bronze statt gedimmtem Gold, weil
+zwei Stärken derselben Farbe einen Vergleich verlangen, zwei Metalle dagegen gesehen werden. Der
+Kartenfuß ist ein dunkler Bronzeknopf.
+
+**Der Sammlungs-Hero ist eine nahezu deckende Vitrinenplatte** mit doppeltem Goldrahmen, vier
+Eckwinkeln, goldenem Fortschrittsbalken und durch Haarlinien getrennten Kennzahlen — die eine
+Fläche im Produkt, die wie ein Gegenstand aussehen darf. Sie ist bewusst **nicht** transparent:
+Bei 70 % lasen die Vollständigkeitszahlen quer über einem Sonnenuntergang.
+
+**Der Kopf** ist dunkles Glas mit goldener Unterkante und einer goldenen Unterstreichung am
+aktiven Punkt statt einer hellen Pille — die Pille war das Letzte, das noch nach
+Web-App-Werkzeugleiste aussah.
+
+**Das Farbschema ist in beiden Vorlieben dunkel** (`color-scheme: dark`). `light dark` sagte dem
+Browser, es könnte auch anders sein — womit in einem hellen Systemthema eine weiße
+UA-Zeichenfläche oder ein weißes Formularelement die Art Direction auseinandernehmen konnte. Die
+Vorliebe ändert weiterhin die Tageszeit, nie die Polarität. Dazu eine einzige Inline-Angabe am
+`<html>`: `color-scheme: dark`, damit ein **nicht geladenes Stylesheet** zu einer dunklen
+ungestylten Seite führt statt zu einer weißen.
+
+**Und ausdrücklich kein `background` am `<html>`.** Der erste Versuch setzte dort zusätzlich
+eine Farbe — und machte damit das gesamte Artwork unsichtbar. Der Grund des `body` wandert nur
+so lange auf die Zeichenfläche, wie `html` selbst keinen hat; sobald `html` einen bekommt, malt
+der `body`-Hintergrund als gewöhnlicher Elementhintergrund — über jedem `z-index: -10`-Kind, das
+er hat. Genau dort liegen `SkyBackdrop` und `WorldZone`. Die Seite wurde flach navy, Himmel,
+Inseln und Portal verschwanden (V3.4).
+
+**Die Detailseite hat eine eigene Fläche bekommen.** Die Welt läuft hinter jeder Collector-Seite,
+und ihr hellster Punkt — das Portal — landet dort genau auf Name, Serie und Preis. Das war die
+letzte Stelle, an der Text direkt auf Artwork stand.
+
+**Der Besitzrahmen in drei Anläufen.** V2.1 zog einen 1-px-Ring bei 45 % Deckung — unsichtbar
+beim Überfliegen einer Spalte, und gesehen zu werden ist seine einzige Aufgabe. V3 verdoppelte
+ihn. **V3.1 beleuchtet ihn:** Goldrand, eingerückte innere Haarlinie, weicher äußerer Schein und
+ein warmer Verlauf über das Elfenbein. Das frühere „kein Glühen" ist damit bewusst gelockert —
+klein und statisch, gerade so viel, dass der Rahmen als Licht auf einem Stück liest, weit
+entfernt von einer Lampe um eine Karte. Die neutrale Karte bekam im Gegenzug eine **bronzene**
+Kante: eine helle Haarlinie auf violettem Grund las sich als „fast Gold", also genau als die
+Unterscheidung, die der Rahmen treffen soll. Die Regel bleibt unverändert **nur im Katalog**
+(Abschnitt 3).
+
+**Elementfarben in zwei Skalen.** `--element-ink-*` für die elfenbeinfarbene Karte,
+`--element-*` für dunkle Flächen. Beide sind schemaunabhängig konstant, weil ihre Gründe es
+sind. Farbe bleibt nie das einzige Signal: Das Label nennt das Element weiterhin.
+
+Dazu: dunkler Glaskopf mit Goldhaarlinie · Kataloghero aus Titel, Subline, Suche und Tabs in
+einer Fläche · dunkle Segmentleiste mit goldenem Aktivzustand · dunkler Kartenfuß für „Info" ·
+Vitrinen-Hero mit Goldkante, warmem Eckenlicht und der Kennzahl in Amber · Auth-Formulare auf
+einer eigenen Fläche statt frei auf dem Himmel.
+
+Unverändert: jede Produktregel aus den Abschnitten 1–5, die Marktwert- und
+Completion-Berechnung, Auth, ADR-0027, das Shop-Fundament, das Datenmodell.
+
+### 10b. Visual V4 — Marke, Siegel, zwei Ansichten
+
+**Eigenes Emblem und eigene Wortmarke.** `public/images/brand/skyisles-mark.svg` — eine
+schwebende Insel mit drei Spitzen über einem Himmelsbogen, in Gold, unter einem Kilobyte, scharf
+bei 28 px. Nichts daran stammt aus einem Franchise. Die Wortmarke steht in einer
+**Display-Serif** aus dem System (`Iowan Old Style`, `Palatino`, `Hoefler Text`, Georgia);
+bewusst **kein Webfont**, weil eine lizenzierte Schrift eine Datei im Repository, eine Lizenz und
+einen Netzabruf bedeutet, bevor der Name der Seite lesbar ist. Die Serif trägt Wortmarke,
+Seitentitel und Serienüberschriften; die Oberfläche behält ihre System-Sans.
+
+**Navigation links neben der Wortmarke.** Am rechten Rand einer 1152-px-Leiste ist sie das
+Layout einer Web-App, nicht das eines Titelkopfs. Aktiv ist heller Text mit goldener
+Unterstreichung und leichtem Schein — keine gefüllte Pille.
+
+**Das Besitzgold trägt die ganze Karte.** Nicht nur den Rahmen ums Bild: Grund, Name, Preis und
+Fuß werden warm, dazu drei Ringe, eine Lichtkante innen und ein weiter Schein außen. Der
+Prüfstein ist, ob eine gesammelte Figur aus normalem Betrachtungsabstand sofort als gesammelt
+liest.
+
+**Und ein Siegel: die goldene Krone.** Die frühere Regel „kein Statusabzeichen" ist damit
+bewusst aufgehoben — allerdings nur für den Katalog. Ein eigenes SVG, kein Emoji (das rendert
+auf jeder Plattform anders und wäre die einzige solche Glyphe im Produkt), `aria-hidden`, weil
+`aria-pressed` und der `sr-only`-Text den Zustand bereits tragen. **In `/collection` gibt es
+weder Krone noch Goldrahmen**: Dort ist jede Figur Besitz, ein Siegel auf jeder Karte siegelt
+nichts.
+
+**Zwei Welten, dauerhaft getrennt.** Der Katalog bekommt `portal-hero-v2` — ein Wahrzeichen,
+komponiert für einen Titel links davon. Die Sammlung bekommt `background`, den weiten Blick ohne
+einzelnen Fokus, der mit der Vitrinenplatte darauf nicht konkurriert.
+
+**Symbole oder Tabelle.** Zwei Blicke auf dieselbe Sammlung: die Karten, die man *sehen* will,
+und eine Tabelle für die Frage nach Zahlen. **Seit V4.2 öffnet die Tabelle** (siehe 10e). Umgesetzt als zwei echte Buttons mit `aria-pressed`,
+auf dem Desktop eine echte `<table>` mit `<th scope="col">`, unter `md:` gestapelte Zeilen —
+sechs Spalten auf 390 px sind entweder unlesbar oder ein horizontales Scrollen. Die Wahl
+überlebt im `localStorage`, gelesen über `useSyncExternalStore` mit Server-Snapshot: Der erste
+Anstrich stimmt mit dem Server überein, React tauscht den gespeicherten Wert direkt nach der
+Hydration ein — keine Abweichung, und kein Render aus einem Render heraus.
+
+**„Alle" wird nach Spielen gruppiert.** 448 Figuren in einem ununterbrochenen Raster sind ein
+Scrollweg, keine Übersicht. Sechs Abschnitte mit Überschrift, `owned / total` und einem dünnen
+Goldfaden — echte `<h2>`, damit die Seite eine Gliederung hat. Reihenfolge aus `series.position`,
+nichts hartkodiert. Ein Spiel ohne Besitz entfällt ganz. Die Zahlen beschreiben die Sammlung,
+**nie die Suche**: „3 / 81", weil ein Suchbegriff drei Treffer hat, wäre eine Falschaussage.
+(V4.1 gibt auch einer einzelnen gewählten Serie eine Überschrift, V4.2 auch dem Duplikatfilter —
+siehe 10c und 10e.)
+
+**Basis- und Special-Figuren sind ausdrücklich nicht gebaut** — keine Heuristik, keine
+Namenserkennung, kein Alibi-Bedienelement. Das ist ein eigener Datenmodellschritt.
+
+### 10c. V4.1 — und ein Audit, das zwei Funktionen ausbremst
+
+**Das Besitzgold liegt um die Karte, nie darüber.** V4 tönte die ganze Karte warm und beleuchtete
+sie von innen — die Figuren kamen ausgewaschen heraus, ein gelber Filter über der Fotografie
+statt eines Rahmens darum. Jetzt trägt die gesammelte Karte denselben Elfenbeingrund und
+dasselbe unveränderte Bild wie jede andere; unterschieden wird sie durch die Ringe, vier
+**statische** Lichtpunkte auf dem Rahmen und die Krone. Den Außenschein hat V4.2 entfernt
+(siehe 10e).
+
+**„Filter zurücksetzen" erscheint nur, wenn es etwas zurückzusetzen gibt.** `hasActiveFilter`
+entscheidet das an einer Stelle: „Alle" mit leerer Suche ist der Ruhezustand, kein Filter. Der
+Ansichtsmodus zählt bewusst nicht dazu — eine Tabelle zu wählen ist eine Art zu schauen, keine
+Einschränkung dessen, was gezeigt wird.
+
+**Serienabschnitte auch bei einer einzelnen Serie.** Dieselbe Form, egal welcher Tab aktiv ist,
+und der Abschnitt nennt den Stand dieses Spiels, was der Tab nicht tut. Seit V4.2 gilt das auch
+für den Duplikatfilter: eine Form, immer.
+
+**Die Katalogsuche verlässt den aktiven Tab nicht — findet aber darüber hinaus.** Die gewählte
+Serie antwortet zuerst, danach folgen die übrigen Spiele als eigene Abschnitte in
+Datenbankreihenfolge, leere ausgelassen. Der aktive Abschnitt bleibt auch ohne Treffer stehen,
+weil „hier nichts, aber drei in Giants" die eigentliche Antwort ist. **Der Tab wechselt nie von
+selbst**: Sonst führte das Leeren der Suche nicht dorthin zurück, wo man war.
+
+### 10d. Audit: warum Elemente fehlen und Special-Versionen warten müssen
+
+Gemessen an der laufenden Datenbank (2026-09-06), nicht geschätzt:
+
+| | |
+|---|---|
+| aktive Sammelobjekte | **561** |
+| davon mit `character_id` | **104 (18,5 %)** |
+| davon mit Element am Charakter | 102 |
+| Charakter ohne Element | 2 (Kaos-Fall, ADR-0034) |
+| **ohne `character_id`** | **457 (81,5 %)** |
+| Charaktere insgesamt | **19** |
+
+**Die Elemente fehlen nicht fehlerhaft — die Kuratierung ist ein Pilot.** ADR-0034 hat 19
+Charaktere bewusst als Anfang angelegt; alles darüber hinaus ist schlicht noch nicht kuratiert.
+Das ist Fall **C (fehlender Charakterlink)**, nicht A. Eine automatische Reparatur ist
+ausgeschlossen: ADR-0034 verbietet das Raten aus Namen, und die Analyse von 2026-09-04 hat
+gezeigt, warum (LightCore in drei Schreibweisen, `Mini Drobit` ≠ Drobot, Tippfehler,
+`Bone Bash Roller Brawl` ≠ Bash).
+
+**Für Basis gegen Special reicht die Datenlage ebenfalls nicht.** Selbst innerhalb der 19
+kuratierten Gruppen steht kein Feld dafür:
+
+```
+SKY-0053 SA  Spyro                    ← Basisfigur
+SKY-0054 SA  Dark Spyro               ← Sonderedition
+SKY-0055 SA  Legendary Spyro          ← Sonderedition
+SKY-0057 SA  Elite Spyro              ← eigene Produktlinie
+SKY-0177 G   Spyro                    ← ebenfalls Basisfigur, anderes Spiel
+SKY-0285 SF  Mega Ram Spyro           ← Basisfigur der Swap-Force-Reihe
+```
+
+`character_id` gruppiert korrekt, sagt aber nichts darüber, welche Zeile die Basisausgabe **je
+Spiel** ist — und für 81,5 % gibt es die Gruppe gar nicht. Eine Namensheuristik träfe höchstens
+167 von 561 Zeilen und läge dabei falsch: `Mega Ram Spyro` ist eine Basisfigur, `Elite …` eine
+eigene Linie.
+
+**Deshalb wurde der Special-Umschalter nicht gebaut.** Kein Alibi-Bedienelement, keine
+Heuristik. Nötig ist ein eigener Datenschritt mit zwei Feldern — sinngemäß eine
+`release_group` (Charakter × Spiel) und ein `is_base_release` je Gruppe, kuratiert wie die
+Charaktere, mit Werkzeug, Dry-Run und `--apply`. Erst danach ist der Umschalter belastbar.
+
+### 10e. V4.2 — geschmiedet statt beleuchtet, und Filter statt Tab
+
+**Der Besitzrahmen verliert jeden Weichzeichner.** V3.4 legte 34 px Bloom und 74 px Halo um jede
+gesammelte Karte. Aus zwei Metern las das als „gesammelt", aus Lesedistanz als *leuchtende*
+Karte: Das Licht griff auf die Nachbarkarten über und weichte genau die Kante auf, die es zeichnen
+sollte. `--gold-glow` heißt jetzt `--gold-frame` und enthält **keinen einzigen Unschärferadius**
+mehr — eine helle Lichtkante, der Körper des Rahmens, ein dunkler Sitz darunter, dazu der
+Schlagschatten, den jede Karte trägt. Rahmen (3 px), feine Innenlinie, vier Funken und Krone
+bleiben. Karte, Bild und Text sind unverändert. Getestet wird das an der Quelle: Der Wächter in
+`src/lib/catalog/card.test.ts` liest `globals.css` und lässt für jede **warme** Schattenebene nur
+Unschärfe 0 zu — der Klassenname allein könnte das nicht beantworten.
+
+**Duplikate sind ein Filter, keine siebte Serie.** Als Tab neben den sechs Spielen beantwortete
+ein Bedienelement zwei Fragen und machte „die Duplikate in Giants" unerreichbar. Getrennt in
+`view.ts`: `CollectionScope` (Spiel) und `CollectionFilters` (heute `duplicatesOnly`),
+`matchesScope` und `matchesFilters`. Sichtbar getrennt bleiben sie durch die Form — runde Pillen
+navigieren, das eckige Feld hinter dem Wort „Filter" schränkt ein. Die Abschnittszahlen bleiben
+Sammlungsstand: Ein Filter ändert, **welche** Karten unter der Überschrift stehen, nie was die
+Überschrift über das Spiel sagt.
+
+**Die Duplikatsumme ist eine Zeile, keine zweite Übersicht.** `duplicateSummary` liefert Figuren,
+zusätzliche Exemplare und deren Wert — `(Anzahl − 1) × Marktpreis`, also ausdrücklich nicht die
+Segmentsumme, die jedes Exemplar zählt. Sie erscheint unter dem Fortschritt, nur solange der
+Filter an ist. `SegmentSummary` ist damit wieder ein einziger Typ statt einer Union: Vollständig­keit
+verschwindet nicht, weil man Duplikate anschaut.
+
+**Die Tabelle öffnet.** Eine große Sammlung wird gelesen, bevor sie durchgeblättert wird; 448
+Karten sind ein Scrollweg. Die Karten bleiben einen Klick entfernt, und die gespeicherte Wahl
+schlägt den Standard — wer Symbole gewählt hat, bekommt sie bei jedem weiteren Besuch.
+
+**Die Tabelle kann entfernen.** Rechte Spalte „Aktion", ein zurückhaltender Textbutton statt einer
+Schaltflächenspalte. Kein Bestätigungsdialog (ADR-0031): Die Zeile bleibt stehen und sagt
+„Rückgängig". Karte und Tabelle teilen sich `useCollectionMutation` — dieselbe optimistische
+Änderung, dasselbe Zurückrollen, dieselbe Zielzustandsmutation (ADR-0027); verschieden ist nur
+das Aussehen.
+
+**Katalog: „In Besitz", nur angemeldet.** Ein Anzeigefilter im Abschnittskopf neben
+`Giants · 81 Figuren`, **standardmäßig aus** — der Katalog ist zuerst der Katalog. Er verengt den
+Pool, aus dem Raster **und** serienübergreifende Suche arbeiten, damit es keinen zweiten Pfad
+gibt, der ihn vergessen könnte. Er schreibt nichts und ändert das Besitzgold nicht: markiert wird
+weiterhin jede Karte. Wer abgemeldet ist, sieht das Bedienelement nicht — auf eine Frage ohne
+Antwort gehört kein Schalter.
+
+**Der Special-Umschalter fehlt weiterhin, und zwar absichtlich.** Die Datenlage aus 10d ist
+unverändert; ein Umschalter aus Namensheuristik wäre geraten (ADR-0034). Lieber kein Bedienelement
+als ein falsches — ein Test hält fest, dass es keins gibt. Ein Elementfilter fehlt aus demselben
+Grund (102 von 561), die Filterkomponente ist aber so geschnitten, dass er dort einzieht, sobald
+die Daten ihn tragen. Die Elementspalte der Tabelle bleibt und zeigt „—", wo nichts kuratiert ist.
+
+### 11. Offen
 
 Serienfarben als reine UI-Konvention · Sortierung der Vitrine (Serie, Wert, zuletzt
 hinzugefügt) · Mengenpflege über `2×` hinaus direkt auf der Karte · Shopangebot im Katalog,
 sobald der Shop öffentlich ist (ADR-0037) · ob die Sammlungskarte langfristig dieselbe
-Tipp-Geste bekommt wie die Katalogkarte.
+Tipp-Geste bekommt wie die Katalogkarte · ein späterer Completion-Scope (Basisfiguren gegen
+Sondereditionen) ist **ausdrücklich keine** V3-Entscheidung und wurde hier nicht vorbereitet.

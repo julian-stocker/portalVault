@@ -37,12 +37,9 @@ export default async function CatalogPage({
   const highlight = params.figure && /^SKY-[0-9]{4}$/.test(params.figure) ? params.figure : null;
 
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-6 md:py-8">
-      {/* Visible, small, and the first thing a QR visitor reads. No hero
-          block: `/` is the catalog itself (ADR-0025). */}
-      <h1 className="mb-4 text-lg font-semibold tracking-tight md:mb-3">
-        {de.catalog.heading}
-      </h1>
+    <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
+      {/* The heading lives inside CatalogView's intro panel since V3, so the
+          title, the subline and the tools read as one block (ADR-0038). */}
       <CatalogView
         figures={figures}
         series={series}

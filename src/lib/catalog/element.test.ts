@@ -5,6 +5,7 @@ import {
   ELEMENT_LABELS,
   asElement,
   elementChipClass,
+  elementPanelClass,
   elementLabel,
 } from "./element.ts";
 import { withCharacterElement } from "./queries.ts";
@@ -42,6 +43,7 @@ describe("the element table", () => {
     for (const element of ELEMENTS) {
       expect(elementLabel(element), element).toBeTruthy();
       expect(elementChipClass(element), element).toContain("element-");
+
     }
   });
 
@@ -140,5 +142,28 @@ describe("withCharacterElement", () => {
     const once = withCharacterElement([figure({ characterId: 2 })], elements);
     const twice = withCharacterElement(once, elements);
     expect(twice[0]).toBe(once[0]);
+  });
+});
+
+describe("the two element scales", () => {
+  it("gives the ivory card its own ink, and dark panels the lighter set", () => {
+    // Two grounds, two scales (ADR-0038, V3). Neither follows the colour
+    // scheme, because neither of their grounds does.
+    for (const element of ELEMENTS) {
+      expect(elementChipClass(element), element).toContain("element-ink-");
+      expect(elementPanelClass(element), element).not.toContain("element-ink-");
+      expect(elementPanelClass(element), element).toContain("element-");
+    }
+  });
+
+  it("keeps the two scales distinct for every element", () => {
+    for (const element of ELEMENTS) {
+      expect(elementChipClass(element)).not.toBe(elementPanelClass(element));
+    }
+  });
+
+  it("names both as text colours, so the label stays the signal", () => {
+    expect(elementChipClass("Fire")).toMatch(/^text-/);
+    expect(elementPanelClass("Fire")).toMatch(/^text-/);
   });
 });

@@ -82,7 +82,16 @@ export default async function FigurePage({ params }: Params) {
           </div>
         </div>
 
-        <div className="flex flex-col gap-5 md:col-span-2 md:pt-1">
+        {/* A ground of its own (ADR-0038, V3.3). The world runs behind the
+            top of every collector page, and the brightest part of it — the
+            portal — lands exactly here; a name and a price set straight on
+            that were the one place V3.2 still put text on artwork. */}
+        <div
+          className={
+            "flex flex-col gap-5 rounded-sky-lg bg-deep/85 p-5 ring-1 ring-gold-line " +
+            "backdrop-blur-sm md:col-span-2 md:p-6"
+          }
+        >
           <div className="flex flex-col gap-2">
             {/* The derived spelling — "Bash (Legendary)" where the stored
                 name is "Legendary Bash" (ADR-0030). The raw name stays in
@@ -112,7 +121,7 @@ export default async function FigurePage({ params }: Params) {
 
           {/* A reference market value, never a shop price (ADR-0033): the
               label says so, and nothing here offers to sell anything. */}
-          <div className="flex flex-col gap-0.5 border-y border-border py-4">
+          <div className="flex flex-col gap-0.5 border-y border-on-deep/15 py-4">
             <span className="text-xs text-muted">{de.catalog.marketValue}</span>
             <span
               className={

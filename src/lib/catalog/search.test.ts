@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { ALL_SERIES, buildSearchIndex, filterFigures, matchesQuery, normalizeForSearch } from "./search.ts";
+import {
+  ALL_SERIES,
+  buildSearchIndex,
+  filterFigures,
+  groupSearchResults,
+  matchesQuery,
+  normalizeForSearch,
+  ownedFigures,
+} from "./search.ts";
 import type { CatalogFigure } from "./types.ts";
 import { displayNameFor, parseVariant, searchFormsFor, sortPartsFor } from "./variant.ts";
 
@@ -137,5 +145,147 @@ describe("filterFigures", () => {
 
   it("keeps the incoming order", () => {
     expect(filterFigures(figures, { query: "ba" }).map((f) => f.name)).toEqual(["Bash", "Bat Spin"]);
+  });
+});
+
+describe("groupSearchResults — searching past the active tab", () => {
+  const SERIES = [
+    { code: "SA", label: "Spyro's Adventure" },
+    { code: "G", label: "Giants" },
+    { code: "SF", label: "Swap Force" },
+  ];
+  const make = (skyId: string, name: string, seriesCode: string): CatalogFigure => ({
+    skyId,
+    name,
+    slug: skyId.toLowerCase(),
+    seriesCode,
+    seriesLabel: seriesCode,
+    seriesPosition: 0,
+    categoryPosition: 0,
+    categoryName: "Figuren",
+    displayName: name,
+    sortBaseName: name,
+    sortVariantLabel: null,
+    searchIndex: buildSearchIndex([name]),
+    marketPrice: 10,
+    imageFile: null,
+    isActive: true,
+    element: null,
+    characterId: null,
+  });
+  const figures = [
+    make("SKY-0001", "Drobot", "SA"),
+    make("SKY-0002", "Bash", "SA"),
+    make("SKY-0100", "LightCore Drobot", "G"),
+    make("SKY-0200", "Drobot Redux", "SF"),
+  ];
+
+  it("answers with the active game first", () => {
+    const groups = groupSearchResults(figures, { query: "drobot", seriesCode: "SA", series: SERIES });
+    expect(groups[0]).toMatchObject({ code: "SA", active: true });
+    expect(groups[0].figures.map((f) => f.skyId)).toEqual(["SKY-0001"]);
+  });
+
+  it("then the other games, in the order the database gave", () => {
+    const groups = groupSearchResults(figures, { query: "drobot", seriesCode: "SA", series: SERIES });
+    expect(groups.map((g) => g.code)).toEqual(["SA", "G", "SF"]);
+    expect(groups.every((g) => g.code === "SA" || !g.active)).toBe(true);
+  });
+
+  it("never renders a game with no hits", () => {
+    const groups = groupSearchResults(figures, { query: "bash", seriesCode: "SA", series: SERIES });
+    expect(groups.map((g) => g.code)).toEqual(["SA"]);
+  });
+
+  it("keeps the active game even with nothing in it, so the answer is visible", () => {
+    // "Nothing in Spyro's Adventure, but two elsewhere" is the useful answer.
+    const groups = groupSearchResults(figures, { query: "drobot", seriesCode: "G", series: SERIES });
+    expect(groups[0]).toMatchObject({ code: "G", active: true });
+    expect(groups.map((g) => g.code)).toEqual(["G", "SA", "SF"]);
+  });
+
+  it("puts the active game first even when it is last in the database order", () => {
+    const groups = groupSearchResults(figures, { query: "drobot", seriesCode: "SF", series: SERIES });
+    expect(groups.map((g) => g.code)).toEqual(["SF", "SA", "G"]);
+  });
+
+  it("an empty query is every figure, still grouped", () => {
+    const groups = groupSearchResults(figures, { query: "", seriesCode: "SA", series: SERIES });
+    expect(groups.flatMap((g) => g.figures)).toHaveLength(4);
+  });
+
+  it("finds nothing without inventing a group", () => {
+    const groups = groupSearchResults(figures, { query: "zzz", seriesCode: "SA", series: SERIES });
+    expect(groups).toHaveLength(1);
+    expect(groups[0].figures).toEqual([]);
+  });
+});
+
+/**
+ * "In Besitz" (ADR-0038, V4.2).
+ *
+ * The catalog's one view filter. It narrows the pool the rest of the catalog
+ * works from, which is what makes it hold across the grid, the search and the
+ * cross-series results without a second code path.
+ */
+describe("the ownership filter", () => {
+  const catalog = [
+    figure({ skyId: "SKY-0001", name: "Bash", seriesCode: "SA" }),
+    figure({ skyId: "SKY-0002", name: "Boomer", seriesCode: "SA" }),
+    figure({ skyId: "SKY-0100", name: "Bouncer", seriesCode: "GI" }),
+    figure({ skyId: "SKY-0200", name: "Blast Zone", seriesCode: "SF" }),
+  ];
+  const owned = new Set(["SKY-0002", "SKY-0100"]);
+
+  it("keeps only what is owned, in catalog order", () => {
+    expect(ownedFigures(catalog, owned).map((f) => f.skyId)).toEqual(["SKY-0002", "SKY-0100"]);
+  });
+
+  it("crosses series: the filter is about ownership, not about a game", () => {
+    const codes = ownedFigures(catalog, owned).map((f) => f.seriesCode);
+    expect(new Set(codes)).toEqual(new Set(["SA", "GI"]));
+  });
+
+  it("changes nothing about the figures themselves", () => {
+    // Display only: no rewriting, no reordering, the same objects.
+    const [first] = ownedFigures(catalog, owned);
+    expect(first).toBe(catalog[1]);
+  });
+
+  it("returns nothing rather than everything when nothing is owned", () => {
+    // The failure that matters: an empty set must not read as "no filter".
+    expect(ownedFigures(catalog, new Set())).toEqual([]);
+  });
+
+  it("still searches inside the narrowed pool", () => {
+    // Both "B" figures in SA match the query; only the owned one survives.
+    const pool = ownedFigures(catalog, owned);
+    const hits = filterFigures(pool, { query: "bo", seriesCode: "SA" });
+    expect(hits.map((f) => f.skyId)).toEqual(["SKY-0002"]);
+  });
+
+  it("keeps the cross-series search grouped, with the active game first", () => {
+    const pool = ownedFigures(catalog, owned);
+    const groups = groupSearchResults(pool, {
+      query: "bo",
+      seriesCode: "GI",
+      series: [
+        { code: "SA", label: "Spyro's Adventure" },
+        { code: "GI", label: "Giants" },
+        { code: "SF", label: "Swap Force" },
+      ],
+    });
+    expect(groups[0]?.code).toBe("GI");
+    expect(groups.flatMap((g) => g.figures.map((f) => f.skyId))).toEqual([
+      "SKY-0100",
+      "SKY-0002",
+    ]);
+  });
+
+  it("survives a cleared search: the pool is not rebuilt by typing", () => {
+    const pool = ownedFigures(catalog, owned);
+    expect(filterFigures(pool, { query: "", seriesCode: "SA" }).map((f) => f.skyId)).toEqual([
+      "SKY-0002",
+    ]);
   });
 });

@@ -5,9 +5,12 @@
  * the canonical name is "Legendary Astroblast" (ADR-0030). The raw name stays
  * in the database untouched, and no name is parsed here.
  *
- * The card is the vitrine (ADR-0035): canvas → surface → plate. The middle
- * tone matters most in the dark theme, where a light plate straight on the
- * near-black canvas has nothing to sit on.
+ * The card is the lit display piece in a dark room (ADR-0038, V3): sky →
+ * ivory card → white plate. It is ivory in both colour schemes, exactly as
+ * the plate is white in both — "cards brighter than their surround" is the
+ * whole composition, and a card that inverted with the theme would take that
+ * away. Its text therefore uses the fixed `--on-card` ink rather than the
+ * theme-following `--foreground`.
  *
  * Design V2 took the frame off: no border, no colour cap, no check badge, no
  * bordered pill. V2.1 gave one back, and only one — a warm amber frame around
@@ -29,6 +32,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { FigureImage } from "@/components/catalog/figure-image";
+import { CollectedCrown } from "@/components/catalog/collected-crown";
 import {
   cardSurfaceClass,
   duplicateBadge,
@@ -93,6 +97,9 @@ export function FigureCard({
     <>
       <div className="relative">
         <FigureImage file={figure.imageFile} name={figure.displayName} />
+        {/* The seal, catalog only — `marksOwnership` is the same rule the
+            frame follows, so the two can never disagree. */}
+        {framed ? <CollectedCrown /> : null}
         {copies !== null ? (
           /* The only thing ever drawn over a figure, and only when it says
              something a label cannot: that there is more than one. Stays in
@@ -112,7 +119,10 @@ export function FigureCard({
       <div className="flex flex-1 flex-col gap-1.5 px-0.5">
         {/* Two lines at most. `title` keeps the full name reachable — the
             longest in the catalog is 39 characters. */}
-        <span className="line-clamp-2 text-sm leading-snug font-medium" title={figure.displayName}>
+        <span
+          className="line-clamp-2 text-sm leading-snug font-semibold text-on-card"
+          title={figure.displayName}
+        >
           {figure.displayName}
         </span>
 
@@ -122,8 +132,8 @@ export function FigureCard({
           {/* A reference market value, not a shop price (ADR-0033). */}
           <span
             className={
-              "text-[15px] leading-none font-semibold tabular-nums " +
-              (figure.marketPrice === null ? "text-muted" : "")
+              "text-base leading-none font-semibold tabular-nums " +
+              (figure.marketPrice === null ? "text-on-card-muted" : "text-on-card")
             }
           >
             {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
@@ -132,10 +142,10 @@ export function FigureCard({
           {showSeries || figure.element ? (
             <span className="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-tight">
               {showSeries ? (
-                <span className="min-w-0 truncate text-muted">{figure.seriesLabel}</span>
+                <span className="min-w-0 truncate text-on-card-muted">{figure.seriesLabel}</span>
               ) : null}
               {showSeries && figure.element ? (
-                <span aria-hidden="true" className="text-border-strong">
+                <span aria-hidden="true" className="text-card-border">
                   ·
                 </span>
               ) : null}
@@ -150,24 +160,26 @@ export function FigureCard({
           ) : null}
 
           {figure.isActive ? null : (
-            <span className="text-[11px] text-muted">{de.catalog.inactive}</span>
+            <span className="text-[11px] text-on-card-muted">{de.catalog.inactive}</span>
           )}
         </div>
       </div>
     </>
   );
 
-  const bodyClass = "flex flex-1 flex-col gap-2.5 text-left";
+  // `relative` so the content sits above the owned card's inner light,
+  // which is painted by ::after on the article.
+  const bodyClass = "relative flex flex-1 flex-col gap-2.5 text-left";
 
   return (
     /* h-full + flex-col so a row of cards ends at the same height, and the
        footer lands on one line no matter how long the names above it are. */
     <article
       className={
-        "group relative flex h-full flex-col overflow-hidden rounded-sky-lg p-2.5 " +
+        // `overflow-hidden` is gone: the owned frame draws inset rings via
+        // ::before/::after, and clipping would cut their corners.
+        "group relative flex h-full flex-col rounded-sky-lg p-2.5 " +
         "shadow-card transition-shadow hover:shadow-raised " +
-        // A warm ring and a slightly warmer surface, not a success state: no
-        // green, no glow, no second border weight. Catalog only.
         cardSurfaceClass(ownership, collected) +
         (highlighted ? " ring-2 ring-accent" : "")
       }
@@ -191,7 +203,7 @@ export function FigureCard({
         </Link>
       )}
 
-      {footer ? <div className="mt-2.5">{footer}</div> : null}
+      {footer ? <div className="relative mt-2.5">{footer}</div> : null}
     </article>
   );
 }

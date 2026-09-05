@@ -31,7 +31,7 @@ export default function CatalogLoading() {
         <Block className="h-11 w-full" />
         {/* Six games, spelled out, on a shared track — the geometry the
             segmented bar actually has since V2 (ADR-0038). */}
-        <div className="flex w-fit gap-1 rounded-sky-lg bg-border/40 p-1">
+        <div className="flex w-fit gap-1 rounded-sky-lg bg-deep/60 p-1 ring-1 ring-border/60">
           {/* Written out, not interpolated: Tailwind only emits classes it
               sees literally, so `w-${n}` would produce no width at all. */}
           {["w-32", "w-16", "w-28", "w-24", "w-32", "w-28"].map((width, index) => (
@@ -46,7 +46,7 @@ export default function CatalogLoading() {
           <div
             key={index}
             aria-hidden="true"
-            className="flex flex-col gap-2.5 rounded-sky-lg bg-surface p-2.5 shadow-card"
+            className="flex flex-col gap-2.5 rounded-sky-lg bg-card p-2.5 shadow-card ring-1 ring-card-border/70"
           >
             <div className="aspect-square w-full rounded-sky-md bg-border/50" />
             <Block className="h-4 w-3/4" />

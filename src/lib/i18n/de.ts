@@ -28,15 +28,25 @@ export const de = {
     heading: "Skylanders Katalog",
     seriesNav: "Serie wählen",
     /** Untertitel unter dem Wortzeichen im Katalogkopf. */
-    intro: "Alle Figuren, Marktpreise und was dir noch fehlt.",
+    intro: "Entdecke alle Figuren aus den Skylands.",
+    /** Suche über alle Serien: Trefferzahl je Serie und insgesamt. */
+    hitCount: (count: number) => (count === 1 ? "1 Treffer" : `${count} Treffer`),
+    searchTotal: (count: number) =>
+      count === 1 ? "1 Treffer im Katalog" : `${count} Treffer im Katalog`,
+    noHitsHere: "Keine Treffer in dieser Serie.",
     /** "1 Figur" / "561 Figuren". No grammar engine, just the one plural. */
     figureCount: (count: number) => (count === 1 ? "1 Figur" : `${count} Figuren`),
     /** With a series chosen: "Swap Force · 89 Figuren". */
     countInSeries: (series: string, count: number) =>
       `${series} · ${count === 1 ? "1 Figur" : `${count} Figuren`}`,
+    /** Anzeigefilter im Katalog-Sektionskopf. Nur für angemeldete Nutzer. */
+    ownedFilter: "In Besitz",
+    /** Wenn der Besitzfilter alles wegfiltert. */
+    ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",
     empty: "Keine Figuren gefunden.",
     emptyHint: "Versuche einen anderen Namen oder eine andere Serie.",
-    resetFilters: "Suche und Serie zurücksetzen",
+    /** Serie bleibt bestehen — zurückgesetzt werden Suche und Besitzfilter. */
+    resetFilters: "Filter zurücksetzen",
     loading: "Katalog wird geladen …",
     errorTitle: "Der Katalog konnte nicht geladen werden.",
     errorHint: "Das lag nicht an dir. Versuch es bitte noch einmal.",
@@ -91,7 +101,8 @@ export const de = {
   },
 
   collection: {
-    title: "Meine Sammlung",
+    title: "Sammlung",
+    subline: "Deine Skylanders. Deine Geschichte.",
     overview: "Überblick",
     statusFilter: "Sammlung filtern",
     collectedOf: (owned: number, total: number) => `${owned} von ${total} gesammelt`,
@@ -122,6 +133,24 @@ export const de = {
     stillMissing: (count: number) =>
       count === 1 ? "1 Figur fehlt noch" : `${count} Figuren fehlen noch`,
     missingLabel: "Fehlen noch",
+    /** Zusatzzeile, wenn der Duplikatfilter aktiv ist. */
+    duplicateLine: (figures: number, extra: number, value: string) =>
+      `${figures === 1 ? "1 Figur" : `${figures} Figuren`} mit Duplikaten · ` +
+      `${extra === 1 ? "1 zusätzliches Exemplar" : `${extra} zusätzliche Exemplare`} · ` +
+      `${value} Extra-Wert`,
+    filterLabel: "Filter",
+    /** Ansichtsumschalter und Tabellenkopf. */
+    viewLabel: "Ansicht",
+    view: { symbols: "Symbole", table: "Tabelle" } as Record<string, string>,
+    table: {
+      image: "Vorschau",
+      figure: "Figur",
+      series: "Serie",
+      element: "Element",
+      quantity: "Anzahl",
+      total: "Gesamtwert",
+      action: "Aktion",
+    },
     showcaseEmpty: "Deine Vitrine ist noch leer.",
     showcaseEmptyHint:
       "Im Katalog fügst du mit einem Tippen die erste Figur hinzu.",

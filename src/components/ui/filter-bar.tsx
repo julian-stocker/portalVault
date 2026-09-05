@@ -11,6 +11,10 @@
  * track also removes six borders from the screen, which was a large part of
  * why the page read as a form.
  *
+ * V3 seats the track in the dark world and gives the active segment a gold
+ * edge: on a deep ground a raised white chip was the only bright thing on the
+ * page and pulled the eye off the figures.
+ *
  * Below `sm:` it scrolls sideways — the one element in the product allowed
  * to. `.no-scrollbar` hides the track, not the scrolling.
  */
@@ -41,10 +45,10 @@ export function FilterBar({
       role="tablist"
       aria-label={label}
       className={
-        "no-scrollbar -mx-4 flex snap-x gap-1 overflow-x-auto px-4 sm:mx-0 sm:px-0 " +
-        // The track. Fits its content on a phone so it does not stretch to a
-        // full-width grey band behind three chips.
-        "sm:w-fit sm:rounded-sky-lg sm:bg-border/40 sm:p-1"
+        // Separate pills on the world rather than one enclosed track: the
+        // track was a control panel laid over the artwork, and the artwork is
+        // the point (ADR-0038, V3.1).
+        "no-scrollbar -mx-4 flex snap-x gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0"
       }
     >
       {options.map((option) => {
@@ -57,13 +61,12 @@ export function FilterBar({
             aria-selected={isActive}
             onClick={() => onSelect(option.value)}
             className={
-              "flex min-h-11 shrink-0 snap-start items-center rounded-sky-md px-3.5 " +
-              "text-sm whitespace-nowrap transition-colors sm:min-h-9 " +
+              "flex min-h-11 shrink-0 snap-start items-center rounded-full px-4 " +
+              "text-sm whitespace-nowrap shadow-card backdrop-blur-sm transition-colors sm:min-h-10 " +
               (isActive
-                ? // Raised out of the track rather than inverted: an active
-                  // segment is the one in front, not the one painted black.
-                  "bg-surface-raised font-medium text-foreground shadow-card"
-                : "font-normal text-muted hover:text-foreground")
+                ? "bg-accent-subtle font-semibold text-accent ring-1 ring-accent/70"
+                : "bg-deep/65 font-normal text-muted ring-1 ring-border/70 " +
+                  "hover:text-foreground hover:ring-border-strong")
             }
           >
             {option.label}
