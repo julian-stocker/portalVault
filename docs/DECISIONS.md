@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-04 (ADR-0035, visuelle Richtung).
+Letzte Aktualisierung: 2026-09-04 (ADR-0036, Hauptnavigation).
 
 ---
 
@@ -1494,3 +1494,73 @@ Elementfarben liegen bei ≥ 4,5:1 auf `surface`, damit sie später Text tragen 
 Glow (teuer, wirkt nach Gaming, müsste bei reduzierter Bewegung weg) · Hintergrundgradient und
 Bildbühne (technisch unmöglich, siehe oben) · Trading-Card-Look · reines Schwarz/Weiß als
 Grundflächen.
+
+### Nachtrag (Phase E): wie das Element tatsächlich erscheint
+
+Zwei zurückhaltende Elemente, beide aus **einer** Tabelle in `src/lib/catalog/element.ts`:
+
+| Ort | Darstellung |
+|---|---|
+| Figure Card | 2 px Akzentkappe an der **Kartenoberkante** · kleiner benannter Badge rechts neben dem Marktwert |
+| CharacterPanel | derselbe Badge in der Zeile „Element" |
+
+**Warum die Kappe an der Karte sitzt und nicht auf der Bildplatte:** Die Platte ist in beiden
+Themes hell, die Elementtokens folgen dem Theme. Auf der Platte wäre die helle Dark-Variante
+unlesbar. Auf `surface` stimmt der Kontrast in beiden Themes (≥ 4,5:1).
+
+**Verbindlich:**
+
+- **Quelle ist ausschließlich `characters.element`** über `character_id`. Keine Ableitung aus
+  Name, Kategorie, Serie oder Variante, kein Fallback, keine Default-Farbe.
+- **Der Badge trägt immer den Elementnamen**, nie nur einen Farbpunkt. `Tech`, `Earth` und
+  `Light` liegen im hellen Theme dicht beieinander — der Text löst das auf, die Farbe allein
+  könnte es nicht.
+- **Neutral ist der Standard, nicht der Mangel.** 459 der 561 Sammelobjekte tragen kein
+  Element; ohne Element gibt es weder Kappe noch Platzhalter, und die Karte ändert ihre Höhe
+  nicht.
+- **Elementfarben gelten nur für Elementsemantik.** Serienchips bleiben neutral; aus
+  Elementfarben werden keine Serien- oder Statusfarben abgeleitet.
+- Der Sammelstatus liegt oben rechts **auf der Platte**, das Element in der Metazeile
+  **darunter** — räumlich getrennt, damit keine Badge-Wolke entsteht.
+
+---
+
+## ADR-0036 — Die Hauptnavigation hat drei Ziele: Katalog · Sammlung · Profil
+
+**Status:** ANGENOMMEN (2026-09-04) · umgesetzt als Phase D des Visual Pass
+
+**Problem.** Die mobile Leiste trug vier Einträge, einer davon **Abmelden**. Damit konkurrierte
+eine Sitzungsaktion mit den drei eigentlichen Produktbereichen um den Daumenplatz — und der
+gefährlichste Eintrag lag direkt neben dem meistgenutzten. Zusätzlich reichten beide Layouts
+`active` fest verdrahtet durch: Der geschützte Bereich übergab `null`, wodurch auf
+`/collection` und `/settings` **nie** etwas hervorgehoben wurde.
+
+**Entscheidung.**
+
+1. **Drei Ziele, mehr nicht.** `Katalog` · `Sammlung` · `Profil` (abgemeldet: `Anmelden`).
+   Der Shop bekommt später **kein** viertes Dauerelement ohne neue Entscheidung.
+2. **Abmelden ist kein Navigationsziel** und liegt in `/settings`, sekundär, im Abschnitt
+   „Sitzung". Derselbe POST-Flow wie zuvor. Kein Danger-Look — es wird nichts gelöscht.
+3. **Die aktive Route kommt aus dem Pfad**, über eine reine Funktion
+   (`src/lib/nav/sections.ts`), nicht aus einem Prop je Layout. Eine Detailseite gehört zum
+   Katalog, Onboarding zum Profil, `/dashboard` zur Sammlung.
+4. **Die aktive Route wird nie allein über Farbe gezeigt**: Schriftgewicht plus ein
+   Akzentbalken — über dem Label in der Bodenleiste, darunter in der Kopfzeile — plus
+   `aria-current="page"`.
+5. **Die Wortmarke steht auch mobil.** Wer über einen QR-Code aus einem eBay-Paket kommt, muss
+   sofort sehen, wo er gelandet ist. Reine Typografie mit einem kleinen Akzentpunkt: kein
+   Bildasset, keine zusätzliche Schrift, kein Verlauf, kein Glow.
+6. **Ein Markup für beide Layouts.** Die Bodenleiste ist auf dem Telefon `fixed` und fällt
+   damit aus dem Fluss, sodass die Kopfzeile darüber nur die Wortmarke zeigt; ab `md:` wird
+   dieselbe Leiste statisch und rückt in die Kopfzeile. Keine zwei Navigationssysteme, keine
+   doppelten Links im DOM.
+
+**Konsequenzen.** `NavSpacer` und die Leiste rechnen beide mit
+`env(safe-area-inset-bottom)`, damit der Home-Indicator nichts verdeckt. Auth-Seiten
+übernehmen dieselbe Wortmarke und dieselbe Trennlinie, bleiben aber ohne Navigation — ein
+halb ausgefülltes Registrierungsformular ist nicht der Moment, andere Wege anzubieten.
+
+**Verworfen:** Abmelden als Icon in der Leiste (dasselbe Problem, kleinere Trefferfläche) ·
+Hamburger-Menü (verbirgt drei Ziele hinter einer Geste) · eine eigene Profilseite neben
+`/settings` (der Account-Bereich existiert bereits) · Icon-Bibliothek für die Navigation
+(Textlabels sind kürzer als jedes Icon-Set und lesen sich auf Deutsch eindeutig).

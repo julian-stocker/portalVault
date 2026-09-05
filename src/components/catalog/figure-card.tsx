@@ -18,6 +18,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { FigureImage } from "@/components/catalog/figure-image";
+import { elementAccentClass, elementChipClass, elementLabel } from "@/lib/catalog/element";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -42,10 +43,21 @@ export function FigureCard({
        action lands on one line no matter how long the names above it are. */
     <article
       className={
-        "flex h-full flex-col gap-2 rounded-sky-lg border bg-surface p-2 shadow-card " +
+        "relative flex h-full flex-col gap-2 overflow-hidden rounded-sky-lg border " +
+        "bg-surface p-2 shadow-card " +
         (highlighted ? "border-accent ring-2 ring-accent" : "border-border")
       }
     >
+      {figure.element ? (
+        /* A 2 px cap, nothing more. It sits on the card rather than on the
+           plate, because the plate is light in both themes while these
+           tokens follow the theme. A figure without a curated element simply
+           has no cap — that is the standard card, not a lesser one. */
+        <span
+          aria-hidden="true"
+          className={`absolute inset-x-0 top-0 h-0.5 ${elementAccentClass(figure.element)}`}
+        />
+      ) : null}
       {/* The whole card leads to the detail page; the action sits outside the
           link so a tap on it cannot navigate away by accident. */}
       <Link href={`/skylanders/${figure.slug}`} className="flex flex-1 flex-col gap-2">
@@ -76,16 +88,34 @@ export function FigureCard({
           {/* Pinned to the bottom of the text area, so price and series line
               up across a row whether a name took one line or two. */}
           <div className="mt-auto flex flex-col items-start gap-1">
-            {/* A reference market value, not a shop price (ADR-0033): same
-                size as the name, no emphasis, tabular figures so a column of
-                them reads as a column. */}
-            <span
-              className={
-                "text-sm tabular-nums " + (figure.marketPrice === null ? "text-muted" : "")
-              }
-            >
-              {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
-            </span>
+            <div className="flex w-full items-center justify-between gap-2">
+              {/* A reference market value, not a shop price (ADR-0033): same
+                  size as the name, no emphasis, tabular figures so a column
+                  of them reads as a column. */}
+              <span
+                className={
+                  "text-sm tabular-nums " + (figure.marketPrice === null ? "text-muted" : "")
+                }
+              >
+                {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+              </span>
+
+              {figure.element ? (
+                /* Named, never a bare coloured dot — the element has to be
+                   readable without colour perception. Sits opposite the
+                   collected badge, which is up on the plate, so the two
+                   never crowd each other. */
+                <span
+                  className={
+                    "shrink-0 rounded-full border border-current/40 px-1.5 py-0.5 " +
+                    "text-[11px] leading-none font-medium " +
+                    elementChipClass(figure.element)
+                  }
+                >
+                  {elementLabel(figure.element)}
+                </span>
+              ) : null}
+            </div>
 
             <span className="max-w-full truncate rounded-full border border-border px-1.5 py-0.5 text-[11px] text-muted">
               {figure.seriesLabel}

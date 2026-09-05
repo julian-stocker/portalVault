@@ -11,7 +11,7 @@ export default async function PublicLayout({ children }: { children: React.React
 
   return (
     <div className="min-h-screen">
-      <SiteNav signedIn={Boolean(data.user)} active="catalog" />
+      <SiteNav signedIn={Boolean(data.user)} />
       {children}
       <NavSpacer />
     </div>

@@ -18,8 +18,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <div className="min-h-screen">
       {/* The same navigation the public catalog uses — one component, two
-          mounts, rather than two systems to keep in step. */}
-      <SiteNav signedIn active={null} />
+          mounts, rather than two systems to keep in step. The active section
+          comes from the path, so /collection and /settings light up too. */}
+      <SiteNav signedIn />
       {children}
       <NavSpacer />
     </div>

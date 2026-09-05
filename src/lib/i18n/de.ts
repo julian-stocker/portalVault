@@ -101,6 +101,7 @@ export const de = {
   },
 
   nav: {
+    primary: "Hauptnavigation",
     catalog: "Katalog",
     collection: "Sammlung",
     settings: "Profil",
@@ -152,6 +153,8 @@ export const de = {
     },
     settings: {
       title: "Einstellungen",
+      sessionSection: "Sitzung",
+      sessionHint: "Du bleibst auf diesem Gerät angemeldet, bis du dich abmeldest.",
       usernameSection: "Benutzername",
       usernameSaved: "Benutzername geändert.",
       passwordSection: "Passwort",

@@ -9,15 +9,18 @@
  * Nothing here is derived from the figure's name. What is shown was curated
  * by hand (ADR-0034).
  */
+import type { ReactNode } from "react";
+
 import type { Character } from "@/lib/catalog/character";
+import { elementChipClass, elementLabel } from "@/lib/catalog/element";
 import { de } from "@/lib/i18n/de";
 import { formatDate } from "@/lib/format";
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4">
       <dt className="text-sm text-muted">{label}</dt>
-      <dd className="text-sm font-medium">{value}</dd>
+      <dd className="text-sm font-medium">{children}</dd>
     </div>
   );
 }
@@ -32,7 +35,25 @@ export function CharacterPanel({
 }) {
   const role = character.roleType ? de.character.roles[character.roleType] : null;
   const rows = [
-    character.element ? { label: de.character.element, value: character.element } : null,
+    character.element
+      ? {
+          label: de.character.element,
+          // Same chip as the figure card, from the same table (ADR-0035).
+          // The element belongs to the character, which is why it reads more
+          // naturally here than on any single collectible.
+          value: (
+            <span
+              className={
+                "inline-block rounded-full border border-current/40 px-2 py-0.5 " +
+                "text-xs leading-none font-medium " +
+                elementChipClass(character.element)
+              }
+            >
+              {elementLabel(character.element)}
+            </span>
+          ),
+        }
+      : null,
     character.species ? { label: de.character.species, value: character.species } : null,
     role ? { label: de.character.role, value: role } : null,
     firstReleaseLabel ? { label: de.character.firstRelease, value: firstReleaseLabel } : null,
@@ -49,7 +70,9 @@ export function CharacterPanel({
       {rows.length > 0 ? (
         <dl className="mt-3 flex flex-col gap-1.5">
           {rows.map((row) => (
-            <Row key={row.label} label={row.label} value={row.value} />
+            <Row key={row.label} label={row.label}>
+              {row.value}
+            </Row>
           ))}
         </dl>
       ) : null}

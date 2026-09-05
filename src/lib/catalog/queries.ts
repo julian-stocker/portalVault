@@ -13,7 +13,8 @@
  *
  * The browser never talks to the database — it receives the result (ADR-0026).
  */
-import type { Character } from "@/lib/catalog/character";
+import type { Character, Element } from "@/lib/catalog/character";
+import { asElement } from "@/lib/catalog/element";
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
@@ -96,6 +97,8 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     imageFile: row.image_file,
     isActive: row.is_active,
     characterId: row.character_id,
+    // Filled in by withCharacterElement() once the character index is known.
+    element: null,
   };
 }
 
@@ -158,12 +161,49 @@ export function withCharacterSearch(
   });
 }
 
-/** id -> canonical name for every curated character. Nineteen rows today. */
-export async function fetchCharacterNames(): Promise<Map<number, string>> {
+/**
+ * Attaches the curated element to each linked figure.
+ *
+ * Separate from the search pass so each stays one job, and so a test can
+ * prove the obvious thing: a figure without a character keeps `element: null`
+ * no matter what its name looks like.
+ */
+export function withCharacterElement(
+  figures: readonly CatalogFigure[],
+  elements: ReadonlyMap<number, Element | null>,
+): CatalogFigure[] {
+  return figures.map((figure) => {
+    if (figure.characterId === null) return figure;
+    const element = elements.get(figure.characterId) ?? null;
+    return element === figure.element ? figure : { ...figure, element };
+  });
+}
+
+export type CharacterIndex = Map<number, { canonicalName: string; element: Element | null }>;
+
+/** id -> name and element for every curated character. Nineteen rows today. */
+export async function fetchCharacterIndex(): Promise<CharacterIndex> {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("characters").select("id, canonical_name");
+  const { data, error } = await supabase.from("characters").select("id, canonical_name, element");
   if (error) throw new Error(`characters: ${error.message}`);
-  return new Map((data ?? []).map((row) => [row.id as number, row.canonical_name as string]));
+  return new Map(
+    (data ?? []).map((row) => [
+      row.id as number,
+      {
+        canonicalName: row.canonical_name as string,
+        element: asElement(row.element as string | null),
+      },
+    ]),
+  );
+}
+
+/** Convenience views of the index, so callers do not re-map it each time. */
+export function characterNames(index: CharacterIndex): Map<number, string> {
+  return new Map([...index].map(([id, entry]) => [id, entry.canonicalName]));
+}
+
+export function characterElements(index: CharacterIndex): Map<number, Element | null> {
+  return new Map([...index].map(([id, entry]) => [id, entry.element]));
 }
 
 /**
@@ -213,8 +253,10 @@ export async function fetchCatalog(): Promise<CatalogFigure[]> {
   );
   // The catalog already holds every collectible name, so the variant rule
   // needs no extra query here.
+  const index = await fetchCharacterIndex();
   const withNames = withVariants(figures, buildNameIndex(figures));
-  return sortFigures(withCharacterSearch(withNames, await fetchCharacterNames()));
+  const withSearch = withCharacterSearch(withNames, characterNames(index));
+  return sortFigures(withCharacterElement(withSearch, characterElements(index)));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */
@@ -301,11 +343,16 @@ export async function fetchFigureDetail(slug: string): Promise<FigureDetail | nu
       .filter((row) => row.skyId !== figure.skyId),
   );
   const nameIndex = await fetchNameIndex();
-  const related = sortFigures(withVariants(siblings, nameIndex));
+  const character = characterResult.data ? toCharacter(characterResult.data as CharacterRow) : null;
+
+  // Every figure here shares the one character, so its element applies to
+  // all of them — no second query, and still no derivation from a name.
+  const elements = new Map([[figure.characterId, character?.element ?? null]]);
+  const related = sortFigures(withCharacterElement(withVariants(siblings, nameIndex), elements));
 
   return {
-    figure,
-    character: characterResult.data ? toCharacter(characterResult.data as CharacterRow) : null,
+    figure: withCharacterElement([figure], elements)[0],
+    character,
     related,
   };
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/auth-form";
+import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { currentProfile, setUsernameAction, updatePasswordAction } from "@/lib/auth/actions";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
@@ -54,6 +55,22 @@ export default async function SettingsPage() {
             },
           ]}
         />
+      </section>
+
+      {/* Signing out is not a navigation destination, so it left the main
+          navigation and lives here instead (ADR-0036). Same POST route as
+          before — no new logout implementation, and nothing is deleted, so
+          it carries no danger styling. */}
+      <section className="flex flex-col gap-4">
+        <h2 className="text-sm font-medium tracking-wide text-muted uppercase">
+          {de.auth.settings.sessionSection}
+        </h2>
+        <p className="text-sm text-muted">{de.auth.settings.sessionHint}</p>
+        <form action="/auth/signout" method="post">
+          <button type="submit" className={ACTION_NEUTRAL}>
+            {de.nav.signOut}
+          </button>
+        </form>
       </section>
     </main>
   );

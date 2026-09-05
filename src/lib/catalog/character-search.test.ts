@@ -44,6 +44,7 @@ function figure(name: string, characterId: number | null): CatalogFigure {
     marketPrice: null,
     imageFile: null,
     isActive: true,
+    element: null,
     characterId,
   };
 }

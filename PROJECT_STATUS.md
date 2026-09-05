@@ -41,6 +41,17 @@ NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis d
 jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
 meldet 31/32 mit genau diesem Hinweis.
 
+**Visual Pass Phase E implementiert (2026-09-05, ADR-0035 Nachtrag).** Die kuratierten
+Elementdaten erscheinen als zweite, sehr zurückhaltende Ebene: 2 px Akzentkappe an der
+Kartenoberkante und ein benannter Badge neben dem Marktwert, dazu derselbe Badge im
+CharacterPanel. **102 der 561 Sammelobjekte** tragen ein Element (104 verknüpft, davon Kaos
+bewusst ohne); die übrigen 459 bleiben neutral — der Standard, nicht der Mangel.
+
+**Visual Pass Phase D implementiert (2026-09-04, ADR-0036).** Die Hauptnavigation trägt drei
+Ziele — Katalog, Sammlung, Profil. Abmelden ist in `/settings` gewandert, die aktive Route wird
+aus dem Pfad abgeleitet statt je Layout durchgereicht, und die Wortmarke steht jetzt auch auf
+dem Telefon. Bodenleiste und Abstandhalter berücksichtigen `env(safe-area-inset-bottom)`.
+
 **Visual Pass Phase A implementiert (2026-09-04, ADR-0035).** Die Oberfläche hat eine
 Token-Grundlage: Flächen, Text, Linien, Akzent, Status, Radius, Schatten und die zehn
 Elementfarben (definiert, noch nicht verwendet). Tragender Token ist **`plate`** — die helle
@@ -471,6 +482,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0033** | **Fünf Preisebenen; Marktpreis ≠ Shoppreis; Bestellpositionen speichern einen Preis-Snapshot** — dokumentiert, **nicht implementiert** |
 | **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
 | **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
+| **0036** | **Hauptnavigation mit drei Zielen; Abmelden gehört nach `/settings`; aktive Route aus dem Pfad** |
 
 ## Offene Entscheidungen
 

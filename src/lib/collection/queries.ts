@@ -7,11 +7,14 @@
  */
 import {
   FIGURE_COLUMNS,
+  characterElements,
+  fetchCharacterIndex,
   fetchNameIndex,
   loadLookups,
   toFigure,
-  withVariants,
   type FigureRow,
+  withCharacterElement,
+  withVariants,
 } from "@/lib/catalog/queries";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CollectionEntry } from "@/lib/catalog/types";
@@ -50,9 +53,10 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
   const { data: auth } = await supabase.auth.getUser();
   if (!auth.user) return [];
 
-  const [lookups, nameIndex, result] = await Promise.all([
+  const [lookups, nameIndex, characterIndex, result] = await Promise.all([
     loadLookups(),
     fetchNameIndex(),
+    fetchCharacterIndex(),
     // skylanders(...) embeds fine: collection_items has a direct foreign key
     // to it. Only the series would need a hop that does not exist.
     supabase.from("collection_items").select(`sky_id, quantity, skylanders(${FIGURE_COLUMNS})`),
@@ -65,8 +69,12 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
     entries.push({ quantity: row.quantity, figure: toFigure(row.skylanders, lookups) });
   }
 
-  // Same derived display name as the catalog, from the same function.
-  const enriched = withVariants(entries.map((e) => e.figure), nameIndex);
+  // Same derived display name and the same element as the catalog, from the
+  // same functions — a collection card must not look different.
+  const enriched = withCharacterElement(
+    withVariants(entries.map((e) => e.figure), nameIndex),
+    characterElements(characterIndex),
+  );
   entries.forEach((entry, index) => {
     entry.figure = enriched[index];
   });

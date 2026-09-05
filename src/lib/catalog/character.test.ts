@@ -48,6 +48,7 @@ function figure(skyId: string, seriesCode: string, seriesPosition: number): Cata
     marketPrice: null,
     imageFile: null,
     isActive: true,
+    element: null,
     characterId: 1,
   };
 }

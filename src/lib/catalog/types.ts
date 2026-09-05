@@ -5,6 +5,8 @@
  * Whatever the database grows, the browser keeps receiving this and nothing
  * more (ADR-0026).
  */
+import type { Element } from "@/lib/catalog/character";
+
 export type CatalogFigure = {
   /** Permanent identity. Every relation hangs off this, never off the slug. */
   skyId: string;
@@ -37,6 +39,14 @@ export type CatalogFigure = {
   /** Content-addressed WebP file name, or null when no image exists. */
   imageFile: string | null;
   isActive: boolean;
+  /**
+   * The curated character's element, or null.
+   *
+   * Comes only from `characters.element` by way of `characterId` — never
+   * from the name, the category or the series (ADR-0034). Null is the normal
+   * case, not missing data.
+   */
+  element: Element | null;
   /**
    * Curated character link, or null.
    *
