@@ -41,6 +41,14 @@ NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis d
 jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
 meldet 31/32 mit genau diesem Hinweis.
 
+**Visual Pass Phase F implementiert (2026-09-05).** Der Katalog hat einen kompakten Kopf
+(„Skylanders Katalog"), eine Serienleiste aus Kurzcodes — **alle sieben Tabs passen auf 360 px**,
+statt „Swap Forc…" als Dauerzustand —, eine Kontextzeile („Trap Team · 141 Figuren"), einen
+Empty State mit Zurücksetzen und Skeleton- sowie Fehlerzustände. Suchwerkzeuge sind ab `md:`
+sticky, mobil nicht. **Keine Serienfarben** — begründet in `docs/ARCHITECTURE.md` 3c und
+ADR-0035. Dabei ein Architekturbefund: eine `loading.tsx` über einer Route mit `notFound()`
+zerstört den 404-Status; der Katalog liegt deshalb in einer eigenen Route-Group.
+
 **Visual Pass Phase E implementiert (2026-09-05, ADR-0035 Nachtrag).** Die kuratierten
 Elementdaten erscheinen als zweite, sehr zurückhaltende Ebene: 2 px Akzentkappe an der
 Kartenoberkante und ein benannter Badge neben dem Marktwert, dazu derselbe Badge im

@@ -25,10 +25,20 @@ export const de = {
     searchLabel: "Figur suchen",
     searchPlaceholder: "Name eingeben …",
     allSeries: "Alle",
-    resultCount: (shown: number, total: number) =>
-      shown === total ? `${total} Figuren` : `${shown} von ${total} Figuren`,
-    empty: "Keine Figur gefunden.",
+    heading: "Skylanders Katalog",
+    seriesNav: "Serie wählen",
+    /** "1 Figur" / "561 Figuren". No grammar engine, just the one plural. */
+    figureCount: (count: number) => (count === 1 ? "1 Figur" : `${count} Figuren`),
+    /** With a series chosen: "Swap Force · 89 Figuren". */
+    countInSeries: (series: string, count: number) =>
+      `${series} · ${count === 1 ? "1 Figur" : `${count} Figuren`}`,
+    empty: "Keine Figuren gefunden.",
     emptyHint: "Versuche einen anderen Namen oder eine andere Serie.",
+    resetFilters: "Suche und Serie zurücksetzen",
+    loading: "Katalog wird geladen …",
+    errorTitle: "Der Katalog konnte nicht geladen werden.",
+    errorHint: "Das lag nicht an dir. Versuch es bitte noch einmal.",
+    retry: "Erneut versuchen",
     noImage: "Kein Bild",
     noPrice: "Preis offen",
     collect: "+ Sammlung",

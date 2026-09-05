@@ -38,7 +38,11 @@ export default async function CatalogPage({
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6 md:py-8">
-      <h1 className="sr-only">{de.catalog.title}</h1>
+      {/* Visible, small, and the first thing a QR visitor reads. No hero
+          block: `/` is the catalog itself (ADR-0025). */}
+      <h1 className="mb-4 text-lg font-semibold tracking-tight md:mb-3">
+        {de.catalog.heading}
+      </h1>
       <CatalogView
         figures={figures}
         series={series}

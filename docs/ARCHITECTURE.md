@@ -159,6 +159,32 @@ Ein einziger `:focus-visible`-Stil gilt global, und `prefers-reduced-motion` sch
 Bewegung ab. Elementfarben stammen ausschließlich aus kuratiertem `characters.element`
 (ADR-0034) — nie aus Namen.
 
+### 3c. Loading-Grenzen und der 404-Status
+
+**Eine `loading.tsx` über einer Route, die `notFound()` aufruft, kostet den 404-Status.**
+Die Antwort beginnt zu streamen, sobald die Suspense-Grenze greift — der Header ist dann schon
+mit `200` verschickt und lässt sich nicht mehr ändern.
+
+Am eigenen Code gemessen: mit `(public)/loading.tsx` lieferte `/skylanders/gibtsnicht`
+**200 statt 404**; ohne sie wieder 404. Ein Skeleton direkt in `skylanders/[slug]/` hatte
+denselben Effekt.
+
+Daraus folgt die heutige Struktur:
+
+```
+(public)/
+  layout.tsx              Navigation
+  error.tsx               Fehlergrenze für alles darunter
+  (catalog)/              Route-Group — ändert die URL nicht
+    page.tsx              der Katalog auf "/"
+    loading.tsx           Skeleton, umschließt NUR den Katalog
+  skylanders/[slug]/
+    page.tsx              ruft notFound() — keine Suspense-Grenze darüber
+```
+
+Die Detailseite bekommt bewusst **kein** Skeleton: Sie rendert in rund 0,63 s, und ein
+korrekter 404 ist mehr wert als ein Ladeplatzhalter auf einer schnellen Seite.
+
 ### 3a. Projektsprache (ADR-0019)
 
 > **Die technische Projektsprache ist Englisch. Die Oberflächensprache von V1 ist Deutsch.**

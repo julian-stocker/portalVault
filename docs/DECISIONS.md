@@ -1523,6 +1523,16 @@ unlesbar. Auf `surface` stimmt der Kontrast in beiden Themes (≥ 4,5:1).
 - Der Sammelstatus liegt oben rechts **auf der Platte**, das Element in der Metazeile
   **darunter** — räumlich getrennt, damit keine Badge-Wolke entsteht.
 
+### Nachtrag (Phase F): keine Serienfarben
+
+Serienfarben waren erlaubt und wurden **nicht** eingeführt. Die Serienleiste sitzt unmittelbar
+über dem Kartenraster, und die Karten tragen bereits zehn Elementfarben. Ein zweites
+Farbsystem in Sichtweite hätte genau die Verwechslung erzeugt, die diese ADR ausschließen
+will — „Orange heißt Fire und gleichzeitig Giants". Die aktive Serie wird deshalb wie jeder
+andere aktive Zustand markiert, und die Serienidentität trägt der Kurzcode plus der
+ausgeschriebene Name in der Kontextzeile. `src/lib/catalog/series-nav.ts` enthält bewusst
+keine Farbe; ein Test hält das fest.
+
 ---
 
 ## ADR-0036 — Die Hauptnavigation hat drei Ziele: Katalog · Sammlung · Profil
