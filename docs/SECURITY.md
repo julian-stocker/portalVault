@@ -83,6 +83,46 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
 **Nichts davon ist implementiert.** Es gibt keine Shop-Tabelle, keinen Shop-Import und keine
 Shop-Rolle.
 
+### Shop-Grenzen (ADR-0037) — **nichts davon existiert**
+
+**Die Berechtigung darf nicht in `profiles` liegen.** An der Migration nachgelesen:
+`grant select, insert, update on public.profiles to authenticated` ist **tabellenweit**, und
+`profiles_update_own` erlaubt jedem Nutzer das Update seiner eigenen Zeile. Eine Spalte
+`profiles.role` wäre damit selbst vergebbar. Die Shop-Rolle bekommt deshalb eine eigene
+Tabelle ohne jedes Client-Recht und wird nur über `public.is_shop_admin()`
+(`security definer`) abgefragt.
+
+**Sichtbarkeitsgrenzen des späteren Shops:**
+
+| Öffentlich lesbar | Niemals öffentlich |
+|---|---|
+| `is_listed`, `sale_price` | **die exakte Stückzahl** — `quantity` und `reserved` |
+| abgeleiteter Rabatt und Endpreis | `shop_inventory.note` (interne Notizen) |
+| „Auf Lager" / „Nicht auf Lager" | `inventory_movements` **vollständig** — Bewegungen, Gründe, Notizen, Bearbeiter |
+| | Einkaufspreise, sobald es sie gibt |
+| | Bestellungen fremder Nutzer |
+| | jede Bestandskorrektur |
+
+**Die exakte Stückzahl bleibt intern** (ADR-0037 § 8). Öffentlich erscheint ausschließlich ein
+abgeleiteter Zustand aus `quantity - reserved`: über null „Auf Lager", sonst „Nicht auf Lager".
+Kein „Noch 17 verfügbar". Eine sichtbare Rabattstufe verrät später ohnehin einen groben
+Bestand (ADR-0033) — die genaue Zahl zusätzlich preiszugeben wäre Geschäftsinformation ohne
+Nutzen für den Käufer. Die Zahl selbst ist nur in `/shop-admin` sichtbar.
+
+**Die konkrete Geschäfts-E-Mail ist keine Autorisierungsregel und wird nicht im Produktcode
+hardcodiert.** Autorisiert wird ausschließlich über die stabile `user_id` und `shop_admins`.
+Das spätere Rollenvergabewerkzeug erhält die Account-Adresse lediglich als **explizite
+Eingabe** und löst daraus den bestehenden Auth-User beziehungsweise dessen `user_id` auf.
+Aus demselben Grund wird die Adresse in der Dokumentation nicht als Wert geführt, sondern nur
+als „der Geschäftsaccount" bezeichnet.
+
+**Normale Collector-Accounts dürfen Shopbestand niemals verändern** — keine schreibende Policy,
+kein Schreibrecht, und jede Mutation läuft über eine `security definer`-Funktion, die
+`is_shop_admin()` prüft. Dieselbe dreifache Absicherung wie beim Katalog.
+
+**`inventory_movements` ist ein Anhängejournal.** Kein `UPDATE`, kein `DELETE` — auch nicht für
+Shop-Admins. Eine falsche Bewegung wird durch eine Gegenbewegung korrigiert, nicht überschrieben.
+
 ### `data/characters/characters.json` gehört ausdrücklich **nicht** auf die Verbotsliste
 
 Diese Datei liegt im Repository und darf das. Sie ist **öffentliche Produktinformation über

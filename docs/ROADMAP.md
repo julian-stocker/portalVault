@@ -268,8 +268,8 @@ auf dem Tracker aufsetzt statt in ihn hinein.
 
 **Zwei Nutzungskontexte.** Der private Account des Betreibers bleibt ein normaler
 Collector-Account (gesammelt, entfernen, später Mengen, später Wanted). Der Geschäftsaccount
-`yulezcollectibles@gmail.com` trägt später **zusätzlich** Shop-Admin-Rechte: Lagerbestand,
-Verkaufspreise, Verfügbarkeit, später Bestellungen, ggf. Referenz-Marktpreise.
+ist ebenfalls ein normaler Auth-User und trägt später **zusätzlich** Shop-Admin-Rechte:
+Lagerbestand, Verkaufspreise, Verfügbarkeit, später Bestellungen, ggf. Referenz-Marktpreise.
 
 > **Die E-Mail-Adresse ist niemals die Berechtigungsregel.** Sie identifiziert nur das Konto.
 > Später braucht es eine echte, serverseitig geprüfte Rolle wie `shop_admin`, die ein Benutzer
@@ -308,9 +308,38 @@ ist Geschäftsinventar: `O` = insgesamt jemals eingekauft, `S` = insgesamt verka
 Die **weiter hinten liegenden O/C/S/D-Blöcke (OVERALL / COLLECTION / SOLD / DUPLICATES) sind
 die private Sammlung und müssen beim Shop-Import ignoriert werden.** Keine Importlogik jetzt.
 
-**Später wahrscheinlich nötige Strukturen** — konzeptionelle Richtung, **keine Migration,
-keine Tabelle jetzt**: Shop-Inventar · Shoppreise · Shop-Admin-Berechtigungen · Rabattregeln ·
-Coupons · Bestellungen · Bestellpositionen mit Preis-Snapshot.
+**Später nötige Strukturen** — seit 2026-09-05 konkret entworfen (ADR-0037,
+`docs/DATABASE.md` Abschnitt 7), **weiterhin keine Migration und keine Tabelle**:
+`shop_admins` · `shop_inventory` · `inventory_movements` · später `orders` und `order_items`
+mit Preis-Snapshot.
+
+**Festgelegte Reihenfolge der Umsetzung** (ADR-0037 § 9):
+
+**Schritt 1 — Shop Foundation.** `shop_admins`, `is_shop_admin()`, `shop_inventory`,
+`inventory_movements`, Constraints, RLS, sichere Bestandsmutationen.
+
+**Schritt 2 — Legacy Inventory Import.** Excel **read-only**, nur die Geschäftsspalte F
+(Difference), SKY-ID-Mapping, Dry-Run als Standard, explizites `--apply`, Anfangsbestand plus
+passende Initialbewegung mit `unit_cost = NULL` — die Legacy kennt keinen belegbaren Einstand
+(`docs/SKYLANDERS_DATA.md` 11d), und ein geschätzter wäre schlechter als keiner.
+
+**Schritt 3 — `/shop-admin`.** Erst danach UI — der Adminbereich soll gegen echtes Datenmodell
+und echten Bestand entstehen, nicht gegen Mock-Strukturen.
+
+**Danach**, nicht Teil der Foundation: Shopanzeige im Katalog und auf der Detailseite ·
+`/shop` als eigene Route · „Fehlend & verfügbar" in der Sammlung · Bestellungen, Reservierung
+und Zahlung.
+
+**Shop V1 verkauft** ausschließlich reguläre öffentliche Sammelobjekte — **nicht** die acht
+internen SWAP-Halbfiguren und **nicht** die acht Softwaretitel mit Bestand. Öffentlich
+erscheint nur „Auf Lager" / „Nicht auf Lager", nie eine Stückzahl.
+
+**Collector Catalog Normalization — eigener späterer Schritt.** Die 46 auffälligen
+Legacy-Zeilen (OVP-, `- ohne OVP`- und `(2)`-Varianten, `docs/SKYLANDERS_DATA.md` 11b) werden
+**bewusst nicht** im Zuge des Shops bereinigt. Dort wird später entschieden: welche Zeilen
+echte Sammelobjekte bleiben, welche aus der Completion verschwinden, wie Zustandspreise
+erhalten bleiben, ob die Zahl 561 sinkt und ob `collection_items` migriert werden müssen.
+**Kein Blocker für das Shop-Fundament.**
 
 **Integration statt zweiter Anwendung.** Katalog, Sammlung und Shop nutzen dieselbe kanonische
 Figur. Langfristig denkbar, ausdrücklich **nicht** Bestandteil der aktuellen Version:
@@ -325,10 +354,19 @@ SkyIsles an, die gekauften Figuren zur Sammlung hinzuzufügen.
 | Welche Rabattart hat Vorrang, wenn beide greifen? | jeder Rabattlogik |
 | Endgültige Rabattschwellen und Prozentsätze | jeder Rabattlogik |
 | Coupon-Details: Gültigkeitszeitraum, Mindestbestellwert, Nutzungslimit, kundenspezifische Einmalcodes | jeder Coupon-Struktur |
-| Wie wird `shop_admin` technisch getragen und vergeben? | jeder Shop-Schreiboperation |
 | Welcher Payment-Provider, und welche Daten liegen dann bei ihm statt bei uns? | jedem Checkout |
-| Wird der öffentliche Lagerbestand als Zahl oder nur als Zustand ausgeliefert? | jeder öffentlichen Shop-Anzeige |
+| Versand und Rückgabe | jedem Checkout |
+| Wie lange hält eine Reservierung? | jedem Checkout |
+| **Steuerverfahren, insbesondere Differenzbesteuerung** (steuerliche, keine technische Frage) | den ersten Bestellungen |
+| Werden Einkäufe künftig mit Stückpreis erfasst? | **dem ersten Wareneingang über `/shop-admin`** — danach unwiederbringlich |
+| Chargen / FIFO / Einzelzuordnung | erst bei konkreter Anforderung; aus `unit_cost` später ableitbar |
+| Lückenlose Rechnungsnummerierung | den ersten Bestellungen |
 | Ist der Shop an dieselbe Wachstumsbedingung geknüpft wie der Marketplace (ADR-0021)? | jeder Umsetzungsplanung |
+
+Entschieden und damit **nicht mehr offen** (ADR-0037): wie `shop_admin` getragen und vergeben
+wird · ob der öffentliche Lagerbestand als Zahl erscheint (nein) · welche `condition`-Werte es
+gibt (`loose`, `boxed`) · ob SWAP-Hälften und Software in V1 verkauft werden (nein) · ob ein
+`catalog_visible` eingeführt wird (nein).
 
 **Community-Ebene — ausdrücklich nicht in V1**
 
@@ -342,7 +380,11 @@ beim Marketplace — nachweisliche Nutzung der Sammlungsplattform (ADR-0021).
 **Weitere**
 
 - Öffentliche Benutzerprofile und öffentlich schaltbare Sammlungen (in V1 ausgeschlossen)
-- Zustand je Exemplar (OVP, lose, beschädigt) → Unique-Index auf `collection_items` entfernen
+- Zustand je Exemplar in der **privaten Sammlung** (OVP, lose, beschädigt) → Unique-Index auf
+  `collection_items` entfernen. Nicht zu verwechseln mit `shop_inventory.condition`: das ist
+  Geschäftsbestand und hat mit der Sammlung nichts zu tun.
+- Weitere `condition`-Werte im Shop über `loose` und `boxed` hinaus
+- eBay-Automatisierung: `channel` und `external_reference` an den Bewegungen
 - Preisverlauf und historische Marktpreise (`price_history`)
 - Mehrere Preisquellen, teilautomatisierte Preisermittlung
 - Admin-Bereich für Katalogpflege (Ablösung der Excel als Katalogquelle)

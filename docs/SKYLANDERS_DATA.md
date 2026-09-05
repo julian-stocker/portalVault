@@ -479,6 +479,143 @@ verschiedene Objekte meint.
 
 ---
 
+## 11b. Verpackungs- und Zweitexemplarzeilen im Katalog (read-only Befund, 2026-09-05)
+
+**46 der 561 Sammelobjekte sind 16 Gruppen derselben physischen Figur.** Gefunden bei der
+Shop-Architekturanalyse, ausschließlich lesend.
+
+| Muster | Zeilen | Beispiel |
+|---|---|---|
+| `Elite X` / `Elite X - ohne OVP` / `Elite X (2)` | 42 (14 Gruppen) | `Elite Boomer` 69,99 € · `- ohne OVP` 27,99 € · `(2)` ohne Preis |
+| `Kaos` / `Kaos in OVP` | 2 | 34,99 € · 54,99 € |
+| `Dark Pyramid` / `Dark Pyramid - OVP` | 2 | 24,99 € · 29,99 € |
+
+**Klassifikation** — nur so weit, wie die Daten sie tragen:
+
+| Zeilen | Einschätzung |
+|---|---|
+| 14 × `- ohne OVP`, `Kaos in OVP`, `Dark Pyramid - OVP` | **wahrscheinlich Verpackungs-/Zustandsvariante** — dieselbe Figur, anderer Preis |
+| 14 × `(2)` | **wahrscheinlich Zweitexemplar**, also eine Menge; 8 davon haben gar keinen Marktpreis |
+| `Double Trouble 1.5` (SKY-0153) | **unklar** — eigener Preis (17,99 € gegen 3,49 €), aber keine erkennbare Regel |
+| Klammersuffixe wie `(Pearl)`, `(Easter)`, `(Clear Crystal)` | **echte Sammelobjekte** — Farb- und Aktionsvarianten, keine Verpackung |
+
+**Bestandslage dieser Zeilen** (nachgezählt 2026-09-05, `O`/`D` aus dem Geschäftsblock):
+
+| Gruppe | je eingekauft | heute im Bestand |
+|---|---|---|
+| 14 × `- ohne OVP` | 3 (SKY-0011, **SKY-0049**, SKY-0083) | **1** (SKY-0049 Elite Slam Bam) |
+| 14 × `(2)` | 0 | 0 |
+| `Kaos in OVP`, `Dark Pyramid - OVP` | 0 | 0 |
+| zugehörige Grundzeilen `Kaos`, `Dark Pyramid` | je 1 bzw. 2 | je 1 |
+
+Die Verpackungszeilen sind also **überwiegend** Preisbeobachtungen, aber nicht ausschließlich:
+Der Zustand wird real bepreist **und** vereinzelt real bevorratet. Genau deshalb bekommt
+`shop_inventory` eine `condition`-Dimension statt zweiter SKY-IDs (ADR-0037) — beim Import wird
+aus `SKY-0049 Elite Slam Bam - ohne OVP` der Bestand `Elite Slam Bam · loose`.
+
+**Nichts wurde geändert.** Keine Umbenennung, keine SKY-ID angefasst, kein Ausschluss.
+
+**Der Shop löst das nicht mit.** `shop_inventory` bekommt eine `condition`-Dimension
+(`loose` / `boxed`, ADR-0037 § 5), damit dieselbe Figur in zwei Verpackungszuständen verkauft
+werden kann, **ohne** eine zweite SKY-ID. Für den Sammlerkatalog ändert das nichts: Solange
+diese Zeilen dort stehen, zählen sie zu den 561 Sammelobjekten, beeinflussen die Completion und
+können eigene Sammlungseinträge haben.
+
+> **Collector catalog normalization of packaging/duplicate legacy rows remains a separate
+> future cleanup decision.**
+
+Dieser spätere Schritt — **Collector Catalog Normalization** — entscheidet, welche OVP-Zeilen
+aus der Completion verschwinden, welche `(2)`-Zeilen reine Legacy-Duplikate sind, welche echten
+Varianten bleiben, wie Zustandspreise erhalten bleiben, ob die Zahl 561 sinkt und ob bestehende
+`collection_items` migriert werden müssen. **Er ist kein Blocker für das Shop-Fundament.**
+
+## 11c. Geschäftsbestand in der Excel (read-only Befund, 2026-09-05)
+
+Kopfzeile der sechs Serienblätter, an der echten Datei verifiziert:
+
+| Spalte | Kopf | Bedeutung |
+|---|---|---|
+| A | — | SKY-ID |
+| B | Serienname | Artikelname |
+| **D** | **O** | Geschäft: jemals eingekauft |
+| **E** | **S** | Geschäft: verkauft |
+| **F** | **D** | Geschäft: aktueller Bestand (`= D − E`) |
+| I | Market | Marktpreis |
+| J | eBay | eBay-Faktor |
+| L/M/N | OVERALL / SOLD / DUPLICATES | Geschäftswerte (Geld) |
+| **P/Q/R/S** | **O / C / S / D** | **private Sammlung** — beim Shopimport zu ignorieren |
+| U/V/W/X | OVERALL / COLLECTION / SOLD / DUPLICATES | private Sammlung (Werte) |
+
+Artikel ab Zeile 4; Zeile 1 Kopf, Zeile 2 Summen.
+
+**Datenqualität über alle sechs Blätter:** 614 Artikelzeilen, **alle** mit gültiger SKY-ID ·
+600 davon im öffentlichen Export, 561 sammelbar · `D` fehlt **nie**, ist **nie negativ** ·
+`O − S = D` gilt **ausnahmslos** · 234 Positionen mit Bestand über null.
+
+**Die 234 Bestandspositionen zerfallen in drei Gruppen:**
+
+| | Anzahl | Bedeutung für den Shop |
+|---|---|---|
+| sammelbare Katalogfiguren | **218** | der eigentliche Shopbestand |
+| Software (Spiele) | 8 | im Sammlerkatalog ausgeschlossen (ADR-0029), verkäuflich wäre sie trotzdem |
+| interne Halbfiguren (`- OBERTEIL`, `- UNTERTEIL`) | 8 | gar nicht im öffentlichen Export — SWAP-Force-Hälften |
+
+**Entschieden (ADR-0037 § 5c): Shop V1 verkauft weder die Halbfiguren noch die Software.**
+
+Die acht Halbfiguren — SKY-0204, SKY-0214, SKY-0216, SKY-0220, SKY-0224, SKY-0229, SKY-0231,
+SKY-0238 — bleiben interne Legacy-Bestandspositionen: kein Shoplisting, kein öffentliches
+Produkt, **kein neuer Katalogeintrag**. Die acht Softwaretitel bleiben nach ADR-0029 außerhalb
+des Sammlerkatalogs und werden dafür nicht reaktiviert.
+
+Damit verkauft Shop V1 ausschließlich reguläre, ohnehin öffentliche Sammelobjekte — und genau
+deshalb braucht die erste Fassung **kein** kuratiertes Sichtbarkeitsfeld neben `is_active`.
+Ein späterer Verkauf dieser 16 Positionen wäre ein eigener Produktentscheid.
+
+## 11d. Einstandswert im Legacy-Bestand (read-only Befund, 2026-09-05)
+
+Untersucht wurde, ob beim späteren Bestandsimport Kosteninformation verloren ginge, wenn nur
+SKY-ID, `condition` und Menge übernommen werden.
+
+**Wo Einkaufsdaten überhaupt liegen:** in den Blättern `Order 2025` und `Order 2026`, jeweils
+links ein Einkaufsblock, rechts ein Verkaufsblock. Die sechs Serienblätter enthalten **keine
+einzige Kostenspalte** — nur `O`/`S`/`D` und Marktwerte.
+
+| Frage | Befund |
+|---|---|
+| Einkaufspreise vorhanden? | **ja, aber nur je Einkaufsereignis** (`Ausgaben` / `Expenses`) |
+| Einkaufsereignisse | 68 (2026) + 87 (2025) |
+| Artikelzeilen darunter | 1 818 (2026) + 1 656 (2025), Freitextnamen mit Stückzahl |
+| Stückgenauer Einkaufspreis | **existiert nirgends** — keine Spalte, in keinem Blatt |
+| SKY-ID in einem Order-Blatt | **0 Treffer** in allen vier Order-/EÜR-Blättern |
+| Lieferant / Verkäufer beim Einkauf | nicht erfasst |
+| Kaufdatum | ja, je Ereignis |
+| Marktwert je Stück beim Einkauf | ja (`Markw. E`) — Marktwert, **nicht** Einstand |
+| `Faktor` je Ereignis | ja, `Ausgaben / Marktwert`, in 68/68 Fällen rechnerisch stimmig; Spanne 0,16–0,66 |
+
+**Zuordenbarkeit Bestand → Anschaffung.** Es gibt keinen Schlüssel: Einkaufszeilen tragen
+Freitextnamen, keine SKY-ID, und keine Charge. Von den 234 Bestandspositionen taucht der
+Katalogname bei **172 (73,5 %)** überhaupt in einer Einkaufsliste auf, davon bei **132 (56,4 %)**
+mit im Katalog eindeutigem Namen; **62 (26,5 %)** kommen in keiner Einkaufsliste vor. Selbst
+bei einem Treffer wäre nur bekannt, *dass* der Artikel einmal in einem Einkauf enthalten war —
+nicht zu welchem Preis, in welcher Charge und ob dieses Exemplar noch das gleiche ist.
+
+**Damit gilt:** Einkaufshistorie existiert nur als Summe je Einkauf. Mehrfache
+Einkaufspreise derselben Figur sind nicht auflösbar. **FIFO, LIFO und Einzelzuordnung sind aus
+dem Bestand heraus nicht rekonstruierbar** — für **alle 234 Positionen (100 %)** fehlt ein
+belegbarer Einstandswert.
+
+Der Legacy-Site-Build kennt nur eine einzige globale Kennzahl (`purchaseRate` aus
+`Summary`, ein Skalar zwischen 0 und 1) — eine Gesamtquote, kein Einstandswert je Position.
+
+**Bewertung.** Ein Einstandswert könnte rechnerisch aus `Marktwert je Stück × Faktor des
+Einkaufs` geschätzt werden. Das wäre eine **Erfindung**, kein Beleg: Es setzte eine Zuordnung
+voraus, die es nicht gibt, und lieferte eine Zahl, die nach einer Buchhaltungsangabe aussieht,
+ohne eine zu sein. **Nicht tun.** Ein ehrliches „nicht bekannt" ist für jede spätere
+steuerliche Betrachtung mehr wert als ein plausibel aussehender Schätzwert.
+
+**Keine personenbezogenen Daten wurden ausgewertet.** Die Verkaufsblöcke enthalten unter anderem
+eine Käuferspalte; sie wurde nicht gelesen und wird nie importiert.
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

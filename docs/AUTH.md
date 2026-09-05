@@ -192,9 +192,11 @@ Autorisierung heißt heute ausschließlich: *„gehört diese Zeile mir?"* — d
 Der spätere First-Party-Shop bringt die **erste echte Rollenunterscheidung** (ADR-0032).
 Damit sie nicht falsch gebaut wird, stehen die Randbedingungen schon jetzt fest:
 
-1. **Die E-Mail-Adresse ist keine Berechtigung.** `yulezcollectibles@gmail.com` identifiziert
-   ein Konto, mehr nicht. Eine hart codierte Adresse als Autorisierungsregel — im Client, im
-   Server-Code, in einer Policy oder in einer Umgebungsvariable — ist ausgeschlossen.
+1. **Die E-Mail-Adresse ist keine Berechtigung.** Sie identifiziert ein Konto, mehr nicht —
+   auch beim Geschäftsaccount. Autorisiert wird ausschließlich über die stabile `user_id` und
+   `shop_admins`. Eine hart codierte Adresse als Autorisierungsregel — im Client, im
+   Server-Code, in einer Policy oder in einer Umgebungsvariable — ist ausgeschlossen. Die
+   konkrete Adresse ist später nur **Eingabe** für das Rollenvergabewerkzeug.
 2. **Die Rolle darf nicht auf `profiles` liegen.** `profiles` ist vom Benutzer selbst
    beschreibbar: `grant select, insert, update … to authenticated` plus `profiles_update_own`.
    Eine Spalte `role` oder `is_shop_admin` dort **könnte sich jeder Benutzer selbst setzen** —
@@ -530,6 +532,48 @@ Namensänderungen · Self-Service-Kontolöschung · eigener SMTP-Anbieter (ADR-0
 von Katalog- oder Sammlungs-UI (das ist V1.5).
 
 ---
+
+## 9.13 Bekannte Lücke: `signUp` wertet `data` nicht aus (Befund 2026-09-05)
+
+`signUpAction` liest ausschließlich `error` aus `supabase.auth.signUp()`:
+
+```ts
+const { error } = await supabase.auth.signUp({ ... });
+if (error) return { error: signUpError(error) };
+redirect("/verify-email");
+```
+
+`data` wird nie betrachtet — weder `data.user`, noch `data.session`, noch `data.user.identities`.
+Daraus folgt zweierlei.
+
+**1. `error: null` ist kein Erfolgsnachweis.** Ein erfolgreicher Aufruf endet in `redirect()`,
+das eine Ausnahme wirft; die Aktion **gibt bei Erfolg gar keinen Zustand zurück**. Das
+`{"error":null}` im Server-Log ist der Startwert von `useActionState`, nicht das Ergebnis.
+Erscheint es als *erstes Argument* eines Aufrufs, heißt das nur „dies ist der erste Versuch";
+steht dort eine Fehlermeldung, hat der **vorige** Versuch sie erzeugt.
+
+**2. Ein bereits registriertes Konto ist von einer echten Neuanmeldung nicht zu unterscheiden.**
+Verlangt ein Projekt E-Mail-Bestätigung, antwortet Supabase auf eine Registrierung mit
+vorhandener Adresse absichtlich **ohne Fehler** und liefert stattdessen einen Benutzer mit
+**leerem `identities`-Array**. Das ist Supabases Schutz gegen Konto-Enumeration und aus
+Sicherheitssicht richtig — aber die Oberfläche schickt den Besucher dann auf „Prüfe dein
+Postfach", obwohl **keine Mail** kommt. Für die betroffene Person sieht ein Fehlschlag wie ein
+Erfolg aus.
+
+**Sicherheitsbewertung:** kein Rechte- oder Sitzungsproblem. Es entsteht keine Sitzung, kein
+Konto, keine Berechtigung. Es ist ein **UX-Fehler**, der wie ein Auth-Fehler aussieht — und
+genau deshalb beim Support teuer wird.
+
+**Noch nicht behoben.** Die Korrektur gehört zu einem eigenen Auth-Schritt, nicht in die
+Shop-Arbeit. Richtung: `data` auswerten, den Fall „leere `identities`" erkennen und eine
+Meldung zeigen, die **weder** ein Konto bestätigt **noch** einen Erfolg vortäuscht — etwa der
+Hinweis, dass bei bestehendem Konto eine Anmeldung oder ein Passwort-Reset der richtige Weg
+ist. Die Meldung darf die Enumerationsfreiheit aus Abschnitt 6 nicht aufgeben.
+
+**Zweiter, kleinerer Befund:** Das versteckte `origin`-Feld in `AuthForm` rendert
+serverseitig als leerer String und wird erst bei der Hydration gesetzt. Ein Absenden vor
+abgeschlossener Hydration schickt `origin=""` und damit ein relatives `emailRedirectTo`.
+Bisher nicht beobachtet, aber dieselbe Klasse von Problem.
 
 ## 10. Offene Punkte
 

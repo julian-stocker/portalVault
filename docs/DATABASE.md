@@ -574,13 +574,103 @@ Die Spaltennamen sind Platzhalter zur Verständigung, kein Entwurf.
 
 | Später | Wofür | Wie es andockt |
 |---|---|---|
-| Shop-Inventar (`shop_inventory`) | Lagerbestand des Geschäfts | `sky_id` als Fremdschlüssel auf `skylanders`; **völlig getrennt von `collection_items`** |
+| Shop-Inventar (`shop_inventory`) | Lagerbestand des Geschäfts | `sky_id` als Fremdschlüssel auf `skylanders`; **völlig getrennt von `collection_items`**, keine Synchronisierung; Eindeutigkeit über `(sky_id, condition)` mit `loose` / `boxed` |
 | Shoppreis | Verkaufspreis, eigene Größe | Feld an derselben Struktur, z. B. `sale_price` — nicht `skylanders.market_price` |
 | Shop-Admin-Berechtigung | wer darf schreiben | eigene Struktur, für `authenticated` **nicht** schreibbar (siehe unten) |
 | Rabattregeln | Lager-Schwellen und Prozentsätze | konfigurierbar an einer Stelle, nicht im Produktcode verteilt |
 | Coupons | Rabattcodes | eigene Struktur; Regeln offen (ADR-0033) |
 | Bestellungen | Kaufvorgang | eigene Struktur; personenbezogene Daten → DSGVO-relevant |
 | Bestellpositionen | was gekauft wurde | **Preis-Snapshot**, kein Verweis auf den heutigen Preis |
+
+#### Konkreter Entwurf (ADR-0037) — **nicht angelegt**
+
+Spaltennamen sind Entwurf, keine Migration. Alles hier ist additiv zum bestehenden Schema.
+
+```
+shop_admins
+  user_id        uuid pk  → auth.users (on delete cascade)
+  granted_at     timestamptz not null default now()
+  note           text
+  -- KEIN Recht für anon/authenticated. Vergabe nur über die Service Role.
+  -- Abgefragt ausschließlich über public.is_shop_admin() (security definer).
+
+shop_inventory
+  id             bigint identity pk
+  sky_id         text not null → skylanders (on delete restrict)   -- UNVERÄNDERLICH
+  condition      text not null  check (condition in ('loose','boxed'))  -- UNVERÄNDERLICH
+  quantity       integer not null default 0  check (quantity >= 0)
+  reserved       integer not null default 0  check (reserved >= 0 and reserved <= quantity)
+  sale_price     numeric(10,2)               check (sale_price is null or sale_price > 0)
+  is_listed      boolean not null default false
+  note           text                              -- intern, nie öffentlich
+  created_at, updated_at
+  unique (sky_id, condition)
+  -- KEIN user_id: der Bestand gehört dem Shop, nicht dem Business-Account.
+
+inventory_movements
+  id             bigint identity pk
+  inventory_id   bigint not null → shop_inventory (on delete restrict)
+  delta          integer not null  check (delta <> 0)
+  reason         text not null     -- purchase | sale_skyisles | sale_external
+                                   -- | return | correction | writeoff
+  unit_cost      numeric(10,2) null   -- NUR bei reason='purchase', sonst NULL
+  currency       text null            -- dito
+  order_id       bigint null → orders                              -- später
+  note           text                                              -- intern
+  created_at     timestamptz not null default now()
+  created_by     uuid not null → auth.users
+  -- Nur Anhängen. Kein UPDATE, kein DELETE — auch nicht für Shop-Admins.
+  -- KEINE eigene sky_id: siehe „Normalisierung" unten.
+```
+
+**`condition` kennt in V1 genau zwei Werte** (ADR-0037 § 5): `loose` — lose Figur ohne
+Verkaufsverpackung — und `boxed` — dieselbe Figur in OVP. Keine weiteren Zustandsstufen.
+Der Eindeutigkeitsschlüssel ist trotzdem **von Anfang an** `(sky_id, condition)`, damit eine
+spätere dritte Ausprägung keine Migration auf laufendem Bestand auslöst.
+
+**Normalisierung: `inventory_movements` speichert `sky_id` nicht doppelt.** Geprüft und
+verworfen: `inventory_id → shop_inventory → sky_id` ist eindeutig, und die Bestandszeile wird
+nie gelöscht. Ein Snapshot wäre nur nötig, wenn eine Position ihre `sky_id` oder `condition`
+ändern könnte — genau das ist ausgeschlossen: **beide Felder sind unveränderlich.** Eine
+Umwidmung wäre eine neue Position plus Ausbuchung der alten, keine Änderung. Die Auswertung
+„alle Bewegungen zu SKY-0123" ist damit ein Join über eine kleine Tabelle in einer
+Admin-Ansicht — der richtige Preis für eine widerspruchsfreie Historie.
+
+**Indizes:** `shop_inventory (sky_id)` für den Katalog-Join · Teilindex
+`shop_inventory (sky_id) where is_listed and quantity > reserved` für „Fehlend & verfügbar" ·
+`inventory_movements (inventory_id, created_at desc)` für den Verlauf ·
+`inventory_movements (order_id) where order_id is not null`.
+
+**`unit_cost` ist bewusst nullable und wird beim Legacy-Import nicht gefüllt.** Die Excel
+kennt Einkaufspreise nur als Summe je Einkaufsereignis, ohne SKY-ID und ohne Charge; für alle
+234 Bestandspositionen ist der Einstand unbelegbar (`docs/SKYLANDERS_DATA.md` 11d). Der Import
+schreibt deshalb `NULL` statt eines geschätzten Werts. Ab dem ersten eigenen Wareneingang ist
+der Preis dagegen bekannt — und ohne Spalte unwiederbringlich verloren, weshalb die beiden
+Spalten von Anfang an mitkommen (ADR-0037 § 21). Chargen (Lots) sind daraus später **ableitbar**
+und werden jetzt nicht gebaut.
+
+**Später, noch nicht entworfen:** `orders`, `order_items` (mit Preis-Snapshot), Rabattregeln,
+Coupons. Zu `order_items` gehören außer den Preisfeldern mindestens `currency`, ein
+gespeichertes `line_total` und ein Steuer-Snapshot. Welches Steuerverfahren gilt, ist eine
+offene **steuerliche** Frage — keine Softwareentscheidung — und muss vor der ersten Bestellung
+geklärt sein.
+
+**Verfügbare Menge und Schutz vor Doppelverkauf.** Öffentlich zählt nie `quantity`, sondern
+`quantity - reserved`; der Warenkorb reduziert nichts, der Checkout reserviert. Beides ist eine
+atomare bedingte Operation in einer `security definer`-Funktion, damit kein Client sie umgehen
+kann — sinngemäß:
+
+```sql
+update shop_inventory
+   set reserved = reserved + :n
+ where id = :id and quantity - reserved >= :n
+returning id;
+```
+
+Null zurückgegebene Zeilen heißen „ausverkauft", nicht „Fehler". Zusammen mit
+`check (quantity >= 0)` und `check (reserved <= quantity)` ist ein negativer oder
+überreservierter Bestand strukturell unmöglich. Concurrency wird auf Datenbankebene gelöst,
+nie durch „Client liest, Client schreibt".
 
 **Drei Randbedingungen, die heute schon gelten und nicht verletzt werden dürfen:**
 

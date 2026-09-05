@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-04 (ADR-0036, Hauptnavigation).
+Letzte Aktualisierung: 2026-09-05 (ADR-0037, Shop-Fundament).
 
 ---
 
@@ -1215,14 +1215,17 @@ gegenseitig nicht implizieren.
 ### Zwei Nutzungskontexte, ein Kontomodell
 
 Der private Account des Betreibers ist ein **normaler Collector-Account** und bleibt es.
-Der Geschäftsaccount `yulezcollectibles@gmail.com` soll später **zusätzlich** Shop-Admin-Rechte
-tragen: Lagerbestand, Verkaufspreise, Verfügbarkeit schalten, später Bestellungen, ggf.
-Referenz-Marktpreise.
+Der **Geschäftsaccount** ist ebenfalls ein ganz normaler Supabase-Auth-User und soll später
+**zusätzlich** Shop-Admin-Rechte tragen: Lagerbestand, Verkaufspreise, Verfügbarkeit schalten,
+später Bestellungen, ggf. Referenz-Marktpreise.
 
-**Die E-Mail-Adresse ist niemals die Autorisierungsregel.** Sie identifiziert nur das Konto.
+**Die E-Mail-Adresse ist niemals die Autorisierungsregel.** Sie identifiziert nur das Konto;
+autorisiert wird ausschließlich über die stabile `user_id` und `shop_admins` (ADR-0037).
 Eine hart codierte Adresse — im Client, im Server-Code, in einer Policy oder in einer
 Umgebungsvariable — ist als Berechtigungsprüfung **ausgeschlossen**: sie ist änderbar, sie
-steht in Klartext im Repository, und sie erzwingt ein Deployment, sobald sich etwas ändert.
+stünde in Klartext im Repository, und sie erzwingt ein Deployment, sobald sich etwas ändert.
+Die konkrete Adresse wird deshalb hier nicht festgehalten — sie ist später lediglich **Eingabe**
+für das kontrollierte Rollenvergabewerkzeug, das daraus den bestehenden Auth-User auflöst.
 
 Stattdessen braucht es später eine **echte, serverseitig geprüfte Rolle** (z. B. `shop_admin`).
 Anforderungen an sie:
@@ -1577,3 +1580,543 @@ halb ausgefülltes Registrierungsformular ist nicht der Moment, andere Wege anzu
 Hamburger-Menü (verbirgt drei Ziele hinter einer Geste) · eine eigene Profilseite neben
 `/settings` (der Account-Bereich existiert bereits) · Icon-Bibliothek für die Navigation
 (Textlabels sind kürzer als jedes Icon-Set und lesen sich auf Deutsch eindeutig).
+
+---
+
+## ADR-0037 — Shop-Fundament: Rolle, Bestand, Bewegungen, Sichtbarkeit
+
+**Status:** Architektur und Produktentscheidungen ANGENOMMEN (2026-09-05) ·
+**nichts davon ist implementiert.**
+Keine Migration, keine Tabelle, keine Policy, keine UI. Dieser Eintrag legt fest, wie das
+Shop-Fundament aussehen wird, damit die erste Migration keine Entscheidung mehr improvisieren
+muss. Er baut auf ADR-0032 (Domänentrennung) und ADR-0033 (Preisebenen) auf.
+
+### 1. Die Berechtigung liegt außerhalb von `profiles`
+
+**Befund, an der laufenden Datenbank geprüft.** `profiles` trägt
+`grant select, insert, update … to authenticated` — **tabellenweit, ohne Spaltenbeschränkung** —
+zusammen mit `profiles_update_own` (`using`/`with check` auf `auth.uid() = id`). Eine Spalte
+`profiles.role` könnte damit **jeder Nutzer bei sich selbst setzen**, mit einem einzigen
+PostgREST-Aufruf. Das ist kein theoretisches Risiko, sondern die heutige Rechtelage.
+
+**Entscheidung.** Die Shop-Berechtigung lebt in einer eigenen Struktur, auf die `authenticated`
+**kein einziges Recht** hat — kein `SELECT`, kein `INSERT`, kein `UPDATE`, kein `DELETE`:
+
+```
+shop_admins (user_id pk → auth.users, granted_at, note)
+```
+
+Die Anwendung fragt nie die Tabelle ab, sondern eine `security definer`-Funktion:
+
+```
+public.is_shop_admin() returns boolean   -- prüft auth.uid(), stable, security definer
+```
+
+Nur diese Funktion bekommt `execute` für `authenticated`. Sie ist zugleich das Prädikat jeder
+späteren Shop-Policy. Damit gibt es genau **eine** Stelle, an der „darf Shop verwalten"
+definiert ist. Ein reiner Client-Check ist niemals die Autorisierung — er darf höchstens
+entscheiden, ob ein Menüpunkt erscheint.
+
+**Die Rolle wird über ein eigenes Werkzeug vergeben**, nach dem Muster von `catalog:import`
+und `characters:import`: Standard **Dry-Run**, Schreiben nur mit explizitem `--apply`. Es löst
+den angegebenen Auth-User eindeutig auf, zeigt die betroffene `user_id`, prüft ob die Rolle
+schon existiert, ist idempotent und **enthält keine E-Mail-Adresse im Quelltext** — die
+Adresse ist Eingabe, nicht Konstante. Noch nicht implementiert.
+
+Die **konkrete Geschäfts-E-Mail steht bewusst in keinem Dokument dieses Repositories.** Sie
+wird erst beim tatsächlichen Rollen-Setup als Eingabe verwendet; personenbezogene Daten ohne
+Zweck zu dokumentieren wäre gegen `docs/SECURITY.md`.
+
+**Verworfen:** `profiles.role` (siehe Befund) · Spaltenrechte auf `profiles` (fragil, eine
+weitere Spalte später hebt sie wieder aus den Angeln) · JWT-Claim (steht im Token, das der
+Client hält, und wird bei Entzug erst mit dem nächsten Refresh wirksam) · eine E-Mail-Konstante
+(ADR-0032 schließt sie aus).
+
+### 2. Der Shop gehört SkyIsles, nicht dem Business-Account
+
+`shop_inventory` trägt **keine** `user_id`. Der Bestand gehört dem Shop, der Business-Account
+darf ihn nur verwalten. Damit ist strukturell ausgeschlossen, dass Geschäftsbestand je in einer
+persönlichen Sammlung landet — `collection_items` bleibt unberührt privat.
+
+Der private Account des Betreibers bleibt ein ganz normaler Collector-Account **ohne jede
+Sonderbehandlung**.
+
+### 3. Drei Sichtbarkeiten
+
+| Frage | Träger in V1 |
+|---|---|
+| Gehört das Objekt in den Sammlerkatalog? | `is_active` + Kategorieregel (ADR-0029) — **unverändert** |
+| Führt der Shop es grundsätzlich? | `shop_inventory.is_listed` |
+| Ist es gerade da? | `quantity - reserved > 0` |
+
+Warum in V1 keine vierte, kuratierte Spalte dazukommt, steht in Abschnitt 6.
+
+### 4. Bestand: gespeicherte Menge **und** Bewegungsjournal
+
+```
+shop_inventory        (id, sky_id, condition, quantity, reserved, sale_price,
+                       is_listed, note, created_at, updated_at)
+inventory_movements   (id, inventory_id, sky_id, delta, reason, order_id,
+                       note, created_at, created_by)
+```
+
+**Entscheidung: beides, nicht eines von beidem.** `quantity` ist die maßgebliche, transaktional
+fortgeschriebene Zahl; `inventory_movements` ist ein reines Anhängejournal, das in derselben
+Transaktion mitschreibt.
+
+Begründung: Der Schutz vor Doppelverkauf ist ein atomares bedingtes Update —
+
+```sql
+update shop_inventory set quantity = quantity - :n
+ where id = :id and quantity - reserved >= :n
+returning id;
+```
+
+Kommen null Zeilen zurück, war es ausverkauft. Gegen ein `SUM(movements)` lässt sich das nicht
+gleich sicher und nicht annähernd gleich schnell formulieren, und `check (quantity >= 0)` gäbe
+es dort gar nicht. Ein reines Ledger wäre auditierbarer, aber jede Bestandsabfrage — Katalog,
+Detailseite, „Fehlend & verfügbar" — würde zur Aggregation über eine wachsende Tabelle.
+
+Die Konsistenz beider Seiten ist prüfbar: `SUM(delta)` je Position muss `quantity` ergeben. Das
+gehört als wiederkehrende Prüfung in `verify:rls` oder ein eigenes Werkzeug, nicht in einen
+Trigger — ein Trigger würde denselben Fehler doppelt schreiben.
+
+**`reason`** unterscheidet mindestens: `purchase` (Wareneingang) · `sale_skyisles` ·
+`sale_external` (eBay und andere Kanäle) · `return` · `correction` · `writeoff`. Ein
+eBay-Verkauf ist damit **eine Bewegung wie jede andere** — heute von Hand erfasst, später
+möglicherweise über eine Integration erzeugt. Die Architektur braucht dafür keine Änderung.
+
+### 5. Zustand: genau zwei Werte, `loose` und `boxed`
+
+**Befund aus der Legacy-Analyse (read-only, 2026-09-05).** 46 der 561 Katalogzeilen sind
+16 Gruppen derselben physischen Figur:
+
+- 14 × `Elite X` / `Elite X - ohne OVP` / `Elite X (2)`
+- `Kaos` / `Kaos in OVP` · `Dark Pyramid` / `Dark Pyramid - OVP`
+
+Die Preisunterschiede sind erheblich — `Elite Boomer` 69,99 € gegen `Elite Boomer - ohne OVP`
+27,99 € — und beschreiben **dieselbe Figur in anderer Verpackung**.
+
+**Diese Zeilen werden tatsächlich bewirtschaftet, wenn auch selten** (nachgezählt 2026-09-05):
+Von den 32 Verpackungs- und Zweitexemplarzeilen wurden **drei je eingekauft** — alle drei
+`- ohne OVP` — und **eine steht heute im Bestand** (`SKY-0049 Elite Slam Bam - ohne OVP`, D = 1).
+Die 14 `(2)`-Zeilen wurden **nie** eingekauft und tragen **keinen** Bestand; `Kaos in OVP` und
+`Dark Pyramid - OVP` ebenfalls nicht, wohl aber die zugehörigen Grundzeilen `Kaos` (D = 1) und
+`Dark Pyramid` (D = 1).
+
+Das ist genau der Grund für eine `condition`-Dimension statt zweiter SKY-IDs: Der Zustand ist
+real bepreist **und** real bevorratet, aber er ist eine Eigenschaft des Bestands, nicht eine
+zweite Sammleridentität.
+
+**Entscheidung.** `shop_inventory` bekommt eine `condition`-Spalte, Eindeutigkeitsschlüssel
+**`(sky_id, condition)`**. Für V1 kennt sie **genau zwei Werte**:
+
+| Wert | Bedeutung |
+|---|---|
+| `loose` | normale lose Figur / loses Collectible **ohne** Verkaufsverpackung |
+| `boxed` | OVP — dieselbe Figur **in** Verkaufsverpackung |
+
+**Bewusst noch nicht eingeführt:** `sealed`, `new`, `used`, `complete`, `damaged`, `mint`,
+`opened`, `incomplete` und jede weitere Zustandsstufe. Sie kommen erst, wenn eine echte
+Produktanforderung sie verlangt — ein Wert, den niemand pflegt, macht jede Abfrage und jede
+Admin-Oberfläche unnötig kompliziert.
+
+Die Spalte kommt **von Anfang an** mit, obwohl V1 vielleicht nur `loose` benutzt: sie später in
+einen Unique-Key aufzunehmen wäre eine Datenmigration auf laufendem Bestand. Der Schlüssel wird
+also von der ersten Migration an mehrwertig geplant, auch wenn er anfangs einwertig belegt ist.
+
+### 5a. OVP ist ein Bestandszustand, kein zweites Produkt
+
+Verpackung erzeugt **keine** eigene Produktidentität. Beide Zustände zeigen auf dieselbe
+kanonische SKY-ID:
+
+```
+Canonical Collectible:  Drobot   (eine SKY-ID)
+Shopbestand:            Drobot · loose    10,80 €
+                        Drobot · boxed    18,90 €
+```
+
+Keine Shop-eigenen SKY-IDs. Keine zweite Produktdatenbank. Keine separate Identität nur wegen
+Verpackung. Damit ist der Shop von der Frage entkoppelt, ob der Sammlerkatalog dieselben
+Varianten sauber führt.
+
+### 5b. Der Sammlerkatalog wird dadurch **nicht** korrekt
+
+Ausdrücklich festgehalten, damit es niemand später verwechselt:
+
+> **Collector catalog normalization of packaging/duplicate legacy rows remains a separate
+> future cleanup decision.**
+
+`condition` im Shop löst das Katalogproblem **nicht**. Solange `Elite Boomer - ohne OVP`,
+`Elite Boomer (2)`, `Kaos in OVP` und `Dark Pyramid - OVP` als eigene Zeilen im öffentlichen
+Katalog stehen, gilt weiterhin:
+
+- sie zählen zu den 561 Sammelobjekten
+- sie beeinflussen die Completion-Quote
+- sie können als eigene Sammlungseinträge existieren
+
+**Jetzt wird nichts bereinigt.** Keine SKY-ID gelöscht, keine Completion-Zahl verändert, kein
+Name geändert. Das ist kein Blocker für das Shop-Fundament, sondern ein eigener späterer
+Schritt (§ 9).
+
+### 5c. Was V1 nicht verkauft
+
+**Die 8 internen SWAP-Force-Halbfiguren** — SKY-0204, SKY-0214, SKY-0216, SKY-0220, SKY-0224,
+SKY-0229, SKY-0231, SKY-0238 — bleiben interne Legacy-/Bestandspositionen. Kein Shoplisting,
+kein öffentliches Produkt, **kein neuer Katalogeintrag**. Ein späterer Verkauf wäre ein eigener
+Produktentscheid.
+
+**Die 8 Softwaretitel mit Bestand** werden ebenfalls nicht verkauft. Software bleibt gemäß
+ADR-0029 außerhalb des Sammlerkatalogs; sie wird dafür nicht reaktiviert.
+
+**Shop V1 verkauft ausschließlich reguläre, bereits öffentliche Sammelobjekte.**
+
+### 6. Kein `catalog_visible` in der ersten Fassung
+
+**`is_active` wird nicht umdefiniert.** Es bedeutet „die Zeile existiert in der Legacy-Quelle"
+und wird vom Katalogimport bei **jedem Lauf** auf `true` gesetzt (`tools/import-catalog.mts`,
+Payloadzeile `is_active: true`). Eine redaktionelle Entscheidung dort abzulegen wäre beim
+nächsten Import weg. `is_active` bleibt **unverändert**.
+
+**Ein neues `catalog_visible` kommt trotzdem nicht** — es hätte in V1 nichts zu tun:
+
+- der Shop verkauft nur reguläre, ohnehin sichtbare Sammelobjekte (§ 5c)
+- SWAP-Hälften und Software werden nicht öffentlich verkauft
+- die Katalogbereinigung ist ein eigener späterer Schritt (§ 5b)
+
+Eine Spalte ohne Aufgabe wäre eine Migration, ein Testeintrag und eine Erklärpflicht ohne
+Gegenwert.
+
+**Wenn kuratierte Sammler-Sichtbarkeit später gebraucht wird**, dann als **eigene,
+importresistente kuratierte Spalte** — nach dem Muster von `character_id`: Der Import benennt
+sie nicht, PostgREST fasst beim `ON CONFLICT DO UPDATE` nur benannte Spalten an, die Kuratierung
+überlebt. `src/lib/catalog/import-payload.test.ts` nagelt die Spaltenliste bereits fest und
+wäre dann zu ergänzen. **Niemals** durch Umdeutung von `is_active`.
+
+### 7. Preis und Rabatt
+
+`skylanders.market_price` bleibt der neutrale Referenzmarktwert (ADR-0010).
+**`shop_inventory.sale_price` ist der manuell gepflegte Basisverkaufspreis** und von
+`market_price` unabhängig. Ein Marktpreisupdate verändert bestehende Shoppreise **nicht**.
+
+`market_price × 0,90` darf ein **Vorschlag** beim Anlegen oder Bearbeiten einer Position sein —
+nie eine gespeicherte, dauerhafte Ableitung. Seltene Figuren gehen über Marktwert, hoher
+Bestand darunter; eine feste Formel könnte beides nicht.
+
+Die fünf Preisebenen (ADR-0033) bleiben unverändert:
+
+```
+1. market_price        neutraler Referenzwert, für alle Nutzer gleich
+2. sale_price          manueller Shop-Basispreis          ← gespeichert
+3. stock discount      abgeleitet, aus dem Bestand
+4. coupon              optional, abgeleitet
+5. final order price   Snapshot in order_items            ← gespeichert
+```
+
+Rabatte rechnen zur Anzeigezeit auf `sale_price` — **nie** auf `market_price`, sonst verschöbe
+ein Shopangebot die Sammlungswerte aller anderen Nutzer.
+
+**OPEN:** konkrete Bestandsrabatt-Schwellen · ob Coupon und Bestandsrabatt kombinierbar sind
+und mit welchem Vorrang. Keine Regel wird jetzt implementiert.
+
+### 8. Öffentliche Lageranzeige: Zustand, keine Stückzahl
+
+Öffentlich erscheint **nie eine Stückzahl**. Nur zwei Zustände, abgeleitet aus der verfügbaren
+Menge:
+
+```
+available_quantity = quantity - reserved
+
+available_quantity >  0   →  „Auf Lager"
+available_quantity <= 0   →  „Nicht auf Lager"
+```
+
+Kein „Noch 17 verfügbar" in V1. Die exakte Menge bleibt intern — sichtbar in `/shop-admin` und
+in den Bewegungen, nirgends sonst. Damit verrät der Shop keine Lagergröße (vgl. ADR-0033: schon
+eine sichtbare Rabattstufe tut das grob genug).
+
+### 9. Reihenfolge der Umsetzung
+
+**Schritt 1 — Shop Foundation.** `shop_admins`, `is_shop_admin()`, `shop_inventory`,
+`inventory_movements`, Constraints, RLS, sichere Bestandsmutationen.
+
+**Schritt 2 — Legacy Inventory Import.** Die echte Excel **read-only**, nur die
+Geschäftsspalte F (Difference), SKY-ID-Mapping, Dry-Run als Standard, explizites `--apply`,
+Anfangsbestand plus passende Initialbewegung.
+
+**Schritt 3 — `/shop-admin`.** Erst danach UI.
+
+**Begründung für genau diese Reihenfolge:** Der Adminbereich soll gegen das echte Datenmodell
+und echten Bestand entwickelt werden, nicht gegen Fantasiedaten oder temporäre
+Mock-Strukturen — sonst richtet sich die UI nach Annahmen, die die Daten nachher nicht erfüllen.
+
+**Danach** — nicht Teil der Foundation: Shopanzeige im Katalog und auf der Detailseite ·
+`/shop` als eigene Route · „Fehlend & verfügbar" · Bestellungen, Reservierung, Zahlung ·
+**Collector Catalog Normalization** (§ 5b).
+
+### 10. Nach dem Import führt die Datenbank
+
+Nach erfolgreichem Initialimport ist **SkyIsles PostgreSQL die zentrale Geschäftsbestandsquelle**.
+Die Excel wird **nicht** dauerhaft parallel gepflegt.
+
+Ausdrücklich ausgeschlossen:
+
+```
+Excel   = Bestand A
+eBay    = Bestand B
+SkyIsles = Bestand C      ← genau das soll nie entstehen
+```
+
+Jede spätere Bestandsänderung — Wareneingang, SkyIsles-Verkauf, eBay-Verkauf, Rückgabe,
+Korrektur, Abschreibung — verändert denselben zentralen Bestand.
+
+### 11. `inventory_movements`: normalisiert, ohne redundante `sky_id`
+
+**Geprüft, wie gefordert.** `inventory_id → shop_inventory → sky_id` ist eindeutig,
+`shop_inventory` wird nie gelöscht (`on delete restrict` in beide Richtungen), und `sky_id` ist
+Teil des Eindeutigkeitsschlüssels der Bestandszeile.
+
+**Empfehlung: `sky_id` **nicht** doppelt speichern.** Ein Audit-Grund läge nur vor, wenn eine
+Bestandszeile ihre `sky_id` ändern könnte — dann wäre die Historie ohne Snapshot falsch. Genau
+das darf sie aber nicht: **`shop_inventory.sky_id` und `condition` sind unveränderlich.** Sie
+sind die Identität der Position; eine Umwidmung wäre keine Änderung, sondern eine neue Position
+plus Ausbuchung der alten. Damit entfällt der einzige Grund für die Denormalisierung, und die
+Auswertung „alle Bewegungen zu SKY-0123" ist ein Join über eine kleine Tabelle in einer
+Admin-Ansicht.
+
+Die Unveränderlichkeit ist eine **Regel des Datenmodells**, keine Konvention der Oberfläche —
+sie gehört später abgesichert (Trigger oder Policy), nicht bloß im Admin-Formular weggelassen.
+
+Felder: `id`, `inventory_id`, `delta`, `reason`, `order_id` (optional), `note`, `created_at`,
+`created_by`. Reason-Werte mindestens: `purchase` · `sale_skyisles` · `sale_external` ·
+`return` · `correction` · `writeoff`. Nur Anhängen — kein `UPDATE`, kein `DELETE`, auch nicht
+für Shop-Admins; eine falsche Bewegung wird durch eine Gegenbewegung korrigiert.
+
+### 12. Bestand: gespeicherte Menge **und** Journal
+
+`shop_inventory.quantity` wird gespeichert; `inventory_movements` ist das Audit-Journal
+daneben. **Weder** ausschließlich `SUM(movements)` **noch** `quantity` ohne Historie.
+
+Ziel: aktueller Bestand schnell und transaktionssicher lesbar **und** jede relevante Änderung
+nachvollziehbar.
+
+Begründung für die gespeicherte Menge: Der Schutz vor Doppelverkauf ist ein atomares bedingtes
+Update. Gegen ein Aggregat lässt sich das nicht gleich sicher formulieren, `check (quantity >= 0)`
+gäbe es dort gar nicht, und jede Katalog- und Sammlungsabfrage würde über eine wachsende
+Tabelle aggregieren.
+
+Konsistenz ist prüfbar: `SUM(delta)` je Position muss `quantity` ergeben — als wiederkehrende
+Prüfung, **nicht als Trigger** (der würde denselben Fehler doppelt schreiben).
+
+### 13. eBay in V1: eine Bewegung von Hand
+
+Ein eBay-Verkauf wird zunächst manuell erfasst:
+
+```
+delta  = -1
+reason = 'sale_external'
+```
+
+Optional **später**, nicht jetzt: `channel` (z. B. `ebay`) und `external_reference`. Das
+Datenmodell muss diese Ergänzung vertragen, ohne dass sich die Inventararchitektur ändert —
+zwei zusätzliche nullable Spalten an einem Anhangsjournal sind genau das. **Keine eBay-API,
+keine Automatisierung in V1.**
+
+### 14. Shopbestand ist nicht `collection_items` — noch einmal ausdrücklich
+
+| | |
+|---|---|
+| Geschäftsbestand | `shop_inventory` |
+| Private Sammlung | `collection_items` |
+
+**Keine Synchronisierung zwischen beiden. Keine Business-Collection.** Und keine
+Shop-Semantik auf der privaten Menge: Ein Nutzer mit `quantity = 4` besitzt privat vier
+Exemplare. Das heißt **nicht**, dass drei zum Verkauf stehen (ADR-0032).
+
+### 15. Öffentliche Darstellung im Katalog
+
+`/` bleibt primär Sammlerkatalog. Wo ein Shopangebot existiert, kann dieselbe Karte zusätzlich
+Marktwert, SkyIsles-Preis und Verfügbarkeit zeigen:
+
+| Lage | Anzeige |
+|---|---|
+| kein Shopangebot | nur `Marktwert 12,00 €` |
+| gelistet, verfügbar | `Marktwert 12,00 €` · `SkyIsles 10,80 €` · `Auf Lager` |
+| gelistet, verfügbar = 0 | `Marktwert 12,00 €` · `SkyIsles 10,80 €` · `Nicht auf Lager` |
+
+**Eine bereits gesammelte Figur verbirgt ihr Shopangebot nicht.** Es gibt keine Regel
+`collected → Angebot ausblenden`. Gründe: Duplikate, Geschenk, Ersatz, ein anderes
+`condition`-Angebot, Mehrfachsammler. Die **Gewichtung** darf sich unterscheiden — bei einer
+fehlenden Figur prominenter, bei einer gesammelten sekundär —, die **Sichtbarkeit** nicht.
+
+`/shop` bleibt als eigene Route für Direktkäufer vorgesehen; `/` bleibt Collector-first. Beide
+nutzen dieselben kanonischen Sammelobjekte und denselben Bestand — **keine zweite Produktkopie**.
+
+`/shop-admin` bleibt Shop-Admins vorbehalten und zeigt später Bestand, `condition`,
+`sale_price`, Listing, Wareneingang, externe Verkäufe, Korrekturen, Bewegungsverlauf und
+Bestellungen. **Die exakte Stückzahl ist ausschließlich dort sichtbar.**
+
+### 16. „Fehlend & verfügbar"
+
+Bestätigt als Join über `sky_id`:
+
+```
+collection_items ⋈ skylanders ⋈ shop_inventory
+```
+
+**Keine separate User-Shop-Mapping-Tabelle.** Mögliche Sichten: Fehlend · Fehlend & verfügbar ·
+Gesammelt · Gesammelt & verfügbar.
+
+`condition` kann dabei mehrere Angebote zu derselben SKY-ID erzeugen — Drobot fehlt, im Shop
+liegen `loose 10,80 €` und `boxed 18,90 €`. Der Eindeutigkeitsschlüssel `(sky_id, condition)`
+bildet genau das ab; die Sicht muss also mit einer 1:n-Beziehung zwischen Figur und Angebot
+umgehen, nicht mit 1:1.
+
+### 17. Reservierung und Doppelverkaufsschutz
+
+**Der Warenkorb reduziert keinen Bestand.** Langfristige Richtung:
+
+```
+Checkout                → Bestand atomar reservieren
+Zahlung erfolgreich     → Reservierung wird echter Verkauf, quantity sinkt
+Zahlung abgebrochen /
+Reservierung abgelaufen → Reservierung wird freigegeben
+```
+
+**Reservierungsdauer: OPEN.**
+
+Der Schutz vor Doppelverkauf ist eine **serverseitige, atomare PostgreSQL-Operation** —
+niemals „Client liest Bestand und schreibt danach". Sinngemäß:
+
+```
+available = quantity - reserved
+nur reservieren/reduzieren, wenn available ausreicht — in einer Bedingung, nicht in zwei Schritten
+```
+
+Concurrency wird auf Datenbankebene gelöst, in einer `security definer`-Funktion oder einer
+vergleichbar sicheren Transaktionsfunktion. **Keine konkrete SQL-Funktion jetzt.**
+
+### 18. Order Snapshot
+
+Spätere `order_items` speichern historische Werte, keine Verweise auf heutige Preise.
+Mindestens:
+
+`sky_id` · `quantity` · **Namens-Snapshot** · `condition` · Basispreis · Rabatt-Snapshot ·
+finaler Stückpreis.
+
+**Zusätzlich geprüft, wie gefordert — was für geschäftlich stabile Bestellungen fehlen würde:**
+
+| Feld | Warum |
+|---|---|
+| `currency` | auch bei nur EUR: eine Rechnung ohne Währung ist keine Rechnung |
+| `line_total` | gespeichert, nicht gerechnet — Rundung darf sich nie nachträglich ändern |
+| Steuersatz und Steuerbetrag als Snapshot | ein Satzwechsel darf alte Belege nicht verschieben |
+| Kennzeichen des Steuerverfahrens | siehe unten |
+
+**Ein Punkt, der früh entschieden werden muss, weil er das Schema bestimmt:** Der Handel mit
+gebrauchten Sammlerstücken läuft häufig über **Differenzbesteuerung** statt Regelbesteuerung.
+Dann bemisst sich die Steuer an der Spanne zwischen Einkauf und Verkauf — die Bestellposition
+müsste den **Einkaufspreis dieses Exemplars** nachvollziehbar machen, was heute nirgends
+gespeichert ist (`inventory_movements` kennt nur `delta`, keinen Einstandswert). Die Legacy-Datei
+führt EÜR-Blätter, das Thema ist also real.
+
+**Das ist eine steuerliche Frage, keine technische — sie bleibt OPEN und wird nicht hier
+entschieden.** Was daraus für das Datenmodell folgt, steht in Abschnitt 21; die
+Legacy-Datenlage in `docs/SKYLANDERS_DATA.md` 11d. Ebenfalls OPEN und rechtlich relevant: eine
+lückenlose Rechnungsnummerierung auf Bestellebene.
+
+**Keine Bestellungen, keine Felder, keine Migration jetzt.**
+
+### 19. Was jetzt feststeht
+
+- Berechtigung in `shop_admins` plus `is_shop_admin()`, nie in `profiles`, nie per E-Mail-Konstante
+- Vergabe der Rolle über ein Werkzeug mit Dry-Run und `--apply`, idempotent, ohne E-Mail im Quelltext
+- `shop_inventory` ohne `user_id`; `collection_items` bleibt unberührt und unsynchronisiert
+- `sky_id` ist die gemeinsame Identität; keine Shop-eigenen Produktidentitäten
+- `condition` mit genau zwei Werten `loose` und `boxed`, von Anfang an im Eindeutigkeitsschlüssel
+- gespeicherte `quantity` **plus** Bewegungsjournal; `inventory_movements` ohne redundante `sky_id`
+- `shop_inventory.sky_id` und `condition` sind unveränderlich
+- atomares bedingtes Update als Schutz vor Doppelverkauf, serverseitig
+- Reservierung beim Checkout, nicht beim Warenkorb
+- `sale_price` manuell, Rabatte abgeleitet, `market_price` niemals durch den Shop verändert
+- öffentlich nur „Auf Lager" / „Nicht auf Lager" aus `quantity - reserved`
+- externe Verkäufe sind eine Bewegungsart, manuell erfasst
+- kein `catalog_visible` in V1; `is_active` bleibt unverändert
+- SWAP-Hälften und Software werden in V1 nicht verkauft
+- Reihenfolge: Foundation → Legacy-Import → `/shop-admin`
+- nach dem Import führt die SkyIsles-Datenbank, nicht die Excel
+- Katalogbereinigung ist ein eigener späterer Schritt und **kein** Blocker
+
+### 20. Was ausdrücklich OPEN bleibt
+
+Bestandsrabatt-Schwellen · ob Coupon und Bestandsrabatt kombinierbar sind und mit welchem
+Vorrang · Zahlungsanbieter · Versand und Rückgabe · Reservierungsdauer · eBay-Automatisierung
+(`channel`, `external_reference`) · **Steuerverfahren, insbesondere Differenzbesteuerung**
+(Abschnitt 21) · lückenlose Rechnungsnummerierung · ob Chargen (Lots) je gebraucht werden ·
+**Collector Catalog Normalization**: welche der 46 Legacy-Zeilen echte Sammelobjekte bleiben,
+ob die Completion-Zahl von 561 sinkt, wie Zustandspreise erhalten bleiben und ob bestehende
+`collection_items` migriert werden müssen · ob SWAP-Hälften oder Software je verkauft werden ·
+weitere `condition`-Werte.
+
+### 21. Einstandswert: zwei nullable Spalten jetzt, keine Chargen
+
+**Anlass.** Abschnitt 18 hielt fest, der Einstandswert betreffe „erst Bestellungen". Die
+Legacy-Untersuchung vom 2026-09-05 (`docs/SKYLANDERS_DATA.md` 11d) zeigt, dass diese Aussage in
+beide Richtungen zu grob war.
+
+**Befund 1 — aus der Legacy ist nichts zu retten.** Einkaufspreise existieren nur als Summe je
+Einkaufsereignis (68 in 2026, 87 in 2025). Es gibt **keine** stückgenaue Kostenspalte, **keine**
+SKY-ID in irgendeinem Order-Blatt und **keine** Charge. Für **alle 234 Bestandspositionen** ist
+der Einstandswert unbelegbar. Der Import kann also gar nichts verlieren, was er nicht ohnehin
+nie hatte — er importiert SKY-ID, `condition` und Menge, und das ist vollständig.
+
+**Befund 2 — ab dem ersten eigenen Wareneingang steht sehr wohl etwas auf dem Spiel.** Sobald
+Einkäufe über `/shop-admin` erfasst werden, ist der bezahlte Preis **im Moment der Eingabe
+bekannt**. Gibt es dann kein Feld dafür, geht er verloren — und zwar endgültig, denn anders als
+beim Marktpreis existiert für ihn keine zweite Quelle. Die Frist ist damit **nicht** „vor den
+Bestellungen", sondern **vor der ersten echten `purchase`-Bewegung**.
+
+**Modellvergleich.**
+
+| | A: nichts | **B: `unit_cost` an purchase** | C: Chargen (Lots) | D: eigene Einkaufstabelle |
+|---|---|---|---|---|
+| Einfachheit | ✅ maximal | ✅ zwei nullable Spalten | ❌ Tabelle + Restmengenführung | ❌ zweite Wahrheit neben dem Journal |
+| Mehrfachpreise derselben Figur | ❌ | ✅ je Bewegung ein Preis | ✅ | ✅ |
+| Teilverkäufe, Rückgaben, Korrekturen | ✅ | ✅ unverändert über `delta` | ⚠️ Restmenge je Lot mitzuführen | ⚠️ |
+| Welches Exemplar wurde verkauft (FIFO) | ❌ | ⚠️ später ableitbar | ✅ | ⚠️ |
+| Differenzbesteuerung möglich | ❌ | ⚠️ Rohdaten vorhanden | ✅ | ✅ |
+| Buchhaltung später | ❌ | ✅ Rohdaten vorhanden | ✅ | ✅ |
+| Migrationsaufwand jetzt | 0 | **nahe 0** | hoch | hoch |
+| Overengineering-Risiko | — | gering | **hoch** | **hoch** |
+
+**Entscheidung: Modell B.** `inventory_movements` bekommt `unit_cost numeric(10,2) null` und
+`currency text null`, gefüllt **nur** bei `reason = 'purchase'`, sonst `NULL`. Zwei nullable
+Spalten, keine Logik, keine Pflicht, keine Oberfläche, die daran hängt.
+
+**Warum das reicht — und warum Chargen später ohne Verlust nachrüstbar sind.** Ein Lot ist im
+Kern nichts anderes als eine Einkaufsbewegung plus eine Restmenge. Solange jede
+`purchase`-Bewegung ihre eigene Menge, ihr Datum und ihren Stückpreis trägt, lassen sich Lots
+daraus jederzeit **ableiten**; fehlt der Stückpreis, lassen sie sich aus **nichts** ableiten.
+Modell B ist damit genau die Datenschicht, auf der Modell C später aufsetzen kann — der
+Unterschied zwischen „später erweiterbar" und „später unmöglich".
+
+**Ausdrücklich nicht getan:** ein Einstandswert wird **nicht** aus `Marktwert × Faktor`
+geschätzt. Das sähe aus wie eine Buchhaltungsangabe, ohne eine zu sein. Der Legacy-Import
+schreibt `unit_cost = NULL` und dokumentiert damit ehrlich, dass der Wert unbekannt ist.
+
+**Keine steuerliche Aussage.** Ob Differenz- oder Regelbesteuerung anzuwenden ist, wird hier
+nicht entschieden und nicht beurteilt — das ist keine Softwarefrage. Festgehalten ist
+ausschließlich, **welche Rohdaten das System speichern können muss**, damit eine spätere
+Anforderung nicht an fehlenden Daten scheitert.
+
+**Zeitpunkte, getrennt:**
+
+| Entscheidung | spätestens fällig |
+|---|---|
+| Existieren `unit_cost` und `currency` als Spalten? | **vor der Foundation-Migration** — hier entschieden: ja |
+| Woher der Einstand der Legacy-Bestände kommt? | **entfällt** — es gibt keinen; Import schreibt `NULL` |
+| Werden Einkäufe künftig mit Preis erfasst? | vor dem ersten Wareneingang über `/shop-admin` |
+| Chargen, FIFO, Einzelzuordnung | erst wenn eine Anforderung sie verlangt — dann ableitbar |
+| Steuerverfahren, `order_items`-Steuerfelder, Rechnungsnummern | vor den ersten Bestellungen |
+
+**Die Shop Foundation ist dadurch nicht blockiert, und der Bestandsimport ebenso wenig.**

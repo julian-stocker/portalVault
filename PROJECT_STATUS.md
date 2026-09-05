@@ -41,6 +41,30 @@ NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis d
 jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
 meldet 31/32 mit genau diesem Hinweis.
 
+**Shop-Fundament vollständig entschieden (2026-09-05, ADR-0037) — nichts implementiert.**
+Rollen in `shop_admins` plus `is_shop_admin()`, nie in `profiles` und nie per E-Mail-Konstante ·
+`shop_inventory` ohne `user_id`, Schlüssel `(sky_id, condition)` mit genau `loose` und `boxed` ·
+`inventory_movements` als Anhängejournal **ohne redundante `sky_id`** · gespeicherte Menge plus
+Journal · atomares bedingtes Update gegen Doppelverkauf · öffentlich nur „Auf Lager" /
+„Nicht auf Lager" aus `quantity - reserved` · `sale_price` manuell, `market_price` unangetastet ·
+**kein `catalog_visible`**, `is_active` bleibt unverändert · SWAP-Hälften und Software werden in
+V1 nicht verkauft · Reihenfolge Foundation → Legacy-Import → `/shop-admin`.
+
+Zwei Legacy-Befunde dahinter: **46 der 561 Katalogzeilen sind Verpackungs-/Zweitexemplarvarianten
+derselben Figur** — ihre Bereinigung ist ein eigener späterer Schritt (**Collector Catalog
+Normalization**) und ausdrücklich kein Blocker —, und von 234 Bestandspositionen sind 16 gar
+keine öffentlichen Sammelobjekte.
+
+**Einstandswert geklärt (2026-09-05, ADR-0037 § 21).** Die Legacy-Excel kennt Einkaufspreise
+nur als Summe je Einkauf, ohne SKY-ID und ohne Charge — für alle 234 Bestandspositionen ist der
+Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigenen Wareneingang
+wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
+`unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
+
+**Nächster Schritt: Shop Foundation Migration.** Kein Produktblocker mehr offen. Das
+Steuerverfahren ist erst vor den *Bestellungen* fällig und ist ohnehin keine
+Softwareentscheidung. **Bis dahin: keine Migration, keine Tabelle, keine Policy.**
+
 **Collection Experience implementiert (Phase H, 2026-09-05).** `/collection` ist eine
 Sammlerübersicht statt einer Liste: Gesamtfortschritt, geschätzter Marktwert, Serienfortschritt
 für alle sechs Spiele, die Filter **Alle · Gesammelt · Fehlend · Duplikate** und alle 561
@@ -498,6 +522,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
 | **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
 | **0036** | **Hauptnavigation mit drei Zielen; Abmelden gehört nach `/settings`; aktive Route aus dem Pfad** |
+| **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — vollständig entschieden, **nicht implementiert** |
 
 ## Offene Entscheidungen
 

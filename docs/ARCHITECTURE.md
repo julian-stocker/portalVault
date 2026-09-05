@@ -76,6 +76,37 @@ Legacy-System: `data/characters/characters.json` → `tools/import-characters.mt
 |---|---|---|---|
 | **Shop** (später, eigene Strukturen) | Lagerbestand, Verkaufspreis, Rabattregeln, Coupons, Bestellungen | ausschließlich Shop-Admin, serverseitig geprüft | Bestand/Preis öffentlich; Bestellungen nur Käufer und Shop-Admin |
 
+**Zielbild (ADR-0037), noch nicht gebaut:**
+
+```
+                     skylanders  (sky_id — die eine Identität)
+                          |
+        +-----------------+------------------+
+        |                 |                  |
+  collection_items   shop_inventory     characters
+  (privat, je User)  (SkyIsles, kein    (kuratiert,
+        |             user_id)           öffentlich)
+        |            unique(sky_id, condition)
+        |            condition = loose | boxed
+        |                 |
+        |          inventory_movements   (Anhängejournal, nur inventory_id:
+        |                 |               purchase, sale_skyisles,
+        |                 |               sale_external, return,
+        |                 |               correction, writeoff)
+        |                 |
+        |            orders / order_items  (später, mit Preis-Snapshot)
+        |
+   „Fehlend & verfügbar" = collection_items ⋈ skylanders ⋈ shop_inventory
+                            über sky_id — keine User-Shop-Tabelle nötig.
+                            condition erzeugt 1:n, nicht 1:1.
+
+   öffentlich sichtbar: quantity - reserved > 0  →  „Auf Lager"
+                        die Zahl selbst nie.
+
+  shop_admins ──▶ public.is_shop_admin()  ──▶ Prädikat jeder Shop-Policy
+  (keine Client-Rechte)   (security definer)
+```
+
 **Die Grenze zwischen Benutzerdaten und Shop ist genauso hart wie die übrigen drei.**
 `collection_items` beantwortet „Was besitzt dieser Nutzer?", die Shop-Domäne beantwortet
 „Was hat das Geschäft auf Lager?". Beide hängen an derselben `sky_id`, sonst an nichts.
