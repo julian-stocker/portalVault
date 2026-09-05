@@ -254,6 +254,10 @@ Betriebsentscheidung, keine Änderung des Datenmodells.
 | `collection_items.sky_id → skylanders.sky_id` | **`restrict`** | **`restrict`** | Ein Katalogeintrag darf nicht unter einer Sammlung wegbrechen. `restrict` lässt ein versehentliches Löschen **laut scheitern**, statt still Benutzerdaten mitzunehmen. Der Import löscht ohnehin nie, sondern setzt `is_active = false`. `on update restrict` statt `cascade`: eine SKY-ID ändert sich nie — ein Änderungsversuch soll fehlschlagen, nicht stillschweigend durch alle Sammlungen propagieren. |
 | `categories.series_code → series.code` | `restrict` | `cascade` | Eine Serie mit Kategorien ist nicht löschbar. Der Serien-Code ist Präsentationsmetadatum, keine Identitätsverankerung wie die SKY-ID — eine Umbenennung darf daher propagieren. |
 | `skylanders.(category_id, series_code) → categories.(id, series_code)` | `restrict` | `cascade` | Eine benutzte Kategorie ist nicht löschbar; Umbenennungen propagieren. |
+| `shop_admins.user_id → auth.users.id` | `cascade` | `cascade` | Konto gelöscht → Berechtigung verschwindet. Anders als beim Journal ist hier nichts zu bewahren. |
+| `shop_inventory.sky_id → skylanders.sky_id` | **`restrict`** | `cascade` | Ein Katalogeintrag darf nicht unter dem Bestand wegbrechen. |
+| `inventory_movements.inventory_id → shop_inventory.id` | **`restrict`** | `cascade` | **Der Riegel vor der Audit-Historie.** Eine Position mit Bewegungen ist nicht löschbar — sonst wäre das Löschen der Position der Umweg, auf dem sich unveränderliche Historie doch entfernen ließe. |
+| `inventory_movements.created_by → auth.users.id` | **`set null`** | `cascade` | Ein gelöschtes Mitarbeiterkonto darf keine Buchungshistorie mitnehmen. NULL heißt danach „System oder ehemaliges Konto". |
 
 ### 3.7 Trigger
 
@@ -582,95 +586,163 @@ Die Spaltennamen sind Platzhalter zur Verständigung, kein Entwurf.
 | Bestellungen | Kaufvorgang | eigene Struktur; personenbezogene Daten → DSGVO-relevant |
 | Bestellpositionen | was gekauft wurde | **Preis-Snapshot**, kein Verweis auf den heutigen Preis |
 
-#### Konkreter Entwurf (ADR-0037) — **nicht angelegt**
+#### Umgesetzt in `0003_shop_foundation.sql` (2026-09-05)
 
-Spaltennamen sind Entwurf, keine Migration. Alles hier ist additiv zum bestehenden Schema.
+Drei Tabellen, eine View, sieben Funktionen. Rein additiv: keine bestehende Tabelle, Spalte,
+Policy oder Zeile wurde verändert. **Die Migrationsdatei liegt im Repository; ob sie im
+Supabase-Projekt bereits angewandt ist, sagt `npm run verify:rls`.**
 
 ```
 shop_admins
-  user_id        uuid pk  → auth.users (on delete cascade)
-  granted_at     timestamptz not null default now()
-  note           text
-  -- KEIN Recht für anon/authenticated. Vergabe nur über die Service Role.
-  -- Abgefragt ausschließlich über public.is_shop_admin() (security definer).
+  user_id     uuid pk → auth.users (on update cascade, on delete cascade)
+  granted_at  timestamptz not null default now()
+  note        text
+  -- Keine Rechte für anon/authenticated, keine Policy. Vergabe über die
+  -- Service Role. Gelesen ausschließlich von public.is_shop_admin().
 
 shop_inventory
-  id             bigint identity pk
-  sky_id         text not null → skylanders (on delete restrict)   -- UNVERÄNDERLICH
-  condition      text not null  check (condition in ('loose','boxed'))  -- UNVERÄNDERLICH
-  quantity       integer not null default 0  check (quantity >= 0)
-  reserved       integer not null default 0  check (reserved >= 0 and reserved <= quantity)
-  sale_price     numeric(10,2)               check (sale_price is null or sale_price > 0)
-  is_listed      boolean not null default false
-  note           text                              -- intern, nie öffentlich
+  id                 bigint identity pk
+  sky_id             text not null → skylanders (on delete restrict)   -- UNVERÄNDERLICH
+  condition          text not null  check in ('loose','boxed')         -- UNVERÄNDERLICH
+  quantity           integer not null default 0  check >= 0
+  reserved           integer not null default 0  check >= 0, check <= quantity
+  available_quantity integer generated always as (quantity - reserved) stored
+  sale_price         numeric(10,2)  check (null or > 0)
+  is_listed          boolean not null default false
+  note               text                       -- intern, nie öffentlich
   created_at, updated_at
   unique (sky_id, condition)
+  check (not is_listed or sale_price is not null)
   -- KEIN user_id: der Bestand gehört dem Shop, nicht dem Business-Account.
 
 inventory_movements
-  id             bigint identity pk
-  inventory_id   bigint not null → shop_inventory (on delete restrict)
-  delta          integer not null  check (delta <> 0)
-  reason         text not null     -- purchase | sale_skyisles | sale_external
-                                   -- | return | correction | writeoff
-  unit_cost      numeric(10,2) null   -- NUR bei reason='purchase', sonst NULL
-  currency       text null            -- dito
-  order_id       bigint null → orders                              -- später
-  note           text                                              -- intern
-  created_at     timestamptz not null default now()
-  created_by     uuid not null → auth.users
-  -- Nur Anhängen. Kein UPDATE, kein DELETE — auch nicht für Shop-Admins.
-  -- KEINE eigene sky_id: siehe „Normalisierung" unten.
+  id           bigint identity pk
+  inventory_id bigint not null → shop_inventory (on delete restrict)
+  delta        integer not null  check (delta <> 0)
+  reason       text not null     check in ('purchase','sale_skyisles','sale_external',
+                                  'return','correction','writeoff','initial_import')
+  unit_cost    numeric(10,2)     -- nur bei reason='purchase'
+  currency     text              -- dito, ISO-4217-Muster ^[A-Z]{3}$
+  note         text              -- intern
+  created_at   timestamptz not null default now()
+  created_by   uuid → auth.users (on delete set null)   -- NULL = System
+  -- KEINE sky_id: normalisiert, siehe unten. KEIN order_id: `orders` gibt es nicht.
 ```
 
-**`condition` kennt in V1 genau zwei Werte** (ADR-0037 § 5): `loose` — lose Figur ohne
-Verkaufsverpackung — und `boxed` — dieselbe Figur in OVP. Keine weiteren Zustandsstufen.
-Der Eindeutigkeitsschlüssel ist trotzdem **von Anfang an** `(sky_id, condition)`, damit eine
-spätere dritte Ausprägung keine Migration auf laufendem Bestand auslöst.
+**Vorzeichen je Reason**, als CHECK: `purchase` und `initial_import` nur positiv ·
+`sale_skyisles`, `sale_external`, `writeoff` nur negativ · `return` und `correction` in beide
+Richtungen. `return` bleibt bewusst offen, weil eine Kundenrückgabe Zugang und eine
+Lieferantenrückgabe Abgang ist — ein Constraint, der eine der beiden verbietet, erzeugt nur
+Buchungen unter falschem Reason.
 
-**Normalisierung: `inventory_movements` speichert `sky_id` nicht doppelt.** Geprüft und
-verworfen: `inventory_id → shop_inventory → sky_id` ist eindeutig, und die Bestandszeile wird
-nie gelöscht. Ein Snapshot wäre nur nötig, wenn eine Position ihre `sky_id` oder `condition`
-ändern könnte — genau das ist ausgeschlossen: **beide Felder sind unveränderlich.** Eine
-Umwidmung wäre eine neue Position plus Ausbuchung der alten, keine Änderung. Die Auswertung
-„alle Bewegungen zu SKY-0123" ist damit ein Join über eine kleine Tabelle in einer
-Admin-Ansicht — der richtige Preis für eine widerspruchsfreie Historie.
+**Kostenfelder** sind an `purchase` gebunden: `check (reason = 'purchase' or (unit_cost is null
+and currency is null))` plus `check ((unit_cost is null) = (currency is null))` und
+`unit_cost >= 0`. `initial_import` ist ausdrücklich ausgeschlossen — eine Spalte, die dort NULL
+sein *muss*, hält strukturell fest, dass der Legacy-Einstand unbekannt ist
+(`docs/SKYLANDERS_DATA.md` 11d, ADR-0037 § 21).
 
-**Indizes:** `shop_inventory (sky_id)` für den Katalog-Join · Teilindex
-`shop_inventory (sky_id) where is_listed and quantity > reserved` für „Fehlend & verfügbar" ·
-`inventory_movements (inventory_id, created_at desc)` für den Verlauf ·
-`inventory_movements (order_id) where order_id is not null`.
+**`initial_import`** ist der Eröffnungsbestand und gilt genau einmal je Position:
+`unique index … (inventory_id) where reason = 'initial_import'`. Das ist die Idempotenz des
+späteren Imports — ein zweiter Lauf scheitert am Index, statt den Bestand zu verdoppeln. Die
+Garantie liegt in der Datenbank, nicht im Skript.
 
-**`unit_cost` ist bewusst nullable und wird beim Legacy-Import nicht gefüllt.** Die Excel
-kennt Einkaufspreise nur als Summe je Einkaufsereignis, ohne SKY-ID und ohne Charge; für alle
-234 Bestandspositionen ist der Einstand unbelegbar (`docs/SKYLANDERS_DATA.md` 11d). Der Import
-schreibt deshalb `NULL` statt eines geschätzten Werts. Ab dem ersten eigenen Wareneingang ist
-der Preis dagegen bekannt — und ohne Spalte unwiederbringlich verloren, weshalb die beiden
-Spalten von Anfang an mitkommen (ADR-0037 § 21). Chargen (Lots) sind daraus später **ableitbar**
-und werden jetzt nicht gebaut.
+**Normalisierung: `inventory_movements` speichert `sky_id` nicht doppelt.** `inventory_id →
+shop_inventory → sky_id` ist eindeutig, und beide Identitätsspalten sind per Trigger
+unveränderlich — ein Snapshot würde einen Wert verdoppeln, der nicht abweichen kann.
 
-**Später, noch nicht entworfen:** `orders`, `order_items` (mit Preis-Snapshot), Rabattregeln,
-Coupons. Zu `order_items` gehören außer den Preisfeldern mindestens `currency`, ein
-gespeichertes `line_total` und ein Steuer-Snapshot. Welches Steuerverfahren gilt, ist eine
-offene **steuerliche** Frage — keine Softwareentscheidung — und muss vor der ersten Bestellung
-geklärt sein.
+**Indizes:** `shop_inventory (sky_id)` · Teilindex `(sky_id) where is_listed and quantity >
+reserved` für „Fehlend & verfügbar" · `inventory_movements (inventory_id, created_at desc)` ·
+der partielle Unique-Index oben.
 
-**Verfügbare Menge und Schutz vor Doppelverkauf.** Öffentlich zählt nie `quantity`, sondern
-`quantity - reserved`; der Warenkorb reduziert nichts, der Checkout reserviert. Beides ist eine
-atomare bedingte Operation in einer `security definer`-Funktion, damit kein Client sie umgehen
-kann — sinngemäß:
+#### Schreibwege: zwei Wrapper, eine Invariante
+
+Clients haben auf keine der drei Tabellen ein Recht — auch Shop-Admins nicht. Der gesamte
+Schreibzugriff sind drei Funktionen:
+
+```
+        apply_inventory_movement()          Invariante. Für NIEMANDEN ausführbar.
+          ^                    ^
+          |                    |
+  record_inventory_     system_record_inventory_
+  movement()            movement()
+  authenticated,        nur service_role
+  is_shop_admin()       (kein Client-Rollen-EXECUTE)
+  created_by=auth.uid() created_by=NULL, keine Kostenparameter
+
+  set_shop_listing()    authenticated + is_shop_admin(); Preis, Listing, Notiz —
+                        niemals quantity oder reserved
+```
+
+Die innere Funktion ist erreichbar, weil die Wrapper `security definer` sind und dem
+Migrations-Owner gehören; ein Owner darf seine eigenen Funktionen immer ausführen. Für jede
+Client-Rolle ist sie explizit entzogen — damit ist auch `created_by` nicht fälschbar, denn nur
+die Wrapper setzen es.
+
+**Der Kern der Invariante** in `apply_inventory_movement()`:
 
 ```sql
-update shop_inventory
-   set reserved = reserved + :n
- where id = :id and quantity - reserved >= :n
-returning id;
+select id into v_inventory_id from public.shop_inventory
+ where sky_id = p_sky_id and condition = p_condition
+ for update;                         -- konkurrierende Bewegungen serialisieren hier
+
+update public.shop_inventory set quantity = quantity + p_delta
+ where id = v_inventory_id and quantity + p_delta >= reserved;
+                                     -- Prüfung IST die WHERE-Klausel
 ```
 
-Null zurückgegebene Zeilen heißen „ausverkauft", nicht „Fehler". Zusammen mit
-`check (quantity >= 0)` und `check (reserved <= quantity)` ist ein negativer oder
-überreservierter Bestand strukturell unmöglich. Concurrency wird auf Datenbankebene gelöst,
-nie durch „Client liest, Client schreibt".
+Null betroffene Zeilen heißt „reicht nicht" und wird als Ausnahme geworfen. Es gibt kein
+Fenster zwischen Prüfen und Schreiben, also kein `read → calculate → write`. Der
+Journaleintrag folgt in derselben Transaktion: entweder beides oder nichts.
+
+#### Unveränderlichkeit und Anhängejournal
+
+`shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die
+Service Role**, die RLS umgeht, Trigger aber nicht. Dieselbe Begründung wie bei
+`prevent_sky_id_change()` in `0001`.
+
+**Die fachliche Bewegungshistorie ist unveränderlich.** Der Trigger verweigert `DELETE`
+**ausnahmslos und für jede Rolle**, die Service Role eingeschlossen, und ebenso jedes `UPDATE`
+an einer Sachspalte. Auch der Umweg über die Position ist zu: Der Fremdschlüssel ist
+`on delete restrict`, eine Position mit Historie lässt sich nicht löschen. Korrigiert wird
+ausschließlich durch neue Gegenbewegungen.
+
+**Genau eine Änderung ist erlaubt: die Anonymisierung des Actors.** Wird ein Konto gelöscht,
+muss `created_by` von dessen UUID auf `NULL` wechseln — das ist es, was `on delete set null`
+tut, und PostgreSQL führt es als `UPDATE` auf dieser Tabelle aus. Der Trigger lässt es durch,
+wenn `old.created_by` gesetzt war, `new.created_by` NULL ist und
+`(id, inventory_id, delta, reason, unit_cost, currency, note, created_at)` per
+`is not distinct from` identisch bleibt. Blockiert bleiben damit: UUID → andere UUID,
+NULL → UUID, und jede gleichzeitige Änderung einer Sachspalte.
+
+Die Grenze ist bewusst die erlaubte **Datenmutation**, nicht der Aufrufer: Ob PostgreSQL das
+`UPDATE` selbst wegen der referentiellen Aktion ausgelöst hat, lässt sich nicht zuverlässig
+feststellen, und danach zu raten wäre die schwächere Garantie. Was bewegt wurde, wann, warum und
+zu welchem Preis, bleibt unantastbar; entfernt wird nur der personenbezogene Bezug. Ohne diese
+Ausnahme wäre jedes Konto, das je eine Bewegung gebucht hat, **dauerhaft nicht mehr löschbar** —
+im Widerspruch zur Kontolöschung in `docs/AUTH.md` und zur erklärten Absicht der FK selbst.
+
+Der Preis dafür ist bewusst in Kauf genommen: Eine versehentlich angelegte Position bleibt
+bestehen. Sie steht dann auf `is_listed = false`, `quantity = 0`, `reserved = 0` und ist
+wirkungslos. Eine Audit-Invariante für Aufräumkomfort aufzuweichen wäre der schlechtere Tausch —
+eine Historie, die sich entfernen lässt, belegt nichts. Eine Position **ohne** jede Bewegung
+bleibt löschbar, weil dann nichts auf sie zeigt; eine Lösch-API dafür gibt es nicht und soll es
+in V1 nicht geben.
+
+#### Reconciliation
+
+`shop_inventory_reconciliation` (View, `security_invoker = true`, keine Client-Rechte) stellt je
+Position `quantity`, `SUM(delta)` und `drift` gegenüber. Ein Constraint ist nicht möglich —
+PostgreSQL kennt keine tabellenübergreifende Aggregatbedingung —, und ein Trigger wäre
+schlechter als nichts: Er schriebe denselben Fehler ein zweites Mal. `npm run verify:rls`
+schlägt fehl, sobald irgendwo `drift <> 0` steht.
+
+#### Noch nicht gebaut
+
+`orders`, `order_items` (mit Preis-Snapshot), Rabattregeln, Coupons, die öffentliche
+Shop-Projektion und die Reservierungs-API. Zu `order_items` gehören außer den Preisfeldern
+mindestens `currency`, ein gespeichertes `line_total` und ein Steuer-Snapshot. Welches
+Steuerverfahren gilt, ist eine offene **steuerliche** Frage — keine Softwareentscheidung — und
+muss vor der ersten Bestellung geklärt sein.
 
 **Drei Randbedingungen, die heute schon gelten und nicht verletzt werden dürfen:**
 

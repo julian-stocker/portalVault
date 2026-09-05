@@ -180,10 +180,13 @@ ausdrücklich nicht genügte — interne Daten wurden gar nicht erst ausgeliefer
 - E-Mail-Vorlagen und die Redirect-URL-Allowlist werden in der Supabase-Konsole konfiguriert.
   Für die Beta müssen dort ausschließlich die tatsächlichen Domains eingetragen sein
   (offene Redirects vermeiden).
-- Kontolöschung: `auth.users` löschen kaskadiert auf `profiles` und `collection_items`.
+- Kontolöschung: `auth.users` löschen kaskadiert auf `profiles`, `collection_items` und
+  `shop_admins`. Gebuchte Shop-Bewegungen bleiben erhalten, ihr `created_by` wird auf `NULL`
+  anonymisiert (`on delete set null`, ADR-0037) — die Geschäftshistorie überlebt, der
+  Personenbezug nicht.
   **OPEN:** Self-Service-Löschung in V1 anbieten? (DSGVO-relevant, siehe `docs/SECURITY.md`.)
 
-### Rollen und Berechtigungen — heute keine, später `shop_admin`
+### Rollen und Berechtigungen — seit `0003` gibt es `shop_admins`
 
 **In V1 gibt es keine Rollen.** Jeder angemeldete Benutzer hat exakt dieselben Rechte, und
 Autorisierung heißt heute ausschließlich: *„gehört diese Zeile mir?"* — durchgesetzt von RLS
@@ -197,6 +200,12 @@ Damit sie nicht falsch gebaut wird, stehen die Randbedingungen schon jetzt fest:
    `shop_admins`. Eine hart codierte Adresse als Autorisierungsregel — im Client, im
    Server-Code, in einer Policy oder in einer Umgebungsvariable — ist ausgeschlossen. Die
    konkrete Adresse ist später nur **Eingabe** für das Rollenvergabewerkzeug.
+1b. **Umgesetzt (2026-09-05).** `0003_shop_foundation.sql` legt `shop_admins (user_id, granted_at,
+   note)` an — für Clients weder les- noch schreibbar — und `public.is_shop_admin()` als einziges
+   Autorisierungsprädikat. Der Geschäftsaccount ist und bleibt ein **normaler Supabase-Auth-User**:
+   `auth.users` → `profiles`, Registrierung über `/register` wie bei jedem anderen. Die Rolle
+   kommt später als zusätzliche Zeile in `shop_admins` dazu, vergeben durch ein eigenes Werkzeug
+   über die Service Role. Kein Business-Signup, keine zweite Auth-Tabelle, keine Adresse im Code.
 2. **Die Rolle darf nicht auf `profiles` liegen.** `profiles` ist vom Benutzer selbst
    beschreibbar: `grant select, insert, update … to authenticated` plus `profiles_update_own`.
    Eine Spalte `role` oder `is_shop_admin` dort **könnte sich jeder Benutzer selbst setzen** —

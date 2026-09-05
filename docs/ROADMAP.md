@@ -315,8 +315,11 @@ mit Preis-Snapshot.
 
 **Festgelegte Reihenfolge der Umsetzung** (ADR-0037 § 9):
 
-**Schritt 1 — Shop Foundation.** `shop_admins`, `is_shop_admin()`, `shop_inventory`,
-`inventory_movements`, Constraints, RLS, sichere Bestandsmutationen.
+**Schritt 1 — Shop Foundation. ✅ implementiert (2026-09-05, `0003_shop_foundation.sql`).**
+`shop_admins`, `is_shop_admin()`, `shop_inventory`, `inventory_movements`,
+`shop_inventory_reconciliation`, Constraints, Trigger, RLS und die drei Mutationsfunktionen.
+Die Migration liegt im Repository; ob sie im Supabase-Projekt angewandt ist, sagt
+`npm run verify:rls`.
 
 **Schritt 2 — Legacy Inventory Import.** Excel **read-only**, nur die Geschäftsspalte F
 (Difference), SKY-ID-Mapping, Dry-Run als Standard, explizites `--apply`, Anfangsbestand plus

@@ -1585,8 +1585,9 @@ Hamburger-Menü (verbirgt drei Ziele hinter einer Geste) · eine eigene Profilse
 
 ## ADR-0037 — Shop-Fundament: Rolle, Bestand, Bewegungen, Sichtbarkeit
 
-**Status:** Architektur und Produktentscheidungen ANGENOMMEN (2026-09-05) ·
-**nichts davon ist implementiert.**
+**Status:** ANGENOMMEN und **umgesetzt in `0003_shop_foundation.sql`** (2026-09-05).
+Das Fundament steht; Bestellungen, öffentliche Shopanzeige, Reservierungs-API, `/shop-admin`,
+Rollenvergabewerkzeug und Legacy-Import folgen als eigene Schritte.
 Keine Migration, keine Tabelle, keine Policy, keine UI. Dieser Eintrag legt fest, wie das
 Shop-Fundament aussehen wird, damit die erste Migration keine Entscheidung mehr improvisieren
 muss. Er baut auf ADR-0032 (Domänentrennung) und ADR-0033 (Preisebenen) auf.
@@ -1887,10 +1888,47 @@ Admin-Ansicht.
 Die Unveränderlichkeit ist eine **Regel des Datenmodells**, keine Konvention der Oberfläche —
 sie gehört später abgesichert (Trigger oder Policy), nicht bloß im Admin-Formular weggelassen.
 
-Felder: `id`, `inventory_id`, `delta`, `reason`, `order_id` (optional), `note`, `created_at`,
-`created_by`. Reason-Werte mindestens: `purchase` · `sale_skyisles` · `sale_external` ·
-`return` · `correction` · `writeoff`. Nur Anhängen — kein `UPDATE`, kein `DELETE`, auch nicht
-für Shop-Admins; eine falsche Bewegung wird durch eine Gegenbewegung korrigiert.
+Felder: `id`, `inventory_id`, `delta`, `reason`, `unit_cost`, `currency`, `note`, `created_at`,
+`created_by`. `order_id` kommt mit der Bestellmigration — `orders` existiert noch nicht.
+
+**Sieben Reason-Werte:** `purchase` · `sale_skyisles` · `sale_external` · `return` ·
+`correction` · `writeoff` · **`initial_import`**.
+
+**`initial_import` ist der Eröffnungsbestand**, nicht ein Einkauf. `purchase` würde eine
+Anschaffung behaupten, für die es keinen Beleg gibt, und jede spätere Kostenauswertung müsste
+218 Positionen als „Einkauf mit unbekanntem Preis" führen — genau die Daten verwässern, für die
+`unit_cost` existiert. Regeln: nur positives `delta` · `unit_cost` und `currency` **müssen**
+NULL sein · **höchstens einmal je Position**, erzwungen durch einen partiellen Unique-Index.
+Dieser Index ist die Idempotenz des Imports: Ein zweiter Lauf scheitert an der Datenbank statt
+den Bestand zu verdoppeln. Eine `initial_import`-Zeile darf **nie** nachträglich als `purchase`
+gelesen werden.
+
+**Unveränderliche Audit-Historie.** `DELETE` ist ausnahmslos verboten, für jede Rolle, auch
+für die Service Role, die RLS umgeht, Trigger aber nicht. Der Fremdschlüssel auf
+`shop_inventory` ist `on delete restrict`: Auch der Umweg über das Löschen der ganzen Position
+führt nicht an der Historie vorbei. Korrigiert wird ausschließlich durch Gegenbewegungen.
+
+**Eine erlaubte Änderung: `created_by` → NULL bei Kontolöschung.** Nachträglich ergänzt
+(2026-09-05), nachdem die funktionale Verifikation den Widerspruch zeigte: `on delete set null`
+wird von PostgreSQL als `UPDATE` ausgeführt und lief in genau dieses Verbot — jedes Konto mit
+Buchungshistorie wäre damit **dauerhaft unlöschbar** gewesen, entgegen der Kontolöschung in
+`docs/AUTH.md` und entgegen der Absicht der FK selbst. Der Trigger lässt jetzt exakt diesen
+Übergang durch: `old.created_by` gesetzt, `new.created_by` NULL, alle Sachspalten per
+`is not distinct from` identisch. Das ist keine Aufweichung, sondern die Vervollständigung —
+die Bewegung selbst bleibt unantastbar, es entfällt nur der Personenbezug.
+
+Die Grenze ist die erlaubte **Datenmutation**, nicht der Aufrufer. Ob PostgreSQL das `UPDATE`
+selbst ausgelöst hat, ist nicht zuverlässig feststellbar; danach zu raten wäre schwächer.
+Tragfähig ist die Prüfung, weil weder Clients noch Shop-Admins Tabellenrechte haben — nur der
+vertrauenswürdige Serverkontext könnte sie überhaupt auslösen, und selbst er kann dabei kein
+Sachfeld verändern.
+
+**Verworfen:** eine Ausnahme für kaskadierte Löschungen, die das Aufräumen einer versehentlich
+angelegten Position oder eines Test-Fixtures erlaubt hätte. Bequemlichkeit beim Aufräumen ist
+kein hinreichender Grund, die zentrale Audit-Invariante zu lockern — eine Historie, die sich
+entfernen lässt, belegt nichts. Eine überflüssige Position bleibt stattdessen wirkungslos
+stehen (`is_listed = false`, `quantity = 0`), und die funktionale Verifikation arbeitet mit
+einem dauerhaften, inaktiven Fixture statt mit Wegwerfdaten.
 
 ### 12. Bestand: gespeicherte Menge **und** Journal
 
@@ -2046,6 +2084,41 @@ lückenlose Rechnungsnummerierung auf Bestellebene.
 - Reihenfolge: Foundation → Legacy-Import → `/shop-admin`
 - nach dem Import führt die SkyIsles-Datenbank, nicht die Excel
 - Katalogbereinigung ist ein eigener späterer Schritt und **kein** Blocker
+
+### 19b. Wie das Fundament gebaut wurde
+
+**Autorisierung ist ein Postgres-Recht, keine Fallunterscheidung im Code.** Der spätere
+Legacy-Import läuft als Service Role und hat keine `auth.uid()` — er kann also nie Shop-Admin
+sein. `is_shop_admin()` dafür aufzuweichen hätte dieselbe Tür für jeden angemeldeten Nutzer
+geöffnet. Stattdessen gibt es **eine** Implementierung der Invariante und zwei Wrapper darum:
+
+```
+        apply_inventory_movement()      für NIEMANDEN ausführbar
+          ^                    ^
+  record_inventory_     system_record_inventory_
+  movement()            movement()
+  authenticated,        nur service_role
+  is_shop_admin()       created_by = NULL, keine Kostenparameter
+  created_by=auth.uid()
+```
+
+Die innere Funktion ist erreichbar, weil die Wrapper `security definer` sind und dem
+Migrations-Owner gehören. Jeder Client-Rolle ist sie explizit entzogen — womit auch `created_by`
+nicht fälschbar ist: Es ist kein Parameter der öffentlichen Wrapper.
+
+**Keine Tabellenrechte für irgendeinen Client**, Shop-Admins eingeschlossen. RLS auf allen drei
+Tabellen **ohne eine einzige Policy**. Die öffentliche Shop-Projektion kommt mit der Shop-UI als
+schmale View oder RPC — `sky_id`, `condition`, `sale_price`, `is_listed` und ein abgeleitetes
+`in_stock`, nie eine Zahl. Das Fundament hat keine öffentliche Oberfläche und braucht deshalb
+auch keine.
+
+**Race Conditions** über `select … for update` plus eine Bedingung, die Teil des
+`update`-Statements ist statt eine vorangehende Prüfung: `where … and quantity + delta >=
+reserved`. Es gibt kein Fenster zwischen Prüfen und Schreiben. Die CHECKs sind das letzte Netz.
+
+**Divergenz** ist ausgeschlossen, weil Mengenänderung und Journalzeile in derselben Funktion und
+derselben Transaktion entstehen und `quantity` für niemanden sonst beschreibbar ist. Nachweisbar
+über die View `shop_inventory_reconciliation`, geprüft von `npm run verify:rls`.
 
 ### 20. Was ausdrücklich OPEN bleibt
 

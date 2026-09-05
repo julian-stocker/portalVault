@@ -83,7 +83,7 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
 **Nichts davon ist implementiert.** Es gibt keine Shop-Tabelle, keinen Shop-Import und keine
 Shop-Rolle.
 
-### Shop-Grenzen (ADR-0037) — **nichts davon existiert**
+### Shop-Grenzen (ADR-0037) — **umgesetzt in `0003_shop_foundation.sql`**
 
 **Die Berechtigung darf nicht in `profiles` liegen.** An der Migration nachgelesen:
 `grant select, insert, update on public.profiles to authenticated` ist **tabellenweit**, und
@@ -116,12 +116,51 @@ Eingabe** und löst daraus den bestehenden Auth-User beziehungsweise dessen `use
 Aus demselben Grund wird die Adresse in der Dokumentation nicht als Wert geführt, sondern nur
 als „der Geschäftsaccount" bezeichnet.
 
-**Normale Collector-Accounts dürfen Shopbestand niemals verändern** — keine schreibende Policy,
-kein Schreibrecht, und jede Mutation läuft über eine `security definer`-Funktion, die
-`is_shop_admin()` prüft. Dieselbe dreifache Absicherung wie beim Katalog.
+**Die drei Shop-Tabellen sind für Clients vollständig geschlossen.** RLS ist auf allen dreien
+aktiv, **ohne eine einzige Policy**, und `anon` wie `authenticated` sind alle Tabellenrechte
+entzogen. Das gilt auch für Shop-Admins: Ihr gesamter Schreibzugriff sind drei Funktionen.
 
-**`inventory_movements` ist ein Anhängejournal.** Kein `UPDATE`, kein `DELETE` — auch nicht für
-Shop-Admins. Eine falsche Bewegung wird durch eine Gegenbewegung korrigiert, nicht überschrieben.
+Spaltenrechte wären die bequeme Lösung und die falsche gewesen — die nächste hinzugefügte
+Spalte wäre wieder offen. Ein `TRUNCATE` wäre ohnehin nicht von RLS gedeckt; erst der
+`revoke` schließt es.
+
+| Rolle | `shop_admins` | `shop_inventory` | `inventory_movements` |
+|---|---|---|---|
+| `anon` | — | — | — |
+| `authenticated` | — | — | — |
+| Shop-Admin | — | nur über Funktionen | nur über Funktionen |
+| `service_role` | voll | INSERT/UPDATE; Position mit Historie nicht löschbar | **nur INSERT** — Trigger verbietet UPDATE und DELETE |
+
+**Zwei getrennte Schreibwege, getrennt durch Postgres-Rechte, nicht durch eine Fallunterscheidung
+im Code.** `record_inventory_movement()` ist für `authenticated` ausführbar und prüft als Erstes
+`is_shop_admin()`. `system_record_inventory_movement()` ist **ausschließlich `service_role`**
+ausführbar — eine Anfrage als `anon` oder `authenticated` wird von Postgres abgewiesen, bevor
+der Funktionskörper überhaupt läuft. Die gemeinsame innere Funktion
+`apply_inventory_movement()` ist **keiner** Rolle ausführbar; erreichbar ist sie nur, weil die
+Wrapper als Owner laufen.
+
+Der Grund für die Trennung: Der spätere Legacy-Import läuft als Service Role und hat keine
+`auth.uid()`, kann also nie Shop-Admin sein. `is_shop_admin()` dafür aufzuweichen hätte
+dieselbe Tür für jeden angemeldeten Nutzer geöffnet.
+
+**`created_by` ist nicht fälschbar.** Es ist kein Parameter der öffentlichen Wrapper: Der
+Admin-Pfad setzt `auth.uid()`, der Systempfad `NULL`. NULL heißt „System" — einen Actor zu
+erfinden wäre eine Falschangabe in einem Auditjournal.
+
+**Die fachliche Bewegungshistorie ist unveränderlich und nie löschbar.** `DELETE` ist
+ausnahmslos verboten, für jede Rolle — auch für die Service Role, die RLS umgeht, Trigger aber
+nicht. Auch der Umweg ist zu: Der Fremdschlüssel auf `shop_inventory` ist `on delete restrict`,
+eine Position mit Historie kann nicht gelöscht werden. Eine falsche Bewegung wird durch eine
+Gegenbewegung korrigiert, nie überschrieben und nie entfernt.
+
+**Eine einzige Änderung ist erlaubt, und sie dient dem Datenschutz:** Bei der Löschung des
+zugehörigen Auth-Users darf `created_by` von dessen UUID auf `NULL` anonymisiert werden —
+sonst wäre ein Konto, das je gebucht hat, dauerhaft nicht löschbar. Alle Sachspalten müssen
+dabei identisch bleiben; UUID → andere UUID und NULL → UUID sind weiterhin blockiert. Die
+Bewegungshistorie verändert sich dadurch fachlich nicht, nur der Personenbezug entfällt.
+
+**Die Geschäfts-E-Mail kommt im Schema nicht vor** — keine Spalte, keine Policy, keine Funktion,
+keine Konstante. Autorisiert wird über `shop_admins.user_id`.
 
 ### `data/characters/characters.json` gehört ausdrücklich **nicht** auf die Verbotsliste
 

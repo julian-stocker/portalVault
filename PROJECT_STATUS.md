@@ -61,9 +61,21 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
-**Nächster Schritt: Shop Foundation Migration.** Kein Produktblocker mehr offen. Das
-Steuerverfahren ist erst vor den *Bestellungen* fällig und ist ohnehin keine
-Softwareentscheidung. **Bis dahin: keine Migration, keine Tabelle, keine Policy.**
+**Shop Foundation implementiert (2026-09-05, `supabase/migrations/0003_shop_foundation.sql`).**
+Drei Tabellen (`shop_admins`, `shop_inventory`, `inventory_movements`), eine Reconciliation-View
+und sieben Funktionen. Kein Client hat ein Tabellenrecht; der gesamte Schreibzugriff sind
+`record_inventory_movement()` (Shop-Admin), `system_record_inventory_movement()` (nur
+`service_role`, für den späteren Import) und `set_shop_listing()` (Preis und Listing).
+`inventory_movements` ist unveränderliche Audit-Historie: kein `DELETE` für irgendeine Rolle,
+keine Änderung an einer Sachspalte, und eine Position mit Historie ist wegen
+`on delete restrict` ebenfalls nicht löschbar. Einzige erlaubte Änderung ist die Anonymisierung
+`created_by → NULL` bei Kontolöschung — ohne sie wäre jedes Konto mit Buchungshistorie dauerhaft
+unlöschbar. `initial_import` gilt je Position genau einmal.
+`tools/verify-rls.mts` prüft das in einem neuen Abschnitt 9.
+
+**Die Migration ist noch nicht angewandt.** Sie muss im Supabase SQL Editor ausgeführt werden;
+danach zeigt `npm run verify:rls`, ob sie greift. Kein `/shop-admin`, kein öffentlicher Shop,
+kein Import, keine Rollenvergabe, keine Bestellungen.
 
 **Collection Experience implementiert (Phase H, 2026-09-05).** `/collection` ist eine
 Sammlerübersicht statt einer Liste: Gesamtfortschritt, geschätzter Marktwert, Serienfortschritt
@@ -522,7 +534,7 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0034** | **Charakteridentität ≠ Sammelobjektidentität ≠ Anzeigevariante; Zuordnungen werden kuratiert, nicht aus Namen geraten** |
 | **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
 | **0036** | **Hauptnavigation mit drei Zielen; Abmelden gehört nach `/settings`; aktive Route aus dem Pfad** |
-| **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — vollständig entschieden, **nicht implementiert** |
+| **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — **umgesetzt in `0003`** |
 
 ## Offene Entscheidungen
 

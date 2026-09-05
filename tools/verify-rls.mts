@@ -43,6 +43,9 @@ const TEST_SKYLANDER = {
 const RUN = Date.now();
 const USER_A = { email: `rls-test-a-${RUN}@portalvault.test`, password: `A-${RUN}-xK9!pQ` };
 const USER_B = { email: `rls-test-b-${RUN}@portalvault.test`, password: `B-${RUN}-mV4!zT` };
+// Booked and then deleted inside section 9, to exercise ON DELETE SET NULL on
+// the real foreign key rather than on a hand-written UPDATE.
+const USER_C = { email: `rls-test-c-${RUN}@portalvault.test`, password: `C-${RUN}-nW7!yR` };
 
 // --- Tiny assertion harness ------------------------------------------------
 type Result = { name: string; passed: boolean; detail: string };
@@ -123,6 +126,7 @@ async function main(): Promise<void> {
   let characterId: number | null = null;
   let userA: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
   let userB: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
+  let userC: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
 
   try {
     // ---------------------------------------------------------------- setup
@@ -568,17 +572,647 @@ async function main(): Promise<void> {
         badUrl.error ? `rejected: ${badUrl.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
       );
     }
+
+    // ------------------------------------- 9. shop foundation (migration 0003)
+    console.log("\n9. Shop foundation: role, stock, journal");
+
+    const shopReady = !(await admin.from("shop_inventory").select("id").limit(1)).error;
+    if (!shopReady) {
+      // One clear failure instead of forty that pass for the wrong reason:
+      // a missing table rejects writes too.
+      check(
+        "migration 0003_shop_foundation.sql is applied",
+        false,
+        "shop_inventory is not reachable - run the migration first",
+      );
+    } else {
+      // The shop fixture is PERMANENT, unlike the catalog fixture above.
+      //
+      // inventory_movements is append-only for every role, and a position that
+      // carries history cannot be deleted (FK RESTRICT) — so shop test data
+      // cannot be torn down, and must not be: weakening that invariant for the
+      // convenience of a test would defeat the point of an audit trail.
+      //
+      // Instead the fixture is inert. SKY-9998 is inactive, so it is outside
+      // the catalog, the collection and every completion count, and it hangs
+      // off an EXISTING series and category so that no phantom series appears
+      // in the UI. Every run reuses it, and the assertions below are written
+      // against the stock that is already there rather than against zero.
+      const host = await admin.from("categories").select("id, series_code").limit(1).maybeSingle();
+      if (!host.data) {
+        check(
+          "a catalog category exists to host the shop fixture",
+          false,
+          "run the catalog import first",
+        );
+      } else {
+      const SHOP_SKY_ID = "SKY-9998";
+      const fixture = await admin.from("skylanders").upsert(
+        {
+          sky_id: SHOP_SKY_ID,
+          name: "RLS Shop Fixture",
+          slug: "rls-shop-fixture",
+          series_code: host.data.series_code,
+          category_id: host.data.id,
+          is_active: false,
+        },
+        { onConflict: "sky_id" },
+      );
+      check(
+        "the permanent shop fixture figure exists and is inactive",
+        !fixture.error,
+        fixture.error ? fixture.error.message : `${SHOP_SKY_ID} ready`,
+      );
+
+      // userA becomes the shop admin, userB stays an ordinary collector. The
+      // grant runs through the service role, exactly as the later tool will.
+      const grant = await admin
+        .from("shop_admins")
+        .upsert({ user_id: userA.user.id, note: "verify-rls fixture" });
+      check(
+        "the service role can grant the shop admin role",
+        !grant.error,
+        grant.error ? grant.error.message : "granted",
+      );
+
+      const stockOf = async (condition: string): Promise<{ id: number; quantity: number } | null> => {
+        const row = await admin
+          .from("shop_inventory")
+          .select("id, quantity")
+          .eq("sky_id", SHOP_SKY_ID)
+          .eq("condition", condition)
+          .maybeSingle();
+        return row.data ? { id: row.data.id as number, quantity: row.data.quantity as number } : null;
+      };
+      const movementCount = async (inventoryId: number): Promise<number> => {
+        const { count } = await admin
+          .from("inventory_movements")
+          .select("id", { count: "exact", head: true })
+          .eq("inventory_id", inventoryId);
+        return count ?? -1;
+      };
+
+      // ---------------------------------------------------- 9.1 authorization
+      for (const [label, client] of [["an authenticated user", b], ["anonymous", anon]] as const) {
+        for (const table of ["shop_admins", "shop_inventory", "inventory_movements"] as const) {
+          const read = await client.from(table).select("*").limit(1);
+          check(
+            `${label} cannot read ${table}`,
+            !!read.error || read.data?.length === 0,
+            read.error ? `rejected: ${read.error.code}` : `${read.data?.length ?? 0} row(s)`,
+          );
+        }
+      }
+
+      const selfGrant = await b.from("shop_admins").insert({ user_id: userB.user.id });
+      check(
+        "an authenticated user cannot make themselves a shop admin",
+        !!selfGrant.error,
+        selfGrant.error ? `rejected: ${selfGrant.error.code}` : "INSERT SUCCEEDED - PRIVILEGE ESCALATION",
+      );
+
+      const directStock = await b
+        .from("shop_inventory")
+        .insert({ sky_id: SHOP_SKY_ID, condition: "loose", quantity: 5 });
+      check(
+        "an authenticated user cannot write stock directly",
+        !!directStock.error,
+        directStock.error ? `rejected: ${directStock.error.code}` : "INSERT SUCCEEDED - RLS HOLE",
+      );
+
+      const nonAdminMove = await b.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "purchase",
+      });
+      check(
+        "an authenticated user cannot book a movement (is_shop_admin gate)",
+        !!nonAdminMove.error,
+        nonAdminMove.error ? `rejected: ${nonAdminMove.error.code}` : "RPC SUCCEEDED - AUTHORIZATION HOLE",
+      );
+
+      const nonAdminListing = await b.rpc("set_shop_listing", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_sale_price: 1, p_is_listed: false,
+      });
+      check(
+        "an authenticated user cannot set a listing",
+        !!nonAdminListing.error,
+        nonAdminListing.error ? `rejected: ${nonAdminListing.error.code}` : "RPC SUCCEEDED - AUTHORIZATION HOLE",
+      );
+
+      // The system path is separated by EXECUTE privilege, not by a check
+      // inside the function - so a client is refused before the body runs.
+      for (const [label, client] of [["an authenticated user", b], ["anonymous", anon]] as const) {
+        const systemPath = await client.rpc("system_record_inventory_movement", {
+          p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "initial_import",
+        });
+        check(
+          `${label} cannot use the system import path`,
+          !!systemPath.error,
+          systemPath.error ? `rejected: ${systemPath.error.code}` : "RPC SUCCEEDED - SYSTEM PATH EXPOSED",
+        );
+      }
+
+      const internal = await a.rpc("apply_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "purchase",
+        p_unit_cost: null, p_currency: null, p_note: null, p_created_by: userB.user.id,
+      });
+      check(
+        "even a shop admin cannot call the internal mutation directly",
+        !!internal.error,
+        internal.error ? `rejected: ${internal.error.code}` : "RPC SUCCEEDED - created_by IS FORGEABLE",
+      );
+
+      // -------------------------------------------------------- 9.2 movements
+      // Measured as deltas against whatever earlier runs left behind.
+      const before = await stockOf("loose");
+      const q0 = before?.quantity ?? 0;
+      const m0 = before ? await movementCount(before.id) : 0;
+
+      const buy = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 3, p_reason: "purchase",
+        p_unit_cost: 4.5, p_currency: "EUR", p_note: "verify-rls",
+      });
+      const afterBuy = await stockOf("loose");
+      check(
+        "a shop admin can book a purchase of 3",
+        !buy.error && afterBuy?.quantity === q0 + 3,
+        buy.error ? buy.error.message : `quantity ${q0} -> ${afterBuy?.quantity ?? "-"}`,
+      );
+      const inventoryId = afterBuy?.id ?? -1;
+
+      const derived = await admin
+        .from("shop_inventory")
+        .select("quantity, reserved, available_quantity")
+        .eq("id", inventoryId)
+        .maybeSingle();
+      check(
+        "available_quantity is derived, not stored twice",
+        derived.data?.available_quantity ===
+          (derived.data?.quantity ?? 0) - (derived.data?.reserved ?? 0),
+        `available=${derived.data?.available_quantity ?? "-"}`,
+      );
+
+      const sell = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -1, p_reason: "sale_external",
+      });
+      const afterSell = await stockOf("loose");
+      check(
+        "an external sale of 1 takes it back down by one",
+        !sell.error && afterSell?.quantity === q0 + 2,
+        sell.error ? sell.error.message : `quantity=${afterSell?.quantity ?? "-"}`,
+      );
+
+      const oversell = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -(q0 + 50), p_reason: "sale_skyisles",
+      });
+      const afterOversell = await stockOf("loose");
+      check(
+        "selling more than there is, is refused",
+        !!oversell.error,
+        oversell.error ? `rejected: ${oversell.error.code}` : "RPC SUCCEEDED - NEGATIVE STOCK",
+      );
+      check(
+        "the refused sale changed nothing (transaction rolled back)",
+        afterOversell?.quantity === q0 + 2,
+        `quantity=${afterOversell?.quantity ?? "-"}`,
+      );
+      check(
+        "the refused sale left no journal row either",
+        (await movementCount(inventoryId)) === m0 + 2,
+        `${await movementCount(inventoryId)} row(s), expected ${m0 + 2}`,
+      );
+
+      const actor = await admin
+        .from("inventory_movements")
+        .select("created_by")
+        .eq("inventory_id", inventoryId)
+        .eq("reason", "purchase")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      check(
+        "created_by is the acting admin, taken from the request",
+        actor.data?.created_by === userA.user.id,
+        `created_by=${actor.data?.created_by ?? "null"}`,
+      );
+
+      // -------------------------------------------------------- 9.3 cost basis
+      const costNoCurrency = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "purchase",
+        p_unit_cost: 3, p_currency: null,
+      });
+      check(
+        "a unit_cost without a currency is refused",
+        !!costNoCurrency.error,
+        costNoCurrency.error ? `rejected: ${costNoCurrency.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const costOnSale = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -1, p_reason: "sale_external",
+        p_unit_cost: 3, p_currency: "EUR",
+      });
+      check(
+        "a cost on anything but a purchase is refused",
+        !!costOnSale.error,
+        costOnSale.error ? `rejected: ${costOnSale.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const costFree = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "purchase",
+      });
+      check(
+        "a purchase without a known cost is allowed",
+        !costFree.error,
+        costFree.error ? costFree.error.message : "accepted",
+      );
+
+      // --------------------------------------------------------- 9.4 reserved
+      const held = (await stockOf("loose"))?.quantity ?? 0;
+      await admin.from("shop_inventory").update({ reserved: held }).eq("id", inventoryId);
+
+      const belowReserved = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -1, p_reason: "sale_external",
+      });
+      check(
+        "stock cannot be taken below what is reserved",
+        !!belowReserved.error,
+        belowReserved.error ? `rejected: ${belowReserved.error.code}` : "RPC SUCCEEDED - RESERVATION IGNORED",
+      );
+
+      const overReserve = await admin
+        .from("shop_inventory")
+        .update({ reserved: held + 1 })
+        .eq("id", inventoryId);
+      check(
+        "reserved cannot exceed quantity",
+        !!overReserve.error,
+        overReserve.error ? `rejected: ${overReserve.error.code}` : "UPDATE SUCCEEDED - CHECK MISSING",
+      );
+
+      const negativeReserved = await admin
+        .from("shop_inventory")
+        .update({ reserved: -1 })
+        .eq("id", inventoryId);
+      check(
+        "reserved cannot go negative",
+        !!negativeReserved.error,
+        negativeReserved.error ? `rejected: ${negativeReserved.error.code}` : "UPDATE SUCCEEDED - CHECK MISSING",
+      );
+      await admin.from("shop_inventory").update({ reserved: 0 }).eq("id", inventoryId);
+
+      // ---------------------------------------------------- 9.5 initial_import
+      const importCost = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 1, p_reason: "initial_import",
+        p_unit_cost: 1, p_currency: "EUR",
+      });
+      check(
+        "initial_import refuses a cost basis",
+        !!importCost.error,
+        importCost.error ? `rejected: ${importCost.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const importNegative = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: -1, p_reason: "initial_import",
+      });
+      check(
+        "initial_import refuses a negative delta",
+        !!importNegative.error,
+        importNegative.error ? `rejected: ${importNegative.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      // Booked on the first run ever; refused with 23505 on every run after —
+      // both outcomes prove the partial unique index is in place.
+      const systemImport = await admin.rpc("system_record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 7, p_reason: "initial_import",
+        p_note: "verify-rls opening balance",
+      });
+      check(
+        "the system path books the opening balance, or it is already booked",
+        !systemImport.error || systemImport.error.code === "23505",
+        systemImport.error ? `already booked: ${systemImport.error.code}` : `movement ${systemImport.data}`,
+      );
+
+      if (!systemImport.error) {
+        const systemActor = await admin
+          .from("inventory_movements")
+          .select("created_by")
+          .eq("id", systemImport.data)
+          .maybeSingle();
+        check(
+          "a system movement records no actor rather than inventing one",
+          systemActor.data?.created_by === null,
+          `created_by=${systemActor.data?.created_by ?? "null"}`,
+        );
+      } else {
+        const systemActor = await admin
+          .from("inventory_movements")
+          .select("created_by")
+          .eq("reason", "initial_import")
+          .limit(1)
+          .maybeSingle();
+        check(
+          "a system movement records no actor rather than inventing one",
+          systemActor.data?.created_by === null,
+          `created_by=${systemActor.data?.created_by ?? "null"}`,
+        );
+      }
+
+      const secondImport = await admin.rpc("system_record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 7, p_reason: "initial_import",
+      });
+      check(
+        "a second opening balance for the same position is refused (idempotent import)",
+        secondImport.error?.code === "23505",
+        secondImport.error ? `rejected: ${secondImport.error.code}` : "RPC SUCCEEDED - IMPORT WOULD DOUBLE STOCK",
+      );
+
+      // ----------------------------------------------------- 9.6 schema guards
+      const dupe = await admin
+        .from("shop_inventory")
+        .insert({ sky_id: SHOP_SKY_ID, condition: "loose" });
+      check(
+        "(sky_id, condition) is unique",
+        !!dupe.error,
+        dupe.error ? `rejected: ${dupe.error.code}` : "INSERT SUCCEEDED - DUPLICATE POSITION",
+      );
+
+      const badCondition = await admin
+        .from("shop_inventory")
+        .insert({ sky_id: SHOP_SKY_ID, condition: "sealed" });
+      check(
+        "a condition outside loose/boxed is refused",
+        !!badCondition.error,
+        badCondition.error ? `rejected: ${badCondition.error.code}` : "INSERT SUCCEEDED - CHECK MISSING",
+      );
+
+      const negativeQuantity = await admin
+        .from("shop_inventory")
+        .update({ quantity: -1 })
+        .eq("id", inventoryId);
+      check(
+        "quantity cannot go negative",
+        !!negativeQuantity.error,
+        negativeQuantity.error ? `rejected: ${negativeQuantity.error.code}` : "UPDATE SUCCEEDED - CHECK MISSING",
+      );
+
+      const freePrice = await a.rpc("set_shop_listing", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_sale_price: 0, p_is_listed: false,
+      });
+      check(
+        "a sale price of 0 is refused, as with market_price",
+        !!freePrice.error,
+        freePrice.error ? `rejected: ${freePrice.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const listedWithoutPrice = await a.rpc("set_shop_listing", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_sale_price: null, p_is_listed: true,
+      });
+      check(
+        "listing without a price is refused",
+        !!listedWithoutPrice.error,
+        listedWithoutPrice.error ? `rejected: ${listedWithoutPrice.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const quantityBeforeListing = (await stockOf("loose"))?.quantity ?? -1;
+      const listing = await a.rpc("set_shop_listing", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_sale_price: 12.5, p_is_listed: true,
+        p_note: "verify-rls",
+      });
+      const listed = await admin
+        .from("shop_inventory")
+        .select("sale_price, is_listed, quantity, reserved")
+        .eq("id", inventoryId)
+        .maybeSingle();
+      check(
+        "a shop admin can price and list a position without touching stock",
+        !listing.error &&
+          listed.data?.is_listed === true &&
+          listed.data?.quantity === quantityBeforeListing &&
+          listed.data?.reserved === 0,
+        listing.error ? listing.error.message : `price=${listed.data?.sale_price}, quantity=${listed.data?.quantity}`,
+      );
+
+      const zeroDelta = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 0, p_reason: "correction",
+      });
+      check(
+        "a movement of zero is refused",
+        !!zeroDelta.error,
+        zeroDelta.error ? `rejected: ${zeroDelta.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      const badReason = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "donation",
+      });
+      check(
+        "an unknown movement reason is refused",
+        !!badReason.error,
+        badReason.error ? `rejected: ${badReason.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+      );
+
+      // ------------------------------------------- 9.7 identity and append-only
+      const repoint = await admin
+        .from("shop_inventory")
+        .update({ condition: "boxed" })
+        .eq("id", inventoryId);
+      check(
+        "a position cannot be re-pointed, not even by the service role",
+        !!repoint.error,
+        repoint.error ? `rejected: ${repoint.error.code}` : "UPDATE SUCCEEDED - HISTORY WOULD BE REWRITTEN",
+      );
+
+      const historyBefore = await movementCount(inventoryId);
+
+      const movementUpdate = await admin
+        .from("inventory_movements")
+        .update({ delta: 99 })
+        .eq("inventory_id", inventoryId);
+      check(
+        "a journal row cannot be updated, not even by the service role",
+        !!movementUpdate.error,
+        movementUpdate.error ? `rejected: ${movementUpdate.error.code}` : "UPDATE SUCCEEDED - JOURNAL IS NOT APPEND-ONLY",
+      );
+
+      const movementDelete = await admin
+        .from("inventory_movements")
+        .delete()
+        .eq("inventory_id", inventoryId);
+      check(
+        "a journal row cannot be deleted, not even by the service role",
+        !!movementDelete.error,
+        movementDelete.error ? `rejected: ${movementDelete.error.code}` : "DELETE SUCCEEDED - JOURNAL IS NOT APPEND-ONLY",
+      );
+
+      // The other way around history could vanish: take the position with it.
+      // RESTRICT closes that route, so there is no path to a deleted journal.
+      const positionDelete = await admin.from("shop_inventory").delete().eq("id", inventoryId);
+      check(
+        "a position with history cannot be deleted, not even by the service role",
+        !!positionDelete.error,
+        positionDelete.error ? `rejected: ${positionDelete.error.code}` : "DELETE SUCCEEDED - HISTORY WOULD VANISH",
+      );
+
+      check(
+        "the history is still complete after all three attempts",
+        (await movementCount(inventoryId)) === historyBefore,
+        `${await movementCount(inventoryId)} row(s), expected ${historyBefore}`,
+      );
+
+      // ------------------------------- 9.8 the one permitted change: the actor
+      const actorSwap = await admin
+        .from("inventory_movements")
+        .update({ created_by: userB.user.id })
+        .eq("inventory_id", inventoryId)
+        .eq("reason", "purchase");
+      check(
+        "the actor cannot be swapped for someone else",
+        !!actorSwap.error,
+        actorSwap.error ? `rejected: ${actorSwap.error.code}` : "UPDATE SUCCEEDED - ACTOR IS FORGEABLE",
+      );
+
+      const boxed = await stockOf("boxed");
+      const actorFill = await admin
+        .from("inventory_movements")
+        .update({ created_by: userA.user.id })
+        .eq("inventory_id", boxed?.id ?? -1)
+        .is("created_by", null);
+      check(
+        "an anonymised movement cannot be given an actor again",
+        !!actorFill.error,
+        actorFill.error ? `rejected: ${actorFill.error.code}` : "UPDATE SUCCEEDED - ACTOR IS FORGEABLE",
+      );
+
+      for (const [column, value] of [
+        ["note", "tampered"],
+        ["delta", 99],
+        ["reason", "correction"],
+      ] as const) {
+        const tamper = await admin
+          .from("inventory_movements")
+          .update({ [column]: value })
+          .eq("inventory_id", inventoryId);
+        check(
+          `a movement's ${column} cannot be changed`,
+          !!tamper.error,
+          tamper.error ? `rejected: ${tamper.error.code}` : "UPDATE SUCCEEDED - HISTORY IS MUTABLE",
+        );
+      }
+
+      const anonWithChange = await admin
+        .from("inventory_movements")
+        .update({ created_by: null, note: "tampered" })
+        .eq("inventory_id", inventoryId)
+        .eq("reason", "purchase");
+      check(
+        "anonymising cannot smuggle a second change along with it",
+        !!anonWithChange.error,
+        anonWithChange.error ? `rejected: ${anonWithChange.error.code}` : "UPDATE SUCCEEDED - HISTORY IS MUTABLE",
+      );
+
+      // The real foreign-key path: an account that booked something is deleted.
+      // Its history has to survive, minus the personal identifier.
+      userC = await createSignedInUser(admin, USER_C);
+      await admin.from("shop_admins").upsert({ user_id: userC.user.id, note: "verify-rls fixture" });
+
+      const cMovement = await userC.client.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "correction",
+        p_note: "verify-rls anonymisation",
+      });
+      const cRowBefore = await admin
+        .from("inventory_movements")
+        .select("id, inventory_id, delta, reason, unit_cost, currency, note, created_at, created_by")
+        .eq("id", cMovement.data ?? -1)
+        .maybeSingle();
+      check(
+        "a third admin books one movement, to be anonymised next",
+        !cMovement.error && cRowBefore.data?.created_by === userC.user.id,
+        cMovement.error ? cMovement.error.message : `movement ${cMovement.data}`,
+      );
+
+      const cDelete = await admin.auth.admin.deleteUser(userC.user.id);
+      check(
+        "an account with booking history can be deleted",
+        !cDelete.error,
+        cDelete.error ? `${cDelete.error.message} (status ${cDelete.error.status ?? "?"})` : "deleted",
+      );
+      if (!cDelete.error) userC = null;
+
+      const cRowAfter = await admin
+        .from("inventory_movements")
+        .select("id, inventory_id, delta, reason, unit_cost, currency, note, created_at, created_by")
+        .eq("id", cMovement.data ?? -1)
+        .maybeSingle();
+      check(
+        "the movement survives the account deletion",
+        !!cRowAfter.data,
+        cRowAfter.data ? `movement ${cRowAfter.data.id} still there` : "MOVEMENT VANISHED",
+      );
+      check(
+        "created_by is anonymised to NULL",
+        cRowAfter.data?.created_by === null,
+        `created_by=${cRowAfter.data?.created_by ?? "null"}`,
+      );
+
+      const unchanged = (["inventory_id", "delta", "reason", "unit_cost", "currency", "note", "created_at"] as const)
+        .filter((column) => cRowBefore.data?.[column] !== cRowAfter.data?.[column]);
+      check(
+        "every factual column is untouched by the anonymisation",
+        cRowAfter.data !== null && unchanged.length === 0,
+        unchanged.length === 0 ? "inventory_id, delta, reason, unit_cost, currency, note, created_at" : `changed: ${unchanged.join(", ")}`,
+      );
+
+      // ---------------------------------------------------- 9.9 reconciliation
+      const drift = await admin
+        .from("shop_inventory_reconciliation")
+        .select("sky_id, condition, quantity, movement_sum, drift")
+        .neq("drift", 0);
+      check(
+        "stock and journal agree everywhere (no drift)",
+        !drift.error && (drift.data?.length ?? 0) === 0,
+        drift.error ? drift.error.message : `${drift.data?.length ?? 0} position(s) with drift`,
+      );
+
+      const anonDrift = await anon.from("shop_inventory_reconciliation").select("*").limit(1);
+      check(
+        "the reconciliation view is not public",
+        !!anonDrift.error || anonDrift.data?.length === 0,
+        anonDrift.error ? `rejected: ${anonDrift.error.code}` : `${anonDrift.data?.length ?? 0} row(s)`,
+      );
+      }
+    }
   } finally {
     // ------------------------------------------------------------- teardown
     console.log("\nTeardown");
     const admin2 = serviceClient();
 
-    for (const u of [userA, userB]) {
-      if (!u) continue;
+    for (const [label, u] of [["A", userA], ["B", userB], ["C", userC]] as const) {
+      if (!u) {
+        console.log(`  test user ${label} cleanup: ok (already removed)`);
+        continue;
+      }
       await admin2.from("collection_items").delete().eq("user_id", u.user.id);
       const del = await admin2.auth.admin.deleteUser(u.user.id);
-      console.log(`  auth user removed: ${del.error ? del.error.message : "ok"}`);
+      if (!del.error) {
+        console.log(`  test user ${label} cleanup: ok`);
+        continue;
+      }
+      // The admin API answers with a bare "Database error deleting user", so
+      // name what is still pointing at the account instead.
+      const blocking = await admin2
+        .from("inventory_movements")
+        .select("id", { count: "exact", head: true })
+        .eq("created_by", u.user.id);
+      console.log(
+        `  test user ${label} cleanup: FAILED - ${del.error.message} ` +
+          `(status ${del.error.status ?? "?"}, id ${u.user.id}, ` +
+          `${blocking.count ?? "?"} movement(s) still reference it)`,
+      );
     }
+
+    // The shop admin grant goes (it also cascades with the user anyway). The
+    // shop fixture itself stays: its journal is append-only and its positions
+    // carry history, so nothing there can be removed — by design. SKY-9998 is
+    // inactive and outside every catalog and collection query.
+    await admin2.from("shop_admins").delete().eq("note", "verify-rls fixture");
 
     await admin2.from("skylanders").delete().eq("sky_id", TEST_SKY_ID);
     // With the figure gone nothing references the character any more, so the
@@ -589,7 +1223,10 @@ async function main(): Promise<void> {
     console.log("  catalog fixture removed");
 
     const counts = await Promise.all(
-      (["series", "categories", "skylanders", "profiles", "collection_items", "characters"] as const).map(
+      ([
+        "series", "categories", "skylanders", "profiles", "collection_items",
+        "characters", "shop_admins", "shop_inventory", "inventory_movements",
+      ] as const).map(
         async (table) => {
           const { count } = await admin2.from(table).select("*", { count: "exact", head: true });
           return `${table}=${count ?? "?"}`;
