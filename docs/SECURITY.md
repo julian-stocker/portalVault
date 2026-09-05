@@ -475,7 +475,12 @@ Sobald Benutzerkonten existieren, werden personenbezogene Daten verarbeitet:
 5. Preisupdates bleiben ein lokales Admin-Werkzeug und sind niemals aus dem Browser erreichbar —
    dieselbe Regel wie im Legacy-Projekt.
 6. Nach dem Deploy stichprobenartig als **anonymer** Besucher prüfen, welche Daten die API
-   herausgibt.
+   herausgibt. Stand 2026-09-06 gegen die laufende Datenbank geprüft: `skylanders`, `series` und
+   `characters` sind anonym lesbar (Katalogdaten, keine internen Spalten), Schreibzugriff ist
+   abgewiesen; `profiles`, `collection_items`, `shop_admins` und `inventory_movements` liefern
+   für `anon` bereits `permission denied` — die Rechte fehlen, nicht nur die Policy.
+
+Konkrete Variablen, URLs und Schritte: `docs/DEPLOYMENT.md`.
 
 ---
 

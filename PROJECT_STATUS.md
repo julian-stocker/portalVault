@@ -61,6 +61,19 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**Deployment vorbereitet (2026-09-06).** Das Repository ist bereit für ein erstes Vercel-Deployment
+auf eine temporäre `*.vercel.app`-Testadresse (Production von `main`, damit die Adresse stabil
+bleibt). Keine hartkodierten Entwicklungsadressen im Anwendungscode: Auth-Rücksprünge entstehen
+zur Laufzeit aus der Origin (`safeOrigin()`), Redirects im Callback und in der Middleware sind
+relativ. Vercel braucht **nur** `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
+der Service-Role-Key wird von keinem ausgelieferten Codepfad gelesen und bleibt lokal.
+**Die Testadresse trägt `noindex, nofollow`** über `metadata.robots` in `src/app/layout.tsx` —
+bewusst ohne `robots.txt`, weil ein `Disallow` das Lesen des Noindex verhindern würde. Beim Start
+von `skyisles.de` muss beides bewusst entfernt werden; ein Test erzwingt die Entscheidung.
+Einzelheiten, Supabase-URL-Konfiguration und Schrittfolge: `docs/DEPLOYMENT.md`.
+**Vor der öffentlichen Beta fehlt weiterhin ein eigener SMTP-Anbieter.** `skyisles.de` ist noch
+nicht verbunden.
+
 **V4.2 umgesetzt (2026-09-06, ADR-0038).** Der Besitzrahmen im Katalog ist **scharf**: kein
 Weichzeichner mehr, `--gold-glow` heißt `--gold-frame` und enthält keinen Unschärferadius (ein
 Test liest das aus `globals.css`); Rahmen, feine Innenlinie, vier Funken und Krone bleiben. Der

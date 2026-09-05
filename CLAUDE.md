@@ -150,6 +150,7 @@ Code soll lesbar, modular und kommentiert sein.
 | Gesamtarchitektur, Systemgrenzen, Datenfluss | `docs/ARCHITECTURE.md` |
 | Abgeschlossenes größeres Feature | `PROJECT_STATUS.md` |
 | Wichtige Architekturentscheidung | `docs/DECISIONS.md` |
+| Deployment, Environment Variables, Auth-URLs, Indexierung | `docs/DEPLOYMENT.md` |
 | Rollen, Berechtigungen, Shop-Domäne | `docs/AUTH.md` + `docs/SECURITY.md` + `docs/DECISIONS.md` |
 
 Weitere Regeln:
@@ -201,6 +202,7 @@ umsetzen. Schwer reversibel oder sicherheitskritisch → **erst fragen**.
 | `docs/SKYLANDERS_DATA.md` | SKY-ID-System, Legacy-Datenregeln, Migration |
 | `docs/ROADMAP.md` | NOW / V1 / LATER / MARKETPLACE |
 | `docs/DECISIONS.md` | Architecture Decision Log |
+| `docs/DEPLOYMENT.md` | Environment Variables, Vercel, Supabase-URLs, temporäres noindex |
 
 <!-- BEGIN:nextjs-agent-rules -->
 

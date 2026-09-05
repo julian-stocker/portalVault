@@ -11,6 +11,31 @@ export const metadata: Metadata = {
     template: `%s · ${de.app.name}`,
   },
   description: de.app.description,
+
+  /*
+   * TEMPORARY — remove this block when skyisles.de goes live.
+   *
+   * The first deployment is a test address on *.vercel.app, meant for trying
+   * the site on a real phone. It must not become the version Google knows.
+   * Vercel sets `X-Robots-Tag: noindex` on preview deployments by itself but
+   * NOT on production ones, and this is a production deployment from `main`,
+   * so the tag has to come from the app.
+   *
+   * Declared here rather than in a robots.txt on purpose: a `Disallow` stops
+   * a crawler from fetching the page, which also stops it from ever reading
+   * a noindex — a URL that someone links to can then still be indexed as a
+   * bare address. Allowing the crawl and answering "noindex" is what actually
+   * keeps the page out of the index.
+   *
+   * Root metadata, so it covers every route; removing it is one deletion.
+   * `src/lib/layout/robots.test.ts` fails on that deletion and names the
+   * launch checklist (docs/DEPLOYMENT.md).
+   */
+  robots: {
+    index: false,
+    follow: false,
+    googleBot: { index: false, follow: false },
+  },
 };
 
 /**
