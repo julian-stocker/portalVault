@@ -20,6 +20,7 @@
 import { revalidatePath } from "next/cache";
 
 import { isAdmin } from "@/lib/auth/admin";
+import { isCondition, isMovementReason } from "@/lib/admin/inventory-model";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
 
@@ -87,5 +88,97 @@ export async function setCatalogGroup(categoryId: number, group: string): Promis
     "admin_set_catalog_group",
     { p_category_id: categoryId, p_group: group },
     ["/admin/catalog/categories", "/admin/catalog", "/", "/collection"],
+  );
+}
+
+// --------------------------------------------------------------- inventory
+
+/**
+ * Books a stock movement.
+ *
+ * The only way stock changes. `quantity` is never assigned — the database
+ * function updates it and writes the journal row in one transaction, and it
+ * refuses a movement that would take a position below what is reserved
+ * (ADR-0037). The position is created by the first movement, so nothing has
+ * to be prepared for a figure that has never been stocked.
+ *
+ * `initial_import` is not among the reasons a browser may pick: that value
+ * belonged to the legacy opening balance and is booked by server tooling
+ * through a function no client role can execute.
+ */
+export async function bookMovement(input: {
+  skyId: string;
+  condition: string;
+  delta: number;
+  reason: string;
+  unitCost?: number | null;
+  note?: string | null;
+}): Promise<AdminResult> {
+  if (!SKY_ID.test(input.skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCondition(input.condition)) return { ok: false, message: de.inventory.unknownCondition };
+  if (!isMovementReason(input.reason)) return { ok: false, message: de.inventory.unknownReason };
+  if (!Number.isInteger(input.delta) || input.delta === 0) {
+    return { ok: false, message: de.inventory.deltaRequired };
+  }
+  if (input.unitCost !== undefined && input.unitCost !== null && !(input.unitCost > 0)) {
+    return { ok: false, message: de.inventory.costPositive };
+  }
+
+  return call(
+    "record_inventory_movement",
+    {
+      p_sky_id: input.skyId,
+      p_condition: input.condition,
+      p_delta: input.delta,
+      p_reason: input.reason,
+      p_unit_cost: input.unitCost ?? null,
+      // Single currency by decision (ADR-0037, section 7). Stated where a
+      // cost is stated, so a later second currency has a place to go.
+      p_currency: input.unitCost === undefined || input.unitCost === null ? null : "EUR",
+      p_note: input.note?.trim() ? input.note.trim() : null,
+    },
+    ["/admin/inventory"],
+  );
+}
+
+/**
+ * Sets price and listing together, because the database function does.
+ *
+ * `set_shop_listing` writes both plus the internal note in one upsert, so a
+ * caller that means to change one has to pass the other two as they are.
+ * That is why both editors read from the row they are editing rather than
+ * from a form that only holds one field.
+ *
+ * It never touches quantity or reserved, and it never touches
+ * `skylanders.market_price` — the reference price belongs to the catalog
+ * (ADR-0033).
+ */
+export async function setListing(input: {
+  skyId: string;
+  condition: string;
+  salePrice: number | null;
+  isListed: boolean;
+  note?: string | null;
+}): Promise<AdminResult> {
+  if (!SKY_ID.test(input.skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCondition(input.condition)) return { ok: false, message: de.inventory.unknownCondition };
+  if (input.salePrice !== null && !(input.salePrice > 0)) {
+    return { ok: false, message: de.inventory.pricePositive };
+  }
+  if (input.isListed && input.salePrice === null) {
+    // The database says the same thing; saying it here says it in German.
+    return { ok: false, message: de.inventory.listingNeedsPrice };
+  }
+
+  return call(
+    "set_shop_listing",
+    {
+      p_sky_id: input.skyId,
+      p_condition: input.condition,
+      p_sale_price: input.salePrice,
+      p_is_listed: input.isListed,
+      p_note: input.note?.trim() ? input.note.trim() : null,
+    },
+    ["/admin/inventory"],
   );
 }

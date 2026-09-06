@@ -11,7 +11,7 @@
  * one nested route that exists, and an unknown path highlights nothing
  * instead of guessing wrong.
  */
-export type NavSection = "catalog" | "collection" | "account" | "admin";
+export type NavSection = "catalog" | "collection" | "account" | "admin" | "inventory";
 
 /** Route prefix of the figure detail pages. */
 const DETAIL_PREFIX = "/skylanders/";
@@ -29,6 +29,10 @@ export function activeSection(pathname: string): NavSection | null {
   if (path === "/collection" || path === "/dashboard") return "collection";
 
   if (path === "/settings" || path === "/onboarding") return "account";
+
+  // Stock has its own destination in the bar, so it lights up on its own
+  // rather than as part of the administration area (ADR-0037).
+  if (path === "/admin/inventory" || path.startsWith("/admin/inventory/")) return "inventory";
 
   // The administration area, including everything under it.
   if (path === "/admin" || path.startsWith("/admin/")) return "admin";

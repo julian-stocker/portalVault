@@ -201,16 +201,22 @@ describe("navigation follows the role", () => {
   });
 
   it("keeps the order the list defines", () => {
-    // Katalog · Sammlung · (Lager) · Admin · Profil
-    const order = ["/", "/collection", "/admin", "/settings", "/login"].map((href) =>
-      nav.indexOf(`href: "${href}"`),
+    // Katalog · Sammlung · Lager · Admin · Profil
+    const order = ["/", "/collection", "/admin/inventory", "/admin", "/settings", "/login"].map(
+      (href) => nav.indexOf(`href: "${href}"`),
     );
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it("has no link to inventory yet", () => {
-    // Not built: a link to a page that does not exist is worse than no link.
-    expect(code(NAV)).not.toMatch(/\/inventory|\/lager|Lager"/i);
+  it("gives the operator stock as a destination of its own", () => {
+    // Added as one more entry with its own condition — nothing moved, and
+    // "Sammlung" was not renamed into it (ADR-0037).
+    const inventory = nav.slice(
+      nav.indexOf('href: "/admin/inventory"'),
+      nav.indexOf('href: "/admin"', nav.indexOf('href: "/admin/inventory"') + 10),
+    );
+    expect(inventory).toContain("applies: (viewer) => viewer.admin");
+    expect(inventory).toContain("de.nav.inventory");
   });
 
   it("marks the mode without rebuilding the site", () => {

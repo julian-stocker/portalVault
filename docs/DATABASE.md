@@ -253,6 +253,30 @@ schon — dieselbe Begründung wie bei `inventory_movements`. **Geschrieben von 
 Protokollieren vergessen, auch kein lokales Skript. Für Clients gibt es weder Rechte noch
 Policy; Admins lesen über `admin_catalog_changes()`.
 
+### 3.3d Lager lesen — `admin_shop_inventory()` / `admin_inventory_movements()` (Migration `0005`)
+
+`0003` gab Administratoren eine vollständige **Schreib**fläche und bewusst **keine**
+Tabellenrechte: `revoke all on shop_inventory, inventory_movements from anon, authenticated`.
+Das ist richtig — ein Tabellen-Grant öffnet jede Spalte, und Einkaufspreise, Lieferanten und
+Bestände sind genau das, was `docs/SECURITY.md` intern hält.
+
+Die Folge, beim Bau der Lager-UI aufgefallen: **ein Admin konnte seinen eigenen Bestand nicht
+lesen.** Auch die Abstimmungs-View half nicht — sie ist `security_invoker` und erbt damit
+absichtlich die (fehlenden) Rechte des Aufrufers.
+
+`0005` ergänzt die fehlende Hälfte in derselben Form wie die Schreibhälfte: zwei
+`security definer`-Funktionen mit `is_shop_admin()`-Prüfung, `revoke … from public, anon`,
+`grant execute … to authenticated`. **Kein Tabellenrecht, keine Policy, keine Spalte.**
+
+| Funktion | Antwort |
+|---|---|
+| `admin_shop_inventory()` | alle Positionen mit `quantity`, `reserved`, `available_quantity`, `sale_price`, `is_listed`, `note` |
+| `admin_inventory_movements(id, limit)` | die jüngsten Bewegungen einer Position, neueste zuerst |
+
+Die Figur hinter einer Position — Name, Bild, Serie, Marktpreis — kommt aus dem Katalog, den die
+Anwendung ohnehin lädt. Die Funktionen joinen nicht und wiederholen damit auch nicht die Regeln
+darüber, was sammelbar und was sichtbar ist.
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

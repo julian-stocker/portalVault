@@ -3005,3 +3005,49 @@ Vitrine bleibt eine Vitrine.
 **Nicht in dieser Runde:** Bild-Upload und Storage (die Karte ist aber so geschnitten, dass eine
 Aktion am Bild dazukommen kann), `element_override`, Varianten/Specials, öffentliche
 Produktgruppen-Untertabs, Lager-/Shopverwaltung, Bestellungen.
+
+### Nachtrag 2026-09-06 — Lagerverwaltung Phase 1 (zu ADR-0037)
+
+**Der Betreiber verwaltet Lager, keine Sammlung.** `/admin/inventory` ist ein eigenes Ziel in der
+Hauptnavigation (`Katalog · Lager · Admin · Profil`), keine umbenannte Sammlungsseite. Der
+Navigationseintrag hat dieselbe Bedingung wie jeder andere — `viewer.admin` — und ersetzt nichts.
+`collection_items` bleibt vollständig unberührt; Lagerbestand wird niemals darüber modelliert.
+
+**Was `0003` schon konnte und `0005` ergänzt.** Die Schreibfläche war vollständig:
+`record_inventory_movement()` legt die Position mit ihrer ersten Bewegung an, prüft
+`is_shop_admin()` und schreibt `auth.uid()` als Akteur; `set_shop_listing()` setzt Preis,
+Angebot und Notiz, ohne Bestand anzufassen; negative Bestände und `reserved`-Unterschreitungen
+wehrt `apply_inventory_movement()` in derselben Transaktion ab. **Gefehlt hat der Lesezugriff** —
+Clients haben auf beiden Tabellen keinerlei Rechte, und die Abstimmungs-View ist
+`security_invoker`. `0005` fügt genau zwei Lesefunktionen hinzu, sonst nichts.
+
+**Bestand ändert sich nur durch Bewegungen.** Die Oberfläche bietet kein Zahlenfeld über
+`quantity`: eine Zuweisung verlöre Grund, Notiz und Kosten und ließe das Journal von der Summe
+abweichen. `initial_import` steht Administratoren **nicht** zur Auswahl — der Wert gehörte zur
+einmaligen Legacy-Eröffnung und wird von Serverwerkzeugen über eine Funktion gebucht, die kein
+Client ausführen darf. Die sechs übrigen Gründe sind wählbar, Stückkosten nur beim Einkauf.
+
+**Reserviert bleibt systemverwaltet.** Anzeigen ja, bearbeiten nein — Reservierungen entstehen
+später beim Checkout. `available = quantity − reserved` kommt aus der gespeicherten Spalte, nicht
+aus einer zweiten Rechnung.
+
+**Preis und Angebot sind getrennt von Bestand und vom Marktpreis.** `sale_price` ist der
+SkyIsles-Preis, `skylanders.market_price` bleibt Referenz; keiner leitet sich vom anderen ab.
+`is_listed` folgt niemals automatisch dem Bestand: „gelistet, aber ausverkauft" und „auf Lager,
+bewusst nicht angeboten" sind beides gültige Zustände.
+
+**Der Umfang der Liste kommt aus dem Katalog, nicht aus Namen.** Die operative Übersicht zeigt
+Positionen zu **aktiven, sammelbaren** Figuren. Software (Kategorie `Spiele`, ADR-0029) und die
+alte Verifikations-Fixture `SKY-9998` (inaktiv) fallen dadurch heraus, ohne dass ein Name
+geprüft wird; ihre Daten bleiben unangetastet und werden als „historische Positionen außerhalb
+des Sortiments" nur gezählt. SWAP-Hälften existieren im Katalog gar nicht — sie wurden nie
+importiert.
+
+**Die Historie ist sichtbar und unveränderlich.** Die Karte zeigt die jüngsten Bewegungen und
+bietet weder Löschen noch Bearbeiten; es gibt auch keine Funktion dafür. Eine falsche Buchung
+wird durch eine `correction` ausgeglichen. Legacy-Bestand ohne belegbare Stückkosten behält
+`unit_cost = NULL` — das ist die richtige Aussage, keine Lücke.
+
+**Nicht in Phase 1:** Bestellungen, Warenkorb, Checkout, Zahlung, Versand, Kundenverwaltung,
+eBay-Anbindung, Reservierungs-UI, Coupons, automatische Preisbildung, FIFO oder
+Durchschnittskosten, Steuerbewertung.

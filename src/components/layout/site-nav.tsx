@@ -72,9 +72,16 @@ const DESTINATIONS: readonly {
     prefetch: (viewer) => (viewer.signedIn ? undefined : false),
   },
 
-  // ── Here is where `Lager` goes once inventory management exists: one more
-  //    entry, `applies: (viewer) => viewer.admin`. It is not written yet,
-  //    because a link to a page that does not exist is worse than no link.
+  {
+    href: "/admin/inventory",
+    label: de.nav.inventory,
+    section: "inventory",
+    // The operator's stock. Where a collector has their collection, the
+    // business account has the shop's shelf (ADR-0032) — a destination of
+    // its own, not the collection under another name.
+    applies: (viewer) => viewer.admin,
+    prefetch: () => false,
+  },
 
   {
     href: "/admin",

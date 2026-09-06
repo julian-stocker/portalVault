@@ -61,6 +61,22 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**Lagerverwaltung Phase 1 gebaut, Migration `0005` noch nicht ausgeführt (2026-09-06, ADR-0037).**
+`/admin/inventory` zeigt dem Betreiber Bestand, Reserviert, Verfügbar, Marktpreis,
+SkyIsles-Preis und Angebotsstatus je Position; Bestand ändern, Preis und Listing gehen direkt
+von der Karte. Die Navigation lautet für ihn **Katalog · Lager · Admin · Profil** — „Lager" ist
+ein eigenes Ziel mit der Bedingung `viewer.admin`, kein umbenannter Sammlungstab. Positionen
+entstehen **on demand** aus der ersten Bewegung; `quantity` wird nie zugewiesen, `reserved` von
+nichts geschrieben, `initial_import` ist keine Adminoption. Preis und Angebot laufen über
+`set_shop_listing()`, Bestand über `record_inventory_movement()` — beides aus `0003`.
+
+⚠️ **`0005_inventory_admin_read.sql` ist geschrieben, aber noch nicht ausgeführt.** Sie fügt nur
+zwei `security definer`-Lesefunktionen hinzu (`admin_shop_inventory`,
+`admin_inventory_movements`), weil Clients auf `shop_inventory` und `inventory_movements`
+weiterhin keine Tabellenrechte haben — ein Admin konnte seinen eigenen Bestand sonst nicht
+lesen. Keine Tabelle, keine Policy, keine Spalte. Bis zur Ausführung antwortet `/admin/inventory`
+mit einem Fehler; der übrige Code ist davon unberührt. Danach: `npm run verify:inventory`.
+
 **Produktgruppen-Untertabs im Katalog (2026-09-06, ADR-0041).** Unter den sechs Serien steht eine
 zweite, kleinere Navigationsebene: `Alle · Figuren · Trap Masters · Fallen · Minis · Items` — je
 Serie nur die tatsächlich vorhandenen Gruppen, aus den Daten abgeleitet, mit Anzahl. Reihenfolge

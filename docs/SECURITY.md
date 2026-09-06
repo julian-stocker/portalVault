@@ -382,6 +382,18 @@ Clients unerreichbar sind, Admin-RPCs für Nicht-Admins scheitern, der Besitzer 
 nachträglich verborgenen Figur seine Sammlung vollständig sieht — und dass das Journal selbst
 für die Service Role append-only bleibt. Läuft direkt nach dem Anwenden von `0004`.
 
+**Lager: lesen ist ebenfalls eine Berechtigung (Migration `0005`).** `shop_inventory` und
+`inventory_movements` haben für `anon` und `authenticated` weiterhin **keine** Tabellenrechte —
+weder lesend noch schreibend. Bestand, Einkaufspreise und Bewegungen sind ausschließlich über
+`admin_shop_inventory()` und `admin_inventory_movements()` erreichbar, die beide
+`is_shop_admin()` fragen. Öffentlich wird später nur „Auf Lager / Nicht auf Lager" aus
+`quantity - reserved` abgeleitet; **eine öffentliche Mengenanzeige gibt es nicht**.
+
+Geschrieben wird unverändert nur über die drei Funktionen aus `0003`:
+`record_inventory_movement()` (Bestand, mit Akteur aus `auth.uid()`), `set_shop_listing()`
+(Preis, Angebot, interne Notiz) und `system_record_inventory_movement()` (nur `service_role`).
+`quantity` wird nie zugewiesen, `reserved` von nichts in Phase 1 geschrieben.
+
 **Was der Adminbereich nicht tut:** keine Rechteverwaltung im Browser, keine Service Role im
 Client, kein Storage-Upload (noch nicht gebaut), kein Zugriff auf fremde Sammlungen.
 `admin_note` ist intern und erscheint in keiner öffentlichen Projektion.
