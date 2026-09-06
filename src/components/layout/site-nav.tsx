@@ -30,51 +30,86 @@ import { de } from "@/lib/i18n/de";
 
 type Item = { href: string; label: string; section: NavSection; prefetch?: boolean };
 
+/** Who is asking. Nothing else decides what the bar offers. */
+type Viewer = { signedIn: boolean; admin: boolean };
+
 /**
- * Three destinations, and which three depends on who is asking.
+ * Every destination the product has, each with the condition under which it
+ * belongs to somebody (ADR-0042).
  *
- * A collector: catalog, their collection, their account.
+ * Written as a list rather than as branches on purpose: the bar is composed
+ * by asking each destination whether it applies, never by putting one entry
+ * in another's place. "Admin" does not replace "Sammlung"; the collection is
+ * simply not one of an operator's destinations, and administration is one of
+ * theirs. That distinction is what keeps the next step a one-line change:
+ * `Lager` becomes an entry between collection and admin whose condition is
+ * `viewer.admin`, and nothing else moves.
  *
- * The business administrator: catalog, administration, account — **without**
- * "Sammlung" (ADR-0042). The business account is the operator, not a
- * collector; offering it a personal collection as a main destination would
- * suggest the shop's stock lives there, which is exactly the confusion
- * ADR-0032 keeps apart. Their own collection page still exists at
- * /collection and still works; it is simply not what the bar offers them.
- *
- * The later "Lager" belongs in that freed slot, next to Admin. It is not put
- * there now: a link to a page that does not exist is worse than no link.
+ * Order here is the order on screen.
  */
+const DESTINATIONS: readonly {
+  href: string;
+  label: string;
+  section: NavSection;
+  applies: (viewer: Viewer) => boolean;
+  prefetch?: (viewer: Viewer) => boolean | undefined;
+}[] = [
+  { href: "/", label: de.nav.catalog, section: "catalog", applies: () => true },
+
+  {
+    href: "/collection",
+    label: de.nav.collection,
+    section: "collection",
+    // A collector's own collection. The business account is the operator,
+    // not a collector (ADR-0032): offering it a personal collection as a
+    // main destination would suggest the shop's stock lives there. The page
+    // still exists and still works for them — it is simply not offered.
+    applies: (viewer) => !viewer.admin,
+    // Prefetched only for someone who has a collection. Signed out the route
+    // answers with a redirect to /login, so fetching it ahead of time would
+    // cost a request and a session check for a page they cannot see (V4.4).
+    // `undefined` leaves Next's own default in place.
+    prefetch: (viewer) => (viewer.signedIn ? undefined : false),
+  },
+
+  // ── Here is where `Lager` goes once inventory management exists: one more
+  //    entry, `applies: (viewer) => viewer.admin`. It is not written yet,
+  //    because a link to a page that does not exist is worse than no link.
+
+  {
+    href: "/admin",
+    label: de.nav.admin,
+    section: "admin",
+    // Convenience, never a permission (ADR-0039). /admin answers 404 to
+    // everyone else whether or not they find the address.
+    applies: (viewer) => viewer.admin,
+    prefetch: () => false,
+  },
+
+  {
+    href: "/settings",
+    label: de.nav.settings,
+    section: "account",
+    applies: (viewer) => viewer.signedIn,
+  },
+  {
+    href: "/login",
+    label: de.nav.signIn,
+    section: "account",
+    applies: (viewer) => !viewer.signedIn,
+  },
+];
+
 function itemsFor(signedIn: boolean, admin: boolean): Item[] {
-  const account: Item = signedIn
-    ? { href: "/settings", label: de.nav.settings, section: "account" }
-    : { href: "/login", label: de.nav.signIn, section: "account" };
-
-  if (admin) {
-    return [
-      { href: "/", label: de.nav.catalog, section: "catalog" },
-      // Convenience, never a permission (ADR-0039). /admin answers 404 to
-      // everyone else whether or not they find the address.
-      { href: "/admin", label: de.nav.admin, section: "admin", prefetch: false },
-      account,
-    ];
-  }
-
-  return [
-    { href: "/", label: de.nav.catalog, section: "catalog" },
-    {
-      href: "/collection",
-      label: de.nav.collection,
-      section: "collection",
-      // Prefetched only for someone who has a collection. For a visitor who
-      // is signed out the route answers with a redirect to /login, so
-      // fetching it ahead of time would cost a request and a session check
-      // for a page they cannot see (V4.4). `undefined` leaves Next's own
-      // default in place: prefetch when the link is in view.
-      prefetch: signedIn ? undefined : false,
-    },
-    account,
-  ];
+  const viewer: Viewer = { signedIn, admin };
+  return DESTINATIONS.filter((destination) => destination.applies(viewer)).map(
+    ({ href, label, section, prefetch }) => ({
+      href,
+      label,
+      section,
+      prefetch: prefetch?.(viewer),
+    }),
+  );
 }
 
 /**

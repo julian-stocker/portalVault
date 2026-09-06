@@ -87,3 +87,48 @@ export function matchesGroup(
 ): boolean {
   return group === null || figure.catalogGroup === group;
 }
+
+/** One entry of the second navigation level. `group: null` is "Alle". */
+export type GroupTab = {
+  group: CatalogGroup | null;
+  label: string;
+  count: number;
+};
+
+/**
+ * The sub-navigation for one game, derived from the figures it holds.
+ *
+ * Nothing is hardcoded per series: Trap Team offers traps because it has
+ * them, Imaginators offers no "Figuren" tab because it has none, and a
+ * category classified later produces its tab without a line of UI changing
+ * (ADR-0041).
+ *
+ * The counts describe the game, not the current view: they are taken before
+ * search and before the ownership filter, so a number beside a tab does not
+ * move while someone types. What the caller passes in decides whose catalog
+ * is being counted — an administrator's list includes hidden figures because
+ * their catalog does, and nobody else's does.
+ *
+ * An unclassified figure is counted under "Alle" and produces no tab of its
+ * own. It is never filed under `item`.
+ */
+export function groupTabs(
+  figures: readonly { catalogGroup: CatalogGroup | null }[],
+  allLabel: string,
+): GroupTab[] {
+  const counts = new Map<CatalogGroup, number>();
+  for (const figure of figures) {
+    const group = figure.catalogGroup;
+    if (group === null) continue;
+    counts.set(group, (counts.get(group) ?? 0) + 1);
+  }
+
+  return [
+    { group: null, label: allLabel, count: figures.length },
+    ...CATALOG_GROUPS.filter((group) => counts.has(group)).map((group) => ({
+      group,
+      label: GROUP_LABELS[group],
+      count: counts.get(group) ?? 0,
+    })),
+  ];
+}

@@ -41,7 +41,10 @@ describe("the collection has a route-level loading boundary", () => {
 
 describe("the navigation prefetches what it should and nothing else", () => {
   it("leaves the collection prefetch to Next for a signed-in visitor", () => {
-    expect(source(NAV)).toContain("prefetch: signedIn ? undefined : false");
+    // Same rule as before, now stated per destination rather than per role
+    // branch (ADR-0042): undefined keeps Next's default, false switches it
+    // off for someone who would only be redirected to /login.
+    expect(source(NAV)).toContain("prefetch: (viewer) => (viewer.signedIn ? undefined : false)");
   });
 
   it("passes the flag on to the link", () => {

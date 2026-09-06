@@ -6,13 +6,19 @@
  * a second mutation (ADR-0042). What it adds is proximity: an administrator
  * who spots a wrong name in the catalog fixes it there.
  *
- * Three rules the interaction follows:
+ * The rules the interaction follows:
  *
- *   Enter or the tick   saves
- *   Escape or a click away  leaves the name as it was
- *   an empty value      clears the override, so the derived name (ADR-0030)
- *                       applies again — which is why the placeholder shows
- *                       what that derived name would be
+ *   opens with        the name that is on screen — the override if there is
+ *                     one, otherwise the derived name. Editing a name should
+ *                     start from the name, not from an empty box.
+ *   Enter / Speichern saves
+ *   Escape / blur     leaves the name as it was
+ *   emptied           clears the override: the derivation applies again
+ *   typed back to the derived name  clears it too, rather than storing a
+ *                     redundant override that says what the derivation
+ *                     already says
+ *   Standard          the explicit way back, offered only while an override
+ *                     exists
  *
  * The canonical, imported `name` is never touched, and neither is the slug.
  */
@@ -63,7 +69,8 @@ export function InlineName({
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(override ?? "");
+  // The effective name, not an empty box: this is an edit, not a new entry.
+  const [value, setValue] = useState(override ?? displayName);
   // Held locally so the card shows the new name the moment it is saved,
   // rather than after the server round trip. router.refresh() then brings
   // the server's own answer, and the two agree.
@@ -71,8 +78,18 @@ export function InlineName({
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  function save() {
-    const next = value.trim();
+  /**
+   * Saves — or clears, which is the same call.
+   *
+   * An empty field means "back to the derivation", and so does typing the
+   * derived name itself: storing it as an override would freeze a value the
+   * derivation already produces, and it would survive a later correction to
+   * the derivation rule. The server turns an empty string into NULL.
+   */
+  function save(explicitReset = false) {
+    const typed = value.trim();
+    const derived = override === null ? displayName : derivedName;
+    const next = explicitReset || typed === derived ? "" : typed;
     setEditing(false);
     setFailed(false);
     startTransition(async () => {
@@ -83,13 +100,13 @@ export function InlineName({
       }
       // Empty means "back to the derivation", and the derivation is what the
       // placeholder shows.
-      setShown(next === "" ? derivedName : next);
+      setShown(next === "" ? (override === null ? displayName : derivedName) : next);
       router.refresh();
     });
   }
 
   function cancel() {
-    setValue(override ?? "");
+    setValue(override ?? displayName);
     setEditing(false);
     setFailed(false);
   }
@@ -132,7 +149,6 @@ export function InlineName({
       <input
         autoFocus
         value={value}
-        placeholder={derivedName}
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") save();
@@ -145,12 +161,28 @@ export function InlineName({
           "ring-1 ring-card-border focus:ring-accent"
         }
       />
-      <span className="flex items-center gap-2 text-[11px] text-on-card-muted">
+      {/* Two words, not a sentence: a card is 150 px wide on a phone, and
+          the long explanation belongs on the detail page where there is
+          room for it. */}
+      <span className="flex items-center gap-3 text-[11px] text-on-card-muted">
         {/* onMouseDown, not onClick: the blur above would cancel first. */}
-        <button type="button" onMouseDown={save} className="font-medium text-on-card underline">
+        <button
+          type="button"
+          onMouseDown={() => save()}
+          className="font-medium text-on-card underline"
+        >
           {de.admin.save}
         </button>
-        <span>{de.admin.overrideHint}</span>
+        {override !== null ? (
+          <button
+            type="button"
+            onMouseDown={() => save(true)}
+            className="underline"
+            title={de.admin.resetToDerived}
+          >
+            {de.admin.resetName}
+          </button>
+        ) : null}
       </span>
     </span>
   );

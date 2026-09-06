@@ -27,6 +27,9 @@ export const de = {
     allSeries: "Alle",
     heading: "Skylanders Katalog",
     seriesNav: "Serie wählen",
+    /** Zweite Navigationsebene: Produktgruppe innerhalb der Serie (ADR-0041). */
+    groupNav: "Art wählen",
+    groupAll: "Alle",
     /** Untertitel unter dem Wortzeichen im Katalogkopf. */
     intro: "Entdecke alle Figuren aus den Skylands.",
     /** Suche über alle Serien: Trefferzahl je Serie und insgesamt. */
@@ -208,6 +211,9 @@ export const de = {
     publicName: "Öffentlicher Name",
     overrideLabel: "Anzeigename überschreiben",
     overrideHint: "Leer lassen, um wieder den abgeleiteten Namen zu verwenden.",
+    /** Kurz genug für eine Karte; die Erklärung steht auf der Detailseite. */
+    resetName: "Standard",
+    resetToDerived: "Auf den abgeleiteten Namen zurücksetzen",
     overrideActive: "überschrieben",
     visible: "Im Katalog sichtbar",
     hidden: "Verborgen",

@@ -13,7 +13,9 @@ import { CatalogCard } from "@/components/catalog/catalog-card";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { OwnedToggle } from "@/components/catalog/owned-toggle";
+import { ProductGroupTabs } from "@/components/catalog/group-tabs";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
+import { groupTabs, matchesGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { filterFigures, groupSearchResults, missingFigures } from "@/lib/catalog/search";
 import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
@@ -29,6 +31,7 @@ export function CatalogView({
   highlightSkyId,
   initialSeriesCode,
   initialQuery = "",
+  initialGroup = null,
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -44,12 +47,33 @@ export function CatalogView({
   /** Restores the view someone left when they went to sign in (ADR-0027). */
   initialSeriesCode?: string;
   initialQuery?: string;
+  initialGroup?: CatalogGroup | null;
 }) {
   // A series is always chosen (ADR-0038). The first one is the default, so
   // the catalog opens on Spyro's Adventure rather than on all 561 at once.
   const defaultSeries = defaultSeriesCode(series);
   const [query, setQuery] = useState(initialQuery);
-  const [seriesCode, setSeriesCode] = useState<string>(initialSeriesCode ?? defaultSeries);
+  const [seriesCode, setSeriesCodeState] = useState<string>(initialSeriesCode ?? defaultSeries);
+
+  /**
+   * The product group inside the chosen game (ADR-0041). `null` is "Alle".
+   *
+   * A second navigation level, not a third filter dimension in disguise:
+   * series says where you are, this says what kind of thing you are looking
+   * at, and neither says anything about variants or completion.
+   */
+  const [group, setGroup] = useState<CatalogGroup | null>(initialGroup ?? null);
+
+  /**
+   * Picking a game resets the group to "Alle".
+   *
+   * Carrying `trap` from Trap Team into SuperChargers would land on a filter
+   * that exists nowhere in that game — an empty grid with no visible cause.
+   */
+  function setSeriesCode(code: string) {
+    setSeriesCodeState(code);
+    setGroup(null);
+  }
   const deferredQuery = useDeferredValue(query);
 
   const searching = deferredQuery.trim() !== "";
@@ -116,11 +140,26 @@ export function CatalogView({
    * the grid and to the cross-series results by construction: there is no
    * second code path that could forget it.
    */
-  const pool = useMemo(
-    // The ownership filter is a collector's question. An administrator owns
-    // nothing here and gets the whole catalog (ADR-0042).
-    () => (admin || showOwned ? figures : missingFigures(figures, owned)),
-    [admin, showOwned, figures, owned],
+  const pool = useMemo(() => {
+    // One pool, narrowed in turn. Search and the cross-series search both
+    // read it, so neither needs to know that a group filter exists — the
+    // same trick the ownership filter uses (ADR-0041).
+    const owning = admin || showOwned ? figures : missingFigures(figures, owned);
+    return group === null ? owning : owning.filter((figure) => matchesGroup(figure, group));
+  }, [admin, showOwned, figures, owned, group]);
+
+  /**
+   * The second level's tabs, for the chosen game.
+   *
+   * Counted from the catalog that was loaded and before search, ownership or
+   * the group itself apply — so the numbers describe the game rather than
+   * the current view, and they do not move while someone types. An
+   * administrator's catalog includes hidden figures, so their counts do too;
+   * nobody else's catalog contains them to begin with.
+   */
+  const tabs = useMemo(
+    () => groupTabs(figures.filter((figure) => figure.seriesCode === seriesCode), de.catalog.groupAll),
+    [figures, seriesCode],
   );
 
   const visible = useMemo(
@@ -150,6 +189,7 @@ export function CatalogView({
   function signInHref(skyId: string): string {
     const params = new URLSearchParams();
     params.set("series", seriesCode);
+    if (group !== null) params.set("group", group);
     if (query.trim() !== "") params.set("q", query.trim());
     params.set("figure", skyId);
     return `/login?next=${encodeURIComponent(`/?${params.toString()}`)}`;
@@ -159,11 +199,12 @@ export function CatalogView({
   // The series is not resettable — one is always chosen — so what is left is
   // the search box and the ownership filter. "Besitz anzeigen" counts as
   // active only when it is off, because on is the resting state.
-  const filtered = query.trim() !== "" || (!admin && !showOwned);
+  const filtered = query.trim() !== "" || (!admin && !showOwned) || group !== null;
 
   function reset() {
     setQuery("");
     setShowOwned(true);
+    setGroup(null);
   }
 
   /** One card, in whichever mode the visitor is in. */
@@ -231,6 +272,10 @@ export function CatalogView({
           vitrine — so there is no bright gap between the two. */}
       <div className="flex flex-col gap-3">
         <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
+
+        {/* The second level, directly under the games it narrows. Absent for
+            a game that holds only one kind of thing. */}
+        <ProductGroupTabs tabs={tabs} active={group} onSelect={setGroup} />
 
         {/*
          * The section header (ADR-0038, V4.2): what is being shown on the

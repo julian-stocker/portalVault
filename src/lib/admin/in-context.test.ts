@@ -181,18 +181,132 @@ describe("the collector's catalog is untouched", () => {
 describe("navigation follows the role", () => {
   const nav = source(NAV);
 
-  it("offers the administrator catalog, admin and account", () => {
-    const branch = nav.slice(nav.indexOf("if (admin) {"), nav.indexOf("return [\n    { href: \"/\""));
-    expect(branch).toContain('href: "/admin"');
-    expect(branch).not.toContain('href: "/collection"');
+  it("composes destinations by condition, never by replacing a slot", () => {
+    // "Admin" does not take "Sammlung"'s place. Each destination states when
+    // it applies, and the bar is what is left (ADR-0042) — which is what
+    // makes adding "Lager" later a one-line change.
+    expect(nav).toContain("const DESTINATIONS");
+    expect(nav).toContain("applies: (viewer) => viewer.admin");
+    expect(nav).toContain("applies: (viewer) => !viewer.admin");
+    expect(nav).toContain("DESTINATIONS.filter((destination) => destination.applies(viewer))");
+    // No branch that returns a whole hand-built list per role.
+    expect(code(NAV)).not.toMatch(/if \(admin\) \{\s*return \[/);
   });
 
-  it("leaves a collector's three destinations alone", () => {
-    expect(nav).toContain('href: "/collection"');
-    expect(nav).toContain("de.nav.collection");
+  it("gives the collection to collectors and administration to operators", () => {
+    const collection = nav.slice(nav.indexOf('href: "/collection"'), nav.indexOf('href: "/admin"'));
+    expect(collection).toContain("applies: (viewer) => !viewer.admin");
+    const admin = nav.slice(nav.indexOf('href: "/admin"'), nav.indexOf('href: "/settings"'));
+    expect(admin).toContain("applies: (viewer) => viewer.admin");
+  });
+
+  it("keeps the order the list defines", () => {
+    // Katalog · Sammlung · (Lager) · Admin · Profil
+    const order = ["/", "/collection", "/admin", "/settings", "/login"].map((href) =>
+      nav.indexOf(`href: "${href}"`),
+    );
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("has no link to inventory yet", () => {
+    // Not built: a link to a page that does not exist is worse than no link.
+    expect(code(NAV)).not.toMatch(/\/inventory|\/lager|Lager"/i);
   });
 
   it("marks the mode without rebuilding the site", () => {
     expect(nav).toContain("de.admin.modeBadge");
+  });
+});
+
+describe("the inline name editor", () => {
+  const inline = source(INLINE);
+
+  it("opens with the name that is on screen, not an empty box", () => {
+    expect(inline).toContain("useState(override ?? displayName)");
+    expect(inline).not.toContain('useState(override ?? "")');
+  });
+
+  it("clears the override when the field is emptied", () => {
+    expect(inline).toContain("const next = explicitReset || typed === derived ? \"\" : typed;");
+  });
+
+  it("clears it when the derived name is typed back, rather than storing it twice", () => {
+    expect(inline).toContain("const derived = override === null ? displayName : derivedName;");
+  });
+
+  it("offers an explicit way back, but only while an override exists", () => {
+    expect(inline).toContain("onMouseDown={() => save(true)}");
+    expect(inline).toContain("de.admin.resetName");
+    expect(inline).toMatch(/override !== null \? \(\s*<button/);
+  });
+
+  it("carries no long explanation on the card", () => {
+    // 150 px wide on a phone; the sentence belongs on the detail page.
+    expect(inline).not.toContain("de.admin.overrideHint");
+  });
+
+  it("still leaves the canonical name and the slug alone", () => {
+    expect(code(INLINE)).not.toMatch(/slug|canonicalName\s*=/);
+  });
+});
+
+/**
+ * The product group is a second navigation level, shared by both roles
+ * (ADR-0041). One component, one derivation, one pool.
+ */
+describe("the product group sub-navigation", () => {
+  const view = source(VIEW);
+
+  it("has one tab component, not one per role", () => {
+    for (const forbidden of [
+      "src/components/catalog/admin-group-tabs.tsx",
+      "src/components/admin/group-tabs.tsx",
+    ]) {
+      expect(() => source(forbidden), forbidden).toThrow();
+    }
+    expect((view.match(/<ProductGroupTabs/g) ?? []).length).toBe(1);
+  });
+
+  it("narrows the same pool the ownership filter narrows", () => {
+    // No second search pipeline: search and the cross-series search read the
+    // pool and never learn that a group filter exists.
+    expect(view).toContain("owning.filter((figure) => matchesGroup(figure, group))");
+    expect(view).toContain("groupSearchResults(pool");
+    expect(view).toContain("filterFigures(pool");
+  });
+
+  it("resets the group when the game changes", () => {
+    const setter = view.slice(view.indexOf("function setSeriesCode(code: string)"));
+    expect(setter.slice(0, 200)).toContain("setGroup(null)");
+  });
+
+  it("counts before search, ownership and the group itself", () => {
+    // The numbers describe the game, so they do not move while typing.
+    expect(view).toContain("groupTabs(figures.filter((figure) => figure.seriesCode === seriesCode)");
+  });
+
+  it("counts an administrator's catalog, which includes hidden figures", () => {
+    // `figures` is whatever the page loaded, and for an administrator that
+    // is the catalog including hidden entries (ADR-0042). Nobody else's
+    // catalog contains them, so nobody else's counts can show them.
+    expect(source(PAGE)).toContain("fetchCatalog({ includeHidden: admin })");
+  });
+
+  it("counts as an active filter, so the reset is offered", () => {
+    expect(view).toContain('const filtered = query.trim() !== "" || (!admin && !showOwned) || group !== null');
+    const reset = view.slice(view.indexOf("function reset()"), view.indexOf("}", view.indexOf("function reset()")));
+    expect(reset).toContain("setGroup(null)");
+  });
+
+  it("carries the group through a sign-in and back", () => {
+    // Same treatment as series and query (ADR-0027): read once from the URL,
+    // never written back — the catalog's state stays in the client.
+    expect(view).toContain('params.set("group", group)');
+    expect(source(PAGE)).toContain("isCatalogGroup(params.group) ? params.group : null");
+  });
+
+  it("says nothing about variants or completion", () => {
+    const tabs = source("src/components/catalog/group-tabs.tsx");
+    expect(tabs).not.toMatch(/special|variant|completion|legendary/i);
   });
 });

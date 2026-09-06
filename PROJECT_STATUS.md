@@ -61,6 +61,16 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**Produktgruppen-Untertabs im Katalog (2026-09-06, ADR-0041).** Unter den sechs Serien steht eine
+zweite, kleinere Navigationsebene: `Alle · Figuren · Trap Masters · Fallen · Minis · Items` — je
+Serie nur die tatsächlich vorhandenen Gruppen, aus den Daten abgeleitet, mit Anzahl. Reihenfolge
+und Labels zentral in `src/lib/catalog/group.ts`. Die Gruppe verengt denselben Pool wie der
+Besitzfilter, weshalb Suche und serienübergreifende Suche sie ohne eigene Implementierung
+mittragen. Serienwechsel setzt auf `Alle`. Zahlen beschreiben die Serie vor Suche und
+Besitzfilter; die Adminansicht zählt verborgene Figuren mit, die öffentliche nicht. Eine Leiste
+für beide Rollen, `NULL` bleibt unter `Alle`. Zustand bleibt clientseitig; `?group=` wird nur zum
+Wiederherstellen nach einer Anmeldung gelesen.
+
 **Adminverwaltung im Katalog (2026-09-06, ADR-0042).** Der Geschäfts-Admin arbeitet auf derselben
 Website wie jeder Sammler: `/` bleibt eine Route, eine Datenbasis, eine Karte. Für ein Adminkonto
 trägt dieselbe `FigureCard` andere Interaktion — Anzeigename **inline** bearbeitbar (Stift, Enter

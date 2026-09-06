@@ -2908,6 +2908,40 @@ entsteht jetzt, die UI ist ein eigener Schritt.
 **Gemessene Verteilung (2026-09-06):** figure 261 · trap 57 · sensei 46 · item 44 · vehicle 31 ·
 trap_master 28 · creation_crystal 27 · mini 27 · swapper 26 · giant 14 = **561**.
 
+### Nachtrag 2026-09-06 — die zweite Navigationsebene ist gebaut
+
+**Untertabs unter den Serien.** `Alle · Figuren · Trap Masters · Fallen · Minis · Items` — je
+Serie nur, was diese Serie wirklich enthält. Nichts davon ist pro Serie hinterlegt: `groupTabs()`
+leitet die Tabs aus den geladenen Figuren ab, die globale Reihenfolge und die deutschen Labels
+stehen zentral in `src/lib/catalog/group.ts`. Eine später korrekt klassifizierte Kategorie
+bekommt ihren Tab, ohne dass UI-Code sich ändert. Hat eine Serie nur eine Gruppe, erscheint die
+Leiste gar nicht — ein Bedienelement ohne Wahl ist keins.
+
+**Product Group ist eine Navigationsebene, keine vierte Filterpipeline.** Sie verengt denselben
+Pool, den schon der Besitzfilter verengt; Suche und serienübergreifende Suche lesen diesen Pool
+und erfahren nie, dass es sie gibt. Damit gilt automatisch: `Trap Team` + `Fallen` + Suchbegriff
+sucht serienübergreifend nur unter Fallen, und Abschnitte ohne Treffer entfallen wie bisher.
+
+**Serienwechsel setzt auf `Alle` zurück.** `trap` von Trap Team nach SuperChargers mitzunehmen
+hieße, auf einem Filter zu landen, den es dort nicht gibt — ein leeres Raster ohne sichtbaren
+Grund.
+
+**Zahlen neben den Tabs beschreiben die Serie, nicht die Ansicht.** Gezählt wird vor Suche, vor
+Besitzfilter und vor der Gruppe selbst, aus dem bereits geladenen Katalog — keine Abfrage je Tab.
+Wessen Katalog gezählt wird, entscheidet die Rolle: die Adminansicht enthält verborgene Figuren,
+die öffentliche nicht, und beide zählen genau das, was sie zeigen.
+
+**`NULL` bleibt unter `Alle`.** Eine unklassifizierte Figur zählt dort mit, bekommt keinen
+eigenen Tab und wird nie zu `item`.
+
+**Eine Leiste für beide Rollen.** Kein `AdminProductGroupTabs`. Was sich zwischen Sammler und
+Admin unterscheidet, ist der geladene Katalog — nicht die Navigation darüber.
+
+**Der Zustand bleibt clientseitig**, wie Serie und Suche seit ADR-0026. `?group=` wird — genau wie
+`?series=` und `?q=` — nur *gelesen*, um die Ansicht nach einer Anmeldung wiederherzustellen
+(ADR-0027), und nicht bei jedem Klick geschrieben. Eine URL-getriebene Katalognavigation wäre
+eine eigene Entscheidung, keine Nebenwirkung dieser.
+
 ---
 
 ## ADR-0042 — Der Adminbereich ist der Katalog: rollenbasierte Verwaltung im Kontext

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CatalogView } from "@/components/catalog/catalog-view";
+import { isCatalogGroup } from "@/lib/catalog/group";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { de } from "@/lib/i18n/de";
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
 export default async function CatalogPage({
   searchParams,
 }: {
-  searchParams: Promise<{ series?: string; q?: string; figure?: string }>;
+  searchParams: Promise<{ series?: string; q?: string; figure?: string; group?: string }>;
 }) {
   const params = await searchParams;
 
@@ -58,6 +59,10 @@ export default async function CatalogPage({
           params.series && series.some((s) => s.code === params.series) ? params.series : undefined
         }
         initialQuery={params.q ?? ""}
+        // Same role as `series` and `q`: restoring the view someone left when
+        // they went to sign in (ADR-0027). The catalog's state stays in the
+        // client — these parameters are read once, never written back.
+        initialGroup={isCatalogGroup(params.group) ? params.group : null}
       />
     </main>
   );

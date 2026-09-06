@@ -5,6 +5,7 @@ import {
   CATALOG_GROUPS,
   GROUP_LABELS,
   groupLabel,
+  groupTabs,
   groupsPresent,
   isCatalogGroup,
   matchesGroup,
@@ -153,5 +154,122 @@ describe("the migration's backfill", () => {
 
   it("adds up to the audited 561", () => {
     expect(Object.values(AUDIT).reduce((a, b) => a + b, 0)).toBe(561);
+  });
+});
+
+/**
+ * The second navigation level (ADR-0041).
+ *
+ * The counts below are the approved expectations from the audit, checked
+ * against the classification the migration wrote. They are pinned here
+ * because a wrong number would be a wrong catalog rather than a wrong pixel.
+ */
+describe("the product group tabs", () => {
+  const figure = (catalogGroup: CatalogGroup | null, seriesCode = "T") => ({
+    catalogGroup,
+    seriesCode,
+  });
+
+  it("puts 'Alle' first and counts everything under it", () => {
+    const tabs = groupTabs([figure("trap"), figure("figure"), figure(null)], "Alle");
+    expect(tabs[0]).toMatchObject({ group: null, label: "Alle", count: 3 });
+  });
+
+  it("keeps the curated order, not the order it met them in", () => {
+    const tabs = groupTabs([figure("item"), figure("trap"), figure("figure")], "Alle");
+    expect(tabs.map((tab) => tab.group)).toEqual([null, "figure", "trap", "item"]);
+  });
+
+  it("offers only groups the series really has", () => {
+    const tabs = groupTabs([figure("figure"), figure("mini")], "Alle");
+    expect(tabs.map((tab) => tab.group)).toEqual([null, "figure", "mini"]);
+    expect(tabs.some((tab) => tab.group === "vehicle")).toBe(false);
+  });
+
+  it("gives an unclassified figure no tab, but counts it under 'Alle'", () => {
+    // NULL means "not classified yet" and never `item` (ADR-0041).
+    const tabs = groupTabs([figure(null), figure("figure")], "Alle");
+    expect(tabs.map((tab) => tab.group)).toEqual([null, "figure"]);
+    expect(tabs[0].count).toBe(2);
+    expect(tabs[1].count).toBe(1);
+  });
+
+  it("counts each group exactly once per figure", () => {
+    const tabs = groupTabs([figure("trap"), figure("trap"), figure("mini")], "Alle");
+    expect(tabs.find((tab) => tab.group === "trap")?.count).toBe(2);
+    expect(tabs.find((tab) => tab.group === "mini")?.count).toBe(1);
+  });
+
+  it("is empty of tabs for an empty series", () => {
+    expect(groupTabs([], "Alle")).toEqual([{ group: null, label: "Alle", count: 0 }]);
+  });
+});
+
+/**
+ * The approved sub-navigation per game, as data.
+ *
+ * These are the numbers the catalog must produce. They come from the audit of
+ * 2026-09-06 and are what the migration's backfill was written to yield.
+ */
+describe("the approved counts per game", () => {
+  const EXPECTED: Record<string, { all: number; groups: [CatalogGroup, number][] }> = {
+    SA: { all: 102, groups: [["figure", 85], ["mini", 4], ["item", 13]] },
+    G: { all: 81, groups: [["figure", 59], ["giant", 14], ["mini", 4], ["item", 4]] },
+    SF: { all: 89, groups: [["figure", 55], ["swapper", 26], ["item", 8]] },
+    T: {
+      all: 141,
+      groups: [["figure", 28], ["trap_master", 28], ["trap", 57], ["mini", 19], ["item", 9]],
+    },
+    SC: { all: 69, groups: [["figure", 34], ["vehicle", 31], ["item", 4]] },
+    I: { all: 79, groups: [["sensei", 46], ["creation_crystal", 27], ["item", 6]] },
+  };
+
+  it("adds up to the 561 collectibles", () => {
+    const total = Object.values(EXPECTED).reduce((sum, series) => sum + series.all, 0);
+    expect(total).toBe(561);
+  });
+
+  it("each game's groups add up to its own total", () => {
+    for (const [code, series] of Object.entries(EXPECTED)) {
+      const sum = series.groups.reduce((n, [, count]) => n + count, 0);
+      expect(sum, code).toBe(series.all);
+    }
+  });
+
+  it("produces exactly those tabs, in the curated order", () => {
+    for (const [code, series] of Object.entries(EXPECTED)) {
+      // A stand-in catalog built from the approved numbers: the derivation is
+      // what is under test, and it must not need a database to be correct.
+      const figures = series.groups.flatMap(([group, count]) =>
+        Array.from({ length: count }, () => ({ catalogGroup: group })),
+      );
+      const tabs = groupTabs(figures, "Alle");
+      expect(tabs[0], code).toMatchObject({ group: null, count: series.all });
+
+      const wanted = CATALOG_GROUPS.filter((group) =>
+        series.groups.some(([name]) => name === group),
+      );
+      expect(tabs.slice(1).map((tab) => tab.group), code).toEqual(wanted);
+      for (const [group, count] of series.groups) {
+        expect(tabs.find((tab) => tab.group === group)?.count, `${code}/${group}`).toBe(count);
+      }
+    }
+  });
+
+  it("never offers a game a group it does not have", () => {
+    // Imaginators has no plain figures at all; Spyro's Adventure no vehicles.
+    const imaginators = groupTabs(
+      EXPECTED.I.groups.flatMap(([group, count]) =>
+        Array.from({ length: count }, () => ({ catalogGroup: group })),
+      ),
+      "Alle",
+    );
+    expect(imaginators.some((tab) => tab.group === "figure")).toBe(false);
+    expect(imaginators.map((tab) => tab.group)).toEqual([
+      null,
+      "sensei",
+      "creation_crystal",
+      "item",
+    ]);
   });
 });
