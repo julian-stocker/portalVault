@@ -31,9 +31,11 @@ import { useState, useTransition } from "react";
 import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
 import { InlineName } from "@/components/admin/inline-name";
 import { FigureCard } from "@/components/catalog/figure-card";
+import { OfferLine } from "@/components/shop/offer-line";
 import { ACTION_CARD } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
+import type { Offer } from "@/lib/shop/offer";
 import { de } from "@/lib/i18n/de";
 
 /** An outlined "i". Decorative; the label beside it carries the meaning. */
@@ -64,6 +66,7 @@ export function CatalogCard({
   admin = false,
   visible = true,
   onVisibilityChange,
+  offers = [],
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -80,6 +83,13 @@ export function CatalogCard({
   /** Editorial visibility, only meaningful in administrator mode. */
   visible?: boolean;
   onVisibilityChange?: (skyId: string, visible: boolean) => void;
+  /**
+   * What SkyIsles offers for this figure — usually nothing (ADR-0043).
+   *
+   * Handed down from the page rather than looked up here: one call answers
+   * for the whole catalog, and a per-card lookup would be 561 requests.
+   */
+  offers?: readonly Offer[];
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -121,6 +131,9 @@ export function CatalogCard({
         interactive={false}
         muted={!visible}
         statusBadge={visible ? null : <HiddenBadge />}
+        // No offer line: the operator has the price in /admin/inventory,
+        // where it can also be changed. Repeating it here would be a second
+        // place that states a price and cannot edit it (ADR-0042).
         nameSlot={
           <InlineName
             skyId={figure.skyId}
@@ -170,6 +183,7 @@ export function CatalogCard({
         href={signInHref}
         highlighted={highlighted}
         showSeries={false}
+        offerSlot={<OfferLine offers={offers} />}
         footer={footer}
       />
     );
@@ -184,6 +198,7 @@ export function CatalogCard({
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}
       showSeries={false}
+      offerSlot={<OfferLine offers={offers} />}
       footer={footer}
     />
   );

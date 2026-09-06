@@ -3051,3 +3051,198 @@ wird durch eine `correction` ausgeglichen. Legacy-Bestand ohne belegbare Stückk
 **Nicht in Phase 1:** Bestellungen, Warenkorb, Checkout, Zahlung, Versand, Kundenverwaltung,
 eBay-Anbindung, Reservierungs-UI, Coupons, automatische Preisbildung, FIFO oder
 Durchschnittskosten, Steuerbewertung.
+
+---
+
+## ADR-0043 — Öffentliches Angebot als Projektion, Warenkorb lokal im Browser
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der Shop wird öffentlich sichtbar — aber nur als **Angebot**, nicht als Lager.
+Die einzige öffentliche Lesefläche auf `shop_inventory` ist die Funktion `public.shop_offers()`
+(Migration `0006`). Sie gibt genau vier Werte zurück:
+
+| Wert | Bedeutung |
+|---|---|
+| `sky_id` | welcher Artikel |
+| `condition` | `loose` oder `boxed` |
+| `sale_price` | der SkyIsles-Preis |
+| `available` | **boolescher** Wert: kaufbar ja/nein |
+
+**Warum eine Funktion und kein Tabellenrecht.** Ein `grant select` ist spaltenblind, und RLS
+filtert Zeilen, nicht Spalten — empirisch belegt am Katalog. Ein Recht auf `shop_inventory`, das
+den Preis freigibt, gibt im selben Atemzug `quantity`, `reserved` und `note` frei. Die Funktion
+ist `security definer`, die Tabellen behalten für `anon` und `authenticated` **keinerlei** Rechte,
+und es wird keine Policy hinzugefügt.
+
+**`available` ist ein Ja/Nein, keine Stückzahl.** „Noch 3 Stück" ist ein Lagerstand, „auf Lager"
+ist eine Angebotsaussage. Die Stückzahl veröffentlichen hieße, das Lager zeilenweise zu
+veröffentlichen (docs/SECURITY.md).
+
+**Was ein Angebot ist.** Ausschließlich `is_listed`. Eine Lagerposition ist kein Angebot: Bestand
+ist etwas, das der Betreiber hat, ein Angebot etwas, das er verkaufen will (ADR-0037). Der
+CHECK `shop_inventory_listed_needs_price` garantiert bereits, dass ein gelistetes Angebot einen
+Preis hat — „gelistet ohne Preis" ist kein Fall, den der Aufrufer behandeln muss. **Gelistet mit
+0 verfügbar** liefert weiterhin eine Zeile mit `available = false` und zeigt „Nicht auf Lager";
+Schweigen wäre die schlechtere Auskunft.
+
+**Was nie ein Angebot bekommt.** Der Katalogfilter in der Funktion: `is_active`,
+`catalog_visible` und die Kategorieregel aus ADR-0029. Software fällt darüber heraus,
+redaktionell verborgene Figuren ebenso, die aufbewahrten Audit-Fixtures sind inaktiv, und
+SWAP-Hälften existieren im Katalog gar nicht. Die Kategorieliste steht als
+`public.non_collectible_categories()` **einmal** in der Datenbank und spiegelt
+`src/lib/catalog/collectible.ts`; `src/lib/shop/offer.test.ts` liest beide Dateien und stellt
+sicher, dass sie dieselben Namen nennen, `npm run verify:shop` prüft dasselbe gegen die laufende
+Datenbank.
+
+**Ein Aufruf für den ganzen Katalog.** `shop_offers()` hat keine Argumente und keine
+Paginierung. Der Katalog dekoriert 561 Karten daraus, der Warenkorb prüft eine Handvoll Zeilen
+dagegen; eine Abfrage pro Karte wären 561 Anfragen auf eine Frage mit einer Antwort. Die Liste
+umfasst höchstens einige hundert Zeilen.
+
+**Zwei Preise bleiben zwei Preise.** `market_price` ist Referenzwert, `sale_price` ist Angebot
+(ADR-0033). Auf der Karte steht der SkyIsles-Preis **unter** dem Marktwert und nennt seine
+Quelle — „SkyIsles 9,90 €" neben 14,00 € liest sich als zwei Aussagen, eine nackte zweite Zahl
+als Korrektur der ersten. „ab 9,90 €" erscheint nur, wenn die kaufbaren Angebote wirklich
+unterschiedlich teuer sind; `loose` und `boxed` zum selben Preis ist ein Preis.
+
+**Keine zweite Karte, keine zweite Pipeline.** `FigureCard` bekommt einen Steckplatz
+(`offerSlot`) und weiß von Angeboten nichts, `CatalogCard` füllt ihn. Es gibt keinen zweiten
+Katalog, keine zweite Kartenkomponente und keinen zweiten Datenweg. Der Adminmodus zeigt **keine**
+Angebotszeile: der Betreiber sieht und ändert den Preis in `/admin/inventory`, und eine zweite
+Stelle, die einen Preis nennt, ihn aber nicht ändern kann, wäre eine Stelle zu viel (ADR-0042).
+
+### Der Warenkorb (V1)
+
+**Der Warenkorb liegt im Browser.** `localStorage`, ein Modul-Store, kein Tabelle, kein Konto,
+keine Server-Action. Anonym füllbar. Er verändert **nichts** an `shop_inventory`,
+`inventory_movements` oder `reserved`.
+
+**Warum nichts reserviert wird.** Reservieren ist ein Versprechen. Ein Versprechen, das niemand
+einlösen kann — es gibt keinen Checkout und keine Zahlung —, nähme Ware für die Lebensdauer eines
+Browsertabs aus dem Regal. Reservierungen entstehen später beim Checkout, wofür `reserved` schon
+existiert (ADR-0037).
+
+**Identität einer Zeile ist `sky_id + condition`** — dieselbe Identität wie die einer
+Lagerposition und wie die eines Angebots. Eine Regel, drei Orte.
+
+**Die Serverdaten gewinnen.** Eine Zeile speichert zusätzlich einen Anzeige-Schnappschuss (Name,
+Bild) und den Preis beim Hinzufügen. Der gespeicherte Preis wird **nie** ausgegeben: gerechnet
+wird immer mit `shop_offers()` von heute; der alte Preis dient nur dem Hinweis „Preis geändert".
+
+**Nichts verschwindet ungefragt.** Eine ausverkaufte oder ausgelistete Zeile bleibt sichtbar, mit
+Begründung, und zählt nicht zur Summe. Ein Warenkorb, der stillschweigend löscht, was jemand
+gewählt hat, lügt über diese Wahl.
+
+**Das Symbol steht im Header, nicht in der Leiste.** Die Hauptnavigation nennt Orte — Katalog,
+Sammlung, Konto; ein Warenkorb ist kein Ort, sondern etwas, das man trägt. Auf dem Telefon hat
+die untere Leiste vier gleich breite Daumenziele, ein fünftes würde alle verkleinern. Für ein
+Adminkonto wird das Symbol nicht angeboten: SkyIsles kauft nicht bei sich selbst (ADR-0042).
+
+**Nicht in dieser Runde:** Checkout, Bestellungen, Zahlung, Versand, Reservierung,
+serverseitiger Warenkorb, Kontobindung des Warenkorbs, Rabatte, Coupons, Mengenrabatte,
+Versandkosten, Steuerausweis.
+
+---
+
+## ADR-0044 — Der Legacy-Anfangsbestand wird einmal gebucht, nicht geschrieben
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der bestehende Geschäftsbestand aus `../webpage/skylanders.xlsx` wird als
+**Eröffnungsbuchung** ins SkyIsles-Lager übernommen: eine `initial_import`-Bewegung je Position,
+gebucht über `system_record_inventory_movement()`. Es wird **kein** `quantity` direkt geschrieben.
+Werkzeug: `tools/import-legacy-inventory.mts`, Dry Run als Standard, `--apply` schreibt.
+
+**Nur Spalte F, und nur die sechs Serienblätter.** Gelesen werden A (SKY-ID), B (Name, nur für
+den Bericht), D/E (nur zur Prüfung von D − E = F) und F (Geschäftsbestand). Die Blätter werden
+über eine **Positivliste** geöffnet: ein Blatt wird gelesen, weil PortalVault eine Serie dieses
+Namens kennt — `Order 2026/2025` und `EÜR 2026/2025` werden dadurch nie erreicht, nicht bloß
+übersprungen. Die privaten Spalten P–S (Privatsammlung) und U–X (Privatwerte) werden nirgends
+gelesen. Der Kopf der Blätter wird vor dem Import geprüft; eine eingefügte Spalte bricht den Lauf
+ab, statt „verkauft" als Bestand zu importieren.
+
+**Identität ist ausschließlich die SKY-ID.** Keine Namensheuristik, kein Fuzzy-Matching, keine
+Kategoriezuordnung aus Namen (CLAUDE.md, Regel 2). Eine unbekannte SKY-ID wird gemeldet und nicht
+angelegt.
+
+**Alles wird als `loose` gebucht — als benannte Annahme, nicht als erfundene Präzision.** Die
+Arbeitsmappe kennt **keine** Verpackungsspalte, kein Kennzeichen und keine Relation; geprüft über
+alle sechs Blätter. Von 218 Bestandszeilen im Sortiment trägt **genau eine** überhaupt einen
+Verpackungshinweis im Namen (`SKY-0049 "Elite Slam Bam - ohne OVP"`), und die ist bereits eine
+eigene SKY-ID mit identischem Katalognamen. Wo die Legacy-Daten Verpackung unterscheiden, tun sie
+es also über die SKY-ID. Eine spätere Korrektur auf `boxed` sind zwei gewöhnliche Bewegungen im
+Adminbereich — genau wofür das Journal da ist.
+
+**Was der Import nicht setzt.** `unit_cost` bleibt NULL — die Systemfunktion hat überhaupt keinen
+Kostenparameter, das ist eine Eigenschaft der Datenbank und nicht des Skripts. `sale_price` bleibt
+NULL und `is_listed` bleibt `false`: Was verkauft wird und zu welchem Preis, ist eine getrennte,
+manuelle Entscheidung (ADR-0037). Es gibt **keine** Ableitung aus `market_price` und keine
+Prozentregel.
+
+**Ausgeschlossen, mit Zahlen (ausgeführt am 2026-09-06).** 614 Artikelzeilen, 234 mit Bestand,
+785 Stück:
+
+| | Positionen | Stück |
+|---|---|---|
+| importiert (Sammlerartikel) | 218 | 762 |
+| Software (ADR-0029) | 8 | 10 |
+| SWAP-Hälften ohne Katalogzeile | 8 | 13 |
+| aufbewahrte Audit-Fixtures | 0 | 0 |
+| inaktiv | 0 | 0 |
+
+Die acht SWAP-Hälften (`OBERTEIL`/`UNTERTEIL`, Blatt SF) haben **gar keine** Katalogzeile; sie
+werden gemeldet und nicht angelegt. Der erste `--apply` buchte 218 von 218 Bewegungen bei 0
+Konflikten; der zweite meldete `218 already initial-imported · 0 changes`. Gegenprobe: `webpage/data/inventory.json.available` stimmt für
+alle 614 Zeilen mit Spalte F überein.
+
+### Wiederholbarkeit ist eine Eigenschaft des Werkzeugs, nicht des Constraints
+
+Der Lauf ist **wiederholbar**, und zwar sauber: ein zweiter identischer Aufruf bucht nichts,
+ändert keinen Bestand und endet mit Exit 0 und der Zeile
+`218 already initial-imported · 0 changes`. Ein Constraint-Fehler ist **kein** akzeptables
+Ergebnis eines zweiten Laufs.
+
+Entschieden wird **je Position**, aus dem Journal, nie aus einem Zähler dessen, was dieser
+Prozess getan hat — es gibt keine Laufmarke, keine Datei, keinen Fortschrittsstand. Damit fallen
+Idempotenz und Wiederaufnahme aus derselben Regel (`src/lib/shop/legacy-plan.ts`):
+
+| Zustand der Position | Entscheidung |
+|---|---|
+| existiert nicht | **importieren** |
+| existiert **und** hat eine `initial_import`-Bewegung | **überspringen** — bereits eröffnet |
+| existiert **ohne** `initial_import` | **Konflikt** — nicht importieren, Mensch entscheidet |
+
+**Der Konfliktfall ist die eigentliche Sicherheitseigenschaft.** Eine Position existiert nur,
+weil jemand eine Bewegung darauf gebucht hat. „Existiert ohne Eröffnungsbuchung" heißt also:
+Hier wird echter Bestand von Hand geführt. Den Legacy-Wert stumpf zu addieren würde ihn
+verdoppeln — und **kein Fehler würde ausgelöst**, der Bestand wäre schlicht falsch. Er wird
+deshalb im Dry Run wie im Apply namentlich gemeldet, nicht gebucht, und der Lauf endet mit
+Exit 1, damit er in keinem Skript unbemerkt durchgeht.
+
+**Erkannt wird am Journal, nicht am Lagerstand.** Eine Position, die wieder bei null steht, ist
+trotzdem eröffnet. Weicht die Arbeitsmappe später vom eröffneten Wert ab, ist das eine Meldung,
+kein Grund zu buchen: ab der Eröffnungsbuchung ist das Journal maßgeblich.
+
+**Abbruch mitten im Lauf.** Jede Position ist eine eigene Transaktion (`PostgREST` führt einen
+RPC in einer Transaktion aus); die 218 sind bewusst **keine** gemeinsame. Bricht ein Lauf nach
+100 Positionen ab, findet der nächste genau die fehlenden 118 — dieselbe Regel, kein Sonderfall.
+Eine fehlgeschlagene Position stoppt den Lauf nicht: sie wird gemeldet und beim nächsten Lauf
+erneut versucht.
+
+**Jede Lesung ist vollständig paginiert.** PostgREST liefert höchstens 1000 Zeilen und sagt
+nichts über den Rest. Ein abgeschnitten gelesenes Journal ließe eine eröffnete Position
+uneröffnet aussehen — genau der Fehler, den der Unique-Index dann als Constraint-Verletzung
+statt als sauberen Lauf sichtbar machen würde.
+
+**Der Unique-Index bleibt — als letzte Sicherung, nicht als Mechanismus.**
+`inventory_movements_one_initial_import` macht eine zweite Eröffnungsbuchung unmöglich, auch
+wenn das Werkzeug sich irrt. Ein Lauf, der sich darauf verlässt, ist ein defekter Lauf.
+
+**Das Legacy-Projekt bleibt unberührt.** Der Reader (`tools/lib/xlsx.mts`) hat keinen
+Schreibpfad — kein `writeFileSync`, kein Stream, kein Shell-Aufruf. Das ist eine stärkere Zusage
+als eine Regel, die sagt, man dürfe nicht schreiben.
+
+**Keine personenbezogenen Daten.** Weder Käuferdaten noch Bestellungen, EÜR-Zahlen, Scraper-Logik,
+Mappings oder Zugangsdaten werden gelesen, geschrieben oder protokolliert. Der Bericht nennt
+Artikelnamen ausschließlich dort, wo ein Mensch entscheiden muss, und nur für Geschäftsbestand.

@@ -7,6 +7,70 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V5 abgeschlossen und produktiv: öffentliches Angebot, Warenkorb und der Legacy-Anfangsbestand
+(2026-09-06, ADR-0043/0044).** Migration `0006` ist angewendet, der Legacy-Import ist real
+ausgeführt, alle Verifikationen sind grün.
+
+*Öffentliches Angebot (ADR-0043).* `public.shop_offers()` in Migration `0006` ist die einzige
+öffentliche Lesefläche auf `shop_inventory`: vier Werte — `sky_id`, `condition`, `sale_price`
+und ein **boolesches** `available` —, `security definer`, ausführbar für `anon` und
+`authenticated`. Kein Tabellenrecht, keine Policy, keine Spalte, kein `alter table`.
+Stückzahlen, Reserviertes, Notizen, Kosten und Bewegungen bleiben unerreichbar. Angeboten wird
+nur, was `is_listed` ist **und** im öffentlichen Katalog steht (`is_active`, `catalog_visible`,
+keine Software) — Fixtures sind inaktiv, SWAP-Hälften existieren im Katalog nicht.
+Die Karte zeigt „SkyIsles 9,90 €" bzw. „ab 9,90 €" unter dem Marktwert, die Figurenseite eine
+Zeile je Zustand mit Kaufknopf. **Ein** Aufruf für 561 Karten; keine zweite Karte, keine zweite
+Pipeline, im Adminmodus keine Angebotszeile.
+
+`0006_public_shop_offers.sql` ist am 2026-09-06 ausgeführt; `npm run verify:shop` besteht
+**15/15**. Die Spaltengrenze ist an der Funktionssignatur selbst belegt: `sky_id`, `condition`,
+`sale_price` und `available` sind abfragbar, und alle neun verbotenen Namen — `quantity`,
+`reserved`, `available_quantity`, `note`, `unit_cost`, `currency`, `created_by`, `inventory_id`,
+`id` — werden von PostgREST mit `42703` abgewiesen, unabhängig davon, ob gerade ein Angebot
+existiert.
+
+*Warenkorb V1 (ADR-0043).* Lokal im Browser (`localStorage`, Modul-Store, `useSyncExternalStore`,
+tabübergreifend), anonym nutzbar. Identität `sky_id + condition`. Er schreibt **keine** Tabelle,
+bucht **keine** Bewegung und reserviert **nichts**. Beim Anzeigen gewinnen die Serverdaten: der
+gespeicherte Preis dient nur dem Hinweis „Preis geändert". Ausverkaufte oder ausgelistete Zeilen
+bleiben sichtbar, mit Begründung, und zählen nicht zur Summe. Route `/cart`, Symbol mit Zähler im
+Header — **kein fünfter Tab** in der Leiste, für Admins nicht angeboten. Kein Checkout, keine
+Bestellung, keine Zahlung.
+
+*Legacy-Anfangsbestand (ADR-0044).* `tools/import-legacy-inventory.mts`
+(`npm run inventory:import-legacy`) liest die Arbeitsmappe **read-only** — nur Spalte F der sechs
+Serienblätter, nie `Order *` oder `EÜR *`, nie die privaten Spalten P–S/U–X — und bucht
+`initial_import`-Bewegungen über `system_record_inventory_movement()`. Kein direktes `quantity`,
+`unit_cost` NULL, `sale_price` NULL, `is_listed` false, keine Namensheuristik, alles als `loose`
+(begründete Annahme: die Arbeitsmappe kennt keine Verpackungsinformation).
+
+**Real ausgeführt am 2026-09-06:** 614 Artikelzeilen · 234 mit Bestand · **218 Positionen /
+762 Stück importiert**, 218/218 Bewegungen gebucht, 0 Konflikte · ausgeschlossen 8
+Softwarepositionen (10 Stück) und 8 SWAP-Hälften ohne Katalogzeile (13 Stück) · 0 Fixtures ·
+0 inaktiv.
+
+**Idempotenz real bewiesen.** Ein zweiter identischer `--apply` meldete
+`218 already initial-imported · 0 changes`: 0 neue Positionen, 0 neue Bewegungen, 0 Stück
+Änderung, 0 Konflikte, Exit 0. Entschieden wird je Position aus dem Journal: existiert nicht →
+importieren · hat `initial_import` → überspringen · existiert **ohne** `initial_import` →
+**Konflikt**, nicht importieren. Ein nach 100 von 218 Positionen abgebrochener Lauf setzte beim
+nächsten Mal mit genau den fehlenden 118 fort (Testnachweis). Der Unique-Index
+`inventory_movements_one_initial_import` bleibt als letzte Sicherung.
+
+**Datenbankstand nach dem Import, gegen die echte DB geprüft:** 218 Legacy-Positionen mit
+`initial_import`, Summe der Anfangsmengen **762**, alle `condition = loose`, alle
+`unit_cost = NULL` und `currency = NULL`, alle `created_by = NULL` (Systemweg), **keine**
+gelistet, **kein** `sale_price`, höchstens eine Eröffnungsbuchung je Position.
+Abstimmung `SUM(inventory_movements.delta) = shop_inventory.quantity` gilt für **alle 222**
+Positionen; kein negativer Bestand, kein `reserved < 0`, kein `reserved > quantity`,
+`reserved = 0` überall.
+
+**Die importierte Ware ist bewusst noch nicht öffentlich.** Ohne `sale_price` und ohne
+`is_listed` erzeugt sie keine Angebote — `shop_offers()` liefert derzeit **0 Zeilen**. Der erste
+echte Shopartikel wird manuell über `/admin/inventory` gelistet. Keine Massenlistung, keine
+automatische Preisbildung.
+
+
 **V1.2 abgeschlossen — Datenbankfundament steht und ist bewiesen.**
 V1.1 (Fundament), V1.2A (Schemaentwurf), V1.2B (Ausführung) und V1.2C (funktionale
 RLS-Verifikation) sind fertig.
@@ -36,19 +100,19 @@ Sammlungswert, gemeinsame responsive Navigation. Die sichtbare Anwendung heißt 
 Damit steht der **erste vollständige End-to-End-Produktfluss**: Katalog öffnen → Figur finden →
 antippen → anmelden → eigene Sammlung sehen.
 
-⚠️ **Offen und blockierend: `supabase/migrations/0002_characters.sql` ist geschrieben, aber
-NOCH NICHT AUSGEFÜHRT.** Sie muss wie 0001 im Supabase-SQL-Editor laufen. Bis dahin schlägt
-jede Katalogabfrage fehl, weil die Datenschicht `characters` mitliest, und `npm run verify:rls`
-meldet 31/32 mit genau diesem Hinweis.
+`supabase/migrations/0002_characters.sql` ist ausgeführt; `characters` hält 19 kuratierte
+Zeilen und 90 SKY-IDs tragen eine `character_id` (gegen die laufende Datenbank geprüft,
+2026-09-06).
 
-**Shop-Fundament vollständig entschieden (2026-09-05, ADR-0037) — nichts implementiert.**
-Rollen in `shop_admins` plus `is_shop_admin()`, nie in `profiles` und nie per E-Mail-Konstante ·
-`shop_inventory` ohne `user_id`, Schlüssel `(sky_id, condition)` mit genau `loose` und `boxed` ·
-`inventory_movements` als Anhängejournal **ohne redundante `sky_id`** · gespeicherte Menge plus
-Journal · atomares bedingtes Update gegen Doppelverkauf · öffentlich nur „Auf Lager" /
-„Nicht auf Lager" aus `quantity - reserved` · `sale_price` manuell, `market_price` unangetastet ·
-**kein `catalog_visible`**, `is_active` bleibt unverändert · SWAP-Hälften und Software werden in
-V1 nicht verkauft · Reihenfolge Foundation → Legacy-Import → `/shop-admin`.
+**Shop-Fundament vollständig entschieden (2026-09-05, ADR-0037).** Rollen in `shop_admins` plus
+`is_shop_admin()`, nie in `profiles` und nie per E-Mail-Konstante · `shop_inventory` ohne
+`user_id`, Schlüssel `(sky_id, condition)` mit genau `loose` und `boxed` · `inventory_movements`
+als Anhängejournal **ohne redundante `sky_id`** · gespeicherte Menge plus Journal · atomares
+bedingtes Update gegen Doppelverkauf · öffentlich nur „Auf Lager" / „Nicht auf Lager" aus
+`quantity - reserved` · `sale_price` manuell, `market_price` unangetastet · SWAP-Hälften und
+Software werden in V1 nicht verkauft · Reihenfolge Foundation → Legacy-Import → Lagerverwaltung.
+Umgesetzt in `0003`, `0005` und `0006`; das damals verworfene `catalog_visible` kam später mit
+ADR-0039 aus einem anderen Grund — redaktioneller Sichtbarkeit, nicht Shoplogik.
 
 Zwei Legacy-Befunde dahinter: **46 der 561 Katalogzeilen sind Verpackungs-/Zweitexemplarvarianten
 derselben Figur** — ihre Bereinigung ist ein eigener späterer Schritt (**Collector Catalog
@@ -61,7 +125,7 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
-**Lagerverwaltung Phase 1 gebaut, Migration `0005` noch nicht ausgeführt (2026-09-06, ADR-0037).**
+**Lagerverwaltung Phase 1 gebaut und live (2026-09-06, ADR-0037).**
 `/admin/inventory` zeigt dem Betreiber Bestand, Reserviert, Verfügbar, Marktpreis,
 SkyIsles-Preis und Angebotsstatus je Position; Bestand ändern, Preis und Listing gehen direkt
 von der Karte. Die Navigation lautet für ihn **Katalog · Lager · Admin · Profil** — „Lager" ist
@@ -70,12 +134,11 @@ entstehen **on demand** aus der ersten Bewegung; `quantity` wird nie zugewiesen,
 nichts geschrieben, `initial_import` ist keine Adminoption. Preis und Angebot laufen über
 `set_shop_listing()`, Bestand über `record_inventory_movement()` — beides aus `0003`.
 
-⚠️ **`0005_inventory_admin_read.sql` ist geschrieben, aber noch nicht ausgeführt.** Sie fügt nur
-zwei `security definer`-Lesefunktionen hinzu (`admin_shop_inventory`,
+`0005_inventory_admin_read.sql` ist am 2026-09-06 ausgeführt und mit `npm run verify:inventory`
+verifiziert. Sie fügt nur zwei `security definer`-Lesefunktionen hinzu (`admin_shop_inventory`,
 `admin_inventory_movements`), weil Clients auf `shop_inventory` und `inventory_movements`
 weiterhin keine Tabellenrechte haben — ein Admin konnte seinen eigenen Bestand sonst nicht
-lesen. Keine Tabelle, keine Policy, keine Spalte. Bis zur Ausführung antwortet `/admin/inventory`
-mit einem Fehler; der übrige Code ist davon unberührt. Danach: `npm run verify:inventory`.
+lesen. Keine Tabelle, keine Policy, keine Spalte.
 
 **Produktgruppen-Untertabs im Katalog (2026-09-06, ADR-0041).** Unter den sechs Serien steht eine
 zweite, kleinere Navigationsebene: `Alle · Figuren · Trap Masters · Fallen · Minis · Items` — je
@@ -359,13 +422,13 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Vollständige Projektdokumentation in `docs/` | ✅ |
 | `supabase/migrations/0001_initial_schema.sql` — geschrieben, **ausgeführt und strukturell verifiziert** | ✅ |
 | `@supabase/supabase-js` als Abhängigkeit | ✅ |
-| `tools/verify-rls.mts` — 31 funktionale RLS-Prüfungen, `npm run verify:rls` | ✅ **ausgeführt, 31/31 bestanden** |
+| `tools/verify-rls.mts` — funktionale RLS-Prüfungen, `npm run verify:rls` | ✅ **ausgeführt, 103/103 bestanden** |
 | `src/lib/catalog/slug.ts` — Slug-Regel nach ADR-0011, 15 Unit-Tests | ✅ |
 | `tools/import-catalog.mts` — Katalogimport, `npm run catalog:import` | ✅ **ausgeführt**, 636 Zeilen geschrieben |
 | Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
 | `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
 | `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
-| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 211 Tests |
+| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 628 Tests |
 | `@supabase/ssr`, Browser-/Server-/Proxy-Clients | ✅ |
 | Auth-Routen: Registrierung, Login, Logout, Bestätigung, Passwort-Reset | ✅ |
 | Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
@@ -377,13 +440,19 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Detailseite `/skylanders/<slug>` | ✅ |
 | `/collection` mit Fortschritt und Sammlungswert | ✅ |
 | Entfernen im Katalog **und** auf `/collection`, mit Rückgängig (ADR-0031) | ✅ |
-| `characters` + `skylanders.character_id`, RLS und Grants (Migration 0002) | ⚠️ geschrieben, **nicht ausgeführt** |
+| `characters` + `skylanders.character_id`, RLS und Grants (Migration 0002) | ✅ **ausgeführt**, 19 Charaktere, 90 verknüpfte SKY-IDs |
 | 19 kuratierte Pilotcharaktere, 104 verknüpfte SKY-IDs (ADR-0034) | ✅ Datei + Werkzeug |
 | `tools/import-characters.mts`, `npm run characters:import` | ✅ Dry-Run geprüft |
 | Charakterbereich und verwandte Figuren auf der Detailseite | ✅ |
 | Gemeinsame responsive Navigation, mobile-first | ✅ |
 | SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
+| `supabase/migrations/0006_public_shop_offers.sql` — `shop_offers()`, `non_collectible_categories()` | ✅ **ausgeführt und verifiziert** |
+| Angebotszeile auf der Katalogkarte und Angebotsblock auf der Figurenseite (ADR-0043) | ✅ |
+| Warenkorb `/cart`, Header-Symbol mit Zähler, `localStorage` (ADR-0043) | ✅ |
+| `tools/verify-shop.mts` — schreibfreie Shop-Verifikation, `npm run verify:shop` | ✅ **15/15 bestanden** |
+| `tools/import-legacy-inventory.mts` + `tools/lib/xlsx.mts` + `src/lib/shop/legacy-plan.ts` (ADR-0044) | ✅ **ausgeführt: 218 Positionen, 762 Stück**; zweiter Lauf 0 Änderungen |
+| Legacy-Geschäftsbestand im Lager: 218 Positionen `loose`, `unit_cost` NULL, ungelistet | ✅ |
 
 ## Noch nicht implementiert
 
@@ -394,7 +463,6 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
   Entfernen löscht deshalb immer die ganze Zeile, und ein „Rückgängig" setzt auf 1 zurück
 - LightCore-Normalisierung und weitere Datenqualitätsfälle (ADR-0030, „bewusst nicht behandelt")
 - Playwright-End-to-End-Tests (ADR-0013, sobald die Sammlungs-UX steht)
-- Vercel-Projekt, Deployment
 
 ---
 
@@ -406,10 +474,10 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
 | Auth | Kein UI. Die Datenbankseite ist fertig und funktional verifiziert: Trigger, Policies und Rechte greifen nachweislich (`tools/verify-rls.mts`, 31/31). Konzept in `docs/AUTH.md` |
 | Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
-| Tests | Lint / Typecheck / Build, 211 Unit-Tests (`npm test`) und der funktionale RLS-Test (`npm run verify:rls`) |
+| Tests | Lint / Typecheck / Build, 628 Unit-Tests (`npm test`) und die funktionalen Prüfungen (`verify:rls`, `verify:editorial`, `verify:inventory`, `verify:shop`) |
 
 Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
-ADR-0015). Vercel ist weiterhin nicht eingerichtet.
+ADR-0015). Vercel ist eingerichtet: `https://portal-vault-lovat.vercel.app` (temporär, `noindex`).
 
 ---
 
@@ -426,7 +494,7 @@ ADR-0015). Vercel ist weiterhin nicht eingerichtet.
 | `characters:import -- --validate-only` | ✅ 19 Charaktere, 104 Zuordnungen, 0 Probleme |
 | kuratierte Datei gegen den echten Katalog | ✅ alle 104 SKY-IDs existieren, sind sammelbar und liegen in Figurenkategorien |
 | abgeleitete „Erste Figur" für alle 19 | ✅ 19/19 korrekt |
-| `npm run verify:rls` | ⚠️ **31/32** — die eine Fehlmeldung ist die noch nicht ausgeführte Migration 0002 |
+| `npm run verify:rls` | ✅ **103/103** (Stand 2026-09-06) |
 
 **NICHT verifiziert, weil die Migration noch aussteht:** RLS und Grants auf `characters`,
 der Fremdschlüssel samt `on delete restrict`, die vier CHECK-Constraints, der Import mit
@@ -664,8 +732,18 @@ Rechte aus Supabases Default-Privilegien) ist behoben und verifiziert. Hergang:
 
 Lint, Typecheck und Build sind grün.
 
-Zwei Hinweise ohne Handlungsbedarf:
+Drei Hinweise ohne Handlungsbedarf:
 
+- **`MODULE_TYPELESS_PACKAGE_JSON`** beim Start der lokalen Werkzeuge
+  (`inventory:import-legacy`, `verify:shop`, `catalog:import`). Node meldet, dass es eine
+  `.ts`-Datei aus `src/` lädt, deren `package.json` kein `"type"` deklariert, und sie deshalb
+  einmal zusätzlich parsen muss. **Rein kosmetisch und rein lokal:** die Warnung erscheint
+  weder in `next dev` noch im Production Build noch auf Vercel — verifiziert, 0 Treffer im
+  Dev-Log. Die naheliegende „Lösung", `"type": "module"` in `package.json`, ist **bewusst nicht**
+  umgesetzt: sie stellt die Modulauflösung des gesamten Next.js-Projekts um, samt aller
+  `.js`-Konfigurationsdateien. Aus demselben Grund heißt die Vitest-Konfiguration
+  `vitest.config.mts` — die Datei sagt es in ihrer ersten Zeile. Ein Modulformat-Refactor wäre
+  eine eigene, isolierte Änderung mit eigener Verifikation, kein Nebeneffekt eines Feature-Commits.
 - Beim `npm install` meldet npm, dass `unrs-resolver` (transitiv über ESLint) ein
   Postinstall-Skript hat, das nicht freigegeben ist. Die Installation ist trotzdem vollständig,
   Lint funktioniert. Keine Aktion nötig.
@@ -727,6 +805,8 @@ Zwei Hinweise ohne Handlungsbedarf:
 | **0035** | **Visuelle Richtung „Skylands Vitrine“; Token-System; `plate` als helle Bildbühne in beiden Themes** |
 | **0036** | **Hauptnavigation mit drei Zielen; Abmelden gehört nach `/settings`; aktive Route aus dem Pfad** |
 | **0038** | **Design V2: Katalog entdeckt (immer eine Serie), Sammlung zeigt nur Besitz; Karten ohne Rahmen, Besitz als Vitrinen-Chip statt Häkchen, dunkler Sammlungs-Kopfbereich** |
+| **0043** | **Öffentliches Angebot als Projektion (`shop_offers()`, vier Werte, `available` boolesch); Warenkorb lokal im Browser, ohne Reservierung** — Code fertig, Migration `0006` **nicht ausgeführt** |
+| **0044** | **Legacy-Anfangsbestand als `initial_import`-Bewegungen, alles `loose`, ohne Kosten, ohne Preis, ohne Listung; wiederholbar und fortsetzbar, bestehende Handbestände sind Konflikte statt Additionen** — **real ausgeführt: 218 Positionen, 762 Stück**, zweiter Lauf 0 Änderungen |
 | **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — **umgesetzt in `0003`** |
 
 ## Offene Entscheidungen
@@ -742,7 +822,6 @@ Keine davon blockiert V1.2.
 | 0033 | Sind Coupons mit automatischen Lager-Rabatten kombinierbar, und was hat Vorrang? | vor jeder Rabattlogik |
 | 0033 | Endgültige Rabattschwellen und Prozentsätze (5/10/15 % sind Beispielwerte) | vor jeder Rabattlogik |
 | 0033 | Coupon-Details: Gültigkeitszeitraum, Mindestbestellwert, Nutzungslimit, Einmalcodes | vor jeder Coupon-Struktur |
-| — | Liefert das öffentliche Shop-Lesefenster eine Stückzahl oder nur einen Zustand? | vor jeder öffentlichen Shop-Anzeige |
 | — | Welcher Payment-Provider? | vor jedem Checkout |
 | — | Sind eBay-beigelegte Rabattcodes nach den dann geltenden eBay-Richtlinien zulässig? | vor jedem Werbemittel in eBay-Paketen |
 
@@ -750,8 +829,13 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**Zuerst: `supabase/migrations/0002_characters.sql` im Supabase-SQL-Editor ausführen**, danach
-`npm run verify:rls` (erwartet 44/44) und `npm run characters:import -- --apply`.
+**Der erste echte Shopartikel.** Der Legacy-Bestand liegt im Lager, ist aber bewusst
+ungelistet und ohne Preis. Der nächste Schritt ist eine bewusste Einzelentscheidung des
+Betreibers in `/admin/inventory`: Preis setzen, listen — und damit das erste öffentliche
+Angebot erzeugen. Keine Massenlistung, keine automatische Preisbildung (ADR-0037, ADR-0043).
+
+Danach offen und **nicht** gebaut: Bestellungen, Checkout, Zahlung, Versand, Reservierungen,
+Rabatte, Coupons.
 
 **V1.6 — Ausbau.** Weitere Sammlungsansichten (kompakt, Tabelle), Fortschritt je Serie,
 Mengen-/Duplikat-UI (**dabei die offene Grenze aus ADR-0031 mitlösen: ein „Rückgängig" setzt

@@ -11,7 +11,7 @@
  * one nested route that exists, and an unknown path highlights nothing
  * instead of guessing wrong.
  */
-export type NavSection = "catalog" | "collection" | "account" | "admin" | "inventory";
+export type NavSection = "catalog" | "collection" | "account" | "admin" | "inventory" | "cart";
 
 /** Route prefix of the figure detail pages. */
 const DETAIL_PREFIX = "/skylanders/";
@@ -27,6 +27,11 @@ export function activeSection(pathname: string): NavSection | null {
   // /dashboard redirects to /collection; both belong to the same section, so
   // the highlight does not flicker during the redirect.
   if (path === "/collection" || path === "/dashboard") return "collection";
+
+  // The cart is reached from the header badge, not from the bar (ADR-0043),
+  // so nothing in the bar lights up for it — but it is still its own section
+  // rather than "the catalog", which is what it would default to otherwise.
+  if (path === "/cart") return "cart";
 
   if (path === "/settings" || path === "/onboarding") return "account";
 

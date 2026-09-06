@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { CharacterPanel, ElementChip } from "@/components/catalog/character-panel";
 import { CollectButton } from "@/components/catalog/collect-button";
+import { OfferPanel } from "@/components/shop/offer-panel";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { firstReleaseSeries } from "@/lib/catalog/character";
@@ -12,6 +13,8 @@ import { fetchFigureBySlug, fetchFigureDetail } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+import { offersFor } from "@/lib/shop/offer";
+import { fetchOffers } from "@/lib/shop/queries";
 import { createClient } from "@/lib/supabase/server";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -28,8 +31,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * Three things in a deliberate order, because they are three different
  * things (ADR-0034):
  *
- *   1. the collectible — this SKY-ID, its series, its market value, and the
- *      one action worth taking on it
+ *   1. the collectible — this SKY-ID, its series, its market value, what
+ *      SkyIsles asks for one if it has one, and the one action worth taking
+ *      on it
  *   2. the character it belongs to, on its own surface so the two never read
  *      as one entity
  *   3. the other collectibles of that character, at their own prices
@@ -57,7 +61,11 @@ export default async function FigurePage({ params }: Params) {
   if (!detail || !figure || !isCollectible(figure) || !figure.catalogVisible) notFound();
 
   const supabase = await createClient();
-  const [{ data: auth }, owned] = await Promise.all([supabase.auth.getUser(), fetchOwnedSkyIds()]);
+  const [{ data: auth }, owned, offers] = await Promise.all([
+    supabase.auth.getUser(),
+    fetchOwnedSkyIds(),
+    fetchOffers(),
+  ]);
 
   // Derived, not stored: the earliest series among this character's figures,
   // this one included. Answers "which series brought the first figure",
@@ -136,6 +144,16 @@ export default async function FigurePage({ params }: Params) {
               {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
             </span>
           </div>
+
+          {/* What SkyIsles asks, if it carries this one (ADR-0043). Under
+              the market value and visually apart from it: the first is what
+              the figure is worth, the second is an offer (ADR-0033). Absent
+              entirely for the ~550 figures that are not stocked. */}
+          <OfferPanel
+            offers={offersFor(offers, figure.skyId)}
+            name={figure.displayName}
+            imageFile={figure.imageFile}
+          />
 
           <CollectButton
             skyId={figure.skyId}

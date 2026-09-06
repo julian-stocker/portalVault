@@ -60,6 +60,21 @@ export const ACTION_CARD =
   `ring-white/10 shadow-card hover:bg-[#4a3520]`;
 
 /**
+ * The shop action — „In den Warenkorb" (ADR-0043).
+ *
+ * Filled accent like ACTION_PRIMARY, because buying is a real action — but a
+ * pill beside the price rather than a bar across the panel. The figure page
+ * already carries one full-width gold action, the collector's; three gold
+ * bars stacked would leave nothing primary on the page. The hierarchy is
+ * carried by size, not by taking the colour away.
+ *
+ * `min-h-11` is still 44 px: it is smaller in width, never in touch target.
+ */
+export const ACTION_SHOP =
+  "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
+  "text-center text-sm font-medium bg-accent text-on-accent hover:bg-accent-hover";
+
+/**
  * Owning something is a state of the showcase, not a completed task
  * (ADR-0038). So it is not a filled success button and carries no check
  * glyph — it is a quiet chip that happens to also be the way to undo.

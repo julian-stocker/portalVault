@@ -4,6 +4,8 @@ import { CatalogView } from "@/components/catalog/catalog-view";
 import { isCatalogGroup } from "@/lib/catalog/group";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
+import { offerRecord } from "@/lib/shop/offer";
+import { fetchOffers } from "@/lib/shop/queries";
 import { de } from "@/lib/i18n/de";
 import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
@@ -16,8 +18,13 @@ export const metadata: Metadata = {
 /**
  * The catalog is the front page (ADR-0025).
  *
- * Two queries: the whole catalog, and — only when signed in — which figures
- * the visitor owns. Search and filtering then happen in the browser.
+ * Three queries: the whole catalog, the public shop, and — only when signed
+ * in — which figures the visitor owns. Search and filtering then happen in
+ * the browser.
+ *
+ * The shop is one call for all 561 cards (ADR-0043). It carries a price and
+ * an availability flag and nothing else: stock levels never leave the
+ * database (migration 0006).
  */
 export default async function CatalogPage({
   searchParams,
@@ -31,13 +38,16 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned] = await Promise.all([
+  const [user, figures, series, owned, offers] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
     // An administrator manages the shop's catalog, not a personal collection
     // (ADR-0042). Their own collection is simply not part of this page.
     admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
+    // Not for an administrator: their card carries editorial actions, and
+    // the price they can actually change is in /admin/inventory (ADR-0042).
+    admin ? Promise.resolve(new Map()) : fetchOffers(),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -63,6 +73,9 @@ export default async function CatalogPage({
         // they went to sign in (ADR-0027). The catalog's state stays in the
         // client — these parameters are read once, never written back.
         initialGroup={isCatalogGroup(params.group) ? params.group : null}
+        // A plain object: a Map does not survive the server → client
+        // boundary and would arrive empty.
+        offers={offerRecord(offers)}
       />
     </main>
   );

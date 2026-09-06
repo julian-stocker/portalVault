@@ -277,6 +277,32 @@ Die Figur hinter einer Position — Name, Bild, Serie, Marktpreis — kommt aus 
 Anwendung ohnehin lädt. Die Funktionen joinen nicht und wiederholen damit auch nicht die Regeln
 darüber, was sammelbar und was sichtbar ist.
 
+### 3.3e Das öffentliche Angebot — `shop_offers()` (Migration `0006`)
+
+Die **einzige** öffentliche Lesefläche auf `shop_inventory`. `security definer`, ohne Argumente,
+`grant execute … to anon, authenticated`. Die Tabellen behalten weiterhin für keinen Clientrole
+irgendein Recht, und es wird keine Policy hinzugefügt (ADR-0043).
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `sky_id` | `text` | welcher Artikel |
+| `condition` | `text` | `loose` oder `boxed` |
+| `sale_price` | `numeric` | der SkyIsles-Preis, nie NULL (CHECK `shop_inventory_listed_needs_price`) |
+| `available` | `boolean` | `available_quantity > 0` — **kein** Lagerstand |
+
+**Nie zurückgegeben:** `quantity`, `reserved`, `available_quantity`, `note`, `unit_cost`,
+`currency`, `created_by`, `inventory_id` und jede Bewegung. Das ist keine Disziplin, sondern die
+Signatur der Funktion.
+
+**Zeilenauswahl:** `is_listed` **und** der Katalogfilter `is_active`, `catalog_visible` sowie die
+Kategorieregel. Eine gelistete Position ohne Bestand liefert weiterhin eine Zeile mit
+`available = false` („Nicht auf Lager"); eine nicht gelistete Position liefert gar keine.
+
+`public.non_collectible_categories()` (`immutable`, gleiche Migration) hält die Kategorienamen
+aus ADR-0029 an **einer** Stelle in der Datenbank und spiegelt `src/lib/catalog/collectible.ts`.
+`src/lib/shop/offer.test.ts` liest beide Dateien, `npm run verify:shop` vergleicht Datenbank und
+Anwendung zur Laufzeit.
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -651,6 +677,11 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
 - Zweite Migration: `0002_characters.sql` — legt `characters` an und ergänzt die nullbare
   Spalte `skylanders.character_id`. **Rein additiv:** keine Zeile geändert, keine gelöscht,
   kein Typ geändert. Rücknahme wäre `drop column` + `drop table`.
+- Migrationen `0003`–`0005`: Shop-Fundament, redaktionelle Katalogebene, Lager-Lesefunktionen.
+- Sechste Migration: `0006_public_shop_offers.sql` — legt `shop_offers()` und
+  `non_collectible_categories()` an. **Rein additiv:** keine Tabelle, keine Spalte, keine Policy,
+  kein Tabellenrecht, kein `alter table`. Rücknahme wäre `drop function` auf beide.
+  **Am 2026-09-06 ausgeführt**, `npm run verify:shop` 15/15.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in
@@ -689,6 +720,14 @@ dem Apply meldete `new 0, changed 0` auf allen drei Tabellen und übernahm alle 
 unverändert aus der Datenbank.
 - Nach jedem Import: Anzahl prüfen, keine doppelte SKY-ID, kein interner Namenssuffix,
   nur öffentliche Serien, alle Bildreferenzen auflösbar. Fehlschlag → Rollback.
+- **Dritter Pflegeweg, einmalig:** `tools/import-legacy-inventory.mts`
+  (`npm run inventory:import-legacy`) bucht den Legacy-Geschäftsbestand als
+  `initial_import`-Bewegungen über `system_record_inventory_movement()`. Dry-Run per Vorgabe,
+  `--apply` schreibt. Er schreibt **kein** `quantity`, setzt weder Preis noch Listung und ist
+  wiederholbar wie fortsetzbar; der Unique-Index `inventory_movements_one_initial_import` bleibt
+  als letzte Sicherung. **Am 2026-09-06 ausgeführt: 218 Positionen, 762 Stück;** ein zweiter
+  identischer Lauf meldete `218 already initial-imported · 0 changes`. Regeln vollständig in
+  ADR-0044 und `docs/SKYLANDERS_DATA.md`.
 
 ---
 

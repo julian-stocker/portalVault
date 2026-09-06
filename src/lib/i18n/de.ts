@@ -323,6 +323,52 @@ export const de = {
     wouldGoNegative: "Der Bestand würde unter das Reservierte fallen.",
   },
 
+  /**
+   * Das öffentliche Angebot von SkyIsles.
+   *
+   * Bewusst getrennt von `inventory`: dort steht, was der Betreiber sieht
+   * (Bestand, Reserviertes, Notizen), hier steht, was Besucher sehen — ein
+   * Preis und ob etwas lieferbar ist. Nie eine Stückzahl (ADR-0037).
+   */
+  shop: {
+    /** Vor dem Preis, damit ein Shop-Preis nie mit dem Marktwert verwechselt wird. */
+    offerPrice: (price: string) => `SkyIsles ${price}`,
+    /** Mehrere Zustände zu verschiedenen Preisen. */
+    offerFrom: (price: string) => `ab ${price}`,
+    soldOut: "Nicht auf Lager",
+    conditionLoose: "Lose",
+    conditionBoxed: "OVP",
+    addToCart: "In den Warenkorb",
+    addToCartFor: (name: string) => `${name} in den Warenkorb legen`,
+    inCart: "Im Warenkorb",
+    offerHeading: "Angebot von SkyIsles",
+  },
+
+  cart: {
+    title: "Warenkorb",
+    open: "Warenkorb öffnen",
+    /** Fürs Badge: Stück, nicht Positionen. */
+    pieces: (n: number) => (n === 1 ? "1 Artikel" : `${n} Artikel`),
+    empty: "Der Warenkorb ist leer.",
+    emptyHint: "Im Katalog steht bei jedem Angebot ein Preis von SkyIsles.",
+    toCatalog: "Zum Katalog",
+    quantity: "Menge",
+    quantityFor: (name: string) => `Menge für ${name}`,
+    remove: "Entfernen",
+    removeFor: (name: string) => `${name} entfernen`,
+    clear: "Warenkorb leeren",
+    total: "Summe",
+    priceChanged: (old: string) => `Preis geändert, vorher ${old}`,
+    soldOut: "Derzeit nicht auf Lager",
+    withdrawn: "Nicht mehr im Angebot",
+    excluded: (n: number) =>
+      n === 1
+        ? "1 Position ist derzeit nicht bestellbar und zählt nicht zur Summe."
+        : `${n} Positionen sind derzeit nicht bestellbar und zählen nicht zur Summe.`,
+    localOnly: "Der Warenkorb wird nur in diesem Browser gespeichert.",
+    noCheckout: "Bestellen ist noch nicht möglich.",
+  },
+
   nav: {
     primary: "Hauptnavigation",
     catalog: "Katalog",

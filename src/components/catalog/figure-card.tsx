@@ -57,6 +57,7 @@ export function FigureCard({
   toggleLabel,
   nameSlot,
   statusBadge,
+  offerSlot,
   interactive = true,
   muted = false,
 }: {
@@ -101,6 +102,15 @@ export function FigureCard({
   nameSlot?: ReactNode;
   /** A chip over the image, beside where the crown sits. "Verborgen". */
   statusBadge?: ReactNode;
+  /**
+   * What SkyIsles asks for this figure, under the market value (ADR-0043).
+   *
+   * A slot rather than the offer itself, so the card stays a description of
+   * a figure: the catalog fills it, the collection and the related figures
+   * beside a detail page leave it empty, and this file never learns what an
+   * offer is.
+   */
+  offerSlot?: ReactNode;
   /**
    * Whether the body is a link or a toggle at all. An administrator's card
    * is neither: its actions are named controls in the footer, so nothing
@@ -161,6 +171,11 @@ export function FigureCard({
           >
             {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
           </span>
+
+          {/* Directly under the market value, because that is the comparison
+              being offered: what it is worth, and what SkyIsles asks. Two
+              facts, never one price correcting the other (ADR-0033). */}
+          {offerSlot}
 
           {showSeries || figure.element ? (
             <span className="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-tight">

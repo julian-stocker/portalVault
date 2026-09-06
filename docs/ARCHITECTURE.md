@@ -48,7 +48,7 @@ PortalVault ist eine Webanwendung mit drei Verantwortungsbereichen:
 
 ## 2. Systemgrenzen
 
-Es gibt genau **vier** Bereiche, und die Grenzen zwischen ihnen sind bewusst hart:
+Es gibt genau **fünf** Bereiche, und die Grenzen zwischen ihnen sind bewusst hart:
 
 | Bereich | Inhalt | Wer schreibt | Wer liest |
 |---|---|---|---|
@@ -56,10 +56,14 @@ Es gibt genau **vier** Bereiche, und die Grenzen zwischen ihnen sind bewusst har
 | **Öffentlicher Katalog** (Postgres `skylanders`, `series`, `categories`) | Name, Serie, Kategorie, Marktpreis, Bild | Import-Werkzeug (Service Role) | alle, auch anonym |
 | **Charaktermetadaten** (Postgres `characters`) | Element, Spezies, Rolle, eigene Kurzbeschreibung, Quelle | Kuratierungswerkzeug (Service Role) | alle, auch anonym |
 | **Benutzerdaten** (Postgres `profiles`, `collection_items`) | Profil, Sammlung | der jeweilige Benutzer | der jeweilige Benutzer (RLS) |
+| **Shop** (Postgres `shop_admins`, `shop_inventory`, `inventory_movements`) | Bestand, Bewegungen, Verkaufspreis, Listung | nur Shop-Admin bzw. Serverwerkzeug, über Funktionen | Betreiber vollständig; öffentlich nur `shop_offers()` |
 | **Secrets** (`.env.local`, Vercel/Supabase-Konsole) | Keys | nur der Nutzer | niemand sonst |
 
-**Regel:** Daten fließen nur in eine Richtung — Legacy → Katalog. Es fließt **nichts** von
-PortalVault zurück in die Excel. Damit gibt es für jedes Feld genau einen Schreiber.
+**Regel:** Daten fließen nur in eine Richtung — Legacy → PortalVault. Es fließt **nichts** von
+PortalVault zurück in die Excel. Damit gibt es für jedes Feld genau einen Schreiber. Seit
+ADR-0044 gibt es neben dem Katalogpfad einen zweiten, einmaligen Legacy-Eingang: den
+Geschäftsbestand als Eröffnungsbuchung ins Shop-Lager, getrennt freigegeben und getrennt
+implementiert.
 
 **Charaktermetadaten sind ein zweiter, getrennter Eingang** und stammen nicht aus dem
 Legacy-System: `data/characters/characters.json` → `tools/import-characters.mts` →
@@ -67,10 +71,11 @@ Legacy-System: `data/characters/characters.json` → `tools/import-characters.mt
 `character_id` nicht, das Kuratierungswerkzeug rührt Name, Preis und Bild nicht an
 (ADR-0034).
 
-### Ein späterer fünfter Bereich: die Shop-Domäne
+### Der fünfte Bereich: die Shop-Domäne
 
-**Existiert nicht und ist nicht gebaut.** Hier steht nur, wohin er gehört, wenn er kommt
-(ADR-0032):
+**Teilweise gebaut.** Tabellen und Rolle (`0003`), Lagerverwaltung für den Betreiber (`0005`)
+und das öffentliche Angebot (`0006`) existieren; Bestellungen, Checkout und Zahlung nicht
+(ADR-0032, ADR-0037, ADR-0043):
 
 | Bereich | Inhalt | Wer schreibt | Wer liest |
 |---|---|---|---|
@@ -100,8 +105,12 @@ Legacy-System: `data/characters/characters.json` → `tools/import-characters.mt
                             über sky_id — keine User-Shop-Tabelle nötig.
                             condition erzeugt 1:n, nicht 1:1.
 
-   öffentlich sichtbar: quantity - reserved > 0  →  „Auf Lager"
-                        die Zahl selbst nie.
+   öffentlich sichtbar: shop_offers()  →  sky_id, condition, sale_price,
+                        available = (quantity - reserved > 0)
+                        die Zahl selbst nie. Kein Tabellenrecht.
+
+   Warenkorb:           localStorage im Browser. Schreibt nichts,
+                        reserviert nichts, braucht kein Konto.
 
   shop_admins ──▶ public.is_shop_admin()  ──▶ Prädikat jeder Shop-Policy
   (keine Client-Rechte)   (security definer)
@@ -121,6 +130,12 @@ aber die **Daten** vermischen sich nie.
 
 **Der Katalog bleibt der einzige kanonische Produktbestand.** Kein zweiter Produktdatensatz
 für dieselben Skylanders, weder für den Shop noch für Bestellungen.
+
+**Der Warenkorb gehört keinem der fünf Bereiche an** (ADR-0043). Er liegt im Browser des
+Besuchers, nicht in Postgres: `localStorage`, ein Modul-Store, kein Konto, keine Server Action,
+keine Reservierung. Was er über den Shop weiß, sind ausschließlich die vier öffentlichen Werte
+aus `shop_offers()`; gerechnet wird immer mit dem Serverpreis von heute, nie mit dem
+gespeicherten.
 
 ---
 
@@ -325,6 +340,36 @@ Browser → Next.js Server Component / Server Action → Supabase (ANON-Key + Se
 Kein Scraping, keine automatische Zuordnung, keine Namensheuristik. Beschreibungen entstehen
 bei SkyIsles selbst. Das Werkzeug prüft vollständig, bevor es schreibt, löscht nie und setzt
 keine bestehende Verknüpfung zurück.
+
+### Das Angebot im Browser
+
+Katalog, Figurenseite und `/cart` laden das öffentliche Angebot mit **einem** Aufruf von
+`shop_offers()` — pro Anfrage memoisiert (React `cache()`), als einfaches Objekt an den Client
+gereicht. 561 Karten aus einer Antwort statt 561 Anfragen (ADR-0043).
+
+```
+shop_inventory ──(security definer)──▶ shop_offers()  ──▶ Server Component
+                                        4 Werte             │
+                                                            ▼
+                                       localStorage ◀──▶ Warenkorb (Browser)
+```
+
+Der Warenkorb schreibt nur `localStorage`. Beim Anzeigen trifft er auf die aktuellen Angebote:
+Preis und Verfügbarkeit kommen vom Server, der gespeicherte Preis dient nur dem Hinweis „Preis
+geändert". Nicht kaufbare Zeilen bleiben sichtbar und zählen nicht zur Summe.
+
+### Legacy-Geschäftsbestand (einmalig, manuell, kontrolliert)
+
+```
+../webpage/skylanders.xlsx  (nur Spalte F der sechs Serienblätter, read-only)
+      →  npm run inventory:import-legacy            Dry Run
+      →  npm run inventory:import-legacy -- --apply
+      →  system_record_inventory_movement()  →  initial_import je Position
+```
+
+Ein eigener, getrennter Weg neben Katalog- und Charakterimport (ADR-0044). Er schreibt nie
+`quantity`, setzt weder Preis noch Listung, liest keine private oder personenbezogene Spalte und
+ist durch den Unique-Index `inventory_movements_one_initial_import` nicht wiederholbar.
 
 ### Marktpreise
 

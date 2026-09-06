@@ -669,6 +669,74 @@ steuerliche Betrachtung mehr wert als ein plausibel aussehender Schätzwert.
 **Keine personenbezogenen Daten wurden ausgewertet.** Die Verkaufsblöcke enthalten unter anderem
 eine Käuferspalte; sie wurde nicht gelesen und wird nie importiert.
 
+## 11e. Der Legacy-Anfangsbestand — Werkzeug und Regeln (2026-09-06)
+
+Werkzeug: `tools/import-legacy-inventory.mts`, `npm run inventory:import-legacy`. Dry Run ist
+die Vorgabe, `--apply` schreibt. Vollständige Begründung in **ADR-0044**.
+
+**Verpackung: es gibt keine Information darüber (read-only Befund).** Über alle sechs
+Serienblätter existiert **keine** Verpackungsspalte, kein Kennzeichen und keine Relation. Von den
+218 Bestandszeilen im Sortiment trägt **genau eine** einen Verpackungshinweis im Namen —
+`SKY-0049 "Elite Slam Bam - ohne OVP"`, Bestand 1 —, und deren Excel-Name ist identisch mit
+ihrem Katalognamen: Sie **ist** bereits eine eigene SKY-ID. Wo die Legacy-Daten Verpackung
+unterscheiden, tun sie es also über die Identität, nicht über ein Attribut (vgl. 11b).
+
+**Daraus folgt: alles wird als `loose` gebucht** — als benannte Annahme, nicht als erfundene
+Präzision, und ohne jede Namensheuristik. Eine spätere Korrektur einzelner Positionen auf
+`boxed` sind zwei gewöhnliche Bewegungen im Adminbereich.
+
+**Was gelesen wird:** A (SKY-ID), B (Name — nur für den Bericht), D/E (nur zur Prüfung
+`D − E = F`), F (Bestand). **Was nie gelesen wird:** P–S und U–X (private Sammlung und deren
+Werte), `Order 2026/2025`, `EÜR 2026/2025`. Die Serienblätter werden über eine **Positivliste**
+geöffnet — ein Blatt wird gelesen, weil PortalVault eine Serie dieses Namens kennt; die
+Order- und EÜR-Blätter werden dadurch nie erreicht, nicht bloß übersprungen. Vor dem Import
+prüft das Werkzeug die Kopfzeile (`O`, `S`, `D` in D/E/F); eine eingefügte Spalte bricht den
+Lauf ab.
+
+**Ausgeführt am 2026-09-06 (gegen die echte Arbeitsmappe):**
+
+| | Positionen | Stück |
+|---|---|---|
+| Artikelzeilen gesamt | 614 | — |
+| davon mit Bestand | 234 | 785 |
+| **importiert (Sammlerartikel, `loose`)** | **218** | **762** |
+| ausgeschlossen: Software (ADR-0029) | 8 | 10 |
+| ausgeschlossen: SWAP-Hälften ohne Katalogzeile | 8 | 13 |
+| ausgeschlossen: aufbewahrte Audit-Fixtures | 0 | 0 |
+| ausgeschlossen: inaktiv | 0 | 0 |
+
+`D − E = F` gilt in allen 614 Zeilen, keine doppelte SKY-ID, kein negativer Bestand.
+Gegenprobe: `webpage/data/inventory.json.available` stimmt für alle 614 Zeilen mit Spalte F
+überein.
+
+**Nach dem Import gegen die Datenbank geprüft:** 218 Positionen mit `initial_import`, Summe der
+Anfangsmengen 762, alle `loose`, alle `unit_cost`/`currency` NULL, alle `created_by` NULL
+(Systemweg), keine gelistet, kein `sale_price`, höchstens eine Eröffnungsbuchung je Position.
+`SUM(inventory_movements.delta) = shop_inventory.quantity` gilt für alle Positionen.
+
+**Wie geschrieben wird.** Eine `initial_import`-Bewegung je Position über
+`system_record_inventory_movement()` (nur `service_role`), also Bestand und Journalzeile in einer
+Transaktion. **Niemals** ein direktes `quantity`. `unit_cost` bleibt NULL — die Systemfunktion
+hat gar keinen Kostenparameter, und nach 11d gibt es für **keine** Position einen belegbaren
+Einstandswert. `sale_price` bleibt NULL, `is_listed` bleibt `false`: Es wird nichts zum Verkauf
+gestellt und kein Preis aus `market_price` abgeleitet.
+
+**Zweimal laufen ändert nichts, und zwar sauber.** Ein zweiter identischer Lauf bucht nichts,
+ändert keinen Bestand und endet mit Exit 0 (`218 already initial-imported · 0 changes`).
+Entschieden wird je Position aus dem **Journal**, nie aus einem Fortschrittsstand:
+
+| Zustand der Position | Entscheidung |
+|---|---|
+| existiert nicht | importieren |
+| existiert, hat `initial_import` | überspringen |
+| existiert, hat **keine** `initial_import` | **Konflikt** — nicht importieren, im Bericht genannt |
+
+Der Konfliktfall schützt Bestand, den jemand von Hand führt: Addieren würde ihn verdoppeln,
+ohne dass ein Fehler entstünde. Bricht ein Lauf nach 100 von 218 Positionen ab, importiert der
+nächste genau die fehlenden 118 — jede Position ist eine eigene Transaktion. Alle Lesungen sind
+paginiert (PostgREST liefert höchstens 1000 Zeilen). Der Unique-Index
+`inventory_movements_one_initial_import` bleibt als **letzte** Sicherung bestehen.
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

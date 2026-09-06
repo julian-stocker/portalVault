@@ -20,7 +20,11 @@ import { filterFigures, groupSearchResults, missingFigures } from "@/lib/catalog
 import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
+import type { Offer } from "@/lib/shop/offer";
 import { de } from "@/lib/i18n/de";
+
+/** One shared empty array, so a card without an offer keeps a stable prop. */
+const EMPTY_OFFERS: readonly Offer[] = [];
 
 export function CatalogView({
   figures,
@@ -32,6 +36,7 @@ export function CatalogView({
   initialSeriesCode,
   initialQuery = "",
   initialGroup = null,
+  offers = {},
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -48,6 +53,15 @@ export function CatalogView({
   initialSeriesCode?: string;
   initialQuery?: string;
   initialGroup?: CatalogGroup | null;
+  /**
+   * The public shop, by SKY-ID (ADR-0043). A plain object rather than a Map
+   * because it crosses the server/client boundary, where a Map does not
+   * survive serialisation.
+   *
+   * Loaded once for the whole catalog: the alternative is one request per
+   * card, and there are 561 cards.
+   */
+  offers?: Readonly<Record<string, readonly Offer[]>>;
 }) {
   // A series is always chosen (ADR-0038). The first one is the default, so
   // the catalog opens on Spyro's Adventure rather than on all 561 at once.
@@ -220,6 +234,7 @@ export function CatalogView({
         admin={admin}
         visible={isVisible(figure)}
         onVisibilityChange={onVisibilityChange}
+        offers={offers[figure.skyId] ?? EMPTY_OFFERS}
       />
     );
   }

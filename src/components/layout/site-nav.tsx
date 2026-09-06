@@ -24,6 +24,7 @@
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 
+import { CartBadge } from "@/components/cart/cart-badge";
 import { Wordmark } from "@/components/layout/wordmark";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
@@ -215,7 +216,7 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-accent/25"
       />
-      <div className="relative flex shrink-0 items-center gap-2 px-4 py-3 md:px-0 md:py-4">
+      <div className="relative flex flex-1 items-center gap-2 px-4 py-3 md:flex-none md:shrink-0 md:px-0 md:py-4">
         <Link href="/" className="flex items-center" aria-label={de.app.name}>
           <Wordmark />
         </Link>
@@ -228,6 +229,24 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
             {de.admin.modeBadge}
           </span>
         ) : null}
+
+        {/*
+         * The cart, in the header rather than in the bar (ADR-0043).
+         *
+         * Pushed to the right end of the header row, which on a phone is the
+         * whole width — the bar down at the thumb keeps its four equal
+         * targets and gains nothing it has to share space with.
+         *
+         * Not offered to the operator: SkyIsles does not buy from itself,
+         * and a basket in the administrator's header would suggest the shop
+         * is a place they shop (ADR-0042). The route still answers; it is
+         * simply not one of their destinations.
+         */}
+        {admin ? null : (
+          <div className="ml-auto md:ml-2">
+            <CartBadge />
+          </div>
+        )}
       </div>
 
       <nav

@@ -12,9 +12,11 @@
     "verify:rls": "node --env-file=.env.local tools/verify-rls.mts",
     "verify:editorial": "node --env-file=.env.local tools/verify-editorial.mts",
     "verify:inventory": "node --env-file=.env.local tools/verify-inventory.mts",
+    "verify:shop": "node --env-file=.env.local tools/verify-shop.mts",
     "catalog:import": "node --env-file=.env.local tools/import-catalog.mts",
     "characters:import": "node --env-file=.env.local tools/import-characters.mts",
     "admin:grant": "node --env-file=.env.local tools/grant-admin.mts",
+    "inventory:import-legacy": "node --env-file=.env.local tools/import-legacy-inventory.mts",
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run build"
   },

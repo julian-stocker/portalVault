@@ -262,9 +262,12 @@ keine Rücknahme von ADR-0008.
 
 #### Fachlich festgehalten (2026-09-04) — ADR-0032 und ADR-0033
 
-Der folgende Abschnitt ist **Dokumentation, keine Planung eines nächsten Schritts.** Nichts
-davon ist gebaut, eingeplant oder freigegeben. Er existiert, damit der Shop später korrekt
-auf dem Tracker aufsetzt statt in ihn hinein.
+Der folgende Abschnitt war ursprünglich reine Dokumentation. **Stand 2026-09-06 ist ein Teil
+davon gebaut** und ausdrücklich freigegeben worden: Shop-Tabellen und Rolle (`0003`),
+Lagerverwaltung für den Betreiber (`0005`), das öffentliche Angebot (`0006`, ADR-0043) und der
+Warenkorb im Browser. **Nicht gebaut:** Bestellungen, Checkout, Zahlung, Versand, Rabatte,
+Coupons. Der Marketplace-Stopp aus ADR-0021 gilt unverändert — ein First-Party-Shop mit genau
+einem Verkäufer ist kein Marketplace.
 
 **Zwei Nutzungskontexte.** Der private Account des Betreibers bleibt ein normaler
 Collector-Account (gesammelt, entfernen, später Mengen, später Wanted). Der Geschäftsaccount
@@ -288,7 +291,10 @@ der bestehende kanonische Katalog wird wiederverwendet.
 | **> 0** | Kaufmöglichkeit, deutlich sichtbarer aktiver „Kaufen"-Button, aktueller Shoppreis |
 | **= 0** | deaktivierter Zustand „Nicht auf Lager" — **der Shoppreis bleibt trotzdem sichtbar** |
 
-Das visuelle Design, einschließlich der genauen Farben, wird später festgelegt.
+**Umgesetzt (2026-09-06, ADR-0043).** Auf der Karte steht der SkyIsles-Preis unter dem Marktwert
+(„SkyIsles € 9,90", bei mehreren Zuständen „ab € 9,90"), auf der Figurenseite eine Zeile je
+Zustand mit „In den Warenkorb". Bei Bestand 0 bleibt die gelistete Position sichtbar und sagt
+„Nicht auf Lager". Eine **Stückzahl wird nie** angezeigt.
 
 **Preisebenen (ADR-0033).** Referenz-Marktwert → Shop-Basispreis → automatischer Lager-Rabatt
 → optionaler Coupon → finaler Bestellpreis. `skylanders.market_price` bleibt der

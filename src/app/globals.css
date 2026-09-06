@@ -66,6 +66,14 @@
   --on-card: #241f19; /* 14.6:1 on card */
   --on-card-muted: #6b6153; /*  4.9:1 on card */
 
+  /* The shop price on an ivory card (ADR-0043).
+     The accent gold is made for the dark sky and washes out on the card, so
+     the offer gets its own ink: the same warm metal, struck dark enough to
+     read as text. 5.3:1 on --card. It is deliberately not --on-card: a
+     SkyIsles price is an offer, and the one thing on the card that is not a
+     description of the figure (ADR-0033). */
+  --shop-on-card: #8a5a12;
+
   /* The image stage. Matches the photographed background, so the image edge
      dissolves into the plate instead of showing a seam. */
   --plate: #ffffff;
@@ -210,6 +218,7 @@
   --color-card-border: var(--card-border);
   --color-on-card: var(--on-card);
   --color-on-card-muted: var(--on-card-muted);
+  --color-shop-on-card: var(--shop-on-card);
 
   --color-border-strong: var(--border-strong);
   --color-ring: var(--ring);

@@ -59,15 +59,17 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
 |---|---|---|
 | Quelle | `skylanders.xlsx` D/E/F, `data/inventory.json` | vom Betreiber bewusst in SkyIsles gepflegt |
 | Zweck | interne Geschäftsführung | ein öffentliches Verkaufsangebot |
-| Status | **verboten** in Repository, Datenbank und Deployment | zulässig **in der Datenbank**, nach ausdrücklicher Freigabe |
+| Status | **verboten** im Repository und im Deployment; **in der Datenbank** nur als einmalige Eröffnungsbuchung des eigenen Lagers (ADR-0044) | zulässig **in der Datenbank**, nach ausdrücklicher Freigabe |
 | Im Repository | **niemals** | **niemals** — auch Shopdaten sind Daten, kein Code |
 
 **Was unverändert gilt, auch wenn der Shop kommt:**
 
 1. **Der Katalogimport bleibt wie er ist.** `guard_public()` im Legacy-Projekt und die
    Feldnamenprüfung im PortalVault-Import bleiben unangetastet. Über den Katalogpfad kommt
-   **kein** Bestand in die Datenbank — ein Shop-Import wäre ein **eigener, getrennter, eigens
-   freizugebender** Weg.
+   **kein** Bestand in die Datenbank. Der Bestandsweg ist ein **eigener, getrennter, eigens
+   freigegebener**: `tools/import-legacy-inventory.mts` (ADR-0044). Er liest **nur** Spalte F
+   der sechs Serienblätter, öffnet `Order *` und `EÜR *` nie, bucht ausschließlich
+   `initial_import`-Bewegungen und schreibt nichts in `../webpage`.
 2. **Keine Bestandsdatei im Repository.** Weder `inventory.json` noch ein Export daraus. Der
    Shopbestand lebt in der Datenbank, nie in Git.
 3. **Die privaten O/C/S/D-Blöcke der Excel bleiben tabu** — OVERALL, COLLECTION, SOLD,
@@ -76,12 +78,14 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
 4. **Käuferdaten und EÜR bleiben tabu.** Bestellungen entstünden später in SkyIsles selbst und
    sind dann personenbezogene Daten mit eigenen DSGVO-Pflichten (Abschnitt 7) — sie werden
    **nicht** aus der Legacy-Excel übernommen.
-5. **Das öffentliche Lesefenster ist zu entscheiden, nicht zu erben.** Eine sichtbare
-   Rabattstufe verrät bereits einen groben Bestand (ADR-0033). Ob überhaupt eine Stückzahl
-   öffentlich wird oder nur ein Zustand, ist eine bewusste Entscheidung — **OPEN**.
+5. **Das öffentliche Lesefenster ist entschieden (ADR-0043).** Öffentlich wird ausschließlich
+   ein **boolescher** Zustand, nie eine Stückzahl — `available = quantity - reserved > 0`,
+   geliefert von `shop_offers()`. Eine sichtbare Rabattstufe verriete einen groben Bestand
+   (ADR-0033); es gibt in V1 keine.
 
-**Nichts davon ist implementiert.** Es gibt keine Shop-Tabelle, keinen Shop-Import und keine
-Shop-Rolle.
+**Stand.** Umgesetzt sind Shop-Tabellen und Rolle (`0003`), die Lager-Lesefunktionen (`0005`),
+das öffentliche Angebot (`0006`) und der Legacy-Bestandsimport als Werkzeug. Bestellungen,
+Checkout, Zahlung und Versand gibt es nicht.
 
 ### Shop-Grenzen (ADR-0037) — **umgesetzt in `0003_shop_foundation.sql`**
 
@@ -386,8 +390,41 @@ für die Service Role append-only bleibt. Läuft direkt nach dem Anwenden von `0
 `inventory_movements` haben für `anon` und `authenticated` weiterhin **keine** Tabellenrechte —
 weder lesend noch schreibend. Bestand, Einkaufspreise und Bewegungen sind ausschließlich über
 `admin_shop_inventory()` und `admin_inventory_movements()` erreichbar, die beide
-`is_shop_admin()` fragen. Öffentlich wird später nur „Auf Lager / Nicht auf Lager" aus
-`quantity - reserved` abgeleitet; **eine öffentliche Mengenanzeige gibt es nicht**.
+`is_shop_admin()` fragen.
+
+**Das öffentliche Angebot (Migration `0006`, ADR-0043).** Seit `0006` gibt es genau **eine**
+öffentliche Lesefläche auf `shop_inventory`: `public.shop_offers()`, `security definer`,
+ausführbar für `anon` und `authenticated`. Sie gibt vier Werte zurück — `sky_id`, `condition`,
+`sale_price` und ein **boolesches** `available` — und ist damit keine View auf die Tabelle,
+sondern eine Projektion.
+
+| Öffentlich über `shop_offers()` | Auch nach `0006` niemals öffentlich |
+|---|---|
+| `sale_price` einer gelisteten Position | `quantity`, `reserved`, `available_quantity` |
+| `condition` (`loose` / `boxed`) | `shop_inventory.note` |
+| „Auf Lager" / „Nicht auf Lager" als `boolean` | `inventory_movements` vollständig |
+| | `unit_cost`, `currency`, `created_by`, `inventory_id` |
+
+**Eine öffentliche Mengenanzeige gibt es weiterhin nicht.** „Noch 3 Stück" ist ein Lagerstand,
+„auf Lager" eine Angebotsaussage; die Stückzahl zu veröffentlichen hieße, das Lager zeilenweise
+zu veröffentlichen. Die Tabellenrechte bleiben unverändert bei null, es wurde keine Policy
+hinzugefügt und keine Tabelle geändert. `npm run verify:shop` prüft beides gegen die laufende
+Datenbank — zuerst, dass `anon` die Tabellen weiterhin nicht lesen kann, dann, dass die
+Projektion genau die vier Werte trägt und genau die Zeilen zeigt, die die Regeln vorhersagen.
+**Stand 2026-09-06: 15/15.** Die Spaltengrenze wird an der Signatur selbst geprüft, nicht an den
+gerade zurückgegebenen Zeilen: PostgREST löst `select=` gegen den Ergebnistyp auf, also weist es
+`quantity`, `reserved`, `available_quantity`, `note`, `unit_cost`, `currency`, `created_by`,
+`inventory_id` und `id` mit `42703` ab — auch wenn der Shop leer ist, wo eine Prüfung der
+zurückgegebenen Schlüssel gar nichts belegen würde.
+
+**Live belegt:** zwei Positionen sind gelistet und bepreist (die aufbewahrten Fixtures), und
+`shop_offers()` liefert trotzdem **0 Zeilen** — weil beide Figuren inaktiv sind. Der Katalogfilter
+wirkt also an echten Daten, nicht nur im Test.
+
+**Der Warenkorb schreibt nichts.** Er liegt in `localStorage` im Browser des Besuchers: keine
+Tabelle, kein Konto, keine Server-Action, keine Reservierung. `reserved` wird von nichts in V1
+geschrieben. Ein Warenkorb kann daher weder Bestand binden noch Geschäftsdaten offenlegen; das
+Einzige, was er über den Shop weiß, sind die vier öffentlichen Werte oben (ADR-0043).
 
 Geschrieben wird unverändert nur über die drei Funktionen aus `0003`:
 `record_inventory_movement()` (Bestand, mit Akteur aus `auth.uid()`), `set_shop_listing()`
@@ -562,3 +599,10 @@ einzige vollständige Datenquelle. Deshalb:
 - `backup/skylanders_original_2026-08-10_mit-bildern.xlsx` niemals überschreiben
   (SHA-256 `2fbc5eb6730795c04f2c28d6469df1cef70aa0bb0100571c2bdb545ac5a3faa6`)
 - im Zweifel: Befehl nicht ausführen und den Nutzer fragen
+
+**Der einzige Leser der Arbeitsmappe in PortalVault** ist `tools/lib/xlsx.mts`. Er hat
+**keinen Schreibpfad** — kein `writeFileSync`, keinen Stream, keinen Shell-Aufruf, keine
+Bibliothek, die schreiben könnte — und wird ausschließlich von
+`tools/import-legacy-inventory.mts` benutzt. `src/lib/shop/legacy-import.test.ts` prüft das am
+Quelltext. Eine Regel, die sagt „nicht schreiben", ist schwächer als ein Programm, das es nicht
+kann.
