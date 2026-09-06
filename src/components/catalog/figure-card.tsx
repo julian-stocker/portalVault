@@ -55,6 +55,10 @@ export function FigureCard({
   href,
   onToggle,
   toggleLabel,
+  nameSlot,
+  statusBadge,
+  interactive = true,
+  muted = false,
 }: {
   figure: CatalogFigure;
   /** Sits below the body, as a sibling — never inside the clickable area. */
@@ -89,6 +93,22 @@ export function FigureCard({
    */
   onToggle?: () => void;
   toggleLabel?: string;
+  /**
+   * Replaces the name with something else — the administrator's inline
+   * editor (ADR-0042). The card keeps its layout; only what stands in the
+   * name's place changes.
+   */
+  nameSlot?: ReactNode;
+  /** A chip over the image, beside where the crown sits. "Verborgen". */
+  statusBadge?: ReactNode;
+  /**
+   * Whether the body is a link or a toggle at all. An administrator's card
+   * is neither: its actions are named controls in the footer, so nothing
+   * happens by tapping the picture (ADR-0042).
+   */
+  interactive?: boolean;
+  /** Dims the card without changing its layout — used for a hidden figure. */
+  muted?: boolean;
 }) {
   const copies = duplicateBadge(quantity);
   const framed = marksOwnership(ownership, collected);
@@ -100,6 +120,7 @@ export function FigureCard({
         {/* The seal, catalog only — `marksOwnership` is the same rule the
             frame follows, so the two can never disagree. */}
         {framed ? <CollectedCrown /> : null}
+        {statusBadge}
         {copies !== null ? (
           /* The only thing ever drawn over a figure, and only when it says
              something a label cannot: that there is more than one. Stays in
@@ -119,12 +140,14 @@ export function FigureCard({
       <div className="flex flex-1 flex-col gap-1.5 px-0.5">
         {/* Two lines at most. `title` keeps the full name reachable — the
             longest in the catalog is 39 characters. */}
-        <span
-          className="line-clamp-2 text-sm leading-snug font-semibold text-on-card"
-          title={figure.displayName}
-        >
-          {figure.displayName}
-        </span>
+        {nameSlot ?? (
+          <span
+            className="line-clamp-2 text-sm leading-snug font-semibold text-on-card"
+            title={figure.displayName}
+          >
+            {figure.displayName}
+          </span>
+        )}
 
         {/* Pinned to the bottom of the text area, so price and metadata line
             up across a row whether a name took one line or two. */}
@@ -181,10 +204,19 @@ export function FigureCard({
         "group relative flex h-full flex-col rounded-sky-lg p-2.5 " +
         "shadow-card transition-shadow hover:shadow-raised " +
         cardSurfaceClass(ownership, collected) +
-        (highlighted ? " ring-2 ring-accent" : "")
+        (highlighted ? " ring-2 ring-accent" : "") +
+        // Dimmed, not hidden: the administrator has to be able to see and
+        // reach a figure they took out of the public catalog.
+        (muted ? " opacity-60" : "")
       }
     >
-      {onToggle ? (
+      {!interactive ? (
+        /* Static body: the picture is a picture. An administrator's actions
+           are named controls in the footer, never a tap on the card
+           (ADR-0042) — on a phone that would be one mis-tap away from hiding
+           a figure from the public catalog. */
+        <div className={bodyClass}>{inner}</div>
+      ) : onToggle ? (
         <button type="button" onClick={onToggle} aria-pressed={collected} className={bodyClass}>
           {inner}
           {/* The state in words, for anyone who cannot see the frame. The

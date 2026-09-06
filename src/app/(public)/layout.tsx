@@ -1,5 +1,6 @@
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
+import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
 
 /**
@@ -7,7 +8,9 @@ import { currentUser } from "@/lib/auth/user";
  * session is read only to decide what the navigation offers.
  */
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
-  const user = await currentUser();
+  // Both answers come from the server, and both are memoised per request —
+  // the catalog page asks the same two questions again (ADR-0042).
+  const [user, admin] = await Promise.all([currentUser(), isAdmin()]);
 
   return (
     <div className="relative min-h-screen">
@@ -15,7 +18,7 @@ export default async function PublicLayout({ children }: { children: React.React
           Owned by the layout so it survives navigation between the two
           route groups. */}
       <WorldZone />
-      <SiteNav signedIn={Boolean(user)} />
+      <SiteNav signedIn={Boolean(user)} admin={admin} />
       {children}
       <NavSpacer />
     </div>

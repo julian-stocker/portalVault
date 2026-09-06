@@ -15,12 +15,21 @@
  * "Info" is a separate link in the footer, a sibling of the body rather than
  * a child — so navigating to the detail page cannot also toggle the state,
  * with no event handling required to keep the two apart.
+ *
+ * For an administrator the same card carries different actions (ADR-0042).
+ * Everything about how a figure looks — picture, name, price, series,
+ * element, layout, responsiveness — stays in FigureCard and is shared. Only
+ * the interaction changes: a collector collects, an administrator edits the
+ * public name and decides whether the figure is in the catalog at all. There
+ * is no second card component and no second catalog.
  */
 "use client";
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
+import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
+import { InlineName } from "@/components/admin/inline-name";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { ACTION_CARD } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
@@ -52,6 +61,9 @@ export function CatalogCard({
   onCollectedChange,
   signInHref,
   highlighted,
+  admin = false,
+  visible = true,
+  onVisibilityChange,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -63,6 +75,11 @@ export function CatalogCard({
   /** null when somebody is signed in; otherwise where the card leads instead. */
   signInHref: string | null;
   highlighted: boolean;
+  /** Administrator mode: editorial actions instead of collection actions. */
+  admin?: boolean;
+  /** Editorial visibility, only meaningful in administrator mode. */
+  visible?: boolean;
+  onVisibilityChange?: (skyId: string, visible: boolean) => void;
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -88,6 +105,41 @@ export function CatalogCard({
         setFailed(true);
       }
     });
+  }
+
+  // The administrator's card. Same FigureCard, same layout, same everything
+  // that shows a figure — a different set of things to do with it.
+  if (admin) {
+    return (
+      <FigureCard
+        figure={figure}
+        // No ownership frame and no crown: the business account manages the
+        // catalog, it does not collect from it (ADR-0042).
+        ownership="catalog"
+        highlighted={highlighted}
+        showSeries={false}
+        interactive={false}
+        muted={!visible}
+        statusBadge={visible ? null : <HiddenBadge />}
+        nameSlot={
+          <InlineName
+            skyId={figure.skyId}
+            displayName={figure.displayName}
+            // What the public name falls back to when the override is
+            // cleared. `displayName` already is that when none is set.
+            derivedName={figure.displayNameOverride === null ? figure.displayName : figure.canonicalName}
+            override={figure.displayNameOverride}
+          />
+        }
+        footer={
+          <AdminCardActions
+            skyId={figure.skyId}
+            visible={visible}
+            onVisibilityChange={onVisibilityChange ?? (() => {})}
+          />
+        }
+      />
+    );
   }
 
   const footer = (

@@ -61,7 +61,20 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
-**Adminbereich Phase 1 gebaut, Migration noch nicht ausgeführt (2026-09-06, ADR-0039/0040/0041).**
+**Adminverwaltung im Katalog (2026-09-06, ADR-0042).** Der Geschäfts-Admin arbeitet auf derselben
+Website wie jeder Sammler: `/` bleibt eine Route, eine Datenbasis, eine Karte. Für ein Adminkonto
+trägt dieselbe `FigureCard` andere Interaktion — Anzeigename **inline** bearbeitbar (Stift, Enter
+speichert, Escape bricht ab, leer setzt auf die ADR-0030-Ableitung zurück), `Verbergen`/`Anzeigen`
+als benanntes Bedienelement statt Tap auf die Karte, `Details` in den bestehenden Editor. Keine
+zweite Katalogkomponente, keine zweite Mutation: beides ruft die Server Actions aus
+`src/lib/admin/actions.ts` und damit die `is_shop_admin()`-Funktionen aus `0004`.
+**Verborgene Figuren bleiben für den Admin sichtbar** (abgedunkelt, Chip „Verborgen") — ein
+ausgelassener Filter, `is_active` und Softwareausschluss gelten weiter. Im Adminmodus entfallen
+Besitzfilter, Sammlungsaktion und Besitzrahmen; die Navigation zeigt **Katalog · Admin · Profil**.
+Ein goldener „Admin"-Chip neben der Wortmarke macht den Modus erkennbar. Der Sammlerkatalog ist
+unverändert.
+
+**Adminbereich Phase 1 gebaut und live (2026-09-06, ADR-0039/0040/0041).**
 `/admin`, `/admin/catalog`, `/admin/catalog/[skyId]` und `/admin/catalog/categories` existieren;
 Nicht-Admins bekommen **404**. Berechtigung bleibt `shop_admins` + `public.is_shop_admin()` —
 trotz des Namens die allgemeine Adminberechtigung —, gelesen über `src/lib/auth/admin.ts`.

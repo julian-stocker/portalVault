@@ -30,7 +30,36 @@ import { de } from "@/lib/i18n/de";
 
 type Item = { href: string; label: string; section: NavSection; prefetch?: boolean };
 
+/**
+ * Three destinations, and which three depends on who is asking.
+ *
+ * A collector: catalog, their collection, their account.
+ *
+ * The business administrator: catalog, administration, account — **without**
+ * "Sammlung" (ADR-0042). The business account is the operator, not a
+ * collector; offering it a personal collection as a main destination would
+ * suggest the shop's stock lives there, which is exactly the confusion
+ * ADR-0032 keeps apart. Their own collection page still exists at
+ * /collection and still works; it is simply not what the bar offers them.
+ *
+ * The later "Lager" belongs in that freed slot, next to Admin. It is not put
+ * there now: a link to a page that does not exist is worse than no link.
+ */
 function itemsFor(signedIn: boolean, admin: boolean): Item[] {
+  const account: Item = signedIn
+    ? { href: "/settings", label: de.nav.settings, section: "account" }
+    : { href: "/login", label: de.nav.signIn, section: "account" };
+
+  if (admin) {
+    return [
+      { href: "/", label: de.nav.catalog, section: "catalog" },
+      // Convenience, never a permission (ADR-0039). /admin answers 404 to
+      // everyone else whether or not they find the address.
+      { href: "/admin", label: de.nav.admin, section: "admin", prefetch: false },
+      account,
+    ];
+  }
+
   return [
     { href: "/", label: de.nav.catalog, section: "catalog" },
     {
@@ -44,15 +73,7 @@ function itemsFor(signedIn: boolean, admin: boolean): Item[] {
       // default in place: prefetch when the link is in view.
       prefetch: signedIn ? undefined : false,
     },
-    signedIn
-      ? { href: "/settings", label: de.nav.settings, section: "account" }
-      : { href: "/login", label: de.nav.signIn, section: "account" },
-    // Convenience, never a permission (ADR-0039). The link is absent for
-    // everyone else, and /admin answers 404 to them whether or not they
-    // find the address.
-    ...(admin
-      ? [{ href: "/admin", label: de.nav.admin, section: "admin" as const, prefetch: false }]
-      : []),
+    account,
   ];
 }
 
@@ -152,13 +173,20 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-accent/25"
       />
-      <Link
-        href="/"
-        className="relative flex shrink-0 items-center px-4 py-3 md:px-0 md:py-4"
-        aria-label={de.app.name}
-      >
-        <Wordmark />
-      </Link>
+      <div className="relative flex shrink-0 items-center gap-2 px-4 py-3 md:px-0 md:py-4">
+        <Link href="/" className="flex items-center" aria-label={de.app.name}>
+          <Wordmark />
+        </Link>
+        {/* Quiet, and always there while it applies (ADR-0042): the mode has
+            to be recognisable without turning the site into a back office.
+            One gold chip beside the wordmark, in the same metal as
+            everything else. */}
+        {admin ? (
+          <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[11px] leading-4 font-medium text-accent ring-1 ring-accent/50">
+            {de.admin.modeBadge}
+          </span>
+        ) : null}
+      </div>
 
       <nav
         aria-label={de.nav.primary}

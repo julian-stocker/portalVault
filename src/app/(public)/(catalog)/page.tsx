@@ -4,6 +4,7 @@ import { CatalogView } from "@/components/catalog/catalog-view";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { de } from "@/lib/i18n/de";
+import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
 
 export const metadata: Metadata = {
@@ -24,11 +25,18 @@ export default async function CatalogPage({
 }) {
   const params = await searchParams;
 
+  // The role decides which slice of the same catalog is loaded, and which
+  // actions the cards carry (ADR-0042). Asked on the server, from the
+  // database — never from a claim the browser sent.
+  const admin = await isAdmin();
+
   const [user, figures, series, owned] = await Promise.all([
     currentUser(),
-    fetchCatalog(),
+    fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
-    fetchOwnedSkyIds(),
+    // An administrator manages the shop's catalog, not a personal collection
+    // (ADR-0042). Their own collection is simply not part of this page.
+    admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -44,6 +52,7 @@ export default async function CatalogPage({
         series={series}
         ownedSkyIds={[...owned]}
         signedIn={Boolean(user)}
+        admin={admin}
         highlightSkyId={highlight}
         initialSeriesCode={
           params.series && series.some((s) => s.code === params.series) ? params.series : undefined

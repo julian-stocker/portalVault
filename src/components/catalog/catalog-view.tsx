@@ -25,6 +25,7 @@ export function CatalogView({
   series,
   ownedSkyIds,
   signedIn,
+  admin = false,
   highlightSkyId,
   initialSeriesCode,
   initialQuery = "",
@@ -33,6 +34,12 @@ export function CatalogView({
   series: readonly SeriesOption[];
   ownedSkyIds: readonly string[];
   signedIn: boolean;
+  /**
+   * Administrator mode (ADR-0042): the same catalog, with editorial actions
+   * on the cards instead of collection actions — and hidden figures included,
+   * because otherwise a figure could be hidden and never found again.
+   */
+  admin?: boolean;
   highlightSkyId: string | null;
   /** Restores the view someone left when they went to sign in (ADR-0027). */
   initialSeriesCode?: string;
@@ -87,6 +94,22 @@ export function CatalogView({
   const [showOwned, setShowOwned] = useState(true);
 
   /**
+   * Visibility changed on this page, before the server has caught up.
+   *
+   * Same idea as `changed` above: the card has to mark itself hidden the
+   * moment the switch is thrown, and stay in the list so it can be brought
+   * back.
+   */
+  const [visibility, setVisibility] = useState<Map<string, boolean>>(() => new Map());
+
+  function onVisibilityChange(skyId: string, visible: boolean) {
+    setVisibility((current) => new Map(current).set(skyId, visible));
+  }
+
+  const isVisible = (figure: CatalogFigure) =>
+    visibility.get(figure.skyId) ?? figure.catalogVisible;
+
+  /**
    * The pool everything else works from.
    *
    * Narrowing here rather than inside the search means the filter applies to
@@ -94,8 +117,10 @@ export function CatalogView({
    * second code path that could forget it.
    */
   const pool = useMemo(
-    () => (showOwned ? figures : missingFigures(figures, owned)),
-    [showOwned, figures, owned],
+    // The ownership filter is a collector's question. An administrator owns
+    // nothing here and gets the whole catalog (ADR-0042).
+    () => (admin || showOwned ? figures : missingFigures(figures, owned)),
+    [admin, showOwned, figures, owned],
   );
 
   const visible = useMemo(
@@ -134,11 +159,28 @@ export function CatalogView({
   // The series is not resettable — one is always chosen — so what is left is
   // the search box and the ownership filter. "Besitz anzeigen" counts as
   // active only when it is off, because on is the resting state.
-  const filtered = query.trim() !== "" || !showOwned;
+  const filtered = query.trim() !== "" || (!admin && !showOwned);
 
   function reset() {
     setQuery("");
     setShowOwned(true);
+  }
+
+  /** One card, in whichever mode the visitor is in. */
+  function card(figure: CatalogFigure) {
+    return (
+      <CatalogCard
+        key={figure.skyId}
+        figure={figure}
+        initialCollected={owned.has(figure.skyId)}
+        onCollectedChange={onCollectedChange}
+        signInHref={signedIn ? null : signInHref(figure.skyId)}
+        highlighted={highlightSkyId === figure.skyId}
+        admin={admin}
+        visible={isVisible(figure)}
+        onVisibilityChange={onVisibilityChange}
+      />
+    );
   }
 
   return (
@@ -212,7 +254,7 @@ export function CatalogView({
                 ? de.catalog.countInSeries(activeSeries.label, visible.length)
                 : de.catalog.figureCount(visible.length)}
           </p>
-          {signedIn ? <OwnedToggle active={showOwned} onChange={setShowOwned} /> : null}
+          {signedIn && !admin ? <OwnedToggle active={showOwned} onChange={setShowOwned} /> : null}
         </div>
       </div>
 
@@ -228,18 +270,7 @@ export function CatalogView({
               {group.figures.length === 0 ? (
                 <p className="text-sm text-muted">{de.catalog.noHitsHere}</p>
               ) : (
-                <FigureGrid>
-                  {group.figures.map((figure) => (
-                    <CatalogCard
-                      key={figure.skyId}
-                      figure={figure}
-                      initialCollected={owned.has(figure.skyId)}
-                      onCollectedChange={onCollectedChange}
-                      signInHref={signedIn ? null : signInHref(figure.skyId)}
-                      highlighted={highlightSkyId === figure.skyId}
-                    />
-                  ))}
-                </FigureGrid>
+                <FigureGrid>{group.figures.map(card)}</FigureGrid>
               )}
             </section>
           ))}
@@ -257,18 +288,7 @@ export function CatalogView({
           ) : null}
         </div>
       ) : (
-        <FigureGrid>
-          {visible.map((figure) => (
-            <CatalogCard
-              key={figure.skyId}
-              figure={figure}
-              initialCollected={owned.has(figure.skyId)}
-              onCollectedChange={onCollectedChange}
-              signInHref={signedIn ? null : signInHref(figure.skyId)}
-              highlighted={highlightSkyId === figure.skyId}
-            />
-          ))}
-        </FigureGrid>
+        <FigureGrid>{visible.map(card)}</FigureGrid>
       )}
     </div>
   );

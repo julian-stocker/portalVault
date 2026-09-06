@@ -108,7 +108,11 @@ describe("the catalog's ownership filter", () => {
   });
 
   it("counts as an active filter only while it is off", () => {
-    expect(source(CATALOG)).toContain('const filtered = query.trim() !== "" || !showOwned');
+    // And only for a collector: an administrator has no ownership filter at
+    // all, so it can never be the thing a reset would undo (ADR-0042).
+    expect(source(CATALOG)).toContain(
+      'const filtered = query.trim() !== "" || (!admin && !showOwned)',
+    );
   });
 
   it("sees an ownership change from a card in the same frame", () => {
@@ -118,8 +122,11 @@ describe("the catalog's ownership filter", () => {
     expect(catalog).toMatch(/for \(const \[skyId, isOwned\] of changed\)/);
   });
 
-  it("is not offered to someone signed out", () => {
-    expect(source(CATALOG)).toMatch(/signedIn \? <OwnedToggle/);
+  it("is not offered to someone signed out, nor to an administrator", () => {
+    // Signed out there is no answer to it; as an administrator there is no
+    // question — the business account manages the catalog rather than
+    // collecting from it (ADR-0042).
+    expect(source(CATALOG)).toMatch(/signedIn && !admin \? <OwnedToggle/);
   });
 
   it("narrows the pool, so search and cross-series results cannot forget it", () => {

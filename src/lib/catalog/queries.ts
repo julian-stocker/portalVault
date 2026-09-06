@@ -267,13 +267,23 @@ export async function fetchNameIndex(): Promise<Map<string, Set<string>>> {
  *
  * Console games stay in the database but never reach the collector catalog
  * (src/lib/catalog/collectible.ts).
+ *
+ * `includeHidden` is the administrator's view of the **same** catalog, not a
+ * second one (ADR-0042). It drops exactly one filter — the editorial
+ * `catalog_visible` — so an administrator can find a figure they hid and put
+ * it back. Everything else stays: `is_active` still applies, software is
+ * still excluded, and the row still has to pass RLS. "Admin mode" means the
+ * collector catalog including its hidden entries, never every technical row
+ * in `skylanders`.
  */
-export async function fetchCatalog(): Promise<CatalogFigure[]> {
+export async function fetchCatalog(
+  options: { includeHidden?: boolean } = {},
+): Promise<CatalogFigure[]> {
   const supabase = await createClient();
-  const [lookups, result] = await Promise.all([
-    loadLookups(),
-    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("is_active", true).eq("catalog_visible", true),
-  ]);
+  let query = supabase.from("skylanders").select(FIGURE_COLUMNS).eq("is_active", true);
+  if (!options.includeHidden) query = query.eq("catalog_visible", true);
+
+  const [lookups, result] = await Promise.all([loadLookups(), query]);
 
   if (result.error) throw new Error(`catalog: ${result.error.message}`);
   const figures = collectibleOnly(

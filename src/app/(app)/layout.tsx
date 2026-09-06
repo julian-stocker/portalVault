@@ -9,12 +9,14 @@ import { redirect } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
+import { isAdmin } from "@/lib/auth/admin";
 import { currentProfile } from "@/lib/auth/profile";
 import { SIGN_IN_PATH } from "@/lib/auth/redirect";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await currentProfile();
   if (!profile) redirect(SIGN_IN_PATH);
+  const admin = await isAdmin();
 
   return (
     <div className="relative min-h-screen">
@@ -25,7 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* The same navigation the public catalog uses — one component, two
           mounts, rather than two systems to keep in step. The active section
           comes from the path, so /collection and /settings light up too. */}
-      <SiteNav signedIn />
+      <SiteNav signedIn admin={admin} />
       {children}
       <NavSpacer />
     </div>

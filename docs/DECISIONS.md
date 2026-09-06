@@ -2907,3 +2907,67 @@ entsteht jetzt, die UI ist ein eigener Schritt.
 
 **Gemessene Verteilung (2026-09-06):** figure 261 · trap 57 · sensei 46 · item 44 · vehicle 31 ·
 trap_master 28 · creation_crystal 27 · mini 27 · swapper 26 · giant 14 = **561**.
+
+---
+
+## ADR-0042 — Der Adminbereich ist der Katalog: rollenbasierte Verwaltung im Kontext
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der Geschäfts-Admin arbeitet **auf derselben Website** wie jeder Sammler. Der
+Katalog `/` bleibt eine Route, eine Datenbasis, eine Komponente — und trägt für ein Adminkonto
+zusätzliche redaktionelle Werkzeuge genau dort, wo die Daten stehen. `/admin` bleibt die
+Zentrale für Übersicht, verborgene Einträge, Kategorien, Historie und alles Spätere; der
+Katalog ist der schnelle Editor.
+
+**Eine Karte, zwei Interaktionsschichten.** Es gibt **keine** `AdminCatalogCard`. `FigureCard`
+zeigt weiterhin Bild, Name, Preis, Serie, Element, Layout und Verhalten für alle gleich; sie hat
+dafür Steckplätze bekommen (`nameSlot`, `statusBadge`, `interactive`, `muted`) und weiß von
+Rollen nichts. `CatalogCard` verzweigt **einmal**, in sich:
+
+| | Sammler | Admin |
+|---|---|---|
+| Kartenkörper | Umschalter „gesammelt" | statisch — kein Tap-Ziel |
+| Name | Text | Inline-Editor mit Stift |
+| Fuß | `Info` | `Verbergen`/`Anzeigen` + `Details` |
+| Besitzrahmen, Krone | ja | nein |
+
+**Warum der Kartenkörper im Adminmodus nichts auslöst.** „Tap auf die Figur = verbergen" wäre auf
+einem Telefon ein Fehlgriff vom öffentlichen Katalog entfernt — die Karte ist genau das, worauf
+der Daumen beim Scrollen landet. Stattdessen ein benanntes Bedienelement in Kartenbreite, mit
+`aria-pressed` und einem ausformulierten `aria-label`; die kurze Beschriftung passt auf eine
+Zeile bei 390 px.
+
+**Verborgene Figuren bleiben für den Admin im Katalog.** Sonst könnte er eine Figur verbergen und
+sie dort nie wieder finden. Umgesetzt als **ein** ausgelassener Filter:
+`fetchCatalog({ includeHidden })` lässt `catalog_visible` weg — und sonst nichts. `is_active` und
+der Softwareausschluss gelten weiter. Adminmodus heißt „der Sammlerkatalog einschließlich seiner
+redaktionell verborgenen Einträge", **nicht** „jede technische Zeile aus `skylanders`". Die Karte
+ist abgedunkelt und trägt den Chip „Verborgen"; die RLS für normale Nutzer bleibt unangetastet
+(ADR-0039), sie sehen sie schlicht nicht.
+
+**Der Katalog ist für den Betreiber keine Sammlung.** Businesskonto = Betreiber, privates Konto =
+Sammlung (ADR-0032). Im Adminmodus entfallen daher die Sammlungsaktion auf der Karte, der Filter
+„Besitz anzeigen" und der Besitzrahmen; die Navigation bietet **Katalog · Admin · Profil** statt
+„Sammlung". Die Sammlungsseite selbst bleibt unverändert bestehen und erreichbar — sie wird nur
+nicht mehr angeboten. Der Platz, den „Sammlung" freigibt, ist der, an dem später „Lager" steht;
+ein Link auf eine nicht gebaute Seite wäre schlechter als kein Link.
+
+**Keine zweite Mutationsebene.** Inline-Umbenennen und Sichtbarkeit rufen exakt die Server
+Actions aus `src/lib/admin/actions.ts` auf, die schon `/admin/catalog/[skyId]` benutzt, und die
+rufen dieselben `security definer`-Funktionen mit `is_shop_admin()` (Migration `0004`). Die
+Oberfläche ist Bequemlichkeit; entschieden wird in der Datenbank. Funktional nachgewiesen: ein
+normaler Nutzer bekommt auf beide RPCs `not authorized`, anonym `permission denied for function`
+— unabhängig davon, was das UI rendert.
+
+**Die Rolle kommt vom Server.** `isAdmin()` → `public.is_shop_admin()`, je Anfrage memoisiert,
+gelesen in Seite und Layout. Keine E-Mail-Prüfung, keine User-ID im Code, kein Claim aus dem
+Browser, keine zweite Rollenquelle.
+
+**Sichtbar, aber nicht laut.** Ein goldener Chip „Admin" neben der Wortmarke, Stiftsymbole an
+bearbeitbaren Namen, der Status auf der Karte. Kein zweites Design, keine Backend-Optik — die
+Vitrine bleibt eine Vitrine.
+
+**Nicht in dieser Runde:** Bild-Upload und Storage (die Karte ist aber so geschnitten, dass eine
+Aktion am Bild dazukommen kann), `element_override`, Varianten/Specials, öffentliche
+Produktgruppen-Untertabs, Lager-/Shopverwaltung, Bestellungen.

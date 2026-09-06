@@ -148,6 +148,9 @@ src/
     (auth)/              login, register, verify, reset
     (admin)/             /admin — Katalogredaktion            — nur Admin (404 sonst)
       admin/catalog/     Liste · Figureneditor · Kategorien
+                         Der Katalog `/` trägt zusätzlich die schnellen
+                         redaktionellen Aktionen (ADR-0042) — dieselbe Karte,
+                         dieselben Mutationen, andere Interaktion.
     (app)/               collection, settings, onboarding    — geschützt
       collection/
         page.tsx         die Sammlung selbst

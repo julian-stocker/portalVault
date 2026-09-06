@@ -211,8 +211,15 @@ export const de = {
     overrideActive: "überschrieben",
     visible: "Im Katalog sichtbar",
     hidden: "Verborgen",
-    hide: "Aus Katalog nehmen",
-    show: "Im Katalog zeigen",
+    /**
+     * Kurz auf der Karte, ausführlich für Screenreader: auf einer 390-px-Karte
+     * bricht „Aus dem Katalog nehmen" auf zwei Zeilen, die Bedeutung steht
+     * dafür im aria-label.
+     */
+    hide: "Verbergen",
+    show: "Anzeigen",
+    hideLong: "Aus dem öffentlichen Katalog nehmen",
+    showLong: "Im öffentlichen Katalog zeigen",
     note: "Interne Notiz",
     noteHint: "Nur im Adminbereich sichtbar.",
     group: "Produktgruppe",
@@ -222,6 +229,12 @@ export const de = {
     category: "Kategorie",
     skyId: "SKY-ID",
     edit: "Bearbeiten",
+    details: "Details",
+    /** Inline-Bearbeitung direkt im Katalog (ADR-0042). */
+    editNameFor: (name: string) => `Anzeigename von ${name} bearbeiten`,
+    hiddenBadge: "Verborgen",
+    /** Kennzeichnung im Kopf, damit der Modus jederzeit erkennbar ist. */
+    modeBadge: "Admin",
     save: "Speichern",
     saved: "Gespeichert.",
     history: "Letzte redaktionelle Änderungen",
