@@ -9,6 +9,7 @@ import { FigureCard } from "@/components/catalog/figure-card";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { firstReleaseSeries } from "@/lib/catalog/character";
 import { isCollectible } from "@/lib/catalog/collectible";
+import { imageSrc } from "@/lib/catalog/image";
 import { fetchFigureBySlug, fetchFigureDetail } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { formatPrice } from "@/lib/format";
@@ -89,7 +90,7 @@ export default async function FigurePage({ params }: Params) {
             so a square image cannot tower over the column beside it. */}
         <div className="md:col-span-3">
           <div className="md:max-w-lg">
-            <FigureImage file={figure.imageFile} name={figure.displayName} />
+            <FigureImage src={imageSrc(figure)} name={figure.displayName} />
           </div>
         </div>
 
@@ -152,7 +153,7 @@ export default async function FigurePage({ params }: Params) {
           <OfferPanel
             offers={offersFor(offers, figure.skyId)}
             name={figure.displayName}
-            imageFile={figure.imageFile}
+            imageSrc={imageSrc(figure)}
           />
 
           <CollectButton

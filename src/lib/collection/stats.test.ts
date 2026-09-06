@@ -25,6 +25,7 @@ function entry(
     displayNameOverride: null,
     marketPrice: price,
     imageFile: null,
+    imageOverridePath: null,
     displayName: "Drobot",
     sortBaseName: "Drobot",
     sortVariantLabel: null,

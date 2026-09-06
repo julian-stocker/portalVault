@@ -28,7 +28,7 @@ const BASH = {
   skyId: "SKY-0001",
   condition: "loose" as const,
   name: "Bash",
-  imageFile: null,
+  imageSrc: null,
   price: 9.9,
 };
 
@@ -152,6 +152,45 @@ describe("storage", () => {
     expect(decodeCart(encodeCart(cart))).toEqual(cart);
   });
 
+  it("migrates a version 1 cart instead of dropping it", () => {
+    // Version 1 stored a bare file name; version 2 stores a URL, because an
+    // uploaded image is not under /images/skylanders (ADR-0046).
+    const stored = JSON.stringify({
+      version: 1,
+      lines: [
+        {
+          skyId: "SKY-0001",
+          condition: "loose",
+          quantity: 2,
+          name: "Bash",
+          imageFile: "0123456789abcdef.webp",
+          priceAtAdd: 9.9,
+        },
+      ],
+    });
+    const cart = decodeCart(stored);
+    expect(cart).toHaveLength(1);
+    expect(cart[0].imageSrc).toBe("/images/skylanders/0123456789abcdef.webp");
+    expect(cart[0].quantity).toBe(2);
+  });
+
+  it("does not turn a stray version 1 value into a broken URL", () => {
+    const stored = JSON.stringify({
+      version: 1,
+      lines: [
+        {
+          skyId: "SKY-0001",
+          condition: "loose",
+          quantity: 1,
+          name: "Bash",
+          imageFile: "../../etc/passwd",
+          priceAtAdd: 9.9,
+        },
+      ],
+    });
+    expect(decodeCart(stored)[0].imageSrc).toBeNull();
+  });
+
   it("treats anything unreadable as an empty cart", () => {
     // A wrong cart is worse than an empty one, and nothing in it costs more
     // than two taps to choose again.
@@ -159,6 +198,7 @@ describe("storage", () => {
     expect(decodeCart("not json")).toEqual([]);
     expect(decodeCart("[]")).toEqual([]);
     expect(decodeCart(JSON.stringify({ version: 99, lines: [] }))).toEqual([]);
+    expect(decodeCart(JSON.stringify({ version: 0, lines: [] }))).toEqual([]);
   });
 
   it("drops lines that are not lines", () => {

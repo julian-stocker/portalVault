@@ -89,7 +89,7 @@ function CartRow({ entry }: { entry: CartEntry }) {
       }
     >
       <div className="w-16 shrink-0 sm:w-20">
-        <FigureImage file={line.imageFile} name={line.name} />
+        <FigureImage src={line.imageSrc} name={line.name} />
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-1">

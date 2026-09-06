@@ -12,6 +12,12 @@
  *
  * There is no write path here, and there will not be one in V1: the cart is
  * local to the browser and reserves nothing (ADR-0043).
+ *
+ * Since ADR-0045 the price the function returns is derived — an override
+ * where one exists, otherwise the market price times the shop-wide
+ * percentage. That is a database concern end to end: no percentage and no
+ * "manual or automatic" flag crosses into the application, let alone into a
+ * browser.
  */
 import { cache } from "react";
 
@@ -21,7 +27,12 @@ import { createClient } from "@/lib/supabase/server";
 type OfferRow = {
   sky_id: string;
   condition: string;
-  sale_price: string | number | null;
+  /**
+   * The EFFECTIVE price (ADR-0045): the manual override if the position has
+   * one, otherwise the market price times the shop-wide percentage. Which of
+   * the two it was is internal and deliberately not published.
+   */
+  price: string | number | null;
   available: boolean;
 };
 
@@ -54,7 +65,7 @@ export const fetchOffers = cache(async (): Promise<OfferIndex> => {
     // `numeric` arrives as a string from PostgREST. A price that will not
     // parse is dropped rather than shown as NaN or as 0 — the same rule the
     // catalog follows for market_price (ADR-0010).
-    const price = typeof row.sale_price === "string" ? Number(row.sale_price) : row.sale_price;
+    const price = typeof row.price === "string" ? Number(row.price) : row.price;
     if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) continue;
     if (!isOfferCondition(row.condition)) continue;
 

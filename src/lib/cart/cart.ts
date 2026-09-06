@@ -40,7 +40,14 @@ export type CartLine = {
   quantity: number;
   /** Display snapshot from the moment it was added. Never used for money. */
   name: string;
-  imageFile: string | null;
+  /**
+   * The picture, already resolved to a URL (ADR-0046).
+   *
+   * A URL rather than a file name, because there are two sources now and the
+   * cart must not re-decide between them from stale data: what was on screen
+   * when the line was added is what the line remembers.
+   */
+  imageSrc: string | null;
   /**
    * The asking price when the line was added.
    *
@@ -77,7 +84,13 @@ function clampQuantity(quantity: number): number {
  */
 export function addLine(
   cart: Cart,
-  article: { skyId: string; condition: OfferCondition; name: string; imageFile: string | null; price: number },
+  article: {
+    skyId: string;
+    condition: OfferCondition;
+    name: string;
+    imageSrc: string | null;
+    price: number;
+  },
   quantity = 1,
 ): Cart {
   const key = lineKey(article.skyId, article.condition);
@@ -91,7 +104,7 @@ export function addLine(
         condition: article.condition,
         quantity: clampQuantity(quantity),
         name: article.name,
-        imageFile: article.imageFile,
+        imageSrc: article.imageSrc,
         priceAtAdd: article.price,
       },
     ];
@@ -103,7 +116,7 @@ export function addLine(
           ...line,
           quantity: clampQuantity(line.quantity + quantity),
           name: article.name,
-          imageFile: article.imageFile,
+          imageSrc: article.imageSrc,
         }
       : line,
   );
@@ -202,7 +215,15 @@ export function unavailableEntries(entries: readonly CartEntry[]): CartEntry[] {
  * one, and there is nothing here that cannot be chosen again in two taps.
  */
 export const CART_STORAGE_KEY = "skyisles.cart.v1";
-const CART_VERSION = 1;
+
+/**
+ * 1 stored `imageFile`, a bare file name; 2 stores `imageSrc`, a URL.
+ *
+ * The key keeps its name so a stored cart is found at all. A version 1 cart
+ * is migrated rather than discarded — see `parseLine`.
+ */
+const CART_VERSION = 2;
+const LEGACY_VERSIONS = new Set([1]);
 
 export function encodeCart(cart: Cart): string {
   return JSON.stringify({ version: CART_VERSION, lines: cart });
@@ -221,7 +242,9 @@ export function decodeCart(raw: string | null): Cart {
 
   if (typeof parsed !== "object" || parsed === null) return EMPTY_CART;
   const payload = parsed as { version?: unknown; lines?: unknown };
-  if (payload.version !== CART_VERSION || !Array.isArray(payload.lines)) return EMPTY_CART;
+  const version = payload.version;
+  const known = version === CART_VERSION || LEGACY_VERSIONS.has(version as number);
+  if (!known || !Array.isArray(payload.lines)) return EMPTY_CART;
 
   const lines: CartLine[] = [];
   const seen = new Set<string>();
@@ -257,7 +280,26 @@ function parseLine(candidate: unknown): CartLine | null {
     condition: row.condition,
     quantity: clampQuantity(row.quantity),
     name: row.name,
-    imageFile: typeof row.imageFile === "string" ? row.imageFile : null,
+    imageSrc: pictureOf(row),
     priceAtAdd: row.priceAtAdd,
   };
 }
+
+/**
+ * The line's picture, migrating a version 1 line on the way.
+ *
+ * Version 1 stored a bare file name from the import; version 2 stores a URL,
+ * because an uploaded image is not under `/images/skylanders/` (ADR-0046).
+ * Turning the old value into the URL it always meant is a two-line migration
+ * and costs nobody their cart.
+ */
+function pictureOf(row: Record<string, unknown>): string | null {
+  if (typeof row.imageSrc === "string" && row.imageSrc !== "") return row.imageSrc;
+  if (typeof row.imageFile === "string" && LEGACY_IMAGE.test(row.imageFile)) {
+    return `/images/skylanders/${row.imageFile}`;
+  }
+  return null;
+}
+
+/** The imported file names, exactly as `skylanders_image_file_format` has it. */
+const LEGACY_IMAGE = /^[0-9a-f]{16}\.webp$/;

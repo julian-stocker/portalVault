@@ -25,6 +25,7 @@ function figure(
     displayNameOverride: null,
     marketPrice: null,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     element: null,
     characterId: null,

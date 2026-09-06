@@ -36,7 +36,8 @@ export type CartArticle = {
   skyId: string;
   condition: OfferCondition;
   name: string;
-  imageFile: string | null;
+  /** Already resolved to a URL by `imageSrc()` (ADR-0046). */
+  imageSrc: string | null;
   price: number;
 };
 

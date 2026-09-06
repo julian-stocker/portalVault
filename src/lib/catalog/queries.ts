@@ -36,6 +36,7 @@ type FigureRow = {
   category_id: number;
   market_price: string | number | null;
   image_file: string | null;
+  image_override_path: string | null;
   is_active: boolean;
   catalog_visible: boolean;
   display_name_override: string | null;
@@ -45,7 +46,7 @@ type FigureRow = {
 // One string literal, not a concatenation: PostgREST's typing reads the
 // select list at the type level, and a computed string loses the row type.
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, is_active, character_id, catalog_visible, display_name_override";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
@@ -114,6 +115,7 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     ),
     marketPrice: row.market_price === null ? null : Number(row.market_price),
     imageFile: row.image_file,
+    imageOverridePath: row.image_override_path,
     isActive: row.is_active,
     catalogVisible: row.catalog_visible,
     canonicalName: row.name,

@@ -20,6 +20,7 @@ import { AdminThumb } from "@/components/admin/admin-thumb";
 import { CONDITIONS, type Condition, type InventoryPosition, type Movement } from "@/lib/admin/inventory-model";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
+import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 import { useRouter } from "next/navigation";
 
@@ -32,6 +33,7 @@ export function InventoryView({
   catalog,
   series,
   outsideScope,
+  percentage,
 }: {
   positions: readonly InventoryPosition[];
   /** Movements per position id, loaded once by the page. */
@@ -41,6 +43,8 @@ export function InventoryView({
   series: readonly SeriesOption[];
   /** Historical positions on something outside that range. Counted, not listed. */
   outsideScope: number;
+  /** The shop-wide price percentage, shown on every card (ADR-0045). */
+  percentage: number;
 }) {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -170,6 +174,7 @@ export function InventoryView({
             key={position.inventoryId}
             position={position}
             movements={movements[position.inventoryId] ?? []}
+            percentage={percentage}
           />
         ))}
       </div>
@@ -187,7 +192,7 @@ export function InventoryView({
                   className="flex flex-col gap-2 rounded-sky-md bg-surface/60 p-3 ring-1 ring-border/50"
                 >
                   <div className="flex items-center gap-3">
-                    <AdminThumb file={figure.imageFile} name={figure.displayName} />
+                    <AdminThumb src={imageSrc(figure)} name={figure.displayName} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{figure.displayName}</p>
                       <p className="text-[11px] text-muted">

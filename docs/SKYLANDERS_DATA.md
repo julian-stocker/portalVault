@@ -737,6 +737,22 @@ nächste genau die fehlenden 118 — jede Position ist eine eigene Transaktion. 
 paginiert (PostgREST liefert höchstens 1000 Zeilen). Der Unique-Index
 `inventory_movements_one_initial_import` bleibt als **letzte** Sicherung bestehen.
 
+## 11f. Bilder: Import und Redaktion sind getrennt (2026-09-06, ADR-0046)
+
+Der Katalogimport besitzt `skylanders.image_file` und überschreibt es bei jedem Lauf. Ein
+Administrator besitzt `skylanders.image_override_path` — einen Pfad im öffentlichen
+Storage-Bucket `catalog` —, und **der Import nennt diese Spalte nirgends**. Dieselbe Trennung wie
+bei `character_id` (ADR-0034) und den redaktionellen Spalten (ADR-0039):
+
+| | gehört | wird überschrieben von |
+|---|---|---|
+| `image_file` | dem Legacy-Import | jedem `catalog:import --apply` |
+| `image_override_path` | dem Administrator | nur `admin_set_image_override()` |
+
+Deshalb ist „Eigenes Bild entfernen" eine Rücknahme und kein Verlust: das importierte Bild lag
+die ganze Zeit darunter. Aufgelöst wird zentral in `src/lib/catalog/image.ts`, in dieser
+Reihenfolge: Override → importiertes Bild → leere Bildbühne.
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

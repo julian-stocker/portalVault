@@ -48,6 +48,7 @@ function figure(name: string, characterId: number | null): CatalogFigure {
     searchIndex: buildSearchIndex(searchFormsFor(name, variant)),
     marketPrice: null,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     element: null,
     characterId,

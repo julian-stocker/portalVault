@@ -35,6 +35,7 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
       .join(" | "),
     marketPrice: 10,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     catalogVisible: true,
     canonicalName: name,

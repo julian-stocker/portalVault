@@ -3246,3 +3246,155 @@ als eine Regel, die sagt, man dürfe nicht schreiben.
 **Keine personenbezogenen Daten.** Weder Käuferdaten noch Bestellungen, EÜR-Zahlen, Scraper-Logik,
 Mappings oder Zugangsdaten werden gelesen, geschrieben oder protokolliert. Der Bericht nennt
 Artikelnamen ausschließlich dort, wo ein Mensch entscheiden muss, und nur für Geschäftsbestand.
+
+---
+
+## ADR-0045 — Shoppreise werden abgeleitet, nicht gepflegt
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der Preis, den der Shop verlangt, wird **berechnet**:
+
+```
+effektiver Preis = manueller Override        wenn gesetzt
+                 = market_price × Prozentsatz sonst, auf Cent gerundet
+                 = NULL                       wenn beides fehlt
+```
+
+Der Prozentsatz ist **eine Zahl in einer Zeile** (`shop_settings`), initial **90 %**, im Admin
+änderbar. 218 Positionen einzeln zu bepreisen war die Alternative und ist keine.
+
+**`sale_price` bleibt, ändert aber seine Bedeutung.** Die Spalte ist ab jetzt der **manuelle
+Override**, nicht „der Preis". NULL heißt „kein Override, es gilt die Regel" statt „noch kein
+Preis". Beide Lesarten stimmen für jede heute existierende Zeile überein, weil der Legacy-Import
+sie überall NULL gelassen hat. **Keine zweite Preisspalte** — zwei Spalten mit je 18,00 € und
+keiner Möglichkeit zu sagen, welche gilt, wäre genau der Zustand, den die Anforderung ausschließt.
+Woher der Preis kommt, sagt `admin_shop_inventory().price_source` (`manual` / `automatic`).
+
+**Nichts speichert einen automatischen Preis.** Deshalb kostet eine Marktpreisänderung kein
+Update und eine Prozentsatzänderung kein Massenschreiben: beide wirken sofort auf alle
+Auto-Positionen, weil nirgends ein abgeleiteter Wert liegt. Ein Override bleibt in beiden Fällen
+unverändert — er ist eine andere Spalte.
+
+**Die Arithmetik steht genau einmal, in der Datenbank.** `public.shop_price(override, market,
+pct)` ist `immutable` und wird von der öffentlichen Projektion, der Adminliste **und** dem
+Listing-Guard aufgerufen. Gerechnet wird auf `numeric`, nie auf Fließkomma; gerundet mit
+`round(x, 2)` — kaufmännisch, halbe Cent von der Null weg. Die Anwendung rechnet **nicht** mit
+Geld: sie liest die berechnete Zahl. Einzige, benannte Ausnahme ist die Vorschau „so viel wäre
+es automatisch" auf der Adminkarte, die weder gespeichert noch verlangt wird.
+
+**Bereich 0 < p ≤ 500 %.** Über 100 % ist ausdrücklich erlaubt — mehr als den Referenzwert zu
+verlangen ist bei Seltenem legitim, und eine Grenze bei 100 wäre eine Produktentscheidung als
+Constraint getarnt. 0 ist ausgeschlossen wie beim Marktpreis (ADR-0010): kostenlos ist kein
+Preis. Die Obergrenze fängt den Tippfehler ab (9000 statt 90).
+
+**Der CHECK `shop_inventory_listed_needs_price` entfällt.** Er sagte „gelistet ⇒ `sale_price`",
+was richtig war, solange `sale_price` der Preis war. Ein CHECK kann die Frage jetzt nicht mehr
+beantworten — sie hängt an `skylanders.market_price` und an `shop_settings`, also an zwei
+anderen Tabellen. Die Regel zieht deshalb an die zwei Stellen, die beides sehen:
+
+* `set_shop_listing()` weist eine Listung ohne effektiven Preis ab
+* `shop_offers()` liefert keine Zeile ohne effektiven Preis
+
+Das ist **strenger** als der Constraint war: der hätte nicht bemerkt, dass ein Marktpreis nach
+dem Listen gelöscht wird, die Projektion bemerkt es.
+
+**Öffentlich bleibt es minimal.** `shop_offers()` gibt weiterhin vier Werte zurück; `sale_price`
+heißt darin jetzt `price`, weil es nicht mehr die gespeicherte Spalte ist, sondern was der Shop
+verlangt. Prozentsatz, Override und `price_source` sind **intern** und verlassen die Datenbank
+nicht.
+
+**Im Adminbereich heißt es „Shop-Preis", nicht „SkyIsles-Preis".** Für den Betreiber ist das
+eindeutiger. Öffentlich bleibt die Marke: auf der Karte steht weiterhin „SkyIsles 9,90 €".
+
+---
+
+## ADR-0046 — Bilder gehören dem Admin, der Import behält seine
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Ein Administrator kann das Bild einer Figur im Browser ersetzen. Es landet in
+Supabase Storage, wirkt sofort überall und braucht **kein Git, kein Deploy, keine Codeänderung**.
+
+**Drei Quellen, feste Reihenfolge:**
+
+| | Quelle | Wem gehört sie |
+|---|---|---|
+| 1 | `skylanders.image_override_path` → Bucket `catalog` | dem Administrator |
+| 2 | `skylanders.image_file` → `/public/images/skylanders` | dem Katalogimport |
+| 3 | kein Bild → leere Bühne | 27 Sammelobjekte, ein Designzustand (ADR-0009) |
+
+**Eine zweite Spalte, nicht eine zweite Bedeutung.** Der Import überschreibt `image_file` bei
+jedem Lauf; der Override muss das überleben. Genau das macht „Eigenes Bild entfernen" zu einem
+echten Vorgang statt zu einem Verlust: das importierte Bild lag die ganze Zeit darunter. **Der
+Katalogimport nennt `image_override_path` nirgends** — dieselbe Trennung wie bei `character_id`
+(ADR-0034) und bei den redaktionellen Spalten (ADR-0039).
+
+**Eine zentrale Auflösung.** `src/lib/catalog/image.ts` beantwortet die Frage einmal. Vorher
+bauten drei Komponenten denselben Pfad selbst zusammen — `FigureImage`, das `Thumb` der
+Sammlungstabelle und `AdminThumb` —, und eine zweite Quelle hätte an drei Stellen erinnert
+werden müssen. Jetzt nehmen alle Bildflächen eine fertige `src` entgegen, auch der Warenkorb,
+der sie mit der Zeile speichert.
+
+**Content-adressierte Pfade, `SKY-0007/<16 hex>.webp`.** Ein Ersatz bekommt einen **neuen** Pfad,
+damit kein Browser und kein CDN das ersetzte Bild aus dem Cache weiterliefert. Der SKY-ID-Ordner
+ist gleichzeitig die Zugriffsgrenze: `admin_set_image_override()` prüft, dass der Pfad zu genau
+dieser Figur gehört, und ein CHECK auf der Spalte prüft die Form.
+
+**Gemessen am 2026-09-06:** Nach dem Löschen eines Objekts liefert dessen öffentliche URL noch
+eine Weile `200` aus dem CDN-Cache (`cf-cache-status: HIT`); der Speicher selbst ist leer, eine
+cache-umgehende Anfrage antwortet `400`. Genau deshalb sind die Pfade content-adressiert: eine
+zwischengespeicherte Kopie liegt immer unter einer URL, auf die niemand mehr verweist, und kann
+das neue Bild nie verdrängen.
+
+**Reihenfolge beim Ersetzen: hochladen → verweisen → erst dann löschen.** Nach jedem denkbaren
+Fehlschlag hat die Figur ein Bild — das alte bis Schritt 2, danach das neue. Ein Fehler beim
+Löschen ist bewusst **kein** Fehler des Vorgangs: eine verwaiste Datei kostet Speicher, ein
+abgebrochener Vorgang kostet das Bild.
+
+**Sicherheit.** Bucket `catalog` ist **öffentlich lesbar** — Katalogbilder sind genau so
+öffentlich wie der Katalog — und **nur für Admins schreibbar**, über Storage-Policies mit dem
+Prädikat `public.is_shop_admin()`. Kein Service-Role-Key im Browser, keine anonymen Uploads.
+Der Dateityp wird **aus den ersten Bytes** bestimmt, nicht aus `File.type`: JPEG, PNG oder WebP,
+höchstens 2 MB, dreifach begrenzt (Client, Server-Action, Bucket).
+
+**Kein Re-Encoding in dieser Runde.** Auf WebP normalisieren, verkleinern und Metadaten
+entfernen bräuchte `sharp` oder Vergleichbares — eine schwere Abhängigkeit und eine eigene
+Entscheidung. Stattdessen: Typprüfung an den Bytes, harte Größengrenze am Bucket, und der
+Betreiber lädt bereits passend zugeschnittene Bilder hoch. **Offen**, bewusst.
+
+---
+
+## ADR-0047 — `−  7  +` ist Oberfläche, kein zweiter Weg in den Bestand
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Bestandskorrekturen sind zwei Tipper: ein roter `−`, die Zahl, ein grüner `+`.
+Kein Dialog, kein Grund, keine Notiz, keine Bestätigung. Der bisherige ausführliche Dialog bleibt
+vollständig erhalten und heißt jetzt **„Weitere Buchung"**.
+
+**Am Audit-Trail ändert sich nichts.** Jeder Tipp ist ein gewöhnlicher Aufruf von
+`record_inventory_movement()` mit `delta = ±1` und `reason = 'correction'`: Bestand und
+Journalzeile in einer Transaktion, Akteur aus `auth.uid()`, Journal append-only, `quantity` wird
+nie zugewiesen (ADR-0037). Die Knöpfe sind eine schnellere Art, denselben Satz zu sagen — kein
+zweiter Weg, Bestand zu ändern.
+
+**`correction` statt einer neuen Kategorie.** Der Constraint erlaubt sie in beide Richtungen, sie
+trägt keine Kostenbasis, und „ich habe nachgezählt" ist genau ihre Bedeutung. Eine Reason nur für
+ein Bedienelement zu erfinden hätte das Journal um eine Unterscheidung erweitert, die fachlich
+keine ist.
+
+**Schnelles Mehrfachtippen.** Dem Server wird ein **Delta** genannt, kein Zielwert: zwei
+gleichzeitige Anfragen können sich nicht überschreiben, und in der Datenbank serialisieren sie
+ohnehin am `select … for update` in `apply_inventory_movement()`. Deshalb wird jeder Tipp sofort
+gesendet, ohne Debounce und ohne Warteschlange. Auf dem Bildschirm hält `useOptimistic` die Summe
+der noch offenen Tipper und lässt sie genau dann fallen, wenn der aktualisierte Serverwert da
+ist — kein Effekt, kein manueller Abgleich, kein Zurückspringen.
+
+**Die Untergrenze ist `reserved`, nicht 0.** `reserved` ist nie negativ, also deckt die Regel
+beides ab. Der `−`-Knopf wird dort inaktiv — das spart eine Anfrage und erklärt sich selbst —,
+**ersetzt aber die Prüfung nicht**: `apply_inventory_movement()` weist die Buchung ab, und deren
+Meldung ist die, die zählt.
+
+**Was auf der Karte verschwunden ist.** `Reserviert` wird nur noch gezeigt, wenn es nicht null
+ist; in V1 schreibt es nichts, und eine Spalte voller Nullen auf jeder Karte sagt nichts.

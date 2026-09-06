@@ -14,19 +14,23 @@
  *
  * The box keeps its square whether or not an image exists, so the 27 figures
  * without one cause no layout shift.
+ *
+ * It takes a resolved `src`, never a file name: which of the three sources a
+ * picture comes from is decided once, in `imageSrc()` (ADR-0046). This
+ * component knows only that there is a URL or there is not.
  */
 import { de } from "@/lib/i18n/de";
 
-export function FigureImage({ file, name }: { file: string | null; name: string }) {
+export function FigureImage({ src, name }: { src: string | null; name: string }) {
   return (
     <div className="relative aspect-square w-full overflow-hidden rounded-sky-md bg-plate ring-1 ring-border/70">
-      {file ? (
+      {src ? (
         /* ADR-0026: the files are already optimised to 640 px,
            content-addressed and served from /public, so next/image would
            re-optimise them at runtime and bill image units for no gain. */
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={`/images/skylanders/${file}`}
+          src={src}
           alt={name}
           loading="lazy"
           decoding="async"

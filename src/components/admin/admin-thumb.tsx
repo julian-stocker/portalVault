@@ -4,14 +4,17 @@
  * Same plate idea as everywhere else, one size smaller: an editing table is
  * read by row, not admired. Lazy, sized, and unbothered by a missing file —
  * 27 collectibles have none.
+ *
+ * Takes a resolved `src` like every other image surface, so an administrator
+ * sees the picture they uploaded and not the one it replaced (ADR-0046).
  */
-export function AdminThumb({ file, name }: { file: string | null; name: string }) {
+export function AdminThumb({ src, name }: { src: string | null; name: string }) {
   return (
     <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-sky-sm bg-plate ring-1 ring-card-border/70">
-      {file ? (
+      {src ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
-          src={`/images/skylanders/${file}`}
+          src={src}
           alt=""
           aria-hidden="true"
           loading="lazy"

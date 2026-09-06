@@ -35,6 +35,7 @@ function figure(skyId: string, overrides: Partial<CatalogFigure> = {}): CatalogF
     searchIndex: skyId.toLowerCase(),
     marketPrice: 10,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     catalogVisible: true,
     canonicalName: skyId,

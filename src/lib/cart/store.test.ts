@@ -48,7 +48,7 @@ const BASH: CartArticle = {
   skyId: "SKY-0007",
   condition: "loose",
   name: "Bash",
-  imageFile: null,
+  imageSrc: null,
   price: 9.9,
 };
 

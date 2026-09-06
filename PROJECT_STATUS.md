@@ -7,6 +7,42 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V6 gebaut, Migration `0007` NOCH NICHT ausgeführt (2026-09-06, ADR-0045/0046/0047).** Drei
+Verbesserungen für die tägliche Verwaltung. Der Code ist vollständig, getestet und gebaut;
+**er setzt `0007` voraus und läuft ohne sie nicht.**
+
+*Quick Stock (ADR-0047).* Die Lagerkarte trägt `−  7  +` direkt an der Menge: ein Tipp, eine
+Bewegung, kein Dialog. Intern unverändert `record_inventory_movement()` mit `delta = ±1` und
+`reason = 'correction'` — Bestand und Journalzeile in einer Transaktion, Akteur `auth.uid()`,
+Journal append-only, `quantity` wird nie zugewiesen. Dem Server wird ein **Delta** genannt, kein
+Zielwert, deshalb können schnelle Mehrfachtipper nichts verlieren; in der Datenbank serialisieren
+sie am `select … for update`. Die Untergrenze ist `reserved`, geprüft in der Datenbank. Der
+ausführliche Dialog bleibt vollständig erhalten als **„Weitere Buchung"**.
+
+*Shoppreise (ADR-0045).* `shop_settings` hält **eine** Zeile mit dem Prozentsatz, initial
+**90 %**, im Admin änderbar. Der effektive Preis ist der manuelle Override oder
+`market_price × Prozent`, auf Cent gerundet, berechnet in **einer** Datenbankfunktion
+(`shop_price()`) auf `numeric`. **Kein abgeleiteter Preis wird gespeichert** — eine
+Marktpreis- oder Prozentsatzänderung wirkt sofort auf alle Auto-Positionen, ohne ein einziges
+Update. `shop_inventory.sale_price` ist ab jetzt der **Override**, keine zweite Preisspalte. Der
+CHECK `shop_inventory_listed_needs_price` entfällt; die Regel steht jetzt in `set_shop_listing()`
+und in `shop_offers()`, die beide den Marktpreis sehen. Im Admin heißt das Feld **„Shop-Preis"**;
+öffentlich bleibt „SkyIsles 9,90 €".
+
+*Bilder (ADR-0046).* `skylanders.image_override_path` plus der öffentliche Storage-Bucket
+`catalog`. Auflösung zentral in `src/lib/catalog/image.ts`: Override → importiertes `image_file`
+→ leere Bühne. Der Import fasst die Override-Spalte nie an. Upload, Ersetzen und Zurücksetzen auf
+`/admin/catalog/[skyId]`; Dateityp aus den **ersten Bytes**, höchstens 2 MB, content-adressierter
+Pfad, kein Service-Role-Key im Browser — geschrieben wird über Storage-Policies mit
+`is_shop_admin()`.
+
+⚠️ **`0007_shop_pricing_and_images.sql` ist geschrieben, aber NICHT ausgeführt, und der
+Storage-Bucket existiert noch nicht.** Anders als bei `0006` gibt es **keine** stille
+Rückfallebene: der Katalog liest `image_override_path` mit, also antwortet die Anwendung ohne die
+Migration mit einem Fehler. **Reihenfolge zwingend: erst `0007` anwenden, dann deployen.**
+Danach: `npm run verify:shop` und `npm run verify:inventory`.
+
+
 **V5 abgeschlossen und produktiv: öffentliches Angebot, Warenkorb und der Legacy-Anfangsbestand
 (2026-09-06, ADR-0043/0044).** Migration `0006` ist angewendet, der Legacy-Import ist real
 ausgeführt, alle Verifikationen sind grün.
@@ -448,6 +484,10 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
 | Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
 | `supabase/migrations/0006_public_shop_offers.sql` — `shop_offers()`, `non_collectible_categories()` | ✅ **ausgeführt und verifiziert** |
+| `supabase/migrations/0007_shop_pricing_and_images.sql` — Preise, Bilder, Storage-Policies | ⚠️ geschrieben, **nicht ausgeführt** |
+| Quick Stock `−  7  +` auf der Lagerkarte (ADR-0047) | ✅ Code, wartet auf `0007` |
+| Abgeleitete Shoppreise, `/admin` → Shop-Einstellungen (ADR-0045) | ✅ Code, wartet auf `0007` |
+| Bild-Upload im Admin, zentrale Bildauflösung (ADR-0046) | ✅ Code, wartet auf `0007` + Bucket |
 | Angebotszeile auf der Katalogkarte und Angebotsblock auf der Figurenseite (ADR-0043) | ✅ |
 | Warenkorb `/cart`, Header-Symbol mit Zähler, `localStorage` (ADR-0043) | ✅ |
 | `tools/verify-shop.mts` — schreibfreie Shop-Verifikation, `npm run verify:shop` | ✅ **15/15 bestanden** |
@@ -829,7 +869,10 @@ Keine davon blockiert V1.2.
 
 ## Nächster geplanter Schritt
 
-**Der erste echte Shopartikel.** Der Legacy-Bestand liegt im Lager, ist aber bewusst
+**Zuerst: `0007` anwenden** (siehe oben), dann `npm run verify:shop` und
+`npm run verify:inventory`, dann deployen.
+
+**Danach: der erste echte Shopartikel.** Der Legacy-Bestand liegt im Lager, ist aber bewusst
 ungelistet und ohne Preis. Der nächste Schritt ist eine bewusste Einzelentscheidung des
 Betreibers in `/admin/inventory`: Preis setzen, listen — und damit das erste öffentliche
 Angebot erzeugen. Keine Massenlistung, keine automatische Preisbildung (ADR-0037, ADR-0043).

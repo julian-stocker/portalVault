@@ -6,6 +6,7 @@ import { VisibilityToggle } from "@/components/admin/visibility-toggle";
 import { ADMIN_PAGE_SIZE, fetchAdminCatalog } from "@/lib/admin/queries";
 import { fetchSeries } from "@/lib/catalog/queries";
 import { groupLabel } from "@/lib/catalog/group";
+import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: `${de.admin.catalog} · ${de.admin.title}` };
@@ -113,7 +114,7 @@ export default async function AdminCatalogPage({
             {result.figures.map((figure) => (
               <tr key={figure.skyId} className="border-b border-border/60 last:border-0">
                 <td className="py-2 pr-3">
-                  <AdminThumb file={figure.imageFile} name={figure.publicName} />
+                  <AdminThumb src={imageSrc(figure)} name={figure.publicName} />
                 </td>
                 <td className="py-2 pr-3 font-mono text-xs text-muted">{figure.skyId}</td>
                 <td className="py-2 pr-3">

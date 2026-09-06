@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 
 import { InventoryView } from "@/components/admin/inventory-view";
-import { fetchInventory, fetchMovements, type Movement } from "@/lib/admin/inventory";
+import {
+  fetchInventory,
+  fetchMovements,
+  fetchShopSettings,
+  type Movement,
+} from "@/lib/admin/inventory";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { de } from "@/lib/i18n/de";
 
@@ -20,9 +25,12 @@ export const metadata: Metadata = { title: `${de.inventory.title} · ${de.admin.
  * fixture out of the operational list without a single name being matched.
  */
 export default async function InventoryPage() {
-  const [catalog, series] = await Promise.all([
+  const [catalog, series, settings] = await Promise.all([
     fetchCatalog({ includeHidden: true }),
     fetchSeries(),
+    // The shop-wide percentage, so every card can say what "automatic" means
+    // instead of showing a number with no explanation (ADR-0045).
+    fetchShopSettings(),
   ]);
   const { positions, outsideScope } = await fetchInventory(catalog);
 
@@ -45,6 +53,7 @@ export default async function InventoryPage() {
         catalog={catalog}
         series={series}
         outsideScope={outsideScope.length}
+        percentage={settings.pricePercentage}
       />
     </main>
   );

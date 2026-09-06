@@ -20,7 +20,12 @@
 import { revalidatePath } from "next/cache";
 
 import { isAdmin } from "@/lib/auth/admin";
-import { isCondition, isMovementReason } from "@/lib/admin/inventory-model";
+import {
+  isCondition,
+  isMovementReason,
+  isValidPercentage,
+} from "@/lib/admin/inventory-model";
+import { isOverridePath } from "@/lib/catalog/image";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
 
@@ -142,12 +147,18 @@ export async function bookMovement(input: {
 }
 
 /**
- * Sets price and listing together, because the database function does.
+ * Sets the manual price override and the listing together.
  *
  * `set_shop_listing` writes both plus the internal note in one upsert, so a
  * caller that means to change one has to pass the other two as they are.
  * That is why both editors read from the row they are editing rather than
  * from a form that only holds one field.
+ *
+ * `salePrice` is the **override** since ADR-0045: null means "no override,
+ * use the automatic price", not "no price". Which is why this function can
+ * no longer refuse a listing just because the override is null — whether a
+ * position has a price depends on the market price and the shop percentage,
+ * and only the database can see both. It says so with a sentence of its own.
  *
  * It never touches quantity or reserved, and it never touches
  * `skylanders.market_price` — the reference price belongs to the catalog
@@ -165,12 +176,7 @@ export async function setListing(input: {
   if (input.salePrice !== null && !(input.salePrice > 0)) {
     return { ok: false, message: de.inventory.pricePositive };
   }
-  if (input.isListed && input.salePrice === null) {
-    // The database says the same thing; saying it here says it in German.
-    return { ok: false, message: de.inventory.listingNeedsPrice };
-  }
-
-  return call(
+  const result = await call(
     "set_shop_listing",
     {
       p_sky_id: input.skyId,
@@ -179,6 +185,55 @@ export async function setListing(input: {
       p_is_listed: input.isListed,
       p_note: input.note?.trim() ? input.note.trim() : null,
     },
-    ["/admin/inventory"],
+    // The public catalog too: a listing is what makes an offer appear on a
+    // card, and the card is cached with the page.
+    ["/admin/inventory", "/", "/cart"],
+  );
+
+  // The one refusal worth translating. Everything else the database rejects
+  // is a bug, not a thing an operator did.
+  if (!result.ok && input.isListed) {
+    return { ok: false, message: de.inventory.listingNeedsPrice };
+  }
+  return result;
+}
+
+/**
+ * The shop-wide percentage of the market price (ADR-0045).
+ *
+ * One number, and changing it moves every automatic price at once — no batch
+ * update, because no row stores an automatic price. Manual overrides are
+ * untouched by construction: they are a different column.
+ *
+ * Revalidates the public surfaces as well as the admin ones, since every
+ * automatic price on every card has just changed.
+ */
+export async function setShopPercentage(percentage: number): Promise<AdminResult> {
+  if (!isValidPercentage(percentage)) {
+    return { ok: false, message: de.admin.percentageRange };
+  }
+  return call(
+    "admin_set_shop_percentage",
+    { p_percentage: percentage },
+    ["/admin", "/admin/inventory", "/", "/cart"],
+  );
+}
+
+/**
+ * Points a figure at an uploaded image, or clears the override (ADR-0046).
+ *
+ * The upload itself happens in `lib/admin/images.ts`; this only records which
+ * object the figure should use. `image_file` is never touched, so clearing
+ * the override brings the imported picture back rather than leaving a gap.
+ */
+export async function setImageOverride(skyId: string, path: string | null): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (path !== null && !isOverridePath(path, skyId)) {
+    return { ok: false, message: de.admin.imageFailed };
+  }
+  return call(
+    "admin_set_image_override",
+    { p_sky_id: skyId, p_path: path ?? "" },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/admin/inventory", "/", "/collection"],
   );
 }

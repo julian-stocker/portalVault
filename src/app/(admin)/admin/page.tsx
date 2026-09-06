@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { ShopSettings } from "@/components/admin/shop-settings";
+import { fetchShopSettings } from "@/lib/admin/inventory";
 import { fetchAdminCategories } from "@/lib/admin/queries";
 import { de } from "@/lib/i18n/de";
 
@@ -9,12 +11,13 @@ export const metadata: Metadata = { title: de.admin.title };
 /**
  * The way in.
  *
- * Deliberately thin: two links and the one number that says whether the
- * classification is finished. Shop and inventory arrive here later; a
- * dashboard invented before there is anything to show would be furniture.
+ * Deliberately thin: two links, the one number that says whether the
+ * classification is finished, and the one setting that prices the whole shop
+ * (ADR-0045). Still not a dashboard — everything here is either a way in or
+ * a thing to change.
  */
 export default async function AdminPage() {
-  const categories = await fetchAdminCategories();
+  const [categories, settings] = await Promise.all([fetchAdminCategories(), fetchShopSettings()]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
 
   return (
@@ -44,6 +47,10 @@ export default async function AdminPage() {
               : " · alle klassifiziert"}
           </span>
         </Link>
+      </div>
+
+      <div className="mt-8">
+        <ShopSettings percentage={settings.pricePercentage} />
       </div>
 
       <p className="mt-8 text-sm text-muted">{de.admin.completionNote}</p>

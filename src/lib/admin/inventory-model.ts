@@ -45,6 +45,23 @@ export function isMovementReason(value: unknown): value is MovementReason {
   return typeof value === "string" && (MOVEMENT_REASONS as readonly string[]).includes(value);
 }
 
+/**
+ * Where the price a position is offered for came from (ADR-0045).
+ *
+ * `manual`    somebody typed it; it is never recomputed
+ * `automatic` derived from the market price and the shop-wide percentage
+ *
+ * Sent by the database rather than derived here from `salePrice === null`.
+ * The same information, but stated once instead of re-inferred wherever it
+ * is displayed.
+ */
+export const PRICE_SOURCES = ["manual", "automatic"] as const;
+export type PriceSource = (typeof PRICE_SOURCES)[number];
+
+export function isPriceSource(value: unknown): value is PriceSource {
+  return typeof value === "string" && (PRICE_SOURCES as readonly string[]).includes(value);
+}
+
 export type InventoryRow = {
   inventoryId: number;
   skyId: string;
@@ -52,11 +69,39 @@ export type InventoryRow = {
   quantity: number;
   reserved: number;
   available: number;
+  /**
+   * The MANUAL price override, or null when the automatic price applies.
+   *
+   * Since ADR-0045 this is not "the price" — `effectivePrice` is. Null here
+   * means "no override", not "no price".
+   */
   salePrice: number | null;
+  /**
+   * What the shop actually charges: the override, or market x percentage.
+   * Null when there is neither an override nor a market price to derive one
+   * from — such a position cannot be listed.
+   */
+  effectivePrice: number | null;
+  priceSource: PriceSource;
   isListed: boolean;
   note: string | null;
   updatedAt: string;
 };
+
+/** The shop-wide configuration an administrator can change (ADR-0045). */
+export type ShopSettings = {
+  /** Percent of the market price. 90 means "ask nine tenths". */
+  pricePercentage: number;
+  updatedAt: string | null;
+};
+
+/** The bounds the database enforces. Stated here so a form can say them. */
+export const MIN_PERCENTAGE = 0.01;
+export const MAX_PERCENTAGE = 500;
+
+export function isValidPercentage(value: number): boolean {
+  return Number.isFinite(value) && value >= MIN_PERCENTAGE && value <= MAX_PERCENTAGE;
+}
 
 /** A position together with the figure it holds. */
 export type InventoryPosition = InventoryRow & {

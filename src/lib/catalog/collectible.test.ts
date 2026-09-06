@@ -25,6 +25,7 @@ function figure(categoryName: string, name = "Drobot"): CatalogFigure {
     displayNameOverride: null,
     marketPrice: 12.99,
     imageFile: null,
+    imageOverridePath: null,
     displayName: name,
     sortBaseName: name,
     sortVariantLabel: null,

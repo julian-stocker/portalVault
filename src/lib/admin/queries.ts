@@ -31,6 +31,8 @@ export type AdminFigure = {
   categoryName: string;
   catalogGroup: CatalogGroup | null;
   imageFile: string | null;
+  /** An administrator's uploaded picture, or null (ADR-0046). */
+  imageOverridePath: string | null;
   isActive: boolean;
   catalogVisible: boolean;
 };
@@ -42,6 +44,7 @@ type Row = {
   series_code: string;
   category_id: number;
   image_file: string | null;
+  image_override_path: string | null;
   is_active: boolean;
   catalog_visible: boolean;
   display_name_override: string | null;
@@ -56,7 +59,7 @@ type Row = {
  * from a public row.
  */
 const ADMIN_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, image_file, is_active, catalog_visible, display_name_override";
+  "sky_id, name, slug, series_code, category_id, image_file, image_override_path, is_active, catalog_visible, display_name_override";
 
 type Lookups = {
   series: Map<string, string>;
@@ -100,6 +103,7 @@ function toAdminFigure(row: Row, index: Lookups): AdminFigure {
     categoryName: category?.name ?? "",
     catalogGroup: category?.group ?? null,
     imageFile: row.image_file,
+    imageOverridePath: row.image_override_path,
     isActive: row.is_active,
     catalogVisible: row.catalog_visible,
   };

@@ -341,6 +341,31 @@ Kein Scraping, keine automatische Zuordnung, keine Namensheuristik. Beschreibung
 bei SkyIsles selbst. Das Werkzeug prüft vollständig, bevor es schreibt, löscht nie und setzt
 keine bestehende Verknüpfung zurück.
 
+### Bilder — eine Auflösung, drei Quellen
+
+```
+image_override_path  →  Supabase Storage, Bucket `catalog`   (Admin, sofort wirksam)
+image_file           →  /public/images/skylanders            (Import, per Deploy)
+nichts               →  leere Bildbühne
+```
+
+`src/lib/catalog/image.ts` beantwortet das einmal; jede Bildfläche — Katalogkarte, Detailseite,
+Sammlungstabelle, Adminliste, Lagerkarte, Warenkorb — nimmt eine fertige `src` entgegen
+(ADR-0046). Vorher bauten drei Komponenten denselben Pfad selbst.
+
+### Preise — nichts Abgeleitetes wird gespeichert
+
+```
+shop_settings.price_percentage  (eine Zeile, initial 90 %)
+skylanders.market_price         (Referenz, aus dem Import)
+shop_inventory.sale_price       (manueller Override, meist NULL)
+        └─ public.shop_price(override, market, pct) ──▶ effektiver Preis
+```
+
+Die Funktion ist die einzige Stelle, an der ein Shoppreis entsteht (ADR-0045). Weil kein
+abgeleiteter Wert in einer Zeile liegt, wirken eine Marktpreisänderung und eine
+Prozentsatzänderung sofort auf alle automatisch bepreisten Positionen — ohne ein einziges Update.
+
 ### Das Angebot im Browser
 
 Katalog, Figurenseite und `/cart` laden das öffentliche Angebot mit **einem** Aufruf von
@@ -349,7 +374,8 @@ gereicht. 561 Karten aus einer Antwort statt 561 Anfragen (ADR-0043).
 
 ```
 shop_inventory ──(security definer)──▶ shop_offers()  ──▶ Server Component
-                                        4 Werte             │
+   + shop_settings + market_price        4 Werte             │
+                                         (effektiver Preis)  │
                                                             ▼
                                        localStorage ◀──▶ Warenkorb (Browser)
 ```

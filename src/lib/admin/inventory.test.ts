@@ -119,8 +119,14 @@ describe("price and listing", () => {
     expect(code(CARD)).not.toMatch(/marketPrice\s*[:=][^=]/);
   });
 
-  it("refuse a listing without a price, in German before in SQL", () => {
-    expect(actions).toContain("input.isListed && input.salePrice === null");
+  it("leave 'can this be listed' to the database, and translate its refusal", () => {
+    // Until ADR-0045 the action could answer this itself: no sale_price
+    // meant no price. It cannot any more — whether a position has a price
+    // now depends on the market price and the shop-wide percentage, and only
+    // the database sees both. So it asks, and turns a refusal into German.
+    expect(actions).not.toContain("input.isListed && input.salePrice === null");
+    expect(actions).toContain("if (!result.ok && input.isListed) {");
+    expect(actions).toContain("de.inventory.listingNeedsPrice");
   });
 
   it("are independent of stock", () => {

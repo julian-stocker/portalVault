@@ -303,6 +303,54 @@ aus ADR-0029 an **einer** Stelle in der Datenbank und spiegelt `src/lib/catalog/
 `src/lib/shop/offer.test.ts` liest beide Dateien, `npm run verify:shop` vergleicht Datenbank und
 Anwendung zur Laufzeit.
 
+### 3.3f `shop_settings` — eine Zeile, typisiert (Migration `0007`)
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `id` | `boolean` | Primärschlüssel, `check (id)` — **genau eine Zeile möglich** |
+| `price_percentage` | `numeric(6,2)` | Standard `90.00`, `> 0` und `<= 500` |
+| `updated_at` / `updated_by` | | wer zuletzt geändert hat, `on delete set null` |
+
+**Bewusst kein Key/Value.** Ein `settings(key, value jsonb)` müsste jeder Leser casten und neu
+validieren, ein Tippfehler im Schlüssel läse sich als „nicht gesetzt", und der CHECK oben könnte
+gar nicht existieren. Der Singleton ist ein Primärschlüssel, der nur einen Wert annehmen kann —
+kein Trigger, kein Aufräumjob.
+
+RLS aktiv, **keine** Client-Rechte. Gelesen über `admin_shop_settings()`, geschrieben über
+`admin_set_shop_percentage()`, beide `security definer` mit `is_shop_admin()`.
+
+### 3.3g Der effektive Shoppreis (Migration `0007`, ADR-0045)
+
+`public.shop_price(override, market_price, percentage)` — `immutable`, `numeric` durchgehend,
+`round(x, 2)`:
+
+```
+override ist nicht NULL          → override
+market_price oder pct ist NULL   → NULL
+sonst                            → round(market_price * pct / 100, 2)
+```
+
+**Die einzige Stelle, an der ein Shoppreis entsteht.** Aufgerufen von `shop_offers()`,
+`admin_shop_inventory()` und `set_shop_listing()`. `shop_inventory.sale_price` ist ab hier der
+**manuelle Override**, nicht „der Preis"; NULL heißt „es gilt die Regel". Es wird **nirgends** ein
+abgeleiteter Preis gespeichert — deshalb wirken Marktpreis- und Prozentsatzänderungen ohne ein
+einziges Update.
+
+**Entfallen:** der CHECK `shop_inventory_listed_needs_price`. Ein CHECK kann die Frage nicht mehr
+beantworten, weil sie an zwei anderen Tabellen hängt; die Regel steht jetzt in
+`set_shop_listing()` (weist eine Listung ohne effektiven Preis ab) und in `shop_offers()` (liefert
+keine Zeile ohne einen). Begründung vollständig in ADR-0045.
+
+### 3.3h `skylanders.image_override_path` (Migration `0007`, ADR-0046)
+
+Nullbare Spalte, Pfad im öffentlichen Storage-Bucket `catalog`, CHECK
+`^SKY-[0-9]{4}/[0-9a-f]{16}\.(webp|png|jpg)$`. NULL heißt „das importierte `image_file` gilt".
+
+**Der Katalogimport schreibt sie nie** — dieselbe Trennung wie bei `character_id` und den
+redaktionellen Spalten. Gesetzt und gelöscht wird über `admin_set_image_override()`, das
+zusätzlich prüft, dass der Pfad zum eigenen SKY-ID gehört. Änderungen landen im redaktionellen
+Journal `catalog_admin_changes` (Feld `image_override_path`), geschrieben vom Trigger.
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -682,6 +730,13 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   `non_collectible_categories()` an. **Rein additiv:** keine Tabelle, keine Spalte, keine Policy,
   kein Tabellenrecht, kein `alter table`. Rücknahme wäre `drop function` auf beide.
   **Am 2026-09-06 ausgeführt**, `npm run verify:shop` 15/15.
+- Siebte Migration: `0007_shop_pricing_and_images.sql` — `shop_settings`, `shop_price()`,
+  abgeleitete Preise in `shop_offers()` und `admin_shop_inventory()`,
+  `skylanders.image_override_path`, Storage-Bucket `catalog` samt Policies. **Überwiegend
+  additiv, mit einer bewussten Lockerung:** der CHECK `shop_inventory_listed_needs_price` wird
+  entfernt, weil er die Frage nicht mehr beantworten kann (ADR-0045). Keine Zeile wird geändert,
+  keine Spalte gelöscht. Zwei Funktionen werden gedropt und neu angelegt, weil PostgreSQL den
+  Rückgabetyp nicht in place ändert.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

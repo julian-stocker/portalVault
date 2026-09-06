@@ -9,8 +9,14 @@
  *
  * Everything it writes goes through the shop functions (ADR-0037): stock via
  * a movement, price and listing via `set_shop_listing`. The card never
- * assigns `quantity`, never touches `reserved`, and never confuses SkyIsles'
+ * assigns `quantity`, never touches `reserved`, and never confuses the shop
  * price with the catalog's market price.
+ *
+ * V6 split the daily job from the rare one (ADR-0047). Correcting a shelf
+ * count is `−  7  +`, right where the number is; everything that needs a
+ * reason, a note or a cost — a purchase, a sale, a write-off — lives behind
+ * "Weitere Buchung". Both book an ordinary movement; only the number of
+ * interactions differs.
  */
 "use client";
 
@@ -18,10 +24,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { AdminThumb } from "@/components/admin/admin-thumb";
+import { PriceEditor } from "@/components/admin/price-editor";
 import { StockDialog } from "@/components/admin/stock-dialog";
+import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
 import type { InventoryPosition, Movement } from "@/lib/admin/inventory-model";
 import { formatNumber, formatPrice } from "@/lib/format";
+import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
 function Figure({ label, value, tone }: { label: string; value: string; tone?: string }) {
@@ -36,22 +45,37 @@ function Figure({ label, value, tone }: { label: string; value: string; tone?: s
 export function InventoryCard({
   position,
   movements,
+  percentage,
 }: {
   position: InventoryPosition;
   /** Already loaded by the page; the card renders, it does not fetch. */
   movements: readonly Movement[];
+  /** The shop-wide percentage, for the "Automatisch · 90 %" line (ADR-0045). */
+  percentage: number;
 }) {
   const router = useRouter();
   const [booking, setBooking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
-  const [price, setPrice] = useState(
-    position.salePrice === null ? "" : String(position.salePrice).replace(".", ","),
-  );
-  const [editingPrice, setEditingPrice] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const figure = position.figure;
+
+  /**
+   * What this position would cost without its override.
+   *
+   * Only needed while an override IS set — otherwise `effectivePrice` already
+   * is the automatic price and the database computed it. This is the one
+   * place money is worked out in the browser, it never leaves the preview,
+   * and it is rounded the same way `public.shop_price` rounds: to cents,
+   * half away from zero, on a value scaled to integers so no binary fraction
+   * can drift.
+   */
+  const automaticPrice =
+    figure?.marketPrice == null
+      ? null
+      : Math.round(figure.marketPrice * percentage) / 100;
+
   const conditionLabel =
     position.condition === "loose" ? de.inventory.conditionLoose : de.inventory.conditionBoxed;
 
@@ -73,32 +97,17 @@ export function InventoryCard({
         setFailed(result.message);
         return;
       }
-      setEditingPrice(false);
       router.refresh();
     });
-  }
-
-  function savePrice() {
-    const text = price.trim().replace(",", ".");
-    if (text === "") {
-      // Clearing the price also takes the position out of the shop: the
-      // database refuses a listing without one, and silently keeping it
-      // listed would be a lie.
-      save({ salePrice: null, isListed: false });
-      return;
-    }
-    const value = Number(text);
-    if (!(value > 0)) {
-      setFailed(de.inventory.pricePositive);
-      return;
-    }
-    save({ salePrice: value });
   }
 
   return (
     <article className="flex flex-col gap-3 rounded-sky-lg bg-surface/80 p-3 ring-1 ring-border/70">
       <div className="flex items-start gap-3">
-        <AdminThumb file={figure?.imageFile ?? null} name={figure?.displayName ?? position.skyId} />
+        <AdminThumb
+          src={figure ? imageSrc(figure) : null}
+          name={figure?.displayName ?? position.skyId}
+        />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">{figure?.displayName ?? position.skyId}</p>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
@@ -126,61 +135,58 @@ export function InventoryCard({
         </button>
       </div>
 
-      <dl className="grid grid-cols-3 gap-x-4 gap-y-2 sm:grid-cols-5">
-        <Figure label={de.inventory.quantity} value={formatNumber(position.quantity)} />
-        <Figure label={de.inventory.reserved} value={formatNumber(position.reserved)} />
-        <Figure
-          label={de.inventory.available}
-          value={formatNumber(position.available)}
-          tone={position.available > 0 ? "text-foreground" : "text-muted"}
-        />
-        <Figure
-          label={de.inventory.marketPrice}
-          value={
-            figure?.marketPrice === null || figure === null
-              ? "—"
-              : formatPrice(figure.marketPrice)
-          }
-          tone="text-muted"
-        />
+      {/* The daily control, given the room it deserves: the number and the
+          two ways to change it, on one line, at 44 px each (ADR-0047). */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div className="min-w-0">
-          <dt className="text-[11px] text-muted">{de.inventory.salePrice}</dt>
-          <dd className="text-sm tabular-nums">
-            {editingPrice ? (
-              <span className="flex items-center gap-1">
-                <input
-                  autoFocus
-                  inputMode="decimal"
-                  value={price}
-                  onChange={(event) => setPrice(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") savePrice();
-                    if (event.key === "Escape") setEditingPrice(false);
-                  }}
-                  className="min-h-9 w-20 rounded-sky-sm bg-surface px-2 text-sm tabular-nums ring-1 ring-border/70"
-                />
-                <button
-                  type="button"
-                  onMouseDown={savePrice}
-                  className="text-[11px] text-accent underline"
-                >
-                  {de.admin.save}
-                </button>
-              </span>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setEditingPrice(true)}
-                className="underline decoration-dotted underline-offset-4 hover:decoration-solid"
-              >
-                {position.salePrice === null
-                  ? de.inventory.noPrice
-                  : formatPrice(position.salePrice)}
-              </button>
-            )}
-          </dd>
+          <p className="text-[11px] text-muted">{de.inventory.quantity}</p>
+          <StockStepper
+            skyId={position.skyId}
+            condition={position.condition}
+            quantity={position.quantity}
+            reserved={position.reserved}
+            onFailed={setFailed}
+          />
         </div>
-      </dl>
+
+        <dl className="flex flex-wrap items-start gap-x-5 gap-y-2">
+          {/* Reserved is shown only when it is not zero — a column of noughts
+              on every card says nothing, and nothing writes it in V1. */}
+          {position.reserved > 0 ? (
+            <Figure label={de.inventory.reserved} value={formatNumber(position.reserved)} />
+          ) : null}
+          <Figure
+            label={de.inventory.available}
+            value={formatNumber(position.available)}
+            tone={position.available > 0 ? "text-foreground" : "text-muted"}
+          />
+          <Figure
+            label={de.inventory.marketPrice}
+            value={
+              figure?.marketPrice === null || figure === null
+                ? "—"
+                : formatPrice(figure.marketPrice)
+            }
+            tone="text-muted"
+          />
+          <div className="min-w-0">
+            <dt className="text-[11px] text-muted">{de.inventory.salePrice}</dt>
+            <dd>
+              {/* What the shop charges, and whether it follows the rule
+                  (ADR-0045). The automatic figure is the database's, not a
+                  second calculation. */}
+              <PriceEditor
+                position={position}
+                automaticPrice={
+                  position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
+                }
+                percentage={percentage}
+                onFailed={setFailed}
+              />
+            </dd>
+          </div>
+        </dl>
+      </div>
 
       {failed ? (
         <p role="alert" className="text-sm text-danger">

@@ -421,6 +421,32 @@ zurückgegebenen Schlüssel gar nichts belegen würde.
 `shop_offers()` liefert trotzdem **0 Zeilen** — weil beide Figuren inaktiv sind. Der Katalogfilter
 wirkt also an echten Daten, nicht nur im Test.
 
+**Shop-Einstellungen (Migration `0007`, ADR-0045).** `shop_settings` hat RLS und **keine**
+Client-Rechte. Gelesen wird über `admin_shop_settings()`, geschrieben über
+`admin_set_shop_percentage()` — beide `security definer`, beide fragen `is_shop_admin()` selbst,
+beide `revoke … from public, anon`. Anonym und für gewöhnliche Angemeldete ist der Prozentsatz
+weder les- noch schreibbar. Der Wertebereich (0 < p ≤ 500) steht als CHECK **und** in der
+Funktion, damit ein Aufrufer einen Satz statt eines Constraint-Namens bekommt.
+
+**Was der Preis öffentlich preisgibt: eine Zahl.** `shop_offers()` liefert den **effektiven**
+Preis. Ob er getippt oder gerechnet wurde, wie hoch der Prozentsatz ist und was in `sale_price`
+steht, verlässt die Datenbank nicht — `verify:shop` weist `sale_price`, `price_source` und
+`price_percentage` ausdrücklich als Spaltennamen ab.
+
+**Bilder (Migration `0007`, ADR-0046).** Der Bucket `catalog` ist **öffentlich lesbar** —
+Katalogbilder sind so öffentlich wie der Katalog — und **nur für Admins schreibbar**:
+`storage.objects`-Policies für INSERT, UPDATE und DELETE mit dem Prädikat
+`public.is_shop_admin()`. **Kein Service-Role-Key im Browser und keiner im Uploadpfad**: die
+Server-Action benutzt die Session des Administrators, und die Policy entscheidet. Anonyme Uploads
+gibt es nicht.
+
+Der Dateityp wird **aus den ersten Bytes** bestimmt (JPEG, PNG, RIFF/WEBP), nicht aus
+`File.type` — der kommt vom Browser und ist, was der Client behauptet. Eine als `image/webp`
+angekündigte HTML-Datei oder ein SVG mit `<script>` fällt dabei durch. Die Größe ist an drei
+Stellen begrenzt (Client, Server-Action, Bucket-Limit 2 MB), der Zielpfad ist
+content-adressiert und liegt zwingend im Ordner der eigenen SKY-ID; gelöscht wird nur der Pfad,
+den die Datenbank als in Gebrauch nennt — nie einer, der aus dem Browser kam.
+
 **Der Warenkorb schreibt nichts.** Er liegt in `localStorage` im Browser des Besuchers: keine
 Tabelle, kein Konto, keine Server-Action, keine Reservierung. `reserved` wird von nichts in V1
 geschrieben. Ein Warenkorb kann daher weder Bestand binden noch Geschäftsdaten offenlegen; das

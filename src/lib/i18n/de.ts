@@ -259,6 +259,29 @@ export const de = {
     noteTooLong: "Die Notiz ist zu lang.",
     completionNote:
       "Verborgene Figuren zählen weder im Zähler noch im Nenner der Sammlungsfortschritts.",
+
+    /** Shop-Einstellungen (ADR-0045). */
+    shopSettings: "Shop-Einstellungen",
+    defaultShopPrice: "Standard-Shoppreis",
+    percentageLabel: "Prozent vom Marktpreis",
+    percentageHint: (n: string) =>
+      `${n} % vom Marktpreis, wenn kein manueller Preis gesetzt ist.`,
+    percentageRange: "Der Prozentsatz muss größer als 0 und höchstens 500 sein.",
+    percentageSaved: "Gespeichert.",
+
+    /** Bildverwaltung (ADR-0046). */
+    image: "Bild",
+    imageChange: "Bild ändern",
+    imageReplace: "Bild ersetzen",
+    imageRemove: "Eigenes Bild entfernen",
+    imageOwn: "Eigenes Bild",
+    imageImported: "Importiertes Bild",
+    imageNone: "Kein Bild",
+    imageUploading: "Wird hochgeladen …",
+    imageFailed: "Das Bild konnte nicht gespeichert werden.",
+    imageTooLarge: "Die Datei ist zu groß (höchstens 2 MB).",
+    imageWrongType: "Nur JPEG, PNG oder WebP.",
+    imageHint: "JPEG, PNG oder WebP, höchstens 2 MB. Das importierte Bild bleibt erhalten.",
   },
 
   /** Lagerverwaltung des Betreibers (ADR-0037). Nur für Admins. */
@@ -274,7 +297,14 @@ export const de = {
     reserved: "Reserviert",
     available: "Verfügbar",
     marketPrice: "Marktpreis",
-    salePrice: "SkyIsles-Preis",
+    /** Im Adminbereich „Shop-Preis" — eindeutiger als der Markenname (V6). */
+    salePrice: "Shop-Preis",
+    priceAutomatic: (n: string) => `Automatisch · ${n} %`,
+    priceManual: "Manuell",
+    priceNoBasis: "Kein Marktpreis",
+    priceModeAuto: (price: string) => `Automatisch (${price})`,
+    priceModeManual: "Manueller Preis",
+    priceResetAuto: "Auf Automatik zurücksetzen",
     noPrice: "kein Preis",
     listed: "Gelistet",
     notListed: "Nicht gelistet",
@@ -288,7 +318,10 @@ export const de = {
     listingOn: "Gelistet",
     listingOff: "Nicht gelistet",
     seriesAll: "Alle Serien",
-    changeStock: "Bestand ändern",
+    changeStock: "Weitere Buchung",
+    increase: "Bestand um 1 erhöhen",
+    decrease: "Bestand um 1 verringern",
+    atFloor: "Bestand kann nicht weiter verringert werden.",
     newPosition: "Position anlegen",
     delta: "Veränderung",
     reason: "Grund",
@@ -319,7 +352,8 @@ export const de = {
     deltaRequired: "Die Veränderung muss eine Zahl ungleich null sein.",
     costPositive: "Stückkosten müssen größer als 0 sein.",
     pricePositive: "Der Preis muss größer als 0 sein.",
-    listingNeedsPrice: "Ohne Preis kann nichts gelistet werden.",
+    listingNeedsPrice:
+      "Ohne Marktpreis und ohne manuellen Preis kann nichts gelistet werden.",
     wouldGoNegative: "Der Bestand würde unter das Reservierte fallen.",
   },
 

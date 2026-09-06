@@ -52,6 +52,7 @@ function figure(skyId: string, seriesCode: string, seriesPosition: number): Cata
     searchIndex: skyId.toLowerCase(),
     marketPrice: null,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     element: null,
     characterId: 1,

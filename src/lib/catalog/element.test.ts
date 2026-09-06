@@ -32,6 +32,7 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
     searchIndex: "drobot",
     marketPrice: 1.99,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     element: null,
     characterId: null,

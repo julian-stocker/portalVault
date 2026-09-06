@@ -40,6 +40,7 @@ import {
   type CardOwnership,
 } from "@/lib/catalog/card";
 import { elementChipClass, elementLabel } from "@/lib/catalog/element";
+import { imageSrc } from "@/lib/catalog/image";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -126,7 +127,7 @@ export function FigureCard({
   const inner = (
     <>
       <div className="relative">
-        <FigureImage file={figure.imageFile} name={figure.displayName} />
+        <FigureImage src={imageSrc(figure)} name={figure.displayName} />
         {/* The seal, catalog only — `marksOwnership` is the same rule the
             frame follows, so the two can never disagree. */}
         {framed ? <CollectedCrown /> : null}

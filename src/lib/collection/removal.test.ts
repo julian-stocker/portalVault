@@ -21,6 +21,7 @@ function entry(skyId: string, marketPrice: number | null = 10, quantity = 1): Co
     displayNameOverride: null,
     marketPrice,
     imageFile: null,
+    imageOverridePath: null,
     displayName: "Drobot",
     sortBaseName: "Drobot",
     sortVariantLabel: null,

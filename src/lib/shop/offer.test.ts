@@ -38,6 +38,8 @@ function code(path: string): string {
 }
 
 const OFFERS_SQL = "supabase/migrations/0006_public_shop_offers.sql";
+/** 0007 replaced shop_offers() to derive the price (ADR-0045). */
+const PRICING_SQL = "supabase/migrations/0007_shop_pricing_and_images.sql";
 const FOUNDATION_SQL = "supabase/migrations/0003_shop_foundation.sql";
 
 describe("what a card says", () => {
@@ -111,29 +113,56 @@ describe("the index", () => {
 });
 
 describe("what the public projection may return", () => {
-  const sql = code(OFFERS_SQL);
+  // The live definition is 0007's; 0006 created the first one.
+  const sql = code(PRICING_SQL);
 
   it("returns four values and no more", () => {
-    const signature = /returns table \(([\s\S]*?)\)\n/.exec(sql)?.[1] ?? "";
+    const offers = sql.slice(sql.indexOf("create or replace function public.shop_offers()"));
+    const signature = /returns table \(([\s\S]*?)\)\n/.exec(offers)?.[1] ?? "";
     const columns = signature
       .split("\n")
       .map((line) => line.trim().split(/\s+/)[0])
       .filter(Boolean);
-    expect(columns).toEqual(["sky_id", "condition", "sale_price", "available"]);
+    expect(columns).toEqual(["sky_id", "condition", "price", "available"]);
   });
 
   it("never returns a stock level", () => {
     // The whole point of the boolean. `available_quantity` may be read to
     // compute it; it may not be selected.
+    const offers = sql.slice(
+      sql.indexOf("create or replace function public.shop_offers()"),
+      sql.indexOf("comment on function public.shop_offers()"),
+    );
     for (const column of ["i.quantity", "i.reserved", "i.note"]) {
-      expect(sql).not.toContain(column);
+      expect(offers).not.toContain(column);
     }
-    expect(sql).toContain("(i.available_quantity > 0) as available");
+    expect(offers).toContain("(i.available_quantity > 0) as available");
   });
 
   it("never touches the journal", () => {
     // Purchase prices, reasons and actors live there (docs/SECURITY.md).
     expect(sql).not.toContain("inventory_movements");
+  });
+
+  it("publishes one price and never says where it came from", () => {
+    // ADR-0045: the override, the percentage and the manual/automatic flag
+    // are all internal. The public gets a number.
+    const offers = sql.slice(
+      sql.indexOf("create or replace function public.shop_offers()"),
+      sql.indexOf("comment on function public.shop_offers()"),
+    );
+    expect(offers).toContain("public.shop_price(i.sale_price, s.market_price, st.price_percentage) as price");
+    expect(offers).not.toContain("price_source");
+    expect(offers).not.toContain("as percentage");
+  });
+
+  it("never offers something it cannot price", () => {
+    // The half of the dropped CHECK that a constraint could not carry: a
+    // market price cleared after listing leaves no effective price.
+    const offers = sql.slice(sql.indexOf("create or replace function public.shop_offers()"));
+    expect(offers).toContain(
+      "public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null",
+    );
   });
 
   it("offers only what the public catalog shows", () => {
@@ -143,17 +172,14 @@ describe("what the public projection may return", () => {
     expect(sql).toContain("public.non_collectible_categories()");
   });
 
-  it("grants no table privilege and adds no policy", () => {
-    expect(sql).not.toMatch(/grant\s+select\s+on\s+(table\s+)?public\.shop_inventory/i);
-    expect(sql).not.toMatch(/create\s+policy/i);
-    expect(sql).not.toMatch(/alter\s+table/i);
+  it("grants no table privilege on the stock", () => {
+    expect(sql).not.toMatch(/grant\s+\w+\s+on\s+(table\s+)?public\.shop_inventory/i);
+    expect(sql).not.toMatch(/grant\s+\w+\s+on\s+(table\s+)?public\.shop_settings/i);
   });
 
   it("is executable by both client roles and by no one else implicitly", () => {
-    expect(sql).toContain("revoke all on function public.shop_offers()                from public;");
-    expect(sql).toContain(
-      "grant execute on function public.shop_offers()                to anon, authenticated;",
-    );
+    expect(sql).toContain("revoke all on function public.shop_offers() from public;");
+    expect(sql).toContain("grant execute on function public.shop_offers() to anon, authenticated;");
   });
 });
 

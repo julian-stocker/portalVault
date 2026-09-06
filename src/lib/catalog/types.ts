@@ -49,8 +49,16 @@ export type CatalogFigure = {
   searchIndex: string;
   /** null means "no known market price" — never 0 (ADR-0010). */
   marketPrice: number | null;
-  /** Content-addressed WebP file name, or null when no image exists. */
+  /** Content-addressed WebP file name from the import, or null (ADR-0009). */
   imageFile: string | null;
+  /**
+   * An administrator's uploaded picture, or null (ADR-0046).
+   *
+   * A path inside the public `catalog` storage bucket. It wins over
+   * `imageFile`, which stays exactly as the import left it — resolve both
+   * through `imageSrc()` and never by hand.
+   */
+  imageOverridePath: string | null;
   isActive: boolean;
   /**
    * Editorial visibility (ADR-0039). False hides the figure from the public

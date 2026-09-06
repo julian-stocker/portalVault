@@ -20,6 +20,7 @@ import { useCollectionMutation } from "@/components/collection/use-collection-mu
 import { elementLabel } from "@/lib/catalog/element";
 import type { CollectionRow } from "@/lib/collection/view";
 import { formatNumber, formatPrice } from "@/lib/format";
+import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
 function rowValue(row: CollectionRow): number | null {
@@ -33,13 +34,13 @@ function rowValue(row: CollectionRow): number | null {
  * light square is what makes them look like the same kind of object. The 27
  * figures without a file keep the square rather than collapsing the row.
  */
-function Thumb({ file, name }: { file: string | null; name: string }) {
+function Thumb({ src, name }: { src: string | null; name: string }) {
   return (
     <span className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-sky-sm bg-plate ring-1 ring-card-border/70">
-      {file ? (
+      {src ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img
-          src={`/images/skylanders/${file}`}
+          src={src}
           alt=""
           aria-hidden="true"
           loading="lazy"
@@ -158,7 +159,7 @@ export function CollectionTable({
               <tr key={row.figure.skyId} className="border-b border-border/60 last:border-0">
                 <td className="py-2 pr-3">
                   <span className="flex justify-center">
-                    <Thumb file={row.figure.imageFile} name={row.figure.displayName} />
+                    <Thumb src={imageSrc(row.figure)} name={row.figure.displayName} />
                   </span>
                 </td>
                 <td className="py-2 pr-4">
@@ -203,7 +204,7 @@ export function CollectionTable({
               key={row.figure.skyId}
               className="flex items-center gap-3 border-b border-border/60 py-2.5 last:border-0"
             >
-              <Thumb file={row.figure.imageFile} name={row.figure.displayName} />
+              <Thumb src={imageSrc(row.figure)} name={row.figure.displayName} />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <div className="flex items-baseline justify-between gap-3">
                   <Link

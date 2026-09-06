@@ -54,13 +54,18 @@ const serviceClient = () =>
   });
 
 /** The four keys a public offer may carry, and nothing else. */
-const PUBLIC_KEYS = ["sky_id", "condition", "sale_price", "available"];
+const PUBLIC_KEYS = ["sky_id", "condition", "price", "available"];
 
 /** PostgREST's code for "column does not exist". */
 const UNDEFINED_COLUMN = "42703";
 
 /** Column names that must never appear in a public answer. */
 const FORBIDDEN = [
+  // The override, the percentage and which of the two applied: all internal
+  // since ADR-0045. The public sees one number and no explanation of it.
+  "sale_price",
+  "price_source",
+  "price_percentage",
   "quantity",
   "reserved",
   "available_quantity",
@@ -140,7 +145,7 @@ async function main(): Promise<void> {
       rows.length === 0 ? "no rows today" : `${rows.length} rows inspected`,
     );
 
-    const priced = rows.every((row) => Number(row.sale_price) > 0);
+    const priced = rows.every((row) => Number(row.price) > 0);
     check("every offer carries a price above zero", priced);
 
     const conditions = rows.every((row) => row.condition === "loose" || row.condition === "boxed");
@@ -163,7 +168,7 @@ async function main(): Promise<void> {
 
     const wrongPrice = [...expected.entries()].filter(([k, row]) => {
       const seen = actual.get(k);
-      return seen !== undefined && Number(seen.sale_price) !== row.price;
+      return seen !== undefined && Number(seen.price) !== row.price;
     });
     check("every price matches the stored one", wrongPrice.length === 0);
 
@@ -203,34 +208,66 @@ async function main(): Promise<void> {
 async function expectedOffers(
   service: SupabaseClient,
 ): Promise<Map<string, { price: number; available: boolean }>> {
-  const [positions, figures, categories] = await Promise.all([
-    service.from("shop_inventory").select("sky_id, condition, sale_price, is_listed, quantity, reserved"),
-    service.from("skylanders").select("sky_id, is_active, catalog_visible, category_id"),
+  const [positions, figures, categories, settings] = await Promise.all([
+    service
+      .from("shop_inventory")
+      .select("sky_id, condition, sale_price, is_listed, quantity, reserved"),
+    service.from("skylanders").select("sky_id, is_active, catalog_visible, category_id, market_price"),
     service.from("categories").select("id, name"),
+    service.from("shop_settings").select("price_percentage"),
   ]);
 
-  for (const result of [positions, figures, categories]) {
+  for (const result of [positions, figures, categories, settings]) {
     if (result.error) throw new Error(result.error.message);
   }
+
+  const percentage = Number((settings.data ?? [])[0]?.price_percentage);
+  if (!Number.isFinite(percentage)) throw new Error("shop_settings: no percentage");
 
   const categoryName = new Map(
     (categories.data ?? []).map((row) => [row.id as number, row.name as string]),
   );
-  const shown = new Map<string, boolean>();
+
+  type FigureState = { shown: boolean; marketPrice: number | null };
+  const figureState = new Map<string, FigureState>();
   for (const figure of figures.data ?? []) {
     const name = categoryName.get(figure.category_id as number) ?? "";
-    shown.set(
-      figure.sky_id as string,
-      Boolean(figure.is_active) && Boolean(figure.catalog_visible) && isCollectibleCategory(name),
-    );
+    figureState.set(figure.sky_id as string, {
+      shown:
+        Boolean(figure.is_active) && Boolean(figure.catalog_visible) && isCollectibleCategory(name),
+      marketPrice: figure.market_price === null ? null : Number(figure.market_price),
+    });
+  }
+
+  /**
+   * The price rule, implemented a second time on purpose.
+   *
+   * If this called `public.shop_price()` the comparison below would prove
+   * nothing — both sides would be the same function. Rounding is the
+   * commercial one: to cents, half away from zero, computed on a value
+   * scaled to integers so no binary fraction can drift.
+   */
+  function effective(override: number | null, market: number | null): number | null {
+    if (override !== null) return override;
+    if (market === null) return null;
+    return Math.round(market * percentage) / 100;
   }
 
   const expected = new Map<string, { price: number; available: boolean }>();
   for (const position of positions.data ?? []) {
     if (!position.is_listed) continue;
-    if (!shown.get(position.sky_id as string)) continue;
+    const state = figureState.get(position.sky_id as string);
+    if (!state?.shown) continue;
+
+    const price = effective(
+      position.sale_price === null ? null : Number(position.sale_price),
+      state.marketPrice,
+    );
+    // Listed, but nothing to charge. Not an offer (ADR-0045).
+    if (price === null) continue;
+
     expected.set(`${position.sky_id as string}/${position.condition as string}`, {
-      price: Number(position.sale_price),
+      price,
       available: Number(position.quantity) - Number(position.reserved) > 0,
     });
   }

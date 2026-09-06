@@ -9,6 +9,8 @@ import { fetchAdminFigure, fetchAdminNote, fetchCatalogChanges } from "@/lib/adm
 import { fetchFigureBySlug } from "@/lib/catalog/queries";
 import { groupLabel } from "@/lib/catalog/group";
 import { formatDate } from "@/lib/format";
+import { ImageEditor } from "@/components/admin/image-editor";
+import { hasImageOverride, imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: `${de.admin.catalog} · ${de.admin.title}` };
@@ -44,11 +46,24 @@ export default async function AdminFigurePage({
       </Link>
 
       <div className="mt-5 flex items-start gap-4">
-        <AdminThumb file={figure.imageFile} name={figure.publicName} />
+        <AdminThumb src={imageSrc(figure)} name={figure.publicName} />
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">{figure.publicName}</h1>
           <p className="mt-1 font-mono text-xs text-muted">{figure.skyId}</p>
         </div>
+      </div>
+
+      {/* The picture, and the two things you can do to it (ADR-0046). First
+          on the page after the identity, because it is the one editorial
+          change that used to need a deploy. */}
+      <div className="mt-6 rounded-sky-lg bg-surface/80 p-4 ring-1 ring-border/70">
+        <h2 className="mb-3 text-sm font-medium">{de.admin.image}</h2>
+        <ImageEditor
+          skyId={figure.skyId}
+          name={figure.publicName}
+          src={imageSrc(figure)}
+          hasOverride={hasImageOverride(figure)}
+        />
       </div>
 
       <dl className="mt-6 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">

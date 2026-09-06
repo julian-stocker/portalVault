@@ -265,8 +265,9 @@ keine Rücknahme von ADR-0008.
 Der folgende Abschnitt war ursprünglich reine Dokumentation. **Stand 2026-09-06 ist ein Teil
 davon gebaut** und ausdrücklich freigegeben worden: Shop-Tabellen und Rolle (`0003`),
 Lagerverwaltung für den Betreiber (`0005`), das öffentliche Angebot (`0006`, ADR-0043) und der
-Warenkorb im Browser. **Nicht gebaut:** Bestellungen, Checkout, Zahlung, Versand, Rabatte,
-Coupons. Der Marketplace-Stopp aus ADR-0021 gilt unverändert — ein First-Party-Shop mit genau
+Warenkorb im Browser, abgeleitete Shoppreise (ADR-0045) und die Bildverwaltung im Admin
+(ADR-0046). **Nicht gebaut:** Bestellungen, Checkout, Zahlung, Versand, Reservierungen, Rabatte,
+Coupons, eBay-Anbindung. Der Marketplace-Stopp aus ADR-0021 gilt unverändert — ein First-Party-Shop mit genau
 einem Verkäufer ist kein Marketplace.
 
 **Zwei Nutzungskontexte.** Der private Account des Betreibers bleibt ein normaler
@@ -290,6 +291,12 @@ der bestehende kanonische Katalog wird wiederverwendet.
 |---|---|
 | **> 0** | Kaufmöglichkeit, deutlich sichtbarer aktiver „Kaufen"-Button, aktueller Shoppreis |
 | **= 0** | deaktivierter Zustand „Nicht auf Lager" — **der Shoppreis bleibt trotzdem sichtbar** |
+
+**Preisbildung umgesetzt (2026-09-06, ADR-0045).** Der Shoppreis wird abgeleitet:
+`market_price × Prozentsatz`, initial **90 %**, zentral im Admin änderbar, mit optionalem
+manuellem Override je Position. Kein abgeleiteter Preis wird gespeichert, also wirkt jede
+Änderung sofort auf alle automatisch bepreisten Positionen. Die Rabattstufen weiter unten bleiben
+unumgesetzt.
 
 **Umgesetzt (2026-09-06, ADR-0043).** Auf der Karte steht der SkyIsles-Preis unter dem Marktwert
 („SkyIsles € 9,90", bei mehreren Zuständen „ab € 9,90"), auf der Figurenseite eine Zeile je

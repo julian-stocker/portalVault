@@ -32,11 +32,11 @@ export function conditionLabel(condition: OfferCondition): string {
 function AddButton({
   offer,
   name,
-  imageFile,
+  imageSrc,
 }: {
   offer: Offer;
   name: string;
-  imageFile: string | null;
+  imageSrc: string | null;
 }) {
   const { add } = useCart();
   // Purely a confirmation that the tap was heard. It says nothing about the
@@ -47,7 +47,7 @@ function AddButton({
     <button
       type="button"
       onClick={() => {
-        add({ skyId: offer.skyId, condition: offer.condition, name, imageFile, price: offer.price });
+        add({ skyId: offer.skyId, condition: offer.condition, name, imageSrc, price: offer.price });
         setAdded(true);
         window.setTimeout(() => setAdded(false), 1800);
       }}
@@ -62,12 +62,13 @@ function AddButton({
 export function OfferPanel({
   offers,
   name,
-  imageFile,
+  imageSrc,
 }: {
   offers: readonly Offer[];
   /** The figure's display name, stored with the cart line as its label. */
   name: string;
-  imageFile: string | null;
+  /** Already resolved (ADR-0046): the cart stores what was on screen. */
+  imageSrc: string | null;
 }) {
   if (offers.length === 0) return null;
 
@@ -94,7 +95,7 @@ export function OfferPanel({
             </div>
 
             {offer.available ? (
-              <AddButton offer={offer} name={name} imageFile={imageFile} />
+              <AddButton offer={offer} name={name} imageSrc={imageSrc} />
             ) : (
               /* Listed but out of stock. The line stays, because "SkyIsles
                  has this" is worth knowing even today (migration 0006). */

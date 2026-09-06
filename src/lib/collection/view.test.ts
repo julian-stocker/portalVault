@@ -40,6 +40,7 @@ function figure(
     searchIndex: skyId.toLowerCase(),
     marketPrice: 10,
     imageFile: null,
+    imageOverridePath: null,
     isActive: true,
     element: null,
     characterId: null,
