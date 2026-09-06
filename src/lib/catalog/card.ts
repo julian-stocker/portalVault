@@ -32,16 +32,28 @@ export type CardOwnership = "catalog" | "showcase";
  * inner line set in from it, and the four sparkles. No blur radius anywhere —
  * the bloom was what made a row of owned cards read as backlit rather than as
  * framed, and it spilled onto the cards either side of them.
+ *
+ * V4.4 adds the surface itself. Three layers, outside in:
+ *
+ *   the card's ground   gold  (`--card-owned`, a flat gradient)
+ *   the figure's plate  grey  (white plate, neutral ring — unchanged)
+ *   the outer frame     gold  (the 3 px ring plus its inner line)
+ *
+ * So the gold reads as the object the figure stands on, and the figure keeps
+ * its own light. A card nobody owns keeps all three neutral.
  */
 const OWNED_SURFACE =
-  // The same ivory ground as any other card.
+  // The card's ground is gold leaf (V4.4).
   //
-  // V4 tinted the whole card warm and lit it from inside, and the figures
-  // came out washed out — a yellow filter over the photograph rather than a
-  // frame around it. The gold belongs *around* the card: the card itself,
-  // the picture and the text stay exactly as bright and as saturated as on a
-  // figure nobody owns (V4.1).
-  "bg-card ring-[3px] ring-[#e0a84a] shadow-gold " +
+  // The distinction V4.1 drew still holds and is what makes this safe: the
+  // gold is on the *card*, never on the figure. The photograph sits on its
+  // white plate with a neutral ring around it, one layer above this, so it
+  // stays exactly as bright and as saturated as on a card nobody owns —
+  // which is what went wrong in V4, where the tint lay over the picture.
+  //
+  // `bg-card` stays underneath as the flat fallback: if the gradient is ever
+  // unavailable, the card is ivory rather than transparent.
+  "bg-card bg-[image:var(--card-owned)] ring-[3px] ring-[#e0a84a] shadow-gold " +
   // The fine inner line, inset from the ring so the two read as a frame
   // rather than as one thick border. A line, not a fill.
   "before:pointer-events-none before:absolute before:inset-[4px] " +

@@ -103,6 +103,15 @@
   --gold-frame:
     0 0 0 1px rgb(255 236 196 / 0.95), 0 0 0 4px rgb(198 143 55 / 0.85),
     0 10px 26px rgb(0 0 0 / 0.5);
+  /* The owned card's own ground (ADR-0038, V4.4).
+     Gold leaf, not light: three flat stops of one warm tone, no blur, no
+     glow, nothing overexposed. It replaces the ivory `--card` only in the
+     catalog, where the card answers "do I have this one?". The figure's
+     plate stays white with its neutral ring on top of it, so the photograph
+     keeps its own light and is never tinted.
+     Both card inks stay legible on the darkest stop: #241f19 at 12.4:1,
+     #6b6153 at 4.6:1 — measured in card.test.ts, not assumed. */
+  --card-owned: linear-gradient(180deg, #f9ebc9 0%, #f4e3be 45%, #f0dfb6 100%);
   /* Four still points of light on the frame — top left, top right and the two
      lower corners. Static: a frame that twinkles is a slot machine. */
   --gold-sparkle:

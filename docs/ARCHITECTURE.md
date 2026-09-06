@@ -147,6 +147,10 @@ src/
     (public)/            Katalog (= /), Detailseiten  — ohne Login erreichbar
     (auth)/              login, register, verify, reset
     (app)/               collection, settings, onboarding    — geschützt
+      collection/
+        page.tsx         die Sammlung selbst
+        loading.tsx      Hülle und Gerüst; macht die dynamische Route
+                         überhaupt erst prefetchbar (ADR-0038, V4.4)
     auth/callback/       Supabase-Auth-Callback (Route Handler)
   components/            wiederverwendbare UI-Bausteine
   lib/

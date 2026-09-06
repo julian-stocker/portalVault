@@ -21,29 +21,65 @@
  */
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 
 import { Wordmark } from "@/components/layout/wordmark";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
 
-type Item = { href: string; label: string; section: NavSection };
+type Item = { href: string; label: string; section: NavSection; prefetch?: boolean };
 
 function itemsFor(signedIn: boolean): Item[] {
   return [
     { href: "/", label: de.nav.catalog, section: "catalog" },
-    { href: "/collection", label: de.nav.collection, section: "collection" },
+    {
+      href: "/collection",
+      label: de.nav.collection,
+      section: "collection",
+      // Prefetched only for someone who has a collection. For a visitor who
+      // is signed out the route answers with a redirect to /login, so
+      // fetching it ahead of time would cost a request and a session check
+      // for a page they cannot see (V4.4). `undefined` leaves Next's own
+      // default in place: prefetch when the link is in view.
+      prefetch: signedIn ? undefined : false,
+    },
     signedIn
       ? { href: "/settings", label: de.nav.settings, section: "account" }
       : { href: "/login", label: de.nav.signIn, section: "account" },
   ];
 }
 
+/**
+ * The click has been heard.
+ *
+ * `useLinkStatus` is pending only while a navigation is actually waiting —
+ * when the route was prefetched, this never lights up, which is exactly the
+ * intended order of defence: `loading.tsx` first, this for the slow network
+ * where the prefetch has not finished.
+ *
+ * Always rendered, never resized: it changes opacity, so nothing on the bar
+ * moves when it appears.
+ */
+function PendingDot() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden="true"
+      className={
+        "pointer-events-none absolute -right-0.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 " +
+        "rounded-full bg-accent transition-opacity duration-150 md:-right-2.5 " +
+        (pending ? "animate-pulse opacity-100" : "opacity-0")
+      }
+    />
+  );
+}
+
 function NavItem({ item, active }: { item: Item; active: boolean }) {
   return (
     <Link
       href={item.href}
+      prefetch={item.prefetch}
       // Announced as the current page, not merely coloured differently.
       aria-current={active ? "page" : undefined}
       className={
@@ -58,6 +94,7 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
       }
     >
       {item.label}
+      <PendingDot />
       {/* A shape as well as a colour. Above the label in the phone bar so
           the thumb never covers it, under it in the header. */}
       {active ? (

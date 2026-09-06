@@ -61,6 +61,19 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**V4.4 umgesetzt (2026-09-06, ADR-0038).** Drei Nachbesserungen. **Der Besitzfilter steht still:**
+Das Häkchen im Ein-Zustand machte den Button breiter und schob ihn auf 390 px in die nächste
+Zeile — jetzt unterscheidet nur Farbe die Zustände, `aria-pressed` und Text bleiben.
+**Gesammelte Katalogkarten haben einen goldenen Grund** (`--card-owned`, flacher Verlauf, kein
+Blur): außen goldener Rahmen, innen goldene Kachel, dazwischen die unveränderte weiße Bildplatte
+mit neutralem Ring — das Foto wird nicht getönt. Sammlungskarten bleiben neutral.
+**Katalog → Sammlung startet sofort:** `/collection` ist dynamisch und wurde deshalb gar nicht
+geprefetcht, solange es keine `loading`-Grenze gab; mit `loading.tsx` liefert der Prefetch jetzt
+18,5 KB Hülle statt 324 B Nichts, und das erste Byte der Navigation kommt nach 71 statt 209 ms.
+Der Prefetch lädt die Sammlung **nicht** mit (nachgemessen: gleich schnell bei 5 wie bei 448
+Figuren) und ist für abgemeldete Besucher abgeschaltet; `useLinkStatus` gibt Rückmeldung, falls
+doch gewartet wird.
+
 **V4.3 umgesetzt (2026-09-06, ADR-0038).** Vier Nachbesserungen. **Login:** Ein falscher
 Versuch leert nur noch das Passwort, die E-Mail-Adresse bleibt stehen — Ursache war der
 React-Formularreset nach einer Server Action, die Regel steht in `src/lib/auth/preserve.ts`

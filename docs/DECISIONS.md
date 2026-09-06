@@ -2692,6 +2692,54 @@ responsives Markup neu zu bauen — eine Designänderung, und deshalb hier bewus
 Symbole/Tabelle — links was gezeigt wird, in der Mitte was einschränkt, rechts wie gezeichnet
 wird. Über der Suche saß er neben der Serienleiste und las sich wie ein siebtes Spiel.
 
+### 10g. V4.4 — ein Umschalter, der stillsteht, eine goldene Kachel, ein Routenwechsel
+
+**Der Besitzfilter ändert seine Größe nicht mehr.** Das Häkchen, das im Ein-Zustand erschien,
+machte den Button breiter; auf 390 px reichte das, um ihn in die nächste Zeile zu schieben — das
+Bedienelement bewegte sich, weil man es benutzt hatte. Jetzt unterscheidet **nur Farbe** die
+beiden Zustände: kein Icon, keine abweichende Schriftstärke, kein anderes Padding. Ein Test hält
+fest, dass in den beiden Zweigen der Klassen nichts Platzverbrauchendes vorkommt. `aria-pressed`
+und der Text `Besitz anzeigen` bleiben unverändert.
+
+**Die gesammelte Karte hat jetzt einen goldenen Grund.** Drei Schichten, von außen nach innen:
+
+| | |
+|---|---|
+| äußerer Rahmen | **gold** — 3 px Ring plus feine Innenlinie (unverändert seit V4.2) |
+| Kachel | **gold** — `--card-owned`, ein flacher Verlauf aus drei Stopps |
+| Bildplatte | **neutral** — weiße Platte mit grauem Ring, unverändert |
+
+Die mittlere Zeile ist der Grund, warum das diesmal funktioniert und in V4 nicht: Das Foto liegt
+auf seiner eigenen weißen Platte **über** dem Gold, wird also weder getönt noch überlagert noch
+ausgewaschen. Kein Unschärferadius, kein Halo, keine überbelichtete Fläche — nur eine andere
+Fläche. Beide Kartentinten bleiben lesbar (12,4:1 und 4,6:1 auf dem dunkelsten Stopp), und
+`card.test.ts` rechnet das gegen `globals.css` nach, statt es zu behaupten.
+**Sammlungskarten bleiben neutral**: Dort ist alles Besitz, ein Goldgrund auf jeder Karte sagte
+nichts.
+
+**Der Wechsel Katalog → Sammlung beginnt jetzt sofort.** Ursache war weder die Abfrage noch die
+Datenmenge, sondern eine fehlende Datei: `/collection` ist eine dynamische Route, und Next.js
+überspringt das Prefetching einer dynamischen Route **vollständig**, solange sie keine
+`loading`-Grenze hat. Gemessen am Produktionsserver mit 448 Figuren:
+
+| | vorher | nachher |
+|---|---|---|
+| Prefetch-Antwort | **324 B, ohne Inhalt** | **18,5 KB mit Hülle und Gerüst** |
+| RSC-Navigation, erstes Byte | 209 ms | **71 ms** |
+| Prefetch-Kosten | — | eine Anfrage, **keine Sammlungsabfrage** |
+
+Dass der Prefetch die Sammlung nicht lädt, ist nachgemessen und nicht angenommen: Er dauert
+gleich lang und ist byte-identisch für ein Konto mit 448 und eines mit 5 Figuren.
+
+Umgesetzt mit den Mitteln des Frameworks, ohne eigene Routing-Logik: `loading.tsx` mit
+Überschrift und `CollectionSkeleton`, `prefetch` bleibt für Angemeldete Next überlassen und ist
+für Abgemeldete **aus** (dort antwortet die Route ohnehin mit einem Redirect auf `/login`), und
+`useLinkStatus` blendet im Navigationselement einen Punkt ein, falls doch einmal gewartet wird —
+immer gerendert, nur die Deckkraft wechselt, damit die Leiste nicht springt.
+
+Die seiteninterne `<Suspense>`-Grenze aus V4.3 ist entfallen: Mit `loading.tsx` umschließt Next
+die Seite selbst, zwei Grenzen hätten dasselbe Gerüst zweimal ausgeliefert.
+
 ### 11. Offen
 
 Serienfarben als reine UI-Konvention · Sortierung der Vitrine (Serie, Wert, zuletzt
