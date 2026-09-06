@@ -10,8 +10,10 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "verify:rls": "node --env-file=.env.local tools/verify-rls.mts",
+    "verify:editorial": "node --env-file=.env.local tools/verify-editorial.mts",
     "catalog:import": "node --env-file=.env.local tools/import-catalog.mts",
     "characters:import": "node --env-file=.env.local tools/import-characters.mts",
+    "admin:grant": "node --env-file=.env.local tools/grant-admin.mts",
     "test": "vitest run",
     "check": "npm run lint && npm run typecheck && npm run build"
   },

@@ -51,7 +51,10 @@ export default async function FigurePage({ params }: Params) {
   const { slug } = await params;
   const detail = await fetchFigureDetail(slug);
   const figure = detail?.figure;
-  if (!detail || !figure || !isCollectible(figure)) notFound();
+  // `catalogVisible` is the editorial answer (ADR-0039): a hidden figure has
+  // no public detail page either, or the catalog would still be reachable one
+  // URL at a time. It stays in the collection of everyone who owns it.
+  if (!detail || !figure || !isCollectible(figure) || !figure.catalogVisible) notFound();
 
   const supabase = await createClient();
   const [{ data: auth }, owned] = await Promise.all([supabase.auth.getUser(), fetchOwnedSkyIds()]);

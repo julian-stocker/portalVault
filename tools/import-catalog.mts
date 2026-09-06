@@ -361,7 +361,7 @@ async function main(): Promise<void> {
   const { data: dbCategories, error: categoryError } = await client.from("categories").select("*");
   if (categoryError) throw new Error(`read categories: ${categoryError.message}`);
   const haveCategory = new Map(
-    (dbCategories ?? []).map((row) => [`${row.series_code as string} ${row.name as string}`, row]),
+    (dbCategories ?? []).map((row) => [`${row.series_code as string}\u0000${row.name as string}`, row]),
   );
 
   type PlannedCategory = { series_code: string; name: string; position: number };
@@ -372,10 +372,10 @@ async function main(): Promise<void> {
     });
   }
   const newCategories = wantCategories.filter(
-    (c) => !haveCategory.has(`${c.series_code} ${c.name}`),
+    (c) => !haveCategory.has(`${c.series_code}\u0000${c.name}`),
   );
   const changedCategories = wantCategories.filter((c) => {
-    const row = haveCategory.get(`${c.series_code} ${c.name}`);
+    const row = haveCategory.get(`${c.series_code}\u0000${c.name}`);
     return row !== undefined && row.position !== c.position;
   });
 
@@ -491,14 +491,14 @@ async function main(): Promise<void> {
   if (rereadError) throw new Error(`re-read categories: ${rereadError.message}`);
   const categoryId = new Map(
     (allCategories ?? []).map((row) => [
-      `${row.series_code as string} ${row.name as string}`,
+      `${row.series_code as string}\u0000${row.name as string}`,
       row.id as number,
     ]),
   );
 
   const figures: PlannedFigure[] = [];
   for (const item of data.items) {
-    const id = categoryId.get(`${item.series} ${item.category}`);
+    const id = categoryId.get(`${item.series}\u0000${item.category}`);
     if (id === undefined) {
       throw new Error(`${item.id}: no category id for ${item.series}/${item.category} - aborting before write`);
     }

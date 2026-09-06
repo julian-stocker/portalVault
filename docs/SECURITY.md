@@ -309,7 +309,7 @@ zu öffnen als umgekehrt.
 |---|---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL` | `.env.local`, Vercel | ja | kein Secret |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | `.env.local`, Vercel | ja | **kein Secret** (ADR-0017) |
-| `SUPABASE_SERVICE_ROLE_KEY` | **nur** `.env.local` | **nie** | **umgeht RLS vollständig** |
+| `SUPABASE_SERVICE_ROLE_KEY` | **nur** `.env.local` | **nie** | **umgeht RLS vollständig**; auch das Rollenwerkzeug läuft nur lokal damit |
 
 **Der Anon-/Publishable-Key ist kein Secret (ADR-0017).** Die Sicherheit des Systems darf
 niemals davon abhängen, dass er verborgen ist. Die tatsächliche Sicherheitsgrenze besteht aus
@@ -328,6 +328,63 @@ Regeln:
 - Keine Secrets in Logs, Fehlermeldungen, Screenshots oder Commit-Messages.
 - Gerät ein Key doch in einen Commit: **Key in Supabase rotieren**. Der Verlauf lässt sich
   praktisch nicht zuverlässig bereinigen — Rotation ist die richtige Antwort.
+
+---
+
+### Adminberechtigung und redaktionelle Schreibwege (Migration `0004`, ADR-0039)
+
+**Die Berechtigung liegt in `shop_admins`** — trotz des Namens ist das die allgemeine
+SkyIsles-Adminberechtigung. Die Tabelle hat für `anon` und `authenticated` **keine Rechte und
+keine Policy**: sie ist in beide Richtungen unerreichbar. Gegen die laufende Datenbank geprüft
+(2026-09-06): ein Lesezugriff mit dem Anon-Key endet mit `permission denied for table
+shop_admins`.
+
+**Vergeben wird sie ausschließlich lokal**, mit `npm run admin:grant` über die Service Role.
+Es gibt keinen Endpunkt, über den sich ein Client selbst befördern könnte — nicht weil er
+abgesichert wäre, sondern weil er nicht existiert. Keine E-Mail-Adresse steht im Quelltext, in
+einem Skript oder in dieser Dokumentation; die Adresse ist ein Argument, gespeichert wird nur
+die User-ID.
+
+**Ein Tabellen-Grant kennt keine Spalten.** `grant select on public.skylanders to anon` gilt für
+jede Spalte, die die Tabelle je bekommt; RLS filtert **Zeilen**, nicht Spalten. Am 2026-09-06
+gegen die laufende Datenbank gemessen: ein anonymer Client liest `select=*` und bekommt alle
+zwölf Spalten zurück. Der erste Entwurf von `0004` hätte `admin_note` genau dorthin gelegt und
+damit über `GET /rest/v1/skylanders?select=admin_note` öffentlich gemacht — unabhängig davon,
+welche Spalten die Anwendung selektiert.
+
+**Daher die Trennung nach Publikum, nicht nach Bequemlichkeit:**
+
+| Öffentlich (auf `skylanders`) | Intern (`catalog_editorial`) |
+|---|---|
+| `catalog_visible`, `display_name_override` — beides ist Teil dessen, was Besucher sehen | `admin_note` — Notizen über Herkunft, Bestand, Vorgänge |
+
+`edited_by`/`edited_at` gibt es gar nicht: `catalog_admin_changes` beantwortet „wer wann was",
+und ein Bearbeiterfeld auf einer weltlesbaren Tabelle würde veröffentlichen, wer den Katalog
+pflegt.
+
+**Verborgene Zeilen verschwinden auch aus der API.** `0004` ersetzt die alte
+`using (true)`-Policy: anonym gilt `is_active and catalog_visible`; angemeldet zusätzlich „ich
+bin Admin" oder „ich besitze diese Figur" (ADR-0040). Ein direkter Supabase-Client sieht damit
+dasselbe wie die Oberfläche — nicht mehr.
+
+**Zwei Schranken vor jeder redaktionellen Änderung:**
+
+1. `(admin)/layout.tsx` antwortet Nicht-Admins mit **404**. Das ist Bequemlichkeit, keine
+   Grenze — eine ausgeblendete Schaltfläche ist keine Berechtigung.
+2. Die `security definer`-Funktionen fragen `public.is_shop_admin()` selbst. Das ist die
+   Grenze. Clients haben auf `skylanders` und `categories` weiterhin kein Schreibrecht, also
+   gibt es daneben keinen zweiten Weg.
+
+**Funktional nachgewiesen, nicht behauptet.** `npm run verify:editorial` prüft mit echten
+Sitzungen (anonym, normaler Nutzer, Admin), dass eine verborgene Figur anonym nicht lesbar ist,
+`select=*` keine interne Spalte enthält, `catalog_editorial` und `catalog_admin_changes` für
+Clients unerreichbar sind, Admin-RPCs für Nicht-Admins scheitern, der Besitzer einer
+nachträglich verborgenen Figur seine Sammlung vollständig sieht — und dass das Journal selbst
+für die Service Role append-only bleibt. Läuft direkt nach dem Anwenden von `0004`.
+
+**Was der Adminbereich nicht tut:** keine Rechteverwaltung im Browser, keine Service Role im
+Client, kein Storage-Upload (noch nicht gebaut), kein Zugriff auf fremde Sammlungen.
+`admin_note` ist intern und erscheint in keiner öffentlichen Projektion.
 
 ---
 

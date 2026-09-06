@@ -16,7 +16,12 @@ import { describe, expect, it } from "vitest";
  */
 const SOURCE = readFileSync("tools/import-catalog.mts", "utf8");
 
-/** Everything the legacy export owns — and nothing else. */
+/**
+ * Everything the legacy export owns — and nothing else.
+ *
+ * The other half of the contract is EDITORIAL below: columns an
+ * administrator owns, which an import must never write (ADR-0039).
+ */
 const ALLOWED = [
   "sky_id",
   "name",
@@ -26,6 +31,15 @@ const ALLOWED = [
   "market_price",
   "image_file",
   "is_active",
+];
+
+/** Admin-owned columns. None of these may ever appear in the payload. */
+const EDITORIAL = [
+  "catalog_visible",
+  "display_name_override",
+  "admin_note",
+  "edited_at",
+  "edited_by",
 ];
 
 function figurePayloadKeys(): string[] {
@@ -41,6 +55,13 @@ function figurePayloadKeys(): string[] {
 describe("the catalog import payload", () => {
   it("writes exactly the columns the legacy export owns", () => {
     expect(figurePayloadKeys().sort()).toEqual([...ALLOWED].sort());
+  });
+
+  it("never writes an editorial column", () => {
+    // The real guard, the second time: visibility, the public name and the
+    // internal note are decisions, and an import must not undo a decision.
+    const keys = figurePayloadKeys();
+    for (const column of EDITORIAL) expect(keys, column).not.toContain(column);
   });
 
   it("never writes character_id", () => {

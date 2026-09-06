@@ -30,7 +30,7 @@ import { de } from "@/lib/i18n/de";
 
 type Item = { href: string; label: string; section: NavSection; prefetch?: boolean };
 
-function itemsFor(signedIn: boolean): Item[] {
+function itemsFor(signedIn: boolean, admin: boolean): Item[] {
   return [
     { href: "/", label: de.nav.catalog, section: "catalog" },
     {
@@ -47,6 +47,12 @@ function itemsFor(signedIn: boolean): Item[] {
     signedIn
       ? { href: "/settings", label: de.nav.settings, section: "account" }
       : { href: "/login", label: de.nav.signIn, section: "account" },
+    // Convenience, never a permission (ADR-0039). The link is absent for
+    // everyone else, and /admin answers 404 to them whether or not they
+    // find the address.
+    ...(admin
+      ? [{ href: "/admin", label: de.nav.admin, section: "admin" as const, prefetch: false }]
+      : []),
   ];
 }
 
@@ -111,10 +117,10 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
   );
 }
 
-export function SiteNav({ signedIn }: { signedIn: boolean }) {
+export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?: boolean }) {
   const pathname = usePathname();
   const active = activeSection(pathname ?? "/");
-  const items = itemsFor(signedIn);
+  const items = itemsFor(signedIn, admin);
 
   return (
     // Dark glass over the sky, closed by a gold hairline. `border-b` carries

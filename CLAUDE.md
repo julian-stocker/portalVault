@@ -204,6 +204,13 @@ umsetzen. Schwer reversibel oder sicherheitskritisch → **erst fragen**.
 | `docs/DECISIONS.md` | Architecture Decision Log |
 | `docs/DEPLOYMENT.md` | Environment Variables, Vercel, Supabase-URLs, temporäres noindex |
 
+**Adminbereich (ab ADR-0039):** `/admin` ist nur für Konten in `shop_admins` erreichbar, geprüft
+serverseitig über `isAdmin()`; jede redaktionelle Schreiboperation fragt zusätzlich in der
+Datenbank. Redaktionelle Spalten (`catalog_visible`, `display_name_override`,
+`categories.catalog_group`) gehören dem Admin und dürfen **nie** in einen Import-Payload
+geraten. **Interne Daten kommen nie auf `skylanders`**: die Tabelle ist weltlesbar, und ein
+Tabellen-Grant kennt keine Spalten — Notizen liegen in `catalog_editorial`.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know

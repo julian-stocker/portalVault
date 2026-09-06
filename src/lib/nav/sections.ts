@@ -11,7 +11,7 @@
  * one nested route that exists, and an unknown path highlights nothing
  * instead of guessing wrong.
  */
-export type NavSection = "catalog" | "collection" | "account";
+export type NavSection = "catalog" | "collection" | "account" | "admin";
 
 /** Route prefix of the figure detail pages. */
 const DETAIL_PREFIX = "/skylanders/";
@@ -29,6 +29,9 @@ export function activeSection(pathname: string): NavSection | null {
   if (path === "/collection" || path === "/dashboard") return "collection";
 
   if (path === "/settings" || path === "/onboarding") return "account";
+
+  // The administration area, including everything under it.
+  if (path === "/admin" || path.startsWith("/admin/")) return "admin";
 
   return null;
 }

@@ -2747,3 +2747,163 @@ hinzugefügt) · Mengenpflege über `2×` hinaus direkt auf der Karte · Shopang
 sobald der Shop öffentlich ist (ADR-0037) · ob die Sammlungskarte langfristig dieselbe
 Tipp-Geste bekommt wie die Katalogkarte · ein späterer Completion-Scope (Basisfiguren gegen
 Sondereditionen) ist **ausdrücklich keine** V3-Entscheidung und wurde hier nicht vorbereitet.
+
+---
+
+## ADR-0039 — Redaktionelle Katalogpflege: wem welche Spalte gehört
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der Katalog bekommt eine redaktionelle Schicht auf denselben Zeilen, und die
+Eigentumsfrage wird an einer Stelle beantwortet:
+
+| Import-owned (`tools/import-catalog.mts`) | Admin/editorial-owned |
+|---|---|
+| `sky_id`, `name`, `slug`, `series_code`, `category_id`, `market_price`, `image_file`, `is_active` | `character_id`, `catalog_visible`, `display_name_override`, `catalog_editorial.admin_note`, `categories.catalog_group` |
+
+**Warum das trägt.** Der Importer benennt seine Spalten einzeln; PostgREST macht daraus
+`ON CONFLICT DO UPDATE SET` für genau diese. Was nicht genannt ist, überlebt jeden Lauf —
+derselbe Mechanismus, der die kuratierten Charakterlinks seit ADR-0034 schützt.
+`src/lib/catalog/import-payload.test.ts` nagelt **beide** Listen fest, und
+`src/lib/catalog/editorial.test.ts` prüft zusätzlich, dass keine redaktionelle Spalte auch nur
+im Code des Importers vorkommt.
+
+**`is_active` wird nicht umdefiniert.** Es bedeutet weiter „die Legacy-Quelle kennt diese Zeile"
+und wird bei jedem Import auf `true` gesetzt. Die redaktionelle Sichtbarkeit ist eine eigene
+Spalte — genau so, wie ADR-0037 § 6 es für diesen Fall vorgesehen hatte.
+
+**`shop_admins` ist die allgemeine Adminberechtigung.** Trotz des Namens. Sie bleibt, wie sie
+ist: `public.is_shop_admin()` ist das einzige Autorisierungsprädikat, drei Shop-Funktionen
+hängen bereits daran, und der einzige fertige Sicherheitsmechanismus umzubenennen wäre Risiko
+ohne Gegenwert. Die Anwendung spricht ausschließlich über `src/lib/auth/admin.ts` mit ihr — dort
+landet ein späteres Rollenmodell, ohne dass ein Aufrufer davon erfährt.
+
+**Interne Daten kommen nicht auf eine weltlesbare Tabelle** — der Befund, der diese Migration
+umgebaut hat. `grant select on public.skylanders to anon` gilt für **jede** Spalte, die die
+Tabelle je bekommt, und RLS filtert Zeilen, nicht Spalten. Gemessen am 2026-09-06: ein anonymer
+PostgREST-Client liest `select=*` und bekommt alle zwölf Spalten. Der erste Entwurf legte
+`admin_note` dorthin — das wäre über `GET /rest/v1/skylanders?select=admin_note` öffentlich
+gewesen, ganz gleich, was die Anwendung selektiert.
+
+Deshalb wird nach **Publikum** getrennt: `catalog_visible` und `display_name_override` bleiben
+auf `skylanders`, weil beide zum öffentlichen Produktmodell gehören — was ein Besucher liest
+und ob er es überhaupt liest. `admin_note` zieht in `catalog_editorial`, eine eigene Tabelle mit
+zwei unabhängigen Schlössern: `anon` hat gar kein Recht, `authenticated` hat `select` und trifft
+auf eine Policy mit `is_shop_admin()`.
+
+**`edited_at`/`edited_by` entfallen ersatzlos.** Sie wären eine zweite Wahrheit neben
+`catalog_admin_changes`, das ohnehin `changed_at` und `changed_by` führt — und ein
+Bearbeiterfeld auf einer weltlesbaren Tabelle hätte veröffentlicht, wer den Katalog pflegt.
+Keine Oberfläche brauchte sie.
+
+**Verborgene Zeilen verschwinden auch aus der API.** `0004` ersetzt die Policy
+`skylanders_select_public` (`using (true)`) durch zwei rollenspezifische: anonym gilt
+`is_active and catalog_visible`, angemeldet zusätzlich „ich bin Admin" oder „ich besitze diese
+Figur". Der dritte Zweig ist notwendig, nicht bequem: eine nachträglich verborgene Figur muss in
+der eigenen Sammlung vollständig bleiben (ADR-0040). Zwei Policies statt einer, weil `anon` auf
+`is_shop_admin()` kein EXECUTE-Recht hat und eine gemeinsame Policy jede anonyme Katalogabfrage
+mit *permission denied for function* beenden würde. Keine Rekursion: die Policies von
+`collection_items` sehen `skylanders` nicht an.
+
+**Zwei Schranken, nicht eine.** `(admin)/layout.tsx` antwortet Nicht-Admins mit **404** statt
+403 — der Bereich existiert für sie nicht. Das ist die Bequemlichkeit. Die Grenze sind die
+`security definer`-Funktionen aus `0004`: jede fragt `is_shop_admin()` selbst, und Clients haben
+auf `skylanders`, `categories` und `catalog_editorial` weiterhin **kein** Schreibrecht. Eine
+Anfrage, die die Oberfläche nie berührt, scheitert in der Datenbank.
+
+**Nachgewiesen wird das funktional, nicht durch Lesen des Quelltexts.**
+`tools/verify-editorial.mts` (`npm run verify:editorial`) prüft mit echten anonymen, normalen
+und Admin-Sitzungen, was jede Rolle wirklich lesen und schreiben kann — einschließlich des
+anonymen Direktversuchs auf `admin_note`. Die Service Role dient nur dem Aufbau und dem
+Aufräumen, nie einer Behauptung.
+
+**Jede redaktionelle Änderung wird protokolliert.** `catalog_admin_changes`, append-only wie das
+Bewegungsjournal, geschrieben von **Triggern auf den Tabellen** statt von der Anwendung: so kann
+kein Schreibweg das Protokollieren vergessen, auch kein Service-Role-Skript. Kein Event
+Sourcing — der aktuelle Zustand steht in den Spalten, das hier ist die Geschichte daneben.
+
+**Der Anzeigename überschreibt, er ersetzt nicht.** Öffentlich gilt
+`display_name_override ?? ADR-0030-Ableitung`; `name` bleibt der importierte Name, der Slug
+bleibt unverändert (ADR-0011), und der Suchindex enthält **beide** Schreibweisen. Ein Override
+schaltet die Variantenableitung für diese Zeile ab — die öffentliche Schreibweise ist dann
+entschieden und wird nicht noch einmal geraten.
+
+**Konsequenzen.** Migration `0004` fügt zwei Spalten an `skylanders`, eine an `categories`, zwei
+Tabellen, neun Funktionen und vier Trigger hinzu — und **ersetzt eine bestehende Policy**. Das
+ist der einzige nicht rein additive Schritt und der Grund, warum die Migration erst nach diesem
+Review ausgeführt wird. Keine Spalte und keine Zeile wird verändert. Der Adminbereich ist Serverbereich; Bilder-Upload,
+Element-Override und Variantenklassifikation sind ausdrücklich **nicht** Teil davon.
+
+---
+
+## ADR-0040 — Verborgene Figuren zählen in keiner Hälfte der Completion
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Ist `catalog_visible = false`, dann zählt die SKY-ID **weder im Zähler noch im
+Nenner** des öffentlichen Sammlungsfortschritts.
+
+Ausdrücklich **verworfen** wurde der zunächst vorgeschlagene Weg, den Zähler weiterzuzählen und
+die Prozentanzeige bei 100 % zu deckeln: „415 von 414" ist auch gedeckelt eine falsche Aussage.
+Zähler und Nenner müssen dieselbe Menge zählen, sonst ist der Bruch keiner.
+
+**Was unverändert bleibt.** Die Zeile in `collection_items` bleibt, nichts wird gelöscht, die
+historische Beziehung bleibt bestehen, der Adminbereich sieht die Figur weiterhin — und der
+**Sammlungswert zählt sie weiter mit**: Besitz ist Besitz, nur der Bruch beschreibt den
+öffentlichen Katalog. Dieselbe Regel gilt seit jeher für `is_active = false`; verborgen und
+zurückgezogen werden gleich behandelt und getrennt ausgewiesen (`hiddenOwned`, `inactiveOwned`).
+
+**Konsequenz.** `owned > total` kann durch diese Funktion nicht entstehen.
+`src/lib/collection/visibility.test.ts` prüft genau das, inklusive des Falls „alles besessen,
+die Hälfte verborgen".
+
+---
+
+## ADR-0041 — Produktgruppen: die dritte Dimension bleibt getrennt
+
+**Status:** ANGENOMMEN (2026-09-06)
+
+**Entscheidung.** Der Katalog kennt künftig drei **unabhängige** Dimensionen:
+
+| | Frage | Träger |
+|---|---|---|
+| A Serie | Aus welchem Spiel? | `skylanders.series_code` |
+| B Produktgruppe | Was für ein Objekt ist das? | `categories.catalog_group` |
+| C Variante | Reguläre Ausgabe oder Legendary/Dark/…? | **nicht gebaut** |
+
+**B liegt auf der Kategorie, nicht auf der SKY-ID.** Der Audit vom 2026-09-06 hat alle 561
+aktiven Sammelobjekte geprüft: Jede der 24 Kategoriezeilen (20 verschiedene Namen) fällt
+**vollständig** in genau eine Produktgruppe; keine mischt zwei. Damit klassifizieren 24
+Entscheidungen 561 Objekte. Ein SKY-ID-Override wird **nicht vorsorglich** gebaut — er wäre eine
+zweite Wahrheit ohne Fall. Tritt je eine echte Ausnahme auf, lässt er sich additiv ergänzen.
+
+**Das Vokabular** (zehn Werte, CHECK statt Enum, damit später erweiterbar):
+`figure` · `giant` · `swapper` · `trap_master` · `sensei` · `vehicle` · `trap` ·
+`creation_crystal` · `mini` · `item`.
+
+Sidekicks und Minis sind **eine** Gruppe (`mini`): dieselbe Produktart unter zwei Legacy-Namen.
+Die genaue Legacy-Kategorie bleibt in `categories.name` erhalten.
+
+**Drei Kategorien tragen Varianten- statt Produktinformation** und gehören trotzdem zu
+`figure`: `Varianten & LightCore` (SF, 27), `Giants Series 2 Figuren` (39) und
+`Trap Team Series Figuren` (6). Was sie benennen — eine Ausführung, eine Neuauflage — ist
+Dimension C.
+
+**`NULL` ist ein Zustand, kein Standard.** Eine später vom Legacy-Projekt angelegte Kategorie
+kommt unklassifiziert an, bleibt unter „Alle" sichtbar und wird **niemals** automatisch `item`.
+Keine Namensheuristik, nirgends: die Zuordnung ist einmal redaktionell in der Migration
+festgeschrieben, wie `data/characters/characters.json`.
+
+**B sagt nichts über Completion.** `catalog_group = 'vehicle'` heißt „das ist ein Fahrzeug" —
+nicht „das ist optional". Ein Fahrzeug ist kein Special, eine Falle ist kein Special, ein
+Kreationskristall ist kein Special; umgekehrt kann ein Trap Master sehr wohl eine
+Special-Ausgabe haben. Der Katalog enthält „Legendary Hand of Fate" — ein **Item** mit
+Legendary-Ausführung — und das ist der Beleg aus echten Daten, dass B und C nicht
+zusammenfallen. Completion bleibt bis auf Weiteres: jedes aktive, sichtbare Sammelobjekt zählt.
+
+**Nicht in dieser Phase:** `variant_kind`, `is_special`, `completion_class`, Specials-Filter,
+automatische Variantenerkennung — und die öffentliche zweite Tab-Leiste. Die Datenbasis
+entsteht jetzt, die UI ist ein eigener Schritt.
+
+**Gemessene Verteilung (2026-09-06):** figure 261 · trap 57 · sensei 46 · item 44 · vehicle 31 ·
+trap_master 28 · creation_crystal 27 · mini 27 · swapper 26 · giant 14 = **561**.

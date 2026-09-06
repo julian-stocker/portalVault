@@ -6,6 +6,7 @@
  * more (ADR-0026).
  */
 import type { Element } from "@/lib/catalog/character";
+import type { CatalogGroup } from "@/lib/catalog/group";
 
 export type CatalogFigure = {
   /** Permanent identity. Every relation hangs off this, never off the slug. */
@@ -21,6 +22,18 @@ export type CatalogFigure = {
   categoryPosition: number;
   /** Category name, verbatim from the legacy source. Decides collectibility. */
   categoryName: string;
+  /** Numeric category id. Only the admin area needs it. */
+  categoryId: number;
+  /**
+   * What kind of collectible this is (ADR-0041), from its category.
+   *
+   * `null` means the category has not been classified — a state, not a
+   * default: such a figure stays visible under "Alle" and is never filed
+   * under a group it was not given.
+   *
+   * Says nothing about specials and nothing about completion.
+   */
+  catalogGroup: CatalogGroup | null;
   /**
    * What the collector area shows: "Astroblast (Legendary)" where the raw
    * name is "Legendary Astroblast". Equals `name` when no variant is
@@ -39,6 +52,16 @@ export type CatalogFigure = {
   /** Content-addressed WebP file name, or null when no image exists. */
   imageFile: string | null;
   isActive: boolean;
+  /**
+   * Editorial visibility (ADR-0039). False hides the figure from the public
+   * catalog, from search and from both halves of completion — while the
+   * collection rows of everyone who owns it stay untouched.
+   */
+  catalogVisible: boolean;
+  /** The imported canonical name, for the admin area. Never rewritten. */
+  canonicalName: string;
+  /** Admin-chosen public name, or null when the derivation applies. */
+  displayNameOverride: string | null;
   /**
    * The curated character's element, or null.
    *

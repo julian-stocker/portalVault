@@ -146,6 +146,8 @@ src/
     globals.css          ✓ Tailwind
     (public)/            Katalog (= /), Detailseiten  — ohne Login erreichbar
     (auth)/              login, register, verify, reset
+    (admin)/             /admin — Katalogredaktion            — nur Admin (404 sonst)
+      admin/catalog/     Liste · Figureneditor · Kategorien
     (app)/               collection, settings, onboarding    — geschützt
       collection/
         page.tsx         die Sammlung selbst

@@ -117,7 +117,22 @@ deshalb natürlicher Schlüssel statt Surrogat. `position` ist in PostgreSQL ein
 | `name` | `text not null` | nicht leer; **nie** automatisch umbenannt oder vereinheitlicht |
 | `created_at` | `timestamptz not null default now()` | |
 
+| `catalog_group` | `text` **nullbar** | Produktgruppe (ADR-0041), redaktionell. CHECK gegen zehn Werte. Migration `0004`. |
+
 Unique: `(series_code, position)` · `(series_code, name)` · `(id, series_code)`.
+
+**`catalog_group` — die Produktgruppe (Migration `0004`, ADR-0041).** Beantwortet „was für ein
+Objekt ist das?": `figure`, `giant`, `swapper`, `trap_master`, `sensei`, `vehicle`, `trap`,
+`creation_crystal`, `mini`, `item`. Sie liegt auf der Kategorie, weil der Audit vom 2026-09-06
+belegt hat, dass jede der 24 Kategoriezeilen vollständig in genau eine Gruppe fällt — 24
+Entscheidungen für 561 Objekte, kein SKY-ID-Override.
+
+`NULL` ist ein Zustand, kein Standard: eine später hinzukommende Kategorie ist unklassifiziert,
+bleibt unter „Alle" sichtbar und wird nie automatisch `item`. Die sechs `Spiele`-Zeilen bleiben
+dauerhaft `NULL` (ADR-0029). **Admin-owned:** der Import schreibt an `categories` nur
+`position` (siehe 6.).
+
+Die Gruppe sagt **nichts** über Varianten und **nichts** über Completion.
 
 Der dritte Unique-Constraint ist für die Eindeutigkeit redundant (`id` ist bereits PK), aber
 syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `skylanders`.
@@ -134,10 +149,33 @@ syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `
 | `market_price` | `numeric(10,2)` **nullbar** | `null` **oder** `> 0` |
 | `price_updated_at` | `timestamptz` | nur gesetzt, wenn ein Preis existiert |
 | `image_file` | `text` | `^[0-9a-f]{16}\.webp$`, nur Dateiname, nie URL |
-| `is_active` | `boolean not null default true` | statt Löschen |
+| `is_active` | `boolean not null default true` | statt Löschen; **import-owned**, bei jedem Lauf `true` |
+| `catalog_visible` | `boolean not null default true` | redaktionelle Sichtbarkeit (ADR-0039), **admin-owned**, öffentlich |
+| `display_name_override` | `text` **nullbar** | öffentlicher Name statt `name`; nicht leer, wenn gesetzt; öffentlich |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
-Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)`.
+Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)` ·
+`(series_code) where is_active and catalog_visible` (die öffentliche Katalogabfrage).
+
+**Drei Sichtbarkeiten, drei Spalten — nie vermischen (ADR-0039):**
+
+| Spalte | Frage | Eigentümer |
+|---|---|---|
+| `skylanders.is_active` | Kennt die Legacy-Quelle die Zeile? | Import |
+| `skylanders.catalog_visible` | Soll sie im öffentlichen Katalog erscheinen? | Admin |
+| `shop_inventory.is_listed` | Bietet der Shop sie an? | Shop |
+
+**Warum hier keine interne Notiz steht.** `grant select on public.skylanders to anon` gilt für
+**jede** Spalte, die die Tabelle je bekommt, und RLS filtert Zeilen, nicht Spalten. Am
+2026-09-06 gegen die laufende Datenbank gemessen: ein anonymer PostgREST-Client liest
+`select=*` und erhält alle zwölf Spalten. Eine interne Notiz auf dieser Tabelle wäre also über
+`GET /rest/v1/skylanders?select=admin_note` öffentlich gewesen — unabhängig davon, was die
+Anwendung selektiert. Deshalb liegt sie in `catalog_editorial` (3.3c). Auf `skylanders` stehen
+nur die beiden Spalten, die zum **öffentlichen** Produktmodell gehören.
+
+**Verborgen heißt weder gelöscht noch gezählt (ADR-0040).** `collection_items` bleibt
+unangetastet, der Sammlungswert zählt die Figur weiter — aber sie steht in **keiner** Hälfte des
+Completion-Bruchs, weder im Zähler noch im Nenner. Damit kann `owned > total` nicht entstehen.
 
 **Feldbegründungen**
 
@@ -176,6 +214,44 @@ transitiv über `categories`.
 **Nicht enthalten und nicht vorgesehen:** Lagerbestand, `available`, Ankaufpreis, eBay-Daten,
 externe Titel, Mapping-Informationen (ADR-0008). Statisch geprüft: keine dieser Spalten
 existiert.
+
+### 3.3c `catalog_editorial` — die interne Seite (Migration `0004`)
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `sky_id` | `text` **PK** | FK → `skylanders`, `on update cascade on delete cascade` |
+| `admin_note` | `text` **nullbar** | interne Notiz, max. 2000 Zeichen |
+| `updated_at` | `timestamptz not null default now()` | |
+
+Eine Zeile je Figur, angelegt bei der ersten Notiz — kein Backfill, keine 601 leeren Zeilen.
+Wird die Notiz geleert, verschwindet die Zeile; die Historie bleibt im Journal.
+
+**Zwei unabhängige Schlösser:** `anon` hat **gar kein** Recht auf der Tabelle, `authenticated`
+hat `select` und trifft auf die Policy `catalog_editorial_select_admin`
+(`using (public.is_shop_admin())`). Schreibrechte hat niemand; geschrieben wird ausschließlich
+über `admin_set_admin_note()`. Fällt eines der beiden Schlösser aus, ist das noch kein Leck.
+
+**Kein `edited_by`/`edited_at` auf `skylanders`.** Beides wäre eine zweite Wahrheit neben
+`catalog_admin_changes` — und ein `edited_by` auf einer weltlesbaren Tabelle würde nebenbei
+veröffentlichen, wer den Katalog pflegt. Wer wann was geändert hat, beantwortet das Journal.
+
+### 3.3b `catalog_admin_changes` — die redaktionelle Historie (Migration `0004`)
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `id` | `bigint generated always as identity` **PK** | |
+| `entity` | `text not null` | `skylander` oder `category` |
+| `entity_id` | `text not null` | SKY-ID bzw. Kategorie-ID als Text |
+| `field` | `text not null` | `catalog_visible`, `display_name_override`, `admin_note`, `catalog_group` |
+| `old_value` / `new_value` | `text` **nullbar** | beide Seiten als Text — die Tabelle wird gelesen, nicht gejoint |
+| `changed_by` | `uuid` **nullbar** | → `auth.users`, `on delete set null`: die Änderung überlebt die Person |
+| `changed_at` | `timestamptz not null default now()` | |
+
+**Append-only per Trigger**, nicht per Policy: RLS gilt nicht für die Service Role, Trigger
+schon — dieselbe Begründung wie bei `inventory_movements`. **Geschrieben von Triggern auf
+`skylanders` und `categories`**, nicht von der Anwendung: so kann kein Schreibweg das
+Protokollieren vergessen, auch kein lokales Skript. Für Clients gibt es weder Rechte noch
+Policy; Admins lesen über `admin_catalog_changes()`.
 
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
@@ -461,7 +537,8 @@ Benutzer eine Berechtigung selbst setzen (ADR-0032, `docs/AUTH.md` Abschnitt 6).
 |---|---|---|---|---|
 | `series_select_public` | `series` | SELECT | anon, authenticated | `true` |
 | `categories_select_public` | `categories` | SELECT | anon, authenticated | `true` |
-| `skylanders_select_public` | `skylanders` | SELECT | anon, authenticated | `true` |
+| `skylanders_select_anon` ¹ | `skylanders` | SELECT | anon | `is_active and catalog_visible` |
+| `skylanders_select_authenticated` ¹ | `skylanders` | SELECT | authenticated | öffentlich **oder** `is_shop_admin()` **oder** eigener Sammlungsbezug |
 | `profiles_select_own` | `profiles` | SELECT | authenticated | `USING (auth.uid() = id)` |
 | `profiles_insert_own` | `profiles` | INSERT | authenticated | `WITH CHECK (auth.uid() = id)` |
 | `profiles_update_own` | `profiles` | UPDATE | authenticated | `USING` **und** `WITH CHECK (auth.uid() = id)` |
@@ -470,12 +547,49 @@ Benutzer eine Berechtigung selbst setzen (ADR-0032, `docs/AUTH.md` Abschnitt 6).
 | `collection_items_update_own` | `collection_items` | UPDATE | authenticated | `USING` **und** `WITH CHECK (auth.uid() = user_id)` |
 | `collection_items_delete_own` | `collection_items` | DELETE | authenticated | `USING (auth.uid() = user_id)` |
 
+¹ **Ersetzt in `0004` die frühere Policy `skylanders_select_public` (`using (true)`).** Solange
+jede Zeile öffentlich war, war „alle Zeilen für alle" richtig. Mit `catalog_visible` muss eine
+verborgene Zeile auch über die **API** verschwinden, nicht nur in der Anwendung. Drei Zweige,
+in dieser Reihenfolge:
+
+1. **öffentlich** — `is_active and catalog_visible`; der Normalfall, greift ohne Unterabfrage.
+2. **Admin** — `public.is_shop_admin()`; sieht alles, ohne dass die Tabelle für andere aufgeht.
+3. **eigener Besitz** — `exists (select 1 from collection_items ci where ci.sky_id = … and
+   ci.user_id = auth.uid())`; eine nachträglich verborgene Figur bleibt in der eigenen Sammlung
+   vollständig sichtbar (ADR-0040), inklusive Name, Preis und Bild.
+
+**Keine Rekursion:** Die Policies von `collection_items` vergleichen `auth.uid()` mit
+`user_id` und erwähnen `skylanders` nicht — der Zyklus entsteht also nicht. Die Unterabfrage
+nutzt den Unique-Index `(user_id, sky_id)`.
+
+**Warum zwei Policies statt einer:** `anon` hat auf `is_shop_admin()` kein EXECUTE-Recht. Eine
+gemeinsame Policy, die die Funktion aufruft, würde jede anonyme Katalogabfrage mit
+*permission denied for function* beenden.
+
 **Warum `USING` und `WITH CHECK` bei jedem UPDATE.** `USING` bestimmt, welche Zeilen geändert
 werden dürfen; `WITH CHECK`, was aus ihnen werden darf. Ohne `WITH CHECK` könnte ein Benutzer
 seine eigene Zeile auf eine fremde `user_id` umschreiben und sie damit verschieben.
 
 **Warum keine DELETE-Policy auf `profiles`.** Profile verschwinden mit dem Auth-Benutzer
 (`on delete cascade`), nicht einzeln. Andernfalls entstünde ein Benutzer ohne Profil.
+
+**Warum es für die redaktionellen Spalten keine Policy gibt (Migration `0004`).** Weil es kein
+Schreibrecht gibt: `anon` und `authenticated` haben auf `skylanders` und `categories` nur
+`select`. Die redaktionellen Spalten erben damit denselben Schutz wie die importierten. Der
+einzige Schreibweg sind vier `security definer`-Funktionen, die jede für sich
+`public.is_shop_admin()` fragen:
+
+| Funktion | Wirkung |
+|---|---|
+| `admin_set_catalog_visible(sky_id, boolean)` | Sichtbarkeit |
+| `admin_set_display_name_override(sky_id, text)` | öffentlicher Name; leerer Text = zurücksetzen |
+| `admin_set_admin_note(sky_id, text)` | interne Notiz |
+| `admin_set_catalog_group(category_id, text)` | Produktgruppe der Kategorie |
+| `admin_catalog_changes(entity, id, limit)` | liest die Historie |
+
+Alle mit `set search_path = ''`, alle `revoke all … from public, anon` und
+`grant execute … to authenticated`. Eine Anfrage ohne Adminberechtigung endet mit
+`insufficient_privilege` — unabhängig davon, ob sie über die Oberfläche kam.
 
 `auth.uid()` steht in allen Policies als `(select auth.uid())`. PostgreSQL wertet die
 Unterabfrage dann einmal je Statement aus statt einmal je Zeile.

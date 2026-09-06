@@ -33,6 +33,14 @@ export type CollectionStats = {
   withoutPrice: number;
   /** Owned figures that are no longer active in the catalog. */
   inactiveOwned: number;
+  /**
+   * Owned figures an administrator has hidden from the public catalog.
+   *
+   * Counted apart for the same reason as `inactiveOwned`: the figure stays in
+   * the collection and in its value, but it is in neither half of the
+   * completion fraction (ADR-0040).
+   */
+  hiddenOwned: number;
   /** Owned entries that are not collectible items — console games. */
   nonCollectibleOwned: number;
 };
@@ -63,6 +71,7 @@ export function collectionStats(
   let estimatedValue = 0;
   let withoutPrice = 0;
   let inactiveOwned = 0;
+  let hiddenOwned = 0;
   let nonCollectibleOwned = 0;
 
   for (const entry of entries) {
@@ -75,7 +84,11 @@ export function collectionStats(
     }
 
     distinctFigures += 1;
-    if (entry.figure.isActive) countedFigures += 1;
+    // Completion counts what the public catalog currently offers. A figure
+    // that left the source (`isActive`) or was hidden editorially
+    // (`catalogVisible`) is in neither half — which is what makes
+    // "owned > total" impossible (ADR-0040).
+    if (entry.figure.isActive && entry.figure.catalogVisible) countedFigures += 1;
     totalPieces += entry.quantity;
     if (entry.figure.marketPrice === null) {
       withoutPrice += 1;
@@ -83,6 +96,7 @@ export function collectionStats(
       estimatedValue += entry.quantity * entry.figure.marketPrice;
     }
     if (!entry.figure.isActive) inactiveOwned += 1;
+    if (!entry.figure.catalogVisible) hiddenOwned += 1;
   }
 
   return {
@@ -94,6 +108,7 @@ export function collectionStats(
     estimatedValue: roundToCents(estimatedValue),
     withoutPrice,
     inactiveOwned,
+    hiddenOwned,
     nonCollectibleOwned,
   };
 }

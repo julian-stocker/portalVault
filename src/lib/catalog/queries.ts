@@ -16,6 +16,7 @@
 import type { Character, Element } from "@/lib/catalog/character";
 import { asElement } from "@/lib/catalog/element";
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
+import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
 import {
@@ -36,22 +37,26 @@ type FigureRow = {
   market_price: string | number | null;
   image_file: string | null;
   is_active: boolean;
+  catalog_visible: boolean;
+  display_name_override: string | null;
   character_id: number | null;
 };
 
+// One string literal, not a concatenation: PostgREST's typing reads the
+// select list at the type level, and a computed string loses the row type.
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, is_active, character_id";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, is_active, character_id, catalog_visible, display_name_override";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
-  categories: Map<number, { position: number; name: string }>;
+  categories: Map<number, { position: number; name: string; catalogGroup: CatalogGroup | null }>;
 };
 
 async function loadLookups(): Promise<Lookups> {
   const supabase = await createClient();
   const [seriesResult, categoryResult] = await Promise.all([
     supabase.from("series").select("code, label, position"),
-    supabase.from("categories").select("id, position, name"),
+    supabase.from("categories").select("id, position, name, catalog_group"),
   ]);
 
   if (seriesResult.error) throw new Error(`series: ${seriesResult.error.message}`);
@@ -67,7 +72,13 @@ async function loadLookups(): Promise<Lookups> {
     categories: new Map(
       (categoryResult.data ?? []).map((row) => [
         row.id as number,
-        { position: row.position as number, name: row.name as string },
+        {
+          position: row.position as number,
+          name: row.name as string,
+          // A value the CHECK constraint already restricts; the guard keeps a
+          // future value the app does not know yet out of the type.
+          catalogGroup: isCatalogGroup(row.catalog_group) ? row.catalog_group : null,
+        },
       ]),
     ),
   };
@@ -88,14 +99,25 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     seriesPosition: series?.position ?? 0,
     categoryPosition: lookups.categories.get(row.category_id)?.position ?? 0,
     categoryName: lookups.categories.get(row.category_id)?.name ?? "",
-    // Filled in by withVariants() once the series context is known.
-    displayName: row.name,
-    sortBaseName: row.name,
+    categoryId: row.category_id,
+    catalogGroup: lookups.categories.get(row.category_id)?.catalogGroup ?? null,
+    // Filled in by withVariants() once the series context is known — unless
+    // an administrator has chosen the public name, which wins over the
+    // derivation (ADR-0039).
+    displayName: row.display_name_override ?? row.name,
+    sortBaseName: row.display_name_override ?? row.name,
     sortVariantLabel: null,
-    searchIndex: buildSearchIndex([row.name]),
+    // Both spellings, always: a search for the imported name has to keep
+    // working after the public name was changed.
+    searchIndex: buildSearchIndex(
+      row.display_name_override === null ? [row.name] : [row.display_name_override, row.name],
+    ),
     marketPrice: row.market_price === null ? null : Number(row.market_price),
     imageFile: row.image_file,
     isActive: row.is_active,
+    catalogVisible: row.catalog_visible,
+    canonicalName: row.name,
+    displayNameOverride: row.display_name_override,
     characterId: row.character_id,
     // Filled in by withCharacterElement() once the character index is known.
     element: null,
@@ -125,6 +147,12 @@ export function withVariants(
   nameIndex: ReadonlyMap<string, ReadonlySet<string>>,
 ): CatalogFigure[] {
   return figures.map((figure) => {
+    // An administrator's choice wins over the derivation (ADR-0039). The
+    // canonical name still reaches the search index — toFigure put both
+    // spellings there — but nothing is inferred from it any more: the public
+    // name has been decided.
+    if (figure.displayNameOverride !== null) return figure;
+
     const namesInSeries = nameIndex.get(figure.seriesCode) ?? new Set<string>();
     const variant = parseVariant(figure.name, namesInSeries);
     const { sortBaseName, sortVariantLabel } = sortPartsFor(figure.name, variant);
@@ -216,7 +244,7 @@ export async function fetchNameIndex(): Promise<Map<string, Set<string>>> {
   const supabase = await createClient();
   const [lookups, result] = await Promise.all([
     loadLookups(),
-    supabase.from("skylanders").select("name, series_code, category_id").eq("is_active", true),
+    supabase.from("skylanders").select("name, series_code, category_id").eq("is_active", true).eq("catalog_visible", true),
   ]);
   if (result.error) throw new Error(`name index: ${result.error.message}`);
 
@@ -244,7 +272,7 @@ export async function fetchCatalog(): Promise<CatalogFigure[]> {
   const supabase = await createClient();
   const [lookups, result] = await Promise.all([
     loadLookups(),
-    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("is_active", true),
+    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("is_active", true).eq("catalog_visible", true),
   ]);
 
   if (result.error) throw new Error(`catalog: ${result.error.message}`);
@@ -388,7 +416,7 @@ export async function countCollectibleFigures(): Promise<number> {
   let query = supabase
     .from("skylanders")
     .select("*", { count: "exact", head: true })
-    .eq("is_active", true);
+    .eq("is_active", true).eq("catalog_visible", true);
 
   if (excluded.length > 0) {
     query = query.not("category_id", "in", `(${excluded.join(",")})`);
@@ -417,7 +445,7 @@ export async function countCollectibleFiguresBySeries(): Promise<Record<string, 
     .filter(([, category]) => !isCollectibleCategory(category.name))
     .map(([id]) => id);
 
-  let query = supabase.from("skylanders").select("series_code").eq("is_active", true);
+  let query = supabase.from("skylanders").select("series_code").eq("is_active", true).eq("catalog_visible", true);
   if (excluded.length > 0) {
     query = query.not("category_id", "in", `(${excluded.join(",")})`);
   }

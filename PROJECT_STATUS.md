@@ -61,6 +61,39 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**Adminbereich Phase 1 gebaut, Migration noch nicht ausgeführt (2026-09-06, ADR-0039/0040/0041).**
+`/admin`, `/admin/catalog`, `/admin/catalog/[skyId]` und `/admin/catalog/categories` existieren;
+Nicht-Admins bekommen **404**. Berechtigung bleibt `shop_admins` + `public.is_shop_admin()` —
+trotz des Namens die allgemeine Adminberechtigung —, gelesen über `src/lib/auth/admin.ts`.
+Vergabe über `npm run admin:grant` (lokal, Service Role, Dry-Run, `--apply`, idempotent, keine
+Adresse im Quelltext). **Noch kein Konto freigeschaltet.**
+
+Migration `0004_catalog_editorial.sql` ist geschrieben und nach einem Security-Review
+überarbeitet, aber **noch nicht ausgeführt**. **Der Befund:** Ein Tabellen-Grant kennt keine
+Spalten — `select=*` liefert einem anonymen Client jede Spalte von `skylanders`, RLS filtert nur
+Zeilen. Der erste Entwurf hätte `admin_note` dorthin gelegt und damit veröffentlicht. Jetzt
+liegen auf `skylanders` nur die zwei **öffentlichen** Spalten (`catalog_visible`,
+`display_name_override`); die interne Notiz steht in der eigenen Tabelle `catalog_editorial`
+(anon ohne jedes Recht, `authenticated` nur über eine `is_shop_admin()`-Policy).
+`edited_at`/`edited_by` sind ersatzlos entfallen — `catalog_admin_changes` beantwortet das
+bereits. Zusätzlich **ersetzt** `0004` die Policy `skylanders_select_public` (`using (true)`):
+verborgene Zeilen verschwinden auch aus der API, außer für Admins und für den Besitzer der
+Figur. Dazu `categories.catalog_group` mit Backfill der 24 Kategoriezeilen, das Append-only-
+Journal und vier `security definer`-Funktionen, die jede selbst `is_shop_admin()` fragen.
+
+**Produktgruppen** (`figure`, `giant`, `swapper`, `trap_master`, `sensei`, `vehicle`, `trap`,
+`creation_crystal`, `mini`, `item`) liegen auf der Kategorie, nicht auf der SKY-ID: der Audit
+hat belegt, dass jede Kategorie vollständig in genau eine Gruppe fällt. Sie sind **orthogonal**
+zu Varianten und zu Completion — `variant_kind`, `is_special` und ein Specials-Filter bleiben
+ungebaut, und die öffentliche zweite Tab-Leiste kommt in einem eigenen Schritt.
+
+**Verborgene Figuren zählen weder im Zähler noch im Nenner** des Fortschritts (ADR-0040), bleiben
+aber in der Sammlung und in ihrem Wert. `owned > total` kann dadurch nicht entstehen.
+
+⚠️ **Bis die Migration ausgeführt ist, laufen Katalog und Sammlung nicht**: die Abfragen lesen
+`catalog_visible` und `catalog_group`. Reihenfolge: `0004` ausführen → `npm run verify:editorial`
+(echte anonyme/Nutzer-/Admin-Sitzungen) → committen und pushen → optional Admin freischalten.
+
 **V4.4 umgesetzt (2026-09-06, ADR-0038).** Drei Nachbesserungen. **Der Besitzfilter steht still:**
 Das Häkchen im Ein-Zustand machte den Button breiter und schob ihn auf 390 px in die nächste
 Zeile — jetzt unterscheidet nur Farbe die Zustände, `aria-pressed` und Text bleiben.

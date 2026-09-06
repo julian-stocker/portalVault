@@ -175,9 +175,10 @@ export function segmentSummary(
   let value = 0;
 
   for (const row of inScope(rows, scope)) {
-    // A figure that left the catalog counts in neither half of the fraction,
-    // so completion cannot be pushed past 100 %.
-    if (row.figure.isActive && row.quantity > 0) owned += 1;
+    // A figure that left the catalog or was hidden editorially counts in
+    // neither half of the fraction, so completion cannot be pushed past
+    // 100 % and `owned > total` cannot arise (ADR-0040).
+    if (row.figure.isActive && row.figure.catalogVisible && row.quantity > 0) owned += 1;
     // The value counts what is owned, active or not: owning it is owning it.
     if (row.quantity > 0 && row.figure.marketPrice !== null) {
       value += row.quantity * row.figure.marketPrice;
@@ -276,7 +277,7 @@ export function groupBySeries(
   // saying "3 / 81" because a search matched three figures would be a lie.
   for (const row of allRows) {
     if (!isCollectible(row.figure)) continue;
-    if (!row.figure.isActive) continue;
+    if (!row.figure.isActive || !row.figure.catalogVisible) continue;
     if (row.quantity <= 0) continue;
     const code = row.figure.seriesCode;
     owned.set(code, (owned.get(code) ?? 0) + 1);

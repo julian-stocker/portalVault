@@ -217,8 +217,19 @@ Damit sie nicht falsch gebaut wird, stehen die Randbedingungen schon jetzt fest:
 5. **Ohne Rolle keine Wirkung:** Ein normaler Benutzer, der eine Shop-Admin-Aktion direkt
    aufruft, muss abgewiesen werden — von RLS und von der Server Action, nicht von der Anzeige.
 
-**Nichts davon ist implementiert.** Es gibt keine Rollenspalte, keine Rollentabelle und keine
-Shop-Policy.
+**Stand 2026-09-06 (ADR-0039).** Punkt 1b ist umgesetzt und wird jetzt allgemein genutzt:
+`shop_admins` **ist** die SkyIsles-Adminberechtigung, `public.is_shop_admin()` das einzige
+Prädikat. Die Anwendung fragt es über `src/lib/auth/admin.ts` (`isAdmin()`), memoisiert je
+Anfrage wie `currentUser()`; ein späteres Rollenmodell landet dort und sonst nirgends.
+
+Vergeben wird die Berechtigung mit `npm run admin:grant` — lokal, über die Service Role,
+Dry-Run als Standard, `--apply` zum Schreiben, idempotent, ohne Adresse im Quelltext. Es gibt
+**keinen** Weg über den Webclient: `shop_admins` hat für `anon` und `authenticated` weder Rechte
+noch Policy.
+
+Geprüft wird serverseitig: `(admin)/layout.tsx` antwortet Nicht-Admins mit **404**, und jede
+redaktionelle Schreiboperation fragt in der Datenbank noch einmal (Migration `0004`). Ein
+ausgeblendeter Link ist weiterhin keine Berechtigung.
 
 ---
 

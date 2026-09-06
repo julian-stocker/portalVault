@@ -113,6 +113,59 @@ SC  Spiele · Figuren · Trophies · Fahrzeuge
 I   Spiele · Senseis · Locations & Truhen · Kreationskristalle
 ```
 
+### Produktgruppen — die stabile Schicht über den Kategorien (ADR-0041)
+
+Die Legacy-Kategorien bleiben genau, wie sie sind: sie sind die **exakte** Klassifikation und
+kommen aus dem Legacy-Projekt. Darüber liegt eine gröbere, für Nutzer verständliche Ebene:
+`categories.catalog_group`, redaktionell gepflegt, vom Import nie angefasst.
+
+| Gruppe | Label | n | aus welchen Kategorien |
+|---|---|---:|---|
+| `figure` | Figuren | 261 | SA/SC `Figuren`, `Giants neue Figuren`, `Giants Series 2 Figuren`, `Swap Force neue Figuren`, `Varianten & LightCore`, `Trap Team neue Figuren`, `Trap Team Series Figuren` |
+| `trap` | Fallen | 57 | `Traps` |
+| `sensei` | Senseis | 46 | `Senseis` |
+| `item` | Items | 44 | `Magic Items` (SA/G/SF), `Trap Items`, `Trophies`, `Locations & Truhen` |
+| `vehicle` | Fahrzeuge | 31 | `Fahrzeuge` |
+| `trap_master` | Trap Masters | 28 | `Trap Masters` |
+| `creation_crystal` | Kreationskristalle | 27 | `Kreationskristalle` |
+| `mini` | Minis | 27 | `Minis` (T), `Sidekicks` (SA/G) |
+| `swapper` | Swapper | 26 | `SWAP Force` |
+| `giant` | Giants | 14 | `Giants große Figuren` |
+
+Summe **561** — gemessen am 2026-09-06, nicht geschätzt.
+
+**Drei Kategorien benennen eine Variante statt einer Produktart** und gehören trotzdem zu
+`figure`: `Varianten & LightCore` (27), `Giants Series 2 Figuren` (39), `Trap Team Series
+Figuren` (6). Was ihr Name sagt — eine Ausführung, eine Neuauflage — ist eine eigene, noch nicht
+gebaute Dimension.
+
+**Die Gruppe sagt nichts über Completion.** „Fahrzeug" heißt nicht „optional". Ein Trap Master
+kann selbst eine Special-Ausgabe sein, und `Legendary Hand of Fate` ist ein **Item** mit
+Legendary-Ausführung.
+
+**`NULL` ist erlaubt und bedeutet „noch nicht klassifiziert".** Eine neue Kategorie aus dem
+Legacy-Projekt kommt so an, bleibt unter „Alle" sichtbar und wird nie automatisch `item`. Die
+sechs `Spiele`-Kategorien bleiben dauerhaft `NULL`.
+
+### Import-owned vs. Admin-owned (ADR-0039)
+
+Der Katalogimport benennt in seinem Upsert genau acht Spalten; PostgREST fasst beim
+`ON CONFLICT DO UPDATE` nur benannte Spalten an. Alles andere überlebt jeden Import.
+
+| Import-owned | Admin/editorial-owned |
+|---|---|
+| `sky_id`, `name`, `slug`, `series_code`, `category_id`, `market_price`, `image_file`, `is_active` | `character_id`, `catalog_visible`, `display_name_override` — und in eigener Tabelle `catalog_editorial.admin_note` |
+| an `categories`: `series_code`, `name`, `position` | an `categories`: `catalog_group` |
+
+Zwei Tests halten das fest: `src/lib/catalog/import-payload.test.ts` (die Spaltenliste des
+Payloads, positiv **und** negativ) und `src/lib/catalog/editorial.test.ts` (keine redaktionelle
+Spalte kommt im Code des Importers überhaupt vor).
+
+**Der Anzeigename** folgt derselben Trennung: `name` bleibt der importierte Rohname,
+`display_name_override` ist die redaktionelle Entscheidung, öffentlich gilt
+`display_name_override ?? Ableitung nach ADR-0030`. Der Slug ändert sich dabei **nicht**
+(ADR-0011), und die Suche findet weiterhin beide Schreibweisen.
+
 ### Sammelbar vs. Software
 
 **Die Kategorie `Spiele` enthält keine Sammelobjekte, sondern Konsolenspiele.** Sie existiert
