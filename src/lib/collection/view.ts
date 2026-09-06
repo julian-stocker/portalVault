@@ -1,12 +1,14 @@
 /**
  * The collection, and the catalog it is measured against.
  *
- * `buildCollectionRows` still covers every collectible, because completion
- * and series progress need a denominator: 448 of 561 is only meaningful if
- * both halves count the same set. What changed in V2 is what reaches the
- * screen — `showcaseRows` and `filterCollection` hand out owned rows only,
- * so the collection page shows a collection and the catalog answers what is
- * missing (ADR-0038).
+ * The rows are what someone owns. The denominators — 448 of 561, 12 of 81 —
+ * arrive as plain counts (`CatalogTotals`) rather than as the catalog itself.
+ *
+ * That is a deliberate change in V4.3. The page used to load all 561 figures
+ * so the browser could count them, which meant shipping every name, slug,
+ * price, image and search index of figures that are never displayed here:
+ * roughly a quarter of a megabyte of JSON on a page that shows what you own.
+ * Counting is the server's job; six numbers travel instead.
  *
  * Everything here is pure. The page does the fetching, the component does the
  * rendering, and these functions decide what the numbers mean.
@@ -24,33 +26,40 @@ export type CollectionRow = {
 };
 
 /**
- * One row per collectible, plus anything collectible that is owned but no
- * longer offered.
+ * The size of the catalog, as numbers rather than as figures.
  *
- * The second part matters: a figure that left the catalog must not disappear
- * from the collection of someone who owns it. It appears at the end, keeps
- * its quantity, and is counted apart from the completion figures.
+ * `total` is every active collectible; `bySeries` is the same count per game.
+ * Both come from the database (`countCollectibleFigures`,
+ * `countCollectibleFiguresBySeries`), so a figure this page never loads still
+ * counts in the denominator.
+ */
+export type CatalogTotals = {
+  total: number;
+  bySeries: Readonly<Record<string, number>>;
+};
+
+export const NO_TOTALS: CatalogTotals = { total: 0, bySeries: {} };
+
+/**
+ * One row per owned collectible.
+ *
+ * A figure that left the catalog keeps its row: something already owned must
+ * not disappear from a collection because it is no longer offered. It is
+ * counted apart from the completion figures — see `segmentSummary`.
  *
  * Console games are the exception. They are not part of the collector surface
  * at all — the catalog does not list them and their detail page is a 404
  * (ADR-0029) — so an owned game gets no card here either. It is not lost:
  * `collectionStats` counts it in `nonCollectibleOwned`, and the overview says
  * so in a sentence.
+ *
+ * Missing figures have no row any more. They never had a card (ADR-0038), and
+ * since V4.3 they are not counted here either — the denominator arrives as a
+ * number, so 561 rows of "quantity 0" would be 561 rows nobody reads.
  */
-export function buildCollectionRows(
-  catalog: readonly CatalogFigure[],
-  owned: readonly CollectionEntry[],
-): CollectionRow[] {
-  const quantities = new Map(owned.map((entry) => [entry.figure.skyId, entry.quantity]));
-  const inCatalog = new Set(catalog.map((figure) => figure.skyId));
-
-  const rows: CollectionRow[] = catalog.map((figure) => {
-    const quantity = quantities.get(figure.skyId) ?? 0;
-    return { figure, quantity, initialQuantity: quantity };
-  });
-
+export function buildCollectionRows(owned: readonly CollectionEntry[]): CollectionRow[] {
+  const rows: CollectionRow[] = [];
   for (const entry of owned) {
-    if (inCatalog.has(entry.figure.skyId)) continue;
     if (!isCollectible(entry.figure)) continue;
     rows.push({
       figure: entry.figure,
@@ -58,7 +67,6 @@ export function buildCollectionRows(
       initialQuantity: entry.quantity,
     });
   }
-
   return rows;
 }
 
@@ -161,28 +169,24 @@ function inScope(rows: readonly CollectionRow[], scope: CollectionScope): Collec
 export function segmentSummary(
   rows: readonly CollectionRow[],
   scope: CollectionScope,
-  catalogTotal: number,
+  totals: CatalogTotals,
 ): SegmentSummary {
   let owned = 0;
   let value = 0;
-  let total = 0;
 
   for (const row of inScope(rows, scope)) {
-    // The denominator counts what the catalog currently offers, so a figure
-    // that left it cannot push completion past 100 %.
-    if (row.figure.isActive) {
-      total += 1;
-      if (row.quantity > 0) owned += 1;
-    }
+    // A figure that left the catalog counts in neither half of the fraction,
+    // so completion cannot be pushed past 100 %.
+    if (row.figure.isActive && row.quantity > 0) owned += 1;
     // The value counts what is owned, active or not: owning it is owning it.
     if (row.quantity > 0 && row.figure.marketPrice !== null) {
       value += row.quantity * row.figure.marketPrice;
     }
   }
 
-  // "Alle" measures against the authoritative catalog count from the database
-  // rather than against however many rows this page happened to load.
-  if (scope === COLLECTION_ALL) total = catalogTotal;
+  // The denominator is the database's count, never however many rows this
+  // page happened to load.
+  const total = scope === COLLECTION_ALL ? totals.total : (totals.bySeries[scope] ?? 0);
 
   return {
     owned,
@@ -263,9 +267,9 @@ export function groupBySeries(
   visibleRows: readonly CollectionRow[],
   allRows: readonly CollectionRow[],
   series: readonly { code: string; label: string }[],
+  totals: CatalogTotals = NO_TOTALS,
 ): SeriesSection[] {
   const owned = new Map<string, number>();
-  const total = new Map<string, number>();
   const visible = new Map<string, CollectionRow[]>();
 
   // The counts describe the collection, not the current search: a section
@@ -273,9 +277,9 @@ export function groupBySeries(
   for (const row of allRows) {
     if (!isCollectible(row.figure)) continue;
     if (!row.figure.isActive) continue;
+    if (row.quantity <= 0) continue;
     const code = row.figure.seriesCode;
-    total.set(code, (total.get(code) ?? 0) + 1);
-    if (row.quantity > 0) owned.set(code, (owned.get(code) ?? 0) + 1);
+    owned.set(code, (owned.get(code) ?? 0) + 1);
   }
 
   // The rows are whatever the grid would have shown, in the order it had —
@@ -293,7 +297,7 @@ export function groupBySeries(
     .map((option) => {
       const list = visible.get(option.code) ?? [];
       const count = owned.get(option.code) ?? 0;
-      const size = total.get(option.code) ?? 0;
+      const size = totals.bySeries[option.code] ?? 0;
       return {
         code: option.code,
         label: option.label,

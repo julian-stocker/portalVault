@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/auth-form";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
-import { currentProfile, setUsernameAction, updatePasswordAction } from "@/lib/auth/actions";
+import { setUsernameAction, updatePasswordAction } from "@/lib/auth/actions";
+import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
 

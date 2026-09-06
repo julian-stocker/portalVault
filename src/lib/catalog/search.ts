@@ -53,7 +53,13 @@ export function matchesSeries(figure: CatalogFigure, seriesCode: string): boolea
 }
 
 /**
- * Narrows the catalog to what someone already owns (ADR-0038, V4.2).
+ * Hides what someone already owns, leaving what is still missing.
+ *
+ * The catalog's one view filter, and it points the other way round since
+ * V4.3: showing everything is the resting state, and switching "Besitz
+ * anzeigen" off answers the question a collector actually stands in a shop
+ * with — *what do I still need?* The earlier version could only do the
+ * opposite, which the collection page already answers better.
  *
  * Applied to the pool *before* search and series, so one narrowing feeds
  * every view the catalog has — the grid and the cross-series search results
@@ -63,11 +69,11 @@ export function matchesSeries(figure: CatalogFigure, seriesCode: string): boolea
  * Display only. Nothing here writes, and ownership is still marked on every
  * card by the gold frame whether the filter is on or off.
  */
-export function ownedFigures(
+export function missingFigures(
   figures: readonly CatalogFigure[],
   ownedSkyIds: ReadonlySet<string>,
 ): CatalogFigure[] {
-  return figures.filter((figure) => ownedSkyIds.has(figure.skyId));
+  return figures.filter((figure) => !ownedSkyIds.has(figure.skyId));
 }
 
 /** Applies search and series filter together. Order of the input is kept. */

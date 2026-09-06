@@ -1,37 +1,61 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 
+import { CollectionSkeleton } from "@/components/collection/collection-skeleton";
 import { CollectionView } from "@/components/collection/collection-view";
-import { currentProfile } from "@/lib/auth/actions";
+import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH } from "@/lib/auth/redirect";
-import { countCollectibleFigures, fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
+import {
+  countCollectibleFigures,
+  countCollectibleFiguresBySeries,
+  fetchSeries,
+} from "@/lib/catalog/queries";
 import { fetchCollection } from "@/lib/collection/queries";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.collection.title };
 
 /**
- * Someone's own collection.
+ * The data half of the page.
  *
- * Loads the whole catalog as well as what is owned, because "what am I
- * missing" is half of what a collection page is for and cannot be answered
- * from the owned rows alone. Same queries the catalog page already uses — no
- * new query, no new table, and the browser does the filtering as before
- * (ADR-0026).
+ * Split out so the heading above it can be sent before any of this has been
+ * asked for (V4.3). Everything here is one round of parallel queries; what
+ * used to be a fourth — the whole catalog, 561 figures with names, prices,
+ * images and search indexes — is now two counts, because counting is all the
+ * page ever did with it.
+ */
+async function CollectionData() {
+  const [owned, series, catalogTotal, bySeries] = await Promise.all([
+    fetchCollection(),
+    fetchSeries(),
+    countCollectibleFigures(),
+    countCollectibleFiguresBySeries(),
+  ]);
+
+  return (
+    <CollectionView
+      owned={owned}
+      series={series}
+      totals={{ total: catalogTotal, bySeries }}
+    />
+  );
+}
+
+/**
+ * Someone's own collection.
  *
  * The numbers are computed in the view so a removal updates the count, the
  * progress, the value and the series bars in the same frame.
+ *
+ * The heading is outside the Suspense boundary on purpose: it needs no data,
+ * so it can be on screen while the collection is still being fetched. A
+ * collection of 448 figures took about half a second to assemble, and for
+ * that half second the visitor used to see the previous page.
  */
 export default async function CollectionPage() {
   const profile = await currentProfile();
   if (!profile?.username) redirect(ONBOARDING_PATH);
-
-  const [catalog, owned, series, catalogTotal] = await Promise.all([
-    fetchCatalog(),
-    fetchCollection(),
-    fetchSeries(),
-    countCollectibleFigures(),
-  ]);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
@@ -52,12 +76,10 @@ export default async function CollectionPage() {
           {de.collection.subline}
         </p>
       </div>
-      <CollectionView
-        catalog={catalog}
-        owned={owned}
-        series={series}
-        catalogTotal={catalogTotal}
-      />
+
+      <Suspense fallback={<CollectionSkeleton />}>
+        <CollectionData />
+      </Suspense>
     </main>
   );
 }

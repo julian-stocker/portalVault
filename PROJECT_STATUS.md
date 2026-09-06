@@ -61,6 +61,20 @@ Einstand unbelegbar, der Import kann also nichts verlieren. Ab dem ersten eigene
 wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei nullable Spalten
 `unit_cost` und `currency`. Chargen bleiben ableitbar und werden nicht gebaut.
 
+**V4.3 umgesetzt (2026-09-06, ADR-0038).** Vier Nachbesserungen. **Login:** Ein falscher
+Versuch leert nur noch das Passwort, die E-Mail-Adresse bleibt stehen — Ursache war der
+React-Formularreset nach einer Server Action, die Regel steht in `src/lib/auth/preserve.ts`
+(Kennung bleibt, Geheimnis nie, nichts wird gespeichert). **Katalogfilter umgedreht:**
+**„Besitz anzeigen", standardmäßig an** — an ist der volle Katalog, aus zeigt nur, was noch
+fehlt; nicht persistiert, wirkt in Raster und serienübergreifender Suche, und eine gerade
+gesammelte Figur verschwindet sofort. **Sammlung schneller:** Die Seite lädt den Katalog nicht
+mehr in den Browser (sechs Zahlen statt 561 Figuren) und zeigt Kopf und Gerüst über eine
+`<Suspense>`-Grenze, bevor die Daten da sind; dazu eine Nutzerabfrage je Anfrage statt drei bis
+vier. Gemessen mit 448 Figuren: HTML 1.502 → 1.260 KB, RSC-Payload 496 → 245 KB, erstes
+sichtbares Gerüst nach 210–260 ms statt gar nichts vor 420–670 ms. Die Bilder waren nicht die
+Ursache (sie sind bereits `lazy`, mit festen Maßen). **Filterposition:** Der Duplikatfilter
+steht jetzt in der Kontrollzeile zwischen Anzahl und Symbole/Tabelle.
+
 **Deployment vorbereitet (2026-09-06).** Das Repository ist bereit für ein erstes Vercel-Deployment
 auf eine temporäre Testadresse. Sie läuft seit 2026-09-06 unter
 `https://portal-vault-lovat.vercel.app` als Production-Deployment von `main`, damit die Adresse

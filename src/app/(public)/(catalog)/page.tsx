@@ -4,7 +4,7 @@ import { CatalogView } from "@/components/catalog/catalog-view";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { de } from "@/lib/i18n/de";
-import { createClient } from "@/lib/supabase/server";
+import { currentUser } from "@/lib/auth/user";
 
 export const metadata: Metadata = {
   title: de.catalog.title,
@@ -24,9 +24,8 @@ export default async function CatalogPage({
 }) {
   const params = await searchParams;
 
-  const supabase = await createClient();
-  const [{ data: auth }, figures, series, owned] = await Promise.all([
-    supabase.auth.getUser(),
+  const [user, figures, series, owned] = await Promise.all([
+    currentUser(),
     fetchCatalog(),
     fetchSeries(),
     fetchOwnedSkyIds(),
@@ -44,7 +43,7 @@ export default async function CatalogPage({
         figures={figures}
         series={series}
         ownedSkyIds={[...owned]}
-        signedIn={Boolean(auth.user)}
+        signedIn={Boolean(user)}
         highlightSkyId={highlight}
         initialSeriesCode={
           params.series && series.some((s) => s.code === params.series) ? params.series : undefined

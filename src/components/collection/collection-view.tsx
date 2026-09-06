@@ -25,7 +25,7 @@ import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FilterBar, type FilterOption } from "@/components/ui/filter-bar";
 import { isCollectible } from "@/lib/catalog/collectible";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
-import type { CatalogFigure, CollectionEntry, SeriesOption } from "@/lib/catalog/types";
+import type { CollectionEntry, SeriesOption } from "@/lib/catalog/types";
 import { collectionStats } from "@/lib/collection/stats";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { CollectionTable } from "@/components/collection/collection-table";
@@ -42,6 +42,7 @@ import { FilterMenu } from "@/components/collection/filter-menu";
 import {
   COLLECTION_ALL,
   NO_FILTERS,
+  type CatalogTotals,
   buildCollectionRows,
   duplicateSummary,
   groupBySeries,
@@ -55,17 +56,19 @@ import {
 import { de } from "@/lib/i18n/de";
 
 export function CollectionView({
-  catalog,
   owned,
   series,
-  catalogTotal,
+  totals,
 }: {
-  catalog: readonly CatalogFigure[];
   owned: readonly CollectionEntry[];
   series: readonly SeriesOption[];
-  catalogTotal: number;
+  /**
+   * The catalog's size, as counts. Not the catalog itself: the browser needs
+   * denominators here, not 561 figures it never draws (V4.3).
+   */
+  totals: CatalogTotals;
 }) {
-  const base = useMemo(() => buildCollectionRows(catalog, owned), [catalog, owned]);
+  const base = useMemo(() => buildCollectionRows(owned), [owned]);
 
   /** Optimistic quantities, keyed by SKY-ID. Absent means "as the server said". */
   const [changed, setChanged] = useState<ReadonlyMap<string, number>>(new Map());
@@ -124,14 +127,11 @@ export function CollectionView({
 
   // Statistics and series progress still see every catalog row: 448 of 561 is
   // only meaningful if both halves count the same set.
-  const stats = useMemo(() => collectionStats(counted, catalogTotal), [counted, catalogTotal]);
+  const stats = useMemo(() => collectionStats(counted, totals.total), [counted, totals.total]);
 
   // Follows the tabs, never the search box: a summary that moved while you
   // typed would stop being a fact about the segment.
-  const summary = useMemo(
-    () => segmentSummary(rows, scope, catalogTotal),
-    [rows, scope, catalogTotal],
-  );
+  const summary = useMemo(() => segmentSummary(rows, scope, totals), [rows, scope, totals]);
 
   // Only while the filter is on: an extra line, never a second summary.
   const duplicates = useMemo(
@@ -199,8 +199,8 @@ export function CollectionView({
    * splitting them by game would scatter the very thing being looked at.
    */
   const sections = useMemo(
-    () => groupBySeries(visible, rows, series),
-    [visible, rows, series],
+    () => groupBySeries(visible, rows, series, totals),
+    [visible, rows, series, totals],
   );
 
   const filtered = hasActiveFilter(scope, query, filters);
@@ -268,18 +268,14 @@ export function CollectionView({
       ) : (
         <>
           <div className="flex flex-col gap-3">
-            {/* Two controls, two jobs: the bar picks the game, the menu
-                narrows it. They share a row on a wide screen and stack on a
-                phone, where the bar needs the full width to scroll. */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-              <FilterBar
-                label={de.collection.statusFilter}
-                options={scopeOptions}
-                active={scope}
-                onSelect={setScope}
-              />
-              <FilterMenu filters={filters} onChange={setFilters} />
-            </div>
+            {/* The series bar keeps the full width: it scrolls on a phone,
+                and the filter is not one of its options (V4.2). */}
+            <FilterBar
+              label={de.collection.statusFilter}
+              options={scopeOptions}
+              active={scope}
+              onSelect={setScope}
+            />
 
             <label className="sr-only" htmlFor="collection-search">
               {de.catalog.searchLabel}
@@ -297,13 +293,24 @@ export function CollectionView({
               }
             />
 
+            {/*
+             * The control row (V4.3): what is being shown, what narrows it,
+             * how it is drawn — left to right, in that order.
+             *
+             * The filter moved here from above the search box. Up there it
+             * sat beside the series bar and read as a seventh game; between
+             * the count and the view toggle it reads as what it is, a
+             * control over the list underneath. One row on a wide screen,
+             * wrapping on a phone.
+             */}
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
               <p className="text-sm text-muted" aria-live="polite">
                 {searching
                   ? de.collection.searchCount(visible.length, inSegment)
                   : de.catalog.figureCount(visible.length)}
               </p>
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center gap-3 md:gap-4">
+                <FilterMenu filters={filters} onChange={setFilters} />
                 {filtered ? (
                   <button
                     type="button"

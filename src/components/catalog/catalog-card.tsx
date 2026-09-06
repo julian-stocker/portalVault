@@ -49,11 +49,17 @@ function InfoGlyph() {
 export function CatalogCard({
   figure,
   initialCollected,
+  onCollectedChange,
   signInHref,
   highlighted,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
+  /**
+   * Tells the catalog what this card just did, so the ownership filter sees
+   * it in the same frame rather than after a round trip (V4.3).
+   */
+  onCollectedChange?: (skyId: string, collected: boolean) => void;
   /** null when somebody is signed in; otherwise where the card leads instead. */
   signInHref: string | null;
   highlighted: boolean;
@@ -65,6 +71,7 @@ export function CatalogCard({
   function onToggle() {
     const desired = !collected;
     setLocal(desired); // optimistic
+    onCollectedChange?.(figure.skyId, desired);
     setFailed(false);
 
     startTransition(async () => {
@@ -73,6 +80,11 @@ export function CatalogCard({
       const result = await setCollected(figure.skyId, desired);
       if (!result.ok) {
         setLocal(!desired); // a wrong state on screen is worse than an error
+        // Also told upward, and that is the part that still works when the
+        // card has meanwhile left the list under the ownership filter: the
+        // figure comes back. Its inline error message is lost with it, which
+        // is the right trade — a wrong list is worse than a missing note.
+        onCollectedChange?.(figure.skyId, !desired);
         setFailed(true);
       }
     });

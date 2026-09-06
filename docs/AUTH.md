@@ -419,6 +419,14 @@ Wer eingeloggt ist, aber noch keinen Benutzernamen hat, landet auf `/onboarding`
 | Netzwerk- oder Supabase-Ausfall | allgemeiner Fehler, **niemals** SQL-Meldungen oder Stacktraces |
 | Trigger hat kein Profil angelegt | `/onboarding` legt es über `profiles_insert_own` selbst an — der bereits vorhandene Fallback |
 
+**Was ein Fehler kostet: das Passwort, nicht das Formular.** React setzt ein Formular zurück,
+sobald seine Action antwortet — richtig nach einem erfolgreichen Absenden, und der Grund, warum
+ein falsches Passwort früher auch die E-Mail-Adresse leerte. Seit V4.3 entscheidet
+`src/lib/auth/preserve.ts` an einer Stelle, was das überlebt: **Kennungen bleiben** (E-Mail,
+Benutzername), **Geheimnisse nie** (Passwort). Umgesetzt über den Unterschied zwischen
+kontrolliertem und unkontrolliertem Eingabefeld — der zurückgehaltene Wert lebt im
+Komponentenzustand, **nicht** in `localStorage`, `sessionStorage` oder einem Cookie.
+
 ### 9.8 Tests
 
 Nach ADR-0013, ohne E2E:

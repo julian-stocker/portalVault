@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
-import { currentProfile } from "@/lib/auth/actions";
+import { currentProfile } from "@/lib/auth/profile";
 import { SIGN_IN_PATH } from "@/lib/auth/redirect";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

@@ -18,6 +18,7 @@ import {
 } from "@/lib/catalog/queries";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CollectionEntry } from "@/lib/catalog/types";
+import { currentUser } from "@/lib/auth/user";
 import { createClient } from "@/lib/supabase/server";
 
 type CollectionRow = {
@@ -34,8 +35,7 @@ type CollectionRow = {
  */
 export async function fetchOwnedSkyIds(): Promise<Set<string>> {
   const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return new Set();
+  if (!(await currentUser())) return new Set();
 
   const { data, error } = await supabase.from("collection_items").select("sky_id");
   if (error) throw new Error(`owned: ${error.message}`);
@@ -50,8 +50,7 @@ export async function fetchOwnedSkyIds(): Promise<Set<string>> {
  */
 export async function fetchCollection(): Promise<CollectionEntry[]> {
   const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return [];
+  if (!(await currentUser())) return [];
 
   const [lookups, nameIndex, characterIndex, result] = await Promise.all([
     loadLookups(),

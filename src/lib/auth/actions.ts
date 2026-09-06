@@ -11,6 +11,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { currentProfile as readProfile, type Profile } from "@/lib/auth/profile";
 import { checkUsername } from "@/lib/auth/username";
 import {
   passwordUpdateError,
@@ -203,18 +204,9 @@ export async function setUsernameAction(
 }
 
 /** Used by protected layouts to decide whether onboarding is still pending. */
-export async function currentProfile(): Promise<{ id: string; username: string | null } | null> {
-  const supabase = await createClient();
-  const { data } = await supabase.auth.getUser();
-  if (!data.user) return null;
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, username")
-    .eq("id", data.user.id)
-    .maybeSingle();
-
-  // The signup trigger normally creates this row. If it is missing, the
-  // onboarding page creates it through profiles_insert_own.
-  return profile ?? { id: data.user.id, username: null };
+export async function currentProfile(): Promise<Profile | null> {
+  // The implementation lives in `profile.ts`, where it can be memoised per
+  // request. A `"use server"` module may only export plain async functions,
+  // so this stays a thin pass-through for anything that imports it from here.
+  return readProfile();
 }

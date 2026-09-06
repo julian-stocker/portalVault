@@ -6,8 +6,8 @@ import {
   filterFigures,
   groupSearchResults,
   matchesQuery,
+  missingFigures,
   normalizeForSearch,
-  ownedFigures,
 } from "./search.ts";
 import type { CatalogFigure } from "./types.ts";
 import { displayNameFor, parseVariant, searchFormsFor, sortPartsFor } from "./variant.ts";
@@ -222,11 +222,12 @@ describe("groupSearchResults — searching past the active tab", () => {
 });
 
 /**
- * "In Besitz" (ADR-0038, V4.2).
+ * "Besitz anzeigen" (ADR-0038, V4.3).
  *
- * The catalog's one view filter. It narrows the pool the rest of the catalog
- * works from, which is what makes it hold across the grid, the search and the
- * cross-series results without a second code path.
+ * The catalog's one view filter, and the pool the rest of the catalog works
+ * from. On — the default — the pool is the whole catalog; off, it is what is
+ * still missing. Narrowing the pool is what makes the filter hold across the
+ * grid, the search and the cross-series results without a second code path.
  */
 describe("the ownership filter", () => {
   const catalog = [
@@ -236,56 +237,92 @@ describe("the ownership filter", () => {
     figure({ skyId: "SKY-0200", name: "Blast Zone", seriesCode: "SF" }),
   ];
   const owned = new Set(["SKY-0002", "SKY-0100"]);
+  const SERIES = [
+    { code: "SA", label: "Spyro's Adventure" },
+    { code: "GI", label: "Giants" },
+    { code: "SF", label: "Swap Force" },
+  ];
 
-  it("keeps only what is owned, in catalog order", () => {
-    expect(ownedFigures(catalog, owned).map((f) => f.skyId)).toEqual(["SKY-0002", "SKY-0100"]);
+  it("shows everything while it is on — the default is the plain catalog", () => {
+    // On does not filter at all: the pool is the catalog itself, owned and
+    // missing together.
+    const pool = catalog;
+    expect(filterFigures(pool, { query: "", seriesCode: ALL_SERIES })).toHaveLength(4);
+  });
+
+  it("off, keeps only what is still missing", () => {
+    expect(missingFigures(catalog, owned).map((f) => f.skyId)).toEqual(["SKY-0001", "SKY-0200"]);
   });
 
   it("crosses series: the filter is about ownership, not about a game", () => {
-    const codes = ownedFigures(catalog, owned).map((f) => f.seriesCode);
-    expect(new Set(codes)).toEqual(new Set(["SA", "GI"]));
+    const codes = missingFigures(catalog, owned).map((f) => f.seriesCode);
+    expect(new Set(codes)).toEqual(new Set(["SA", "SF"]));
   });
 
   it("changes nothing about the figures themselves", () => {
     // Display only: no rewriting, no reordering, the same objects.
-    const [first] = ownedFigures(catalog, owned);
-    expect(first).toBe(catalog[1]);
+    const [first] = missingFigures(catalog, owned);
+    expect(first).toBe(catalog[0]);
   });
 
-  it("returns nothing rather than everything when nothing is owned", () => {
-    // The failure that matters: an empty set must not read as "no filter".
-    expect(ownedFigures(catalog, new Set())).toEqual([]);
+  it("returns everything when nothing is owned", () => {
+    expect(missingFigures(catalog, new Set())).toHaveLength(4);
+  });
+
+  it("returns nothing when everything is owned", () => {
+    // The complete-collection case: an empty list, not a silently unfiltered
+    // one. The catalog then says so in its own empty state.
+    const all = new Set(catalog.map((f) => f.skyId));
+    expect(missingFigures(catalog, all)).toEqual([]);
   });
 
   it("still searches inside the narrowed pool", () => {
-    // Both "B" figures in SA match the query; only the owned one survives.
-    const pool = ownedFigures(catalog, owned);
-    const hits = filterFigures(pool, { query: "bo", seriesCode: "SA" });
-    expect(hits.map((f) => f.skyId)).toEqual(["SKY-0002"]);
+    // Both "B" figures in SA match the query; only the missing one survives.
+    const pool = missingFigures(catalog, owned);
+    const hits = filterFigures(pool, { query: "b", seriesCode: "SA" });
+    expect(hits.map((f) => f.skyId)).toEqual(["SKY-0001"]);
+  });
+
+  it("holds across a series change", () => {
+    const pool = missingFigures(catalog, owned);
+    expect(filterFigures(pool, { query: "", seriesCode: "SA" }).map((f) => f.skyId)).toEqual([
+      "SKY-0001",
+    ]);
+    expect(filterFigures(pool, { query: "", seriesCode: "GI" })).toEqual([]);
+    expect(filterFigures(pool, { query: "", seriesCode: "SF" }).map((f) => f.skyId)).toEqual([
+      "SKY-0200",
+    ]);
   });
 
   it("keeps the cross-series search grouped, with the active game first", () => {
-    const pool = ownedFigures(catalog, owned);
-    const groups = groupSearchResults(pool, {
-      query: "bo",
-      seriesCode: "GI",
-      series: [
-        { code: "SA", label: "Spyro's Adventure" },
-        { code: "GI", label: "Giants" },
-        { code: "SF", label: "Swap Force" },
-      ],
-    });
-    expect(groups[0]?.code).toBe("GI");
+    const pool = missingFigures(catalog, owned);
+    const groups = groupSearchResults(pool, { query: "b", seriesCode: "SF", series: SERIES });
+    expect(groups[0]?.code).toBe("SF");
     expect(groups.flatMap((g) => g.figures.map((f) => f.skyId))).toEqual([
-      "SKY-0100",
-      "SKY-0002",
+      "SKY-0200",
+      "SKY-0001",
     ]);
   });
 
   it("survives a cleared search: the pool is not rebuilt by typing", () => {
-    const pool = ownedFigures(catalog, owned);
+    const pool = missingFigures(catalog, owned);
     expect(filterFigures(pool, { query: "", seriesCode: "SA" }).map((f) => f.skyId)).toEqual([
-      "SKY-0002",
+      "SKY-0001",
+    ]);
+  });
+
+  it("drops a figure the moment it is collected, and brings it back when it is not", () => {
+    // What the catalog does while the filter is off: the card reports the
+    // change upward, the pool is rebuilt from the new set, and the figure
+    // leaves the list without waiting for the server.
+    const afterCollecting = new Set([...owned, "SKY-0001"]);
+    expect(missingFigures(catalog, afterCollecting).map((f) => f.skyId)).toEqual(["SKY-0200"]);
+
+    const afterRemoving = new Set([...owned].filter((id) => id !== "SKY-0100"));
+    expect(missingFigures(catalog, afterRemoving).map((f) => f.skyId)).toEqual([
+      "SKY-0001",
+      "SKY-0100",
+      "SKY-0200",
     ]);
   });
 });

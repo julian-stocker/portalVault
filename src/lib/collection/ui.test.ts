@@ -94,8 +94,28 @@ describe("the German surface", () => {
 describe("the catalog's ownership filter", () => {
   const CATALOG = "src/components/catalog/catalog-view.tsx";
 
-  it("starts off: the catalog is the catalog first", () => {
-    expect(source(CATALOG)).toContain("useState(false)");
+  it("starts on: the resting state is the whole catalog (V4.3)", () => {
+    // On means "show what I own as well", which is simply the catalog. The
+    // old V4.2 filter was the inverse and defaulted to off.
+    expect(source(CATALOG)).toMatch(/const \[showOwned, setShowOwned\] = useState\(true\)/);
+  });
+
+  it("keeps no stored preference, so no old inverted value can come back", () => {
+    const catalog = source(CATALOG);
+    // Reads and writes, not the comment that explains why there are none.
+    expect(catalog).not.toMatch(/(local|session)Storage\.(get|set|remove)Item|document\.cookie/);
+    expect(catalog).not.toContain("ownedOnly");
+  });
+
+  it("counts as an active filter only while it is off", () => {
+    expect(source(CATALOG)).toContain('const filtered = query.trim() !== "" || !showOwned');
+  });
+
+  it("sees an ownership change from a card in the same frame", () => {
+    const catalog = source(CATALOG);
+    expect(catalog).toContain("onCollectedChange");
+    // The set the filter reads is the server list plus what changed here.
+    expect(catalog).toMatch(/for \(const \[skyId, isOwned\] of changed\)/);
   });
 
   it("is not offered to someone signed out", () => {
@@ -104,7 +124,7 @@ describe("the catalog's ownership filter", () => {
 
   it("narrows the pool, so search and cross-series results cannot forget it", () => {
     const catalog = source(CATALOG);
-    expect(catalog).toContain("ownedFigures(figures, owned)");
+    expect(catalog).toContain("missingFigures(figures, owned)");
     expect(catalog).toContain("filterFigures(pool,");
     expect(catalog).toContain("groupSearchResults(pool,");
   });

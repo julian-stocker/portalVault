@@ -9,6 +9,8 @@ export function Field({
   type = "text",
   autoComplete,
   defaultValue,
+  value,
+  onChange,
   hint,
   error,
   required = true,
@@ -18,6 +20,13 @@ export function Field({
   type?: string;
   autoComplete?: string;
   defaultValue?: string;
+  /**
+   * Controlled value. Used for the fields that have to survive a failed
+   * submission — React empties an uncontrolled input when the form action
+   * returns (src/lib/auth/preserve.ts).
+   */
+  value?: string;
+  onChange?: (value: string) => void;
   hint?: string;
   error?: string;
   required?: boolean;
@@ -36,7 +45,9 @@ export function Field({
         name={name}
         type={type}
         autoComplete={autoComplete}
-        defaultValue={defaultValue}
+        {...(value === undefined
+          ? { defaultValue }
+          : { value, onChange: (event) => onChange?.(event.target.value) })}
         required={required}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy || undefined}

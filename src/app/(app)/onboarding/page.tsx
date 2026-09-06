@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/auth-form";
 import { AuthCard } from "@/components/auth/form-field";
-import { currentProfile, setUsernameAction } from "@/lib/auth/actions";
+import { setUsernameAction } from "@/lib/auth/actions";
+import { currentProfile } from "@/lib/auth/profile";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
 

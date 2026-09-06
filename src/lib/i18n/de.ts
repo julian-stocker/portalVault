@@ -39,10 +39,13 @@ export const de = {
     /** With a series chosen: "Swap Force · 89 Figuren". */
     countInSeries: (series: string, count: number) =>
       `${series} · ${count === 1 ? "1 Figur" : `${count} Figuren`}`,
-    /** Anzeigefilter im Katalog-Sektionskopf. Nur für angemeldete Nutzer. */
-    ownedFilter: "In Besitz",
-    /** Wenn der Besitzfilter alles wegfiltert. */
-    ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",
+    /**
+     * Anzeigefilter im Katalog-Sektionskopf. Nur für angemeldete Nutzer.
+     * An (Standard) = alles zeigen, aus = nur Fehlendes (ADR-0038, V4.3).
+     */
+    ownedFilter: "Besitz anzeigen",
+    /** Wenn der Filter aus ist und trotzdem nichts fehlt. */
+    ownedEmpty: "Aus dieser Serie besitzt du bereits alles.",
     empty: "Keine Figuren gefunden.",
     emptyHint: "Versuche einen anderen Namen oder eine andere Serie.",
     /** Serie bleibt bestehen — zurückgesetzt werden Suche und Besitzfilter. */
@@ -133,6 +136,8 @@ export const de = {
     stillMissing: (count: number) =>
       count === 1 ? "1 Figur fehlt noch" : `${count} Figuren fehlen noch`,
     missingLabel: "Fehlen noch",
+    /** Vorgelesen, während die Sammlung geladen wird. */
+    loading: "Sammlung wird geladen …",
     /** Zusatzzeile, wenn der Duplikatfilter aktiv ist. */
     duplicateLine: (figures: number, extra: number, value: string) =>
       `${figures === 1 ? "1 Figur" : `${figures} Figuren`} mit Duplikaten · ` +

@@ -926,6 +926,10 @@ erzeugen, ohne irgendetwas zu verbessern.
   Bilder je Figur — ist sie neu zu bewerten.
 - Optimierungen werden **nicht vorsorglich** eingebaut. Zeigt eine Messung auf einem echten
   mobilen Gerät ein Problem, wird es dann behandelt.
+- **Nachtrag 2026-09-06 (V4.3):** Genau dieser Fall trat auf `/collection` ein — dort ging der
+  Katalog nicht in eine Suche, sondern nur in Nenner. Gemessen mit 448 Figuren: 1,50 MB HTML,
+  davon 496 KB RSC-Payload, nichts davor sichtbar. Der Katalog wird für diese Seite nicht mehr
+  geladen; es reisen sechs Zahlen. **Für den Katalog selbst gilt ADR-0026 unverändert.**
 
 ---
 
@@ -2643,6 +2647,50 @@ unverändert; ein Umschalter aus Namensheuristik wäre geraten (ADR-0034). Liebe
 als ein falsches — ein Test hält fest, dass es keins gibt. Ein Elementfilter fehlt aus demselben
 Grund (102 von 561), die Filterkomponente ist aber so geschnitten, dass er dort einzieht, sobald
 die Daten ihn tragen. Die Elementspalte der Tabelle bleibt und zeigt „—", wo nichts kuratiert ist.
+
+### 10f. V4.3 — vier Nachbesserungen, davon eine gemessene
+
+**Ein falsches Passwort kostet das Passwort, nicht das Formular.** Ursache war nicht der
+Fehlerpfad, sondern React: `<form action={serverAction}>` setzt das Formular zurück, sobald die
+Action antwortet, und ein unkontrolliertes Feld verliert dabei seinen Wert. Die Regel steht
+jetzt in `src/lib/auth/preserve.ts` — Kennung bleibt, Geheimnis nie — und wird über den
+Unterschied kontrolliert/unkontrolliert durchgesetzt. Nichts wird gespeichert; der Wert lebt im
+Komponentenzustand.
+
+**Der Katalogfilter zeigt jetzt in die nützliche Richtung.** V4.2 hatte „In Besitz", aus als
+Standard, an zeigte nur Besitz — also die Frage, die die Sammlungsseite besser beantwortet.
+V4.3 dreht ihn um: **„Besitz anzeigen", an als Standard.** An ist schlicht der Katalog, aus
+lässt stehen, was noch fehlt — die Frage, mit der man vor einem Regal steht. `ownedFigures`
+heißt jetzt `missingFigures`. Der Filter wird **nicht gespeichert**: kein `localStorage`, kein
+Cookie, kein URL-Parameter, damit kein Altwert mit umgekehrter Bedeutung zurückkehren kann. Die
+Karten melden eine Besitzänderung nach oben, sodass eine gerade gesammelte Figur bei
+ausgeschaltetem Filter sofort verschwindet statt erst nach einer Serverrunde.
+
+**Die Sammlung lädt den Katalog nicht mehr.** Gemessen mit 448 Figuren, Produktionsserver:
+
+| | vorher | nachher |
+|---|---|---|
+| HTML gesamt | 1.502 KB | 1.260 KB |
+| davon RSC-Payload | 496 KB | 245 KB |
+| Figuren im Payload | 1.009 | 448 |
+| erstes sichtbares Gerüst | — (nichts vor 420–670 ms) | 210–260 ms |
+
+Zwei Ursachen, beide nicht die Bilder: Die Seite schickte alle 561 Katalogfiguren in den
+Browser, nur damit dieser sie **zählt**; und sie schickte gar nichts, bevor alle Abfragen
+fertig waren. Jetzt liefert der Server die Zählung (`countCollectibleFiguresBySeries`), und der
+Kopf samt Gerüst (`CollectionSkeleton`) steht in einer `<Suspense>`-Grenze davor. Dazu teilen
+sich Layout, Seite und Abfragen denselben Nutzer je Anfrage (React `cache`), statt Supabase
+drei- bis viermal nacheinander nach demselben Token zu fragen.
+
+**Die Bilder waren nie das Problem** — sie tragen bereits `loading="lazy"`, feste Maße und eine
+`aspect-square`-Box, kein `priority`, kein `next/image` (ADR-0026). Offen und beziffert bleibt:
+Tabellen- und Telefonansicht stehen beide im HTML (rund 1 MB der verbliebenen 1,26 MB), weil
+der Server nicht weiß, welche gebraucht wird. Das zu ändern hieße, die Tabelle als ein einziges
+responsives Markup neu zu bauen — eine Designänderung, und deshalb hier bewusst nicht getan.
+
+**Der Sammlungsfilter steht jetzt in der Kontrollzeile**, zwischen Anzahl und
+Symbole/Tabelle — links was gezeigt wird, in der Mitte was einschränkt, rechts wie gezeichnet
+wird. Über der Suche saß er neben der Serienleiste und las sich wie ein siebtes Spiel.
 
 ### 11. Offen
 

@@ -14,7 +14,7 @@ import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { OwnedToggle } from "@/components/catalog/owned-toggle";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
-import { filterFigures, groupSearchResults, ownedFigures } from "@/lib/catalog/search";
+import { filterFigures, groupSearchResults, missingFigures } from "@/lib/catalog/search";
 import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
@@ -45,15 +45,46 @@ export function CatalogView({
   const [seriesCode, setSeriesCode] = useState<string>(initialSeriesCode ?? defaultSeries);
   const deferredQuery = useDeferredValue(query);
 
-  const owned = useMemo(() => new Set(ownedSkyIds), [ownedSkyIds]);
   const searching = deferredQuery.trim() !== "";
 
   /**
-   * "In Besitz": display only (ADR-0038, V4.2). Off by default — the catalog
-   * is the catalog first — and never offered signed out, where it has no
-   * answer.
+   * What was collected or given up on this page, before the server has told
+   * anyone about it.
+   *
+   * The cards toggle ownership themselves and the filter has to see that in
+   * the same frame: collecting a figure while "Besitz anzeigen" is off means
+   * it belongs to the owned pile now, so it leaves the list. Waiting for the
+   * server to say so would leave it sitting there under a filter that
+   * excludes it.
    */
-  const [ownedOnly, setOwnedOnly] = useState(false);
+  const [changed, setChanged] = useState<Map<string, boolean>>(() => new Map());
+
+  const owned = useMemo(() => {
+    const set = new Set(ownedSkyIds);
+    for (const [skyId, isOwned] of changed) {
+      if (isOwned) set.add(skyId);
+      else set.delete(skyId);
+    }
+    return set;
+  }, [ownedSkyIds, changed]);
+
+  function onCollectedChange(skyId: string, collected: boolean) {
+    setChanged((current) => new Map(current).set(skyId, collected));
+  }
+
+  /**
+   * "Besitz anzeigen": display only, **on by default** (ADR-0038, V4.3).
+   *
+   * On is the plain catalog, owned and missing together. Off hides what is
+   * already owned and leaves what is still missing. Never offered signed
+   * out, where it has no answer.
+   *
+   * Deliberately not persisted: no `localStorage`, no cookie, no URL
+   * parameter. Every visit opens on the full catalog, which is what the
+   * catalog is for — and there is no stored value from the old, inverted
+   * V4.2 filter that could quietly come back meaning the opposite.
+   */
+  const [showOwned, setShowOwned] = useState(true);
 
   /**
    * The pool everything else works from.
@@ -63,8 +94,8 @@ export function CatalogView({
    * second code path that could forget it.
    */
   const pool = useMemo(
-    () => (ownedOnly ? ownedFigures(figures, owned) : figures),
-    [ownedOnly, figures, owned],
+    () => (showOwned ? figures : missingFigures(figures, owned)),
+    [showOwned, figures, owned],
   );
 
   const visible = useMemo(
@@ -101,12 +132,13 @@ export function CatalogView({
 
   const activeSeries = series.find((option) => option.code === seriesCode) ?? null;
   // The series is not resettable — one is always chosen — so what is left is
-  // the search box and the ownership filter.
-  const filtered = query.trim() !== "" || ownedOnly;
+  // the search box and the ownership filter. "Besitz anzeigen" counts as
+  // active only when it is off, because on is the resting state.
+  const filtered = query.trim() !== "" || !showOwned;
 
   function reset() {
     setQuery("");
-    setOwnedOnly(false);
+    setShowOwned(true);
   }
 
   return (
@@ -180,7 +212,7 @@ export function CatalogView({
                 ? de.catalog.countInSeries(activeSeries.label, visible.length)
                 : de.catalog.figureCount(visible.length)}
           </p>
-          {signedIn ? <OwnedToggle active={ownedOnly} onChange={setOwnedOnly} /> : null}
+          {signedIn ? <OwnedToggle active={showOwned} onChange={setShowOwned} /> : null}
         </div>
       </div>
 
@@ -202,6 +234,7 @@ export function CatalogView({
                       key={figure.skyId}
                       figure={figure}
                       initialCollected={owned.has(figure.skyId)}
+                      onCollectedChange={onCollectedChange}
                       signInHref={signedIn ? null : signInHref(figure.skyId)}
                       highlighted={highlightSkyId === figure.skyId}
                     />
@@ -214,7 +247,7 @@ export function CatalogView({
       ) : visible.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
           <p className="font-medium">
-            {ownedOnly && !searching ? de.catalog.ownedEmpty : de.catalog.empty}
+            {!showOwned && !searching ? de.catalog.ownedEmpty : de.catalog.empty}
           </p>
           <p className="text-sm text-muted">{de.catalog.emptyHint}</p>
           {filtered ? (
@@ -230,6 +263,7 @@ export function CatalogView({
               key={figure.skyId}
               figure={figure}
               initialCollected={owned.has(figure.skyId)}
+              onCollectedChange={onCollectedChange}
               signInHref={signedIn ? null : signInHref(figure.skyId)}
               highlighted={highlightSkyId === figure.skyId}
             />

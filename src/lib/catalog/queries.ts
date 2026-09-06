@@ -399,5 +399,39 @@ export async function countCollectibleFigures(): Promise<number> {
   return count ?? 0;
 }
 
+/**
+ * How many active collectibles each game holds.
+ *
+ * The collection page needs exactly this and nothing else from the catalog:
+ * the denominators under "12 / 81". It used to load all 561 figures — with
+ * names, slugs, prices, images and search indexes — carry them through the
+ * variant and character enrichment, and ship them to the browser, only to
+ * count them there (V4.3). One column, tallied on the server, answers the
+ * same question.
+ */
+export async function countCollectibleFiguresBySeries(): Promise<Record<string, number>> {
+  const supabase = await createClient();
+  const lookups = await loadLookups();
+
+  const excluded = [...lookups.categories.entries()]
+    .filter(([, category]) => !isCollectibleCategory(category.name))
+    .map(([id]) => id);
+
+  let query = supabase.from("skylanders").select("series_code").eq("is_active", true);
+  if (excluded.length > 0) {
+    query = query.not("category_id", "in", `(${excluded.join(",")})`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`series counts: ${error.message}`);
+
+  const totals: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const code = row.series_code as string;
+    totals[code] = (totals[code] ?? 0) + 1;
+  }
+  return totals;
+}
+
 export type { FigureRow, Lookups };
 export { loadLookups, FIGURE_COLUMNS };

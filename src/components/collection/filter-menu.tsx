@@ -32,10 +32,10 @@ export function FilterMenu({
       aria-label={de.collection.filterLabel}
       className="flex shrink-0 items-center gap-2"
     >
-      {/* A rule and a word, so the filter cannot be read as a seventh game.
-          The pills beside it are round and navigate; this is square and
-          narrows, and the label says which of the two it is. */}
-      <span aria-hidden="true" className="hidden h-5 w-px bg-border sm:block" />
+      {/* The word, so the control says what kind of control it is. It sits
+          between the count and the view toggle now (V4.3), where a square
+          chip beside a round series pill is no longer the thing that has to
+          keep the two apart. */}
       <span className="text-[11px] tracking-wide text-muted uppercase">
         {de.collection.filterLabel}
       </span>
