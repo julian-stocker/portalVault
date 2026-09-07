@@ -19,12 +19,12 @@
  */
 "use client";
 
-import { useState } from "react";
-
 import { useCart } from "@/components/cart/use-cart";
 import { CartGlyph } from "@/components/shop/cart-glyph";
 import { conditionLabel } from "@/components/shop/shop-action";
 import { ACTION_SHOP } from "@/components/ui/action";
+import { keyOf, lineKey } from "@/lib/cart/cart";
+import { showCartToast } from "@/lib/cart/toast";
 import { buyableOffers, type Offer } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -38,18 +38,26 @@ function AddButton({
   name: string;
   imageSrc: string | null;
 }) {
-  const { add } = useCart();
-  // A confirmation that the tap was heard, and nothing more: it says nothing
-  // about the cart's contents, so it cannot go stale or contradict them.
-  const [added, setAdded] = useState(false);
+  const { cart, add } = useCart();
 
   return (
     <button
       type="button"
       onClick={() => {
+        // Same rule as the catalog card (V10): the button never renames
+        // itself — it always means the same thing — and the confirmation is
+        // the toast. Read the line first so the toast can say whether it is
+        // new or grew.
+        const key = lineKey(offer.skyId, offer.condition);
+        const existing = cart.find((line) => keyOf(line) === key);
         add({ skyId: offer.skyId, condition: offer.condition, name, imageSrc, price: offer.price });
-        setAdded(true);
-        window.setTimeout(() => setAdded(false), 1800);
+        showCartToast({
+          kind: existing ? "increased" : "added",
+          name,
+          condition: offer.condition,
+          price: offer.price,
+          quantity: (existing?.quantity ?? 0) + 1,
+        });
       }}
       aria-label={de.shop.addToCartFor(
         `${name} (${conditionLabel(offer.condition)})`,
@@ -58,7 +66,7 @@ function AddButton({
       className={`${ACTION_SHOP} gap-1.5`}
     >
       <CartGlyph />
-      {added ? de.shop.inCart : de.shop.addToCart}
+      {de.shop.addToCart}
     </button>
   );
 }

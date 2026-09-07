@@ -386,7 +386,18 @@ export const de = {
     /** Wenn mehrere Zustände kaufbar sind, wird erst der Zustand gewählt. */
     chooseCondition: "Zustand wählen",
     chooseConditionFor: (name: string) => `Zustand für ${name} wählen`,
-    inCart: "Im Warenkorb",
+    /**
+     * Bestätigung nach dem Hinzufügen (V10).
+     *
+     * Der Knopf selbst ändert seine Beschriftung nicht mehr — er heißt immer
+     * dasselbe, weil er immer dasselbe tut. Bestätigt wird im Toast.
+     */
+    toastAdded: "Zum Warenkorb hinzugefügt",
+    toastIncreased: "Menge im Warenkorb erhöht",
+    toastLine: (name: string, condition: string, price: string) =>
+      `${name} · ${condition} · ${price}`,
+    toastQuantityLine: (quantity: number, name: string, condition: string) =>
+      `${quantity}× ${name} · ${condition}`,
     offerHeading: "Angebot",
   },
 

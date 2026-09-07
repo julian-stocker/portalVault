@@ -3587,13 +3587,59 @@ unsichtbar.
 
 **Ein schwebender Warenkorb auf dem Telefon.** Der Header rollt nach der ersten Kartenreihe weg;
 wer über hundert Figuren scrollt und drei einlegt, musste zum Prüfen nach oben zurück. Der
-schwebende Zugang zeigt **Symbol und Anzahl** (nicht die Summe — die Anzahl ist die Frage, und
-eine Summe kostet Breite, die ein schwebendes Element auf 390 px nicht nehmen sollte), sitzt
-rechts **über** der unteren Leiste und dem Home-Indikator
-(`2.75rem + env(safe-area-inset-bottom) + 0.75rem`, dieselben Werte wie `NavSpacer`), und führt
-nach `/cart`.
+schwebende Zugang führt nach `/cart` und liest denselben Store wie das Header-Symbol: kein
+zweiter Warenkorb, kein Provider, kein Serveraufruf. Montiert **einmal**, in der Navigation,
+nicht von jeder Seite einzeln. Nur unterhalb `md:` (darüber steht der Header ohnehin), nicht für
+den Betreiber (ADR-0042) und nicht auf `/cart` selbst.
 
-Er erscheint **nur mit Inhalt** — ein leerer Warenkorb lässt den Katalog in Ruhe —, nur unterhalb
-`md:` (darüber steht der Header ohnehin), nicht für den Betreiber (ADR-0042) und nicht auf
-`/cart` selbst. Montiert **einmal**, in der Navigation, nicht von jeder Seite einzeln. Er liest
-denselben Store wie das Header-Symbol: kein zweiter Warenkorb, kein Provider, kein Serveraufruf.
+*Form und Sichtbarkeit präzisiert der V10-Nachtrag am Ende dieser Datei: ein runder Knopf statt
+einer Pille, immer sichtbar statt nur mit Inhalt.*
+
+
+### Nachtrag 2026-09-07 — Warenkorb-Feedback und runder Zugang, V10 (zu ADR-0043)
+
+Reine UX-Verfeinerung, keine Architekturänderung — deshalb kein eigener ADR. Der Warenkorb bleibt
+lokal: `localStorage`, ein Store, `useSyncExternalStore`, keine Reservierung, kein Checkout.
+
+**Der Kaufknopf benennt sich nicht mehr um.** Er zeigte nach dem Tippen kurz „Im Warenkorb" und
+sagte damit zweierlei Falsches: ein Bedienelement, das immer dasselbe tut, sah aus, als täte es
+zwei Dinge, und es behauptete auf dem Knopf etwas über den Inhalt des Warenkorbs, den er nicht
+kennt. Vorher, während und nachher steht dort derselbe Preis. Ein weiterer Tipp erhöht wie bisher
+die Menge.
+
+**Bestätigt wird in einem Toast.** „✓ Zum Warenkorb hinzugefügt" mit einer kleinen Zeile
+darunter (`Bash · Lose · 4,49 €`); war die Zeile schon im Korb, heißt es „Menge im Warenkorb
+erhöht" mit `2× Bash · Lose`. Welcher der beiden Fälle vorliegt, wird **aus dem bestehenden
+Store** gelesen — die Zeile wird vor dem Hinzufügen gesucht —, nicht aus einem zweiten Zähler.
+
+**Ein Toast, kein Stapel.** `src/lib/cart/toast.ts` ist ein Modul-Store derselben Bauart wie der
+Warenkorb und hält **eine** Nachricht; ein neuer Zugang ersetzt sie und startet die Zeit neu.
+Der Timer liegt **im Store**, nicht in der Komponente: damit ist die Komponente ein reiner Leser
+ohne Effekt, es gibt nichts aufzuräumen, und kein Timer kann eine Nachricht überleben, zu der er
+nicht mehr gehört. Sichtbar 2,6 s, verschwindet von selbst, blockiert nichts
+(`pointer-events-none`), ist kein Dialog und braucht keinen Schließen-Klick.
+
+**Die Live-Region steht dauerhaft im Baum**, nur ihr Inhalt wechselt: `role="status"`,
+`aria-live="polite"`. Eine Region, die gleichzeitig mit ihrer Nachricht entsteht, wird nicht
+zuverlässig vorgelesen. Keine Animation — damit ist `prefers-reduced-motion` trivial erfüllt.
+
+**Kein „Warenkorb ansehen"-Link im Toast** (geprüft und verworfen): er machte das Element auf
+390 px spürbar größer, und der runde Zugang daneben ist ohnehin der Weg zum Warenkorb. V10 ist
+bewusst nur Rückmeldung.
+
+**Der schwebende Zugang ist jetzt ein runder Knopf**, 3,25 rem im Durchmesser, mit zentriertem
+Warenkorbsymbol und einem Zähler-Abzeichen oben rechts (`99+` ab hundert, dieselbe Quelle und
+dieselbe Regel wie im Header). Er sitzt 10 px über der unteren Leiste
+(`2.75rem + env(safe-area-inset-bottom) + 0.625rem` — dieselben Werte, die `NavSpacer`
+reserviert), der Toast wiederum 4,5 rem darüber, sodass sich beide nie überlappen.
+
+**Er ist immer da, nicht erst mit Inhalt.** V9 blendete ihn bei leerem Korb aus, damit ein
+Katalog, in dem niemand einkauft, ruhig bleibt. Das machte den Warenkorb genau in dem Moment
+unauffindbar, in dem man ihn zum ersten Mal sucht — man kann kein Bedienelement öffnen, das erst
+erscheint, nachdem man es benutzt hat. Der Knopf ist immer da; das **Abzeichen** kommt mit dem
+ersten Artikel.
+
+**Beide hängen außerhalb des `<header>`.** Der Header trägt `backdrop-blur`, und ein Vorfahre mit
+aktivem `backdrop-filter` kann zum Containing Block seiner `position: fixed`-Nachkommen werden —
+die Engines sind sich darin uneinig. WebKit platziert korrekt (nachgemessen), andere würden einen
+„unten rechts"-Knopf an den Kopf der Seite setzen. Außerhalb des Headers ist die Frage gegenstandslos.

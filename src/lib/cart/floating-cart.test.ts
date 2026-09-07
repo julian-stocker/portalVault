@@ -60,11 +60,16 @@ const BASH = {
 };
 
 describe("when it is there", () => {
-  it("is not rendered while the cart is empty", () => {
-    expect(code(FLOATING)).toContain("if (count === 0) return null;");
+  it("is there even with an empty cart", () => {
+    // V9 hid it until something was in the cart, which made the cart hard to
+    // find at exactly the moment somebody first wants it. The button is
+    // always there on a phone; the badge is what appears (V10).
+    const floating = code(FLOATING);
+    expect(floating).not.toContain("if (count === 0) return null;");
+    expect(floating).toContain("count > 0 ? (");
   });
 
-  it("appears with the first article", () => {
+  it("counts the badge, not the button", () => {
     const off = subscribe(() => {});
     expect(getSnapshot().cart).toHaveLength(0);
     addToCart(BASH);
@@ -108,7 +113,8 @@ describe("where it is not", () => {
   });
 
   it("is not offered to the administrator", () => {
-    expect(nav).toContain("const floatingCart = !admin && active !== \"cart\";");
+    expect(nav).toContain("const shopping = !admin;");
+    expect(nav).toContain('const floatingCart = shopping && active !== "cart";');
   });
 
   it("is not shown on the cart page itself", () => {
@@ -120,6 +126,16 @@ describe("where it is not", () => {
     // Not by every page that might want it.
     expect(nav).toContain("{floatingCart ? <FloatingCart /> : null}");
     expect((nav.match(/<FloatingCart/g) ?? []).length).toBe(1);
+  });
+
+  it("is mounted outside the header, which carries a backdrop filter", () => {
+    // An ancestor with an active backdrop-filter may become the containing
+    // block for its fixed descendants, and engines disagree about it — a
+    // "bottom right" button would then land at the top of the page.
+    const header = nav.indexOf("</header>");
+    expect(header).toBeGreaterThan(-1);
+    expect(nav.indexOf("<FloatingCart")).toBeGreaterThan(header);
+    expect(nav.indexOf("<CartToast")).toBeGreaterThan(header);
   });
 
   it("is therefore on the catalog and on a figure page", () => {
@@ -134,8 +150,9 @@ describe("where it sits", () => {
 
   it("clears the bottom bar and the home indicator", () => {
     // The same numbers NavSpacer reserves: 2.75rem of bar plus the phone's
-    // safe-area inset, and a gap on top of both.
-    expect(floating).toContain("bottom-[calc(2.75rem+env(safe-area-inset-bottom)+0.75rem)]");
+    // safe-area inset, and a 10 px gap on top of both — close enough to read
+    // as one cluster with the bar, far enough never to cover a label.
+    expect(floating).toContain("bottom-[calc(2.75rem+env(safe-area-inset-bottom)+0.625rem)]");
     const nav = code(NAV);
     expect(nav).toContain("h-[calc(2.75rem+env(safe-area-inset-bottom))]");
     expect(nav).toContain("pb-[env(safe-area-inset-bottom)]");
@@ -158,9 +175,11 @@ describe("what it says", () => {
   const floating = code(FLOATING);
 
   it("names itself and its count for a screen reader", () => {
-    expect(floating).toContain("aria-label={de.cart.openWith(count)}");
+    // With an empty cart there is no count to announce, only the destination.
+    expect(floating).toContain("aria-label={count > 0 ? de.cart.openWith(count) : de.cart.open}");
     expect(de.cart.openWith(1)).toBe("Warenkorb öffnen, 1 Artikel");
     expect(de.cart.openWith(3)).toBe("Warenkorb öffnen, 3 Artikel");
+    expect(de.cart.open).toBe("Warenkorb öffnen");
   });
 
   it("shows the count, and the count is decoration beside the name", () => {
@@ -172,8 +191,16 @@ describe("what it says", () => {
     expect(floating).not.toContain("formatPrice");
   });
 
-  it("keeps a 44 px touch target", () => {
-    expect(floating).toContain("min-h-11");
+  it("is a round button, comfortably past the 44 px target", () => {
+    // 52 px across, a circle — a floating action, not a pill (V10).
+    expect(floating).toContain("h-[3.25rem] w-[3.25rem]");
+    expect(floating).toContain("rounded-full");
+    expect(floating).not.toContain("min-h-11");
+  });
+
+  it("carries the count as a badge on the button", () => {
+    expect(floating).toContain('"absolute -top-1 -right-1 flex h-5 min-w-5');
+    expect(floating).toContain('count > 99 ? "99+" : formatNumber(count)');
   });
 
   it("uses the existing accent, not a new colour", () => {

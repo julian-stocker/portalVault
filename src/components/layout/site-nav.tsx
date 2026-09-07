@@ -25,6 +25,7 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 
 import { CartBadge } from "@/components/cart/cart-badge";
+import { CartToast } from "@/components/cart/cart-toast";
 import { FloatingCart } from "@/components/cart/floating-cart";
 import { Wordmark } from "@/components/layout/wordmark";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
@@ -188,21 +189,36 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
   const items = itemsFor(signedIn, admin);
 
   /**
-   * The floating cart belongs to the same question as the header badge —
-   * "where is my cart" — so it is mounted here, once, rather than by every
-   * page that might want it (V9).
+   * The floating cart and its confirmation belong to the same question as the
+   * header badge — "where is my cart" — so both are mounted here, once,
+   * rather than by every page that might want them (V9, V10).
    *
-   * Not for the operator, for the same reason the badge is not: SkyIsles
-   * does not buy from itself (ADR-0042). Not on /cart either — a shortcut to
-   * the page you are already on is a control with nothing to do.
+   * Not for the operator, for the same reason the badge is not: SkyIsles does
+   * not buy from itself (ADR-0042). The button is also absent on /cart — a
+   * shortcut to the page you are already on is a control with nothing to do —
+   * but the confirmation stays, because the cart page has a buy action of its
+   * own reachable from the figures beside it.
    */
-  const floatingCart = !admin && active !== "cart";
+  const shopping = !admin;
+  const floatingCart = shopping && active !== "cart";
 
   return (
-    // Dark glass over the sky, closed by a gold hairline. `border-b` carries
-    // the gold rather than a separate element, so nothing can drift out of
-    // alignment with the bar.
-    <header
+    /*
+     * The header, and then the two floating pieces — deliberately **outside**
+     * it (V10).
+     *
+     * The header carries `backdrop-blur`, and an ancestor with an active
+     * `backdrop-filter` may become the containing block for its
+     * `position: fixed` descendants. Engines disagree about that, so a
+     * viewport-fixed element must not sit inside one: WebKit places it
+     * against the viewport, others against the header — which would put a
+     * "bottom right" button at the top of the page.
+     */
+    <>
+      {/* Dark glass over the sky, closed by a gold hairline. `border-b`
+          carries the gold rather than a separate element, so nothing can
+          drift out of alignment with the bar. */}
+      <header
       className={
         // Glass in the world, not a bar above it (ADR-0038, V3.3). The gold
         // edge stays — it is what closes the header — but the ground is
@@ -261,8 +277,6 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
         )}
       </div>
 
-      {floatingCart ? <FloatingCart /> : null}
-
       <nav
         aria-label={de.nav.primary}
         className={
@@ -278,7 +292,11 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
           <NavItem key={item.href} item={item} active={active === item.section} />
         ))}
       </nav>
-    </header>
+      </header>
+
+      {floatingCart ? <FloatingCart /> : null}
+      {shopping ? <CartToast /> : null}
+    </>
   );
 }
 

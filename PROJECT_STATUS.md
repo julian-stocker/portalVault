@@ -7,6 +7,24 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V10 gebaut (2026-09-07).** Reine Warenkorb-UX, keine Migration, keine Architekturänderung.
+
+*Kaufknopf.* Er benennt sich nicht mehr kurzzeitig in „Im Warenkorb" um — vorher, während und
+nachher steht dort derselbe Preis. Ein weiterer Tipp erhöht wie bisher die Menge.
+
+*Toast.* Bestätigt wird stattdessen in einer dauerhaft im Baum stehenden Live-Region
+(`role="status"`, `aria-live="polite"`): „Zum Warenkorb hinzugefügt" bzw. „Menge im Warenkorb
+erhöht", mit einer kleinen Detailzeile. Ein Modul-Store derselben Bauart wie der Warenkorb hält
+**eine** Nachricht und den Timer; die Komponente ist ein reiner Leser ohne Effekt. 2,6 s sichtbar,
+blockiert nichts, kein Dialog.
+
+*Schwebender Warenkorb.* Runder Knopf (3,25 rem) unten rechts, 10 px über der unteren Leiste,
+mit Zähler-Abzeichen oben rechts. **Immer sichtbar** auf dem Telefon, nicht erst mit Inhalt — das
+Abzeichen kommt mit dem ersten Artikel. Nicht auf `/cart`, nicht für Admins, nicht ab `md:`.
+Knopf und Toast hängen jetzt **außerhalb** des `backdrop-blur`-Headers, damit `position: fixed`
+in jeder Engine gegen den Viewport rechnet.
+
+
 **V9 gebaut (2026-09-07).** Reine UX, keine Migration, keine Architekturänderung.
 
 *Kartengeometrie.* Jede Sammlerkarte hat dieselben festen Zonen — Bild, Name, Informationszeile

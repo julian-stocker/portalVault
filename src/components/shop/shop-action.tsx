@@ -38,6 +38,8 @@ import { useState } from "react";
 
 import { CartGlyph } from "@/components/shop/cart-glyph";
 import { useCart } from "@/components/cart/use-cart";
+import { keyOf, lineKey } from "@/lib/cart/cart";
+import { showCartToast } from "@/lib/cart/toast";
 import { buyableOffers, summarizeOffers, type Offer, type OfferCondition } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -76,9 +78,8 @@ export function ShopAction({
   /** Already resolved (ADR-0046); stored with the cart line. */
   imageSrc: string | null;
 }) {
-  const { add } = useCart();
+  const { cart, add } = useCart();
   const [choosing, setChoosing] = useState(false);
-  const [added, setAdded] = useState(false);
 
   const summary = summarizeOffers(offers);
   if (summary.kind === "none") return null;
@@ -86,12 +87,23 @@ export function ShopAction({
   const buyable = buyableOffers(offers);
 
   function put(offer: Offer) {
+    /*
+     * Read the line before adding, so the confirmation can say which of the
+     * two things happened — a new line, or an existing one that grew. That
+     * is the store's own state, not a second count kept somewhere else.
+     */
+    const key = lineKey(skyId, offer.condition);
+    const existing = cart.find((line) => keyOf(line) === key);
     add({ skyId, condition: offer.condition, name, imageSrc, price: offer.price });
     setChoosing(false);
-    // Confirmation that the tap was heard, and nothing more: it says nothing
-    // about the cart's contents, so it cannot go stale.
-    setAdded(true);
-    window.setTimeout(() => setAdded(false), 1600);
+
+    showCartToast({
+      kind: existing ? "increased" : "added",
+      name,
+      condition: offer.condition,
+      price: offer.price,
+      quantity: (existing?.quantity ?? 0) + 1,
+    });
   }
 
   if (choosing) {
@@ -148,7 +160,7 @@ export function ShopAction({
         className={BUY}
       >
         <CartGlyph />
-        {added ? de.shop.inCart : formatPrice(summary.price)}
+        {formatPrice(summary.price)}
       </button>
     );
   }
