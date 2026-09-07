@@ -1,5 +1,5 @@
 /**
- * "Zum Warenkorb hinzugefügt" (V10).
+ * "Zum Warenkorb hinzugefügt" — and, since V11, "das geht gerade nicht".
  *
  * The buy button used to rename itself for a moment — "Im Warenkorb" — which
  * said the wrong thing twice: it made a control that always does one thing
@@ -10,6 +10,13 @@
  * A pure reader of `lib/cart/toast`, which owns the message and its timer.
  * No effects, so there is nothing to clean up and no timer that can outlive
  * the message it belongs to.
+ *
+ * FOUR MESSAGES, TWO SHAPES
+ *
+ * The two that confirm carry a detail line — what went in, and at what price.
+ * The two that refuse carry **nothing but a sentence**. There is no count in
+ * a refusal because the message type has no field for one: "no more
+ * available" never becomes "only 3 left" (docs/SECURITY.md).
  *
  * WHERE IT SITS
  *
@@ -47,6 +54,28 @@ function CheckGlyph() {
   );
 }
 
+/**
+ * For the two refusals. Deliberately not a warning triangle and not
+ * `text-danger`: nothing has gone wrong for the visitor, and dressing "we
+ * cannot supply that many" as an error would overstate it.
+ */
+function NoticeGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      className="mt-0.5 h-4 w-4 shrink-0 text-on-deep-muted"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    >
+      <circle cx="8" cy="8" r="6.25" />
+      <path d="M8 4.75v3.75M8 11.1h.01" />
+    </svg>
+  );
+}
+
 export function CartToast() {
   const toast = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
@@ -74,25 +103,37 @@ export function CartToast() {
             "shadow-raised ring-1 ring-gold-line backdrop-blur-sm"
           }
         >
-          <CheckGlyph />
-          <div className="min-w-0">
-            <p className="text-sm leading-snug font-medium text-on-deep">
-              {toast.kind === "increased" ? de.shop.toastIncreased : de.shop.toastAdded}
-            </p>
-            <p className="truncate text-[11px] leading-tight text-on-deep-muted tabular-nums">
-              {toast.kind === "increased"
-                ? de.shop.toastQuantityLine(
-                    toast.quantity,
-                    toast.name,
-                    conditionLabel(toast.condition),
-                  )
-                : de.shop.toastLine(
-                    toast.name,
-                    conditionLabel(toast.condition),
-                    formatPrice(toast.price),
-                  )}
-            </p>
-          </div>
+          {toast.kind === "added" || toast.kind === "increased" ? (
+            <>
+              <CheckGlyph />
+              <div className="min-w-0">
+                <p className="text-sm leading-snug font-medium text-on-deep">
+                  {toast.kind === "increased" ? de.shop.toastIncreased : de.shop.toastAdded}
+                </p>
+                <p className="truncate text-[11px] leading-tight text-on-deep-muted tabular-nums">
+                  {toast.kind === "increased"
+                    ? de.shop.toastQuantityLine(
+                        toast.quantity,
+                        toast.name,
+                        conditionLabel(toast.condition),
+                      )
+                    : de.shop.toastLine(
+                        toast.name,
+                        conditionLabel(toast.condition),
+                        formatPrice(toast.price),
+                      )}
+                </p>
+              </div>
+            </>
+          ) : (
+            <>
+              <NoticeGlyph />
+              {/* One sentence, and nowhere to put a number. */}
+              <p className="min-w-0 text-sm leading-snug font-medium text-on-deep">
+                {toast.kind === "denied" ? de.shop.toastDenied : de.shop.toastUnchecked}
+              </p>
+            </>
+          )}
         </div>
       ) : null}
     </div>

@@ -3643,3 +3643,66 @@ ersten Artikel.
 aktivem `backdrop-filter` kann zum Containing Block seiner `position: fixed`-Nachkommen werden —
 die Engines sind sich darin uneinig. WebKit platziert korrekt (nachgemessen), andere würden einen
 „unten rechts"-Knopf an den Kopf der Seite setzen. Außerhalb des Headers ist die Frage gegenstandslos.
+
+
+### Nachtrag 2026-09-07 — Mengengrenze und „schon im Warenkorb", V11 (zu ADR-0043)
+
+Zwei zusammenhängende Warenkorb-Probleme, eine Ergänzung. Keine Architekturänderung, deshalb kein
+eigener ADR: der Warenkorb bleibt lokal (`localStorage`, ein Store, `useSyncExternalStore`), es
+gibt weiterhin keine Bestellung, keinen Checkout und **keine Reservierung**.
+
+**Das Problem.** Der Warenkorb zählte, so hoch er wollte. `clampQuantity` begrenzt auf 99, das
+Zahlenfeld auf `/cart` nahm eine getippte 99 entgegen, und niemand fragte, ob SkyIsles 99 davon
+hat. Das ist ein Browser, der eine Frage über ein Lager beantwortet.
+
+**Die Lösung ist ein Bit, keine Zahl.** `shop_quantity_available(sky_id, condition, quantity)`
+(Migration `0009`) beantwortet „wäre **diese** Menge gerade möglich" mit `boolean`. Ein
+`allowed_quantity: 3` wurde ausdrücklich geprüft und **verworfen**: eine Antwort „3" auf die
+Anfrage „5" ist der Lagerbestand unter anderem Namen. Die Funktion fragt `is_shop_eligible()` und
+`shop_price()` — dieselben Regeln wie `shop_offers()`, keine zweite Kopie der Shop-Logik — und
+vergleicht `available_quantity` (`quantity - reserved`, die generierte Spalte aus `0003`), ohne
+sie je zurückzugeben. Jede Art von „nein" fällt in dasselbe `false`.
+
+**Die Restgrenze wird benannt, nicht wegerklärt.** Wer wiederholt konkrete Mengen anfragt, kann die
+Obergrenze eingrenzen. Das ist beim Verkauf von Ware nicht vollständig vermeidbar — jeder Shop, in
+den man `n` Stück legen kann, beantwortet damit, ob `n` geht. Vermieden wird der vermeidbare Teil:
+keine Bestandsspalte verlässt die Datenbank, kein Feld trägt eine Stückzahl, keine Oberfläche zeigt
+eine. Das ist keine Sicherheit durch Verschleierung und wird nicht als solche behauptet.
+
+**Fail closed.** Die Server-Action liefert `allowed`, `denied` oder `unchecked`; jeder Fehler ist
+`unchecked`, und `unchecked` erhöht nie. Anders als bei `fetchOffers`, wo ein fehlendes `0006` zu
+„keine Angebote" auflösen darf, gibt es hier keine harmlose Vermutung. **Folge, die zwingend
+beachtet werden muss:** ohne angewandte `0009` lehnt die Anwendung jede Erhöhung ab — erst
+migrieren, dann deployen.
+
+**Angebunden als Server-Action**, nicht als Browser-RPC: das Muster von `collection/actions.ts` und
+`admin/actions.ts`. Funktionsname und Parameterform bleiben aus dem Client-Bundle heraus; hinüber
+geht ein Wort.
+
+**Ein Add-Pfad für drei Oberflächen.** Katalogpille, Figurenseite und das Plus auf `/cart` gehen
+alle durch `useAddToCart`; die Regeln selbst liegen in `decideAdd` (`src/lib/cart/add.ts`), pur und
+direkt testbar, weil dieses Projekt keine Render-Tests hat. Gefragt wird immer nach der **Gesamt**-
+menge, die die Zeile erreichen würde — ein „+1" hinge von einem Warenkorb ab, den der Server nicht
+sieht. Ein `useRef`-Wächter pro Auslöser verhindert, dass ein Doppeltipp zweimal durchgeht; dass
+zwischen Antwort und lokalem Schreiben jemand anders kauft, ist ausdrücklich hingenommen — ein
+Warenkorb ist keine Reservierung.
+
+**Das freie Zahlenfeld auf `/cart` ist weg.** An seiner Stelle ein Stepper `−  n  +`: Minus lokal
+und sofort (es kann den Warenkorb nur kleiner machen), Plus über den geprüften Pfad. Minus hält bei
+eins an — „Entfernen" steht daneben und sagt, was es tut; die Null-Semantik von `setLineQuantity`
+bleibt im Store unverändert.
+
+**Die Pille zeigt, was schon drin liegt.** Gleiche Geometrie, kräftigeres Gold
+(`--accent-hover`, `--gold-line-strong`, `shadow-gold` — alles vorhandene Tokens) und ein Haken
+**im** Warenkorbsymbol. `CartCheckedGlyph` teilt sich die Korb-Pfade mit `CartGlyph`, damit die
+beiden Zustände nicht auseinanderlaufen; der Haken ist gezeichnet, kein Unicode-`✓`.
+
+**Der Knopf bleibt „Hinzufügen".** Kein Toggle, kein Entfernen, kein Mengen-Badge auf der Karte —
+ein weiterer Klick legt ein weiteres Exemplar hinein, sofern verfügbar. Wer raten muss, ob ein
+Klick hinzufügt oder entfernt, klickt nicht. Mengen verwaltet `/cart`, den Gesamtstand zeigt der
+schwebende Warenkorb. Markiert wird die geschlossene Pille von **jeder** kaufbaren Condition dieser
+SKY-ID; im geöffneten Chooser ist es pro Condition sichtbar.
+
+**Wiederverwendbar für den späteren Checkout**, ohne ihn zu bauen: die Eligibility-Regeln liegen
+schon in der Datenbank, und ein Checkout wird dieselbe Frage stellen müssen — nur atomar und
+tatsächlich reservierend. Das ist ausdrücklich nicht Teil von V11.

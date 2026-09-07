@@ -33,7 +33,13 @@ const TOAST = "src/components/cart/cart-toast.tsx";
 const ACTION = "src/components/shop/shop-action.tsx";
 const PANEL = "src/components/shop/offer-panel.tsx";
 
-const BASH = { kind: "added" as const, name: "Bash", condition: "loose" as const, price: 4.49, quantity: 1 };
+const BASH = { kind: "added" as const, name: "Bash", condition: "loose" as const, price: 4.49 };
+
+/** The name, for the members that carry one. Keeps the union honest. */
+function nameOf(): string | null {
+  const toast = getSnapshot();
+  return toast && "name" in toast ? toast.name : null;
+}
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -70,7 +76,7 @@ describe("the message", () => {
 
   it("notifies its readers when it appears and when it goes", () => {
     const seen: (string | null)[] = [];
-    const off = subscribe(() => seen.push(getSnapshot()?.name ?? null));
+    const off = subscribe(() => seen.push(nameOf()));
     showCartToast(BASH);
     vi.advanceTimersByTime(CART_TOAST_MS);
     off();
@@ -84,7 +90,7 @@ describe("adding several things quickly", () => {
     // added three taps ago.
     showCartToast(BASH);
     showCartToast({ ...BASH, name: "Boomer", price: 9.49 });
-    expect(getSnapshot()?.name).toBe("Boomer");
+    expect(nameOf()).toBe("Boomer");
   });
 
   it("restarts the timer on every add", () => {
@@ -93,7 +99,7 @@ describe("adding several things quickly", () => {
     showCartToast({ ...BASH, name: "Boomer" });
     // The first timer must not fire and take the second message with it.
     vi.advanceTimersByTime(200);
-    expect(getSnapshot()?.name).toBe("Boomer");
+    expect(nameOf()).toBe("Boomer");
     vi.advanceTimersByTime(CART_TOAST_MS);
     expect(getSnapshot()).toBeNull();
   });
@@ -169,39 +175,101 @@ describe("the component", () => {
   });
 });
 
+describe("what a refusal says", () => {
+  it("is one sentence and carries no fields at all", () => {
+    // The type gives it nowhere to put a count; these are the values.
+    showCartToast({ kind: "denied" });
+    expect(Object.keys(getSnapshot()!).sort()).toEqual(["id", "kind"]);
+    showCartToast({ kind: "unchecked" });
+    expect(Object.keys(getSnapshot()!).sort()).toEqual(["id", "kind"]);
+  });
+
+  it("names no stock level", () => {
+    for (const text of [de.shop.toastDenied, de.shop.toastUnchecked]) {
+      expect(text).not.toMatch(/\d/);
+      expect(text).not.toMatch(/Lager|Bestand|St\u00fcck|verf\u00fcgbare?n?\s+\d/i);
+    }
+    expect(de.shop.toastDenied).toBe("Keine weitere Menge verf\u00fcgbar.");
+    expect(de.shop.toastUnchecked).toBe("Menge konnte gerade nicht gepr\u00fcft werden.");
+  });
+
+  it("tells a refusal apart from a failed check", () => {
+    // One is an answer, the other is the absence of one.
+    expect(de.shop.toastUnchecked).not.toBe(de.shop.toastDenied);
+  });
+
+  it("replaces a confirmation, and is replaced by one", () => {
+    showCartToast(BASH);
+    showCartToast({ kind: "denied" });
+    expect(getSnapshot()!.kind).toBe("denied");
+    expect(nameOf()).toBeNull();
+    showCartToast(BASH);
+    expect(getSnapshot()!.kind).toBe("added");
+  });
+
+  it("goes away on the same timer", () => {
+    showCartToast({ kind: "denied" });
+    vi.advanceTimersByTime(CART_TOAST_MS);
+    expect(getSnapshot()).toBeNull();
+  });
+});
+
+describe("the component renders both shapes", () => {
+  const toast = code(TOAST);
+
+  it("shows a detail line only for the two confirmations", () => {
+    expect(toast).toContain('toast.kind === "added" || toast.kind === "increased"');
+    expect(toast).toContain("de.shop.toastLine(");
+    expect(toast).toContain("de.shop.toastQuantityLine(");
+  });
+
+  it("shows a refusal as a sentence with no detail line", () => {
+    expect(toast).toContain("de.shop.toastDenied");
+    expect(toast).toContain("de.shop.toastUnchecked");
+  });
+
+  it("does not dress a refusal as an error", () => {
+    expect(toast).not.toContain("text-danger");
+    expect(toast).not.toContain('role="alert"');
+    expect(toast).toContain('aria-live="polite"');
+  });
+});
+
 describe("the buy button no longer renames itself", () => {
+  it("has no label to swap to", () => {
+    // The V10 removal, still gone: the i18n key that produced the temporary
+    // "Im Warenkorb" does not exist.
+    expect("inCart" in de.shop).toBe(false);
+  });
+
   it("shows the price, before and after", () => {
     const action = code(ACTION);
     expect(action).toContain("{formatPrice(summary.price)}");
-    expect(action).not.toContain("inCart");
     expect(action).not.toContain("setAdded");
+    expect(action).not.toContain("de.shop.addToCart}");
   });
 
   it("and the figure page's button keeps its own label", () => {
     const panel = code(PANEL);
     expect(panel).toContain("{de.shop.addToCart}");
-    expect(panel).not.toContain("inCart");
     expect(panel).not.toContain("setAdded");
   });
 
-  it("confirms through the toast instead", () => {
+  it("confirms through the shared add path, not from the button", () => {
+    // Since V11 the toast is raised by useAddToCart, after the server has
+    // answered — the buttons no longer decide anything themselves.
     for (const path of [ACTION, PANEL]) {
-      expect(code(path)).toContain("showCartToast({");
+      const source = code(path);
+      expect(source).toContain("useAddToCart()");
+      expect(source).not.toContain("showCartToast");
     }
   });
 
-  it("reads the existing line from the cart store rather than counting again", () => {
-    const action = code(ACTION);
-    expect(action).toContain("const key = lineKey(skyId, offer.condition);");
-    expect(action).toContain("cart.find((line) => keyOf(line) === key)");
-    expect(action).toContain('kind: existing ? "increased" : "added"');
-  });
-
-  it("only confirms after a condition has actually been chosen", () => {
+  it("only adds after a condition has actually been chosen", () => {
     // Opening the chooser is not an add.
     const action = code(ACTION);
     const opener = action.slice(action.indexOf("onClick={() => setChoosing(true)}"));
-    expect(opener).not.toContain("showCartToast");
-    expect(action.indexOf("showCartToast")).toBeLessThan(action.indexOf("if (choosing)"));
+    expect(opener).not.toContain("addOne(");
+    expect(action.indexOf("await addOne({")).toBeLessThan(action.indexOf("if (choosing)"));
   });
 });

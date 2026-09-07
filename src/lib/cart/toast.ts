@@ -1,5 +1,5 @@
 /**
- * The one line of feedback after something goes into the cart (V10).
+ * The one line of feedback after the cart was asked to change (V10, V11).
  *
  * A module store with the same shape as the cart's own — subscribe, snapshot,
  * server snapshot — because that is the pattern this product already uses for
@@ -17,6 +17,14 @@
  * clean up on unmount, nothing that can leak, and no timer that survives a
  * message it no longer belongs to.
  *
+ * FOUR MESSAGES, AND WHY THE SHAPE IS A UNION
+ *
+ * V11 added the two that report a refusal. They are separate members rather
+ * than flags on one object so that a refusal has **nowhere to put a number**:
+ * `denied` carries no name, no price and no quantity, and the type is what
+ * guarantees it. "Keine weitere Menge verfügbar" cannot accidentally grow a
+ * stock level, because there is no field for one (docs/SECURITY.md).
+ *
  * It knows nothing about the cart beyond what it is told. It stores no
  * quantities of its own, reads no storage and mutates nothing: the cart is
  * the cart's business (ADR-0043).
@@ -26,20 +34,29 @@ import type { OfferCondition } from "@/lib/shop/offer";
 /** Long enough to read, short enough not to sit in the way. */
 export const CART_TOAST_MS = 2600;
 
-export type CartToast = {
-  /** Whether the line is new, or an existing one that grew. */
-  kind: "added" | "increased";
-  name: string;
-  condition: OfferCondition;
-  price: number;
-  /** The line's quantity **after** the change. Only shown for `increased`. */
-  quantity: number;
-  /**
-   * Distinguishes two identical adds so the reader can tell them apart.
-   * Never displayed.
-   */
-  id: number;
-};
+/**
+ * What happened, as the visitor needs to hear it.
+ *
+ *   added      a line that was not there is there now
+ *   increased  a line that was there grew
+ *   denied     the shop cannot supply that many right now — no reason given,
+ *              and no count, ever
+ *   unchecked  the question could not be put to the server at all. A
+ *              different sentence from `denied` on purpose: one is an answer,
+ *              the other is the absence of one, and claiming a stock status
+ *              we never obtained would be a lie.
+ */
+export type CartToastMessage =
+  | { kind: "added"; name: string; condition: OfferCondition; price: number }
+  | { kind: "increased"; name: string; condition: OfferCondition; quantity: number }
+  | { kind: "denied" }
+  | { kind: "unchecked" };
+
+/**
+ * `id` distinguishes two identical messages so a reader can tell them apart.
+ * Never displayed.
+ */
+export type CartToast = CartToastMessage & { id: number };
 
 const listeners = new Set<() => void>();
 let snapshot: CartToast | null = null;
@@ -66,7 +83,7 @@ export function getServerSnapshot(): CartToast | null {
   return null;
 }
 
-export function showCartToast(message: Omit<CartToast, "id">): void {
+export function showCartToast(message: CartToastMessage): void {
   if (timer !== null) clearTimeout(timer);
   sequence += 1;
   snapshot = { ...message, id: sequence };

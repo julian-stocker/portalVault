@@ -36,10 +36,10 @@
 
 import { useState } from "react";
 
-import { CartGlyph } from "@/components/shop/cart-glyph";
+import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
+import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { keyOf, lineKey } from "@/lib/cart/cart";
-import { showCartToast } from "@/lib/cart/toast";
 import { buyableOffers, summarizeOffers, type Offer, type OfferCondition } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -63,8 +63,26 @@ export function conditionLabel(condition: OfferCondition): string {
  */
 const BUY =
   "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 " +
-  "bg-accent text-on-accent text-[13px] font-semibold tabular-nums " +
-  "shadow-card transition-colors hover:bg-accent-hover";
+  "text-on-accent text-[13px] font-semibold tabular-nums " +
+  "transition-colors disabled:opacity-70";
+
+/** Nothing of this figure in the cart. The pill as V9 designed it. */
+const BUY_IDLE = "bg-accent shadow-card hover:bg-accent-hover";
+
+/**
+ * Already in the cart (V11): the same pill, in a brighter gold.
+ *
+ * `--accent-hover` is the accent's own lighter tone and `--gold-line-strong`
+ * its stronger line — both already in the palette, so the state is louder
+ * without a new colour entering the product. `shadow-gold` is the gold glow
+ * the collection frame uses, which is what makes it read across a grid.
+ *
+ * Height, padding and radius are untouched, so a marked card is exactly as
+ * tall as an unmarked one: the ring and the shadow are painted, not laid out
+ * (V9.1 geometry).
+ */
+const BUY_IN_CART =
+  "bg-accent-hover ring-1 ring-gold-line-strong shadow-gold hover:bg-accent-hover";
 
 export function ShopAction({
   offers,
@@ -78,7 +96,8 @@ export function ShopAction({
   /** Already resolved (ADR-0046); stored with the cart line. */
   imageSrc: string | null;
 }) {
-  const { cart, add } = useCart();
+  const { cart } = useCart();
+  const { addOne, pending } = useAddToCart();
   const [choosing, setChoosing] = useState(false);
 
   const summary = summarizeOffers(offers);
@@ -86,24 +105,34 @@ export function ShopAction({
 
   const buyable = buyableOffers(offers);
 
-  function put(offer: Offer) {
-    /*
-     * Read the line before adding, so the confirmation can say which of the
-     * two things happened — a new line, or an existing one that grew. That
-     * is the store's own state, not a second count kept somewhere else.
-     */
-    const key = lineKey(skyId, offer.condition);
-    const existing = cart.find((line) => keyOf(line) === key);
-    add({ skyId, condition: offer.condition, name, imageSrc, price: offer.price });
-    setChoosing(false);
+  /** Is this exact article — figure and condition — in the cart? */
+  function inCart(condition: OfferCondition): boolean {
+    const key = lineKey(skyId, condition);
+    return cart.some((line) => keyOf(line) === key && line.quantity > 0);
+  }
 
-    showCartToast({
-      kind: existing ? "increased" : "added",
-      name,
-      condition: offer.condition,
-      price: offer.price,
-      quantity: (existing?.quantity ?? 0) + 1,
-    });
+  /**
+   * Is anything of this figure in the cart?
+   *
+   * Any buyable condition marks the closed pill (V11). The pill stands for
+   * the figure — when it says "ab 4,49 €" it is not speaking about one
+   * condition — so "you already have one of these" is the honest reading, and
+   * the chooser below says which. Only conditions that can still be bought
+   * count: a mark driven by a line that is sold out would point at a button
+   * that cannot act on it.
+   */
+  const anyInCart = buyable.some((offer) => inCart(offer.condition));
+
+  /**
+   * Adds one, once the server has agreed (V11).
+   *
+   * The whole sequence — read the line, ask, add, confirm or refuse — lives
+   * in `useAddToCart`, shared with the figure page and the cart's own plus,
+   * so the three cannot disagree about what is allowed.
+   */
+  async function put(offer: Offer) {
+    setChoosing(false);
+    await addOne({ skyId, condition: offer.condition, name, imageSrc, price: offer.price });
   }
 
   if (choosing) {
@@ -127,24 +156,31 @@ export function ShopAction({
         <p className="px-1 text-[11px] leading-tight text-on-card-muted">
           {de.shop.chooseCondition}
         </p>
-        {buyable.map((offer) => (
-          <button
-            key={offer.condition}
-            type="button"
-            onClick={() => put(offer)}
-            aria-label={de.shop.addToCartFor(
-              `${name} (${conditionLabel(offer.condition)})`,
-              formatPrice(offer.price),
-            )}
-            className={`${BUY} w-full justify-between`}
-          >
-            <span className="font-medium">{conditionLabel(offer.condition)}</span>
-            <span className="flex items-center gap-1.5">
-              {formatPrice(offer.price)}
-              <CartGlyph />
-            </span>
-          </button>
-        ))}
+        {buyable.map((offer) => {
+          // Per condition here, because this is where the two are told apart.
+          const already = inCart(offer.condition);
+          const label = `${name} (${conditionLabel(offer.condition)})`;
+          return (
+            <button
+              key={offer.condition}
+              type="button"
+              onClick={() => put(offer)}
+              disabled={pending}
+              aria-label={
+                already
+                  ? de.shop.addAnotherFor(label, formatPrice(offer.price))
+                  : de.shop.addToCartFor(label, formatPrice(offer.price))
+              }
+              className={`${BUY} ${already ? BUY_IN_CART : BUY_IDLE} w-full justify-between`}
+            >
+              <span className="font-medium">{conditionLabel(offer.condition)}</span>
+              <span className="flex items-center gap-1.5">
+                {formatPrice(offer.price)}
+                {already ? <CartCheckedGlyph /> : <CartGlyph />}
+              </span>
+            </button>
+          );
+        })}
       </div>
     );
   }
@@ -156,10 +192,16 @@ export function ShopAction({
       <button
         type="button"
         onClick={() => put(offer)}
-        aria-label={de.shop.addToCartFor(name, formatPrice(summary.price))}
-        className={BUY}
+        disabled={pending}
+        aria-label={
+          anyInCart
+            ? de.shop.addAnotherFor(name, formatPrice(summary.price))
+            : de.shop.addToCartFor(name, formatPrice(summary.price))
+        }
+        className={`${BUY} ${anyInCart ? BUY_IN_CART : BUY_IDLE}`}
       >
-        <CartGlyph />
+        {/* The glyph changes, the price does not, and the button still adds. */}
+        {anyInCart ? <CartCheckedGlyph /> : <CartGlyph />}
         {formatPrice(summary.price)}
       </button>
     );
@@ -171,9 +213,9 @@ export function ShopAction({
       onClick={() => setChoosing(true)}
       aria-label={de.shop.chooseConditionFor(name)}
       aria-expanded={false}
-      className={BUY}
+      className={`${BUY} ${anyInCart ? BUY_IN_CART : BUY_IDLE}`}
     >
-      <CartGlyph />
+      {anyInCart ? <CartCheckedGlyph /> : <CartGlyph />}
       {de.shop.offerFrom(formatPrice(summary.price))}
     </button>
   );

@@ -7,6 +7,25 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V11 gebaut (2026-09-07), Migration noch nicht angewandt.** Zwei Warenkorb-Probleme.
+
+*Mengengrenze.* Der Warenkorb zählte, so hoch er wollte — das Zahlenfeld auf `/cart` nahm eine
+getippte 99 entgegen, ohne dass jemand den Bestand gefragt hätte. Neu: `shop_quantity_available()`
+(Migration `0009`) beantwortet „wäre **diese** Menge gerade möglich" mit einem **Boolean**. Keine
+Bestandszahl verlässt die Datenbank; ein `allowed_quantity`-Feld wurde geprüft und verworfen. Alle
+drei Add-Wege — Katalogpille, Figurenseite, Plus auf `/cart` — gehen durch denselben geprüften
+Pfad und sind **fail closed**. Das freie Zahlenfeld ist einem Stepper `−  n  +` gewichen.
+
+*„Schon im Warenkorb".* Die Katalogpille zeigt in kräftigerem Gold und mit einem Haken im
+Warenkorbsymbol, dass diese Figur bereits im Korb liegt. Gleiche Geometrie, gleiche Bedeutung: der
+Knopf bleibt **Hinzufügen**, kein Toggle, kein Mengen-Badge auf der Karte.
+
+*Unverändert:* lokaler Warenkorb, ein Store, keine Reservierung, keine Bestellung, kein Checkout.
+
+> **Nächster Schritt:** `supabase/migrations/0009_shop_quantity_check.sql` anwenden — **vor** dem
+> nächsten Deployment. Der Anwendungscode ist fail closed: ohne die Funktion lehnt er jede
+> Mengenerhöhung ab. Noch nicht committet, nicht gepusht.
+
 **V10 gebaut (2026-09-07).** Reine Warenkorb-UX, keine Migration, keine Architekturänderung.
 
 *Kaufknopf.* Er benennt sich nicht mehr kurzzeitig in „Im Warenkorb" um — vorher, während und

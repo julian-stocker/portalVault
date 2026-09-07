@@ -452,6 +452,40 @@ Tabelle, kein Konto, keine Server-Action, keine Reservierung. `reserved` wird vo
 geschrieben. Ein Warenkorb kann daher weder Bestand binden noch Geschäftsdaten offenlegen; das
 Einzige, was er über den Shop weiß, sind die vier öffentlichen Werte oben (ADR-0043).
 
+**Der Warenkorb fragt seit V11 eine Menge ab — und bekommt ein Bit** (Migration `0009`).
+`public.shop_quantity_available(sky_id, condition, quantity)` beantwortet genau eine Frage:
+„wäre **diese** Menge dieses Artikels gerade möglich?" Rückgabe ist `boolean`, nicht `integer`.
+
+Verworfen wurde bewusst ein `allowed_quantity`-Feld: eine Antwort „3" auf die Anfrage „5" ist der
+Lagerbestand unter anderem Namen, nur in einem Roundtrip statt in mehreren. Die Funktion ist
+`stable`, `security definer`, `set search_path = ''`, hat explizite `revoke`/`grant` auf
+`anon, authenticated`, schreibt nichts und **reserviert nichts**. Eligibility, Freigabe und Preis
+fragt sie über `is_shop_eligible()` und `shop_price()` ab — dieselben Regeln wie `shop_offers()`,
+keine zweite Kopie. Jede Art von „nein" fällt in dasselbe `false`: der Aufrufer erfährt nicht, ob
+zu wenig da ist, ob die Position ausgelistet wurde oder ob es sie nie gab.
+
+**Ehrlich benannte Restgrenze.** Wer wiederholt konkrete Mengen anfragt, kann die Obergrenze durch
+Ausprobieren eingrenzen. Das ist beim Verkauf von Ware grundsätzlich nicht vollständig vermeidbar —
+jeder Shop, in den man `n` Stück legen kann, beantwortet damit die Frage, ob `n` möglich ist,
+unabhängig von der API-Form. Vermieden wird der vermeidbare Teil: **keine Bestandsspalte verlässt
+die Datenbank, kein Feld trägt eine Stückzahl, und keine Oberfläche zeigt eine an.** Das ist keine
+Sicherheit durch Verschleierung und wird auch nicht als solche behauptet — der Bestand ist kein
+Geheimnis, er ist bloß keine API.
+
+**Fail closed.** Die Server-Action `checkCartQuantity` (`src/lib/shop/quantity.ts`) liefert
+`allowed`, `denied` oder `unchecked`. Jeder Fehler — Netz, Timeout, fehlende Funktion (`PGRST202`
+in einer Umgebung ohne `0009`) — ist `unchecked`, und `unchecked` erhöht **nie** eine Menge.
+Anders als `fetchOffers`, das ein fehlendes `0006` zu „keine Angebote" auflösen darf, gibt es hier
+keine harmlose Vermutung: eine Menge zu erlauben, die niemand geprüft hat, wäre eine Behauptung
+über den Bestand. Verringern und Entfernen bleiben rein lokal.
+
+**`src/lib/shop/public-surface.test.ts` hält das fest.** Der Test liest alle Migrationen, ermittelt
+jede für `anon`/`authenticated` ausführbare Funktion (ohne die, die intern `is_shop_admin()`
+verlangen) und weist jede `RETURNS`-Klausel zurück, in der `quantity`, `reserved`,
+`available_quantity`, `note`, `unit_cost`, `currency` oder `created_by` vorkommt. Eine spätere
+Migration, die für ein „nur noch 3 übrig"-Abzeichen eine Bestandszahl in eine öffentliche
+Projektion aufnimmt, scheitert dort, statt zu deployen.
+
 Geschrieben wird unverändert nur über die drei Funktionen aus `0003`:
 `record_inventory_movement()` (Bestand, mit Akteur aus `auth.uid()`), `set_shop_listing()`
 (Preis, Angebot, interne Notiz) und `system_record_inventory_movement()` (nur `service_role`).

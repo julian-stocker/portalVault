@@ -23,6 +23,7 @@
 
 import Link from "next/link";
 
+import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { conditionLabel } from "@/components/shop/shop-action";
@@ -49,30 +50,80 @@ import { offerIndex, type Offer } from "@/lib/shop/offer";
  */
 const PANEL = "rounded-sky-lg bg-deep/90 ring-1 backdrop-blur-sm";
 
-function QuantityField({ entry }: { entry: CartEntry }) {
+/** Both ends of the stepper. 44 px targets, and identical to each other. */
+const STEP =
+  "flex h-11 w-11 items-center justify-center rounded-sky-md bg-surface-raised " +
+  "text-lg leading-none ring-1 ring-border-strong transition-colors " +
+  "hover:ring-accent disabled:opacity-40 disabled:hover:ring-border-strong";
+
+/**
+ * `−  2  +` (V11), where there used to be a free number field.
+ *
+ * The field took a typed 99 and wrote it straight to the cart. Nobody had
+ * asked whether SkyIsles has 99, and a browser is not in a position to know:
+ * `clampQuantity` bounds the number, not the stock. A stepper removes the
+ * question of absurd input entirely — the only way up is one at a time, and
+ * every one of those steps is checked with the server.
+ *
+ * The two directions are deliberately not symmetrical:
+ *
+ *   plus   asks the server what the line's **new total** would be, and only
+ *          then writes. Denied leaves the cart untouched.
+ *   minus  is local and immediate. It can only ever make the cart smaller,
+ *          so there is nothing to verify and nothing to wait for.
+ *
+ * Minus stops at one rather than removing the line: "Entfernen" is right
+ * there beside it and says what it does. The store still treats a quantity of
+ * zero as a removal (`setLineQuantity`) — nothing here calls it with one.
+ */
+function QuantityStepper({ entry }: { entry: CartEntry }) {
   const { setQuantity } = useCart();
-  const key = keyOf(entry.line);
-  const id = `cart-quantity-${key.replace("/", "-")}`;
+  const { addOne, pending } = useAddToCart();
+  const { line } = entry;
+  const key = keyOf(line);
 
   return (
-    <>
-      <label className="sr-only" htmlFor={id}>
-        {de.cart.quantityFor(entry.line.name)}
-      </label>
-      <input
-        id={id}
-        type="number"
-        inputMode="numeric"
-        min={1}
-        max={MAX_LINE_QUANTITY}
-        value={entry.line.quantity}
-        onChange={(event) => setQuantity(key, Number(event.target.value))}
-        className={
-          "min-h-11 w-16 rounded-sky-md bg-surface-raised px-2 text-center text-sm " +
-          "ring-1 ring-border-strong tabular-nums focus:ring-accent"
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setQuantity(key, line.quantity - 1)}
+        disabled={line.quantity <= 1}
+        aria-label={de.cart.decreaseFor(line.name)}
+        className={STEP}
+      >
+        <span aria-hidden="true">−</span>
+      </button>
+
+      {/* The number is text, not a field: there is nothing to type into. */}
+      <span
+        aria-label={`${de.cart.quantityFor(line.name)}: ${line.quantity}`}
+        className="min-w-8 text-center text-sm font-medium tabular-nums"
+      >
+        {line.quantity}
+      </span>
+
+      <button
+        type="button"
+        onClick={() =>
+          void addOne({
+            skyId: line.skyId,
+            condition: line.condition,
+            name: line.name,
+            imageSrc: line.imageSrc,
+            // The server's current price, never the one it was added at.
+            price: entry.price ?? line.priceAtAdd,
+          })
         }
-      />
-    </>
+        // Nothing to add when the line cannot be bought at all, and never
+        // past the cart's own bound — the server refuses it too, but asking
+        // would be a round trip to be told what is already known.
+        disabled={pending || !entry.purchasable || line.quantity >= MAX_LINE_QUANTITY}
+        aria-label={de.cart.increaseFor(line.name)}
+        className={STEP}
+      >
+        <span aria-hidden="true">+</span>
+      </button>
+    </div>
   );
 }
 
@@ -114,7 +165,7 @@ function CartRow({ entry }: { entry: CartEntry }) {
         ) : null}
 
         <div className="mt-1 flex items-center gap-3">
-          <QuantityField entry={entry} />
+          <QuantityStepper entry={entry} />
           <button
             type="button"
             onClick={() => remove(keyOf(line))}

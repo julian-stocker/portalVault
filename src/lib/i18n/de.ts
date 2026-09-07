@@ -398,6 +398,21 @@ export const de = {
       `${name} · ${condition} · ${price}`,
     toastQuantityLine: (quantity: number, name: string, condition: string) =>
       `${quantity}× ${name} · ${condition}`,
+    /**
+     * Abgelehnte Mengen (V11).
+     *
+     * Bewusst ohne Stückzahl. „Nur noch 3 verfügbar" wäre der Lagerbestand,
+     * und der ist nicht öffentlich (docs/SECURITY.md). Der nächste Schritt
+     * des Besuchers ist ohnehin derselbe, egal ob zwei oder zwanzig fehlen.
+     *
+     * `toastUnchecked` ist absichtlich ein anderer Satz: „nicht verfügbar"
+     * wäre eine Behauptung über den Bestand, die wir gar nicht erhalten haben.
+     */
+    toastDenied: "Keine weitere Menge verfügbar.",
+    toastUnchecked: "Menge konnte gerade nicht geprüft werden.",
+    /** Die Pille bleibt „Hinzufügen", auch wenn schon etwas im Korb liegt. */
+    addAnotherFor: (name: string, price: string) =>
+      `${name} für ${price} noch einmal in den Warenkorb legen`,
     offerHeading: "Angebot",
   },
 
@@ -414,6 +429,12 @@ export const de = {
     toCatalog: "Zum Katalog",
     quantity: "Menge",
     quantityFor: (name: string) => `Menge für ${name}`,
+    /**
+     * Stepper statt freiem Zahlenfeld (V11). Das Feld nahm eine getippte 99
+     * entgegen, ohne dass irgendjemand den Bestand gefragt hätte.
+     */
+    increaseFor: (name: string) => `Menge für ${name} erhöhen`,
+    decreaseFor: (name: string) => `Menge für ${name} verringern`,
     remove: "Entfernen",
     removeFor: (name: string) => `${name} entfernen`,
     clear: "Warenkorb leeren",

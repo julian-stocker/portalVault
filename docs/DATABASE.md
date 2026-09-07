@@ -380,6 +380,48 @@ effektivem Preis, verfügbarem Bestand und erfüllten Katalogregeln.
 Eignung und den Grund einer fehlenden Eignung. Es gibt **keinen** Shop-Snapshot und keinen
 Synchronisationsschritt: `shop_offers()` liest den Bestand live.
 
+### 3.3j Mengenprüfung für den Warenkorb (Migration `0009`)
+
+> **Status: geschrieben, noch nicht angewandt.** Die Migration liegt im Repository und ist in
+> keiner Umgebung eingespielt. Sie muss **vor** dem Deployment des zugehörigen Anwendungscodes
+> angewandt werden — siehe die Warnung am Ende dieses Abschnitts.
+
+`public.shop_quantity_available(p_sky_id text, p_condition text, p_quantity integer)` →
+`boolean`. `stable`, `security definer`, `set search_path = ''`, ausführbar für `anon` und
+`authenticated`.
+
+Sie beantwortet genau eine Frage: **wäre diese Menge dieses Artikels gerade kaufbar?** `true`
+nur, wenn alles davon gilt:
+
+| Bedingung | Woher |
+|---|---|
+| `1 ≤ p_quantity ≤ max_cart_quantity()` | Vernunftgrenze, kein Bestandswert |
+| Position existiert mit genau dieser `condition` | `shop_inventory` |
+| `is_listed` | Freigabe (ADR-0048) |
+| `is_shop_eligible(sky_id)` | Katalogregel, **dieselbe Funktion** wie `shop_offers()` |
+| `shop_price(...) is not null` | effektiver Preis (ADR-0045) |
+| `available_quantity >= p_quantity` | `quantity - reserved`, die generierte Spalte aus `0003` |
+
+**Keine Bestandszahl verlässt die Funktion.** Es gibt keine `returns table`, also auch keine
+Spalte, in die eine Stückzahl je geraten könnte; `available_quantity` kommt genau einmal vor, auf
+der rechten Seite eines Vergleichs. Ein `allowed_quantity`-Feld wurde geprüft und verworfen — es
+wäre der Lagerbestand unter anderem Namen (docs/SECURITY.md).
+
+`public.max_cart_quantity()` → `integer` (`immutable`) hält die Obergrenze **99** und spiegelt
+`MAX_LINE_QUANTITY` aus `src/lib/cart/cart.ts`. `src/lib/shop/quantity.test.ts` liest beide Seiten
+und schlägt fehl, wenn sie auseinanderlaufen — dieselbe Kopplung wie zwischen
+`non_collectible_categories()` und `collectible.ts`.
+
+**Sie reserviert nichts und schreibt nichts.** `reserved` wird gelesen, nie geschrieben; es gibt
+weiterhin keine Bestellung, keinen Checkout und keine Reservierung (ADR-0043). Ein `true` heißt
+„im Moment möglich", nie „für dich zurückgelegt": zwischen Antwort und Kauf kann sich der Bestand
+ändern, und ein späterer Checkout muss erneut fragen — atomar, und dann tatsächlich reservierend.
+
+> **Deployment-Reihenfolge, zwingend.** Der Anwendungscode ist *fail closed*: fehlt die Funktion,
+> antwortet PostgREST mit `PGRST202`, die Server-Action liefert `unchecked`, und **jede** Erhöhung
+> wird abgelehnt. Wird der Code vor der Migration deployt, kann niemand mehr etwas in den
+> Warenkorb legen. Erst `0009` anwenden, dann deployen.
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -770,6 +812,10 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   `admin_shop_listing_audit()`, Vorgabewert `is_listed = true`, Freigabe ohne Preiszwang und die
   **einmalige** Freigabe des bereits vorhandenen geeigneten Bestands. Ändert keine Menge, keine
   Reservierung, keinen Preis, erzeugt keine Bewegung und setzt niemals `false`. Idempotent.
+- Neunte Migration: `0009_shop_quantity_check.sql` — `max_cart_quantity()` und
+  `shop_quantity_available()`. Legt nur zwei Funktionen an: keine Tabelle, keine Spalte, keine
+  Policy, kein Tabellenrecht, keine Datenzeile. **Noch nicht angewandt** (Stand 2026-09-07); der
+  zugehörige Anwendungscode ist fail closed und braucht sie, siehe Abschnitt 3.3j.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

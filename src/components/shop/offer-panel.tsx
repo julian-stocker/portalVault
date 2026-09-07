@@ -19,12 +19,12 @@
  */
 "use client";
 
+import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
-import { CartGlyph } from "@/components/shop/cart-glyph";
+import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
 import { conditionLabel } from "@/components/shop/shop-action";
 import { ACTION_SHOP } from "@/components/ui/action";
 import { keyOf, lineKey } from "@/lib/cart/cart";
-import { showCartToast } from "@/lib/cart/toast";
 import { buyableOffers, type Offer } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -38,34 +38,38 @@ function AddButton({
   name: string;
   imageSrc: string | null;
 }) {
-  const { cart, add } = useCart();
+  const { cart } = useCart();
+  const { addOne, pending } = useAddToCart();
+
+  const key = lineKey(offer.skyId, offer.condition);
+  const already = cart.some((line) => keyOf(line) === key && line.quantity > 0);
+  const label = `${name} (${conditionLabel(offer.condition)})`;
 
   return (
     <button
       type="button"
-      onClick={() => {
-        // Same rule as the catalog card (V10): the button never renames
-        // itself — it always means the same thing — and the confirmation is
-        // the toast. Read the line first so the toast can say whether it is
-        // new or grew.
-        const key = lineKey(offer.skyId, offer.condition);
-        const existing = cart.find((line) => keyOf(line) === key);
-        add({ skyId: offer.skyId, condition: offer.condition, name, imageSrc, price: offer.price });
-        showCartToast({
-          kind: existing ? "increased" : "added",
-          name,
+      // Same rule as the catalog card (V10): the button never renames itself
+      // — it always means the same thing — and the confirmation is the toast.
+      // Since V11 the quantity is checked with the server first; the shared
+      // hook does the reading, asking and confirming (ADR-0043 addendum).
+      onClick={() =>
+        void addOne({
+          skyId: offer.skyId,
           condition: offer.condition,
+          name,
+          imageSrc,
           price: offer.price,
-          quantity: (existing?.quantity ?? 0) + 1,
-        });
-      }}
-      aria-label={de.shop.addToCartFor(
-        `${name} (${conditionLabel(offer.condition)})`,
-        formatPrice(offer.price),
-      )}
-      className={`${ACTION_SHOP} gap-1.5`}
+        })
+      }
+      disabled={pending}
+      aria-label={
+        already
+          ? de.shop.addAnotherFor(label, formatPrice(offer.price))
+          : de.shop.addToCartFor(label, formatPrice(offer.price))
+      }
+      className={`${ACTION_SHOP} gap-1.5 disabled:opacity-70`}
     >
-      <CartGlyph />
+      {already ? <CartCheckedGlyph /> : <CartGlyph />}
       {de.shop.addToCart}
     </button>
   );

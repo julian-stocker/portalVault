@@ -100,8 +100,15 @@ describe("what the card says", () => {
   });
 
   it("offers no disabled or greyed-out shop surface", () => {
-    expect(action).not.toContain("disabled");
-    expect(action).not.toContain("opacity-");
+    // The V7 rule: nothing that cannot be bought is rendered as a dimmed or
+    // disabled button. The only `disabled` here is the V11 busy guard, which
+    // lasts one request and belongs to the button that was just pressed, and
+    // the only `opacity-` is what expresses it.
+    expect(action).not.toContain("available");
+    expect(action).not.toMatch(/disabled=\{(?!pending)/);
+    const dimmed = action.split("\n").filter((line) => line.includes("opacity-"));
+    expect(dimmed).toHaveLength(1);
+    expect(dimmed[0]).toContain("disabled:opacity-70");
   });
 
   it("uses the shared cart glyph, not an emoji", () => {
@@ -210,11 +217,20 @@ describe("who sees it", () => {
 describe("the cart is untouched by any of this", () => {
   it("still stores sky_id + condition and writes no table", () => {
     const action = code(ACTION);
-    expect(action).toContain("add({ skyId, condition: offer.condition");
+    // Since V11 the add goes through the shared hook, which is where the
+    // article is assembled — still sky_id + condition, still nothing else.
+    expect(action).toContain("addOne({ skyId, condition: offer.condition");
     expect(action).not.toContain("@/lib/supabase");
     expect(action).not.toContain(".rpc(");
     expect(action).not.toContain("reserved");
     expect(action).not.toContain("use server");
+
+    // The hook may ask the server whether a quantity is possible, and that
+    // is all: it books no movement and holds nothing back.
+    const hook = code("src/components/cart/use-add-to-cart.ts");
+    expect(hook).toContain("checkCartQuantity");
+    expect(hook).not.toContain(".rpc(");
+    expect(hook).not.toMatch(/reserv/i);
   });
 });
 
@@ -324,7 +340,7 @@ describe("the condition chooser (V9.1)", () => {
   });
 
   it("still names every buyable condition with its price", () => {
-    expect(action).toContain("buyable.map((offer) => (");
+    expect(action).toContain("buyable.map((offer) => {");
     expect(action).toContain("conditionLabel(offer.condition)");
     expect(action).toContain("formatPrice(offer.price)");
     expect(action).toContain("de.shop.addToCartFor(");
