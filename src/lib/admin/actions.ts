@@ -155,10 +155,13 @@ export async function bookMovement(input: {
  * from a form that only holds one field.
  *
  * `salePrice` is the **override** since ADR-0045: null means "no override,
- * use the automatic price", not "no price". Which is why this function can
- * no longer refuse a listing just because the override is null — whether a
- * position has a price depends on the market price and the shop percentage,
- * and only the database can see both. It says so with a sentence of its own.
+ * use the automatic price", not "no price".
+ *
+ * `isListed` is the **release**, not "in stock" (ADR-0048). Releasing does
+ * not require a price and never could sensibly: "sell this when possible" is
+ * a decision somebody can make before a market price is known, and
+ * `shop_offers()` simply leaves the position out until there is one. So this
+ * function no longer refuses anything a price is missing for.
  *
  * It never touches quantity or reserved, and it never touches
  * `skylanders.market_price` — the reference price belongs to the catalog
@@ -176,7 +179,7 @@ export async function setListing(input: {
   if (input.salePrice !== null && !(input.salePrice > 0)) {
     return { ok: false, message: de.inventory.pricePositive };
   }
-  const result = await call(
+  return call(
     "set_shop_listing",
     {
       p_sky_id: input.skyId,
@@ -185,17 +188,10 @@ export async function setListing(input: {
       p_is_listed: input.isListed,
       p_note: input.note?.trim() ? input.note.trim() : null,
     },
-    // The public catalog too: a listing is what makes an offer appear on a
+    // The public catalog too: a release is what makes an offer appear on a
     // card, and the card is cached with the page.
     ["/admin/inventory", "/", "/cart"],
   );
-
-  // The one refusal worth translating. Everything else the database rejects
-  // is a bug, not a thing an operator did.
-  if (!result.ok && input.isListed) {
-    return { ok: false, message: de.inventory.listingNeedsPrice };
-  }
-  return result;
 }
 
 /**

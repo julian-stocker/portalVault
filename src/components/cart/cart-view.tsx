@@ -25,7 +25,7 @@ import Link from "next/link";
 
 import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
-import { conditionLabel } from "@/components/shop/offer-panel";
+import { conditionLabel } from "@/components/shop/shop-action";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import {
   cartTotal,

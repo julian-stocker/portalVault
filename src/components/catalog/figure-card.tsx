@@ -104,12 +104,13 @@ export function FigureCard({
   /** A chip over the image, beside where the crown sits. "Verborgen". */
   statusBadge?: ReactNode;
   /**
-   * What SkyIsles asks for this figure, under the market value (ADR-0043).
+   * The buy action, above the footer (ADR-0043, V7).
    *
    * A slot rather than the offer itself, so the card stays a description of
    * a figure: the catalog fills it, the collection and the related figures
    * beside a detail page leave it empty, and this file never learns what an
-   * offer is.
+   * offer is. It sits **outside** the body, like the footer, so pressing it
+   * can never toggle a collection or open a detail page.
    */
   offerSlot?: ReactNode;
   /**
@@ -161,40 +162,39 @@ export function FigureCard({
         )}
 
         {/* Pinned to the bottom of the text area, so price and metadata line
-            up across a row whether a name took one line or two. */}
+            up across a row whether a name took one line or two.
+
+            V7 put the market value and the element on ONE line: information
+            left, a quiet status chip right. They used to be stacked with the
+            shop price wedged between them, which made three unrelated facts
+            read as one block. The offer is not here any more — it is an
+            action, and it lives in the footer (ADR-0043, V7). */}
         <div className="mt-auto flex flex-col gap-1">
-          {/* A reference market value, not a shop price (ADR-0033). */}
-          <span
-            className={
-              "text-base leading-none font-semibold tabular-nums " +
-              (figure.marketPrice === null ? "text-on-card-muted" : "text-on-card")
-            }
-          >
-            {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
-          </span>
+          <div className="flex min-w-0 items-baseline justify-between gap-2">
+            {/* A reference market value, never a shop price (ADR-0033). */}
+            <span
+              className={
+                "text-base leading-none font-semibold tabular-nums " +
+                (figure.marketPrice === null ? "text-on-card-muted" : "text-on-card")
+              }
+            >
+              {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+            </span>
 
-          {/* Directly under the market value, because that is the comparison
-              being offered: what it is worth, and what SkyIsles asks. Two
-              facts, never one price correcting the other (ADR-0033). */}
-          {offerSlot}
+            {figure.element ? (
+              /* Named, never a bare coloured dot — the element has to be
+                 readable without colour perception. */
+              <span
+                className={`shrink-0 text-[11px] leading-tight font-medium ${elementChipClass(figure.element)}`}
+              >
+                {elementLabel(figure.element)}
+              </span>
+            ) : null}
+          </div>
 
-          {showSeries || figure.element ? (
-            <span className="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-tight">
-              {showSeries ? (
-                <span className="min-w-0 truncate text-on-card-muted">{figure.seriesLabel}</span>
-              ) : null}
-              {showSeries && figure.element ? (
-                <span aria-hidden="true" className="text-card-border">
-                  ·
-                </span>
-              ) : null}
-              {figure.element ? (
-                /* Named, never a bare coloured dot — the element has to be
-                   readable without colour perception. */
-                <span className={`shrink-0 font-medium ${elementChipClass(figure.element)}`}>
-                  {elementLabel(figure.element)}
-                </span>
-              ) : null}
+          {showSeries ? (
+            <span className="min-w-0 truncate text-[11px] leading-tight text-on-card-muted">
+              {figure.seriesLabel}
             </span>
           ) : null}
 
@@ -251,7 +251,11 @@ export function FigureCard({
         </Link>
       )}
 
-      {footer ? <div className="relative mt-2.5">{footer}</div> : null}
+      {/* Both are siblings of the body, never children of it: nothing here
+          is nested inside anything clickable, so no event has to be stopped
+          from bubbling for the card's own action to stay correct. */}
+      {offerSlot ? <div className="relative mt-2.5">{offerSlot}</div> : null}
+      {footer ? <div className={`relative ${offerSlot ? "mt-1.5" : "mt-2.5"}`}>{footer}</div> : null}
     </article>
   );
 }

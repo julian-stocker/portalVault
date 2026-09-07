@@ -60,29 +60,27 @@ describe("the navigation prefetches what it should and nothing else", () => {
   });
 });
 
-describe("the ownership toggle keeps its box in both states", () => {
-  const toggle = source("src/components/catalog/owned-toggle.tsx");
+describe("the ownership filter is one row of pills", () => {
+  const filter = source("src/components/catalog/ownership-filter.tsx");
 
-  it("draws no icon that would widen it when switched on", () => {
-    // The tick added ~18 px and pushed the control onto its own line at
-    // 390 px — the filter moved because it had been used.
-    expect(toggle).not.toContain("<svg");
-    expect(toggle).not.toContain("CheckGlyph");
+  it("draws no icon that would widen a segment when it is chosen", () => {
+    // Its predecessor grew a tick when switched on, which added ~18 px and
+    // pushed the control onto its own line at 390 px: the filter moved
+    // because it had been used. Only colour differs between the states.
+    expect(filter).not.toContain("<svg");
+    expect(filter).not.toContain("CheckGlyph");
   });
 
-  it("changes only colour between the two states", () => {
-    // Nothing that occupies space may differ: no padding, no gap, no weight.
-    // Only the two branches of the className ternary, not the props above it.
-    const active = toggle.slice(
-      toggle.indexOf('"whitespace-nowrap ring-1 transition-colors " +'),
-      toggle.indexOf("      }\n    >"),
-    );
-    for (const spacing of ["px-", "gap-", "min-h-", "font-"]) {
-      expect(active, `${spacing} must not differ between states`).not.toContain(spacing);
-    }
+  it("marks exactly the active segment, and marks it as selected", () => {
+    // aria-selected on a tab, not aria-pressed on a toggle: these are three
+    // views of one list, not three independent switches.
+    expect(filter).toContain('role="tablist"');
+    expect(filter).toContain('role="tab"');
+    expect(filter).toContain("aria-selected={isActive}");
+    expect(filter).not.toContain("aria-pressed");
   });
 
-  it("still states its state semantically", () => {
-    expect(toggle).toContain("aria-pressed={active}");
+  it("keeps a 40 px touch target", () => {
+    expect(filter).toContain("min-h-10");
   });
 });

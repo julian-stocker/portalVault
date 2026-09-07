@@ -90,6 +90,28 @@ Rechte würde jede Registrierung fehlschlagen.
 Fehlermeldungen bleiben allgemein („E-Mail oder Passwort ist falsch") — sie verraten nicht,
 ob ein Konto existiert.
 
+**Wohin die Anmeldung führt (V7).** Ohne ausdrückliches Ziel landen **alle** Konten auf dem
+**Katalog** `/` — `DEFAULT_SIGNED_IN_PATH` in `src/lib/auth/redirect.ts`, gemeinsamer Rückfall
+von Login, E-Mail-Bestätigung und abgeschlossenem Onboarding.
+
+Vorher war es `/collection`. Für ein Adminkonto ist das die falsche Seite: der Betreiber hat
+gar keine Sammlung in seinem Arbeitsablauf, seine Ziele sind **Katalog · Lager · Admin**
+(ADR-0042). Der Katalog ist für beide richtig, und nicht als Kompromiss — er ist die Startseite
+(ADR-0025), funktioniert ohne Konto, und beide Rollen arbeiten dort: die eine sammelt daraus,
+die andere pflegt ihn.
+
+**Bewusst nicht rollenabhängig.** Eine Startseite, die sich an einer Berechtigung verzweigt,
+wäre eine zweite Stelle, die der Navigation widersprechen kann — und sie schickte dieselbe
+Person mit ihren zwei Konten an zwei verschiedene Orte.
+
+**Ein ausdrücklich gewünschtes Ziel bleibt erhalten.** Wer vor der Anmeldung `/collection` oder
+eine Figurenseite öffnen wollte, kommt genau dorthin: die Middleware hängt `?next=` an, und
+`safeRedirect()` nimmt nur eigene Pfade an. `signInUrlFor("/")` hängt gar kein `next` an — eine
+Rückkehr an dieselbe Stelle braucht keinen Parameter. Onboarding schlägt weiterhin jedes Ziel:
+ohne Benutzernamen hat die Anwendung keine Anzeigeidentität.
+
+`/dashboard` bleibt eine dauerhafte Weiterleitung auf `/collection`, damit alte Links halten.
+
 ### Logout
 
 `supabase.auth.signOut()`, danach Redirect auf die Startseite und Revalidierung der

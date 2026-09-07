@@ -7,6 +7,54 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V8 gebaut, Migration `0008` NOCH NICHT ausgeführt (2026-09-07, ADR-0048).** Der Shop wird
+**Opt-out statt Opt-in**: vorhandener Bestand wird angeboten, sofern niemand widerspricht.
+
+*Was sich ändert.* `shop_inventory.is_listed` bekommt den Vorgabewert `true` — eine Position
+entsteht aus ihrer ersten Bewegung, und dieser Insert nennt keine Flags, also gilt der
+Vorgabewert für **jeden** Erzeugungsweg (Quick Stock, ausführliche Buchung, Systempfad).
+`set_shop_listing()` verlangt für eine Freigabe **keinen** Preis mehr; die Prüfung bleibt in
+`shop_offers()`. `public.is_shop_eligible()` benennt die eine Regel („aktiv, sichtbar,
+sammelbar"), die Projektion **und** die einmalige Freigabe benutzen.
+
+*Was ausdrücklich gleich bleibt.* Es gibt keinen Shop-Snapshot und keinen
+„Shop synchronisieren"-Knopf: `shop_offers()` liest den Bestand live. Bestand 0 schaltet die
+Freigabe **nicht** ab — das Angebot verschwindet durch Arithmetik und ist nach dem Wiedereinbuchen
+sofort zurück. Freigabe gilt je `(sky_id, condition)`.
+
+*Preview gegen die echte Datenbank (schreibfrei):* 222 Positionen, **218 geeignet**, davon 2
+bereits freigegeben → **216 würden aktiviert**. Ausgeschlossen bleiben **4** Fixture-Positionen
+(`SKY-9998`, `SKY-9994`, je loose und boxed), weil ihre Figuren inaktiv sind — über die zentrale
+Regel, nicht über eine Sonderliste. Keine Position ohne Preisbasis, keine mit Bestand 0.
+
+⚠️ **`0008_shop_listing_opt_out.sql` ist geschrieben, aber NICHT ausgeführt.** Solange das so ist,
+meldet `npm run verify:shop` **16/17** — die eine rote Prüfung ist genau „jede geeignete Position
+ist freigegeben". Sie wird grün, wenn die Migration läuft.
+
+
+**V7 gebaut: Navigation und Katalog-UX (2026-09-07).** Keine Migration, keine neue Architektur —
+drei Verfeinerungen bestehender Entscheidungen (Nachtrag zu ADR-0038/0042/0043).
+
+*Login-Ziel.* Ohne ausdrückliches Ziel landen **alle** Konten auf dem **Katalog** statt auf
+`/collection`. `DEFAULT_SIGNED_IN_PATH` ist der gemeinsame Rückfall von Login,
+E-Mail-Bestätigung und abgeschlossenem Onboarding; ein vor der Anmeldung gewünschtes Ziel
+(`?next=`) bleibt erhalten, Onboarding schlägt weiterhin alles. Bewusst **nicht**
+rollenabhängig.
+
+*Besitzfilter.* `Alle · Besitz · Fehlen` statt des Umschalters „Besitz anzeigen", der
+hervorgehoben war, während Besitz verborgen war. Vorgabe `Alle`, nichts gespeichert, nichts zu
+migrieren. Verengt denselben Pool wie Serie, Produktgruppe und Suche, also sind alle
+Kombinationen ohne Zusatzcode möglich. Für anonyme Besucher und für den Admin **gar nicht**
+sichtbar, nicht deaktiviert.
+
+*Shop auf der Katalogkarte.* Marktwert bleibt Information (Preis links, Elementchip rechts auf
+einer Zeile), der Kauf wird eine goldene Aktion in der Fußzeile — ohne Markennamen, nur Preis
+und Warenkorbsymbol. **Nur tatsächlich kaufbare Angebote erscheinen**: kein deaktivierter Knopf,
+kein „Nicht auf Lager". Eine Kondition kauft direkt, zwei zu verschiedenen Preisen zeigen
+„ab 4,49 €" und fragen beim Druck nach dem Zustand. Dieselbe Sprache auf der Detailseite. Kein
+Kaufknopf im Adminkatalog. Warenkorb-Architektur unverändert.
+
+
 **V6 gebaut, Migration `0007` NOCH NICHT ausgeführt (2026-09-06, ADR-0045/0046/0047).** Drei
 Verbesserungen für die tägliche Verwaltung. Der Code ist vollständig, getestet und gebaut;
 **er setzt `0007` voraus und läuft ohne sie nicht.**
@@ -163,7 +211,7 @@ wäre der Preis dagegen bekannt, deshalb bekommt `inventory_movements` zwei null
 
 **Lagerverwaltung Phase 1 gebaut und live (2026-09-06, ADR-0037).**
 `/admin/inventory` zeigt dem Betreiber Bestand, Reserviert, Verfügbar, Marktpreis,
-SkyIsles-Preis und Angebotsstatus je Position; Bestand ändern, Preis und Listing gehen direkt
+Shop-Preis (so seit V6 benannt) und Angebotsstatus je Position; Bestand ändern, Preis und Listing gehen direkt
 von der Karte. Die Navigation lautet für ihn **Katalog · Lager · Admin · Profil** — „Lager" ist
 ein eigenes Ziel mit der Bedingung `viewer.admin`, kein umbenannter Sammlungstab. Positionen
 entstehen **on demand** aus der ersten Bewegung; `quantity` wird nie zugewiesen, `reserved` von
@@ -472,6 +520,8 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Sichere Redirect-Validierung gegen offene Weiterleitungen | ✅ |
 | Katalog als Startseite `/`, ohne Konto nutzbar (ADR-0025) | ✅ |
 | Suche und Serienfilter clientseitig (ADR-0026) | ✅ |
+| Besitzfilter `Alle · Besitz · Fehlen`, nur für angemeldete Sammler | ✅ |
+| Kaufaktion auf der Katalogkarte, nur für kaufbare Angebote | ✅ |
 | Owned-Toggle, Mutation als Endzustand (ADR-0027) | ✅ |
 | Detailseite `/skylanders/<slug>` | ✅ |
 | `/collection` mit Fortschritt und Sammlungswert | ✅ |

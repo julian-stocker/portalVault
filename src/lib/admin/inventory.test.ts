@@ -119,14 +119,16 @@ describe("price and listing", () => {
     expect(code(CARD)).not.toMatch(/marketPrice\s*[:=][^=]/);
   });
 
-  it("leave 'can this be listed' to the database, and translate its refusal", () => {
-    // Until ADR-0045 the action could answer this itself: no sale_price
-    // meant no price. It cannot any more — whether a position has a price
-    // now depends on the market price and the shop-wide percentage, and only
-    // the database sees both. So it asks, and turns a refusal into German.
+  it("do not refuse a release for want of a price", () => {
+    // Two separate questions since ADR-0048: releasing something for the
+    // shop is a decision somebody can make before its market price is known,
+    // and shop_offers() simply leaves it out until there is one. So neither
+    // the action nor the database refuses any more.
     expect(actions).not.toContain("input.isListed && input.salePrice === null");
-    expect(actions).toContain("if (!result.ok && input.isListed) {");
-    expect(actions).toContain("de.inventory.listingNeedsPrice");
+    expect(actions).not.toContain("listingNeedsPrice");
+    const listing = readFileSync("supabase/migrations/0008_shop_listing_opt_out.sql", "utf8");
+    expect(listing).toContain("coalesce(p_is_listed, true)");
+    expect(listing).not.toContain("cannot list");
   });
 
   it("are independent of stock", () => {

@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   DEFAULT_SIGNED_IN_PATH,
   ONBOARDING_PATH,
+  SIGN_IN_PATH,
   destinationAfterSignIn,
   safeOrigin,
   safeRedirect,
@@ -122,5 +124,71 @@ describe("safeOrigin", () => {
 
   it("drops a smuggled path, query or fragment", () => {
     expect(safeOrigin("https://skyisles.example/evil?a=1#b")).toBe("https://skyisles.example");
+  });
+});
+
+describe("where a sign-in lands (V7)", () => {
+  it("sends everybody to the catalog by default", () => {
+    // It used to be /collection, which is a page an administrator never uses
+    // — their destinations are Katalog, Lager, Admin (ADR-0042). The catalog
+    // is the front page and the one place both roles work.
+    expect(DEFAULT_SIGNED_IN_PATH).toBe("/");
+    expect(destinationAfterSignIn(true, null)).toBe("/");
+    expect(destinationAfterSignIn(true, "")).toBe("/");
+  });
+
+  it("does not decide by role", () => {
+    // A landing page that forks on a permission is a second thing that can
+    // disagree with the navigation.
+    // The code, not the comment that explains what it used to be.
+    const source = readFileSync("src/lib/auth/redirect.ts", "utf8")
+      .split("\n")
+      .filter((line) => {
+        const trimmed = line.trimStart();
+        return !trimmed.startsWith("*") && !trimmed.startsWith("//") && !trimmed.startsWith("/*");
+      })
+      .join("\n");
+    expect(source).not.toContain("isAdmin");
+    expect(source).not.toContain("is_shop_admin");
+    expect(source).not.toContain("/collection");
+  });
+
+  it("still honours a page somebody asked for before signing in", () => {
+    expect(destinationAfterSignIn(true, "/collection")).toBe("/collection");
+    expect(destinationAfterSignIn(true, "/skylanders/bash")).toBe("/skylanders/bash");
+    expect(destinationAfterSignIn(true, "/?series=G&figure=SKY-0007")).toBe(
+      "/?series=G&figure=SKY-0007",
+    );
+  });
+
+  it("still sends somebody without a username to onboarding first", () => {
+    expect(destinationAfterSignIn(false, "/collection")).toBe(ONBOARDING_PATH);
+  });
+
+  it("still refuses an off-site target", () => {
+    expect(destinationAfterSignIn(true, "//evil.example")).toBe("/");
+    expect(destinationAfterSignIn(true, "https://evil.example")).toBe("/");
+  });
+
+  it("asks for no `next` when the catalog itself is the target", () => {
+    // /login?next=%2F would be a round trip to the same place.
+    expect(signInUrlFor("/")).toBe(SIGN_IN_PATH);
+    expect(signInUrlFor("/collection")).toBe("/login?next=%2Fcollection");
+  });
+
+  it("is the same value every redirect path falls back to", () => {
+    // login, email confirmation and finishing onboarding.
+    const actions = readFileSync("src/lib/auth/actions.ts", "utf8");
+    expect(actions).toContain("destinationAfterSignIn(hasUsername, String(formData.get(\"next\") ?? \"\"))");
+    expect(actions).toContain('safeRedirect(String(formData.get("next") ?? ""), DEFAULT_SIGNED_IN_PATH)');
+    const callback = readFileSync("src/app/auth/callback/route.ts", "utf8");
+    expect(callback).toContain("destinationAfterSignIn(hasUsername, null)");
+    // And no route hardcodes the old destination any more.
+    for (const file of [actions, callback]) expect(file).not.toContain('"/collection"');
+  });
+
+  it("leaves /dashboard pointing at the collection, for old links", () => {
+    const dashboard = readFileSync("src/app/(app)/dashboard/page.tsx", "utf8");
+    expect(dashboard).toContain('permanentRedirect("/collection")');
   });
 });

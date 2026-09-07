@@ -12,11 +12,18 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { CatalogCard } from "@/components/catalog/catalog-card";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
-import { OwnedToggle } from "@/components/catalog/owned-toggle";
+import { OwnershipFilter } from "@/components/catalog/ownership-filter";
 import { ProductGroupTabs } from "@/components/catalog/group-tabs";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
 import { groupTabs, matchesGroup, type CatalogGroup } from "@/lib/catalog/group";
-import { filterFigures, groupSearchResults, missingFigures } from "@/lib/catalog/search";
+import { filterFigures, groupSearchResults } from "@/lib/catalog/search";
+import {
+  DEFAULT_OWNERSHIP,
+  isOwnershipActive,
+  matchesOwnership,
+  offersOwnershipFilter,
+  type OwnershipMode,
+} from "@/lib/catalog/ownership";
 import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
@@ -118,18 +125,20 @@ export function CatalogView({
   }
 
   /**
-   * "Besitz anzeigen": display only, **on by default** (ADR-0038, V4.3).
+   * "Alle · Besitz · Fehlen": display only, `all` by default (V7).
    *
-   * On is the plain catalog, owned and missing together. Off hides what is
-   * already owned and leaves what is still missing. Never offered signed
-   * out, where it has no answer.
+   * Three named states replace the "Besitz anzeigen" toggle, which was
+   * highlighted while owned figures were hidden and therefore read as
+   * inverted. Exactly one segment is highlighted here, and it is always the
+   * one describing what is on screen.
    *
    * Deliberately not persisted: no `localStorage`, no cookie, no URL
-   * parameter. Every visit opens on the full catalog, which is what the
-   * catalog is for — and there is no stored value from the old, inverted
-   * V4.2 filter that could quietly come back meaning the opposite.
+   * parameter. Every visit opens on the whole catalog, which is what the
+   * catalog is for — and no stored value from an older filter can come back
+   * meaning something else. Nothing has to be migrated, because nothing was
+   * ever stored.
    */
-  const [showOwned, setShowOwned] = useState(true);
+  const [ownership, setOwnership] = useState<OwnershipMode>(DEFAULT_OWNERSHIP);
 
   /**
    * Visibility changed on this page, before the server has caught up.
@@ -156,11 +165,18 @@ export function CatalogView({
    */
   const pool = useMemo(() => {
     // One pool, narrowed in turn. Search and the cross-series search both
-    // read it, so neither needs to know that a group filter exists — the
-    // same trick the ownership filter uses (ADR-0041).
-    const owning = admin || showOwned ? figures : missingFigures(figures, owned);
+    // read it, so neither needs to know that a group filter or an ownership
+    // filter exists — that is what makes every combination work without any
+    // of them being written twice (ADR-0041).
+    //
+    // An administrator has no ownership state to narrow by (ADR-0042), so
+    // their pool skips the step rather than being given a third value that
+    // means "not applicable".
+    const owning = admin
+      ? figures
+      : figures.filter((figure) => matchesOwnership(figure, owned, ownership));
     return group === null ? owning : owning.filter((figure) => matchesGroup(figure, group));
-  }, [admin, showOwned, figures, owned, group]);
+  }, [admin, ownership, figures, owned, group]);
 
   /**
    * The second level's tabs, for the chosen game.
@@ -213,11 +229,12 @@ export function CatalogView({
   // The series is not resettable — one is always chosen — so what is left is
   // the search box and the ownership filter. "Besitz anzeigen" counts as
   // active only when it is off, because on is the resting state.
-  const filtered = query.trim() !== "" || (!admin && !showOwned) || group !== null;
+  const filtered =
+    query.trim() !== "" || (!admin && isOwnershipActive(ownership)) || group !== null;
 
   function reset() {
     setQuery("");
-    setShowOwned(true);
+    setOwnership(DEFAULT_OWNERSHIP);
     setGroup(null);
   }
 
@@ -314,7 +331,9 @@ export function CatalogView({
                 ? de.catalog.countInSeries(activeSeries.label, visible.length)
                 : de.catalog.figureCount(visible.length)}
           </p>
-          {signedIn && !admin ? <OwnedToggle active={showOwned} onChange={setShowOwned} /> : null}
+          {offersOwnershipFilter({ signedIn, admin }) ? (
+            <OwnershipFilter active={ownership} onSelect={setOwnership} />
+          ) : null}
         </div>
       </div>
 
@@ -338,7 +357,11 @@ export function CatalogView({
       ) : visible.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
           <p className="font-medium">
-            {!showOwned && !searching ? de.catalog.ownedEmpty : de.catalog.empty}
+            {ownership === "owned" && !searching
+              ? de.catalog.ownedEmpty
+              : ownership === "missing" && !searching
+                ? de.catalog.missingEmpty
+                : de.catalog.empty}
           </p>
           <p className="text-sm text-muted">{de.catalog.emptyHint}</p>
           {filtered ? (

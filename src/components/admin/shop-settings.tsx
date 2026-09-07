@@ -17,8 +17,12 @@ import { useRouter } from "next/navigation";
 import { setShopPercentage } from "@/lib/admin/actions";
 import { MAX_PERCENTAGE, MIN_PERCENTAGE } from "@/lib/admin/inventory-model";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { automaticShopPrice } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+
+/** The commonest market price in the catalog, so the example is recognisable. */
+const EXAMPLE = 4.99;
 
 export function ShopSettings({ percentage }: { percentage: number }) {
   const router = useRouter();
@@ -87,7 +91,7 @@ export function ShopSettings({ percentage }: { percentage: number }) {
           they will recognise on a card. */}
       <p className="mt-3 text-sm text-muted tabular-nums">
         {valid
-          ? `${formatPrice(4.99)} → ${formatPrice(Math.round(4.99 * parsed) / 100)}`
+          ? `${formatPrice(EXAMPLE)} → ${formatPrice(automaticShopPrice(EXAMPLE, parsed))}`
           : de.admin.percentageRange}
       </p>
       <p className="mt-1 text-[11px] text-muted">

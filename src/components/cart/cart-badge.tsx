@@ -19,28 +19,8 @@
 import Link from "next/link";
 
 import { useCart } from "@/components/cart/use-cart";
+import { CartGlyph } from "@/components/shop/cart-glyph";
 import { de } from "@/lib/i18n/de";
-
-/** A basket outline. Decorative; the label carries the meaning. */
-function CartGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-5 w-5"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M3 6h18l-1.8 9.6a2 2 0 0 1-2 1.6H6.8a2 2 0 0 1-2-1.6L3 6Z" />
-      <path d="M8.5 6 10 2.75M15.5 6 14 2.75" />
-      <circle cx="9" cy="20.25" r="1.25" />
-      <circle cx="16" cy="20.25" r="1.25" />
-    </svg>
-  );
-}
 
 export function CartBadge() {
   const { count } = useCart();
@@ -54,7 +34,7 @@ export function CartBadge() {
         "text-on-deep-muted transition-colors hover:text-on-deep"
       }
     >
-      <CartGlyph />
+      <CartGlyph className="h-5 w-5" />
       {count > 0 ? (
         <span
           className={

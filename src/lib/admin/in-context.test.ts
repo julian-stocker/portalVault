@@ -168,8 +168,13 @@ describe("the collector's catalog is untouched", () => {
   const view = source(VIEW);
 
   it("keeps the ownership filter for collectors and hides it from an admin", () => {
-    expect(view).toContain("signedIn && !admin ? <OwnedToggle");
-    expect(view).toContain("admin || showOwned ? figures : missingFigures(figures, owned)");
+    // Three named states since V7; the condition that decides who is offered
+    // it lives in one function rather than in a JSX ternary (ADR-0042).
+    expect(view).toContain("offersOwnershipFilter({ signedIn, admin })");
+    expect(view).toContain("<OwnershipFilter");
+    // An administrator's pool skips the narrowing entirely rather than being
+    // given a third value meaning "not applicable".
+    expect(view).toMatch(/const owning = admin\s*\n?\s*\? figures/);
   });
 
   it("keeps collect and remove on a collector's card", () => {
@@ -306,7 +311,9 @@ describe("the product group sub-navigation", () => {
   });
 
   it("counts as an active filter, so the reset is offered", () => {
-    expect(view).toContain('const filtered = query.trim() !== "" || (!admin && !showOwned) || group !== null');
+    expect(view).toContain(
+      'query.trim() !== "" || (!admin && isOwnershipActive(ownership)) || group !== null',
+    );
     const reset = view.slice(view.indexOf("function reset()"), view.indexOf("}", view.indexOf("function reset()")));
     expect(reset).toContain("setGroup(null)");
   });

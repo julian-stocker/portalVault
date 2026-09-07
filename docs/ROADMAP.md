@@ -298,10 +298,12 @@ manuellem Override je Position. Kein abgeleiteter Preis wird gespeichert, also w
 Änderung sofort auf alle automatisch bepreisten Positionen. Die Rabattstufen weiter unten bleiben
 unumgesetzt.
 
-**Umgesetzt (2026-09-06, ADR-0043).** Auf der Karte steht der SkyIsles-Preis unter dem Marktwert
-(„SkyIsles € 9,90", bei mehreren Zuständen „ab € 9,90"), auf der Figurenseite eine Zeile je
-Zustand mit „In den Warenkorb". Bei Bestand 0 bleibt die gelistete Position sichtbar und sagt
-„Nicht auf Lager". Eine **Stückzahl wird nie** angezeigt.
+**Umgesetzt (Stand 2026-09-07, ADR-0043 mit dem V7-Nachtrag).** Der Marktwert bleibt Information
+auf der Karte; das Angebot ist eine goldene Kaufaktion darunter, mit Preis und Warenkorbsymbol
+und **ohne** Markennamen. Bei mehreren kaufbaren Zuständen „ab € 9,90" mit Auswahl beim Druck.
+Ist gerade nichts kaufbar, erscheint **gar keine** Shopfläche — kein „Nicht auf Lager" im
+Sammlerkatalog. Auf der Figurenseite eine Zeile je kaufbarem Zustand. Eine **Stückzahl wird nie**
+angezeigt.
 
 **Preisebenen (ADR-0033).** Referenz-Marktwert → Shop-Basispreis → automatischer Lager-Rabatt
 → optionaler Coupon → finaler Bestellpreis. `skylanders.market_price` bleibt der

@@ -146,10 +146,11 @@ export default async function FigurePage({ params }: Params) {
             </span>
           </div>
 
-          {/* What SkyIsles asks, if it carries this one (ADR-0043). Under
-              the market value and visually apart from it: the first is what
-              the figure is worth, the second is an offer (ADR-0033). Absent
-              entirely for the ~550 figures that are not stocked. */}
+          {/* What can be bought, if anything (ADR-0043). Under the market
+              value and visually apart from it: the first is what the figure
+              is worth, the second is an offer (ADR-0033). Absent entirely
+              when nothing is buyable — no disabled action, no "sold out"
+              (V7). */}
           <OfferPanel
             offers={offersFor(offers, figure.skyId)}
             name={figure.displayName}

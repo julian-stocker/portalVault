@@ -8,8 +8,27 @@
 
 /** Where a signed-in user without a username has to go first. */
 export const ONBOARDING_PATH = "/onboarding";
-/** Default landing page after signing in: the visitor's own collection. */
-export const DEFAULT_SIGNED_IN_PATH = "/collection";
+/**
+ * Default landing page after signing in: the catalog.
+ *
+ * It used to be `/collection`, which was right while a collector was the only
+ * kind of account. It is not right for the operator: an administrator has no
+ * collection in their workflow at all — their destinations are Katalog,
+ * Lager, Admin (ADR-0042) — and landing them on a page they never use was the
+ * product telling them they had opened the wrong app.
+ *
+ * The catalog is the answer for both, and not as a compromise: it is the
+ * front page (ADR-0025), it works signed out, and it is where both roles do
+ * their work — one collects from it, the other edits it.
+ *
+ * Deliberately **not** role-dependent. A landing page that forks on a
+ * permission is a second thing that can disagree with the navigation, and it
+ * would send the two accounts of the same person to two different places.
+ *
+ * This is only the fallback. Somebody who asked for a page before signing in
+ * still gets that page — see `safeRedirect`.
+ */
+export const DEFAULT_SIGNED_IN_PATH = "/";
 /** Where the middleware sends anonymous visitors. */
 export const SIGN_IN_PATH = "/login";
 

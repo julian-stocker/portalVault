@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
+  buyableOffers,
   findOffer,
   offerIndex,
   offerRecord,
@@ -76,8 +77,25 @@ describe("what a card says", () => {
     expect(summary).toEqual({ kind: "single", price: 19, condition: "boxed" });
   });
 
-  it("says 'not in stock' rather than nothing when it is carried but empty", () => {
-    expect(summarizeOffers([offer({ available: false })])).toEqual({ kind: "soldOut" });
+  it("says nothing at all when nothing can be bought", () => {
+    // V7: a listed but empty position gets no shop area on a catalog card —
+    // no disabled button, no "Nicht auf Lager", no greyed-out surface. The
+    // collector catalog is a catalog of objects; sold-out state belongs on a
+    // shop surface of its own, later.
+    expect(summarizeOffers([offer({ available: false })])).toEqual({ kind: "none" });
+    expect(summarizeOffers([
+      offer({ condition: "loose", available: false }),
+      offer({ condition: "boxed", price: 19, available: false }),
+    ])).toEqual({ kind: "none" });
+  });
+
+  it("offers only what is actually buyable", () => {
+    const mixed = [
+      offer({ condition: "loose", price: 5, available: false }),
+      offer({ condition: "boxed", price: 19, available: true }),
+    ];
+    expect(buyableOffers(mixed).map((o) => o.condition)).toEqual(["boxed"]);
+    expect(buyableOffers([offer({ available: false })])).toEqual([]);
   });
 });
 

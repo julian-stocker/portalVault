@@ -46,9 +46,15 @@ export const de = {
      * Anzeigefilter im Katalog-Sektionskopf. Nur für angemeldete Nutzer.
      * An (Standard) = alles zeigen, aus = nur Fehlendes (ADR-0038, V4.3).
      */
-    ownedFilter: "Besitz anzeigen",
+    /** Der Besitzfilter im Katalog: drei benannte Zustände, kein Umschalter. */
+    ownershipNav: "Besitz filtern",
+    ownershipAll: "Alle",
+    ownershipOwned: "Besitz",
+    ownershipMissing: "Fehlen",
     /** Wenn der Filter aus ist und trotzdem nichts fehlt. */
-    ownedEmpty: "Aus dieser Serie besitzt du bereits alles.",
+    /** „Fehlen" ist leer: alles vorhanden. */
+    ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",
+    missingEmpty: "Aus dieser Serie besitzt du bereits alles.",
     empty: "Keine Figuren gefunden.",
     emptyHint: "Versuche einen anderen Namen oder eine andere Serie.",
     /** Serie bleibt bestehen — zurückgesetzt werden Suche und Besitzfilter. */
@@ -301,22 +307,22 @@ export const de = {
     salePrice: "Shop-Preis",
     priceAutomatic: (n: string) => `Automatisch · ${n} %`,
     priceManual: "Manuell",
-    priceNoBasis: "Kein Marktpreis",
+    priceNoBasis: "Kein Shop-Preis",
     priceModeAuto: (price: string) => `Automatisch (${price})`,
     priceModeManual: "Manueller Preis",
     priceResetAuto: "Auf Automatik zurücksetzen",
     noPrice: "kein Preis",
-    listed: "Gelistet",
-    notListed: "Nicht gelistet",
-    listedShort: "Angebot",
+    listed: "Im Shop",
+    notListed: "Nicht im Shop",
+    listedShort: "Im Shop",
     stockFilter: "Bestand",
     stockAll: "Alle",
     stockIn: "Auf Lager",
     stockOut: "Nicht auf Lager",
-    listingFilter: "Angebot",
+    listingFilter: "Shop",
     listingAll: "Alle",
-    listingOn: "Gelistet",
-    listingOff: "Nicht gelistet",
+    listingOn: "Im Shop",
+    listingOff: "Nicht im Shop",
     seriesAll: "Alle Serien",
     changeStock: "Weitere Buchung",
     increase: "Bestand um 1 erhöhen",
@@ -352,8 +358,9 @@ export const de = {
     deltaRequired: "Die Veränderung muss eine Zahl ungleich null sein.",
     costPositive: "Stückkosten müssen größer als 0 sein.",
     pricePositive: "Der Preis muss größer als 0 sein.",
-    listingNeedsPrice:
-      "Ohne Marktpreis und ohne manuellen Preis kann nichts gelistet werden.",
+    /** „Im Shop" heißt freigegeben, nicht „gerade lieferbar" (ADR-0048). */
+    soldOutHint: "Aktuell ausverkauft",
+    noPriceHint: "Kein Shop-Preis — erscheint nicht im Shop.",
     wouldGoNegative: "Der Bestand würde unter das Reservierte fallen.",
   },
 
@@ -365,17 +372,22 @@ export const de = {
    * Preis und ob etwas lieferbar ist. Nie eine Stückzahl (ADR-0037).
    */
   shop: {
-    /** Vor dem Preis, damit ein Shop-Preis nie mit dem Marktwert verwechselt wird. */
-    offerPrice: (price: string) => `SkyIsles ${price}`,
-    /** Mehrere Zustände zu verschiedenen Preisen. */
+    /**
+     * Auf der Karte steht nur noch der Preis — der Markenname stand vorher
+     * davor („SkyIsles 4,49 €") und war überflüssig: der Kontext ist die
+     * Website selbst.
+     */
     offerFrom: (price: string) => `ab ${price}`,
-    soldOut: "Nicht auf Lager",
     conditionLoose: "Lose",
     conditionBoxed: "OVP",
     addToCart: "In den Warenkorb",
-    addToCartFor: (name: string) => `${name} in den Warenkorb legen`,
+    addToCartFor: (name: string, price: string) =>
+      `${name} für ${price} in den Warenkorb legen`,
+    /** Wenn mehrere Zustände kaufbar sind, wird erst der Zustand gewählt. */
+    chooseCondition: "Zustand wählen",
+    chooseConditionFor: (name: string) => `Zustand für ${name} wählen`,
     inCart: "Im Warenkorb",
-    offerHeading: "Angebot von SkyIsles",
+    offerHeading: "Angebot",
   },
 
   cart: {

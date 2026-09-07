@@ -61,30 +61,74 @@ export function sortOffers(offers: readonly Offer[]): Offer[] {
 }
 
 /**
+ * What the automatic price of a figure would be — exactly as the database
+ * computes it.
+ *
+ * THIS IS NOT THE PRICE THAT IS CHARGED. `public.shop_price()` is, and it is
+ * the only thing that ever decides what an offer costs (ADR-0045). This
+ * mirror exists for two jobs that cannot ask the database:
+ *
+ *   the admin card   "what would this cost without its manual override?"
+ *   verify:shop      an independent expectation to compare the projection
+ *                    against — one that must not simply call shop_price(),
+ *                    or the comparison would prove nothing
+ *
+ * EXACT, NOT FLOATING POINT. `16.65 × 90 %` is 14.985, which rounds to 14.99;
+ * `Math.round(16.65 * 90) / 100` gives 14.98, because 16.65 × 90 is
+ * 1498.4999999999998 in binary. That was a real defect in the verifier and in
+ * the admin preview, found by the verifier's own price check on live data.
+ *
+ * So the arithmetic runs on integers: cents × hundredths-of-a-percent,
+ * divided by 10 000, rounded half away from zero — which is what
+ * `round(numeric, 2)` does in Postgres. Values arrive with at most two
+ * decimals (`numeric(10,2)`, `numeric(6,2)`), so scaling them by 100 and
+ * rounding recovers the exact integer they represent.
+ */
+export function automaticShopPrice(
+  marketPrice: number | null,
+  percentage: number | null,
+): number | null {
+  if (marketPrice === null || percentage === null) return null;
+  if (!Number.isFinite(marketPrice) || !Number.isFinite(percentage)) return null;
+  if (marketPrice <= 0 || percentage <= 0) return null;
+
+  const cents = Math.round(marketPrice * 100);
+  const hundredths = Math.round(percentage * 100);
+  // Both operands are positive, so "half away from zero" is "+ half, floor".
+  return Math.floor((cents * hundredths + 5000) / 10000) / 100;
+}
+
+/** What can actually be bought right now. Listed but empty is not an offer. */
+export function buyableOffers(offers: readonly Offer[]): Offer[] {
+  return sortOffers(offers.filter((offer) => offer.available));
+}
+
+/**
  * What a card should say about a figure, if anything.
  *
- * `none`        SkyIsles does not carry it. The card says nothing at all —
- *               most of the 561 are in this state and a "nicht im Angebot"
- *               line on all of them would be noise.
- * `single`      exactly one buyable offer: the price, plainly.
- * `from`        more than one buyable offer, at different prices: "ab …".
- *               Two conditions at the same price is still a single price,
- *               so it is `single` — "ab 9,90 €" beside nothing but 9,90 €
- *               reads as though something cheaper were being withheld.
- * `soldOut`     carried, but nothing available. "Nicht auf Lager" is more
- *               use than silence: it says the shop has this article.
+ * `none`    nothing can be bought right now. The card shows **no shop area
+ *           at all** — not a disabled button, not "Nicht auf Lager", not a
+ *           greyed-out surface. The catalog is a collector's catalog first
+ *           (ADR-0025); an article that cannot be bought is an article the
+ *           collector catalog has nothing to say about, and most of the 561
+ *           are in that state. Sold-out and listing status belong on a shop
+ *           surface of their own, later.
+ * `single`  one price to pay — either a single buyable condition, or two at
+ *           the same price. Adding is one tap.
+ * `from`    buyable at more than one price: "ab 4,49 €", and the condition
+ *           is chosen when the button is pressed.
+ *
+ * Two conditions at the same price stays `single`: "ab 4,49 €" beside
+ * nothing cheaper than 4,49 € reads as though something were being withheld.
  */
 export type OfferSummary =
   | { kind: "none" }
   | { kind: "single"; price: number; condition: OfferCondition }
-  | { kind: "from"; price: number }
-  | { kind: "soldOut" };
+  | { kind: "from"; price: number };
 
 export function summarizeOffers(offers: readonly Offer[]): OfferSummary {
-  if (offers.length === 0) return { kind: "none" };
-
   const buyable = offers.filter((offer) => offer.available);
-  if (buyable.length === 0) return { kind: "soldOut" };
+  if (buyable.length === 0) return { kind: "none" };
 
   const cheapest = buyable.reduce((low, offer) => (offer.price < low.price ? offer : low));
   const onePrice = buyable.every((offer) => offer.price === cheapest.price);

@@ -29,6 +29,7 @@ import { StockDialog } from "@/components/admin/stock-dialog";
 import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
 import type { InventoryPosition, Movement } from "@/lib/admin/inventory-model";
+import { automaticShopPrice } from "@/lib/shop/offer";
 import { formatNumber, formatPrice } from "@/lib/format";
 import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
@@ -65,16 +66,12 @@ export function InventoryCard({
    * What this position would cost without its override.
    *
    * Only needed while an override IS set — otherwise `effectivePrice` already
-   * is the automatic price and the database computed it. This is the one
-   * place money is worked out in the browser, it never leaves the preview,
-   * and it is rounded the same way `public.shop_price` rounds: to cents,
-   * half away from zero, on a value scaled to integers so no binary fraction
-   * can drift.
+   * is the automatic price and the database computed it. `automaticShopPrice`
+   * mirrors `public.shop_price` exactly, on integers: an earlier version
+   * multiplied floats here and showed 14,98 € where the shop charges
+   * 14,99 € (ADR-0045).
    */
-  const automaticPrice =
-    figure?.marketPrice == null
-      ? null
-      : Math.round(figure.marketPrice * percentage) / 100;
+  const automaticPrice = automaticShopPrice(figure?.marketPrice ?? null, percentage);
 
   const conditionLabel =
     position.condition === "loose" ? de.inventory.conditionLoose : de.inventory.conditionBoxed;
@@ -116,23 +113,40 @@ export function InventoryCard({
             <span>· {conditionLabel}</span>
           </p>
         </div>
-        {/* The offer state, and the control that changes it. Independent of
-            stock: "listed but sold out" and "in stock, not offered" are both
-            real (ADR-0037). */}
-        <button
-          type="button"
-          onClick={() => save({ isListed: !position.isListed })}
-          aria-pressed={position.isListed}
-          aria-busy={pending || undefined}
-          className={
-            "min-h-9 shrink-0 rounded-full px-3 text-xs font-medium whitespace-nowrap ring-1 " +
-            (position.isListed
-              ? "bg-accent-subtle text-accent ring-accent/60"
-              : "bg-surface text-muted ring-border/70")
-          }
-        >
-          {position.isListed ? de.inventory.listed : de.inventory.notListed}
-        </button>
+        {/* The shop release, and the control that changes it (ADR-0048).
+            "Im Shop" means released, never "in stock": the two are separate
+            questions and both states of each are real — released and sold
+            out, in stock and deliberately withheld. */}
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <button
+            type="button"
+            onClick={() => save({ isListed: !position.isListed })}
+            aria-pressed={position.isListed}
+            aria-busy={pending || undefined}
+            className={
+              "min-h-9 shrink-0 rounded-full px-3 text-xs font-medium whitespace-nowrap ring-1 " +
+              (position.isListed
+                ? "bg-accent-subtle text-accent ring-accent/60"
+                : "bg-surface text-muted ring-border/70")
+            }
+          >
+            {position.isListed ? de.inventory.listed : de.inventory.notListed}
+          </button>
+
+          {/* Why a released position is nevertheless not on sale. Said here
+              rather than by dimming the switch, which would read as "the
+              release is off" — it is not (ADR-0048). */}
+          {position.isListed && position.available <= 0 ? (
+            <span className="text-[11px] leading-tight text-muted">
+              {de.inventory.soldOutHint}
+            </span>
+          ) : null}
+          {position.isListed && position.effectivePrice === null ? (
+            <span className="text-[11px] leading-tight text-danger">
+              {de.inventory.noPriceHint}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {/* The daily control, given the room it deserves: the number and the

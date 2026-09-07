@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import {
+  DEFAULT_OWNERSHIP,
+  isOwnershipActive,
+  offersOwnershipFilter,
+  OWNERSHIP_MODES,
+} from "@/lib/catalog/ownership";
 import { de } from "@/lib/i18n/de";
 
 /**
@@ -94,25 +100,43 @@ describe("the German surface", () => {
 describe("the catalog's ownership filter", () => {
   const CATALOG = "src/components/catalog/catalog-view.tsx";
 
-  it("starts on: the resting state is the whole catalog (V4.3)", () => {
-    // On means "show what I own as well", which is simply the catalog. The
-    // old V4.2 filter was the inverse and defaulted to off.
-    expect(source(CATALOG)).toMatch(/const \[showOwned, setShowOwned\] = useState\(true\)/);
+  it("starts on 'Alle': the resting state is the whole catalog", () => {
+    expect(source(CATALOG)).toMatch(
+      /const \[ownership, setOwnership\] = useState<OwnershipMode>\(DEFAULT_OWNERSHIP\)/,
+    );
+    expect(DEFAULT_OWNERSHIP).toBe("all");
   });
 
-  it("keeps no stored preference, so no old inverted value can come back", () => {
+  it("has three named states, never an inverted toggle", () => {
+    // The predecessor lit up while owned figures were *hidden*. Three states
+    // cannot be inverted: exactly one is highlighted and it is the one that
+    // describes what is on screen.
+    expect([...OWNERSHIP_MODES]).toEqual(["all", "owned", "missing"]);
+    const catalog = source(CATALOG);
+    expect(catalog).not.toContain("showOwned");
+    expect(catalog).not.toContain("OwnedToggle");
+  });
+
+  it("keeps no stored preference, so no old value can come back", () => {
     const catalog = source(CATALOG);
     // Reads and writes, not the comment that explains why there are none.
     expect(catalog).not.toMatch(/(local|session)Storage\.(get|set|remove)Item|document\.cookie/);
     expect(catalog).not.toContain("ownedOnly");
+    // And nothing reads it back out of the URL either — `series`, `q`,
+    // `group` and `figure` are the only parameters, all of them for
+    // restoring a view after signing in (ADR-0027).
+    expect(catalog).not.toMatch(/params\.(owned|ownership)/);
   });
 
-  it("counts as an active filter only while it is off", () => {
+  it("counts as an active filter only when it is not 'Alle'", () => {
     // And only for a collector: an administrator has no ownership filter at
     // all, so it can never be the thing a reset would undo (ADR-0042).
     expect(source(CATALOG)).toContain(
-      'const filtered = query.trim() !== "" || (!admin && !showOwned)',
+      'query.trim() !== "" || (!admin && isOwnershipActive(ownership))',
     );
+    expect(isOwnershipActive("all")).toBe(false);
+    expect(isOwnershipActive("owned")).toBe(true);
+    expect(isOwnershipActive("missing")).toBe(true);
   });
 
   it("sees an ownership change from a card in the same frame", () => {
@@ -126,14 +150,22 @@ describe("the catalog's ownership filter", () => {
     // Signed out there is no answer to it; as an administrator there is no
     // question — the business account manages the catalog rather than
     // collecting from it (ADR-0042).
-    expect(source(CATALOG)).toMatch(/signedIn && !admin \? <OwnedToggle/);
+    expect(source(CATALOG)).toMatch(/offersOwnershipFilter\(\{ signedIn, admin \}\)/);
+    expect(offersOwnershipFilter({ signedIn: true, admin: false })).toBe(true);
+    expect(offersOwnershipFilter({ signedIn: false, admin: false })).toBe(false);
+    expect(offersOwnershipFilter({ signedIn: true, admin: true })).toBe(false);
+    expect(offersOwnershipFilter({ signedIn: false, admin: true })).toBe(false);
   });
 
   it("narrows the pool, so search and cross-series results cannot forget it", () => {
     const catalog = source(CATALOG);
-    expect(catalog).toContain("missingFigures(figures, owned)");
+    expect(catalog).toContain("matchesOwnership(figure, owned, ownership)");
     expect(catalog).toContain("filterFigures(pool,");
     expect(catalog).toContain("groupSearchResults(pool,");
+  });
+
+  it("leaves an administrator's pool untouched", () => {
+    expect(source(CATALOG)).toMatch(/const owning = admin\s*\n?\s*\? figures/);
   });
 
   it("has no Specials toggle, because nothing in the data says what a special is", () => {

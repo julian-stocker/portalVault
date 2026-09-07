@@ -209,10 +209,55 @@ async function main(): Promise<void> {
     check("the catalog's market price is untouched", market.data?.market_price === null,
       String(market.data?.market_price));
 
-    const listedWithoutPrice = await a.rpc("set_shop_listing", {
+    // Release and buyability are two questions (ADR-0048). The fixture figure
+    // has no market price at all, so this position has no effective price —
+    // and may still be released. What must not happen is that it becomes a
+    // public offer.
+    const beforeRelease = await admin
+      .from("shop_inventory")
+      .select("id, quantity, reserved, sale_price")
+      .eq("sky_id", SKY)
+      .eq("condition", "boxed")
+      .single();
+    const movementsBefore = await admin
+      .from("inventory_movements")
+      .select("id", { count: "exact", head: true })
+      .eq("inventory_id", beforeRelease.data?.id ?? 0);
+
+    const releasedWithoutPrice = await a.rpc("set_shop_listing", {
       p_sky_id: SKY, p_condition: "boxed", p_sale_price: null, p_is_listed: true,
     });
-    check("refuses a listing without a price", listedWithoutPrice.error !== null);
+    check("a position with no price basis may still be released",
+      releasedWithoutPrice.error === null, releasedWithoutPrice.error?.message ?? "");
+
+    const afterRelease = await admin
+      .from("shop_inventory")
+      .select("id, quantity, reserved, sale_price, is_listed")
+      .eq("sky_id", SKY)
+      .eq("condition", "boxed")
+      .single();
+    check("it is recorded as released", afterRelease.data?.is_listed === true);
+    check("its stock is untouched",
+      afterRelease.data?.quantity === beforeRelease.data?.quantity &&
+      afterRelease.data?.reserved === beforeRelease.data?.reserved,
+      `${beforeRelease.data?.quantity} -> ${afterRelease.data?.quantity}`);
+    check("it still has no manual price", afterRelease.data?.sale_price === null);
+
+    const movementsAfter = await admin
+      .from("inventory_movements")
+      .select("id", { count: "exact", head: true })
+      .eq("inventory_id", beforeRelease.data?.id ?? 0);
+    check("releasing wrote no movement — listing is not a stock change",
+      movementsAfter.count === movementsBefore.count,
+      `${movementsBefore.count} -> ${movementsAfter.count}`);
+
+    // The separation, stated as the thing that actually matters.
+    const publicOffers = ((await anonClient().rpc("shop_offers")).data ?? []) as {
+      sky_id: string; condition: string;
+    }[];
+    check("released is not the same as buyable: no public offer without a price",
+      !publicOffers.some((o) => o.sky_id === SKY && o.condition === "boxed"),
+      `${publicOffers.length} offers, none for ${SKY}/boxed`);
 
     const history = await a.rpc("admin_inventory_movements", {
       p_inventory_id: after?.inventory_id ?? 0,

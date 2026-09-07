@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import { isValidPercentage, MAX_PERCENTAGE, MIN_PERCENTAGE } from "@/lib/admin/inventory-model";
+import { automaticShopPrice } from "@/lib/shop/offer";
 
 /**
  * Automatic shop prices (ADR-0045).
@@ -144,10 +145,18 @@ describe("listing", () => {
     expect(code(FOUNDATION)).toContain("constraint shop_inventory_listed_needs_price");
   });
 
-  it("refuses a listing with no effective price, in the function", () => {
+  it("refused a listing with no effective price — until 0008 separated the two", () => {
+    // 0007 put the guard in set_shop_listing(). ADR-0048 took it back out:
+    // releasing something for the shop is a decision that can precede a
+    // price, and shop_offers() is where the rule belongs. Both halves are
+    // asserted so the history stays legible.
     const fn = body(source, "create or replace function public.set_shop_listing");
-    expect(fn).toContain("public.shop_price(p_sale_price, s.market_price, st.price_percentage)");
     expect(fn).toContain("if coalesce(p_is_listed, false) and v_effective is null then");
+
+    const listing = code("supabase/migrations/0008_shop_listing_opt_out.sql");
+    const now = body(listing, "create or replace function public.set_shop_listing");
+    expect(now).not.toContain("v_effective");
+    expect(now).toContain("coalesce(p_is_listed, true)");
   });
 
   it("still never touches stock", () => {
@@ -202,12 +211,50 @@ describe("the application does not compute money", () => {
     expect(shop).not.toContain("market");
   });
 
-  it("computes only a preview, and only where an override hides the automatic price", () => {
+  it("computes only a preview, through the one exact mirror", () => {
     // One exception, deliberate and named: the card shows what a position
-    // would cost without its override. It is never saved and never charged.
+    // would cost without its override. It is never saved and never charged,
+    // and it goes through `automaticShopPrice` — the card does no arithmetic
+    // of its own.
     const card = app("src/components/admin/inventory-card.tsx");
-    const matches = card.match(/Math\.round/g) ?? [];
-    expect(matches).toHaveLength(1);
-    expect(card).toContain("Math.round(figure.marketPrice * percentage) / 100");
+    expect(card).toContain("automaticShopPrice(figure?.marketPrice ?? null, percentage)");
+    expect(card).not.toContain("Math.round");
+    expect(card).not.toMatch(/marketPrice\s*\*/);
+
+    // And so does the settings example.
+    const settings = app("src/components/admin/shop-settings.tsx");
+    expect(settings).toContain("automaticShopPrice(EXAMPLE, parsed)");
+    expect(settings).not.toContain("Math.round");
+  });
+
+  it("mirrors the database exactly, on integers rather than floats", () => {
+    // The case that found the bug: 16.65 x 90 % is 14.985, which rounds to
+    // 14.99. In binary, 16.65 * 90 is 1498.4999999999998, and the old
+    // float version answered 14.98 — a price the shop does not charge.
+    expect(automaticShopPrice(16.65, 90)).toBe(14.99);
+    expect(automaticShopPrice(4.99, 90)).toBe(4.49);
+    expect(automaticShopPrice(12.35, 90)).toBe(11.12);
+    expect(automaticShopPrice(16.05, 90)).toBe(14.45);
+    expect(automaticShopPrice(10, 85)).toBe(8.5);
+    expect(automaticShopPrice(19.99, 100)).toBe(19.99);
+    expect(automaticShopPrice(10, 150)).toBe(15);
+  });
+
+  it("answers null wherever the database answers NULL", () => {
+    expect(automaticShopPrice(null, 90)).toBeNull();
+    expect(automaticShopPrice(4.99, null)).toBeNull();
+    expect(automaticShopPrice(0, 90)).toBeNull();
+    expect(automaticShopPrice(4.99, 0)).toBeNull();
+    expect(automaticShopPrice(Number.NaN, 90)).toBeNull();
+  });
+
+  it("is the same mirror the verifier compares against", () => {
+    // verify:shop must not call shop_price() — that would compare the
+    // database with itself — but it must be exact.
+    const verifier = app("tools/verify-shop.mts");
+    expect(verifier).toContain("automaticShopPrice(market, percentage)");
+    expect(verifier).not.toContain("Math.round(market");
+    // The code, not the comment that explains why it must not.
+    expect(verifier).not.toContain("shop_price");
   });
 });

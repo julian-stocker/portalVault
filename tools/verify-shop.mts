@@ -27,6 +27,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { isCollectibleCategory, NON_COLLECTIBLE_CATEGORIES } from "../src/lib/catalog/collectible.ts";
+import { automaticShopPrice } from "../src/lib/shop/offer.ts";
 
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
@@ -166,11 +167,20 @@ async function main(): Promise<void> {
     check("nothing that should be offered is missing", missing.length === 0, missing.join(", "));
     check("nothing is offered that should not be", extra.length === 0, extra.join(", "));
 
+    // The effective price, not the stored column: `sale_price` is only the
+    // manual override, and most offers have none (ADR-0045).
     const wrongPrice = [...expected.entries()].filter(([k, row]) => {
       const seen = actual.get(k);
       return seen !== undefined && Number(seen.price) !== row.price;
     });
-    check("every price matches the stored one", wrongPrice.length === 0);
+    check(
+      "every offer carries the effective shop price",
+      wrongPrice.length === 0,
+      wrongPrice
+        .slice(0, 3)
+        .map(([k, row]) => `${k}: offered ${actual.get(k)?.price}, expected ${row.price}`)
+        .join(" · "),
+    );
 
     const wrongAvailability = [...expected.entries()].filter(([k, row]) => {
       const seen = actual.get(k);
@@ -179,7 +189,83 @@ async function main(): Promise<void> {
     check("every availability flag matches the stock", wrongAvailability.length === 0);
   }
 
-  heading("4. The category rule is one rule");
+  heading("4. Shop release — what is offered, and what is held back");
+  {
+    // Read with the service role, so this works before migration 0008 has
+    // introduced admin_shop_listing_audit() as well as after it.
+    const [positions, figures, categories] = await Promise.all([
+      service.from("shop_inventory").select("sky_id, condition, is_listed, quantity, reserved, sale_price"),
+      service.from("skylanders").select("sky_id, name, is_active, catalog_visible, category_id, market_price"),
+      service.from("categories").select("id, name"),
+    ]);
+    for (const result of [positions, figures, categories]) {
+      if (result.error) throw new Error(result.error.message);
+    }
+
+    const categoryName = new Map(
+      (categories.data ?? []).map((row) => [row.id as number, row.name as string]),
+    );
+    const figure = new Map((figures.data ?? []).map((row) => [row.sky_id as string, row]));
+
+    /** Why a position may not be offered at all, or null when it may. */
+    function ineligible(skyId: string): string | null {
+      const f = figure.get(skyId);
+      if (!f) return "no catalog row";
+      if (!f.is_active) return "inactive figure";
+      if (!f.catalog_visible) return "editorially hidden";
+      if (!isCollectibleCategory(categoryName.get(f.category_id as number) ?? "")) {
+        return "not a collectible";
+      }
+      return null;
+    }
+
+    const rows = positions.data ?? [];
+    const eligible = rows.filter((row) => ineligible(row.sky_id as string) === null);
+    const released = eligible.filter((row) => row.is_listed);
+    const optedOut = eligible.filter((row) => !row.is_listed);
+
+    console.log(`  positions            ${rows.length}`);
+    console.log(`  eligible for the shop ${eligible.length}`);
+    console.log(`  released (is_listed)  ${released.length}`);
+    console.log(`  deliberate opt-outs   ${optedOut.length}`);
+
+    const reasons = new Map<string, number>();
+    for (const row of rows) {
+      const why = ineligible(row.sky_id as string);
+      if (why) reasons.set(why, (reasons.get(why) ?? 0) + 1);
+    }
+    for (const [why, count] of reasons) console.log(`  held back: ${why.padEnd(20)} ${count}`);
+
+    // The shop is opt-out (ADR-0048): an eligible position that nobody
+    // switched off is released. Before 0008 this is the work still to do.
+    check(
+      "every eligible position is released, or was switched off on purpose",
+      optedOut.length === 0,
+      optedOut.length === 0
+        ? "no opt-outs"
+        : `${optedOut.length} eligible positions not released — migration 0008 not applied yet, ` +
+          `or these are deliberate opt-outs: ` +
+          `${optedOut.slice(0, 5).map((r) => `${r.sky_id}/${r.condition}`).join(", ")}…`,
+    );
+
+    // Nothing ineligible may be released into the public projection. It may
+    // still carry is_listed — the fixtures do — but it must not surface.
+    const leaked = rows.filter(
+      (row) => row.is_listed && ineligible(row.sky_id as string) !== null &&
+        ((offers.data ?? []) as OfferRow[]).some((o) => o.sky_id === row.sky_id),
+    );
+    check("nothing ineligible reaches the public projection", leaked.length === 0,
+      leaked.map((r) => r.sky_id as string).join(", "));
+
+    // Released with no price basis: legal, and simply not offered.
+    const priceless = released.filter((row) => {
+      const f = figure.get(row.sky_id as string);
+      return row.sale_price === null && (f?.market_price ?? null) === null;
+    });
+    console.log(`  released without a price basis  ${priceless.length} (not offered until priced)`);
+  }
+
+  heading("5. The category rule is one rule");
   {
     const { data, error } = await anon.rpc("non_collectible_categories");
     if (error) {
@@ -243,14 +329,13 @@ async function expectedOffers(
    * The price rule, implemented a second time on purpose.
    *
    * If this called `public.shop_price()` the comparison below would prove
-   * nothing — both sides would be the same function. Rounding is the
-   * commercial one: to cents, half away from zero, computed on a value
-   * scaled to integers so no binary fraction can drift.
+   * nothing — both sides would be the same function. `automaticShopPrice()`
+   * is the application's own mirror of it and does the arithmetic on
+   * integers; this check is what caught the earlier float version showing
+   * 14,98 € where the database charges 14,99 €.
    */
   function effective(override: number | null, market: number | null): number | null {
-    if (override !== null) return override;
-    if (market === null) return null;
-    return Math.round(market * percentage) / 100;
+    return override !== null ? override : automaticShopPrice(market, percentage);
   }
 
   const expected = new Map<string, { price: number; available: boolean }>();

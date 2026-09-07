@@ -287,8 +287,13 @@ irgendein Recht, und es wird keine Policy hinzugefügt (ADR-0043).
 |---|---|---|
 | `sky_id` | `text` | welcher Artikel |
 | `condition` | `text` | `loose` oder `boxed` |
-| `sale_price` | `numeric` | der SkyIsles-Preis, nie NULL (CHECK `shop_inventory_listed_needs_price`) |
+| `sale_price` | `numeric` | der Angebotspreis, nie NULL |
 | `available` | `boolean` | `available_quantity > 0` — **kein** Lagerstand |
+
+> **Stand seit `0007`/`0008`:** Die Spalte heißt in der Projektion `price` und trägt den
+> **effektiven** Preis (Override oder Marktpreis × Prozentsatz), nicht die gespeicherte
+> `sale_price`-Spalte. Der CHECK `shop_inventory_listed_needs_price` existiert nicht mehr;
+> preislose Positionen werden von `shop_offers()` ausgefiltert (Abschnitte 3.3g und 3.3i).
 
 **Nie zurückgegeben:** `quantity`, `reserved`, `available_quantity`, `note`, `unit_cost`,
 `currency`, `created_by`, `inventory_id` und jede Bewegung. Das ist keine Disziplin, sondern die
@@ -350,6 +355,30 @@ Nullbare Spalte, Pfad im öffentlichen Storage-Bucket `catalog`, CHECK
 redaktionellen Spalten. Gesetzt und gelöscht wird über `admin_set_image_override()`, das
 zusätzlich prüft, dass der Pfad zum eigenen SKY-ID gehört. Änderungen landen im redaktionellen
 Journal `catalog_admin_changes` (Feld `image_override_path`), geschrieben vom Trigger.
+
+### 3.3i Shop-Freigabe ist Opt-out (Migration `0008`, ADR-0048)
+
+`shop_inventory.is_listed` hat ab `0008` den Vorgabewert **`true`**. Eine Position entsteht aus
+ihrer ersten Bewegung — `apply_inventory_movement()` fügt sie ohne Flags ein —, also gilt der
+Vorgabewert für **jeden** Erzeugungsweg.
+
+| | Bedeutung |
+|---|---|
+| `is_listed = true` | für den Shop freigegeben. **Nicht** „auf Lager". |
+| `is_listed = false` | bewusster Ausschluss: Bestand behalten, hier nicht verkaufen. |
+
+`public.is_shop_eligible(sky_id)` (`stable`) beantwortet „gehört diese Figur überhaupt in den
+Shop": aktiv, `catalog_visible`, sammelbar. Aufgerufen von `shop_offers()` **und** von der
+einmaligen Freigabe in `0008` — dieselbe Regel, nicht zwei Kopien. Sie sagt nichts über Bestand
+oder Preis.
+
+`set_shop_listing()` verlangt für eine Freigabe **keinen** Preis mehr (die Prüfung aus `0007`
+entfällt dort und bleibt in `shop_offers()`). Kaufbar ist eine Position weiterhin nur mit
+effektivem Preis, verfügbarem Bestand und erfüllten Katalogregeln.
+
+`admin_shop_listing_audit()` (`security definer`, adminonly) listet je Position Freigabe,
+Eignung und den Grund einer fehlenden Eignung. Es gibt **keinen** Shop-Snapshot und keinen
+Synchronisationsschritt: `shop_offers()` liest den Bestand live.
 
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
@@ -737,6 +766,10 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   entfernt, weil er die Frage nicht mehr beantworten kann (ADR-0045). Keine Zeile wird geändert,
   keine Spalte gelöscht. Zwei Funktionen werden gedropt und neu angelegt, weil PostgreSQL den
   Rückgabetyp nicht in place ändert.
+- Achte Migration: `0008_shop_listing_opt_out.sql` — `is_shop_eligible()`,
+  `admin_shop_listing_audit()`, Vorgabewert `is_listed = true`, Freigabe ohne Preiszwang und die
+  **einmalige** Freigabe des bereits vorhandenen geeigneten Bestands. Ändert keine Menge, keine
+  Reservierung, keinen Preis, erzeugt keine Bewegung und setzt niemals `false`. Idempotent.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

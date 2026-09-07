@@ -31,10 +31,11 @@ import { useState, useTransition } from "react";
 import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
 import { InlineName } from "@/components/admin/inline-name";
 import { FigureCard } from "@/components/catalog/figure-card";
-import { OfferLine } from "@/components/shop/offer-line";
+import { ShopAction } from "@/components/shop/shop-action";
 import { ACTION_CARD } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
+import { imageSrc } from "@/lib/catalog/image";
 import type { Offer } from "@/lib/shop/offer";
 import { de } from "@/lib/i18n/de";
 
@@ -117,8 +118,28 @@ export function CatalogCard({
     });
   }
 
+  /**
+   * The buy action, or nothing at all (ADR-0043, V7).
+   *
+   * Rendered for everyone who is not an administrator, signed in or not — a
+   * cart needs no account. Deliberately independent of ownership: somebody
+   * who owns a figure may want a second one, and hiding the offer on owned
+   * cards would be the shop guessing at that.
+   */
+  const shop =
+    offers.length > 0 ? (
+      <ShopAction
+        offers={offers}
+        skyId={figure.skyId}
+        name={figure.displayName}
+        imageSrc={imageSrc(figure)}
+      />
+    ) : null;
+
   // The administrator's card. Same FigureCard, same layout, same everything
-  // that shows a figure — a different set of things to do with it.
+  // that shows a figure — a different set of things to do with it. No buy
+  // action: the operator manages prices and listings in /admin/inventory and
+  // does not shop in their own catalog (ADR-0042).
   if (admin) {
     return (
       <FigureCard
@@ -183,7 +204,7 @@ export function CatalogCard({
         href={signInHref}
         highlighted={highlighted}
         showSeries={false}
-        offerSlot={<OfferLine offers={offers} />}
+        offerSlot={shop}
         footer={footer}
       />
     );
@@ -198,7 +219,7 @@ export function CatalogCard({
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}
       showSeries={false}
-      offerSlot={<OfferLine offers={offers} />}
+      offerSlot={shop}
       footer={footer}
     />
   );

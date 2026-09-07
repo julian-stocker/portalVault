@@ -3082,7 +3082,9 @@ veröffentlichen (docs/SECURITY.md).
 **Was ein Angebot ist.** Ausschließlich `is_listed`. Eine Lagerposition ist kein Angebot: Bestand
 ist etwas, das der Betreiber hat, ein Angebot etwas, das er verkaufen will (ADR-0037). Der
 CHECK `shop_inventory_listed_needs_price` garantiert bereits, dass ein gelistetes Angebot einen
-Preis hat — „gelistet ohne Preis" ist kein Fall, den der Aufrufer behandeln muss. **Gelistet mit
+Preis hat — „gelistet ohne Preis" ist kein Fall, den der Aufrufer behandeln muss.
+**Überholt:** dieser CHECK ist mit `0007` entfallen und die Freigabe ist seit ADR-0048 vom Preis
+getrennt; „freigegeben ohne Preis" ist ein gültiger Zustand, den `shop_offers()` ausfiltert. **Gelistet mit
 0 verfügbar** liefert weiterhin eine Zeile mit `available = false` und zeigt „Nicht auf Lager";
 Schweigen wäre die schlechtere Auskunft.
 
@@ -3101,7 +3103,9 @@ dagegen; eine Abfrage pro Karte wären 561 Anfragen auf eine Frage mit einer Ant
 umfasst höchstens einige hundert Zeilen.
 
 **Zwei Preise bleiben zwei Preise.** `market_price` ist Referenzwert, `sale_price` ist Angebot
-(ADR-0033). Auf der Karte steht der SkyIsles-Preis **unter** dem Marktwert und nennt seine
+(ADR-0033). *(Überholt vom V7-Nachtrag am Ende dieser Datei: der Markenname steht nicht mehr
+auf der Karte, und das Angebot ist eine Aktion in der Fußzeile statt einer Zeile unter dem
+Marktwert.)* Auf der Karte stand der SkyIsles-Preis **unter** dem Marktwert und nannte seine
 Quelle — „SkyIsles 9,90 €" neben 14,00 € liest sich als zwei Aussagen, eine nackte zweite Zahl
 als Korrektur der ersten. „ab 9,90 €" erscheint nur, wenn die kaufbaren Angebote wirklich
 unterschiedlich teuer sind; `loose` und `boxed` zum selben Preis ist ein Preis.
@@ -3283,6 +3287,18 @@ Listing-Guard aufgerufen. Gerechnet wird auf `numeric`, nie auf Fließkomma; ger
 Geld: sie liest die berechnete Zahl. Einzige, benannte Ausnahme ist die Vorschau „so viel wäre
 es automatisch" auf der Adminkarte, die weder gespeichert noch verlangt wird.
 
+**Der Mirror in der Anwendung rechnet exakt, nicht in Fließkomma.** Zwei Stellen brauchen den
+automatischen Preis, ohne die Datenbank fragen zu können: die Adminkarte („was wäre es ohne
+Override?") und `verify:shop` (eine unabhängige Erwartung — ein Aufruf von `shop_price()` würde
+die Datenbank mit sich selbst vergleichen). Beide gehen über `automaticShopPrice()`.
+
+Die erste Fassung multiplizierte Fließkommazahlen und war falsch: `16,65 × 90 %` ist 14,985 und
+rundet auf **14,99**, aber `16.65 * 90` ist binär `1498.4999999999998`, also ergab `Math.round`
+**14,98**. Gefunden hat das der Preis-Check von `verify:shop` an echten Daten — an genau einer
+von 218 Positionen (`SKY-0363`). Die Datenbank war nie falsch; sie rechnet auf `numeric`.
+`automaticShopPrice()` rechnet deshalb auf ganzen Zahlen: Cent × Hundertstelprozent, geteilt
+durch 10 000, halbe von der Null weg — dieselbe Semantik wie `round(numeric, 2)`.
+
 **Bereich 0 < p ≤ 500 %.** Über 100 % ist ausdrücklich erlaubt — mehr als den Referenzwert zu
 verlangen ist bei Seltenem legitim, und eine Grenze bei 100 wäre eine Produktentscheidung als
 Constraint getarnt. 0 ist ausgeschlossen wie beim Marktpreis (ADR-0010): kostenlos ist kein
@@ -3398,3 +3414,127 @@ Meldung ist die, die zählt.
 
 **Was auf der Karte verschwunden ist.** `Reserviert` wird nur noch gezeigt, wenn es nicht null
 ist; in V1 schreibt es nichts, und eine Spalte voller Nullen auf jeder Karte sagt nichts.
+
+
+### Nachtrag 2026-09-07 — Katalog-UX V7 (zu ADR-0038, ADR-0042 und ADR-0043)
+
+Drei Verfeinerungen bestehender Entscheidungen. Keine neue ADR: die Regeln darunter bleiben,
+was sie waren.
+
+**Der Besitzfilter hat drei benannte Zustände: `Alle · Besitz · Fehlen`** (ersetzt „Besitz
+anzeigen" aus ADR-0038, V4.3). Der Umschalter war hervorgehoben, **während** Besitz verborgen
+war — er leuchtete, um zu sagen, dass er ausgeschaltet ist. Das war damals bewusst so begründet
+(„aus ist der Zustand, der die Liste verändert"), liest sich aber invertiert, weil ein
+hervorgehobenes Bedienelement im ganzen Produkt sonst heißt: *das siehst du gerade*. Mit drei
+Zuständen stellt sich die Frage nicht — genau einer ist hervorgehoben, und es ist immer der,
+der beschreibt, was auf dem Bildschirm steht.
+
+Vorgabe ist `Alle`, nichts wird gespeichert (kein `localStorage`, kein Cookie, kein
+URL-Parameter), also gibt es auch nichts zu migrieren: der alte Zustand lag nie irgendwo.
+Der Filter verengt **denselben Pool** wie Serie, Produktgruppe und Suche — deshalb funktionieren
+alle Kombinationen, ohne dass eine von ihnen von den anderen weiß. Angeboten wird er nur einem
+angemeldeten Sammler: anonym gibt es keine Antwort darauf, und der Betreiber sammelt nicht aus
+dem Katalog, den er verwaltet (ADR-0042). Abwesend, nicht deaktiviert.
+
+**Marktpreis ist Information, das Angebot ist eine Aktion.** Beide standen untereinander im
+selben Block der Karte, in derselben Größe, und sind nicht dieselbe Art von Aussage. Der
+Marktwert bleibt, wo Information steht, und bekommt den Elementchip als ruhiges Statusfeld an
+die rechte Seite derselben Zeile. Der Kauf zieht nach unten in die Aktionsreihe, als goldener
+Knopf aus den vorhandenen `--accent`-Tokens — kein neuer Farbwert.
+
+Auf dem Knopf steht **kein Markenname** mehr: „SkyIsles 4,49 €" sagte in einem Wort, was die
+Website ohnehin sagt. Nur Preis und Warenkorbsymbol.
+
+**Im Sammlerkatalog erscheint nur, was wirklich kaufbar ist.** Kein deaktivierter Knopf, kein
+„Nicht auf Lager", keine ausgegraute Fläche — bei einem Angebot ohne Bestand erscheint gar
+nichts. Der Katalog ist zuerst ein Katalog von Objekten (ADR-0025); Ausverkauft- und
+Listing-Status gehören auf eine eigene Shop-Fläche, später. Eine kaufbare Kondition kauft mit
+einem Tipp; zwei zu verschiedenen Preisen zeigen „ab 4,49 €" und fragen beim Druck nach dem
+Zustand, weil die Warenkorb-Identität `sky_id + condition` ist (ADR-0043) und Raten den falschen
+Artikel in den Korb legte. Zwei Konditionen zum selben Preis bleiben ein Preis.
+
+Angebot und Besitz sind **unabhängig**: wer eine Figur besitzt, bekommt den Kaufknopf trotzdem —
+ein zweites Exemplar ist eine legitime Absicht, und das Angebot ist kein Hinweis darauf, was
+fehlt. Der Adminkatalog bekommt ihn nicht (ADR-0042). Kauf, Sammlungsaktion und Detailseite sind
+Geschwister im Markup, nie ineinander verschachtelt — deshalb muss kein einziges Ereignis am
+Weiterlaufen gehindert werden.
+
+**Nach der Anmeldung landen alle auf dem Katalog** statt auf `/collection`; Begründung und
+`returnTo`-Verhalten in `docs/AUTH.md`, Abschnitt 2.
+
+---
+
+## ADR-0048 — Der Shop ist Opt-out, nicht Opt-in
+
+**Status:** ANGENOMMEN (2026-09-07)
+
+**Entscheidung.** **Vorhandener Bestand wird angeboten, sofern niemand widerspricht.**
+`shop_inventory.is_listed` bekommt den Vorgabewert `true`, und der bereits vorhandene geeignete
+Bestand wird einmalig freigegeben. Das kehrt bewusst um, was ADR-0037 gesetzt hatte
+(`default false`).
+
+**Warum die Umkehr.** Bei `default false` hätte jede der 218 importierten Positionen einzeln
+eingeschaltet werden müssen — und jede künftige nach ihrer ersten Buchung erneut. Das ist eine
+Synchronisationsaufgabe, verkleidet als Produktentscheidung. Der Lagerbestand ist die Wahrheit;
+die einzige redaktionelle Entscheidung, die es zu treffen gibt, ist der **Ausschluss** einzelner
+Positionen.
+
+**Zwei Fragen, die getrennt bleiben.**
+
+| | Frage | Wer beantwortet sie |
+|---|---|---|
+| `is_listed` | Darf diese Position überhaupt angeboten werden? | der Betreiber, redaktionell |
+| kaufbar | Kann sie gerade gekauft werden? | abgeleitet: Preis + Bestand + Katalogregeln |
+
+`is_listed = true` heißt **nicht** „auf Lager". Sie waren zuletzt verknüpft: seit ADR-0045 wies
+`set_shop_listing()` eine Freigabe ohne effektiven Preis ab. Damit hing „das will ich verkaufen"
+an einem Preis, der noch gar nicht bekannt sein muss — eine neue Position konnte im Moment ihrer
+Entstehung nicht freigegeben werden. **Die Prüfung entfällt in der Freigabe und bleibt in
+`shop_offers()`**, wo sie seit derselben Migration ohnehin steht. Eine freigegebene Position ohne
+Preis ist erlaubt und wird schlicht nicht angeboten, bis es einen gibt.
+
+**Eine Regel, die sagt, was überhaupt in den Shop gehört.** `public.is_shop_eligible(sky_id)` —
+aktiv, redaktionell sichtbar, sammelbar (ADR-0029, ADR-0039). Die drei Bedingungen standen
+bereits inline in `shop_offers()`; sie bekommen einen Namen, **weil die einmalige Freigabe genau
+dieselbe Regel benutzen muss**. Eine zweite, leicht abweichende Kopie von „welche Figuren zählen"
+ist der Weg, auf dem eine Fixture oder ein Konsolenspiel in einem öffentlichen Shop landet. Sie
+sagt nichts über Bestand, Preis oder Reservierungen.
+
+**Der Vorgabewert ist nicht die Schranke.** Eine Position entsteht aus ihrer ersten Bewegung, und
+dieser Insert nennt überhaupt keine Flags — damit deckt der eine Spaltenvorgabewert **jeden**
+Erzeugungsweg ab: Quick Stock, ausführliche Buchung, der Systempfad des Legacy-Imports und alles
+später Hinzukommende. Das ist gefahrlos, weil eine Bewegung auf Software oder eine inaktive Figur
+zwar eine freigegebene Position erzeugt, `shop_offers()` sie aber weiterhin ausschließt.
+
+**Bestand 0 schaltet nichts ab.** Verkauft sich eine Position leer, bleibt `is_listed = true` und
+das Angebot verschwindet durch Arithmetik. Wird wieder eingebucht, ist es sofort wieder da —
+**ohne** Aktivierung, ohne Sync, ohne zweiten Adminschritt. Nichts im Produkt setzt `is_listed`
+aus einer Menge ab.
+
+**Es gibt keinen Shop-Snapshot und keinen „Shop synchronisieren"-Knopf.** `shop_offers()` liest
+`shop_inventory` live. Ein Zustand „Lager sagt 5, Shop sagt 4" ist nicht möglich, weil es nur
+eine Zahl gibt.
+
+**Freigabe gilt je Position, nicht je Figur.** Der Schlüssel bleibt `(sky_id, condition)`: `loose`
+kann angeboten und `boxed` ausgeschlossen sein. Es gibt kein figurenweites Flag.
+
+**Die einmalige Aktivierung ist eng geschnitten.** Sie setzt ausschließlich `true`, nur wo
+`is_shop_eligible()` gilt, nur wo noch nicht freigegeben (also idempotent), und rührt weder Menge
+noch Reservierung, Preis, Bewegung noch Sammlungsdaten an. **Ein Opt-out wird nie überschrieben** —
+eine Migration setzt keine Entscheidung außer Kraft. Freigabe ist keine Bestandsbewegung und wird
+nicht als solche journalisiert; die Abstimmung `SUM(delta) = quantity` bleibt unberührt.
+
+**Auditierbarkeit.** `is_listed` wird weiterhin **nicht** einzeln journalisiert — das
+redaktionelle Journal deckt Katalogfelder ab (ADR-0039), und `inventory_movements` ist für Mengen
+da. Dafür gibt es `admin_shop_listing_audit()`: je Position die Freigabe, die Eignung und, wenn
+sie fehlt, den Grund. `npm run verify:shop` druckt die Übersicht und prüft, dass jede geeignete
+Position freigegeben ist oder bewusst ausgeschlossen wurde.
+
+**Im Adminbereich heißt es „Im Shop" / „Nicht im Shop"** statt „Gelistet". Bei Freigabe ohne
+Bestand steht daneben „Aktuell ausverkauft", ohne Preis „Kein Shop-Preis" — beides erklärt, warum
+nichts verkauft wird, **ohne** den Schalter abzudunkeln, der ja an ist.
+
+**Unverändert:** Sicherheit (kein Client-Recht auf `shop_inventory`, Freigabe nur über
+`set_shop_listing()` mit `is_shop_admin()`), die öffentliche Projektion (vier Werte, nie eine
+Stückzahl), der Warenkorb (lokal, keine Reservierung, Serverdaten gewinnen) und der abgeschlossene
+Legacy-Import.
