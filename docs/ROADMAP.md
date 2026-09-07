@@ -214,6 +214,24 @@ Fortschritt je Serie · Playwright.
 
 ---
 
+## Commerce V1 — begonnen 2026-09-07
+
+Der First-Party-Shop bekommt Bestellungen. **Phase A ist gebaut** (Commerce-Kern und atomare
+Bestandsreservierung, Migration `0010`, noch nicht angewandt); der vollständige Architekturplan
+für Zahlung, Versand, Rechnung, Widerruf und Monatsabrechnung liegt vor.
+
+Reihenfolge der Phasen: **0** Blocker (SMTP, Steuerstatus, Anbieterkonto) · **A** Commerce-Kern +
+Reservierung · **B/C** Checkout ohne Zahlung · **D** Zahlung und Webhook · **E** Bestellungen für
+Kunde und Betreiber · **F** Rechnungen und E-Mail · **G** Storno, Widerruf, Retoure, Erstattung ·
+**H** Buchhaltung und Startfreigabe.
+
+Der Marketplace-Stopp aus ADR-0021 gilt unverändert: ein Shop mit genau einem Verkäufer ist kein
+Marketplace.
+
+**Blockierend, bevor weitergebaut wird:** Steuerstatus (§ 19 / § 25a / Regelbesteuerung) mit dem
+Steuerberater, Zahlungsanbieter, Mailversand, Lieferländer und Versandkosten.
+
+
 ## LATER — nach V1, vor dem Marketplace
 
 **Analytics und Premium**

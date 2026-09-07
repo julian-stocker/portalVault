@@ -3706,3 +3706,215 @@ SKY-ID; im geöffneten Chooser ist es pro Condition sichtbar.
 **Wiederverwendbar für den späteren Checkout**, ohne ihn zu bauen: die Eligibility-Regeln liegen
 schon in der Datenbank, und ein Checkout wird dieselbe Frage stellen müssen — nur atomar und
 tatsächlich reservierend. Das ist ausdrücklich nicht Teil von V11.
+
+
+## ADR-0049 — Die Bestellung ist ein Snapshot mit zwei Zuständen
+
+**Status:** ANGENOMMEN (2026-09-07) · Datenmodell gebaut (Migration `0010`), **noch nicht
+angewandt**. Zahlung, Rechnung, Versand und Widerruf sind spätere Phasen.
+
+**Problem.** Ein Shop-Datenmodell verfällt an zwei Stellen zuverlässig: wenn eine historische
+Bestellung von heutigen Preisen und Namen abhängt, und wenn „bezahlt", „versandt", „widerrufen"
+und „erstattet" in ein Statusfeld gedrängt werden.
+
+### Die Bestellung ist zugleich die Checkout-Sitzung
+
+Eine eigene `checkout_sessions`-Tabelle wurde geprüft und verworfen. Eine abgebrochene Sitzung
+**ist** eine Bestellung, die nie bezahlt wurde; eine zweite Tabelle dafür bringt einen Join, einen
+zweiten Lebenszyklus und die Frage, welcher von beiden recht hat, wenn sie auseinanderlaufen.
+Drei Entitäten tragen den Ablauf: `orders`, `order_reservations` und — später — `payment_attempts`.
+Ein zweiter Zahlungsversuch ist ein weiterer Versuch zur **selben** Bestellung; die Bestellnummer,
+die der Kunde bereits gesehen hat, bleibt seine.
+
+### Zwei Achsen, nicht eine
+
+`payment_status` und `fulfillment_status` stehen getrennt, weil bezahlt und versandt orthogonal
+sind. In einem Feld entstünden Werte wie `paid_shipped_partially_refunded`, und die Kombinatorik
+wächst mit jedem Fall. Zwei kleine geschlossene Mengen sind kleiner **und** vollständig.
+
+**Widerruf, Retoure und Reklamation sind ausdrücklich keine Bestellzustände.** Eine Bestellung
+kann zwei Teilwiderrufe, eine halb angekommene Retoure und parallel eine Reklamation tragen — als
+Statuswert nicht darstellbar. Sie werden eigene Zeilen mit eigenem Lebenslauf.
+
+### Positionen sind eingefroren
+
+Die Umsetzung von ADR-0033: `order_lines` speichert Name, Bild, Einzelpreis und Zeilensumme zum
+Kaufzeitpunkt. `sky_id` bleibt als Auswertungsbezug, **ohne** kaskadierenden Fremdschlüssel — die
+Zeile erinnert sich daran, was verkauft wurde, nicht daran, wie es heute heißt. Ein
+Trigger weist jedes `UPDATE` und `DELETE` auf `order_lines`, `order_addresses` und `order_events`
+ab; auf `orders` sind Identität und Beträge eingefroren.
+
+`name_snapshot` ist der **serverseitige** Katalogname, nicht der String aus dem Browser: was auf
+einer Rechnung landet, darf nicht vom Käufer stammen. Die Oberfläche ordnet denselben Namen für
+Varianten anders an (ADR-0030) — dieselbe Information, andere Anordnung.
+
+### Der Kunde überlebt seine Bestellung nicht, die Bestellung ihn schon
+
+`orders.user_id` ist `ON DELETE SET NULL`, **nie** `CASCADE`. Eine Bestellung ist ein Beleg mit
+Aufbewahrungspflicht; eine Kontolöschung darf ihn nicht vernichten. `customer_email` trägt die
+Bestellung danach weiter. Dieselbe Trennung nimmt `inventory_movements.created_by` seit `0003`
+vorweg.
+
+### Gast-Checkout
+
+`user_id` ist nullbar, und das ist ein unterstütztes Ergebnis, kein Fehler. Der Warenkorb
+funktioniert seit ADR-0043 anonym; eine Kontopflicht ausgerechnet im letzten Schritt wäre die
+teuerste denkbare Stelle für diese Hürde. Für Gäste wird **keine** Platzhalter-Profilzeile
+erfunden. Der Zugang zu einer Gastbestellung über ein gehashtes Token folgt in einer späteren
+Phase — solange es ihn nicht gibt, ist eine Gastbestellung für **jeden** Client unlesbar, was der
+sichere Zwischenzustand ist.
+
+### Bestellnummern
+
+`SI-2026-001000`, aus einer Sequenz als Spalten-Default, für keine Rolle beschreibbar. `nextval`
+ist atomar und nimmt an keinem Rollback teil — Lücken sind abgebrochene Checkouts und bedeuten
+nichts. **Rechnungsnummern sind davon getrennt** und werden erst bei Ausstellung aus einer eigenen
+Sequenz gezogen; nur so bleibt die Rechnungsfolge dicht, obwohl es unbezahlte Bestellungen gibt.
+
+### Was bewusst fehlt
+
+**Keine Steuerfelder.** Regelbesteuerung, §&nbsp;19 und §&nbsp;25a verlangen verschiedene
+Rechnungen, und die Entscheidung liegt beim Steuerberater. Rechnungen sind unveränderlich, also
+wäre ein geratenes Format dauerhaft falsch. **Keine Provider-Felder**, solange kein
+Zahlungsanbieter gewählt ist. **`shipping_amount` ist 0**, weil Versanddienstleister, Länder und
+Preise offene Entscheidungen sind — die Spalte existiert, weil die Summe aus benannten Teilen
+bestehen muss, nicht weil Phase A wüsste, was hineingehört.
+
+**Verworfen:** ein Statusfeld für alles · `checkout_sessions` als eigene Tabelle ·
+Bestellpositionen mit Fremdschlüssel auf `skylanders` · `ON DELETE CASCADE` auf `user_id` ·
+UUID als öffentliche Bestellkennung · geratene Steuerlogik.
+
+---
+
+## ADR-0050 — Reservierung beginnt beim Checkout und läuft ab
+
+**Status:** ANGENOMMEN (2026-09-07) · gebaut in Migration `0010`, **noch nicht angewandt**.
+
+**Problem.** Der Warenkorb reserviert nichts (ADR-0043), und das bleibt so. Irgendwann zwischen
+„zur Kasse" und „bezahlt" muss der Bestand aber verbindlich blockiert werden, sonst verkauft ein
+Shop mit Einzelstücken dieselbe Figur zweimal. Gebrauchte Skylanders sind fast immer
+Einzelstücke — zwei gleichzeitige Checkouts auf `quantity = 1` sind der Normalfall.
+
+**Entscheidung.** Ein Warenkorb reserviert nichts; ein Checkout reserviert **alles oder nichts**.
+
+### `reserved` bleibt die maßgebliche Zahl
+
+`order_reservations` ist das Buch, `shop_inventory.reserved` der fortgeschriebene Saldo — beide in
+derselben Transaktion. Die Spalte wurde **nicht** durch eine Summe über Reservierungszeilen
+ersetzt, weil `available_quantity` eine *generated stored* Spalte darüber ist, der partielle Index
+für gelistete Positionen sie benutzt, `apply_inventory_movement` sich mit ihr schützt und
+`shop_offers()` `available` daraus ableitet. Vier Stellen hätten sich ändern müssen. Stattdessen
+prüft `verify:commerce` die Übereinstimmung — genau wie `SUM(delta) = quantity` schon geprüft wird.
+
+### Atomar, mit dem Muster, das schon da war
+
+`reserve_for_order()` erfindet nichts: es ist `apply_inventory_movement` aus `0003` über mehrere
+Positionen. Alle betroffenen Zeilen werden mit `SELECT … FOR UPDATE` **in aufsteigender
+`id`-Reihenfolge** gesperrt — die feste Reihenfolge ist der Deadlock-Schutz, sonst sperren zwei
+Warenkörbe mit überlappenden Artikeln über Kreuz. Danach wird abgelaufener Halt **unter der
+Sperre** geräumt, Eignung und Preis neu geprüft, und die Verfügbarkeit ist Teil der
+`WHERE`-Klausel des `UPDATE`, nicht eines vorherigen `SELECT`. Kein Treffer heißt: nicht genug da,
+und die ganze Transaktion rollt zurück. **Eine halb reservierte Bestellung gibt es nicht.**
+
+### 20 Minuten, serverseitig
+
+`reservation_ttl()` steht in der Datenbank, weil der Server das entscheidet und ein Client, der
+seine eigene Frist wählen dürfte, Bestand unbegrenzt halten könnte. 20 Minuten: lang genug für
+einen PayPal-Umweg oder eine Bank-App mit 2FA, kurz genug, dass ein Einzelstück nicht eine halbe
+Stunde für alle anderen tot ist. Später soll die Anbietersitzung auf denselben Zeitpunkt gesetzt
+werden, damit beide nicht auseinanderlaufen können.
+
+### Freigabe: synchron zuerst, Zeitgeber nur als Kosmetik
+
+`release_expired_reservations()` wird an zwei Stellen gerufen. Die wichtige ist die erste:
+**synchron in `reserve_for_order()`**, beschränkt auf die Positionen, die ohnehin gesperrt werden.
+Wer den Artikel will, räumt selbst auf — damit löst sich Konkurrenz sofort und korrekt auf. Ein
+späterer Zeitgeber hält nur `shop_offers().available` frisch für Besucher, die nie einen Checkout
+versuchen. **Nichts, das etwas entscheidet, hängt davon ab, dass er gelaufen ist**, weshalb ein
+verspäteter Lauf keine inkonsistente Buchung erzeugen kann. `0010` installiert **keinen**
+Zeitgeber; das ist eine Infrastrukturentscheidung für sich.
+
+### Der Verkauf passiert genau einmal
+
+`convert_order_reservations()` existiert bereits, obwohl es keine Zahlung gibt: als reines
+DB-Primitiv, damit die Zahlungsphase nichts mehr erfinden muss, sondern nur diese Funktion ruft.
+**Der Zustand der Reservierung ist der Idempotenzschlüssel** — das `UPDATE` auf `converted` trägt
+`and state = 'active'` unter der Sperre, also findet ein zweiter Aufruf nichts, bucht nichts und
+schreibt keine Bewegung. `unique (movement_id)` ist die zweite Verteidigungslinie.
+
+**Reihenfolge ist Pflicht:** erst `reserved` senken, dann buchen. `apply_inventory_movement`
+schützt sich mit `quantity + delta >= reserved`, also stünde bei einem Einzelstück die eigene
+Reservierung der eigenen Buchung im Weg. Beide Zahlen fallen um denselben Betrag, `available_quantity`
+bewegt sich also nicht — korrekt, die Ware war schon vergeben.
+
+### Eine Reservierung wird freigegeben, nie gelöscht
+
+Ein Trigger weist `DELETE` ab. Eine abgelaufene Reservierung ist die Erklärung für eine Zahl, die
+sich verändert hat; sie wegzuwerfen macht den Abgleich unbeweisbar.
+
+### Bestand horten ist die eigentliche Bedrohung
+
+`create_order()` hält echten Bestand für 20 Minuten und muss ohne Konto aufrufbar bleiben, weil
+der Warenkorb ohne Konto funktioniert. Ein Skript könnte damit jedes Einzelstück — also fast jede
+Figur — dauerhaft unverkäuflich halten, kostenlos. **Das Zeitlimit hilft dagegen nicht:** ein Bot
+reserviert nach Ablauf sofort neu.
+
+**Die Grenze liegt in der Datenbank, nicht in der Server-Action.** Das ist keine Stilfrage: Die
+Anwendung spricht mit PostgREST über den **Anon-Key** und die Sitzung des Besuchers (ADR-0014,
+ADR-0017). Eine Server-Action und ein Browser, der die RPC direkt aufruft, kommen damit als
+*dieselbe* Datenbankrolle an, und der Anon-Key ist absichtlich öffentlich. Eine Prüfung in
+TypeScript wäre mit einem einzigen `curl` umgangen. Die einzige Stelle, an der eine Grenze nicht
+umgehbar ist, ist SQL.
+
+`enforce_checkout_limits()` zählt drei Dinge über eine Identität, alle aus bereits vorhandenem
+Zustand — **keine Zählertabelle, kein Zeitgeber, kein externer Dienst**: offene Checkouts (5),
+gehaltene Stückzahl (25) und Bestellungen in der letzten Stunde (10). Die Werte stehen in
+`commerce_settings` und sind ohne Deployment änderbar.
+
+**Identität ist drei Dinge.** Eine einzelne Dimension ist in Sekunden gewechselt — eine
+E-Mail-Adresse kostet nichts. Eine Bestellung zählt zur Identität, wenn **eine** von Konto,
+Adresse oder Client-Fingerabdruck passt, und alle drei werden gemeinsam gezählt.
+
+**Der Fingerabdruck ist keine Adresse.** SHA-256 aus der Aufrufer-Adresse und einem zufälligen
+Salt, der die Datenbank nie verlässt. **Keine rohe IP wird irgendwo gespeichert.** Fehlt die
+Adresse, ist der Wert `NULL` und die Dimension entfällt — niemals ein gemeinsamer konstanter
+Eimer, der alle Besucher zusammen drosseln würde. Ein Trigger erlaubt nur, den Fingerabdruck zu
+**löschen**, nie zu setzen oder zu ändern; bei Bezahlung entfällt er, weil eine bezahlte
+Bestellung nichts mehr zu drosseln hat.
+
+**Idempotenz ist kein Missbrauchsschutz.** `request_id` verhindert, dass ein Doppelklick zwei
+Bestellungen erzeugt — mehr nicht. Eine UUID ist frei wählbar, ein Angreifer nimmt einfach jedes
+Mal eine neue. Die beiden Mechanismen lösen verschiedene Probleme und ersetzen einander nicht.
+
+### Eine verletzte Invariante wird laut, nicht leise repariert
+
+`greatest(0, reserved - quantity)` wurde entfernt. Bei einer gültigen aktiven Reservierung **muss**
+`reserved >= reservation.quantity` gelten; gilt es nicht, sind Buch und Zähler bereits
+auseinandergelaufen, und ein Clamp auf 0 würde genau das für immer verbergen. Freigabe und
+Konvertierung tragen die Bedingung stattdessen in der `WHERE`-Klausel und werfen bei keinem
+Treffer `data_corrupted`. Die ganze Transaktion rollt zurück.
+
+**Damit gibt es keine halben Übergänge.** Entweder Reservierungszustand, `reserved` und Bewegung
+sind vollständig konsistent, oder nichts davon ist geschehen. Kein `converted` ohne Verkaufsbewegung,
+kein `released` mit unverändertem `reserved`.
+
+### Verspätete Zahlung nach freigegebener Reservierung
+
+Nur eine **aktive** Reservierung wird konvertiert. Eine abgelaufene und freigegebene wird **nicht**
+wiederbelebt — das wäre genau das Overselling, das die Sperren verhindern sollen. Die
+Konvertierung liefert dann eine kleinere Zahl zurück als die Bestellung Positionen hat; die
+Zahlungsphase vergleicht beides und setzt `needs_resolution`. Ein Mensch entscheidet zwischen
+Nachbeschaffung und Erstattung. `needs_resolution` hat in Phase A noch keinen Schreiber und keinen
+Leser — die Bedeutung steht fest, die Mechanik kommt mit der Zahlung.
+
+**Verworfen:** Reservierung schon im Warenkorb · `reserved` als Summe über Reservierungszeilen ·
+Reservieren ohne Sperre mit anschließender Prüfung · Löschen abgelaufener Reservierungen ·
+Freigabe ausschließlich per Zeitgeber · eine zweite Bestandsarchitektur neben
+`inventory_movements` · **Missbrauchsschutz in der Server-Action** (mit dem Anon-Key umgehbar) ·
+**rohe IP als Commerce-Datum** · **eine einzelne Identitätsdimension** · **`greatest(0, …)` als
+stille Reparatur** · Kontopflicht beim Checkout · CAPTCHA als Grundvoraussetzung für jeden Kauf.
+
+> **Noch nicht entschieden und nicht implementiert:** Der Zahlungsanbieter, der
+> Webhook-Wahrheitsbegriff („bezahlt ist, was der Server beim Anbieter gesehen hat") und die
+> Rechnungsarchitektur. Sie sind im Architekturplan beschrieben und bekommen eigene ADRs, wenn sie
+> gebaut werden.

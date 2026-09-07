@@ -7,6 +7,64 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Commerce V1 · Phase A abgeschlossen und produktiv (2026-09-07).** Migration `0010` ist auf
+Production angewandt, der Commerce-Kern liegt live in der Datenbank: Bestellungen können entstehen
+und Bestand kann atomar reserviert werden — ohne Zahlungsanbieter, ohne Checkout-Oberfläche, ohne
+Rechnung, ohne E-Mail. **Es gibt noch keine Oberfläche, die eine Bestellung auslöst**, entsprechend
+0 Bestellungen und 0 Reservierungen im Normalbetrieb.
+
+*Neu (Migration `0010`, angewandt und gegen Production verifiziert).* `orders`, `order_lines`,
+`order_addresses`, `order_events`, `order_reservations`; dazu `create_order()`,
+`reserve_for_order()`, `release_expired_reservations()`, `release_order_reservations()`,
+`convert_order_reservations()` und die Abgleichs-View `reservation_reconciliation`.
+
+*Zwei Zustandsachsen.* Zahlung und Erfüllung stehen getrennt. Widerruf, Retoure und Reklamation
+sind ausdrücklich **keine** Bestellzustände und kommen später als eigene Vorgänge (ADR-0049).
+
+*Reservierung.* Ein Warenkorb reserviert nichts, ein Checkout reserviert alles oder nichts.
+Sperren in fester `id`-Reihenfolge, Verfügbarkeitsprüfung in der `WHERE`-Klausel, 20 Minuten
+serverseitig, abgelaufener Halt wird synchron im Checkout geräumt (ADR-0050). `shop_inventory.reserved`
+wird damit erstmals geschrieben — die Spalte existiert seit `0003` genau dafür.
+
+*Bestand unverändert.* `quantity` sinkt bei einer Reservierung **nicht**, und es entsteht keine
+Bewegung: verkauft ist noch nichts. `convert_order_reservations()` ist gebaut und idempotent, wird
+aber von nichts gerufen — die Zahlungsphase ruft sie.
+
+*Missbrauchsschutz.* `create_order()` hält echten Bestand und bleibt ohne Konto aufrufbar — ein
+Skript könnte damit Einzelstücke dauerhaft blockieren. Die Grenze liegt deshalb **in der
+Datenbank**: Server-Action und direkter RPC-Aufruf kommen über den öffentlichen Anon-Key als
+dieselbe Rolle an, eine Prüfung in TypeScript wäre umgehbar. `enforce_checkout_limits()` zählt
+offene Checkouts, gehaltene Stückzahl und Bestellungen pro Stunde je Identität — Konto, E-Mail
+**oder** salted Client-Fingerabdruck. Keine rohe IP wird gespeichert, kein Zähler-Backend, kein
+CAPTCHA.
+
+*Invarianten.* `greatest(0, …)` ist raus: Freigabe und Konvertierung senken `reserved` nur unter
+`where reserved >= quantity` und werfen sonst `data_corrupted`. Halbe Übergänge sind damit
+unmöglich.
+
+*Bewusst offen:* Steuer-/Rechnungssemantik (Steuerberater) und Zahlungsanbieter. Keine Steuerfelder,
+keine Provider-Felder, `shipping_amount = 0`, kein SDK, keine Env-Variable, kein Webhook.
+
+*Runtime-Security geprüft.* `npm run verify:commerce` läuft gegen Production und meldet **30/30**:
+Reconciliation-Drift 0, `reserved` und `held` je 0 über 222 Positionen, alle Commerce-Tabellen für
+`anon` weder les- noch schreibbar, alle acht internen Funktionen abgewiesen (42501), und
+`create_order()` als einzige öffentliche Commerce-Schreibfläche erreichbar.
+
+*Client-Fingerabdruck produktiv bestätigt.* `request.headers` und `x-forwarded-for` sind im
+PostgREST-Aufrufpfad verfügbar, `request_client_hash()` liefert einen 64-stelligen Hex-Digest —
+ohne dass dafür eine Bestellung erzeugt oder ein Recht geöffnet werden musste. Damit ist der offene
+Runtime-Smoke der Vorrunde geschlossen.
+
+*Eine Korrektur nach dem Anwenden.* `reservation_ttl()` und `next_order_number()` waren zunächst
+für `anon` ausführbar: `0010` hatte sie nur `from public` entzogen, während Supabase über
+Default-Privileges zusätzlich **explizite** EXECUTE-Grants an `anon` und `authenticated` vergibt.
+Beide wurden produktiv nachgezogen, die Migration im Repository entspricht jetzt demselben Stand,
+und ein neuer Test prüft die Regel generisch für **jede** Funktion der Migration — er hätte den
+Fehler vor dem Anwenden gefunden.
+
+> **Nächster Schritt:** Phase B (Checkout ohne Zahlung). Blockierend bleiben Steuerstatus,
+> Zahlungsanbieter, Mailversand, Lieferländer und Versandkosten.
+
 **V11 ausgeliefert (2026-09-07).** Zwei Warenkorb-Probleme. Migration `0009` ist angewandt,
 der Code ist produktiv.
 

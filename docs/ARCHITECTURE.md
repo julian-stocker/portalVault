@@ -479,3 +479,43 @@ First-Party-Shop (ADR-0032) und die fünf Preisebenen (ADR-0033) sind dokumentie
 Entscheidungen sie nicht verbauen. **Keine Struktur, keine Rolle und keine Zeile Code davon
 existiert.** Der Marketplace-Stopp aus ADR-0021 bleibt unverändert bestehen — ein
 First-Party-Shop mit genau einem Verkäufer ist etwas anderes als ein Marktplatz.
+
+---
+
+## Commerce V1 — Phase A (Migration `0010`, noch nicht angewandt)
+
+Der Shop bekommt Bestellungen, und die Systemgrenze verschiebt sich dabei **nicht**: es kommt kein
+Backend-Service dazu (ADR-0014). Next.js spricht weiterhin direkt mit Supabase, die Regeln liegen
+in der Datenbank, und der Browser bleibt eine Anzeige.
+
+```
+Browser            Warenkorb in localStorage, unverbindlich (ADR-0043)
+   |                 sky_id · condition · quantity — nie ein Preis
+   v
+Server Action      placeOrder()  — prüft die Form eines Entwurfs
+   |
+   v
+PostgreSQL         create_order()
+                     · Preise neu aus shop_price()
+                     · Eignung neu aus is_shop_eligible()
+                     · orders + order_lines + order_addresses + order_events
+                     · reserve_for_order()  → alles oder nichts
+                   eine Transaktion
+```
+
+**Die Missbrauchsgrenze steht in der Datenbank.** Die Server-Action prüft nur die *Form* eines
+Entwurfs. Alles, was wirklich gelten muss, prüft `create_order()` selbst — denn die Action spricht
+mit PostgREST über den Anon-Key und die Besuchersitzung, kommt also als dieselbe Rolle an wie ein
+Browser, der die RPC direkt aufruft. Eine Grenze in TypeScript wäre umgehbar; eine in SQL ist es
+nicht.
+
+**Der Warenkorb bleibt außerhalb.** Er reserviert nichts und weiß nichts über Bestellungen; die
+Reservierung beginnt erst im Checkout (ADR-0050).
+
+**Der Bestand behält eine Architektur.** `convert_order_reservations()` bucht über das bestehende
+`apply_inventory_movement()` — dasselbe Append-only-Journal, derselbe Grund `sale_skyisles`. Es
+gibt keinen zweiten Weg, an dem Bestand vorbei.
+
+**Was Phase A nicht enthält:** Zahlungsanbieter, Webhook, Checkout-Oberfläche, Bestellansicht für
+Kunde oder Betreiber, Rechnung, E-Mail, Widerruf, Retoure, Steuerlogik. Die Reihenfolge und die
+offenen Entscheidungen stehen in `docs/ROADMAP.md`.

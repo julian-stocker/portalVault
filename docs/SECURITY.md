@@ -479,6 +479,73 @@ Anders als `fetchOffers`, das ein fehlendes `0006` zu „keine Angebote" auflös
 keine harmlose Vermutung: eine Menge zu erlauben, die niemand geprüft hat, wäre eine Behauptung
 über den Bestand. Verringern und Entfernen bleiben rein lokal.
 
+**Der Commerce-Kern schreibt nie aus dem Browser** (Migration `0010`, ADR-0049 / ADR-0050,
+noch nicht angewandt). Kein Client-Rolle bekommt `INSERT`, `UPDATE` oder `DELETE` auf `orders`,
+`order_lines`, `order_addresses`, `order_events` oder `order_reservations` — es existiert für keine
+dieser Tabellen eine schreibende Policy. `authenticated` darf ausschließlich **lesen**, und nur die
+eigenen Bestellungen (`user_id = auth.uid()`); `anon` bekommt gar nichts.
+
+Eine **Gastbestellung** hat keine `auth.uid()` und ist damit als Policy nicht ausdrückbar — sie
+bleibt für jeden Client unlesbar, bis die Token-Funktion in einer späteren Phase existiert. Das ist
+der sichere Zwischenzustand, nicht eine Lücke.
+
+`create_order()` ist die **einzige** für `anon`/`authenticated` ausführbare Commerce-Funktion. Die
+Bestandsprimitive — `reserve_for_order()`, `release_expired_reservations()`,
+`release_order_reservations()`, `convert_order_reservations()` — sind allen Rollen entzogen und nur
+serverseitig erreichbar. `reservation_reconciliation` ist für Clients gesperrt: sie zeigt
+Stückzahlen.
+
+**Kein Preis kommt aus dem Browser.** `create_order()` liest jeden Preis über `shop_price()` und
+jede Eignung über `is_shop_eligible()` — dieselben Funktionen wie `shop_offers()`, keine zweite
+Kopie. Der Payload trägt ausschließlich `sky_id`, `condition`, `quantity`, Kontakt und Adresse;
+`src/lib/commerce/order.test.ts` prüft, dass darin kein Feld für Preis, Summe oder Rabatt
+existiert. Auch die Reservierungsfrist bestimmt der Server (`reservation_ttl()`), nie der Aufrufer.
+
+**Bestand horten — das Bedrohungsmodell des Checkouts.** `create_order()` hält echten Bestand für
+20 Minuten und bleibt ohne Konto aufrufbar. Ein Skript könnte damit Einzelstücke dauerhaft
+blockieren; das Zeitlimit hilft nicht, weil nach Ablauf sofort neu reserviert werden kann.
+
+**Die Grenze steht in SQL, nicht in der Server-Action** — und das ist eine Sicherheits-, keine
+Stilentscheidung: Die Anwendung spricht mit PostgREST über den **Anon-Key** und die Besuchersitzung.
+Eine Server-Action und ein direkter RPC-Aufruf aus dem Browser kommen als *dieselbe* Rolle an, und
+der Anon-Key ist absichtlich öffentlich (ADR-0017). Eine Prüfung in TypeScript wäre mit einem
+`curl` umgangen. `enforce_checkout_limits()` zählt deshalb in der Datenbank: offene Checkouts,
+gehaltene Stückzahl und Bestellungen pro Stunde, je Identität — und eine Identität ist Konto
+**oder** E-Mail **oder** Client-Fingerabdruck, weil jede einzelne Dimension in Sekunden gewechselt
+ist.
+
+**Der Fingerabdruck ist keine IP-Adresse.** Gespeichert wird SHA-256 aus Adresse und einem
+zufälligen Salt, der die Datenbank nie verlässt (`commerce_settings.client_salt`, für keine
+Client-Rolle lesbar). **Keine rohe IP wird als Commerce-Datum gespeichert.** Ohne Adresse ist der
+Wert `NULL` und die Dimension entfällt — nie ein gemeinsamer konstanter Eimer. Ein Trigger erlaubt
+ausschließlich das **Löschen** des Werts, und bei Bezahlung entfällt er: eine bezahlte Bestellung
+hat nichts mehr zu drosseln. Datenminimierung, nicht Datensammlung.
+
+**Idempotenz ≠ Missbrauchsschutz.** `orders.request_id` verhindert, dass ein Doppelklick zwei
+Bestellungen erzeugt. Sie ist frei wählbar und schützt vor gar nichts sonst; die beiden Mechanismen
+lösen verschiedene Probleme.
+
+**Öffentliche Commerce-Angriffsfläche nach der Härtung:** genau **eine** Funktion,
+`create_order()`, ausführbar für `anon` und `authenticated`. **Produktiv verifiziert
+(2026-09-07, `verify:commerce` 30/30).** Sie ist die einzige Stelle, die eine
+Bestellung erzeugt, Preise bestimmt, Bestand sperrt und `reserved` erhöht — und sie prüft die
+Grenzen selbst, bevor sie irgendetwas schreibt. `reserve_for_order()`,
+`release_expired_reservations()`, `release_order_reservations()`,
+`convert_order_reservations()`, `enforce_checkout_limits()`, `request_client_hash()`,
+`reservation_ttl()` und `next_order_number()` sind allen Rollen entzogen.
+
+**`REVOKE … FROM PUBLIC` allein genügt in Supabase nicht.** Default-Privileges vergeben EXECUTE auf
+jede neue Funktion im Schema `public` **explizit** an `anon` und `authenticated`; die implizite
+PUBLIC-Vergabe zu entziehen lässt diese beiden bestehen. Genau so waren `reservation_ttl()` und
+`next_order_number()` nach dem ersten Anwenden von `0010` kurzzeitig öffentlich erreichbar —
+letztere ist `volatile` und ruft `nextval()`, ein Aufrufer hätte also Bestellnummern verbrauchen
+können. Jede interne Funktion wird deshalb mit `from public, anon, authenticated` entzogen, und
+`src/lib/commerce/schema.test.ts` prüft diese Regel für **jede** in der Migration definierte
+Funktion, nicht nur für eine Liste.
+
+**Bestandszahlen bleiben unveröffentlicht.** `0010` fügt keine öffentliche Leseflächen hinzu; die
+Regel aus `0006` und `0009` gilt unverändert.
+
 **`src/lib/shop/public-surface.test.ts` hält das fest.** Der Test liest alle Migrationen, ermittelt
 jede für `anon`/`authenticated` ausführbare Funktion (ohne die, die intern `is_shop_admin()`
 verlangen) und weist jede `RETURNS`-Klausel zurück, in der `quantity`, `reserved`,

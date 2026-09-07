@@ -422,6 +422,97 @@ weiterhin keine Bestellung, keinen Checkout und keine Reservierung (ADR-0043). E
 > wird abgelehnt. Wird der Code vor der Migration deployt, kann niemand mehr etwas in den
 > Warenkorb legen. Erst `0009` anwenden, dann deployen.
 
+### 3.3k Commerce-Kern (Migration `0010`, ADR-0049 / ADR-0050)
+
+> **Status: angewandt auf Production (2026-09-07) und verifiziert.** Rein additiv — keine bestehende
+> Tabelle, Spalte oder Funktion wurde verändert. `npm run verify:commerce` meldet 30/30; Bestand,
+> öffentliche Angebote und Sammlungssemantik sind unverändert (`verify:shop` 17/17,
+> `verify:inventory` 34/34, `verify:rls` 105/105, Drift 0).
+>
+> **Nachtrag zu den Rechten:** `reservation_ttl()` und `next_order_number()` waren zunächst nur
+> `from public` entzogen und dadurch für `anon` ausführbar — Supabase vergibt EXECUTE auf neue
+> Funktionen zusätzlich **explizit** an `anon` und `authenticated`. Beide wurden produktiv
+> nachgezogen; die Datei entspricht diesem Stand, sodass eine frische Datenbank dieselben Rechte
+> erhält.
+
+| Tabelle | Inhalt |
+|---|---|
+| `commerce_settings` | Eine Zeile: Missbrauchsgrenzen und das Salt für den Client-Fingerabdruck. Für keine Client-Rolle lesbar. |
+| `orders` | Eine Bestellung. Zugleich die Checkout-Sitzung — es gibt bewusst keine `checkout_sessions`. |
+| `order_lines` | Eingefrorener Positions-Snapshot (ADR-0033): Name, Bild, Einzelpreis, Zeilensumme. |
+| `order_addresses` | Liefer- und optionale Rechnungsadresse, je eine Zeile pro `(order_id, kind)`. |
+| `order_events` | Append-only-Historie: wer, wann, was. Kein Event Sourcing. |
+| `order_reservations` | Was für eine Bestellung im Regal blockiert ist. |
+
+**Zwei Zustandsachsen.** `payment_status` (`pending`, `paid`, `failed`, `expired`, `cancelled`,
+`refunded`, `partially_refunded`) und `fulfillment_status` (`unfulfilled`, `preparing`, `shipped`,
+`completed`, `cancelled`) als CHECK-Constraints, im Stil von `shop_inventory_condition_known`.
+Widerruf, Retoure und Reklamation stehen in **keinem** der beiden.
+
+**Bestellnummer.** `SI-2026-001000`, aus `order_number_seq` als Spalten-Default gesetzt, unique
+und per Trigger unveränderlich. Lücken sind abgebrochene Checkouts. Rechnungsnummern bekommen
+später eine **eigene** Sequenz.
+
+**Kontolöschung.** `orders.user_id` ist `ON DELETE SET NULL`. Eine Bestellung ist ein Beleg mit
+Aufbewahrungspflicht; `customer_email` trägt sie weiter. Dieselbe Regel wie
+`inventory_movements.created_by`.
+
+**Unveränderlichkeit.** Trigger weisen jedes `UPDATE`/`DELETE` auf `order_lines`,
+`order_addresses` und `order_events` ab. Auf `orders` sind Nummer, Beträge, Währung, Kontaktadresse
+und `placed_at` eingefroren; `user_id` darf **nur** auf `NULL` wechseln (das tut die
+Fremdschlüssel-Aktion beim Löschen eines Kontos). `order_reservations` darf den Zustand wechseln,
+aber nicht gelöscht werden.
+
+#### Funktionen
+
+| Funktion | Rechte | Zweck |
+|---|---|---|
+| `reservation_ttl()` | niemand | 20 Minuten. Eine Definition, serverseitig. Entzogen für `public`, `anon` **und** `authenticated`. |
+| `next_order_number()` | niemand | Spalten-Default, race-frei über eine Sequenz. `volatile` — ein Aufrufer könnte Nummern verbrauchen, deshalb ebenfalls für alle drei Rollen entzogen. |
+| `create_order(request_id, email, items, address)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Idempotent über `request_id`. |
+| `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
+| `release_expired_reservations(ids?)` | niemand | Gibt abgelaufenen Halt frei. Idempotent. `NULL` = alles (Zeitgeber), Array = die Positionen eines Checkouts. |
+| `release_order_reservations(order_id)` | niemand | Gibt den Halt einer Bestellung frei. Idempotent. |
+| `convert_order_reservations(order_id)` | niemand | Reservierung → Verkauf: senkt `reserved`, bucht `sale_skyisles` über `apply_inventory_movement()`. Idempotent über den Reservierungszustand. **Wird von nichts gerufen** — die Zahlungsphase ruft sie. |
+
+**`reserved` wird erstmals geschrieben.** Die Spalte existiert seit `0003` genau dafür, also
+funktionieren `available_quantity` (generated), der partielle Index und der Guard in
+`apply_inventory_movement()` ohne Änderung. `reservation_reconciliation` stellt `reserved` der
+Summe aktiver Reservierungen gegenüber; `npm run verify:commerce` verlangt Drift 0.
+
+**Reihenfolge beim Verkaufsabschluss:** erst `reserved` senken, dann buchen. Der Guard
+`quantity + delta >= reserved` würde sonst bei einem Einzelstück an der eigenen Reservierung
+scheitern.
+
+#### Missbrauchsgrenzen
+
+`enforce_checkout_limits()` läuft in `create_order()`, **bevor** irgendetwas geschrieben oder
+gehalten wird. Sie zählt je Identität offene Checkouts (5), gehaltene Stückzahl (25) und
+Bestellungen der letzten Stunde (10); die Werte stehen in `commerce_settings`. Eine Identität ist
+Konto **oder** E-Mail **oder** `orders.client_hash` — eine einzelne Dimension ist zu leicht
+gewechselt. Keine Zählertabelle, kein Zeitgeber: alles wird aus vorhandenem Zustand abgeleitet.
+
+`request_client_hash()` liefert SHA-256 aus Aufrufer-Adresse und `client_salt`, oder `NULL`, wenn
+keine Adresse vorliegt. **Keine rohe Adresse wird gespeichert.** Der Immutability-Trigger erlaubt
+nur, `client_hash` zu löschen.
+
+#### Invarianten werden laut verletzt, nicht still repariert
+
+Freigabe und Konvertierung senken `reserved` mit `... where reserved >= reservation.quantity` und
+werfen bei keinem Treffer `data_corrupted`; die Transaktion rollt vollständig zurück. Es gibt
+deshalb keinen Zustand `converted` ohne Verkaufsbewegung und keinen Zustand `released` mit
+unverändertem `reserved`. Ein früheres `greatest(0, …)` wurde entfernt: es hätte einen bereits
+vorhandenen Datenfehler dauerhaft verborgen.
+
+Nur eine **aktive** Reservierung konvertiert. Eine freigegebene wird nicht wiederbelebt; die
+Konvertierung meldet dann eine kleinere Zahl als die Bestellung Positionen hat, und die
+Zahlungsphase setzt `needs_resolution`, statt zu überverkaufen.
+
+**Nicht enthalten, bewusst:** Steuerfelder (Steuerberater), Provider-Felder (Anbieter offen),
+`payment_attempts` (kommt mit dem Anbieter), Rechnungen, Widerruf, Retoure. `shipping_amount`
+existiert und ist `0`, weil die Summe aus benannten Teilen bestehen muss.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -815,6 +906,12 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
 - Neunte Migration: `0009_shop_quantity_check.sql` — `max_cart_quantity()` und
   `shop_quantity_available()`. Legt nur zwei Funktionen an: keine Tabelle, keine Spalte, keine
   Policy, kein Tabellenrecht, keine Datenzeile. **Angewandt am 2026-09-07**, siehe Abschnitt 3.3j.
+- Zehnte Migration: `0010_commerce_core.sql` — der Commerce-Kern: `orders`, `order_lines`,
+  `order_addresses`, `order_events`, `order_reservations`, die Bestellnummern-Sequenz und die
+  Funktionen für Anlage, Reservierung, Freigabe und Verkaufsabschluss (ADR-0049, ADR-0050).
+  **Rein additiv:** keine bestehende Tabelle wird geändert, keine bestehende Funktion neu signiert,
+  keine Zeile angefasst. **Noch nicht angewandt** (Stand 2026-09-07) und daher gegen keine echte
+  Datenbank getestet; geprüft ist bisher nur der SQL-Vertrag (`src/lib/commerce/schema.test.ts`).
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in
