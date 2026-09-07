@@ -29,9 +29,16 @@ Knopf bleibt **Hinzufügen**, kein Toggle, kein Mengen-Badge auf der Karte.
 = 99; `shop_inventory` und `inventory_movements` für `anon` weiterhin nicht lesbar (`42501`);
 `shop_offers()` weist `quantity`, `reserved`, `available_quantity`, `note` und `unit_cost` an der
 Signatur ab (`42703`). Bestand unverändert, Journal-Drift **0**. `verify:shop` 17/17,
-`verify:inventory` 34/34. Deployment-Smoke gegen die Produktions-URL: `/`, `/cart` und eine
+`verify:inventory` 34/34, `verify:rls` 105/105. Deployment-Smoke gegen die Produktions-URL: `/`, `/cart` und eine
 Figurenseite je HTTP 200, kein freies Zahlenfeld mehr auf `/cart`, Pille/FAB/Toast-Region wie
 erwartet.
+
+*Nachgezogene Prüfung.* `verify:rls` trug noch die Zusicherung „listing without a price is
+refused" aus der Zeit vor `0008` und stand deshalb bei 102/103. ADR-0048 hat den Preiszwang aus
+`set_shop_listing()` bewusst entfernt; die Prüfung ist jetzt umgedreht und prüft beide Hälften der
+Entscheidung getrennt: eine Freigabe **ohne** Preis ist als Admin-Zustand erlaubt, und das
+öffentliche `shop_offers()` führt trotzdem kein Angebot ohne effektiven Preis. Keine Migration,
+keine Semantikänderung, `set_shop_listing()` unangetastet.
 
 > **Offen — manueller Smoke auf einem echten Telefon (~390 px).** In dieser Umgebung ist keine
 > Browser-Automatisierung verfügbar; alle Interaktionsschritte sind ungeprüft. Zu prüfen:
@@ -41,11 +48,6 @@ erwartet.
 > weitere Menge verfügbar." ohne Stückzahl → Minus und Entfernen → zurück zum Katalog, Reload und
 > Cross-Tab: Warenkorb bleibt erhalten.
 
-> **Offen — veraltete Prüfung in `verify:rls`.** Die Zusicherung „listing without a price is
-> refused" (`tools/verify-rls.mts`) stammt aus der Zeit vor `0008` und schlägt fehl: ADR-0048 hat
-> den Preiszwang aus `set_shop_listing()` bewusst entfernt, und `verify:inventory` prüft
-> ausdrücklich das Gegenteil. Nicht durch V11 verursacht — `0009` fasst `set_shop_listing()` nicht
-> an. `verify:rls` steht dadurch bei 102/103.
 
 **V10 gebaut (2026-09-07).** Reine Warenkorb-UX, keine Migration, keine Architekturänderung.
 

@@ -963,13 +963,63 @@ async function main(): Promise<void> {
         freePrice.error ? `rejected: ${freePrice.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
       );
 
+      // ------------------------------------------- release and price, apart
+      //
+      // Until 0007 this pair was one rule: `set_shop_listing()` refused to set
+      // `is_listed = true` without a price, and this verifier asserted the
+      // refusal. ADR-0048 separated them deliberately, and the guard moved to
+      // `shop_offers()`, where it already was:
+      //
+      //   is_listed        may this position be offered at all?   editorial
+      //   buyable now      price + stock + catalog rules          derived
+      //
+      // The point is that "I want to sell this" must not depend on a price
+      // that may not be known yet — a new position could not otherwise be
+      // released at the moment it was created. So the assertion is inverted:
+      // releasing without a price is allowed, and the price rule is checked
+      // where it now lives.
       const listedWithoutPrice = await a.rpc("set_shop_listing", {
         p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_sale_price: null, p_is_listed: true,
       });
+      const releasedUnpriced = await admin
+        .from("shop_inventory")
+        .select("sale_price, is_listed")
+        .eq("id", inventoryId)
+        .maybeSingle();
       check(
-        "listing without a price is refused",
-        !!listedWithoutPrice.error,
-        listedWithoutPrice.error ? `rejected: ${listedWithoutPrice.error.code}` : "RPC SUCCEEDED - CHECK MISSING",
+        "a shop admin may release a position that has no price yet (ADR-0048)",
+        !listedWithoutPrice.error &&
+          releasedUnpriced.data?.is_listed === true &&
+          releasedUnpriced.data?.sale_price === null,
+        listedWithoutPrice.error
+          ? `REJECTED: ${listedWithoutPrice.error.code} - ADR-0048 allows this`
+          : `is_listed=${releasedUnpriced.data?.is_listed}, sale_price=${releasedUnpriced.data?.sale_price ?? "null"}`,
+      );
+
+      // The other half of the same decision, and the reason the first half is
+      // safe: a release is not an offer. Stated as the invariant over the
+      // whole public projection rather than over the fixture alone — the
+      // fixture is inactive, so its absence would also be explained by the
+      // catalog gate and would prove nothing about the price rule.
+      const publicOffers = await anon.rpc("shop_offers");
+      const priceless = (publicOffers.data ?? []).filter(
+        (row: { price: unknown }) => row.price === null || Number(row.price) <= 0,
+      );
+      check(
+        "no public offer exists without an effective price (ADR-0048)",
+        !publicOffers.error && priceless.length === 0,
+        publicOffers.error
+          ? publicOffers.error.message
+          : `${(publicOffers.data ?? []).length} offer(s), ${priceless.length} without a price`,
+      );
+
+      const fixtureOffered = (publicOffers.data ?? []).some(
+        (row: { sky_id: string }) => row.sky_id === SHOP_SKY_ID,
+      );
+      check(
+        "the released-but-priceless fixture reaches no visitor",
+        !fixtureOffered,
+        fixtureOffered ? `${SHOP_SKY_ID} IS PUBLICLY OFFERED` : `${SHOP_SKY_ID} absent from shop_offers()`,
       );
 
       const quantityBeforeListing = (await stockOf("loose"))?.quantity ?? -1;
