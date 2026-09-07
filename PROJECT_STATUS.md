@@ -9,16 +9,17 @@ Die vollständige Änderungshistorie liegt in Git.
 
 **V9 gebaut (2026-09-07).** Reine UX, keine Migration, keine Architekturänderung.
 
-*Kartengeometrie.* Jede Sammlerkarte hat jetzt dieselben festen Zonen — Bild, Name,
-Informationszeile (Marktpreis links, Element rechts), **Aktionszeile**, `Info` —, und die
-Aktionszeile ist immer da: `min-h-10` auf einer stets gerenderten Zeile statt eines Randes, der
-mit dem Kaufknopf erscheint. Zwei Karten derselben Gridzeile stehen damit auf gleicher Höhe,
-gleich ob eine davon kaufbar ist. Die linke Hälfte der Zeile bleibt für eine spätere
-Sammleraktion frei.
+*Kartengeometrie.* Jede Sammlerkarte hat dieselben festen Zonen — Bild, Name, Informationszeile
+(Marktpreis links, Element rechts) und eine gemeinsame **Fußzeile**: `Info` links, der Kauf
+rechts, falls es einen gibt. Die Zeile wird bedingungslos gerendert und bringt ihr eigenes
+`min-h-10` mit, der Rand darüber ist konstant — deshalb sind eine kaufbare und eine nicht
+kaufbare Karte exakt gleich hoch, ohne einen einzigen zustandsabhängigen Rand. Gegenüber der
+ersten V9-Fassung mit eigener Aktionszeile spart das rund 40 px je Karte.
 
-*Kauf und Info.* Der Kauf ist eine kompakte, rechtsbündige Goldpille — Warenkorbsymbol und
-Preis, sonst nichts. `Info` ist ein dezenter Link mit 36 px Trefferfläche statt eines
-Vollbreiten-Knopfes, in derselben Gewichtung wie „Details" auf der Adminkarte.
+*Kauf und Info.* Der Kauf ist eine kompakte Goldpille am rechten Ende — Warenkorbsymbol und
+Preis, sonst nichts. `Info` steht links unten mit Icon, `text-xs font-medium`, 40 px
+Trefferfläche und `shrink-0`, damit es die Pille nie aus der Zeile drängt. Der Zustandswähler
+öffnet als Panel über der Fußzeile, sodass sich die Kartenhöhe nicht bewegt.
 
 *Mobiler Warenkorb.* Ein schwebender Zugang unten rechts, **nur** mit Inhalt, nur unter `md:`,
 nicht für Admins und nicht auf `/cart`. Er sitzt über der unteren Leiste und dem Home-Indikator

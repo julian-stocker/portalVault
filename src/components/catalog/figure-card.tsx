@@ -58,7 +58,6 @@ export function FigureCard({
   toggleLabel,
   nameSlot,
   statusBadge,
-  offerSlot,
   interactive = true,
   muted = false,
 }: {
@@ -103,28 +102,6 @@ export function FigureCard({
   nameSlot?: ReactNode;
   /** A chip over the image, beside where the crown sits. "Verborgen". */
   statusBadge?: ReactNode;
-  /**
-   * The card's action row (V9).
-   *
-   * Three states, and the distinction between the last two is the whole
-   * point of the layout:
-   *
-   *   undefined  no action row at all — the collection showcase and the
-   *              related figures beside a detail page have none
-   *   null       the row is there and empty
-   *   a node     the row is there and holds the buy action
-   *
-   * `null` reserves the row's height, so a figure that can be bought and one
-   * that cannot are exactly the same shape. That is what keeps the name, the
-   * price, the element and the Info link on one line across a grid row,
-   * instead of every card ending wherever its content happened to stop.
-   *
-   * A slot rather than the offer itself, so the card stays a description of a
-   * figure and never learns what an offer is. It sits **outside** the body,
-   * like the footer, so pressing it can never toggle a collection or open a
-   * detail page.
-   */
-  offerSlot?: ReactNode;
   /**
    * Whether the body is a link or a toggle at all. An administrator's card
    * is neither: its actions are named controls in the footer, so nothing
@@ -263,25 +240,23 @@ export function FigureCard({
         </Link>
       )}
 
-      {/* Both are siblings of the body, never children of it: nothing here
-          is nested inside anything clickable, so no event has to be stopped
-          from bubbling for the card's own action to stay correct. */}
-      {offerSlot !== undefined ? (
-        /*
-         * The action row — always this tall, whatever is in it (V9).
-         *
-         * `min-h-10` rather than a margin that appears with the button: an
-         * empty row and a row with a 40 px pill are both 40 px, so nothing
-         * below moves. The left half is deliberately empty, and reserved: a
-         * collector action can join the row later without any card growing.
-         */
-        <div className="relative mt-2.5 flex min-h-10 items-center justify-end gap-2">
-          {offerSlot}
-        </div>
-      ) : null}
-      {footer ? (
-        <div className={`relative ${offerSlot !== undefined ? "mt-0.5" : "mt-2.5"}`}>{footer}</div>
-      ) : null}
+      {/*
+       * The footer, and the only thing below the body (V9.1).
+       *
+       * V9 had two rows here — an action row for the shop and a separate
+       * centred Info link — which cost a card 40 px it did not need and
+       * separated two things that belong on one line. The collector's footer
+       * is now a single row: Info on the left, the buy action on the right.
+       *
+       * A sibling of the body, never a child of it: nothing here is nested
+       * inside anything clickable, so no event has to be stopped from
+       * bubbling for the card's own action to stay correct.
+       *
+       * The margin is constant. Nothing about the footer's height depends on
+       * what is in it — the row that goes in here brings its own minimum, so
+       * a card that can be bought and one that cannot end at the same place.
+       */}
+      {footer ? <div className="relative mt-2">{footer}</div> : null}
     </article>
   );
 }

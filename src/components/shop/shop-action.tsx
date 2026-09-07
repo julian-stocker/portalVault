@@ -95,12 +95,24 @@ export function ShopAction({
   }
 
   if (choosing) {
-    // Open, this grows the row. That is allowed: what has to match across
-    // cards is the resting state, and every card's resting state is one
-    // 40 px row (V9).
+    /*
+     * A panel over the footer, not a row inside it (V9.1).
+     *
+     * The closed state is a pill at the right end of a row it shares with
+     * the Info link. Opening it in flow would either squeeze that link or
+     * make the card taller than its neighbours — so it lifts out instead,
+     * anchored to the footer's bottom edge, and the card's geometry does not
+     * move at all. `bg-card` because it has to be readable over the picture
+     * it covers.
+     */
     return (
-      <div className="flex w-full flex-col gap-1.5">
-        <p className="px-1 text-right text-[11px] leading-tight text-on-card-muted">
+      <div
+        className={
+          "absolute inset-x-0 bottom-0 z-10 flex flex-col gap-1.5 rounded-sky-md " +
+          "bg-card p-1.5 shadow-raised ring-1 ring-card-border"
+        }
+      >
+        <p className="px-1 text-[11px] leading-tight text-on-card-muted">
           {de.shop.chooseCondition}
         </p>
         {buyable.map((offer) => (

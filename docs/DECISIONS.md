@@ -3549,24 +3549,41 @@ Reine UX-Verfeinerung, keine Architekturänderung — deshalb kein eigener ADR.
 **Jede Sammlerkarte hat dieselbe Geometrie, unabhängig davon, ob sie kaufbar ist.** Vorher machte
 ein vorhandenes Angebot die Karte um eine Knopfhöhe länger, also lagen Name, Preis, Element und
 `Info` bei zwei Karten derselben Zeile auf verschiedenen Höhen. Die Karte hat jetzt feste Zonen:
-Bild · Name · Informationszeile (Marktpreis links, Element rechts) · **Aktionszeile** · `Info`.
+Bild · Name · Informationszeile (Marktpreis links, Element rechts) · **Fußzeile**.
 
-**Die Aktionszeile ist immer da.** `FigureCard` unterscheidet drei Fälle: `offerSlot === undefined`
-heißt „diese Fläche gibt es hier nicht" (Sammlung, verwandte Figuren), `null` heißt „die Fläche
-ist da und leer", ein Knoten heißt „die Fläche trägt den Kauf". Die Höhe hält **ein**
-`min-h-10` auf der immer gerenderten Zeile — kein Rand, der mit dem Knopf erscheint, und keine
-zustandsabhängigen Pixelwerte. Die linke Hälfte bleibt bewusst frei: eine spätere Sammleraktion
-kann dort einziehen, ohne dass eine Karte wächst.
+**Die Fußzeile ist eine Zeile, und sie ist immer da.** Links `Info`, rechts der Kauf, falls es
+einen gibt:
+
+```
+[ ⓘ Info                                🛒 4,49 € ]
+[ ⓘ Info                                          ]
+```
+
+Die erste Fassung von V9 trennte beides — eine eigene 40-px-Aktionszeile und darunter ein
+zentrierter `Info`-Link. Das kostete jede Karte 40 px und stellte zwei Dinge auseinander, die
+zusammengehören. Die Zeile wird **bedingungslos** gerendert und bringt ihr eigenes `min-h-10`
+mit; es gibt nirgends ein `offer ? … : …` in der Geometrie, und der Rand darüber ist konstant.
+Deshalb sind eine kaufbare und eine nicht kaufbare Karte exakt gleich hoch. `justify-between` mit
+`Info` als erstem Kind hält den Link links, auch wenn rechts nichts steht.
+
+`FigureCard` hat dafür nur noch **einen** Fußzeilen-Slot; die V9-Unterscheidung
+`offerSlot === undefined | null | Knoten` ist entfallen, weil der Kauf jetzt im Fuß sitzt. Die
+Sammlung behält ihren eigenen Fuß (die Entfernen-Aktion), die verwandten Figuren neben einer
+Detailseite haben gar keinen — beide bleiben damit kompakter, wie vorgesehen.
 
 **Der Kauf ist eine kompakte Pille, rechtsbündig:** Warenkorbsymbol und Preis, 40 px hoch, so
 breit wie ihr Inhalt. Kein Wort dazu — „Kaufen", „Shop" oder der Markenname wiederholten alle nur
-den Kontext. Ist nichts kaufbar, bleibt die Zeile leer: **kein** deaktivierter Knopf, kein
-„Ausverkauft", keine leere sichtbare Pille.
+den Kontext. Ist nichts kaufbar, bleibt rechts einfach nichts: **kein** deaktivierter Knopf, kein
+„Ausverkauft", kein Platzhalter.
 
-**`Info` ist ein Link, kein Knopf.** Vorher war das Unwichtigste auf der Karte ihre schwerste
-Form. Jetzt dieselbe Gewichtung wie „Details" auf der Adminkarte (`ACTION_LINK`), mit 36 px
-Trefferfläche über die volle Breite — es sieht aus wie Text und ist trotzdem tippbar. Damit lesen
-sich Sammler- und Adminkarte als dasselbe Objekt mit verschiedenen Aufgaben.
+**Der Zustandswähler öffnet über der Fußzeile**, nicht in ihr — an deren Unterkante verankert.
+In der Zeile würde er entweder `Info` zusammendrücken oder die Karte höher machen als ihre
+Nachbarn; als Panel bewegt sich die Geometrie überhaupt nicht.
+
+**`Info` ist ein Link, kein Knopf** — links unten, mit Icon, `text-xs font-medium`, 40 px
+Trefferfläche und `shrink-0`, damit er den Kauf nie aus der Zeile drängt. Vorher war das
+Unwichtigste auf der Karte ihre schwerste Form; die zentrierte V9-Zwischenstufe war dann fast
+unsichtbar.
 
 **Ein schwebender Warenkorb auf dem Telefon.** Der Header rollt nach der ersten Kartenreihe weg;
 wer über hundert Figuren scrollt und drei einlegt, musste zum Prüfen nach oben zurück. Der

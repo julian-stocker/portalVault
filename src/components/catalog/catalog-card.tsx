@@ -125,6 +125,9 @@ export function CatalogCard({
    * cart needs no account. Deliberately independent of ownership: somebody
    * who owns a figure may want a second one, and hiding the offer on owned
    * cards would be the shop guessing at that.
+   *
+   * `null` when there is nothing to buy, and null is simply absent from the
+   * footer row — no placeholder, no disabled button, no reserved gap.
    */
   const shop =
     offers.length > 0 ? (
@@ -176,19 +179,35 @@ export function CatalogCard({
     );
   }
 
+  /**
+   * The card's footer, and the whole of it (V9.1).
+   *
+   * One row: Info at the left end, the buy action at the right. V9 kept them
+   * apart — a 40 px action row of its own, then a centred Info link — which
+   * cost every card 40 px and read as two separate decisions when they are
+   * simply the two things a card offers.
+   *
+   * The row is rendered unconditionally and brings its own `min-h-10`, so a
+   * card that can be bought and one that cannot are exactly the same height.
+   * There is no `offer ? … : …` anywhere in the geometry: `shop` is either an
+   * element or nothing, and `justify-between` puts whatever is there in its
+   * place. Info never moves.
+   */
   const footer = (
     <>
-      {/* A link, not a button (V9). It is the quietest thing a card offers,
-          and it used to be the heaviest shape on it. Same weight as the
-          administrator's "Details", so both cards read as one object. */}
-      <Link
-        href={`/skylanders/${figure.slug}`}
-        aria-label={de.catalog.infoFor(figure.displayName)}
-        className={ACTION_LINK}
-      >
-        <InfoGlyph />
-        {de.catalog.info}
-      </Link>
+      <div className="flex min-h-10 items-center justify-between gap-2">
+        <Link
+          href={`/skylanders/${figure.slug}`}
+          aria-label={de.catalog.infoFor(figure.displayName)}
+          className={ACTION_LINK}
+        >
+          <InfoGlyph />
+          {/* Truncates rather than overflowing when the pill beside it is
+              wide; the accessible name on the link is unaffected. */}
+          <span className="truncate">{de.catalog.info}</span>
+        </Link>
+        {shop}
+      </div>
       {failed ? (
         <p role="alert" className="mt-1 text-xs text-danger">
           {de.catalog.collectFailed}
@@ -207,7 +226,6 @@ export function CatalogCard({
         href={signInHref}
         highlighted={highlighted}
         showSeries={false}
-        offerSlot={shop}
         footer={footer}
       />
     );
@@ -222,7 +240,6 @@ export function CatalogCard({
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}
       showSeries={false}
-      offerSlot={shop}
       footer={footer}
     />
   );

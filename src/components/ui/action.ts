@@ -75,18 +75,25 @@ export const ACTION_SHOP =
   "text-center text-sm font-medium bg-accent text-on-accent hover:bg-accent-hover";
 
 /**
- * The quiet link at the foot of a card (V9).
+ * The quiet link at the foot of a card (V9.1).
  *
- * "Info" used to be a full-width ACTION_CARD button, which made the one
- * secondary thing on the card the heaviest shape on it. It is a link now, the
- * same weight as the administrator's "Details" — the two cards should read as
- * the same object with different jobs.
+ * "Info" was a full-width ACTION_CARD button, which made the one secondary
+ * thing on the card the heaviest shape on it; V9 made it a centred text link,
+ * which made it nearly invisible. It sits at the left end of the card's
+ * footer now, a little larger and a little firmer — a link, still, but one
+ * that reads as an action.
  *
- * `min-h-9` and the full width are the touch target: it looks like a text
- * link and is 36 px tall, because the visible ink is not the tappable area.
+ * `min-h-10` is the touch target: 40 px tall, because the visible ink is not
+ * the tappable area. It never stretches, so it cannot push the buy action out
+ * of the row — the two are flex siblings with a gap between them.
+ *
+ * It may, however, shrink. A wide pill ("ab € 58,90") next to this label
+ * exceeds a 161 px card at 390 px, and two `shrink-0` siblings would simply
+ * overflow. So the label truncates instead: the icon and the touch target
+ * stay, the price keeps its full width, and the row keeps its height.
  */
 export const ACTION_LINK =
-  "flex min-h-9 w-full items-center justify-center gap-1 text-[11px] " +
+  "inline-flex min-h-10 min-w-0 items-center gap-1 -mx-1 px-1 text-xs font-medium " +
   "text-on-card-muted underline underline-offset-2 hover:text-on-card";
 
 /**
