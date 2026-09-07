@@ -298,9 +298,9 @@ manuellem Override je Position. Kein abgeleiteter Preis wird gespeichert, also w
 Änderung sofort auf alle automatisch bepreisten Positionen. Die Rabattstufen weiter unten bleiben
 unumgesetzt.
 
-**Umgesetzt (Stand 2026-09-07, ADR-0043 mit dem V7-Nachtrag).** Der Marktwert bleibt Information
-auf der Karte; das Angebot ist eine goldene Kaufaktion darunter, mit Preis und Warenkorbsymbol
-und **ohne** Markennamen. Bei mehreren kaufbaren Zuständen „ab € 9,90" mit Auswahl beim Druck.
+**Umgesetzt (Stand 2026-09-07, ADR-0043 mit den V7/V9-Nachträgen).** Der Marktwert bleibt
+Information auf der Karte; das Angebot ist eine kompakte goldene Pille in der Aktionszeile
+darunter, rechtsbündig, mit Warenkorbsymbol und Preis und **ohne** Markennamen. Bei mehreren kaufbaren Zuständen „ab € 9,90" mit Auswahl beim Druck.
 Ist gerade nichts kaufbar, erscheint **gar keine** Shopfläche — kein „Nicht auf Lager" im
 Sammlerkatalog. Auf der Figurenseite eine Zeile je kaufbarem Zustand. Eine **Stückzahl wird nie**
 angezeigt.

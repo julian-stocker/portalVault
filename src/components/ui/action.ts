@@ -75,6 +75,21 @@ export const ACTION_SHOP =
   "text-center text-sm font-medium bg-accent text-on-accent hover:bg-accent-hover";
 
 /**
+ * The quiet link at the foot of a card (V9).
+ *
+ * "Info" used to be a full-width ACTION_CARD button, which made the one
+ * secondary thing on the card the heaviest shape on it. It is a link now, the
+ * same weight as the administrator's "Details" — the two cards should read as
+ * the same object with different jobs.
+ *
+ * `min-h-9` and the full width are the touch target: it looks like a text
+ * link and is 36 px tall, because the visible ink is not the tappable area.
+ */
+export const ACTION_LINK =
+  "flex min-h-9 w-full items-center justify-center gap-1 text-[11px] " +
+  "text-on-card-muted underline underline-offset-2 hover:text-on-card";
+
+/**
  * Owning something is a state of the showcase, not a completed task
  * (ADR-0038). So it is not a filled success button and carries no check
  * glyph — it is a quiet chip that happens to also be the way to undo.

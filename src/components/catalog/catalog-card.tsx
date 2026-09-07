@@ -32,7 +32,7 @@ import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
 import { InlineName } from "@/components/admin/inline-name";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { ShopAction } from "@/components/shop/shop-action";
-import { ACTION_CARD } from "@/components/ui/action";
+import { ACTION_LINK } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { imageSrc } from "@/lib/catalog/image";
@@ -45,7 +45,7 @@ function InfoGlyph() {
     <svg
       aria-hidden="true"
       viewBox="0 0 16 16"
-      className="h-3.5 w-3.5 shrink-0"
+      className="h-3 w-3 shrink-0"
       fill="none"
       stroke="currentColor"
       strokeWidth="1.5"
@@ -178,10 +178,13 @@ export function CatalogCard({
 
   const footer = (
     <>
+      {/* A link, not a button (V9). It is the quietest thing a card offers,
+          and it used to be the heaviest shape on it. Same weight as the
+          administrator's "Details", so both cards read as one object. */}
       <Link
         href={`/skylanders/${figure.slug}`}
         aria-label={de.catalog.infoFor(figure.displayName)}
-        className={`${ACTION_CARD} gap-1.5`}
+        className={ACTION_LINK}
       >
         <InfoGlyph />
         {de.catalog.info}

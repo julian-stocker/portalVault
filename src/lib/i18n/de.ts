@@ -393,6 +393,9 @@ export const de = {
   cart: {
     title: "Warenkorb",
     open: "Warenkorb öffnen",
+    /** Für den schwebenden Zugang: die Zahl gehört in den Namen, nicht daneben. */
+    openWith: (n: number) =>
+      n === 1 ? "Warenkorb öffnen, 1 Artikel" : `Warenkorb öffnen, ${n} Artikel`,
     /** Fürs Badge: Stück, nicht Positionen. */
     pieces: (n: number) => (n === 1 ? "1 Artikel" : `${n} Artikel`),
     empty: "Der Warenkorb ist leer.",

@@ -7,6 +7,24 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**V9 gebaut (2026-09-07).** Reine UX, keine Migration, keine Architekturänderung.
+
+*Kartengeometrie.* Jede Sammlerkarte hat jetzt dieselben festen Zonen — Bild, Name,
+Informationszeile (Marktpreis links, Element rechts), **Aktionszeile**, `Info` —, und die
+Aktionszeile ist immer da: `min-h-10` auf einer stets gerenderten Zeile statt eines Randes, der
+mit dem Kaufknopf erscheint. Zwei Karten derselben Gridzeile stehen damit auf gleicher Höhe,
+gleich ob eine davon kaufbar ist. Die linke Hälfte der Zeile bleibt für eine spätere
+Sammleraktion frei.
+
+*Kauf und Info.* Der Kauf ist eine kompakte, rechtsbündige Goldpille — Warenkorbsymbol und
+Preis, sonst nichts. `Info` ist ein dezenter Link mit 36 px Trefferfläche statt eines
+Vollbreiten-Knopfes, in derselben Gewichtung wie „Details" auf der Adminkarte.
+
+*Mobiler Warenkorb.* Ein schwebender Zugang unten rechts, **nur** mit Inhalt, nur unter `md:`,
+nicht für Admins und nicht auf `/cart`. Er sitzt über der unteren Leiste und dem Home-Indikator
+und liest denselben Store wie das Header-Symbol — kein zweiter Warenkorb.
+
+
 **V8 gebaut, Migration `0008` NOCH NICHT ausgeführt (2026-09-07, ADR-0048).** Der Shop wird
 **Opt-out statt Opt-in**: vorhandener Bestand wird angeboten, sofern niemand widerspricht.
 

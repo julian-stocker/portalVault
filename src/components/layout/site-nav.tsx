@@ -25,6 +25,7 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 
 import { CartBadge } from "@/components/cart/cart-badge";
+import { FloatingCart } from "@/components/cart/floating-cart";
 import { Wordmark } from "@/components/layout/wordmark";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
@@ -186,6 +187,17 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
   const active = activeSection(pathname ?? "/");
   const items = itemsFor(signedIn, admin);
 
+  /**
+   * The floating cart belongs to the same question as the header badge —
+   * "where is my cart" — so it is mounted here, once, rather than by every
+   * page that might want it (V9).
+   *
+   * Not for the operator, for the same reason the badge is not: SkyIsles
+   * does not buy from itself (ADR-0042). Not on /cart either — a shortcut to
+   * the page you are already on is a control with nothing to do.
+   */
+  const floatingCart = !admin && active !== "cart";
+
   return (
     // Dark glass over the sky, closed by a gold hairline. `border-b` carries
     // the gold rather than a separate element, so nothing can drift out of
@@ -248,6 +260,8 @@ export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?
           </div>
         )}
       </div>
+
+      {floatingCart ? <FloatingCart /> : null}
 
       <nav
         aria-label={de.nav.primary}

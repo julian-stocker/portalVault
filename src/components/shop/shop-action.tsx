@@ -2,8 +2,10 @@
  * Buying, on a catalog card.
  *
  * V7 moved the shop off the market-price line and down into the card's action
- * row. The two were sitting one under the other, in the same block, in the
- * same size, and they are not the same kind of fact:
+ * row; V9 made it small. A full-width gold button was the loudest thing on a
+ * card that is meant to be a display piece, and it made a card you can buy
+ * structurally different from one you cannot. The two facts it separates are
+ * still these:
  *
  *   market price   neutral information about the object — what it is worth
  *   shop offer     an action — what SkyIsles will sell you one for
@@ -46,15 +48,19 @@ export function conditionLabel(condition: OfferCondition): string {
 }
 
 /**
- * Warm gold on the ivory card.
+ * A compact gold pill, not a bar (V9).
  *
  * `--accent` with `--on-accent` ink: the tokens the product already uses for
  * its one warm action colour, so nothing new is invented and the button
  * belongs to the same family as the collection frame and the header badge.
- * 40 px tall — a real touch target that still leaves the card a card.
+ *
+ * 40 px tall and only as wide as its content — a real touch target that
+ * leaves the card a card. It carries a cart glyph and a price and no word:
+ * "Kaufen", "Shop" or the brand name would all repeat what the context
+ * already says.
  */
 const BUY =
-  "flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-full px-3 " +
+  "inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-3 " +
   "bg-accent text-on-accent text-[13px] font-semibold tabular-nums " +
   "shadow-card transition-colors hover:bg-accent-hover";
 
@@ -89,9 +95,12 @@ export function ShopAction({
   }
 
   if (choosing) {
+    // Open, this grows the row. That is allowed: what has to match across
+    // cards is the resting state, and every card's resting state is one
+    // 40 px row (V9).
     return (
-      <div className="flex flex-col gap-1.5">
-        <p className="px-1 text-[11px] leading-tight text-on-card-muted">
+      <div className="flex w-full flex-col gap-1.5">
+        <p className="px-1 text-right text-[11px] leading-tight text-on-card-muted">
           {de.shop.chooseCondition}
         </p>
         {buyable.map((offer) => (
@@ -103,7 +112,7 @@ export function ShopAction({
               `${name} (${conditionLabel(offer.condition)})`,
               formatPrice(offer.price),
             )}
-            className={`${BUY} justify-between`}
+            className={`${BUY} w-full justify-between`}
           >
             <span className="font-medium">{conditionLabel(offer.condition)}</span>
             <span className="flex items-center gap-1.5">
@@ -120,32 +129,28 @@ export function ShopAction({
   if (summary.kind === "single") {
     const offer = buyable.find((o) => o.price === summary.price) ?? buyable[0];
     return (
-      <div className="flex">
-        <button
-          type="button"
-          onClick={() => put(offer)}
-          aria-label={de.shop.addToCartFor(name, formatPrice(summary.price))}
-          className={BUY}
-        >
-          <CartGlyph />
-          {added ? de.shop.inCart : formatPrice(summary.price)}
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={() => put(offer)}
+        aria-label={de.shop.addToCartFor(name, formatPrice(summary.price))}
+        className={BUY}
+      >
+        <CartGlyph />
+        {added ? de.shop.inCart : formatPrice(summary.price)}
+      </button>
     );
   }
 
   return (
-    <div className="flex">
-      <button
-        type="button"
-        onClick={() => setChoosing(true)}
-        aria-label={de.shop.chooseConditionFor(name)}
-        aria-expanded={false}
-        className={BUY}
-      >
-        <CartGlyph />
-        {de.shop.offerFrom(formatPrice(summary.price))}
-      </button>
-    </div>
+    <button
+      type="button"
+      onClick={() => setChoosing(true)}
+      aria-label={de.shop.chooseConditionFor(name)}
+      aria-expanded={false}
+      className={BUY}
+    >
+      <CartGlyph />
+      {de.shop.offerFrom(formatPrice(summary.price))}
+    </button>
   );
 }

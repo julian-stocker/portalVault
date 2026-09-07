@@ -115,6 +115,24 @@ describe("what the card says", () => {
     expect(action).toContain("text-on-accent");
     expect(action).not.toMatch(/#[0-9a-fA-F]{6}/);
   });
+
+  it("is a compact pill, not a bar", () => {
+    // V9: a full-width gold button made a card you can buy structurally
+    // different from one you cannot, and it was the loudest thing on a
+    // display piece.
+    expect(action).toContain("inline-flex h-10 shrink-0");
+    expect(action).not.toMatch(/const BUY =[\s\S]{0,200}flex-1/);
+    expect(action).not.toMatch(/const BUY =[\s\S]{0,200}w-full/);
+  });
+
+  it("carries a glyph and a price and no word", () => {
+    // "Kaufen", "Shop" or the brand would all repeat the context.
+    for (const word of ["Kaufen", "Shop", "SkyIsles", "Angebot"]) {
+      expect(action).not.toContain(`de.shop.${word.toLowerCase()}`);
+    }
+    expect(action).toContain("<CartGlyph />");
+    expect(action).toContain("formatPrice(summary.price)");
+  });
 });
 
 describe("the market price stays information", () => {
@@ -139,10 +157,10 @@ describe("click boundaries", () => {
   const figure = code(FIGURE);
 
   it("puts the buy action outside the clickable body", () => {
-    // The body is a link or a toggle; the offer and the footer are siblings
-    // of it, so nothing needs an event stopped from bubbling.
-    const tail = figure.slice(figure.indexOf("{offerSlot ?"));
-    expect(tail).toContain("{offerSlot ?");
+    // The body is a link or a toggle; the action row and the footer are
+    // siblings of it, so nothing needs an event stopped from bubbling.
+    const tail = figure.slice(figure.indexOf("{offerSlot !== undefined ?"));
+    expect(tail).toContain("{offerSlot !== undefined ?");
     expect(tail).toContain("{footer ?");
     const body = figure.slice(figure.indexOf("const inner = ("), figure.indexOf("const bodyClass"));
     // Neither is rendered inside the body — the word may appear in a JSX
@@ -159,7 +177,9 @@ describe("click boundaries", () => {
   });
 
   it("keeps a 40 px touch target", () => {
-    expect(code(ACTION)).toContain("min-h-10");
+    // `h-10` exactly, so the pill is the same height as the empty row it
+    // sits in — that is what keeps every card the same shape (V9).
+    expect(code(ACTION)).toContain("h-10");
   });
 });
 
@@ -193,5 +213,71 @@ describe("the cart is untouched by any of this", () => {
     expect(action).not.toContain(".rpc(");
     expect(action).not.toContain("reserved");
     expect(action).not.toContain("use server");
+  });
+});
+
+
+describe("every card is the same shape (V9)", () => {
+  const figure = code(FIGURE);
+  const card = code(CARD);
+
+  it("reserves the action row whether or not there is an offer", () => {
+    // `undefined` means "no such zone"; `null` means "the zone is here and
+    // empty". That distinction is what keeps the Info link on one line
+    // across a grid row.
+    expect(figure).toContain("{offerSlot !== undefined ?");
+    expect(figure).toContain("flex min-h-10 items-center justify-end");
+  });
+
+  it("hands the row to every collector card, offer or not", () => {
+    // `shop` is null when nothing is buyable, and the prop is passed either
+    // way — so both branches render the row.
+    expect(card).toContain("offers.length > 0 ? (");
+    expect((card.match(/offerSlot=\{shop\}/g) ?? []).length).toBe(2);
+  });
+
+  it("gives the showcase no action row at all", () => {
+    // The collection and the related figures beside a detail page pass no
+    // slot, so they keep their old, tighter card.
+    const collection = code("src/components/collection/collection-view.tsx");
+    expect(collection).not.toContain("offerSlot");
+    const detail = code("src/app/(public)/skylanders/[slug]/page.tsx");
+    expect(detail).not.toContain("offerSlot");
+  });
+
+  it("holds the row's height in CSS, not in per-state margins", () => {
+    // One `min-h-10` on an always-present row, rather than a margin that
+    // appears with the button.
+    const tail = figure.slice(figure.indexOf("{offerSlot !== undefined ?"));
+    expect(tail).not.toMatch(/offerSlot \?[^:]*mt-/);
+    expect(tail).toContain('offerSlot !== undefined ? "mt-0.5" : "mt-2.5"');
+  });
+
+  it("leaves the left of the row free for a later collector action", () => {
+    expect(figure).toContain("justify-end");
+  });
+});
+
+describe("the Info link (V9)", () => {
+  const card = code(CARD);
+
+  it("is a quiet link, not a full-width button", () => {
+    expect(card).toContain("ACTION_LINK");
+    expect(card).not.toContain("ACTION_CARD");
+    const action = readFileSync("src/components/ui/action.ts", "utf8");
+    expect(action).toContain("export const ACTION_LINK");
+    // Same weight as the administrator's "Details".
+    expect(action).toMatch(/ACTION_LINK =[\s\S]{0,200}underline/);
+  });
+
+  it("keeps a real touch target even though it reads as text", () => {
+    const action = readFileSync("src/components/ui/action.ts", "utf8");
+    expect(action).toMatch(/ACTION_LINK =[\s\S]{0,200}min-h-9/);
+    expect(action).toMatch(/ACTION_LINK =[\s\S]{0,200}w-full/);
+  });
+
+  it("still opens the figure's page, with an accessible name", () => {
+    expect(card).toContain("href={`/skylanders/${figure.slug}`}");
+    expect(card).toContain("aria-label={de.catalog.infoFor(figure.displayName)}");
   });
 });

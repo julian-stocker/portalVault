@@ -3439,8 +3439,10 @@ dem Katalog, den er verwaltet (ADR-0042). Abwesend, nicht deaktiviert.
 **Marktpreis ist Information, das Angebot ist eine Aktion.** Beide standen untereinander im
 selben Block der Karte, in derselben Größe, und sind nicht dieselbe Art von Aussage. Der
 Marktwert bleibt, wo Information steht, und bekommt den Elementchip als ruhiges Statusfeld an
-die rechte Seite derselben Zeile. Der Kauf zieht nach unten in die Aktionsreihe, als goldener
-Knopf aus den vorhandenen `--accent`-Tokens — kein neuer Farbwert.
+die rechte Seite derselben Zeile. Der Kauf zieht nach unten in die Aktionsreihe, aus den
+vorhandenen `--accent`-Tokens — kein neuer Farbwert. *(Größe und Form davon präzisiert der
+V9-Nachtrag am Ende dieser Datei: eine kompakte Pille statt eines Knopfes über die volle
+Breite.)*
 
 Auf dem Knopf steht **kein Markenname** mehr: „SkyIsles 4,49 €" sagte in einem Wort, was die
 Website ohnehin sagt. Nur Preis und Warenkorbsymbol.
@@ -3538,3 +3540,43 @@ nichts verkauft wird, **ohne** den Schalter abzudunkeln, der ja an ist.
 `set_shop_listing()` mit `is_shop_admin()`), die öffentliche Projektion (vier Werte, nie eine
 Stückzahl), der Warenkorb (lokal, keine Reservierung, Serverdaten gewinnen) und der abgeschlossene
 Legacy-Import.
+
+
+### Nachtrag 2026-09-07 — Kartengeometrie und mobiler Warenkorb, V9 (zu ADR-0038 und ADR-0043)
+
+Reine UX-Verfeinerung, keine Architekturänderung — deshalb kein eigener ADR.
+
+**Jede Sammlerkarte hat dieselbe Geometrie, unabhängig davon, ob sie kaufbar ist.** Vorher machte
+ein vorhandenes Angebot die Karte um eine Knopfhöhe länger, also lagen Name, Preis, Element und
+`Info` bei zwei Karten derselben Zeile auf verschiedenen Höhen. Die Karte hat jetzt feste Zonen:
+Bild · Name · Informationszeile (Marktpreis links, Element rechts) · **Aktionszeile** · `Info`.
+
+**Die Aktionszeile ist immer da.** `FigureCard` unterscheidet drei Fälle: `offerSlot === undefined`
+heißt „diese Fläche gibt es hier nicht" (Sammlung, verwandte Figuren), `null` heißt „die Fläche
+ist da und leer", ein Knoten heißt „die Fläche trägt den Kauf". Die Höhe hält **ein**
+`min-h-10` auf der immer gerenderten Zeile — kein Rand, der mit dem Knopf erscheint, und keine
+zustandsabhängigen Pixelwerte. Die linke Hälfte bleibt bewusst frei: eine spätere Sammleraktion
+kann dort einziehen, ohne dass eine Karte wächst.
+
+**Der Kauf ist eine kompakte Pille, rechtsbündig:** Warenkorbsymbol und Preis, 40 px hoch, so
+breit wie ihr Inhalt. Kein Wort dazu — „Kaufen", „Shop" oder der Markenname wiederholten alle nur
+den Kontext. Ist nichts kaufbar, bleibt die Zeile leer: **kein** deaktivierter Knopf, kein
+„Ausverkauft", keine leere sichtbare Pille.
+
+**`Info` ist ein Link, kein Knopf.** Vorher war das Unwichtigste auf der Karte ihre schwerste
+Form. Jetzt dieselbe Gewichtung wie „Details" auf der Adminkarte (`ACTION_LINK`), mit 36 px
+Trefferfläche über die volle Breite — es sieht aus wie Text und ist trotzdem tippbar. Damit lesen
+sich Sammler- und Adminkarte als dasselbe Objekt mit verschiedenen Aufgaben.
+
+**Ein schwebender Warenkorb auf dem Telefon.** Der Header rollt nach der ersten Kartenreihe weg;
+wer über hundert Figuren scrollt und drei einlegt, musste zum Prüfen nach oben zurück. Der
+schwebende Zugang zeigt **Symbol und Anzahl** (nicht die Summe — die Anzahl ist die Frage, und
+eine Summe kostet Breite, die ein schwebendes Element auf 390 px nicht nehmen sollte), sitzt
+rechts **über** der unteren Leiste und dem Home-Indikator
+(`2.75rem + env(safe-area-inset-bottom) + 0.75rem`, dieselben Werte wie `NavSpacer`), und führt
+nach `/cart`.
+
+Er erscheint **nur mit Inhalt** — ein leerer Warenkorb lässt den Katalog in Ruhe —, nur unterhalb
+`md:` (darüber steht der Header ohnehin), nicht für den Betreiber (ADR-0042) und nicht auf
+`/cart` selbst. Montiert **einmal**, in der Navigation, nicht von jeder Seite einzeln. Er liest
+denselben Store wie das Header-Symbol: kein zweiter Warenkorb, kein Provider, kein Serveraufruf.

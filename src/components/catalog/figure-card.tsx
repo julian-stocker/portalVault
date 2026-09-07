@@ -104,13 +104,25 @@ export function FigureCard({
   /** A chip over the image, beside where the crown sits. "Verborgen". */
   statusBadge?: ReactNode;
   /**
-   * The buy action, above the footer (ADR-0043, V7).
+   * The card's action row (V9).
    *
-   * A slot rather than the offer itself, so the card stays a description of
-   * a figure: the catalog fills it, the collection and the related figures
-   * beside a detail page leave it empty, and this file never learns what an
-   * offer is. It sits **outside** the body, like the footer, so pressing it
-   * can never toggle a collection or open a detail page.
+   * Three states, and the distinction between the last two is the whole
+   * point of the layout:
+   *
+   *   undefined  no action row at all — the collection showcase and the
+   *              related figures beside a detail page have none
+   *   null       the row is there and empty
+   *   a node     the row is there and holds the buy action
+   *
+   * `null` reserves the row's height, so a figure that can be bought and one
+   * that cannot are exactly the same shape. That is what keeps the name, the
+   * price, the element and the Info link on one line across a grid row,
+   * instead of every card ending wherever its content happened to stop.
+   *
+   * A slot rather than the offer itself, so the card stays a description of a
+   * figure and never learns what an offer is. It sits **outside** the body,
+   * like the footer, so pressing it can never toggle a collection or open a
+   * detail page.
    */
   offerSlot?: ReactNode;
   /**
@@ -254,8 +266,22 @@ export function FigureCard({
       {/* Both are siblings of the body, never children of it: nothing here
           is nested inside anything clickable, so no event has to be stopped
           from bubbling for the card's own action to stay correct. */}
-      {offerSlot ? <div className="relative mt-2.5">{offerSlot}</div> : null}
-      {footer ? <div className={`relative ${offerSlot ? "mt-1.5" : "mt-2.5"}`}>{footer}</div> : null}
+      {offerSlot !== undefined ? (
+        /*
+         * The action row — always this tall, whatever is in it (V9).
+         *
+         * `min-h-10` rather than a margin that appears with the button: an
+         * empty row and a row with a 40 px pill are both 40 px, so nothing
+         * below moves. The left half is deliberately empty, and reserved: a
+         * collector action can join the row later without any card growing.
+         */
+        <div className="relative mt-2.5 flex min-h-10 items-center justify-end gap-2">
+          {offerSlot}
+        </div>
+      ) : null}
+      {footer ? (
+        <div className={`relative ${offerSlot !== undefined ? "mt-0.5" : "mt-2.5"}`}>{footer}</div>
+      ) : null}
     </article>
   );
 }
