@@ -382,9 +382,9 @@ Synchronisationsschritt: `shop_offers()` liest den Bestand live.
 
 ### 3.3j Mengenprüfung für den Warenkorb (Migration `0009`)
 
-> **Status: geschrieben, noch nicht angewandt.** Die Migration liegt im Repository und ist in
-> keiner Umgebung eingespielt. Sie muss **vor** dem Deployment des zugehörigen Anwendungscodes
-> angewandt werden — siehe die Warnung am Ende dieses Abschnitts.
+> **Status: angewandt (2026-09-07).** Produktiv verifiziert: beide Funktionen existieren, sind für
+> `anon` und `authenticated` ausführbar, und `anon` kann `shop_inventory` und
+> `inventory_movements` weiterhin nicht lesen (`42501`). Bestand unverändert, Journal-Drift 0.
 
 `public.shop_quantity_available(p_sky_id text, p_condition text, p_quantity integer)` →
 `boolean`. `stable`, `security definer`, `set search_path = ''`, ausführbar für `anon` und
@@ -814,8 +814,7 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   Reservierung, keinen Preis, erzeugt keine Bewegung und setzt niemals `false`. Idempotent.
 - Neunte Migration: `0009_shop_quantity_check.sql` — `max_cart_quantity()` und
   `shop_quantity_available()`. Legt nur zwei Funktionen an: keine Tabelle, keine Spalte, keine
-  Policy, kein Tabellenrecht, keine Datenzeile. **Noch nicht angewandt** (Stand 2026-09-07); der
-  zugehörige Anwendungscode ist fail closed und braucht sie, siehe Abschnitt 3.3j.
+  Policy, kein Tabellenrecht, keine Datenzeile. **Angewandt am 2026-09-07**, siehe Abschnitt 3.3j.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in
