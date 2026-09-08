@@ -73,10 +73,12 @@ describe("the migration stays additive", () => {
     }
   });
 
-  it("is the twelfth migration and touches no earlier one", () => {
+  it("sits in the numbered sequence without disturbing it", () => {
     const files = readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")).sort();
-    expect(files[files.length - 1]).toBe("0012_payment_core.sql");
-    expect(files).toHaveLength(12);
+    expect(files).toContain("0012_payment_core.sql");
+    // Contiguous numbering from 0001, no gaps and no duplicates.
+    const numbers = files.map((f) => Number(f.slice(0, 4)));
+    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });
 });
 

@@ -182,8 +182,80 @@ select cron.schedule(
 );
 ```
 
-Fünf Minuten bei zwanzig Minuten Haltedauer. `cron.schedule` mit gleichem Namen **aktualisiert**
-den bestehenden Job, legt also keinen zweiten an — mehrfaches Ausführen ist ungefährlich. Der Job
-läuft als `postgres` und darf die Funktion deshalb aufrufen, **ohne dass ein Grant geöffnet werden
-muss**; genau das ist der Grund gegen einen öffentlichen HTTP-Endpunkt. Prüfen mit
-`select jobname, schedule, active from cron.job;`.
+Fünf Minuten bei zwanzig Minuten Haltedauer. Der Job läuft als `postgres` und darf die Funktion
+deshalb aufrufen, **ohne dass ein Grant geöffnet werden muss** — genau das ist der Grund gegen
+einen öffentlichen HTTP-Endpunkt.
+
+**Vorher abmelden, statt sich auf Namensverhalten zu verlassen.** Eine frühere Fassung dieses
+Abschnitts behauptete, `cron.schedule` mit gleichem Namen aktualisiere den bestehenden Job. Das ist
+in der pg_cron-Dokumentation **nicht zugesichert**, und Quellen widersprechen sich — pg_cron lässt
+doppelte Jobnamen grundsätzlich zu. Deshalb wird nicht darauf gebaut:
+
+```sql
+select cron.unschedule('expire-stale-checkouts')
+ where exists (select 1 from cron.job where jobname = 'expire-stale-checkouts');
+```
+
+Danach erst `cron.schedule(...)`. Prüfen mit
+`select jobid, jobname, schedule, active from cron.job;` — dort darf der Name **genau einmal**
+stehen.
+
+---
+
+## Rollout mit zwei `create_order()`-Signaturen (B2.2a)
+
+Migration `0013` fügt `create_order()` ein sechstes Argument hinzu — die
+Zahlungsfähigkeit. Eine Argumentliste lässt sich in PostgreSQL nicht in place
+erweitern, und die alte Fassung einfach zu ersetzen würde ein Loch von der
+Länge eines Deployments öffnen: Die Migration liegt, Vercel liefert noch den
+vorherigen Commit aus, dessen Kasse ruft die Fünf-Argument-Funktion, und
+PostgREST antwortet `PGRST202`. Jede Bestellung in diesem Fenster schlägt fehl.
+
+**Deshalb existieren beide für die Überfahrt.** `0013` droppt nichts.
+
+| Aufrufende Argumentnamen | Aufgelöst auf |
+|---|---|
+| `request_id, email, items, address, shipping_method` | alte Fassung (0011), Shim |
+| … `+ payment_token` | neue Fassung (0013), kanonisch |
+
+**Warum das eindeutig ist:** Die beiden unterscheiden sich in Stelligkeit *und*
+Argumentnamen, und `p_payment_token` hat **keinen DEFAULT**. Mit einem Default
+würde ein Fünf-Namen-Aufruf auf **beide** passen, und PostgREST wiese ihn als
+mehrdeutig zurück, statt eine zu wählen. Ein Test hält das fest.
+
+**Bestellungen über den Shim** tragen `payment_token_hash = NULL`. Das ist die
+ehrliche Folge und bewusst nicht kaschiert: Es wurde keine Fähigkeit vorgelegt,
+also wird keine vermerkt. Ein serverseitig erfundener Hash, dessen Klartext
+niemand besitzt, wäre keine Fähigkeit, sondern nur ein Wert, der wie eine
+aussieht. Solche Bestellungen können **nie** per Gast-Fähigkeit bezahlt werden;
+für angemeldete Besitzer bleibt der `user_id`-Pfad unberührt. Zahlung ist in
+diesem Fenster ohnehin für niemanden freigeschaltet.
+
+### Reihenfolge
+
+1. `0013` anwenden — danach funktionieren **beide** Signaturen.
+2. Runtime prüfen: alte und neue Signatur je aufrufbar, Spalte vorhanden,
+   `authorize_order_payment()` für Clients gesperrt.
+3. Neuen Code committen, pushen, deployen.
+4. Smoke: Kasse lädt, der neue Build ruft nachweislich die Sechs-Argument-Fassung,
+   Request-ID und Fähigkeit entstehen stabil im Browser.
+5. **Erst danach** die Aufräum-Migration.
+
+### Aufräum-Migration — noch nicht angelegt
+
+Sie besteht aus einer Anweisung:
+
+```sql
+drop function if exists public.create_order(text, text, jsonb, jsonb, text);
+```
+
+Eindeutig, weil sich die beiden in der Stelligkeit unterscheiden. **Die Datei
+existiert absichtlich noch nicht:** eine Migration im Ordner, die noch nicht
+angewandt werden darf, ist eine geladene Waffe — sie würde den Grundsatz
+brechen, dass `supabase/migrations/` den produktiven Stand abbildet. Sie wird
+angelegt, wenn entschieden ist, ob sie unmittelbar nach dem Deployment oder mit
+dem nächsten Commerce-Schritt läuft.
+
+Bis dahin ist die alte Fassung **in der Datenbank selbst** als temporär
+gekennzeichnet (`comment on function`), damit niemand später zwei
+`create_order` findet und raten muss.

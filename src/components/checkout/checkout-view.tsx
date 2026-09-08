@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { useCart } from "@/components/cart/use-cart";
+import { newCheckoutCredentials, type CheckoutCredentials } from "@/lib/commerce/capability";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { cartTotal, keyOf, resolveCart } from "@/lib/cart/cart";
 import { placeOrder, shippingOptions, type PlacedOrder } from "@/lib/commerce/actions";
@@ -118,6 +119,23 @@ export function CheckoutView({
   // both get past it — the same guard `useAddToCart` uses.
   const busy = useRef(false);
 
+  /*
+   * One request id and one payment capability for this whole checkout
+   * attempt, generated in the browser and kept stable across retries.
+   *
+   * Stable is the point. A fresh request id on a retry would create a second
+   * order and hold a second lot of stock; a fresh capability would fail to
+   * prove ownership of the first. Held in a ref rather than state so a
+   * re-render cannot mint new ones.
+   *
+   * They live in memory only. A reload loses them, and the order that was
+   * already placed simply expires with its reservation — acceptable while
+   * there is no payment step. Surviving a reload is part of the guest order
+   * access that comes with the confirmation mail, not of this phase.
+   */
+  const credentials = useRef<CheckoutCredentials | null>(null);
+  if (credentials.current === null) credentials.current = newCheckoutCredentials();
+
   const entries = resolveCart(cart, offerIndex(offers));
   const purchasable = entries.filter((entry) => entry.purchasable);
   const subtotal = cartTotal(entries);
@@ -147,16 +165,19 @@ export function CheckoutView({
 
     try {
       const { email: contact, ...address } = fields;
-      const result = await placeOrder({
-        email: contact,
-        address,
-        shippingMethod: method,
-        items: purchasable.map((entry) => ({
-          skyId: entry.line.skyId,
-          condition: entry.line.condition,
-          quantity: entry.line.quantity,
-        })),
-      });
+      const result = await placeOrder(
+        {
+          email: contact,
+          address,
+          shippingMethod: method,
+          items: purchasable.map((entry) => ({
+            skyId: entry.line.skyId,
+            condition: entry.line.condition,
+            quantity: entry.line.quantity,
+          })),
+        },
+        credentials.current!,
+      );
 
       if (result.ok) {
         // The order and its reservation are real now, so the basket has done

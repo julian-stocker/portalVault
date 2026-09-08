@@ -280,12 +280,18 @@ describe("the server action stays a wrapper", () => {
   });
 
   it("makes a double submit harmless", () => {
-    expect(action).toContain("p_request_id");
-    expect(action).toContain("randomUUID()");
+    // Since B2.2a the browser owns both identifiers and keeps them stable
+    // across retries — the server minting a fresh id per call was the bug
+    // that made a lost response create a second order.
+    expect(action).toContain("p_request_id: credentials.requestId");
+    expect(action).toContain("p_payment_token: credentials.paymentToken");
+    expect(action).not.toContain("randomUUID()");
   });
 
-  it("takes no payment step, because Phase A has none", () => {
-    expect(action).not.toMatch(/stripe|mollie|paypal|payment|checkout_session|webhook/i);
+  it("integrates no payment provider", () => {
+    // It carries a payment capability, which is authorisation, not a payment.
+    expect(action).not.toMatch(/stripe|mollie|paypal|checkout_session|webhook|payment_intent/i);
+    expect(action).not.toMatch(/redirect|sk_live|sk_test/i);
   });
 
   it("does not require an account", () => {

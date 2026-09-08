@@ -27,8 +27,7 @@
  */
 "use server";
 
-import { randomUUID } from "node:crypto";
-
+import { isPaymentToken, type CheckoutCredentials } from "@/lib/commerce/capability";
 import { draftPayload, validateDraft, type DraftProblem, type OrderDraft } from "@/lib/commerce/order";
 import { isShippingMethod, type ShippingOption } from "@/lib/commerce/shipping";
 import { createClient } from "@/lib/supabase/server";
@@ -52,6 +51,12 @@ export type PlaceOrderResult =
    */
   | { ok: false; reason: "too_many_checkouts" }
   | { ok: false; reason: "failed" };
+
+/**
+ * Postgres' `insufficient_privilege`, raised by `create_order()` when a repeat
+ * of a request id arrives without the capability that order was created with.
+ */
+const NOT_YOURS = new Set(["42501", "insufficient_privilege"]);
 
 /**
  * What the checkout renders beside each carrier.
@@ -97,22 +102,31 @@ const UNAVAILABLE = new Set(["23514", "P0002", "no_data_found", "check_violation
 const THROTTLED = new Set(["53300", "too_many_connections"]);
 
 /**
- * @param requestId Idempotency for the checkout button. The same id returns
- *   the order it already created rather than a second one, which is what makes
- *   a double submit — or a retry after a dropped connection — harmless.
- *   Generated here when the caller has none.
+ * @param credentials Generated **by the browser**, once per checkout attempt,
+ *   and stable across retries. The request id makes a repeat harmless; the
+ *   payment capability is what proves, on that repeat, that this is the same
+ *   customer — and what later lets a guest pay for the order at all.
+ *
+ *   Both travel forward only. Neither is ever returned, so a lost response
+ *   cannot destroy either of them (see `capability.ts`).
  */
 export async function placeOrder(
   draft: OrderDraft,
-  requestId?: string,
+  credentials: CheckoutCredentials,
 ): Promise<PlaceOrderResult> {
+  // A malformed capability would be refused by the database anyway; catching
+  // it here keeps a broken client from spending a round trip.
+  if (!credentials || !isPaymentToken(credentials.paymentToken)) {
+    return { ok: false, reason: "failed" };
+  }
   const problems = validateDraft(draft);
   if (problems.length > 0) return { ok: false, reason: "invalid", problems };
 
   try {
     const supabase = await createClient();
     const { data, error } = await supabase.rpc("create_order", {
-      p_request_id: requestId ?? randomUUID(),
+      p_request_id: credentials.requestId,
+      p_payment_token: credentials.paymentToken,
       ...draftPayload(draft),
     });
 
@@ -120,6 +134,9 @@ export async function placeOrder(
       // Three different things, and the interface says something different
       // about each: the article is gone, the customer is holding too much
       // already, or we are broken.
+      // A repeated request id without the matching capability: somebody
+      // else's checkout, or a client that regenerated its own credentials.
+      if (NOT_YOURS.has(error.code ?? "")) return { ok: false, reason: "failed" };
       if (THROTTLED.has(error.code ?? "")) return { ok: false, reason: "too_many_checkouts" };
       if (UNAVAILABLE.has(error.code ?? "")) return { ok: false, reason: "unavailable" };
       return { ok: false, reason: "failed" };
