@@ -448,6 +448,85 @@ export const de = {
         : `${n} Positionen sind derzeit nicht bestellbar und zählen nicht zur Summe.`,
     localOnly: "Der Warenkorb wird nur in diesem Browser gespeichert.",
     noCheckout: "Bestellen ist noch nicht möglich.",
+    toCheckout: "Zur Kasse",
+  },
+
+  /**
+   * Kasse (B1).
+   *
+   * Noch ohne Zahlung: die Bestellung entsteht und der Bestand wird
+   * reserviert, bezahlt wird im nächsten Schritt. Die Texte sagen das
+   * ausdrücklich, statt eine abgeschlossene Zahlung anzudeuten.
+   */
+  checkout: {
+    title: "Kasse",
+    contactHeading: "Kontakt",
+    email: "E-Mail",
+    emailHint: "An diese Adresse geht die Bestellbestätigung.",
+
+    addressHeading: "Lieferadresse",
+    firstName: "Vorname",
+    lastName: "Nachname",
+    company: "Firma (optional)",
+    street: "Straße",
+    houseNumber: "Hausnummer",
+    addressLine2: "Adresszusatz (optional)",
+    postalCode: "PLZ",
+    city: "Ort",
+    country: "Land",
+    countryFixed: "Deutschland",
+    countryHint: "SkyIsles liefert derzeit nur innerhalb Deutschlands.",
+
+    shippingHeading: "Versand",
+    shippingFree: "Kostenlos",
+    freeFrom: (amount: string) => `Ab ${amount} Warenwert versandkostenfrei.`,
+
+    summaryHeading: "Zusammenfassung",
+    itemsSubtotal: "Zwischensumme",
+    shipping: "Versand",
+    total: "Gesamtbetrag",
+
+    /**
+     * Bewusst NICHT „Zahlungspflichtig bestellen": In B1 gibt es keine
+     * Zahlung, und der gesetzlich vorgeschriebene Wortlaut gehört an die
+     * Stelle, an der tatsächlich eine Zahlungspflicht entsteht (B2).
+     */
+    submit: "Bestellung anlegen",
+    submitting: "Bestellung wird angelegt …",
+    paymentFollows:
+      "Die Zahlung ist noch nicht eingerichtet. Deine Bestellung wird angelegt und die Ware " +
+      "für dich vorgemerkt; bezahlt wird im nächsten Schritt.",
+
+    emptyTitle: "Der Warenkorb ist leer.",
+    emptyHint: "Leg zuerst etwas in den Warenkorb.",
+
+    successTitle: "Bestellung angelegt",
+    successNumber: "Bestellnummer",
+    successHint:
+      "Wir haben deine Bestellung gespeichert und die Artikel für dich vorgemerkt. " +
+      "Bezahlt ist sie noch nicht — die Zahlung folgt im nächsten Schritt.",
+    successToCatalog: "Weiter im Katalog",
+
+    /** Fehler, in Kundensprache. Nie eine Datenbankmeldung. */
+    errorUnavailable:
+      "Mindestens ein Artikel ist nicht mehr in der gewünschten Menge verfügbar. " +
+      "Dein Warenkorb ist unverändert — bitte prüfe ihn noch einmal.",
+    errorThrottled:
+      "Für diese Adresse sind gerade mehrere Bestellungen offen. Bitte schließe sie ab " +
+      "oder versuche es in ein paar Minuten noch einmal.",
+    errorFailed: "Das hat gerade nicht geklappt. Bitte versuche es noch einmal.",
+    errorInvalid: "Bitte prüfe die markierten Angaben.",
+    problem: {
+      no_items: "Der Warenkorb ist leer.",
+      too_many_items: "Der Warenkorb enthält zu viele verschiedene Artikel.",
+      invalid_item: "Ein Artikel im Warenkorb ist ungültig.",
+      invalid_quantity: "Eine Menge im Warenkorb ist ungültig.",
+      duplicate_item: "Ein Artikel ist doppelt im Warenkorb.",
+      invalid_email: "Bitte gib eine gültige E-Mail-Adresse ein.",
+      incomplete_address: "Bitte fülle alle Pflichtfelder der Lieferadresse aus.",
+      invalid_country: "SkyIsles liefert derzeit nur nach Deutschland.",
+      invalid_shipping_method: "Bitte wähle eine Versandart.",
+    },
   },
 
   nav: {

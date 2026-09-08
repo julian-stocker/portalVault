@@ -543,6 +543,22 @@ können. Jede interne Funktion wird deshalb mit `from public, anon, authenticate
 `src/lib/commerce/schema.test.ts` prüft diese Regel für **jede** in der Migration definierte
 Funktion, nicht nur für eine Liste.
 
+**Der Versandpreis kommt nie aus dem Browser** (Migration `0011`). `create_order()` nimmt eine
+Versandart entgegen und **keinen Betrag**: es gibt keinen Parameter, in dem einer stünde. DHL
+wählen und 0,00 € mitschicken ist damit strukturell unmöglich, nicht bloß unerwünscht. Die
+Berechnung liegt in `shipping_amount_for()`, das für keine Client-Rolle ausführbar ist; öffentlich
+ist nur die Anzeigeprojektion `shipping_quote()`, und sie liest dieselbe Funktion — angezeigter
+und berechneter Preis können nicht auseinanderlaufen. Ebenso wird das Lieferland (`DE`) geprüft,
+bevor irgendetwas geschrieben wird.
+
+**Ein Grant allein macht eine Funktion nicht aufrufbar.** `shipping_quote()` war gegrantet, aber
+als INVOKER deklariert, und rief zwei für Clients gesperrte Funktionen auf — sie lief damit als der
+Aufrufer und scheiterte mit `permission denied for function shipping_catalog`. Wer eine öffentliche
+Projektion über interne Funktionen legt, braucht `security definer`, genau wie `shop_offers()` seit
+`0006`. `src/lib/commerce/shipping.test.ts` prüft das jetzt generisch: jede an `anon`/`authenticated`
+gegrantete Funktion, die eine im selben Migrationsfile definierte, entzogene Funktion aufruft, muss
+Definer sein.
+
 **Bestandszahlen bleiben unveröffentlicht.** `0010` fügt keine öffentliche Leseflächen hinzu; die
 Regel aus `0006` und `0009` gilt unverändert.
 

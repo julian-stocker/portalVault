@@ -4,12 +4,13 @@ import { existsSync } from "node:fs";
 import { metadata } from "@/app/layout";
 
 /**
- * The test deployment must not be indexed (docs/DEPLOYMENT.md).
+ * The deployment must not be indexed yet (docs/DEPLOYMENT.md).
  *
  * This guard exists to be **deliberately deleted**. The noindex belongs to
- * the *.vercel.app test phase; when skyisles.de goes live it has to go, and
- * a failing test at that moment is the reminder that removing it is a
- * decision rather than an oversight.
+ * the pre-release phase, and the trigger is the public beta gate rather than
+ * the domain: https://skyisles.app is live, but there is still no checkout,
+ * no legal page and no transactional mail. A failing test at that moment is
+ * the reminder that removing it is a decision rather than an oversight.
  *
  * Removal checklist at launch:
  *   1. drop the `robots` block in src/app/layout.tsx

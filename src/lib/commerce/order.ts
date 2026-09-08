@@ -19,6 +19,11 @@
  * non-binding (ADR-0043); reserving begins at checkout, in SQL.
  */
 import { MAX_LINE_QUANTITY } from "@/lib/cart/cart";
+import {
+  DELIVERY_COUNTRY,
+  isShippingMethod,
+  type ShippingMethod,
+} from "@/lib/commerce/shipping";
 import { isOfferCondition, type OfferCondition } from "@/lib/shop/offer";
 
 /**
@@ -66,7 +71,10 @@ export type DraftAddress = {
   addressLine2?: string;
   postalCode: string;
   city: string;
-  /** ISO-3166 alpha-2. Deliberately **not** checked against a country list. */
+  /**
+   * ISO-3166 alpha-2. V1 delivers to Germany only, so this is `DE` — and the
+   * database refuses anything else rather than trusting the form.
+   */
   countryCode: string;
   phone?: string;
 };
@@ -75,6 +83,11 @@ export type OrderDraft = {
   email: string;
   items: readonly DraftItem[];
   address: DraftAddress;
+  /**
+   * Which carrier, and only that. What it costs is decided by the server —
+   * there is deliberately no field here for an amount.
+   */
+  shippingMethod: ShippingMethod;
 };
 
 /**
@@ -92,14 +105,13 @@ export type DraftProblem =
   | "duplicate_item"
   | "invalid_email"
   | "incomplete_address"
-  | "invalid_country";
+  | "invalid_country"
+  | "invalid_shipping_method";
 
 const SKY_ID = /^SKY-[0-9]{4}$/;
 
 /** Deliberately loose. Address syntax is not a useful gate; delivery is. */
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const COUNTRY = /^[A-Za-z]{2}$/;
 
 /** A basket nobody legitimately fills. Guards the JSON payload, not stock. */
 export const MAX_ORDER_ITEMS = 50;
@@ -157,9 +169,13 @@ export function validateDraft(draft: OrderDraft): DraftProblem[] {
   ) {
     problems.push("incomplete_address");
   }
-  if (!address || !COUNTRY.test(address.countryCode ?? "")) {
+  // Germany only in V1. Checked here so the form can say so, and again in
+  // `create_order()`, which is what actually decides.
+  if (!address || (address.countryCode ?? "").toUpperCase() !== DELIVERY_COUNTRY) {
     problems.push("invalid_country");
   }
+
+  if (!isShippingMethod(draft.shippingMethod)) problems.push("invalid_shipping_method");
 
   // One entry per problem, however many items triggered it.
   return [...new Set(problems)];
@@ -176,9 +192,11 @@ export function draftPayload(draft: OrderDraft): {
   p_email: string;
   p_items: { sky_id: string; condition: string; quantity: number }[];
   p_address: Record<string, string | null>;
+  p_shipping_method: string;
 } {
   return {
     p_email: draft.email.trim(),
+    p_shipping_method: draft.shippingMethod,
     p_items: draft.items.map((item) => ({
       sky_id: item.skyId,
       condition: item.condition,

@@ -30,10 +30,18 @@
 import { randomUUID } from "node:crypto";
 
 import { draftPayload, validateDraft, type DraftProblem, type OrderDraft } from "@/lib/commerce/order";
+import { isShippingMethod, type ShippingOption } from "@/lib/commerce/shipping";
 import { createClient } from "@/lib/supabase/server";
 
+export type PlacedOrder = {
+  orderNumber: string;
+  itemsSubtotal: number;
+  shippingAmount: number;
+  totalAmount: number;
+};
+
 export type PlaceOrderResult =
-  | { ok: true; orderNumber: string }
+  | { ok: true; order: PlacedOrder }
   | { ok: false; reason: "invalid"; problems: DraftProblem[] }
   /** The database refused: withdrawn, sold out, or no longer priced. */
   | { ok: false; reason: "unavailable" }
@@ -44,6 +52,36 @@ export type PlaceOrderResult =
    */
   | { ok: false; reason: "too_many_checkouts" }
   | { ok: false; reason: "failed" };
+
+/**
+ * What the checkout renders beside each carrier.
+ *
+ * Display only. The amount is what `shipping_amount_for()` says this goods
+ * value would pay, and `create_order()` charges what the same function says
+ * about the goods value **it** computed — so a tampered subtotal can change
+ * what is shown and never what is billed.
+ */
+export async function shippingOptions(itemsSubtotal: number): Promise<ShippingOption[]> {
+  const subtotal = Number.isFinite(itemsSubtotal) && itemsSubtotal > 0 ? itemsSubtotal : 0;
+
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("shipping_quote", {
+      p_items_subtotal: subtotal,
+    });
+    if (error || !Array.isArray(data)) return [];
+
+    return data.flatMap((row: { code: string; name: string; amount: unknown; is_default: boolean }) => {
+      const amount = typeof row.amount === "string" ? Number(row.amount) : row.amount;
+      if (!isShippingMethod(row.code) || typeof amount !== "number" || !Number.isFinite(amount)) {
+        return [];
+      }
+      return [{ code: row.code, name: row.name, amount, isDefault: row.is_default === true }];
+    });
+  } catch {
+    return [];
+  }
+}
 
 /** Postgres codes `create_order()` raises for a draft that cannot be filled. */
 const UNAVAILABLE = new Set(["23514", "P0002", "no_data_found", "check_violation"]);
@@ -94,7 +132,20 @@ export async function placeOrder(
       return { ok: false, reason: "failed" };
     }
 
-    return { ok: true, orderNumber };
+    // `numeric` arrives as a string from PostgREST, exactly as it does for
+    // shop prices.
+    const money = (value: unknown): number =>
+      typeof value === "string" ? Number(value) : typeof value === "number" ? value : Number.NaN;
+
+    const order: PlacedOrder = {
+      orderNumber,
+      itemsSubtotal: money(row.items_subtotal),
+      shippingAmount: money(row.shipping_amount),
+      totalAmount: money(row.total_amount),
+    };
+    if (!Number.isFinite(order.totalAmount)) return { ok: false, reason: "failed" };
+
+    return { ok: true, order };
   } catch {
     return { ok: false, reason: "failed" };
   }

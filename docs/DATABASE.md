@@ -508,6 +508,35 @@ Nur eine **aktive** Reservierung konvertiert. Eine freigegebene wird nicht wiede
 Konvertierung meldet dann eine kleinere Zahl als die Bestellung Positionen hat, und die
 Zahlungsphase setzt `needs_resolution`, statt zu überverkaufen.
 
+#### Steuermodell und Versand (Migration `0011`, B1)
+
+`orders.tax_regime` hält als unveränderlichen Snapshot, welche Steuerregeln beim Kauf galten —
+V1: `small_business_19` (Kleinunternehmerregelung, § 19 UStG). **Bewusst ein Regime und kein
+Satz.** Ein `tax_rate = 0` hieße „steuerbarer Umsatz, mit 0 % besteuert"; § 19 heißt, dass die
+Steuer nicht erhoben wird. Aus einem Nullsatz entstünde eine Rechnung mit einer 0,00-€-USt-Zeile
+und ein Buchhaltungsexport mit einer Steuerspalte, die es nicht geben darf. Order-Level genügt:
+§ 19 ist eine Eigenschaft des Verkäufers, nicht des Artikels.
+
+Der Versand steht in vier Funktionen statt in einer Tabelle — zwei Methoden und eine Schwelle sind
+eine Regel, keine Daten, und eine Preisänderung soll das Gewicht einer Migration haben:
+
+| Funktion | Rechte | Zweck |
+|---|---|---|
+| `free_shipping_threshold()` | niemand | 75,00 €, gemessen an `items_subtotal` |
+| `shipping_catalog()` | niemand | Hermes 5,49 € (Standard), DHL 6,49 € |
+| `shipping_amount_for(code, subtotal)` | niemand | **Die** Berechnung. Wirft bei unbekannter Methode. |
+| `shipping_quote(subtotal)` | `anon`, `authenticated` | Anzeigeprojektion für die Kasse. **`security definer`**, weil sie die drei internen Funktionen aufruft — als INVOKER scheiterte sie an deren Rechten. |
+
+Angezeigter und berechneter Preis kommen aus derselben Funktion, können also nicht auseinanderlaufen.
+`create_order()` nimmt eine Versandart entgegen und **keinen Betrag** — es gibt keinen Parameter,
+in dem ein Preis mitgeschickt werden könnte. Lieferland wird auf `DE` geprüft, bevor irgendetwas
+geschrieben wird. `shipping_method_code` und `_name` werden beide gespeichert: eine spätere
+Umbenennung des Anbieters darf nicht umschreiben, was dem Kunden gezeigt wurde. Auch bei
+kostenlosem Versand bleibt die Methode stehen — „Hermes, kostenlos" ist, was passiert ist;
+„kostenlos" ist kein Anbieter.
+
+Beides ist vom Immutability-Trigger erfasst.
+
 **Nicht enthalten, bewusst:** Steuerfelder (Steuerberater), Provider-Felder (Anbieter offen),
 `payment_attempts` (kommt mit dem Anbieter), Rechnungen, Widerruf, Retoure. `shipping_amount`
 existiert und ist `0`, weil die Summe aus benannten Teilen bestehen muss.
@@ -912,6 +941,13 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   **Rein additiv:** keine bestehende Tabelle wird geändert, keine bestehende Funktion neu signiert,
   keine Zeile angefasst. **Noch nicht angewandt** (Stand 2026-09-07) und daher gegen keine echte
   Datenbank getestet; geprüft ist bisher nur der SQL-Vertrag (`src/lib/commerce/schema.test.ts`).
+- Elfte Migration: `0011_checkout_shipping_and_tax.sql` — `orders.tax_regime` (§ 19-Snapshot),
+  `orders.shipping_method_code`/`_name`, die Versandregel als `free_shipping_threshold()`,
+  `shipping_catalog()`, `shipping_amount_for()` und `shipping_quote()`, dazu `create_order()` mit
+  Versandart und Deutschland-Prüfung. Additiv: zwei Spalten, keine Tabelle, kein Datensatz. Die
+  einzige Ausnahme ist `create_order()`, das gedroppt und neu angelegt wird — eine Argumentliste
+  lässt sich nicht in place erweitern (dasselbe tat `0007`). **Angewandt am 2026-09-08** und gegen
+  Production verifiziert.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

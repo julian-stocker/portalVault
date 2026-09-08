@@ -2,12 +2,20 @@
 
 Wie SkyIsles öffentlich erreichbar wird — und was dabei **nicht** mitfliegt.
 
-Stand: 2026-09-06. Aktuelle Stufe: **temporäre Testadresse**
+Stand: 2026-09-08. Aktuelle Stufe: **eigene Domain, noch nicht öffentlich**
 
-    https://portal-vault-lovat.vercel.app
+    https://skyisles.app
 
-Production-Deployment vom Branch `main`. Kein offizieller Start, `skyisles.de`
-noch nicht verbunden — die endgültige Domain ist weiterhin offen.
+**Die kanonische öffentliche Adresse.** Production-Deployment vom Branch `main`,
+über Vercel eingerichtet, in der Supabase-Auth-Konfiguration als Site URL
+hinterlegt. Kein offizieller Start: es gibt zwar seit B1 eine Kasse, aber
+weder Zahlung noch Rechtstexte noch Transaktionsmails — `noindex` bleibt bis
+zum Beta-Gate bestehen.
+
+`https://portal-vault-lovat.vercel.app` bleibt als technische Vercel-Adresse
+erreichbar, ist aber **nicht** mehr die kanonische Domain und wird nirgends
+mehr als solche genannt. Eine mögliche `skyisles.de` ist weiterhin offen und
+keine Voraussetzung für irgendetwas.
 
 ---
 
@@ -65,19 +73,23 @@ Einzutragen unter **Authentication → URL Configuration**:
 
 | Feld | Wert |
 |---|---|
-| Site URL | `https://portal-vault-lovat.vercel.app` |
-| Redirect URLs | `https://portal-vault-lovat.vercel.app/**` |
+| Site URL | `https://skyisles.app` |
+| Redirect URLs | `https://skyisles.app/**` |
 | Redirect URLs | `http://localhost:3000/**` |
 
 Die Site URL ist der Rückfall, wenn die App keine gültige Origin mitschickt
-(Formular ohne Hydration). Sie zeigt deshalb auf die Testadresse, nicht auf
-localhost. Der localhost-Eintrag hält die lokale Entwicklung am Leben.
+(Formular ohne Hydration). Sie zeigt deshalb auf die kanonische Domain, nicht
+auf localhost. Der localhost-Eintrag hält die lokale Entwicklung am Leben.
 
 Sollte der Reset-Link am Query-String scheitern, zusätzlich exakt
-`https://portal-vault-lovat.vercel.app/auth/callback` eintragen.
+`https://skyisles.app/auth/callback` eintragen.
 
-Beim späteren Wechsel auf `skyisles.de` kommt die neue Domain hinzu, und die
-Site URL wandert dorthin; der `vercel.app`-Eintrag darf bleiben oder gehen.
+**Der alte `vercel.app`-Eintrag wird entfernt.** Er hat keinen technischen
+Zweck mehr: Bestätigungslinks sollen auf der kanonischen Domain landen, und
+jeder zusätzliche Eintrag in der Allowlist ist eine weitere Adresse, auf der
+ein Auth-Link ausgeliefert werden darf. Vercel-Preview-Deployments brauchen
+ihn nicht — sie haben ohnehin wechselnde Hosts und sind hinter einer
+Anmeldung; wer dort Auth testen will, tut das lokal.
 
 ---
 
@@ -107,7 +119,7 @@ ist die Variante, die tatsächlich draußen hält.
 Vercel setzt `X-Robots-Tag: noindex` von sich aus nur auf **Preview**-
 Deployments, nicht auf Production. Deshalb muss es aus der App kommen.
 
-**Checkliste zum Start von `skyisles.de`:**
+**Checkliste zum öffentlichen Beta-Start:**
 
 1. `robots`-Block in `src/app/layout.tsx` entfernen
 2. `src/lib/layout/robots.test.ts` entfernen (der Test schlägt sonst fehl —
@@ -119,8 +131,8 @@ Deployments, nicht auf Production. Deshalb muss es aus der App kommen.
 ## Deployment-Prozess
 
 **Production von `main`, keine Previews als Testadresse.** Vercel gibt einem
-Production-Deployment eine stabile Adresse — hier
-`https://portal-vault-lovat.vercel.app` — die bei jedem Push auf `main`
+Production-Deployment eine stabile Adresse — hier `https://skyisles.app` —
+die bei jedem Push auf `main`
 automatisch neu gebaut wird. Preview-URLs enthalten den
 Commit-Hash, ändern sich also bei jedem Push, und Vercel schützt sie
 standardmäßig hinter einer Anmeldung — beides ist für „auf dem Handy öffnen"

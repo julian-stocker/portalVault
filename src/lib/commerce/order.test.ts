@@ -38,14 +38,15 @@ const ADDRESS: DraftAddress = {
   street: "Beispielweg",
   houseNumber: "7a",
   postalCode: "6020",
-  city: "Innsbruck",
-  countryCode: "AT",
+  city: "Köln",
+  countryCode: "DE",
 };
 
 const DRAFT: OrderDraft = {
   email: "kunde@example.com",
   items: [{ skyId: "SKY-0007", condition: "loose", quantity: 1 }],
   address: ADDRESS,
+  shippingMethod: "hermes",
 };
 
 describe("a complete draft", () => {
@@ -122,11 +123,27 @@ describe("what makes a draft unusable", () => {
     }
   });
 
-  it("refuses a country code that is not one", () => {
-    for (const countryCode of ["", "D", "DEU", "12"]) {
+  it("refuses any country but Germany", () => {
+    // V1 delivers to Germany only. The database refuses the rest too — this
+    // is so the form can say so before spending a round trip.
+    for (const countryCode of ["", "D", "DEU", "12", "AT", "CH", "JP"]) {
       expect(validateDraft({ ...DRAFT, address: { ...ADDRESS, countryCode } })).toContain(
         "invalid_country",
       );
+    }
+  });
+
+  it("accepts Germany however it is cased", () => {
+    for (const countryCode of ["DE", "de", "De"]) {
+      expect(validateDraft({ ...DRAFT, address: { ...ADDRESS, countryCode } })).toEqual([]);
+    }
+  });
+
+  it("refuses a shipping method that does not exist", () => {
+    for (const shippingMethod of ["", "post", "ups", "free_shipping"] as const) {
+      expect(
+        validateDraft({ ...DRAFT, shippingMethod: shippingMethod as never }),
+      ).toContain("invalid_shipping_method");
     }
   });
 
@@ -138,6 +155,7 @@ describe("what makes a draft unusable", () => {
         { skyId: "worse", condition: "loose", quantity: 1 },
       ],
       address: { ...ADDRESS, city: "" },
+      shippingMethod: "hermes",
     });
     expect(problems).toContain("invalid_email");
     expect(problems).toContain("invalid_item");
@@ -147,11 +165,11 @@ describe("what makes a draft unusable", () => {
 });
 
 describe("which countries may be delivered to", () => {
-  it("is deliberately not decided here", () => {
-    // An open user decision. A list written today would have to be migrated
-    // away tomorrow; the shape of the code is checked, not the destination.
-    expect(validateDraft({ ...DRAFT, address: { ...ADDRESS, countryCode: "JP" } })).toEqual([]);
-    expect(code("src/lib/commerce/order.ts")).not.toMatch(/\["DE"|'DE'|countries|allowedCountries/);
+  it("is one, and it is named in one place", () => {
+    // Germany only in V1. The constant lives in shipping.ts and the database
+    // enforces it again — the form check is a courtesy, not the gate.
+    expect(code("src/lib/commerce/order.ts")).toContain("DELIVERY_COUNTRY");
+    expect(code("src/lib/commerce/shipping.ts")).toContain('DELIVERY_COUNTRY = "DE"');
   });
 });
 
@@ -159,7 +177,13 @@ describe("the payload carries intent, never money", () => {
   const payload = draftPayload(DRAFT);
 
   it("sends only what the customer chose", () => {
-    expect(Object.keys(payload).sort()).toEqual(["p_address", "p_email", "p_items"]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "p_address",
+      "p_email",
+      "p_items",
+      "p_shipping_method",
+    ]);
+    expect(payload.p_shipping_method).toBe("hermes");
     expect(payload.p_items).toEqual([{ sky_id: "SKY-0007", condition: "loose", quantity: 1 }]);
   });
 
@@ -170,15 +194,22 @@ describe("the payload carries intent, never money", () => {
     }
   });
 
+  it("names a carrier but never what it costs", () => {
+    // The whole point: choosing DHL and sending 0,00 € is impossible because
+    // there is no parameter to send it in.
+    expect(JSON.stringify(payload)).toContain("hermes");
+    expect(Object.keys(payload)).not.toContain("p_shipping_amount");
+  });
+
   it("trims what people type and normalises the country", () => {
     const messy = draftPayload({
       ...DRAFT,
       email: "  kunde@example.com  ",
-      address: { ...ADDRESS, countryCode: "at", city: "  Innsbruck " },
+      address: { ...ADDRESS, countryCode: "de", city: "  Köln " },
     });
     expect(messy.p_email).toBe("kunde@example.com");
-    expect(messy.p_address.country_code).toBe("AT");
-    expect(messy.p_address.city).toBe("Innsbruck");
+    expect(messy.p_address.country_code).toBe("DE");
+    expect(messy.p_address.city).toBe("Köln");
   });
 
   it("turns an empty optional into NULL rather than an empty string", () => {
@@ -200,13 +231,23 @@ describe("the reservation vocabulary", () => {
 
 describe("the server action stays a wrapper", () => {
   const action = code("src/lib/commerce/actions.ts");
+  /** Just placeOrder: the file also holds the shipping quote action. */
+  const place = action.slice(action.indexOf("export async function placeOrder"));
 
   it("validates before it spends a round trip", () => {
-    expect(action.indexOf("validateDraft(draft)")).toBeLessThan(action.indexOf("supabase.rpc("));
+    expect(place.indexOf("validateDraft(draft)")).toBeLessThan(place.indexOf("supabase.rpc("));
   });
 
   it("calls the one function that creates orders", () => {
-    expect(action).toContain('supabase.rpc("create_order"');
+    expect(place).toContain('supabase.rpc("create_order"');
+  });
+
+  it("asks the server what shipping costs instead of computing it", () => {
+    // No price and no threshold appear in TypeScript at all: the rule lives
+    // in shipping_amount_for(), and both display and charge read it.
+    expect(action).toContain('supabase.rpc("shipping_quote"');
+    expect(code("src/lib/commerce/shipping.ts")).not.toMatch(/5\.49|6\.49|75/);
+    expect(action).not.toMatch(/5\.49|6\.49|\b75\b/);
   });
 
   it("sends nothing about money", () => {

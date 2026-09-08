@@ -7,6 +7,57 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Commerce V1 · Phase B1 abgeschlossen und produktiv (2026-09-08).** Migration `0011` ist auf
+Production angewandt und verifiziert. Die Kasse existiert: Adresse, Versandart, serverseitige Berechnung, Bestellung und Reservierung. **Ohne
+Zahlung** — B1 endet bei einer angelegten, reservierten, unbezahlten Bestellung, und die
+Oberfläche sagt das ausdrücklich.
+
+*Feste Produktentscheidungen.* Lieferung **nur nach Deutschland**. Zwei Versandarten:
+**Hermes 5,49 €** (vorausgewählt) und **DHL 6,49 €**. **Ab 75,00 € Warenwert** ist beides
+kostenlos; die Schwelle misst `items_subtotal`, also den Warenwert vor Rabatten. Keine Gewichts-,
+Größen- oder PLZ-Staffeln, keine Packstation — das kommt später.
+
+*Steuermodell.* SkyIsles wird unter der **Kleinunternehmerregelung (§ 19 UStG)** betrieben. Die
+Bestellung speichert das als unveränderlichen Snapshot `tax_regime = 'small_business_19'` —
+**ausdrücklich kein `tax_rate = 0`**: ein Nullsatz wäre ein steuerbarer Umsatz mit 0 %, § 19 ist
+die Nichterhebung. Der Unterschied ist in der Rechnung entscheidend. Kein Netto, keine USt-Zeile,
+kein „inkl. MwSt." — nirgends.
+
+*Eine Regel, ein Ort.* Der Versandpreis lebt ausschließlich in `shipping_amount_for()`. Die Kasse
+zeigt an, was diese Funktion sagt, und `create_order()` berechnet damit, was tatsächlich berechnet
+wird — der Browser wählt einen Anbieter und **niemals** einen Preis. In TypeScript steht kein
+einziger Betrag.
+
+*Reservierung unverändert.* Das Öffnen der Kasse hält nichts. Erst beim Absenden werden Preise neu
+gelesen, Verfügbarkeit neu geprüft, der Versand bestimmt und der Bestand atomar reserviert — 20
+Minuten, wie gehabt. Kein neuer Zeitgeber, keine neue Infrastruktur.
+
+*Warenkorb.* Neuer CTA „Zur Kasse". Nach erfolgreicher Bestellung wird der Warenkorb geleert —
+Bestellung und Reservierung existieren dann wirklich, und ein stehengebliebener Korb lüde dazu
+ein, denselben Bestand ein zweites Mal zu blockieren. Bei **jedem** Fehler bleibt er unangetastet.
+
+*Runtime verifiziert.* Gegen Production geprüft, ohne eine einzige Bestellung zu erzeugen:
+Versandpreise an allen Schwellen (0 / 10 / 74,99 → 5,49 · 6,49; 75 / 75,01 / 200 → 0,00), Hermes
+erste und vorausgewählte Option, die alte vierstellige `create_order()`-Signatur ist weg, ein
+Nicht-DE-Land und eine unbekannte Versandart werden **vor** jedem Schreibvorgang abgewiesen, und
+für `p_shipping_amount`, `p_total_amount`, `p_items_subtotal`, `p_discount_amount` und
+`p_tax_regime` existiert schlicht kein Parameter. Alle neun internen Funktionen für `anon`
+gesperrt, alle fünf Bestelltabellen weder les- noch schreibbar, Bestand unverändert.
+
+*Ein Defekt, gefunden und behoben.* `shipping_quote()` war zunächst als INVOKER deklariert und rief
+zwei für Clients gesperrte Funktionen auf — die Kasse hätte gar keine Versandarten angezeigt
+(die Berechnung wäre korrekt geblieben, `create_order()` rechnet selbst). Behoben mit
+`security definer`, wie es `shop_offers()` seit `0006` macht. Ein neuer Test fängt die Fehlerklasse
+generisch ab: jede an Clients gegrantete Funktion, die eine gesperrte interne Funktion aufruft,
+muss Definer sein.
+
+*Domain.* Die kanonische Production-Adresse ist **`https://skyisles.app`**; die alte
+Vercel-Adresse ist keine kanonische Domain mehr. `noindex, nofollow` bleibt bis zum Beta-Gate
+aktiv.
+
+> **Nächster Schritt:** Phase B2 (Zahlung). Blockierend bleiben Zahlungsanbieter, Mailversand und
+> eine Staging-Umgebung für den Nebenläufigkeitstest.
+
 **Commerce V1 · Phase A abgeschlossen und produktiv (2026-09-07).** Migration `0010` ist auf
 Production angewandt, der Commerce-Kern liegt live in der Datenbank: Bestellungen können entstehen
 und Bestand kann atomar reserviert werden — ohne Zahlungsanbieter, ohne Checkout-Oberfläche, ohne
@@ -446,14 +497,15 @@ steht jetzt in der Kontrollzeile zwischen Anzahl und Symbole/Tabelle.
 
 **Deployment vorbereitet (2026-09-06).** Das Repository ist bereit für ein erstes Vercel-Deployment
 auf eine temporäre Testadresse. Sie läuft seit 2026-09-06 unter
-`https://portal-vault-lovat.vercel.app` als Production-Deployment von `main`, damit die Adresse
+`https://skyisles.app` als Production-Deployment von `main`, damit die Adresse
 stabil bleibt. Keine hartkodierten Entwicklungsadressen im Anwendungscode: Auth-Rücksprünge entstehen
 zur Laufzeit aus der Origin (`safeOrigin()`), Redirects im Callback und in der Middleware sind
 relativ. Vercel braucht **nur** `NEXT_PUBLIC_SUPABASE_URL` und `NEXT_PUBLIC_SUPABASE_ANON_KEY`;
 der Service-Role-Key wird von keinem ausgelieferten Codepfad gelesen und bleibt lokal.
 **Die Testadresse trägt `noindex, nofollow`** über `metadata.robots` in `src/app/layout.tsx` —
 bewusst ohne `robots.txt`, weil ein `Disallow` das Lesen des Noindex verhindern würde. Beim Start
-von `skyisles.de` muss beides bewusst entfernt werden; ein Test erzwingt die Entscheidung.
+zum öffentlichen Beta-Start muss beides bewusst entfernt werden; ein Test erzwingt die
+Entscheidung. Die eigene Domain allein ist dafür **nicht** der Auslöser.
 Einzelheiten, Supabase-URL-Konfiguration und Schrittfolge: `docs/DEPLOYMENT.md`.
 **Vor der öffentlichen Beta fehlt weiterhin ein eigener SMTP-Anbieter.** `skyisles.de` ist noch
 nicht verbunden.
@@ -704,7 +756,8 @@ Wartet auf Freigabe für **V1.3 — Katalogimport**.
 | Tests | Lint / Typecheck / Build, 628 Unit-Tests (`npm test`) und die funktionalen Prüfungen (`verify:rls`, `verify:editorial`, `verify:inventory`, `verify:shop`) |
 
 Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
-ADR-0015). Vercel ist eingerichtet: `https://portal-vault-lovat.vercel.app` (temporär, `noindex`).
+ADR-0015). Vercel ist eingerichtet, die kanonische Domain ist **`https://skyisles.app`**
+(noch `noindex` bis zum Beta-Gate).
 
 ---
 

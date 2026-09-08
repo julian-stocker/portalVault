@@ -27,7 +27,7 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { conditionLabel } from "@/components/shop/shop-action";
-import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import {
   cartTotal,
   keyOf,
@@ -225,10 +225,14 @@ export function CartView({ offers }: { offers: Readonly<Record<string, readonly 
           <p className="text-xs text-muted">{de.cart.excluded(unavailable.length)}</p>
         ) : null}
 
-        {/* Stated plainly rather than dressed up as a disabled button. There
-            is no checkout to disable. */}
-        <p className="text-sm text-muted">{de.cart.noCheckout}</p>
         <p className="text-[11px] text-muted">{de.cart.localOnly}</p>
+
+        {/* The one action worth taking here. Following it holds no stock:
+            the cart stays non-binding until the checkout is submitted
+            (ADR-0050). */}
+        <Link href="/checkout" className={ACTION_PRIMARY}>
+          {de.cart.toCheckout}
+        </Link>
 
         <div className="flex flex-wrap gap-3">
           <Link href="/" className={`${ACTION_NEUTRAL} w-auto`}>

@@ -13,10 +13,13 @@ export const metadata: Metadata = {
   description: de.app.description,
 
   /*
-   * TEMPORARY — remove this block when skyisles.de goes live.
+   * TEMPORARY — remove this block at the public beta gate.
    *
-   * The first deployment is a test address on *.vercel.app, meant for trying
-   * the site on a real phone. It must not become the version Google knows.
+   * The site now answers on its own domain, https://skyisles.app, but it is
+   * still not open: there is no checkout, no legal page and no transactional
+   * mail. The trigger for removing this is that release gate, not the domain —
+   * having an address and being ready to be found are different things.
+   *
    * Vercel sets `X-Robots-Tag: noindex` on preview deployments by itself but
    * NOT on production ones, and this is a production deployment from `main`,
    * so the tag has to come from the app.
