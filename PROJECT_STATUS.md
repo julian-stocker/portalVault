@@ -7,6 +7,59 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Commerce V1 · Phase B2.1 abgeschlossen und produktiv (2026-09-08).** Migration `0012` ist
+angewandt und runtime-verifiziert. Der Payment-Core steht — **ohne Zahlungsanbieter**: kein Stripe-SDK,
+kein Webhook, keine Edge Function, kein `pg_cron`, keine Payment-Oberfläche. Nichts in der
+Anwendung ruft ihn auf; er wartet auf B2.2.
+
+*Neu.* `payment_attempts` und `payment_events`, dazu `start_payment_attempt()`,
+`attach_provider_payment()`, `confirm_order_payment()`, `fail_payment_attempt()` und
+`expire_stale_checkouts()`. **Alle fünf sind allen Client-Rollen entzogen** — der privilegierte
+Aufrufer wird eine Supabase Edge Function (ADR-0051).
+
+*Der eine Vertrag.* Eine bestätigte Zahlung schließt die **ganze** Bestellung ab — Reservierungen
+konvertiert, Bestand gebucht, eine `sale_skyisles`-Bewegung je Position — oder sie schließt
+**keine** davon ab und markiert `needs_resolution`. Nie halb verkauft, nie überverkauft.
+
+*Dreifach idempotent.* Das Event (`unique (provider, provider_event_id)`), die Bestellung
+(`paid_at is null`) und jede Reservierung (unter Sperre beansprucht). Ein Anbieter, der dasselbe
+Event fünfmal liefert, bucht einen Verkauf.
+
+*Drei Defekte im Audit vor der Migration gefunden und behoben:* ein Event galt als erledigt, sobald
+seine ID eingefügt war — ein Webhook vor `attach_provider_payment()` hätte die Bestellung dauerhaft
+unbezahlt gelassen; ein abweichender Betrag ließ den Versuch offen hängen; der Sweep konnte eine
+zur Prüfung markierte Bestellung stillschweigend ablaufen lassen.
+
+*Runtime verifiziert (51 Prüfungen, ohne einen einzigen Schreibvorgang).* Alle Spalten vorhanden,
+kein `payload`-Feld, alle fünf Signaturen exakt, keine Überladung nimmt einen Betrag oder ein
+Secret entgegen, `anon` kann nichts lesen, schreiben, ändern, löschen oder ausführen, die
+öffentliche RPC-Oberfläche ist unverändert — und alle fünf Funktionsrümpfe wurden tatsächlich
+ausgeführt und griffen an ihren Wächtern. Bestellungen, Reservierungen, Versuche und Events stehen
+weiterhin auf 0.
+
+> **Nächster Schritt:** B2.2 — Stripe-Anbindung und Payment-Bootstrap. Voraussetzungen unten.
+
+### Voraussetzungen vor B2.2 und B2.3
+
+| | Warum |
+|---|---|
+| Stripe-Konto + PayPal-Business-Konto (EWR) | Verifizierung dauert; ohne sie kein Testmodus |
+| `pg_cron` aktivieren | Erst wenn echte Reservierungen entstehen. Exakte Anweisung in `docs/DEPLOYMENT.md` |
+| **Staging-Supabase-Projekt** | **Vor B2.3 zwingend.** Production kann keinen echten Nebenläufigkeitstest tragen: Bestellzeilen sind append-only, Bestellungen `on delete restrict` — eine Testbestellung wäre unlöschbar. Stripes Testmodus hilft nicht, weil eine Test-Zahlung trotzdem echte Zeilen in die verbundene Datenbank schreibt. |
+| Mailversand | Nicht blockierend für B2, aber vor echten Kunden nötig und vor öffentlichem Release Pflicht |
+
+### Danach vorgemerkt: Account-/Profil-Phase
+
+Der Profil-/Account-Bereich wird nach B2 neu strukturiert — **jetzt nicht zu bauen**, aber B2 darf
+nichts dagegen arbeiten. Vorgesehene Unterbereiche: Übersicht · persönliche Daten · Kontakt- und
+Lieferdaten · Einstellungen · Bestellungen · Sammlung · Warenkorb · Sicherheit.
+
+**Die eine Regel, die dabei zählt:** Gespeicherte Lieferdaten dürfen den Checkout später
+**vorbefüllen**, aber niemals den Adress-Snapshot der Bestellung ersetzen. Eine Bestellung
+erinnert sich daran, was abgeschickt wurde (ADR-0049) — eine später geänderte Profiladresse darf
+nicht rückwirkend verändern, wohin ein Paket ging. Die Bestellhistorie setzt auf der bestehenden
+`orders`-RLS auf; Gastbestellungen brauchen den Token-Zugang.
+
 **Commerce V1 · Phase B1 abgeschlossen und produktiv (2026-09-08).** Migration `0011` ist auf
 Production angewandt und verifiziert. Die Kasse existiert: Adresse, Versandart, serverseitige Berechnung, Bestellung und Reservierung. **Ohne
 Zahlung** — B1 endet bei einer angelegten, reservierten, unbezahlten Bestellung, und die

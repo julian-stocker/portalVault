@@ -3918,3 +3918,94 @@ stille Reparatur** · Kontopflicht beim Checkout · CAPTCHA als Grundvoraussetzu
 > Webhook-Wahrheitsbegriff („bezahlt ist, was der Server beim Anbieter gesehen hat") und die
 > Rechnungsarchitektur. Sie sind im Architekturplan beschrieben und bekommen eigene ADRs, wenn sie
 > gebaut werden.
+
+
+## ADR-0051 — Bezahlt ist, was der Server beim Anbieter gesehen hat
+
+**Status:** ANGENOMMEN (2026-09-08) · Payment-Core gebaut und produktiv (Migration `0012`).
+Anbieteranbindung, Webhook und Edge Function folgen in B2.2 und B2.3.
+
+**Problem.** Eine Zahlung ist der einzige Vorgang im Shop, bei dem ein Fehler unmittelbar Geld
+oder Ware kostet. Drei Fragen mussten vorher entschieden sein: welcher Anbieter, wem die
+Zahlungsbestätigung geglaubt wird, und mit welchen Rechten der bestätigende Code läuft.
+
+### Der Anbieter ist Stripe
+
+Verglichen wurden Stripe, Mollie und PayPal direkt — anhand der aktuellen Herstellerdokumentation,
+nicht anhand von Erinnerung. **Eine frühere Empfehlung für Mollie wurde damit widerrufen:** sie
+stützte sich auf die Annahme, Stripe biete PayPal in Deutschland nicht an. Das ist falsch; Stripe
+listet `DE` unter den unterstützten Geschäftsstandorten für PayPal, inklusive Checkout und
+vollständiger wie teilweiser Erstattung.
+
+Beide Anbieter können PayPal, Karte, Apple Pay, Google Pay, Klarna und SEPA, beide ohne
+Grundgebühr. Die Gebühren unterscheiden sich um Cent je Bestellung (Karte EWR: Stripe 1,5 %,
+Mollie 1,8 %; PayPal: Mollie ohne, Stripe mit 0,2 % Aufschlag) — **das trägt keine
+Architekturentscheidung.**
+
+Entschieden hat der Punkt, an dem dieses Projekt eine Lücke hat: **es gibt keine
+Staging-Umgebung.** `stripe listen --forward-to localhost` liefert echte Test-Webhooks an den
+Entwicklungsrechner, ohne öffentliche Adresse und ohne Deployment. Mollies ID-only-Webhook ist
+architektonisch eleganter — eine Fälschung ist zwecklos, weil der Status ohnehin nachgeholt wird —
+aber jeder Test braucht dort eine erreichbare URL.
+
+Zahlarten zum Start: **PayPal, Karte, Apple Pay, Google Pay.** Nicht Klarna (eigene
+Rückabwicklung) und nicht SEPA-Lastschrift (Rücklastschriften, verzögerte Gutschrift).
+
+### Der Browser ist nie die Wahrheit
+
+Ein erfolgreicher Rücksprung auf `/checkout/...` bedeutet **nichts**. Wahr wird eine Zahlung
+ausschließlich dadurch, dass der Server sie beim Anbieter gesehen hat. Die Rückkehrseite liest den
+Bestellzustand und zeigt ihn an; sie setzt keinen. Alle sechs Reihenfolgen — Webhook vor
+Rücksprung, Rücksprung vor Webhook, Browser geschlossen, Event doppelt, Event verspätet, Betrag
+abweichend — führen zum selben Ergebnis, weil keine davon vom Browser abhängt.
+
+### Der privilegierte Pfad ist eine Supabase Edge Function
+
+Das ist die eigentliche Architekturentscheidung. `confirm_order_payment()` muss allen
+Client-Rollen entzogen bleiben, aber die Anwendung erreicht PostgREST mit dem **Anon-Key** — eine
+Server-Action könnte die Funktion also gar nicht aufrufen. Drei Wege standen zur Wahl:
+
+| | Ansatz | Warum nicht |
+|---|---|---|
+| A | Service Role in Vercel | Bricht die Regel aus `docs/DEPLOYMENT.md`. Ein Schlüssel, der RLS vollständig umgeht, in einer Umgebung mit Webhook-Verkehr. |
+| B | Anon-gegrantete RPC mit Shared Secret | Eine öffentlich ausführbare Funktion, deren Sicherheit an einem mitgeschickten String hängt. Kleinste Änderung, aber die größte Angriffsfläche. |
+| **C** | **Supabase Edge Function** | **Gewählt.** |
+
+**Gewählt: C.** Die Edge Function läuft **innerhalb** von Supabase, also verlässt der
+Service-Role-Schlüssel diese Grenze nie. Vercel bekommt weiterhin keinen. Das Stripe-Webhook-Secret
+liegt ausschließlich als Server-Secret. Der Preis ist eine zweite Deployment-Zielumgebung und eine
+zweite Laufzeit — das ist bewusst in Kauf genommen, weil die Alternative bedeutet hätte, entweder
+eine bestehende Sicherheitsregel zu brechen oder eine privilegierte Operation öffentlich
+ausführbar zu machen.
+
+**Feste Regeln, die daraus folgen:**
+
+- Der Browser besitzt ausschließlich öffentliche Supabase-Credentials.
+- Vercel erhält keinen Supabase-Service-Role-Schlüssel.
+- Privilegierte Payment- und Order-Operationen bleiben für `PUBLIC`, `anon` und `authenticated`
+  gesperrt — produktiv geprüft.
+- Rückkehrrouten im Browser sind reine Anzeige.
+
+### Ein Event gilt erst als erledigt, wenn es erledigt wurde
+
+`(provider, provider_event_id)` ist eindeutig, und der Insert ist das Schloss. Entscheidend ist
+aber die Unterscheidung, die beim Audit vor der Migration gefunden wurde: **eine Zeile mit
+`processed_at IS NULL` wurde gesehen, aber nicht abgeschlossen** — ein Retry muss sie erneut
+verarbeiten. Nur eine verarbeitete Zeile ist ein echtes Duplikat.
+
+Der Fall ist nicht theoretisch: Ein Webhook kann eintreffen, **bevor** `attach_provider_payment()`
+committet hat. Die erste Zustellung findet dann berechtigterweise keinen Attempt. Würde sie als
+erledigt vermerkt, verwürfe jeder Retry sich selbst und die Bestellung bliebe für immer unbezahlt.
+
+### Alles oder nichts, und niemals Overselling
+
+Vor jeder Konvertierung werden die aktiven Reservierungen gegen die Bestellpositionen gezählt.
+Fehlt auch nur eine, wird **keine** konvertiert: eine halb verkaufte Bestellung ist schlimmer als
+eine, die jemand ansieht. Eine verspätete Zahlung auf eine bereits freigegebene Reservierung wird
+als eingegangen verbucht, setzt `needs_resolution` und schreibt **keine** Bestandsbewegung
+(ADR-0050). Ein abweichender Betrag verkauft nichts und schließt den Versuch als `failed`.
+
+**Verworfen:** Browser-Rücksprung als Zahlungsnachweis · Service Role in Vercel · öffentlich
+ausführbare Bestätigungsfunktion mit Shared Secret · Mollie (auf falscher Annahme empfohlen) ·
+Klarna und SEPA-Lastschrift zum Start · Wiederbeleben abgelaufener Reservierungen · teilweise
+Konvertierung einer Bestellung · Speichern von Anbieter-Payloads oder Zahlungsdaten.

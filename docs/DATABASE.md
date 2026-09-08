@@ -948,6 +948,11 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   einzige Ausnahme ist `create_order()`, das gedroppt und neu angelegt wird — eine Argumentliste
   lässt sich nicht in place erweitern (dasselbe tat `0007`). **Angewandt am 2026-09-08** und gegen
   Production verifiziert.
+- Zwölfte Migration: `0012_payment_core.sql` — `payment_attempts`, `payment_events` und die fünf
+  Payment-Funktionen (ADR-0051). Additiv: zwei Tabellen, keine bestehende Tabelle oder Funktion
+  geändert. **Alle Funktionen sind `PUBLIC`, `anon` und `authenticated` entzogen**; der
+  privilegierte Aufrufer wird eine Supabase Edge Function. **Angewandt am 2026-09-08** und
+  runtime-verifiziert.
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

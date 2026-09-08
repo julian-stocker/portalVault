@@ -220,10 +220,27 @@ Der First-Party-Shop bekommt Bestellungen. **Phase A ist gebaut** (Commerce-Kern
 Bestandsreservierung, Migration `0010`, noch nicht angewandt); der vollständige Architekturplan
 für Zahlung, Versand, Rechnung, Widerruf und Monatsabrechnung liegt vor.
 
-Reihenfolge der Phasen: **0** Blocker (SMTP, Steuerstatus, Anbieterkonto) · **A** Commerce-Kern +
-Reservierung · **B/C** Checkout ohne Zahlung · **D** Zahlung und Webhook · **E** Bestellungen für
-Kunde und Betreiber · **F** Rechnungen und E-Mail · **G** Storno, Widerruf, Retoure, Erstattung ·
-**H** Buchhaltung und Startfreigabe.
+**Stand 2026-09-08:** Phase A (Commerce-Kern und Reservierung), B1 (Kasse ohne Zahlung) und B2.1
+(Payment-Core ohne Anbieter) sind gebaut und produktiv. Steuermodell und Zahlungsanbieter sind
+entschieden: **Kleinunternehmerregelung § 19** und **Stripe**, letzteres mit einer **Supabase Edge
+Function** als privilegiertem Webhook-Pfad (ADR-0051) — Vercel bekommt weiterhin keinen
+Service-Role-Schlüssel.
+
+Weitere Reihenfolge: **B2.2** Stripe-Anbindung und Bootstrap · **B2.3** Webhook und Edge Function ·
+**B3** Bestellungen für den Betreiber und Versand · **B4** Kundenbestellungen und
+Transaktionsmails · **B5** Rechnungen · **B6** Storno, Widerruf, Retoure, Erstattung ·
+**B7** Buchhaltung und Startfreigabe.
+
+**Vor B2.3 zwingend: ein separates Supabase-Staging-Projekt.** Gleiche Migrationen, eigenes
+Testinventar, Stripe-Testmodus — damit echte Testbestellungen und der Nebenläufigkeitstest (zwei
+gleichzeitige Checkouts auf das letzte Stück) möglich werden, ohne die Produktionshistorie zu
+verschmutzen. Production kann das nicht leisten: Bestellzeilen sind append-only und Bestellungen
+`on delete restrict`.
+
+**Nach Commerce: Account und Profil neu strukturieren.** Übersicht, persönliche Daten, Kontakt- und
+Lieferdaten, Einstellungen, Bestellungen, Sammlung, Warenkorb, Sicherheit. Gespeicherte
+Lieferdaten befüllen den Checkout künftig vor, ersetzen aber nie den unveränderlichen
+Adress-Snapshot der Bestellung (ADR-0049).
 
 Der Marketplace-Stopp aus ADR-0021 gilt unverändert: ein Shop mit genau einem Verkäufer ist kein
 Marketplace.

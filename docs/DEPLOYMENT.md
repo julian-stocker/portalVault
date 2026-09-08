@@ -161,3 +161,29 @@ Repository noch in der Datenbank. Vollständige Liste: `docs/SECURITY.md`.
 Die Shop-Grundlage existiert in der Datenbank (Migration `0003`), aber es gibt
 keine Shop-Route, keine Shop-UI und keinen öffentlichen Zugriff:
 `shop_admins` und `inventory_movements` sind für `anon` nicht einmal lesbar.
+
+---
+
+## Reservierungen aufräumen — `pg_cron`, erst mit B2.2
+
+`public.expire_stale_checkouts()` gibt abgelaufene Reservierungen frei und schließt die
+Bestellungen, die mit ihnen verfallen sind. **Noch nicht eingerichtet**, weil es ohne Zahlungen
+nichts aufzuräumen gibt und `reserve_for_order()` ohnehin synchron räumt.
+
+Wenn es so weit ist, im SQL-Editor:
+
+```sql
+create extension if not exists pg_cron with schema extensions;
+
+select cron.schedule(
+  'expire-stale-checkouts',
+  '*/5 * * * *',
+  $$select public.expire_stale_checkouts();$$
+);
+```
+
+Fünf Minuten bei zwanzig Minuten Haltedauer. `cron.schedule` mit gleichem Namen **aktualisiert**
+den bestehenden Job, legt also keinen zweiten an — mehrfaches Ausführen ist ungefährlich. Der Job
+läuft als `postgres` und darf die Funktion deshalb aufrufen, **ohne dass ein Grant geöffnet werden
+muss**; genau das ist der Grund gegen einen öffentlichen HTTP-Endpunkt. Prüfen mit
+`select jobname, schedule, active from cron.job;`.
