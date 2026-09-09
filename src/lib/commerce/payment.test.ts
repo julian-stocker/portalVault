@@ -154,6 +154,18 @@ describe("what may change about an attempt", () => {
     expect(trigger).toContain("and that is final");
   });
 
+  it("is superseded by 0015, which reopens exactly one of those four", () => {
+    // 0012's rule was absolute and that turned out to be wrong: an attempt
+    // closed as `expired` by our own local timeout could never be corrected
+    // by a later authoritative confirmation, so a late payment rolled back
+    // and went unrecorded. 0015 permits `expired` -> `succeeded` and nothing
+    // else. This test exists so the two files cannot silently disagree —
+    // the live contract is `payment-bootstrap.test.ts`.
+    const next = readFileSync("supabase/migrations/0015_payment_bootstrap.sql", "utf8");
+    expect(next).toContain("create or replace function public.payment_attempts_protect()");
+    expect(next).toContain("if old.status = 'expired' and new.status = 'succeeded' then");
+  });
+
   it("never deletes an attempt or an event", () => {
     expect(code).toContain("create trigger payment_attempts_keep");
     expect(code).toContain("before delete on public.payment_attempts");

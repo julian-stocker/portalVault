@@ -953,6 +953,35 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   geändert. **Alle Funktionen sind `PUBLIC`, `anon` und `authenticated` entzogen**; der
   privilegierte Aufrufer wird eine Supabase Edge Function. **Angewandt am 2026-09-08** und
   runtime-verifiziert.
+- Dreizehnte Migration: `0013_guest_payment_capability.sql` — `orders.payment_token_hash` und
+  `authorize_order_payment()` (B2.2a). `create_order()` bekommt ein sechstes Argument, die
+  Fähigkeit; die fünfstellige Fassung bleibt **absichtlich daneben stehen**, damit das Deployment
+  ohne Fenster übersetzt, in dem jeder Checkout `PGRST202` beantwortet. **Angewandt am 2026-09-08.**
+- Vierzehnte Migration: `0014_remove_legacy_create_order.sql` — entfernt die fünfstellige
+  Fassung wieder. Eine Anweisung, sonst nichts. **Auf Staging angewandt am 2026-09-09, Production
+  ausstehend.**
+- Fünfzehnte Migration: `0015_payment_bootstrap.sql` — der Payment-Bootstrap (B2.2b):
+  `payment_attempts_protect()` erlaubt genau `expired` → `succeeded` (ADR-0052),
+  `amount_to_cents()` als einzige Stelle, an der Geld die Einheit wechselt,
+  `start_payment_attempt()` liefert zusätzlich `amount_cents`, `created_at` und die Anbieter-IDs,
+  und `pending_payment_expiries()` ist ein reiner Leser für den späteren Expiry-Sweep.
+  `start_payment_attempt()` wird gedroppt und neu angelegt (Rückgabetyp erweitert) — **und
+  deshalb neu entzogen**, denn für Privilegien ist sie danach eine neue Funktion.
+  **Auf Staging angewandt am 2026-09-09, Production ausstehend.**
+- Sechzehnte Migration: `0016_fix_create_order_amount_initialization.sql` — **eine
+  Defektbehebung.** `create_order()` legte die Bestellung seit `0010` mit Nullbeträgen an und
+  aktualisierte sie danach, was `orders_protect_immutable()` verbietet: **jeder Checkout warf
+  `23001`, es konnte nie eine Bestellung entstehen.** Die Beträge stehen jetzt vor dem INSERT fest
+  (ADR-0053). Eine Funktion, kein Trigger, keine Tabelle, kein Grant.
+  **Auf Staging angewandt und verifiziert am 2026-09-09, Production ausstehend.**
+
+> **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
+> gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
+> Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.
+> Jeder schreibende Abschnitt läuft in `begin … rollback`, die Suite lässt also nichts zurück.
+> **Sie gehört auf Staging und niemals auf Production.** Sie hat den Defekt aus `0016` gefunden,
+> den 1305 statische Tests nicht sehen konnten — der Grund steht in ADR-0053.
+
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit
   Service-Role-Key und ist standardmäßig ein **Dry-Run**. Regeln und Prüfliste vollständig in

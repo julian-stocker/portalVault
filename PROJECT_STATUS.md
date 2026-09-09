@@ -7,10 +7,38 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**Commerce V1 · Phase B2.1 abgeschlossen und produktiv (2026-09-08).** Migration `0012` ist
-angewandt und runtime-verifiziert. Der Payment-Core steht — **ohne Zahlungsanbieter**: kein Stripe-SDK,
-kein Webhook, keine Edge Function, kein `pg_cron`, keine Payment-Oberfläche. Nichts in der
-Anwendung ruft ihn auf; er wartet auf B2.2.
+**Commerce V1 · Phase B2.2b vorbereitet, auf Staging verifiziert (2026-09-09).** Migrationen
+`0014`, `0015` und `0016` sind geschrieben, auf `skyisles-staging` angewandt und dort gegen eine
+echte Datenbank geprüft. **Auf Production noch nicht angewandt.** Weiterhin kein Stripe-SDK, kein
+Webhook, keine Edge Function, keine Secrets, kein `pg_cron`, keine Payment-Oberfläche.
+
+> ### Der Checkout war seit `0010` funktionsunfähig
+>
+> `create_order()` legte die Bestellung mit Nullbeträgen an und aktualisierte sie unmittelbar
+> danach — was `orders_protect_immutable()` aus derselben Migration verbietet. Jeder Aufruf warf
+> `23001` und rollte zurück. **Es konnte keine Bestellung entstehen, in keiner Umgebung**, und es
+> gibt keine Eingabe, die daran vorbeikommt. Dass Production null Bestellungen zählt, ist keine
+> Aussage über Kundschaft. `0016` behebt es (ADR-0053); es ist die dringendste der drei
+> ausstehenden Migrationen.
+>
+> **Warum 1305 Tests das nicht sahen.** Jeder Test dieser Funktion ist eine Zusicherung über
+> Dateitext. `schema.test.ts` behauptet in derselben Datei, dass der Trigger die Beträge einfriert
+> *und* dass `create_order()` sie aktualisiert — beide Aussagen stimmen für sich, und kein
+> Textvergleich sieht den Widerspruch. Ausgeführt worden war die Funktion nie. Gefunden hat es die
+> neue Staging-Runtime-Suite im dritten Lauf.
+
+*Neu in dieser Phase.* Ein wegwerfbares Staging-Projekt mit vollständig nachgespielter
+Migrationskette `0001`–`0016` (`docs/DEPLOYMENT.md`) · `supabase/tests/0015_runtime_verification.sql`,
+die erste Prüfung dieses Projekts, die Commerce-Schreibvorgänge **wirklich ausführt** · `0015` mit
+dem Übergang `expired` → `succeeded` (ADR-0052), `amount_to_cents()`, dem erweiterten
+`start_payment_attempt()` und dem Leser `pending_payment_expiries()` · `0016` mit den endgültigen
+Beträgen vor dem INSERT (ADR-0053) · `0014` entfernt die alte `create_order`-Signatur.
+
+*Was daraus folgt.* Statische Zusicherungen über SQL-Text finden diese Fehlerklasse nicht. Vor
+jedem weiteren Commerce-Schritt gilt: erst Staging, dann Production.
+
+**Zuvor: Phase B2.1 (2026-09-08).** Migration `0012` ist angewandt und runtime-verifiziert. Der
+Payment-Core steht — **ohne Zahlungsanbieter**. Nichts in der Anwendung ruft ihn auf.
 
 *Neu.* `payment_attempts` und `payment_events`, dazu `start_payment_attempt()`,
 `attach_provider_payment()`, `confirm_order_payment()`, `fail_payment_attempt()` und

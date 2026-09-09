@@ -139,6 +139,26 @@ describe("the browser cannot name a price", () => {
     expect(fn("create_order")).toContain("total_amount    = v_subtotal + v_shipping");
   });
 
+  it("but does it by UPDATE, which 0016 had to replace", () => {
+    // 0011's create_order inserted the order with zero amounts and patched
+    // them afterwards — and `orders_protect_immutable()` refuses exactly
+    // that, so every call raised 23001 and no order could be created. The
+    // assertion above still describes 0011 correctly; it is not what runs.
+    // 0016 computes the amounts before the INSERT and updates nothing.
+    // The live contract is `create-order.test.ts`.
+    expect(fn("create_order")).toContain("update public.orders");
+    // Comments stripped: 0016's header quotes the defective statement in
+    // order to explain it, and that quotation is not code.
+    const next = readFileSync(
+      "supabase/migrations/0016_fix_create_order_amount_initialization.sql", "utf8",
+    )
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
+    expect(next).toContain("create or replace function public.create_order(");
+    expect(next).not.toContain("update public.orders");
+  });
+
   it("exposes only the display projection to clients", () => {
     expect(code).toContain("grant execute on function public.shipping_quote(numeric) to anon, authenticated;");
     for (const internal of ["free_shipping_threshold()", "shipping_catalog()"]) {

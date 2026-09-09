@@ -1,0 +1,38 @@
+-- ===========================================================================
+-- 0014 — removing the create_order() shim
+--
+-- ⚠️  NOT YET APPLIED. See "When to run this" below.
+--
+-- 0013 added a sixth argument to create_order() — the payment capability — and
+-- deliberately kept the five-argument version alive so the deployment could
+-- cross over without a window in which every checkout answered PGRST202. That
+-- crossing is done: the new build is live and calls the six-argument version.
+--
+-- This migration removes the shim, and does nothing else.
+--
+-- WHY THE DROP IS UNAMBIGUOUS
+--
+-- The two versions differ in arity, so naming the argument types identifies
+-- exactly one of them. The six-argument version — `(text, text, jsonb, jsonb,
+-- text, text)` — is untouched, keeps its grants, and remains the only way an
+-- order is created.
+--
+-- WHY NOT SOONER
+--
+-- Only one call site exists (`src/lib/commerce/actions.ts`), it always sends
+-- `p_payment_token`, and no tool or script calls the function at all — so
+-- nothing in the current build needs the shim.
+--
+-- The usual worry with dropping a signature after a deploy is a browser still
+-- running the previous bundle. It does not apply here, and the reason is worth
+-- writing down: `create_order` is never called from a browser. It is called by
+-- a **server action**, which runs the currently deployed server code. A stale
+-- bundle invoking that action reaches the new server, not the old RPC.
+--
+-- So this is safe to run at any point after the deployment settled. It is
+-- still deliberately not urgent: an unused function costs nothing, and being
+-- wrong about a shared checkout path costs a great deal. It travels with the
+-- next commerce migration rather than on its own.
+-- ===========================================================================
+
+drop function if exists public.create_order(text, text, jsonb, jsonb, text);

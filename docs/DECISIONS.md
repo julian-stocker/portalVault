@@ -4009,3 +4009,114 @@ als eingegangen verbucht, setzt `needs_resolution` und schreibt **keine** Bestan
 ausführbare Bestätigungsfunktion mit Shared Secret · Mollie (auf falscher Annahme empfohlen) ·
 Klarna und SEPA-Lastschrift zum Start · Wiederbeleben abgelaufener Reservierungen · teilweise
 Konvertierung einer Bestellung · Speichern von Anbieter-Payloads oder Zahlungsdaten.
+
+---
+
+## ADR-0052 — Ein lokaler Timeout darf vom Anbieter korrigiert werden
+
+**Status:** ANGENOMMEN (2026-09-09) · Migration `0015`, auf Staging runtime-verifiziert,
+Production ausstehend.
+
+**Problem.** `payment_attempts.status` kannte vier Endzustände, und `payment_attempts_protect()`
+verbot jeden Übergang aus ihnen heraus — ausnahmslos. Das war als Stärke gedacht und war ein
+Defekt.
+
+`expire_stale_checkouts()` setzt einen Versuch allein aufgrund **unseres eigenen Zustands** auf
+`expired`: die Reservierung ist abgelaufen, also hat niemand rechtzeitig bezahlt. Die Checkout
+Session beim Anbieter kann in diesem Moment aber noch bezahlbar sein — Stripes Mindestlaufzeit
+beträgt 30 Minuten, unsere Reservierung 20, und die beiden lassen sich nicht angleichen.
+
+Zahlt der Kunde danach, erreicht `confirm_order_payment()` seinen Late-Payment-Zweig und führt
+`set status = 'succeeded'` auf einem `expired`-Versuch aus. Der Trigger warf `restrict_violation`,
+**die gesamte Transaktion rollte zurück — einschließlich der `payment_events`-Zeile**, die den
+Eingang festgehalten hätte. Stripe wiederholte drei Tage lang in denselben Fehler.
+
+**Das Geld war eingenommen und die Datenbank erfuhr nie davon.** Genau der Pfad, für den
+ADR-0050 existiert, war der einzige, der nicht funktionieren konnte.
+
+**Entscheidung.** Genau ein Übergang wird erlaubt: **`expired` → `succeeded`.** Sonst nichts.
+
+Die Begründung ist ADR-0051 selbst: *bezahlt ist, was der Server beim Anbieter gesehen hat.*
+`expired` ist unsere Vermutung, `succeeded` ist die Auskunft des Anbieters. Eine autoritative
+Bestätigung muss eine lokale Vermutung korrigieren dürfen — andernfalls behauptet die Datenbank
+etwas, das nachweislich falsch ist.
+
+Weiterhin verboten, weil keiner davon eine korrigierte Vermutung beschreibt:
+
+| Übergang | Warum er verboten bleibt |
+|---|---|
+| `failed` → `succeeded` | Der Anbieter hat gesagt, dass diese Zahlung nicht funktioniert hat |
+| `cancelled` → `succeeded` | Jemand hat den Versuch bewusst beendet |
+| `succeeded` → irgendetwas | Bereits die autoritative Antwort; da ist nichts zu korrigieren |
+| `expired` → `pending` / `created` | Ein Versuch läuft nicht rückwärts |
+
+**`failed_at` wird im Trigger geleert, nicht im Aufrufer.** `payment_attempts_failed_at_matches`
+verlangt `(failed_at is not null) = (status in ('failed','expired','cancelled'))`. Nur den Status
+freizugeben hätte die Trigger-Ablehnung gegen eine CHECK-Verletzung getauscht und nichts gelöst.
+Die Regel steht an einer Stelle, damit ein später hinzukommender Aufrufer sie nicht vergessen
+kann. Der Zeitpunkt des lokalen Ablaufs geht nicht verloren — er steht als `checkout_expired`
+in `order_events`.
+
+**Konsequenz.** Der Late-Payment-Vertrag aus B2.1 bleibt unverändert: Versuch `succeeded`,
+Bestellung `paid`, `paid_at` gesetzt, `needs_resolution = true`, keine Reservierung wiederbelebt,
+keine Bestandsbewegung. Er ist jetzt zum ersten Mal überhaupt erreichbar.
+
+**Verworfen:** Terminalzustände generell aufweichen · `confirm_order_payment()` so ändern, dass
+es den Versuch in Ruhe lässt (die Bestellung wäre bezahlt, der Versuch für immer `expired` — zwei
+Zeilen, die sich widersprechen) · `failed_at` behalten und die CHECK-Bedingung lockern.
+
+---
+
+## ADR-0053 — Beträge stehen fest, bevor die Bestellung existiert
+
+**Status:** ANGENOMMEN (2026-09-09) · Migration `0016`, auf Staging runtime-verifiziert,
+Production ausstehend.
+
+**Problem.** Seit `0010` legte `create_order()` die Bestellung mit Nullbeträgen an und setzte sie
+unmittelbar danach:
+
+```sql
+insert into public.orders (... items_subtotal, total_amount ...) values (... 0, 0 ...)
+...
+update public.orders set items_subtotal = v_subtotal, ...
+```
+
+`orders_protect_immutable()` — in derselben Migration eingeführt — verbietet genau das. Jeder
+Aufruf warf `23001` und rollte zurück. **Es konnte keine Bestellung angelegt werden, in keiner
+Umgebung.** Der Checkout war seit `0010` funktionsunfähig; `0011` und `0013` haben die Funktion
+ersetzt und den Widerspruch jedes Mal mitgenommen.
+
+Dass Production null Bestellungen hatte, war keine Aussage über Kundschaft.
+
+**Warum es sechs Migrationen lang unentdeckt blieb.** Jeder Test dieser Funktion ist eine
+Zusicherung über **Dateitext**. `schema.test.ts` behauptet in derselben Datei, dass der Trigger die
+Beträge einfriert *und* dass `create_order()` sie aktualisiert. Beide Aussagen stimmen für sich.
+Kein Textvergleich sieht, dass sie einander widersprechen — und ausgeführt worden war die Funktion
+nie. Gefunden hat es die Staging-Runtime-Suite im dritten Lauf.
+
+**Entscheidung.** Die Beträge werden berechnet, **bevor** die Bestellzeile entsteht. Danach gibt es
+nichts mehr zu aktualisieren.
+
+```
+Durchgang 1   jede Position auflösen, prüfen, bepreisen, Snapshot behalten   (schreibt nichts)
+              v_subtotal, danach v_shipping
+INSERT        orders mit den endgültigen Beträgen
+Durchgang 2   order_lines aus den Snapshots aus Durchgang 1
+```
+
+**Durchgang 2 liest nichts nach.** Das ist Korrektheit, nicht Ordnungsliebe: die Funktion läuft
+unter READ COMMITTED, ein zweites Nachschlagen desselben Artikels dürfte legitim einen anderen
+Preis liefern als den, aus dem die Zwischensumme gebildet wurde — die Bestellung berechnete dann
+einen Betrag und ihre Positionen zeigten einen anderen. Jede Position wird genau einmal bepreist.
+Die Snapshots reisen als `jsonb` und damit ohne neuen Typ; `numeric` überlebt den Umweg exakt.
+
+**Der Trigger bleibt unverändert.** Das ist der Kern der Entscheidung: die Zusage aus
+`docs/SECURITY.md` — die Beträge einer Bestellung sind unveränderlich — wird dadurch buchstäblich
+wahr, ab dem ersten INSERT, ohne Fenster.
+
+**Verworfen:** eine Initialisierungs-Ausnahme im Trigger (etwa „Änderung erlaubt, solange der alte
+Betrag 0 ist"). Sie hätte aus *unveränderlich* ein *unveränderlich, außer kurz* gemacht, eine
+Zusage ohne Einschränkung nachträglich eingeschränkt und eine Bestellzeile mit Nullbeträgen
+hinterlassen, die nebenläufige Leser sehen können. · Zwei getrennte Lesedurchgänge gegen den
+Katalog (Preis-Race). · Ein neuer Composite Type für die Snapshots (Schemaänderung für einen
+lokalen Zwischenspeicher).

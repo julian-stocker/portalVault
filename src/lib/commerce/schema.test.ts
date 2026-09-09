@@ -445,6 +445,29 @@ describe("creating an order", () => {
     expect(create).toContain("total_amount   = v_subtotal");
     expect(create).not.toMatch(/shipping_amount\s*=\s*[1-9]/);
   });
+
+  it("and sets the amounts by UPDATE, which the trigger above forbids", () => {
+    // The defect 0016 fixes, and the reason it went unseen for six
+    // migrations: this file asserts that the trigger freezes the amounts AND
+    // that create_order updates them. Both were true of 0010's text; together
+    // they made every checkout raise 23001. No static test can catch that —
+    // only executing it against PostgreSQL can, which is what
+    // supabase/tests/0015_runtime_verification.sql now does.
+    expect(create).toContain("update public.orders");
+    expect(fn("orders_protect_immutable")).toContain(
+      "new.items_subtotal  is distinct from old.items_subtotal",
+    );
+    // Comments stripped: 0016's header quotes both the defective UPDATE and
+    // the trigger name in order to explain the collision.
+    const fixed = readFileSync(
+      "supabase/migrations/0016_fix_create_order_amount_initialization.sql", "utf8",
+    )
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
+    expect(fixed).not.toContain("update public.orders");
+    expect(fixed).not.toContain("orders_protect_immutable");
+  });
 });
 
 describe("nothing about tax or a payment provider is guessed", () => {

@@ -241,21 +241,105 @@ diesem Fenster ohnehin für niemanden freigeschaltet.
    Request-ID und Fähigkeit entstehen stabil im Browser.
 5. **Erst danach** die Aufräum-Migration.
 
-### Aufräum-Migration — noch nicht angelegt
+### Aufräum-Migration — `0014`, geschrieben und **noch nicht angewandt**
 
-Sie besteht aus einer Anweisung:
+`0014_remove_legacy_create_order.sql` besteht aus einer Anweisung:
 
 ```sql
 drop function if exists public.create_order(text, text, jsonb, jsonb, text);
 ```
 
-Eindeutig, weil sich die beiden in der Stelligkeit unterscheiden. **Die Datei
-existiert absichtlich noch nicht:** eine Migration im Ordner, die noch nicht
-angewandt werden darf, ist eine geladene Waffe — sie würde den Grundsatz
-brechen, dass `supabase/migrations/` den produktiven Stand abbildet. Sie wird
-angelegt, wenn entschieden ist, ob sie unmittelbar nach dem Deployment oder mit
-dem nächsten Commerce-Schritt läuft.
+Eindeutig, weil sich die beiden in der Stelligkeit unterscheiden.
+
+> **Achtung:** `supabase/migrations/` bildet sonst den produktiven Stand ab.
+> `0014` ist die einzige Ausnahme und ist im Dateikopf entsprechend markiert.
+> Nicht mit anderen Migrationen zusammen blind ausführen.
+
+**Wann anwenden.** Technisch ab sofort sicher, und der Grund ist
+architektonisch: `create_order` wird nie aus einem Browser gerufen, sondern aus
+einer **Server Action**, die den aktuell ausgelieferten Servercode ausführt. Ein
+Browser mit altem Bundle erreicht damit den neuen Server, nicht die alte
+Funktion. Die übliche Sorge um veraltete Bundles greift hier also nicht.
+
+Trotzdem **nicht sofort**: eine ungenutzte Funktion kostet nichts, ein Irrtum
+auf dem Bestellpfad kostet viel. Sie läuft mit der nächsten Commerce-Migration
+mit.
 
 Bis dahin ist die alte Fassung **in der Datenbank selbst** als temporär
 gekennzeichnet (`comment on function`), damit niemand später zwei
 `create_order` findet und raten muss.
+
+---
+
+## Staging — `skyisles-staging`
+
+Ein zweites, wegwerfbares Supabase-Projekt. Es existiert, weil Production
+**keine Commerce-Testdaten aufnehmen darf**: `order_lines` ist append-only und
+`orders` steht auf `on delete restrict`, eine Testbestellung wäre dort für
+immer unentfernbar.
+
+**Aufbau.** Frisches Projekt, gleiche Region, eigenes Datenbankpasswort. Dann
+`0001` bis `0016` **vollständig und in Reihenfolge** über den SQL Editor. Kein
+Dump, kein selektives Kopieren einzelner Tabellen — der Sinn ist gerade, dass
+die Migrationskette selbst bewiesen wird. Sie ist dafür geeignet: keine
+`create extension`, keine datenabhängigen Backfills, keine Vorwärtsreferenzen,
+und die drei Seed-Inserts sind Singleton-Zeilen mit `on conflict do nothing`.
+
+Staging startet mit **leerem Katalog** — die 820 SKY-IDs stehen in keiner
+Migration. Das ist richtig so; die Runtime-Suite legt an, was sie braucht.
+
+**Environment.** Eine eigene Datei `.env.staging` im Projektwurzelverzeichnis
+mit denselben drei Namen wie `.env.local`:
+
+```
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+```
+
+`.gitignore` deckt sie über `.env.*` bereits ab. **`.env.local` wird dabei nie
+angefasst** — sie zeigt weiterhin auf Production.
+
+Die `verify:*`-Skripte fest verdrahten `--env-file=.env.local`. Gegen Staging
+laufen sie deshalb nicht über `npm run`, sondern direkt:
+
+```bash
+node --env-file=.env.staging tools/verify-rls.mts
+node --env-file=.env.staging tools/verify-commerce.mts
+```
+
+> `verify:rls` ist **nicht lesend** — es legt echte Auth-Benutzer an und räumt
+> sie in einem `finally` wieder ab. Vor dem ersten Lauf prüfen, dass die URL
+> in `.env.staging` wirklich das Staging-Projekt benennt.
+
+**Regeln, die Staging und Production trennen.** Der Service-Role-Key bekommt
+nie ein `NEXT_PUBLIC_`-Präfix und geht nie nach Vercel. Stripe-Testschlüssel
+liegen ausschließlich in den Edge-Function-Secrets des Staging-Projekts,
+Live-Schlüssel ausschließlich in denen von Production — nie beide in einem
+Projekt. Staging behält `noindex` dauerhaft.
+
+**Runtime-Suite.** `supabase/tests/0015_runtime_verification.sql`, abschnittweise
+im SQL Editor. Jeder schreibende Abschnitt läuft in `begin … rollback`; was
+nicht zurückrollt, sind Sequenzen (`next_order_number()`, Identity-Spalten), und
+das ist in einer wegwerfbaren Umgebung folgenlos. Abschnitt 6 prüft am Ende, dass
+nichts übrig geblieben ist. **Niemals gegen Production.**
+
+---
+
+## Warnung: `0016` ist eine Produktionsbehebung, keine Aufräumarbeit
+
+`0014`, `0015` und `0016` sind auf Staging angewandt und verifiziert, auf
+Production **noch nicht**. Von den dreien ist `0016` das dringende:
+
+**Der Checkout ist in Production seit `0010` funktionsunfähig.** `create_order()`
+legte die Bestellung mit Nullbeträgen an und aktualisierte sie danach, was
+`orders_protect_immutable()` verbietet — jeder Aufruf warf `23001` und rollte
+zurück. Es gibt keine Eingabe, die daran vorbeikommt. Dass Production null
+Bestellungen zählt, ist keine Aussage über Kundschaft (ADR-0053).
+
+Erschwerend: `23001` steht weder in `UNAVAILABLE` noch in `THROTTLED`
+(`src/lib/commerce/actions.ts`), fällt also in den generischen `failed`-Zweig.
+Ein Kunde hätte einen unerklärten Fehler gesehen und der Betrieb kein
+spezifisches Signal bekommen.
+
+Reihenfolge auf Production, wenn freigegeben: `0014` → `0015` → `0016`.
