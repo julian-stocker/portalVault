@@ -5,6 +5,7 @@
   "description": "Web platform for Skylanders collectors: catalog, accounts, personal collection.",
   "scripts": {
     "dev": "next dev",
+    "dev:staging": "node tools/dev-staging.mts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -14,6 +15,7 @@
     "verify:inventory": "node --env-file=.env.local tools/verify-inventory.mts",
     "verify:shop": "node --env-file=.env.local tools/verify-shop.mts",
     "verify:commerce": "node --env-file=.env.local tools/verify-commerce.mts",
+    "verify:payment-smoke": "node --env-file=.env.staging tools/verify-payment-smoke.mts",
     "catalog:import": "node --env-file=.env.local tools/import-catalog.mts",
     "characters:import": "node --env-file=.env.local tools/import-characters.mts",
     "admin:grant": "node --env-file=.env.local tools/grant-admin.mts",

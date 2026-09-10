@@ -1,0 +1,18 @@
+# Supabase CLI configuration.
+#
+# Only what SkyIsles actually needs. The project is not managed by `supabase
+# init`; migrations are applied by hand through the SQL Editor and this file
+# exists for one reason: an Edge Function's JWT setting cannot be expressed
+# anywhere else in the repository.
+
+project_id = "skyisles"
+
+[functions.create-payment]
+# MUST stay false.
+#
+# With verification on, Supabase rejects the request before the function runs
+# whenever the JWT is missing or not a user token — which is every guest
+# checkout, and guests are most of the shop. The function verifies the token
+# itself instead (see index.ts, step 2), which is also the only way to tell
+# "no user" apart from "invalid user".
+verify_jwt = false

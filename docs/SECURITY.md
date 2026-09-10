@@ -697,6 +697,51 @@ mit dem Auth-UI (V1.4) und brauchen dann eine eigene Verifikation.
   Import (Service Role) änderbar.
 - **Fehlermeldungen** verraten keine internen Details, keine SQL-Fehler, keine Stacktraces.
 
+### CORS der Edge Function `create-payment` (B2.2b)
+
+Der Request an `create-payment` trägt ein `Authorization`-Bearer-Token und — beim Gastcheckout —
+die Zahlungs-Capability aus `0013`. Beides darf keine beliebige Seite im Internet im Browser
+eines Besuchers auslösen. **Deshalb ist CORS hier eine Sicherheitsgrenze und keine
+Konfigurationsformalie.**
+
+**Origin: Allowlist, niemals `*`.** Sie kommt vollständig aus `ALLOWED_ORIGINS` und hat **keinen
+eingebauten Default**. Eine im Quelltext verdrahtete Produktions-Origin wäre genau dort falsch, wo
+es zählt: die Function wird pro Umgebung deployt, und ein Staging-Deployment, das
+`https://skyisles.app` vertraut, ließe den Live-Shop Testzahlungen gegen die Staging-Datenbank
+starten. Unkonfiguriert heißt „jeden Cross-Origin-Request ablehnen" — eine Fehlkonfiguration
+scheitert geschlossen, nicht offen.
+
+**Request-Header: ebenfalls eine Allowlist — und eine zu enge scheitert *stumm*.**
+
+```
+Access-Control-Allow-Headers: authorization, apikey, content-type, x-client-info
+```
+
+`x-client-info` ist **nicht optional**: supabase-js setzt es über `DEFAULT_HEADERS` auf jeden
+Client, und `get functions()` reicht diese Header an den FunctionsClient weiter. Jeder
+`functions.invoke()`-Aufruf aus einem Browser fragt ihn im Preflight an.
+
+Fehlt ein Name in dieser Liste, antwortet der Preflight trotzdem `204` mit korrektem
+`Allow-Origin` — und der Browser sendet den POST **gar nicht erst**. In der Anwendung erscheint
+nur ein opakes „Failed to send a request to the Edge Function"; die Function wird nie betreten,
+es entsteht kein `payment_attempt` und kein Log-Eintrag, an dem man es sehen könnte. Genau dieser
+Fehler hat den ersten Runtime-Smoke gekostet.
+
+**Daraus die Regel:** Ändert sich, welche Header der Client mitschickt — ein Upgrade von
+supabase-js, ein eigener Header, aktiviertes Tracing —, muss diese Liste mitgeführt werden. Sie
+liegt als `ALLOWED_REQUEST_HEADERS` in `supabase/functions/create-payment/session.ts` und wird von
+`index.ts` über `allowedRequestHeadersValue()` gelesen; zwei handgepflegte Listen würden
+auseinanderlaufen, ohne dass es jemand bemerkt. `payment-session.test.ts` schickt einen
+realistischen Browser-Preflight dagegen, prüft Groß-/Kleinschreibung (HTTP-Feldnamen sind
+case-insensitiv; ein Browser vergleicht in Kleinschreibung) und verlangt, dass `index.ts` den
+gemeinsamen Helper aufruft statt den String zu wiederholen.
+
+**Nicht freigegeben ist `traceparent`.** supabase-js hängt ihn nur an, wenn
+`tracePropagation.enabled` true ist — der Default ist `false` — *und* der Tracing-Entrypoint
+importiert wurde *und* ein OpenTelemetry-SDK läuft. `src/lib/supabase/client.ts` übergibt keine
+Optionen, es sendet ihn also nichts. Einen Header freizugeben, den niemand schickt, vergrößert die
+Fläche ohne Gegenwert; er kommt auf die Liste, wenn Tracing eingeschaltet wird.
+
 ---
 
 ## 7. Datenschutz (DSGVO)

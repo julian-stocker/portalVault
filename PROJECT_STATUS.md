@@ -1,16 +1,37 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-06 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-10 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
 
 ## Aktuelle Phase
 
-**Commerce V1 · Phase B2.2b vorbereitet, auf Staging verifiziert (2026-09-09).** Migrationen
-`0014`, `0015` und `0016` sind geschrieben, auf `skyisles-staging` angewandt und dort gegen eine
-echte Datenbank geprüft. **Auf Production noch nicht angewandt.** Weiterhin kein Stripe-SDK, kein
-Webhook, keine Edge Function, keine Secrets, kein `pg_cron`, keine Payment-Oberfläche.
+**Commerce V1 · Phase B2.2b abgeschlossen und auf Staging runtime-verifiziert (2026-09-10).**
+Migrationen `0014`, `0015` und `0016` sind geschrieben, auf `skyisles-staging` angewandt und dort
+gegen eine echte Datenbank geprüft. **Auf Production noch nicht angewandt.**
+
+*Neu und real:* die Edge Function `create-payment` (`supabase/functions/create-payment/`), deployt
+auf `skyisles-staging` mit einem Stripe-**Test**schlüssel in den Function-Secrets. Sie ist der
+einzige privilegierte Aufrufer der Payment-Funktionen; Service-Role-Key und Stripe-Secret
+existieren im Webdeployment weiterhin nicht (ADR-0051). **Kein Stripe-SDK** — die Function spricht
+Stripes REST-API direkt. **Weiterhin nicht vorhanden:** Webhook, `pg_cron`, Payment-Oberfläche,
+Production-Deployment der Function.
+
+*Der erste echte Zahlungsvorgang.* Order 16 (`SI-2026-001015`) auf Staging: ein Klick, genau ein
+`payment_attempt`, Status `pending`, 9,31 EUR, eine Stripe Checkout Session (`cs_test_…`) mit
+gespeicherter Checkout-URL — und **nichts sonst hat sich bewegt**: Bestellung weiter `pending`,
+`paid_at` null, `needs_resolution` false, Reservierung `active` und nicht konvertiert,
+`reserved = 1`, `available = 1`, **null `sale_skyisles`-Bewegungen**. Genau so soll es sein: eine
+Checkout-URL heißt, dass jemand bezahlen *kann*, und sonst nichts. Verkauft wird erst durch
+`confirm_order_payment()` — und den Auslöser dafür baut B2.3.
+
+*Was zwei Läufe gekostet hat, und jetzt geprüft wird.* Erstens der Stock-Hold: 20 Minuten, und
+`start_payment_attempt()` verlangt `expires_at > now()`. Nichts räumt abgelaufene Holds weg
+(`pg_cron` ist aus), eine Reservierung steht also noch lange auf `active`, nachdem sie aufgehört
+hat zu zählen — `verify-payment-smoke.mts` prüft deshalb die Uhr, nicht nur den Zustand. Zweitens
+CORS: `x-client-info` fehlte in `Access-Control-Allow-Headers`, der Preflight antwortete `204`,
+und der Browser verwarf den POST trotzdem stumm. Regel und Test dazu in `docs/SECURITY.md` §6.
 
 > ### Der Checkout war seit `0010` funktionsunfähig
 >
@@ -65,15 +86,16 @@ Secret entgegen, `anon` kann nichts lesen, schreiben, ändern, löschen oder aus
 ausgeführt und griffen an ihren Wächtern. Bestellungen, Reservierungen, Versuche und Events stehen
 weiterhin auf 0.
 
-> **Nächster Schritt:** B2.2 — Stripe-Anbindung und Payment-Bootstrap. Voraussetzungen unten.
+> **Nächster Schritt:** B2.3 — `stripe-webhook`. Erst er darf eine Zahlung bestätigen; bis dahin
+> ist jede Stripe-Session auf Staging folgenlos. Voraussetzungen unten.
 
-### Voraussetzungen vor B2.2 und B2.3
+### Voraussetzungen vor B2.3
 
 | | Warum |
 |---|---|
-| Stripe-Konto + PayPal-Business-Konto (EWR) | Verifizierung dauert; ohne sie kein Testmodus |
+| ~~Stripe-Konto~~ **erledigt** | Testschlüssel liegt in den Function-Secrets von `skyisles-staging`; der Live-Schlüssel gehört ausschließlich nach Production. PayPal (EWR) steht weiterhin aus. |
 | `pg_cron` aktivieren | Erst wenn echte Reservierungen entstehen. Exakte Anweisung in `docs/DEPLOYMENT.md` |
-| **Staging-Supabase-Projekt** | **Vor B2.3 zwingend.** Production kann keinen echten Nebenläufigkeitstest tragen: Bestellzeilen sind append-only, Bestellungen `on delete restrict` — eine Testbestellung wäre unlöschbar. Stripes Testmodus hilft nicht, weil eine Test-Zahlung trotzdem echte Zeilen in die verbundene Datenbank schreibt. |
+| ~~**Staging-Supabase-Projekt**~~ **erledigt** — `skyisles-staging` | War vor B2.3 zwingend. Production kann keinen echten Nebenläufigkeitstest tragen: Bestellzeilen sind append-only, Bestellungen `on delete restrict` — eine Testbestellung wäre unlöschbar. Stripes Testmodus hilft nicht, weil eine Test-Zahlung trotzdem echte Zeilen in die verbundene Datenbank schreibt. |
 | Mailversand | Nicht blockierend für B2, aber vor echten Kunden nötig und vor öffentlichem Release Pflicht |
 
 ### Danach vorgemerkt: Account-/Profil-Phase

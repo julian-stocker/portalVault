@@ -13,6 +13,11 @@
 *.pem
 *.key
 
+# --- Supabase CLI state ------------------------------------------------
+# Written by the CLI (version cache, link state). Never part of the repo:
+# it can name a project ref, and this repository serves more than one.
+supabase/.temp/
+
 # --- Internal legacy data -------------------------------------------------
 # These patterns are an extra brake, not a permission: the legacy project
 # ../webpage is never copied into this repository in the first place.
