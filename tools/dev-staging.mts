@@ -21,54 +21,52 @@
  *
  * THE INTERLOCK
  *
- * If the URL in `.env.staging` turns out to be the same one as in
- * `.env.local`, this refuses to start. A staging file that has been pointed
- * at production by accident is exactly the mistake worth failing on.
+ * This file used to carry its own copy of the check. It now calls the shared
+ * one in `lib/staging-guard.mts` — the same guard the importers and the
+ * writing verifiers use, so there is one rule about what "staging" means
+ * rather than one per tool.
+ *
+ * The check runs against the values this process is about to hand to the dev
+ * server, not against the file it read them from: what matters is where the
+ * browser ends up.
  */
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
 
-/** `KEY=value` lines, ignoring comments and blanks. Quotes are stripped. */
-function readEnvFile(path: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return out;
-  }
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq < 1) continue;
-    const key = trimmed.slice(0, eq).trim();
-    let value = trimmed.slice(eq + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    out[key] = value;
-  }
-  return out;
-}
+import {
+  checkStagingTarget,
+  readEnvFile,
+  referenceFromDisk,
+  STAGING_ENV_FILE,
+} from "./lib/staging-guard.mts";
 
-const staging = readEnvFile(".env.staging");
-const production = readEnvFile(".env.local");
+const staging = readEnvFile(STAGING_ENV_FILE);
 
 const url = staging.NEXT_PUBLIC_SUPABASE_URL;
 const anon = staging.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 if (!url || !anon) {
-  console.error(".env.staging must define NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+  console.error(
+    `${STAGING_ENV_FILE} must define NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.`,
+  );
   process.exit(1);
 }
 
-const same = (a: string | undefined, b: string) => (a ?? "").replace(/\/+$/, "") === b.replace(/\/+$/, "");
-if (same(production.NEXT_PUBLIC_SUPABASE_URL, url)) {
-  console.error("Refusing to start: .env.staging names the same project as .env.local.");
+/*
+ * No service-role key in the target: this process never has one to give the
+ * dev server, so the guard's key check has nothing to compare and the URL
+ * check is what decides. That is the correct shape here — the risk this
+ * command carries is a browser session on the wrong project, not a privileged
+ * write.
+ */
+const verdict = checkStagingTarget({ url, serviceRoleKey: undefined }, referenceFromDisk());
+if (!verdict.ok) {
+  console.error("");
+  console.error("  PRODUCTION GUARD — refusing to start.");
+  console.error("");
+  console.error(`  dev:staging is a staging-only command, and ${verdict.message}`);
+  console.error("");
+  console.error("  No server was started.");
+  console.error("");
   process.exit(1);
 }
 

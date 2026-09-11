@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { assignSlugs, seriesSlug } from "../src/lib/catalog/slug.ts";
+import { requireStagingIfRequested } from "./lib/staging-guard.mts";
 
 const DEFAULT_INPUT = "data/catalog/products.json";
 const IMAGE_DIR = "public/images/skylanders";
@@ -227,7 +228,21 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * The one place a privileged client is built — and therefore the one place the
+ * production guard has to stand.
+ *
+ * Checked here rather than in `main()` so that no later code path can acquire a
+ * connection without passing it: there is no client before this function and
+ * only this function returns one. `--validate-only` never calls it and needs no
+ * guard, because it never opens a connection at all.
+ *
+ * The guard only applies when the caller asked for it — `catalog:import:staging`
+ * sets the flag. The unguarded `catalog:import:prod` is the deliberate
+ * production path and stays exactly as it was.
+ */
 function serviceClient(): SupabaseClient {
+  requireStagingIfRequested("catalog:import");
   return createClient(
     requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
     requireEnv("SUPABASE_SERVICE_ROLE_KEY"),

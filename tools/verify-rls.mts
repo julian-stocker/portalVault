@@ -26,6 +26,8 @@
  */
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
+import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+
 // --- Test fixtures ---------------------------------------------------------
 // Deliberately outside the real catalog: SKY-9999 is the highest ID the format
 // allows and will never be issued by the legacy ledger (highest_issued = 820).
@@ -121,6 +123,21 @@ async function createSignedInUser(
 }
 
 async function main(): Promise<void> {
+  /*
+   * The production guard, first thing (2026-09-11).
+   *
+   * This verifier WRITES: it creates real auth users, inserts and deletes its
+   * own SKY-99xx fixtures, and grants itself shop-admin. Against production
+   * that is deliberate and documented; against staging it has to be asked for
+   * by name. `verify:rls:staging` sets the flag, `verify:rls:prod` does not — and an
+   * environment-neutral alias no longer exists, so neither run can be started
+   * without saying which one it is.
+   *
+   * Before any client is built, so there is no window in which a connection
+   * exists and the check has not run.
+   */
+  requireStagingIfRequested("verify:rls");
+
   const admin = serviceClient();
   let categoryId: number | null = null;
   let characterId: number | null = null;

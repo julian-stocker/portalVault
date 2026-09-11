@@ -21,6 +21,8 @@
  */
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
+import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+
 const RUN = Date.now();
 const SKY = "SKY-9994";
 const USER = { email: `inv-user-${RUN}@portalvault.test`, password: `U-${RUN}-xK9!pQ` };
@@ -64,6 +66,21 @@ async function signedIn(
 }
 
 async function main(): Promise<void> {
+  /*
+   * The production guard, first thing (2026-09-11).
+   *
+   * This verifier WRITES: it creates real auth users, inserts and deletes its
+   * own SKY-99xx fixtures, and grants itself shop-admin. Against production
+   * that is deliberate and documented; against staging it has to be asked for
+   * by name. `verify:inventory:staging` sets the flag, `verify:inventory:prod` does not — and an
+   * environment-neutral alias no longer exists, so neither run can be started
+   * without saying which one it is.
+   *
+   * Before any client is built, so there is no window in which a connection
+   * exists and the check has not run.
+   */
+  requireStagingIfRequested("verify:inventory");
+
   const admin = serviceClient();
   let user: Awaited<ReturnType<typeof signedIn>> | null = null;
   let boss: Awaited<ReturnType<typeof signedIn>> | null = null;

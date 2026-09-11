@@ -44,15 +44,25 @@ Tailwind CSS v4, ESLint 9. Supabase ist **noch nicht** angebunden.
 Der aktuelle Stand steht in `PROJECT_STATUS.md`.
 
 ```bash
-npm run dev        # Entwicklungsserver
-npm run lint       # ESLint
-npm run typecheck  # tsc --noEmit
-npm run build      # Production Build
-npm run check      # lint + typecheck + build  ← nach jeder relevanten Änderung
-npm test           # Unit-Tests
-npm run verify:rls # funktionale RLS-Prüfung gegen die echte Datenbank
-npm run verify:shop # öffentliche Angebotsprojektion prüfen (schreibfrei)
+npm run dev           # Entwicklungsserver (Production-Daten! meist dev:staging nehmen)
+npm run dev:staging   # Entwicklungsserver gegen Staging
+npm run lint          # ESLint
+npm run typecheck     # tsc --noEmit
+npm run build         # Production Build
+npm run check         # lint + typecheck + build  ← nach jeder relevanten Änderung
+npm test              # Unit-Tests
+
+npm run verify:rls:staging       # funktionale RLS-Prüfung (SCHREIBT: Auth-Nutzer, Fixtures)
+npm run verify:shop:staging      # öffentliche Angebotsprojektion prüfen (schreibfrei)
+npm run catalog:import:staging   # Katalogimport nach Staging
 ```
+
+**Jedes datenbankschreibende Werkzeug nennt seine Umgebung im Namen.** Es gibt keinen
+umgebungsneutralen Alias mehr: `:prod` zielt auf Production, `:staging` auf Staging. Die
+`:staging`-Varianten setzen `SKYISLES_REQUIRE_STAGING=1`, und `tools/lib/staging-guard.mts`
+bricht ab — **bevor eine Verbindung entsteht** —, wenn das Ziel nicht genau das in `.env.staging`
+genannte Projekt ist. Der Guard vergleicht Origin und Service-Role-Key exakt; er rät nicht an
+Projektnamen.
 
 ---
 

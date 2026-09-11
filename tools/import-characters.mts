@@ -26,6 +26,7 @@ import { readFileSync } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { validateCuratedFile, type CuratedCharacter } from "../src/lib/catalog/character.ts";
+import { requireStagingIfRequested } from "./lib/staging-guard.mts";
 
 const DEFAULT_INPUT = "data/characters/characters.json";
 
@@ -80,6 +81,11 @@ async function main(): Promise<void> {
   let client: SupabaseClient | null = null;
 
   if (!validateOnly) {
+    // Before the connection exists, not before the write: a staging-only run
+    // has no business reading production either, and failing here costs the
+    // operator nothing but the validation they were about to run anyway.
+    // `--validate-only` opens nothing and is therefore not guarded.
+    requireStagingIfRequested("characters:import");
     client = createClient(
       requireEnv("NEXT_PUBLIC_SUPABASE_URL"),
       requireEnv("SUPABASE_SERVICE_ROLE_KEY"),
