@@ -204,9 +204,17 @@ ausdrücklich nicht genügte — interne Daten wurden gar nicht erst ausgeliefer
   Für die Beta müssen dort ausschließlich die tatsächlichen Domains eingetragen sein
   (offene Redirects vermeiden).
 - Kontolöschung: `auth.users` löschen kaskadiert auf `profiles`, `collection_items` und
-  `shop_admins`. Gebuchte Shop-Bewegungen bleiben erhalten, ihr `created_by` wird auf `NULL`
-  anonymisiert (`on delete set null`, ADR-0037) — die Geschäftshistorie überlebt, der
-  Personenbezug nicht.
+  `shop_admins`. Geschäftliche Historie bleibt erhalten und verliert nur den Personenbezug
+  (`on delete set null`): `inventory_movements.created_by` (ADR-0037),
+  `catalog_admin_changes.changed_by`, `orders.user_id` und — seit `0020` —
+  `order_events.actor_user_id`. Die Geschäftshistorie überlebt, der Personenbezug nicht.
+
+  Alle vier Tabellen sind append-only, und eine referentielle `SET NULL`-Aktion **ist** ein
+  `UPDATE`: Jede dieser Tabellen braucht deshalb einen ausdrücklichen Carve-out in ihrem
+  Immutability-Trigger, sonst macht sie Konten unlöschbar. Bei `order_events` fehlte er bis
+  `0020`; gefunden im Mail-E2E auf Staging am 2026-09-11 (`Database error deleting user`).
+  **Eine neue Tabelle mit Kontoreferenz und Schreibschutz braucht denselben Carve-out**, oder
+  sie bricht diese Zusage — Details in `docs/DATABASE.md`.
   **OPEN:** Self-Service-Löschung in V1 anbieten? (DSGVO-relevant, siehe `docs/SECURITY.md`.)
 
 ### Rollen und Berechtigungen — seit `0003` gibt es `shop_admins`

@@ -7,7 +7,7 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**Transactional Mail V1 auf Staging fertig und nachgewiesen (2026-09-11).** Nicht committet.
+**Transactional Mail V1 auf Staging fertig und nachgewiesen (2026-09-11).**
 
 *Drei Mails, und keine davon wird von der Datenbank verschickt.* Zahlungsbestätigung und
 Versandbestätigung an den Kunden, Prüfhinweis an den Betreiber. Versendet wird ausschließlich in
@@ -41,7 +41,7 @@ vergeben** ist — eine Steuernummer kann nicht dadurch öffentlich werden, dass
 Die alte Regel „die Geschäfts-E-Mail kommt im Schema nicht vor" ist präzisiert: **Adressen
 autorisieren nie**, und das gilt unverändert.
 
-*Geprüft:* `npm run check` grün, **1780 Tests in 81 Dateien** (vorher 1691/77), alle fünf
+*Geprüft:* `npm run check` grün, **1798 Tests in 82 Dateien** (vorher 1691/77), alle fünf
 Staging-Verifier grün, Secret-/PII-Scan sauber, keine Unternehmensangabe in Quelltext, Fixture
 oder Test.
 
@@ -75,8 +75,19 @@ konstant.
 > hatte, blieb stehen (`Database error deleting user`); der, der nur eine Mail auslöste, ließ sich
 > entfernen. **Nicht von `0019` verursacht** und ein Datenschutzthema.
 >
-> **Fix folgt als eigene, kleine Migration `0020`** — eigener Commit, eigener
-> Runtime-Nachweis.
+> **Behoben in `0020`, auf Staging angewandt und verifiziert am 2026-09-11.** Dieselbe Ausnahme
+> wie bei `inventory_movements`: `actor_user_id` darf **nur verloren gehen**, und nur wenn `id`,
+> `order_id`, `event_type`, `actor_kind`, `payload` und `created_at` unverändert bleiben. Alles
+> andere bleibt verweigert — `DELETE` ohne Ausnahme, jedes gewöhnliche `UPDATE`, und auch eines,
+> das die Anonymisierung mit einer Änderung zusammen schmuggeln will. `order_lines` und
+> `order_addresses` behalten `deny_write()`: beide tragen keine Kontoreferenz und können deshalb
+> keine Löschung blockieren. Damit ist `order_events` die dritte und letzte Tabelle, die diese
+> Ausnahme braucht.
+>
+> Das gestrandete Konto ist entfernt: kein `@staging.invalid`-Konto mehr vorhanden. Sein
+> `order_shipped`-Ereignis auf `SI-2026-001042` steht unverändert in der Historie, jetzt mit
+> `actor_user_id = NULL` — 28 Ereignisse insgesamt, keines verloren. Die Regel gilt ab jetzt für
+> jede neue Tabelle mit Kontoreferenz und Schreibschutz; nachgetragen in `docs/AUTH.md`.
 
 *Die beiden Punkte, die nur von Hand zu prüfen waren, sind geprüft.* Eine **echte
 Stripe-Sandbox-Redelivery** des `checkout.session.completed` zu `SI-2026-001042` erzeugte
@@ -86,7 +97,7 @@ Stripe-Sandbox-Redelivery** des `checkout.session.completed` zu `SI-2026-001042`
 bestätigt; die Zahlungsbestätigung gilt dort als zugestellt. Gesendet wurde ausschließlich an die
 eigene Testadresse.
 
-**Production unverändert.** `0019` dort nicht angewandt, keine Function deployt, kein
+**Production unverändert.** `0019` und `0020` dort nicht angewandt, keine Function deployt, kein
 Secret gesetzt.
 
 ---

@@ -13,7 +13,10 @@ import { readFileSync } from "node:fs";
  * This does the reading a compiler would. It is not a PL/pgSQL parser and does
  * not pretend to be; it checks the three things that have actually gone wrong.
  */
-const FILES = ["supabase/tests/0019_transactional_mail_runtime.sql"] as const;
+const FILES = [
+  "supabase/tests/0019_transactional_mail_runtime.sql",
+  "supabase/tests/0020_order_events_anonymisation_runtime.sql",
+] as const;
 
 const SQL = readFileSync(FILES[0], "utf8");
 
@@ -41,7 +44,7 @@ function blocks(file: string = FILES[0]): { head: string; body: string; index: n
 /** Declarations, whether one per line or several on one. */
 function declared(head: string): Set<string> {
   return new Set(
-    [...head.matchAll(/\b(v_[a-z_]+)\s+(?:bigint|text|jsonb|boolean|integer|timestamptz|interval|public\.)/g)].map(
+    [...head.matchAll(/\b(v_[a-z_]+)\s+(?:bigint|text|jsonb|boolean|integer|timestamptz|interval|uuid|record|public\.)/g)].map(
       (m) => m[1],
     ),
   );

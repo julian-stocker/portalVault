@@ -463,6 +463,17 @@ und `placed_at` eingefroren; `user_id` darf **nur** auf `NULL` wechseln (das tut
 Fremdschlüssel-Aktion beim Löschen eines Kontos). `order_reservations` darf den Zustand wechseln,
 aber nicht gelöscht werden.
 
+**`order_events` hat seit `0020` genau eine Ausnahme — dieselbe wie `inventory_movements`.**
+`actor_user_id` ist `ON DELETE SET NULL`, und diese Fremdschlüssel-Aktion **ist** ein `UPDATE`:
+Der pauschale `deny_write()` hat sie mitverweigert und damit jedes Konto dauerhaft unlöschbar
+gemacht, das je eine Bestellung aufgegeben (`placed`) oder versendet (`order_shipped`) hatte.
+`prevent_order_event_change()` lässt den Vorgang durch, wenn `old.actor_user_id` gesetzt war,
+`new.actor_user_id` NULL ist und `(id, order_id, event_type, actor_kind, payload, created_at)`
+per `is not distinct from` identisch bleibt. `DELETE` bleibt ausnahmslos verweigert, ebenso
+UUID → andere UUID, NULL → UUID und jede Änderung, die sich mit der Anonymisierung zusammen
+einschmuggeln will. `order_lines` und `order_addresses` behalten `deny_write()` unverändert:
+Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
+
 #### Funktionen
 
 | Funktion | Rechte | Zweck |
@@ -1056,6 +1067,17 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   keine Zeile angefasst. Der `RESEND_API_KEY` liegt ausschließlich als Edge-Secret (ADR-0051) —
   die Datenbank kennt ihn nicht. **Auf Staging angewandt und runtime-verifiziert am 2026-09-11,
   auf Production NICHT angewandt.**
+- Zwanzigste Migration: `0020_order_events_anonymisation.sql` — **eine Defektbehebung.**
+  `order_events` lag unter dem pauschalen `deny_write()`, das auch die Fremdschlüssel-Aktion
+  `ON DELETE SET NULL` auf `actor_user_id` abwies: Wer eine Bestellung aufgegeben oder versendet
+  hatte, dessen Konto war nicht mehr löschbar (`Database error deleting user`). Gefunden im
+  Mail-E2E auf Staging am 2026-09-11. `prevent_order_event_change()` erlaubt genau die
+  Anonymisierung mit unveränderten Sachspalten — dieselbe Regel wie `inventory_movements`
+  (`0003`, ADR-0037) und `catalog_admin_changes` (`0004`). Ein Trigger, eine Funktion, keine
+  Tabelle, keine Spalte, kein Grant. `deny_write()` bleibt für `order_lines` und
+  `order_addresses` unverändert. **Auf Staging angewandt und runtime-verifiziert am 2026-09-11,
+  auf Production NICHT angewandt.**
+
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
 > Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.
