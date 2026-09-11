@@ -34,6 +34,12 @@ import { requireStagingIfRequested } from "./lib/staging-guard.mts";
 const TEST_SERIES = { code: "TEST", label: "RLS Test Series", release_year: 2026, position: 99 };
 const TEST_CATEGORY = { name: "RLS Test Category", position: 0 };
 const TEST_SKY_ID = "SKY-9999";
+/*
+ * The PERMANENT shop fixture, named up here because two places need it: the
+ * shop section that maintains it, and the teardown that has to explain why the
+ * series and category it hangs off can never be removed.
+ */
+const SHOP_FIXTURE_SKY_ID = "SKY-9998";
 const TEST_CHARACTER = "RLS Test Character";
 const TEST_SKYLANDER = {
   sky_id: TEST_SKY_ID,
@@ -141,6 +147,14 @@ async function main(): Promise<void> {
   const admin = serviceClient();
   let categoryId: number | null = null;
   let characterId: number | null = null;
+  /*
+   * Which fixtures THIS run created, and therefore which ones it may remove.
+   *
+   * Declared out here so the teardown can see it even when setup throws
+   * part-way through: whatever was created before the failure is still owned
+   * and still gets cleaned up.
+   */
+  let createdHere = { series: false, category: false, character: false };
   let userA: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
   let userB: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
   let userC: Awaited<ReturnType<typeof createSignedInUser>> | null = null;
@@ -149,20 +163,73 @@ async function main(): Promise<void> {
     // ---------------------------------------------------------------- setup
     console.log("\nSetup — minimal catalog fixture (service role)");
 
-    const series = await admin.from("series").insert(TEST_SERIES).select().single();
-    if (series.error) throw new Error(`seed series: ${series.error.message}`);
+    /*
+     * SEED OR REUSE, NEVER PLAIN INSERT.
+     *
+     * The series and its category cannot be assumed absent. `SKY-9998` — the
+     * PERMANENT shop fixture created further down — hangs off them, and its
+     * foreign keys are ON DELETE RESTRICT, so the teardown below has never been
+     * able to remove them. On a database where this verifier has run once
+     * before, a plain `insert` therefore dies on `series_pkey` in setup, before
+     * a single assertion runs. That is what happened on staging: the series has
+     * stood since 2026-09-09 and every later run aborted.
+     *
+     * So each fixture is looked up first and only created when it is missing,
+     * and `owned` records which of them this run brought into existence. The
+     * teardown removes exactly those and nothing else.
+     */
+    const owned = { series: false, category: false, character: false };
 
-    const category = await admin
+    const foundSeries = await admin
+      .from("series")
+      .select("code")
+      .eq("code", TEST_SERIES.code)
+      .maybeSingle();
+    if (foundSeries.error) throw new Error(`read series: ${foundSeries.error.message}`);
+
+    if (foundSeries.data) {
+      console.log(`  series ${TEST_SERIES.code} already exists — reused, and left in place`);
+    } else {
+      const series = await admin.from("series").insert(TEST_SERIES).select().single();
+      if (series.error) throw new Error(`seed series: ${series.error.message}`);
+      owned.series = true;
+    }
+
+    const foundCategory = await admin
       .from("categories")
-      .insert({ ...TEST_CATEGORY, series_code: TEST_SERIES.code })
-      .select()
-      .single();
-    if (category.error) throw new Error(`seed category: ${category.error.message}`);
-    categoryId = category.data.id as number;
+      .select("id")
+      .eq("series_code", TEST_SERIES.code)
+      .eq("name", TEST_CATEGORY.name)
+      .maybeSingle();
+    if (foundCategory.error) throw new Error(`read category: ${foundCategory.error.message}`);
 
+    if (foundCategory.data) {
+      categoryId = foundCategory.data.id as number;
+      console.log(`  category #${categoryId} already exists — reused, and left in place`);
+    } else {
+      const category = await admin
+        .from("categories")
+        .insert({ ...TEST_CATEGORY, series_code: TEST_SERIES.code })
+        .select()
+        .single();
+      if (category.error) throw new Error(`seed category: ${category.error.message}`);
+      categoryId = category.data.id as number;
+      owned.category = true;
+    }
+
+    /*
+     * The subject of the assertions, and the one fixture this verifier does
+     * own outright: nothing persistent references `SKY-9999`, so it is upserted
+     * back to its canonical values on every run and removed at the end. A row
+     * left behind by a crashed run is therefore repaired rather than reused in
+     * whatever state it was abandoned in.
+     */
     const skylander = await admin
       .from("skylanders")
-      .insert({ ...TEST_SKYLANDER, series_code: TEST_SERIES.code, category_id: categoryId })
+      .upsert(
+        { ...TEST_SKYLANDER, series_code: TEST_SERIES.code, category_id: categoryId },
+        { onConflict: "sky_id" },
+      )
       .select()
       .single();
     if (skylander.error) throw new Error(`seed skylander: ${skylander.error.message}`);
@@ -170,19 +237,36 @@ async function main(): Promise<void> {
     // Migration 0002 may not be applied yet. Rather than crashing setup, note
     // it and let the other checks run — the character section then reports a
     // single, unmistakable failure instead of a stack trace.
-    const character = await admin
+    const foundCharacter = await admin
       .from("characters")
-      .insert({ canonical_name: TEST_CHARACTER, element: "Tech", role_type: "core" })
-      .select()
-      .single();
-    if (character.error) {
-      console.log(`  ! characters unavailable: ${character.error.message}`);
+      .select("id")
+      .eq("canonical_name", TEST_CHARACTER)
+      .maybeSingle();
+
+    if (foundCharacter.error) {
+      console.log(`  ! characters unavailable: ${foundCharacter.error.message}`);
+    } else if (foundCharacter.data) {
+      characterId = foundCharacter.data.id as number;
+      console.log(`  character #${characterId} already exists — reused, and left in place`);
     } else {
-      characterId = character.data.id as number;
+      const character = await admin
+        .from("characters")
+        .insert({ canonical_name: TEST_CHARACTER, element: "Tech", role_type: "core" })
+        .select()
+        .single();
+      if (character.error) {
+        console.log(`  ! characters unavailable: ${character.error.message}`);
+      } else {
+        characterId = character.data.id as number;
+        owned.character = true;
+      }
     }
 
+    // Handed to the teardown, which may only remove what this run created.
+    createdHere = owned;
+
     console.log(
-      `  seeded series ${TEST_SERIES.code}, one category, ${TEST_SKY_ID}` +
+      `  fixture ready: series ${TEST_SERIES.code}, category #${categoryId}, ${TEST_SKY_ID}` +
         (characterId === null ? "" : `, character #${characterId}`),
     );
 
@@ -615,7 +699,26 @@ async function main(): Promise<void> {
       // off an EXISTING series and category so that no phantom series appears
       // in the UI. Every run reuses it, and the assertions below are written
       // against the stock that is already there rather than against zero.
-      const host = await admin.from("categories").select("id, series_code").limit(1).maybeSingle();
+      /*
+       * Where the permanent fixture lives — its own host first.
+       *
+       * `.limit(1)` without an ORDER BY picks whatever the planner returns, so
+       * once the real catalog was imported this could have re-hosted SKY-9998
+       * onto an arbitrary category. Moving a permanent fixture is a change to
+       * persistent data, and it would also unpin the series the teardown is
+       * careful not to delete. So the fixture's current host wins, and the
+       * arbitrary pick is only the fallback for the very first run.
+       */
+      const existingHost = await admin
+        .from("skylanders")
+        .select("category_id, series_code")
+        .eq("sky_id", SHOP_FIXTURE_SKY_ID)
+        .maybeSingle();
+
+      const host = existingHost.data
+        ? { data: { id: existingHost.data.category_id as number, series_code: existingHost.data.series_code as string } }
+        : await admin.from("categories").select("id, series_code").limit(1).maybeSingle();
+
       if (!host.data) {
         check(
           "a catalog category exists to host the shop fixture",
@@ -623,7 +726,7 @@ async function main(): Promise<void> {
           "run the catalog import first",
         );
       } else {
-      const SHOP_SKY_ID = "SKY-9998";
+      const SHOP_SKY_ID = SHOP_FIXTURE_SKY_ID;
       const fixture = await admin.from("skylanders").upsert(
         {
           sky_id: SHOP_SKY_ID,
@@ -1281,13 +1384,61 @@ async function main(): Promise<void> {
     // inactive and outside every catalog and collection query.
     await admin2.from("shop_admins").delete().eq("note", "verify-rls fixture");
 
-    await admin2.from("skylanders").delete().eq("sky_id", TEST_SKY_ID);
-    // With the figure gone nothing references the character any more, so the
-    // restrict constraint lets it go.
-    await admin2.from("characters").delete().eq("canonical_name", TEST_CHARACTER);
-    if (categoryId !== null) await admin2.from("categories").delete().eq("id", categoryId);
-    await admin2.from("series").delete().eq("code", TEST_SERIES.code);
-    console.log("  catalog fixture removed");
+    /*
+     * ONLY WHAT THIS RUN CREATED.
+     *
+     * The series and the category may be older than this process: `SKY-9998`,
+     * the permanent shop fixture, hangs off them and pins them in place
+     * (FK RESTRICT). Deleting them was never possible and must not be
+     * attempted — a teardown that removes a fixture it found rather than made
+     * is a teardown that destroys somebody else's state.
+     *
+     * `SKY-9999` is the exception and is removed unconditionally: it is this
+     * verifier's own subject, nothing persistent references it, and setup
+     * upserts it fresh every run.
+     *
+     * Errors are reported rather than swallowed. The previous version awaited
+     * these deletes without looking at the result, which is why a teardown
+     * that could not remove the series still printed "catalog fixture removed"
+     * and left the next run to discover the truth by crashing.
+     */
+    const removed: string[] = [];
+    const kept: string[] = [];
+
+    const figureGone = await admin2.from("skylanders").delete().eq("sky_id", TEST_SKY_ID);
+    if (figureGone.error) console.log(`  ! ${TEST_SKY_ID} not removed: ${figureGone.error.message}`);
+    else removed.push(TEST_SKY_ID);
+
+    if (createdHere.character) {
+      // With the figure gone nothing references the character any more, so the
+      // restrict constraint lets it go.
+      const gone = await admin2.from("characters").delete().eq("canonical_name", TEST_CHARACTER);
+      if (gone.error) console.log(`  ! character not removed: ${gone.error.message}`);
+      else removed.push("character");
+    } else if (characterId !== null) {
+      kept.push(`character #${characterId}`);
+    }
+
+    if (createdHere.category && categoryId !== null) {
+      const gone = await admin2.from("categories").delete().eq("id", categoryId);
+      if (gone.error) console.log(`  ! category not removed: ${gone.error.message}`);
+      else removed.push(`category #${categoryId}`);
+    } else if (categoryId !== null) {
+      kept.push(`category #${categoryId}`);
+    }
+
+    if (createdHere.series) {
+      const gone = await admin2.from("series").delete().eq("code", TEST_SERIES.code);
+      if (gone.error) console.log(`  ! series not removed: ${gone.error.message}`);
+      else removed.push(`series ${TEST_SERIES.code}`);
+    } else {
+      kept.push(`series ${TEST_SERIES.code}`);
+    }
+
+    console.log(`  removed: ${removed.length > 0 ? removed.join(", ") : "nothing"}`);
+    if (kept.length > 0) {
+      console.log(`  kept (pre-existing, pinned by ${SHOP_FIXTURE_SKY_ID}): ${kept.join(", ")}`);
+    }
 
     const counts = await Promise.all(
       ([

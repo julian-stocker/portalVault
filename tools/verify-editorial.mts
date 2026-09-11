@@ -28,7 +28,18 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import { requireStagingIfRequested } from "./lib/staging-guard.mts";
 
 const RUN = Date.now();
-const TEST_SERIES = { code: "TSTE", label: "Editorial Test Series", release_year: 2026, position: 98 };
+/*
+ * Position 97, not 98.
+ *
+ * `series.position` is UNIQUE, and 98 belongs to the permanent `SMOK` smoke
+ * fixture on staging (99 to `TEST`). Asking for 98 made the setup die on
+ * `series_position_key` before a single check ran — the same class of
+ * fixture-collides-with-fixture problem the SKY-9995/9996 note below records.
+ *
+ * Nothing about what this verifier asserts changes; only which slot its
+ * throwaway series occupies.
+ */
+const TEST_SERIES = { code: "TSTE", label: "Editorial Test Series", release_year: 2026, position: 97 };
 const TEST_CATEGORY = { name: "Editorial Test Category", position: 0 };
 // SKY-9995/9996 rather than 9997/9998: an earlier verify:rls run left
 // SKY-9998 behind (the failed teardown of 2026-09-05), and a fixture that
