@@ -1,0 +1,37 @@
+{
+  "note": "STAGING ONLY. A controlled shop fixture for judging the customer-facing UX: 21 canonical figures, 26 stock positions, every public shop state the product can show. Contains no production stock, no real purchase costs, no customer data. Quantities are invented, small and deliberately unrealistic; they exist to produce a state on screen, not to describe a shelf. Applied by tools/seed-shop-fixtures.mts, which refuses to run anywhere but staging.",
+  "approved": "2026-09-11",
+  "positions": [
+    { "skyId": "SKY-0053", "name": "Spyro",                                   "series": "SA", "condition": "loose", "quantity": 3, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0007", "name": "Bash",                                    "series": "SA", "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock (pairs with boxed below at a different price)" },
+    { "skyId": "SKY-0007", "name": "Bash",                                    "series": "SA", "condition": "boxed", "quantity": 1, "salePrice": 18.9,   "isListed": true,  "state": "manual price, in stock -> card shows 'ab ...' and a condition chooser" },
+    { "skyId": "SKY-0043", "name": "Hex",                                     "series": "SA", "condition": "boxed", "quantity": 2, "salePrice": 21.5,   "isListed": true,  "state": "boxed only, manual price - shortest name in the catalog" },
+    { "skyId": "SKY-0096", "name": "Anvil Rain",                              "series": "SA", "condition": "loose", "quantity": 5, "salePrice": null,   "isListed": true,  "state": "auto price on the cheapest figure in the catalog (0.89)" },
+    { "skyId": "SKY-0092", "name": "Sidekick Gill Runt",                      "series": "SA", "condition": "loose", "quantity": 1, "salePrice": null,   "isListed": true,  "state": "auto price, last one in stock" },
+    { "skyId": "SKY-0090", "name": "Elite Zook",                              "series": "SA", "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "NO market price and no manual price -> no shop price at all; listed but absent from shop_offers()" },
+
+    { "skyId": "SKY-0114", "name": "Bouncer",                                 "series": "G",  "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0114", "name": "Bouncer",                                 "series": "G",  "condition": "boxed", "quantity": 0, "salePrice": 39.9,   "isListed": true,  "state": "listed but SOLD OUT alongside a buyable loose - only the loose price may be offered" },
+    { "skyId": "SKY-0128", "name": "Chill",                                   "series": "G",  "condition": "loose", "quantity": 0, "salePrice": null,   "isListed": true,  "state": "listed and SOLD OUT -> the card shows no shop area at all" },
+    { "skyId": "SKY-0186", "name": "Zap",                                     "series": "G",  "condition": "loose", "quantity": 4, "salePrice": null,   "isListed": false, "state": "in stock but NOT LISTED -> withheld from the shop on purpose" },
+    { "skyId": "SKY-0192", "name": "Dragonfire Cannon",                       "series": "G",  "condition": "loose", "quantity": 3, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+
+    { "skyId": "SKY-0203", "name": "Blast Zone",                              "series": "SF", "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0203", "name": "Blast Zone",                              "series": "SF", "condition": "boxed", "quantity": 2, "salePrice": 14.9,   "isListed": true,  "state": "manual price -> two buyable conditions at different prices" },
+    { "skyId": "SKY-0242", "name": "Bumble Blast",                            "series": "SF", "condition": "boxed", "quantity": 1, "salePrice": null,   "isListed": true,  "state": "boxed only, auto price" },
+    { "skyId": "SKY-0277", "name": "Fire Bone Hot Dog (Clear Crystal Green)", "series": "SF", "condition": "loose", "quantity": 1, "salePrice": 279.0,  "isListed": true,  "state": "longest name in the catalog (39 chars) at the top of the price range" },
+    { "skyId": "SKY-0297", "name": "Arkeyan Crossbow",                        "series": "SF", "condition": "loose", "quantity": 0, "salePrice": null,   "isListed": true,  "state": "listed and SOLD OUT" },
+
+    { "skyId": "SKY-0313", "name": "Blastermind",                             "series": "T",  "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0313", "name": "Blastermind",                             "series": "T",  "condition": "boxed", "quantity": 1, "salePrice": 54.9,   "isListed": true,  "state": "manual price -> two conditions, different prices" },
+    { "skyId": "SKY-0369", "name": "Mini Barkley",                            "series": "T",  "condition": "loose", "quantity": 3, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0397", "name": "Air Hourglass",                           "series": "T",  "condition": "loose", "quantity": 6, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+
+    { "skyId": "SKY-0499", "name": "Barrel Blaster",                          "series": "SC", "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price" },
+    { "skyId": "SKY-0499", "name": "Barrel Blaster",                          "series": "SC", "condition": "boxed", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price too -> both conditions at the SAME price, so the card adds in one tap" },
+    { "skyId": "SKY-0471", "name": "Power Blue Double Dare Trigger Happy",    "series": "SC", "condition": "boxed", "quantity": 1, "salePrice": 59.9,   "isListed": true,  "state": "boxed only, manual price, very long name (36 chars)" },
+
+    { "skyId": "SKY-0536", "name": "Air Strike",                              "series": "I",  "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
+    { "skyId": "SKY-0588", "name": "Air Angel",                               "series": "I",  "condition": "loose", "quantity": 4, "salePrice": 3.5,    "isListed": true,  "state": "manual price BELOW the automatic one" }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "note": "Curated mapping of catalog categories to the product group shown as the catalog's second navigation level (ADR-0041). Editorial data, owned by the administrator (ADR-0039): the catalog import never writes categories.catalog_group, and this file is applied by a separate, staging-only seed. On production the supported path is /admin/catalog/categories. Approved 2026-09-11.",
+  "approved": "2026-09-11",
+  "groups": [
+    { "series": "SA", "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029) - never appears in the catalog, so it has no place in a navigation level inside it." },
+    { "series": "SA", "category": "Figuren",                 "group": "figure",           "why": "Core figures of the first wave." },
+    { "series": "SA", "category": "Sidekicks",               "group": "mini",             "why": "Same small companion figures the Trap Team wave calls Minis - 'Sidekick Gill Runt' and 'Mini Gill Runt' are the same character (ADR-0034). The character role keeps the two names apart; the shelf does not." },
+    { "series": "SA", "category": "Magic Items",             "group": "item",             "why": "'Anvil Rain', 'Healing Elixir' - items, not figures." },
+
+    { "series": "G",  "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029)." },
+    { "series": "G",  "category": "Giants große Figuren",    "group": "giant",            "why": "The Giants themselves - exactly what the group exists for." },
+    { "series": "G",  "category": "Giants neue Figuren",     "group": "figure",           "why": "New core figures released alongside the Giants; not Giants." },
+    { "series": "G",  "category": "Giants Series 2 Figuren", "group": "figure",           "why": "Reissues of core figures." },
+    { "series": "G",  "category": "Sidekicks",               "group": "mini",             "why": "As in Spyro's Adventure." },
+    { "series": "G",  "category": "Magic Items",             "group": "item",             "why": "As in Spyro's Adventure." },
+
+    { "series": "SF", "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029)." },
+    { "series": "SF", "category": "SWAP Force",              "group": "swapper",          "why": "The separable figures the wave is named after." },
+    { "series": "SF", "category": "Swap Force neue Figuren", "group": "figure",           "why": "Core figures of the wave." },
+    { "series": "SF", "category": "Varianten & LightCore",   "group": "figure",           "why": "'Blizzard Chill', 'Fire Bone Hot Dog' - variants of core figures, still figures (ADR-0030)." },
+    { "series": "SF", "category": "Magic Items",             "group": "item",             "why": "As in Spyro's Adventure." },
+
+    { "series": "T",  "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029)." },
+    { "series": "T",  "category": "Trap Masters",            "group": "trap_master",      "why": "Its own group in the model." },
+    { "series": "T",  "category": "Trap Team neue Figuren",  "group": "figure",           "why": "Core figures of the wave." },
+    { "series": "T",  "category": "Trap Team Series Figuren","group": "figure",           "why": "Reissues of core figures." },
+    { "series": "T",  "category": "Minis",                   "group": "mini",             "why": "'Mini Gill Runt', 'Mini Jini'." },
+    { "series": "T",  "category": "Trap Items",              "group": "item",             "why": "Despite the name these are NOT traps: 'Piggy Bank', 'Mirror of Mystery', 'Sunscraper Spire' - the wave's magic items and adventure locations." },
+    { "series": "T",  "category": "Traps",                   "group": "trap",             "why": "'Air Hourglass', 'Dark Spider' - the crystal traps." },
+
+    { "series": "SC", "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029)." },
+    { "series": "SC", "category": "Figuren",                 "group": "figure",           "why": "Core figures of the wave." },
+    { "series": "SC", "category": "Trophies",                "group": "item",             "why": "'Kaos Trophy', 'Sky Trophy' - unlock items, not playable figures." },
+    { "series": "SC", "category": "Fahrzeuge",               "group": "vehicle",          "why": "Its own group in the model." },
+
+    { "series": "I",  "category": "Spiele",                  "group": null,               "why": "Not a collectible (ADR-0029)." },
+    { "series": "I",  "category": "Senseis",                 "group": "sensei",           "why": "Its own group in the model." },
+    { "series": "I",  "category": "Locations & Truhen",      "group": "item",             "why": "'Mystery Chest Gold', 'Enchanted Elven Forest' - items and locations." },
+    { "series": "I",  "category": "Kreationskristalle",      "group": "creation_crystal", "why": "Its own group in the model." }
+  ]
+}

@@ -7,6 +7,66 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Staging trägt jetzt den echten Katalog (2026-09-11).** Noch nicht committet.
+
+*Warum überhaupt.* Staging enthielt zwei Figuren. Damit ließ sich kein Raster, keine Serie, kein
+Namensumbruch und kein Shop-Zustand visuell beurteilen — der UX-Smoke wäre eine Prüfung an einer
+leeren Bühne gewesen.
+
+*Vier Schritte, alle aus dem Repository reproduzierbar.* Katalog (600 Zeilen, 561 Sammelfiguren,
+6 Serien, 30 Kategoriezeilen) · 19 kuratierte Charaktere mit 104 Verknüpfungen · 24 freigegebene
+Produktgruppen · 26 Shop-Positionen auf 21 Figuren. Keine Migration, keine Production-Daten,
+keine erfundene Figur.
+
+*Der Production-Guard davor.* `tools/lib/staging-guard.mts` vergleicht Origin **und**
+Service-Role-Key exakt gegen `.env.local` und erlaubt nur das in `.env.staging` genannte Projekt.
+Jedes staging-only Werkzeug ruft ihn **vor** der Client-Erzeugung. Nachgewiesen: fünf Werkzeuge
+mit `--env-file=.env.local` gestartet → alle Exit 1, „Nothing has been written"; ein absichtlich
+auf Production gebogenes `.env.staging` → ebenfalls Exit 1. Es gibt keinen umgebungsneutralen
+schreibenden npm-Namen mehr (`:prod` / `:staging`).
+
+*Produktgruppen und Shop gehen durch den echten Schreibpfad.* Beide Seeds legen einen temporären
+Administrator an, rufen `admin_set_catalog_group()` bzw. `record_inventory_movement()` und
+`set_shop_listing()` wie die Adminoberfläche, und entfernen das Konto im `finally`. Bestand
+entsteht **ausschließlich** über Bewegungen; keine Zeile setzt `quantity` direkt.
+
+*Idempotenz gemessen, nicht behauptet.* Zweiter `--apply`-Lauf des Shop-Seeds:
+`inventory_movements` 32 → 32, Positionen 29 → 29, Gesamtbestand 69 → 69, „No movement was booked
+and no stock changed." Der Seed bucht Differenzen, nie Zielwerte.
+
+*Die Smoke-Historie ist unberührt.* `SI-2026-001041` weiterhin `needs_resolution`,
+`SI-2026-001022` und `SI-2026-001040` weiterhin versendet, `SKY-9101` und `SKY-9998` mit
+unveränderten Beständen. `image_override_path` ist auf **0** Figuren gesetzt und wird von keinem
+Seed und keinem Import genannt; kein Werkzeug im Repository berührt den Storage-Bucket.
+
+*Zwei Verifier-Kollisionen, beide älter als dieser Seed, beide behoben.* `verify:editorial` wollte
+`series.position = 98`, das seit dem 2026-09-10 dem `SMOK`-Fixture gehört — auf 97 geändert.
+
+*Der `verify:rls`-Idempotenzdefekt.* Sein Setup `insert`te die Serie `TEST` bedingungslos. Die
+steht aber seit dem 2026-09-09, weil sein **eigenes** permanentes `SKY-9998` daran hängt und die
+Fremdschlüssel `on delete restrict` sind — der Teardown konnte sie nie entfernen, prüfte seine
+`delete`-Ergebnisse nicht und meldete trotzdem „catalog fixture removed". Jeder spätere Lauf starb
+in Zeile eins des Setups an `series_pkey`.
+
+Behoben durch **Besitz statt Annahme**: Setup schlägt Serie, Kategorie und Charakter zuerst nach
+und legt sie nur an, wenn sie fehlen; ein `owned`-Record hält fest, was *dieser* Lauf erzeugt hat;
+der Teardown entfernt genau das und lässt alles Vorgefundene stehen — mit Begründung im Log
+(„kept (pre-existing, pinned by SKY-9998)"). `delete`-Fehler werden jetzt gemeldet statt
+verschluckt. Zusätzlich bleibt `SKY-9998` an seiner bestehenden Kategorie: die Hostwahl war ein
+`.limit(1)` ohne `order by` und hätte das permanente Fixture nach dem Katalogimport auf eine
+beliebige Kategorie verschieben können. **Keine Assertion und kein Buchungsaufruf geändert** —
+`check(`- und `.rpc(`-Zeilen im Diff: 0 hinzugefügt, 0 entfernt. Zwei Läufe hintereinander:
+**105/105**.
+
+*Was `verify:rls` dabei bewusst verändert.* Der Bestand von `SKY-9998/loose` wächst pro Lauf um 4
+(+3 Einkauf, −1 Externverkauf, +1 Einkauf, +1 Korrektur). Das sind seine eigenen Prüfungen gegen
+ein append-only-Journal — genau der Grund, warum dieses Fixture permanent ist. Identität, Slug,
+Serie, Kategorie, Preis, Listung und `is_active` bleiben unverändert.
+
+**Production unverändert.** Weder gelesen noch geschrieben.
+
+---
+
 **UX-Beta-Gate Phase 1 + 2 gebaut, auf Staging geprüft (2026-09-11).** Noch nicht committet.
 
 *Die Plattform hat jetzt einen Eingang.* Der Review vom 11.09. hat keine Feature-Lücke gefunden,

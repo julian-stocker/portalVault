@@ -17,6 +17,8 @@
     "catalog:import:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/import-catalog.mts",
     "characters:import:prod": "node --env-file=.env.local tools/import-characters.mts",
     "characters:import:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/import-characters.mts",
+    "seed:category-groups:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/seed-category-groups.mts",
+    "seed:shop-fixtures:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/seed-shop-fixtures.mts",
     "admin:grant": "node --env-file=.env.local tools/grant-admin.mts",
     "inventory:import-legacy": "node --env-file=.env.local tools/import-legacy-inventory.mts",
     "verify:rls:prod": "node --env-file=.env.local tools/verify-rls.mts",
