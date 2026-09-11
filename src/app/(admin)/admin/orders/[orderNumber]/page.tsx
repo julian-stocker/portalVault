@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
+import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
 import { fetchAdminOrder } from "@/lib/admin/order-queries";
 import { shipBlocker } from "@/lib/admin/orders";
@@ -60,6 +61,15 @@ export default async function AdminOrderPage({
       <h1 className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
         {order.order_number}
       </h1>
+
+      {/* Before anything about the order itself: an operator must not read a
+          test order as a real one, today or in three years. */}
+      {order.commerce_mode === "sandbox" ? (
+        <SandboxOrderPanel
+          orderNumber={order.order_number}
+          stockReverted={order.stock_reverted}
+        />
+      ) : null}
 
       {/* Loud, and above everything else: this is the state in which shipping
           would hand over goods the ledger still counts as present. */}

@@ -165,7 +165,16 @@ Bewegungshistorie verändert sich dadurch fachlich nicht, nur der Personenbezug 
 
 **E-Mail-Adressen sind niemals ein Autorisierungsmerkmal** (ADR-0059). Kein Code vergleicht eine
 Adresse, um zu entscheiden, wer etwas darf — autorisiert wird über `shop_admins.user_id`, geprüft
-von `is_shop_admin()` bzw. `is_shop_admin_for(uuid)`.
+von `is_shop_admin()` bzw. `is_shop_admin_for(uuid)`. Seit `0021` gilt dasselbe für die zweite
+Berechtigung dieses Schemas: `commerce_testers.user_id`, geprüft von `is_commerce_tester()` bzw.
+`is_commerce_tester_for(uuid)`.
+
+**Suchen ist nicht autorisieren.** `admin_find_accounts()` ist die einzige Funktion, die eine
+Adresse aus `auth.users` liest, und sie tut damit genau eines: ein Konto **finden** und dessen
+`user_id` zurückgeben. Freigeschaltet wird danach die `user_id` —
+`admin_set_commerce_tester(p_user_id uuid, …)` nimmt nichts anderes entgegen. Die Funktion
+schreibt nichts, gibt höchstens zehn Zeilen zurück und beantwortet eine Anfrage unter drei
+Zeichen mit gar nichts.
 
 Bis 2026-09-11 stand hier zusätzlich, die Geschäfts-E-Mail komme im Schema überhaupt nicht vor.
 Das war die damalige *Umsetzung* dieser Regel, nicht die Regel selbst. Seit `0019` liegt eine

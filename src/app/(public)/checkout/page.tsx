@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CheckoutView } from "@/components/checkout/checkout-view";
+import { checkoutAccess } from "@/lib/commerce/access";
 import { de } from "@/lib/i18n/de";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
@@ -29,6 +30,10 @@ export default async function CheckoutPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
+  // Asked before anything is loaded. Not the enforcement — `create_order()`
+  // asks the same question in the database — but the reason the page does not
+  // offer a form nobody could submit.
+  const access = await checkoutAccess();
   const offers = await fetchOffers();
 
   // Where the payment page sends somebody who cancelled. A hint only: the
@@ -50,11 +55,26 @@ export default async function CheckoutPage({
         {de.checkout.title}
       </h1>
       <div className="mt-5">
-        <CheckoutView
-          offers={offerRecord(offers)}
-          email={data.user?.email ?? ""}
-          resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
-        />
+        {access.mayCheckout ? (
+          <CheckoutView
+            offers={offerRecord(offers)}
+            email={data.user?.email ?? ""}
+            resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
+          />
+        ) : (
+          <section className="rounded-xl border border-white/10 bg-white/5 p-5">
+            <h2 className="text-base font-semibold">
+              {access.reason === "testers_only"
+                ? de.checkout.testersOnlyHeading
+                : de.checkout.closedHeading}
+            </h2>
+            <p className="mt-2 text-sm text-white/70">
+              {access.reason === "testers_only"
+                ? de.checkout.testersOnlyBody
+                : de.checkout.closedBody}
+            </p>
+          </section>
+        )}
       </div>
     </main>
   );

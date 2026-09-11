@@ -20,6 +20,12 @@
 import { revalidatePath } from "next/cache";
 
 import { looksLikeEmail, normaliseContact } from "@/lib/admin/business";
+import {
+  isCommerceMode,
+  MIN_ACCOUNT_QUERY,
+  readAccountMatches,
+  type AccountMatch,
+} from "@/lib/admin/commerce-model";
 import { isAdmin } from "@/lib/auth/admin";
 import {
   isCondition,
@@ -268,5 +274,104 @@ export async function setBusinessContact(
   if (error) return { ok: false, message: de.admin.business.saveFailed };
 
   revalidatePath("/admin");
+  return { ok: true };
+}
+
+/* ------------------------------------------------------- the commerce mode */
+
+/**
+ * Switches commerce between closed, sandbox and live.
+ *
+ * `admin_set_commerce_mode()` checks the role itself and refuses an unknown
+ * value; this wrapper exists to answer in German and to revalidate the pages
+ * whose content the switch changes — the admin dashboard and the checkout,
+ * which stops offering a form the moment the mode closes.
+ */
+export async function setCommerceMode(mode: string): Promise<AdminResult> {
+  if (!isCommerceMode(mode)) return { ok: false, message: de.admin.commerce.modeFailed };
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_set_commerce_mode", { p_mode: mode });
+  if (error) return { ok: false, message: de.admin.commerce.modeFailed };
+
+  revalidatePath("/admin");
+  revalidatePath("/checkout");
+  revalidatePath("/cart");
+  return { ok: true };
+}
+
+/**
+ * Grants or withdraws sandbox checkout for one account.
+ *
+ * The argument is a `user_id` and nothing else. An address never reaches this
+ * function, because an address never authorises anything (ADR-0032) — the
+ * search below is how an operator turns a person they know into an id.
+ */
+export async function setCommerceTester(
+  userId: string,
+  enabled: boolean,
+  note?: string,
+): Promise<AdminResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (typeof userId !== "string" || userId === "") {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_set_commerce_tester", {
+    p_user_id: userId,
+    p_enabled: enabled,
+    p_note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
+  });
+  if (error) return { ok: false, message: de.admin.writeFailed };
+
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+/**
+ * Finds accounts by the beginning of a username or address.
+ *
+ * Read-only, and deliberately narrow: three characters minimum, ten results,
+ * prefix matching. It is a lookup box for an operator who already knows who
+ * they are looking for, not a directory to browse.
+ */
+export async function findAccounts(
+  query: string,
+): Promise<{ ok: true; matches: AccountMatch[] } | { ok: false; message: string }> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  const trimmed = typeof query === "string" ? query.trim() : "";
+  if (trimmed.length < MIN_ACCOUNT_QUERY) {
+    return { ok: false, message: de.admin.commerce.searchTooShort };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_find_accounts", { p_query: trimmed });
+  if (error) return { ok: false, message: de.admin.writeFailed };
+
+  return { ok: true, matches: readAccountMatches(data) };
+}
+
+/**
+ * Books the return movements for a sandbox order's stock.
+ *
+ * The correction path this schema has always had (ADR-0037): nothing is
+ * edited and nothing is deleted, a new movement says what happened. The
+ * database refuses any order that was not placed in sandbox, so this button
+ * can never put a real customer's goods back on the shelf.
+ */
+export async function revertSandboxStock(orderNumber: string): Promise<AdminResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_revert_sandbox_stock", {
+    p_order_number: orderNumber,
+  });
+  if (error) return { ok: false, message: de.admin.commerce.revertStockFailed };
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/inventory");
+  revalidatePath(`/admin/orders/${orderNumber}`);
   return { ok: true };
 }

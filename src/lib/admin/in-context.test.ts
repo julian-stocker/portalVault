@@ -138,9 +138,10 @@ describe("the same mutations as /admin, not new ones", () => {
   it("adds no database function of its own", () => {
     // The in-context catalog reuses the editorial mutations rather than
     // growing its own (ADR-0042). The list is pinned so a new one has to be
-    // a deliberate addition, named here — as the last three were: the shop
-    // percentage (ADR-0045), the image override (ADR-0046) and the business
-    // contact (ADR-0059), none of which the catalog card calls.
+    // a deliberate addition, named here — as the last ones were: the shop
+    // percentage (ADR-0045), the image override (ADR-0046), the business
+    // contact (ADR-0059) and the four commerce-mode functions (ADR-0060).
+    // None of them is called by the catalog card.
     const actions = source("src/lib/admin/actions.ts");
     const rpcs = [...actions.matchAll(/"(admin_[a-z_]+)"/g)].map((m) => m[1]);
     expect(new Set(rpcs)).toEqual(
@@ -151,6 +152,12 @@ describe("the same mutations as /admin, not new ones", () => {
         "admin_set_catalog_group",
         "admin_set_shop_percentage",
         "admin_set_image_override",
+        // ADR-0060 — the commerce mode, its testers, the account search and
+        // the sandbox stock reversal. All on /admin, none in the catalog.
+        "admin_set_commerce_mode",
+        "admin_set_commerce_tester",
+        "admin_find_accounts",
+        "admin_revert_sandbox_stock",
         "admin_set_business_contact",
       ]),
     );

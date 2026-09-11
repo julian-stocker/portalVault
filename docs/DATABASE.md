@@ -600,6 +600,94 @@ in ein Postfach gehört: kein `payment_token_hash`, kein `client_hash`, keine `r
 interne ID, keine Stripe-Session. Eine Mail autorisiert nichts (ADR-0059).
 
 
+### 3.3m Der Commerce-Modus — `commerce_settings.mode` und `commerce_testers` (Migration `0021`, ADR-0060)
+
+Eine Spalte, eine kleine Tabelle, ein Prädikat.
+
+| Werkzeug | Inhalt |
+|---|---|
+| `commerce_settings.mode` | `closed` · `sandbox` · `live`. CHECK, kein Enum. Default `closed`. |
+| `commerce_testers(user_id)` | wer im Sandbox-Modus bestellen darf. Wie `shop_admins`, additiv. |
+| `commerce_checkout_allowed()` | die eine Antwort: `live` = jeder · `sandbox` = angemeldeter Tester · sonst nein |
+
+**Gastbestellung im Sandbox-Modus ist strukturell aus.** Ein Gast hat keine `user_id`, und
+`is_commerce_tester_for(NULL)` ist falsch — es gibt keinen Zweig, der das anders beantwortet.
+
+**Admin ist nicht automatisch Tester.** `is_commerce_tester()` liest ausschließlich
+`commerce_testers`. Die beiden Listen sind verschieden und sollen es bleiben.
+
+**Kein Rollensystem.** Dieselbe Form wie `shop_admins` seit ADR-0032: Tabelle mit `user_id`,
+`is_…()`-Funktion, RLS an, jedes Tabellenrecht `anon` und `authenticated` entzogen. Keine
+Hierarchie, keine Rolle, kein Feature-Flag-Framework.
+
+**Durchsetzung liegt in der Datenbank.** `create_order()` fragt `commerce_checkout_allowed()` als
+**allerersten** Ausdruck — vor den Formprüfungen, vor jeder Preisabfrage. Die Funktion ist über
+PostgREST mit dem Anon-Key erreichbar; eine Prüfung in der Oberfläche wäre einen Request weit von
+„übersprungen" entfernt. Die Ablehnung ist ein einziger Literaltext für alle drei Gründe: Ein
+Aufrufer erfährt, dass er nicht bestellen darf, nicht warum.
+
+Zwei weitere Stellen fragen noch einmal, jede ihre eigene Fassung:
+
+| Funktion | Frage |
+|---|---|
+| `authorize_order_payment()` | gehört die Bestellung im Sandbox-Modus noch einem **aktuellen** Tester? |
+| `start_payment_attempt()` | ist der Modus der Bestellung noch der aktuelle? |
+
+Die erste bedeutet: Ein entzogenes Testerrecht stoppt auch Checkouts, die dieses Konto bereits
+geöffnet hat.
+
+**`commerce_access()` ist die einzige öffentliche Projektion** und gibt `may_checkout` plus einen
+groben Grund (`open` · `testers_only` · `closed`) zurück — **nie den Modus selbst**. Dieselbe
+Allow-List-Disziplin wie `business_settings_public()`.
+
+#### `orders.commerce_mode` — die Kennzeichnung, die bleibt
+
+Vom Immutability-Trigger eingefroren, **ohne Default**, beim Nachtragen wahrheitsgemäß auf
+`sandbox` gesetzt: Es gab nie einen Live-Stripe-Schlüssel in irgendeinem Deployment.
+
+Zwei Aufgaben in einer Spalte:
+
+1. **Eine Testbestellung bleibt Jahre später als solche erkennbar** — auch nachdem der Shop live
+   gegangen ist. Ein aus der *heutigen* Einstellung abgeleitetes Kennzeichen würde Geschichte
+   umschreiben, sobald die Einstellung sich ändert.
+2. **Sie ist die Zahlungsschranke.** Eine Sandbox-Bestellung wurde gegen Stripe im Testmodus
+   kalkuliert; sie mit Live-Schlüsseln zu bezahlen wäre eine echte Abbuchung für einen Testkauf.
+
+Dass die Spalte keinen Default hat, ist Absicht: `create_order()` ist der einzige Weg zu einer
+Bestellung, und ein künftiger Pfad, der den Modus vergisst, soll laut scheitern statt plausibel
+auszusehen.
+
+#### Testbestand: echter Bestand, mit einem Knopf zurück
+
+Ein Sandbox-Kauf läuft durch den echten Reservierungs- und Bewegungspfad — das ist der Zweck
+einer Production-Sandbox — und senkt damit echten Bestand.
+`admin_revert_sandbox_stock(order_number)` bucht für jede tatsächlich **konvertierte** Position
+(nicht je Bestellzeile: eine späte Zahlung konvertiert weniger) eine `return`-Bewegung über
+`apply_inventory_movement()`. Korrigiert wird durch neue Bewegungen, nie durch Bearbeiten
+(ADR-0037). Die Funktion verweigert jede Bestellung, die nicht im Sandbox-Modus entstand, und ist
+über das Order-Event `sandbox_stock_reverted` idempotent.
+
+Solange `sandbox` gilt, kann ohnehin niemand sonst kaufen — ein vorübergehend falscher
+verfügbarer Bestand schadet keinem echten Kunden.
+
+#### Die Adminfunktionen
+
+| Funktion | Zweck |
+|---|---|
+| `admin_commerce_state()` | Modus, Testerliste, Bestellungen je Modus |
+| `admin_find_accounts(query)` | Konto **finden** — Präfix auf Benutzername oder Adresse, höchstens 10, mindestens 3 Zeichen |
+| `admin_set_commerce_mode(mode)` | umschalten |
+| `admin_set_commerce_tester(user_id, enabled, note)` | freischalten oder entziehen |
+| `admin_revert_sandbox_stock(order_number)` | Testbestand zurückbuchen |
+
+Alle fünf fragen `is_shop_admin()` im eigenen Rumpf. **Die Suche darf eine Adresse lesen, um ein
+Konto zu finden; freigeschaltet wird die `user_id`.** `admin_set_commerce_tester()` nimmt nichts
+anderes entgegen — eine Adresse identifiziert ein Konto, sie autorisiert keines (ADR-0032).
+
+`admin_order()` und `admin_orders()` tragen den Modus mit, damit eine Testbestellung ohne
+Quervergleich erkennbar ist.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -1077,6 +1165,18 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   Tabelle, keine Spalte, kein Grant. `deny_write()` bleibt für `order_lines` und
   `order_addresses` unverändert. **Auf Staging angewandt und runtime-verifiziert am 2026-09-11,
   auf Production NICHT angewandt.**
+
+- Einundzwanzigste Migration: `0021_commerce_mode.sql` — **der Commerce-Modus** (ADR-0060).
+  Eine Spalte auf `commerce_settings`, die Tabelle `commerce_testers`, das Prädikat
+  `commerce_checkout_allowed()`, die schmale öffentliche Projektion `commerce_access()`, die
+  Spalte `orders.commerce_mode` samt Nachtrag und Immutability, dazu die drei Stellen des
+  Kauf- und Zahlungspfads und fünf Adminfunktionen. `create_order()`,
+  `authorize_order_payment()` und `start_payment_attempt()` werden per `create or replace`
+  ersetzt — Signatur und Rückgabetyp bleiben identisch; nur `admin_orders()` wird gedroppt und
+  neu angelegt, weil eine `returns table`-Signatur nicht in place wachsen kann.
+  **Der Default ist `closed`: Das Anwenden schließt den Checkout, bis jemand ihn bewusst
+  öffnet.** Rein additiv im Übrigen — keine Zeile gelöscht, kein Typ geändert.
+  **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der

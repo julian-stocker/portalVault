@@ -35,6 +35,7 @@ import {
   buildSessionForm,
   idempotencyKey,
   parseAllowlist,
+  providerConfigProblem,
   parsePaymentRequest,
   redirectUrls,
   resolveAllowedOrigin,
@@ -190,6 +191,30 @@ Deno.serve(async (req: Request) => {
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+
+  // ---- 2b. does this deployment's Stripe key match the world we are in? ----
+  //
+  // The mode is read from the database, which is the only place it exists.
+  // Deriving it from an environment variable here would create a second
+  // source of truth that could drift from the one `create_order()` stamps on
+  // the order — and the drift would be invisible until a tester was charged
+  // real money.
+  //
+  // Every unclear answer refuses. A database that cannot be reached, a mode
+  // that cannot be read, a key whose prefix says the other world: all of them
+  // end here, before Stripe is contacted.
+  const modeRow = await admin.rpc("commerce_mode");
+  if (modeRow.error) {
+    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
+      modeRow.error);
+  }
+  const configProblem = providerConfigProblem(modeRow.data, STRIPE_SECRET_KEY);
+  if (configProblem !== null) {
+    // The reason is logged, never returned: a visitor learns that payment is
+    // unavailable, not which key this deployment holds.
+    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
+      `commerce mode and Stripe key disagree: ${configProblem}`);
+  }
 
   // ---- 3. may this caller pay for this order? ------------------------------
   //

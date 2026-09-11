@@ -26,6 +26,8 @@ export type AdminOrderRow = {
   customer_email: string;
   /** 0 flagged · 1 paid and unsent · 2 in flight · 3 settled. From SQL. */
   attention: number;
+  /** Which world the order was placed in. Frozen at insert (ADR-0060). */
+  commerce_mode: string;
 };
 
 /** The document `admin_order()` returns. */
@@ -46,6 +48,10 @@ export type AdminOrderDetail = {
     shipping_method: string | null;
     tracking_number: string | null;
     is_guest: boolean;
+    /** Which world the order was placed in. Never changes (ADR-0060). */
+    commerce_mode: string;
+    /** Sandbox only: have the return movements already been booked? */
+    stock_reverted: boolean;
   };
   address: {
     first_name: string;

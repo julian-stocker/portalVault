@@ -85,7 +85,16 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
         className={`block rounded-sky-lg bg-surface/80 px-5 py-4 hover:ring-border-strong ${tone}`}
       >
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <span className="font-medium tabular-nums">{order.order_number}</span>
+          <span className="font-medium tabular-nums">
+            {order.order_number}
+            {/* A test order has to be recognisable without opening it, and
+                stays recognisable after the shop goes live (ADR-0060). */}
+            {order.commerce_mode === "sandbox" ? (
+              <span className="ml-2 rounded-sky-sm bg-accent/20 px-1.5 py-0.5 align-middle text-[0.65rem] tracking-wide text-foreground">
+                {de.admin.commerce.sandboxBadge}
+              </span>
+            ) : null}
+          </span>
           <span className="text-sm font-semibold tabular-nums">
             {formatPrice(Number(order.total_amount))}
           </span>

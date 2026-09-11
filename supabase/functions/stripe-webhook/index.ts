@@ -37,6 +37,7 @@ import {
   statusForOutcome,
   type DbOutcome,
   type StripeEventShape,
+  livemodeConfigConflict,
 } from "./event.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -126,6 +127,29 @@ Deno.serve(async (req: Request) => {
     // is secret, but neither is the caller's business.
     console.error("stripe-webhook signature rejected:", (error as Error).message);
     return respond(400, { error: "invalid_signature" });
+  }
+
+  // ---- 2b. does this deployment agree with itself? -------------------------
+  //
+  // `STRIPE_LIVEMODE` says which endpoint this is; the commerce mode in the
+  // database says which world the shop is in. They are two statements about
+  // the same thing, so a disagreement is not a case to handle — it is a
+  // misconfiguration, and the only safe thing to do with a misconfigured
+  // payment endpoint is nothing.
+  //
+  // 503 rather than 200: Stripe keeps the event and retries, so fixing the
+  // configuration recovers the delivery instead of losing it.
+  let mode: string | null;
+  try {
+    mode = await readCommerceMode();
+  } catch (error) {
+    console.error("stripe-webhook cannot read the commerce mode:", describe(error));
+    return respond(503, { error: "not_configured" });
+  }
+  const conflict = livemodeConfigConflict(mode, EXPECT_LIVEMODE);
+  if (conflict !== null) {
+    console.error(`stripe-webhook refusing every event: ${conflict}`);
+    return respond(503, { error: "not_configured" });
   }
 
   // ---- 3. what this event means -------------------------------------------
@@ -286,6 +310,30 @@ async function callDatabase(
     throw new Error(`${fn}: ${payload?.code ?? response.status} ${payload?.message ?? ""}`);
   }
   return payload as DbOutcome;
+}
+
+/**
+ * The commerce mode, straight from the database.
+ *
+ * Same transport as `callDatabase()` — a plain POST with the service key —
+ * because this function holds no supabase-js client and needs none for one
+ * scalar. A failure throws, and the caller turns that into a 503.
+ */
+async function readCommerceMode(): Promise<string | null> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/commerce_mode`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`commerce_mode: ${payload?.code ?? response.status} ${payload?.message ?? ""}`);
+  }
+  return typeof payload === "string" ? payload : null;
 }
 
 /** A code and a message, never a whole error object — as in create-payment. */

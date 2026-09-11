@@ -7,6 +7,55 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Commerce Test Mode gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
+
+*Eine Spalte, eine kleine Tabelle, ein Prädikat* (ADR-0060). `commerce_settings.mode` kennt
+`closed`, `sandbox` und `live`; `commerce_testers(user_id)` sagt, wer im Sandbox-Modus kaufen
+darf; `commerce_checkout_allowed()` ist die eine Antwort, die `create_order()` als **allerersten**
+Ausdruck einholt — vor jeder Formprüfung, vor jeder Preisabfrage. Gastbestellung im Sandbox-Modus
+ist strukturell aus: Ein Gast hat keine `user_id`, und `is_commerce_tester_for(NULL)` ist falsch.
+
+*Kein Rollensystem.* Dieselbe Form wie `shop_admins` seit ADR-0032 — Tabelle mit `user_id`,
+`is_…()`-Funktion, RLS an, alle Clientrechte entzogen. **Admin ist nicht automatisch Tester.**
+Die Adminsuche darf eine Adresse lesen, um ein Konto zu *finden*; freigeschaltet wird die
+`user_id`, und `admin_set_commerce_tester()` nimmt nichts anderes entgegen.
+
+*Durchsetzung liegt in der Datenbank, nicht in der Oberfläche.* `create_order()` ist über
+PostgREST mit dem Anon-Key erreichbar. Zwei weitere Stellen fragen noch einmal:
+`authorize_order_payment()` verlangt im Sandbox-Modus, dass die Bestellung einem **aktuellen**
+Tester gehört — ein entzogenes Recht stoppt damit auch schon geöffnete Checkouts —, und
+`start_payment_attempt()` verlangt, dass der Modus der Bestellung noch der aktuelle ist.
+
+*Der Modus steht auf der Bestellung und bleibt dort.* `orders.commerce_mode`, vom
+Immutability-Trigger eingefroren, ohne Default, bestehende Zeilen wahrheitsgemäß auf `sandbox`
+nachgetragen — es gab nie einen Live-Stripe-Schlüssel in irgendeinem Deployment. Eine
+Testbestellung bleibt als solche erkennbar, auch Jahre nachdem der Shop live gegangen ist.
+
+*Stripe hat genau eine Wahrheit.* Beide Edge Functions lesen den Modus aus der Datenbank.
+`create-payment` vergleicht ihn mit dem Präfix des eigenen Schlüssels und verweigert **jede**
+Unklarheit; der Webhook vergleicht ihn mit `STRIPE_LIVEMODE` und verarbeitet bei Widerspruch gar
+nichts — `503`, damit Stripe die Zustellung behält. Es gibt bewusst keine `COMMERCE_MODE`-Variable.
+
+`STRIPE_LIVEMODE` wird als `=== "true"` gelesen: Für `sandbox` und `closed` genügt es, die
+Variable nicht zu setzen. Nur die exakte Zeichenkette `true` schaltet Live-Events frei.
+
+*Testbestand: echter Bestand, mit einem Knopf zurück.* Ein Sandbox-Kauf läuft durch den echten
+Reservierungs- und Bewegungspfad — das ist der Zweck — und `admin_revert_sandbox_stock()` bucht
+für jede tatsächlich konvertierte Position eine `return`-Bewegung. Korrigiert wird durch neue
+Bewegungen, nie durch Bearbeiten (ADR-0037). Idempotent über ein Order-Event, und jede Bestellung,
+die nicht im Sandbox-Modus entstand, wird verweigert.
+
+*Geprüft:* `npm run check` grün, **1869 Tests in 84 Dateien** (vorher 1798/82), alle fünf
+Staging-Verifier grün, Secret-/PII-Scan sauber.
+
+**Der Default ist `closed`.** Das Anwenden von `0021` schließt den Checkout, bis jemand ihn
+bewusst öffnet — auf Production ist Schweigen die sichere Antwort. Auf Staging muss der Modus
+nach dem Anwenden auf `sandbox` gesetzt werden, sonst schlagen die Commerce-Verifier fehl.
+
+**Production unverändert.** `0019`, `0020` und `0021` dort nicht angewandt.
+
+---
+
 **Transactional Mail V1 auf Staging fertig und nachgewiesen (2026-09-11).**
 
 *Drei Mails, und keine davon wird von der Datenbank verschickt.* Zahlungsbestätigung und

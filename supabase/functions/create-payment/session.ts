@@ -406,3 +406,58 @@ export function buildSessionForm(input: {
 
   return form;
 }
+
+/* ------------------------------------------------- the commerce mode guard */
+
+/**
+ * Which world commerce is in. The database is the only source of it; this
+ * function never guesses from an environment variable, because two sources
+ * are two things that can disagree and eventually will.
+ */
+export type CommerceMode = "closed" | "sandbox" | "live";
+
+export function isCommerceMode(value: unknown): value is CommerceMode {
+  return value === "closed" || value === "sandbox" || value === "live";
+}
+
+/**
+ * What a Stripe secret says about itself.
+ *
+ * Both shapes Stripe issues are recognised: `sk_` for a standard secret key
+ * and `rk_` for a restricted one. Anything else is `unknown`, which is never
+ * treated as acceptable — a key whose world cannot be read is a key that must
+ * not be used.
+ */
+export function stripeKeyMode(key: string | undefined | null): "test" | "live" | "unknown" {
+  if (typeof key !== "string") return "unknown";
+  if (/^(sk|rk)_test_/.test(key)) return "test";
+  if (/^(sk|rk)_live_/.test(key)) return "live";
+  return "unknown";
+}
+
+/**
+ * The whole Stripe-safety rule, as one pure question.
+ *
+ * Returns a short reason when the deployment must refuse, and `null` when the
+ * key and the mode describe the same world. Every unclear case is a reason:
+ * an unreadable mode, an unreadable key, a missing key, a closed shop. There
+ * is no branch that shrugs and continues.
+ *
+ * This is what keeps "sandbox" honest. A sandbox that could reach a live key
+ * would charge a tester real money for a test purchase, and a live shop
+ * running on test keys would take orders nobody ever paid for.
+ */
+export function providerConfigProblem(
+  mode: unknown,
+  stripeKey: string | undefined | null,
+): string | null {
+  if (!isCommerceMode(mode)) return "unknown_commerce_mode";
+  if (mode === "closed") return "commerce_closed";
+  if (!stripeKey) return "missing_stripe_key";
+
+  const keyMode = stripeKeyMode(stripeKey);
+  if (keyMode === "unknown") return "unrecognised_stripe_key";
+
+  const wanted = mode === "live" ? "live" : "test";
+  return keyMode === wanted ? null : `stripe_key_is_${keyMode}_but_mode_is_${mode}`;
+}

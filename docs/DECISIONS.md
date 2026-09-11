@@ -4554,3 +4554,113 @@ eine Konstante im Code (unveränderlich ohne Deployment, und genau die Hardcodie
 `docs/SECURITY.md` verbietet) · die Tabelle öffentlich lesbar machen und die nicht-öffentlichen
 Felder später „herausfiltern" (ein Filter, der nach dem Feld kommt, vergisst irgendwann eines) ·
 alle künftigen Felder gleich mitanlegen.
+
+---
+
+## ADR-0060 — Commerce hat einen Modus; „Test" ist eine Eigenschaft der Bestellung, keine Umgebung
+
+**Status:** ANGENOMMEN (2026-09-11) · umgesetzt in Migration `0021`
+
+**Kontext.** SkyIsles soll auf der echten Domain, mit echten Konten und der echten Datenbank
+geprüft werden, während Stripe im Testmodus bleibt und kein gewöhnlicher Besucher zur Kasse
+kommt. Bisher war „darf jemand kaufen" gar keine Frage, die das System gestellt hat:
+`create_order()` verkaufte an jeden, der die Funktion erreichte.
+
+**Entscheidung.** Eine Spalte, eine kleine Tabelle, ein Prädikat.
+
+| | |
+|---|---|
+| `commerce_settings.mode` | `closed` · `sandbox` · `live` |
+| `commerce_testers(user_id)` | wer im Sandbox-Modus kaufen darf |
+| `commerce_checkout_allowed()` | die eine Antwort, die `create_order()` einholt |
+
+**Warum kein zweites Environment.** Eine getrennte „Testumgebung" auf Production wäre eine
+zweite Datenbank, zweite Konten, zweiter Bestand — also genau das, was hier nicht getestet
+werden soll. Die Frage ist nicht *wo* getestet wird, sondern *wer* gerade kaufen darf. Das ist
+eine Berechtigung, und Berechtigungen haben in diesem Schema seit ADR-0032 eine feste Form:
+eine Tabelle mit `user_id`, eine `is_…()`-Funktion, kein Rollensystem.
+
+**Warum der Modus zusätzlich auf der Bestellung landet.** `orders.commerce_mode` ist durch den
+Immutability-Trigger eingefroren. Eine Testbestellung muss **Jahre später** noch als solche
+erkennbar sein — auch und gerade, nachdem der Shop live gegangen ist. Ein Kennzeichen, das aus
+der *heutigen* Einstellung abgeleitet wird, schreibt Geschichte um, sobald die Einstellung sich
+ändert. Genau das darf nicht passieren.
+
+Dieselbe Spalte ist zugleich die Zahlungsschranke: `start_payment_attempt()` verweigert eine
+Bestellung, deren Modus nicht mehr der aktuelle ist. Eine Sandbox-Bestellung wurde gegen
+Stripe-Testmodus kalkuliert; sie mit Live-Schlüsseln zu bezahlen wäre eine echte Abbuchung für
+einen Testkauf.
+
+**Die Stripe-Konsistenz hat genau eine Quelle.** Der Modus steht in der Datenbank, und beide
+Edge Functions fragen ihn dort. `create-payment` vergleicht ihn mit dem Präfix des eigenen
+Stripe-Schlüssels (`sk_test_`/`rk_test_` gegen `sk_live_`/`rk_live_`) und verweigert **jede**
+Unklarheit: unlesbarer Modus, unlesbarer Schlüssel, fehlender Schlüssel, geschlossener Shop.
+Der Webhook vergleicht ihn mit seinem eigenen `STRIPE_LIVEMODE` und verarbeitet bei
+Widerspruch **gar nichts** (503, damit Stripe die Zustellung behält).
+
+`STRIPE_LIVEMODE` wird als `Deno.env.get(…) === "true"` gelesen — ein Boolean, nie `undefined`.
+Für `sandbox` und `closed` genügt es deshalb, die Variable **nicht zu setzen**; ein
+ausdrückliches `false` ist nicht nötig und ändert nichts. Der einzige Wert, der Live-Events
+freischaltet, ist die exakte Zeichenkette `true`, und diese Asymmetrie ist die Absicht: Jede
+Unklarheit landet auf der Testseite, nie auf der Live-Seite. Ein zweiter Modus in einer
+Environment-Variablen wäre eine zweite Wahrheit, die von der auf der Bestellung abweichen kann —
+und die Abweichung wäre erst sichtbar, wenn jemand echtes Geld bezahlt hat.
+
+**Durchsetzung liegt in der Datenbank, nicht in der Oberfläche.** `create_order()` ist über
+PostgREST mit dem Anon-Key erreichbar; eine Prüfung in TypeScript wäre einen Request weit von
+„übersprungen" entfernt. Die Oberfläche entscheidet nur, ob ein Formular angeboten wird.
+
+**Drei Stellen fragen, und jede fragt ihre eigene Fassung der Frage:**
+
+1. `create_order()` — darf **diese** Identität jetzt bestellen? (Modus + Tester + angemeldet)
+2. `authorize_order_payment()` — gehört die Bestellung im Sandbox-Modus noch einem **aktuellen**
+   Tester? Ein entzogenes Testerrecht stoppt damit auch schon geöffnete Checkouts.
+3. `start_payment_attempt()` — ist der Modus der Bestellung noch der aktuelle?
+
+**Gastbestellung im Sandbox-Modus ist aus**, und zwar strukturell: Ein Gast hat keine `user_id`,
+und `is_commerce_tester_for(NULL)` ist falsch. Es gibt keinen Zweig, der das anders beantwortet.
+
+**Testinventar: echter Bestand, mit einem Knopf zurück.** Ein Sandbox-Kauf geht durch den
+echten Reservierungs- und Bewegungspfad — das ist der Zweck einer Production-Sandbox. Er senkt
+also echten Bestand. `admin_revert_sandbox_stock()` bucht für jede tatsächlich konvertierte
+Position eine `return`-Bewegung; korrigiert wird durch neue Bewegungen, nie durch Bearbeiten
+(ADR-0037). Die Funktion verweigert jede Bestellung, die nicht im Sandbox-Modus entstand, und
+ist über ein Order-Event idempotent.
+
+Während `sandbox` gilt, kann ohnehin **niemand sonst kaufen** — ein vorübergehend falscher
+verfügbarer Bestand schadet keinem echten Kunden.
+
+**Konsequenzen.**
+
+- Der Standardwert ist `closed`. Das Anwenden der Migration **schließt** den Checkout, bis
+  jemand ihn bewusst öffnet. Auf Production ist Schweigen die sichere Antwort.
+- Bestehende Bestellungen werden auf `sandbox` nachgetragen — wahrheitsgemäß: es gab nie einen
+  Live-Schlüssel in irgendeinem Deployment.
+- `orders.commerce_mode` bekommt **keinen** Default. Ein künftiger Pfad, der den Modus vergisst,
+  soll laut scheitern statt plausibel auszusehen.
+- Admin ist **nicht** automatisch Tester. `is_commerce_tester()` liest nur `commerce_testers`.
+- Die Adminsuche darf eine E-Mail lesen, um ein Konto zu **finden**. Freigeschaltet wird die
+  `user_id`. `admin_set_commerce_tester()` nimmt nichts anderes entgegen (ADR-0032).
+- `commerce_access()` gibt dem Client `may_checkout` und einen groben Grund — **nie den Modus**.
+  Ein Besucher erfährt, dass er nicht bestellen kann, nicht dass gerade getestet wird.
+
+**Verworfen:**
+
+- **Ein generisches Feature-Flag-System.** Drei Werte in einer Spalte beantworten die Frage, die
+  es heute gibt. Ein Framework für künftige Betas wäre eine Abstraktion über einem einzigen Fall.
+- **Ein dedizierter, nicht öffentlicher Testartikel.** `is_shop_eligible()` verlangt
+  `catalog_visible`; ein verkaufbarer Testartikel müsste also im Katalog stehen. Ihn zu
+  verstecken hieße, eine neue „Testartikel"-Dimension durch `shop_offers()`, `is_shop_eligible()`
+  und die Katalogansicht zu ziehen. Und er würde das Falsche prüfen: dass der Checkout für
+  Phantasieartikel funktioniert.
+- **Eine separate Sandbox-Bestandsdimension.** `shop_inventory` ist über `(sky_id, condition)`
+  identifiziert; eine dritte Dimension ändert Primärschlüssel, `shop_offers()`,
+  `reserve_for_order()`, `convert_order_reservations()`, die Admin-UI und die
+  Reconciliation-View. Die mit Abstand größte Variante, für den kleinsten Gewinn.
+- **Sandbox-Bestellungen konvertieren gar keinen Bestand.** Dann bliebe der riskanteste Teil des
+  Zahlungspfads — Reservierung → Bewegung — im Test ungeprüft, und der Test wäre kein Test.
+- **`STRIPE_LIVEMODE` als alleinige Wahrheit.** Eine Environment-Variable kann von der Datenbank
+  abweichen; die Bestellung trägt den Modus der Datenbank.
+- **Eine Rolle `TESTER` neben `USER`/`ADMIN`.** Additiv und klein, wie `shop_admins` — nicht eine
+  Hierarchie, in der ein Admin automatisch alles darf.
+

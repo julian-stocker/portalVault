@@ -490,14 +490,21 @@ describe("the Deno entry point, held to its contract", () => {
     }
   });
 
-  it("calls exactly the three contracted database functions", () => {
+  it("calls exactly the four contracted database functions", () => {
     // start_payment_attempt appears twice: once to open or reuse the attempt,
     // once to re-read it when a concurrent request won the attach race.
+    //
+    // `commerce_mode` was added by ADR-0060 and is a pure read: the mode has
+    // one home, and this function asks it rather than keeping a second copy
+    // in an environment variable that could drift from the one stamped on
+    // the order.
     const rpcs = [...entryCode.matchAll(/\.rpc\(\s*"(\w+)"/g)].map((m) => m[1]);
     expect([...new Set(rpcs)].sort()).toEqual(["attach_provider_payment",
                                                "authorize_order_payment",
+                                               "commerce_mode",
                                                "start_payment_attempt"]);
     expect(rpcs.filter((r) => r === "start_payment_attempt")).toHaveLength(2);
+    expect(rpcs.filter((r) => r === "commerce_mode")).toHaveLength(1);
   });
 
   it("authorises through the existing contract, not a parallel one", () => {

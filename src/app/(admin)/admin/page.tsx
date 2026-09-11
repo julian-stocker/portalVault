@@ -2,8 +2,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { BusinessSettings } from "@/components/admin/business-settings";
+import { CommercePanel } from "@/components/admin/commerce-panel";
 import { ShopSettings } from "@/components/admin/shop-settings";
 import { fetchBusinessSettings } from "@/lib/admin/business";
+import { fetchCommerceState } from "@/lib/admin/commerce";
 import { fetchShopSettings } from "@/lib/admin/inventory";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { hasOpenWork } from "@/lib/admin/orders";
@@ -21,12 +23,13 @@ export const metadata: Metadata = { title: de.admin.title };
  * a thing to change.
  */
 export default async function AdminPage() {
-  const [categories, settings, openOrders, business] = await Promise.all([
+  const [categories, settings, openOrders, business, commerce] = await Promise.all([
     fetchAdminCategories(),
     fetchShopSettings(),
     // Memoised per request — the layout above already counted these rows.
     fetchOpenOrderCounts(),
     fetchBusinessSettings(),
+    fetchCommerceState(),
   ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
   const copy = de.admin.orders;
@@ -107,6 +110,7 @@ export default async function AdminPage() {
       {/* Who SkyIsles is, before what it charges: the contact address feeds
           every customer mail and later the legal pages (ADR-0059). */}
       <div className="mt-8">
+        <CommercePanel state={commerce} />
         <BusinessSettings contactEmail={business.contactEmail} replyTo={business.replyTo} />
       </div>
 

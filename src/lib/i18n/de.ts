@@ -404,6 +404,55 @@ export const de = {
         "geprüft werden muss.",
     },
 
+    /** Commerce-Modus und Sandbox-Tester (ADR-0060). */
+    commerce: {
+      heading: "Verkauf",
+      hint:
+        "Bestimmt, wer bezahlen kann. Bereits aufgegebene Bestellungen behalten den Modus, " +
+        "in dem sie entstanden sind — das lässt sich nachträglich nicht ändern.",
+      modeLabel: "Modus",
+      modeClosed: "Geschlossen",
+      modeClosedHint: "Niemand kann zur Kasse gehen.",
+      modeSandbox: "Test",
+      modeSandboxHint:
+        "Nur angemeldete Tester können bestellen, und Stripe läuft im Testmodus. " +
+        "Gastbestellungen sind aus.",
+      modeLive: "Öffentlich",
+      modeLiveHint: "Normaler Verkauf für alle.",
+      modeSaved: "Modus geändert.",
+      modeFailed: "Das hat nicht geklappt.",
+
+      testersHeading: "Tester",
+      testersHint:
+        "Nur diese Konten können im Testmodus bestellen. Adminrechte allein genügen nicht — " +
+        "wer testen soll, muss hier stehen.",
+      testersEmpty: "Noch niemand freigeschaltet.",
+      searchLabel: "Konto suchen",
+      searchPlaceholder: "Benutzername oder E-Mail",
+      searchHint:
+        "Die Suche dient nur dazu, das richtige Konto zu finden. Freigeschaltet wird das " +
+        "Konto, nicht die Adresse.",
+      searchTooShort: "Mindestens drei Zeichen.",
+      searchEmpty: "Kein Konto gefunden.",
+      enable: "Freischalten",
+      disable: "Entfernen",
+      isAdmin: "Admin",
+      noteLabel: "Notiz (optional)",
+
+      ordersByMode: "Bestellungen nach Modus",
+      sandboxBadge: "TEST",
+      sandboxOrderHint:
+        "Diese Bestellung wurde im Testmodus aufgegeben. Sie bleibt dauerhaft als Test " +
+        "gekennzeichnet.",
+      revertStock: "Testbestand zurückbuchen",
+      revertStockHint:
+        "Bucht für jede verkaufte Position eine Rückgabe, damit ein Testkauf den echten " +
+        "Bestand nicht verfälscht.",
+      revertStockDone: "Zurückgebucht.",
+      revertStockAlready: "Bereits zurückgebucht.",
+      revertStockFailed: "Das hat nicht geklappt.",
+    },
+
     /** Shop-Einstellungen (ADR-0045). */
     shopSettings: "Shop-Einstellungen",
     defaultShopPrice: "Standard-Shoppreis",
@@ -523,6 +572,7 @@ export const de = {
       trackingNumber: "Trackingnummer",
       noTracking: "Keine Trackingnummer hinterlegt",
       trackingTooLong: "Diese Trackingnummer ist zu lang.",
+
       /**
        * Die Rückfrage vor der einzigen unumkehrbaren Aktion des Systems
        * (UX-Beta, F6).
@@ -816,6 +866,20 @@ export const de = {
    */
   checkout: {
     title: "Kasse",
+
+    /**
+     * Wenn gerade niemand (oder fast niemand) bestellen kann.
+     *
+     * Bewusst ohne das Wort „Sandbox": Wer nicht freigeschaltet ist, erfährt,
+     * dass er nicht bestellen kann — nicht, dass gerade getestet wird.
+     */
+    closedHeading: "Bestellen ist derzeit nicht möglich",
+    closedBody:
+      "Der Verkauf ist im Moment geschlossen. Der Warenkorb bleibt erhalten.",
+    testersOnlyHeading: "Bestellen ist derzeit eingeschränkt",
+    testersOnlyBody:
+      "Der Verkauf ist gerade nur für einen kleinen Kreis freigeschaltet. " +
+      "Der Warenkorb bleibt erhalten.",
     contactHeading: "Kontakt",
     email: "E-Mail",
     emailHint: "An diese Adresse geht die Bestellbestätigung.",

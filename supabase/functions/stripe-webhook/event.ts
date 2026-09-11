@@ -252,3 +252,38 @@ export function statusForOutcome(outcome: DbOutcome, unknownIsFinal: boolean): n
   if (outcome === "unknown_payment") return unknownIsFinal ? 200 : 500;
   return 200;
 }
+
+/* -------------------------------------------- the commerce mode cross-check */
+
+/**
+ * Which Stripe world a commerce mode belongs to.
+ *
+ * `closed` maps to test, not to "either". A live event arriving at a shop
+ * that is not live is wrong in every reading of it, and the safe answer to a
+ * wrong live event is to refuse it.
+ */
+export function expectedLivemode(mode: string | null | undefined): boolean {
+  return mode === "live";
+}
+
+/**
+ * Does this deployment's own configuration agree with itself?
+ *
+ * `STRIPE_LIVEMODE` is what the endpoint was told; the commerce mode is what
+ * the database knows. They describe the same thing, so a disagreement is a
+ * misconfiguration rather than a decision to make — and the only safe
+ * response to it is to process nothing at all.
+ *
+ * Returns a short reason to log, or `null` when the two agree.
+ */
+export function livemodeConfigConflict(
+  mode: string | null | undefined,
+  expectLivemodeFromEnv: boolean,
+): string | null {
+  if (mode !== "closed" && mode !== "sandbox" && mode !== "live") {
+    return `unknown_commerce_mode:${String(mode)}`;
+  }
+  return expectedLivemode(mode) === expectLivemodeFromEnv
+    ? null
+    : `commerce_mode_${mode}_but_STRIPE_LIVEMODE_${expectLivemodeFromEnv}`;
+}

@@ -356,6 +356,34 @@ stattfinden kann.
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…`, **pro Endpoint verschieden**. Staging und Production teilen ihn nie. Ohne ihn antwortet die Function auf jeden POST `503` und prüft nichts — fail closed. |
 | `STRIPE_LIVEMODE` | ungesetzt auf Staging (Default `false`). Eine Production-Deployment braucht `true`, sonst verwirft sie jedes Live-Event als `livemode_mismatch`. |
 
+> **Seit `0021` muss `STRIPE_LIVEMODE` mit dem Commerce-Modus übereinstimmen** (ADR-0060). Die
+> Function liest `commerce_mode()` bei jeder Zustellung und verarbeitet **gar nichts**, solange
+> die beiden sich widersprechen: `live` verlangt den *effektiven* Wert `true`, `sandbox` und
+> `closed` verlangen `false`. Die Antwort ist `503`, nicht `200` — Stripe behält das Event, und
+> eine korrigierte Konfiguration holt die Zustellung nach, statt sie zu verlieren.
+>
+> **Für `sandbox` und `closed` genügt es, die Variable nicht zu setzen; sie muss nicht
+> ausdrücklich auf `false` stehen.** Gelesen wird `Deno.env.get("STRIPE_LIVEMODE") === "true"` —
+> ein Boolean, nie `undefined`. „Ungesetzt" und „`false`" sind damit derselbe Wert, es gibt
+> keinen dritten Zustand, auf den man fail-closed reagieren könnte, und der einzige Eingabewert,
+> der Live-Events überhaupt freischaltet, ist die **exakte** Zeichenkette `true`. Die
+> Asymmetrie zeigt bewusst in die sichere Richtung.
+>
+> Umgekehrt heißt das: Ein Tippfehler (`TRUE`, `1`, `yes`) wird als `false` gelesen. Für
+> `sandbox` ist das ohnehin der gewollte Zustand. Für `live` ist es ein **Ausfall, kein
+> Geldfehler** — jedes Event wird mit `503` abgewiesen, und die Logzeile
+> `commerce_mode_live_but_STRIPE_LIVEMODE_false` benennt die Ursache genau.
+>
+> **Es gibt keine `COMMERCE_MODE`-Variable und soll keine geben.** Der Modus hat eine Quelle: die
+> Datenbank. Eine zweite könnte von der abweichen, die `create_order()` auf die Bestellung
+> stempelt — und die Abweichung wäre erst sichtbar, wenn jemand echtes Geld bezahlt hat.
+>
+> Dasselbe gilt für `create-payment` in der anderen Richtung: Es vergleicht den Modus mit dem
+> **Präfix des eigenen `STRIPE_SECRET_KEY`** (`sk_test_`/`rk_test_` gegen `sk_live_`/`rk_live_`)
+> und antwortet bei jeder Unklarheit `503 provider_unconfigured` — unlesbarer Modus, unlesbarer
+> Schlüssel, fehlender Schlüssel, geschlossener Shop. Ein Sandbox-Deployment kann damit keinen
+> Live-Schlüssel benutzen, und ein Live-Shop keinen Testschlüssel.
+
 Ein Stripe-**API**-Schlüssel wird nicht gesetzt und darf nicht gesetzt werden: der signierte Body
 ist autoritativ, es wird nichts nachgeladen — und eine Function ohne API-Key kann nicht abbuchen,
 erstatten oder Sessions verfallen lassen.
