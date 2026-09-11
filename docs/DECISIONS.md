@@ -4371,3 +4371,60 @@ dasselbe wie einer URL zu glauben.
 Referrer und jedem Server-Log) · `localStorage` (überlebt den Besuch) · Gästen nach der Zahlung
 gar keinen Status zeigen (ohne Mailversand erführen sie nichts) · den Service-Role-Key in Vercel,
 um serverseitig zu lesen (bricht ADR-0051).
+
+---
+
+## ADR-0057 — Fulfillment kennt einen Übergang, und `needs_resolution` sperrt ihn
+
+**Status:** ANGENOMMEN (2026-09-11) · Migration `0018`, auf Staging runtime-verifiziert,
+Production ausstehend.
+
+**Problem.** `orders.fulfillment_status` kennt seit `0010` fünf Werte und **keine Übergangsregel**.
+Der CHECK erlaubt jeden davon jederzeit, auch `completed → unfulfilled`. Solange niemand schrieb,
+war das folgenlos. Admin Orders V1 schreibt.
+
+Dazu ein zweites, teureres Problem: **darf eine bezahlte Bestellung versendet werden?** Die
+naheliegende Antwort — `payment_status = 'paid'` — ist zu schwach. Eine Bestellung mit
+`needs_resolution` **ist** bezahlt: das Geld kam an, nachdem der Hold abgelaufen war, es wurde
+**keine Reservierung konvertiert und kein Bestand gebucht** (ADR-0050). Sie zu versenden hieße,
+Ware herauszugeben, die das Bestandsjournal noch als vorhanden führt.
+
+**Entscheidung.**
+
+**V1 kennt genau einen Übergang: `unfulfilled → shipped`.** `preparing`, `completed` und
+`cancelled` bleiben im CHECK und bekommen keinen Weg — einen Zustand zu erlauben, aus dem nichts
+herausführt, wäre schlimmer als ihn zu verbieten.
+
+**Durchgesetzt an zwei Stellen, mit verschiedenen Aufgaben.** `admin_mark_order_shipped()` prüft
+die Geschäftsregeln: Administrator, bezahlt, nicht geflaggt, nicht versendet. Der Trigger
+`orders_protect_fulfillment()` prüft **keine** davon und soll das nicht. Er beantwortet eine
+engere Frage, die unabhängig vom Schreiber gelten muss: *ist dieser Zustandswechsel überhaupt
+vorgesehen?*
+
+Der Trigger wurde bewusst gebaut, obwohl heute genau eine Funktion schreibt. Die Begründung liefert
+ADR-0052: bei `payment_attempts` ging ein Zustandsübergang real schief, und dort existierte der
+Trigger bereits. Vor dem Bau wurde geprüft, dass **nichts** in der Datenbank `fulfillment_status`
+schreibt — `confirm_order_payment()`, `expire_stale_checkouts()` und `fail_payment_attempt()`
+fassen ausschließlich `payment_status` an —, der Guard bricht also keinen bestehenden Pfad.
+
+**`needs_resolution` ist eine Sperre, niemals ein Nebeneffekt.** Fulfillment darf sie nicht
+löschen, und der Trigger verbietet, dass sich beide in einer Anweisung ändern. Bewusst so eng:
+`confirm_order_payment()` **setzt** das Flag weiterhin, und ein späterer Auflösungs-Workflow muss
+es löschen können. Verboten ist nur, es beim Drücken eines Versandknopfes zu verlieren.
+
+Eine geflaggte Bestellung ist damit in V1 **nicht versendbar**. Das ist die ehrliche Antwort: sie
+braucht eine Entscheidung zwischen Nachbestellen und Erstatten, und beides gibt es noch nicht.
+
+**Der Server besitzt `shipped_at`.** Der Trigger setzt es beim Übergang aus der eigenen Uhr und
+reicht es sonst unverändert weiter. „Der Client nennt kein Versanddatum" ist dadurch strukturell
+statt vereinbart.
+
+**Konsequenz, am eigenen Leib gelernt.** Beim Staging-Smoke wurde die E2E-Referenzbestellung
+`SI-2026-001022` versehentlich mitversendet. Zurückdrehen ist nicht möglich — der Trigger
+verweigert `shipped → unfulfilled`, und `order_events` ist append-only. Der Zustand bleibt und wird
+in `PROJECT_STATUS.md` erklärt. **Ein Guard, der nur so lange gilt, wie er nicht stört, ist
+keiner.**
+
+**Verworfen:** die Übergänge allein in der RPC zu prüfen (heute ein Schreiber, morgen zwei) · eine
+generische State-Machine-Infrastruktur für fünf Werte und einen Übergang · `needs_resolution` beim
+Versand automatisch aufzulösen · eine Bearbeitungsfunktion für die Trackingnummer in V1.

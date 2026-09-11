@@ -288,6 +288,93 @@ export const de = {
     imageTooLarge: "Die Datei ist zu groß (höchstens 2 MB).",
     imageWrongType: "Nur JPEG, PNG oder WebP.",
     imageHint: "JPEG, PNG oder WebP, höchstens 2 MB. Das importierte Bild bleibt erhalten.",
+
+    /** Bestellverwaltung (Admin Orders V1). */
+    orders: {
+      title: "Bestellungen",
+      linkHint: "Bezahlte Bestellungen sehen und als versendet markieren.",
+      empty: "Keine Bestellungen.",
+      openOnly: "Nur offene",
+      all: "Alle",
+
+      /** Spalten der Übersicht. */
+      number: "Bestellnummer",
+      placedAt: "Datum",
+      payment: "Zahlung",
+      fulfillment: "Versand",
+      total: "Gesamt",
+      customer: "Kunde",
+      lines: (n: number) => (n === 1 ? "1 Position" : `${n} Positionen`),
+
+      /** Aufmerksamkeitsstufen — die Reihenfolge der Übersicht. */
+      attention: {
+        needs_resolution: "Prüfen",
+        to_ship: "Zu versenden",
+        in_flight: "Offen",
+        settled: "Erledigt",
+      },
+
+      /** Zahlungs- und Versandzustände in Kundensprache. */
+      paymentStatus: {
+        pending: "Ausstehend",
+        paid: "Bezahlt",
+        failed: "Fehlgeschlagen",
+        expired: "Abgelaufen",
+        cancelled: "Storniert",
+        refunded: "Erstattet",
+        partially_refunded: "Teilweise erstattet",
+      },
+      fulfillmentStatus: {
+        unfulfilled: "Nicht versendet",
+        preparing: "In Vorbereitung",
+        shipped: "Versendet",
+        completed: "Abgeschlossen",
+        cancelled: "Storniert",
+      },
+
+      /** Detailseite. */
+      detailTitle: (number: string) => `Bestellung ${number}`,
+      notFound: "Diese Bestellung gibt es nicht.",
+      guest: "Gastbestellung",
+      account: "Mit Konto",
+      addressHeading: "Lieferadresse",
+      linesHeading: "Positionen",
+      eventsHeading: "Verlauf",
+      subtotal: "Zwischensumme",
+      shipping: "Versand",
+      paidAt: "Bezahlt am",
+      shippedAt: "Versendet am",
+      unitPrice: "Einzelpreis",
+      quantity: "Menge",
+
+      /** Der Hinweis, der Geld schützt. */
+      needsResolutionTitle: "Diese Bestellung muss geprüft werden",
+      needsResolutionHint:
+        "Die Zahlung ist eingegangen, aber es wurde keine Reservierung umgewandelt und kein " +
+        "Bestand gebucht. Vor dem Versand muss entschieden werden: nachbestellen oder erstatten. " +
+        "Der Versand ist deshalb gesperrt.",
+
+      /** Versandaktion. */
+      shipHeading: "Versand",
+      shipAction: "Als versendet markieren",
+      shipping_: "Wird markiert …",
+      trackingLabel: "Trackingnummer (optional)",
+      trackingHint:
+        "Wird unverändert gespeichert. In V1 nachträglich nicht mehr änderbar.",
+      trackingNumber: "Trackingnummer",
+      noTracking: "Keine Trackingnummer hinterlegt",
+      trackingTooLong: "Diese Trackingnummer ist zu lang.",
+      shipRefused:
+        "Diese Bestellung kann nicht als versendet markiert werden. Bitte prüfe Zahlung und " +
+        "Status oben.",
+      shipFailed: "Das hat gerade nicht geklappt. Bitte versuche es erneut.",
+      shippedAlready: "Bereits versendet.",
+      blocker: {
+        not_paid: "Nicht bezahlt — Versand gesperrt.",
+        needs_resolution: "Prüfung erforderlich — Versand gesperrt.",
+        already_shipped: "Bereits versendet.",
+      },
+    },
   },
 
   /** Lagerverwaltung des Betreibers (ADR-0037). Nur für Admins. */

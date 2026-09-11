@@ -7,7 +7,51 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**Commerce V1 · Phase B2.4 abgeschlossen und auf Staging verifiziert (2026-09-11).**
+**Commerce V1 · Admin Orders V1 abgeschlossen und auf Staging verifiziert (2026-09-11).**
+
+*Der Betreiber kann jetzt arbeiten.* Vor diesem Schritt landete eine bezahlte Bestellung nirgends,
+wo sie jemand sieht: `0010` entzieht die Commerce-Tabellen jeder Client-Rolle und gibt `select`
+nur über `*_select_own` zurück, also sah der Administrator — ein gewöhnlicher `authenticated`
+Nutzer — **ausschließlich seine eigenen** Bestellungen. `/admin/orders` und
+`/admin/orders/[orderNumber]` schließen das, über drei `security definer`-Funktionen, die
+`is_shop_admin()` selbst fragen (Migration `0018`).
+
+*Die Übersicht sortiert nach Arbeit, nicht nach Datum:* zu prüfen → zu versenden → offen →
+erledigt. Die Regel steht einmal, in SQL. Nur die oberste Stufe ist laut.
+
+*Was Versand ausdrücklich nicht tut.* Er bewegt **keinen Bestand, keine Reservierung, kein Geld** —
+der Verkauf wurde bei `confirm_order_payment()` gebucht. Auf Staging gemessen: `quantity` und
+`reserved` unverändert, keine zusätzliche Bewegung, `payment_attempts` und `payment_events`
+unverändert.
+
+*Vier Verweigerungen, und die dritte ist die wichtige.* Kein Administrator · nicht bezahlt ·
+**`needs_resolution`** · bereits versendet. Eine geflaggte Bestellung ist bezahlt, aber es wurde
+nichts konvertiert und kein Bestand gebucht (ADR-0050); sie zu versenden hieße, Ware
+herauszugeben, die das Journal noch als vorhanden führt. Das Flag ist hier eine **Sperre**, die
+Fulfillment niemals löscht — dafür sorgt zusätzlich der Trigger.
+
+*Der Trigger ist Defense-in-Depth, nicht die Geschäftsregel.* `orders_protect_fulfillment()`
+erlaubt genau `unfulfilled → shipped`, setzt `shipped_at` aus der Serveruhr (ein Aufrufer kann
+kein Versanddatum nennen), macht die Trackingnummer nach dem Versand unveränderlich und verbietet,
+dass Fulfillment `needs_resolution` mitverändert. Vor dem Bau geprüft: **nichts in der Datenbank
+schrieb `fulfillment_status`**, der Guard bricht also keinen Payment-, Expiry- oder Cleanup-Pfad —
+Abschnitt 4 der Runtime-Suite spielt beide nach.
+
+*Trackingnummer:* optional, roh gespeichert, nur getrimmt. Keine Carrier-Erkennung, keine
+Formatprüfung, keine URL — Carrier widersprechen sich, und ein Validator, der DHL kennt, würde
+Hermes ablehnen.
+
+*Staging-verifiziert.* `0018` angewandt, Runtime-Suite **8/8** (jeder Abschnitt legt seine eigene
+Fixture an und rollt zurück), dazu ein manueller Browser-Smoke mit zwei echten Fixtures:
+`SI-2026-001040` versandbereit, `SI-2026-001041` über den Late-Payment-Pfad erzeugt und damit
+gesperrt. Reihenfolge, rotes Banner, gesperrter Versand und verschwundener Button bestätigt.
+
+**Noch nicht gebaut:** Storno, Retoure, Teilversand, `completed`, Carrier-APIs, Rechnung,
+Mailversand.
+
+---
+
+**Zuvor: Phase B2.4 (2026-09-11).**
 
 *Die Kasse bezahlt jetzt.* Nach `create_order()` ruft die Anwendung selbst `create-payment` auf
 und leitet zur Stripe Hosted Checkout Session weiter — keine Dev-Harness mehr. Der Button heißt
@@ -31,6 +75,24 @@ sind der größere Teil des Shops. `0017` ist der fehlende Leser: `stable`, vier
 keine IDs, kein `is_paid`, kein `currency`. Autorisierung **ruft `authorize_order_payment()` aus
 `0013` auf statt sie zu kopieren**. Unbekannte und unautorisierte Bestellung liefern dasselbe
 leere Ergebnis — die Antwort unterscheidet nichts.
+
+> ### `SI-2026-001022` — die Referenzbestellung, und warum sie jetzt „versendet" ist
+>
+> Sie bleibt die **historische erste echte Stripe-E2E-Referenz**. Alles, was sie dazu macht, ist
+> unverändert: der Zahlungsversuch, die `cs_test_…`-Session, `payment_succeeded`, `paid_at`, die
+> konvertierte Reservierung und die eine `sale_skyisles`-Bewegung.
+>
+> Am 2026-09-11 wurde sie beim Admin-Orders-Smoke **zusätzlich** über die Oberfläche als versendet
+> markiert — ein Klick auf die falsche Bestellung. **Das ist kein Datenfehler und wird nicht
+> korrigiert.** Der Versand hat nachweislich weder Bestand noch Geld bewegt: `quantity` und
+> `reserved` unverändert, keine zusätzliche Bewegung, `payment_attempts` und `payment_events`
+> unverändert.
+>
+> Zurückgedreht wird nichts. `orders_protect_fulfillment()` verweigert `shipped → unfulfilled` und
+> jede Tracking-Änderung — genau wie entworfen —, und `order_events` ist append-only: das
+> `order_shipped`-Ereignis bliebe ohnehin stehen. Eine Zeile zurückzusetzen, deren Journal den
+> Versand weiter zeigt, wäre unehrlicher als der Ist-Zustand. **Kein Trigger wird dafür
+> abgeschaltet, keine Staging-Historie manipuliert.**
 
 *Zwei Browser-Bugs, im manuellen Smoke gefunden.* Back von Stripe stellte das Dokument aus dem
 **bfcache** wieder her, React-State eingeschlossen: `redirecting` blieb `true`, der Button blieb
@@ -174,7 +236,9 @@ Secret entgegen, `anon` kann nichts lesen, schreiben, ändern, löschen oder aus
 ausgeführt und griffen an ihren Wächtern. Bestellungen, Reservierungen, Versuche und Events stehen
 weiterhin auf 0.
 
-> **Nächster Schritt:** Rollout nach Production als eigener Release-Schritt — Migration `0017`,
+> **Nächster Schritt:** Transactional Mail (Resend, `mail.skyisles.app`) — Zahlungs- und
+> Versandbestätigung plus interne `needs_resolution`-Warnung. Danach Rechtstexte, dann der Rollout
+> nach Production als eigener Release-Schritt — Migrationen `0017` und `0018`,
 > beide Edge Functions, Webhook-Endpoint, Live-Secret, `STRIPE_LIVEMODE=true`, `ALLOWED_ORIGINS`
 > mit der echten Origin, `pg_cron`. Davor fehlen weiterhin Mailversand und die Rechtstexte.
 

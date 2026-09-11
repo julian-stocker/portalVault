@@ -26,6 +26,14 @@ export default async function AdminPage() {
 
       <div className="mt-8 flex flex-col gap-3">
         <Link
+          href="/admin/orders?open=1"
+          className="rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
+        >
+          <span className="font-medium">{de.admin.orders.title}</span>
+          <span className="mt-1 block text-sm text-muted">{de.admin.orders.linkHint}</span>
+        </Link>
+
+        <Link
           href="/admin/catalog"
           className="rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
         >

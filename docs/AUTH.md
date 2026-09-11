@@ -14,6 +14,7 @@ PortalVault speichert **niemals** ein Passwort, einen Hash oder ein Reset-Token.
 |---|---|---|
 | Registrierung mit E-Mail + Passwort | ✅ | |
 | E-Mail-Verifizierung | ✅ | Login erst nach Bestätigung |
+| Bestellverwaltung im Adminbereich | ✅ | `shop_admins` + `is_shop_admin()`, Migration `0018` |
 | Login / Logout | ✅ | |
 | Session-Verwaltung | ✅ | Cookie-basiert, `@supabase/ssr` |
 | Passwort vergessen / zurücksetzen | ✅ | |

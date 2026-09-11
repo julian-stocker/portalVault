@@ -977,6 +977,18 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   **Auf Staging angewandt und verifiziert am 2026-09-09, auf Production angewandt und dort mit
   einem realen Checkout-/Reservierungs-Smoke verifiziert.**
 
+- Achtzehnte Migration: `0018_admin_orders.sql` — **Bestellverwaltung.** Eine Spalte
+  (`orders.tracking_number`, roh gespeichert, getrimmt, höchstens 64 Zeichen und nur auf einer
+  versendeten Bestellung), zwei CHECKs (`shipped_at` passt zum Versandzustand), ein Trigger
+  (`orders_protect_fulfillment()`: genau `unfulfilled → shipped`, `shipped_at` aus der Serveruhr,
+  Tracking nach dem Versand unveränderlich, Fulfillment darf `needs_resolution` nicht mitändern)
+  und drei Funktionen: `admin_orders()` (Liste, sortiert nach Aufmerksamkeit), `admin_order()`
+  (ein Dokument als `jsonb`) und `admin_mark_order_shipped()`. Alle drei fragen
+  `is_shop_admin()` im eigenen Rumpf. Die Projektionen enthalten **kein** `client_hash`, kein
+  `payment_token_hash`, kein `request_id` und keine interne ID. Versand schreibt keine
+  Bestandsbewegung, keine Reservierung und keine Zahlungsspalte.
+  **Auf Staging angewandt und verifiziert am 2026-09-11, auf Production NICHT angewandt.**
+
 - Siebzehnte Migration: `0017_order_payment_state.sql` — **eine lesende Funktion, sonst nichts.**
   `order_payment_state(p_order_number, p_token)` gibt vier Spalten zurück (`order_number`,
   `payment_status`, `needs_resolution`, `total_amount`) und ist die einzige Funktion der

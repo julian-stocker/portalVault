@@ -439,6 +439,19 @@ node --env-file=.env.staging tools/verify-commerce.mts
 > sie in einem `finally` wieder ab. Vor dem ersten Lauf prüfen, dass die URL
 > in `.env.staging` wirklich das Staging-Projekt benennt.
 
+**Staging-Administrator.** `skyisles-staging` hat **genau einen** Auth-Nutzer, und derselbe Account
+ist seit 2026-09-11 der dauerhafte Staging-Administrator (`shop_admins`, Notiz
+`staging admin for Admin Orders V1 smoke, 2026-09-11`). Gesetzt über den vorgesehenen Weg:
+
+```bash
+node --env-file=.env.staging tools/grant-admin.mts --list
+node --env-file=.env.staging tools/grant-admin.mts --email <adresse> --apply
+```
+
+Ohne diesen Eintrag antwortet `/admin` mit 404 und `admin_orders()` mit
+`insufficient_privilege` — beides korrekt, aber es macht jeden Admin-Smoke unmöglich. **Auf
+Production wird die Rolle unabhängig davon vergeben; die beiden Projekte teilen keine Nutzer.**
+
 **Regeln, die Staging und Production trennen.** Der Service-Role-Key bekommt
 nie ein `NEXT_PUBLIC_`-Präfix und geht nie nach Vercel. Stripe-Testschlüssel
 liegen ausschließlich in den Edge-Function-Secrets des Staging-Projekts,

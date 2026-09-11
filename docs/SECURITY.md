@@ -837,6 +837,28 @@ nichts Neues mehr beantwortet. Getrennt davon, unter eigenem Schlüssel und ausd
 Geheimnis, liegen Bestell-ID und -nummer: ohne sie wäre eine Bestellung nach einem Browser-Back
 ohne `?order=` unerreichbar, obwohl sie Bestand hält.
 
+### Was der Administrator über Bestellungen sehen darf (Admin Orders V1)
+
+Drei Funktionen aus `0018`, alle `security definer` mit gepinntem `search_path`, alle mit
+`is_shop_admin()` **im eigenen Rumpf** — nicht in einem Wrapper, weil `public-surface.test.ts`
+genau daran erkennt, was öffentliche Fläche ist.
+
+**Der Administrator sieht hier echte Kundendaten**, und das ist beabsichtigt: E-Mail-Adresse und
+vollständige Lieferadresse sind das Minimum, um ein Paket zu packen. Was er **nicht** sieht:
+`client_hash` (der Missbrauchs-Fingerabdruck), `payment_token_hash` (die Zahlungs-Capability),
+`request_id` und jede interne ID. Keines davon hilft beim Versand, und je weniger Orte sie haben,
+desto besser.
+
+**Die Anwendung greift nicht an den Funktionen vorbei.** Kein `.from("orders")` in einer
+Admin-Route — das wäre besonders tückisch, weil RLS dem Administrator seine *eigenen* Bestellungen
+liefern würde und es funktionierend aussähe. Ein Test verbietet es. Kein Service-Role-Key ist
+beteiligt; die Session ist die des Administrators.
+
+**Versand verändert nichts als den Versandzustand.** Kein Bestand, keine Reservierung, keine
+Zahlungsspalte, und niemals `needs_resolution` — das Flag ist eine Sperre, keine Kachel zum
+Wegklicken. Der Trigger `orders_protect_fulfillment()` setzt das durch, unabhängig davon, wer
+schreibt.
+
 ---
 
 ## 7. Datenschutz (DSGVO)
