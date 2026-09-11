@@ -2,6 +2,34 @@
 import type { ReactNode } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
+import type { AuthContext } from "@/lib/auth/context";
+import { de } from "@/lib/i18n/de";
+
+const CONTEXT_NOTE: Record<AuthContext, string> = {
+  collect: de.auth.context.collect,
+  collection: de.auth.context.collection,
+  account: de.auth.context.account,
+  cart: de.auth.context.cart,
+  checkout: de.auth.context.checkout,
+};
+
+/**
+ * One sentence saying what the visitor was doing a moment ago (F11).
+ *
+ * The auth screens carried the intent perfectly and never mentioned it: a
+ * visitor taps a figure, the card links to `/login?next=…&figure=SKY-0042`
+ * (ADR-0027), and a bare e-mail field arrives. This is the missing sentence
+ * and nothing more — `null` renders nothing at all, which is every screen
+ * reached without a `next`.
+ */
+export function AuthContextNote({ context }: { context: AuthContext | null }) {
+  if (context === null) return null;
+  return (
+    <p className="rounded-sky-md bg-accent-subtle/70 px-3 py-2.5 text-sm leading-relaxed text-foreground ring-1 ring-gold-line">
+      {CONTEXT_NOTE[context]}
+    </p>
+  );
+}
 
 export function Field({
   label,

@@ -7,6 +7,51 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**UX-Beta-Gate Phase 1 + 2 gebaut, auf Staging geprüft (2026-09-11).** Noch nicht committet.
+
+*Die Plattform hat jetzt einen Eingang.* Der Review vom 11.09. hat keine Feature-Lücke gefunden,
+sondern eine Eingangslücke: sorgfältig gebaute Oberflächen ohne Tür, ohne Schild und ohne
+Fußzeile. Diese Phase baut genau diese drei Dinge — und **ADR-0025 bleibt unangetastet**: `/` ist
+weiterhin der Katalog, es gibt keine Landingpage (ADR-0058).
+
+*Zehn Punkte, und keiner davon ändert eine Geschäftsregel.* Fußzeile (auf allen öffentlichen und
+angemeldeten Seiten, **nicht** im Adminbereich) · `/ueber-skyisles` · Nutzenversprechen und zwei
+CTAs im Katalog-Hero, ausschließlich für Ausgeloggte · kontextabhängige Erklärung auf `/login`
+und `/register` · Vertrauensblock im Checkout mit Stripe beim Namen · feldgenaue
+Checkout-Validierung · `needs_resolution` als Zähler auf `/admin` und als Badge in der Navigation
+· Rückfrage vor „Als versendet markieren" · `/shop` · Token-Drift behoben.
+
+*Was die Fußzeile bewusst nicht enthält.* Impressum, Datenschutz, Widerruf, AGB und Kontakt sind
+**nicht verlinkt**, weil es sie nicht gibt — ein toter Link ist schlechter als ein fehlender. Die
+Plätze stehen als Liste in `site-footer.tsx`; `beta-surfaces.test.ts` schlägt fehl, sobald einer
+davon verlinkt wird, ohne dass die Seite existiert.
+
+*Die Rückfrage vor dem Versand ist die Antwort auf einen Fehler, der bereits passiert ist.*
+`SI-2026-001022` wurde beim Smoke-Test durch einen Klick auf die falsche Zeile versendet markiert,
+und `orders_protect_fulfillment()` verweigert korrekterweise die Rücknahme. Die Rückfrage nennt
+jetzt Bestellnummer und Empfänger und sagt, dass nichts davon zurückgeht. **Am Trigger, an
+`admin_mark_order_shipped()` und an `shipBlocker()` wurde nichts geändert.**
+
+*`/shop` ist eine Sicht, kein zweiter Shop.* Dieselben zwei Aufrufe wie `/`, verbunden in
+`shopEntries()`. Keine Migration, keine RPC, keine Stückzahl, und verborgene Figuren fallen dort
+heraus, wo sie überall herausfallen.
+
+*Was diese Phase ausdrücklich NICHT tut.* **Keine Bestellmail.** Der Review nennt den Kundenbeleg
+als P0, und er bleibt offen: Mailversand ist ein eigenes Release-Gate (ADR-0018, ROADMAP V1.7),
+und ein improvisierter Versand wäre schlechter als keiner. Ebenfalls nicht: Bestellhistorie im
+Konto, Onboarding, globaler „Fehlen"-Modus, Admin-Vokabular, N+1 im Lager, SEO, `noindex`.
+
+*Staging-verifiziert, nicht browser-verifiziert.* `npm run check` grün, **1641 Tests in 75
+Dateien** (vorher 1525/66). Gegen `skyisles-staging` per HTTP geprüft: alle neuen Routen
+antworten `200`, `/impressum` und `/kontakt` weiterhin `404`, Fußzeile auf fünf Seiten vorhanden,
+Gast-Hero mit Nutzenversprechen und beiden CTAs, die drei Login-Kontexte einzeln durchgespielt,
+`noindex` unverändert. **Browser-Automation stand nicht zur Verfügung** — es gibt keine visuelle
+Prüfung und keinen Mobile-Smoke.
+
+**Production unverändert.** Keine Migration, kein Deployment, kein Commit.
+
+---
+
 **Commerce V1 · Admin Orders V1 abgeschlossen und auf Staging verifiziert (2026-09-11).**
 
 *Der Betreiber kann jetzt arbeiten.* Vor diesem Schritt landete eine bezahlte Bestellung nirgends,

@@ -20,6 +20,92 @@ export const de = {
       "Katalog, Marktpreise und persönliche Sammlungsverwaltung für Skylanders.",
   },
 
+  /**
+   * Die Fußzeile (UX-Beta, F1).
+   *
+   * ES WERDEN NUR ZIELE VERLINKT, DIE ES GIBT. Impressum, Datenschutz,
+   * Widerrufsbelehrung und AGB existieren noch nicht; ein Link darauf wäre
+   * tot, und eine Seite namens „Impressum" ohne Impressum wäre schlimmer als
+   * keine. Die Plätze stehen in `site-footer.tsx` als Liste im Kommentar und
+   * werden aktiv, sobald die Texte da sind — das ist ein eigenes Release-Gate
+   * (docs/ROADMAP.md, V1.7).
+   *
+   * Ebenfalls bewusst nicht vorhanden: ein Kontaktpunkt. Es gibt noch keine
+   * entschiedene Adresse, und eine erfundene wäre ein Kanal, der ins Leere
+   * läuft.
+   */
+  footer: {
+    /** Zugängliche Bezeichnung der Fußzeilen-Navigation. */
+    nav: "Fußzeile",
+    /** Eine sachliche Zeile darüber, was SkyIsles ist. Kein Werbetext. */
+    positioning:
+      "Katalog, Marktwerte und kostenlose Sammlungsverwaltung für Skylanders — " +
+      "und ein kleiner Shop mit ausgewählten Figuren.",
+    catalog: "Katalog",
+    shop: "Shop",
+    about: "Über SkyIsles",
+    copyright: (year: number) => `© ${year} SkyIsles`,
+  },
+
+  /**
+   * „Über SkyIsles" — der eigene Platz für erklärende Inhalte, den ADR-0025
+   * ausdrücklich vorgesehen und den es bis zur UX-Beta-Phase nicht gab.
+   *
+   * Sachlich und sammlerorientiert. Keine erfundene Unternehmensgeschichte,
+   * keine Behauptung über Team, Gründung oder Größe, keine Zahl, die nicht aus
+   * der Datenbank kommt — die Figurenzahl wird zur Laufzeit gezählt.
+   */
+  about: {
+    title: "Über SkyIsles",
+    lead:
+      "SkyIsles ist eine Plattform für Skylanders-Sammler: ein vollständiger Katalog mit " +
+      "Marktwerten, eine kostenlose Sammlungsverwaltung dazu — und ein kleiner eigener Shop.",
+
+    catalogHeading: "Der Katalog",
+    /**
+     * Die Zahl kommt zur Laufzeit aus der Datenbank, kann also auch 1 sein —
+     * auf Staging ist sie das. Deshalb die Singularform, wie überall sonst
+     * auch (`catalog.figureCount`): eine Zahl aus der Datenbank in einen Satz
+     * zu setzen heißt, beide Fälle zu schreiben.
+     */
+    catalogBody: (figures: number, formatted: string) =>
+      (figures === 1
+        ? `Die ${formatted} Sammelfigur aus den Skylanders-Spielen, mit Bild, Element, Serie `
+        : `Alle ${formatted} Sammelfiguren aus den sechs Skylanders-Spielen, mit Bild, Element, Serie `) +
+      "und einem Referenz-Marktwert. Der Katalog ist ohne Konto vollständig nutzbar: Suche, " +
+      "Serien, Produktgruppen und jede Figurenseite stehen offen.",
+
+    collectionHeading: "Die Sammlung",
+    collectionBody:
+      "Mit einem kostenlosen Konto wird aus dem Katalog ein Sammlungstracker: Eine Figur " +
+      "antippen heißt „habe ich“. SkyIsles zeigt dann, wie weit jede Serie ist, was noch fehlt " +
+      "und was die Sammlung nach den hinterlegten Marktwerten wert ist.",
+    collectionFree: "Die Sammlungsverwaltung ist und bleibt kostenlos.",
+
+    shopHeading: "Der Shop",
+    shopBody:
+      "SkyIsles verkauft ausgewählte Figuren selbst — lose oder originalverpackt, jeweils " +
+      "einzeln geprüft. Es ist kein Marktplatz: Es gibt genau einen Verkäufer, und das ist " +
+      "SkyIsles. Der Versand erfolgt derzeit innerhalb Deutschlands.",
+
+    togetherHeading: "Warum beides zusammengehört",
+    togetherBody:
+      "Sammlung und Shop sind dieselbe Plattform, nicht zwei Angebote nebeneinander. Wer im " +
+      "Katalog auf „Fehlen“ filtert, sieht sofort, welche der fehlenden Figuren SkyIsles gerade " +
+      "liefern kann. Der Tracker funktioniert aber vollständig ohne jeden Kauf — das ist der " +
+      "Punkt, nicht das Nebenprodukt.",
+
+    /** Marktwert ≠ Shoppreis. Der Unterschied steht sonst nur auf Karten. */
+    pricesHeading: "Marktwert und Shoppreis",
+    pricesBody:
+      "Auf jeder Figur steht ein Marktwert: eine Referenz dafür, was das Stück ungefähr wert " +
+      "ist. Das ist kein Angebot und kein Versicherungswert. Was SkyIsles für ein Exemplar " +
+      "verlangt, steht getrennt davon und nur dort, wo tatsächlich etwas verfügbar ist.",
+
+    toCatalog: "Zum Katalog",
+    toShop: "Zum Shop",
+  },
+
   catalog: {
     title: "Katalog",
     searchLabel: "Figur suchen",
@@ -30,8 +116,30 @@ export const de = {
     /** Zweite Navigationsebene: Produktgruppe innerhalb der Serie (ADR-0041). */
     groupNav: "Art wählen",
     groupAll: "Alle",
-    /** Untertitel unter dem Wortzeichen im Katalogkopf. */
+    /**
+     * Untertitel im Katalogkopf — für jemanden, der bereits angemeldet ist.
+     *
+     * Für Ausgeloggte steht stattdessen `valueProp` da: wer das Produkt kennt,
+     * braucht keine Erklärung, sondern eine ruhige Arbeitsüberschrift.
+     */
     intro: "Entdecke alle Figuren aus den Skylands.",
+    /**
+     * Was SkyIsles ist, in einem Satz — nur für ausgeloggte Besucher (UX-Beta,
+     * F7). `/` bleibt der Katalog (ADR-0025); dies ist die Zeile, die dort
+     * bisher fehlte, keine Landingpage.
+     *
+     * Nennt die drei Dinge, die es gibt, in der Reihenfolge ihrer Wichtigkeit:
+     * der Katalog, die kostenlose Sammlung, der eigene Shop.
+     */
+    valueProp:
+      "Alle Skylanders mit Marktwerten, eine kostenlose Sammlungsverwaltung — " +
+      "und ausgewählte Figuren direkt von SkyIsles.",
+    /** Die eine Aktion, die ein neuer Besucher hier hat. */
+    ctaPrimary: "Sammlung starten — kostenlos",
+    /** Führt auf die Seite, die ADR-0025 als „eigenen Platz" vorgesehen hat. */
+    ctaSecondary: "Was ist SkyIsles?",
+    /** Dritter, leiser Weg: das Angebot, ohne den Katalog zu verlassen. */
+    ctaShop: "Zum Shop",
     /** Suche über alle Serien: Trefferzahl je Serie und insgesamt. */
     hitCount: (count: number) => (count === 1 ? "1 Treffer" : `${count} Treffer`),
     searchTotal: (count: number) =>
@@ -297,6 +405,27 @@ export const de = {
       openOnly: "Nur offene",
       all: "Alle",
 
+      /**
+       * Was auf der Startseite des Adminbereichs und am Navigationspunkt steht
+       * (UX-Beta, F5).
+       *
+       * Bis hierher war `needs_resolution` nur zu sehen, wenn der Betreiber von
+       * sich aus `/admin/orders` öffnete — der eine Zustand im System, der Geld
+       * schützt, hatte keinen Weg zum Menschen. Gezählt wird aus den Daten, die
+       * `admin_orders(p_open_only => true)` ohnehin liefert: keine neue Abfrage,
+       * kein Polling, keine Benachrichtigungsinfrastruktur.
+       */
+      needsResolutionCount: (n: number) =>
+        n === 1 ? "1 Bestellung muss geprüft werden" : `${n} Bestellungen müssen geprüft werden`,
+      toShipCount: (n: number) =>
+        n === 1 ? "1 Bestellung ist zu versenden" : `${n} Bestellungen sind zu versenden`,
+      nothingOpen: "Nichts offen.",
+      /** Am Navigationspunkt „Admin", nur wenn geprüft werden muss. */
+      badgeLabel: (n: number) =>
+        n === 1
+          ? "1 Bestellung muss geprüft werden"
+          : `${n} Bestellungen müssen geprüft werden`,
+
       /** Spalten der Übersicht. */
       number: "Bestellnummer",
       placedAt: "Datum",
@@ -364,6 +493,31 @@ export const de = {
       trackingNumber: "Trackingnummer",
       noTracking: "Keine Trackingnummer hinterlegt",
       trackingTooLong: "Diese Trackingnummer ist zu lang.",
+      /**
+       * Die Rückfrage vor der einzigen unumkehrbaren Aktion des Systems
+       * (UX-Beta, F6).
+       *
+       * `orders_protect_fulfillment()` verweigert `shipped → unfulfilled` und
+       * jede spätere Trackingänderung, und `order_events` ist append-only —
+       * ein Klick daneben lässt sich nicht zurücknehmen. Genau das ist am
+       * 2026-09-11 mit `SI-2026-001022` passiert (PROJECT_STATUS.md).
+       *
+       * Die Rückfrage nennt Nummer und Empfänger, weil das die beiden Angaben
+       * sind, an denen ein Mensch merkt, dass er die falsche Zeile offen hat.
+       * Am Trigger ändert sich nichts.
+       */
+      confirmTitle: "Wirklich als versendet markieren?",
+      confirmFor: (number: string, recipient: string) =>
+        `Bestellung ${number} an ${recipient}.`,
+      confirmWithTracking: (tracking: string) => `Trackingnummer: ${tracking}`,
+      confirmWithoutTracking: "Ohne Trackingnummer.",
+      confirmIrreversible:
+        "Das lässt sich nicht zurücknehmen — auch die Trackingnummer ist danach nicht mehr " +
+        "änderbar.",
+      confirmYes: "Ja, als versendet markieren",
+      confirmNo: "Abbrechen",
+      shipSucceeded: (number: string) => `Bestellung ${number} ist als versendet markiert.`,
+
       shipRefused:
         "Diese Bestellung kann nicht als versendet markiert werden. Bitte prüfe Zahlung und " +
         "Status oben.",
@@ -501,6 +655,36 @@ export const de = {
     addAnotherFor: (name: string, price: string) =>
       `${name} für ${price} noch einmal in den Warenkorb legen`,
     offerHeading: "Angebot",
+
+    /**
+     * Die Shop-Oberfläche (UX-Beta, F8).
+     *
+     * Sie beantwortet die eine Frage, die der Katalog nicht beantworten kann:
+     * *was verkauft SkyIsles gerade?* Kein zweiter Datenbestand — dieselbe
+     * `shop_offers()`-Projektion, dieselben Karten, dieselben Aktionen.
+     *
+     * Es steht nirgends eine Stückzahl. „Verfügbar" ist ein Ja/Nein, und der
+     * Bestand bleibt in der Datenbank (docs/SECURITY.md, Migration 0006).
+     */
+    page: {
+      title: "Shop",
+      heading: "Im Shop von SkyIsles",
+      /** Sagt, wer verkauft. Keine Lieferzeit — es ist keine entschieden. */
+      intro:
+        "Diese Figuren verkauft SkyIsles gerade selbst — kein Marktplatz, ein Verkäufer. " +
+        "Versand innerhalb Deutschlands, ab 75 € Warenwert versandkostenfrei.",
+      count: (n: number) => (n === 1 ? "1 Figur im Angebot" : `${n} Figuren im Angebot`),
+      searchLabel: "Im Angebot suchen",
+      /** Kein Treffer, obwohl es Angebote gibt. */
+      noHits: "Keine Figur im Angebot passt dazu.",
+      noHitsHint: "Versuche einen anderen Namen oder setze die Suche zurück.",
+      resetSearch: "Suche zurücksetzen",
+      /** Gar nichts gelistet oder alles ausverkauft — für Besucher dasselbe. */
+      empty: "Derzeit ist nichts im Angebot.",
+      emptyHint:
+        "Der Bestand wechselt. Der Katalog steht unabhängig davon vollständig offen.",
+      toCatalog: "Zum ganzen Katalog",
+    },
   },
 
   cart: {
@@ -585,8 +769,67 @@ export const de = {
     submitting: "Bestellung wird angelegt …",
     redirecting: "Weiterleitung zur Zahlung …",
     paymentFollows:
-      "Im nächsten Schritt wirst du zur gesicherten Zahlungsseite unseres Zahlungsdienstleisters " +
-      "weitergeleitet. Die Ware wird währenddessen für dich vorgemerkt.",
+      "Im nächsten Schritt wirst du zur gesicherten Zahlungsseite von Stripe weitergeleitet. " +
+      "Die Ware wird währenddessen für dich vorgemerkt.",
+
+    /**
+     * Der Vertrauensblock direkt über dem zahlungspflichtigen Knopf
+     * (UX-Beta, F2).
+     *
+     * Jeder Satz hier ist nachprüfbar. Ausdrücklich NICHT enthalten:
+     *
+     *   Lieferzeit    es ist keine entschieden, und eine erfundene Zusage wäre
+     *                 die erste Sache, an der ein Kunde SkyIsles misst.
+     *   Kontakt       es gibt noch keine entschiedene Adresse (siehe `footer`).
+     *   Rechtstexte   eigenes Release-Gate; hier steht nur, dass sie folgen.
+     */
+    trust: {
+      heading: "Bevor du bestellst",
+      /** Wer verkauft. Die Frage, die das Produkt bisher nirgends beantwortet. */
+      seller:
+        "Verkäufer ist SkyIsles. Alle Artikel kommen direkt von uns — SkyIsles ist kein " +
+        "Marktplatz und vermittelt nicht zwischen Händlern.",
+      sellerLabel: "Verkäufer",
+      shippingLabel: "Versand",
+      /** Nur was feststeht: Land, gewählte Art, Betrag. Keine Dauer. */
+      shippingValue: (method: string, amount: string) => `${method} · ${amount} · Deutschland`,
+      /*
+       * Deliberately not "sobald die Zahlung bestätigt ist": everything a
+       * customer reads before the status page has to stay free of the phrase
+       * that only `order_payment_state()` may produce, even in a conditional.
+       * `checkout.test.ts` enforces that as a blunt substring rule, and blunt
+       * is the right shape for it.
+       */
+      shippingNote: "Verschickt wird, sobald der Zahlungseingang feststeht.",
+      paymentLabel: "Zahlung",
+      paymentValue: "Stripe",
+      paymentNote:
+        "Mit dem Bestellen wirst du zu Stripe weitergeleitet und bezahlst dort. SkyIsles " +
+        "bekommt und speichert keine Kartendaten.",
+      /*
+       * KEIN WIDERRUFS-/AGB-EINTRAG.
+       *
+       * Eine frühere Fassung stand hier und sagte, die Texte „werden vor der
+       * öffentlichen Beta ergänzt". Das ist eine Entwicklernotiz, die in der
+       * Kasse eines echten Kunden gelandet wäre — und ein Shop, der seinen
+       * eigenen Bauzustand kommentiert, wirkt unfertiger als einer, der
+       * schweigt. Sobald Widerrufsbelehrung und AGB existieren, kommen sie als
+       * Link hierher; bis dahin steht an dieser Stelle nichts.
+       */
+    },
+
+    /**
+     * Feldbezogene Fehler (UX-Beta, F4).
+     *
+     * `errorInvalid` verspricht seit jeher „die markierten Angaben" — bis
+     * jetzt wurde nichts markiert. Diese Texte stehen am jeweiligen Feld; die
+     * Zuordnung macht `src/lib/commerce/field-errors.ts`, und zwar als
+     * Spiegel von `validateDraft()`, nicht als zweite Regel.
+     */
+    fieldError: {
+      required: "Bitte ausfüllen.",
+      email: "Bitte gib eine gültige E-Mail-Adresse ein.",
+    },
 
     /** Die Bestellung existiert, nur der Start der Zahlung ist gescheitert. */
     payment: {
@@ -695,9 +938,35 @@ export const de = {
   },
 
   auth: {
+    /**
+     * Warum jemand gerade hier steht (UX-Beta, F11).
+     *
+     * Abgeleitet aus dem vorhandenen `next`-Parameter — es gibt keinen neuen
+     * Mechanismus und keinen neuen Redirect. Der Satz erklärt nur, was der
+     * Besucher eine Sekunde vorher tun wollte.
+     *
+     * `collect` ist der teuerste Einstieg im Produkt: jemand hat auf eine
+     * Figur getippt und landet auf einem Formular. Nur dort wird „Konto
+     * erstellen" zusätzlich als eigene Aktion angeboten.
+     */
+    context: {
+      collect:
+        "Du wolltest eine Figur in deine Sammlung legen. Dafür braucht SkyIsles ein Konto — " +
+        "es ist kostenlos.",
+      collection: "Deine Sammlung gehört zu deinem Konto. Melde dich an, um sie zu öffnen.",
+      account: "Melde dich an, um dein Konto zu verwalten.",
+      cart: "Dein Warenkorb bleibt erhalten. Ein Konto brauchst du dafür nicht.",
+      checkout:
+        "Zum Bestellen brauchst du kein Konto. Mit einem Konto findest du deine Bestellungen " +
+        "später wieder.",
+    },
     register: {
       title: "Konto erstellen",
       intro: "Lege ein Konto an, um deine Sammlung zu erfassen.",
+      /** Ersetzt `intro`, wenn jemand gerade eine Figur sammeln wollte. */
+      introCollect:
+        "Mit einem kostenlosen Konto merkt sich SkyIsles, welche Figuren du besitzt — und " +
+        "zeigt dir, was in jeder Serie noch fehlt.",
       submit: "Konto erstellen",
       haveAccount: "Du hast schon ein Konto?",
       signInLink: "Anmelden",
@@ -708,6 +977,12 @@ export const de = {
       forgot: "Passwort vergessen?",
       noAccount: "Noch kein Konto?",
       registerLink: "Konto erstellen",
+      /**
+       * Dieselbe Zielseite, stärker angeboten: wer gerade eine Figur sammeln
+       * wollte, hat mit hoher Wahrscheinlichkeit noch kein Konto (F11).
+       */
+      registerAction: "Kostenloses Konto erstellen",
+      orSignIn: "Du hast schon ein Konto? Melde dich hier an.",
     },
     verifyEmail: {
       title: "Prüfe dein Postfach",
@@ -787,18 +1062,6 @@ export const de = {
     },
   },
 
-  home: {
-    status: "Im Aufbau",
-    intro:
-      "PortalVault entsteht gerade. Der öffentliche Katalog, Benutzerkonten und die persönliche Sammlung folgen Schritt für Schritt.",
-    nextUp: "Als Nächstes geplant",
-    steps: [
-      "Datenbankmodell und Zugriffsregeln einrichten",
-      "Katalog mit 600 Skylandern importieren",
-      "Katalog, Suche und Figurenseiten",
-      "Benutzerkonten und persönliche Sammlung",
-    ],
-  },
 } as const;
 
 export type Texts = typeof de;

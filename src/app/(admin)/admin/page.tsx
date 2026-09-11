@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import { ShopSettings } from "@/components/admin/shop-settings";
 import { fetchShopSettings } from "@/lib/admin/inventory";
+import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { hasOpenWork } from "@/lib/admin/orders";
 import { fetchAdminCategories } from "@/lib/admin/queries";
 import { de } from "@/lib/i18n/de";
 
@@ -17,8 +19,15 @@ export const metadata: Metadata = { title: de.admin.title };
  * a thing to change.
  */
 export default async function AdminPage() {
-  const [categories, settings] = await Promise.all([fetchAdminCategories(), fetchShopSettings()]);
+  const [categories, settings, openOrders] = await Promise.all([
+    fetchAdminCategories(),
+    fetchShopSettings(),
+    // Memoised per request — the layout above already counted these rows.
+    fetchOpenOrderCounts(),
+  ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
+  const copy = de.admin.orders;
+  const flagged = openOrders.needsResolution > 0;
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pt-8 pb-6 md:pt-12">
@@ -27,10 +36,45 @@ export default async function AdminPage() {
       <div className="mt-8 flex flex-col gap-3">
         <Link
           href="/admin/orders?open=1"
-          className="rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
+          className={
+            "rounded-sky-lg bg-surface/80 px-5 py-4 hover:ring-border-strong " +
+            // The same three-level tone the order list uses, so the two agree
+            // about what is loud: only a flagged order raises its voice.
+            (flagged ? "ring-2 ring-danger/70" : "ring-1 ring-border/70")
+          }
         >
-          <span className="font-medium">{de.admin.orders.title}</span>
-          <span className="mt-1 block text-sm text-muted">{de.admin.orders.linkHint}</span>
+          <span className="font-medium">{copy.title}</span>
+          {/*
+           * The two numbers, on the page the operator opens first (F5).
+           *
+           * Counted from rows `admin_orders(p_open_only => true)` already
+           * returns — no second query, no aggregate, nothing that polls. Until
+           * now a flagged order was discoverable only by opening the list on a
+           * hunch, and a flagged order is one where money has arrived, nothing
+           * was booked and shipping is locked (ADR-0050).
+           */}
+          <span className="mt-1 block text-sm">
+            {hasOpenWork(openOrders) ? (
+              <>
+                {flagged ? (
+                  <span className="font-semibold text-danger">
+                    {copy.needsResolutionCount(openOrders.needsResolution)}
+                  </span>
+                ) : null}
+                {flagged && openOrders.toShip > 0 ? (
+                  <span className="text-muted"> · </span>
+                ) : null}
+                {openOrders.toShip > 0 ? (
+                  <span className={flagged ? "text-muted" : "font-medium text-accent"}>
+                    {copy.toShipCount(openOrders.toShip)}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="text-muted">{copy.nothingOpen}</span>
+            )}
+          </span>
+          <span className="mt-1 block text-sm text-muted">{copy.linkHint}</span>
         </Link>
 
         <Link

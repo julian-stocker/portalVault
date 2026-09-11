@@ -93,6 +93,45 @@ export function attentionOf(value: number): Attention {
   }
 }
 
+/** How much work is waiting, by kind. */
+export type OpenOrderCounts = {
+  /** Paid, nothing booked, shipping locked. The number that must be seen. */
+  needsResolution: number;
+  /** Paid and unsent. Ordinary work. */
+  toShip: number;
+};
+
+export const NO_OPEN_ORDERS: OpenOrderCounts = { needsResolution: 0, toShip: 0 };
+
+/**
+ * The two numbers the operator needs before they have opened anything.
+ *
+ * Counted from the rows `admin_orders(p_open_only => true)` already returns —
+ * that call filters to `attention <= 1`, which is exactly these two buckets.
+ * No second query, no aggregate function, no notification table and nothing
+ * that polls: the count is computed on the request that renders the page.
+ *
+ * Anything outside the two buckets is ignored rather than lumped in, so a
+ * caller that passes an unfiltered list gets the same answer.
+ */
+export function openOrderCounts(rows: readonly { attention: number }[]): OpenOrderCounts {
+  let needsResolution = 0;
+  let toShip = 0;
+
+  for (const row of rows) {
+    const attention = attentionOf(row.attention);
+    if (attention === "needs_resolution") needsResolution += 1;
+    else if (attention === "to_ship") toShip += 1;
+  }
+
+  return { needsResolution, toShip };
+}
+
+/** Is there anything at all to do? Decides whether a panel appears. */
+export function hasOpenWork(counts: OpenOrderCounts): boolean {
+  return counts.needsResolution > 0 || counts.toShip > 0;
+}
+
 /* -------------------------------------------------------------- shipping */
 
 /** Why an order cannot be shipped, or null when it can. */

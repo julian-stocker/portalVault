@@ -17,16 +17,24 @@
 import { notFound } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
+import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { isAdmin } from "@/lib/auth/admin";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   if (!(await isAdmin())) notFound();
 
+  // Memoised per request, so the admin home page below counts the same rows
+  // without a second round trip.
+  const openOrders = await fetchOpenOrderCounts();
+
   return (
     /* No WorldZone: the admin area is a workbench, not a shop window. The
-       quiet canvas from the root layout is the right ground for a table. */
+       quiet canvas from the root layout is the right ground for a table.
+
+       No footer either: it orients visitors and offers the public and legal
+       pages, and the operator needs neither. */
     <div className="relative min-h-screen">
-      <SiteNav signedIn admin />
+      <SiteNav signedIn admin openOrders={openOrders} />
       {children}
       <NavSpacer />
     </div>

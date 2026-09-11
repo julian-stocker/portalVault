@@ -68,6 +68,7 @@ export function CatalogCard({
   visible = true,
   onVisibilityChange,
   offers = [],
+  showSeries = false,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -91,6 +92,15 @@ export function CatalogCard({
    * for the whole catalog, and a per-card lookup would be 561 requests.
    */
   offers?: readonly Offer[];
+  /**
+   * Whether the card names its game.
+   *
+   * Off by default, because the catalog always has a series selected and the
+   * label would repeat the active tab on every card. `/shop` turns it on: that
+   * grid mixes all six games, so the series is the one thing a card there
+   * cannot be assumed to share with its neighbours.
+   */
+  showSeries?: boolean;
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -225,7 +235,7 @@ export function CatalogCard({
         ownership="catalog"
         href={signInHref}
         highlighted={highlighted}
-        showSeries={false}
+        showSeries={showSeries}
         footer={footer}
       />
     );
@@ -239,7 +249,7 @@ export function CatalogCard({
       onToggle={onToggle}
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}
-      showSeries={false}
+      showSeries={showSeries}
       footer={footer}
     />
   );

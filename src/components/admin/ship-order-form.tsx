@@ -2,37 +2,70 @@
 
 import { useRef, useState } from "react";
 
+import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { markOrderShipped } from "@/lib/admin/order-actions";
-import { TRACKING_MAX_LENGTH } from "@/lib/admin/orders";
+import { normaliseTracking, TRACKING_MAX_LENGTH } from "@/lib/admin/orders";
 import { de } from "@/lib/i18n/de";
 
 /**
  * Marking one order as shipped.
  *
- * A form, a guard against a double submit, and a German sentence when the
- * database refuses. Everything that decides lives in
+ * A form, a confirmation, a guard against a double submit, and a German
+ * sentence when the database refuses. Everything that decides lives in
  * `admin_mark_order_shipped()`: administrator, paid, unflagged, unshipped.
+ *
+ * WHY THERE IS A CONFIRMATION NOW
+ *
+ * This is the only irreversible action in the product.
+ * `orders_protect_fulfillment()` allows exactly `unfulfilled → shipped`,
+ * refuses the way back, freezes the tracking number afterwards, and
+ * `order_events` is append-only — so a click on the wrong row cannot be taken
+ * back by anyone, including the database owner. That is not hypothetical: on
+ * 2026-09-11 `SI-2026-001022` was marked shipped by exactly that mistake
+ * during a smoke test (PROJECT_STATUS.md).
+ *
+ * So the confirmation names the two things a person checks when they suspect
+ * they have the wrong order open — the number and the recipient — and says
+ * plainly that it cannot be undone. **Nothing about the rule changed:** no
+ * trigger, no function, no status, no guard. The confirmation is a step in
+ * front of the same call.
  *
  * The tracking number is optional and is stored exactly as pasted, minus
  * surrounding whitespace. No carrier detection, no link, no format check —
  * carriers disagree, and a validator that knows DHL would reject Hermes.
  */
-export function ShipOrderForm({ orderNumber }: { orderNumber: string }) {
+export function ShipOrderForm({
+  orderNumber,
+  recipient,
+}: {
+  orderNumber: string;
+  /** Who the parcel is addressed to. Shown in the confirmation, nowhere else. */
+  recipient: string;
+}) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [tracking, setTracking] = useState("");
+  /** True while the confirmation stands. Nothing has been sent at this point. */
+  const [confirming, setConfirming] = useState(false);
   // Checked and set before the first await, so two taps in one frame cannot
   // both get through — the same guard the checkout uses.
   const busy = useRef(false);
 
-  async function submit(formData: FormData) {
+  const copy = de.admin.orders;
+  const normalised = normaliseTracking(tracking);
+
+  async function ship() {
     if (busy.current) return;
     busy.current = true;
     setPending(true);
     setError(null);
     try {
-      const tracking = String(formData.get("tracking") ?? "");
       const result = await markOrderShipped(orderNumber, tracking);
-      if (!result.ok) setError(result.message);
+      if (!result.ok) {
+        setError(result.message);
+        setConfirming(false);
+        return;
+      }
       // On success the server action revalidates and the page re-reads; the
       // form is replaced by the shipped state rather than told to hide.
     } finally {
@@ -41,33 +74,97 @@ export function ShipOrderForm({ orderNumber }: { orderNumber: string }) {
     }
   }
 
+  if (confirming) {
+    return (
+      <div
+        // Announced when it appears: the operator may have got here by
+        // keyboard, and a question that is only visible is not a question.
+        role="alertdialog"
+        aria-label={copy.confirmTitle}
+        className="flex flex-col gap-3 rounded-sky-md bg-surface-raised p-4 ring-1 ring-danger/60"
+      >
+        <p className="font-semibold">{copy.confirmTitle}</p>
+
+        <p className="text-sm tabular-nums">{copy.confirmFor(orderNumber, recipient)}</p>
+        <p className="text-sm text-muted tabular-nums">
+          {normalised === null
+            ? copy.confirmWithoutTracking
+            : copy.confirmWithTracking(normalised)}
+        </p>
+
+        {/* The sentence that matters. Not styled as an error — nothing has
+            gone wrong — but as the fact that makes this worth asking. */}
+        <p className="text-sm font-medium text-danger">{copy.confirmIrreversible}</p>
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void ship()}
+            disabled={pending}
+            className={`${ACTION_PRIMARY} w-auto disabled:opacity-60`}
+          >
+            {pending ? copy.shipping_ : copy.confirmYes}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirming(false)}
+            disabled={pending}
+            className={`${ACTION_NEUTRAL} w-auto disabled:opacity-60`}
+          >
+            {copy.confirmNo}
+          </button>
+        </div>
+
+        {error ? (
+          <p role="alert" className="text-sm text-danger">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <form action={submit} className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted">{de.admin.orders.trackingLabel}</span>
+        <span className="text-muted">{copy.trackingLabel}</span>
         <input
           name="tracking"
           type="text"
+          value={tracking}
+          onChange={(event) => setTracking(event.target.value)}
           maxLength={TRACKING_MAX_LENGTH}
           autoComplete="off"
-          className="rounded-sky bg-surface px-3 py-2 ring-1 ring-border/70"
+          // `rounded-sky` is not a class — the scale is `-sm`/`-md`/`-lg`, so
+          // this box rendered with square corners among rounded ones (F16).
+          // `min-h-11` is the 44 px target every other control in the product
+          // already has.
+          className="min-h-11 rounded-sky-md bg-surface px-3 py-2 ring-1 ring-border/70 focus:ring-accent"
         />
-        <span className="text-xs text-muted">{de.admin.orders.trackingHint}</span>
+        <span className="text-xs text-muted">{copy.trackingHint}</span>
       </label>
 
       {error ? (
-        <p role="alert" className="text-sm text-red-300">
+        <p role="alert" className="text-sm text-danger">
           {error}
         </p>
       ) : null}
 
+      {/*
+       * Opens the question; it does not ship. The white pill this replaces
+       * (`bg-white/90 text-black`) appeared nowhere else in the product and
+       * was the loudest thing on the page for the most dangerous action on it.
+       */}
       <button
-        type="submit"
-        disabled={pending}
-        className="w-auto self-start rounded-full bg-white/90 px-4 py-2 text-sm font-semibold text-black disabled:opacity-40"
+        type="button"
+        onClick={() => {
+          setError(null);
+          setConfirming(true);
+        }}
+        className={`${ACTION_PRIMARY} w-auto self-start`}
       >
-        {pending ? de.admin.orders.shipping_ : de.admin.orders.shipAction}
+        {copy.shipAction}
       </button>
-    </form>
+    </div>
   );
 }

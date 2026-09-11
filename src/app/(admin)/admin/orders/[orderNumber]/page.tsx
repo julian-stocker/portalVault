@@ -43,6 +43,13 @@ export default async function AdminOrderPage({
   const copy = de.admin.orders;
   const blocker = shipBlocker(order);
 
+  // What the confirmation names. Falls back to the contact address when there
+  // is no delivery address at all — never to an empty string, which would make
+  // the question read "Bestellung … an ."
+  const recipient =
+    [address?.first_name, address?.last_name].filter(Boolean).join(" ").trim() ||
+    order.customer_email;
+
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
       <Link href="/admin/orders" className="text-sm text-muted underline underline-offset-4">
@@ -56,9 +63,11 @@ export default async function AdminOrderPage({
       {/* Loud, and above everything else: this is the state in which shipping
           would hand over goods the ledger still counts as present. */}
       {order.needs_resolution ? (
-        <div className="mt-5 rounded-sky-lg bg-red-950/40 p-5 ring-2 ring-red-400/70">
-          <h2 className="font-semibold text-red-200">{copy.needsResolutionTitle}</h2>
-          <p className="mt-1 text-sm text-red-100/90">{copy.needsResolutionHint}</p>
+        // `--danger` and its tints, not raw `red-*`: the product has one
+        // colour for "this is wrong" and this is it (F9).
+        <div className="mt-5 rounded-sky-lg bg-danger/10 p-5 ring-2 ring-danger/70">
+          <h2 className="font-semibold text-danger">{copy.needsResolutionTitle}</h2>
+          <p className="mt-1 text-sm text-foreground/90">{copy.needsResolutionHint}</p>
         </div>
       ) : null}
 
@@ -140,7 +149,9 @@ export default async function AdminOrderPage({
         {lines.map((line, index) => (
           <li
             key={`${line.sky_id}-${line.condition}-${index}`}
-            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-sky bg-surface/60 px-4 py-3 text-sm"
+            // `rounded-sky` is not a class: the scale is -sm/-md/-lg, so these
+            // rows rendered square-cornered among rounded panels (F16).
+            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-sky-md bg-surface/60 px-4 py-3 text-sm"
           >
             <span>
               <span className="font-medium">{line.name}</span>
@@ -177,7 +188,35 @@ export default async function AdminOrderPage({
       <h2 className="mt-8 text-lg font-semibold">{copy.shipHeading}</h2>
       <div className="mt-2 rounded-sky-lg bg-surface/80 p-5 ring-1 ring-border/70">
         {blocker === null ? (
-          <ShipOrderForm orderNumber={order.order_number} />
+          <ShipOrderForm
+            orderNumber={order.order_number}
+            // Named in the confirmation, because the recipient is the other
+            // thing a person recognises when they have the wrong row open.
+            recipient={recipient}
+          />
+        ) : order.fulfillment_status === "shipped" ? (
+          /*
+           * Visible success, and it survives a reload (F6).
+           *
+           * Not a toast: the state is on the order, so it is read back from
+           * the order. Whoever comes to this page tomorrow sees the same
+           * sentence the person who shipped it saw.
+           */
+          <div className="flex flex-col gap-1">
+            <p className="text-sm font-medium text-success">
+              {copy.shipSucceeded(order.order_number)}
+            </p>
+            {order.shipped_at ? (
+              <p className="text-sm text-muted tabular-nums">
+                {copy.shippedAt}: {new Date(order.shipped_at).toLocaleString(de.locale)}
+              </p>
+            ) : null}
+            <p className="text-sm text-muted tabular-nums">
+              {order.tracking_number
+                ? `${copy.trackingNumber}: ${order.tracking_number}`
+                : copy.noTracking}
+            </p>
+          </div>
         ) : (
           <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
         )}

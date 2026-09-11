@@ -11,7 +11,15 @@
  * one nested route that exists, and an unknown path highlights nothing
  * instead of guessing wrong.
  */
-export type NavSection = "catalog" | "collection" | "account" | "admin" | "inventory" | "cart";
+export type NavSection =
+  | "catalog"
+  | "collection"
+  | "account"
+  | "admin"
+  | "inventory"
+  | "cart"
+  | "shop"
+  | "about";
 
 /** Route prefix of the figure detail pages. */
 const DETAIL_PREFIX = "/skylanders/";
@@ -32,6 +40,13 @@ export function activeSection(pathname: string): NavSection | null {
   // so nothing in the bar lights up for it — but it is still its own section
   // rather than "the catalog", which is what it would default to otherwise.
   if (path === "/cart") return "cart";
+
+  // Reached from the footer and from the catalog's hero, not from the bar
+  // (ADR-0036 keeps three destinations). Named anyway, for the same reason
+  // the cart is: a page that belongs somewhere should say where, even while
+  // nothing in the bar can light up for it.
+  if (path === "/shop") return "shop";
+  if (path === "/ueber-skyisles") return "about";
 
   if (path === "/settings" || path === "/onboarding") return "account";
 

@@ -44,7 +44,10 @@ export default async function CheckoutSuccessPage({
 
       <div className="mt-5">
         {orderNumber === "" ? (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
+          // The product's own panel, not raw `bg-white/5` (F9): this is the
+          // screen a customer lands on after paying, and it was the only one
+          // that did not look like SkyIsles.
+          <div className="rounded-sky-lg bg-deep/90 p-5 ring-1 ring-gold-line backdrop-blur-sm">
             <h2 className="text-lg font-semibold">{de.checkout.result.unknownTitle}</h2>
             <p className="mt-1 text-sm text-on-deep-muted">{de.checkout.result.unknownHint}</p>
           </div>

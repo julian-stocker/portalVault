@@ -7,10 +7,11 @@
  */
 "use client";
 
+import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
-import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { OwnershipFilter } from "@/components/catalog/ownership-filter";
 import { ProductGroupTabs } from "@/components/catalog/group-tabs";
@@ -274,12 +275,55 @@ export function CatalogView({
         >
           {de.catalog.heading}
         </h1>
+        {/*
+         * The one line that says what SkyIsles is — and only to somebody who
+         * does not know yet (F7).
+         *
+         * `/` stays the catalog (ADR-0025): the first channel is a QR code on
+         * a parcel, and a page between intent and action would be a page
+         * nobody asked for. What was missing was never a landing page, it was
+         * this sentence. A signed-in collector keeps the quiet working
+         * subline, because they have already answered the question.
+         */}
         <p
           className="mt-2 text-sm text-on-deep-muted md:text-base"
           style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
         >
-          {de.catalog.intro}
+          {signedIn || admin ? de.catalog.intro : de.catalog.valueProp}
         </p>
+
+        {/*
+         * Two actions, and only for a visitor without an account.
+         *
+         * Nothing here is a marketing device: no countdown, no popup, no
+         * modal, no dismissible banner that comes back. It is one row that
+         * disappears entirely the moment somebody signs in — the catalog below
+         * it is untouched, and an administrator never sees it at all
+         * (ADR-0042).
+         *
+         * `/register` rather than `/login`: somebody reading this sentence is
+         * being told what an account is for, so the honest next step is making
+         * one. The sign-in link stays where it always was, in the bar.
+         */}
+        {signedIn || admin ? null : (
+          <div className="mt-4 flex flex-wrap items-center gap-2.5">
+            <Link href="/register" className={`${ACTION_PRIMARY} w-auto`}>
+              {de.catalog.ctaPrimary}
+            </Link>
+            <Link href="/ueber-skyisles" className={`${ACTION_NEUTRAL} w-auto`}>
+              {de.catalog.ctaSecondary}
+            </Link>
+            {/* The shop, as a quiet third way rather than a third button:
+                what SkyIsles sells is worth being findable, and it is not what
+                a first-time visitor is here for. */}
+            <Link
+              href="/shop"
+              className="inline-flex min-h-11 items-center px-1 text-sm text-on-deep-muted underline underline-offset-4 transition-colors hover:text-on-deep"
+            >
+              {de.catalog.ctaShop}
+            </Link>
+          </div>
+        )}
 
         <label className="sr-only" htmlFor="catalog-search">
           {de.catalog.searchLabel}

@@ -234,14 +234,30 @@ Daraus folgt die heutige Struktur:
 
 ```
 (public)/
-  layout.tsx              Navigation
+  layout.tsx              Navigation und Fußzeile
   error.tsx               Fehlergrenze für alles darunter
   (catalog)/              Route-Group — ändert die URL nicht
     page.tsx              der Katalog auf "/"
     loading.tsx           Skeleton, umschließt NUR den Katalog
   skylanders/[slug]/
     page.tsx              ruft notFound() — keine Suspense-Grenze darüber
+  shop/
+    page.tsx              das aktuelle Angebot, eine Sicht auf shop_offers()
+  ueber-skyisles/
+    page.tsx              erklärender Inhalt (ADR-0025, ADR-0058)
+  cart/ · checkout/ · checkout/erfolg/
 ```
+
+**`/shop` ist kein zweiter Shop.** Die Seite liest dieselben zwei Aufrufe wie `/` —
+`fetchCatalog()` und `fetchOffers()`, beide pro Request memoisiert — und verbindet sie in
+`shopEntries()` (`src/lib/shop/surface.ts`). Keine eigene Tabelle, keine eigene RPC, keine
+zweite Vorstellung davon, was „verfügbar" heißt, und weiterhin **keine Stückzahl**: ein Angebot
+trägt ein Boolean (Migration `0006`). Redaktionell verborgene Figuren (ADR-0039) und
+Nicht-Sammelobjekte (ADR-0029) fallen dort heraus, wo sie überall herausfallen.
+
+**Die Fußzeile verlinkt nur Ziele, die es gibt.** Impressum, Datenschutz, Widerruf und AGB sind
+ein eigenes Release-Gate (ROADMAP V1.7) und stehen deshalb nicht darin — die Plätze sind in
+`site-footer.tsx` als Liste dokumentiert. Der Adminbereich bekommt keine Fußzeile.
 
 Die Detailseite bekommt bewusst **kein** Skeleton: Sie rendert in rund 0,63 s, und ein
 korrekter 404 ist mehr wert als ein Ladeplatzhalter auf einer schnellen Seite.

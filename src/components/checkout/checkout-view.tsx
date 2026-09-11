@@ -30,6 +30,12 @@ import { useEffect, useRef, useState } from "react";
 import { useCart } from "@/components/cart/use-cart";
 import { newCheckoutCredentials, type CheckoutCredentials } from "@/lib/commerce/capability";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import {
+  fieldProblems,
+  firstMarkedField,
+  summaryProblems,
+  type FieldProblem,
+} from "@/lib/commerce/field-errors";
 import { cartTotal, keyOf, resolveCart } from "@/lib/cart/cart";
 import { placeOrder, shippingOptions, type PlacedOrder } from "@/lib/commerce/actions";
 import { recallOpenOrder, rememberOpenOrder, rememberPaymentToken } from "@/lib/commerce/capability";
@@ -51,7 +57,17 @@ const PANEL = "rounded-sky-lg bg-deep/90 p-4 ring-1 ring-gold-line backdrop-blur
 const FIELD =
   "min-h-11 w-full rounded-sky-md bg-surface-raised px-3 text-sm ring-1 ring-border-strong " +
   "focus:ring-accent";
+/** The same box, marked. A ring rather than a tint: the ground stays readable. */
+const FIELD_INVALID =
+  "min-h-11 w-full rounded-sky-md bg-surface-raised px-3 text-sm ring-2 ring-danger " +
+  "focus:ring-danger";
 const LABEL = "mb-1 block text-xs font-medium text-on-deep-muted";
+
+/** What a marked field says, per reason. */
+const FIELD_MESSAGE: Record<FieldProblem, string> = {
+  required: de.checkout.fieldError.required,
+  email: de.checkout.fieldError.email,
+};
 
 type Fields = DraftAddress & { email: string };
 
@@ -69,6 +85,21 @@ const EMPTY: Fields = {
   phone: "",
 };
 
+/**
+ * One input, and whether it is being pointed at.
+ *
+ * `de.checkout.errorInvalid` has always said "Bitte prüfe die **markierten**
+ * Angaben" while nothing was ever marked — the customer got a sentence and
+ * nine identical boxes. The mark is four things together, because any one of
+ * them alone leaves somebody out: a ring (seen), a message under the field
+ * (read), `aria-invalid` plus `aria-describedby` (announced), and the focus
+ * jump the form does after a failed submit (found).
+ *
+ * Deliberately no `required` attribute. Native validation would gate the
+ * submit before `validateDraft()` — the one validator that decides — ever ran,
+ * and would replace these sentences with a browser bubble in the browser's own
+ * wording.
+ */
 function Field({
   id,
   label,
@@ -77,6 +108,7 @@ function Field({
   autoComplete,
   className = "",
   inputMode,
+  problem,
 }: {
   id: string;
   label: string;
@@ -85,7 +117,10 @@ function Field({
   autoComplete?: string;
   className?: string;
   inputMode?: "text" | "numeric" | "email";
+  /** Why this field is marked, or undefined when it is not. */
+  problem?: FieldProblem;
 }) {
+  const errorId = `${id}-error`;
   return (
     <div className={className}>
       <label className={LABEL} htmlFor={id}>
@@ -97,8 +132,15 @@ function Field({
         onChange={(event) => onChange(event.target.value)}
         autoComplete={autoComplete}
         inputMode={inputMode}
-        className={FIELD}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? errorId : undefined}
+        className={problem ? FIELD_INVALID : FIELD}
       />
+      {problem ? (
+        <p id={errorId} className="mt-1 text-xs text-danger">
+          {FIELD_MESSAGE[problem]}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -140,6 +182,8 @@ export function CheckoutView({
   const [method, setMethod] = useState<ShippingMethod>(DEFAULT_SHIPPING_METHOD);
   const [options, setOptions] = useState<ShippingOption[]>([]);
   const [problems, setProblems] = useState<DraftProblem[]>([]);
+  /** Set once per failed submit, so the cursor moves exactly once. */
+  const [focusRequest, setFocusRequest] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
   const [pending, setPending] = useState(false);
@@ -228,6 +272,42 @@ export function CheckoutView({
   const purchasable = entries.filter((entry) => entry.purchasable);
   const subtotal = cartTotal(entries);
 
+  /*
+   * Which fields are marked, recomputed on every keystroke.
+   *
+   * That is what makes a mark clearable: `fieldProblems()` re-tests the values
+   * currently on screen, so filling a blank field removes its ring the moment
+   * the first character lands, without another round trip. The problems list
+   * is what the server objected to; the values decide which of those problems
+   * still applies to which box.
+   */
+  const marked = fieldProblems(problems, fields);
+  /** What no field can point at, and therefore still belongs above the button. */
+  const remainingProblems = summaryProblems(problems);
+
+  /*
+   * Move the cursor to the first thing that can be fixed.
+   *
+   * Keyed on a counter rather than on `marked`, which is a fresh Map on every
+   * render: reacting to that would fight the customer for the caret while they
+   * type. One failed submit, one jump.
+   */
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    const field = firstMarkedField(marked);
+    if (!field) return;
+    const input = document.getElementById(field);
+    if (input instanceof HTMLInputElement) {
+      input.focus();
+      // `center` rather than the default: on a phone the software keyboard
+      // takes the lower half of the viewport, and a field scrolled to the top
+      // edge of it is a field nobody can see.
+      input.scrollIntoView({ block: "center", behavior: "smooth" });
+    }
+    // Deliberately keyed on the request alone — see above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRequest]);
+
   // The shipping prices come from the server, for this basket. One call: the
   // basket does not change while the page is open.
   useEffect(() => {
@@ -287,7 +367,10 @@ export function CheckoutView({
         return;
       }
 
-      if (result.reason === "invalid") setProblems(result.problems);
+      if (result.reason === "invalid") {
+        setProblems(result.problems);
+        setFocusRequest((n) => n + 1);
+      }
       setError(
         result.reason === "invalid"
           ? de.checkout.errorInvalid
@@ -360,7 +443,9 @@ export function CheckoutView({
         </p>
 
         {paymentError ? (
-          <p role="alert" className="text-sm text-red-300">
+          // `--danger`, not raw `red-300` (F9). The product has one colour for
+          // a failure and it is a token.
+          <p role="alert" className="text-sm text-danger">
             {paymentError}
           </p>
         ) : null}
@@ -449,6 +534,7 @@ export function CheckoutView({
           onChange={set("email")}
           autoComplete="email"
           inputMode="email"
+          problem={marked.get("email")}
         />
         <p className="mt-1 text-[11px] text-on-deep-muted">{de.checkout.emailHint}</p>
       </section>
@@ -457,14 +543,14 @@ export function CheckoutView({
       <section className={PANEL}>
         <h2 className="mb-3 text-sm font-semibold">{de.checkout.addressHeading}</h2>
         <div className="grid grid-cols-2 gap-3">
-          <Field id="firstName" label={de.checkout.firstName} value={fields.firstName} onChange={set("firstName")} autoComplete="given-name" />
-          <Field id="lastName" label={de.checkout.lastName} value={fields.lastName} onChange={set("lastName")} autoComplete="family-name" />
+          <Field id="firstName" label={de.checkout.firstName} value={fields.firstName} onChange={set("firstName")} autoComplete="given-name" problem={marked.get("firstName")} />
+          <Field id="lastName" label={de.checkout.lastName} value={fields.lastName} onChange={set("lastName")} autoComplete="family-name" problem={marked.get("lastName")} />
           <Field id="company" label={de.checkout.company} value={fields.company ?? ""} onChange={set("company")} autoComplete="organization" className="col-span-2" />
-          <Field id="street" label={de.checkout.street} value={fields.street} onChange={set("street")} autoComplete="address-line1" />
-          <Field id="houseNumber" label={de.checkout.houseNumber} value={fields.houseNumber} onChange={set("houseNumber")} />
+          <Field id="street" label={de.checkout.street} value={fields.street} onChange={set("street")} autoComplete="address-line1" problem={marked.get("street")} />
+          <Field id="houseNumber" label={de.checkout.houseNumber} value={fields.houseNumber} onChange={set("houseNumber")} problem={marked.get("houseNumber")} />
           <Field id="addressLine2" label={de.checkout.addressLine2} value={fields.addressLine2 ?? ""} onChange={set("addressLine2")} autoComplete="address-line2" className="col-span-2" />
-          <Field id="postalCode" label={de.checkout.postalCode} value={fields.postalCode} onChange={set("postalCode")} autoComplete="postal-code" inputMode="numeric" />
-          <Field id="city" label={de.checkout.city} value={fields.city} onChange={set("city")} autoComplete="address-level2" />
+          <Field id="postalCode" label={de.checkout.postalCode} value={fields.postalCode} onChange={set("postalCode")} autoComplete="postal-code" inputMode="numeric" problem={marked.get("postalCode")} />
+          <Field id="city" label={de.checkout.city} value={fields.city} onChange={set("city")} autoComplete="address-level2" problem={marked.get("city")} />
         </div>
 
         {/* Not a field: V1 delivers to Germany, and the database refuses
@@ -549,6 +635,11 @@ export function CheckoutView({
         </dl>
       </section>
 
+      {/* ---------------------------------------------------------- trust */}
+      <TrustBlock
+        method={options.find((option) => option.code === method) ?? null}
+      />
+
       {/* ------------------------------------------------------------- submit */}
       <div className="flex flex-col gap-3">
         <p className="text-xs text-on-deep-muted">{de.checkout.paymentFollows}</p>
@@ -556,9 +647,12 @@ export function CheckoutView({
         {error ? (
           <div role="alert" className="rounded-sky-md bg-danger/10 px-3 py-2 text-sm text-danger ring-1 ring-danger/40">
             <p>{error}</p>
-            {problems.length > 0 ? (
+            {/* Only what is not already marked at its own field: repeating
+                "fill in the required fields" under six boxes that each say
+                "Bitte ausfüllen" is the same instruction three times over. */}
+            {remainingProblems.length > 0 ? (
               <ul className="mt-1 list-disc pl-4 text-xs">
-                {problems.map((problem) => (
+                {remainingProblems.map((problem) => (
                   <li key={problem}>{de.checkout.problem[problem]}</li>
                 ))}
               </ul>
@@ -571,5 +665,70 @@ export function CheckoutView({
         </button>
       </div>
     </form>
+  );
+}
+
+/**
+ * Who is selling, how it ships, and who takes the money (F2).
+ *
+ * The last screen before a stranger hands over money used to carry no fact
+ * about the seller at all — no identity, no shipping statement, no named
+ * payment provider — and then sent them to a Stripe page that does not look
+ * like SkyIsles.
+ *
+ * EVERY LINE IS CHECKABLE, AND THE MISSING ONES SAY SO.
+ *
+ * No delivery time: none is defined, and an invented one would be the first
+ * promise SkyIsles breaks. No contact address: none is decided, and an
+ * invented one is a support channel that goes nowhere. And no Widerruf/AGB
+ * row: an earlier version said the texts "werden vor der öffentlichen Beta
+ * ergänzt", which is a developer's note standing in a real customer's
+ * checkout. A shop that narrates its own building site reads as less finished
+ * than one that says nothing. The links belong here once the texts exist.
+ *
+ * The shipping figure comes from the option the customer has selected, which
+ * came from `shipping_quote()` — this component computes no money.
+ */
+function TrustBlock({ method }: { method: ShippingOption | null }) {
+  const copy = de.checkout.trust;
+  return (
+    <section className={`${PANEL} flex flex-col gap-3`} aria-label={copy.heading}>
+      <h2 className="text-sm font-semibold">{copy.heading}</h2>
+
+      <dl className="flex flex-col gap-3 text-sm">
+        <div>
+          <dt className="text-xs font-medium text-on-deep-muted">{copy.sellerLabel}</dt>
+          <dd className="mt-0.5 leading-relaxed">{copy.seller}</dd>
+        </div>
+
+        <div>
+          <dt className="text-xs font-medium text-on-deep-muted">{copy.shippingLabel}</dt>
+          <dd className="mt-0.5 leading-relaxed">
+            {method ? (
+              <span className="tabular-nums">
+                {copy.shippingValue(
+                  method.name,
+                  method.amount === 0 ? de.checkout.shippingFree : formatPrice(method.amount),
+                )}
+              </span>
+            ) : (
+              de.checkout.countryFixed
+            )}
+            <span className="mt-0.5 block text-xs text-on-deep-muted">{copy.shippingNote}</span>
+          </dd>
+        </div>
+
+        <div>
+          <dt className="text-xs font-medium text-on-deep-muted">{copy.paymentLabel}</dt>
+          {/* Stripe by name. The customer is about to leave this origin for a
+              page that carries somebody else's branding, and being told a
+              second beforehand is the whole difference. */}
+          <dd className="mt-0.5 leading-relaxed">
+            <span className="font-medium">{copy.paymentValue}</span>
+            <span className="mt-0.5 block text-xs text-on-deep-muted">{copy.paymentNote}</span>
+          </dd>
+        </div>
+      </dl>
+    </section>
   );
 }

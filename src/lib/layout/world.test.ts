@@ -30,7 +30,14 @@ describe("the world background is owned by the layouts", () => {
   it.each(COLLECTOR_LAYOUTS)("%s positions it against the page, not the viewport", (path) => {
     // The layout's own wrapper has to be the containing block, or an
     // absolutely positioned world would escape to the document.
-    expect(source(path)).toContain('className="relative min-h-screen"');
+    //
+    // Asserted as two properties rather than as one literal class string: the
+    // wrapper also became a flex column when the footer arrived, so that it
+    // can be pushed to the bottom of a short page. `relative` is the part this
+    // guard is about, and it is unchanged.
+    const wrapper = source(path).match(/className="([^"]*min-h-screen[^"]*)"/)?.[1] ?? "";
+    expect(wrapper.split(/\s+/)).toContain("relative");
+    expect(wrapper.split(/\s+/)).toContain("min-h-screen");
   });
 
   it("no page owns it, so navigation between the route groups cannot lose it", () => {

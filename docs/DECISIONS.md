@@ -4428,3 +4428,59 @@ keiner.**
 **Verworfen:** die Übergänge allein in der RPC zu prüfen (heute ein Schreiber, morgen zwei) · eine
 generische State-Machine-Infrastruktur für fünf Werte und einen Übergang · `needs_resolution` beim
 Versand automatisch aufzulösen · eine Bearbeitungsfunktion für die Trackingnummer in V1.
+
+---
+
+## ADR-0058 — Der Eingang liegt im Katalog, nicht vor ihm
+
+**Status:** ANGENOMMEN (2026-09-11)
+
+**Kontext.** Der UX-Review vor der öffentlichen Beta hat eine Lücke benannt, die keine
+Feature-Lücke war: SkyIsles erklärte sich niemandem. `/` trug „Skylanders Katalog · Entdecke alle
+Figuren aus den Skylands" — eine Katalogüberschrift, kein Nutzenversprechen. `de.app.tagline`
+existierte und wurde an **keiner** Stelle gerendert. Es gab keine Fußzeile, auf keiner Route, und
+damit keinen Ort für Impressum, Datenschutz, Widerruf, AGB oder Kontakt. Der Shop bewegte über
+Stripe echtes Geld und hatte keine Adresse: kaufbare Figuren waren goldene Pillen auf einzelnen
+von 561 Karten, hinter einer Serienauswahl, die auf Spyro's Adventure startet.
+
+**Entscheidung.** **ADR-0025 bleibt unverändert gültig: `/` ist der Katalog, es gibt keine
+Landingpage.** Der erste Akquisekanal ist ein QR-Code auf einem Paket, und eine Marketingseite
+zwischen Absicht und Handlung wäre genau der Klick, den ADR-0025 zu Recht abgelehnt hat. Was
+fehlte, war nie eine Landingpage — es war ein Satz.
+
+Daraus vier Festlegungen:
+
+1. **Das Nutzenversprechen steht im vorhandenen Katalog-Hero**, und nur für Ausgeloggte. Ein
+   angemeldeter Sammler behält die ruhige Arbeitsüberschrift; ein Administrator sieht die Zeile
+   nie (ADR-0042). Dazu zwei Aktionen — Registrierung und „Was ist SkyIsles?" — und ein leiser
+   dritter Weg in den Shop. Kein Banner, kein Overlay, kein wiederkehrender Hinweis.
+2. **`/ueber-skyisles` ist der „eigene Platz"**, den ADR-0025 wörtlich vorgesehen hatte. Ein
+   Ziel, kein Eingang: erreichbar aus Fußzeile und Hero, niemals vorgeschaltet. Die Seite deckt
+   zugleich den Vertrauensbedarf des Shops, weil sie sagt, wer verkauft.
+3. **`/shop` ist eine Sicht, kein zweiter Shop.** Dieselbe Projektion, dieselben Karten,
+   dieselbe Verfügbarkeitsregel, keine Stückzahl. Sie beantwortet die eine Frage, die der Katalog
+   strukturell nicht beantworten kann: *was verkauft SkyIsles gerade?*
+4. **ADR-0036 bleibt ebenfalls unverändert: die Hauptnavigation behält drei Ziele.** `/shop` und
+   `/ueber-skyisles` werden über Fußzeile und Hero erreicht. Ob der Shop ein viertes Ziel
+   verdient, ist eine Frage für nach der Beta — mit Nutzungsdaten statt mit einer Vermutung.
+
+**Zwei Dinge, die bewusst fehlen.** Die Fußzeile verlinkt **nur existierende Ziele**: ein toter
+Link ist schlechter als ein fehlender, und eine Seite namens „Impressum" ohne Impressum ist
+schlechter als beides. Und es gibt **keinen Kontaktpunkt**, weil keine Adresse entschieden ist —
+eine erfundene wäre ein Kanal, der ins Leere läuft, während `checkout.result.attentionHint` einem
+Kunden bereits zusagt, dass sich jemand meldet. Beides ist ein Release-Gate, kein Versehen.
+
+**Konsequenzen.**
+
+- Der QR-Besucher verliert keinen Klick: der Katalog steht weiter unmittelbar auf `/`.
+- Ein Fremder kann in zehn Sekunden beantworten, was SkyIsles ist, was kostenlos ist und ob hier
+  verkauft wird — ohne dass das Produkt eine Marketingschicht bekommt.
+- Sobald Impressum, Datenschutz, Widerruf, AGB und eine Kontaktadresse stehen, ist ihre Aufnahme
+  eine Ergänzung der Liste in `site-footer.tsx` und sonst nichts.
+- Eine Landingpage nachträglich einzuführen bliebe eine Rücknahme von ADR-0025 und bräuchte einen
+  eigenen Eintrag.
+
+**Verworfen:** eine klassische Landingpage vor dem Katalog · eine eigene Startseite für
+angemeldete Sammler (ein Dashboard wäre ein zweites Ding, das der Navigation widersprechen kann —
+siehe `DEFAULT_SIGNED_IN_PATH`) · Platzhalterseiten für die Rechtstexte · ein vierter
+Navigationspunkt für den Shop · ein Onboarding-Tutorial nach der Registrierung.

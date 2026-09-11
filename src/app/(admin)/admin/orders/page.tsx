@@ -67,11 +67,15 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
 
   // Only the top bucket is loud. Making three levels shout would mean none of
   // them does.
+  //
+  // `--danger` and `--accent`, not raw `red-*`/`amber-*` (F9): the product has
+  // exactly one colour for "this is wrong" and one warm accent, and both
+  // already exist as tokens.
   const tone =
     attention === "needs_resolution"
-      ? "ring-2 ring-red-400/70"
+      ? "ring-2 ring-danger/70"
       : attention === "to_ship"
-        ? "ring-1 ring-amber-300/60"
+        ? "ring-1 ring-accent/60"
         : "ring-1 ring-border/70";
 
   return (
@@ -91,9 +95,9 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
           <span
             className={
               attention === "needs_resolution"
-                ? "font-semibold text-red-300"
+                ? "font-semibold text-danger"
                 : attention === "to_ship"
-                  ? "font-semibold text-amber-200"
+                  ? "font-semibold text-accent"
                   : undefined
             }
           >

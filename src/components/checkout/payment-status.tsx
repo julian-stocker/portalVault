@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { forgetPaymentToken, recallPaymentToken } from "@/lib/commerce/capability";
 import {
   AUTO_REFRESH_DELAYS_MS,
@@ -140,8 +141,20 @@ export function PaymentStatus({ orderNumber }: { orderNumber: string }) {
       : Number.NaN;
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/5 p-5">
-      <div>
+    // The product's own panel (F9). Until now this screen — the one a customer
+    // reaches immediately after paying — was built from raw `bg-white/5` and
+    // `border-white/10` and was the only page that did not look like SkyIsles.
+    <div className="flex flex-col gap-4 rounded-sky-lg bg-deep/90 p-5 ring-1 ring-gold-line backdrop-blur-sm">
+      {/*
+       * The status changes without anybody touching the page: three scheduled
+       * reads turn "Zahlungsstatus wird geprüft" into "Zahlung bestätigt". It
+       * is the only text in the product that does that, and it was silent.
+       *
+       * The region is mounted from the first render and only its contents
+       * change — a live region that appears together with its message is not
+       * reliably announced. Same construction as the cart's toast.
+       */}
+      <div role="status" aria-live="polite">
         <h2 className="text-lg font-semibold">{loaded ? titles[view] : copy.checking}</h2>
         {loaded ? <p className="mt-1 text-sm text-on-deep-muted">{hints[view]}</p> : null}
       </div>
@@ -163,7 +176,7 @@ export function PaymentStatus({ orderNumber }: { orderNumber: string }) {
             type="button"
             onClick={() => void read()}
             disabled={busy}
-            className="rounded-full border border-white/25 px-4 py-2 text-sm disabled:opacity-40"
+            className={`${ACTION_NEUTRAL} w-auto rounded-full disabled:opacity-40`}
           >
             {copy.refresh}
           </button>

@@ -28,10 +28,18 @@ import { CartBadge } from "@/components/cart/cart-badge";
 import { CartToast } from "@/components/cart/cart-toast";
 import { FloatingCart } from "@/components/cart/floating-cart";
 import { Wordmark } from "@/components/layout/wordmark";
+import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
 
-type Item = { href: string; label: string; section: NavSection; prefetch?: boolean };
+type Item = {
+  href: string;
+  label: string;
+  section: NavSection;
+  prefetch?: boolean;
+  /** How many orders are flagged. Only "Admin" ever carries this (F5). */
+  badge?: number;
+};
 
 /** Who is asking. Nothing else decides what the bar offers. */
 type Viewer = { signedIn: boolean; admin: boolean };
@@ -56,6 +64,16 @@ const DESTINATIONS: readonly {
   section: NavSection;
   applies: (viewer: Viewer) => boolean;
   prefetch?: (viewer: Viewer) => boolean | undefined;
+  /**
+   * A count worth interrupting for, or 0.
+   *
+   * Only one destination has one and only one number qualifies: an order in
+   * `needs_resolution` is paid, has booked no stock and cannot be shipped
+   * (ADR-0050). Orders merely waiting to be sent are ordinary work and are
+   * counted on /admin, not shouted about in the bar — three loud levels mean
+   * none of them is.
+   */
+  badge?: (counts: OpenOrderCounts) => number;
 }[] = [
   { href: "/", label: de.nav.catalog, section: "catalog", applies: () => true },
 
@@ -94,6 +112,7 @@ const DESTINATIONS: readonly {
     // everyone else whether or not they find the address.
     applies: (viewer) => viewer.admin,
     prefetch: () => false,
+    badge: (counts) => counts.needsResolution,
   },
 
   {
@@ -110,14 +129,15 @@ const DESTINATIONS: readonly {
   },
 ];
 
-function itemsFor(signedIn: boolean, admin: boolean): Item[] {
+function itemsFor(signedIn: boolean, admin: boolean, counts: OpenOrderCounts): Item[] {
   const viewer: Viewer = { signedIn, admin };
   return DESTINATIONS.filter((destination) => destination.applies(viewer)).map(
-    ({ href, label, section, prefetch }) => ({
+    ({ href, label, section, prefetch, badge }) => ({
       href,
       label,
       section,
       prefetch: prefetch?.(viewer),
+      badge: badge?.(counts) ?? 0,
     }),
   );
 }
@@ -147,6 +167,33 @@ function PendingDot() {
   );
 }
 
+/**
+ * "Something here needs a person" — and nothing else in the product says it.
+ *
+ * A flagged order is paid, booked nothing and is locked against shipping
+ * (ADR-0050). Until now the only way to learn of one was to open /admin/orders
+ * on a hunch, so the one state that actively protects money had no route to
+ * the human it needs.
+ *
+ * `--danger` rather than the accent: the accent is what SkyIsles offers, and
+ * this is not an offer. The count is repeated in the accessible name, because
+ * a bare number over a word is not a sentence.
+ */
+function AttentionBadge({ count }: { count: number }) {
+  return (
+    <span
+      className={
+        "ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 " +
+        "bg-danger/20 text-[11px] leading-4 font-semibold text-danger tabular-nums " +
+        "ring-1 ring-danger/60"
+      }
+    >
+      <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
+      <span className="sr-only">{de.admin.orders.badgeLabel(count)}</span>
+    </span>
+  );
+}
+
 function NavItem({ item, active }: { item: Item; active: boolean }) {
   return (
     <Link
@@ -166,6 +213,7 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
       }
     >
       {item.label}
+      {item.badge ? <AttentionBadge count={item.badge} /> : null}
       <PendingDot />
       {/* A shape as well as a colour. Above the label in the phone bar so
           the thumb never covers it, under it in the header. */}
@@ -183,10 +231,24 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
   );
 }
 
-export function SiteNav({ signedIn, admin = false }: { signedIn: boolean; admin?: boolean }) {
+export function SiteNav({
+  signedIn,
+  admin = false,
+  openOrders = NO_OPEN_ORDERS,
+}: {
+  signedIn: boolean;
+  admin?: boolean;
+  /**
+   * How much work is waiting, counted on the server (F5).
+   *
+   * Zeroes for everybody who is not an administrator, and no query was made to
+   * find that out — `fetchOpenOrderCounts()` asks `isAdmin()` first.
+   */
+  openOrders?: OpenOrderCounts;
+}) {
   const pathname = usePathname();
   const active = activeSection(pathname ?? "/");
-  const items = itemsFor(signedIn, admin);
+  const items = itemsFor(signedIn, admin, openOrders);
 
   /**
    * The floating cart and its confirmation belong to the same question as the
