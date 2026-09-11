@@ -164,13 +164,23 @@ keine Shop-Route, keine Shop-UI und keinen öffentlichen Zugriff:
 
 ---
 
-## Reservierungen aufräumen — `pg_cron`, erst mit B2.2
+## Reservierungen aufräumen — `pg_cron`
 
 `public.expire_stale_checkouts()` gibt abgelaufene Reservierungen frei und schließt die
-Bestellungen, die mit ihnen verfallen sind. **Noch nicht eingerichtet**, weil es ohne Zahlungen
-nichts aufzuräumen gibt und `reserve_for_order()` ohnehin synchron räumt.
+Bestellungen, die mit ihnen verfallen sind.
 
-Wenn es so weit ist, im SQL-Editor:
+**Auf `skyisles-staging` eingerichtet und verifiziert (2026-09-11). Auf Production noch NICHT
+eingerichtet.**
+
+**Was der Job tatsächlich tut — und was nicht.** Er ist *nicht* der Weg, auf dem Bestand
+rechtzeitig zurückkommt: `create_order()` ruft `release_expired_reservations(p_inventory_ids)`
+bereits synchron auf genau die Positionen, die es gleich sperrt. Ein Käufer wartet also nie auf
+den Sweep. Was der Job erledigt, ist die **Buchhaltung** — Bestellung auf `expired`, offener
+Versuch auf `expired`, `checkout_expired` in `order_events`. Deshalb sind fünf Minuten großzügig
+und nicht knapp; eine Minutenfrequenz brächte nichts.
+
+Einrichten — bevorzugt die Extension über *Database → Extensions* im Dashboard einschalten
+(anbieternativ, ADR-0054), sonst im SQL-Editor:
 
 ```sql
 create extension if not exists pg_cron with schema extensions;
@@ -198,7 +208,37 @@ select cron.unschedule('expire-stale-checkouts')
 
 Danach erst `cron.schedule(...)`. Prüfen mit
 `select jobid, jobname, schedule, active from cron.job;` — dort darf der Name **genau einmal**
-stehen.
+stehen. Läufe kontrollieren über
+`select jobid, status, return_message, start_time from cron.job_run_details order by start_time desc;`
+
+**Überlappende Läufe sind unschädlich — durch Konstruktion, nicht durch pg_cron.** Ob pg_cron
+gleichzeitige Läufe desselben Jobs verhindert, ist hier *nicht* geprüft und wird deshalb auch
+nicht behauptet (ADR-0054, Punkt 3). Es trägt aber nicht: beide Funktionen sind idempotent,
+`release_expired_reservations()` sperrt in derselben festen Reihenfolge wie der Checkout
+(`order by r.inventory_id, r.id`, also kein Deadlock), und jeder Schreibvorgang hat ein
+Zustandsprädikat (`and state = 'active'`, `and payment_status = 'pending'`). Ein zweiter Lauf
+wartet auf die Sperre und findet dann nichts mehr.
+
+### Verifikation auf Staging (2026-09-11)
+
+Frische Gast-Bestellung `SI-2026-001016` über `create_order()`, 1× SKY-9101/loose + Hermes,
+9,31 €. Ohne jeden manuellen Eingriff, geprüft mit
+`tools/verify-payment-smoke.mts --before` und `--expired`:
+
+| | Ergebnis |
+|---|---|
+| vor Ablauf | 13/13 — `pending`, Hold aktiv mit 19,9 min Rest, `reserved=1`, `available=1` |
+| nach Ablauf | 13/13 — `payment_status=expired`, Reservierung `released`, `reserved=0`, `available=2`, `movement_id` null |
+| Wiederholung 7 min später | 13/13, identisch — `checkout_expired` steht **genau einmal**, `reserved` unverändert |
+| Bestandsbewegungen | **keine `sale_skyisles`**, projektweit 0 |
+
+`released_at` war `09:05:00.044` — exakt ein Cron-Tick. Die Reservierung lief um 09:00:40 ab, der
+Lauf um 09:00:00 sah sie also noch als gültig und ließ sie in Ruhe; der Lauf um 09:05:00 räumte
+sie ab. Verzug: 4,3 Minuten, innerhalb des erwarteten Fensters von maximal fünf.
+
+Zuvor hatte derselbe Job die drei liegengebliebenen Bestellungen `SI-2026-001013` bis
+`SI-2026-001015` nachgeholt, darunter eine mit offenem `payment_attempt` aus dem B2.2b-Smoke —
+dieser wurde korrekt auf `expired` geschlossen, ohne dass etwas verkauft wurde.
 
 ---
 

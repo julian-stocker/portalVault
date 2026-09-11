@@ -4120,3 +4120,146 @@ Zusage ohne Einschränkung nachträglich eingeschränkt und eine Bestellzeile mi
 hinterlassen, die nebenläufige Leser sehen können. · Zwei getrennte Lesedurchgänge gegen den
 Katalog (Preis-Race). · Ein neuer Composite Type für die Snapshots (Schemaänderung für einen
 lokalen Zwischenspeicher).
+
+---
+
+## ADR-0054 — Anbieterfunktionen vor Eigenbau: wartungsarme Architektur
+
+**Status:** ANGENOMMEN (2026-09-10) · projektweites Architekturprinzip · erste Anwendung: B2.3
+`stripe-webhook`.
+
+**Problem.** SkyIsles wird von einer Person gebaut und auf unabsehbare Zeit von derselben Person
+gewartet. Jede selbstgeschriebene Zeile ist damit nicht nur einmal zu schreiben, sondern dauerhaft
+zu verstehen, zu testen, bei Bibliotheks- und Protokolländerungen nachzuziehen und im Fehlerfall
+allein zu debuggen. Die knappe Ressource ist nicht Rechenzeit und nicht Kontrolle, sondern
+**dauerhaft selbst zu wartende Fläche**.
+
+Der Anlass ist konkret. Der B2.3-Plan schlug zunächst eine **eigene HMAC-Implementierung** der
+Stripe-Signaturprüfung vor, mit der Begründung, sie sei dann in Vitest testbar — das offizielle SDK
+laufe nur im Deno-Runtime. Das Argument ist für sich richtig und in der Sache falsch gewichtet:
+
+> Testbarkeit des eigenen Codes ist der falsche Maßstab, wenn die Alternative Code ist, den man
+> gar nicht erst besitzt.
+
+Eine selbstgebaute Signaturprüfung heißt: konstantzeitiger Vergleich, Timestamp-Toleranz, mehrere
+`v1`-Signaturen bei Secret-Rotation, und die Pflicht, jede künftige Änderung an Stripes
+Signaturformat selbst zu bemerken. Der Gegenwert wäre eine grüne Testdatei über **unsere eigene
+Kryptographie** — die Klasse Code, bei der ein Fehler am teuersten und am schwersten zu sehen ist.
+
+**Entscheidung.** Wird eine sicherheitskritische, standardisierte oder infrastrukturelle Funktion
+von einem etablierten Anbieter zuverlässig bereitgestellt, **verwenden wir diese, statt sie selbst
+zu implementieren.** In dieser Reihenfolge:
+
+| | Ebene | Beispiel |
+|---|---|---|
+| 1 | Offizielle Anbieterfunktion / SDK | `stripe.webhooks.constructEventAsync()` |
+| 2 | Plattformfunktion von Supabase oder Stripe | Supabase Auth, Edge Functions, Stripes Retry-Logik und Event-IDs |
+| 3 | Kleine eigene Adapter-/Glue-Logik | Cent → Euro, Event-Typ → DB-Funktion, Outcome → HTTP-Code |
+| 4 | Eigene Implementierung | nur, wenn es auf 1–3 nichts Geeignetes gibt |
+
+**Besonders zu vermeiden:** eigene Kryptographie · eigene Auth-Systeme · eigene
+Payment-Verifikation · eigene Mail-Infrastruktur · eigene Queue- und Retry-Systeme, wo der Anbieter
+das bereits löst · **Abstraktionsschichten um einen Anbieter herum, die keinen konkreten Nutzen
+haben**.
+
+Der letzte Punkt schneidet in die andere Richtung und ist genauso gemeint: ein selbstgebautes
+`PaymentProvider`-Interface „für den Fall, dass wir Stripe wechseln" ist ebenfalls dauerhaft zu
+wartende Fläche — bezahlt heute, für einen Nutzen, den es vielleicht nie gibt.
+
+**Was das Prinzip nicht sagt.** Es ist kein Freibrief für Abhängigkeiten. Eine neue Abhängigkeit
+bleibt eine Lieferkettenentscheidung: etabliert, gepflegt, versionsgepinnt, und beim
+Anbieter-SDK ausschließlich der Anbieter selbst. Ebenso bleibt `docs/SECURITY.md` unberührt —
+Anbietercode bekommt keine Secrets, die er nicht braucht, und keinen Zugriff jenseits seiner
+Aufgabe.
+
+**Was sich an der Testkultur ändert.** Wir testen weiterhin scharf, aber die richtige Sache. Nicht
+mehr „ist unsere HMAC-Berechnung korrekt", sondern **„rufen wir das SDK richtig auf"** — mit dem
+rohen Body, mit dem Secret aus der Umgebung, und mit dem Ergebnis an der richtigen Stelle. Die
+Grenze verschiebt sich von der Krypto-Korrektheit zur Integrationskorrektheit, und nur die zweite
+ist noch unsere.
+
+**Konsequenzen für B2.3.**
+
+- Signaturprüfung über das **offizielle Stripe-SDK**, in Deno als `npm:stripe` mit
+  `constructEventAsync()` und `Stripe.createSubtleCryptoProvider()`. Die synchrone Variante
+  benutzt Node-Krypto und scheitert im Edge-Runtime — das ist die klassische Falle und der Grund,
+  warum die asynchrone Form hier keine Stilfrage ist.
+- **Retries gehören Stripe.** Wir bauen keinen eigenen Wiederholungsdienst; wir antworten
+  non-2xx, wenn eine Wiederholung erwünscht ist, und 2xx sonst.
+- **Idempotenz über Stripes `evt_…`**, dedupliziert von `payment_events` — keine zweite,
+  abweichende Dedup-Logik im Edge-Code.
+- **Supabase Edge Functions als Runtime**, weiterhin aus ADR-0051.
+- **Die Geschäftslogik bleibt vollständig in den bestehenden DB-Funktionen.**
+  `confirm_order_payment()` und `fail_payment_attempt()` sind die einzigen Schreiber; der
+  Webhook ist Signaturprüfung, Feldextraktion und ein Router. Bestand und Reservierungen werden
+  im Edge-Code **niemals** direkt verändert.
+
+**Konsequenz darüber hinaus.** Bei jeder künftigen Infrastrukturfrage — Mailversand, geplante
+Aufgaben, Dateiablage, Suche — wird zuerst geprüft, ob Supabase oder ein etablierter Anbieter das
+bereits löst. Eigenbau braucht ab jetzt eine Begründung; er ist nicht mehr die Voreinstellung.
+
+**Verworfen:** eine eigene HMAC-SHA256-Verifikation der Stripe-Signatur (Vitest-Testbarkeit
+rechtfertigt keine selbstgewartete Kryptographie auf dem Zahlungspfad) · ein anbieterneutraler
+Payment-Abstraktionslayer ohne zweiten Anbieter · ein eigener Webhook-Retry- und
+Dead-Letter-Mechanismus neben dem, den Stripe drei Tage lang kostenlos betreibt.
+
+### Konkrete Festlegungen aus dem Architektur-Audit (2026-09-10)
+
+Das Audit hat den Bestand gegen dieses Prinzip geprüft. Befund: die Codebasis ist bereits
+weitgehend anbieterorientiert — keine eigene Kryptographie, kein eigenes Auth-System, kein eigener
+Retry-Dienst, keine eigene Mail-Infrastruktur, kein Provider-Abstraktionslayer. Die Regel
+beschreibt hier überwiegend die bestehende Praxis. Fünf Punkte werden trotzdem festgeschrieben,
+weil sie sonst schleichend anders entschieden würden:
+
+**1. Checkout- und Reservierungsablauf läuft über `pg_cron`.** `expire_stale_checkouts()` wird von
+PostgreSQL selbst aufgerufen, nach der in `docs/DEPLOYMENT.md` festgelegten Anleitung. **Kein
+eigener Sweeper-Service, keine Edge Function für Scheduling, kein externer Scheduler, und kein
+Aufräumen, das an einem HTTP-Request hängt.** Der Job läuft als `postgres` und braucht deshalb
+keinen geöffneten Grant — genau das ist das Argument gegen einen HTTP-Endpunkt.
+
+**2. Stripe-Webhook-Signaturen prüft das offizielle Stripe-SDK.** `constructEventAsync()` mit
+`createSubtleCryptoProvider()`. **Keine eigene HMAC-Implementierung**, auch nicht mit dem Argument
+besserer Testbarkeit.
+
+**3. Die Vertrauensannahme hinter `X-Forwarded-For` ist NICHT belegt.** `request_client_hash()`
+nimmt den linkesten Eintrag als Client-Adresse. Das gilt nur, wenn kein Client einen eigenen Header
+mitschickt — Proxies hängen an, sie ersetzen nicht. Ob Supabases Gateway ihn überschreibt, ist
+**ungeprüft**.
+
+> **Regel, die daraus allgemein folgt:** Eine Sicherheitsannahme wird erst dann als zugesichert
+> dokumentiert, wenn sie durch offizielle Anbieterdokumentation **oder** reproduzierbares
+> Staging-Verhalten belegt ist. Bis dahin steht sie als offene Frage in `docs/SECURITY.md` — nicht
+> als Eigenschaft des Systems.
+
+Fällt die Annahme, gehört generische Missbrauchsabwehr auf IP-Ebene ohnehin an die Plattform
+(Vercel Firewall, Cloudflare), die die echte Socket-Adresse sieht — nicht in eine SQL-Funktion.
+
+**4. Username-Regeln bekommen keine Generator-Infrastruktur.** `auth/username.ts` spiegelt
+`profiles_username_not_reserved` von Hand. Das ist Doppelpflege, aber ein Codegenerator wäre neue
+dauerhafte Fläche für ein sehr kleines Problem — also genau der Fehler, den dieses ADR verhindern
+soll. **Zuerst zu prüfen ist, ob eine einzige kanonische Quelle oder schlicht ein Contract-Test die
+kleinere Wartungsfläche ergibt.** Offen, und bewusst niedrig priorisiert.
+
+**5. Die Tests, welche die Edge-Function-Liste festschreiben, werden erweitert, nicht gelockert.**
+`payment-bootstrap.test.ts` und `payment.test.ts` verlangen beide, dass `supabase/functions`
+**genau** `["create-payment"]` enthält. Mit B2.3 wird daraus bewusst `["create-payment",
+"stripe-webhook"]`. Diese Tests sind die Bremse gegen unbemerkt wachsende Edge-Fläche und damit
+ein Werkzeug dieses Prinzips — sie durch eine unscharfe Zusicherung zu ersetzen wäre eine
+Verschlechterung.
+
+### Vorentscheidungen für noch nicht gebaute Bereiche
+
+Festgehalten, damit sie nicht später als Eigenbau enden:
+
+| Bereich | Entscheidung |
+|---|---|
+| Bildverarbeitung | **Supabase Storage Image Transformations**, keine eigene `sharp`-Pipeline. Heute findet bewusst weder Resizing noch Re-Encoding statt |
+| Transaktionsmails | Etablierter externer Anbieter. **Kein eigenes SMTP, keine eigene Queue.** Auth-Mails verschickt Supabase Auth bereits selbst |
+| Zahlungsbelege | Stripes eigene Belege verwenden, **soweit sie ausreichen** |
+
+**Zur Abgrenzung Beleg vs. Rechnung, ausdrücklich:** Ein Stripe-Zahlungsbeleg ist eine
+Zahlungsbestätigung. Ob er eine rechtlich oder steuerlich erforderliche Rechnung ersetzt, ist
+**hier nicht entschieden und wird hier nicht behauptet** — SkyIsles rechnet nach §19 UStG ohne
+ausgewiesene Steuer ab, und was daraus an Pflichtangaben folgt, gehört geprüft, wenn das
+Rechnungsmodul gebaut wird. Bis dahin gilt nur: für die *Zahlungsbestätigung* wird nichts
+Eigenes gebaut.

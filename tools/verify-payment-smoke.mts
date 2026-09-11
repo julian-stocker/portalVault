@@ -113,7 +113,11 @@ const service: SupabaseClient = createClient(URL_, requireEnv("SUPABASE_SERVICE_
 /* ------------------------------------------------------------- the subject */
 
 const argv = process.argv.slice(2);
-const stage: "before" | "after" = argv.includes("--before") ? "before" : "after";
+const stage: "before" | "after" | "expired" = argv.includes("--before")
+  ? "before"
+  : argv.includes("--expired")
+    ? "expired"
+    : "after";
 const positional = argv.filter((a) => !a.startsWith("--"));
 
 const wantsLatest = argv.includes("--latest");
@@ -177,6 +181,14 @@ async function main(): Promise<void> {
 
   if (stage === "before") {
     check("baseline: zero attempts", rows.length === 0, `${rows.length} found`);
+  } else if (stage === "expired") {
+    // The sweep closes any attempt it finds open. An order that never reached
+    // create-payment simply has none, and that is the ordinary case here.
+    const open = rows.filter((r) => {
+      const status = (r as unknown as { status: string }).status;
+      return status === "created" || status === "pending";
+    });
+    check("no attempt left open", open.length === 0, `${open.length} open of ${rows.length}`);
   } else {
     check("exactly one attempt", rows.length === 1, `${rows.length} found`);
     if (rows.length !== 1) return report(null);
@@ -241,7 +253,11 @@ async function main(): Promise<void> {
     shipping_method_name: string | null;
     total_text: string;
   };
-  check("payment_status is pending", o.payment_status === "pending", o.payment_status);
+  if (stage === "expired") {
+    check("payment_status is expired", o.payment_status === "expired", o.payment_status);
+  } else {
+    check("payment_status is pending", o.payment_status === "pending", o.payment_status);
+  }
   check("paid_at is null", o.paid_at === null, String(o.paid_at));
   check("needs_resolution is false", o.needs_resolution === false, String(o.needs_resolution));
   check(`order total is ${expectedAmount}`, o.total_text === expectedAmount, o.total_text);
@@ -268,11 +284,19 @@ async function main(): Promise<void> {
   }[];
 
   check("at least one reservation", held.length > 0, `${held.length}`);
-  check(
-    "every reservation still active",
-    held.length > 0 && held.every((r) => r.state === "active"),
-    held.map((r) => r.state).join(",") || "none",
-  );
+  if (stage === "expired") {
+    check(
+      "every reservation released",
+      held.length > 0 && held.every((r) => r.state === "released"),
+      held.map((r) => r.state).join(",") || "none",
+    );
+  } else {
+    check(
+      "every reservation still active",
+      held.length > 0 && held.every((r) => r.state === "active"),
+      held.map((r) => r.state).join(",") || "none",
+    );
+  }
   /*
    * `state` alone is not the question the database asks.
    *
@@ -285,7 +309,7 @@ async function main(): Promise<void> {
   const now = Date.now();
   const minutesLeft = held.map((r) => (Date.parse(r.expires_at) - now) / 60_000);
   const soonest = minutesLeft.length > 0 ? Math.min(...minutesLeft) : 0;
-  check(
+  if (stage !== "expired") check(
     "hold has not lapsed",
     held.length > 0 && soonest > 0,
     held.length === 0
@@ -337,11 +361,13 @@ async function main(): Promise<void> {
         i.quantity - i.reserved
       }`,
     );
-    check(
-      `${i.sky_id}/${i.condition}: this order holds ${r.quantity}`,
-      r.quantity === 1,
-      `${r.quantity}`,
-    );
+    if (stage !== "expired") {
+      check(
+        `${i.sky_id}/${i.condition}: this order holds ${r.quantity}`,
+        r.quantity === 1,
+        `${r.quantity}`,
+      );
+    }
 
     const sales = await service
       .from("inventory_movements")
@@ -352,6 +378,34 @@ async function main(): Promise<void> {
       `${i.sky_id}/${i.condition}: no sale_skyisles movement`,
       !sales.error && (sales.count ?? 0) === 0,
       sales.error ? sales.error.message : `${sales.count ?? 0} found`,
+    );
+  }
+
+  if (stage === "expired") {
+    heading("4. the sweep left its paperwork");
+    const events = await service
+      .from("order_events")
+      .select("event_type")
+      .eq("order_id", orderId);
+    const types = ((events.data ?? []) as { event_type: string }[]).map((e) => e.event_type);
+    check(
+      "order_events carries checkout_expired",
+      !events.error && types.includes("checkout_expired"),
+      events.error ? events.error.message : types.join(" -> "),
+    );
+    /*
+     * `payment_attempt_started` is allowed here and must be.
+     *
+     * An order that reached create-payment carries one, and expiring such an
+     * order is an ordinary outcome — the attempt is closed as `expired`, not
+     * erased. What must be absent is any event that says money was settled:
+     * that is what would mean the sweep had sold something.
+     */
+    const settled = ["payment_succeeded", "late_payment_unresolved", "payment_amount_mismatch"];
+    check(
+      "no payment was settled",
+      settled.every((t) => !types.includes(t)),
+      types.join(" -> "),
     );
   }
 

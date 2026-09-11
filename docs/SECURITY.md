@@ -525,6 +525,31 @@ hat nichts mehr zu drosseln. Datenminimierung, nicht Datensammlung.
 Bestellungen erzeugt. Sie ist frei wählbar und schützt vor gar nichts sonst; die beiden Mechanismen
 lösen verschiedene Probleme.
 
+> ### OFFEN — die `X-Forwarded-For`-Annahme ist nicht belegt
+>
+> `request_client_hash()` liest `current_setting('request.headers')` und nimmt den **linkesten**
+> Eintrag aus `x-forwarded-for` als Adresse des Clients. Der Kommentar in `0010` begründet das mit
+> „der linkeste Eintrag ist der ursprüngliche Client".
+>
+> **Das gilt nur, wenn der Client selbst keinen `X-Forwarded-For` mitschickt.** Proxies *hängen an*,
+> sie ersetzen nicht. Schickt ein Aufrufer den Header selbst, steht sein frei gewählter Wert links —
+> und die Fingerprint-Dimension wäre durch ein Headerfeld beliebig rotierbar.
+>
+> **Ob Supabases Gateway den Header überschreibt, ist ungeprüft.** Weder offizielle Dokumentation
+> noch reproduzierbares Staging-Verhalten liegen dafür vor. Die Annahme wird deshalb **nicht** als
+> Eigenschaft des Systems dokumentiert (ADR-0054, Punkt 3).
+>
+> **Auswirkung, falls sie fällt:** begrenzt. `enforce_checkout_limits()` zählt drei Dimensionen —
+> Account, E-Mail-Adresse und Fingerprint — und greift, sobald **eine** passt. Ein rotierender
+> Fingerprint entwertet eine davon, nicht die Prüfung. Ein Gast, der pro Bestellung auch die
+> Adresse wechselt, käme damit an den Grenzen vorbei; Bestand schützt weiterhin die
+> Verfügbarkeitsprüfung in `create_order()`, nicht dieses Limit.
+>
+> **Zu tun:** gegen Staging reproduzieren (Request mit selbstgesetztem `X-Forwarded-For` gegen
+> PostgREST, Fingerprint der entstehenden Bestellung vergleichen). Bestätigt sich die
+> Manipulierbarkeit, gehört generische IP-Missbrauchsabwehr an die Plattform (Vercel Firewall,
+> Cloudflare), die die echte Socket-Adresse sieht — nicht in eine SQL-Funktion.
+
 **Öffentliche Commerce-Angriffsfläche nach der Härtung:** genau **eine** Funktion,
 `create_order()`, ausführbar für `anon` und `authenticated`. **Produktiv verifiziert
 (2026-09-07, `verify:commerce` 30/30).** Sie ist die einzige Stelle, die eine
