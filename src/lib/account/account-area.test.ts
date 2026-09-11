@@ -59,11 +59,25 @@ describe("the account area is one place with four destinations", () => {
     expect(activeSection("/settings")).toBe("account");
   });
 
-  it("signing out is an account action, not a bar item", () => {
+  it("signing out sits on the account hub, not in the bar and not under security", () => {
     // A destructive-feeling control on every screen is one somebody
-    // eventually hits by accident on a phone.
-    expect(source("src/app/(app)/account/security/page.tsx")).toContain('action="/auth/signout"');
+    // eventually hits by accident on a phone. But it is also not a *setting*:
+    // „Konto & Sicherheit" is for changing something about the account, and
+    // leaving is not a change to it (ADR-0062).
+    expect(source("src/app/(app)/account/page.tsx")).toContain('action="/auth/signout"');
+    expect(source("src/app/(app)/account/security/page.tsx")).not.toContain("/auth/signout");
     expect(source("src/components/layout/site-nav.tsx")).not.toContain("/auth/signout");
+  });
+
+  it("is a POST, so a prefetcher can never end somebody's session", () => {
+    const hub = source("src/app/(app)/account/page.tsx");
+    expect(hub).toContain('method="post"');
+    expect(hub).not.toContain('href="/auth/signout"');
+  });
+
+  it("security keeps the password and is where account changes will land", () => {
+    const security = source("src/app/(app)/account/security/page.tsx");
+    expect(security).toContain("updatePasswordAction");
   });
 
   it("reuses the existing auth actions rather than growing parallel ones", () => {

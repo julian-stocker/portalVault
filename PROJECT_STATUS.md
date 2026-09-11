@@ -7,6 +7,45 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Order-/Tracking-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
+
+*Die Sendungsnummer war an das Versandereignis geschweißt* — an zwei Stellen: Der CHECK verlangte
+eine bereits versendete Bestellung, und `orders_protect_fulfillment()` warf bei jeder Änderung
+außerhalb des einen Übergangs. Die Nummer war damit nur im exakten Moment des Versands schreibbar
+und danach nie wieder. Der reale Ablauf — Label kaufen, Nummer eintragen, später versenden,
+gelegentlich ein Label stornieren und tauschen — war strukturell unmöglich.
+
+*Jetzt zwei unabhängige Zustände* (ADR-0062): `fulfillment_status` beantwortet „ist es raus"
+und wird unverändert bewacht, `tracking_number` beantwortet „welches Paket ist es" und ist vor wie
+nach dem Versand setzbar. **`shipped_at` bewegt sich dabei nicht** — der Trigger pinnt es im
+Nicht-Übergangs-Zweig ausdrücklich auf den alten Wert.
+
+*Eine Korrektur verschickt nichts.* `admin_set_tracking_number()` ruft den Mailpfad gar nicht auf;
+dahinter lägen ohnehin der Primärschlüssel von `order_mail` und die Endgültigkeit von `sent`.
+Jede Änderung schreibt ein `tracking_updated`-Event — ohne die Nummer selbst in der Nutzlast, denn
+ein Event wird von mehr Augen gelesen als die Bestellung.
+
+*Der Trackinglink kommt aus einem zentralen Helfer*, benutzt von beiden Bestellseiten. Gebaut aus
+`shipping_method_code`, nie aus dem Anzeigenamen, der umbenannt werden darf. Unbekannter Carrier →
+**kein Link**, Nummer trotzdem sichtbar: Ein falscher Trackinglink schickt jemanden auf eine Seite,
+die sagt, sein Paket existiere nicht. Die Referenz muss wie eine Sendungsnummer aussehen **und**
+wird kodiert.
+
+*Abmelden* steht jetzt auf der Einstiegsebene des Kontobereichs statt unter „Konto & Sicherheit" —
+dort gehören Änderungen am Konto hin, und Gehen ist keine.
+
+*Der Browser-Kauf im E2E ist sauber gelandet:* `SI-2026-001045`, `commerce_mode='sandbox'`, bezahlt
+und versendet, Reservierung `converted`, **genau eine** `sale_skyisles`-Bewegung, SKY-0092/loose
+1 → 0, beide Mails `sent` mit `attempts=1`, Ereigniskette `placed → payment_attempt_started →
+payment_succeeded → order_shipped`. „Als Standard speichern" hat funktioniert, und die
+Bestelladresse ist davon unabhängig als Snapshot festgeschrieben.
+
+*Geprüft:* `npm run check` grün, **2010 Tests in 91 Dateien** (vorher 1960/89).
+
+**Production unverändert.** `0019`–`0023` dort nicht angewandt.
+
+---
+
 **Account/Cart/Checkout-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
 
 *Ein Befund aus dem manuellen Browsertest, und er ist der ernsteste bisher.* Artikel als Gast in

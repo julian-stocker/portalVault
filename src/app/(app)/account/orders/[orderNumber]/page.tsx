@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { AccountHeader } from "@/components/account/account-header";
+import { TrackingLink } from "@/components/commerce/tracking-link";
 import { fetchMyOrder } from "@/lib/account/orders";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
@@ -62,7 +63,16 @@ export default async function MyOrderPage({
         {order.tracking_number ? (
           <>
             <dt className="text-muted">{copy.tracking}</dt>
-            <dd className="tabular-nums">{String(order.tracking_number)}</dd>
+            <dd>
+              {/* The same component the operator's page uses, so the two
+                  cannot disagree about what is clickable (ADR-0062). */}
+              <TrackingLink
+                shippingMethodCode={
+                  order.shipping_method_code === null ? null : String(order.shipping_method_code)
+                }
+                trackingNumber={String(order.tracking_number)}
+              />
+            </dd>
           </>
         ) : null}
         <dt className="text-muted">{copy.total}</dt>

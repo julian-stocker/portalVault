@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { markOrderShipped } from "@/lib/admin/order-actions";
-import { normaliseTracking, TRACKING_MAX_LENGTH } from "@/lib/admin/orders";
+import { normaliseTracking } from "@/lib/admin/orders";
 import { de } from "@/lib/i18n/de";
 
 /**
@@ -30,21 +30,28 @@ import { de } from "@/lib/i18n/de";
  * trigger, no function, no status, no guard. The confirmation is a step in
  * front of the same call.
  *
- * The tracking number is optional and is stored exactly as pasted, minus
- * surrounding whitespace. No carrier detection, no link, no format check —
- * carriers disagree, and a validator that knows DHL would reject Hermes.
+ * THE NUMBER IS NOT ENTERED HERE ANY MORE
+ *
+ * Since ADR-0062 the parcel reference is its own state with its own control,
+ * because a label is often bought before the parcel goes and occasionally
+ * cancelled and replaced afterwards. This form names whatever is already
+ * recorded in its confirmation — it is one of the two things a person checks
+ * when they suspect they have the wrong row open — and ships without touching
+ * it.
  */
 export function ShipOrderForm({
   orderNumber,
   recipient,
+  trackingNumber,
 }: {
   orderNumber: string;
   /** Who the parcel is addressed to. Shown in the confirmation, nowhere else. */
   recipient: string;
+  /** What is already recorded, if anything. Named in the confirmation. */
+  trackingNumber: string | null;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tracking, setTracking] = useState("");
   /** True while the confirmation stands. Nothing has been sent at this point. */
   const [confirming, setConfirming] = useState(false);
   // Checked and set before the first await, so two taps in one frame cannot
@@ -52,7 +59,7 @@ export function ShipOrderForm({
   const busy = useRef(false);
 
   const copy = de.admin.orders;
-  const normalised = normaliseTracking(tracking);
+  const normalised = normaliseTracking(trackingNumber);
 
   async function ship() {
     if (busy.current) return;
@@ -60,7 +67,9 @@ export function ShipOrderForm({
     setPending(true);
     setError(null);
     try {
-      const result = await markOrderShipped(orderNumber, tracking);
+      // No number from here: whatever is recorded stays (`coalesce` in
+      // `admin_mark_order_shipped()`). The number has its own control.
+      const result = await markOrderShipped(orderNumber, null);
       if (!result.ok) {
         setError(result.message);
         setConfirming(false);
@@ -124,25 +133,17 @@ export function ShipOrderForm({
     );
   }
 
+  /*
+   * No tracking input here any more.
+   *
+   * Since ADR-0062 the number is its own state with its own control, and two
+   * boxes for one value on one page is a question about which of them counts.
+   * Shipping without naming a number keeps whatever was recorded — that is
+   * what `coalesce` in `admin_mark_order_shipped()` is for.
+   */
   return (
     <div className="flex flex-col gap-3">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted">{copy.trackingLabel}</span>
-        <input
-          name="tracking"
-          type="text"
-          value={tracking}
-          onChange={(event) => setTracking(event.target.value)}
-          maxLength={TRACKING_MAX_LENGTH}
-          autoComplete="off"
-          // `rounded-sky` is not a class — the scale is `-sm`/`-md`/`-lg`, so
-          // this box rendered with square corners among rounded ones (F16).
-          // `min-h-11` is the 44 px target every other control in the product
-          // already has.
-          className="min-h-11 rounded-sky-md bg-surface px-3 py-2 ring-1 ring-border/70 focus:ring-accent"
-        />
-        <span className="text-xs text-muted">{copy.trackingHint}</span>
-      </label>
+      <p className="text-sm text-muted">{copy.shipUsesRecordedTracking}</p>
 
       {error ? (
         <p role="alert" className="text-sm text-danger">

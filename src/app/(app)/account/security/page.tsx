@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 
 import { AccountHeader } from "@/components/account/account-header";
 import { AuthForm } from "@/components/auth/auth-form";
-import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { updatePasswordAction } from "@/lib/auth/actions";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
@@ -12,11 +11,12 @@ import { de } from "@/lib/i18n/de";
 export const metadata: Metadata = { title: de.account.security.title };
 
 /**
- * Password and sign-out, together.
+ * What can be changed about the account itself.
  *
- * Sign-out lives here rather than in the navigation because it is an account
- * action, and because a destructive-feeling control in a bar that is on every
- * screen is a control somebody eventually hits by accident on a phone.
+ * The password today; e-mail and deleting the account belong here when they
+ * exist. Signing out deliberately does **not** (ADR-0062): it changes nothing
+ * about the account, it ends a session, and it belongs where somebody looks
+ * for it — one tap into the account area, not two.
  */
 export default async function AccountSecurityPage() {
   const profile = await currentProfile();
@@ -45,15 +45,9 @@ export default async function AccountSecurityPage() {
         />
       </section>
 
-      <section className="flex flex-col gap-4 border-t border-border/70 pt-6">
-        {/* A POST, not a link: signing out changes state, and a prefetcher
-            must never be able to trigger it. */}
-        <form action="/auth/signout" method="post">
-          <button type="submit" className={ACTION_NEUTRAL}>
-            {de.nav.signOut}
-          </button>
-        </form>
-      </section>
+      {/* What comes here next: changing the sign-in address, and deleting the
+          account. Both are account changes; signing out is not, and lives on
+          the account hub instead (ADR-0062). */}
     </main>
   );
 }

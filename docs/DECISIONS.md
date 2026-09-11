@@ -4804,3 +4804,111 @@ Menge gewinnt" (verliert stillschweigend eine Zeile, die jemand gewählt hat) ·
 über die E-Mail-Adresse ins Konto holen · den alten Warenkorbschlüssel migrieren · ein
 Kontext-Provider statt eines Modul-Stores für den Principal (zwei Antworten, wo es eine gibt).
 
+---
+
+## ADR-0062 — Die Sendungsnummer ist eine Eigenschaft des Pakets, nicht des Versandereignisses
+
+**Status:** ANGENOMMEN (2026-09-11) · umgesetzt in Migration `0023`
+
+**Beobachtet im Betrieb.** Der reale Ablauf des Betreibers: Versandlabel kaufen, Nummer
+eintragen, die Bestellung *später* als versendet markieren — und gelegentlich ein Label
+stornieren und gegen ein neues tauschen. **Beides war unmöglich.**
+
+**Root Cause: zwei Regeln, an zwei Stellen, die dasselbe verschweißten.**
+
+| Woher | Was |
+|---|---|
+| CHECK `orders_tracking_number_shape` | verlangte `fulfillment_status <> 'unfulfilled'` — eine Nummer konnte auf einer unversendeten Bestellung gar nicht existieren |
+| `orders_protect_fulfillment()` | warf bei **jeder** Änderung an `tracking_number` außerhalb des Übergangs |
+
+Zusammen: Die Nummer war nur im exakten Moment des Versands schreibbar und danach nie wieder.
+
+Der Fehler war eine Vermischung von Zuständigkeiten. `orders_protect_fulfillment()` ist der
+Wächter über *Fulfillment*; dass es auch über die Sendungsnummer wachte, war eine zweite Regel
+im Mantel der ersten.
+
+**Entscheidung: zwei unabhängige Zustände.**
+
+| Zustand | Bedeutung | Regel |
+|---|---|---|
+| `fulfillment_status` | Ist es raus? | genau ein Übergang, unverändert bewacht |
+| `tracking_number` | Welches Paket ist es? | frei setzbar, vorher wie nachher |
+
+**Was ausdrücklich nicht wackelt.** `shipped_at` kommt weiterhin von der Serveruhr und nur beim
+Übergang — eine Korrektur der Nummer bewegt es nicht, und der Trigger pinnt es im
+Nicht-Übergangs-Zweig ausdrücklich auf den alten Wert. Fulfillment läuft weiterhin
+`unfulfilled -> shipped` und sonst nichts. Fulfillment darf `needs_resolution` weiterhin nicht
+mitändern. Identität, Beträge und Adresse bleiben von `orders_protect_immutable()` und den
+Append-only-Triggern eingefroren — `0023` fasst keinen davon an.
+
+**Eine Korrektur verschickt nichts.** Drei Gründe, und der erste ist der beste:
+
+1. `admin_set_tracking_number()` ruft den Mailpfad **nicht auf**. `send-order-mail` wird vom
+   Adminvorgang erreicht, nie aus der Datenbank.
+2. Der Primärschlüssel von `order_mail` `(order_id, kind)` ließe eine zweite
+   `shipping_confirmation` ohnehin nicht zu.
+3. `sent` ist endgültig, auch gegen `force` (ADR-0059).
+
+**Historie.** Jede Änderung schreibt ein `tracking_updated`-Event; eine Nicht-Änderung schreibt
+nichts, damit die Historie lesbar bleibt. Die **Nummer selbst steht nicht in der Nutzlast** —
+ein Event wird von mehr Augen gelesen als die Bestellung, und die alte Referenz hat dort keinen
+Zweck. Was drinsteht: ob vorher eine da war, ob jetzt eine da ist, ob die Bestellung schon
+versendet war.
+
+**`admin_mark_order_shipped()` bekommt ein `coalesce`.** Vorher konnte keine Nummer vor dem
+Versand existieren, also war „ohne Nummer versenden" ein No-op. Jetzt würde es das gestern
+gekaufte Label wegwerfen.
+
+**Eine Eingabe, nicht zwei.** Das Versandformular hat sein Trackingfeld verloren. Zwei Felder für
+denselben Wert auf einer Seite sind eine Frage danach, welches zählt. Es nennt in seiner
+Rückfrage weiterhin die eingetragene Nummer — sie ist eines der zwei Dinge, an denen jemand
+merkt, dass er die falsche Zeile offen hat.
+
+### Der Trackinglink
+
+Ein zentraler Helfer, `trackingUrl(code, nummer)`, benutzt von **beiden** Bestellseiten — der des
+Betreibers und der des Kunden —, damit die zwei sich nicht darüber uneinig werden können, was
+klickbar ist.
+
+**Der Carrier ist der Code, nicht der Name.** `shipping_method_name` ist, was dem Kunden gezeigt
+wurde, und darf umbenannt werden; `shipping_method_code` ist, worauf `shipping_catalog()`
+schlüsselt. Ein aus dem Anzeigenamen gebauter Link bräche beim ersten „DHL Paket", still.
+Deshalb tragen `admin_order()` und `my_order()` den Code jetzt mit.
+
+**Nichts wird erfunden.** Unbekannter Carrier → **kein Link**, Nummer trotzdem sichtbar. Ein
+falscher Trackinglink schickt jemanden auf eine Seite, die sagt, sein Paket existiere nicht — das
+ist schlechter als kein Link.
+
+**Die Referenz kommt nie ungeprüft in eine URL.** Sie muss wie eine Sendungsnummer aussehen
+(`[A-Za-z0-9][A-Za-z0-9-]{2,63}`) **und** wird zusätzlich `encodeURIComponent`-kodiert. Die
+Prüfung allein würde reichen, die Kodierung allein auch; beide zusammen heißen, dass ein
+gelockertes Muster nicht sofort ein Loch ist. `rel="noreferrer"`: Die Seite eines Carriers geht
+nichts an, von welcher Bestellseite jemand kam.
+
+`src/lib/layout/domain.test.ts` verbietet absolute URLs in `src/`. `tracking.ts` steht dort jetzt
+als **einzige benannte Ausnahme**, mit einer zusätzlichen Prüfung, dass darin nur
+Carrier-Hostnamen über `https` vorkommen. Der Fehler, den dieser Wächter verhindert — ein
+Redirect oder ein Canonical auf den falschen *SkyIsles*-Host — ist von einer Carrier-URL nicht
+auslösbar.
+
+### Abmelden
+
+Abmelden verlässt **„Konto & Sicherheit"** und steht als eigene Aktion unten im Kontobereich.
+„Konto & Sicherheit" ist dafür da, *etwas am Konto zu ändern* — Passwort, Zugangsadresse, eines
+Tages das Konto löschen. Gehen ist keine Änderung am Konto, und es eine Ebene tief zu vergraben
+heißt, danach suchen zu müssen. Weiterhin ein `POST`, damit kein Prefetcher eine Sitzung beenden
+kann.
+
+**Konsequenzen.**
+
+- `0023` ist rein additiv bis auf einen CHECK, der in place ersetzt wird. Kein `DROP` einer
+  Funktion, keine Tabelle, keine Zeile angefasst.
+- Commerce Test Mode (ADR-0060) und Kontozustand (ADR-0061) bleiben unberührt; ein Test prüft
+  das am Migrationstext.
+- Eine dritte Versandart bräuchte einen Eintrag in `TRACKING_URLS` — `tracking.test.ts` schlägt
+  fehl, bis sie einen hat oder ausdrücklich als eine ohne Link geführt wird.
+
+**Verworfen:** Tracking in `admin_mark_order_shipped()` korrigierbar machen (dann korrigiert man
+eine Nummer, indem man so tut, als versende man erneut) · die alte Nummer ins Event schreiben ·
+den Link aus `shipping_method_name` bauen · für unbekannte Carrier einen Suchlink raten · den
+Domain-Wächter ganz abschalten statt eine benannte Ausnahme zu führen.

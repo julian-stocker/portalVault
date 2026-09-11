@@ -46,6 +46,8 @@ export type AdminOrderDetail = {
     discount_amount: string | number;
     total_amount: string | number;
     shipping_method: string | null;
+    /** The carrier the catalogue keys on — what a tracking link is built from. */
+    shipping_method_code: string | null;
     tracking_number: string | null;
     is_guest: boolean;
     /** Which world the order was placed in. Never changes (ADR-0060). */

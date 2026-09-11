@@ -132,3 +132,48 @@ export async function markOrderShipped(
   revalidatePath(`/admin/orders/${orderNumber}`);
   return { ok: true };
 }
+
+/**
+ * Record, replace or clear the parcel reference.
+ *
+ * Deliberately **not** a wrapper that also ships. Correcting a number is its
+ * own action (ADR-0062): the operator buys a label before the parcel goes,
+ * and sometimes cancels one and buys another after it has gone.
+ *
+ * Note what is absent from this function: `sendOrderMail()`. A corrected
+ * reference is not a second shipment, and the customer has already been told
+ * their parcel is on its way. Three things would stop a duplicate anyway —
+ * the delivery row's primary key, `sent` being terminal, and the provider's
+ * idempotency key — but the first and best reason is that nothing here calls
+ * it.
+ */
+export async function setTrackingNumber(
+  orderNumber: string,
+  trackingNumber: string | null,
+): Promise<ShipResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const tracking = normaliseTracking(trackingNumber);
+  if (trackingTooLong(tracking)) {
+    return { ok: false, message: de.admin.orders.trackingTooLong };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_set_tracking_number", {
+    p_order_number: orderNumber,
+    p_tracking_number: tracking,
+  });
+
+  if (error) {
+    const code = error.code ?? "";
+    if (NOT_ADMIN.has(code)) return { ok: false, message: de.admin.notAllowed };
+    if (REFUSED.has(code)) return { ok: false, message: de.admin.orders.trackingRefused };
+    return { ok: false, message: de.admin.orders.shipFailed };
+  }
+
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/admin/orders");
+  // The customer's own page shows the same number and the same link.
+  revalidatePath(`/account/orders/${orderNumber}`);
+  return { ok: true };
+}

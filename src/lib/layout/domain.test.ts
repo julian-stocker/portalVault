@@ -55,11 +55,38 @@ describe("no host is hard-coded into the application", () => {
     }
   });
 
+  /**
+   * One file may name an absolute URL, and it is not about this site.
+   *
+   * `tracking.ts` builds a link into a carrier's own tracking page (ADR-0062).
+   * That is an external destination, not SkyIsles' identity — the failure this
+   * whole describe block exists to prevent is a redirect or a canonical that
+   * points at the wrong SkyIsles host, and a carrier URL cannot cause it.
+   *
+   * Listed here by name so a second such file has to be a decision.
+   */
+  const EXTERNAL_DESTINATIONS = ["src/lib/commerce/tracking.ts"];
+
   it("contains no absolute http(s) URL at all", () => {
     // The Supabase URL arrives as an environment variable, never as a literal.
     for (const path of FILES) {
+      if (EXTERNAL_DESTINATIONS.includes(path)) continue;
       const absolute = code(path).match(/https?:\/\/[^\s"'`)]+/g) ?? [];
       expect(absolute, `${path} contains ${absolute.join(", ")}`).toEqual([]);
+    }
+  });
+
+  it("and the one exception names only carriers, over https", () => {
+    for (const path of EXTERNAL_DESTINATIONS) {
+      const absolute = code(path).match(/https?:\/\/[^\s"'`$)]+/g) ?? [];
+      expect(absolute.length, path).toBeGreaterThan(0);
+      for (const url of absolute) {
+        // No plaintext, and nothing that could be a SkyIsles host: the first
+        // test in this block already forbids the names, this forbids the
+        // shape of the mistake as well.
+        expect(url, url).toMatch(/^https:\/\//);
+        expect(new URL(url).hostname, url).toMatch(/^(www\.)?(myhermes\.de|dhl\.de)$/);
+      }
     }
   });
 

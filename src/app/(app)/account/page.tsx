@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
@@ -53,6 +54,22 @@ export default async function AccountPage() {
           </Link>
         ))}
       </nav>
+
+      {/*
+       * Signing out is its own thing, not a security setting (ADR-0062).
+       * „Konto & Sicherheit" is for changing something about the account —
+       * password, address, one day deleting it. Leaving is neither, and
+       * burying it a level down means hunting for it.
+       *
+       * Below the list and visually separated, because it is the one action
+       * here that ends the session — and a POST, not a link, so a prefetcher
+       * can never trigger it.
+       */}
+      <form action="/auth/signout" method="post" className="border-t border-border/70 pt-6">
+        <button type="submit" className={ACTION_NEUTRAL}>
+          {de.nav.signOut}
+        </button>
+      </form>
     </main>
   );
 }

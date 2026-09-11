@@ -220,8 +220,13 @@ ausdrücklich nicht genügte — interne Daten wurden gar nicht erst ausgeliefer
 ### Der Kontobereich (ab ADR-0061)
 
 `/account` ist der Einstieg, mit vier Zielen: **Profil** (Benutzername), **Kontakt &
-Lieferadresse**, **Meine Bestellungen**, **Konto & Sicherheit** (Passwort, Abmelden). `/settings` ist ein permanenter Redirect darauf — der Pfad steht in
+Lieferadresse**, **Meine Bestellungen**, **Konto & Sicherheit** (Passwort, später Zugangsadresse
+und Kontolöschung). `/settings` ist ein permanenter Redirect darauf — der Pfad steht in
 Lesezeichen und im Onboarding.
+
+**Abmelden steht auf der Einstiegsebene**, nicht unter „Konto & Sicherheit" (ADR-0062): Dort
+gehören Änderungen *am Konto* hin, und Gehen ist keine. Es bleibt ein `POST` auf
+`/auth/signout` — ein Prefetcher darf keine Sitzung beenden können.
 
 `PROTECTED_PREFIXES` in `src/lib/supabase/middleware.ts` deckt `/account` als Präfix ab, und jede
 der fünf Seiten prüft die Sitzung zusätzlich serverseitig über `currentProfile()`. Die Middleware

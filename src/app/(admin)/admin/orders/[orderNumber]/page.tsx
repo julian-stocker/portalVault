@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
+import { TrackingForm } from "@/components/admin/tracking-form";
+import { TrackingLink } from "@/components/commerce/tracking-link";
 import { fetchAdminOrder } from "@/lib/admin/order-queries";
 import { shipBlocker } from "@/lib/admin/orders";
 import { formatPrice } from "@/lib/format";
@@ -115,7 +117,12 @@ export default async function AdminOrderPage({
         {order.tracking_number ? (
           <>
             <dt className="text-muted">{copy.trackingNumber}</dt>
-            <dd className="tabular-nums">{order.tracking_number}</dd>
+            <dd>
+              <TrackingLink
+                shippingMethodCode={order.shipping_method_code}
+                trackingNumber={order.tracking_number}
+              />
+            </dd>
           </>
         ) : null}
       </dl>
@@ -204,6 +211,7 @@ export default async function AdminOrderPage({
             // Named in the confirmation, because the recipient is the other
             // thing a person recognises when they have the wrong row open.
             recipient={recipient}
+            trackingNumber={order.tracking_number}
           />
         ) : order.fulfillment_status === "shipped" ? (
           /*
@@ -222,16 +230,34 @@ export default async function AdminOrderPage({
                 {copy.shippedAt}: {new Date(order.shipped_at).toLocaleString(de.locale)}
               </p>
             ) : null}
-            <p className="text-sm text-muted tabular-nums">
-              {order.tracking_number
-                ? `${copy.trackingNumber}: ${order.tracking_number}`
-                : copy.noTracking}
+            <p className="text-sm text-muted">
+              {order.tracking_number ? (
+                <>
+                  {copy.trackingNumber}:{" "}
+                  <TrackingLink
+                    shippingMethodCode={order.shipping_method_code}
+                    trackingNumber={order.tracking_number}
+                  />
+                </>
+              ) : (
+                copy.noTracking
+              )}
             </p>
           </div>
         ) : (
           <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
         )}
       </div>
+
+      {/* Its own control, before and after the parcel goes (ADR-0062): a label
+          is often bought first and occasionally cancelled and replaced. It
+          changes no fulfilment state and sends no second confirmation. */}
+      <TrackingForm
+        orderNumber={order.order_number}
+        shippingMethodCode={order.shipping_method_code}
+        trackingNumber={order.tracking_number}
+        shipped={order.fulfillment_status === "shipped"}
+      />
 
       {/* --------------------------------------------------------------- mail */}
       <OrderMailPanel orderNumber={order.order_number} mail={mail ?? []} />

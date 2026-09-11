@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 const FILES = [
   "supabase/tests/0019_transactional_mail_runtime.sql",
   "supabase/tests/0020_order_events_anonymisation_runtime.sql",
+  "supabase/tests/0023_tracking_runtime.sql",
 ] as const;
 
 const SQL = readFileSync(FILES[0], "utf8");

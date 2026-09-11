@@ -938,7 +938,7 @@ export const de = {
     },
     security: {
       title: "Konto & Sicherheit",
-      hint: "Passwort ändern und abmelden.",
+      hint: "Passwort und Zugangsdaten.",
     },
   },
 

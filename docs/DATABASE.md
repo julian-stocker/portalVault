@@ -736,6 +736,36 @@ deshalb nicht im Konto, sondern bleiben über ihre Capability erreichbar (ADR-00
 statt Tabellenlesen, weil ein Grant spaltenblind ist — dieselbe Begründung wie bei `shop_offers()`.
 
 
+### 3.3o Sendungsnummer und Fulfillment sind zwei Zustände (Migration `0023`, ADR-0062)
+
+`0018` hatte beide verschweißt — der CHECK verlangte eine versendete Bestellung, und
+`orders_protect_fulfillment()` warf bei jeder Änderung außerhalb des Übergangs. Die Nummer war
+damit nur im exakten Moment des Versands schreibbar und danach nie wieder.
+
+| Zustand | Bedeutung | Regel |
+|---|---|---|
+| `fulfillment_status` | Ist es raus? | genau ein Übergang, unverändert bewacht |
+| `tracking_number` | Welches Paket ist es? | frei setzbar, vor **und** nach dem Versand |
+
+**`shipped_at` bleibt unbewegt.** Der Trigger setzt es beim Übergang aus der Serveruhr und pinnt
+es sonst ausdrücklich auf den alten Wert — eine Korrektur der Nummer ist kein zweiter Versand.
+
+`admin_set_tracking_number(nummer, referenz)` ist der Weg dorthin: Adminprüfung im eigenen Rumpf,
+trimmt, verweigert über 64 Zeichen, schreibt **nur** `tracking_number` (`fulfillment_status` und
+`shipped_at` kommen im UPDATE gar nicht vor) und legt ein `tracking_updated`-Event an. Eine
+Nicht-Änderung schreibt nichts. Die Referenz selbst steht **nicht** in der Event-Nutzlast, nur ob
+vorher/nachher eine da war und ob die Bestellung schon versendet war.
+
+`admin_mark_order_shipped()` benutzt jetzt `coalesce(v_tracking, v_order.tracking_number)`: Ohne
+Nummer zu versenden behält die bereits eingetragene, statt das gestern gekaufte Label wegzuwerfen.
+
+**Kein Mailpfad.** `admin_set_tracking_number()` ruft `send-order-mail` nicht auf — dahinter lägen
+ohnehin der Primärschlüssel von `order_mail` und die Endgültigkeit von `sent` (ADR-0059).
+
+`admin_order()` und `my_order()` tragen zusätzlich `shipping_method_code`: Ein Trackinglink wird
+aus dem Code des Versandkatalogs gebaut, nie aus dem Anzeigenamen, der umbenannt werden darf.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -1232,6 +1262,15 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   erweitert. Rein additiv: keine bestehende Tabelle geändert, keine Zeile angefasst, kein Trigger
   neu definiert. Nur `order_payment_state()` wird gedroppt und neu angelegt, weil eine
   `returns table`-Signatur nicht in place wachsen kann.
+  **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
+
+- Dreiundzwanzigste Migration: `0023_tracking_number_is_editable.sql` — **Sendungsnummer und
+  Fulfillment werden entkoppelt** (ADR-0062). Ein CHECK wird in place ersetzt,
+  `orders_protect_fulfillment()` verliert die Trackingregel (behält jede Fulfillment-Regel),
+  `admin_set_tracking_number()` kommt hinzu, `admin_mark_order_shipped()` bekommt ein `coalesce`,
+  und beide Bestelldokumente tragen `shipping_method_code`. Kein `DROP` einer Funktion, keine
+  Tabelle, keine Zeile angefasst. Runtime-Suite: `supabase/tests/0023_tracking_runtime.sql`
+  (fünf Abschnitte, alle mit Rollback).
   **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
