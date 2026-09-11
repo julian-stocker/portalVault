@@ -281,7 +281,7 @@ diesem Fenster ohnehin für niemanden freigeschaltet.
    Request-ID und Fähigkeit entstehen stabil im Browser.
 5. **Erst danach** die Aufräum-Migration.
 
-### Aufräum-Migration — `0014`, geschrieben und **noch nicht angewandt**
+### Aufräum-Migration — `0014`, angewandt auf Staging und Production
 
 `0014_remove_legacy_create_order.sql` besteht aus einer Anweisung:
 
@@ -308,6 +308,76 @@ mit.
 Bis dahin ist die alte Fassung **in der Datenbank selbst** als temporär
 gekennzeichnet (`comment on function`), damit niemand später zwei
 `create_order` findet und raten muss.
+
+---
+
+## Edge Function `stripe-webhook` (B2.3)
+
+**Auf `skyisles-staging` deployt und runtime-verifiziert (2026-09-11). Auf Production NICHT
+deployt, und es existiert dort kein Webhook-Endpoint und kein Live-Secret.**
+
+Sie ist die einzige Stelle, die bestätigen darf, dass Geld angekommen ist. Was sie selbst tut, ist
+wenig: Signatur über das offizielle Stripe-SDK prüfen, Felder lesen, eine von zwei
+Datenbankfunktionen aufrufen, Antwortcode setzen (ADR-0054).
+
+**Deploy.** Kein `supabase link`, Project-Ref immer explizit:
+
+```bash
+npx supabase functions deploy stripe-webhook \
+  --project-ref <staging-ref> --no-verify-jwt --use-api
+```
+
+`config.toml` setzt `verify_jwt = false`, und zwar aus einem anderen Grund als bei
+`create-payment`: Stripe schickt überhaupt keinen Supabase-JWT. Mit Verifikation würde die
+Plattform jede Zustellung abweisen, bevor die einzige Authentifizierung, die zählt, überhaupt
+stattfinden kann.
+
+**Secrets.**
+
+| Name | |
+|---|---|
+| `STRIPE_WEBHOOK_SECRET` | `whsec_…`, **pro Endpoint verschieden**. Staging und Production teilen ihn nie. Ohne ihn antwortet die Function auf jeden POST `503` und prüft nichts — fail closed. |
+| `STRIPE_LIVEMODE` | ungesetzt auf Staging (Default `false`). Eine Production-Deployment braucht `true`, sonst verwirft sie jedes Live-Event als `livemode_mismatch`. |
+
+Ein Stripe-**API**-Schlüssel wird nicht gesetzt und darf nicht gesetzt werden: der signierte Body
+ist autoritativ, es wird nichts nachgeladen — und eine Function ohne API-Key kann nicht abbuchen,
+erstatten oder Sessions verfallen lassen.
+
+**Endpoint bei Stripe.** Genau vier Event-Typen abonnieren, nicht mehr:
+
+```
+checkout.session.completed
+checkout.session.expired
+checkout.session.async_payment_succeeded
+checkout.session.async_payment_failed
+```
+
+`payment_intent.payment_failed` ausdrücklich **nicht**: das Objekt ist ein `pi_…` und gegen unsere
+`cs_…`-Identität nicht auflösbar, und eine abgelehnte Karte ist kein beendeter Checkout.
+
+**Reihenfolge bei der Einrichtung — Negativpfade zuerst.**
+
+1. Deployen **ohne** Secret. Jeder POST muss `503 not_configured` geben, ein `GET` `405`. Das
+   beweist, dass das Modul lädt (das SDK auflöst, der Crypto-Provider funktioniert) und dass es
+   fail closed ist.
+2. `supabase/tests/0017_webhook_runtime.sql` abschnittweise im SQL-Editor auf Staging.
+3. Endpoint im **Testmodus** anlegen, `whsec_…` setzen.
+4. Negativpfade: ohne Signatur `400 missing_signature`; Müll-Header, fehlendes `v1`, falsches
+   Secret, alter Timestamp, Signatur über einen anderen Body → jeweils `400 invalid_signature`.
+   **Erst danach** kommt Geld ins Spiel.
+5. Sandbox-Zahlung, dann dasselbe Event über das Dashboard **erneut zustellen** und prüfen, dass
+   der Bestand sich nicht bewegt.
+
+> Das Stripe-Dashboard kann in der aktuellen Oberfläche **keine** Testevents selbst senden; es
+> verweist auf die Stripe CLI. Die wird hier nicht installiert (ADR-0054) — der E2E-Test beweist
+> ohnehin strikt mehr als ein `stripe trigger`.
+
+**Verifikation auf Staging (2026-09-11).** Vollständige Kette über den echten Anbieter: Kasse →
+`create_order()` → `create-payment` → Stripe Sandbox → echte Testzahlung → signierter
+`checkout.session.completed` → `confirm_order_payment()`. Ergebnis: Versuch `succeeded`,
+Bestellung `paid` ohne `needs_resolution`, Reservierung `converted`, **genau eine**
+`sale_skyisles`-Bewegung, `quantity` 2 → 1, `reserved` 0. Erneute Zustellung desselben Events:
+eine `payment_events`-Zeile mit unverändertem `received_at`, **kein** zweiter Verkauf.
 
 ---
 
@@ -366,12 +436,13 @@ nichts übrig geblieben ist. **Niemals gegen Production.**
 
 ---
 
-## Warnung: `0016` ist eine Produktionsbehebung, keine Aufräumarbeit
+## `0016` war eine Produktionsbehebung, keine Aufräumarbeit — angewandt
 
-`0014`, `0015` und `0016` sind auf Staging angewandt und verifiziert, auf
-Production **noch nicht**. Von den dreien ist `0016` das dringende:
+`0014`, `0015` und `0016` sind auf Staging **und auf Production** angewandt und verifiziert;
+Production zusätzlich mit einem realen Checkout-/Reservierungs-Smoke. Von den dreien war `0016`
+das dringende, und der Abschnitt bleibt stehen, weil er erklärt, warum:
 
-**Der Checkout ist in Production seit `0010` funktionsunfähig.** `create_order()`
+**Der Checkout war in Production seit `0010` funktionsunfähig.** `create_order()`
 legte die Bestellung mit Nullbeträgen an und aktualisierte sie danach, was
 `orders_protect_immutable()` verbietet — jeder Aufruf warf `23001` und rollte
 zurück. Es gibt keine Eingabe, die daran vorbeikommt. Dass Production null
@@ -382,4 +453,4 @@ Erschwerend: `23001` steht weder in `UNAVAILABLE` noch in `THROTTLED`
 Ein Kunde hätte einen unerklärten Fehler gesehen und der Betrieb kein
 spezifisches Signal bekommen.
 
-Reihenfolge auf Production, wenn freigegeben: `0014` → `0015` → `0016`.
+Angewandt auf Production in dieser Reihenfolge: `0014` → `0015` → `0016`.

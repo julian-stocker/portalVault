@@ -538,7 +538,7 @@ describe("no provider, no secret, no scheduler, no new reach", () => {
     // 0015 itself introduces none. The one that exists is B2.2b's
     // create-payment, which calls start_payment_attempt() — it does not call
     // anything 0015 added beyond that, and never the expiry reader.
-    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment"]);
+    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment", "stripe-webhook"]);
     const entry = readFileSync("supabase/functions/create-payment/index.ts", "utf8");
     expect(entry).not.toContain("pending_payment_expiries");
     expect(entry).not.toContain("amount_to_cents");

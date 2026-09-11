@@ -7,16 +7,61 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**Commerce V1 · Phase B2.2b abgeschlossen und auf Staging runtime-verifiziert (2026-09-10).**
-Migrationen `0014`, `0015` und `0016` sind geschrieben, auf `skyisles-staging` angewandt und dort
-gegen eine echte Datenbank geprüft. **Auf Production noch nicht angewandt.**
+**Commerce V1 · Phase B2.3 abgeschlossen und auf Staging runtime-verifiziert (2026-09-11).**
+
+*Der Kreis ist geschlossen.* `stripe-webhook` ist die zweite Edge Function und die einzige Stelle,
+die sagen darf, dass Geld angekommen ist. Am 2026-09-11 lief zum ersten Mal die **vollständige
+Kette über den echten Anbieter**: Kasse → `create_order()` → `create-payment` → Stripe Checkout
+im Sandbox-Modus → **echte Testzahlung** → von Stripe **signierter** `checkout.session.completed`
+→ `confirm_order_payment()` → Reservierung konvertiert → **Bestand genau einmal gebucht**.
+
+Bestellung `SI-2026-001022`: Versuch `succeeded` über 9,31 EUR, Bestellung `paid` ohne
+`needs_resolution`, Reservierung `converted` mit ihrer Bewegung, **eine** `sale_skyisles`-Zeile,
+`quantity` 2 → 1, `reserved` zurück auf 0.
+
+*Und die Probe, die zählt.* Dasselbe Event wurde über Stripe **erneut zugestellt**. Danach: immer
+noch **eine** `payment_events`-Zeile mit unverändertem `received_at`, **ein** Verkauf, derselbe
+`movement_id`, kein zweites `payment_succeeded`. Nicht „dasselbe Ergebnis noch einmal berechnet",
+sondern dieselbe Zeile, unberührt. Das ist der Vertrag aus `0012`: nie halb verkauft, nie
+überverkauft.
+
+*Wie wenig die Function tut.* Signaturprüfung über das **offizielle Stripe-SDK**
+(`constructEventAsync()` mit `createSubtleCryptoProvider()`, ADR-0054), Feldextraktion, ein Router
+auf zwei bestehende Datenbankfunktionen. Kein eigener HMAC, keine eigene Idempotenzlogik, kein
+CORS, kein Stripe-API-Key — die Function kann nicht abbuchen, erstatten oder verfallen lassen.
+Die Zuordnung läuft ausschließlich über `checkout.session.id` gegen `provider_payment_id`;
+`metadata` ist niemals Wahrheit. **Keine Migration.**
+
+*Die Falle, die `payment_status` heißt.* `checkout.session.completed` bedeutet bei asynchronen
+Methoden „Kunde fertig, Geld noch nicht da". Bestätigt wird nur bei `status = complete` **und**
+`payment_status = paid`. **Asynchrone Zahlungsmethoden sind für V1 im Stripe-Dashboard
+deaktiviert** (ADR-0055); die Handler für `async_payment_succeeded` und `async_payment_failed`
+existieren trotzdem, defensiv.
+
+*Über SQL runtime-verifiziert* (`supabase/tests/0017_webhook_runtime.sql`, sieben Abschnitte, alle
+in `begin … rollback`, spurlos): Happy Path, fünffache Zustellung → ein Verkauf, Late Payment über
+`expired → succeeded`, Betragsabweichung, unbekannte Session bleibt unverarbeitet und retrybar,
+`expired`/`failed` schließen den Versuch ohne Bestellung und Hold anzufassen.
+
+**Production unverändert.** `stripe-webhook` ist **nur** auf `skyisles-staging` deployt, es gibt
+dort keinen Production-Webhook-Endpoint und kein Live-Secret. `pg_cron` bleibt ebenfalls
+ausschließlich auf Staging.
+
+---
+
+**Zuvor: Phase B2.2b (2026-09-10).**
+Migrationen `0014`, `0015` und `0016` sind auf `skyisles-staging` **und auf Production** angewandt
+und in beiden Umgebungen gegen eine echte Datenbank geprüft — auf Production mit einem realen
+Checkout-/Reservierungs-Smoke. **Der Checkout funktioniert dort damit wieder** (ADR-0053).
+`pg_cron` ist ausdrücklich **nur auf Staging** eingerichtet und bleibt für Production ein eigener
+späterer Release-Schritt.
 
 *Neu und real:* die Edge Function `create-payment` (`supabase/functions/create-payment/`), deployt
 auf `skyisles-staging` mit einem Stripe-**Test**schlüssel in den Function-Secrets. Sie ist der
 einzige privilegierte Aufrufer der Payment-Funktionen; Service-Role-Key und Stripe-Secret
 existieren im Webdeployment weiterhin nicht (ADR-0051). **Kein Stripe-SDK** — die Function spricht
-Stripes REST-API direkt. **Weiterhin nicht vorhanden:** Webhook, `pg_cron`, Payment-Oberfläche,
-Production-Deployment der Function.
+Stripes REST-API direkt. **Weiterhin nicht vorhanden:** Webhook, Payment-Oberfläche, Production-Deployment der Function,
+`pg_cron` auf Production.
 
 *Der erste echte Zahlungsvorgang.* Order 16 (`SI-2026-001015`) auf Staging: ein Klick, genau ein
 `payment_attempt`, Status `pending`, 9,31 EUR, eine Stripe Checkout Session (`cs_test_…`) mit
@@ -38,9 +83,9 @@ und der Browser verwarf den POST trotzdem stumm. Regel und Test dazu in `docs/SE
 > `create_order()` legte die Bestellung mit Nullbeträgen an und aktualisierte sie unmittelbar
 > danach — was `orders_protect_immutable()` aus derselben Migration verbietet. Jeder Aufruf warf
 > `23001` und rollte zurück. **Es konnte keine Bestellung entstehen, in keiner Umgebung**, und es
-> gibt keine Eingabe, die daran vorbeikommt. Dass Production null Bestellungen zählt, ist keine
-> Aussage über Kundschaft. `0016` behebt es (ADR-0053); es ist die dringendste der drei
-> ausstehenden Migrationen.
+> gab keine Eingabe, die daran vorbeikam. Dass Production bis dahin null Bestellungen zählte, war
+> keine Aussage über Kundschaft. `0016` hat es behoben (ADR-0053) und ist angewandt — auf Staging
+> wie auf Production.
 >
 > **Warum 1305 Tests das nicht sahen.** Jeder Test dieser Funktion ist eine Zusicherung über
 > Dateitext. `schema.test.ts` behauptet in derselben Datei, dass der Trigger die Beträge einfriert
@@ -86,8 +131,10 @@ Secret entgegen, `anon` kann nichts lesen, schreiben, ändern, löschen oder aus
 ausgeführt und griffen an ihren Wächtern. Bestellungen, Reservierungen, Versuche und Events stehen
 weiterhin auf 0.
 
-> **Nächster Schritt:** B2.3 — `stripe-webhook`. Erst er darf eine Zahlung bestätigen; bis dahin
-> ist jede Stripe-Session auf Staging folgenlos. Voraussetzungen unten.
+> **Nächster Schritt:** B2.4 — der echte Zahlungsschritt in der Kasse. Bis dahin gibt es in der
+> Anwendung **keine** Oberfläche, die `create-payment` aufruft; die temporäre Dev-Harness dafür
+> ist entfernt. Danach: Rollout nach Production (Function, Webhook-Endpoint, Live-Secret,
+> `pg_cron`) als eigener Release-Schritt.
 
 ### Voraussetzungen vor B2.3
 
@@ -704,9 +751,13 @@ keine Änderung an einer Sachspalte, und eine Position mit Historie ist wegen
 unlöschbar. `initial_import` gilt je Position genau einmal.
 `tools/verify-rls.mts` prüft das in einem neuen Abschnitt 9.
 
-**Die Migration ist noch nicht angewandt.** Sie muss im Supabase SQL Editor ausgeführt werden;
-danach zeigt `npm run verify:rls`, ob sie greift. Kein `/shop-admin`, kein öffentlicher Shop,
-kein Import, keine Rollenvergabe, keine Bestellungen.
+**Die Migration ist angewandt** — auf Production wie auf Staging, geprüft mit
+`npm run verify:rls`. Der damalige Nachsatz („kein `/shop-admin`, kein öffentlicher Shop, kein
+Import, keine Rollenvergabe, keine Bestellungen") beschrieb den Stand vom 2026-09-05 und gilt
+nicht mehr. Ist-Zustand auf Production (2026-09-11, lesend geprüft): 222 Lagerpositionen, davon
+219 mit `initial_import`, **218 öffentliche Angebote** über `shop_offers()`, ein Eintrag in
+`shop_admins`, eine Bestellung (`cancelled`, nie bezahlt) und **null** `payment_attempts`.
+Der Adminbereich heißt `/admin`, nicht `/shop-admin` (ADR-0039).
 
 **Collection Experience implementiert (Phase H, 2026-09-05).** `/collection` ist eine
 Sammlerübersicht statt einer Liste: Gesamtfortschritt, geschätzter Marktwert, Serienfortschritt

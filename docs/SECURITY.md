@@ -767,6 +767,37 @@ importiert wurde *und* ein OpenTelemetry-SDK läuft. `src/lib/supabase/client.ts
 Optionen, es sendet ihn also nichts. Einen Header freizugeben, den niemand schickt, vergrößert die
 Fläche ohne Gegenwert; er kommt auf die Liste, wenn Tracing eingeschaltet wird.
 
+### Die Sicherheitsgrenze von `stripe-webhook` (B2.3)
+
+Der Webhook ist der **einzige Endpunkt des Systems, den das öffentliche Internet unauthentifiziert
+erreichen darf** — und die einzige Stelle, die bestätigen darf, dass Geld angekommen ist. Vier
+Eigenschaften tragen das:
+
+**Die Signatur ist die Authentifizierung, und sonst nichts.** Geprüft vom offiziellen Stripe-SDK
+(ADR-0054). Fehlt `STRIPE_WEBHOOK_SECRET`, antwortet die Function `503` und prüft gar nichts —
+eine Fehlkonfiguration akzeptiert nichts, statt alles zu akzeptieren.
+
+**Der rohe Body geht in die Prüfung.** `await req.text()` als Erstes; erst nach der Verifikation
+entsteht ein Objekt. Vorher zu parsen und neu zu serialisieren ändert Whitespace und
+Schlüsselreihenfolge und ist die verbreitetste Art, eine Signaturprüfung unbemerkt wertlos zu
+machen.
+
+**Kein CORS, und das ist Absicht.** Stripe ist kein Browser. Ein `Access-Control-*`-Block hier
+wäre Attrappe und würde einen Schutz suggerieren, den er nicht leistet.
+
+**Kein Stripe-API-Schlüssel.** Der signierte Body ist autoritativ, es wird nichts nachgeladen.
+Damit kann dieser Endpunkt strukturell nicht abbuchen, erstatten oder Sessions verfallen lassen —
+selbst wenn er kompromittiert wäre.
+
+**Und keine Wahrheit aus `metadata`.** `order_id` und `payment_attempt_id` haben wir selbst in die
+Checkout Session geschrieben; Stripe speichert und liefert sie zurück, ohne sie zu prüfen. Die
+Identität einer Zahlung ist die Session-ID (`cs_…`) gegen `payment_attempts.provider_payment_id`.
+Ein Event, das eine andere Bestellung behauptet, ändert daran nichts.
+
+Alles Weitere — Idempotenz, Sperren, Konvertierung, Bestandsbuchung — liegt in den Funktionen aus
+`0012`/`0015` und nicht im Edge-Code. Dieser schreibt **nie** direkt nach `shop_inventory`,
+`inventory_movements` oder `order_reservations`.
+
 ---
 
 ## 7. Datenschutz (DSGVO)

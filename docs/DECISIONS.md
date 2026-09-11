@@ -4014,8 +4014,8 @@ Konvertierung einer Bestellung · Speichern von Anbieter-Payloads oder Zahlungsd
 
 ## ADR-0052 — Ein lokaler Timeout darf vom Anbieter korrigiert werden
 
-**Status:** ANGENOMMEN (2026-09-09) · Migration `0015`, auf Staging runtime-verifiziert,
-Production ausstehend.
+**Status:** ANGENOMMEN (2026-09-09) · Migration `0015`, auf Staging runtime-verifiziert, auf
+Production angewandt.
 
 **Problem.** `payment_attempts.status` kannte vier Endzustände, und `payment_attempts_protect()`
 verbot jeden Übergang aus ihnen heraus — ausnahmslos. Das war als Stärke gedacht und war ein
@@ -4069,8 +4069,8 @@ Zeilen, die sich widersprechen) · `failed_at` behalten und die CHECK-Bedingung 
 
 ## ADR-0053 — Beträge stehen fest, bevor die Bestellung existiert
 
-**Status:** ANGENOMMEN (2026-09-09) · Migration `0016`, auf Staging runtime-verifiziert,
-Production ausstehend.
+**Status:** ANGENOMMEN (2026-09-09) · Migration `0016`, auf Staging runtime-verifiziert, auf
+Production angewandt und dort mit einem realen Checkout-/Reservierungs-Smoke bestätigt.
 
 **Problem.** Seit `0010` legte `create_order()` die Bestellung mit Nullbeträgen an und setzte sie
 unmittelbar danach:
@@ -4263,3 +4263,55 @@ Zahlungsbestätigung. Ob er eine rechtlich oder steuerlich erforderliche Rechnun
 ausgewiesene Steuer ab, und was daraus an Pflichtangaben folgt, gehört geprüft, wenn das
 Rechnungsmodul gebaut wird. Bis dahin gilt nur: für die *Zahlungsbestätigung* wird nichts
 Eigenes gebaut.
+
+---
+
+## ADR-0055 — V1 nimmt nur sofortige Zahlungsmethoden
+
+**Status:** ANGENOMMEN (2026-09-11) · Steuerung im Stripe-Dashboard, nicht im Code ·
+`stripe-webhook` auf Staging runtime-verifiziert.
+
+**Problem.** `checkout.session.completed` heißt nicht „bezahlt". Bei einer asynchronen
+Zahlungsmethode — Überweisung, Klarna, SEPA-Lastschrift — feuert Stripe dieses Event mit
+`status: "complete"` und `payment_status: "unpaid"`: der Kunde ist mit dem Checkout fertig, das
+Geld ist unterwegs oder auch nicht. Wer auf den Event-Typ allein reagiert, konvertiert
+Reservierungen und bucht eine Verkaufsbewegung für Geld, das nie ankommen muss.
+
+Der zweite, unauffälligere Konflikt ist zeitlich. Unsere Reservierung hält **20 Minuten**
+(ADR-0050); eine asynchrone Zahlung braucht Tage. Der Hold läuft also **immer** ab, bevor das Geld
+da ist. `expire_stale_checkouts()` räumt die Bestellung ab, die spätere Bestätigung landet
+zwangsläufig im Late-Payment-Zweig: Geld verbucht, nichts konvertiert, `needs_resolution` gesetzt
+(ADR-0052). Das ist korrekt und trotzdem untragbar — jede solche Bestellung wäre Handarbeit.
+
+**Entscheidung.** V1 bietet **ausschließlich sofortige Zahlungsmethoden** an: Karte sowie Apple
+Pay und Google Pay über Stripe Checkout.
+
+**Gesteuert wird das im Stripe-Dashboard, nicht im Code.** `create-payment` schickt bewusst kein
+`payment_method_types` — dessen Abwesenheit ist gerade das, was Dynamic Payment Methods aktiviert,
+und die Auswahl gehört damit in die Dashboard-Konfiguration. Das ist ADR-0054 angewandt: die
+Plattform kann das, also bauen wir es nicht nach. Eine Allowlist im Quelltext wäre eine zweite,
+abweichende Wahrheit, die bei jeder Dashboard-Änderung stillschweigend falsch würde.
+
+**Die Handler werden trotzdem gebaut.** `checkout.session.async_payment_succeeded` und
+`checkout.session.async_payment_failed` sind in `stripe-webhook` implementiert, abonniert und in
+`supabase/tests/0017_webhook_runtime.sql` verifiziert. Begründung: „sollte nicht vorkommen" ist
+keine Zusicherung, eine Dashboard-Einstellung ist an einer anderen Stelle änderbar als dieser
+Code, und der Fehlermodus wäre, Ware gegen nichts herauszugeben. Ein Handler, der nie feuert,
+kostet nichts; sein Fehlen kostet Bestand.
+
+**Unabhängig davon gilt die Feldprüfung.** Bestätigt wird nur bei `status = "complete"` **und**
+`payment_status = "paid"`. Die Dashboard-Einstellung ist die erste Sperre, diese Prüfung die
+zweite, und die zweite ist die, die im Code steht.
+
+**Konsequenz.** Der Late-Payment-Pfad bleibt der seltene Ausnahmefall, für den er gedacht war: ein
+Kunde, der in Minute 25 einer noch offenen Stripe-Session bezahlt — Stripes Session lebt 32
+Minuten, unser Hold 20, und die beiden lassen sich nicht angleichen. Nicht der Normalbetrieb einer
+ganzen Zahlungsart.
+
+**Zu prüfen, bevor asynchrone Methoden je aktiviert werden:** eine Haltedauer, die zur Methode
+passt, oder ein Bestellzustand „bezahlt, aber unreserviert", der ohne Handarbeit auflösbar ist.
+Beides ist eine eigene Entscheidung und keine Einstellung.
+
+**Verworfen:** asynchrone Methoden anbieten und den Late-Payment-Pfad als Regelbetrieb behandeln ·
+eine Methoden-Allowlist im Quelltext parallel zur Dashboard-Konfiguration · die async-Handler
+weglassen, weil die Methoden abgeschaltet sind.

@@ -16,3 +16,13 @@ project_id = "skyisles"
 # itself instead (see index.ts, step 2), which is also the only way to tell
 # "no user" apart from "invalid user".
 verify_jwt = false
+
+[functions.stripe-webhook]
+# MUST stay false, and for a different reason than create-payment's.
+#
+# Stripe sends no Supabase JWT at all — it has no account here and never will.
+# With verification on, the platform would reject every delivery before the
+# function ran, and the only authentication that matters would never get a
+# chance to happen: the Stripe signature, checked by Stripe's own SDK
+# (ADR-0054).
+verify_jwt = false

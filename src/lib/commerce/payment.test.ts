@@ -493,7 +493,7 @@ describe("B2.1 ships no provider integration", () => {
     // 0012 shipped with no Edge Function at all. B2.2b added exactly one, and
     // the webhook is still B2.3 — this guard fails the day that changes,
     // which is when it should be revisited rather than silently widened.
-    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment"]);
+    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment", "stripe-webhook"]);
   });
 
   it("calls none of the payment functions from the application", () => {

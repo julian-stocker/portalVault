@@ -967,13 +967,15 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   und `pending_payment_expiries()` ist ein reiner Leser für den späteren Expiry-Sweep.
   `start_payment_attempt()` wird gedroppt und neu angelegt (Rückgabetyp erweitert) — **und
   deshalb neu entzogen**, denn für Privilegien ist sie danach eine neue Funktion.
-  **Auf Staging angewandt am 2026-09-09, Production ausstehend.**
+  **Auf Staging angewandt am 2026-09-09, auf Production angewandt und dort mit einem realen
+  Checkout-/Reservierungs-Smoke verifiziert.**
 - Sechzehnte Migration: `0016_fix_create_order_amount_initialization.sql` — **eine
   Defektbehebung.** `create_order()` legte die Bestellung seit `0010` mit Nullbeträgen an und
   aktualisierte sie danach, was `orders_protect_immutable()` verbietet: **jeder Checkout warf
   `23001`, es konnte nie eine Bestellung entstehen.** Die Beträge stehen jetzt vor dem INSERT fest
   (ADR-0053). Eine Funktion, kein Trigger, keine Tabelle, kein Grant.
-  **Auf Staging angewandt und verifiziert am 2026-09-09, Production ausstehend.**
+  **Auf Staging angewandt und verifiziert am 2026-09-09, auf Production angewandt und dort mit
+  einem realen Checkout-/Reservierungs-Smoke verifiziert.**
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
