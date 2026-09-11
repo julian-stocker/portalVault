@@ -37,6 +37,8 @@
  * the order and being sent to the payment provider.
  */
 
+import { principalKey, type Principal } from "@/lib/auth/principal";
+
 /** 32 bytes — 256 bits, as hex. The size the stored SHA-256 digest implies. */
 const TOKEN_BYTES = 32;
 
@@ -121,9 +123,20 @@ export function newCheckoutCredentials(): CheckoutCredentials {
  * cannot be replayed against another order.
  */
 
-/** One key per order, so two checkouts in one tab cannot collide. */
-export function capabilityStorageKey(orderNumber: string): string {
-  return `skyisles.pay.v1.${orderNumber}`;
+/**
+ * One key per order AND per principal.
+ *
+ * The order number alone was not enough. `sessionStorage` outlives a sign-out
+ * — it belongs to the tab, not to the session — so after signing in as
+ * somebody else the same key was still there, still readable, and still a
+ * working capability for the previous account's order. Namespacing by
+ * principal is what makes the next account's browser unable to offer it
+ * (ADR-0061); `authorize_order_payment()` remains the thing that decides.
+ */
+const PAY_PREFIX = "skyisles.pay.v2.";
+
+export function capabilityStorageKey(principal: Principal, orderNumber: string): string {
+  return `${PAY_PREFIX}${principalKey(principal)}.${orderNumber}`;
 }
 
 /**
@@ -131,10 +144,10 @@ export function capabilityStorageKey(orderNumber: string): string {
  * rather than returning null, and a checkout must not die because a browser
  * refuses to remember something.
  */
-export function rememberPaymentToken(orderNumber: string, token: string): void {
+export function rememberPaymentToken(principal: Principal, orderNumber: string, token: string): void {
   if (!isPaymentToken(token)) return;
   try {
-    window.sessionStorage.setItem(capabilityStorageKey(orderNumber), token);
+    window.sessionStorage.setItem(capabilityStorageKey(principal, orderNumber), token);
   } catch {
     /* Not remembering is survivable: the payment still starts, and the status
        page will simply not be able to show a guest their order. */
@@ -142,9 +155,9 @@ export function rememberPaymentToken(orderNumber: string, token: string): void {
 }
 
 /** The capability for this order, or null. Never throws. */
-export function recallPaymentToken(orderNumber: string): string | null {
+export function recallPaymentToken(principal: Principal, orderNumber: string): string | null {
   try {
-    const value = window.sessionStorage.getItem(capabilityStorageKey(orderNumber));
+    const value = window.sessionStorage.getItem(capabilityStorageKey(principal, orderNumber));
     return isPaymentToken(value) ? value : null;
   } catch {
     return null;
@@ -152,9 +165,9 @@ export function recallPaymentToken(orderNumber: string): string | null {
 }
 
 /** Forget it. Called as soon as the order can no longer change by itself. */
-export function forgetPaymentToken(orderNumber: string): void {
+export function forgetPaymentToken(principal: Principal, orderNumber: string): void {
   try {
-    window.sessionStorage.removeItem(capabilityStorageKey(orderNumber));
+    window.sessionStorage.removeItem(capabilityStorageKey(principal, orderNumber));
   } catch {
     /* nothing to do, and nothing worth telling the customer */
   }
@@ -175,13 +188,15 @@ export function forgetPaymentToken(orderNumber: string): void {
  * settles. Nothing here would help an attacker who does not also hold the
  * capability.
  */
-const OPEN_ORDER_KEY = "skyisles.pay.v1.open";
+function openOrderKey(principal: Principal): string {
+  return `${PAY_PREFIX}${principalKey(principal)}.open`;
+}
 
 export type OpenOrder = { orderId: number; orderNumber: string };
 
-export function rememberOpenOrder(order: OpenOrder): void {
+export function rememberOpenOrder(principal: Principal, order: OpenOrder): void {
   try {
-    window.sessionStorage.setItem(OPEN_ORDER_KEY, JSON.stringify(order));
+    window.sessionStorage.setItem(openOrderKey(principal), JSON.stringify(order));
   } catch {
     /* the payment still works; only "resume" is lost */
   }
@@ -200,9 +215,9 @@ export function rememberOpenOrder(order: OpenOrder): void {
  * is still holding stock. Reading our own tab's storage is not the same as
  * trusting a URL.
  */
-export function recallOpenOrder(orderNumber?: string): OpenOrder | null {
+export function recallOpenOrder(principal: Principal, orderNumber?: string): OpenOrder | null {
   try {
-    const raw = window.sessionStorage.getItem(OPEN_ORDER_KEY);
+    const raw = window.sessionStorage.getItem(openOrderKey(principal));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<OpenOrder>;
     if (typeof parsed.orderNumber !== "string" || parsed.orderNumber === "") return null;
@@ -214,10 +229,49 @@ export function recallOpenOrder(orderNumber?: string): OpenOrder | null {
   }
 }
 
-export function forgetOpenOrder(): void {
+export function forgetOpenOrder(principal: Principal): void {
   try {
-    window.sessionStorage.removeItem(OPEN_ORDER_KEY);
+    window.sessionStorage.removeItem(openOrderKey(principal));
   } catch {
     /* nothing worth telling the customer */
+  }
+}
+
+
+/**
+ * Throw away every payment state that does not belong to this principal.
+ *
+ * Called whenever the browser changes who it is acting as — a sign-in, a
+ * sign-out, or arriving on a page already signed in as somebody else. Without
+ * it the previous account's capability would simply sit in the tab until it
+ * was closed, unreachable through the scoped keys but still present.
+ *
+ * A guest who signs in loses the capability of an order they placed as a
+ * guest, and that is the intended trade: a token must not follow a person
+ * across an identity change. The order itself is untouched and still reachable
+ * with its number and the mail it produced.
+ */
+export function forgetForeignPaymentState(principal: Principal): void {
+  const mine = `${PAY_PREFIX}${principalKey(principal)}.`;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < window.sessionStorage.length; i += 1) {
+      const key = window.sessionStorage.key(i);
+      if (key !== null && key.startsWith(PAY_PREFIX) && !key.startsWith(mine)) {
+        doomed.push(key);
+      }
+    }
+    for (const key of doomed) window.sessionStorage.removeItem(key);
+
+    // The unscoped keys this release replaces. Removed rather than migrated:
+    // there is no way to tell whose they were, and guessing is what caused
+    // the leak in the first place.
+    window.sessionStorage.removeItem("skyisles.pay.v1.open");
+    for (let i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+      const key = window.sessionStorage.key(i);
+      if (key !== null && key.startsWith("skyisles.pay.v1.")) window.sessionStorage.removeItem(key);
+    }
+  } catch {
+    /* Private mode. Nothing was stored, so nothing needs forgetting. */
   }
 }

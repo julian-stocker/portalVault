@@ -1,8 +1,12 @@
+import { principalFor } from "@/lib/auth/principal";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
 import { watchPageShow, type PageShowLike } from "./checkout-lifecycle";
 import { recallOpenOrder, rememberOpenOrder } from "./capability";
+
+/** Every browser-side key carries a principal since ADR-0061. */
+const ME = principalFor("user-a");
 
 /**
  * B2.4 — returning to the checkout from the payment page.
@@ -168,22 +172,22 @@ describe("the existing order stays the thing that gets paid", () => {
      * from the bfcache, this lookup is the only thing between the customer and
      * an order that is holding their stock.
      */
-    rememberOpenOrder({ orderId: 42, orderNumber: "SI-2026-001030" });
-    expect(recallOpenOrder()).toEqual({ orderId: 42, orderNumber: "SI-2026-001030" });
+    rememberOpenOrder(ME, { orderId: 42, orderNumber: "SI-2026-001030" });
+    expect(recallOpenOrder(ME)).toEqual({ orderId: 42, orderNumber: "SI-2026-001030" });
   });
 
   it("still refuses an order number that is not this tab's", () => {
     // The number comes from the URL and is therefore suppliable by anyone.
-    rememberOpenOrder({ orderId: 42, orderNumber: "SI-2026-001030" });
-    expect(recallOpenOrder("SI-2026-000001")).toBeNull();
-    expect(recallOpenOrder("SI-2026-001030")).toEqual({
+    rememberOpenOrder(ME, { orderId: 42, orderNumber: "SI-2026-001030" });
+    expect(recallOpenOrder(ME, "SI-2026-000001")).toBeNull();
+    expect(recallOpenOrder(ME, "SI-2026-001030")).toEqual({
       orderId: 42,
       orderNumber: "SI-2026-001030",
     });
   });
 
   it("recovers nothing when this tab placed nothing", () => {
-    expect(recallOpenOrder()).toBeNull();
+    expect(recallOpenOrder(ME)).toBeNull();
   });
 
   it("keeps the capability untouched by the reset", () => {

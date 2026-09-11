@@ -7,6 +7,7 @@
  */
 import { redirect } from "next/navigation";
 
+import { PrincipalGate } from "@/components/layout/principal-gate";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
@@ -27,6 +28,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* The world starts behind the header, not below it (ADR-0038, V3.3).
           Owned by the layout so it survives navigation between the two
           route groups. */}
+      {/* Who this browser is acting as. Draws nothing (ADR-0061). */}
+      <PrincipalGate userId={profile.id} />
       <WorldZone variant="world" />
       {/* The same navigation the public catalog uses — one component, two
           mounts, rather than two systems to keep in step. The active section

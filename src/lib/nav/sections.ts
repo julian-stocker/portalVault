@@ -48,6 +48,9 @@ export function activeSection(pathname: string): NavSection | null {
   if (path === "/shop") return "shop";
   if (path === "/ueber-skyisles") return "about";
 
+  // `/settings` is a permanent redirect to `/account` since ADR-0061 and is
+  // kept here so the highlight does not flicker while it resolves.
+  if (path === "/account" || path.startsWith("/account/")) return "account";
   if (path === "/settings" || path === "/onboarding") return "account";
 
   // Stock has its own destination in the bar, so it lights up on its own

@@ -47,6 +47,7 @@ export function authContext(next: string | null | undefined): AuthContext | null
   }
 
   if (path === "/collection" || path === "/dashboard") return "collection";
+  if (path === "/account" || path.startsWith("/account/")) return "account";
   if (path === "/settings" || path === "/onboarding") return "account";
   if (path === "/cart") return "cart";
   if (path === "/checkout") return "checkout";

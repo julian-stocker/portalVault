@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
+import { GUEST, principalFor } from "@/lib/auth/principal";
 import {
   capabilityStorageKey,
+  forgetForeignPaymentState,
   forgetOpenOrder,
   forgetPaymentToken,
   newPaymentToken,
@@ -29,6 +31,12 @@ function installStorage(): Map<string, string> {
       getItem: (k: string) => backing.get(k) ?? null,
       setItem: (k: string, v: string) => void backing.set(k, v),
       removeItem: (k: string) => void backing.delete(k),
+      // The sweep enumerates; a Map preserves insertion order, which is all
+      // the real Storage guarantees too.
+      get length() {
+        return backing.size;
+      },
+      key: (i: number) => [...backing.keys()][i] ?? null,
     },
   });
   return backing;
@@ -37,6 +45,10 @@ function installStorage(): Map<string, string> {
 const ORDER = "SI-2026-001022";
 const TOKEN = "a".repeat(64);
 
+/** Every key carries a principal since ADR-0061. Two accounts and a guest. */
+const ME = principalFor("user-a");
+const THEM = principalFor("user-b");
+
 beforeEach(() => {
   vi.unstubAllGlobals();
 });
@@ -44,42 +56,42 @@ beforeEach(() => {
 describe("the capability round-trips through sessionStorage", () => {
   it("remembers and recalls a token for its own order", () => {
     installStorage();
-    rememberPaymentToken(ORDER, TOKEN);
-    expect(recallPaymentToken(ORDER)).toBe(TOKEN);
+    rememberPaymentToken(ME, ORDER, TOKEN);
+    expect(recallPaymentToken(ME, ORDER)).toBe(TOKEN);
   });
 
   it("keys by order number, so two checkouts cannot collide", () => {
     const backing = installStorage();
-    rememberPaymentToken(ORDER, TOKEN);
-    rememberPaymentToken("SI-2026-001023", "b".repeat(64));
+    rememberPaymentToken(ME, ORDER, TOKEN);
+    rememberPaymentToken(ME, "SI-2026-001023", "b".repeat(64));
 
-    expect(recallPaymentToken(ORDER)).toBe(TOKEN);
-    expect(recallPaymentToken("SI-2026-001023")).toBe("b".repeat(64));
+    expect(recallPaymentToken(ME, ORDER)).toBe(TOKEN);
+    expect(recallPaymentToken(ME, "SI-2026-001023")).toBe("b".repeat(64));
     expect(backing.size).toBe(2);
-    expect(capabilityStorageKey(ORDER)).not.toBe(capabilityStorageKey("SI-2026-001023"));
+    expect(capabilityStorageKey(ME, ORDER)).not.toBe(capabilityStorageKey(ME, "SI-2026-001023"));
   });
 
   it("returns null for an order it never stored", () => {
     installStorage();
-    expect(recallPaymentToken("SI-2026-999999")).toBeNull();
+    expect(recallPaymentToken(ME, "SI-2026-999999")).toBeNull();
   });
 
   it("refuses to store or return a malformed token", () => {
     const backing = installStorage();
     // A stored value that is not a 64-hex capability cannot be one of ours,
     // and sending it would only produce a pointless round trip.
-    rememberPaymentToken(ORDER, "not-a-token");
+    rememberPaymentToken(ME, ORDER, "not-a-token");
     expect(backing.size).toBe(0);
 
-    backing.set(capabilityStorageKey(ORDER), "nonsense");
-    expect(recallPaymentToken(ORDER)).toBeNull();
+    backing.set(capabilityStorageKey(ME, ORDER), "nonsense");
+    expect(recallPaymentToken(ME, ORDER)).toBeNull();
   });
 
   it("forgets on request", () => {
     const backing = installStorage();
-    rememberPaymentToken(ORDER, TOKEN);
-    forgetPaymentToken(ORDER);
-    expect(recallPaymentToken(ORDER)).toBeNull();
+    rememberPaymentToken(ME, ORDER, TOKEN);
+    forgetPaymentToken(ME, ORDER);
+    expect(recallPaymentToken(ME, ORDER)).toBeNull();
     expect(backing.size).toBe(0);
   });
 
@@ -99,47 +111,47 @@ describe("the capability round-trips through sessionStorage", () => {
         },
       },
     });
-    expect(() => rememberPaymentToken(ORDER, TOKEN)).not.toThrow();
-    expect(recallPaymentToken(ORDER)).toBeNull();
-    expect(() => forgetPaymentToken(ORDER)).not.toThrow();
+    expect(() => rememberPaymentToken(ME, ORDER, TOKEN)).not.toThrow();
+    expect(recallPaymentToken(ME, ORDER)).toBeNull();
+    expect(() => forgetPaymentToken(ME, ORDER)).not.toThrow();
   });
 
   it("generates tokens that match the stored shape", () => {
     installStorage();
     const fresh = newPaymentToken();
-    rememberPaymentToken(ORDER, fresh);
-    expect(recallPaymentToken(ORDER)).toBe(fresh);
+    rememberPaymentToken(ME, ORDER, fresh);
+    expect(recallPaymentToken(ME, ORDER)).toBe(fresh);
   });
 });
 
 describe("the open order is remembered separately from the secret", () => {
   it("recalls only the order it was asked about", () => {
     installStorage();
-    rememberOpenOrder({ orderId: 23, orderNumber: ORDER });
-    expect(recallOpenOrder(ORDER)).toEqual({ orderId: 23, orderNumber: ORDER });
+    rememberOpenOrder(ME, { orderId: 23, orderNumber: ORDER });
+    expect(recallOpenOrder(ME, ORDER)).toEqual({ orderId: 23, orderNumber: ORDER });
     // An order number from anywhere else — a guessed one, a shared link —
     // matches nothing and reveals nothing.
-    expect(recallOpenOrder("SI-2026-000001")).toBeNull();
+    expect(recallOpenOrder(ME, "SI-2026-000001")).toBeNull();
   });
 
   it("refuses a stored value that is not a usable id", () => {
     const backing = installStorage();
     for (const bad of ['{"orderNumber":"' + ORDER + '","orderId":0}', "{", '{"orderId":23}']) {
       backing.set("skyisles.pay.v1.open", bad);
-      expect(recallOpenOrder(ORDER), bad).toBeNull();
+      expect(recallOpenOrder(ME, ORDER), bad).toBeNull();
     }
   });
 
   it("forgets on request", () => {
     installStorage();
-    rememberOpenOrder({ orderId: 23, orderNumber: ORDER });
-    forgetOpenOrder();
-    expect(recallOpenOrder(ORDER)).toBeNull();
+    rememberOpenOrder(ME, { orderId: 23, orderNumber: ORDER });
+    forgetOpenOrder(ME);
+    expect(recallOpenOrder(ME, ORDER)).toBeNull();
   });
 
   it("does not store the capability alongside it", () => {
     const backing = installStorage();
-    rememberOpenOrder({ orderId: 23, orderNumber: ORDER });
+    rememberOpenOrder(ME, { orderId: 23, orderNumber: ORDER });
     for (const value of backing.values()) {
       expect(value).not.toContain(TOKEN);
       expect(value).not.toMatch(/[0-9a-f]{64}/);
@@ -203,5 +215,94 @@ describe("the capability never leaves the places it is allowed to be", () => {
       "src/components/checkout/payment-status.tsx",
       "src/lib/commerce/start-payment.ts",
     ]);
+  });
+});
+
+
+/**
+ * The leak this release fixes.
+ *
+ * `sessionStorage` belongs to the tab, not to the session — so after a
+ * sign-out and a sign-in as somebody else, the same keys were still there,
+ * still readable, and still a working capability for the previous account's
+ * order. The second account was shown "Offene Bestellung SI-…" for an order
+ * that was never theirs (ADR-0061).
+ */
+describe("one account's payment state never reaches another", () => {
+  it("two accounts do not share a capability key", () => {
+    installStorage();
+    rememberPaymentToken(ME, ORDER, TOKEN);
+
+    expect(recallPaymentToken(THEM, ORDER)).toBeNull();
+    expect(recallPaymentToken(GUEST, ORDER)).toBeNull();
+    expect(capabilityStorageKey(ME, ORDER)).not.toBe(capabilityStorageKey(THEM, ORDER));
+    expect(capabilityStorageKey(ME, ORDER)).not.toBe(capabilityStorageKey(GUEST, ORDER));
+  });
+
+  it("two accounts do not share an open order", () => {
+    installStorage();
+    rememberOpenOrder(ME, { orderId: 41, orderNumber: ORDER });
+
+    expect(recallOpenOrder(ME)).toEqual({ orderId: 41, orderNumber: ORDER });
+    expect(recallOpenOrder(THEM)).toBeNull();
+    expect(recallOpenOrder(GUEST)).toBeNull();
+  });
+
+  it("a guest's open order does not follow them into an account", () => {
+    installStorage();
+    rememberOpenOrder(GUEST, { orderId: 41, orderNumber: ORDER });
+    expect(recallOpenOrder(ME)).toBeNull();
+  });
+
+  it("switching principal throws the other identity's state away", () => {
+    const backing = installStorage();
+    rememberPaymentToken(ME, ORDER, TOKEN);
+    rememberOpenOrder(ME, { orderId: 41, orderNumber: ORDER });
+    expect(backing.size).toBe(2);
+
+    // Signing in as somebody else.
+    forgetForeignPaymentState(THEM);
+
+    expect(backing.size).toBe(0);
+    expect(recallPaymentToken(ME, ORDER)).toBeNull();
+    expect(recallOpenOrder(ME)).toBeNull();
+  });
+
+  it("keeps the current principal's own state", () => {
+    const backing = installStorage();
+    rememberPaymentToken(ME, ORDER, TOKEN);
+    rememberOpenOrder(ME, { orderId: 41, orderNumber: ORDER });
+
+    forgetForeignPaymentState(ME);
+
+    expect(backing.size).toBe(2);
+    expect(recallPaymentToken(ME, ORDER)).toBe(TOKEN);
+  });
+
+  it("removes the unscoped keys this release replaces", () => {
+    const backing = installStorage();
+    // What the previous build wrote: no owner in the key at all.
+    backing.set("skyisles.pay.v1.open", JSON.stringify({ orderId: 9, orderNumber: ORDER }));
+    backing.set(`skyisles.pay.v1.${ORDER}`, TOKEN);
+
+    forgetForeignPaymentState(ME);
+
+    expect(backing.has("skyisles.pay.v1.open")).toBe(false);
+    expect(backing.has(`skyisles.pay.v1.${ORDER}`)).toBe(false);
+  });
+
+  it("survives a browser that refuses storage", () => {
+    vi.stubGlobal("window", {
+      sessionStorage: {
+        get length(): number {
+          throw new Error("denied");
+        },
+        key: () => null,
+        getItem: () => null,
+        setItem: () => undefined,
+        removeItem: () => undefined,
+      },
+    });
+    expect(() => forgetForeignPaymentState(ME)).not.toThrow();
   });
 });

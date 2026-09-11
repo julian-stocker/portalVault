@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { addToCart, getSnapshot, removeFromCart, resetCartStore, subscribe } from "@/lib/cart/store";
-import { cartCount, lineKey, MAX_LINE_QUANTITY } from "@/lib/cart/cart";
+import { GUEST } from "@/lib/auth/principal";
+import { addToCart, bindPrincipal, getSnapshot, removeFromCart, resetCartStore, subscribe } from "@/lib/cart/store";
+import { cartCount, GUEST_CART_KEY, lineKey, MAX_LINE_QUANTITY } from "@/lib/cart/cart";
 
 /**
  * "This one is already in your basket" (V11).
@@ -187,6 +188,7 @@ describe("what counts as 'in the cart'", () => {
 describe("it reacts to the cart itself", () => {
   it("shows the mark once a line exists, and drops it when it goes", () => {
     const off = subscribe(() => {});
+    bindPrincipal(GUEST);
     const key = lineKey(BASH.skyId, BASH.condition);
 
     const holds = () => getSnapshot().cart.some((l) => lineKey(l.skyId, l.condition) === key);
@@ -201,6 +203,7 @@ describe("it reacts to the cart itself", () => {
 
   it("is the same store the header and the floating cart read", () => {
     const off = subscribe(() => {});
+    bindPrincipal(GUEST);
     addToCart(BASH);
     addToCart(BASH);
     expect(cartCount(getSnapshot().cart)).toBe(2);
@@ -209,12 +212,13 @@ describe("it reacts to the cart itself", () => {
 
   it("follows a change made in another tab", () => {
     const off = subscribe(() => {});
+    bindPrincipal(GUEST);
     addToCart(BASH);
     expect(getSnapshot().cart).toHaveLength(1);
 
     // What a second tab does: rewrite the key, then the storage event.
-    entries.set("skyisles.cart.v1", JSON.stringify({ version: 2, lines: [] }));
-    for (const listener of storageListeners) listener({ key: "skyisles.cart.v1" });
+    entries.set(GUEST_CART_KEY, JSON.stringify({ version: 2, lines: [] }));
+    for (const listener of storageListeners) listener({ key: GUEST_CART_KEY });
 
     expect(getSnapshot().cart).toHaveLength(0);
     off();

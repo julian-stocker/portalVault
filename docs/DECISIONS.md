@@ -4664,3 +4664,143 @@ verfügbarer Bestand schadet keinem echten Kunden.
 - **Eine Rolle `TESTER` neben `USER`/`ADMIN`.** Additiv und klein, wie `shop_admins` — nicht eine
   Hierarchie, in der ein Admin automatisch alles darf.
 
+---
+
+## ADR-0061 — Warenkorb, Capability und Lieferdaten gehören einem Konto, nicht einem Browser
+
+**Status:** ANGENOMMEN (2026-09-11) · umgesetzt in Migration `0022`
+
+**Beobachtet im manuellen Browsertest.** Artikel als Gast in den Warenkorb gelegt, abgemeldet,
+mit einem anderen Profil angemeldet — derselbe Warenkorb war noch da. Und mehr: Das zweite Profil
+bekam *„Offene Bestellung SI-2026-001025 · Diese Bestellung gehört zu einer anderen Sitzung."*
+angezeigt, samt Schaltfläche „Zahlung erneut starten".
+
+**Root Cause, in einem Satz.** Jeder Zustand des Checkouts lag unter einem **festen Schlüssel ohne
+Eigentümer**:
+
+| Was | Wo | Folge |
+|---|---|---|
+| Warenkorb | `localStorage["skyisles.cart.v1"]` | ein Warenkorb je Browser, nicht je Konto |
+| Offene Bestellung | `sessionStorage["skyisles.pay.v1.open"]` | überlebt den Logout, der Tab überlebt ihn auch |
+| Capability | `sessionStorage["skyisles.pay.v1.<nr>"]` | dito, und sie funktioniert weiterhin |
+
+Der **Browser** war die Identität, nicht das Konto. Ein Wechsel des Kontos änderte deshalb an
+keinem dieser Schlüssel irgendetwas.
+
+Wichtig für die Einordnung: Die Datenbank hat nie etwas Falsches herausgegeben.
+`authorize_order_payment()` hat die fremde Bestellung korrekt verweigert — deshalb *stand da* auch
+„gehört zu einer anderen Sitzung". Das Leck war, dass die Oberfläche eine fremde Bestellnummer
+überhaupt anzeigte und eine Aktion dazu anbot. Hätte derselbe Tab noch die Capability des ersten
+Kontos gehalten, wäre aus der Anzeige eine **funktionierende Zahlung für eine fremde Bestellung**
+geworden: `authorize_order_payment()` ist ein ODER aus Konto **oder** Capability.
+
+### Entscheidung 1 — Warenkorb: Server für Konten, `localStorage` nur für Gäste
+
+Verglichen wurden die beiden vom Nutzer genannten Varianten:
+
+| | `localStorage` nach `user_id` namespacen | **Serverseitiger Kontowarenkorb** |
+|---|---|---|
+| Isolation | *versteckt* fremde Körbe | *unerreichbar* über RLS |
+| Auf dem Gerät | jeder Korb bleibt lokal liegen | nichts Fremdes liegt lokal |
+| Zweites Gerät | eigener Korb je Browser | derselbe Korb |
+| Kosten | keine Migration | eine Tabelle, vier Policies |
+
+Gewählt: **der Server**, für Angemeldete. Dieses Schema hat genau *einen* Mechanismus für „nur der
+Eigentümer", und `collection_items` benutzt ihn seit `0001`: RLS über `auth.uid()`. Ein
+Schlüsselname ist kein Mechanismus — er verbirgt, er verhindert nicht. Und die Erwartung, dass ein
+Warenkorb auf dem Telefon derselbe ist wie am Rechner, ist eine normale Shop-Erwartung, keine
+Erweiterung.
+
+**Das ist keine Umkehr von ADR-0043.** Dort steht unter *„Nicht in dieser Runde"* wörtlich:
+*serverseitiger Warenkorb, Kontobindung des Warenkorbs*. Es ist diese Runde. Was unverändert
+bleibt: Ein Warenkorb reserviert nichts, bucht nichts, fasst `shop_inventory` und `reserved` nicht
+an, und gerechnet wird immer mit `shop_offers()` von heute — der gespeicherte Preis dient nur dem
+Hinweis „Preis geändert".
+
+**Gäste behalten `localStorage`**, weil ein Gast kein Konto hat, an dem eine Zeile hängen könnte.
+Der Schlüssel heißt jetzt `skyisles.cart.v2.guest` und trägt den Eigentümer im Namen.
+
+**Der alte Schlüssel wird nicht migriert, sondern verworfen.** Es lässt sich nicht feststellen,
+wem er gehörte — und zu raten ist genau der Fehler, der das Leck erzeugt hat. Ein paar Leute
+bekommen einmal einen leeren Warenkorb.
+
+### Entscheidung 2 — jeder Browser-Schlüssel trägt einen Principal
+
+`guest` oder `u.<user_id>`, gesetzt von einer winzigen Client-Komponente in beiden Layouts, die
+die vom Server bekannte `user_id` weiterreicht. Beim Wechsel wird **jeder** Zahlungs-Schlüssel
+eines anderen Principals aus dem Tab entfernt, ebenso die alten Schlüssel ohne Eigentümer.
+
+Eine Capability folgt einem Menschen **nicht** über einen Identitätswechsel — auch nicht vom Gast
+ins eigene Konto. Das ist ein bewusster Verlust: Die Bestellung selbst bleibt erreichbar, über
+Nummer und Bestellmail.
+
+Der Principal ist **keine Sicherheitsgrenze** und gibt nicht vor, eine zu sein. Die Datenbank
+entscheidet, wer eine Bestellung sehen darf; das hier verhindert, dass ein Browser einem Menschen
+den Zustand eines anderen überhaupt *anbietet*.
+
+### Entscheidung 3 — die offene Bestellung wird erfragt, nicht geglaubt
+
+`sessionStorage` sagt jetzt nur noch, *welche* Bestellung dieser Tab bezahlt hat. Bevor irgendetwas
+angezeigt wird, fragt die Seite `order_payment_state()`. Kommt keine Zeile zurück — weil der
+Aufrufer nicht autorisiert ist —, wird der Hinweis **verworfen statt gerendert**, und die lokalen
+Schlüssel werden gelöscht.
+
+### Entscheidung 4 — der Zahlungs-CTA kommt aus dem Zahlungszustand
+
+`order_payment_state()` liefert zusätzlich `attempts`. Daraus:
+
+| Zustand | CTA |
+|---|---|
+| Bestellung da, **0** Versuche | **Zahlung starten** |
+| **≥ 1** Versuch, nicht abgeschlossen | **Zahlung erneut starten** |
+| bezahlt · storniert · erstattet · `needs_resolution` | **kein CTA** |
+
+Vorher wurde die Beschriftung daraus abgeleitet, *dass* eine Bestellung existierte — was die
+Frage nicht ist.
+
+### Entscheidung 5 — gespeicherte Lieferdaten sind eine eigene Tabelle
+
+`customer_contacts`, nicht Spalten auf `profiles`. Ein Profil ist die öffentliche Hälfte einer
+Identität — Benutzername, Avatar; dies ist eine Postanschrift. In einer Tabelle entschiede **eine**
+Policy über beides, und an dem Tag, an dem eine öffentliche Sammlerseite Profile breiter lesbar
+macht, ginge die Anschrift mit.
+
+**Die Bestelladresse bleibt ein Snapshot.** `order_addresses` wird von `create_order()` geschrieben
+und vom Append-only-Trigger aus `0010` eingefroren. `customer_contacts` ist ein **Vorschlag für
+ein Formular**; eine Änderung dort kann eine alte Bestellung nicht umschreiben. Genau dafür sind
+es zwei Tabellen. `0022` fasst weder `create_order()` noch `order_addresses` noch den Trigger an —
+ein Test prüft das am Migrationstext.
+
+Das Speichern ist **opt-in und standardmäßig aus**: Die Anschrift eines Menschen aufzubewahren ist
+dessen Entscheidung, nichts, das ihm passiert. Löschen ist im Kontobereich jederzeit möglich.
+
+### Entscheidung 6 — der Kontobereich bekommt eine Struktur
+
+`/settings` war Benutzername, Passwort und Abmelden in einer Spalte; eigene Bestellungen gab es
+nirgends. Jetzt `/account` als Einstieg mit vier Zielen: **Profil**, **Kontakt & Lieferadresse**,
+**Meine Bestellungen**, **Konto & Sicherheit**. Mobile-first eine Spalte voller daumengroßer
+Zeilen — keine Tabs, keine Sidebar: auf dem Telefon sind beides Reihen zu kleiner Ziele.
+
+`/settings` bleibt als permanenter Redirect; der Pfad steht in Lesezeichen und im Onboarding.
+Abmelden wandert nach „Konto & Sicherheit" — eine destruktiv wirkende Schaltfläche in einer Leiste,
+die auf jedem Bildschirm steht, trifft irgendwann jemand versehentlich.
+
+**Meine Bestellungen** liest `my_orders()` / `my_order()` statt der Tabelle: Ein Tabellenrecht ist
+spaltenblind, und `orders` trägt `client_hash`, `payment_token_hash` und `request_id`. Dieselbe
+Begründung, die `shop_offers()` zu einer Funktion gemacht hat (ADR-0043). Gastbestellungen
+erscheinen dort **nicht** — sie haben keine `user_id`, und über die E-Mail-Adresse zu matchen hieße,
+eine Adresse zu einem Zugangsmerkmal zu machen (ADR-0032).
+
+**Konsequenzen.**
+
+- Zwei neue Tabellen, beide mit denselben vier Eigentümer-Policies wie `collection_items`.
+- `order_payment_state()` wächst um `attempts` und wird dafür gedroppt und neu angelegt.
+- Der Commerce-Modus aus ADR-0060 bleibt vollständig erhalten; `0022` fasst ihn nicht an.
+- Ein Gast merkt vom Ganzen nichts außer einem neuen Schlüsselnamen.
+
+**Verworfen:** `localStorage` nach `user_id` namespacen (versteckt statt verhindert) · Adresse als
+Spalten auf `profiles` (eine Policy für zwei Empfindlichkeiten) · Warenkorb-Merge per „größere
+Menge gewinnt" (verliert stillschweigend eine Zeile, die jemand gewählt hat) · Gastbestellungen
+über die E-Mail-Adresse ins Konto holen · den alten Warenkorbschlüssel migrieren · ein
+Kontext-Provider statt eines Modul-Stores für den Principal (zwei Antworten, wo es eine gibt).
+

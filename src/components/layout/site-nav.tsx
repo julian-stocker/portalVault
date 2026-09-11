@@ -116,7 +116,7 @@ const DESTINATIONS: readonly {
   },
 
   {
-    href: "/settings",
+    href: "/account",
     label: de.nav.settings,
     section: "account",
     applies: (viewer) => viewer.signedIn,

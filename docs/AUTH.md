@@ -217,6 +217,23 @@ ausdrücklich nicht genügte — interne Daten wurden gar nicht erst ausgeliefer
   sie bricht diese Zusage — Details in `docs/DATABASE.md`.
   **OPEN:** Self-Service-Löschung in V1 anbieten? (DSGVO-relevant, siehe `docs/SECURITY.md`.)
 
+### Der Kontobereich (ab ADR-0061)
+
+`/account` ist der Einstieg, mit vier Zielen: **Profil** (Benutzername), **Kontakt &
+Lieferadresse**, **Meine Bestellungen**, **Konto & Sicherheit** (Passwort, Abmelden). `/settings` ist ein permanenter Redirect darauf — der Pfad steht in
+Lesezeichen und im Onboarding.
+
+`PROTECTED_PREFIXES` in `src/lib/supabase/middleware.ts` deckt `/account` als Präfix ab, und jede
+der fünf Seiten prüft die Sitzung zusätzlich serverseitig über `currentProfile()`. Die Middleware
+ist Bequemlichkeit; RLS bleibt die Grenze.
+
+**Der Browser trägt seit ADR-0061 einen Principal.** Warenkorb, Capability und offene Bestellung
+liegen unter einem Schlüssel, der `guest` oder `u.<user_id>` enthält; bei jedem Identitätswechsel
+wird der Zustand jedes anderen Principals aus dem Tab entfernt. Das ist **keine**
+Sicherheitsgrenze — `authorize_order_payment()` entscheidet weiterhin, wer eine Bestellung sehen
+und bezahlen darf. Es verhindert, dass ein Browser einem Menschen den Zustand eines anderen
+überhaupt anbietet.
+
 ### Rollen und Berechtigungen — seit `0003` gibt es `shop_admins`
 
 **In V1 gibt es keine Rollen.** Jeder angemeldete Benutzer hat exakt dieselben Rechte, und

@@ -14,6 +14,7 @@ import {
   type PaymentView,
 } from "@/lib/commerce/payment-state";
 import { formatPrice } from "@/lib/format";
+import { currentPrincipal } from "@/lib/auth/principal";
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/client";
 
@@ -54,7 +55,7 @@ export function PaymentStatus({ orderNumber }: { orderNumber: string }) {
       const supabase = createClient();
       // The token is only sent when we actually hold one. A signed-in owner
       // needs none: the function accepts their verified auth.uid().
-      const token = recallPaymentToken(orderNumber);
+      const token = recallPaymentToken(currentPrincipal(), orderNumber);
       const { data, error } = await supabase.rpc("order_payment_state", {
         p_order_number: orderNumber,
         p_token: token,
@@ -114,7 +115,7 @@ export function PaymentStatus({ orderNumber }: { orderNumber: string }) {
    * and a secret held past its purpose is exposure for nothing (ADR-0056).
    */
   useEffect(() => {
-    if (loaded && isTerminal(view)) forgetPaymentToken(orderNumber);
+    if (loaded && isTerminal(view)) forgetPaymentToken(currentPrincipal(), orderNumber);
   }, [loaded, view, orderNumber]);
 
   const copy = de.checkout.result;

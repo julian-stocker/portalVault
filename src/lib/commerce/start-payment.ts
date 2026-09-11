@@ -1,5 +1,6 @@
 "use client";
 
+import { currentPrincipal } from "@/lib/auth/principal";
 import { recallPaymentToken } from "@/lib/commerce/capability";
 import { createClient } from "@/lib/supabase/client";
 
@@ -77,7 +78,7 @@ export async function startPayment(
 
   const body: { order_id: number; payment_token?: string } = { order_id: orderId };
   if (orderNumber) {
-    const token = recallPaymentToken(orderNumber);
+    const token = recallPaymentToken(currentPrincipal(), orderNumber);
     if (token !== null) body.payment_token = token;
   }
 

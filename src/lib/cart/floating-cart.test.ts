@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { CART_STORAGE_KEY, cartCount, decodeCart, encodeCart, addLine } from "@/lib/cart/cart";
-import { addToCart, getSnapshot, resetCartStore, subscribe } from "@/lib/cart/store";
+import { GUEST_CART_KEY, cartCount, decodeCart, encodeCart, addLine } from "@/lib/cart/cart";
+import { GUEST } from "@/lib/auth/principal";
+import { addToCart, bindPrincipal, getSnapshot, resetCartStore, subscribe } from "@/lib/cart/store";
 import { activeSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
 
@@ -217,7 +218,7 @@ describe("the cart architecture is untouched", () => {
     expect(round).toEqual(cart);
     expect(round[0].skyId).toBe("SKY-0007");
     expect(round[0].condition).toBe("loose");
-    expect(CART_STORAGE_KEY).toBe("skyisles.cart.v1");
+    expect(GUEST_CART_KEY).toBe("skyisles.cart.v2.guest");
   });
 
   it("adds no provider, no second store and no server call", () => {
@@ -228,10 +229,15 @@ describe("the cart architecture is untouched", () => {
     expect(floating).not.toContain("Provider");
   });
 
-  it("reads a cart written before it existed", () => {
+  it("reads a guest cart written before it existed", () => {
     const stored = encodeCart(addLine([], BASH, 3));
-    storage.setItem(CART_STORAGE_KEY, stored);
+    storage.setItem(GUEST_CART_KEY, stored);
     const off = subscribe(() => {});
+    // Binding is explicit since ADR-0061: the store shows nothing until it
+    // knows whose basket to show, so a signed-in person never sees a guest's
+    // count in the gap before the layout's gate has spoken.
+    expect(getSnapshot().ready).toBe(false);
+    bindPrincipal(GUEST);
     expect(cartCount(getSnapshot().cart)).toBe(3);
     off();
   });

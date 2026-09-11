@@ -38,7 +38,14 @@ import {
 } from "@/lib/commerce/field-errors";
 import { cartTotal, keyOf, resolveCart } from "@/lib/cart/cart";
 import { placeOrder, shippingOptions, type PlacedOrder } from "@/lib/commerce/actions";
-import { recallOpenOrder, rememberOpenOrder, rememberPaymentToken } from "@/lib/commerce/capability";
+import {
+  forgetOpenOrder,
+  forgetPaymentToken,
+  recallOpenOrder,
+  rememberOpenOrder,
+  rememberPaymentToken,
+} from "@/lib/commerce/capability";
+import { readOpenOrderState, type OpenOrderView } from "@/lib/commerce/open-order-client";
 import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
 import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
 import { conditionLabel } from "@/components/shop/shop-action";
@@ -50,6 +57,9 @@ import {
 } from "@/lib/commerce/shipping";
 import type { DraftAddress, DraftProblem } from "@/lib/commerce/order";
 import { formatPrice } from "@/lib/format";
+import { saveContact } from "@/lib/account/actions";
+import type { SavedContact } from "@/lib/account/contact-model";
+import { currentPrincipal } from "@/lib/auth/principal";
 import { de } from "@/lib/i18n/de";
 import { offerIndex, type Offer } from "@/lib/shop/offer";
 
@@ -164,6 +174,8 @@ function messageFor(reason: PaymentStartFailure): string {
 export function CheckoutView({
   offers,
   email,
+  contact,
+  saveDefaultAllowed,
   resumeOrderNumber,
 }: {
   offers: Readonly<Record<string, readonly Offer[]>>;
@@ -175,10 +187,30 @@ export function CheckoutView({
    * it is the one that placed that order. If the stored open order does not
    * match, nothing is offered and nothing is revealed.
    */
+  /**
+   * What this account has saved, or null for a guest and for an account that
+   * has saved nothing. A **prefill**, never authority: whatever is in the
+   * form when it is submitted is what `create_order()` snapshots (ADR-0061).
+   */
+  contact?: SavedContact | null;
+  /** Whether "save as my default" may be offered. False for a guest. */
+  saveDefaultAllowed?: boolean;
   resumeOrderNumber?: string;
 }) {
   const { cart, ready, clear } = useCart();
-  const [fields, setFields] = useState<Fields>({ ...EMPTY, email });
+  /*
+   * Saved details win over the bare session address, and an explicitly saved
+   * contact address wins over the one somebody signed up with — that is what
+   * saving it was for.
+   */
+  const [fields, setFields] = useState<Fields>(() => ({
+    ...EMPTY,
+    ...(contact ?? {}),
+    email: contact?.email?.trim() || email,
+    countryCode: DELIVERY_COUNTRY,
+  }));
+  /** Offered only to an account, and only once the form has something in it. */
+  const [saveAsDefault, setSaveAsDefault] = useState(false);
   const [method, setMethod] = useState<ShippingMethod>(DEFAULT_SHIPPING_METHOD);
   const [options, setOptions] = useState<ShippingOption[]>([]);
   const [problems, setProblems] = useState<DraftProblem[]>([]);
@@ -192,6 +224,16 @@ export function CheckoutView({
   const [paymentError, setPaymentError] = useState<string | null>(null);
   /** False until the `?order=` hint has been matched against this tab. */
   const [resumeChecked, setResumeChecked] = useState(false);
+  /**
+   * What the database says about the open order, or null.
+   *
+   * The panel is not rendered without it. Storage can only ever be a hint: it
+   * said which order this tab was paying for, and the observed bug was that it
+   * kept saying so after somebody else signed in. `order_payment_state()`
+   * returns no row to a caller it has not authorised, so asking is what makes
+   * the panel impossible to show to the wrong account (ADR-0061).
+   */
+  const [openState, setOpenState] = useState<OpenOrderView | null>(null);
   // Checked and set before the first await, so two taps in one frame cannot
   // both get past it — the same guard `useAddToCart` uses.
   const busy = useRef(false);
@@ -248,24 +290,51 @@ export function CheckoutView({
    */
   useEffect(() => {
     if (placed || resumeChecked) return;
+    let cancelled = false;
+
     // Deferred by a task: `sessionStorage` must not be read during render, and
     // setting state synchronously inside an effect makes React cascade.
     const timer = setTimeout(() => {
-      const open = recallOpenOrder(resumeOrderNumber || undefined);
-      if (open) {
+      void (async () => {
+        const principal = currentPrincipal();
+        const open = recallOpenOrder(principal, resumeOrderNumber || undefined);
+        if (!open) {
+          if (!cancelled) setResumeChecked(true);
+          return;
+        }
+
+        // Ask before showing. A hint that the database will not confirm is a
+        // hint about somebody else's order, and it is dropped rather than
+        // rendered.
+        const state = await readOpenOrderState(principal, open.orderNumber);
+        if (cancelled) return;
+
+        if (state === null) {
+          forgetOpenOrder(principal);
+          forgetPaymentToken(principal, open.orderNumber);
+          setResumeChecked(true);
+          return;
+        }
+
+        setOpenState(state);
         setPlaced({
           orderId: open.orderId,
           orderNumber: open.orderNumber,
-          // A reload keeps the order, not its figures. The canonical total is
-          // on the status page; inventing one here would be worse than none.
+          // A reload keeps the order, not its figures. The total comes back
+          // from the database above when it has one; inventing one would be
+          // worse than showing none.
           itemsSubtotal: Number.NaN,
           shippingAmount: Number.NaN,
-          totalAmount: Number.NaN,
+          totalAmount: state.totalAmount ?? Number.NaN,
         });
-      }
-      setResumeChecked(true);
+        setResumeChecked(true);
+      })();
     }, 0);
-    return () => clearTimeout(timer);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [resumeOrderNumber, placed, resumeChecked]);
 
   const entries = resolveCart(cart, offerIndex(offers));
@@ -332,10 +401,10 @@ export function CheckoutView({
     setProblems([]);
 
     try {
-      const { email: contact, ...address } = fields;
+      const { email: contactEmail, ...address } = fields;
       const result = await placeOrder(
         {
-          email: contact,
+          email: contactEmail,
           address,
           shippingMethod: method,
           items: purchasable.map((entry) => ({
@@ -354,11 +423,23 @@ export function CheckoutView({
         setPlaced(result.order);
         clear();
 
+        /*
+         * Saving the default is deliberately AFTER the order exists and is
+         * not awaited: it is a convenience, and a failure to remember an
+         * address must never cost somebody the order they just placed. The
+         * order carries its own snapshot either way (ADR-0061).
+         */
+        if (saveAsDefault && saveDefaultAllowed) {
+          void saveContact({ email: contactEmail, ...address }).catch(() => {
+            /* Nothing to tell the customer: their order went through. */
+          });
+        }
+
         // Written before the payment call, not after: if anything below fails,
         // the order still exists and holds stock, and the customer must still
         // be able to prove it is theirs (ADR-0056).
-        rememberPaymentToken(result.order.orderNumber, credentials.current!.paymentToken);
-        rememberOpenOrder({
+        rememberPaymentToken(currentPrincipal(), result.order.orderNumber, credentials.current!.paymentToken);
+        rememberOpenOrder(currentPrincipal(), {
           orderId: result.order.orderId,
           orderNumber: result.order.orderNumber,
         });
@@ -433,13 +514,26 @@ export function CheckoutView({
    * been paid, and B1's wording would now be untrue.
    */
   if (placed) {
+    /*
+     * An order that was just placed in this session has, by definition, had
+     * no payment attempt yet — so `start`. One recovered from storage brings
+     * the database's answer with it.
+     */
+    const cta = openState?.cta ?? "start";
+
     return (
       <div className={`${PANEL} flex flex-col gap-4`}>
         <h2 className="text-lg font-semibold">
           {de.checkout.payment.openOrder(placed.orderNumber)}
         </h2>
         <p className="text-sm text-on-deep-muted">
-          {redirecting ? de.checkout.redirecting : de.checkout.payment.resumeHint}
+          {redirecting
+            ? de.checkout.redirecting
+            : cta === "none"
+              ? de.checkout.payment.settledHint
+              : cta === "retry"
+                ? de.checkout.payment.retryHint
+                : de.checkout.payment.resumeHint}
         </p>
 
         {paymentError ? (
@@ -480,14 +574,26 @@ export function CheckoutView({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => void retryPayment()}
-            disabled={redirecting}
-            className={`${ACTION_NEUTRAL} w-auto disabled:opacity-40`}
-          >
-            {redirecting ? de.checkout.redirecting : de.checkout.payment.retry}
-          </button>
+          {/* The wording, and whether there is a button at all, come from what
+              actually happened to this order — not from the fact that one
+              exists. A customer who has never started a payment is not
+              retrying anything, and a paid order must never be offered a
+              second one (ADR-0061). A freshly placed order has made no
+              attempt yet, which is exactly `start`. */}
+          {cta === "none" ? null : (
+            <button
+              type="button"
+              onClick={() => void retryPayment()}
+              disabled={redirecting}
+              className={`${ACTION_NEUTRAL} w-auto disabled:opacity-40`}
+            >
+              {redirecting
+                ? de.checkout.redirecting
+                : cta === "retry"
+                  ? de.checkout.payment.retry
+                  : de.checkout.payment.start}
+            </button>
+          )}
           <Link href="/" className="text-sm underline underline-offset-4">
             {de.checkout.result.toCatalog}
           </Link>
@@ -591,6 +697,30 @@ export function CheckoutView({
           ))}
         </div>
       </section>
+
+      {/* ------------------------------------------- keep these for next time
+          Offered only to an account: a guest has nowhere to save it to, and a
+          checkbox that quietly does nothing is worse than no checkbox. Off by
+          default — keeping somebody's postal address is their decision, not a
+          thing that happens to them (ADR-0061). */}
+      {saveDefaultAllowed ? (
+        <section className={PANEL}>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={saveAsDefault}
+              onChange={(event) => setSaveAsDefault(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-accent"
+            />
+            <span>
+              <span className="font-medium">{de.checkout.saveDefault}</span>
+              <span className="mt-0.5 block text-on-deep-muted">
+                {de.checkout.saveDefaultHint}
+              </span>
+            </span>
+          </label>
+        </section>
+      ) : null}
 
       {/* ------------------------------------------------------------ summary */}
       <section className={PANEL}>

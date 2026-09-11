@@ -183,6 +183,35 @@ pflegt und die in Mails und später im Impressum steht. Sie ist kein Zugangsmerk
 nirgends als eines gelesen. Die Tabelle ist für `anon` und `authenticated` vollständig gesperrt;
 der einzige Weg nach außen ist `business_settings_public()`, das seine Spalten wörtlich aufzählt.
 
+### Browserzustand trägt einen Eigentümer (ab ADR-0061)
+
+Gefunden im manuellen Browsertest am 2026-09-11: Warenkorb, offene Bestellung und
+Zahlungs-Capability lagen unter **festen Schlüsseln ohne Eigentümer**
+(`skyisles.cart.v1`, `skyisles.pay.v1.open`, `skyisles.pay.v1.<nr>`). Der Browser war die
+Identität, nicht das Konto — also überlebte jeder dieser Werte einen Abmelde- und Anmeldevorgang,
+und das zweite Konto bekam die offene Bestellung des ersten angezeigt.
+
+**Die Datenbank hat dabei nichts Falsches herausgegeben.** `authorize_order_payment()` hat die
+fremde Bestellung korrekt verweigert. Das Leck lag darin, dass die Oberfläche eine fremde
+Bestellnummer überhaupt anzeigte — und darin, dass die Capability desselben Tabs sie im ungünstigen
+Fall auch bezahlbar gemacht hätte: Die Autorisierung ist ein ODER aus Konto **oder** Capability.
+
+Die Regeln daraus:
+
+- **Jeder Browser-Schlüssel mit Kontobezug trägt einen Principal** (`guest` oder `u.<user_id>`).
+- **Bei jedem Identitätswechsel wird der Zustand jedes anderen Principals aus dem Tab entfernt**,
+  einschließlich der alten Schlüssel ohne Eigentümer.
+- **Eine Capability folgt keinem Menschen über einen Identitätswechsel**, auch nicht vom Gast ins
+  eigene Konto.
+- **Ein Hinweis aus dem Browser wird erfragt, nicht geglaubt.** Bevor eine offene Bestellung
+  angezeigt wird, muss `order_payment_state()` sie für diesen Aufrufer bestätigen; kommt keine
+  Zeile, wird der Hinweis verworfen und der lokale Schlüssel gelöscht.
+- Der Principal ist **keine** Sicherheitsgrenze. Er verhindert das Anbieten, nicht den Zugriff —
+  den verhindert weiterhin die Datenbank.
+
+Der Warenkorb eines angemeldeten Kontos liegt seit `0022` in `cart_items` unter RLS. Ein
+Schlüsselname verbirgt einen fremden Warenkorb; eine Policy macht ihn unerreichbar.
+
 ### `data/characters/characters.json` gehört ausdrücklich **nicht** auf die Verbotsliste
 
 Diese Datei liegt im Repository und darf das. Sie ist **öffentliche Produktinformation über

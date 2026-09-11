@@ -214,7 +214,21 @@ export function unavailableEntries(entries: readonly CartEntry[]): CartEntry[] {
  * build does not know, is discarded — a wrong cart is worse than an empty
  * one, and there is nothing here that cannot be chosen again in two taps.
  */
-export const CART_STORAGE_KEY = "skyisles.cart.v1";
+/**
+ * The GUEST basket's key, and only the guest's.
+ *
+ * The old key was `skyisles.cart.v1` with no owner in it, which is why one
+ * account could see another's basket (ADR-0061). A signed-in basket is now a
+ * row in `cart_items`; what is left here belongs to whoever is not signed in.
+ *
+ * The version is bumped rather than reused, and the old key is deliberately
+ * NOT migrated: there is no way to tell whose basket it was, and guessing is
+ * what caused the leak. A few people get an empty basket once.
+ */
+export const GUEST_CART_KEY = "skyisles.cart.v2.guest";
+
+/** The key this release abandons. Removed on sight, never read. */
+export const ABANDONED_CART_KEY = "skyisles.cart.v1";
 
 /**
  * 1 stored `imageFile`, a bare file name; 2 stores `imageSrc`, a URL.

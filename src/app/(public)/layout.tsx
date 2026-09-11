@@ -1,3 +1,4 @@
+import { PrincipalGate } from "@/components/layout/principal-gate";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
@@ -24,6 +25,8 @@ export default async function PublicLayout({ children }: { children: React.React
       {/* The world starts behind the header, not below it (ADR-0038, V3.3).
           Owned by the layout so it survives navigation between the two
           route groups. */}
+      {/* Who this browser is acting as. Draws nothing (ADR-0061). */}
+      <PrincipalGate userId={user?.id ?? null} />
       <WorldZone />
       <SiteNav signedIn={Boolean(user)} admin={admin} openOrders={openOrders} />
       {/* `flex-1` so a short page still pushes the footer to the bottom of the

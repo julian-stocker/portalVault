@@ -574,6 +574,26 @@ export const de = {
       trackingTooLong: "Diese Trackingnummer ist zu lang.",
 
       /**
+       * Trackingnummer und Versandstatus sind zwei Zustände (ADR-0062):
+       * Label zuerst kaufen, später versenden, notfalls Label tauschen.
+       */
+      trackingHeading: "Sendungsnummer",
+      trackingBeforeShippingHint:
+        "Du kannst die Nummer schon eintragen, bevor du die Bestellung als versendet " +
+        "markierst. Das verschickt nichts und benachrichtigt niemanden.",
+      trackingAfterShippingHint:
+        "Die Bestellung ist bereits versendet. Eine Korrektur der Nummer ändert weder das " +
+        "Versanddatum noch löst sie eine zweite Versandbestätigung aus.",
+      trackingCurrent: "Aktuell:",
+      trackingEditHint: "Leer lassen und speichern entfernt die Nummer.",
+      trackingSave: "Nummer speichern",
+      trackingReplace: "Nummer ersetzen",
+      trackingSaved: "Gespeichert.",
+      trackingRefused: "Diese Nummer konnte nicht gespeichert werden.",
+      shipUsesRecordedTracking:
+        "Es wird die unten eingetragene Sendungsnummer verwendet. Du kannst sie auch " +
+        "nachträglich noch ändern.",
+      /**
        * Die Rückfrage vor der einzigen unumkehrbaren Aktion des Systems
        * (UX-Beta, F6).
        *
@@ -864,6 +884,64 @@ export const de = {
    * reserviert, bezahlt wird im nächsten Schritt. Die Texte sagen das
    * ausdrücklich, statt eine abgeschlossene Zahlung anzudeuten.
    */
+  /** Der Kontobereich (ADR-0061). Mobile-first, eine Ebene, klare Namen. */
+  account: {
+    title: "Mein Konto",
+    overviewHint: "Alles, was zu deinem Konto gehört.",
+
+    profile: {
+      title: "Profil",
+      hint: "Dein Benutzername im Katalog.",
+    },
+    contact: {
+      title: "Kontakt & Lieferadresse",
+      hint: "Wird an der Kasse vorausgefüllt. Du kannst sie dort für eine Bestellung ändern.",
+      intro:
+        "Diese Angaben gelten als Standard für künftige Bestellungen. Bereits aufgegebene " +
+        "Bestellungen behalten die Adresse, die zum Bestellzeitpunkt galt — eine Änderung hier " +
+        "ändert sie nicht.",
+      save: "Speichern",
+      saved: "Gespeichert.",
+      remove: "Gespeicherte Daten löschen",
+      removed: "Gelöscht.",
+      empty: "Noch nichts gespeichert.",
+      saveFailed: "Das hat nicht geklappt.",
+      signInFirst: "Bitte melde dich an.",
+    },
+    orders: {
+      title: "Meine Bestellungen",
+      hint: "Alle Bestellungen dieses Kontos.",
+      empty: "Du hast noch nichts bestellt.",
+      emptyHint: "Sobald du bestellst, findest du hier den Stand.",
+      placedAt: "Bestellt am",
+      total: "Summe",
+      articles: (n: number) => (n === 1 ? "1 Artikel" : `${n} Artikel`),
+      testBadge: "TEST",
+      /** Gastbestellungen hängen nicht am Konto, sondern an der Mail. */
+      guestNote:
+        "Bestellungen, die du ohne Anmeldung aufgegeben hast, erscheinen hier nicht. Den Stand " +
+        "findest du über den Link in der Bestellmail.",
+      shippingAddress: "Lieferadresse",
+      shippingMethod: "Versand",
+      tracking: "Sendungsnummer",
+      snapshotNote:
+        "Diese Adresse ist der Stand zum Bestellzeitpunkt und ändert sich nicht mehr.",
+      notFound: "Diese Bestellung gehört nicht zu deinem Konto.",
+      /** Beide Zustandsachsen als ein Wort — der Kunde will wissen, wo sein Paket ist. */
+      statusLabel: {
+        awaiting_payment: "Zahlung offen",
+        paid: "Bezahlt",
+        shipped: "Verschickt",
+        needs_attention: "Wird geprüft",
+        closed: "Abgeschlossen",
+      } as Record<string, string>,
+    },
+    security: {
+      title: "Konto & Sicherheit",
+      hint: "Passwort ändern und abmelden.",
+    },
+  },
+
   checkout: {
     title: "Kasse",
 
@@ -896,6 +974,13 @@ export const de = {
     country: "Land",
     countryFixed: "Deutschland",
     countryHint: "SkyIsles liefert derzeit nur innerhalb Deutschlands.",
+
+    /** Nur für angemeldete Konten; ein Gast hat keinen Ort dafür (ADR-0061). */
+    saveDefault: "Diese Angaben für künftige Bestellungen speichern",
+    saveDefaultHint:
+      "Sie werden dann an der Kasse vorausgefüllt. Du kannst sie jederzeit unter " +
+      "\u201EKontakt & Lieferadresse\u201C ändern oder löschen. Diese Bestellung behält die " +
+      "Adresse, die du hier eingegeben hast.",
 
     shippingHeading: "Versand",
     shippingFree: "Kostenlos",
@@ -982,11 +1067,22 @@ export const de = {
 
     /** Die Bestellung existiert, nur der Start der Zahlung ist gescheitert. */
     payment: {
+      /**
+       * Drei Fälle, und sie werden aus dem tatsächlichen Zahlungszustand
+       * abgeleitet, nicht daraus, dass eine Bestellung existiert (ADR-0061).
+       */
+      start: "Zahlung starten",
       retry: "Zahlung erneut starten",
       openOrder: (number: string) => `Offene Bestellung ${number}`,
       resumeHint:
         "Diese Bestellung ist angelegt und die Ware für dich vorgemerkt. Du kannst die Zahlung " +
         "jetzt starten.",
+      retryHint:
+        "Die Zahlung wurde noch nicht abgeschlossen. Deine Bestellung besteht weiter und die " +
+        "Ware bleibt für dich vorgemerkt.",
+      settledHint:
+        "Für diese Bestellung ist nichts mehr zu tun. Den aktuellen Stand findest du unter " +
+        "\u201EMeine Bestellungen\u201C.",
       errorNotPayable:
         "Die Reservierung für diese Bestellung ist abgelaufen. Bitte lege den Artikel erneut in " +
         "den Warenkorb.",

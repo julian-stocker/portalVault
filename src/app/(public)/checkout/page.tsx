@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CheckoutView } from "@/components/checkout/checkout-view";
+import { fetchSavedContact } from "@/lib/account/contacts";
 import { checkoutAccess } from "@/lib/commerce/access";
 import { de } from "@/lib/i18n/de";
 import { offerRecord } from "@/lib/shop/offer";
@@ -46,6 +47,10 @@ export default async function CheckoutPage({
   const supabase = await createClient();
   const { data } = await supabase.auth.getUser();
 
+  // What this account has saved, if anything. RLS returns their row and no
+  // other; a guest gets null and is asked for everything, as before.
+  const contact = await fetchSavedContact();
+
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
       <h1
@@ -59,6 +64,8 @@ export default async function CheckoutPage({
           <CheckoutView
             offers={offerRecord(offers)}
             email={data.user?.email ?? ""}
+            contact={contact}
+            saveDefaultAllowed={Boolean(data.user)}
             resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
           />
         ) : (

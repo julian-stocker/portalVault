@@ -688,6 +688,54 @@ anderes entgegen — eine Adresse identifiziert ein Konto, sie autorisiert keine
 Quervergleich erkennbar ist.
 
 
+### 3.3n Kontozustand — `cart_items` und `customer_contacts` (Migration `0022`, ADR-0061)
+
+Zwei Tabellen, beide mit genau den vier Eigentümer-Policies, die `collection_items` seit `0001`
+hat. Das ist der ganze Grund, warum es Tabellen sind: Dieses Schema hat **einen** Mechanismus für
+„nur der Eigentümer", und das ist RLS über `auth.uid()`.
+
+#### `cart_items` — der Warenkorb eines angemeldeten Kontos
+
+Primärschlüssel `(user_id, sky_id, condition)` — dieselbe Zeilenidentität wie Lagerposition,
+Angebot und Bestellzeile. `anon` bekommt **keinerlei** Recht: Ein Gast hat kein Konto, also auch
+keine Zeile, die seine sein könnte. Gäste behalten den lokalen Warenkorb
+(`localStorage["skyisles.cart.v2.guest"]`).
+
+**Ein Warenkorb reserviert weiterhin nichts.** Keine Bewegung, kein `reserved`, kein Zugriff auf
+`shop_inventory` — nur `create_order()` macht aus einer Absicht einen Halt (ADR-0043). Gespeichert
+wird Identität, Menge und der Preis beim Hinzufügen; Name und Bild kommen beim Lesen aus dem
+Katalog, damit „die Serverdaten gewinnen" auch über Geräte hinweg gilt.
+
+`merge_guest_cart(jsonb)` faltet beim Anmelden einen Gastkorb hinein: Mengen **addieren** sich und
+werden bei `max_cart_quantity()` gekappt. Die Regel liegt in SQL, damit zwei gleichzeitig
+anmeldende Tabs nicht um eine falsche Zahl rennen können. Fehlerhafte Zeilen werden übersprungen,
+nicht geworfen — das läuft während einer Anmeldung.
+
+#### `customer_contacts` — gespeicherte Kontakt- und Lieferdaten
+
+Eine Zeile je Konto, jedes Feld nullbar: Es ist ein halb ausgefülltes Formular, das jemand
+speichern darf, keine abgeschlossene Bestellung. Bewusst **nicht** Spalten auf `profiles` — ein
+Profil ist die öffentliche Hälfte einer Identität, dies ist eine Postanschrift, und eine Tabelle
+hieße eine Policy für beide Empfindlichkeiten.
+
+> **Die Bestelladresse bleibt ein Snapshot.** `order_addresses` schreibt `create_order()`, und der
+> Append-only-Trigger aus `0010` friert sie ein. `customer_contacts` ist ein **Vorschlag für ein
+> Formular**; eine Änderung dort kann eine bestehende Bestellung nicht umschreiben. `0022` fasst
+> weder `create_order()` noch `order_addresses` noch den Trigger an.
+
+#### Was ein Kunde über eigene Bestellungen lesen darf
+
+| Funktion | Antwort |
+|---|---|
+| `my_orders(limit)` | die eigenen Bestellungen, ohne `client_hash`, `payment_token_hash`, `request_id` |
+| `my_order(nummer)` | eine davon als Dokument, mit der **Adresse zum Bestellzeitpunkt** |
+| `order_payment_state(nummer, token)` | zusätzlich `attempts` — daraus wird der Zahlungs-CTA abgeleitet |
+
+Beide Erstere matchen auf `user_id`, niemals auf eine Adresse: Gastbestellungen erscheinen
+deshalb nicht im Konto, sondern bleiben über ihre Capability erreichbar (ADR-0032). Funktionen
+statt Tabellenlesen, weil ein Grant spaltenblind ist — dieselbe Begründung wie bei `shop_offers()`.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -1176,6 +1224,14 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   neu angelegt, weil eine `returns table`-Signatur nicht in place wachsen kann.
   **Der Default ist `closed`: Das Anwenden schließt den Checkout, bis jemand ihn bewusst
   öffnet.** Rein additiv im Übrigen — keine Zeile gelöscht, kein Typ geändert.
+  **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
+
+- Zweiundzwanzigste Migration: `0022_account_state.sql` — **Kontozustand** (ADR-0061). Zwei
+  Tabellen (`cart_items`, `customer_contacts`) mit je vier Eigentümer-Policies,
+  `merge_guest_cart()`, `my_orders()`, `my_order()` und `order_payment_state()` um `attempts`
+  erweitert. Rein additiv: keine bestehende Tabelle geändert, keine Zeile angefasst, kein Trigger
+  neu definiert. Nur `order_payment_state()` wird gedroppt und neu angelegt, weil eine
+  `returns table`-Signatur nicht in place wachsen kann.
   **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`

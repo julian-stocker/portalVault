@@ -221,8 +221,9 @@ describe("navigation follows the role", () => {
   });
 
   it("keeps the order the list defines", () => {
-    // Katalog · Sammlung · Lager · Admin · Profil
-    const order = ["/", "/collection", "/admin/inventory", "/admin", "/settings", "/login"].map(
+    // Katalog · Sammlung · Lager · Admin · Konto
+    // `/settings` became `/account` with ADR-0061; the position is unchanged.
+    const order = ["/", "/collection", "/admin/inventory", "/admin", "/account", "/login"].map(
       (href) => nav.indexOf(`href: "${href}"`),
     );
     expect(order).toEqual([...order].sort((a, b) => a - b));

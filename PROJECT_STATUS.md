@@ -7,6 +7,57 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Account/Cart/Checkout-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
+
+*Ein Befund aus dem manuellen Browsertest, und er ist der ernsteste bisher.* Artikel als Gast in
+den Warenkorb, abmelden, mit einem anderen Profil anmelden — derselbe Warenkorb war noch da, und
+das zweite Profil bekam die **offene Bestellung des ersten** angezeigt.
+
+*Die Ursache ist ein Satz.* Jeder Zustand des Checkouts lag unter einem festen Schlüssel **ohne
+Eigentümer**: der Warenkorb in `localStorage["skyisles.cart.v1"]`, die offene Bestellung und die
+Capability in `sessionStorage`. Der Browser war die Identität, nicht das Konto — ein Kontowechsel
+änderte an keinem dieser Schlüssel etwas.
+
+*Die Datenbank hat nichts Falsches herausgegeben.* `authorize_order_payment()` hat die fremde
+Bestellung korrekt verweigert; deshalb stand da überhaupt „gehört zu einer anderen Sitzung". Das
+Leck war die Oberfläche, die eine fremde Bestellnummer anzeigte — und im ungünstigen Fall die
+Capability desselben Tabs, denn die Autorisierung ist ein ODER aus Konto **oder** Capability.
+
+*Der Warenkorb eines Kontos liegt jetzt in der Datenbank* (`cart_items`, RLS, dieselben vier
+Eigentümer-Policies wie `collection_items` seit `0001`). Ein Schlüsselname verbirgt einen fremden
+Warenkorb; eine Policy macht ihn unerreichbar. Gäste behalten `localStorage` — unter
+`skyisles.cart.v2.guest`, mit dem Eigentümer im Namen. Der alte Schlüssel wird **verworfen, nicht
+migriert**: Es lässt sich nicht feststellen, wem er gehörte, und zu raten ist genau der Fehler.
+ADR-0043 hatte den serverseitigen Warenkorb unter „Nicht in dieser Runde" — es ist diese Runde.
+
+*Jeder Browser-Schlüssel trägt einen Principal* (`guest` oder `u.<user_id>`), und bei jedem
+Identitätswechsel fliegt der Zustand jedes anderen Principals aus dem Tab. Eine offene Bestellung
+wird außerdem **erfragt statt geglaubt**: Ohne Bestätigung durch `order_payment_state()` wird der
+Hinweis verworfen und der lokale Schlüssel gelöscht.
+
+*Der Zahlungs-CTA kommt aus dem Zahlungszustand.* `order_payment_state()` liefert jetzt
+`attempts`: 0 Versuche → „Zahlung starten", ≥ 1 → „Zahlung erneut starten", bezahlt oder geprüft →
+gar kein CTA. Vorher wurde die Beschriftung daraus abgeleitet, *dass* eine Bestellung existierte.
+
+*Gespeicherte Lieferdaten sind eine eigene Tabelle* (`customer_contacts`), nicht Spalten auf
+`profiles`: Ein Profil ist die öffentliche Hälfte einer Identität, dies ist eine Postanschrift.
+Speichern ist opt-in und standardmäßig aus. **Die Bestelladresse bleibt ein Snapshot** — `0022`
+fasst `create_order()`, `order_addresses` und den Immutability-Trigger nicht an, und ein Test
+prüft das am Migrationstext.
+
+*Der Kontobereich hat eine Struktur.* `/account` mit vier Zielen — Profil · Kontakt &
+Lieferadresse · Meine Bestellungen · Konto & Sicherheit. `/settings` ist ein permanenter Redirect.
+„Meine Bestellungen" gab es bisher überhaupt nicht.
+
+*Geprüft:* `npm run check` grün, **1960 Tests in 89 Dateien** (vorher 1876/84).
+
+**Der Commerce Test Mode aus ADR-0060 bleibt vollständig erhalten** — `0022` fasst weder den
+Modus, noch `commerce_testers`, noch die Stripe-Guards, noch den Sandbox-Stempel an.
+
+**Production unverändert.** `0019`–`0022` dort nicht angewandt.
+
+---
+
 **Commerce Test Mode gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
 
 *Eine Spalte, eine kleine Tabelle, ein Prädikat* (ADR-0060). `commerce_settings.mode` kennt

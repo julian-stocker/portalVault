@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { CART_STORAGE_KEY, decodeCart } from "@/lib/cart/cart";
+import { GUEST } from "@/lib/auth/principal";
+import { GUEST_CART_KEY, decodeCart } from "@/lib/cart/cart";
 import {
   addToCart,
+  bindPrincipal,
   clearCart,
   getServerSnapshot,
   getSnapshot,
@@ -35,6 +37,11 @@ function fakeStorage() {
     setItem(this: { throwOnWrite: boolean }, key: string, value: string): void {
       if (this.throwOnWrite) throw new Error("QuotaExceededError");
       entries.set(key, value);
+    },
+    // `clearCart()` removes the key rather than writing an empty basket:
+    // there is nothing to remember, and an empty record is still a record.
+    removeItem(key: string): void {
+      entries.delete(key);
     },
   };
 }
@@ -75,15 +82,24 @@ afterEach(() => {
 });
 
 /** What React does: subscribe, then read. Returns the unsubscribe. */
+/**
+ * A visitor with no account, which is what every case in this file is about.
+ *
+ * Binding is explicit since ADR-0061: the store shows nothing at all until it
+ * has been told whose basket to show, so a signed-in person never sees a
+ * guest's count in the gap before the layout's gate has spoken.
+ */
 function mount(): () => void {
-  return subscribe(() => {});
+  const off = subscribe(() => {});
+  bindPrincipal(GUEST);
+  return off;
 }
 
 describe("what the server renders", () => {
   it("is always the empty cart", () => {
     // The server cannot know what is in a browser's storage. Rendering a
     // guess is a hydration mismatch and a badge that flickers.
-    storage.entries.set(CART_STORAGE_KEY, JSON.stringify({ version: 1, lines: [{ ...BASH, quantity: 4, priceAtAdd: 9.9 }] }));
+    storage.entries.set(GUEST_CART_KEY, JSON.stringify({ version: 1, lines: [{ ...BASH, quantity: 4, priceAtAdd: 9.9 }] }));
     expect(getServerSnapshot()).toEqual({ cart: [], ready: false });
   });
 });
@@ -110,7 +126,7 @@ describe("persistence", () => {
   it("writes something a fresh decode can read", () => {
     const off = mount();
     addToCart(BASH, 3);
-    expect(decodeCart(storage.getItem(CART_STORAGE_KEY))).toEqual(getSnapshot().cart);
+    expect(decodeCart(storage.getItem(GUEST_CART_KEY))).toEqual(getSnapshot().cart);
     off();
   });
 
@@ -133,7 +149,7 @@ describe("changing the cart", () => {
 
     setCartQuantity("SKY-0007/loose", 2);
     expect(getSnapshot().cart[0].quantity).toBe(2);
-    expect(decodeCart(storage.getItem(CART_STORAGE_KEY))[0].quantity).toBe(2);
+    expect(decodeCart(storage.getItem(GUEST_CART_KEY))[0].quantity).toBe(2);
     off();
   });
 
@@ -144,7 +160,7 @@ describe("changing the cart", () => {
 
     removeFromCart("SKY-0007/loose");
     expect(getSnapshot().cart.map((line) => line.condition)).toEqual(["boxed"]);
-    expect(decodeCart(storage.getItem(CART_STORAGE_KEY))).toHaveLength(1);
+    expect(decodeCart(storage.getItem(GUEST_CART_KEY))).toHaveLength(1);
     off();
   });
 
@@ -153,7 +169,7 @@ describe("changing the cart", () => {
     addToCart(BASH, 4);
     clearCart();
     expect(getSnapshot().cart).toEqual([]);
-    expect(decodeCart(storage.getItem(CART_STORAGE_KEY))).toEqual([]);
+    expect(decodeCart(storage.getItem(GUEST_CART_KEY))).toEqual([]);
     off();
   });
 
@@ -175,10 +191,10 @@ describe("a second tab", () => {
 
     // The other tab writes, then the browser tells this one.
     storage.entries.set(
-      CART_STORAGE_KEY,
+      GUEST_CART_KEY,
       JSON.stringify({ version: 1, lines: [{ ...BOXED, quantity: 7, priceAtAdd: 24 }] }),
     );
-    for (const listener of storageListeners) listener({ key: CART_STORAGE_KEY });
+    for (const listener of storageListeners) listener({ key: GUEST_CART_KEY });
 
     expect(getSnapshot().cart).toHaveLength(1);
     expect(getSnapshot().cart[0]).toMatchObject({ condition: "boxed", quantity: 7 });
@@ -210,7 +226,7 @@ describe("a browser that will not store anything", () => {
     addToCart(BASH, 2);
 
     expect(getSnapshot().cart).toHaveLength(1);
-    expect(storage.getItem(CART_STORAGE_KEY)).toBeNull();
+    expect(storage.getItem(GUEST_CART_KEY)).toBeNull();
     off();
   });
 });

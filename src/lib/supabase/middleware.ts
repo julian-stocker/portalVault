@@ -23,7 +23,7 @@ import { ONBOARDING_PATH, signInUrlFor } from "@/lib/auth/redirect";
  * /login?next=/collection rather than being sent back to a path that no
  * longer exists.
  */
-const PROTECTED_PREFIXES = ["/collection", "/settings", "/onboarding"];
+const PROTECTED_PREFIXES = ["/collection", "/account", "/settings", "/onboarding"];
 
 /** Routes a signed-in user has no reason to see. */
 const SIGNED_OUT_ONLY_PREFIXES = ["/login", "/register", "/forgot-password"];
