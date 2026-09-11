@@ -123,34 +123,57 @@ describe("the summary states no tax", () => {
   });
 });
 
-describe("nothing here claims a payment happened", () => {
-  it("does not use the label that belongs to a payment obligation", () => {
-    // "Zahlungspflichtig bestellen" is the legally required wording for the
-    // moment a payment obligation arises. B1 has no payment, so it would be
-    // wrong here; it moves to the submit button in B2.
-    expect(de.checkout.submit).toBe("Bestellung anlegen");
-    expect(JSON.stringify(de.checkout)).not.toContain("Zahlungspflichtig");
+describe("nothing claims a payment happened unless the database says so", () => {
+  it("uses the label that a payment obligation legally requires", () => {
+    /*
+     * § 312j Abs. 3 BGB. Until B2.3 this button created no obligation — it
+     * reserved stock and nothing else — so the neutral wording was correct and
+     * this test asserted it. B2.4 sends the customer straight to the payment
+     * page, so the obligation now arises here and the label has to say so.
+     */
+    expect(de.checkout.submit).toBe("Zahlungspflichtig bestellen");
   });
 
-  it("says plainly that payment comes later", () => {
+  it("says plainly what the next step is", () => {
     expect(view).toContain("de.checkout.paymentFollows");
-    expect(de.checkout.paymentFollows).toMatch(/Zahlung/);
-    expect(de.checkout.successHint).toMatch(/Bezahlt ist sie noch nicht/);
+    expect(de.checkout.paymentFollows).toMatch(/weitergeleitet/);
   });
 
-  it("confirms an order rather than a purchase", () => {
-    expect(de.checkout.successTitle).toBe("Bestellung angelegt");
-    // Nothing anywhere states that money changed hands.
-    const strings = JSON.stringify(de.checkout);
+  it("claims money changed hands only where the database was asked", () => {
+    /*
+     * The rule that survives B2.4, and the one that matters.
+     *
+     * Everything the customer reads before and during checkout must stay free
+     * of any claim that a payment succeeded. Only `result.confirmed*` may say
+     * it, and that copy is shown solely for `viewFor(...) === "confirmed"` —
+     * which comes from `order_payment_state()` and never from the redirect.
+     */
+    const { result, ...beforePayment } = de.checkout;
+    const strings = JSON.stringify(beforePayment);
     for (const claim of [
       "erfolgreich bezahlt",
       "Zahlung erhalten",
       "Zahlung abgeschlossen",
       "Zahlung erfolgreich",
+      "Zahlung bestätigt",
       "Vielen Dank für deinen Einkauf",
     ]) {
-      expect(strings).not.toContain(claim);
+      expect(strings, claim).not.toContain(claim);
     }
+
+    /*
+     * And the waiting state must not quietly imply success.
+     *
+     * Checked against completed forms rather than against the word stem:
+     * "Zahlung wird bestätigt" is the progressive and is exactly right for a
+     * webhook still in flight, while "Zahlung bestätigt" would be a claim. A
+     * cruder test would have forbidden the correct wording.
+     */
+    const waiting = `${result.awaitingTitle} ${result.awaitingHint}`;
+    expect(waiting).not.toMatch(/\berhalten\b|\berfolgreich\b|\babgeschlossen\b/);
+    expect(waiting).not.toMatch(/Zahlung bestätigt/);
+    // It has to say, positively, that this is not settled yet.
+    expect(waiting).toMatch(/wird|noch nicht/);
   });
 });
 

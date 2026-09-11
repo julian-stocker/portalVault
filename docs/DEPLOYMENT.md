@@ -311,6 +311,23 @@ gekennzeichnet (`comment on function`), damit niemand später zwei
 
 ---
 
+## Migration `0017` und der echte Zahlungsschritt (B2.4)
+
+**`0017_order_payment_state.sql` ist auf `skyisles-staging` angewandt und verifiziert
+(2026-09-11). Auf Production NICHT angewandt.**
+
+Eine lesende Funktion, die der Browser aufrufen darf — die einzige der Payment-Familie. Details in
+`docs/DATABASE.md`; die Sicherheitsgrenze in `docs/SECURITY.md`.
+
+**`ALLOWED_ORIGINS` ist der Punkt, der beim Rollout leicht übersehen wird.** Die Secrets von
+`create-payment` nennen heute nur `http://localhost:3000`, was für `npm run dev:staging` genau
+richtig ist. Sobald die Kasse von einer anderen Origin aus bezahlt — eine Vercel-Preview, die
+Produktionsdomain —, muss deren Origin dazu. Fehlt sie, antwortet der Preflight sauber und der
+Browser verwirft den POST **stumm**: kein Fehler in den Logs, keine Zeile in der Datenbank. Genau
+so ging der erste B2.2b-Smoke verloren, damals an `x-client-info`.
+
+---
+
 ## Edge Function `stripe-webhook` (B2.3)
 
 **Auf `skyisles-staging` deployt und runtime-verifiziert (2026-09-11). Auf Production NICHT
@@ -360,7 +377,7 @@ checkout.session.async_payment_failed
 1. Deployen **ohne** Secret. Jeder POST muss `503 not_configured` geben, ein `GET` `405`. Das
    beweist, dass das Modul lädt (das SDK auflöst, der Crypto-Provider funktioniert) und dass es
    fail closed ist.
-2. `supabase/tests/0017_webhook_runtime.sql` abschnittweise im SQL-Editor auf Staging.
+2. `supabase/tests/webhook_runtime_verification.sql` abschnittweise im SQL-Editor auf Staging.
 3. Endpoint im **Testmodus** anlegen, `whsec_…` setzen.
 4. Negativpfade: ohne Signatur `400 missing_signature`; Müll-Header, fehlendes `v1`, falsches
    Secret, alter Timestamp, Signatur über einen anderen Body → jeweils `400 invalid_signature`.

@@ -487,25 +487,90 @@ export const de = {
     total: "Gesamtbetrag",
 
     /**
-     * Bewusst NICHT „Zahlungspflichtig bestellen": In B1 gibt es keine
-     * Zahlung, und der gesetzlich vorgeschriebene Wortlaut gehört an die
-     * Stelle, an der tatsächlich eine Zahlungspflicht entsteht (B2).
+     * Der gesetzlich vorgeschriebene Wortlaut (§ 312j Abs. 3 BGB).
+     *
+     * Bis B2.3 hieß der Button „Bestellung anlegen", und das war richtig: es
+     * entstand keine Zahlungspflicht. Mit B2.4 führt dieser Klick zur Kasse
+     * des Zahlungsanbieters, also entsteht sie hier — und die Beschriftung
+     * muss das eindeutig sagen.
      */
-    submit: "Bestellung anlegen",
+    submit: "Zahlungspflichtig bestellen",
     submitting: "Bestellung wird angelegt …",
+    redirecting: "Weiterleitung zur Zahlung …",
     paymentFollows:
-      "Die Zahlung ist noch nicht eingerichtet. Deine Bestellung wird angelegt und die Ware " +
-      "für dich vorgemerkt; bezahlt wird im nächsten Schritt.",
+      "Im nächsten Schritt wirst du zur gesicherten Zahlungsseite unseres Zahlungsdienstleisters " +
+      "weitergeleitet. Die Ware wird währenddessen für dich vorgemerkt.",
+
+    /** Die Bestellung existiert, nur der Start der Zahlung ist gescheitert. */
+    payment: {
+      retry: "Zahlung erneut starten",
+      openOrder: (number: string) => `Offene Bestellung ${number}`,
+      resumeHint:
+        "Diese Bestellung ist angelegt und die Ware für dich vorgemerkt. Du kannst die Zahlung " +
+        "jetzt starten.",
+      errorNotPayable:
+        "Die Reservierung für diese Bestellung ist abgelaufen. Bitte lege den Artikel erneut in " +
+        "den Warenkorb.",
+      errorNotYours: "Diese Bestellung gehört zu einer anderen Sitzung.",
+      errorUnavailable: "Die Zahlung ist derzeit nicht verfügbar. Bitte versuche es später erneut.",
+      errorProvider:
+        "Die Zahlung konnte nicht gestartet werden. Deine Bestellung bleibt bestehen — bitte " +
+        "versuche es erneut.",
+      errorNetwork:
+        "Keine Verbindung zur Zahlungsseite. Deine Bestellung bleibt bestehen — bitte versuche " +
+        "es erneut.",
+    },
+
+    /** Rückkehr von der Zahlungsseite. Kein Wort davon ist ein Zahlungsbeleg. */
+    result: {
+      title: "Bestellung",
+      orderNumber: "Bestellnummer",
+      total: "Gesamtbetrag",
+      refresh: "Status aktualisieren",
+      checking: "Zahlungsstatus wird geprüft …",
+
+      confirmedTitle: "Zahlung bestätigt",
+      confirmedHint:
+        "Wir haben deine Zahlung erhalten und die Artikel für dich gebucht. Du hörst von uns, " +
+        "sobald die Sendung unterwegs ist.",
+
+      awaitingTitle: "Zahlung wird bestätigt",
+      awaitingHint:
+        "Deine Zahlung ist bei uns noch nicht bestätigt. Das dauert meist nur wenige Sekunden. " +
+        "Du kannst diese Seite offen lassen oder den Status aktualisieren.",
+
+      attentionTitle: "Wir prüfen deine Bestellung",
+      attentionHint:
+        "Deine Zahlung ist eingegangen, aber die Bestellung muss von uns geprüft werden, bevor " +
+        "sie versandt wird. Wir melden uns — bitte unternimm nichts weiter.",
+
+      expiredTitle: "Bestellung nicht abgeschlossen",
+      expiredHint:
+        "Diese Bestellung wurde nicht bezahlt und ist abgelaufen. Es wurde nichts abgebucht. " +
+        "Du kannst den Artikel erneut in den Warenkorb legen.",
+
+      refundedTitle: "Bestellung erstattet",
+      refundedHint: "Zu dieser Bestellung liegt eine Erstattung vor.",
+
+      unknownTitle: "Bestellung nicht gefunden",
+      unknownHint:
+        "Zu dieser Bestellung können wir hier nichts anzeigen. Wenn du als Gast bestellt hast, " +
+        "funktioniert diese Seite nur in dem Browserfenster, in dem du bestellt hast.",
+
+      toCatalog: "Weiter im Katalog",
+    },
 
     emptyTitle: "Der Warenkorb ist leer.",
     emptyHint: "Leg zuerst etwas in den Warenkorb.",
 
-    successTitle: "Bestellung angelegt",
+    /*
+     * `successTitle`, `successHint` und `successToCatalog` sind mit B2.4
+     * entfallen. Sie beschrieben eine angelegte, unbezahlte Bestellung als
+     * Abschluss — das war bis B2.3 die Wahrheit und ist es nicht mehr. Was der
+     * Kunde nach der Zahlung sieht, steht unter `result` und kommt aus
+     * `order_payment_state()`.
+     */
     successNumber: "Bestellnummer",
-    successHint:
-      "Wir haben deine Bestellung gespeichert und die Artikel für dich vorgemerkt. " +
-      "Bezahlt ist sie noch nicht — die Zahlung folgt im nächsten Schritt.",
-    successToCatalog: "Weiter im Katalog",
 
     /** Fehler, in Kundensprache. Nie eine Datenbankmeldung. */
     errorUnavailable:

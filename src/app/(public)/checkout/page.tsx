@@ -24,8 +24,17 @@ export const metadata: Metadata = { title: de.checkout.title };
  * There is no payment here. B1 ends with a created, reserved, unpaid order,
  * and the interface says so rather than implying a completed purchase.
  */
-export default async function CheckoutPage() {
+export default async function CheckoutPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ order?: string }>;
+}) {
   const offers = await fetchOffers();
+
+  // Where the payment page sends somebody who cancelled. A hint only: the
+  // browser checks it against the order it actually placed, and a number from
+  // anywhere else matches nothing.
+  const { order } = await searchParams;
 
   // Only to prefill a field. The address that ends up on the order is the one
   // in the form, snapshotted — never a live link to an account (ADR-0049).
@@ -41,7 +50,11 @@ export default async function CheckoutPage() {
         {de.checkout.title}
       </h1>
       <div className="mt-5">
-        <CheckoutView offers={offerRecord(offers)} email={data.user?.email ?? ""} />
+        <CheckoutView
+          offers={offerRecord(offers)}
+          email={data.user?.email ?? ""}
+          resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
+        />
       </div>
     </main>
   );

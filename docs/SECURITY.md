@@ -798,6 +798,45 @@ Alles Weitere — Idempotenz, Sperren, Konvertierung, Bestandsbuchung — liegt 
 `0012`/`0015` und nicht im Edge-Code. Dieser schreibt **nie** direkt nach `shop_inventory`,
 `inventory_movements` oder `order_reservations`.
 
+### Der Zahlungsstatus, den ein Kunde selbst lesen darf (B2.4)
+
+`order_payment_state()` ist die **erste und einzige** Funktion der Payment-Familie, die `anon` und
+`authenticated` ausführen dürfen. Vier Eigenschaften machen das vertretbar:
+
+**Sie liest nur.** `stable`, `security definer`, `set search_path = ''`, kein `insert`, kein
+`update`. Sie öffnet keinen Tabellenzugriff: `anon` bekommt auf `public.orders` weiterhin
+`insufficient_privilege` — gegen die laufende Staging-Datenbank geprüft.
+
+**Sie gibt vier Spalten zurück** — `order_number`, `payment_status`, `needs_resolution`,
+`total_amount`. Keine E-Mail, keine Adresse, keine Positionen, kein `client_hash`, kein
+`payment_token_hash`, kein `request_id`, keine IDs. Kein `is_paid` (wäre eine zweite Wahrheit
+neben `payment_status`) und kein `currency` (verboten für öffentlich aufrufbare Funktionen, siehe
+`public-surface.test.ts`).
+
+**Sie dupliziert keine Autorisierung.** Die Regel steht seit `0013` in
+`authorize_order_payment()` und wird aufgerufen, nicht kopiert: der angemeldete Eigentümer über
+verifiziertes `auth.uid()`, oder der Halter der Capability.
+
+**Die Antwort unterscheidet nichts.** Unbekannte und unautorisierte Bestellung liefern beide null
+Zeilen. Bestellnummern sind ein lesbarer Zähler und jeder darf sie ausprobieren; zugesichert ist,
+dass das Ausprobieren **nichts lehrt** — nicht, dass es verhindert wird. Rate Limiting und
+Timing-Unterschiede sind separate Belange und hier nicht adressiert.
+
+### Rückkehr von der Zahlungsseite
+
+**Der Redirect ist kein Zahlungsnachweis.** Stripe schickt den Kunden zurück, wenn die Checkout
+Session abschließt — nicht, wenn Geld ankommt —, und die Rücksprung-URL kann jeder tippen.
+`/checkout/erfolg` leitet daraus nichts ab; jedes Wort kommt aus `order_payment_state()`.
+`session_id` steht in der URL, weil `create-payment` Stripes Platzhalter dort hinterlegt, und wird
+in `src/` in **keiner Codezeile** gelesen: es autorisiert nichts und identifiziert nichts, was die
+Bestellnummer nicht schon identifiziert.
+
+**Die Capability überlebt den Redirect in `sessionStorage`** (ADR-0056) — nie `localStorage`, nie
+in einer URL, nie in einem Log, ein Schlüssel je Bestellnummer, gelöscht sobald die Bestellung
+nichts Neues mehr beantwortet. Getrennt davon, unter eigenem Schlüssel und ausdrücklich **kein**
+Geheimnis, liegen Bestell-ID und -nummer: ohne sie wäre eine Bestellung nach einem Browser-Back
+ohne `?order=` unerreichbar, obwohl sie Bestand hält.
+
 ---
 
 ## 7. Datenschutz (DSGVO)

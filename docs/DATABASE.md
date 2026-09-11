@@ -977,6 +977,17 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   **Auf Staging angewandt und verifiziert am 2026-09-09, auf Production angewandt und dort mit
   einem realen Checkout-/Reservierungs-Smoke verifiziert.**
 
+- Siebzehnte Migration: `0017_order_payment_state.sql` — **eine lesende Funktion, sonst nichts.**
+  `order_payment_state(p_order_number, p_token)` gibt vier Spalten zurück (`order_number`,
+  `payment_status`, `needs_resolution`, `total_amount`) und ist die einzige Funktion der
+  Payment-Familie, die ein Client aufrufen darf. Sie existiert, weil ein **Gast** seine eigene
+  Bestellung sonst nicht sehen kann: `orders_select_own` deckt nur Angemeldete ab, und `0010` hielt
+  fest, dass eine Gastbestellung als Policy gar nicht ausdrückbar ist. Autorisierung über
+  `authorize_order_payment()` aus `0013` — aufgerufen, nicht kopiert. Keine PII, keine IDs, kein
+  `payment_token_hash`, kein `is_paid`, kein `currency`. Unbekannte und unautorisierte Bestellung
+  liefern dasselbe leere Ergebnis.
+  **Auf Staging angewandt und verifiziert am 2026-09-11, auf Production NICHT angewandt.**
+
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
 > Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.

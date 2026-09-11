@@ -33,6 +33,14 @@ import { isShippingMethod, type ShippingOption } from "@/lib/commerce/shipping";
 import { createClient } from "@/lib/supabase/server";
 
 export type PlacedOrder = {
+  /**
+   * The row id, needed by `create-payment` (B2.4).
+   *
+   * The Edge Function matches on the id and nothing else — not the order
+   * number, which is a readable counter. It was always returned by
+   * `create_order()`; until B2.4 nothing needed it, so it was dropped here.
+   */
+  orderId: number;
   orderNumber: string;
   itemsSubtotal: number;
   shippingAmount: number;
@@ -145,7 +153,13 @@ export async function placeOrder(
     // `returns table` arrives as an array of one row.
     const row = Array.isArray(data) ? data[0] : data;
     const orderNumber = row?.order_number;
+    const orderId = typeof row?.order_id === "number" ? row.order_id : Number(row?.order_id);
     if (typeof orderNumber !== "string" || orderNumber === "") {
+      return { ok: false, reason: "failed" };
+    }
+    if (!Number.isSafeInteger(orderId) || orderId < 1) {
+      // Without it the customer could never be sent to pay, and an order that
+      // cannot be paid for is worse than one that was not created.
       return { ok: false, reason: "failed" };
     }
 
@@ -155,6 +169,7 @@ export async function placeOrder(
       typeof value === "string" ? Number(value) : typeof value === "number" ? value : Number.NaN;
 
     const order: PlacedOrder = {
+      orderId,
       orderNumber,
       itemsSubtotal: money(row.items_subtotal),
       shippingAmount: money(row.shipping_amount),

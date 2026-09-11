@@ -1,5 +1,11 @@
 -- ===========================================================================
--- 0017 — runtime verification of the webhook's database contract, STAGING ONLY
+-- Webhook runtime verification (B2.3) — STAGING ONLY
+--
+-- DELIBERATELY UNNUMBERED. The other suite is `0015_runtime_verification.sql`
+-- because it verifies migration 0015. This one verifies no migration at all:
+-- B2.3 added none, and numbering it would have claimed a migration that does
+-- not exist — which is exactly the gap the contiguity guard in
+-- `payment.test.ts` catches.
 --
 -- B2.3 adds NO migration. What it adds is a caller, and this suite proves that
 -- the two functions that caller uses behave as `stripe-webhook` assumes when

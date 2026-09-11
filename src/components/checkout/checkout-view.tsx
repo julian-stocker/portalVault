@@ -32,6 +32,9 @@ import { newCheckoutCredentials, type CheckoutCredentials } from "@/lib/commerce
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { cartTotal, keyOf, resolveCart } from "@/lib/cart/cart";
 import { placeOrder, shippingOptions, type PlacedOrder } from "@/lib/commerce/actions";
+import { recallOpenOrder, rememberOpenOrder, rememberPaymentToken } from "@/lib/commerce/capability";
+import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
+import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
 import { conditionLabel } from "@/components/shop/shop-action";
 import {
   DEFAULT_SHIPPING_METHOD,
@@ -100,12 +103,37 @@ function Field({
   );
 }
 
+/** The Edge Function's failure reasons, in the customer's words. */
+function messageFor(reason: PaymentStartFailure): string {
+  switch (reason) {
+    case "not_payable":
+      return de.checkout.payment.errorNotPayable;
+    case "not_yours":
+      return de.checkout.payment.errorNotYours;
+    case "unavailable":
+      return de.checkout.payment.errorUnavailable;
+    case "network":
+      return de.checkout.payment.errorNetwork;
+    default:
+      return de.checkout.payment.errorProvider;
+  }
+}
+
 export function CheckoutView({
   offers,
   email,
+  resumeOrderNumber,
 }: {
   offers: Readonly<Record<string, readonly Offer[]>>;
   email: string;
+  /**
+   * From `?order=…` — where the payment page sends somebody who cancelled.
+   *
+   * It is a hint and not an authorisation: it only asks this browser whether
+   * it is the one that placed that order. If the stored open order does not
+   * match, nothing is offered and nothing is revealed.
+   */
+  resumeOrderNumber?: string;
 }) {
   const { cart, ready, clear } = useCart();
   const [fields, setFields] = useState<Fields>({ ...EMPTY, email });
@@ -115,6 +143,11 @@ export function CheckoutView({
   const [error, setError] = useState<string | null>(null);
   const [placed, setPlaced] = useState<PlacedOrder | null>(null);
   const [pending, setPending] = useState(false);
+  /** True from the moment create-payment is called until the browser leaves. */
+  const [redirecting, setRedirecting] = useState(false);
+  const [paymentError, setPaymentError] = useState<string | null>(null);
+  /** False until the `?order=` hint has been matched against this tab. */
+  const [resumeChecked, setResumeChecked] = useState(false);
   // Checked and set before the first await, so two taps in one frame cannot
   // both get past it — the same guard `useAddToCart` uses.
   const busy = useRef(false);
@@ -128,13 +161,68 @@ export function CheckoutView({
    * prove ownership of the first. Held in a ref rather than state so a
    * re-render cannot mint new ones.
    *
-   * They live in memory only. A reload loses them, and the order that was
-   * already placed simply expires with its reservation — acceptable while
-   * there is no payment step. Surviving a reload is part of the guest order
-   * access that comes with the confirmation mail, not of this phase.
+   * The capability is additionally written to `sessionStorage` once the order
+   * exists, keyed by its order number (ADR-0056). Without that a guest who
+   * comes back from the payment page could not be shown their own order — the
+   * whole trip leaves this origin and the ref does not survive it. A reload
+   * before the order exists still loses both, and loses nothing: no order was
+   * placed.
    */
   const credentials = useRef<CheckoutCredentials | null>(null);
   if (credentials.current === null) credentials.current = newCheckoutCredentials();
+
+  /*
+   * Coming back from the payment page.
+   *
+   * `window.location.assign()` leaves this document in the back/forward cache,
+   * and Back restores it verbatim — React state included. `redirecting` was
+   * true when the tab left, so the button would come back disabled and reading
+   * "Weiterleitung zur Zahlung" for an order that exists and is still holding
+   * stock. A bfcache restore runs no effect and initialises no state;
+   * `pageshow` is the only place this can be noticed.
+   *
+   * Only the transient lock is cleared. The order, its id and the capability
+   * stay exactly where they are.
+   */
+  useEffect(
+    () =>
+      watchPageShow(window, () => {
+        busy.current = false;
+        setRedirecting(false);
+      }),
+    [],
+  );
+
+  /*
+   * Coming back from a cancelled payment.
+   *
+   * The basket was emptied when the order was placed, so without this the
+   * customer would land on "your basket is empty" while an order of theirs is
+   * holding stock. The order number from the URL is matched against what this
+   * tab remembers; a number from somewhere else matches nothing and is simply
+   * ignored.
+   */
+  useEffect(() => {
+    if (placed || resumeChecked) return;
+    // Deferred by a task: `sessionStorage` must not be read during render, and
+    // setting state synchronously inside an effect makes React cascade.
+    const timer = setTimeout(() => {
+      const open = recallOpenOrder(resumeOrderNumber || undefined);
+      if (open) {
+        setPlaced({
+          orderId: open.orderId,
+          orderNumber: open.orderNumber,
+          // A reload keeps the order, not its figures. The canonical total is
+          // on the status page; inventing one here would be worse than none.
+          itemsSubtotal: Number.NaN,
+          shippingAmount: Number.NaN,
+          totalAmount: Number.NaN,
+        });
+      }
+      setResumeChecked(true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [resumeOrderNumber, placed, resumeChecked]);
 
   const entries = resolveCart(cart, offerIndex(offers));
   const purchasable = entries.filter((entry) => entry.purchasable);
@@ -185,6 +273,17 @@ export function CheckoutView({
         // twice by the same person.
         setPlaced(result.order);
         clear();
+
+        // Written before the payment call, not after: if anything below fails,
+        // the order still exists and holds stock, and the customer must still
+        // be able to prove it is theirs (ADR-0056).
+        rememberPaymentToken(result.order.orderNumber, credentials.current!.paymentToken);
+        rememberOpenOrder({
+          orderId: result.order.orderId,
+          orderNumber: result.order.orderNumber,
+        });
+
+        await toPayment(result.order);
         return;
       }
 
@@ -204,47 +303,122 @@ export function CheckoutView({
     }
   }
 
-  // ------------------------------------------------------------- after order
+  /**
+   * Hand the order to the payment provider.
+   *
+   * The browser names an order and nothing else. No amount, no currency, no
+   * line item: `create-payment` reads all of that from the order under its own
+   * lock, so there is nothing here for a tampered client to influence.
+   *
+   * On failure the order is NOT abandoned. It exists, it holds stock for
+   * twenty minutes, and the same `orderId` can be handed over again — the
+   * database returns the open attempt and Stripe replays the same session, so
+   * a retry cannot produce a second payable checkout.
+   */
+  async function toPayment(order: PlacedOrder) {
+    setRedirecting(true);
+    setPaymentError(null);
+
+    const outcome = await startPayment(order.orderId, order.orderNumber);
+    if (outcome.ok) {
+      // A full navigation, not a router push: the destination is Stripe.
+      window.location.assign(outcome.url);
+      return;
+    }
+
+    setRedirecting(false);
+    setPaymentError(messageFor(outcome.reason));
+  }
+
+  /** Start the payment again for an order that already exists. */
+  async function retryPayment() {
+    if (busy.current || !placed) return;
+    busy.current = true;
+    try {
+      await toPayment(placed);
+    } finally {
+      busy.current = false;
+    }
+  }
+
+  /*
+   * ------------------------------------------------------- after order
+   *
+   * Reaching this panel means the order exists and the customer is NOT at the
+   * payment page: either the redirect is still being prepared, or starting it
+   * failed. It is deliberately not a success message any more — nothing has
+   * been paid, and B1's wording would now be untrue.
+   */
   if (placed) {
     return (
       <div className={`${PANEL} flex flex-col gap-4`}>
-        <h2 className="text-lg font-semibold">{de.checkout.successTitle}</h2>
-        <p className="text-sm text-on-deep-muted">{de.checkout.successHint}</p>
-
-        <dl className="flex flex-col gap-2 text-sm">
-          <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-on-deep-muted">{de.checkout.successNumber}</dt>
-            <dd className="font-semibold tabular-nums">{placed.orderNumber}</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-4">
-            <dt className="text-on-deep-muted">{de.checkout.shipping}</dt>
-            <dd className="tabular-nums">
-              {options.find((o) => o.code === method)?.name ?? method}
-              {" · "}
-              {placed.shippingAmount === 0
-                ? de.checkout.shippingFree
-                : formatPrice(placed.shippingAmount)}
-            </dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-4 border-t border-gold-line pt-2">
-            <dt className="font-medium">{de.checkout.total}</dt>
-            <dd className="text-xl font-semibold tabular-nums">{formatPrice(placed.totalAmount)}</dd>
-          </div>
-        </dl>
-
-        <p className="text-xs text-on-deep-muted">
-          {fields.firstName} {fields.lastName}, {fields.street} {fields.houseNumber},{" "}
-          {fields.postalCode} {fields.city}
+        <h2 className="text-lg font-semibold">
+          {de.checkout.payment.openOrder(placed.orderNumber)}
+        </h2>
+        <p className="text-sm text-on-deep-muted">
+          {redirecting ? de.checkout.redirecting : de.checkout.payment.resumeHint}
         </p>
 
-        <Link href="/" className={`${ACTION_NEUTRAL} w-auto`}>
-          {de.checkout.successToCatalog}
-        </Link>
+        {paymentError ? (
+          <p role="alert" className="text-sm text-red-300">
+            {paymentError}
+          </p>
+        ) : null}
+
+        {/* After a full reload the amounts are gone — only the order number and
+            its id survive in sessionStorage, and neither is money. Showing a
+            figure we no longer hold would be inventing one; the canonical
+            total is on the status page. */}
+        {Number.isFinite(placed.totalAmount) ? (
+          <dl className="flex flex-col gap-2 text-sm">
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-on-deep-muted">{de.checkout.successNumber}</dt>
+              <dd className="font-semibold tabular-nums">{placed.orderNumber}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="text-on-deep-muted">{de.checkout.shipping}</dt>
+              <dd className="tabular-nums">
+                {options.find((o) => o.code === method)?.name ?? method}
+                {" · "}
+                {placed.shippingAmount === 0
+                  ? de.checkout.shippingFree
+                  : formatPrice(placed.shippingAmount)}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4 border-t border-gold-line pt-2">
+              <dt className="font-medium">{de.checkout.total}</dt>
+              <dd className="text-xl font-semibold tabular-nums">
+                {formatPrice(placed.totalAmount)}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void retryPayment()}
+            disabled={redirecting}
+            className={`${ACTION_NEUTRAL} w-auto disabled:opacity-40`}
+          >
+            {redirecting ? de.checkout.redirecting : de.checkout.payment.retry}
+          </button>
+          <Link href="/" className="text-sm underline underline-offset-4">
+            {de.checkout.result.toCatalog}
+          </Link>
+        </div>
       </div>
     );
   }
 
   // ------------------------------------------------------------- empty cart
+  //
+  // An empty basket is ambiguous for exactly one task: it may mean "nothing to
+  // buy", or it may mean "an order was placed and is waiting to be paid". So
+  // the answer waits until `sessionStorage` has been asked. A basket with
+  // something in it is not ambiguous and renders immediately.
+  if (!resumeChecked && purchasable.length === 0) return null;
+
   if (!ready || purchasable.length === 0) {
     return (
       <div className={`${PANEL} flex flex-col items-center gap-3 py-10 text-center`}>

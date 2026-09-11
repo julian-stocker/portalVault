@@ -88,3 +88,136 @@ export type CheckoutCredentials = {
 export function newCheckoutCredentials(): CheckoutCredentials {
   return { requestId: newRequestId(), paymentToken: newPaymentToken() };
 }
+
+/* ------------------------------------------------ surviving the redirect */
+
+/**
+ * Keeping the capability across the trip to Stripe (B2.4, ADR-0056).
+ *
+ * WHY THIS EXISTS, AND WHAT IT COSTS
+ *
+ * Everything above describes a secret held in memory for a few seconds. B2.4
+ * breaks that: the customer leaves for Stripe's domain and comes back, and a
+ * guest who arrives at /checkout/erfolg with nothing but an order number
+ * cannot be shown their own order — `order_payment_state()` answers no one who
+ * cannot prove they placed it. Without persistence, guests — most of the shop
+ * — would be told nothing at all after paying.
+ *
+ * So the token is written to `sessionStorage`, and that is a real widening of
+ * the attack surface: script running on this origin can read it. The trade is
+ * deliberate and bounded:
+ *
+ *   sessionStorage, not localStorage   it dies with the tab; a shared computer
+ *                                      does not keep it
+ *   one key per order number           a second checkout cannot overwrite the
+ *                                      first order's capability
+ *   deleted at a terminal state        held only while it still answers
+ *                                      something (see `isTerminal`)
+ *   never a URL, never a query string, never a log line, never an event
+ *                                      payload — unchanged from above
+ *
+ * What the token can do stays narrow: start or read the payment of the ONE
+ * order it belongs to. It is not a session, it grants nothing else, and it
+ * cannot be replayed against another order.
+ */
+
+/** One key per order, so two checkouts in one tab cannot collide. */
+export function capabilityStorageKey(orderNumber: string): string {
+  return `skyisles.pay.v1.${orderNumber}`;
+}
+
+/**
+ * Every access is wrapped: Safari in private mode throws on `sessionStorage`
+ * rather than returning null, and a checkout must not die because a browser
+ * refuses to remember something.
+ */
+export function rememberPaymentToken(orderNumber: string, token: string): void {
+  if (!isPaymentToken(token)) return;
+  try {
+    window.sessionStorage.setItem(capabilityStorageKey(orderNumber), token);
+  } catch {
+    /* Not remembering is survivable: the payment still starts, and the status
+       page will simply not be able to show a guest their order. */
+  }
+}
+
+/** The capability for this order, or null. Never throws. */
+export function recallPaymentToken(orderNumber: string): string | null {
+  try {
+    const value = window.sessionStorage.getItem(capabilityStorageKey(orderNumber));
+    return isPaymentToken(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Forget it. Called as soon as the order can no longer change by itself. */
+export function forgetPaymentToken(orderNumber: string): void {
+  try {
+    window.sessionStorage.removeItem(capabilityStorageKey(orderNumber));
+  } catch {
+    /* nothing to do, and nothing worth telling the customer */
+  }
+}
+
+/**
+ * The open order this tab is in the middle of paying for.
+ *
+ * Separate from the capability above, and stored under its own key, because
+ * it is a different kind of value: an order id and its number are **not
+ * secrets**. They are kept for one reason — after a cancelled payment the
+ * browser returns to `/checkout?order=…` with nothing but the number, and
+ * `create-payment` matches on the id. Without this, "resume payment" would
+ * need the id back from the database, and the status reader deliberately
+ * returns no ids at all.
+ *
+ * Same lifetime rules as the token: sessionStorage, cleared when the order
+ * settles. Nothing here would help an attacker who does not also hold the
+ * capability.
+ */
+const OPEN_ORDER_KEY = "skyisles.pay.v1.open";
+
+export type OpenOrder = { orderId: number; orderNumber: string };
+
+export function rememberOpenOrder(order: OpenOrder): void {
+  try {
+    window.sessionStorage.setItem(OPEN_ORDER_KEY, JSON.stringify(order));
+  } catch {
+    /* the payment still works; only "resume" is lost */
+  }
+}
+
+/**
+ * The open order this tab is paying for.
+ *
+ * With an order number it must be that one: the number comes from `?order=…`
+ * and is therefore attacker-suppliable, so it is matched rather than trusted.
+ *
+ * Without one it returns whatever this tab stored, and that is the case that
+ * matters after a Back from the payment page: the browser lands on `/checkout`
+ * with no query at all, and if the document was not restored from the
+ * back/forward cache, the placed order would otherwise be unreachable while it
+ * is still holding stock. Reading our own tab's storage is not the same as
+ * trusting a URL.
+ */
+export function recallOpenOrder(orderNumber?: string): OpenOrder | null {
+  try {
+    const raw = window.sessionStorage.getItem(OPEN_ORDER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<OpenOrder>;
+    if (typeof parsed.orderNumber !== "string" || parsed.orderNumber === "") return null;
+    if (orderNumber !== undefined && parsed.orderNumber !== orderNumber) return null;
+    if (!Number.isSafeInteger(parsed.orderId) || (parsed.orderId ?? 0) < 1) return null;
+    return { orderId: parsed.orderId as number, orderNumber: parsed.orderNumber };
+  } catch {
+    return null;
+  }
+}
+
+export function forgetOpenOrder(): void {
+  try {
+    window.sessionStorage.removeItem(OPEN_ORDER_KEY);
+  } catch {
+    /* nothing worth telling the customer */
+  }
+}

@@ -7,7 +7,50 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
-**Commerce V1 · Phase B2.3 abgeschlossen und auf Staging runtime-verifiziert (2026-09-11).**
+**Commerce V1 · Phase B2.4 abgeschlossen und auf Staging verifiziert (2026-09-11).**
+
+*Die Kasse bezahlt jetzt.* Nach `create_order()` ruft die Anwendung selbst `create-payment` auf
+und leitet zur Stripe Hosted Checkout Session weiter — keine Dev-Harness mehr. Der Button heißt
+**„Zahlungspflichtig bestellen"**, weil die Zahlungspflicht ab B2.4 an dieser Stelle entsteht
+(§ 312j Abs. 3 BGB); bis B2.3 war die neutrale Beschriftung die richtige.
+
+*Der Browser nennt eine Zahl.* `{ order_id }`, dazu bei Gästen die Capability. Kein Betrag, keine
+Währung, keine Position — alles davon liest `start_payment_attempt()` unter der Sperre aus der
+Bestellung.
+
+*`/checkout/erfolg` behauptet nichts.* Server-Shell, die eigentliche Frage stellt der Browser über
+**`order_payment_state()`** (Migration `0017`). Der Redirect ist kein Beweis: Stripe schickt den
+Kunden zurück, wenn die Session abschließt, und das ist nicht dasselbe Ereignis wie „Geld
+angekommen" — die URL kann ohnehin jeder tippen. `session_id` wird in `src/` in **keiner**
+Codezeile gelesen. `needs_resolution` schlägt jeden Status, auch `paid`: eine spät bezahlte,
+unreservierte Bestellung bekommt nie „unterwegs" zu sehen.
+
+*Warum überhaupt eine neue Funktion.* Angemeldete Kunden lesen ihre Bestellung über
+`orders_select_own`. **Gäste können das nicht** — `0010` hielt das ausdrücklich fest — und Gäste
+sind der größere Teil des Shops. `0017` ist der fehlende Leser: `stable`, vier Spalten, keine PII,
+keine IDs, kein `is_paid`, kein `currency`. Autorisierung **ruft `authorize_order_payment()` aus
+`0013` auf statt sie zu kopieren**. Unbekannte und unautorisierte Bestellung liefern dasselbe
+leere Ergebnis — die Antwort unterscheidet nichts.
+
+*Zwei Browser-Bugs, im manuellen Smoke gefunden.* Back von Stripe stellte das Dokument aus dem
+**bfcache** wieder her, React-State eingeschlossen: `redirecting` blieb `true`, der Button blieb
+gesperrt, die Bestellung unbezahlbar. Ein bfcache-Restore ist kein Mount — kein Effect läuft,
+nichts initialisiert sich —, `pageshow` ist die einzige Stelle, an der es auffällt. Ohne bfcache
+lud `/checkout` **ohne** `?order=` neu und zeigte „Warenkorb leer", während die Bestellung Bestand
+hielt; `recallOpenOrder()` holt sie jetzt aus dem Tab-State zurück. Beide Pfade sind manuell
+gegengeprüft.
+
+*Staging-verifiziert.* `0017` angewandt, Autorisierung in zehn Prüfungen belegt (Eigentümer ja,
+fremd nein, unbekannt nein, anon nein, Token ja, falsch/leer/null nein, Replay nein, kein direkter
+Tabellenzugriff). Gast- und Auth-Checkout durchlaufen, Redirect zu Stripe, Abbruch und Rückkehr,
+Wiederaufnahme derselben Bestellung — **ohne neuen Testkauf**.
+
+**Production unverändert.** `0017` ist dort **nicht** angewandt, `stripe-webhook` nicht deployt,
+kein Live-Stripe, `pg_cron` weiterhin nur auf Staging.
+
+---
+
+**Zuvor: Phase B2.3 (2026-09-11).**
 
 *Der Kreis ist geschlossen.* `stripe-webhook` ist die zweite Edge Function und die einzige Stelle,
 die sagen darf, dass Geld angekommen ist. Am 2026-09-11 lief zum ersten Mal die **vollständige
@@ -38,7 +81,7 @@ Methoden „Kunde fertig, Geld noch nicht da". Bestätigt wird nur bei `status =
 deaktiviert** (ADR-0055); die Handler für `async_payment_succeeded` und `async_payment_failed`
 existieren trotzdem, defensiv.
 
-*Über SQL runtime-verifiziert* (`supabase/tests/0017_webhook_runtime.sql`, sieben Abschnitte, alle
+*Über SQL runtime-verifiziert* (`supabase/tests/webhook_runtime_verification.sql`, sieben Abschnitte, alle
 in `begin … rollback`, spurlos): Happy Path, fünffache Zustellung → ein Verkauf, Late Payment über
 `expired → succeeded`, Betragsabweichung, unbekannte Session bleibt unverarbeitet und retrybar,
 `expired`/`failed` schließen den Versuch ohne Bestellung und Hold anzufassen.
@@ -131,10 +174,9 @@ Secret entgegen, `anon` kann nichts lesen, schreiben, ändern, löschen oder aus
 ausgeführt und griffen an ihren Wächtern. Bestellungen, Reservierungen, Versuche und Events stehen
 weiterhin auf 0.
 
-> **Nächster Schritt:** B2.4 — der echte Zahlungsschritt in der Kasse. Bis dahin gibt es in der
-> Anwendung **keine** Oberfläche, die `create-payment` aufruft; die temporäre Dev-Harness dafür
-> ist entfernt. Danach: Rollout nach Production (Function, Webhook-Endpoint, Live-Secret,
-> `pg_cron`) als eigener Release-Schritt.
+> **Nächster Schritt:** Rollout nach Production als eigener Release-Schritt — Migration `0017`,
+> beide Edge Functions, Webhook-Endpoint, Live-Secret, `STRIPE_LIVEMODE=true`, `ALLOWED_ORIGINS`
+> mit der echten Origin, `pg_cron`. Davor fehlen weiterhin Mailversand und die Rechtstexte.
 
 ### Voraussetzungen vor B2.3
 

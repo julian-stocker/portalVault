@@ -4294,7 +4294,7 @@ abweichende Wahrheit, die bei jeder Dashboard-Änderung stillschweigend falsch w
 
 **Die Handler werden trotzdem gebaut.** `checkout.session.async_payment_succeeded` und
 `checkout.session.async_payment_failed` sind in `stripe-webhook` implementiert, abonniert und in
-`supabase/tests/0017_webhook_runtime.sql` verifiziert. Begründung: „sollte nicht vorkommen" ist
+`supabase/tests/webhook_runtime_verification.sql` verifiziert. Begründung: „sollte nicht vorkommen" ist
 keine Zusicherung, eine Dashboard-Einstellung ist an einer anderen Stelle änderbar als dieser
 Code, und der Fehlermodus wäre, Ware gegen nichts herauszugeben. Ein Handler, der nie feuert,
 kostet nichts; sein Fehlen kostet Bestand.
@@ -4315,3 +4315,59 @@ Beides ist eine eigene Entscheidung und keine Einstellung.
 **Verworfen:** asynchrone Methoden anbieten und den Late-Payment-Pfad als Regelbetrieb behandeln ·
 eine Methoden-Allowlist im Quelltext parallel zur Dashboard-Konfiguration · die async-Handler
 weglassen, weil die Methoden abgeschaltet sind.
+
+---
+
+## ADR-0056 — Die Zahlungs-Capability überlebt den Redirect in `sessionStorage`
+
+**Status:** ANGENOMMEN (2026-09-11) · B2.4 · ändert eine Zusage aus ADR-0051/B2.2a.
+
+**Problem.** Bis B2.3 lag die Gast-Capability ausschließlich im Arbeitsspeicher, und
+`capability.ts` sagte das ausdrücklich zu: *„held in memory for the seconds between placing the
+order and being sent to the payment provider."* Ein Test hielt es fest — `does not survive in
+browser storage yet`.
+
+B2.4 bricht diese Annahme, weil der Kunde jetzt **die Domain verlässt**. Nach der Zahlung kommt er
+auf `/checkout/erfolg?order=…` zurück, und dort muss die Seite sagen, ob das Geld angekommen ist —
+aus der Datenbank gelesen, niemals aus dem Redirect geschlossen.
+
+Für angemeldete Kunden trägt RLS das. **Für Gäste nicht.** `order_payment_state()` antwortet
+niemandem, der nicht beweisen kann, dass er die Bestellung aufgegeben hat, und der einzige Beweis
+eines Gastes ist die Capability. Liegt sie nur im Speicher, ist sie nach dem Redirect weg — und
+ein Gast erführe über seine eigene, gerade bezahlte Bestellung **gar nichts**. Gäste sind laut
+`create-payment` „most of the shop".
+
+**Entscheidung.** Die Capability wird in `sessionStorage` abgelegt, unter vier Auflagen:
+
+| Auflage | Grund |
+|---|---|
+| `sessionStorage`, **nie** `localStorage` | Sie stirbt mit dem Tab. `localStorage` überlebte den Besuch an einem geteilten Rechner. |
+| ein Schlüssel je Bestellnummer | Ein zweiter Checkout im selben Tab kann die Capability des ersten nicht überschreiben. |
+| gelöscht im Endzustand | Sobald die Bestellung nichts Neues mehr beantworten kann, ist ein weiter gehaltenes Geheimnis Exposition ohne Zweck (`isTerminal`). |
+| nie URL, nie Query-String, nie Log, nie Event-Payload | Unverändert aus B2.2a. |
+
+**Der Preis, offen benannt.** Das ist eine reale Ausweitung der Angriffsfläche: Skript auf dieser
+Origin kann `sessionStorage` lesen, ein XSS also die Capability. Dagegen steht, was sie überhaupt
+erlaubt — **eine** Bestellung bezahlen oder deren Status lesen. Sie ist keine Sitzung, gewährt
+nichts darüber hinaus und lässt sich gegen keine andere Bestellung wiederverwenden. Derselbe
+Browser besaß sie ohnehin bereits; was sich ändert, ist die Dauer, nicht der Umfang.
+
+**Was zusätzlich gespeichert wird, und was daran nicht geheim ist.** Nach einer abgebrochenen
+Zahlung kehrt der Browser mit nichts als der Bestellnummer zurück, `create-payment` braucht aber
+die Bestell-ID. Beide liegen deshalb unter einem **eigenen** Schlüssel — bewusst getrennt vom
+Geheimnis, weil sie keines sind. Die Alternative wäre gewesen, `order_payment_state()` IDs
+zurückgeben zu lassen; die Projektion bleibt lieber minimal.
+
+**Nachtrag (2026-09-11, im manuellen Smoke gefunden).** Die getrennte Ablage von Bestell-ID und
+-nummer ist nicht nur Bequemlichkeit, sondern trägt einen Fehlerfall, der erst im Browser sichtbar
+wurde: Stripes `cancel_url` kehrt mit `?order=…` zurück, ein **Browser-Back** aber ohne jede
+Query. Wird das Dokument dabei nicht aus dem Back/Forward-Cache bedient, ist die Bestellung ohne
+diesen Eintrag unerreichbar, während sie Bestand hält. `recallOpenOrder()` nimmt die Nummer
+deshalb **optional**: mit Nummer wird sie geprüft, weil sie aus der URL stammt; ohne Nummer wird
+zurückgegeben, was dieser Tab selbst gespeichert hat. Das eigene Storage zu lesen ist nicht
+dasselbe wie einer URL zu glauben.
+
+**Verworfen:** die Capability in die Rücksprung-URL legen (dann steht sie in Browserverlauf,
+Referrer und jedem Server-Log) · `localStorage` (überlebt den Besuch) · Gästen nach der Zahlung
+gar keinen Status zeigen (ohne Mailversand erführen sie nichts) · den Service-Role-Key in Vercel,
+um serverseitig zu lesen (bricht ADR-0051).

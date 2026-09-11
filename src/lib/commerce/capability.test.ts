@@ -253,11 +253,21 @@ describe("the token goes nowhere it could be written down", () => {
     expect(view).not.toMatch(/value=\{credentials/);
   });
 
-  it("does not survive in browser storage yet", () => {
-    // Deliberate for B2.2a: memory only. Surviving a reload belongs to guest
-    // order access, which arrives with the confirmation mail.
+  it("survives a redirect in sessionStorage, and never in localStorage", () => {
+    /*
+     * B2.2a kept the capability in memory and this test forbade any storage at
+     * all. B2.4 changed that deliberately (ADR-0056): the customer now leaves
+     * for the payment provider and comes back, and a guest who cannot prove
+     * ownership on their return is shown nothing about their own order.
+     *
+     * What did NOT change is where it may live. sessionStorage dies with the
+     * tab; localStorage would outlive the visit on a shared computer. The full
+     * rules — one key per order, forgotten at a terminal state, never a URL,
+     * never a log — are asserted in `capability-storage.test.ts`.
+     */
     const view = source("src/components/checkout/checkout-view.tsx");
-    expect(view).not.toMatch(/localStorage|sessionStorage/);
+    expect(view).not.toMatch(/localStorage/);
+    expect(source("src/lib/commerce/capability.ts")).not.toMatch(/window\.localStorage/);
   });
 });
 
