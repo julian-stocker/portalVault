@@ -7,6 +7,90 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+**Transactional Mail V1 auf Staging fertig und nachgewiesen (2026-09-11).** Nicht committet.
+
+*Drei Mails, und keine davon wird von der Datenbank verschickt.* Zahlungsbestätigung und
+Versandbestätigung an den Kunden, Prüfhinweis an den Betreiber. Versendet wird ausschließlich in
+`send-order-mail`, der dritten Edge Function — dem einzigen Ort, der `RESEND_API_KEY` kennt.
+Vercel bekommt weiterhin kein Secret (ADR-0051).
+
+*Was die Datenbank beisteuert, ist die eine Frage, die der Anbieter nicht beantworten kann:*
+haben wir diese Mail schon übergeben, und dürfen wir sie noch einmal übergeben. `order_mail` hält
+eine Zeile je (Bestellung, Art) mit vier Zuständen — und der vierte ist der eigentliche Entwurf:
+**`unresolved`** heißt, dass niemand es sagen kann (409 auf dem Idempotenzschlüssel, Timeout,
+abgestürzter Request). `sent` ist endgültig, auch gegen das Force-Flag: Resends Idempotenzfenster
+sind 24 Stunden, danach wäre ein zweiter Versand eine zweite Mail im Postfach.
+
+*Zwei Schranken übereinander.* `confirm_order_payment()` liefert `confirmed` genau einmal — ein
+erneut zugestelltes Stripe-Event bekommt `duplicate_event` oder `already_confirmed`, und keiner
+der beiden steht in der Mail-Zuordnung des Webhooks. Dahinter der Primärschlüssel von
+`order_mail`. Dazu Resends eigener `idempotencyKey`, stabil je logischer Mail
+(`skyisles/payment-confirmation/SI-…`), nie zufällig je Versuch.
+
+*Mailfehler berührt keine Zahlung.* Der Versand liegt hinter dem committeten RPC, hält keine
+Transaktion, fasst weder Bestellung noch Reservierung noch Bewegung an und wirft nie nach oben —
+ein schlechter Moment beim Mailanbieter darf keine bestätigte Zahlung in einen Webhook-Retry
+verwandeln.
+
+*Unternehmensdaten als eigene Entität (ADR-0059).* `business_settings`, nicht zwei Spalten auf
+`shop_settings`: die eine Tabelle sagt, was SkyIsles verlangt, die neue, wer SkyIsles ist. Heute
+zwei Felder, weil heute zwei gebraucht werden; Betreibername, Anschrift und Steuerangaben kommen
+mit dem Legal-Block in dieselbe Tabelle. Der einzige Weg nach außen ist
+`business_settings_public()`, das seine Spalten **wörtlich** aufzählt und heute **an niemanden
+vergeben** ist — eine Steuernummer kann nicht dadurch öffentlich werden, dass sie neu ist.
+Die alte Regel „die Geschäfts-E-Mail kommt im Schema nicht vor" ist präzisiert: **Adressen
+autorisieren nie**, und das gilt unverändert.
+
+*Geprüft:* `npm run check` grün, **1780 Tests in 81 Dateien** (vorher 1691/77), alle fünf
+Staging-Verifier grün, Secret-/PII-Scan sauber, keine Unternehmensangabe in Quelltext, Fixture
+oder Test.
+
+*Auf Staging end-to-end nachgewiesen (2026-09-11).* `0019` angewandt, Runtime-Suite 0–9 bestanden,
+`send-order-mail` deployt. Eine echte Sandbox-Zahlung über Stripe (`SI-2026-001042`, 6,38 €):
+Bestellung `paid`, Reservierung `converted`, **genau eine** `sale_skyisles`-Bewegung, Bestand
+3 → 2, `reserved` zurück auf 0 — und **genau ein** `order_mail`-Satz `payment_confirmation`,
+`sent`, mit Resend-Message-ID, vier Sekunden nach der Bestätigung.
+
+*Die Wiederholung ändert nichts.* Dasselbe Event erneut an `confirm_order_payment()` →
+`duplicate_event`, **keine** zusätzliche `payment_events`-Zeile. `claim_order_mail()` → `already_sent`,
+**auch mit `force`**: `sent` ist endgültig, weil Resends Idempotenzfenster 24 Stunden sind. Bewegungen,
+Bestand, `sent_at` und Message-ID unverändert.
+
+*Versand und Betreiberhinweis.* Zweiter `admin_mark_order_shipped()`-Aufruf → `23514 already
+shipped`. Zweiter und dritter Mailversuch → `already_sent`. Die geflaggte Fixture `SI-2026-001041`
+bekam **ausschließlich** `resolution_alert` und **keine** Kundenbestätigung. Kein Mailpfad hat
+Zahlung oder Bestand angefasst: `inventory_movements` und `payment_events` über alle Mailversuche
+konstant.
+
+> ### Dabei gefunden: `order_events` blockiert die Löschung eines Kontos
+>
+> `inventory_movements` erlaubt seit ADR-0037 **eine** Ausnahme von seiner Append-only-Regel: bei
+> Löschung des Auth-Users darf `created_by` auf NULL anonymisiert werden, sonst wäre ein Konto, das
+> je gebucht hat, dauerhaft nicht löschbar. **`order_events` hat diese Ausnahme nicht** — es nutzt
+> das pauschale `deny_write()` aus `0010`, das jedes UPDATE verweigert, auch das der
+> `on delete set null`-Fremdschlüsselaktion.
+>
+> Folge: Wer eine Bestellung aufgegeben (`placed`) oder versendet (`order_shipped`) hat, dessen
+> Konto lässt sich nicht mehr löschen. Im E2E belegt: der temporäre Administrator, der versendet
+> hatte, blieb stehen (`Database error deleting user`); der, der nur eine Mail auslöste, ließ sich
+> entfernen. **Nicht von `0019` verursacht** und ein Datenschutzthema.
+>
+> **Fix folgt als eigene, kleine Migration `0020`** — eigener Commit, eigener
+> Runtime-Nachweis.
+
+*Die beiden Punkte, die nur von Hand zu prüfen waren, sind geprüft.* Eine **echte
+Stripe-Sandbox-Redelivery** des `checkout.session.completed` zu `SI-2026-001042` erzeugte
+**keine** zusätzliche `payment_events`-Zeile (5 Zeilen, 5 verschiedene `provider_event_id`) und
+**keinen** zweiten Mailversuch: `payment_confirmation` steht weiterhin auf `attempts = 1`,
+`sent`, mit unverändertem `sent_at`. Die Zustellung aller drei Mails ist im Anbieter-Dashboard
+bestätigt; die Zahlungsbestätigung gilt dort als zugestellt. Gesendet wurde ausschließlich an die
+eigene Testadresse.
+
+**Production unverändert.** `0019` dort nicht angewandt, keine Function deployt, kein
+Secret gesetzt.
+
+---
+
 **Staging trägt jetzt den echten Katalog (2026-09-11).** Noch nicht committet.
 
 *Warum überhaupt.* Staging enthielt zwei Figuren. Damit ließ sich kein Raster, keine Serie, kein

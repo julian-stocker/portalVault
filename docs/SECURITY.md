@@ -163,8 +163,16 @@ sonst wäre ein Konto, das je gebucht hat, dauerhaft nicht löschbar. Alle Sachs
 dabei identisch bleiben; UUID → andere UUID und NULL → UUID sind weiterhin blockiert. Die
 Bewegungshistorie verändert sich dadurch fachlich nicht, nur der Personenbezug entfällt.
 
-**Die Geschäfts-E-Mail kommt im Schema nicht vor** — keine Spalte, keine Policy, keine Funktion,
-keine Konstante. Autorisiert wird über `shop_admins.user_id`.
+**E-Mail-Adressen sind niemals ein Autorisierungsmerkmal** (ADR-0059). Kein Code vergleicht eine
+Adresse, um zu entscheiden, wer etwas darf — autorisiert wird über `shop_admins.user_id`, geprüft
+von `is_shop_admin()` bzw. `is_shop_admin_for(uuid)`.
+
+Bis 2026-09-11 stand hier zusätzlich, die Geschäfts-E-Mail komme im Schema überhaupt nicht vor.
+Das war die damalige *Umsetzung* dieser Regel, nicht die Regel selbst. Seit `0019` liegt eine
+**veröffentlichte Kontaktadresse** in `business_settings` — Konfiguration, die der Betreiber
+pflegt und die in Mails und später im Impressum steht. Sie ist kein Zugangsmerkmal und wird
+nirgends als eines gelesen. Die Tabelle ist für `anon` und `authenticated` vollständig gesperrt;
+der einzige Weg nach außen ist `business_settings_public()`, das seine Spalten wörtlich aufzählt.
 
 ### `data/characters/characters.json` gehört ausdrücklich **nicht** auf die Verbotsliste
 

@@ -42,6 +42,7 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+const MAIL_SECRET = Deno.env.get("MAIL_FUNCTION_SECRET");
 
 /**
  * Which world this deployment belongs to.
@@ -154,11 +155,89 @@ Deno.serve(async (req: Request) => {
   const unknownIsFinal = decision.action === "fail" ? decision.unknownIsFinal : false;
   const status = statusForOutcome(outcome, unknownIsFinal);
 
+  /*
+   * ---- 5. the mail, and deliberately after everything that matters --------
+   *
+   * The payment is committed by now. This call cannot change that, cannot
+   * change the status Stripe is about to read, and cannot throw out of here:
+   * a mail provider having a bad minute must never turn a confirmed payment
+   * into a webhook Stripe retries.
+   *
+   * `outcome` is what makes it exactly-once. `confirm_order_payment()` returns
+   * `confirmed` for one delivery of one event and never again — a replay gets
+   * `duplicate_event` or `already_confirmed`, neither of which is in this map.
+   * The delivery row behind `claim_order_mail()` is the second guard.
+   */
+  await mailFor(outcome, decision.sessionId);
+
   console.log(
     `stripe-webhook ${event.type} ${maskSession(decision.sessionId)} -> ${outcome} (${status})`,
   );
   return respond(status, { received: true, outcome });
 });
+
+/** Which mail, if any, an outcome deserves. Anything absent sends nothing. */
+const MAIL_FOR_OUTCOME: Record<string, string> = {
+  // Money arrived and stock was booked. The customer gets their confirmation.
+  confirmed: "payment_confirmation",
+  // Money arrived and nothing was booked, or the amount did not match. The
+  // customer gets NO confirmation — the order is not one we can fulfil yet —
+  // and the operator gets woken up instead (ADR-0050).
+  late_payment_unresolved: "resolution_alert",
+  amount_mismatch: "resolution_alert",
+};
+
+/**
+ * Hand the mail to `send-order-mail`, or do nothing at all.
+ *
+ * Never throws. Every failure path here ends in a log line, because the only
+ * thing worse than a missing confirmation mail is a payment that gets retried
+ * because the confirmation mail was missing.
+ */
+async function mailFor(outcome: DbOutcome, sessionId: string): Promise<void> {
+  const kind = MAIL_FOR_OUTCOME[outcome];
+  if (!kind) return;
+
+  if (!MAIL_SECRET) {
+    console.error("stripe-webhook: MAIL_FUNCTION_SECRET missing, no mail sent");
+    return;
+  }
+
+  try {
+    // `confirm_order_payment()` answers with an outcome, not an order, so the
+    // order has to be looked up. Read-only and service-role only.
+    const lookup = await fetch(`${SUPABASE_URL}/rest/v1/rpc/order_number_for_payment`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_provider: "stripe", p_provider_payment_id: sessionId }),
+    });
+    const orderNumber = await lookup.json();
+    if (!lookup.ok || typeof orderNumber !== "string" || orderNumber === "") {
+      console.error(`stripe-webhook: no order for ${maskSession(sessionId)}, no mail sent`);
+      return;
+    }
+
+    const sent = await fetch(`${SUPABASE_URL}/functions/v1/send-order-mail`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-skyisles-mail-secret": MAIL_SECRET,
+      },
+      // No `force`: only a verified administrator may overrule an unresolved
+      // record, and a webhook is not one.
+      body: JSON.stringify({ orderNumber, kind }),
+    });
+    if (!sent.ok) {
+      console.error(`stripe-webhook: send-order-mail answered ${sent.status} for ${kind}`);
+    }
+  } catch (error) {
+    console.error(`stripe-webhook: mail dispatch failed: ${describe(error)}`);
+  }
+}
 
 /* ------------------------------------------------------------------ plumbing */
 

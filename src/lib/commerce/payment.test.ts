@@ -487,13 +487,26 @@ describe("B2.1 ships no provider integration", () => {
     }
   });
 
-  it("adds no webhook route, and the only Edge Function is B2.2b's", () => {
+  it("adds no webhook route, and every Edge Function is a named one", () => {
     const files = readdirSync("src/app", { recursive: true }) as string[];
     expect(files.some((f) => String(f).includes("webhook"))).toBe(false);
-    // 0012 shipped with no Edge Function at all. B2.2b added exactly one, and
-    // the webhook is still B2.3 — this guard fails the day that changes,
-    // which is when it should be revisited rather than silently widened.
-    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment", "stripe-webhook"]);
+    /*
+     * The guard that matters is not "there is exactly one" — it is that a new
+     * privileged runtime is a deliberate, named addition (ADR-0051). Three
+     * exist now, each with its own reason:
+     *
+     *   create-payment    B2.2b, the only caller of the payment functions
+     *   stripe-webhook    B2.3, the only thing that may say money arrived
+     *   send-order-mail   transactional mail, the only holder of the Resend key
+     *
+     * A fourth fails this test, which is when it should be discussed rather
+     * than silently widened.
+     */
+    expect(readdirSync("supabase/functions").sort()).toEqual([
+      "create-payment",
+      "send-order-mail",
+      "stripe-webhook",
+    ]);
   });
 
   it("calls none of the payment functions from the application", () => {

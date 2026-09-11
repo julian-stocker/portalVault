@@ -73,6 +73,20 @@ export type AdminOrderDetail = {
     created_at: string;
     payload: Record<string, unknown>;
   }[];
+  /**
+   * Delivery state per mail, from `order_mail` (ADR-0059). Absent on an order
+   * placed before 0019 and on one where no mail has been attempted — both are
+   * an empty list, not a missing field.
+   */
+  mail: {
+    kind: string;
+    /** The EFFECTIVE state: a stale claim already reads as `unresolved`. */
+    state: string;
+    sent_at: string | null;
+    attempts: number;
+    last_error: string | null;
+    updated_at: string | null;
+  }[];
 };
 
 /* ------------------------------------------------------------- attention */

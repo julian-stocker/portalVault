@@ -535,17 +535,25 @@ describe("no provider, no secret, no scheduler, no new reach", () => {
   });
 
   it("adds no Edge Function of its own and no provider dependency", () => {
-    // 0015 itself introduces none. The one that exists is B2.2b's
-    // create-payment, which calls start_payment_attempt() — it does not call
-    // anything 0015 added beyond that, and never the expiry reader.
-    expect(readdirSync("supabase/functions").sort()).toEqual(["create-payment", "stripe-webhook"]);
+    // 0015 itself introduces none. The functions that exist came with their
+    // own phases — create-payment (B2.2b), stripe-webhook (B2.3) and
+    // send-order-mail (transactional mail) — and none of them calls anything
+    // 0015 added beyond start_payment_attempt(), never the expiry reader.
+    expect(readdirSync("supabase/functions").sort()).toEqual([
+      "create-payment",
+      "send-order-mail",
+      "stripe-webhook",
+    ]);
     const entry = readFileSync("supabase/functions/create-payment/index.ts", "utf8");
     expect(entry).not.toContain("pending_payment_expiries");
     expect(entry).not.toContain("amount_to_cents");
     const pkg = JSON.parse(readFileSync("package.json", "utf8"));
     const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    // No provider SDK in the APPLICATION's dependencies. The Edge Functions
+    // pull theirs with `npm:` specifiers at their own runtime, which is the
+    // point: Vercel ships neither Stripe's SDK nor Resend's.
     for (const name of Object.keys(deps)) {
-      expect(name).not.toMatch(/stripe|mollie|paypal/i);
+      expect(name).not.toMatch(/stripe|mollie|paypal|resend/i);
     }
   });
 

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
 import { fetchAdminOrder } from "@/lib/admin/order-queries";
 import { shipBlocker } from "@/lib/admin/orders";
@@ -39,7 +40,7 @@ export default async function AdminOrderPage({
   const detail = await fetchAdminOrder(orderNumber);
   if (!detail) notFound();
 
-  const { order, address, lines, events } = detail;
+  const { order, address, lines, events, mail } = detail;
   const copy = de.admin.orders;
   const blocker = shipBlocker(order);
 
@@ -221,6 +222,9 @@ export default async function AdminOrderPage({
           <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
         )}
       </div>
+
+      {/* --------------------------------------------------------------- mail */}
+      <OrderMailPanel orderNumber={order.order_number} mail={mail ?? []} />
 
       {/* ------------------------------------------------------------- events */}
       <h2 className="mt-8 text-lg font-semibold">{copy.eventsHeading}</h2>

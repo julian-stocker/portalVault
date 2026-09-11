@@ -374,6 +374,36 @@ export const de = {
     completionNote:
       "Verborgene Figuren zählen weder im Zähler noch im Nenner der Sammlungsfortschritts.",
 
+    /**
+     * Unternehmensdaten (ADR-0059).
+     *
+     * Bewusst getrennt von den Shop-Einstellungen: dort steht, was SkyIsles
+     * verlangt, hier steht, wer SkyIsles ist. Dieselbe Quelle bedient später
+     * die Rechtstexte und die Rechnung — eine Angabe, die drei Oberflächen
+     * zitieren, braucht genau einen Ort.
+     */
+    business: {
+      heading: "Unternehmensdaten",
+      hint:
+        "Diese Angaben erscheinen in Mails an Kunden und später in den Rechtstexten. " +
+        "Die Absenderadresse der Mails gehört zur Serverkonfiguration und ist hier bewusst " +
+        "nicht änderbar.",
+      contactEmail: "Geschäfts-E-Mail",
+      contactEmailHint:
+        "Die Adresse, an die Kunden schreiben. Sie steht als Antwortadresse in jeder " +
+        "Bestell- und Versandmail.",
+      replyTo: "Abweichende Antwortadresse (optional)",
+      replyToHint: "Leer lassen, wenn Antworten an die Geschäfts-E-Mail gehen sollen.",
+      save: "Speichern",
+      saved: "Gespeichert.",
+      invalidEmail: "Das sieht nicht nach einer E-Mail-Adresse aus.",
+      saveFailed: "Das hat nicht geklappt.",
+      /** Ohne sie kann die Prüfwarnung nirgendwohin. */
+      missingWarning:
+        "Ohne Geschäfts-E-Mail kann SkyIsles dich nicht benachrichtigen, wenn eine Bestellung " +
+        "geprüft werden muss.",
+    },
+
     /** Shop-Einstellungen (ADR-0045). */
     shopSettings: "Shop-Einstellungen",
     defaultShopPrice: "Standard-Shoppreis",
@@ -517,6 +547,61 @@ export const de = {
       confirmYes: "Ja, als versendet markieren",
       confirmNo: "Abbrechen",
       shipSucceeded: (number: string) => `Bestellung ${number} ist als versendet markiert.`,
+
+      /**
+       * Mailzustand je Bestellung (Transactional Mail V1).
+       *
+       * Vier Zustände, und der vierte ist der wichtige: „unklar" heißt, dass
+       * niemand sagen kann, ob die Mail draußen ist — ein 409 auf dem
+       * Idempotenzschlüssel oder ein abgebrochener Request. Ein blindes
+       * Nachsenden würde dem Kunden dieselbe Mail ein zweites Mal schicken.
+       */
+      mail: {
+        heading: "Mails",
+        empty: "Für diese Bestellung wurde noch keine Mail angestoßen.",
+        kind: {
+          payment_confirmation: "Zahlungsbestätigung",
+          shipping_confirmation: "Versandbestätigung",
+          resolution_alert: "Prüfhinweis an dich",
+        } as Record<string, string>,
+        state: {
+          sending: "wird gesendet",
+          sent: "gesendet",
+          failed: "fehlgeschlagen",
+          unresolved: "unklar",
+        } as Record<string, string>,
+        sentAt: (when: string) => `gesendet am ${when}`,
+        attempts: (n: number) => (n === 1 ? "1 Versuch" : `${n} Versuche`),
+        /** Nur der Fehlername des Anbieters, nie ein ganzes Fehlerobjekt. */
+        lastError: (name: string) => `Letzter Fehler: ${name}`,
+
+        retry: "Erneut senden",
+        retrying: "Wird gesendet …",
+        /** Für „gesendet" gibt es bewusst keinen Knopf. */
+        sentIsFinal:
+          "Bereits gesendet. Eine zweite Mail wäre eine zweite Mail im Postfach des Kunden.",
+
+        /** Die Rückfrage vor dem einzigen Fall, der doppelt zustellen könnte. */
+        confirmUnresolvedTitle: "Nicht sicher, ob diese Mail draußen ist",
+        confirmUnresolvedBody:
+          "Der Versanddienst hat auf diesen Versuch keine eindeutige Antwort gegeben. Möglich " +
+          "ist beides: die Mail ist angekommen, oder sie ist nie losgegangen. Wenn du jetzt " +
+          "erneut sendest, kann der Kunde sie zweimal bekommen.",
+        confirmUnresolvedYes: "Trotzdem erneut senden",
+        confirmUnresolvedNo: "Abbrechen",
+
+        sendFailed: "Die Mail konnte nicht angestoßen werden.",
+        outcome: {
+          sent: "Mail gesendet.",
+          already_sent: "Diese Mail wurde bereits gesendet.",
+          in_flight: "Diese Mail wird gerade gesendet.",
+          unresolved: "Unklar, ob die Mail draußen ist — bitte prüfen.",
+          unknown_order: "Diese Bestellung gibt es nicht.",
+          no_recipient: "Es ist keine Geschäftsadresse hinterlegt.",
+          failed: "Der Versanddienst hat die Mail abgelehnt.",
+          unknown: "Unbekanntes Ergebnis.",
+        } as Record<string, string>,
+      },
 
       shipRefused:
         "Diese Bestellung kann nicht als versendet markiert werden. Bitte prüfe Zahlung und " +

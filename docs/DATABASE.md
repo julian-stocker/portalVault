@@ -542,6 +542,53 @@ Beides ist vom Immutability-Trigger erfasst.
 existiert und ist `0`, weil die Summe aus benannten Teilen bestehen muss.
 
 
+### 3.3l Transaktionsmail — `business_settings` und `order_mail` (Migration `0019`, ADR-0059)
+
+Zwei Tabellen, die nichts miteinander zu tun haben außer dem Zeitpunkt ihrer Entstehung.
+
+**`business_settings` — eine Zeile, die Unternehmensdaten hält.** Nicht „die Mailadresse", sondern
+die zentrale Konfiguration, aus der später auch Impressum und AGB ihre Felder ziehen (ADR-0059).
+Heute: `id`, `contact_email`, `transactional_reply_to`, `updated_at`, `updated_by`. RLS ist an,
+und **jedes** Tabellenrecht ist `anon` und `authenticated` entzogen — ein Tabellen-Grant kennt
+keine Spalten, und Steuer- oder interne Felder dürfen nicht dadurch öffentlich werden, dass später
+eine Spalte dazukommt.
+
+Öffentlich wird ausschließlich eine **ausdrücklich aufgezählte** Projektion:
+`business_settings_public()` gibt genau `contact_email` zurück und sonst nichts. Sie ist heute
+**niemandem** gewährt, weil es noch keine öffentliche Rechtsseite gibt, die sie bräuchte; die
+Allow-List existiert trotzdem, damit die spätere Freigabe eine Zeile Grant ist und keine
+Entscheidung darüber, welche Spalten eigentlich öffentlich sind. Rechtstexte selbst bleiben
+versionierte Templates im Code, keine Datenbankzeilen.
+
+Gepflegt wird über `admin_business_settings()` und `admin_set_business_contact()`, beide mit
+`is_shop_admin()` im eigenen Rumpf.
+
+**`order_mail` — der Zustellnachweis, ein Primärschlüssel `(order_id, kind)`.** Drei Arten:
+`payment_confirmation`, `shipping_confirmation`, `resolution_alert`. Vier Zustände:
+
+| Zustand | Bedeutung | erneut senden? |
+|---|---|---|
+| `sending` | beansprucht, Ausgang offen | erst nach Ablauf der Frist |
+| `sent` | der Anbieter hat angenommen | **nie**, auch nicht mit `force` |
+| `failed` | eindeutig fehlgeschlagen | ja |
+| `unresolved` | Ausgang unbekannt (Timeout, Absturz, 409) | nur bewusst, im Admin sichtbar |
+
+`sent_at` ist über einen CHECK an `state = 'sent'` gekoppelt, ein Trigger verbietet jeden Rückweg
+aus `sent`, ein zweiter jedes `DELETE`. `claim_order_mail()` ist der einzige Weg in den Versand
+und beantwortet in einem Aufruf, was zu tun ist: `claimed`, `already_sent`, `in_flight`,
+`unresolved` oder `unknown_order`. `order_mail_grace()` (10 Minuten) entscheidet, wann ein
+hängender Anspruch als unklar gilt — nicht als frei.
+
+**Drei Schichten, die eine doppelte Mail verhindern**, bewusst unabhängig voneinander: die
+Ereigniszuordnung im Webhook (ein wiederholt zugestelltes Stripe-Event bildet auf gar keine Mail
+ab), der Primärschlüssel hier, und der `idempotencyKey` beim Anbieter. Der Anbieterschlüssel
+deckt nur 24 Stunden ab — deshalb ist `sent` **hier** terminal und nicht dort.
+
+`order_mail_payload()` stellt zusammen, was in einer Mail stehen darf, und lässt weg, was niemals
+in ein Postfach gehört: kein `payment_token_hash`, kein `client_hash`, keine `request_id`, keine
+interne ID, keine Stripe-Session. Eine Mail autorisiert nichts (ADR-0059).
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |
@@ -1000,6 +1047,15 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   liefern dasselbe leere Ergebnis.
   **Auf Staging angewandt und verifiziert am 2026-09-11, auf Production NICHT angewandt.**
 
+- Neunzehnte Migration: `0019_transactional_mail.sql` — **Transaktionsmail** (ADR-0059).
+  Zwei Tabellen (`business_settings`, `order_mail`), der Anspruchs- und Abschlusspfad
+  (`claim_order_mail()`, `mark_order_mail_sent/failed/unresolved()`), die Nutzlast
+  (`order_mail_payload()`), die schmale öffentliche Projektion (`business_settings_public()`,
+  **niemandem gewährt**) und die beiden Adminfunktionen. `admin_order()` wird gedroppt und neu
+  angelegt, weil die Projektion um `mail` wächst. Rein additiv: keine bestehende Tabelle geändert,
+  keine Zeile angefasst. Der `RESEND_API_KEY` liegt ausschließlich als Edge-Secret (ADR-0051) —
+  die Datenbank kennt ihn nicht. **Auf Staging angewandt und runtime-verifiziert am 2026-09-11,
+  auf Production NICHT angewandt.**
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
 > Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.

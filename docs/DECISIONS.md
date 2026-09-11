@@ -4484,3 +4484,73 @@ Kunden bereits zusagt, dass sich jemand meldet. Beides ist ein Release-Gate, kei
 angemeldete Sammler (ein Dashboard wäre ein zweites Ding, das der Navigation widersprechen kann —
 siehe `DEFAULT_SIGNED_IN_PATH`) · Platzhalterseiten für die Rechtstexte · ein vierter
 Navigationspunkt für den Shop · ein Onboarding-Tutorial nach der Registrierung.
+
+---
+
+## ADR-0059 — E-Mail-Adressen autorisieren nie; Unternehmensdaten sind zentrale Konfiguration
+
+**Status:** ANGENOMMEN (2026-09-11) · umgesetzt in Migration `0019`
+
+**Kontext.** `docs/SECURITY.md` hielt bisher fest: *„Die Geschäfts-E-Mail kommt im Schema nicht
+vor — keine Spalte, keine Policy, keine Funktion, keine Konstante."* Der Transactional-Mail-Block
+braucht aber genau eine solche Adresse: als Antwortadresse in jeder Kundenmail und als Empfänger
+der internen Prüfwarnung. Und der kommende Legal-Block braucht mehr davon — Betreibername,
+ladungsfähige Anschrift, steuerliche Angaben.
+
+**Die Regel meinte zwei Dinge, und nur eines davon bleibt absolut.**
+
+1. **E-Mail-Adressen sind niemals ein Autorisierungsmerkmal.** Kein Code vergleicht eine Adresse,
+   um zu entscheiden, wer etwas darf. Autorisiert wird ausschließlich über `shop_admins.user_id`,
+   geprüft von `is_shop_admin()` beziehungsweise — für eine Edge Function, die keine `auth.uid()`
+   hat — von `is_shop_admin_for(uuid)` mit einer zuvor verifizierten ID. **Diese Regel gilt
+   unverändert und ohne Ausnahme.**
+2. *Die Adresse steht nirgends im Schema.* Das war eine **Umsetzung** von (1) zu einem Zeitpunkt,
+   als es keinen anderen Grund für eine Adresse gab. Als Regel für veröffentlichte Geschäftsdaten
+   ist sie falsch: eine Kontaktadresse, die im Impressum, in der Mail und auf der Rechnung steht,
+   ist Konfiguration, kein Geheimnis und kein Zugangsmerkmal.
+
+**Entscheidung.**
+
+- **Eine eigene Entität `business_settings`**, nicht zwei Spalten auf `shop_settings`. Die eine
+  Tabelle beantwortet, *was SkyIsles verlangt*; die neue, *wer SkyIsles ist*. Verschiedene
+  Lebensdauer, verschiedene Leser, verschiedene Sensitivität. Rechtstexte, Mails und die spätere
+  Rechnung zitieren dieselbe Angabe — eine Angabe, die drei Oberflächen zitieren, braucht genau
+  einen Ort.
+- **Heute nur zwei Spalten:** `contact_email` und `transactional_reply_to`. Betreibername,
+  Anschrift, Telefon und Steuerangaben kommen mit dem Legal-Block. Eine leere Spalte ist ein
+  Versprechen, das niemand geprüft hat.
+- **Drei Sensitivitätsstufen, und die strenge ist der Default.** *Öffentlich* (Kontaktadresse,
+  später Name und Anschrift) · *intern* (abweichendes Reply-To) · *niemals öffentlich*
+  (Steuerangaben). Die Tabelle ist für `anon` und `authenticated` vollständig gesperrt.
+- **Der einzige Weg nach außen ist `business_settings_public()`**, eine Projektion, die ihre
+  Spalten **wörtlich aufzählt**. Kein `select *`, keine aus dem Katalog gebaute Spaltenliste. Eine
+  Spalte, die der Legal-Block hinzufügt, ist damit unsichtbar, bis sie jemand absichtlich
+  einträgt — eine Steuernummer kann nicht dadurch öffentlich werden, dass sie neu ist.
+  `mail-schema.test.ts` nagelt die Liste fest; das macht aus der Konvention eine Zusicherung.
+- **Die Projektion ist heute an niemanden vergeben.** Sie ist definiert, damit ihre Form geprüft
+  und getestet werden kann, aber keine öffentliche Seite rendert eine Unternehmensangabe — es gibt
+  kein Impressum und keinen Kontaktlink. Der Legal-Block ersetzt ein `revoke` durch ein `grant`,
+  in dem Moment, in dem es eine Seite gibt, die die Angabe trägt.
+- **Die technische Absenderadresse gehört nicht dazu.** `orders@mail.skyisles.app` und
+  `account@mail.skyisles.app` liegen auf der verifizierten Sendedomain und sind
+  Umgebungskonfiguration (`MAIL_FROM`). Ein Adminfeld dafür wäre ein Feld, mit dem sich
+  Zustellbarkeit in einem Tastendruck zerstören lässt.
+- **Ein schmaler Schreiber je Faktengruppe**, nicht eine Funktion für alles:
+  `admin_set_business_contact()` heute, `admin_set_business_identity()` später. Eine
+  Gott-Funktion hieße, dass jeder Aufrufer jedes Feld übergibt und jede Validierung in einem
+  Zweig liegt.
+- **Rechtstexte bleiben versionierte Templates im Code.** Der Admin pflegt die veränderlichen
+  Fakten, nicht juristischen Freitext.
+
+**Konsequenzen.**
+
+- `docs/SECURITY.md` wird präzisiert: (1) bleibt als Regel, (2) wird als das benannt, was es war.
+- Keine Unternehmensangabe steht je in Quelltext, Fixture oder Test. Die Migration legt die Zeile
+  leer an; gesetzt wird im Adminbereich. Tests verwenden `@example.com`.
+- Der Legal-Block erweitert diese Tabelle und diese Projektion, statt eine zweite Quelle zu bauen.
+
+**Verworfen:** zwei Spalten auf `shop_settings` (Preis und Identität sind verschiedene Fragen) ·
+eine Konstante im Code (unveränderlich ohne Deployment, und genau die Hardcodierung, die
+`docs/SECURITY.md` verbietet) · die Tabelle öffentlich lesbar machen und die nicht-öffentlichen
+Felder später „herausfiltern" (ein Filter, der nach dem Feld kommt, vergisst irgendwann eines) ·
+alle künftigen Felder gleich mitanlegen.

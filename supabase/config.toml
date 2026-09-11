@@ -26,3 +26,14 @@ verify_jwt = false
 # chance to happen: the Stripe signature, checked by Stripe's own SDK
 # (ADR-0054).
 verify_jwt = false
+
+[functions.send-order-mail]
+# MUST stay false, for the same reason create-payment's is.
+#
+# Two callers reach this function and neither presents the kind of token
+# Supabase's own gate expects: stripe-webhook sends a shared secret and no JWT
+# at all, and the admin area sends a user token that still has to be checked
+# against `shop_admins` afterwards. With verification on, the first is rejected
+# before the function runs and the second is accepted without the check that
+# matters. The function authorises both itself (see index.ts, `authorise`).
+verify_jwt = false

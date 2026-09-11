@@ -19,6 +19,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { looksLikeEmail, normaliseContact } from "@/lib/admin/business";
 import { isAdmin } from "@/lib/auth/admin";
 import {
   isCondition,
@@ -232,4 +233,40 @@ export async function setImageOverride(skyId: string, path: string | null): Prom
     { p_sky_id: skyId, p_path: path ?? "" },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/admin/inventory", "/", "/collection"],
   );
+}
+
+/**
+ * The operator's own facts (ADR-0059).
+ *
+ * A narrow writer for one group of facts, not a god-function that sets
+ * everything: the legal block adds `setBusinessIdentity()` beside this one, so
+ * each keeps its own validation instead of branching inside a shared body.
+ *
+ * `admin_set_business_contact()` asks `is_shop_admin()` in the database. The
+ * check here answers in German and saves a round trip; it is not the boundary.
+ */
+export async function setBusinessContact(
+  contactEmail: string,
+  replyTo: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const contact = normaliseContact(contactEmail);
+  const reply = normaliseContact(replyTo);
+
+  for (const value of [contact, reply]) {
+    if (value !== null && !looksLikeEmail(value)) {
+      return { ok: false, message: de.admin.business.invalidEmail };
+    }
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_set_business_contact", {
+    p_contact_email: contact,
+    p_reply_to: reply,
+  });
+  if (error) return { ok: false, message: de.admin.business.saveFailed };
+
+  revalidatePath("/admin");
+  return { ok: true };
 }
