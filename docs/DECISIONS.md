@@ -4912,3 +4912,78 @@ kann.
 eine Nummer, indem man so tut, als versende man erneut) · die alte Nummer ins Event schreiben ·
 den Link aus `shipping_method_name` bauen · für unbekannte Carrier einen Suchlink raten · den
 Domain-Wächter ganz abschalten statt eine benannte Ausnahme zu führen.
+
+---
+
+## ADR-0063 — „Offen" heißt nicht abgeschlossen, und zwar überall dasselbe
+
+**Status:** ANGENOMMEN (2026-09-12) · umgesetzt in Migration `0024`
+
+**Beobachtet auf Production am 2026-09-12.** `SI-2026-001004` stand auf
+`pending` / `unfulfilled`, weil der Stripe-Webhook auf eine falsche URL zeigte. Die Zeile im
+Admin war beschriftet mit **„Offen · Ausstehend · Nicht versendet"**. Der Filter darüber hieß
+**„Nur offene"**. Die Bestellung erschien dort **nicht** — sie war nur unter „Alle Bestellungen"
+zu finden.
+
+**Root Cause: ein Wort, zwei Bedeutungen, zwei Zeilen voneinander entfernt.**
+
+`admin_orders()` sortiert seit `0018` in vier Aufmerksamkeitsstufen:
+
+| Stufe | Bedingung | Beschriftung |
+|---|---|---|
+| 0 | `needs_resolution` | „Prüfen" |
+| 1 | `paid` und `unfulfilled` | „Zu versenden" |
+| 2 | `payment_status = 'pending'` | **„Offen"** |
+| 3 | sonst | „Erledigt" |
+
+und `p_open_only` filterte auf `attention <= 1`. Stufe 2 — die Stufe, die die Oberfläche selbst
+**„Offen"** nannte — war also aus dem Filter **„Nur offene"** ausgeschlossen.
+
+**Die Semantik war gemeint, das Wort war falsch.** Der Filter meinte *„was jetzt Arbeit ist"*:
+eine Bestellung prüfen oder ein Paket packen. Ein laufender Checkout ist beides nicht — er
+erledigt sich in zwanzig Minuten von selbst. Nur hieß dieselbe Stufe eben „Offen".
+
+**Und es war mehr als kosmetisch.** `fetchOpenOrderCounts()` benutzte denselben Filter für die
+Zähler auf `/admin`. Eine hängende Zahlung tauchte damit **nirgends** auf — nicht in der Liste,
+nicht im Zähler, nicht im Abzeichen. Genau der Fall, den ein Betreiber sehen muss, war der
+einzige, den nichts zeigte.
+
+### Entscheidung
+
+**„Offen" = nicht abgeschlossen**, also die Stufen 0, 1 und 2. Eine Bestellung verlässt den
+Zustand, wenn ihr nichts mehr zustoßen kann: bezahlt und versendet, abgelaufen, storniert,
+erstattet.
+
+`p_open_only` filtert deshalb auf `attention <= 2`. Stufe 3 bleibt draußen — eine Liste, die
+nie leer wird, liest niemand.
+
+**Ein Prädikat, eine Definition — und es steht in SQL.** Die Zähler auf `/admin` nennen
+weiterhin die zwei Stufen, die *Arbeit* sind — ein Checkout in der Schwebe braucht niemanden —,
+aber sie werden aus **derselben Menge** gezählt, die `p_open_only` zurückgibt. `hasOpenWork()`
+beantwortet in TypeScript nur noch „gibt es etwas zu tun"; „ist etwas offen" beantwortet
+ausschließlich `admin_orders()`. Eine zweite TypeScript-Funktion, die dieselbe Summe noch einmal
+bildet, wäre eine zweite Definition, die irgendwann abweicht.
+
+**Die Beschriftung der Stufe 2 wird „Zahlung offen".** Derselbe Wortlaut, den die Kundenansicht
+seit ADR-0061 benutzt (`account.orders.statusLabel.awaiting_payment`). Damit steht das Wort
+„offen" nur noch an einer Stelle für den Filter und nirgends mehr für eine einzelne Stufe.
+
+**Warum nicht „`pending` länger als 20 Minuten".** Verlockend, und hier falsch.
+`expire_stale_checkouts()` verschiebt einen abgelaufenen Checkout alle fünf Minuten auf
+`expired` — eine `pending`-Bestellung, die älter ist, **ist** damit bereits die Anomalie. Ein
+Altersfilter versteckte sie hinter einer zweiten Regel, die mit dem Zeitplan des Sweeps
+übereinstimmen müsste. Ein Zustand, eine Bedeutung.
+
+**Konsequenzen.**
+
+- `0024` ersetzt **einen Vergleich** in `admin_orders()`. Stufen, Sortierung, Spalten und die
+  `is_shop_admin()`-Prüfung bleiben wörtlich gleich; ein Test vergleicht beide Fassungen.
+- `OpenOrderCounts` bekommt `inFlight`. Das Nav-Abzeichen bleibt bei `needsResolution`: Ein
+  roter Punkt, sobald jemand einen Warenkorb öffnet, wäre die falsche Lautstärke.
+- `/admin` zeigt offene Zahlungen als eigene, leise Zeile — getrennt von der Arbeitszeile.
+- Keine Bestellung wird verändert. Die Migration liest keine Zeile und schreibt keine.
+
+**Verworfen:** nur die Beschriftung ändern und den Filter lassen (dann bliebe eine hängende
+Zahlung unsichtbar — der eigentliche Schaden) · `attention <= 3` (die Liste wäre die Liste aller
+Bestellungen und damit kein Filter) · ein Altersfilter auf `pending` · den Zähler getrennt vom
+Filter definieren (das war die Ursache).

@@ -7,6 +7,33 @@ Die vollständige Änderungshistorie liegt in Git.
 
 ## Aktuelle Phase
 
+> ## Arbeitsmodus ab 2026-09-12: **Staging first**
+>
+> Production gilt als **erfolgreich E2E-verifiziert** und wird bis auf ausdrücklich
+> freigegebene Read-only-Prüfungen **nicht mehr verändert**.
+>
+> | | |
+> |---|---|
+> | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
+> | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
+> | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
+> | Production-Migration | **keine** |
+> | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
+> | Production-Testbestellungen | **keine weiteren** |
+>
+> Offene Themen werden gesammelt auf Staging bearbeitet, aber **fachlich getrennt und in
+> kleinen, nachvollziehbaren Änderungen** — eine Sache, eine Migration, ein Commit.
+>
+> **Offen, jeweils für sich:**
+>
+> 1. **`client_hash`** wird bei Zahlung nicht geleert, obwohl der Spaltenkommentar aus `0010` es
+>    zusagt. Kein Sicherheitsproblem — ein gesalzener SHA-256 ohne die Adresse —, aber eine
+>    Datenminimierung, die versprochen und nicht geliefert wird.
+> 2. **Business-Bestellmail** und weitere UX-/Funktionsänderungen.
+>
+> Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
+> Betreiber stellt den Modus auf `closed` zurück.
+
 **Order-/Tracking-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
 
 *Die Sendungsnummer war an das Versandereignis geschweißt* — an zwei Stellen: Der CHECK verlangte

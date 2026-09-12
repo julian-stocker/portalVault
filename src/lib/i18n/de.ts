@@ -483,6 +483,10 @@ export const de = {
       empty: "Keine Bestellungen.",
       openOnly: "Nur offene",
       all: "Alle",
+      /** Was „offen" bedeutet — einmal ausgeschrieben, wo der Filter steht. */
+      openOnlyHint: "Alles, was noch nicht abgeschlossen ist.",
+      inFlightCount: (n: number) =>
+        n === 1 ? "1 Zahlung offen" : `${n} Zahlungen offen`,
 
       /**
        * Was auf der Startseite des Adminbereichs und am Navigationspunkt steht
@@ -518,7 +522,13 @@ export const de = {
       attention: {
         needs_resolution: "Prüfen",
         to_ship: "Zu versenden",
-        in_flight: "Offen",
+        /**
+         * Nicht mehr „Offen" (ADR-0063): Der Filter darüber heißt „Nur offene",
+         * und dasselbe Wort für zwei verschiedene Dinge, zwei Zeilen
+         * voneinander entfernt, war genau der Fehler. Derselbe Wortlaut wie in
+         * der Kundenansicht (`account.orders.statusLabel.awaiting_payment`).
+         */
+        in_flight: "Zahlung offen",
         settled: "Erledigt",
       },
 

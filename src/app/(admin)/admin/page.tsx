@@ -80,6 +80,15 @@ export default async function AdminPage() {
               <span className="text-muted">{copy.nothingOpen}</span>
             )}
           </span>
+          {/* Quiet, and separate from the work line above: a checkout in
+              flight needs nobody. But it is open, and until ADR-0063 it was
+              counted nowhere — which is how a payment that hung because a
+              webhook never arrived stayed invisible on every screen. */}
+          {openOrders.inFlight > 0 ? (
+            <span className="mt-1 block text-sm text-muted">
+              {copy.inFlightCount(openOrders.inFlight)}
+            </span>
+          ) : null}
           <span className="mt-1 block text-sm text-muted">{copy.linkHint}</span>
         </Link>
 

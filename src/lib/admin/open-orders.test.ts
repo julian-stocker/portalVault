@@ -10,19 +10,32 @@ describe("openOrderCounts", () => {
     expect(openOrderCounts([])).toEqual(NO_OPEN_ORDERS);
   });
 
-  it("separates the two buckets", () => {
-    expect(openOrderCounts([row(0), row(0), row(1)])).toEqual({
+  it("separates the three open buckets", () => {
+    expect(openOrderCounts([row(0), row(0), row(1), row(2)])).toEqual({
       needsResolution: 2,
       toShip: 1,
+      inFlight: 1,
     });
   });
 
-  it("ignores settled and in-flight rows", () => {
+  it("counts an unpaid checkout rather than dropping it", () => {
+    // Until 0024 this row was counted nowhere AND filtered out of the list
+    // that calls itself "only open" — so a payment that hung because a webhook
+    // never arrived was visible in neither place (ADR-0063).
+    expect(openOrderCounts([row(2)])).toEqual({
+      needsResolution: 0,
+      toShip: 0,
+      inFlight: 1,
+    });
+  });
+
+  it("ignores settled rows", () => {
     // `p_open_only` filters these out in SQL; an unfiltered list must still
     // produce the same answer.
-    expect(openOrderCounts([row(0), row(2), row(3), row(9)])).toEqual({
+    expect(openOrderCounts([row(0), row(3), row(9)])).toEqual({
       needsResolution: 1,
       toShip: 0,
+      inFlight: 0,
     });
   });
 
@@ -31,11 +44,17 @@ describe("openOrderCounts", () => {
   });
 });
 
-describe("hasOpenWork", () => {
-  it("is false only when both buckets are empty", () => {
+describe("hasOpenWork — is there something for a person to do?", () => {
+  it("is false only when both actionable buckets are empty", () => {
     expect(hasOpenWork(NO_OPEN_ORDERS)).toBe(false);
-    expect(hasOpenWork({ needsResolution: 0, toShip: 1 })).toBe(true);
-    expect(hasOpenWork({ needsResolution: 1, toShip: 0 })).toBe(true);
+    expect(hasOpenWork({ needsResolution: 0, toShip: 1, inFlight: 0 })).toBe(true);
+    expect(hasOpenWork({ needsResolution: 1, toShip: 0, inFlight: 0 })).toBe(true);
+  });
+
+  it("stays false for a checkout in flight", () => {
+    // It is open, and it needs nobody. Saying "you have work" about it would
+    // make the sentence untrue every time somebody opens a basket.
+    expect(hasOpenWork({ needsResolution: 0, toShip: 0, inFlight: 3 })).toBe(false);
   });
 });
 

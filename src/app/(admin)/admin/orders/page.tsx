@@ -48,6 +48,12 @@ export default async function AdminOrdersPage({
         </div>
       </div>
 
+      {/* What "open" means, written where the filter is. The word used to mean
+          one thing here and another on the rows below (ADR-0063). */}
+      {openOnly ? (
+        <p className="mt-1 text-sm text-muted">{de.admin.orders.openOnlyHint}</p>
+      ) : null}
+
       {orders.length === 0 ? (
         <p className="mt-8 text-muted">{de.admin.orders.empty}</p>
       ) : (

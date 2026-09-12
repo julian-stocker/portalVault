@@ -121,9 +121,16 @@ export type OpenOrderCounts = {
   needsResolution: number;
   /** Paid and unsent. Ordinary work. */
   toShip: number;
+  /**
+   * Placed, not paid yet. Nobody has to do anything about it — but it is
+   * open, and until 0024 it was counted nowhere and filtered out of the list
+   * that calls itself "only open" (ADR-0063). A checkout that hangs because a
+   * webhook never arrived looks exactly like this one.
+   */
+  inFlight: number;
 };
 
-export const NO_OPEN_ORDERS: OpenOrderCounts = { needsResolution: 0, toShip: 0 };
+export const NO_OPEN_ORDERS: OpenOrderCounts = { needsResolution: 0, toShip: 0, inFlight: 0 };
 
 /**
  * The two numbers the operator needs before they have opened anything.
@@ -139,17 +146,27 @@ export const NO_OPEN_ORDERS: OpenOrderCounts = { needsResolution: 0, toShip: 0 }
 export function openOrderCounts(rows: readonly { attention: number }[]): OpenOrderCounts {
   let needsResolution = 0;
   let toShip = 0;
+  let inFlight = 0;
 
   for (const row of rows) {
     const attention = attentionOf(row.attention);
     if (attention === "needs_resolution") needsResolution += 1;
     else if (attention === "to_ship") toShip += 1;
+    else if (attention === "in_flight") inFlight += 1;
   }
 
-  return { needsResolution, toShip };
+  return { needsResolution, toShip, inFlight };
 }
 
-/** Is there anything at all to do? Decides whether a panel appears. */
+/**
+ * Is there anything for a person to do?
+ *
+ * Deliberately NOT the same question as "is anything open". A checkout in
+ * flight is open and needs nobody; saying "you have work" about it would make
+ * the sentence untrue every time somebody opens a basket. The wider set —
+ * everything not settled — is what `p_open_only` returns, and it is
+ * defined once, in SQL (ADR-0063).
+ */
 export function hasOpenWork(counts: OpenOrderCounts): boolean {
   return counts.needsResolution > 0 || counts.toShip > 0;
 }

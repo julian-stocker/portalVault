@@ -1273,6 +1273,12 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   (fünf Abschnitte, alle mit Rollback).
   **Auf Staging angewandt und verifiziert am …, auf Production NICHT angewandt.**
 
+- Vierundzwanzigste Migration: `0024_open_orders_include_pending.sql` — **ein Vergleich**
+  (ADR-0063). `admin_orders(p_open_only => true)` filterte auf `attention <= 1` und schloss damit
+  genau die Stufe aus, die die Oberfläche „Offen" nannte; jetzt `<= 2`. Stufen, Sortierung,
+  Spalten und Rollenprüfung unverändert. Keine Tabelle, keine Spalte, keine Zeile angefasst.
+  **Auf Staging angewandt und runtime-verifiziert am 2026-09-12, auf Production NICHT angewandt.**
+
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
 > Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.
