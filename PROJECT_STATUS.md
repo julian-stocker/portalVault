@@ -30,7 +30,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > |---|---|---|---|
 > | **M0** | ADR-0064, ADR-0065, Nachträge zu ADR-0021/0059, Sprachregelung | — | **abgeschlossen** |
 > | **M1** | Bewegungsvokabular: neue Verkäufe heißen `sale` | `0025` | **abgeschlossen** |
-> | **M2** | `sellers` + `platform_settings`, `active_seller()` | `0026` | offen |
+> | **M2** | `sellers` + `platform_settings`, `active_seller()` | `0026` | **abgeschlossen** |
 >
 > SkyIsles ist die **Plattform**, **yulez.collectibles** der erste und vorerst einzige
 > gewerbliche Verkäufer auf SkyIsles. Die Runtime bleibt bewusst Single-Seller; die Liste

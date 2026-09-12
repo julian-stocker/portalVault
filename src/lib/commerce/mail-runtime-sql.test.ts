@@ -18,6 +18,7 @@ const FILES = [
   "supabase/tests/0020_order_events_anonymisation_runtime.sql",
   "supabase/tests/0023_tracking_runtime.sql",
   "supabase/tests/0025_movement_reason_runtime.sql",
+  "supabase/tests/0026_platform_and_seller_runtime.sql",
 ] as const;
 
 const SQL = readFileSync(FILES[0], "utf8");
@@ -121,9 +122,10 @@ describe("the suite cannot be run against production by accident", () => {
     expect(SQL).not.toMatch(/^commit;$/m);
   });
 
-  it("pins the agreed business_settings columns", () => {
-    expect(SQL).toContain(
-      "array['id', 'contact_email', 'transactional_reply_to', 'updated_at', 'updated_by']",
-    );
+  it("pins the agreed platform_settings columns", () => {
+    // `transactional_reply_to` left with 0026: the Reply-To on an order mail
+    // is the seller's, not the platform's (ADR-0064).
+    expect(SQL).toContain("array['id', 'contact_email', 'updated_at', 'updated_by']");
+    expect(SQL).not.toContain("public.business_settings");
   });
 });

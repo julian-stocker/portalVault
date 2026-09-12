@@ -482,6 +482,7 @@ Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
 | `next_order_number()` | niemand | Spalten-Default, race-frei über eine Sequenz. `volatile` — ein Aufrufer könnte Nummern verbrauchen, deshalb ebenfalls für alle drei Rollen entzogen. |
 | `create_order(request_id, email, items, address)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Idempotent über `request_id`. |
 | `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
+| `active_seller()` | niemand | Der eine aktive Verkäufer. **Einziger Leseweg** auf `sellers` — ein zweiter Verkäufer hätte damit genau eine Stelle zu ändern (ADR-0064). |
 | `release_expired_reservations(ids?)` | niemand | Gibt abgelaufenen Halt frei. Idempotent. `NULL` = alles (Zeitgeber), Array = die Positionen eines Checkouts. |
 | `release_order_reservations(order_id)` | niemand | Gibt den Halt einer Bestellung frei. Idempotent. |
 | `convert_order_reservations(order_id)` | niemand | Reservierung → Verkauf: senkt `reserved`, bucht `sale` über `apply_inventory_movement()` (bis `0025`: `sale_skyisles`, ADR-0065). Idempotent über den Reservierungszustand. **Wird von nichts gerufen** — die Zahlungsphase ruft sie. |
@@ -1290,6 +1291,24 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   `SI-2026-001048` (SKY-0053/loose): genau eine `sale`-Bewegung, `delta -1`, die vorhandene
   `sale_skyisles`-Zeile derselben Position unverändert daneben. **Auf Production NICHT
   angewandt.**
+
+- Sechsundzwanzigste Migration: `0026_platform_and_seller.sql` — **zwei Rechtssubjekte**
+  (ADR-0064). Neue Tabelle `sellers` (genau **eine** Zeile, `display_name = 'yulez.collectibles'`,
+  Kontaktwerte aus `business_settings` **kopiert**); `sellers_one_active` als partieller
+  Unique-Index erlaubt höchstens **einen aktiven** Verkäufer; `active_seller()` ist der einzige
+  Leseweg. `business_settings` heißt jetzt `platform_settings` und verliert
+  `transactional_reply_to` — eine reine Verkäuferangabe, vorher kopiert und in einer Sperre
+  geprüft. `mail_contact_settings()` behält **Name, Signatur und Rückgabeform** und liest nur
+  woanders her, deshalb braucht `send-order-mail` **kein Redeploy**. **Kein `seller_id`, keine
+  Commerce-Funktion, keine Policy, kein Grant auf die Tabelle.** Runtime-Suite:
+  `supabase/tests/0026_platform_and_seller_runtime.sql` (sieben Abschnitte, alle schreibenden
+  mit Rollback).
+  **Auf Staging angewandt und runtime-verifiziert am 2026-09-12** — `active_seller()` liefert
+  `yulez.collectibles`, beide Adressen entsprechen dem vor der Migration erhobenen
+  SHA-256-Fingerabdruck, `mail_contact_settings()` antwortet byteweise unverändert, ein zweiter
+  aktiver Verkäufer wird vom Index abgewiesen, und ein echter Sandbox-Kauf (`SI-2026-001049`)
+  hat die Bestellbestätigung mit dem Reply-To des **Verkäufers** versendet. **Auf Production
+  NICHT angewandt.**
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der

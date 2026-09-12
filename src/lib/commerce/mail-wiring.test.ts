@@ -84,7 +84,23 @@ describe("the Resend key never leaves the Edge Function", () => {
   it("is read from the environment, never from the database", () => {
     expect(fn).toContain('Deno.env.get("RESEND_API_KEY")');
     // A key in a settings table would be a key an administrator could read.
-    expect(fn).not.toContain("business_settings");
+    // Named one by one rather than as a pattern: the point is that NO settings
+    // table is reachable from here, whatever it is called this month.
+    for (const table of ["business_settings", "platform_settings", "sellers"]) {
+      expect(fn, `${table} must not be read from the Edge Function`).not.toContain(table);
+    }
+  });
+
+  it("reads the contact through the projection whose shape 0026 preserved", () => {
+    /*
+     * `mail_contact_settings()` kept its name, signature and return shape when
+     * its source moved from business_settings to the seller (ADR-0064), which
+     * is why this deployed function needed no redeploy. If this assertion ever
+     * has to change, the function has to be redeployed everywhere.
+     */
+    expect(fn).toContain('rpc("mail_contact_settings")');
+    expect(fn).toContain("settings.contact_email");
+    expect(fn).toContain("settings.transactional_reply_to");
   });
 
   it("the From address is environment configuration too", () => {

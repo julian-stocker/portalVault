@@ -47,12 +47,12 @@ begin
     then v_missing := v_missing || 'mail_contact_settings'; end if;
   if to_regprocedure('public.admin_set_business_contact(text,text)') is null
     then v_missing := v_missing || 'admin_set_business_contact'; end if;
-  if to_regclass('public.business_settings') is null
-    then v_missing := v_missing || 'business_settings'; end if;
-  if to_regprocedure('public.business_settings_public()') is null
-    then v_missing := v_missing || 'business_settings_public'; end if;
-  if to_regprocedure('public.admin_business_settings()') is null
-    then v_missing := v_missing || 'admin_business_settings'; end if;
+  if to_regclass('public.platform_settings') is null
+    then v_missing := v_missing || 'platform_settings'; end if;
+  if to_regprocedure('public.platform_settings_public()') is null
+    then v_missing := v_missing || 'platform_settings_public'; end if;
+  if to_regprocedure('public.admin_platform_settings()') is null
+    then v_missing := v_missing || 'admin_platform_settings'; end if;
 
   if array_length(v_missing, 1) > 0 then
     raise exception '0019 not applied, missing: %', array_to_string(v_missing, ', ');
@@ -413,8 +413,13 @@ end $$;
 
 
 -- ===========================================================================
--- SECTION 8 — the business contact is configuration, not authorisation,
+-- SECTION 8 — the PLATFORM contact is configuration, not authorisation,
 --             and the public projection publishes only what it names.
+--
+-- Renamed by 0026: this table was `business_settings` until the platform and
+-- the seller became two subjects (ADR-0064). The seller's own addresses, and
+-- the Reply-To that moved with them, are verified in
+-- `0026_platform_and_seller_runtime.sql`.
 -- ===========================================================================
 begin;
 do $$
@@ -424,34 +429,35 @@ declare
   v_cols   text[];
   v_key    text;
 begin
-  select contact_email into v_before from public.business_settings;
+  select contact_email into v_before from public.platform_settings;
+  -- v_before is restored by the rollback at the end of this section.
 
   -- The CHECK is a guard against a typo, and it holds.
   v_ok := false;
   begin
-    update public.business_settings set contact_email = 'not-an-address' where id;
+    update public.platform_settings set contact_email = 'not-an-address' where id;
   exception when check_violation then v_ok := true;
   end;
   if not v_ok then raise exception 'a malformed contact address was accepted'; end if;
 
-  update public.business_settings set contact_email = 'fixture@example.com' where id;
-  if (select contact_email from public.business_settings) <> 'fixture@example.com' then
+  update public.platform_settings set contact_email = 'fixture@example.com' where id;
+  if (select contact_email from public.platform_settings) <> 'fixture@example.com' then
     raise exception 'the contact address did not stick';
   end if;
 
   -- Null is a real value: no address configured yet.
-  update public.business_settings set contact_email = null where id;
-  if (select contact_email from public.business_settings) is not null then
+  update public.platform_settings set contact_email = null where id;
+  if (select contact_email from public.platform_settings) is not null then
     raise exception 'the contact address cannot be cleared';
   end if;
 
   -- Exactly one row, forever.
   v_ok := false;
   begin
-    insert into public.business_settings (id) values (false);
+    insert into public.platform_settings (id) values (false);
   exception when others then v_ok := true;
   end;
-  if not v_ok then raise exception 'business_settings is not a singleton'; end if;
+  if not v_ok then raise exception 'platform_settings is not a singleton'; end if;
 
   -- THE TABLE'S OWN COLUMN LIST, pinned.
   --
@@ -461,13 +467,13 @@ begin
   -- anything renders it is a field nobody decided the visibility of.
   select array_agg(a.attname::text order by a.attnum) into v_cols
     from pg_attribute a
-   where a.attrelid = 'public.business_settings'::regclass
+   where a.attrelid = 'public.platform_settings'::regclass
      and a.attnum > 0
      and not a.attisdropped;
 
   if v_cols is distinct from
-     array['id', 'contact_email', 'transactional_reply_to', 'updated_at', 'updated_by'] then
-    raise exception 'business_settings holds %, which is not the agreed list',
+     array['id', 'contact_email', 'updated_at', 'updated_by'] then
+    raise exception 'platform_settings holds %, which is not the agreed list',
       array_to_string(v_cols, ', ');
   end if;
 
@@ -485,7 +491,7 @@ begin
   -- property this test exists for — a field the legal block adds to the table
   -- must not become visible by arriving.
   begin
-    execute 'select contact_email from public.business_settings_public()';
+    execute 'select contact_email from public.platform_settings_public()';
   exception when others then
     raise exception 'the public projection does not expose contact_email';
   end;
@@ -493,13 +499,13 @@ begin
   for v_key in
     select a.attname::text
       from pg_attribute a
-     where a.attrelid = 'public.business_settings'::regclass
+     where a.attrelid = 'public.platform_settings'::regclass
        and a.attnum > 0
        and not a.attisdropped
        and a.attname <> 'contact_email'
   loop
     begin
-      execute format('select %I from public.business_settings_public()', v_key);
+      execute format('select %I from public.platform_settings_public()', v_key);
       -- P0001, so the handler below does not swallow it.
       raise exception 'the public projection exposes %, which is not on the allow-list', v_key;
     exception when undefined_column then
@@ -514,22 +520,22 @@ rollback;
 
 
 -- ===========================================================================
--- SECTION 9 — business_settings is closed, and the public projection is not
+-- SECTION 9 — platform_settings is closed, and the public projection is not
 --             granted to anybody yet.
 -- ===========================================================================
 do $$
 begin
-  if has_table_privilege('anon', 'public.business_settings', 'select')
-     or has_table_privilege('authenticated', 'public.business_settings', 'select') then
-    raise exception 'business_settings is readable by a client role';
+  if has_table_privilege('anon', 'public.platform_settings', 'select')
+     or has_table_privilege('authenticated', 'public.platform_settings', 'select') then
+    raise exception 'platform_settings is readable by a client role';
   end if;
 
   -- Defined, deliberately ungranted until a public page needs it.
-  if has_function_privilege('anon', 'public.business_settings_public()', 'execute') then
+  if has_function_privilege('anon', 'public.platform_settings_public()', 'execute') then
     raise exception 'the public projection is already granted to anon';
   end if;
 
-  if not has_function_privilege('authenticated', 'public.admin_business_settings()', 'execute') then
+  if not has_function_privilege('authenticated', 'public.admin_platform_settings()', 'execute') then
     raise exception 'an administrator cannot read the business settings';
   end if;
 

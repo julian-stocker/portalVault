@@ -1,8 +1,13 @@
 /**
- * The operator's own facts, on /admin.
+ * The seller's own facts, on /admin.
  *
- * Two fields today (ADR-0059). The legal block adds legal name, service
- * address and tax details to the same panel and the same table, which is the
+ * SkyIsles is the platform; this panel is about the seller — who the customer
+ * contracts with and who answers a question about an order (ADR-0064). The
+ * platform's own address sits in its own panel right below, because the two
+ * are different duties even while one person holds both.
+ *
+ * Three fields today (ADR-0059). The legal block adds legal name, service
+ * address and tax details to this panel and the `sellers` table, which is the
  * reason this is not a pair of columns on the pricing settings.
  *
  * The technical From address is deliberately absent and not editable: it
@@ -14,21 +19,24 @@
 import { useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
-import { setBusinessContact } from "@/lib/admin/actions";
+import { setSellerContact } from "@/lib/admin/actions";
 import { de } from "@/lib/i18n/de";
 
 const FIELD =
   "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 focus:ring-accent";
 const LABEL = "mb-1 block text-xs font-medium text-muted";
 
-export function BusinessSettings({
+export function SellerSettings({
+  displayName,
   contactEmail,
   replyTo,
 }: {
+  displayName: string | null;
   contactEmail: string | null;
   replyTo: string | null;
 }) {
-  const copy = de.admin.business;
+  const copy = de.admin.seller;
+  const [name, setName] = useState(displayName ?? "");
   const [contact, setContact] = useState(contactEmail ?? "");
   const [reply, setReply] = useState(replyTo ?? "");
   const [saved, setSaved] = useState(false);
@@ -39,7 +47,7 @@ export function BusinessSettings({
     setSaved(false);
     setError(null);
     startTransition(async () => {
-      const result = await setBusinessContact(contact, reply);
+      const result = await setSellerContact(name, contact, reply);
       if (result.ok) setSaved(true);
       else setError(result.message);
     });
@@ -61,11 +69,26 @@ export function BusinessSettings({
 
       <div className="mt-4 flex flex-col gap-4">
         <div>
-          <label className={LABEL} htmlFor="business-contact">
+          <label className={LABEL} htmlFor="seller-name">
+            {copy.displayName}
+          </label>
+          <input
+            id="seller-name"
+            type="text"
+            autoComplete="off"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            className={FIELD}
+          />
+          <p className="mt-1 text-xs text-muted">{copy.displayNameHint}</p>
+        </div>
+
+        <div>
+          <label className={LABEL} htmlFor="seller-contact">
             {copy.contactEmail}
           </label>
           <input
-            id="business-contact"
+            id="seller-contact"
             type="email"
             inputMode="email"
             autoComplete="off"
@@ -77,11 +100,11 @@ export function BusinessSettings({
         </div>
 
         <div>
-          <label className={LABEL} htmlFor="business-reply-to">
+          <label className={LABEL} htmlFor="seller-reply-to">
             {copy.replyTo}
           </label>
           <input
-            id="business-reply-to"
+            id="seller-reply-to"
             type="email"
             inputMode="email"
             autoComplete="off"

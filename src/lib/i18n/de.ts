@@ -382,26 +382,50 @@ export const de = {
      * die Rechtstexte und die Rechnung — eine Angabe, die drei Oberflächen
      * zitieren, braucht genau einen Ort.
      */
-    business: {
-      heading: "Unternehmensdaten",
+    /**
+     * Verkäuferdaten (ADR-0064). SkyIsles ist die Plattform; verkauft wird
+     * unter dem Handelsnamen des Verkäufers. Die Plattformangaben stehen
+     * getrennt darunter — zwei Pflichten, zwei Blöcke.
+     */
+    seller: {
+      heading: "Verkäuferdaten",
       hint:
-        "Diese Angaben erscheinen in Mails an Kunden und später in den Rechtstexten. " +
-        "Die Absenderadresse der Mails gehört zur Serverkonfiguration und ist hier bewusst " +
-        "nicht änderbar.",
-      contactEmail: "Geschäfts-E-Mail",
+        "Wer die Ware verkauft. Diese Angaben stehen in Mails an Kunden und später auf der " +
+        "Rechnung und in der Widerrufsbelehrung. Die Absenderadresse der Mails gehört zur " +
+        "Serverkonfiguration und ist hier bewusst nicht änderbar.",
+      displayName: "Handelsname",
+      displayNameHint: "Unter diesem Namen kaufen Kundinnen und Kunden.",
+      contactEmail: "Verkäufer-E-Mail",
       contactEmailHint:
-        "Die Adresse, an die Kunden schreiben. Sie steht als Antwortadresse in jeder " +
-        "Bestell- und Versandmail.",
+        "Die Adresse, an die Kunden zu einer Bestellung schreiben. Sie steht als Antwortadresse " +
+        "in jeder Bestell- und Versandmail.",
       replyTo: "Abweichende Antwortadresse (optional)",
-      replyToHint: "Leer lassen, wenn Antworten an die Geschäfts-E-Mail gehen sollen.",
+      replyToHint: "Leer lassen, wenn Antworten an die Verkäufer-E-Mail gehen sollen.",
       save: "Speichern",
       saved: "Gespeichert.",
       invalidEmail: "Das sieht nicht nach einer E-Mail-Adresse aus.",
       saveFailed: "Das hat nicht geklappt.",
       /** Ohne sie kann die Prüfwarnung nirgendwohin. */
       missingWarning:
-        "Ohne Geschäfts-E-Mail kann SkyIsles dich nicht benachrichtigen, wenn eine Bestellung " +
+        "Ohne Verkäufer-E-Mail kann SkyIsles dich nicht benachrichtigen, wenn eine Bestellung " +
         "geprüft werden muss.",
+    },
+
+    /** Plattformdaten (ADR-0064). Andere Pflicht, andere Adresse. */
+    platform: {
+      heading: "Plattformdaten",
+      hint:
+        "Wer SkyIsles betreibt. Diese Adresse beantwortet Fragen zur Plattform selbst — " +
+        "Datenschutz, Konto, Beschwerden. Fragen zu einer Bestellung gehen an den Verkäufer. " +
+        "Beides darf heute dieselbe Adresse sein.",
+      contactEmail: "Plattform-E-Mail",
+      contactEmailHint:
+        "Erscheint später im Impressum und in der Datenschutzerklärung. Steht in keiner " +
+        "Bestellmail.",
+      save: "Speichern",
+      saved: "Gespeichert.",
+      invalidEmail: "Das sieht nicht nach einer E-Mail-Adresse aus.",
+      saveFailed: "Das hat nicht geklappt.",
     },
 
     /** Commerce-Modus und Sandbox-Tester (ADR-0060). */

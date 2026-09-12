@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { BusinessSettings } from "@/components/admin/business-settings";
 import { CommercePanel } from "@/components/admin/commerce-panel";
+import { PlatformSettings } from "@/components/admin/platform-settings";
+import { SellerSettings } from "@/components/admin/seller-settings";
 import { ShopSettings } from "@/components/admin/shop-settings";
-import { fetchBusinessSettings } from "@/lib/admin/business";
 import { fetchCommerceState } from "@/lib/admin/commerce";
 import { fetchShopSettings } from "@/lib/admin/inventory";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { fetchPlatformSettings } from "@/lib/admin/platform";
+import { fetchSeller } from "@/lib/admin/seller";
 import { hasOpenWork } from "@/lib/admin/orders";
 import { fetchAdminCategories } from "@/lib/admin/queries";
 import { de } from "@/lib/i18n/de";
@@ -23,12 +25,13 @@ export const metadata: Metadata = { title: de.admin.title };
  * a thing to change.
  */
 export default async function AdminPage() {
-  const [categories, settings, openOrders, business, commerce] = await Promise.all([
+  const [categories, settings, openOrders, seller, platform, commerce] = await Promise.all([
     fetchAdminCategories(),
     fetchShopSettings(),
     // Memoised per request — the layout above already counted these rows.
     fetchOpenOrderCounts(),
-    fetchBusinessSettings(),
+    fetchSeller(),
+    fetchPlatformSettings(),
     fetchCommerceState(),
   ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
@@ -116,11 +119,18 @@ export default async function AdminPage() {
         </Link>
       </div>
 
-      {/* Who SkyIsles is, before what it charges: the contact address feeds
-          every customer mail and later the legal pages (ADR-0059). */}
+      {/* Who sells, then who operates, then what it charges. The seller comes
+          first because its address feeds every customer mail and later the
+          invoice; the platform's own address answers a different question
+          (ADR-0064, ADR-0059). */}
       <div className="mt-8">
         <CommercePanel state={commerce} />
-        <BusinessSettings contactEmail={business.contactEmail} replyTo={business.replyTo} />
+        <SellerSettings
+          displayName={seller.displayName}
+          contactEmail={seller.contactEmail}
+          replyTo={seller.replyTo}
+        />
+        <PlatformSettings contactEmail={platform.contactEmail} />
       </div>
 
       <div className="mt-8">

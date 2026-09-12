@@ -177,11 +177,24 @@ schreibt nichts, gibt höchstens zehn Zeilen zurück und beantwortet eine Anfrag
 Zeichen mit gar nichts.
 
 Bis 2026-09-11 stand hier zusätzlich, die Geschäfts-E-Mail komme im Schema überhaupt nicht vor.
-Das war die damalige *Umsetzung* dieser Regel, nicht die Regel selbst. Seit `0019` liegt eine
-**veröffentlichte Kontaktadresse** in `business_settings` — Konfiguration, die der Betreiber
-pflegt und die in Mails und später im Impressum steht. Sie ist kein Zugangsmerkmal und wird
-nirgends als eines gelesen. Die Tabelle ist für `anon` und `authenticated` vollständig gesperrt;
-der einzige Weg nach außen ist `business_settings_public()`, das seine Spalten wörtlich aufzählt.
+Das war die damalige *Umsetzung* dieser Regel, nicht die Regel selbst. Seit `0019` liegen
+**veröffentlichte Kontaktadressen** im Schema — Konfiguration, die der Betreiber pflegt und die
+in Mails und später im Impressum steht. Sie sind kein Zugangsmerkmal und werden nirgends als
+eines gelesen.
+
+Seit `0026` sind es **zwei** Adressen, weil es zwei Rechtssubjekte gibt (ADR-0064):
+`platform_settings.contact_email` gehört SkyIsles als Plattformbetreiber (Datenschutz, Konto,
+Beschwerden über die Plattform), `sellers.contact_email` dem Verkäufer (alles zu einer
+Bestellung; sie steht als Antwortadresse in jeder Bestellmail). Beide Tabellen sind für `anon`
+und `authenticated` **vollständig gesperrt** — RLS an, keine Policy, kein Grant. Der einzige Weg
+nach außen ist `platform_settings_public()`, das seine Spalten wörtlich aufzählt und heute an
+niemanden vergeben ist.
+
+**Verkäufer zu sein ist keine Berechtigung.** Keine Tabelle verbindet ein Konto mit einem
+Verkäufer, keine Policy kennt einen, und es gibt weder Seller-Login noch Seller-Rolle.
+Autorisiert wird ausschließlich über `shop_admins.user_id`, geprüft von `is_shop_admin()`
+(ADR-0032). Höchstens **ein** Verkäufer ist aktiv — erzwungen vom partiellen Unique-Index
+`sellers_one_active`, nicht von einer Konvention.
 
 ### Browserzustand trägt einen Eigentümer (ab ADR-0061)
 

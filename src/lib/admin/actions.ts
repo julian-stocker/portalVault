@@ -19,7 +19,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { looksLikeEmail, normaliseContact } from "@/lib/admin/business";
+import { looksLikeEmail, normaliseContact } from "@/lib/admin/seller";
 import {
   isCommerceMode,
   MIN_ACCOUNT_QUERY,
@@ -248,30 +248,64 @@ export async function setImageOverride(skyId: string, path: string | null): Prom
  * everything: the legal block adds `setBusinessIdentity()` beside this one, so
  * each keeps its own validation instead of branching inside a shared body.
  *
- * `admin_set_business_contact()` asks `is_shop_admin()` in the database. The
+ * `admin_set_seller_contact()` asks `is_shop_admin()` in the database. The
  * check here answers in German and saves a round trip; it is not the boundary.
+ *
+ * Takes no seller id and never will while SkyIsles has one seller: the
+ * database addresses the ACTIVE seller, so no caller can name a second one
+ * into existence (ADR-0064).
  */
-export async function setBusinessContact(
+export async function setSellerContact(
+  displayName: string,
   contactEmail: string,
   replyTo: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
 
+  const name = normaliseContact(displayName);
   const contact = normaliseContact(contactEmail);
   const reply = normaliseContact(replyTo);
 
   for (const value of [contact, reply]) {
     if (value !== null && !looksLikeEmail(value)) {
-      return { ok: false, message: de.admin.business.invalidEmail };
+      return { ok: false, message: de.admin.seller.invalidEmail };
     }
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("admin_set_business_contact", {
+  const { error } = await supabase.rpc("admin_set_seller_contact", {
+    p_display_name: name,
     p_contact_email: contact,
     p_reply_to: reply,
   });
-  if (error) return { ok: false, message: de.admin.business.saveFailed };
+  if (error) return { ok: false, message: de.admin.seller.saveFailed };
+
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+/**
+ * The platform's own contact address.
+ *
+ * Deliberately a separate action from `setSellerContact()`: two subjects, two
+ * narrow writers (ADR-0059). Neither can touch the other's field, which is a
+ * property the runtime proof checks in both directions.
+ */
+export async function setPlatformContact(
+  contactEmail: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const contact = normaliseContact(contactEmail);
+  if (contact !== null && !looksLikeEmail(contact)) {
+    return { ok: false, message: de.admin.platform.invalidEmail };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_set_platform_contact", {
+    p_contact_email: contact,
+  });
+  if (error) return { ok: false, message: de.admin.platform.saveFailed };
 
   revalidatePath("/admin");
   return { ok: true };

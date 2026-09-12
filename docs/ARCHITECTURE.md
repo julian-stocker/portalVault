@@ -29,8 +29,8 @@ unverändert.
 | Begriff | Bedeutet | Bedeutet **nicht** |
 |---|---|---|
 | **Plattform** | SkyIsles: Katalog, Konten, Sammlung, Checkout, Zahlung | nicht den Verkäufer der Ware |
-| **Plattformbetreiber** | das Rechtssubjekt hinter SkyIsles | nicht den Rechnungsaussteller |
-| **Verkäufer** | wer die Ware besitzt, verkauft, versendet und in Rechnung stellt | keine Rolle, keine Berechtigung, kein Login |
+| **Plattformbetreiber** | das Rechtssubjekt hinter SkyIsles · `platform_settings` | nicht den Rechnungsaussteller |
+| **Verkäufer** | wer die Ware besitzt, verkauft, versendet und in Rechnung stellt · `sellers`, gelesen über `active_seller()` | keine Rolle, keine Berechtigung, kein Login |
 | **Angebot** | eine kaufbare Position (`shop_offers()`) | keine Zuordnung zu einem benannten Verkäufer |
 | **Bestand** | `shop_inventory`, eine Position je `(sky_id, condition)` | keine Position je Verkäufer |
 | **Admin** | `shop_admins` — wer redaktionell und operativ handeln darf | kein Verkäufer und kein Plattformbetreiber |
