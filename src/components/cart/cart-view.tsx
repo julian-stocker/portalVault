@@ -185,7 +185,14 @@ function CartRow({ entry }: { entry: CartEntry }) {
   );
 }
 
-export function CartView({ offers }: { offers: Readonly<Record<string, readonly Offer[]>> }) {
+export function CartView({
+  offers,
+  guest,
+}: {
+  offers: Readonly<Record<string, readonly Offer[]>>;
+  /** Whether nobody is signed in. Decided on the server (ADR-0061). */
+  guest: boolean;
+}) {
   const { cart, ready, clear } = useCart();
 
   // Until the stored cart has been read, the honest answer is "nothing yet" —
@@ -225,7 +232,16 @@ export function CartView({ offers }: { offers: Readonly<Record<string, readonly 
           <p className="text-xs text-muted">{de.cart.excluded(unavailable.length)}</p>
         ) : null}
 
-        <p className="text-[11px] text-muted">{de.cart.localOnly}</p>
+        {/* GUESTS ONLY (ADR-0061). A signed-in basket lives in `cart_items`
+              and follows the account across devices, so the old unconditional
+              sentence told exactly the people who had solved this problem that
+              they still had it. Decided on the server, so the right answer is in
+              the first paint — a client-side read would flash the wrong one. */}
+        {guest ? (
+          <p className="text-[11px] leading-snug text-muted">
+              {de.cart.guestOnly} {de.cart.guestOnlyHint}
+          </p>
+        ) : null}
 
         {/* The one action worth taking here. Following it holds no stock:
             the cart stays non-binding until the checkout is submitted

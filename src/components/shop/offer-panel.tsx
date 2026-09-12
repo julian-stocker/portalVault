@@ -13,9 +13,13 @@
  * stock keeps (`sky_id + condition`) and the cart keeps — one rule, three
  * places (ADR-0037, ADR-0043).
  *
- * Nothing here reserves anything. Adding to the cart writes `localStorage`
- * and touches no table: stock is only committed when an order is, and there
- * are no orders in V1.
+ * Nothing here reserves anything, and that has not changed — stock is
+ * committed when an order is, never before (ADR-0050).
+ *
+ * WHERE THE BASKET GOES HAS changed. Until ADR-0061 this comment said "writes
+ * localStorage and touches no table", and that a signed-in basket now lives
+ * in `cart_items` is exactly what the notice below had to stop denying. A
+ * guest still writes to `localStorage`; an account writes to the server.
  */
 "use client";
 
@@ -79,12 +83,20 @@ export function OfferPanel({
   offers,
   name,
   imageSrc,
+  guest,
 }: {
   offers: readonly Offer[];
   /** The figure's display name, stored with the cart line as its label. */
   name: string;
   /** Already resolved (ADR-0046): the cart stores what was on screen. */
   imageSrc: string | null;
+  /**
+   * Whether nobody is signed in. Handed down from the server rather than read
+   * from `currentPrincipal()`: that value is a module variable set in an
+   * effect, so during render it is still the guest default and never changes
+   * again — a signed-in visitor would see the guest notice permanently.
+   */
+  guest: boolean;
 }) {
   const buyable = buyableOffers(offers);
   if (buyable.length === 0) return null;
@@ -119,8 +131,16 @@ export function OfferPanel({
         ))}
       </ul>
 
-      {/* Said once, here, where somebody is about to add something. */}
-      <p className="text-[11px] leading-snug text-muted">{de.cart.localOnly}</p>
+      {/* GUESTS ONLY (ADR-0061). A signed-in basket lives in `cart_items`
+          and follows the account across devices, so the old unconditional
+          sentence told exactly the people who had solved this problem that
+          they still had it. Decided on the server, so the right answer is in
+          the first paint — a client-side read would flash the wrong one. */}
+      {guest ? (
+        <p className="text-[11px] leading-snug text-muted">
+          {de.cart.guestOnly} {de.cart.guestOnlyHint}
+        </p>
+      ) : null}
     </section>
   );
 }

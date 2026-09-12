@@ -57,7 +57,11 @@ export default async function MyOrderPage({
 
       <dl className="grid grid-cols-[9rem_1fr] gap-y-1 text-sm">
         <dt className="text-muted">{copy.placedAt}</dt>
-        <dd>{formatDate(String(order.placed_at))}</dd>
+        {/* Not `String(...)`: that turns a missing value into the literal
+            "undefined", which formatDate then has to reject by accident
+            rather than on purpose. The field is typed as unknown here, so it
+            is narrowed instead. */}
+        <dd>{formatDate(typeof order.placed_at === "string" ? order.placed_at : null)}</dd>
         <dt className="text-muted">{copy.shippingMethod}</dt>
         <dd>{String(order.shipping_method ?? "–")}</dd>
         {order.tracking_number ? (

@@ -155,6 +155,10 @@ export default async function FigurePage({ params }: Params) {
             offers={offersFor(offers, figure.skyId)}
             name={figure.displayName}
             imageSrc={imageSrc(figure)}
+            /* The session this page already read, reused. A guest is told
+               where the basket is kept; an account is not, because for them
+               it is kept on the server and needs no explaining (ADR-0061). */
+            guest={auth.user === null}
           />
 
           <CollectButton

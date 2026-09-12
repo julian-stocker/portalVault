@@ -912,7 +912,16 @@ export const de = {
       n === 1
         ? "1 Position ist derzeit nicht bestellbar und zählt nicht zur Summe."
         : `${n} Positionen sind derzeit nicht bestellbar und zählen nicht zur Summe.`,
-    localOnly: "Der Warenkorb wird nur in diesem Browser gespeichert.",
+    /**
+     * Nur für GÄSTE (ADR-0061). Angemeldet liegt der Warenkorb in
+     * `cart_items` und gilt geräteübergreifend — der alte, unbedingte Satz
+     * sagte dort das Gegenteil dessen, was die Anmeldung gerade gebracht hat.
+     *
+     * Formuliert als Grund, nicht als Einschränkung: Was der Gast verliert,
+     * steht im ersten Satz, was er dagegen tun kann, im zweiten.
+     */
+    guestOnly: "Dieser Warenkorb liegt nur in diesem Browser.",
+    guestOnlyHint: "Melde dich an, damit er auf deinen Geräten erhalten bleibt.",
     noCheckout: "Bestellen ist noch nicht möglich.",
     toCheckout: "Zur Kasse",
   },

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { SkyBackdrop } from "@/components/layout/sky-backdrop";
 import { de } from "@/lib/i18n/de";
@@ -39,6 +39,57 @@ export const metadata: Metadata = {
     follow: false,
     googleBot: { index: false, follow: false },
   },
+};
+
+/**
+ * The viewport, and the one field that makes the bottom bar sit right.
+ *
+ * WHAT WAS WRONG
+ *
+ * Nothing exported a viewport at all, so Next emitted its default —
+ * `width=device-width, initial-scale=1` — WITHOUT `viewport-fit=cover`. And
+ * without that, iOS reports every `env(safe-area-inset-*)` as **zero**.
+ *
+ * The consequence was not cosmetic and not theoretical. `SiteNav`, `CartToast`
+ * and `FloatingCart` each compute their position from
+ * `env(safe-area-inset-bottom)`, and three tests pin those expressions. On an
+ * iPhone all of that arithmetic added nothing, and the bottom bar sat under
+ * the home indicator. The tests could not catch it: they assert that the CSS
+ * string is in the bundle, which it was — what was missing is the declaration
+ * that makes the value non-zero. `viewport.test.ts` asserts this export.
+ *
+ * WHY THE OTHER FIELDS ARE WRITTEN OUT
+ *
+ * Exporting a viewport object replaces the default entirely rather than
+ * extending it, so `width` and `initialScale` have to be restated or they are
+ * dropped. They are Next's own defaults, repeated deliberately.
+ *
+ * Zoom is NOT restricted. `maximumScale` and `userScalable` are deliberately
+ * absent: a page that cannot be pinched is a page somebody cannot read, and
+ * "it keeps the layout tidy" has never been worth that.
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+
+  /*
+   * The whole point of this export. Lets the page paint into the display
+   * cutout and the home-indicator area, which is also what makes the
+   * safe-area insets report a real size. Everything that has to stay clear of
+   * those edges already pads itself with them.
+   */
+  viewportFit: "cover",
+
+  /*
+   * The browser chrome takes the colour of the sky it sits above, so the
+   * status bar does not cut a pale band across the top of a dark page. Both
+   * values are `--sky-high`: dusk in the default scheme, night in the dark
+   * one (ADR-0038).
+   */
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#1b1b42" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e0d24" },
+  ],
 };
 
 /**

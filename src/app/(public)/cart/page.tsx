@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { CartView } from "@/components/cart/cart-view";
+import { currentUser } from "@/lib/auth/user";
 import { de } from "@/lib/i18n/de";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
@@ -10,16 +11,22 @@ export const metadata: Metadata = { title: de.cart.title };
 /**
  * The cart.
  *
- * The page is a server component that loads one thing: the public shop. What
- * is actually in the cart lives in the visitor's browser and is read there
- * (ADR-0043), so this route needs no session and works signed out.
+ * The page is a server component that loads two things: the public shop, and
+ * whether anybody is signed in. What is actually in the cart is read in the
+ * browser — from `localStorage` for a guest, from `cart_items` for an account
+ * (ADR-0043, ADR-0061) — so this route still works signed out.
+ *
+ * The session is read here rather than in the view because the notice about
+ * where the basket is kept has to be right in the FIRST paint. The client
+ * cannot answer that during render: `currentPrincipal()` is bound in an
+ * effect, so it still reads "guest" while the markup is produced.
  *
  * The whole offer list is handed down rather than a lookup for the lines in
  * the cart, for the simple reason that the server cannot know what those
  * lines are — and because the list is small enough that it does not matter.
  */
 export default async function CartPage() {
-  const offers = await fetchOffers();
+  const [offers, user] = await Promise.all([fetchOffers(), currentUser()]);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
@@ -34,7 +41,7 @@ export default async function CartPage() {
         {de.cart.title}
       </h1>
       <div className="mt-5">
-        <CartView offers={offerRecord(offers)} />
+        <CartView offers={offerRecord(offers)} guest={user === null} />
       </div>
     </main>
   );
