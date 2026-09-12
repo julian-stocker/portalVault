@@ -29,11 +29,17 @@ export function isCondition(value: unknown): value is Condition {
  * `system_record_inventory_movement()`, which no browser can reach. The
  * database still accepts the value — this list is a product decision, not a
  * constraint, and the constraint is where it belongs.
+ *
+ * `sale_skyisles` is absent for the same reason and a different one: since
+ * 0025 a sale booked here is `sale` (ADR-0065). The old value stays a
+ * permitted value in the database forever — history can never be renamed —
+ * so it still has a label in `de.inventory.reasons`. It just cannot be
+ * chosen for a NEW booking.
  */
 export const MOVEMENT_REASONS = [
   "purchase",
   "sale_external",
-  "sale_skyisles",
+  "sale",
   "return",
   "correction",
   "writeoff",

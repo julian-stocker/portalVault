@@ -483,9 +483,12 @@ describe("the Stripe request body", () => {
 
 describe("the Deno entry point, held to its contract", () => {
   it("never marks anything paid and converts no stock", () => {
+    // `'sale'` is quoted on purpose: the bare word appears in ordinary prose,
+    // the SQL literal is what a stock booking would look like.
     for (const forbidden of ["confirm_order_payment", "convert_order_reservations",
                              "release_order_reservations", "expire_stale_checkouts",
-                             "inventory_movements", "payment_status", "sale_skyisles"]) {
+                             "inventory_movements", "payment_status", "sale_skyisles",
+                             "'sale'"]) {
       expect(entryCode, `${forbidden} must not appear`).not.toContain(forbidden);
     }
   });

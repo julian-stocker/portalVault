@@ -29,7 +29,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Phase | Gegenstand | Migration | Stand |
 > |---|---|---|---|
 > | **M0** | ADR-0064, ADR-0065, Nachträge zu ADR-0021/0059, Sprachregelung | — | **abgeschlossen** |
-> | **M1** | Bewegungsvokabular: neue Verkäufe heißen `sale` | `0025` | offen |
+> | **M1** | Bewegungsvokabular: neue Verkäufe heißen `sale` | `0025` | **abgeschlossen** |
 > | **M2** | `sellers` + `platform_settings`, `active_seller()` | `0026` | offen |
 >
 > SkyIsles ist die **Plattform**, **yulez.collectibles** der erste und vorerst einzige

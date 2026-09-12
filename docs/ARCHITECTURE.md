@@ -125,8 +125,8 @@ und das öffentliche Angebot (`0006`) existieren; Bestellungen, Checkout und Zah
         |            condition = loose | boxed
         |                 |
         |          inventory_movements   (Anhängejournal, nur inventory_id:
-        |                 |               purchase, sale_skyisles,
-        |                 |               sale_external, return,
+        |                 |               purchase, sale, sale_external,
+        |                 |               sale_skyisles (historisch), return,
         |                 |               correction, writeoff)
         |                 |
         |            orders / order_items  (später, mit Preis-Snapshot)
@@ -559,8 +559,9 @@ nicht.
 Reservierung beginnt erst im Checkout (ADR-0050).
 
 **Der Bestand behält eine Architektur.** `convert_order_reservations()` bucht über das bestehende
-`apply_inventory_movement()` — dasselbe Append-only-Journal, derselbe Grund `sale_skyisles`. Es
-gibt keinen zweiten Weg, an dem Bestand vorbei.
+`apply_inventory_movement()` — dasselbe Append-only-Journal, ein Grund. Seit `0025` heißt der
+Grund `sale`; vorher gebuchte Bewegungen tragen weiter `sale_skyisles` und werden nie
+umgeschrieben (ADR-0065). Es gibt keinen zweiten Weg, an dem Bestand vorbei.
 
 **Was Phase A nicht enthält:** Zahlungsanbieter, Webhook, Checkout-Oberfläche, Bestellansicht für
 Kunde oder Betreiber, Rechnung, E-Mail, Widerruf, Retoure, Steuerlogik. Die Reihenfolge und die

@@ -484,7 +484,7 @@ Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
 | `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
 | `release_expired_reservations(ids?)` | niemand | Gibt abgelaufenen Halt frei. Idempotent. `NULL` = alles (Zeitgeber), Array = die Positionen eines Checkouts. |
 | `release_order_reservations(order_id)` | niemand | Gibt den Halt einer Bestellung frei. Idempotent. |
-| `convert_order_reservations(order_id)` | niemand | Reservierung → Verkauf: senkt `reserved`, bucht `sale_skyisles` über `apply_inventory_movement()`. Idempotent über den Reservierungszustand. **Wird von nichts gerufen** — die Zahlungsphase ruft sie. |
+| `convert_order_reservations(order_id)` | niemand | Reservierung → Verkauf: senkt `reserved`, bucht `sale` über `apply_inventory_movement()` (bis `0025`: `sale_skyisles`, ADR-0065). Idempotent über den Reservierungszustand. **Wird von nichts gerufen** — die Zahlungsphase ruft sie. |
 
 **`reserved` wird erstmals geschrieben.** Die Spalte existiert seit `0003` genau dafür, also
 funktionieren `available_quantity` (generated), der partielle Index und der Guard in
@@ -1279,6 +1279,18 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   Spalten und Rollenprüfung unverändert. Keine Tabelle, keine Spalte, keine Zeile angefasst.
   **Auf Staging angewandt und runtime-verifiziert am 2026-09-12, auf Production NICHT angewandt.**
 
+- Fünfundzwanzigste Migration: `0025_movement_reason_neutral.sql` — **das Bewegungsvokabular**
+  (ADR-0065). `sale` kommt hinzu, `sale_skyisles` bleibt **dauerhaft** erlaubt, und
+  `convert_order_reservations()` bucht ab jetzt `sale`. Die Funktion wurde zeichengleich aus
+  `0010` übernommen; genau eine Zeile unterscheidet sich. **Kein Backfill, kein `update`, kein
+  `select` auf `inventory_movements`** — Historie kann nie umbenannt werden, und diese Migration
+  versucht es auch nicht. Runtime-Suite: `supabase/tests/0025_movement_reason_runtime.sql`
+  (vier Abschnitte, alle mit Rollback).
+  **Auf Staging angewandt und runtime-verifiziert am 2026-09-12** — echter Sandbox-Kauf
+  `SI-2026-001048` (SKY-0053/loose): genau eine `sale`-Bewegung, `delta -1`, die vorhandene
+  `sale_skyisles`-Zeile derselben Position unverändert daneben. **Auf Production NICHT
+  angewandt.**
+
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der
 > Zahlungsversuche, den vollständigen Late-Payment-Pfad samt Idempotenz und den Expiry-Leser.
@@ -1400,8 +1412,10 @@ inventory_movements
   id           bigint identity pk
   inventory_id bigint not null → shop_inventory (on delete restrict)
   delta        integer not null  check (delta <> 0)
-  reason       text not null     check in ('purchase','sale_skyisles','sale_external',
+  reason       text not null     check in ('purchase','sale','sale_skyisles','sale_external',
                                   'return','correction','writeoff','initial_import')
+                                  -- 'sale' seit 0025; 'sale_skyisles' bleibt dauerhaft
+                                  -- erlaubt, weil Historie nie umbenannt wird (ADR-0065)
   unit_cost    numeric(10,2)     -- nur bei reason='purchase'
   currency     text              -- dito, ISO-4217-Muster ^[A-Z]{3}$
   note         text              -- intern
@@ -1410,7 +1424,7 @@ inventory_movements
   -- KEINE sky_id: normalisiert, siehe unten. KEIN order_id: `orders` gibt es nicht.
 ```
 
-**Vorzeichen je Reason**, als CHECK: `purchase` und `initial_import` nur positiv ·
+**Vorzeichen je Reason**, als CHECK: `purchase` und `initial_import` nur positiv · `sale`,
 `sale_skyisles`, `sale_external`, `writeoff` nur negativ · `return` und `correction` in beide
 Richtungen. `return` bleibt bewusst offen, weil eine Kundenrückgabe Zugang und eine
 Lieferantenrückgabe Abgang ist — ein Constraint, der eine der beiden verbietet, erzeugt nur

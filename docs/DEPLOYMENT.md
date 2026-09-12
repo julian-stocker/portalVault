@@ -424,6 +424,11 @@ Bestellung `paid` ohne `needs_resolution`, Reservierung `converted`, **genau ein
 `sale_skyisles`-Bewegung, `quantity` 2 → 1, `reserved` 0. Erneute Zustellung desselben Events:
 eine `payment_events`-Zeile mit unverändertem `received_at`, **kein** zweiter Verkauf.
 
+> Protokoll vom 2026-09-11, unverändert. **Wer diese Prüfung heute wiederholt, erwartet
+> `reason = 'sale'`**: Seit `0025` bucht `convert_order_reservations()` unter dem neutralen
+> Namen (ADR-0065). Die Bewegung von damals trägt weiterhin `sale_skyisles` — Historie wird nie
+> umgeschrieben.
+
 ---
 
 ## Staging — `skyisles-staging`

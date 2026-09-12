@@ -7,6 +7,7 @@ import {
   isCondition,
   isMovementReason,
 } from "@/lib/admin/inventory";
+import { de } from "@/lib/i18n/de";
 
 /**
  * Stock management (ADR-0037, phase 1).
@@ -38,6 +39,8 @@ const CARD = "src/components/admin/inventory-card.tsx";
 const DIALOG = "src/components/admin/stock-dialog.tsx";
 const VIEW = "src/components/admin/inventory-view.tsx";
 const FOUNDATION = "supabase/migrations/0003_shop_foundation.sql";
+/** The vocabulary in force. 0003 opened it; 0025 added `sale` (ADR-0065). */
+const REASONS_NOW = "supabase/migrations/0025_movement_reason_neutral.sql";
 const READS = "supabase/migrations/0005_inventory_admin_read.sql";
 
 describe("the vocabulary V1 knows", () => {
@@ -54,15 +57,37 @@ describe("the vocabulary V1 knows", () => {
     expect(MOVEMENT_REASONS).not.toContain("initial_import");
     expect(isMovementReason("initial_import")).toBe(false);
     expect([...MOVEMENT_REASONS].sort()).toEqual(
-      ["correction", "purchase", "return", "sale_external", "sale_skyisles", "writeoff"].sort(),
+      ["correction", "purchase", "return", "sale", "sale_external", "writeoff"].sort(),
     );
   });
 
+  it("cannot book a new movement under the retired name", () => {
+    // `sale_skyisles` stays a permitted value in the database forever —
+    // history can never be renamed (ADR-0065) — but a NEW booking is `sale`.
+    expect(MOVEMENT_REASONS).not.toContain("sale_skyisles");
+    expect(isMovementReason("sale_skyisles")).toBe(false);
+    expect(MOVEMENT_REASONS).toContain("sale");
+  });
+
   it("only offers reasons the database accepts", () => {
-    const sql = source(FOUNDATION);
+    const sql = source(REASONS_NOW);
     const block = sql.slice(sql.indexOf("inventory_movements_reason_known"));
     for (const reason of MOVEMENT_REASONS) {
-      expect(block.slice(0, 600), reason).toContain(`'${reason}'`);
+      expect(block.slice(0, 900), reason).toContain(`'${reason}'`);
+    }
+  });
+
+  it("every reason the shop ever booked still has a label", () => {
+    // The history list reads `de.inventory.reasons[movement.reason]`, keyed by
+    // whatever the database holds. A retired value without a label shows an
+    // empty reason on an old row.
+    const sql = source(REASONS_NOW);
+    const block = sql.slice(sql.indexOf("inventory_movements_reason_known"));
+    const permitted = [...block.slice(0, 900).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]);
+    expect(permitted).toContain("sale_skyisles");
+    expect(permitted).toContain("sale_external");
+    for (const reason of permitted) {
+      expect(de.inventory.reasons, reason).toHaveProperty(reason);
     }
   });
 });

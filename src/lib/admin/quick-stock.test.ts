@@ -48,7 +48,7 @@ describe("a tap is a movement", () => {
     expect([...MOVEMENT_REASONS]).toEqual([
       "purchase",
       "sale_external",
-      "sale_skyisles",
+      "sale",
       "return",
       "correction",
       "writeoff",

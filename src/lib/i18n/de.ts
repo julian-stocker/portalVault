@@ -752,7 +752,13 @@ export const de = {
       `${n} historische Position${n === 1 ? "" : "en"} außerhalb des Sortiments (Auditdaten, unverändert).`,
     reasons: {
       purchase: "Einkauf",
-      sale_skyisles: "Verkauf SkyIsles",
+      sale: "Verkauf",
+      /**
+       * Historie. Bis 0025 hieß derselbe Vorgang so (ADR-0065). Der Eintrag
+       * bleibt, sonst zeigt die Bewegungsliste für alte Zeilen einen leeren
+       * Grund — umbenennen lässt sich die Historie nie.
+       */
+      sale_skyisles: "Verkauf SkyIsles (historisch)",
       sale_external: "Externer Verkauf",
       return: "Rückgabe",
       correction: "Korrektur",

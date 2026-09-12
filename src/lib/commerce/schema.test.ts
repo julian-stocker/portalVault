@@ -371,6 +371,9 @@ describe("turning a hold into a sale", () => {
 
   it("books through the existing journal, not a second inventory path", () => {
     expect(convert).toContain("public.apply_inventory_movement(");
+    // This file reads 0010, which is history and is never edited. The reason
+    // it books was renamed to `sale` in 0025 (ADR-0065); the definition in
+    // force is pinned by `movement-reason.test.ts`.
     expect(convert).toContain("'sale_skyisles'");
     expect(convert).not.toContain("insert into public.inventory_movements");
     expect(convert).not.toContain("set quantity = quantity");

@@ -63,7 +63,11 @@ end $$;
 --
 -- What the webhook causes for a paid checkout: the attempt succeeds, the order
 -- is paid, every reservation converts, and exactly one sale movement per line
--- appears. This is the only path in the system that may write sale_skyisles.
+-- appears. This is the only path in the system that may write a shop sale.
+--
+-- The counts below accept BOTH names: `sale` since 0025 and `sale_skyisles`
+-- on anything booked before it. History is never renamed (ADR-0065), so a
+-- position can legitimately carry one of each.
 -- ===========================================================================
 begin;
 do $$
@@ -154,7 +158,7 @@ begin
 
   select count(*) into v_sales
     from public.inventory_movements
-   where inventory_id = v_inv and reason = 'sale_skyisles';
+   where inventory_id = v_inv and reason in ('sale', 'sale_skyisles');
   if v_sales <> 1 then raise exception 'expected exactly 1 sale movement, got %', v_sales; end if;
 
   -- Stock left, reservation cleared.
@@ -236,7 +240,7 @@ begin
   end loop;
 
   select count(*) into v_sales
-    from public.inventory_movements where inventory_id = v_inv and reason = 'sale_skyisles';
+    from public.inventory_movements where inventory_id = v_inv and reason in ('sale', 'sale_skyisles');
   if v_sales <> 1 then raise exception 'five deliveries produced % sale movements', v_sales; end if;
 
   raise notice 'PASS  section 2 — five deliveries, one sale';
@@ -334,7 +338,7 @@ begin
   end if;
 
   select count(*) into v_sales
-    from public.inventory_movements where inventory_id = v_inv and reason = 'sale_skyisles';
+    from public.inventory_movements where inventory_id = v_inv and reason in ('sale', 'sale_skyisles');
   if v_sales <> 0 then raise exception 'a late payment must not book stock, got % movements', v_sales; end if;
   if (select quantity from public.shop_inventory where id = v_inv) <> v_qty then
     raise exception 'stock changed on a late payment';
@@ -411,7 +415,7 @@ begin
   end if;
 
   select count(*) into v_sales
-    from public.inventory_movements where inventory_id = v_inv and reason = 'sale_skyisles';
+    from public.inventory_movements where inventory_id = v_inv and reason in ('sale', 'sale_skyisles');
   if v_sales <> 0 then raise exception 'a mismatch booked stock'; end if;
 
   -- A wrong currency must be refused the same way, and 'EUR' vs 'eur' must NOT
