@@ -107,10 +107,22 @@
      backlit. Every radius here is zero. Three hard lines instead — a pale
      highlight against the frame, the frame's own body, and a dark seat under
      it — which is how metal is seen: by its edges, not by what it emits. The
-     last entry is depth, the same drop every card has. */
+     last entry is depth, the same drop every card has.
+
+     V3.1a widened the body from 4 px to 5 px, raised it from 0.85 to 0.95
+     alpha and added a dark seat outside it. Not decoration: until V3.1 a
+     saturated gold BUY pill sat in the footer of every owned, buyable card,
+     and it was carrying a large part of the ownership signal by accident.
+     Moving trade to silver took that away and left the frame to say it
+     alone — which it was never strong enough to do. The ground could not be
+     deepened to compensate: at the next step down, `--on-card-muted` falls
+     to 4.21:1 and the series label stops clearing AA. The frame carries no
+     text, so it is where the weight belongs.
+     7.2:1 against the sky, against 3.6:1 for the bronze edge of a card
+     nobody owns — that difference IS the state. */
   --gold-frame:
-    0 0 0 1px rgb(255 236 196 / 0.95), 0 0 0 4px rgb(198 143 55 / 0.85),
-    0 10px 26px rgb(0 0 0 / 0.5);
+    0 0 0 1px rgb(255 236 196 / 0.95), 0 0 0 5px rgb(210 154 60 / 0.95),
+    0 0 0 6px rgb(138 95 28 / 0.6), 0 10px 26px rgb(0 0 0 / 0.5);
   /* The owned card's own ground (ADR-0038, V4.4).
      Gold leaf, not light: three flat stops of one warm tone, no blur, no
      glow, nothing overexposed. It replaces the ivory `--card` only in the
@@ -127,6 +139,169 @@
     radial-gradient(2px 2px at 88% 7%, rgb(255 240 208 / 0.85), transparent 60%),
     radial-gradient(2px 2px at 7% 92%, rgb(255 240 208 / 0.7), transparent 60%),
     radial-gradient(2.5px 2.5px at 94% 88%, rgb(255 246 224 / 0.8), transparent 60%);
+
+  /* =====================================================================
+     V3.1 — ROLES, NOT COLOURS
+     ---------------------------------------------------------------------
+     `--accent` carried four meanings at once: buying, focus, the active nav
+     pill and the ownership frame. A token with four roles can hold none of
+     them exclusively, which is how the loudest colour in the product came to
+     say both "this is yours" and "this costs money" on the same card.
+
+     The language, in one line each:
+
+       GOLD      possession. The collector's metal.
+       SILVER    trade. A different metal, not a dimmer gold.
+       NEUTRAL   navigation, general actions, UI state.
+       BRAND     the SkyIsles wordmark. Identity, never a state.
+
+     The rule is about MEANING, not about the hue appearing at all: gold used
+     as an interactive or semantic state means possession. Decorative and
+     brand gold — the wordmark, the forged panel edges, the horizon — stays.
+     ===================================================================== */
+
+  /* --- GOLD · possession ------------------------------------------------
+     Values unchanged from V3. Only the names are new, so that what they mean
+     is readable at the point of use rather than inferred from `accent`. */
+  --own-frame: var(--gold-frame);
+  --own-ground: var(--card-owned);
+  --own-ink: #e0a44a; /*  7.4:1 on canvas — the ink of a collected state */
+  /*
+   * Gold as INK ON A LIGHT GROUND — the "In deiner Sammlung" line.
+   *
+   * `--own-ink` is made for the dark sky and measures 1.98:1 on the ivory
+   * card and 1.66:1 on the owned gold: a line written in it would be
+   * invisible exactly where it matters most. Same hue (72° against 76°), dark
+   * enough to be read: 6.3:1 on ivory and 5.3:1 on the darkest stop of the
+   * owned ground.
+   *
+   * The same two-faces rule the silver follows, for the same reason.
+   */
+  --own-ink-on-card: #7d500f;
+  --on-own: #1a1206; /*  8.5:1 on --own-ink — ink on a gold surface */
+  --own-subtle: #33261a; /* the chip ground behind --own-ink */
+  --own-line: var(--gold-line);
+  /* The fine inner line of the frame. Was a literal in card.ts. */
+  --own-line-strong: rgb(240 192 115 / 0.75);
+
+  /* --- SILVER · trade ---------------------------------------------------
+     Forged silver, not grey. Three things keep it from reading as a disabled
+     control, and all three were measured rather than assumed:
+
+       contrast   9.2:1 on the ivory card. Disabled lives on LOW contrast;
+                  this is the opposite end of the scale.
+       chroma     C* 7.9 with b* −7.9 — a cool cast. Dead neutral grey is
+                  C* 0.0, and that is what reads as switched off.
+       structure  a bright sheen, a body and a dark seat, exactly as
+                  `--gold-frame` is built. Metal is seen by its edges.
+
+     It also had to clear the one collision on the card: `--element-ink-undead`
+     is itself a blue-grey. ΔE 17.1 apart, where a lighter silver (#4d5866)
+     would have been 7.8 — close enough to misread as an element chip. */
+
+  /* Ink on the ivory card and the gold owned card. 9.2:1 / 7.7:1. */
+  --trade-ink: #39424d;
+  /* Silver on a dark ground: the offer heading, and the fill of a trade
+     control. 11.7:1 on canvas at dusk, 12.8:1 at night. */
+  --trade-solid: #c9d1dc;
+  --trade-solid-hover: #dfe6ee;
+  /* Ink on that fill. 10.5:1. */
+  --on-trade: #1b2129;
+
+  /* SILVER ON A LIGHT GROUND — the buy pill on an ivory card.
+     V3.1 got this wrong: it used the polished silver everywhere, and on the
+     card that measured 1.39:1 (1.17:1 on an owned card's gold). The control
+     was very nearly invisible, and the pale patch flattened the card.
+     The rule was already written in `ACTION_CARD`: the card is the bright
+     object, so a control inside it has to be the dark shape. Same metal, the
+     other way round — 9.1:1 ink on fill, 9.2:1 against the ivory card and
+     7.7:1 against the gold one. */
+  --trade-on-card: #39424d;
+  --trade-on-card-hover: #4a5666;
+  --on-trade-on-card: #eef2f7;
+  /* The hairline, mirroring --gold-line. Alpha, so it sits on any ground. */
+  --trade-line: rgb(154 166 181 / 0.55);
+  --trade-line-strong: rgb(180 191 205 / 0.8);
+  /* The three-part metal, mirroring --gold-frame: sheen, body, seat. */
+  --trade-frame:
+    0 0 0 1px rgb(238 242 247 / 0.9), 0 0 0 3px rgb(154 166 181 / 0.85),
+    0 8px 20px rgb(0 0 0 / 0.45);
+
+  /* --- NEUTRAL · navigation, general actions, UI state ------------------
+     Deliberately not a metal. The neutral primary — Speichern, Anmelden —
+     must read as an action without claiming either language, so the FILL is
+     quiet and the BORDER carries the 3:1 a control boundary needs (WCAG
+     1.4.11). A tonal fill alone reaches 1.6:1 against the sky and would read
+     as a panel rather than a button. */
+  --action-neutral: #3a3668;
+  --action-neutral-hover: #464178;
+  --action-neutral-edge: #7b73c4; /*  4.4:1 on canvas, 4.8:1 at night */
+  --on-action-neutral: var(--foreground); /*  9.7:1 on the fill */
+
+  /* The active navigation item. Tonal, because "where I am" is not a state
+     of the collection and not an offer. */
+  /* A link is navigation, not a metal. Violet from the neutral family,
+     4.4:1 on the sky — distinguishable from body text without borrowing
+     gold, which it did until V3.1. */
+  --link: var(--action-neutral-edge);
+
+  --nav-active: var(--surface-raised);
+  --nav-active-ink: var(--foreground);
+
+  /* Status, filters and toggles. Also tonal — "Verborgen", "Sandbox" and an
+     active filter chip mean none of the four languages. Genuinely semantic
+     states keep their own colours: --success, --danger, --warn stay. */
+  --status-ground: var(--surface-raised);
+  --status-ink: var(--foreground);
+  --status-line: var(--border-strong);
+
+  /* --- FOCUS · a system affordance, not a meaning ----------------------
+     Neither gold nor silver, on purpose: where the keyboard is has nothing to
+     do with owning or buying.
+
+     A PAIR of rings rather than one colour, because no single value works on
+     every ground this product has. `--focus` carries dark grounds (16:1 on
+     canvas) and `--focus-halo` carries light ones (17.8:1 on the ivory card,
+     9.0:1 on gold, 12.8:1 on silver). Measured on all ten surfaces in
+     `focus.test.ts`; every one has at least one member above 3:1.
+
+     Before V3.1 focus was `ring-accent`, which on a gold button was 1.16:1 —
+     a focus ring that did not exist. */
+  --focus: #eaf2ff;
+  --focus-halo: rgb(10 9 24 / 0.92);
+
+  /* --- THE CARD TEMPLATE · ink on printed paper (V3.4) -----------------
+     `designs/cards/silver.png` and `gold.png` are paper, not the ivory panel
+     `--on-card` was measured against: #f3e8d5 and #f7e8c6, and of equal
+     luminance, so one ink serves both templates.
+
+     Near-black and NEUTRAL. `--on-card` is #241f19, a warm brown-black that
+     belongs to the ivory surfaces it was made for; on printed paper a warm
+     ink reads as faded. 14.8:1 on both templates.
+
+     `--template-ink-muted` is for states that are genuinely secondary — an
+     inactive figure, a missing price. Everything a card normally says uses
+     the black one. */
+  --template-ink: #171717;
+  --template-ink-muted: #545454; /*  6.2:1 on both templates */
+  /* The image window is a real hole in the artwork. This is what sits in it
+     behind the figure — see figure-card.tsx. */
+  --template-window: #ffffff;
+
+  /* --- WORLD · decorative, never a state -------------------------------
+     The forged edges of the header and footer, and the warm line inside
+     them. Gold here is the light of the sky catching a struck plate — it
+     names nothing, responds to nothing and is never interactive. Separated
+     from `--own-*` so a sweep over possession cannot take the world with it,
+     and from `--brand` because these are not the wordmark either. */
+  --world-edge: rgb(224 164 74 / 0.5);
+  --world-sheen: rgb(224 164 74 / 0.25);
+
+  /* --- BRAND · the wordmark --------------------------------------------
+     The one gold that means neither possession nor anything else: it means
+     SkyIsles. Named so that a later sweep over `--own-*` cannot take the
+     wordmark with it. */
+  --brand: #e0a44a;
 
   /* --- The showcase panel ---------------------------------------------- */
   --deep: #14122c;
@@ -149,16 +324,26 @@
      for the ivory card and the plate; the plain names are for dark panels.
      Both are constant across colour schemes, because both of their grounds
      are. Colour alone never conveys the element — "earth" and "tech" differ
-     only in hue, which is why a label always names it. */
+     only in hue, which is why a label always names it.
+
+     CALIBRATED IN V3.2 against the OWNED ground, not just the ivory card.
+     Eight of the ten missed AA on `--own-ground`'s darkest stop — and
+     `--element-ink-light` missed it on the plain card too, at 4.43:1, which
+     had been true since the chips were introduced. Every one now clears
+     4.6:1 there and 5.4:1 on ivory, at a cost of ΔE ≤ 3.3 for six of them.
+     `light` moved furthest (ΔE 7.7) because it started furthest away.
+
+     They also had to stay tellable apart from each other: the closest pair
+     is water/air at ΔE 10.0. `element-inks.test.ts` holds both ends. */
   --element-ink-magic: #6d4bab;
-  --element-ink-tech: #8a5a12;
-  --element-ink-water: #1a6c93;
-  --element-ink-fire: #b23b1e;
-  --element-ink-life: #2c7a3f;
-  --element-ink-undead: #5f6b78;
-  --element-ink-earth: #8a5f2c;
-  --element-ink-air: #446f88;
-  --element-ink-light: #8a6d13;
+  --element-ink-tech: #885812;
+  --element-ink-water: #19698f;
+  --element-ink-fire: #af3a1e;
+  --element-ink-life: #286f3a;
+  --element-ink-undead: #58636f;
+  --element-ink-earth: #835a2a;
+  --element-ink-air: #3f677f;
+  --element-ink-light: #795f11;
   --element-ink-dark: #4a4a8a;
 
   --element-magic: #b79bea;
@@ -229,6 +414,49 @@
   --color-on-accent: var(--on-accent);
   --color-gold-line: var(--gold-line);
   --color-gold-line-strong: var(--gold-line-strong);
+
+  /* --- V3.1 roles ------------------------------------------------------- */
+  --color-own-ink: var(--own-ink);
+  --color-own-ink-on-card: var(--own-ink-on-card);
+  --color-own-subtle: var(--own-subtle);
+  --color-own-line: var(--own-line);
+  --color-own-line-strong: var(--own-line-strong);
+
+  --color-trade-ink: var(--trade-ink);
+  --color-trade-solid: var(--trade-solid);
+  --color-trade-solid-hover: var(--trade-solid-hover);
+  --color-on-trade: var(--on-trade);
+  --color-trade-on-card: var(--trade-on-card);
+  --color-trade-on-card-hover: var(--trade-on-card-hover);
+  --color-on-trade-on-card: var(--on-trade-on-card);
+  --color-trade-line: var(--trade-line);
+  --color-trade-line-strong: var(--trade-line-strong);
+
+  --color-action-neutral: var(--action-neutral);
+  --color-action-neutral-hover: var(--action-neutral-hover);
+  --color-action-neutral-edge: var(--action-neutral-edge);
+  --color-on-action-neutral: var(--on-action-neutral);
+
+  --color-link: var(--link);
+  --color-on-own: var(--on-own);
+  --color-nav-active: var(--nav-active);
+  --color-nav-active-ink: var(--nav-active-ink);
+
+  --color-status-ground: var(--status-ground);
+  --color-status-ink: var(--status-ink);
+  --color-status-line: var(--status-line);
+
+  --color-focus: var(--focus);
+  --color-focus-halo: var(--focus-halo);
+
+  --color-template-ink: var(--template-ink);
+  --color-template-ink-muted: var(--template-ink-muted);
+  --color-template-window: var(--template-window);
+  --color-world-edge: var(--world-edge);
+  --color-world-sheen: var(--world-sheen);
+  --color-brand: var(--brand);
+
+  --shadow-trade: var(--trade-frame);
 
   --color-success: var(--success);
   --color-danger: var(--danger);
@@ -350,4 +578,85 @@
       scroll-behavior: auto !important;
     }
   }
+}
+
+/* ===========================================================================
+   The focus ring, as one treatment (V3.1)
+   ---------------------------------------------------------------------------
+   Written once, here, because it is a PAIR and a pair is easy to half-apply.
+   Before V3.1 focus was `focus:ring-accent`, which on a gold button measured
+   1.16:1 — a ring that was not there. Gold also meant that focus, buying and
+   ownership shared one colour.
+
+   Two concentric rings, so at least one of them is always visible:
+
+     inner  --focus       #eaf2ff   16:1 on the sky, 14.5:1 on a panel
+     outer  --focus-halo  near-black  17.8:1 on ivory, 12.8:1 on silver,
+                                      9.0:1 on gold
+
+   `outline` rather than `box-shadow` for the inner ring: an outline follows
+   `border-radius`, is never clipped by `overflow-hidden`, and survives forced
+   colours — where the system supplies its own and this one steps aside.
+
+   `:focus-visible` and not `:focus`: a pointer press should not leave a ring
+   behind, and this is the rule browsers already have for that.
+   =========================================================================== */
+@layer utilities {
+  .focus-ring {
+    outline: none;
+  }
+
+  .focus-ring:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    /* The dark companion, drawn just outside the bright one. */
+    box-shadow: 0 0 0 6px var(--focus-halo);
+    border-radius: inherit;
+  }
+
+  /* Forced colours paint their own focus indicator and ignore ours; leaving
+     a box-shadow there would add a smear around it. */
+  @media (forced-colors: active) {
+    .focus-ring:focus-visible {
+      outline: 3px solid Highlight;
+      box-shadow: none;
+    }
+  }
+}
+
+/* ===========================================================================
+   FigureCard layout debugging (V3.5)
+   ---------------------------------------------------------------------------
+   The card's content sits in nine measured rows over a decorative template,
+   and the only way to check that a slot really lands on the band the artwork
+   paints is to see it. This paints them.
+
+   OFF BY DEFAULT AND INERT IN PRODUCTION. Nothing here applies unless the
+   `data-card-layout-debug` attribute is present, and `LAYOUT_DEBUG` in
+   `card-template.ts` is `false`, so the attribute is simply absent — the
+   rendered markup is identical with this stylesheet in place.
+
+   To use it: flip that constant, or add the attribute by hand in devtools on
+   one card. Colours are deliberately flat and translucent so the artwork
+   underneath stays readable through them.
+   =========================================================================== */
+[data-card-layout-debug] [data-slot] {
+  outline: 1px solid rgb(255 255 255 / 0.55);
+  outline-offset: -1px;
+}
+[data-card-layout-debug] [data-slot="image"]  { background: rgb(80 150 255 / 0.22); }
+[data-card-layout-debug] [data-slot="name"]   { background: rgb(255 80 80 / 0.22); }
+[data-card-layout-debug] [data-slot="market"] { background: rgb(80 220 120 / 0.22); }
+[data-card-layout-debug] [data-slot="meta"]   { background: rgb(255 220 60 / 0.26); }
+[data-card-layout-debug] [data-slot="trade"]  { background: rgb(190 110 255 / 0.26); }
+
+/* The two rows that must stay empty: if anything ever lands in them, it is
+   visible against a hatch rather than merely wrong. */
+[data-card-layout-debug] [data-slot="pad"],
+[data-card-layout-debug] [data-slot="sep"] {
+  background: repeating-linear-gradient(
+    45deg,
+    rgb(255 255 255 / 0.18) 0 3px,
+    transparent 3px 6px
+  );
 }

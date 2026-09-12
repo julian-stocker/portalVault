@@ -15,6 +15,12 @@
  * The box keeps its square whether or not an image exists, so the 27 figures
  * without one cause no layout shift.
  *
+ * NOT USED BY THE CATALOG CARD any more (V3.3). That card is a PNG template
+ * with a transparent window, and the figure sits behind it — no plate, no
+ * ring, no radius of ours. What still needs a framed plate is everything the
+ * template does not cover: the figure's own detail page, a cart line and the
+ * administrator's image editor. The ring came back with them.
+ *
  * It takes a resolved `src`, never a file name: which of the three sources a
  * picture comes from is decided once, in `imageSrc()` (ADR-0046). This
  * component knows only that there is a URL or there is not.

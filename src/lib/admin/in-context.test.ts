@@ -122,7 +122,7 @@ describe("what an administrator's card offers", () => {
   });
 
   it("offers no collection action", () => {
-    const branch = card.slice(card.indexOf("if (admin) {"), card.indexOf("const footer = ("));
+    const branch = card.slice(card.indexOf("if (admin) {"), card.indexOf("const trade ="));
     expect(branch).not.toContain("onToggle");
     expect(branch).not.toContain("setCollected");
     expect(branch).not.toContain("initialCollected");
@@ -191,9 +191,14 @@ describe("the collector's catalog is untouched", () => {
 
   it("keeps collect and remove on a collector's card", () => {
     const card = source(CARD);
-    const collector = card.slice(card.indexOf("const footer = ("));
+    const collector = card.slice(card.indexOf("const trade ="));
     expect(collector).toContain("onToggle");
-    expect(collector).toContain("de.catalog.info");
+    // The "Info" link is gone in V3.2 — the card body already leads to the
+    // detail page. What a collector's card still offers beyond the toggle is
+    // the trade row, and only when something is actually offered.
+    expect(collector).toContain("OfferLink");
+    // V3.3: the plate is always drawn; OfferLink decides what stands on it.
+    expect(collector).toContain("notice");
   });
 
   it("leaves search and series navigation shared", () => {

@@ -71,7 +71,7 @@ export function ViewToggle({
               "flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[13px] " +
               "whitespace-nowrap transition-colors " +
               (isActive
-                ? "bg-accent-subtle font-medium text-accent ring-1 ring-accent/60"
+                ? "bg-status-ground font-medium text-status-ink ring-1 ring-status-line"
                 : "text-muted hover:text-foreground")
             }
           >

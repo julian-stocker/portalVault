@@ -126,7 +126,7 @@ export function InventoryCard({
             className={
               "min-h-9 shrink-0 rounded-full px-3 text-xs font-medium whitespace-nowrap ring-1 " +
               (position.isListed
-                ? "bg-accent-subtle text-accent ring-accent/60"
+                ? "bg-status-ground text-status-ink ring-status-line"
                 : "bg-surface text-muted ring-border/70")
             }
           >

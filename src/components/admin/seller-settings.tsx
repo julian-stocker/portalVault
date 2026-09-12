@@ -23,7 +23,7 @@ import { setSellerContact } from "@/lib/admin/actions";
 import { de } from "@/lib/i18n/de";
 
 const FIELD =
-  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 focus:ring-accent";
+  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 focus-ring";
 const LABEL = "mb-1 block text-xs font-medium text-muted";
 
 export function SellerSettings({

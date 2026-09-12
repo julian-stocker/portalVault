@@ -24,7 +24,8 @@ function Status({ state, message }: { state: State; message: string }) {
   return (
     <p
       role="status"
-      className={`text-xs ${state === "saved" ? "text-accent" : "text-danger"}`}
+      className={// Saved is a success, not a possession. Gold until V3.1.
+      `text-xs ${state === "saved" ? "text-success" : "text-danger"}`}
     >
       {state === "saved" ? de.admin.saved : message}
     </p>

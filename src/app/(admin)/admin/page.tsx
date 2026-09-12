@@ -74,7 +74,7 @@ export default async function AdminPage() {
                   <span className="text-muted"> · </span>
                 ) : null}
                 {openOrders.toShip > 0 ? (
-                  <span className={flagged ? "text-muted" : "font-medium text-accent"}>
+                  <span className={flagged ? "text-muted" : "font-medium text-foreground"}>
                     {copy.toShipCount(openOrders.toShip)}
                   </span>
                 ) : null}

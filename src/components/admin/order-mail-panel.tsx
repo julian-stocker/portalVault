@@ -38,7 +38,9 @@ export type OrderMailRow = {
 function toneFor(state: string): string {
   if (state === "sent") return "text-success";
   if (state === "unresolved") return "font-semibold text-danger";
-  if (state === "failed") return "font-semibold text-accent";
+  // A failed delivery is an error, not a collection state. It wore gold
+  // until V3.1 (ADR-0038); `--danger` is what the product already has for it.
+  if (state === "failed") return "font-semibold text-danger";
   return "text-muted";
 }
 

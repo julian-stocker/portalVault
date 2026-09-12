@@ -33,59 +33,35 @@ export type CardOwnership = "catalog" | "showcase";
  * the bloom was what made a row of owned cards read as backlit rather than as
  * framed, and it spilled onto the cards either side of them.
  *
- * V4.4 adds the surface itself. Three layers, outside in:
+ * V4.4 added the surface; V3.2 reduced what sits on it.
  *
- *   the card's ground   gold  (`--card-owned`, a flat gradient)
- *   the figure's plate  grey  (white plate, neutral ring — unchanged)
- *   the outer frame     gold  (the 3 px ring plus its inner line)
+ *   the card's ground   gold  (`--own-ground`, a flat gradient)
+ *   the figure's plate  white, with a GOLD seam when owned (V3.2)
+ *   the outer frame     gold  (three struck lines plus a 3 px ring)
  *
- * So the gold reads as the object the figure stands on, and the figure keeps
- * its own light. A card nobody owns keeps all three neutral.
+ * The gold reads as the object the figure stands on, and the figure keeps its
+ * own light. A card nobody owns keeps all three neutral.
+ *
+ * WHY THE SEAM. The ground is plainly visible — ΔE 14–19 against a plain
+ * card — but it lies UNDER a square plate that takes two thirds of the tile,
+ * so what showed was a 5 px margin and a strip of text. The gold was where
+ * nobody looks, which is why the crown was doing the work alone. The seam
+ * puts one line of it exactly where the eye rests.
  */
-const OWNED_SURFACE =
-  // The card's ground is gold leaf (V4.4).
-  //
-  // The distinction V4.1 drew still holds and is what makes this safe: the
-  // gold is on the *card*, never on the figure. The photograph sits on its
-  // white plate with a neutral ring around it, one layer above this, so it
-  // stays exactly as bright and as saturated as on a card nobody owns —
-  // which is what went wrong in V4, where the tint lay over the picture.
-  //
-  // `bg-card` stays underneath as the flat fallback: if the gradient is ever
-  // unavailable, the card is ivory rather than transparent.
-  "bg-card bg-[image:var(--card-owned)] ring-[3px] ring-[#e0a84a] shadow-gold " +
-  // The fine inner line, inset from the ring so the two read as a frame
-  // rather than as one thick border. A line, not a fill.
-  "before:pointer-events-none before:absolute before:inset-[4px] " +
-  "before:rounded-[0.68rem] before:ring-1 before:ring-[rgb(240_192_115/0.75)] " +
-  "before:content-[''] " +
-  // Four still points of light on the frame. `bg-[image:var(--gold-sparkle)]`
-  // paints only those four dots — the rest of the layer is transparent, so
-  // nothing underneath is brightened.
-  "after:pointer-events-none after:absolute after:inset-0 after:rounded-sky-lg " +
-  "after:bg-[image:var(--gold-sparkle)] after:content-['']";
-
-/**
- * The plain display piece.
+/*
+ * THE CARD'S SURFACE IS A PNG SINCE V3.3.
  *
- * Every card is framed — a collectible in a case has an edge whether or not
- * it is yours. But the edge here is **bronze**, not dimmed gold: at 25 %
- * accent the two states were the same colour at two strengths, which is a
- * comparison the eye has to make rather than see. A different metal is seen.
- */
-const NEUTRAL_SURFACE = "bg-card ring-1 ring-[#8a6a45]/55 shadow-card";
-
-/**
- * The card's surface classes.
+ * `OWNED_SURFACE` and `NEUTRAL_SURFACE` drew the whole card in CSS: the ivory
+ * ground and the gold leaf, a bronze outline or a three-line struck frame, an
+ * inset line, a sparkle layer. All of it is painted into
+ * `designs/cards/silver.png` and `gold.png` now, and none of it is allowed to
+ * exist twice — so the constants and `cardSurfaceClass()` are gone rather than
+ * left unused.
  *
- * The frame is a catalog answer, never a collection one — which is why the
- * context is a parameter rather than something inferred from `collected`.
- * Both branches share the ivory ground: the difference is the frame, not the
- * material the piece is made of.
+ * What survives is the QUESTION, which is not a visual matter: which template
+ * a card shows still depends on `ownership` being `catalog`, so the collection
+ * does not mark every card it holds (ADR-0038).
  */
-export function cardSurfaceClass(ownership: CardOwnership, collected: boolean): string {
-  return ownership === "catalog" && collected ? OWNED_SURFACE : NEUTRAL_SURFACE;
-}
 
 /** True when the card carries the ownership frame and its assistive text. */
 export function marksOwnership(ownership: CardOwnership, collected: boolean): boolean {

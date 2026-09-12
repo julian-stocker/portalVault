@@ -107,7 +107,7 @@ export function PriceEditor({
         className={
           "rounded-sky-sm px-2 py-1.5 text-left text-xs ring-1 " +
           (position.priceSource === "automatic"
-            ? "bg-accent-subtle text-accent ring-accent/50"
+            ? "bg-status-ground text-status-ink ring-status-line"
             : "ring-border/70 hover:bg-border/30")
         }
       >

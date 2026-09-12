@@ -51,14 +51,14 @@ export function SiteFooter() {
         // A quiet plate at the foot of the world, closed by the same gold
         // hairline the header opens with — so the page has two ends rather
         // than a beginning and a fade.
-        "relative mt-12 border-t border-accent/40 bg-deep/80 backdrop-blur-md md:mt-16"
+        "relative mt-12 border-t border-world-edge bg-deep/80 backdrop-blur-md md:mt-16"
       }
     >
       {/* The warm line just inside the edge, as on the header: the plate is
           struck rather than drawn. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 top-px h-px bg-accent/20"
+        className="pointer-events-none absolute inset-x-0 top-px h-px bg-world-sheen"
       />
 
       <div

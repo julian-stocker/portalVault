@@ -26,8 +26,8 @@ import Link from "next/link";
 import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
-import { conditionLabel } from "@/components/shop/shop-action";
-import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import { conditionLabel } from "@/lib/shop/condition";
+import { ACTION_NEUTRAL, ACTION_TRADE } from "@/components/ui/action";
 import {
   cartTotal,
   keyOf,
@@ -54,7 +54,7 @@ const PANEL = "rounded-sky-lg bg-deep/90 ring-1 backdrop-blur-sm";
 const STEP =
   "flex h-11 w-11 items-center justify-center rounded-sky-md bg-surface-raised " +
   "text-lg leading-none ring-1 ring-border-strong transition-colors " +
-  "hover:ring-accent disabled:opacity-40 disabled:hover:ring-border-strong";
+  "focus-ring hover:ring-border-strong disabled:opacity-40";
 
 /**
  * `−  2  +` (V11), where there used to be a free number field.
@@ -246,7 +246,7 @@ export function CartView({
         {/* The one action worth taking here. Following it holds no stock:
             the cart stays non-binding until the checkout is submitted
             (ADR-0050). */}
-        <Link href="/checkout" className={ACTION_PRIMARY}>
+        <Link href="/checkout" className={ACTION_TRADE}>
           {de.cart.toCheckout}
         </Link>
 

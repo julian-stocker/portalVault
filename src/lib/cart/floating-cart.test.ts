@@ -204,9 +204,10 @@ describe("what it says", () => {
     expect(floating).toContain('count > 99 ? "99+" : formatNumber(count)');
   });
 
-  it("uses the existing accent, not a new colour", () => {
-    expect(floating).toContain("bg-accent");
-    expect(floating).toContain("text-on-accent");
+  it("uses the trade metal, not the collection's", () => {
+    // Silver since V3.1: the cart is trade, and gold means possession.
+    expect(floating).toContain("bg-trade-solid");
+    expect(floating).toContain("text-on-trade");
     expect(floating).not.toMatch(/#[0-9a-fA-F]{6}/);
   });
 });

@@ -26,7 +26,7 @@
 import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
-import { conditionLabel } from "@/components/shop/shop-action";
+import { conditionLabel } from "@/lib/shop/condition";
 import { ACTION_SHOP } from "@/components/ui/action";
 import { keyOf, lineKey } from "@/lib/cart/cart";
 import { buyableOffers, type Offer } from "@/lib/shop/offer";
@@ -103,12 +103,35 @@ export function OfferPanel({
 
   return (
     <section
+      /*
+       * The destination of every catalog card's trade row (V3.2):
+       * `/skylanders/<slug>#angebote`. `scroll-mt` keeps the heading clear of
+       * the sticky header when the browser jumps here.
+       */
+      id="angebote"
       aria-label={de.shop.offerHeading}
-      className="flex flex-col gap-3 rounded-sky-md bg-accent-subtle/60 p-4 ring-1 ring-gold-line"
+      className="flex scroll-mt-24 flex-col gap-3 rounded-sky-md bg-surface/60 p-4 ring-1 ring-trade-line"
     >
-      <h2 className="text-xs font-medium tracking-wide text-accent uppercase">
+      <h2 className="text-xs font-medium tracking-wide text-trade-solid uppercase">
         {de.shop.offerHeading}
       </h2>
+
+      {/*
+       * THE SELLER LINE BELONGS HERE AND CANNOT BE BUILT YET.
+       *
+       * `yulez.collectibles · Gewerblicher Verkäufer` is the one thing this
+       * section still owes. The name lives in `sellers`, and every read path
+       * to it is closed to a visitor: `active_seller()` is revoked from
+       * `anon` and `authenticated` (0026), and `admin_seller()` is gated on
+       * `is_shop_admin()`. The web app never holds a service-role key
+       * (ADR-0051), so the server component cannot reach it either.
+       *
+       * It needs one granted projection — a `seller_public()` that names its
+       * columns literally, the same shape `platform_settings_public()` has —
+       * and that is a migration. Deliberately not faked with a constant in
+       * i18n: two sources of truth for a trade name is exactly what ADR-0059
+       * forbids, and the migration already carries the value.
+       */}
 
       <ul className="flex flex-col gap-3">
         {buyable.map((offer) => (

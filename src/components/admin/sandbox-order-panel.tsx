@@ -44,7 +44,7 @@ export function SandboxOrderPanel({
   return (
     <section className="mt-5 rounded-sky-lg bg-surface-raised p-5 ring-1 ring-border-strong">
       <h2 className="flex items-center gap-2 font-semibold">
-        <span className="rounded-sky-sm bg-accent/20 px-2 py-0.5 text-xs tracking-wide text-foreground">
+        <span className="rounded-sky-sm bg-status-ground px-2 py-0.5 text-xs tracking-wide text-status-ink">
           {copy.sandboxBadge}
         </span>
         {copy.modeSandbox}

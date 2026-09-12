@@ -813,6 +813,11 @@ export const de = {
      * davor („SkyIsles 4,49 €") und war überflüssig: der Kontext ist die
      * Website selbst.
      */
+    /** Die Handelszeile auf der Katalogkarte (V3.2) — verkäuferneutral. */
+    /** Die Silberplatte, wenn gerade niemand anbietet. Ruhig, nicht defekt. */
+    noOffer: "Aktuell kein Angebot",
+    offersFrom: (price: string) => `Angebote ab ${price}`,
+    offersFor: (name: string) => `Angebote für ${name} ansehen`,
     offerFrom: (price: string) => `ab ${price}`,
     conditionLoose: "Lose",
     conditionBoxed: "OVP",

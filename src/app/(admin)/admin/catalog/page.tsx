@@ -48,7 +48,7 @@ export default async function AdminCatalogPage({
     <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12">
       <div className="flex flex-wrap items-baseline justify-between gap-3">
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{de.admin.catalog}</h1>
-        <Link href="/admin/catalog/categories" className="text-sm text-accent underline">
+        <Link href="/admin/catalog/categories" className="text-sm text-link underline">
           {de.admin.categories}
         </Link>
       </div>
@@ -136,7 +136,7 @@ export default async function AdminCatalogPage({
                 <td className="py-2 text-right">
                   <Link
                     href={`/admin/catalog/${figure.skyId}`}
-                    className="text-xs text-accent underline underline-offset-2"
+                    className="text-xs text-link underline underline-offset-2"
                   >
                     {de.admin.edit}
                   </Link>
@@ -149,14 +149,14 @@ export default async function AdminCatalogPage({
 
       <div className="mt-5 flex items-center justify-between text-sm">
         {page > 1 ? (
-          <Link href={query({ page: String(page - 1) })} className="text-accent underline">
+          <Link href={query({ page: String(page - 1) })} className="text-link underline">
             {de.admin.previous}
           </Link>
         ) : (
           <span />
         )}
         {page < lastPage ? (
-          <Link href={query({ page: String(page + 1) })} className="text-accent underline">
+          <Link href={query({ page: String(page + 1) })} className="text-link underline">
             {de.admin.next}
           </Link>
         ) : (

@@ -158,7 +158,7 @@ export function InlineName({
         aria-label={de.admin.overrideLabel}
         className={
           "min-h-8 w-full rounded-sky-sm bg-plate px-2 text-sm text-on-plate " +
-          "ring-1 ring-card-border focus:ring-accent"
+          "ring-1 ring-card-border focus-ring"
         }
       />
       {/* Two words, not a sentence: a card is 150 px wide on a phone, and

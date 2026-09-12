@@ -60,7 +60,7 @@ export default async function AboutPage() {
           {de.about.collectionBody}
           {/* The one sentence that answers "what does it cost me?" — set apart
               because it is the answer, not a detail of the paragraph. */}
-          <span className="mt-2 block font-medium text-accent">{de.about.collectionFree}</span>
+          <span className="mt-2 block font-medium text-own-ink">{de.about.collectionFree}</span>
         </Section>
 
         <Section heading={de.about.shopHeading}>{de.about.shopBody}</Section>

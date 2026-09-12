@@ -81,7 +81,7 @@ export function ShopView({
           className={
             "min-h-12 w-full rounded-full bg-deep/80 px-5 py-3 text-base " +
             "shadow-raised ring-1 ring-border-strong/70 backdrop-blur-sm " +
-            "placeholder:text-muted focus:ring-accent/70"
+            "placeholder:text-muted focus-ring"
           }
         />
       </div>

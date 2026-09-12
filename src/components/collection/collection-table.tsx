@@ -94,7 +94,7 @@ function RemoveCell({
         aria-busy={pending || undefined}
         className={
           "rounded-sky-sm px-2 py-1 text-xs whitespace-nowrap underline underline-offset-2 " +
-          (justRemoved ? "text-accent" : "text-muted hover:text-danger") +
+          (justRemoved ? "text-own-ink" : "text-muted hover:text-danger") +
           (pending ? " opacity-70" : "")
         }
       >
@@ -165,7 +165,7 @@ export function CollectionTable({
                 <td className="py-2 pr-4">
                   <Link
                     href={`/skylanders/${row.figure.slug}`}
-                    className="font-medium hover:text-accent"
+                    className="font-medium hover:text-own-ink"
                   >
                     {row.figure.displayName}
                   </Link>

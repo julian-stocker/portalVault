@@ -26,7 +26,7 @@ import {
   ACTION_CARD,
   ACTION_OWNED,
   ACTION_PENDING,
-  ACTION_PRIMARY,
+  ACTION_OWN,
 } from "@/components/ui/action";
 import { setCollected } from "@/lib/collection/actions";
 import { de } from "@/lib/i18n/de";
@@ -71,7 +71,10 @@ export function CollectButton({
   signInHref,
   variant = "card",
 }: Props) {
-  const idle = variant === "page" ? ACTION_PRIMARY : ACTION_CARD;
+  // Gold, because this is the one press that adds something to what you
+  // own (V3.1). The card variant stays the quiet dark pill — repeated across
+  // a grid, gold would stop meaning anything.
+  const idle = variant === "page" ? ACTION_OWN : ACTION_CARD;
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();

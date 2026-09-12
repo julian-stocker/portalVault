@@ -140,10 +140,9 @@ describe("the hook around it", () => {
   });
 });
 
-describe("all three add surfaces go through it", () => {
-  it("the catalog pill, the figure page and the cart's plus", () => {
+describe("both add surfaces go through it", () => {
+  it("the figure page and the cart's plus", () => {
     for (const path of [
-      "src/components/shop/shop-action.tsx",
       "src/components/shop/offer-panel.tsx",
       "src/components/cart/cart-view.tsx",
     ]) {
@@ -153,7 +152,6 @@ describe("all three add surfaces go through it", () => {
 
   it("and none of them still adds without asking", () => {
     for (const path of [
-      "src/components/shop/shop-action.tsx",
       "src/components/shop/offer-panel.tsx",
     ]) {
       const source = code(path);

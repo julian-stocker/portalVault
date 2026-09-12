@@ -53,7 +53,7 @@ export default async function MyOrdersPage() {
                     {order.orderNumber}
                     {/* A test order stays marked as one for ever (ADR-0060). */}
                     {order.commerceMode === "sandbox" ? (
-                      <span className="ml-2 rounded-sky-sm bg-accent/20 px-1.5 py-0.5 align-middle text-[0.65rem] tracking-wide">
+                      <span className="ml-2 rounded-sky-sm bg-status-ground px-1.5 py-0.5 align-middle text-[0.65rem] tracking-wide text-status-ink">
                         {copy.testBadge}
                       </span>
                     ) : null}

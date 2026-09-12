@@ -25,7 +25,10 @@ export function Wordmark({ className = "" }: { className?: string }) {
       />
       <span className="font-display text-[19px] leading-none tracking-tight md:text-[22px]">
         <span className="font-semibold text-on-deep">Sky</span>
-        <span className="font-normal text-accent">Isles</span>
+        {/* Brand gold, not possession gold (V3.1, ADR-0038). The one place
+            the hue means SkyIsles rather than a state — named separately so a
+            later sweep over `--own-*` cannot take the wordmark with it. */}
+        <span className="font-normal text-brand">Isles</span>
       </span>
     </span>
   );

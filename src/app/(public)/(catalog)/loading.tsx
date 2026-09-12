@@ -12,6 +12,7 @@
  * have to switch it off again anyway.
  */
 import { de } from "@/lib/i18n/de";
+import { SERIES_BARS } from "@/lib/ui/skeleton";
 
 function Block({ className }: { className: string }) {
   return <div aria-hidden="true" className={`rounded-sky-md bg-border/50 ${className}`} />;
@@ -34,8 +35,8 @@ export default function CatalogLoading() {
         <div className="flex w-fit gap-1 rounded-sky-lg bg-deep/60 p-1 ring-1 ring-border/60">
           {/* Written out, not interpolated: Tailwind only emits classes it
               sees literally, so `w-${n}` would produce no width at all. */}
-          {["w-32", "w-16", "w-28", "w-24", "w-32", "w-28"].map((width, index) => (
-            <Block key={index} className={`h-9 shrink-0 ${width}`} />
+          {SERIES_BARS.map((bar) => (
+            <Block key={bar.id} className={`h-9 shrink-0 ${bar.width}`} />
           ))}
         </div>
         <Block className="h-5 w-32" />

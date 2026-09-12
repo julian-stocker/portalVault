@@ -81,7 +81,7 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
     attention === "needs_resolution"
       ? "ring-2 ring-danger/70"
       : attention === "to_ship"
-        ? "ring-1 ring-accent/60"
+        ? "ring-1 ring-danger/60"
         : "ring-1 ring-border/70";
 
   return (
@@ -96,7 +96,7 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
             {/* A test order has to be recognisable without opening it, and
                 stays recognisable after the shop goes live (ADR-0060). */}
             {order.commerce_mode === "sandbox" ? (
-              <span className="ml-2 rounded-sky-sm bg-accent/20 px-1.5 py-0.5 align-middle text-[0.65rem] tracking-wide text-foreground">
+              <span className="ml-2 rounded-sky-sm bg-status-ground px-1.5 py-0.5 align-middle text-[0.65rem] tracking-wide text-status-ink">
                 {de.admin.commerce.sandboxBadge}
               </span>
             ) : null}
@@ -112,7 +112,7 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
               attention === "needs_resolution"
                 ? "font-semibold text-danger"
                 : attention === "to_ship"
-                  ? "font-semibold text-accent"
+                  ? "font-semibold text-danger"
                   : undefined
             }
           >

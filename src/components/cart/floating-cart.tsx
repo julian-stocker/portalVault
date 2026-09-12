@@ -41,8 +41,13 @@ export function FloatingCart() {
         "fixed right-4 bottom-[calc(2.75rem+env(safe-area-inset-bottom)+0.625rem)] z-30 " +
         // 52 px: a real floating action, and well past the 44 px target.
         "flex h-[3.25rem] w-[3.25rem] items-center justify-center rounded-full " +
-        "bg-accent text-on-accent shadow-raised ring-1 ring-on-accent/10 " +
-        "transition-colors hover:bg-accent-hover md:hidden"
+        // A real dark edge, not a hint of one (V3.1a). The button is
+        // `fixed` and scrolls over whatever is beneath it — including ivory
+        // cards, where the silver fill alone measures 1.39:1. The pair covers
+        // every ground: the fill carries the dark sky at 11.7:1, the ring
+        // carries a light card at 14.6:1.
+        "focus-ring bg-trade-solid text-on-trade shadow-raised ring-2 ring-on-trade " +
+        "transition-colors hover:bg-trade-solid-hover md:hidden"
       }
     >
       <CartGlyph className="h-6 w-6" />
@@ -56,7 +61,7 @@ export function FloatingCart() {
           className={
             "absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center " +
             "rounded-full bg-deep px-1 text-[11px] leading-none font-semibold " +
-            "text-on-deep ring-2 ring-accent tabular-nums"
+            "text-on-deep ring-2 ring-trade-solid tabular-nums"
           }
         >
           {count > 99 ? "99+" : formatNumber(count)}

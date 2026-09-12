@@ -20,7 +20,7 @@ import { COMMERCE_MODES, type AccountMatch, type CommerceState } from "@/lib/adm
 import { de } from "@/lib/i18n/de";
 
 const FIELD =
-  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 focus:ring-accent";
+  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 focus-ring";
 
 export function CommercePanel({ state }: { state: CommerceState }) {
   const copy = de.admin.commerce;
@@ -83,7 +83,7 @@ export function CommercePanel({ state }: { state: CommerceState }) {
               aria-pressed={active}
               className={`rounded-sky-md px-3 py-2 text-left text-sm ring-1 ${
                 active
-                  ? "bg-accent/15 ring-accent text-foreground"
+                  ? "bg-status-ground ring-status-line text-status-ink"
                   : "bg-surface ring-border/70 text-muted hover:text-foreground"
               }`}
             >

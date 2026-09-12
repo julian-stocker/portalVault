@@ -64,7 +64,7 @@ export function FilterBar({
               "flex min-h-11 shrink-0 snap-start items-center rounded-full px-4 " +
               "text-sm whitespace-nowrap shadow-card backdrop-blur-sm transition-colors sm:min-h-10 " +
               (isActive
-                ? "bg-accent-subtle font-semibold text-accent ring-1 ring-accent/70"
+                ? "bg-status-ground font-semibold text-status-ink ring-1 ring-status-line"
                 : "bg-deep/65 font-normal text-muted ring-1 ring-border/70 " +
                   "hover:text-foreground hover:ring-border-strong")
             }

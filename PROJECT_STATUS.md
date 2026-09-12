@@ -1195,7 +1195,7 @@ eine **Bronzekante**, eigene eine doppelte **Goldfassung** mit Schein. Der Samml
 eine nahezu deckende Vitrinenplatte mit doppeltem Goldrahmen, Eckwinkeln, goldenem
 Fortschrittsbalken und getrennten Kennzahlen. Kopf mit Goldkante und goldener Unterstreichung
 statt heller Pille. Assets: 135 KB / 45 KB (Portal), 112 KB / 43 KB (Welt), Quellen unter
-`artwork/` unversioniert. Das
+`designs/artwork/` unversioniert. Das
 Farbschema kippt nicht mehr die Welt, sondern die Tageszeit — hell ist Dämmerung, dunkel ist
 Nacht, beide mit denselben hellen Karten. Der Besitzrahmen im Katalog ist deutlich verstärkt
 (Goldrand plus innere Haarlinie); in `/collection` gibt es ihn weiterhin nicht.

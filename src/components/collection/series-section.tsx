@@ -51,10 +51,10 @@ export function SeriesSectionHeader({
           progress bar here would compete with the one in the summary. */}
       <div
         aria-hidden="true"
-        className="mt-2 h-px w-full overflow-hidden rounded-full bg-gradient-to-r from-accent/45 via-border to-transparent"
+        className="mt-2 h-px w-full overflow-hidden rounded-full bg-gradient-to-r from-own-ink/45 via-border to-transparent"
       >
         <div
-          className="h-full bg-accent"
+          className="h-full bg-own-ink"
           style={{ width: `${Math.min(100, Math.max(0, (ratio ?? 0) * 100))}%` }}
         />
       </div>

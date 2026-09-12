@@ -2408,7 +2408,7 @@ Titel, Subline und Suche stehen in einer Spalte, die auf Desktop bei 52 % Breite
 liegen in verschiedenen Route Groups, und was einer Seite gehört, wird beim Wechsel zwischen
 ihnen ausgehängt. Ein struktureller Test hält beides fest.
 
-`artwork/background.png` bleibt die volle Welt und trägt jetzt die Seiten, die nichts anderes zu
+`designs/artwork/background.png` bleibt die volle Welt und trägt jetzt die Seiten, die nichts anderes zu
 tun haben: Anmeldung, Registrierung, Passwort-Reset. Nichts davon stammt aus den Spielen;
 verboten bleibt ausschließlich fremdes Material: offizielle Skylanders-Hintergründe,
 Spiel-Screenshots, fremde Fantasy-Artworks, fremde Logos (`docs/SECURITY.md`, ADR-0009).
@@ -2416,7 +2416,7 @@ Spiel-Screenshots, fremde Fantasy-Artworks, fremde Logos (`docs/SECURITY.md`, AD
 **Ausgeliefert werden nur die optimierten Ableitungen:** `skyisles-backdrop.webp` (112 KB) und
 `skyisles-backdrop-sm.webp` (43 KB) unter `public/images/brand/`, ausgewählt per `srcset` — ein
 Telefon lädt nie die große Datei. Aus 2,1 MB PNG werden damit 43–112 KB. Die Quelldateien unter
-`artwork/` sind **nicht** versioniert (`.gitignore`): mehrere Megabyte Rohmaterial gehören nicht
+`designs/artwork/` und `designs/cards/` sind **nicht** versioniert (`.gitignore`): mehrere Megabyte Rohmaterial gehören nicht
 in die Historie eines Repositories, das sonst aus Text besteht. Sollen sie es doch, ist das eine
 bewusste Entscheidung und kein Nebeneffekt.
 

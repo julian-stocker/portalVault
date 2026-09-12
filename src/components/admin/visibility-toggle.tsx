@@ -41,7 +41,7 @@ export function VisibilityToggle({ skyId, visible }: { skyId: string; visible: b
         className={
           "min-h-8 rounded-full px-3 text-xs font-medium whitespace-nowrap ring-1 " +
           (on
-            ? "bg-accent-subtle text-accent ring-accent/60"
+            ? "bg-status-ground text-status-ink ring-status-line"
             : "bg-surface text-muted ring-border/70") +
           (pending ? " opacity-70" : "")
         }

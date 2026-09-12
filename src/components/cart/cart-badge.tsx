@@ -38,8 +38,8 @@ export function CartBadge() {
       {count > 0 ? (
         <span
           className={
-            "absolute top-1 right-0.5 min-w-4 rounded-full bg-accent px-1 " +
-            "text-[10px] leading-4 font-semibold text-on-accent tabular-nums"
+            "absolute top-1 right-0.5 min-w-4 rounded-full bg-trade-solid px-1 " +
+            "text-[10px] leading-4 font-semibold text-on-trade tabular-nums"
           }
         >
           {/* The number is decoration over the icon; the accessible name

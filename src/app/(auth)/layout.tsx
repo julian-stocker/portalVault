@@ -19,7 +19,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   return (
     <div className="relative min-h-screen">
       <WorldBackdrop />
-      <header className="border-b-2 border-accent/50 bg-deep/85 backdrop-blur-md">
+      <header className="border-b-2 border-world-edge bg-deep/85 backdrop-blur-md">
         <Link href="/" className="flex items-center px-4 py-3 md:px-6" aria-label={de.app.name}>
           <Wordmark />
         </Link>

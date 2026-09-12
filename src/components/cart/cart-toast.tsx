@@ -31,7 +31,7 @@
 
 import { useSyncExternalStore } from "react";
 
-import { conditionLabel } from "@/components/shop/shop-action";
+import { conditionLabel } from "@/lib/shop/condition";
 import { getServerSnapshot, getSnapshot, subscribe } from "@/lib/cart/toast";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -42,7 +42,7 @@ function CheckGlyph() {
     <svg
       aria-hidden="true"
       viewBox="0 0 16 16"
-      className="mt-0.5 h-4 w-4 shrink-0 text-accent"
+      className="mt-0.5 h-4 w-4 shrink-0 text-trade-solid"
       fill="none"
       stroke="currentColor"
       strokeWidth="2"

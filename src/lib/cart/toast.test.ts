@@ -30,8 +30,7 @@ function code(path: string): string {
 }
 
 const TOAST = "src/components/cart/cart-toast.tsx";
-const ACTION = "src/components/shop/shop-action.tsx";
-const PANEL = "src/components/shop/offer-panel.tsx";
+const panel = readFileSync("src/components/shop/offer-panel.tsx", "utf8");
 
 const BASH = { kind: "added" as const, name: "Bash", condition: "loose" as const, price: 4.49 };
 
@@ -235,41 +234,21 @@ describe("the component renders both shapes", () => {
   });
 });
 
-describe("the buy button no longer renames itself", () => {
-  it("has no label to swap to", () => {
-    // The V10 removal, still gone: the i18n key that produced the temporary
-    // "Im Warenkorb" does not exist.
-    expect("inCart" in de.shop).toBe(false);
-  });
-
-  it("shows the price, before and after", () => {
-    const action = code(ACTION);
-    expect(action).toContain("{formatPrice(summary.price)}");
-    expect(action).not.toContain("setAdded");
-    expect(action).not.toContain("de.shop.addToCart}");
-  });
-
-  it("and the figure page's button keeps its own label", () => {
-    const panel = code(PANEL);
-    expect(panel).toContain("{de.shop.addToCart}");
-    expect(panel).not.toContain("setAdded");
+describe("the figure page's add button no longer renames itself", () => {
+  /*
+   * The catalog's buy pill is gone in V3.2 — the card links to the figure's
+   * offers instead of selling from the grid — so the only button this rule
+   * still applies to is the one in the offer panel. It never becomes
+   * "Hinzugefügt": the confirmation is the toast, and a control that renames
+   * itself has stopped saying what it does.
+   */
+  it("shows the price, and keeps showing it", () => {
+    expect(panel).toContain("formatPrice(offer.price)");
+    expect(panel).not.toContain("Hinzugefügt");
   });
 
   it("confirms through the shared add path, not from the button", () => {
-    // Since V11 the toast is raised by useAddToCart, after the server has
-    // answered — the buttons no longer decide anything themselves.
-    for (const path of [ACTION, PANEL]) {
-      const source = code(path);
-      expect(source).toContain("useAddToCart()");
-      expect(source).not.toContain("showCartToast");
-    }
-  });
-
-  it("only adds after a condition has actually been chosen", () => {
-    // Opening the chooser is not an add.
-    const action = code(ACTION);
-    const opener = action.slice(action.indexOf("onClick={() => setChoosing(true)}"));
-    expect(opener).not.toContain("addOne(");
-    expect(action.indexOf("await addOne({")).toBeLessThan(action.indexOf("if (choosing)"));
+    expect(panel).toContain("useAddToCart");
+    expect(panel).not.toContain("setAdded");
   });
 });

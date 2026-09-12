@@ -25,7 +25,7 @@ const CONTEXT_NOTE: Record<AuthContext, string> = {
 export function AuthContextNote({ context }: { context: AuthContext | null }) {
   if (context === null) return null;
   return (
-    <p className="rounded-sky-md bg-accent-subtle/70 px-3 py-2.5 text-sm leading-relaxed text-foreground ring-1 ring-gold-line">
+    <p className="rounded-sky-md bg-status-ground px-3 py-2.5 text-sm leading-relaxed text-status-ink ring-1 ring-status-line">
       {CONTEXT_NOTE[context]}
     </p>
   );

@@ -72,6 +72,12 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Source artwork. The shipped derivatives live in public/images/brand/ and are
-# committed; the multi-megabyte originals are kept out of the repository.
-/artwork/
+# Design sources. The shipped derivatives are committed — brand imagery in
+# public/images/brand/, the card templates in public/images/cards/ — while the
+# multi-megabyte originals stay out of the repository.
+#
+# `artwork/` moved to `designs/artwork/` on 2026-09-12, and the old rule was
+# anchored at the root (`/artwork/`), so for a moment 15 MB of sources were
+# neither ignored nor committed. Both folders are now named.
+/designs/artwork/
+/designs/cards/

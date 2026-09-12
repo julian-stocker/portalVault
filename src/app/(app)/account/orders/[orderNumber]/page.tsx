@@ -50,7 +50,7 @@ export default async function MyOrderPage({
       <AccountHeader title={String(order.order_number)} />
 
       {order.commerce_mode === "sandbox" ? (
-        <p className="rounded-sky-md bg-accent/15 px-3 py-2 text-sm ring-1 ring-accent/40">
+        <p className="rounded-sky-md bg-status-ground px-3 py-2 text-sm text-status-ink ring-1 ring-status-line">
           {copy.testBadge} — {de.admin.commerce.sandboxOrderHint}
         </p>
       ) : null}

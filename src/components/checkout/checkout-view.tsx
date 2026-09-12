@@ -29,7 +29,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useCart } from "@/components/cart/use-cart";
 import { newCheckoutCredentials, type CheckoutCredentials } from "@/lib/commerce/capability";
-import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import { ACTION_NEUTRAL, ACTION_TRADE } from "@/components/ui/action";
 import {
   fieldProblems,
   firstMarkedField,
@@ -48,7 +48,7 @@ import {
 import { readOpenOrderState, type OpenOrderView } from "@/lib/commerce/open-order-client";
 import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
 import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
-import { conditionLabel } from "@/components/shop/shop-action";
+import { conditionLabel } from "@/lib/shop/condition";
 import {
   DEFAULT_SHIPPING_METHOD,
   DELIVERY_COUNTRY,
@@ -66,7 +66,7 @@ import { offerIndex, type Offer } from "@/lib/shop/offer";
 const PANEL = "rounded-sky-lg bg-deep/90 p-4 ring-1 ring-gold-line backdrop-blur-sm";
 const FIELD =
   "min-h-11 w-full rounded-sky-md bg-surface-raised px-3 text-sm ring-1 ring-border-strong " +
-  "focus:ring-accent";
+  "focus-ring";
 /** The same box, marked. A ring rather than a tint: the ground stays readable. */
 const FIELD_INVALID =
   "min-h-11 w-full rounded-sky-md bg-surface-raised px-3 text-sm ring-2 ring-danger " +
@@ -678,7 +678,7 @@ export function CheckoutView({
               className={
                 "flex min-h-11 cursor-pointer items-center gap-3 rounded-sky-md px-3 py-2 " +
                 "ring-1 transition-colors " +
-                (method === option.code ? "bg-accent-subtle ring-accent" : "ring-border-strong")
+                (method === option.code ? "bg-status-ground ring-status-line" : "ring-border-strong")
               }
             >
               <input
@@ -687,7 +687,7 @@ export function CheckoutView({
                 value={option.code}
                 checked={method === option.code}
                 onChange={() => setMethod(option.code)}
-                className="h-4 w-4 accent-accent"
+                className="h-4 w-4 accent-trade-solid"
               />
               <span className="flex-1 text-sm font-medium">{option.name}</span>
               <span className="text-sm tabular-nums">
@@ -710,7 +710,7 @@ export function CheckoutView({
               type="checkbox"
               checked={saveAsDefault}
               onChange={(event) => setSaveAsDefault(event.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-accent"
+              className="mt-0.5 h-4 w-4 accent-trade-solid"
             />
             <span>
               <span className="font-medium">{de.checkout.saveDefault}</span>
@@ -790,7 +790,7 @@ export function CheckoutView({
           </div>
         ) : null}
 
-        <button type="submit" disabled={pending} className={`${ACTION_PRIMARY} disabled:opacity-70`}>
+        <button type="submit" disabled={pending} className={`${ACTION_TRADE} disabled:opacity-70`}>
           {pending ? de.checkout.submitting : de.checkout.submit}
         </button>
       </div>

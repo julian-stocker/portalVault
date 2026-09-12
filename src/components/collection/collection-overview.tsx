@@ -69,7 +69,7 @@ export function CollectionOverview({
         "bg-[radial-gradient(130%_130%_at_18%_-10%,#2a2551_0%,#161230_45%,#0d0a1e_100%)] " +
         // A struck gold frame, not a hairline: this is the one panel in the
         // product that is allowed to look like an object.
-        "shadow-raised ring-2 ring-accent/85"
+        "shadow-raised ring-2 ring-own-ink/85"
       }
     >
       {/* A frame inside the frame, four corner brackets, and a warm light in
@@ -77,13 +77,13 @@ export function CollectionOverview({
           panel earns more than that (ADR-0038, V3.1). */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-[4px] rounded-[0.66rem] ring-1 ring-accent/45"
+        className="pointer-events-none absolute inset-[4px] rounded-[0.66rem] ring-1 ring-own-ink/45"
       />
       {CORNERS.map((corner) => (
         <span
           key={corner}
           aria-hidden="true"
-          className={`pointer-events-none absolute h-5 w-5 border-accent ${corner}`}
+          className={`pointer-events-none absolute h-5 w-5 border-own-ink ${corner}`}
         />
       ))}
       {/* Two warm reflections, as light on a lacquered surface rather than
@@ -122,7 +122,7 @@ export function CollectionOverview({
             {segmentLabel}
           </p>
           <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
-            <span className="text-4xl leading-none font-semibold tracking-tight text-accent tabular-nums md:text-5xl">
+            <span className="text-4xl leading-none font-semibold tracking-tight text-own-ink tabular-nums md:text-5xl">
               {formatNumber(summary.owned)}
             </span>
             <span className="text-sm text-on-deep-muted tabular-nums">
@@ -151,7 +151,7 @@ export function CollectionOverview({
           className="h-full rounded-full shadow-[0_0_10px_rgb(224_164_74/0.55)]"
           style={{
             width: `${Math.min(100, Math.max(0, summary.ratio * 100))}%`,
-            background: "linear-gradient(to bottom, #f3cd85 0%, var(--accent) 55%, #a9761f 100%)",
+            background: "linear-gradient(to bottom, #f3cd85 0%, var(--own-ink) 55%, #a9761f 100%)",
           }}
         />
       </div>

@@ -23,7 +23,7 @@ export default async function AdminCategoriesPage() {
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pt-8 pb-10 md:pt-12">
-      <Link href="/admin/catalog" className="text-sm text-accent underline">
+      <Link href="/admin/catalog" className="text-sm text-link underline">
         ← {de.admin.catalog}
       </Link>
       <h1 className="mt-4 text-2xl font-semibold tracking-tight md:text-3xl">

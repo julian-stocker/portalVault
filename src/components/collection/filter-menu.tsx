@@ -47,7 +47,7 @@ export function FilterMenu({
           "flex min-h-9 items-center gap-1.5 rounded-sky-sm px-3 text-[13px] " +
           "whitespace-nowrap ring-1 transition-colors " +
           (active
-            ? "bg-accent-subtle font-medium text-accent ring-accent/60"
+            ? "bg-status-ground font-medium text-status-ink ring-status-line"
             : "bg-surface/70 text-muted ring-border/70 hover:text-foreground")
         }
       >

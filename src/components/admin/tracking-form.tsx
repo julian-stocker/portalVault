@@ -92,7 +92,7 @@ export function TrackingForm({
           }}
           maxLength={TRACKING_MAX_LENGTH}
           autoComplete="off"
-          className="min-h-11 rounded-sky-md bg-surface px-3 py-2 ring-1 ring-border/70 focus:ring-accent"
+          className="min-h-11 rounded-sky-md bg-surface px-3 py-2 ring-1 ring-border/70 focus-ring"
         />
         <span className="text-xs text-muted">{copy.trackingEditHint}</span>
       </label>

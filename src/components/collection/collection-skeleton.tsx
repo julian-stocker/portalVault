@@ -12,8 +12,10 @@
  * visible, and a phone screen holds about that many.
  */
 import { de } from "@/lib/i18n/de";
+import { SERIES_BARS } from "@/lib/ui/skeleton";
 
 const ROWS = Array.from({ length: 12 }, (_, index) => index);
+
 
 /** A soft bar standing in for a line of text. */
 function Bar({ className }: { className: string }) {
@@ -28,7 +30,7 @@ export function CollectionSkeleton() {
       aria-label={de.collection.loading}
     >
       {/* The vitrine panel: same ground, same gold frame, same height. */}
-      <section className="rounded-sky-lg bg-[radial-gradient(130%_130%_at_18%_-10%,#2a2551_0%,#161230_45%,#0d0a1e_100%)] px-5 py-5 shadow-raised ring-2 ring-accent/40 md:px-7 md:py-6">
+      <section className="rounded-sky-lg bg-[radial-gradient(130%_130%_at_18%_-10%,#2a2551_0%,#161230_45%,#0d0a1e_100%)] px-5 py-5 shadow-raised ring-2 ring-own-ink/40 md:px-7 md:py-6">
         <Bar className="h-3 w-24" />
         <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-4">
           <Bar className="h-10 w-32" />
@@ -42,8 +44,8 @@ export function CollectionSkeleton() {
       {/* Series bar, search, control row — the three things above the list. */}
       <div className="flex flex-col gap-3">
         <div className="flex gap-2 overflow-hidden">
-          {["w-16", "w-36", "w-24", "w-28", "w-28", "w-32"].map((width) => (
-            <Bar key={width} className={`h-9 shrink-0 ${width}`} />
+          {SERIES_BARS.map((bar) => (
+            <Bar key={bar.id} className={`h-9 shrink-0 ${bar.width}`} />
           ))}
         </div>
         <Bar className="h-11 w-full" />

@@ -160,7 +160,7 @@ function PendingDot() {
       aria-hidden="true"
       className={
         "pointer-events-none absolute -right-0.5 top-1/2 h-1.5 w-1.5 -translate-y-1/2 " +
-        "rounded-full bg-accent transition-opacity duration-150 md:-right-2.5 " +
+        "rounded-full bg-foreground transition-opacity duration-150 md:-right-2.5 " +
         (pending ? "animate-pulse opacity-100" : "opacity-0")
       }
     />
@@ -221,9 +221,13 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
         <span
           aria-hidden="true"
           className={
-            "absolute inset-x-3 top-0 h-0.5 rounded-full bg-accent " +
+            // Neutral since V3.1: where you are is not a state of the
+            // collection and not an offer. Near-white rather than tonal,
+            // because a 3 px line has to carry its own contrast — a fill
+            // token would vanish at that width.
+            "absolute inset-x-3 top-0 h-0.5 rounded-full bg-nav-active-ink " +
             "md:inset-x-0 md:top-auto md:-bottom-1 md:h-[3px] " +
-            "md:shadow-[0_0_12px_rgb(224_164_74/0.75)]"
+            "md:shadow-[0_0_12px_rgb(240_239_248/0.45)]"
           }
         />
       ) : null}
@@ -289,7 +293,7 @@ export function SiteNav({
         // V4 pulled the navigation over to the wordmark: it used to sit at
         // the far right of a 1152 px bar, which is a web app's layout, not a
         // masthead's. Now the two read as one lockup on the left.
-        "relative sticky top-0 z-30 border-b border-accent/50 bg-deep/80 backdrop-blur-md " +
+        "relative sticky top-0 z-30 border-b border-world-edge bg-deep/80 backdrop-blur-md " +
         "shadow-[0_8px_28px_rgb(0_0_0/0.4)] " +
         "md:flex md:items-center md:gap-8 md:px-6"
       }
@@ -304,7 +308,7 @@ export function SiteNav({
           struck plate rather than a rectangle with a border. */}
       <span
         aria-hidden="true"
-        className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-accent/25"
+        className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-world-sheen"
       />
       <div className="relative flex flex-1 items-center gap-2 px-4 py-3 md:flex-none md:shrink-0 md:px-0 md:py-4">
         <Link href="/" className="flex items-center" aria-label={de.app.name}>
@@ -312,10 +316,10 @@ export function SiteNav({
         </Link>
         {/* Quiet, and always there while it applies (ADR-0042): the mode has
             to be recognisable without turning the site into a back office.
-            One gold chip beside the wordmark, in the same metal as
-            everything else. */}
+            Tonal since V3.1: being an administrator is a UI state, and the
+            gold it used to borrow belongs to the collection. */}
         {admin ? (
-          <span className="rounded-full bg-accent-subtle px-2 py-0.5 text-[11px] leading-4 font-medium text-accent ring-1 ring-accent/50">
+          <span className="rounded-full bg-status-ground px-2 py-0.5 text-[11px] leading-4 font-medium text-status-ink ring-1 ring-status-line">
             {de.admin.modeBadge}
           </span>
         ) : null}

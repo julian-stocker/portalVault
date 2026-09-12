@@ -25,45 +25,24 @@
  */
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
 import { InlineName } from "@/components/admin/inline-name";
 import { FigureCard } from "@/components/catalog/figure-card";
-import { ShopAction } from "@/components/shop/shop-action";
-import { ACTION_LINK } from "@/components/ui/action";
+import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
-import { imageSrc } from "@/lib/catalog/image";
 import type { Offer } from "@/lib/shop/offer";
 import { de } from "@/lib/i18n/de";
 
-/** An outlined "i". Decorative; the label beside it carries the meaning. */
-function InfoGlyph() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 16 16"
-      className="h-3 w-3 shrink-0"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-    >
-      <circle cx="8" cy="8" r="6.25" />
-      <path d="M8 7.25v4" />
-      <path d="M8 4.75h.01" />
-    </svg>
-  );
-}
 
 export function CatalogCard({
   figure,
   initialCollected,
   onCollectedChange,
   signInHref,
-  highlighted,
+  highlighted = false,
   admin = false,
   visible = true,
   onVisibilityChange,
@@ -79,7 +58,8 @@ export function CatalogCard({
   onCollectedChange?: (skyId: string, collected: boolean) => void;
   /** null when somebody is signed in; otherwise where the card leads instead. */
   signInHref: string | null;
-  highlighted: boolean;
+  /** A deep link landed on this card. Passed straight through. */
+  highlighted?: boolean;
   /** Administrator mode: editorial actions instead of collection actions. */
   admin?: boolean;
   /** Editorial visibility, only meaningful in administrator mode. */
@@ -128,26 +108,6 @@ export function CatalogCard({
     });
   }
 
-  /**
-   * The buy action, or nothing at all (ADR-0043, V7).
-   *
-   * Rendered for everyone who is not an administrator, signed in or not — a
-   * cart needs no account. Deliberately independent of ownership: somebody
-   * who owns a figure may want a second one, and hiding the offer on owned
-   * cards would be the shop guessing at that.
-   *
-   * `null` when there is nothing to buy, and null is simply absent from the
-   * footer row — no placeholder, no disabled button, no reserved gap.
-   */
-  const shop =
-    offers.length > 0 ? (
-      <ShopAction
-        offers={offers}
-        skyId={figure.skyId}
-        name={figure.displayName}
-        imageSrc={imageSrc(figure)}
-      />
-    ) : null;
 
   // The administrator's card. Same FigureCard, same layout, same everything
   // that shows a figure — a different set of things to do with it. No buy
@@ -158,7 +118,10 @@ export function CatalogCard({
       <FigureCard
         figure={figure}
         // No ownership frame and no crown: the business account manages the
-        // catalog, it does not collect from it (ADR-0042).
+        // catalog, it does not collect from it (ADR-0042). The VARIANT SEAL
+        // does appear — it is a property of the figure, not of a viewer, and
+        // the operator needs to tell a Legendary from its base figure more
+        // than anyone (V3.2).
         ownership="catalog"
         highlighted={highlighted}
         showSeries={false}
@@ -178,7 +141,7 @@ export function CatalogCard({
             override={figure.displayNameOverride}
           />
         }
-        footer={
+        trade={
           <AdminCardActions
             skyId={figure.skyId}
             visible={visible}
@@ -190,41 +153,33 @@ export function CatalogCard({
   }
 
   /**
-   * The card's footer, and the whole of it (V9.1).
+   * The trade row, and the whole of it (V3.2).
    *
-   * One row: Info at the left end, the buy action at the right. V9 kept them
-   * apart — a 40 px action row of its own, then a centred Info link — which
-   * cost every card 40 px and read as two separate decisions when they are
-   * simply the two things a card offers.
+   * The silver plate is painted into both templates, so it is always there
+   * and `OfferLink` decides what stands on it: an offer, or the quiet
+   * sentence that there is none.
    *
-   * The row is rendered unconditionally and brings its own `min-h-10`, so a
-   * card that can be bought and one that cannot are exactly the same height.
-   * There is no `offer ? … : …` anywhere in the geometry: `shop` is either an
-   * element or nothing, and `justify-between` puts whatever is there in its
-   * place. Info never moves.
+   * The "Info" link is gone. The card body already leads to the detail page,
+   * and a second link to the same destination was the one element on the tile
+   * that said nothing. Whatever the visitor taps — picture, name, offer —
+   * they arrive at the figure, and the offer row arrives at its offers.
    */
-  const footer = (
-    <>
-      <div className="flex min-h-10 items-center justify-between gap-2">
-        <Link
-          href={`/skylanders/${figure.slug}`}
-          aria-label={de.catalog.infoFor(figure.displayName)}
-          className={ACTION_LINK}
-        >
-          <InfoGlyph />
-          {/* Truncates rather than overflowing when the pill beside it is
-              wide; the accessible name on the link is unaffected. */}
-          <span className="truncate">{de.catalog.info}</span>
-        </Link>
-        {shop}
-      </div>
-      {failed ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
-          {de.catalog.collectFailed}
-        </p>
-      ) : null}
-    </>
-  );
+  const trade = <OfferLink offers={offers} slug={figure.slug} name={figure.displayName} />;
+
+  /**
+   * A collect that did not stick has to say so on the card it failed on.
+   *
+   * Over the foot of the window, where it covers artwork rather than
+   * information — and where it cannot change the card's height.
+   */
+  const notice = failed ? (
+    <span
+      role="alert"
+      className="absolute inset-x-1 bottom-1 rounded bg-danger/90 px-1 py-0.5 text-center text-[9px] leading-tight font-semibold text-[#2a0f0d]"
+    >
+      {de.catalog.collectFailed}
+    </span>
+  ) : null;
 
   // Signed out the body is a link rather than a toggle: there is nothing to
   // toggle yet, and the same tap should lead where the visitor needs to go.
@@ -236,7 +191,8 @@ export function CatalogCard({
         href={signInHref}
         highlighted={highlighted}
         showSeries={showSeries}
-        footer={footer}
+        trade={trade}
+        notice={notice}
       />
     );
   }
@@ -250,7 +206,8 @@ export function CatalogCard({
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}
       showSeries={showSeries}
-      footer={footer}
+      trade={trade}
+      notice={notice}
     />
   );
 }

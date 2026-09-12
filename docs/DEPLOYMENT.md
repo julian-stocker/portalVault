@@ -153,7 +153,7 @@ Cache-Header für die Figurenbilder.
 
 ## Was nicht ausgeliefert wird
 
-`artwork/` (Quellbilder) ist in `.gitignore` und damit nicht im Repository —
+`designs/artwork/` und `designs/cards/` (Quellbilder und Card-Templates) sind in `.gitignore` und damit nicht im Repository —
 ausgeliefert sind nur die Derivate unter `public/images/brand/`.
 `../webpage`, `skylanders.xlsx`, Lager-, Order- und EÜR-Daten sind weder im
 Repository noch in der Datenbank. Vollständige Liste: `docs/SECURITY.md`.

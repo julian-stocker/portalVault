@@ -52,7 +52,7 @@ export function OwnershipFilter({
               "flex min-h-10 shrink-0 items-center rounded-full px-3 text-[13px] " +
               "whitespace-nowrap transition-colors " +
               (isActive
-                ? "bg-accent/15 font-medium text-accent ring-1 ring-accent/50"
+                ? "bg-status-ground font-medium text-status-ink ring-1 ring-status-line"
                 : "bg-deep/50 text-muted ring-1 ring-border/50 hover:text-foreground hover:ring-border")
             }
           >

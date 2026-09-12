@@ -225,7 +225,7 @@ export function CollectionView({
         // so marking every card would say nothing and would water down what
         // the gold means in the catalog (ADR-0038). The card keeps its
         // default `ownership="showcase"`.
-        footer={
+        trade={
           <>
             {row.quantity === 0 && row.initialQuantity > 0 ? (
               <p className="mb-1 text-center text-xs text-muted">{de.collection.removed}</p>
