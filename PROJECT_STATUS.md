@@ -24,6 +24,18 @@ Die vollständige Änderungshistorie liegt in Git.
 > Offene Themen werden gesammelt auf Staging bearbeitet, aber **fachlich getrennt und in
 > kleinen, nachvollziehbaren Änderungen** — eine Sache, eine Migration, ein Commit.
 >
+> **Laufender Block: Plattform und Verkäufer trennen (ADR-0064), M0–M2.**
+>
+> | Phase | Gegenstand | Migration | Stand |
+> |---|---|---|---|
+> | **M0** | ADR-0064, ADR-0065, Nachträge zu ADR-0021/0059, Sprachregelung | — | **abgeschlossen** |
+> | **M1** | Bewegungsvokabular: neue Verkäufe heißen `sale` | `0025` | offen |
+> | **M2** | `sellers` + `platform_settings`, `active_seller()` | `0026` | offen |
+>
+> SkyIsles ist die **Plattform**, **yulez.collectibles** der erste und vorerst einzige
+> gewerbliche Verkäufer auf SkyIsles. Die Runtime bleibt bewusst Single-Seller; die Liste
+> dessen, was ausdrücklich **nicht** gebaut wird, steht in ADR-0064.
+>
 > **Offen, jeweils für sich:**
 >
 > 1. **`client_hash`** wird bei Zahlung nicht geleert, obwohl der Spaltenkommentar aus `0010` es

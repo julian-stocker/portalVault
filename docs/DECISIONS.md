@@ -715,6 +715,15 @@ Moment zur Plattform, in dem sie neue Figuren in der Hand halten. **Daraus folgt
 Anforderung, keine Marketing-Notiz:** Mehrere frisch gekaufte Figuren müssen sich **mobil sehr
 schnell** erfassen lassen. Das begründet den Owned-Toggle als Anforderung an das Katalog-UI.
 
+**Nachtrag (2026-09-12, ADR-0064).** Der Stopp gilt unverändert, einschließlich des Satzes
+„auch nicht konzeptionell, auch nicht ‚nur das Datenmodell'". Präzisiert wird allein, dass der
+eine Verkäufer, den der First-Party-Shop ohnehin voraussetzt, ab jetzt **benannt** ist:
+SkyIsles ist die Plattform, **yulez.collectibles** ist der erste und vorerst einzige
+gewerbliche Verkäufer auf SkyIsles. Es entsteht dadurch keine Marketplace-Funktion und kein
+Marketplace-Datenmodell — ADR-0064 führt die Liste dessen, was ausdrücklich nicht gebaut wird,
+und sechs prüfbare Schranken. Die Bedingung für einen zweiten Verkäufer bleibt die Bedingung
+dieses ADR.
+
 ---
 
 ## ADR-0022 — Free und Premium: Richtung festgelegt, Grenze und Preis offen
@@ -4555,6 +4564,23 @@ eine Konstante im Code (unveränderlich ohne Deployment, und genau die Hardcodie
 Felder später „herausfiltern" (ein Filter, der nach dem Feld kommt, vergisst irgendwann eines) ·
 alle künftigen Felder gleich mitanlegen.
 
+**Nachtrag (2026-09-12, ADR-0064).** Die Frage „wer ist SkyIsles" hat ab jetzt zwei Antworten.
+Der Legal-Block erweitert deshalb **`sellers`**, nicht `business_settings`: Betreibername,
+ladungsfähige Anschrift und steuerliche Angaben gehören auf Rechnung und Widerrufsbelehrung und
+damit dem Verkäufer, nicht der Plattform. `business_settings` wird in `0026` zu
+`platform_settings` und trägt nur noch plattformeigene Angaben. Alles andere aus diesem ADR gilt
+unverändert für beide Entitäten: drei Sensitivitätsstufen mit der strengen als Default · der
+einzige Weg nach außen ist eine Projektion, die ihre Spalten **wörtlich** aufzählt · ein
+schmaler Schreiber je Faktengruppe · keine leere Spalte ohne Leser · E-Mail-Adressen
+autorisieren nie.
+
+Eine benannte Ausnahme von „keine Unternehmensangabe steht je in Quelltext": `0026` legt
+`sellers.display_name` mit dem Wert `yulez.collectibles` an. Das ist ein öffentlich geführter
+Handelsname, kein Geheimnis und kein Zugangsmerkmal, und ohne ihn wäre der Datensatz eine
+namenlose Zeile — genau das leere Versprechen, das dieses ADR vermeiden will. Kontaktadresse
+und Antwortadresse werden weiterhin **nicht** in der Migration gesetzt, sondern aus dem
+Bestand kopiert.
+
 ---
 
 ## ADR-0060 — Commerce hat einen Modus; „Test" ist eine Eigenschaft der Bestellung, keine Umgebung
@@ -4987,3 +5013,174 @@ Altersfilter versteckte sie hinter einer zweiten Regel, die mit dem Zeitplan des
 Zahlung unsichtbar — der eigentliche Schaden) · `attention <= 3` (die Liste wäre die Liste aller
 Bestellungen und damit kein Filter) · ein Altersfilter auf `pending` · den Zähler getrennt vom
 Filter definieren (das war die Ursache).
+
+---
+
+## ADR-0064 — SkyIsles ist die Plattform, yulez.collectibles ist der Verkäufer
+
+**Status:** ANGENOMMEN (2026-09-12) · M0, reine Dokumentation · umgesetzt in `0026` (M2)
+
+**Entscheidung.** SkyIsles ist ab jetzt konzeptionell eine **Collector Platform mit
+Marketplace-Layer**, nicht mehr „ein Shop mit Sammlung". Daraus folgen genau zwei Identitäten,
+und sie werden ab jetzt nie wieder in einem Wort zusammengefasst:
+
+| | |
+|---|---|
+| **SkyIsles** | die **Plattform**. Betreiberin des Katalogs, der Konten, der Sammlung, des Checkouts und der Zahlungsabwicklung. |
+| **yulez.collectibles** | der **erste und vorerst einzige gewerbliche Verkäufer auf SkyIsles**. Verkäufer der Ware, Vertragspartner des Kunden, Rechnungsaussteller. |
+
+Beides gehört heute derselben Person. Das ist der Grund, warum die Trennung jetzt billig ist —
+und kein Grund, sie zu unterlassen: Es sind trotzdem zwei Rechtssubjekte mit verschiedenen
+Pflichten.
+
+### Die Runtime bleibt bewusst Single-Seller
+
+**Die Plattform wird ab jetzt konzeptionell seller-fähig gedacht, aber die laufende
+Implementierung bleibt absichtlich Single-Seller, bis ein zweiter realer Verkäufer existiert.**
+
+Das ist keine Zwischenstufe auf dem Weg zu einem Marketplace und kein „erster Schritt". Es ist
+ein Zustand, der so lange gilt, bis eine neue Entscheidung ihn ablöst. Bis dahin gilt
+ausnahmslos:
+
+- **kein `seller_id`** — auf keiner Tabelle, in keiner Migration
+- **keine sellerbezogenen Inventory-Strukturen** — `shop_inventory` behält `unique (sky_id, condition)`
+- **keine Multi-Seller-Bestellungen** — eine Bestellung hat implizit genau einen Verkäufer
+- **keine Seller-RLS** — keine Policy kennt einen Verkäufer
+- **kein Seller-Login** — Verkäufer sein ist ein Datensatz, keine Berechtigung
+- **kein Seller-Onboarding** — keine Selbstregistrierung, kein Antrag, kein Freigabeprozess
+- **kein Stripe Connect**
+- **keine Provisionen, keine Payouts**
+- **keine privaten Verkäufer**
+- **keine Marketplace-Fan-out-Logik** — kein Angebotsvergleich, keine Verkäuferauswahl, keine
+  Warenkorbgruppierung nach Verkäufer
+
+### Was stattdessen gebaut wird, und warum überhaupt etwas
+
+Drei Dinge, und alle drei aus demselben Grund: Sie sind später entweder unmöglich oder
+unverhältnismäßig teuer.
+
+1. **Das Bewegungsvokabular** (M1, ADR-0065). `inventory_movements.reason` enthält
+   `sale_skyisles` — ein Markenname als Domänenbegriff. `reason` steht im
+   `is not distinct from`-Tupel von `prevent_inventory_movement_change()`: **Historie kann
+   niemals umbenannt werden.** Der einzige unumkehrbare Posten, und er wächst mit jedem Verkauf.
+
+2. **Plattform- und Verkäuferidentität** (M2). `business_settings` beantwortet heute „wer
+   SkyIsles ist" und liefert zugleich die Antwortadresse in *Verkäufer*mails. ADR-0059 plant
+   dorthin „Betreibername, ladungsfähige Anschrift, steuerliche Angaben" — unter dieser
+   Entscheidung ist **keine** davon eine Plattformangabe. Solange die Tabelle zwei Spalten und
+   eine fast leere Zeile hat, ist die Trennung eine Migration; sobald Impressum, AGB und
+   Widerrufsbelehrung daraus lesen, ist sie eine Änderung an veröffentlichten Rechtstexten.
+
+3. **Die Semantik der FigureCard** (mit UI/UX V3, nicht als eigener Schritt). „Angebote ab
+   4,24 €" statt „SkyIsles 4,24 €" — der Preis gehört einem Angebot, nicht der Plattform.
+
+**Der Beleg, dass die Trennung bereits fällig ist:** `orders.tax_regime` friert seit `0011` bei
+jeder Bestellung `small_business_19` ein — § 19 UStG. Das ist weder Plattform- noch
+Kundeneigenschaft, sondern der Steuerstatus **des Verkäufers**, dauerhaft auf die Bestellung
+geschrieben. Das Datenmodell kennt den Verkäufer längst; es hat nur keinen Ort für ihn.
+
+### Sechs Schranken, jede prüfbar
+
+Vorsätze halten eine Sitzung. Diese Sätze sind per Test oder per Diff nachweisbar:
+
+1. **Das Wort `seller_id` kommt in keiner Migration vor.** Als Test, nicht als Absicht: ein
+   `grep` über `supabase/migrations/`, der bei jedem Treffer fehlschlägt.
+2. **Höchstens ein aktiver Verkäufer, von der Datenbank erzwungen.** Ein partieller Unique-Index,
+   der beim Übergang zu mehreren Verkäufern *gelöscht* wird — keine Struktur, die sich ändert.
+3. **M2 fasst keine Commerce-Funktion an.** Nicht `create_order()`, `authorize_order_payment()`,
+   `confirm_order_payment()`, `shop_offers()`, `convert_order_reservations()`,
+   `merge_guest_cart()`. Taucht eine im Diff auf, ist die Phase entgleist.
+4. **Verkäufer sein ist keine Berechtigung.** Keine Tabelle verbindet ein Konto mit einem
+   Verkäufer. Autorisiert wird weiter ausschließlich über `shop_admins.user_id` und
+   `is_shop_admin()` (ADR-0032, ADR-0059).
+5. **`active_seller()` ist der einzige Leseweg.** Kein anderer Codepfad liest direkt aus
+   `sellers`. Die spätere Multi-Seller-Frage hat damit genau einen Ort.
+6. **Kein neues Feld ohne Leser** — ADR-0059 wörtlich: *„Eine leere Spalte ist ein Versprechen,
+   das niemand geprüft hat."*
+
+### Verhältnis zu ADR-0021
+
+**ADR-0021 wird nicht aufgehoben.** Der Marketplace-Stopp gilt unverändert, einschließlich des
+Satzes *„auch nicht konzeptionell, auch nicht ‚nur das Datenmodell'"* — und die Liste oben ist
+seine Umsetzung, nicht seine Ausnahme. Präzisiert wird allein, dass der eine Verkäufer, den
+ADR-0032 ff. ohnehin voraussetzen, ab jetzt **benannt** ist statt mit der Plattform
+verschmolzen. Es entsteht keine Marketplace-Funktion und kein Marketplace-Datenmodell.
+
+Die Bedingung aus ADR-0021 bleibt die Bedingung: Über einen zweiten Verkäufer wird erst
+entschieden, wenn PortalVault nachweislich Nutzer gewinnt.
+
+**Konsequenzen.**
+
+- `CLAUDE.md`, `docs/ROADMAP.md` und `docs/ARCHITECTURE.md` führen die zwei Identitäten getrennt.
+- Neue Oberflächentexte sprechen vom **Angebot** oder vom **Verkäufer**, nicht von „SkyIsles",
+  wo der Verkäufer gemeint ist. Bestehende Texte werden nicht flächendeckend umgeschrieben —
+  sie ändern sich dort, wo ohnehin gearbeitet wird.
+- Die Reihenfolge ist M0 → M1 (`0025`) → M2 (`0026`), jede Phase ein eigener Commit, jede zuerst
+  auf Staging.
+
+**Verworfen:** einen Multi-Seller-Marketplace bauen (ADR-0021) · nur sprachlich trennen und die
+Daten zusammenlassen (der Legal-Block macht das später teuer) · `sellers` mit allen künftigen
+Feldern anlegen (ADR-0059) · eine Verkäuferrolle einführen (ADR-0032) · den heutigen Verkäufer
+als Zeile in `shop_admins` betrachten (eine Berechtigung ist kein Rechtssubjekt).
+
+---
+
+## ADR-0065 — Der Grund einer Bestandsbewegung benennt das Ereignis, nie den Akteur
+
+**Status:** ANGENOMMEN (2026-09-12) · umgesetzt in Migration `0025` (M1)
+
+**Kontext.** `inventory_movements.reason` kennt seit `0003` unter anderem `sale_skyisles`
+(*„sold through the shop"*) und `sale_external` (*„sold elsewhere, eBay included"*). Der erste
+Wert trägt einen Markennamen. Unter ADR-0064 ist er falsch: Verkauft später ein anderer
+Händler über SkyIsles, verkauft nicht SkyIsles.
+
+**Und der Name ist endgültig.** `reason` steht im eingefrorenen Tupel von
+`prevent_inventory_movement_change()`:
+
+```sql
+and (new.id, new.inventory_id, new.delta, new.reason, …)
+    is not distinct from
+    (old.id, old.inventory_id, old.delta, old.reason, …)
+```
+
+Kein `update` kommt daran vorbei, auch die Service Role nicht.
+
+**Entscheidung: der neue Wert heißt `sale`.**
+
+Die Achse, die `sale_skyisles` von `sale_external` trennt, ist der **Kanal** — hier verkauft
+oder woanders —, nicht der Verkäufer: In beiden Fällen ist der Verkäufer dieselbe Person. Jeder
+Name, der einen Akteur benennt, trägt die Unterscheidung auf der falschen Achse ein und ist in
+dem Moment falsch, in dem ein zweiter Akteur existiert.
+
+`sale` behauptet genau eine Sache, und die bleibt für immer wahr: Es war ein Verkauf. Der Kanal
+ist ohnehin aus den Daten ableitbar — ein `sale` hat eine Bestellung hinter sich
+(`order_lines.inventory_id`), ein `sale_external` hat keine. Ein Name muss nicht wiederholen,
+was die Beziehung schon sagt. Und der Akteur bleibt frei: Käme je eine Verkäuferzuordnung,
+gehört sie in eine eigene Spalte, nicht in den Grund.
+
+Die deutsche Oberfläche nimmt das vorweg: `sale_external` heißt dort **„Externer Verkauf"**.
+Das Gegenstück heißt **„Verkauf"**.
+
+**Das Vokabular wächst, es ersetzt nicht.**
+
+- **`sale_skyisles` bleibt dauerhaft im CHECK.** Entfernt man den Wert, scheitert schon das
+  `add constraint` an den vorhandenen Zeilen — und ändern lassen die sich nie.
+- **Keine Backfill-Aktion, kein `update` auf historischen Bewegungen.** Historie sagt, was damals
+  war, und damals hieß es so.
+- `sale` bekommt dieselbe Richtungsregel wie `sale_skyisles`: `delta < 0`.
+- `convert_order_reservations()` schreibt ab `0025` nur noch `sale`. Es ist der einzige Schreiber
+  im ganzen System.
+
+**Konsequenzen.**
+
+- Die Adminliste (`MOVEMENT_REASONS`) bietet neue Buchungen nur noch als `sale` an; die
+  Übersetzungstabelle behält `sale_skyisles` als **„Verkauf SkyIsles (historisch)"**, sonst zeigt
+  die Bewegungsliste für alte Zeilen einen leeren Grund.
+- Jede Abfrage, die `reason = 'sale_skyisles'` als „Shopverkauf" liest, übersieht ab `0025` alle
+  neuen. Betroffen sind ausschließlich Testdateien und Prüfprotokolle; sie werden mitgeführt.
+
+**Verworfen:** `sale_platform` (die Plattform verkauft nicht) · `seller_sale` (benennt einen
+Akteur, den *jede* Verkaufsbewegung hat, unterscheidet also nichts) · `marketplace_sale` (setzt
+einen Marketplace voraus, den es nicht gibt) · `sale_onsite` (liest sich im Handel als
+Ladengeschäft) · `sale_internal` (heißt in der Buchhaltung konzerninterne Umbuchung — und in der
+Buchhaltung liegt dieses Journal) · `sale_skyisles` umbenennen (technisch unmöglich).

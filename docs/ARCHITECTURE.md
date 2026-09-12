@@ -7,6 +7,36 @@ in `docs/DECISIONS.md` als Entscheidung geführt.
 
 ---
 
+## 0. Zwei Identitäten, die nie zusammenfallen (ADR-0064)
+
+| | |
+|---|---|
+| **SkyIsles** | die **Plattform**. Betreiberin von Katalog, Konten, Sammlung, Checkout und Zahlungsabwicklung. Nicht Verkäuferin der Ware. |
+| **yulez.collectibles** | der **erste und vorerst einzige gewerbliche Verkäufer auf SkyIsles**. Vertragspartner des Kunden, Rechnungsaussteller, Versender. |
+
+Beides gehört derselben Person — es sind trotzdem zwei Rechtssubjekte mit verschiedenen
+Pflichten. Wo im Folgenden „SkyIsles" steht, ist die Plattform gemeint.
+
+**Die Plattform wird konzeptionell seller-fähig gedacht; die laufende Implementierung bleibt
+bewusst Single-Seller, bis ein zweiter realer Verkäufer existiert.** Kein `seller_id`, keine
+sellerbezogenen Inventory-Strukturen, keine Multi-Seller-Bestellungen, keine Seller-RLS, kein
+Seller-Login, kein Seller-Onboarding, kein Stripe Connect, keine Provisionen oder Payouts, keine
+privaten Verkäufer, keine Marketplace-Fan-out-Logik. Der Marketplace-Stopp aus ADR-0021 gilt
+unverändert.
+
+**Begriffe, und was sie nicht bedeuten.**
+
+| Begriff | Bedeutet | Bedeutet **nicht** |
+|---|---|---|
+| **Plattform** | SkyIsles: Katalog, Konten, Sammlung, Checkout, Zahlung | nicht den Verkäufer der Ware |
+| **Plattformbetreiber** | das Rechtssubjekt hinter SkyIsles | nicht den Rechnungsaussteller |
+| **Verkäufer** | wer die Ware besitzt, verkauft, versendet und in Rechnung stellt | keine Rolle, keine Berechtigung, kein Login |
+| **Angebot** | eine kaufbare Position (`shop_offers()`) | keine Zuordnung zu einem benannten Verkäufer |
+| **Bestand** | `shop_inventory`, eine Position je `(sky_id, condition)` | keine Position je Verkäufer |
+| **Admin** | `shop_admins` — wer redaktionell und operativ handeln darf | kein Verkäufer und kein Plattformbetreiber |
+
+---
+
 ## 1. Überblick
 
 PortalVault ist eine Webanwendung mit drei Verantwortungsbereichen:

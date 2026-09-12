@@ -15,9 +15,19 @@ schneller Owned/Not-Owned-Toggle, Fortschritt. **Kein Marketplace** (ADR-0021).
 Handel, Tausch, Angebote und Zahlungen werden erst wieder bewertet, wenn PortalVault
 nachweislich Nutzer gewinnt. Produktvision und -prinzipien: `docs/ROADMAP.md`.
 
-Der **First-Party-Shop** (ein Verkäufer: der Betreiber) ist **teilweise gebaut** — ADR-0032,
-ADR-0033, ADR-0037, ADR-0043, ADR-0044. Er ist kein Marketplace; der Marketplace-Stopp aus
-ADR-0021 gilt unverändert.
+**Zwei Identitäten, die nie zusammenfallen (ADR-0064):** **SkyIsles** ist die **Plattform** —
+Katalog, Konten, Sammlung, Checkout, Zahlung. **yulez.collectibles** ist der **erste und vorerst
+einzige gewerbliche Verkäufer auf SkyIsles** — Vertragspartner des Kunden, Rechnungsaussteller,
+Versender. Beides gehört derselben Person; es sind trotzdem zwei Rechtssubjekte.
+
+Der **Shop** (ein Verkäufer) ist **teilweise gebaut** — ADR-0032, ADR-0033, ADR-0037, ADR-0043,
+ADR-0044. Die Plattform wird konzeptionell seller-fähig gedacht, **die laufende Implementierung
+bleibt aber bewusst Single-Seller**, bis ein zweiter realer Verkäufer existiert. Das heißt
+ausnahmslos: kein `seller_id` · keine sellerbezogenen Inventory-Strukturen · keine
+Multi-Seller-Bestellungen · keine Seller-RLS · kein Seller-Login · kein Seller-Onboarding ·
+kein Stripe Connect · keine Provisionen oder Payouts · keine privaten Verkäufer · keine
+Marketplace-Fan-out-Logik. **Der Marketplace-Stopp aus ADR-0021 gilt unverändert** — auch nicht
+konzeptionell, auch nicht „nur das Datenmodell".
 
 **Vorhanden:** `shop_admins` + `is_shop_admin()`, `shop_inventory`, `inventory_movements`,
 `/admin/inventory`, das öffentliche Angebot `shop_offers()` und ein lokaler Warenkorb.

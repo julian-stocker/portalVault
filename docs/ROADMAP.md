@@ -455,6 +455,16 @@ beim Marketplace — nachweisliche Nutzung der Sammlungsplattform (ADR-0021).
 **Marketplace, Trading, Seller-Funktionen, Payments, Versand, Bewertungen und Disputes sind
 nicht Bestandteil von PortalVault V1** (ADR-0021).
 
+**Präzisierung 2026-09-12 (ADR-0064).** SkyIsles ist die **Plattform**; **yulez.collectibles**
+ist der erste und vorerst einzige gewerbliche Verkäufer auf SkyIsles. Die Plattform wird ab
+jetzt konzeptionell seller-fähig gedacht — die laufende Implementierung bleibt aber bewusst
+**Single-Seller**, bis ein zweiter realer Verkäufer existiert. Das ist keine Vorstufe zum
+Marketplace: Es entsteht **kein `seller_id`**, keine sellerbezogene Inventory-Struktur, keine
+Multi-Seller-Bestellung, keine Seller-RLS, kein Seller-Login, kein Seller-Onboarding, kein
+Stripe Connect, keine Provision, kein Payout, kein privater Verkäufer und keine
+Fan-out-Logik. Was stattdessen entsteht, sind zwei Namen und eine Identitätstabelle mit genau
+einer Zeile — weil beides später unmöglich oder unverhältnismäßig teuer wäre.
+
 **Diese Richtung wird erst dann erneut bewertet, wenn PortalVault nachweislich echte Nutzer
 gewinnt und die Sammlungsplattform angenommen wird.** Das ist bewusst eine Bedingung und kein
 Datum: „später" lädt dazu ein, doch schon mal etwas vorzubereiten. Vor diesem Nachweis wird an
