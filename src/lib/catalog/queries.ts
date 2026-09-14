@@ -13,6 +13,8 @@
  *
  * The browser never talks to the database — it receives the result (ADR-0026).
  */
+import { cache } from "react";
+
 import type { Character, Element } from "@/lib/catalog/character";
 import { asElement } from "@/lib/catalog/element";
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
@@ -53,7 +55,30 @@ type Lookups = {
   categories: Map<number, { position: number; name: string; catalogGroup: CatalogGroup | null }>;
 };
 
-async function loadLookups(): Promise<Lookups> {
+/**
+ * The two lookup tables every catalog read needs: the games and the
+ * categories. Together about sixteen rows, changed only when an administrator
+ * edits a category.
+ *
+ * Memoised per request. One render of /collection used to run this four
+ * times — `fetchCollection` and, inside it, `fetchNameIndex` both ask for it,
+ * and `countCollectibleFigures` and `countCollectibleFiguresBySeries` each
+ * await it before their own query. That was eight round trips for sixteen
+ * rows, and the last two lengthened their branch instead of running alongside
+ * it.
+ *
+ * `cache` is React's per-request memo, the same one `currentUser` and
+ * `isAdmin` use. It is not a data cache: it holds nothing between requests,
+ * nothing between users, and nothing across a `revalidatePath`. The next
+ * request reads both tables again, so an edited category shows up on the very
+ * next render — which is why `setCatalogGroup` revalidates `/` and
+ * `/collection`.
+ *
+ * Nothing writes these tables and then reads them back inside one request:
+ * `admin_set_catalog_group` is the only writer, and it lives in
+ * `lib/admin/actions.ts`, which calls none of the readers above.
+ */
+const loadLookups = cache(async (): Promise<Lookups> => {
   const supabase = await createClient();
   const [seriesResult, categoryResult] = await Promise.all([
     supabase.from("series").select("code, label, position"),
@@ -83,7 +108,7 @@ async function loadLookups(): Promise<Lookups> {
       ]),
     ),
   };
-}
+});
 
 /**
  * numeric(10,2) arrives as a string over the wire. Parsing it here keeps the

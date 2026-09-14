@@ -165,6 +165,8 @@ export function CollectionTable({
                 <td className="py-2 pr-4">
                   <Link
                     href={`/skylanders/${row.figure.slug}`}
+                    /* Not prefetched — see the note on the list below. */
+                    prefetch={false}
                     className="font-medium hover:text-own-ink"
                   >
                     {row.figure.displayName}
@@ -209,6 +211,21 @@ export function CollectionTable({
                 <div className="flex items-baseline justify-between gap-3">
                   <Link
                     href={`/skylanders/${row.figure.slug}`}
+                    /*
+                     * Not prefetched (V3.6, A/B).
+                     *
+                     * The table is this page's default view, and it holds one
+                     * row per owned figure — hundreds of them. Every row name
+                     * is a link to a dynamic route, and Next prefetches each
+                     * one as it scrolls into view; each of those requests
+                     * passes through `src/proxy.ts` and validates the session
+                     * against the auth server first. Scrolling a collection
+                     * was therefore a round trip per row.
+                     *
+                     * Only the figure links. The page's own navigation is
+                     * untouched.
+                     */
+                    prefetch={false}
                     className="min-w-0 truncate text-sm font-medium"
                   >
                     {row.figure.displayName}

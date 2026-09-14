@@ -351,7 +351,25 @@ export function FigureCard({
           </span>
         </button>
       ) : (
-        <Link href={href ?? `/skylanders/${figure.slug}`} className={bodyClass}>
+        <Link
+          href={href ?? `/skylanders/${figure.slug}`}
+          /*
+           * The figure's own detail page is not prefetched (V3.6, A/B).
+           *
+           * This branch serves two different cards. The collection's showcase
+           * passes no `href`, so every visible card falls back to its detail
+           * page — one dynamic route per card, each costing a proxy round
+           * trip through the auth server once it scrolls into view. A signed
+           * out catalog card passes `signInHref` instead, which is a single
+           * destination shared by every card on the page and stays on Next's
+           * default.
+           *
+           * Hence the condition rather than a flat `false`: what is being
+           * withdrawn is the per-figure prefetch, not prefetching.
+           */
+          prefetch={href ? undefined : false}
+          className={bodyClass}
+        >
           {body}
           {owned ? <span className="sr-only">{de.catalog.collectedBadge}</span> : null}
         </Link>

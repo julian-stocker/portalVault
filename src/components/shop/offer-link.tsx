@@ -79,6 +79,22 @@ export function OfferLink({
   return (
     <Link
       href={`/skylanders/${slug}#angebote`}
+      /*
+       * Not prefetched (V3.6, A/B).
+       *
+       * One of these stands on every card that has an offer, so a screen of
+       * catalog is a screen of links to dynamic routes. Next prefetches a
+       * link as it enters the viewport, every one of those requests passes
+       * through `src/proxy.ts`, and the proxy validates the session against
+       * the auth server before it knows the request is a prefetch nobody
+       * asked for. Scrolling the catalog therefore bought a round trip per
+       * offer — for pages most visitors never open.
+       *
+       * The navigation between the main sections keeps its prefetch: that is
+       * where someone actually goes next, and it is a fixed handful of links
+       * rather than one per card.
+       */
+      prefetch={false}
       aria-label={de.shop.offersFor(name)}
       className={
         `focus-ring group/offer flex h-full w-full items-center justify-center gap-1 ` +
