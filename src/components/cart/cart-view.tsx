@@ -27,7 +27,7 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { conditionLabel } from "@/lib/shop/condition";
-import { ACTION_NEUTRAL, ACTION_TRADE } from "@/components/ui/action";
+import { ACTION_COMMERCE_BLOCK, ACTION_NEUTRAL, COMMERCE_SURFACE } from "@/components/ui/action";
 import {
   cartTotal,
   keyOf,
@@ -245,8 +245,14 @@ export function CartView({
 
         {/* The one action worth taking here. Following it holds no stock:
             the cart stays non-binding until the checkout is submitted
-            (ADR-0050). */}
-        <Link href="/checkout" className={ACTION_TRADE}>
+            (ADR-0050).
+
+            Amber, not silver. Silver is what an offer is made of — a price, a
+            condition, the fact that something can be had. This is the step
+            somebody takes towards paying, which is the one thing the commerce
+            role exists to mark (V3.2). Same geometry as before; only the
+            metal changed. */}
+        <Link href="/checkout" className={ACTION_COMMERCE_BLOCK} style={COMMERCE_SURFACE}>
           {de.cart.toCheckout}
         </Link>
 

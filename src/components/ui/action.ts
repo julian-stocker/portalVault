@@ -187,6 +187,19 @@ export const COMMERCE_SURFACE = {
   color: "var(--on-commerce)",
 } as const;
 
+/**
+ * THE SAME ROLE WORN AS INK.
+ *
+ * Where the commerce action is a glyph on a dark ground rather than a filled
+ * pill — the header's cart — there is no surface to paint. The colour moves
+ * to the foreground and `--on-commerce` is not used at all: that ink exists
+ * for reading *on* amber, and here amber is the thing being read.
+ *
+ * Inline for the same reason `COMMERCE_SURFACE` is, and pointing at the same
+ * token, so `globals.css` stays the one place the colour is decided.
+ */
+export const COMMERCE_INK = { color: "var(--commerce)" } as const;
+
 export const ACTION_COMMERCE =
   "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
   `text-center text-sm font-semibold ${COMMERCE}`;
@@ -199,6 +212,20 @@ export const ACTION_COMMERCE_COMPACT =
   "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
   `text-center text-sm font-semibold ${COMMERCE} ` +
   "sm:min-h-8 sm:px-3 sm:py-1 sm:text-[13px]";
+
+/**
+ * The same commerce role at the width of a panel's main action.
+ *
+ * `ACTION_COMMERCE` is an inline pill, sized to the row it sits in. The
+ * cart's step into the checkout is the full-width block at the foot of the
+ * summary, so it takes `BASE` — the geometry it already had as a silver
+ * button — and the amber role on top. Nothing about its size, radius,
+ * padding or position changes; only which of the two metals it is.
+ *
+ * Carried with `COMMERCE_SURFACE` as an inline style, like every other
+ * surface in this role. See the note above it for why.
+ */
+export const ACTION_COMMERCE_BLOCK = `${BASE} font-semibold ${COMMERCE}`;
 
 export const ACTION_LINK =
   "inline-flex min-h-10 min-w-0 items-center gap-1 -mx-1 px-1 text-xs font-medium focus-ring " +

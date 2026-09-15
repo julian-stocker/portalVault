@@ -20,6 +20,7 @@ import Link from "next/link";
 
 import { useCart } from "@/components/cart/use-cart";
 import { CartGlyph } from "@/components/shop/cart-glyph";
+import { COMMERCE_INK } from "@/components/ui/action";
 import { de } from "@/lib/i18n/de";
 
 export function CartBadge() {
@@ -31,13 +32,42 @@ export function CartBadge() {
       aria-label={count > 0 ? `${de.cart.open}, ${de.cart.pieces(count)}` : de.cart.open}
       className={
         "relative flex min-h-11 min-w-11 items-center justify-center rounded-full " +
-        "text-on-deep-muted transition-colors hover:text-on-deep"
+        /*
+         * AMBER, BECAUSE THIS IS A COMMERCE ACTION (V3.2).
+         *
+         * It was `text-on-deep-muted` — the ink of something present but not
+         * being pointed at, the same weight as a secondary nav item. That is
+         * what a cart looks like when it is filed under navigation. It is not
+         * navigation: it is the way to the purchase, and the role for that
+         * already exists.
+         *
+         * The role is worn as ink rather than as a filled pill. There is no
+         * surface here to fill — the control is a glyph on the header's own
+         * dark ground — and giving it one would make it a button in a row of
+         * links, which is a layout decision nobody asked for.
+         *
+         * Contrast on `bg-deep/80`: 6.83:1 by day, 7.28:1 at night; pressed,
+         * the darkest of the three, still 5.40:1 and 5.76:1. Measured in
+         * `roles.test.ts` rather than asserted here.
+         *
+         * Hover and press stay classes, the resting colour is carried inline
+         * — the same split `COMMERCE_SURFACE` makes, and for the same reason.
+         */
+        "focus-ring transition-colors hover:text-commerce-hover active:text-commerce-pressed"
       }
+      style={COMMERCE_INK}
     >
       <CartGlyph className="h-5 w-5" />
       {count > 0 ? (
         <span
           className={
+            /*
+             * The count stays silver, deliberately. Amber marks the action;
+             * silver is what trade information is made of, and "three
+             * articles" is information. It also keeps the bubble legible
+             * against the amber glyph behind it, which a second amber would
+             * not.
+             */
             "absolute top-1 right-0.5 min-w-4 rounded-full bg-trade-solid px-1 " +
             "text-[10px] leading-4 font-semibold text-on-trade tabular-nums"
           }

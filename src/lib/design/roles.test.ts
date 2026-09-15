@@ -659,7 +659,7 @@ describe("amber is the act of buying, and it is not the ownership gold", () => {
     expect(luminance(token("commerce-pressed"))).toBeLessThan(rest);
   });
 
-  it("changes no existing button — it is worn in one place so far", () => {
+  it("leaves the silver shop action exactly as it was", () => {
     const action = readFileSync("src/components/ui/action.ts", "utf8");
     // The silver shop action still exists and still says silver.
     expect(action).toContain("bg-trade-solid");
@@ -674,5 +674,188 @@ describe("amber is the act of buying, and it is not the ownership gold", () => {
     const declaration = action.slice(at, action.indexOf(";", at));
     expect(declaration).toContain("bg-trade-solid");
     expect(declaration).not.toContain("commerce");
+  });
+});
+
+/**
+ * Where the commerce role is actually worn.
+ *
+ * Production QA found two purchase actions still in grey: the header's cart,
+ * which was the ink of a secondary nav item, and "Zur Kasse", which was
+ * silver. Silver is what an OFFER is made of — a price, a condition, the fact
+ * that something can be had. Neither of those two is an offer; both are the
+ * step somebody takes towards paying.
+ *
+ * These assertions are about which role each control wears, and about the two
+ * that must NOT move with them.
+ */
+describe("the commerce role is worn where a purchase is started", () => {
+  const action = readFileSync("src/components/ui/action.ts", "utf8");
+  const badge = readFileSync("src/components/cart/cart-badge.tsx", "utf8");
+  /*
+   * The same file with comments stripped. The prose in it explains which ink
+   * the control USED to carry and names that class, so a raw search finds the
+   * explanation and calls it the bug.
+   */
+  const stripComments = (text: string): string =>
+    text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+  const badgeCode = stripComments(badge);
+  const checkoutCode = stripComments(
+    readFileSync("src/components/checkout/checkout-view.tsx", "utf8"),
+  );
+  const cart = readFileSync("src/components/cart/cart-view.tsx", "utf8");
+
+  /** A token's value under `prefers-color-scheme: dark`, not in `:root`. */
+  function darkToken(name: string): string {
+    const at = CSS.indexOf("prefers-color-scheme: dark");
+    expect(at, "no dark block in globals.css").toBeGreaterThan(-1);
+    const match = CSS.slice(at).match(new RegExp(`--${name}:\\s*(#[0-9a-f]{6})`, "i"));
+    expect(match, `--${name} has no dark value`).not.toBeNull();
+    return match![1];
+  }
+
+  it("paints the header cart amber, as ink rather than as a surface", () => {
+    expect(badge).toContain("style={COMMERCE_INK}");
+    expect(badge).toContain('import { COMMERCE_INK } from "@/components/ui/action";');
+    // The muted nav ink is gone from the control itself.
+    const link = badgeCode.slice(badgeCode.indexOf("<Link"), badgeCode.indexOf("<CartGlyph"));
+    expect(link.length, "the Link slice is empty").toBeGreaterThan(40);
+    expect(link).not.toContain("text-on-deep-muted");
+    expect(link).not.toContain("hover:text-on-deep");
+  });
+
+  it("gives that glyph the role's own hover, press and focus", () => {
+    expect(badge).toContain("hover:text-commerce-hover");
+    expect(badge).toContain("active:text-commerce-pressed");
+    expect(badge).toContain("focus-ring");
+  });
+
+  it("keeps that glyph readable on the header in both themes", () => {
+    /*
+     * A glyph on `bg-deep/80`. Held to 4.5 rather than to the 3.0 that
+     * non-text UI would allow: it is the only mark the control has, and the
+     * pressed state is the darkest of the three.
+     */
+    for (const ground of [token("deep"), darkToken("deep")]) {
+      for (const state of ["commerce", "commerce-hover", "commerce-pressed"]) {
+        expect(contrast(token(state), ground), `${state} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("is not the ownership gold, on the header either", () => {
+    // The same distance the surface has to keep. Worn as ink beside gold ink,
+    // on the same dark ground, this is the comparison that matters.
+    expect(distance(token("commerce"), GOLD)).toBeGreaterThan(15);
+  });
+
+  it("takes the checkout step out of silver without moving it", () => {
+    expect(cart).toContain("className={ACTION_COMMERCE_BLOCK} style={COMMERCE_SURFACE}");
+    expect(cart).not.toContain("ACTION_TRADE");
+  });
+
+  it("gives that step the geometry it already had", () => {
+    // Same BASE as ACTION_TRADE: full width, same height, same radius, same
+    // padding. Only the metal changed — the brief said no layout change.
+    const at = action.indexOf("export const ACTION_COMMERCE_BLOCK =");
+    expect(at, "ACTION_COMMERCE_BLOCK is missing").toBeGreaterThan(-1);
+    const declaration = action.slice(at, action.indexOf(";", at));
+    expect(declaration).toContain("${BASE}");
+    expect(declaration).toContain("${COMMERCE}");
+  });
+
+  it("invents no second amber", () => {
+    // Every amber in the application points at the same token.
+    expect(action).toContain('export const COMMERCE_INK = { color: "var(--commerce)" }');
+    const inks = action.slice(action.indexOf("export const COMMERCE_INK"));
+    expect(inks.slice(0, inks.indexOf(";"))).not.toMatch(/#[0-9a-f]{3,6}/i);
+    for (const file of [badge, cart]) {
+      expect(file).not.toMatch(/#e8862b|#f2953c|#d1741f/i);
+    }
+  });
+
+  it("leaves the figure page's buy button silver", () => {
+    // ADR-0038's contract for that surface. It is reconciled when somebody
+    // looks at it, not by this change.
+    const panel = readFileSync("src/components/shop/offer-panel.tsx", "utf8");
+    expect(panel).toMatch(/compact \? ACTION_COMMERCE_COMPACT : ACTION_SHOP/);
+    expect(panel).toContain("style={compact ? COMMERCE_SURFACE : undefined}");
+  });
+
+  it("carries the funnel through to the final submit", () => {
+    /*
+     * The case that was left open one round ago, and then made: this is the
+     * most concrete purchase action there is, so the funnel would have ended
+     * in a different colour from the three steps leading to it.
+     */
+    expect(checkoutCode).toContain("className={`${ACTION_COMMERCE_BLOCK} disabled:opacity-70`}");
+    expect(checkoutCode).toContain("style={COMMERCE_SURFACE}");
+    // Stripped of comments: the prose above the button names the role it used
+    // to wear, and a raw search would read the explanation as the bug.
+    expect(checkoutCode).not.toContain("ACTION_TRADE");
+  });
+
+  it("keeps the submit disabled-looking while it is submitting", () => {
+    /*
+     * `disabled:opacity-70` fades the inline surface with everything on it,
+     * so a pending button is a dimmed amber and not a bright one that cannot
+     * be pressed. Unchanged from the silver version — the mechanism never
+     * depended on which colour was underneath.
+     */
+    expect(checkoutCode).toContain("disabled:opacity-70");
+    expect(checkoutCode).toContain("disabled={pending}");
+    expect(checkoutCode).toContain("{pending ? de.checkout.submitting : de.checkout.submit}");
+  });
+
+  it("gives all four steps of the funnel the same role", () => {
+    /*
+     * Quick view -> header cart -> "Zur Kasse" -> submit. Checked as one set
+     * rather than one at a time: the defect this guards against is a step
+     * being left behind, which is exactly what a per-file test does not see.
+     */
+    const wearers = {
+      "quick view": readFileSync("src/components/shop/offer-panel.tsx", "utf8"),
+      "header cart": badge,
+      "zur kasse": cart,
+      "checkout submit": checkoutCode,
+    };
+    for (const [step, file] of Object.entries(wearers)) {
+      expect(file, `${step} must wear the commerce role`).toMatch(
+        /COMMERCE_SURFACE|COMMERCE_INK/,
+      );
+    }
+  });
+
+  it("carries focus, hover and press in the role itself", () => {
+    /*
+     * Every amber control — the quick view's pill, "Zur Kasse" and the
+     * checkout submit — gets its states from this one string. A control can
+     * therefore be the right colour and still have no visible focus, which is
+     * not something any per-component test would notice.
+     *
+     * Sliced to the declaration: the prose around it names these classes.
+     */
+    const at = action.indexOf("const COMMERCE =");
+    expect(at, "the COMMERCE role is missing").toBeGreaterThan(-1);
+    const role = action.slice(at, action.indexOf(";", at));
+    expect(role, "keyboard focus must be visible").toContain("focus-ring");
+    expect(role).toContain("hover:bg-commerce-hover");
+    expect(role).toContain("active:bg-commerce-pressed");
+    expect(role).toContain("ring-1 ring-commerce-line");
+  });
+
+  it("gives all three amber surfaces those same states", () => {
+    for (const name of ["ACTION_COMMERCE", "ACTION_COMMERCE_COMPACT", "ACTION_COMMERCE_BLOCK"]) {
+      const at = action.indexOf(`export const ${name} =`);
+      expect(at, `${name} is missing`).toBeGreaterThan(-1);
+      expect(action.slice(at, action.indexOf(";", at)), name).toContain("${COMMERCE}");
+    }
+  });
+
+  it("keeps the cart count silver — a quantity is not a purchase", () => {
+    const bubble = badgeCode.slice(badgeCode.indexOf("<span"));
+    expect(bubble).toContain("bg-trade-solid");
+    expect(bubble).toContain("text-on-trade");
+    expect(bubble).not.toContain("commerce");
   });
 });

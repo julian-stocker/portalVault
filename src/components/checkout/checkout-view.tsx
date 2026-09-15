@@ -29,7 +29,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useCart } from "@/components/cart/use-cart";
 import { newCheckoutCredentials, type CheckoutCredentials } from "@/lib/commerce/capability";
-import { ACTION_NEUTRAL, ACTION_TRADE } from "@/components/ui/action";
+import { ACTION_COMMERCE_BLOCK, ACTION_NEUTRAL, COMMERCE_SURFACE } from "@/components/ui/action";
 import {
   fieldProblems,
   firstMarkedField,
@@ -790,7 +790,31 @@ export function CheckoutView({
           </div>
         ) : null}
 
-        <button type="submit" disabled={pending} className={`${ACTION_TRADE} disabled:opacity-70`}>
+        {/*
+          * The last step of the funnel, in the funnel's colour.
+          *
+          * Amber marks the move towards paying, all the way through: the
+          * quick view's "In den Warenkorb", the header's cart, "Zur Kasse",
+          * and this. It was silver, which is the colour of an OFFER — a
+          * price, a condition, the fact that something can be had. This
+          * button is not an offer; it is the moment somebody accepts one.
+          *
+          * Same geometry as before: `ACTION_COMMERCE_BLOCK` is built on the
+          * same `BASE` `ACTION_TRADE` was, so width, height, radius, padding
+          * and shadow are untouched. Only the metal and the edge changed.
+          *
+          * `disabled:opacity-70` stays exactly as it was and keeps working:
+          * opacity fades the inline surface underneath it, so a submitting
+          * button is a dimmed amber rather than a bright one nobody can
+          * press. The label carries the rest — it reads `submitting` while
+          * `pending`.
+          */}
+        <button
+          type="submit"
+          disabled={pending}
+          className={`${ACTION_COMMERCE_BLOCK} disabled:opacity-70`}
+          style={COMMERCE_SURFACE}
+        >
           {pending ? de.checkout.submitting : de.checkout.submit}
         </button>
       </div>
