@@ -21,9 +21,12 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { QuickView } from "@/components/catalog/quick-view";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
+import { quickViewModel } from "@/lib/ui/quick-view";
+import type { PublicSeller } from "@/lib/shop/seller";
 import type { ShopEntry } from "@/lib/shop/surface";
 import { de } from "@/lib/i18n/de";
 
@@ -32,6 +35,7 @@ export function ShopView({
   ownedSkyIds,
   signedIn,
   highlightSkyId = null,
+  seller = null,
 }: {
   entries: readonly ShopEntry[];
   /** Which of the offered figures the visitor already owns. Empty signed out. */
@@ -39,9 +43,18 @@ export function ShopView({
   signedIn: boolean;
   /** Outlines the card somebody came back to after signing in (ADR-0027). */
   highlightSkyId?: string | null;
+  /** Who sells on SkyIsles, from the page's own queries (ADR-0064). */
+  seller?: PublicSeller | null;
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
+  /*
+   * The same dialog the catalog has (IR-001). It is the same card and the
+   * same trade row, so "Angebote ab …" has to mean the same thing here — a
+   * control that navigates on one page and opens a dialog on another is two
+   * controls wearing one label.
+   */
+  const [quickViewSkyId, setQuickViewSkyId] = useState<string | null>(null);
   const owned = useMemo(() => new Set(ownedSkyIds), [ownedSkyIds]);
 
   const normalized = normalizeForSearch(deferredQuery);
@@ -118,6 +131,7 @@ export function ShopView({
               }
               highlighted={highlightSkyId === entry.figure.skyId}
               offers={entry.offers}
+              onOpenOffers={() => setQuickViewSkyId(entry.figure.skyId)}
               // Unlike the catalog, this grid mixes all six games, so the
               // series is worth naming on every card.
               showSeries
@@ -125,6 +139,21 @@ export function ShopView({
           ))}
         </FigureGrid>
       )}
+
+      {/* One dialog for the grid, outside every card's container (IR-001). */}
+      <QuickView
+        model={
+          quickViewSkyId
+            ? quickViewModel(
+                entries.find((entry) => entry.figure.skyId === quickViewSkyId)?.figure,
+                entries.find((entry) => entry.figure.skyId === quickViewSkyId)?.offers,
+              )
+            : null
+        }
+        seller={seller}
+        guest={!signedIn}
+        onClose={() => setQuickViewSkyId(null)}
+      />
     </div>
   );
 }

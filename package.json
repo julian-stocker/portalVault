@@ -29,6 +29,8 @@
     "verify:inventory:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-inventory.mts",
     "verify:shop:prod": "node --env-file=.env.local tools/verify-shop.mts",
     "verify:shop:staging": "node --env-file=.env.staging tools/verify-shop.mts",
+    "verify:seller:prod": "node --env-file=.env.local tools/verify-seller.mts",
+    "verify:seller:staging": "node --env-file=.env.staging tools/verify-seller.mts",
     "verify:commerce:prod": "node --env-file=.env.local tools/verify-commerce.mts",
     "verify:commerce:staging": "node --env-file=.env.staging tools/verify-commerce.mts",
     "verify:payment-smoke:staging": "node --env-file=.env.staging tools/verify-payment-smoke.mts"

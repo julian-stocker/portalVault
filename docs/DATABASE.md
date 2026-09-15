@@ -482,7 +482,8 @@ Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
 | `next_order_number()` | niemand | Spalten-Default, race-frei über eine Sequenz. `volatile` — ein Aufrufer könnte Nummern verbrauchen, deshalb ebenfalls für alle drei Rollen entzogen. |
 | `create_order(request_id, email, items, address)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Idempotent über `request_id`. |
 | `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
-| `active_seller()` | niemand | Der eine aktive Verkäufer. **Einziger Leseweg** auf `sellers` — ein zweiter Verkäufer hätte damit genau eine Stelle zu ändern (ADR-0064). |
+| `active_seller()` | niemand | Der eine aktive Verkäufer, **ganze Zeile** (`select s.*`) — deshalb für alle drei Rollen entzogen (ADR-0064). |
+| `seller_public()` | `anon`, `authenticated` | **Identität, keine Relation.** Gibt `id` und `display_name` des aktiven Verkäufers zurück, sonst nichts — Allow-List, wörtlich benannt. Kontaktadresse, Reply-To, `updated_by` und Zeitstempel bleiben drin (`0027`). Aus der sichtbaren `id` folgt **nicht**, dass SkyIsles Multi-Seller kann: keine Tabelle trägt ein `seller_id`. |
 | `release_expired_reservations(ids?)` | niemand | Gibt abgelaufenen Halt frei. Idempotent. `NULL` = alles (Zeitgeber), Array = die Positionen eines Checkouts. |
 | `release_order_reservations(order_id)` | niemand | Gibt den Halt einer Bestellung frei. Idempotent. |
 | `convert_order_reservations(order_id)` | niemand | Reservierung → Verkauf: senkt `reserved`, bucht `sale` über `apply_inventory_movement()` (bis `0025`: `sale_skyisles`, ADR-0065). Idempotent über den Reservierungszustand. **Wird von nichts gerufen** — die Zahlungsphase ruft sie. |
@@ -1309,6 +1310,24 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   aktiver Verkäufer wird vom Index abgewiesen, und ein echter Sandbox-Kauf (`SI-2026-001049`)
   hat die Bestellbestätigung mit dem Reply-To des **Verkäufers** versendet. **Auf Production
   NICHT angewandt.**
+
+- Siebenundzwanzigste Migration: `0027_seller_public.sql` — **der Handelsname wird lesbar.**
+  Eine einzige Funktion plus Grant: `seller_public()` liefert `id` und `display_name` des
+  aktiven Verkäufers an `anon` und `authenticated`, als Allow-List nach dem Muster von
+  `platform_settings_public()` (ADR-0059). `security definer`, `set search_path = ''`,
+  `where s.is_active`. **Additiv** — kein `alter table`, keine Policy, kein Grant auf
+  `sellers`; `active_seller()`, `admin_seller()` und `shop_offers()` bleiben unverändert.
+  Rückbau ist eine Zeile: `drop function if exists public.seller_public();`.
+
+  **Das ist eine Identität, keine Relation.** Die Funktion beantwortet „wer verkauft auf
+  SkyIsles", nicht „wer verkauft diesen Artikel". Es gibt weiterhin **kein `seller_id`** auf
+  irgendeiner Tabelle, und ein Angebot wird **nicht** mit einem Verkäufer verknüpft — es
+  kann nicht, weil `sellers_one_active` garantiert, dass es genau einen gibt. Die jetzt
+  öffentliche `id` ist der Schlüssel, an dem eine spätere echte Relation hinge; heute ist sie
+  eine Konstante. **Wer aus `seller.id` in der Schnellansicht schließt, Multi-Seller sei
+  bereits implementiert, irrt** — der Marketplace-Stopp aus ADR-0021 gilt unverändert, und die
+  echte Offer→Seller-Relation kommt erst mit einem zweiten realen Verkäufer (ADR-0064).
+  Prüfwerkzeug: `npm run verify:seller:staging` (schreibfrei, zehn Eigenschaften).
 
 > **Runtime-Verifikation.** `supabase/tests/0015_runtime_verification.sql` prüft `0015` und `0016`
 > gegen eine echte Datenbank: ACL-Matrix, Cent-Umrechnung, die Übergangsmatrix der

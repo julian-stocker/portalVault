@@ -11,8 +11,11 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { QuickView } from "@/components/catalog/quick-view";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
+import { quickViewModel } from "@/lib/ui/quick-view";
+import type { PublicSeller } from "@/lib/shop/seller";
 import { OwnershipFilter } from "@/components/catalog/ownership-filter";
 import { ProductGroupTabs } from "@/components/catalog/group-tabs";
 import { SeriesTabs } from "@/components/catalog/series-tabs";
@@ -45,6 +48,7 @@ export function CatalogView({
   initialQuery = "",
   initialGroup = null,
   offers = {},
+  seller = null,
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -70,6 +74,14 @@ export function CatalogView({
    * card, and there are 561 cards.
    */
   offers?: Readonly<Record<string, readonly Offer[]>>;
+  /**
+   * Who sells on SkyIsles, from the page's own round of queries (ADR-0064).
+   *
+   * `null` when nobody is published — before migration 0027, or for an
+   * administrator, who is not shopping. The quick view then names no seller
+   * rather than inventing one.
+   */
+  seller?: PublicSeller | null;
 }) {
   // A series is always chosen (ADR-0038). The first one is the default, so
   // the catalog opens on Spyro's Adventure rather than on all 561 at once.
@@ -149,6 +161,21 @@ export function CatalogView({
    * back.
    */
   const [visibility, setVisibility] = useState<Map<string, boolean>>(() => new Map());
+
+  /**
+   * Which figure's offer is being looked at, or null (IR-001).
+   *
+   * A SKY-ID rather than the figure itself, so what the dialog shows is
+   * resolved from the same `figures` and `offers` the grid reads on every
+   * render. A captured object would keep showing a price that had changed
+   * underneath it.
+   *
+   * Deliberately not in the URL. A query parameter would make the dialog
+   * shareable and would also turn every open into a request for a dynamic
+   * route — which is exactly the work commit a0353cb removed. The shareable
+   * address is the figure's own page, offered in the dialog.
+   */
+  const [quickViewSkyId, setQuickViewSkyId] = useState<string | null>(null);
 
   function onVisibilityChange(skyId: string, visible: boolean) {
     setVisibility((current) => new Map(current).set(skyId, visible));
@@ -253,6 +280,7 @@ export function CatalogView({
         visible={isVisible(figure)}
         onVisibilityChange={onVisibilityChange}
         offers={offers[figure.skyId] ?? EMPTY_OFFERS}
+        onOpenOffers={() => setQuickViewSkyId(figure.skyId)}
       />
     );
   }
@@ -417,6 +445,30 @@ export function CatalogView({
       ) : (
         <FigureGrid>{visible.map(card)}</FigureGrid>
       )}
+
+      {/*
+       * The quick view — one instance for the whole grid, and a sibling of
+       * it rather than a child of any card (IR-001).
+       *
+       * `quickViewModel` returns null for a figure with nothing buyable, so
+       * a stale id cannot leave an empty shop surface standing open. Closing
+       * changes this one value and nothing else: the series, the group, the
+       * search, the ownership filter and the scroll position are all state
+       * around this line that nobody touches.
+       */}
+      <QuickView
+        model={
+          quickViewSkyId
+            ? quickViewModel(
+                figures.find((figure) => figure.skyId === quickViewSkyId),
+                offers[quickViewSkyId],
+              )
+            : null
+        }
+        seller={seller}
+        guest={!signedIn}
+        onClose={() => setQuickViewSkyId(null)}
+      />
     </div>
   );
 }

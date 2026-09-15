@@ -6,6 +6,7 @@ import { currentUser } from "@/lib/auth/user";
 import { fetchCatalog } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchOffers } from "@/lib/shop/queries";
+import { fetchSellerPublic } from "@/lib/shop/seller";
 import { shopEntries } from "@/lib/shop/surface";
 import { de } from "@/lib/i18n/de";
 
@@ -45,7 +46,7 @@ export default async function ShopPage({
   const params = await searchParams;
   const admin = await isAdmin();
 
-  const [user, catalog, offers, owned] = await Promise.all([
+  const [user, catalog, offers, owned, seller] = await Promise.all([
     currentUser(),
     // Hidden figures are filtered by `shopEntries()`, but asking for them here
     // would put them in the browser's payload on the way. The public slice is
@@ -53,6 +54,8 @@ export default async function ShopPage({
     fetchCatalog({ includeHidden: false }),
     fetchOffers(),
     admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
+    // Who sells here (ADR-0064, migration 0027). One call for the page.
+    fetchSellerPublic(),
   ]);
 
   const entries = shopEntries(catalog, offers);
@@ -86,6 +89,7 @@ export default async function ShopPage({
           entries={entries}
           ownedSkyIds={[...owned]}
           signedIn={Boolean(user)}
+          seller={seller}
           highlightSkyId={highlight}
         />
       </div>

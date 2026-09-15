@@ -5184,3 +5184,56 @@ Akteur, den *jede* Verkaufsbewegung hat, unterscheidet also nichts) · `marketpl
 einen Marketplace voraus, den es nicht gibt) · `sale_onsite` (liest sich im Handel als
 Ladengeschäft) · `sale_internal` (heißt in der Buchhaltung konzerninterne Umbuchung — und in der
 Buchhaltung liegt dieses Journal) · `sale_skyisles` umbenennen (technisch unmöglich).
+
+---
+
+## ADR-0066 — Der Handelsname des Verkäufers ist öffentlich, die Zuordnung zum Angebot nicht
+
+**Status:** angenommen · **Datum:** 2026-09-14 · **Migration:** `0027_seller_public.sql`
+
+**Kontext.** ADR-0064 trennt zwei Rechtssubjekte: SkyIsles ist die Plattform,
+yulez.collectibles ist der erste und vorerst einzige gewerbliche Verkäufer. `0026` legte die
+Tabelle `sellers` an, ließ aber jeden Leseweg für Besucher zu: RLS ohne Policy, Tabellen-Grant
+entzogen, `active_seller()` allen entzogen (sie gibt `select s.*` zurück), `admin_seller()` auf
+`is_shop_admin()` gegattert, und die Anwendung hält keinen Service-Role-Key (ADR-0051).
+
+Damit konnte die Schnellansicht über dem Katalog einen Preis und einen Kaufknopf zeigen, aber
+nicht, **mit wem** der Kunde den Vertrag schließt. Das ist die wichtigere der beiden Angaben.
+
+**Entscheidung.** Eine Allow-List-Projektion `seller_public()` nach dem Muster von
+`platform_settings_public()`: `id` und `display_name` des **aktiven** Verkäufers, `security
+definer`, `set search_path = ''`, vergeben an `anon` und `authenticated`. Sonst nichts.
+
+**Was ausdrücklich NICHT entschieden wurde.** Die Projektion ist eine **Identität, keine
+Relation**. Sie beantwortet „wer verkauft auf SkyIsles", nicht „wer verkauft diesen Artikel".
+Es gibt weiterhin kein `seller_id` auf `shop_inventory`, `inventory_movements`, `orders`,
+`order_items` oder sonst einer Tabelle; `shop_offers()` ist unverändert; ein Angebot wird nicht
+mit einem Verkäufer verknüpft. Es *kann* nicht: `sellers_one_active` garantiert, dass es genau
+einen gibt, und eine Fremdschlüsselspalte, die für jede Zeile denselben Wert trägt, ist keine
+Beziehung, sondern eine Konstante mit Zeremonie.
+
+**Die Falle, die das benennt.** Mit dieser Migration wird `seller.id` erstmals im Browser
+sichtbar. Wer daraus schließt, SkyIsles unterstütze bereits mehrere Verkäufer, irrt. Der
+Marketplace-Stopp aus ADR-0021 gilt unverändert. Die echte Offer→Seller-Relation entsteht
+zusammen mit einem zweiten realen Verkäufer — dann wird `sellers_one_active` **gelöscht**, und
+das ist die Änderung, an der man es merkt, nicht diese hier.
+
+**„Gewerblicher Verkäufer" ist keine Spalte.** Auf SkyIsles verkaufen ausschließlich
+gewerbliche Verkäufer; private sind ausgeschlossen (ADR-0021, ADR-0064). Die Aussage ist damit
+für jeden Verkäufer wahr und wird als i18n-Text geführt, nicht je Zeile gespeichert. Gäbe es je
+private Verkäufer, würde daraus eine Spalte — und dieser Text ein Feld.
+
+**Kein Rating.** Es existiert kein Bewertungsmodell: keine Tabelle, keine Reviews, kein
+Review-Count, keine Reputation. Der Identitätsblock ist so gebaut, dass eine echte
+Reputationszeile später als dritte Zeile hinzukommen könnte. Bis dahin steht dort nichts —
+Sterne ohne Datengrundlage sind Dekoration, die sich als Beleg ausgibt.
+
+**Konsequenzen.** Die einzige neue öffentliche Tatsache ist der Handelsname, der ohnehin auf
+jeder Rechnung und im Impressum steht. Rückbau ist eine Zeile:
+`drop function if exists public.seller_public();` — additiv, ohne Spalte, Constraint oder Daten.
+
+**Verworfen:** `shop_offers()` um Verkäuferfelder erweitern (Rückgabetyp ließe sich nur über
+`drop function` ändern, wiederholte den Namen je Angebotszeile statt einmal je Seite, und
+suggerierte einen Join, den es nicht gibt) · eine Spalte `is_commercial` (heute mit genau einem
+möglichen Wert) · den Namen als Konstante in der Oberfläche (zweite Quelle der Wahrheit für
+einen Rechtsnamen, ADR-0059).

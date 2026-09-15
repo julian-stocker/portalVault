@@ -82,6 +82,20 @@ sonst wird das Verbot beim ersten Shop-Commit stillschweigend aufgeweicht.
    ein **boolescher** Zustand, nie eine Stückzahl — `available = quantity - reserved > 0`,
    geliefert von `shop_offers()`. Eine sichtbare Rabattstufe verriete einen groben Bestand
    (ADR-0033); es gibt in V1 keine.
+6. **Vom Verkäufer ist genau der Handelsname öffentlich (`0027`).** `seller_public()` gibt
+   `id` und `display_name` des aktiven Verkäufers an `anon` und `authenticated` — eine
+   Allow-List, die ihre Spalten wörtlich benennt, nach dem Muster von
+   `platform_settings_public()` (ADR-0059). Der Handelsname ist ohnehin öffentlich: er steht
+   in jeder Bestellmail, auf jeder Rechnung und gehört ins Impressum.
+
+   **Nicht öffentlich und ausdrücklich nicht in dieser Projektion:** `contact_email`,
+   `transactional_reply_to`, `updated_by`, `created_at`, `updated_at`. Eine Spalte, die
+   `sellers` später bekommt — Steuernummer, ladungsfähige Anschrift, Auszahlungskonto —, ist
+   hier **unsichtbar**, bis jemand sie absichtlich aufführt. Die Tabelle `sellers` bleibt
+   RLS-geschützt und für `anon`/`authenticated` entzogen; `active_seller()` bleibt **allen**
+   entzogen, weil sie `select s.*` macht; `admin_seller()` bleibt auf `is_shop_admin()`
+   gegattert. Geprüft von `npm run verify:seller:staging` und von
+   `src/lib/shop/seller-schema.test.ts`.
 
 **Stand.** Umgesetzt sind Shop-Tabellen und Rolle (`0003`), die Lager-Lesefunktionen (`0005`),
 das öffentliche Angebot (`0006`) und der Legacy-Bestandsimport als Werkzeug. Bestellungen,

@@ -566,6 +566,28 @@
     display: none;
   }
 
+  /* ---------------------------------------------------------------------
+     The two motions a dialog needs, and no others.
+
+     The product had no keyframes at all before the quick view, and these
+     exist only so a dialog does not appear as a hard cut over the catalog
+     behind it. Both are short enough to read as the panel arriving rather
+     than as an effect, and both are neutralised by the reduced-motion rule
+     below — which is why they are declared here and not in a component.
+     --------------------------------------------------------------------- */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(0.5rem) scale(0.985);
+    }
+  }
+
   /* Nothing here animates by decoration. This covers whatever transitions
      components carry, now and later. */
   @media (prefers-reduced-motion: reduce) {

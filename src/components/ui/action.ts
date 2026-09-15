@@ -142,6 +142,22 @@ export const ACTION_SHOP =
  * overflow. So the label truncates instead: the icon and the touch target
  * stay, the price keeps its full width, and the row keeps its height.
  */
+/**
+ * The shop action where the row it sits in is small — the quick view's offer
+ * line (IR-001).
+ *
+ * The same silver as `ACTION_SHOP` and the same meaning; only the geometry
+ * differs, so trade still looks like trade. It shrinks **only from `sm:`
+ * upwards**: on a touch screen it keeps the 44 px target, and a compact pill
+ * is a desktop affordance where the pointer is exact.
+ */
+export const ACTION_SHOP_COMPACT =
+  "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
+  "text-center text-sm font-semibold focus-ring bg-trade-solid text-on-trade " +
+  "shadow-card ring-1 ring-trade-line-strong " +
+  "transition-colors hover:bg-trade-solid-hover hover:shadow-raised " +
+  "sm:min-h-8 sm:px-3 sm:py-1 sm:text-[13px]";
+
 export const ACTION_LINK =
   "inline-flex min-h-10 min-w-0 items-center gap-1 -mx-1 px-1 text-xs font-medium focus-ring " +
   "text-on-card-muted underline underline-offset-2 hover:text-on-card";

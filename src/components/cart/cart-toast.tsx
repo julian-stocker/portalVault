@@ -91,7 +91,10 @@ export function CartToast() {
       className={
         // Clear of the round cart button (3.25rem) and of the bar and home
         // indicator beneath it, with a gap either side.
-        "pointer-events-none fixed right-4 left-4 z-40 " +
+        // Above the quick view (z-50): this is the confirmation of an action
+        // taken inside that dialog, and a confirmation nobody can see is not
+        // one (IR-001).
+        "pointer-events-none fixed right-4 left-4 z-60 " +
         "bottom-[calc(2.75rem+env(safe-area-inset-bottom)+4.5rem)] " +
         "md:right-6 md:left-auto md:bottom-6 md:max-w-sm"
       }

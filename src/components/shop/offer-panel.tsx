@@ -27,20 +27,40 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
 import { conditionLabel } from "@/lib/shop/condition";
-import { ACTION_SHOP } from "@/components/ui/action";
+import { ACTION_SHOP, ACTION_SHOP_COMPACT } from "@/components/ui/action";
 import { keyOf, lineKey } from "@/lib/cart/cart";
 import { buyableOffers, type Offer } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 
-function AddButton({
+/**
+ * "In den Warenkorb" for exactly one article.
+ *
+ * Exported since IR-001 so the quick view can place it in its own layout
+ * without a second copy of the rules around it — which line it belongs to,
+ * whether one is already in the cart, and what the accessible name says. The
+ * behaviour behind it is `useAddToCart` either way, so the two surfaces
+ * cannot drift.
+ */
+export function OfferAddButton({
   offer,
   name,
   imageSrc,
+  className = "",
+  compact = false,
 }: {
   offer: Offer;
   name: string;
   imageSrc: string | null;
+  /** Layout from the caller — the pill's own look is not negotiable. */
+  className?: string;
+  /**
+   * A smaller pill for a small row (IR-001).
+   *
+   * Same colour and same behaviour; only the geometry differs, and only from
+   * `sm:` upwards so a touch target never drops below 44 px.
+   */
+  compact?: boolean;
 }) {
   const { cart } = useCart();
   const { addOne, pending } = useAddToCart();
@@ -71,7 +91,7 @@ function AddButton({
           ? de.shop.addAnotherFor(label, formatPrice(offer.price))
           : de.shop.addToCartFor(label, formatPrice(offer.price))
       }
-      className={`${ACTION_SHOP} gap-1.5 disabled:opacity-70`}
+      className={`${compact ? ACTION_SHOP_COMPACT : ACTION_SHOP} gap-1.5 disabled:opacity-70 ${className}`}
     >
       {already ? <CartCheckedGlyph /> : <CartGlyph />}
       {de.shop.addToCart}
@@ -149,7 +169,7 @@ export function OfferPanel({
               </span>
             </div>
 
-            <AddButton offer={offer} name={name} imageSrc={imageSrc} />
+            <OfferAddButton offer={offer} name={name} imageSrc={imageSrc} />
           </li>
         ))}
       </ul>

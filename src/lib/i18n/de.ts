@@ -887,6 +887,46 @@ export const de = {
     },
   },
 
+  /**
+   * Die Schnellansicht über dem Katalog (IR-001).
+   *
+   * Sie ersetzt den Sprung auf die Detailseite für den häufigsten Fall: „was
+   * kostet das und kann ich es kaufen". Die Detailseite bleibt und wird aus
+   * dem Dialog heraus ausdrücklich angeboten — sie zeigt Charakter, Element
+   * und verwandte Figuren, die hier absichtlich fehlen.
+   *
+   * Kein Verkäufername, keine Bewertung, keine Lieferzeit, keine
+   * Versandkosten: nichts davon liegt in den Daten, die die Karte hat.
+   */
+  quickView: {
+    close: "Schnellansicht schließen",
+    toDetail: "Vollständige Details ansehen",
+    toDetailFor: (name: string) => `Detailseite für ${name} öffnen`,
+    /**
+     * Die Überschrift der Angebotsliste.
+     *
+     * Heute immer „Angebot": `shop_inventory` hat einen Unique-Index auf
+     * (sky_id, condition), und die Schnellansicht handelt nur mit „Lose" —
+     * es kann also höchstens eines geben. Die gezählte Form steht bereit,
+     * weil ein zweiter Verkäufer sie braucht und eine Überschrift, die dann
+     * falsch wäre, schlimmer ist als eine, die heute nie erscheint.
+     */
+    offersCount: (n: number) => (n === 1 ? "Angebot" : `Angebote (${n})`),
+    /**
+     * Die Rolle des Verkäufers unter seinem Namen.
+     *
+     * Eine Plattformaussage, keine Spalte: auf SkyIsles verkaufen ausschließlich
+     * gewerbliche Verkäufer — private Verkäufer sind ausdrücklich nicht
+     * vorgesehen (ADR-0021, ADR-0064). Deshalb ist der Satz für jeden Verkäufer
+     * wahr und muss nicht je Zeile gespeichert werden. Sollte es je private
+     * Verkäufer geben, wird daraus eine Spalte und dieser Text ein Feld.
+     *
+     * Der NAME daneben kommt aus seller_public() und steht bewusst nirgends
+     * im Code.
+     */
+    sellerKind: "Gewerblicher Verkäufer",
+  },
+
   cart: {
     title: "Warenkorb",
     open: "Warenkorb öffnen",

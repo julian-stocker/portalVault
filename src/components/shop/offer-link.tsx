@@ -54,11 +54,22 @@ export function OfferLink({
   offers,
   slug,
   name,
+  onOpen,
 }: {
   offers: readonly Offer[];
   slug: string;
   /** For the accessible name: "Angebote für Bouncer ansehen". */
   name: string;
+  /**
+   * Opens the quick view instead of navigating (IR-001).
+   *
+   * Optional, and the element stays a real `<Link>` either way. That is not
+   * decoration: without it a middle click, a Cmd-click and a browser with no
+   * JavaScript would all have nothing to act on, and the accessible name of
+   * a link says where it leads. With it, an ordinary left click is
+   * intercepted and the catalog stays put.
+   */
+  onOpen?: () => void;
 }) {
   const summary = summarizeOffers(offers);
 
@@ -95,6 +106,19 @@ export function OfferLink({
        * rather than one per card.
        */
       prefetch={false}
+      onClick={(event) => {
+        if (!onOpen) return;
+        /*
+         * Only a plain left click opens the dialog. Cmd/Ctrl, Shift and the
+         * middle button all mean "somewhere else, please" — a new tab or a
+         * new window — and intercepting those would take away a navigation
+         * the visitor deliberately asked for.
+         */
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (event.button !== 0) return;
+        event.preventDefault();
+        onOpen();
+      }}
       aria-label={de.shop.offersFor(name)}
       className={
         `focus-ring group/offer flex h-full w-full items-center justify-center gap-1 ` +

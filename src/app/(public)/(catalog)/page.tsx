@@ -6,6 +6,7 @@ import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
+import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
@@ -38,7 +39,7 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned, offers] = await Promise.all([
+  const [user, figures, series, owned, offers, seller] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
@@ -48,6 +49,10 @@ export default async function CatalogPage({
     // Not for an administrator: their card carries editorial actions, and
     // the price they can actually change is in /admin/inventory (ADR-0042).
     admin ? Promise.resolve(new Map()) : fetchOffers(),
+    // Who sells on SkyIsles (ADR-0064, migration 0027). One call for the whole
+    // page, in the same round as everything else — the quick view reads it
+    // from props and fetches nothing when it opens.
+    admin ? Promise.resolve(null) : fetchSellerPublic(),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -76,6 +81,7 @@ export default async function CatalogPage({
         // A plain object: a Map does not survive the server → client
         // boundary and would arrive empty.
         offers={offerRecord(offers)}
+        seller={seller}
       />
     </main>
   );

@@ -34,6 +34,7 @@ import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Offer } from "@/lib/shop/offer";
+import { quickBuyOffers } from "@/lib/ui/quick-view";
 import { de } from "@/lib/i18n/de";
 
 
@@ -48,6 +49,7 @@ export function CatalogCard({
   onVisibilityChange,
   offers = [],
   showSeries = false,
+  onOpenOffers,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -81,6 +83,16 @@ export function CatalogCard({
    * cannot be assumed to share with its neighbours.
    */
   showSeries?: boolean;
+  /**
+   * Opens the quick view for this figure (IR-001).
+   *
+   * Passed down rather than held here: the dialog must not be rendered inside
+   * the card. `FigureCard` is an `@container`, which is a containing block
+   * for `position: fixed` descendants, so a dialog mounted in this subtree
+   * would lay itself out inside a 211 px card. The grid's owner holds the
+   * state and renders one dialog for the whole page.
+   */
+  onOpenOffers?: () => void;
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -164,7 +176,25 @@ export function CatalogCard({
    * that said nothing. Whatever the visitor taps — picture, name, offer —
    * they arrive at the figure, and the offer row arrives at its offers.
    */
-  const trade = <OfferLink offers={offers} slug={figure.slug} name={figure.displayName} />;
+  /*
+   * The quick view is offered only when it would have something to sell.
+   *
+   * It trades loose copies alone (`QUICK_VIEW_CONDITION`), so a figure whose
+   * only listing is boxed gets no dialog — and `OfferLink` then does what it
+   * did before: it is a link, and it leads to the figure page where that
+   * boxed offer is. A dialog that opened to say "nothing here" would be a
+   * worse answer than the page that has the answer.
+   */
+  const quickBuy = quickBuyOffers(offers).length > 0;
+
+  const trade = (
+    <OfferLink
+      offers={offers}
+      slug={figure.slug}
+      name={figure.displayName}
+      onOpen={quickBuy ? onOpenOffers : undefined}
+    />
+  );
 
   /**
    * A collect that did not stick has to say so on the card it failed on.
