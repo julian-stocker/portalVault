@@ -20,6 +20,7 @@ function figure(categoryName: string, name = "Drobot"): CatalogFigure {
     categoryName,
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     catalogVisible: true,
     canonicalName: name,
     displayNameOverride: null,

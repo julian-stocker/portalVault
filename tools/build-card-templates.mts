@@ -29,7 +29,17 @@ const SOURCE = "designs/cards";
 const TARGET = "public/images/cards";
 
 /** Canvas of both sources. Asserted rather than assumed. */
-const CANVAS = { width: 1024, height: 1536 };
+/**
+ * The source canvas, as of V3.5.
+ *
+ * Was 1024×1536 while the two templates were `silver` and `gold`. The six
+ * artworks that replaced them are 1007×1562 — a different ratio, not a
+ * rescale — and `CARD_CANVAS` in `lib/catalog/card-template.ts` was moved to
+ * match. The assertion below is what keeps the two from drifting apart: an
+ * artwork delivered at the old size stops the build instead of quietly
+ * shifting every slot on the card.
+ */
+const CANVAS = { width: 1007, height: 1562 };
 
 /**
  * `sm` covers two columns on a phone (~200 CSS px at 2× ≈ 400), `lg` covers a
@@ -40,7 +50,41 @@ const WIDTHS = [
   { suffix: "", width: 640 },
 ] as const;
 
-const TEMPLATES = ["silver", "gold"] as const;
+/**
+ * The active artworks (V3.5, extended in fix round 1).
+ *
+ * Two per card type: the card a figure is printed on, and the card it is
+ * printed on once somebody owns it. Ownership is still not a card type — it
+ * picks the second file of the same pair, and `card_type` never changes.
+ *
+ * `collection` is gone from this list. It was the one ownership artwork for
+ * all five types; each type has its own now, and its source PNG is no longer
+ * in `designs/cards/`. The built `collection.webp` stays in `public/` for the
+ * moment — the way back is not thrown away until the browser has confirmed
+ * the new pairs.
+ *
+ * `prestige.collected.png` is present and is currently a byte-identical copy
+ * of `prestige.png`. That is the operator's placeholder, not a decision made
+ * here: no fallback in code, no aliased path, and nothing to unwind when the
+ * real artwork arrives — dropping the file in and running this again is the
+ * whole of it.
+ *
+ * `silver` and `gold` are deliberately absent. Their sources stay where they
+ * are and their WebPs stay built; they are simply not rebuilt, and their
+ * 1024×1536 sources would fail the size assertion below.
+ */
+const TEMPLATES = [
+  "card",
+  "card.collected",
+  "dark",
+  "dark.collected",
+  "legendary",
+  "legendary.collected",
+  "chase",
+  "chase.collected",
+  "prestige",
+  "prestige.collected",
+] as const;
 
 const kb = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
 
@@ -52,7 +96,7 @@ for (const name of TEMPLATES) {
 
   if (meta.width !== CANVAS.width || meta.height !== CANVAS.height) {
     throw new Error(
-      `${from} is ${meta.width}×${meta.height}; both templates must be ` +
+      `${from} is ${meta.width}×${meta.height}; every template must be ` +
         `${CANVAS.width}×${CANVAS.height} or the overlay coordinates stop lining up`,
     );
   }

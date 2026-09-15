@@ -6,6 +6,7 @@
  * more (ADR-0026).
  */
 import type { Element } from "@/lib/catalog/character";
+import type { CardType } from "@/lib/catalog/card-type";
 import type { CatalogGroup } from "@/lib/catalog/group";
 
 export type CatalogFigure = {
@@ -34,6 +35,15 @@ export type CatalogFigure = {
    * Says nothing about specials and nothing about completion.
    */
   catalogGroup: CatalogGroup | null;
+  /**
+   * Which base artwork this figure is printed on (V3.5).
+   *
+   * Editorial and permanent — what the collectible IS, not whether anybody
+   * owns it. Ownership overrides the artwork at render time and never writes
+   * here. Never `null`: the column is NOT NULL with a default, and an
+   * unreadable value falls back to `standard` rather than to nothing.
+   */
+  cardType: CardType;
   /**
    * What the collector area shows: "Astroblast (Legendary)" where the raw
    * name is "Legendary Astroblast". Equals `name` when no variant is

@@ -386,6 +386,11 @@ export const de = {
     writeFailed: "Das hat nicht geklappt.",
     unknownFigure: "Unbekannte Figur.",
     unknownCategory: "Unbekannte Kategorie.",
+    /** Ein Kartentyp, den es nicht gibt (V3.5). */
+    unknownCardType: "Unbekannter Kartentyp.",
+    /** Überschrift und Bezeichnung des Kartentyp-Felds (V3.5). */
+    cardType: "Kartentyp",
+    cardTypeHint: "Bestimmt nur die Kartengrafik — der Name der Figur ändert sich dadurch nicht.",
     nameTooLong: "Der Name ist zu lang.",
     noteTooLong: "Die Notiz ist zu lang.",
     completionNote:

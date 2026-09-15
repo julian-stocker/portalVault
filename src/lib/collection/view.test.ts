@@ -31,6 +31,7 @@ function figure(
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     catalogVisible: true,
     canonicalName: "",
     displayNameOverride: null,

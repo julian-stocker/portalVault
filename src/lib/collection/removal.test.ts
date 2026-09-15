@@ -16,6 +16,7 @@ function entry(skyId: string, marketPrice: number | null = 10, quantity = 1): Co
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     catalogVisible: true,
     canonicalName: "",
     displayNameOverride: null,

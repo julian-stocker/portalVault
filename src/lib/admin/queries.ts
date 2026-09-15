@@ -13,6 +13,7 @@
  * columns' write path (migration 0004) and `admin_note`, which no public
  * projection selects.
  */
+import { asCardType, type CardType } from "@/lib/catalog/card-type";
 import { isCollectibleCategory } from "@/lib/catalog/collectible";
 import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { createClient } from "@/lib/supabase/server";
@@ -35,6 +36,8 @@ export type AdminFigure = {
   imageOverridePath: string | null;
   isActive: boolean;
   catalogVisible: boolean;
+  /** Which base artwork the figure is printed on (V3.5). */
+  cardType: CardType;
 };
 
 type Row = {
@@ -48,6 +51,7 @@ type Row = {
   is_active: boolean;
   catalog_visible: boolean;
   display_name_override: string | null;
+  card_type: string;
 };
 
 /**
@@ -59,7 +63,7 @@ type Row = {
  * from a public row.
  */
 const ADMIN_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, image_file, image_override_path, is_active, catalog_visible, display_name_override";
+  "sky_id, name, slug, series_code, category_id, image_file, image_override_path, is_active, catalog_visible, display_name_override, card_type";
 
 type Lookups = {
   series: Map<string, string>;
@@ -106,6 +110,7 @@ function toAdminFigure(row: Row, index: Lookups): AdminFigure {
     imageOverridePath: row.image_override_path,
     isActive: row.is_active,
     catalogVisible: row.catalog_visible,
+    cardType: asCardType(row.card_type),
   };
 }
 

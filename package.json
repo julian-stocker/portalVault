@@ -33,7 +33,8 @@
     "verify:seller:staging": "node --env-file=.env.staging tools/verify-seller.mts",
     "verify:commerce:prod": "node --env-file=.env.local tools/verify-commerce.mts",
     "verify:commerce:staging": "node --env-file=.env.staging tools/verify-commerce.mts",
-    "verify:payment-smoke:staging": "node --env-file=.env.staging tools/verify-payment-smoke.mts"
+    "verify:payment-smoke:staging": "node --env-file=.env.staging tools/verify-payment-smoke.mts",
+    "cards:build": "node tools/build-card-templates.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
@@ -49,6 +50,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "sharp": "^0.35.4",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.0"

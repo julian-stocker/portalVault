@@ -18,6 +18,7 @@ import { cache } from "react";
 import type { Character, Element } from "@/lib/catalog/character";
 import { asElement } from "@/lib/catalog/element";
 import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
+import { asCardType } from "@/lib/catalog/card-type";
 import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
@@ -43,12 +44,13 @@ type FigureRow = {
   catalog_visible: boolean;
   display_name_override: string | null;
   character_id: number | null;
+  card_type: string;
 };
 
 // One string literal, not a concatenation: PostgREST's typing reads the
 // select list at the type level, and a computed string loses the row type.
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override, card_type";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
@@ -127,6 +129,10 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     categoryName: lookups.categories.get(row.category_id)?.name ?? "",
     categoryId: row.category_id,
     catalogGroup: lookups.categories.get(row.category_id)?.catalogGroup ?? null,
+    /* Guarded rather than cast: the CHECK constraint is the guarantee, and
+       this keeps a value a later migration adds — read by an older build —
+       out of the artwork lookup instead of into an undefined one. */
+    cardType: asCardType(row.card_type),
     // Filled in by withVariants() once the series context is known — unless
     // an administrator has chosen the public name, which wins over the
     // derivation (ADR-0039).

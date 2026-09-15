@@ -32,7 +32,16 @@ describe("the ownership question belongs to the catalog", () => {
   it("decides which template is drawn, and nothing else", () => {
     const card = readFileSync("src/components/catalog/figure-card.tsx", "utf8");
     expect(card).toContain("const owned = marksOwnership(ownership, collected)");
-    expect(card).toContain("owned ? TEMPLATE.owned : TEMPLATE.plain");
+    // V3.5: the question is unchanged and its answer picks between the
+    // ownership artwork and the figure's own card type — nothing else.
+    /*
+     * Fix round 2: the question is unchanged, and one function answers it.
+     * Which card is drawn depends on the type; whether ownership changes that
+     * card is a switch in `card-template.ts`, currently off.
+     */
+    expect(card).toContain("const template = artworkFor(figure.cardType, owned);");
+    expect(card).not.toContain("TEMPLATE.owned");
+    expect(card).not.toContain("COLLECTION_ARTWORK");
   });
 });
 

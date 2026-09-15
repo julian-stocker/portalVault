@@ -152,10 +152,30 @@ syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `
 | `is_active` | `boolean not null default true` | statt Löschen; **import-owned**, bei jedem Lauf `true` |
 | `catalog_visible` | `boolean not null default true` | redaktionelle Sichtbarkeit (ADR-0039), **admin-owned**, öffentlich |
 | `display_name_override` | `text` **nullbar** | öffentlicher Name statt `name`; nicht leer, wenn gesetzt; öffentlich |
+| `card_type` | `text not null default 'standard'` | auf welches Kartenmotiv die Figur gedruckt wird (0030); CHECK `standard \| dark \| legendary \| chase \| prestige`; **admin-owned**, öffentlich |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
 Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)` ·
 `(series_code) where is_active and catalog_visible` (die öffentliche Katalogabfrage).
+
+**`card_type` ist redaktionell, nicht Besitz (0030).** Die Spalte sagt, *was die Figur ist* —
+ein Dark Spyro und ein gewöhnlicher Spyro sind verschiedene Sammelobjekte und sahen bisher
+gleich aus. Besitz ist dagegen ein Zustand *pro Betrachter* und wird beim Rendern als Overlay
+über jedes Kartenmotiv gelegt; **Sammeln schreibt hier nie**, und es gibt keinen Kartentyp
+`collection`. Ebenso wenig ist es das Variantensystem: `card_type` ändert keinen Namen, keinen
+Slug, keine Sortierung und keine Charakterzuordnung.
+
+Der Backfill in 0030 ist eine **Liste von 76 SKY-IDs**, kein Namensmuster: 21 `dark`,
+25 `legendary`, 30 `chase`, **0 `prestige`**. `prestige` ist ein gültiger Typ mit eigenem
+Motiv, den der Admin setzen kann — automatisch klassifiziert wird dafür nichts. `chase` meint
+ausschließlich **besondere Farben, Materialien und Finishes** einer bestehenden Figur (Crystal,
+Pearl, Jade, Glow, Granite, Scarlet, Molten, Bronze, Metallic, Golden) und ist **keine
+allgemeine Special-Edition-Taxonomie**; saisonale und Event-Editionen bleiben `standard`.
+
+Gesetzt wird die Spalte über `admin_set_card_type(p_sky_id text, p_card_type text)` —
+`security definer`, `search_path = ''`, prüft `is_shop_admin()` vor dem `update`, schreibt
+**nur** `card_type` und nicht `updated_at`. Das Vokabular steht einmal im CHECK; die Funktion
+wiederholt es nicht.
 
 **Drei Sichtbarkeiten, drei Spalten — nie vermischen (ADR-0039):**
 

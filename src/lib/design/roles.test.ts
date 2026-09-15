@@ -574,13 +574,15 @@ describe("gold no longer works as a state or an action", () => {
      * on `gold.png`, and gold appears nowhere else on the tile.
      */
     const template = readFileSync("src/lib/catalog/card-template.ts", "utf8");
-    expect(template).toContain('owned: { src: "/images/cards/gold.webp"');
-    expect(template).toContain('plain: { src: "/images/cards/silver.webp"');
+    // Fix round 1: every card type has its own owned artwork; there is no
+    // single ownership card any more.
+    expect(template).toContain("collected: {");
+    expect(template).toContain("${name}.collected.webp");
     const card = readFileSync("src/components/catalog/figure-card.tsx", "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       .replace(/^\s*\/\/.*$/gm, "");
-    expect(card).toContain("owned ? TEMPLATE.owned : TEMPLATE.plain");
+    expect(card).toContain("const template = artworkFor(figure.cardType, owned);");
     expect(card).not.toMatch(/shadow-gold|own-ground|own-frame/);
   });
 

@@ -36,6 +36,7 @@ function figure(skyId: string, overrides: Partial<CatalogFigure> = {}): CatalogF
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     displayName: name,
     sortBaseName: name,
     sortVariantLabel: null,

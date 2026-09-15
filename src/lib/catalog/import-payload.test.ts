@@ -58,6 +58,20 @@ const EDITORIAL = [
   "edited_at",
   "edited_by",
   "image_override_path",
+  /*
+   * Which card the figure is printed on (V3.5).
+   *
+   * The single reason an administrator's classification survives: the payload
+   * names only the columns the legacy export owns, PostgREST turns that into
+   * ON CONFLICT DO UPDATE SET for those and no others, and `card_type` is not
+   * among them. Set a figure to Chase by hand and the next import leaves it
+   * alone — there is no override flag, because none is needed.
+   *
+   * New figures get 'standard' from the column default. No import-time
+   * classification, deliberately: a heuristic that runs on every import is a
+   * heuristic that eventually overwrites a decision somebody made.
+   */
+  "card_type",
 ];
 
 function figurePayloadKeys(): string[] {

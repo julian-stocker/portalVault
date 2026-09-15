@@ -312,6 +312,22 @@
      the black one. */
   --template-ink: #171717;
   --template-ink-muted: #545454; /*  6.2:1 on both templates */
+
+  /* THE SAME TWO INKS FOR A DARK CARD (V3.5).
+
+     The pair above is near-black and was calibrated on silver and gold, which
+     are both bright paper. Two of the six artworks are not: the measured mean
+     brightness of their text areas is 36 (`dark.png`) and 28
+     (`legendary.png`). Near-black on either is unreadable, so a dark card
+     swaps these two variables for these two — see `ARTWORK_TONE` and the card
+     root in `figure-card.tsx`.
+
+     Off-white rather than pure white, and a warm grey rather than a cold one,
+     so the pair reads as printed ink on a dark stock rather than as a screen.
+     15.5:1 and 8.5:1 on the darker of the two grounds, 14.1:1 and 7.8:1 on
+     the lighter. */
+  --template-ink-on-dark: #f6f4f0;
+  --template-ink-muted-on-dark: #bdb7ab;
   /* The image window is a real hole in the artwork. This is what sits in it
      behind the figure — see figure-card.tsx. */
   --template-window: #ffffff;

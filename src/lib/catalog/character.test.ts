@@ -43,6 +43,7 @@ function figure(skyId: string, seriesCode: string, seriesPosition: number): Cata
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     catalogVisible: true,
     canonicalName: "",
     displayNameOverride: null,

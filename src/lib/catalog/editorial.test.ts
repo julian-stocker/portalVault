@@ -26,6 +26,7 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     displayName: override ?? name,
     sortBaseName: override ?? name,
     sortVariantLabel: null,

@@ -21,8 +21,20 @@
  * A PROPERTY OF THE FIGURE, so it appears on the administrator's card too,
  * where the ownership crown deliberately does not (ADR-0042).
  */
+/*
+ * BOTTOM LEFT OF THE WINDOW, NOT TOP LEFT (fix round 1).
+ *
+ * It sat at `top-1.5 left-1.5`, where it covered the figure's head on a tall
+ * sculpt and competed with the ornamented top of the window that four of the
+ * six artworks carry. Down here it sits over the figure's feet and the
+ * window's quiet lower edge instead.
+ *
+ * Positioned against the image slot, so it stays inside the window on every
+ * card type — one position for all five, no per-type exceptions. Nothing else
+ * changed: same size, same ink, same two grounds, same words.
+ */
 const BASE =
-  "absolute top-1.5 left-1.5 rounded-[3px] px-1.5 py-0.5 " +
+  "absolute bottom-1.5 left-1.5 rounded-[3px] px-1.5 py-0.5 " +
   "font-mono text-[9px] leading-[1.4] font-medium tracking-[0.08em] uppercase " +
   // The light lower edge: one pixel of highlight under a dark field is what
   // makes a stamp look pressed. No radius on it, no blur, no glow.

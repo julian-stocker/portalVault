@@ -18,6 +18,7 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
     categoryName: "Magische Gegenstände",
     categoryId: 4,
     catalogGroup: "item",
+    cardType: "standard",
     displayName: "Anvil Rain",
     sortBaseName: "Anvil Rain",
     sortVariantLabel: null,

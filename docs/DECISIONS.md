@@ -5237,3 +5237,59 @@ jeder Rechnung und im Impressum steht. Rückbau ist eine Zeile:
 suggerierte einen Join, den es nicht gibt) · eine Spalte `is_commercial` (heute mit genau einem
 möglichen Wert) · den Namen als Konstante in der Oberfläche (zweite Quelle der Wahrheit für
 einen Rechtsnamen, ADR-0059).
+
+---
+
+## ADR-0067 — Was eine Figur ist, steht in der Datenbank; wem sie gehört, liegt als Siegel darüber
+
+**Status:** angenommen · **Datum:** 2026-09-15 · **Migration:** `0030_card_types.sql`
+
+**Kontext.** Jede Figurenkarte wurde auf einem von zwei Motiven gezeichnet: Silber, oder Gold,
+sobald der Betrachter die Figur besitzt. Das ist **eine Achse für zwei Aufgaben**. Ein Dark
+Spyro und ein gewöhnlicher Spyro sind verschiedene Sammelobjekte und sahen trotzdem gleich aus,
+während „Gold" nichts über die Figur aussagt und alles über den, der sie ansieht.
+
+**Entscheidung.** Die beiden Achsen werden getrennt.
+
+`skylanders.card_type` ist eine **redaktionelle, dauerhafte Tatsache über das Sammelobjekt** —
+`standard`, `dark`, `legendary`, `chase`, `prestige` — und bestimmt das Basismotiv. Besitz
+bleibt ein Zustand **pro Betrachter**, wird beim Rendern als Overlay über *jedes* Motiv gelegt
+und schreibt nie in diese Spalte. Einen Kartentyp `collection` gibt es nicht.
+
+**`chase` ist eng definiert:** ausschließlich besondere **Farben, Materialien und Finishes**
+einer bestehenden Figur — Crystal, Pearl, Jade, Glow, Granite, Scarlet, Molten, Bronze,
+Metallic, Golden. Es ist **keine allgemeine Special-Edition-Taxonomie**; saisonale und
+Event-Editionen (Easter, Halloween, Royale, Nitro, Mystical) bleiben `standard`, bis jemand
+etwas anderes entscheidet. `prestige` ist ein gültiger Typ mit eigenem Motiv, den der Admin
+setzen kann — **automatisch klassifiziert wird dafür nichts**, der Backfill vergibt ihn null
+Mal.
+
+**Besitz wird als Siegel gezeigt, nicht als zweites Motiv.** Der ursprüngliche Plan war ein
+zweites, „gesammeltes" Artwork je Kartentyp. Gebaut wurde das auch — die Dateien `*.collected.*`
+und die vollständige plain/collected-Architektur existieren und werden von der Build-Pipeline
+erzeugt. Sie sind über `USE_COLLECTED_ARTWORK = false` in `lib/catalog/card-template.ts`
+**zentral abgeschaltet**, weil die Paare nicht pixelgleich sind: Rahmen und Figur schienen beim
+Sammeln zu springen, und eine Zustandsänderung darf das, wovon sie der Zustand ist, nicht
+bewegen. Stattdessen liegt `CollectedSeal` — ein goldenes Siegel mit Häkchen aus den
+Ownership-Tokens — über der oberen rechten Ecke des Bildfensters. Eine Geometrie, eine Größe,
+kein Sonderfall je Kartentyp. Besessen und nicht besessen teilen sich damit **dasselbe**
+Basismotiv, und der einzige Unterschied ist das Siegel.
+
+**Der Backfill ist eine Liste, keine Regel.** 76 SKY-IDs, ausgeschrieben: 21 `dark`,
+25 `legendary`, 30 `chase`. Kein LIKE, kein Regex, kein Namensabgleich. Die Klassifikation
+entstand in der Anwendung, wo `parseVariant()` bereits weiß, dass eine Variante eine Basisfigur
+braucht, um Variante *von* etwas zu sein — das unterscheidet „Dark Spyro" von „Dark Pyramid".
+Ein Muster in SQL wäre ein zweiter, gröberer Klassifikator, der dem ersten widerspricht. Eine
+Liste ist außerdem prüfbar und bleibt stabil, wenn eine Figur umbenannt wird.
+
+**Konsequenzen.** `card_type` ändert **keinen** Namen, keinen Slug, keine Sortierung und keine
+Charakterzuordnung — die drei Identitäten aus ADR-0034 bleiben getrennt. Rückbau ist
+`alter table public.skylanders drop column card_type;` plus `drop function
+public.admin_set_card_type(text, text);`.
+
+**Verworfen:** ein PostgreSQL-Enum (jeder geschlossene Wertebereich im Schema ist `text` +
+CHECK; ein Enum-Wert lässt sich nicht entfernen und `add value` rollt nicht sauber zurück) ·
+ein Kartentyp `collection` (vermischte wieder die beiden Achsen) · das Vokabular zusätzlich in
+`admin_set_card_type()` (zweite Liste, die mitgepflegt werden muss — der CHECK ist die
+Wahrheit) · `updated_at` bei einer redaktionellen Änderung mitzuschreiben (die Spalte gehört
+dem Import; die drei vergleichbaren Admin-Mutationen lassen sie ebenfalls in Ruhe).

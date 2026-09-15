@@ -2,13 +2,13 @@ import { describe, expect, it } from "vitest";
 import { readFileSync, statSync } from "node:fs";
 
 import {
+  CARD_ARTWORK,
   CARD_CANVAS,
   GRID_AREAS,
   GRID_ROWS,
   INSET,
   LAYOUT_DEBUG,
   ROWS,
-  TEMPLATE,
   WINDOW_FILL,
 } from "@/lib/catalog/card-template";
 import { marksOwnership } from "@/lib/catalog/card";
@@ -79,7 +79,7 @@ describe("the shipped templates", () => {
 
   it("the build tool refuses assets that would not line up", () => {
     const tool = source(TOOL);
-    expect(tool).toContain("both templates must be");
+    expect(tool).toContain("every template must be");
     expect(tool).toContain("has no alpha channel");
     // No keying, no cropping: the sources are finished artwork.
     expect(code(TOOL)).not.toMatch(/extract|trim|flatten|removeAlpha/);
@@ -122,10 +122,21 @@ describe("nothing the artwork already paints is painted again", () => {
 });
 
 describe("possession is the whole card", () => {
-  it("gold when it is yours, silver when it is not", () => {
-    expect(TEMPLATE.owned.src).toContain("gold");
-    expect(TEMPLATE.plain.src).toContain("silver");
-    expect(code(CARD)).toContain("owned ? TEMPLATE.owned : TEMPLATE.plain");
+  it("the figure's own card, and an overlay when it is yours", () => {
+    /*
+     * V3.5 split one axis into two. The gold/silver pair said "yours" and
+     * "not yours" and nothing about the figure; now the artwork says what the
+     * collectible IS, and ownership overrides it without writing to it.
+     */
+    /*
+     * V3.5 split one axis into two: the artwork says what the collectible IS,
+     * and ownership is shown on top of it. Fix round 2 stopped ownership
+     * changing the artwork at all — the two halves of a pair are not
+     * pixel-congruent, so the card appeared to jump.
+     */
+    expect(CARD_ARTWORK.standard.plain.src).toContain("card.webp");
+    expect(CARD_ARTWORK.standard.collected.src).toContain("card.collected.webp");
+    expect(code(CARD)).toContain("const template = artworkFor(figure.cardType, owned);");
   });
 
   it("still only the catalog asks the question", () => {
@@ -147,7 +158,9 @@ describe("possession is the whole card", () => {
 
 describe("one row grid, measured off the artwork", () => {
   it("the canvas is the render box, so the gold glow is not clipped", () => {
-    expect(CARD_CANVAS).toEqual({ width: 1024, height: 1536 });
+    // V3.5: the six new artworks are 1007×1562, a different ratio rather
+    // than a rescale, and the canvas moved to them.
+    expect(CARD_CANVAS).toEqual({ width: 1007, height: 1562 });
     expect(code(CARD)).toContain("aspectRatio: CARD_ASPECT");
   });
 
@@ -175,22 +188,35 @@ describe("one row grid, measured off the artwork", () => {
     ]);
   });
 
-  it("lands on the bands the templates paint", () => {
-    // Cumulative tops, against the measurements taken off the two PNGs.
+  it("keeps the rows in a plausible order against the artwork", () => {
+    /*
+     * This used to pin cumulative tops against pixel rows measured off
+     * `silver.png` and `gold.png` — y 114, 1136, 1148, 1267, 1406 of 1536.
+     * Those two are not the artwork any more: V3.5 replaced them with six
+     * files on a 1007×1562 canvas of a different ratio, and fix round 1
+     * deliberately moved `meta` and `trade` down.
+     *
+     * The painted bands of the new artworks have NOT been measured — the
+     * operator asked for one small correction and a look in the browser
+     * before anything is pinned. Asserting the old numbers would have been
+     * asserting a canvas that no longer exists, and inventing new ones would
+     * be worse.
+     *
+     * What is checked is what is actually known: the window is in the upper
+     * half, the trade row clears the bottom ornament, and nothing overlaps.
+     */
     const top: Record<string, number> = {};
     let y = 0;
-    for (const r of ROWS) {
-      top[r.area] = y;
-      y += r.height;
-    }
-    // image window: y 114–775 of 1536
-    expect(top.image).toBeCloseTo((114 / 1536) * 100, 1);
-    // the painted diamond rule: y 1136–1148
-    expect(top.sep).toBeCloseTo((1136 / 1536) * 100, 1);
-    expect(top.meta).toBeCloseTo((1148 / 1536) * 100, 1);
-    // the silver plate: y 1267–1406
-    expect(top.trade).toBeCloseTo((1267 / 1536) * 100, 1);
-    expect(top["frame-bottom"]).toBeCloseTo((1406 / 1536) * 100, 1);
+    for (const r of ROWS) { top[r.area] = y; y += r.height; }
+
+    expect(top.image).toBeGreaterThan(5);
+    expect(top.image + 43).toBeLessThan(55);          // window ends before mid-card
+    expect(top.name).toBeGreaterThan(top.image);
+    expect(top.market).toBeGreaterThan(top.name);
+    expect(top.meta).toBeGreaterThan(top.market);
+    expect(top.trade).toBeGreaterThan(top.meta);
+    // The bottom ornament of every new artwork begins around 96 %.
+    expect(top.trade + 9.05).toBeLessThan(95);
   });
 
   it("is expressed in percent, never in pixels", () => {
@@ -256,6 +282,27 @@ describe("the layout debug mode", () => {
     expect(LAYOUT_DEBUG).toBe(false);
     // The attribute is absent rather than false — nothing to match on.
     expect(code(CARD)).toContain('LAYOUT_DEBUG ? "" : undefined');
+  });
+
+  it("still reaches every grid layer, so the tool survives being switched off", () => {
+    /*
+     * The card draws three grid layers on one set of measurements. Two of
+     * them sit ON the artwork and hold the slots the debug mode paints — the
+     * decorative one and the interactive one — and both have to carry the
+     * attribute: asserting that it merely appears somewhere would pass with
+     * one of the two silently dropped, leaving half the card unpainted the
+     * next time someone needs the tool.
+     *
+     * The third is the picture layer BEHIND the artwork. It is deliberately
+     * unmarked: its only slot is `image`, whose band the decorative layer
+     * already paints on exactly the same geometry, and painting it twice
+     * would tint the figure rather than the slot.
+     */
+    const card = code(CARD);
+    const overlays = card.match(/pointer-events-none absolute inset-0 grid/g) ?? [];
+    const marked = card.match(/data-card-layout-debug=\{LAYOUT_DEBUG \? "" : undefined\}/g) ?? [];
+    expect(overlays).toHaveLength(2);
+    expect(marked).toHaveLength(overlays.length);
   });
 
   it("paints every slot a different colour", () => {

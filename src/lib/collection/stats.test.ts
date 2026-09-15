@@ -20,6 +20,7 @@ function entry(
     categoryName,
     categoryId: 1,
     catalogGroup: "figure",
+    cardType: "standard",
     catalogVisible: true,
     canonicalName: "Drobot",
     displayNameOverride: null,

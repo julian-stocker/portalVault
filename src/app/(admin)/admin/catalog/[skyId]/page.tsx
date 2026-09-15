@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AdminThumb } from "@/components/admin/admin-thumb";
+import { CardTypeSelect } from "@/components/admin/card-type-select";
 import { FigureEditor } from "@/components/admin/figure-editor";
 import { VisibilityToggle } from "@/components/admin/visibility-toggle";
 import { fetchAdminFigure, fetchAdminNote, fetchCatalogChanges } from "@/lib/admin/queries";
@@ -51,6 +52,17 @@ export default async function AdminFigurePage({
           <h1 className="text-2xl font-semibold tracking-tight">{figure.publicName}</h1>
           <p className="mt-1 font-mono text-xs text-muted">{figure.skyId}</p>
         </div>
+      </div>
+
+      {/* Which card the figure is printed on (V3.5). Its own block rather
+          than a line in the name editor: it is a fact about the collectible,
+          not about how it is written, and the hint says so. */}
+      <div className="mt-6 flex items-center justify-between gap-4 rounded-sky-lg bg-surface/80 p-4 ring-1 ring-border/70">
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium">{de.admin.cardType}</h2>
+          <p className="mt-0.5 text-xs text-muted">{de.admin.cardTypeHint}</p>
+        </div>
+        <CardTypeSelect skyId={figure.skyId} cardType={figure.cardType} />
       </div>
 
       {/* The picture, and the two things you can do to it (ADR-0046). First

@@ -148,6 +148,7 @@ describe("the same mutations as /admin, not new ones", () => {
     expect(new Set(rpcs)).toEqual(
       new Set([
         "admin_set_catalog_visible",
+        "admin_set_card_type",
         "admin_set_display_name_override",
         "admin_set_admin_note",
         "admin_set_catalog_group",

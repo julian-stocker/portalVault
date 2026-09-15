@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-10 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-15 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -45,6 +45,27 @@ Die vollständige Änderungshistorie liegt in Git.
 >
 > Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
 > Betreiber stellt den Modus auf `closed` zurück.
+
+**V3.5 — Kartentypen gebaut, Staging angewandt, Production offen (2026-09-15).** Nicht committet.
+
+`skylanders.card_type` trennt, **was eine Figur ist**, von **wem sie gehört** (ADR-0067,
+`0030_card_types.sql`). Fünf persistierte Typen: `standard`, `dark`, `legendary`, `chase`,
+`prestige`. Der Backfill ist eine kuratierte Liste von 76 SKY-IDs — 21 `dark`, 25 `legendary`,
+30 `chase` — und vergibt `prestige` **null Mal**: der Typ ist unterstützt, hat ein eigenes
+Motiv und wird vom Administrator von Hand gesetzt. `chase` meint ausschließlich besondere
+Farben, Materialien und Finishes, **keine** allgemeine Special-Edition-Taxonomie.
+
+Besitz bleibt davon unberührt und schreibt nie in die Spalte. Besessene und nicht besessene
+Figuren teilen sich **dasselbe** Basismotiv; der Unterschied ist `CollectedSeal`, ein goldenes
+Siegel oben rechts auf der Bildfensterkante. Die zweite, „gesammelte" Motivvariante
+(`*.collected.*`) existiert vollständig im Code und in der Build-Pipeline, ist aber über
+`USE_COLLECTED_ARTWORK = false` zentral **abgeschaltet** — die Paare sind nicht pixelgleich.
+
+| | |
+|---|---|
+| Staging | `0030` angewandt und verifiziert |
+| Production | **noch nicht angewandt** — eigene Freigabe |
+| Code | gebaut, getestet, **nicht committet, nicht gepusht** |
 
 **Order-/Tracking-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
 

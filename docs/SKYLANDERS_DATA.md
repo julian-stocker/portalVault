@@ -753,6 +753,36 @@ Deshalb ist „Eigenes Bild entfernen" eine Rücknahme und kein Verlust: das imp
 die ganze Zeit darunter. Aufgelöst wird zentral in `src/lib/catalog/image.ts`, in dieser
 Reihenfolge: Override → importiertes Bild → leere Bildbühne.
 
+## 11g. Kartentyp: was eine Figur *ist*, getrennt von dem, wem sie gehört (2026-09-15, ADR-0067)
+
+`skylanders.card_type` sagt, auf welches Basismotiv eine Figur gedruckt wird — `standard`,
+`dark`, `legendary`, `chase`, `prestige`. Die Spalte ist **redaktionell und dauerhaft**,
+gehört dem Administrator und wird über `admin_set_card_type()` gesetzt. Der Import nennt sie
+nirgends; dieselbe Trennung wie bei `image_override_path` (11f) und `character_id` (ADR-0034).
+
+**Besitz ist keine Kartenart.** Es gibt keinen Typ `collection`, und Sammeln schreibt hier nie.
+Besessene und nicht besessene Figuren verwenden **dasselbe** Motiv; der Unterschied ist ein
+goldenes Siegel (`CollectedSeal`), das beim Rendern darübergelegt wird. Die zweite,
+„gesammelte" Motivvariante (`*.collected.*`) existiert im Code und in der Build-Pipeline, ist
+aber über `USE_COLLECTED_ARTWORK = false` zentral abgeschaltet — die Paare sind nicht
+pixelgleich, und die Karte schien beim Sammeln zu springen.
+
+**Die Klassifikation ist eine kuratierte Liste, kein Namensmuster.** 76 SKY-IDs in `0030`:
+21 `dark`, 25 `legendary`, 30 `chase`, **0 `prestige`**. Sie entstand in der Anwendung, wo
+`parseVariant()` bereits verlangt, dass eine Variante eine Basisfigur **in derselben Serie**
+hat — genau die Regel, die „Dark Spyro" (Variante von SKY-0053) von „Dark Pyramid",
+„Dark Reactor" und „Dark Rune" trennt, die nur zufällig so heißen. Ein `LIKE 'Dark %'` in SQL
+wäre ein zweiter, gröberer Klassifikator, der dem ersten widerspricht.
+
+**`chase` ist eng definiert:** nur besondere Farben, Materialien und Finishes einer bestehenden
+Figur — Crystal, Pearl, Jade, Glow, Granite, Scarlet, Molten, Bronze, Metallic, Golden. **Keine
+allgemeine Special-Edition-Taxonomie.** Saisonale und Event-Editionen (Easter, Halloween,
+Royale, Nitro, Mystical) bleiben `standard`. `prestige` vergibt der Administrator von Hand.
+
+**Namen bleiben roh (Regel 4).** Zwei der 76 tragen Tippfehler aus der Legacy-Quelle —
+SKY-0252 „Legendary Grim Creemper" und SKY-0280 „Horn Blast Whirwind (Clear Crystal)". Beide
+werden **nicht** korrigiert: `0030` klassifiziert, es redigiert nicht.
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

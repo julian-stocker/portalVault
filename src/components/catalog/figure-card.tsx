@@ -34,14 +34,16 @@
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
+import { CollectedSeal } from "@/components/catalog/collected-seal";
 import { VariantSeal } from "@/components/catalog/variant-seal";
 import {
   CARD_ASPECT,
   GRID_AREAS,
   GRID_ROWS,
   INSET,
+  ARTWORK_TONE,
+  artworkFor,
   LAYOUT_DEBUG,
-  TEMPLATE,
   WINDOW_FILL,
   type CardArea,
 } from "@/lib/catalog/card-template";
@@ -69,17 +71,27 @@ const GRID: CSSProperties = {
 function Slot({
   area,
   className = "",
+  style,
   children,
 }: {
   area: CardArea;
   className?: string;
+  /**
+   * Extra style for the slot — in practice the horizontal inset from `INSET`.
+   *
+   * A style rather than a class because a Tailwind arbitrary value has to be
+   * a literal in the source to be generated: `px-[${INSET.text}]` compiles to
+   * a class name with no rule behind it. The grid area is merged in below so
+   * a caller cannot lose it by passing a style of its own.
+   */
+  style?: CSSProperties;
   children?: ReactNode;
 }) {
   return (
     <div
       data-slot={area}
       className={`relative min-h-0 ${className}`}
-      style={{ gridArea: area }}
+      style={{ ...style, gridArea: area }}
     >
       {children}
     </div>
@@ -133,7 +145,30 @@ export function FigureCard({
 }) {
   const copies = duplicateBadge(quantity);
   const owned = marksOwnership(ownership, collected);
-  const template = owned ? TEMPLATE.owned : TEMPLATE.plain;
+
+  /*
+   * WHICH CARD THIS FIGURE IS PRINTED ON (V3.5).
+   *
+   * Two independent facts meet here, and neither writes to the other.
+   * `figure.cardType` is editorial and permanent — what the collectible IS.
+   * `owned` is this viewer's collection state. It decides what is drawn ON
+   * the card, never which card — and never the type, which nothing here
+   * writes.
+   *
+   * `artworkFor()` holds the whole rule, including the switch that currently
+   * keeps the `.collected` artworks out of use: their frames are a few pixels
+   * off their plain counterparts, and collecting a figure must not make the
+   * figure appear to move.
+   *
+   * `marksOwnership` stays exactly the boundary it already was. A surface
+   * that asks for `ownership="showcase"` — the figure page's siblings — shows
+   * the card type and never the collection artwork, which is the same rule
+   * that kept the gold template off those cards before.
+   */
+  const template = artworkFor(figure.cardType, owned);
+  /* One tone per card type, for both of its cards: a collected artwork is the
+     same stock with an ownership treatment on it, not a different design. */
+  const tone = ARTWORK_TONE[figure.cardType];
   const picture = imageSrc(figure);
 
   const body = (
@@ -157,7 +192,7 @@ export function FigureCard({
       />
 
       <div className="absolute inset-0 grid" style={GRID}>
-        <Slot area="image" className="px-[10.8%]">
+        <Slot area="image" style={{ paddingInline: INSET.image }}>
           {picture ? (
             /* ADR-0026: already optimised to 640 px, content-addressed and
                served from /public, so next/image would re-optimise at runtime
@@ -203,7 +238,7 @@ export function FigureCard({
         style={GRID}
         data-card-layout-debug={LAYOUT_DEBUG ? "" : undefined}
       >
-        <Slot area="image" className="px-[10.8%]">
+        <Slot area="image" style={{ paddingInline: INSET.image }}>
           {figure.sortVariantLabel ? <VariantSeal label={figure.sortVariantLabel} /> : null}
           {statusBadge}
           {copies !== null && !owned ? (
@@ -238,7 +273,7 @@ export function FigureCard({
         <Slot area="pad" />
         <Slot area="sep" />
 
-        <Slot area="name" className="flex items-center justify-center px-[13%]">
+        <Slot area="name" className="flex items-center justify-center" style={{ paddingInline: INSET.text }}>
           {nameSlot ?? (
             /* The base name: the finish is on the seal over the window, so
                "Bash" rather than "Bash (Legendary)". `title` keeps the full
@@ -260,7 +295,7 @@ export function FigureCard({
          * `justify-end` inside the row: the block sits at the foot of its
          * band, just above the painted rule, rather than floating in it.
          */}
-        <Slot area="market" className="flex flex-col justify-end gap-[4%] px-[13%] pb-[3%] text-center">
+        <Slot area="market" className="flex flex-col justify-end gap-[4%] pb-[3%] text-center" style={{ paddingInline: INSET.text }}>
           <span className="block text-[clamp(7px,4.1cqw,9.5px)] leading-none font-medium tracking-[0.1em] text-template-ink-muted uppercase">
             {de.catalog.marketValue}
           </span>
@@ -282,7 +317,7 @@ export function FigureCard({
          * never does, and the two cannot overlap however narrow the card gets.
          * Both are `nowrap`; the type shrinks with the card instead.
          */}
-        <Slot area="meta" className="px-[13%] text-[clamp(8px,4.6cqw,10.5px)] leading-[1.1] font-medium text-template-ink">
+        <Slot area="meta" className="text-[clamp(8px,4.6cqw,10.5px)] leading-[1.1] font-medium text-template-ink" style={{ paddingInline: INSET.text }}>
           <div
             className="grid h-full items-center gap-[4%]"
             style={{ gridTemplateColumns: "minmax(0, 1fr) auto" }}
@@ -319,6 +354,13 @@ export function FigureCard({
           </div>
         </Slot>
       </div>
+
+      {/*
+       * LAYER 4 — the one thing that is about the viewer rather than the
+       * figure. Last, so it is above the artwork and above the picture; it
+       * carries its own position and size, so every card type gets the same.
+       */}
+      {owned ? <CollectedSeal /> : null}
     </>
   );
 
@@ -337,7 +379,30 @@ export function FigureCard({
         // reach a figure they took out of the public catalog.
         (muted ? "opacity-60" : "")
       }
-      style={{ aspectRatio: CARD_ASPECT }}
+      /*
+       * THE CARD'S OWN INK (V3.5).
+       *
+       * The two variables are redefined here rather than a second set of
+       * classes being threaded through every slot. Everything below still
+       * says `text-template-ink` and `text-template-ink-muted`; what those
+       * two resolve to now depends on the artwork underneath them — because
+       * `dark.png` and `legendary.png` are dark stock, and the near-black
+       * default was calibrated on bright paper.
+       *
+       * The colours themselves stay tokens in `globals.css`. This picks a
+       * pair; it does not invent one, and it carries no design role — gold
+       * still means ownership, silver trade, amber commerce, and none of
+       * them is set from here.
+       */
+      style={
+        tone === "dark"
+          ? ({
+              aspectRatio: CARD_ASPECT,
+              "--template-ink": "var(--template-ink-on-dark)",
+              "--template-ink-muted": "var(--template-ink-muted-on-dark)",
+            } as CSSProperties)
+          : { aspectRatio: CARD_ASPECT }
+      }
     >
       {!interactive ? (
         /* Static body: the picture is a picture. An administrator's actions
@@ -385,8 +450,40 @@ export function FigureCard({
         style={GRID}
         data-card-layout-debug={LAYOUT_DEBUG ? "" : undefined}
       >
-        <Slot area="trade" className="pointer-events-auto px-[10.1%]">
-          {trade}
+        {/*
+         * THE TRADE ROW, ON A PLATE THE CARD NOW DRAWS ITSELF (V3.5).
+         *
+         * `silver.png` and `gold.png` had the plate painted into them —
+         * `SURFACE.plate` is its colour, read off the artwork. None of the
+         * six new templates has one: the measured surface at this height is
+         * ornament on `chase` and `prestige`, and dark stock on `dark` and
+         * `legendary`.
+         *
+         * So the plate moves into CSS, from the same `--trade-solid` token
+         * the rest of the trade language already uses. Silver stays silver
+         * and means what it always meant — trade, not ownership, not
+         * commerce. Nothing about the offer logic, the ink inside the row or
+         * what the row can be clicked on changes; only where the metal comes
+         * from.
+         *
+         * `rounded-sky-sm` and the hairline so it reads as a struck plate
+         * rather than a grey rectangle, which is what the painted one did.
+         */}
+        <Slot area="trade" className="pointer-events-auto" style={{ paddingInline: INSET.trade }}>
+          {/*
+           * Layout only — no paint (fix round 2).
+           *
+           * Fix round 1 drew a silver plate here, because the six V3.5
+           * artworks did not appear to carry the one `silver.png` had. They
+           * do; a second plate on top of a painted one is two plates. The box
+           * still centres its content and still clips it, and everything that
+           * makes the row work — the link, its text, its accessible name, its
+           * hover, focus and keyboard behaviour, the quick view it opens — is
+           * inside `trade` and untouched.
+           */}
+          <div className="flex h-full w-full items-center justify-center overflow-hidden">
+            {trade}
+          </div>
         </Slot>
       </div>
     </article>

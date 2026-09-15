@@ -17,6 +17,7 @@
  */
 "use server";
 
+import { isCardType } from "@/lib/catalog/card-type";
 import { revalidatePath } from "next/cache";
 
 import { looksLikeEmail, normaliseContact } from "@/lib/admin/seller";
@@ -61,6 +62,28 @@ export async function setCatalogVisible(skyId: string, visible: boolean): Promis
   return call(
     "admin_set_catalog_visible",
     { p_sky_id: skyId, p_visible: visible },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+  );
+}
+
+/**
+ * Which base artwork a figure is printed on (V3.5).
+ *
+ * The value is validated in the database as well — `admin_set_card_type()`
+ * refuses an unknown one before it reads the row, and the CHECK constraint
+ * refuses it again. This guard is here so a typo comes back as a readable
+ * refusal rather than as a generic write failure.
+ *
+ * Revalidates the catalogue and the collection, because the card is drawn on
+ * both, and the figure's own admin page. Not the shop: a card type changes
+ * no price, no offer and no availability.
+ */
+export async function setCardType(skyId: string, cardType: string): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCardType(cardType)) return { ok: false, message: de.admin.unknownCardType };
+  return call(
+    "admin_set_card_type",
+    { p_sky_id: skyId, p_card_type: cardType },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
   );
 }
