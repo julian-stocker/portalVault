@@ -232,9 +232,10 @@ describe("the main sections keep their prefetch", () => {
   });
 
   it("leaves the cart, the shop and the about page prefetching", () => {
+    // The floating cart used to be in this list. It was removed in V3.4;
+    // the header's cart is the one link to /cart now.
     for (const file of [
       "src/components/cart/cart-badge.tsx",
-      "src/components/cart/floating-cart.tsx",
       "src/components/layout/site-footer.tsx",
     ]) {
       for (const tag of linkTags(file)) {

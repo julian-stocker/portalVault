@@ -50,11 +50,12 @@ export const metadata: Metadata = {
  * `width=device-width, initial-scale=1` — WITHOUT `viewport-fit=cover`. And
  * without that, iOS reports every `env(safe-area-inset-*)` as **zero**.
  *
- * The consequence was not cosmetic and not theoretical. `SiteNav`, `CartToast`
- * and `FloatingCart` each compute their position from
- * `env(safe-area-inset-bottom)`, and three tests pin those expressions. On an
- * iPhone all of that arithmetic added nothing, and the bottom bar sat under
- * the home indicator. The tests could not catch it: they assert that the CSS
+ * The consequence was not cosmetic and not theoretical. `SiteNav` and
+ * `CartToast` each compute their position from `env(safe-area-inset-bottom)`,
+ * and tests pin those expressions. On an iPhone all of that arithmetic added
+ * nothing, and the bottom bar sat under the home indicator. (A third one,
+ * `FloatingCart`, did the same until V3.4 removed it.) The tests could not
+ * catch it: they assert that the CSS
  * string is in the bundle, which it was — what was missing is the declaration
  * that makes the value non-zero. `viewport.test.ts` asserts this export.
  *

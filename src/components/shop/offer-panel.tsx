@@ -71,7 +71,17 @@ export function OfferAddButton({
 
   const key = lineKey(offer.skyId, offer.condition);
   const already = cart.some((line) => keyOf(line) === key && line.quantity > 0);
-  const label = `${name} (${conditionLabel(offer.condition)})`;
+  /*
+   * WHAT THE SCREEN READER IS TOLD THIS BUTTON BUYS.
+   *
+   * The figure page names the condition, because its panel is the surface
+   * where a condition could still become a choice. The quick view does not:
+   * V1 sells loose and nothing else, so "(Lose)" distinguishes the offer from
+   * nothing at all — it was removed from the visible row for that reason
+   * (V1_CONDITION), and reading it aloud is the same redundancy with a
+   * different output device.
+   */
+  const label = compact ? name : `${name} (${conditionLabel(offer.condition)})`;
 
   return (
     <button
@@ -101,7 +111,27 @@ export function OfferAddButton({
       style={compact ? COMMERCE_SURFACE : undefined}
     >
       {already ? <CartCheckedGlyph /> : <CartGlyph />}
-      {de.shop.addToCart}
+      {/*
+       * THE PRICE IS THE LABEL, IN THE QUICK VIEW (V3.4).
+       *
+       * Amber already says "this buys something" and the glyph already says
+       * "into the basket", so "In den Warenkorb" beside them was the third
+       * telling of one fact — and the widest thing in a row that has to hold
+       * a seller's name beside it on a phone.
+       *
+       * The row no longer prints the price separately; this carries it. One
+       * price per offer, on the control that charges it.
+       *
+       * The figure page keeps the words: its button stands alone under a
+       * heading, with no price beside it and no room pressure.
+       *
+       * `tabular-nums` so two offers under one another do not shift.
+       */}
+      {compact ? (
+        <span className="tabular-nums">{formatPrice(offer.price)}</span>
+      ) : (
+        de.shop.addToCart
+      )}
     </button>
   );
 }

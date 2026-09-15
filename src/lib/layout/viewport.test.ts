@@ -8,9 +8,10 @@ import { viewport } from "@/app/layout";
  *
  * WHY THIS FILE EXISTS RATHER THAN A THIRD CSS ASSERTION
  *
- * `floating-cart.test.ts` and `toast.test.ts` already pin the
- * `env(safe-area-inset-bottom)` expressions in the bottom bar, the toast and
- * the floating cart. Every one of those passed while the bar sat under the
+ * `masthead.test.ts` and `toast.test.ts` already pin the
+ * `env(safe-area-inset-bottom)` expressions in the bottom bar and the toast.
+ * (A third file did the same for the floating cart, until V3.4 removed that
+ * button.) Every one of those passed while the bar sat under the
  * home indicator on every iPhone — because nothing exported a viewport, Next
  * emitted its default without `viewport-fit=cover`, and iOS then reports
  * every inset as ZERO.

@@ -297,17 +297,23 @@ export function QuickView({
                   >
                     <div className="flex min-w-0 flex-col gap-0.5">
                       {/*
-                       * No condition label. V1 sells loose figures and only
-                       * loose figures, so "Lose" is not a distinction the
-                       * buyer can act on — it labels the only thing there is.
-                       * The price leads instead. If a second condition is ever
-                       * offered, the label comes back here, because then it
-                       * would carry information. See `V1_CONDITION`.
+                       * NO PRICE HERE, AND NO CONDITION (V3.4).
+                       *
+                       * The condition went first: V1 sells loose figures and
+                       * only loose figures, so "Lose" labelled the only thing
+                       * there is (see `V1_CONDITION`). The price followed it
+                       * into the button, because a row that shows 12,99 € on
+                       * the left and a button reading 12,99 € on the right is
+                       * printing one fact twice and spending the width of a
+                       * phone on it.
+                       *
+                       * What is left on this side is who is selling — which
+                       * is the one thing the button cannot say.
+                       *
+                       * If a second condition is ever offered, the label
+                       * comes back here, because then it would carry
+                       * information.
                        */}
-                      <span className="text-lg leading-tight font-semibold text-on-deep tabular-nums">
-                        {formatPrice(offer.price)}
-                      </span>
-
                       {/*
                        * WHO IS SELLING — under the price, not beside it.
                        *

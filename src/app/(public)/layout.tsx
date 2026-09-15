@@ -22,16 +22,28 @@ export default async function PublicLayout({ children }: { children: React.React
 
   return (
     <div className="relative flex min-h-screen flex-col">
-      {/* The world starts behind the header, not below it (ADR-0038, V3.3).
-          Owned by the layout so it survives navigation between the two
-          route groups. */}
       {/* Who this browser is acting as. Draws nothing (ADR-0061). */}
       <PrincipalGate userId={user?.id ?? null} />
-      <WorldZone />
       <SiteNav signedIn={Boolean(user)} admin={admin} openOrders={openOrders} />
       {/* `flex-1` so a short page still pushes the footer to the bottom of the
           viewport instead of leaving it floating in the middle. */}
-      <div className="flex-1">{children}</div>
+      <div className="relative flex-1">
+        {/*
+         * The world begins UNDER the header (V3.4).
+         *
+         * It used to be drawn behind it — the header was glass and the sky was
+         * the same sky above and below the hairline (ADR-0038, V3.3). That is
+         * the decision this release reverses: the header is now an opaque top
+         * edge, so artwork behind it would be artwork nobody can see, and the
+         * `top-0` it is anchored to has to mean "below the masthead".
+         *
+         * Inside the content wrapper, which is `relative` for exactly this
+         * reason. Still owned by the layout rather than by a page, so it
+         * survives client navigation between the two route groups.
+         */}
+        <WorldZone />
+        {children}
+      </div>
       <SiteFooter />
       <NavSpacer />
     </div>

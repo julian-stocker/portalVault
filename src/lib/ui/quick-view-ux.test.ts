@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import { de } from "@/lib/i18n/de";
+
 /**
  * The quick view as a dialog, as a piece of the catalog, and as a promise
  * about requests (IR-001).
@@ -516,11 +518,10 @@ describe("one offer is one compact line", () => {
     expect(row).toContain("flex items-center justify-between");
   });
 
-  it("opens the offer with the price, naming no condition", () => {
+  it("names no condition, anywhere in the row", () => {
     /*
      * "Lose € 4,49" labelled the only thing there is. V1 sells loose figures
-     * and nothing else, so the word distinguished the offer from nothing and
-     * cost the price its position as the first line of the row.
+     * and nothing else, so the word distinguished the offer from nothing.
      *
      * If a second condition is ever sold, the label belongs back here —
      * `OFFER_CONDITIONS` still has two entries, and `conditionLabel()` still
@@ -534,19 +535,51 @@ describe("one offer is one compact line", () => {
     // come back is the condition read as something to display.
     const rendered = row.slice(row.indexOf("key={offer.condition}") + 21);
     expect(rendered).not.toContain("offer.condition");
-
-    // The price is the first thing the row renders.
-    const price = row.indexOf("formatPrice(offer.price)");
-    expect(price).toBeGreaterThan(-1);
-    const before = row.slice(0, price);
-    expect(before).not.toContain("<span className=\"text-xs");
   });
 
-  it("keeps the seller under the price, inside the same column", () => {
+  it("prints the price once, on the button that charges it (V3.4)", () => {
+    /*
+     * The row used to show 12,99 € on the left and a button reading "In den
+     * Warenkorb" on the right. Amber already says a purchase starts here and
+     * the glyph already says where it goes, so the words were the third
+     * telling of one fact — and the price was the second telling of another.
+     * The button carries the price now and the row carries none.
+     */
+    expect(row).not.toContain("formatPrice");
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toContain("<span className=\"tabular-nums\">{formatPrice(offer.price)}</span>");
+  });
+
+  it("leaves the seller as the only thing on the left of the row", () => {
     const seller = row.indexOf("seller.displayName");
-    const price = row.indexOf("formatPrice(offer.price)");
-    expect(price).toBeGreaterThan(-1);
-    expect(seller).toBeGreaterThan(price);
+    expect(seller).toBeGreaterThan(-1);
+    const left = row.slice(row.indexOf('<div className="flex min-w-0 flex-col'), row.indexOf("<OfferAddButton"));
+    expect(left.length).toBeGreaterThan(40);
+    expect(left).toContain("seller.displayName");
+    expect(left).not.toContain("formatPrice");
+  });
+
+  it("still says the whole sentence to a screen reader", () => {
+    /*
+     * A visible label of "12,99 €" is not a sentence. The `aria-label`
+     * replaces it entirely, so the compact button must keep naming the
+     * figure, the price and what pressing it does.
+     */
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toContain("de.shop.addToCartFor(label, formatPrice(offer.price))");
+    expect(panel).toContain("de.shop.addAnotherFor(label, formatPrice(offer.price))");
+    expect(de.shop.addToCartFor("Hex", "12,99 €")).toBe("Hex für 12,99 € in den Warenkorb legen");
+    expect(de.shop.addAnotherFor("Hex", "12,99 €")).toContain("Hex");
+    expect(de.shop.addAnotherFor("Hex", "12,99 €")).toContain("12,99 €");
+  });
+
+  it("says no condition to a screen reader either", () => {
+    // The quick view drops it; the figure page keeps it, because that surface
+    // is where a condition could still become a choice.
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toContain(
+      "const label = compact ? name : `${name} (${conditionLabel(offer.condition)})`;",
+    );
   });
 
   it("uses a compact buy pill that still clears 44 px on touch", () => {
@@ -649,9 +682,14 @@ describe("one offer is one compact line", () => {
 });
 
 describe("the overlays stack in the right order", () => {
-  it("the dialog is above the floating cart and the header", () => {
+  it("the dialog is above the header and the phone's bottom bar", () => {
+    // The floating cart used to be the third thing in this ladder. V3.4
+    // removed it; what is left below the dialog is the masthead at z-30 and
+    // the bottom navigation at z-20.
     expect(code(MODAL)).toContain("z-50");
-    expect(code("src/components/cart/floating-cart.tsx")).toContain("z-30");
+    const nav = code("src/components/layout/site-nav.tsx");
+    expect(nav).toContain("sticky top-0 z-30");
+    expect(nav).toContain("fixed inset-x-0 bottom-0 z-20");
   });
 
   it("but the cart confirmation is above the dialog", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -244,19 +244,20 @@ describe("guarantee 2 — the polished silver is legible on every surface it is 
     expect(contrast(token("trade-solid-hover"), token("on-trade"))).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("the floating cart carries a dark edge, because it also passes over cards", () => {
+  it("keeps its dark ink legible on a card, wherever it lands next", () => {
     /*
-     * The one place the polished silver meets a light ground: the floating
-     * cart is `fixed` and scrolls over the grid. Its fill alone measures
-     * 1.39:1 on an ivory card. The pair is what covers both — the fill on
-     * the sky, the ring on a card — exactly as the focus ring does.
+     * This used to be about the floating cart — the one place the polished
+     * silver met a light ground, because it was `fixed` and scrolled over the
+     * grid. V3.4 removed that button, so the file it inspected is gone.
+     *
+     * The colour guarantee is not. `--on-trade` is the ink of every silver
+     * surface, and the next one to pass over a card must not have to
+     * rediscover that its fill alone measures 1.39:1 there.
      */
     for (const [, ground] of CARD_GROUNDS) {
       expect(contrast(token("on-trade"), ground)).toBeGreaterThanOrEqual(3);
     }
-    const floating = readFileSync("src/components/cart/floating-cart.tsx", "utf8");
-    expect(floating).toContain("ring-2 ring-on-trade");
-    expect(floating, "a 10% ring is not an edge").not.toContain("ring-on-trade/10");
+    expect(existsSync("src/components/cart/floating-cart.tsx"), "the floating cart is gone (V3.4)").toBe(false);
   });
 });
 

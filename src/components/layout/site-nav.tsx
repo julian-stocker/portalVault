@@ -26,7 +26,6 @@ import { usePathname } from "next/navigation";
 
 import { CartBadge } from "@/components/cart/cart-badge";
 import { CartToast } from "@/components/cart/cart-toast";
-import { FloatingCart } from "@/components/cart/floating-cart";
 import { Wordmark } from "@/components/layout/wordmark";
 import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
@@ -255,18 +254,18 @@ export function SiteNav({
   const items = itemsFor(signedIn, admin, openOrders);
 
   /**
-   * The floating cart and its confirmation belong to the same question as the
-   * header badge — "where is my cart" — so both are mounted here, once,
-   * rather than by every page that might want them (V9, V10).
+   * The cart confirmation belongs to the same question as the header cart —
+   * "where is my cart" — so it is mounted here, once, rather than by every
+   * page that might want it (V9, V10).
    *
-   * Not for the operator, for the same reason the badge is not: SkyIsles does
-   * not buy from itself (ADR-0042). The button is also absent on /cart — a
-   * shortcut to the page you are already on is a control with nothing to do —
-   * but the confirmation stays, because the cart page has a buy action of its
-   * own reachable from the figures beside it.
+   * Not for the operator, for the same reason the cart is not: SkyIsles does
+   * not buy from itself (ADR-0042).
+   *
+   * V3.4 removed the floating cart that used to be mounted beside it. There
+   * is one cart entry point now, in the header, and it is reachable from
+   * anywhere because the header is sticky.
    */
   const shopping = !admin;
-  const floatingCart = shopping && active !== "cart";
 
   return (
     /*
@@ -286,16 +285,35 @@ export function SiteNav({
           drift out of alignment with the bar. */}
       <header
       className={
-        // Glass in the world, not a bar above it (ADR-0038, V3.3). The gold
-        // edge stays — it is what closes the header — but the ground is
-        // translucent so the sky behind it is the same sky as below it.
-        //
-        // V4 pulled the navigation over to the wordmark: it used to sit at
-        // the far right of a 1152 px bar, which is a web app's layout, not a
-        // masthead's. Now the two read as one lockup on the left.
-        "relative sticky top-0 z-30 border-b border-world-edge bg-deep/80 backdrop-blur-md " +
-        "shadow-[0_8px_28px_rgb(0_0_0/0.4)] " +
-        "md:flex md:items-center md:gap-8 md:px-6"
+        /*
+         * THE TOP EDGE OF THE WORLD, NOT A PANE OVER IT (V3.4).
+         *
+         * It was `bg-deep/80 backdrop-blur-md` with a 28 px shadow at 40 %
+         * black, and the sky was drawn behind it — glass floating above the
+         * page (ADR-0038, V3.3). On a phone that read as one more overlay
+         * among several, which is what this release is about.
+         *
+         * Three things make it sit down instead: an opaque ground, no blur,
+         * and no drop shadow. A shadow says "I am above this"; the gold
+         * hairline below and the two struck lines inside say "this is where
+         * the world begins" — and `WorldZone` now starts underneath, so the
+         * statement is true rather than merely drawn.
+         *
+         * `sticky top-0` is unchanged and is the point: flush at the top on
+         * load, in the document flow, and still there after scrolling — which
+         * is why the floating cart has nothing left to do.
+         *
+         * Removing the blur also removes a latent hazard. An ancestor with an
+         * active `backdrop-filter` may become the containing block for its
+         * `position: fixed` descendants, and the phone's bottom bar is one.
+         * It is no longer at anybody's mercy. This is NOT a reason to move
+         * `CartToast` in here; see below.
+         *
+         * A flex row at every width now, not only from `md:`. That is what
+         * lets the cart sit at the right end of the row on a phone as well.
+         */
+        "relative sticky top-0 z-30 flex items-center gap-2 border-b border-world-edge " +
+        "bg-deep px-4 py-3 md:gap-8 md:px-6 md:py-4"
       }
     >
       {/* A thin warm line inside the top edge: the bar catches the light of
@@ -310,7 +328,8 @@ export function SiteNav({
         aria-hidden="true"
         className="pointer-events-none absolute inset-x-0 bottom-px h-px bg-world-sheen"
       />
-      <div className="relative flex flex-1 items-center gap-2 px-4 py-3 md:flex-none md:shrink-0 md:px-0 md:py-4">
+      {/* The brand lockup: wordmark, and the mode badge when there is one. */}
+      <div className="relative flex shrink-0 items-center gap-2">
         <Link href="/" className="flex items-center" aria-label={de.app.name}>
           <Wordmark />
         </Link>
@@ -324,23 +343,6 @@ export function SiteNav({
           </span>
         ) : null}
 
-        {/*
-         * The cart, in the header rather than in the bar (ADR-0043).
-         *
-         * Pushed to the right end of the header row, which on a phone is the
-         * whole width — the bar down at the thumb keeps its four equal
-         * targets and gains nothing it has to share space with.
-         *
-         * Not offered to the operator: SkyIsles does not buy from itself,
-         * and a basket in the administrator's header would suggest the shop
-         * is a place they shop (ADR-0042). The route still answers; it is
-         * simply not one of their destinations.
-         */}
-        {admin ? null : (
-          <div className="ml-auto md:ml-2">
-            <CartBadge />
-          </div>
-        )}
       </div>
 
       <nav
@@ -358,9 +360,40 @@ export function SiteNav({
           <NavItem key={item.href} item={item} active={active === item.section} />
         ))}
       </nav>
+
+      {/*
+       * THE ONLY CART ENTRY POINT (V3.4, ADR-0043).
+       *
+       * Its own group at the right end of the row, separated from the
+       * navigation by `ml-auto` rather than sitting two pixels from the
+       * wordmark, where it used to look like part of the brand lockup.
+       * Destinations on the left, actions on the right.
+       *
+       * On a phone the navigation is out of flow at the bottom of the screen,
+       * so this row is `[wordmark] ......... [cart]` — which is the whole of
+       * the mobile header, and why the floating button is gone.
+       *
+       * Not offered to the operator: SkyIsles does not buy from itself, and a
+       * basket in the administrator's header would suggest the shop is a
+       * place they shop (ADR-0042). The route still answers; it is simply not
+       * one of their destinations.
+       */}
+      {admin ? null : (
+        <div className="ml-auto flex shrink-0 items-center">
+          <CartBadge />
+        </div>
+      )}
       </header>
 
-      {floatingCart ? <FloatingCart /> : null}
+      {/*
+       * Still OUTSIDE the header, and deliberately so.
+       *
+       * The header no longer carries a `backdrop-filter`, so the containing
+       * block hazard that put this here is gone — but "the reason expired" is
+       * not a reason to move a fixed overlay inside a sticky ancestor. It
+       * costs nothing where it is and cannot be broken by a later header
+       * change.
+       */}
       {shopping ? <CartToast /> : null}
     </>
   );

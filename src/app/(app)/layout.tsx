@@ -25,17 +25,29 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="relative flex min-h-screen flex-col">
-      {/* The world starts behind the header, not below it (ADR-0038, V3.3).
-          Owned by the layout so it survives navigation between the two
-          route groups. */}
       {/* Who this browser is acting as. Draws nothing (ADR-0061). */}
       <PrincipalGate userId={profile.id} />
-      <WorldZone variant="world" />
       {/* The same navigation the public catalog uses — one component, two
           mounts, rather than two systems to keep in step. The active section
           comes from the path, so /collection and /settings light up too. */}
       <SiteNav signedIn admin={admin} openOrders={openOrders} />
-      <div className="flex-1">{children}</div>
+      <div className="relative flex-1">
+        {/*
+         * The world begins UNDER the header (V3.4).
+         *
+         * It used to be drawn behind it — the header was glass and the sky was
+         * the same sky above and below the hairline (ADR-0038, V3.3). That is
+         * the decision this release reverses: the header is now an opaque top
+         * edge, so artwork behind it would be artwork nobody can see, and the
+         * `top-0` it is anchored to has to mean "below the masthead".
+         *
+         * Inside the content wrapper, which is `relative` for exactly this
+         * reason. Still owned by the layout rather than by a page, so it
+         * survives client navigation between the two route groups.
+         */}
+        <WorldZone variant="world" />
+        {children}
+      </div>
       {/* The same footer as the public pages: a signed-in collector needs the
           same destinations, and a second variant would be a second thing to
           keep in step. */}
