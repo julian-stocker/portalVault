@@ -27,7 +27,7 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { isCollectibleCategory, NON_COLLECTIBLE_CATEGORIES } from "../src/lib/catalog/collectible.ts";
-import { automaticShopPrice } from "../src/lib/shop/offer.ts";
+import { automaticShopPrice, V1_CONDITION } from "../src/lib/shop/offer.ts";
 
 type Result = { name: string; passed: boolean; detail: string };
 const results: Result[] = [];
@@ -149,8 +149,16 @@ async function main(): Promise<void> {
     const priced = rows.every((row) => Number(row.price) > 0);
     check("every offer carries a price above zero", priced);
 
-    const conditions = rows.every((row) => row.condition === "loose" || row.condition === "boxed");
-    check("every offer has a known condition", conditions);
+    // Since 0029 the projection publishes one condition, so "a known
+    // condition" would pass on an empty set and on the wrong one alike. The
+    // assertion is the contract instead: every published offer is in the
+    // condition V1 sells.
+    const offConditions = [...new Set(rows.map((row) => row.condition))];
+    check(
+      `every public offer is in the V1 sale condition (${V1_CONDITION})`,
+      rows.length > 0 && offConditions.every((c) => c === V1_CONDITION),
+      rows.length === 0 ? "no offers to inspect" : `conditions seen: ${offConditions.join(", ")}`,
+    );
 
     const booleans = rows.every((row) => typeof row.available === "boolean");
     check("availability is a boolean, never a count", booleans);
@@ -290,6 +298,14 @@ async function main(): Promise<void> {
  * Deliberately an independent implementation of the rule rather than a second
  * call to the same function: if both sides came from `shop_offers()` the
  * comparison would prove nothing.
+ *
+ * Since 0029 that rule includes the condition V1 sells, and this side takes
+ * it from `V1_CONDITION` — the application's own constant, the one every
+ * public surface already filters by. That is not a second product truth:
+ * `loose-only-schema.test.ts` holds `V1_CONDITION` against the literal inside
+ * `v1_sale_condition()`, so if the database and the application ever disagree
+ * about what V1 sells, that test fails before this verifier ever runs. What
+ * the two sides must not share is the projection under test, and they do not.
  */
 async function expectedOffers(
   service: SupabaseClient,
@@ -341,6 +357,10 @@ async function expectedOffers(
   const expected = new Map<string, { price: number; available: boolean }>();
   for (const position of positions.data ?? []) {
     if (!position.is_listed) continue;
+    // A condition V1 does not sell is stock, not an offer (0029). The row
+    // stays in the table and stays visible to the administrator; it is simply
+    // not something the storefront publishes.
+    if (position.condition !== V1_CONDITION) continue;
     const state = figureState.get(position.sky_id as string);
     if (!state?.shown) continue;
 

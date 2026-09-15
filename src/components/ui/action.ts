@@ -143,19 +143,61 @@ export const ACTION_SHOP =
  * stay, the price keeps its full width, and the row keeps its height.
  */
 /**
- * The shop action where the row it sits in is small — the quick view's offer
- * line (IR-001).
+ * THE ACT OF BUYING (V3.2).
  *
- * The same silver as `ACTION_SHOP` and the same meaning; only the geometry
- * differs, so trade still looks like trade. It shrinks **only from `sm:`
- * upwards**: on a touch screen it keeps the 44 px target, and a compact pill
- * is a desktop affordance where the pointer is exact.
+ * The fourth role, and the one the palette was missing. Gold says what
+ * somebody owns, silver says what somebody offers, neutral moves you around
+ * the product — and none of them says "press this and it is in your basket".
+ * The buy action wore silver, which made it read as one more line of offer
+ * information inside an offer panel.
+ *
+ * Warm amber from the same sunset as the rest of SkyIsles, ΔE 20.3 from the
+ * ownership gold so the two cannot be confused. Dark ink on it, glyph
+ * included — the ink is a token, not `text-black`, so a later change to the
+ * surface takes its ink with it.
+ *
+ * IT CHANGES NOTHING THAT EXISTS. `ACTION_SHOP` on the figure page is still
+ * silver: this is applied where a purchase is started and nowhere else, and
+ * the two surfaces are reconciled when the second one is looked at, not by a
+ * find-and-replace.
  */
-export const ACTION_SHOP_COMPACT =
+const COMMERCE =
+  "focus-ring ring-1 ring-commerce-line shadow-card " +
+  "transition-colors hover:bg-commerce-hover hover:shadow-raised active:bg-commerce-pressed";
+
+/**
+ * THE RESTING SURFACE, AS AN INLINE STYLE.
+ *
+ * `bg-commerce` and `text-on-commerce` generate correctly, sit on the right
+ * element, and are backed by `--commerce` in `:root` — all verified in the
+ * served stylesheet — and the button still came back dark with a pale
+ * outline, which is what a button looks like when neither rule reaches it.
+ *
+ * Same remedy as the trade row's ink: an inline style carries the value
+ * itself. It needs no class to be generated or shipped, and it outranks every
+ * stylesheet rule short of `!important`.
+ *
+ * It still points at the TOKENS, not at hexes — `globals.css` stays the one
+ * place the colour is decided, and a change there still moves the button.
+ * Hover and press stay as classes: they are enhancements, and if they go
+ * missing the button is still amber with dark ink.
+ */
+export const COMMERCE_SURFACE = {
+  backgroundColor: "var(--commerce)",
+  color: "var(--on-commerce)",
+} as const;
+
+export const ACTION_COMMERCE =
   "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
-  "text-center text-sm font-semibold focus-ring bg-trade-solid text-on-trade " +
-  "shadow-card ring-1 ring-trade-line-strong " +
-  "transition-colors hover:bg-trade-solid-hover hover:shadow-raised " +
+  `text-center text-sm font-semibold ${COMMERCE}`;
+
+/**
+ * The same action where the row it sits in is small — the quick view's offer
+ * line. Shrinks only from `sm:` up, so a thumb never gets less than 44 px.
+ */
+export const ACTION_COMMERCE_COMPACT =
+  "inline-flex min-h-11 shrink-0 items-center justify-center rounded-full px-4 py-2 " +
+  `text-center text-sm font-semibold ${COMMERCE} ` +
   "sm:min-h-8 sm:px-3 sm:py-1 sm:text-[13px]";
 
 export const ACTION_LINK =

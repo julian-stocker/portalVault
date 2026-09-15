@@ -386,6 +386,21 @@ Synchronisationsschritt: `shop_offers()` liest den Bestand live.
 > `anon` und `authenticated` ausführbar, und `anon` kann `shop_inventory` und
 > `inventory_movements` weiterhin nicht lesen (`42501`). Bestand unverändert, Journal-Drift 0.
 
+> **Die öffentliche V1-Commerce-Grenze, an einer Stelle.** Drei Funktionen sind für `anon`
+> ausführbar und berühren `condition`. Seit `0028`/`0029` fragen alle drei dieselbe Regel,
+> `public.v1_sale_condition()`:
+>
+> | Funktion | seit | Verhalten außerhalb der V1-Kondition |
+> |---|---|---|
+> | `shop_offers()` | `0029` | die Position erscheint nicht in der Projektion |
+> | `shop_quantity_available()` | `0028` | `false`, wie bei ausverkauft — keine neue Fehlersemantik |
+> | `create_order()` | `0028` | `check_violation`, in Pass 1, bevor irgendetwas geschrieben wird |
+>
+> **Die interne Datenhaltung ist davon nicht betroffen.** `shop_inventory.condition` und
+> `order_lines.condition` behalten beide Werte, die Adminfunktionen zeigen beide, und historische
+> Bestellungen bleiben korrekt als das lesbar, was verkauft wurde. Eingeschränkt ist der
+> öffentliche V1-Kaufpfad, nicht das Datenmodell.
+
 `public.shop_quantity_available(p_sky_id text, p_condition text, p_quantity integer)` →
 `boolean`. `stable`, `security definer`, `set search_path = ''`, ausführbar für `anon` und
 `authenticated`.
@@ -396,6 +411,7 @@ nur, wenn alles davon gilt:
 | Bedingung | Woher |
 |---|---|
 | `1 ≤ p_quantity ≤ max_cart_quantity()` | Vernunftgrenze, kein Bestandswert |
+| `i.condition = v1_sale_condition()` | V1 verkauft ausschließlich `loose` (`0028`) — `boxed` ergibt `false`, nicht einen Fehler |
 | Position existiert mit genau dieser `condition` | `shop_inventory` |
 | `is_listed` | Freigabe (ADR-0048) |
 | `is_shop_eligible(sky_id)` | Katalogregel, **dieselbe Funktion** wie `shop_offers()` |
@@ -480,7 +496,7 @@ Beide tragen keine Kontoreferenz und können deshalb keine Löschung blockieren.
 |---|---|---|
 | `reservation_ttl()` | niemand | 20 Minuten. Eine Definition, serverseitig. Entzogen für `public`, `anon` **und** `authenticated`. |
 | `next_order_number()` | niemand | Spalten-Default, race-frei über eine Sequenz. `volatile` — ein Aufrufer könnte Nummern verbrauchen, deshalb ebenfalls für alle drei Rollen entzogen. |
-| `create_order(request_id, email, items, address)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Idempotent über `request_id`. |
+| `create_order(request_id, email, items, address, shipping_method, payment_token)` | `anon`, `authenticated` | Der **einzige** Weg, eine Bestellung anzulegen. Liest Preise über `shop_price()`, Eignung über `is_shop_eligible()`, reserviert im selben Aufruf. Lehnt seit `0028` jede Position ab, deren Kondition nicht `v1_sale_condition()` ist — in Pass 1, bevor irgendetwas geschrieben wird. Idempotent über `request_id`. |
 | `reserve_for_order(order_id)` | niemand | Alles oder nichts. Sperrt in aufsteigender `id`-Reihenfolge, räumt abgelaufenen Halt unter der Sperre, prüft Verfügbarkeit in der `WHERE`-Klausel. |
 | `active_seller()` | niemand | Der eine aktive Verkäufer, **ganze Zeile** (`select s.*`) — deshalb für alle drei Rollen entzogen (ADR-0064). |
 | `seller_public()` | `anon`, `authenticated` | **Identität, keine Relation.** Gibt `id` und `display_name` des aktiven Verkäufers zurück, sonst nichts — Allow-List, wörtlich benannt. Kontaktadresse, Reply-To, `updated_by` und Zeitstempel bleiben drin (`0027`). Aus der sichtbaren `id` folgt **nicht**, dass SkyIsles Multi-Seller kann: keine Tabelle trägt ein `seller_id`. |
@@ -1335,6 +1351,83 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
 > Jeder schreibende Abschnitt läuft in `begin … rollback`, die Suite lässt also nichts zurück.
 > **Sie gehört auf Staging und niemals auf Production.** Sie hat den Defekt aus `0016` gefunden,
 > den 1305 statische Tests nicht sehen konnten — der Grund steht in ADR-0053.
+
+- Achtundzwanzigste Migration: `0028_v1_loose_only_commerce.sql` — **V1 verkauft lose, und die
+  Datenbank weiß das jetzt auch.** Die Anwendung zeigt seit dem V1-Commerce-Vertrag auf jeder
+  öffentlichen Fläche ausschließlich `loose`; `shop_quantity_available()` und `create_order()`
+  akzeptierten dagegen jede Kondition, die der Aufrufer nannte, und beide sind über PostgREST mit
+  dem Anon-Key erreichbar. Etwas nicht anzuzeigen ist keine Ablehnung.
+
+  Drei Objekte, alle additiv. `v1_sale_condition()` ist neu, `immutable`, an **niemanden**
+  granted (beide Aufrufer sind `security definer` und laufen als Owner) und schreibt das Wort
+  `loose` als einzige Stelle im SQL — das Gegenstück zu `V1_CONDITION` in
+  `src/lib/shop/offer.ts`. `shop_quantity_available()` bekommt genau ein zusätzliches Prädikat
+  und antwortet für `boxed` mit demselben `false` wie für eine ausverkaufte Position: keine neue
+  Fehlersemantik für eine boolesche Funktion. `create_order()` bekommt genau eine zusätzliche
+  Validierung in **Pass 1** — dem Durchgang, der nichts schreibt — und lehnt eine Nicht-`loose`-
+  Position mit `check_violation` ab, demselben Code wie eine ungültige Menge.
+
+  **Die Ablehnung ist ausdrücklich, nicht beiläufig.** Ein `article X / boxed is not offered`
+  wäre unwahr: die Position existiert, ist gelistet, ist eligible und hat einen Preis. Falsch ist
+  die Anfrage, nicht der Bestand.
+
+  **Atomar.** Der Guard steht vor `insert into public.orders`, vor `order_lines`, vor
+  `order_addresses`, vor `order_events` und vor `reserve_for_order()`. Ein gemischter Warenkorb
+  aus `loose` + `boxed` hinterlässt keine Bestellung, keine Position, keine Bewegung und keine
+  Bestandsänderung — es gibt zum Zeitpunkt der Ablehnung nichts zurückzurollen, und die Exception
+  bricht die Transaktion des Aufrufers ohnehin ganz ab.
+
+  **Ersetzt werden die aktuell gültigen Definitionen:** `shop_quantity_available` aus `0009`,
+  `create_order` aus `0021` — die **sechsstellige** Signatur. Die fünfstellige Fassung wurde in
+  `0014` gedroppt und wird hier bewusst **nicht** wiederbelebt; `create or replace` auf einer
+  anderen Argumentliste würde nichts ersetzen, sondern die Legacy-Überladung neu anlegen.
+
+  **Kein Datenmodell bewegt sich.** Kein `alter table`, kein `insert`, kein `update`, kein
+  `delete`. `shop_inventory.condition` und `order_lines.condition` behalten beide Werte samt
+  CHECK-Constraint, bestehende `boxed`-Bestände bleiben unverändert stehen, historische
+  `boxed`-Bestellpositionen bleiben lesbar. OVP ist ein Produkt, das noch nicht entworfen ist —
+  seine Daten müssen das überleben.
+
+  **Grants unverändert.** Beide `revoke`/`grant`-Paare sind zeichengleich aus `0009` und `0021`
+  wiederholt (`anon`, `authenticated`), damit sie im Review sichtbar sind statt vererbt.
+  Rückbau: die Definitionen aus `0009` und `0021` erneut anwenden, dann
+  `drop function if exists public.v1_sale_condition();`.
+
+  **Status: noch nicht angewandt** — weder Staging noch Production.
+
+- Neunundzwanzigste Migration: `0029_v1_loose_only_offers.sql` — **die Storefront hört auf zu
+  bewerben, was nicht verkauft wird.** `0028` hat die beiden Türen geschlossen, durch die eine
+  boxed-Position gekauft werden konnte. `shop_offers()` blieb offen: die Projektion lieferte
+  `anon` weiterhin boxed-Angebote mit Preis und Verfügbarkeitsflag — auf Staging 8 von 25
+  Zeilen — für Artikel, die `create_order()` inzwischen ablehnt. Ein Angebot, das niemand
+  annehmen kann, ist keines.
+
+  Genau das war der ursprüngliche Befund: die Katalogkarte sagte „Angebote ab 21,50 €" für
+  SKY-0043, während der Quick View sich weigerte zu öffnen — die Karte glaubte der Projektion,
+  der Quick View der V1-Regel.
+
+  **Eine Funktion, ein zusätzliches Prädikat.** Die Definition aus `0008` wörtlich, plus
+  `and i.condition = public.v1_sale_condition()`. Signatur, vier Rückgabespalten, Typen,
+  `stable`/`security definer`/`search_path`, `is_listed`, `is_shop_eligible`, Preisregel,
+  `available`-Semantik und Sortierung unverändert. **Kein neues Argument** — eine Kondition, die
+  der Client wählen könnte, ist genau die Wahl, die V1 nicht anbietet. Das Wort `loose` steht
+  nicht in dieser Datei; die Regel wird bei `v1_sale_condition()` (`0028`) erfragt.
+
+  **Kein Datenmodell, keine Historie.** Kein `alter table`, kein `insert`/`update`/`delete`.
+  `shop_inventory` behält jede boxed-Zeile samt CHECK-Constraint, `order_lines` behält die
+  Kondition jeder historischen Position — eine früher aufgegebene boxed-Bestellung liest sich
+  weiterhin als boxed in `my_order()`, in `admin_order()` und in ihrer Bestellbestätigung.
+  `admin_shop_inventory()` und `admin_inventory_movements()` zeigen unverändert beide
+  Konditionen: interner Bestand ist eine andere Frage als ein öffentliches Angebot.
+
+  **Kein Sicherheitsfix.** Seit `0028` kann niemand mehr eine boxed-Position kaufen. Was sich
+  hier ändert, ist, was einem Besucher gesagt wird — und Verteidigung in der Tiefe für jede
+  künftige Fläche, die den Filter vergisst. Die Filter in der Anwendung (`v1BuyableOffers()`,
+  `hasV1BuyableOffer()`, `isV1Buyable()`, Cart- und Quick-View-Guards) bleiben bestehen: ein
+  Payload ist eine Netzwerkantwort, keine Garantie.
+
+  Grants zeichengleich aus `0008` wiederholt (`anon`, `authenticated`). Rückbau: die Definition
+  aus `0008` erneut anwenden. **Status: noch nicht angewandt** — weder Staging noch Production.
 
 - Kein `DROP`, kein destruktives `ALTER` ohne ausdrückliche Freigabe des Nutzers.
 - Der Import (`tools/import-catalog.mts`, `npm run catalog:import`) läuft lokal mit

@@ -28,7 +28,13 @@
  *
  * Everything here is pure. No storage, no React, no database.
  */
-import { isOfferCondition, type Offer, type OfferCondition, type OfferIndex } from "@/lib/shop/offer";
+import {
+  isOfferCondition,
+  isV1Buyable,
+  type Offer,
+  type OfferCondition,
+  type OfferIndex,
+} from "@/lib/shop/offer";
 
 /** Sanity bound, not a stock check: the cart cannot see stock levels. */
 export const MAX_LINE_QUANTITY = 99;
@@ -169,7 +175,13 @@ export function resolveLine(line: CartLine, offers: OfferIndex): CartEntry {
     return { line, offer: null, price: null, purchasable: false, priceChanged: false, total: null };
   }
 
-  const purchasable = offer.available;
+  /*
+   * The V1 truth (V3.3), not just `available`. A line for a condition this
+   * product does not sell cannot be bought — whether it got into storage
+   * before the rule existed or by somebody editing `localStorage`. It stays
+   * visible and stays out of the total, exactly like a sold-out line.
+   */
+  const purchasable = isV1Buyable(offer);
   return {
     line,
     offer,

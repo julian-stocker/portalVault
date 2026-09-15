@@ -29,6 +29,11 @@ export function SeriesTabs({
 }) {
   return (
     <FilterBar
+      /* The primary browse row (V3.3): compact, and scrolling sideways at
+         every width rather than wrapping. Six games wrapped to two lines on a
+         laptop, and a navigation whose height depends on how many games exist
+         is one the eye has to find again after every change. */
+      variant="nav"
       label={de.catalog.seriesNav}
       active={active}
       onSelect={onSelect}

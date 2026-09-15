@@ -91,6 +91,20 @@ export type CollectionFilters = {
 
 export const NO_FILTERS: CollectionFilters = { duplicatesOnly: false };
 
+/**
+ * How many of the collection's SECONDARY filters are on (V3.3).
+ *
+ * The scope — which game — is navigation and is not counted, for the same
+ * reason the catalog does not count its series: it is visible on screen, and
+ * the badge exists to report what is not.
+ *
+ * One today. It is a function rather than a boolean so that the second one
+ * does not have to rewrite the caller.
+ */
+export function collectionFilterCount(filters: CollectionFilters): number {
+  return filters.duplicatesOnly ? 1 : 0;
+}
+
 /** The rows the showcase may display at all: what is actually owned. */
 export function showcaseRows(rows: readonly CollectionRow[]): CollectionRow[] {
   return rows.filter((row) => row.quantity > 0);

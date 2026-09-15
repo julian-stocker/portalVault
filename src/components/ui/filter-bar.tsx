@@ -33,13 +33,27 @@ export function FilterBar({
   active,
   onSelect,
   label,
+  variant = "default",
 }: {
   options: readonly FilterOption[];
   active: string;
   onSelect: (value: string) => void;
   /** Accessible name of the whole bar, e.g. "Serie wählen". */
   label: string;
+  /**
+   * `nav` — the primary browse row, e.g. the games (V3.3).
+   *
+   * It is smaller than the default and it NEVER wraps: with six games it
+   * wrapped to two lines on a laptop and to three on a phone, and a
+   * navigation that changes height as the data grows is one the eye has to
+   * re-find. It scrolls sideways at every width instead, which is the one
+   * place in this product where that is the right answer.
+   *
+   * It shrinks only from `sm:` up. A thumb still gets 44 px.
+   */
+  variant?: "default" | "nav";
 }) {
+  const nav = variant === "nav";
   return (
     <div
       role="tablist"
@@ -48,7 +62,8 @@ export function FilterBar({
         // Separate pills on the world rather than one enclosed track: the
         // track was a control panel laid over the artwork, and the artwork is
         // the point (ADR-0038, V3.1).
-        "no-scrollbar -mx-4 flex snap-x gap-2 overflow-x-auto px-4 sm:mx-0 sm:flex-wrap sm:px-0"
+        "no-scrollbar -mx-4 flex snap-x overflow-x-auto px-4 sm:mx-0 sm:px-0 " +
+        (nav ? "gap-1.5" : "gap-2 sm:flex-wrap")
       }
     >
       {options.map((option) => {
@@ -61,8 +76,9 @@ export function FilterBar({
             aria-selected={isActive}
             onClick={() => onSelect(option.value)}
             className={
-              "flex min-h-11 shrink-0 snap-start items-center rounded-full px-4 " +
-              "text-sm whitespace-nowrap shadow-card backdrop-blur-sm transition-colors sm:min-h-10 " +
+              "flex min-h-11 shrink-0 snap-start items-center rounded-full " +
+              "whitespace-nowrap shadow-card backdrop-blur-sm transition-colors " +
+              (nav ? "px-3.5 text-[13px] sm:min-h-9 " : "px-4 text-sm sm:min-h-10 ") +
               (isActive
                 ? "bg-status-ground font-semibold text-status-ink ring-1 ring-status-line"
                 : "bg-deep/65 font-normal text-muted ring-1 ring-border/70 " +

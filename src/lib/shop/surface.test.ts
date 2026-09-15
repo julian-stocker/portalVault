@@ -89,7 +89,7 @@ describe("shopEntries", () => {
     expect(shopEntries(catalog, index).map((entry) => entry.fromPrice)).toEqual([5, 12, 30]);
   });
 
-  it("takes the cheapest of several conditions as the from-price", () => {
+  it("shows the loose price and never the boxed one beside it (V3.3)", () => {
     const catalog = [figure({ skyId: "SKY-0001" })];
     const index = offers({
       "SKY-0001": [
@@ -100,10 +100,17 @@ describe("shopEntries", () => {
 
     const [entry] = shopEntries(catalog, index);
     expect(entry.fromPrice).toBe(8);
-    expect(entry.offers).toHaveLength(2);
+    // One offer, not two: V1 sells loose, and the boxed row is not public.
+    expect(entry.offers).toHaveLength(1);
+    expect(entry.offers[0].condition).toBe("loose");
   });
 
-  it("ignores a sold-out condition when deriving the from-price", () => {
+  it("drops a figure whose only listing is boxed", () => {
+    /*
+     * Not "shows it at the boxed price": V1 has no public concept of OVP, so
+     * such a figure has no offer at all and does not belong on a page whose
+     * whole subject is what can be bought.
+     */
     const catalog = [figure({ skyId: "SKY-0001" })];
     const index = offers({
       "SKY-0001": [
@@ -112,9 +119,7 @@ describe("shopEntries", () => {
       ],
     });
 
-    const [entry] = shopEntries(catalog, index);
-    expect(entry.fromPrice).toBe(22);
-    expect(entry.offers).toHaveLength(1);
+    expect(shopEntries(catalog, index)).toHaveLength(0);
   });
 
   it("breaks price ties by name so the order is stable", () => {

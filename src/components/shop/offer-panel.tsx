@@ -27,9 +27,9 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
 import { conditionLabel } from "@/lib/shop/condition";
-import { ACTION_SHOP, ACTION_SHOP_COMPACT } from "@/components/ui/action";
+import { ACTION_COMMERCE_COMPACT, ACTION_SHOP, COMMERCE_SURFACE } from "@/components/ui/action";
 import { keyOf, lineKey } from "@/lib/cart/cart";
-import { buyableOffers, type Offer } from "@/lib/shop/offer";
+import { v1BuyableOffers, type Offer } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 
@@ -55,10 +55,14 @@ export function OfferAddButton({
   /** Layout from the caller — the pill's own look is not negotiable. */
   className?: string;
   /**
-   * A smaller pill for a small row (IR-001).
+   * The quick view's variant (IR-001, V3.2).
    *
-   * Same colour and same behaviour; only the geometry differs, and only from
-   * `sm:` upwards so a touch target never drops below 44 px.
+   * Smaller — only from `sm:` up, so a touch target never drops below 44 px —
+   * and amber rather than silver. The offer row around it stays silver and
+   * stays information; this is the one thing on it that starts a purchase,
+   * and it is the only place the amber is used so far. The figure page's
+   * panel keeps `ACTION_SHOP` until that surface is looked at in its own
+   * right.
    */
   compact?: boolean;
 }) {
@@ -91,7 +95,10 @@ export function OfferAddButton({
           ? de.shop.addAnotherFor(label, formatPrice(offer.price))
           : de.shop.addToCartFor(label, formatPrice(offer.price))
       }
-      className={`${compact ? ACTION_SHOP_COMPACT : ACTION_SHOP} gap-1.5 disabled:opacity-70 ${className}`}
+      className={`${compact ? ACTION_COMMERCE_COMPACT : ACTION_SHOP} gap-1.5 disabled:opacity-70 ${className}`}
+      /* The amber surface, carried rather than looked up — see
+         `COMMERCE_SURFACE`. The figure page's silver button is untouched. */
+      style={compact ? COMMERCE_SURFACE : undefined}
     >
       {already ? <CartCheckedGlyph /> : <CartGlyph />}
       {de.shop.addToCart}
@@ -118,7 +125,11 @@ export function OfferPanel({
    */
   guest: boolean;
 }) {
-  const buyable = buyableOffers(offers);
+  /* The V1 truth (V3.3): loose and in stock. A figure whose only listing is
+     boxed shows no panel here either — the page must not offer what the
+     catalog will not sell, and hiding it on one surface only is how Hex came
+     to have a buy button the grid refused to lead to. */
+  const buyable = v1BuyableOffers(offers);
   if (buyable.length === 0) return null;
 
   return (

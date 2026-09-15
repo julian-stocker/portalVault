@@ -613,3 +613,66 @@ describe("genuine semantic states were not neutralised", () => {
     expect(CSS).toContain("--danger:");
   });
 });
+
+describe("amber is the act of buying, and it is not the ownership gold", () => {
+  /**
+   * The fourth role (V3.2). Gold is what somebody OWNS, silver is what
+   * somebody OFFERS — and neither of them means "press this and it is in
+   * your basket". Until now the buy action borrowed silver, which made it
+   * look like one more line of the offer panel it sat in.
+   *
+   * Computed, not asserted by name: a token can be spelled correctly and
+   * still be unreadable, or still be the same colour as the one it has to be
+   * told apart from.
+   */
+  it("carries dark ink at AA on every one of its three states", () => {
+    const ink = token("on-commerce");
+    for (const state of ["commerce", "commerce-hover", "commerce-pressed"]) {
+      expect(contrast(token(state), ink), state).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("is legible against the dialog it is used in", () => {
+    // The quick view's panel. A warm surface on a deep indigo one has to be
+    // a surface, not a smudge.
+    expect(contrast(token("commerce"), "#221d3d")).toBeGreaterThanOrEqual(3);
+  });
+
+  it("is a different colour from the ownership gold, not a shade of it", () => {
+    // CIE76. Under 10 would be "two versions of the same colour"; this has to
+    // read as another thing entirely, because it means another thing.
+    expect(distance(token("commerce"), token("own-ink"))).toBeGreaterThan(15);
+  });
+
+  it("is warm, which is what keeps it inside the SkyIsles sunset", () => {
+    // Red channel highest, blue lowest: an orange, not a signal red and not
+    // the danger colour.
+    const [r, g, b] = rgb(token("commerce"));
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThan(b);
+    expect(distance(token("commerce"), token("danger"))).toBeGreaterThan(15);
+  });
+
+  it("darkens when pressed and lightens on hover", () => {
+    const rest = luminance(token("commerce"));
+    expect(luminance(token("commerce-hover"))).toBeGreaterThan(rest);
+    expect(luminance(token("commerce-pressed"))).toBeLessThan(rest);
+  });
+
+  it("changes no existing button — it is worn in one place so far", () => {
+    const action = readFileSync("src/components/ui/action.ts", "utf8");
+    // The silver shop action still exists and still says silver.
+    expect(action).toContain("bg-trade-solid");
+    /*
+     * And the amber is a role of its own, not a redefinition of that one.
+     * Sliced to the DECLARATION — up to the semicolon that ends it — because
+     * everything after it is the next token's prose, which naturally says
+     * "commerce" and made an earlier version of this fail for the wrong
+     * reason.
+     */
+    const at = action.indexOf("export const ACTION_SHOP =");
+    const declaration = action.slice(at, action.indexOf(";", at));
+    expect(declaration).toContain("bg-trade-solid");
+    expect(declaration).not.toContain("commerce");
+  });
+});

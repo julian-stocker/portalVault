@@ -42,7 +42,7 @@
  */
 "use server";
 
-import { isOfferCondition, type OfferCondition } from "@/lib/shop/offer";
+import { isOfferCondition, V1_CONDITION, type OfferCondition } from "@/lib/shop/offer";
 import { MAX_LINE_QUANTITY } from "@/lib/cart/cart";
 import { createClient } from "@/lib/supabase/server";
 
@@ -74,6 +74,19 @@ export async function checkCartQuantity(
   // answer for a quantity no cart line may hold.
   if (!SKY_ID.test(skyId)) return "denied";
   if (!isOfferCondition(condition)) return "denied";
+  /*
+   * V1 sells loose only (V3.3). Refusing here closes the ordinary purchase
+   * path — the add button, the cart stepper, a hand-edited `localStorage`
+   * line — before it reaches the server.
+   *
+   * IT IS NOT THE BOUNDARY, and the comment below already says why: the
+   * database is the authority. `shop_quantity_available()` and
+   * `create_order()` still match any condition the caller names, so a request
+   * crafted outside this application could still buy a boxed position. Making
+   * that impossible is a change to `0009` and `0011` — a migration, and one
+   * that belongs in its own reviewed step.
+   */
+  if (condition !== V1_CONDITION) return "denied";
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_LINE_QUANTITY) {
     return "denied";
   }

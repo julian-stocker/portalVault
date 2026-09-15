@@ -1,3 +1,9 @@
+import {
+  DEFAULT_AVAILABILITY,
+  isAvailabilityActive,
+  type AvailabilityMode,
+} from "@/lib/catalog/availability";
+
 /**
  * "Alle · Besitz · Fehlen" — what the catalog shows about ownership.
  *
@@ -65,6 +71,28 @@ export function filterByOwnership<T extends Pick<CatalogFigure, "skyId">>(
  */
 export function isOwnershipActive(mode: OwnershipMode): boolean {
   return mode !== DEFAULT_OWNERSHIP;
+}
+
+/**
+ * How many of the catalog's SECONDARY filters are on (V3.3).
+ *
+ * Secondary is the whole point: the search box and the game are how somebody
+ * navigates, and neither is counted here. What the badge on the filter button
+ * promises is "there are narrowings you cannot see" — a chosen game is not
+ * one of those, because the game is on screen.
+ *
+ * Pure, so the badge cannot drift from the state it describes.
+ */
+export function catalogFilterCount(
+  group: string | null,
+  ownership: OwnershipMode,
+  availability: AvailabilityMode = DEFAULT_AVAILABILITY,
+): number {
+  return (
+    (group === null ? 0 : 1) +
+    (isOwnershipActive(ownership) ? 1 : 0) +
+    (isAvailabilityActive(availability) ? 1 : 0)
+  );
 }
 
 /**

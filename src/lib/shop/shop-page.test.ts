@@ -58,9 +58,12 @@ describe("only what can actually be bought", () => {
 
   it("leaves the buyable test where it already lives", () => {
     const surface = code("src/lib/shop/surface.ts");
-    expect(surface).toContain("buyableOffers(");
-    // Not a second opinion about availability.
+    // The one V1 commerce truth (V3.3), not a second opinion about what is
+    // for sale — and not a second opinion about the condition either.
+    expect(surface).toContain("v1BuyableOffers(");
     expect(surface).not.toContain("available === true");
+    expect(surface).not.toContain('"loose"');
+    expect(surface).not.toContain('"boxed"');
   });
 });
 

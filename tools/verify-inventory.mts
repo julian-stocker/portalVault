@@ -22,6 +22,10 @@
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
 import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+// The application's own V1 rule, not a copy of it. `loose-only-schema.test.ts`
+// holds this constant against the literal inside `v1_sale_condition()`, so the
+// database and this file cannot disagree about what V1 sells.
+import { V1_CONDITION } from "../src/lib/shop/offer.ts";
 
 const RUN = Date.now();
 const SKY = "SKY-9994";
@@ -268,13 +272,52 @@ async function main(): Promise<void> {
       movementsAfter.count === movementsBefore.count,
       `${movementsBefore.count} -> ${movementsAfter.count}`);
 
-    // The separation, stated as the thing that actually matters.
+    // The separation, stated over the whole public projection rather than
+    // over this fixture.
+    //
+    // Asking whether SKY-9994/boxed is absent proves nothing: the fixture
+    // figure is created with `is_active = false`, so the catalog gate keeps
+    // it out whatever its price and whatever its condition. `verify-rls.mts`
+    // names the same trap and answers it the same way — assert the invariant
+    // where it can actually be violated, which is the live data.
     const publicOffers = ((await anonClient().rpc("shop_offers")).data ?? []) as {
-      sky_id: string; condition: string;
+      sky_id: string; condition: string; price: number | string | null;
     }[];
-    check("released is not the same as buyable: no public offer without a price",
-      !publicOffers.some((o) => o.sky_id === SKY && o.condition === "boxed"),
-      `${publicOffers.length} offers, none for ${SKY}/boxed`);
+
+    check("the public projection has offers to inspect", publicOffers.length > 0,
+      `${publicOffers.length} offers`);
+
+    // ADR-0048: released is not the same as buyable. A position without an
+    // effective price is released and is not an offer.
+    const priceless = publicOffers.filter(
+      (o) => o.price === null || !(Number(o.price) > 0),
+    );
+    check("no public offer exists without an effective price (ADR-0048)",
+      priceless.length === 0,
+      `${publicOffers.length} offers, ${priceless.length} without a price`);
+
+    // 0029: the storefront publishes the condition V1 sells, and only that
+    // one. Runs against real stock — staging carries boxed positions that are
+    // listed, eligible and priced, so this fails loudly if 0029 is missing.
+    const foreign = [...new Set(
+      publicOffers.filter((o) => o.condition !== V1_CONDITION).map((o) => o.condition),
+    )];
+    check(`no public offer is outside the V1 sale condition (${V1_CONDITION}, 0029)`,
+      foreign.length === 0,
+      foreign.length === 0
+        ? `${publicOffers.length} offers, all ${V1_CONDITION}`
+        : `also offered: ${foreign.join(", ")}`);
+
+    // And the other half of the contract, which is what makes the line above
+    // a narrowing of the storefront rather than a loss of the data: boxed is
+    // still there, and the administrator still sees it.
+    const adminRows = ((await a.rpc("admin_shop_inventory")).data ?? []) as Row[];
+    const adminBoxed = adminRows.filter(
+      (row) => row.sky_id === SKY && row.condition === "boxed",
+    );
+    check("boxed stock stays visible to the administrator (0029 narrows the storefront, not the data)",
+      adminBoxed.length === 1,
+      `${adminBoxed.length} boxed position(s) for ${SKY}`);
 
     const history = await a.rpc("admin_inventory_movements", {
       p_inventory_id: after?.inventory_id ?? 0,

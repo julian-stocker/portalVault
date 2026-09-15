@@ -15,6 +15,14 @@ import { QuickView } from "@/components/catalog/quick-view";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { quickViewModel } from "@/lib/ui/quick-view";
+import { BrowseToolbar } from "@/components/ui/browse-toolbar";
+import { AvailabilityFilter } from "@/components/catalog/availability-filter";
+import {
+  DEFAULT_AVAILABILITY,
+  matchesAvailability,
+  type AvailabilityMode,
+} from "@/lib/catalog/availability";
+import { FilterGroup, FilterSheet } from "@/components/ui/filter-sheet";
 import type { PublicSeller } from "@/lib/shop/seller";
 import { OwnershipFilter } from "@/components/catalog/ownership-filter";
 import { ProductGroupTabs } from "@/components/catalog/group-tabs";
@@ -22,6 +30,7 @@ import { SeriesTabs } from "@/components/catalog/series-tabs";
 import { groupTabs, matchesGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { filterFigures, groupSearchResults } from "@/lib/catalog/search";
 import {
+  catalogFilterCount,
   DEFAULT_OWNERSHIP,
   isOwnershipActive,
   matchesOwnership,
@@ -154,6 +163,15 @@ export function CatalogView({
   const [ownership, setOwnership] = useState<OwnershipMode>(DEFAULT_OWNERSHIP);
 
   /**
+   * Whether to show only figures somebody is offering (V3.3).
+   *
+   * Its own dimension, combining freely with the ownership filter above it —
+   * "missing and buyable" is the whole point, and a third option inside
+   * `ownership` could not say it.
+   */
+  const [availability, setAvailability] = useState<AvailabilityMode>(DEFAULT_AVAILABILITY);
+
+  /**
    * Visibility changed on this page, before the server has caught up.
    *
    * Same idea as `changed` above: the card has to mark itself hidden the
@@ -203,8 +221,19 @@ export function CatalogView({
     const owning = admin
       ? figures
       : figures.filter((figure) => matchesOwnership(figure, owned, ownership));
-    return group === null ? owning : owning.filter((figure) => matchesGroup(figure, group));
-  }, [admin, ownership, figures, owned, group]);
+    const grouped = group === null ? owning : owning.filter((figure) => matchesGroup(figure, group));
+    /*
+     * The third narrowing, applied last and in the same pool as the other
+     * two, so every combination works by construction: series × group ×
+     * ownership × availability, and the search reads this pool as well.
+     *
+     * `offers` is the object the page already handed down — the same one the
+     * cards and the quick view read. Nothing is fetched to answer this.
+     */
+    return availability === DEFAULT_AVAILABILITY
+      ? grouped
+      : grouped.filter((figure) => matchesAvailability(offers[figure.skyId], availability));
+  }, [admin, ownership, figures, owned, group, availability, offers]);
 
   /**
    * The second level's tabs, for the chosen game.
@@ -264,6 +293,23 @@ export function CatalogView({
     setQuery("");
     setOwnership(DEFAULT_OWNERSHIP);
     setGroup(null);
+    setAvailability(DEFAULT_AVAILABILITY);
+  }
+
+  /**
+   * What the filter button reports, and what its reset clears (V3.3).
+   *
+   * Only the two secondary filters. The search box and the game are on
+   * screen, so counting them would promise hidden narrowings that are not
+   * hidden — and clearing them from inside the panel would undo navigation
+   * somebody can see.
+   */
+  const filterCount = catalogFilterCount(group, ownership, availability);
+
+  function resetFilters() {
+    setOwnership(DEFAULT_OWNERSHIP);
+    setGroup(null);
+    setAvailability(DEFAULT_AVAILABILITY);
   }
 
   /** One card, in whichever mode the visitor is in. */
@@ -375,38 +421,62 @@ export function CatalogView({
       {/* Still inside the world, at the point where it turns into the
           vitrine — so there is no bright gap between the two. */}
       <div className="flex flex-col gap-3">
+        {/*
+         * THE GAMES STAY OUTSIDE THE PANEL (V3.3).
+         *
+         * Picking a game is how somebody browses 561 figures; it is not a
+         * narrowing of a list they are already looking at. Folding it into a
+         * filter menu would hide the one control that is used on every visit
+         * behind the one that is used on some.
+         */}
         <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
 
-        {/* The second level, directly under the games it narrows. Absent for
-            a game that holds only one kind of thing. */}
-        <ProductGroupTabs tabs={tabs} active={group} onSelect={setGroup} />
-
         {/*
-         * The section header (ADR-0038, V4.2): what is being shown on the
-         * left, what can be done about it on the right. The count line was
-         * already here; it gains the controls rather than a bar of its own,
-         * because a second bar under the tabs would read as a second
-         * navigation.
+         * THE TOOLBAR (V3.3): what is being shown, and what can be done about
+         * it — one row, the same row the collection has.
          *
-         * `aria-live` so a filter change is announced without moving focus.
+         * The type tabs and the ownership filter used to sit out here beside
+         * the games, which gave a phone three rows of pills before a single
+         * figure and gave the eye no way to tell navigation from narrowing.
          *
-         * There is deliberately no "Specials" toggle. Nothing in the data
-         * says which figures are specials — deriving it from names would be
-         * guessing (ADR-0034) — so the control is absent rather than present
-         * and wrong.
+         * There is deliberately no "Specials" toggle and no sort control.
+         * Nothing in the data says which figures are specials — deriving it
+         * from names would be guessing (ADR-0034) — and there is no sort
+         * model to expose. Absent beats present and wrong.
          */}
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <p className="text-sm text-muted" aria-live="polite">
-            {searching
+        <BrowseToolbar
+          count={
+            searching
               ? de.catalog.searchTotal(groups?.reduce((n, g) => n + g.figures.length, 0) ?? 0)
               : activeSeries
                 ? de.catalog.countInSeries(activeSeries.label, visible.length)
-                : de.catalog.figureCount(visible.length)}
-          </p>
-          {offersOwnershipFilter({ signedIn, admin }) ? (
-            <OwnershipFilter active={ownership} onSelect={setOwnership} />
-          ) : null}
-        </div>
+                : de.catalog.figureCount(visible.length)
+          }
+        >
+          <FilterSheet activeCount={filterCount} onReset={resetFilters}>
+            {/* Only what this page actually filters by. The type tabs are
+                absent for a game that holds one kind of thing, exactly as
+                they were when they sat outside. */}
+            {tabs.length > 1 ? (
+              <FilterGroup label={de.catalog.groupNav}>
+                <ProductGroupTabs tabs={tabs} active={group} onSelect={setGroup} />
+              </FilterGroup>
+            ) : null}
+
+            {offersOwnershipFilter({ signedIn, admin }) ? (
+              <FilterGroup label={de.catalog.ownershipNav}>
+                <OwnershipFilter active={ownership} onSelect={setOwnership} />
+              </FilterGroup>
+            ) : null}
+
+            {/* Its own group, always — it does not depend on being signed in
+                the way ownership does, because what is for sale is public
+                (ADR-0025). */}
+            <FilterGroup label={de.catalog.availabilityNav}>
+              <AvailabilityFilter active={availability} onSelect={setAvailability} />
+            </FilterGroup>
+          </FilterSheet>
+        </BrowseToolbar>
       </div>
 
       {groups ? (

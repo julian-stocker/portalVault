@@ -47,7 +47,6 @@ import Link from "next/link";
 import { ElementChip } from "@/components/catalog/character-panel";
 import { Modal } from "@/components/ui/modal";
 import { OfferAddButton } from "@/components/shop/offer-panel";
-import { conditionLabel } from "@/lib/shop/condition";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import type { QuickViewModel } from "@/lib/ui/quick-view";
@@ -147,7 +146,7 @@ export function QuickView({
              * made the picture grow with every pixel the dialog gained,
              * which is how a 320 px plate became a wall.
              */
-            "grid gap-5 p-5 " +
+            "grid gap-4 p-4 " +
             "sm:grid-cols-[minmax(170px,210px)_minmax(0,1fr)] sm:gap-5 sm:p-5 " +
             "md:grid-cols-[minmax(190px,230px)_minmax(0,1fr)] md:gap-6"
           }
@@ -176,8 +175,15 @@ export function QuickView({
                * No `vw`, no percentage, no `min()` of either: those are what
                * made the size depend on the window instead of on the layout.
                */
-              "mx-auto flex aspect-square w-full max-w-[220px] items-center justify-center " +
-              "rounded-sky-md bg-template-window p-3 ring-1 ring-gold-line " +
+              /*
+               * Smaller on a phone than on a desktop (V3.2). The plate used
+               * to take 220 px of a 390 px screen, which pushed the offer —
+               * the thing this dialog exists for — below the fold. 150 px
+               * still identifies the figure and leaves the price on the
+               * first screen.
+               */
+              "mx-auto flex aspect-square w-full max-w-[150px] items-center justify-center " +
+              "rounded-sky-md bg-template-window p-2.5 ring-1 ring-gold-line " +
               "sm:mx-0 sm:max-w-[210px] sm:p-3.5 md:max-w-[230px]"
             }
           >
@@ -201,13 +207,13 @@ export function QuickView({
           </div>
 
           {/* THE FACTS, THE PRICES, THE OFFER. */}
-          <div className="flex min-w-0 flex-col gap-4">
-            <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-col gap-3 sm:gap-4">
+            <div className="flex min-w-0 flex-col gap-1">
               <h2
                 id={headingId}
                 /* Clear of the close button on the narrow layout, where the
                    heading runs the full width of the panel. */
-                className="min-w-0 pr-12 text-2xl leading-tight font-semibold text-balance text-on-deep break-words sm:pr-0"
+                className="min-w-0 pr-12 text-xl leading-tight font-semibold text-balance text-on-deep break-words sm:pr-0 sm:text-2xl"
               >
                 {model.name}
               </h2>
@@ -290,13 +296,16 @@ export function QuickView({
                     }
                   >
                     <div className="flex min-w-0 flex-col gap-0.5">
-                      <span className="flex items-baseline gap-2">
-                        <span className="text-xs leading-tight text-on-deep-muted">
-                          {conditionLabel(offer.condition)}
-                        </span>
-                        <span className="text-lg leading-tight font-semibold text-on-deep tabular-nums">
-                          {formatPrice(offer.price)}
-                        </span>
+                      {/*
+                       * No condition label. V1 sells loose figures and only
+                       * loose figures, so "Lose" is not a distinction the
+                       * buyer can act on — it labels the only thing there is.
+                       * The price leads instead. If a second condition is ever
+                       * offered, the label comes back here, because then it
+                       * would carry information. See `V1_CONDITION`.
+                       */}
+                      <span className="text-lg leading-tight font-semibold text-on-deep tabular-nums">
+                        {formatPrice(offer.price)}
                       </span>
 
                       {/*

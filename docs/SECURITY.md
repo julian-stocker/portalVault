@@ -535,7 +535,36 @@ Lagerbestand unter anderem Namen, nur in einem Roundtrip statt in mehreren. Die 
 `anon, authenticated`, schreibt nichts und **reserviert nichts**. Eligibility, Freigabe und Preis
 fragt sie über `is_shop_eligible()` und `shop_price()` ab — dieselben Regeln wie `shop_offers()`,
 keine zweite Kopie. Jede Art von „nein" fällt in dasselbe `false`: der Aufrufer erfährt nicht, ob
-zu wenig da ist, ob die Position ausgelistet wurde oder ob es sie nie gab.
+zu wenig da ist, ob die Position ausgelistet wurde oder ob es sie nie gab. Seit `0028` fällt auch
+„falsche Kondition" in dasselbe `false`: V1 verkauft ausschließlich `loose`, und `boxed` ist damit
+so wenig kaufbar wie eine ausverkaufte Position.
+
+**Der V1-Vertrag wird an der Datenbankgrenze durchgesetzt, nicht nur in der Oberfläche**
+(Migration `0028`). Die Anwendung zeigt `boxed` nirgends an — aber `shop_quantity_available()` und
+`create_order()` sind über PostgREST mit dem Anon-Key erreichbar, und beide nahmen jede Kondition
+entgegen, die der Aufrufer nannte. Ein manipuliertes Frontend oder ein direkter RPC-Aufruf konnte
+damit echten `boxed`-Bestand zu einem echten Preis kaufen. Beide Funktionen fragen jetzt
+`v1_sale_condition()`, die das Wort `loose` als einzige Stelle im SQL führt und an **niemanden**
+granted ist — die Aufrufer sind `security definer` und brauchen kein Recht darauf. `create_order()`
+lehnt eine Nicht-`loose`-Position **ausdrücklich** ab (`check_violation`, derselbe Code wie eine
+ungültige Menge), und zwar in Pass 1, der nichts schreibt: ein gemischter Warenkorb hinterlässt
+keine Bestellung, keine Position, keine Bewegung und keine Bestandsänderung. Das Datenmodell
+bleibt unberührt — `boxed` ist weiterhin eine gültige Kondition, nur kein Verkaufsgegenstand.
+
+**Seit `0029` gilt dasselbe für die Projektion** (`shop_offers()`). Bis dahin lieferte sie `anon`
+weiterhin boxed-Angebote samt Preis und Verfügbarkeit — auf Staging 8 von 25 Zeilen — für Artikel,
+die seit `0028` nicht mehr gekauft werden können. Das war keine Kauflücke mehr, aber eine falsche
+Aussage gegenüber dem Besucher und die Quelle des ursprünglichen Befunds (Karte bewarb ein
+Angebot, das der Quick View verweigerte). Damit sind **alle drei für `anon` ausführbaren
+Funktionen, die `condition` berühren**, auf dieselbe Regel gezogen: `shop_offers()`,
+`shop_quantity_available()` und `create_order()` fragen `public.v1_sale_condition()`.
+
+**Die Anwendung filtert weiterhin selbst.** `v1BuyableOffers()` und die Cart-/Quick-View-Guards
+bleiben bestehen — `0029` ist Verteidigung in der Tiefe, kein Grund, einem Payload zu vertrauen.
+
+**Nicht öffentlich heißt nicht gelöscht.** `shop_inventory` behält jede boxed-Zeile,
+`order_lines` jede historische boxed-Position, und `admin_shop_inventory()`,
+`admin_inventory_movements()`, `admin_order()` sowie `my_order()` zeigen sie unverändert.
 
 **Ehrlich benannte Restgrenze.** Wer wiederholt konkrete Mengen anfragt, kann die Obergrenze durch
 Ausprobieren eingrenzen. Das ist beim Verkauf von Ware grundsätzlich nicht vollständig vermeidbar —

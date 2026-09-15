@@ -21,13 +21,27 @@
  */
 "use client";
 
-import {
-  ACTION_CARD,
-  ACTION_OWNED,
-  ACTION_PENDING,
-} from "@/components/ui/action";
+import { ACTION_PENDING } from "@/components/ui/action";
+import { INK_OFFER } from "@/components/shop/offer-link";
 import { useCollectionMutation } from "@/components/collection/use-collection-mutation";
 import { de } from "@/lib/i18n/de";
+
+/** A thin cross. Small enough to sit beside an 11 px label without shouting. */
+function RemoveGlyph() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 12 12"
+      className="h-2.5 w-2.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+    >
+      <path d="M3 3l6 6M9 3l-6 6" />
+    </svg>
+  );
+}
 
 export function CollectionAction({
   skyId,
@@ -56,18 +70,57 @@ export function CollectionAction({
       : de.catalog.collect;
 
   return (
-    <div>
+    /*
+     * THE WRAPPER CARRIES THE SLOT'S HEIGHT (V3.2).
+     *
+     * It used to be a bare `<div>`. `h-full` on the button then resolved
+     * against a parent of `height: auto`, which is the button's own content
+     * height — so it collapsed and sat at the TOP of the silver plate
+     * instead of filling it. `OfferLink` has no wrapper at all, which is why
+     * the catalog never showed this.
+     *
+     * The failure message is taken out of flow for the same reason: in flow
+     * it would make the wrapper taller than the slot and push the label back
+     * off the plate.
+     */
+    <div className="relative h-full w-full">
       <button
         type="button"
         onClick={() => apply(owned ? 0 : Math.max(initialQuantity, 1))}
         aria-label={owned ? de.collection.removeLabel(name) : undefined}
         aria-busy={pending || undefined}
-        className={`${justRemoved ? ACTION_OWNED : ACTION_CARD} ${pending ? ACTION_PENDING : ""}`}
+        className={
+          /*
+           * THE WHOLE PLATE IS THE CONTROL (V3.2).
+           *
+           * It used to be an `ACTION_CARD` pill — gold-brown, 40 px tall — in
+           * a slot that is 29 px on a 211 px card. It overflowed its row and
+           * made removal the heaviest shape on the page, wearing the colour
+           * that means ownership.
+           *
+           * Now it fills the silver plate the artwork already paints, exactly
+           * as the catalog's offer line does: same slot, same size, same
+           * position, dark ink on silver. The card gains no height, and the
+           * tap target is the plate rather than a chip inside it.
+           */
+          "focus-ring flex h-full w-full items-center justify-center gap-1 " +
+          "whitespace-nowrap px-1.5 sm:px-2 " +
+          "text-[clamp(9px,4.8cqw,11px)] leading-none font-semibold " +
+          "transition-opacity hover:opacity-75 active:opacity-60 " +
+          (pending ? ACTION_PENDING : "")
+        }
+        /* The same near-black the catalog's buyable line uses, from the same
+           constant, and inline for the same reason — see `offer-link.tsx`. */
+        style={{ color: INK_OFFER }}
       >
+        {owned ? <RemoveGlyph /> : null}
         {label}
       </button>
       {failed ? (
-        <p role="alert" className="mt-1 text-xs text-danger">
+        <p
+          role="alert"
+          className="absolute inset-x-0 top-full mt-1 text-center text-xs text-danger"
+        >
           {de.collection.removeFailed}
         </p>
       ) : null}

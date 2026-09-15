@@ -184,6 +184,34 @@
   /* The fine inner line of the frame. Was a literal in card.ts. */
   --own-line-strong: rgb(240 192 115 / 0.75);
 
+  /* --- AMBER · the act of buying (V3.2) ---------------------------------
+     A fourth role, and it exists because the other three could not carry it.
+     Gold is what somebody OWNS. Silver is what somebody OFFERS. Neither is
+     "press this to buy it", and until now the buy action borrowed silver —
+     which made it look like one more piece of offer information sitting in
+     an offer panel.
+
+     Warm amber rather than a retail orange: it belongs to the same sunset the
+     rest of SkyIsles is lit by, and it is deliberately NOT the ownership
+     gold. Measured in CIE76 against `--own-ink` (#e0a44a): ΔE 20.3, which is
+     not a shade of the same colour but a different one.
+
+     Contrast, all against `--on-commerce`:
+       rest     #e8862b   6.95 : 1     and 6.01 : 1 against the dialog panel
+       hover    #f2953c   8.07 : 1
+       pressed  #d1741f   5.50 : 1
+
+     It changes NO existing button. It is applied where a purchase is
+     actually started, and `ACTION_SHOP` — the offer panel on a figure page —
+     deliberately still wears silver until that surface is looked at too. */
+  --commerce: #e8862b;
+  --commerce-hover: #f2953c;
+  --commerce-pressed: #d1741f;
+  /* The same ink as on gold: dark enough that neither surface needs a second
+     value, and it keeps warm surfaces reading as one family. */
+  --on-commerce: #1a1206;
+  --commerce-line: rgb(255 196 128 / 0.55);
+
   /* --- SILVER · trade ---------------------------------------------------
      Forged silver, not grey. Three things keep it from reading as a disabled
      control, and all three were measured rather than assumed:
@@ -421,6 +449,12 @@
   --color-own-subtle: var(--own-subtle);
   --color-own-line: var(--own-line);
   --color-own-line-strong: var(--own-line-strong);
+
+  --color-commerce: var(--commerce);
+  --color-commerce-hover: var(--commerce-hover);
+  --color-commerce-pressed: var(--commerce-pressed);
+  --color-on-commerce: var(--on-commerce);
+  --color-commerce-line: var(--commerce-line);
 
   --color-trade-ink: var(--trade-ink);
   --color-trade-solid: var(--trade-solid);

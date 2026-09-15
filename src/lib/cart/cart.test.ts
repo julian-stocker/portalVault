@@ -116,6 +116,12 @@ describe("the server's answer beats the stored one", () => {
 
 describe("what cannot be bought", () => {
   it("keeps a sold-out line on screen and out of the total", () => {
+    /*
+     * Both lines are unbuyable now, for two different reasons: the loose one
+     * is sold out, and the boxed one is a condition V1 does not sell (V3.3).
+     * Both stay visible — a line vanishing from the cart is worse than a line
+     * that says it cannot be bought — and both stay out of the total.
+     */
     const cart = addLine(addLine([], BASH, 2), BASH_BOXED, 1);
     const entries = resolveCart(
       cart,
@@ -125,9 +131,9 @@ describe("what cannot be bought", () => {
     expect(entries).toHaveLength(2);
     expect(entries[0].purchasable).toBe(false);
     expect(entries[0].total).toBeNull();
-    // Only the boxed line counts.
-    expect(cartTotal(entries)).toBe(19);
-    expect(unavailableEntries(entries)).toHaveLength(1);
+    expect(entries[1].purchasable).toBe(false);
+    expect(cartTotal(entries)).toBe(0);
+    expect(unavailableEntries(entries)).toHaveLength(2);
   });
 
   it("keeps a withdrawn line on screen, with no price at all", () => {

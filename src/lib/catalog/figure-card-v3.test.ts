@@ -12,7 +12,7 @@ import {
   WINDOW_FILL,
 } from "@/lib/catalog/card-template";
 import { marksOwnership } from "@/lib/catalog/card";
-import { buyableOffers, summarizeOffers, type Offer } from "@/lib/shop/offer";
+import { v1BuyableOffers, summarizeOffers, type Offer } from "@/lib/shop/offer";
 
 /**
  * FigureCard V3.3 — the card is a picture.
@@ -459,7 +459,168 @@ describe("normal card information is black", () => {
     // Explicitly out of scope: the variant seal has its two dark plates, and
     // the trade row inks the silver.
     expect(code(SEAL)).toMatch(/#f3e6c8|#ded7e8/);
-    expect(code(LINK)).toContain("#39424d");
+    expect(code(LINK)).toMatch(/#[0-9a-f]{6}/);
+  });
+});
+
+describe("the trade row separates its two states by contrast (V3.2)", () => {
+  /**
+   * A wall of cards has to say at a glance which figure can be bought. Both
+   * states used to share one ink at one weight, so it did not.
+   *
+   * They are separated by contrast, not by colour: silver stays silver,
+   * because gold means ownership and a buyable offer is not something you own
+   * (V3.1). Measured against the plate the artwork actually paints, sampled
+   * from both templates at the trade band.
+   */
+  const PLATE = { silver: "#c2c8cd", gold: "#bec2c8" } as const;
+
+  function luminance(hex: string): number {
+    const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = channels.map((v) =>
+      v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4,
+    );
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function contrast(a: string, b: string): number {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  /** The two inks, read out of the component rather than restated here. */
+  function ink(name: "INK_QUIET" | "INK_OFFER"): string {
+    const match = code(LINK).match(new RegExp(`export const ${name} = "(#[0-9a-f]{6})"`));
+    expect(match, `${name} is missing`).not.toBeNull();
+    return match![1];
+  }
+
+  /**
+   * THE TEST THAT WOULD HAVE CAUGHT THE BUG.
+   *
+   * The old assertions found `#11161c` in the file and passed while the
+   * browser painted the text near-white. Finding a hex in a source file says
+   * nothing about whether the colour reaches the element: a class only paints
+   * if its rule arrives, and a card on a dark page inherits near-white when
+   * none does.
+   *
+   * So the colour is carried as an inline style now, and these check that —
+   * that the value is applied on the very element that renders the text, by a
+   * mechanism that needs nothing generated and outranks every stylesheet rule
+   * short of `!important`.
+   */
+  it("applies both inks as inline styles, not as classes", () => {
+    const link = code(LINK);
+    expect(link).toContain("style={{ color: INK_OFFER }}");
+    expect(link).toContain("style={{ color: INK_QUIET }}");
+    // The class form is what failed; it must not come back alongside.
+    expect(link).not.toMatch(/text-\[#[0-9a-f]{6}\]/);
+  });
+
+  it("puts the style on the element that renders the text", () => {
+    const link = code(LINK);
+    for (const state of ["INK_QUIET", "INK_OFFER"]) {
+      const at = link.indexOf(`style={{ color: ${state} }}`);
+      expect(at, `${state} is not applied`).toBeGreaterThan(-1);
+      // The opening tag it belongs to, and the text it wraps, are the same
+      // element: the style sits before the `>` that closes that tag.
+      const tagEnd = link.indexOf(">", at);
+      const nextTagStart = link.indexOf("<", at);
+      expect(tagEnd, `${state} must close its own tag first`).toBeLessThan(nextTagStart);
+    }
+  });
+
+  it("has no ancestor in the card forcing a colour onto the trade slot", () => {
+    /*
+     * A colour on the slot or on the grid above it would be inherited by
+     * anything that did not set its own — which is how near-white got in.
+     *
+     * The slicing is fiddly and was wrong once: the card has TWO elements
+     * carrying `pointer-events-none absolute inset-0 grid` — layer three
+     * inside the body, and the sibling grid that owns the trade row — and
+     * `indexOf` found the first. The closing tag was then searched from the
+     * start of the string, landed BEFORE the trade row, and produced an empty
+     * slice that asserted nothing. `lastIndexOf` takes the sibling grid, and
+     * the closing tag is searched forward from the opening one.
+     */
+    const card = code(CARD);
+    const gridAt = card.lastIndexOf("pointer-events-none absolute inset-0 grid");
+    const sibling = card.slice(gridAt);
+    const openAt = sibling.indexOf('area="trade"');
+    expect(openAt, "the trade row is not in the sibling grid").toBeGreaterThan(-1);
+
+    const tradeSlot = sibling.slice(openAt, sibling.indexOf("</Slot>", openAt));
+    // Not empty, or the assertions below hold nothing.
+    expect(tradeSlot.length).toBeGreaterThan(20);
+    expect(tradeSlot).not.toMatch(/text-(white|on-deep|foreground)/);
+    expect(tradeSlot).not.toMatch(/text-\[#/);
+
+    // And the grid itself, between its opening tag and the trade row.
+    const gridTag = sibling.slice(0, sibling.indexOf(">"));
+    expect(gridTag).not.toMatch(/text-(white|on-deep|foreground)/);
+  });
+
+  it("writes a buyable offer in near-black, well past AA", () => {
+    for (const plate of Object.values(PLATE)) {
+      expect(contrast(ink("INK_OFFER"), plate)).toBeGreaterThanOrEqual(7);
+    }
+  });
+
+  it("clears AA on both plates — 'no offer' is readable, not dimmed away", () => {
+    /*
+     * The gold template is the owned card and its plate is three points
+     * darker (#bec2c8 against #c2c8cd), so it is the one the floor has to
+     * hold on. Both are checked.
+     */
+    for (const plate of Object.values(PLATE)) {
+      expect(contrast(ink("INK_QUIET"), plate)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("stays visibly the quieter of the two", () => {
+    for (const plate of Object.values(PLATE)) {
+      expect(contrast(ink("INK_QUIET"), plate)).toBeLessThan(6);
+    }
+  });
+
+  it("separates the two states by a wide margin of ink", () => {
+    for (const plate of Object.values(PLATE)) {
+      const ratio = contrast(ink("INK_OFFER"), plate) / contrast(ink("INK_QUIET"), plate);
+      // Dark against grey, not two shades of the same thing. The quiet ink
+      // sits high enough to clear AA on both plates, which costs some of the
+      // margin — it is still more than double, and that is what has to read
+      // while scrolling.
+      expect(ratio).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("weights the price more heavily than its label", () => {
+    const link = code(LINK);
+    expect(link).toContain("font-bold tabular-nums");
+    expect(link).toContain("de.shop.offersFromLabel");
+  });
+
+  it("distinguishes them by ink alone, never by a second surface", () => {
+    /*
+     * An earlier draft gave the buyable state a gradient, a highlight and a
+     * shadow. On the real artwork the plate is already a painted surface and
+     * a second one laid over it made the text harder to read, not easier.
+     */
+    const link = code(LINK);
+    expect(link).not.toContain("linear-gradient");
+    expect(link).not.toContain("inset_0_1px_0");
+    expect(link).not.toMatch(/shadow-\[/);
+    // Press feedback stays, as ink.
+    expect(link).toContain("hover:opacity-");
+    expect(link).toContain("active:opacity-");
+  });
+
+  it("uses no gold anywhere in the trade row", () => {
+    // Gold is ownership (V3.1). A buyable offer is not something you own.
+    const link = code(LINK);
+    for (const gold of ["gold", "own-ink", "own-line", "ACTION_OWN"]) {
+      expect(link, `${gold} belongs to ownership`).not.toContain(gold);
+    }
   });
 });
 
@@ -542,15 +703,23 @@ describe("the trade zone", () => {
     expect(link).not.toMatch(/opacity-[1-5]0\b/);
   });
 
-  it("shows the cheapest buyable price, whatever the conditions are", () => {
+  it("shows the loose price and never teases a cheaper boxed one (V3.3)", () => {
+    /*
+     * This used to quote whichever condition was cheapest. V1 sells loose
+     * only, so a boxed listing — even at half the price — is not a price
+     * anybody can pay here, and putting it on the card would advertise a
+     * purchase the product refuses to make.
+     */
     expect(
       summarizeOffers([offer({ price: 9 }), offer({ condition: "boxed", price: 4.49 })]),
-    ).toMatchObject({ price: 4.49 });
-    // A sold-out cheaper line must not set the "ab" price.
+    ).toMatchObject({ price: 9 });
+
+    // A sold-out loose line beside a buyable boxed one leaves nothing to say.
     expect(
       summarizeOffers([offer({ price: 1, available: false }), offer({ condition: "boxed", price: 8 })]),
-    ).toMatchObject({ price: 8 });
-    expect(buyableOffers([offer({ available: false })])).toEqual([]);
+    ).toEqual({ kind: "none" });
+
+    expect(v1BuyableOffers([offer({ available: false })])).toEqual([]);
   });
 
   it("is a sibling of the body, so it is its own target", () => {

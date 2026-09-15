@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
-  buyableOffers,
+  v1BuyableOffers,
   findOffer,
   offerIndex,
   offerRecord,
@@ -58,23 +58,25 @@ describe("what a card says", () => {
     });
   });
 
-  it("says 'ab' only when the buyable prices actually differ", () => {
+  it("quotes one price, because V1 sells one condition", () => {
+    /*
+     * "ab …" needed two buyable prices, and V1 cannot have them: one loose
+     * position per figure (unique on sky_id + condition) and boxed is not
+     * public. The `from` branch stays in the model for the day a second
+     * seller makes two prices possible again.
+     */
     const two = [offer({ condition: "loose", price: 9.9 }), offer({ condition: "boxed", price: 19 })];
-    expect(summarizeOffers(two)).toEqual({ kind: "from", price: 9.9 });
-
-    // Same price in both conditions is one price. "ab 9,90 €" beside nothing
-    // cheaper than 9,90 € reads as though something were being withheld.
-    const same = [offer({ condition: "loose" }), offer({ condition: "boxed" })];
-    expect(summarizeOffers(same)).toEqual({ kind: "single", price: 9.9, condition: "loose" });
+    expect(summarizeOffers(two)).toEqual({ kind: "single", price: 9.9, condition: "loose" });
   });
 
-  it("ignores what cannot be bought when quoting a price", () => {
+  it("never quotes a boxed price — V1 does not sell OVP", () => {
     const summary = summarizeOffers([
       offer({ condition: "loose", price: 5, available: false }),
       offer({ condition: "boxed", price: 19, available: true }),
     ]);
-    // The cheap one is out of stock, so 5,00 € is not a price anyone can pay.
-    expect(summary).toEqual({ kind: "single", price: 19, condition: "boxed" });
+    // The loose one is out of stock and the boxed one is not for sale here,
+    // so the card says nothing rather than teasing 19,00 €.
+    expect(summary).toEqual({ kind: "none" });
   });
 
   it("says nothing at all when nothing can be bought", () => {
@@ -89,13 +91,21 @@ describe("what a card says", () => {
     ])).toEqual({ kind: "none" });
   });
 
-  it("offers only what is actually buyable", () => {
+  it("offers only what V1 actually sells", () => {
     const mixed = [
       offer({ condition: "loose", price: 5, available: false }),
       offer({ condition: "boxed", price: 19, available: true }),
     ];
-    expect(buyableOffers(mixed).map((o) => o.condition)).toEqual(["boxed"]);
-    expect(buyableOffers([offer({ available: false })])).toEqual([]);
+    // Neither qualifies: one is sold out, the other is a condition V1 has no
+    // public concept of.
+    expect(v1BuyableOffers(mixed)).toEqual([]);
+    expect(v1BuyableOffers([offer({ available: false })])).toEqual([]);
+    expect(
+      v1BuyableOffers([offer({ condition: "boxed", available: true })]),
+    ).toEqual([]);
+    expect(
+      v1BuyableOffers([offer({ condition: "loose", available: true })]),
+    ).toHaveLength(1);
   });
 });
 

@@ -47,8 +47,48 @@ import { summarizeOffers, type Offer } from "@/lib/shop/offer";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 
-/** Ink on the plate. 5.4:1 on the darker of the two templates. */
-const INK = "text-[#39424d]";
+/*
+ * TWO STATES, TOLD APART BY ONE THING: DARK OR GREY (V3.2).
+ *
+ * An earlier draft gave the buyable state its own polished surface — a
+ * highlight, a gradient, a shadow. On the real artwork that read as worse,
+ * not better: the plate is already a painted surface, and a second one laid
+ * over it muddied the text it was meant to lift.
+ *
+ * So the difference is ink alone. Both states share the same silver plate,
+ * the same size and the same position; one is nearly black and one is grey.
+ * Silver stays silver — gold means ownership, and a buyable offer is not
+ * something you own (V3.1).
+ *
+ * Measured against the plate the artwork actually paints, sampled from both
+ * templates at the trade band (silver #c2c8cd, gold #bec2c8):
+ *
+ *   offer  #11161c   10.76 : 1  silver   10.16 : 1  gold
+ *   quiet  #474f5b    4.90 : 1  silver    4.63 : 1  gold
+ *
+ * Both clear AA on both plates, and they still differ by a factor of 2.2 —
+ * the quiet state is passive because it is grey against near-black, not
+ * because it was dimmed until it stopped being readable.
+ *
+ * WHY THESE ARE INLINE STYLES AND NOT CLASSES
+ *
+ * They were `text-[#11161c]` and `text-[#474f5b]`. Both classes generate
+ * correctly and both sit on the element that renders the text — and the
+ * browser still showed the inherited near-white of the dark page, which is
+ * what a card falls back to when no colour rule reaches it.
+ *
+ * A class can only paint if its rule arrives. An inline style carries the
+ * value itself: it needs nothing generated, nothing scanned, nothing shipped
+ * alongside, and it outranks every stylesheet rule that is not `!important`
+ * — and nothing in this project marks a colour `!important`. The card
+ * already sets `gridArea`, `aspectRatio` and the window inset this way, so
+ * the mechanism is the one this component already uses for values it cannot
+ * afford to have go missing.
+ *
+ * Weight, size and spacing stay in Tailwind. Only the two colours moved.
+ */
+export const INK_OFFER = "#11161c";
+export const INK_QUIET = "#474f5b";
 
 export function OfferLink({
   offers,
@@ -77,10 +117,18 @@ export function OfferLink({
     return (
       <span
         className={
+          /*
+           * Deliberately passive: no surface of its own, no highlight, normal
+           * weight. It says what is true and asks for nothing.
+           */
+          /*
+           * Inactive: the same plate, no surface of its own, no hover, and
+           * nothing to press. Grey is the whole of the signal.
+           */
           `flex h-full w-full items-center justify-center whitespace-nowrap px-1.5 sm:px-2 ` +
-          `text-[clamp(9px,4.8cqw,11px)] leading-none ` +
-          `font-medium tracking-wide ${INK} opacity-80`
+          `text-[clamp(9px,4.8cqw,11px)] leading-none font-normal tracking-wide`
         }
+        style={{ color: INK_QUIET }}
       >
         {de.shop.noOffer}
       </span>
@@ -121,13 +169,23 @@ export function OfferLink({
       }}
       aria-label={de.shop.offersFor(name)}
       className={
+        /*
+         * Active: near-black on the painted plate, and nothing else. The
+         * whole line is semibold so it holds its own at 9 px on the narrowest
+         * card; the price is bolder still, because that is the number being
+         * scanned for. Hover and press are a touch of ink, not a surface.
+         */
         `focus-ring group/offer flex h-full w-full items-center justify-center gap-1 ` +
         `whitespace-nowrap px-1.5 sm:px-2 ` +
-        `text-[clamp(9px,4.8cqw,11px)] leading-none font-semibold tabular-nums ${INK} ` +
-        `transition-opacity hover:opacity-80`
+        `text-[clamp(9px,4.8cqw,11px)] leading-none font-semibold ` +
+        `transition-opacity hover:opacity-75 active:opacity-60`
       }
+      style={{ color: INK_OFFER }}
     >
-      <span>{de.shop.offersFrom(formatPrice(summary.price))}</span>
+      {/* The price is the fact somebody is scanning for, so it is the heavier
+          of the two. The label stays light and does not compete. */}
+      <span>{de.shop.offersFromLabel}</span>
+      <span className="font-bold tabular-nums">{formatPrice(summary.price)}</span>
       <span aria-hidden="true" className="shrink-0 text-[13px] leading-none">
         ›
       </span>

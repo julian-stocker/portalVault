@@ -9,7 +9,7 @@
  *
  * This is a join, not a query. The catalog comes from `fetchCatalog()` and the
  * offers from `shop_offers()` — the same two calls `/` already makes, both
- * memoised per request. `buyableOffers()` decides what "available" means, here
+ * memoised per request. `v1BuyableOffers()` decides what V1 sells, here
  * as everywhere else.
  *
  * NO STOCK LEVELS. An offer carries a boolean, never a count (migration 0006,
@@ -17,7 +17,7 @@
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { isCollectible } from "@/lib/catalog/collectible";
-import { buyableOffers, offersFor, type Offer, type OfferIndex } from "@/lib/shop/offer";
+import { v1BuyableOffers, offersFor, type Offer, type OfferIndex } from "@/lib/shop/offer";
 
 /** One figure that can be bought, with the offers that make it buyable. */
 export type ShopEntry = {
@@ -33,7 +33,7 @@ export type ShopEntry = {
  *
  * Three exclusions, and each is a rule that already exists somewhere else:
  *
- *   not buyable       `buyableOffers()` — listed but sold out is not an offer
+ *   not buyable       `v1BuyableOffers()` — sold out, or a condition V1 does not sell
  *   not visible       `catalogVisible` — an editorially hidden figure has no
  *                     public detail page either (ADR-0039), so it must not
  *                     appear on a public shop page
@@ -54,13 +54,13 @@ export function shopEntries(
     if (!figure.catalogVisible) continue;
     if (!isCollectible(figure)) continue;
 
-    const buyable = buyableOffers(offersFor(offers, figure.skyId));
+    const buyable = v1BuyableOffers(offersFor(offers, figure.skyId));
     if (buyable.length === 0) continue;
 
     entries.push({
       figure,
       offers: buyable,
-      // `buyableOffers()` sorts available-first then cheapest, so the head is
+      // `v1BuyableOffers()` sorts cheapest first, so the head is
       // the cheapest thing that can actually be bought.
       fromPrice: buyable[0].price,
     });

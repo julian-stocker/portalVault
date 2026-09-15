@@ -34,7 +34,7 @@ import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Offer } from "@/lib/shop/offer";
-import { quickBuyOffers } from "@/lib/ui/quick-view";
+import { hasQuickViewOffer } from "@/lib/ui/quick-view";
 import { de } from "@/lib/i18n/de";
 
 
@@ -185,7 +185,7 @@ export function CatalogCard({
    * boxed offer is. A dialog that opened to say "nothing here" would be a
    * worse answer than the page that has the answer.
    */
-  const quickBuy = quickBuyOffers(offers).length > 0;
+  const quickBuy = hasQuickViewOffer(offers);
 
   const trade = (
     <OfferLink

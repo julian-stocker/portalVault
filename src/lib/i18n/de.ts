@@ -159,6 +159,20 @@ export const de = {
     ownershipAll: "Alle",
     ownershipOwned: "Besitz",
     ownershipMissing: "Fehlen",
+    /**
+     * Die Verfügbarkeit (V3.3) — eine EIGENE Dimension neben dem Besitz.
+     *
+     * Keine dritte Option neben „Alle | Besitz | Fehlen": Besitzen und
+     * kaufen können sind unabhängig, und „Fehlend UND kaufbar" ist genau die
+     * Kombination, die ein zusammengelegtes Control unmöglich machen würde.
+     *
+     * „Mit Angebot" heißt dasselbe wie die Handelszeile der Karte: es gibt
+     * mindestens ein tatsächlich kaufbares Angebot, nicht bloß eine
+     * gelistete Position.
+     */
+    availabilityNav: "Verfügbarkeit filtern",
+    availabilityAll: "Alle",
+    availabilityOffered: "Mit Angebot",
     /** Wenn der Filter aus ist und trotzdem nichts fehlt. */
     /** „Fehlen" ist leer: alles vorhanden. */
     ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",
@@ -261,6 +275,9 @@ export const de = {
       `${extra === 1 ? "1 zusätzliches Exemplar" : `${extra} zusätzliche Exemplare`} · ` +
       `${value} Extra-Wert`,
     filterLabel: "Filter",
+    /** Überschrift der Gruppe im Filterpanel (V3.3) — „Filter" steht schon
+        über dem Panel, hier gehört hin, WORAUF gefiltert wird. */
+    filterGroupShowcase: "Sammlung",
     /** Ansichtsumschalter und Tabellenkopf. */
     viewLabel: "Ansicht",
     view: { symbols: "Symbole", table: "Tabelle" } as Record<string, string>,
@@ -817,6 +834,8 @@ export const de = {
     /** Die Silberplatte, wenn gerade niemand anbietet. Ruhig, nicht defekt. */
     noOffer: "Aktuell kein Angebot",
     offersFrom: (price: string) => `Angebote ab ${price}`,
+    /** Dieselbe Zeile, aber getrennt — der Preis wird schwerer gesetzt (V3.2). */
+    offersFromLabel: "Angebote ab",
     offersFor: (name: string) => `Angebote für ${name} ansehen`,
     offerFrom: (price: string) => `ab ${price}`,
     conditionLoose: "Lose",
@@ -898,6 +917,22 @@ export const de = {
    * Kein Verkäufername, keine Bewertung, keine Lieferzeit, keine
    * Versandkosten: nichts davon liegt in den Daten, die die Karte hat.
    */
+  /**
+   * Die gemeinsame Browse-Navigation von Katalog und Sammlung (V3.3).
+   *
+   * Beide Seiten stellen dieselbe Frage — „was sehe ich, und was kann ich
+   * daran einschränken" — und beschrifteten sie bisher getrennt.
+   */
+  browse: {
+    filter: "Filter",
+    filterHeading: "Filter",
+    filterClose: "Filter schließen",
+    filterReset: "Filter zurücksetzen",
+    /** Für Screenreader: „· 2" ist kein Satz. */
+    filterActive: (n: number) =>
+      n === 1 ? "1 Filter aktiv" : `${n} Filter aktiv`,
+  },
+
   quickView: {
     close: "Schnellansicht schließen",
     toDetail: "Vollständige Details ansehen",

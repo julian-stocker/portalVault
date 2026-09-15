@@ -98,9 +98,51 @@ export function automaticShopPrice(
   return Math.floor((cents * hundredths + 5000) / 10000) / 100;
 }
 
-/** What can actually be bought right now. Listed but empty is not an offer. */
-export function buyableOffers(offers: readonly Offer[]): Offer[] {
-  return sortOffers(offers.filter((offer) => offer.available));
+/* ===========================================================================
+ * WHAT V1 SELLS — the one commerce truth (V3.3)
+ *
+ * SkyIsles V1 sells LOOSE figures and nothing else. Not "the quick view is
+ * loose-only": the PRODUCT is. There is no condition to choose, no OVP
+ * listing, no OVP navigation and no way to buy one, and when OVP arrives it
+ * arrives with its own data, product and UX design rather than as a second
+ * value in a column.
+ *
+ * `boxed` is NOT removed from the database and its rows are NOT deleted —
+ * keeping them is what makes a real OVP concept possible later. They are
+ * simply not public: to a visitor, a figure whose only listing is boxed has
+ * no offer at all.
+ *
+ * ONE FUNCTION, AND EVERY PUBLIC SURFACE READS IT. The card's trade row, the
+ * "Mit Angebot" filter, the quick view, the figure page's offer panel, the
+ * shop grid and the cart all resolve to `v1BuyableOffers`. Two of them
+ * disagreeing is how Hex came to advertise a price the catalog would not
+ * sell — the trade row asked "is anything available", the dialog asked "is
+ * anything loose", and a boxed-only figure fell between them.
+ * ========================================================================= */
+
+/** The one condition V1 offers to the public. */
+export const V1_CONDITION: OfferCondition = "loose";
+
+/**
+ * What this product will actually sell, cheapest first.
+ *
+ * Two filters, and both are load-bearing: `available` drops a listing that is
+ * sold out, `condition` drops one V1 does not support.
+ */
+export function v1BuyableOffers(offers: readonly Offer[]): Offer[] {
+  return sortOffers(
+    offers.filter((offer) => offer.available && offer.condition === V1_CONDITION),
+  );
+}
+
+/** Is there anything here a visitor could buy? */
+export function hasV1BuyableOffer(offers: readonly Offer[] | undefined): boolean {
+  return v1BuyableOffers(offers ?? []).length > 0;
+}
+
+/** Whether one specific listing is something V1 sells. */
+export function isV1Buyable(offer: Offer): boolean {
+  return offer.available && offer.condition === V1_CONDITION;
 }
 
 /**
@@ -127,7 +169,9 @@ export type OfferSummary =
   | { kind: "from"; price: number };
 
 export function summarizeOffers(offers: readonly Offer[]): OfferSummary {
-  const buyable = offers.filter((offer) => offer.available);
+  // The V1 truth, so the card's trade row can never advertise a price the
+  // product will not sell.
+  const buyable = v1BuyableOffers(offers);
   if (buyable.length === 0) return { kind: "none" };
 
   const cheapest = buyable.reduce((low, offer) => (offer.price < low.price ? offer : low));

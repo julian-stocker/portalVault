@@ -33,40 +33,35 @@
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Element } from "@/lib/catalog/character";
 import { imageSrc } from "@/lib/catalog/image";
-import { sortOffers, type Offer, type OfferCondition } from "@/lib/shop/offer";
+import { v1BuyableOffers, type Offer } from "@/lib/shop/offer";
 
 /**
- * The one condition the quick view trades in.
+ * What the quick view can sell for a figure — which is simply what V1 sells.
  *
- * A product decision, not a technical one: the quick view exists for browsing
- * and buying quickly, and a boxed copy is a more deliberate purchase that
- * deserves the whole figure page. Boxed offers keep existing, keep being
- * listed, and keep being buyable — on `/skylanders/<slug>`, where there is
- * room to say what "OVP" means for a twelve-year-old toy.
+ * This used to own a rule of its own (`QUICK_VIEW_CONDITION`), on the
+ * reasoning that OVP is a more deliberate purchase and belongs on the figure
+ * page. V3.3 overruled that: V1 does not sell OVP anywhere, so "loose only"
+ * is not a property of this dialog but of the product, and it lives in
+ * `lib/shop/offer.ts` with every other surface reading it.
  *
- * Stated here, once, rather than as a condition buried in the renderer: every
- * surface that asks this module what the quick view trades gets the same
- * answer, including the catalog card that decides whether to offer the dialog
- * at all.
+ * Returns a list although the schema allows one: `shop_inventory` is unique
+ * on (sky_id, condition), so one figure has at most one loose position. It is
+ * a list because that is the shape a second seller arrives into.
  */
-export const QUICK_VIEW_CONDITION: OfferCondition = "loose";
-
 /**
- * What the quick view can sell for a figure: loose, in stock, cheapest first.
+ * Can this figure be quick-bought at all?
  *
- * Returns a list although the schema allows only one. `shop_inventory` carries
- * a unique index on `(sky_id, condition)`, so one figure has at most one loose
- * position and this can hold at most one entry today. It is a list because the
- * shape is what a second seller would arrive into, and because a caller that
- * assumed "exactly one" would have to be found and rewritten at that point.
+ * The catalog card asks this to decide whether "Angebote ab …" opens the
+ * dialog or leads nowhere. In V1 it is the same answer as the "Mit Angebot"
+ * filter and the same answer as the card's trade row — one truth, several
+ * doors into it (`hasV1BuyableOffer`).
  */
+export function hasQuickViewOffer(offers: readonly Offer[] | undefined): boolean {
+  return quickBuyOffers(offers).length > 0;
+}
+
 export function quickBuyOffers(offers: readonly Offer[] | undefined): Offer[] {
-  const loose = (offers ?? []).filter(
-    (offer) => offer.available && offer.condition === QUICK_VIEW_CONDITION,
-  );
-  // `sortOffers` puts buyable first and then cheapest; everything here is
-  // buyable, so what is left is ascending price.
-  return sortOffers(loose);
+  return v1BuyableOffers(offers ?? []);
 }
 
 export type QuickViewModel = {

@@ -13,10 +13,16 @@
  * `catalog` — the grid mixes owned and missing figures, so an owned one gets
  * the vitrine frame. The card answers "do I already have this one?".
  *
- * `showcase` — everything on the page is owned already: `/collection`, and
- * the related figures beside a figure someone is looking at. A frame there
- * would mark every card identically and would water down what the frame
- * means in the catalog (ADR-0038).
+ * `showcase` — the card is not being asked about ownership at all, and has
+ * no answer to give: the related figures beside a figure someone is looking
+ * at, where the page never reads who owns what. Such a card passes no
+ * `collected` either, so this mode changes nothing on its own.
+ *
+ * `/collection` used to be `showcase` too, on the reasoning that marking
+ * every card on a page of owned figures says nothing (ADR-0038). V3.2
+ * overrules that: gold means possession, everywhere, and the same figure may
+ * not be gold in the catalog and ivory in the collection. The collection
+ * passes `catalog` — the same mode, the same rule, the same template.
  */
 export type CardOwnership = "catalog" | "showcase";
 

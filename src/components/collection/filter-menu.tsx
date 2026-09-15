@@ -32,19 +32,15 @@ export function FilterMenu({
       aria-label={de.collection.filterLabel}
       className="flex shrink-0 items-center gap-2"
     >
-      {/* The word, so the control says what kind of control it is. It sits
-          between the count and the view toggle now (V4.3), where a square
-          chip beside a round series pill is no longer the thing that has to
-          keep the two apart. */}
-      <span className="text-[11px] tracking-wide text-muted uppercase">
-        {de.collection.filterLabel}
-      </span>
+      {/* No label of its own any more (V3.3): the control lives inside the
+          filter panel, and the group heading above it already says what this
+          group is. The word here would be the same word twice. */}
       <button
         type="button"
         aria-pressed={active}
         onClick={() => onChange({ ...filters, duplicatesOnly: !active })}
         className={
-          "flex min-h-9 items-center gap-1.5 rounded-sky-sm px-3 text-[13px] " +
+          "flex min-h-11 items-center gap-1.5 rounded-sky-sm px-3 text-[13px] sm:min-h-9 " +
           "whitespace-nowrap ring-1 transition-colors " +
           (active
             ? "bg-status-ground font-medium text-status-ink ring-status-line"

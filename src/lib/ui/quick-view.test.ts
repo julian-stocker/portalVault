@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
-import { quickViewModel } from "@/lib/ui/quick-view";
+import { hasQuickViewOffer, quickViewModel } from "@/lib/ui/quick-view";
+import { hasBuyableOffer } from "@/lib/catalog/availability";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Offer } from "@/lib/shop/offer";
 
@@ -112,6 +114,91 @@ describe("the quick view trades loose copies and nothing else", () => {
     expect(
       quickViewModel(figure(), [offer({ condition: "loose", available: false })]),
     ).toBeNull();
+  });
+});
+
+describe("who gets a quick view, and who gets the figure page", () => {
+  /**
+   * The report that produced these: Hex (SKY-0043) showed "Angebote ab
+   * 21,50 €" in the catalog and led to its page instead of opening the
+   * dialog. The offer is real — and it is BOXED. Staging holds exactly one
+   * row for it: `condition=boxed, price=21.5, available=true`.
+   *
+   * So the two questions are genuinely different, and mixing them up is the
+   * mistake these guard against:
+   *
+   *   hasBuyableOffer     any buyable offer      → the card shows a price
+   *   hasQuickViewOffer   a buyable LOOSE offer  → the dialog has something
+   */
+  const boxedOnly = [offer({ condition: "boxed", price: 21.5, available: true })];
+
+  it("a buyable loose offer opens the dialog", () => {
+    expect(hasQuickViewOffer([offer({ condition: "loose" })])).toBe(true);
+  });
+
+  it("a boxed-only figure does not — and that is the contract, not a defect", () => {
+    expect(hasQuickViewOffer(boxedOnly)).toBe(false);
+    expect(quickViewModel(figure(), boxedOnly)).toBeNull();
+  });
+
+  it("and its card says nothing either — one truth, not two (V3.3)", () => {
+    /*
+     * This assertion used to be the opposite way round, and the difference is
+     * the whole of the Hex report: the card advertised "Angebote ab 21,50 €"
+     * and the dialog refused to open, because the row asked "is anything
+     * available" and the dialog asked "is anything loose".
+     *
+     * V1 sells loose only, everywhere. So both answer no, and the card shows
+     * "Aktuell kein Angebot" rather than a price it will not honour.
+     */
+    expect(hasBuyableOffer(boxedOnly)).toBe(false);
+    expect(hasQuickViewOffer(boxedOnly)).toBe(false);
+  });
+
+  it("a listed but unavailable loose offer opens nothing", () => {
+    expect(hasQuickViewOffer([offer({ condition: "loose", available: false })])).toBe(false);
+  });
+
+  it("boxed beside loose opens the dialog, on the loose one", () => {
+    const mixed = [offer({ condition: "boxed", price: 21.5 }), offer({ condition: "loose", price: 4.49 })];
+    expect(hasQuickViewOffer(mixed)).toBe(true);
+    expect(quickViewModel(figure(), mixed)?.offers.map((o) => o.condition)).toEqual(["loose"]);
+  });
+
+  it("nothing at all opens nothing", () => {
+    expect(hasQuickViewOffer([])).toBe(false);
+    expect(hasQuickViewOffer(undefined)).toBe(false);
+  });
+});
+
+describe("the card and the dialog decide with one function", () => {
+  it("the card asks `hasQuickViewOffer`, not a predicate of its own", () => {
+    const card = readFileSync("src/components/catalog/catalog-card.tsx", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(card).toContain("hasQuickViewOffer(offers)");
+    // The shapes an earlier version had, and the ones a future one might try.
+    expect(card).not.toContain(".length > 0");
+    expect(card).not.toContain("summarizeOffers");
+    expect(card).not.toContain('"loose"');
+  });
+
+  it("and the model refuses on the same ground", () => {
+    const model = readFileSync("src/lib/ui/quick-view.ts", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(model).toContain("return quickBuyOffers(offers).length > 0");
+    expect(model).toContain("const buyable = quickBuyOffers(offers)");
+  });
+
+  it("keys offers by the SKY-ID exactly as it arrives", () => {
+    /*
+     * `shop_offers()` returns `SKY-0043`; the record is keyed by that string
+     * and read back by that string. No casing change, no trim, no prefix —
+     * a transformation on one side only would silently empty the trade row.
+     */
+    const view = readFileSync("src/components/catalog/catalog-view.tsx", "utf8");
+    expect(view).toContain("offers[figure.skyId]");
+    expect(view).not.toMatch(/skyId\.(toLowerCase|toUpperCase|trim|replace)/);
+    const record = readFileSync("src/lib/shop/offer.ts", "utf8");
+    expect(record).toContain("Object.fromEntries(index)");
   });
 });
 

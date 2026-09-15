@@ -96,8 +96,14 @@ describe("the performance fix of a0353cb is not undone", () => {
     for (const file of [CATALOG_VIEW, SHOP_VIEW]) {
       expect(code(file).match(/<QuickView/g), `${file}`).toHaveLength(1);
     }
-    expect(code(CARD)).not.toContain("QuickView");
-    expect(code(FIGURE_CARD)).not.toContain("QuickView");
+    /*
+     * The JSX, not the word. The card legitimately CALLS
+     * `hasQuickViewOffer` to decide whether to offer the dialog; what it must
+     * not do is render one — that would put a dialog inside an `@container`
+     * that cannot position it, once per card.
+     */
+    expect(code(CARD)).not.toContain("<QuickView");
+    expect(code(FIGURE_CARD)).not.toContain("<QuickView");
   });
 
   it("holds the open figure as an id, so the card stays free of the dialog", () => {
@@ -328,7 +334,9 @@ describe("the picture is sized by the layout, never by the window", () => {
   it("caps the picture in pixels at both ends", () => {
     // Reported from Safari: with a percentage width the plate grew with the
     // dialog until it filled it and pushed the name below the fold.
-    expect(plate).toContain("max-w-[220px]");
+    // Smaller on a phone than on a desktop: the plate used to take 220 px of
+    // a 390 px screen and pushed the offer below the fold (V3.2).
+    expect(plate).toContain("max-w-[150px]");
     expect(plate).toMatch(/sm:max-w-\[\d+px\]/);
     // Sized for a 760 px dialog, not for a 896 px one: driving the plate back
     // to 320 px would fill the narrower popover all over again.
@@ -401,7 +409,7 @@ describe("the dialog is as tall as its content, and no taller", () => {
   });
 
   it("keeps a visible margin on every side", () => {
-    expect(modal).toContain("p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-8");
+    expect(modal).toContain("p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-8");
   });
 });
 
@@ -420,8 +428,11 @@ describe("the offers are a list, and it is honest about what it knows", () => {
   });
 
   it("trades loose copies only, decided in the model and not in the markup", () => {
-    expect(model).toContain('QUICK_VIEW_CONDITION: OfferCondition = "loose"');
-    expect(model).toContain("offer.condition === QUICK_VIEW_CONDITION");
+    // The rule is the product's, not this dialog's: it lives in
+    // `lib/shop/offer.ts` and the quick view reads it like everyone else.
+    expect(model).toContain("v1BuyableOffers");
+    expect(code("src/lib/shop/offer.ts")).toContain('V1_CONDITION: OfferCondition = "loose"');
+    expect(code("src/lib/shop/offer.ts")).toContain("offer.condition === V1_CONDITION");
     // The renderer must not carry a condition test of its own.
     expect(quick).not.toContain('"boxed"');
     expect(quick).not.toContain("condition ===");
@@ -429,7 +440,7 @@ describe("the offers are a list, and it is honest about what it knows", () => {
 
   it("does not offer the dialog when there is nothing loose to sell", () => {
     // The card stays a link to the figure page, which has the boxed offer.
-    expect(code(CARD)).toContain("quickBuyOffers");
+    expect(code(CARD)).toContain("hasQuickViewOffer(offers)");
     expect(code(CARD)).toContain("quickBuy ? onOpenOffers : undefined");
   });
 
@@ -505,6 +516,32 @@ describe("one offer is one compact line", () => {
     expect(row).toContain("flex items-center justify-between");
   });
 
+  it("opens the offer with the price, naming no condition", () => {
+    /*
+     * "Lose € 4,49" labelled the only thing there is. V1 sells loose figures
+     * and nothing else, so the word distinguished the offer from nothing and
+     * cost the price its position as the first line of the row.
+     *
+     * If a second condition is ever sold, the label belongs back here —
+     * `OFFER_CONDITIONS` still has two entries, and `conditionLabel()` still
+     * translates both for the cart, the checkout and the order mail, where a
+     * historical boxed line still has to say what it was.
+     */
+    expect(row).not.toContain("conditionLabel");
+    expect(quick).not.toContain("@/lib/shop/condition");
+
+    // `key={offer.condition}` is React bookkeeping and stays; what must not
+    // come back is the condition read as something to display.
+    const rendered = row.slice(row.indexOf("key={offer.condition}") + 21);
+    expect(rendered).not.toContain("offer.condition");
+
+    // The price is the first thing the row renders.
+    const price = row.indexOf("formatPrice(offer.price)");
+    expect(price).toBeGreaterThan(-1);
+    const before = row.slice(0, price);
+    expect(before).not.toContain("<span className=\"text-xs");
+  });
+
   it("keeps the seller under the price, inside the same column", () => {
     const seller = row.indexOf("seller.displayName");
     const price = row.indexOf("formatPrice(offer.price)");
@@ -515,10 +552,94 @@ describe("one offer is one compact line", () => {
   it("uses a compact buy pill that still clears 44 px on touch", () => {
     expect(row).toContain("compact");
     const token = code("src/components/ui/action.ts");
-    const compact = token.slice(token.indexOf("ACTION_SHOP_COMPACT"));
+    const compact = token.slice(token.indexOf("ACTION_COMMERCE_COMPACT"));
     // Small only from `sm:` up — a pointer is exact, a thumb is not.
     expect(compact).toContain("min-h-11");
     expect(compact).toContain("sm:min-h-8");
+  });
+
+  it("wears the commerce amber, not the silver of the row around it", () => {
+    /*
+     * The offer row is information and stays silver. The button is the one
+     * thing on it that starts a purchase, and until V3.2 it borrowed silver
+     * too — which made the act of buying look like another line of the offer.
+     */
+    const token = code("src/components/ui/action.ts");
+    const commerce = token.slice(token.indexOf("const COMMERCE ="), token.indexOf("export const ACTION_LINK"));
+    // The resting surface is an inline style now (see below); what stays in
+    // the class string is the edge and the two interaction states.
+    expect(commerce).toContain("ring-commerce-line");
+    expect(commerce).toContain("hover:bg-commerce-hover");
+    expect(commerce).toContain("active:bg-commerce-pressed");
+    expect(commerce).toContain("focus-ring");
+    // Not the ownership gold, and not a literal.
+    expect(commerce).not.toContain("own-ink");
+    expect(commerce).not.toMatch(/#[0-9a-f]{6}/);
+    expect(code("src/components/shop/offer-panel.tsx")).toContain("ACTION_COMMERCE_COMPACT");
+  });
+
+  it("carries the amber as a value, not only as a class", () => {
+    /*
+     * The regression this exists to stop: the button came back dark with a
+     * pale outline. `bg-commerce` and `text-on-commerce` generate correctly,
+     * sit on the right element and are backed by `--commerce` in `:root` —
+     * all verified in the served stylesheet — and it still rendered without
+     * them. A class only paints if its rule arrives.
+     *
+     * It still points at the tokens, so `globals.css` stays the one place
+     * the colour is decided.
+     */
+    const action = code("src/components/ui/action.ts");
+    expect(action).toContain("export const COMMERCE_SURFACE");
+    expect(action).toContain('backgroundColor: "var(--commerce)"');
+    expect(action).toContain('color: "var(--on-commerce)"');
+    // Not a hex: the role lives in the stylesheet, not in the component.
+    const surface = action.slice(action.indexOf("export const COMMERCE_SURFACE"));
+    expect(surface.slice(0, surface.indexOf("}"))).not.toMatch(/#[0-9a-f]{6}/);
+
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toContain("style={compact ? COMMERCE_SURFACE : undefined}");
+  });
+
+  it("is not the ownership gold, on any surface", () => {
+    const action = code("src/components/ui/action.ts");
+    const commerce = action.slice(action.indexOf("const COMMERCE ="), action.indexOf("export const ACTION_LINK"));
+    for (const gold of ["own-ink", "own-line", "accent", "gold"]) {
+      expect(commerce, `${gold} is ownership, not buying`).not.toContain(gold);
+    }
+  });
+
+  it("gives the two surfaces two different buttons, on purpose", () => {
+    /*
+     * A screenshot of a grey "In den Warenkorb" is not evidence of a bug
+     * until it says WHICH button it is. There are two, and the contract is
+     * that they differ:
+     *
+     *   quick view   compact      amber   — the one place a purchase starts
+     *   figure page  not compact  silver  — the offer panel, still trade
+     *
+     * The figure page is not made amber by this, and a future sweep that
+     * "unifies" them has to fail here first.
+     */
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toMatch(/compact \? ACTION_COMMERCE_COMPACT : ACTION_SHOP/);
+    expect(panel).toContain("style={compact ? COMMERCE_SURFACE : undefined}");
+
+    // The quick view is the caller that passes it.
+    expect(code(QUICK_VIEW)).toContain("compact");
+
+    // The figure page's panel renders the button without it.
+    const page = code("src/app/(public)/skylanders/[slug]/page.tsx");
+    expect(page).toContain("<OfferPanel");
+    expect(page).not.toContain("compact");
+  });
+
+  it("leaves the figure page's offer panel on silver", () => {
+    // The new role is applied where a purchase starts, not by a sweep over
+    // every button that ever said "In den Warenkorb".
+    const panel = code("src/components/shop/offer-panel.tsx");
+    expect(panel).toContain("ACTION_SHOP");
+    expect(panel).toMatch(/compact \? ACTION_COMMERCE_COMPACT : ACTION_SHOP/);
   });
 
   it("grows by adding entries, not by changing shape", () => {

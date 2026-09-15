@@ -39,8 +39,11 @@ import {
   type ViewMode,
 } from "@/components/collection/view-mode";
 import { FilterMenu } from "@/components/collection/filter-menu";
+import { BrowseToolbar } from "@/components/ui/browse-toolbar";
+import { FilterGroup, FilterSheet } from "@/components/ui/filter-sheet";
 import {
   COLLECTION_ALL,
+  collectionFilterCount,
   NO_FILTERS,
   type CatalogTotals,
   buildCollectionRows,
@@ -221,23 +224,46 @@ export function CollectionView({
         key={row.figure.skyId}
         figure={row.figure}
         quantity={row.quantity}
-        // No ownership frame and no crown: everything on this page is owned,
-        // so marking every card would say nothing and would water down what
-        // the gold means in the catalog (ADR-0038). The card keeps its
-        // default `ownership="showcase"`.
+        /*
+         * THE SAME OWNED STATE AS THE CATALOG (V3.2).
+         *
+         * This card used to keep the default `ownership="showcase"`, which
+         * suppresses the frame — the reasoning being that everything here is
+         * owned anyway, so marking every card would say nothing (ADR-0038).
+         *
+         * That reasoning is now overruled by a plainer rule: gold means
+         * possession, everywhere. A figure that is gold in the catalog and
+         * ivory in the collection is the same figure wearing two answers to
+         * the same question, and the collection is the page where the answer
+         * matters most.
+         *
+         * So it asks the SAME function for the SAME decision — no collection
+         * gold, no second variant, no CSS laid over the top. `collected`
+         * follows the live quantity, so a figure removed on this page drops
+         * the frame in the same frame as it drops out of the collection.
+         */
+        ownership="catalog"
+        collected={row.quantity > 0}
+        /*
+         * THE SAME PLATE, A DIFFERENT JOB (V3.2).
+         *
+         * One card geometry, one artwork, and the bottom slot means whatever
+         * the page it is on is about: in the catalog it is the offer, here it
+         * is the one piece of housekeeping a collection needs.
+         *
+         * Offers are deliberately NOT shown here. Commerce belongs to the
+         * catalog; this page is the showcase, and a price on every owned
+         * figure would turn it into a shop. The page therefore asks for no
+         * offers at all — no request, not one per card and not one per page.
+         */
         trade={
-          <>
-            {row.quantity === 0 && row.initialQuantity > 0 ? (
-              <p className="mb-1 text-center text-xs text-muted">{de.collection.removed}</p>
-            ) : null}
-            <CollectionAction
-              skyId={row.figure.skyId}
-              name={row.figure.displayName}
-              quantity={row.quantity}
-              initialQuantity={row.initialQuantity}
-              onQuantityChange={onQuantityChange}
-            />
-          </>
+          <CollectionAction
+            skyId={row.figure.skyId}
+            name={row.figure.displayName}
+            quantity={row.quantity}
+            initialQuantity={row.initialQuantity}
+            onQuantityChange={onQuantityChange}
+          />
         }
       />
     );
@@ -275,6 +301,8 @@ export function CollectionView({
               options={scopeOptions}
               active={scope}
               onSelect={setScope}
+              /* The same browse row as the catalog's (V3.3). */
+              variant="nav"
             />
 
             <label className="sr-only" htmlFor="collection-search">
@@ -303,26 +331,40 @@ export function CollectionView({
              * control over the list underneath. One row on a wide screen,
              * wrapping on a phone.
              */}
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-              <p className="text-sm text-muted" aria-live="polite">
-                {searching
+            {/*
+             * THE TOOLBAR (V3.3) — the same row the catalog has, and for the
+             * same reason: what is being shown on the left, what can be done
+             * about it on the right.
+             *
+             * The duplicates filter moved into the panel. Out here it sat
+             * beside the games and read as a seventh game, which is the
+             * mistake V4.2 already fixed once by moving it down; the panel is
+             * where it stops competing with navigation altogether.
+             *
+             * The view switch stays outside. It does not narrow anything —
+             * it decides how the same rows are drawn — and it is the one
+             * control on this page somebody flips repeatedly.
+             *
+             * No offer filter, and none is possible: this page loads no
+             * commerce data at all (V3.2).
+             */}
+            <BrowseToolbar
+              count={
+                searching
                   ? de.collection.searchCount(visible.length, inSegment)
-                  : de.catalog.figureCount(visible.length)}
-              </p>
-              <div className="flex flex-wrap items-center gap-3 md:gap-4">
-                <FilterMenu filters={filters} onChange={setFilters} />
-                {filtered ? (
-                  <button
-                    type="button"
-                    onClick={reset}
-                    className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
-                  >
-                    {de.collection.resetFilters}
-                  </button>
-                ) : null}
-                <ViewToggle mode={mode} onSelect={selectMode} />
-              </div>
-            </div>
+                  : de.catalog.figureCount(visible.length)
+              }
+            >
+              <FilterSheet
+                activeCount={collectionFilterCount(filters)}
+                onReset={() => setFilters(NO_FILTERS)}
+              >
+                <FilterGroup label={de.collection.filterGroupShowcase}>
+                  <FilterMenu filters={filters} onChange={setFilters} />
+                </FilterGroup>
+              </FilterSheet>
+              <ViewToggle mode={mode} onSelect={selectMode} />
+            </BrowseToolbar>
           </div>
 
           {visible.length === 0 ? (

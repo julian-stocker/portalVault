@@ -204,7 +204,7 @@ export function Modal({
          * The safe area matters at the bottom in landscape as well as
          * portrait, so it is added to the padding rather than to a margin.
          */
-        "p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-8 " +
+        "p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:p-8 " +
         /*
          * The catalog has to stay READABLE behind this, not merely present.
          *
@@ -246,7 +246,7 @@ export function Modal({
            * `dvh`, not `vh`: on iOS Safari `vh` is the tallest the viewport
            * ever gets, so the panel would run under the address bar.
            */
-          "max-h-[85dvh] sm:max-h-[74dvh] " +
+          "max-h-[82dvh] sm:max-h-[74dvh] " +
           /*
            * Depth, not ornament (ADR-0038).
            *
