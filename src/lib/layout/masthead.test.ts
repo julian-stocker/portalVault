@@ -262,61 +262,250 @@ describe("the bar carries marks, the header carries actions (V3.4.1)", () => {
   });
 });
 
-describe("the account is one icon in the header", () => {
-  it("goes where the bar used to go, and nowhere else", () => {
-    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
-    expect(nav.match(/<AccountAction /g)).toHaveLength(1);
-    expect(nav).not.toContain('label: de.nav.settings');
-    expect(nav).not.toContain('label: de.nav.signIn');
+/**
+ * The two account actions (V3.4.2).
+ *
+ * V3.4.1 put one icon in the header and forbade a second, because a word in
+ * the bar plus an icon up here would have been two ways into one room. This
+ * is a different arrangement and the rule still holds: the two lead to two
+ * different pages, and the active state can light up on only one of them.
+ *
+ *   name + person  ->  /account/profile
+ *   cog            ->  /account
+ */
+describe("the header carries a profile and an account action", () => {
+  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
+  const settingsFn = nav.slice(nav.indexOf("function SettingsAction("), nav.indexOf("function NavItem("));
+  const group = nav.slice(nav.indexOf('<div className="ml-auto flex min-w-0 items-center'));
+
+  it("has a slice of each to inspect", () => {
+    expect(profileFn.length).toBeGreaterThan(200);
+    expect(settingsFn.length).toBeGreaterThan(200);
+    expect(group.length).toBeGreaterThan(100);
   });
 
-  it("says its name, since it shows no text", () => {
-    const action = nav.slice(nav.indexOf("function AccountAction("));
-    expect(action.slice(0, action.indexOf("</Link>"))).toContain("aria-label={label}");
-    expect(nav).toContain("const label = signedIn ? de.nav.settings : de.nav.signIn;");
-    // The same German words the bar used, not a new pair.
-    expect(de.nav.settings).toBe("Profil");
-    expect(de.nav.signIn).toBe("Anmelden");
+  it("sends the two to two different pages", () => {
+    expect(profileFn).toContain('href={signedIn ? "/account/profile" : "/login"}');
+    expect(settingsFn).toContain('href="/account"');
+    // The rule V3.4.1 established, kept: nothing leads twice to one place.
+    expect(profileFn).not.toContain('href="/account"');
   });
 
-  it("is neutral: not the ownership gold and not the commerce amber", () => {
-    const action = nav.slice(nav.indexOf("function AccountAction("));
-    const decl = action.slice(0, action.indexOf("</Link>"));
-    expect(decl).toContain("text-on-deep-muted hover:text-on-deep");
-    expect(decl).not.toContain("commerce");
-    expect(decl).not.toMatch(/own-ink|brand|gold/);
+  it("offers no settings to somebody who is not signed in", () => {
+    expect(group).toContain("{signedIn ? <SettingsAction active={settingsActive} /> : null}");
   });
 
-  it("clears the 44 px target and keeps a visible focus", () => {
-    const action = nav.slice(nav.indexOf("function AccountAction("));
-    const decl = action.slice(0, action.indexOf("</Link>"));
-    expect(decl).toContain("min-h-11 min-w-11");
-    expect(decl).toContain("focus-ring");
-    // The mark itself stays small, so the header's height is unchanged.
-    expect(decl).toContain('<AccountGlyph className="h-[18px] w-[18px]" />');
-  });
-
-  it("still marks the account area as the current page", () => {
-    const action = nav.slice(nav.indexOf("function AccountAction("));
-    expect(action.slice(0, action.indexOf("</Link>"))).toContain(
-      'aria-current={active ? "page" : undefined}',
-    );
-    expect(nav).toContain('active={active === "account"}');
-  });
-
-  it("sits before the cart, in one actions group at the right", () => {
-    const group = nav.slice(nav.indexOf('<div className="ml-auto flex shrink-0 items-center'));
-    const account = group.indexOf("<AccountAction");
+  it("orders them name, person, cog, cart", () => {
+    const profile = group.indexOf("<ProfileAction");
+    const settings = group.indexOf("<SettingsAction");
     const cart = group.indexOf("<CartBadge />");
-    expect(account).toBeGreaterThan(-1);
-    expect(cart).toBeGreaterThan(account);
+    expect(profile).toBeGreaterThan(-1);
+    expect(settings).toBeGreaterThan(profile);
+    expect(cart).toBeGreaterThan(settings);
+    // Inside the profile link: the name, then the glyph.
+    const name = profileFn.indexOf("{name}");
+    const glyph = profileFn.indexOf("<AccountGlyph");
+    expect(name).toBeGreaterThan(-1);
+    expect(glyph).toBeGreaterThan(name);
+  });
+
+  it("gives both an accessible name, since neither shows a label", () => {
+    expect(profileFn).toContain("aria-label={label}");
+    expect(profileFn).toContain(
+      "const label = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;",
+    );
+    expect(settingsFn).toContain("aria-label={de.nav.account}");
+    // Existing German, not invented words.
+    expect(de.nav.profile).toBe("Profil");
+    expect(de.nav.account).toBe("Mein Konto");
+    expect(de.nav.signIn).toBe("Anmelden");
+    // The label carries the visible name, because aria-label replaces content.
+    expect(de.nav.profileOf("yulez")).toContain("yulez");
+  });
+
+  it("shows nothing at all when there is no username", () => {
+    /*
+     * `null` twice over: signed out, or signed in before onboarding. No dash,
+     * no empty box — furniture standing in for a fact that does not exist.
+     */
+    expect(profileFn).toContain("const name = signedIn ? username : null;");
+    expect(profileFn).toMatch(/\{name \? \(/);
+    expect(profileFn).toContain(") : null}");
+    expect(nav).toContain("username?: string | null;");
+  });
+
+  it("keeps both neutral — not the ownership gold, not the commerce amber", () => {
+    for (const [what, fn] of [["profile", profileFn], ["settings", settingsFn]] as const) {
+      expect(fn, what).toContain("text-on-deep-muted hover:text-on-deep");
+      expect(fn, what).not.toContain("commerce");
+      expect(fn, what).not.toMatch(/own-ink|brand|gold/);
+    }
+  });
+
+  it("clears 44 px on both and keeps a visible focus", () => {
+    // The profile's target is the glyph's own box, so the name cannot squeeze it.
+    expect(profileFn).toContain('<span className="flex h-11 w-11 shrink-0 items-center justify-center">');
+    expect(profileFn).toContain("focus-ring");
+    expect(settingsFn).toContain("flex h-11 w-11 shrink-0 items-center justify-center");
+    expect(settingsFn).toContain("focus-ring");
+    // Marks stay 18 px; shrinking an icon is not how space is found.
+    expect(profileFn).toContain('<AccountGlyph className="h-[18px] w-[18px]" />');
+    expect(settingsFn).toContain('<SettingsGlyph className="h-[18px] w-[18px]" />');
   });
 
   it("is offered to the administrator, unlike the cart", () => {
     // An operator has an account; they simply do not shop here.
-    const group = nav.slice(nav.indexOf('<div className="ml-auto flex shrink-0 items-center'));
-    expect(group.slice(0, group.indexOf("<AccountAction"))).not.toContain("admin ?");
+    expect(group.slice(0, group.indexOf("<ProfileAction"))).not.toContain("admin ?");
     expect(group).toContain("{admin ? null : <CartBadge />}");
+  });
+});
+
+/**
+ * The name may only grow and shrink to the left.
+ *
+ * The three marks on the right are the fixed points of this header; a
+ * twenty-character username must eat into empty space, never into them.
+ */
+describe("a long username moves nothing", () => {
+  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
+
+  it("keeps the min-w-0 chain unbroken", () => {
+    /*
+     * Every link in the chain, because a flex item's default `min-width:auto`
+     * refuses to shrink below its content — one missing `min-w-0` anywhere
+     * above the text and `truncate` never gets its turn.
+     */
+    expect(nav).toContain('<div className="ml-auto flex min-w-0 items-center');   // the group
+    expect(profileFn).toContain("focus-ring flex min-w-0 items-center gap-1.5");  // the link
+    expect(profileFn).toContain('<span className="min-w-0 truncate text-right');  // the text
+  });
+
+  it("anchors the group to the right", () => {
+    // `ml-auto` is what makes the name grow leftwards instead of pushing.
+    expect(nav).toContain('className="ml-auto flex min-w-0 items-center');
+  });
+
+  it("truncates rather than wraps", () => {
+    // `truncate` is overflow-hidden + text-ellipsis + whitespace-nowrap.
+    expect(profileFn).toContain("truncate");
+    expect(profileFn).toContain("text-right");
+    expect(profileFn).not.toContain("break-words");
+    expect(profileFn).not.toContain("flex-wrap");
+  });
+
+  it("holds every icon box rigid", () => {
+    const boxes = nav.match(/h-11 w-11 shrink-0/g) ?? [];
+    expect(boxes.length, "profile and settings both need a rigid box").toBeGreaterThanOrEqual(2);
+    expect(code(BADGE)).toContain("min-h-11 min-w-11");
+  });
+
+  it("introduces no new breakpoint to hide the name behind", () => {
+    // The name uses whatever width is left, on every device.
+    expect(nav).not.toMatch(/min-\[\d+px\]:/);
+    expect(profileFn).not.toContain("hidden ");
+  });
+
+  it("cannot make the header a second row", () => {
+    const at = nav.indexOf("<header");
+    const header = nav.slice(at, nav.indexOf("\n    >", at));
+    expect(header).toContain("flex items-center");
+    expect(header).not.toContain("flex-wrap");
+    // The brand never shrinks, so the name is the only elastic thing here.
+    expect(nav).toContain('<div className="relative flex shrink-0 items-center gap-2">');
+  });
+});
+
+/**
+ * Exactly one of the two is ever the current page.
+ */
+describe("the active state splits between profile and account", () => {
+  it("reads one level finer than activeSection(), and only here", () => {
+    expect(nav).toContain('const profileActive = (pathname ?? "/") === "/account/profile";');
+    expect(nav).toContain("const settingsActive = inAccount && !profileActive;");
+    expect(nav).toContain('const inAccount = active === "account";');
+  });
+
+  it("leaves the section model alone", () => {
+    // Widening `activeSection()` would change what /settings and /onboarding
+    // mean everywhere else for the sake of one header.
+    const sections = readFileSync("src/lib/nav/sections.ts", "utf8");
+    expect(sections).toContain('if (path === "/account" || path.startsWith("/account/")) return "account";');
+    expect(sections).not.toContain('"account-profile"');
+  });
+
+  it("never marks both, on any account route", () => {
+    // The rule expressed as arithmetic over the real paths.
+    const inAccount = (p: string) => p === "/account" || p.startsWith("/account/") || p === "/settings" || p === "/onboarding";
+    for (const path of [
+      "/account", "/account/profile", "/account/security", "/account/contact",
+      "/account/orders", "/account/orders/SI-2026-001042", "/settings", "/onboarding", "/",
+    ]) {
+      const profile = path === "/account/profile";
+      const settings = inAccount(path) && !profile;
+      expect([profile, settings].filter(Boolean).length, path).toBeLessThanOrEqual(1);
+      // And inside the account area exactly one of them is always current,
+      // so the header never goes blank where it should be marked.
+      if (inAccount(path)) {
+        expect([profile, settings].filter(Boolean).length, path).toBe(1);
+      }
+    }
+  });
+});
+
+/**
+ * Where the username comes from, and what it costs.
+ */
+describe("the username reaches the header on the server", () => {
+  const layouts = {
+    public: code("src/app/(public)/layout.tsx"),
+    app: code("src/app/(app)/layout.tsx"),
+    admin: code("src/app/(admin)/layout.tsx"),
+  };
+
+  it("is a server prop, never a browser fetch", () => {
+    for (const [name, layout] of Object.entries(layouts)) {
+      expect(layout, name).toContain("username=");
+    }
+    const profileAction = nav.slice(nav.indexOf("function ProfileAction("));
+    expect(profileAction).not.toContain("useEffect");
+    expect(profileAction).not.toContain("fetch(");
+    expect(nav).not.toContain('"use swr"');
+  });
+
+  it("costs the app layout nothing — it already had the profile", () => {
+    expect(layouts.app.match(/currentProfile\(\)/g)).toHaveLength(1);
+    expect(layouts.app).toContain("username={profile.username}");
+  });
+
+  it("joins the work the public layout was already doing", () => {
+    expect(layouts.public).toContain("const [user, admin, profile] = await Promise.all([");
+    expect(layouts.public).toContain("currentProfile(),");
+    expect(layouts.public.match(/currentProfile\(\)/g)).toHaveLength(1);
+  });
+
+  it("does not mix the admin gate with header decoration", () => {
+    const gate = layouts.admin.indexOf("if (!(await isAdmin())) notFound();");
+    const fetchAfter = layouts.admin.indexOf("currentProfile()");
+    expect(gate).toBeGreaterThan(-1);
+    expect(fetchAfter, "the profile must be read after the gate").toBeGreaterThan(gate);
+    expect(layouts.admin.slice(gate, gate + 60)).not.toContain("currentProfile");
+  });
+
+  it("uses the shared memoised helper rather than a query of its own", () => {
+    for (const [name, layout] of Object.entries(layouts)) {
+      expect(layout, name).not.toContain('from("profiles")');
+    }
+    expect(readFileSync("src/lib/auth/profile.ts", "utf8")).toContain("export const currentProfile = cache(");
+  });
+
+  it("reads nothing from delivery data", () => {
+    // `customer_contacts` and `order_addresses` hold real names. They are
+    // commerce records, not identity, and the header must not touch them.
+    for (const [name, layout] of Object.entries(layouts)) {
+      expect(layout, name).not.toContain("customer_contacts");
+      expect(layout, name).not.toContain("order_addresses");
+    }
+    expect(nav).not.toContain("first_name");
   });
 });
 

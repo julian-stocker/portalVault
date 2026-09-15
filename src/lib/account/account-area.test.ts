@@ -41,24 +41,39 @@ describe("the account area is one place with four destinations", () => {
     expect(source("src/lib/supabase/middleware.ts")).toContain('"/account"');
   });
 
-  it("the navigation points at the hub, from the header", () => {
+  it("the hub is reached from the header, by its own action", () => {
     /*
-     * V3.4.1 moved the account out of the phone's bar and into the masthead
-     * as an icon. The destination is unchanged; what changed is that there is
-     * one door to it rather than a word in the bar on every width.
+     * V3.4.1 moved the account out of the phone's bar into the masthead;
+     * V3.4.2 split that one icon into two, because the hub and the profile
+     * page are two different places and one control could only ever open one
+     * of them.
      */
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
-    expect(nav).toContain("<AccountAction signedIn={signedIn}");
+    expect(nav).toContain('<SettingsAction active={settingsActive} />');
+    const settings = nav.slice(nav.indexOf("function SettingsAction("));
+    expect(settings.slice(0, settings.indexOf("</Link>"))).toContain('href="/account"');
   });
 
-  it("offers exactly one way in", () => {
-    // A spelled-out entry in the bar AND an icon in the header would be two
-    // doors to one room, lighting up in two places at once.
+  it("offers exactly one way to each of the two", () => {
+    /*
+     * The rule has not moved: nothing leads twice to one page. What changed
+     * is that there are two pages.
+     */
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav.match(/<AccountAction /g)).toHaveLength(1);
+    expect(nav.match(/<ProfileAction /g)).toHaveLength(1);
+    expect(nav.match(/<SettingsAction /g)).toHaveLength(1);
+    // And neither is back in the bar.
     expect(nav).not.toContain('href: "/account"');
     expect(nav).not.toContain('href: "/login"');
+    expect(nav).not.toContain('section: "account"');
+  });
+
+  it("keeps the profile page as its own destination", () => {
+    const nav = source("src/components/layout/site-nav.tsx");
+    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
+    expect(profile).toContain('href={signedIn ? "/account/profile" : "/login"}');
+    // It is one of the hub's four sections and stays one.
+    expect(source("src/app/(app)/account/page.tsx")).toContain('{ href: "/account/profile"');
   });
 
   it("the old path still resolves instead of 404ing", () => {

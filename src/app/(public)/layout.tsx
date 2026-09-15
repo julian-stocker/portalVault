@@ -4,6 +4,7 @@ import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { isAdmin } from "@/lib/auth/admin";
+import { currentProfile } from "@/lib/auth/profile";
 import { currentUser } from "@/lib/auth/user";
 
 /**
@@ -13,7 +14,17 @@ import { currentUser } from "@/lib/auth/user";
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
   // All three answers come from the server, and all three are memoised per
   // request — the catalog page asks the same two questions again (ADR-0042).
-  const [user, admin] = await Promise.all([currentUser(), isAdmin()]);
+  // `currentProfile()` joins the pair that was already here rather than
+  // waiting behind it: it needs `currentUser()`, which is memoised and
+  // resolved by this very call, so its own marginal work is one indexed read
+  // of `profiles` — measured at 102 ms, faster than the catalogue read the
+  // page makes in the same breath. Nothing at all for an anonymous visitor:
+  // it returns null the moment `currentUser()` does (V3.4.2).
+  const [user, admin, profile] = await Promise.all([
+    currentUser(),
+    isAdmin(),
+    currentProfile(),
+  ]);
   // Only ever a query for the operator: `fetchOpenOrderCounts()` asks
   // `isAdmin()` itself and returns zeroes for everybody else without touching
   // the database. A flagged order has to be visible from wherever they are,
@@ -24,7 +35,12 @@ export default async function PublicLayout({ children }: { children: React.React
     <div className="relative flex min-h-screen flex-col">
       {/* Who this browser is acting as. Draws nothing (ADR-0061). */}
       <PrincipalGate userId={user?.id ?? null} />
-      <SiteNav signedIn={Boolean(user)} admin={admin} openOrders={openOrders} />
+      <SiteNav
+        signedIn={Boolean(user)}
+        admin={admin}
+        openOrders={openOrders}
+        username={profile?.username ?? null}
+      />
       {/* `flex-1` so a short page still pushes the footer to the bottom of the
           viewport instead of leaving it floating in the middle. */}
       <div className="relative flex-1">

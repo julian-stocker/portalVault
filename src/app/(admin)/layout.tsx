@@ -19,13 +19,18 @@ import { notFound } from "next/navigation";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { isAdmin } from "@/lib/auth/admin";
+import { currentProfile } from "@/lib/auth/profile";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  // The authorisation gate, on its own and first. Nothing cosmetic shares
+  // this line: whether somebody may be here is not a question to be resolved
+  // in the same breath as what to print in the header.
   if (!(await isAdmin())) notFound();
 
-  // Memoised per request, so the admin home page below counts the same rows
-  // without a second round trip.
-  const openOrders = await fetchOpenOrderCounts();
+  // Two independent reads, once the gate has passed. Both memoised per
+  // request, so the admin home page below counts the same rows without a
+  // second round trip, and the operator's own handle costs one indexed read.
+  const [openOrders, profile] = await Promise.all([fetchOpenOrderCounts(), currentProfile()]);
 
   return (
     /* No WorldZone: the admin area is a workbench, not a shop window. The
@@ -34,7 +39,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
        No footer either: it orients visitors and offers the public and legal
        pages, and the operator needs neither. */
     <div className="relative min-h-screen">
-      <SiteNav signedIn admin openOrders={openOrders} />
+      <SiteNav signedIn admin openOrders={openOrders} username={profile?.username ?? null} />
       {children}
       <NavSpacer />
     </div>

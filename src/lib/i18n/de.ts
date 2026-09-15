@@ -1302,7 +1302,21 @@ export const de = {
     primary: "Hauptnavigation",
     catalog: "Katalog",
     collection: "Sammlung",
-    settings: "Profil",
+    /**
+     * Die beiden Kopfzeilen-Aktionen (V3.4.2).
+     *
+     * Getrennte Ziele, deshalb getrennte Namen: `profile` führt auf die
+     * eigene Sammleridentität, `account` auf den Kontobereich. Der Schlüssel
+     * hiess bis V3.4.1 `settings` und trug den Wert „Profil" — solange es nur
+     * eine Aktion gab, fiel das nicht auf; mit zweien wäre es irreführend.
+     *
+     * `profileOf` wird gelesen, wenn der Benutzername sichtbar danebensteht:
+     * ein `aria-label` ersetzt den sichtbaren Text vollständig, also muss es
+     * ihn mitnehmen, sonst hört ein Screenreader den Namen gar nicht.
+     */
+    profile: "Profil",
+    profileOf: (name: string) => `Profil: ${name}`,
+    account: "Mein Konto",
     signOut: "Abmelden",
     signIn: "Anmelden",
     /** Nur für Administratoren sichtbar (ADR-0039). */

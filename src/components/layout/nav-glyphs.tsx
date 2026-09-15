@@ -112,6 +112,25 @@ export function AdminGlyph({ className = "h-[18px] w-[18px]" }: { className?: st
 }
 
 /**
+ * Settings: the cog.
+ *
+ * Eight spokes around a hub rather than a toothed wheel — teeth at 18 px with
+ * a 1.8 stroke close into a blob, and the spoked form keeps its shape all the
+ * way down. Deliberately not the sliders of `AdminGlyph`: that one means the
+ * operator's back office, this one means your own account, and two controls a
+ * few pixels apart must not look like the same idea.
+ */
+export function SettingsGlyph({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <circle cx="12" cy="12" r="3.25" />
+      <path d="M12 2.9v2.3M12 18.8v2.3M21.1 12h-2.3M5.2 12h-2.3" />
+      <path d="m18.44 5.56-1.63 1.63M7.19 16.81l-1.63 1.63M18.44 18.44l-1.63-1.63M7.19 7.19 5.56 5.56" />
+    </Glyph>
+  );
+}
+
+/**
  * The account: head and shoulders.
  *
  * The one icon in the header that is neither brand nor commerce. Neutral ink

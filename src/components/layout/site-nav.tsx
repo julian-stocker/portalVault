@@ -31,6 +31,7 @@ import {
   CatalogGlyph,
   CollectionGlyph,
   InventoryGlyph,
+  SettingsGlyph,
 } from "@/components/layout/nav-glyphs";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
@@ -224,45 +225,111 @@ function AttentionBadge({ count }: { count: number }) {
 }
 
 /**
- * Who you are — the header's other global action (V3.4.1).
+ * Who you are — and, beside it, the account itself (V3.4.2).
  *
- * ONE DOOR, NOT TWO. The bar used to spell this out as `Profil` or
- * `Anmelden`; those entries are gone from `DESTINATIONS`, and this is the
- * only way to the account area on every width. Two entry points would light
- * up their active state in two places at once and make the same room look
- * like two rooms.
+ * TWO ACTIONS, TWO DESTINATIONS. V3.4.1 had one door to the account area and
+ * a test that forbade a second, because a spelled-out entry in the bar and an
+ * icon in the header would have been two ways into one room. This is a
+ * different arrangement: the two now lead to two different pages.
  *
- * ICON ONLY, WHICH IS WHY THE NAME MATTERS. `aria-label` carries the whole
- * label — the same German word the bar used — so a screen reader hears
- * "Profil" or "Anmelden" and nothing is lost by dropping the text. No
- * tooltip: this product has no tooltip anywhere, and inventing one for a
- * single control would be a new pattern with one user.
+ *   name + person  ->  /account/profile   the collector identity
+ *   cog            ->  /account           the account hub
  *
- * NEUTRAL INK. An account is not a possession and not a purchase, so neither
- * the ownership gold nor the commerce amber applies. It borrows the ink of a
- * quiet navigation item and brightens on hover, exactly as the bar's labels
- * do — and goes to full strength while you are in the account area, which is
- * how it shows the state the bar used to show.
+ * The rule the old test protected is intact — nothing leads twice to the same
+ * place, and the active state can only ever light up on one of them.
+ *
+ * THE NAME IS THE USERNAME, and nothing else. `profiles.username` is three to
+ * twenty characters of `[a-zA-Z0-9_]`, so it is a handle rather than a name —
+ * there is no given name on a profile, and the ones in `customer_contacts`
+ * and `order_addresses` are delivery data, not identity.
+ *
+ * NEUTRAL, both of them. An account is neither a possession nor a purchase,
+ * so neither the ownership gold nor the commerce amber applies. The cart
+ * beside them keeps its amber and its silver count.
  */
-function AccountAction({ signedIn, active }: { signedIn: boolean; active: boolean }) {
-  const label = signedIn ? de.nav.settings : de.nav.signIn;
+function ProfileAction({
+  signedIn,
+  username,
+  active,
+}: {
+  signedIn: boolean;
+  /** `null` before onboarding, and for everybody who is not signed in. */
+  username: string | null;
+  active: boolean;
+}) {
+  const name = signedIn ? username : null;
+  /*
+   * An `aria-label` replaces the element's content outright, so when a name
+   * is on screen the label has to carry it too — otherwise the one thing a
+   * sighted visitor reads is the one thing a screen reader never hears.
+   */
+  const label = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;
+
   return (
     <Link
-      href={signedIn ? "/account" : "/login"}
+      href={signedIn ? "/account/profile" : "/login"}
       aria-label={label}
       aria-current={active ? "page" : undefined}
       /*
-       * 44 px of target around an 18 px mark, the same pair `CartBadge` uses,
-       * so the two actions are one cluster rather than two sizes. The header's
-       * height is unchanged: the row is already taller than this.
+       * `min-w-0` here as well as on the group around it: the chain has to be
+       * unbroken, because a flex item's default `min-width: auto` refuses to
+       * shrink below its content and `truncate` would never get its turn.
        */
       className={
-        "focus-ring relative flex min-h-11 min-w-11 items-center justify-center " +
-        "rounded-full transition-colors " +
+        "focus-ring flex min-w-0 items-center gap-1.5 rounded-full transition-colors " +
         (active ? "text-on-deep" : "text-on-deep-muted hover:text-on-deep")
       }
     >
-      <AccountGlyph className="h-[18px] w-[18px]" />
+      {/*
+       * THE NAME GROWS AND SHRINKS TO THE LEFT, AND NOTHING ELSE MOVES.
+       *
+       * The group is anchored right by `ml-auto`, every icon box is
+       * `shrink-0`, and this is the only elastic thing in the row — so a
+       * twenty-character username eats leftward into empty space and a narrow
+       * phone truncates it, while the person, the cog and the cart stay where
+       * they were. `text-right` keeps the visible end of a truncated name
+       * against the glyph it belongs to.
+       *
+       * Absent entirely when there is no username — before onboarding there
+       * is nothing to show, and an empty box or a dash would be furniture
+       * standing in for a fact that does not exist yet.
+       */}
+      {name ? (
+        <span className="min-w-0 truncate text-right text-[13px] leading-none font-medium">
+          {name}
+        </span>
+      ) : null}
+      {/* 44 px around an 18 px mark. Fixed, so the name cannot squeeze it. */}
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center">
+        <AccountGlyph className="h-[18px] w-[18px]" />
+      </span>
+    </Link>
+  );
+}
+
+/**
+ * The account hub, for somebody who is already in.
+ *
+ * Signed out there is nothing to configure, so there is no cog — the person
+ * beside it is the way in, and it says "Anmelden".
+ *
+ * Named "Mein Konto", which is the heading the page itself carries. Not
+ * "Einstellungen": that word promises a settings screen, and this opens the
+ * hub with its four sections.
+ */
+function SettingsAction({ active }: { active: boolean }) {
+  return (
+    <Link
+      href="/account"
+      aria-label={de.nav.account}
+      aria-current={active ? "page" : undefined}
+      className={
+        "focus-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full " +
+        "transition-colors " +
+        (active ? "text-on-deep" : "text-on-deep-muted hover:text-on-deep")
+      }
+    >
+      <SettingsGlyph className="h-[18px] w-[18px]" />
     </Link>
   );
 }
@@ -325,9 +392,19 @@ export function SiteNav({
   signedIn,
   admin = false,
   openOrders = NO_OPEN_ORDERS,
+  username = null,
 }: {
   signedIn: boolean;
   admin?: boolean;
+  /**
+   * The signed-in visitor's handle, from `profiles.username` (V3.4.2).
+   *
+   * `null` is a real state twice over: nobody is signed in, or somebody is
+   * and has not been through onboarding yet. Both render the person glyph
+   * alone. Supplied by the layout — every one of the three already knows who
+   * is asking, and none of them fetches it from the browser.
+   */
+  username?: string | null;
   /**
    * How much work is waiting, counted on the server (F5).
    *
@@ -352,6 +429,22 @@ export function SiteNav({
    * is one cart entry point now, in the header, and it is reachable from
    * anywhere because the header is sticky.
    */
+  /*
+   * WHICH OF THE TWO ACCOUNT ACTIONS IS CURRENT (V3.4.2).
+   *
+   * `activeSection()` answers "account" for the whole area, which was exactly
+   * right while one control stood for all of it. Two controls need one level
+   * more, and only here — the section model still has the granularity the
+   * rest of the product wants, and widening it would change what `/settings`
+   * and `/onboarding` mean everywhere else for the sake of one header.
+   *
+   * Mutually exclusive by construction: the hub takes every account route the
+   * profile page does not, so the two can never both be `aria-current`.
+   */
+  const inAccount = active === "account";
+  const profileActive = (pathname ?? "/") === "/account/profile";
+  const settingsActive = inAccount && !profileActive;
+
   const shopping = !admin;
 
   return (
@@ -460,8 +553,10 @@ export function SiteNav({
        * of the screen, so this row reads `[wordmark] ......... [account]
        * [cart]`.
        */}
-      <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
-        <AccountAction signedIn={signedIn} active={active === "account"} />
+      <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
+        <ProfileAction signedIn={signedIn} username={username} active={profileActive} />
+        {/* Nothing to configure when nobody is signed in. */}
+        {signedIn ? <SettingsAction active={settingsActive} /> : null}
         {/*
          * THE ONLY CART ENTRY POINT (V3.4, ADR-0043), at the outer edge.
          *

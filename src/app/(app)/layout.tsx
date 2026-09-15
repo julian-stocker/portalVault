@@ -30,7 +30,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* The same navigation the public catalog uses — one component, two
           mounts, rather than two systems to keep in step. The active section
           comes from the path, so /collection and /settings light up too. */}
-      <SiteNav signedIn admin={admin} openOrders={openOrders} />
+      {/* `profile` is already loaded above — the username costs nothing here. */}
+      <SiteNav signedIn admin={admin} openOrders={openOrders} username={profile.username} />
       <div className="relative flex-1">
         {/*
          * The world begins UNDER the header (V3.4).
