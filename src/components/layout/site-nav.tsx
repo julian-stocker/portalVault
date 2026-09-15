@@ -25,6 +25,13 @@ import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 
 import { CartBadge } from "@/components/cart/cart-badge";
+import {
+  AccountGlyph,
+  AdminGlyph,
+  CatalogGlyph,
+  CollectionGlyph,
+  InventoryGlyph,
+} from "@/components/layout/nav-glyphs";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
 import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
@@ -35,6 +42,8 @@ type Item = {
   href: string;
   label: string;
   section: NavSection;
+  /** The destination's mark. Drawn beside the label on the phone (V3.4.1). */
+  icon: ({ className }: { className?: string }) => React.ReactElement;
   prefetch?: boolean;
   /** How many orders are flagged. Only "Admin" ever carries this (F5). */
   badge?: number;
@@ -61,6 +70,15 @@ const DESTINATIONS: readonly {
   href: string;
   label: string;
   section: NavSection;
+  /**
+   * The destination's mark, shown beside its label on the phone only (V3.4.1).
+   *
+   * Every destination has one, including the operator's two. The bar is one
+   * bar: an administrator sees the catalog next to `Lager` and `Admin`, so
+   * drawing only the collector's would leave that viewer with one illustrated
+   * item and two bare ones.
+   */
+  icon: ({ className }: { className?: string }) => React.ReactElement;
   applies: (viewer: Viewer) => boolean;
   prefetch?: (viewer: Viewer) => boolean | undefined;
   /**
@@ -74,12 +92,19 @@ const DESTINATIONS: readonly {
    */
   badge?: (counts: OpenOrderCounts) => number;
 }[] = [
-  { href: "/", label: de.nav.catalog, section: "catalog", applies: () => true },
+  {
+    href: "/",
+    label: de.nav.catalog,
+    section: "catalog",
+    icon: CatalogGlyph,
+    applies: () => true,
+  },
 
   {
     href: "/collection",
     label: de.nav.collection,
     section: "collection",
+    icon: CollectionGlyph,
     // A collector's own collection. The business account is the operator,
     // not a collector (ADR-0032): offering it a personal collection as a
     // main destination would suggest the shop's stock lives there. The page
@@ -96,6 +121,7 @@ const DESTINATIONS: readonly {
     href: "/admin/inventory",
     label: de.nav.inventory,
     section: "inventory",
+    icon: InventoryGlyph,
     // The operator's stock. Where a collector has their collection, the
     // business account has the shop's shelf (ADR-0032) — a destination of
     // its own, not the collection under another name.
@@ -107,6 +133,7 @@ const DESTINATIONS: readonly {
     href: "/admin",
     label: de.nav.admin,
     section: "admin",
+    icon: AdminGlyph,
     // Convenience, never a permission (ADR-0039). /admin answers 404 to
     // everyone else whether or not they find the address.
     applies: (viewer) => viewer.admin,
@@ -114,27 +141,30 @@ const DESTINATIONS: readonly {
     badge: (counts) => counts.needsResolution,
   },
 
-  {
-    href: "/account",
-    label: de.nav.settings,
-    section: "account",
-    applies: (viewer) => viewer.signedIn,
-  },
-  {
-    href: "/login",
-    label: de.nav.signIn,
-    section: "account",
-    applies: (viewer) => !viewer.signedIn,
-  },
+  /*
+   * The account is NOT here (V3.4.1).
+   *
+   * It used to be the third word in the bar — "Profil" when signed in,
+   * "Anmelden" when not — beside Katalog and Sammlung. Those two are areas of
+   * the product a collector moves between; an account is a platform action,
+   * the same kind of thing the cart is, and it now sits beside the cart in
+   * the header where that kind of thing belongs.
+   *
+   * There is exactly one way to it, on every width: `AccountAction` below. A
+   * spelled-out entry here and an icon up there would be two doors to one
+   * room, and the active state would light up in two places at once.
+   */
 ];
+
 
 function itemsFor(signedIn: boolean, admin: boolean, counts: OpenOrderCounts): Item[] {
   const viewer: Viewer = { signedIn, admin };
   return DESTINATIONS.filter((destination) => destination.applies(viewer)).map(
-    ({ href, label, section, prefetch, badge }) => ({
+    ({ href, label, section, icon, prefetch, badge }) => ({
       href,
       label,
       section,
+      icon,
       prefetch: prefetch?.(viewer),
       badge: badge?.(counts) ?? 0,
     }),
@@ -193,6 +223,50 @@ function AttentionBadge({ count }: { count: number }) {
   );
 }
 
+/**
+ * Who you are — the header's other global action (V3.4.1).
+ *
+ * ONE DOOR, NOT TWO. The bar used to spell this out as `Profil` or
+ * `Anmelden`; those entries are gone from `DESTINATIONS`, and this is the
+ * only way to the account area on every width. Two entry points would light
+ * up their active state in two places at once and make the same room look
+ * like two rooms.
+ *
+ * ICON ONLY, WHICH IS WHY THE NAME MATTERS. `aria-label` carries the whole
+ * label — the same German word the bar used — so a screen reader hears
+ * "Profil" or "Anmelden" and nothing is lost by dropping the text. No
+ * tooltip: this product has no tooltip anywhere, and inventing one for a
+ * single control would be a new pattern with one user.
+ *
+ * NEUTRAL INK. An account is not a possession and not a purchase, so neither
+ * the ownership gold nor the commerce amber applies. It borrows the ink of a
+ * quiet navigation item and brightens on hover, exactly as the bar's labels
+ * do — and goes to full strength while you are in the account area, which is
+ * how it shows the state the bar used to show.
+ */
+function AccountAction({ signedIn, active }: { signedIn: boolean; active: boolean }) {
+  const label = signedIn ? de.nav.settings : de.nav.signIn;
+  return (
+    <Link
+      href={signedIn ? "/account" : "/login"}
+      aria-label={label}
+      aria-current={active ? "page" : undefined}
+      /*
+       * 44 px of target around an 18 px mark, the same pair `CartBadge` uses,
+       * so the two actions are one cluster rather than two sizes. The header's
+       * height is unchanged: the row is already taller than this.
+       */
+      className={
+        "focus-ring relative flex min-h-11 min-w-11 items-center justify-center " +
+        "rounded-full transition-colors " +
+        (active ? "text-on-deep" : "text-on-deep-muted hover:text-on-deep")
+      }
+    >
+      <AccountGlyph className="h-[18px] w-[18px]" />
+    </Link>
+  );
+}
+
 function NavItem({ item, active }: { item: Item; active: boolean }) {
   return (
     <Link
@@ -201,8 +275,8 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
       // Announced as the current page, not merely coloured differently.
       aria-current={active ? "page" : undefined}
       className={
-        "relative flex min-h-11 flex-1 items-center justify-center px-3 text-sm " +
-        "transition-colors md:flex-none md:px-1 md:py-2 md:text-[15px] " +
+        "relative flex min-h-11 flex-1 items-center justify-center gap-1.5 px-3 text-sm " +
+        "transition-colors md:flex-none md:gap-0 md:px-1 md:py-2 md:text-[15px] " +
         (active
           ? // A gold underline, not a filled pill. The pill was the last
             // thing on the page that still looked like a web app toolbar
@@ -211,6 +285,19 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
           : "text-on-deep-muted hover:text-on-deep")
       }
     >
+      {/*
+       * Beside the label, not above it, and only below `md:` (V3.4.1).
+       *
+       * Above would be the usual shape for a phone bar and would make it
+       * taller — and the bar's height is 2.75rem, a number `NavSpacer`
+       * reserves in two layouts. Beside costs nothing: with two destinations
+       * each half of a 360 px screen holds an 18 px mark and "Sammlung" with
+       * room to spare, and the operator's three still fit.
+       *
+       * Hidden from `md:` up, where the navigation is a row of words in the
+       * masthead and a mark beside each would turn it into a toolbar.
+       */}
+      <item.icon className="h-[18px] w-[18px] md:hidden" />
       {item.label}
       {item.badge ? <AttentionBadge count={item.badge} /> : null}
       <PendingDot />
@@ -362,27 +449,30 @@ export function SiteNav({
       </nav>
 
       {/*
-       * THE ONLY CART ENTRY POINT (V3.4, ADR-0043).
+       * THE GLOBAL ACTIONS (V3.4.1).
        *
-       * Its own group at the right end of the row, separated from the
-       * navigation by `ml-auto` rather than sitting two pixels from the
-       * wordmark, where it used to look like part of the brand lockup.
-       * Destinations on the left, actions on the right.
+       * The header carries what belongs to the platform — who you are, and
+       * what you are buying. The bar below carries where you are: the
+       * catalogue and the collection. That split is the whole of this change.
        *
-       * On a phone the navigation is out of flow at the bottom of the screen,
-       * so this row is `[wordmark] ......... [cart]` — which is the whole of
-       * the mobile header, and why the floating button is gone.
-       *
-       * Not offered to the operator: SkyIsles does not buy from itself, and a
-       * basket in the administrator's header would suggest the shop is a
-       * place they shop (ADR-0042). The route still answers; it is simply not
-       * one of their destinations.
+       * One group, `ml-auto`, account first and cart at the outer edge, at
+       * every width. On a phone the navigation is out of flow at the bottom
+       * of the screen, so this row reads `[wordmark] ......... [account]
+       * [cart]`.
        */}
-      {admin ? null : (
-        <div className="ml-auto flex shrink-0 items-center">
-          <CartBadge />
-        </div>
-      )}
+      <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
+        <AccountAction signedIn={signedIn} active={active === "account"} />
+        {/*
+         * THE ONLY CART ENTRY POINT (V3.4, ADR-0043), at the outer edge.
+         *
+         * Not offered to the operator: SkyIsles does not buy from itself, and
+         * a basket in the administrator's header would suggest the shop is a
+         * place they shop (ADR-0042). The route still answers; it is simply
+         * not one of their destinations — and the account beside it stays,
+         * because an operator has one.
+         */}
+        {admin ? null : <CartBadge />}
+      </div>
       </header>
 
       {/*

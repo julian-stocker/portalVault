@@ -41,8 +41,24 @@ describe("the account area is one place with four destinations", () => {
     expect(source("src/lib/supabase/middleware.ts")).toContain('"/account"');
   });
 
-  it("the navigation points at the hub", () => {
-    expect(source("src/components/layout/site-nav.tsx")).toContain('href: "/account"');
+  it("the navigation points at the hub, from the header", () => {
+    /*
+     * V3.4.1 moved the account out of the phone's bar and into the masthead
+     * as an icon. The destination is unchanged; what changed is that there is
+     * one door to it rather than a word in the bar on every width.
+     */
+    const nav = source("src/components/layout/site-nav.tsx");
+    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
+    expect(nav).toContain("<AccountAction signedIn={signedIn}");
+  });
+
+  it("offers exactly one way in", () => {
+    // A spelled-out entry in the bar AND an icon in the header would be two
+    // doors to one room, lighting up in two places at once.
+    const nav = source("src/components/layout/site-nav.tsx");
+    expect(nav.match(/<AccountAction /g)).toHaveLength(1);
+    expect(nav).not.toContain('href: "/account"');
+    expect(nav).not.toContain('href: "/login"');
   });
 
   it("the old path still resolves instead of 404ing", () => {

@@ -230,12 +230,21 @@ describe("navigation follows the role", () => {
   });
 
   it("keeps the order the list defines", () => {
-    // Katalog · Sammlung · Lager · Admin · Konto
-    // `/settings` became `/account` with ADR-0061; the position is unchanged.
-    const order = ["/", "/collection", "/admin/inventory", "/admin", "/account", "/login"].map(
-      (href) => nav.indexOf(`href: "${href}"`),
+    // Katalog · Sammlung · Lager · Admin
+    //
+    // The account used to close this list as a fifth entry. V3.4.1 took it
+    // out of the bar entirely: it is a platform action, not a collector area,
+    // and it lives in the masthead beside the cart now.
+    const order = ["/", "/collection", "/admin/inventory", "/admin"].map((href) =>
+      nav.indexOf(`href: "${href}"`),
     );
+    expect(order.every((at) => at > -1)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it("no longer offers the account as a destination", () => {
+    expect(nav).not.toContain('href: "/account"');
+    expect(nav).not.toContain('section: "account"');
   });
 
   it("gives the operator stock as a destination of its own", () => {

@@ -76,8 +76,9 @@ describe("there is exactly one cart entry point", () => {
   });
 
   it("is not offered to the administrator", () => {
-    // SkyIsles does not buy from itself (ADR-0042).
-    expect(nav).toMatch(/\{admin \? null : \(\s*<div className="ml-auto/);
+    // SkyIsles does not buy from itself (ADR-0042). The account beside it
+    // stays, because an operator has one.
+    expect(nav).toContain("{admin ? null : <CartBadge />}");
   });
 
   it("is present on the cart page too", () => {
@@ -189,6 +190,133 @@ describe("the phone keeps its bottom bar", () => {
     const header = nav.slice(at, nav.indexOf("\n    >", at));
     expect(header).toContain("flex items-center");
     expect(header).not.toContain("md:flex ");
+  });
+});
+
+describe("the bar carries marks, the header carries actions (V3.4.1)", () => {
+  const glyphs = code("src/components/layout/nav-glyphs.tsx");
+
+  it("draws its own icons in the house style rather than installing a set", () => {
+    // `cart-glyph.tsx` set the style; a second grid and a second stroke
+    // weight would make the one icon this product already had the odd one.
+    const cart = code("src/components/shop/cart-glyph.tsx");
+    for (const source of [glyphs, cart]) {
+      expect(source).toContain('viewBox: "0 0 24 24"');
+      expect(source).toContain('stroke: "currentColor"');
+      expect(source).toContain('strokeWidth: "1.8"');
+    }
+    const pkg = JSON.parse(readFileSync("package.json", "utf8"));
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    for (const set of ["lucide-react", "react-icons", "@heroicons/react", "feather-icons"]) {
+      expect(deps[set], `${set} must not be installed`).toBeUndefined();
+    }
+  });
+
+  it("keeps every nav mark neutral — no ownership gold, no commerce amber", () => {
+    /*
+     * The collection's icon is the one at risk: it is the door to the page
+     * that lists owned figures, not a figure somebody owns. A gold door would
+     * say the whole section is a possession.
+     */
+    expect(glyphs).not.toMatch(/own-ink|--own|commerce|amber|gold/i);
+    expect(glyphs.match(/currentColor/g)?.length).toBeGreaterThan(0);
+    expect(glyphs).not.toMatch(/#[0-9a-f]{3,6}/i);
+  });
+
+  it("gives every destination a mark, so no viewer sees a half-drawn bar", () => {
+    // An administrator sees the catalogue beside their own two destinations.
+    for (const glyph of ["CatalogGlyph", "CollectionGlyph", "InventoryGlyph", "AdminGlyph"]) {
+      expect(glyphs, `${glyph} is missing`).toContain(`export function ${glyph}`);
+      expect(nav, `${glyph} is not used`).toContain(`icon: ${glyph},`);
+    }
+    // One icon per destination. `icon: [A-Z]` so the field's own type
+    // declaration at the head of the list is not counted as a fifth.
+    const list = nav.slice(nav.indexOf("const DESTINATIONS"), nav.indexOf("function itemsFor"));
+    expect(list.match(/icon: [A-Z]\w+/g) ?? []).toHaveLength((list.match(/href: "/g) ?? []).length);
+  });
+
+  it("shows the mark on the phone only", () => {
+    // From md: up the navigation is a row of words in the masthead; a mark
+    // beside each would turn it into a toolbar.
+    expect(nav).toContain('<item.icon className="h-[18px] w-[18px] md:hidden" />');
+  });
+
+  it("does not make the bar taller, because NavSpacer reserves its height", () => {
+    /*
+     * Beside the label, not above it. Above is the usual shape for a phone
+     * bar and would need more than the 2.75rem two layouts reserve.
+     */
+    // `AttentionBadge` is declared BEFORE `NavItem`, so slicing to it ran
+    // backwards and produced an empty string that contained everything.
+    const item = nav.slice(nav.indexOf("function NavItem("));
+    expect(item.length, "the NavItem slice is empty").toBeGreaterThan(200);
+    expect(item).toContain("min-h-11");
+    expect(item).toContain("items-center justify-center gap-1.5");
+    expect(item).not.toContain("flex-col");
+    expect(nav).toContain("h-[calc(2.75rem+env(safe-area-inset-bottom))] md:hidden");
+  });
+
+  it("keeps the active state the bar already had", () => {
+    expect(nav).toContain('aria-current={active ? "page" : undefined}');
+    expect(nav).toContain("font-medium text-on-deep");
+  });
+});
+
+describe("the account is one icon in the header", () => {
+  it("goes where the bar used to go, and nowhere else", () => {
+    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
+    expect(nav.match(/<AccountAction /g)).toHaveLength(1);
+    expect(nav).not.toContain('label: de.nav.settings');
+    expect(nav).not.toContain('label: de.nav.signIn');
+  });
+
+  it("says its name, since it shows no text", () => {
+    const action = nav.slice(nav.indexOf("function AccountAction("));
+    expect(action.slice(0, action.indexOf("</Link>"))).toContain("aria-label={label}");
+    expect(nav).toContain("const label = signedIn ? de.nav.settings : de.nav.signIn;");
+    // The same German words the bar used, not a new pair.
+    expect(de.nav.settings).toBe("Profil");
+    expect(de.nav.signIn).toBe("Anmelden");
+  });
+
+  it("is neutral: not the ownership gold and not the commerce amber", () => {
+    const action = nav.slice(nav.indexOf("function AccountAction("));
+    const decl = action.slice(0, action.indexOf("</Link>"));
+    expect(decl).toContain("text-on-deep-muted hover:text-on-deep");
+    expect(decl).not.toContain("commerce");
+    expect(decl).not.toMatch(/own-ink|brand|gold/);
+  });
+
+  it("clears the 44 px target and keeps a visible focus", () => {
+    const action = nav.slice(nav.indexOf("function AccountAction("));
+    const decl = action.slice(0, action.indexOf("</Link>"));
+    expect(decl).toContain("min-h-11 min-w-11");
+    expect(decl).toContain("focus-ring");
+    // The mark itself stays small, so the header's height is unchanged.
+    expect(decl).toContain('<AccountGlyph className="h-[18px] w-[18px]" />');
+  });
+
+  it("still marks the account area as the current page", () => {
+    const action = nav.slice(nav.indexOf("function AccountAction("));
+    expect(action.slice(0, action.indexOf("</Link>"))).toContain(
+      'aria-current={active ? "page" : undefined}',
+    );
+    expect(nav).toContain('active={active === "account"}');
+  });
+
+  it("sits before the cart, in one actions group at the right", () => {
+    const group = nav.slice(nav.indexOf('<div className="ml-auto flex shrink-0 items-center'));
+    const account = group.indexOf("<AccountAction");
+    const cart = group.indexOf("<CartBadge />");
+    expect(account).toBeGreaterThan(-1);
+    expect(cart).toBeGreaterThan(account);
+  });
+
+  it("is offered to the administrator, unlike the cart", () => {
+    // An operator has an account; they simply do not shop here.
+    const group = nav.slice(nav.indexOf('<div className="ml-auto flex shrink-0 items-center'));
+    expect(group.slice(0, group.indexOf("<AccountAction"))).not.toContain("admin ?");
+    expect(group).toContain("{admin ? null : <CartBadge />}");
   });
 });
 
