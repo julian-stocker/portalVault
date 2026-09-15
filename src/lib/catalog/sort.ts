@@ -6,9 +6,14 @@
  * across everything: the block order carries meaning.
  *
  * Within a category, a figure sorts by its BASE name so variants sit next to
- * the figure they belong to (ADR-0030). All 55 recognised variants share the
- * category of their base, so this never fights the block order.
+ * the figure they belong to (ADR-0030) — never by its display name, which
+ * since V3.6 begins with the variant label ("Blue Bash") and would scatter a
+ * family across the alphabet.
+ *
+ * Inside one family the order is by EDITION, not by label: standard, special,
+ * chase, dark, legendary, prestige (ADR-0068).
  */
+import { familyRank } from "@/lib/catalog/card-type";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
 const collator = new Intl.Collator("de", { sensitivity: "base", numeric: true });
@@ -22,15 +27,36 @@ export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
   const byBase = collator.compare(a.sortBaseName, b.sortBaseName);
   if (byBase !== 0) return byBase;
 
-  // Within one family the base figure comes before its variants.
+  /*
+   * Within one family, by edition (V3.6).
+   *
+   *   standard · special · chase · dark · legendary · prestige
+   *
+   * The operator's order, held in `FAMILY_ORDER` so this reads it rather than
+   * restating it. It replaces "base figure before its variants", which could
+   * only ever say two things and put a Legendary next to a seasonal repaint.
+   *
+   * It is the CARD TYPE that orders here, not the name: a figure whose form
+   * the name does not spell out still sorts where it belongs, and a figure
+   * the operator reclassifies moves with its type.
+   */
+  const byEdition = familyRank(a.cardType) - familyRank(b.cardType);
+  if (byEdition !== 0) return byEdition;
+
+  /*
+   * Same base, same edition. The label breaks the tie — there are families
+   * with two chases — and the plain figure still comes before a labelled one,
+   * because a base figure and its unnamed-form sibling share a rank.
+   */
   const aIsVariant = a.sortVariantLabel !== null;
   const bIsVariant = b.sortVariantLabel !== null;
   if (aIsVariant !== bIsVariant) return aIsVariant ? 1 : -1;
   if (aIsVariant && bIsVariant) {
-    return collator.compare(a.sortVariantLabel!, b.sortVariantLabel!);
+    const byLabel = collator.compare(a.sortVariantLabel!, b.sortVariantLabel!);
+    if (byLabel !== 0) return byLabel;
   }
 
-  // Same base, both plain: identical names in one category are possible.
+  // Last resort: identical names in one category are possible.
   return collator.compare(a.name, b.name);
 }
 

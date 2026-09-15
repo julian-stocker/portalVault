@@ -8,6 +8,7 @@ function figure(
   seriesPosition: number,
   categoryPosition: number,
   variant?: { base: string; label: string },
+  cardType: CatalogFigure["cardType"] = "standard",
 ): CatalogFigure {
   return {
     skyId: `SKY-${String(seriesPosition * 100 + categoryPosition).padStart(4, "0")}`,
@@ -20,7 +21,7 @@ function figure(
     categoryName: "Figuren",
     categoryId: 1,
     catalogGroup: "figure",
-    cardType: "standard",
+    cardType,
     catalogVisible: true,
     canonicalName: "",
     displayNameOverride: null,
@@ -30,7 +31,7 @@ function figure(
     isActive: true,
     element: null,
     characterId: null,
-    displayName: variant ? `${variant.base} (${variant.label})` : name,
+    displayName: variant ? `${variant.label} ${variant.base}` : name,
     sortBaseName: variant ? variant.base : name,
     sortVariantLabel: variant ? variant.label : null,
     searchIndex: name.toLowerCase(),
@@ -59,7 +60,7 @@ describe("sortFigures", () => {
       figure("Legendary Astroblast", 0, 0, { base: "Astroblast", label: "Legendary" }),
       figure("Astroblast", 0, 0),
     ]);
-    expect(result.map((f) => f.displayName)).toEqual(["Astroblast", "Astroblast (Legendary)"]);
+    expect(result.map((f) => f.displayName)).toEqual(["Astroblast", "Legendary Astroblast"]);
   });
 
   it("orders several variants of one figure by their label", () => {
@@ -70,8 +71,8 @@ describe("sortFigures", () => {
     ]);
     expect(result.map((f) => f.displayName)).toEqual([
       "Bash",
-      "Bash (Blue)",
-      "Bash (Legendary)",
+      "Blue Bash",
+      "Legendary Bash",
     ]);
   });
 
@@ -85,7 +86,7 @@ describe("sortFigures", () => {
     ]);
     expect(result.map((f) => f.displayName)).toEqual([
       "Bash",
-      "Bash (Legendary)",
+      "Legendary Bash",
       "Bash Junior",
     ]);
   });
@@ -104,5 +105,79 @@ describe("sortFigures", () => {
       figure("Mmm", 0, 0),
     ]);
     expect(result.map((f) => f.name)).toEqual(["Mmm", "Zzz", "Aaa"]);
+  });
+});
+
+/**
+ * A family stays a family (V3.6).
+ *
+ * The display name now begins with the variant label — "Blue Bash", not
+ * "Bash (Blue)" — and that changed nothing here, because nothing here has ever
+ * read the display name. `sortBaseName` is the truth, and it is still the BASE.
+ */
+describe("the Bash block", () => {
+  const bash = () => [
+    figure("Legendary Bash", 0, 0, { base: "Bash", label: "Legendary" }, "legendary"),
+    figure("Blue Bash", 0, 0, { base: "Bash", label: "Blue" }, "special"),
+    figure("Bash", 0, 0),
+    figure("Chill Light Core", 0, 0, undefined, "special"),
+  ];
+
+  it("keeps Bash, Blue Bash and Legendary Bash together, under Bash", () => {
+    /*
+     * The failure this guards: sorting by what a visitor sees would file
+     * "Blue Bash" under B-l-u-e and "Legendary Bash" under L, scattering one
+     * figure's family across the alphabet. "Chill Light Core" is here to prove
+     * the block is contiguous and not merely sorted.
+     */
+    const order = sortFigures(bash()).map((f) => f.displayName);
+    expect(order).toEqual(["Bash", "Blue Bash", "Legendary Bash", "Chill Light Core"]);
+  });
+
+  it("orders one family by edition, not by label", () => {
+    /*
+     * standard · special · chase · dark · legendary · prestige — the
+     * operator's order. Alphabetically the labels would run Blue, Chase, Dark,
+     * Legendary, which happens to agree; "Zebra" proves it is the type that
+     * decides and not the word.
+     */
+    const family = [
+      figure("Legendary Spyro", 0, 0, { base: "Spyro", label: "Legendary" }, "legendary"),
+      figure("Zebra Spyro", 0, 0, { base: "Spyro", label: "Zebra" }, "special"),
+      figure("Dark Spyro", 0, 0, { base: "Spyro", label: "Dark" }, "dark"),
+      figure("Spyro", 0, 0),
+      figure("Pearl Spyro", 0, 0, { base: "Spyro", label: "Pearl" }, "chase"),
+    ];
+    expect(sortFigures(family).map((f) => f.cardType)).toEqual([
+      "standard",
+      "special",
+      "chase",
+      "dark",
+      "legendary",
+    ]);
+  });
+
+  it("breaks a tie inside one edition with the label", () => {
+    const two = [
+      figure("Molten Hot Dog", 0, 0, { base: "Hot Dog", label: "Molten" }, "chase"),
+      figure("Bronze Hot Dog", 0, 0, { base: "Hot Dog", label: "Bronze" }, "chase"),
+      figure("Hot Dog", 0, 0),
+    ];
+    expect(sortFigures(two).map((f) => f.displayName)).toEqual([
+      "Hot Dog",
+      "Bronze Hot Dog",
+      "Molten Hot Dog",
+    ]);
+  });
+
+  it("does not read the display name at all", () => {
+    // Two figures whose displayed names sort the other way round from their
+    // bases. The base wins.
+    const pair = [
+      figure("Zulu Aardvark", 0, 0, { base: "Aardvark", label: "Zulu" }, "special"),
+      figure("Bash", 0, 0),
+    ];
+    expect(sortFigures(pair).map((f) => f.sortBaseName)).toEqual(["Aardvark", "Bash"]);
+    expect(sortFigures(pair).map((f) => f.displayName)).toEqual(["Zulu Aardvark", "Bash"]);
   });
 });

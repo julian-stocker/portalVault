@@ -126,7 +126,7 @@ describe("withCharacterSearch", () => {
   });
 
   it("keeps the existing variant search working", () => {
-    expect(found("Bash (Legendary)")).toContain("Legendary Bash");
+    expect(found("Bash (Legendary)")).toContain("Legendary Bash"); // the pre-V3.6 display name still finds it
     expect(found("Bash Legendary")).toContain("Legendary Bash");
   });
 

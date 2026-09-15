@@ -5293,3 +5293,129 @@ ein Kartentyp `collection` (vermischte wieder die beiden Achsen) · das Vokabula
 `admin_set_card_type()` (zweite Liste, die mitgepflegt werden muss — der CHECK ist die
 Wahrheit) · `updated_at` bei einer redaktionellen Änderung mitzuschreiben (die Spalte gehört
 dem Import; die drei vergleichbaren Admin-Mutationen lassen sie ebenfalls in Ruhe).
+
+---
+
+## ADR-0068 — Der Anzeigename gehört dem Leser, die Sortierung der Basisfigur
+
+**Status:** angenommen · **Datum:** 2026-09-15 · **Migration:** `0031_special_card_type.sql`
+
+**Kontext.** Drei Dinge liefen in V3.6 zusammen, und alle drei hängen an derselben Frage: was
+gehört in die Datenbank, und was wird beim Lesen abgeleitet?
+
+**1. Ein sechster Kartentyp: `special`.** ADR-0067 sagte über `card_type` ausdrücklich: „Nicht
+einmal eine vollständige Taxonomie. Saisonale, Event- und Editionsvarianten … bleiben
+`standard`, bis jemand anders entscheidet." Jemand hat anders entschieden. `special` ist eine
+bewusst **breite** Kategorie: eine zusätzliche offizielle **Form oder Edition** einer
+Basisfigur innerhalb derselben Serie — LightCore, Eon's Elite, Nitro, Blue, Power Blue,
+Mystical, Granite, die Saison- und Event-Ausgaben, die benannten Einzelformen. 95 Figuren.
+
+**Bei Mehrfachbelegung gewinnt die höchste Stufe:** `legendary > dark > special > standard`.
+Eine Zeile hält einen Wert; SKY-0130 „Legendary Chill Light Core" ist beides und bleibt
+`legendary`. `chase` steht außerhalb dieser Kette, weil es eine andere Frage beantwortet —
+dieselbe Figur in anderer Ausführung, nicht eine stärkere Edition. Genau **eine** Figur wurde
+zwischen beiden bewegt: SKY-0117 „Crusher (Granite)".
+
+**2. Der Anzeigename wird abgeleitet, nicht migriert.** Die Quelle schreibt „Legendary Bash"
+als Präfix und „Hex (Pearl)" in Klammern. Bis V3.6 wurde alles auf die Klammerform normalisiert
+— Sammler sagen aber „Legendary Bash". Also wird jetzt umgekehrt normalisiert, und beide
+Schreibweisen landen auf denselben drei Werten.
+
+**`name` bleibt dabei unangetastet, und das ist kein Detail.** Der Katalogimport besitzt die
+Spalte und schreibt sie bei jedem Lauf; ein `update … set name` in 0031 hätte bis zum nächsten
+Import gehalten. Die Ableitung ist importfest, slug-stabil (ADR-0011: ein vergebener Slug
+bleibt) und führt keine zweite Namenswahrheit ein. Es gibt deshalb **keine** neue Spalte
+`base_name` oder `sort_name`.
+
+**3. Sortiert wird nach der Basisfigur, nie nach dem Anzeigenamen.** `sortBaseName` war schon
+vorher die Wahrheit und bleibt es: „Bash", „Blue Bash" und „Legendary Bash" stehen als ein
+Block unter *Bash*. Neu ist die Ordnung **innerhalb** einer Familie — nicht mehr alphabetisch
+nach Label, sondern nach Edition: `standard · special · chase · dark · legendary · prestige`.
+`lib/shop/surface.ts` verglich als einzige Stelle Anzeigenamen und benutzt jetzt dieselbe
+`compareFigures`; es gibt keine Shop-eigene Reihenfolge mehr.
+
+**4. Besitz ist endgültig ein Overlay.** ADR-0067 hielt die `*.collected`-Architektur mit
+`USE_COLLECTED_ARTWORK = false` offen. Sie ist jetzt **verworfen**: die Quell-PNGs sind
+entfernt, `CardArtworkPair` und das Flag sind gelöscht, und `artworkFor()` nimmt keinen
+Betrachter mehr entgegen. Es gibt sechs Basismotive und **ein** Ownership-Overlay
+(`collected.png`), das das bisher selbst gezeichnete SVG ersetzt. Ein Flag, das niemand je
+setzen wird, ist nur ein zweiter Zustand, über den nachgedacht werden muss.
+
+Mit entfernt: `gold`/`silver` samt dem `TEMPLATE`-Export (seit V3.5 von nichts gerendert), das
+einzelne `collection`-Motiv und die zehn `*.collected`-WebPs — zusammen 16 ausgelieferte
+Dateien und drei Generationen derselben verworfenen Idee.
+
+**Konsequenzen.** Der Build erzeugt exakt sechs Karten plus ein Overlay und **prüft jetzt, was
+er baut**: Maße, echten Alphakanal, ein durchsichtiges Bildfenster und freigestellte
+Außenecken. Anlass war ein `special.png`, das in korrekter Größe, aber mit einrastertem
+Transparenz-Karo und ganz ohne Alphakanal geliefert wurde — die einzige damalige Prüfung war
+die Größe, und es wäre mit vollständig verdeckter Figur ausgeliefert worden.
+
+**Verworfen:** `name` in 0031 massenhaft umzuschreiben (der Import hätte es zurückgesetzt) ·
+eine persistente Spalte für den Basisnamen (`sortBaseName` löst es bereits, und eine zweite
+Textwahrheit driftet) · `character_id` als Sortierwahrheit (nur 104 von 602 Figuren, und
+semantisch breiter: „Lava Barf Eruptor" und „Eruptor" teilen einen Charakter, aber keine
+Basisfigur) · eine generische Regel `Name (X) → X Name` (sie hätte „Elite Boomer (2)" zu „2
+Elite Boomer" gemacht) · `chase` pauschal in die Prioritätskette aufzunehmen (eine echte
+Chase-Ausführung wäre von der breiteren Kategorie verschluckt worden).
+
+---
+
+## ADR-0069 — Eon's Elite ist eine Produktlinie, keine Spielart von „Special"
+
+**Status:** angenommen · **Datum:** 2026-09-15 · **Migration:** `0032_elite_card_type.sql`
+
+**Kontext.** ADR-0068 führte `special` ein, bewusst breit: „eine zusätzliche offizielle **Form
+oder Edition** einer Basisfigur innerhalb derselben Serie, wenn keine stärkere Marke greift."
+Eon's Elite landete dort zusammen mit LightCore, Granite, Nitro und den Saisonausgaben — mit
+**42 von 95** Zeilen war es fast die halbe Kategorie.
+
+**Entscheidung.** Eon's Elite bekommt den siebten Kartentyp: `elite`.
+
+Es gehört nicht zu den anderen. LightCore ist eine **Bauweise**, Granite eine **Ausführung**;
+Eon's Elite ist eine **Produktlinie** — eigene Verpackung, eigenes Regal, und seit V3.7 ein
+eigenes Motiv. Der Punkt, an dem eine Kategorie aufhört, eine Kategorie zu sein, ist der, an dem
+sie sich ihr Bild mit vier anderen Dingen teilt. `special` behält die 53, die wirklich eine Form
+von etwas sind, und bleibt damit ein Wort mit Bedeutung.
+
+**`elite` steht außerhalb der Editionskette.** `legendary > dark > special > standard` gilt
+unverändert für alle anderen. Eon's Elite konkurriert nie: seine Mitglieder kommen aus einer
+kuratierten 42er-Liste, nie aus einem Namen, und keine Figur im Katalog ist zugleich Eon's Elite
+und Dark oder Legendary. `chase` steht aus dem anderen Grund daneben — es ist eine Ausführung,
+keine Edition.
+
+**Verpackung ist eine andere Dimension als Edition, und das ist der Kern.** Die Linie führt
+**drei Zeilen je Figur**: die Series-1-Schachtel, die Series-2-Schachtel und die lose Figur.
+Alle drei **sind** Eon's Elite, alle drei bekommen `elite`. Welche davon ein Besucher sieht, ist
+eine andere Frage, beantwortet von `catalog_visible`: V1 unterstützt öffentlich ausschließlich
+`loose` (ADR-0021), also sind die 14 losen Zeilen sichtbar und die 28 OVP-Zeilen nicht. Keine
+Zeile wird gelöscht, keine Sammlungsdaten werden umgehängt, der Admin sieht weiterhin alle 42.
+
+**Die Sichtbarkeit steht ausdrücklich NICHT in der Migration.** `catalog_visible` ist eine
+redaktionelle Entscheidung des Administrators (ADR-0039), gesetzt über
+`admin_set_catalog_visible()`. Sie aus einer Migration zu schreiben hieße, sie ihm wegzunehmen.
+Auf Production ist sie bereits getroffen; Staging hat sie nie erhalten und bekommt sie auf
+demselben Weg.
+
+**Der öffentliche Name.** `Elite Boomer - ohne OVP` liest sich als **„Eon's Elite Boomer"** —
+abgeleitet, wie jeder Anzeigename seit ADR-0068, ohne dass `name` angefasst wird. Gebaut wird er
+aus dem **Charakter**, nicht aus dem Rohnamen: „Elite Boomer" trägt das Wort bereits, und „Eon's
+Elite Elite Boomer" ist keine Figur. Derselbe Charakter ist auch die Sortierwahrheit — alle drei
+Zeilen stehen im Boomer-Block unter B, nicht unter E für „Eon's".
+
+**Die Migrationsreihenfolge ist zwingend: 0031, dann 0032.** 0031 ist seit 2026-09-15 auf
+Staging und darf deshalb nicht mehr verändert werden. 0032 ist auf `card_type = 'special'`
+gegattert: auf einer Datenbank ohne 0031 trifft es nichts und schreibt nichts — der Guard fällt
+auf „kein Effekt" zurück, nicht auf „falsches Ergebnis". Production hat 0031 noch nicht.
+
+**Konsequenzen.** Sieben Kartentypen, sieben Basismotive, ein Ownership-Overlay. Counts nach
+beiden Migrationen: `standard` 432 · `special` 53 · `elite` 42 · `dark` 21 · `legendary` 25 ·
+`chase` 29 · `prestige` 0.
+
+**Verworfen:** Eon's Elite in `special` zu belassen (42 von 95 Zeilen, und ein eigenes Motiv
+ohne eigenen Typ ist nicht darstellbar) · die Sichtbarkeit in 0032 mitzuschreiben (nimmt dem
+Administrator eine Entscheidung, die ihm gehört) · eine Namensheuristik `like 'Elite %'` in SQL
+(wäre auch für eine Figur wahr, die schlicht „Elite …" heißt) · die drei Verpackungszeilen zu
+verschmelzen (vernichtet historische Daten und eine spätere echte OVP-Architektur) · `elite` in
+die Editionskette aufzunehmen (es konkurriert nie, und ein Rang, der nie verglichen wird, ist
+eine Behauptung ohne Fall).

@@ -51,9 +51,9 @@ const NAMES = new Map([["SA", new Set(["Bash"])]]);
 
 describe("the display name override", () => {
   it("wins over the derived name", () => {
-    // Without an override this row would read "Bash (Legendary)" (ADR-0030).
+    // Without an override this row would read "Legendary Bash" (ADR-0030).
     const [derived] = withVariants([figure()], NAMES);
-    expect(derived.displayName).toBe("Bash (Legendary)");
+    expect(derived.displayName).toBe("Legendary Bash");
 
     const [chosen] = withVariants([figure({ displayNameOverride: "Bash, legend\u00e4r" })], NAMES);
     expect(chosen.displayName).toBe("Bash, legend\u00e4r");
@@ -80,7 +80,7 @@ describe("the display name override", () => {
 
   it("comes back to the derivation when it is cleared", () => {
     const [reset] = withVariants([figure({ displayNameOverride: null })], NAMES);
-    expect(reset.displayName).toBe("Bash (Legendary)");
+    expect(reset.displayName).toBe("Legendary Bash");
   });
 
   it("switches the variant derivation off while it is set", () => {

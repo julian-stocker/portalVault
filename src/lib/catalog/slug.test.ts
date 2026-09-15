@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
 import { assignSlugs, seriesSlug, slugify } from "./slug.ts";
 
 describe("slugify", () => {
@@ -108,5 +109,42 @@ describe("assignSlugs — stability on later imports", () => {
     );
     expect(result.find((r) => r.skyId === "SKY-0001")?.slug).toBe("kaos");
     expect(result.find((r) => r.skyId === "SKY-0500")?.slug).toBe("kaos-imaginators");
+  });
+});
+
+/**
+ * V3.6 turned every variant's public name round — "Crusher (Granite)" is shown
+ * as "Granite Crusher" — and no URL moved.
+ *
+ * Two independent reasons, and this pins both: the display name is derived and
+ * never written to `name`, and a slug that exists is kept whatever the name
+ * says. Either one alone would be enough; together they mean a naming decision
+ * can never break a bookmark, a shared link or a cart reference.
+ */
+describe("a new public name never moves a URL", () => {
+  it("keeps the slug a figure already has, whatever it is now called", () => {
+    const before = assignSlugs(
+      [{ skyId: "SKY-0117", name: "Crusher (Granite)", seriesLabel: "Giants" }],
+      new Map(),
+    );
+    expect(before[0].slug).toBe("crusher-granite");
+
+    // The same figure, re-imported after the display rules changed. The name
+    // in the payload is the raw one either way — the derivation never writes
+    // to it — but even a renamed row keeps its URL.
+    const after = assignSlugs(
+      [{ skyId: "SKY-0117", name: "Granite Crusher", seriesLabel: "Giants" }],
+      new Map([["SKY-0117", "crusher-granite"]]),
+    );
+    expect(after[0].slug).toBe("crusher-granite");
+  });
+
+  it("derives no slug from a display name, because it never sees one", () => {
+    // `assignSlugs` takes sky_id, name and series. There is no parameter
+    // through which a derived name could reach it (ADR-0011).
+    const source = readFileSync("src/lib/catalog/slug.ts", "utf8");
+    expect(source).not.toContain("displayName");
+    expect(source).not.toContain("parseVariant");
+    expect(source).not.toContain("variantLabel");
   });
 });

@@ -27,6 +27,9 @@ import {
   parseVariant,
   searchFormsFor,
   sortPartsFor,
+  parseEliteEdition,
+  eliteDisplayNameFor,
+  eliteSearchFormsFor,
 } from "@/lib/catalog/variant";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
@@ -187,6 +190,33 @@ export function withVariants(
     if (figure.displayNameOverride !== null) return figure;
 
     const namesInSeries = nameIndex.get(figure.seriesCode) ?? new Set<string>();
+
+    /*
+     * Eon's Elite first (V3.6). It is a different question from the finish
+     * system — "which box did this come in" rather than "which finish is
+     * this" — and it is asked first because the answers would otherwise
+     * collide: "Elite Boomer (2)" must not be read as a figure called
+     * "Elite Boomer" with a variant label of "2".
+     *
+     * `editionLabel` is null for the loose row, so its badge stays empty and
+     * only the "- ohne OVP" disappears from what a visitor reads.
+     */
+    const elite = parseEliteEdition(figure.name, namesInSeries);
+    if (elite !== null) {
+      return {
+        ...figure,
+        displayName: eliteDisplayNameFor(elite),
+        /*
+         * All three rows sort together AND with the character they are a
+         * version of: "Boomer", "Eon's Elite Boomer", and the rest of the
+         * Boomer family in one block under B — not under E for "Eon's".
+         */
+        sortBaseName: elite.characterName,
+        sortVariantLabel: elite.editionLabel,
+        searchIndex: buildSearchIndex(eliteSearchFormsFor(figure.name, elite)),
+      };
+    }
+
     const variant = parseVariant(figure.name, namesInSeries);
     const { sortBaseName, sortVariantLabel } = sortPartsFor(figure.name, variant);
     return {

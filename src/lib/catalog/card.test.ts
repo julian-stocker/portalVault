@@ -39,7 +39,7 @@ describe("the ownership question belongs to the catalog", () => {
      * Which card is drawn depends on the type; whether ownership changes that
      * card is a switch in `card-template.ts`, currently off.
      */
-    expect(card).toContain("const template = artworkFor(figure.cardType, owned);");
+    expect(card).toContain("const template = artworkFor(figure.cardType);");
     expect(card).not.toContain("TEMPLATE.owned");
     expect(card).not.toContain("COLLECTION_ARTWORK");
   });

@@ -753,35 +753,106 @@ Deshalb ist „Eigenes Bild entfernen" eine Rücknahme und kein Verlust: das imp
 die ganze Zeit darunter. Aufgelöst wird zentral in `src/lib/catalog/image.ts`, in dieser
 Reihenfolge: Override → importiertes Bild → leere Bildbühne.
 
-## 11g. Kartentyp: was eine Figur *ist*, getrennt von dem, wem sie gehört (2026-09-15, ADR-0067)
+## 11g. Kartentyp: was eine Figur *ist*, getrennt von dem, wem sie gehört (2026-09-15, ADR-0067/0068)
 
 `skylanders.card_type` sagt, auf welches Basismotiv eine Figur gedruckt wird — `standard`,
-`dark`, `legendary`, `chase`, `prestige`. Die Spalte ist **redaktionell und dauerhaft**,
-gehört dem Administrator und wird über `admin_set_card_type()` gesetzt. Der Import nennt sie
-nirgends; dieselbe Trennung wie bei `image_override_path` (11f) und `character_id` (ADR-0034).
+`special`, `elite`, `dark`, `legendary`, `chase`, `prestige`. Die Spalte ist **redaktionell und
+dauerhaft**, gehört dem Administrator und wird über `admin_set_card_type()` gesetzt. Der Import
+nennt sie nirgends; dieselbe Trennung wie bei `image_override_path` (11f) und `character_id`
+(ADR-0034).
+
+**Bei Mehrfachbelegung gewinnt die höchste Stufe:** `legendary > dark > special > standard`.
+`chase` und `elite` stehen außerhalb dieser Kette — `chase` ist keine stärkere Edition, sondern
+dieselbe Edition in anderer Ausführung, und `elite` ist eine Produktlinie aus kuratierter Liste.
 
 **Besitz ist keine Kartenart.** Es gibt keinen Typ `collection`, und Sammeln schreibt hier nie.
 Besessene und nicht besessene Figuren verwenden **dasselbe** Motiv; der Unterschied ist ein
-goldenes Siegel (`CollectedSeal`), das beim Rendern darübergelegt wird. Die zweite,
-„gesammelte" Motivvariante (`*.collected.*`) existiert im Code und in der Build-Pipeline, ist
-aber über `USE_COLLECTED_ARTWORK = false` zentral abgeschaltet — die Paare sind nicht
-pixelgleich, und die Karte schien beim Sammeln zu springen.
+Overlay (`collected.webp`), das beim Rendern darübergelegt wird. Die frühere Idee, je Kartentyp
+ein zweites „gesammeltes" Motiv zu führen, ist **verworfen** — die Paare waren nie pixelgleich,
+und die Karte schien beim Sammeln zu springen. Es gibt seit V3.6 sechs Basismotive und **ein**
+Ownership-Overlay, sonst nichts.
 
-**Die Klassifikation ist eine kuratierte Liste, kein Namensmuster.** 76 SKY-IDs in `0030`:
-21 `dark`, 25 `legendary`, 30 `chase`, **0 `prestige`**. Sie entstand in der Anwendung, wo
-`parseVariant()` bereits verlangt, dass eine Variante eine Basisfigur **in derselben Serie**
-hat — genau die Regel, die „Dark Spyro" (Variante von SKY-0053) von „Dark Pyramid",
-„Dark Reactor" und „Dark Rune" trennt, die nur zufällig so heißen. Ein `LIKE 'Dark %'` in SQL
-wäre ein zweiter, gröberer Klassifikator, der dem ersten widerspricht.
+**Die Klassifikation ist eine kuratierte Liste, kein Namensmuster.** 0030 klassifizierte 76
+SKY-IDs, 0031 weitere 95 als `special`. Sie entstand in der Anwendung, wo `parseVariant()`
+bereits verlangt, dass eine Variante eine Basisfigur **in derselben Serie** hat — genau die
+Regel, die „Dark Spyro" (Variante von SKY-0053) von „Dark Pyramid", „Dark Reactor" und „Dark
+Rune" trennt, die nur zufällig so heißen. Ein `LIKE 'Dark %'` in SQL wäre ein zweiter, gröberer
+Klassifikator, der dem ersten widerspricht.
 
-**`chase` ist eng definiert:** nur besondere Farben, Materialien und Finishes einer bestehenden
-Figur — Crystal, Pearl, Jade, Glow, Granite, Scarlet, Molten, Bronze, Metallic, Golden. **Keine
-allgemeine Special-Edition-Taxonomie.** Saisonale und Event-Editionen (Easter, Halloween,
-Royale, Nitro, Mystical) bleiben `standard`. `prestige` vergibt der Administrator von Hand.
+**Abgrenzung `special` / `chase`:** `special` ist die zusätzliche **Form oder Edition** einer
+Basisfigur — LightCore, Eon's Elite, Nitro, Blue, Power Blue, Mystical, Granite, Saison- und
+Event-Ausgaben, benannte Einzelformen. `chase` ist dieselbe Figur in einer besonderen **Farbe
+oder einem besonderen Material** — Crystal, Pearl, Jade, Glow, Scarlet, Molten, Bronze,
+Metallic, Golden. Granite ist die einzige Figur, die zwischen beiden bewegt wurde (0031,
+`chase` → `special`).
 
-**Namen bleiben roh (Regel 4).** Zwei der 76 tragen Tippfehler aus der Legacy-Quelle —
-SKY-0252 „Legendary Grim Creemper" und SKY-0280 „Horn Blast Whirwind (Clear Crystal)". Beide
-werden **nicht** korrigiert: `0030` klassifiziert, es redigiert nicht.
+**Namen bleiben roh (Regel 4).** Zwei der 0030-Figuren tragen Tippfehler aus der Legacy-Quelle
+— SKY-0252 „Legendary Grim Creemper" und SKY-0280 „Horn Blast Whirwind (Clear Crystal)". Beide
+werden **nicht** korrigiert: die Migrationen klassifizieren, sie redigieren nicht.
+
+## 11h. Der öffentliche Anzeigename wird abgeleitet, nicht gespeichert (2026-09-15, ADR-0068)
+
+Die Legacy-Quelle schreibt dieselbe Sache auf zwei Arten: **als Präfix** („Legendary Bash") und
+**in Klammern** („Hex (Pearl)"). Beide werden roh übernommen. `lib/catalog/variant.ts` bildet
+sie auf dieselbe Struktur ab und zeigt **eine** Form:
+
+| in der Datenbank | Basis | Form | öffentlich |
+|---|---|---|---|
+| `Legendary Bash` | Bash | Legendary | **Legendary Bash** |
+| `Crusher (Granite)` | Crusher | Granite | **Granite Crusher** |
+| `Freeze Blade (Nitro)` | Freeze Blade | Nitro | **Nitro Freeze Blade** |
+
+**Warum abgeleitet und nicht migriert.** `name` gehört dem Import und wird bei jedem Lauf
+geschrieben — ein `update ... set name` in einer Migration hielte bis zum nächsten
+`catalog:import --apply` und wäre dann still weg. Die Ableitung ist importfest, slug-stabil und
+führt keine zweite Namenswahrheit ein.
+
+**Die Regel ist bewusst konservativ:** ein führendes oder eingeklammertes Token gilt nur dann
+als Form, wenn der Rest als Figur **in derselben Serie** existiert. Das trennt die Variante vom
+Namen („Dark Sword" ist ein Trap, dessen Element „Dark" heißt).
+
+**Zwei Klammerinhalte sind ausdrücklich keine Form:**
+
+| | | |
+|---|---|---|
+| `Elite Boomer (2)` | `(2)` ist das Zweitexemplar (11b) | „2 Elite Boomer" wäre Unsinn |
+| `Spiel für Xbox One (EN)` | `(EN)` ist die Sprachfassung | keine Figur |
+
+**Anzeigename ≠ Sortierwahrheit.** Sortiert und gruppiert wird über `sortBaseName` — die
+**Basisfigur** —, nie über den Anzeigenamen. „Bash", „Blue Bash" und „Legendary Bash" stehen
+deshalb als ein Block unter *Bash*, nicht unter B, B und L. Innerhalb einer Familie ordnet der
+**Kartentyp**: `standard · special · chase · dark · legendary · prestige`.
+
+## 11i. Eon's Elite: eine Linie, drei Zeilen je Figur (2026-09-15, ADR-0069)
+
+Der Legacy-Bestand führt jede Eon's-Elite-Figur **dreimal**, und der Unterschied ist die
+**Verpackung**, nicht die Figur:
+
+| roh | bedeutet | öffentlich angezeigt | V1 sichtbar |
+|---|---|---|---|
+| `Elite Boomer` | OVP Series 1 | Eon's Elite Boomer (OVP Series 1) | nein |
+| `Elite Boomer (2)` | OVP Series 2 | Eon's Elite Boomer (OVP Series 2) | nein |
+| `Elite Boomer - ohne OVP` | lose Figur | **Eon's Elite Boomer** | ja |
+
+Keiner der drei Namen sagt das. Wörtlich gelesen ist der erste die Figur, der zweite ein
+Zweitexemplar und der dritte eine Figur mit angeschweißter deutscher Notiz — genau so wurden
+sie bis V3.6 angezeigt.
+
+**Die Sicherheitsregel ist dieselbe wie überall:** eine Zeile gilt nur dann als OVP-Ausgabe,
+wenn ihre **lose Geschwisterzeile in derselben Serie existiert**. Damit bleibt die globale Regel
+„`(2)` ist nie ein Variantenlabel" unverändert — keine andere Figur im Katalog hat eine
+`- ohne OVP`-Zeile, die die Ausnahme rechtfertigen würde.
+
+**Sortiert wird unter dem Charakter, nicht unter „E".** Alle drei Zeilen tragen
+`sortBaseName = "Boomer"` und stehen damit im Boomer-Block, obwohl der Anzeigename mit „Eon's"
+beginnt. Die Suche nach der Basisfigur ist dabei tolerant gegenüber Bindestrich und
+Leerzeichen: die Elite-Zeilen schreiben SKY-0021 „Dino-Rang" als „Dino Rang", und der deutsche
+Collator setzt „Dino Roar" zwischen beide. Gemessen am echten Katalog erzeugt diese Faltung in
+**keiner** der sechs Serien eine Kollision.
+
+**Zwei Rohdaten-Eigenheiten, beide unkorrigiert (Regel 4):** SKY-0075 heißt
+`Elite Voodood- ohne OVP` ohne Leerzeichen vor dem Strich, und die Elite-Zeilen schreiben
+„Dino Rang" statt „Dino-Rang". Beide werden von der Ableitung gelesen, keine wird umgeschrieben.
 
 ## 12. Migrationsregeln für PortalVault
 

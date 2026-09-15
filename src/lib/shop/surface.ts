@@ -18,6 +18,7 @@
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { isCollectible } from "@/lib/catalog/collectible";
 import { v1BuyableOffers, offersFor, type Offer, type OfferIndex } from "@/lib/shop/offer";
+import { compareFigures } from "@/lib/catalog/sort";
 
 /** One figure that can be bought, with the offers that make it buyable. */
 export type ShopEntry = {
@@ -66,9 +67,16 @@ export function shopEntries(
     });
   }
 
+  /*
+   * Cheapest first; equal prices fall back to the CATALOGUE's order (V3.6).
+   *
+   * This used to compare `displayName`, which was harmless while a variant
+   * was shown as "Bash (Legendary)" and wrong the moment it became "Legendary
+   * Bash": two cards of one figure would sit under B and under L. Reusing
+   * `compareFigures` costs nothing here and means the shop can never drift
+   * from the catalogue again — there is no shop-only ordering to maintain.
+   */
   return entries.sort(
-    (a, b) =>
-      a.fromPrice - b.fromPrice ||
-      a.figure.displayName.localeCompare(b.figure.displayName, "de"),
+    (a, b) => a.fromPrice - b.fromPrice || compareFigures(a.figure, b.figure),
   );
 }

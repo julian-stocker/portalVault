@@ -46,26 +46,39 @@ Die vollständige Änderungshistorie liegt in Git.
 > Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
 > Betreiber stellt den Modus auf `closed` zurück.
 
-**V3.5 — Kartentypen gebaut, Staging angewandt, Production offen (2026-09-15).** Nicht committet.
+**V3.5 — Kartentypen, ausgeliefert (2026-09-15).** Commit `b2c46dc`, Staging und Production.
 
 `skylanders.card_type` trennt, **was eine Figur ist**, von **wem sie gehört** (ADR-0067,
-`0030_card_types.sql`). Fünf persistierte Typen: `standard`, `dark`, `legendary`, `chase`,
-`prestige`. Der Backfill ist eine kuratierte Liste von 76 SKY-IDs — 21 `dark`, 25 `legendary`,
-30 `chase` — und vergibt `prestige` **null Mal**: der Typ ist unterstützt, hat ein eigenes
-Motiv und wird vom Administrator von Hand gesetzt. `chase` meint ausschließlich besondere
-Farben, Materialien und Finishes, **keine** allgemeine Special-Edition-Taxonomie.
+`0030_card_types.sql`). Fünf Typen, 76 klassifizierte Figuren, Ownership als Siegel über dem
+Basismotiv. Als Zwischenstand nach Production gegeben, damit der Betreiber auf echten Geräten
+prüfen kann.
 
-Besitz bleibt davon unberührt und schreibt nie in die Spalte. Besessene und nicht besessene
-Figuren teilen sich **dasselbe** Basismotiv; der Unterschied ist `CollectedSeal`, ein goldenes
-Siegel oben rechts auf der Bildfensterkante. Die zweite, „gesammelte" Motivvariante
-(`*.collected.*`) existiert vollständig im Code und in der Build-Pipeline, ist aber über
-`USE_COLLECTED_ARTWORK = false` zentral **abgeschaltet** — die Paare sind nicht pixelgleich.
+**V3.6 — sechster Kartentyp und kanonische Anzeigenamen (2026-09-15).** Nicht committet.
+`0031` auf **Staging angewandt**, auf Production **noch nicht**.
+
+`special` als sechster Typ (95 Figuren), Anzeigenamen abgeleitet statt migriert
+(„Crusher (Granite)" → „Granite Crusher"), `collected.png` statt SVG-Siegel, und die
+`*.collected`-Architektur verworfen statt nur abgeschaltet. ADR-0068.
+
+**V3.7 — Eon's Elite als eigener Kartentyp (2026-09-15).** Nicht committet, Migration **nicht
+angewandt**.
+
+`elite` als siebter Typ (ADR-0069, `0032_elite_card_type.sql`). Eon's Elite lag in `special` —
+42 von 95 Zeilen — und ist keine Form, sondern eine **Produktlinie** mit eigener Verpackung und
+seit V3.7 eigenem Motiv. `special` behält 53.
+
+**Verpackung ist orthogonal zum Typ.** Die Linie führt drei Zeilen je Figur: OVP Series 1, OVP
+Series 2, lose. Alle 42 sind `elite`; öffentlich sichtbar sind in V1 nur die **14 losen**, weil
+SkyIsles ausschließlich `loose` anbietet (ADR-0021). Die 28 OVP-Zeilen bleiben vollständig
+erhalten und für den Admin sichtbar. Öffentlicher Name der losen Zeile: **„Eon's Elite Boomer"**
+— abgeleitet, sortiert unter *Boomer*.
 
 | | |
 |---|---|
-| Staging | `0030` angewandt und verifiziert |
-| Production | **noch nicht angewandt** — eigene Freigabe |
-| Code | gebaut, getestet, **nicht committet, nicht gepusht** |
+| Staging | `0031` und `0032` angewandt · 14 sichtbar, 28 versteckt · visuelle QA freigegeben |
+| Production | `0031` und `0032` angewandt · 14 sichtbar, 28 versteckt · read-only verifiziert |
+| Reihenfolge | war zwingend `0031` → `0032`, so ausgeführt |
+| Code | gebaut, getestet, **noch nicht committet** |
 
 **Order-/Tracking-Hotfix gebaut, noch nicht angewandt (2026-09-11).** Nicht committet.
 

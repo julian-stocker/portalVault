@@ -155,7 +155,7 @@ describe("an owned figure is gold on both pages", () => {
 
   it("and therefore the same template, chosen in one place", () => {
     const card = code("src/components/catalog/figure-card.tsx");
-    expect(card).toContain("const template = artworkFor(figure.cardType, owned);");
+    expect(card).toContain("const template = artworkFor(figure.cardType);");
     // The collection must not reach for the artwork itself.
     expect(code(VIEW)).not.toContain("TEMPLATE");
     expect(code(VIEW)).not.toContain("CARD_ARTWORK");

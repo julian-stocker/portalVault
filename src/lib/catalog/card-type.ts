@@ -15,15 +15,30 @@
  * `collection` card type and there must not be one (see `COLLECTION_ARTWORK`).
  *
  * It is NOT the variant system either. `lib/catalog/variant.ts` decides how a
- * figure is NAMED and SORTED — "Dark Spyro" becomes "Spyro (Dark)" — and that
- * is a different question with a different answer. A figure can be
- * `card_type: "dark"` and keep exactly the name it has today. The two systems
- * are deliberately not coupled: `VARIANT_TOKENS` knows nothing about Chase,
- * and nothing here reads a name.
+ * figure is NAMED and SORTED — and that is a different question with a
+ * different answer. The two overlap in vocabulary and nowhere else: a figure
+ * can be `card_type: "dark"` and keep exactly the name it has today, and
+ * nothing here ever reads a name.
  *
- * And it is NOT a complete taxonomy of Skylanders editions. A seasonal, event
- * or marketing variant is a real thing that this list has no word for, and it
- * stays `standard` until somebody decides otherwise in the admin.
+ * WHEN SEVERAL APPLY, THE HIGHEST WINS (V3.6)
+ *
+ *     legendary  >  dark  >  special  >  standard
+ *
+ * Real figures carry more than one mark. "Legendary Chill Light Core" is a
+ * LightCore — which is a `special` form — and a Legendary. One row, one
+ * column, one value, so the order above decides: it is `legendary`, and the
+ * LightCore stays part of what the figure is called rather than of what it is
+ * printed on. `EDITION_RANK` below is that rule, written down once.
+ *
+ * `chase` is deliberately OUTSIDE that chain. It answers a different
+ * question — the same figure in a different finish — and a genuine Chase run
+ * must never be swallowed by the broader `special`.
+ *
+ * `elite` is outside it too, for a different reason. Eon's Elite is a product
+ * LINE, not a stronger edition of a figure: its members come from a curated
+ * list of 42 rows (0032), never from a name, and no figure in the catalogue
+ * is both an Eon's Elite and a Dark or a Legendary. It cannot compete, so it
+ * is not ranked against the others.
  *
  * THE SOURCE OF TRUTH IS THE COLUMN
  *
@@ -41,7 +56,15 @@
  * derived, so none of them can drift out of step with the others. The SQL
  * CHECK constraint is held against this list by a test.
  */
-export const CARD_TYPES = ["standard", "dark", "legendary", "chase", "prestige"] as const;
+export const CARD_TYPES = [
+  "standard",
+  "special",
+  "elite",
+  "dark",
+  "legendary",
+  "chase",
+  "prestige",
+] as const;
 
 export type CardType = (typeof CARD_TYPES)[number];
 
@@ -58,6 +81,8 @@ export const DEFAULT_CARD_TYPE: CardType = "standard";
  */
 export const CARD_TYPE_LABELS: Readonly<Record<CardType, string>> = {
   standard: "Standard",
+  special: "Special",
+  elite: "Elite",
   dark: "Dark",
   legendary: "Legendary",
   chase: "Chase",
@@ -65,7 +90,7 @@ export const CARD_TYPE_LABELS: Readonly<Record<CardType, string>> = {
 };
 
 /**
- * Whether a value from outside is one of the five.
+ * Whether a value from outside is one of the six.
  *
  * The CHECK constraint is the real guarantee; this is what keeps a value the
  * application does not know yet — after a later migration, against an older
@@ -79,4 +104,54 @@ export function isCardType(value: unknown): value is CardType {
 /** A row's card type, or the default when it is missing or unknown. */
 export function asCardType(value: unknown): CardType {
   return isCardType(value) ? value : DEFAULT_CARD_TYPE;
+}
+
+/**
+ * WHICH MARK WINS WHEN A FIGURE CARRIES SEVERAL (V3.6).
+ *
+ * The one place the priority from the header is machine-readable. Higher is
+ * stronger; `chase` sits deliberately outside the chain and is given the rank
+ * of the plain figure, because it is not a stronger edition of anything — it
+ * is the same edition in a different finish, and ranking it against the others
+ * would invent a comparison the domain does not make.
+ *
+ * This does NOT classify anything at runtime. `card_type` is persisted and the
+ * column is the truth (see the header); this exists so that the ONE list of
+ * figures that a migration reclassifies can be checked against the rule, and
+ * so that the catalogue can order a family deterministically.
+ */
+export const EDITION_RANK: Readonly<Record<CardType, number>> = {
+  standard: 0,
+  chase: 0,
+  /* A product line, not a stronger edition — see the header. Assigned from a
+     curated list, so it never meets the chain in the first place. */
+  elite: 0,
+  special: 1,
+  dark: 2,
+  legendary: 3,
+  prestige: 4,
+};
+
+/**
+ * The order a base figure's family is shown in (V3.6, operator's rule).
+ *
+ * Not `EDITION_RANK`: that answers "which mark is stronger", this answers
+ * "what does a collector want to see first", and the operator put `chase`
+ * between `special` and `dark` rather than beside the plain figure.
+ */
+export const FAMILY_ORDER: readonly CardType[] = [
+  "standard",
+  "special",
+  /* Eon's Elite sits with the figure it is a version OF: after the plain
+     figure and the broader special forms, before the finishes and editions. */
+  "elite",
+  "chase",
+  "dark",
+  "legendary",
+  "prestige",
+];
+
+/** Where a card type sits in its family. Lower comes first. */
+export function familyRank(cardType: CardType): number {
+  return FAMILY_ORDER.indexOf(cardType);
 }

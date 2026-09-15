@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Offer, OfferIndex } from "@/lib/shop/offer";
@@ -147,5 +148,26 @@ describe("shopEntries", () => {
     const keys = new Set(Object.keys(entry.offers[0]));
     expect(keys).toEqual(new Set(["skyId", "condition", "price", "available"]));
     expect(Object.keys(entry)).toEqual(["figure", "offers", "fromPrice"]);
+  });
+});
+
+/**
+ * The shop reads the catalogue's order (V3.6).
+ *
+ * It used to compare `displayName`, which was harmless while a variant read
+ * "Bash (Legendary)" and wrong the moment it became "Legendary Bash": two
+ * cards of one figure would sit under B and under L.
+ */
+describe("equal prices fall back to the catalogue order", () => {
+  it("uses compareFigures, not the display name", () => {
+    const source = readFileSync("src/lib/shop/surface.ts", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(source).toContain("compareFigures(a.figure, b.figure)");
+    expect(source).not.toContain("displayName.localeCompare");
+    expect(source).not.toContain("localeCompare");
+    // One ordering for the whole site: it imports the catalogue's, it does
+    // not restate it.
+    expect(source).toContain('from "@/lib/catalog/sort"');
   });
 });

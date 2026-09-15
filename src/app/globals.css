@@ -332,6 +332,26 @@
      behind the figure — see figure-card.tsx. */
   --template-window: #ffffff;
 
+  /* THE TRADE ROW'S OWN TWO INKS (V3.6).
+
+     The row at the foot of a card carries either an offer or the sentence
+     that there is none, and until V3.6 both colours were literals compiled
+     into `components/shop/offer-link.tsx`. On the four light artworks that
+     was right. On `dark` and `legendary` it was not: "Aktuell kein Angebot"
+     is a mid grey, and a mid grey on near-black stock is not quiet, it is
+     gone.
+
+     Tokens, so the card root can swap them the same way it already swaps
+     `--template-ink` — one mechanism for "which ink is legible on which
+     artwork", not two. The `-on-dark` pair is measured against the darker of
+     the two stocks: 12.6:1 for the offer and 5.9:1 for the quiet state, which
+     keeps the quiet one clearly the weaker of the pair while leaving it
+     comfortably above the 4.5:1 a body text needs. */
+  --trade-ink: #11161c;
+  --trade-ink-quiet: #474f5b;
+  --trade-ink-on-dark: #eceef1;
+  --trade-ink-quiet-on-dark: #a2abb8;
+
   /* --- WORLD · decorative, never a state -------------------------------
      The forged edges of the header and footer, and the warm line inside
      them. Gold here is the light of the sky catching a struck plate — it
@@ -502,6 +522,8 @@
   --color-template-ink: var(--template-ink);
   --color-template-ink-muted: var(--template-ink-muted);
   --color-template-window: var(--template-window);
+  --color-trade-ink: var(--trade-ink);
+  --color-trade-ink-quiet: var(--trade-ink-quiet);
   --color-world-edge: var(--world-edge);
   --color-world-sheen: var(--world-sheen);
   --color-brand: var(--brand);

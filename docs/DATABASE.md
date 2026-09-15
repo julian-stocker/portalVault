@@ -152,7 +152,7 @@ syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `
 | `is_active` | `boolean not null default true` | statt Löschen; **import-owned**, bei jedem Lauf `true` |
 | `catalog_visible` | `boolean not null default true` | redaktionelle Sichtbarkeit (ADR-0039), **admin-owned**, öffentlich |
 | `display_name_override` | `text` **nullbar** | öffentlicher Name statt `name`; nicht leer, wenn gesetzt; öffentlich |
-| `card_type` | `text not null default 'standard'` | auf welches Kartenmotiv die Figur gedruckt wird (0030); CHECK `standard \| dark \| legendary \| chase \| prestige`; **admin-owned**, öffentlich |
+| `card_type` | `text not null default 'standard'` | auf welches Kartenmotiv die Figur gedruckt wird (0030, sechster Wert in 0031, siebter in 0032); CHECK `standard \| special \| elite \| dark \| legendary \| chase \| prestige`; **admin-owned**, öffentlich |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
 Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)` ·
@@ -165,17 +165,65 @@ gleich aus. Besitz ist dagegen ein Zustand *pro Betrachter* und wird beim Render
 `collection`. Ebenso wenig ist es das Variantensystem: `card_type` ändert keinen Namen, keinen
 Slug, keine Sortierung und keine Charakterzuordnung.
 
-Der Backfill in 0030 ist eine **Liste von 76 SKY-IDs**, kein Namensmuster: 21 `dark`,
-25 `legendary`, 30 `chase`, **0 `prestige`**. `prestige` ist ein gültiger Typ mit eigenem
-Motiv, den der Admin setzen kann — automatisch klassifiziert wird dafür nichts. `chase` meint
-ausschließlich **besondere Farben, Materialien und Finishes** einer bestehenden Figur (Crystal,
-Pearl, Jade, Glow, Granite, Scarlet, Molten, Bronze, Metallic, Golden) und ist **keine
-allgemeine Special-Edition-Taxonomie**; saisonale und Event-Editionen bleiben `standard`.
+**Bei Mehrfachbelegung gewinnt die höchste Stufe (0031):**
+
+```
+legendary  >  dark  >  special  >  standard
+```
+
+Eine Zeile, eine Spalte, ein Wert. SKY-0130 „Legendary Chill Light Core" ist ein LightCore
+*und* ein Legendary und bleibt `legendary`; das LightCore überlebt im Namen der Figur, nicht im
+Kartenmotiv. Es ist die einzige Figur im Bestand, bei der die Regel heute überhaupt etwas zu
+entscheiden hat. Maschinenlesbar als `EDITION_RANK` in `lib/catalog/card-type.ts`.
+
+**`chase` und `elite` stehen bewusst außerhalb dieser Kette.** `chase` beantwortet eine andere
+Frage — dieselbe Figur in einer anderen Ausführung. `elite` ist eine **Produktlinie**: seine 42
+Mitglieder kommen aus einer kuratierten Liste (0032), nie aus einem Namen, und keine Figur im
+Katalog ist zugleich Eon's Elite und Dark oder Legendary. Beide treffen die Kette nie.
+
+**`elite` ist nicht `special` (0032).** Eon's Elite lag bis 0032 in `special` — 42 von 95
+Zeilen, also fast die halbe Kategorie. Es gehört nicht dazu: LightCore ist eine Bauweise,
+Granite eine Ausführung, Eon's Elite eine eigene Produktlinie mit eigener Verpackung und seit
+V3.7 eigenem Motiv. `special` behält die 53, die wirklich eine *Form* von etwas sind.
+
+**Verpackung ist eine andere Dimension als Edition.** Die Linie hat **drei Zeilen je Figur** —
+OVP Series 1, OVP Series 2, lose — und alle drei sind `elite`. Welche davon öffentlich sichtbar
+ist, beantwortet `catalog_visible`: in V1 nur die lose Zeile, weil SkyIsles öffentlich
+ausschließlich `loose` unterstützt. Die 28 OVP-Zeilen bleiben vollständig erhalten und für den
+Admin sichtbar.
+
+**Die Backfills sind Listen, keine Namensmuster.** 0030 klassifizierte 76 SKY-IDs (21 `dark`,
+25 `legendary`, 30 `chase`), 0031 weitere 95 als `special`. `prestige` bleibt bei **0**: ein
+gültiger Typ mit eigenem Motiv, den der Admin setzen kann — automatisch klassifiziert wird
+dafür nichts.
+
+**`special`** meint eine zusätzliche offizielle **Form oder Edition** einer Basisfigur
+innerhalb derselben Serie: LightCore, Eon's Elite, Nitro, Blue, Power Blue, Mystical, Granite,
+die Saison- und Event-Ausgaben und die benannten Einzelformen. **`chase`** meint ausschließlich
+besondere **Farben und Materialien** — Crystal, Pearl, Jade, Glow, Scarlet, Molten, Bronze,
+Metallic, Golden. Granite wechselte in 0031 von `chase` nach `special`; es ist die einzige
+Figur, die zwischen den beiden bewegt wurde.
+
+Die Verteilung nach 0031: `standard` 432 · `special` 95 · `dark` 21 · `legendary` 25 ·
+`chase` 29 · `prestige` 0. Nach 0032 wandern 42 davon nach `elite`: `standard` 432 ·
+`special` **53** · `elite` **42** · `dark` 21 · `legendary` 25 · `chase` 29 · `prestige` 0.
+
+**Reihenfolge der Migrationen ist zwingend: 0031, dann 0032.** 0032 ist auf
+`where card_type = 'special'` gegattert — auf einer Datenbank ohne 0031 trifft es nichts und
+schreibt nichts. Beide sind seit 2026-09-15 auf Staging und Production angewandt.
+
+**Welche Eon's-Elite-Zeile öffentlich ist, entscheidet `catalog_visible`, nicht `card_type`.**
+Alle 42 sind `elite`; öffentlich sichtbar sind die **14 losen**, weil V1 ausschließlich `loose`
+anbietet (ADR-0021). Die 28 OVP-Zeilen bleiben vollständig erhalten und für den Admin sichtbar.
+Diese Sichtbarkeit ist eine redaktionelle Entscheidung des Administrators und wird **von keiner
+Migration geschrieben**.
 
 Gesetzt wird die Spalte über `admin_set_card_type(p_sky_id text, p_card_type text)` —
 `security definer`, `search_path = ''`, prüft `is_shop_admin()` vor dem `update`, schreibt
 **nur** `card_type` und nicht `updated_at`. Das Vokabular steht einmal im CHECK; die Funktion
-wiederholt es nicht.
+wiederholt es nicht, weshalb 0031 sie auch nicht anfassen musste. Der Trigger
+`skylanders_set_updated_at` (0001) setzt `updated_at` allerdings bei **jedem** UPDATE auf der
+Tabelle, unabhängig davon, welche Spalten ein Statement nennt.
 
 **Drei Sichtbarkeiten, drei Spalten — nie vermischen (ADR-0039):**
 

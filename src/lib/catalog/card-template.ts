@@ -131,6 +131,27 @@ export const GRID_AREAS = ROWS.map((r) => `"${r.area}"`).join(" ");
  * `px-[${INSET.image}]` would produce no CSS. An inline style carries the
  * value itself, which is the same remedy the commerce surface uses.
  */
+/**
+ * HOW FAR THE FIGURE'S NAME SITS BELOW THE CENTRE OF ITS ROW (V3.6).
+ *
+ * The name is centred in a row 10.48 % of the card tall. A two-line name —
+ * "Elite Boomer - ohne OVP" is the one that showed it — very nearly fills
+ * that row, so its first line ends up hard against the frame under the image
+ * window with no air at all.
+ *
+ * A TRANSFORM, NOT PADDING. Padding would shrink a box the long names already
+ * fill and could clip the second line; a translate moves what is drawn and
+ * nothing that is measured. What it moves into is the top of the market row,
+ * which is empty by construction — that row is `justify-end`, so its content
+ * sits at its foot.
+ *
+ * Deliberately small. 2 % of the card's width is about four pixels on a
+ * phone's two-column grid, which is the "kleines Stück" this was asked for
+ * and not a layout change. ONE value for all six card types; this is the only
+ * number to touch if it should sit lower still.
+ */
+export const NAME_DROP = "2cqw";
+
 export const INSET = {
   /** The window. */
   image: "10.8%",
@@ -158,24 +179,38 @@ export const INSET = {
 /*
  * MEASURED, NOT CONVERTED (V3.5).
  *
- * The alpha channel of all six artworks was read. Their windows agree
- * horizontally to within a pixel or two — x 83…85 to 909…923 — and disagree
- * at the top, because each one has an ornamented head that opens into the
- * full width at a different height:
+ * MEASURED TWICE, AND THE SECOND TIME PROPERLY (V3.6).
  *
- *   card 125   dark 134   legendary 146   chase 153   prestige/collection 253
+ * The first reading walked the artworks' CENTRE AXIS and found the window at
+ * y 125…791 — comfortably inside a fill that started at 116. The browser
+ * disagreed: a thin transparent strip showed along the top of the window on
+ * five of the six cards.
  *
- * The bottom agrees again: 773…791.
+ * The centre axis is not where the window is highest. Every artwork has an
+ * ornamented head — a point or diamond over the middle of the frame — and the
+ * hole follows it upward. Read column by column instead of down one line, the
+ *true extrema are:
  *
- * This rectangle is the UNION plus a small overscan, not the intersection.
- * The artwork sits ON TOP of the image and masks it, so a fill that is
- * slightly too large costs nothing and leaves no seam — which is exactly what
- * the old value did (it was ~11 px wider than silver.png's actual hole).
- * Taking the intersection instead would shrink the picture on four artworks
- * to accommodate the two with the tallest ornament, and those two are meant
- * to cover more of the figure.
+ *   card 99   chase 99   special 103   dark 103   legendary 103   prestige 141
+ *
+ * So the old top of 116 cut 17 px off the deepest notch, and that notch was
+ * exactly the strip that showed. Horizontally and at the foot the old values
+ * were never in doubt: x 83…923 against a fill of 76…930, and the hole ends
+ * at 819 against a fill reaching 916.
+ *
+ * THIS RECTANGLE IS THE UNION PLUS OVERSCAN, NOT THE INTERSECTION. The
+ * artwork sits ON TOP of the fill and masks it, so a fill that is too large
+ * costs nothing and leaves no seam; a fill that is too small leaves a hole in
+ * the card. The top is now 80 — 19 px above the deepest notch, and 30 px
+ * below the row where `prestige`'s frame stops being opaque across the whole
+ * band, which is the point past which white would start showing OUTSIDE the
+ * card. Both margins were measured, not guessed.
+ *
+ * Taking the intersection instead would shrink the picture on five artworks
+ * to accommodate the one with the tallest ornament, and that one is meant to
+ * cover more of the figure.
  */
-export const WINDOW_FILL = zone(76, 930, 116, 800);
+export const WINDOW_FILL = zone(76, 930, 80, 836);
 
 /**
  * Layout debugging.
@@ -187,97 +222,64 @@ export const WINDOW_FILL = zone(76, 930, 116, 800);
  */
 export const LAYOUT_DEBUG = false;
 
-/**
- * The template files. `sm` is for a phone showing two columns.
- *
- * Named by state rather than by colour at the call site — `silver` and `gold`
- * are what the files are called, but what decides is possession.
- */
-export const TEMPLATE = {
-  owned: { src: "/images/cards/gold.webp", small: "/images/cards/gold-sm.webp" },
-  plain: { src: "/images/cards/silver.webp", small: "/images/cards/silver-sm.webp" },
-} as const;
-
 /** One artwork: the 640 px file and the 400 px one beside it. */
 export type CardArtwork = { src: string; small: string };
 
-/** The two cards a figure of one type can be printed on. */
-export type CardArtworkPair = {
-  /** Nobody owns it. */
-  plain: CardArtwork;
-  /** Somebody does. */
-  collected: CardArtwork;
-};
-
-const pair = (name: string): CardArtworkPair => ({
-  plain: { src: `/images/cards/${name}.webp`, small: `/images/cards/${name}-sm.webp` },
-  collected: {
-    src: `/images/cards/${name}.collected.webp`,
-    small: `/images/cards/${name}.collected-sm.webp`,
-  },
+const art = (name: string): CardArtwork => ({
+  src: `/images/cards/${name}.webp`,
+  small: `/images/cards/${name}-sm.webp`,
 });
 
 /**
- * WHICH CARD A FIGURE IS PRINTED ON (V3.5, revised in fix round 1).
+ * WHICH CARD A FIGURE IS PRINTED ON (V3.6).
  *
- * TWO AXES, STILL TWO. `card_type` says what the collectible is and never
- * changes; ownership picks which of that type's two cards is drawn. The
- * earlier version had one ownership artwork for all five types, which made
- * every owned figure look the same whatever it was — a Legendary in somebody's
- * collection stopped being visibly Legendary. Each type keeps its own identity
- * now, owned or not.
+ * One artwork per card type. That is the whole mapping now.
  *
- * Typed as a total `Record`, so a sixth card type cannot be added to
- * `CARD_TYPES` without both of its artworks: the compiler asks for them.
+ * WHAT THIS REPLACED, AND WHY. Until V3.6 every type carried a PAIR — the
+ * card, and a second "collected" card drawn for owners. The pairs were built,
+ * shipped, and never used: their frames and windows sat a few pixels apart, so
+ * collecting a figure made the card and the figure inside it appear to jump,
+ * and a state change must not move the thing it is a state of. The operator
+ * abandoned the idea and removed the source PNGs; the switch that held it back
+ * (`USE_COLLECTED_ARTWORK`) is gone with it, because a flag nobody will ever
+ * set is just a second state to reason about.
  *
- * `prestige.collected` exists and is, today, a byte-identical copy of
- * `prestige.png` — the operator's placeholder until the real artwork is
- * drawn. It is listed here like any other pair rather than being special-cased
- * in code: an owned Prestige figure therefore looks like an unowned one for
- * now, which is the intended interim state, and replacing the source PNG plus
- * one `npm run cards:build` is the entire migration to the final artwork. No
- * fallback branch to find and delete later.
+ * OWNERSHIP IS NOW FULLY ORTHOGONAL. It draws `OWNERSHIP_OVERLAY` on top of
+ * whichever card this returns and changes nothing underneath — see
+ * `components/catalog/collected-seal.tsx`. There is no owned/unowned artwork,
+ * no `collection` card type, and no file that means "mine".
  *
- * There is no `collection` entry and no collection artwork any more. Ownership
- * was never a card type and now has no file of its own either.
+ * Typed as a total `Record`, so a seventh card type cannot join `CARD_TYPES`
+ * without its artwork: the compiler asks for it.
  */
-export const CARD_ARTWORK: Readonly<Record<CardType, CardArtworkPair>> = {
-  standard: pair("card"),
-  dark: pair("dark"),
-  legendary: pair("legendary"),
-  chase: pair("chase"),
-  prestige: pair("prestige"),
+export const CARD_ARTWORK: Readonly<Record<CardType, CardArtwork>> = {
+  standard: art("card"),
+  special: art("special"),
+  elite: art("elite"),
+  dark: art("dark"),
+  legendary: art("legendary"),
+  chase: art("chase"),
+  prestige: art("prestige"),
 };
 
 /**
- * WHETHER AN OWNED FIGURE GETS ITS OWN ARTWORK — currently: no.
+ * The mark drawn over an owned figure's card.
  *
- * The five `.collected` artworks exist and are built, and `CARD_ARTWORK`
- * carries both halves of every pair. They are not drawn, because the two
- * halves are not pixel-for-pixel congruent: the window and the frame sit a
- * few pixels apart, so collecting a figure made the card and the figure
- * inside it appear to jump. A state change must not move the thing it is a
- * state of.
- *
- * Ownership is shown by an overlay on the plain card instead — same symbol,
- * same place, same size on all five types — so the artwork underneath never
- * changes and nothing shifts.
- *
- * This is a switch, not a deletion. The pairs stay mapped and stay built; the
- * day the artworks line up, this becomes `true` and nothing else has to be
- * rebuilt or remembered.
+ * Not a card type and not in `CARD_ARTWORK`: it is square where the cards are
+ * 1007 × 1562, it is drawn on top rather than underneath, and it is the same
+ * file for every type. Keeping it out of that record is what stops it from
+ * ever being reachable as `artworkFor(...)`.
  */
-export const USE_COLLECTED_ARTWORK = false;
+export const OWNERSHIP_OVERLAY: CardArtwork = art("collected");
 
 /**
- * The card a figure is printed on, given its type and whether it is owned.
+ * The card a figure is printed on.
  *
- * One place, so the switch above cannot be half-applied: no component asks
- * the question a second time and no caller reaches into a pair directly.
+ * Takes the type and nothing else. Ownership used to be a second parameter
+ * here; it is not a property of the card any more.
  */
-export function artworkFor(cardType: CardType, owned: boolean): CardArtwork {
-  const artwork = CARD_ARTWORK[cardType];
-  return owned && USE_COLLECTED_ARTWORK ? artwork.collected : artwork.plain;
+export function artworkFor(cardType: CardType): CardArtwork {
+  return CARD_ARTWORK[cardType];
 }
 
 /**
@@ -307,9 +309,27 @@ export type ArtworkTone = "light" | "dark";
 
 export const ARTWORK_TONE: Readonly<Record<CardType, ArtworkTone>> = {
   standard: "light",
+  special: "light",
+  /* Measured on the artwork the operator delivered: the text area's mean
+     brightness is 210, between `prestige` (205) and `special` (213). */
+  elite: "light",
   dark: "dark",
   legendary: "dark",
-  chase: "dark",
+  /*
+   * LIGHT since V3.6, and it was wrong before.
+   *
+   * `chase.png` is a crystal artwork: bright, busy, and heavily textured. It
+   * was entered as "dark" in V3.5 on the strength of how it looks rather than
+   * what it measures, and the measurement disagrees — the mean brightness of
+   * its text area is 225, the brightest of the six after `card` at 222. The
+   * near-white on-dark ink was therefore painted onto near-white paper, and
+   * the name, the market value and the price were close to invisible.
+   *
+   * The texture is what made this look like a judgement call. It is not: the
+   * ink has to be legible against the surface it sits on, and that surface is
+   * light.
+   */
+  chase: "light",
   prestige: "light",
 };
 
@@ -317,7 +337,7 @@ export const ARTWORK_TONE: Readonly<Record<CardType, ArtworkTone>> = {
  * One tone per card type, for both of its cards.
  *
  * A collected artwork is the same card with an ownership treatment on it, not
- * a different design — `dark.collected.png` is still dark stock. The tone is
+ * a different design. The tone is
  * therefore a property of the type, not of the pair, and there is no second
  * table to keep in step. If a collected artwork ever needs the other ink, that
  * is a finding for the browser and a deliberate change here, not something to

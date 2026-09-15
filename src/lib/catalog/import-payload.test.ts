@@ -140,3 +140,39 @@ describe("the catalog import payload", () => {
     expect(SOURCE).toContain('onConflict: "sky_id"');
   });
 });
+
+/**
+ * What V3.6 added to the curated side of the line.
+ *
+ * `card_type` was already out of the payload (0030). The public display name
+ * joined it in a different way: it is not a column at all. It is derived from
+ * `name` at read time, so there is nothing for an import to overwrite — which
+ * is precisely why V3.6 did not migrate `name`.
+ */
+describe("the V3.6 naming change cannot be undone by an import", () => {
+  const payload = readFileSync("tools/import-catalog.mts", "utf8");
+
+  it("writes no display name, because there is no display name column", () => {
+    expect(payload).not.toContain("display_name_override");
+    expect(payload).not.toContain("displayName");
+    expect(payload).not.toContain("card_type");
+  });
+
+  it("leaves the derivation entirely outside the import", () => {
+    // The import knows nothing about variants: no token list, no parser, no
+    // classification. A heuristic that runs on every import is a heuristic
+    // that eventually overwrites a decision somebody made.
+    expect(payload).not.toContain("parseVariant");
+    expect(payload).not.toContain("VARIANT_TOKENS");
+    expect(payload).not.toContain("displayNameFor");
+  });
+
+  it("starts a new figure on standard, from the column default", () => {
+    const migration = readFileSync("supabase/migrations/0030_card_types.sql", "utf8");
+    expect(migration).toContain("card_type text not null default 'standard'");
+    // And 0031 does not change that default while adding the sixth value.
+    const later = readFileSync("supabase/migrations/0031_special_card_type.sql", "utf8");
+    expect(later).not.toContain("set default");
+    expect(later).not.toContain("drop default");
+  });
+});

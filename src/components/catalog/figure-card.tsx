@@ -41,6 +41,7 @@ import {
   GRID_AREAS,
   GRID_ROWS,
   INSET,
+  NAME_DROP,
   ARTWORK_TONE,
   artworkFor,
   LAYOUT_DEBUG,
@@ -147,27 +148,24 @@ export function FigureCard({
   const owned = marksOwnership(ownership, collected);
 
   /*
-   * WHICH CARD THIS FIGURE IS PRINTED ON (V3.5).
+   * WHICH CARD THIS FIGURE IS PRINTED ON (V3.6).
    *
-   * Two independent facts meet here, and neither writes to the other.
-   * `figure.cardType` is editorial and permanent — what the collectible IS.
-   * `owned` is this viewer's collection state. It decides what is drawn ON
-   * the card, never which card — and never the type, which nothing here
-   * writes.
+   * The type decides the card, and that is the end of it. `figure.cardType`
+   * is editorial and permanent — what the collectible IS — and nothing here
+   * writes to it.
    *
-   * `artworkFor()` holds the whole rule, including the switch that currently
-   * keeps the `.collected` artworks out of use: their frames are a few pixels
-   * off their plain counterparts, and collecting a figure must not make the
-   * figure appear to move.
+   * `owned` no longer takes part. It used to pick between a pair of artworks;
+   * since V3.6 it only decides whether `CollectedSeal` is drawn ON TOP, so the
+   * card underneath is identical whoever is looking and nothing moves when a
+   * figure is collected.
    *
    * `marksOwnership` stays exactly the boundary it already was. A surface
-   * that asks for `ownership="showcase"` — the figure page's siblings — shows
-   * the card type and never the collection artwork, which is the same rule
-   * that kept the gold template off those cards before.
+   * that asks for `ownership="showcase"` — the figure page's siblings — never
+   * marks anything as owned, which is the same rule that kept the gold
+   * template off those cards before.
    */
-  const template = artworkFor(figure.cardType, owned);
-  /* One tone per card type, for both of its cards: a collected artwork is the
-     same stock with an ownership treatment on it, not a different design. */
+  const template = artworkFor(figure.cardType);
+  /* One tone per card type. It follows the artwork, not the viewer. */
   const tone = ARTWORK_TONE[figure.cardType];
   const picture = imageSrc(figure);
 
@@ -273,16 +271,29 @@ export function FigureCard({
         <Slot area="pad" />
         <Slot area="sep" />
 
-        <Slot area="name" className="flex items-center justify-center" style={{ paddingInline: INSET.text }}>
+        <Slot area="name" className="flex items-center justify-center" style={{ paddingInline: INSET.text, transform: `translateY(${NAME_DROP})` }}>
           {nameSlot ?? (
-            /* The base name: the finish is on the seal over the window, so
-               "Bash" rather than "Bash (Legendary)". `title` keeps the full
-               spelling reachable. */
+            /*
+             * THE NAME A VISITOR READS (V3.6).
+             *
+             * `displayName`, not `sortBaseName`. This showed the base name
+             * until V3.6 — "Bash" for "Bash (Legendary)" — because the label
+             * was already on the badge over the window and the two together
+             * read as a stutter. Then the display rule turned round: a variant
+             * is now called "Legendary Bash", the label is part of the name
+             * rather than a suffix hanging off it, and showing only "Bash"
+             * stopped being a tidier spelling of the same thing and started
+             * being the wrong figure. A Granite Crusher is not a Crusher.
+             *
+             * `sortBaseName` keeps its job and only its job: it decides where
+             * the card SITS, never what it SAYS. The two are deliberately
+             * different values on `CatalogFigure` and must not be swapped.
+             */
             <span
               className="line-clamp-2 text-center text-[clamp(9px,6.2cqw,15px)] leading-[1.15] font-semibold text-template-ink"
               title={figure.displayName}
             >
-              {figure.sortBaseName}
+              {figure.displayName}
             </span>
           )}
         </Slot>
@@ -400,6 +411,11 @@ export function FigureCard({
               aspectRatio: CARD_ASPECT,
               "--template-ink": "var(--template-ink-on-dark)",
               "--template-ink-muted": "var(--template-ink-muted-on-dark)",
+              /* The trade row sits on the same stock and needs the same
+                 treatment — see `--trade-ink` in globals.css. One swap, four
+                 variables, no second mechanism. */
+              "--trade-ink": "var(--trade-ink-on-dark)",
+              "--trade-ink-quiet": "var(--trade-ink-quiet-on-dark)",
             } as CSSProperties)
           : { aspectRatio: CARD_ASPECT }
       }

@@ -86,9 +86,22 @@ import { de } from "@/lib/i18n/de";
  * afford to have go missing.
  *
  * Weight, size and spacing stay in Tailwind. Only the two colours moved.
+ *
+ * WHY THEY ARE NOW VARIABLES AND STILL INLINE (V3.6)
+ *
+ * The literals were correct on the four light artworks and wrong on the two
+ * dark ones: `#474f5b` on `dark.png` left "Aktuell kein Angebot" barely
+ * visible. The card root already swaps `--template-ink` when it draws on dark
+ * stock, so these join that swap rather than growing a mechanism of their own.
+ *
+ * Still inline, for exactly the reason above: an inline style outranks every
+ * stylesheet rule that is not `!important`, and `var()` inside one resolves
+ * against the ancestor that set it. The fallback is the old literal, so the
+ * component keeps working wherever no card defines the variable — which is
+ * the case in `collection-action.tsx`, the one other consumer.
  */
-export const INK_OFFER = "#11161c";
-export const INK_QUIET = "#474f5b";
+export const INK_OFFER = "var(--trade-ink, #11161c)";
+export const INK_QUIET = "var(--trade-ink-quiet, #474f5b)";
 
 export function OfferLink({
   offers,

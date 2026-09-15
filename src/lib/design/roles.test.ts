@@ -567,22 +567,33 @@ describe("gold no longer works as a state or an action", () => {
     expect(link).not.toMatch(/bg-(own|trade|accent)/);
   });
 
-  it("the ownership card is still gold — now as artwork", () => {
+  it("ownership is an overlay now, and gold is still nowhere in the CSS", () => {
     /*
-     * V3.3 replaced the CSS surface with two finished templates. The language
-     * is unchanged and the assertion moved with it: an owned figure is drawn
-     * on `gold.png`, and gold appears nowhere else on the tile.
+     * Three generations of one idea. V3.3 replaced a CSS gold surface with a
+     * finished `gold.png`; V3.5 gave every card type its own owned artwork;
+     * V3.6 dropped owned artwork altogether — the pairs were never
+     * pixel-congruent and the card appeared to jump when a figure was
+     * collected. What survives is the language: gold means possession, it is
+     * drawn rather than styled, and it appears nowhere else on the tile.
      */
-    const template = readFileSync("src/lib/catalog/card-template.ts", "utf8");
-    // Fix round 1: every card type has its own owned artwork; there is no
-    // single ownership card any more.
-    expect(template).toContain("collected: {");
-    expect(template).toContain("${name}.collected.webp");
+    /* Prose removed: the file explains at length what it used to do, naming
+       the very symbols asserted against below. */
+    const template = readFileSync("src/lib/catalog/card-template.ts", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(template).toContain("export const OWNERSHIP_OVERLAY");
+    expect(template).toContain("/images/cards/${name}.webp");
+    // The pair shape, and the flag that held half of it back, are gone.
+    expect(template).not.toContain("collected: {");
+    expect(template).not.toContain("${name}.collected.webp");
+    expect(template).not.toContain("USE_COLLECTED_ARTWORK");
+
     const card = readFileSync("src/components/catalog/figure-card.tsx", "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
       .replace(/^\s*\/\/.*$/gm, "");
-    expect(card).toContain("const template = artworkFor(figure.cardType, owned);");
+    expect(card).toContain("const template = artworkFor(figure.cardType);");
+    expect(card).toContain("{owned ? <CollectedSeal /> : null}");
     expect(card).not.toMatch(/shadow-gold|own-ground|own-frame/);
   });
 
