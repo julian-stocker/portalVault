@@ -58,6 +58,57 @@ async function removeObject(path: string): Promise<void> {
   await supabase.storage.from(CATALOG_BUCKET).remove([path]);
 }
 
+/**
+ * The storage half, on its own (V3.8).
+ *
+ * `uploadFigureImage` does two things: it writes bytes into the bucket, and
+ * it points the figure's row at them. The central edit dialog collects every
+ * change and saves once, so it needs the first without the second — a picture
+ * chosen but not yet confirmed is a draft like any other field.
+ *
+ * TWO STEPS, AND THEY ARE NOT ONE. The object exists in storage the moment
+ * this returns; the FIGURE only shows it once `setImageOverride` runs, which
+ * the dialog does when the operator saves. What that costs is an orphan: a
+ * file uploaded and then discarded stays in the bucket, unreferenced. That is
+ * the trade this file already made in the other direction — its header says
+ * "an orphan is cheaper than a lost picture" — and it stays cheap: the object
+ * is content-addressed, so re-uploading the same picture reuses it rather
+ * than piling up copies.
+ *
+ * Every check is the same one `uploadFigureImage` makes, because it is the
+ * same code path: administrator, real size, real bytes. None of it is the
+ * boundary — the storage policy asks `is_shop_admin()` too.
+ */
+export async function stageFigureImage(formData: FormData): Promise<ImageResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const skyId = String(formData.get("skyId") ?? "");
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, message: de.admin.imageFailed };
+  }
+  if (file.size > MAX_IMAGE_BYTES) return { ok: false, message: de.admin.imageTooLarge };
+
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const kind = sniffImage(bytes);
+  if (!kind) return { ok: false, message: de.admin.imageWrongType };
+
+  const path = imagePathFor(skyId, bytes, kind);
+  const supabase = await createClient();
+  const upload = await supabase.storage.from(CATALOG_BUCKET).upload(path, bytes, {
+    contentType: kind.mime,
+    upsert: true,
+  });
+  if (upload.error) return { ok: false, message: de.admin.imageFailed };
+
+  /* No `setImageOverride` here, and no cleanup of the previous object: the
+     figure still points at whatever it pointed at, and it is not this
+     function's business to take that away. */
+  return { ok: true, path };
+}
+
 export async function uploadFigureImage(formData: FormData): Promise<ImageResult> {
   if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
 

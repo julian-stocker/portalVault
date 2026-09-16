@@ -11,6 +11,8 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { AdminFigureModal } from "@/components/admin/figure-modal";
+import type { AdminFigureDraft } from "@/lib/admin/figure-draft";
 import { QuickView } from "@/components/catalog/quick-view";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
@@ -194,6 +196,20 @@ export function CatalogView({
    * address is the figure's own page, offered in the dialog.
    */
   const [quickViewSkyId, setQuickViewSkyId] = useState<string | null>(null);
+  /*
+   * The administrator's editor (V3.8). A separate piece of state from the
+   * quick view on purpose: the two dialogs answer different questions, only
+   * one of them can be open, and a shared "which dialog" value would let a
+   * future change open the buying panel for an operator.
+   */
+  const [editSkyId, setEditSkyId] = useState<string | null>(null);
+  /*
+   * What a save changed, held here until the server's revalidation catches
+   * up. `revalidatePath` reaches this component through a new render; this
+   * makes the card correct in the same frame, which is what the operator is
+   * looking at.
+   */
+  const [edited, setEdited] = useState<Record<string, AdminFigureDraft>>({});
 
   function onVisibilityChange(skyId: string, visible: boolean) {
     setVisibility((current) => new Map(current).set(skyId, visible));
@@ -313,7 +329,9 @@ export function CatalogView({
   }
 
   /** One card, in whichever mode the visitor is in. */
-  function card(figure: CatalogFigure) {
+  function card(original: CatalogFigure) {
+    /* What the editor has already saved, applied before the card draws. */
+    const figure = withEdits(original);
     return (
       <CatalogCard
         key={figure.skyId}
@@ -324,11 +342,29 @@ export function CatalogView({
         highlighted={highlightSkyId === figure.skyId}
         admin={admin}
         visible={isVisible(figure)}
-        onVisibilityChange={onVisibilityChange}
         offers={offers[figure.skyId] ?? EMPTY_OFFERS}
         onOpenOffers={() => setQuickViewSkyId(figure.skyId)}
+        onEdit={() => setEditSkyId(figure.skyId)}
       />
     );
+  }
+
+  /**
+   * A figure with whatever the editor has already saved applied.
+   *
+   * Only the two fields a card actually draws — the card type decides the
+   * artwork, the override decides the name. Visibility has its own path
+   * (`isVisible`), and the note and image path are not on a card.
+   */
+  function withEdits(figure: CatalogFigure): CatalogFigure {
+    const saved = edited[figure.skyId];
+    if (!saved) return figure;
+    return {
+      ...figure,
+      cardType: saved.cardType,
+      displayName: saved.displayNameOverride ?? figure.displayName,
+      displayNameOverride: saved.displayNameOverride,
+    };
   }
 
   return (
@@ -539,6 +575,34 @@ export function CatalogView({
         guest={!signedIn}
         onClose={() => setQuickViewSkyId(null)}
       />
+
+      {/*
+       * The administrator's editor — one instance for the whole grid, for the
+       * same reason the quick view is one: a dialog per card is 561 dialogs.
+       *
+       * Rendered only in admin mode, so nothing about it reaches a collector's
+       * bundle path through this branch, and it holds the figure by id so a
+       * save can redraw the card underneath it without closing it.
+       */}
+      {admin ? (
+        <AdminFigureModal
+          /* A different figure is a different dialog: remounting is what
+             gives it a clean draft without an effect that resets one. */
+          key={editSkyId ?? "none"}
+          figure={
+            editSkyId
+              ? (withEdits(figures.find((figure) => figure.skyId === editSkyId)!) ?? null)
+              : null
+          }
+          onClose={() => setEditSkyId(null)}
+          onSaved={(skyId, draft) => {
+            setEdited((current) => ({ ...current, [skyId]: draft }));
+            /* Visibility has its own path through the grid, and the card is
+               dimmed by it rather than by the draft. */
+            onVisibilityChange(skyId, draft.catalogVisible);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

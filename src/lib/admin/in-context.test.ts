@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * The administrator works in the catalog, not beside it (ADR-0042).
@@ -62,7 +62,7 @@ describe("one catalog, one card", () => {
 
   it("renders both modes through one card factory", () => {
     const view = source(VIEW);
-    expect(view).toContain("function card(figure: CatalogFigure)");
+    expect(view).toContain("function card(original: CatalogFigure)");
     expect((view.match(/<CatalogCard/g) ?? []).length).toBe(1);
   });
 });
@@ -100,16 +100,45 @@ describe("the role comes from the server", () => {
 describe("what an administrator's card offers", () => {
   const card = source(CARD);
 
-  it("edits the public name in place", () => {
-    expect(card).toContain("<InlineName");
-    expect(card).toContain("override={figure.displayNameOverride}");
+  it("shows the same name a collector sees (V3.8)", () => {
+    /*
+     * The inline editor with a pencil is gone. It was a second way to change
+     * one of five fields, in a place where the other four could not be seen,
+     * and it made the admin card the only card in the catalogue whose name
+     * looked different. Editing is one door now.
+     */
+    expect(card).not.toContain("<InlineName");
+    expect(card).not.toContain("nameSlot=");
+    expect(source(CARD)).not.toContain('from "@/components/admin/inline-name"');
+    // The component itself stays: the detail page still uses it.
+    expect(existsSync(INLINE)).toBe(true);
+    expect(source("src/app/(admin)/admin/catalog/[skyId]/page.tsx")).toContain("FigureEditor");
   });
 
-  it("shows and hides the figure with a named control", () => {
+  it("does not let a tap on the card change anything", () => {
     // Not a tap on the card: on a phone that is one mis-tap away from taking
     // a figure out of the public catalog.
     expect(card).toContain("interactive={false}");
-    expect(source(ACTIONS)).toContain("aria-pressed={visible}");
+  });
+
+  it("carries exactly one action, and it opens the editor (V3.8)", () => {
+    /*
+     * THE BUG THIS REPLACED. The trade row is 9.05 % of the card's height —
+     * 29 px on a two-column phone — and it used to hold a 40 px button, a
+     * link and an error line stacked on top of each other. The row clips, so
+     * the button was cut and the link was invisible.
+     *
+     * One control, in the same box the public offer line uses.
+     */
+    const actions = code(ACTIONS);
+    expect(actions).toContain("AdminEditAction");
+    expect(actions.match(/<button/g) ?? []).toHaveLength(1);
+    expect(actions).not.toContain("<Link");
+    expect(actions).not.toContain("aria-pressed");
+    // The public row's geometry, not a second one.
+    expect(actions).toContain("h-full w-full");
+    expect(actions).not.toContain("min-h-");
+    expect(actions).not.toContain("flex-col");
   });
 
   it("marks a hidden figure rather than dropping it", () => {
@@ -117,8 +146,17 @@ describe("what an administrator's card offers", () => {
     expect(card).toContain("<HiddenBadge />");
   });
 
-  it("links to the existing detail editor instead of a second one", () => {
-    expect(source(ACTIONS)).toContain("href={`/admin/catalog/${skyId}`}");
+  it("opens the dialog rather than navigating away (V3.8)", () => {
+    /*
+     * The detail page still exists and is still reachable from
+     * /admin/catalog. What changed is that fixing one field no longer costs a
+     * page load and a trip back.
+     */
+    expect(card).toContain("<AdminEditAction");
+    expect(card).toContain("onEdit={() => onEdit?.(figure)}");
+    expect(source(ACTIONS)).not.toContain("/admin/catalog/");
+    expect(source(VIEW)).toContain("<AdminFigureModal");
+    expect(existsSync("src/app/(admin)/admin/catalog/[skyId]/page.tsx")).toBe(true);
   });
 
   it("offers no collection action", () => {
@@ -130,9 +168,21 @@ describe("what an administrator's card offers", () => {
 });
 
 describe("the same mutations as /admin, not new ones", () => {
-  it("reuses the two server actions", () => {
+  it("reuses the existing server actions, and adds none (V3.8)", () => {
+    /*
+     * The dialog writes five fields. All five actions existed before it did;
+     * it orchestrates them, it does not replace them — and the detail page
+     * still calls the same ones.
+     */
+    const modal = source("src/components/admin/figure-modal.tsx");
+    for (const action of [
+      "setDisplayNameOverride", "setCardType", "setImageOverride",
+      "setCatalogVisible", "setAdminNote",
+    ]) {
+      expect(modal, action).toContain(action);
+    }
+    expect(modal).toContain('from "@/lib/admin/actions"');
     expect(source(INLINE)).toContain('import { setDisplayNameOverride } from "@/lib/admin/actions"');
-    expect(source(ACTIONS)).toContain('import { setCatalogVisible } from "@/lib/admin/actions"');
   });
 
   it("adds no database function of its own", () => {

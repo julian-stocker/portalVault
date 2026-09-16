@@ -19,16 +19,20 @@
  * For an administrator the same card carries different actions (ADR-0042).
  * Everything about how a figure looks — picture, name, price, series,
  * element, layout, responsiveness — stays in FigureCard and is shared. Only
- * the interaction changes: a collector collects, an administrator edits the
- * public name and decides whether the figure is in the catalog at all. There
- * is no second card component and no second catalog.
+ * the interaction changes: a collector collects, an administrator edits.
+ * There is no second card component and no second catalog.
+ *
+ * SINCE V3.8 THE ADMIN CARD READS EXACTLY LIKE THE PUBLIC ONE. It had grown
+ * two differences beyond its action — an inline name editor with a pencil,
+ * and a stack of three controls in a row that fits one. Both are gone: the
+ * name is the same text a collector sees, and the trade row carries a single
+ * "Bearbeiten" that opens a dialog holding all five editable fields.
  */
 "use client";
 
 import { useState, useTransition } from "react";
 
-import { AdminCardActions, HiddenBadge } from "@/components/admin/card-actions";
-import { InlineName } from "@/components/admin/inline-name";
+import { AdminEditAction, HiddenBadge } from "@/components/admin/card-actions";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
@@ -46,13 +50,15 @@ export function CatalogCard({
   highlighted = false,
   admin = false,
   visible = true,
-  onVisibilityChange,
   offers = [],
   showSeries = false,
   onOpenOffers,
+  onEdit,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
+  /** Admin only: opens the edit dialog for this figure. */
+  onEdit?: (figure: CatalogFigure) => void;
   /**
    * Tells the catalog what this card just did, so the ownership filter sees
    * it in the same frame rather than after a round trip (V4.3).
@@ -66,7 +72,6 @@ export function CatalogCard({
   admin?: boolean;
   /** Editorial visibility, only meaningful in administrator mode. */
   visible?: boolean;
-  onVisibilityChange?: (skyId: string, visible: boolean) => void;
   /**
    * What SkyIsles offers for this figure — usually nothing (ADR-0043).
    *
@@ -140,26 +145,17 @@ export function CatalogCard({
         interactive={false}
         muted={!visible}
         statusBadge={visible ? null : <HiddenBadge />}
-        // No offer line: the operator has the price in /admin/inventory,
-        // where it can also be changed. Repeating it here would be a second
-        // place that states a price and cannot edit it (ADR-0042).
-        nameSlot={
-          <InlineName
-            skyId={figure.skyId}
-            displayName={figure.displayName}
-            // What the public name falls back to when the override is
-            // cleared. `displayName` already is that when none is set.
-            derivedName={figure.displayNameOverride === null ? figure.displayName : figure.canonicalName}
-            override={figure.displayNameOverride}
-          />
-        }
-        trade={
-          <AdminCardActions
-            skyId={figure.skyId}
-            visible={visible}
-            onVisibilityChange={onVisibilityChange ?? (() => {})}
-          />
-        }
+        /*
+         * No `nameSlot`: the name is the name. The inline editor that used to
+         * live here was a second way to change one of five fields, in a place
+         * where the other four could not be seen — and it made the admin card
+         * the one card in the catalogue whose name looked different.
+         *
+         * No offer line either: the operator has the price in
+         * /admin/inventory, where it can also be changed. Repeating it here
+         * would be a second place that states a price and cannot edit it.
+         */
+        trade={<AdminEditAction name={figure.displayName} onEdit={() => onEdit?.(figure)} />}
       />
     );
   }

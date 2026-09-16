@@ -386,6 +386,39 @@ export const de = {
     writeFailed: "Das hat nicht geklappt.",
     unknownFigure: "Unbekannte Figur.",
     unknownCategory: "Unbekannte Kategorie.",
+    /** Der Bearbeiten-Knopf auf der Adminkarte, mit Figurennamen (V3.8). */
+    editFigure: (name: string) => `${name} bearbeiten`,
+    /** Überschrift und Abschnitte des Bearbeiten-Dialogs (V3.8). */
+    editTitle: "Figur bearbeiten",
+    /* Der Adminblock hatte keins von beiden — `cancel` steht im Checkout-Block
+       und `loading` im Katalogblock, beides andere Kontexte. */
+    cancel: "Abbrechen",
+    loading: "Wird geladen …",
+    elementLabel: "Element",
+    sectionIdentity: "Identität",
+    sectionIdentityHint: "Kommt aus dem Import und wird bei jedem Lauf neu geschrieben.",
+    sectionDisplay: "Darstellung",
+    sectionVisibility: "Sichtbarkeit",
+    sectionVisibilityHint:
+      "Unabhängig vom Kartentyp. Eine Figur auszublenden ändert nicht, worauf sie gedruckt ist.",
+    sectionInternal: "Intern",
+    sectionHistory: "Änderungen",
+    /* `overrideLabel`, `overrideHint` und `noteLabel` stehen in diesem Block
+       bereits — `FigureEditor` benutzt sie auf der Detailseite. Derselbe Text
+       für dasselbe Feld, an einer Stelle. */
+    visibleLabel: "Im öffentlichen Katalog zeigen",
+    /* `save`, `saved` und `cancel` existieren in diesem Block bereits und
+       werden wiederverwendet — ein zweites Wort für dieselbe Sache wäre eine
+       zweite Wahrheit. Nur was fehlt, kommt dazu. */
+    saveChanges: "Änderungen speichern",
+    saving: "Wird gespeichert …",
+    discardTitle: "Änderungen verwerfen?",
+    discardBody: "Die Änderungen an dieser Figur wurden noch nicht gespeichert.",
+    keepEditing: "Weiter bearbeiten",
+    discard: "Änderungen verwerfen",
+    savedPartly: (saved: number, total: number) =>
+      `${saved} von ${total} Änderungen gespeichert. Die übrigen stehen noch offen.`,
+    loadFailed: "Die Figur konnte nicht geladen werden.",
     /** Ein Kartentyp, den es nicht gibt (V3.5). */
     unknownCardType: "Unbekannter Kartentyp.",
     /** Überschrift und Bezeichnung des Kartentyp-Felds (V3.5). */

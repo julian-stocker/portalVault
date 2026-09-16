@@ -130,10 +130,32 @@ describe("the hero explains itself — to a stranger only", () => {
    * `/` is the catalog (ADR-0025). The hero gained a sentence and a row of
    * links; it must not have gained a marketing device.
    */
-  it("adds no banner, modal or dismissible interruption", () => {
-    for (const forbidden of ["Dialog", "Modal", "Popup", "localStorage", "dismiss"]) {
+  it("adds no banner, popup or dismissible interruption", () => {
+    for (const forbidden of ["Dialog", "Popup", "localStorage", "dismiss"]) {
       expect(view).not.toContain(forbidden);
     }
+  });
+
+  it("opens no dialog at a visitor, and the one it can open is the operator's", () => {
+    /*
+     * The catalogue has two dialogs and neither is a marketing device: the
+     * quick view, which a visitor opens by asking about an offer, and — since
+     * V3.8 — the administrator's editor. Both are opened by a deliberate tap
+     * and neither appears on its own.
+     *
+     * The word "Modal" was on the forbidden list until V3.8, which caught the
+     * editor by its name rather than by what it does. What actually matters is
+     * asserted instead: the only dialog component named here besides the quick
+     * view is the admin one, and it is rendered behind the admin guard.
+     */
+    const dialogs = [...view.matchAll(/<([A-Z][A-Za-z]*(?:Modal|View))\b/g)].map((m) => m[1]);
+    expect([...new Set(dialogs)].sort()).toEqual(["AdminFigureModal", "QuickView"]);
+    expect(view).toContain("{admin ? (");
+    const at = view.indexOf("<AdminFigureModal");
+    expect(view.lastIndexOf("{admin ? (", at), "the editor is not behind the admin guard").toBeGreaterThan(-1);
+    // And nothing opens either of them without being asked.
+    expect(view).not.toMatch(/useEffect\([^)]*setEditSkyId/);
+    expect(view).not.toMatch(/useEffect\([^)]*setQuickViewSkyId/);
   });
 });
 

@@ -1,87 +1,78 @@
 /**
- * What an administrator can do to a figure from the catalog itself.
+ * What an administrator can do to a figure from the catalogue itself (V3.8).
  *
- * Two controls, both named, both large enough for a thumb: show or hide, and
- * open the full editor. Deliberately **not** "tap the card to hide it" — on a
- * phone that is one mis-tap away from taking a figure out of the public
- * catalog, and the card is the one thing your finger lands on while scrolling
- * (ADR-0042).
+ * ONE ACTION, AND IT OPENS THE EDITOR.
  *
- * Neither control is a permission. Both call server actions that call
- * database functions that ask `is_shop_admin()` themselves; this component
- * only decides what the button looks like.
+ * Until V3.8 this row carried three things stacked on top of each other: a
+ * show/hide button, a "Details" link and, when a write failed, an error line.
+ * They did not fit. The trade row is 9.05 % of the card's height — 29 px on a
+ * two-column phone — and `ACTION_CARD` alone is 40 px, so the button was
+ * clipped and the link below it was invisible. Three controls were being put
+ * where the public card puts one.
+ *
+ * So there is one control now, in the same box the public offer line uses,
+ * and it opens a dialog that holds all five editable fields — visibility
+ * included. Hiding a figure is a decision, and a decision belongs in the
+ * place where you can see what you are deciding about, not under a thumb
+ * scrolling a grid (ADR-0042 said the same thing about tapping the card).
+ *
+ * NEUTRAL, ON PURPOSE. Gold means possession, silver means trade, amber means
+ * a purchase. Editing is none of those: it is an action on the interface, so
+ * it takes the neutral card action and says what it does.
+ *
+ * It is not a permission either. The dialog's writes call server actions that
+ * call database functions that ask `is_shop_admin()` themselves; this decides
+ * what a button looks like.
  */
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
-
-import { setCatalogVisible } from "@/lib/admin/actions";
-import { ACTION_CARD } from "@/components/ui/action";
 import { de } from "@/lib/i18n/de";
 
-export function AdminCardActions({
-  skyId,
-  visible,
-  onVisibilityChange,
+export function AdminEditAction({
+  name,
+  onEdit,
 }: {
-  skyId: string;
-  visible: boolean;
-  /** Lets the catalog mark the card at once, before the server answers. */
-  onVisibilityChange: (skyId: string, visible: boolean) => void;
+  /** Named for a screen reader: a grid of these is otherwise 561 "Bearbeiten". */
+  name: string;
+  onEdit: () => void;
 }) {
-  const router = useRouter();
-  const [failed, setFailed] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  function toggle() {
-    const desired = !visible;
-    onVisibilityChange(skyId, desired); // optimistic
-    setFailed(false);
-    startTransition(async () => {
-      const result = await setCatalogVisible(skyId, desired);
-      if (!result.ok) {
-        onVisibilityChange(skyId, visible);
-        setFailed(true);
-        return;
-      }
-      router.refresh();
-    });
-  }
-
   return (
-    <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-pressed={visible}
-        aria-label={visible ? de.admin.hideLong : de.admin.showLong}
-        aria-busy={pending || undefined}
-        className={
-          `${ACTION_CARD} gap-1.5 ` +
-          (visible ? "" : "bg-[#4a2f17] text-[#f6d9a8] ") +
-          (pending ? "opacity-70" : "")
-        }
-      >
-        {visible ? de.admin.hide : de.admin.show}
-      </button>
-
-      <Link
-        href={`/admin/catalog/${skyId}`}
-        className="text-center text-[11px] text-on-card-muted underline underline-offset-2 hover:text-on-card"
-      >
-        {de.admin.details}
-      </Link>
-
-      {failed ? (
-        <p role="alert" className="text-center text-[11px] text-danger">
-          {de.admin.writeFailed}
-        </p>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      onClick={onEdit}
+      aria-label={de.admin.editFigure(name)}
+      /*
+       * The same box as `OfferLink`: `h-full w-full`, no minimum height, and
+       * type that scales with the card. The row IS the target — full width
+       * inside the trade inset — and giving this one a `min-h` would push it
+       * out of a row whose height is fixed by the artwork.
+       */
+      className={
+        "focus-ring flex h-full w-full items-center justify-center gap-1 rounded-sky-sm " +
+        "whitespace-nowrap px-1.5 sm:px-2 " +
+        "text-[clamp(9px,4.8cqw,11px)] leading-none font-semibold " +
+        "transition-opacity hover:opacity-75 active:opacity-60"
+      }
+      style={{ color: INK_EDIT }}
+    >
+      <span>{de.admin.edit}</span>
+      <span aria-hidden="true" className="shrink-0 text-[13px] leading-none">
+        ›
+      </span>
+    </button>
   );
 }
+
+/**
+ * The ink, inline for the reason `offer-link.tsx` records: a class only paints
+ * if its rule arrives, and the card falls back to the page's near-white when
+ * none does. An inline style carries the value itself.
+ *
+ * The same near-black the buyable offer uses, because both sit on the card's
+ * own printed surface and the surface decides what is legible — not what the
+ * action means. What the action MEANS is carried by the word.
+ */
+const INK_EDIT = "var(--trade-ink, #11161c)";
 
 /** The chip that marks a figure the public catalog no longer shows. */
 export function HiddenBadge() {
