@@ -81,3 +81,8 @@ Thumbs.db
 # neither ignored nor committed. Both folders are now named.
 /designs/artwork/
 /designs/cards/
+
+# Local backups of production storage objects. Image bytes an administrator
+# uploaded live in Supabase Storage, not in Git (ADR-0046); an export of them
+# is a safety copy, not a repository asset.
+/.backups/

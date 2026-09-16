@@ -268,6 +268,73 @@ export function requireStaging(toolLabel: string): string {
 }
 
 /**
+ * Refuse to continue unless the process is pointed at PRODUCTION.
+ *
+ * The mirror image of `requireStaging()`, and it exists for the one tool that
+ * genuinely belongs there: the read-only backup of the administrator's image
+ * overrides, which live in production's storage bucket and nowhere else.
+ *
+ * It decides the same way — positively, by exact identity, never by a name.
+ * The target must match BOTH identities in `.env.local`, origin and key, and
+ * must not be the project `.env.staging` names. Matching only one is refused:
+ * that is a half-configured environment, and a backup taken from one is a
+ * backup of something nobody can name afterwards.
+ *
+ * WHY AN AFFIRMATIVE CHECK AT ALL FOR A READER
+ *
+ * Nothing here can damage production. What it can do is write production's
+ * bytes into a local directory labelled "production" — and a backup that
+ * silently contains staging is worse than no backup, because it will be
+ * trusted. The label has to be earned.
+ */
+export function requireProduction(toolLabel: string): string {
+  const reference = referenceFromDisk();
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const targetOrigin = projectOrigin(url);
+  const productionOrigin = projectOrigin(reference.production.NEXT_PUBLIC_SUPABASE_URL);
+  const stagingOrigin = projectOrigin(reference.staging.NEXT_PUBLIC_SUPABASE_URL);
+  const productionKey = reference.production.SUPABASE_SERVICE_ROLE_KEY;
+
+  const refuse = (why: string): never => {
+    console.error("");
+    console.error("  ENVIRONMENT GUARD — refusing to run.");
+    console.error("");
+    console.error(`  ${toolLabel} reads PRODUCTION on purpose, and ${why}`);
+    console.error("");
+    console.error(`  Start it with --env-file=${PRODUCTION_ENV_FILE}, or fix that file.`);
+    console.error("  Nothing has been read and nothing has been written.");
+    console.error("");
+    process.exit(1);
+  };
+
+  if (targetOrigin === null) {
+    refuse("no NEXT_PUBLIC_SUPABASE_URL is set, so the target cannot be identified.");
+  }
+  if (productionOrigin === null || typeof productionKey !== "string" || productionKey === "") {
+    refuse(`${PRODUCTION_ENV_FILE} does not name a project and a service-role key.`);
+  }
+  if (stagingOrigin !== null && stagingOrigin === targetOrigin) {
+    refuse(`the target project ${projectRef(url)} is the one named in ${STAGING_ENV_FILE}.`);
+  }
+  if (targetOrigin !== productionOrigin) {
+    refuse(
+      `the target project ${projectRef(url)} is not the one named in ${PRODUCTION_ENV_FILE}.`,
+    );
+  }
+  if (key !== productionKey) {
+    refuse(
+      `the SUPABASE_SERVICE_ROLE_KEY in use is not the one in ${PRODUCTION_ENV_FILE}, ` +
+        "so the address and the credential disagree about which project this is.",
+    );
+  }
+
+  console.log(`  environment guard: passed — target is production (${projectRef(url)}).`);
+  return targetOrigin as string;
+}
+
+/**
  * The same guard, but only when the caller asked for it.
  *
  * For the tools that legitimately serve both environments: the verifiers run

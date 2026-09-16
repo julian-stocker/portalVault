@@ -777,6 +777,58 @@ Deshalb ist „Eigenes Bild entfernen" eine Rücknahme und kein Verlust: das imp
 die ganze Zeit darunter. Aufgelöst wird zentral in `src/lib/catalog/image.ts`, in dieser
 Reihenfolge: Override → importiertes Bild → leere Bildbühne.
 
+### Overrides liegen im Storage, nicht in Git — und brauchen eine Sicherung
+
+Das importierte Bild ist eine Datei in `public/images/skylanders/`, versioniert und mit dem
+Deploy ausgeliefert: es zu verlieren ist ein `git checkout`. Das hochgeladene Bild ist ein
+Objekt im Bucket `catalog` **je Supabase-Projekt** und existiert genau einmal — nicht in Git,
+nicht in der anderen Umgebung, in keinem Export.
+
+**Zwei gewöhnliche Aktionen im Adminbereich löschen es endgültig:** ein Bild zu ersetzen
+entfernt das vorherige Objekt, „Bild entfernen" das aktuelle. Beides fragt nicht nach und ist
+nicht rückholbar.
+
+Deshalb gibt es `npm run images:export:prod` (`tools/export-image-overrides.mts`). Es ist
+**ausschließlich lesend** — SELECT, Bucket-Listing, Download — und schreibt nur nach
+`.backups/`, das gitignoriert ist. Jedes Objekt wird gegen seinen inhaltsadressierten Pfad
+geprüft; stimmt ein Hash nicht, schlägt der Export fehl statt ein Verzeichnis zu hinterlassen,
+dem man später vertraut. Objekte ohne Verweis (Reste früherer Ersetzungen) werden getrennt
+unter `orphans/` gesichert, nie gelöscht und nie mit den aktiven vermischt.
+
+**Die Sicherung macht aus den Bytes kein Repository-Asset.** Ein Override ist eine
+redaktionelle Entscheidung in einer Umgebung; ihn zum Git-Asset zu machen hieße, die Grenze
+aufzuheben, die ADR-0046 gezogen hat. Ein Bild dauerhaft zur Wahrheit dieser Figur zu erklären
+ist eine Einzelfallentscheidung: dann ersetzt es die Datei unter `public/images/skylanders/`,
+und der Override verschwindet.
+
+### Abgleich: gesichertes Backup → Staging
+
+`npm run images:sync:staging -- <backup-verzeichnis>` bringt ein geprüftes Backup in Staging.
+
+**Dry Run ist der Standard**; geschrieben wird nur mit ausdrücklichem `--apply`. **Production wird
+dabei nicht kontaktiert** — weder für Bytes noch für Zugangsdaten. Das ist der Zweck: ein
+Rückspielen, das die Quellumgebung erreichen müsste, wäre an dem Tag nutzlos, an dem man es
+braucht.
+
+Das `complete: true` im Manifest wird **nicht geglaubt**: jede Datei wird neu gehasht, jeder Pfad
+neu geprüft, die Menge neu gezählt, bevor die Zielumgebung überhaupt angesprochen wird.
+
+Jede Figur wird eingeordnet — `READY`, `ALREADY_SYNCED`, `DIFFERENT_OVERRIDE`, `MISSING_FIGURE`,
+`OBJECT_MISSING`, `OBJECT_DIFFERENT`. **Automatisch geändert werden nur `READY` und
+`OBJECT_MISSING`.** Die drei Konfliktfälle stoppen den Lauf: ein Werkzeug kann nicht wissen,
+welches Bild gemeint war.
+
+**Es wird nie gelöscht und nie überschrieben.** Reihenfolge je Eintrag: hochladen → zurücklesen
+und Hash prüfen → erst dann die Zeile umhängen. Scheitert der letzte Schritt, bleibt das Objekt
+liegen; ein erneuter Lauf erkennt `READY` und macht fertig. Zweimal laufen lassen ist folgenlos.
+
+Geschrieben wird über `system_set_image_override()` (Migration `0035`), nicht über
+`admin_set_image_override()`: letztere fragt `is_shop_admin()`, und ein Werkzeug mit Service-Role
+hat kein `auth.uid()`. Dieselbe Trennung wie bei `record_inventory_movement()` und
+`system_record_inventory_movement()` (0003) — die Berechtigung **ist** das EXECUTE-Recht. Beide
+prüfen, dass der Pfad zur Figur gehört, und beide protokollieren über denselben Trigger, mit
+`changed_by = NULL` für den Systemweg.
+
 ## 11g. Kartentyp: was eine Figur *ist*, getrennt von dem, wem sie gehört (2026-09-15, ADR-0067/0068)
 
 `skylanders.card_type` sagt, auf welches Basismotiv eine Figur gedruckt wird — `standard`,
