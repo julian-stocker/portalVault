@@ -393,6 +393,12 @@ export const de = {
     /* Der Adminblock hatte keins von beiden — `cancel` steht im Checkout-Block
        und `loading` im Katalogblock, beides andere Kontexte. */
     cancel: "Abbrechen",
+    /**
+     * Das X im Kopf des Bearbeiten-Dialogs (V3.8a). Eigener Text statt
+     * `quickView.close`: derselbe Knopf, aber ein anderer Dialog — und eine
+     * Vorlesehilfe soll sagen, was hier geschlossen wird.
+     */
+    closeEditor: "Bearbeiten schließen",
     loading: "Wird geladen …",
     elementLabel: "Element",
     sectionIdentity: "Identität",

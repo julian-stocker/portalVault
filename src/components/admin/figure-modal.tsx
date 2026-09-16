@@ -265,217 +265,291 @@ export function AdminFigureModal({
 
   return (
     <Modal open onClose={requestClose} labelledBy={headingId} size="lg">
-      <div className="flex max-h-[85vh] flex-col">
-        {/* The figure, so there is no doubt which one is being changed. */}
-        <header className="flex items-start gap-3 border-b border-border/60 p-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={imageSrc(figure) ?? ""}
-            alt=""
-            aria-hidden="true"
-            className="h-14 w-14 shrink-0 rounded-sky-sm bg-white object-contain"
-          />
-          <div className="min-w-0 flex-1">
-            <h2 id={headingId} className="truncate text-base font-semibold">
-              {figure.displayName}
-            </h2>
-            <p className="mt-0.5 font-mono text-xs text-muted">
-              {figure.skyId} · {CARD_TYPE_LABELS[draft?.cardType ?? figure.cardType]}
-            </p>
-          </div>
-        </header>
-
-        <div className="flex-1 overflow-y-auto overscroll-contain p-4">
-          {loadError !== null ? (
-            <p role="alert" className="text-sm text-danger">
-              {loadError}
-            </p>
-          ) : draft === null ? (
-            <p className="text-sm text-muted">{de.admin.loading}</p>
-          ) : (
-            <div className="flex flex-col gap-5">
-              <Section title={de.admin.sectionIdentity} hint={de.admin.sectionIdentityHint}>
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  <Fact label={de.admin.skyId} value={figure.skyId} />
-                  <Fact label={de.admin.canonicalName} value={figure.canonicalName} />
-                  <Fact label={de.admin.series} value={figure.seriesLabel} />
-                  <Fact label={de.admin.category} value={figure.categoryName} />
-                  <Fact label={de.admin.group} value={groupLabel(figure.catalogGroup)} />
-                  <Fact label={de.admin.elementLabel} value={figure.element ?? "—"} />
-                </dl>
-              </Section>
-
-              <Section title={de.admin.sectionDisplay}>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs text-muted">{de.admin.overrideLabel}</span>
-                  <input
-                    type="text"
-                    value={draft.displayNameOverride ?? ""}
-                    onChange={(event) =>
-                      set("displayNameOverride", event.target.value === "" ? null : event.target.value)
-                    }
-                    maxLength={120}
-                    className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
-                  />
-                  <span className="text-xs text-muted">{de.admin.overrideHint}</span>
-                </label>
-
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs text-muted">{de.admin.cardType}</span>
-                  <select
-                    value={draft.cardType}
-                    onChange={(event) => set("cardType", event.target.value as AdminFigureDraft["cardType"])}
-                    className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
-                  >
-                    {CARD_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {CARD_TYPE_LABELS[type]}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-muted">{de.admin.cardTypeHint}</span>
-                </label>
-
-                {/*
-                  * THE PICTURE, IN TWO STEPS THAT ARE NOT ONE.
-                  *
-                  * Choosing a file uploads it to storage straight away —
-                  * bytes have to exist somewhere before anything can point at
-                  * them — but the FIGURE is not changed until the dialog is
-                  * saved. So the preview below is a draft like every other
-                  * field, and cancelling leaves the figure showing exactly
-                  * what it showed before.
-                  *
-                  * What that costs is an orphan in the bucket if the operator
-                  * uploads and then discards. The object is content-addressed,
-                  * so the same picture is the same object however often it is
-                  * chosen, and `image-actions.ts` already records that an
-                  * orphan is the cheaper of the two mistakes.
-                  */}
-                <div className="flex flex-col gap-2">
-                  <span className="text-xs text-muted">{de.admin.image}</span>
-                  <div className="flex items-start gap-3">
-                    <div className="w-24 shrink-0">
-                      <FigureImage src={previewSrc} name={figure.displayName} />
-                    </div>
-                    <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      <p className="text-[11px] text-muted">
-                        {draft.imageOverridePath ? de.admin.imageOwn : de.admin.imageImported}
-                      </p>
-                      <input
-                        ref={fileInput}
-                        type="file"
-                        accept="image/png,image/jpeg,image/webp"
-                        className="sr-only"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) stage(file);
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => fileInput.current?.click()}
-                        disabled={uploading || saving}
-                        aria-busy={uploading || undefined}
-                        className={ACTION_NEUTRAL}
-                      >
-                        {uploading ? de.admin.imageUploading : de.admin.imageReplace}
-                      </button>
-                      {draft.imageOverridePath !== null ? (
-                        <button
-                          type="button"
-                          onClick={() => set("imageOverridePath", null)}
-                          disabled={uploading || saving}
-                          className="text-xs text-link underline underline-offset-2"
-                        >
-                          {de.admin.imageRemove}
-                        </button>
-                      ) : null}
-                      {imageError !== null ? (
-                        <p role="alert" className="text-xs text-danger">
-                          {imageError}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </Section>
-
-              <Section title={de.admin.sectionVisibility} hint={de.admin.sectionVisibilityHint}>
-                <label className="flex min-h-11 items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={draft.catalogVisible}
-                    onChange={(event) => set("catalogVisible", event.target.checked)}
-                    className="h-5 w-5 accent-[#3b2a17] focus-ring"
-                  />
-                  <span className="text-sm">{de.admin.visibleLabel}</span>
-                </label>
-              </Section>
-
-              <Section title={de.admin.sectionInternal}>
-                <label className="flex flex-col gap-1">
-                  <span className="text-xs text-muted">{de.admin.note}</span>
-                  <textarea
-                    value={draft.adminNote}
-                    onChange={(event) => set("adminNote", event.target.value)}
-                    maxLength={2000}
-                    rows={3}
-                    className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
-                  />
-                  <span className="text-xs text-muted">{de.admin.noteHint}</span>
-                </label>
-              </Section>
-
-              {changes.length > 0 ? (
-                <Section title={de.admin.sectionHistory}>
-                  <ul className="flex flex-col gap-1 text-xs text-muted">
-                    {changes.map((change) => (
-                      <li key={`${change.field}-${change.changedAt}`}>
-                        <span className="text-foreground">{change.field}</span>{" "}
-                        {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
-                        {formatDate(change.changedAt)}
-                      </li>
-                    ))}
-                  </ul>
-                </Section>
-              ) : null}
-            </div>
-          )}
+      {/*
+        * THE PANEL IS THE COLUMN. THIS FILE ONLY FILLS IT.
+        *
+        * `Modal` already is `flex flex-col` with a `dvh` ceiling and
+        * `overflow-hidden`, and `filter-sheet.tsx` already puts a head, a
+        * scrolling body and a foot straight into it. This editor used to wrap
+        * all three in a `flex max-h-[85vh] flex-col` div instead, which broke
+        * the scroll in two ways at once — see the note on the body below.
+        *
+        * So there is no wrapper. Head, body and foot are the panel's own flex
+        * children, and the chain that has to hold is one link long.
+        */}
+      {/* The figure, so there is no doubt which one is being changed. */}
+      <header className="flex shrink-0 items-start gap-3 border-b border-border/60 p-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imageSrc(figure) ?? ""}
+          alt=""
+          aria-hidden="true"
+          className="h-14 w-14 shrink-0 rounded-sky-sm bg-white object-contain"
+        />
+        <div className="min-w-0 flex-1">
+          <h2 id={headingId} className="truncate text-base font-semibold">
+            {figure.displayName}
+          </h2>
+          <p className="mt-0.5 font-mono text-xs text-muted">
+            {figure.skyId} · {CARD_TYPE_LABELS[draft?.cardType ?? figure.cardType]}
+          </p>
         </div>
 
-        <footer className="flex flex-col gap-2 border-t border-border/60 p-4">
-          {/* The result, stated as what it is. A partial save is not a success. */}
-          {report !== null && report.failed.length > 0 ? (
-            <p role="alert" className="text-sm text-danger">
-              {report.saved.length === 0
-                ? report.failed[0].message
-                : de.admin.savedPartly(report.saved.length, report.saved.length + report.failed.length)}
-            </p>
-          ) : complete ? (
-            <p role="status" className="text-sm text-muted">
-              {de.admin.saved}
-            </p>
-          ) : null}
+        {/*
+          * `requestClose`, not `onClose`: this is the same door as Escape and
+          * the backdrop, so it asks before throwing away an unsaved edit. It
+          * sits in the head rather than over the body, so a long form scrolls
+          * underneath it and never past it.
+          *
+          * Same shape and the same 44 px target as the quick view's and the
+          * filter sheet's — an inline glyph in each, which is how this
+          * codebase already carries it.
+          */}
+        <button
+          type="button"
+          onClick={requestClose}
+          disabled={saving}
+          aria-label={de.admin.closeEditor}
+          className={
+            "focus-ring -mt-1.5 -mr-1.5 inline-flex h-11 w-11 shrink-0 items-center " +
+            "justify-center rounded-full text-muted transition-colors " +
+            "hover:bg-white/10 hover:text-foreground disabled:opacity-50"
+          }
+        >
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+          >
+            <path d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+        </button>
+      </header>
 
-          <div className="flex gap-2">
-            <button type="button" onClick={requestClose} disabled={saving} className={ACTION_NEUTRAL}>
-              {de.admin.cancel}
-            </button>
-            <button
-              type="button"
-              onClick={() => void save()}
-              disabled={!dirty || saving}
-              aria-busy={saving || undefined}
-              className={ACTION_PRIMARY + (dirty && !saving ? "" : " opacity-60")}
-            >
-              {saving ? de.admin.saving : de.admin.saveChanges}
-            </button>
+      {/*
+        * THE ONLY SCROLLING REGION, AND WHY IT IS SPELLED LIKE THIS.
+        *
+        * `min-h-0` is the whole bug. A flex child's `min-height` defaults to
+        * `auto`, which resolves to its min-content height — so a body full of
+        * sections REFUSES to shrink below the height of those sections, the
+        * column grows past the panel's ceiling, and `overflow-hidden` on the
+        * panel cuts the rest off. That is exactly what "the last fields are
+        * unreachable" looked like: not a missing scrollbar, a clipped column.
+        * `overflow-y-auto` cannot help while the element never gets smaller
+        * than its content, because then there is nothing to scroll.
+        *
+        * NOT `flex-1`. That is `flex: 1 1 0%`, which would make this claim the
+        * panel's full ceiling even for a figure with no history — a short
+        * editor with a band of empty space above the buttons. The default
+        * `flex: 0 1 auto` is the half that was wanted: be the size of the
+        * content, give way once the ceiling is reached. `quick-view.tsx`
+        * records the same reasoning.
+        *
+        * `overscroll-contain` keeps the gesture here once the ends are
+        * reached, so the catalogue behind never takes over the scroll.
+        *
+        * `pb-6` rather than the `p-4` on the other three sides: the last field
+        * must not sit against the foot, and on a phone the bottom edge is
+        * where the browser's own chrome comes and goes.
+        */}
+      <div className="min-h-0 overflow-y-auto overscroll-contain p-4 pb-6">
+        {loadError !== null ? (
+          <p role="alert" className="text-sm text-danger">
+            {loadError}
+          </p>
+        ) : draft === null ? (
+          <p className="text-sm text-muted">{de.admin.loading}</p>
+        ) : (
+          <div className="flex flex-col gap-5">
+            <Section title={de.admin.sectionIdentity} hint={de.admin.sectionIdentityHint}>
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <Fact label={de.admin.skyId} value={figure.skyId} />
+                <Fact label={de.admin.canonicalName} value={figure.canonicalName} />
+                <Fact label={de.admin.series} value={figure.seriesLabel} />
+                <Fact label={de.admin.category} value={figure.categoryName} />
+                <Fact label={de.admin.group} value={groupLabel(figure.catalogGroup)} />
+                <Fact label={de.admin.elementLabel} value={figure.element ?? "—"} />
+              </dl>
+            </Section>
+
+            <Section title={de.admin.sectionDisplay}>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted">{de.admin.overrideLabel}</span>
+                <input
+                  type="text"
+                  value={draft.displayNameOverride ?? ""}
+                  onChange={(event) =>
+                    set("displayNameOverride", event.target.value === "" ? null : event.target.value)
+                  }
+                  maxLength={120}
+                  className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+                />
+                <span className="text-xs text-muted">{de.admin.overrideHint}</span>
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted">{de.admin.cardType}</span>
+                <select
+                  value={draft.cardType}
+                  onChange={(event) => set("cardType", event.target.value as AdminFigureDraft["cardType"])}
+                  className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+                >
+                  {CARD_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {CARD_TYPE_LABELS[type]}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-muted">{de.admin.cardTypeHint}</span>
+              </label>
+
+              {/*
+                * THE PICTURE, IN TWO STEPS THAT ARE NOT ONE.
+                *
+                * Choosing a file uploads it to storage straight away —
+                * bytes have to exist somewhere before anything can point at
+                * them — but the FIGURE is not changed until the dialog is
+                * saved. So the preview below is a draft like every other
+                * field, and cancelling leaves the figure showing exactly
+                * what it showed before.
+                *
+                * What that costs is an orphan in the bucket if the operator
+                * uploads and then discards. The object is content-addressed,
+                * so the same picture is the same object however often it is
+                * chosen, and `image-actions.ts` already records that an
+                * orphan is the cheaper of the two mistakes.
+                */}
+              <div className="flex flex-col gap-2">
+                <span className="text-xs text-muted">{de.admin.image}</span>
+                <div className="flex items-start gap-3">
+                  <div className="w-24 shrink-0">
+                    <FigureImage src={previewSrc} name={figure.displayName} />
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <p className="text-[11px] text-muted">
+                      {draft.imageOverridePath ? de.admin.imageOwn : de.admin.imageImported}
+                    </p>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      className="sr-only"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) stage(file);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInput.current?.click()}
+                      disabled={uploading || saving}
+                      aria-busy={uploading || undefined}
+                      className={ACTION_NEUTRAL}
+                    >
+                      {uploading ? de.admin.imageUploading : de.admin.imageReplace}
+                    </button>
+                    {draft.imageOverridePath !== null ? (
+                      <button
+                        type="button"
+                        onClick={() => set("imageOverridePath", null)}
+                        disabled={uploading || saving}
+                        className="text-xs text-link underline underline-offset-2"
+                      >
+                        {de.admin.imageRemove}
+                      </button>
+                    ) : null}
+                    {imageError !== null ? (
+                      <p role="alert" className="text-xs text-danger">
+                        {imageError}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            <Section title={de.admin.sectionVisibility} hint={de.admin.sectionVisibilityHint}>
+              <label className="flex min-h-11 items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={draft.catalogVisible}
+                  onChange={(event) => set("catalogVisible", event.target.checked)}
+                  className="h-5 w-5 accent-[#3b2a17] focus-ring"
+                />
+                <span className="text-sm">{de.admin.visibleLabel}</span>
+              </label>
+            </Section>
+
+            <Section title={de.admin.sectionInternal}>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted">{de.admin.note}</span>
+                <textarea
+                  value={draft.adminNote}
+                  onChange={(event) => set("adminNote", event.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+                />
+                <span className="text-xs text-muted">{de.admin.noteHint}</span>
+              </label>
+            </Section>
+
+            {changes.length > 0 ? (
+              <Section title={de.admin.sectionHistory}>
+                <ul className="flex flex-col gap-1 text-xs text-muted">
+                  {changes.map((change) => (
+                    <li key={`${change.field}-${change.changedAt}`}>
+                      <span className="text-foreground">{change.field}</span>{" "}
+                      {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
+                      {formatDate(change.changedAt)}
+                    </li>
+                  ))}
+                </ul>
+              </Section>
+            ) : null}
           </div>
-        </footer>
+        )}
       </div>
 
+      {/*
+        * `shrink-0`, like the head: whatever the body does, saving stays one
+        * press away. Which matters more with every setting this editor gains
+        * — the operator must never scroll past twenty fields to reach it.
+        */}
+      <footer className="flex shrink-0 flex-col gap-2 border-t border-border/60 p-4">
+        {/* The result, stated as what it is. A partial save is not a success. */}
+        {report !== null && report.failed.length > 0 ? (
+          <p role="alert" className="text-sm text-danger">
+            {report.saved.length === 0
+              ? report.failed[0].message
+              : de.admin.savedPartly(report.saved.length, report.saved.length + report.failed.length)}
+          </p>
+        ) : complete ? (
+          <p role="status" className="text-sm text-muted">
+            {de.admin.saved}
+          </p>
+        ) : null}
+
+        <div className="flex gap-2">
+          <button type="button" onClick={requestClose} disabled={saving} className={ACTION_NEUTRAL}>
+            {de.admin.cancel}
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!dirty || saving}
+            aria-busy={saving || undefined}
+            className={ACTION_PRIMARY + (dirty && !saving ? "" : " opacity-60")}
+          >
+            {saving ? de.admin.saving : de.admin.saveChanges}
+          </button>
+        </div>
+      </footer>
       {/* Closing with unsaved changes asks first. Rendered inside the same
           panel so the focus trap keeps holding. */}
       {confirming ? (
