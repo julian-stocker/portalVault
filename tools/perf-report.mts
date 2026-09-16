@@ -5,7 +5,7 @@
  *   npm run perf:report:prod    -- --run <uuid>
  *   npm run perf:report:prod    -- --label mobile-baseline-1
  *
- * READ ONLY. One `select` on one table and nothing else; there is no insert,
+ * READ ONLY. `select` on two tables and nothing else; there is no insert,
  * update, delete, RPC or storage call in this file, and `telemetry.test.ts`
  * holds that.
  *
@@ -31,25 +31,42 @@
  * secure and keep working; a terminal report is something an operator reads and
  * an agent can be handed verbatim.
  *
- * WHAT THE THREE COLUMNS MEAN
+ * WHAT THE COLUMNS MEAN
  *
- *   visible   the tap until the new page was on screen — the felt duration
- *   commit    the tap until the router changed route — waiting
- *   paint     the route change until the frame — rendering
+ *   visible   the tap until the new content was on screen — the felt duration
+ *   commit    the tap until the route changed, or the dialog entered the DOM
+ *   paint     that moment until the frame — rendering
  *
  * A slow `visible` with a slow `commit` is a server or data problem. A slow
  * `visible` with a fast `commit` is rendering. That split is the reason all
  * three are recorded.
+ *
+ * TWO SECTIONS, NEVER ONE SET OF PERCENTILES (ADR-0073)
+ *
+ * Navigations are route changes; interactions are things that happen inside a
+ * page — the quick view above all, which is the catalog's main gesture and
+ * changes no route at all. They are different events, so they are aggregated
+ * separately. The interaction section carries four extra columns (`c-*`) for
+ * when the ARTWORK became visible, which is a different question from when
+ * the dialog did.
  */
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  selectInteractions,
   selectRows,
+  summarizeInteractions,
   summarizePairs,
   summarizeRuns,
+  type InteractionRow,
   type NavigationRow,
 } from "../src/lib/perf/report.ts";
 import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+
+/** The columns the interaction report needs. No figure identity exists to ask for. */
+const INTERACTION_COLUMNS =
+  "run_id, occurred_at, route, interaction, interaction_to_visible_ms, " +
+  "interaction_to_commit_ms, commit_to_visible_ms, content_visible_ms, warm, label";
 
 /** The columns the report needs. `user_id` only to say which tester a run was. */
 const COLUMNS =
@@ -115,6 +132,30 @@ async function readAll(client: SupabaseClient): Promise<NavigationRow[]> {
   return rows;
 }
 
+/**
+ * Every recorded interaction, oldest first.
+ *
+ * Tolerant of a database where `0038` has not been applied yet: the report is
+ * then a navigation report, which is exactly what it was before. A missing
+ * table must not take the working half of the report down with it.
+ */
+async function readInteractions(client: SupabaseClient): Promise<InteractionRow[] | null> {
+  const rows: InteractionRow[] = [];
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data, error } = await client
+      .from("perf_interactions")
+      .select(INTERACTION_COLUMNS)
+      .order("occurred_at", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return null;
+
+    const page = (data ?? []) as unknown as InteractionRow[];
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+  return rows;
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   // The `:staging` script sets the flag; `:prod` does not, and then this is a
@@ -138,6 +179,9 @@ async function main(): Promise<void> {
   const runs = summarizeRuns(all);
   if (runs.length === 0) {
     console.log("  No navigation has been recorded yet.\n");
+    // Not a return: a run may hold interactions and no navigation at all —
+    // somebody who opened quick views and never left the catalog.
+    await interactions(client, runId, label);
     return;
   }
 
@@ -192,6 +236,68 @@ async function main(): Promise<void> {
     `\n  ${total} navigation(s) over ${measured.length} route pair(s).` +
       "\n  p50/p75/p95/min/max are the felt duration (tap to visible), in ms." +
       "\n  commit = tap to route change (waiting) · paint = route change to frame (rendering).\n",
+  );
+
+  await interactions(client, runId, label);
+}
+
+/**
+ * The second section: in-page interactions (ADR-0073).
+ *
+ * Its own percentiles, never mixed with the navigation ones — a dialog and a
+ * route change are different events and averaging them would describe neither.
+ */
+async function interactions(
+  client: SupabaseClient,
+  runId: string | null,
+  label: string | null,
+): Promise<void> {
+  const all = await readInteractions(client);
+
+  heading("Interactions");
+  if (all === null) {
+    console.log("  perf_interactions is not available here — 0038 is not applied.\n");
+    return;
+  }
+
+  const measured = summarizeInteractions(selectInteractions(all, { runId, label }));
+  if (measured.length === 0) {
+    console.log("  No in-page interaction has been recorded yet.\n");
+    return;
+  }
+
+  console.log(
+    `\n  ${pad("interaction", 20)}${pad("route", 24)}${pad("warm", 6)}` +
+      `${"n".padStart(4)}${"p50".padStart(7)}${"p75".padStart(7)}${"p95".padStart(7)}` +
+      `${"min".padStart(7)}${"max".padStart(7)}${"commit".padStart(8)}${"paint".padStart(7)}` +
+      // The artwork block, labelled so nobody reads it as more of the same.
+      `${"c-n".padStart(6)}${"c-p50".padStart(8)}${"c-p75".padStart(8)}${"c-p95".padStart(8)}`,
+  );
+  console.log(`  ${"-".repeat(127)}`);
+
+  for (const row of measured) {
+    console.log(
+      `  ${pad(row.interaction, 20)}${pad(row.route, 24)}${pad(row.warm ? "warm" : "cold", 6)}` +
+        `${num(row.samples, 4)}${num(row.visibleP50, 7)}${num(row.visibleP75, 7)}` +
+        `${num(row.visibleP95, 7)}${num(row.visibleMin, 7)}${num(row.visibleMax, 7)}` +
+        `${num(row.commitP50, 8)}${num(row.paintP50, 7)}` +
+        // `num` prints a dash for null, which is what "not measured" looks
+        // like. It is never rendered as 0.
+        `${num(row.contentSamples, 6)}${num(row.contentP50, 8)}` +
+        `${num(row.contentP75, 8)}${num(row.contentP95, 8)}`,
+    );
+  }
+
+  const total = measured.reduce((sum, row) => sum + row.samples, 0);
+  const withContent = measured.reduce((sum, row) => sum + row.contentSamples, 0);
+  console.log(
+    `\n  ${total} interaction(s) over ${measured.length} key/route pair(s).` +
+      "\n  p50/p75/p95/min/max are tap to the dialog being on screen (A→C), in ms." +
+      "\n  commit = tap to dialog in the DOM · paint = dialog in the DOM to frame." +
+      `\n  c-* is tap to the ARTWORK being ready (A→D) over the ${withContent} of ${total} ` +
+      "sample(s) where it could be measured;" +
+      "\n  a dash means no artwork timing, never zero. c-p50 below p50 means the picture " +
+      "was already decoded.\n",
   );
 }
 

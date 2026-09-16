@@ -38,6 +38,7 @@ werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migratio
 | `characters` | 19 (Pilot) | kuratierte Charaktermetadaten | öffentlich lesbar, nur kuratiert schreibbar |
 | `testers` + 3 (`0036`) | wenige | Testkonten und ihre Test-Berechtigungen | kein Clientrecht, nur über Funktionen |
 | `perf_navigations` | wächst je Messlauf | Navigationszeiten von Testkonten | kein Clientrecht, Admin liest aggregiert |
+| `perf_interactions` | wächst je Messlauf | Interaktionszeiten (Quick View) von Testkonten | kein Clientrecht, Admin liest aggregiert |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -940,6 +941,53 @@ schreiben.
 `auth.uid()`, also ist `is_shop_admin()` dort `false`. Das Werkzeug liest `perf_navigations`
 deshalb direkt mit dem Service-Role-Key — dieselbe Form wie `export-image-overrides.mts` und
 `verify-shop.mts` — und gruppiert in `src/lib/perf/report.ts`. Strikt lesend, nur `select`.
+
+
+---
+
+### 3.3r `perf_interactions` — gemessene Interaktionen (Migration `0038`, ADR-0073)
+
+Die wichtigste Geste im Katalog ist **keine Navigation**: eine Figur zu öffnen setzt React-State,
+der Pfad ändert sich nie (ADR-0027), und 0037 konnte sie deshalb nicht sehen. Diese Tabelle misst
+sie — wieder nur für Konten mit `performance_tracking`.
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `run_id` | `uuid` | **derselbe Lauf** wie die Navigationen daneben |
+| `user_id` | `uuid` | aus `auth.uid()`, nie aus einem Parameter |
+| `route` | `text` | **wo** es passierte, Routenmuster · CHECK wie in 0037 |
+| `interaction` | `text` | geschlossene Menge, CHECK `in ('quick_view_open')` |
+| `interaction_to_visible_ms` | `integer` | A→C, der Dialog steht |
+| `interaction_to_commit_ms` | `integer` | A→B, React |
+| `commit_to_visible_ms` | `integer` | B→C, Paint |
+| `content_visible_ms` | `integer` **nullable** | A→D, das Artwork ist zu sehen |
+| `viewport_w` / `viewport_h` | `smallint` | CHECK 0–10000 |
+| `warm` | `boolean` | dieser Schlüssel auf dieser Route kam im Lauf schon vor |
+| `build_id` / `label` | `text` | wie in 0037 |
+
+**`route` ist Singular.** Eine Interaktion hat einen Ort, keine Richtung; `from_route`/`to_route`
+in `perf_navigations` bleiben dadurch unverändert Routen.
+
+**`content_visible_ms` ist nullable, und null bleibt null.** Kein Bild, kein verlässliches
+Browsersignal oder ein vorher geschlossener Dialog ergeben **nichts** — nie eine Null. Der Wert
+darf zudem **kleiner** sein als `interaction_to_visible_ms`: ein bereits dekodiertes Bild war nie
+das, worauf gewartet wurde. Der CHECK vergleicht die beiden absichtlich nicht.
+
+**Keine Figuridentität.** Keine `sky_id`, kein Slug, kein Name, kein Bildpfad. `quick_view_open`
+auf `/` sagt, dass ein Dialog aufging, nie welcher.
+
+| Funktion | Gate | Zweck |
+|---|---|---|
+| `record_interaction(…)` | `has_tester_permission('performance_tracking')` | der einzige Schreibweg |
+| `admin_perf_interactions(uuid, text)` | `is_shop_admin()` | Perzentile je Schlüssel/Route, warm/kalt getrennt |
+| `admin_prune_perf_interactions(int)` | `is_shop_admin()` | auf Zuruf löschen, kein Scheduler |
+
+`admin_perf_interactions()` zählt die Artwork-Messwerte (`content_samples`) und bildet die
+Artwork-Perzentile nur über sie — `percentile_cont` ignoriert Nulls, und die Anzahl sagt, wie
+belastbar die Zahl ist.
+
+**Abhängigkeiten:** `auth.users` (0001), `is_shop_admin()` (0003), `has_tester_permission()`
+(0036). **Nicht** `0035`.
 
 
 ### 3.4 `profiles` — 1:1 zu `auth.users`

@@ -803,6 +803,21 @@ Recht und keine Policy, weder vor noch nach diesem Lesepfad.
 `npm run perf:report:staging` ist strikt lesend und trägt dieselbe Staging-Sperre wie jedes andere
 Werkzeug mit zwei Umgebungen.
 
+### Interaktions-Telemetrie (Migration `0038`, ADR-0073)
+
+Gleiche Haltung, gleiches Tor: `perf_interactions` hat RLS an, `revoke all from anon,
+authenticated`, keine Policy. Geschrieben wird nur über `record_interaction()`, das
+`performance_tracking` verlangt und das Konto aus `auth.uid()` nimmt — **kein `p_user_id`**.
+Commerce allein genügt nicht, Adminrechte allein genügen nicht. Gelesen wird über
+`admin_perf_interactions()` (`is_shop_admin()`) oder auf der Kommandozeile mit dem
+Service-Role-Key; der Tester liest auch hier nichts zurück.
+
+**Was zusätzlich nicht erfasst wird.** Die Tabelle nennt **nie**, welche Figur geöffnet wurde:
+keine `sky_id`, kein Slug, kein Name, kein Bildpfad, keine Bild-URL. Der Schlüssel stammt aus
+einer im CHECK festgelegten Menge — der Browser kann keinen Ereignisnamen erfinden —, und das
+Markup trägt genau diesen Schlüssel und sonst nichts. Aus `quick_view_open` auf `/` lässt sich
+kein Browserverlauf rekonstruieren.
+
 ## 5. Git-Sicherheit
 
 Geplante `.gitignore`-Strategie (**noch nicht angelegt** — dieser Durchlauf schreibt nur Doku):

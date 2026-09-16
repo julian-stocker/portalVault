@@ -27,6 +27,40 @@
  * pins that rule for the catalog importer; it holds here for the same reason.
  */
 
+/** One row of `perf_interactions`, named as PostgREST returns it. */
+export type InteractionRow = {
+  run_id: string;
+  occurred_at: string;
+  route: string;
+  interaction: string;
+  interaction_to_visible_ms: number;
+  interaction_to_commit_ms: number;
+  commit_to_visible_ms: number;
+  /** Null when the artwork gave no trustworthy signal. Never a zero for that. */
+  content_visible_ms: number | null;
+  warm: boolean;
+  label: string | null;
+};
+
+export type InteractionSummary = {
+  interaction: string;
+  route: string;
+  warm: boolean;
+  samples: number;
+  visibleP50: number;
+  visibleP75: number;
+  visibleP95: number;
+  visibleMin: number;
+  visibleMax: number;
+  commitP50: number;
+  paintP50: number;
+  /** How many of `samples` had a measurable artwork timing. May be 0. */
+  contentSamples: number;
+  contentP50: number | null;
+  contentP75: number | null;
+  contentP95: number | null;
+};
+
 /** One row of `perf_navigations`, named as PostgREST returns it. */
 export type NavigationRow = {
   run_id: string;
@@ -180,4 +214,77 @@ export function summarizePairs(rows: readonly NavigationRow[]): PairSummary[] {
 
   pairs.sort((a, b) => b.visibleP75 - a.visibleP75);
   return pairs;
+}
+
+
+/**
+ * Interaction timings per key and route, slowest p75 first.
+ *
+ * Ordered by the STRUCTURAL p75 (A→C), like the navigation table, so the two
+ * sections read the same way. The artwork numbers are reported beside them
+ * rather than mixed in: they answer a different question, and a route whose
+ * dialog appears instantly but whose picture takes a second is a different
+ * problem from one that is slow to open.
+ *
+ * NULLS ARE EXCLUDED, NOT COUNTED AS ZERO. A sample with no measurable
+ * artwork timing contributes to `samples` and not to `contentSamples`, and
+ * the percentiles are taken over the latter. Treating "not measured" as
+ * "instant" would make every un-measurable figure look like the fastest one.
+ */
+export function summarizeInteractions(rows: readonly InteractionRow[]): InteractionSummary[] {
+  const byKey = new Map<string, InteractionRow[]>();
+  for (const row of rows) {
+    // Neither part can contain the separator: `interaction` is a closed set of
+    // lower-case words and `route` is CHECK-constrained to a pattern.
+    const key = `${row.interaction}|${row.route}|${row.warm}`;
+    const group = byKey.get(key);
+    if (group) group.push(row);
+    else byKey.set(key, [row]);
+  }
+
+  const ascending = (a: number, b: number) => a - b;
+  const summaries: InteractionSummary[] = [];
+  for (const group of byKey.values()) {
+    const visible = group.map((row) => row.interaction_to_visible_ms).sort(ascending);
+    const commit = group.map((row) => row.interaction_to_commit_ms).sort(ascending);
+    const paint = group.map((row) => row.commit_to_visible_ms).sort(ascending);
+    const content = group
+      .map((row) => row.content_visible_ms)
+      .filter((value): value is number => typeof value === "number")
+      .sort(ascending);
+
+    summaries.push({
+      interaction: group[0].interaction,
+      route: group[0].route,
+      warm: group[0].warm,
+      samples: group.length,
+      visibleP50: whole(percentile(visible, 0.5)),
+      visibleP75: whole(percentile(visible, 0.75)),
+      visibleP95: whole(percentile(visible, 0.95)),
+      visibleMin: visible[0],
+      visibleMax: visible[visible.length - 1],
+      commitP50: whole(percentile(commit, 0.5)),
+      paintP50: whole(percentile(paint, 0.5)),
+      contentSamples: content.length,
+      // Null, not zero, when nothing was measurable: the report prints a dash.
+      contentP50: content.length === 0 ? null : whole(percentile(content, 0.5)),
+      contentP75: content.length === 0 ? null : whole(percentile(content, 0.75)),
+      contentP95: content.length === 0 ? null : whole(percentile(content, 0.95)),
+    });
+  }
+
+  summaries.sort((a, b) => b.visibleP75 - a.visibleP75);
+  return summaries;
+}
+
+/** The same `--run` / `--label` filter, for interaction rows. */
+export function selectInteractions(
+  rows: readonly InteractionRow[],
+  filter: { runId?: string | null; label?: string | null },
+): InteractionRow[] {
+  return rows.filter(
+    (row) =>
+      (!filter.runId || row.run_id === filter.runId) &&
+      (!filter.label || row.label === filter.label),
+  );
 }

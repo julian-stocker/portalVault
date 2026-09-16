@@ -152,6 +152,23 @@ export function OfferLink({
     <Link
       href={`/skylanders/${slug}#angebote`}
       /*
+       * A marker for performance measurement, and only when this link opens
+       * the quick view rather than navigating (ADR-0073).
+       *
+       * It carries an interaction key and nothing else — no SKY-ID, no slug,
+       * no name. Telemetry is mounted only for accounts holding
+       * `performance_tracking`, so for everybody else this attribute is inert
+       * markup that nothing reads.
+       *
+       * It also keeps the navigation numbers honest. This element is an
+       * anchor whose click handler calls `preventDefault()` in the bubble
+       * phase, while the telemetry listener runs in the capture phase before
+       * it — so without the marker a quick view open looked exactly like the
+       * start of a navigation to the detail page, and the navigation that
+       * never came would be charged against the next real one.
+       */
+      {...(onOpen ? { "data-perf": "quick_view_open" } : {})}
+      /*
        * Not prefetched (V3.6, A/B).
        *
        * One of these stands on every card that has an offer, so a screen of

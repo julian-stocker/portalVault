@@ -15,8 +15,25 @@
  * NO RETRY. A failed flush puts nothing back. Retrying over a bad connection
  * is how a telemetry client becomes the performance problem it was measuring,
  * and the next flush carries whatever has accumulated since anyway.
+ *
+ * ONE QUEUE, TWO KINDS (ADR-0073)
+ *
+ * Navigations and interactions share it. Not to save code — because a second
+ * queue would mean a second `pagehide` handler and a second way to lose the
+ * last few samples of a run at exactly the moment they matter. The queue
+ * itself does not know the difference: it holds whatever it is given, in
+ * order, and the delivery step sorts them out.
  */
-import type { Sample } from "./navigation.ts";
+import type { NavigationSample } from "./navigation.ts";
+import type { InteractionSample } from "./interaction.ts";
+
+/**
+ * One measurement, of either kind, discriminated by `kind`.
+ *
+ * Order is preserved across both: a batch reads as what the tester did, in
+ * the sequence they did it.
+ */
+export type Sample = NavigationSample | InteractionSample;
 
 /** Sent as one request. Small enough to be cheap, large enough to be rare. */
 export const BATCH_SIZE = 10;

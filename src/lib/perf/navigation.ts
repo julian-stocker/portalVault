@@ -117,7 +117,16 @@ export function explains(pending: Pending, arrivedPath: string, now: number): bo
   return normalizeRoute(arrivedPath) === pending.toRoute;
 }
 
-export type Sample = {
+export type NavigationSample = {
+  /**
+   * What kind of measurement this is (ADR-0073).
+   *
+   * The queue carries navigations and in-page interactions together, and the
+   * delivery step sends each to its own function. A discriminator on the
+   * sample is how a batch stays one ordered list of what the tester did
+   * rather than two lists that have to be zipped back together.
+   */
+  kind: "navigation";
   fromRoute: string;
   toRoute: string;
   interactionToVisibleMs: number;
@@ -125,6 +134,9 @@ export type Sample = {
   commitToVisibleMs: number;
   warm: boolean;
 };
+
+/** The old name, kept because everything that speaks of navigation uses it. */
+export type Sample = NavigationSample;
 
 /** The three durations, rounded, from the three timestamps. */
 export function measure(
@@ -143,6 +155,7 @@ export function measure(
   if (toVisible > MAX_NAVIGATION_MS) return null;
 
   return {
+    kind: "navigation",
     fromRoute: pending.fromRoute,
     toRoute: pending.toRoute,
     interactionToVisibleMs: toVisible,

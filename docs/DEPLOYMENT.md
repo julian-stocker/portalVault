@@ -527,29 +527,41 @@ Angewandt auf Production in dieser Reihenfolge: `0014` → `0015` → `0016`.
 
 ---
 
-## Offene Migrationen für Production — `0035`, `0036`, `0037`
+## Migrationsstand der Telemetrie — was Production noch fehlt
 
-Stand 2026-09-16. **Production hat `0033` und `0034`; `0035`, `0036` und `0037` sind dort nicht
-angewandt.** Staging hat `0035` und `0036`, `0037` nicht. Die Reihenfolge ist nicht beliebig:
+**Stand 2026-09-17.**
 
-| | Migration | Abhängigkeit |
+| Migration | Staging | Production |
 |---|---|---|
-| 1. | `0035_system_set_image_override.sql` | keine — eigenständig, nur der Bildabgleich hängt daran |
-| 2. | `0036_tester_feature_permissions.sql` | **muss vor `0037`** — legt `tester_features` an |
-| 3. | `0037_performance_telemetry.sql` | `record_navigation()` ruft `has_tester_permission()` aus `0036` |
+| `0035_system_set_image_override.sql` | angewandt | **absichtlich nicht** — gehört zum Bildabgleich |
+| `0036_tester_feature_permissions.sql` | angewandt | angewandt |
+| `0037_performance_telemetry.sql` | angewandt | angewandt |
+| `0038_performance_interactions.sql` | angewandt, verifiziert | **offen — der einzige nächste Schritt** |
 
-`0037` vor `0036` scheitert laut beim Anlegen der Funktion und hinterlässt keine halbe Installation
-— die Reihenfolge ist also erzwungen und nicht nur empfohlen. `0035` ist zu den beiden anderen
-unabhängig und darf davor oder danach laufen.
+**Die nächste SQL-Aktion auf Production ist genau eine: `0038`.** `0036` und `0037` sind dort
+angewandt und werden **nicht** erneut ausgeführt.
 
-**Alle drei sind additiv.** Keine Zeile wird geändert, keine Spalte gelöscht, keine bestehende
-Funktion umsigniert. `0036` schreibt einmalig die vorhandenen `commerce_testers` in das neue
-Modell; auf einer Production ohne Tester ist das eine leere Menge.
+**`0038` hängt nicht an `0035`.** Es braucht `auth.users` (0001), `is_shop_admin()` (0003) und
+`has_tester_permission()` (0036) — mehr nicht; `system_set_image_override()` kommt darin nicht vor.
+`0035` bleibt auf Production unangewandt, und das ändert an `0038` nichts.
 
-**Nach `0037` ist noch nichts an.** Die Telemetrie misst erst, wenn ein Konto im Adminbereich unter
-„Testkonten" die Berechtigung `performance_tracking` bekommt. Ohne diesen Schritt ändert die
-Migration am Verhalten der Seite nichts.
+**Die Reihenfolge war nie beliebig:** `0037` und `0038` rufen beide `has_tester_permission()` aus
+`0036` und scheitern ohne es laut, ohne eine halbe Installation zu hinterlassen. `0038` und `0037`
+sind voneinander unabhängig — ohne `0038` ist der Bericht ein reiner Navigationsbericht und sagt
+das auch.
 
-**Rücknahme.** `0037`: `drop function` auf die vier Funktionen, `drop table perf_navigations`.
+**Additiv.** Keine Zeile wird geändert, keine Spalte gelöscht, keine bestehende Funktion
+umsigniert.
+
+**Nach einer Migration ist noch nichts an.** Die Telemetrie misst erst, wenn ein Konto im
+Adminbereich unter „Testkonten" die Berechtigung `performance_tracking` hat. Ohne diesen Schritt
+ändert `0038` am Verhalten der Seite nichts.
+
+**`0038` ist unabhängig von `0037`.** Es ergänzt nur eine zweite Tabelle; ohne `0038` bleibt der
+Bericht ein reiner Navigationsbericht und sagt das auch. `0037` ohne `0038` ist ein gültiger
+Zustand, `0038` ohne `0036` nicht.
+
+**Rücknahme.** `0038`: `drop function` auf die drei Funktionen, `drop table perf_interactions`.
+`0037`: `drop function` auf die vier Funktionen, `drop table perf_navigations`.
 `0036`: die vier Tabellen und die Funktionen droppen — `commerce_testers` steht dafür bewusst noch
 als Spiegel da und ist aktuell (ADR-0071).

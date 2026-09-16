@@ -6015,3 +6015,128 @@ Nutzertracking) · eine eigene `perf_testers`-Tabelle (ADR-0071 existiert genau 
 ein Admin-Dashboard (Oberfläche für eine Zahlentabelle) · automatisches Pruning per `pg_cron`
 (ein Scheduler, den niemand beobachtet; `admin_prune_perf_navigations(days)` wird gerufen, wenn
 jemand aufräumen will).
+
+---
+
+## ADR-0073 — Die wichtigste Interaktion im Katalog ist keine Navigation
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** `0038_performance_interactions.sql`
+**Erweitert ADR-0072. Ändert an `perf_navigations` nichts.**
+
+**Kontext.** Der erste echte Production-Lauf von 0037 hat funktioniert — und dabei etwas
+Wichtigeres gezeigt als die Zahlen: **13 Navigationen, jede einzelne ein Link aus der
+Hauptnavigation, und null `/skylanders/[slug]`.** Der Tester hatte in derselben Sitzung Figuren
+durchgesehen, Detailansichten geöffnet, in den Warenkorb gelegt und eine Sandbox-Bestellung
+abgeschlossen.
+
+Der Grund steht im Code und ist eine Entscheidung, keine Panne: Eine Figur zu öffnen **ist keine
+Navigation**. Der Tap setzt React-State, ein Dialog erscheint, der Pfad ändert sich nie
+(ADR-0027). Navigationstelemetrie hat daran nichts zu messen. Die Geste, die am meisten darüber
+entscheidet, wie schnell sich SkyIsles anfühlt, erzeugte **keine einzige Zeile**.
+
+**Entscheidung.** Eine zweite, schmale Tabelle für Interaktionen innerhalb einer Seite — und
+**vier** Zeitpunkte statt drei:
+
+| | | |
+|---|---|---|
+| **A** | der Tap auf den Auslöser | Klick-Listener |
+| **B** | der Dialog steht im DOM | `MutationObserver` |
+| **C** | das erste Bild danach | zwei verschachtelte rAF |
+| **D** | das Artwork ist zu sehen | `img.decode()` / `load` |
+
+### Warum D existiert, und warum ohne D die Messung gelogen hätte
+
+**Der Quick View lädt nichts.** Figur und Angebote liegen längst im Browser
+(`lib/ui/quick-view.ts` sagt das ausdrücklich), `quickViewModel()` ist rein. A→C misst also React
+und Paint — und wird fast immer schnell aussehen.
+
+Das Bild ist eine andere Sache. Es ist `loading="lazy"`, und für jede Figur mit einem
+Admin-Override kommt es **über das Netz aus Supabase Storage**. Ein Bericht mit nur A→C hätte
+gesagt „der Quick View öffnet in 40 ms", während der Tester auf einen leeren Rahmen sieht. Das
+wäre die zweite Messung hintereinander gewesen, die das Falsche misst.
+
+**`content_visible_ms` ist nullable, und null bleibt null.** Wenn es kein Bild gibt, wenn der
+Browser kein verlässliches Signal liefert oder wenn der Dialog vorher geschlossen wird, steht dort
+**nichts** — nie eine Null. „Konnte nicht gemessen werden" in „war sofort da" zu verwandeln ist
+genau der Fehler, gegen den diese Spalte existiert. Auch der Bericht rechnet Nulls nicht mit,
+sondern zählt sie: `c-n` sagt, über wie viele Messwerte die Artwork-Perzentile gebildet wurden.
+
+**`decode()` statt `load`, wo es beides gibt.** `load` sagt, dass die Bytes da sind; `decode()`
+sagt, dass der Browser das Bild zeichnen kann, ohne zu blockieren. Auf einem Telefon ist das
+Dekodieren eines 640×640-PNG nicht umsonst, und der Tester sieht den zweiten Moment.
+
+**D darf kleiner sein als C.** Ein bereits dekodiertes Bild kann vor dem zweiten Frame fertig
+sein. Das ist kein Fehler, sondern der Befund „das Bild war nie das, worauf gewartet wurde" — und
+ein Clamp auf C würde genau diesen Fall auslöschen. Weder der CHECK noch der Client korrigieren
+das.
+
+### Zwei Tabellen, weil zwei Dinge gemeint sind
+
+`perf_navigations.from_route`/`to_route` **bleiben Routen**. `/[dialog]/quick-view` dort
+hineinzuschreiben hieße, beide Spalten bedeuteten „eine Route, manchmal aber auch nicht", und jede
+spätere Abfrage müsste wissen, welches gerade gilt. Eine Interaktion hat einen **Ort**, keine
+Richtung: eine `route`-Spalte, dazu ein Schlüssel, der sagt, was passiert ist.
+
+### Der Schlüsselvorrat ist ein CHECK, kein Register
+
+Der Unterschied zu ADR-0071 ist der Punkt. Test-Berechtigungen sind eine **offene** Menge — eine
+neue ist ein `INSERT`. Interaktionsschlüssel sind **durch ihre Bauart geschlossen**: ein Schlüssel
+kann nicht existieren, bevor jemand den Client-Code schreibt, der ihn sendet, und das ist ohnehin
+ein Deploy. Ein Register wäre Zeremonie um eine Bedingung, die real ist.
+
+**Genau ein Schlüssel:** `quick_view_open`. **Kein `quick_view_switch`** — der Dialog hat keine
+Galeriepfeile und kein Weiter (`quick-view.tsx`); eine andere Figur heißt schließen und neu
+tippen, also zwei Öffnungen. Ein Schlüssel, der nie feuern kann, ist schlimmer als keiner.
+
+### Der Marker, und was er nebenbei repariert
+
+Ein Attribut `data-perf="quick_view_open"` am vorhandenen Auslöser, und zwar **nur**, wenn dieser
+den Dialog öffnet statt zu navigieren. Es trägt einen Interaktionsschlüssel und sonst nichts —
+keine SKY-ID, keinen Slug, keinen Namen.
+
+Es hält außerdem die Navigationszahlen ehrlich. Der Auslöser ist ein `<Link>`, dessen Handler
+`preventDefault()` in der Bubble-Phase ruft — **nachdem** der Capture-Listener der Telemetrie den
+Klick bereits gesehen hat. Ohne den Marker sah jedes Öffnen des Quick View aus wie der Beginn
+einer Navigation zur Detailseite, und die Navigation, die nie kam, wurde der **nächsten echten**
+angelastet, die daraufhin verworfen wurde. Das ist ein Teil der Erklärung für 13 aufgezeichnete
+Navigationen in einer vollen Sitzung.
+
+### `Modal` und `QuickView` wissen von nichts
+
+B wird an `role="dialog"` und `aria-modal="true"` erkannt — Attribute, die der Dialog längst
+trug. Keine Zeile in `Modal` oder `QuickView` ändert sich: keine Animationsdauer, kein
+`backdrop-blur`, kein `loading="lazy"`. **Messen heißt hier nicht anfassen.**
+
+### `warm` sagt weniger, als es klingt
+
+`warm` heißt: **dieser Schlüssel auf dieser Route kam in diesem Lauf schon vor.** Nicht, dass das
+Bild im Cache lag, nicht, dass der Router-Cache warm war, nicht, dass Storage das Objekt hatte.
+Die Zeile kennt keine Bildidentität, könnte es also gar nicht wissen — zwei Quick Views zweier
+Figuren holen zwei verschiedene Bilder, und der zweite gilt trotzdem als warm.
+
+### Eine Warteschlange, zwei Arten
+
+Navigationen und Interaktionen teilen sie sich — nicht um Code zu sparen, sondern weil eine zweite
+Warteschlange einen zweiten `pagehide`-Handler bedeutete und damit einen zweiten Weg, die letzten
+Messwerte eines Laufs genau dann zu verlieren, wenn sie zählen. Jede Probe wird **einzeln**
+geprüft und einzeln gesendet: eine fehlerhafte Interaktion überspringt sich selbst, die
+Navigationen daneben werden trotzdem aufgezeichnet.
+
+### Weiterhin absichtlich ungemessen
+
+Zurück/Vorwärts · frische Dokumentladungen · Ankünfte nach `redirect()` · Stripes eigene Dauer ·
+das Schließen des Dialogs · Admin-Editor und Figur-anlegen-Dialog · Suchtippen · Scrollen ·
+Warenkorb-Hinzufügen. **Abdeckungsqualität vor Ereignismenge**: Zahlen zu erzeugen, die keine
+Frage beantworten, macht den Bericht schlechter, nicht besser.
+
+**`checkout_submit` ist zurückgestellt**, nicht halb gebaut. Messbar wäre es — der Tap, dann der
+Moment, in dem SkyIsles an Stripe übergibt —, aber `window.location.assign()` zerstört das
+Dokument sofort danach, und die Probe müsste ein Unload überleben, für das der Zustellweg nicht
+gebaut ist. Die Dauer-Spalten wurden dafür **nicht vorsorglich nullable gemacht**.
+
+**Verworfen.** Ein Pseudo-Route-Eintrag in `perf_navigations` (macht beide Routenspalten
+mehrdeutig) · `quick_view_switch` (existiert nicht) · ein Interaktionsregister als Tabelle
+(Zeremonie) · `content_visible_ms = interaction_to_visible_ms` bei gecachtem Bild (macht aus
+„nicht messbar" ein „sofort") · Nulls als Null in die Perzentile (dasselbe, nur im Bericht) · eine
+zweite Warteschlange · generische Interaktionsanalytik · Option C aus dem Audit (mehr Ereignisse
+ohne mehr Antworten).

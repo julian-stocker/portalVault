@@ -1399,7 +1399,7 @@ ausdrücklich nicht Teil dieses Release.
 ## Test-Berechtigungen und Performance-Telemetrie (Stand 2026-09-16)
 
 **0036 — Test-Berechtigungen** · ADR-0071 · `0036_tester_feature_permissions.sql` ·
-**auf Staging angewandt, auf Production nicht.** `commerce_testers` war eine Tabelle für eine
+**auf Staging und Production angewandt.** `commerce_testers` war eine Tabelle für eine
 Frage; die zweite Frage hätte eine zweite Tabelle derselben Form bedeutet. Jetzt: `testers`,
 `tester_features` (Vokabular: `commerce`, `performance_tracking`), `tester_permissions`,
 `tester_permission_changes`. `is_commerce_tester()` behält Name, Signatur und Rechte — am
@@ -1408,7 +1408,7 @@ stehen und wird nachgeführt; gelesen wird es von nichts mehr. Verwaltet im Admi
 „Testkonten"; `commerce-panel.tsx` ist dadurch von 204 auf 96 Zeilen geschrumpft.
 
 **0037 — Navigationstelemetrie** · ADR-0072 · `0037_performance_telemetry.sql` ·
-**geschrieben, NIRGENDS angewandt.**
+**auf Staging und Production angewandt und verifiziert.**
 
 Warum überhaupt: SkyIsles fühlt sich mobil langsam an, die Verdächtigen sind bekannt, aber
 **welcher die gefühlte Sekunde erzeugt, weiß niemand.** `PerformanceNavigationTiming` misst
@@ -1440,8 +1440,63 @@ liefert den Bericht. Der erste Lauf (2 Navigationen, beide kalt) zeigt die Dauer
 Zeichnen. Das ist ein erster Hinweis, **keine Messreihe** — und ausdrücklich noch kein Anlass,
 etwas zu optimieren.
 
-**Offen vor Production:** `0035` → `0036` → `0037` anwenden, Testkonto berechtigen, mobile
-Basismessung aufnehmen. **Production: bislang nichts.**
+**Erledigt auf Production:** `0036` und `0037` sind angewandt; ein erster Lauf hat die Aufzeichnung
+bestätigt (13 Navigationen, Lauf `6b69e9fa-…`) — **und zugleich gezeigt, dass die Hauptgeste des
+Katalogs gar keine Navigation ist.** Daher V2 / `0038`, siehe unten. `0035` bleibt auf Production
+absichtlich unangewandt.
+
+---
+
+## V2 — Interaktionstelemetrie (Stand 2026-09-16)
+
+**0038 — Quick View messen** · ADR-0073 · `0038_performance_interactions.sql` ·
+**auf Staging angewandt und verifiziert; auf Production offen.**
+
+Der erste Production-Lauf von 0037 hat funktioniert und dabei etwas Wichtigeres gezeigt:
+**13 Navigationen, jede ein Link aus der Hauptnavigation, null `/skylanders/[slug]`** — in einer
+Sitzung mit Figurenstöbern, Warenkorb und abgeschlossener Sandbox-Bestellung. Eine Figur zu öffnen
+ist **keine Navigation** (ADR-0027), also hatte 0037 daran nichts zu messen.
+
+| | |
+|---|---|
+| Vier Zeitpunkte: Tap → Dialog im DOM → erstes Bild → Artwork bereit | ✅ |
+| `perf_interactions`, `route` singular — `perf_navigations` bleibt unberührt | ✅ geschrieben |
+| Geschlossene Schlüsselmenge per CHECK, genau `quick_view_open` | ✅ geschrieben |
+| `content_visible_ms` nullable; null bleibt null, nie 0 | ✅ |
+| `img.decode()` statt `load`, auch bei gecachtem Bild | ✅ |
+| D darf kleiner sein als C — kein Clamp | ✅ |
+| Ein `data-perf`-Attribut, keine Figuridentität | ✅ |
+| `Modal` und `QuickView` unverändert — Animation, Blur, `loading="lazy"` bleiben | ✅ |
+| Eine Warteschlange für beide Arten, ein `pagehide` | ✅ |
+| Bericht mit zwei getrennten Abschnitten, Artwork mit eigener Anzahl | ✅ |
+| 83 neue Tests in `src/lib/perf/interaction.test.ts` | ✅ |
+
+**Nebenbefund, mitrepariert:** Der Quick-View-Auslöser ist ein `<Link>`, dessen Handler
+`preventDefault()` erst in der Bubble-Phase ruft. Der Capture-Listener der Telemetrie sah den
+Klick vorher und merkte sich eine Navigation zur Detailseite, die nie stattfand — die **nächste
+echte** Navigation wurde dadurch verworfen. Der `data-perf`-Marker beendet das, weil der Klick nun
+als Interaktion erkannt wird, bevor der Anchor-Zweig ihn sieht.
+
+**Zurückgestellt:** `checkout_submit`. Messbar wäre es, aber `window.location.assign()` zerstört
+das Dokument sofort; die Dauer-Spalten wurden dafür **nicht** vorsorglich nullable gemacht.
+
+**Auf Staging verifiziert (2026-09-17).** `perf_interactions` existiert, kein direktes Recht für
+`anon`/`authenticated`, alle drei Funktionen `security definer`. Drei echte Messwerte vom Telefon,
+**alle drei mit messbarer Artwork-Zeit**:
+
+| | n | A→C p50 | commit | paint | content p50 |
+|---|---:|---:|---:|---:|---:|
+| `quick_view_open` `/` kalt | 1 | 196 | 115 | 81 | 215 |
+| `quick_view_open` `/` warm | 2 | 142 | 68 | 74 | 154 |
+
+Der Bericht trennt Navigationen und Interaktionen sauber. **Die Navigationszeilen dieses Laufs
+stammen aus dem alten Staging-Lauf und sind keine Baseline.**
+
+**Offen auf Production:** ausschließlich `0038`. `0036` und `0037` sind dort bereits angewandt.
+
+**Baseline:** Der Production-Lauf `6b69e9fa-…` bleibt eine reine Navigations-Verifikation und ist
+**kein** Optimierungs-Vorher. Der neue Vorher-Lauf heißt `prod-baseline-v2` und wird erst nach dem
+Rollout erhoben. **Bis dahin wird nichts optimiert.**
 
 ---
 

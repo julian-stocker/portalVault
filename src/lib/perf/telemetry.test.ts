@@ -176,6 +176,7 @@ describe("the three durations", () => {
   it("splits waiting from drawing", () => {
     const sample = measure(tap, 1700, 1900, false);
     expect(sample).toEqual({
+      kind: "navigation",
       fromRoute: "/",
       toRoute: "/collection",
       interactionToVisibleMs: 900,
