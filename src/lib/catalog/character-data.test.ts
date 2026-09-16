@@ -3,15 +3,16 @@ import { describe, expect, it } from "vitest";
 
 import { firstReleaseSeries, validateCuratedFile } from "./character.ts";
 import { isCollectibleCategory } from "./collectible.ts";
+import { skyIdRange } from "./sky-id.ts";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
 /**
  * The curated pilot data, checked against the real catalog.
  *
  * This is the test that matters most in this milestone. It does not exercise
- * a function — it asserts that 19 hand-made character assignments actually
- * describe the 561 collectibles we have, including every case where a name
- * rule would get it wrong.
+ * a function — it asserts that the hand-made character assignments actually
+ * describe the collectibles we have, including every case where a name rule
+ * would get it wrong.
  *
  * Both files ship in the repository, so this runs offline.
  */
@@ -26,7 +27,28 @@ const seriesLabel = new Map(catalog.series.map((series) => [series.code, series.
 const item = new Map(catalog.items.map((entry) => [entry.id, entry]));
 const knownSkyIds = new Set(catalog.items.map((entry) => entry.id));
 
-const { problems, characters } = validateCuratedFile(curated, knownSkyIds);
+/*
+ * `legacy-export`, stated rather than assumed (ADR-0070).
+ *
+ * `products.json` is complete for the ids the legacy project issued and
+ * CANNOT hold one SkyIsles issued — that is what the productive range means.
+ * Telling the validator what this set covers is the difference between
+ * "SKY-0821 does not exist" and "SKY-0821 was not issued here"; only the
+ * second is true, and only the live catalogue can answer the first. The
+ * import does exactly that before it writes.
+ */
+const { problems, characters } = validateCuratedFile(curated, knownSkyIds, "legacy-export");
+
+/**
+ * The curated ids this file can still say something about.
+ *
+ * Everything below reads `products.json` for a category or a series, and a
+ * figure SkyIsles created has neither there. Skipping them is not a gap being
+ * ignored — it is this file declining to answer a question it has no source
+ * for, while `character-namespace.test.ts` holds the rules that do apply.
+ */
+const fromExport = (skyIds: readonly string[]) =>
+  skyIds.filter((skyId) => skyIdRange(skyId) === "historical");
 const byName = new Map(characters.map((entry) => [entry.canonical_name, entry]));
 
 function idsOf(name: string): string[] {
@@ -37,7 +59,9 @@ function idsOf(name: string): string[] {
 
 /** Only what firstReleaseSeries reads. */
 function figuresOf(name: string): CatalogFigure[] {
-  return idsOf(name).map((skyId) => {
+  // Only the export-backed ids: the derivation answers "which series brought
+  // the first figure", and a series is exactly what the export knows.
+  return fromExport(idsOf(name)).map((skyId) => {
     const row = item.get(skyId)!;
     return {
       seriesCode: row.series,
@@ -52,14 +76,21 @@ describe("the curated pilot file", () => {
     expect(problems).toEqual([]);
   });
 
-  it("holds 19 characters and 104 assignments", () => {
-    expect(characters).toHaveLength(19);
-    expect(characters.flatMap((entry) => entry.sky_ids)).toHaveLength(104);
+  it("holds 20 characters and 107 assignments", () => {
+    /*
+     * The twentieth is Fire Kraken, and its third assignment is `SKY-0821` —
+     * the first admin-created figure ever curated. It is counted here like
+     * any other: an admin-created row is a canonical catalogue figure
+     * (ADR-0070), and this file's only concession to that is knowing which
+     * questions `products.json` can answer about it.
+     */
+    expect(characters).toHaveLength(20);
+    expect(characters.flatMap((entry) => entry.sky_ids)).toHaveLength(107);
   });
 
   it("assigns only collectibles — never a console game", () => {
     for (const entry of characters) {
-      for (const skyId of entry.sky_ids) {
+      for (const skyId of fromExport(entry.sky_ids)) {
         const row = item.get(skyId)!;
         expect(
           isCollectibleCategory(row.category),
@@ -80,7 +111,7 @@ describe("the curated pilot file", () => {
       "Locations & Truhen",
     ]);
     for (const entry of characters) {
-      for (const skyId of entry.sky_ids) {
+      for (const skyId of fromExport(entry.sky_ids)) {
         const row = item.get(skyId)!;
         expect(NOT_FIGURES.has(row.category), `${skyId} is in '${row.category}'`).toBe(false);
       }
@@ -196,7 +227,7 @@ describe("the grouping cases a name rule gets wrong", () => {
   });
 });
 
-describe("derived first release, checked for all 19", () => {
+describe("derived first release, checked for all 20", () => {
   const EXPECTED: Record<string, string> = {
     Drobot: "SA",
     Spyro: "SA",
@@ -217,6 +248,7 @@ describe("derived first release, checked for all 19", () => {
     "Grim Creeper": "SF",
     "Turbo Charge Donkey Kong": "SC",
     Kaos: "I",
+    "Fire Kraken": "SF",
   };
 
   it("covers every pilot character", () => {

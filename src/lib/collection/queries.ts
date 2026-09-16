@@ -8,12 +8,14 @@
 import {
   FIGURE_COLUMNS,
   characterElements,
+  characterNames,
   fetchCharacterIndex,
   fetchNameIndex,
   loadLookups,
   toFigure,
   type FigureRow,
   withCharacterElement,
+  withCharacterFamily,
   withVariants,
 } from "@/lib/catalog/queries";
 import { sortFigures } from "@/lib/catalog/sort";
@@ -71,7 +73,10 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
   // Same derived display name and the same element as the catalog, from the
   // same functions — a collection card must not look different.
   const enriched = withCharacterElement(
-    withVariants(entries.map((e) => e.figure), nameIndex),
+    withCharacterFamily(
+      withVariants(entries.map((e) => e.figure), nameIndex),
+      characterNames(characterIndex),
+    ),
     characterElements(characterIndex),
   );
   entries.forEach((entry, index) => {

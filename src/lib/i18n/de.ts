@@ -393,6 +393,73 @@ export const de = {
     /* Der Adminblock hatte keins von beiden — `cancel` steht im Checkout-Block
        und `loading` im Katalogblock, beides andere Kontexte. */
     cancel: "Abbrechen",
+    /* ------------------------------------------------------------------
+       Figur hinzufügen (V3.9). Ein eigener Block, weil hier zum ersten Mal
+       ein Katalogeintrag ENTSTEHT statt geändert zu werden — die Wörter für
+       „anlegen" und „speichern" dürfen sich nicht vermischen.
+       ------------------------------------------------------------------ */
+    /** Der Knopf in der Katalogleiste, nur für Admins sichtbar. */
+    addFigure: "Hinzufügen",
+    addFigureTitle: "Figur hinzufügen",
+    /** Das X im Kopf des Hinzufügen-Dialogs. */
+    closeAdd: "Hinzufügen schließen",
+
+    startHeading: "Womit anfangen?",
+    startEmpty: "Leer beginnen",
+    startTemplate: "Bestehende Figur als Vorlage",
+    templateSearch: "Figur suchen …",
+    templateNone: "Keine passende Figur gefunden.",
+    templateChosen: (name: string) => `Vorlage: ${name}`,
+    templateClear: "Vorlage entfernen",
+    /* Was eine Vorlage überträgt, im Klartext — damit niemand annimmt, sie
+       übernehme Bild, Kartentyp oder Sichtbarkeit. */
+    /* Die Vorlage ist keine Formular-Vorbefüllung, sondern eine Aussage über
+       die Sammleridentität (ADR-0070a). Der Text sagt das, statt „übernimmt
+       zwei Felder" zu behaupten. */
+    templateHint:
+      "Die neue Figur gilt als weitere Ausgabe derselben Figur. Serie und Kategorie sind Startwerte.",
+    templateInherits: "Charakterzuordnung wird übernommen — Element und Suche folgen daraus.",
+    templateNoCharacter:
+      "Diese Vorlage hat keine Charakterzuordnung. Die neue Figur bleibt ohne — sie wird nicht erraten.",
+    templateNameUnchanged:
+      "Der Name stammt noch aus der Vorlage. Bitte den endgültigen Namen eintragen.",
+
+    skyIdAuto: "Wird automatisch vergeben",
+    createName: "Name",
+    createNameHint: "Wird roh gespeichert — keine Korrektur, keine Normalisierung.",
+    createSeries: "Serie",
+    createCategory: "Kategorie",
+    createCategoryFirst: "Zuerst eine Serie wählen.",
+    /* Beide Felder sind Anzeige, keine Eingabe: die Gruppe hängt an der
+       Kategorie, das Element an der Charakterzuordnung. */
+    groupDerived: "Ergibt sich aus der Kategorie.",
+    elementDerived: "Wird über die Charakterzuordnung bestimmt.",
+    slugLabel: "URL-Kürzel",
+    slugPreviewHint: "Vorschau. Die endgültige Vergabe erfolgt beim Anlegen.",
+
+    createVisibleLabel: "Sofort im öffentlichen Katalog zeigen",
+    createVisibleHint:
+      "Standardmäßig aus. Eine neue Figur hat noch kein Bild und keine Charakterzuordnung.",
+    createImageHint: "Optional. Wird nach dem Anlegen hochgeladen.",
+
+    similarTitle: "Ähnliche Katalogeinträge gefunden",
+    similarHint: "Gleiche Namen sind erlaubt — bitte nur kurz prüfen.",
+
+    create: "Figur hinzufügen",
+    creating: "Wird angelegt …",
+    created: (skyId: string) => `Figur ${skyId} hinzugefügt`,
+    /* Der Zweiphasen-Fall: die Figur EXISTIERT, nur das Bild fehlt. Der Text
+       sagt beides, weil ein bloßes „fehlgeschlagen" zu einem zweiten Anlegen
+       verleiten würde — und damit zu einer zweiten SKY-ID. */
+    createdWithoutImage: (skyId: string) =>
+      `Figur ${skyId} wurde angelegt, das Bild konnte nicht gespeichert werden.`,
+    closeWithoutImage: "Ohne Bild schließen",
+    imageAfterwards: "Das Bild lässt sich jederzeit über Bearbeiten nachtragen.",
+    createNameRequired: "Bitte einen Namen eintragen.",
+    createSeriesRequired: "Bitte eine Serie wählen.",
+    createCategoryRequired: "Bitte eine Kategorie wählen, die zur Serie gehört.",
+    createFailed: "Die Figur konnte nicht angelegt werden.",
+
     /**
      * Das X im Kopf des Bearbeiten-Dialogs (V3.8a). Eigener Text statt
      * `quickView.close`: derselbe Knopf, aber ein anderer Dialog — und eine

@@ -44,6 +44,26 @@ export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
   if (byEdition !== 0) return byEdition;
 
   /*
+   * THE FIGURE THE FAMILY IS NAMED AFTER COMES FIRST (V3.9a).
+   *
+   * Since the curated character may decide `sortBaseName` (ADR-0070b), a
+   * family can hold several members that the name rule gave no label to —
+   * "Eruptor", "Eruptor Light Core", "Lava Barf Eruptor" are all unlabelled.
+   * The chain below could only separate them by raw name, which is
+   * alphabetical luck: "Big Bubble Pop Fizz" would lead the Pop Fizz family.
+   *
+   * So the plain figure leads, stated rather than hoped for. It asks about
+   * the DISPLAY name, which is what the visitor reads and what "this is the
+   * figure itself" means to them.
+   *
+   * Only a tie-break. Series, category, base name and edition have all
+   * already had their say, and FAMILY_ORDER is untouched.
+   */
+  const aIsBase = a.displayName === a.sortBaseName;
+  const bIsBase = b.displayName === b.sortBaseName;
+  if (aIsBase !== bIsBase) return aIsBase ? -1 : 1;
+
+  /*
    * Same base, same edition. The label breaks the tie — there are families
    * with two chases — and the plain figure still comes before a labelled one,
    * because a base figure and its unnamed-form sibling share a rank.

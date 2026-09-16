@@ -270,6 +270,47 @@ export function withCharacterElement(
   });
 }
 
+/**
+ * THE COLLECTOR FAMILY, WHERE THE CATALOGUE ACTUALLY KNOWS IT (ADR-0070b).
+ *
+ * `sortBaseName` decides which figures stand together. Until now it came
+ * entirely from the NAME: `variant.ts` splits "Legendary Astroblast" into a
+ * base and a label, and a name it cannot split stays whole. That works for
+ * the forms somebody curated a token for, and it cannot work for the rest —
+ * "Dark Turbo Charge D.K." shares no characters with "Turbo Charge Donkey
+ * Kong", and "Legendary Grim Creemper" is a typo in the source. ADR-0034
+ * lists both as unsolvable by any name rule, which is why the curated link
+ * exists in the first place.
+ *
+ * So where a curated character IS known, it decides the family. The name rule
+ * keeps everything else, unchanged.
+ *
+ * IT WRITES ONE FIELD. That is the whole safety property of this pass:
+ * `sortVariantLabel` is what `figure-card.tsx` renders as a seal, and this
+ * function never touches it. A figure whose family improves keeps exactly the
+ * badge it had — including none. "Kaos in OVP" joins the Kaos family without
+ * anyone being told it is an "in OVP" variant, and the derivation cannot
+ * invent a label because it has no code that produces one.
+ *
+ * `displayName` is untouched too: "Gold Fire Kraken" keeps its name and sorts
+ * under Fire Kraken. Family, display and badge are three questions with three
+ * answers (ADR-0070b).
+ *
+ * A figure with no character, or one whose id is not in the index, is
+ * returned as it came — which is 461 of the 565 collectibles today.
+ */
+export function withCharacterFamily(
+  figures: readonly CatalogFigure[],
+  characterNames: ReadonlyMap<number, string>,
+): CatalogFigure[] {
+  return figures.map((figure) => {
+    if (figure.characterId === null) return figure;
+    const canonical = characterNames.get(figure.characterId);
+    if (canonical === undefined || canonical === figure.sortBaseName) return figure;
+    return { ...figure, sortBaseName: canonical };
+  });
+}
+
 export type CharacterIndex = Map<number, { canonicalName: string; element: Element | null }>;
 
 /** id -> name and element for every curated character. Nineteen rows today. */
@@ -355,9 +396,13 @@ export async function fetchCatalog(
   // The catalog already holds every collectible name, so the variant rule
   // needs no extra query here.
   const index = await fetchCharacterIndex();
+  const names = characterNames(index);
   const withNames = withVariants(figures, buildNameIndex(figures));
-  const withSearch = withCharacterSearch(withNames, characterNames(index));
-  return sortFigures(withCharacterElement(withSearch, characterElements(index)));
+  const withSearch = withCharacterSearch(withNames, names);
+  // The family pass runs after the name rule and before the sort: it is the
+  // curated answer overriding the derived one, and only for sortBaseName.
+  const withFamily = withCharacterFamily(withSearch, names);
+  return sortFigures(withCharacterElement(withFamily, characterElements(index)));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */
@@ -372,8 +417,10 @@ export async function fetchFigureBySlug(slug: string): Promise<CatalogFigure | n
   if (!result.data) return null;
 
   const figure = toFigure(result.data as FigureRow, lookups);
-  const nameIndex = await fetchNameIndex();
-  return withVariants([figure], nameIndex)[0];
+  const [nameIndex, index] = await Promise.all([fetchNameIndex(), fetchCharacterIndex()]);
+  // The same family as everywhere else. One figure on its own never sorts
+  // against anything, but no surface may disagree about what family it is in.
+  return withCharacterFamily(withVariants([figure], nameIndex), characterNames(index))[0];
 }
 
 type CharacterRow = {
@@ -449,7 +496,17 @@ export async function fetchFigureDetail(slug: string): Promise<FigureDetail | nu
   // Every figure here shares the one character, so its element applies to
   // all of them — no second query, and still no derivation from a name.
   const elements = new Map([[figure.characterId, character?.element ?? null]]);
-  const related = sortFigures(withCharacterElement(withVariants(siblings, nameIndex), elements));
+  /*
+   * The siblings are exactly the figures that share this one character, so
+   * the family name is already in hand — no second query, and the related
+   * list orders itself the way the catalogue does.
+   */
+  const names = new Map(
+    character === null ? [] : [[character.id, character.canonicalName] as const],
+  );
+  const related = sortFigures(
+    withCharacterElement(withCharacterFamily(withVariants(siblings, nameIndex), names), elements),
+  );
 
   return {
     figure: withCharacterElement([figure], elements)[0],

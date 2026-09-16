@@ -707,6 +707,38 @@ Client, kein Storage-Upload (noch nicht gebaut), kein Zugriff auf fremde Sammlun
 
 ---
 
+### Katalogeinträge anlegen (Migration `0033`, ADR-0070)
+
+Seit V3.9 kann ein Administrator eine Figur erzeugen. Der Schreibweg ist derselbe wie bei jeder
+anderen redaktionellen Mutation — **kein Client-Recht auf der Tabelle, eine
+`security definer`-Funktion mit `is_shop_admin()` als erster Anweisung**:
+
+```sql
+admin_create_figure(p_name, p_series_code, p_category_id, …) returns text
+```
+
+`insert`, `update` und `delete` auf `public.skylanders` bleiben für `anon` und `authenticated`
+entzogen, wie 0001 sie entzogen hat. Die Funktion wird vor dem `grant` **allen drei** Rollen
+entzogen (`public, anon, authenticated`) — Supabase erteilt `EXECUTE` auf jede neue Funktion in
+`public` an `anon` und `authenticated` explizit, ein Widerruf nur von `PUBLIC` ließe beide
+stehen. Die Hilfsfunktionen `slugify()` und `next_figure_slug()` bekommen gar kein Ausführrecht.
+
+**Die Sequence ist für niemanden lesbar.** `revoke all on sequence public.sky_id_seq from public,
+anon, authenticated`: wer eine Sequence erreicht, kann Nummern verbrennen — dieselbe Lehre, die
+0010 für `order_number_seq` festhält. Eine SKY-ID ist permanent; verbrannte Nummern kommen nicht
+zurück.
+
+**Die Funktion nimmt keine Identität entgegen.** Kein `p_sky_id`, kein `p_slug`. Beides entsteht
+in der Datenbank — ein Parameter dafür wäre der Weg, eine Identität aus einem Browser zu wählen.
+Ebenso wenig schreibt sie Preis, Bild oder `character_id`: diese Spalten gehören anderen Pfaden,
+und ein Create, der sie annähme, wäre eine stille Tür in fremdes Gebiet.
+
+**Kein Delete.** Es gibt keine Delete-RPC und kein Delete-Recht. Eine falsch angelegte Figur wird
+verborgen (`catalog_visible = false`); ihre SKY-ID bleibt vergeben.
+
+**Das Bild läuft weiter über die Storage-Policy**, deren Prädikat `is_shop_admin()` ist
+(ADR-0046) — keine zweite Upload-Architektur, kein Service-Role-Key im Webprozess.
+
 ## 5. Git-Sicherheit
 
 Geplante `.gitignore`-Strategie (**noch nicht angelegt** — dieser Durchlauf schreibt nur Doku):

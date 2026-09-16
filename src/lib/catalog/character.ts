@@ -13,6 +13,15 @@
  * holds the shared rules — the same validation the import tool runs, so a
  * unit test can reach it without a database.
  */
+/*
+ * RELATIVE, WITH THE EXTENSION, AND THAT IS NOT A STYLE CHOICE.
+ *
+ * `tools/import-characters.mts` loads this file under plain Node, which knows
+ * nothing about the `@/*` alias. Every other import here is type-only and
+ * erased before Node ever sees it; this one is a runtime import and has to
+ * resolve for real. `character-import-runtime.test.ts` holds the rule.
+ */
+import { isCuratableSkyId, skyIdRange } from "./sky-id.ts";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
 /** The ten canonical elements. Mirrors the CHECK in migration 0002. */
@@ -107,13 +116,33 @@ function isNullableString(value: unknown): value is string | null {
  * one error per run would be miserable, and the import must never write a
  * partially validated file (the catalog import works the same way).
  *
- * `knownSkyIds` is what the database actually holds. Pass an empty set to
+ * `scope` says WHAT `knownSkyIds` is a complete list of, and since ADR-0070
+ * that is a real question:
+ *
+ *   "database"       — the live `skylanders` table. It holds every canonical
+ *                      figure there is, so every curated id must be in it.
+ *                      This is what `tools/import-characters.mts` passes, and
+ *                      it is the gate that actually protects the data.
+ *   "legacy-export"  — `data/catalog/products.json`. Complete for the ids the
+ *                      legacy project issued and, by construction, incapable
+ *                      of holding one SkyIsles issued. An id in the productive
+ *                      range is therefore checked for shape and range only;
+ *                      whether it EXISTS is the import's job, before any write.
+ *
+ * Either way an id in the reserved system/test range is refused outright: those
+ * rows are fixtures, and a curated production assignment must never point at
+ * one.
+ *
+ * `knownSkyIds` is what the caller actually holds. Pass an empty set to
  * check only the shape — the SKY-ID existence check is then skipped, which is
  * what `--validate-only` does when it never opens a connection.
  */
+export type CatalogScope = "database" | "legacy-export";
+
 export function validateCuratedFile(
   input: unknown,
   knownSkyIds: ReadonlySet<string>,
+  scope: CatalogScope = "database",
 ): { problems: string[]; characters: CuratedCharacter[] } {
   const problems: string[] = [];
   const characters: CuratedCharacter[] = [];
@@ -222,7 +251,31 @@ export function validateCuratedFile(
         continue;
       }
       skyIdOwner.set(skyId, name);
-      if (knownSkyIds.size > 0 && !knownSkyIds.has(skyId)) {
+
+      const range = skyIdRange(skyId);
+      if (!isCuratableSkyId(skyId)) {
+        /*
+         * The reserved band, or a number in no range at all. `SKY-9998` is a
+         * valid ROW — it carries orders on production — and it is not a
+         * catalogue figure anybody collects. Curating it would put a fixture
+         * in front of a customer.
+         */
+        problems.push(
+          `${label}: ${skyId} is in the ${range} range and may not be curated (ADR-0070)`,
+        );
+        continue;
+      }
+
+      if (knownSkyIds.size === 0) continue;
+
+      /*
+       * A productive id cannot be in the legacy export — that is what makes it
+       * productive. Its existence is checked by the import against the live
+       * catalogue, before it writes anything.
+       */
+      if (scope === "legacy-export" && range === "productive") continue;
+
+      if (!knownSkyIds.has(skyId)) {
         problems.push(`${label}: ${skyId} does not exist in the catalog`);
       }
     }

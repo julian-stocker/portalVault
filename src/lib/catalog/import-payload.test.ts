@@ -72,6 +72,18 @@ const EDITORIAL = [
    * heuristic that eventually overwrites a decision somebody made.
    */
   "card_type",
+  /*
+   * Where the row came from (V3.9, ADR-0070).
+   *
+   * `source` defaults to 'import', so every row the export owns gets the
+   * right value without the payload ever naming it — and that is exactly why
+   * it must not be named. An admin-created row carries 'admin', and an import
+   * that wrote this column would relabel it as its own on the next run: the
+   * provenance would be lost, and with it the one thing that keeps
+   * admin-created figures out of the "in the database but not in the export"
+   * warning forever.
+   */
+  "source",
 ];
 
 function figurePayloadKeys(): string[] {

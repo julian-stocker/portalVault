@@ -236,6 +236,17 @@
       "sky_ids": ["SKY-0250", "SKY-0251", "SKY-0252"]
     },
     {
+      "canonical_name": "Fire Kraken",
+      "element": "Fire",
+      "species": "Chinesischer Drache",
+      "role_type": "swapper",
+      "short_description": "Feuer-Skylander aus Swap Force: ein chinesischer Drache, dessen Figur sich wie alle SWAP-Force-Figuren in Ober- und Unterteil trennen und mit anderen neu kombinieren lässt.",
+      "source_url": "https://skylanders.fandom.com/wiki/Fire_Kraken",
+      "source_label": "Skylanders Wiki (Fandom)",
+      "verified_at": "2026-09-16",
+      "sky_ids": ["SKY-0210", "SKY-0211", "SKY-0821"]
+    },
+    {
       "canonical_name": "Turbo Charge Donkey Kong",
       "element": "Life",
       "species": "Affe",

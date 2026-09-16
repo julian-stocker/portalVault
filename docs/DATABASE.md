@@ -32,7 +32,7 @@ werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migratio
 | `auth.users` | — | Supabase Auth, verwaltet von Supabase | nie direkt schreiben |
 | `series` | 6 | Serien inkl. Anzeigereihenfolge | öffentlich lesbar |
 | `categories` | 30 | Kategorien je Serie inkl. Reihenfolge | öffentlich lesbar |
-| `skylanders` | 600 | kanonischer Katalog | öffentlich lesbar |
+| `skylanders` | 600 + admin-erzeugte | kanonischer Katalog | öffentlich lesbar |
 | `profiles` | = Benutzer | Benutzername, Profil | öffentlich lesbar, selbst schreibbar |
 | `collection_items` | wächst | Sammlung: Benutzer × Figur × Menge | nur der Eigentümer |
 | `characters` | 19 (Pilot) | kuratierte Charaktermetadaten | öffentlich lesbar, nur kuratiert schreibbar |
@@ -153,10 +153,24 @@ syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `
 | `catalog_visible` | `boolean not null default true` | redaktionelle Sichtbarkeit (ADR-0039), **admin-owned**, öffentlich |
 | `display_name_override` | `text` **nullbar** | öffentlicher Name statt `name`; nicht leer, wenn gesetzt; öffentlich |
 | `card_type` | `text not null default 'standard'` | auf welches Kartenmotiv die Figur gedruckt wird (0030, sechster Wert in 0031, siebter in 0032); CHECK `standard \| special \| elite \| dark \| legendary \| chase \| prestige`; **admin-owned**, öffentlich |
+| `source` | `text not null default 'import'` | Herkunft (ADR-0070); CHECK `import \| admin`; **nie in der Import-Payload** |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
 Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)` ·
 `(series_code) where is_active and catalog_visible` (die öffentliche Katalogabfrage).
+
+**`source` ist reine Herkunft (0033, ADR-0070).** Nach erfolgreichem Anlegen ist eine
+admin-erzeugte Figur genauso kanonisch wie eine importierte. Die Spalte steuert **nichts** —
+weder Sichtbarkeit noch Berechtigung, Commerce, Kartenoptik oder Reihenfolge. Sie hat im Produkt
+genau einen Leser: `tools/import-catalog.mts` nimmt `source = 'admin'` aus der Warnung „in the
+database but not in the export" heraus, weil dort sonst dauerhaft jede neue Figur stünde.
+
+**Neue Figuren entstehen über `admin_create_figure()` (0033).** Eine Transaktion: SKY-ID aus
+`public.sky_id_seq` (start 821, Obergrenze 8999 — 9000–9999 ist der reserved system/test range),
+Slug über `public.next_figure_slug()`, Zeile, optionale Notiz und ein Journaleintrag `created`.
+`catalog_visible` startet **false**. Die Funktion schreibt weder Preis noch Bild noch
+`character_id`. **Kein Delete** — es gibt keine Delete-RPC, und `collection_items` sowie
+`shop_inventory` stehen auf `on delete restrict`.
 
 **`card_type` ist redaktionell, nicht Besitz (0030).** Die Spalte sagt, *was die Figur ist* —
 ein Dark Spyro und ein gewöhnlicher Spyro sind verschiedene Sammelobjekte und sahen bisher
@@ -231,6 +245,7 @@ Tabelle, unabhängig davon, welche Spalten ein Statement nennt.
 |---|---|---|
 | `skylanders.is_active` | Kennt die Legacy-Quelle die Zeile? | Import |
 | `skylanders.catalog_visible` | Soll sie im öffentlichen Katalog erscheinen? | Admin |
+| `skylanders.source` | Woher kam die Zeile? `import` \| `admin` | System (0033) |
 | `shop_inventory.is_listed` | Bietet der Shop sie an? | Shop |
 
 **Warum hier keine interne Notiz steht.** `grant select on public.skylanders to anon` gilt für

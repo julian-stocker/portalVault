@@ -429,9 +429,23 @@ async function main(): Promise<void> {
       slugDrift.push(`${item.id}  stored '${row.slug as string}', the name would now yield '${wanted}'`);
     }
   }
-  const missingFromExport = (dbFigures ?? []).filter(
-    (row) => !data.items.some((item) => item.id === (row.sky_id as string)),
-  );
+  /*
+   * Rows the export no longer carries - which is a question about the
+   * export's own rows, not about every row in the table.
+   *
+   * Since 0033 a figure can be created in the admin catalogue, and such a row
+   * is not in the export BY DESIGN (ADR-0070). Counting it here would put
+   * every admin-created figure into this warning permanently, and a warning
+   * that always fires stops being read - which is exactly what would make a
+   * genuinely vanished import row invisible.
+   *
+   * `source` is provenance and is used for nothing else. It does not change
+   * how the row is treated anywhere: not here, where it is only asked whose
+   * row this is, and nowhere in the application at all.
+   */
+  const missingFromExport = (dbFigures ?? [])
+    .filter((row) => (row.source as string | null) !== "admin")
+    .filter((row) => !data.items.some((item) => item.id === (row.sky_id as string)));
 
   const unchangedFigures = data.items.length - newFigures.length - figureChanges.length;
   console.log(`  figures     new ${newFigures.length}, changed ${figureChanges.length}, unchanged ${unchangedFigures}`);

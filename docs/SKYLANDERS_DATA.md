@@ -21,9 +21,33 @@ Format `SKY-0001` … `SKY-0820`, Regex `^SKY-\d{4}$`, **Spalte A** der Master-E
 - Eine Umbenennung (Spalte B) ändert die Identität **nicht**.
 - Ein Bild ist **kein** Bestandteil der Identität — austauschbar, ohne die SKY-ID zu berühren.
 - Der Legacy-Build **erfindet niemals eine ID**. Fehlt eine, bricht er ab und nennt Sheet + Zeile
-  (`etl/articles.py::require_valid_ids`). Vergabe ausschließlich über `etl/assign_ids.py`.
-- Nächste Nummer = Maximum aus `data/id_ledger.json` (`highest_issued: 820`) und der höchsten
-  ID in der Mappe. Der Ledger wird nur erhöht, nie zurückgesetzt.
+  (`etl/articles.py::require_valid_ids`).
+
+### Vergabe: seit 2026-09-16 bei SkyIsles (ADR-0070)
+
+**Die Legacy-Vergabe ist eingefroren.** `etl/assign_ids.py` vergibt keine neuen Skylander-IDs
+mehr. `data/id_ledger.json` mit `highest_issued: 820` bleibt historische Wahrheit und wird weder
+fortgeschrieben noch zurückgesetzt.
+
+Neue Figuren entstehen im Adminbereich über `admin_create_figure()` (Migration 0033). Die Nummer
+kommt aus der Sequence `public.sky_id_seq`, `start with 821`, monoton, nie zurückgesetzt, nie
+recycelt — ein zurückgerollter Create verbraucht seine Nummer trotzdem, und das ist die
+gewünschte Eigenschaft, nicht ein Defekt.
+
+| Bereich | Bedeutung |
+|---|---|
+| `SKY-0001`–`SKY-0820` | historisch, vom Legacy-Projekt vergeben |
+| `SKY-0821`–`SKY-8999` | produktiver SkyIsles-Allokationsbereich |
+| `SKY-9000`–`SKY-9999` | **reserved system/test range** — belegt von Fixtures, nie automatisch vergeben |
+
+Der reservierte Bereich ist eine Feststellung, kein Aufräumauftrag: `SKY-9994` und `SKY-9998`
+tragen auf Production echte Bestellzeilen und Journalzeilen, auf Staging zusätzlich `SKY-9101`.
+Eine SKY-ID ist per Trigger unveränderlich und `order_lines.sky_id` ist kein Fremdschlüssel —
+umnummerieren ginge nicht, ohne Bestellzeilen ins Leere zeigen zu lassen.
+
+**Format ≠ Vergabebereich.** `^SKY-[0-9]{4}$` bleibt unverändert; `SKY-9994` ist eine gültige
+SKY-ID. Die Grenze 8999 gilt ausschließlich für die automatische Neuvergabe und steht in
+`admin_create_figure()`.
 
 **Was die SKY-ID verbindet:** Excel-Zeile · Masterbild · Website-Bild · Marktpreis ·
 externe Preisquelle/Mapping · Lagerbestand · Ankauf · später eBay · **künftig: Benutzersammlungen
@@ -760,6 +784,13 @@ Reihenfolge: Override → importiertes Bild → leere Bildbühne.
 dauerhaft**, gehört dem Administrator und wird über `admin_set_card_type()` gesetzt. Der Import
 nennt sie nirgends; dieselbe Trennung wie bei `image_override_path` (11f) und `character_id`
 (ADR-0034).
+
+**Sammlerfamilie ≠ Variantensiegel (ADR-0070b).** Wo ein kuratierter Charakter existiert, bestimmt
+`characters.canonical_name` die **Familie** (`sortBaseName`) — unsichtbar, entscheidet nur die
+Reihenfolge. Das **sichtbare** Variantensiegel (`sortVariantLabel`) kommt weiterhin ausschließlich
+aus dem Variantenparser und seiner kuratierten Tokenliste. Eine Charakterzuordnung verbessert also
+die Einsortierung, ohne je ein Siegel zu erzeugen oder zu ändern. Figuren ohne `character_id`
+verhalten sich unverändert.
 
 **Bei Mehrfachbelegung gewinnt die höchste Stufe:** `legendary > dark > special > standard`.
 `chase` und `elite` stehen außerhalb dieser Kette — `chase` ist keine stärkere Edition, sondern

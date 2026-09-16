@@ -166,11 +166,28 @@ describe("validateCuratedFile", () => {
   });
 
   it("rejects a SKY-ID the catalog does not contain", () => {
+    /*
+     * A historical id that is simply absent. The example used to be
+     * `SKY-9999`, which since ADR-0070 is refused one step earlier for being
+     * in the reserved range — a stronger reason, and the wrong one to be
+     * testing here. The next case covers that separately.
+     */
     const { problems } = validateCuratedFile(
-      file(entry({ sky_ids: ["SKY-9999"] })),
+      file(entry({ sky_ids: ["SKY-0599"] })),
       new Set(["SKY-0028"]),
     );
-    expect(problems.join(" ")).toContain("SKY-9999 does not exist");
+    expect(problems.join(" ")).toContain("SKY-0599 does not exist");
+  });
+
+  it("rejects a reserved system/test SKY-ID even when the catalog holds it", () => {
+    // `SKY-9994` and `SKY-9998` are real rows carrying fixtures, orders and
+    // journal entries. Being present is exactly why the range rule has to
+    // come first (ADR-0070).
+    const { problems } = validateCuratedFile(
+      file(entry({ sky_ids: ["SKY-9998"] })),
+      new Set(["SKY-9998"]),
+    );
+    expect(problems.join(" ")).toContain("reserved range and may not be curated");
   });
 
   it("rejects anything that is not a SKY-ID", () => {

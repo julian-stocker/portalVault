@@ -11,8 +11,10 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { AddFigureModal } from "@/components/admin/add-figure-modal";
 import { AdminFigureModal } from "@/components/admin/figure-modal";
 import type { AdminFigureDraft } from "@/lib/admin/figure-draft";
+import type { CategoryOption } from "@/lib/admin/new-figure-draft";
 import { QuickView } from "@/components/catalog/quick-view";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { FigureGrid } from "@/components/catalog/figure-grid";
@@ -60,6 +62,7 @@ export function CatalogView({
   initialGroup = null,
   offers = {},
   seller = null,
+  categories = [],
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -93,6 +96,15 @@ export function CatalogView({
    * rather than inventing one.
    */
   seller?: PublicSeller | null;
+  /**
+   * The controlled category list the create dialog offers (V3.9).
+   *
+   * Loaded by the page, and only for an administrator — a collector's render
+   * passes nothing and the array stays empty. The series list is already a
+   * prop for the series picker, so creating a figure adds one query to the
+   * admin page and none to the public one.
+   */
+  categories?: readonly CategoryOption[];
 }) {
   // A series is always chosen (ADR-0038). The first one is the default, so
   // the catalog opens on Spyro's Adventure rather than on all 561 at once.
@@ -203,6 +215,14 @@ export function CatalogView({
    * future change open the buying panel for an operator.
    */
   const [editSkyId, setEditSkyId] = useState<string | null>(null);
+  /*
+   * Creating a figure (V3.9). Separate state from the editor's: one dialog
+   * changes a figure that exists, the other brings one into existence, and a
+   * shared "which dialog" value would have to encode that difference anyway.
+   */
+  const [adding, setAdding] = useState(false);
+  /* What the last create issued, so the confirmation can name it. */
+  const [created, setCreated] = useState<string | null>(null);
   /*
    * What a save changed, held here until the server's revalidation catches
    * up. `revalidatePath` reaches this component through a new render; this
@@ -512,6 +532,41 @@ export function CatalogView({
               <AvailabilityFilter active={availability} onSelect={setAvailability} />
             </FilterGroup>
           </FilterSheet>
+
+          {/*
+            * Creating a figure (V3.9, ADR-0070), beside the filter rather than
+            * on a page of its own — the administrator works in the catalogue,
+            * not next to it (ADR-0042).
+            *
+            * `admin` gates the whole element, so a collector's render never
+            * carries the button, its label or its dialog. `BrowseToolbar`
+            * already lays its children out as a row, so nothing about the
+            * toolbar's layout changes to make room.
+            */}
+          {admin ? (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className={
+                "focus-ring inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full " +
+                "px-4 text-sm font-medium text-on-deep-muted ring-1 ring-border/70 " +
+                "transition-colors hover:text-on-deep hover:ring-border-strong"
+              }
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+              >
+                <path d="M8 3.5v9M3.5 8h9" />
+              </svg>
+              {de.admin.addFigure}
+            </button>
+          ) : null}
         </BrowseToolbar>
       </div>
 
@@ -602,6 +657,61 @@ export function CatalogView({
             onVisibilityChange(skyId, draft.catalogVisible);
           }}
         />
+      ) : null}
+
+      {admin ? (
+        <AddFigureModal
+          /* Remounted per opening, so a cancelled draft never comes back. */
+          key={adding ? "open" : "closed"}
+          open={adding}
+          onClose={() => setAdding(false)}
+          series={series}
+          categories={categories}
+          figures={figures}
+          onCreated={(skyId) => {
+            setCreated(skyId);
+            /* Cleared from the handler rather than from an effect: there is
+               no subscription here, just one message that has had its turn. */
+            window.setTimeout(() => setCreated(null), 6000);
+            /*
+             * Nothing else to do. The new figure cannot come from the `edited`
+             * overlay — that can only restate a figure the server already
+             * sent — so it has to come from the server, and `createFigure()`
+             * has already called `refresh()` there. The catalogue itself stays
+             * free of any router, which is what `ui/browse.test.ts` and
+             * `ui/quick-view-ux.test.ts` require of it.
+             */
+          }}
+        />
+      ) : null}
+
+      {/*
+        * The confirmation, as a live region that is always mounted and only
+        * changes its contents — one that appears at the same moment as its
+        * message is not reliably announced. Same placement rules as
+        * `CartToast`: clear of the bottom bar and the home indicator.
+        */}
+      {admin ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={
+            "pointer-events-none fixed inset-x-0 z-60 flex justify-center px-4 " +
+            "bottom-[calc(2.75rem+env(safe-area-inset-bottom)+1rem)] md:bottom-6"
+          }
+        >
+          {created !== null ? (
+            <p
+              className={
+                "pointer-events-auto rounded-full bg-[oklch(16%_0.045_282)] px-4 py-2 text-sm " +
+                "text-on-deep ring-1 ring-gold-line shadow-raised " +
+                "motion-safe:animate-[rise_140ms_ease-out]"
+              }
+            >
+              {de.admin.created(created)}
+            </p>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );

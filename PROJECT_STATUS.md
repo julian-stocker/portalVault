@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-15 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-16 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -1345,6 +1345,53 @@ Benutzerdaten blieben unberührt: `profiles` und `collection_items` stehen weite
 End-to-End-Fluss**) → V1.6 Ausbau → V1.7 Beta-Reife.
 
 Wartet auf Freigabe für **V1.3 — Katalogimport**.
+
+---
+
+## V3.8a / V3.9 — Adminkatalog (Stand 2026-09-16)
+
+**V3.8a — Adminmodal scrollbar** · Commit `77a398f` · **fertig, auf Staging manuell zu prüfen.**
+Der Bearbeiten-Dialog umschloss Kopf, Body und Fuß mit `flex max-h-[85vh] flex-col` — ein zweites,
+höheres Ceiling in `vh` statt `dvh`, und ohne `min-h-0` konnte der Body nie unter seine
+Inhaltshöhe schrumpfen. Die Spalte wuchs über den Panel hinaus und wurde von dessen
+`overflow-hidden` abgeschnitten: kein fehlender Scrollbalken, sondern unerreichbare Felder. Jetzt
+liegen Kopf, Body und Fuß direkt im Panel (`shrink-0` / `min-h-0 overflow-y-auto
+overscroll-contain` / `shrink-0`), das Ceiling kommt allein aus der Primitive, und der Kopf trägt
+ein X.
+
+**V3.9 — Figur hinzufügen** · ADR-0070 · Migration `0033_admin_created_figures.sql` ·
+**Code fertig, Migration geschrieben und NIRGENDS angewandt.**
+
+SkyIsles vergibt ab hier selbst kanonische Katalogeinträge und SKY-IDs; die Legacy-Vergabe über
+`etl/assign_ids.py` ist eingefroren. Namensraum: `0001–0820` historisch, `0821–8999` produktiv,
+`9000–9999` reserved system/test range. Sequence `sky_id_seq` ab 821, monoton, nie recycelt.
+
+| | |
+|---|---|
+| `[+ Hinzufügen]` neben „Filter", nur für Admins | ✅ |
+| `AddFigureModal`, V3.8a-Scrollstruktur, keine Navigation | ✅ |
+| `admin_create_figure()` — eine Transaktion, `is_shop_admin()`, Grenze 8999 | ✅ geschrieben |
+| `skylanders.source` (`import` \| `admin`) — reine Herkunft | ✅ geschrieben |
+| SQL-`slugify()` + `next_figure_slug()`, ADR-0011 dreistufig | ✅ geschrieben |
+| Journal: `created` + `card_type` (Trigger, eine Quelle pro Mutation) | ✅ geschrieben |
+| Vorlage überträgt **nur** `series_code` + `category_id` | ✅ |
+| Neue Figuren starten **verborgen** | ✅ |
+| `character_id` bleibt NULL — ADR-0034 unverändert | ✅ |
+| Bild in zwei Phasen, Uploadfehler erzeugt nie eine zweite SKY-ID | ✅ |
+| Weiche Duplikatwarnung, kein Unique auf `name` | ✅ |
+| Import ignoriert `source='admin'` in der Missing-Export-Warnung | ✅ |
+| Kein Delete, keine Delete-RPC, keine Kategorieverwaltung | bewusst offen |
+
+**V3.9a — Vorlage erbt die Sammleridentität** · ADR-0070a · Migration
+`0034_create_figure_from_template.sql` · **geschrieben, nicht angewandt.** Die Vorlage überträgt
+`character_id`, serverseitig aus der Vorlagenzeile gelesen (nie als Argument). Vorlage ohne
+Charakter erbt nichts und sagt es. Offen und bewusst nicht entschieden: ob ein kuratierter
+Charakter den `sortBaseName` bestimmen soll — beträfe 30 bestehende Karten sichtbar, siehe
+ADR-0070a.
+
+**Offen vor Staging:** `0033` im Staging-SQL-Editor anwenden, danach
+`supabase/tests/0033_slug_parity.sql` ausführen (schreibfrei) und die SQL-/TypeScript-Parität der
+24 Slug-Fixtures bestätigen. **Production: nichts.**
 
 ---
 

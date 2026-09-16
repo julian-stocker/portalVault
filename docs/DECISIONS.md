@@ -5419,3 +5419,369 @@ Administrator eine Entscheidung, die ihm gehört) · eine Namensheuristik `like 
 verschmelzen (vernichtet historische Daten und eine spätere echte OVP-Architektur) · `elite` in
 die Editionskette aufzunehmen (es konkurriert nie, und ein Rang, der nie verglichen wird, ist
 eine Behauptung ohne Fall).
+
+---
+
+## ADR-0070 — SkyIsles vergibt neue Katalogeinträge und SKY-IDs selbst
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** `0033_admin_created_figures.sql`
+
+**Kontext.** Bis hierher konnte PortalVault keine Figur anlegen. Es validierte SKY-IDs und
+upsertete, was der Legacy-Export mitbrachte. ADR-0006 sagte das ausdrücklich: Katalogpflege
+bleibt für V1 vollständig im Legacy-System, und dass PostgreSQL die Source of Truth wird, stand
+dort als **LATER**. ADR-0001 zog daraus die Konsequenz: „Neue Figuren erhalten ihre ID weiterhin
+im Legacy-Projekt über `etl/assign_ids.py`, solange die Excel den Katalog führt."
+
+Das ist die Stelle, an der das nicht mehr trägt. Der Katalog wird im Adminbereich gepflegt
+(ADR-0042), die Excel wird abgelöst, und der Weg „Zeile in die Excel, ETL laufen lassen,
+exportieren, importieren" ist für eine einzelne fehlende Figur kein Weg, sondern ein Hindernis.
+
+**Entscheidung.** SkyIsles erzeugt ab sofort selbst kanonische Katalogeinträge und vergibt dafür
+selbst SKY-IDs. Für **neue** Figuren ersetzt dieser ADR die entsprechenden Teile von ADR-0001 und
+ADR-0006. Alles andere an ADR-0001 bleibt unverändert in Kraft: eine SKY-ID wird nie abgeleitet,
+nie wiederverwendet, nie geändert.
+
+### Der Namensraum
+
+    SKY-0001 – SKY-0820   historisch, vom Legacy-Projekt vergeben
+    SKY-0821 – SKY-8999   produktiver SkyIsles-Allokationsbereich
+    SKY-9000 – SKY-9999   reserved system/test range
+
+**Die Legacy-Vergabe ist eingefroren.** `etl/assign_ids.py` vergibt keine neuen
+Skylander-IDs mehr. Der Ledger mit `highest_issued: 820` bleibt historische Wahrheit und wird
+weder fortgeschrieben noch zurückgesetzt.
+
+**Der reservierte Bereich ist kein Aufräumauftrag, sondern eine Feststellung.** Er ist belegt und
+lässt sich nicht räumen: `SKY-9994` und `SKY-9998` tragen auf Production Bestand, Bestellungen,
+Reservierungen und Journalzeilen, auf Staging zusätzlich `SKY-9101`, und die Verify-Werkzeuge
+ziehen Fixtures aus 9001, 9002 und 9994–9999. Eine SKY-ID ist per Trigger unveränderlich, und
+`order_lines.sky_id` ist bewusst **kein** Fremdschlüssel — eine Umnummerierung ließe
+Bestellzeilen ins Leere zeigen. Also wird der Bereich nicht geräumt, sondern **deklariert**, und
+der Allokator hört davor auf. Damit wird aus „so viele Figuren legt nie jemand an" eine
+Bedingung.
+
+**Format und Vergabebereich sind zwei verschiedene Dinge.** `skylanders_sky_id_format` bleibt
+`^SKY-[0-9]{4}$` und wird **nicht** verengt — `SKY-9994` ist eine vollkommen gültige SKY-ID. Die
+Grenze 8999 gilt ausschließlich für die **automatische Neuvergabe** und steht deshalb in
+`admin_create_figure()`, wo die Entscheidung fällt. Die beiden zu verwechseln würde Zeilen
+ungültig machen, die täglich benutzt werden.
+
+### Die Vergabe
+
+Eine PostgreSQL-Sequence, `public.sky_id_seq`, `start with 821` — aus demselben Grund, aus dem
+`order_number_seq` eine ist (ADR-0053, Migration 0010): `nextval` ist atomar, und es nimmt **nicht
+am Rollback teil**. Das Zweite ist hier die Anforderung, nicht die Nebenwirkung. Scheitert ein
+Create an einem Constraint, ist seine Nummer verbraucht und der nächste Create nimmt die
+folgende. Eine Lücke bedeutet „diese Nummer wurde einmal gezogen" — was genau zutrifft und dem
+Legacy-Ledger entspricht, in dem 14 der Nummern unter 820 ebenfalls nie öffentliche Zeilen
+wurden.
+
+**Nie `max(sky_id) + 1`.** Zwei gleichzeitige Creates lesen dasselbe Maximum und schreiben
+dieselbe Identität. Die Sequence ist für niemanden außerhalb der Funktion lesbar; ein Aufrufer,
+der sie erreicht, kann Nummern verbrennen.
+
+**Vorab read-only geprüft (2026-09-16).** Weder Production noch Staging hält eine SKY-ID zwischen
+0821 und 8999. Production: 602 Zeilen, oberhalb 0820 nur `SKY-9994` und `SKY-9998`. Staging: 603
+Zeilen, oberhalb 0820 nur `SKY-9101`, `SKY-9994`, `SKY-9998`.
+
+### `source` ist Herkunft, sonst nichts
+
+`skylanders.source` ∈ `{import, admin}`, NOT NULL, Default `import`. **Nach erfolgreichem Create
+ist eine admin-erzeugte Figur genauso kanonisch wie eine importierte.**
+
+`source` darf **nicht** verwendet werden für Sichtbarkeit, Berechtigungen, Commerce, Kartenoptik,
+Ranking oder irgendeine andere fachliche Unterscheidung. Es hat genau eine Aufgabe im Produkt:
+`tools/import-catalog.mts` erkennt seine eigenen Zeilen und nimmt admin-erzeugte aus der Warnung
+„in the database but not in the export" heraus. Ohne das stünde dort dauerhaft jede neue Figur —
+und eine Warnung, die immer feuert, wird nicht mehr gelesen, was ausgerechnet eine wirklich
+verschwundene Importzeile unsichtbar machte. Zweiter Zweck außerhalb des Codes: in fünf Jahren
+ist noch beantwortbar, woher SKY-0834 kam.
+
+**`source` gehört nie in die Import-Payload.** `src/lib/catalog/import-payload.test.ts` hält das
+fest.
+
+### Was der Create tut und was nicht
+
+`admin_create_figure()` ist **eine Transaktion**: Zeile, Notiz und Journaleintrag committen
+gemeinsam oder gar nicht. Sie prüft `is_shop_admin()`, zieht die Nummer, prüft die Grenze,
+berechnet den Slug und schreibt.
+
+**Sie nimmt keine SKY-ID und keinen Slug entgegen.** Beides gehört der Datenbank; ein Argument
+dafür wäre eine Einladung, eine Identität aus dem Browser zu wählen.
+
+**Sie schreibt keine fremde Spalte.** Kein `market_price` (Legacy-Preispfad, ADR-0007), kein
+`image_file` (Import, ADR-0009), kein `image_override_path` (Storage, ADR-0046), kein
+`character_id` (kuratierte Datei, ADR-0034).
+
+**Neue Figuren starten verborgen** (`catalog_visible = false`). Eine gerade angelegte Figur hat
+kein Bild, keine Charakterzuordnung und womöglich einen Arbeitstitel. Sie im selben Moment zu
+veröffentlichen zeigt genau das jedem Besucher.
+
+### Charakterzuordnung bleibt unangetastet
+
+ADR-0034 gilt unverändert. `character_id` ist im Anlegen-Dialog nicht editierbar, wird nicht aus
+einer Vorlage kopiert, und der Create schreibt NULL. `data/characters/characters.json` bleibt die
+vollständige kuratierte Wahrheit. Kein Character-Create aus dem Modal, keine Heuristik, keine
+Namenszuordnung. Element ist folglich Anzeige, keine Eingabe — es hängt am Charakter.
+
+### Kein Delete
+
+`collection_items` und `shop_inventory` stehen auf `on delete restrict`, `order_lines.sky_id` ist
+gar kein Fremdschlüssel. Ein Delete ist damit entweder blockiert oder hinterlässt still
+Bestellzeilen, die auf nichts zeigen. Eine versehentlich angelegte Figur wird über den
+bestehenden Editor auf `catalog_visible = false` gesetzt. **Ihre SKY-ID bleibt dauerhaft
+vergeben** — das verlangt ADR-0001.
+
+### Slug
+
+ADR-0011 unverändert, aber zum ersten Mal auch in SQL: `public.slugify()` und
+`public.next_figure_slug()`. Der Grund, warum die Entscheidung in der Datenbank fallen muss: die
+Eindeutigkeitsprüfung und der INSERT müssen in einer Transaktion liegen. In TypeScript zu
+rechnen hieße lesen, entscheiden, schreiben — genau die Race, die dieser Entwurf vermeidet.
+
+Zwei Implementierungen derselben Regel sind eine Last, solange nichts sie aneinander hält.
+Deshalb: `src/lib/catalog/slug-sql-parity.test.ts` prüft die SQL Schritt für Schritt gegen die
+TypeScript-Fassung, und `supabase/tests/0033_slug_parity.sql` führt beide über dieselben
+Fixtures aus. Die Erwartungswerte dort sind erzeugt, nicht getippt.
+
+### Zwei Phasen für das Bild, und das wird nicht verschleiert
+
+Ein hochgeladenes Objekt liegt unter `SKY-xxxx/<hash>.webp` — der Pfad braucht die Identität, die
+der Create gerade erst vergibt. Es gibt keine Reihenfolge, die beides atomar macht. Also:
+**Phase A** legt die Figur an, **Phase B** lädt das Bild unter der zurückgegebenen SKY-ID hoch,
+über die bestehende V3.8-Infrastruktur (`stageFigureImage` → `setImageOverride`), ohne zweite
+Upload-Architektur.
+
+Scheitert Phase B, **existiert die Figur**. Der Dialog sagt das, bietet Schließen an und ruft
+den Create **nie erneut** auf. Ein zweiter Create auf einen fehlgeschlagenen Upload wäre eine
+zweite SKY-ID für eine Figur — der eine Fehler, gegen den dieser ganze Entwurf gebaut ist. Das
+Orphan-Verhalten bleibt wie in ADR-0046: eine unreferenzierte Datei kostet Speicher, ein
+fehlgeschlagener Vorgang kostet Arbeit.
+
+### Duplikate
+
+Keine neue harte Regel. `name` ist bewusst nicht eindeutig und bleibt es: vierzehn Zeilen enden
+auf „- ohne OVP", sechs Spiele heißen „Game (Xbox 360)", und Kaos ist Trap, Trophy **und** Sensei.
+Ein Unique-Constraint auf `(name, series)` würde legitime Varianten abweisen. Stattdessen eine
+**weiche Warnung** vor dem Anlegen, verglichen über die Slug-Form innerhalb derselben Serie —
+damit „Dino-Rang" und „Dino Rang" als dieselbe Nachbarschaft erkannt werden. Der Administrator
+darf fortfahren. Technisch eindeutig bleiben SKY-ID und Slug.
+
+### Journal
+
+Kein zweites Audit-System. `catalog_admin_changes` lernt zwei Felder: `created` und `card_type`.
+
+`card_type` schließt eine seit 0030 offene Lücke — `admin_set_card_type()` schrieb drei
+Migrationen lang eine redaktionelle Spalte, ohne dass irgendetwas es festhielt. Protokolliert
+wird im **Trigger**, nicht im RPC: **eine Journalquelle pro Mutation.** Im Setter zu loggen
+deckte genau einen Aufrufer; ein Service-Role-UPDATE oder ein späterer zweiter RPC schriebe die
+Spalte und hinterließe nichts. Der Trigger sitzt an der Tabelle.
+
+Die Erzeugung protokolliert der RPC selbst als `created`. Der Trigger ist `after update` und
+feuert bei einem INSERT nicht — eine neue Figur bekommt also einen Eintrag statt einen pro
+Spalte. **Kein Backfill:** eine jetzt erfundene Zeile behauptete Zeitpunkt und Urheber, die
+niemand kennt.
+
+### Konsequenzen
+
+- ADR-0006 gilt für **Preise** unverändert weiter (ADR-0007): Preispflege bleibt im Legacy-Pfad.
+- Der Import bleibt idempotent und löscht weiterhin nichts.
+- **Kategorien erzeugt V3.9 nicht.** Serie und Kategorie kommen ausschließlich aus bestehenden
+  kontrollierten Daten, die Kategorie wird nach Serie gefiltert. Fehlt die benötigte Kategorie,
+  ist der Create blockiert — kein Freitext als Notausgang. Kategorieverwaltung ist eine eigene
+  Runde.
+- Der Adminbereich bleibt der Katalog (ADR-0042): „Hinzufügen" steht neben „Filter", nicht auf
+  einer eigenen Seite.
+- **`data/catalog/products.json` ist nicht mehr der vollständige kanonische Katalog.** Der Export
+  bleibt vollständig für die IDs, die das Legacy-Projekt vergeben hat, und kann eine von SkyIsles
+  vergebene ID per Konstruktion nie enthalten. Code, der „nicht im Export" mit „existiert nicht"
+  gleichsetzt, weist echte Zeilen ab. Wo offline gegen den Export geprüft wird, muss die
+  Zuständigkeit ausgesprochen werden — siehe `validateCuratedFile(…, scope)`; die Existenz einer
+  produktiven ID beantwortet allein die Datenbank.
+- **Eine Charakteridentität ist optional.** `character_id = NULL` ist der Normalfall (ADR-0034)
+  und für eine admin-erzeugte Figur genauso gültig wie für eine importierte. Eine Vorlage ohne
+  kuratierten Charakter vererbt nichts, und nichts wird aus dem Namen erschlossen. Eine fehlende
+  Zuordnung ist kein Mangel und blockiert nichts.
+- **Eine Sammlerkarte braucht weder Bestand noch Angebot.** `shop_inventory` und die öffentliche
+  Angebotsprojektion sind eigene Entscheidungen über dieselbe SKY-ID (ADR-0037, ADR-0043). Eine
+  Figur, die nur im Katalog steht und nie verkauft wird, ist ein vollständiger Katalogeintrag —
+  das ist der Regelfall für die Karten, für die dieses Feature gebaut wurde.
+
+**Verworfen.** Eine `SELECT max(sky_id)+1`-Vergabe im Client (race-prone) · den globalen
+CHECK auf 8999 zu verengen (macht `SKY-9994`/`SKY-9998` ungültig) · die Fixtures umzunummerieren
+(Trigger verbietet es, Bestellzeilen hingen ins Leere) · eine Schleife, die belegte IDs
+überspringt (macht den reservierten Bereich zu einer unsichtbaren Mine statt zu einer
+dokumentierten Reservierung) · ein Draft-/Pending-Zustand vor dem kanonischen Eintrag (zweite
+Katalogtabelle und ein Übernahmeworkflow, den bei einem einzigen Administrator niemand bedient) ·
+`character_id` aus der Vorlage zu übernehmen (erzeugte Zuordnungen, die nur in der Datenbank
+stehen, und machte `characters.json` zu einem unvollständigen Verzeichnis).
+
+---
+
+## ADR-0070a — „Bestehende Figur als Vorlage" ist eine Aussage über die Sammleridentität
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** `0034_create_figure_from_template.sql`
+**Ergänzt ADR-0070. Ändert ADR-0034 nicht.**
+
+**Kontext.** V3.9 lieferte zwei Einstiege aus, und der Vorlagen-Einstieg füllte zwei Formularfelder
+vor: Serie und Kategorie. Das ist Bequemlichkeit — und nicht das, was der Betreiber meint, wenn er
+Fire Kraken als Vorlage wählt. Gemeint ist: *„Was ich anlege, ist ein weiterer Fire Kraken."* Eine
+Sonderausgabe, eine Ausführung, eine Farbvariante. Die neue Zeile ist ein anderes **Sammelobjekt**
+und derselbe **Charakter**.
+
+**Entscheidung.** Die Vorlage überträgt `character_id`. Damit ist sie keine Vorbefüllung mehr,
+sondern die Aussage über die Sammleridentität, die ADR-0034 mit genau dieser Spalte beantwortet.
+
+| Modus | Bedeutung | `character_id` |
+|---|---|---|
+| **Leer beginnen** | eine wirklich neue, nicht zugeordnete Figur | bleibt `NULL` |
+| **Bestehende Figur als Vorlage** | eine weitere Ausgabe einer vorhandenen Figur | von der Vorlage |
+
+**Kein zweites Verhältnis.** Kein `base_figure_id`, kein `template_id`, kein `parent_sky_id`, kein
+`derived_from`. Uns interessiert die geteilte Sammleridentität, nicht die Abstammung — und die
+steht bereits in `character_id`, die jede Abfrage ohnehin liest. Die gewählte Vorlage wird **nicht**
+dauerhaft referenziert; nach dem Anlegen ist die neue Zeile von einer importierten Zeile desselben
+Charakters nicht zu unterscheiden, und das ist richtig so.
+
+### Die Vorlage wird übergeben, nicht der Charakter
+
+Die naheliegende Form wäre `p_character_id bigint`. Sie ist die falsche: die Funktion ist für jede
+angemeldete Sitzung ausführbar — `is_shop_admin()` entscheidet, **wer handeln darf**, nicht **was
+jemand behaupten darf**. Ein Charakterargument machte kuratierte Zuordnungen zu Client-Eingaben.
+
+`admin_create_figure()` nimmt deshalb eine **SKY-ID**, die existieren muss, und liest den Charakter
+selbst aus dieser Zeile. Die einzigen Identitäten, die je geschrieben werden können, sind solche,
+die der Katalog bereits hält. Eine unbekannte Vorlage wird abgewiesen statt still ignoriert — sonst
+entstünde eine Figur, die abgeleitet aussieht und es nicht ist. Ein zusätzlicher Lookup ist dafür
+der richtige Preis.
+
+### Vorlage ohne Charakter
+
+`character_id` ist auf 500 der 604 Zeilen `NULL` — Traps, Fahrzeuge, Kristalle und alles noch nicht
+Kuratierte. Eine solche Vorlage überträgt **nichts**, und der Dialog sagt das, statt ein Verhältnis
+zu suggerieren. Das Anlegen bleibt möglich; die neue Figur hat dann ebenfalls keinen Charakter,
+genau wie bei „Leer beginnen". **Nichts wird aus dem Namen erraten** (ADR-0034).
+
+### Serie und Kategorie
+
+`character_id` ist **serienunabhängig**: die Spalte trägt keinen Serienbezug, und der
+Fremdschlüssel zeigt allein auf `characters (id)`. Die Serie der Figur hängt am Paar
+`(category_id, series_code)`. Serie oder Kategorie im Formular zu ändern **trennt die geerbte
+Charakteridentität deshalb nicht** — das ist auch fachlich richtig: eine Swap-Force-Variante einer
+Figur, die zuerst in Giants erschien, ist ein realer Fall.
+
+### Was diese Entscheidung *nicht* löst — und warum nicht still
+
+Die Erwartung war, dass „Gold Fire Kraken" durch die geerbte Identität **neben** Fire Kraken
+einsortiert. Das tut es nicht, und der Grund ist strukturell:
+
+> **`character_id` erreicht die Sortierung heute nicht.** `sortBaseName` entsteht in `variant.ts`
+> aus dem **Namen** und dem Namensindex der Serie. Der Charakter fließt in `element` (ADR-0034) und
+> in den Suchindex — nicht in die Sortierung. Einzige Ausnahme: `parseEliteEdition()` setzt
+> `sortBaseName` bereits auf einen Charakternamen.
+
+Die Ableitung so zu erweitern, dass ein kuratierter Charakter den Basisnamen bestimmt, wäre der
+naheliegende nächste Schritt und ist **bewusst nicht Teil dieser Runde**. Gemessen am echten
+Staging-Bestand (read-only, 2026-09-16) beträfe es **30 der 104 verknüpften Figuren**:
+
+    SKY-0274 "Fire Bone Hot Dog"      → Basis "Hot Dog"      Etikett "Fire Bone"
+    SKY-0283 "Lava Barf Eruptor"      → Basis "Eruptor"      Etikett "Lava Barf"
+    SKY-0287 "Ninja Stealth Elf"      → Basis "Stealth Elf"  Etikett "Ninja"
+    … 27 weitere
+
+Inhaltlich sind das fast durchweg **Verbesserungen** — genau die Fälle, die ADR-0034 als durch
+Namensregeln unlösbar dokumentiert. Aber: **`sortVariantLabel` wird sichtbar gerendert**
+(`figure-card.tsx` zeichnet daraus ein `VariantSeal`). Die Änderung setzte also ein sichtbares
+Etikett auf 30 bestehende öffentliche Karten, darunter Fälle wie `SKY-0564 "Kaos in OVP"` mit dem
+Etikett „in OVP". Das ist eine Produktentscheidung über den öffentlichen Katalog und keine
+Nebenwirkung einer Create-Runde.
+
+**Diese Frage ist mit ADR-0070b entschieden:** der kuratierte Charakter bestimmt die Familie, und
+das sichtbare Variantensiegel bleibt allein Sache des Parsers. Die befürchtete Nebenwirkung tritt
+nicht ein — gemessen null Siegeländerungen.
+
+**Verworfen.** „Gold" in `VARIANT_TOKENS` aufzunehmen (läse jeden importierten Namen neu, der so
+beginnt — eine Kuratierungsentscheidung, die kein Anlegen-Dialog trifft) · `p_character_id` als
+Argument (machte kuratierte Zuordnungen zu Client-Eingaben) · ein zweites
+Abstammungsverhältnis (zweite Antwort auf eine Frage, die `character_id` beantwortet) · einen
+berechneten `sortBaseName` in die Datenbank zu schreiben (die Ableitung bleibt Lesezeit) ·
+sortierrelevantes Verhalten an `source` zu hängen (ADR-0070: Herkunft steuert nichts).
+
+---
+
+## ADR-0070b — Sammlerfamilie ist kuratiert, das Variantensiegel bleibt geparst
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** keine
+**Schließt die offene Frage aus ADR-0070a. Ändert ADR-0034 und ADR-0030 nicht.**
+
+**Kontext.** `sortBaseName` entschied, welche Figuren zusammenstehen, und kam vollständig aus dem
+**Namen**: `variant.ts` zerlegt „Legendary Astroblast" in Basis und Etikett, ein Name ohne
+erkanntes Token bleibt ganz. Das trägt für die kuratierten Formen und kann für den Rest nicht
+tragen — „Dark Turbo Charge D.K." hat null Zeichenüberlappung mit „Turbo Charge Donkey Kong", und
+„Legendary Grim Creemper" ist ein Tippfehler in der Quelle. ADR-0034 führt beide als durch
+Namensregeln unlösbar auf; genau dafür existiert die kuratierte Verknüpfung.
+
+**Entscheidung.** Drei Begriffe, drei Antworten — und sie bleiben drei:
+
+| Begriff | Woher | Sichtbar? |
+|---|---|---|
+| **Sammlerfamilie** (`sortBaseName`) | `characters.canonical_name`, wenn ein kuratierter Charakter existiert — sonst unverändert der Parser | **nein**, entscheidet nur die Reihenfolge |
+| **Anzeigename** (`displayName`) | unverändert ADR-0030 / ADR-0039 | ja |
+| **Variantensiegel** (`sortVariantLabel`) | **ausschließlich** der Variantenparser und seine kuratierte Tokenliste | ja |
+
+Umgesetzt als Lesezeit-Pass `withCharacterFamily()` neben `withCharacterSearch()` und
+`withCharacterElement()`. **Er schreibt genau ein Feld.** Das ist die ganze Sicherheitseigenschaft:
+eine Figur, deren Familie sich verbessert, behält exakt das Siegel, das sie hatte — einschließlich
+gar keinem. Es gibt in dieser Ableitung keinen Code, der ein Etikett erzeugt.
+
+**Kein persistiertes Feld.** Die Familie ist abgeleitet und bleibt es: kein `sort_base_name`, kein
+`catalog_base_name`, keine Migration. Ein zweites Feld neben `characters.canonical_name` wäre
+genau das, was zuerst veraltet, wenn ein Charakter umbenannt wird.
+
+**Keine Abstammung.** Kein `base_sky_id`, kein `parent_sky_id`. Die geteilte
+Sammleridentität steht in `character_id`; „wovon abgeleitet" wird nicht gefragt.
+
+**Kein `source`.** Für importierte und admin-erzeugte Zeilen gilt dieselbe Regel (ADR-0070).
+
+### Gemessen am echten Bestand (Staging, read-only, 2026-09-16)
+
+    sammelbare Figuren:                       565
+    Familie geändert:                          44
+    SIEGEL GEÄNDERT:                            0
+    Anzeigename geändert:                       0
+    Sortierposition bewegt:                    66
+    Familien ohne führende Basisfigur:          0
+
+Die 44 sind fast durchweg Korrekturen: `Fire Bone Hot Dog` → Hot Dog, `Lava Barf Eruptor` →
+Eruptor, `Ninja Stealth Elf` → Stealth Elf, `Dark Turbo Charge D.K.` → Turbo Charge Donkey Kong.
+Die beiden Fälle, die eine „Name minus Charaktername"-Regel verdorben hätte, bleiben unbeschriftet:
+**`Kaos in OVP`** landet in der Familie Kaos **ohne** Siegel „in OVP", **`Grim Creeper - Lightcore`**
+in der Familie Grim Creeper **ohne** Siegel „- Lightcore".
+
+### Die Basisfigur führt ihre Familie
+
+Weil eine Familie nun mehrere unbeschriftete Mitglieder haben kann, entschied sonst der Rohname
+alphabetisch — „Big Bubble Pop Fizz" stünde vor „Pop Fizz". Ein Tiebreak in `compareFigures()`:
+**wessen Anzeigename der Familienname ist, steht vorn.** Er greift **nach** Serie, Kategorie,
+Basisname und Editionsrang; `FAMILY_ORDER` ist unverändert.
+
+### `character_id = NULL`
+
+461 der 565 sammelbaren Figuren. Der Pass gibt sie unverändert zurück — dasselbe Objekt, nicht
+einmal eine Kopie. **Keine Namensheuristik**, keine automatische Zuordnung (ADR-0034).
+
+### `display_name_override`
+
+Der Override bestimmt weiterhin allein den **Anzeigenamen** (ADR-0039); daran ändert sich nichts.
+Die Familie folgt dem kuratierten Charakter auch dann, denn sie beantwortet eine andere Frage:
+*welche Figur ist das*, nicht *wie heißt sie hier*. Heute ist das folgenlos — auf Staging trägt
+**keine** Zeile einen Override. Sollte ein Override je mit der Familienzuordnung in Konflikt
+geraten, gewinnt der Override für den Namen und der Charakter für die Einsortierung; beides
+gleichzeitig zu bedienen ist kein Widerspruch, weil die beiden Werte nichts miteinander zu tun
+haben.
+
+**Verworfen.** Ein Etikett aus „Name minus Charaktername" abzuleiten (erzeugte sichtbare Siegel wie
+„in OVP" auf 44 bestehenden Karten) · „Gold" in `VARIANT_TOKENS` (läse jeden importierten Namen neu,
+der so beginnt) · ein persistiertes Familienfeld · eine Vorlagen-Abstammung · ein paralleles
+`collectorFamilyName` neben `sortBaseName` (dasselbe Feld, unsichtbar, ein Konsument — ein zweites
+wäre Doppelung ohne Gewinn).

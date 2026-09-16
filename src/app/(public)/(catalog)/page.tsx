@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { CatalogView } from "@/components/catalog/catalog-view";
 import { isCatalogGroup } from "@/lib/catalog/group";
+import { fetchFigureFormOptions } from "@/lib/admin/queries";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { offerRecord } from "@/lib/shop/offer";
@@ -39,7 +40,7 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned, offers, seller] = await Promise.all([
+  const [user, figures, series, owned, offers, seller, formOptions] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
@@ -53,6 +54,10 @@ export default async function CatalogPage({
     // page, in the same round as everything else — the quick view reads it
     // from props and fetches nothing when it opens.
     admin ? Promise.resolve(null) : fetchSellerPublic(),
+    // The controlled lists behind "Hinzufügen" (V3.9). Only an administrator
+    // can create a figure, so a collector's render does not pay for them —
+    // and the create dialog needs no request of its own when it opens.
+    admin ? fetchFigureFormOptions() : Promise.resolve(null),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -82,6 +87,7 @@ export default async function CatalogPage({
         // boundary and would arrive empty.
         offers={offerRecord(offers)}
         seller={seller}
+        categories={formOptions?.categories ?? []}
       />
     </main>
   );

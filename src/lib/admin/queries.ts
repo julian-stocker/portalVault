@@ -243,6 +243,52 @@ export async function fetchAdminCategories(): Promise<AdminCategory[]> {
   }));
 }
 
+/**
+ * The two controlled lists the create dialog offers (V3.9).
+ *
+ * WHY NOT `fetchAdminCategories()`
+ *
+ * That one answers a different question — "which categories still need a
+ * product group" — and drops the software categories on the way, because
+ * software has no group and never will (ADR-0029). A create dialog must be
+ * able to offer every category that exists, including `Spiele`: refusing to
+ * let an administrator file a game would be a rule nobody decided.
+ *
+ * Both lists come ordered the way the catalogue orders them, so the dropdowns
+ * read like the catalogue rather than like the database.
+ */
+export type FigureFormOptions = {
+  series: { code: string; label: string }[];
+  categories: { id: number; seriesCode: string; name: string; catalogGroup: CatalogGroup | null }[];
+};
+
+export async function fetchFigureFormOptions(): Promise<FigureFormOptions> {
+  const supabase = await createClient();
+  const [series, categories] = await Promise.all([
+    supabase.from("series").select("code, label, position").order("position"),
+    supabase
+      .from("categories")
+      .select("id, series_code, name, position, catalog_group")
+      .order("series_code")
+      .order("position"),
+  ]);
+  if (series.error) throw new Error(`series: ${series.error.message}`);
+  if (categories.error) throw new Error(`categories: ${categories.error.message}`);
+
+  return {
+    series: (series.data ?? []).map((row) => ({
+      code: row.code as string,
+      label: row.label as string,
+    })),
+    categories: (categories.data ?? []).map((row) => ({
+      id: row.id as number,
+      seriesCode: row.series_code as string,
+      name: row.name as string,
+      catalogGroup: isCatalogGroup(row.catalog_group) ? row.catalog_group : null,
+    })),
+  };
+}
+
 export type CatalogChange = {
   field: string;
   oldValue: string | null;
