@@ -5785,3 +5785,233 @@ haben.
 der so beginnt) · ein persistiertes Familienfeld · eine Vorlagen-Abstammung · ein paralleles
 `collectorFamilyName` neben `sortBaseName` (dasselbe Feld, unsichtbar, ein Konsument — ein zweites
 wäre Doppelung ohne Gewinn).
+
+---
+
+## ADR-0071 — Testkonten tragen einzelne Test-Berechtigungen
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** `0036_tester_feature_permissions.sql`
+**Ersetzt die Speicherung aus ADR-0060/`0021` für Tester. Ändert ADR-0032 nicht.**
+
+**Kontext.** `0021` gab einem Konto eine Sache: `commerce_testers` sagt, wer im Sandbox-Modus zur
+Kasse darf. Das war die richtige Größe für eine Frage und ist die falsche für die zweite — die
+ehrliche Antwort auf „Performance-Tracking dazu" wäre eine zweite Tabelle derselben Form gewesen,
+und auf die dritte eine dritte.
+
+**Entscheidung.** Die Form wird einmal allgemein und danach nie wieder:
+
+| | |
+|---|---|
+| `testers` | dieses Konto ist ein ausdrücklich benanntes Testkonto |
+| `tester_features` | das Vokabular — welche Test-Berechtigungen es gibt |
+| `tester_permissions` | dieses Konto darf dieses eine Ding |
+| `tester_permission_changes` | wer hat wann was vergeben oder entzogen |
+
+Anfangsvokabular: **`commerce`** (E-Commerce) und **`performance_tracking`** (Performance-Tracking).
+
+### Was das nicht ist
+
+**Kein Rollensystem.** Eine Test-Berechtigung gewährt genau das, was sie nennt: nie eine andere
+Berechtigung, nie `shop_admins`. Ein Administrator ist kein Tester, solange ihn niemand auf die
+Liste gesetzt hat — die Regel, die `0021` bereits aufgeschrieben hat und die hier gilt.
+
+**Kein Feature-Flag-Framework.** Keine Rollout-Quoten, keine Umgebungssteuerung, kein Ablaufdatum.
+Eine Liste von Konten und eine Liste von Dingen, die sie testen dürfen.
+
+### Das Vokabular ist Datum, nicht Schema
+
+Jede andere geschlossene Menge im Schema ist ein CHECK — zu Recht: `card_type` und `commerce_mode`
+sind **fachlich** geschlossen. Diese Menge ist ausdrücklich **offen**, und der Unterschied zählt:
+ein Enum braucht `ALTER TYPE`, ein CHECK das Droppen und Neuanlegen der Bedingung, eine Tabelle
+ein `INSERT`. Die Validierung ist dadurch nicht schwächer — ein Fremdschlüssel weist einen
+erfundenen Schlüssel genauso ab. Das deutsche Label steht daneben statt in einer zweiten Liste in
+der Anwendung.
+
+**Keine Client-Berechtigung auf irgendeiner der vier Tabellen.** Ein Tester kann weder die
+Testerliste noch das Register noch das Journal lesen und sich selbst nichts gewähren.
+
+### Mitgliedschaft ist die Zeile
+
+Kein `enabled`-Flag: die Zeile **ist** der Zustand — dieselbe Entscheidung wie bei `shop_admins`
+und `commerce_testers`. Zwei Arten, dasselbe zu sagen, sind zwei Arten, uneins zu werden.
+`tester_permissions` hängt an `testers`, nicht an `auth.users`; „Tester entfernen" ist damit **ein
+Delete**, die Berechtigungen folgen per Kaskade, und Konto, Sammlung, Bestellungen, Bestand und
+Adminstatus bleiben unberührt.
+
+### Commerce läuft unverändert weiter
+
+`is_commerce_tester()` und `is_commerce_tester_for(uuid)` bleiben — gleiche Namen, gleiche
+Signaturen, gleiche Rechte. Nur ihre Körper fragen jetzt die generische Berechtigung. Damit ändert
+sich an `commerce_checkout_allowed()`, der Bestellsichtbarkeit, `admin_find_accounts()` und
+`admin_commerce_state()` **keine Zeile**. Checkout-Logik umzuschreiben, während man den
+Berechtigungsspeicher austauscht, wären zwei Risiken in einem Schritt.
+
+`admin_set_commerce_tester()` bleibt ebenfalls und pflegt intern das neue Modell. Sein Entzug
+nimmt seit 0036 **nur die Commerce-Berechtigung**, nicht die Mitgliedschaft — ein Konto, das noch
+etwas anderes testet, testet es weiter. Genau dafür existiert diese Migration.
+
+### `commerce_testers` bleibt — als Spiegel, nicht als Wahrheit
+
+**Eine Autorität für Lesezugriffe, ein Spiegel für den Rückweg.** Nach 0036 liest **nichts** mehr
+`commerce_testers`; seine beiden einzigen Leser sind Hüllen geworden. Die Tabelle bleibt stehen und
+wird bei jedem Schreibvorgang nachgeführt, damit ein Zurücknehmen von 0036 funktionierenden
+Commerce wiederherstellt — **auch für Tester, die danach hinzukamen**. Ohne den Spiegel verlören
+die still ihren Zugang.
+
+Auseinanderlaufen können die beiden nicht in einer Weise, die jemand bemerkt, weil nur eine von
+ihnen je befragt wird. Eine spätere Migration entfernt den Spiegel, sobald das generische Modell in
+Production gelaufen ist. **Das Aufräumen ist eine Runde Geduld wert.**
+
+### Journal
+
+`tester_permission_changes`, absichtlich schmal und append-only. `catalog_admin_changes` ist für den
+Katalog und sein CHECK sagt das; sie zu dehnen hieße, `entity` zwei unverwandte Dinge bedeuten zu
+lassen. Mitgliedschaft wird mitprotokolliert, ohne das Feld zu verwässern: `permission` ist `NULL`
+für `added`/`removed` — genau das, wonach „hierbei ging es nicht um eine Berechtigung" aussieht.
+**Kein Fremdschlüssel auf `testers`:** ein Eintrag über eine Entfernung muss die Entfernung
+überleben, sonst wäre das Journal sinnlos.
+
+**Verworfen.** Eine zweite Tabelle je Testfunktion (die Form, die dieser ADR abschafft) · eine
+breite Tabelle mit `can_*`-Spalten (eine Migration je künftiger Funktion) · Enum oder CHECK für das
+Vokabular (DDL statt Datensatz) · ein `enabled`-Flag neben der Zeile · `commerce_testers` sofort zu
+droppen (kein Rückweg) · die Checkout-Logik gleich mit umzuschreiben (zwei Risiken auf einmal).
+
+---
+
+## ADR-0072 — Navigationszeiten werden auf Testkonten gemessen, nicht auf Nutzern
+
+**Status:** angenommen · **Datum:** 2026-09-16 · **Migration:** `0037_performance_telemetry.sql`
+**Baut auf ADR-0071. Ändert an der Navigation selbst nichts.**
+
+**Kontext.** SkyIsles fühlt sich auf dem Telefon langsam an. Die Verdächtigen sind bekannt und
+aufgeschrieben — zwei `auth.getUser()`-Runden je Navigation, 2 von 33 Routen mit `loading.tsx`,
+abgeschalteter Prefetch auf der Figurenkarte, ein großer Katalog-Payload. **Welcher davon die
+gefühlte Sekunde erzeugt, weiß niemand.** Optimieren ohne Messung heißt raten und danach
+weiterraten, weil auch das Ergebnis nicht messbar ist.
+
+Die üblichen Werkzeuge helfen hier nicht. `PerformanceNavigationTiming` misst Dokumentladungen —
+eine App-Router-Navigation ist keine. Web Vitals als Bibliothek liefern auf **mobilem Safari**
+weder INP noch LCP noch CLS noch Long Tasks, und `navigator.connection` gibt es dort nicht. Genau
+das Gerät, um das es geht, ist das, über das die Standardwerkzeuge nichts sagen.
+
+**Entscheidung.** Eine eigene, sehr kleine Messung von **drei Zeitpunkten**, aktiv **nur** für
+Konten mit der Test-Berechtigung `performance_tracking` aus ADR-0071.
+
+| | | |
+|---|---|---|
+| **A** | der Klick-Handler läuft | `performance.now()` |
+| **B** | `usePathname()` meldet die neue Route | Effekt |
+| **C** | das erste Bild danach | zwei verschachtelte `requestAnimationFrame` |
+
+Daraus drei Spalten: **A→C** die gefühlte Dauer, **A→B** das Warten, **B→C** das Zeichnen. Der
+Split ist der ganze Zweck: **langsames A→C mit langsamem A→B** ist Server oder Daten, **langsames
+A→C mit schnellem A→B** ist Rendern. Diese beiden Befunde führen zu völlig verschiedenen
+Optimierungen, und ohne die Aufteilung wären sie nicht zu unterscheiden.
+
+Zwei Frames statt einem: der erste Callback läuft **vor** dem Paint des Commits, der ihn geplant
+hat. Erst der zweite liegt danach — der früheste Moment, zu dem die neue Seite wirklich zu sehen
+war. Ein einzelner rAF würde systematisch zu früh messen.
+
+### Aus für alle anderen, und zwar strukturell
+
+Die Berechtigung wird **auf dem Server im Layout** geprüft, bevor die Komponente existiert. Wer
+sie nicht hat, bekommt die Komponente nicht — kein Listener, kein Timer, keine Anfrage, kein
+Messwert, und der Client-Code ist gar nicht erst im Baum. Das ist der Unterschied zu einem Flag,
+das man clientseitig auswerten könnte.
+
+**Keine E-Mail-Adresse im Client.** Die Frage „darf dieses Konto gemessen werden" beantwortet
+Postgres über `has_tester_permission('performance_tracking')`; der Browser erfährt nur, ob er
+misst, nie warum oder wer sonst.
+
+### Was aufgezeichnet wird — und was es nicht gibt
+
+Aufgezeichnet: **Routenmuster** (`/skylanders/[slug]`, nie `/skylanders/gold-fire-kraken`), die
+drei Dauern, Viewportgröße, warm/kalt, Build-ID, Run-ID, optionales Label, `auth.uid()`,
+Zeitstempel.
+
+Nicht aufgezeichnet — **und im Schema nicht unterbringbar:** Roh-URLs · Query-Strings ·
+Suchbegriffe · Formularinhalte · Warenkorbinhalte · Tokens, Cookies, Header · IP · User-Agent ·
+Klickziele · Scrollverhalten · Session-Replay · Tastatureingaben. Es gibt keine Spalte dafür. Das
+ist dasselbe Prinzip wie überall sonst hier: **interne Daten werden nicht versteckt, sie sind gar
+nicht erst da.**
+
+Dass nur Muster ankommen, ist zusätzlich ein CHECK: `to_route` und `from_route` müssen
+`^/[A-Za-z0-9\[\]/_-]{0,63}$` erfüllen. Ein Slug mit Bindestrichen käme durch diesen Ausdruck —
+deshalb normalisiert der Client gegen eine **feste Liste** der vier dynamischen Routen und liefert
+für alles Unbekannte `/[unknown]`. Der CHECK ist der Riegel, die Liste die Entscheidung.
+
+### Ein Weg hinein, kein Weg zurück
+
+`record_navigation()` ist die einzige Schreibmöglichkeit, prüft selbst die Berechtigung und nimmt
+das Konto aus `auth.uid()` — **es ist kein Parameter**, also kann kein Aufrufer für ein anderes
+Konto schreiben. Auf `perf_navigations` hat kein Client ein Recht: kein `select`, kein `insert`,
+RLS an, `revoke all from anon, authenticated`.
+
+**Der Tester liest seine eigenen Messungen nicht.** Die Tabelle sagt, welches Konto wo langsam
+war; das ist eine Betreibersicht. Für einen Administrator **mit Browsersitzung** sind das
+`admin_perf_runs()` und `admin_perf_report()`, beide `is_shop_admin()`-gated.
+
+### Der Bericht auf der Kommandozeile liest die Tabelle, nicht die Adminfunktionen
+
+**Nachtrag 2026-09-16, nach dem ersten echten Staging-Lauf.** `npm run perf:report:staging`
+scheiterte mit `shop administrator role required`. Kein Fehler in der Berechtigung, sondern die
+Bedingung selbst: das Werkzeug verbindet sich mit dem Service-Role-Key, der **kein `auth.uid()`**
+hat. `is_shop_admin()` fragt `shop_admins` nach `auth.uid()`, bekommt NULL und antwortet `false`.
+Beide Adminfunktionen weisen also jedes Werkzeug ab — und zwar zu Recht.
+
+**`is_shop_admin()` wird dafür nicht aufgeweicht.** Dieses Prädikat schützt die Daten vor jedem
+angemeldeten Konto; es so zu ändern, dass ein Skript durchkommt, wäre genau die Lockerung, die man
+nicht haben will. Die Adminfunktionen bleiben unverändert.
+
+Stattdessen dieselbe Form, die Operator-Werkzeuge hier immer hatten: **direkt lesen mit dem
+Service-Role-Key** — wie `export-image-overrides.mts`, `verify-shop.mts` und der Katalogimport.
+Der Schlüssel liegt ausschließlich auf dem Entwicklungsrechner, trägt nie `NEXT_PUBLIC_` und ist
+nicht im ausgelieferten Bundle. Die Gruppierung liegt in `src/lib/perf/report.ts`, wo sie prüfbar
+ist, statt in einer `.mts`, die nur gegen eine echte Datenbank läuft.
+
+Das ist **nicht** derselbe Fall wie `0035`: dort brauchte ein **Schreibvorgang** eine kuratierte
+Funktion (`system_set_image_override()`), weil ein direktes `update` die Logik umgangen hätte. Ein
+Lesevorgang hat keine Logik zu umgehen — **es braucht deshalb keine Migration `0038`.**
+
+Die Perzentile stehen damit zweimal da, in SQL und in TypeScript. Beide sind auf
+`percentile_cont` festgelegt und durch Tests darauf festgenagelt; abweichen können sie nur um eine
+Millisekunde, wenn ein Wert exakt zwischen zwei Millisekunden liegt und Postgres und JavaScript
+die Rundung verschieden auflösen.
+
+### Ein Terminalbefehl statt eines Dashboards
+
+`npm run perf:report:staging -- --latest` druckt die Tabelle. Die Frage wird ein paar Mal je
+Optimierung gestellt, von einer Person, und die Antwort ist eine Zahlentabelle. Eine Adminseite
+wäre eine Oberfläche zum Bauen, Gestalten, Absichern und Instandhalten. Der Befehl ist strikt
+lesend und trägt dieselbe Staging-Sperre wie jedes andere Werkzeug mit zwei Umgebungen.
+
+### Die Messung darf nicht messbar sein
+
+Ein passiver Capture-Listener am Dokument statt einer Änderung an jedem `<Link>`. Kein
+`preventDefault()`, kein `stopPropagation()`, keine Verzögerung. **Kein React-State je Ereignis** —
+alles Refs, weil State bei jedem Tap den Teilbaum neu rendern würde, also genau die Kosten
+verursachte, die hier nicht entstehen dürfen. Die Zustellung wird nie abgewartet, alle Fehler
+werden geschluckt, **und es gibt keinen Retry**: Wiederholungen über eine schlechte Mobilverbindung
+sind der Weg, auf dem ein Telemetrie-Client selbst zum Performanceproblem wird. Die Warteschlange
+ist bei 100 Einträgen gedeckelt und verwirft die ältesten.
+
+Ein Tap wird nur der Ankunft gutgeschrieben, auf die er zielte. Zurück-Button, Redirect oder ein
+zweiter Tap während des ersten lassen den Tap unzugeordnet — er wird **verworfen**, statt eine
+Dauer zu erzeugen, die zwei Navigationen misst. Lieber eine Messung weniger als eine falsche.
+
+### Zuerst messen, dann reparieren
+
+**0037 ändert an keinem der bekannten Verdächtigen etwas.** Proxy-Auth, `updateSession()`,
+`currentUser()`, Prefetch, Loading-Boundaries, Suspense, Katalogabfragen, RSC-Payload,
+`FigureCard`, Navigationsverhalten bleiben, wie sie sind. Ein Vorher-Wert, der auf einem bereits
+halb optimierten Stand entstanden ist, ist kein Vorher-Wert. Deshalb gibt es `label` und
+`build_id`: zwei Läufe, `mobile-baseline-1` und `mobile-after-1`, sind vergleichbar.
+
+**Verworfen.** Eine Web-Vitals-Bibliothek (misst auf mobilem Safari das Falsche oder nichts) ·
+`PerformanceNavigationTiming` (kennt SPA-Navigation nicht) · `sendBeacon` (trägt keine Session,
+und der Insert braucht sie) · ein Drittanbieter-RUM (Nutzerdaten verlassen das System, kostet,
+widerspricht `docs/SECURITY.md`) · Messung für alle mit Sampling (wir wollen kein allgemeines
+Nutzertracking) · eine eigene `perf_testers`-Tabelle (ADR-0071 existiert genau deswegen) ·
+ein Admin-Dashboard (Oberfläche für eine Zahlentabelle) · automatisches Pruning per `pg_cron`
+(ein Scheduler, den niemand beobachtet; `admin_prune_perf_navigations(days)` wird gerufen, wenn
+jemand aufräumen will).

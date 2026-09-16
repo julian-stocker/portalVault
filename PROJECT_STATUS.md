@@ -1360,7 +1360,7 @@ overscroll-contain` / `shrink-0`), das Ceiling kommt allein aus der Primitive, u
 ein X.
 
 **V3.9 — Figur hinzufügen** · ADR-0070 · Migration `0033_admin_created_figures.sql` ·
-**Code fertig, Migration geschrieben und NIRGENDS angewandt.**
+**auf Staging und Production angewandt.**
 
 SkyIsles vergibt ab hier selbst kanonische Katalogeinträge und SKY-IDs; die Legacy-Vergabe über
 `etl/assign_ids.py` ist eingefroren. Namensraum: `0001–0820` historisch, `0821–8999` produktiv,
@@ -1383,15 +1383,65 @@ SkyIsles vergibt ab hier selbst kanonische Katalogeinträge und SKY-IDs; die Leg
 | Kein Delete, keine Delete-RPC, keine Kategorieverwaltung | bewusst offen |
 
 **V3.9a — Vorlage erbt die Sammleridentität** · ADR-0070a · Migration
-`0034_create_figure_from_template.sql` · **geschrieben, nicht angewandt.** Die Vorlage überträgt
+`0034_create_figure_from_template.sql` · **auf Staging und Production angewandt.** Die Vorlage überträgt
 `character_id`, serverseitig aus der Vorlagenzeile gelesen (nie als Argument). Vorlage ohne
 Charakter erbt nichts und sagt es. Offen und bewusst nicht entschieden: ob ein kuratierter
 Charakter den `sortBaseName` bestimmen soll — beträfe 30 bestehende Karten sichtbar, siehe
 ADR-0070a.
 
-**Offen vor Staging:** `0033` im Staging-SQL-Editor anwenden, danach
-`supabase/tests/0033_slug_parity.sql` ausführen (schreibfrei) und die SQL-/TypeScript-Parität der
-24 Slug-Fixtures bestätigen. **Production: nichts.**
+**Erledigt:** `0033` und `0034` sind auf Staging und Production angewandt,
+`supabase/tests/0033_slug_parity.sql` (schreibfrei) bestätigt die SQL-/TypeScript-Parität der
+Slug-Fixtures. **Production hält bewusst kein SKY-0821** — `characters:import:prod` ist
+ausdrücklich nicht Teil dieses Release.
+
+---
+
+## Test-Berechtigungen und Performance-Telemetrie (Stand 2026-09-16)
+
+**0036 — Test-Berechtigungen** · ADR-0071 · `0036_tester_feature_permissions.sql` ·
+**auf Staging angewandt, auf Production nicht.** `commerce_testers` war eine Tabelle für eine
+Frage; die zweite Frage hätte eine zweite Tabelle derselben Form bedeutet. Jetzt: `testers`,
+`tester_features` (Vokabular: `commerce`, `performance_tracking`), `tester_permissions`,
+`tester_permission_changes`. `is_commerce_tester()` behält Name, Signatur und Rechte — am
+Checkout ändert sich keine Zeile. `commerce_testers` bleibt als **Spiegel für den Rückweg**
+stehen und wird nachgeführt; gelesen wird es von nichts mehr. Verwaltet im Adminbereich unter
+„Testkonten"; `commerce-panel.tsx` ist dadurch von 204 auf 96 Zeilen geschrumpft.
+
+**0037 — Navigationstelemetrie** · ADR-0072 · `0037_performance_telemetry.sql` ·
+**geschrieben, NIRGENDS angewandt.**
+
+Warum überhaupt: SkyIsles fühlt sich mobil langsam an, die Verdächtigen sind bekannt, aber
+**welcher die gefühlte Sekunde erzeugt, weiß niemand.** `PerformanceNavigationTiming` misst
+App-Router-Navigation nicht, und mobiles Safari liefert weder INP noch LCP noch CLS noch Long
+Tasks — genau das Gerät, um das es geht.
+
+| | |
+|---|---|
+| Drei Zeitpunkte: Klick → `usePathname()` → zweiter rAF | ✅ |
+| Aktiv **nur** bei Test-Berechtigung `performance_tracking`, serverseitig im Layout geprüft | ✅ |
+| `perf_navigations` — RLS an, kein Clientrecht, keine Policy | ✅ geschrieben |
+| `record_navigation()` nimmt das Konto aus `auth.uid()`, kein `p_user_id` | ✅ geschrieben |
+| Nur Routen**muster**, CHECK erzwingt die Form | ✅ geschrieben |
+| Keine URL, kein Query-String, kein Suchbegriff, kein Inhalt — keine Spalte dafür | ✅ |
+| `admin_perf_runs()` / `admin_perf_report()` / `admin_prune_perf_navigations()`, alle Admin-gated | ✅ geschrieben |
+| `npm run perf:report:staging -- --latest`, strikt lesend, Service-Role-Lesepfad | ✅ **auf Staging verifiziert** |
+| Passiver Capture-Listener, kein React-State je Ereignis, kein Retry, gedeckelte Queue | ✅ |
+| 65 Tests in `src/lib/perf/telemetry.test.ts` | ✅ |
+
+**Ausdrücklich nicht Teil von 0037:** irgendeine Optimierung. Proxy-Auth, `updateSession()`,
+`currentUser()`, Prefetch, Loading-Boundaries, Suspense, Katalogabfragen, RSC-Payload,
+`FigureCard` und das Navigationsverhalten bleiben unverändert — **ein Vorher-Wert auf einem schon
+halb optimierten Stand wäre keiner.** `label` und `build_id` machen zwei Läufe vergleichbar.
+
+**Auf Staging verifiziert (2026-09-16).** `0037` ist angewandt, das Testkonto hat
+`performance_tracking`, die Aufzeichnung funktioniert, und `npm run perf:report:staging -- --latest`
+liefert den Bericht. Der erste Lauf (2 Navigationen, beide kalt) zeigt die Dauer deutlich auf der
+**Warteseite**: 1544 von 1693 ms bzw. 803 von 1030 ms entfallen auf `commit`, nicht auf das
+Zeichnen. Das ist ein erster Hinweis, **keine Messreihe** — und ausdrücklich noch kein Anlass,
+etwas zu optimieren.
+
+**Offen vor Production:** `0035` → `0036` → `0037` anwenden, Testkonto berechtigen, mobile
+Basismessung aufnehmen. **Production: bislang nichts.**
 
 ---
 

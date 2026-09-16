@@ -739,6 +739,70 @@ verborgen (`catalog_visible = false`); ihre SKY-ID bleibt vergeben.
 **Das Bild läuft weiter über die Storage-Policy**, deren Prädikat `is_shop_admin()` ist
 (ADR-0046) — keine zweite Upload-Architektur, kein Service-Role-Key im Webprozess.
 
+### Testkonten und Test-Berechtigungen (Migration `0036`, ADR-0071)
+
+Ein Testkonto ist ein ausdrücklich benanntes Konto, und eine Test-Berechtigung gewährt **genau
+das, was sie nennt**: nie eine andere Berechtigung, nie `shop_admins`. Umgekehrt macht Adminstatus
+niemanden zum Tester.
+
+**Keine Client-Berechtigung auf irgendeiner der vier Tabellen** — `testers`, `tester_features`,
+`tester_permissions`, `tester_permission_changes` haben RLS an, `revoke all from anon,
+authenticated` und keine Policy. Ein Tester kann die Testerliste nicht lesen, das Register nicht
+aufzählen, das Journal nicht einsehen und sich selbst nichts gewähren: es gibt keinen Pfad dorthin.
+
+Gelesen wird ausschließlich über `has_tester_permission(text)` — **ohne User-Argument**, sie kann
+also nur über den Aufrufer Auskunft geben. Die benannte Variante `has_tester_permission_for(uuid,
+text)` existiert nur für den Zahlungspfad, der eine User-ID statt einer Sitzung hält, und ist
+**allen** Clientrollen entzogen; sie kann damit kein Auskunftsdienst über fremde Konten werden.
+Dieselbe Trennung wie `is_shop_admin()` / `is_shop_admin_for()`.
+
+Geändert wird ausschließlich über `admin_set_tester()` und `admin_set_tester_permission()`, beide
+mit `is_shop_admin()` als erster Anweisung. Das Vokabular ist ein Fremdschlüssel auf
+`tester_features`: ein erfundener Berechtigungsschlüssel wird abgewiesen, und die Fehlermeldung
+nennt ihn.
+
+**`commerce_testers` wird seit 0036 von nichts mehr gelesen.** Die Tabelle bleibt als Spiegel für
+den Rückweg stehen und wird nachgeführt; die Autorität ist `tester_permissions`.
+
+### Performance-Telemetrie (Migration `0037`, ADR-0072)
+
+**Das ist kein Nutzertracking.** Gemessen werden Navigationszeiten ausschließlich auf Konten mit
+der Test-Berechtigung `performance_tracking`. Für alle anderen existiert die Messung nicht — die
+Prüfung liegt **serverseitig im Layout**, und ohne Berechtigung wird die Telemetriekomponente gar
+nicht erst gerendert: kein Listener, kein Timer, keine Anfrage, kein Client-Code im Baum.
+
+**Keine E-Mail-Adresse und keine Kontoliste im Client.** Die Frage beantwortet Postgres über
+`has_tester_permission('performance_tracking')`; der Browser erfährt nur, ob er misst.
+
+**Aufgezeichnet wird:** Routen**muster** (`/skylanders/[slug]`), drei Dauern in Millisekunden,
+Viewportgröße, warm/kalt, Build-ID, Run-ID, optionales Label, `auth.uid()`, Zeitstempel.
+
+**Nicht aufgezeichnet — und im Schema nicht unterbringbar:** Roh-URLs · Query-Strings ·
+Suchbegriffe · Formularinhalte · Warenkorbinhalte · Tokens, Cookies, Header · IP-Adresse ·
+User-Agent · Klickziele · Scrollverhalten · Session-Replay · Tastatureingaben. `perf_navigations`
+hat für nichts davon eine Spalte. Zusätzlich erzwingt ein CHECK die Musterform beider
+Routenspalten, und der Client normalisiert gegen eine feste Liste der dynamischen Routen; alles
+Unbekannte wird `/[unknown]`.
+
+**Kein Clientrecht auf der Tabelle** — RLS an, `revoke all from anon, authenticated`, keine Policy.
+Geschrieben wird ausschließlich über `record_navigation()`, das die Berechtigung selbst prüft und
+das Konto aus `auth.uid()` nimmt: **es gibt kein `p_user_id`**, also kann kein Aufrufer für ein
+fremdes Konto schreiben.
+
+**Zwei Lesewege, beide privilegiert.** Im Browser `admin_perf_runs()` und `admin_perf_report()`,
+beide `is_shop_admin()`-gated — **auch der Tester liest seine eigenen Messungen nicht**, weil die
+Tabelle sagt, welches Konto wo langsam war. Auf der Kommandozeile der Service-Role-Key, der RLS
+bauartbedingt umgeht, ausschließlich auf dem Entwicklungsrechner liegt und nie nach Vercel gehört
+(`docs/DEPLOYMENT.md`). Der Service-Role-Key kann `is_shop_admin()` **nicht** erfüllen — er hat
+kein `auth.uid()` —, und das Prädikat wurde dafür ausdrücklich nicht aufgeweicht.
+
+Für `anon` und `authenticated` ändert das nichts: sie haben auf `perf_navigations` weiterhin kein
+Recht und keine Policy, weder vor noch nach diesem Lesepfad.
+
+`admin_prune_perf_navigations(days)` löscht auf Zuruf; es gibt keinen Scheduler. Der Lesebefehl
+`npm run perf:report:staging` ist strikt lesend und trägt dieselbe Staging-Sperre wie jedes andere
+Werkzeug mit zwei Umgebungen.
+
 ## 5. Git-Sicherheit
 
 Geplante `.gitignore`-Strategie (**noch nicht angelegt** — dieser Durchlauf schreibt nur Doku):

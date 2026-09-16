@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from "next";
 
+import { NavigationTelemetry } from "@/components/perf/navigation-telemetry";
 import { SkyBackdrop } from "@/components/layout/sky-backdrop";
+import { buildId, canTrackPerformance } from "@/lib/perf/permission";
 import { de } from "@/lib/i18n/de";
 
 import "./globals.css";
@@ -104,9 +106,17 @@ export const viewport: Viewport = {
  * sky for no reason. The page still works without it — `--canvas` is a solid
  * colour and every surface above sets its own ground (ADR-0038).
  */
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  /*
+   * Asked on the server, once per request (ADR-0072). For everybody without
+   * the `performance_tracking` tester permission the component below is not
+   * rendered at all — no listener, no timer, no request, and none of the code
+   * in the tree. "Off for normal users" is structural here, not a flag.
+   */
+  const tracking = await canTrackPerformance();
+
   return (
     <html
       lang="de"
@@ -129,6 +139,7 @@ export default function RootLayout({
       <body className="relative min-h-screen antialiased">
         <SkyBackdrop />
         {children}
+        {tracking ? <NavigationTelemetry buildId={buildId()} /> : null}
       </body>
     </html>
   );

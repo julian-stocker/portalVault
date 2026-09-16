@@ -36,6 +36,8 @@ werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migratio
 | `profiles` | = Benutzer | Benutzername, Profil | öffentlich lesbar, selbst schreibbar |
 | `collection_items` | wächst | Sammlung: Benutzer × Figur × Menge | nur der Eigentümer |
 | `characters` | 19 (Pilot) | kuratierte Charaktermetadaten | öffentlich lesbar, nur kuratiert schreibbar |
+| `testers` + 3 (`0036`) | wenige | Testkonten und ihre Test-Berechtigungen | kein Clientrecht, nur über Funktionen |
+| `perf_navigations` | wächst je Messlauf | Navigationszeiten von Testkonten | kein Clientrecht, Admin liest aggregiert |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -865,6 +867,79 @@ ohnehin der Primärschlüssel von `order_mail` und die Endgültigkeit von `sent`
 
 `admin_order()` und `my_order()` tragen zusätzlich `shipping_method_code`: Ein Trackinglink wird
 aus dem Code des Versandkatalogs gebaut, nie aus dem Anzeigenamen, der umbenannt werden darf.
+
+
+### 3.3p Test-Berechtigungen (Migration `0036`, ADR-0071)
+
+Vier schmale Tabellen ersetzen „eine Tabelle je Testfunktion". Vollständige Sicherheitsbetrachtung
+in `docs/SECURITY.md`; hier nur die Form.
+
+| Tabelle | Zweck | Schlüssel |
+|---|---|---|
+| `testers` | dieses Konto ist ein benanntes Testkonto | `user_id` |
+| `tester_features` | das Vokabular der Test-Berechtigungen | `key` (`commerce`, `performance_tracking`) |
+| `tester_permissions` | dieses Konto darf dieses eine Ding | `(user_id, feature_key)` |
+| `tester_permission_changes` | append-only Journal, wer wann was vergab | `id` |
+
+`tester_permissions` hängt an `testers` (Kaskade), nicht an `auth.users`: „Tester entfernen" ist
+**ein Delete**, und Konto, Sammlung, Bestellungen und Adminstatus bleiben unberührt. Das Vokabular
+ist **Datum, nicht Schema** — eine neue Testfunktion ist ein `INSERT`, keine Migration.
+
+Gelesen wird ausschließlich über `has_tester_permission(text)` (ohne User-Argument, also nur über
+den Aufrufer) und `has_tester_permission_for(uuid, text)`. `is_commerce_tester()` und
+`is_commerce_tester_for(uuid)` behalten Name, Signatur und Rechte und fragen intern das neue
+Modell — an `commerce_checkout_allowed()`, der Bestellsichtbarkeit und `admin_commerce_state()`
+ändert 0036 **keine Zeile**.
+
+**`commerce_testers` bleibt als Spiegel stehen.** Seit 0036 liest es nichts mehr; geschrieben wird
+es weiterhin bei jeder Änderung, damit eine Rücknahme von 0036 funktionierenden Commerce
+wiederherstellt — auch für Tester, die erst danach hinzukamen. Die Autorität ist
+`tester_permissions`. Eine spätere Migration entfernt den Spiegel.
+
+---
+
+### 3.3q `perf_navigations` — gemessene Navigationen (Migration `0037`, ADR-0072)
+
+Wie lange eine Navigation auf dem Gerät eines **Testkontos** gedauert hat. Keine allgemeine
+Nutzererfassung: geschrieben wird nur für Konten mit der Test-Berechtigung
+`performance_tracking` aus 0036.
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `run_id` | `uuid` | ein Messlauf = ein Browser-Tab, im `sessionStorage` erzeugt |
+| `user_id` | `uuid` | **aus `auth.uid()`**, nie aus einem Parameter |
+| `occurred_at` | `timestamptz` | Serverzeit |
+| `from_route` / `to_route` | `text` | **Routenmuster**, CHECK `^/[A-Za-z0-9\[\]/_-]{0,63}$` |
+| `interaction_to_visible_ms` | `integer` | A→C, die gefühlte Dauer · 0–600000 |
+| `interaction_to_commit_ms` | `integer` | A→B, das Warten · 0–600000 |
+| `commit_to_visible_ms` | `integer` | B→C, das Zeichnen · 0–600000 |
+| `viewport_w` / `viewport_h` | `smallint` | Gerätegröße, gerundet · CHECK 0–10000 |
+| `warm` | `boolean` | dieses Routenpaar kam im Lauf schon vor |
+| `build_id` | `text` | Commit-SHA (12) der Vercel-Bereitstellung, sonst `dev` |
+| `label` | `text` | frei gewählter Laufname, CHECK `^[a-z0-9][a-z0-9-]{0,39}$` |
+
+**Es gibt keine Spalte für eine URL, einen Query-String, einen Suchbegriff, Formular- oder
+Warenkorbinhalte, Tokens, IP oder User-Agent.** Das Schema ist die Zusage: es gibt nichts, wohin
+man sie schriebe. `to_route` trägt `/skylanders/[slug]`, niemals `/skylanders/gold-fire-kraken`.
+
+**Kein Client hat ein Recht auf der Tabelle** — RLS an, `revoke all from anon, authenticated`,
+keine Policy. Auch der Tester liest seine eigenen Messungen nicht.
+
+| Funktion | Gate | Zweck |
+|---|---|---|
+| `record_navigation(…)` | `has_tester_permission('performance_tracking')` | der einzige Schreibweg |
+| `admin_perf_runs(int)` | `is_shop_admin()` | die letzten Läufe |
+| `admin_perf_report(uuid, text)` | `is_shop_admin()` | p50/p75/p95 je Routenpaar, warm/kalt getrennt |
+| `admin_prune_perf_navigations(int)` | `is_shop_admin()` | älter als *n* Tage löschen, **auf Zuruf, kein Scheduler** |
+
+`record_navigation()` nimmt **kein** `p_user_id`: der Aufrufer kann nicht für ein fremdes Konto
+schreiben.
+
+**Die beiden `admin_perf_*`-Funktionen sind der Weg für einen Administrator mit Browsersitzung.**
+`npm run perf:report:staging -- --latest` kann sie nicht rufen: der Service-Role-Key hat kein
+`auth.uid()`, also ist `is_shop_admin()` dort `false`. Das Werkzeug liest `perf_navigations`
+deshalb direkt mit dem Service-Role-Key — dieselbe Form wie `export-image-overrides.mts` und
+`verify-shop.mts` — und gruppiert in `src/lib/perf/report.ts`. Strikt lesend, nur `select`.
 
 
 ### 3.4 `profiles` — 1:1 zu `auth.users`

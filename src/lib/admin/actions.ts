@@ -388,6 +388,61 @@ export async function setCommerceTester(
 }
 
 /**
+ * Adds or removes a tester account (ADR-0071).
+ *
+ * The argument is a `user_id` and nothing else, for the same reason
+ * `setCommerceTester()` takes one: an address never authorises anything
+ * (ADR-0032). Removing takes the account's permissions with it by cascade and
+ * touches nothing else about the account.
+ */
+export async function setTester(
+  userId: string,
+  enabled: boolean,
+  note?: string,
+): Promise<AdminResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (typeof userId !== "string" || userId === "") {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  return call(
+    "admin_set_tester",
+    {
+      p_user_id: userId,
+      p_enabled: enabled,
+      p_note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
+    },
+    ["/admin"],
+  );
+}
+
+/**
+ * Grants or revokes one tester permission (ADR-0071).
+ *
+ * The permission is not validated here beyond being a non-empty string: the
+ * registry in the database decides what exists, and inventing a second list to
+ * check against would be the drift this design removes. An unknown key comes
+ * back refused, by name.
+ */
+export async function setTesterPermission(
+  userId: string,
+  permission: string,
+  enabled: boolean,
+): Promise<AdminResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (typeof userId !== "string" || userId === "") {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  if (typeof permission !== "string" || permission === "") {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  return call(
+    "admin_set_tester_permission",
+    { p_user_id: userId, p_permission: permission, p_enabled: enabled },
+    ["/admin", "/checkout", "/cart"],
+  );
+}
+
+/**
  * Finds accounts by the beginning of a username or address.
  *
  * Read-only, and deliberately narrow: three characters minimum, ten results,

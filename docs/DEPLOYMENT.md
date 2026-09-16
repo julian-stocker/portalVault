@@ -21,16 +21,23 @@ keine Voraussetzung für irgendetwas.
 
 ## Environment Variables
 
-Der ausgelieferte Webcode liest genau zwei Variablen — nachgewiesen über
+Der ausgelieferte Webcode liest genau drei Variablen — nachgewiesen über
 `grep -rn "process.env" src/`:
 
 | Variable | Wo gelesen | Zweck |
 |---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | `src/lib/supabase/{client,server,middleware}.ts` | Projekt-Endpunkt |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dieselben drei Dateien | öffentlicher Schlüssel (ADR-0017) |
+| `NEXT_PUBLIC_SUPABASE_URL` | `src/lib/supabase/{client,server,middleware}.ts`, `src/lib/catalog/image.ts` | Projekt-Endpunkt |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | dieselben drei Supabase-Dateien | öffentlicher Schlüssel (ADR-0017) |
+| `VERCEL_GIT_COMMIT_SHA` | `src/lib/perf/permission.ts` | Build-ID der Messläufe (ADR-0072) |
 
-Beide sind öffentlich. Der Schutz liegt bei Supabase Auth und Row Level
-Security, nicht bei ihrer Geheimhaltung.
+Die beiden `NEXT_PUBLIC_*` sind öffentlich. Der Schutz liegt bei Supabase Auth
+und Row Level Security, nicht bei ihrer Geheimhaltung.
+
+**`VERCEL_GIT_COMMIT_SHA` setzt Vercel selbst** — es ist nichts einzutragen.
+Es wird **serverseitig** gelesen, auf zwölf Zeichen gekürzt und nur an
+Messwerte von Testkonten geschrieben, damit ein Vorher- und ein Nachher-Lauf
+unterscheidbar sind. Kein `NEXT_PUBLIC_`-Präfix, also nichts davon im Bundle;
+lokal gibt es keine Bereitstellung, und die Antwort ist dann `dev`.
 
 ### Lokal
 
@@ -517,3 +524,32 @@ Ein Kunde hätte einen unerklärten Fehler gesehen und der Betrieb kein
 spezifisches Signal bekommen.
 
 Angewandt auf Production in dieser Reihenfolge: `0014` → `0015` → `0016`.
+
+---
+
+## Offene Migrationen für Production — `0035`, `0036`, `0037`
+
+Stand 2026-09-16. **Production hat `0033` und `0034`; `0035`, `0036` und `0037` sind dort nicht
+angewandt.** Staging hat `0035` und `0036`, `0037` nicht. Die Reihenfolge ist nicht beliebig:
+
+| | Migration | Abhängigkeit |
+|---|---|---|
+| 1. | `0035_system_set_image_override.sql` | keine — eigenständig, nur der Bildabgleich hängt daran |
+| 2. | `0036_tester_feature_permissions.sql` | **muss vor `0037`** — legt `tester_features` an |
+| 3. | `0037_performance_telemetry.sql` | `record_navigation()` ruft `has_tester_permission()` aus `0036` |
+
+`0037` vor `0036` scheitert laut beim Anlegen der Funktion und hinterlässt keine halbe Installation
+— die Reihenfolge ist also erzwungen und nicht nur empfohlen. `0035` ist zu den beiden anderen
+unabhängig und darf davor oder danach laufen.
+
+**Alle drei sind additiv.** Keine Zeile wird geändert, keine Spalte gelöscht, keine bestehende
+Funktion umsigniert. `0036` schreibt einmalig die vorhandenen `commerce_testers` in das neue
+Modell; auf einer Production ohne Tester ist das eine leere Menge.
+
+**Nach `0037` ist noch nichts an.** Die Telemetrie misst erst, wenn ein Konto im Adminbereich unter
+„Testkonten" die Berechtigung `performance_tracking` bekommt. Ohne diesen Schritt ändert die
+Migration am Verhalten der Seite nichts.
+
+**Rücknahme.** `0037`: `drop function` auf die vier Funktionen, `drop table perf_navigations`.
+`0036`: die vier Tabellen und die Funktionen droppen — `commerce_testers` steht dafür bewusst noch
+als Spiegel da und ist aktuell (ADR-0071).

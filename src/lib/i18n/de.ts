@@ -605,6 +605,35 @@ export const de = {
       revertStockFailed: "Das hat nicht geklappt.",
     },
 
+    /* ------------------------------------------------------------------
+       Testkonten und ihre Test-Berechtigungen (ADR-0071).
+
+       Ein eigener Block neben `commerce`, weil ein Tester seit 0036 nicht
+       mehr „darf im Testmodus bestellen" heißt: Commerce ist eine von
+       mehreren Berechtigungen, und die Namen der Berechtigungen stehen in
+       der Datenbank, nicht hier.
+       ------------------------------------------------------------------ */
+    testers: {
+      heading: "Testkonten",
+      hint:
+        "Ausdrücklich benannte Testkonten. Jede Berechtigung gilt für sich: sie gewährt nur, " +
+        "was sie nennt, und niemals Adminrechte. Adminrechte allein machen niemanden zum Tester.",
+      empty: "Noch kein Testkonto.",
+      permissionsHeading: "Test-Berechtigungen",
+      noPermissions: "Keine Berechtigung — das Konto steht auf der Liste und darf nichts.",
+      isAdmin: "Admin",
+      remove: "Testkonto entfernen",
+      removeHint: "Entfernt nur den Testerstatus und dessen Berechtigungen. Das Konto bleibt.",
+      searchLabel: "Konto suchen",
+      searchPlaceholder: "Benutzername oder E-Mail",
+      searchHint:
+        "Die Suche findet nur das richtige Konto. Zum Testkonto wird das Konto, nicht die Adresse.",
+      searchEmpty: "Kein Konto gefunden.",
+      searchTooShort: "Mindestens drei Zeichen.",
+      add: "Als Testkonto hinzufügen",
+      alreadyTester: "Ist bereits Testkonto",
+    },
+
     /** Shop-Einstellungen (ADR-0045). */
     shopSettings: "Shop-Einstellungen",
     defaultShopPrice: "Standard-Shoppreis",

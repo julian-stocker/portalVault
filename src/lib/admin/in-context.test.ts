@@ -208,6 +208,9 @@ describe("the same mutations as /admin, not new ones", () => {
         // the sandbox stock reversal. All on /admin, none in the catalog.
         "admin_set_commerce_mode",
         "admin_set_commerce_tester",
+        // Tester membership and one tester permission (ADR-0071, 0036).
+        "admin_set_tester",
+        "admin_set_tester_permission",
         "admin_find_accounts",
         "admin_revert_sandbox_stock",
         // ADR-0064 — two subjects, so one narrow writer each. Setting the

@@ -270,10 +270,20 @@ describe("the admin panel stays a client component", () => {
     expect(PANEL).not.toContain('from "@/lib/admin/commerce"');
   });
 
-  it("the panel grants by user id and never by address", () => {
-    expect(PANEL).toContain("setCommerceTester(userId");
-    expect(PANEL).toContain("grant(match.userId");
-    expect(PANEL).not.toMatch(/setCommerceTester\(\s*(match|tester)\.email/);
+  it("the tester panel grants by user id and never by address", () => {
+    /*
+     * The invariant did not change; the file did. Since 0036 the tester list
+     * lives in `TesterPanel` (ADR-0071), so this is asserted where the code
+     * now is rather than dropped. An address may FIND an account; what is
+     * granted is always the `user_id` of the row that was picked (ADR-0032).
+     */
+    const TESTER_PANEL = readFileSync("src/components/admin/tester-panel.tsx", "utf8");
+    expect(TESTER_PANEL).toContain("setTester(userId");
+    expect(TESTER_PANEL).toContain("setTesterPermission(userId");
+    expect(TESTER_PANEL).toContain("membership(match.userId");
+    expect(TESTER_PANEL).not.toMatch(/set(Tester|TesterPermission)\(\s*(match|tester)\.email/);
+    // And the commerce panel no longer holds a second copy of the list.
+    expect(PANEL).not.toContain("setCommerceTester");
   });
 });
 

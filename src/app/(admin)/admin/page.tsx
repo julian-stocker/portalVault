@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { CommercePanel } from "@/components/admin/commerce-panel";
+import { TesterPanel } from "@/components/admin/tester-panel";
 import { PlatformSettings } from "@/components/admin/platform-settings";
 import { SellerSettings } from "@/components/admin/seller-settings";
 import { ShopSettings } from "@/components/admin/shop-settings";
 import { fetchCommerceState } from "@/lib/admin/commerce";
+import { fetchTesterState } from "@/lib/admin/tester";
 import { fetchShopSettings } from "@/lib/admin/inventory";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchPlatformSettings } from "@/lib/admin/platform";
@@ -25,7 +27,7 @@ export const metadata: Metadata = { title: de.admin.title };
  * a thing to change.
  */
 export default async function AdminPage() {
-  const [categories, settings, openOrders, seller, platform, commerce] = await Promise.all([
+  const [categories, settings, openOrders, seller, platform, commerce, testers] = await Promise.all([
     fetchAdminCategories(),
     fetchShopSettings(),
     // Memoised per request — the layout above already counted these rows.
@@ -33,6 +35,7 @@ export default async function AdminPage() {
     fetchSeller(),
     fetchPlatformSettings(),
     fetchCommerceState(),
+    fetchTesterState(),
   ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
   const copy = de.admin.orders;
@@ -125,6 +128,9 @@ export default async function AdminPage() {
           (ADR-0064, ADR-0059). */}
       <div className="mt-8">
         <CommercePanel state={commerce} />
+        {/* Its own panel since 0036: testers are no longer a commerce
+            setting, and each carries its own permissions (ADR-0071). */}
+        <TesterPanel state={testers} />
         <SellerSettings
           displayName={seller.displayName}
           contactEmail={seller.contactEmail}
