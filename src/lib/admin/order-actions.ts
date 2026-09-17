@@ -134,6 +134,43 @@ export async function markOrderShipped(
 }
 
 /**
+ * Set a shipped order back to unfulfilled (ADR-0074).
+ *
+ * The correction for a mis-tap, which until 0039 could only be made in a
+ * database session. `admin_unmark_order_shipped()` clears `shipped_at`, keeps
+ * the tracking number and writes one journal entry; it touches no payment
+ * column, no reservation, no inventory movement and no order line.
+ *
+ * NO MAIL. There is no "your parcel is not on its way after all" message, and
+ * inventing one would tell a customer about an operator's slip. If the order
+ * ships again, `order_mail`'s primary key and `claim_order_mail()` returning
+ * `already_sent` keep the shipping confirmation from going out twice — which
+ * is why `markOrderShipped()` needs no special case for a repeat.
+ */
+export async function unmarkOrderShipped(orderNumber: string): Promise<ShipResult> {
+  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("admin_unmark_order_shipped", {
+    p_order_number: orderNumber,
+  });
+
+  if (error) {
+    const code = error.code ?? "";
+    if (NOT_ADMIN.has(code)) return { ok: false, message: de.admin.notAllowed };
+    // Already unfulfilled, or gone. A fact about the order, not a fault.
+    if (REFUSED.has(code)) return { ok: false, message: de.admin.orders.shipRefused };
+    return { ok: false, message: de.admin.orders.unshipFailed };
+  }
+
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderNumber}`);
+  // The customer's page states the status, so it has to be re-read as well.
+  revalidatePath(`/account/orders/${orderNumber}`);
+  return { ok: true };
+}
+
+/**
  * Record, replace or clear the parcel reference.
  *
  * Deliberately **not** a wrapper that also ships. Correcting a number is its

@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 /**
- * The two admin changes before the beta: a flagged order that cannot be
- * missed (F5), and a confirmation in front of the only irreversible action in
- * the product (F6).
+ * Admin fulfilment wiring: a flagged order that cannot be missed (F5), and
+ * the shipping status control.
  *
- * Both counting rules are pure and tested in `open-orders.test.ts`. What is
- * asserted here is the wiring — and that the fulfilment rule itself did not
- * move a millimetre.
+ * This file used to hold the confirmation in front of "the only irreversible
+ * action in the product". 0039 removed the irreversibility rather than the
+ * symptom, so the assertions moved with it: what is pinned now is that the
+ * status goes both ways, that it does not dress a reversible switch as a
+ * destructive one, and that the copy which claimed otherwise is gone.
+ *
+ * Both counting rules are pure and tested in `open-orders.test.ts`.
  */
 function code(path: string): string {
   return readFileSync(path, "utf8")
@@ -32,55 +35,76 @@ const detail = code(DETAIL);
 const home = code(HOME);
 const nav = code(NAV);
 
-describe("shipping asks first", () => {
-  it("the button opens a question rather than shipping", () => {
-    expect(form).toContain("setConfirming(true)");
-    // The visible action must not be wired straight to the call.
-    expect(form).not.toContain("onClick={() => void ship()}\n        className");
+describe("the shipping status goes both ways", () => {
+  it("offers the forward move when the order has not gone", () => {
+    expect(form).toContain("copy.shipAction");
+    expect(form).toContain("markOrderShipped(orderNumber, null)");
   });
 
-  it("the confirmation names the order and the recipient", () => {
-    expect(form).toContain("copy.confirmFor(orderNumber, recipient)");
-    expect(detail).toContain("recipient={recipient}");
+  it("offers the way back when it has", () => {
+    // The correction that used to require a database session.
+    expect(form).toContain("copy.unshipAction");
+    expect(form).toContain("unmarkOrderShipped(orderNumber)");
   });
 
-  it("it repeats the tracking number that is about to be frozen", () => {
-    expect(form).toContain("copy.confirmWithTracking(normalised)");
-    expect(form).toContain("copy.confirmWithoutTracking");
+  it("picks the direction from the current status, not from a second flag", () => {
+    expect(form).toContain("shipped ? copy.statusShipped : copy.statusUnfulfilled");
+    expect(form).toContain("const result = shipped");
   });
 
-  it("it says the action cannot be taken back", () => {
-    expect(form).toContain("copy.confirmIrreversible");
+  it("asks no question in either direction", () => {
+    /*
+     * A modal in front of a switch that goes both ways makes a harmless
+     * operation feel dangerous, and this one sits in the middle of the work.
+     */
+    expect(form).not.toContain("setConfirming");
+    expect(form).not.toContain('role="alertdialog"');
+    expect(form).not.toContain("confirmYes");
+    expect(form).not.toContain("confirmNo");
+  });
+
+  it("is not styled as destructive", () => {
+    // The action takes the ordinary button styles; the old confirmation wore a
+    // danger ring. `text-danger` survives only on the error line, where it
+    // belongs.
+    expect(form).toContain("shipped ? ACTION_NEUTRAL : ACTION_PRIMARY");
+    expect(form).not.toContain("ring-danger");
+    expect(form).not.toContain("font-medium text-danger");
+  });
+
+  it("guards against a double tap the way the checkout does", () => {
+    expect(form).toContain("if (busy.current) return;");
+    expect(form).toContain("busy.current = true;");
+  });
+
+  it("says the status keeps the tracking number", () => {
+    expect(form).toContain("copy.statusKeepsTracking");
+  });
+
+  it("the copy that claimed it was irreversible is gone", () => {
+    // The whole file, comments included: no sentence claiming a lock should
+    // survive anywhere, not even as a quotation explaining its removal.
     const copy = readFileSync("src/lib/i18n/de.ts", "utf8");
-    expect(copy).toContain("Das lässt sich nicht zurücknehmen");
-  });
-
-  it("it can be refused", () => {
-    expect(form).toContain("copy.confirmNo");
-    expect(form).toContain("setConfirming(false)");
-  });
-
-  it("it is announced, not merely drawn", () => {
-    expect(form).toContain('role="alertdialog"');
-  });
-
-  it("only the confirmed path calls the action", () => {
-    const calls = form.match(/markOrderShipped\(/g) ?? [];
-    expect(calls).toHaveLength(1);
-    expect(form).toContain("onClick={() => void ship()}");
+    expect(copy).not.toContain("Das lässt sich nicht zurücknehmen");
+    expect(copy).not.toContain("Trackingnummer ist danach nicht mehr");
+    expect(copy).not.toContain("nachträglich nicht mehr änderbar");
+    // And no orphaned keys left behind.
+    expect(copy).not.toContain("confirmIrreversible");
+    expect(copy).not.toContain("confirmYes");
   });
 });
 
-describe("success is visible and survives a reload", () => {
+describe("the status is visible and survives a reload", () => {
   it("the detail page states it from the order's own status", () => {
     expect(detail).toContain('order.fulfillment_status === "shipped"');
-    expect(detail).toContain("copy.shipSucceeded(order.order_number)");
+    expect(detail).toContain("shipped={order.fulfillment_status === \"shipped\"}");
   });
 
-  it("it shows when and with what", () => {
+  it("shows when it went out, and only while it is out", () => {
+    // `admin_unmark_order_shipped()` clears `shipped_at`, so the line must not
+    // outlive the status it describes.
+    expect(detail).toContain('order.fulfillment_status === "shipped" && order.shipped_at');
     expect(detail).toContain("copy.shippedAt");
-    expect(detail).toContain("copy.trackingNumber");
-    expect(detail).toContain("copy.noTracking");
   });
 });
 
@@ -127,8 +151,12 @@ describe("the fulfilment rule itself did not move", () => {
     const orders = code(ORDERS);
     expect(orders).toContain('if (order.needs_resolution) return "needs_resolution";');
     expect(orders).toContain('if (order.payment_status !== "paid") return "not_paid";');
+    /*
+     * `shipped` stopped being a blocker in 0039 — the control renders the way
+     * back from it. The states with no workflow behind them still block.
+     */
     expect(orders).toContain(
-      'if (order.fulfillment_status !== "unfulfilled") return "already_shipped";',
+      'if (order.fulfillment_status !== "unfulfilled" && order.fulfillment_status !== "shipped") {',
     );
   });
 
@@ -137,9 +165,11 @@ describe("the fulfilment rule itself did not move", () => {
     expect(detail).toContain("{blocker === null ? (");
   });
 
-  it("the trigger is not touched by any of this", () => {
+  it("0018 is not edited — the transition is widened in 0039", () => {
     const migration = readFileSync("supabase/migrations/0018_admin_orders.sql", "utf8");
     expect(migration).toContain("orders_protect_fulfillment");
+    // 0018's own text still describes the one-way rule it shipped with.
+    expect(migration).toContain("Allows exactly one fulfilment transition");
   });
 
   it("the tracking number is still stored raw beyond a trim", () => {

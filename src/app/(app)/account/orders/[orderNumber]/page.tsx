@@ -64,6 +64,23 @@ export default async function MyOrderPage({
         <dd>{formatDate(typeof order.placed_at === "string" ? order.placed_at : null)}</dd>
         <dt className="text-muted">{copy.shippingMethod}</dt>
         <dd>{String(order.shipping_method ?? "–")}</dd>
+        {/*
+         * The CURRENT status, not the highest one ever reached (ADR-0074).
+         *
+         * `my_order()` has always returned `fulfillment_status`; this page
+         * simply never showed it, so the customer inferred the state from
+         * whether a tracking number had appeared. Since 0039 an administrator
+         * can set a mistaken "Versendet" back, and an inference would then be
+         * wrong in the one case that matters.
+         *
+         * Read fresh on every render, so unfulfilled → shipped → unfulfilled
+         * → shipped each show as themselves.
+         */}
+        <dt className="text-muted">{copy.shipmentStatus}</dt>
+        <dd>
+          {copy.fulfillmentStatus[String(order.fulfillment_status ?? "")] ??
+            copy.fulfillmentStatus.unfulfilled}
+        </dd>
         {order.tracking_number ? (
           <>
             <dt className="text-muted">{copy.tracking}</dt>

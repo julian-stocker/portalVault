@@ -818,6 +818,27 @@ einer im CHECK festgelegten Menge — der Browser kann keinen Ereignisnamen erfi
 Markup trägt genau diesen Schlüssel und sonst nichts. Aus `quick_view_open` auf `/` lässt sich
 kein Browserverlauf rekonstruieren.
 
+### Versandstatus und Bestellintegrität (Migration `0039`, ADR-0074)
+
+Der Versandstatus ist ab `0039` in beide Richtungen änderbar — und das ist **keine** Lockerung der
+Bestellintegrität, weil er nie Teil davon war: „versendet" ist eine Auskunft an den Kunden, kein
+Geld- und kein Bestandsereignis.
+
+Unverändert hart bleiben: `orders_protect_immutable()` (Identität und alle vier Beträge bei jedem
+Update), `order_lines`/`order_addresses`/`order_events` append-only, die Verkaufsbuchung am
+**Zahlungs**pfad. `admin_unmark_order_shipped()` schreibt eine einzige Spalte und eine Journalzeile
+— keine Zahlung, kein Bestand, keine Reservierung, keine Position, keinen Betrag, keine
+Sendungsnummer, keine Stripe-Daten, keine Mail.
+
+**Berechtigung unverändert:** `is_shop_admin()` als erste Anweisung, `security definer`,
+`set search_path = ''`, `revoke all … from public, anon`, `grant execute … to authenticated` — die
+Form jeder Admin-RPC hier. Eine Test-Berechtigung gewährt nichts davon (ADR-0071), ein Kunde
+ebenso wenig; es gibt keinen Tabellenpfad an diesen Funktionen vorbei.
+
+**Bestelldaten bleiben Snapshots.** `series_snapshot` kommt beim INSERT aus dem Katalog und wird
+danach nie wieder nachgeschlagen; historische Zeilen bleiben NULL statt aus heutigen Daten
+aufgefüllt zu werden. Beide Leser projizieren nur `order_lines`.
+
 ## 5. Git-Sicherheit
 
 Geplante `.gitignore`-Strategie (**noch nicht angelegt** — dieser Durchlauf schreibt nur Doku):

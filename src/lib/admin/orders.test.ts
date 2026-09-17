@@ -59,8 +59,17 @@ describe("only a paid, unflagged, unshipped order may be shipped", () => {
     );
   });
 
-  it("refuses an order that has already gone", () => {
-    for (const status of ["shipped", "completed", "cancelled", "preparing"]) {
+  it("offers the way back from a shipped order rather than blocking it", () => {
+    /*
+     * Changed in 0039 (ADR-0074). `shipped` is a status the control can move
+     * in both directions, so it is not a blocker any more — a mis-tap is
+     * corrected in the admin rather than in a database session.
+     */
+    expect(shipBlocker(order({ fulfillment_status: "shipped" }))).toBeNull();
+  });
+
+  it("still refuses the states with no workflow behind them", () => {
+    for (const status of ["completed", "cancelled", "preparing"]) {
       expect(shipBlocker(order({ fulfillment_status: status })), status).toBe("already_shipped");
     }
   });

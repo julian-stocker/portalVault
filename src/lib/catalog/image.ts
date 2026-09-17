@@ -70,6 +70,33 @@ export function imageSrc(source: ImageSource): string | null {
   return null;
 }
 
+/**
+ * An order line's frozen picture reference, as an `ImageSource` (ADR-0074).
+ *
+ * `order_lines.image_snapshot` holds one of the two shapes the catalog uses,
+ * and they are told apart by shape alone (ADR-0046):
+ *
+ *   `SKY-0007/<16 hex>.webp`   an administrator's upload — it has a directory
+ *   `<16 hex>.webp`            an imported file
+ *
+ * A reference and not a URL, because the full address depends on the storage
+ * host, which is environment configuration and has no business being frozen
+ * into an order.
+ *
+ * This is an adapter, not a second resolver: it decides which of the two
+ * fields the snapshot fills and hands the result to `imageSrc()` like every
+ * other surface. Nothing here reads `skylanders` — an order shows what was
+ * sold, not what that figure looks like today.
+ */
+export function snapshotImageSource(snapshot: string | null | undefined): ImageSource {
+  if (typeof snapshot !== "string" || snapshot === "") {
+    return { imageFile: null, imageOverridePath: null };
+  }
+  return snapshot.includes("/")
+    ? { imageFile: null, imageOverridePath: snapshot }
+    : { imageFile: snapshot, imageOverridePath: null };
+}
+
 /** True when an administrator has replaced this figure's picture. */
 export function hasImageOverride(source: ImageSource): boolean {
   return Boolean(source.imageOverridePath);

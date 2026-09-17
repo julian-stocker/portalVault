@@ -990,6 +990,58 @@ belastbar die Zahl ist.
 (0036). **Nicht** `0035`.
 
 
+---
+
+### 3.3s Versand ist umkehrbar, die Serie wird ab jetzt mitgeschrieben (Migration `0039`, ADR-0074)
+
+**`orders.fulfillment_status` kennt zwei Übergänge**, nicht mehr einen:
+
+```
+unfulfilled  ⇄  shipped
+```
+
+`preparing`, `completed` und `cancelled` bleiben im CHECK und bleiben gesperrt — sie haben keinen
+Ablauf hinter sich. `orders_protect_fulfillment()` setzt `shipped_at` beim Versenden aus der
+Serveruhr und **auf NULL** beim Zurücknehmen; außerhalb eines Übergangs kann es nicht wandern.
+
+| Funktion | Gate | Wirkung |
+|---|---|---|
+| `admin_mark_order_shipped(text, text)` | `is_shop_admin()` | unverändert seit `0023` |
+| `admin_unmark_order_shipped(text)` | `is_shop_admin()` | `shipped → unfulfilled`, `shipped_at = NULL` |
+
+**Was das Zurücknehmen *nicht* anfasst:** Zahlung, Bestand, Reservierungen, Positionen, Beträge,
+Sendungsnummer, Testbestellungsstatus, Stripe-Daten, Mail. Es schreibt **eine Spalte** und hängt
+`order_unshipped` ans Journal. `orders_protect_immutable()` friert Identität und Beträge
+weiterhin bei jedem Update ein.
+
+**Die Sendungsnummer bleibt stehen.** Sie ist eine Tatsache über ein gekauftes Label, der Status
+eine Auskunft an den Kunden; sie ist vor **und** nach dem Versand änderbar (seit `0023`) und wird
+nur durch eine ausdrückliche Eingabe geleert. „Nicht versendet" neben einer Sendungsnummer ist
+deshalb ein gültiger Zustand.
+
+#### `order_lines.series_snapshot`
+
+| | |
+|---|---|
+| Typ | `text`, **nullable** |
+| CHECK | `series_snapshot is null or length(btrim(series_snapshot)) > 0` |
+| Quelle | `series.label` über `skylanders.series_code`, **zum Zeitpunkt des INSERT** |
+| Trigger | `order_lines_series_snapshot` → `order_lines_capture_series()`, `before insert` |
+
+**Kein Backfill, nie.** Bestellungen vor `0039` bleiben NULL und der Admin zeigt „—". Die
+historische Serie ist nicht wiederherstellbar — der einzige Weg wäre der heutige Katalog, und das
+wäre eine Behauptung über die Vergangenheit, kein Snapshot (ADR-0033). Dass der Trigger nur bei
+INSERT feuert, macht das strukturell: bestehende Zeilen werden nie besucht.
+
+Der Trigger füllt nur, was der Aufrufer offen ließ, und lässt bei unauflösbarer `sky_id` NULL
+stehen, statt eine Kasse an einem Anzeigefeld scheitern zu lassen. **`create_order()` wurde nicht
+angefasst.**
+
+`admin_order()` liefert zusätzlich `image` (aus `image_snapshot`, war nur in `my_order()`) und
+`series`; `my_order()` zusätzlich `series`. Beide lesen ausschließlich aus `order_lines` — kein
+Join auf `skylanders`, `categories` oder `series`.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

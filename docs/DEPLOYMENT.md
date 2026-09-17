@@ -537,9 +537,15 @@ Angewandt auf Production in dieser Reihenfolge: `0014` → `0015` → `0016`.
 | `0036_tester_feature_permissions.sql` | angewandt | angewandt |
 | `0037_performance_telemetry.sql` | angewandt | angewandt |
 | `0038_performance_interactions.sql` | angewandt, verifiziert | **offen — der einzige nächste Schritt** |
+| `0039_shipping_is_reversible.sql` | angewandt, vom Betreiber geprüft | **offen** |
 
-**Die nächste SQL-Aktion auf Production ist genau eine: `0038`.** `0036` und `0037` sind dort
-angewandt und werden **nicht** erneut ausgeführt.
+**Auf Production stehen `0038` und `0039` aus.** `0036` und `0037` sind dort angewandt und
+werden **nicht** erneut ausgeführt.
+
+**`0039` ist von `0038` unabhängig** und umgekehrt — die eine betrifft Telemetrie, die andere
+Bestellabwicklung. Die Reihenfolge zwischen ihnen ist frei; beide brauchen nichts aus `0035`.
+`0039` braucht `orders`, `order_lines`, `order_events`, `skylanders`, `series` und
+`is_shop_admin()`, alles seit `0010` bzw. `0003` vorhanden.
 
 **`0038` hängt nicht an `0035`.** Es braucht `auth.users` (0001), `is_shop_admin()` (0003) und
 `has_tester_permission()` (0036) — mehr nicht; `system_set_image_override()` kommt darin nicht vor.

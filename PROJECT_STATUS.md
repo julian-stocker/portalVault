@@ -1500,6 +1500,50 @@ Rollout erhoben. **Bis dahin wird nichts optimiert.**
 
 ---
 
+## Adminbestellungen — Kommissionieren am Telefon (Stand 2026-09-17)
+
+**0039 — Versand ist umkehrbar** · ADR-0074 · `0039_shipping_is_reversible.sql` ·
+**geschrieben, NIRGENDS angewandt.**
+
+Aus einem Durchgang durch die echte Production-Bestellansicht am iPhone. Drei Befunde, ein
+Nebenbefund:
+
+| | |
+|---|---|
+| Positionen als Tabelle mit Bild, Serie, Zustand, Stück, Preis, Summe | ✅ |
+| Thumbnail aus `image_snapshot` über den **einen** Resolver, 48×48, `object-contain` | ✅ |
+| Mobile: dieselbe Tabelle als Blöcke, **kein** horizontales Scrollen der Seite | ✅ |
+| Reihenfolge: **1. Sendungsnummer, 2. Versandstatus** | ✅ |
+| `unfulfilled ⇄ shipped`, beide Richtungen, ohne Rückfrage | ✅ geschrieben |
+| `shipped_at` beim Zurücknehmen auf NULL, beim erneuten Versand neu | ✅ geschrieben |
+| Sendungsnummer bleibt — sie ist ein Label, kein Status | ✅ |
+| Kundenansicht zeigt den **aktuellen** Versandstatus | ✅ |
+| 68 neue Tests in `src/lib/admin/fulfillment.test.ts` | ✅ |
+
+**Der `SI-2026-001022`-Fall ist damit erledigt.** Am 2026-09-11 wurde diese Bestellung bei einem
+Smoke-Test versehentlich als versendet markiert und blieb es, weil `orders_protect_fulfillment()`
+genau einen Übergang erlaubte. Die Rückfrage, die daraufhin davorgesetzt wurde, entfällt jetzt
+wieder: 0039 beseitigt die Ursache statt des Symptoms, und ein Modal vor einem Schalter, der in
+beide Richtungen geht, macht einen harmlosen Vorgang bedrohlich.
+
+**Zwei veraltete Sätze entfernt**, die schon seit `0023` falsch waren: „In V1 nachträglich nicht
+mehr änderbar" und „auch die Trackingnummer ist danach nicht mehr änderbar". Die Nummer ist seit
+`0023` jederzeit änderbar; nur die Oberfläche behauptete das Gegenteil.
+
+**`series_snapshot`: ab jetzt, nicht rückwirkend.** `order_lines` hat die Serie nie gespeichert,
+und sie ist nicht wiederherstellbar — der einzige Weg wäre der heutige Katalog. Also legt 0039 die
+Spalte an, ein `before insert`-Trigger füllt sie für **neue** Zeilen, und alte bleiben NULL; der
+Admin zeigt „—". Kein Backfill. `create_order()` (263 Zeilen, sechsmal ersetzt, die ganze Kasse)
+wurde dafür **nicht** angefasst.
+
+**Auf Staging angewandt und vom Betreiber manuell geprüft (2026-09-17).** Versenden,
+Zurücknehmen und erneutes Versenden wurden an einer Testbestellung durchgespielt.
+
+**Offen auf Production:** `0038` und `0039`. Die Reihenfolge zwischen den beiden ist frei — die
+eine betrifft Telemetrie, die andere Bestellabwicklung; keine braucht etwas aus `0035`.
+
+---
+
 ## Aktuell implementiert
 
 | | |

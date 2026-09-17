@@ -746,6 +746,27 @@ export const de = {
       unitPrice: "Einzelpreis",
       quantity: "Menge",
 
+      /**
+       * Die Positionstabelle beim Kommissionieren (ADR-0074).
+       *
+       * Jede Spalte kommt aus dem Bestell-Snapshot, nie aus dem aktuellen
+       * Katalog: eine Umbenennung von heute darf eine Bestellung von gestern
+       * nicht umschreiben (ADR-0033).
+       */
+      lineImage: "Bild",
+      lineFigure: "Figur",
+      lineSeries: "Serie",
+      lineCondition: "Zustand",
+      lineQuantity: "Stückzahl",
+      lineTotal: "Gesamt",
+      /* Bestellungen vor 0039 haben keine Serie gespeichert. Sie aus dem
+         heutigen Katalog nachzuschlagen wäre eine Behauptung über die
+         Vergangenheit, also steht hier ein Strich. */
+      lineSeriesUnknown: "—",
+      lineNoImage: "Kein Bild",
+      conditionLoose: "Lose",
+      conditionBoxed: "OVP",
+
       /** Der Hinweis, der Geld schützt. */
       needsResolutionTitle: "Diese Bestellung muss geprüft werden",
       needsResolutionHint:
@@ -758,8 +779,10 @@ export const de = {
       shipAction: "Als versendet markieren",
       shipping_: "Wird markiert …",
       trackingLabel: "Trackingnummer (optional)",
-      trackingHint:
-        "Wird unverändert gespeichert. In V1 nachträglich nicht mehr änderbar.",
+      /* Seit 0023 ist die Nummer jederzeit änderbar — vorher wie nachher. Der
+         frühere Hinweis beschrieb eine Sperre, die es seitdem nicht mehr gibt
+         (ADR-0074). */
+      trackingHint: "Wird unverändert gespeichert und ist jederzeit änderbar.",
       trackingNumber: "Trackingnummer",
       noTracking: "Keine Trackingnummer hinterlegt",
       trackingTooLong: "Diese Trackingnummer ist zu lang.",
@@ -785,29 +808,33 @@ export const de = {
         "Es wird die unten eingetragene Sendungsnummer verwendet. Du kannst sie auch " +
         "nachträglich noch ändern.",
       /**
-       * Die Rückfrage vor der einzigen unumkehrbaren Aktion des Systems
-       * (UX-Beta, F6).
+       * Versandstatus — ein Zustand, keine unumkehrbare Aktion (ADR-0074).
        *
-       * `orders_protect_fulfillment()` verweigert `shipped → unfulfilled` und
-       * jede spätere Trackingänderung, und `order_events` ist append-only —
-       * ein Klick daneben lässt sich nicht zurücknehmen. Genau das ist am
-       * 2026-09-11 mit `SI-2026-001022` passiert (PROJECT_STATUS.md).
+       * Die frühere Rückfrage stand vor der „einzigen unumkehrbaren Aktion des
+       * Systems" und nannte sie auch so. Seit 0039 ist sie umkehrbar:
+       * `unfulfilled ↔ shipped`. Eine Rückfrage für einen Schalter, der in
+       * beide Richtungen geht, macht einen harmlosen Vorgang bedrohlich — und
+       * eine falsch gesetzte Markierung ist jetzt in einem Klick korrigiert,
+       * statt in einer Datenbanksitzung.
        *
-       * Die Rückfrage nennt Nummer und Empfänger, weil das die beiden Angaben
-       * sind, an denen ein Mensch merkt, dass er die falsche Zeile offen hat.
-       * Am Trigger ändert sich nichts.
+       * „Versendet" ist eine Auskunft an den Kunden, kein Geld- und kein
+       * Bestandsereignis. Zahlung, Bestand, Positionen und Beträge bleiben
+       * unberührt.
        */
-      confirmTitle: "Wirklich als versendet markieren?",
-      confirmFor: (number: string, recipient: string) =>
-        `Bestellung ${number} an ${recipient}.`,
-      confirmWithTracking: (tracking: string) => `Trackingnummer: ${tracking}`,
-      confirmWithoutTracking: "Ohne Trackingnummer.",
-      confirmIrreversible:
-        "Das lässt sich nicht zurücknehmen — auch die Trackingnummer ist danach nicht mehr " +
-        "änderbar.",
-      confirmYes: "Ja, als versendet markieren",
-      confirmNo: "Abbrechen",
+      statusHeading: "Versandstatus",
+      statusUnfulfilled: "Nicht versendet",
+      statusShipped: "Versendet",
+      unshipAction: "Als nicht versendet markieren",
+      unshipping: "Wird zurückgesetzt …",
+      unshipFailed: "Der Versandstatus konnte nicht zurückgesetzt werden.",
+      statusHint:
+        "Der Versandstatus ist eine Auskunft an den Kunden und jederzeit in beide Richtungen " +
+        "änderbar. Zahlung, Bestand, Positionen und Beträge bleiben davon unberührt.",
+      statusKeepsTracking:
+        "Die Sendungsnummer bleibt gespeichert. Entfernen kannst du sie oben.",
       shipSucceeded: (number: string) => `Bestellung ${number} ist als versendet markiert.`,
+      unshipSucceeded: (number: string) =>
+        `Bestellung ${number} ist wieder als nicht versendet markiert.`,
 
       /**
        * Mailzustand je Bestellung (Transactional Mail V1).
@@ -1193,6 +1220,26 @@ export const de = {
       shippingAddress: "Lieferadresse",
       shippingMethod: "Versand",
       tracking: "Sendungsnummer",
+      /**
+       * Der aktuelle Versandstatus, nicht der höchste je erreichte (ADR-0074).
+       *
+       * Seit 0039 kann ein Versand zurückgenommen werden, wenn er versehentlich
+       * markiert wurde. Die Sendungsnummer bleibt dabei stehen — sie ist eine
+       * Tatsache über ein gekauftes Label, der Status eine Auskunft. Beides
+       * gleichzeitig zu sehen („Nicht versendet" und eine Nummer) ist deshalb
+       * richtig und kein Widerspruch.
+       *
+       * Eigene Liste statt `de.admin.orders.fulfillmentStatus`: dieselben
+       * Wörter, aber die Kundenansicht borgt sich keine Adminzeichenkette.
+       */
+      shipmentStatus: "Versandstatus",
+      fulfillmentStatus: {
+        unfulfilled: "Nicht versendet",
+        preparing: "In Vorbereitung",
+        shipped: "Versendet",
+        completed: "Abgeschlossen",
+        cancelled: "Storniert",
+      } as Record<string, string>,
       snapshotNote:
         "Diese Adresse ist der Stand zum Bestellzeitpunkt und ändert sich nicht mehr.",
       notFound: "Diese Bestellung gehört nicht zu deinem Konto.",

@@ -6140,3 +6140,110 @@ mehrdeutig) · `quick_view_switch` (existiert nicht) · ein Interaktionsregister
 „nicht messbar" ein „sofort") · Nulls als Null in die Perzentile (dasselbe, nur im Bericht) · eine
 zweite Warteschlange · generische Interaktionsanalytik · Option C aus dem Audit (mehr Ereignisse
 ohne mehr Antworten).
+
+---
+
+## ADR-0074 — „Versendet" ist eine Auskunft, kein Ereignis
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **Migration:** `0039_shipping_is_reversible.sql`
+**Ändert die Einbahnregel aus ADR-0062/`0018`. Lässt ADR-0033 unangetastet.**
+
+**Kontext.** Der Betreiber hat die Admin-Bestellansicht am iPhone benutzt und drei Dinge gefunden.
+Die Positionen standen als Textkarten da, ohne Bild — schlecht zu kommissionieren. Die Reihenfolge
+war „Als versendet markieren" **vor** „Sendungsnummer", also genau umgekehrt zur Arbeit. Und der
+Versandstatus ließ sich nicht zurücknehmen.
+
+Das Dritte wiegt am schwersten, weil es einmal wehgetan hat: Am 2026-09-11 wurde
+`SI-2026-001022` bei einem Smoke-Test versehentlich als versendet markiert und blieb es.
+
+### Was „versendet" eigentlich ist
+
+**Eine Aussage an den Kunden über den Zustand seines Pakets.** Kein Geldereignis, kein
+Bestandsereignis. Die Verkaufsbuchung entsteht beim **Bezahlen** (`convert_order_reservations()`),
+nicht beim Versenden; `admin_mark_order_shipped()` schreibt seit jeher weder Bewegung noch
+Reservierung noch eine Zahlungsspalte.
+
+Aussagen werden korrigiert. Ein Tippfehler in der Lieferadresse wird korrigiert, ein falsch
+gesetzter Haken bisher nicht — obwohl der zweite dem Kunden eine falsche Auskunft gibt und der
+erste nur uns. Deshalb erlaubt `orders_protect_fulfillment()` ab 0039 **beide** Richtungen:
+
+```
+unfulfilled  ⇄  shipped
+```
+
+**Was nicht dazukommt:** `preparing`, `completed`, `cancelled`. Die stehen weiter im CHECK und
+haben weiter keinen Ablauf hinter sich; sie zu erlauben hieße Zustände zu erlauben, aus denen
+nichts herausführt. Das war 0018s Argument und es gilt unverändert — `unfulfilled` war nie einer
+davon.
+
+**Was unverändert hart bleibt:** `orders_protect_immutable()` friert Identität und Beträge bei
+jedem Update ein, `order_events` bleibt append-only, Positionen bleiben append-only, Bestand und
+Zahlung werden nicht berührt. Zurücknehmen schreibt **eine Spalte** und eine Journalzeile.
+
+### `shipped_at` gehört zu seinem Versand
+
+Beim Versenden die Serverzeit, beim Zurücknehmen **NULL**. Ein Datum an einer Bestellung, die
+nicht versendet ist, wäre eine Behauptung, die den Status überlebt. Wird später erneut versendet,
+liest die Uhr neu — das ist, was ein Versanddatum bedeutet. Außerhalb eines Übergangs kann es
+weiterhin nicht wandern.
+
+### Die Sendungsnummer bleibt
+
+Sie ist eine Tatsache über ein **gekauftes Label**, der Status eine Auskunft. Eine Auskunft
+zurückzunehmen kauft kein Label zurück. Wer die Nummer loswerden will, leert das Feld — dort
+gehört diese Entscheidung hin (ADR-0062).
+
+Der Kunde kann dadurch legitim „Nicht versendet" **und** eine Sendungsnummer sehen. Das ist kein
+Widerspruch, sondern genau der Zustand: ein Label existiert, das Paket ist noch nicht raus.
+
+### Keine Rückfrage mehr
+
+Die Rückfrage war richtig für das, was sie bewachte — die einzige unumkehrbare Aktion des
+Produkts. 0039 beseitigt die Ursache statt des Symptoms. Ein Modal vor einem Schalter, der in
+beide Richtungen geht, macht einen harmlosen Vorgang bedrohlich und bremst genau die Arbeit, in
+deren Mitte er sitzt. Die Sätze „Das lässt sich nicht zurücknehmen" und „auch die Trackingnummer
+ist danach nicht mehr änderbar" sind **gelöscht** — der zweite war schon seit `0023` falsch.
+
+### Keine Mail in die Gegenrichtung
+
+Es gibt keine „Ihr Paket ist doch nicht unterwegs"-Nachricht, und eine zu erfinden hieße, dem
+Kunden vom Ausrutscher eines Betreibers zu erzählen. Wird erneut versendet, verhindert die
+bestehende Idempotenz die zweite Versandbestätigung: `order_mail` hat den Primärschlüssel
+`(order_id, kind)` und `claim_order_mail()` antwortet auf `sent` mit `already_sent`. **Am
+Mailsystem ändert 0039 nichts.**
+
+### `series_snapshot` — vorwärts ehrlich, rückwärts leer
+
+`order_lines` hat die Serie nie gespeichert. Sie ist auch nicht wiederherstellbar: der einzige Weg
+ist `sky_id → skylanders → series`, also **veränderlicher aktueller Katalog** — genau das, was
+ADR-0033 aus einer historischen Bestellung heraushält.
+
+Also legt 0039 die Spalte an und **füllt nichts**. Bestellungen von vorher bleiben für immer NULL,
+der Admin zeigt „—". Ein Backfill schriebe den heutigen Katalog in die gestrige Bestellung und
+nennte das Snapshot; **eine leere Zelle ist wahr, eine geratene nicht.**
+
+**Warum ein Trigger und kein siebtes `create_order()`.** Die Funktion ist 263 Zeilen lang, wurde
+sechsmal ersetzt und ist die gesamte Kasse. Sie für ein Anzeigefeld abzuschreiben hieße, das
+Falsche zu riskieren. Ein `before insert`-Trigger auf `order_lines` nimmt die Serie in derselben
+Transaktion aus derselben Tabelle, gegen die `create_order()` die Zeile bepreist hat, und deckt
+jeden Einfügeweg ab. Dass er **nur bei INSERT** feuert, ist zugleich das, was „kein Backfill"
+strukturell macht statt versprochen: bestehende Zeilen werden nie besucht. Ein nicht auflösbares
+`sky_id` lässt NULL stehen, statt eine Kasse an einem Anzeigefeld scheitern zu lassen.
+
+### Die Positionstabelle
+
+Sieben Angaben je Zeile, immer an derselben Stelle, Bild zuerst — Kommissionieren ist eine
+Scanaufgabe. **Jede** stammt aus dem Snapshot; die Komponente bekommt eine Zeile und nie eine
+SKY-ID zum Nachschlagen, es gibt also keine Abfrage, die falsch sein könnte. Das Bild kommt aus
+`image_snapshot` durch **denselben** Resolver wie überall (`imageSrc()`, ADR-0046); neu ist nur ein
+Adapter, der die beiden Referenzformen unterscheidet.
+
+Ein `<table>`, das unterhalb von `md:` zu Blöcken wird: eine Auszeichnung, ein Datensatz. Sieben
+Spalten dürfen die Seite am Telefon nicht seitwärts schieben, und zwei getrennte Layouts wären
+zwei Dinge, die auseinanderlaufen können.
+
+**Verworfen.** Die Serie live aus dem Katalog joinen (ADR-0033) · historische Zeilen backfillen ·
+`create_order()` neu schreiben · die Rückfrage mit korrigiertem Text behalten (sie bewacht nichts
+mehr) · beim Zurücknehmen die Sendungsnummer löschen · `shipped_at` „für später" behalten · eine
+Stornomail · eine eigene Mobilansicht der Positionen · `preparing`/`completed`/`cancelled`
+freischalten.

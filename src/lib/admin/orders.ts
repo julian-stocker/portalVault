@@ -190,7 +190,14 @@ export function shipBlocker(order: {
 }): ShipBlocker | null {
   if (order.needs_resolution) return "needs_resolution";
   if (order.payment_status !== "paid") return "not_paid";
-  if (order.fulfillment_status !== "unfulfilled") return "already_shipped";
+  /*
+   * `shipped` is no longer a blocker (ADR-0074): the status control renders
+   * the way back from it. Only the states with no workflow behind them —
+   * `preparing`, `completed`, `cancelled` — still have nothing to offer.
+   */
+  if (order.fulfillment_status !== "unfulfilled" && order.fulfillment_status !== "shipped") {
+    return "already_shipped";
+  }
   return null;
 }
 

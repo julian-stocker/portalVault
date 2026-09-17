@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { OrderLinesTable } from "@/components/admin/order-lines-table";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
@@ -47,12 +48,6 @@ export default async function AdminOrderPage({
   const copy = de.admin.orders;
   const blocker = shipBlocker(order);
 
-  // What the confirmation names. Falls back to the contact address when there
-  // is no delivery address at all — never to an empty string, which would make
-  // the question read "Bestellung … an ."
-  const recipient =
-    [address?.first_name, address?.last_name].filter(Boolean).join(" ").trim() ||
-    order.customer_email;
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
@@ -162,28 +157,11 @@ export default async function AdminOrderPage({
       )}
 
       {/* -------------------------------------------------------------- lines */}
+      {/* A structured table rather than prose rows: this is the part of the
+          page somebody works from while picking figures off a shelf. Every
+          field is a snapshot from the order (ADR-0074). */}
       <h2 className="mt-8 text-lg font-semibold">{copy.linesHeading}</h2>
-      <ul className="mt-2 flex flex-col gap-2">
-        {lines.map((line, index) => (
-          <li
-            key={`${line.sky_id}-${line.condition}-${index}`}
-            // `rounded-sky` is not a class: the scale is -sm/-md/-lg, so these
-            // rows rendered square-cornered among rounded panels (F16).
-            className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-sky-md bg-surface/60 px-4 py-3 text-sm"
-          >
-            <span>
-              <span className="font-medium">{line.name}</span>
-              <span className="ml-2 text-muted tabular-nums">
-                {line.sky_id} · {line.condition}
-              </span>
-            </span>
-            <span className="tabular-nums">
-              {line.quantity} × {formatPrice(Number(line.unit_price))}
-              <span className="ml-3 font-semibold">{formatPrice(Number(line.line_total))}</span>
-            </span>
-          </li>
-        ))}
-      </ul>
+      <OrderLinesTable lines={lines} />
 
       <dl className="mt-4 flex flex-col gap-1 text-sm">
         <div className="flex justify-between">
@@ -203,52 +181,13 @@ export default async function AdminOrderPage({
       </dl>
 
       {/* ----------------------------------------------------------- shipping */}
-      <h2 className="mt-8 text-lg font-semibold">{copy.shipHeading}</h2>
-      <div className="mt-2 rounded-sky-lg bg-surface/80 p-5 ring-1 ring-border/70">
-        {blocker === null ? (
-          <ShipOrderForm
-            orderNumber={order.order_number}
-            // Named in the confirmation, because the recipient is the other
-            // thing a person recognises when they have the wrong row open.
-            recipient={recipient}
-            trackingNumber={order.tracking_number}
-          />
-        ) : order.fulfillment_status === "shipped" ? (
-          /*
-           * Visible success, and it survives a reload (F6).
-           *
-           * Not a toast: the state is on the order, so it is read back from
-           * the order. Whoever comes to this page tomorrow sees the same
-           * sentence the person who shipped it saw.
-           */
-          <div className="flex flex-col gap-1">
-            <p className="text-sm font-medium text-success">
-              {copy.shipSucceeded(order.order_number)}
-            </p>
-            {order.shipped_at ? (
-              <p className="text-sm text-muted tabular-nums">
-                {copy.shippedAt}: {new Date(order.shipped_at).toLocaleString(de.locale)}
-              </p>
-            ) : null}
-            <p className="text-sm text-muted">
-              {order.tracking_number ? (
-                <>
-                  {copy.trackingNumber}:{" "}
-                  <TrackingLink
-                    shippingMethodCode={order.shipping_method_code}
-                    trackingNumber={order.tracking_number}
-                  />
-                </>
-              ) : (
-                copy.noTracking
-              )}
-            </p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
-        )}
-      </div>
-
+      {/*
+       * SENDUNGSNUMMER FIRST, THEN VERSANDSTATUS (ADR-0074).
+       *
+       * The order on the page follows the order of the work: the operator buys
+       * a label, records its number, and then says the parcel has gone. The
+       * reverse arrangement asked for the last step first.
+       */}
       {/* Its own control, before and after the parcel goes (ADR-0062): a label
           is often bought first and occasionally cancelled and replaced. It
           changes no fulfilment state and sends no second confirmation. */}
@@ -258,6 +197,33 @@ export default async function AdminOrderPage({
         trackingNumber={order.tracking_number}
         shipped={order.fulfillment_status === "shipped"}
       />
+
+
+      <h2 className="mt-8 text-lg font-semibold">{copy.statusHeading}</h2>
+      <div className="mt-2 rounded-sky-lg bg-surface/80 p-5 ring-1 ring-border/70">
+        {blocker === null ? (
+          <div className="flex flex-col gap-3">
+            <ShipOrderForm
+              orderNumber={order.order_number}
+              shipped={order.fulfillment_status === "shipped"}
+              hasTracking={order.tracking_number !== null}
+            />
+            {/*
+             * When it went out, read back from the order rather than shown as
+             * a toast: whoever opens this page tomorrow sees what the person
+             * who shipped it saw. Cleared by `admin_unmark_order_shipped()`,
+             * so it disappears with the status instead of outliving it.
+             */}
+            {order.fulfillment_status === "shipped" && order.shipped_at ? (
+              <p className="text-sm text-muted tabular-nums">
+                {copy.shippedAt}: {new Date(order.shipped_at).toLocaleString(de.locale)}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
+        )}
+      </div>
 
       {/* --------------------------------------------------------------- mail */}
       <OrderMailPanel orderNumber={order.order_number} mail={mail ?? []} />
