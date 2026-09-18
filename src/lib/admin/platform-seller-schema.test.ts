@@ -56,8 +56,18 @@ describe("guard 1 — no table carries a seller", () => {
      * (ADR-0077). It is a membership, not a partition of commerce — no order,
      * no inventory row and no catalog row gains a seller. That distinction is
      * why the guard below still sweeps every other migration.
+     *
+     * `0051` joins that list for the same reason and no other: it reads the
+     * membership to decide whether an account may hold a dotted username, and
+     * names `seller_id` only to exclude the grant being withdrawn from the
+     * count of those remaining. `seller-schema.test.ts` proves it reaches no
+     * commerce table.
      */
-    const MEMBERSHIP = ["0041_three_account_authorization.sql", "0042_strict_account_types.sql"];
+    const MEMBERSHIP = [
+      "0041_three_account_authorization.sql",
+      "0042_strict_account_types.sql",
+      "0051_admin_predicate_and_business_usernames.sql",
+    ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")
         .split("\n")

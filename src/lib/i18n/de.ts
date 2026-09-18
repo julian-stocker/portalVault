@@ -953,6 +953,14 @@ export const de = {
     grant: "Shopzugang geben",
     alreadyOperator: "Hat bereits Zugang",
     failed: "Das konnte nicht gespeichert werden.",
+    /*
+     * Kein Fehler, sondern eine Regel (0051): ein Punkt im Benutzernamen ist
+     * an den Shopzugang gebunden. Wir benennen niemals selbst einen Nutzer um.
+     */
+    revokeBlockedByUsername:
+      "Der Benutzername dieses Kontos enthält einen Punkt, den nur ein Shopkonto führen darf. " +
+      "Das Konto muss seinen Benutzernamen zuerst selbst auf einen ohne Punkt ändern; " +
+      "danach lässt sich der Shopzugang entziehen.",
   },
 
   admin: {
@@ -2394,7 +2402,21 @@ export const de = {
       intro:
         "Der Benutzername ist deine Anzeigeidentität. Du kannst ihn später jederzeit ändern.",
       submit: "Benutzernamen speichern",
-      hint: "3 bis 20 Zeichen, Buchstaben, Ziffern und Unterstriche.",
+      /*
+       * Ein Hinweis für alle, nicht zwei (0051).
+       *
+       * Die Seite darf den Kontotyp nicht kennen — Abmelden gehört zum Konto,
+       * nicht zur Rolle, und `three-accounts.test.ts` hält das fest. Ein Satz,
+       * der die Ausnahme benennt statt sie zu verschweigen, sagt einem
+       * Sammlerkonto trotzdem nicht, Punkte seien erlaubt. Der genaue Grund
+       * steht in der Fehlermeldung, wo er gebraucht wird.
+       *
+       * Kein Beispielname: der Name des Verkäufers steht nirgends im Text
+       * (ADR-0080).
+       */
+      hint:
+        "3 bis 20 Zeichen, Buchstaben, Ziffern und Unterstriche. " +
+        "Shopkonten dürfen zusätzlich Punkte zwischen den Namensteilen führen.",
     },
     settings: {
       title: "Einstellungen",
@@ -2433,6 +2455,14 @@ export const de = {
       usernameTooShort: "Der Benutzername braucht mindestens 3 Zeichen.",
       usernameTooLong: "Der Benutzername darf höchstens 20 Zeichen haben.",
       usernameInvalid: "Erlaubt sind nur Buchstaben, Ziffern und Unterstriche.",
+      /*
+       * Der Name ist in Ordnung — das Konto darf ihn nur nicht führen. Ein
+       * „ungültige Zeichen" wäre hier falsch und würde zum Weiterprobieren
+       * einladen (0051).
+       */
+      usernameBusinessOnly:
+        "Ein Punkt im Benutzernamen ist nur für Shopkonten möglich. " +
+        "Für dieses Konto sind Buchstaben, Ziffern und Unterstriche erlaubt.",
       usernameReserved: "Dieser Benutzername ist reserviert.",
       usernameTaken: "Dieser Benutzername ist bereits vergeben.",
       usernameUnchanged: "Das ist bereits dein Benutzername.",

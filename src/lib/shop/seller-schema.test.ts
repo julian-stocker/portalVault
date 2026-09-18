@@ -128,9 +128,21 @@ describe("this is an identity, not a marketplace", () => {
      * `seller_operators.seller_id` names which shop an ACCOUNT may operate
      * (ADR-0077). A membership, not a partition of commerce. Its own file
      * checks that it reaches no commerce table.
+     *
+     * `0051` reads that same membership and nothing else: it asks whether an
+     * account still operates an active seller before letting a dotted username
+     * stand, and compares `seller_id` only to exclude the row being withdrawn
+     * from that count. No commerce table gains a column, and the check below
+     * confirms it touches none.
      */
     const everything = readdirSync(MIGRATIONS)
-      .filter((f) => f.endsWith(".sql") && !f.startsWith("0041_") && !f.startsWith("0042_"))
+      .filter(
+        (f) =>
+          f.endsWith(".sql") &&
+          !f.startsWith("0041_") &&
+          !f.startsWith("0042_") &&
+          !f.startsWith("0051_"),
+      )
       .map((f) => readFileSync(`${MIGRATIONS}/${f}`, "utf8"))
       .join("\n")
       .split("\n")
@@ -138,6 +150,31 @@ describe("this is an identity, not a marketplace", () => {
       .join("\n")
       .replace(/'(?:[^']|'')*'/g, "''");
     expect(everything).not.toContain("seller_id");
+  });
+
+  it("and 0051's exemption really is only the membership", () => {
+    /*
+     * The exemption above is a hole in a guard, so it gets its own floor:
+     * 0051 may name `seller_id` on `seller_operators` and nowhere else. If it
+     * ever reached a commerce table, this fails even though the file is
+     * skipped above.
+     */
+    const sql051 = readFileSync(`${MIGRATIONS}/0051_admin_predicate_and_business_usernames.sql`, "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n")
+      .replace(/'(?:[^']|'')*'/g, "''");
+
+    for (const commerce of [
+      "shop_inventory", "inventory_movements", "orders", "order_lines",
+      "shop_offers", "order_addresses", "invoices", "payment_attempts",
+    ]) {
+      expect(sql051, commerce).not.toContain(commerce);
+    }
+    // Every seller_id it does name belongs to the membership table.
+    for (const match of sql051.matchAll(/(\w+)\.seller_id/g)) {
+      expect(["o", "old", "new"], match[0]).toContain(match[1]);
+    }
   });
 
   it("says in its own comment that it is not a relation", () => {

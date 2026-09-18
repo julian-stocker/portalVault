@@ -12,6 +12,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { currentProfile as readProfile, type Profile } from "@/lib/auth/profile";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { checkUsername } from "@/lib/auth/username";
 import {
   passwordUpdateError,
@@ -56,6 +57,8 @@ function usernameMessage(problem: NonNullable<ReturnType<typeof checkUsername>>)
       return de.auth.errors.usernameTooLong;
     case "invalid-characters":
       return de.auth.errors.usernameInvalid;
+    case "business-only":
+      return de.auth.errors.usernameBusinessOnly;
     case "reserved":
       return de.auth.errors.usernameReserved;
   }
@@ -181,7 +184,15 @@ export async function setUsernameAction(
 ): Promise<ActionState> {
   const candidate = String(formData.get("username") ?? "").trim();
 
-  const problem = checkUsername(candidate);
+  /*
+   * Whether this account may use a dot is asked of the SERVER, never of the
+   * form. `canOperateSeller()` reads `my_capabilities()` over the caller's own
+   * session, so a request that sets its own flag learns nothing from it — and
+   * the database refuses the write anyway. This only decides the message.
+   */
+  const business = await canOperateSeller();
+
+  const problem = checkUsername(candidate, { business });
   if (problem) return fieldError("username", usernameMessage(problem));
 
   const supabase = await createClient();

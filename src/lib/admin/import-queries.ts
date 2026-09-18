@@ -15,37 +15,42 @@ import { createClient } from "@/lib/supabase/server";
 /**
  * The catalog, flat.
  *
- * `skylanders` is world-readable by design (ADR-0043), so this needs no
- * privileged path — but it is read on the server and handed to the browser with
- * the page, rather than fetched from the browser: 600 rows travelling once in
- * the page payload beats 600 rows fetched over a phone connection.
+ * Read on the server and handed to the browser with the page rather than
+ * fetched from the browser: 600 rows travelling once in the page payload beats
+ * 600 rows fetched over a phone connection.
  *
  * **Every** row, not just the publicly visible ones. A figure hidden from the
- * catalog still has stock, and an importer that could not see it would report
- * the owner's own inventory as unmatched.
+ * catalog still has stock, and an importer that could not see it reports the
+ * owner's own inventory as unmatched.
+ *
+ * THAT SENTENCE USED TO BE FALSE, AND IT COST A REAL IMPORT. This read a table
+ * as the signed-in user, and `skylanders_select_authenticated` grants sight of
+ * hidden rows to `is_shop_admin()` — a platform administrator. A Seller
+ * Operator is deliberately not one (`0042`), so the account that actually runs
+ * the shop saw only `catalog_visible` rows. The first real Production import
+ * skipped 28 `Elite …` figures as UNMATCHED_RELEVANT and left their stock
+ * unsynchronised.
+ *
+ * `seller_import_catalog()` (`0052`) is the fix: one `security definer`
+ * function, seller-gated, returning the four columns a match needs. The row
+ * policy on `skylanders` is unchanged, so nothing about ordinary catalog
+ * browsing moved — see the migration for why widening it was the wrong shape
+ * of fix.
  */
 export const fetchImportCatalog = cache(async (): Promise<CatalogEntry[]> => {
   if (!(await canOperateSeller())) return [];
 
   const supabase = await createClient();
-  const [figures, categories] = await Promise.all([
-    supabase.from("skylanders").select("sky_id, name, series_code, category_id"),
-    supabase.from("categories").select("id, name"),
-  ]);
-
-  if (figures.error || categories.error || !figures.data || !categories.data) return [];
-
-  const categoryName = new Map(
-    (categories.data as { id: number; name: string }[]).map((c) => [c.id, c.name]),
-  );
+  const { data, error } = await supabase.rpc("seller_import_catalog");
+  if (error || !Array.isArray(data)) return [];
 
   return (
-    figures.data as { sky_id: string; name: string; series_code: string; category_id: number }[]
+    data as { sky_id: string; name: string; series_code: string; category: string }[]
   ).map((row) => ({
     skyId: row.sky_id,
     name: row.name,
     series: row.series_code,
-    category: categoryName.get(row.category_id) ?? "",
+    category: row.category ?? "",
   }));
 });
 

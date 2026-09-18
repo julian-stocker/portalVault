@@ -14,6 +14,7 @@ import { de } from "@/lib/i18n/de";
 /** PostgreSQL error codes the profile writes can produce. */
 const UNIQUE_VIOLATION = "23505";
 const CHECK_VIOLATION = "23514";
+const RESTRICT_VIOLATION = "23001";
 
 export type FieldError = { field: "username" | "email" | "password" | "form"; message: string };
 
@@ -32,11 +33,30 @@ export function profileWriteError(error: MaybeError, candidate: string): FieldEr
     return { field: "username", message: de.auth.errors.usernameTaken };
   }
   if (error?.code === CHECK_VIOLATION) {
-    const reserved = error.message?.includes("not_reserved") ?? false;
-    return {
-      field: "username",
-      message: reserved ? de.auth.errors.usernameReserved : de.auth.errors.usernameInvalid,
-    };
+    const message = error.message ?? "";
+    /*
+     * `0051` raises its entitlement refusal with an explicit constraint name,
+     * so this case can be told apart from a malformed name. Without it the
+     * shop rule would surface as "invalid characters" — true of the account,
+     * not of the name, and useless to somebody who typed a perfectly good one.
+     */
+    if (message.includes("profiles_username_business_only")) {
+      return { field: "username", message: de.auth.errors.usernameBusinessOnly };
+    }
+    if (message.includes("not_reserved")) {
+      return { field: "username", message: de.auth.errors.usernameReserved };
+    }
+    return { field: "username", message: de.auth.errors.usernameInvalid };
+  }
+
+  /*
+   * Withdrawing shop access from an account whose username still needs it.
+   * Raised by `seller_operators_username_guard` as restrict_violation, which
+   * PostgREST surfaces as 23001 — not a username problem at all, so it goes to
+   * the form.
+   */
+  if (error?.code === RESTRICT_VIOLATION) {
+    return { field: "form", message: de.auth.errors.generic };
   }
   void candidate;
   return { field: "form", message: de.auth.errors.generic };

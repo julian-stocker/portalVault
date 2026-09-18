@@ -61,12 +61,24 @@ async function call(
   args: Record<string, unknown>,
   paths: readonly string[],
   capability: Capability,
+  /**
+   * Turns one specific database refusal into a sentence worth reading.
+   *
+   * Everything else stays `writeFailed`: an administrator does not need the
+   * error code, and a raw Postgres message is not a user interface. This is
+   * for refusals that are a rule of the product rather than a fault — the
+   * caller is being told what to do, not that something broke.
+   */
+  domainError?: (error: { code?: string; message?: string }) => string | null,
 ): Promise<AdminResult> {
   if (!(await allowed(capability))) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc(fn, args);
-  if (error) return { ok: false, message: de.admin.writeFailed };
+  if (error) {
+    const specific = domainError?.(error) ?? null;
+    return { ok: false, message: specific ?? de.admin.writeFailed };
+  }
 
   for (const path of paths) revalidatePath(path);
   return { ok: true };
@@ -646,6 +658,16 @@ export async function setSellerOperator(
     },
     ["/admin"],
     "platform",
+    /*
+     * `0051` refuses to withdraw the last shop grant from an account whose
+     * username still contains a dot. That is a rule, not a failure, and the
+     * administrator can act on it — so it gets its own sentence instead of
+     * "could not be saved".
+     */
+    (error) =>
+      error.message?.includes("seller_operators_username_guard")
+        ? de.businessAccounts.revokeBlockedByUsername
+        : null,
   );
 }
 
