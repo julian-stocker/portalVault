@@ -174,9 +174,41 @@ describe("who the customer is contracting with", () => {
       SELLER_IDENTITY.postalCode,
       SELLER_IDENTITY.city,
       SELLER_IDENTITY.vatId,
-      SELLER_IDENTITY.email,
     ]) {
       expect(SQL, value).toContain(`'${value}'`);
+    }
+  });
+
+  it("except the contact address, which has deliberately moved on", () => {
+    /*
+     * `0047` seeds `info@skyisles.app`. The published address is now
+     * `info@skyisles.de`, and the two are allowed to differ — which is why
+     * this is its own test rather than a gap in the loop above.
+     *
+     * WHY THE MIGRATION IS NOT UPDATED. `0047` is applied to Staging and
+     * Production, and an applied migration is never rewritten. It cannot do
+     * any harm either: every contact field is seeded through
+     * `coalesce(nullif(btrim(x), ''), …)`, so the seed only ever fills a NULL
+     * and can never overwrite a value that exists.
+     *
+     * WHERE THE TRUTH LIVES NOW. The legal pages render `SELLER_IDENTITY`;
+     * the invoice and each new `order_legal_snapshots` row read
+     * `public.sellers.contact_email`. Both carry the new address. The seed
+     * literal is a historical default, not the authority.
+     */
+    expect(SELLER_IDENTITY.email).toBe("info@skyisles.de");
+    expect(SQL).toContain("'info@skyisles.app'");
+    expect(SQL).not.toContain(SELLER_IDENTITY.email);
+
+    // The seed can only fill an empty field — that is what makes the
+    // divergence harmless rather than a landmine.
+    for (const field of [
+      "contact_email",
+      "withdrawal_contact_email",
+      "complaints_contact_email",
+      "transactional_reply_to",
+    ]) {
+      expect(SQL, field).toContain(`nullif(btrim(${field}), '')`);
     }
   });
 

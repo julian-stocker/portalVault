@@ -50,7 +50,21 @@ export const SELLER_IDENTITY = {
   country: "Deutschland",
   countryCode: "DE",
 
-  email: "info@skyisles.app",
+  /*
+   * The published contact address (§ 5 Abs. 1 Nr. 2 DDG).
+   *
+   * NOTE THE DOMAIN. It is `skyisles.de`, while the site itself is served from
+   * `skyisles.app`. That is deliberate and not a typo: the address is a
+   * contact detail, not an origin, and nothing derives a URL from it.
+   *
+   * Migration `0047` still carries the previous `info@skyisles.app` as its
+   * seed default. That migration is applied to Staging and Production and is
+   * never rewritten; its seed only ever fills a NULL, so it cannot overwrite
+   * the live value. The authority for what a customer is shown is this
+   * constant for the legal pages, and `public.sellers.contact_email` for the
+   * invoice and for future order snapshots — both now `info@skyisles.de`.
+   */
+  email: "info@skyisles.de",
   /** § 5 Abs. 1 Nr. 6 DDG — the VAT identification number, since one exists. */
   vatId: "DE321022065",
 

@@ -18,7 +18,7 @@ Sie ist **keine Rechtsberatung** und ersetzt keine anwaltliche Prüfung vor dem 
 | **Unternehmer** | Julian Stocker |
 | **Rechtsform** | Einzelunternehmen (**nicht** im Handelsregister eingetragen) |
 | **Anschrift** | Lechhalde 1 1/2, 87629 Füssen, Deutschland |
-| **E-Mail** | info@skyisles.app |
+| **E-Mail** | info@skyisles.de |
 | **Telefon** | keines veröffentlicht |
 | **USt-IdNr.** | DE321022065 |
 | **Umsatzsteuer** | Kleinunternehmer nach § 19 UStG |
