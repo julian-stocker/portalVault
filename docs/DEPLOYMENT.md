@@ -455,6 +455,34 @@ und die drei Seed-Inserts sind Singleton-Zeilen mit `on conflict do nothing`.
 Staging startet mit **leerem Katalog** — die 820 SKY-IDs stehen in keiner
 Migration. Das ist richtig so; die Runtime-Suite legt an, was sie braucht.
 
+### Testartefakte auf Staging (Stand 2026-09-18)
+
+Staging ist die Wegwerfumgebung, und die Verifikation von `0047`/`0049`/`0048` hat dort bewusst
+Daten hinterlassen. **Keine davon ist ein echter Kundenvorgang**, und das ist strukturell
+belegbar, nicht bloß behauptet:
+
+- Alle Bestellungen laufen mit `commerce_mode = 'sandbox'`.
+- Alle Adressen liegen unter `@skyisles.invalid` — `.invalid` ist nach RFC 2606 reserviert und
+  kann keinem realen Postfach gehören.
+- Die Widerrufserklärungen tragen ihren Testzweck im Text (`0049 race`, `0049 stale`).
+
+**Widerrufe #3 und #6 stehen auf `sending`.** Sie sind die Fixtures des Race- und
+Stale-Claim-Tests: beide wurden absichtlich beansprucht und nie aufgelöst. Nach der
+15-Minuten-Regel aus `0049` sind sie längst wieder beanspruchbar — der Zustand heilt sich selbst
+und blockiert nichts. Sie werden **nicht gelöscht**: `withdrawal_requests` ist eine
+Rechtsaufzeichnung, und aus solchen Tabellen wird nicht ad hoc entfernt.
+
+Es gibt **keine** vorgesehene Methode, einen Widerruf als erledigt zu markieren, ohne eine
+Erstattung zu buchen (`handled_at` setzt nur `seller_record_refund()`). Eine erfundene Erstattung
+wäre eine Falschaussage in einer Finanzaufzeichnung, also bleibt es bei der Dokumentation hier.
+`seller_archive_test_orders()` aus `0046` archiviert Sandbox-**Bestellungen**, ändert aber nichts
+an der Widerrufsliste: `seller_withdrawals()` filtert weder nach `commerce_mode` noch nach
+`sandbox_archived_at`.
+
+> **Offen für Production:** dass `seller_withdrawals()` Sandbox- und Live-Widerrufe vermischt,
+> fällt auf Staging nicht auf, weil dort alles Sandbox ist. Vor dem produktiven Einsatz ist zu
+> entscheiden, ob die Liste nach `commerce_mode` filtern soll.
+
 **Environment.** Eine eigene Datei `.env.staging` im Projektwurzelverzeichnis
 mit denselben drei Namen wie `.env.local`:
 
@@ -538,12 +566,139 @@ Angewandt auf Production in dieser Reihenfolge: `0014` → `0015` → `0016`.
 | `0037_performance_telemetry.sql` | angewandt | angewandt |
 | `0038_performance_interactions.sql` | angewandt, verifiziert | **offen — der einzige nächste Schritt** |
 | `0039_shipping_is_reversible.sql` | angewandt, vom Betreiber geprüft | **offen** |
+| `0040_shop_platform_responsibilities.sql` | **angewandt** | **offen** |
+| `0041_three_account_authorization.sql` | **angewandt** | **offen** |
+| `0042_strict_account_types.sql` | **offen** | **offen** |
+| `0043_order_review_recovery.sql` | **angewandt** (2026-09-17 nachgeprüft) | **offen** |
+| `0044_seller_year_to_date.sql` | **angewandt** (2026-09-17 nachgeprüft) | **offen** |
+| `0045_seller_order_archive.sql` | **angewandt** (2026-09-17 nachgeprüft) | **offen** |
+| `0046_sandbox_order_archive.sql` | **angewandt** (2026-09-18 nachgeprüft) | **offen** |
+| `0047_legal_layer.sql` | **angewandt** (2026-09-18) | **offen** |
+| `0049_withdrawal_receipt_idempotency.sql` | **angewandt** (2026-09-18) | **offen** |
+| `0048_inventory_import.sql` | **angewandt** (2026-09-18) | **offen** |
+| `0050_inventory_import_unchanged_summary.sql` | **angewandt** (2026-09-18) | **offen** |
 
-**Auf Production stehen `0038` und `0039` aus.** `0036` und `0037` sind dort angewandt und
+**Auf Production stehen `0038` bis `0050` aus.**
+
+### Production, Stand 2026-09-18
+
+`0038` war bereits angewandt (das war in der Tabelle oben falsch verzeichnet). In diesem Rollout
+liefen **`0039` bis `0050` in numerischer Reihenfolge** — nicht in der Staging-Historie. Production
+bleibt dabei bewusst im **Sandbox-Modus**; der Wechsel auf `live` ist ein eigenes, noch offenes Gate.
+
+**Bestand und Bestellungen blieben unverändert:** 4 Bestellungen, 222 Positionen, 971 Einheiten,
+461 Bewegungen — vor und nach dem gesamten Rollout identisch.
+
+**`sellers.contact_email` wurde einmalig gesetzt.** `0047` bewahrt bewusst einen vorhandenen Wert,
+und Production trug `yulez.collectibles@gmail.com`. Nach dem Seed wurde die Spalte in einer
+einzelnen, vorher und nachher geprüften Anweisung auf `info@skyisles.app` gesetzt — dieselbe
+Adresse, die `SELLER_IDENTITY` und der Seed-Literal in `0047` tragen. Kein anderes Feld wurde
+angefasst.
+
+> ### Die Reihenfolge auf Staging ist `0047 → 0049 → 0048 → 0050`
+>
+> Nicht aufsteigend, und das ist richtig so. `0047` war bereits angewandt, als beim
+> Verifizieren der Widerrufs-Quittung ein Idempotenzfehler auffiel; eine angewandte Migration
+> wird nicht umgeschrieben, also bekam die Korrektur die nächste freie Nummer `0049` und lief
+> **vor** dem noch offenen `0048`. Dasselbe danach mit `0050`, das einen Zählerfehler in `0048`
+> korrigiert.
+>
+> **Die Nummer sagt, wann eine Datei geschrieben wurde; die Datenbank sagt, wann sie lief.**
+> Beides darf auseinandergehen. Wer diese Kette auf einer neuen Umgebung nachzieht, wendet sie
+> in **numerischer** Reihenfolge an — `0048` vor `0049` ist dort unproblematisch, weil `0049`
+> nur `withdrawal_requests` aus `0047` anfasst und `0050` nur eine Funktion aus `0048` ersetzt.
+> Die beiden Korrekturen sind voneinander unabhängig.
+
+**`0048` braucht `0003`** (Bestand und Bewegungen) **und `0041`** (Verkäuferprädikat). Es legt
+`inventory_imports`, `inventory_import_rows` und `inventory_import_mappings` samt sechs Funktionen
+an und **schreibt keinen Bestand** (ADR-0087). Es braucht **keinen Storage-Bucket**: die Tabelle
+wird nie hochgeladen. `inventory_imports.content_fingerprint` ist ein **inhaltlicher**
+Fingerabdruck über die ausgelesenen Zeilen, kein Datei-Hash, und blockiert keinen Import.
+
+**`0047` braucht `0010`/`0019`** (Bestellungen und Mail) **und `0041`** (Verkäuferprädikat), nicht
+`0046`. Es legt `legal_document_versions`, `order_legal_snapshots`, `withdrawal_requests`,
+`withdrawal_attempts`, `order_refunds` und `invoices` an, erweitert die erlaubten Mail-Arten, stellt
+`order_mail_payload()` auf den erweiterten Umfang um und **seedet die Verkäuferidentität**
+in `public.sellers` (nicht `shop_settings` — dort gibt es diese Spalten nicht; sie stammen aus
+`0040`). `0047` setzt damit `0040` voraus, was der ursprüngliche Kopf der Migration nicht nannte.
+(ADR-0086). Es setzt zusätzlich **zwei Trigger auf bestehende Tabellen**:
+`orders_clear_client_hash_trg` auf `orders` (löscht den Missbrauchs-Fingerabdruck bei Bezahlung —
+die Zusage aus `0010`, die bisher niemand ausgeführt hat) und `order_legal_snapshots_protect_trg`
+(Snapshot ab dem Schreiben unveränderlich). `0010` wurde dafür **nicht** angefasst. Ohne die Migration fehlen Rechnung, Widerrufsaufzeichnung und der Versionsschnappschuss;
+die Rechtsseiten selbst rendern auch ohne sie, weil ihre Texte im Code stehen.
+
+**`0050` ersetzt genau eine Funktion aus `0048`** — `seller_create_import()` — und ändert darin
+genau eine Zeile: der `unchanged`-Zähler filterte auf `status = 'pending' and delta = 0`, was
+`reconcile()` nie erzeugt (delta 0 heißt `unchanged`, `pending` heißt delta ≠ 0). Der Zähler war
+damit strukturell immer 0. Keine Auswirkung auf angewandten Bestand — `seller_apply_import()`
+liest diese Zähler nicht —, wohl aber auf die Zusammenfassung, auf der der Betreiber eine
+Bestandsänderung freigibt.
+
+**`0049` korrigiert die Widerrufs-Quittung aus `0047`** und braucht **einen erneuten Deploy von
+`send-order-mail`**. Es fügt `withdrawal_requests.receipt_attempt_at`, den Zustand `sending` und
+`claim_withdrawal_receipt()` hinzu; `receipt_sent_at` ist ab jetzt einmalig beschreibbar und
+`sent` ist endgültig, beides per Trigger. Reihenfolge beim Anwenden: erst `0049`, dann die
+Function deployen — die Signatur von `mark_withdrawal_receipt()` bleibt unverändert, deshalb
+entsteht dazwischen keine Lücke.
+
+**Nach `0047` ist ein Deploy der Edge Functions nötig** — `send-order-mail` (neue Arten,
+`SITE_URL`) und `stripe-webhook` (Annahme-Mail, Rechnungsausstellung). **`SITE_URL` muss in den
+Supabase-Secrets gesetzt sein**, sonst stehen die Links in den Mails auf einer leeren Herkunft.
+
+**`0046` braucht `0045`** (die fünf Funktionen, die es ersetzt) **und `0044`** (das Bestellprädikat,
+das diese Funktionen aufrufen). Es fügt `orders.sandbox_archived_at`/`sandbox_archived_by` samt
+CHECK hinzu, stellt fünf Lesefunktionen auf `commerce_mode = 'live'` um und legt die drei
+Testbestellungs-Funktionen an (ADR-0084). Ohne die Migration bleiben Testbestellungen in der
+normalen Liste und `/business/orders/test` ist leer.
+
+**`0045` braucht `0041`, den Commerce-Kern (`0010`/`0018`/`0024`) und `0044`** — letzteres wegen
+`order_counts_as_placed()`, der geteilten Definition einer echten Bestellung (ADR-0083). **`0044`
+läuft also vor `0045`.** `0042` und `0043` braucht es nicht. Es legt `order_attention()`, drei Archivfunktionen, `seller_open_order_counts()`, die
+Tabelle `seller_monthly_reports` und drei Berichtsfunktionen an und stellt `admin_orders()` per
+`create or replace` auf die neue Regelfunktion um (**gleiche Signatur, gleicher Rückgabetyp** —
+deshalb ohne `drop`). Ohne die Migration bleibt `/business/orders` in der Aktuell-Ansicht leer,
+`/business/reports` zeigt jeden Monat als „noch nicht erstellt", und das Arbeitsabzeichen zeigt 0
+(ADR-0082).
+
+### Wie der Stand am 2026-09-17 nachgeprüft wurde (zweite Prüfung)
+
+**`0044` und `0045` sind inzwischen angewandt** — zwischen den Arbeitsrunden. Sie werden deshalb
+**nicht mehr geändert**; die Korrekturen aus ADR-0084 stehen in `0046`.
+
+### Wie der Stand am 2026-09-17 nachgeprüft wurde
+
+Nicht aus dieser Tabelle, sondern aus der Datenbank: ein schreibfreier Probelauf ruft je Migration
+eine Funktion auf, die es nur dort gibt, und liest den Fehlercode — `PGRST202`/`42883` heißt „gibt
+es nicht" (nicht angewandt), `42501` heißt „gibt es, und sie hat uns abgewiesen" (angewandt).
+Ergebnis: **`0043` ist auf Staging angewandt**, obwohl diese Tabelle es als offen führte; `0044`
+und `0045` sind es nicht. Die Zeile oben ist entsprechend korrigiert.
+
+**`0044` braucht nur `0041`** (das Verkäuferprädikat) — nicht `0042` und nicht `0043`. Es legt
+`order_counts_as_placed()` und `seller_year_to_date()` an, keinen Index (`orders_placed_idx` aus
+`0010` genügt); ohne die Migration zeigt die Shop-Übersicht beide Kennzahlen als 0 (ADR-0081/0083).
+
+**`0043` braucht nur `0041`** (das Verkäuferprädikat) und das Bestandsjournal aus `0003`/`0025` —
+nicht `0042`. Die Reihenfolge `0042` vor `0043` ist trotzdem die natürliche. `0036` und `0037` sind dort angewandt und
 werden **nicht** erneut ausgeführt.
 
-**`0039` ist von `0038` unabhängig** und umgekehrt — die eine betrifft Telemetrie, die andere
-Bestellabwicklung. Die Reihenfolge zwischen ihnen ist frei; beide brauchen nichts aus `0035`.
+**`0038`, `0039` und `0040` sind voneinander unabhängig** — Telemetrie, Bestellabwicklung und
+Zuständigkeitstrennung. Die Reihenfolge zwischen ihnen ist frei; keine braucht etwas aus `0035`.
+**`0041` braucht `0040`**, **`0042` braucht `0041`**; die drei laufen in dieser Reihenfolge.
+
+### Warum `0040` nicht mehr angefasst wird
+
+`0040` ist auf Staging angewandt. Danach fiel auf, dass die Versandkostengrenze auf dem
+Plattform-Singleton lag statt beim Verkäufer (ADR-0076). Eine angewandte Migration wird dafür
+**nicht umgeschrieben**: ein frischer Datenbestand und Staging liefen sonst durch verschiedene
+Historien zum selben Schema, und genau das macht Migrationen unprüfbar. Die Verschiebung steht
+deshalb in `0041`, samt Datenübernahme. `shop_settings.free_shipping_threshold` bleibt eine
+Migration lang bestehen und wird von nichts mehr gelesen; `0042` kann die Spalte entfernen.
+
+**Ein frischer Datenbestand** wendet `0001 … 0040 … 0041` der Reihe nach an und erreicht exakt
+denselben Zustand wie Staging nach `0041`.
+`0040` braucht `sellers` (0026), `platform_settings` (0019 als `business_settings`, in `0026`
+umbenannt), `shop_settings` (0007) und
+`create_order()` (0028).
 `0039` braucht `orders`, `order_lines`, `order_events`, `skylanders`, `series` und
 `is_shop_admin()`, alles seit `0010` bzw. `0003` vorhanden.
 

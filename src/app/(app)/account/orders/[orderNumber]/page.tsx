@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
@@ -8,6 +9,7 @@ import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { formatDate, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
 export const metadata: Metadata = { title: de.account.orders.title };
 
@@ -147,6 +149,44 @@ export default async function MyOrderPage({
           <p className="text-xs text-muted">{copy.snapshotNote}</p>
         </section>
       ) : null}
+
+      {/*
+       * The documents and rights attached to this order (ADR-0086).
+       *
+       * A signed-in customer needs no capability token — `invoice_document()`
+       * recognises the owner. A guest reaches the same two things from the
+       * order-status page, which holds their token.
+       */}
+      <section className="flex flex-col gap-2">
+        <h2 className="text-sm font-medium tracking-wide text-muted uppercase">
+          {de.account.orders.documents}
+        </h2>
+        <div className="flex flex-col gap-2">
+          {order.payment_status === "paid" ||
+          order.payment_status === "refunded" ||
+          order.payment_status === "partially_refunded" ? (
+            <Link
+              href={`/rechnung/${order.order_number}`}
+              className="rounded-sky-md bg-surface/80 px-4 py-3 text-sm ring-1 ring-border/70 hover:ring-border-strong"
+            >
+              {de.invoice.openLink}
+            </Link>
+          ) : (
+            <p className="text-sm text-muted">{de.invoice.pending}</p>
+          )}
+
+          {/*
+           * § 356a BGB. Offered on the order it belongs to as well as in the
+           * footer, because that is where somebody looks for it.
+           */}
+          <Link
+            href={WITHDRAWAL_PATH}
+            className="rounded-sky-md bg-surface/80 px-4 py-3 text-sm ring-1 ring-border/70 hover:ring-border-strong"
+          >
+            {de.withdrawal.orderEntry}
+          </Link>
+        </div>
+      </section>
     </main>
   );
 }

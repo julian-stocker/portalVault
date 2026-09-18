@@ -18,23 +18,30 @@
  */
 import { cache } from "react";
 
-import { isAdmin } from "@/lib/auth/admin";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 
 export type PlatformSettings = {
   /** PUBLIC. The platform's published contact address. */
   contactEmail: string | null;
+  /**
+   * PUBLIC. Where somebody writes about SkyIsles itself — account, data
+   * protection, the site. A question about an order goes to the seller
+   * (ADR-0077). NULL until an address exists; none is invented.
+   */
+  supportEmail: string | null;
   updatedAt: string | null;
 };
 
 export const NO_PLATFORM_SETTINGS: PlatformSettings = {
   contactEmail: null,
+  supportEmail: null,
   updatedAt: null,
 };
 
 /** What the administrator sees. Memoised per request, like `fetchSeller()`. */
 export const fetchPlatformSettings = cache(async (): Promise<PlatformSettings> => {
-  if (!(await isAdmin())) return NO_PLATFORM_SETTINGS;
+  if (!(await isPlatformAdmin())) return NO_PLATFORM_SETTINGS;
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_platform_settings");
@@ -45,6 +52,7 @@ export const fetchPlatformSettings = cache(async (): Promise<PlatformSettings> =
 
   return {
     contactEmail: row.contact_email ?? null,
+    supportEmail: row.support_email ?? null,
     updatedAt: row.updated_at ?? null,
   };
 });

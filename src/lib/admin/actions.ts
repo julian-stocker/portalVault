@@ -7,7 +7,7 @@
  * called these actions without the admin area, or spoke to PostgREST
  * directly, the answer is the same — `insufficient_privilege`.
  *
- * The action still asks `isAdmin()` first. Not as the boundary: as the way to
+ * The action still asks its capability first. Not as the boundary: as the way to
  * return a German sentence instead of a Postgres error, and to keep the
  * pointless round trip out.
  *
@@ -27,7 +27,7 @@ import {
   readAccountMatches,
   type AccountMatch,
 } from "@/lib/admin/commerce-model";
-import { isAdmin } from "@/lib/auth/admin";
+import { canOperateSeller, isPlatformAdmin } from "@/lib/auth/capabilities";
 import {
   isCondition,
   isMovementReason,
@@ -42,12 +42,27 @@ export type AdminResult = { ok: true } | { ok: false; message: string };
 const SKY_ID = /^SKY-[0-9]{4}$/;
 
 /** Everything the editorial writes have in common. */
+/**
+ * Which capability an action needs (ADR-0077).
+ *
+ * It must match the predicate the function asks in the database, or the two
+ * disagree — and the disagreement has only one shape: the screen offers
+ * something the database then refuses. `"platform"` is not a stronger
+ * `"seller"`; they are different authorities and neither contains the other.
+ */
+type Capability = "platform" | "seller";
+
+async function allowed(capability: Capability): Promise<boolean> {
+  return capability === "platform" ? isPlatformAdmin() : canOperateSeller();
+}
+
 async function call(
   fn: string,
   args: Record<string, unknown>,
   paths: readonly string[],
+  capability: Capability,
 ): Promise<AdminResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await allowed(capability))) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc(fn, args);
@@ -63,6 +78,7 @@ export async function setCatalogVisible(skyId: string, visible: boolean): Promis
     "admin_set_catalog_visible",
     { p_sky_id: skyId, p_visible: visible },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
   );
 }
 
@@ -85,6 +101,7 @@ export async function setCardType(skyId: string, cardType: string): Promise<Admi
     "admin_set_card_type",
     { p_sky_id: skyId, p_card_type: cardType },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
   );
 }
 
@@ -96,6 +113,7 @@ export async function setDisplayNameOverride(skyId: string, value: string): Prom
     "admin_set_display_name_override",
     { p_sky_id: skyId, p_value: value },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
   );
 }
 
@@ -107,6 +125,7 @@ export async function setAdminNote(skyId: string, value: string): Promise<AdminR
     "admin_set_admin_note",
     { p_sky_id: skyId, p_value: value },
     ["/admin/catalog", `/admin/catalog/${skyId}`],
+    "platform",
   );
 }
 
@@ -123,6 +142,7 @@ export async function setCatalogGroup(categoryId: number, group: string): Promis
     "admin_set_catalog_group",
     { p_category_id: categoryId, p_group: group },
     ["/admin/catalog/categories", "/admin/catalog", "/", "/collection"],
+    "platform",
   );
 }
 
@@ -172,7 +192,8 @@ export async function bookMovement(input: {
       p_currency: input.unitCost === undefined || input.unitCost === null ? null : "EUR",
       p_note: input.note?.trim() ? input.note.trim() : null,
     },
-    ["/admin/inventory"],
+    ["/business/inventory"],
+    "seller",
   );
 }
 
@@ -220,7 +241,8 @@ export async function setListing(input: {
     },
     // The public catalog too: a release is what makes an offer appear on a
     // card, and the card is cached with the page.
-    ["/admin/inventory", "/", "/cart"],
+    ["/business/inventory", "/", "/cart"],
+    "seller",
   );
 }
 
@@ -241,7 +263,8 @@ export async function setShopPercentage(percentage: number): Promise<AdminResult
   return call(
     "admin_set_shop_percentage",
     { p_percentage: percentage },
-    ["/admin", "/admin/inventory", "/", "/cart"],
+    ["/admin", "/business/inventory", "/", "/cart"],
+    "seller",
   );
 }
 
@@ -260,7 +283,8 @@ export async function setImageOverride(skyId: string, path: string | null): Prom
   return call(
     "admin_set_image_override",
     { p_sky_id: skyId, p_path: path ?? "" },
-    ["/admin/catalog", `/admin/catalog/${skyId}`, "/admin/inventory", "/", "/collection"],
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/business/inventory", "/", "/collection"],
+    "platform",
   );
 }
 
@@ -278,12 +302,154 @@ export async function setImageOverride(skyId: string, path: string | null): Prom
  * database addresses the ACTIVE seller, so no caller can name a second one
  * into existence (ADR-0064).
  */
+/**
+ * The seller's identity — who yulez.collectibles legally is (ADR-0075).
+ *
+ * Every field is optional and an empty string clears it, which is what the
+ * database function means by NULL-leaves-alone. Nothing is validated beyond
+ * being a string: a legal form, a register number and a Wirtschafts-ID have
+ * no shape this code could check that would not eventually reject a real one.
+ *
+ * These values are **not** published anywhere yet. Legal V1 renders them; this
+ * only records them, and a field left empty stays empty.
+ */
+export async function setSellerDetails(fields: {
+  legalName?: string;
+  tradingName?: string;
+  legalForm?: string;
+  street?: string;
+  postalCode?: string;
+  city?: string;
+  countryCode?: string;
+  phone?: string;
+  directContact?: string;
+  registerCourt?: string;
+  registerNumber?: string;
+  vatId?: string;
+  wId?: string;
+}): Promise<AdminResult> {
+  return call(
+    "admin_set_seller_details",
+    {
+      p_legal_name: fields.legalName ?? null,
+      p_trading_name: fields.tradingName ?? null,
+      p_legal_form: fields.legalForm ?? null,
+      p_street: fields.street ?? null,
+      p_postal_code: fields.postalCode ?? null,
+      p_city: fields.city ?? null,
+      p_country_code: fields.countryCode ?? null,
+      p_phone: fields.phone ?? null,
+      p_direct_contact: fields.directContact ?? null,
+      p_register_court: fields.registerCourt ?? null,
+      p_register_number: fields.registerNumber ?? null,
+      p_vat_id: fields.vatId ?? null,
+      p_w_id: fields.wId ?? null,
+    },
+    ["/admin"],
+    "seller",
+  );
+}
+
+/**
+ * The shop's contacts and policies, plus the PLATFORM support address.
+ *
+ * The PLATFORM's support address is deliberately absent. It used to ride along
+ * because the two were edited on one screen — but a seller-guarded function
+ * that writes `platform_settings` is a seller editing a platform setting, and
+ * no amount of UI placement fixes that (ADR-0077). It has its own
+ * administrator-guarded writer.
+ *
+ * Leaving the withdrawal or complaints address empty is meaningful: it means
+ * "the seller's address", resolved with `coalesce` rather than copied, so it
+ * keeps following that address when it changes.
+ */
+export async function setShopPolicies(fields: {
+  contactEmail?: string;
+  withdrawalContactEmail?: string;
+  complaintsContactEmail?: string;
+  smallBusiness19?: boolean;
+  disputeParticipation?: boolean;
+  disputeBody?: string;
+  returnPostageBorneBy?: "customer" | "seller";
+  dispatchStatement?: string;
+  freeShippingThreshold?: number;
+}): Promise<AdminResult> {
+  for (const value of [fields.contactEmail, fields.withdrawalContactEmail,
+                       fields.complaintsContactEmail]) {
+    const trimmed = normaliseContact(value ?? "");
+    if (trimmed !== null && !looksLikeEmail(trimmed)) {
+      return { ok: false, message: de.admin.seller.invalidEmail };
+    }
+  }
+  if (fields.freeShippingThreshold !== undefined &&
+      (!Number.isFinite(fields.freeShippingThreshold) || fields.freeShippingThreshold < 0)) {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+
+  return call(
+    "admin_set_shop_policies",
+    {
+      p_contact_email: fields.contactEmail ?? null,
+      p_withdrawal_contact_email: fields.withdrawalContactEmail ?? null,
+      p_complaints_contact_email: fields.complaintsContactEmail ?? null,
+      p_small_business_19: fields.smallBusiness19 ?? null,
+      p_dispute_participation: fields.disputeParticipation ?? null,
+      p_dispute_body: fields.disputeBody ?? null,
+      p_return_postage_borne_by: fields.returnPostageBorneBy ?? null,
+      p_dispatch_statement: fields.dispatchStatement ?? null,
+      p_free_shipping_threshold: fields.freeShippingThreshold ?? null,
+    },
+    // The threshold and the countries reach the checkout, so it re-reads too.
+    ["/admin", "/checkout", "/cart"],
+    "seller",
+  );
+}
+
+/**
+ * The SkyIsles support address — a PLATFORM setting (ADR-0077).
+ *
+ * Separate from `setShopPolicies()` because it is a different authority, not
+ * merely a different field: `admin_set_platform_support()` asks
+ * `is_platform_admin()`, so a seller operator is refused in the database
+ * whatever screen the input happens to sit on.
+ */
+export async function setPlatformSupport(supportEmail: string): Promise<AdminResult> {
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const trimmed = normaliseContact(supportEmail);
+  if (trimmed !== null && !looksLikeEmail(trimmed)) {
+    return { ok: false, message: de.admin.seller.invalidEmail };
+  }
+  return call("admin_set_platform_support", { p_support_email: supportEmail }, ["/admin"], "platform");
+}
+
+/** Enables or disables one delivery country. The server decides, always. */
+export async function setShippingCountry(
+  countryCode: string,
+  label: string,
+  enabled: boolean,
+): Promise<AdminResult> {
+  if (!/^[A-Za-z]{2}$/.test(countryCode.trim())) {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  return call(
+    "admin_set_shipping_country",
+    {
+      p_country_code: countryCode.trim().toUpperCase(),
+      p_label: label.trim(),
+      p_enabled: enabled,
+    },
+    ["/admin", "/checkout"],
+    "seller",
+  );
+}
+
 export async function setSellerContact(
   displayName: string,
   contactEmail: string,
   replyTo: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const name = normaliseContact(displayName);
   const contact = normaliseContact(contactEmail);
@@ -317,7 +483,7 @@ export async function setSellerContact(
 export async function setPlatformContact(
   contactEmail: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const contact = normaliseContact(contactEmail);
   if (contact !== null && !looksLikeEmail(contact)) {
@@ -346,7 +512,7 @@ export async function setPlatformContact(
  */
 export async function setCommerceMode(mode: string): Promise<AdminResult> {
   if (!isCommerceMode(mode)) return { ok: false, message: de.admin.commerce.modeFailed };
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("admin_set_commerce_mode", { p_mode: mode });
@@ -370,7 +536,7 @@ export async function setCommerceTester(
   enabled: boolean,
   note?: string,
 ): Promise<AdminResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
   if (typeof userId !== "string" || userId === "") {
     return { ok: false, message: de.admin.writeFailed };
   }
@@ -400,7 +566,7 @@ export async function setTester(
   enabled: boolean,
   note?: string,
 ): Promise<AdminResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
   if (typeof userId !== "string" || userId === "") {
     return { ok: false, message: de.admin.writeFailed };
   }
@@ -412,6 +578,7 @@ export async function setTester(
       p_note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
     },
     ["/admin"],
+    "platform",
   );
 }
 
@@ -428,7 +595,7 @@ export async function setTesterPermission(
   permission: string,
   enabled: boolean,
 ): Promise<AdminResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
   if (typeof userId !== "string" || userId === "") {
     return { ok: false, message: de.admin.writeFailed };
   }
@@ -439,6 +606,7 @@ export async function setTesterPermission(
     "admin_set_tester_permission",
     { p_user_id: userId, p_permission: permission, p_enabled: enabled },
     ["/admin", "/checkout", "/cart"],
+    "platform",
   );
 }
 
@@ -449,10 +617,42 @@ export async function setTesterPermission(
  * prefix matching. It is a lookup box for an operator who already knows who
  * they are looking for, not a directory to browse.
  */
+/**
+ * Grants or withdraws permission to operate the shop (ADR-0077).
+ *
+ * A PLATFORM act: `admin_set_seller_operator()` asks `is_platform_admin()`, so
+ * a seller operator cannot add a second operator to its own shop. Granting the
+ * shop does not grant the catalog, and holding the catalog does not grant the
+ * shop — there is no inheritance in either direction.
+ *
+ * The argument is a `user_id`. An address may FIND the account (`findAccounts`)
+ * but never authorises one, for the same reason `setTester()` takes an id.
+ */
+export async function setSellerOperator(
+  userId: string,
+  enabled: boolean,
+  note?: string,
+): Promise<AdminResult> {
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (typeof userId !== "string" || userId === "") {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  return call(
+    "admin_set_seller_operator",
+    {
+      p_user_id: userId,
+      p_enabled: enabled,
+      p_note: typeof note === "string" && note.trim() !== "" ? note.trim() : null,
+    },
+    ["/admin"],
+    "platform",
+  );
+}
+
 export async function findAccounts(
   query: string,
 ): Promise<{ ok: true; matches: AccountMatch[] } | { ok: false; message: string }> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
   const trimmed = typeof query === "string" ? query.trim() : "";
   if (trimmed.length < MIN_ACCOUNT_QUERY) {
     return { ok: false, message: de.admin.commerce.searchTooShort };
@@ -474,7 +674,7 @@ export async function findAccounts(
  * can never put a real customer's goods back on the shelf.
  */
 export async function revertSandboxStock(orderNumber: string): Promise<AdminResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("admin_revert_sandbox_stock", {
@@ -483,7 +683,7 @@ export async function revertSandboxStock(orderNumber: string): Promise<AdminResu
   if (error) return { ok: false, message: de.admin.commerce.revertStockFailed };
 
   revalidatePath("/admin");
-  revalidatePath("/admin/inventory");
-  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/business/inventory");
+  revalidatePath(`/business/orders/${orderNumber}`);
   return { ok: true };
 }

@@ -14,35 +14,55 @@ function source(path: string): string {
 }
 
 const ADAPTER = "src/lib/auth/admin.ts";
+const CAPABILITIES = "src/lib/auth/capabilities.ts";
 const LAYOUT = "src/app/(admin)/layout.tsx";
 const ACTIONS = "src/lib/admin/actions.ts";
 const MIGRATION = "supabase/migrations/0004_catalog_editorial.sql";
 
 describe("the admin adapter", () => {
   const adapter = source(ADAPTER);
+  const caps = source(CAPABILITIES);
+
+  it("means PLATFORM administrator since 0041, and delegates to say so", () => {
+    /*
+     * `isAdmin()` used to ask `is_shop_admin()`, which answered "may correct
+     * the catalog?" and "may run the shop?" at once. Since ADR-0077 those are
+     * two capabilities, and this adapter carries only the first.
+     */
+    expect(adapter).toContain("return isPlatformAdmin();");
+    expect(adapter).not.toContain('supabase.rpc("is_shop_admin")');
+  });
 
   it("asks the database, not the session or a claim", () => {
-    expect(adapter).toContain('supabase.rpc("is_shop_admin")');
-    expect(adapter).not.toMatch(/localStorage|cookies\(\)|headers\(\)|process\.env/);
+    expect(caps).toContain('supabase.rpc("my_capabilities")');
+    expect(caps).not.toMatch(/localStorage|cookies\(\)|headers\(\)|process\.env/);
+    // Never an address or a name — the two things that are not authorisation.
+    expect(caps).not.toMatch(/email|username|display_name/i);
   });
 
   it("says no for an anonymous request without asking", () => {
-    // No session can ever be an admin; the round trip would only confirm it.
-    expect(adapter).toContain("if (!(await currentUser())) return false;");
+    expect(caps).toContain("if (!(await currentUser())) return NO_CAPABILITIES;");
   });
 
   it("denies when the check itself fails", () => {
     // An error is not a permission. This is the line that decides whether a
-    // database outage opens or closes the admin area.
-    expect(adapter).toContain("if (error) return false;");
+    // database outage opens or closes the privileged areas.
+    expect(caps).toContain("if (error || data === null || typeof data !== \"object\") return NO_CAPABILITIES;");
   });
 
-  it("returns a real boolean, never a truthy value", () => {
-    expect(adapter).toContain("return data === true;");
+  it("returns real booleans, never truthy values", () => {
+    expect(caps).toContain("row.is_platform_admin === true");
+    expect(caps).toContain("row.can_operate_seller === true");
   });
 
   it("is memoised per request, like the user lookup", () => {
-    expect(adapter).toContain("cache(async ()");
+    expect(caps).toContain("cache(async ()");
+  });
+
+  it("keeps the two capabilities independent", () => {
+    // Neither derives from the other anywhere in the adapter.
+    expect(caps).not.toMatch(/platformAdmin\s*\|\|\s*sellerOperator/);
+    expect(caps).not.toMatch(/sellerOperator\s*\|\|\s*platformAdmin/);
   });
 });
 
@@ -50,7 +70,10 @@ describe("the admin route group", () => {
   const layout = source(LAYOUT);
 
   it("checks before anything below it renders", () => {
-    expect(layout).toContain("if (!(await isAdmin())) notFound();");
+    expect(layout).toContain("if (!platformAdmin) notFound();");
+    // The gate is the platform capability alone — running the shop is not a
+    // way into the platform area (ADR-0077).
+    expect(layout).not.toContain("sellerOperator) notFound()");
   });
 
   it("answers 404, not 403", () => {
@@ -83,7 +106,13 @@ describe("editorial writes are guarded twice", () => {
   const sql = source(MIGRATION);
 
   it("checks in the server action", () => {
-    expect(actions).toContain("if (!(await isAdmin()))");
+    /*
+     * The gate is now per-action: `call()` takes the capability the database
+     * function asks for, so the screen and the predicate cannot drift apart
+     * (ADR-0077). "platform" is not a stronger "seller".
+     */
+    expect(actions).toContain("if (!(await allowed(capability)))");
+    expect(actions).toContain('capability === "platform" ? isPlatformAdmin() : canOperateSeller()');
   });
 
   it("and again in every database function", () => {

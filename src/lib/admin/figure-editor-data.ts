@@ -21,7 +21,7 @@
 "use server";
 
 import { fetchAdminNote, fetchCatalogChanges, type CatalogChange } from "@/lib/admin/queries";
-import { isAdmin } from "@/lib/auth/admin";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 
 const SKY_ID = /^SKY-[0-9]{4}$/;
@@ -41,7 +41,7 @@ export async function loadFigureEditor(
    * themselves. This returns a German sentence instead of a Postgres error,
    * and keeps a pointless round trip out.
    */
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const [note, changes] = await Promise.all([
     fetchAdminNote(skyId),

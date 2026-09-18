@@ -31,7 +31,7 @@ import {
   CatalogGlyph,
   CollectionGlyph,
   InventoryGlyph,
-  SettingsGlyph,
+  AccountHubGlyph,
 } from "@/components/layout/nav-glyphs";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
@@ -46,12 +46,22 @@ type Item = {
   /** The destination's mark. Drawn beside the label on the phone (V3.4.1). */
   icon: ({ className }: { className?: string }) => React.ReactElement;
   prefetch?: boolean;
-  /** How many orders are flagged. Only "Admin" ever carries this (F5). */
+  /** How many orders are flagged. Only the shop ever carries this (F5). */
   badge?: number;
 };
 
 /** Who is asking. Nothing else decides what the bar offers. */
-type Viewer = { signedIn: boolean; admin: boolean };
+/**
+ * The account's type, as the bar sees it (ADR-0077, ADR-0078).
+ *
+ * Exactly one of the three is true at a time — the database refuses an account
+ * that would be two — so the bar never has to decide which of two identities
+ * to draw. All of it comes from `capabilities()`, the same server-side answer
+ * the route guards use. Never from an address, a display name or the current
+ * path: a link that appears on different evidence from the guard behind it is
+ * how an operator ends up staring at a 404.
+ */
+type Viewer = { signedIn: boolean; admin: boolean; business: boolean; collector: boolean };
 
 /**
  * Every destination the product has, each with the condition under which it
@@ -106,11 +116,18 @@ const DESTINATIONS: readonly {
     label: de.nav.collection,
     section: "collection",
     icon: CollectionGlyph,
-    // A collector's own collection. The business account is the operator,
-    // not a collector (ADR-0032): offering it a personal collection as a
-    // main destination would suggest the shop's stock lives there. The page
-    // still exists and still works for them — it is simply not offered.
-    applies: (viewer) => !viewer.admin,
+    /*
+     * A collector's own collection. The SELLER is the operator, not a
+     * collector (ADR-0032): offering it a personal collection as a main
+     * destination would suggest the shop's stock lives there. The page still
+     * exists and still works for them — it is simply not offered.
+     *
+     * `collector`, not `!business`: since 0042 an account is exactly one of
+     * user, business or admin (ADR-0078), and only the first has a collection.
+     * An administrator is a platform operator account, not a collector with
+     * extra buttons — the row policies refuse them the table outright.
+     */
+    applies: (viewer) => viewer.collector,
     // Prefetched only for someone who has a collection. Signed out the route
     // answers with a redirect to /login, so fetching it ahead of time would
     // cost a request and a session check for a page they cannot see (V4.4).
@@ -119,14 +136,36 @@ const DESTINATIONS: readonly {
   },
 
   {
-    href: "/admin/inventory",
+    href: "/business",
+    label: de.nav.business,
+    section: "business",
+    icon: InventoryGlyph,
+    /*
+     * The shop. Offered to whoever may actually run it — not to whoever
+     * happens to administer SkyIsles (ADR-0077).
+     *
+     * It carries the flagged-order count, because a paid order that booked no
+     * stock is the seller's problem to solve and nobody else can (ADR-0050).
+     * Until 0041 that badge sat on "Admin", which is now the wrong desk.
+     */
+    applies: (viewer) => viewer.business,
+    prefetch: () => false,
+    badge: (counts) => counts.needsResolution,
+  },
+
+  {
+    href: "/business/inventory",
     label: de.nav.inventory,
     section: "inventory",
     icon: InventoryGlyph,
     // The operator's stock. Where a collector has their collection, the
-    // business account has the shop's shelf (ADR-0032) — a destination of
-    // its own, not the collection under another name.
-    applies: (viewer) => viewer.admin,
+    // seller has the shop's shelf (ADR-0032) — a destination of its own, not
+    // the collection under another name.
+    //
+    // `viewer.business`, not `viewer.admin`: an administrator who was never
+    // granted the shop gets 404 here, so offering the link would be an
+    // invitation to a wall.
+    applies: (viewer) => viewer.business,
     prefetch: () => false,
   },
 
@@ -139,7 +178,6 @@ const DESTINATIONS: readonly {
     // everyone else whether or not they find the address.
     applies: (viewer) => viewer.admin,
     prefetch: () => false,
-    badge: (counts) => counts.needsResolution,
   },
 
   /*
@@ -158,8 +196,19 @@ const DESTINATIONS: readonly {
 ];
 
 
-function itemsFor(signedIn: boolean, admin: boolean, counts: OpenOrderCounts): Item[] {
-  const viewer: Viewer = { signedIn, admin };
+function itemsFor(
+  signedIn: boolean,
+  admin: boolean,
+  business: boolean,
+  counts: OpenOrderCounts,
+): Item[] {
+  /*
+   * Collector = neither privileged membership, which is what "USER" means
+   * (ADR-0078). A signed-out visitor counts: Sammlung has always been offered
+   * to them and leads to sign-in, and taking it away would hide the product's
+   * second half from exactly the people being invited into it.
+   */
+  const viewer: Viewer = { signedIn, admin, business, collector: !admin && !business };
   return DESTINATIONS.filter((destination) => destination.applies(viewer)).map(
     ({ href, label, section, icon, prefetch, badge }) => ({
       href,
@@ -232,8 +281,8 @@ function AttentionBadge({ count }: { count: number }) {
  * icon in the header would have been two ways into one room. This is a
  * different arrangement: the two now lead to two different pages.
  *
- *   name + person  ->  /account/profile   the collector identity
- *   cog            ->  /account           the account hub
+ *   name + person  ->  /account/profile   who this account is
+ *   card           ->  /account           everything on file about it
  *
  * The rule the old test protected is intact — nothing leads twice to the same
  * place, and the active state can only ever light up on one of them.
@@ -315,9 +364,10 @@ function ProfileAction({
  *
  * Named "Mein Konto", which is the heading the page itself carries. Not
  * "Einstellungen": that word promises a settings screen, and this opens the
- * hub with its four sections.
+ * hub with its four sections. The mark had to follow — a cog said the word
+ * the label refused to (ADR-0080).
  */
-function SettingsAction({ active }: { active: boolean }) {
+function AccountHubAction({ active }: { active: boolean }) {
   return (
     <Link
       href="/account"
@@ -329,7 +379,7 @@ function SettingsAction({ active }: { active: boolean }) {
         (active ? "text-on-deep" : "text-on-deep-muted hover:text-on-deep")
       }
     >
-      <SettingsGlyph className="h-[18px] w-[18px]" />
+      <AccountHubGlyph className="h-[18px] w-[18px]" />
     </Link>
   );
 }
@@ -391,11 +441,15 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
 export function SiteNav({
   signedIn,
   admin = false,
+  business = false,
   openOrders = NO_OPEN_ORDERS,
   username = null,
 }: {
   signedIn: boolean;
+  /** Runs SkyIsles. Grants nothing commercial (ADR-0077). */
   admin?: boolean;
+  /** May run the shop. Grants nothing on the catalog (ADR-0077). */
+  business?: boolean;
   /**
    * The signed-in visitor's handle, from `profiles.username` (V3.4.2).
    *
@@ -415,7 +469,7 @@ export function SiteNav({
 }) {
   const pathname = usePathname();
   const active = activeSection(pathname ?? "/");
-  const items = itemsFor(signedIn, admin, openOrders);
+  const items = itemsFor(signedIn, admin, business, openOrders);
 
   /**
    * The cart confirmation belongs to the same question as the header cart —
@@ -443,7 +497,7 @@ export function SiteNav({
    */
   const inAccount = active === "account";
   const profileActive = (pathname ?? "/") === "/account/profile";
-  const settingsActive = inAccount && !profileActive;
+  const accountHubActive = inAccount && !profileActive;
 
   const shopping = !admin;
 
@@ -513,10 +567,21 @@ export function SiteNav({
         <Link href="/" className="flex items-center" aria-label={de.app.name}>
           <Wordmark />
         </Link>
-        {/* Quiet, and always there while it applies (ADR-0042): the mode has
-            to be recognisable without turning the site into a back office.
-            Tonal since V3.1: being an administrator is a UI state, and the
-            gold it used to borrow belongs to the collection. */}
+        {/*
+         * Quiet, and always there while it applies (ADR-0042): the capability
+         * has to be recognisable without turning the site into a back office.
+         * Tonal since V3.1 — the gold it used to borrow belongs to the
+         * collection, and a capability is not ownership.
+         *
+         * TWO BADGES, NOT A RANK (ADR-0077). Business and Admin are separate
+         * capabilities, so an account holding both shows both rather than the
+         * "higher" one: there is no higher one. A collector sees neither.
+         */}
+        {business ? (
+          <span className="rounded-full bg-status-ground px-2 py-0.5 text-[11px] leading-4 font-medium text-status-ink ring-1 ring-status-line">
+            {de.business.modeBadge}
+          </span>
+        ) : null}
         {admin ? (
           <span className="rounded-full bg-status-ground px-2 py-0.5 text-[11px] leading-4 font-medium text-status-ink ring-1 ring-status-line">
             {de.admin.modeBadge}
@@ -556,7 +621,7 @@ export function SiteNav({
       <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
         <ProfileAction signedIn={signedIn} username={username} active={profileActive} />
         {/* Nothing to configure when nobody is signed in. */}
-        {signedIn ? <SettingsAction active={settingsActive} /> : null}
+        {signedIn ? <AccountHubAction active={accountHubActive} /> : null}
         {/*
          * THE ONLY CART ENTRY POINT (V3.4, ADR-0043), at the outer edge.
          *

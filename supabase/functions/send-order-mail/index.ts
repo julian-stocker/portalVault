@@ -35,6 +35,8 @@ import {
   goesToCustomer,
   idempotencyKey,
   isMailKind,
+  withdrawalReceipt,
+  type WithdrawalReceipt,
   render,
   type MailKind,
   type MailOrder,
@@ -43,6 +45,16 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+
+/**
+ * Where the links in a mail point.
+ *
+ * From the environment, never written into a template: the same build has to
+ * be correct on the canonical domain, on a preview deployment and locally
+ * (src/lib/layout/domain.test.ts). A confirmation mail pointing at the wrong
+ * host is precisely the failure that rule exists to prevent.
+ */
+const SITE = { origin: (Deno.env.get("SITE_URL") ?? "").replace(/\/+$/, "") };
 const MAIL_SECRET = Deno.env.get("MAIL_FUNCTION_SECRET");
 
 /**
@@ -95,7 +107,7 @@ function secretMatches(given: string | null): boolean {
   return diff === 0;
 }
 
-type Caller = { kind: "webhook" } | { kind: "admin"; userId: string } | null;
+type Caller = { kind: "webhook" } | { kind: "admin"; userId: string } | { kind: "checkout" } | null;
 
 async function authorise(req: Request): Promise<Caller> {
   if (secretMatches(req.headers.get("x-skyisles-mail-secret"))) return { kind: "webhook" };
@@ -117,6 +129,103 @@ async function authorise(req: Request): Promise<Caller> {
   return { kind: "admin", userId: data.user.id };
 }
 
+/**
+ * The § 356a Abs. 4 receipt confirmation.
+ *
+ * SENDS ONCE PER DECLARATION — and until `0049` that was only a comment. The
+ * earlier version read no state at all: invoking it twice sent twice and
+ * overwrote the record of when the statutory confirmation went out. The only
+ * thing preventing a duplicate was Resend's `idempotencyKey`, a provider
+ * convenience with a finite window rather than a property of this system.
+ *
+ * Now the database decides. `claim_withdrawal_receipt()` moves the row to
+ * `sending` and tells exactly one caller it may proceed; two simultaneous
+ * requests serialise on the row and the loser is refused. Nothing is sent
+ * before that claim succeeds, so "did we already send this?" is answered by
+ * the same statement that reserves the right to send — there is no window
+ * between asking and acting.
+ *
+ * The provider's `idempotencyKey` stays. It is now a second belt rather than
+ * the only one.
+ *
+ * THE ADDRESS is the one the consumer typed into the statutory function, never
+ * one supplied by the caller — which is what keeps this from becoming a way to
+ * mail strangers.
+ *
+ * NO ADMINISTRATOR TOKEN. A guest bought without an account and must be able
+ * to withdraw without one. `receive_withdrawal()` already required the order
+ * number together with the e-mail address on that order, so a row cannot exist
+ * unless somebody held both.
+ */
+async function sendWithdrawalReceipt(rawId: unknown): Promise<Response> {
+  const withdrawalId = typeof rawId === "number" && Number.isInteger(rawId) ? rawId : null;
+  if (withdrawalId === null) return respond(400, { error: "invalid_body" });
+
+  const { data, error } = await admin.rpc("withdrawal_mail_payload", {
+    p_withdrawal_id: withdrawalId,
+  });
+  if (error || !data) return respond(200, { sent: false, outcome: "unknown_withdrawal" });
+
+  /*
+   * The claim, before anything is composed or sent.
+   *
+   * False means another request is sending it right now, or it has already
+   * gone out. Either way this request must not send: one declaration, one
+   * confirmation. It is not an error — a retry finding the work already done
+   * is the system behaving correctly — so the caller gets 200 and an outcome
+   * that says what happened.
+   */
+  const { data: claimed, error: claimError } = await admin.rpc("claim_withdrawal_receipt", {
+    p_withdrawal_id: withdrawalId,
+  });
+  if (claimError) {
+    console.error(`send-order-mail: could not claim withdrawal receipt ${withdrawalId}`);
+    return respond(200, { sent: false, outcome: "claim_failed" });
+  }
+  if (claimed !== true) {
+    return respond(200, { sent: false, outcome: "already_sent" });
+  }
+
+  const receipt = data as WithdrawalReceipt;
+  const mail = withdrawalReceipt(receipt);
+
+  try {
+    const resend = new Resend(RESEND_API_KEY);
+    const { error: sendError } = await resend.emails.send(
+      {
+        from: MAIL_FROM,
+        to: [receipt.contact_email],
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+      },
+      { idempotencyKey: `skyisles/withdrawal-receipt/${withdrawalId}` },
+    );
+    if (sendError) {
+      await admin.rpc("mark_withdrawal_receipt", {
+        p_withdrawal_id: withdrawalId,
+        p_state: "failed",
+      });
+      /*
+       * The declaration is recorded with its statutory timestamp either way.
+       * A receipt that did not go out is the operator's problem to fix; it is
+       * not a reason to treat the withdrawal as unreceived.
+       */
+      console.error(`send-order-mail: withdrawal receipt ${withdrawalId} failed`);
+      return respond(200, { sent: false, outcome: "send_failed" });
+    }
+  } catch {
+    await admin.rpc("mark_withdrawal_receipt", {
+      p_withdrawal_id: withdrawalId,
+      p_state: "failed",
+    });
+    return respond(200, { sent: false, outcome: "send_failed" });
+  }
+
+  await admin.rpc("mark_withdrawal_receipt", { p_withdrawal_id: withdrawalId, p_state: "sent" });
+  return respond(200, { sent: true, outcome: "sent" });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return respond(405, { error: "method_not_allowed" });
@@ -128,11 +237,35 @@ Deno.serve(async (req) => {
     return respond(503, { error: "mail_unavailable" });
   }
 
-  let body: { orderNumber?: unknown; kind?: unknown; force?: unknown };
+  let body: {
+    orderNumber?: unknown;
+    kind?: unknown;
+    force?: unknown;
+    withdrawalId?: unknown;
+  };
   try {
     body = await req.json();
   } catch {
     return respond(400, { error: "invalid_body" });
+  }
+
+  /*
+   * THE WITHDRAWAL RECEIPT TAKES ITS OWN PATH, for three reasons.
+   *
+   * It is keyed on a withdrawal rather than an order, so `claim_order_mail()`
+   * — whose key is (order, kind) — cannot express it: a second declaration on
+   * the same order would find the first one's claim and send nothing, and
+   * § 356a Abs. 4 wants a confirmation for each declaration.
+   *
+   * Its content is the declaration, not the order.
+   *
+   * And it must work for a signed-out guest. `receive_withdrawal()` already
+   * required the order number together with the e-mail on the order, so the
+   * row cannot exist unless somebody held both; sending is then one-shot,
+   * because the row leaves `pending` and never returns to it.
+   */
+  if (body.kind === "withdrawal_receipt") {
+    return await sendWithdrawalReceipt(body.withdrawalId);
   }
 
   const orderNumber = typeof body.orderNumber === "string" ? body.orderNumber.trim() : "";
@@ -141,7 +274,19 @@ Deno.serve(async (req) => {
   }
   const kind: MailKind = body.kind;
 
-  const caller = await authorise(req);
+  /*
+   * THE ORDER ACKNOWLEDGEMENT IS REACHABLE WITHOUT A TOKEN, and it has to be:
+   * § 312i Abs. 1 Nr. 3 BGB requires the receipt of an order to be confirmed
+   * without undue delay, and most orders are placed by guests who hold no
+   * session at all.
+   *
+   * What makes that safe is `claim_order_mail()`, whose key is (order, kind):
+   * this mail can be sent **once per order, ever**, and only to the address
+   * already on that order. Somebody who guessed an order number could cause
+   * that order's own acknowledgement to be sent to that order's own customer,
+   * once — which is a message the customer was going to receive anyway.
+   */
+  const caller = kind === "order_received" ? { kind: "checkout" as const } : await authorise(req);
   if (!caller) return respond(401, { error: "not_authorised" });
 
   // Only a verified administrator may overrule an unresolved record. A webhook
@@ -198,7 +343,7 @@ Deno.serve(async (req) => {
       return respond(200, { sent: false, outcome: "no_recipient" });
     }
 
-    const mail = render(kind, order);
+    const mail = render(kind, order, SITE);
 
     // ----------------------------------------------------------- 3. the send
     const resend = new Resend(RESEND_API_KEY);

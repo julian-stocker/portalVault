@@ -299,23 +299,51 @@ describe("the idempotency key", () => {
 });
 
 describe("dispatch", () => {
-  it("knows exactly three kinds", () => {
+  it("knows the kinds it sends, and refuses anything else", () => {
+    for (const kind of [
+      "order_received",
+      "order_confirmation",
+      "shipping_confirmation",
+      "refund_confirmation",
+      "resolution_alert",
+    ]) {
+      expect(isMailKind(kind), kind).toBe(true);
+    }
+    // Still accepted so rows sent before 0047 stay renderable (ADR-0086).
     expect(isMailKind("payment_confirmation")).toBe(true);
-    expect(isMailKind("shipping_confirmation")).toBe(true);
-    expect(isMailKind("resolution_alert")).toBe(true);
     expect(isMailKind("invoice")).toBe(false);
     expect(isMailKind(null)).toBe(false);
   });
 
+  /* The host is injected, never hard-coded — see the note in templates.ts. */
+  const SITE = { origin: "https://example.test" };
+
   it("routes each kind to its own body", () => {
-    expect(render("payment_confirmation", ORDER).subject).toContain("Zahlung bestätigt");
-    expect(render("shipping_confirmation", ORDER).subject).toContain("unterwegs");
-    expect(render("resolution_alert", ORDER).subject).toContain("geprüft werden");
+    expect(render("order_received", ORDER, SITE).subject).toContain("eingegangen");
+    expect(render("order_confirmation", ORDER, SITE).subject).toContain("bestätigt");
+    expect(render("shipping_confirmation", ORDER, SITE).subject).toContain("unterwegs");
+    expect(render("refund_confirmation", ORDER, SITE).subject).toContain("Erstattung");
+    expect(render("resolution_alert", ORDER, SITE).subject).toContain("geprüft werden");
+  });
+
+  it("renders the old name as the acceptance it always was", () => {
+    // `payment_confirmation` named the trigger, not the act. Same body now.
+    expect(render("payment_confirmation", ORDER, SITE).subject).toBe(
+      render("order_confirmation", ORDER, SITE).subject,
+    );
+  });
+
+  it("puts the injected host in the links, and no other host", () => {
+    const mail = render("order_confirmation", ORDER, SITE);
+    expect(mail.html).toContain("https://example.test/widerrufen");
+    expect(mail.text).toContain("https://example.test/agb");
   });
 
   it("sends only the alert to the operator", () => {
-    expect(goesToCustomer("payment_confirmation")).toBe(true);
+    expect(goesToCustomer("order_received")).toBe(true);
+    expect(goesToCustomer("order_confirmation")).toBe(true);
     expect(goesToCustomer("shipping_confirmation")).toBe(true);
+    expect(goesToCustomer("refund_confirmation")).toBe(true);
     expect(goesToCustomer("resolution_alert")).toBe(false);
   });
 });

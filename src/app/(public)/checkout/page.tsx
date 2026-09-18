@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { CheckoutView } from "@/components/checkout/checkout-view";
 import { fetchSavedContact } from "@/lib/account/contacts";
 import { checkoutAccess } from "@/lib/commerce/access";
+import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
@@ -31,6 +32,10 @@ export default async function CheckoutPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
+  /* The contractual seller, named on the last screen before payment
+     (ADR-0075). Read here because CheckoutView is a client component. */
+  const seller = await fetchSellerPublic();
+
   // Asked before anything is loaded. Not the enforcement — `create_order()`
   // asks the same question in the database — but the reason the page does not
   // offer a form nobody could submit.
@@ -66,6 +71,7 @@ export default async function CheckoutPage({
             email={data.user?.email ?? ""}
             contact={contact}
             saveDefaultAllowed={Boolean(data.user)}
+            sellerName={seller?.displayName ?? null}
             resumeOrderNumber={typeof order === "string" ? order.trim() : undefined}
           />
         ) : (

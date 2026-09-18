@@ -76,13 +76,29 @@ function granted(text: string): Set<string> {
 const all = functions(code);
 
 /**
- * A function granted to `authenticated` that begins by demanding
- * `is_shop_admin()` is not a public read path — it is the operator's own tool,
- * and it raises for everybody else (ADR-0039). Those may return stock levels,
- * because stock is exactly what an administrator is looking at.
+ * A function granted to `authenticated` that demands a privileged predicate is
+ * not a public read path — it is the operator's own tool, and it raises for
+ * everybody else (ADR-0039). Those may return stock levels, because stock is
+ * exactly what an operator is looking at.
+ *
+ * ALL THREE PREDICATES, NOT JUST THE FIRST. This list said `is_shop_admin()`
+ * and nothing else, which was the whole story until 0041 split the operator in
+ * two. Every seller function written since guards with
+ * `can_operate_active_seller()` — so this guard had quietly been reading them
+ * as public read paths, and the only reason it never fired is that none of
+ * them happened to return a column on the forbidden list. 0045 returns
+ * `currency`, and it fired. The miss was here, not there.
  */
+const PRIVILEGED_PREDICATES = [
+  "public.is_shop_admin()",
+  "public.is_platform_admin()",
+  "public.can_operate_active_seller()",
+];
+
 const adminOnly = new Set(
-  all.filter((fn) => fn.body.includes("public.is_shop_admin()")).map((fn) => fn.name),
+  all
+    .filter((fn) => PRIVILEGED_PREDICATES.some((predicate) => fn.body.includes(predicate)))
+    .map((fn) => fn.name),
 );
 
 const callable = new Set([...granted(code)].filter((name) => !adminOnly.has(name)));

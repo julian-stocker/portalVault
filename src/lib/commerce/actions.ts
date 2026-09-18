@@ -177,8 +177,47 @@ export async function placeOrder(
     };
     if (!Number.isFinite(order.totalAmount)) return { ok: false, reason: "failed" };
 
+    /*
+     * § 312i Abs. 1 Nr. 3 BGB: the receipt of the order is confirmed
+     * electronically without undue delay. Until 0047 there was no message at
+     * all between the order and the payment — a customer whose payment hung
+     * heard nothing (ADR-0086).
+     *
+     * AWAITED, so the acknowledgement is on its way before the customer is
+     * sent to the payment page; but it can never fail the order. The order
+     * exists, the stock is held, and a mail provider having a bad minute is
+     * not a reason to tell somebody their order did not go through.
+     *
+     * It is NOT an acceptance and says so in its own body: the acceptance is
+     * the order confirmation that follows a confirmed payment.
+     */
+    await acknowledgeOrder(orderNumber);
+
     return { ok: true, order };
   } catch {
     return { ok: false, reason: "failed" };
+  }
+}
+
+
+/**
+ * Tell the customer we have their order (§ 312i Abs. 1 Nr. 3 BGB).
+ *
+ * Through the Edge Function, because `RESEND_API_KEY` is a Supabase secret and
+ * never reaches this deployment (ADR-0051). No token is attached and none is
+ * needed: `claim_order_mail()` allows this mail once per order and sends it
+ * only to the address already on that order.
+ *
+ * Never throws, never reports. The caller is a checkout that has already
+ * succeeded.
+ */
+async function acknowledgeOrder(orderNumber: string): Promise<void> {
+  try {
+    const supabase = await createClient();
+    await supabase.functions.invoke("send-order-mail", {
+      body: { orderNumber, kind: "order_received" },
+    });
+  } catch {
+    // Recorded in `order_mail`; visible to the operator on the order.
   }
 }

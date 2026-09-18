@@ -115,3 +115,31 @@ export function formatDate(value: string | null | undefined): string {
   if (Number.isNaN(instant.getTime())) return "–";
   return dateFormat.format(instant);
 }
+
+const partsFormat = new Intl.DateTimeFormat("en-CA", {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  timeZone: TIME_ZONE,
+});
+
+/** A calendar day, as Berlin has it. */
+export type BerlinDay = { year: number; month: number; day: number };
+
+/**
+ * What day it is where this product's calendar lives.
+ *
+ * `new Date().getFullYear()` would be the runtime's year, and the runtime is
+ * UTC on the server. For most of the year the two agree; on 31 December at
+ * 23:30 in Berlin they do not, and the order archive would open on a year that
+ * has not started — the same defect one hour earlier at the end of every
+ * month. Same reasoning as `TIME_ZONE` above: the calendar is Berlin's, so the
+ * day is read in Berlin.
+ *
+ * `en-CA` only because it yields `YYYY-MM-DD` with no adornment; the zone is
+ * what matters.
+ */
+export function berlinToday(now: Date = new Date()): BerlinDay {
+  const [year, month, day] = partsFormat.format(now).split("-").map(Number);
+  return { year, month, day };
+}

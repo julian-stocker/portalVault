@@ -106,8 +106,8 @@ describe("how an upload is written", () => {
     expect(actions).not.toMatch(/createClient\([^)]/);
   });
 
-  it("asks isAdmin() before anything else", () => {
-    expect(actions).toContain("if (!(await isAdmin()))");
+  it("asks isPlatformAdmin() before anything else", () => {
+    expect(actions).toContain("if (!(await isPlatformAdmin()))");
   });
 
   it("validates the SKY-ID rather than trusting the form", () => {

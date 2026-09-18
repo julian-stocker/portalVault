@@ -132,31 +132,17 @@ export type OpenOrderCounts = {
 
 export const NO_OPEN_ORDERS: OpenOrderCounts = { needsResolution: 0, toShip: 0, inFlight: 0 };
 
-/**
- * The two numbers the operator needs before they have opened anything.
+/*
+ * `openOrderCounts(rows)` used to live here: it counted the three buckets out
+ * of the rows `admin_orders(p_open_only => true)` returned.
  *
- * Counted from the rows `admin_orders(p_open_only => true)` already returns —
- * that call filters to `attention <= 1`, which is exactly these two buckets.
- * No second query, no aggregate function, no notification table and nothing
- * that polls: the count is computed on the request that renders the page.
- *
- * Anything outside the two buckets is ignored rather than lumped in, so a
- * caller that passes an unfiltered list gets the same answer.
+ * It was removed in 0045, and the reason is worth keeping. That call is capped
+ * at 100 rows, so the badge was never a count of open orders — it was a count
+ * of open orders *on the first page*. A shop with 130 needing attention said
+ * 100, and would have gone on saying 100 as the number grew. Counting is not
+ * listing: `seller_open_order_counts()` does it with an aggregate, with no cap
+ * and with the same predicate (ADR-0082).
  */
-export function openOrderCounts(rows: readonly { attention: number }[]): OpenOrderCounts {
-  let needsResolution = 0;
-  let toShip = 0;
-  let inFlight = 0;
-
-  for (const row of rows) {
-    const attention = attentionOf(row.attention);
-    if (attention === "needs_resolution") needsResolution += 1;
-    else if (attention === "to_ship") toShip += 1;
-    else if (attention === "in_flight") inFlight += 1;
-  }
-
-  return { needsResolution, toShip, inFlight };
-}
 
 /**
  * Is there anything for a person to do?

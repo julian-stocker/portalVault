@@ -119,13 +119,17 @@ export async function signInAction(_prev: ActionState, formData: FormData): Prom
 }
 
 // ------------------------------------------------------------------ sign out
-
-export async function signOutAction(): Promise<never> {
-  const supabase = await createClient();
-  await supabase.auth.signOut();
-  revalidatePath("/", "layout");
-  redirect("/");
-}
+//
+// There is no `signOutAction()` here, and its absence is deliberate (ADR-0085).
+//
+// One existed, exported and imported by nothing — a second way to end a
+// session, sitting beside the `/auth/signout` route that actually does it. A
+// spare implementation of an auth action is not harmless: the next person to
+// need a sign-out button finds two and picks one, and then there are two in
+// the interface as well.
+//
+// The one mechanism is `POST /auth/signout`, rendered once, at the bottom of
+// `/account/profile`.
 
 // ------------------------------------------------------------ password reset
 

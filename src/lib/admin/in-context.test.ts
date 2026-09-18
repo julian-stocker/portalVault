@@ -217,6 +217,18 @@ describe("the same mutations as /admin, not new ones", () => {
         // platform's address must not be able to reach the seller's.
         "admin_set_seller_contact",
         "admin_set_platform_contact",
+        // ADR-0075 — the shop's own facts. Three writers rather than one,
+        // split by what a mistake would cost: an identity typo is harmless,
+        // a policy or a delivery country is not.
+        "admin_set_seller_details",
+        "admin_set_shop_policies",
+        "admin_set_shipping_country",
+        // ADR-0077 — granting the shop is a PLATFORM act, so it lives with
+        // the admin writers and not with the commercial ones.
+        "admin_set_seller_operator",
+        // The platform's own support address — its own writer, because it is
+        // a different authority from the seller's contacts (ADR-0077).
+        "admin_set_platform_support",
       ]),
     );
   });
@@ -269,16 +281,16 @@ describe("navigation follows the role", () => {
     // it applies, and the bar is what is left (ADR-0042) — which is what
     // makes adding "Lager" later a one-line change.
     expect(nav).toContain("const DESTINATIONS");
-    expect(nav).toContain("applies: (viewer) => viewer.admin");
-    expect(nav).toContain("applies: (viewer) => !viewer.admin");
+    expect(nav).toContain("applies: (viewer) => viewer.business");
+    expect(nav).toContain("applies: (viewer) => viewer.collector");
     expect(nav).toContain("DESTINATIONS.filter((destination) => destination.applies(viewer))");
     // No branch that returns a whole hand-built list per role.
     expect(code(NAV)).not.toMatch(/if \(admin\) \{\s*return \[/);
   });
 
-  it("gives the collection to collectors and administration to operators", () => {
+  it("gives the collection to collectors, and the shelf to the seller", () => {
     const collection = nav.slice(nav.indexOf('href: "/collection"'), nav.indexOf('href: "/admin"'));
-    expect(collection).toContain("applies: (viewer) => !viewer.admin");
+    expect(collection).toContain("applies: (viewer) => viewer.collector");
     const admin = nav.slice(nav.indexOf('href: "/admin"'), nav.indexOf('href: "/settings"'));
     expect(admin).toContain("applies: (viewer) => viewer.admin");
   });
@@ -289,7 +301,7 @@ describe("navigation follows the role", () => {
     // The account used to close this list as a fifth entry. V3.4.1 took it
     // out of the bar entirely: it is a platform action, not a collector area,
     // and it lives in the masthead beside the cart now.
-    const order = ["/", "/collection", "/admin/inventory", "/admin"].map((href) =>
+    const order = ["/", "/collection", "/business/inventory", "/admin"].map((href) =>
       nav.indexOf(`href: "${href}"`),
     );
     expect(order.every((at) => at > -1)).toBe(true);
@@ -301,14 +313,14 @@ describe("navigation follows the role", () => {
     expect(nav).not.toContain('section: "account"');
   });
 
-  it("gives the operator stock as a destination of its own", () => {
+  it("gives the SELLER stock as a destination of its own (ADR-0077)", () => {
     // Added as one more entry with its own condition — nothing moved, and
     // "Sammlung" was not renamed into it (ADR-0037).
     const inventory = nav.slice(
-      nav.indexOf('href: "/admin/inventory"'),
-      nav.indexOf('href: "/admin"', nav.indexOf('href: "/admin/inventory"') + 10),
+      nav.indexOf('href: "/business/inventory"'),
+      nav.indexOf('href: "/admin"', nav.indexOf('href: "/business/inventory"') + 10),
     );
-    expect(inventory).toContain("applies: (viewer) => viewer.admin");
+    expect(inventory).toContain("applies: (viewer) => viewer.business");
     expect(inventory).toContain("de.nav.inventory");
   });
 

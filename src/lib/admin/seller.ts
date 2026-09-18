@@ -23,7 +23,7 @@
  */
 import { cache } from "react";
 
-import { isAdmin } from "@/lib/auth/admin";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 
 export type Seller = {
@@ -52,7 +52,7 @@ export const NO_SELLER: Seller = {
  * database refuses either way.
  */
 export const fetchSeller = cache(async (): Promise<Seller> => {
-  if (!(await isAdmin())) return NO_SELLER;
+  if (!(await canOperateSeller())) return NO_SELLER;
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_seller");

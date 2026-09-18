@@ -99,16 +99,37 @@ describe("the trust block", () => {
   });
 
   /**
-   * The legal texts do not exist, so the block says nothing about them. It
-   * used to say they "werden vor der öffentlichen Beta ergänzt" — a note to
-   * the developer, rendered into a paying customer's checkout.
+   * The inverse of what this asserted for the whole of V1.
+   *
+   * Then the legal texts did not exist, so the block said nothing about them —
+   * and specifically must not say they "werden vor der öffentlichen Beta
+   * ergänzt", which is a developer's note in a paying customer's checkout.
+   *
+   * They exist now, so § 312j Abs. 2 BGB decides: the pre-contractual
+   * information belongs immediately before the order (ADR-0086).
    */
-  it("says nothing about Widerruf and AGB, and links nowhere empty", () => {
-    expect(view).not.toContain("legalPending");
-    expect(view).not.toContain("legalLabel");
-    for (const slug of ["/widerruf", "/agb", "/impressum", "/datenschutz", "/kontakt"]) {
-      expect(view).not.toContain(slug);
+  it("carries the pre-contractual information and links it", () => {
+    expect(view).toContain("legalLabel");
+    for (const slug of ["/agb", "/widerruf", "/versand", "/datenschutz"]) {
+      expect(view, slug).toContain(slug);
     }
+    // And still no note to the developer.
+    expect(view).not.toContain("legalPending");
+    const copy = readFileSync("src/lib/i18n/de.ts", "utf8");
+    expect(copy).not.toContain("werden vor der öffentlichen Beta ergänzt");
+  });
+
+  it("does not ask the customer to agree to a privacy policy", () => {
+    /*
+     * Privacy information is information. A checkbox saying "ich stimme der
+     * Datenschutzerklärung zu" asks for a consent that is not the basis for
+     * processing an order, and collecting it would make the real basis harder
+     * to explain, not easier.
+     */
+    const copy = readFileSync("src/lib/i18n/de.ts", "utf8");
+    const block = copy.slice(copy.indexOf("trust: {"), copy.indexOf("fieldError: {"));
+    expect(block).not.toMatch(/stimme.{0,40}(zu|einverstanden)/i);
+    expect(block).toContain("legalPrivacyNote");
   });
 
   /**

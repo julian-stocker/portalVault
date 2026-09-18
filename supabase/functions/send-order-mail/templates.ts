@@ -37,6 +37,19 @@ export type MailOrder = {
   shipped_at: string | null;
   payment_status: string;
   needs_resolution: boolean;
+  /** Added in 0047: who sold, which terms applied, and the invoice if issued. */
+  seller?: {
+    name: string | null;
+    legal_name: string | null;
+    street: string | null;
+    postal_code: string | null;
+    city: string | null;
+    email: string | null;
+    vat_id: string | null;
+  } | null;
+  legal?: { agb_version: string | null; widerruf_version: string | null } | null;
+  invoice_number?: string | null;
+  refunded_total?: string | null;
   address: {
     first_name: string;
     last_name: string;
@@ -324,12 +337,327 @@ export function resolutionAlert(order: MailOrder): RenderedMail {
   return { subject, html, text };
 }
 
+
+/* ------------------------------------------------- 0. who sold, on every mail
+ *
+ * § 312f Abs. 2 BGB wants the contract confirmation on a durable medium with
+ * the Art. 246a particulars. An e-mail is durable; a link to a page that can
+ * be edited tomorrow is not. So the seller, the terms that applied and the
+ * withdrawal instruction travel IN the message.
+ *
+ * The seller's details come from the order's own snapshot, not from today's
+ * settings — the customer contracted with whoever was named then.
+ */
+
+/**
+ * The site's own address is NOT written here.
+ *
+ * Every absolute URL this product emits is built from the origin it is serving
+ * or from `SITE_URL`, so the same build is correct on the canonical domain, on
+ * a preview deployment and on localhost — the property that made the move from
+ * a vercel.app host to the real one a documentation change and nothing else
+ * (src/lib/layout/domain.test.ts). A confirmation mail pointing at the wrong
+ * host is exactly the failure that rule exists to prevent, so the host is
+ * passed in.
+ */
+export type MailSite = { origin: string };
+
+/** The contracting party, in one line. Falls back only if the snapshot is bare. */
+function sellerLine(order: MailOrder): string {
+  const legal = order.seller?.legal_name?.trim();
+  const trade = order.seller?.name?.trim();
+  if (legal && trade) return `${legal}, handelnd unter ${trade}`;
+  if (legal) return legal;
+  if (trade) return trade;
+  return "der Verkäufer dieses Shops";
+}
+
+function sellerAddress(order: MailOrder): string[] {
+  const s = order.seller;
+  if (!s) return [];
+  return [
+    s.legal_name ?? "",
+    s.name ?? "",
+    s.street ?? "",
+    [s.postal_code, s.city].filter(Boolean).join(" "),
+    s.email ? `E-Mail: ${s.email}` : "",
+    s.vat_id ? `USt-IdNr. ${s.vat_id}` : "",
+  ].filter((line) => line.trim() !== "");
+}
+
+/**
+ * The block every customer mail ends with: who sold, under which terms, and
+ * where the withdrawal function is.
+ *
+ * Not a signature and not decoration — it is the part that makes the message
+ * a durable record rather than a notification.
+ */
+function sellerFooter(order: MailOrder, site: MailSite): { html: string; text: string } {
+  const address = sellerAddress(order);
+  const agb = order.legal?.agb_version;
+  const widerruf = order.legal?.widerruf_version;
+
+  const versions = [
+    agb ? `AGB in der Fassung ${agb}` : null,
+    widerruf ? `Widerrufsbelehrung in der Fassung ${widerruf}` : null,
+  ].filter((v): v is string => v !== null);
+
+  const html =
+    `<div style="margin:24px 0 0;border-top:1px solid #ddd4c1;padding-top:16px;` +
+    `font-size:12px;color:#6b6153;line-height:1.6">` +
+    `<strong style="color:#241f19">Verkäufer und Vertragspartner</strong><br>` +
+    address.map((line) => escapeHtml(line)).join("<br>") +
+    (versions.length > 0
+      ? `<br><br>Für diese Bestellung gelten: ${escapeHtml(versions.join(" · "))}.`
+      : "") +
+    `<br><br>` +
+    `<a href="${site.origin}/agb" style="color:#8a5a12">AGB</a> · ` +
+    `<a href="${site.origin}/widerruf" style="color:#8a5a12">Widerrufsbelehrung</a> · ` +
+    `<a href="${site.origin}/widerrufen" style="color:#8a5a12">Vertrag widerrufen</a> · ` +
+    `<a href="${site.origin}/datenschutz" style="color:#8a5a12">Datenschutz</a> · ` +
+    `<a href="${site.origin}/impressum" style="color:#8a5a12">Impressum</a>` +
+    `</div>`;
+
+  const text =
+    `\n\n----------------------------------------\n` +
+    `Verkäufer und Vertragspartner\n` +
+    address.map((line) => `  ${line}`).join("\n") +
+    (versions.length > 0 ? `\n\nFür diese Bestellung gelten: ${versions.join(" · ")}.` : "") +
+    `\n\nAGB:                 ${site.origin}/agb\n` +
+    `Widerrufsbelehrung:  ${site.origin}/widerruf\n` +
+    `Vertrag widerrufen:  ${site.origin}/widerrufen\n` +
+    `Datenschutz:         ${site.origin}/datenschutz\n` +
+    `Impressum:           ${site.origin}/impressum\n`;
+
+  return { html, text };
+}
+
+/**
+ * The short withdrawal notice that rides on the acceptance.
+ *
+ * Not the full statutory Belehrung — that is linked and lives on one page, so
+ * there is one authoritative copy. This is what a person needs to act: the
+ * period, when it starts, and the two ways to declare.
+ */
+const withdrawalSummary = (site: MailSite): readonly string[] => [
+  "Du kannst diesen Vertrag binnen vierzehn Tagen ohne Angabe von Gründen widerrufen. Die " +
+    "Frist beginnt an dem Tag, an dem du die letzte Ware in Besitz genommen hast.",
+  `Am einfachsten online über ${site.origin}/widerrufen — du bekommst dann sofort eine ` +
+    "Eingangsbestätigung mit Datum und Uhrzeit. Eine E-Mail oder ein Brief genügen genauso.",
+];
+
+/* ------------------------------------------- 1. the order has reached us
+ *
+ * § 312i Abs. 1 Nr. 3 BGB: the receipt of the order must be confirmed
+ * electronically without undue delay. Before 0047 no such message existed at
+ * all — a customer whose payment hung heard nothing.
+ *
+ * IT IS NOT AN ACCEPTANCE, and it says so in as many words. Under the contract
+ * model (docs/LEGAL.md) the acceptance is the order confirmation that follows
+ * the payment; a message that let itself be read as the contract would make
+ * the seller bound to an order they may not be able to fill.
+ */
+export function orderReceived(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `Bestellung ${order.order_number} — bei uns eingegangen`;
+  const footer = sellerFooter(order, site);
+
+  const body =
+    H1("Deine Bestellung ist bei uns eingegangen.") +
+    P(
+      `Wir haben deine Bestellung ${order.order_number} erhalten. Sobald deine Zahlung ` +
+        "bestätigt ist, schicken wir dir die Bestellbestätigung — erst damit kommt der " +
+        "Kaufvertrag zustande.",
+    ) +
+    P(
+      "Diese E-Mail bestätigt nur den Eingang deiner Bestellung. Sie ist noch keine Annahme " +
+        "und noch keine Rechnung.",
+    ) +
+    lineTable(order) +
+    addressBlock(order).html;
+
+  const text =
+    "Deine Bestellung ist bei uns eingegangen.\n\n" +
+    `Wir haben deine Bestellung ${order.order_number} erhalten. Sobald deine Zahlung ` +
+    "bestätigt ist, schicken wir dir die Bestellbestätigung - erst damit kommt der " +
+    "Kaufvertrag zustande.\n\n" +
+    "Diese E-Mail bestätigt nur den Eingang deiner Bestellung. Sie ist noch keine Annahme " +
+    "und noch keine Rechnung.\n\n" +
+    lineText(order) +
+    addressBlock(order).text +
+    footer.text;
+
+  return { subject, html: WRAP(subject, body + footer.html), text };
+}
+
+/* ------------------------------------------- 2. the contract exists
+ *
+ * The seller's acceptance, and the § 312f Abs. 2 confirmation on a durable
+ * medium in one message — which is why the seller, the terms that applied and
+ * the withdrawal notice are all in the body rather than behind links.
+ */
+export function orderConfirmation(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `Bestellung ${order.order_number} — bestätigt`;
+  const footer = sellerFooter(order, site);
+  const invoice = order.invoice_number;
+
+  const body =
+    H1("Deine Bestellung ist bestätigt.") +
+    P(
+      `Wir haben deine Zahlung erhalten und nehmen deine Bestellung ${order.order_number} ` +
+        `hiermit an. Damit ist der Kaufvertrag zwischen dir und ${sellerLine(order)} ` +
+        "zustande gekommen.",
+    ) +
+    P("Du hörst wieder von uns, sobald die Sendung unterwegs ist.") +
+    lineTable(order) +
+    addressBlock(order).html +
+    (invoice
+      ? P(`Deine Rechnung ${invoice} findest du unter ${site.origin}/rechnung/${order.order_number}.`)
+      : "") +
+    `<div style="margin:20px 0 0;padding:14px 16px;background:#f6f3ec;border-radius:8px">` +
+    `<strong style="font-size:14px">Widerrufsrecht</strong>` +
+    withdrawalSummary(site).map((line) => P(line)).join("") +
+    `</div>`;
+
+  const text =
+    "Deine Bestellung ist bestätigt.\n\n" +
+    `Wir haben deine Zahlung erhalten und nehmen deine Bestellung ${order.order_number} ` +
+    `hiermit an. Damit ist der Kaufvertrag zwischen dir und ${sellerLine(order)} zustande ` +
+    "gekommen.\n\n" +
+    "Du hörst wieder von uns, sobald die Sendung unterwegs ist.\n\n" +
+    lineText(order) +
+    addressBlock(order).text +
+    (invoice ? `\n\nRechnung ${invoice}: ${site.origin}/rechnung/${order.order_number}` : "") +
+    "\n\nWiderrufsrecht\n" +
+    withdrawalSummary(site).map((line) => `  ${line}`).join("\n") +
+    footer.text;
+
+  return { subject, html: WRAP(subject, body + footer.html), text };
+}
+
+/* ------------------------------------------- 3. money on its way back */
+
+export function refundConfirmation(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `Bestellung ${order.order_number} — Erstattung`;
+  const footer = sellerFooter(order, site);
+  const amount = order.refunded_total ?? "0";
+
+  const body =
+    H1("Wir haben deine Erstattung angewiesen.") +
+    P(
+      `Für deine Bestellung ${order.order_number} haben wir insgesamt ${money(amount)} ` +
+        "erstattet. Die Rückzahlung erfolgt über dasselbe Zahlungsmittel, das du bei der " +
+        "Bestellung verwendet hast.",
+    ) +
+    P(
+      "Wie lange es dauert, bis der Betrag bei dir ankommt, hängt von deiner Bank oder " +
+        "deinem Zahlungsdienst ab. Darauf haben wir keinen Einfluss.",
+    );
+
+  const text =
+    "Wir haben deine Erstattung angewiesen.\n\n" +
+    `Für deine Bestellung ${order.order_number} haben wir insgesamt ${money(amount)} ` +
+    "erstattet. Die Rückzahlung erfolgt über dasselbe Zahlungsmittel, das du bei der " +
+    "Bestellung verwendet hast.\n\n" +
+    "Wie lange es dauert, bis der Betrag bei dir ankommt, hängt von deiner Bank oder deinem " +
+    "Zahlungsdienst ab.\n" +
+    footer.text;
+
+  return { subject, html: WRAP(subject, body + footer.html), text };
+}
+
+/* ------------------------------------------- 4. the § 356a receipt
+ *
+ * § 356a Abs. 4 BGB: on activation of the confirmation function the trader must
+ * without undue delay transmit, **on a durable medium**, a receipt confirmation
+ * containing the CONTENT of the withdrawal declaration and the DATE AND TIME of
+ * its receipt.
+ *
+ * All three are in this message, and all three come from the stored row — so
+ * the confirmation and the record cannot disagree about what was declared or
+ * when it arrived.
+ */
+export type WithdrawalReceipt = {
+  withdrawal_id: number;
+  order_number: string;
+  consumer_name: string;
+  contact_email: string;
+  declaration: string;
+  received_at: string;
+};
+
+export function withdrawalReceipt(receipt: WithdrawalReceipt): RenderedMail {
+  const subject = `Widerruf zu Bestellung ${receipt.order_number} — Eingang bestätigt`;
+  const received = berlinDateTime(receipt.received_at);
+
+  const body =
+    H1("Wir haben deinen Widerruf erhalten.") +
+    P(
+      `Hiermit bestätigen wir den Eingang deiner Widerrufserklärung zur Bestellung ` +
+        `${receipt.order_number}.`,
+    ) +
+    `<div style="margin:16px 0;padding:14px 16px;background:#f6f3ec;border-radius:8px">` +
+    `<div style="font-size:12px;color:#6b6153;margin-bottom:6px">Eingegangen am</div>` +
+    `<div style="font-weight:600">${escapeHtml(received)}</div>` +
+    `<div style="font-size:12px;color:#6b6153;margin:14px 0 6px">Inhalt deiner Erklärung</div>` +
+    `<div style="white-space:pre-line">${escapeHtml(receipt.declaration)}</div>` +
+    `<div style="font-size:12px;color:#6b6153;margin:14px 0 6px">Erklärt von</div>` +
+    `<div>${escapeHtml(receipt.consumer_name)}</div>` +
+    `</div>` +
+    P(
+      "Wir melden uns bei dir und stimmen die Rücksendung ab. Die Ware sendest du innerhalb " +
+        "von 14 Tagen zurück; die unmittelbaren Kosten der Rücksendung trägst du.",
+    ) +
+    P(
+      "Deine Zahlungen einschließlich der Lieferkosten erstatten wir unverzüglich, spätestens " +
+        "binnen 14 Tagen ab Eingang dieser Erklärung. Wir dürfen damit warten, bis die Ware " +
+        "zurück ist oder du die Absendung nachgewiesen hast.",
+    );
+
+  const text =
+    "Wir haben deinen Widerruf erhalten.\n\n" +
+    `Hiermit bestätigen wir den Eingang deiner Widerrufserklärung zur Bestellung ` +
+    `${receipt.order_number}.\n\n` +
+    `Eingegangen am: ${received}\n\n` +
+    `Inhalt deiner Erklärung:\n${receipt.declaration}\n\n` +
+    `Erklärt von: ${receipt.consumer_name}\n\n` +
+    "Wir melden uns bei dir und stimmen die Rücksendung ab. Die Ware sendest du innerhalb von " +
+    "14 Tagen zurück; die unmittelbaren Kosten der Rücksendung trägst du.\n\n" +
+    "Deine Zahlungen einschließlich der Lieferkosten erstatten wir unverzüglich, spätestens " +
+    "binnen 14 Tagen ab Eingang dieser Erklärung.\n";
+
+  return { subject, html: WRAP(subject, body), text };
+}
+
+/** Date and time as § 356a Abs. 4 requires them, in the product's zone. */
+export function berlinDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Berlin",
+  }).format(date) + " Uhr";
+}
+
 /* ------------------------------------------------------------------ dispatch */
 
+
 export const MAIL_KINDS = [
-  "payment_confirmation",
+  "order_received",
+  "order_confirmation",
   "shipping_confirmation",
+  "refund_confirmation",
   "resolution_alert",
+  /*
+   * Historical. `order_confirmation` replaced it in 0047 when the contract
+   * model was settled: the mail after payment is the seller's ACCEPTANCE, and
+   * naming it after the payment described the trigger rather than the act.
+   * Rows sent under the old name stay valid; nothing new uses it.
+   */
+  "payment_confirmation",
 ] as const;
 
 export type MailKind = (typeof MAIL_KINDS)[number];
@@ -338,12 +666,17 @@ export function isMailKind(value: unknown): value is MailKind {
   return typeof value === "string" && (MAIL_KINDS as readonly string[]).includes(value);
 }
 
-export function render(kind: MailKind, order: MailOrder): RenderedMail {
+export function render(kind: MailKind, order: MailOrder, site: MailSite): RenderedMail {
   switch (kind) {
+    case "order_received":
+      return orderReceived(order, site);
+    case "order_confirmation":
     case "payment_confirmation":
-      return paymentConfirmation(order);
+      return orderConfirmation(order, site);
     case "shipping_confirmation":
       return shippingConfirmation(order);
+    case "refund_confirmation":
+      return refundConfirmation(order, site);
     case "resolution_alert":
       return resolutionAlert(order);
   }

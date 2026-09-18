@@ -169,7 +169,7 @@ describe("who may book at all", () => {
     expect(actions).toContain('"record_inventory_movement"');
     // The action asks first to return a German sentence; the function asks
     // again because that is the boundary.
-    expect(actions).toContain("if (!(await isAdmin()))");
+    expect(actions).toContain("if (!(await allowed(capability)))");
     const foundation = code(FOUNDATION);
     expect(foundation).toMatch(
       /create or replace function public\.record_inventory_movement[\s\S]*?if not public\.is_shop_admin\(\) then/,

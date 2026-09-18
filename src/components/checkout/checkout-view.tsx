@@ -177,9 +177,18 @@ export function CheckoutView({
   contact,
   saveDefaultAllowed,
   resumeOrderNumber,
+  sellerName,
 }: {
   offers: Readonly<Record<string, readonly Offer[]>>;
   email: string;
+  /**
+   * Who the customer is contracting with, from `seller_public()` (ADR-0075).
+   *
+   * Passed in rather than read here, because this is a client component and
+   * the seller is a server fact. `null` renders the neutral sentence — the
+   * checkout never guesses a name.
+   */
+  sellerName?: string | null;
   /**
    * From `?order=…` — where the payment page sends somebody who cancelled.
    *
@@ -767,6 +776,7 @@ export function CheckoutView({
 
       {/* ---------------------------------------------------------- trust */}
       <TrustBlock
+        sellerName={sellerName ?? null}
         method={options.find((option) => option.code === method) ?? null}
       />
 
@@ -830,20 +840,47 @@ export function CheckoutView({
  * payment provider — and then sent them to a Stripe page that does not look
  * like SkyIsles.
  *
- * EVERY LINE IS CHECKABLE, AND THE MISSING ONES SAY SO.
+ * EVERY LINE IS CHECKABLE, AND THE MISSING ONE SAYS SO.
  *
- * No delivery time: none is defined, and an invented one would be the first
- * promise SkyIsles breaks. No contact address: none is decided, and an
- * invented one is a support channel that goes nowhere. And no Widerruf/AGB
- * row: an earlier version said the texts "werden vor der öffentlichen Beta
- * ergänzt", which is a developer's note standing in a real customer's
- * checkout. A shop that narrates its own building site reads as less finished
- * than one that says nothing. The links belong here once the texts exist.
+ * Still no delivery time: none is defined, and an invented one would be the
+ * first promise SkyIsles breaks. The shipping page states the dispatch time,
+ * which is a fact, and the statutory 30-day backstop, which is law.
+ *
+ * THE LEGAL ROW EXISTS NOW (ADR-0086). An earlier version of this block said
+ * the texts "werden vor der öffentlichen Beta ergänzt" — a developer's note
+ * standing in a real customer's checkout — and was removed for it. The texts
+ * exist, so § 312j Abs. 2 BGB decides what belongs here: the pre-contractual
+ * information, immediately before the order, in hervorgehobener Weise.
  *
  * The shipping figure comes from the option the customer has selected, which
  * came from `shipping_quote()` — this component computes no money.
  */
-function TrustBlock({ method }: { method: ShippingOption | null }) {
+function LegalLink({ href, label }: { href: string; label: string }) {
+  /*
+   * Opens in a new tab deliberately: the basket, the typed address and the
+   * capability token live in this one, and sending somebody out of a
+   * half-filled checkout to read the AGB is how a checkout is abandoned.
+   */
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener"
+      className="underline underline-offset-4 hover:text-on-deep"
+    >
+      {label}
+    </a>
+  );
+}
+
+function TrustBlock({
+  method,
+  sellerName,
+}: {
+  method: ShippingOption | null;
+  /** From `seller_public()`. Null renders the neutral sentence. */
+  sellerName: string | null;
+}) {
   const copy = de.checkout.trust;
   return (
     <section className={`${PANEL} flex flex-col gap-3`} aria-label={copy.heading}>
@@ -852,7 +889,9 @@ function TrustBlock({ method }: { method: ShippingOption | null }) {
       <dl className="flex flex-col gap-3 text-sm">
         <div>
           <dt className="text-xs font-medium text-on-deep-muted">{copy.sellerLabel}</dt>
-          <dd className="mt-0.5 leading-relaxed">{copy.seller}</dd>
+          <dd className="mt-0.5 leading-relaxed">
+            {sellerName ? copy.seller(sellerName) : copy.sellerFallback}
+          </dd>
         </div>
 
         <div>
@@ -880,6 +919,29 @@ function TrustBlock({ method }: { method: ShippingOption | null }) {
           <dd className="mt-0.5 leading-relaxed">
             <span className="font-medium">{copy.paymentValue}</span>
             <span className="mt-0.5 block text-xs text-on-deep-muted">{copy.paymentNote}</span>
+          </dd>
+        </div>
+
+        {/*
+         * The pre-contractual information, where § 312j Abs. 2 BGB wants it:
+         * immediately before the order, highlighted (ADR-0086). Links, not
+         * checkboxes — the terms apply because they are part of the offer the
+         * customer is making, and privacy information is information rather
+         * than something to agree to.
+         */}
+        <div>
+          <dt className="text-xs font-medium text-on-deep-muted">{copy.legalLabel}</dt>
+          <dd className="mt-0.5 leading-relaxed">
+            {copy.legalIntro}
+            <span className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+              <LegalLink href="/agb" label={copy.legalAgb} />
+              <LegalLink href="/widerruf" label={copy.legalWithdrawal} />
+              <LegalLink href="/versand" label={copy.legalShipping} />
+              <LegalLink href="/datenschutz" label={copy.legalPrivacy} />
+            </span>
+            <span className="mt-1 block text-xs text-on-deep-muted">
+              {copy.legalPrivacyNote}
+            </span>
           </dd>
         </div>
       </dl>

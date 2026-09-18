@@ -123,8 +123,14 @@ describe("this is an identity, not a marketplace", () => {
      * it does not exist. Matching raw text would fail on the very statements
      * that promise the thing this test is checking for.
      */
+    /*
+     * ONE EXCEPTION since 0041, and it is the opposite of a marketplace:
+     * `seller_operators.seller_id` names which shop an ACCOUNT may operate
+     * (ADR-0077). A membership, not a partition of commerce. Its own file
+     * checks that it reaches no commerce table.
+     */
     const everything = readdirSync(MIGRATIONS)
-      .filter((f) => f.endsWith(".sql"))
+      .filter((f) => f.endsWith(".sql") && !f.startsWith("0041_") && !f.startsWith("0042_"))
       .map((f) => readFileSync(`${MIGRATIONS}/${f}`, "utf8"))
       .join("\n")
       .split("\n")

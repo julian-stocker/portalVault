@@ -131,6 +131,26 @@ export function SettingsGlyph({ className = "h-[18px] w-[18px]" }: { className?:
 }
 
 /**
+ * The account hub: a card with its lines.
+ *
+ * NOT a cog, which is what stood here until the Business review. The label
+ * said "Mein Konto" and the comment argued against the word "Einstellungen" —
+ * and then drew a cog, which means Settings to everybody who has ever used a
+ * computer. An affordance outvotes a label it contradicts (ADR-0080).
+ *
+ * A card with three lines reads as "the things on file about me", which is
+ * what the page behind it is: profile, delivery data, orders, security.
+ */
+export function AccountHubGlyph({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="M7 10h5M7 14h10" />
+    </Glyph>
+  );
+}
+
+/**
  * The account: head and shoulders.
  *
  * The one icon in the header that is neither brand nor commerce. Neutral ink

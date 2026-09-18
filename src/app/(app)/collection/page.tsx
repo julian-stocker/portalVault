@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { CollectionHeading } from "@/components/collection/collection-heading";
 import { CollectionView } from "@/components/collection/collection-view";
+import { isCollector } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH } from "@/lib/auth/redirect";
 import {
@@ -33,6 +34,13 @@ export const metadata: Metadata = { title: de.collection.title };
  * with it (V4.3).
  */
 export default async function CollectionPage() {
+  /*
+   * The collection is a collector's (ADR-0078). A Business or Admin
+   * account has none, so the page does not exist for them — the same
+   * 404 the two management areas answer to everybody else.
+   */
+  if (!(await isCollector())) notFound();
+
   const profile = await currentProfile();
   if (!profile?.username) redirect(ONBOARDING_PATH);
 

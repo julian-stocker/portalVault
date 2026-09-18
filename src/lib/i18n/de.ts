@@ -44,7 +44,24 @@ export const de = {
     catalog: "Katalog",
     shop: "Shop",
     about: "Über SkyIsles",
+
+    /* Die Rechtsspalte (ADR-0086). „Vertrag widerrufen" steht bewusst
+       zwischen den Rechtstexten und nicht darunter: § 356a BGB verlangt, dass
+       die Funktion gut sichtbar und leicht zugänglich ist. */
+    impressum: "Impressum",
+    privacy: "Datenschutz",
+    terms: "AGB",
+    withdrawal: "Widerrufsbelehrung",
+    withdrawNow: "Vertrag widerrufen",
+    shipping: "Versand",
+    payment: "Zahlung",
+    contact: "Kontakt",
+
     copyright: (year: number) => `© ${year} SkyIsles`,
+    /* Wer verkauft, am Fuß jeder Seite. Eine Zeile, die sonst nirgends steht:
+       Plattform und Verkäufer sind dieselbe Person, und der Kunde soll das
+       sehen können, ohne das Impressum zu öffnen. */
+    seller: (name: string) => `Verkauf über diesen Shop: ${name}`,
   },
 
   /**
@@ -83,10 +100,15 @@ export const de = {
     collectionFree: "Die Sammlungsverwaltung ist und bleibt kostenlos.",
 
     shopHeading: "Der Shop",
-    shopBody:
-      "SkyIsles verkauft ausgewählte Figuren selbst — lose oder originalverpackt, jeweils " +
-      "einzeln geprüft. Es ist kein Marktplatz: Es gibt genau einen Verkäufer, und das ist " +
-      "SkyIsles. Der Versand erfolgt derzeit innerhalb Deutschlands.",
+    /* SkyIsles ist die Sammlerplattform, nicht der Verkäufer (ADR-0075). */
+    shopBody: (name: string) =>
+      `Der integrierte Shop wird derzeit ausschließlich von ${name} betrieben — ausgewählte ` +
+      "Figuren, lose oder originalverpackt, jeweils einzeln geprüft. Es ist kein Marktplatz: " +
+      "Es gibt genau einen Verkäufer. Der Versand erfolgt derzeit innerhalb Deutschlands.",
+    shopBodyFallback:
+      "Der integrierte Shop wird derzeit von genau einem gewerblichen Verkäufer betrieben — " +
+      "ausgewählte Figuren, lose oder originalverpackt, jeweils einzeln geprüft. Es ist kein " +
+      "Marktplatz. Der Versand erfolgt derzeit innerhalb Deutschlands.",
 
     togetherHeading: "Warum beides zusammengehört",
     togetherBody:
@@ -333,6 +355,606 @@ export const de = {
   },
 
   /** Adminbereich. Nie für normale Nutzer sichtbar (ADR-0039). */
+  /**
+   * Der Bereich des Verkäufers (ADR-0077).
+   *
+   * Eigener Block neben `admin`, weil es eine andere Zuständigkeit ist und
+   * nicht nur eine andere Seite: Shop führen und Plattform führen sind zwei
+   * Befugnisse, auch solange dieselbe Person beide hat.
+   */
+  /**
+   * Die Rechnung (ADR-0086).
+   *
+   * KEINE UMSATZSTEUERZEILE. Nach § 19 UStG sind die Umsätze steuerfrei; eine
+   * Zeile „USt 0,00 €" behauptete eine Besteuerung mit null und wäre falsch.
+   * Der Hinweis auf die Steuerbefreiung steht dort, wo § 34a UStDV ihn
+   * verlangt: bei der Summe.
+   */
+  invoice: {
+    title: "Rechnung",
+    download: "Als PDF herunterladen",
+    issuedAt: "Rechnungsdatum",
+    orderNumber: "Bestellnummer",
+    placedAt: "Bestelldatum",
+    seller: "Rechnungssteller",
+    customer: "Rechnungsempfänger",
+    tableCaption: "Positionen der Rechnung",
+    description: "Bezeichnung",
+    quantity: "Menge",
+    unitPrice: "Einzelpreis",
+    amount: "Betrag",
+    itemsSubtotal: "Zwischensumme Ware",
+    shipping: "Versand",
+    discount: "Rabatt",
+    total: "Gesamtbetrag",
+    sealed: "originalverpackt",
+    loose: "lose",
+    paid: "Der Rechnungsbetrag ist bezahlt. Diese Rechnung dient als Beleg.",
+    /* Auf der Bestelldetailseite. */
+    openLink: "Rechnung ansehen",
+    pending: "Die Rechnung wird erstellt, sobald die Zahlung bestätigt ist.",
+  },
+
+  /**
+   * Rechts- und Serviceseiten (ADR-0086).
+   *
+   * Die Rechtstexte selbst stehen nicht hier, sondern in `src/lib/legal/` —
+   * sie sind versioniert und werden je Bestellung festgehalten. Hier steht
+   * nur, was die Oberfläche drumherum sagt.
+   */
+  legal: {
+    nav: "Rechtliches",
+
+    /**
+     * § 312j Abs. 1 BGB — spätestens **bei Beginn des Bestellvorgangs** klar
+     * und deutlich angeben, ob Lieferbeschränkungen bestehen und welche
+     * Zahlungsmittel akzeptiert werden (ADR-0086).
+     *
+     * Der Warenkorb ist diese Stelle: von hier geht es zur Kasse. Die
+     * Zahlungsarten werden nicht aufgezählt, weil die tatsächlich verfügbaren
+     * vom Zahlungsdienstleister entschieden werden — eine Aufzählung hier
+     * könnte etwas versprechen, was gerade nicht geht.
+     */
+    orderStart: {
+      delivery: "Lieferung nur innerhalb Deutschlands.",
+      payment: "Bezahlt wird über Stripe; die verfügbaren Zahlungsarten siehst du dort.",
+      more: "Versand und Zahlung",
+    },
+    shipping: {
+      ratesHeading: "Versandkosten",
+      ratesHint:
+        "Aktuell eingestellte Preise. Was deine Bestellung kostet, steht an der Kasse — " +
+        "berechnet wird dort dieselbe Regel wie hier.",
+      method: "Versandart",
+      priceBelow: "Unter der Grenze",
+      priceAbove: "Ab der Grenze",
+      free: "Kostenlos",
+      threshold: (amount: string) => `Ab ${amount} Warenwert ist der Versand kostenlos.`,
+    },
+    form: {
+      heading: "Muster-Widerrufsformular",
+      hint:
+        "Dieses Formular ist gesetzlich vorgegeben. Du musst es nicht verwenden — eine " +
+        "eindeutige Erklärung in eigenen Worten genügt ebenso.",
+      recipient: "An",
+      copy: "Formulartext kopieren",
+      copied: "Kopiert",
+    },
+  },
+
+  /**
+   * Die elektronische Widerrufsfunktion nach § 356a BGB (ADR-0086).
+   *
+   * DIE BESCHRIFTUNGEN SIND GESETZLICH VORGEGEBEN. „Vertrag widerrufen" und
+   * „Widerruf bestätigen" stehen wörtlich im Gesetz. Sie werden nicht
+   * umformuliert, nicht verkürzt und nicht durch etwas Freundlicheres ersetzt.
+   *
+   * DIE ANTWORT IST IMMER DIESELBE. Ob Bestellnummer und E-Mail zu einer
+   * Bestellung passen oder nicht, steht auf der Bestätigungsseite dasselbe.
+   * Alles andere machte die gesetzliche Funktion zum Auskunftsdienst darüber,
+   * welche Bestellungen und welche Adressen es gibt.
+   */
+  withdrawal: {
+    title: "Vertrag widerrufen",
+    entryTitle: "Vertrag online widerrufen",
+    entryHint:
+      "In zwei Schritten, ohne Konto. Du bekommst sofort eine Eingangsbestätigung per E-Mail.",
+    lead:
+      "Hier kannst du deinen Kaufvertrag widerrufen. Du brauchst dafür kein Konto — nur deine " +
+      "Bestellnummer und die E-Mail-Adresse, mit der du bestellt hast.",
+
+    /* Schritt 1 */
+    step1: "Schritt 1 von 2: Angaben",
+    orderNumber: "Bestellnummer",
+    orderNumberHint: "Steht in jeder E-Mail zu deiner Bestellung, zum Beispiel SI-2026-001234.",
+    name: "Dein Name",
+    nameHint: "So, wie du bestellt hast.",
+    email: "E-Mail-Adresse",
+    emailHint: "Die Adresse, mit der du bestellt hast. Dorthin geht die Eingangsbestätigung.",
+    declaration: "Deine Erklärung (optional)",
+    declarationHint:
+      "Wenn du nichts schreibst, verwenden wir: „Hiermit widerrufe ich den Vertrag über den " +
+      "Kauf der folgenden Waren: Bestellung <Nummer>.“",
+    continue: "Vertrag widerrufen",
+
+    /* Schritt 2 */
+    step2: "Schritt 2 von 2: Bestätigen",
+    reviewHint:
+      "Bitte prüfe deine Angaben. Mit dem nächsten Klick geht dein Widerruf bei uns ein.",
+    back: "Zurück zu den Angaben",
+    confirm: "Widerruf bestätigen",
+    sending: "Wird übermittelt …",
+
+    /* Danach */
+    doneTitle: "Danke — das war's",
+    doneBody:
+      "Wenn Bestellnummer und E-Mail-Adresse zu einer Bestellung passen, ist dein Widerruf bei " +
+      "uns eingegangen und wir haben dir eine Eingangsbestätigung an die angegebene Adresse " +
+      "geschickt. Sie enthält den Inhalt deiner Erklärung sowie Datum und Uhrzeit des Eingangs.",
+    doneHint:
+      "Kommt innerhalb weniger Minuten nichts an, prüfe bitte die Schreibweise der Adresse und " +
+      "der Bestellnummer — oder schreib uns einfach direkt.",
+    doneNext: "Was als Nächstes passiert",
+    doneSteps: [
+      "Wir melden uns bei dir und stimmen die Rücksendung ab.",
+      "Du sendest die Ware innerhalb von 14 Tagen zurück. Die unmittelbaren Kosten der " +
+        "Rücksendung trägst du.",
+      "Wir erstatten dir alle erhaltenen Zahlungen einschließlich der Lieferkosten. Bis die " +
+        "Ware zurück ist oder du die Absendung nachgewiesen hast, dürfen wir damit warten.",
+    ],
+
+    /* Fehler am Feld */
+    errors: {
+      orderNumber: "Bitte gib deine Bestellnummer ein.",
+      name: "Bitte gib deinen Namen ein.",
+      email: "Bitte gib eine gültige E-Mail-Adresse ein.",
+      failed: "Das hat gerade nicht geklappt. Bitte versuch es noch einmal.",
+    },
+
+    /* Auf der Bestelldetailseite */
+    orderEntry: "Diesen Vertrag widerrufen",
+    orderDeclared: (date: string) => `Widerruf eingegangen am ${date}.`,
+    orderRefunded: (amount: string) => `Erstattet: ${amount}.`,
+  },
+
+  business: {
+    title: "Shop",
+    /** Klein und sekundär, wie das Admin-Pendant (ADR-0077). */
+    modeBadge: "Business",
+    /**
+     * Die Bereiche des Shops (ADR-0080).
+     *
+     * Aufgebaut wie „Mein Konto": Karten mit Titel, einem Satz und einem Ziel.
+     * Die Übersicht führt hin, geändert wird im jeweiligen Bereich — sonst
+     * wäre die Startseite ein Formular mit vierzig Feldern.
+     */
+    areas: {
+      profile: {
+        title: "Händlerprofil",
+        hint: "Der Name, unter dem Kunden dich im Katalog sehen.",
+      },
+      offers: {
+        title: "Angebote & Preise",
+        hint: "Verkaufsmodus und automatische Preisbildung.",
+      },
+      inventory: {
+        title: "Lagerbestand",
+        hint: "Menge, Preis und Freigabe je Figur — und das Bestandsjournal.",
+      },
+      orders: {
+        title: "Bestellungen",
+        hint: "Bestellungen deiner Kundschaft: prüfen, versenden, Sendungsnummer.",
+      },
+      shipping: {
+        title: "Versand",
+        hint: "Lieferländer, Versandarten, Preise und die Versandkostengrenze.",
+      },
+      legal: {
+        title: "Geschäftsdaten & Kontakt",
+        hint: "Rechtliche Angaben, Kontaktadressen, Steuer, Widerruf.",
+      },
+      reports: {
+        title: "Berichte",
+        hint: "Monatliche Abrechnungsberichte ansehen und erstellen.",
+      },
+      withdrawals: {
+        title: "Widerrufe",
+        hint: "Eingegangene Widerrufe und die zugehörigen Erstattungen.",
+      },
+      imports: {
+        title: "Bestand abgleichen",
+        hint: "Lagerbestand aus deiner Excel-Tabelle übernehmen.",
+      },
+    },
+    hint:
+      "Bestellungen, Bestand, Preise und die Angaben des Verkäufers. Der Katalog gehört " +
+      "SkyIsles und wird im Plattformbereich gepflegt.",
+    inventory: "Lagerbestand",
+    inventoryHint: "Menge, Preis und Freigabe je Figur.",
+
+    /**
+     * Zwei Zahlen zum Jahr (ADR-0081, korrigiert in ADR-0083).
+     *
+     * BESTELLTÄTIGKEIT, NICHT GELDEINGANG. Gezählt wird, was in diesem Jahr
+     * bestellt wurde — wann bezahlt wird, entscheidet nichts. Deshalb
+     * „Bestellwert" und nicht „Umsatz", „Einnahmen" oder „bezahlt": eine am
+     * 30. Dezember aufgegebene und am 2. Januar bezahlte Bestellung würde
+     * jedes dieser Wörter falsch machen.
+     *
+     * Dieselbe Definition wie in den Monatsberichten, damit zwölf Berichte und
+     * diese Zahl dasselbe meinen.
+     */
+    ytdOrders: "Bestellungen dieses Jahr",
+    ytdOrderValue: "Bestellwert dieses Jahr",
+    ytdHint:
+      "Bestellungen seit dem 1. Januar, nach Bestelldatum, nur im Echtbetrieb. Abgebrochene " +
+      "Checkouts zählen nicht. Der Bestellwert ist kein Zahlungseingang: eine Bestellung zählt " +
+      "zu dem Jahr, in dem sie aufgegeben wurde, auch wenn das Geld später eintrifft.",
+
+    /* Überschriften der Unterseiten. Der Panel-Titel kommt von der Seite, die
+       ihn zeigt — dieselbe Gruppe darf nicht an zwei Stellen stehen. */
+    profileHeading: "Händlerprofil",
+    profileHint:
+      "Was Kunden von dir sehen, wenn ein Angebot dir gehört. Rechtliche Angaben stehen unter " +
+      "„Geschäftsdaten & Kontakt“.",
+    profileNameSource:
+      "Der Händlername kommt aus den Verkäuferangaben, nicht aus deinem Benutzernamen.",
+    profileIconMissing:
+      "Ein Händler-Icon gibt es noch nicht. Es kommt, sobald SkyIsles Bilder für Händler " +
+      "speichern kann.",
+    offersHeading: "Angebote & Preise",
+    offersHint:
+      "Ob der Shop offen ist und wie Preise automatisch gebildet werden. Welche Figur zu " +
+      "welchem Preis angeboten wird, entscheidest du je Figur im Lagerbestand.",
+    offersToInventory: "Zum Lagerbestand",
+    shippingHeading: "Versand",
+    shippingPageHint:
+      "Wohin geliefert wird, womit und ab welchem Warenwert versandkostenfrei. Gilt für alle " +
+      "Bestellungen in diesem Shop.",
+    legalHeading: "Geschäftsdaten & Kontakt",
+    legalPageHint:
+      "Die Angaben, die später im Impressum, auf Rechnungen und in der Widerrufsbelehrung " +
+      "stehen. Noch wird nichts davon veröffentlicht.",
+    /**
+     * Widerrufe (ADR-0086).
+     *
+     * WIDERRUF UND ERSTATTUNG SIND ZWEI EREIGNISSE. Der Widerruf ist die
+     * Erklärung des Kunden mit ihrem gesetzlichen Eingangszeitpunkt; die
+     * Erstattung ist eine spätere, eigene Buchung. Die Oberfläche hält sie
+     * getrennt, weil sie es sind.
+     *
+     * Das Geld bewegt dieser Bereich nicht: erstattet wird bei Stripe, hier
+     * wird es festgehalten.
+     */
+    withdrawals: {
+      heading: "Widerrufe",
+      pageHint:
+        "Widerrufe, die Kundschaft über die Online-Funktion erklärt hat. Der Eingangszeitpunkt " +
+        "ist gesetzlich maßgeblich und wird nicht verändert.",
+      empty: "Keine Widerrufe.",
+      openOnly: "Nur offene",
+      all: "Alle",
+      receivedAt: "Eingegangen",
+      declaredBy: "Erklärt von",
+      declaration: "Erklärung",
+      receipt: "Eingangsbestätigung",
+      receiptState: {
+        pending: "wird versendet",
+        sent: "zugestellt",
+        failed: "nicht zugestellt",
+      },
+      handled: "Erledigt",
+      open: "Offen",
+      refundedSoFar: (amount: string) => `Bereits erstattet: ${amount}`,
+
+      refundHeading: "Erstattung festhalten",
+      refundHint:
+        "Erstattet wird bei Stripe. Hier wird der Betrag festgehalten, damit Bestellung, " +
+        "Berichte und Kundenansicht übereinstimmen.",
+      amount: "Betrag",
+      reason: "Grund (optional)",
+      providerId: "Stripe-Erstattungs-ID (optional)",
+      record: "Erstattung festhalten",
+      recording: "Wird gespeichert …",
+      amountInvalid: "Bitte gib einen Betrag größer als 0 ein.",
+      refundRefused: "Das geht nicht: mehr als bezahlt wurde, oder die Bestellung ist unbezahlt.",
+      refundFailed: "Das hat nicht geklappt.",
+    },
+
+    /**
+     * Bestandsabgleich aus der Tabelle (ADR-0087).
+     *
+     * ES IST EIN ABGLEICH, KEIN ZUBUCHEN. Die Spalte „Storage" ist ein
+     * Zielwert: steht dort 0 und im Shop liegen 3, ist die richtige Antwort
+     * −3. Deshalb spricht die Oberfläche von Abgleich und nennt Erhöhungen
+     * und Verringerungen getrennt — eine Verringerung ist die Richtung, bei
+     * der man vorher hinsehen will.
+     *
+     * Die Datei wird nicht hochgeladen. Der Browser liest rund 0,75 MB aus
+     * der 450-MB-Datei und schickt nur die Zeilen.
+     */
+    imports: {
+      title: "Bestand abgleichen",
+      hint:
+        "Lade deine skylanders.xlsx. SkyIsles liest daraus nur die sechs Spiel-Tabellenblätter " +
+        "und die Spalte „Storage“ — die Bilder bleiben auf deinem Gerät.",
+      choose: "Datei auswählen",
+      reading: "Datei wird gelesen …",
+      analysing: "Zeilen werden zugeordnet …",
+      readBytes: (mb: string, total: string) =>
+        `${mb} MB von ${total} MB gelesen — der Rest sind Bilder und wird nicht gebraucht.`,
+      savedAt: (date: string) => `Tabelle zuletzt gespeichert am ${date}`,
+
+      /* Die Zusammenfassung. */
+      summary: "Ergebnis",
+      rowsSeen: (n: number) => `${n} Zeilen gelesen`,
+      supported: "eindeutig erkannt",
+      increases: "Erhöhungen",
+      decreases: "Verringerungen",
+      unchanged: "unverändert",
+      newPositions: "neue Positionen",
+      conflicts: "zu prüfen",
+      ignored: "nicht zuständig",
+      unmatched: "nicht gefunden",
+
+      /* Die Tabelle. */
+      sheet: "Blatt",
+      row: "Zeile",
+      name: "Tabelle",
+      figure: "SkyIsles",
+      current: "Bestand",
+      desired: "Tabelle",
+      change: "Änderung",
+      after: "Danach",
+      status: "Status",
+
+      statusLabel: {
+        pending: "bereit",
+        conflict: "prüfen",
+        unchanged: "unverändert",
+        skipped: "übersprungen",
+        applied: "übernommen",
+        failed: "fehlgeschlagen",
+      },
+
+      /* Warum eine Zeile nicht dazugehört — einmal pro Art, nicht pro Zeile. */
+      ignoredWhy: {
+        IGNORED_GAME:
+          "Spiele und Software: gehören nicht zu diesem Figurenabgleich. Ihr Bestand bleibt " +
+          "unverändert.",
+        IGNORED_SWAP_FORCE_HALF:
+          "Swap-Force-Hälften: werden nur lokal geführt. Erst eine vollständige Figur zählt hier.",
+        IGNORED_DAMAGED: "Als beschädigt geführte Altlasten.",
+        IGNORED_OVP: "Ausdrücklich originalverpackt — dieser Abgleich ist für lose Figuren.",
+        IGNORED_SHEET: "Von dir ausgenommen.",
+        INVALID_ROW: "Keine Bestandszahl in Spalte F.",
+      },
+
+      /* Der einzige echte Konflikt: reservierte Ware gehört schon jemandem. */
+      conflictHeading: "Hier ist Ware für laufende Bestellungen reserviert",
+      conflictHint:
+        "Diese Positionen lassen sich nicht auf den Sollbestand bringen, solange die " +
+        "Reservierung besteht — sonst wäre Ware verkauft, die es nicht mehr gibt. Sie werden " +
+        "übersprungen; alles andere wird übernommen.",
+
+      decreaseHeading: "Diese Positionen werden weniger",
+      decreaseHint: "Der Bestand wird auf den Wert aus der Tabelle gesetzt.",
+
+      apply: "Abgleich übernehmen",
+      applying: "Wird übernommen …",
+      discard: "Verwerfen",
+      appliedResult: (n: number, u: number) =>
+        `${n} Positionen angepasst, ${u} waren bereits gleich.`,
+
+      previewFailed: "Die Vorschau konnte nicht gespeichert werden.",
+      applyRefused:
+        "Mindestens eine Position lässt sich nicht abbuchen — vermutlich ist Ware für eine " +
+        "laufende Bestellung reserviert. Es wurde nichts geändert.",
+      applyFailed: "Der Abgleich konnte nicht übernommen werden. Es wurde nichts geändert.",
+      readFailed: "Die Datei konnte nicht gelesen werden.",
+      noSheets:
+        "In dieser Datei wurden die Tabellenblätter SA, G, SF, T, SC und I nicht gefunden.",
+
+      /*
+       * Browser zu alt (ADR-0087). Wird geprüft, BEVOR die Datei angefasst
+       * wird — der Abgleich soll nicht mittendrin an einer fehlenden
+       * Browserfunktion scheitern, sondern gar nicht erst anfangen.
+       */
+      unsupportedBrowser:
+        "Dieser Browser kann große Excel-Dateien nicht direkt lesen. Der Abgleich wurde " +
+        "nicht gestartet, es wurde nichts geändert. Mit einem aktuellen Chrome, Edge, " +
+        "Firefox oder Safari (ab Version 16.4) funktioniert er.",
+
+      /* Verlauf. */
+      history: "Frühere Abgleiche",
+      historyEmpty: "Noch kein Abgleich.",
+      neverApplied: "nicht übernommen",
+    },
+
+    ordersHeading: "Bestellungen",
+    ordersPageHint: "Bestellungen, die Kundschaft bei dir aufgegeben hat.",
+
+    /**
+     * Testbestellungen (ADR-0084).
+     *
+     * ARCHIVIEREN IST NICHT LÖSCHEN. SkyIsles löscht keine Bestellungen —
+     * echte sind Geschäftsunterlagen, Testbestellungen sind der Nachweis, wie
+     * sich Checkout, Zahlung und Versand tatsächlich verhalten haben.
+     * Archivieren setzt einen Zeitstempel; die Bestellung, ihre Positionen,
+     * Zahlungsereignisse und Versandhistorie bleiben vollständig erhalten, und
+     * „Wiederherstellen" nimmt den Zeitstempel zurück. Die Texte hier sagen das
+     * auch, statt nach Papierkorb zu klingen.
+     */
+    testOrders: {
+      tab: "Testbestellungen",
+      liveTab: "Bestellungen",
+      heading: "Testbestellungen",
+      pageHint:
+        "Bestellungen aus dem Testbetrieb. Sie zählen in keiner Kennzahl und in keinem Bericht " +
+        "mit und erscheinen nicht unter „Bestellungen“.",
+      empty: "Keine Testbestellungen.",
+      emptyArchived: "Keine archivierten Testbestellungen.",
+      showArchived: "Archivierte anzeigen",
+      hideArchived: "Nur aktive anzeigen",
+      archivedBadge: "Archiviert",
+      archive: "Archivieren",
+      restore: "Wiederherstellen",
+      archiveAll: "Alle sichtbaren archivieren",
+      working: "Einen Moment …",
+      /* Einmal ausgeschrieben, damit niemand „archivieren" für „weg" hält. */
+      archiveHint:
+        "Archivieren blendet eine Testbestellung nur aus dieser Liste aus. Nichts wird " +
+        "gelöscht, nichts am Bestand, an der Zahlung oder am Versand geändert — und " +
+        "zurückholen geht jederzeit.",
+      notSandbox:
+        "Das geht nur mit Testbestellungen. Es wurde nichts geändert.",
+      failed: "Das hat nicht geklappt.",
+      archivedCount: (n: number) =>
+        n === 1 ? "1 Testbestellung archiviert" : `${n} Testbestellungen archiviert`,
+      restoredCount: (n: number) =>
+        n === 1 ? "1 Testbestellung wiederhergestellt" : `${n} Testbestellungen wiederhergestellt`,
+    },
+
+    /**
+     * Monatsnamen, ausgeschrieben.
+     *
+     * Nicht über `Intl.DateTimeFormat`: dafür bräuchte jeder Monatsname ein
+     * Datum, und ein Datum hat einen Tag und eine Zeitzone — beides Dinge, die
+     * hier nicht gemeint sind und im falschen Moment einen Monat verschieben.
+     * Ein Monat ist hier eine Zahl von 1 bis 12.
+     */
+    monthNames: [
+      "Januar", "Februar", "März", "April", "Mai", "Juni",
+      "Juli", "August", "September", "Oktober", "November", "Dezember",
+    ] as const,
+    monthLabel: (year: number, month: number) =>
+      `${de.business.monthNames[month - 1] ?? month} ${year}`,
+
+    /**
+     * Das Bestellarchiv (ADR-0082).
+     *
+     * „Aktuell" ist bewusst nicht „Dieser Monat": am Ersten wäre die Liste
+     * leer, obwohl dieselbe Arbeit noch offen ist. Und es ist nicht nur ein
+     * Zeitraum — alles Unerledigte bleibt oben stehen, egal wie alt es ist.
+     */
+    archive: {
+      current: "Aktuell",
+      currentHint: (days: number) =>
+        `Die letzten ${days} Tage — und alles, was noch nicht abgeschlossen ist, ` +
+        `unabhängig vom Alter.`,
+      older: "Ältere Bestellungen",
+      olderHint: "Nach Monat. Ein Monat öffnet sich als eigene Liste.",
+      empty: "In diesem Zeitraum keine Bestellungen.",
+      emptyCurrent: "Nichts Aktuelles und nichts Offenes.",
+      year: "Jahr",
+      month: "Monat",
+      allMonths: "Alle Monate",
+      orderCount: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
+      apply: "Anzeigen",
+      backToCurrent: "Zurück zur aktuellen Ansicht",
+    },
+
+    /**
+     * Berichte (ADR-0082).
+     *
+     * EIN MONATSBERICHT IST EIN EREIGNISBERICHT. Eine Bestellung gehört in den
+     * Monat, in dem sie aufgegeben wurde — nicht in den, in dem das Geld
+     * ankam. Deshalb heißt die Zahl „Bestellwert" und nicht „Einnahme",
+     * „Umsatz" oder „bezahlt": eine am 31. August aufgegebene und am
+     * 2. September bezahlte Bestellung würde jedes dieser Wörter an dem Tag
+     * falsch machen, an dem der Bericht entsteht.
+     *
+     * Zahlungseingänge und Rückerstattungen sind eine zweite Art von Bericht,
+     * nach ihren eigenen Ereignisdaten — die gibt es noch nicht, und diese
+     * Seite tut nicht so.
+     */
+    reports: {
+      heading: "Berichte",
+      pageHint:
+        "Für jeden abgeschlossenen Kalendermonat ein Bericht über die Bestellungen dieses " +
+        "Monats. Einmal erstellt, ändert er sich nicht mehr.",
+      status: {
+        available: "Verfügbar",
+        ready: "Noch nicht erstellt",
+        running: "Noch nicht verfügbar",
+      },
+      runningHint: "Der Monat läuft noch.",
+      create: "Bericht erstellen",
+      creating: "Wird erstellt …",
+      finalizedAt: (date: string) => `Erstellt am ${date}`,
+
+      /* Die Zahlen. „Bestellwert" ist die Hauptzahl; die Aufteilung darunter
+         ist derselbe Betrag, anders geschnitten. */
+      orders: "Bestellungen",
+      orderValue: "Bestellwert",
+      merchandise: "Davon Ware",
+      shipping: "Davon Versand",
+      discount: "Davon Rabatt",
+
+      /* Rein informativ, Stand bei Erstellung. Definiert den Bestellwert
+         nicht um: gezählt wird jede Bestellung des Monats, bezahlt oder
+         nicht. */
+      paid: "Davon bezahlt",
+      unpaid: "Zahlung offen",
+      snapshotHint: "Zahlungsstand zum Zeitpunkt der Erstellung.",
+
+      taxRegime: "Steuerregelung",
+      taxRegimeNames: {
+        small_business_19: "Kleinunternehmer, § 19 UStG — keine Umsatzsteuer",
+        mixed: "Im Monat gewechselt",
+      },
+      empty: "Für dieses Jahr gibt es noch nichts zu berichten.",
+      monthNotOver: "Dieser Monat ist noch nicht vorbei.",
+      createFailed: "Der Bericht konnte nicht erstellt werden.",
+
+      /**
+       * Was der Bericht ist und was er nicht ist — einmal ausgeschrieben,
+       * statt als Spalten mit 0,00 €.
+       */
+      limits:
+        "Gezählt wird nach Bestelldatum (Berliner Kalender), nur im Echtbetrieb. Abgebrochene " +
+        "Checkouts zählen nicht. Der Bestellwert ist kein Zahlungseingang: eine Bestellung " +
+        "zählt zu ihrem Monat, auch wenn das Geld später eintrifft. Eine spätere Zahlung " +
+        "ändert einen erstellten Bericht nicht.",
+      limitsMissing:
+        "Nicht enthalten: Rückerstattungen (die gehören in den Monat, in dem sie stattfinden, " +
+        "und werden bisher nirgends mit Betrag erfasst), Gebühren des Zahlungsanbieters " +
+        "(SkyIsles speichert sie nicht) und Umsatzsteuer (nach § 19 UStG wird keine erhoben). " +
+        "Es ist ein Tätigkeitsnachweis, keine Buchhaltung.",
+      downloadLater:
+        "Ein Download als PDF oder CSV ist noch nicht eingebaut. Die Zahlen stehen hier.",
+    },
+  },
+
+  /** Verwaltung des Shopzugangs — eine Plattformaufgabe (ADR-0077). */
+  businessAccounts: {
+    heading: "Business-Zugänge",
+    hint:
+      "Wer diesen Shop führen darf. Ein Konto hat genau einen Typ: Sammler, Business oder Admin. " +
+      "Ein Adminkonto kann keinen Shopzugang bekommen — dafür braucht es ein eigenes Konto.",
+    empty: "Noch kein Konto darf den Shop führen.",
+    sellerLabel: "Verkäufer",
+    enabled: "Aktiv",
+    disabled: "Deaktiviert",
+    enable: "Aktivieren",
+    disable: "Deaktivieren",
+    /* Seit 0042 kann ein Konto nicht mehr beides sein; die Zeile bleibt für
+       Altbestand aus der Zeit davor (ADR-0078). */
+    alsoAdmin: "Auch Admin",
+    isAdminAccount: "Adminkonto — kein Shopzugang möglich",
+    revokedBecomesUser:
+      "Ein Entzug macht das Konto wieder zu einem Sammlerkonto. Die Sammlung bleibt erhalten.",
+    searchLabel: "Konto suchen",
+    searchPlaceholder: "Benutzername oder E-Mail",
+    searchHint:
+      "Die Suche findet das Konto. Gespeichert wird die Konto-ID, nie die Adresse.",
+    searchEmpty: "Kein Konto gefunden.",
+    searchTooShort: "Mindestens drei Zeichen.",
+    grant: "Shopzugang geben",
+    alreadyOperator: "Hat bereits Zugang",
+    failed: "Das konnte nicht gespeichert werden.",
+  },
+
   admin: {
     title: "Administration",
     catalog: "Katalog",
@@ -539,6 +1161,106 @@ export const de = {
         "geprüft werden muss.",
     },
 
+    /**
+       Verantwortungsbereiche im Adminbereich (ADR-0075).
+
+       SHOP ist der Verkäufer, ADMIN ist SkyIsles. Dieselbe Person bedient
+       heute beides — genau deshalb steht es getrennt da: wenn ein Mensch beide
+       Fragen beantwortet, erinnert ihn nichts daran, dass es zwei sind.
+     */
+    domains: {
+      shopHeading: "Shop",
+      shopHint:
+        "Alles, was dem Verkäufer gehört: Bestellungen, Versand, Verkäuferangaben, Steuern, " +
+        "Widerruf. Vertragspartner der Kunden ist der Verkäufer, nicht SkyIsles.",
+      adminHeading: "Plattform",
+      adminHint:
+        "Alles, was SkyIsles selbst betrifft: Katalog, Figuren, Kategorien, Testkonten, " +
+        "Plattformangaben. Kein Verkauf.",
+    },
+
+    /**
+       Verkäufer- und Shopangaben in Gruppen (ADR-0075).
+
+       Noch nirgends veröffentlicht: Legal V1 rendert diese Werte später. Hier
+       werden sie nur erfasst, und ein leeres Feld bleibt leer — ein Platzhalter
+       in einem Impressumsfeld wäre keine halbfertige Einstellung, sondern eine
+       falsche Aussage über eine echte Person.
+     */
+    shopProfile: {
+      heading: "Verkäufer- und Shopangaben",
+      hint:
+        "Diese Angaben stehen später im Impressum, auf Rechnungen und in der Widerrufsbelehrung. " +
+        "Noch wird nichts davon veröffentlicht. Leere Felder bleiben leer.",
+      save: "Speichern",
+      saving: "Wird gespeichert …",
+      saved: "Gespeichert.",
+      saveFailed: "Das konnte nicht gespeichert werden.",
+      noneYet: "— noch nicht gesetzt",
+
+      sellerHeading: "Verkäufer",
+      sellerHint:
+        "Wer der Verkäufer rechtlich ist. Pflichtangaben nur, soweit sie auf dich zutreffen: " +
+        "ohne Registereintrag bleibt das Registerfeld leer.",
+      legalName: "Rechtlicher Name",
+      legalNameHint: "Die natürliche oder juristische Person, die haftet.",
+      tradingName: "Geschäftsname",
+      tradingNameHint: "Unter welchem Namen verkauft wird. Steht später im Impressum.",
+      legalForm: "Rechtsform",
+      street: "Straße und Hausnummer",
+      postalCode: "PLZ",
+      city: "Ort",
+      countryCode: "Land (2 Buchstaben)",
+      phone: "Telefon",
+      phoneHint: "Optional. Vorgeschrieben ist ein zweiter schneller Kanal, kein Telefon.",
+      directContact: "Zweiter Kontaktweg",
+      directContactHint: "Was Kunden außer der E-Mail schnell erreicht.",
+      registerCourt: "Registergericht",
+      registerNumber: "Registernummer",
+      vatId: "USt-IdNr.",
+      wId: "Wirtschafts-Identifikationsnummer",
+      wIdHint: "Falls dir eine zugeteilt wurde — sie gehört dann ins Impressum.",
+
+      contactHeading: "Kontakt",
+      contactHint:
+        "Zwei verschiedene Zuständigkeiten. Fragen zu einer Bestellung beantwortet der Verkäufer, " +
+        "Fragen zum Konto oder zur Website die Plattform.",
+      sellerContact: "Verkäuferkontakt",
+      sellerContactHint: "Der Verkäufer — Bestellungen, Ware, Versand.",
+      withdrawalContact: "Widerruf",
+      complaintsContact: "Reklamationen",
+      fallbackHint: "Leer lassen heißt: es gilt der Verkäuferkontakt. Aktuell:",
+
+      taxHeading: "Steuern",
+      smallBusiness: "Kleinunternehmerregelung nach § 19 UStG",
+      smallBusinessHint:
+        "Es wird keine Umsatzsteuer ausgewiesen. „inkl. MwSt.“ wäre dann falsch. " +
+        "Differenzbesteuerung nach § 25a wird nicht verwendet.",
+
+      shippingHeading: "Versand",
+      shippingHint:
+        "Wohin geliefert wird, entscheidet der Server. Die Kasse zeigt nur an, was hier " +
+        "freigeschaltet ist — das Formular allein schaltet kein Land frei.",
+      countryEnabled: "Aktiv — deaktivieren",
+      countryDisabled: "Inaktiv — aktivieren",
+      threshold: "Versandkostenfrei ab (€)",
+      dispatch: "Versandaussage",
+      dispatchHint: "Leer lassen, solange keine Lieferzeit zugesagt werden kann.",
+
+      withdrawalHeading: "Widerruf & Reklamationen",
+      withdrawalHint:
+        "Gilt für den gesetzlichen Widerruf von Waren. Die Widerrufsbelehrung selbst " +
+        "entsteht erst mit Legal V1.",
+      returnPostage: "Rücksendekosten im Widerrufsfall",
+      postageCustomer: "Der Kunde trägt sie",
+      postageSeller: "Ich übernehme sie",
+      dispute: "Freiwillig an der Verbraucherschlichtung teilnehmen",
+      disputeHint:
+        "Die Pflicht zur Aussage entsteht erst über zehn Beschäftigten. Aus bleibt heißt " +
+        "nur: keine freiwillige Teilnahme.",
+      disputeBody: "Zuständige Schlichtungsstelle",
+    },
+
     /** Plattformdaten (ADR-0064). Andere Pflicht, andere Adresse. */
     platform: {
       heading: "Plattformdaten",
@@ -547,6 +1269,12 @@ export const de = {
         "Datenschutz, Konto, Beschwerden. Fragen zu einer Bestellung gehen an den Verkäufer. " +
         "Beides darf heute dieselbe Adresse sein.",
       contactEmail: "Plattform-E-Mail",
+      /* Die Supportadresse von SkyIsles — eine Plattformangabe, deshalb hier
+         und nicht bei den Verkäuferangaben (ADR-0077). */
+      supportEmail: "Support-E-Mail",
+      supportEmailHint:
+        "Für Fragen zu SkyIsles selbst: Konto, Datenschutz, Website. Fragen zu einer Bestellung " +
+        "beantwortet der Verkäufer. Leer lassen, solange es keine Adresse gibt.",
       contactEmailHint:
         "Erscheint später im Impressum und in der Datenschutzerklärung. Steht in keiner " +
         "Bestellmail.",
@@ -767,12 +1495,46 @@ export const de = {
       conditionLoose: "Lose",
       conditionBoxed: "OVP",
 
-      /** Der Hinweis, der Geld schützt. */
+      /**
+       * Der Hinweis, der Geld schützt — und seit 0043 auch sagt, was zu tun
+       * ist (ADR-0079).
+       *
+       * Vorher stand hier nur, dass geprüft werden muss und der Versand
+       * gesperrt ist. Ein Verkäufer konnte eine bezahlte Bestellung bekommen
+       * und hatte keinen einzigen Weg weiter. Die Ursachen sind zwei
+       * verschiedene Probleme und bekommen zwei verschiedene Texte.
+       */
       needsResolutionTitle: "Diese Bestellung muss geprüft werden",
       needsResolutionHint:
-        "Die Zahlung ist eingegangen, aber es wurde keine Reservierung umgewandelt und kein " +
-        "Bestand gebucht. Vor dem Versand muss entschieden werden: nachbestellen oder erstatten. " +
-        "Der Versand ist deshalb gesperrt.",
+        "Vor dem Versand muss dieser Punkt geklärt sein. Solange er offen ist, bleibt der " +
+        "Versand gesperrt.",
+
+      /* Zahlung kam an, nachdem die Reservierung abgelaufen war. Das Geld ist
+         echt, der Bestand wurde nie abgebucht. */
+      reviewLateTitle: "Bestand wurde bei der Zahlung nicht abgebucht",
+      reviewLateHint:
+        "Die Zahlung ist eingegangen, nachdem die Reservierung abgelaufen war. Die Ware wurde " +
+        "deshalb nie vom Lager abgezogen. Wenn sie noch da ist, kannst du sie jetzt nachbuchen — " +
+        "danach ist der Versand frei.",
+      reviewResolve: "Bestand nachbuchen und freigeben",
+      reviewResolving: "Wird gebucht …",
+      reviewShortTitle: "Dafür reicht der Bestand nicht",
+      reviewShortHint:
+        "Für mindestens eine Position ist zu wenig auf Lager. Buche zuerst Ware zu — im " +
+        "Lagerbestand — oder erstatte die Bestellung. Nachbuchen ist erst möglich, wenn alle " +
+        "Positionen gedeckt sind.",
+      reviewMismatchTitle: "Der gezahlte Betrag passt nicht zur Bestellung",
+      reviewMismatchHint:
+        "Das ist eine Geldfrage und lässt sich nicht über den Bestand lösen. Kläre die Zahlung " +
+        "beim Zahlungsanbieter — Erstattung oder Korrektur — bevor versendet wird.",
+      reviewUnknownHint:
+        "Der Grund ist nicht mehr nachvollziehbar. Prüfe Zahlung und Bestand, bevor du " +
+        "versendest.",
+      reviewNeeded: "Benötigt",
+      reviewAvailable: "Verfügbar",
+      reviewResolved: "Gebucht. Der Versand ist jetzt frei.",
+      reviewRefused: "Das war so nicht möglich. Die Bestellung bleibt gesperrt.",
+      reviewFailed: "Das konnte nicht gebucht werden.",
 
       /** Versandaktion. */
       shipHeading: "Versand",
@@ -1056,9 +1818,14 @@ export const de = {
       title: "Shop",
       heading: "Im Shop von SkyIsles",
       /** Sagt, wer verkauft. Keine Lieferzeit — es ist keine entschieden. */
-      intro:
-        "Diese Figuren verkauft SkyIsles gerade selbst — kein Marktplatz, ein Verkäufer. " +
+      /* Der Verkäufername kommt aus `seller_public()`; ohne ihn steht hier die
+         neutrale Fassung, nie ein geratener Name (ADR-0075). */
+      intro: (name: string) =>
+        `Diese Figuren verkauft ${name} über SkyIsles — kein Marktplatz, ein Verkäufer. ` +
         "Versand innerhalb Deutschlands, ab 75 € Warenwert versandkostenfrei.",
+      introFallback:
+        "Diese Figuren verkauft der Verkäufer dieses Shops über SkyIsles — kein Marktplatz, " +
+        "ein Verkäufer. Versand innerhalb Deutschlands, ab 75 € Warenwert versandkostenfrei.",
       count: (n: number) => (n === 1 ? "1 Figur im Angebot" : `${n} Figuren im Angebot`),
       searchLabel: "Im Angebot suchen",
       /** Kein Treffer, obwohl es Angebote gibt. */
@@ -1240,6 +2007,8 @@ export const de = {
         completed: "Abgeschlossen",
         cancelled: "Storniert",
       } as Record<string, string>,
+      /* Rechnung und Widerruf, auf der Bestellung selbst (ADR-0086). */
+      documents: "Dokumente und Rechte",
       snapshotNote:
         "Diese Adresse ist der Stand zum Bestellzeitpunkt und ändert sich nicht mehr.",
       notFound: "Diese Bestellung gehört nicht zu deinem Konto.",
@@ -1289,13 +2058,18 @@ export const de = {
     city: "Ort",
     country: "Land",
     countryFixed: "Deutschland",
-    countryHint: "SkyIsles liefert derzeit nur innerhalb Deutschlands.",
+    /*
+     * Wer liefert — und das ist nicht die Plattform (ADR-0086). Der frühere
+     * Satz lautete „SkyIsles liefert derzeit nur innerhalb Deutschlands" und
+     * machte die Plattform zum Versender. Versendet wird vom Verkäufer.
+     */
+    countryHint: "Es wird derzeit nur innerhalb Deutschlands geliefert.",
 
     /** Nur für angemeldete Konten; ein Gast hat keinen Ort dafür (ADR-0061). */
     saveDefault: "Diese Angaben für künftige Bestellungen speichern",
     saveDefaultHint:
       "Sie werden dann an der Kasse vorausgefüllt. Du kannst sie jederzeit unter " +
-      "\u201EKontakt & Lieferadresse\u201C ändern oder löschen. Diese Bestellung behält die " +
+      "„Kontakt & Lieferadresse“ ändern oder löschen. Diese Bestellung behält die " +
       "Adresse, die du hier eingegeben hast.",
 
     shippingHeading: "Versand",
@@ -1336,10 +2110,23 @@ export const de = {
     trust: {
       heading: "Bevor du bestellst",
       /** Wer verkauft. Die Frage, die das Produkt bisher nirgends beantwortet. */
-      seller:
-        "Verkäufer ist SkyIsles. Alle Artikel kommen direkt von uns — SkyIsles ist kein " +
-        "Marktplatz und vermittelt nicht zwischen Händlern.",
-      sellerLabel: "Verkäufer",
+      /**
+       * Wer verkauft — und das ist nicht SkyIsles (ADR-0064, ADR-0075).
+       *
+       * Der frühere Satz nannte SkyIsles als Verkäufer. Er sollte klarstellen, dass
+       * dies kein Marktplatz ist, und tat das, indem er den falschen
+       * Vertragspartner nannte — auf dem letzten Bildschirm vor der Zahlung.
+       * Beides lässt sich zugleich richtig sagen.
+       *
+       * Der Name kommt aus `seller_public()`, nicht aus dieser Datei.
+       */
+      seller: (name: string) =>
+        `${name} ist dein Vertragspartner für diese Bestellung und versendet die Ware. ` +
+        "SkyIsles stellt Katalog, Konto und Kasse bereit und vermittelt nicht zwischen Händlern.",
+      sellerFallback:
+        "Die Ware wird vom Verkäufer dieses Shops verkauft und versendet. SkyIsles stellt " +
+        "Katalog, Konto und Kasse bereit und vermittelt nicht zwischen Händlern.",
+      sellerLabel: "Verkauf durch",
       shippingLabel: "Versand",
       /** Nur was feststeht: Land, gewählte Art, Betrag. Keine Dauer. */
       shippingValue: (method: string, amount: string) => `${method} · ${amount} · Deutschland`,
@@ -1356,16 +2143,37 @@ export const de = {
       paymentNote:
         "Mit dem Bestellen wirst du zu Stripe weitergeleitet und bezahlst dort. SkyIsles " +
         "bekommt und speichert keine Kartendaten.",
-      /*
-       * KEIN WIDERRUFS-/AGB-EINTRAG.
+      /**
+       * Die Rechtsangaben unmittelbar vor der Bestellung (ADR-0086).
        *
-       * Eine frühere Fassung stand hier und sagte, die Texte „werden vor der
-       * öffentlichen Beta ergänzt". Das ist eine Entwicklernotiz, die in der
-       * Kasse eines echten Kunden gelandet wäre — und ein Shop, der seinen
-       * eigenen Bauzustand kommentiert, wirkt unfertiger als einer, der
-       * schweigt. Sobald Widerrufsbelehrung und AGB existieren, kommen sie als
-       * Link hierher; bis dahin steht an dieser Stelle nichts.
+       * § 312j Abs. 2 BGB verlangt, dass die Angaben nach Art. 246a § 1 Abs. 1
+       * Satz 1 Nr. 1, 5 bis 7, 8, 14 und 15 EGBGB „unmittelbar bevor der
+       * Verbraucher seine Bestellung abgibt, klar und verständlich in
+       * hervorgehobener Weise" bereitstehen. Dieser Block ist diese Stelle.
+       *
+       * Nr. 1 (wesentliche Eigenschaften) steht in der Zusammenfassung
+       * darüber, Nr. 5 und 7 (Gesamtpreis, Versandkosten) ebenfalls. Nr. 6
+       * entfällt: es gibt keine personalisierte Preisbildung. Nr. 8, 14 und 15
+       * betreffen Dauerschuldverhältnisse — hier wird einmal gekauft.
+       *
+       * Frühere Fassung: an dieser Stelle stand, die Rechtstexte „werden vor
+       * der öffentlichen Beta ergänzt". Das war eine Entwicklernotiz in der
+       * Kasse eines echten Kunden. Jetzt stehen die Texte da.
        */
+      legalLabel: "Bedingungen",
+      legalIntro:
+        "Mit der Bestellung gelten unsere AGB. Ein Widerrufsrecht steht dir zu; wie es " +
+        "ausgeübt wird, steht in der Widerrufsbelehrung.",
+      legalAgb: "AGB",
+      legalWithdrawal: "Widerrufsbelehrung",
+      legalPrivacy: "Datenschutz",
+      legalShipping: "Versand",
+      /* Datenschutz ist Information, keine Einwilligung — deshalb ein Link und
+         kein Kästchen zum Ankreuzen. */
+      legalPrivacyNote:
+        "Wie wir deine Daten für diese Bestellung verarbeiten, steht in der " +
+        "Datenschutzerklärung.",
+
     },
 
     /**
@@ -1398,7 +2206,7 @@ export const de = {
         "Ware bleibt für dich vorgemerkt.",
       settledHint:
         "Für diese Bestellung ist nichts mehr zu tun. Den aktuellen Stand findest du unter " +
-        "\u201EMeine Bestellungen\u201C.",
+        "„Meine Bestellungen“.",
       errorNotPayable:
         "Die Reservierung für diese Bestellung ist abgelaufen. Bitte lege den Artikel erneut in " +
         "den Warenkorb.",
@@ -1480,7 +2288,7 @@ export const de = {
       duplicate_item: "Ein Artikel ist doppelt im Warenkorb.",
       invalid_email: "Bitte gib eine gültige E-Mail-Adresse ein.",
       incomplete_address: "Bitte fülle alle Pflichtfelder der Lieferadresse aus.",
-      invalid_country: "SkyIsles liefert derzeit nur nach Deutschland.",
+      invalid_country: "Es wird derzeit nur nach Deutschland geliefert.",
       invalid_shipping_method: "Bitte wähle eine Versandart.",
     },
   },
@@ -1506,9 +2314,11 @@ export const de = {
     account: "Mein Konto",
     signOut: "Abmelden",
     signIn: "Anmelden",
-    /** Nur für Administratoren sichtbar (ADR-0039). */
+    /** Nur für Plattform-Administratoren sichtbar (ADR-0039, ADR-0077). */
     admin: "Admin",
-    /** Lagerverwaltung des Betreibers. Nur für Administratoren. */
+    /** Der Shop. Nur für Konten mit Shopzugang — nicht für Admins (ADR-0077). */
+    business: "Shop",
+    /** Lagerverwaltung des Verkäufers. Nur mit Shopzugang. */
     inventory: "Lager",
   },
 

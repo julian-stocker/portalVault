@@ -18,7 +18,11 @@ nachweislich Nutzer gewinnt. Produktvision und -prinzipien: `docs/ROADMAP.md`.
 **Zwei Identitäten, die nie zusammenfallen (ADR-0064):** **SkyIsles** ist die **Plattform** —
 Katalog, Konten, Sammlung, Checkout, Zahlung. **yulez.collectibles** ist der **erste und vorerst
 einzige gewerbliche Verkäufer auf SkyIsles** — Vertragspartner des Kunden, Rechnungsaussteller,
-Versender. Beides gehört derselben Person; es sind trotzdem zwei Rechtssubjekte.
+Versender. **Beides ist dasselbe Rechtssubjekt** — ein Einzelunternehmen von Julian Stocker —,
+aber **zwei Rollen**: die Plattform betreibt Katalog, Konten und Kasse, der Verkäufer ist
+Vertragspartner des Kunden. Vertragspartner heißt überall „Julian Stocker, handelnd unter
+yulez.collectibles" (ADR-0086, `docs/LEGAL.md`). Die frühere Formulierung „zwei Rechtssubjekte"
+war falsch.
 
 Der **Shop** (ein Verkäufer) ist **teilweise gebaut** — ADR-0032, ADR-0033, ADR-0037, ADR-0043,
 ADR-0044. Die Plattform wird konzeptionell seller-fähig gedacht, **die laufende Implementierung

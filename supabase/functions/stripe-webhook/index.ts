@@ -202,14 +202,75 @@ Deno.serve(async (req: Request) => {
 
 /** Which mail, if any, an outcome deserves. Anything absent sends nothing. */
 const MAIL_FOR_OUTCOME: Record<string, string> = {
-  // Money arrived and stock was booked. The customer gets their confirmation.
-  confirmed: "payment_confirmation",
+  /*
+   * Money arrived and stock was booked. The customer gets the ORDER
+   * CONFIRMATION — which under the contract model settled in 0047 is the
+   * seller's acceptance, and therefore the moment the contract exists
+   * (docs/LEGAL.md). Until this mail goes out there is an offer and a payment
+   * and no contract, which is exactly why the two flagged outcomes below get
+   * no customer mail at all.
+   *
+   * The kind was called `payment_confirmation` until 0047. That named the
+   * trigger rather than the act.
+   */
+  confirmed: "order_confirmation",
   // Money arrived and nothing was booked, or the amount did not match. The
   // customer gets NO confirmation — the order is not one we can fulfil yet —
   // and the operator gets woken up instead (ADR-0050).
   late_payment_unresolved: "resolution_alert",
   amount_mismatch: "resolution_alert",
 };
+
+/**
+ * Which order a Stripe session belongs to.
+ *
+ * `confirm_order_payment()` answers with an outcome, not an order, so the
+ * order has to be looked up. Read-only and service-role only, and shared by
+ * the invoice and the mail so the two can never disagree about which order
+ * they are acting on.
+ */
+async function orderNumberFor(sessionId: string): Promise<string | null> {
+  const lookup = await fetch(`${SUPABASE_URL}/rest/v1/rpc/order_number_for_payment`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ p_provider: "stripe", p_provider_payment_id: sessionId }),
+  });
+  const orderNumber = await lookup.json();
+  return lookup.ok && typeof orderNumber === "string" && orderNumber !== "" ? orderNumber : null;
+}
+
+/**
+ * Issue the invoice for a confirmed payment.
+ *
+ * Never throws and never blocks the response: a payment that is confirmed in
+ * the database stays confirmed even if the document could not be written, and
+ * the operator can re-issue. The 200 to Stripe must not depend on it.
+ */
+async function issueInvoice(sessionId: string): Promise<void> {
+  try {
+    const orderNumber = await orderNumberFor(sessionId);
+    if (!orderNumber) return;
+
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/issue_invoice`, {
+      method: "POST",
+      headers: {
+        apikey: SERVICE_KEY,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ p_order_number: orderNumber }),
+    });
+    if (!response.ok) {
+      console.error(`stripe-webhook: issue_invoice answered ${response.status}`);
+    }
+  } catch (error) {
+    console.error(`stripe-webhook: invoice failed: ${describe(error)}`);
+  }
+}
 
 /**
  * Hand the mail to `send-order-mail`, or do nothing at all.
@@ -222,25 +283,25 @@ async function mailFor(outcome: DbOutcome, sessionId: string): Promise<void> {
   const kind = MAIL_FOR_OUTCOME[outcome];
   if (!kind) return;
 
+  /*
+   * THE INVOICE IS ISSUED BEFORE THE ACCEPTANCE IS SENT, so the confirmation
+   * can carry its number — the customer gets one message, not a promise of a
+   * document that follows.
+   *
+   * Only for `confirmed`: a flagged order has no accepted contract and
+   * therefore nothing to invoice. `issue_invoice()` is idempotent, so a
+   * redelivered webhook re-reads the invoice it already made.
+   */
+  if (outcome === "confirmed") await issueInvoice(sessionId);
+
   if (!MAIL_SECRET) {
     console.error("stripe-webhook: MAIL_FUNCTION_SECRET missing, no mail sent");
     return;
   }
 
   try {
-    // `confirm_order_payment()` answers with an outcome, not an order, so the
-    // order has to be looked up. Read-only and service-role only.
-    const lookup = await fetch(`${SUPABASE_URL}/rest/v1/rpc/order_number_for_payment`, {
-      method: "POST",
-      headers: {
-        apikey: SERVICE_KEY,
-        Authorization: `Bearer ${SERVICE_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ p_provider: "stripe", p_provider_payment_id: sessionId }),
-    });
-    const orderNumber = await lookup.json();
-    if (!lookup.ok || typeof orderNumber !== "string" || orderNumber === "") {
+    const orderNumber = await orderNumberFor(sessionId);
+    if (!orderNumber) {
       console.error(`stripe-webhook: no order for ${maskSession(sessionId)}, no mail sent`);
       return;
     }

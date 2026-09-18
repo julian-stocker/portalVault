@@ -24,7 +24,7 @@
 const DYNAMIC: ReadonlyArray<{ prefix: readonly string[]; name: string }> = [
   { prefix: ["skylanders"], name: "[slug]" },
   { prefix: ["account", "orders"], name: "[orderNumber]" },
-  { prefix: ["admin", "orders"], name: "[orderNumber]" },
+  { prefix: ["business", "orders"], name: "[orderNumber]" },
   { prefix: ["admin", "catalog"], name: "[skyId]" },
 ];
 

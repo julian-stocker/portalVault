@@ -7,7 +7,7 @@
  */
 import { cache } from "react";
 
-import { isAdmin } from "@/lib/auth/admin";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 
 import { COMMERCE_CLOSED, readCommerceState, type CommerceState } from "./commerce-model";
@@ -20,7 +20,7 @@ export * from "./commerce-model";
  * the database refuses either way.
  */
 export const fetchCommerceState = cache(async (): Promise<CommerceState> => {
-  if (!(await isAdmin())) return COMMERCE_CLOSED;
+  if (!(await canOperateSeller())) return COMMERCE_CLOSED;
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_commerce_state");

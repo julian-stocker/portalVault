@@ -18,14 +18,15 @@ import { notFound } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
-import { isAdmin } from "@/lib/auth/admin";
+import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   // The authorisation gate, on its own and first. Nothing cosmetic shares
   // this line: whether somebody may be here is not a question to be resolved
   // in the same breath as what to print in the header.
-  if (!(await isAdmin())) notFound();
+  const { platformAdmin, sellerOperator } = await capabilities();
+  if (!platformAdmin) notFound();
 
   // Two independent reads, once the gate has passed. Both memoised per
   // request, so the admin home page below counts the same rows without a
@@ -39,7 +40,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
        No footer either: it orients visitors and offers the public and legal
        pages, and the operator needs neither. */
     <div className="relative min-h-screen">
-      <SiteNav signedIn admin openOrders={openOrders} username={profile?.username ?? null} />
+      <SiteNav
+        signedIn
+        admin
+        /* Both, so the badge states what is true rather than which area this
+           happens to be (ADR-0077). */
+        business={sellerOperator}
+        openOrders={openOrders}
+        username={profile?.username ?? null}
+      />
       {children}
       <NavSpacer />
     </div>

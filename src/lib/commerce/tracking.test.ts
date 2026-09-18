@@ -137,7 +137,7 @@ describe("the parcel this release was tested with", () => {
 
 describe("there is one builder, not one per page", () => {
   const SOURCES = [
-    "src/app/(admin)/admin/orders/[orderNumber]/page.tsx",
+    "src/app/(business)/business/orders/[orderNumber]/page.tsx",
     "src/app/(app)/account/orders/[orderNumber]/page.tsx",
     "src/components/admin/tracking-form.tsx",
   ];

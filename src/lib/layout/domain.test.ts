@@ -48,9 +48,26 @@ describe("no host is hard-coded into the application", () => {
   });
 
   it("names no production domain in shipped code", () => {
+    /*
+     * A HOST IN A URL POSITION. The rule protects absolute URLs the app emits
+     * — a confirmation mail pointing at the wrong host is the failure it
+     * exists to prevent — so the match requires a scheme or a protocol-relative
+     * prefix.
+     *
+     * An e-mail ADDRESS at the same domain is not a URL and cannot send anyone
+     * anywhere. `info@skyisles.app` is the seller's published contact detail,
+     * required in the Impressum by § 5 DDG and on the invoice by § 34a UStDV
+     * (ADR-0086); it has to exist as a literal, because an Impressum that
+     * renders an empty address is worse than none. `@` before the domain is
+     * therefore excluded, and only there.
+     */
     for (const path of FILES) {
+      expect(code(path), `${path} names a site URL`).not.toMatch(
+        /(?:https?:)?\/\/[\w.-]*(?:skyisles\.(?:app|de|com)|portal-vault-lovat|vercel\.app)/,
+      );
+      // And the bare domain stays forbidden everywhere except after an `@`.
       expect(code(path), `${path} names a site domain`).not.toMatch(
-        /skyisles\.(app|de|com)|portal-vault-lovat|vercel\.app/,
+        /(?<!@)\b(?:skyisles\.(?:app|de|com)|portal-vault-lovat|vercel\.app)/,
       );
     }
   });

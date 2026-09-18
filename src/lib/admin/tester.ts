@@ -8,7 +8,7 @@
  */
 import { cache } from "react";
 
-import { isAdmin } from "@/lib/auth/admin";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 
 import { NO_TESTERS, readTesterState, type TesterState } from "./tester-model";
@@ -21,7 +21,7 @@ export * from "./tester-model";
  * the database refuses either way.
  */
 export const fetchTesterState = cache(async (): Promise<TesterState> => {
-  if (!(await isAdmin())) return NO_TESTERS;
+  if (!(await isPlatformAdmin())) return NO_TESTERS;
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_tester_state");

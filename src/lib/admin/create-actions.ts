@@ -25,7 +25,7 @@
 import { refresh, revalidatePath } from "next/cache";
 
 import { isCardTypeValue } from "@/lib/admin/new-figure-draft";
-import { isAdmin } from "@/lib/auth/admin";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
 
@@ -72,7 +72,7 @@ export async function createFigure(input: CreateFigureInput): Promise<CreateResu
     return { ok: false, message: de.admin.unknownFigure };
   }
 
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("admin_create_figure", {

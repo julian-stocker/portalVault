@@ -256,6 +256,19 @@ export function CartView({
           {de.cart.toCheckout}
         </Link>
 
+        {/*
+         * § 312j Abs. 1 BGB: at the LATEST at the start of the ordering
+         * process, state clearly whether delivery restrictions exist and which
+         * means of payment are accepted (ADR-0086). The basket is where that
+         * process begins, so it is stated here as well as at the checkout.
+         */}
+        <p className="text-xs leading-relaxed text-muted">
+          {de.legal.orderStart.delivery} {de.legal.orderStart.payment}{" "}
+          <Link href="/versand" className="underline underline-offset-4">
+            {de.legal.orderStart.more}
+          </Link>
+        </p>
+
         <div className="flex flex-wrap gap-3">
           <Link href="/" className={`${ACTION_NEUTRAL} w-auto`}>
             {de.cart.toCatalog}

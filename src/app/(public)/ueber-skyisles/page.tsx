@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { countCollectibleFigures } from "@/lib/catalog/queries";
 import { formatNumber } from "@/lib/format";
+import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = {
@@ -31,6 +32,9 @@ export const metadata: Metadata = {
  * counted from the database on each request, so it cannot go stale.
  */
 export default async function AboutPage() {
+  /* Who runs the shop is read, not written here (ADR-0075). */
+  const seller = await fetchSellerPublic();
+
   const figures = await countCollectibleFigures();
 
   return (
@@ -63,7 +67,9 @@ export default async function AboutPage() {
           <span className="mt-2 block font-medium text-own-ink">{de.about.collectionFree}</span>
         </Section>
 
-        <Section heading={de.about.shopHeading}>{de.about.shopBody}</Section>
+        <Section heading={de.about.shopHeading}>
+          {seller ? de.about.shopBody(seller.displayName) : de.about.shopBodyFallback}
+        </Section>
 
         <Section heading={de.about.togetherHeading}>{de.about.togetherBody}</Section>
 

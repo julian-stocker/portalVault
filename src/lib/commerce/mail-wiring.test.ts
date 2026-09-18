@@ -136,11 +136,29 @@ describe("the webhook sends exactly one confirmation, and only for a real one", 
       webhook.indexOf("const MAIL_FOR_OUTCOME"),
       webhook.indexOf("};", webhook.indexOf("const MAIL_FOR_OUTCOME")),
     );
-    // A flagged order is paid and nothing was booked: the customer gets the
-    // "we are checking" status page, the operator gets woken up.
+    /*
+     * A flagged order is paid and nothing was booked: the customer gets the
+     * "we are checking" status page, the operator gets woken up.
+     *
+     * Under the contract model settled in 0047 this is also the reason no
+     * contract exists for a flagged order — the acceptance IS the order
+     * confirmation, and it is not sent (docs/LEGAL.md).
+     */
     expect(map).toMatch(/late_payment_unresolved:\s*"resolution_alert"/);
     expect(map).toMatch(/amount_mismatch:\s*"resolution_alert"/);
-    expect(map).toMatch(/confirmed:\s*"payment_confirmation"/);
+    expect(map).toMatch(/confirmed:\s*"order_confirmation"/);
+    // And the old name is gone from the wiring, not merely aliased.
+    expect(map).not.toContain("payment_confirmation");
+  });
+
+  it("invoices only a confirmed payment, and before the acceptance is sent", () => {
+    // So the confirmation can carry the invoice number instead of promising a
+    // document that follows.
+    expect(webhook).toContain('if (outcome === "confirmed") await issueInvoice(sessionId);');
+    const dispatch = webhook.slice(webhook.indexOf("async function mailFor"));
+    expect(dispatch.indexOf("issueInvoice(sessionId)")).toBeLessThan(
+      dispatch.indexOf("send-order-mail"),
+    );
   });
 
   it("dispatches after the outcome is settled, never inside it", () => {
@@ -244,6 +262,24 @@ describe("no queue and no schedule was introduced", () => {
   });
 
   it("one request sends at most one mail", () => {
-    expect((fn.match(/resend\.emails\.send\(/g) ?? []).length).toBe(1);
+    /*
+     * Two send sites since 0047, on two paths that cannot both run: the
+     * § 356a receipt is keyed on a withdrawal rather than an order, so it
+     * leaves the handler before the ordinary path begins. What matters is not
+     * the count of call sites but that neither path sends twice — and that
+     * the withdrawal branch really does return.
+     */
+    const receipt = fn.slice(fn.indexOf("async function sendWithdrawalReceipt"));
+    const handler = fn.slice(fn.indexOf("Deno.serve("));
+
+    expect((receipt.slice(0, receipt.indexOf("Deno.serve(")).match(/resend\.emails\.send\(/g) ?? []).length).toBe(1);
+    expect((handler.match(/resend\.emails\.send\(/g) ?? []).length).toBe(1);
+    expect(handler).toContain("return await sendWithdrawalReceipt(body.withdrawalId);");
+  });
+
+  it("the receipt is sent once per declaration, not once per request", () => {
+    // The row leaves `pending` as part of the send, so a repeat finds nothing.
+    expect(fn).toContain("mark_withdrawal_receipt");
+    expect(fn).toContain("skyisles/withdrawal-receipt/${withdrawalId}");
   });
 });

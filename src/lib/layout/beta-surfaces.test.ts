@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * The three surfaces the UX beta gate added or repaired, asserted against the
@@ -54,51 +54,51 @@ describe("the footer exists at all", () => {
   });
 });
 
-describe("the footer links nowhere that does not exist", () => {
-  const footer = code(FOOTER);
-
-  /**
-   * The legal texts are a release gate of their own and none is written. A
-   * dead link is worse than a missing one, and a page called "Impressum" with
-   * no Impressum in it is worse than both.
+describe("the footer links the legal pages, and every one of them exists", () => {
+  /*
+   * The inverse of what this block asserted for the whole of V1. Then the
+   * footer deliberately linked none of them, because none of the texts was
+   * written and a page titled "Impressum" containing no Impressum is worse
+   * than a missing link. They are written now (ADR-0086), so the links are
+   * required rather than forbidden — and the destinations are checked, because
+   * a legal link that 404s is the original failure wearing a new hat.
    */
-  it("does not link the unwritten legal pages", () => {
-    for (const slug of ["/impressum", "/datenschutz", "/widerruf", "/agb", "/kontakt"]) {
-      expect(footer).not.toContain(`href="${slug}"`);
-      expect(footer).not.toContain(`href: "${slug}"`);
+  const footer = readFileSync("src/components/layout/site-footer.tsx", "utf8");
+
+  const REQUIRED = [
+    "/impressum",
+    "/datenschutz",
+    "/agb",
+    "/widerruf",
+    "/widerrufen",
+    "/versand",
+    "/zahlung",
+    "/kontakt",
+  ];
+
+  it("links every one of them", () => {
+    for (const href of REQUIRED) {
+      // `/widerrufen` travels as the shared `WITHDRAWAL_PATH` constant, so the
+      // statutory instruction and the footer can never name different places.
+      const linked = footer.includes(`"${href}"`) || footer.includes("WITHDRAWAL_PATH");
+      expect(linked, `${href} is not linked`).toBe(true);
+    }
+    expect(footer).toContain("WITHDRAWAL_PATH");
+  });
+
+  it("and every destination is a route that exists", () => {
+    for (const href of REQUIRED) {
+      const path = `src/app/(public)${href}/page.tsx`;
+      expect(existsSync(path), `${href} has no page`).toBe(true);
     }
   });
 
-  it("does not ship placeholder legal routes either", () => {
-    for (const route of ["impressum", "datenschutz", "widerruf", "agb", "kontakt"]) {
-      expect(existsSync(`src/app/(public)/${route}/page.tsx`)).toBe(false);
-    }
-  });
-
-  it("every destination it does link is a route that exists", () => {
-    // Both forms: the JSX attribute on the wordmark, and the data list the
-    // navigation is built from.
-    const linked = [
-      ...[...footer.matchAll(/href="(\/[^"]*)"/g)].map((match) => match[1]),
-      ...[...footer.matchAll(/href:\s*"(\/[^"]*)"/g)].map((match) => match[1]),
-    ];
-    expect(linked.length).toBeGreaterThan(1);
-
-    const ROUTES: Record<string, string> = {
-      "/": "src/app/(public)/(catalog)/page.tsx",
-      "/shop": "src/app/(public)/shop/page.tsx",
-      "/ueber-skyisles": "src/app/(public)/ueber-skyisles/page.tsx",
-    };
-
-    for (const href of linked) {
-      expect(ROUTES[href], `footer links ${href}, which has no page`).toBeTruthy();
-      expect(existsSync(ROUTES[href])).toBe(true);
-    }
-  });
-
-  it("offers the shop and the about page as destinations", () => {
-    expect(footer).toContain('href: "/shop"');
-    expect(footer).toContain('href: "/ueber-skyisles"');
+  it("the withdrawal function is reachable from every page", () => {
+    // § 356a BGB: continuously available during the period, prominently
+    // placed, easily accessible. The footer is on every public page and on
+    // the signed-in app layout.
+    expect(footer).toContain("WITHDRAWAL_PATH");
+    expect(footer).toContain("de.footer.withdrawNow");
   });
 });
 
@@ -193,8 +193,8 @@ describe("no design-system regressions", () => {
       "src/components/checkout/payment-status.tsx",
       "src/components/checkout/checkout-view.tsx",
       "src/components/admin/ship-order-form.tsx",
-      "src/app/(admin)/admin/orders/page.tsx",
-      "src/app/(admin)/admin/orders/[orderNumber]/page.tsx",
+      "src/app/(business)/business/orders/page.tsx",
+      "src/app/(business)/business/orders/[orderNumber]/page.tsx",
     ];
     const RAW =
       /(?:bg|text|border|ring)-(?:white|black|red|amber|yellow|green|emerald|blue|orange|gray|slate|zinc|neutral)[-/][0-9]/;

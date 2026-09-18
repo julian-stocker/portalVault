@@ -196,7 +196,7 @@ Das war die damalige *Umsetzung* dieser Regel, nicht die Regel selbst. Seit `001
 in Mails und später im Impressum steht. Sie sind kein Zugangsmerkmal und werden nirgends als
 eines gelesen.
 
-Seit `0026` sind es **zwei** Adressen, weil es zwei Rechtssubjekte gibt (ADR-0064):
+Seit `0026` sind es **zwei** Adressen, weil es zwei Rollen gibt — Plattform und Verkäufer, ein Rechtssubjekt (ADR-0064, präzisiert durch ADR-0086):
 `platform_settings.contact_email` gehört SkyIsles als Plattformbetreiber (Datenschutz, Konto,
 Beschwerden über die Plattform), `sellers.contact_email` dem Verkäufer (alles zu einer
 Bestellung; sie steht als Antwortadresse in jeder Bestellmail). Beide Tabellen sind für `anon`
@@ -620,8 +620,27 @@ ist.
 zufälligen Salt, der die Datenbank nie verlässt (`commerce_settings.client_salt`, für keine
 Client-Rolle lesbar). **Keine rohe IP wird als Commerce-Datum gespeichert.** Ohne Adresse ist der
 Wert `NULL` und die Dimension entfällt — nie ein gemeinsamer konstanter Eimer. Ein Trigger erlaubt
-ausschließlich das **Löschen** des Werts, und bei Bezahlung entfällt er: eine bezahlte Bestellung
-hat nichts mehr zu drosseln. Datenminimierung, nicht Datensammlung.
+ausschließlich das **Löschen** des Werts. Datenminimierung, nicht Datensammlung.
+
+**Seit `0047`: gelöscht wird er auch tatsächlich.** `0010` hat im Spaltenkommentar angekündigt, der
+Fingerabdruck entfalle bei Bezahlung, und die Datenschutzerklärung hat das dem Kunden als Tatsache
+weitergegeben — getan hat es nichts. `orders_clear_client_hash_trg` (`before insert or update`)
+führt es jetzt aus. Kosten: die bezahlte Bestellung zählt nicht mehr in den Stundenzähler der
+Fingerprint-Dimension. Der Arm, auf den es ankommt — offene Checkouts, verbunden mit **aktiven**
+Reservierungen — ist nicht betroffen, weil eine bezahlte Bestellung keine aktive Reservierung mehr
+hält; unbezahlte Checkouts behalten ihren Fingerabdruck bis zum Ablauf. Konto und E-Mail bleiben
+als Dimensionen unverändert.
+
+**Der Widerrufs-Endpunkt ist gedrosselt (`0047`, ADR-0086).** `receive_withdrawal()` ist öffentlich
+und muss es sein — ein Widerruf darf kein Konto voraussetzen. Die erste Fassung zählte Zeilen in
+`withdrawal_requests`, die nur bei einem Treffer entstehen; eine Sonde auf eine erfundene
+Bestellnummer wurde damit nie gezählt. `withdrawal_attempts` hält jetzt je Aufruf einen gesalzenen
+Fingerabdruck und einen Zeitstempel, geschrieben **bevor** feststeht, ob etwas passt: 10 Versuche je
+gleitender Stunde, unabhängig davon, ob die Bestellung existiert, die E-Mail passt oder die Nummer
+erfunden ist. Ein gedrosselter Aufruf erhält **dieselbe** Antwort wie ein Nichttreffer; die
+Antwort verrät weiterhin nicht, ob es die Bestellung gibt. Die Tabelle ist für jede Client-Rolle
+gesperrt und enthält weder Bestellnummer noch E-Mail noch Namen; Zeilen älter als zwei Stunden
+werden bei jedem Aufruf entfernt.
 
 **Idempotenz ≠ Missbrauchsschutz.** `orders.request_id` verhindert, dass ein Doppelklick zwei
 Bestellungen erzeugt. Sie ist frei wählbar und schützt vor gar nichts sonst; die beiden Mechanismen
@@ -838,6 +857,79 @@ ebenso wenig; es gibt keinen Tabellenpfad an diesen Funktionen vorbei.
 **Bestelldaten bleiben Snapshots.** `series_snapshot` kommt beim INSERT aus dem Katalog und wird
 danach nie wieder nachgeschlagen; historische Zeilen bleiben NULL statt aus heutigen Daten
 aufgefüllt zu werden. Beide Leser projizieren nur `order_lines`.
+
+### Shop- und Plattformeinstellungen (Migration `0040`, ADR-0075)
+
+**Zwei Zuständigkeiten, zwei Zeilen.** Die Verkäuferangaben stehen auf `sellers`, die Adresse der
+Plattform auf `platform_settings`. Dass heute dieselbe Person beides verantwortet, ist der Grund für
+die Trennung und kein Argument dagegen.
+
+**Keine neue Rolle.** `is_shop_admin()` bleibt das einzige Prädikat; alle vier neuen Funktionen
+prüfen es als erste Anweisung, sind `security definer` mit `set search_path = ''`, `revoke`n von
+`public, anon` und sind nur `authenticated` ausführbar. Eine Test-Berechtigung gewährt hiervon
+nichts (ADR-0071).
+
+**Öffentlich ist nur, was ein Kassenformular braucht:** `shipping_countries` ist lesbar, weil die
+Kasse die Länderliste anzeigen muss. `shipping_methods` ist es **nicht** — Preise erreichen den
+Kunden über `shipping_quote()`, das den Betrag ohnehin berechnet. `seller_public()` bleibt
+unverändert: der Kunde sieht einen Anzeigenamen, keine Registernummer und keine Steuernummer.
+
+**Die Prüfung, wohin geliefert wird, ist serverseitig.** `create_order()` fragt
+`shipping_country_allowed()`; der Client spiegelt die Liste nur für sein Formular. Ein verändertes
+Frontend schaltet kein Land frei.
+
+**Keine Geheimnisse.** Die neuen Spalten tragen Identitäts- und Richtlinienangaben, keine
+Schlüssel, keine Tokens, keine Zugangsdaten — und sie sind leer, bis ein Mensch sie füllt.
+
+### Drei Konten (Migration `0041`, ADR-0077)
+
+**Zwei Berechtigungen, keine Hierarchie.** `platform_admins` sagt, wer SkyIsles führt;
+`seller_operators` sagt, wer den Shop führt. `is_platform_admin()` und
+`can_operate_active_seller()` rufen einander **nie** auf — Admin impliziert nicht Business und
+umgekehrt. Beides hat nur, wem beides einzeln gegeben wurde.
+
+**Autorisiert wird über `auth.uid()`**, nie über E-Mail-Adresse, Benutzernamen oder Anzeigenamen.
+Die Suche im Adminbereich *findet* ein Konto über die Adresse; gespeichert und geprüft wird die
+Konto-ID. Auf beiden Tabellen hat kein Clientrole ein Recht, es gibt keine Policy, und die
+Migration nennt kein einziges Konto — der Adminbestand wird aus `shop_admins` übernommen.
+
+**`is_shop_admin()` ist seit `0041` ein Alias auf `is_platform_admin()`** und ausdrücklich **keine**
+Vereinigung der beiden. Alles, was bei der Neuzuordnung übersehen wurde, verweigert damit dem
+Verkäufer und funktioniert für den Administrator weiter — die sichere Richtung.
+
+**41 Funktionen wurden maschinell umgestellt:** je genau zwei geänderte Zeilen, Prädikat und
+Meldung. 21 fragen nun nach dem Verkäufer, 22 nach der Plattform. Die Wächter sind weiterhin die
+Grenze, nicht die Route: `/business` und `/admin` antworten 404, aber jede Schreiboperation fragt
+dasselbe Prädikat noch einmal in der Datenbank.
+
+**Die Supportadresse der Plattform gehört dem Admin.** `admin_set_platform_support()` fragt
+`is_platform_admin()`; `admin_set_shop_policies()` kann sie seit der Bereinigung von `0041` nicht
+mehr schreiben und der Leser des Verkäufers gibt sie nicht mehr aus. Ein Feld dafür steht **nicht**
+im Shopprofil — eine Eingabe auf dem falschen Bildschirm lehrt die falsche Zuständigkeit, auch
+wenn das Speichern scheitert.
+
+**Entzug bleibt sichtbar.** `seller_operators.is_enabled` wird auf `false` gesetzt statt die Zeile
+zu löschen; die Prädikate prüfen das Flag. Dass ein Mutationstest das Weglassen dieser Bedingung
+zunächst nicht bemerkte, ist der Grund, warum sie jetzt ausdrücklich geprüft wird.
+
+### Ein Konto, ein Typ (Migration `0042`, ADR-0078)
+
+**USER, BUSINESS oder ADMIN — nie zwei davon.** Zwei Trigger halten das: einer auf
+`seller_operators` weist einen Plattform-Administrator ab, einer auf `platform_admins` weist einen
+aktiven Shopbetreiber ab. Trigger und nicht CHECK, weil die Invariante über zwei Tabellen reicht;
+und nicht nur in der Vergabefunktion, weil sie einen direkten `INSERT`, einen direkten RPC-Aufruf
+und die Service-Role überstehen muss.
+
+Beide sehen nur **aktive** Mitgliedschaft: erst entziehen, dann vergeben. Das Vergeben entfernt
+**niemals still** die andere Mitgliedschaft. Der letzte Administrator kann sich nicht selbst
+entfernen — niemand könnte es zurückgeben.
+
+**Die Sammlung ist Sammlern vorbehalten.** Alle vier Policies auf `collection_items` verlangen
+zusätzlich `is_collector_account()`; sie wurden ersetzt und nicht ergänzt, weil eine zweite
+permissive Policy mehr erlaubt hätte statt weniger. Lesen ist ebenso zu wie Schreiben.
+**Gelöscht wird nichts** — ein Typwechsel verschiebt Zugriff, nicht Speicher.
+
+Der Katalog bleibt für alle drei lesbar (ADR-0076). Eingeschränkt hat sich nur die Sammlung.
 
 ## 5. Git-Sicherheit
 

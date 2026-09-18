@@ -226,9 +226,9 @@ describe("the main sections keep their prefetch", () => {
     expect(code(NAV)).toContain("prefetch: (viewer) => (viewer.signedIn ? undefined : false)");
   });
 
-  it("still switches prefetch off for the two admin destinations only", () => {
+  it("still switches prefetch off for the operator destinations only", () => {
     const nav = code(NAV);
-    expect(nav.match(/prefetch: \(\) => false/g)).toHaveLength(2);
+    expect(nav.match(/prefetch: \(\) => false/g)).toHaveLength(3);
   });
 
   it("leaves the cart, the shop and the about page prefetching", () => {

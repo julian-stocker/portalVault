@@ -12,14 +12,16 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
-import { isAdmin } from "@/lib/auth/admin";
+import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { SIGN_IN_PATH } from "@/lib/auth/redirect";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const profile = await currentProfile();
   if (!profile) redirect(SIGN_IN_PATH);
-  const admin = await isAdmin();
+  // Both capabilities, from the one memoised answer the route guards use
+  // (ADR-0077). The bar offers a destination only to whoever may enter it.
+  const { platformAdmin, sellerOperator } = await capabilities();
   // Zeroes without a query for a collector; see `fetchOpenOrderCounts()`.
   const openOrders = await fetchOpenOrderCounts();
 
@@ -31,7 +33,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           mounts, rather than two systems to keep in step. The active section
           comes from the path, so /collection and /settings light up too. */}
       {/* `profile` is already loaded above — the username costs nothing here. */}
-      <SiteNav signedIn admin={admin} openOrders={openOrders} username={profile.username} />
+      <SiteNav
+        signedIn
+        admin={platformAdmin}
+        business={sellerOperator}
+        openOrders={openOrders}
+        username={profile.username}
+      />
       <div className="relative flex-1">
         {/*
          * The world begins UNDER the header (V3.4).

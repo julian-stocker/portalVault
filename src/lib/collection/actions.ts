@@ -14,6 +14,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { isCollector } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 
 const SKY_ID = /^SKY-[0-9]{4}$/;
@@ -44,6 +45,13 @@ export async function setCollected(
   ) {
     return { ok: false, reason: "invalid" };
   }
+
+  /*
+   * A collection belongs to a private collector (ADR-0078). A Business or an
+   * Admin account has none — the row policies refuse them since 0042, and
+   * asking here turns a silent zero-row write into an answer.
+   */
+  if (!(await isCollector())) return { ok: false, reason: "auth" };
 
   const supabase = await createClient();
   const { data: auth } = await supabase.auth.getUser();

@@ -21,7 +21,7 @@ const code = (path: string) =>
     .replace(/^\s*\/\/.*$/gm, "");
 
 const sql = code(MIGRATION);
-const detail = code("src/app/(admin)/admin/orders/[orderNumber]/page.tsx");
+const detail = code("src/app/(business)/business/orders/[orderNumber]/page.tsx");
 const table = code("src/components/admin/order-lines-table.tsx");
 const actions = code("src/lib/admin/order-actions.ts");
 
@@ -449,7 +449,7 @@ describe("authorization", () => {
       actions.indexOf("export async function unmarkOrderShipped"),
       actions.indexOf("export async function setTrackingNumber"),
     );
-    expect(unshipAction).toContain("if (!(await isAdmin())) return { ok: false");
+    expect(unshipAction).toContain("if (!(await canOperateSeller())) return { ok: false");
   });
 
   it("gives a tester nothing", () => {

@@ -274,8 +274,8 @@ describe("the bar carries marks, the header carries actions (V3.4.1)", () => {
  *   cog            ->  /account
  */
 describe("the header carries a profile and an account action", () => {
-  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
-  const settingsFn = nav.slice(nav.indexOf("function SettingsAction("), nav.indexOf("function NavItem("));
+  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function AccountHubAction("));
+  const settingsFn = nav.slice(nav.indexOf("function AccountHubAction("), nav.indexOf("function NavItem("));
   const group = nav.slice(nav.indexOf('<div className="ml-auto flex min-w-0 items-center'));
 
   it("has a slice of each to inspect", () => {
@@ -292,12 +292,12 @@ describe("the header carries a profile and an account action", () => {
   });
 
   it("offers no settings to somebody who is not signed in", () => {
-    expect(group).toContain("{signedIn ? <SettingsAction active={settingsActive} /> : null}");
+    expect(group).toContain("{signedIn ? <AccountHubAction active={accountHubActive} /> : null}");
   });
 
-  it("orders them name, person, cog, cart", () => {
+  it("orders them name, person, account card, cart", () => {
     const profile = group.indexOf("<ProfileAction");
-    const settings = group.indexOf("<SettingsAction");
+    const settings = group.indexOf("<AccountHubAction");
     const cart = group.indexOf("<CartBadge />");
     expect(profile).toBeGreaterThan(-1);
     expect(settings).toBeGreaterThan(profile);
@@ -350,7 +350,7 @@ describe("the header carries a profile and an account action", () => {
     expect(settingsFn).toContain("focus-ring");
     // Marks stay 18 px; shrinking an icon is not how space is found.
     expect(profileFn).toContain('<AccountGlyph className="h-[18px] w-[18px]" />');
-    expect(settingsFn).toContain('<SettingsGlyph className="h-[18px] w-[18px]" />');
+    expect(settingsFn).toContain('<AccountHubGlyph className="h-[18px] w-[18px]" />');
   });
 
   it("is offered to the administrator, unlike the cart", () => {
@@ -367,7 +367,7 @@ describe("the header carries a profile and an account action", () => {
  * twenty-character username must eat into empty space, never into them.
  */
 describe("a long username moves nothing", () => {
-  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
+  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function AccountHubAction("));
 
   it("keeps the min-w-0 chain unbroken", () => {
     /*
@@ -421,7 +421,7 @@ describe("a long username moves nothing", () => {
 describe("the active state splits between profile and account", () => {
   it("reads one level finer than activeSection(), and only here", () => {
     expect(nav).toContain('const profileActive = (pathname ?? "/") === "/account/profile";');
-    expect(nav).toContain("const settingsActive = inAccount && !profileActive;");
+    expect(nav).toContain("const accountHubActive = inAccount && !profileActive;");
     expect(nav).toContain('const inAccount = active === "account";');
   });
 
@@ -478,13 +478,14 @@ describe("the username reaches the header on the server", () => {
   });
 
   it("joins the work the public layout was already doing", () => {
-    expect(layouts.public).toContain("const [user, admin, profile] = await Promise.all([");
+    expect(layouts.public).toContain("const [user, caps, profile] = await Promise.all([");
     expect(layouts.public).toContain("currentProfile(),");
     expect(layouts.public.match(/currentProfile\(\)/g)).toHaveLength(1);
   });
 
   it("does not mix the admin gate with header decoration", () => {
-    const gate = layouts.admin.indexOf("if (!(await isAdmin())) notFound();");
+    // The gate is the platform capability alone since 0041 (ADR-0077).
+    const gate = layouts.admin.indexOf("if (!platformAdmin) notFound();");
     const fetchAfter = layouts.admin.indexOf("currentProfile()");
     expect(gate).toBeGreaterThan(-1);
     expect(fetchAfter, "the profile must be read after the gate").toBeGreaterThan(gate);

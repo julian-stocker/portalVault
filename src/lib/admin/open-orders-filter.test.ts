@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { attentionOf, hasOpenWork, openOrderCounts } from "@/lib/admin/orders";
+import { attentionOf, hasOpenWork, NO_OPEN_ORDERS } from "@/lib/admin/orders";
+import { latestFunction } from "@/test-support/migrations";
 import { de } from "@/lib/i18n/de";
 
 /**
@@ -79,27 +80,30 @@ describe("the filter and the label agree on what open means", () => {
 });
 
 describe("the counter uses the same definition as the list", () => {
-  const row = (attention: number) => ({ attention });
+  /*
+   * These used to exercise `openOrderCounts(rows)`. The counting moved into
+   * `seller_open_order_counts()` in 0045 — because counting rows fetched from
+   * a 100-row page is not counting (ADR-0082) — so the same three assertions
+   * are now made about the SQL that does it.
+   */
+  // The effective definition: 0046 redefines this one to be live-only.
+  const counter = latestFunction("seller_open_order_counts").body;
 
   it("counts all three open buckets", () => {
-    expect(openOrderCounts([row(0), row(1), row(2)])).toEqual({
-      needsResolution: 1,
-      toShip: 1,
-      inFlight: 1,
-    });
+    for (const bucket of [0, 1, 2]) {
+      expect(counter, String(bucket)).toContain(`count(*) filter (where a.attention = ${bucket})`);
+    }
   });
 
   it("an unpaid checkout is counted, but it is not work", () => {
-    const counts = openOrderCounts([row(2)]);
-    expect(counts.inFlight).toBe(1);
+    expect(counter).toContain("'in_flight',        count(*) filter (where a.attention = 2)");
     // The nav badge must not light up because somebody opened a basket.
-    expect(hasOpenWork(counts)).toBe(false);
+    expect(hasOpenWork({ ...NO_OPEN_ORDERS, inFlight: 1 })).toBe(false);
   });
 
   it("a settled order is neither", () => {
-    const counts = openOrderCounts([row(3)]);
-    expect(counts).toEqual({ needsResolution: 0, toShip: 0, inFlight: 0 });
-    expect(hasOpenWork(counts)).toBe(false);
+    expect(counter).not.toContain("a.attention = 3");
+    expect(hasOpenWork(NO_OPEN_ORDERS)).toBe(false);
   });
 
   it("the buckets the counter knows are the buckets the SQL emits", () => {
@@ -121,34 +125,59 @@ describe("the counter uses the same definition as the list", () => {
 
 describe("list and counter read the same rows", () => {
   const queries = readFileSync("src/lib/admin/order-queries.ts", "utf8");
-  const home = readFileSync("src/app/(admin)/admin/page.tsx", "utf8");
-  const list = readFileSync("src/app/(admin)/admin/orders/page.tsx", "utf8");
+  const home = readFileSync("src/app/(business)/business/page.tsx", "utf8");
+  const list = readFileSync("src/app/(business)/business/orders/page.tsx", "utf8");
+  const archive = readFileSync("src/lib/admin/order-archive.ts", "utf8");
 
-  it("there is one call, and the counter is computed from its result", () => {
-    // Not a second query with a second predicate — that is how the two would
-    // drift apart again.
-    expect(queries).toContain("fetchAdminOrders(true)");
-    expect(queries).toContain("openOrderCounts(rows)");
+  /** Block and line comments removed, so prose cannot satisfy or break a test. */
+  function withoutComments(source: string): string {
+    return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  }
+
+  it("the list and the counter share a predicate, not an implementation", () => {
+    /*
+     * These were one call until 0045: the counter tallied the list's rows.
+     * That is why the badge was capped at 100 (ADR-0082). They are now two
+     * queries — and the drift this file exists to prevent is prevented the
+     * better way, by both deriving their buckets from `order_attention()`
+     * rather than by one being a by-product of the other.
+     */
     expect((queries.match(/rpc\("admin_orders"/g) ?? []).length).toBe(1);
+    expect(queries).toContain('rpc("seller_open_order_counts")');
+
+    for (const name of ["admin_orders", "seller_open_order_counts"]) {
+      const body = latestFunction(name).body;
+      expect(body, name).toContain("public.order_attention(o.needs_resolution");
+      // And nowhere is the rule written out a second time.
+      expect(body, name).not.toContain("when o.needs_resolution then 0");
+    }
   });
 
   it("the list asks the same function with the same flag", () => {
-    expect(list).toContain("fetchAdminOrders(openOnly)");
+    // `?open=1` is still its own view and still one call. The archive views
+    // added in 0045 sit beside it; they did not absorb it (ADR-0082).
     expect(list).toContain('open === "1"');
+    expect(list).toContain("fetchAdminOrders(true)");
   });
 
   it("neither filters again in TypeScript", () => {
     // The rule lives in SQL. A second copy here is a second thing to keep in
     // step, and it would be the one nobody remembers.
-    for (const source of [list, home]) {
-      expect(source).not.toMatch(/attention\s*<=\s*\d/);
-      expect(source).not.toMatch(/payment_status\s*===\s*"pending"/);
+    //
+    // Comments are stripped first. This assertion is about what the code
+    // DOES, and a doc comment that explains the SQL rule is not a second
+    // implementation of it — matching prose would only teach the next author
+    // to stop explaining things.
+    for (const source of [list, home, archive]) {
+      const code = withoutComments(source);
+      expect(code).not.toMatch(/attention\s*<=\s*\d/);
+      expect(code).not.toMatch(/payment_status\s*===\s*"pending"/);
     }
   });
 
   it("the admin home shows unpaid checkouts, quietly and separately", () => {
     expect(home).toContain("openOrders.inFlight > 0");
-    expect(home).toContain("copy.inFlightCount");
+    expect(home).toContain("orders.inFlightCount");
     // Still separate from the work line: hasOpenWork decides that one.
     expect(home).toContain("hasOpenWork(openOrders)");
   });
@@ -171,7 +200,12 @@ describe("the reported case, end to end through the model", () => {
   });
 
   it("is counted", () => {
-    expect(openOrderCounts([stuckCheckout]).inFlight).toBe(1);
+    // Bucket 2 has its own `filter` clause in the aggregate, so it is counted
+    // rather than folded into "settled".
+    expect(latestFunction("seller_open_order_counts").body).toContain(
+      "'in_flight',        count(*) filter (where a.attention = 2)",
+    );
+    expect(stuckCheckout.attention).toBe(2);
   });
 
   it("and is labelled without using the filter's word", () => {

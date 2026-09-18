@@ -16,6 +16,7 @@ export type NavSection =
   | "collection"
   | "account"
   | "admin"
+  | "business"
   | "inventory"
   | "cart"
   | "shop"
@@ -54,10 +55,15 @@ export function activeSection(pathname: string): NavSection | null {
   if (path === "/settings" || path === "/onboarding") return "account";
 
   // Stock has its own destination in the bar, so it lights up on its own
-  // rather than as part of the administration area (ADR-0037).
-  if (path === "/admin/inventory" || path.startsWith("/admin/inventory/")) return "inventory";
+  // rather than as part of the seller's area (ADR-0037).
+  if (path === "/business/inventory" || path.startsWith("/business/inventory/")) return "inventory";
 
-  // The administration area, including everything under it.
+  // The seller's area — orders, offers, shop settings (ADR-0077). Separate
+  // from the platform area, because they are separate authorities even when
+  // one person holds both.
+  if (path === "/business" || path.startsWith("/business/")) return "business";
+
+  // The platform administration area, including everything under it.
   if (path === "/admin" || path.startsWith("/admin/")) return "admin";
 
   return null;

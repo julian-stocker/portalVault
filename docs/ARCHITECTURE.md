@@ -14,7 +14,7 @@ in `docs/DECISIONS.md` als Entscheidung geführt.
 | **SkyIsles** | die **Plattform**. Betreiberin von Katalog, Konten, Sammlung, Checkout und Zahlungsabwicklung. Nicht Verkäuferin der Ware. |
 | **yulez.collectibles** | der **erste und vorerst einzige gewerbliche Verkäufer auf SkyIsles**. Vertragspartner des Kunden, Rechnungsaussteller, Versender. |
 
-Beides gehört derselben Person — es sind trotzdem zwei Rechtssubjekte mit verschiedenen
+Beides gehört derselben Person und ist **ein** Rechtssubjekt (ADR-0086) — aber zwei Rollen mit verschiedenen
 Pflichten. Wo im Folgenden „SkyIsles" steht, ist die Plattform gemeint.
 
 **Die Plattform wird konzeptionell seller-fähig gedacht; die laufende Implementierung bleibt

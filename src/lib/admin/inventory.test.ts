@@ -251,17 +251,22 @@ describe("the model carries no database", () => {
   });
 });
 
-describe("the stock page is admin-only by construction", () => {
-  it("sits inside the admin route group", () => {
-    expect(() => source("src/app/(admin)/admin/inventory/page.tsx")).not.toThrow();
-    // (admin)/layout.tsx answers 404 to everyone else, and the database
-    // refuses the reads regardless (migration 0005).
-    expect(source("src/app/(admin)/layout.tsx")).toContain("if (!(await isAdmin())) notFound();");
+describe("the stock page belongs to the seller, by construction", () => {
+  it("sits inside the business route group", () => {
+    /*
+     * Stock is a commercial fact, so it moved out of the platform area in
+     * 0041 (ADR-0077). A platform administrator who was never granted the
+     * shop gets the same 404 here as a collector.
+     */
+    expect(() => source("src/app/(business)/business/inventory/page.tsx")).not.toThrow();
+    expect(source("src/app/(business)/layout.tsx")).toContain("if (!sellerOperator) notFound();");
+    // And it is no longer reachable through the platform area at all.
+    expect(() => source("src/app/(admin)/admin/inventory/page.tsx")).toThrow();
   });
 
   it("loads the catalog including hidden figures, like the admin catalog", () => {
     // A figure taken out of the public catalog can still sit in a box.
-    expect(source("src/app/(admin)/admin/inventory/page.tsx")).toContain(
+    expect(source("src/app/(business)/business/inventory/page.tsx")).toContain(
       "fetchCatalog({ includeHidden: true })",
     );
   });

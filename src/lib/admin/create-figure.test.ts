@@ -305,8 +305,8 @@ describe("the action sends no identity and decides nothing", () => {
     expect(action).not.toContain("p_slug");
   });
 
-  it("asks isAdmin() for the message, not as the boundary", () => {
-    expect(action).toContain("await isAdmin()");
+  it("asks isPlatformAdmin() for the message, not as the boundary", () => {
+    expect(action).toContain("await isPlatformAdmin()");
     expect(action).toContain("de.admin.notAllowed");
   });
 

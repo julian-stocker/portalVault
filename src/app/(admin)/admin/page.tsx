@@ -1,103 +1,49 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { CommercePanel } from "@/components/admin/commerce-panel";
-import { TesterPanel } from "@/components/admin/tester-panel";
+import { BusinessAccountsPanel } from "@/components/admin/business-accounts-panel";
 import { PlatformSettings } from "@/components/admin/platform-settings";
-import { SellerSettings } from "@/components/admin/seller-settings";
-import { ShopSettings } from "@/components/admin/shop-settings";
-import { fetchCommerceState } from "@/lib/admin/commerce";
-import { fetchTesterState } from "@/lib/admin/tester";
-import { fetchShopSettings } from "@/lib/admin/inventory";
-import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { TesterPanel } from "@/components/admin/tester-panel";
 import { fetchPlatformSettings } from "@/lib/admin/platform";
-import { fetchSeller } from "@/lib/admin/seller";
-import { hasOpenWork } from "@/lib/admin/orders";
 import { fetchAdminCategories } from "@/lib/admin/queries";
+import { fetchSellerOperators } from "@/lib/admin/seller-operators";
+import { fetchTesterState } from "@/lib/admin/tester";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.admin.title };
 
 /**
- * The way in.
+ * Running SkyIsles.
  *
- * Deliberately thin: two links, the one number that says whether the
- * classification is finished, and the one setting that prices the whole shop
- * (ADR-0045). Still not a dashboard — everything here is either a way in or
- * a thing to change.
+ * The catalog every collector and every Business reads, the accounts that may
+ * run the shop, the testers, the platform's own contact. **No commerce.**
+ * Orders, stock, prices and the seller's facts moved to `/business` in 0041,
+ * because operating a shop and operating the platform are different
+ * authorities even while one person holds both (ADR-0077).
+ *
+ * An administrator who has not been granted the shop cannot reach it from
+ * here — there is no link, and there would be no page if they followed one.
  */
 export default async function AdminPage() {
-  const [categories, settings, openOrders, seller, platform, commerce, testers] = await Promise.all([
+  const [categories, platform, testers, operators] = await Promise.all([
     fetchAdminCategories(),
-    fetchShopSettings(),
-    // Memoised per request — the layout above already counted these rows.
-    fetchOpenOrderCounts(),
-    fetchSeller(),
     fetchPlatformSettings(),
-    fetchCommerceState(),
     fetchTesterState(),
+    fetchSellerOperators(),
   ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
-  const copy = de.admin.orders;
-  const flagged = openOrders.needsResolution > 0;
 
   return (
     <main className="mx-auto w-full max-w-4xl px-4 pt-8 pb-6 md:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">{de.admin.title}</h1>
+      <p className="mt-2 text-sm text-muted">{de.admin.domains.adminHint}</p>
 
-      <div className="mt-8 flex flex-col gap-3">
-        <Link
-          href="/admin/orders?open=1"
-          className={
-            "rounded-sky-lg bg-surface/80 px-5 py-4 hover:ring-border-strong " +
-            // The same three-level tone the order list uses, so the two agree
-            // about what is loud: only a flagged order raises its voice.
-            (flagged ? "ring-2 ring-danger/70" : "ring-1 ring-border/70")
-          }
-        >
-          <span className="font-medium">{copy.title}</span>
-          {/*
-           * The two numbers, on the page the operator opens first (F5).
-           *
-           * Counted from rows `admin_orders(p_open_only => true)` already
-           * returns — no second query, no aggregate, nothing that polls. Until
-           * now a flagged order was discoverable only by opening the list on a
-           * hunch, and a flagged order is one where money has arrived, nothing
-           * was booked and shipping is locked (ADR-0050).
-           */}
-          <span className="mt-1 block text-sm">
-            {hasOpenWork(openOrders) ? (
-              <>
-                {flagged ? (
-                  <span className="font-semibold text-danger">
-                    {copy.needsResolutionCount(openOrders.needsResolution)}
-                  </span>
-                ) : null}
-                {flagged && openOrders.toShip > 0 ? (
-                  <span className="text-muted"> · </span>
-                ) : null}
-                {openOrders.toShip > 0 ? (
-                  <span className={flagged ? "text-muted" : "font-medium text-foreground"}>
-                    {copy.toShipCount(openOrders.toShip)}
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <span className="text-muted">{copy.nothingOpen}</span>
-            )}
-          </span>
-          {/* Quiet, and separate from the work line above: a checkout in
-              flight needs nobody. But it is open, and until ADR-0063 it was
-              counted nowhere — which is how a payment that hung because a
-              webhook never arrived stayed invisible on every screen. */}
-          {openOrders.inFlight > 0 ? (
-            <span className="mt-1 block text-sm text-muted">
-              {copy.inFlightCount(openOrders.inFlight)}
-            </span>
-          ) : null}
-          <span className="mt-1 block text-sm text-muted">{copy.linkHint}</span>
-        </Link>
-
+      {/*
+       * The canonical catalog is the platform's (ADR-0076). Every collector
+       * reads it, every Business attaches offers to it, and nobody but an
+       * administrator corrects it.
+       */}
+      <div className="mt-8 grid gap-3 sm:grid-cols-2">
         <Link
           href="/admin/catalog"
           className="rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
@@ -122,25 +68,16 @@ export default async function AdminPage() {
         </Link>
       </div>
 
-      {/* Who sells, then who operates, then what it charges. The seller comes
-          first because its address feeds every customer mail and later the
-          invoice; the platform's own address answers a different question
-          (ADR-0064, ADR-0059). */}
+      <BusinessAccountsPanel state={operators} />
+
       <div className="mt-8">
-        <CommercePanel state={commerce} />
         {/* Its own panel since 0036: testers are no longer a commerce
             setting, and each carries its own permissions (ADR-0071). */}
         <TesterPanel state={testers} />
-        <SellerSettings
-          displayName={seller.displayName}
-          contactEmail={seller.contactEmail}
-          replyTo={seller.replyTo}
+        <PlatformSettings
+          contactEmail={platform.contactEmail}
+          supportEmail={platform.supportEmail}
         />
-        <PlatformSettings contactEmail={platform.contactEmail} />
-      </div>
-
-      <div className="mt-8">
-        <ShopSettings percentage={settings.pricePercentage} />
       </div>
 
       <p className="mt-8 text-sm text-muted">{de.admin.completionNote}</p>

@@ -6247,3 +6247,1500 @@ zwei Dinge, die auseinanderlaufen können.
 mehr) · beim Zurücknehmen die Sendungsnummer löschen · `shipped_at` „für später" behalten · eine
 Stornomail · eine eigene Mobilansicht der Positionen · `preparing`/`completed`/`cancelled`
 freischalten.
+
+---
+
+## ADR-0075 — USER, SHOP und ADMIN sind Verantwortungsbereiche
+
+> **Teilweise überholt durch ADR-0077 (2026-09-17).** Der Abschnitt „Drei Bereiche, keine
+> Rechtssubjekte und keine Rollen" gilt nur noch zur Hälfte: es sind weiterhin keine Rechtssubjekte,
+> aber seit `0041` sind es **ausdrückliche Berechtigungen** — `platform_admins` und
+> `seller_operators`, ohne Vererbung. Alles Übrige in diesem ADR — die Trennung der Einstellungen,
+> die Rückfallwege der Kontakte, der Verzicht auf `seller_id` — gilt unverändert.
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **Migration:** `0040_shop_platform_responsibilities.sql`
+**Führt ADR-0064 aus. Ändert ADR-0021 nicht: kein Marktplatz.**
+
+**Kontext.** ADR-0064 hat die beiden Identitäten getrennt — SkyIsles die Plattform,
+yulez.collectibles der Verkäufer. Im Produkt war davon wenig zu sehen: `/admin` mischte
+Bestellungen, Testkonten, Verkäuferangaben, Plattformangaben und den Preisprozentsatz auf einem
+Bildschirm, und die Kasse sagte **„Verkäufer ist SkyIsles"** — auf dem letzten Bildschirm vor der
+Zahlung, also genau dort, wo die Aussage zählt.
+
+Der Satz war nicht aus Nachlässigkeit falsch. Er sollte klarstellen, dass dies kein Marktplatz ist,
+und tat das, indem er den falschen Vertragspartner nannte. **Beides lässt sich gleichzeitig richtig
+sagen**, und dieser ADR sagt, wie.
+
+### Drei Bereiche, keine Rechtssubjekte und keine Rollen
+
+| | |
+|---|---|
+| **USER** | Konto, Profil, Sammlung, eigene Bestellungen. Unverändert. |
+| **SHOP** | Alles, was dem Verkäufer gehört: Bestellungen, Versand, Verkäuferidentität, Kontakt, Steuern, Widerruf. |
+| **ADMIN** | Alles, was SkyIsles selbst betrifft: Katalog, Figuren, Kategorien, Testkonten, Plattformkontakt. |
+
+**Keine drei Rechtssubjekte** — heute ist es eine Person. **Keine drei Rollen**: `is_shop_admin()`
+bleibt das einzige Prädikat, und derselbe Administrator erreicht weiterhin beides. Eine RBAC, die
+niemand braucht, wäre eine Berechtigungsschicht, die man pflegen muss, ohne dass sie je etwas
+verhindert.
+
+### Warum die Trennung überhaupt nötig ist, wenn es eine Person ist
+
+**Gerade deswegen.** Wenn derselbe Mensch beide Fragen beantwortet, erinnert ihn nichts daran, dass
+es zwei sind — und die Antworten fließen ineinander. „Verkäufer ist SkyIsles" ist genau, wie das
+aussieht. Zwei getrennte Zeilen in der Datenbank und zwei Überschriften im Adminbereich sind die
+billigste Art, den Unterschied sichtbar zu halten, bis er eines Tages auch praktisch einer ist.
+
+### Was aus dem Code in die Konfiguration wandert
+
+Drei Geschäftsentscheidungen waren SQL-Literale: das Lieferland (`create_order()` verglich mit
+`'DE'`), die Versandarten samt Preisen und die Versandkostengrenze. Keine davon ist ein Naturgesetz;
+alle drei gehören dem Verkäufer. **Eine Entscheidung, die eine Migration braucht, trifft niemand.**
+
+Sie werden Tabellen — `shipping_countries`, `shipping_methods`, `shop_settings.free_shipping_threshold`
+— **mit exakt den heutigen Werten befüllt**: DE, Hermes 5,49 €, DHL 6,49 €, 75,00 €. Das Anwenden
+von 0040 ändert also keinen Preis, kein Land und kein Verhalten.
+
+**Der Server entscheidet weiter.** `create_order()` fragt `shipping_country_allowed()` statt eines
+einkompilierten Landes. Die Kasse spiegelt dieselbe Liste für ihr Formular und entscheidet nichts:
+Wer den Client verändert, schaltet kein Land frei. Die Funktion wurde dafür **maschinell** aus 0028
+übernommen und an genau einer Stelle geändert — 263 Zeilen abzutippen wäre die ganze Kasse aufs
+Spiel gesetzt für ein Konfigurationsfeld.
+
+### Ein Verkäufer-Kontakt, zwei Rückfallwege
+
+`contact_email` bleibt maßgeblich. `withdrawal_contact_email` und `complaints_contact_email` sind
+NULL-bar und bedeuten „keine eigene Adresse" — aufgelöst mit `coalesce`, **nie kopiert**. Eine Kopie
+sähe heute identisch aus und hörte am Tag der Änderung auf zu folgen. Genau so verrotten
+Einstellungen.
+
+`platform_settings.support_email` ist die Adresse der **Plattform** — Konto, Datenschutz, Website.
+Sie ist NULL und bleibt es, bis es eine gibt: **`support@skyisles.app` steht nirgends im Code.**
+`platform_settings.contact_email` wird nicht umbenannt; eine Umbenennung, die nur eine These über
+Namensgebung ausdrückt, ist der schnellste Weg von einer These zu einem Ausfall.
+
+**Nachtrag, teuer gelernt.** Die erste Fassung dieser Migration schrieb
+`alter table public.business_settings` — den Namen, den `0019` vergab und den `0026` vierzehn
+Migrationen später in `platform_settings` geändert hat. Typecheck, Lint und die gesamte Testsuite
+waren grün; Staging antwortete „relation does not exist". **Eine Migration zu lesen ist nicht
+dasselbe wie das Schema zu lesen** — das Schema ist die Summe aller Migrationen, und eine
+Umbenennung in der Mitte ist unsichtbar, wenn man nur die Datei öffnet, die die Tabelle angelegt
+hat. `migration-names.test.ts` prüft das jetzt: kein `rename to` darf von einer späteren Migration
+mit dem alten Namen unterlaufen werden.
+
+### Identität wird erfasst, nicht erfunden
+
+Dreizehn Spalten für rechtlichen Namen, Geschäftsnamen, Rechtsform, Anschrift, Telefon, zweiten
+Kontaktweg, Register, USt-IdNr. und Wirtschafts-IdNr. **Alle NULL-bar, alle leer, kein einziger
+Seed.** Ein Platzhalter in einem Impressumsfeld ist keine halbfertige Einstellung, sondern eine
+falsche Aussage über eine echte Person, die darauf wartet, veröffentlicht zu werden. Ein CHECK
+verbietet zusätzlich den Leerstring: „gesetzt, aber leer" soll es nicht geben.
+
+### Die Kasse nennt den Verkäufer, der Katalog nicht
+
+Der Name kommt aus `seller_public()` und steht **nirgends im Code** — Umbenennen ist eine Zeile in
+der Datenbank, kein `grep`. Ohne aktiven Verkäufer greift ein neutraler Satz; ein geratener Name
+wäre schlimmer als keiner.
+
+Die **Katalogkarte bleibt verkäuferneutral** („Angebote ab …"). Der Katalog ist ein
+Sammlerwerkzeug, kein Schaufenster, und 565 Karten mit einem Verkäufernamen wären das Zweite. Die
+**Schnellansicht** ist die Stelle, an der ein konkretes Angebot erscheint, und zeigt dort weiterhin
+den Namen plus „Gewerblicher Verkäufer" — das war schon richtig.
+
+### Was Legal V1 noch braucht
+
+0040 legt die Struktur, nicht die Texte. Offen bleiben: Impressum, AGB, Datenschutzerklärung,
+Widerrufsbelehrung, Muster-Widerrufsformular, die elektronische Widerrufsfunktion nach § 356a BGB,
+der § 19-Hinweis an den Preisen, die Bestätigung auf dauerhaftem Datenträger — und auf `orders`
+`terms_version` und `withdrawal_version`, damit ein Vertrag von gestern reproduzierbar bleibt, wenn
+die Einstellungen von heute sich ändern. **Bewusst nicht in 0040**: Vertragshistorie ist kein
+Nebenprodukt einer Zuständigkeitstrennung.
+
+**Verworfen.** Drei Rechtssubjekte erfinden · RBAC für einen Menschen · `seller_id` „für später"
+(ADR-0021) · den Verkäufernamen ins i18n schreiben · `platform_settings.contact_email` umbenennen ·
+die Rückfalladressen mit Kopien füllen · Identitätsfelder mit Musterdaten vorbelegen · eine
+Support-Adresse einkompilieren · Versandpreise beim Umzug in die Konfiguration „glätten" ·
+`create_order()` von Hand abschreiben.
+
+---
+
+## ADR-0076 — Der Katalog gehört SkyIsles, das Angebot dem Verkäufer
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **keine eigene Migration**
+**Feste Invariante. Ergänzt ADR-0075 um die Frage, wem welches Datum gehört.**
+
+**Kontext.** ADR-0075 hat Zuständigkeiten getrennt: USER, SHOP, ADMIN. Offen blieb die Frage, die
+darüber entscheidet, ob ein zweiter Verkäufer später überhaupt möglich ist — **wem gehören die
+Daten?**
+
+### Die Regel, in vier Sätzen
+
+| | |
+|---|---|
+| **Der Katalog** | gehört SkyIsles |
+| **Der Sammlungsstand** | gehört den Nutzern |
+| **Angebot, Bestand, Verkaufsbetrieb** | gehören den Verkäufern |
+| **Plattform- und Katalogpflege** | gehört den Admins |
+
+**Ein Verkäufer führt keinen eigenen Figurenkatalog.** Er hängt kommerzielle Daten an
+Katalogeinträge von SkyIsles:
+
+```
+SkyIsles-Katalogeintrag  +  Angebot des Verkäufers
+```
+
+Angebotsseitig: ob dieser Verkäufer den Artikel führt, Preis, Menge, Zustand, Verfügbarkeit,
+verkäuferspezifischer Bestell- und Versandzustand.
+
+**Ein Verkäufer ändert niemals kanonische Katalogtatsachen:** Name, kanonisches Bild, Serie,
+Element, Variante, Kartentyp, beschreibende Katalogmetadaten. Eine Korrektur durch den ADMIN wird
+zur gemeinsamen Wahrheit für **alle** — Sammler wie Verkäufer.
+
+**Niemals ein zweiter, duplizierter Figurenkatalog pro Verkäufer.** Ein zweiter Verkäufer
+referenziert denselben kanonischen Katalog.
+
+### Warum das heute schon gilt, ohne dass etwas gebaut wurde
+
+Der Befund aus der Prüfung: **die Trennung existiert bereits, sie war nur nicht aufgeschrieben.**
+
+- Auf `skylanders`, `categories`, `series` und `catalog_editorial` gibt es **kein einziges
+  Tabellenrecht und keine Policy** für `anon` oder `authenticated`. Jeder Schreibweg ist eine
+  `security definer`-Funktion mit `is_shop_admin()` als erster Anweisung.
+- Der kommerzielle Bestand hängt über `shop_inventory.sky_id` am Katalog, statt ihn zu kopieren.
+  `order_lines.sky_id` ebenso.
+- Redaktionelle Spalten (`catalog_visible`, `display_name_override`, `catalog_group`) gehören dem
+  Admin; `is_listed`, `sale_price` und `quantity` liegen auf `shop_inventory` und gehören dem
+  Verkäufer. Die Grenze verläuft schon an der richtigen Stelle.
+
+### Was diese Invariante an `0040` geändert hat
+
+**Die Versandkostengrenze ist vom Plattform-Singleton auf `sellers` gewandert.**
+`shop_settings` ist per `check (id)` eine Ein-Zeilen-Tabelle — richtig für eine Plattformtatsache,
+falsch für diese: was ein Shop für Porto verlangt, ist die Entscheidung eines Verkäufers. Auf dem
+Singleton wäre das heute unsichtbar geblieben und hätte am Tag des zweiten Verkäufers einen Umbau
+einer Bedingung gekostet, die genau eine Zeile erlauben soll. **Die Spalte kostet hier nichts und
+später nichts.**
+
+**Die Katalog-Einstiege stehen jetzt unter „Plattform".** Bestellungen, Katalog und Kategorien
+lagen als eine Reihe über beiden Überschriften — also außerhalb der Gliederung, die sie erklären
+sollte. Bestellungen gehören zum Shop, der Katalog zur Plattform.
+
+### Was ausdrücklich NICHT gebaut wird
+
+Kein `seller_id`, kein zweiter Verkäufer, kein Onboarding, keine Provisionen, keine Auszahlungen,
+kein Ranking, keine Marktplatz-AGB, keine neue Rolle. `sellers_one_active` gilt weiter (ADR-0021,
+ADR-0075).
+
+### Der Weg dorthin, falls er je gegangen wird
+
+Damit „verhindert es nicht" eine überprüfbare Aussage ist und keine Hoffnung:
+
+| Schritt | Aufwand |
+|---|---|
+| `shop_inventory` bekommt `seller_id` | nullable Spalte, Backfill auf den einen Verkäufer, dann `not null` |
+| `shipping_methods` / `shipping_countries` bekommen `seller_id` | Spalte, Backfill, Primärschlüssel auf `(seller_id, code)` erweitern |
+| `sellers_one_active` fällt | Constraint droppen |
+| `admin_set_*`-Funktionen nehmen eine Verkäuferreferenz | heute lösen sie „den aktiven Verkäufer" implizit auf |
+| Berechtigungen trennen Shop-Betreiber von Plattform-Admin | neue Prädikate neben `is_shop_admin()` |
+| `order_lines`, `orders` | **unverändert** — sie sind schon Snapshots und kennen den Katalog nur über `sky_id` |
+| Katalogtabellen | **unverändert** — sie waren nie verkäuferbezogen |
+
+Der Katalog steht in dieser Liste nicht. Das ist der Punkt: **die Struktur, die einen zweiten
+Verkäufer teuer machen würde, wäre ein duplizierter Katalog, und den gibt es nicht.**
+
+**Verworfen.** Ein Katalog je Verkäufer · verkäuferbezogene Spalten auf `skylanders` ·
+verkäuferbezogene Einstellungen auf dem Plattform-Singleton · `seller_id` „auf Vorrat" · eine
+Rollenschicht, bevor es einen zweiten Betreiber gibt.
+
+---
+
+## ADR-0077 — Drei Konten: USER, BUSINESS, ADMIN
+
+> **Teilweise überholt durch ADR-0078 (2026-09-17).** Der Abschnitt „Orthogonal" gilt nur noch zur
+> Hälfte: die beiden Prädikate rufen einander weiterhin nie auf, aber ein Konto kann seit `0042`
+> **nicht mehr beide Mitgliedschaften halten**. „Beides hat nur, wem beides einzeln gegeben wurde"
+> ist damit hinfällig — es kann niemandem mehr gegeben werden. Alles Übrige gilt unverändert.
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **Migration:** `0041_three_account_authorization.sql`
+**Führt ADR-0076 aus. Korrigiert ADR-0075 in einem Punkt: es sind jetzt doch Berechtigungen.**
+
+**Kontext.** ADR-0075 hielt fest, USER/SHOP/ADMIN seien Verantwortungsbereiche und ausdrücklich
+**keine** Rollen. Das war richtig für den Schritt, den es beschrieb — und es ist der Punkt, an dem
+dieser ADR widerspricht. Der Betreiber will drei Geräte: ein Sammlerkonto, ein Shopkonto und ein
+Plattformkonto. Solange `is_shop_admin()` beide Fragen beantwortet, ist das nicht ausdrückbar.
+
+**Das Problem war ein Prädikat mit zwei Bedeutungen.** `is_shop_admin()` hieß gleichzeitig „darf
+den Katalog korrigieren" und „darf den Shop führen". Solange eine Person beides ist, fällt das
+niemandem auf — und genau deshalb konnte ein Business-Konto nicht verkaufen, ohne zugleich den
+Katalog umschreiben zu dürfen, den jeder Sammler liest.
+
+### Zwei Berechtigungen, keine Hierarchie
+
+| | |
+|---|---|
+| **USER** | der Normalfall. **Keine Zeile, nirgends.** |
+| **BUSINESS** | eine Zeile in `seller_operators`: dieses Konto darf diesen Shop führen |
+| **ADMIN** | eine Zeile in `platform_admins`: dieses Konto führt SkyIsles |
+
+**Orthogonal, und das ist der ganze Punkt.** Admin impliziert nicht Business, Business impliziert
+nicht Admin. Beides hat nur, wem beides einzeln gegeben wurde. `is_platform_admin()` und
+`can_operate_active_seller()` rufen einander **nie** auf — das ist die eine Zeile, deren Bruch
+niemand bemerken würde, weil heute eine Person beides hält, und deshalb steht ein Test genau darauf.
+
+### Niemand sperrt sich aus
+
+`platform_admins` wird aus `shop_admins` befüllt. Wer SkyIsles heute verwaltet, tut es danach
+weiter. Die Migration **nennt dabei niemanden**: sie liest die Tabelle, die die Antwort schon
+enthält — keine UUID, keine Adresse, kein Name, und ein Test prüft das mit zwei Mustern.
+
+Den **Shopzugang vergibt sie ausdrücklich nicht** mit. Das macht der Betreiber danach einmal in der
+Oberfläche. Ihn automatisch mitzugeben wäre genau die Vererbung, die dieser ADR beseitigt.
+
+### `is_shop_admin()` bedeutet jetzt nur noch Plattform
+
+Nicht gelöscht, sondern verengt: ein Alias auf `is_platform_admin()`. Zwei Gründe. `shop_admins`
+ist die Tabelle, die der Betreiber kennt. Und alles, was bei der Neuzuordnung übersehen wurde,
+funktioniert weiter für den Administrator und **verweigert dem Verkäufer** — das ist die sichere
+Richtung: eine übersehene Funktion sperrt einen Verkäufer aus einem Bildschirm aus, sie übergibt
+ihm nicht den Katalog.
+
+**Ausdrücklich nicht** `is_platform_admin() or can_operate_active_seller()`. Das wäre die Vererbung
+in einer Zeile.
+
+### 41 Funktionen, maschinell umgestellt
+
+Jede Funktion wurde aus der Migration geholt, die sie zuletzt definiert, der Wächter ersetzt und
+geprüft, dass **genau zwei Zeilen** anders sind: das Prädikat und seine Meldung. Alles andere ist
+Byte für Byte das, was heute läuft. 41 `security definer`-Funktionen abzutippen ist der Weg, auf
+dem eine Berechtigungsschicht ein Loch bekommt — und dieselbe Technik hat schon `create_order()`
+durch `0040` getragen.
+
+**BUSINESS** (21): Bestellungen, Versand, Tracking, Bestand, Bestandsjournal, Freigabe, Preise,
+Commerce-Modus, Sandbox-Rückbuchung, Verkäuferangaben, Shopprofil, Versandkonfiguration.
+**ADMIN** (22): Katalogsichtbarkeit, Anzeigenamen, Notizen, Produktgruppen, Katalogjournal, Bilder,
+Kartentypen, Figuren anlegen, Plattformangaben, Kontosuche, Testkonten, Telemetrie — plus die
+beiden neuen für die Shopzugänge.
+
+### Zwei Bereiche, weil es zwei Befugnisse sind
+
+`/business` ist neu und trägt Bestellungen, Bestand und die Verkäuferangaben. `/admin` behält
+Katalog, Kategorien, Testkonten, Plattformangaben — und die Verwaltung der Shopzugänge, denn
+**jemandem den Shop zu geben ist ein Plattformakt**. Ein Verkäufer kann sich keinen zweiten
+Betreiber dazuholen.
+
+Beide Bereiche antworten **404**, nicht 403: ein „verboten" bestätigt, dass es dort etwas gibt. Und
+beide sind nur das erste von zwei Toren — jede Schreiboperation fragt dasselbe Prädikat noch einmal
+in der Datenbank.
+
+### Das Abzeichen zeigt Befugnisse, keinen Rang
+
+Sammler: nichts. Shop: „Business". Plattform: „Admin". Beides: **beide Abzeichen**, nicht das
+höhere — es gibt kein höheres. Klein und sekundär, tonal, ohne das Sammlergold (ADR-0042).
+
+### `seller_operators.seller_id` ist kein Marktplatz
+
+Es ist das einzige `seller_id` im ganzen Schema, und es beantwortet **„welches Konto darf diesen
+Shop führen"** — nicht „welchem Verkäufer gehört diese Bestellung". Keine Bestellung, keine
+Bestandszeile und keine Katalogzeile bekommt eines; Tests prüfen beides getrennt.
+`sellers_one_active` gilt unverändert.
+
+**Zugang wird deaktiviert, nicht gelöscht.** Eine Berechtigung, die es gab und nicht mehr gibt, ist
+eine Tatsache über die Vergangenheit. Damit ist `is_enabled` tragend — und dass ein Mutationstest
+das Weglassen dieser einen Bedingung zunächst **nicht** bemerkte, war der Grund, die Prüfung
+nachzuziehen.
+
+### Nachtrag: die Navigation musste der Berechtigung folgen
+
+Nach dem ersten manuellen Test auf Staging sah das Adminkonto weiterhin „Lager", folgte dem Link
+und bekam 404. **Der Wächter hatte recht, der Link war falsch** — und die Versuchung, das durch
+Aufweichen der Route zu beheben, ist genau die, der man nicht nachgeben darf.
+
+Die Ursache war eine Zeile: `Viewer` kannte nur `{ signedIn, admin }`, also hing sowohl das Lager
+als auch der Adminbereich an `viewer.admin`. Ein Business-Konto sah dadurch **gar keinen** Einstieg
+in seinen eigenen Bereich. `Viewer` kennt jetzt beide Befugnisse, und jedes Ziel fragt die, die der
+Wächter dahinter fragt.
+
+Drei Dinge wanderten mit: das **Abzeichen der gemeldeten Bestellung** sitzt jetzt am Shop statt am
+Adminbereich — eine bezahlte Bestellung ohne gebuchten Bestand löst der Verkäufer, nicht die
+Plattform. Die **Sammlung** hängt an `!viewer.business` statt `!viewer.admin`; die Begründung aus
+ADR-0032 („der Betreiber ist kein Sammler") beschrieb immer den Verkäufer, und ein
+Plattform-Administrator ist im Katalog ein ganz normaler Sammler. Und die **Leser der
+Anwendung** fragen jetzt dieselbe Befugnis wie die Funktion, die sie aufrufen — `fetchOpenOrderCounts()`
+fragte `isAdmin()`, während `admin_orders()` seit 0041 den Verkäufer fragt, sodass ein Business-Konto
+einen leeren Shop gesehen hätte.
+
+**Abmelden musste nicht umziehen.** Es steht seit ADR-0062 auf `/account`, genau einmal, als POST
+unterhalb einer Trennlinie — „Abmelden ist keine Sicherheitseinstellung". `/settings` ist ein
+permanenter Redirect auf `/account`, was den Eindruck erklärt, es liege unter den Einstellungen.
+Geändert wurde nichts; geprüft wird es jetzt.
+
+### Nachtrag: ein Leck, das keine Route geschlossen hätte
+
+Die erste Fassung von `0041` ließ `admin_set_shop_policies()` weiterhin
+`platform_settings.support_email` schreiben — und stellte den Wächter zugleich auf
+`can_operate_active_seller()` um. Damit hätte ein **Verkäufer die Supportadresse der Plattform**
+setzen können. In der Oberfläche stand das Feld unter „Kontakt" im Shopprofil, freundlich als
+Plattformangabe beschriftet; die Begründung war, die Gegenüberstellung mache den Unterschied
+sichtbar.
+
+**Beides war falsch.** Die Beschriftung war Kosmetik über einer echten Berechtigungslücke, und
+Zuständigkeit lehrt sich durch **richtige Platzierung**, nicht durch Nebeneinanderstellen. Die
+Funktion verliert den Parameter — per `drop function`, weil sonst die zehnstellige Fassung aus
+`0040` daneben stehen bliebe, aufrufbar und nun verkäufergeschützt. Die Adresse bekommt mit
+`admin_set_platform_support()` einen eigenen, plattformgeschützten Schreiber, und
+`admin_platform_settings()` liefert sie (gedroppt und neu angelegt, weil ein Rückgabetyp sich nicht
+in place ändert). Der Leser des Verkäufers gibt sie gar nicht mehr aus.
+
+**Verworfen.** `is_shop_admin()` als Vereinigung beider Prädikate · Admin automatisch zum
+Verkäufer machen · Konten in der Migration benennen · `seller_id` auf Bestellungen oder Bestand ·
+eine Rollentabelle mit frei definierbaren Rollen · die 41 Funktionen von Hand abschreiben · den
+Shopzugang im Shop verwalten lassen.
+
+---
+
+## ADR-0078 — Ein Konto, ein Typ
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **Migration:** `0042_strict_account_types.sql`
+**Verschärft ADR-0077. Lässt ADR-0076 unberührt.**
+
+**Kontext.** ADR-0077 machte BUSINESS und ADMIN zu **orthogonalen Berechtigungen**, die ein Konto
+zusammen halten kann, wenn jemand beide vergibt. Für das Problem, das es löste — zwei Befugnisse
+aus einem Prädikat zu trennen —, war das die richtige Form. Für das Produkt ist es die falsche.
+
+### Die Entscheidung
+
+| | |
+|---|---|
+| **USER** | privates Sammlerkonto. Keine privilegierte Mitgliedschaft. |
+| **BUSINESS** | gewerblicher Shop. **Keine Sammlung.** |
+| **ADMIN** | die Plattform. Keine Sammlung, kein Shop. |
+
+**Es gibt keinen vierten Zustand.** Wer privat sammelt *und* einen Shop führt, benutzt **zwei
+Konten**. Das ist die Entscheidung, kein Nebeneffekt der Umsetzung.
+
+### Warum getrennt und nicht geschichtet
+
+Der eigentliche Grund liegt in der Zukunft: SkyIsles soll eines Tages **private Sammler aus ihrer
+eigenen Sammlung verkaufen** lassen können. Wäre BUSINESS „ein Sammler mit Verkaufsrecht", dann
+wären dieses künftige Feature und der gewerbliche Shop **dieselbe Sache unter zwei Namen** — und es
+gäbe keine Stelle mehr, an der man ihnen verschiedene Regeln geben könnte. Privates Verkaufen und
+gewerbliches Verkaufen sind unterschiedliche Domänen mit unterschiedlichen Pflichten.
+
+**Privates Verkaufen wird jetzt nicht gebaut.** Die Identitäten werden getrennt, solange das
+billig ist.
+
+### Durchgesetzt in der Datenbank, nicht in der Oberfläche
+
+Zwei Tabellen, also **zwei Trigger**. Ein CHECK sieht nicht über Tabellengrenzen, und ein
+Fremdschlüssel kann keine *Abwesenheit* ausdrücken. Ein Wächter in der Vergabefunktion allein
+hielte einen direkten `INSERT` nicht auf — die Invariante muss einen direkten RPC-Aufruf und die
+Service-Role überstehen.
+
+Beide sehen nur auf **aktive** Mitgliedschaft. Eine entzogene Verkäuferzeile behält ihre Historie
+(ADR-0077) und darf keine dauerhafte Sperre sein: erst entziehen, dann vergeben — genau der
+ausdrückliche Übergang, den das Produkt will. **Niemals still das andere entfernen.**
+
+### Die Sammlung gehört Sammlern
+
+`0001` machte `collection_items` besitzergebunden; das war damals die ganze Frage. Jetzt sind es
+zwei: wessen Zeile ist das, **und ist dieses Konto überhaupt ein Sammler**.
+
+Alle vier Policies werden **ersetzt**, nicht ergänzt — eine zweite permissive Policy würde mit der
+ersten ver-ODERt und **mehr** erlauben, nicht weniger. Auch das Lesen ist zu: die Sammlung eines
+Business-Kontos ist unsichtbar, nicht bloß eingefroren.
+
+**Gelöscht wird nichts.** Ein Typwechsel verschiebt Zugriff, niemals Speicher. Wird der Shopzugang
+entzogen, ist dieselbe Sammlung unverändert wieder da.
+
+### Navigation und Abzeichen
+
+USER: Katalog, Sammlung, Konto. BUSINESS: Katalog, Shop, Lager, Konto, Abzeichen „Business".
+ADMIN: Katalog, Admin, Konto, Abzeichen „Admin". **Kein Sammlung-Eintrag für Business oder Admin**
+— und nicht nur ausgeblendet: die Route antwortet 404 und die Policies verweigern die Tabelle.
+
+Ein abgemeldeter Besucher zählt weiter als Sammler und sieht „Sammlung", die zur Anmeldung führt.
+Sie ihm wegzunehmen hieße, die halbe Produktidee vor genau den Leuten zu verstecken, die man
+einlädt.
+
+**Konto und Abmelden bleiben allen drei Typen gemeinsam** (ADR-0062). Ein Konto zu haben ist keine
+Sammlerfunktion.
+
+### Was das nicht ist
+
+Keine Rollentabelle, keine Hierarchie, kein Marktplatz. `is_platform_admin()` und
+`can_operate_active_seller()` rufen einander weiterhin **nie** auf. `is_privileged_account()` ist
+kein Bindeglied zwischen ihnen, sondern die Antwort auf eine dritte Frage — „ist dieses Konto
+etwas anderes als ein privater Sammler?" —, die nur die Sammlung stellt.
+
+**Verworfen.** Eine gemeinsame Rollentabelle · BUSINESS als „USER plus Verkaufsrecht" ·
+stilles Entfernen der anderen Mitgliedschaft beim Vergeben · Sammlungsdaten beim Typwechsel
+löschen · die Invariante nur in der Vergabefunktion · nur die Navigation zu verstecken · den
+letzten Administrator entfernbar zu lassen.
+
+---
+
+## ADR-0079 — Eine gemeldete Bestellung braucht einen Ausgang
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **Migration:** `0043_order_review_recovery.sql`
+**Ergänzt ADR-0050. Lässt ADR-0074 (umkehrbarer Versand) und ADR-0078 unberührt.**
+
+**Kontext.** Beim ersten echten Test mit dem Business-Konto auf Staging: die Bestellung ist
+bezahlt, der Bildschirm sagt „Prüfung erforderlich — Versand gesperrt", und **es gibt nichts zu
+tun**. Kein Knopf, keine Erklärung, kein Weg. Die Prüfung ergab: `needs_resolution` wird seit
+`0010` gesetzt, trägt den Kommentar „never cleared automatically" — und wurde tatsächlich **nirgends
+gelöscht**, weder automatisch noch von Hand, in keiner Migration und auf keinem Bildschirm.
+
+Ein Verkäufer konnte also eine bezahlte Bestellung bekommen und hatte keinen Ablauf dafür.
+
+### Zwei Wege hinein, und sie sind nicht dasselbe Problem
+
+| Ursache | Was passiert ist | Reparierbar? |
+|---|---|---|
+| `late_payment_unresolved` | Das Geld kam an, **nachdem** die Reservierung abgelaufen und freigegeben war. Bestellung **bezahlt**, Bestand **nie abgebucht**. | **Ja**, wenn die Ware heute da ist |
+| `payment_amount_mismatch` | Der gezahlte Betrag passt nicht zum Versuch. Bestellung nicht als bezahlt markiert. | **Nein** — eine Geldfrage |
+
+Das ist der Grund, warum hier kein „Freigeben"-Knopf steht. Ein solcher Knopf würde erlauben, Ware
+zu versenden, die das Lagerbuch noch als vorhanden führt — genau das, wogegen die Meldung existiert.
+
+### Die Reparatur ist eine echte Buchung
+
+Für den ersten Fall gilt: **wenn die Ware auf dem Regal liegt, ist die Buchung nachholbar**, und
+danach steht exakt der Zustand da, den eine umgewandelte Reservierung hinterlassen hätte. Also
+bucht `seller_resolve_stock_shortfall()` je Position eine `sale`-Bewegung durch das **vorhandene**
+Journal — dieselbe Funktion, die die Umwandlung benutzt hätte — und löscht die Markierung **erst
+danach**.
+
+`apply_inventory_movement()` weigert sich, eine Position unter ihre Reservierung zu drücken. Diese
+Weigerung wird **nicht abgefangen**: reicht der Bestand nicht, rollt die ganze Transaktion zurück,
+nichts ist gebucht, die Markierung bleibt und die Bestellung bleibt gesperrt. **Das ist die
+Sicherheitseigenschaft, kein Fehlerfall, den man umgehen müsste.**
+
+Zusätzlich verweigert die Funktion: eine Bestellung ohne Markierung, eine mit Geldabweichung, eine
+ohne das Spätzahlungsereignis, eine unbezahlte, eine mit noch **aktiver** Reservierung (dort ist der
+gewöhnliche Weg offen, und Buchen wäre Doppelbuchung) und eine, die schon einmal gebucht wurde.
+
+### Der Bildschirm sagt, welches Problem es ist
+
+Vorher: eine rote Box mit zwei Sätzen und keiner Handlung. Jetzt: die Ursache im Klartext — nie das
+interne Ereignis —, je Position **benötigt gegen verfügbar**, damit „reicht nicht" nachprüfbar ist
+statt behauptet, und der Knopf **nur dort, wo es einen gibt**. Bei einer Geldabweichung steht, dass
+sie beim Zahlungsanbieter zu klären ist.
+
+### Wem es gehört
+
+Dem Verkäufer. Bestellabwicklung ist Shopbetrieb, nicht Plattformverwaltung (ADR-0077):
+`can_operate_active_seller()`, niemals `is_shop_admin()`. Ein Plattform-Administrator ohne
+Shopzugang kann eine gemeldete Bestellung ebenso wenig auflösen wie versenden.
+
+### Die Staging-Bestellung
+
+`SI-2026-001041`, Sandbox, 11.09.2026: `checkout_expired` → `late_payment_unresolved {held:0,
+required:1}`. Eine Zeile, `SKY-9101/loose`, eine Reservierung im Zustand `released`. Aktueller
+Bestand: 4 vorhanden, 0 reserviert. Sie ist also **regulär reparierbar** und braucht keinen
+Sonderweg für Altbestellungen — **kein Invariant wurde für sie aufgeweicht**. Eine Bestellung ohne
+Deckung bliebe gesperrt, auch diese.
+
+**Verworfen.** Ein `needs_resolution = false`-Schalter · den Bestandsfehler bei Geldabweichung
+„auch" zu buchen · die Weigerung von `apply_inventory_movement()` abzufangen und teilweise zu
+buchen · einen Sonderweg für Sandbox- oder Altbestellungen · die Auflösung dem Administrator zu
+geben · die Sperre in `shipBlocker()` zu lockern.
+
+---
+
+## ADR-0080 — Der Shop ist ein Bereich, kein Formularstapel
+
+**Status:** angenommen · **Datum:** 2026-09-17 · **keine Migration**
+**Informationsarchitektur. Ändert an ADR-0077/0078 nichts.**
+
+**Kontext.** Zwei Befunde aus der Benutzung, beide keine Fehler im engeren Sinn:
+
+1. Der Betreiber erlebte „Mein Konto" als **Einstellungen** — obwohl das Label „Mein Konto" heißt
+   und ein Kommentar im Code ausdrücklich gegen das Wort „Einstellungen" argumentiert. Darüber
+   stand ein **Zahnrad**.
+2. `/business` war vier gestapelte Panels unter zwei Links. Die ladungsfähige Anschrift des
+   Verkäufers stand zwei Bildschirmhöhen unter der Bestellzahl.
+
+### Ein Zahnrad sticht das Label, das ihm widerspricht
+
+Das Symbol war das Problem, nicht der Text. Wer ein Zahnrad sieht, liest „Einstellungen", egal was
+daneben steht — eine Affordanz gewinnt gegen eine Beschriftung, die ihr widerspricht. Das Zahnrad
+ist jetzt eine **Karte mit Zeilen**: „die Dinge, die über mich hinterlegt sind", und genau das
+steht dahinter — Profil, Lieferdaten, Bestellungen, Sicherheit.
+
+Die zwei Türen im Kopfbereich bleiben (V3.4.1): Name und Person führen zu *wer dieses Konto ist*,
+die Karte zu *was über es hinterlegt ist*. **Abmelden bleibt unten auf „Mein Konto"**, unter einer
+Trennlinie, als POST — dort war es richtig und dort bleibt es, für alle drei Kontotypen.
+
+### Der Shop bekommt eine Übersicht statt einer Startseite mit allem darauf
+
+`/business` ist jetzt aufgebaut wie „Mein Konto": Karten mit Titel, einem Satz und einem Ziel.
+
+| Bereich | Was dort gehört |
+|---|---|
+| **Händlerprofil** | Der Name, unter dem Kunden den Shop sehen |
+| **Angebote & Preise** | Verkaufsmodus und automatische Preisbildung |
+| **Lagerbestand** | Menge, Preis und Freigabe je Figur, plus Journal |
+| **Bestellungen** | Bestellungen der Kundschaft: prüfen, versenden, Sendungsnummer |
+| **Versand** | Länder, Versandarten, Preise, Versandkostengrenze |
+| **Geschäftsdaten & Kontakt** | Rechtliche Angaben, Kontakte, Steuer, Widerruf |
+
+**Kein Feld wurde verschoben, nur seine Adresse.** `ShopProfilePanel` bekam eine `groups`-Angabe
+und rendert jetzt auf jeder Seite die Gruppen, die ihr Thema sind — dieselbe Gruppe an zwei Stellen
+wäre dasselbe Feld an zwei Stellen.
+
+**Die Übersicht bearbeitet nichts.** Sie führt hin. Die Arbeit unterbricht sie nur, wenn es welche
+gibt: gemeldete und zu versendende Bestellungen stehen oben, sonst steht dort nichts.
+
+### Öffentliche Händleridentität gegen Papierkram
+
+„Händlerprofil" ist das Gesicht, „Geschäftsdaten & Kontakt" die Akte. Zwei Publika, zwei Pflichten
+(ADR-0075). Der **Händlername kommt aus `sellers.display_name`** über `seller_public()` — dieselbe
+Quelle, die die Schnellansicht schon zeigt. **Nicht der Benutzername des Kontos**: der ist ein
+persönliches Handle und ähnelt heute zufällig dem Shopnamen; das eine fürs andere zu nehmen bricht
+in dem Moment, in dem jemand anderes den Shop führt.
+
+### Zwei Dinge, die es noch nicht gibt, und die nicht erfunden wurden
+
+**Händler-Icon.** Es existiert keine Spalte dafür und keine Storage-Policy. Die Seite **sagt das**,
+statt einen leeren Rahmen zu zeichnen, der einen Upload verspricht. Nachziehen heißt: eine Spalte
+auf `sellers`, ein Bucket-Pfad mit Policy, ein Upload-Weg — eine eigene Runde, keine Beifracht.
+
+**Bewertungen.** Kein Schema, keine Daten, keine Seite. Es gibt **keine Karte**, auch keine
+deaktivierte: `site-footer.tsx` hat diese Regel für das Produkt längst entschieden — *ein toter
+Link ist schlimmer als ein fehlender*. Der Bereich ist hier festgehalten und wird gebaut, wenn er
+gebaut wird.
+
+### „Bestellungen" heißt zweierlei
+
+Unter „Mein Konto" sind es **die eigenen Käufe**, im Shop **die Bestellungen der Kundschaft**. Die
+Shop-Liste sagt das jetzt in einem Satz über der Tabelle, damit ein Betreiber seine Verkäufe nie
+für Einkäufe hält.
+
+### Navigation
+
+**Shop** ist der Haupteinstieg, **Lager** bleibt als Abkürzung — Bestand ist die Aufgabe, die
+mehrmals täglich angefasst wird, alles andere erreicht man über die Übersicht. Nichts sonst aus dem
+Shop wandert in die Leiste; eine Leiste, die jeden Bereich aufnimmt, ist keine Leiste mehr.
+
+**Verworfen.** Das Zahnrad mit besserem Label behalten · eine Karte „Bewertungen" ohne Ziel · ein
+leerer Icon-Rahmen ohne Speicher · alle Verkäufereinstellungen in eine Seite „Einstellungen" ·
+zwei Karten auf dieselbe Route · den Benutzernamen als Händlernamen · eine Migration, damit die
+Übersicht vollständig aussieht.
+
+---
+
+## ADR-0081 — Zwei Zahlen, ein Prädikat, kein Berichtswesen
+
+**Status:** angenommen (2026-09-17) · Migration `0044` · ergänzt ADR-0080 ·
+**das Prädikat und die Beschriftung sind durch ADR-0083 ersetzt**
+
+> **Nachtrag (2026-09-17, vor der ersten Anwendung).** Der unten beschriebene
+> `paid`-Filter und die Beschriftung „Umsatz dieses Jahr" gelten **nicht mehr**.
+> `0044` zählt jetzt Bestelltätigkeit — aufgegebene Bestellungen, unabhängig von
+> der Zahlung — und die Zahl heißt „Bestellwert dieses Jahr". Begründung und
+> neues Prädikat: **ADR-0083**. Alles Übrige an dieser Entscheidung (Aggregat
+> statt Zeilenabruf, Berliner Jahresgrenze, exakter Sandbox-Ausschluss, keine
+> Analysetabellen) gilt unverändert.
+
+### Kontext
+
+Die Shop-Übersicht sagte, was zu tun ist, aber nicht, wie das Jahr läuft. Gefragt waren zwei
+Zahlen: **Bestellungen dieses Jahr** und **Umsatz dieses Jahr**.
+
+### Entscheidung
+
+**Eine Aggregatfunktion, keine Liste.** `seller_year_to_date()` gibt ein `jsonb` mit zwei Werten
+zurück. Der naheliegende Weg — `admin_orders()` aufrufen und in der Seite summieren — holt ein
+ganzes Jahr Bestellungen **samt Kundenadressen** in eine Ansicht, die „127" drucken will. Das
+wächst mit dem Shop und trägt personenbezogene Daten dorthin, wo sie nichts zu suchen haben.
+
+**Beide Zahlen teilen ein Prädikat:** `payment_status = 'paid'` und `commerce_mode = 'live'`,
+ab `date_trunc('year', now() at time zone 'Europe/Berlin')`.
+
+**Erstattungen: die Grenze wird genannt, nicht überspielt.** Das Schema kennt einen
+Erstattungs**status**, aber **keinen Erstattungsbetrag** — nirgends. Bei
+`partially_refunded` ist der Nettowert damit nicht bekannt, sondern *unbekannt*. Also fallen
+erstattete und teilerstattete Bestellungen aus **beiden** Zahlen heraus, und der Hinweis unter den
+Karten sagt genau das. Die Alternative wäre gewesen, einen Betrag zu erfinden, den niemand
+aufgeschrieben hat.
+
+**Darum heißt es „Umsatz" und sonst nichts.** Es ist die Summe bezahlter Bestellsummen. Kein
+Wareneinsatz, keine Gebühren, keine Steuer, keine Erstattung ist verrechnet. Jedes Wort, das eine
+Verrechnung verspricht, wäre an dieser Zahl falsch — ein Test hält die Bezeichnung fest.
+
+**Eine markierte Bestellung zählt.** `needs_resolution` heißt, die Abwicklung braucht einen
+Menschen — nicht, dass das Geld fraglich ist: eine verspätete Zahlung steht auf `paid`, *weil* sie
+ankam. Der andere Weg in die Markierung, die Betragsabweichung, setzt nie `paid` und fällt durch
+dasselbe Prädikat heraus, ohne Sonderfall.
+
+**Sandbox fällt exakt heraus.** `commerce_mode` ist NOT NULL, auf der Bestellung eingefroren, und
+`0021` hat jede ältere Zeile auf `'sandbox'` gesetzt. `= 'live'` ist eine Tatsache über die
+Bestellung, keine Vermutung aus Nummer, Kunde oder Datum.
+
+**Das Jahr ist Berlins.** Eine Bestellung um 00:30 am 1. Januar gehört zum neuen Jahr; unter UTC
+täte sie es nicht.
+
+**Darstellung über `src/lib/format.ts`.** Das ergibt `€ 4.582,40` und `1 270` — Locale `de-AT`,
+Symbol voran, schmales Leerzeichen als Gruppentrenner (ADR-0019). Eine zweite Währungsformatierung
+für ein Mock-up einzuführen hieße, Geld an zwei Stellen verschieden zu schreiben.
+
+### Konsequenzen
+
+`0044` braucht `0041` (das Verkäuferprädikat), sonst nichts. Das Prädikat steht **in der
+`WHERE`-Klausel**: ein Aufrufer ohne Verkäuferrecht aggregiert die leere Menge, statt eine Zeile zu
+lesen. Ein Teilindex auf `placed_at` hält die Summe billig.
+
+**Verworfen.** Nettoumsatz aus geschätzten Erstattungen · getrennte Prädikate für Anzahl und
+Umsatz · Analysetabellen, Tages-Rollups oder eine materialisierte Sicht für zwei Zahlen ·
+Vorjahresvergleich und Diagramme · `admin_orders()` in der Seite summieren · eine Umsatzzahl für
+ADMIN (der Shop gehört dem Verkäufer, ADR-0077).
+
+---
+
+## ADR-0082 — Das Archiv darf Arbeit nicht verstecken, der Bericht gehört seinem Monat
+
+**Status:** angenommen (2026-09-17) · Migration `0045` · ergänzt ADR-0063, ADR-0080, ADR-0081 ·
+**Entscheidung 5 ist durch ADR-0083 präzisiert**
+
+> **Nachtrag (2026-09-17, vor der ersten Anwendung).** Das Prädikat unten las
+> `payment_status not in ('expired', 'cancelled')`. Der Ausschluss von
+> `cancelled` war falsch: eine Stornierung ist ein **späteres Ereignis** und
+> darf die ursprüngliche Bestellung nicht rückwirkend aus ihrem Bestellmonat
+> entfernen. Gültig ist jetzt `public.order_counts_as_placed()` aus `0044` —
+> siehe **ADR-0083**. Der Abschnitt „Verhältnis zu ADR-0081" unten ist damit
+> ebenfalls überholt: die beiden Zahlen teilen sich jetzt dieselbe Definition.
+
+### Kontext
+
+Die Bestellliste hatte genau eine Form: „die neuesten hundert, sortiert nach Aufmerksamkeit". Sie
+beantwortet „was muss ich jetzt tun?" und sonst nichts — nicht „was war im August?". Und der
+Verkäufer hat für keinen Monat einen Nachweis, was gelaufen ist.
+
+### Entscheidung 1 — Aktuell ist ein ODER, kein Datum
+
+```
+aktiv  =  aktuell  ODER  noch offen
+```
+
+Die naheliegende Regel — „älter als 15 Tage wandert ins Archiv" — versteckt Arbeit. Eine
+markierte Bestellung (`needs_resolution`) ist bezahlt, hat keinen Bestand gebucht, kann nicht
+versendet werden, **und wird jeden Tag älter, gerade weil sich niemand darum gekümmert hat**. Die
+Regel, die die Liste aufräumt, wäre die Regel, die die eine wichtige Zeile begräbt.
+
+„Noch offen" ist keine neue Definition: es ist `attention <= 2`, also genau das, was `p_open_only`
+seit `0024` bedeutet (ADR-0063). Eine Definition von „offen" — für das Abzeichen, den Filter und
+das Archiv.
+
+**15 Tage, rollierend, in Berliner Kalendertagen.** Nicht „dieser Monat": am Ersten wäre die Liste
+leer, obwohl dieselbe Arbeit offen ist. Nicht `now() - interval '15 days'`: dann läge die Grenze
+bei der Uhrzeit, zu der man die Seite geöffnet hat.
+
+### Entscheidung 2 — Monate sind Überschriften, keine Zeilen
+
+Die Monatsabschnitte kommen aus `seller_order_calendar()`: eine Zeile je Monat, nur Zählungen,
+höchstens zwölf im Jahr. Ein Monat öffnet sich als **eigene Ansicht** (`?year=&month=`), nicht als
+aufgeklapptes `<details>` — ein `<details>` mit hunderten Zeilen hat diese Zeilen trotzdem geladen.
+Damit lädt keine Ansicht dieser Seite je die gesamte Historie.
+
+**Der Filter hat Vorrang vor dem Standard.** Im Standard zeigen die Monatsabschnitte nur, was nicht
+schon oben steht. Wählt der Verkäufer einen Monat, zeigt die Seite **den ganzen Monat** — ein
+Filter, der die jungen Zeilen verschweigt, lügt über den Monat in seiner Überschrift. Und in eine
+Jahres-/Monatsansicht wird nichts aus den letzten 15 Tagen hineinkopiert.
+
+### Entscheidung 3 — Die Aufmerksamkeitsregel bekommt eine eigene Funktion
+
+`0018` hat die Warnung selbst hingeschrieben: „Zwei Kopien sind zwei Dinge, die übereinstimmen
+müssen und es irgendwann nicht mehr tun." Diese Migration hätte fünf daraus gemacht.
+`order_attention()` ist die Regel; `admin_orders()` wird per `create or replace` darauf umgestellt
+— gleiche Signatur, gleicher Rückgabetyp, gleiche Sortierung, gleiche `p_open_only`-Bedeutung.
+
+### Entscheidung 4 — Das Arbeitsabzeichen zählt, statt zu blättern
+
+Das Abzeichen wurde aus den Zeilen berechnet, die `admin_orders(p_open_only)` liefert — und dieser
+Aufruf ist **auf 100 Zeilen gedeckelt**. Das Abzeichen war also nie eine Zahl offener Bestellungen,
+sondern eine Zahl offener Bestellungen **auf der ersten Seite**: bei 130 stand dort 100, und bei
+1300 stünde dort 100. `seller_open_order_counts()` fragt drei Zahlen ab, ohne Limit, mit
+demselben Prädikat. Was „offen" heißt, ändert sich nicht — nur die Antwort wird richtig.
+
+### Entscheidung 5 — Ein Monatsbericht ist ein **Ereignisbericht**
+
+Das ist die Entscheidung, die den ersten Entwurf ersetzt hat. Der zählte `paid`-Bestellungen; damit
+war die Augustzahl eine Aussage über **Zahlungen**, die den Namen eines Monats trug.
+
+**Ein Ereignis gehört in den Monat, in dem es passiert ist. Ein späteres Ereignis greift nie
+zurück.**
+
+```
+Bestellung aufgegeben   2026-08-31   ->  Bestellaktivität im August
+bezahlt                 2026-09-02   ->  ändert am August nichts
+erstattet               2026-09-12   ->  ein September-Ereignis
+```
+
+Daraus folgt alles Übrige:
+
+**Der Monat kommt aus `placed_at`, aus nichts sonst.** Nicht aus `paid_at`, nicht aus dem
+Statuswechsel, nicht aus `shipped_at`. Ein auf die Zahlung gestellter Monat verschöbe eine
+Bestellung je nachdem, wann ein Webhook ankam, und schriebe jeden abgeschlossenen Monat neu,
+sobald eine späte Zahlung eintrifft.
+
+**Zahlung ist keine Bedingung.** Eine im August aufgegebene Bestellung ist Augustaktivität, ob das
+Geld am 31., am 2. September oder noch gar nicht kam.
+
+**Was eine Bestellung ist — geprüft, nicht angenommen.** Ein Warenkorb steht nicht in der Datenbank
+(ADR-0043). Eine Zeile in `orders` schreibt `create_order()` in dem Moment, in dem der Kunde den
+Checkout mit seiner Adresse abschickt. Von den sieben erlaubten `payment_status`-Werten schreibt
+dieses Schema **drei**: `pending`, `paid`, `expired`. `failed`, `cancelled`, `refunded` und
+`partially_refunded` stehen im CHECK und werden von nichts geschrieben. Also:
+
+```
+zählbar  =  payment_status not in ('expired', 'cancelled')
+```
+
+`expired` ist der abgebrochene Checkout — die 20-Minuten-Reservierung ist verfallen, der Bestand
+zurückgegangen, niemand hat bezahlt. `cancelled` steht daneben, weil es dasselbe bedeuten wird,
+falls es je geschrieben wird. **Eine erstattete Bestellung bleibt in ihrem Bestellmonat** — die
+Erstattung ist ein eigenes Ereignis in ihrem eigenen Monat, und genau das ist der Punkt.
+
+### Entscheidung 6 — Es heißt **Bestellwert**, nicht Einnahme
+
+Weil das Geld nicht angekommen sein muss. „Einnahme", „Umsatz" und „bezahlt" behaupten alle einen
+Zahlungseingang; bei einer am 31. aufgegebenen und am 2. bezahlten Bestellung wäre jedes dieser
+Wörter an dem Tag falsch, an dem der Bericht entsteht. `paid_count`/`unpaid_count` stehen als
+**Stand bei Erstellung** daneben — informativ, und sie definieren den Bestellwert nicht um.
+
+Zahlungseingänge und Rückerstattungen sind eine **zweite** Art von Bericht, nach ihren eigenen
+Ereignisdaten. Die gibt es noch nicht.
+
+### Entscheidung 7 — Keine Versionierung
+
+Der erste Entwurf hatte `version`, um einen Monat nach einer späten Zahlung neu auszustellen. In
+diesem Modell ist eine späte Zahlung **kein Grund**, irgendetwas neu auszustellen — sie ändert den
+Monat der Bestellung nicht —, und eine Erstattung gehört in einen anderen Monat. Ohne den
+rückwirkenden Fall blieb nur eine Korrektur, die niemand verlangt hat. Also die stärkere
+Invariante:
+
+**Ein festgeschriebener Bericht je Kalendermonat und Modus.** Per `unique`-Constraint, nicht per
+Gewohnheit.
+
+### Entscheidung 8 — Nur Felder, die SkyIsles wirklich hat
+
+| | |
+|---|---|
+| **Gebühren des Zahlungsanbieters** | `payment_events` speichert Event-ID, Typ und Ausgang — bewusst nicht die Payload (`0012`). Keine `balance_transaction`, keine Gebühr, keine Auszahlung. |
+| **Erstattungen** | Kein Betrag, kein Zeitstempel, keine Tabelle — nur vier Statuswerte, die nichts schreibt. Was ein künftiges Erstattungsereignis braucht, steht am Ende von `0045`. |
+| **Umsatzsteuer** | § 19 UStG: wird nicht erhoben, und bewusst nicht als Satz 0 modelliert (`0011`). |
+| **Gewinn** | Nichts hier weiß, was der Bestand gekostet hat. |
+
+Vier Spalten mit Nullen läsen sich als „es wurde nichts abgezogen". Zwei Sätze unter der Liste
+lesen sich als das, was stimmt.
+
+### Entscheidung 9 — Kein Download in dieser Runde
+
+PDF und CSV brauchen eine Formatentscheidung und einen **privaten** Speicherort. Der einzige Bucket
+des Projekts ist `catalog-images`, und der ist **öffentlich** (`0007`). Erzeugt würden beide aus
+der festgeschriebenen Zeile und `included_orders`, nie aus einer frischen Abfrage.
+
+### Verhältnis zu ADR-0081
+
+**Die beiden Zahlen sind jetzt bewusst verschieden.** `0044` zählt `paid`; der Bericht zählt
+aufgegebene Bestellungen. Das ist kein Versehen, sondern zwei Fragen: *Geld eingegangen* gegen
+*Bestellungen angenommen*. Solange die Shop-Startseite „Umsatz dieses Jahr" sagt und `paid`
+meint, ist ihre Beschriftung für sich genommen korrekt — aber sie beantwortet eine andere Frage
+als die Berichte darunter. Ob sie auf **Bestellumsatz** umgestellt wird, ist eine offene
+Produktentscheidung; `0044` ist nirgends angewandt und kann ohne Neuschreiben geändert werden.
+
+### Konsequenzen
+
+`0045` braucht `0041` und den Commerce-Kern; nicht `0042`, `0043` oder `0044`. Kein `seller_id` —
+ADR-0076 gilt. `seller_monthly_reports` ist für jede Client-Rolle gesperrt; der Weg hinein sind die
+Funktionen, und alle fragen `can_operate_active_seller()`.
+
+**Verworfen.** Archivieren nach Alter allein · „dieser Monat" statt 15 rollierender Tage ·
+aufklappbare `<details>` mit vorgeladenen Zeilen · Umsatz neben der Monatszahl · **den Bericht auf
+`paid` stellen** · **den Monat aus `paid_at` ableiten** · **eine erstattete Bestellung rückwirkend
+aus ihrem Bestellmonat entfernen** · Berichtsversionierung für einen rückwirkenden Fall, den es
+nicht gibt · eine Erstattungsspalte, die immer 0 ist · eine Steuerzeile 0,00 € · geschätzte
+Stripe-Gebühren · ein Hintergrundjob · ein Download-Knopf ohne Datei · das Abzeichen weiter aus
+einer 100-Zeilen-Seite zählen.
+
+---
+
+## ADR-0083 — Eine Definition von „Bestellung", und ein Ereignis gehört seinem Monat
+
+**Status:** angenommen (2026-09-17) · Migrationen `0044` + `0045`, beide vor der ersten
+Anwendung korrigiert · präzisiert ADR-0081 und ADR-0082
+
+### Kontext
+
+ADR-0082 hat das Ereignismodell für Monatsberichte eingeführt. Zwei Stellen waren damit noch
+nicht konsistent.
+
+**Erstens** zählte die Jahreskennzahl auf der Shop-Startseite weiter `paid`-Bestellungen und hieß
+„Umsatz dieses Jahr" — eine Zwitterzahl: begrenzt durch das Bestelldatum, gefiltert nach Zahlung.
+Eine am 30. Dezember aufgegebene und am 2. Januar bezahlte Bestellung zählte in **keinem** der
+beiden Jahre; eine im Januar aufgegebene und im März bezahlte hob den Januarwert nachträglich an.
+
+**Zweitens** schloss das Berichtsprädikat `cancelled` zusammen mit `expired` aus. Das war die
+Annahme, `cancelled` werde einmal „auch ein nicht zustande gekommener Kauf" bedeuten. Tut es
+nicht: eine Stornierung ist eine **echte Bestellung, die später rückgängig gemacht wurde**.
+
+### Entscheidung 1 — Eine Definition, in einer Funktion
+
+`public.order_counts_as_placed(payment_status)` in `0044`:
+
+```sql
+select p_payment_status is distinct from 'expired';
+```
+
+`seller_year_to_date()` und `seller_finalize_monthly_report()` rufen sie auf, statt sie
+abzuschreiben. Zwei Kopien von „was ist eine Bestellung" wären zwei Dinge, die sich über das Geld
+des Shops einig sein müssen und es irgendwann nicht mehr wären. Deshalb steht sie in `0044`, der
+niedrigeren Nummer: **`0045` hängt jetzt von `0044` ab**, nicht umgekehrt.
+
+### Entscheidung 2 — Warum `expired` ausgeschlossen ist, und warum das kein Rückwirken ist
+
+`expired` heißt genau eines: `create_order()` hat die Zeile geschrieben und den Bestand gehalten,
+zwanzig Minuten sind vergangen, niemand hat bezahlt, `expire_stale_checkouts()` hat den Halt
+freigegeben und die Ware zurückgelegt. **Es wurde nie etwas verkauft.** Der Kunde hat keinen Kauf
+storniert — er hat keinen abgeschlossen.
+
+Die Zeile hat die produktdefinierte Grenze vom Checkout-Versuch zur gewerblichen Bestellung nie
+überschritten. Sie ist keine Bestellung, die aufgehört hat zu zählen; sie war nie eine.
+
+**Und sie kann keinen Bericht rückwirkend ändern:** der Zustand tritt rund zwanzig Minuten nach der
+Aufgabe ein, und ein Monat wird frühestens am Ersten des nächsten berichtet. Es gibt keinen Moment,
+in dem eine verfallene Zeile in einer veröffentlichten Zahl stand.
+
+**Dieser Ausschluss wird nicht verallgemeinert.** Er gilt für `expired` und für nichts sonst.
+
+### Entscheidung 3 — `cancelled` zählt, und muss weiter zählen
+
+```
+5. September    Bestellung aufgegeben   +50 €   Septemberaktivität
+8. September    storniert               -50 €   ein September-Stornoereignis
+
+31. August      Bestellung aufgegeben   +40 €   Augustaktivität
+12. September   erstattet               -40 €   ein September-Erstattungsereignis
+```
+
+August wird nicht wieder geöffnet. Stünde `cancelled` im Ausschluss, würde das Schreiben dieses
+Werts eine 50-€-Bestellung stillschweigend aus einem Monat löschen, der sie bereits berichtet hat.
+Da heute nichts `cancelled` schreibt, wird die Grenze **jetzt** festgeschrieben, bevor sie falsch
+gezogen werden kann — per Funktionskommentar und per Test.
+
+**Warnung an die künftige Storno-Implementierung:** `cancelled` darf nicht für abgebrochene
+Checkouts verwendet werden. Dafür gibt es `expired`. Die beiden können sich keinen Wert teilen —
+einer heißt „wurde nie ein Geschäft", der andere „war ein Geschäft und wurde rückgängig gemacht".
+
+### Entscheidung 4 — Das Ereignisregister (Invariante)
+
+| Ereignis | Gehört in den Monat von |
+|---|---|
+| **Bestellung** | `placed_at` |
+| **Zahlung** | dem Zeitpunkt des Zahlungseingangs — falls Zahlungsberichte kommen |
+| **Erstattung** | dem Zeitpunkt der Erstattung |
+| **Stornierung / Gutschrift** | dem Zeitpunkt der Stornierung |
+
+**Kein späteres Ereignis ändert je den Monat, zu dem ein früheres gehört.**
+
+Daraus folgt auch: ein künftiger **Zahlungsbericht wird nicht** auf `placed_at` aufgebaut. Dass
+`0044` und `0045` sich die Bestelldefinition teilen, ist richtig, weil beide dieselbe Frage nach
+Bestelltätigkeit stellen. Eine Frage nach eingegangenem Geld ist eine andere und bekommt ihr
+eigenes Datum.
+
+Erstattungs- und Stornoinfrastruktur wird **jetzt nicht** gebaut. Was sie brauchen wird, steht am
+Ende von `0045`.
+
+### Entscheidung 5 — Die Beschriftung
+
+**Bestellungen dieses Jahr** und **Bestellwert dieses Jahr**. Nicht „Umsatz", nicht „Einnahmen",
+nicht „bezahlt": Zahlung ist keine Bedingung, also wäre jedes dieser Wörter bei der erstbesten
+Bestellung falsch, die über den Jahreswechsel bezahlt wird. Dieselbe Wortwahl wie in den
+Monatsberichten, damit zwölf Berichte und die Jahreszahl dasselbe meinen.
+
+### Konsequenzen
+
+Beide Migrationen waren nirgends angewandt und wurden korrigiert statt ersetzt. **Anwendungsreihenfolge:
+`0044` vor `0045`**, weil `0045` die Prädikatfunktion aus `0044` aufruft. Unverändert bleiben: ein
+unveränderlicher Bericht je Monat, keine Versionierung, `paid_count`/`unpaid_count` als
+informativer Stand, `included_orders` als Beleg, exakter Sandbox-Ausschluss über `commerce_mode`,
+die PDF/CSV-Richtung, das Bestellarchiv und die Aggregat-Korrektur des Arbeitsabzeichens.
+
+**Verworfen.** `cancelled` mit `expired` in einen Topf werfen · den Ausschluss verfallener
+Checkouts auf spätere Ereignisse verallgemeinern · die Bestelldefinition in beiden Migrationen
+ausschreiben · die Prädikatfunktion in `0045` anlegen (dann müsste `0044` danach laufen) · die
+Jahreskennzahl auf `paid` lassen und nur umbenennen · sie auf `paid_at` umstellen (das wäre ein
+Zahlungsbericht, keine Bestelltätigkeit).
+
+---
+
+## ADR-0084 — Bestellungen werden nie gelöscht; Testbestellungen bekommen ein Archiv
+
+**Status:** angenommen (2026-09-17) · Migration `0046` · ergänzt ADR-0060, ADR-0082, ADR-0083
+
+### Die Invariante
+
+**SkyIsles löscht keine Bestellungen. Weder echte noch Testbestellungen.**
+
+| | |
+|---|---|
+| `commerce_mode = 'live'` | Geschäftsunterlage. Es besteht eine Aufbewahrungspflicht. |
+| `commerce_mode = 'sandbox'` | technischer Nachweis. Er belegt, wie sich Checkout, Zahlungs-Webhook und Versandweg tatsächlich verhalten haben. |
+
+Keine Produktaktion entfernt eine Bestellung physisch: nicht Stornierung, nicht Erstattung, nicht
+Versand, nicht die Wiederherstellung aus ADR-0079 — und nicht das Archivieren aus dieser
+Entscheidung.
+
+**Das Schema hat das bereits durchgesetzt, und diese Migration schwächt es nicht ab.** Jeder
+Fremdschlüssel auf `orders` ist `ON DELETE RESTRICT`; `orders.user_id` ist `ON DELETE SET NULL`,
+damit ein gelöschtes Konto die Bestellung freigibt statt sie zu vernichten (`0010`); Client-Rollen
+haben `select` auf `orders` und sonst nichts. Ein Audit über Migrationen, Anwendungscode und
+Werkzeuge fand **keinen einzigen** Löschpfad für Bestellungen.
+
+### Das Problem, das kein Speicherproblem ist
+
+Einen Checkout durchzutesten heißt, eine Bestellung aufzugeben. Ihn fünfzigmal zu testen heißt
+fünfzig Bestellungen — mitten in der Liste, in der der Betreiber echte Arbeit sucht, und mitgezählt
+in deren Monatszahlen. Die Antwort ist nicht, sie zu löschen; sie sind der Nachweis. Die Antwort
+ist, dass sie in dieser Liste nie hätten stehen dürfen.
+
+### Entscheidung 1 — Die Bestellansichten des Shops werden **live-only**
+
+Nicht „live zuerst", nicht „live mit Badge an den anderen" — nur live. Fünf Funktionen bekommen
+eine Klausel, `o.commerce_mode = 'live'`: `admin_orders()`, `seller_orders_active()`,
+`seller_orders_month()`, `seller_order_calendar()`, `seller_open_order_counts()`. Damit kann eine
+Testbestellung weder eine Monatszahl noch die Aktuell-Liste noch die Jahresauswahl noch das
+Arbeitsabzeichen aufblähen.
+
+### Entscheidung 2 — Testbestellungen bekommen eine eigene Ansicht und ein Archiv
+
+`/business/orders/test`, erreichbar über zwei Reiter **[ Bestellungen ] [ Testbestellungen ]**.
+Standard ist `Bestellungen`.
+
+Bewusst schlichter als das Live-Archiv: keine Monatsgruppen, keine Jahresauswahl, kein
+15-Tage-Fenster. Eine Testbestellung ist keine Arbeit und hat keine Historie, durch die man
+navigiert — sie muss erkennbar und wegräumbar sein.
+
+**Archivieren ist ausschließlich Sichtbarkeit.** Es schreibt einen Zeitstempel. Bestellung,
+Positionen, Zahlungsereignisse, Versand- und Bestandshistorie bleiben vollständig; „Wiederherstellen"
+nimmt den Zeitstempel zurück. Das steht auch so auf der Seite, damit „archivieren" nie als „weg"
+gelesen wird.
+
+### Entscheidung 3 — Ein eigenes technisches Feld
+
+`sandbox_archived_at timestamptz` und `sandbox_archived_by uuid`.
+
+Kein Missbrauch von `payment_status`, `fulfillment_status` oder `needs_resolution`: die bedeuten
+etwas über das Geschäft, und „der Betreiber hat aufgeräumt" hineinzuschreiben hieße, eine
+Zustandsmaschine eine Frage beantworten zu lassen, die ihr niemand gestellt hat. `commerce_mode`
+wäre noch schlimmer — er ist von `orders_protect_immutable()` eingefroren, weil er entscheidet, zu
+welcher Welt eine Bestellung gehört.
+
+**Benennung folgt der Tabelle:** `paid_at`, `shipped_at`, `completed_at`, `cancelled_at` — ein
+nullbarer `*_at`-Zeitstempel **ist** der Zustand, und nirgends im Schema sagt ein zusätzliches
+Boolean dasselbe noch einmal.
+
+`sandbox_archived_by` ist die Spalte wert: dies ist die einzige Betreiberaktion im ganzen
+Bestellablauf ohne eigene Spur — kein Ereignis, keine Bestandsbewegung, keine Mail.
+
+### Entscheidung 4 — Der Schutz ist eine CHECK-Constraint, keine Prüfung in einer Funktion
+
+```sql
+check (sandbox_archived_at is null or commerce_mode = 'sandbox')
+```
+
+**Eine echte Bestellung kann nicht als archiviert markiert werden.** Nicht durch eine Funktion mit
+einem Fehler, nicht durch eine spätere Migration, die es vergisst, nicht durch ein handgeschriebenes
+UPDATE um drei Uhr nachts. Dass die Funktionen dasselbe prüfen, macht die Prüfung höflich, nicht
+tragend.
+
+**Alles oder nichts.** Eine Liste, die eine einzige echte Bestellung enthält, archiviert **gar
+nichts** — auch nicht die Testbestellungen darin. Ein Stapel halb anzuwenden, weil das meiste davon
+in Ordnung war, ist genau der Weg, auf dem eine echte Bestellung verschwindet, während der Betreiber
+eine Erfolgsmeldung liest. Ein nicht existierender Bestellname scheitert ebenso.
+
+**Es gibt keine generische Archivfunktion und darf keine geben.** `commerce_mode` ist hier kein
+Parameter. Beide Funktionen nennen `'sandbox'` in ihrer eigenen WHERE-Klausel, und eine einzelne
+Bestellung ist eine Liste mit einem Element — damit existiert keine Einzelfunktion, um die herum
+eine spätere Massenaktion die Prüfung einmal außerhalb der Schleife erledigen könnte.
+
+### Entscheidung 5 — Kein Einfluss auf Geld, in keinem Zustand
+
+`0044` und `0045` lesen `commerce_mode`, **nicht** `sandbox_archived_at`. Eine Testbestellung steht
+außerhalb jeder Kennzahl und jedes Monatsberichts — aktiv, archiviert oder wiederhergestellt. Es
+gibt keinen Zustand, in den sie geraten könnte, der daran etwas ändert.
+
+### Warum eine neue Migration statt einer Änderung an `0045`
+
+Weil `0045` **auf Staging angewandt ist** — gegen die Datenbank geprüft, nicht aus einer Tabelle
+abgelesen. Eine angewandte Migration ist Historie. Die fünf Lesefunktionen werden hier ersetzt, mit
+identischer Signatur und identischem Rückgabetyp; genau das macht `create or replace` sicher
+(`0040` hat die andere Variante gelernt). Es ist auch der sauberere Schnitt: `0045` ist Archiv und
+Monatsbericht, `0046` ist die Trennung von Echt- und Testbetrieb.
+
+### Konsequenzen
+
+Anwendungsreihenfolge **`0044` → `0045` → `0046`**. ADMIN gewinnt nichts: jede Funktion fragt
+`can_operate_active_seller()`, und Testbestellungen gehören dem Verkäufer.
+
+**Verworfen.** Testbestellungen löschen · „Testdaten aufräumen"-Knopf · eine generische
+Archivfunktion mit `commerce_mode` als Parameter · Archivieren über `payment_status` oder
+`commerce_mode` abbilden · ein Boolean neben dem Zeitstempel · clientseitiges Ausblenden ·
+einen gemischten Stapel teilweise anwenden · Testbestellungen weiter mit Badge in der Live-Liste ·
+das volle Monats-/Jahresarchiv für Testbestellungen nachbauen.
+
+---
+
+## ADR-0085 — Abmelden gehört auf „Profil", nicht auf die Kontoübersicht
+
+**Status:** angenommen (2026-09-17) · keine Migration · korrigiert ADR-0062
+
+### Der Befund
+
+Der Abmelden-Knopf stand auf `/account` — der Kontoübersicht. ADR-0062 hatte das bewusst so
+entschieden: Abmelden ist keine Sicherheitseinstellung, also nicht unter „Konto & Sicherheit"
+vergraben, sondern eine Ebene höher sichtbar.
+
+Die Begründung war richtig über „Konto & Sicherheit" und falsch über diese Seite, aus einem Grund,
+den das Routing verdeckte:
+
+**`/settings` leitet dauerhaft auf `/account` um.**
+
+Wer Einstellungen sucht, landet also auf genau der Seite mit dem Knopf. „Abmelden steht unter
+Einstellungen" war keine Verwechslung — so war es gerendert.
+
+### Warum die vorige Prüfung das für erledigt hielt
+
+Weil drei Tests `src/app/(app)/account/page.tsx` als Ort festschrieben und grün waren. Sie prüften,
+**wo der Knopf ist**, nicht **wo er hingehört** — und bestätigten damit genau den Zustand, der im
+Browser falsch aussah. Ein Test, der die Ist-Route festhält, kann einen Platzierungsfehler nicht
+finden; er zementiert ihn.
+
+### Entscheidung
+
+**Genau ein Abmelden-Knopf, ganz unten auf `/account/profile`.**
+
+`/account` ist Navigation. „Profil" ist die Identität des Kontos — wer man angemeldet **ist** —, und
+diese Sitzung zu beenden gehört ans Ende davon.
+
+**Verschoben, nicht dupliziert.** Dasselbe `POST /auth/signout`, dasselbe Markup, ein Ort. Ein POST
+und kein Link, damit kein Prefetch eine Sitzung beenden kann.
+
+**Für alle drei Kontotypen dieselbe Seite.** Abmelden beendet eine Sitzung, und die hat jedes Konto
+— es ist keine Rollenaktion und wird nicht in den Business- oder Adminbereich kopiert. Tragfähig ist
+das, weil `/account/*` nur eine Sitzung verlangt: allein `/collection` ist auf Sammler eingeschränkt
+(ADR-0078). Ein Test hält das fest, denn wäre `/account/profile` je so eingeschränkt, hätte diese
+Verschiebung Verkäufern und Administratoren das Abmelden genommen.
+
+**Eine zweite Implementierung ist entfernt.** `signOutAction()` lag exportiert und von niemandem
+importiert in `src/lib/auth/actions.ts`. Wer als Nächstes einen Abmelden-Knopf braucht, findet sonst
+zwei Wege und wählt einen — und dann stehen auch wieder zwei Knöpfe in der Oberfläche.
+
+**`/settings` bleibt ein `permanentRedirect` auf `/account`** — der Pfad steht im
+Navigationsmodell, in Lesezeichen und im Onboarding. Das Ziel trägt jetzt keinen Abmelden-Knopf
+mehr, und damit ist die Ursache weg statt die Umleitung.
+
+### Konsequenzen
+
+Die Tests prüfen jetzt Zuständigkeit statt Fundort: **jede** `.tsx` unter `src/app` wird
+durchsucht, und genau eine darf das Formular rendern; jede Seite der Business- und Admin-Gruppen
+wird geprüft, nicht drei davon.
+
+**Verworfen.** Den Knopf auf beiden Seiten lassen · ihn in die Navigationsleiste heben · eine
+eigene Seite „Abmelden" · `/settings` zu einer echten Seite zurückbauen, um das Problem dort zu
+lösen · den Knopf je Kontotyp unterschiedlich platzieren.
+
+---
+
+## ADR-0086 — Die Rechtsschicht: Vertragsmodell, Widerrufsfunktion, Rechnung
+
+**Status:** angenommen (2026-09-17) · Migration `0047` · präzisiert ADR-0064 · Rechtsgrundlagen
+und Quellen in `docs/LEGAL.md`
+
+> **Keine Rechtsberatung.** Diese Entscheidung beschreibt, was gebaut wurde und warum. Ob es
+> genügt, entscheidet eine anwaltliche Prüfung vor dem öffentlichen Start.
+
+### Kontext
+
+Der Phase-1-Audit fand eine vollständige, disziplinierte Handelsmaschine und **keine
+Rechtsschicht**. Null Rechtsseiten, keine veröffentlichte Verkäuferidentität, kein Widerrufsweg,
+keine Rechnung — und, am folgenreichsten, **keine einzige E-Mail zwischen Bestellung und
+Zahlungseingang**.
+
+### Entscheidung 1 — SkyIsles und yulez.collectibles sind **ein** Unternehmen
+
+ADR-0064 sprach von „zwei Rechtssubjekten". Das war falsch. Beide werden von **Julian Stocker** als
+**ein Einzelunternehmen** betrieben.
+
+Was ADR-0064 richtig hatte und was bleibt: die Trennung zweier **Rollen**. Die Plattform betreibt
+Katalog, Konten und Kasse; der Verkäufer ist Vertragspartner des Kunden. Das ist eine
+architektonische Trennung, keine gesellschaftsrechtliche — und sie trägt weiterhin, weil ein
+zweiter Verkäufer die Rolle neu besetzen würde, nicht das Eigentum an SkyIsles.
+
+Vertragspartner ist überall: **Julian Stocker, handelnd unter yulez.collectibles**.
+
+Der Satz „SkyIsles liefert derzeit nur innerhalb Deutschlands" machte die Plattform zum Versender
+und ist ersetzt.
+
+### Entscheidung 2 — Das Vertragsschlussmodell, an der Technik entlang
+
+| Schritt | Technisch | Rechtlich |
+|---|---|---|
+| „Zahlungspflichtig bestellen" | `create_order()` legt die Bestellung an | **Angebot des Kunden** |
+| sofort danach | Mail `order_received` | **Zugangsbestätigung**, § 312i Abs. 1 Nr. 3 BGB — **keine Annahme** |
+| Zahlung bei Stripe | Webhook bestätigt | Erfüllungshandlung, **keine** Annahme |
+| danach | Mail `order_confirmation` | **Annahme** → **Vertragsschluss** |
+| keine Zahlung | `expired` | **kein Vertrag** |
+| `needs_resolution` | `resolution_alert` an den Betreiber | **keine Annahme** |
+
+**Die Zugangsbestätigung ist neu und war die eigentliche Lücke.** Wer bestellte und dessen Zahlung
+hängen blieb, bekam bisher **gar nichts**.
+
+**Warum dieses Modell.** Es ist das einzige, das ohne zusätzliche Schritte zur vorhandenen Technik
+passt, und es löst den Fall „bezahlt, aber Bestand fehlt" von selbst: dort wird gerade keine
+Kundenmail ausgelöst, also entsteht keine Annahme. Verworfen: der Klick schließt den Vertrag (dann
+wäre der Verkäufer an Bestellungen gebunden, die er nicht erfüllen kann) · die Zahlung ist die
+Annahme (eine Handlung des Kunden ist keine Erklärung des Verkäufers) · Stripe schließt den Vertrag.
+
+Die Mail-Art hieß `payment_confirmation`. Das benannte den Auslöser statt der Handlung; sie heißt
+jetzt `order_confirmation` und der alte Wert bleibt nur für bereits versandte Zeilen erlaubt.
+
+### Entscheidung 3 — Elektronische Widerrufsfunktion (§ 356a BGB, seit 19.06.2026 in Kraft)
+
+Zwei Schritte, weil das Gesetz zwei verlangt. **Die Beschriftungen sind der Wortlaut des Gesetzes**
+— „Vertrag widerrufen" und „Widerruf bestätigen" — und werden nicht verschönert.
+
+**Ohne Konto**, weil ein Gastkäufer sonst von der gesetzlichen Funktion ausgeschlossen wäre.
+Identifiziert wird über Bestellnummer **und** die E-Mail-Adresse auf der Bestellung.
+
+**Die Antwort ist immer dieselbe**, ob etwas passte oder nicht. Sonst wäre die Funktion ein
+Auskunftsdienst darüber, welche Bestellungen und welche Adressen es gibt. Der Verbraucher erfährt
+das Ergebnis so, wie das Gesetz es vorsieht: durch die Eingangsbestätigung an der von ihm
+angegebenen Adresse — mit **Inhalt der Erklärung sowie Datum und Uhrzeit des Eingangs**, alle drei
+aus der gespeicherten Zeile, damit Bestätigung und Nachweis nicht auseinanderlaufen können.
+
+**Der Zeitstempel ist der der Datenbank.** Eine Browseruhr entscheidet nicht über eine gesetzliche
+Frist.
+
+**Immer erreichbar, ohne berechnete Frist.** Die Frist läuft ab Erhalt der Ware, und dieses Produkt
+kennt kein Zustelldatum. Eine hier berechnete Grenze wäre geraten — und eine geratene Grenze, die
+zu früh schließt, verwehrt ein gesetzliches Recht.
+
+**Widerruf ≠ Erstattung.** Zwei Ereignisse, zwei Tabellen, zwei Zeitstempel (ADR-0083).
+
+### Entscheidung 4 — Rechnung: erzeugt, nie gespeichert
+
+Ausgestellt **bei bestätigter Zahlung**, also im Moment der Annahme. Nummer `SI-R-<Jahr>-<lfd>`,
+einmalig, unveränderlich; ein Trigger weist jede Änderung und jede Löschung zurück.
+
+**Verkäufer- und Kundenangaben werden in die Rechnung kopiert**, nicht gejoint: ein Dokument, das
+aus Livedaten neu gerendert wird, ist kein Dokument. Eine spätere Adressänderung ändert keine
+ausgestellte Rechnung.
+
+**Es wird keine Datei gespeichert.** Das PDF entsteht bei jedem Abruf aus den unveränderlichen
+Zeilen — also gibt es keine Datei, die versehentlich im öffentlichen `catalog`-Bucket landen kann.
+Der Zugriff läuft über `authorize_order_payment()`: angemeldeter Eigentümer oder Inhaber der
+Capability aus `0013`. Unbekannt und fremd antworten gleich (404).
+
+**Kein Umsatzsteuerausweis, nirgends.** § 19-Umsätze sind **steuerfrei**; eine Zeile „USt 0,00 €"
+behauptete eine Besteuerung mit null. § 34a UStDV verlangt das Entgelt **in einer Summe** mit dem
+Hinweis auf die Steuerbefreiung — genau das steht dort. Eine fortlaufende Nummer verlangt § 34a
+**nicht**; sie wird trotzdem vergeben, als freiwillige Zugabe und nicht als behaupteter
+Pflichtinhalt.
+
+**Das HTML ist das primäre Dokument, das PDF liegt daneben.** Ein handgeschriebenes PDF kann kein
+getaggtes PDF sein; wer auf assistive Technik angewiesen ist, bekäme daraus lose Textläufe. Die
+Seite zeigt dieselben Zahlen in einer echten Tabelle.
+
+### Entscheidung 5 — Versionierung als Schnappschuss, nicht als CMS
+
+Die Texte liegen als **Code** unter `src/lib/legal/`: diffbar, reviewbar, ohne Redaktionsoberfläche.
+Die **Versionskennung** steht in `legal_document_versions`, und ein Trigger kopiert sie bei jeder
+Bestellanlage nach `order_legal_snapshots` — atomar, ohne zweiten Round-Trip, der fehlschlagen
+könnte. Ein Test hält Code und Datenbank in Übereinstimmung.
+
+**Eine historische Bestellung zeigt nie auf einen späteren Text**, weil der Schnappschuss eine
+Kopie ist und kein Fremdschlüssel.
+
+### Entscheidung 6 — Was **nicht** gebaut wurde, und warum
+
+**Kein Einwilligungsbanner.** Jeder Client-Speicher ist first-party und dient einer vom Nutzer
+gewünschten Funktion. Eine Einwilligung für technisch Erforderliches einzuholen wäre sachlich
+falsch und würde echte Einwilligung entwerten.
+
+**Keine AGB-Checkbox.** Die Bedingungen gelten, weil sie Teil des Angebots sind, das der Kunde
+abgibt; sie stehen unmittelbar über dem Knopf und sind verlinkt. **Und keine
+Datenschutz-Checkbox**: Datenschutzinformation ist Information, keine vertragliche Einwilligung.
+
+**Keine Stripe-Erstattung per Knopf.** Erstattet wird dort, wo die Zahlung liegt; hier wird der
+Betrag festgehalten. Ein Knopf, der hier echtes Geld bewegte, bräuchte Schreibrechte an einer
+Stelle, die nie welche hatte (ADR-0051), und machte einen Fehlklick unumkehrbar.
+
+**Keine Barrierefreiheitserklärung.** Nach den Geschäftsfakten greift die
+Kleinstunternehmen-Ausnahme des BFSG. Eine Konformitätsaussage ohne Pflicht und ohne Prüfung wäre
+eine Behauptung; gebaut wird trotzdem barrierefrei.
+
+### Konsequenzen
+
+**Anwendungsreihenfolge: `0042` → `0046` → `0047`.** `0047` hängt an `0010`/`0019` (Bestellungen,
+Mail) und `0041` (Verkäuferprädikat).
+
+**Verworfen.** Generische Textbausteine · eine Datenschutzerklärung mit Abschnitten für nicht
+vorhandene Technik · ein Cookie-Banner aus Gewohnheit · eine erfundene Telefonnummer · ein
+behaupteter Handelsregistereintrag · eine Lieferzeitzusage ohne Grundlage · ein Link zur
+eingestellten ODR-Plattform · ein eigenes hübscheres Widerrufsformular statt des gesetzlichen
+Musters · Widerruf und Erstattung als ein Vorgang · gespeicherte PDF-Dateien · eine
+Umsatzsteuerzeile mit 0,00 €.
+
+### Nachtrag (2026-09-18, zweiter) — der erste Anwendungsversuch schlug fehl
+
+```
+ERROR: 42703: column "legal_name" does not exist
+```
+
+**Die Verkäuferidentität wurde nach `public.shop_settings` geschrieben.** Diese Spalten liegen auf
+`public.sellers`, angelegt von `0040`. Betroffen waren vier Stellen: der Seed in Abschnitt 13,
+`orders_snapshot_legal()`, `issue_invoice()` und `shipping_free_from()`. Zusätzlich gab es keine
+Spalte `house_number` auf `sellers` — „Lechhalde 1 1/2" ist **eine** Straßenzeile; die Aufteilung
+in Straße und Hausnummer gibt es nur bei der **Kundenadresse** (`order_addresses`), und von dort
+stammte die falsche Annahme.
+
+**`shipping_free_from()` war der gefährlichere der vier Fälle.** `free_shipping_threshold` existiert
+auf **beiden** Tabellen — `0041` hat den Wert nach `sellers` kopiert, weil er eine
+Verkäuferentscheidung ist (ADR-0076), und die alte Spalte stehen lassen. Die falsche Tabelle wäre
+dort also **nicht** mit einem Fehler aufgefallen, sondern hätte still eine veraltete Zahl geliefert.
+
+**Warum drei Prüfrunden das nicht gefunden haben.** Alle Tests dieses Projekts lesen den
+Migrationstext. Eine Anweisung, die die **falsche Tabelle** nennt, ist als Text fehlerfrei — sie ist
+nur gegen ein Schema falsch, und kein Test kannte das Schema. Konsequenz:
+`columnsOf()` in `src/test-support/migrations.ts` faltet `create table` und
+`alter table … add column` über die gesamte Historie, so wie `latestFunction()` Neudefinitionen
+faltet, und `src/lib/legal/schema-reality.test.ts` prüft damit jede geschriebene Spalte gegen die
+Spalten, die es wirklich gibt. Vier nachgestellte Varianten des Fehlers werden erkannt.
+
+**Nebenbefund beim Bau des Helfers:** `columnsOf()` fand zunächst nur 12 der 25 Spalten von
+`sellers`. Der Kommentar in `0040` enthält „…natural or legal person; `trading_name`…" — das
+Semikolon beendete für den regulären Ausdruck die Anweisung, drei Zeilen vor dem ersten
+`add column`. Kommentare werden jetzt vor dem Vergleich entfernt. Dieselbe Prosa-statt-Code-Falle
+wie mehrfach zuvor.
+
+**`0047` wurde nicht teilweise angewendet.** Der SQL Editor hat vollständig zurückgerollt; alle
+sechs Tabellen fehlten danach weiterhin, und die Zählstände der Fingerabdrücke (5 bezahlt,
+9 unbezahlt) waren unverändert. Das wurde geprüft, nicht angenommen.
+
+### Nachtrag (2026-09-18) — vier Befunde aus der Prüfung vor dem Anwenden
+
+`0047` war noch nicht angewendet, deshalb wurden alle vier **in** `0047` behoben, nicht in einer
+Folgemigration.
+
+**Die Zusage „Fingerabdruck wird bei Bezahlung gelöscht" wurde eingelöst.** `0010` hat sie im
+Spaltenkommentar formuliert, die Datenschutzerklärung hat sie dem Kunden als Tatsache mitgeteilt,
+und niemand hat sie ausgeführt. Ein Trigger tut es jetzt. Bewusst ein Trigger und **keine**
+Änderung an `confirm_order_payment()`: diese Funktion ist auf Staging angewendet, und eine
+angewendete Migration wird nicht umgeschrieben. Der Preis ist bekannt und klein — eine bezahlte
+Bestellung zählt nicht mehr im Stundenzähler der Fingerprint-Dimension —, während der Arm, der
+Missbrauch tatsächlich stoppt (offene Checkouts mit **aktiven** Reservierungen), unberührt bleibt,
+weil eine bezahlte Bestellung keine aktive Reservierung mehr hält.
+
+**Die Drosselung des Widerrufs-Endpunkts war wirkungslos.** Gezählt wurden Zeilen in
+`withdrawal_requests` — die nur bei einem Treffer entstehen. Genau der Fall, gegen den gedrosselt
+werden soll (Sonden auf erfundene Bestellnummern), erzeugte keine Zeile und wurde nie gezählt.
+`withdrawal_attempts` zählt jetzt **Versuche**, geschrieben bevor irgendetwas über den Treffer
+bekannt ist. Die Datenschutzeigenschaft bleibt: gedrosselt oder nicht getroffen — die Antwort ist
+dieselbe, und sie verrät nicht, ob es die Bestellung gibt. Gespeichert werden nur Fingerabdruck und
+Zeitstempel, und nur für zwei Stunden.
+
+**`order_legal_snapshots` war änderbar.** `invoices` hatte den Schutz von Anfang an; der Snapshot,
+der festhält, welche Bedingungen für eine Bestellung galten, hatte ihn nicht — bei gleichem Zweck.
+Jetzt weist ein Trigger Änderung und Löschung zurück. Das erste `insert` bleibt erlaubt.
+
+**Die Sandbox-Sperre im Widerruf war als `'live'` einbetoniert.** Damit war der Erfolgspfad auf
+Staging überhaupt nicht prüfbar — jede Testbestellung wurde abgewiesen, und die einzige Art, den
+Pfad zu sehen, wäre gewesen, ihn auf Production auszuprobieren. Geprüft wird jetzt
+`o.commerce_mode = commerce_mode()`: dieselbe Funktion, mit der `create_order()` stempelt.
+
+> **Korrektur (2026-09-18).** Der ursprüngliche Text dieses Absatzes behauptete, Production laufe
+> live. **Das stimmt nicht.** Der Production-Preflight hat `commerce_settings.mode = 'sandbox'`
+> gemessen (gesetzt am 2026-09-13), und alle vier dortigen Bestellungen tragen
+> `commerce_mode = 'sandbox'`; es gibt **null** Live-Bestellungen. Der Satz war eine Annahme, die
+> nie geprüft wurde.
+>
+> **Die Sicherheitsaussage bleibt trotzdem gültig, aber aus dem anderen Halbsatz:** eine Installation
+> im Sandbox-Modus nimmt keine echten Bestellungen an (`commerce_checkout_allowed()` verlangt dort
+> ein angemeldetes Testkonto), also gibt es dort auch keine echte Kundschaft, deren Bestellung ein
+> Fremder widerrufen könnte. Sobald Production auf `live` geschaltet wird, greift die ursprünglich
+> beschriebene Wirkung: historische Sandbox-Bestellungen werden ab diesem Moment abgewiesen.
+>
+> Der **Kommentar im Rumpf von `receive_withdrawal()`** trägt die falsche Behauptung weiterhin —
+> `0047` ist auf Staging und Production angewandt und wird nicht rückwirkend geändert. Eine
+> Korrektur wäre eine additive Folgemigration, die die Funktion allein wegen eines Kommentars neu
+> definiert; sie ist **nicht** durchgeführt worden und wäre nur zusammen mit einer ohnehin nötigen
+> funktionalen Änderung sinnvoll.
+
+---
+
+## ADR-0087 — Bestandsabgleich aus der Tabelle, ohne die Tabelle hochzuladen
+
+**Status:** angenommen (2026-09-18) · Migration `0048`
+
+### Kontext
+
+Der Betreiber führt seinen physischen Bestand in `skylanders.xlsx`. Die Datei ist **450 MB groß —
+449,4 MB davon sind 554 eingebettete Bilder** in Spalte A, die er für die Inventur am Regal
+braucht. Die Zahlen darin sind 0,9 MB.
+
+### Entscheidung 1 — Die Datei bleibt auf dem Gerät
+
+Eine ZIP-Datei ist wahlfrei zugänglich: ein Verzeichnis am Ende sagt, wo jedes Element beginnt.
+Am echten Workbook gemessen liegt alles Nötige in den **ersten 714 KB plus den letzten 42 KB**:
+
+| | |
+|---|---|
+| Zentralverzeichnis (am Dateiende) | 42,3 KB |
+| `workbook.xml`, Rels, `sharedStrings` | 19,2 KB |
+| die sechs Spiel-Arbeitsblätter | 111,7 KB |
+| **gelesen insgesamt** | **≈ 0,75 MB = 0,17 %** |
+
+Gemessen: Verzeichnis öffnen 9 ms, neun Elemente entpacken 4 ms, 15 ms insgesamt.
+
+Der Browser liest diese Scheiben mit `File.slice()` — das eine **Sicht** liefert, keine Kopie, also
+64 KB Speicher für die letzten 64 KB einer 450-MB-Datei — entpackt sie mit `DecompressionStream`
+und schickt **nur die Zeilen**.
+
+**Damit verschwindet das ganze Problem, statt umgangen zu werden.** Kein 4,5-MB-Body-Limit, kein
+privater Bucket, kein temporäres Objekt mit Lebenszyklus, keine ZIP-Bombe auf dem Server, kein
+Upload über Mobilfunk. Die ursprünglich vorgeschlagene Architektur — direkter Upload in Supabase
+Storage — wurde **verworfen, weil sie nicht nötig ist**: sie löst den Transport eines Datenvolumens,
+das nicht transportiert werden muss.
+
+Voraussetzung ist `DecompressionStream` (Safari 16.4+, Chrome 103+, Firefox 113+). Fehlt es, sagt
+die Oberfläche das klar; der Rückfallweg wäre, die 0,75-MB-Scheibe zum Server zu schicken, was in
+jeden Serverless-Body passt.
+
+### Entscheidung 2 — Es ist ein Abgleich, kein Zubuchen
+
+Spalte F („Storage") ist ein **Zielwert**. Steht dort 0 und im Shop liegen 3, ist die richtige
+Antwort **−3**. Deshalb heißt die Funktion Abgleich, und deshalb zeigt die Vorschau Erhöhungen und
+Verringerungen getrennt.
+
+**Die Zahlen am echten Workbook:**
+
+| | Zeilen | mit Bestand | Stück |
+|---|---:|---:|---:|
+| `SUPPORTED_COMPLETE_LOOSE_FIGURE` | **559** | 250 | 992 |
+| `IGNORED_GAME` | 39 | 13 | 19 |
+| `IGNORED_SWAP_FORCE_HALF` | 13 | 8 | 13 |
+| `IGNORED_OVP` | 2 | 0 | 0 |
+| `IGNORED_DAMAGED` | 1 | 0 | 0 |
+| `UNMATCHED_RELEVANT` / `AMBIGUOUS_RELEVANT` | **0** | 0 | 0 |
+
+**Ignorieren ist eine Handlung, kein Versäumnis.** Eine Spielezeile hat eine gültige SKY-ID und wird
+trotzdem weder importiert **noch genullt** — eine CHECK-Constraint macht es einer `IGNORED`-Zeile
+strukturell unmöglich, ein Delta zu tragen.
+
+**`ohne OVP` heißt *ohne* Karton.** Vierzehn `Elite … - ohne OVP`-Zeilen sind genau die vollständigen
+losen Figuren, um die es geht; ein naives `/OVP/` hätte jede davon verworfen.
+
+### Entscheidung 3 — Zuordnung ist exakt und nach Blatt getrennt
+
+Blatt plus Name löst **600 von 614 Zeilen exakt auf, mit null Mehrdeutigkeit** — keine einzige
+brauchte Normalisierung. Die Trennung nach Blatt ist tragend: **32 Namen kommen in mehr als einem
+Spiel vor** (`Bash` in SA und G, jeder Konsolentitel in allen sechs). **Es gibt bewusst keine
+unscharfe Zuordnung**: eine Beinahe-Übereinstimmung, die still Bestand schreibt, ist das eine
+Versagen, das dieses Design nicht riskiert.
+
+Normalisiert wird nur der Schlüssel **gespeicherter Zuordnungen**, damit eine einmal getroffene
+Entscheidung ein erneutes Speichern der Tabelle übersteht.
+
+### Entscheidung 4 — Die Tabelle ist die Wahrheit über den Lagerbestand
+
+`Storage` ist ein **Sollwert**, kein Zuwachs. Wer die Datei hochlädt und bestätigt, sagt SkyIsles,
+was im Regal liegt:
+
+```
+desired = Excel Storage
+delta   = desired − current
+```
+
+Das Delta gibt es nur, weil Bestand über ein anhängendes Journal bewegt wird (`0003`). Gemeint ist
+„gleichziehen"; die Rechnung ist der Weg dorthin.
+
+**Eine frühere Fassung hat das falsch gemacht, und der Fehler ist lehrreich.** Sie verweigerte eine
+Erhöhung, wenn die Tabelle älter aussah als die letzte Bestandsbewegung, oder wenn der Wert seit
+dem letzten Import unverändert war. Beides ließ SkyIsles eine Anweisung anzweifeln, die der
+Betreiber gerade bewusst gegeben hatte — er importiert ja **gerade deshalb**, weil beide Seiten
+auseinanderliegen. Steht bei der Bestätigung 5 in der Tabelle, ist der Sollbestand 5.
+
+Beim adversarialen Nachprüfen zeigte sich derselbe Denkfehler auch andersherum: die Behauptung
+„eine veraltete Tabelle kann nur fälschlich **hinzufügen**" stimmte nicht. Ein nach dem Speichern
+manuell eingebuchter Fund oder eine Rücksendung wäre von einer alten Tabelle genauso fälschlich
+**entfernt** worden. Die Asymmetrie war nicht begründbar — und mit der korrigierten Semantik ist
+die Frage gegenstandslos.
+
+`dcterms:modified` und der Sollwert des letzten Imports bleiben erhalten: auf dem Bildschirm, damit
+auffällt, wenn die falsche Datei gewählt wurde, und in der Historie. **Entscheiden tun sie nichts.**
+
+### Entscheidung 4a — Der einzige echte Konflikt ist eine Reservierung
+
+Weil dort der gewünschte Zustand **unmöglich** ist statt nur überraschend. Reservierte Stücke
+gehören bereits einer laufenden Bestellung; `shop_inventory` verlangt `reserved <= quantity`, und
+`apply_inventory_movement()` bricht das nicht.
+
+Geprüft wird es **zusätzlich in der Vorschau** — nicht als zweite Meinung, sondern weil die Vorschau
+es sonst nicht sagen könnte: Die Zeile sähe fertig aus und der ganze Import bräche später an einer
+Bedingung ab, die niemand gezeigt bekommen hat. Solche Zeilen werden übersprungen, alles andere
+wird übernommen. **Nicht** gekappt, **nicht** stillschweigend übergangen, und Reservierungen werden
+nicht aufgelöst.
+
+### Entscheidung 5 — Bestand wird bewegt, nicht gesetzt
+
+`apply_inventory_movement()` schreibt `shop_inventory.quantity` seit `0003` als Einziges, immer per
+Delta, immer mit Journalzeile, und weigert sich bereits, unter `reserved` zu gehen. Der Import ruft
+`record_inventory_movement()` mit dem Grund **`correction`** — den `0003` als „a recount, either
+direction" definiert — und erbt damit jede dieser Garantien. `0048` schreibt **keine** Bestandszeile
+und formuliert **keine** eigene Untergrenze.
+
+**Das Delta wird beim Übernehmen neu berechnet**, nicht aus der Vorschau übernommen: zwischen
+Vorschau und Bestätigung kann etwas verkauft worden sein.
+
+**Eine Transaktion.** Eine plpgsql-Funktion ist eine Transaktion: scheitert Zeile 3, fallen 1 und 2
+mit. Es gibt keinen halb angewendeten Zustand zu erklären und kein Fortsetzen zu entwerfen.
+
+### Konsequenzen
+
+Anwendungsreihenfolge `0047` → `0048`. Keine neue Bewegungsart, kein Bucket, kein Upload. Eine neu
+bebestandete Position bleibt **unlistet und ohne Preis** — `shop_inventory_listed_needs_price`
+verlangt es, und es ist richtig so: Veröffentlichen bleibt eine eigene Entscheidung mit einem Preis.
+
+**Verworfen.** Upload der 450-MB-Datei in Storage · Bilder aus dem Workbook entfernen · eine zweite
+schlanke Arbeitsmappe · CSV- oder JSON-Export vor jedem Import · Python-Vorverarbeitung · eine
+XLSX-Bibliothek, die das ganze Archiv materialisiert · unscharfe Namenszuordnung · Spielezeilen
+nullen · Swap-Force-Hälften automatisch paaren · Spalte I als Verkaufspreis · „Overall" und „Sold"
+als Bewegungshistorie nachtragen · Tabellensummen als Eingabe.
+
+### Nachtrag (2026-09-18) — Fingerabdruck und Browser-Gate
+
+**Der Fingerabdruck ist inhaltlich, nicht binär.** Die Spalte hieß `file_hash`, war stets `NULL`,
+und der Name lud zu genau der falschen Implementierung ein: einen Datei-Hash zu bilden hieße, 450 MB
+zu lesen, um 614 Zahlen zu identifizieren — und würde die falsche Frage beantworten, weil ein
+Neuspeichern oder ein ausgetauschtes Foto jedes Byte ändert, ohne am Regal etwas zu ändern. Jetzt
+`content_fingerprint`: SHA-256 über die kanonisierten *ausgelesenen* Zeilen (Version, Blatt,
+getrimmter Name, Storage-Zahl, sortiert, JSON-kodiert).
+
+Bewusst **vor** der Auflösung gebildet — ohne SKY-ID und ohne Klassifikation. Beides ist die
+Lesart von SkyIsles und verschiebt sich, wenn der Katalog eine Figur bekommt oder eine Zuordnung
+gespeichert wird; keines davon ist eine Änderung am physischen Bestand. Ein Fingerabdruck, der
+sich dabei mitbewegt, könnte die einzige Frage, die er hat, nicht beantworten.
+
+**Er blockiert nichts.** Die Tabelle ist die absolute Wahrheit über den physischen Bestand
+(Korrektur vom 2026-09-18); ein erneuter Import derselben Aufnahme ist folgenlos, weil jedes Delta
+null ist. Die Spalte ist `nullable`, und kein Aufrufer verzweigt auf ihr — beides ist getestet.
+
+**Das Browser-Gate läuft vor der Datei.** Ein Browser ohne `DecompressionStream("deflate-raw")`
+scheiterte vorher mitten im Parsen und meldete „Die Datei konnte nicht gelesen werden" — richtig,
+nutzlos und von einer kaputten Datei nicht zu unterscheiden. `missingCapabilities()` prüft
+`DecompressionStream`, `File.prototype.slice`, `crypto.subtle` und `TextDecoder`, bevor gelesen,
+geparst oder ein Import-Batch angelegt wird. `deflate-raw` wird **durch Konstruieren** geprüft, nicht
+durch Existenz: Safari 16.4 kennt `DecompressionStream`, aber nur `gzip` und `deflate`. Die tieferen
+Prüfungen in `xlsx-reader.ts` bleiben — das Gate erzeugt einen Satz für einen Menschen, sie halten
+einen Aufrufer ehrlich.

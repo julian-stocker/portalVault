@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
@@ -56,20 +55,19 @@ export default async function AccountPage() {
       </nav>
 
       {/*
-       * Signing out is its own thing, not a security setting (ADR-0062).
-       * „Konto & Sicherheit" is for changing something about the account —
-       * password, address, one day deleting it. Leaving is neither, and
-       * burying it a level down means hunting for it.
+       * NO SIGN-OUT BUTTON HERE, deliberately (ADR-0085).
        *
-       * Below the list and visually separated, because it is the one action
-       * here that ends the session — and a POST, not a link, so a prefetcher
-       * can never trigger it.
+       * It used to sit below this list. The reasoning was that leaving is not
+       * a security setting and should not be buried a level down — which was
+       * sound about „Konto & Sicherheit" and wrong about this page, for a
+       * reason the layout hid: **`/settings` permanently redirects here.**
+       * Anyone who goes looking for settings lands on this exact page, so a
+       * sign-out button on it IS a sign-out button under Settings, whatever
+       * the route is called.
+       *
+       * It now lives at the bottom of „Profil", where the account's own
+       * identity is — one door, one place, one button.
        */}
-      <form action="/auth/signout" method="post" className="border-t border-border/70 pt-6">
-        <button type="submit" className={ACTION_NEUTRAL}>
-          {de.nav.signOut}
-        </button>
-      </form>
     </main>
   );
 }

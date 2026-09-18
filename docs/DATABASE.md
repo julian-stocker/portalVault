@@ -39,6 +39,8 @@ werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migratio
 | `testers` + 3 (`0036`) | wenige | Testkonten und ihre Test-Berechtigungen | kein Clientrecht, nur über Funktionen |
 | `perf_navigations` | wächst je Messlauf | Navigationszeiten von Testkonten | kein Clientrecht, Admin liest aggregiert |
 | `perf_interactions` | wächst je Messlauf | Interaktionszeiten (Quick View) von Testkonten | kein Clientrecht, Admin liest aggregiert |
+| `shipping_countries` | 1 (`DE`) | wohin der Shop liefert | öffentlich lesbar, nur Admin schreibt |
+| `shipping_methods` | 2 | Versandarten und Preise | kein Clientrecht, öffentlich über `shipping_quote()` |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -659,6 +661,11 @@ existiert und ist `0`, weil die Summe aus benannten Teilen bestehen muss.
 
 ### 3.3l Transaktionsmail — `business_settings` und `order_mail` (Migration `0019`, ADR-0059)
 
+> **Achtung, Umbenennung:** `business_settings` heißt seit `0026` **`platform_settings`**, und
+> `transactional_reply_to` ist dort entfallen (Abschnitt 3.3q folgend, ADR-0064). Dieser
+> Abschnitt beschreibt den Stand von `0019`. Wer eine neue Migration schreibt, nimmt den
+> heutigen Namen — genau diese Verwechslung hat `0040` beim ersten Anwenden zerbrochen.
+
 Zwei Tabellen, die nichts miteinander zu tun haben außer dem Zeitpunkt ihrer Entstehung.
 
 **`business_settings` — eine Zeile, die Unternehmensdaten hält.** Nicht „die Mailadresse", sondern
@@ -1040,6 +1047,225 @@ angefasst.**
 `admin_order()` liefert zusätzlich `image` (aus `image_snapshot`, war nur in `my_order()`) und
 `series`; `my_order()` zusätzlich `series`. Beide lesen ausschließlich aus `order_lines` — kein
 Join auf `skylanders`, `categories` oder `series`.
+
+
+---
+
+### 3.3t Shop und Plattform sind getrennte Zuständigkeiten (Migration `0040`, ADR-0075)
+
+**`sellers` bekommt die Identität**, die später im Impressum, auf Rechnungen und in der
+Widerrufsbelehrung steht: `legal_name`, `trading_name`, `legal_form`, `street`, `postal_code`,
+`city`, `country_code`, `phone`, `direct_contact`, `register_court`, `register_number`, `vat_id`,
+`w_id`. **Alle NULL-bar, alle leer.** Es gibt keinen Seed: ein Platzhalter in einem
+Impressumsfeld wäre eine falsche Aussage über eine echte Person. Ein CHECK je Spalte verbietet
+zusätzlich den Leerstring.
+
+**Kontakte.** `contact_email` bleibt maßgeblich. `withdrawal_contact_email` und
+`complaints_contact_email` sind NULL-bar und heißen „keine eigene Adresse" — aufgelöst per
+`coalesce`, **nie kopiert**. `admin_shop_settings()` liefert die aufgelösten Werte gleich mit, damit
+die Regel genau einmal existiert.
+
+**Richtlinien.** `small_business_19` (Vorgabe `true`, ein Regime und nie ein Satz — § 25a kommt
+nicht vor), `dispute_participation` (Vorgabe `false`) mit `dispute_body`, gekoppelt durch einen
+CHECK, `return_postage_borne_by` (`customer` | `seller`, Vorgabe `customer`), `dispatch_statement`
+(NULL, bis eine Lieferzeit zugesagt werden kann).
+
+**Plattform.** `platform_settings.support_email` — die Adresse von SkyIsles selbst. NULL, bis es
+eine gibt; keine Adresse steht im Code. `contact_email` wird **nicht** umbenannt.
+
+#### Versand ist Konfiguration
+
+| | |
+|---|---|
+| `shipping_countries` | wohin geliefert wird · **nur `DE` befüllt** · öffentlich lesbar, weil das Kassenformular die Liste braucht |
+| `shipping_methods` | Hermes 5,49 € · DHL 6,49 € · kein Clientrecht, der Weg dorthin ist `shipping_quote()` |
+| `sellers.free_shipping_threshold` | `75.00` — auf dem **Verkäufer**, nicht auf dem Plattform-Singleton (ADR-0076) |
+
+`shipping_catalog()` und `free_shipping_threshold()` behalten Signatur und Ergebnis und lesen jetzt
+diese Tabellen — jeder Aufrufer bleibt unberührt. **`create_order()` fragt
+`shipping_country_allowed()`** statt `country_code = 'DE'`; das ist die maßgebliche Prüfung, der
+Client spiegelt nur. Die Funktion wurde maschinell aus `0028` übernommen und an genau einer Stelle
+geändert.
+
+| Funktion | Gate | Zweck |
+|---|---|---|
+| `shipping_country_allowed(text)` | öffentlich | liefert der Shop dorthin? |
+| `admin_shop_settings()` | `is_shop_admin()` | alles, was der Einstellungsbildschirm braucht |
+| `admin_set_seller_details(…)` | `is_shop_admin()` | Identität |
+| `admin_set_shop_policies(…)` | `is_shop_admin()` | Kontakte, Steuern, Widerruf, Schwelle, Plattform-Support |
+| `admin_set_shipping_country(…)` | `is_shop_admin()` | Land aktivieren/deaktivieren |
+| `shop_setting_value(text, text)` | keinem Client | NULL lässt stehen, `''` löscht, sonst trimmen |
+
+**Kein `seller_id`, kein zweiter Verkäufer, keine neue Rolle.** `sellers_one_active` gilt weiter.
+
+#### Wem welches Datum gehört (ADR-0076)
+
+| Bereich | Eigentümer | Wo |
+|---|---|---|
+| Kanonischer Katalog | **SkyIsles / ADMIN** | `skylanders`, `categories`, `series`, `catalog_editorial` — kein Clientrecht, nur `is_shop_admin()`-Funktionen |
+| Sammlungsstand | **USER** | `collection_items`, nur der Eigentümer |
+| Angebot, Bestand, Versand, Bestellabwicklung | **SHOP / Verkäufer** | `shop_inventory`, `sellers`, `shipping_*`, `orders` |
+| Plattformangaben | **ADMIN** | `platform_settings` |
+
+**Ein Verkäufer führt keinen eigenen Katalog.** `shop_inventory` hängt über `sky_id` am
+kanonischen Eintrag und wiederholt keine Katalogspalte. Eine Korrektur durch den Admin wirkt
+dadurch sofort für alle. Ein zweiter Verkäufer bekäme später ein `seller_id` auf `shop_inventory`
+und `shipping_*` — additiv; die Katalogtabellen bleiben unberührt, weil sie nie verkäuferbezogen
+waren.
+
+
+---
+
+### 3.3u Drei Konten (Migration `0041`, ADR-0077)
+
+| Tabelle | Bedeutung |
+|---|---|
+| `platform_admins` | `user_id` — dieses Konto führt SkyIsles |
+| `seller_operators` | `(seller_id, user_id, is_enabled, …)` — dieses Konto darf diesen Shop führen |
+
+**USER ist die Abwesenheit beider Zeilen.** Kein Datensatz sagt „Sammler".
+
+| Funktion | Antwortet auf |
+|---|---|
+| `is_platform_admin()` | führt SkyIsles |
+| `can_operate_seller(bigint)` / `can_operate_active_seller()` | darf den Shop führen |
+| `my_capabilities()` | beides, als ein Dokument für die Anwendung |
+| `admin_seller_operators()` / `admin_set_seller_operator(uuid, boolean, text)` | Shopzugänge verwalten — **Plattform**-gated |
+| `order_counts_as_placed(text)` | **die eine Definition einer echten Bestellung**: alles außer `'expired'`. `'cancelled'`/`'refunded'` zählen weiter — sie sind spätere Ereignisse. `0044`, ADR-0083 |
+| `seller_year_to_date()` | Anzahl und **Bestellwert** der Live-Bestellungen, die seit 1. Januar (Berlin) **aufgegeben** wurden — Zahlung entscheidet nichts. **Verkäufer**-gated, `0044`, ADR-0081/0083 |
+| `order_attention()` | die eine Definition der Aufmerksamkeitsstufe (0–3), `0045` |
+| `seller_orders_active()` / `seller_orders_month()` / `seller_order_calendar()` | Bestellarchiv: aktuelles Fenster, ein Monat, Monatszählungen — **Verkäufer**-gated, `0045`, ADR-0082 |
+| `seller_monthly_reports()` / `seller_report_years()` / `seller_finalize_monthly_report()` | Monatsberichte lesen, Jahre auflisten, einen Monat festschreiben — **Verkäufer**-gated, `0045`, ADR-0082 |
+| `seller_open_order_counts()` | die drei Arbeitszahlen als Aggregat statt als Zeilenzählung — **Verkäufer**-gated, `0045`, live-only seit `0046` |
+| `seller_test_orders()` / `seller_archive_test_orders(text[])` / `seller_restore_test_orders(text[])` | Testbestellungen lesen, wegräumen, zurückholen — **Verkäufer**-gated, `0046`, ADR-0084 |
+
+**Die Rechtsschicht (`0047`, ADR-0086).** `legal_document_versions` hält die Fassungskennung je
+Rechtstext (der **Text** steht in `src/lib/legal/`); ein Trigger kopiert sie bei jeder Bestellanlage
+samt Verkäuferangaben nach `order_legal_snapshots`, damit eine historische Bestellung nie auf einen
+späteren Text zeigt. **Ein Snapshot ist ab dem Schreiben unveränderlich:**
+`order_legal_snapshots_protect_trg` weist jede Änderung und jede Löschung zurück — dieselbe
+Sicherung wie bei `invoices`, aus demselben Grund: eine Aufzeichnung darüber, wem gegenüber welche
+Bedingungen galten, ist wertlos, wenn sie später bearbeitet werden kann.
+
+`withdrawal_requests` hält je Widerruf nach § 356a BGB Name, Kontaktadresse,
+**Inhalt der Erklärung** und den **gesetzlich maßgeblichen Eingangszeitpunkt**; `order_refunds` hält
+Erstattungen als eigene Ereignisse mit eigenem `occurred_at` (ADR-0083) — die erstattete Summe ist
+die Summe der Zeilen, nie ein Status. `invoices` hält je bezahlter Bestellung **eine** Rechnung mit
+kopierten Verkäufer-, Kunden- und Betragsangaben; ein Trigger weist jede Änderung und jede Löschung
+zurück, und es wird **keine Datei gespeichert** — das PDF entsteht bei jedem Abruf.
+
+**Die Quittung wird genau einmal versendet (`0049`).** `0047` hat das behauptet und nicht
+getan: ein zweiter Aufruf versendete erneut und überschrieb `receipt_sent_at`. Der Zustand
+`sending` und `claim_withdrawal_receipt()` ersetzen das — die Zustandsänderung **ist** die
+Entscheidung, in einer Anweisung, sodass von zwei gleichzeitigen Aufrufen genau einer senden
+darf. `receipt_sent_at` ist einmalig beschreibbar (`coalesce`), `sent` ist endgültig, beides
+zusätzlich per Trigger `withdrawal_receipt_protect_trg` erzwungen, plus die CHECK-Invariante
+`(receipt_state = 'sent') = (receipt_sent_at is not null)`. Ein tatsächlich fehlgeschlagener
+Versand bleibt wiederholbar, und ein Anspruch, der älter als 15 Minuten ist, darf übernommen
+werden — sonst bliebe eine Quittung liegen, wenn ein Sender mittendrin abstürzt.
+
+`withdrawal_attempts` hält **nur** einen gesalzenen Fingerabdruck des Aufrufers und einen
+Zeitstempel — keine Bestellnummer, keine E-Mail, keinen Namen. `receive_withdrawal()` schreibt die
+Zeile, **bevor** feststeht, ob überhaupt etwas passt, und begrenzt auf 10 Versuche je gleitender
+Stunde; Zeilen älter als zwei Stunden werden bei jedem Aufruf entfernt. Ein gedrosselter Aufruf
+erhält **dieselbe** Antwort wie ein Nichttreffer (`accepted: true, delivered: false`) — „du wirst
+gedrosselt" wäre selbst wieder ein verwertbares Signal. Begründung: ADR-0086.
+
+`receive_withdrawal()` prüft `o.commerce_mode = commerce_mode()`, nicht `'live'` — dieselbe
+Funktion, mit der `create_order()` stempelt. Auf Staging (Sandbox) ist der Pfad damit vollständig
+prüfbar, auf Production (Live) bleibt eine historische Testbestellung ausgeschlossen.
+
+Alle sechs Tabellen sind für jede Client-Rolle gesperrt; der Weg hinein sind die Funktionen
+aus `0047`.
+
+**Bestandsabgleich (`0048`, ADR-0087).** `inventory_imports` hält je Abgleich Datei, Speicherzeit
+der Tabelle, einen **inhaltlichen** Fingerabdruck (`content_fingerprint`) und die Ergebniszahlen; `inventory_import_rows` **jede** gelesene Zeile, auch die
+ignorierten — sonst ließe sich „warum hat sich das *nicht* geändert?" nicht beantworten;
+`inventory_import_mappings` eine vom Betreiber einmal getroffene Zuordnung, nach Blatt und
+normalisiertem Namen. Bestand wird **nicht** hier geschrieben: `seller_apply_import()` ruft
+`record_inventory_movement()` mit Grund `correction` und erbt die Untergrenze aus `0003`. Eine
+`IGNORED`-Zeile kann per CHECK kein Delta tragen.
+
+**Die Zusammenfassung zählt seit `0050` den Zustand, den die Zeilen tragen.** `0048` filterte
+auf `status = 'pending' and delta = 0` — eine Kombination, die `reconcile()` nie erzeugt, weil
+delta 0 den Status `unchanged` bedeutet. Der Zähler war strukturell immer 0, und die reale
+Arbeitsmappe meldete `559 unterstützt · 245 Erhöhungen · 7 Senkungen · 0 unverändert`, obwohl
+307 Zeilen unverändert waren. Angewandter Bestand war nie betroffen — `seller_apply_import()`
+liest diese Zähler nicht —, die Freigabeansicht schon. Es gilt jetzt
+`supported = increases + decreases + unchanged + conflicts`.
+
+**`content_fingerprint` ist kein Datei-Hash.** Er wird in `src/lib/import/fingerprint.ts` über die
+*ausgelesenen Zeilen* gebildet — Version, Blatt, getrimmter Name, Storage-Zahl, sortiert —, nicht
+über die 450 MB der Datei. Dieselbe Bestandsaufnahme ergibt denselben Wert, auch wenn die Mappe neu
+gespeichert oder ein Bild ausgetauscht wurde; eine geänderte Storage-Zahl ergibt einen anderen.
+Bewusst **vor** der Auflösung: keine SKY-ID, keine Klassifikation — die verschieben sich, wenn der
+Katalog oder eine Zuordnung wächst, und das ist keine Änderung am Regal. Der Wert dient der
+Historie und dem Wiedererkennen; er **blockiert keinen Import** (die Spalte ist `nullable`, und
+kein Aufrufer verzweigt auf ihr). Ein erneuter Import derselben Aufnahme ist ohnehin folgenlos:
+gegen ein absolutes Ziel abzugleichen ist idempotent.
+
+**Bestellungen werden nie gelöscht** (ADR-0084). Jeder Fremdschlüssel auf `orders` ist
+`ON DELETE RESTRICT`, `orders.user_id` ist `ON DELETE SET NULL`, Client-Rollen haben nur `select`,
+und es existiert keine Löschfunktion. `orders.sandbox_archived_at` / `sandbox_archived_by` räumen
+eine **Testbestellung** aus der Testliste — reine Sichtbarkeit, umkehrbar, ohne Wirkung auf Bestand,
+Zahlung, Versand oder Beträge. Die CHECK-Constraint
+`sandbox_archived_at is null or commerce_mode = 'sandbox'` macht diesen Zustand auf einer echten
+Bestellung strukturell unmöglich. Seit `0046` lesen `admin_orders()`, `seller_orders_active()`,
+`seller_orders_month()`, `seller_order_calendar()` und `seller_open_order_counts()` **nur**
+`commerce_mode = 'live'`.
+
+**`seller_monthly_reports`** (Tabelle, `0045`) hält je abgeschlossenem Kalendermonat **genau
+einen** festgeschriebenen Bericht über die **Bestellungen dieses Monats**:
+`order_count`, `order_value`, `merchandise_amount`, `shipping_amount`, `discount_amount`,
+`paid_count`/`unpaid_count` (rein informativ, Stand bei Erstellung), `tax_regime` (als **Name**,
+nicht als Satz) und `included_orders` (welche Bestellnummern gezählt wurden).
+
+**Der Monat ist der Monat von `placed_at`** (Berliner Kalender) — nicht der der Zahlung, des
+Versands oder der Erfüllung. Gezählt wird, was `order_counts_as_placed()` als echte Bestellung
+anerkennt (alles außer `'expired'`); **Zahlung ist keine Bedingung**. Eine später eintreffende
+Zahlung ändert einen geschriebenen Bericht nicht; eine spätere **Erstattung oder Stornierung**
+gehört in den Monat, in dem sie stattfindet, und entfernt die Bestellung **nicht** aus ihrem
+Bestellmonat (ADR-0083). Deshalb gibt es **keine Versionierung**: `unique (period_year,
+period_month, commerce_mode)`.
+
+**Keine** Spalte für Erstattung, Gebühr, Netto, Steuerbetrag oder Gewinn — diese Daten existieren
+im System nicht (ADR-0082). Für jede Client-Rolle gesperrt, RLS aktiv, ohne Policy: der Weg hinein
+sind die drei Funktionen.
+
+**Kein Prädikat ruft das andere.** `is_shop_admin()` ist ein Alias auf `is_platform_admin()`.
+
+**`seller_operators.seller_id` ist das einzige `seller_id` im Schema** und beantwortet „welches
+Konto darf diesen Shop führen" — nicht „welchem Verkäufer gehört diese Bestellung". Bestellungen,
+Bestand und Katalog bekommen keines (ADR-0076).
+
+Kein Clientrecht auf beiden Tabellen, keine Policy. Entzug setzt `is_enabled = false`; die Zeile
+bleibt, weil ein gewährter und wieder entzogener Zugang eine Tatsache ist.
+
+
+---
+
+### 3.3v Ein Konto, ein Typ (Migration `0042`, ADR-0078)
+
+| Typ | Mitgliedschaft | Sammlung | Shop | Plattform |
+|---|---|---|---|---|
+| **USER** | keine | ja | nein | nein |
+| **BUSINESS** | `seller_operators` aktiv | **nein** | ja | nein |
+| **ADMIN** | `platform_admins` | **nein** | nein | ja |
+
+Durchgesetzt durch zwei Trigger — `seller_operators_one_type` und `platform_admins_one_type` —,
+die jeweils die andere Tabelle befragen. Beide sehen nur **aktive** Mitgliedschaft, damit
+„entziehen, dann vergeben" möglich bleibt.
+
+| Funktion | Zweck |
+|---|---|
+| `is_privileged_account(uuid)` | Business oder Admin — also **kein** privater Sammler |
+| `is_collector_account()` | der Aufrufer ist ein privater Sammler |
+| `admin_set_platform_admin(uuid, boolean, text)` | Adminrechte vergeben/entziehen, weist Shopbetreiber ab, schützt den letzten Admin |
+| `my_capabilities()` | liefert zusätzlich `account_type`: `user` \| `business` \| `admin` |
+
+`collection_items` verlangt in allen vier Policies zusätzlich `is_collector_account()` — auch beim
+Lesen. **Keine Zeile wird beim Typwechsel gelöscht:** ein Entzug des Shopzugangs macht dieselbe
+Sammlung unverändert wieder sichtbar.
 
 
 ### 3.4 `profiles` — 1:1 zu `auth.users`
@@ -1567,7 +1793,7 @@ der SKY-ID-Unveränderlichkeit (Abschnitt 3.7).
   `sale_skyisles`-Zeile derselben Position unverändert daneben. **Auf Production NICHT
   angewandt.**
 
-- Sechsundzwanzigste Migration: `0026_platform_and_seller.sql` — **zwei Rechtssubjekte**
+- Sechsundzwanzigste Migration: `0026_platform_and_seller.sql` — **zwei Rollen, ein Rechtssubjekt** (ADR-0086)
   (ADR-0064). Neue Tabelle `sellers` (genau **eine** Zeile, `display_name = 'yulez.collectibles'`,
   Kontaktwerte aus `business_settings` **kopiert**); `sellers_one_active` als partieller
   Unique-Index erlaubt höchstens **einen aktiven** Verkäufer; `active_seller()` ist der einzige

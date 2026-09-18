@@ -12,7 +12,7 @@ import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = {
   title: de.shop.page.title,
-  description: de.shop.page.intro,
+  description: de.shop.page.introFallback,
 };
 
 /**
@@ -58,6 +58,13 @@ export default async function ShopPage({
     fetchSellerPublic(),
   ]);
 
+  /* The seller names itself — this page never hard-codes who sells (ADR-0075).
+     Without an active seller the neutral sentence stands; a guessed name
+     would be worse than none. */
+  const intro = seller
+    ? de.shop.page.intro(seller.displayName)
+    : de.shop.page.introFallback;
+
   const entries = shopEntries(catalog, offers);
 
   // Only outlines a card after coming back from sign-in. Nothing is written
@@ -80,7 +87,7 @@ export default async function ShopPage({
           className="mt-2 text-sm text-on-deep-muted md:text-base"
           style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
         >
-          {de.shop.page.intro}
+          {intro}
         </p>
       </div>
 

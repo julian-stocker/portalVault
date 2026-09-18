@@ -50,8 +50,15 @@ describe("guard 1 — no table carries a seller", () => {
      * word while explaining the boundary — prose may name the idea, schema may
      * not introduce it. This is the single word that separates an identity
      * record from a marketplace.
+     *
+     * ONE EXCEPTION, and it is the opposite of a marketplace: since 0041
+     * `seller_operators.seller_id` names which shop an ACCOUNT may operate
+     * (ADR-0077). It is a membership, not a partition of commerce — no order,
+     * no inventory row and no catalog row gains a seller. That distinction is
+     * why the guard below still sweeps every other migration.
      */
-    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql"))) {
+    const MEMBERSHIP = ["0041_three_account_authorization.sql", "0042_strict_account_types.sql"];
+    for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")
         .split("\n")
         .filter((line) => !line.trimStart().startsWith("--"))
@@ -59,6 +66,20 @@ describe("guard 1 — no table carries a seller", () => {
         .replace(/'(?:[^']|'')*'/g, "''");
       expect(body, `${file} introduces seller_id`).not.toMatch(/seller_id/i);
     }
+  });
+
+  it("0041's seller_id is a membership and reaches no commerce table", () => {
+    // Raw: this file's prose contains apostrophes, and stripping string
+    // literals across them would swallow the schema it is meant to read.
+    const body = readFileSync(`${MIGRATIONS}/0041_three_account_authorization.sql`, "utf8");
+    // It exists only on the membership table and the predicate that reads it.
+    for (const commerce of ["orders", "order_lines", "shop_inventory", "skylanders"]) {
+      expect(
+        body,
+        `0041 puts seller_id on ${commerce}`,
+      ).not.toMatch(new RegExp(`alter table public\\.${commerce}[^;]*seller_id`, "i"));
+    }
+    expect(body).toContain("constraint seller_operators_pk primary key (seller_id, user_id)");
   });
 
   it("adds no column to any existing table", () => {

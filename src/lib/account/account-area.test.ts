@@ -49,8 +49,8 @@ describe("the account area is one place with four destinations", () => {
      * of them.
      */
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav).toContain('<SettingsAction active={settingsActive} />');
-    const settings = nav.slice(nav.indexOf("function SettingsAction("));
+    expect(nav).toContain('<AccountHubAction active={accountHubActive} />');
+    const settings = nav.slice(nav.indexOf("function AccountHubAction("));
     expect(settings.slice(0, settings.indexOf("</Link>"))).toContain('href="/account"');
   });
 
@@ -61,7 +61,7 @@ describe("the account area is one place with four destinations", () => {
      */
     const nav = source("src/components/layout/site-nav.tsx");
     expect(nav.match(/<ProfileAction /g)).toHaveLength(1);
-    expect(nav.match(/<SettingsAction /g)).toHaveLength(1);
+    expect(nav.match(/<AccountHubAction /g)).toHaveLength(1);
     // And neither is back in the bar.
     expect(nav).not.toContain('href: "/account"');
     expect(nav).not.toContain('href: "/login"');
@@ -70,7 +70,7 @@ describe("the account area is one place with four destinations", () => {
 
   it("keeps the profile page as its own destination", () => {
     const nav = source("src/components/layout/site-nav.tsx");
-    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function SettingsAction("));
+    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function AccountHubAction("));
     expect(profile).toContain('href={signedIn ? "/account/profile" : "/login"}');
     // It is one of the hub's four sections and stays one.
     expect(source("src/app/(app)/account/page.tsx")).toContain('{ href: "/account/profile"');
@@ -90,20 +90,70 @@ describe("the account area is one place with four destinations", () => {
     expect(activeSection("/settings")).toBe("account");
   });
 
-  it("signing out sits on the account hub, not in the bar and not under security", () => {
-    // A destructive-feeling control on every screen is one somebody
-    // eventually hits by accident on a phone. But it is also not a *setting*:
-    // „Konto & Sicherheit" is for changing something about the account, and
-    // leaving is not a change to it (ADR-0062).
-    expect(source("src/app/(app)/account/page.tsx")).toContain('action="/auth/signout"');
+  it("signing out sits on Profil — not the hub, not the bar, not under security", () => {
+    /*
+     * A destructive-feeling control on every screen is one somebody
+     * eventually hits by accident on a phone. It is also not a *setting*:
+     * „Konto & Sicherheit" is for changing something about the account, and
+     * leaving is not a change to it (ADR-0062).
+     *
+     * And it is not on the hub either (ADR-0085). It was, and the reason that
+     * looked acceptable is three lines below this one: `/settings`
+     * permanently redirects to `/account`, so a button on the hub IS a button
+     * under Settings, whatever the route is called. „Profil" is the account's
+     * own identity, and ending that session belongs at the bottom of it.
+     */
+    expect(source("src/app/(app)/account/profile/page.tsx")).toContain('action="/auth/signout"');
+    expect(source("src/app/(app)/account/page.tsx")).not.toContain("/auth/signout");
     expect(source("src/app/(app)/account/security/page.tsx")).not.toContain("/auth/signout");
     expect(source("src/components/layout/site-nav.tsx")).not.toContain("/auth/signout");
   });
 
+  it("and therefore not on what /settings actually renders", () => {
+    // The redirect destination is the hub, and the hub has no logout.
+    const settings = source("src/app/(app)/settings/page.tsx");
+    expect(settings).toContain('permanentRedirect("/account")');
+    expect(source("src/app/(app)/account/page.tsx")).not.toContain("signout");
+  });
+
   it("is a POST, so a prefetcher can never end somebody's session", () => {
+    const profile = source("src/app/(app)/account/profile/page.tsx");
+    expect(profile).toContain('method="post"');
+    expect(profile).not.toContain('href="/auth/signout"');
+  });
+
+  it("every account type can reach it — USER, BUSINESS and ADMIN alike", () => {
+    /*
+     * The whole fix rests on this. If `/account/profile` were gated the way
+     * `/collection` is, moving the button here would have taken logout away
+     * from a seller and an administrator entirely.
+     *
+     * The `(app)` layout asks for a session and nothing more; only
+     * `/collection` narrows to a collector (ADR-0078). Neither the profile
+     * page nor the account hub mentions a capability at all.
+     */
+    const layout = source("src/app/(app)/layout.tsx");
+    expect(layout).toContain("if (!profile) redirect(SIGN_IN_PATH);");
+    expect(layout).not.toContain("notFound()");
+    expect(source("src/app/(app)/collection/page.tsx")).toContain(
+      "if (!(await isCollector())) notFound();",
+    );
+    for (const file of [
+      "src/app/(app)/account/page.tsx",
+      "src/app/(app)/account/profile/page.tsx",
+    ]) {
+      const page = source(file);
+      expect(page, file).not.toContain("isCollector");
+      expect(page, file).not.toContain("canOperateSeller");
+      expect(page, file).not.toContain("isPlatformAdmin");
+      expect(page, file).not.toContain("notFound");
+    }
+  });
+
+  it("and the hub still leads to Profil, so the button is one tap from it", () => {
+    // Moving it must not make it harder to find than it was.
     const hub = source("src/app/(app)/account/page.tsx");
-    expect(hub).toContain('method="post"');
-    expect(hub).not.toContain('href="/auth/signout"');
+    expect(hub).toContain('{ href: "/account/profile", copy: de.account.profile }');
   });
 
   it("security keeps the password and is where account changes will land", () => {

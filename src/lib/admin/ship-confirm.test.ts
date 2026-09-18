@@ -24,8 +24,8 @@ function code(path: string): string {
 }
 
 const FORM = "src/components/admin/ship-order-form.tsx";
-const DETAIL = "src/app/(admin)/admin/orders/[orderNumber]/page.tsx";
-const HOME = "src/app/(admin)/admin/page.tsx";
+const DETAIL = "src/app/(business)/business/orders/[orderNumber]/page.tsx";
+const HOME = "src/app/(business)/business/page.tsx";
 const NAV = "src/components/layout/site-nav.tsx";
 const QUERIES = "src/lib/admin/order-queries.ts";
 const ORDERS = "src/lib/admin/orders.ts";
@@ -110,9 +110,10 @@ describe("the status is visible and survives a reload", () => {
 
 describe("a flagged order cannot be missed", () => {
   it("the admin home states both numbers", () => {
-    expect(home).toContain("copy.needsResolutionCount(openOrders.needsResolution)");
-    expect(home).toContain("copy.toShipCount(openOrders.toShip)");
-    expect(home).toContain("copy.nothingOpen");
+    expect(home).toContain("orders.needsResolutionCount(openOrders.needsResolution)");
+    expect(home).toContain("orders.toShipCount(openOrders.toShip)");
+    // The hub shows the work card only when there IS work (ADR-0080).
+    expect(home).toContain("hasOpenWork(openOrders)");
   });
 
   it("only the flagged bucket is loud there", () => {
@@ -133,16 +134,24 @@ describe("a flagged order cannot be missed", () => {
   it("nothing polls and no new infrastructure was added", () => {
     const queries = code(QUERIES);
     expect(queries).toContain('supabase.rpc("admin_orders", { p_open_only: openOnly })');
-    // The count reuses the list call; there is no second RPC and no aggregate.
-    expect(queries).toContain("fetchAdminOrders(true)");
+    /*
+     * This used to add "and no aggregate": the count reused the list call.
+     * 0045 made it an aggregate deliberately — the list call is capped at 100
+     * rows, so reusing it meant the badge stopped being true above a hundred
+     * (ADR-0082). What the assertion was actually protecting is intact: no
+     * polling, no notification table, no background job. One extra query on
+     * the request that renders the page, for the operator alone.
+     */
+    expect(queries).toContain('supabase.rpc("seller_open_order_counts")');
     for (const source of [queries, nav, home]) {
       expect(source).not.toContain("setInterval");
       expect(source).not.toContain("setTimeout");
+      expect(source).not.toContain("subscribe(");
     }
   });
 
   it("costs a collector nothing: the role is asked before the database is", () => {
-    expect(code(QUERIES)).toContain("if (!(await isAdmin())) return NO_OPEN_ORDERS;");
+    expect(code(QUERIES)).toContain("if (!(await canOperateSeller())) return NO_OPEN_ORDERS;");
   });
 });
 

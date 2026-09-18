@@ -6,28 +6,17 @@
  * strongest single signal that a site is unfinished, and for a shop that takes
  * payments it also meant the legally required pages had nowhere to live.
  *
- * ONLY DESTINATIONS THAT EXIST
+ * THE LEGAL COLUMN
  *
- * Impressum, Datenschutzerklärung, Widerrufsbelehrung and AGB are a release
- * gate of their own (docs/ROADMAP.md, V1.7) and none of them is written. They
- * are therefore **not linked**: a dead link is worse than a missing one, and a
- * page titled "Impressum" that contains no Impressum is worse than both.
+ * These slots were reserved and empty for the whole of V1, with a comment
+ * explaining that a page titled "Impressum" containing no Impressum is worse
+ * than no link at all. The texts exist now (ADR-0086), so the links do.
  *
- * The slots, in the order they will be rendered once the texts exist:
- *
- *     /impressum      Impressum
- *     /datenschutz    Datenschutzerklärung
- *     /widerruf       Widerrufsbelehrung
- *     /agb            AGB
- *     /kontakt        Kontakt
- *
- * `impressum` and `datenschutz` are already reserved usernames, so those two
- * addresses are free to take (src/lib/auth/username.ts).
- *
- * There is deliberately no contact point yet either: no address has been
- * decided, and one invented here would be a support channel that goes
- * nowhere — while `de.checkout.result.attentionHint` already promises a
- * customer that somebody will get in touch.
+ * **„Vertrag widerrufen" is not decoration in this list.** § 356a BGB requires
+ * the electronic withdrawal function to be continuously available during the
+ * withdrawal period, prominently placed and easily accessible — a footer link
+ * on every page is how that is met, and it is why the entry sits here rather
+ * than only inside an account area a guest has no way into.
  *
  * NOT IN THE ADMIN AREA. `(admin)/layout.tsx` does not mount this: the
  * operator's workbench has no visitors to orient and no legal pages to offer.
@@ -36,12 +25,32 @@ import Link from "next/link";
 
 import { Wordmark } from "@/components/layout/wordmark";
 import { de } from "@/lib/i18n/de";
+import { SELLER_IDENTITY } from "@/lib/legal/seller-identity";
+import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
-/** The public destinations that exist today. Order is the order on screen. */
+/** One class for every foot link: same target size, same behaviour. */
+const FOOT_LINK =
+  "inline-flex min-h-11 w-fit items-center text-sm text-on-deep-muted transition-colors " +
+  "hover:text-on-deep focus-visible:outline-2 focus-visible:outline-offset-2 " +
+  "focus-visible:outline-current";
+
+/** What the shop is. */
 const LINKS: readonly { href: string; label: string }[] = [
   { href: "/", label: de.footer.catalog },
   { href: "/shop", label: de.footer.shop },
   { href: "/ueber-skyisles", label: de.footer.about },
+];
+
+/** What the law requires to be findable from anywhere. */
+const LEGAL_LINKS: readonly { href: string; label: string }[] = [
+  { href: "/impressum", label: de.footer.impressum },
+  { href: "/datenschutz", label: de.footer.privacy },
+  { href: "/agb", label: de.footer.terms },
+  { href: "/widerruf", label: de.footer.withdrawal },
+  { href: WITHDRAWAL_PATH, label: de.footer.withdrawNow },
+  { href: "/versand", label: de.footer.shipping },
+  { href: "/zahlung", label: de.footer.payment },
+  { href: "/kontakt", label: de.footer.contact },
 ];
 
 export function SiteFooter() {
@@ -73,21 +82,36 @@ export function SiteFooter() {
           </Link>
           {/* What this is, in one sachliche line. Not a slogan. */}
           <p className="text-sm leading-relaxed text-on-deep-muted">{de.footer.positioning}</p>
+          {/* And who sells, named from the seller data rather than written
+              here (ADR-0086). */}
+          <p className="text-sm text-on-deep-muted">
+            {de.footer.seller(SELLER_IDENTITY.contractingParty)}
+          </p>
         </div>
 
-        <nav aria-label={de.footer.nav} className="flex flex-col gap-1">
-          {LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              // 44 px targets here too: a footer on a phone is thumbed like
-              // anything else.
-              className="inline-flex min-h-11 w-fit items-center text-sm text-on-deep-muted transition-colors hover:text-on-deep"
-            >
-              {link.label}
-            </Link>
-          ))}
-        </nav>
+        <div className="flex flex-col gap-8 sm:flex-row sm:gap-12">
+          <nav aria-label={de.footer.nav} className="flex flex-col gap-1">
+            {LINKS.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                // 44 px targets here too: a footer on a phone is thumbed like
+                // anything else.
+                className={FOOT_LINK}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+
+          <nav aria-label={de.legal.nav} className="flex flex-col gap-1">
+            {LEGAL_LINKS.map((link) => (
+              <Link key={link.href} href={link.href} className={FOOT_LINK}>
+                {link.label}
+              </Link>
+            ))}
+          </nav>
+        </div>
       </div>
 
       <div className="mx-auto w-full max-w-6xl px-4 pb-8 md:pb-10">

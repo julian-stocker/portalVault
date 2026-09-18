@@ -3,12 +3,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { OrderLinesTable } from "@/components/admin/order-lines-table";
+import { OrderReviewPanel } from "@/components/admin/order-review-panel";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
 import { TrackingForm } from "@/components/admin/tracking-form";
 import { TrackingLink } from "@/components/commerce/tracking-link";
 import { fetchAdminOrder } from "@/lib/admin/order-queries";
+import { fetchOrderReview } from "@/lib/admin/order-review";
 import { shipBlocker } from "@/lib/admin/orders";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -47,11 +49,16 @@ export default async function AdminOrderPage({
   const { order, address, lines, events, mail } = detail;
   const copy = de.admin.orders;
   const blocker = shipBlocker(order);
+  // Only asked when there is something to explain; the reader returns
+  // "not flagged" without a round trip for everybody else.
+  const review = order.needs_resolution
+    ? await fetchOrderReview(order.order_number)
+    : ({ flagged: false } as const);
 
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
-      <Link href="/admin/orders" className="text-sm text-muted underline underline-offset-4">
+      <Link href="/business/orders" className="text-sm text-muted underline underline-offset-4">
         ← {copy.title}
       </Link>
 
@@ -69,15 +76,12 @@ export default async function AdminOrderPage({
       ) : null}
 
       {/* Loud, and above everything else: this is the state in which shipping
-          would hand over goods the ledger still counts as present. */}
-      {order.needs_resolution ? (
-        // `--danger` and its tints, not raw `red-*`: the product has one
-        // colour for "this is wrong" and this is it (F9).
-        <div className="mt-5 rounded-sky-lg bg-danger/10 p-5 ring-2 ring-danger/70">
-          <h2 className="font-semibold text-danger">{copy.needsResolutionTitle}</h2>
-          <p className="mt-1 text-sm text-foreground/90">{copy.needsResolutionHint}</p>
-        </div>
-      ) : null}
+          would hand over goods the ledger still counts as present.
+
+          Since 0043 it also says WHY and, where the cause allows it, offers
+          the repair (ADR-0079). A blocked order with no way forward was a
+          seller with no workflow. */}
+      <OrderReviewPanel orderNumber={order.order_number} review={review} />
 
       <dl className="mt-6 grid grid-cols-[10rem_1fr] gap-y-1 text-sm">
         <dt className="text-muted">{copy.placedAt}</dt>

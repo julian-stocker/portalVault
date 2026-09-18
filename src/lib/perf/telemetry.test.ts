@@ -51,7 +51,7 @@ describe("a route becomes a pattern, never a URL", () => {
 
   it("collapses every dynamic route this application actually has", () => {
     expect(normalizeRoute("/account/orders/SI-2026-001000")).toBe("/account/orders/[orderNumber]");
-    expect(normalizeRoute("/admin/orders/SI-2026-001000")).toBe("/admin/orders/[orderNumber]");
+    expect(normalizeRoute("/business/orders/SI-2026-001000")).toBe("/business/orders/[orderNumber]");
     expect(normalizeRoute("/admin/catalog/SKY-0821")).toBe("/admin/catalog/[skyId]");
   });
 

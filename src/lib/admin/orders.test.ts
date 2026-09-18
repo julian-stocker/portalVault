@@ -290,8 +290,8 @@ describe("the application never reaches around the functions", () => {
   const files = [
     "src/lib/admin/order-queries.ts",
     "src/lib/admin/order-actions.ts",
-    "src/app/(admin)/admin/orders/page.tsx",
-    "src/app/(admin)/admin/orders/[orderNumber]/page.tsx",
+    "src/app/(business)/business/orders/page.tsx",
+    "src/app/(business)/business/orders/[orderNumber]/page.tsx",
     "src/components/admin/ship-order-form.tsx",
   ].map((path) => [path, readFileSync(path, "utf8")] as const);
 

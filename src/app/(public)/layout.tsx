@@ -3,7 +3,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
-import { isAdmin } from "@/lib/auth/admin";
+import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { currentUser } from "@/lib/auth/user";
 
@@ -20,15 +20,17 @@ export default async function PublicLayout({ children }: { children: React.React
   // of `profiles` — measured at 102 ms, faster than the catalogue read the
   // page makes in the same breath. Nothing at all for an anonymous visitor:
   // it returns null the moment `currentUser()` does (V3.4.2).
-  const [user, admin, profile] = await Promise.all([
+  const [user, caps, profile] = await Promise.all([
     currentUser(),
-    isAdmin(),
+    // Both capabilities in one answer (ADR-0077): the bar must offer exactly
+    // what the route guards would let this account into.
+    capabilities(),
     currentProfile(),
   ]);
-  // Only ever a query for the operator: `fetchOpenOrderCounts()` asks
-  // `isAdmin()` itself and returns zeroes for everybody else without touching
-  // the database. A flagged order has to be visible from wherever they are,
-  // not only from inside /admin.
+  // Only ever a query for the seller: `fetchOpenOrderCounts()` asks
+  // `canOperateSeller()` itself and returns zeroes for everybody else without
+  // touching the database. A flagged order has to be visible from wherever
+  // the operator is, not only from inside /business.
   const openOrders = await fetchOpenOrderCounts();
 
   return (
@@ -37,7 +39,8 @@ export default async function PublicLayout({ children }: { children: React.React
       <PrincipalGate userId={user?.id ?? null} />
       <SiteNav
         signedIn={Boolean(user)}
-        admin={admin}
+        admin={caps.platformAdmin}
+        business={caps.sellerOperator}
         openOrders={openOrders}
         username={profile?.username ?? null}
       />

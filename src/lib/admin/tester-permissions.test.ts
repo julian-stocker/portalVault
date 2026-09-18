@@ -391,7 +391,8 @@ describe("the admin surface", () => {
     for (const action of ["setTester", "setTesterPermission"]) {
       const at = ACTIONS.indexOf(`export async function ${action}(`);
       expect(at, action).toBeGreaterThan(-1);
-      expect(ACTIONS.slice(at, at + 400)).toContain("await isAdmin()");
+      // Tester management is a PLATFORM act (ADR-0077).
+      expect(ACTIONS.slice(at, at + 400)).toContain("await isPlatformAdmin()");
     }
   });
 

@@ -19,7 +19,7 @@
 import { revalidatePath } from "next/cache";
 
 import { normaliseTracking, trackingTooLong } from "@/lib/admin/orders";
-import { isAdmin } from "@/lib/auth/admin";
+import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/server";
 
@@ -85,11 +85,11 @@ export async function retryOrderMail(
   kind: MailKind,
   acknowledgeUnresolved = false,
 ): Promise<MailResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const result = await sendOrderMail(orderNumber, kind, acknowledgeUnresolved);
 
-  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath(`/business/orders/${orderNumber}`);
   return result;
 }
 
@@ -101,7 +101,7 @@ export async function markOrderShipped(
   orderNumber: string,
   trackingNumber: string | null,
 ): Promise<ShipResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const tracking = normaliseTracking(trackingNumber);
   if (trackingTooLong(tracking)) {
@@ -128,8 +128,43 @@ export async function markOrderShipped(
   // must not make a shipped order look unshipped.
   await sendOrderMail(orderNumber, "shipping_confirmation");
 
-  revalidatePath("/admin/orders");
-  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/business/orders");
+  revalidatePath(`/business/orders/${orderNumber}`);
+  return { ok: true };
+}
+
+/**
+ * Books the stock a late payment never took, and clears the review flag
+ * (ADR-0079).
+ *
+ * Not an unlock. `seller_resolve_stock_shortfall()` books one sale movement
+ * per line through the ordinary journal and clears the flag only afterwards;
+ * if the shelf cannot cover the order the booking raises, the transaction
+ * rolls back and the order stays blocked. That refusal is the safety property.
+ *
+ * A payment discrepancy is refused by name — moving goods does not settle
+ * money — so the seller learns which problem they have.
+ */
+export async function resolveStockShortfall(orderNumber: string): Promise<ShipResult> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("seller_resolve_stock_shortfall", {
+    p_order_number: orderNumber,
+  });
+
+  if (error) {
+    const code = error.code ?? "";
+    if (NOT_ADMIN.has(code)) return { ok: false, message: de.admin.notAllowed };
+    // A refusal is a fact about the order — not paid, no stock, already
+    // booked, a money mismatch. The page re-reads and says which.
+    if (REFUSED.has(code)) return { ok: false, message: de.admin.orders.reviewRefused };
+    return { ok: false, message: de.admin.orders.reviewFailed };
+  }
+
+  revalidatePath("/business/orders");
+  revalidatePath(`/business/orders/${orderNumber}`);
+  revalidatePath("/business/inventory");
   return { ok: true };
 }
 
@@ -148,7 +183,7 @@ export async function markOrderShipped(
  * is why `markOrderShipped()` needs no special case for a repeat.
  */
 export async function unmarkOrderShipped(orderNumber: string): Promise<ShipResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc("admin_unmark_order_shipped", {
@@ -163,8 +198,8 @@ export async function unmarkOrderShipped(orderNumber: string): Promise<ShipResul
     return { ok: false, message: de.admin.orders.unshipFailed };
   }
 
-  revalidatePath("/admin/orders");
-  revalidatePath(`/admin/orders/${orderNumber}`);
+  revalidatePath("/business/orders");
+  revalidatePath(`/business/orders/${orderNumber}`);
   // The customer's page states the status, so it has to be re-read as well.
   revalidatePath(`/account/orders/${orderNumber}`);
   return { ok: true };
@@ -188,7 +223,7 @@ export async function setTrackingNumber(
   orderNumber: string,
   trackingNumber: string | null,
 ): Promise<ShipResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   const tracking = normaliseTracking(trackingNumber);
   if (trackingTooLong(tracking)) {
@@ -208,8 +243,8 @@ export async function setTrackingNumber(
     return { ok: false, message: de.admin.orders.shipFailed };
   }
 
-  revalidatePath(`/admin/orders/${orderNumber}`);
-  revalidatePath("/admin/orders");
+  revalidatePath(`/business/orders/${orderNumber}`);
+  revalidatePath("/business/orders");
   // The customer's own page shows the same number and the same link.
   revalidatePath(`/account/orders/${orderNumber}`);
   return { ok: true };

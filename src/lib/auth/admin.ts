@@ -1,13 +1,15 @@
 /**
  * Is the current request an administrator?
  *
- * One adapter over one database predicate. The predicate is
- * `public.is_shop_admin()` from migration `0003` — and despite its name it is
- * **the general SkyIsles administrator check today**, not a shop-only one
- * (ADR-0039). The name stayed because three shop functions already depend on
- * it and renaming the only finished security mechanism to read better would
- * be risk without gain. This function is where a future rename or a real role
- * model arrives, so callers never need to know either way.
+ * Since 0041 this means **platform administrator** and nothing else
+ * (ADR-0077): the account runs SkyIsles — catalog, categories, testers,
+ * platform settings. It grants nothing commercial. Running the shop is
+ * `canOperateSeller()`, and neither capability implies the other.
+ *
+ * It delegates to `capabilities()` so there is one round trip and one answer
+ * per request. `is_shop_admin()` still exists in the database as an alias for
+ * `is_platform_admin()`, kept so anything not yet reclassified fails closed
+ * for a seller rather than open.
  *
  * Two properties matter:
  *
@@ -24,19 +26,8 @@
  *
  * Memoised per request like `currentUser`: a page and its layout both ask.
  */
-import { cache } from "react";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 
-import { currentUser } from "@/lib/auth/user";
-import { createClient } from "@/lib/supabase/server";
-
-export const isAdmin = cache(async (): Promise<boolean> => {
-  // No session, no round trip: an anonymous request can never be an admin,
-  // and the RPC would only confirm it at the cost of a query.
-  if (!(await currentUser())) return false;
-
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("is_shop_admin");
-  // An error is not permission. A failing check denies, it never grants.
-  if (error) return false;
-  return data === true;
-});
+export async function isAdmin(): Promise<boolean> {
+  return isPlatformAdmin();
+}

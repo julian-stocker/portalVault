@@ -26,7 +26,7 @@
 
 import { setImageOverride } from "@/lib/admin/actions";
 import { imagePathFor, MAX_IMAGE_BYTES, sniffImage } from "@/lib/admin/image-file";
-import { isAdmin } from "@/lib/auth/admin";
+import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { CATALOG_BUCKET, isOverridePath } from "@/lib/catalog/image";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
@@ -80,7 +80,7 @@ async function removeObject(path: string): Promise<void> {
  * boundary — the storage policy asks `is_shop_admin()` too.
  */
 export async function stageFigureImage(formData: FormData): Promise<ImageResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const skyId = String(formData.get("skyId") ?? "");
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
@@ -110,7 +110,7 @@ export async function stageFigureImage(formData: FormData): Promise<ImageResult>
 }
 
 export async function uploadFigureImage(formData: FormData): Promise<ImageResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const skyId = String(formData.get("skyId") ?? "");
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
@@ -161,7 +161,7 @@ export async function uploadFigureImage(formData: FormData): Promise<ImageResult
  * empty plate if it never had a file.
  */
 export async function removeFigureImage(skyId: string): Promise<ImageResult> {
-  if (!(await isAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
 
   const previous = await currentOverride(skyId);

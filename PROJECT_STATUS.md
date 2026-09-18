@@ -1544,6 +1544,275 @@ eine betrifft Telemetrie, die andere Bestellabwicklung; keine braucht etwas aus 
 
 ---
 
+## USER / SHOP / ADMIN — Zuständigkeiten getrennt (Stand 2026-09-17)
+
+**0040 — Shop und Plattform** · ADR-0075 · `0040_shop_platform_responsibilities.sql` ·
+**geschrieben, NIRGENDS angewandt.**
+
+ADR-0064 trennte SkyIsles (Plattform) und yulez.collectibles (Verkäufer) begrifflich. Im Produkt
+war davon nichts zu sehen: `/admin` mischte alles auf einem Bildschirm, und die Kasse sagte
+**„Verkäufer ist SkyIsles"** — auf dem letzten Bildschirm vor der Zahlung.
+
+| | |
+|---|---|
+| `/admin` in **Shop** und **Plattform** gegliedert, ohne neue Seiten | ✅ |
+| Verkäuferidentität: 13 Spalten, alle NULL-bar, **kein Seed** | ✅ geschrieben |
+| Widerrufs-/Reklamationskontakt per `coalesce`, **nie kopiert** | ✅ geschrieben |
+| § 19 UStG, Schlichtung, Rücksendekosten, Versandaussage als Einstellung | ✅ geschrieben |
+| `shipping_countries` (nur `DE`), `shipping_methods` (5,49/6,49), Schwelle 75,00 | ✅ geschrieben |
+| `create_order()` fragt `shipping_country_allowed()` statt `'DE'` | ✅ geschrieben |
+| Plattform-Support-Adresse konfigurierbar, **nirgends einkompiliert** | ✅ geschrieben |
+| Kasse/Shop/Über-Seite nennen den Verkäufer aus `seller_public()` | ✅ |
+| Katalogkarte bleibt verkäuferneutral, Schnellansicht nennt den Verkäufer | ✅ |
+| Kein `seller_id`, keine zweite Verkäuferzeile, keine neue Rolle | ✅ |
+| Versandkostengrenze auf `sellers` statt auf dem Plattform-Singleton (ADR-0076) | ✅ |
+| Katalog-Einstiege unter „Plattform", Bestellungen unter „Shop" | ✅ |
+| 54 neue Tests in `src/lib/admin/responsibilities.test.ts` | ✅ |
+
+**Verhalten ändert sich nicht.** DE, Hermes 5,49 €, DHL 6,49 € und 75,00 € sind exakt die Werte,
+die vorher als Literale im SQL standen — 0040 verschiebt nur, wo sie stehen.
+
+**`create_order()` wurde maschinell übernommen**, nicht abgeschrieben: 263 Zeilen, eine geänderte
+Stelle, der Rest per Skript aus `0028` kopiert und die Differenz geprüft.
+
+**Offen vor Staging:** `0040` im Staging-SQL-Editor anwenden, danach eine Testbestellung aufgeben
+(muss unverändert funktionieren) und im Adminbereich prüfen, dass Shop und Plattform getrennt
+erscheinen. **Production: `0038`, `0039` und `0040` stehen aus, Reihenfolge frei.**
+
+**Legal V1 fehlt weiterhin vollständig** — Impressum, AGB, Datenschutz, Widerrufsbelehrung,
+Muster-Formular, die Widerrufsfunktion nach § 356a BGB, der § 19-Hinweis an den Preisen und
+`terms_version`/`withdrawal_version` auf `orders`. 0040 legt nur die Struktur, aus der diese Texte
+später gerendert werden. **Alle Geschäftsangaben sind noch leer**; der Fragebogen kam unbeantwortet
+zurück.
+
+---
+
+## Drei Konten — USER, BUSINESS, ADMIN (Stand 2026-09-17)
+
+**0041 — Berechtigungen** · ADR-0077 · `0041_three_account_authorization.sql` ·
+**geschrieben, NIRGENDS angewandt.**
+
+ADR-0075 hatte festgehalten, die drei Bereiche seien keine Rollen. Für den Schritt stimmte das; für
+drei echte Geräte nicht. `is_shop_admin()` beantwortete „darf den Katalog korrigieren" und „darf den
+Shop führen" mit demselben Ja.
+
+| | |
+|---|---|
+| `platform_admins` + `is_platform_admin()`, aus `shop_admins` befüllt | ✅ geschrieben |
+| `seller_operators` + `can_operate_active_seller()` | ✅ geschrieben |
+| **Keine Vererbung** — die Prädikate rufen einander nie auf | ✅ per Test |
+| 41 Funktionen maschinell umgestellt, je genau zwei Zeilen geändert | ✅ geschrieben |
+| `/business` mit Bestellungen, Bestand, Verkäuferangaben | ✅ |
+| `/admin` nur noch Plattform: Katalog, Testkonten, Shopzugänge | ✅ |
+| Business-Zugänge im Adminbereich vergeben, per Konto-ID | ✅ |
+| Abzeichen „Business" / „Admin", beide wenn beides | ✅ |
+| Versandkostengrenze wandert auf `sellers` (Nachtrag zu 0040) | ✅ geschrieben |
+| Kein `seller_id` auf Bestellungen, Bestand oder Katalog | ✅ per Test |
+| 38 Tests in `three-accounts.test.ts`, sechs Grenzen mutationsgeprüft | ✅ |
+
+**Eine Berechtigungslücke, vor dem Anwenden gefunden:** `admin_set_shop_policies()` schrieb
+`platform_settings.support_email` und war zugleich auf den Verkäufer umgestellt — ein Verkäufer
+hätte die Supportadresse der Plattform setzen können. Die Funktion verliert den Parameter (per
+`drop function`, sonst bliebe die alte Signatur aufrufbar), die Adresse bekommt einen eigenen
+plattformgeschützten Schreiber, und das Eingabefeld steht jetzt im Plattformbereich statt im
+Shopprofil.
+
+**Eine Lücke, die der Mutationstest gefunden hat:** das Weglassen der `is_enabled`-Bedingung in
+`can_operate_active_seller()` fiel zunächst **nicht** auf — ein entzogener Zugang hätte weiter
+gegolten. Die Prüfung wurde nachgezogen, danach schlägt die Mutation fehl.
+
+**Offen vor Staging:** `0041` anwenden, dann im Adminbereich dem yulez.collectibles-Konto den
+Shopzugang geben. **Production: `0038`, `0039`, `0040`, dann `0041`.**
+
+---
+
+## Ein Konto, ein Typ (Stand 2026-09-17)
+
+**0042 — strikte Kontotypen** · ADR-0078 · `0042_strict_account_types.sql` ·
+**geschrieben, NIRGENDS angewandt.**
+
+ADR-0077 erlaubte einem Konto beide Befugnisse. Das Produkt will das nicht: **USER, BUSINESS oder
+ADMIN — nie zwei.** Wer privat sammelt und einen Shop führt, benutzt zwei Konten.
+
+| | |
+|---|---|
+| Zwei Trigger erzwingen die Ausschließlichkeit über beide Tabellen | ✅ geschrieben |
+| Nur **aktive** Mitgliedschaft zählt — entziehen, dann vergeben | ✅ |
+| Vergabe entfernt nie still die andere Mitgliedschaft | ✅ |
+| Letzter Administrator nicht entfernbar | ✅ |
+| `collection_items`: alle vier Policies collector-only, auch `select` | ✅ geschrieben |
+| Sammlung im Adminkonto wieder entfernt (Navigation **und** Route **und** Policy) | ✅ |
+| `account_type` kommt aus der Datenbank, nicht aus zwei Booleans | ✅ |
+| Business-Vergabe weist Adminkonten mit einem Satz ab, nicht mit einem Fehler | ✅ |
+| Typwechsel löscht nichts — die Sammlung kommt bei Entzug zurück | ✅ per Test |
+| 67 Tests in `three-accounts.test.ts`, vier Grenzen mutationsgeprüft | ✅ |
+
+**Der eigentliche Grund** steht in ADR-0078: SkyIsles soll später privaten Sammlern erlauben, aus
+der eigenen Sammlung zu verkaufen. Wäre BUSINESS „ein Sammler mit Verkaufsrecht", wären dieses
+künftige Feature und der gewerbliche Shop dieselbe Sache — und man könnte ihnen keine
+unterschiedlichen Regeln geben.
+
+**Offen vor Staging:** `0042` anwenden. **Production: `0039` → `0040` → `0041` → `0042`.**
+
+---
+
+## Shop-Verwaltung und Kontobegriff (Stand 2026-09-17)
+
+**ADR-0080 · keine Migration.** Zwei Befunde aus der Benutzung:
+
+**Das Zahnrad.** „Mein Konto" wurde als Einstellungen gelesen — das Label sagte schon „Mein Konto",
+darüber stand ein Zahnrad. Jetzt eine Karte mit Zeilen. Abmelden bleibt unverändert unten auf
+„Mein Konto".
+
+**Der Shop.** `/business` war vier gestapelte Panels unter zwei Links. Jetzt eine Übersicht mit
+sechs Karten — Händlerprofil, Angebote & Preise, Lagerbestand, Bestellungen, Versand,
+Geschäftsdaten & Kontakt — und je eine Seite dahinter. Kein Feld ist verschwunden; `ShopProfilePanel`
+rendert per `groups` nur die Gruppen, die zur jeweiligen Seite gehören.
+
+| | |
+|---|---|
+| Händlername aus `sellers.display_name`, nie aus dem Benutzernamen | ✅ per Test |
+| Shop-Bestellungen als Kundenbestellungen benannt | ✅ |
+| Shop = Haupteinstieg, Lager = Abkürzung, sonst nichts in der Leiste | ✅ |
+| **Händler-Icon:** existiert nicht — die Seite sagt es, statt es vorzutäuschen | ⛔ Folgerunde |
+| **Bewertungen:** keine Karte, kein totes Ziel — nur im ADR festgehalten | ⛔ Folgerunde |
+| 22 Tests in `shop-home.test.ts` | ✅ |
+
+**Keine SQL.** Die IA-Runde selbst legte keine Migration an.
+
+---
+
+## Jahreskennzahlen im Shop (Stand 2026-09-17)
+
+**ADR-0081 · Migration `0044` — nicht angewandt.** Über der Karten-Übersicht stehen zwei Zahlen:
+**Bestellungen dieses Jahr** und **Umsatz dieses Jahr**, beide seit 1. Januar Berliner Zeit.
+
+| | |
+|---|---|
+| `seller_year_to_date()` aggregiert in der Datenbank, statt ein Jahr Bestellungen zu laden | ✅ |
+| **Bestelltätigkeit, nicht Geldeingang** (ADR-0083): gezählt wird nach `placed_at` | ✅ per Test |
+| Prädikat für beide Zahlen gleich, und mit den Monatsberichten **geteilt** (`order_counts_as_placed()`) | ✅ per Test |
+| Sandbox-Bestellungen ausgeschlossen (`commerce_mode` NOT NULL, `0021` backfilled) | ✅ |
+| Storniert/erstattet bleibt im Bestelljahr — Rückgängigmachen ist ein späteres Ereignis | ✅ Mutationstest |
+| Heißt **„Bestellwert dieses Jahr"**, nicht Umsatz/Einnahmen/bezahlt | ✅ per Test |
+| Darstellung über `formatPrice`/`formatNumber` — `€ 4.582,40`, `1 270` (de-AT) | ✅ |
+| ADMIN ohne Verkäuferrecht sieht die Zahlen nicht | ✅ per Test |
+| 9 Tests in `shop-kpi.test.ts` | ✅ |
+
+**Offen vor Staging:** `0044` anwenden. Ohne die Migration zeigen beide Karten 0.
+
+---
+
+## Bestellarchiv und Monatsberichte (Stand 2026-09-17)
+
+**ADR-0082 · Migration `0045` — nicht angewandt.** Der Shop bekommt einen siebten Bereich
+(**Berichte**) und die Bestellliste eine Vergangenheit.
+
+### Bestellungen
+
+| | |
+|---|---|
+| **Aktuell** = letzte 15 Berliner Kalendertage **ODER** noch offen (`attention <= 2`) | ✅ per Test |
+| Eine markierte Bestellung bleibt oben, egal wie alt — Alter versteckt nie Arbeit | ✅ Mutationstests |
+| Ältere, abgeschlossene Bestellungen als Monatsüberschriften mit Anzahl | ✅ |
+| Ein Monat öffnet sich als eigene Ansicht, nicht als aufgeklapptes `<details>` | ✅ |
+| Standard: aktuelles Jahr, alle Monate — nirgends ein hartkodiertes Jahr | ✅ per Test |
+| Ein gewählter Monat zeigt den **ganzen** Monat; die Aktuell-Liste wird nicht danebengelegt | ✅ per Test |
+| `?open=1` und die 0043-Wiederherstellung unverändert | ✅ |
+| Keine Ansicht lädt die gesamte Historie | ✅ per Test |
+| **Abzeichen:** zählt jetzt per Aggregat statt aus 100 geholten Zeilen — bei 130 stand dort 100 | ✅ per Test |
+
+### Berichte — Ereignisberichte
+
+**Eine Bestellung gehört in den Monat, in dem sie aufgegeben wurde.** Nicht in den, in dem das Geld
+ankam. Ein späteres Ereignis greift nie zurück.
+
+| | |
+|---|---|
+| Monat aus `placed_at` (Berlin) — nicht Zahlung, Versand oder Erfüllung | ✅ per Test |
+| Gezählt wird, was `order_counts_as_placed()` anerkennt — alles außer `'expired'` | ✅ per Test |
+| Zahlung ist **keine** Bedingung; storniert/erstattet bleibt im Bestellmonat | ✅ Mutationstests |
+| Ereignisregister festgehalten: Zahlung, Erstattung, Storno gehören ihrem eigenen Monat | 📝 in `0045` |
+| Heißt **Bestellwert**, nicht Einnahme/Umsatz/bezahlt | ✅ per Test |
+| `paid_count`/`unpaid_count` rein informativ, Stand bei Erstellung | ✅ |
+| **Genau ein** Bericht je Monat — Versionierung entfernt, weil es keinen rückwirkenden Fall gibt | ✅ per Test |
+| Der laufende Monat ist „noch nicht verfügbar" — die Datenbank weigert sich zusätzlich | ✅ per Test |
+| **Keine** Erstattung, Gebühr, Netto, Steuerbetrag, Gewinn — diese Daten gibt es nicht | ⚠️ genannte Grenze |
+| **Kein Download:** PDF/CSV braucht Format und privaten Speicher; der einzige Bucket ist öffentlich | ⛔ Folgerunde |
+| Was ein künftiges Erstattungsereignis braucht, steht am Ende von `0045` | 📝 festgehalten |
+
+**Migrationsstand am 2026-09-17 nachgeprüft** (schreibfreier Probelauf gegen Staging, nicht aus der
+Doku): **`0043` ist auf Staging angewandt** — die Tabelle in `DEPLOYMENT.md` führte es als offen
+und ist korrigiert. `0044` und `0045` sind nicht angewandt.
+
+**Offen vor Staging:** `0042`, dann `0044`, dann `0045`. `0045` ruft die Prädikatfunktion aus
+`0044` auf — die Reihenfolge ist nicht frei.
+
+---
+
+## Abmelden steht auf „Profil" (Stand 2026-09-17)
+
+**ADR-0085 · keine Migration.** Der Knopf stand auf `/account`. Da `/settings` dauerhaft dorthin
+umleitet, war „Abmelden unter Einstellungen" keine Verwechslung, sondern der gerenderte Zustand.
+
+| | |
+|---|---|
+| Genau ein Abmelden-Knopf, unten auf `/account/profile` | ✅ per Test über **alle** `.tsx` unter `src/app` |
+| `/account`, `/settings`-Ziel, Business- und Adminseiten: keiner | ✅ per Test |
+| Verschoben, nicht dupliziert — dasselbe `POST /auth/signout` | ✅ |
+| Ungenutztes zweites `signOutAction()` entfernt | ✅ per Test |
+| Für USER, BUSINESS und ADMIN dieselbe Seite; `/account/*` ist nicht typgebunden | ✅ per Test |
+| Die alten Tests schrieben den **Fundort** fest und waren grün — jetzt prüfen sie Zuständigkeit | ⚠️ Lehre |
+
+---
+
+## Rechts- und Compliance-Schicht (Stand 2026-09-17)
+
+**ADR-0086 · Migration `0047` — nicht angewandt.** Rechtsgrundlagen, geprüfte Normen und offene
+Punkte stehen in **`docs/LEGAL.md`**.
+
+| | |
+|---|---|
+| `/impressum`, `/datenschutz`, `/agb`, `/widerruf`, `/versand`, `/zahlung`, `/kontakt` | ✅ |
+| `/widerrufen` — elektronische Widerrufsfunktion nach § 356a BGB, zwei Schritte, ohne Konto | ✅ |
+| `/rechnung/<nummer>` als barrierefreie Seite, PDF daneben | ✅ |
+| **Zugangsbestätigung** nach § 312i Abs. 1 Nr. 3 BGB — gab es vorher **gar nicht** | ✅ |
+| Annahme = Bestellbestätigung; AGB § 3 beschreibt genau die sechs Schritte des Codes | ✅ per Test |
+| Verkäuferidentität überall: Julian Stocker, handelnd unter yulez.collectibles | ✅ per Test |
+| Statutory Muster wörtlich; keine erfundene Telefonnummer, kein Handelsregister, kein ODR-Link | ✅ 9 Mutationstests |
+| Kein Umsatzsteuerausweis; § 19 in der **aktuellen** Fassung (steuerfrei) | ✅ per Test |
+| Kein Einwilligungsbanner, keine AGB- oder Datenschutz-Checkbox — begründet in `docs/LEGAL.md` | ✅ |
+| 54 Tests in `legal-layer.test.ts` | ✅ |
+
+**Offen vor dem Start:** Transportlaufzeit (Betreiber), anwaltliche Prüfung, Prozessorenregionen
+und AVV, Aufbewahrungsfristen, Kontolöschung. Siehe `docs/LEGAL.md` Abschnitt 9.
+
+**Offen vor Staging:** `0042`, `0046`, `0047` anwenden; danach die Edge Functions deployen und
+`SITE_URL` in den Supabase-Secrets setzen.
+
+---
+
+## Bestandsabgleich aus der Tabelle (Stand 2026-09-18)
+
+**ADR-0087 · Migration `0048` — nicht angewandt.**
+
+| | |
+|---|---|
+| Die 450-MB-Datei wird **nicht hochgeladen** — der Browser liest 0,75 MB (0,17 %) daraus | ✅ gemessen |
+| 559 vollständige lose Figuren im Umfang, 250 mit Bestand, 992 Stück | ✅ gegen die echte Datei |
+| 39 Spiele, 13 Swap-Force-Hälften, 2 OVP, 1 beschädigt — erkannt, unangetastet, **nicht genullt** | ✅ per CHECK |
+| 0 nicht gefunden, 0 mehrdeutig | ✅ |
+| Die Tabelle ist der Sollwert: F = 0 setzt den Bestand auf 0 | ✅ per Test |
+| Keine Veraltungssperre — der Betreiber importiert gerade wegen der Abweichung | ✅ per Test |
+| Einziger echter Konflikt: reservierte Ware. Nicht gekappt, nicht übergangen | ✅ per Test |
+| Bestand nur über `record_inventory_movement()`, Grund `correction`, eine Transaktion | ✅ per Test |
+| 44 Tests in `importer.test.ts`, 12 Mutationstests | ✅ |
+
+**Offen:** Bilder-Rückfallweg für Browser ohne `DecompressionStream`; Auflöser-Oberfläche für
+`UNMATCHED`-Zeilen (heute 0, die Tabellen und die Aktion dafür stehen).
+
+---
+
 ## Aktuell implementiert
 
 | | |
