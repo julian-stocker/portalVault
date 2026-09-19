@@ -561,6 +561,10 @@ export const de = {
         title: "Widerrufe",
         hint: "Eingegangene Widerrufe und die zugehörigen Erstattungen.",
       },
+      orderbook: {
+        title: "Orderbuch",
+        hint: "Einkäufe, Paketprüfung und Einbuchen in den Bestand.",
+      },
       imports: {
         title: "Bestand abgleichen",
         hint: "Lagerbestand aus deiner Excel-Tabelle übernehmen.",
@@ -769,6 +773,496 @@ export const de = {
       history: "Frühere Abgleiche",
       historyEmpty: "Noch kein Abgleich.",
       neverApplied: "nicht übernommen",
+    },
+
+    /*
+     * Orderbuch (ADR-0088).
+     *
+     * Bewusst operative Sprache: „Ausgaben", „Marktwert", „Faktor". Keine
+     * Buchhaltungsbegriffe — das hier ist ein Einkaufsbuch für den Betrieb,
+     * keine Buchführung, und die Wörter sollen nichts anderes behaupten.
+     */
+    orderbook: {
+      title: "Orderbuch",
+      hint: "Einkäufe erfassen, Pakete prüfen und Figuren einbuchen.",
+      /* Die zwei Hälften des Orderbuchs, als kompakte Navigation. Mehrzahl,
+         weil die Reiter zu Listen führen und nicht zu einem Vorgang. */
+      tabs: { purchase: "Einkäufe", sale: "Verkäufe" },
+      saleSoon: "später",
+      empty: "Noch kein Einkauf erfasst.",
+
+      /**
+       * Anlegen (0063).
+       *
+       * Sichtbar steht nur „+ Neu" — daneben liegen die Reiter, und die sagen
+       * bereits, worum es geht. Was der Knopf konkret anlegt, steht im
+       * zugänglichen Namen, damit ein Screenreader nicht „Plus" vorliest.
+       */
+      newCompact: "+ Neu",
+      newPurchase: "Neuen Einkauf anlegen",
+      allYears: "Alle Jahre",
+      allMonths: "Alle Monate",
+      /* Ein Einkauf ohne Datum ist ein echter Einkauf — nur das Datum fehlt
+         noch. Kein Platzhalterdatum, keine leere Zelle, die kaputt aussieht. */
+      undatedFilter: "Ohne Datum",
+      undated: "Datum fehlt",
+      undatedNew: "Leer lassen, wenn das Kaufdatum noch nicht feststeht.",
+      /* Kaufen ist noch kein Einlagern. */
+      createStockHint: "Das Anlegen ändert den Bestand nicht. "
+        + "Erst „Einbuchen“ bei der einzelnen Position legt sie ins Lager.",
+      undatedHint: "Kaufdatum noch nicht zugewiesen",
+
+      /**
+       * Die zwei Einordnungen (0063).
+       *
+       * SIE SIND UNABHÄNGIG VONEINANDER UND VON „Intern/Extern".
+       *
+       * „Unvollständig" heißt: an diesem Vorgang fehlt etwas, das jemand
+       * nachtragen muss — kein Datum, oder ein von Hand angelegter Einkauf
+       * ohne eine einzige Position. Es wird nicht gespeichert, sondern bei
+       * jedem Lesen aus dem Vorgang selbst abgeleitet: Datum nachgetragen,
+       * Einordnung weg. Eine offene Auszahlung oder eine noch nicht
+       * eingebuchte Position ist ausdrücklich NICHT gemeint — das ist
+       * laufendes Geschäft, kein Loch in den Unterlagen.
+       *
+       * „Test" heißt: absichtlich angelegt, um etwas auszuprobieren. Kein
+       * echtes Geld, kein echter Vorgang. Testvorgänge stehen in keiner
+       * Geschäftssumme und tauchen in den normalen Listen nicht auf — ihr
+       * eigener Filter nennt jederzeit ihre Anzahl, damit niemand sie sucht.
+       */
+      status: {
+        all: "Alle",
+        /**
+         * „Offen" heißt: hier ist noch etwas zu TUN, nicht: hier fehlt etwas
+         * (0066). Ein Verkauf kann auf den Cent vollständig erfasst sein und
+         * trotzdem offen, weil die Figur noch im Regal liegt.
+         *
+         * Gezeigt wird nur, was sich auch wirklich buchen lässt: „Einbuchen"
+         * und „Ausbuchen" weisen historische Positionen ab, also stehen die
+         * hier nicht — ein Filter, der eine unmögliche Aktion verspricht,
+         * wäre schlechter als einer, der schweigt.
+         */
+        open: "Offen",
+        incomplete: "Unvollständig",
+        test: "Test",
+        label: "Einordnung",
+        /* Als Kennzeichen in der Zeile, nicht als Satz. */
+        testBadge: "Test",
+        incompleteBadge: "Unvollständig",
+        testTitle: "Testvorgang — zählt in keiner Geschäftssumme mit.",
+        incompleteTitle: "Unvollständig — hier fehlt noch etwas.",
+        emptyIncomplete: "Nichts Unvollständiges.",
+        emptyOpen: "Nichts offen — es ist alles ein- bzw. ausgebucht.",
+        emptyTest: "Keine Testvorgänge.",
+        openBadge: "Offen",
+        openTitle: "Offen — hier ist noch eine Lagerbuchung fällig.",
+        /* Wo die Testdaten geblieben sind, einmal ausgeschrieben. */
+        hiddenHint: (n: number) =>
+          n === 1
+            ? "1 Testvorgang ist ausgeblendet. Er steht unter „Test“."
+            : `${n.toLocaleString("de-AT")} Testvorgänge sind ausgeblendet. Sie stehen unter „Test“.`,
+      },
+
+      /* Beim Anlegen, und später korrigierbar. Standard: aus. */
+      testFlag: "Testvorgang",
+      testFlagHint: "Zählt in keiner Geschäftssumme mit und steht unter „Test“.",
+      markTest: "Als Testvorgang markieren",
+      unmarkTest: "Testmarkierung entfernen",
+      testSaving: "Wird gespeichert …",
+
+      setDate: "Kaufdatum zuweisen",
+      changeDate: "Kaufdatum ändern",
+      clearDate: "Datum entfernen",
+      dateLabel: "Kaufdatum",
+      dateSaving: "Wird gespeichert …",
+      save: "Speichern",
+      columns: {
+        date: "Datum",
+        items: "Artikel",
+        expenses: "Ausgaben",
+        marketValue: "Marktwert",
+        factor: "Faktor",
+        progress: "Eingebucht",
+        source: "Quelle",
+      },
+      sources: { manual: "manuell", excel_order_2026: "Order 2026" },
+
+      /* Werkbank-Ansicht: kompaktes Hauptbuch mit Aufklappen (ADR-0088). */
+      summary: {
+        count: "Anzahl",
+        countHint: (items: number) =>
+          items === 1 ? "1 Artikel" : `${items.toLocaleString("de-AT")} Artikel`,
+        expenses: "Ausgaben",
+        marketValue: "Marktwert",
+        factor: "Faktor",
+      },
+      /* Ein Stern statt eines Satzes in jeder Zeile. Die Erklärung hängt als
+         Titel daran, damit sie vorlesbar bleibt, ohne die Zeile zu füllen. */
+      incompleteMark: "*",
+      incompleteTitle: (n: number) =>
+        n === 1
+          ? "1 Artikel ohne bekannten Marktpreis — Marktwert und Faktor sind unvollständig."
+          : `${n.toLocaleString("de-AT")} Artikel ohne bekannten Marktpreis — Marktwert und Faktor sind unvollständig.`,
+      search: "Suche",
+      searchHint: "Datum, Betrag, Faktor oder Figur",
+      searchClear: "Suche zurücksetzen",
+      searchEmpty: "Nichts gefunden.",
+      /** „3 Treffer in diesem Einkauf" — warum die Zeile im Ergebnis steht. */
+      matchCount: (n: number) =>
+        n === 1 ? "1 Treffer in diesem Einkauf" : `${n} Treffer in diesem Einkauf`,
+      expand: "Einkauf aufklappen",
+      collapse: "Einkauf zuklappen",
+      loadingItems: "Artikel werden geladen …",
+      itemsFailed: "Die Artikel konnten nicht geladen werden.",
+      openDetail: "Einzelansicht",
+      /* Kopfzeile der aufgeklappten Artikelliste. */
+      itemColumns: { series: "Serie", figure: "Figur", status: "Status", action: "Aktion" },
+      back: "Zurück zum Orderbuch",
+      /* Der Haken heißt NICHT „eingebucht". Historische Zeilen besitzen keine
+         Lagerbewegung — er heißt „hier ist nichts mehr zu tun". */
+      settled: "Historisch übernommen",
+      completeLabel: "Vollständig eingebucht",
+      openLabel: (booked: number, total: number) => `${booked} von ${total} eingebucht`,
+      /** „%s von %s" — wie viele Einheiten schon im Bestand sind. */
+      progress: (booked: number, total: number) => `${booked} von ${total}`,
+      /** Unbekannt ist nicht null: das sagt der Text ausdrücklich. */
+      incomplete: (n: number) =>
+        n === 1 ? "1 Artikel ohne Marktpreis" : `${n} Artikel ohne Marktpreis`,
+      noValue: "kein Marktwert bekannt",
+      /* Ein historischer Einkauf hat keine offene Arbeit — „0 von 14" würde
+         das Gegenteil behaupten (Pilot 06.12.2025). */
+      historical: "historisch",
+      percentOfMarket: (p: number) => `${p.toLocaleString("de-AT", { maximumFractionDigits: 1 })} % vom Marktpreis`,
+      addItem: "+ Artikel hinzufügen",
+      addUncategorized: "+ Sonstiger Artikel",
+      uncategorizedHint: "Portal, Spiel oder Zubehör — bleibt Teil des Einkaufs, kommt aber nicht in den Figurenbestand.",
+      searchPlaceholder: "Figur suchen",
+      book: "Einbuchen",
+      booking: "Wird eingebucht …",
+      booked: "Im Bestand",
+      unbook: "Buchung zurücknehmen",
+      priceFrozen: "Preis beim Einbuchen festgehalten",
+      priceLive: "aktueller Marktpreis",
+      legacyRow: "historisch — bereits im Bestand berücksichtigt",
+      /* Zuordnung korrigieren (0054). */
+      remap: "Zuordnung ändern",
+      remapCancel: "Abbrechen",
+      remapNotAFigure: "Keine Figur (Portal, Spiel, Zubehör)",
+      remapRemember: "Diesen Excel-Namen künftig so zuordnen",
+      /** „Excel: Bob" — nur wenn der Rohtext vom Katalognamen abweicht. */
+      rawLabel: (raw: string) => `Excel: ${raw}`,
+      /**
+       * Figurenauswahl beim Anlegen und im Einkauf (0064).
+       *
+       * EINE ZEILE JE FIGUR, EIN DATENSATZ JE STÜCK. Die Menge steht nur im
+       * Browser: gespeichert wird je Stück eine eigene Position, weil eine
+       * Position genau ein Objekt ist — einzeln einbuchbar, einzeln
+       * beschädigt, mit höchstens einer Lagerbewegung.
+       *
+       * ÄNDERN GILT FÜR DIE GANZE ZEILE. Drei Wash Buckler, die in Wahrheit
+       * Dark Wash Buckler sind, werden in einem Schritt korrigiert. Für den
+       * selteneren Fall „zwei davon, eines anders" wird die Menge verringert
+       * und die andere Variante getrennt hinzugefügt.
+       */
+      figures: {
+        heading: "Figuren",
+        hint: "Suchen und auswählen. Gespeichert wird erst beim Anlegen.",
+        search: "Figur suchen …",
+        searchLabel: "Figur suchen",
+        tooShort: "Mindestens zwei Zeichen eingeben.",
+        empty: "Keine Figur gefunden.",
+        noCatalog: "Der Katalog konnte nicht geladen werden.",
+        results: "Suchergebnisse",
+        selected: "Ausgewählte Figuren",
+        none: "Noch keine Figur ausgewählt.",
+        /* Ausgeschrieben, weil „3 × 2" auf einem Telefon niemand entziffert. */
+        units: (n: number) => (n === 1 ? "1 Figur" : `${n.toLocaleString("de-AT")} Figuren`),
+        /* Menge einer Zeile. Das Minus bei 1 entfernt die Zeile — dasselbe
+           Gemeinte wie das ×, nur die Geste, die die Finger schon machen. */
+        more: (name: string) => `Eine Einheit ${name} mehr`,
+        less: (name: string) => `Eine Einheit ${name} weniger`,
+        quantity: (name: string, n: number) => `${name}: ${n} Stück`,
+        remove: "Entfernen",
+        removeOne: (name: string) => `${name} entfernen`,
+        change: "Figur ändern",
+        changeOne: (name: string) => `${name} austauschen`,
+        changeCancel: "Abbrechen",
+        /* Marktwert und Faktor, live. Unbekannt ist nicht null. */
+        marketValue: "Marktwert",
+        factor: "Faktor",
+        noMarketValue: "Marktwert fehlt",
+        missingPrices: (n: number) =>
+          n === 1
+            ? "1 Figur ohne Marktpreis — Marktwert und Faktor sind unvollständig."
+            : `${n.toLocaleString("de-AT")} Figuren ohne Marktpreis — Marktwert und Faktor sind unvollständig.`,
+        /* Ohne Figur speichern bleibt erlaubt (0063): der Einkauf ist dann
+           „Unvollständig" und wird später ergänzt. */
+        emptyAllowed: "Ohne Figur anlegen ist möglich — der Einkauf gilt dann als unvollständig.",
+        limit: (n: number) => `Mehr als ${n} Figuren auf einmal gehen nicht.`,
+      },
+
+      states: {
+        ordered: "bestellt",
+        arrived: "angekommen",
+        damaged: "beschädigt",
+        missing: "fehlt",
+        booked: "eingebucht",
+        reconciled_legacy: "historisch",
+      },
+      errors: {
+        alreadyBooked: "Dieser Artikel ist bereits im Bestand. Nimm die Buchung zurück, bevor du ihn änderst.",
+        notAFigure: "Dieser Artikel ist keine Katalogfigur und kann nicht in den Figurenbestand.",
+        damaged: "Ein beschädigter Artikel kommt nicht in den Verkaufsbestand. Setze ihn auf „angekommen“, wenn er doch in Ordnung ist.",
+        missing: "Ein Artikel, der nie angekommen ist, lässt sich nicht einbuchen.",
+        historical: "Historische Einkäufe sind bereits im Bestand berücksichtigt und werden nicht erneut eingebucht.",
+        hasBookings: "Dieser Einkauf hat Artikel im Bestand. Nimm diese Buchungen zuerst zurück.",
+        dateRange: "Dieses Kaufdatum liegt außerhalb des plausiblen Bereichs.",
+        bookedRemap:
+          "Dieser Artikel ist im Bestand. Die Bewegung benennt die Figur, die tatsächlich " +
+          "eingebucht wurde — nimm die Buchung zurück, bevor du die Zuordnung änderst.",
+        /* 0064: eine Werkbuch-Zeile wird nicht gelöscht. Ihre Zuordnung darf
+           weiterhin korrigiert werden — das ist 0054 und bleibt. */
+        historicalItem:
+          "Diese Position stammt aus der Excel-Historie und wird nicht gelöscht. " +
+          "Ihre Figurenzuordnung lässt sich weiterhin über „Zuordnung ändern“ korrigieren.",
+        tooManyItems: "Zu viele Figuren auf einmal.",
+      },
+    },
+
+    /**
+     * Verkauf (ADR-0089).
+     *
+     * DREI DIMENSIONEN, DREI WÖRTER. Geld, Bestand und Versand bewegen sich
+     * unabhängig — ein Verkauf kann versendet, erstattet, nicht retourniert
+     * und in der Auszahlung offen sein, alles gleichzeitig. Die Texte halten
+     * das auseinander, statt es in einen Status zu pressen.
+     *
+     * „Refund" ist Geld, „Retoure" ist Ware. Der Workbook-Befund: 41 erstattete
+     * Bestellungen, 6 mit zurückgekommener Ware.
+     */
+    sales: {
+      title: "Verkauf",
+      hint: "Verkäufe über SkyIsles und über externe Kanäle.",
+      tabs: { internal: "Intern", external: "Extern" },
+      empty: "Noch kein Verkauf erfasst.",
+
+      /**
+       * Anlegen (0063).
+       *
+       * Sichtbar „+ Neu", zugänglich der ganze Satz — und den Knopf gibt es
+       * nur unter „Extern". Ein interner Verkauf entsteht aus einer bezahlten
+       * Bestellung und nie daraus, dass jemand ihn eintippt; deshalb steht
+       * unter „Intern" gar kein Anlegen-Knopf, statt eines, der beim Drücken
+       * ablehnt.
+       */
+      newSale: "Neuen externen Verkauf anlegen",
+      internalNoCreate:
+        "Interne Verkäufe entstehen automatisch aus einer bezahlten SkyIsles-Bestellung.",
+      /* Anlegen eines externen Verkaufs. Intern entsteht aus einer Bestellung. */
+      create: {
+        title: "Neuer externer Verkauf",
+        hint: "Für eBay und andere Verkäufe außerhalb von SkyIsles. "
+          + "Interne SkyIsles-Verkäufe entstehen automatisch aus einer bezahlten Bestellung.",
+        channel: "Kanal", date: "Verkaufsdatum", country: "Land",
+        buyer: "Käufer", reference: "Referenz", note: "Notiz",
+        subtotal: "Summe", shipping: "Versand", discount: "Rabatt",
+        submit: "Verkauf anlegen",
+        dateHint: "Leer lassen, wenn das Datum noch nicht feststeht.",
+        /* Anlegen ist noch keine Lagerbewegung. */
+        stockHint: "Das Anlegen ändert den Bestand nicht. "
+          + "Erst „Ausbuchen“ bei der einzelnen Position nimmt sie aus dem Lager.",
+        invalidAmount: "Bitte einen gültigen Betrag eintragen.",
+        /* Standard: aus. Der Normalfall darf nicht umständlicher werden. */
+        testFlag: "Testvorgang",
+        testFlagHint: "Zählt in keiner Geschäftssumme mit und steht unter „Test“.",
+
+        /**
+         * Vorlagen, Figuren und der Auszahlungsabgleich (ADR-0092).
+         *
+         * EINE VORLAGE IST NUR LAYOUT. „eBay“ entscheidet, welche Felder zu
+         * sehen sind und wie sie heißen — gespeichert wird in denselben
+         * Strukturen wie bisher: `sale_fees` mit `kind` und `settled_by`,
+         * `settlement_adjustments`, die drei Beträge auf `sales`. Es gibt
+         * keine eBay-Tabelle und keine eBay-Spalte.
+         *
+         * VERSAND IST ZWEIMAL DA, UND DAS IST DER PUNKT. Was der Käufer für
+         * den Versand zahlt, ist eine Einnahme; was das Label kostet, ist
+         * eine Ausgabe. Und beim Label entscheidet `settled_by`, ob es die
+         * Auszahlung mindert: ein über eBay gekauftes Label schon, ein am
+         * Schalter gekauftes nicht — es ist trotzdem echtes Geld.
+         */
+        template: "Vorlage",
+        templateNames: { ebay: "eBay", manual: "Ohne Vorlage" },
+        templateHint: "Bestimmt nur Beschriftungen und sichtbare Felder.",
+
+        incomeHeading: "Vom Käufer bezahlt",
+        costHeading: "Gebühren und Kosten",
+        subtotalLabel: "Verkauf (Artikelpreis)",
+        shippingLabel: "Versand (vom Käufer bezahlt)",
+        discountLabel: "Rabatt",
+
+        feeAdd: "+ Gebühr",
+        feeAddLabel: "Weitere Gebühr",
+        feeRemove: (label: string) => `${label} entfernen`,
+        feeLabelPlaceholder: "Bezeichnung",
+        /* Der Schalter, der über die Auszahlung entscheidet. */
+        settledBy: "Abgezogen von",
+        settledChannel: "Kanal",
+        settledExternal: "selbst bezahlt",
+        settledHint: "„Kanal“ mindert die Auszahlung. „selbst bezahlt“ kostet Geld, "
+          + "ändert aber nicht, was der Kanal überweist.",
+        feeNeedsLabel: "Bitte die weitere Gebühr benennen.",
+
+        adjustment: "Gutschrift / Korrektur",
+        adjustmentHint: "Vorzeichen zählt: + erhöht die Auszahlung, − verringert sie.",
+
+        expectedPayout: "Auszahlung",
+        payoutHint: "Berechnet nach derselben Formel wie die importierten Verkäufe: "
+          + "Verkauf + Versand − Rabatt − vom Kanal einbehaltene Gebühren + Korrekturen. "
+          + "Selbst bezahlte Versandlabel mindern sie nicht.",
+
+        figuresHeading: "Figuren",
+        figuresHint: "Beim Anlegen wird nichts ausgebucht.",
+      },
+      channels: { ebay: "eBay", manual: "Manuell" },
+      /* Zuordnung einer Position korrigieren (0065). Nur handgemachte,
+         nicht ausgebuchte Positionen — historische bleiben, wie sie sind. */
+      changeFigure: "Figur ändern",
+      changeFigureOne: (name: string) => `${name} austauschen`,
+      itemSearch: "Figur suchen",
+      noItems: "Noch keine Position erfasst.",
+      addUncategorized: "Ohne Katalogzuordnung hinzufügen",
+      uncategorizedHint: "Kein Katalogartikel — Name eintragen.",
+      removeItem: "Entfernen",
+      backToLedger: "Zurück zum Verkaufsbuch",
+      /*
+       * Die Finanzzeile trägt die Überschriften des Arbeitsbuchs.
+       * `Order 2026!T4` heißt wörtlich „EU" und enthält das Länderkürzel —
+       * nachgesehen, nicht geraten. Ebenso U „Summe", V „Versand",
+       * W „Rabatt", AD „Refund", AE „Auszahlung".
+       */
+      columns: {
+        date: "Datum", country: "EU", sum: "Summe", shipping: "Versand",
+        discount: "Rabatt", fees: "Fees", label: "Label", refund: "Refund",
+        payout: "Auszahlung", details: "Details",
+        /* Weiterhin gebraucht: Filter, Detailansicht, Intern-Spalte. */
+        channel: "Kanal", countryName: "Land", items: "Artikel",
+        order: "Bestellung", gross: "Gesamt",
+        expected: "Erwartet", reported: "Gemeldet",
+        difference: "Differenz", status: "Status",
+      },
+      /** Die Detailübersicht eines Verkaufs. */
+      detailsModal: {
+        title: "Verkaufsdetails",
+        close: "Schließen",
+        sale: "Verkauf",
+        channel: "Kanal", reference: "Referenz", buyer: "Käufer",
+        amounts: "Beträge",
+        charges: "Gebühren",
+        labels: "Versandlabel",
+        /* Nie `channel` / `external` zeigen — der Inhaber liest, wer bezahlt
+           hat, nicht den Enum-Wert. */
+        settledChannel: "Über Kanal", settledExternal: "Extern bezahlt",
+        refunds: "Refunds",
+        adjustments: "Auszahlungskorrekturen",
+        payout: "Auszahlung",
+        shippingState: "Versand",
+        none: "keine",
+        /* Pflege eines externen Verkaufs nach dem Verkaufstag. */
+        edit: "Bearbeiten", done: "Fertig", save: "Speichern", cancel: "Abbrechen",
+        remove: "Entfernen",
+        addFee: "Gebühr hinzufügen", addRefund: "Rückerstattung hinzufügen",
+        amount: "Betrag", kind: "Art", settlement: "Abrechnung", label: "Bezeichnung",
+        reason: "Grund", occurredAt: "Datum",
+        history: "Änderungen",
+        historyEmpty: "Noch nichts korrigiert.",
+        /* Interne Verkäufe gehören dem Shop — hier wird nichts bearbeitet. */
+        commerceLocked: "Diese Angaben gehören zur Bestellung.",
+        stale: "Dieser Verkauf wurde inzwischen geändert. Bitte neu laden.",
+        /* Provenienz bleibt sichtbar, auch nach einer Korrektur. */
+        imported: "Aus Order 2026 importiert",
+        editedSince: "seit dem Import korrigiert",
+        /* Gebührenarten. Ein eigener Text schlägt diese Namen. */
+        feeKinds: {
+          payment: "Transaktionsgebühr",
+          marketplace: "Marktplatzgebühr",
+          shipping_label: "Versandlabel",
+          other: "Sonstige",
+        },
+        /* Genau die Gründe, die die Datenbank zulässt — keine erfundenen. */
+        refundReasons: {
+          artikel_fehlt: "Artikel fehlt",
+          artikel_beschaedigt: "Artikel beschädigt",
+          nicht_geliefert: "Nicht geliefert",
+          versandkorrektur: "Versandkorrektur",
+          retoure: "Retoure",
+          kulanz: "Kulanz",
+          sonstiges: "Sonstiges",
+        },
+      },
+      /* Die Spalten der aufgeklappten Positionsliste. Dieselbe Tabelle wie im
+         Einkauf, um „Bestand" und „Retoure" erweitert — beides sind eigene
+         Tatsachen und gehören nicht in eine gemeinsame Statusspalte. */
+      itemColumns: {
+        series: "Serie", figure: "Figur", marketValue: "Marktwert",
+        stock: "Bestand", returned: "Retoure", action: "Aktion",
+      },
+      summary: {
+        count: "Verkäufe", items: "Artikel", gross: "Umsatz",
+        /* Eine Auszahlungszahl, berechnet (ADR-0095). „Gemeldet", „Offen" und
+           der Filter „Auszahlung offen" sind mit dem manuellen Abgleich
+           entfallen. */
+        expected: "Auszahlung",
+      },
+      /* Finanzielle Erstattung und körperliche Retoure sind zwei Dinge. */
+      refundNotReturn: "Eine Rückerstattung ist Geld — ob etwas zurückkam, steht bei der Position.",
+      undated: "Datum fehlt",
+      /* Warum ein interner Verkauf als Test gilt: die Bestellung sagt es. */
+      testFromOrder: "Testbestellung aus dem Testbetrieb",
+      testFromOperator: "Von Hand als Testvorgang markiert",
+      /* Bestand — der Haken heißt „ausgebucht", nicht „verkauft": das eine ist
+         eine Lagerbewegung, das andere ein Geschäftsvorfall. */
+      book: "Ausbuchen", booked: "Ausgebucht", booking: "Wird ausgebucht …",
+      unbook: "Ausbuchen zurücknehmen",
+      returnItem: "Retoure eingegangen", returned: "Retoure",
+      restock: "Wieder einlagern", restocked: "Wieder eingelagert",
+      shipped: "Versendet", notShipped: "Nicht versendet",
+      markShipped: "Als versendet markieren", markNotShipped: "Versand zurücknehmen",
+      /* Geld */
+      addFee: "+ Gebühr", addRefund: "+ Refund", addItem: "+ Artikel",
+      amounts: "Beträge", fees: "Gebühren", refunds: "Refunds",
+      subtotal: "Summe", shipping: "Versand", discount: "Rabatt",
+      buyIn: "Buy In", factor: "Einkaufsfaktor",
+      buyInHint: "Rechnerischer Wert, nicht der tatsächliche Einkaufspreis dieses Stücks.",
+      note: "Notiz", detail: "Einzelansicht", back: "Zurück zum Verkauf",
+      expand: "Verkauf aufklappen", collapse: "Verkauf zuklappen",
+      loadingItems: "Wird geladen …", itemsFailed: "Konnte nicht geladen werden.",
+      commerceOwned: "Von der Bestellung übernommen",
+      errors: {
+        /* 0065: eine Werkbuch-Position wird weder gelöscht noch umgehängt. */
+        historicalItem:
+          "Diese Position stammt aus der Excel-Historie und wird nicht verändert.",
+        bookedItem:
+          "Diese Position ist ausgebucht. Nimm die Lagerbewegung zurück, bevor du sie änderst.",
+        tooMany: "Zu viele Positionen, Gebühren oder Korrekturen auf einmal.",
+        reserved: "Dieser Artikel ist aktuell für eine SkyIsles-Bestellung reserviert.",
+        noStock: "Für diesen Artikel gibt es keinen Lagerbestand.",
+        notAFigure: "Dieser Artikel ist keine Katalogfigur und hat keinen Lagerplatz.",
+        historical: "Historische Verkäufe verändern den Bestand nicht.",
+        returnFirst: "Markiere die Retoure zuerst als eingegangen.",
+        neverBooked: "Dieser Artikel wurde nie ausgebucht.",
+        alreadyRestocked: "Dieser Artikel wurde bereits wieder eingelagert.",
+        commerceOwned: "Diese Angabe gehört zur Bestellung und wird dort gepflegt.",
+        positiveFee: "Eine Gebühr ist ein positiver Betrag. Für eine Gutschrift nutze eine Auszahlungskorrektur.",
+        hasMovements: "Dieser Verkauf hat Artikel im Bestand. Nimm die Buchungen zuerst zurück.",
+        itemBooked: "Dieser Artikel ist ausgebucht. Nimm die Buchung zuerst zurück.",
+        internalAutomatic: "SkyIsles-Verkäufe entstehen automatisch aus einer bezahlten Bestellung.",
+        /* Die Antwort gehört der Bestellung — und deren Modus steht fest. */
+        internalTestDerived:
+          "Ob ein interner Verkauf ein Test ist, entscheidet die Bestellung: "
+          + "Testbestellungen kommen aus dem Testbetrieb und sind dort festgeschrieben.",
+        dateRange: "Dieses Verkaufsdatum liegt außerhalb des plausiblen Bereichs.",
+      },
     },
 
     ordersHeading: "Bestellungen",
@@ -2393,6 +2887,9 @@ export const de = {
       backToLogin: "Zurück zur Anmeldung",
     },
     resetPassword: {
+      /* Nach erfolgreichem Zurücksetzen: die Recovery-Sitzung ist beendet,
+         und das neue Passwort wird hier zum ersten Mal benutzt (ADR-0094). */
+      changed: "Dein Passwort wurde geändert. Melde dich jetzt mit dem neuen Passwort an.",
       title: "Neues Passwort setzen",
       submit: "Passwort speichern",
       done: "Dein Passwort wurde geändert.",

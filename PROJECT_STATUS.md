@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-16 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-19 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -17,7 +17,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
 > | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
 > | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
-> | Production-Migration | **keine** |
+> | Production-Migration | `0053`–`0066` am **2026-09-19 angewandt** (Orderbuch-Release) |
 > | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
 > | Production-Testbestellungen | **keine weiteren** |
 >
@@ -45,6 +45,152 @@ Die vollständige Änderungshistorie liegt in Git.
 >
 > Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
 > Betreiber stellt den Modus auf `closed` zurück.
+
+## Orderbuch-Release nach Production (2026-09-19) — abgeschlossen
+
+Das Orderbuch ist gebaut, auf Staging verifiziert und mitsamt der rekonstruierten
+Excel-Historie nach Production übertragen. `0053`–`0066` sind **auf beiden Projekten
+angewandt**, von Hand über den SQL-Editor — einen DDL-Pfad gibt es in diesem Projekt nicht.
+
+**Was übertragen wurde** (`tools/transfer-to-production.mts`, ADR-0096):
+
+| | |
+|---|---|
+| Einkäufe / Positionen | 84 · 2 114 |
+| Verkäufe / Positionen | 292 · 1 253 (+ 3 interne aus `0060` = 295) |
+| Gebühren / Erstattungen | 813 = 3 220,78 € · 41 = 624,41 € |
+| Korrekturen | 4 = −3,81 € |
+| Namenszuordnungen | 13 |
+| **Bestand und Ledger** | **1 201 Stück · 628 Bewegungen · unverändert** |
+
+Nur `source = 'excel_order_2026'`. Keine Lagerbewegung, kein Bestand, kein `auth.users`, keine
+Staging-Testvorgänge, keine Fixtures, keine Secrets. Der reale Bestand stimmte vorher schon auf
+beiden Seiten (912 = 912); die 171 Stück Differenz waren ausschließlich Fixtures.
+
+Nachprüfung: 34/34, `max |Δ|` der 292 Auszahlungen **0,0000000000**.
+
+**Das Werkzeug ist gesperrt.** Ein zweiter Lauf würde die drei verkaufsgebundenen
+`settlement_adjustments` duplizieren — sie tragen keinen Fingerabdruck. Statt Ersatzidentität
+zu erfinden, verweigert der Transfer den Lauf, sobald ein Klasse-A-Fingerabdruck in Production liegt:
+`transfer:apply` endet mit Exit 1, `transfer:preview` meldet die Sperre. Nachgewiesen —
+Zählstände vor und nach dem Abbruchversuch identisch.
+
+**Offen, bewusst liegen gelassen:** die Verifizierer-Fixtures `SKY-9994`/`SKY-9998` in
+Production (209 Stück), die 61 verwaisten `sale_external`-Bewegungen dort, sowie auf Staging
+die SKY-0821-Kollision und der SKY-0333-Preis. `SKY-0822` wurde nicht übernommen.
+
+---
+
+**Finales Staging-Update (2026-09-19).** Migration
+`0066_orderbook_open_status.sql` auf **Staging und Production angewandt** — Migrationen laufen in
+diesem Projekt von Hand über den SQL-Editor.
+
+*Datumskorrekturen übernommen, ohne Reimport.* Die 13 bisher undatierten Einkäufe (#81–#93) haben
+ihre Daten aus dem aktuellen Arbeitsbuch bekommen, Verkauf #228 ist von `2028-06-28` auf
+`2026-06-28` korrigiert. **Nicht** über die Importer: deren Fingerabdruck enthält das Datum, ein
+Reimport hätte 13 doppelte Einkäufe und einen doppelten Verkauf erzeugt. Stattdessen
+`tools/apply-workbook-dates.mts` über `seller_set_purchase_date` / `seller_set_sale_date`.
+Nachgewiesen: jeder Inhalts-Hash (Positionen, Gebühren, Refunds, Korrekturen, Fingerabdrücke,
+Bestand, Bewegungen) vorher = nachher, nur die 14 Datumsfelder haben sich bewegt. Einkauf
+`Unvollständig` 13 → 0. Die drei kaputten Verkaufsdaten (#51, #99, #129) stehen im Arbeitsbuch
+weiterhin als `""`, `"18"` und `"16.04.206"` und bleiben unverändert NULL.
+
+*Vierte Achse `Offen`* (ADR-0093). `Alle · Offen · Unvollständig · Test`. Abgeleitet, keine
+Spalte. Die Regel ist wörtlich die der Buchungsfunktionen — historische Positionen sind deshalb
+nie offen, weil `Einbuchen`/`Ausbuchen` sie ablehnen. Konsequenz offen benannt: der
+Werkbuch-Rückstand (111 Einkaufs-, 240 Verkaufspositionen) erscheint dort **nicht**.
+
+*Passwort-Reset endet beim Login* (ADR-0094). `resetPasswordAction` meldet nach Erfolg ab und
+leitet auf `/login?passwort-geaendert=1`; `/account/security` bleibt unverändert.
+
+**Vorher — externer Verkauf mit Vorlage und Figuren (2026-09-19).** Migration
+`0065_sale_create_with_details.sql` ist auf Staging **angewandt und verifiziert**:
+`npm run verify:sale-workflow:staging` → 41/41.
+
+*Die Vorlage ist Layout* (ADR-0092). `Vorlage: eBay` bestimmt Beschriftungen, sichtbare Felder und
+die Gebührenzeilen, mit denen das Formular öffnet. Gespeichert wird in `sale_fees`,
+`settlement_adjustments` und den drei Beträgen auf `sales` — keine eBay-Tabelle, keine
+`ebay_fee`-Spalte, kein Kanal-Zweig. Mehrere Gebühren waren ohnehin längst der Normalfall: 282 der
+Staging-Verkäufe haben mehr als eine.
+
+*Versand ist zweimal da.* Was der Käufer zahlt, ist eine Einnahme; was das Label kostet, eine
+Ausgabe — und beim Label entscheidet `settled_by`, ob es die Auszahlung mindert. Das war im
+Arbeitsbuch `lbl eBay` gegen `lbl ext`.
+
+*Eine Formel.* `plannedPayout` — mit der 292 Werkbuch-Verkäufe rekonstruiert wurden — ist nach
+`sales-money.ts` umgezogen und wird jetzt auch vom Anlegen-Formular benutzt. Sobald der Verkauf
+existiert, bleibt `sale_expected_payout()` die Autorität; die Detailseite rechnet nicht nach.
+
+*Anlegen ≠ Ausbuchen, weiterhin.* Zehn Figuren im Formular erzeugen null Lagerbewegungen. Jede
+Figur wird einzeln über `Ausbuchen` aus dem Bestand genommen, eine `sale_external`-Bewegung je
+Stück. Und `seller_remove_sale_item` lehnt jetzt Werkbuch-Zeilen ab — es prüfte nur `movement_id`,
+und **1 253 der 1 257** Verkaufspositionen sind Historie mit `movement_id is null`.
+
+**Vorher — Figurenauswahl beim Anlegen eines Einkaufs (2026-09-19).**
+`0064_purchase_create_with_items.sql` ist auf Staging **angewandt und verifiziert**:
+`npm run verify:purchase-items:staging` → 37/37, Mengen- und Reservierungsdelta 0, zwei
+Bewegungen ausschließlich aus der bewusst durchgeführten Einbuch-Schutzprüfung.
+
+*Die Figuren gehören ins Anlegen* (ADR-0091). Auf `Neuen Einkauf anlegen` wird jetzt direkt
+gesucht und ausgewählt; der Entwurf lebt im Browser, bis der Knopf gedrückt wird. Eine Zeile je
+Figur mit `− n +`, beim Speichern expandiert zu einer `purchase_items`-Zeile je physischem Stück.
+Marktwert und Faktor rechnen live mit `valuePurchase` — derselben Funktion wie das Hauptbuch, also
+unbekannt ≠ 0 und Marktwert 0 ⇒ kein Faktor statt `Infinity`. Ein Einkauf ohne Figur bleibt
+erlaubt und gilt als `Unvollständig`.
+
+*Zwei Lücken, zwei Funktionen.* `seller_create_purchase_with_items` macht Anlegen zu **einer**
+Transaktion — vorher konnte ein Abbruch bei Position 5 einen halben Einkauf hinterlassen; sie
+delegiert an `seller_create_purchase` und `seller_add_purchase_item`, statt deren Prüfungen zu
+kopieren. Und `seller_remove_purchase_item` lehnt jetzt **Werkbuch-Zeilen ab**: es prüfte nur auf
+`movement_id`, und **2 114 der 2 115** Positionen sind abgeglichene Historie mit
+`movement_id is null` — sobald die Detailseite `Entfernen` anbietet, wären sie einen Klick vom
+Verschwinden entfernt gewesen. Ihre Zuordnung bleibt korrigierbar (`0054`); nur das Löschen wird
+abgelehnt.
+
+*Eine Suche statt drei.* `FigureSearch` ersetzt drei fast gleiche Felder und sortiert: exakter
+Name > Präfix > Wortanfang > Enthalten, damit `Wash Buckler` über `Dark Wash Buckler` steht.
+Kein Request je Tastendruck — der Katalog kommt einmal mit der Seite.
+
+**Vorher — Testvorgänge und `Unvollständig` (2026-09-19).** `0063_orderbook_test_classification.sql`
+ist auf Staging **angewandt** (bestätigt: `purchases.is_test` und `sales.is_test` existieren, die
+neuen Signaturen antworten).
+
+*Drei unabhängige Achsen statt zwei* (ADR-0090). **Kanal** (Intern/Extern) bleibt, was er war.
+**Einordnung** ist neu: `Test` trennt absichtliche Probeläufe von echten Geschäftsvorfällen.
+**Vollständigkeit** ersetzt `Datum fehlt` durch `Unvollständig` — und zwar als echtes Prädikat, nicht
+als neues Etikett: ein von Hand angelegter Einkauf ohne Position, ein externer Verkauf ohne
+Position oder ohne eingetragene Beträge zählen jetzt mit. Ein Vorgang darf beides sein.
+
+*Test wird hergeleitet, wo es eine kanonische Quelle gibt.* Ein interner Verkauf fragt
+`orders.commerce_mode` — beim Bestellen gesetzt, danach unveränderlich (ADR-0060), dieselbe Quelle,
+aus der seit ADR-0084 Testbestellungen aus den Livelisten fallen. Eine Kopie auf `sales` gibt es
+nicht; ein CHECK hält die Spalte dort auf `false`, und `sale_is_test()` ist die einzige Definition.
+Nur was keine solche Quelle hat — Einkäufe und externe Verkäufe von Hand — bekommt ein eigenes
+`is_test`, Default `false`. **Notiztext entscheidet zur Laufzeit nichts.**
+
+*Unvollständigkeit wird nie gespeichert.* Kein `is_incomplete`. Die Lesemodelle rechnen sie bei
+jedem Lesen aus der Zeile aus, also verlässt ein Einkauf die Klasse in dem Moment, in dem sein Datum
+nachgetragen wird. Ausdrücklich **nicht** unvollständig: eine offene Marktplatz-Auszahlung, eine
+noch nicht eingebuchte Position, leere Notiz/Referenz/Land — und das Jahr 2028 des einen
+historischen Verkaufs, das unangetastet bleibt.
+
+*Die Kopfzeile ist jetzt die Navigation.* `Einkäufe · Verkäufe · + Neu` in einer Reihe; die
+vollbreiten Knöpfe sind entfernt. `+ Neu` ist kontextabhängig, 44 px auf dem Handy und kompakt ab
+`sm:`, und trägt den ganzen Satz als zugänglichen Namen. Unter **Verkauf → Intern** gibt es
+**gar kein** Anlegen — nicht ein deaktiviertes.
+
+*Normale Geschäftssummen enthalten keine Testdaten*, weil die Summe über genau die zurückgegebenen
+Zeilen aggregiert. Ausgeblendet wird trotzdem nichts stillschweigend: derselbe Aufruf liefert die
+Zähler aller drei Klassen.
+
+| | |
+|---|---|
+| Migration | geschrieben, **nicht angewandt** (Staging vorgesehen, Production nie) |
+| Staging-Daten | unverändert · 85 Einkäufe, 309 Verkäufe, 423 Bewegungen, 1032 Stück, 0 reserviert |
+| Backfill | Teil von `0063`: markiert Einkauf 94 und Verkauf 312 über je vier Felder |
+| Historie | 292 importierte Verkäufe, 1 freistehende Korrektur, drei NULL-Daten, 2028-Zeile: **unangetastet** |
+| Bestand | keine Bewegung geschrieben, gelöscht oder umbenannt |
+| Tests | 4654 in 156 Dateien grün (vorher 4589/155) · `npm run check` grün |
 
 **V3.5 — Kartentypen, ausgeliefert (2026-09-15).** Commit `b2c46dc`, Staging und Production.
 

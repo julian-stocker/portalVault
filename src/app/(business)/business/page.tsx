@@ -33,6 +33,7 @@ const AREAS: readonly { href: string; copy: { title: string; hint: string } }[] 
   { href: "/business/offers", copy: de.business.areas.offers },
   { href: "/business/inventory", copy: de.business.areas.inventory },
   { href: "/business/orders", copy: de.business.areas.orders },
+  { href: "/business/orderbuch", copy: de.business.areas.orderbook },
   { href: "/business/shipping", copy: de.business.areas.shipping },
   { href: "/business/legal", copy: de.business.areas.legal },
   { href: "/business/reports", copy: de.business.areas.reports },

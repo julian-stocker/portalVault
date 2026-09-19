@@ -695,6 +695,134 @@
    `:focus-visible` and not `:focus`: a pointer press should not leave a ring
    behind, and this is the rule browsers already have for that.
    =========================================================================== */
+/* ===========================================================================
+   The Orderbuch ledger grid (ADR-0088)
+   ---------------------------------------------------------------------------
+   ONE COLUMN DEFINITION, IN ONE PLACE. The header row and every purchase row
+   read the same custom property, so they cannot drift apart — the alignment is
+   not two lists of widths that happen to match today.
+
+   WHY THIS IS CSS AND NOT TAILWIND ARBITRARY VALUES
+
+   The first version wrote the template inline as
+   `sm:grid-cols-[6.5rem_3.5rem_1fr_1fr_4rem_3rem_2rem]`. That utility must be
+   discovered by scanning the source, generated, and then survive to the
+   browser. When any link in that chain misses — a dev server that did not
+   re-scan after the class was introduced is the usual one — the element keeps
+   `display:grid` with NO template, and a seven-column row silently becomes
+   seven stacked lines. Which is exactly what the owner photographed.
+
+   A declared rule in the stylesheet has no such chain.
+
+   WHY THE GRID IS NEVER ON THE <button>
+
+   WebKit wraps a button's content in an anonymous box, so `display:grid` on a
+   `<button>` has historically not laid its children out as grid items at all.
+   The row is a <div> that owns the grid; the click target is a transparent
+   button stretched across it.
+   =========================================================================== */
+
+@layer components {
+  /* =========================================================================
+     THE ORDERBUCH LEDGER — ONE LAYOUT, TWO LEDGERS
+
+     `.ob-row` is a ledger line and `.ob-item` a line inside an expanded one.
+     Einkauf and Verkauf both use exactly these, through the primitives in
+     `components/business/ledger-table.tsx`.
+
+     WHY THIS IS CSS AND NOT TAILWIND ARBITRARY VALUES
+
+     The first version wrote the template inline as
+     `sm:grid-cols-[6.5rem_3.5rem_1fr_1fr_4rem_3rem_2rem]`. That utility must be
+     discovered by scanning the source, generated, and then survive to the
+     browser. When any link in that chain misses — a dev server that did not
+     re-scan after the class was introduced is the usual one — the element keeps
+     `display:grid` with NO template, and a seven-column row silently becomes
+     seven stacked lines. Which is exactly what the owner photographed.
+
+     A declared rule in the stylesheet has no such chain.
+
+     WHY THE COLUMN COUNT IS A CUSTOM PROPERTY AND NOT A SECOND CLASS
+
+     A sale has ten columns where a purchase has seven. Saying that with a
+     second rule — `.ob-sale` and its own `--sale-columns` — is what the
+     previous Verkauf table did, and it is a second layout system however
+     carefully it mirrors the first. It also failed in the owner's browser
+     while `.ob-row`, in this same file and this same layer, kept working: a
+     rule only one ledger depends on can go missing for only that ledger.
+
+     So there is no second rule. The purchase track list is the FALLBACK inside
+     `var()`, and a ledger with different columns passes its own list as an
+     inline custom property on the container — delivered with the markup, in
+     the same response, with nothing to scan or rebuild. Einkauf sets nothing
+     and renders from the fallback, byte for byte what it always did.
+
+     WHY THE GRID IS NEVER ON THE <button>
+
+     WebKit wraps a button's content in an anonymous box, so `display:grid` on
+     a `<button>` has historically not laid its children out as grid items at
+     all. The row is a <div> that owns the grid; the click target is a
+     transparent button stretched across it.
+     ========================================================================= */
+
+  .ob-row,
+  .ob-item {
+    display: grid;
+    align-items: center;
+    column-gap: 0.75rem;
+    /* Mobile: two lines, not seven or ten. Label-free, because the values are
+       recognisable — a date, a count, amounts, a ratio. Both ledgers collapse
+       to this, because `--ob-columns` is only read on desktop. */
+    grid-template-columns: 1fr auto;
+    row-gap: 0.125rem;
+  }
+
+  /* 44px minimum, and about that in practice: one control-height ledger line. */
+  .ob-row {
+    min-height: 2.75rem;
+    padding: 0.375rem 0.75rem;
+  }
+
+  .ob-item {
+    min-height: 2.25rem;
+    padding: 0.25rem 0.75rem;
+  }
+
+  @media (min-width: 48rem) {
+    .ob-row {
+      /* Fallback = Einkauf: Datum · Artikel · Ausgaben · Marktwert · Faktor ·
+         Status · Chevron. Verkauf overrides it with ten tracks. */
+      grid-template-columns: var(--ob-columns,
+        7rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 3.5rem 1.5rem);
+      row-gap: 0;
+    }
+    .ob-item {
+      /* Fallback = Einkauf: # · Serie · Figur · Marktwert · Status · Aktion.
+         `Serie` is identity information, not decoration: display names repeat
+         across the six games, so `Drobot` alone does not say which shelf it
+         came off. Its width is taken from the flexible `Figur` track, never
+         from the row height.
+         `Aktion` keeps its track whether or not a button is in it, so a
+         historical row and a bookable one line up. */
+      grid-template-columns: var(--ob-item-columns,
+        2.5rem 9.5rem minmax(0, 1fr) 6rem 4.5rem 6.5rem);
+      row-gap: 0;
+    }
+
+    /*
+       A floor for a table too wide for the window, so it scrolls sideways
+       inside its own box rather than having ten columns crushed into the
+       width of six. Desktop only — on a phone the row is two lines and has no
+       columns to protect.
+     */
+    .ob-min { min-width: var(--ob-min-width, 0); }
+  }
+
+  /* `1.234,56 €` split over two lines stops being a figure you can compare
+     down a column, so money cells never wrap. */
+  .ob-money { white-space: nowrap; }
+}
+
 @layer utilities {
   .focus-ring {
     outline: none;

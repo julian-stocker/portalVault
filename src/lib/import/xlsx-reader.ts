@@ -45,13 +45,22 @@ type Entry = {
   localHeaderOffset: number;
 };
 
+export type XlsxReadErrorKind = "not-a-zip" | "unsupported" | "missing-part" | "too-large";
+
 export class XlsxReadError extends Error {
-  constructor(
-    message: string,
-    readonly kind: "not-a-zip" | "unsupported" | "missing-part" | "too-large",
-  ) {
+  /*
+   * Written out rather than declared as a constructor parameter property.
+   * Same field, same behaviour — but a parameter property is TypeScript that
+   * cannot be erased, and `node --experimental-strip-types` refuses the whole
+   * module for it. This reader is now shared with `tools/import-orderbook.mts`,
+   * which runs under exactly that.
+   */
+  readonly kind: XlsxReadErrorKind;
+
+  constructor(message: string, kind: XlsxReadErrorKind) {
     super(message);
     this.name = "XlsxReadError";
+    this.kind = kind;
   }
 }
 

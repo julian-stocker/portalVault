@@ -7744,3 +7744,556 @@ geparst oder ein Import-Batch angelegt wird. `deflate-raw` wird **durch Konstrui
 durch Existenz: Safari 16.4 kennt `DecompressionStream`, aber nur `gzip` und `deflate`. Die tieferen
 Prüfungen in `xlsx-reader.ts` bleiben — das Gate erzeugt einen Satz für einen Menschen, sie halten
 einen Aufrufer ehrlich.
+
+---
+
+## ADR-0090 — Testvorgang und Unvollständigkeit sind zwei Einordnungen, kein dritter Kanal
+
+**Status:** akzeptiert (2026-09-19) · Migration `0063_orderbook_test_classification.sql` ·
+**nur Staging**
+
+### Kontext
+
+Zwei Dinge lagen im Orderbuch falsch, und beide sahen aus wie ein Beschriftungsproblem.
+
+**Testdaten standen mitten in den Geschäftszahlen.** Auf Staging liegen absichtlich behaltene
+Rauchtest-Zeilen — Einkauf 94, Verkauf 312 — und sie waren von echten Vorgängen nur daran zu
+erkennen, dass jemand `TESTKAUF` in eine Notiz geschrieben hatte. Eine Notiz ist Prosa: sie darf
+umformuliert werden, und eine Einordnung, die sich beim Korrigieren eines Tippfehlers ändert, ist
+keine. Gleichzeitig zählten diese Zeilen in Anzahl, Ausgaben, Umsatz und Faktor mit.
+
+**`Datum fehlt` war ein Prädikat mit einem Etikett darauf.** Es beantwortete genau eine Frage —
+`purchased_at is null` —, während der Betreiber eine breitere meinte: *woran muss ich hier noch
+arbeiten?* Ein von Hand angelegter Einkauf ohne eine einzige Position ist genauso unfertig wie
+einer ohne Datum, und der Filter konnte ihn nicht nennen.
+
+Dazu kam die Oberfläche: beide Hälften des Orderbuchs öffneten mit einer großen Überschrift und
+einem vollbreiten `+ Neuer Einkauf` / `+ Neuer Verkauf` darüber. Drei Zeilen Rahmen vor der ersten
+Zahl, und das Lauteste auf einer Werkbank war ein Knopf, den man ein paarmal pro Woche drückt.
+
+### Entscheidung
+
+**Drei Achsen, ausdrücklich unabhängig.**
+
+| Achse | Frage | Antwort |
+|---|---|---|
+| **Kanal** | Intern oder extern? | `sales.order_id` — unverändert |
+| **Einordnung** | Echt oder Test? | `is_test` / `orders.commerce_mode` |
+| **Vollständigkeit** | Fehlt noch etwas? | abgeleitet, nicht gespeichert |
+
+Ein Testverkauf ist weiterhin ein **externer** Verkauf. Ein unvollständiger Vorgang ist weiterhin
+ein **echter**. Ein Vorgang darf Test **und** unvollständig sein — Verkauf 312 ist genau das.
+Nichts davon wird in ein gemeinsames Enum gefaltet.
+
+**Test wird hergeleitet, wo es eine kanonische Quelle gibt.** Ein interner Verkauf projiziert eine
+Bestellung, und die trägt die Antwort bereits: `orders.commerce_mode` wird beim Bestellen gesetzt
+und danach von `orders_protect_immutable()` verweigert (ADR-0060). Dieselbe Quelle hält seit
+ADR-0084 Testbestellungen aus den Livelisten. Eine Kopie auf `sales` wäre eine zweite Wahrheit über
+dieselbe Bestellung — also gibt es keine: ein CHECK hält `sales.is_test` für interne Verkäufe auf
+`false`, `sale_is_test()` ist die einzige Definition, und jeder Leser ruft sie auf.
+
+Nur was **keine** kanonische Quelle hat — ein von Hand angelegter Einkauf, ein externer Verkauf —
+bekommt eine eigene Spalte, Default `false`, beim Anlegen setzbar und später korrigierbar.
+
+**Unvollständigkeit wird nie gespeichert.** Ein `is_incomplete`-Haken müsste gelöscht werden,
+sobald jemand das Datum nachträgt, und genau das vergisst man. Die Lesemodelle rechnen ihn bei
+jedem Lesen aus den Zeilen selbst aus; Datum nachgetragen heißt Einordnung weg, ohne dass jemand
+etwas zurücksetzt.
+
+Die genauen Regeln — je Hälfte getrennt, samt der Liste dessen, was ausdrücklich **nicht**
+unvollständig ist — stehen in `docs/DATABASE.md`, Abschnitt 3.3w, und im Kopf von `0063`.
+
+**Die normale Ansicht ist die Geschäftsansicht.** `p_status` steht auf `normal`, also enthält sie
+keine Testvorgänge — und weil die Summe über genau die zurückgegebenen Zeilen aggregiert, deren
+Geld ebenso wenig. Ausgeblendet wird trotzdem nichts stillschweigend: derselbe Aufruf liefert die
+Zähler aller drei Klassen, der `Test`-Chip trägt seinen immer sichtbar, und eine Zeile unter den
+Filtern sagt, wo die Zeilen geblieben sind.
+
+**Die Navigation wird die Kopfzeile.** `Einkäufe · Verkäufe · + Neu` in einer Reihe. `+ Neu` ist
+kontextabhängig und es gibt genau eines davon je Bildschirm; die großen Knöpfe sind entfernt, nicht
+daneben stehen gelassen. Unter **Verkauf → Intern** wird gar keines gerendert — nicht ein
+deaktiviertes: ein interner Verkauf entsteht, weil eine Bestellung bezahlt wurde, und ein Knopf,
+dessen einziges Ergebnis eine Fehlermeldung ist, bringt jemandem bei, dass es die Tür gibt.
+
+### Begründung der drei Punkte, die auch anders hätten ausgehen können
+
+**Warum nicht die Notiz.** Sie steht genau einmal in `0063` — in der einmaligen Datenkorrektur am
+Ende, die zwei bekannte Staging-Zeilen über vier Felder gleichzeitig identifiziert und je ein
+Boolean schreibt. Zur Laufzeit liest nichts sie. Auf Production trifft keine der beiden Anweisungen
+eine Zeile.
+
+**Warum eine offene Auszahlung nicht unvollständig ist.** Ein Marktplatz zahlt später; das ist der
+Normalfall und nicht das Fehlen einer Angabe. `Auszahlung offen` ist seit `0059` ein eigener
+Filter und bleibt einer. Dieselbe Trennung gilt für eine noch nicht eingebuchte Einkaufsposition:
+das Paket ist noch nicht da — ein Zustand, keine Lücke.
+
+**Warum das Jahr 2028 keine Regel ist.** `Order 2026` enthält einen Verkauf mit Datum
+2028-06-28. `seller_set_sale_date()` prüft Plausibilität beim **Schreiben**; ein bereits
+gespeichertes Datum nachträglich für falsch zu erklären, weil es seltsam aussieht, wäre geraten.
+Die Zeile bleibt unverändert und gilt nicht als unvollständig.
+
+### Konsequenzen
+
+- Zwei Spalten, zwei Korrekturfunktionen, eine Herleitungsfunktion, `p_status` an zwei
+  Lesemodellen. Kein Tagging-Framework, keine neue Tabelle.
+- Die Vorgängersignaturen von `seller_create_purchase`, `seller_create_sale`,
+  `seller_orderbook_ledger` und `seller_sales` werden **gedroppt**, nicht überladen — eine
+  Überladung, die sich nur in einem letzten Argument mit Default unterscheidet, macht jeden Aufruf
+  mehrdeutig.
+- **Auf Staging sind heute alle 25 Bestellungen `sandbox`**, also gelten alle 14 internen Verkäufe
+  als Test und `Verkauf → Intern → Alle` ist leer. Das ist die richtige Antwort und kein Sonderfall
+  der Umgebung: dieselbe Regel trennt in Production später echte von Sandbox-Käufen, die dann
+  nebeneinander existieren.
+- Historische Importe bleiben normale Geschäftsvorfälle. Kein Importer nennt die Spalte.
+- Kein Lagerbestand bewegt sich. `0063` erwähnt `inventory_movements`, `shop_inventory` und
+  `record_inventory_movement()` an keiner Stelle.
+
+### Verworfen
+
+`is_incomplete` als gepflegtes Boolean · Test als dritter Wert neben Intern und Extern · eine
+Kopie von `commerce_mode` auf `sales` · dauerhafte Erkennung über `note ilike '%TEST%'` · ein
+generisches Tag-System · ein deaktivierter `+ Neu`-Knopf unter Intern · das Umbenennen von
+`Datum fehlt` ohne Erweiterung des Prädikats · das Löschen der Staging-Testdaten.
+
+---
+
+## ADR-0091 — Die Figuren gehören ins Anlegen; das Werkbuch gehört geschützt
+
+**Status:** akzeptiert (2026-09-19) · Migration `0064_purchase_create_with_items.sql` ·
+**nur Staging**
+
+### Kontext
+
+Der Einkauf wurde in zwei Schritten erfasst: erst der Kopf — Datum, Ausgaben, Notiz —, dann auf
+der Detailseite die Figuren. Die Begründung von damals (ADR-0088) war, dass das Paket ohnehin
+dort durchgearbeitet wird. In der Praxis weiß der Betreiber beim Tippen des Betrags längst, was
+in der Kiste liegt, und der Umweg über einen zweiten Bildschirm machte ausgerechnet den
+Normalfall zum langsamen.
+
+Bei der Bestandsaufnahme fiel ein zweites, ernsteres Problem auf. `seller_remove_purchase_item`
+existierte seit `0053` und lehnte genau eine Sache ab: eine Position, die eine Lagerbewegung
+besitzt. Das war damals vollständig — kein Bildschirm bot Löschen an, und es gab ausschließlich
+handgemachte Positionen. Inzwischen liegen **2 114 von 2 115** Positionen als abgeglichene
+Werkbuch-Zeilen in der Datenbank, alle mit `movement_id is null`. Sobald die Detailseite
+`Entfernen` anbietet — und genau das verlangt dieser Auftrag —, wäre jede einzelne davon einen
+Klick vom Verschwinden entfernt gewesen. Ihre Provenienz erzeugt kein Importer neu: dieses
+Projekt importiert nicht neu.
+
+### Entscheidung
+
+**Der Entwurf lebt im Browser, bis der Knopf gedrückt wird.** Ein Klick auf ein Suchergebnis legt
+nichts an. Die Alternative — den Einkauf beim ersten Treffer erzeugen und Positionen anhängen —
+hinterlässt bei jedem Sinneswandel einen verwaisten Einkauf, den jemand suchen und löschen muss.
+
+**Anlegen ist eine Transaktion.** `seller_create_purchase_with_items` nimmt die Figuren als
+JSON-Liste entgegen und ruft intern `seller_create_purchase` und je Element
+`seller_add_purchase_item` auf. Sie wiederholt deren Prüfungen nicht, sondern delegiert sie; ein
+ungültiges Element nimmt den ganzen Einkauf mit. Es gibt keinen Zustand „Einkauf angelegt,
+Position 5 fehlt".
+
+**Eine Zeile je Figur im Browser, eine Zeile je Stück in der Datenbank.** Der Entwurf gruppiert
+nach SKY-ID und trägt eine Menge, damit drei Wash Buckler drei Taps statt drei Suchen sind. Beim
+Absenden wird wieder expandiert. Eine `quantity`-Spalte hätte das Gegenteil bedeutet: eine
+Position **ist** ein Objekt — einzeln einbuchbar, einzeln beschädigt, mit höchstens einer
+Lagerbewegung.
+
+**Ändern gilt für die ganze Zeile.** Drei Figuren, die in Wahrheit die Dark-Variante sind, werden
+in einem Schritt korrigiert. Der seltenere Fall „zwei davon, eines anders" wird über die Menge
+gelöst. Eine Zeile an Ort und Stelle zu spalten hätte ein zweites Auswahlmodell für den
+selteneren Fehler gebraucht.
+
+**Entfernen und Umzuordnen sind zwei verschiedene Handlungen mit verschiedenen Regeln.**
+
+| | Ungebucht, handgemacht | Ungebucht, historisch | Eingebucht |
+|---|---|---|---|
+| Figur ändern | ja | **ja** (`0054`) | nein |
+| Entfernen | ja | **nein** | nein |
+
+Die mittlere Spalte ist der Kern. Eine historische Zeile muss korrigierbar bleiben — ein
+Werkbuchname, der auf die falsche SKY-ID zeigt, ist genau der Fehler, für den `0054` gebaut
+wurde —, und dabei bleiben Zeile, Zeilennummer und Provenienz stehen. Sie zu **löschen** ist die
+andere Handlung, und die wird abgelehnt, dreifach geprüft: über die Quelle des Einkaufs, über
+`state = 'reconciled_legacy'` und über `source_row` samt der beiden Legacy-Marker.
+
+**Eine Suche, überall.** Es gab drei fast gleiche Suchfelder mit unterschiedlicher Trefferfolge.
+`FigureSearch` ist jetzt eines, und es sortiert: ein exakter Name gewinnt, ein Präfix schlägt
+einen Wortanfang, ein Wortanfang schlägt ein bloßes Enthalten. Vorher konnte `Dark Wash Buckler`
+über `Wash Buckler` stehen, weil der Katalog nach SKY-ID sortiert ist — und in der Hand hält man
+die einfache.
+
+### Konsequenzen
+
+- Zwei Funktionen in `0064`. Keine Spalte, keine Tabelle, kein Backfill, kein RLS-Eingriff, keine
+  Lagerbewegung.
+- **Varianten brauchen kein Variantensystem.** `Free Ranger`, `Legendary Free Ranger` und
+  `Dark Wash Buckler` sind eigene Katalogzeilen mit eigenen SKY-IDs und eigenen Marktpreisen. Die
+  Trefferzeile zeigt Serie, Name, SKY-ID und Preis — kanonische Felder, nichts Erfundenes.
+- **Marktwert und Faktor werden live mit derselben Funktion gerechnet, die das Hauptbuch nutzt**
+  (`valuePurchase`). Unbekannt ist nicht null: eine Figur ohne Marktpreis zählt als
+  `unknownItems` und wird genannt, und ein Marktwert von 0 ergibt **keinen** Faktor statt
+  `Infinity`.
+- **Keine Suchanfrage je Tastendruck.** Der Katalog kommt einmal mit der Seite; gefiltert wird im
+  Speicher. Damit gibt es weder etwas zu entprellen noch eine Antwort, die zu spät eintrifft und
+  eine neuere überschreibt.
+- Ein Einkauf **ohne** Figuren bleibt möglich und gilt dann als `Unvollständig` (ADR-0090). Wer
+  nur Datum und Betrag kennt, speichert und ergänzt später.
+- Die Korrektur einer ungebuchten, handgemachten Position wird nicht protokolliert:
+  `orderbook_audit` ist verkaufsseitig, und was Provenienz hat, ist stattdessen gar nicht erst
+  löschbar. Begründung in `docs/DATABASE.md`, §3.3x.
+- `Testvorgang` bleibt unverändert. Figuren hinzuzufügen ändert keine Einordnung.
+
+### Verworfen
+
+Den Einkauf beim ersten Suchtreffer anlegen · eine `quantity`-Spalte auf `purchase_items` · das
+Entfernen historischer Zeilen mit einem Warnhinweis statt einer Ablehnung · das Sperren der
+Umzuordnung historischer Zeilen (hätte 2 114 Werkbuchzeilen unkorrigierbar gemacht) · ein
+Bestätigungsdialog vor dem Entfernen einer ungebuchten Entwurfsposition · ein Variantenmodell
+über dem Katalog · eine Suche je Tastendruck gegen die Datenbank · ein eigener Audit-Zweig für
+Einkaufspositionen · das Löschen statt Zurücknehmen einer Buchung.
+
+---
+
+## ADR-0092 — Eine Vorlage ist Layout, und es gibt weiterhin eine Auszahlungsformel
+
+**Status:** akzeptiert (2026-09-19) · Migration `0065_sale_create_with_details.sql` ·
+**nur Staging**
+
+### Kontext
+
+Der externe Verkauf wurde in Etappen erfasst: Kanal, Datum und drei Beträge im Formular, alles
+Weitere — Gebühren, Label, Korrektur, gemeldete Auszahlung — danach in „Details". Das Formular
+sagte das selbst in einem Kommentar: *„Zwei Aufrufe, weil `seller_create_sale` das Geld
+absichtlich bei null beginnt … ein Fehler im zweiten Schritt hinterlässt einen Verkauf, der in
+Details zu korrigieren ist."*
+
+Für diesen Bildschirm ist das kein kosmetisches Problem. Sein Zweck ist der **Abgleich**: die
+gemeldete Auszahlung gegen die, die sich aus den Zahlen ergibt. Ein Verkauf, dem zwei Gebühren
+fehlen, weil die Verbindung nach dem zweiten Aufruf abbrach, vergleicht gegen eine falsche Zahl —
+und sieht dabei vollständig aus.
+
+Bei der Bestandsaufnahme kam ein zweiter Befund dazu, derselbe wie auf der Einkaufsseite:
+`seller_remove_sale_item` lehnte nur Positionen mit `movement_id` ab. **1 253 von 1 257**
+Verkaufspositionen sind importierte Werkbuch-Zeilen, und weil Historie nie Bestand bewegt, haben
+sie alle `movement_id is null`. Geschützt waren sie nur dadurch, dass die Oberfläche den Knopf
+nicht zeigte.
+
+### Entscheidung
+
+**Eine Vorlage ist Layout und nichts sonst.** `eBay` bestimmt Beschriftungen, sichtbare Felder
+und die Gebührenzeilen, mit denen das Formular öffnet. Gespeichert wird in `sale_fees`,
+`settlement_adjustments` und den drei Beträgen auf `sales` — dieselben Strukturen wie für jeden
+anderen Kanal. Keine `ebay_fee`-Spalte, keine eBay-Tabelle, kein `if channel = 'ebay'` irgendwo.
+Das Modell trug den Fall längst: 820 Gebührenzeilen in vier `kind`/`settled_by`-Kombinationen,
+282 Verkäufe mit mehr als einer Gebühr. Eine dritte Plattform ist ein Listeneintrag.
+
+**`settled_by` ist die interessante Frage, und deshalb fragt die Oberfläche sie.** Ein über eBay
+abgerechnetes Versandlabel mindert die Auszahlung, ein am Schalter gekauftes nicht — beides ist
+echtes Geld. Das war im Arbeitsbuch `lbl eBay` gegen `lbl ext`, hier ist es ein Schalter an der
+Gebührenzeile. Und *Versand* steht zweimal auf dem Bildschirm, weil es zwei Dinge sind: was der
+Käufer zahlt (Einnahme) und was das Label kostet (Ausgabe).
+
+**Eine Formel.** `plannedPayout` — die Funktion, mit der 292 Werkbuch-Verkäufe rekonstruiert
+wurden — zieht von `sales-import.ts` nach `sales-money.ts` um und wird von dort re-exportiert.
+Das Anlegen-Formular ruft sie über `payoutView` auf; es kann den xlsx-Reader nicht importieren,
+und eine zweite Formel in einer React-Komponente wäre zwei Antworten auf eine Frage. **Sobald
+der Verkauf existiert, ist `sale_expected_payout()` die Autorität** — die Detailseite rechnet
+nicht nach, und ein Test hält das seit `0062` fest.
+
+**Der Verkauf entsteht als Ganzes.** `seller_create_sale_with_details` ist eine Anweisung und
+delegiert an die fünf Einzelfunktionen, statt deren Prüfungen und Audit-Verhalten zu kopieren.
+Die drei Beträge setzt sie **direkt**, nicht über `seller_update_sale`: das Anlegen ist keine
+Korrektur, und acht Audit-Zeilen „von 0 auf 20,00 geändert" Sekunden nach der Entstehung würden
+den Satz entwerten, den `orderbook_audit` trägt. Die gemeldete Auszahlung wird dagegen auditiert
+— sie kommt von außen.
+
+**Anlegen bleibt ausdrücklich kein Ausbuchen.** Zehn Figuren im Formular erzeugen null
+Lagerbewegungen. `seller_book_sale_item` bleibt der einzige Weg in den Bestand, je physischer
+Einheit eine `sale_external`-Bewegung mit `delta = −1`.
+
+**Eine Figurensuche für das ganze Orderbuch.** `FigureSearch` und `FigureDraft` (aus `0064`,
+dort noch `PurchaseDraft`) werden geteilt statt kopiert. Nichts am Auswählen einer Figur
+unterscheidet Kaufen von Verkaufen.
+
+**Korrigieren und Löschen sind zwei Handlungen.**
+
+| | ungebucht, handgemacht | ungebucht, historisch | ausgebucht | intern |
+|---|---|---|---|---|
+| Figur ändern | ja | nein | nein | nein |
+| Entfernen | ja | nein | nein | nein |
+
+Enger als auf der Einkaufsseite, und mit Absicht: `0054` erlaubt das Umzuordnen historischer
+*Einkaufs*-Positionen, weil genau dafür gebaut. Für Verkäufe gab es das nie, kein Bildschirm hat
+es angeboten, und diesen Kurationsweg hier zu erfinden wäre Umfang, den niemand verlangt hat.
+
+### Konsequenzen
+
+- Drei Funktionen in `0065`. Keine Spalte, keine Tabelle, kein Backfill, kein RLS-Eingriff, keine
+  Lagerbewegung.
+- Das Anlegen-Formular kennt keinen eBay-Zweig: jeder Unterschied ist ein Feld am
+  Vorlagenobjekt (`showsDiscount`, `defaultFees`, `channel`).
+- Eine leere Gebührenzeile wird **verworfen**, keine Gebühr über 0,00 € gespeichert.
+- Die Differenz ist `null`, solange nichts gemeldet ist — nie `0,00 €`, was als „stimmt überein"
+  gelesen würde. Vor dem Vergleich wird auf zwei Nachkommastellen gerundet, damit
+  `18.419999999999998` keine Abweichung ist.
+- Beide Positionskorrekturen schreiben nach `orderbook_audit` (`sale_item`).
+- Ein Verkauf ohne Figuren bleibt möglich; er ist dann `Unvollständig` (ADR-0090).
+
+### Verworfen
+
+Eine eBay-Tabelle oder eine `ebay_fee`-Spalte · ein `channel`-Zweig in Query oder Komponente ·
+eine zweite Auszahlungsformel in React · das Nachrechnen der Auszahlung auf der Detailseite ·
+`seller_update_sale` für die Beträge beim Anlegen (falsche Audit-Aussage) · eine dritte
+Figurensuche · das Ausbuchen aller Positionen beim Anlegen · eine Mengenspalte auf `sale_items` ·
+das Umzuordnen historischer Verkaufspositionen · das Löschen statt Zurücknehmen einer
+Lagerbewegung.
+
+---
+
+## ADR-0093 — `Offen` ist eine vierte Achse, und sie verspricht nur, was die Buchung annimmt
+
+**Status:** akzeptiert (2026-09-19) · Migration `0066_orderbook_open_status.sql` ·
+**nur Staging**
+
+### Kontext
+
+Das Orderbuch konnte sagen, ob an einem Vorgang etwas **fehlt** (`Unvollständig`, ADR-0090). Es
+konnte nicht sagen, ob an einem vollständigen Vorgang noch etwas zu **tun** ist. Ein Verkauf kann
+auf den Cent erfasst sein — Datum, Figuren, Gebühren, Auszahlung — und die Figur liegt trotzdem
+noch im Regal. Das ist keine Lücke in den Unterlagen, das ist offene Arbeit, und dafür gab es
+keinen Filter.
+
+### Entscheidung
+
+Eine vierte, unabhängige Achse: **`Alle · Offen · Unvollständig · Test`**. Abgeleitet, nirgends
+gespeichert, keine neue Spalte.
+
+**Die Regel ist die der Buchungsfunktion selbst** — und das ist der eigentliche Inhalt dieser
+Entscheidung, nicht ein Implementierungsdetail:
+
+```sql
+-- Einkaufsposition offen:
+movement_id is null and sky_id is not null and state in ('ordered', 'arrived')
+
+-- Verkaufsposition offen:
+order_id is null and source <> 'excel_order_2026'
+  and movement_id is null and sky_id is not null
+```
+
+Das ist wörtlich das, was `seller_book_purchase_item` bzw. `seller_book_sale_item` akzeptieren.
+Ein Vorgang ist offen, sobald **eine** solche Position existiert.
+
+**Was das kostet, und warum es trotzdem richtig ist.** Die Analyse hatte zunächst eine weitere
+Variante vorgeschlagen: zusätzlich die Werkbuch-Marker lesen — `purchase_items.legacy_booked_flag`
+leer, `sale_items.legacy_stock_flag` weder `x` noch `r`. Das Arbeitsbuch kennzeichnet so **111
+Einkaufs- und 240 Verkaufspositionen** als noch nicht gebucht. Gemessen auf Staging:
+
+| Regel | Einkauf offen | Verkauf offen | davon echte Geschäftsvorfälle |
+|---|---|---|---|
+| Bedingungen der Buchungsfunktionen | 2 (4 Pos.) | 4 (10 Pos.) | **0 / 0** |
+| zusätzlich Legacy-Marker | 8 (111 Pos.) | 34 (222 Pos.) | 6 / 30 |
+
+Die zweite Variante zeigt mehr — und **jede einzelne dieser Zeilen wäre beim Klick auf
+`Einbuchen`/`Ausbuchen` abgewiesen worden.** `seller_book_purchase_item` lehnt
+`state = 'reconciled_legacy'` ausdrücklich ab („a historical purchase item is already reflected in
+stock and is never booked again"), `seller_book_sale_item` lehnt `source = 'excel_order_2026'` ab
+(„historical sales never move stock"). Alle 111 bzw. 240 Positionen liegen auf importierten
+Vorgängen.
+
+Ein Filter, der eine unmögliche Aktion verspricht, ist schlechter als einer, der schweigt — und
+schlimmer: er würde den Betreiber einladen, Bestand zu erzeugen, den der nächste
+`/admin/imports`-Abgleich sofort wieder abräumt, weil dort der physische Sollbestand entschieden
+wird. Dieselbe Begründung schließt schon heute Nicht-Figuren aus: ein Portal mit `sky_id is null`
+ist nie einbuchbar und daher nie offene Arbeit.
+
+**Konsequenz, offen benannt:** `Offen` zeigt auf Staging heute nur Testvorgänge, weil alle echten
+Vorgänge importiert sind. Der Filter wird nützlich, sobald der Betreiber Einkäufe und Verkäufe von
+Hand anlegt — und das ist inzwischen der normale Weg (ADR-0091, ADR-0092). Der Werkbuch-Rückstand
+aus dem Arbeitsbuch ist damit **nicht** adressiert; er ist eine Frage an das Arbeitsbuch und an
+den Bestandsabgleich, nicht an das Orderbuch.
+
+### Konsequenzen
+
+- Zwei Lesemodelle bekommen ein abgeleitetes `is_open`, einen Zähler und einen `p_status`-Wert.
+  Beide Signaturen bleiben gleich, also bleibt jeder Aufrufer unberührt.
+- Vier Achsen, vier unabhängige Fragen. Ein Einkauf kann offen **und** unvollständig sein (auf
+  Staging: #94, #95) oder nur eines von beidem.
+- In der Liste ein leerer Ring `○` neben dem gefüllten Punkt `●` von `Unvollständig`.
+  Unterscheidbar ohne Farbe, und bewusst leiser als das `Test`-Abzeichen: an einem offenen
+  Vorgang ist nichts falsch.
+- Kein Backfill, keine Spalte, kein RLS-Eingriff, keine Lagerbewegung.
+
+### Verworfen
+
+Eine gepflegte `is_open`-Spalte · die Legacy-Marker als Quelle (siehe oben) · `Offen` als vierter
+Wert neben `Alle/Unvollständig/Test` statt als eigene Achse · ein Warnsymbol in Rot · das
+Aufweichen der Buchungsfunktionen, damit historische Positionen doch buchbar werden.
+
+---
+
+## ADR-0094 — Ein abgeschlossenes Passwort-Zurücksetzen endet beim Login
+
+**Status:** akzeptiert (2026-09-19) · keine Migration · Code
+
+### Kontext
+
+`/reset-password` speicherte das neue Passwort und blieb stehen. Die Seite zeigte eine
+Erfolgsmeldung unter demselben Formular, und der Browser hielt weiterhin die temporäre
+Recovery-Sitzung, die der Mail-Link erzeugt hatte. Nichts sagte, dass der Vorgang vorbei war; ein
+Reload zeigte wieder das Formular; und das Passwort, das gerade geändert worden war, hatte noch
+niemand benutzt.
+
+Ursache war eine geteilte Aktion: `updatePasswordAction` bediente sowohl `/account/security` —
+wo Stehenbleiben richtig ist, der Mensch ist absichtlich angemeldet — als auch das Zurücksetzen,
+wo es falsch ist.
+
+### Entscheidung
+
+Eine zweite, sehr kleine Aktion `resetPasswordAction` nur für den Recovery-Fall. Sie tut dasselbe
+und endet anders: **Sitzung beenden, dann zum Login.**
+
+```
+updateUser({ password })  → Fehler?  → Feldfehler, Formular bleibt, Sitzung bleibt
+                          → Erfolg?  → signOut() → redirect("/login?passwort-geaendert=1")
+```
+
+**Das `signOut()` ist tragend, nicht Kosmetik.** `/login` steht in
+`SIGNED_OUT_ONLY_PREFIXES`; ein Redirect ohne Abmeldung würde den noch angemeldeten Browser vom
+Proxy auf den Katalog weitergeleitet sehen — der Bug wäre durch einen leiseren ersetzt.
+
+**Die Reihenfolge ist die Entscheidung.** Abmelden und Weiterleiten passieren ausschließlich
+nach einem erfolgreichen `updateUser`. Ein abgelehntes Passwort lässt Formular *und* Sitzung
+stehen: für einen Tippfehler eine neue Mail anzufordern wäre die schlechtere Antwort. Fehlt die
+Recovery-Sitzung ganz — Link abgelaufen oder schon benutzt —, sagt das Formular das, statt eine
+Weiterleitung zu zeigen, die nach Erfolg aussieht.
+
+Genau ein `redirect()`, ohne `next`, ohne Rückverweis auf `/reset-password`: es gibt nichts, wovon
+eine Schleife entstehen könnte.
+
+### Konsequenzen
+
+- `/account/security` ist unverändert und bleibt bei `updatePasswordAction`.
+- Ein Satz über dem Login-Formular, gesteuert von `?passwort-geaendert=1`. Ein Query-Parameter,
+  kein Flash-Cookie: er überlebt genau eine Navigation und verrät nichts.
+- 13 Tests in `src/lib/auth/reset-password.test.ts` für Erfolg, Fehler, fehlende
+  Recovery-Sitzung, Reihenfolge, Schleifenfreiheit und die Unberührtheit der Einstellungsseite.
+
+### Verworfen
+
+`updatePasswordAction` um einen Schalter erweitern · den Redirect ohne `signOut()` · ein
+Flash-Cookie · nach dem Zurücksetzen automatisch anmelden (dann bliebe das neue Passwort
+ungetestet) · `/reset-password` in `SIGNED_OUT_ONLY_PREFIXES` aufnehmen (das würde den Flow
+zerstören, der die Recovery-Sitzung ja braucht).
+
+---
+
+## ADR-0095 — Es gibt eine Auszahlung, und sie wird gerechnet
+
+**Status:** akzeptiert (2026-09-19) · keine Migration · Code
+
+### Kontext
+
+Der externe Verkauf kannte zwei Auszahlungen: die **erwartete**, aus Erlös, Versand, Gebühren
+und Erstattungen gerechnet, und die **gemeldete**, die der Mensch nach dem Blick in die
+eBay-Abrechnung eintippt. Daraus folgte ein Status — „Auszahlung offen", „stimmt",
+„abweichend" — plus eine manuelle Bestätigung, die ihn schließt.
+
+Das war eine Buchhaltungsaufgabe, die sich das Orderbuch selbst gestellt hat. Die Formel ist
+vollständig: Erlös + Versand − Versandlabel − Erstattungen − (Transaktions-, Marktplatz- und
+sonstige über den Kanal abgerechnete Gebühren) + Korrekturen. Was sie liefert, ist keine
+Schätzung, die eine Meldung bestätigen müsste, sondern dieselbe Zahl. Der Status hat nie eine
+Abweichung gefunden, die nicht eine **fehlende Gebührenzeile** war — und die gehört erfasst,
+nicht gemeldet.
+
+### Entscheidung
+
+**Eine Zahl. Keine Meldung, kein Status, keine Bestätigung.**
+
+`plannedPayout()` und `sale_expected_payout()` bleiben und sind ab hier *die* Auszahlung.
+Entfernt: das Eingabefeld, `payoutState`, `payoutDifference`, `payoutCell`, `payoutDelta`, der
+Filter „Auszahlung offen" und das manuelle Abschließen.
+
+Stimmt die Zahl nicht mit der Abrechnung überein, fehlt eine Gebühr oder eine Erstattung.
+Dann wird **die** nachgetragen, und die Auszahlung stimmt wieder — an einer Stelle statt an zwei.
+
+### Konsequenzen
+
+- Der RPC nimmt den gemeldeten Wert weiterhin entgegen und ignoriert ihn; die Spalte bleibt
+  stehen. **Keine historischen Finanzdaten werden gelöscht** — was eingetragen wurde, bleibt
+  lesbar, es steuert nur nichts mehr.
+- Die vierte Achse `Offen` (ADR-0093) ist davon unberührt: sie fragt nach der *Ausbuchung*,
+  nicht nach Geld.
+- `sales-money.ts` besitzt `plannedPayout`, `roundMoney`, `parseMoney`, `parseSignedMoney`.
+  `saleFormMoney()` ist die eine Konstruktion, aus der Panel und Payload lesen — vorher gab es
+  zwei, und sie konnten auseinanderlaufen.
+
+### Verworfen
+
+Den Status behalten und nur ausblenden · die Meldung zur Pflicht machen · eine Toleranzgrenze
+(„bis 5 Cent gilt als stimmt") — eine Schwelle hätte genau die Gebührenzeilen verschluckt,
+deretwegen es überhaupt Abweichungen gab.
+
+---
+
+## ADR-0096 — Der Production-Transfer ist ein Einmalwerkzeug, kein Synchronisationssystem
+
+**Status:** akzeptiert (2026-09-19) · ausgeführt am 2026-09-19 · Werkzeug
+
+### Kontext
+
+Die rekonstruierte Excel-Historie — 84 Einkäufe, 2114 Positionen, 292 Verkäufe, 1253
+Positionen, 813 Gebühren, 41 Erstattungen, 4 Korrekturen, 13 Namenszuordnungen — lag in
+Staging und musste nach Production. Ein `pg_dump` kam nicht in Frage: er hätte Staging-Konten,
+Fixture-Bestände, einen fremden Bewegungs-Ledger und 25 Sandbox-Bestellungen mitgebracht und
+einen bereits korrekten Production-Bestand überschrieben.
+
+`tools/transfer-to-production.mts` kopiert deshalb **Zeilen, keine Datenbank**: nur
+`source = 'excel_order_2026'`, ohne Bestand, ohne Auth, mit Neuvergabe der Ids und
+Umschreibung der Elternverweise. Er lief am 2026-09-19. Die Nachprüfung war vollständig grün.
+
+### Das Problem, das der zweite Probelauf gefunden hat
+
+Identität reist im `import_fingerprint`. Für Einkäufe und Verkäufe trägt ihn jede Zeile, und
+ein zweiter Lauf schreibt dort nachweislich nichts. **`settlement_adjustments` ist die
+Ausnahme:** drei der vier historischen Korrekturen hängen an einem Verkauf und haben *keinen*
+Fingerabdruck — nur die freistehende hat einen, seit 0061. Ein Fingerabdruckvergleich kann sie
+nicht wiedererkennen, also meldete der zweite Probelauf sie als neu. Ein dritter Lauf hätte sie
+dupliziert.
+
+### Entscheidung
+
+**Nicht die Wiedererkennung reparieren, sondern den zweiten Lauf verbieten.**
+
+Eine Ersatzidentität aus `(sale_id, amount, reason)` wäre ein dauerhafter
+Abgleichmechanismus, der Zeilenidentität errät — gebaut für eine Migration, die einmal
+stattfindet und bereits stattgefunden hat. Stattdessen fragt das Werkzeug das Ziel:
+
+```
+Trägt irgendein Klasse-A-Fingerabdruck aus Staging bereits in Production?
+   ja  → GESPERRT.  --apply bricht mit Exit 1 ab, bevor irgendetwas geschrieben wird
+   nein → der Transfer hat noch nicht stattgefunden
+```
+
+Keine Markertabelle, keine Versionszeile, kein Zustand, den das Werkzeug pflegen müsste:
+**die übertragenen Daten sind der Beleg, dass die Übertragung stattfand.**
+
+Die Sperre ist absichtlich grob. Sie fragt nicht, *welche* Zeilen fehlen, denn ein halb
+abgeschlossener Transfer ist nichts, was ein erneuter Lauf stillschweigend vervollständigen
+sollte — das ist eine Entscheidung für einen Menschen vor den Daten, nicht für einen Filter.
+
+### Konsequenzen
+
+- `npm run transfer:preview` läuft weiter, meldet die Sperre und zeigt **keine** Insert-Liste
+  mehr, die niemand mehr ausführen kann.
+- `npm run transfer:apply -- --confirm-production` endet mit Exit 1 und schreibt nichts.
+  Nachgewiesen: Zählstände und Summen vor und nach dem Versuch byte-identisch.
+- Die drei fingerabdrucklosen Korrekturen bleiben, wie sie sind. Sie sind echte historische
+  Daten; ihnen nachträglich einen Fingerabdruck zu geben hieße, Identität zu erfinden.
+- Die Filterzeile für `newAdj` bleibt ehrlich falsch — sie meldet die drei als neu, weil sie es
+  nicht besser wissen *kann*. Genau deshalb gibt es die Sperre, und ein Kommentar sagt das an
+  Ort und Stelle.
+
+### Verworfen
+
+Matching über `(sale_id, amount, reason)` · den drei Korrekturen nachträglich Fingerabdrücke
+schreiben · eine `migrations_applied`-Markertabelle in Production · das Werkzeug löschen (eine
+Migration, die man nicht mehr nachlesen kann, ist eine, die man nicht mehr prüfen kann).

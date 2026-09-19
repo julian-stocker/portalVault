@@ -1268,6 +1268,315 @@ Lesen. **Keine Zeile wird beim Typwechsel gelöscht:** ein Entzug des Shopzugang
 Sammlung unverändert wieder sichtbar.
 
 
+### 3.3w Testvorgänge und Unvollständigkeit im Orderbuch (Migration `0063`, ADR-0090)
+
+Das Orderbuch sortiert eine Zeile ab jetzt entlang **drei unabhängiger Achsen**. Keine davon
+ersetzt eine andere, und keine wird in ein gemeinsames Enum gefaltet.
+
+| Achse | Frage | Wo die Antwort liegt |
+|---|---|---|
+| **Kanal** | Intern oder extern verkauft? | `sales.order_id` — unverändert seit `0059` |
+| **Einordnung** | Echter Geschäftsvorfall oder Testvorgang? | `is_test`, bzw. `orders.commerce_mode` |
+| **Vollständigkeit** | Fehlt noch etwas? | **abgeleitet**, nirgends gespeichert |
+
+#### `is_test` — zwei Spalten und eine Herleitung
+
+```
+purchases.is_test   boolean not null default false
+sales.is_test       boolean not null default false
+```
+
+**Ein interner Verkauf trägt die Antwort nicht selbst.** Sie steht bereits in
+`orders.commerce_mode` — beim Bestellen gesetzt und von `orders_protect_immutable()` danach
+verweigert (`0021`), dieselbe Quelle, aus der die Bestellansichten seit `0046` Testbestellungen
+aus der Livemenge halten. Eine Kopie auf `sales` wäre eine zweite Wahrheit über eine Bestellung,
+also gibt es keine: `sales_internal_test_is_derived` hält die Spalte für interne Verkäufe fest
+auf `false`, und
+
+```sql
+sale_is_test(p_sale_id) -- order_id is null ? sales.is_test : commerce_mode = 'sandbox'
+```
+
+ist die **einzige** Definition. `seller_sales()` und `seller_sale()` rufen sie auf, statt den
+CASE zu wiederholen.
+
+**Notiztext entscheidet zur Laufzeit nichts.** Die einzige Stelle, an der er überhaupt vorkommt,
+ist die einmalige Datenkorrektur am Ende von `0063`, die genau zwei Staging-Zeilen über je vier
+Felder gleichzeitig identifiziert (`id`, `source`, fehlender `import_fingerprint`, Notiz bzw.
+externe Referenz). Kein Importer schreibt die Spalte; historische Zeilen bleiben damit normale
+Geschäftsvorfälle.
+
+#### `Unvollständig` — abgeleitet, damit es nicht veraltet
+
+Es gibt **keine** Spalte `is_incomplete`. Ein gespeicherter Haken müsste gelöscht werden, sobald
+jemand das fehlende Datum nachträgt — und genau das vergisst man. Die Lesemodelle
+(`seller_orderbook_ledger()`, `seller_sales()`) rechnen ihn bei jedem Lesen aus:
+
+| | Unvollständig genau dann, wenn |
+|---|---|
+| **Einkauf** | `purchased_at is null` · **oder** `source = 'manual'` und der Einkauf hat keine Position |
+| **Verkauf extern** | `sold_at is null` · **oder** `source = 'manual'` und keine Position · **oder** `source = 'manual'` und Summe **und** Versand beide `0` (der Platzhalter, den `seller_create_sale()` schreibt) |
+| **Verkauf intern** | die Bestellung ist nicht `paid` · **oder** sie hat kein `paid_at` · **oder** sie hat keine Position |
+
+**Bewusst nicht unvollständig** — das ist laufendes Geschäft, kein Loch in den Unterlagen:
+eine noch nicht gemeldete Auszahlung (`Auszahlung offen` ist ein eigener Filter) · eine noch
+nicht eingebuchte Einkaufsposition · eine noch nicht ausgebuchte Verkaufsposition · leere
+Notiz, Käufer, Referenz oder Land · ein **verdächtiges Jahr**. Der Verkauf vom 2028-06-28 aus
+`Order 2026` bleibt unangetastet: `seller_set_sale_date()` prüft Plausibilität beim Schreiben,
+und ein gespeichertes Datum nachträglich für falsch zu erklären, weil es seltsam aussieht, wäre
+geraten.
+
+**Historische Importe werden an keiner dieser Regeln außer dem Datum gemessen.** Die Positionen
+einer importierten Zeile gehören der Arbeitsmappe, nicht dem Betreiber: auf diesen Bildschirmen
+lässt sich keine hinzufügen. Eine importierte Gruppe ohne Positionen stünde also dauerhaft in einer
+Arbeitsliste, ohne dass jemand sie abarbeiten könnte — deshalb tragen beide Positionsregeln
+`source = 'manual'`. Was eine `#REF!`-Gruppe wirklich noch braucht, ist ihr Datum, und genau das
+verlangt die Regel von ihr. (Auf Staging hat heute **jede** importierte Gruppe Positionen; die
+Einschränkung ändert also keine bestehende Zeile, sondern verhindert eine spätere Flut.)
+
+#### Lesen und Schreiben
+
+`p_status` (`normal` | `incomplete` | `test` | `any`) kommt in beiden Ledger-Funktionen hinzu;
+die Vorgängersignaturen werden gedroppt statt überladen. **`normal` ist der Default**, also
+enthält die Geschäftsliste — und damit auch ihre Summe, die über genau die zurückgegebenen Zeilen
+aggregiert — keine Testvorgänge. Dieselbe Antwort liefert zusätzlich `classification` mit den
+Zählern aller drei Klassen, gebildet **vor** dem Einordnungsfilter und **nach** Jahr, Monat,
+Bereich und Suche: `Test 1` heißt „einer in dieser Ansicht", nicht „einer in der Datenbank".
+
+`any` ist aus der URL nicht erreichbar und existiert für die Jahresfilter, die ein Jahr auch dann
+anbieten müssen, wenn dort nur Testzeilen liegen.
+
+| Funktion | Zweck |
+|---|---|
+| `seller_create_purchase(date, numeric, text, boolean)` | wie bisher, plus `p_is_test` (Default `false`) |
+| `seller_create_sale(text, date, text, text, text, text, boolean)` | ebenso |
+| `seller_set_purchase_test(bigint, boolean)` | Einordnung nachträglich korrigieren |
+| `seller_set_sale_test(bigint, boolean, timestamptz)` | ebenso; weist interne Verkäufe ab, prüft den Konflikt-Token aus `0062` und schreibt nach `orderbook_audit` |
+
+Alle vier sind `security definer`, `set search_path = ''`, fragen
+`can_operate_active_seller()` und sind von `anon` und `public` entzogen. Die beiden
+Korrekturfunktionen nennen **eine** Spalte plus ihre eigenen Änderungsstempel — kein Betrag, kein
+Kanal, kein Datum, keine Position, keine Provenienz, und nichts aus `inventory_movements`.
+`0063` erwähnt Lagerbestand an keiner Stelle.
+
+
+### 3.3x Figuren beim Anlegen, Korrekturen danach (Migration `0064`, ADR-0091)
+
+`0064` schließt genau **zwei** Lücken im Einkaufs-Workflow. Alles andere war schon da und wird
+nicht angefasst: `seller_add_purchase_item` (`0053`), `seller_set_purchase_item_sky` (`0054`)
+und die Ablehnung eingebuchter Positionen durch beide plus den Fremdschlüssel.
+
+#### Lücke 1 — Anlegen war keine einzelne Operation
+
+Vorher: `seller_create_purchase`, danach je Figur ein `seller_add_purchase_item`. Jeder Aufruf
+eine eigene Transaktion — bricht der fünfte ab, existiert ein Einkauf, dem eine Figur fehlt und
+den niemand so angelegt hat.
+
+```
+seller_create_purchase_with_items(
+  p_purchased_at date, p_total_cost numeric, p_note text default null,
+  p_is_test boolean default false, p_items jsonb default '[]'::jsonb
+) returns bigint
+```
+
+`p_items` ist **ein Element je physischem Stück**, niemals eine Menge:
+
+```json
+[{"sky_id": "SKY-0212"}, {"sky_id": "SKY-0212"}, {"raw_name": "Portal of Power"}]
+```
+
+Drei Wash Buckler sind drei Elemente, werden drei Zeilen und später drei einzelne Buchungen. Eine
+`quantity`-Spalte wäre eine zweite Art zu sagen, wie viele es sind — und zwei Arten, dasselbe zu
+sagen, widersprechen sich irgendwann. Die Gruppierung mit `− n +` existiert **nur im Browser**
+(`src/lib/orderbook/draft.ts`) und wird beim Absenden wieder aufgelöst.
+
+Die Funktion ist **dünn und delegiert**: sie ruft `seller_create_purchase` und je Element
+`seller_add_purchase_item` auf, statt deren Prüfungen zu wiederholen. Ein plpgsql-Rumpf ist für
+den Aufrufer eine einzige Anweisung — scheitert das dritte Element, verschwindet der Einkauf mit
+ihm. Es gibt keine Teilanlage. Zwei Schranken: `p_items` muss ein JSON-Array sein, und mehr als
+**200** Elemente auf einmal werden abgelehnt (dieselbe Zahl wie `MAX_DRAFT_UNITS` im Browser).
+
+Ein Einkauf **ohne** Positionen bleibt erlaubt und gilt dann als `Unvollständig` (§3.3w).
+
+#### Lücke 2 — Löschen schützte das Werkbuch nicht
+
+`seller_remove_purchase_item` (`0053`) lehnte nur ab, was eine Lagerbewegung besitzt. Das war
+damals die ganze Gefahr: kein Bildschirm bot Löschen an, und es gab nur handgemachte Positionen.
+Beides gilt nicht mehr. Die Detailseite bietet jetzt `Entfernen`, und **2 114 der 2 115**
+Positionen auf Staging sind abgeglichene Werkbuch-Zeilen mit `source_row` — Provenienz, die kein
+Importer neu erzeugt, weil dieses Projekt nicht neu importiert. Sie haben `movement_id is null`
+und waren damit einen Klick vom Verschwinden entfernt.
+
+Die neu signierte Funktion lehnt zusätzlich ab, und fragt **dreifach**, damit kein einzelnes Feld
+für immer richtig bleiben muss:
+
+| Bedingung | Warum |
+|---|---|
+| `purchases.source <> 'manual'` | ein importierter Einkauf besitzt importierte Zeilen |
+| `state = 'reconciled_legacy'` | der Zustand, den das Werkbuch selbst mitbringt |
+| `source_row is not null` | die Zeilennummer aus der Tabelle |
+| `legacy_booked_flag` / `legacy_condition_flag` gesetzt | die zwei Marker der alten Tabelle |
+
+Auf Staging stimmen die drei exakt überein: 2 114 Positionen sind nach allen dreien historisch,
+1 nach keiner. Die Prüfung auf `movement_id` bleibt **vorne** — „das liegt im Bestand" ist der
+Satz, den der Betreiber zuerst braucht.
+
+**Ausdrücklich weiter erlaubt: die Figurenzuordnung einer historischen Zeile zu korrigieren.**
+Das ist `seller_set_purchase_item_sky` und der ganze Zweck von `0054` — ein Werkbuchname, der auf
+die falsche SKY-ID zeigt, muss reparabel sein. Dabei ändert sich eine Einordnung, während Zeile,
+Zeilennummer und Provenienz stehen bleiben. Das Löschen der Zeile ist die andere Handlung, und
+nur die wird abgelehnt.
+
+#### Was `0064` nicht tut
+
+Keine Spalte, keine Tabelle, kein Backfill, keine Änderung an einer bestehenden Zeile. Kein RLS,
+keine Policy, kein Tabellen-Grant. **Kein Lagerbestand** — `record_inventory_movement()`,
+`shop_inventory` und `inventory_movements` kommen in keiner ausführbaren Anweisung der Datei vor.
+Beide Funktionen sind `security definer`, `set search_path = ''`, fragen
+`can_operate_active_seller()`, sind `public` und `anon` entzogen und nur `authenticated` gewährt.
+
+#### Audit
+
+Die Korrektur einer ungebuchten, handgemachten Position wird **nicht** protokolliert.
+`orderbook_audit` (`0062`) ist verkaufsseitig — `sale_id` als Fremdschlüssel,
+`entity_type in ('sale', 'sale_fee', 'sale_refund', 'sale_item', 'settlement_adjustment')` — und
+auf der Einkaufsseite existiert keine Audit-Architektur. Eine anzulegen, um das Entfernen einer
+Zeile festzuhalten, die noch nie Geld, Bestand oder Werkbuch berührt hat, wäre mehr Apparat als
+Aussage. Was Provenienz **hat**, ist stattdessen gar nicht erst löschbar (Lücke 2), und was
+Bestand berührt hat, wird über `seller_unbook_purchase_item` mit einer Gegenbewegung
+zurückgenommen statt gelöscht.
+
+
+### 3.3y Externer Verkauf: Vorlage, Gebühren, Auszahlung (Migration `0065`, ADR-0092)
+
+#### Die Vorlage ist Layout — es gibt kein eBay-Datenmodell
+
+`Vorlage: eBay` entscheidet, welche Felder das Formular zeigt, wie sie heißen und mit welchen
+Gebührenzeilen es startet. Gespeichert wird ausschließlich in dem, was seit `0059` existiert:
+
+| Im Formular | Landet in |
+|---|---|
+| Verkauf (Artikelpreis) | `sales.items_subtotal` |
+| Versand (vom Käufer bezahlt) | `sales.shipping_charged` |
+| Rabatt | `sales.discount_amount` |
+| eBay-Gebühr | `sale_fees` · `kind = 'marketplace'` · `settled_by = 'channel'` |
+| Versandkosten (Label), über eBay gekauft | `sale_fees` · `kind = 'shipping_label'` · `settled_by = 'channel'` |
+| Versandkosten (Label), selbst bezahlt | `sale_fees` · `kind = 'shipping_label'` · `settled_by = 'external'` |
+| weitere Gebühr | `sale_fees` · `kind = 'other'` · mit `label` (Pflicht) |
+| Gutschrift / Korrektur | `settlement_adjustments.amount`, **vorzeichenbehaftet** |
+| Tatsächliche Auszahlung | `sales.reported_payout_amount` / `_ref` / `_at` |
+| Figuren | je Stück eine Zeile in `sale_items` |
+
+**Keine `ebay_fee`-Spalte, keine eBay-Tabelle, kein eBay-Zweig in einer Query.** Das bestehende
+Modell trägt den Fall bereits: auf Staging liegen 820 Gebührenzeilen in vier
+`kind`/`settled_by`-Kombinationen, 282 Verkäufe haben mehr als eine Gebühr, einer hat vier.
+
+#### `settled_by` ist das Feld, das über die Auszahlung entscheidet
+
+Es ist die ganze Unterscheidung, die das Arbeitsbuch als zwei Spalten führte — `lbl eBay` (Y) und
+`lbl ext` (Z). Ein über den Kanal abgerechnetes Label mindert die Auszahlung, ein am Schalter
+gekauftes nicht. **Beides ist echtes Geld**, aber nur eines ändert, was eBay überweist. Deshalb
+fragt die Oberfläche danach, statt nur eine Zahl entgegenzunehmen.
+
+#### Eine Formel, drei Aufrufer
+
+```
+U + V − W − AD − (X + AA + Y) + AB
+```
+
+| Aufrufer | Funktion | Wann |
+|---|---|---|
+| historischer Import | `plannedPayout()` (TS) | Vorschau, bevor es den Verkauf gibt |
+| Anlegen-Formular | `plannedPayout()` über `payoutView()` | live, bevor es den Verkauf gibt |
+| Detailseite und Hauptbuch | `sale_expected_payout()` (SQL) | sobald der Verkauf existiert |
+
+`plannedPayout` ist in `0065` von `sales-import.ts` nach `sales-money.ts` **umgezogen**, nicht
+kopiert: das Anlegen-Formular kann den xlsx-Reader nicht importieren, und zwei Formeln wären zwei
+Antworten auf eine Frage. `sales-import.ts` re-exportiert sie, damit jeder bestehende Aufrufer
+unverändert weiterläuft. **Sobald der Verkauf existiert, ist die Datenbank die Autorität** — die
+Detailseite rechnet nicht nach, und ein Test hält das fest.
+
+#### `seller_create_sale_with_details` — der Verkauf entsteht als Ganzes
+
+Vorher: `seller_create_sale`, dann ein zweiter Aufruf für die Beträge, danach Gebühren und
+Auszahlung in „Details". Drei Transaktionen, und ein Abbruch dazwischen hinterlässt einen Verkauf,
+dessen Geld halb erfasst ist — und dessen Auszahlungsabgleich damit gegen eine falsche Zahl
+vergleicht.
+
+Die Funktion ist **dünn und delegiert** an `seller_create_sale`, `seller_add_sale_item`,
+`seller_add_sale_fee`, `seller_add_settlement_adjustment` und `seller_set_sale_payout`. Ein
+plpgsql-Rumpf ist für den Aufrufer eine einzige Anweisung: scheitert die dritte Gebühr,
+verschwindet der ganze Verkauf. Schranken: Arrays, höchstens 200 Positionen und je 20 Gebühren
+und Korrekturen.
+
+**Die drei Beträge werden direkt gesetzt, nicht über `seller_update_sale`** — eine
+Audit-Entscheidung. `seller_create_sale` schreibt 0/0/0 als Platzhalter; die echten Zahlen durch
+die auditierte Update-Funktion zu schicken, würde acht `orderbook_audit`-Zeilen erzeugen, die
+behaupten, der Verkauf sei Sekunden nach seiner Entstehung *korrigiert* worden. `orderbook_audit`
+hält fest, was sich **nach** Anlage oder Import geändert hat; das Anlegen muss draußen bleiben,
+damit der Satz etwas bedeutet. Die gemeldete Auszahlung wird dagegen **schon** auditiert: sie
+kommt von außen, und wann sie zuerst eingetragen wurde, ist eine Information.
+
+#### Anlegen ≠ Ausbuchen
+
+`0065` nennt `record_inventory_movement`, `shop_inventory` und `inventory_movements` in keiner
+ausführbaren Anweisung. Ein Verkauf mit zehn Figuren erzeugt **null** Lagerbewegungen. Jede
+physische Figur wird einzeln über `seller_book_sale_item` ausgebucht, und das schreibt genau eine
+kanonische `sale_external`-Bewegung mit `delta = −1` (unverändert seit `0059`).
+
+#### Positionen korrigieren
+
+| | ungebucht, handgemacht | ungebucht, historisch | ausgebucht | intern |
+|---|---|---|---|---|
+| Figur ändern (`seller_set_sale_item_sky`, neu) | ja | **nein** | nein | nein |
+| Entfernen (`seller_remove_sale_item`, verschärft) | ja | **nein** | nein | nein |
+
+`seller_remove_sale_item` prüfte bis `0065` nur `movement_id` — derselbe Mangel, den `0064` auf
+der Einkaufsseite behoben hat. **1 253 der 1 257** Verkaufspositionen sind importierte Historie
+mit `source_row` und beiden Legacy-Markern, und Historie bewegt nie Bestand (erzwungen durch
+`sale_items_no_historical_movement()`), also hat jede einzelne `movement_id is null`. Die
+Oberfläche blendete den Knopf aus; die Funktion ist die Grenze.
+
+**Warum enger als auf der Einkaufsseite.** `0054` erlaubt ausdrücklich, eine historische
+*Einkaufs*-Position umzuzuordnen — dafür wurde sie gebaut. Für Verkäufe gab es das nie, die
+Bildschirme haben es nie angeboten, und diesen Kurationsweg hier zu erfinden wäre Umfang, den
+niemand verlangt hat. Beide Korrekturen schreiben nach `orderbook_audit` (`sale_item`).
+
+
+### 3.3z `Offen` — vierte Achse, abgeleitet (Migration `0066`, ADR-0093)
+
+`Unvollständig` heißt: am **Datensatz** fehlt etwas. `Offen` heißt: der Datensatz ist in Ordnung
+und eine **physische Buchung** steht noch aus. Unabhängig voneinander und von Kanal und Test.
+
+| Achse | Frage | Quelle |
+|---|---|---|
+| Kanal | intern oder extern? | `sales.order_id` (`0059`) |
+| Einordnung | Test? | `is_test` / `orders.commerce_mode` (`0063`) |
+| Vollständigkeit | fehlt etwas? | abgeleitet (`0063`) |
+| **Aktion** | **ist noch etwas zu tun?** | **abgeleitet (`0066`)** |
+
+```sql
+-- Einkaufsposition offen
+movement_id is null and sky_id is not null and state in ('ordered', 'arrived')
+
+-- Verkaufsposition offen
+order_id is null and source <> 'excel_order_2026'
+  and movement_id is null and sky_id is not null
+```
+
+Ein Vorgang ist offen, sobald **eine** Position offen ist. `seller_orderbook_ledger` und
+`seller_sales` liefern `is_open` je Zeile und `classification.open`; `p_status` akzeptiert
+zusätzlich `open`. Beide Signaturen bleiben unverändert, also bleibt jeder Aufrufer unberührt.
+
+**Die Regel ist wörtlich die der Buchungsfunktion.** `seller_book_purchase_item` lehnt
+`reconciled_legacy` ab, `seller_book_sale_item` lehnt `excel_order_2026` ab — historische
+Positionen sind deshalb **nie** offen, auch wenn das Arbeitsbuch sie in Spalte D bzw. L als
+ungebucht markiert (111 bzw. 240 Zeilen). Ein Filter, der eine Aktion verspricht, die die
+Datenbank verweigert, wäre schlechter als einer, der schweigt; die Begründung und die gemessenen
+Zahlen stehen in ADR-0093. `sky_id is null` ist aus demselben Grund nie offen: ein Portal lässt
+sich nicht einbuchen.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { AuthForm } from "@/components/auth/auth-form";
 import { AuthCard } from "@/components/auth/form-field";
-import { updatePasswordAction } from "@/lib/auth/actions";
+import { resetPasswordAction } from "@/lib/auth/actions";
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/server";
 
@@ -18,7 +18,7 @@ export default async function ResetPasswordPage() {
   return (
     <AuthCard title={de.auth.resetPassword.title}>
       <AuthForm
-        action={updatePasswordAction}
+        action={resetPasswordAction}
         submitLabel={de.auth.resetPassword.submit}
         fields={[
           {

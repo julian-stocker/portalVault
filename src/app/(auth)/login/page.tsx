@@ -6,7 +6,7 @@ import { AuthCard, AuthContextNote } from "@/components/auth/form-field";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { signInAction } from "@/lib/auth/actions";
 import { authContext, favoursRegistration } from "@/lib/auth/context";
-import { safeRedirect } from "@/lib/auth/redirect";
+import { PASSWORD_CHANGED_PARAM, safeRedirect } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.auth.login.title };
@@ -14,9 +14,13 @@ export const metadata: Metadata = { title: de.auth.login.title };
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; [PASSWORD_CHANGED_PARAM]?: string }>;
 }) {
-  const { next } = await searchParams;
+  const params = await searchParams;
+  const next = params.next;
+  /* Set by `resetPasswordAction` after a successful reset, and by nothing
+     else. One sentence; it changes no behaviour. */
+  const passwordChanged = params[PASSWORD_CHANGED_PARAM] === "1";
   // Sanitised here as well as in the action: the value is rendered into the
   // form and travels with every submission.
   const target = safeRedirect(next);
@@ -35,6 +39,13 @@ export default async function LoginPage({
 
   return (
     <AuthCard title={de.auth.login.title}>
+      {passwordChanged ? (
+        <p role="status"
+           className="mb-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
+          {de.auth.resetPassword.changed}
+        </p>
+      ) : null}
+
       <AuthContextNote context={context} />
 
       <AuthForm

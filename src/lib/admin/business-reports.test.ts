@@ -367,8 +367,17 @@ describe("no financial field this system does not have", () => {
   it("the copy calls it none of those words either", () => {
     // The copy, not the comment above it: the comment's job is to explain why
     // these words are wrong, which it cannot do without naming them.
+    /*
+     * ANCHORED ON THE LINE, NOT THE SUBSTRING.
+     *
+     * `indexOf("    reports: {")` also matches the SIX-space `reports:` in the
+     * navigation block 500 lines earlier, so this slice silently covered half
+     * the business copy — and failed the day an unrelated block legitimately
+     * used one of these words. The newline pins it to the top-level key this
+     * test is actually about.
+     */
     const block = COPY.slice(
-      COPY.indexOf("    reports: {"),
+      COPY.indexOf("\n    reports: {"),
       COPY.indexOf("      downloadLater:"),
     );
     const reports = block.replace(/\/\*[\s\S]*?\*\//g, "");

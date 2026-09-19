@@ -692,3 +692,25 @@ ist unverändert, es gibt keine automatischen Wiederholungen.
 - **OPEN:** Wie wird die spätere Rolle `shop_admin` getragen und vergeben? Fest steht nur, wo
   sie **nicht** hingehört (Abschnitt 6, ADR-0032). Nötig vor der ersten Shop-Schreiboperation,
   nicht vorher.
+
+---
+
+## Passwort zurücksetzen endet beim Login (ADR-0094)
+
+`/reset-password` benutzt `resetPasswordAction`, **nicht** `updatePasswordAction`.
+
+| | `/account/security` | `/reset-password` |
+|---|---|---|
+| Aktion | `updatePasswordAction` | `resetPasswordAction` |
+| bei Erfolg | Meldung, Sitzung bleibt | `signOut()` → `/login?passwort-geaendert=1` |
+| bei Fehler | Feldfehler, bleibt stehen | Feldfehler, bleibt stehen, Sitzung bleibt |
+
+**Warum das `signOut()` nötig ist:** `/login` steht in `SIGNED_OUT_ONLY_PREFIXES`
+(`src/lib/supabase/middleware.ts`). Ohne Abmeldung würde der Proxy den noch angemeldeten Browser
+vom Login weg auf den Katalog schicken — der Fehler wäre durch einen leiseren ersetzt.
+
+**Reihenfolge:** Abmelden und Weiterleiten erst nach erfolgreichem `updateUser`. Ein abgelehntes
+Passwort lässt Formular und Recovery-Sitzung stehen, damit ein Tippfehler keine neue Mail kostet.
+Fehlt die Recovery-Sitzung ganz, meldet das Formular `sessionExpired`, statt eine Weiterleitung
+zu zeigen, die nach Erfolg aussieht. Genau ein `redirect()`, ohne `next` und ohne Rückverweis auf
+`/reset-password` — es gibt nichts, wovon eine Schleife entstehen könnte.

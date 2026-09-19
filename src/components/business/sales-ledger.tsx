@@ -1,0 +1,380 @@
+"use client";
+
+/**
+ * The Verkauf ledger (ADR-0089).
+ *
+ * The Einkauf ledger's IMPLEMENTATION, not merely its shape. Every element
+ * here comes from `ledger-table.tsx` and lands on `.ob-row` / `.ob-item` —
+ * the same two rules the purchase ledger renders through, which are the rules
+ * that demonstrably work in the owner's browser.
+ *
+ * The previous version had its own `.ob-sale` family mirroring `.ob-row`
+ * faithfully, and it still rendered as one run-on line while Einkauf, from the
+ * same stylesheet and the same layer, did not. A rule only one ledger depends
+ * on is a rule that can go missing for only that ledger. So Verkauf no longer
+ * has one: its ten tracks are an inline custom property on the container,
+ * delivered in the same response as the markup.
+ *
+ * WHAT IS DIFFERENT, AND WHY
+ *
+ * Three extra columns that only a sale has: `Erwartet`, `Gemeldet` and `Δ`.
+ * Payout reconciliation is the reason the owner wants to stop keeping the
+ * spreadsheet, so all three sit in the collapsed row rather than behind a
+ * click — and a missing reported payout reads `Offen`, never `0,00 €`.
+ *
+ * Ten columns do not fit a narrow window, so the ledger keeps its width and
+ * scrolls sideways. Squeezing the table instead would cost the alignment that
+ * is the entire point of a table.
+ */
+
+/*
+ * The financial row, in the workbook's own order and under its own headings:
+ * `Order 2026!T4` is literally `EU`, U `Summe`, V `Versand`, W `Rabatt`,
+ * X+AA the fees, Y+Z the labels, AD `Refund`, AE `Auszahlung`.
+ *
+ * Datum · EU · Summe · Versand · Rabatt · Fees · Label · Refund · Auszahlung · Details
+ *
+ * `Fees` and `Label` are disjoint halves of the same fee table and arrive as
+ * aggregates from `seller_sales()` (0062) — a label is never in both.
+ */
+const SALE_COLUMNS =
+  "6rem 3rem minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) "
+  + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 5.5rem";
+
+/* # · Serie · Figur · Marktwert · Bestand · Retoure · Aktion */
+const SALE_ITEM_COLUMNS =
+  "2.5rem 8.5rem minmax(0, 1fr) 5.5rem 6rem 5rem 8rem";
+
+const SALE_MIN_WIDTH = "62rem";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
+
+import { formatPrice } from "@/lib/format";
+import { de } from "@/lib/i18n/de";
+import { bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
+  from "@/lib/orderbook/sales-actions";
+import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
+import { countryLabel, itemActions } from "@/lib/orderbook/sales-view";
+import { SaleDetails } from "./sale-details";
+import {
+  LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
+} from "./ledger-table";
+import { RowMarks } from "./orderbook-nav";
+
+const copy = de.business.sales;
+
+const formatDate = (iso: string | null): string =>
+  iso === null ? copy.undated
+    : new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
+
+/**
+ * The payout cell (ADR-0095).
+ *
+ * One number, computed. There used to be two — what the channel had reported
+ * and what it should have paid — with `offen` standing in until somebody
+ * typed the first. That reconciliation is gone: the payout is derived from
+ * the sale's own figures by `sale_expected_payout()`, so there is nothing to
+ * be pending about.
+ */
+function Payout({ sale }: { sale: SaleRow }) {
+  if (sale.expectedPayout === null) return <span className="text-xs text-muted">—</span>;
+  return (
+    <span className="ob-money tabular-nums" title={copy.summary.expected}>
+      {formatPrice(sale.expectedPayout)}
+    </span>
+  );
+}
+
+function Summary({ summary }: { summary: SalesSummary }) {
+  const cells = [
+    { key: "count", label: copy.summary.count, value: summary.saleCount.toLocaleString("de-AT"),
+      hint: `${summary.itemCount.toLocaleString("de-AT")} ${copy.summary.items}` },
+    { key: "gross", label: copy.summary.gross, value: formatPrice(summary.gross), hint: null },
+    { key: "expected", label: copy.summary.expected, value: formatPrice(summary.expectedPayout), hint: null },
+  ];
+  return (
+    <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+      {cells.map((cell) => (
+        <div key={cell.key} className="rounded-sky-md bg-surface/70 px-3 py-1.5 ring-1 ring-border/60">
+          <dt className="text-xs leading-tight text-muted">{cell.label}</dt>
+          <dd className="leading-tight tabular-nums">{cell.value}</dd>
+          {cell.hint ? <dd className="text-xs leading-tight text-muted">{cell.hint}</dd> : null}
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+type Detail = Record<string, unknown>;
+
+export function SalesLedger({ sales, summary, backHref }: {
+  sales: SaleRow[]; summary: SalesSummary; backHref: string;
+}) {
+  const [open, setOpen] = useState<ReadonlySet<number>>(
+    () => new Set(sales.filter((s) => s.matchItems.length > 0).map((s) => s.id)));
+  const [details, setDetails] = useState<Record<number, Detail | "failed">>({});
+  /*
+   * Which sale's breakdown is open. Separate from `open`, which is the item
+   * list: the chevron and the Details button are two controls doing two
+   * things, and neither may move the other.
+   */
+  const [showing, setShowing] = useState<number | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const loading = useRef<Set<number>>(new Set());
+
+  const load = useCallback((id: number, force = false) => {
+    if (loading.current.has(id)) return;
+    loading.current.add(id);
+    void loadSale(id).then((d) => {
+      loading.current.delete(id);
+      setDetails((current) => ({ ...current, [id]: d ?? "failed" }));
+    });
+    if (force) setDetails((current) => { const next = { ...current }; delete next[id]; return next; });
+  }, []);
+
+  /* Details reuses the same lazily-loaded payload the item list uses. */
+  const onDetails = (id: number) => { setShowing(id); load(id); };
+
+  const toggle = (id: number) => {
+    setOpen((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    if (!open.has(id)) load(id);
+  };
+
+  useEffect(() => {
+    for (const id of open) load(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Never optimistic. The server decides, then the row is re-read. */
+  const act = (id: number, run: () => Promise<{ ok: boolean; message?: string }>) => {
+    setError(null);
+    startTransition(async () => {
+      const result = await run();
+      if (!result.ok) { setError(result.message ?? null); return; }
+      loading.current.delete(id);
+      load(id, true);
+    });
+  };
+
+  const showingSale = sales.find((s) => s.id === showing) ?? null;
+
+  if (sales.length === 0) {
+    return (<><Summary summary={summary} /><p className="mt-6 text-sm text-muted">{copy.empty}</p></>);
+  }
+
+  return (
+    <>
+      <Summary summary={summary} />
+      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
+
+      <LedgerTable columns={SALE_COLUMNS} itemColumns={SALE_ITEM_COLUMNS}
+                   minWidth={SALE_MIN_WIDTH}>
+        <LedgerHead>
+          <span>{copy.columns.date}</span>
+          <span>{copy.columns.country}</span>
+          <span className="text-right">{copy.columns.sum}</span>
+          <span className="text-right">{copy.columns.shipping}</span>
+          <span className="text-right">{copy.columns.discount}</span>
+          <span className="text-right">{copy.columns.fees}</span>
+          <span className="text-right">{copy.columns.label}</span>
+          <span className="text-right">{copy.columns.refund}</span>
+          <span className="text-right">{copy.columns.payout}</span>
+          <span className="text-center">{copy.columns.details}</span>
+        </LedgerHead>
+
+        <ul className="divide-y divide-border/60">
+          {sales.map((sale) => {
+            const expanded = open.has(sale.id);
+            const detail = details[sale.id];
+            const gross = (sale.itemsSubtotal ?? 0) + (sale.shippingCharged ?? 0) - (sale.discountAmount ?? 0);
+            return (
+              <li key={sale.id}>
+                <LedgerRow expanded={expanded} controls={`sale-${sale.id}`}
+                           onToggle={() => toggle(sale.id)}
+                           label={<>
+                             {expanded ? copy.collapse : copy.expand} — {formatDate(sale.soldAt)}, {formatPrice(gross)}
+                           </>}>
+                  {/* Date, plus the row's classification marks — see `RowMarks`. */}
+                  <span className={sale.soldAt === null ? "font-medium text-muted" : "font-medium tabular-nums"}>
+                    {formatDate(sale.soldAt)}
+                    <RowMarks isTest={sale.isTest} isIncomplete={sale.isIncomplete} isOpen={sale.isOpen} />
+                  </span>
+                  {/* `EU` in the workbook, and what it holds is the code. */}
+                  <span className="truncate text-xs text-muted" title={countryLabel(sale.country)}>
+                    {sale.country ?? "—"}
+                  </span>
+                  <span className="ob-money text-right tabular-nums">
+                    {formatPrice(sale.itemsSubtotal ?? 0)}
+                  </span>
+                  <span className="ob-money text-right tabular-nums text-muted">
+                    {formatPrice(sale.shippingCharged ?? 0)}
+                  </span>
+                  <span className="ob-money text-right tabular-nums text-muted">
+                    {formatPrice(sale.discountAmount ?? 0)}
+                  </span>
+                  {/* Two disjoint halves: a shipping label is in Label, never
+                      in Fees, so the pair is the whole cost of the sale. */}
+                  <span className="ob-money text-right tabular-nums text-muted">
+                    {formatPrice(sale.feesTotal)}
+                  </span>
+                  <span className="ob-money text-right tabular-nums text-muted">
+                    {formatPrice(sale.labelTotal)}
+                  </span>
+                  <span className="ob-money text-right tabular-nums text-muted">
+                    {formatPrice(sale.refunded)}
+                  </span>
+                  <span className="text-right"><Payout sale={sale} /></span>
+                  {/*
+                    A real button, above the row's own overlay button. Its
+                    `stopPropagation` is what keeps opening the breakdown from
+                    also toggling the item list — two controls, two actions.
+                  */}
+                  <span className="relative z-10 text-center">
+                    <button type="button"
+                            onClick={(event) => { event.stopPropagation(); onDetails(sale.id); }}
+                            className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg">
+                      {copy.columns.details}
+                    </button>
+                  </span>
+                </LedgerRow>
+
+                {sale.matchItems.length > 0 ? (
+                  <p className="truncate px-3 pb-1 text-xs text-muted">
+                    {sale.matchItems.slice(0, 4).map((m) => `${m.position}. ${m.name}`).join(" · ")}
+                  </p>
+                ) : null}
+
+                {expanded ? (
+                  <LedgerExpansion id={`sale-${sale.id}`}>
+                    {detail === undefined ? (
+                      <p className="px-3 py-2 text-xs text-muted">{copy.loadingItems}</p>
+                    ) : detail === "failed" ? (
+                      <p className="px-3 py-2 text-xs text-muted">{copy.itemsFailed}</p>
+                    ) : (
+                      <SaleDetail sale={sale} detail={detail} pending={pending} act={act} />
+                    )}
+                    <div className="px-3 pt-1.5">
+                      <Link href={`/business/orderbuch/verkauf/${sale.id}?zurueck=${encodeURIComponent(backHref)}`}
+                            className="text-xs text-muted underline underline-offset-2">
+                        {copy.detail}
+                      </Link>
+                    </div>
+                  </LedgerExpansion>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      </LedgerTable>
+
+      {/*
+        One dialog for the whole ledger, not one per row: a modal per sale
+        would mount 293 portals to show none of them.
+      */}
+      {showingSale ? (
+        <SaleDetails key={showingSale.id} sale={showingSale} detail={details[showingSale.id]}
+                     open onClose={() => setShowing(null)}
+                     onSaved={() => { loading.current.delete(showingSale.id); load(showingSale.id, true); }} />
+      ) : null}
+    </>
+  );
+}
+
+/** The expanded body: items, money and the payout, in the order work happens. */
+function SaleDetail({ sale, detail, pending, act }: {
+  sale: SaleRow; detail: Detail; pending: boolean;
+  act: (id: number, run: () => Promise<{ ok: boolean; message?: string }>) => void;
+}) {
+  const order = detail.order as Record<string, unknown> | null;
+  const items = (detail.items ?? []) as Record<string, unknown>[];
+  const lines = (order?.lines ?? []) as Record<string, unknown>[];
+  const historical = String((detail.sale as Record<string, unknown>)?.source) === "excel_order_2026";
+
+  return (
+    <>
+      {/*
+        Einkauf's item table, plus one column. `Bestand` and `Retoure` were a
+        single cell that had to say three different things at once; they are
+        two facts and now have two columns.
+      */}
+      <LedgerItemHead>
+        <span>#</span>
+        <span>{copy.itemColumns.series}</span>
+        <span>{copy.itemColumns.figure}</span>
+        <span className="text-right">{copy.itemColumns.marketValue}</span>
+        <span className="text-center">{copy.itemColumns.stock}</span>
+        <span className="text-center">{copy.itemColumns.returned}</span>
+        <span className="text-right">{copy.itemColumns.action}</span>
+      </LedgerItemHead>
+
+      <ul className="divide-y divide-border/40">
+        {/* An internal sale shows the ORDER's lines. There is no copy to show. */}
+        {order
+          ? lines.map((line) => (
+              <LedgerItemRow key={String(line.id)}>
+                <span className="tabular-nums text-xs text-muted">{String(line.quantity)}×</span>
+                <span className="truncate text-xs text-muted">{String(line.series_code ?? "—")}</span>
+                <span className="truncate">{String(line.name ?? "")}</span>
+                <span className="ob-money text-right tabular-nums">{formatPrice(Number(line.unit_price))}</span>
+                {/* Commerce already moved the stock when the order was paid. */}
+                <span className="text-center text-xs text-muted">✓</span>
+                <span className="text-center text-xs text-muted">—</span>
+                <span className="text-right text-xs text-muted">{copy.commerceOwned}</span>
+              </LedgerItemRow>
+            ))
+          : items.map((item) => {
+              const can = itemActions(item as never, historical);
+              /*
+               * Two facts, two cells, from the two columns that record them.
+               * `Bestand` is whether the unit left the shelf; `Retoure` is
+               * whether it came back and whether it was put away again.
+               */
+              const stock = item.movement_id !== null ? copy.booked : "—";
+              const back = item.return_movement_id !== null ? copy.restocked
+                : item.returned_at !== null ? copy.returned : "—";
+              return (
+                <LedgerItemRow key={String(item.id)}>
+                  <span className="tabular-nums text-xs text-muted">{String(item.position)}</span>
+                  <span className="truncate text-xs text-muted">{String(item.series_code ?? "—")}</span>
+                  <span className="truncate">{String(item.name ?? "")}</span>
+                  <span className="ob-money text-right tabular-nums">
+                    {item.market_price === null ? "—" : formatPrice(Number(item.market_price))}
+                  </span>
+                  <span className="text-center text-xs text-muted">{stock}</span>
+                  <span className="text-center text-xs text-muted">{back}</span>
+                  <span className="text-right">
+                    {/* Only what the server would accept. An impossible button
+                        invites a click that ends in a rule the screen knew. */}
+                    {can.canBook ? (
+                      <button type="button" disabled={pending}
+                              onClick={() => act(sale.id, () => bookSaleItem(Number(item.id), sale.id))}
+                              className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
+                        {copy.book}
+                      </button>
+                    ) : can.canReturn ? (
+                      <button type="button" disabled={pending}
+                              onClick={() => act(sale.id, () => returnSaleItem(Number(item.id), sale.id, true))}
+                              className="min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
+                        {copy.returnItem}
+                      </button>
+                    ) : can.canRestock ? (
+                      <button type="button" disabled={pending}
+                              onClick={() => act(sale.id, () => restockSaleItem(Number(item.id), sale.id))}
+                              className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
+                        {copy.restock}
+                      </button>
+                    ) : null}
+                  </span>
+                </LedgerItemRow>
+              );
+            })}
+      </ul>
+
+    </>
+  );
+}

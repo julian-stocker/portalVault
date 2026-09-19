@@ -33,6 +33,16 @@ export const DEFAULT_SIGNED_IN_PATH = "/";
 export const SIGN_IN_PATH = "/login";
 
 /**
+ * Marks the login page as the end of a completed password reset (ADR-0094).
+ *
+ * A query parameter rather than a flash message in a cookie: it survives one
+ * navigation, says nothing an attacker could not already guess, and cannot
+ * outlive the page. Its only effect is one sentence above the form — the
+ * form, the action and `next` are untouched by it.
+ */
+export const PASSWORD_CHANGED_PARAM = "passwort-geaendert";
+
+/**
  * Accepts only same-site paths.
  *
  * Rejected: absolute URLs, protocol-relative URLs ("//evil.example"), anything

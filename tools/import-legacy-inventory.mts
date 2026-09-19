@@ -73,6 +73,8 @@ import { resolve } from "node:path";
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+
 import { readWorkbook, type Workbook } from "./lib/xlsx.mts";
 import {
   accountsForEveryRow,
@@ -384,6 +386,16 @@ async function fetchPositionStates(db: SupabaseClient): Promise<Map<string, Posi
 // ----------------------------------------------------------------------- main
 
 async function main(): Promise<void> {
+  /*
+   * The production guard, before any client exists.
+   *
+   * This tool WRITES inventory movements and was the last one in the
+   * repository whose npm script named no environment — it ran against
+   * `.env.local`, i.e. Production, with nothing to stop it. `:staging` sets
+   * the flag, `:prod` does not: the same bargain every verifier strikes.
+   */
+  requireStagingIfRequested("inventory:import-legacy");
+
   const options = parseArgs(process.argv.slice(2));
   const path = resolve(process.cwd(), options.file);
 

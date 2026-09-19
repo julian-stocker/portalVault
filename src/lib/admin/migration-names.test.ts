@@ -57,7 +57,15 @@ function definitions(): { file: string; name: string; args: string; returns: str
   for (const file of files) {
     const sql = code(file);
     for (const match of sql.matchAll(
-      /create\s+or\s+replace\s+function\s+public\.([a-z_]+)\s*\(([\s\S]*?)\)\s*\n\s*returns\s+([\s\S]*?)\n\s*(?:language|security|stable|immutable|volatile)/gi,
+      /*
+       * The qualifier may sit on the SAME line as the return type — most of
+       * the Orderbuch functions are written `returns bigint language plpgsql
+       * volatile …`. Anchoring on a newline made the capture run on into the
+       * body looking for one, so two migrations declaring the same function
+       * with different BODIES looked like a changed return type. Stopping at
+       * the first qualifier reads the type itself either way.
+       */
+      /create\s+or\s+replace\s+function\s+public\.([a-z_]+)\s*\(([\s\S]*?)\)\s*\n?\s*returns\s+([\s\S]*?)\s+(?:language|security|stable|immutable|volatile)\b/gi,
     )) {
       found.push({
         file,

@@ -23,6 +23,8 @@ import {
 } from "@/lib/auth/errors";
 import {
   DEFAULT_SIGNED_IN_PATH,
+  PASSWORD_CHANGED_PARAM,
+  SIGN_IN_PATH,
   destinationAfterSignIn,
   safeOrigin,
   safeRedirect,
@@ -174,6 +176,57 @@ export async function updatePasswordAction(
 
   revalidatePath("/", "layout");
   return { error: null, success: de.auth.settings.passwordSaved };
+}
+
+/**
+ * The same change, but at the end of a RECOVERY (ADR-0094).
+ *
+ * WHY THIS IS NOT `updatePasswordAction`
+ *
+ * That one serves `/account/security`, where the person is signed in on
+ * purpose and must STAY signed in: a success message under the form is the
+ * whole of the right behaviour there.
+ *
+ * A reset is the other situation. The link put the browser into a temporary
+ * recovery session, and `updatePasswordAction` left it there — new password
+ * saved, and the screen still the reset form, still holding the session the
+ * mail created. Nothing said the flow was over, reloading showed the form
+ * again, and the one credential that had just changed had never been used.
+ *
+ * So: end the recovery session and hand the person the ordinary login, where
+ * the new password is the thing that gets them in. `signOut()` is what makes
+ * it the ordinary login and not a half-authenticated one — without it the
+ * recovery session would survive the redirect and `/login` would bounce a
+ * signed-in visitor straight back out.
+ *
+ * ORDER MATTERS AND IS THE POINT. The sign-out and the redirect happen only
+ * after `updateUser` reports success. A failed update returns a field error
+ * and the form stays exactly where it is, session intact, so the person can
+ * try again — losing the recovery session on a rejected password would mean
+ * asking for a new mail to fix a typo.
+ *
+ * `redirect()` throws `NEXT_REDIRECT`, so it is called last and outside any
+ * try/catch.
+ */
+export async function resetPasswordAction(
+  _prev: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const password = String(formData.get("password") ?? "");
+  if (password === "") return fieldError("password", de.auth.errors.passwordRequired);
+
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getUser();
+  // No recovery session: the link expired or was already used. Saying so in
+  // the form is better than a redirect that looks like success.
+  if (!data.user) return fieldError("form", de.auth.errors.sessionExpired);
+
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) return { error: passwordUpdateError(error) };
+
+  await supabase.auth.signOut();
+  revalidatePath("/", "layout");
+  redirect(`${SIGN_IN_PATH}?${PASSWORD_CHANGED_PARAM}=1`);
 }
 
 // ------------------------------------------------------------------ username
