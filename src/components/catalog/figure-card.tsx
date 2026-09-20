@@ -48,7 +48,9 @@ import {
   WINDOW_FILL,
   type CardArea,
 } from "@/lib/catalog/card-template";
-import { duplicateBadge, marksOwnership, type CardOwnership } from "@/lib/catalog/card";
+import {
+  duplicateBadge, marksOwnership, understatesCard, UNCOLLECTED_SCALE, type CardOwnership,
+} from "@/lib/catalog/card";
 import { elementLabel } from "@/lib/catalog/element";
 import { imageSrc } from "@/lib/catalog/image";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -115,6 +117,7 @@ export function FigureCard({
   notice,
   interactive = true,
   muted = false,
+  knowsCollection = false,
 }: {
   figure: CatalogFigure;
   /** What stands on the silver plate. Its row is painted into the artwork. */
@@ -143,9 +146,23 @@ export function FigureCard({
   interactive?: boolean;
   /** Dims the card without changing its layout — a hidden figure. */
   muted?: boolean;
+  /**
+   * Whether this surface knows the viewer's collection (V4.6).
+   *
+   * Off by default, so a surface that cannot answer "does he own this" does
+   * not answer it by accident. Only the signed-in catalog turns it on — see
+   * `understatesCard`.
+   */
+  knowsCollection?: boolean;
 }) {
   const copies = duplicateBadge(quantity);
   const owned = marksOwnership(ownership, collected);
+  /*
+   * A figure the viewer does not own is drawn a hair smaller, on a shell
+   * with the colour taken out of it. NOTHING ELSE CHANGES — see the two
+   * places this is used below, and the rule in `globals.css`.
+   */
+  const understated = understatesCard(ownership, collected, knowsCollection);
 
   /*
    * WHICH CARD THIS FIGURE IS PRINTED ON (V3.6).
@@ -218,6 +235,17 @@ export function FigureCard({
       {/*
        * LAYER 2 — the artwork. Frame, paper, gold, crown, rule, plate.
        * `pointer-events-none` so it never eats a tap meant for the card.
+       *
+       * THIS ELEMENT IS THE ONLY THING THE UNOWNED TREATMENT TOUCHES (V4.6).
+       *
+       * It is the whole shell and nothing but the shell: the frame, the
+       * paper, the gilding, the crown, the struck rule and the trade plate
+       * are all painted into this one PNG. Layer 1 is the white window and
+       * the figure's own picture; layer 3 is the name, the variant seal, the
+       * market value, the element and the copies badge; the trade row is a
+       * fourth grid below. A filter here cannot reach any of them, which is
+       * what makes "only the card design greys out" a structural fact rather
+       * than a list of exceptions somebody has to maintain.
        */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
@@ -227,7 +255,10 @@ export function FigureCard({
         alt=""
         aria-hidden="true"
         draggable={false}
-        className="pointer-events-none absolute inset-0 h-full w-full select-none"
+        className={
+          "pointer-events-none absolute inset-0 h-full w-full select-none"
+          + (understated ? " card-shell-unowned" : "")
+        }
       />
 
       {/* LAYER 3 — everything that goes ON the artwork. */}
@@ -405,10 +436,29 @@ export function FigureCard({
        * still means ownership, silver trade, amber commerce, and none of
        * them is set from here.
        */
-      style={
-        tone === "dark"
+      style={{
+        aspectRatio: CARD_ASPECT,
+        /*
+         * A TRANSFORM, BECAUSE THE GRID MUST NOT MOVE (V4.6).
+         *
+         * A width or a margin would be layout, and layout is what the row
+         * shares: one shrunken card would re-measure its column and every
+         * other card in the grid would shift by a fraction. A transform is
+         * paint. The cell keeps the size it had, the gaps stay identical,
+         * and `scale` takes the type with it — so nothing inside the card
+         * is re-laid out either, which is the one change that was asked for
+         * and the only one that happens.
+         *
+         * `bottom` so the cards in a row stand on one line and their trade
+         * rows agree. `center` horizontally, so the column reads straight.
+         *
+         * No transition: an instant change, as asked.
+         */
+        ...(understated
+          ? { transform: `scale(${UNCOLLECTED_SCALE})`, transformOrigin: "center bottom" }
+          : {}),
+        ...(tone === "dark"
           ? ({
-              aspectRatio: CARD_ASPECT,
               "--template-ink": "var(--template-ink-on-dark)",
               "--template-ink-muted": "var(--template-ink-muted-on-dark)",
               /* The trade row sits on the same stock and needs the same
@@ -417,8 +467,8 @@ export function FigureCard({
               "--trade-ink": "var(--trade-ink-on-dark)",
               "--trade-ink-quiet": "var(--trade-ink-quiet-on-dark)",
             } as CSSProperties)
-          : { aspectRatio: CARD_ASPECT }
-      }
+          : {}),
+      } as CSSProperties}
     >
       {!interactive ? (
         /* Static body: the picture is a picture. An administrator's actions

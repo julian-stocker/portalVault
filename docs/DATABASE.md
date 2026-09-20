@@ -1577,6 +1577,139 @@ Zahlen stehen in ADR-0093. `sky_id is null` ist aus demselben Grund nie offen: e
 sich nicht einbuchen.
 
 
+### 3.3aa Einkauf: wieder offen, und ein Ende ohne Lagerbewegung (Migrationen `0067`–`0070`, ADR-0099)
+
+**`0067` — fünf historische Einkäufe sind wieder offen.** 109 Positionen aus fünf über
+`import_fingerprint` benannten Einkäufen stehen auf `ordered`: bezahlte Ware, die zum
+Importzeitpunkt noch unterwegs war. Die übrigen 2 005 der 2 114 bleiben `reconciled_legacy`.
+**Kein Bestand, keine Bewegung** — `movement_id` bleibt NULL; der Block misst Bestandssumme und
+Bewegungszahl vorher und rollt zurück, sobald sich eine der beiden ändert. Idempotent: ein
+zweiter Lauf erkennt den Zielzustand und tut nichts.
+
+**`0068` — „offen" heißt nicht „hat eine `sky_id`".** `is_open` im Einkaufsledger verlangt
+nicht mehr `sky_id is not null`. Eine Position ohne Katalogbezug — Porto, Zubehör, Sammelposten
+— ist eine echte offene Aufgabe; sie zu verstecken, weil ihr das Regal fehlt, verschweigt
+Arbeit. Drei der 109 sind genau das. Das ergänzt 3.3z: dort ist `sky_id is null` „nie offen",
+weil sich ein Portal nicht **einbuchen** lässt — richtig für das Einbuchen, falsch für das
+Offensein.
+
+**`0069` — `settled` als Ende ohne Lagerbewegung.** `purchase_items.state` kennt zusätzlich
+`settled`, und `seller_set_purchase_item_state` vergibt es **nur** ohne Katalogbezug:
+
+```sql
+if p_state = 'settled' and v_sky is not null then
+  raise exception 'a catalog figure leaves the purchase by being booked' ...
+```
+
+Die Sperre sitzt in der Funktion, nicht nur in der Oberfläche: auch ein direkter RPC-Aufruf
+kommt nicht daran vorbei. Eine Katalogfigur verlässt den Einkauf ausschließlich durch
+Einbuchen — sonst wäre `settled` ein stiller Weg, Bestand verschwinden zu lassen.
+
+**`0070` — der Ledger zählt die Enden getrennt.** `seller_orderbook_ledger` liefert zusätzlich
+`settled_count`, und `open_count = item_count − booked_count − settled_count`. `settled_count`
+wird **nirgends** zu `booked_count` addiert: *gebucht* heißt, es gibt eine Bewegung, *erledigt*
+heißt, es gibt keine und wird auch keine geben.
+
+
+### 3.3ab Verkauf: Freigabe, vier Enden, und was eine Bewegung belegt (Migrationen `0071`–`0075`, ADR-0099)
+
+**`0071` — drei Spalten und eine einmalige, namentliche Freigabe.** Neu sind
+`sales.cancelled_at`, `sales.stock_released_at` und `sale_items.settled_at`. 21 historische
+Verkäufe bekommen `stock_released_at` **und** `shipped_at`, einer `cancelled_at`. Ihre 197
+Positionen bleiben unberührt: `movement_id` NULL, keine Bewegung. `stock_released_at` ist die
+Ausnahme von der Regel „historische Verkäufe bewegen kein Lager" — sie gilt **pro Bestellung**,
+wird von Hand erteilt und nie abgeleitet. Für die 270 übrigen Arbeitsbuch-Verkäufe bleibt die
+Sperre unverändert bestehen.
+
+**`0072` und `0075` — der Status wird abgeleitet, nie gespeichert.** `0072` gibt `seller_sales`
+ein `is_open` und erste Endungszähler; `0075` korrigiert deren Bedeutung, nachdem sich zeigte,
+dass „hat eine Bewegung" eine zurückgekommene Figur fälschlich als erledigt zählt. Endgültig:
+
+```
+outbooked_count    Bewegung vorhanden, keine Retoure angekündigt und keine eingetroffen
+restocked_count    echte `return`-Bewegung vorhanden
+settled_count      ohne Bewegung geschlossen (0071/0073)
+not_shipped_count  nie verschickt, also nie gebucht (0074)
+closed_count       eines dieser vier
+open_count         item_count − closed_count
+```
+
+`sale_item_is_closed(public.sale_items)` ist das **eine** Prädikat, das `is_open` und
+`closed_count` gemeinsam benutzen — damit die beiden nicht auseinanderlaufen können. Eine
+Position mit angekündigter **oder** eingetroffener Retoure ist ausdrücklich **nicht**
+geschlossen: jemand muss sie noch einlagern.
+
+**`0073` — was ausgebucht werden darf, und was nur abgeschlossen.**
+
+```
+Ausbuchen  (erzeugt eine Bewegung)   Katalogfigur, die tatsächlich vom Regal kam
+Erledigt   (erzeugt nie eine)        sky_id IS NULL  oder  legacy_stock_flag = '-'
+```
+
+`legacy_stock_flag = '-'` ist Spalte L des Arbeitsbuchs: verschickt, aber **nie dem Lager
+entnommen**. Das Merkmal ist Provenienz — vom Import geschrieben, von keinem RPC setzbar —,
+deshalb lässt es sich nicht zu einer allgemeinen Tür ausweiten. Dasselbe Merkmal **verbietet**
+seit `0073` auch das Ausbuchen, eine solche Position hat also genau ein Ende. In Production gibt
+es genau eine solche Position: `Terrafin S2`, SKY-0181.
+
+`seller_book_sale_item` verweigert damit: internen Verkauf · stornierte Bestellung ·
+Arbeitsbuch-Verkauf ohne `stock_released_at` · bereits ohne Bewegung geschlossene Position ·
+Nicht-Katalogartikel · `legacy_stock_flag = '-'`.
+
+**`0074` — zwei Enden, die vorher nicht ausdrückbar waren.**
+
+| Spalte | Bedeutung | erlaubt, solange |
+|---|---|---|
+| `not_shipped_at` | Das Paket ging raus, dieses Stück nicht — ausverkauft, beschädigt, erstattet. Es hat das Regal nie verlassen. | `movement_id is null` |
+| `return_announced_at` | Für eine **ausgebuchte** Position ist eine Retoure angekündigt. Die Ware ist noch nicht da. | `movement_id is not null` |
+
+Drei CHECK-Constraints als Boden unter den Funktionen: `sale_items_not_shipped_has_no_movement`,
+`sale_items_return_needs_a_movement` und `sale_items_one_ending_without_movement` — `settled_at`
+und `not_shipped_at` schließen einander aus, weil sie zwei verschiedene Erklärungen derselben
+Position wären.
+
+
+### 3.3ac Smoke-Verkäufe tragen `is_test` (Migration `0076`)
+
+Zwei von Hand erzeugte Verkäufe auf Staging (`SMOKE-1`, `UIFLOW-1`) waren nie als Testvorgang
+markiert und zählten deshalb in Geschäftssummen mit. `0076` setzt `is_test = true` — es
+**löscht sie nicht**: beide besitzen echte Bewegungen (`sale_external` −1 und `return` +1, die
+sich aufheben), und `inventory_movements` ist append-only mit `on delete restrict`. Ein Flag
+ändert nichts Physisches und nimmt sie zugleich aus den Zahlen.
+
+Erkannt werden sie an dem, was sie **sind** — manueller Verkauf, ohne Bestellung, ohne
+Fingerabdruck, noch nicht markiert, mit einer der beiden Referenzen —, nicht an ihrer ID. In
+Production gibt es sie nicht; dort findet der Block 0 Treffer, meldet das per `notice` und
+beendet sich, statt zu scheitern.
+
+
+### 3.3ad Fachlicher Status und echte Lagerbewegung sind zwei Dinge
+
+Die Trennung, die den ganzen Block trägt (ADR-0099). **Nur die drei fett gesetzten Felder sind
+Belege einer Bewegung** — alle anderen beschreiben ausschließlich den Vorgang:
+
+| Feld | Aussage | Bewegung? |
+|---|---|---|
+| `purchase_items.state = 'ordered'` | bestellt, unterwegs | nein |
+| `purchase_items.state = 'settled'` | erledigt, ohne Lagerbezug | nein, nie |
+| **`purchase_items.movement_id`** | **eingebucht** | ja, genau eine |
+| `sales.shipped_at` | das Paket ist raus | nein |
+| `sales.stock_released_at` | Ausbuchen ist für diese Bestellung freigegeben | nein |
+| `sales.cancelled_at` | storniert | nein |
+| `sale_items.settled_at` | geschlossen, ohne Lagerbezug | nein, nie |
+| `sale_items.not_shipped_at` | nie verschickt | nein, nie |
+| `sale_items.return_announced_at` | Retoure unterwegs | nein |
+| `sale_items.returned_at` | physisch zurück, noch nicht eingelagert | nein |
+| **`sale_items.movement_id`** | **ausgebucht** | ja, genau eine (`sale_external`, −1) |
+| **`sale_items.return_movement_id`** | **wieder eingelagert** | ja, genau eine (`return`, +1) |
+
+Ein Vorgang kann also vollständig abgeschlossen sein, ohne dass sich im Lager irgendetwas
+bewegt hat — und umgekehrt bleibt jede Bewegung durch genau eine `movement_id` belegt. Keine
+der Migrationen `0067`–`0076` erzeugt beim Anwenden eine Bewegung; `record_inventory_movement`
+kommt im ganzen Satz einmal vor, im **Rumpf** von `seller_book_sale_item`, und läuft erst, wenn
+jemand später *Ausbuchen* drückt.
+
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

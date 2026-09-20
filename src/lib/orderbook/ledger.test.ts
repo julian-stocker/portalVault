@@ -33,7 +33,14 @@ const CSS = read("src/app/globals.css");
 /** The shared ledger primitives — where the markup of BOTH ledgers now lives. */
 const PRIMITIVES = read("src/components/business/ledger-table.tsx");
 
-/** The `.ob-row` / `.ob-item` rules, and the desktop block that overrides them. */
+/**
+ * The `.ob-row` / `.ob-item` rules.
+ *
+ * There is no longer a mobile half and a desktop half to tell apart: the
+ * tracks are unconditional and the only thing left inside a media query is
+ * which axis the box scrolls on. `desktop` still names that query's contents
+ * so the scroll rules can be asserted where they live.
+ */
 const ledgerCss = (() => {
   const start = CSS.indexOf("@layer components {");
   const desktop = CSS.indexOf("@media (min-width: 48rem) {", start);
@@ -43,6 +50,12 @@ const ledgerCss = (() => {
     desktop: CSS.slice(desktop, CSS.indexOf("@layer utilities {")),
   };
 })();
+/** Strip TSX comments: a comment that NAMES a class is not the class. */
+const withoutComments = (text: string) => text
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+const PRIMITIVES_CODE = withoutComments(PRIMITIVES);
+
 /** The component with its comments removed — a comment is not a class. */
 const COMPONENT_CODE = COMPONENT
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -55,7 +68,17 @@ const COMPONENT_CODE = COMPONENT
  * it is what renders when a ledger passes no property of its own.
  */
 const tracks = (rule: string, selector: string): string[] => {
-  const block = rule.slice(rule.indexOf(`.${selector} {`));
+  /*
+   * `.ob-item {` occurs twice: once in the shared `display: grid` rule it
+   * shares with `.ob-row`, and once in its own. Only one of them declares
+   * tracks, so take the first block that does rather than the first block.
+   */
+  let block = "";
+  for (let at = rule.indexOf(`.${selector} {`); at !== -1;
+       at = rule.indexOf(`.${selector} {`, at + 1)) {
+    const candidate = rule.slice(at, rule.indexOf("}", at));
+    if (candidate.includes("grid-template-columns")) { block = rule.slice(at); break; }
+  }
   const decl = /grid-template-columns:\s*([\s\S]*?);/.exec(block);
   if (!decl) return [];
   const value = decl[1].replace(/\s+/g, " ").trim();
@@ -237,35 +260,146 @@ describe("the summary describes what is on screen, not everything", () => {
 });
 
 describe("status: a tick is a claim, so it had better be the right one", () => {
-  it("a historical purchase is settled", () => {
-    expect(rowStatus({ source: "excel_order_2026", bookedCount: 0, itemCount: 14 })).toBe("settled");
+  /*
+   * V4.7. `Eingebucht` now means one thing and only one: a stock movement
+   * exists for this unit. The previous vocabulary gave every imported
+   * purchase a ✓ under a column headed `Eingebucht`, for 84 purchases and
+   * 2 114 items of which not one owns a `movement_id`.
+   */
+  it("a workbook purchase is historical, and says so in words", () => {
+    expect(rowStatus({ source: "excel_order_2026", bookedCount: 0, itemCount: 14 })).toBe("historical");
+    // Even with an open unit in it since 0067: the purchase is still
+    // history, and `is_open` is what surfaces the outstanding work.
+    expect(rowStatus({ source: "excel_order_2026", bookedCount: 0, itemCount: 54 })).toBe("historical");
   });
 
-  it("a manual purchase reports how much is left", () => {
-    expect(rowStatus({ source: "manual", bookedCount: 3, itemCount: 10 })).toBe("open");
+  it("a manual purchase distinguishes none, some and all", () => {
+    expect(rowStatus({ source: "manual", bookedCount: 0, itemCount: 10 })).toBe("open");
+    expect(rowStatus({ source: "manual", bookedCount: 3, itemCount: 10 })).toBe("partial");
     expect(rowStatus({ source: "manual", bookedCount: 10, itemCount: 10 })).toBe("complete");
   });
 
-  it("a historical ITEM is settled even though it owns no movement", () => {
-    expect(itemStatus({ state: "reconciled_legacy" })).toBe("settled");
-    expect(itemStatus({ state: "booked" })).toBe("complete");
-    expect(itemStatus({ state: "arrived" })).toBe("open");
+  it("counts a settled position as closed, but never as booked (0070)", () => {
+    /*
+     * Ten figures booked and two portals settled. Nothing is outstanding —
+     * `is_open` says so — but two of the twelve own no movement, so
+     * `Eingebucht ✓` would claim two bookings that do not exist.
+     */
+    const row = { source: "manual", bookedCount: 10, itemCount: 12, settledCount: 2 };
+    expect(rowStatus(row)).toBe("settled");
+    expect(rowStatus(row)).not.toBe("complete");
+
+    // All twelve booked and none settled is still the tick.
+    expect(rowStatus({ source: "manual", bookedCount: 12, itemCount: 12, settledCount: 0 }))
+      .toBe("complete");
+    // A portal settled while figures are still outstanding is partial.
+    expect(rowStatus({ source: "manual", bookedCount: 0, itemCount: 12, settledCount: 2 }))
+      .toBe("partial");
+    // Nothing done at all is open, settled or not.
+    expect(rowStatus({ source: "manual", bookedCount: 0, itemCount: 12, settledCount: 0 }))
+      .toBe("open");
+    // A parcel that is nothing but portals, all filed away.
+    expect(rowStatus({ source: "manual", bookedCount: 0, itemCount: 2, settledCount: 2 }))
+      .toBe("settled");
+  });
+
+  it("agrees with the Offen axis instead of contradicting it", () => {
+    /*
+     * The bug this closes: the column said `10 von 12` for ever while
+     * `is_open` said there was nothing to do. One screen, two answers.
+     * `closed === itemCount` is exactly the SQL's `open_count = 0`.
+     */
+    const closed = (r: { bookedCount: number; settledCount: number; itemCount: number }) =>
+      r.itemCount - r.bookedCount - r.settledCount === 0;
+    for (const r of [
+      { bookedCount: 10, itemCount: 12, settledCount: 2 },
+      { bookedCount: 12, itemCount: 12, settledCount: 0 },
+      { bookedCount: 0, itemCount: 2, settledCount: 2 },
+    ]) {
+      expect(closed(r), JSON.stringify(r)).toBe(true);
+      expect(["complete", "settled"]).toContain(rowStatus({ source: "manual", ...r }));
+    }
+    for (const r of [
+      { bookedCount: 3, itemCount: 10, settledCount: 0 },
+      { bookedCount: 0, itemCount: 12, settledCount: 2 },
+    ]) {
+      expect(closed(r), JSON.stringify(r)).toBe(false);
+      expect(["partial", "open"]).toContain(rowStatus({ source: "manual", ...r }));
+    }
+  });
+
+  it("a historical purchase stays `Historisch` whatever the counts say", () => {
+    // Including the five 0067 reopened: a workbook purchase is history
+    // however much of it is still in the post, and the `Offen` axis is
+    // where that outstanding work is shown.
+    expect(rowStatus({ source: "excel_order_2026", bookedCount: 0, itemCount: 41, settledCount: 3 }))
+      .toBe("historical");
+  });
+
+  it("treats a caller that predates 0070 as having settled nothing", () => {
+    expect(rowStatus({ source: "manual", bookedCount: 10, itemCount: 10 })).toBe("complete");
+  });
+
+  it("an empty purchase is open, not complete", () => {
+    // `bookedCount === itemCount` is true of 0 === 0, and "everything is
+    // booked" is the wrong thing to say about nothing.
+    expect(rowStatus({ source: "manual", bookedCount: 0, itemCount: 0 })).toBe("open");
+  });
+
+  it("an item is asked of its movement, not of its state", () => {
+    expect(itemStatus({ state: "reconciled_legacy", movementId: null })).toBe("historical");
+    expect(itemStatus({ state: "booked", movementId: 42 })).toBe("complete");
+    expect(itemStatus({ state: "ordered", movementId: null })).toBe("open");
+    expect(itemStatus({ state: "arrived", movementId: null })).toBe("open");
+    expect(itemStatus({ state: "damaged", movementId: null })).toBe("open");
+    expect(itemStatus({ state: "missing", movementId: null })).toBe("open");
+  });
+
+  it("nothing without a movement can read as booked", () => {
+    /*
+     * The property, stated over every state the column constraint allows.
+     * `reconciled_legacy` is the case that mattered: it has no movement and
+     * used to draw the same ✓ as a real booking.
+     */
+    for (const state of ["ordered", "arrived", "damaged", "missing", "reconciled_legacy"]) {
+      expect(itemStatus({ state, movementId: null }), state).not.toBe("complete");
+    }
+  });
+
+  it("names all four states, and the tick belongs to exactly one", () => {
+    const c = de.business.orderbook;
+    expect(c.historicalLabel).toBe("Historisch");
+    // Closed-without-a-booking carries no tick either (0070).
+    expect(c.closedLabel).toBe("Erledigt");
+    expect(c.closedLabel).not.toContain("✓");
+    expect(c.closedHint(10, 2)).toContain("10 eingebucht");
+    expect(c.closedHint(10, 2)).toContain("2 erledigt");
+    expect(c.states.ordered).toBe("Bestellt");
+    expect(c.states.arrived).toBe("Angekommen");
+    expect(c.completeCell).toContain("Eingebucht");
+    expect(c.completeCell).toContain("✓");
+    // And no other label carries a tick.
+    for (const label of [c.historicalLabel, c.openRowLabel, c.partialLabel,
+                         c.states.ordered, c.states.arrived, c.states.damaged,
+                         c.states.missing, c.states.reconciled_legacy]) {
+      expect(label, label).not.toContain("✓");
+    }
+  });
+
+  it("the column no longer claims `Eingebucht` for everything under it", () => {
+    expect(de.business.orderbook.columns.progress).not.toBe("Eingebucht");
+    expect(de.business.orderbook.historicalLabel.toLowerCase()).not.toContain("eingebucht");
   });
 
   it("and the tick never says the word `eingebucht` for a historical row", () => {
-    /*
-     * The tick means "nothing outstanding". Labelling it "eingebucht" would be
-     * a false statement about inventory: the row is `reconciled_legacy` with
-     * `movement_id` NULL and no movement was ever created.
-     */
     expect(de.business.orderbook.settled).toBe("Historisch übernommen");
     expect(de.business.orderbook.settled.toLowerCase()).not.toContain("eingebucht");
     expect(de.business.orderbook.settled.toLowerCase()).not.toContain("bestand");
   });
 
-  it("the tick carries that text where a reader can reach it", () => {
-    expect(COMPONENT).toContain("aria-label={label}");
-    expect(COMPONENT).toContain("title={label}");
+  it("every status carries its long form where a reader can reach it", () => {
+    expect(COMPONENT).toContain("aria-label={title}");
+    expect(COMPONENT).toContain("title={title}");
   });
 
   it("presentation only — the redesign changes no database semantics", () => {
@@ -338,9 +472,11 @@ describe("the ledger stays cheap when it is closed", () => {
     expect((PAGE.match(/await\s+Promise\.all/g) ?? []).length).toBe(1);
   });
 
-  it("and the ledger scrolls inside itself so the page does not grow with the data", () => {
-    expect(PRIMITIVES).toContain("overflow-auto");
-    expect(COMPONENT).toContain("dvh");
+  it("and on desktop the ledger scrolls inside itself so the page does not grow", () => {
+    // On a phone the page keeps the vertical axis — see the scroll-axis test
+    // below. `62dvh` is the desktop box, and it lives in the stylesheet now.
+    expect(PRIMITIVES).toContain("ob-scroll");
+    expect(ledgerCss.desktop).toContain("dvh");
   });
 });
 
@@ -445,8 +581,8 @@ describe("the ledger renders as a table, not as stacked lines", () => {
     expect(COMPONENT_CODE).not.toMatch(/grid-cols-\[/);
   });
 
-  it("the purchase row has exactly seven desktop tracks, in the required order", () => {
-    const columns = tracks(ledgerCss.desktop, "ob-row");
+  it("the purchase row has exactly seven tracks, in the required order, at every width", () => {
+    const columns = tracks(ledgerCss.all, "ob-row");
     expect(columns).toHaveLength(7);
     // Datum · Artikel · Ausgaben · Marktwert · Faktor · Status · Chevron
     expect(columns[0]).toBe("7rem");                    // Datum, fixed
@@ -456,8 +592,8 @@ describe("the ledger renders as a table, not as stacked lines", () => {
     expect(columns[6]).toBe("1.5rem");                  // Chevron, in the row
   });
 
-  it("the item row has exactly six desktop tracks, and Aktion keeps its track", () => {
-    const columns = tracks(ledgerCss.desktop, "ob-item");
+  it("the item row has exactly six tracks, and Aktion keeps its track", () => {
+    const columns = tracks(ledgerCss.all, "ob-item");
     expect(columns).toHaveLength(6);
     // # · Serie · Figur · Marktwert · Status · Aktion
     expect(columns[0]).toBe("2.5rem");                  // #
@@ -472,7 +608,7 @@ describe("the ledger renders as a table, not as stacked lines", () => {
     // The approved 36px item row must survive a sixth column.
     const item = ledgerCss.all.slice(ledgerCss.all.indexOf(".ob-item {"));
     expect(/min-height:\s*2\.25rem;/.test(item)).toBe(true);
-    expect(tracks(ledgerCss.desktop, "ob-item")[2]).toBe("minmax(0, 1fr)");
+    expect(tracks(ledgerCss.all, "ob-item")[2]).toBe("minmax(0, 1fr)");
   });
 
   it("the header and the rows come from one primitive, so they cannot drift", () => {
@@ -483,8 +619,8 @@ describe("the ledger renders as a table, not as stacked lines", () => {
      */
     expect(PRIMITIVES).toContain('className="ob-row sticky top-0');
     expect(PRIMITIVES).toContain('className="ob-row relative');
-    expect(PRIMITIVES).toContain('className="ob-item hidden');
-    expect(PRIMITIVES).toContain('<li className="ob-item text-sm">');
+    expect(PRIMITIVES).toContain('className="ob-item grid');
+    expect(PRIMITIVES).toContain('<li className="ob-item bg-canvas text-sm">');
     expect(COMPONENT_CODE).not.toMatch(/className="ob-(row|item)/);
     for (const primitive of ["LedgerTable", "LedgerHead", "LedgerRow", "LedgerItemRow"]) {
       expect(COMPONENT, primitive).toContain(`<${primitive}`);
@@ -498,7 +634,7 @@ describe("the ledger renders as a table, not as stacked lines", () => {
      * at all. The row is a <div>; the click target is stretched over it.
      */
     expect(PRIMITIVES).not.toMatch(/<button[^>]*className="ob-/);
-    expect(PRIMITIVES).toContain('className="absolute inset-0 h-full w-full');
+    expect(PRIMITIVES).toContain('className="absolute inset-0 z-10 h-full w-full');
   });
 
   it("the whole row is still one disclosure control", () => {
@@ -519,12 +655,103 @@ describe("the ledger renders as a table, not as stacked lines", () => {
     expect(px).toBeLessThanOrEqual(52);      // and no taller than a table row
   });
 
-  it("desktop is an explicit breakpoint, not whatever mobile happened to do", () => {
-    expect(ledgerCss.all).toContain("@media (min-width: 48rem)");
-    // …and the mobile default is two columns, not seven squeezed ones.
-    // The shared `.ob-row, .ob-item` rule is the first template in the block.
-    const mobileTemplate = /grid-template-columns:\s*([^;]+);/.exec(ledgerCss.mobile)?.[1];
-    expect(mobileTemplate?.replace(/\s+/g, " ").trim()).toBe("1fr auto");
+  it("a phone gets the same seven columns, not two stacked lines", () => {
+    /*
+     * The tracks used to be declared inside `@media (min-width: 48rem)`,
+     * with `1fr auto` below it: two lines per row, no header, five values
+     * crushed together on the second. That is the layout the owner
+     * photographed and could not read.
+     *
+     * A ledger is a table. A table too wide for the window scrolls.
+     */
+    const outsideQueries = ledgerCss.mobile;
+    expect(outsideQueries).toContain("--ob-columns");
+    expect(outsideQueries).toContain("--ob-item-columns");
+    expect(outsideQueries).not.toMatch(/grid-template-columns:\s*1fr auto;/);
+    // No width-conditional column list is left anywhere, in either direction.
+    expect(ledgerCss.desktop).not.toContain("grid-template-columns");
+    expect(ledgerCss.all).not.toMatch(/@media[^{]*max-width[^{]*\{[^}]*ob-(row|item)/);
+  });
+
+  it("the table scrolls sideways at every width, and the floor is not optional", () => {
+    // `.ob-min` used to be rendered only when a ledger passed a width, and
+    // Einkauf passed none — so its seven columns had nothing to scroll
+    // against and were free to be squeezed.
+    expect(ledgerCss.mobile).toMatch(/\.ob-min \{ min-width: var\(--ob-min-width, 0\); \}/);
+    expect(PRIMITIVES).toContain('<div className="ob-min">');
+    expect(PRIMITIVES).not.toContain("minWidth ? <div");
+    expect(PRIMITIVES).toContain('"--ob-min-width": minWidth');
+    expect(COMPONENT).toContain("minWidth={PURCHASE_MIN_WIDTH}");
+  });
+
+  it("the purchase floor is wide enough for the columns it has to hold", () => {
+    /*
+     * Not a guess: every track at its narrowest, the gaps between them, and
+     * the row's own padding. A floor below that is a floor that still
+     * crushes something.
+     */
+    const declared = /const PURCHASE_MIN_WIDTH = "([\d.]+)rem"/.exec(COMPONENT);
+    expect(declared).not.toBeNull();
+    const minRem = (track: string): number => {
+      const m = /minmax\(\s*([\d.]+)rem/.exec(track);
+      if (m) return Number(m[1]);
+      if (/minmax\(\s*0/.test(track)) return 0;
+      return Number(/([\d.]+)rem/.exec(track)?.[1] ?? 0);
+    };
+    for (const selector of ["ob-row", "ob-item"] as const) {
+      const t = tracks(ledgerCss.all, selector);
+      const needed = t.reduce((sum, x) => sum + minRem(x), 0)
+        + 0.75 * (t.length - 1) + 0.75 * 2;
+      expect(Number(declared![1]), selector).toBeGreaterThanOrEqual(needed);
+    }
+  });
+
+  it("the page keeps the vertical axis on a phone and the ledger takes it back on desktop", () => {
+    /*
+     * A table that swallows the downward swipe is the complaint people
+     * actually have about tables on phones. Sideways is the ledger's axis;
+     * downwards is the page's — until there is a desktop window, where 85
+     * purchases would otherwise push the search field off the top.
+     */
+    expect(ledgerCss.mobile).toMatch(/\.ob-scroll \{\s*overflow-x: auto;\s*overflow-y: hidden;/);
+    expect(ledgerCss.desktop).toMatch(/\.ob-scroll \{[\s\S]*?overflow: auto;/);
+    expect(ledgerCss.desktop).toMatch(/max-height: min\(62dvh, 42rem\);/);
+    // The height is no longer an inline style that applies at every width.
+    expect(PRIMITIVES).not.toContain('maxHeight: "min(62dvh, 42rem)"');
+    expect(PRIMITIVES).toContain("ob-scroll");
+  });
+
+  it("the first column stays put while the rest scrolls under it", () => {
+    /*
+     * A row of numbers with no date in front of it belongs to nothing. The
+     * sticky cell inherits the row's background so the columns passing
+     * beneath are hidden — which is why the row is opaque — and the overlay
+     * button outranks it so the whole row is still one click target.
+     */
+    const sticky = ledgerCss.all.slice(ledgerCss.all.indexOf(".ob-row > :first-child"));
+    expect(sticky).toContain("position: sticky");
+    expect(sticky).toContain("left: 0");
+    expect(sticky).toContain("background: inherit");
+    // Pulled over the row's own padding, or the scrolled content shows
+    // through a 0.75rem stripe at the left edge.
+    expect(sticky).toContain("margin-left: -0.75rem");
+    expect(sticky).toContain("padding-left: 0.75rem");
+    expect(ledgerCss.all).toContain(".ob-item > :first-child");
+
+    expect(PRIMITIVES).toContain("bg-surface text-sm hover:bg-surface-raised");
+    expect(PRIMITIVES).not.toContain("bg-surface/60 text-sm");
+    // `isolate` keeps the button's z-index inside its row, so it cannot also
+    // paint over the sticky header on a vertical scroll.
+    expect(PRIMITIVES).toContain("ob-row relative isolate");
+    expect(PRIMITIVES).toContain("absolute inset-0 z-10");
+  });
+
+  it("the expansion has a real background token", () => {
+    // `bg-bg/40` named no theme colour, so no utility was ever generated
+    // and the expansion had no background at all.
+    expect(PRIMITIVES_CODE).not.toContain("bg-bg/");
+    expect(PRIMITIVES_CODE).toContain("bg-canvas");
+    expect(CSS).toContain("--color-canvas:");
   });
 
   it("the Excel provenance is no longer printed in the ledger", () => {
@@ -539,8 +766,10 @@ describe("the ledger renders as a table, not as stacked lines", () => {
   });
 
   it("and the ledger still scrolls inside itself", () => {
-    expect(PRIMITIVES).toContain("overflow-auto");
-    expect(COMPONENT).toContain("dvh");
+    // `overflow-auto` was a utility on the element; the axis depends on the
+    // viewport now, so it is `.ob-scroll` in the stylesheet instead.
+    expect(PRIMITIVES).toContain("ob-scroll");
+    expect(ledgerCss.desktop).toContain("62dvh");
   });
 });
 

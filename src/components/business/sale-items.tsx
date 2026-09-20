@@ -25,10 +25,10 @@ import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
-  addSaleItem, bookSaleItem, removeSaleItem, restockSaleItem, returnSaleItem,
-  setSaleItemSky,
+  addSaleItem, announceSaleItemReturn, bookSaleItem, removeSaleItem, restockSaleItem,
+  returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
 } from "@/lib/orderbook/sales-actions";
-import { itemActions, saleItemEdits } from "@/lib/orderbook/sales-view";
+import { saleItemActions, saleItemEdits } from "@/lib/orderbook/sales-view";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureSearch } from "./figure-search";
 import {
@@ -39,13 +39,29 @@ const copy = de.business.sales;
 const book = de.business.orderbook;
 
 /* # · Serie · Figur · Marktwert · Bestand · Retoure · Aktion */
-const ITEM_COLUMNS = "2.5rem 8.5rem minmax(0, 1fr) 5.5rem 6rem 5rem 8rem";
+const ITEM_COLUMNS = "minmax(9rem, 1fr) 6rem 9rem 9rem";
 
-export function SaleItems({ saleId, items, catalog, historical, internal }: {
+/*
+ * The six fixed tracks, the gaps and the padding come to 41.5rem, and the
+ * floor used to be 44 — which left `Figur` 2.5rem. That never showed,
+ * because the floor only applied on desktop and a desktop window is wider
+ * than the floor. It applies at every width now, so it is the number a
+ * phone actually gets, and a 40-pixel column for a figure name is not one.
+ */
+const ITEM_MIN_WIDTH = "40rem";
+
+export function SaleItems({ saleId, items, catalog, historical, internal,
+                           frozen, cancelled, shipped = false }: {
   saleId: number;
   items: Record<string, unknown>[];
   catalog: readonly FigureChoice[];
   historical: boolean;
+  /** A workbook sale nobody released. Narrower than `historical` (0071). */
+  frozen?: boolean;
+  /** The order was called off. */
+  cancelled?: boolean;
+  /** The order went out — a sale fact, which is why it arrives from above. */
+  shipped?: boolean;
   internal: boolean;
 }) {
   /** The line whose figure is being corrected, by item id. One at a time. */
@@ -70,14 +86,19 @@ export function SaleItems({ saleId, items, catalog, historical, internal }: {
         </p>
       ) : null}
 
-      <LedgerTable itemColumns={ITEM_COLUMNS} minWidth="44rem">
+      <LedgerTable itemColumns={ITEM_COLUMNS} minWidth={ITEM_MIN_WIDTH}>
         <LedgerItemHead>
-          <span>#</span>
-          <span>{copy.itemColumns.series}</span>
+          {/*
+            FOUR COLUMNS, NOT SEVEN. `Bestand` and `Retoure` were two columns
+            answering one question between them — a row could read
+            `Ausgebucht` and `Wieder eingelagert` at once and leave the
+            reader to work out which was true now. One status column says
+            which of the eight states the position is in, and one action
+            column says the one thing to do about it.
+          */}
           <span>{copy.itemColumns.figure}</span>
           <span className="text-right">{copy.itemColumns.marketValue}</span>
-          <span className="text-center">{copy.itemColumns.stock}</span>
-          <span className="text-center">{copy.itemColumns.returned}</span>
+          <span className="text-center">{copy.itemColumns.status}</span>
           <span className="text-right">{copy.itemColumns.action}</span>
         </LedgerItemHead>
 
@@ -85,43 +106,62 @@ export function SaleItems({ saleId, items, catalog, historical, internal }: {
           {items.length === 0 ? (
             <li className="px-3 py-3 text-sm text-muted">{copy.noItems}</li>
           ) : items.map((item) => {
-            const can = itemActions(item as never, historical);
+            const can = saleItemActions(item as never, {
+              frozen: frozen ?? historical, cancelled: cancelled ?? false, shipped,
+            });
             const edits = saleItemEdits(item as never, { historical, internal });
             const itemId = Number(item.id);
-            const stock = item.movement_id !== null ? copy.booked : "—";
-            const back = item.return_movement_id !== null ? copy.restocked
-              : item.returned_at !== null ? copy.returned : "—";
+            const id = Number(item.id);
+            /* One label per state, and the tick only where a movement is. */
+            const strong = can.status === "outbooked" || can.status === "restocked";
+            const run = (fn: () => Promise<unknown>) => () => act(fn as never);
+            const primary: Record<string, () => void> = {
+              book: run(() => bookSaleItem(id, saleId)),
+              announce_return: run(() => announceSaleItemReturn(id, saleId, true)),
+              mark_returned: run(() => returnSaleItem(id, saleId, true)),
+              restock: run(() => restockSaleItem(id, saleId)),
+              settle: run(() => settleSaleItem(id, saleId, true)),
+              unsettle: run(() => settleSaleItem(id, saleId, false)),
+              unmark_not_shipped: run(() => setSaleItemNotShipped(id, saleId, false)),
+            };
+            const quiet = can.primary === "unsettle" || can.primary === "unmark_not_shipped"
+              || can.primary === "announce_return";
             return (
               <LedgerItemRow key={String(item.id)}>
-                <span className="tabular-nums text-xs text-muted">{String(item.position)}</span>
-                <span className="truncate text-xs text-muted">{String(item.series_code ?? "—")}</span>
-                <span className="truncate">{String(item.name ?? item.raw_name ?? "")}</span>
+                {/* One cell, one span: the series belongs in the title,
+                    not in a second element inside a grid track. */}
+                <span className="break-words"
+                      title={[String(item.name ?? item.raw_name ?? ""), item.series_code]
+                        .filter(Boolean).join(" · ")}>
+                  {String(item.name ?? item.raw_name ?? "")}
+                </span>
                 <span className="ob-money text-right tabular-nums">
                   {item.market_price === null || item.market_price === undefined
                     ? "—" : formatPrice(Number(item.market_price))}
                 </span>
-                <span className="text-center text-xs text-muted">{stock}</span>
-                <span className="text-center text-xs text-muted">{back}</span>
-                <span className="flex justify-end gap-2 text-right">
+                <span className={`truncate text-center text-xs ${strong ? "text-fg" : "text-muted"}`}
+                      title={can.status === "settled" ? copy.settleHint
+                        : can.status === "not_shipped" ? copy.notShippedItemHint : undefined}>
+                  {copy.itemStates[can.status]}
+                </span>
+                <span className="flex flex-wrap justify-end gap-2 text-right">
                   {/* Only what the server would accept. An impossible button
                       invites a click that ends in a rule the screen knew. */}
-                  {can.canBook ? (
-                    <button type="button" disabled={pending}
-                            onClick={() => act(() => bookSaleItem(Number(item.id), saleId))}
-                            className={`${ACTION_PRIMARY} min-h-9 w-auto px-2 text-xs disabled:opacity-50`}>
-                      {copy.book}
+                  {can.primary ? (
+                    <button type="button" disabled={pending} onClick={primary[can.primary]}
+                            className={quiet
+                              ? "min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50"
+                              : `${can.primary === "book" ? ACTION_PRIMARY : ACTION_NEUTRAL} min-h-9 w-auto px-2 text-xs disabled:opacity-50`}>
+                      {copy.itemActionLabels[can.primary]}
                     </button>
-                  ) : can.canReturn ? (
-                    <button type="button" disabled={pending}
-                            onClick={() => act(() => returnSaleItem(Number(item.id), saleId, true))}
+                  ) : null}
+                  {/* The one secondary: a parcel can go out without a piece
+                      in it, and then nothing is booked because nothing left. */}
+                  {can.canNotShip ? (
+                    <button type="button" disabled={pending} title={copy.notShippedItemHint}
+                            onClick={() => act(() => setSaleItemNotShipped(id, saleId, true))}
                             className="min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
-                      {copy.returnItem}
-                    </button>
-                  ) : can.canRestock ? (
-                    <button type="button" disabled={pending}
-                            onClick={() => act(() => restockSaleItem(Number(item.id), saleId))}
-                            className={`${ACTION_NEUTRAL} min-h-9 w-auto px-2 text-xs disabled:opacity-50`}>
-                      {copy.restock}
+                      {copy.markNotShippedItem}
                     </button>
                   ) : null}
                   {/* A line that never left the shelf may simply be wrong:

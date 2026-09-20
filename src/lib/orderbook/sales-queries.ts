@@ -45,6 +45,22 @@ export type SaleRow = {
   isIncomplete: boolean;
   /** A physical booking is still owed — `Ausbuchen` would accept it (0066). */
   isOpen: boolean;
+  /** Called off (0071). Never open, never books stock. */
+  cancelledAt: string | null;
+  /** A historical sale 0071 released for stock work. */
+  stockReleasedAt: string | null;
+  /** Left the shelf AND still gone — a return takes it out again (0075). */
+  outbookedCount: number;
+  /** Came back and was put away: a real `return` movement (0075). */
+  restockedCount: number;
+  /** Closed WITHOUT a movement — never added to `outbookedCount`. */
+  settledCount: number;
+  /** Never sent, so never booked (0074). */
+  notShippedCount: number;
+  /** Finished by any of the four routes. */
+  closedCount: number;
+  /** itemCount − closedCount. */
+  openCount: number;
   matchItems: { id: number; position: number; name: string }[];
 };
 
@@ -116,6 +132,14 @@ export const fetchSales = cache(async (
       isTest: r.is_test === true,
       isIncomplete: r.is_incomplete === true,
       isOpen: r.is_open === true,
+      cancelledAt: (r.cancelled_at as string) ?? null,
+      stockReleasedAt: (r.stock_released_at as string) ?? null,
+      outbookedCount: n(r.outbooked_count),
+      restockedCount: n(r.restocked_count),
+      settledCount: n(r.settled_count),
+      notShippedCount: n(r.not_shipped_count),
+      closedCount: n(r.closed_count),
+      openCount: n(r.open_count),
       note: (r.note as string) ?? null,
       matchItems: (Array.isArray(r.match_items) ? r.match_items : []).map((m) => {
         const i = m as Record<string, unknown>;

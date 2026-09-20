@@ -14,10 +14,19 @@ export const ITEM_STATES = [
   "missing",
   "booked",
   "reconciled_legacy",
+  /*
+   * The ending for something that is not a catalog figure (0069). A portal
+   * arrived and is accounted for; it has no place in figure inventory, so
+   * `booked` — which needs a sky_id and writes a movement — can never be
+   * its ending. The database refuses `settled` for any row that HAS a
+   * sky_id, so this cannot become a way past the inventory ledger.
+   */
+  "settled",
 ] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 
-/** The four the Quickbox may set. `booked` is reached by booking, not by picking. */
+/** The four the Quickbox may set freely. `booked` is reached by booking, not
+ *  by picking, and `settled` only through `canSettle` — see below. */
 export const QUICK_STATES: readonly ItemState[] = ["ordered", "arrived", "damaged", "missing"];
 
 /**
@@ -31,6 +40,25 @@ export const QUICK_STATES: readonly ItemState[] = ["ordered", "arrived", "damage
 export function canBook(item: { state: ItemState; skyId: string | null }): boolean {
   if (item.skyId === null) return false;
   return item.state === "ordered" || item.state === "arrived";
+}
+
+/**
+ * Whether this item can be marked `Erledigt` right now (0069).
+ *
+ * THE MIRROR IMAGE OF `canBook`, and deliberately not its negation.
+ *
+ *   a catalog figure   never. It ends by being booked, and offering any
+ *                      other ending would be offering a way to close a
+ *                      position while the stock it represents goes missing.
+ *                      The database refuses it too; this only keeps the
+ *                      button away from a press that would fail.
+ *   arrived only       `Bestellt -> Angekommen -> Erledigt`. Filing away
+ *                      something that has not turned up yet would be a
+ *                      statement nobody can make.
+ */
+export function canSettle(item: { state: ItemState; skyId: string | null }): boolean {
+  if (item.skyId !== null) return false;
+  return item.state === "arrived";
 }
 
 export type ValuedItem = {

@@ -765,62 +765,173 @@
      transparent button stretched across it.
      ========================================================================= */
 
+  /* =========================================================================
+     ONE SET OF COLUMNS AT EVERY WIDTH
+
+     This used to collapse to `1fr auto` below 48rem: two lines per row, no
+     header, the other five or eight values crammed in beside each other. On
+     a phone that produced exactly what the owner photographed — a column of
+     dense unlabelled fragments that cannot be compared down the page.
+
+     A ledger is a table, and the honest way to show a table too wide for the
+     window is to let it be too wide and scroll it. So the tracks below are
+     unconditional, `.ob-min` holds the table at a width its columns actually
+     fit into, and the box scrolls sideways inside itself. Nothing is dropped,
+     nothing is truncated, and a phone shows the same columns in the same
+     order as a desktop — which is also why the header is no longer hidden.
+     ========================================================================= */
+
   .ob-row,
   .ob-item {
     display: grid;
     align-items: center;
     column-gap: 0.75rem;
-    /* Mobile: two lines, not seven or ten. Label-free, because the values are
-       recognisable — a date, a count, amounts, a ratio. Both ledgers collapse
-       to this, because `--ob-columns` is only read on desktop. */
-    grid-template-columns: 1fr auto;
-    row-gap: 0.125rem;
   }
 
   /* 44px minimum, and about that in practice: one control-height ledger line. */
   .ob-row {
+    /* Fallback = Einkauf: Datum · Artikel · Ausgaben · Marktwert · Faktor ·
+       Status · Chevron. Verkauf overrides it with ten tracks. */
+    grid-template-columns: var(--ob-columns,
+      7rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 7.5rem 1.5rem);
     min-height: 2.75rem;
     padding: 0.375rem 0.75rem;
   }
 
   .ob-item {
+    /* Fallback = Einkauf: # · Serie · Figur · Marktwert · Status · Aktion.
+       `Serie` is identity information, not decoration: display names repeat
+       across the six games, so `Drobot` alone does not say which shelf it
+       came off. Its width is taken from the flexible `Figur` track, never
+       from the row height.
+       `Aktion` keeps its track whether or not a button is in it, so a
+       historical row and a bookable one line up. */
+    grid-template-columns: var(--ob-item-columns,
+      2.5rem 9.5rem minmax(0, 1fr) 6rem 6rem 6.5rem);
     min-height: 2.25rem;
     padding: 0.25rem 0.75rem;
   }
 
-  @media (min-width: 48rem) {
-    .ob-row {
-      /* Fallback = Einkauf: Datum · Artikel · Ausgaben · Marktwert · Faktor ·
-         Status · Chevron. Verkauf overrides it with ten tracks. */
-      grid-template-columns: var(--ob-columns,
-        7rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 3.5rem 1.5rem);
-      row-gap: 0;
-    }
-    .ob-item {
-      /* Fallback = Einkauf: # · Serie · Figur · Marktwert · Status · Aktion.
-         `Serie` is identity information, not decoration: display names repeat
-         across the six games, so `Drobot` alone does not say which shelf it
-         came off. Its width is taken from the flexible `Figur` track, never
-         from the row height.
-         `Aktion` keeps its track whether or not a button is in it, so a
-         historical row and a bookable one line up. */
-      grid-template-columns: var(--ob-item-columns,
-        2.5rem 9.5rem minmax(0, 1fr) 6rem 4.5rem 6.5rem);
-      row-gap: 0;
-    }
+  /*
+     The floor that makes the sideways scroll happen instead of the columns
+     being crushed. Every ledger declares one; `0` would mean "crush me".
+   */
+  .ob-min { min-width: var(--ob-min-width, 0); }
 
-    /*
-       A floor for a table too wide for the window, so it scrolls sideways
-       inside its own box rather than having ten columns crushed into the
-       width of six. Desktop only — on a phone the row is two lines and has no
-       columns to protect.
-     */
-    .ob-min { min-width: var(--ob-min-width, 0); }
+  /* -------------------------------------------------------------------------
+     AN ITEM ROW DOES NOT GROW TO THE LEDGER'S FLOOR
+
+     `.ob-min` holds the whole box at the width the LEDGER row needs — ten or
+     eleven columns, 71rem for Verkauf. The expanded item list lives in that
+     same box and has four columns, so its one flexible track used to
+     collect all the slack: `Figur` took 43rem of 71, and `Marktwert`,
+     `Status` and `Aktion` sat off the right of a 1024px screen.
+
+     A ceiling instead. 52rem is what the four columns want — 24rem of fixed
+     tracks plus roughly the same again for the name — so the sub-table ends
+     where it has a reason to end and all four columns are on screen at
+     scroll position 0. Inert everywhere else: the Einkauf box is 48rem and
+     the Verkauf detail box 40rem, both already narrower than this.
+   */
+  .ob-item { max-width: var(--ob-item-max, 52rem); }
+
+  /* -------------------------------------------------------------------------
+     WHICH AXIS SCROLLS, AND WHERE
+
+     Mobile scrolls sideways only. The page keeps the vertical axis — a table
+     that traps the downward swipe is the thing people complain about most on
+     a phone, and the ledger has no business owning a gesture the page needs.
+     `overflow-y: hidden` rather than `visible` because CSS refuses to mix a
+     scrolling axis with a visible one; the box has no height limit here, so
+     it clips nothing.
+
+     Desktop keeps the box it always had: 85 purchases would otherwise push
+     the search field a full screen above the row it produced. `dvh` so a
+     collapsing mobile toolbar cannot cut off the last row.
+   */
+  .ob-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  @media (min-width: 48rem) {
+    .ob-scroll {
+      overflow: auto;
+      max-height: min(62dvh, 42rem);
+    }
+  }
+
+  /* -------------------------------------------------------------------------
+     THE FIRST COLUMN STAYS PUT
+
+     Scrolled sideways, a row of numbers with no date in front of it belongs
+     to nothing. The first cell sticks to the left edge of the scroll box so
+     every row keeps saying which row it is.
+
+     `background: inherit` and not a colour of its own: the cell has to hide
+     whatever slides under it, and it has to keep doing so through the row's
+     hover state. Inheriting means there is one background per row, declared
+     once on the row, and the sticky cell cannot drift out of step with it.
+     This is why the ledger rows are opaque — a translucent cell would show
+     the columns passing beneath.
+
+     The negative margin pulls the cell over the row's own left padding, and
+     the matching padding puts the text back where it was; without it a
+     0.75rem transparent stripe would sit between the scroll edge and the
+     sticky cell, and the scrolled content would show through it.
+   */
+  .ob-row > :first-child,
+  .ob-item > :first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: inherit;
+    margin-left: -0.75rem;
+    padding-left: 0.75rem;
   }
 
   /* `1.234,56 €` split over two lines stops being a figure you can compare
      down a column, so money cells never wrap. */
   .ob-money { white-space: nowrap; }
+
+  /* =========================================================================
+     THE SHELL OF A CARD NOBODY OWNS (V4.6)
+
+     Applied to ONE element: the template artwork in layer 2 of `FigureCard`.
+     That single PNG is the whole card design — frame, paper, gilding, crown,
+     struck rule and trade plate — and it is the only thing this may touch.
+     The figure's picture, its name, the variant seal, MARKTWERT, the price,
+     the element and the offer row are all in other layers, at full colour
+     and full contrast, and no filter here can reach them.
+
+     WHY MOSTLY SATURATION AND ALMOST NO BRIGHTNESS
+
+     Taking the colour out says "not yours" without saying "worse". Dimming
+     says "worse", and past about 8 % it also starts dragging the artwork's
+     own contrast down with it, which is what makes a desaturated card look
+     cheap rather than quiet. So: a little over half the chroma removed, and
+     three percent of light — enough to settle the card behind an owned
+     neighbour, not enough to read as disabled.
+
+     The six card types keep their identity through it. `legendary` and
+     `dark` stay dark stock, `prestige` and `chase` keep their ornament; a
+     muted gold is still recognisably the gold card. Nothing is replaced,
+     nothing is hidden, and an owned card is untouched — the full design,
+     exactly as it was.
+     ========================================================================= */
+  .card-shell-unowned {
+    filter: saturate(0.45) brightness(0.97);
+  }
+
+  /*
+     Forced colours throw filters away and repaint from the user's palette,
+     so the shell would come back at full strength while the size difference
+     stayed. Dropping the filter there keeps the two states consistent with
+     each other rather than half-applied.
+   */
+  @media (forced-colors: active) {
+    .card-shell-unowned { filter: none; }
+  }
 }
 
 @layer utilities {

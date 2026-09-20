@@ -36,6 +36,7 @@ import {
 } from "@/lib/orderbook/draft";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureDraft } from "./figure-draft";
+import { Field, FormSection, INPUT, MONEY } from "./form-section";
 
 const copy = de.business.orderbook;
 const figures = copy.figures;
@@ -92,81 +93,86 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
   }
 
   return (
-    <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
+    <form onSubmit={submit} className="mt-6 flex flex-col gap-5">
       {error ? (
         <p role="alert" className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">{error}</p>
       ) : null}
 
-      <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted">{copy.columns.date}</span>
-        {/* Not `required`: empty is a real answer, and it means unknown. */}
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-               className="min-h-11 rounded-sky-md bg-surface px-3 ring-1 ring-border/70" />
-        <span className="text-xs text-muted">{copy.undatedNew}</span>
-      </label>
+      {/* 1. What the record is. One field, because a purchase has one fact
+             of its own that is not money and not figures. */}
+      <FormSection title={copy.newSections.purchase}>
+        <div className="sm:max-w-xs">
+          {/* Not `required`: empty is a real answer, and it means unknown.
+              It used to say so in a sentence underneath; an empty optional
+              date field does not need one. */}
+          <Field label={copy.columns.date}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+                   className={INPUT} />
+          </Field>
+        </div>
+      </FormSection>
 
-      <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted">{copy.columns.expenses}</span>
-        <input type="text" inputMode="decimal" required value={cost} placeholder="0,00"
-               onChange={(e) => setCost(e.target.value)}
-               className="min-h-11 rounded-sky-md bg-surface px-3 tabular-nums ring-1 ring-border/70" />
-      </label>
-
-      <FigureDraft lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
+      {/* 2. What was in the parcel. */}
+      <FormSection title={copy.newSections.figures}>
+        <FigureDraft lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
+      </FormSection>
 
       {/*
-        One line, three numbers, and it only appears once there is something
-        to count. `Marktwert` and `Faktor` are the two figures the owner
-        judges a parcel by, so they belong beside the figures rather than on
-        the next screen.
+        3. What it cost, with the two numbers the parcel is judged by right
+        beside it — `Marktwert` and `Faktor` only mean anything next to the
+        price, and they move as it is typed.
       */}
-      {units > 0 ? (
-        <div className="flex flex-col gap-0.5">
-          <p className="text-sm tabular-nums">
-            {figures.units(units)}
-            {" · "}
-            {figures.marketValue}{" "}
-            {value.knownItems === 0 ? figures.noMarketValue : formatPrice(value.knownValue)}
-            {" · "}
-            {figures.factor}{" "}
-            {value.percent === null
-              ? "—"
-              : `${value.percent.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`}
-          </p>
-          {value.unknownItems > 0 ? (
-            <p className="text-xs text-muted">{figures.missingPrices(value.unknownItems)}</p>
+      <FormSection title={copy.newSections.amount}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
+          <Field label={copy.purchasePrice}>
+            <input type="text" inputMode="decimal" required value={cost} placeholder="0,00"
+                   onChange={(e) => setCost(e.target.value)} className={MONEY} />
+          </Field>
+
+          {units > 0 ? (
+            <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-sm tabular-nums sm:pb-2.5">
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-muted">{figures.marketValue}</dt>
+                <dd>{value.knownItems === 0 ? figures.noMarketValue : formatPrice(value.knownValue)}</dd>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <dt className="text-xs text-muted">{figures.factor}</dt>
+                <dd>
+                  {value.percent === null
+                    ? "—"
+                    : `${value.percent.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`}
+                </dd>
+              </div>
+              {value.unknownItems > 0 ? (
+                <p className="basis-full text-xs text-muted">{figures.missingPrices(value.unknownItems)}</p>
+              ) : null}
+            </dl>
           ) : null}
         </div>
-      ) : (
-        <p className="text-xs text-muted">{figures.emptyAllowed}</p>
-      )}
+      </FormSection>
 
-      {/* Quieter than the figure workflow on purpose: it is a short
-          operational remark, not the substance of the purchase. */}
-      <label className="flex flex-col gap-1">
-        <span className="text-xs text-muted">Notiz</span>
-        <input type="text" value={note} onChange={(e) => setNote(e.target.value)}
-               className="min-h-11 rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 sm:min-h-9" />
-      </label>
+      {/* 4. The optional tail. Set back, not hidden. */}
+      <FormSection title={copy.newSections.note}>
+        {/* No second `Notiz` above the box — the heading already said it. */}
+        <input type="text" value={note} aria-label={copy.newSections.note}
+               onChange={(e) => setNote(e.target.value)} className={INPUT} />
 
-      {/*
-        One checkbox, unticked. The normal case must not get slower because a
-        rare one exists, so it is a single line with its consequence spelt out
-        beside it rather than a mode the form has to be put into.
-      */}
-      <label className="flex items-start gap-2">
-        <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)}
-               className="mt-1 size-4" />
-        <span className="text-sm">
-          {copy.testFlag}
-          <span className="block text-xs text-muted">{copy.testFlagHint}</span>
-        </span>
-      </label>
+        {/*
+          One checkbox, unticked. The normal case must not get slower because
+          a rare one exists, so it is a single line rather than a mode the
+          form has to be put into.
+        */}
+        <label className="flex items-center gap-2 pt-1" title={copy.testFlagHint}>
+          <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)}
+                 className="size-4 shrink-0" />
+          <span className="text-sm">{copy.testFlag}</span>
+        </label>
+      </FormSection>
 
-      {/* Said before the button, not after the surprise. */}
-      <p className="text-xs text-muted">{copy.createStockHint}</p>
-      <button type="submit" disabled={pending} className={`${ACTION_PRIMARY} min-h-11 w-auto disabled:opacity-60`}>
-        {copy.newPurchase}
+      <button type="submit" disabled={pending}
+              className={`${ACTION_PRIMARY} min-h-11 w-full disabled:opacity-60 sm:w-auto sm:self-start`}>
+        {copy.submitPurchase}
+        {units > 0 ? ` · ${figures.units(units)}` : ""}
       </button>
     </form>
   );

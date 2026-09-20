@@ -84,6 +84,9 @@ export function AddPurchaseItem({
             disabled={pending}
             onSelect={(choice) => add(choice.skyId, choice.name)}
           />
+          {/* Said where `Einbuchen` is, not under the create form's submit
+              button — the same place the Verkauf says it. */}
+          <p className="mt-2 text-xs text-muted">{copy.createStockHint}</p>
           <button type="button" onClick={() => setUncategorized(true)}
                   className="mt-3 text-xs text-muted underline underline-offset-2">
             {copy.addUncategorized}

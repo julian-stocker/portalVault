@@ -8297,3 +8297,299 @@ sollte — das ist eine Entscheidung für einen Menschen vor den Daten, nicht f�
 Matching über `(sale_id, amount, reason)` · den drei Korrekturen nachträglich Fingerabdrücke
 schreiben · eine `migrations_applied`-Markertabelle in Production · das Werkzeug löschen (eine
 Migration, die man nicht mehr nachlesen kann, ist eine, die man nicht mehr prüfen kann).
+
+---
+
+## ADR-0097 — Ein Buch ist eine Tabelle, und eine zu breite Tabelle scrollt
+
+**Status:** akzeptiert (2026-09-20) · keine Migration · UI
+
+### Kontext
+
+Das Orderbuch war für den Schreibtisch gebaut und wird am Telefon benutzt.
+
+Unterhalb von 48rem klappten `.ob-row` und `.ob-item` auf `grid-template-columns: 1fr auto`
+zusammen: zwei Zeilen je Datensatz, **keine Kopfzeile**, und der restliche Inhalt — bei einem
+Verkauf acht Werte — gedrängt in die zweite Zeile. Die Begründung stand im Stylesheet und war
+plausibel: „label-free, because the values are recognisable — a date, a count, amounts, a
+ratio". Sie stimmt für zwei Werte und bricht bei zehn zusammen. Was der Inhaber sah, war eine
+Spalte dichter, unbeschrifteter Fragmente, die man nicht nach unten vergleichen kann.
+
+Die Anlegen-Formulare hatten das gespiegelte Problem: eine Einleitung, ein Hinweis unter dem
+Datum, einer zur Vorlage, einer zu den Figuren, einer zum Abrechnungsschalter und drei Zeilen
+Formel unter der Auszahlung. Auf einem 360px-Schirm war mehr Fließtext als Eingabefeld zu sehen.
+
+### Entscheidung
+
+**Die Spalten gelten bei jeder Breite. Was nicht passt, wird gescrollt.**
+
+```
+vorher   < 48rem : grid-template-columns: 1fr auto      (zwei Zeilen, keine Kopfzeile)
+         ≥ 48rem : var(--ob-columns, …)                 (sieben bzw. zehn Spuren)
+
+jetzt    überall : var(--ob-columns, …)
+                   .ob-min  → Boden, unter dem nicht gequetscht wird
+                   .ob-scroll → seitwärts immer; abwärts gehört auf dem
+                                Telefon der Seite, auf dem Desktop dem Buch
+```
+
+Drei Folgeentscheidungen, jede aus der ersten:
+
+**Die Kopfzeile ist nicht mehr versteckt.** Eine Spalte, die man drei Positionen weit
+geschoben hat, beschriftet sich nicht selbst.
+
+**Die erste Spalte klebt links.** Eine Zahlenreihe ohne Datum davor gehört zu nichts. Die
+Zelle erbt den Hintergrund der Zeile, um das Durchscheinende zu verdecken — **deshalb sind die
+Zeilen deckend** statt `bg-surface/60`. Der Klick-Knopf bekommt `z-10` und die Zeile `isolate`,
+damit er die Zelle überragt, ohne auch die klebende Kopfzeile zu überdecken.
+
+**Die vertikale Achse gehört auf dem Telefon der Seite.** Eine Tabelle, die den Wisch nach
+unten schluckt, ist die Beschwerde, die Menschen über Tabellen auf Telefonen tatsächlich haben.
+
+### Der Boden wird nach der flexiblen Spalte bemessen, nicht nach der Summe
+
+Der erste Boden war die Summe der Spuren plus Abstände plus Polster — arithmetisch richtig und
+unbrauchbar. `Figur` ist `minmax(0, 1fr)` und bekommt, was übrig bleibt; bei exakt der Summe
+bleibt nichts übrig. Beide Positionslisten waren so bemessen und hätten einem Figurennamen
+40 bzw. 68 Pixel gegeben.
+
+Sichtbar wurde das erst jetzt: vorher galt der Boden nur auf dem Desktop, wo das Fenster
+breiter ist als er. **Bei jeder Breite ist der Boden die Breite, die ein Telefon bekommt.**
+Einkauf steht deshalb auf 44rem und die Verkaufs-Positionsliste auf 52rem — gewählt für die
+flexible Spalte, nicht für die Summe. Ein Test misst genau das und nicht die Summe.
+
+### Die Formulare: Gruppen statt Sätze
+
+Sechs Überschriften im Verkauf (`Verkauf · Figuren · Beträge · Kosten · Auszahlung · Notiz`),
+vier im Einkauf (`Einkauf · Figuren · Betrag · Notiz`), in dieser Reihenfolge, Wichtiges zuerst.
+`FormSection` und `Field` in `components/business/form-section.tsx` sind für beide dieselben —
+vorher hatte jedes Formular sein eigenes `Row` und `Heading` und die beiden drifteten.
+
+**Keine Karte in der Karte:** eine Gruppe ist eine Überschrift und ein Abstand. Das einzige
+umrandete Element ist die **Auszahlung**, weil sie die Antwort ist und keine Frage.
+
+**Eine Spalte auf dem Telefon, immer.** Jedes Raster beginnt einspaltig und teilt sich erst bei
+`sm:`. Die Ausnahme ist die Gebührenzeile — vier Bedienelemente passen nicht über 320px —, und
+sie stapelt: Name auf der ersten Zeile, Betrag, Schalter und `×` auf der zweiten.
+
+**Was an Text blieb.** Der Satz „Anlegen ändert den Bestand nicht" ist nicht gelöscht, sondern
+umgezogen: neben den Positions-Picker, wo `Einbuchen` bzw. `Ausbuchen` tatsächlich stehen —
+der Verkauf sagte ihn dort schon. Die Erklärung des Testvorgangs ist ein `title` am Kästchen.
+Geblieben ist `settledHint`: was der Abrechnungsschalter bewirkt, sieht man nicht am Schalter.
+
+**Was gelöscht wurde, weil es nichts mehr erklärte:** `hint`, `dateHint`, `templateHint`,
+`figuresHint`, `payoutHint`, `adjustmentHint`, `undatedNew`, `figures.emptyAllowed`.
+
+Und `Vorlage` heißt jetzt **`Kanal`**. Der Inhaber wählt, wo verkauft wurde; dass davon auch das
+Layout abhängt, ist eine Folge und keine Frage, die er beantworten muss. Gespeichert wird
+unverändert `sales.channel`.
+
+### Nebenbefund
+
+`bg-bg/40` auf der aufgeklappten Zeile benannte keine Theme-Farbe — `--color-bg` gibt es nicht,
+die Utility wurde nie erzeugt, der Bereich hatte gar keinen Hintergrund. Gemeint war `canvas`.
+
+### Konsequenzen
+
+- **Keine Geschäftslogik, keine Berechnung, kein RPC und kein Datenmodell angefasst.**
+- 22 neue Tests in `mobile-layout.test.ts` messen gegen echte Gerätebreiten (320/360/390/393/414).
+  Die alten Tests, die die Zwei-Zeilen-Faltung festschrieben, wurden ersetzt, nicht gelöscht.
+- Ein `title` auf den Namenszellen: wo `truncate` doch greift, ist der Name erreichbar.
+
+### Verworfen
+
+Spalten auf dem Telefon weglassen (welche?) · Karten statt Tabelle (das war der Zustand vor
+ADR-0088) · die Faltung behalten und nur beschriften (zehn Beschriftungen kosten mehr Platz als
+die zehn Werte) · die klebende Spalte weglassen (dann gehört eine gescrollte Zahlenreihe zu
+nichts) · den Boden per JavaScript messen.
+
+---
+
+## ADR-0098 — Was dir fehlt, tritt einen Schritt zurück
+
+**Status:** akzeptiert (2026-09-20) · keine Migration · UI
+
+### Kontext
+
+Seit V3.6 ist die Karte für jeden Betrachter dieselbe: `figure.cardType` entscheidet das
+Artwork, Besitz entscheidet nur, ob das `CollectedSeal` obendrauf liegt (ADR-0038, V3.2). Das
+war eine bewusste Entscheidung und bleibt richtig — die Karte einer Figur ist eine Eigenschaft
+der Figur, nicht des Betrachters.
+
+Nur beantwortet sie eine andere Frage als die, die man beim Durchscrollen von 561 Karten hat:
+**was fehlt mir?** Das Siegel sagt es, aber es ist ein kleines Element auf einer vollen Karte
+zwischen anderen vollen Karten. Die Rasterzeile sieht in beiden Fällen gleich aus.
+
+### Entscheidung
+
+**Nicht gesammelt: eine Spur kleiner, auf einer entsättigten Hülle. Sonst nichts.**
+
+```
+gesammelt      volle Größe · volles Kartendesign · Siegel · unverändert
+nicht gesammelt  ×0,97      · Hülle entsättigt     · Inhalt unverändert
+```
+
+**Die Hülle ist genau ein Element.** Das gesamte Kartendesign — Rahmen, Papier, Vergoldung,
+Krone, geprägte Linie und die Silberplatte der Handelszeile — ist in *ein* PNG gemalt, Layer 2
+von `FigureCard`. Ein Filter dort kann Layer 1 (das weiße Fenster und das Figurenbild) und
+Layer 3 (Name, Varianten-Siegel, MARKTWERT, Preis, Element, Anzahl) nicht erreichen, und die
+Handelszeile ist ein viertes Raster darunter.
+
+Das macht „nur das Kartendesign wird grau" zu einer **strukturellen Tatsache** statt zu einer
+Liste von Ausnahmen, die jemand pflegen muss. Ein Test zählt die Verwendungen: `understated`
+kommt im Bauteil genau dreimal vor — einmal berechnet, zweimal benutzt.
+
+`saturate(0.45) brightness(0.97)`: Farbe raus, Licht fast nicht. Abdunkeln sagt „schlechter",
+und jenseits von etwa 8 % zieht es den Eigenkontrast des Artworks mit nach unten — dann sieht
+eine entsättigte Karte billig aus statt ruhig. Unter `forced-colors` entfällt der Filter ganz,
+sonst käme die Hülle in voller Stärke zurück, während der Größenunterschied bliebe.
+
+### Die Größe ist Farbe, nicht Layout
+
+`transform: scale()`, nicht Breite, Rand oder Innenabstand. Die drei wären Layout: **eine**
+geschrumpfte Karte vermisst ihre Spalte neu, und jede andere Karte der Zeile verschiebt sich
+mit. Ein Transform ist Malerei — die Rasterzelle behält ihre Größe, die Abstände bleiben
+identisch, und `scale` nimmt die Typografie mit, sodass innerhalb der Karte nichts neu
+umgebrochen wird.
+
+`transform-origin: center bottom`: die Karten einer Zeile stehen auf einer Linie und ihre
+Handelszeilen fluchten. Keine Transition — die Änderung ist sofort, wie verlangt.
+
+**0,97, und warum diese Zahl.** Eine Karte ist über die vier Rasterstufen zwischen 177 px und
+214 px breit. 3 % davon sind 5–6 px Breite, also rückt jede Kante um rund 3 px ein — gegen
+einen Rahmen, der bei diesen Breiten selbst 5–6 px misst. Die beiden Zustände unterscheiden
+sich also um etwa einen halben Rahmen je Seite, und das ist eine Rahmenbreite genau dort, wo
+das Auge vergleicht: an der Lücke zwischen zwei Karten.
+
+### `understatesCard` ist nicht die Negation von `marksOwnership`
+
+Und darin liegt die ganze Entscheidung. `marksOwnership` beantwortet „ist das mein Exemplar";
+**drei der fünf Oberflächen, die eine Karte zeichnen, können das gar nicht beantworten**, und
+für sie ist die Antwort „nein" statt „nicht besessen":
+
+| Oberfläche | kennt die Sammlung |
+|---|---|
+| Katalog, angemeldet | **ja** — die einzige, die ihre Karten abstuft |
+| Sammlung | ja, und dort ist alles besessen → greift nie |
+| Katalog, abgemeldet | nein — es gibt noch keine Sammlung |
+| Katalog, Administrator | nein — er sammelt nicht aus seinem eigenen Katalog (ADR-0042) |
+| Figurenseite, Geschwister | nein — `showcase` markiert nie Besitz |
+
+Die Oberfläche sagt deshalb **ausdrücklich**, ob sie es weiß: `knowsCollection`, standardmäßig
+aus. Es aus dem Vorhandensein von `onToggle` abzuleiten würde eine visuelle Regel an einen
+Event-Handler binden und das Aussehen der Admin-Karte zu einer Nebenwirkung davon machen.
+
+Ohne diese Unterscheidung wäre der abgemeldete Katalog ein Raster, in dem **jede** Karte
+geschrumpft und grau ist — das sagt nichts über Besitz und lässt bloß das Design verblassen.
+
+### Konsequenzen
+
+- **Keine neue Geschäftslogik, keine Datenbankänderung.** Der Status kommt aus der bestehenden
+  Collection-Logik, über dieselbe `collected`-Eigenschaft, die die Karte schon hatte.
+- Prestige, Legendary, Dark, Gold, Chase: unverändert, wenn gesammelt. Der Tinten-Tausch für
+  dunkles Papier hängt weiter am Artwork und nicht am Betrachter.
+- 26 Tests in `collected-emphasis.test.ts`, davon fünf, die festhalten, welche Oberfläche
+  abstuft, und vier, die das Raster gegen Layout-Änderungen schützen.
+
+### Verworfen
+
+Ein zweites Artwork je Zustand (das war V3.5 und wurde in V3.6 abgeschafft) · `opacity` auf der
+ganzen Karte (dimmt den Text mit, den die Anforderung ausdrücklich ausnimmt) · `grayscale(1)`
+(nimmt die Kartentypen ununterscheidbar mit) · eine Breitenänderung (verschiebt das Raster) ·
+eine Transition (es wurde ausdrücklich keine Animation gewünscht) · die gesammelte Karte
+*größer* zu machen statt die andere kleiner (dann müsste das Raster für den größeren Zustand
+Platz vorhalten, den es meistens nicht braucht).
+
+
+---
+
+## ADR-0099 — Orderbuchstatus ist nicht Lagerstatus
+
+**Status:** akzeptiert (2026-09-20) · Migrationen `0067`–`0076` · Datenmodell + RPC
+
+### Kontext
+
+Das Orderbuch zeigte für jede Position `Eingebucht ✓`, auch für Ware, die nie im Regal stand.
+Die Ursache war keine Anzeigefrage: Import und Datenmodell hatten **zwei verschiedene Dinge in
+ein Feld gelegt** — „was ist mit diesem Vorgang zu tun?" und „was ist mit diesem Stück im Lager
+passiert?". Solange beides dasselbe Feld ist, muss jede Statusänderung entweder eine Bewegung
+erfinden oder eine verschweigen.
+
+Die rekonstruierte Arbeitsbuch-Historie macht den Unterschied unvermeidbar. Sie enthält
+Einkäufe, die bezahlt und noch unterwegs sind; Positionen ohne Katalogbezug, die nie ein Regal
+haben werden; verschickte Verkaufszeilen, die das Lager ausdrücklich **nicht** berührt haben;
+und Retouren, die angekündigt, eingetroffen oder eingelagert sein können — drei Zustände, nicht
+einer.
+
+### Entscheidung
+
+**Der fachliche Status eines Vorgangs und die physische Lagerbewegung sind getrennt. Eine
+Bewegung entsteht ausschließlich durch eine ausdrückliche Handlung, und sie hinterlässt immer
+einen Beleg.**
+
+1. **Ein Einkauf verändert den Bestand erst durch explizites Einbuchen.** `ordered` heißt
+   bestellt und unterwegs — nicht angekommen, nicht eingelagert.
+2. **Ein Verkauf verändert den Bestand erst durch explizites Ausbuchen.** `shipped_at` sagt,
+   dass das Paket raus ist; über das Regal sagt es nichts.
+3. **`movement_id` ist der Beleg einer echten Ausbuchung** (`sale_external`, −1) bzw. beim
+   Einkauf einer echten Einbuchung. Ist sie NULL, hat sich nichts bewegt — ohne Ausnahme.
+4. **`return_movement_id` ist der Beleg einer echten Wiedereinlagerung** (`return`, +1).
+5. **Eine Position ohne Katalogbezug darf ohne Lagerbewegung `settled` / „Erledigt" werden.**
+   Porto, Zubehör, Sammelposten und Kartenpacks haben kein Regal; sie offen zu lassen wäre
+   Arbeit, die niemand erledigen kann. Die Sperre liegt serverseitig: eine Position **mit**
+   `sky_id` lässt sich auch per direktem RPC nicht auf `settled` setzen.
+6. **Historische Positionen mit `legacy_stock_flag = '-'` werden nicht künstlich ausgebucht.**
+   Das Arbeitsbuch sagt für sie: verschickt, aber nie dem Lager entnommen. Sie auszubuchen
+   würde ein Stück vom Regal nehmen, das dieser Verkauf nie gehalten hat. Sie enden über
+   „Erledigt" — und dasselbe Merkmal verbietet ihnen das Ausbuchen, sie haben also genau ein
+   Ende.
+7. **`not_shipped_at` ist ein Abschluss ohne Ausbuchung.** Das Stück hat das Regal nie
+   verlassen; es nicht zu buchen ist die *richtige* Buchführung, nicht eine fehlende. Erlaubt
+   nur, solange `movement_id` NULL ist — das Einzige, was die Aussage falsch machen würde.
+8. **`return_announced_at` öffnet eine bereits ausgebuchte Position für den Retourenprozess
+   wieder.** Sie gilt ab da nicht mehr als erledigt, obwohl eine Bewegung existiert: jemand
+   muss die Ware noch entgegennehmen.
+9. **`returned_at` heißt physisch zurückgekommen — nicht automatisch eingelagert.** Das
+   Einlagern ist ein eigener Schritt mit eigenem Beleg (`return_movement_id`). Zwischen beiden
+   liegt ein realer Zustand: die Figur liegt auf dem Tisch, nicht im Regal.
+10. **Test- und Smoke-Daten bleiben über `is_test` vom echten Orderbuch getrennt.** Ein
+    Testvorgang, der nicht markiert ist, wird zu Geschäftszahlen. Die Markierung ist die
+    Trennung — nicht eine gesonderte Tabelle und nicht das Löschen.
+11. **Der Inventory-Ledger ist append-only. Bestehende Bewegungen werden niemals zur
+    kosmetischen Bereinigung gelöscht.** `inventory_movements` trägt `on delete restrict`. Was
+    das Regal getan hat, bleibt stehen, auch wenn der zugehörige Vorgang sich später als Test
+    herausstellt; korrigiert wird durch eine **neue** Bewegung oder durch ein Flag am Vorgang,
+    nie durch Entfernen der Historie.
+
+### Konsequenzen
+
+**Der Status wird abgeleitet, nie gespeichert.** `sale_item_is_closed(public.sale_items)` ist
+das eine Prädikat hinter `is_open` und `closed_count`; ein zweiter Ort, an dem „fertig"
+definiert wird, kann nicht entstehen. Vier Enden zählen als fertig — ausgebucht und noch weg,
+wieder eingelagert, ohne Bewegung geschlossen, nie verschickt —, eine angekündigte oder
+eingetroffene Retoure ausdrücklich nicht.
+
+**Die Freigabe historischer Verkäufe ist namentlich und einmalig.** `stock_released_at` wird
+pro Bestellung von Hand erteilt, nachdem der Betreiber bestätigt hat, was tatsächlich passiert
+ist. Sie wird nirgends abgeleitet; die 270 nicht freigegebenen Arbeitsbuch-Verkäufe bleiben
+gesperrt wie zuvor.
+
+**Provenienz ist keine Erlaubnis, die man sich ausstellen kann.** `legacy_stock_flag` schreibt
+der Import und sonst nichts — es gibt keinen RPC, der es setzt. Genau deshalb taugt es als
+Bedingung für eine Ausnahme: ein von Hand angelegter Verkauf trägt dort NULL und kann die
+Ausnahme nicht erreichen.
+
+**Keine der zehn Migrationen erzeugt eine Bewegung.** Drei ändern überhaupt Daten (`0067`,
+`0071`, `0076`), alle drei mit einem Vorher/Nachher-Wächter auf Bestandssumme und
+Bewegungszahl, der den Block zurückrollt, sobald sich eine der beiden bewegt. Nachgewiesen auf
+Production: 1 201 Stück und 628 Bewegungen vor und nach dem Rollout, Postcheck 50/50.
+
+### Verworfen
+
+Den Status aus dem Vorhandensein einer Bewegung allein ableiten (das war `0072` und zählte eine
+zurückgekommene Figur als erledigt — der Fehler, den `0075` behebt) · `settled` für beliebige
+Positionen öffnen (dann wäre es ein stiller Weg, Bestand verschwinden zu lassen) ·
+`not_shipped_at` als Grund in `settled_at` unterbringen (hätte die strenge Sperre für einen
+Fall aufweichen müssen, der sie nicht braucht) · die zwei Smoke-Verkäufe löschen (würde echte
+Bewegungen verwaisen lassen oder am `on delete restrict` scheitern) · `returned_at` das
+Einlagern miterledigen lassen (verwischt genau die Grenze, die dieser ADR zieht).

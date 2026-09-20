@@ -571,10 +571,18 @@ describe("editing a sale item on the detail page", () => {
 
 /* ===================================================================== */
 describe("the German copy", () => {
-  it("names the template and says it is only layout", () => {
-    expect(de.business.sales.create.template).toBe("Vorlage");
+  it("the layout switch is labelled as the channel it also sets", () => {
+    /*
+     * It said `Vorlage` and explained underneath that a template only moves
+     * labels around. That is true and it is not the operator's problem: what
+     * they are choosing is where the thing was sold. The stored value is
+     * unchanged — `sales.channel`, via `template.channel`.
+     */
+    expect(de.business.sales.create.template).toBe("Kanal");
     expect(de.business.sales.create.templateNames.ebay).toBe("eBay");
-    expect(de.business.sales.create.templateHint).toContain("Beschriftungen");
+    expect(de.business.sales.create.templateNames.manual).toBe("Manuell");
+    // The explanation of what a template is went with it.
+    expect((de.business.sales.create as Record<string, unknown>).templateHint).toBeUndefined();
   });
 
   it("distinguishes the two shipping meanings in words", () => {
@@ -588,13 +596,25 @@ describe("the German copy", () => {
     for (const gone of ["reportedPayout", "payoutDifference", "payoutMatches", "payoutPending"]) {
       expect(c[gone], gone).toBeUndefined();
     }
-    // And the hint still states the rule that matters for the formula.
-    expect(String(c.payoutHint)).toContain("Selbst bezahlte Versandlabel mindern sie nicht");
+    /*
+     * The three-line formula under the figure is gone with it. The number
+     * moves the moment any amount above it moves, and `settledHint` still
+     * states the one rule that is not visible: which side of the switch
+     * reaches the payout.
+     */
+    expect(c.payoutHint).toBeUndefined();
+    expect(String(de.business.sales.create.settledHint)).toContain("mindert die Auszahlung");
   });
 
-  it("still promises that creating changes no stock", () => {
+  it("the sentence about stock left the form, not the product", () => {
+    /*
+     * `Anlegen ist kein Ausbuchen` is still true and still said — on the
+     * item list, where `Ausbuchen` is the button being described. Under a
+     * submit button it was one more line of prose to scroll past.
+     */
     expect(de.business.sales.create.stockHint).toContain("ändert den Bestand nicht");
-    expect(NEW_SALE).toContain("create.stockHint");
+    expect(NEW_SALE).not.toContain("create.stockHint");
+    expect(read("src/components/business/sale-items.tsx")).toContain("create.stockHint");
   });
 
   it("maps the new refusals to sentences instead of raw SQL", () => {

@@ -548,9 +548,16 @@ describe("the create screen", () => {
     expect(read("src/lib/orderbook/draft.ts")).toContain("valuePurchase");
   });
 
-  it("does not force a figure, and says so", () => {
+  it("does not force a figure", () => {
+    /*
+     * It used to say so in a sentence under the picker. The sentence is
+     * gone: an optional field that simply accepts being left empty does not
+     * need a line explaining that it is optional, and the purchase turns up
+     * under `Unvollständig` either way.
+     */
     expect(NEW_PURCHASE).not.toContain("lines.length === 0 ? setError");
-    expect(de.business.orderbook.figures.emptyAllowed).toContain("unvollständig");
+    expect((de.business.orderbook.figures as Record<string, unknown>).emptyAllowed)
+      .toBeUndefined();
   });
 
   it("keeps the nullable date and invents no default", () => {
@@ -571,14 +578,29 @@ describe("the create screen", () => {
     expect(loop).not.toContain("is_test");
   });
 
-  it("still says that creating changes no stock", () => {
-    expect(NEW_PURCHASE).toContain("createStockHint");
+  it("the stock sentence moved to the button it describes", () => {
+    /*
+     * `Anlegen ist kein Einbuchen` is still true and still said — beside the
+     * item picker on the detail screen, where `Einbuchen` actually is, and
+     * exactly where the Verkauf says its half of the same sentence. Under a
+     * submit button it was one more line of prose between the operator and
+     * the action.
+     */
     expect(de.business.orderbook.createStockHint).toContain("ändert den Bestand nicht");
+    expect(NEW_PURCHASE).not.toContain("createStockHint");
+    expect(read("src/components/business/add-purchase-item.tsx")).toContain("createStockHint");
   });
 
-  it("keeps the Notiz field, quieter than the figures", () => {
-    expect(NEW_PURCHASE).toContain("Notiz");
-    expect(NEW_PURCHASE).toContain("sm:min-h-9");
+  it("keeps the Notiz field, in the quiet group at the end", () => {
+    /*
+     * It used to be a shorter input in the middle of the form. It is now the
+     * last group, under its own heading, with the Testvorgang checkbox —
+     * the two things that are usually left alone, together and last.
+     */
+    expect(NEW_PURCHASE).toContain("copy.newSections.note");
+    const tail = NEW_PURCHASE.slice(NEW_PURCHASE.indexOf("copy.newSections.note"));
+    expect(tail).toContain("copy.testFlag");
+    expect(tail).toContain("copy.submitPurchase");
   });
 });
 
@@ -662,7 +684,7 @@ describe("the German copy", () => {
   it("names every new string the screens use", () => {
     const f = de.business.orderbook.figures;
     for (const key of ["heading", "search", "empty", "remove", "change", "marketValue",
-      "factor", "noMarketValue", "emptyAllowed"] as const) {
+      "factor", "noMarketValue"] as const) {
       expect(typeof f[key]).toBe("string");
     }
     expect(f.units(1)).toBe("1 Figur");

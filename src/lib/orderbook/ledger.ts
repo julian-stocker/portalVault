@@ -21,6 +21,8 @@ export type LedgerRow = {
   note: string | null;
   itemCount: number;
   bookedCount: number;
+  /** Closed without a movement, because they are not catalog figures (0070). */
+  settledCount: number;
   openCount: number;
   knownValue: number;
   knownItems: number;
@@ -127,32 +129,91 @@ export function looksNumeric(term: string): boolean {
 }
 
 export type RowStatus =
-  /** Historical: settled for Orderbuch purposes, owning no movement. */
-  | "settled"
-  /** Every unit booked. */
+  /** Taken over from the workbook. Owns no movement and never will. */
+  | "historical"
+  /** Every unit has a real stock movement. */
   | "complete"
-  /** Work outstanding. */
+  /** Some units have one, some do not. */
+  | "partial"
+  /** Closed without a movement, because it is not a catalog figure (0069). */
+  | "settled"
+  /** No unit has one yet. */
   | "open";
 
-/**
- * What the compact status cell says.
+/*
+ * WHAT `EINGEBUCHT` IS ALLOWED TO MEAN (V4.7).
  *
- * `settled` is the historical case and it is PRESENTATION ONLY. The row is
- * `reconciled_legacy` with `movement_id` NULL and stays that way: the tick
- * means "nothing left to do here", not "a movement exists". The accessible
- * name spells that out, because a bare ✓ in a ledger otherwise reads as
- * "booked into stock" — which would be a false statement about inventory.
+ * Exactly one thing: a stock movement exists. Nothing else earns the word —
+ * not that the purchase was imported, not that the old spreadsheet ticked
+ * its own column, not that current stock was reconciled by another route.
+ *
+ * WHAT WAS WRONG BEFORE
+ *
+ * `rowStatus` returned `settled` for every `excel_order_2026` purchase and
+ * the cell drew a ✓, under a column headed `Eingebucht`. All 84 imported
+ * purchases showed it, and all 2 114 of their items showed the same ✓ under
+ * a column headed `Status` — while not one of them owns a `movement_id`.
+ * The disclaimer lived in the tooltip; the claim lived in the heading, and
+ * the heading is what gets read.
  */
-export function rowStatus(row: { source: string; bookedCount: number; itemCount: number }): RowStatus {
-  if (row.source === "excel_order_2026") return "settled";
+export function rowStatus(row: {
+  source: string; bookedCount: number; itemCount: number; settledCount?: number;
+}): RowStatus {
+  /*
+   * A WORKBOOK PURCHASE STAYS `Historisch`, EVEN WITH AN OPEN UNIT IN IT.
+   *
+   * Since 0067 five of them hold a position that is `ordered` again — eleven
+   * units that never arrived. The purchase itself is still history, and
+   * saying `2 von 54 eingebucht` about it would invite exactly the reading
+   * this change removes. The outstanding work is not hidden: `is_open`
+   * (0066) lights the row's `Offen` mark and the `Offen` filter lists it,
+   * and the item rows below say `Bestellt` in plain words.
+   */
+  if (row.source === "excel_order_2026") return "historical";
+
+  /*
+   * TWO SENTENCES THAT WERE BEING COLLAPSED INTO ONE (0070).
+   *
+   *   "everything was booked"   every position owns a movement
+   *   "nothing is outstanding"  every position is booked OR settled
+   *
+   * Ten figures booked and two portals settled is the second and not the
+   * first, and saying `Eingebucht ✓` about it would claim two movements
+   * that do not exist. `settled` is its own answer, with no tick, and the
+   * settled count is never folded into the booked one — here or in SQL.
+   *
+   * `settledCount` is optional so a caller that predates 0070 still
+   * compiles; absent, it is nought, which is what it was before.
+   */
+  const settled = row.settledCount ?? 0;
+  const closed = row.bookedCount + settled;
   if (row.itemCount > 0 && row.bookedCount === row.itemCount) return "complete";
+  if (row.itemCount > 0 && closed === row.itemCount) return "settled";
+  if (closed > 0) return "partial";
   return "open";
 }
 
-/** The same question for one item. */
-export function itemStatus(item: { state: string }): RowStatus {
-  if (item.state === "reconciled_legacy") return "settled";
-  if (item.state === "booked") return "complete";
+/**
+ * The same question for one item — asked of the movement, not of the state.
+ *
+ * `state = 'booked'` and `movement_id is not null` cannot disagree: the only
+ * path to that state is `seller_book_purchase_item`, which writes both in one
+ * UPDATE, and `seller_set_purchase_item_state` refuses `'booked'` outright
+ * (`0053`). Reading the movement is nevertheless the honest way to ask,
+ * because the movement IS the claim being made.
+ *
+ * `open` covers `ordered`, `arrived`, `damaged` and `missing`; the caller
+ * prints the state's own name, which says more than "not booked".
+ */
+export function itemStatus(item: { state: string; movementId: number | null }): RowStatus {
+  if (item.state === "reconciled_legacy") return "historical";
+  if (item.movementId !== null) return "complete";
+  /*
+   * `settled` is an ending, not outstanding work — but it is NOT a booking
+   * and gets no tick. A portal that is filed away never touched the figure
+   * inventory, and the ✓ in this column means exactly one thing.
+   */
+  if (item.state === "settled") return "settled";
   return "open";
 }
 

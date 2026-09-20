@@ -62,6 +62,7 @@ export const fetchLedger = cache(
         note: (r.note as string) ?? null,
         itemCount: Number(r.item_count),
         bookedCount: Number(r.booked_count),
+        settledCount: Number(r.settled_count ?? 0),
         openCount: Number(r.open_count),
         knownValue: Number(r.known_value),
         knownItems: Number(r.known_items),

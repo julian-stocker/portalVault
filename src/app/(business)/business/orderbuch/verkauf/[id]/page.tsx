@@ -43,6 +43,15 @@ export default async function SalePage({
   const internal = order !== null;
   const historical = String(sale.source) === "excel_order_2026";
   /*
+   * FROZEN IS NARROWER THAN HISTORICAL SINCE 0071.
+   *
+   * A workbook sale the owner released is still history — it keeps its
+   * provenance, its fingerprint and its `Importiert` mark — but it can be
+   * worked on. Only an unreleased one is untouchable.
+   */
+  const frozen = historical && (sale.stock_released_at ?? null) === null;
+  const cancelled = (sale.cancelled_at ?? null) !== null;
+  /*
    * The classification, as the database decided it (0063) — the operator's own
    * flag for an external sale, `orders.commerce_mode` for an internal one.
    * Never worked out again here: two answers to one question is how they start
@@ -123,6 +132,7 @@ export default async function SalePage({
       */}
       <SaleItems saleId={Number(id)} catalog={catalog}
                  internal={internal} historical={historical}
+                 frozen={frozen} cancelled={cancelled}
                  items={internal
                    ? ((order?.lines ?? []) as Record<string, unknown>[]).map((l, i) => ({
                        id: l.id, position: i + 1, series_code: l.series_code,

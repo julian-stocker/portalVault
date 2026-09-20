@@ -35,8 +35,8 @@ import {
 } from "./sales-money.ts";
 import {
   CHANNEL_LABELS, FEE_LABELS, MANUAL_CHANNELS, SETTLEMENT_LABELS, countryLabel,
-  itemActions, parseScope, rpcScope,
-  safeSalesBackHref, salesHref, sortSales,
+  parseScope, rpcScope, saleItemActions, saleItemClosed,
+  safeSalesBackHref, saleStockStatus, salesHref, sortSales,
 } from "./sales-view.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -656,38 +656,136 @@ describe("the payout is derived and nothing else (ADR-0095)", () => {
   });
 });
 
-describe("which action a sold object may show", () => {
-  const item = (over: Partial<{ movement_id: number | null; returned_at: string | null;
-                                return_movement_id: number | null; sky_id: string | null }> = {}) =>
-    ({ movement_id: null, returned_at: null, return_movement_id: null, sky_id: "SKY-0203", ...over });
+describe("one position, one status, one action (0074/0075)", () => {
+  const item = (over: Record<string, unknown> = {}) => ({
+    movement_id: null, returned_at: null, return_movement_id: null,
+    settled_at: null, not_shipped_at: null, return_announced_at: null,
+    sky_id: "SKY-0203", legacy_stock_flag: null, ...over,
+  } as never);
+  const ctx = (over: Partial<{ frozen: boolean; cancelled: boolean; shipped: boolean }> = {}) =>
+    ({ frozen: false, cancelled: false, shipped: true, ...over });
 
-  it("a fresh figure may be booked out", () => {
-    expect(itemActions(item(), false)).toEqual({ canBook: true, canReturn: false, canRestock: false });
+  it("walks a figure through the whole life it can have", () => {
+    /*
+     * The physical story, one step at a time. Each step is one fact the
+     * database records, and each shows exactly one status.
+     */
+    expect(saleItemActions(item(), ctx({ shipped: false })))
+      .toMatchObject({ status: "open", primary: null });
+    expect(saleItemActions(item(), ctx()))
+      .toMatchObject({ status: "shipped", primary: "book" });
+    expect(saleItemActions(item({ movement_id: 5 }), ctx()))
+      .toMatchObject({ status: "outbooked", primary: "announce_return" });
+    expect(saleItemActions(item({ movement_id: 5, return_announced_at: "t" }), ctx()))
+      .toMatchObject({ status: "return_announced", primary: "mark_returned" });
+    expect(saleItemActions(item({ movement_id: 5, returned_at: "t" }), ctx()))
+      .toMatchObject({ status: "returned", primary: "restock" });
+    expect(saleItemActions(item({ movement_id: 5, returned_at: "t", return_movement_id: 6 }), ctx()))
+      .toMatchObject({ status: "restocked", primary: null });
   });
 
-  it("a non-figure may not — it has no stock position", () => {
-    expect(itemActions(item({ sky_id: null }), false).canBook).toBe(false);
+  it("never shows two states at once", () => {
+    /*
+     * The bug this replaced: `Bestand` said `Ausgebucht` and `Retoure` said
+     * `Wieder eingelagert` in the same row, and the reader had to work out
+     * which was true now.
+     */
+    const restocked = item({ movement_id: 5, returned_at: "t", return_movement_id: 6 });
+    expect(saleItemActions(restocked, ctx()).status).toBe("restocked");
+    expect(saleItemActions(restocked, ctx()).status).not.toBe("outbooked");
   });
 
-  it("a booked item may be returned, not booked again", () => {
-    expect(itemActions(item({ movement_id: 546 }), false))
-      .toEqual({ canBook: false, canReturn: true, canRestock: false });
+  it("offers `Nicht verschickt` while the piece is still on the shelf, and not after", () => {
+    expect(saleItemActions(item(), ctx({ shipped: false })).canNotShip).toBe(true);
+    expect(saleItemActions(item(), ctx()).canNotShip).toBe(true);
+    expect(saleItemActions(item({ movement_id: 5 }), ctx()).canNotShip).toBe(false);
+    // And it is its own ending, distinct from `Erledigt`.
+    expect(saleItemActions(item({ not_shipped_at: "t" }), ctx()))
+      .toMatchObject({ status: "not_shipped", primary: "unmark_not_shipped" });
   });
 
-  it("a returned item may be restocked, and only then", () => {
-    expect(itemActions(item({ movement_id: 546, returned_at: "2026-09-18" }), false))
-      .toEqual({ canBook: false, canReturn: false, canRestock: true });
-    expect(itemActions(item({ returned_at: "2026-09-18" }), false).canRestock).toBe(true);
+  it("keeps the settle lock exactly where 0073 put it", () => {
+    // A shelf-bound figure books; it is never closed without a movement.
+    expect(saleItemActions(item(), ctx())).toMatchObject({ primary: "book" });
+    expect(saleItemActions(item(), ctx()).primary).not.toBe("settle");
+    // No catalog row, or the workbook's not-from-stock marker: closed.
+    expect(saleItemActions(item({ sky_id: null }), ctx())).toMatchObject({ primary: "settle" });
+    expect(saleItemActions(item({ legacy_stock_flag: "-" }), ctx()))
+      .toMatchObject({ primary: "settle" });
+    // And neither of those may be marked `Nicht verschickt` instead —
+    // there is no shelf for them to have stayed on.
+    expect(saleItemActions(item({ sky_id: null }), ctx()).canNotShip).toBe(false);
   });
 
-  it("a restocked item offers nothing more", () => {
-    expect(itemActions(item({ movement_id: 546, returned_at: "x", return_movement_id: 547 }), false))
-      .toEqual({ canBook: false, canReturn: false, canRestock: false });
+  it("a frozen or cancelled order offers nothing at all", () => {
+    for (const c of [ctx({ frozen: true }), ctx({ cancelled: true })]) {
+      expect(saleItemActions(item(), c)).toMatchObject({ primary: null, canNotShip: false });
+      expect(saleItemActions(item({ sky_id: null }), c).primary).toBeNull();
+    }
   });
 
-  it("and a historical row offers nothing at all, whatever its markers said", () => {
-    expect(itemActions(item(), true)).toEqual({ canBook: false, canReturn: false, canRestock: false });
-    expect(itemActions(item({ movement_id: 1 }), true).canReturn).toBe(false);
+  it("agrees with the database about what counts as finished", () => {
+    // Mirrors `sale_item_is_closed()` in 0075, case for case.
+    expect(saleItemClosed(item())).toBe(false);
+    expect(saleItemClosed(item({ movement_id: 5 }))).toBe(true);
+    expect(saleItemClosed(item({ movement_id: 5, return_announced_at: "t" }))).toBe(false);
+    expect(saleItemClosed(item({ movement_id: 5, returned_at: "t" }))).toBe(false);
+    expect(saleItemClosed(item({ movement_id: 5, returned_at: "t", return_movement_id: 6 }))).toBe(true);
+    expect(saleItemClosed(item({ settled_at: "t" }))).toBe(true);
+    expect(saleItemClosed(item({ not_shipped_at: "t" }))).toBe(true);
+  });
+});
+
+describe("what the stock column says about a whole sale (0072)", () => {
+  const sale = (over: Partial<Parameters<typeof saleStockStatus>[0]> = {}) => ({
+    source: "manual", cancelledAt: null, stockReleasedAt: null, orderId: null,
+    itemCount: 3, outbookedCount: 0, settledCount: 0, ...over,
+  });
+
+  it("the tick belongs to real movements and to nothing else", () => {
+    expect(saleStockStatus(sale({ outbookedCount: 3 }))).toBe("outbooked");
+  });
+
+  it("finished partly by settling is `Abgeschlossen`, never `Ausgebucht`", () => {
+    /*
+     * Nothing outstanding, but one piece never left figure inventory. Two
+     * different sentences, and the tick is only the first one.
+     */
+    const s = sale({ outbookedCount: 2, settledCount: 1 });
+    expect(saleStockStatus(s)).toBe("closed");
+    expect(saleStockStatus(s)).not.toBe("outbooked");
+    // All three closed the same way, and that way is not a booking.
+    expect(saleStockStatus(sale({ settledCount: 3 }))).toBe("closed");
+  });
+
+  it("partly and not at all are distinguished", () => {
+    expect(saleStockStatus(sale({ outbookedCount: 1 }))).toBe("partial");
+    expect(saleStockStatus(sale({ settledCount: 1 }))).toBe("partial");
+    expect(saleStockStatus(sale())).toBe("open");
+  });
+
+  it("a cancelled order outranks everything", () => {
+    expect(saleStockStatus(sale({ cancelledAt: "2026-08-31", outbookedCount: 3 })))
+      .toBe("cancelled");
+  });
+
+  it("a workbook sale is frozen until 0071 releases it, then it is ordinary", () => {
+    expect(saleStockStatus(sale({ source: "excel_order_2026" }))).toBe("frozen");
+    expect(saleStockStatus(sale({ source: "excel_order_2026", stockReleasedAt: "2026-09-20" })))
+      .toBe("open");
+  });
+
+  it("an order's lines belong to commerce", () => {
+    expect(saleStockStatus(sale({ orderId: 7 }))).toBe("frozen");
+  });
+
+  it("settled is never counted as outbooked", () => {
+    // Stated over the whole space: `outbooked` requires outbookedCount to
+    // equal itemCount on its own, with settled nowhere in the sum.
+    for (const settled of [0, 1, 2, 3]) {
+      const s = sale({ outbookedCount: 3 - settled, settledCount: settled, itemCount: 3 });
+      expect(saleStockStatus(s) === "outbooked", `settled=${settled}`).toBe(settled === 0);
+    }
   });
 });
 
@@ -820,17 +918,19 @@ describe("the ledger renders as a table", () => {
     expect(noComments(LEDGER)).not.toMatch(/ob-sale/);
   });
 
-  it("the collapsed sale has exactly ten cells, in header and in row alike", () => {
+  it("the collapsed sale has exactly eleven cells, in header and in row alike", () => {
     /*
      * If the markup and the track list disagree the extra cells wrap onto a
      * second line — the failure the owner photographed twice.
      */
+    // Eleven since 0072: `Lager` joined the row, between Auszahlung and
+    // Details, because a sale now has a stock state worth a word.
     const columns = constTracks("SALE_COLUMNS");
-    expect(columns).toHaveLength(10);
-    expect(cells(inside(LEDGER, "<LedgerHead>", "</LedgerHead>"))).toBe(10);
+    expect(columns).toHaveLength(11);
+    expect(cells(inside(LEDGER, "<LedgerHead>", "</LedgerHead>"))).toBe(11);
     // The row's last cell wraps the Details button, so it is a cell like the
     // others and the counts still have to agree.
-    expect(cells(inside(LEDGER, "<LedgerRow ", "</LedgerRow>"))).toBe(10);
+    expect(cells(inside(LEDGER, "<LedgerRow ", "</LedgerRow>"))).toBe(11);
   });
 
   it("Intern and Extern are one table, with no scope-dependent cell left", () => {
@@ -846,15 +946,20 @@ describe("the ledger renders as a table", () => {
   });
 
   it("the expanded item table has one cell per item track, on both row kinds", () => {
+    /*
+     * Four since 0075: `Figur · Marktwert · Status · Aktion`. `Bestand` and
+     * `Retoure` were two columns answering one question between them, and
+     * a row could read `Ausgebucht` and `Wieder eingelagert` at once.
+     */
     const columns = constTracks("SALE_ITEM_COLUMNS");
-    expect(columns).toHaveLength(7);
-    expect(cells(inside(LEDGER, "<LedgerItemHead>", "</LedgerItemHead>"))).toBe(7);
+    expect(columns).toHaveLength(4);
+    expect(cells(inside(LEDGER, "<LedgerItemHead>", "</LedgerItemHead>"))).toBe(4);
     // Two kinds of item row — an order line and a sale item — and both must
     // match, or an internal sale's columns slide under an external one's.
     const rows = [...LEDGER.matchAll(/<LedgerItemRow key=/g)].map((m) =>
       LEDGER.slice(m.index, LEDGER.indexOf("</LedgerItemRow>", m.index)));
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(cells(row)).toBe(7);
+    for (const row of rows) expect(cells(row)).toBe(4);
   });
 
   it("Einkauf keeps six item cells, so the shared rule still fits it", () => {
@@ -875,8 +980,11 @@ describe("the ledger renders as a table", () => {
     expect(PRIMITIVES).toContain('"--ob-item-columns": itemColumns');
     expect(LEDGER).toContain("columns={SALE_COLUMNS}");
     expect(LEDGER).toContain("itemColumns={SALE_ITEM_COLUMNS}");
-    // Einkauf passes none and renders from the rule's own fallback.
-    expect(EINKAUF).toContain("<LedgerTable>");
+    // Einkauf passes no column list and renders from the rule's own
+    // fallback — but it does pass a width, because a ledger without a floor
+    // is a ledger whose columns can be crushed.
+    expect(EINKAUF).toContain("<LedgerTable minWidth={PURCHASE_MIN_WIDTH}>");
+    expect(EINKAUF).not.toContain("columns={");
     expect(components).toMatch(/grid-template-columns: var\(--ob-columns,/);
     expect(components).toMatch(/grid-template-columns: var\(--ob-item-columns,/);
   });
@@ -893,25 +1001,32 @@ describe("the ledger renders as a table", () => {
       + 0.75 * (tracks.length - 1) + 0.75 * 2;
     expect(needed).toBeGreaterThan(0);
     expect(Number(declared![1])).toBeGreaterThanOrEqual(needed);
-    // Applied on desktop only, and it is the ledger that scrolls.
-    expect(components.slice(components.indexOf("@media (min-width: 48rem)")))
+    // Applied at EVERY width now, and it is the ledger that scrolls.
+    expect(components.slice(0, components.indexOf("@media (min-width: 48rem)")))
       .toMatch(/\.ob-min \{ min-width: var\(--ob-min-width, 0\); \}/);
-    expect(PRIMITIVES).toContain("overflow-auto");
+    expect(components).toContain(".ob-scroll");
     expect(PRIMITIVES).toContain('<div className="ob-min">');
   });
 
-  it("mobile is the same two-line fallback Einkauf uses", () => {
+  it("mobile gets the same ten columns Einkauf's seven are treated to", () => {
     /*
-     * The custom property is only read inside the desktop query, so passing
-     * ten tracks cannot leak onto a phone — both ledgers collapse identically.
+     * Both ledgers used to collapse to `1fr auto` below 48rem: two lines a
+     * row, no header, eight values crushed onto the second. Ten columns are
+     * not readable that way and neither were seven.
+     *
+     * So the property is read at every width and the table scrolls sideways
+     * under its floor. Whatever Verkauf passes reaches a phone intact —
+     * which is the point, not a leak.
      */
     const mobile = components.slice(0, components.indexOf("@media (min-width: 48rem)"))
       .replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(/grid-template-columns:\s*1fr auto;/.test(mobile)).toBe(true);
-    // The property is not read outside the desktop query, so ten tracks
-    // cannot reach a phone.
-    expect(mobile).not.toContain("--ob-columns");
+    expect(/grid-template-columns:\s*1fr auto;/.test(mobile)).toBe(false);
+    expect(mobile).toContain("--ob-columns");
+    expect(mobile).toContain("--ob-item-columns");
+    // Still no width-conditional column list, in either direction.
     expect(components).not.toMatch(/@media[^{]*max-width[^{]*\{[^}]*ob-(row|item)/);
+    expect(components.slice(components.indexOf("@media (min-width: 48rem)")))
+      .not.toContain("grid-template-columns");
   });
 
   it("money cells never wrap", () => {
@@ -947,17 +1062,17 @@ describe("the ledger renders as a table", () => {
 
   it("the grid is never on a <button>", () => {
     expect(PRIMITIVES).not.toMatch(/<button[^>]*className="ob-/);
-    expect(PRIMITIVES).toContain('className="absolute inset-0 h-full w-full');
+    expect(PRIMITIVES).toContain('className="absolute inset-0 z-10 h-full w-full');
   });
 
   it("item labels are German copy, not strings baked into the JSX", () => {
     // ADR-0019: UI text lives in `de.ts`.
     const head = inside(LEDGER, "<LedgerItemHead>", "</LedgerItemHead>");
-    for (const word of ["Serie", "Artikel", "Marktwert", "Bestand", "Aktion"]) {
+    for (const word of ["Serie", "Artikel", "Marktwert", "Status", "Aktion"]) {
       expect(head, word).not.toContain(`>${word}<`);
     }
-    expect(head).toContain("copy.itemColumns.stock");
-    expect(head).toContain("copy.itemColumns.returned");
+    expect(head).toContain("copy.itemColumns.figure");
+    expect(head).toContain("copy.itemColumns.status");
   });
 
   it("never mutates optimistically", () => {
@@ -1095,7 +1210,22 @@ describe("the Excel financial row", () => {
      */
     const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));
     expect(row).toMatch(/onClick=\{\(event\) => \{ event\.stopPropagation\(\); onDetails\(sale\.id\); \}\}/);
-    expect(row).toContain("relative z-10");
+    /*
+     * AND IT HAS TO OUTRANK THE OVERLAY, NOT MERELY CARRY A Z-INDEX.
+     *
+     * This test used to assert `relative z-10`, and it kept passing when
+     * the overlay was given `z-10` too — at equal z-index the later element
+     * wins, so the overlay swallowed the click and `Details` expanded the
+     * item list instead of opening the dialog. The number alone proves
+     * nothing; the comparison does.
+     */
+    const primitives = read("src/components/business/ledger-table.tsx");
+    const overlay = /absolute inset-0 z-(\d+)/.exec(primitives);
+    const details = /relative z-(\d+) text-center/.exec(row);
+    expect(overlay, "overlay z-index").not.toBeNull();
+    expect(details, "details z-index").not.toBeNull();
+    expect(Number(details![1]), "Details must sit above the row overlay")
+      .toBeGreaterThan(Number(overlay![1]));
     // Two separate pieces of state: one for items, one for the dialog.
     expect(LEDGER).toContain("const [showing, setShowing]");
     expect(LEDGER).toMatch(/const onDetails = \(id: number\) => \{ setShowing\(id\); load\(id\); \};/);
@@ -1829,11 +1959,17 @@ describe("operational creation workflows", () => {
     expect(BOOK).toContain("'sale_external'");
     expect(BOOK).toMatch(/-1, 'sale_external'/);
     expect(BOOK).not.toMatch(/update public\.shop_inventory/);
-    // The screen says so before the button is pressed.
-    expect(NEW_SALE).toContain("create.stockHint");
+    /*
+     * Both screens still say so — beside the picker that adds an item, which
+     * is where `Ausbuchen` and `Einbuchen` actually are. Under the create
+     * form's submit button it was prose nobody read on the way past.
+     */
     expect(de.business.sales.create.stockHint).toContain("Ausbuchen");
-    expect(NEW_PURCHASE).toContain("copy.createStockHint");
     expect(de.business.orderbook.createStockHint).toContain("Einbuchen");
+    expect(read("src/components/business/sale-items.tsx")).toContain("create.stockHint");
+    expect(read("src/components/business/add-purchase-item.tsx")).toContain("createStockHint");
+    expect(NEW_SALE).not.toContain("create.stockHint");
+    expect(NEW_PURCHASE).not.toContain("copy.createStockHint");
   });
 
   it("the two snapshots freeze at Ausbuchen, not at creation", () => {

@@ -32,7 +32,7 @@
  *   * fourteen internal sales belonging to sandbox orders
  *
  * NO INVENTORY. Not one movement, not one quantity. The real stock already
- * matches — 912 pieces on both sides, zero deviations — and Production's
+ * matches — 992 pieces on both sides, zero deviations — and Production's
  * ledger is append-only. No row this tool writes references a movement:
  * every class-A item has `movement_id` NULL, which is checked before writing.
  *

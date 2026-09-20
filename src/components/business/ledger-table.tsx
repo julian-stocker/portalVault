@@ -25,8 +25,13 @@
  * second stylesheet rule that has to survive a scan, a cache or a rebuild for
  * the sale table to have columns.
  *
- * The property is only read inside the desktop media query, so both ledgers
- * still collapse to the same two-line mobile layout.
+ * THE COLUMNS ARE THE SAME AT EVERY WIDTH
+ *
+ * They used to collapse to two lines below 48rem. A phone then showed a
+ * column of unlabelled fragments instead of a ledger. Now both ledgers keep
+ * their real columns and the box scrolls sideways under them, with the first
+ * cell stuck to the left edge so a scrolled row still says which row it is.
+ * See the `.ob-row` block in `globals.css`.
  */
 import type { CSSProperties, ReactNode } from "react";
 
@@ -36,37 +41,49 @@ export type Columns = string;
 /**
  * The scroll box that holds a whole ledger.
  *
- * Scrolls in both directions: down through a long year, and sideways when a
- * wide table does not fit. Only this element scrolls — the page never does.
+ * Sideways at every width, when the table is wider than the window. Downwards
+ * on desktop only: a phone gives the vertical axis back to the page, because
+ * a table that swallows the downward swipe is worse than a long page. The
+ * axes are in `.ob-scroll`.
  */
 export function LedgerTable({ columns, itemColumns, minWidth, children }: {
   columns?: Columns;
   itemColumns?: Columns;
-  /** Desktop-only floor, so wide tables scroll instead of being crushed. */
-  minWidth?: string;
+  /** The width the columns actually need, at every viewport. Required. */
+  minWidth: string;
   children: ReactNode;
 }) {
   const style = {
-    maxHeight: "min(62dvh, 42rem)",
     ...(columns ? { "--ob-columns": columns } : {}),
     ...(itemColumns ? { "--ob-item-columns": itemColumns } : {}),
-    ...(minWidth ? { "--ob-min-width": minWidth } : {}),
+    "--ob-min-width": minWidth,
   } as CSSProperties;
 
+  /*
+   * `.ob-min` is unconditional now. It used to be rendered only when a ledger
+   * passed a width, which meant Einkauf had no floor at all and its seven
+   * columns were free to be squeezed to nothing. A ledger without a floor is
+   * a ledger that can be crushed, so the floor is not optional.
+   */
   return (
-    <div className="mt-3 overflow-auto rounded-sky-lg ring-1 ring-border/70" style={style}>
-      {minWidth ? <div className="ob-min">{children}</div> : children}
+    <div className="ob-scroll mt-3 rounded-sky-lg ring-1 ring-border/70" style={style}>
+      <div className="ob-min">{children}</div>
     </div>
   );
 }
 
 /**
- * The column header. Desktop only — on a phone the values label themselves
- * and a header would only cost a line.
+ * The column header, at every width.
+ *
+ * It used to be desktop-only, on the reasoning that a phone's two-line row
+ * labelled itself. The row has real columns on a phone now, and a column you
+ * have scrolled three places sideways does not label itself at all — so the
+ * header is the thing that makes the scroll readable rather than a line the
+ * small screen can spare.
  */
 export function LedgerHead({ children }: { children: ReactNode }) {
   return (
-    <div className="ob-row sticky top-0 z-10 hidden bg-surface text-xs text-muted ring-1 ring-border/60 md:grid"
+    <div className="ob-row sticky top-0 z-10 grid bg-surface text-xs text-muted ring-1 ring-border/60"
          style={{ minHeight: "2rem" }} aria-hidden="true">
       {children}
     </div>
@@ -90,12 +107,21 @@ export function LedgerRow({ children, expanded, controls, label, onToggle }: {
   label: ReactNode;
   onToggle: () => void;
 }) {
+  /*
+   * OPAQUE, AND A STACKING CONTEXT OF ITS OWN.
+   *
+   * Opaque because the sticky first cell inherits this background in order to
+   * hide the columns sliding under it; `bg-surface/60` would have let them
+   * show through. `isolate` because the overlay button has to outrank that
+   * sticky cell — without a context of its own, a `z-10` button would also
+   * outrank the sticky HEADER and paint over it on a vertical scroll.
+   */
   return (
-    <div className="ob-row relative bg-surface/60 text-sm hover:bg-surface has-[button:focus-visible]:ring-1 has-[button:focus-visible]:ring-fg/50">
+    <div className="ob-row relative isolate bg-surface text-sm hover:bg-surface-raised has-[button:focus-visible]:ring-1 has-[button:focus-visible]:ring-fg/50">
       {children}
       <button type="button" onClick={onToggle}
               aria-expanded={expanded} aria-controls={controls}
-              className="absolute inset-0 h-full w-full cursor-pointer outline-none">
+              className="absolute inset-0 z-10 h-full w-full cursor-pointer outline-none">
         <span className="sr-only">{label}</span>
       </button>
     </div>
@@ -109,21 +135,34 @@ export function LedgerRow({ children, expanded, controls, label, onToggle }: {
  * instead of spanning the table.
  */
 export function LedgerExpansion({ id, children }: { id: string; children: ReactNode }) {
+  /*
+   * `bg-bg/40` stood here and did nothing: there is no `--color-bg` in the
+   * theme, so the utility was never generated and the expansion had no
+   * background at all. `canvas` is the token that was meant — one step
+   * darker than the surface the rows sit on, which is what tells the eye the
+   * items belong inside the row above them.
+   */
   return (
-    <div id={id} className="border-t border-border/50 bg-bg/40 pb-1">{children}</div>
+    <div id={id} className="border-t border-border/50 bg-canvas pb-1">{children}</div>
   );
 }
 
-/** The header of an expanded item list. Desktop only, same as `LedgerHead`. */
+/** The header of an expanded item list, at every width — same as `LedgerHead`. */
 export function LedgerItemHead({ children }: { children: ReactNode }) {
   return (
-    <div className="ob-item hidden text-xs text-muted md:grid" style={{ minHeight: "1.75rem" }}>
+    <div className="ob-item grid bg-canvas text-xs text-muted" style={{ minHeight: "1.75rem" }}>
       {children}
     </div>
   );
 }
 
-/** One line inside an expanded row. */
+/**
+ * One line inside an expanded row.
+ *
+ * Carries the background rather than leaving it to the expansion: the sticky
+ * `#` cell inherits it, and `inherit` from a transparent parent is still
+ * transparent.
+ */
 export function LedgerItemRow({ children }: { children: ReactNode }) {
-  return <li className="ob-item text-sm">{children}</li>;
+  return <li className="ob-item bg-canvas text-sm">{children}</li>;
 }

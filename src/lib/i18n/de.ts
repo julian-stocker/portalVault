@@ -800,13 +800,22 @@ export const de = {
        */
       newCompact: "+ Neu",
       newPurchase: "Neuen Einkauf anlegen",
+      /*
+       * Die vier Gruppen des Anlegen-Formulars. Dieselbe Ordnung wie im
+       * Verkauf: erst was der Vorgang ist, dann was drin war, dann was er
+       * gekostet hat, dann das Optionale.
+       */
+      newSections: {
+        purchase: "Einkauf", figures: "Figuren", amount: "Betrag", note: "Notiz",
+      },
+      purchasePrice: "Kaufpreis",
+      submitPurchase: "Einkauf anlegen",
       allYears: "Alle Jahre",
       allMonths: "Alle Monate",
       /* Ein Einkauf ohne Datum ist ein echter Einkauf — nur das Datum fehlt
          noch. Kein Platzhalterdatum, keine leere Zelle, die kaputt aussieht. */
       undatedFilter: "Ohne Datum",
       undated: "Datum fehlt",
-      undatedNew: "Leer lassen, wenn das Kaufdatum noch nicht feststeht.",
       /* Kaufen ist noch kein Einlagern. */
       createStockHint: "Das Anlegen ändert den Bestand nicht. "
         + "Erst „Einbuchen“ bei der einzelnen Position legt sie ins Lager.",
@@ -882,7 +891,9 @@ export const de = {
         expenses: "Ausgaben",
         marketValue: "Marktwert",
         factor: "Faktor",
-        progress: "Eingebucht",
+        /* Hieß „Eingebucht" und behauptete das für jede Zeile darunter. Die
+           Spalte zeigt vier Zustände, also benennt sie das Thema. */
+        progress: "Lager",
         source: "Quelle",
       },
       sources: { manual: "manuell", excel_order_2026: "Order 2026" },
@@ -918,9 +929,30 @@ export const de = {
       /* Kopfzeile der aufgeklappten Artikelliste. */
       itemColumns: { series: "Serie", figure: "Figur", status: "Status", action: "Aktion" },
       back: "Zurück zum Orderbuch",
-      /* Der Haken heißt NICHT „eingebucht". Historische Zeilen besitzen keine
-         Lagerbewegung — er heißt „hier ist nichts mehr zu tun". */
+      /*
+       * „EINGEBUCHT" HEISST GENAU EINE SACHE: es gibt eine Lagerbewegung.
+       *
+       * Bis V4.7 stand über der Spalte „Eingebucht" und in jeder Zelle eines
+       * importierten Einkaufs ein ✓ — bei 84 Einkäufen und 2114 Positionen,
+       * von denen keine einzige eine `movement_id` besitzt. Der Vorbehalt
+       * stand im Tooltip, die Behauptung in der Überschrift; gelesen wird die
+       * Überschrift.
+       *
+       * Vier Zustände, vier Wörter. Das ✓ erscheint nur beim vierten.
+       */
       settled: "Historisch übernommen",
+      historicalLabel: "Historisch",
+      historicalHint: "Bestand separat abgeglichen",
+      completeCell: "Eingebucht ✓",
+      openRowLabel: "Offen",
+      openRowHint: "Noch nichts eingebucht",
+      /* Teils gebucht: die Zelle zeigt die Zahlen, der Tooltip das Wort. */
+      partialLabel: "Teilweise eingebucht",
+      /* Nichts mehr offen — aber nicht alles gebucht: Nicht-Katalogartikel
+         wurden erledigt statt eingebucht. Deshalb kein Haken. */
+      closedLabel: "Erledigt",
+      closedHint: (booked: number, settled: number) =>
+        `${booked} eingebucht · ${settled} erledigt — nichts mehr offen`,
       completeLabel: "Vollständig eingebucht",
       openLabel: (booked: number, total: number) => `${booked} von ${total} eingebucht`,
       /** „%s von %s" — wie viele Einheiten schon im Bestand sind. */
@@ -997,18 +1029,28 @@ export const de = {
             : `${n.toLocaleString("de-AT")} Figuren ohne Marktpreis — Marktwert und Faktor sind unvollständig.`,
         /* Ohne Figur speichern bleibt erlaubt (0063): der Einkauf ist dann
            „Unvollständig" und wird später ergänzt. */
-        emptyAllowed: "Ohne Figur anlegen ist möglich — der Einkauf gilt dann als unvollständig.",
         limit: (n: number) => `Mehr als ${n} Figuren auf einmal gehen nicht.`,
       },
 
+      /*
+       * Diese Wörter stehen an zwei Stellen: auf den Zustandsknöpfen der
+       * Detailseite und in der Lager-Spalte des Buchs. Groß geschrieben,
+       * weil sie dort Statusangaben sind und keine Satzfragmente.
+       */
       states: {
-        ordered: "bestellt",
-        arrived: "angekommen",
-        damaged: "beschädigt",
-        missing: "fehlt",
-        booked: "eingebucht",
-        reconciled_legacy: "historisch",
+        ordered: "Bestellt",
+        arrived: "Angekommen",
+        damaged: "Beschädigt",
+        missing: "Fehlt",
+        booked: "Eingebucht",
+        reconciled_legacy: "Historisch",
+        /* Das Ende für etwas, das keine Katalogfigur ist (0069). */
+        settled: "Erledigt",
       },
+      /* Die Aktion dazu — nur bei Positionen ohne Katalogfigur. */
+      settle: "Erledigt",
+      settleHint: "Kein Katalogartikel — kommt nicht in den Figurenbestand.",
+      unsettle: "Zurücknehmen",
       errors: {
         alreadyBooked: "Dieser Artikel ist bereits im Bestand. Nimm die Buchung zurück, bevor du ihn änderst.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und kann nicht in den Figurenbestand.",
@@ -1061,13 +1103,30 @@ export const de = {
       /* Anlegen eines externen Verkaufs. Intern entsteht aus einer Bestellung. */
       create: {
         title: "Neuer externer Verkauf",
-        hint: "Für eBay und andere Verkäufe außerhalb von SkyIsles. "
-          + "Interne SkyIsles-Verkäufe entstehen automatisch aus einer bezahlten Bestellung.",
-        channel: "Kanal", date: "Verkaufsdatum", country: "Land",
+        /*
+         * DIE ÜBERSCHRIFTEN TRAGEN JETZT DIE ERKLÄRUNG.
+         *
+         * Das Formular stand voller Sätze: eine Einleitung, ein Hinweis unter
+         * dem Datum, einer zur Vorlage, einer zu den Figuren, einer zum
+         * Abrechnungsschalter, drei Zeilen Formel unter der Auszahlung. Auf
+         * einem Telefon war mehr Fließtext als Eingabe zu sehen.
+         *
+         * Die Sätze sind weg, die Gruppen geblieben: sechs Überschriften, die
+         * sagen, was in ihnen steht. Was ein Feld bedeutet, sagt sein Name;
+         * was der Abrechnungsschalter bewirkt, zeigt die Auszahlung, die sich
+         * beim Umschalten bewegt. Erklärt wird nur noch, was man nicht sehen
+         * kann.
+         */
+        sections: {
+          sale: "Verkauf", figures: "Figuren", amounts: "Beträge",
+          costs: "Kosten", payout: "Auszahlung", note: "Notiz",
+        },
+        /* Optionale Angaben, zusammen und leiser. */
+        moreDetails: "Weitere Angaben",
+        channel: "Kanal", date: "Datum", country: "Land",
         buyer: "Käufer", reference: "Referenz", note: "Notiz",
         subtotal: "Summe", shipping: "Versand", discount: "Rabatt",
         submit: "Verkauf anlegen",
-        dateHint: "Leer lassen, wenn das Datum noch nicht feststeht.",
         /* Anlegen ist noch keine Lagerbewegung. */
         stockHint: "Das Anlegen ändert den Bestand nicht. "
           + "Erst „Ausbuchen“ bei der einzelnen Position nimmt sie aus dem Lager.",
@@ -1091,17 +1150,20 @@ export const de = {
          * Auszahlung mindert: ein über eBay gekauftes Label schon, ein am
          * Schalter gekauftes nicht — es ist trotzdem echtes Geld.
          */
-        template: "Vorlage",
-        templateNames: { ebay: "eBay", manual: "Ohne Vorlage" },
-        templateHint: "Bestimmt nur Beschriftungen und sichtbare Felder.",
+        /*
+         * Die Auswahl heißt „Kanal", nicht „Vorlage": der Inhaber wählt hier,
+         * wo verkauft wurde — dass davon auch das Layout abhängt, ist eine
+         * Folge und keine Frage, die er beantworten muss. Gespeichert wird
+         * weiterhin `sales.channel`, unverändert.
+         */
+        template: "Kanal",
+        templateNames: { ebay: "eBay", manual: "Manuell" },
 
-        incomeHeading: "Vom Käufer bezahlt",
-        costHeading: "Gebühren und Kosten",
-        subtotalLabel: "Verkauf (Artikelpreis)",
-        shippingLabel: "Versand (vom Käufer bezahlt)",
+        subtotalLabel: "Verkaufspreis",
+        shippingLabel: "Versand vom Käufer",
         discountLabel: "Rabatt",
 
-        feeAdd: "+ Gebühr",
+        feeAdd: "+ Kosten",
         feeAddLabel: "Weitere Gebühr",
         feeRemove: (label: string) => `${label} entfernen`,
         feeLabelPlaceholder: "Bezeichnung",
@@ -1109,20 +1171,16 @@ export const de = {
         settledBy: "Abgezogen von",
         settledChannel: "Kanal",
         settledExternal: "selbst bezahlt",
+        /* Bleibt: der Schalter selbst ist zwei Wörter, seine Wirkung nicht. */
         settledHint: "„Kanal“ mindert die Auszahlung. „selbst bezahlt“ kostet Geld, "
           + "ändert aber nicht, was der Kanal überweist.",
         feeNeedsLabel: "Bitte die weitere Gebühr benennen.",
 
-        adjustment: "Gutschrift / Korrektur",
-        adjustmentHint: "Vorzeichen zählt: + erhöht die Auszahlung, − verringert sie.",
+        adjustment: "Korrektur",
 
         expectedPayout: "Auszahlung",
-        payoutHint: "Berechnet nach derselben Formel wie die importierten Verkäufe: "
-          + "Verkauf + Versand − Rabatt − vom Kanal einbehaltene Gebühren + Korrekturen. "
-          + "Selbst bezahlte Versandlabel mindern sie nicht.",
 
         figuresHeading: "Figuren",
-        figuresHint: "Beim Anlegen wird nichts ausgebucht.",
       },
       channels: { ebay: "eBay", manual: "Manuell" },
       /* Zuordnung einer Position korrigieren (0065). Nur handgemachte,
@@ -1144,7 +1202,7 @@ export const de = {
       columns: {
         date: "Datum", country: "EU", sum: "Summe", shipping: "Versand",
         discount: "Rabatt", fees: "Fees", label: "Label", refund: "Refund",
-        payout: "Auszahlung", details: "Details",
+        payout: "Auszahlung", stock: "Lager", details: "Details",
         /* Weiterhin gebraucht: Filter, Detailansicht, Intern-Spalte. */
         channel: "Kanal", countryName: "Land", items: "Artikel",
         order: "Bestellung", gross: "Gesamt",
@@ -1203,9 +1261,11 @@ export const de = {
       /* Die Spalten der aufgeklappten Positionsliste. Dieselbe Tabelle wie im
          Einkauf, um „Bestand" und „Retoure" erweitert — beides sind eigene
          Tatsachen und gehören nicht in eine gemeinsame Statusspalte. */
+      /* Vier Spalten seit 0075: `Bestand` und `Retoure` beantworteten zu
+         zweit eine Frage und konnten sich widersprechen. */
       itemColumns: {
         series: "Serie", figure: "Figur", marketValue: "Marktwert",
-        stock: "Bestand", returned: "Retoure", action: "Aktion",
+        status: "Status", action: "Aktion",
       },
       summary: {
         count: "Verkäufe", items: "Artikel", gross: "Umsatz",
@@ -1223,6 +1283,63 @@ export const de = {
       /* Bestand — der Haken heißt „ausgebucht", nicht „verkauft": das eine ist
          eine Lagerbewegung, das andere ein Geschäftsvorfall. */
       book: "Ausbuchen", booked: "Ausgebucht", booking: "Wird ausgebucht …",
+      /*
+       * Das Ende für eine Position, die nie im Figurenbestand stand (0073) —
+       * ein Portal, oder eine Zeile, die das Arbeitsbuch mit L="-" als nicht
+       * aus dem Lager genommen markiert hat. Kein Haken: „Ausgebucht" heißt
+       * genau, dass eine Lagerbewegung existiert.
+       */
+      settle: "Erledigt",
+      unsettle: "Zurücknehmen",
+      settleHint: "Kein Lagerabgang — diese Position stand nicht im Figurenbestand.",
+      /*
+       * Ein Zustand je Position (0074/0075). Der Haken steht nur an den
+       * beiden, hinter denen eine echte Lagerbewegung steht.
+       */
+      itemStates: {
+        open: "Offen",
+        shipped: "Verschickt",
+        outbooked: "Ausgebucht ✓",
+        return_announced: "Retoure unterwegs",
+        returned: "Retoure angekommen",
+        restocked: "Wieder eingelagert ✓",
+        not_shipped: "Nicht verschickt",
+        settled: "Erledigt",
+      },
+      itemActionLabels: {
+        book: "Ausbuchen",
+        announce_return: "Retoure melden",
+        mark_returned: "Retoure angekommen",
+        restock: "Einlagern",
+        settle: "Erledigt",
+        unsettle: "Zurücknehmen",
+        unmark_not_shipped: "Zurücknehmen",
+      },
+      /* Positionsebene — `notShipped` oben gehört dem Versandschalter der
+         ganzen Bestellung und bedeutet etwas anderes. */
+      markNotShippedItem: "Nicht verschickt",
+      notShippedItemHint: "Ging nicht mit raus — bleibt im Bestand, wird nicht ausgebucht.",
+      states: { settled: "Erledigt" },
+      /* Lagerstatus eines ganzen Verkaufs (0072). */
+      stock: {
+        outbooked: "Ausgebucht ✓",
+        outbookedHint: "Alle Positionen ausgebucht und nicht zurückgekommen",
+        returned: "Retour ✓",
+        returnedHint: "Alle Positionen zurück und wieder eingelagert",
+        closed: "Abgeschlossen",
+        closedHint: (outbooked: number, restocked: number, settled: number, notShipped: number) =>
+          `${outbooked} ausgebucht · ${restocked} retour · ${settled} erledigt · ${notShipped} nicht verschickt`,
+        settled: "Erledigt",
+        settledHint: (booked: number, settled: number) =>
+          `${booked} ausgebucht · ${settled} erledigt — nichts mehr offen`,
+        cancelled: "Storniert",
+        cancelledHint: "Bestellung storniert — kein Lagerabgang",
+        frozen: "Historisch",
+        frozenHint: "Bestand separat abgeglichen",
+        open: "Offen",
+        openHint: "Noch nichts ausgebucht",
+        partial: "Teilweise ausgebucht",
+      },
       unbook: "Ausbuchen zurücknehmen",
       returnItem: "Retoure eingegangen", returned: "Retoure",
       restock: "Wieder einlagern", restocked: "Wieder eingelagert",

@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-19 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-20 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -17,7 +17,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
 > | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
 > | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
-> | Production-Migration | `0053`–`0066` am **2026-09-19 angewandt** (Orderbuch-Release) |
+> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow) |
 > | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
 > | Production-Testbestellungen | **keine weiteren** |
 >
@@ -46,6 +46,120 @@ Die vollständige Änderungshistorie liegt in Git.
 > Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
 > Betreiber stellt den Modus auf `closed` zurück.
 
+## Orderbuch-Workflow Einkauf und Verkauf auf Production (2026-09-20) — abgeschlossen
+
+Der Orderbuch-Block ist fachlich vollständig: Einkauf **und** Verkauf laufen auf Production.
+Die tragende Regel steht in **ADR-0099** — *Orderbuchstatus ist nicht Lagerstatus* —, das
+Datenmodell in `docs/DATABASE.md`, Abschnitte 3.3aa–3.3ad.
+Die Migrationen `0067`–`0076` sind am 2026-09-20 von Hand über den SQL-Editor angewandt —
+einen DDL-Pfad gibt es in diesem Projekt nicht —, der anschließende Postcheck ist **50/50
+PASS**, ausschließlich lesend.
+
+**Production-Baseline nach dem Rollout — unverändert gegenüber vorher:**
+
+| | |
+|---|---|
+| Gesamtbestand | **1 201 Stück** · 264 Positionen |
+| davon real verkäuflich | **992 Stück** · 260 Positionen, alle `loose` |
+| davon Fixtures (`SKY-9994`, `SKY-9998`) | **209 Stück** · 4 Positionen |
+| reserviert | **0** |
+| `inventory_movements` | **628** |
+
+**Keine der zehn Migrationen hat eine Inventory-Bewegung erzeugt.** Die jüngste Bewegung
+datiert weiterhin auf 2026-09-18 und stammt aus dem Bestandsabgleich, nicht aus dem Rollout.
+Nur drei ändern überhaupt Daten — `0067`, `0071`, `0076` —, alle drei mit einem
+Vorher/Nachher-Wächter auf Bestand und Bewegungszahl, der den Block zurückrollt, sobald sich
+eine der beiden Zahlen bewegt. `record_inventory_movement` kommt im ganzen Satz genau einmal
+vor: im Rumpf von `seller_book_sale_item` (`0073`), also erst, wenn jemand später *Ausbuchen*
+drückt.
+
+### Was sich fachlich geändert hat
+
+*Einkauf.* **5 historische Einkäufe mit 109 Positionen stehen wieder offen (`ordered`)**
+(`0067`) — bezahlte Ware, die noch unterwegs ist. Die übrigen 2 005 der 2 114 Positionen
+bleiben `reconciled_legacy`. `is_open` versteckt eine Position nicht mehr allein deshalb, weil
+sie keine `sky_id` trägt (`0068`); drei der 109 sind genau solche. Für sie gibt es das neue
+Ende `settled` — „Erledigt" — mit serverseitiger Sperre: eine Position **mit** `sky_id` lässt
+sich auch per direktem RPC nicht auf `settled` setzen (`0069`), und der Ledger zählt sie
+getrennt (`0070`).
+
+*Verkauf.* **21 historische Verkäufe sind freigegeben und als verschickt markiert, 1 ist
+storniert** (`0071`). Ihre **197 Positionen wurden durch den Rollout nicht ausgebucht**: alle
+197 tragen weiterhin `movement_id` NULL, 193 mit SKY-ID und 4 ohne Katalogbezug. Auch
+`settled_at`, `not_shipped_at`, `return_announced_at` und `return_movement_id` sind über alle
+1 253 Verkaufspositionen hinweg leer. Der Verkaufsstatus wird aus Positionsfakten abgeleitet
+(`0072`, `0075`), zwei Endungen kamen dazu — *Nicht verschickt* und *Retoure unterwegs*
+(`0074`) —, und `seller_book_sale_item` verweigert vier Fälle mehr als vorher (`0073`).
+
+*Testvorgänge.* **0 Production-Testsales.** `0076` markiert zwei Smoke-Verkäufe als
+Testvorgang; beide existieren **nur auf Staging** (Sale 15 `SMOKE-1`, Sale 19 `UIFLOW-1`). Auf
+Production findet die Migration planmäßig 0 Treffer, meldet das per `notice` und ändert nichts
+— sie scheitert dort bewusst nicht, sonst wäre der Satz nicht anwendbar.
+
+### Zwei Punkte, die offen bleiben
+
+- **`SKY-0063` Stump Smash — vor dem ersten echten Ausbuchen physisch zählen.** Zwei Positionen
+  stehen offen. Die Spalte `S` im Arbeitsbuch ist handgetippt;
+  bei dieser einen Figur lässt sich aus den Daten nicht entscheiden, ob ein Ausbuchen doppelt
+  abziehen würde. Das ist eine Zählung am Regal, keine Datenfrage.
+- **`Terrafin S2` / `SKY-0181`** (Item 1201, Sale 287) trägt `legacy_stock_flag = '-'`: Das
+  Arbeitsbuch sagt, dieses Exemplar wurde verschickt, aber **nie dem Lager entnommen**. Die
+  Position bleibt deshalb **bewusst ohne Lagerbewegung** und wird über *Erledigt* abgeschlossen,
+  nicht über *Ausbuchen* — `0073` verweigert ihr das Ausbuchen serverseitig. Das Exemplar im
+  Regal ist nachweislich ein anderes als das verkaufte.
+
+### Noch nicht auf Production: der zugehörige Anwendungscode
+
+Die Datenbankseite ist ausgerollt, **der Code nicht**. Die Orderbuch-Oberfläche zu diesem Block
+— abgeleiteter Verkaufsstatus, Positionstabelle, *Erledigt* / *Nicht verschickt* / *Retoure*,
+Mobile-Überarbeitung — ist gebaut und getestet, aber **weder committet noch deployt**. Das
+laufende Vercel-Deployment spricht mit den neuen RPCs über älteren Code: zusätzliche Felder
+ignoriert er, die neuen Aktionen fehlen in der Oberfläche schlicht. Die beiden folgenden
+Abschnitte beschreiben genau diesen noch nicht committeten Teil.
+
+---
+
+## Sammlungsstatus auf der Figurenkarte (2026-09-20) — nicht committet
+
+Eine Figur, die dem Sammler fehlt, wird eine Spur kleiner gezeichnet (×0,97) und ihre **Hülle**
+entsättigt (ADR-0098). Das gesamte Kartendesign ist ein einziges PNG — Layer 2 von
+`FigureCard` —, also erreicht der Filter Figurenbild, Name, Varianten-Siegel, MARKTWERT, Preis,
+Element und Angebotszeile strukturell nicht; sie bleiben bei voller Farbe und vollem Kontrast.
+
+Die Größe ist `transform: scale()`, nicht Breite: **das Raster kann sich nicht verschieben.**
+`transform-origin: center bottom`, damit die Karten einer Zeile auf einer Linie stehen.
+
+Abgestuft wird nur dort, wo die Sammlung bekannt ist — angemeldeter Katalog. Abgemeldet, für
+den Administrator und auf der Figurenseite bleibt alles wie bisher; sonst wäre jede Karte
+geschrumpft und grau, was nichts über Besitz aussagt. **Keine neue Geschäftslogik, kein Schema.**
+
+---
+
+## Orderbuch auf dem Telefon (2026-09-20) — nicht committet
+
+Das Orderbuch war für den Schreibtisch gebaut und wird am Telefon benutzt (ADR-0097).
+**Nur UI, Layout und Text — keine Geschäftslogik, keine Berechnung, kein RPC, kein Schema.**
+
+*Die Tabellen.* Unterhalb von 48rem klappten beide Bücher auf zwei Zeilen ohne Kopfzeile
+zusammen; bei einem Verkauf drängten sich acht Werte in die zweite. Jetzt gelten dieselben
+Spalten bei jeder Breite, die Box scrollt seitwärts, die Kopfzeile ist sichtbar, und die erste
+Spalte klebt links, damit eine gescrollte Zeile weiter sagt, welche Zeile sie ist. Die
+vertikale Achse gehört auf dem Telefon der Seite, auf dem Desktop unverändert dem Buch.
+
+*Der Boden wird nach der flexiblen Spalte bemessen.* Nach der Summe bemessen bekäme `Figur`
+40 bzw. 68 Pixel — beide Positionslisten waren so, sichtbar wurde es erst, seit der Boden auch
+auf dem Telefon gilt. Einkauf 44rem, Verkaufs-Positionsliste 52rem.
+
+*Die Anlegen-Formulare.* Sechs Gruppen im Verkauf, vier im Einkauf, eine Spalte auf dem
+Telefon, 44px-Ziele, und acht Erklärtexte weniger. Der Satz „Anlegen ändert den Bestand nicht"
+ist umgezogen statt gelöscht — neben `Einbuchen`/`Ausbuchen`. `Vorlage` heißt jetzt `Kanal`.
+
+*Nebenbefund:* `bg-bg/40` benannte keine Theme-Farbe und tat nie etwas; gemeint war `canvas`.
+
+22 neue Tests gegen echte Gerätebreiten (320/360/390/393/414) in `mobile-layout.test.ts`.
+
+---
+
 ## Orderbuch-Release nach Production (2026-09-19) — abgeschlossen
 
 Das Orderbuch ist gebaut, auf Staging verifiziert und mitsamt der rekonstruierten
@@ -65,7 +179,9 @@ angewandt**, von Hand über den SQL-Editor — einen DDL-Pfad gibt es in diesem 
 
 Nur `source = 'excel_order_2026'`. Keine Lagerbewegung, kein Bestand, kein `auth.users`, keine
 Staging-Testvorgänge, keine Fixtures, keine Secrets. Der reale Bestand stimmte vorher schon auf
-beiden Seiten (912 = 912); die 171 Stück Differenz waren ausschließlich Fixtures.
+beiden Seiten (992 = 992, positionsgenau über 250 Positionen, 0 Mengendifferenzen); die
+171 Stück Gesamtdifferenz sind 181 Stück Production-Fixtures abzüglich 10 Stück
+`boxed`-Testpositionen, die es nur auf Staging gibt.
 
 Nachprüfung: 34/34, `max |Δ|` der 292 Auszahlungen **0,0000000000**.
 
@@ -2047,6 +2163,33 @@ ADR-0015). Vercel ist eingerichtet, die kanonische Domain ist **`https://skyisle
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt
+
+**2026-09-20, Post-Deployment-Check Production nach `0067`–`0076` — read-only, 50/50 PASS:**
+
+| Prüfung | Ergebnis |
+|---|---|
+| Bestand · real · Fixtures · reserviert · Bewegungen | ✅ 1 201 · 992 · 209 · 0 · 628 |
+| Journal gegen Bestandstabelle | ✅ 628 Bewegungen summieren auf 1 201 |
+| jüngste Bewegung | ✅ 2026-09-18 — der Rollout hat keine erzeugt |
+| `purchase_items` gesamt · `ordered` · `reconciled_legacy` · `settled` | ✅ 2 114 · 109 · 2 005 · 0 |
+| offene Einkäufe | ✅ genau 79, 80, 82, 83, 84 — kein sechster |
+| `sales` gesamt · freigegeben · davon verschickt · storniert · Testsales | ✅ 295 · 21 · 21 · 1 · 0 |
+| die 197 betroffenen Verkaufspositionen | ✅ alle ohne `movement_id`, 193 mit SKY-ID, 4 Non-Catalog |
+| `settled_at` · `not_shipped_at` · `return_announced_at` · `return_movement_id`, global | ✅ 0 · 0 · 0 · 0 |
+| Terrafin S2 (Item 1201, SKY-0181, Sale 287) | ✅ vorhanden, `legacy_stock_flag = '-'`, ohne Bewegung |
+| `SKY-0063` Stump Smash | ✅ 2 offene Positionen, keine Bewegung, keine automatische Korrektur |
+| Funktionen aus `0068`–`0075` | ✅ 7 seller-gesperrte erreichbar, `sale_item_is_closed` antwortet |
+| Spalten aus `0071` / `0074` | ✅ alle fünf lesbar |
+
+Ausschließlich lesend: keine RPC-Schreibtests, keine Testvorgänge, keine Bewegung erzeugt. Die
+seller-gesperrten Funktionen sind über ihr `insufficient_privilege` nachgewiesen, das als erste
+Anweisung vor jeder Schreiboperation greift.
+
+**Nicht geprüft, weil PostgREST es nicht hergibt:** die Constraint-Definitionen und die
+Funktionsrümpfe selbst — `pg_proc`, `pg_constraint` und `information_schema` sind über die API
+nicht erreichbar. Belegt sind sie durch den fehlerfreien Lauf der Migrationen und durch
+Staging. Ebenso gab es **keine Grammatikprüfung** für `0067`–`0076`: `libpg-query` ist in
+dieser Umgebung kaputt gepackt.
 
 **2026-09-04, Charakter-Pilot (ADR-0034) — teilweise verifiziert:**
 

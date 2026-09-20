@@ -36,7 +36,10 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { bookPurchaseItem, loadPurchaseItems } from "@/lib/orderbook/actions";
-import { canCheckIn, itemStatus, rowStatus, type LedgerRow as LedgerRowData, type LedgerSummary } from "@/lib/orderbook/ledger";
+import {
+  canCheckIn, itemStatus, rowStatus,
+  type LedgerRow as LedgerRowData, type LedgerSummary, type RowStatus,
+} from "@/lib/orderbook/ledger";
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
 } from "./ledger-table";
@@ -44,6 +47,21 @@ import { RowMarks } from "./orderbook-nav";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
 
 const copy = de.business.orderbook;
+
+/*
+ * THE FLOOR, AND WHY IT IS NOT THE MINIMUM.
+ *
+ * The seven ledger tracks need 38.5rem — 32.5rem of tracks, six 0.75rem
+ * gaps, 0.75rem of row padding each side. Setting the floor there would be
+ * arithmetically correct and wrong in practice: the EXPANDED row's `Figur`
+ * track is `minmax(0, 1fr)`, so at 38.5rem it collects the 4.25rem nobody
+ * else claimed — 68 pixels, which truncates almost every figure name.
+ *
+ * 44rem leaves `Figur` 9.75rem. It is the same floor the Verkauf item list
+ * uses, and it is chosen for the flexible column rather than for the sum:
+ * a table wide enough to fit is not the same as a table wide enough to read.
+ */
+const PURCHASE_MIN_WIDTH = "48rem";
 
 const formatFactor = (factor: number | null): string =>
   factor === null ? "—" : factor.toLocaleString("de-AT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -61,20 +79,28 @@ const formatDate = (iso: string | null): string =>
     : new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
 
 /**
- * The status cell: a tick, or how much is left.
+ * The status cell — and the ✓ is a claim now, not a decoration.
  *
- * The tick on a historical row is presentation. Those rows are
- * `reconciled_legacy` with `movement_id` NULL and remain so — it says "nothing
- * outstanding", never "a movement exists". Which is why it carries an
- * accessible name of `Historisch übernommen` instead of standing alone.
+ * ONE RULE: the tick appears if and only if a stock movement exists. A
+ * historical row says `Historisch` in words and carries no tick at all,
+ * because a ✓ in a column about inventory reads as "this is on the shelf
+ * because I put it there" — which is false for 2 103 of the 2 114 imported
+ * items and, since 0067, unanswered for the other eleven.
+ *
+ * `text` is what the cell shows, `title` the longer form behind it. They
+ * differ only where the short form would not fit the track: a partly booked
+ * purchase shows `3 von 14` and says `Teilweise eingebucht` on hover.
  */
-function Status({ status, label }: { status: "settled" | "complete" | "open"; label: string }) {
-  if (status === "open") {
-    return <span className="truncate text-xs tabular-nums text-muted" title={label}>{label}</span>;
-  }
+function Status({ status, text, title }: {
+  status: RowStatus; text: string; title: string;
+}) {
   return (
-    <span className={status === "settled" ? "text-muted" : "text-fg"} title={label} aria-label={label} role="img">
-      ✓
+    <span
+      className={"truncate text-xs " + (status === "complete" ? "text-fg" : "text-muted")}
+      title={title}
+      aria-label={title}
+    >
+      {text}
     </span>
   );
 }
@@ -123,10 +149,20 @@ function ItemRow({ item, onCheckIn, pending }: {
   onCheckIn: (item: PurchaseItem) => void;
   pending: boolean;
 }) {
+  /*
+   * Asked of the movement, not of the state — `itemStatus` explains why.
+   * An open unit prints its own state (`Bestellt`, `Angekommen`,
+   * `Beschädigt`, `Fehlt`), which says more than "not booked" and is the
+   * vocabulary of the buttons that move it on.
+   */
   const status = itemStatus(item);
-  const label = status === "settled" ? copy.settled
-    : status === "complete" ? copy.states.booked
+  const text = status === "historical" ? copy.historicalLabel
+    : status === "complete" ? copy.completeCell
     : copy.states[item.state as keyof typeof copy.states] ?? item.state;
+  const title = status === "historical" ? copy.historicalHint
+    : status === "complete" ? copy.completeLabel
+    : status === "settled" ? copy.settleHint
+    : text;
 
   return (
     <LedgerItemRow>
@@ -142,12 +178,15 @@ function ItemRow({ item, onCheckIn, pending }: {
         inventing one would be worse than an empty cell.
       */}
       <span className="truncate text-xs text-muted">{item.seriesLabel ?? "—"}</span>
-      <span className="truncate">{item.name}</span>
+      {/* `truncate` is a last resort, not a strategy — the floor above is
+          sized so it rarely fires. When it does, the full name is still
+          reachable rather than gone. */}
+      <span className="truncate" title={item.name}>{item.name}</span>
       <span className="text-right tabular-nums">
         {item.marketPrice === null ? "—" : formatPrice(item.marketPrice)}
       </span>
       <span className="text-center">
-        <Status status={status} label={label} />
+        <Status status={status} text={text} title={title} />
       </span>
       <span className="text-right">
         {canCheckIn(item) ? (
@@ -244,9 +283,10 @@ export function OrderbookLedger({
       {/*
         No `columns` prop: seven tracks are the ledger default, so Einkauf
         renders from the rule's own fallback and has nothing of its own to
-        deliver. Verkauf passes ten.
+        deliver. Verkauf passes ten. The width is not optional, though —
+        without it the columns have no floor to scroll against.
       */}
-      <LedgerTable>
+      <LedgerTable minWidth={PURCHASE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
           <span className="text-right">{copy.columns.items}</span>
@@ -263,9 +303,21 @@ export function OrderbookLedger({
             const status = rowStatus(purchase);
             const unvalued = purchase.itemCount - purchase.knownItems;
             const loaded = items[purchase.id];
-            const statusLabel = status === "settled" ? copy.settled
+            /*
+             * Four states, four different things to say. `Eingebucht ✓` is
+             * reserved for the one where every unit owns a movement.
+             */
+            const counted = `${purchase.bookedCount} von ${purchase.itemCount}`;
+            const statusText = status === "historical" ? copy.historicalLabel
+              : status === "complete" ? copy.completeCell
+              : status === "settled" ? copy.closedLabel
+              : status === "partial" ? counted
+              : copy.openRowLabel;
+            const statusLabel = status === "historical" ? copy.historicalHint
               : status === "complete" ? copy.completeLabel
-              : copy.openLabel(purchase.bookedCount, purchase.itemCount);
+              : status === "settled" ? copy.closedHint(purchase.bookedCount, purchase.settledCount)
+              : status === "partial" ? `${copy.partialLabel} — ${counted}`
+              : copy.openRowHint;
 
             return (
               <li key={purchase.id}>
@@ -300,7 +352,7 @@ export function OrderbookLedger({
                     ) : null}
                   </span>
                   <span className="text-right tabular-nums">{formatFactor(purchase.factor)}</span>
-                  <span className="text-center"><Status status={status} label={statusLabel} /></span>
+                  <span className="text-center"><Status status={status} text={statusText} title={statusLabel} /></span>
                   <span aria-hidden="true" className="text-center text-muted">{expanded ? "▴" : "▾"}</span>
                 </LedgerRow>
 

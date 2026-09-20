@@ -46,7 +46,7 @@ import {
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureSearch } from "./figure-search";
 import {
-  QUICK_STATES, canBook, canRemapItem, canRemoveItem, type ItemState,
+  QUICK_STATES, canBook, canRemapItem, canRemoveItem, canSettle, type ItemState,
 } from "@/lib/orderbook/purchase";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
 
@@ -141,6 +141,14 @@ export function PurchaseItems({
         {optimistic.map((item) => {
           const legacy = item.state === "reconciled_legacy";
           const isBooked = item.state === "booked";
+          /*
+           * A position with no catalog figure (0069). A portal cannot be
+           * booked into figure inventory, so `Einbuchen` is not offered at
+           * all — a disabled button that can never become enabled is worse
+           * than none — and `Erledigt` takes its place.
+           */
+          const nonCatalog = item.skyId === null;
+          const isSettled = item.state === "settled";
           const mayRemap = canRemapItem(item);
           const mayRemove = canRemoveItem(source, item);
           return (
@@ -197,6 +205,31 @@ export function PurchaseItems({
                         {copy.unbook}
                       </button>
                     </div>
+                  ) : nonCatalog ? (
+                    /*
+                     * `Bestellt -> Angekommen -> Erledigt`. Undoing it puts
+                     * the row back on `angekommen`: nothing irreversible
+                     * happened, no movement exists, and a mis-click should
+                     * not need a migration to fix.
+                     */
+                    isSettled ? (
+                      <div className="ml-auto flex items-center gap-2">
+                        <span className="text-xs font-medium">{copy.states.settled}</span>
+                        <button type="button" disabled={pending}
+                                onClick={() => quick(item, "arrived")}
+                                className={`${ACTION_NEUTRAL} min-h-11 w-auto disabled:opacity-60`}>
+                          {copy.unsettle}
+                        </button>
+                      </div>
+                    ) : (
+                      <button type="button"
+                              disabled={pending || !canSettle({ state: item.state, skyId: item.skyId })}
+                              onClick={() => quick(item, "settled")}
+                              title={copy.settleHint}
+                              className={`${ACTION_NEUTRAL} ml-auto min-h-11 w-auto disabled:opacity-40`}>
+                        {copy.settle}
+                      </button>
+                    )
                   ) : (
                     <button type="button"
                             disabled={pending || !canBook({ state: item.state, skyId: item.skyId })}

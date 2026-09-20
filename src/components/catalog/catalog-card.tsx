@@ -228,6 +228,20 @@ export function CatalogCard({
       figure={figure}
       ownership="catalog"
       collected={collected}
+      /*
+       * THE ONE SURFACE THAT RANKS ITS CARDS (V4.6).
+       *
+       * Signed in, in the catalog, the collection is known for every card on
+       * the page — so a figure the collector does not have is drawn a hair
+       * smaller on a shell with the colour taken out of it.
+       *
+       * Not passed on the two branches above. Signed out there is no
+       * collection to compare against, and an administrator does not collect
+       * from the catalog they manage (ADR-0042); in both cases every card
+       * would be understated, which says nothing about ownership and merely
+       * makes the grid look faded.
+       */
+      knowsCollection
       onToggle={onToggle}
       toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
       highlighted={highlighted}

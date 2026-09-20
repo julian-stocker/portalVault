@@ -75,6 +75,52 @@ export function marksOwnership(ownership: CardOwnership, collected: boolean): bo
 }
 
 /**
+ * How much smaller a card nobody owns is drawn (V4.6).
+ *
+ * ONE FRAME WIDTH OF DIFFERENCE, AND NOT A SECOND CARD SIZE.
+ *
+ * A card renders between 177 px and 214 px wide across the grid's four
+ * breakpoints. 3 % of that is 5–6 px off the width, so each edge moves in by
+ * about 3 px — against a frame that is itself 5–6 px at those widths. The
+ * two states therefore differ by roughly half a frame per side, which is one
+ * frame width where the eye compares them: at the gap between two cards.
+ *
+ * It is deliberately near the floor of what reads as a difference at all.
+ * The desaturated shell does the telling; the size only has to agree with it.
+ */
+export const UNCOLLECTED_SCALE = 0.97;
+
+/**
+ * True when this card should be drawn as one the viewer does not own.
+ *
+ * NOT the negation of `marksOwnership`, and the difference is the whole
+ * point. `marksOwnership` answers "is this owned"; three of the five
+ * surfaces that render a card cannot answer it at all, and for them the
+ * negation is false rather than true:
+ *
+ *   catalog, signed in     knows. The one surface that ranks its cards.
+ *   collection             knows, and everything on it is owned — so the
+ *                          treatment is computed and never applies.
+ *   catalog, signed out    there is no collection yet. A grid where every
+ *                          card is shrunk and grey says nothing about
+ *                          ownership and everything about the design.
+ *   catalog, administrator the business account manages the catalog, it
+ *                          does not collect from it (ADR-0042).
+ *   showcase               the figure page's siblings never mark ownership
+ *                          at all — the same boundary `marksOwnership` has
+ *                          always drawn.
+ *
+ * So the surface says whether it knows, explicitly. Inferring it from the
+ * presence of a toggle would tie a visual rule to an event handler and make
+ * the admin card's appearance a side effect of it having no `onToggle`.
+ */
+export function understatesCard(
+  ownership: CardOwnership, collected: boolean, knowsCollection: boolean,
+): boolean {
+  return ownership === "catalog" && knowsCollection && !collected;
+}
+
+/**
  * The quantity to print over the plate, or null.
  *
  * Never "1×": that is every card in the collection, and a badge that is

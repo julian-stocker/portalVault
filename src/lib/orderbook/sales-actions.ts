@@ -231,6 +231,24 @@ export async function removeSaleItem(itemId: number, saleId: number) {
 export async function bookSaleItem(itemId: number, saleId: number) {
   return run("seller_book_sale_item", { p_item_id: itemId }, saleId);
 }
+/*
+ * Erledigt — the ending for a position that never stood on a shelf (0073).
+ * Writes one timestamp and never a movement; the database refuses it for any
+ * catalog figure that is not marked as not-from-stock.
+ */
+export async function settleSaleItem(itemId: number, saleId: number, settled: boolean) {
+  return run("seller_settle_sale_item", { p_item_id: itemId, p_settled: settled }, saleId);
+}
+/* Nicht verschickt — die Ware blieb im Regal, also wird nichts gebucht (0074). */
+export async function setSaleItemNotShipped(itemId: number, saleId: number, notShipped: boolean) {
+  return run("seller_set_sale_item_not_shipped",
+    { p_item_id: itemId, p_not_shipped: notShipped }, saleId);
+}
+/* Retoure unterwegs — angekündigt, noch nicht da (0074). */
+export async function announceSaleItemReturn(itemId: number, saleId: number, announced: boolean) {
+  return run("seller_announce_sale_item_return",
+    { p_item_id: itemId, p_announced: announced }, saleId);
+}
 export async function unbookSaleItem(itemId: number, saleId: number) {
   return run("seller_unbook_sale_item", { p_item_id: itemId }, saleId);
 }

@@ -32,29 +32,33 @@
  * `Order 2026!T4` is literally `EU`, U `Summe`, V `Versand`, W `Rabatt`,
  * X+AA the fees, Y+Z the labels, AD `Refund`, AE `Auszahlung`.
  *
- * Datum · EU · Summe · Versand · Rabatt · Fees · Label · Refund · Auszahlung · Details
+ * Datum · EU · Summe · Versand · Rabatt · Fees · Label · Refund · Auszahlung ·
+ * Lager · Details
  *
  * `Fees` and `Label` are disjoint halves of the same fee table and arrive as
  * aggregates from `seller_sales()` (0062) — a label is never in both.
  */
 const SALE_COLUMNS =
   "6rem 3rem minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) "
-  + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 5.5rem";
+  + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 7.5rem 5.5rem";
 
-/* # · Serie · Figur · Marktwert · Bestand · Retoure · Aktion */
+/* Figur · Marktwert · Status · Aktion (0075). Four, not seven: `#` and
+   `Serie` moved into the figure cell, and `Bestand`/`Retoure` became one
+   status that can only ever say one thing. */
 const SALE_ITEM_COLUMNS =
-  "2.5rem 8.5rem minmax(0, 1fr) 5.5rem 6rem 5rem 8rem";
+  "minmax(9rem, 1fr) 6rem 9rem 9rem";
 
-const SALE_MIN_WIDTH = "62rem";
+/* 7.5rem wider than before: the Lager column carries words, not a tick. */
+const SALE_MIN_WIDTH = "71rem";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
-import { bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
+import { announceSaleItemReturn, bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
   from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
-import { countryLabel, itemActions } from "@/lib/orderbook/sales-view";
+import { countryLabel, saleItemActions, saleStockStatus } from "@/lib/orderbook/sales-view";
 import { SaleDetails } from "./sale-details";
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
@@ -76,6 +80,41 @@ const formatDate = (iso: string | null): string =>
  * the sale's own figures by `sale_expected_payout()`, so there is nothing to
  * be pending about.
  */
+/**
+ * The stock column (0072).
+ *
+ * `Ausgebucht ✓` only where every position owns a `sale_external` movement.
+ * A sale finished partly by settling says `Erledigt` and carries no tick:
+ * it is done, and two of its pieces never left figure inventory.
+ */
+function Stock({ sale }: { sale: SaleRow }) {
+  const status = saleStockStatus(sale);
+  const c = copy.stock;
+  const text = status === "outbooked" ? c.outbooked
+    : status === "returned" ? c.returned
+    : status === "closed" ? c.closed
+    : status === "cancelled" ? c.cancelled
+    : status === "frozen" ? c.frozen
+    : status === "partial" ? `${sale.closedCount} von ${sale.itemCount}`
+    : c.open;
+  const title = status === "outbooked" ? c.outbookedHint
+    : status === "returned" ? c.returnedHint
+    : status === "closed" ? c.closedHint(sale.outbookedCount, sale.restockedCount,
+                                         sale.settledCount, sale.notShippedCount)
+    : status === "cancelled" ? c.cancelledHint
+    : status === "frozen" ? c.frozenHint
+    : status === "partial" ? c.partial
+    : c.openHint;
+  /* The tick belongs to the two states a real movement stands behind. */
+  const strong = status === "outbooked" || status === "returned";
+  return (
+    <span className={"truncate text-xs " + (strong ? "text-fg" : "text-muted")}
+          title={title} aria-label={title}>
+      {text}
+    </span>
+  );
+}
+
 function Payout({ sale }: { sale: SaleRow }) {
   if (sale.expectedPayout === null) return <span className="text-xs text-muted">—</span>;
   return (
@@ -184,6 +223,7 @@ export function SalesLedger({ sales, summary, backHref }: {
           <span className="text-right">{copy.columns.label}</span>
           <span className="text-right">{copy.columns.refund}</span>
           <span className="text-right">{copy.columns.payout}</span>
+          <span className="text-center">{copy.columns.stock}</span>
           <span className="text-center">{copy.columns.details}</span>
         </LedgerHead>
 
@@ -229,12 +269,19 @@ export function SalesLedger({ sales, summary, backHref }: {
                     {formatPrice(sale.refunded)}
                   </span>
                   <span className="text-right"><Payout sale={sale} /></span>
+                  <span className="text-center"><Stock sale={sale} /></span>
                   {/*
-                    A real button, above the row's own overlay button. Its
-                    `stopPropagation` is what keeps opening the breakdown from
-                    also toggling the item list — two controls, two actions.
+                    A REAL BUTTON, AND IT HAS TO OUTRANK THE ROW'S OVERLAY.
+
+                    `z-20`, not `z-10`. The overlay that makes the whole row a
+                    disclosure control carries `z-10` so it sits above the
+                    sticky first column — and it comes LATER in the DOM, so at
+                    equal z-index it wins and swallows this click. That is
+                    exactly what happened: `Details` expanded the item list
+                    instead of opening the dialog, and `stopPropagation` never
+                    ran because the event never reached this button.
                   */}
-                  <span className="relative z-10 text-center">
+                  <span className="relative z-20 text-center">
                     <button type="button"
                             onClick={(event) => { event.stopPropagation(); onDetails(sale.id); }}
                             className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg">
@@ -298,17 +345,17 @@ function SaleDetail({ sale, detail, pending, act }: {
   return (
     <>
       {/*
-        Einkauf's item table, plus one column. `Bestand` and `Retoure` were a
-        single cell that had to say three different things at once; they are
-        two facts and now have two columns.
+        FOUR COLUMNS, THE SAME AS THE DETAIL SCREEN (0075).
+
+        `Bestand` and `Retoure` were two columns answering one question
+        between them, and a row could read `Ausgebucht` and `Wieder
+        eingelagert` at the same time. One status says which of the eight
+        states the position is in; one action says the one thing to do.
       */}
       <LedgerItemHead>
-        <span>#</span>
-        <span>{copy.itemColumns.series}</span>
         <span>{copy.itemColumns.figure}</span>
         <span className="text-right">{copy.itemColumns.marketValue}</span>
-        <span className="text-center">{copy.itemColumns.stock}</span>
-        <span className="text-center">{copy.itemColumns.returned}</span>
+        <span className="text-center">{copy.itemColumns.status}</span>
         <span className="text-right">{copy.itemColumns.action}</span>
       </LedgerItemHead>
 
@@ -317,56 +364,58 @@ function SaleDetail({ sale, detail, pending, act }: {
         {order
           ? lines.map((line) => (
               <LedgerItemRow key={String(line.id)}>
-                <span className="tabular-nums text-xs text-muted">{String(line.quantity)}×</span>
-                <span className="truncate text-xs text-muted">{String(line.series_code ?? "—")}</span>
-                <span className="truncate">{String(line.name ?? "")}</span>
+                <span className="break-words" title={String(line.name ?? "")}>
+                  {String(line.quantity)}× {String(line.name ?? "")}
+                </span>
                 <span className="ob-money text-right tabular-nums">{formatPrice(Number(line.unit_price))}</span>
                 {/* Commerce already moved the stock when the order was paid. */}
-                <span className="text-center text-xs text-muted">✓</span>
-                <span className="text-center text-xs text-muted">—</span>
+                <span className="text-center text-xs text-muted">{copy.itemStates.outbooked}</span>
                 <span className="text-right text-xs text-muted">{copy.commerceOwned}</span>
               </LedgerItemRow>
             ))
           : items.map((item) => {
-              const can = itemActions(item as never, historical);
+              const can = saleItemActions(item as never, {
+                frozen: historical && sale.stockReleasedAt === null,
+                cancelled: sale.cancelledAt !== null,
+                shipped: sale.shippedAt !== null,
+              });
+              const id = Number(item.id);
+              const strong = can.status === "outbooked" || can.status === "restocked";
               /*
-               * Two facts, two cells, from the two columns that record them.
-               * `Bestand` is whether the unit left the shelf; `Retoure` is
-               * whether it came back and whether it was put away again.
+               * The ledger's inline list offers the two actions that move
+               * stock and the two that step a return along. Closing a
+               * position without a movement is a decision, and decisions
+               * belong on the detail screen where the whole sale is visible.
                */
-              const stock = item.movement_id !== null ? copy.booked : "—";
-              const back = item.return_movement_id !== null ? copy.restocked
-                : item.returned_at !== null ? copy.returned : "—";
+              const primary: Partial<Record<string, () => void>> = {
+                book: () => act(sale.id, () => bookSaleItem(id, sale.id)),
+                announce_return: () => act(sale.id, () => announceSaleItemReturn(id, sale.id, true)),
+                mark_returned: () => act(sale.id, () => returnSaleItem(id, sale.id, true)),
+                restock: () => act(sale.id, () => restockSaleItem(id, sale.id)),
+              };
+              const run = can.primary ? primary[can.primary] : undefined;
               return (
                 <LedgerItemRow key={String(item.id)}>
-                  <span className="tabular-nums text-xs text-muted">{String(item.position)}</span>
-                  <span className="truncate text-xs text-muted">{String(item.series_code ?? "—")}</span>
-                  <span className="truncate">{String(item.name ?? "")}</span>
+                  {/* One cell, one span: the series belongs in the title,
+                      not in a second element inside a grid track. */}
+                  <span className="break-words"
+                        title={[String(item.name ?? item.raw_name ?? ""), item.series_code]
+                          .filter(Boolean).join(" · ")}>
+                    {String(item.name ?? item.raw_name ?? "")}
+                  </span>
                   <span className="ob-money text-right tabular-nums">
                     {item.market_price === null ? "—" : formatPrice(Number(item.market_price))}
                   </span>
-                  <span className="text-center text-xs text-muted">{stock}</span>
-                  <span className="text-center text-xs text-muted">{back}</span>
+                  <span className={`truncate text-center text-xs ${strong ? "text-fg" : "text-muted"}`}>
+                    {copy.itemStates[can.status]}
+                  </span>
                   <span className="text-right">
                     {/* Only what the server would accept. An impossible button
                         invites a click that ends in a rule the screen knew. */}
-                    {can.canBook ? (
-                      <button type="button" disabled={pending}
-                              onClick={() => act(sale.id, () => bookSaleItem(Number(item.id), sale.id))}
+                    {run ? (
+                      <button type="button" disabled={pending} onClick={run}
                               className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
-                        {copy.book}
-                      </button>
-                    ) : can.canReturn ? (
-                      <button type="button" disabled={pending}
-                              onClick={() => act(sale.id, () => returnSaleItem(Number(item.id), sale.id, true))}
-                              className="min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
-                        {copy.returnItem}
-                      </button>
-                    ) : can.canRestock ? (
-                      <button type="button" disabled={pending}
-                              onClick={() => act(sale.id, () => restockSaleItem(Number(item.id), sale.id))}
-                              className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
-                        {copy.restock}
+                        {copy.itemActionLabels[can.primary!]}
                       </button>
                     ) : null}
                   </span>
