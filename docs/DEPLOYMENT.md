@@ -6,16 +6,19 @@ Stand: 2026-09-08. Aktuelle Stufe: **eigene Domain, noch nicht öffentlich**
 
     https://skyisles.app
 
-**Die kanonische öffentliche Adresse.** Production-Deployment vom Branch `main`,
-über Vercel eingerichtet, in der Supabase-Auth-Konfiguration als Site URL
-hinterlegt. Kein offizieller Start: es gibt zwar seit B1 eine Kasse, aber
-weder Zahlung noch Rechtstexte noch Transaktionsmails — `noindex` bleibt bis
-zum Beta-Gate bestehen.
+**Die kanonische öffentliche Adresse — und die einzige, die funktioniert.**
+Production-Deployment vom Branch `main`, über Vercel eingerichtet, in der
+Supabase-Auth-Konfiguration als Site URL hinterlegt. Erreichbarkeit zuletzt
+bestätigt am 2026-09-20. Kein offizieller Start: es gibt zwar seit B1 eine
+Kasse, aber weder Zahlung noch Rechtstexte noch Transaktionsmails — `noindex`
+bleibt bis zum Beta-Gate bestehen.
 
-`https://portal-vault-lovat.vercel.app` bleibt als technische Vercel-Adresse
-erreichbar, ist aber **nicht** mehr die kanonische Domain und wird nirgends
-mehr als solche genannt. Eine mögliche `skyisles.de` ist weiterhin offen und
-keine Voraussetzung für irgendetwas.
+**Die alte technische Vercel-Adresse `portal-vault-lovat.vercel.app` ist tot.**
+Sie antwortet mit `DEPLOYMENT_NOT_FOUND` (geprüft am 2026-09-20) und ist damit
+weder kanonisch noch überhaupt erreichbar. Sie steht hier nur, damit ältere
+Verweise darauf einzuordnen sind — als Adresse taugt sie nicht mehr, und ein
+Fallback auf sie gibt es nicht. Eine mögliche `skyisles.de` ist weiterhin offen
+und keine Voraussetzung für irgendetwas.
 
 ---
 
