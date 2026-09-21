@@ -106,10 +106,24 @@ export async function fetchInventory(
   return { positions, outsideScope };
 }
 
-/** The recent movements of one position, newest first. */
+/**
+ * The BUSINESS movements of one position, newest first.
+ *
+ * `seller_business_movements` (0085), not `admin_inventory_movements`: the
+ * ledger without its technical and test rows — no `initial_import`, no
+ * fixture position, nothing a sandbox order or an `is_test` sale booked.
+ * Every one of those exclusions is a reference or a checked column inside
+ * the function; none of them reads a note, and none of them happens here.
+ *
+ * THE FILTER IS IN THE READ PATH ON PURPOSE. These rows feed both the
+ * history and the `Eingekauft`/`Verkauft` counters, so filtering in the
+ * browser would leave the two able to disagree — and would ship the test
+ * data to the client anyway. `admin_inventory_movements` is untouched and
+ * still answers the audit question.
+ */
 export async function fetchMovements(inventoryId: number, limit = 20): Promise<Movement[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("admin_inventory_movements", {
+  const { data, error } = await supabase.rpc("seller_business_movements", {
     p_inventory_id: inventoryId,
     p_limit: limit,
   });

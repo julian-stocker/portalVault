@@ -177,10 +177,14 @@ describe("what the operational list contains", () => {
     expect(queries).not.toMatch(/\.delete\(/);
   });
 
-  it("reads through the admin functions, never from the tables", () => {
+  it("reads through the gated functions, never from the tables", () => {
     const queries = source(QUERIES);
     expect(queries).toContain('rpc("admin_shop_inventory")');
-    expect(queries).toContain('rpc("admin_inventory_movements"');
+    // The history moved to the business view in 0085: the same rows without
+    // the technical and test ones. `admin_inventory_movements` still exists
+    // and still answers the audit question; the stock screen no longer asks
+    // it, because that screen is not an audit.
+    expect(queries).toContain('rpc("seller_business_movements"');
     expect(queries).not.toMatch(/from\("shop_inventory"\)|from\("inventory_movements"\)/);
   });
 });
