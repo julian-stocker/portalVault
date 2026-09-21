@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-20 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-21 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -17,7 +17,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
 > | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
 > | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
-> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow), `0077`–`0078` und `0079`–`0082` am **2026-09-21** (Zahlungswelt je Aufrufer, Legacy-Lagerhistorie) |
+> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow), `0077`–`0078`, `0079`–`0082` und `0083`–`0085` am **2026-09-21** (Zahlungswelt je Aufrufer, Legacy-Lagerhistorie, Testbewegungen strukturell getrennt) |
 > | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
 > | Production-Testbestellungen | **keine weiteren** |
 >
@@ -46,6 +46,71 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Pre-Go-Live-Cutover auf Staging und Production (2026-09-21) — abgeschlossen
+
+**Der operative Ledger beginnt leer.** Vor dem Go-Live standen zwei Sorten Inhalt nebeneinander:
+die reale Geschäftshistorie, die vollständig außerhalb der Plattform entstanden ist, und alles,
+was innerhalb SkyIsles beim Bauen, Testen und Debuggen angefallen ist. Der Betreiber hat
+bestätigt, was vier unabhängige Signale zeigten — **über SkyIsles gab es bis zum Cutover keinen
+einzigen echten Kauf oder Verkauf.** Entscheidung, Begründung und Abwägungen: **ADR-0103**,
+Ablauf und Verifikation: `docs/DATABASE.md` 3.3ah.
+
+**Die Business-Historie beginnt am 01.01.2026.** Für den Zeitraum bis zum Go-Live ist die finale
+**Excel-Arbeitsmappe die Source of Truth** für sämtliche realen Käufe, Verkäufe und Bestände;
+sie steht rekonstruiert in `legacy_stock_events`.
+
+### Production nach dem Cutover
+
+| bleibt | | entfernt | |
+|---|---|---|---|
+| `legacy_stock_events` | **2 671** | `inventory_movements` | **720 → 0** |
+| reale lose Stück | **824** | Fixtures | 4 Positionen / 209 Stück |
+| `shop_inventory` | 273 Positionen, 0 reserviert | `orders` + 13 Kindtabellen | **alle 0** |
+| Workbook-Verkäufe | **292 `sales` / 1 253 `sale_items`** | `payment_attempts` / `payment_events` | 5 / 12 → 0 |
+| fees / refunds / settlements | 813 / 41 / 4 | `invoices` | 1 → 0 |
+| Einkäufe | **84 `purchases` / 2 114 `purchase_items`** | Nicht-Workbook-`sales` | 5 → 0 |
+| Importprotokoll | 1 / **614 Zeilen, vollständig** | `cart_items` / `customer_contacts` | → 0 |
+| `orderbook_audit` | **3**, alle an Workbook-Verkäufen | | |
+
+`shop_inventory.quantity` wurde nicht angefasst — die 824 losen Stück sind die Cutover-Baseline.
+
+**Die 167 technischen `movement_id`-Zeiger in `inventory_import_rows` wurden bewusst auf NULL
+gesetzt.** Der Fremdschlüssel trägt `ON DELETE RESTRICT` aus einer bleibenden Tabelle. Jede
+Importzeile behält ihren gesamten fachlichen Inhalt; nur der Zeiger auf eine Ledger-Zeile fehlt,
+die es nicht mehr gibt. Protokolliert im Lauf: Production Import #1, Bewegungen 600 … 766.
+
+### Unabhängig verifiziert, nicht aus den Skriptausgaben
+
+Auf Production zusätzlich **zeilenweise gegen einen unmittelbar zuvor erzeugten
+Pre-Reset-Snapshot** — 58 Tabellen, 10 916 Zeilen, lokal und gitignored unter
+`.backups/prod-pre-reset-20260921T185103Z/`. **Das ist eine lokale Sicherung; keine Zeile daraus
+gehört ins Repository** (`docs/SECURITY.md`).
+
+- Alle Sollwerte erreicht, auf Staging wie auf Production.
+- **0 verwaiste Fremdschlüsselreferenzen.**
+- **Nur Fixtures entfernt:** die 273 überlebenden Positionen sind byte-identisch zum Snapshot,
+  `updated_at` eingeschlossen — kein einziges `UPDATE` auf `shop_inventory`.
+- **Legacy-Rekonstruktion:** Σ 824 = realer loser Bestand, pro SKY-ID 0 Abweichungen.
+- **`inventory_import_rows`:** 167 Zeilen, bei denen sich ausschließlich `movement_id` geändert
+  hat; 0 Zeilen mit irgendeiner anderen Änderung.
+- **34 unbeteiligte Tabellen byte-identisch.**
+- **Kein Trigger blieb deaktiviert** — in beiden Umgebungen per `pg_trigger` bestätigt.
+- `npm test` 172 Dateien / 5 221 Tests grün, `npm run check` grün.
+
+### Einmalig, kein Betriebsprozess
+
+**Der Reset war eine einmalige Pre-Go-Live-Ausnahme und darf niemals wiederholt werden.** Ab
+jetzt enthält `inventory_movements` ausschließlich echte operative SkyIsles-Bewegungen; ein
+zweiter Lauf wäre Datenverlust, und die Gates würden ihn nicht verhindern — sie prüfen auf
+echtes Geld und auf die Workbook-Historie, nicht darauf, ob das Skript schon einmal lief. Ein
+Bestandsfehler wird mit einer Korrekturbewegung beantwortet, nicht mit einem leeren Ledger.
+
+`tools/sql/pre-go-live-reset.sql` bleibt als **Protokoll** liegen, deutlich als
+`ONE-TIME — DO NOT RUN AGAIN` markiert, und wird **nicht** nach `supabase/migrations/`
+verschoben.
+
+---
 
 ## Legacy-Lagerhistorie 2026 auf Production (2026-09-21) — abgeschlossen
 

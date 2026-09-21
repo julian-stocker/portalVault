@@ -8860,3 +8860,110 @@ wäre genau die Sorte Aufräumarbeit, gegen die dieser Guard existiert.
 - Production-Ergebnis vom 2026-09-21: 2 671 Ereignisse, 600 Positionen auf 824 Einheiten,
   90 Korrekturbewegungen netto −168, 191 Positionen ohne Bewegung geschlossen, eine bewusst
   offen. Zahlen und Ablauf: `docs/DATABASE.md` 3.3ag.
+
+---
+
+## ADR-0103
+
+**Pre-Go-Live-Cutover: der operative Ledger beginnt leer**
+
+Status: **angenommen** · 2026-09-21 · betrifft `inventory_movements`, `orders` samt Kindkette,
+`shop_inventory`, `inventory_import_rows` · baut auf ADR-0102 auf
+
+### Kontext
+
+Vor dem Go-Live von SkyIsles hatte die Production-Datenbank zwei Sorten Inhalt nebeneinander:
+die **reale Geschäftshistorie**, die vollständig außerhalb der Plattform entstanden ist —
+überwiegend auf eBay, belegt durch die finale Excel-Arbeitsmappe —, und alles, was **innerhalb**
+SkyIsles beim Bauen, Testen und Debuggen angefallen ist: Sandbox-Bestellungen, Zahlungsversuche,
+Testrechnungen, Smoke-Verkäufe, Fixture-Positionen und die Lagerbewegungen, die daraus entstanden.
+
+Der Betreiber hat bestätigt, was vier unabhängige Signale bereits zeigten: **über SkyIsles gab
+es bis zum Cutover keinen einzigen echten Kauf oder Verkauf.** Keine Stripe-Sitzung trug je das
+Präfix `cs_live_`, keine Bestellung im LIVE-Modus wurde je bezahlt, es gab keine Erstattung, und
+jede Rechnung hing an einer Sandbox-Bestellung.
+
+Damit lag ein Ledger vor, dessen 720 Zeilen fast ausschließlich Testartefakte waren, während die
+echte Vergangenheit daneben in `legacy_stock_events` steht. Ein Betreiber, der die Lagerkarte
+öffnet, hätte zwischen beidem nicht unterscheiden können.
+
+### Entscheidung
+
+**Die Business-Historie beginnt am 01.01.2026.** Alles davor ist privat und nicht Gegenstand
+dieses Systems. Für den Zeitraum 01.01.2026 bis zum Go-Live ist die **finale Excel-Arbeitsmappe
+die Source of Truth** für sämtliche realen Käufe, Verkäufe und Bestände; sie liegt rekonstruiert
+in `legacy_stock_events` (ADR-0102).
+
+**Alles rein innerhalb SkyIsles Entstandene war Test und wurde beim Cutover entfernt.** Der
+operative Ledger `inventory_movements` beginnt ab diesem Zeitpunkt bei null und enthält künftig
+ausschließlich echte operative SkyIsles-Bewegungen.
+
+Ausgeführt am 2026-09-21 mit `tools/sql/pre-go-live-reset.sql` in **einer** Transaktion, zuerst
+Staging, dann Production, beide anschließend unabhängig verifiziert.
+
+### Was bleibt, was geht
+
+| bleibt | |
+|---|---|
+| `legacy_stock_events` | 2 671 Ereignisse — die gesamte Vergangenheit ab 01.01.2026 |
+| Workbook-Verkäufe | 292 `sales` / 1 253 `sale_items` / 813 `sale_fees` / 41 `sale_refunds` / 4 `settlement_adjustments` |
+| Einkaufshistorie | 84 `purchases` / 2 114 `purchase_items` |
+| Importprotokoll | 1 `inventory_imports` / 614 `inventory_import_rows`, jede Zeile vollständig |
+| Orderbuch-Audit | 3 `orderbook_audit`, alle an erhaltenen Workbook-Verkäufen |
+| Bestand | `shop_inventory.quantity` unangetastet — **824 reale lose Stück**, 273 Positionen |
+| | Katalog, Serien, Charaktere, Konten, Sammlungen, Tester-Infrastruktur, Telemetrie |
+
+| entfernt | |
+|---|---|
+| operativer Ledger | **720 → 0** `inventory_movements` |
+| Testbestellungen | 6 `orders` samt vollständiger Kindkette |
+| Zahlungen | 5 `payment_attempts`, 12 `payment_events`, 1 `invoices` |
+| Testverkäufe | 5 Nicht-Workbook-`sales` |
+| Fixtures | 4 Positionen / 209 Stück (SKY-9994, SKY-9998) — **vollständig** |
+| sonstiges | `cart_items`, `customer_contacts`, `order_mail`, `order_legal_snapshots` |
+
+**Die 167 technischen `movement_id`-Zeiger in `inventory_import_rows` wurden bewusst auf NULL
+gesetzt.** Der Fremdschlüssel trägt `ON DELETE RESTRICT` aus einer bleibenden Tabelle, hätte den
+Lauf also blockiert. Die Spalte ist nullable, kein Constraint verlangt einen Wert, kein View,
+keine Funktion und kein Anwendungscode liest sie. Jede Importzeile behält Blatt, Quellzeile,
+Rohname, Klassifikation, SKY-ID, Zustand, Vorher-/Soll-Menge, Delta, Status und Notiz — **nur
+der Zeiger auf eine Ledger-Zeile fehlt, die es nicht mehr gibt.** Der Status bleibt das
+unterscheidende Feld: `applied` heißt weiterhin angewandt. Die aufgelöste Verknüpfung ist im
+Lauf protokolliert: Production Import #1, 167 Zeiger auf `inventory_movements` 600 … 766.
+
+### Warum nicht anders
+
+**Die Testdaten stehenlassen und im UI filtern.** Genau das war der Zustand davor, und er hat
+nicht getragen: `0083`–`0085` filtern zwar strukturell statt über Freitext, aber die Testzeilen
+blieben im Ledger, in jeder Auswertung und in jedem Export. Ein Go-Live ist der einzige Moment,
+in dem sich das noch sauber trennen lässt.
+
+**`TRUNCATE` statt `DELETE`.** Hätte die Zeilentrigger umgangen, scheitert aber an den
+Fremdschlüsseln aus `sale_items` und `order_reservations` — PostgreSQL prüft dort die Constraint,
+nicht die Zeilen. `TRUNCATE ... CASCADE` hätte `sale_items` mitgenommen, also über tausend Zeilen
+echter Geschäftshistorie.
+
+**Die Schutztrigger dauerhaft abschwächen.** Zehn `BEFORE DELETE`-Trigger standen im Weg. Sie
+fielen für die Dauer **einer** Transaktion, einzeln benannt, und standen danach wieder — in
+beiden Umgebungen per `pg_trigger` gegengeprüft. `session_replication_role = replica` schied aus,
+weil es auch die Fremdschlüsselprüfung abgeschaltet hätte, und die war hier das Sicherheitsnetz.
+
+**Den Bestand mit zurücksetzen.** `shop_inventory.quantity` wurde nicht angefasst. Die 824 losen
+Stück sind die Cutover-Baseline; die Vergangenheit erklären ausschließlich die
+`legacy_stock_events`.
+
+### Konsequenzen
+
+- **Der Reset war eine einmalige Pre-Go-Live-Ausnahme und darf niemals als normaler
+  Betriebsprozess wiederholt werden.** Ein zweiter Lauf wäre Datenverlust: ab jetzt enthält
+  `inventory_movements` echte operative Bewegungen, und die Gates prüfen auf echtes Geld und
+  auf die Workbook-Historie — nicht darauf, ob das Skript schon einmal lief. Ein Bestandsfehler
+  wird mit einer Korrekturbewegung beantwortet, nicht mit einem leeren Ledger.
+- `tools/sql/pre-go-live-reset.sql` bleibt als **Protokoll** im Repository, deutlich als
+  `ONE-TIME — DO NOT RUN AGAIN` markiert, und wird **nicht** nach `supabase/migrations/`
+  verschoben. Es ist keine Schemaänderung und darf auf einer frischen Datenbank nie laufen.
+- Vor dem Production-Lauf entstand ein lokaler Pre-Reset-Snapshot unter
+  `.backups/prod-pre-reset-20260921T185103Z/` — 58 Tabellen, 10 916 Zeilen, gitignored. **Er ist
+  eine lokale Sicherung; keine Zeile daraus gehört ins Repository** (`docs/SECURITY.md`).
+- Lager V2 zeigt ab dem Cutover keine operative Bewegung mehr, nur noch die rekonstruierte
+  Legacy-Historie — bis die erste echte Bewegung gebucht wird.

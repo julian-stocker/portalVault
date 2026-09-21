@@ -442,17 +442,19 @@ alle ACTIVE.
 **Der erste echte LIVE-Kauf steht noch aus** und wird anschließend read-only verifiziert —
 dieselbe Kette wie bei den Sandbox-Durchläufen.
 
-**Production-Baseline, Stand 2026-09-21 nach der Legacy-Lagermigration: 1 033 gesamt · 824 real
-(= Spalte F der Arbeitsmappe) · 209 Fixtures · 0 reserviert · 720 Bewegungen.** Die 90
-`correction`-Bewegungen des Bestandsabgleichs und die 2 671 rekonstruierten
-`legacy_stock_events` stehen in `PROJECT_STATUS.md` und `docs/DATABASE.md` 3.3ag; die Zahlen
-davor (1 201 / 992 / 630) gelten nur bis zu diesem Rollout.
+**Production-Baseline, Stand 2026-09-21 nach dem Pre-Go-Live-Cutover: 824 gesamt · 824 real
+(= Spalte F der Arbeitsmappe) · 0 Fixtures · 0 reserviert · 0 Bewegungen.** Der operative Ledger
+beginnt ab dem Cutover leer und enthält künftig ausschließlich echte operative
+SkyIsles-Bewegungen; die gesamte Vergangenheit ab 01.01.2026 steht in den 2 671
+`legacy_stock_events`. Ablauf, Zahlen und Verifikation: `docs/DATABASE.md` 3.3ah und ADR-0103.
 
-Der Sandbox-E2E `SI-2026-001008` hat `SKY-0021 loose ×1` korrekt ausgebucht
-(`#769`, −1, `sale`); der Testbestand wurde danach append-only über `#770` (+1, `return`,
-Notiz `sandbox test order SI-2026-001008`) zurückgeführt. Der Bestand ist deshalb wieder auf dem
-Wert von vorher, die Bewegungszahl aber um zwei höher — nichts wurde gelöscht oder von Hand
-korrigiert.
+Die Zahlen davor gelten nur bis zum jeweiligen Rollout und sind nicht mehr der Ist-Stand:
+1 201 / 992 / 630 vor der Legacy-Lagermigration, 1 033 / 824 / 209 / 720 zwischen ihr und dem
+Cutover.
+
+Der Sandbox-E2E `SI-2026-001008` hatte `SKY-0021 loose ×1` korrekt ausgebucht (`#769`, −1,
+`sale`) und über `#770` (+1, `return`) zurückgeführt. Beide Bewegungen waren Testartefakte und
+sind mit dem Pre-Go-Live-Cutover entfallen (ADR-0103); der Bestand blieb dabei unverändert.
 
 > **Was sich erst beim ersten Live-Kauf zeigt.** `selectStripeKey` prüft das Schlüsselpräfix
 > (`sk_live_`/`rk_live_`) zur Laufzeit, und Secrets sind über die API nur als SHA-256-Digest

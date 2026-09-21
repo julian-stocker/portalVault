@@ -2131,6 +2131,87 @@ zeigten diese in der Verifikation sofort die beabsichtigten Rechte.
 `generated always as identity` · zusammengesetzter Fremdschlüssel · Statement-Reihenfolge ·
 `search_path = ''` in allen drei Funktionen.
 
+### 3.3ah Pre-Go-Live-Cutover: der operative Ledger beginnt leer (ADR-0103)
+
+Am **2026-09-21** wurde der operative Shop einmalig zurückgesetzt — zuerst Staging, dann
+Production, jeweils in **einer** Transaktion und anschließend unabhängig verifiziert. Das
+Skript liegt als Protokoll unter `tools/sql/pre-go-live-reset.sql`, deutlich als
+`ONE-TIME — DO NOT RUN AGAIN` markiert, und **nicht** unter `supabase/migrations/`: es ist
+keine Schemaänderung und darf auf einer frischen Datenbank nie laufen.
+
+**Die Business-Historie beginnt am 01.01.2026.** Für den Zeitraum bis zum Go-Live ist die
+finale Excel-Arbeitsmappe die Source of Truth; sie steht rekonstruiert in
+`legacy_stock_events` (3.3ag, ADR-0102). Alles rein innerhalb SkyIsles Entstandene war Test.
+
+#### Production, Ist-Zustand nach dem Cutover
+
+| | |
+|---|---|
+| `inventory_movements` | **0** — der operative Ledger beginnt leer |
+| `shop_inventory` | 273 Positionen · **824 reale lose Stück** · 0 boxed · 0 reserviert |
+| Fixtures | **vollständig entfernt** — 4 Positionen / 209 Stück (SKY-9994, SKY-9998) |
+| `legacy_stock_events` | **2 671** |
+| Workbook-Verkäufe | **292 `sales` / 1 253 `sale_items`** · 813 fees · 41 refunds · 4 settlements |
+| Einkäufe | **84 `purchases` / 2 114 `purchase_items`** |
+| Importprotokoll | 1 `inventory_imports` / **614 `inventory_import_rows`** |
+| `orderbook_audit` | **3**, alle an erhaltenen Workbook-Verkäufen |
+| Bestellkette, Zahlungen, Rechnungen | **0** in jeder der 14 Tabellen |
+
+`shop_inventory.quantity` wurde **nicht** angefasst. Die 824 losen Stück sind die
+Cutover-Baseline; die Vergangenheit erklären ausschließlich die `legacy_stock_events`.
+
+#### Die eine bewusst gelöste Verknüpfung
+
+`inventory_import_rows.movement_id` trägt `ON DELETE RESTRICT` und steht in einer Tabelle, die
+bleibt — der Fremdschlüssel hätte den Lauf blockiert. Die **167 Zeiger wurden kontrolliert auf
+NULL gesetzt** (Production Import #1, `inventory_movements` 600 … 766), mit einer vorher
+gemessenen Sollzahl und einem `get diagnostics`-Assert dagegen.
+
+Zulässig ist das, weil die Spalte nullable ist, kein Constraint einen Wert verlangt
+(`..._ignored_is_inert` verlangt im Gegenteil NULL für ignorierte Zeilen), die Tabelle keinen
+einzigen Trigger trägt, nur `apply_inventory_import` sie schreibt und **kein View, keine
+Funktion und kein Anwendungscode sie liest**. Jede Importzeile behält Blatt, Quellzeile,
+Rohname, Klassifikation, SKY-ID, Zustand, Vorher-/Soll-Menge, Delta, Status und Notiz.
+`status = 'applied'` bleibt das unterscheidende Feld.
+
+#### Zehn Schutztrigger, für die Dauer einer Transaktion
+
+Neun Tabellen verbieten DELETE per Zeilentrigger. `TRUNCATE` hätte sie umgangen, scheitert aber
+an den Fremdschlüsseln aus `sale_items` und `order_reservations` — PostgreSQL prüft dort die
+Constraint, nicht die Zeilen; `CASCADE` hätte über tausend Zeilen echter Geschäftshistorie
+mitgenommen. Deshalb zeilenweises DELETE mit **zehn einzeln benannten** Triggern kurz
+deaktiviert, alle Fremdschlüssel scharf. `session_replication_role = replica` schied aus, weil
+es auch die Fremdschlüsselprüfung abgeschaltet hätte.
+
+Die Liste stammt aus einer vollständigen Trigger-Inventur; nach dem Lauf wurde in **beiden**
+Umgebungen per `pg_trigger` bestätigt, dass kein Trigger deaktiviert blieb.
+
+#### Unabhängige Post-Reset-Verifikation
+
+Nicht über die NOTICE-Ausgaben des Skripts, sondern gegen den tatsächlichen Datenbankzustand —
+und auf Production zusätzlich **zeilenweise gegen einen unmittelbar zuvor erzeugten
+Pre-Reset-Snapshot** (58 Tabellen, 10 916 Zeilen, lokal und gitignored unter `.backups/`; keine
+Zeile daraus gehört ins Repository, `docs/SECURITY.md`).
+
+- Alle Sollwerte erreicht, in beiden Umgebungen.
+- **FK-Integrität: 0 verwaiste Referenzen** über alle geprüften Beziehungen.
+- **Nur Fixtures entfernt:** die 273 überlebenden Positionen sind byte-identisch zum Snapshot,
+  `updated_at` eingeschlossen — es gab kein einziges `UPDATE` auf `shop_inventory`.
+- **Legacy-Rekonstruktion:** Σ 824 = realer loser Bestand, pro SKY-ID **0 Abweichungen**.
+  Boxed wird nicht mit der Loose-Rekonstruktion vermischt.
+- **`inventory_import_rows`:** 167 Zeilen, bei denen sich **ausschließlich** `movement_id`
+  geändert hat; **0** Zeilen mit irgendeiner anderen Änderung.
+- **34 unbeteiligte Tabellen byte-identisch** — keine unerwartete Änderung.
+
+#### Ein zweiter Lauf wäre Datenverlust
+
+Ab dem Cutover enthält `inventory_movements` ausschließlich echte operative Bewegungen. Die
+Gates des Skripts prüfen auf echtes Geld und auf die Workbook-Historie — **nicht darauf, ob das
+Skript schon einmal lief.** Ein Bestandsfehler wird mit einer Korrekturbewegung beantwortet,
+nicht mit einem leeren Ledger.
+
+---
+
 ---
 
 ## 4. Beziehungen
