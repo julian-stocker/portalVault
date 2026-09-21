@@ -947,19 +947,40 @@ describe("the ledger renders as a table", () => {
 
   it("the expanded item table has one cell per item track, on both row kinds", () => {
     /*
-     * Four since 0075: `Figur · Marktwert · Status · Aktion`. `Bestand` and
-     * `Retoure` were two columns answering one question between them, and
-     * a row could read `Ausgebucht` and `Wieder eingelagert` at once.
+     * SIX, AND THE SAME SIX AN EXPANDED PURCHASE HAS:
+     * `# · Serie · Figur · Marktwert · Status · Aktion`.
+     *
+     * It was four for a while. `#` and `Serie` lived in the figure cell's
+     * `title`, which a phone cannot open, and `Figur` was `minmax(9rem, 1fr)`
+     * inside a 71rem ledger — so it took every bit of slack and pushed status
+     * and action out of view. What was left on screen was a row of blanks
+     * with a button at the end.
+     *
+     * `Bestand` and `Retoure` stay merged into one status; that part of 0075
+     * was right and is unchanged.
      */
-    const columns = constTracks("SALE_ITEM_COLUMNS");
-    expect(columns).toHaveLength(4);
-    expect(cells(inside(LEDGER, "<LedgerItemHead>", "</LedgerItemHead>"))).toBe(4);
+    expect(cells(inside(LEDGER, "<LedgerItemHead>", "</LedgerItemHead>"))).toBe(6);
     // Two kinds of item row — an order line and a sale item — and both must
     // match, or an internal sale's columns slide under an external one's.
     const rows = [...LEDGER.matchAll(/<LedgerItemRow key=/g)].map((m) =>
       LEDGER.slice(m.index, LEDGER.indexOf("</LedgerItemRow>", m.index)));
     expect(rows).toHaveLength(2);
-    for (const row of rows) expect(cells(row)).toBe(4);
+    for (const row of rows) expect(cells(row)).toBe(6);
+  });
+
+  /**
+   * The point of the whole change: there is now ONE item layout, and it is
+   * the rule's own fallback. A second track list is what produced the
+   * four-column variant in the first place.
+   */
+  it("no sale screen overrides the shared item track list any more", () => {
+    const detail = read("src/components/business/sale-items.tsx");
+    for (const [name, source] of [["Verkaufsbuch", LEDGER],
+                                  ["Verkauf-Detail", detail]] as const) {
+      expect(source, name).not.toContain("itemColumns=");
+      expect(source, name).not.toContain("SALE_ITEM_COLUMNS");
+      expect(source, name).not.toContain("const ITEM_COLUMNS");
+    }
   });
 
   it("Einkauf keeps six item cells, so the shared rule still fits it", () => {
@@ -979,7 +1000,9 @@ describe("the ledger renders as a table", () => {
     expect(PRIMITIVES).toContain('"--ob-columns": columns');
     expect(PRIMITIVES).toContain('"--ob-item-columns": itemColumns');
     expect(LEDGER).toContain("columns={SALE_COLUMNS}");
-    expect(LEDGER).toContain("itemColumns={SALE_ITEM_COLUMNS}");
+    // The ITEM list is no longer among them: both ledgers render the six
+    // cells the rule's fallback describes, so there is nothing to override.
+    expect(LEDGER).not.toContain("itemColumns=");
     // Einkauf passes no column list and renders from the rule's own
     // fallback — but it does pass a width, because a ledger without a floor
     // is a ledger whose columns can be crushed.

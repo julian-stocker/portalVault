@@ -98,13 +98,24 @@ describe("the ledger at phone widths", () => {
     const cap = Number(/\.ob-item \{ max-width: var\(--ob-item-max, ([\d.]+)rem\)/
       .exec(CSS)![1]) * REM;
     const box = (px: number) => Math.min(px, cap);
+    /*
+     * ONE TRACK LIST FOR ALL THREE, read from the rule's own fallback.
+     *
+     * Verkauf used to bring its own — four columns in the ledger and four
+     * on the detail screen — and that is exactly what this file was written
+     * to catch: `Figur` as `minmax(9rem, 1fr)` inside a 71rem box collects
+     * all the slack and pushes the rest out of view. Now both sale screens
+     * render the six cells the fallback describes, so there is one layout
+     * to hold to the readable minimum and three widths to hold it at.
+     */
+    const shared = /grid-template-columns: var\(--ob-item-columns,\s*([^)]*\)[^;]*)/
+      .exec(CSS)![1].replace(/\s+/g, " ").trim();
     return [
-      ["Einkauf", /grid-template-columns: var\(--ob-item-columns,\s*([^)]*\)[^;]*)/
-        .exec(CSS)![1].replace(/\s+/g, " ").trim(),
+      ["Einkauf", shared,
         box(Number(/const PURCHASE_MIN_WIDTH = "([\d.]+)rem"/.exec(PURCHASE_LEDGER)![1]) * REM)],
-      ["Verkaufsbuch", /const SALE_ITEM_COLUMNS =\s*\n?\s*"([^"]*)"/.exec(SALES_LEDGER)![1],
+      ["Verkaufsbuch", shared,
         box(Number(/const SALE_MIN_WIDTH = "([\d.]+)rem"/.exec(SALES_LEDGER)![1]) * REM)],
-      ["Verkauf-Detail", /const ITEM_COLUMNS = "([^"]*)"/.exec(SALE_ITEMS)![1],
+      ["Verkauf-Detail", shared,
         box(Number(/const ITEM_MIN_WIDTH = "([\d.]+)rem"/.exec(SALE_ITEMS)![1]) * REM)],
     ];
   };
@@ -148,7 +159,7 @@ describe("the ledger at phone widths", () => {
     }
   });
 
-  it("the four-column table fits a normal desktop without scrolling sideways", () => {
+  it("the item table fits a normal desktop without scrolling sideways", () => {
     /*
      * 1024px is the narrowest desktop worth calling one, and the ledger
      * container is capped at max-w-5xl (64rem) anyway. The item table has
@@ -159,9 +170,8 @@ describe("the ledger at phone widths", () => {
       .exec(CSS)![1]) * REM;
     expect(cap).toBeLessThanOrEqual(1024);
     expect(cap).toBeLessThanOrEqual(64 * REM);
-    // And wide enough to hold the four columns at their minimums.
+    // And wide enough to hold the six columns at their minimums.
     for (const [name, list] of itemTables()) {
-      if (split(list).length !== 4) continue;
       const t = split(list);
       const needed = (t.reduce((sum, x) => sum + minRem(x), 0) + 0.75 * 3 + 1.5) * REM;
       expect(cap, `${name} needs ${needed}px`).toBeGreaterThanOrEqual(needed);
@@ -169,9 +179,8 @@ describe("the ledger at phone widths", () => {
   });
 
   it.each(PHONES)("still scrolls rather than crushes at %ipx", (width) => {
-    // Four columns need more than any phone has; the box scrolls, as before.
+    // Six columns need more than any phone has; the box scrolls, as before.
     for (const [name, list] of itemTables()) {
-      if (split(list).length !== 4) continue;
       const t = split(list);
       const needed = (t.reduce((sum, x) => sum + minRem(x), 0) + 0.75 * 3 + 1.5) * REM;
       expect(needed, `${name} at ${width}px`).toBeGreaterThan(width);

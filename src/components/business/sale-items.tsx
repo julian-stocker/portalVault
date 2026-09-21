@@ -38,17 +38,19 @@ import {
 const copy = de.business.sales;
 const book = de.business.orderbook;
 
-/* # · Serie · Figur · Marktwert · Bestand · Retoure · Aktion */
-const ITEM_COLUMNS = "minmax(9rem, 1fr) 6rem 9rem 9rem";
-
 /*
- * The six fixed tracks, the gaps and the padding come to 41.5rem, and the
- * floor used to be 44 — which left `Figur` 2.5rem. That never showed,
- * because the floor only applied on desktop and a desktop window is wider
- * than the floor. It applies at every width now, so it is the number a
- * phone actually gets, and a 40-pixel column for a figure name is not one.
+ * NO TRACK LIST HERE. `.ob-item`'s fallback in `globals.css` is the Einkauf
+ * list — `# · Serie · Figur · Marktwert · Status · Aktion` — and this screen
+ * renders exactly those six cells, so it inherits the rule rather than
+ * overriding it with a second one.
+ *
+ * The floor is the one number this screen still owns, because it has no
+ * ledger around it to inherit a width from. The five fixed tracks, the five
+ * gaps and the padding come to 35.75rem; 44 leaves `Figur` a little over
+ * 8rem, which is about twenty characters — the same readable minimum
+ * `mobile-layout.test.ts` holds every item table to.
  */
-const ITEM_MIN_WIDTH = "40rem";
+const ITEM_MIN_WIDTH = "44rem";
 
 export function SaleItems({ saleId, items, catalog, historical, internal,
                            frozen, cancelled, shipped = false }: {
@@ -86,16 +88,18 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
         </p>
       ) : null}
 
-      <LedgerTable itemColumns={ITEM_COLUMNS} minWidth={ITEM_MIN_WIDTH}>
+      <LedgerTable minWidth={ITEM_MIN_WIDTH}>
         <LedgerItemHead>
           {/*
-            FOUR COLUMNS, NOT SEVEN. `Bestand` and `Retoure` were two columns
-            answering one question between them — a row could read
-            `Ausgebucht` and `Wieder eingelagert` at once and leave the
-            reader to work out which was true now. One status column says
-            which of the eight states the position is in, and one action
-            column says the one thing to do about it.
+            THE SAME SIX COLUMNS AN EXPANDED PURCHASE HAS. `Bestand` and
+            `Retoure` stay merged into one status — a row could otherwise
+            read `Ausgebucht` and `Wieder eingelagert` at once and leave the
+            reader to work out which was true now — and `#` and `Serie` have
+            their own tracks instead of hiding in the figure cell's tooltip,
+            where a phone cannot reach them.
           */}
+          <span>#</span>
+          <span>{book.itemColumns.series}</span>
           <span>{copy.itemColumns.figure}</span>
           <span className="text-right">{copy.itemColumns.marketValue}</span>
           <span className="text-center">{copy.itemColumns.status}</span>
@@ -128,11 +132,16 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
               || can.primary === "announce_return";
             return (
               <LedgerItemRow key={String(item.id)}>
-                {/* One cell, one span: the series belongs in the title,
-                    not in a second element inside a grid track. */}
-                <span className="break-words"
-                      title={[String(item.name ?? item.raw_name ?? ""), item.series_code]
-                        .filter(Boolean).join(" · ")}>
+                <span className="tabular-nums text-xs text-muted">
+                  {item.position === null || item.position === undefined
+                    ? "—" : String(item.position)}
+                </span>
+                {/* A dash for a non-figure: a portal has no Skylanders
+                    series, and inventing one would be worse than a blank. */}
+                <span className="truncate text-xs text-muted">
+                  {item.series_code ? String(item.series_code) : "—"}
+                </span>
+                <span className="break-words" title={String(item.name ?? item.raw_name ?? "")}>
                   {String(item.name ?? item.raw_name ?? "")}
                 </span>
                 <span className="ob-money text-right tabular-nums">

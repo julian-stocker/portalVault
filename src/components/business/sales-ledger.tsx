@@ -42,11 +42,20 @@ const SALE_COLUMNS =
   "6rem 3rem minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) "
   + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 7.5rem 5.5rem";
 
-/* Figur · Marktwert · Status · Aktion (0075). Four, not seven: `#` and
-   `Serie` moved into the figure cell, and `Bestand`/`Retoure` became one
-   status that can only ever say one thing. */
-const SALE_ITEM_COLUMNS =
-  "minmax(9rem, 1fr) 6rem 9rem 9rem";
+/*
+ * NO ITEM TRACK LIST HERE, AND THAT IS THE POINT.
+ *
+ * `.ob-item`'s fallback in `globals.css` is the Einkauf list —
+ * `# · Serie · Figur · Marktwert · Status · Aktion` — and an expanded sale
+ * now renders exactly those six cells, so it inherits the rule instead of
+ * overriding it. One layout, one place to change it.
+ *
+ * The four-column version this replaces folded `#` and `Serie` into the
+ * figure cell's tooltip, where a phone could not reach them, and gave `Figur`
+ * `minmax(9rem, 1fr)` inside a 71rem ledger — so it collected every bit of
+ * slack and pushed status and action off the screen. What the owner saw was
+ * a row of empty cells with a button at the end of it.
+ */
 
 /* 7.5rem wider than before: the Lager column carries words, not a tick. */
 const SALE_MIN_WIDTH = "71rem";
@@ -211,8 +220,7 @@ export function SalesLedger({ sales, summary, backHref }: {
       <Summary summary={summary} />
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
 
-      <LedgerTable columns={SALE_COLUMNS} itemColumns={SALE_ITEM_COLUMNS}
-                   minWidth={SALE_MIN_WIDTH}>
+      <LedgerTable columns={SALE_COLUMNS} minWidth={SALE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
           <span>{copy.columns.country}</span>
@@ -345,14 +353,14 @@ function SaleDetail({ sale, detail, pending, act }: {
   return (
     <>
       {/*
-        FOUR COLUMNS, THE SAME AS THE DETAIL SCREEN (0075).
-
-        `Bestand` and `Retoure` were two columns answering one question
-        between them, and a row could read `Ausgebucht` and `Wieder
-        eingelagert` at the same time. One status says which of the eight
-        states the position is in; one action says the one thing to do.
+        THE SAME SIX COLUMNS AN EXPANDED PURCHASE HAS, in the same order and
+        from the same CSS rule. `Bestand` and `Retoure` stay merged into one
+        status — that was right in 0075 and is unchanged — but `#` and `Serie`
+        come back out of the tooltip and get the tracks they have next door.
       */}
       <LedgerItemHead>
+        <span>#</span>
+        <span>{copy.itemColumns.series}</span>
         <span>{copy.itemColumns.figure}</span>
         <span className="text-right">{copy.itemColumns.marketValue}</span>
         <span className="text-center">{copy.itemColumns.status}</span>
@@ -362,8 +370,12 @@ function SaleDetail({ sale, detail, pending, act }: {
       <ul className="divide-y divide-border/40">
         {/* An internal sale shows the ORDER's lines. There is no copy to show. */}
         {order
-          ? lines.map((line) => (
+          ? lines.map((line, index) => (
               <LedgerItemRow key={String(line.id)}>
+                <span className="tabular-nums text-xs text-muted">{index + 1}</span>
+                <span className="truncate text-xs text-muted">
+                  {line.series_code ? String(line.series_code) : "—"}
+                </span>
                 <span className="break-words" title={String(line.name ?? "")}>
                   {String(line.quantity)}× {String(line.name ?? "")}
                 </span>
@@ -396,11 +408,16 @@ function SaleDetail({ sale, detail, pending, act }: {
               const run = can.primary ? primary[can.primary] : undefined;
               return (
                 <LedgerItemRow key={String(item.id)}>
-                  {/* One cell, one span: the series belongs in the title,
-                      not in a second element inside a grid track. */}
-                  <span className="break-words"
-                        title={[String(item.name ?? item.raw_name ?? ""), item.series_code]
-                          .filter(Boolean).join(" · ")}>
+                  <span className="tabular-nums text-xs text-muted">
+                    {item.position === null || item.position === undefined
+                      ? "—" : String(item.position)}
+                  </span>
+                  {/* A dash for a non-figure: a portal has no Skylanders
+                      series, and inventing one would be worse than a blank. */}
+                  <span className="truncate text-xs text-muted">
+                    {item.series_code ? String(item.series_code) : "—"}
+                  </span>
+                  <span className="break-words" title={String(item.name ?? item.raw_name ?? "")}>
                     {String(item.name ?? item.raw_name ?? "")}
                   </span>
                   <span className="ob-money text-right tabular-nums">
