@@ -183,9 +183,21 @@ describe("history and the counters read the same thing", () => {
       expect(source).not.toContain("commerce_mode");
       expect(source).not.toContain("initial_import");
     }
-    // One list feeds both, so a filter could not reach one and miss the other.
-    expect(card).toContain("tradeCounters(legacyTotals, movements)");
-    expect(card).toContain("mergeHistory(legacy ?? [], movements)");
+    /*
+     * Since 0086 the two read one SQL definition — `business_movements` —
+     * rather than one shared browser list, so they still cannot drift
+     * apart, and the counters no longer depend on how many rows the
+     * timeline happens to hold.
+     */
+    expect(card).toContain("tradeCounters(legacyTotals, tradeTotals)");
+    expect(card).toContain("mergeHistory(");
+    const totals = readFileSync("supabase/migrations/0086_business_trade_totals.sql", "utf8");
+    expect(totals).toContain("create or replace view public.business_movements");
+    for (const fn of ["seller_business_movements", "seller_business_trade_totals"]) {
+      const start = totals.indexOf(`create or replace function public.${fn}`);
+      expect(totals.slice(start, totals.indexOf("$$;", start)), fn)
+        .toContain("from public.business_movements b");
+    }
   });
 
   it("leaves the legacy events untouched", () => {

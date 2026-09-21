@@ -47,6 +47,43 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Lager V2: Zähler außerhalb der Zeitleiste (2026-09-21, `0086`) — abgeschlossen
+
+Zwei Defekte, die dieselbe Ursache hatten: eine Abfrage bediente zwei Anforderungen, die sich
+widersprechen — die Zeitleiste will *die letzten N*, der Lebenszeit-Zähler will *alle*.
+
+**`Eingekauft`/`Verkauft` hingen an einer gekappten Liste.** Die operative Hälfte summierte der
+Browser aus den Zeilen von `seller_business_movements()`, und die begrenzt `p_limit`, hart bei
+500. Ab der 501. Bewegung einer Position hätte die Karte still zu wenig gezeigt.
+
+**Die Seite lud einen Movement-RPC je Position** — 278 auf Production, 283 auf Staging —, und
+die Zahl wuchs mit dem Katalog, nicht mit den Daten.
+
+`0086` löst beides additiv: der View `public.business_movements` hält die Definition einer
+operativen Geschäftsbewegung **einmal**, `seller_business_movements()` liest ihn weiterhin
+paginiert für die Anzeige, `seller_business_trade_totals()` aggregiert ihn **vollständig ohne
+`LIMIT`/`OFFSET`**. `tradeCounters()` addiert nur noch zwei Aggregate — eine Zeitleiste lässt
+sich gar nicht mehr übergeben. Die Detailhistorie, operativ und legacy zusammen, kommt in
+einem Roundtrip beim Öffnen einer Karte.
+
+| | vorher | nachher |
+|---|---|---|
+| Requests beim Laden, Staging / Production | 283 / 278 | **6 / 6** |
+| Lifetime-Zähler | halb aus einer 500er-Liste | **zwei vollständige Aggregate** |
+| Bestand | `shop_inventory.quantity` | unverändert |
+
+Die Ausschlüsse bleiben die aus `0085` und stehen jetzt genau einmal: `initial_import`,
+Fixtures ab SKY-9000, Sandbox-Bestellungen hin und zurück, `is_test`-Verkäufe hin und zurück.
+**Keine `note`- oder `reason`-Heuristik.**
+
+Staging und Production am 2026-09-21 ausgerollt, beide read-only verifiziert; auf Production
+byte-genau über SHA-256 je Tabelle belegt, dass **keine einzige Datenzeile** betroffen war.
+Beide Ledger waren beim Rollout leer, Production stand vorher wie nachher bei **824 real loose ·
+0 boxed · 0 reserviert · 0 `inventory_movements` · 2 671 `legacy_stock_events`**; die Zähler
+sind damit heute exakt die Legacy-Summen. Details: `docs/DATABASE.md` 3.3ai, ADR-0102 Nachtrag.
+
+---
+
 ## Pre-Go-Live-Cutover auf Staging und Production (2026-09-21) — abgeschlossen
 
 **Der operative Ledger beginnt leer.** Vor dem Go-Live standen zwei Sorten Inhalt nebeneinander:

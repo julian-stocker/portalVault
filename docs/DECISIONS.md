@@ -8861,6 +8861,15 @@ wäre genau die Sorte Aufräumarbeit, gegen die dieser Guard existiert.
   90 Korrekturbewegungen netto −168, 191 Positionen ohne Bewegung geschlossen, eine bewusst
   offen. Zahlen und Ablauf: `docs/DATABASE.md` 3.3ag.
 
+**Nachtrag 2026-09-21 (Migration `0086`).** Die beiden Zähler waren zur Hälfte aus einer
+gekappten Liste gerechnet: die Legacy-Hälfte kam aggregiert, die operative summierte der
+Browser aus den Zeilen, die `seller_business_movements()` gerade zurückgegeben hatte — und
+die sind per `p_limit` begrenzt, hart bei 500. Eine Lebenszeitkennzahl darf nicht davon
+abhängen, wie viele Zeilen eine Zeitleiste anzeigt; das ist kein zu klein gewählter Wert,
+sondern ein Kategorienfehler. **Beide Hälften kommen jetzt als vollständige Aggregate aus der
+Datenbank, und `tradeCounters()` addiert nur noch — eine Zeitleiste lässt sich gar nicht mehr
+übergeben.** Details: `docs/DATABASE.md` 3.3ai.
+
 ---
 
 ## ADR-0103

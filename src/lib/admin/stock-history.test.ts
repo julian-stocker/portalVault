@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   PURCHASE_REASONS, SALE_REASONS, dayOf, draftDelta, draftFloor, mergeHistory,
@@ -107,51 +108,75 @@ describe("the market value is only ever one that was recorded", () => {
   });
 });
 
-describe("Eingekauft and Verkauft count documented trade only", () => {
-  const totals = { purchasedUnits: 10, soldUnits: 8 };
+describe("Eingekauft and Verkauft are two complete aggregates, added", () => {
+  const legacy = { purchasedUnits: 10, soldUnits: 8 };
 
-  it("adds the reconstruction and the real bookings", () => {
-    expect(tradeCounters(totals, [
-      movement({ id: 1, reason: "purchase", delta: 1 }),
-      movement({ id: 2, reason: "sale", delta: -1 }),
-    ])).toEqual({ purchased: 11, sold: 9 });
+  it("adds the reconstruction and the operative ledger", () => {
+    expect(tradeCounters(legacy, { purchasedUnits: 1, soldUnits: 1 }))
+      .toEqual({ purchased: 11, sold: 9 });
   });
 
-  it("counts the retired sale name, because history cannot be renamed", () => {
-    expect(tradeCounters(undefined, [
-      movement({ id: 1, reason: "sale_skyisles", delta: -2 }),
-      movement({ id: 2, reason: "sale_external", delta: -3 }),
-    ])).toEqual({ purchased: 0, sold: 5 });
+  it("works when only one half exists", () => {
+    expect(tradeCounters(legacy, undefined)).toEqual({ purchased: 10, sold: 8 });
+    expect(tradeCounters(undefined, { purchasedUnits: 4, soldUnits: 2 }))
+      .toEqual({ purchased: 4, sold: 2 });
   });
 
-  it("counts neither a correction, a return nor a write-off", () => {
-    for (const reason of ["correction", "return", "writeoff", "initial_import"]) {
-      expect(tradeCounters(undefined, [movement({ id: 1, reason, delta: 4 })]), reason)
-        .toEqual({ purchased: 0, sold: 0 });
-      expect(tradeCounters(undefined, [movement({ id: 2, reason, delta: -4 })]), reason)
-        .toEqual({ purchased: 0, sold: 0 });
-    }
+  it("works for a position neither half knows", () => {
+    expect(tradeCounters(undefined, undefined)).toEqual({ purchased: 0, sold: 0 });
   });
 
-  it("does not let a return reduce what was sold", () => {
-    // The goods came back; that is its own event, not an un-sale.
-    expect(tradeCounters({ purchasedUnits: 0, soldUnits: 3 }, [
-      movement({ id: 1, reason: "return", delta: 1 }),
-    ]).sold).toBe(3);
+  /*
+   * THE REGRESSION THIS FUNCTION EXISTS TO PREVENT.
+   *
+   * The operative half used to be summed from the movement list the card
+   * happened to hold, and that list is capped — `p_limit`, hard-limited to
+   * 500 by the database. A position past that undercounted its own lifetime
+   * with nothing on screen to say so. The signature is now the guard: a
+   * timeline cannot be passed in, so a cap cannot reach the counters.
+   */
+  it("takes no timeline and therefore cannot be truncated by one", () => {
+    expect(tradeCounters.length).toBe(2);
+    const source = readFileSync("src/lib/admin/stock-history.ts", "utf8");
+    const body = source.slice(source.indexOf("export function tradeCounters"));
+    const fn = body.slice(0, body.indexOf("\n}"));
+    // No iteration, no reason test, no delta — nothing that only a row has.
+    expect(fn).not.toMatch(/for\s*\(|\.reduce\(|\.filter\(|\.map\(/);
+    expect(fn).not.toContain("PURCHASE_REASONS");
+    expect(fn).not.toContain("SALE_REASONS");
+    expect(fn).not.toContain("delta");
   });
 
-  it("works for a position the reconstruction never touched", () => {
-    expect(tradeCounters(undefined, [])).toEqual({ purchased: 0, sold: 0 });
+  it("counts a position with more than 500 movements in full", () => {
+    /*
+     * 12 000 purchases and 9 000 sales on one position. A 500-row window
+     * would have reported 500-ish of them; the aggregate reports all of
+     * them, because the database summed them and no list was involved.
+     */
+    expect(tradeCounters(undefined, { purchasedUnits: 12_000, soldUnits: 9_000 }))
+      .toEqual({ purchased: 12_000, sold: 9_000 });
   });
 
-  it("ignores a movement whose sign contradicts its reason", () => {
-    expect(tradeCounters(undefined, [
-      movement({ id: 1, reason: "purchase", delta: -1 }),
-      movement({ id: 2, reason: "sale", delta: 1 }),
-    ])).toEqual({ purchased: 0, sold: 0 });
+  it("is unchanged by how many timeline rows a card happens to show", () => {
+    // Same position, three different display limits, one answer.
+    const operative = { purchasedUnits: 700, soldUnits: 650 };
+    const shown = [0, 20, 500].map(() => tradeCounters(legacy, operative));
+    expect(new Set(shown.map((c) => JSON.stringify(c))).size).toBe(1);
+    expect(shown[0]).toEqual({ purchased: 710, sold: 658 });
+  });
+
+  it("gives the legacy sums alone while the operative ledger is empty", () => {
+    // Production semantics right after the pre-go-live cutover (ADR-0103):
+    // `inventory_movements` is 0, so `seller_business_trade_totals()`
+    // returns no row for any position and the card reads that as zero.
+    expect(tradeCounters(legacy, undefined)).toEqual({ purchased: 10, sold: 8 });
+    expect(tradeCounters(legacy, { purchasedUnits: 0, soldUnits: 0 }))
+      .toEqual({ purchased: 10, sold: 8 });
   });
 
   it("keeps the two vocabularies where a reader can check them", () => {
+    // The arithmetic is in SQL now; these stay as the readable statement of
+    // the split, and `stock-card.test.ts` holds them in step with 0086.
     expect([...PURCHASE_REASONS]).toEqual(["purchase"]);
     expect([...SALE_REASONS].sort()).toEqual(["sale", "sale_external", "sale_skyisles"]);
   });

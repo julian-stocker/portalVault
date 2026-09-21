@@ -17,9 +17,9 @@ import { useMemo, useState } from "react";
 import { InventoryCard } from "@/components/admin/inventory-card";
 import { StockDialog } from "@/components/admin/stock-dialog";
 import { AdminThumb } from "@/components/admin/admin-thumb";
-import { CONDITIONS, type Condition, type InventoryPosition, type Movement } from "@/lib/admin/inventory-model";
+import { CONDITIONS, type Condition, type InventoryPosition } from "@/lib/admin/inventory-model";
 import { positionKey } from "@/lib/admin/position-key";
-import type { LegacyTotals } from "@/lib/admin/stock-history";
+import type { TradeTotals } from "@/lib/admin/stock-history";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { imageSrc } from "@/lib/catalog/image";
@@ -31,18 +31,23 @@ type Listing = "all" | "listed" | "unlisted";
 
 export function InventoryView({
   positions,
-  movements,
   legacyTotals,
+  tradeTotals,
   catalog,
   series,
   outsideScope,
   percentage,
 }: {
   positions: readonly InventoryPosition[];
-  /** Movements per position id, loaded once by the page. */
-  movements: Readonly<Record<number, Movement[]>>;
   /** Reconstructed 2026 totals per `SKY-ID:condition` (ADR-0102). */
-  legacyTotals: Readonly<Record<string, LegacyTotals>>;
+  legacyTotals: Readonly<Record<string, TradeTotals>>;
+  /**
+   * Lifetime operative totals per inventory id (0086).
+   *
+   * Complete aggregates, both of them. No movement list reaches this
+   * component any more — a card fetches its own timeline when opened.
+   */
+  tradeTotals: Readonly<Record<number, TradeTotals>>;
   /** The operational range: active collectible figures (ADR-0029, ADR-0039). */
   catalog: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -178,8 +183,8 @@ export function InventoryView({
           <InventoryCard
             key={position.inventoryId}
             position={position}
-            movements={movements[position.inventoryId] ?? []}
             legacyTotals={legacyTotals[positionKey(position.skyId, position.condition)]}
+            tradeTotals={tradeTotals[position.inventoryId]}
             percentage={percentage}
           />
         ))}

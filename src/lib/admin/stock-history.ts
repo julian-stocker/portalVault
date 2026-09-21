@@ -28,6 +28,13 @@ export type LedgerSource = "legacy" | "operative";
 /**
  * What counts as buying and selling, and what deliberately does not.
  *
+ * THE ARITHMETIC USING THESE LIVES IN SQL, NOT HERE. Both halves of the
+ * counters are aggregated by the database — `seller_legacy_stock_summary()`
+ * for the reconstruction, `seller_business_trade_totals()` for the operative
+ * ledger — because only the database sees every row. These two sets are the
+ * readable statement of the same split, and `stock-card.test.ts` holds the
+ * two in step.
+ *
  * `return`, `correction`, `writeoff`, `opening_balance` and
  * `legacy_adjustment` are none of the two. A return is not a purchase — the
  * goods came back, nobody bought anything — and a correction is a recount.
@@ -67,6 +74,22 @@ export type OperativeMovement = {
   unitCost: number | null;
   note: string | null;
   createdAt: string;
+};
+
+/**
+ * How many operative rows an opened card shows.
+ *
+ * A DISPLAY CUT-OFF AND NOTHING ELSE. No lifetime figure may be derived
+ * from a list this number truncates — `tradeCounters` takes aggregates for
+ * exactly that reason (0086). Raising or lowering it changes what a reader
+ * scrolls through and nothing that is counted.
+ */
+export const HISTORY_LIMIT = 20;
+
+/** Both sources of one card's timeline, fetched together when it opens. */
+export type CardHistory = {
+  legacy: LegacyEvent[];
+  movements: OperativeMovement[];
 };
 
 export type LedgerEntry = {
@@ -182,11 +205,21 @@ export function mergeHistory(
   }));
 }
 
-/** The reconstructed totals of one position, from `seller_legacy_stock_summary()`. */
-export type LegacyTotals = {
+/**
+ * Documented purchases and sales of one position, already aggregated.
+ *
+ * Two of these exist per position and they come from the same shape: the
+ * reconstructed half from `seller_legacy_stock_summary()` (0079), the
+ * operative half from `seller_business_trade_totals()` (0086). BOTH ARE
+ * COMPLETE — neither is paginated, neither is capped.
+ */
+export type TradeTotals = {
   purchasedUnits: number;
   soldUnits: number;
 };
+
+/** The reconstructed half. Kept as its own name because the card says so. */
+export type LegacyTotals = TradeTotals;
 
 export type TradeCounters = {
   /** Documented business purchases from 2026-01-01, plus real ones since. */
@@ -198,23 +231,27 @@ export type TradeCounters = {
 /**
  * `Eingekauft` and `Verkauft` — documented trade, and nothing else.
  *
- * The legacy half is already aggregated by the database; the operative half
- * is summed from the movements this card holds. Neither half counts an
+ * TWO COMPLETE AGGREGATES, ADDED. Nothing else. Neither half counts an
  * opening balance, a legacy adjustment, a correction or a return.
+ *
+ * THE TIMELINE IS NOT AN INPUT HERE, AND MUST NEVER BECOME ONE.
+ *
+ * It used to be: the operative half was summed from the movement list the
+ * card happened to hold, and that list is capped — `p_limit`, hard-limited
+ * to 500 by the database. A position past that would have undercounted its
+ * own lifetime, silently, with nothing on screen to suggest it. A figure
+ * about the whole life of a position cannot be derived from a window onto
+ * it, however wide the window is made. `seller_business_trade_totals()`
+ * (0086) aggregates without a limit, and this function only adds.
  */
 export function tradeCounters(
-  legacy: LegacyTotals | undefined,
-  movements: readonly OperativeMovement[],
+  legacy: TradeTotals | undefined,
+  operative: TradeTotals | undefined,
 ): TradeCounters {
-  let purchased = legacy?.purchasedUnits ?? 0;
-  let sold = legacy?.soldUnits ?? 0;
-
-  for (const movement of movements) {
-    if (PURCHASE_REASONS.has(movement.reason) && movement.delta > 0) purchased += movement.delta;
-    if (SALE_REASONS.has(movement.reason) && movement.delta < 0) sold += -movement.delta;
-  }
-
-  return { purchased, sold };
+  return {
+    purchased: (legacy?.purchasedUnits ?? 0) + (operative?.purchasedUnits ?? 0),
+    sold: (legacy?.soldUnits ?? 0) + (operative?.soldUnits ?? 0),
+  };
 }
 
 /**

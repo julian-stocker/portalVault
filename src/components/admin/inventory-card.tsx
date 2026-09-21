@@ -35,10 +35,11 @@ import { PriceEditor } from "@/components/admin/price-editor";
 import { StockLedger } from "@/components/admin/stock-ledger";
 import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
-import type { InventoryPosition, Movement } from "@/lib/admin/inventory-model";
-import { loadLegacyEvents } from "@/lib/admin/legacy-actions";
+import type { InventoryPosition } from "@/lib/admin/inventory-model";
+import { loadCardHistory } from "@/lib/admin/legacy-actions";
 import {
-  mergeHistory, tradeCounters, type LedgerEntry, type LegacyEvent, type LegacyTotals,
+  mergeHistory, tradeCounters,
+  type CardHistory, type LedgerEntry, type TradeTotals,
 } from "@/lib/admin/stock-history";
 import { automaticShopPrice } from "@/lib/shop/offer";
 import { formatNumber, formatPrice } from "@/lib/format";
@@ -59,27 +60,32 @@ function Counter({ label, value }: { label: string; value: number }) {
 
 export function InventoryCard({
   position,
-  movements,
   legacyTotals,
+  tradeTotals,
   percentage,
 }: {
   position: InventoryPosition;
-  /** Already loaded by the page; the card renders, it does not fetch. */
-  movements: readonly Movement[];
-  /** The reconstruction's totals for this position, if it has any. */
-  legacyTotals?: LegacyTotals;
+  /** The reconstruction's lifetime totals for this position, if it has any. */
+  legacyTotals?: TradeTotals;
+  /** The operative ledger's lifetime totals for this position (0086). */
+  tradeTotals?: TradeTotals;
   /** The shop-wide percentage, for the "Automatisch · 90 %" line (ADR-0045). */
   percentage: number;
 }) {
   const router = useRouter();
   const [showHistory, setShowHistory] = useState(false);
-  const [legacy, setLegacy] = useState<LegacyEvent[] | null>(null);
+  const [history, setHistory] = useState<CardHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const figure = position.figure;
-  const { purchased, sold } = tradeCounters(legacyTotals, movements);
+  /*
+   * Two complete aggregates, added. The timeline below is NOT part of this
+   * and must never become part of it: it is capped, these figures are not
+   * (0086). That coupling is the bug this card used to have.
+   */
+  const { purchased, sold } = tradeCounters(legacyTotals, tradeTotals);
 
   /**
    * What this position would cost without its override. Only needed while an
@@ -91,23 +97,29 @@ export function InventoryCard({
     position.condition === "loose" ? copy.conditionLoose : copy.conditionBoxed;
 
   /**
-   * The events are fetched on first open, not with the page.
+   * BOTH sources are fetched on first open, not with the page.
    *
-   * 2 671 reconstructed rows sit across 600 positions and only an opened
-   * card shows any of them. One call per open beats 264 on load.
+   * 2 671 reconstructed rows sit across 600 positions, and the operative
+   * ledger grows for as long as the shop runs. Only an opened card shows
+   * either, so one round trip per open beats 273 on load — which is what
+   * this page did before 0086, once per position, for a list it then
+   * summed into a counter it had no business summing.
    */
   function toggleHistory() {
     const next = !showHistory;
     setShowHistory(next);
-    if (!next || legacy !== null || loadingHistory) return;
+    if (!next || history !== null || loadingHistory) return;
     setLoadingHistory(true);
-    void loadLegacyEvents(position.skyId, position.condition)
-      .then((events) => setLegacy(events))
-      .catch(() => setLegacy([]))
+    void loadCardHistory(position.skyId, position.condition, position.inventoryId)
+      .then(setHistory)
+      .catch(() => setHistory({ legacy: [], movements: [] }))
       .finally(() => setLoadingHistory(false));
   }
 
-  const entries: LedgerEntry[] = mergeHistory(legacy ?? [], movements);
+  const entries: LedgerEntry[] = mergeHistory(
+    history?.legacy ?? [],
+    history?.movements ?? [],
+  );
 
   /**
    * Price and listing travel together, because `set_shop_listing` writes
@@ -251,16 +263,16 @@ export function InventoryCard({
             <span aria-hidden="true" className="text-[10px]">{showHistory ? "▴" : "▾"}</span>
             {copy.history}
           </span>
-          {/* Only once the reconstruction has arrived: before that this
-              would count the booked movements alone and then jump. */}
-          {legacy !== null ? (
+          {/* Only once the history has arrived: before that there is
+              nothing to count, and a zero that jumps is worse than none. */}
+          {history !== null ? (
             <span className="text-[11px] tabular-nums">{copy.historyCount(entries.length)}</span>
           ) : null}
         </button>
 
         {showHistory ? (
           <div className="mt-1.5">
-            {loadingHistory && legacy === null ? (
+            {loadingHistory && history === null ? (
               <p className="px-1 py-2 text-xs text-muted">{copy.historyLoading}</p>
             ) : (
               /* Read-only, and structurally so: movements are append-only

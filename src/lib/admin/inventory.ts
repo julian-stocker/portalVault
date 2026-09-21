@@ -29,6 +29,7 @@ import { isCollectible } from "@/lib/catalog/collectible";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
 
+import type { TradeTotals } from "@/lib/admin/stock-history";
 import {
   isCondition,
   isPriceSource,
@@ -115,11 +116,14 @@ export async function fetchInventory(
  * Every one of those exclusions is a reference or a checked column inside
  * the function; none of them reads a note, and none of them happens here.
  *
- * THE FILTER IS IN THE READ PATH ON PURPOSE. These rows feed both the
- * history and the `Eingekauft`/`Verkauft` counters, so filtering in the
- * browser would leave the two able to disagree — and would ship the test
- * data to the client anyway. `admin_inventory_movements` is untouched and
- * still answers the audit question.
+ * THE FILTER IS IN THE READ PATH ON PURPOSE. Filtering in the browser would
+ * ship the test data to the client anyway. `admin_inventory_movements` is
+ * untouched and still answers the audit question.
+ *
+ * `limit` IS A DISPLAY CUT-OFF AND NOTHING ELSE. No lifetime figure may be
+ * computed from these rows — `fetchTradeTotals()` answers that without a
+ * limit (0086). This is called when a card's history is opened, never for
+ * the page as a whole.
  */
 export async function fetchMovements(inventoryId: number, limit = 20): Promise<Movement[]> {
   const supabase = await createClient();
@@ -147,6 +151,43 @@ export async function fetchMovements(inventoryId: number, limit = 20): Promise<M
     note: row.note,
     createdAt: row.created_at,
   }));
+}
+
+/**
+ * Lifetime operative purchases and sales, per position, for the whole page.
+ *
+ * One call, the same shape the reconstruction has had since ADR-0102:
+ * `seller_legacy_stock_summary()` answers every card's legacy half in one
+ * request, and `seller_business_trade_totals()` (0086) now answers the
+ * operative half the same way. Before this the page asked for one movement
+ * list PER POSITION — 273 requests on production — and summed them in the
+ * browser, which was both a fan-out and a wrong number the moment a
+ * position outgrew the limit.
+ *
+ * Keyed by `inventory_id`. A position the database leaves out has nothing
+ * to count; the card reads a missing entry as zero.
+ *
+ * Empty on failure rather than throwing, like the legacy totals: a card
+ * without counters is wrong by omission, a stock screen that refuses to
+ * load is worse.
+ */
+export async function fetchTradeTotals(): Promise<Map<number, TradeTotals>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_business_trade_totals");
+  if (error) return new Map();
+
+  const totals = new Map<number, TradeTotals>();
+  for (const row of (data ?? []) as {
+    inventory_id: number;
+    purchased_units: number;
+    sold_units: number;
+  }[]) {
+    totals.set(Number(row.inventory_id), {
+      purchasedUnits: Number(row.purchased_units) || 0,
+      soldUnits: Number(row.sold_units) || 0,
+    });
+  }
+  return totals;
 }
 
 /**

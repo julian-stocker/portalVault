@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
 
 import { InventoryView } from "@/components/admin/inventory-view";
-import {
-  fetchInventory,
-  fetchMovements,
-  fetchShopSettings,
-  type Movement,
-} from "@/lib/admin/inventory";
+import { fetchInventory, fetchShopSettings, fetchTradeTotals } from "@/lib/admin/inventory";
 import { fetchLegacyTotals } from "@/lib/admin/legacy-stock";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { de } from "@/lib/i18n/de";
@@ -26,35 +21,31 @@ export const metadata: Metadata = { title: `${de.inventory.title} · ${de.admin.
  * fixture out of the operational list without a single name being matched.
  */
 export default async function InventoryPage() {
-  const [catalog, series, settings, legacyTotals] = await Promise.all([
+  /*
+   * FOUR QUERIES FOR THE WHOLE PAGE, AND NONE PER POSITION.
+   *
+   * `Eingekauft` and `Verkauft` are lifetime figures, so both halves arrive
+   * as complete aggregates — the reconstruction from
+   * `seller_legacy_stock_summary()` (ADR-0102) and the operative ledger from
+   * `seller_business_trade_totals()` (0086). One call each, for every card.
+   *
+   * This page used to ask for one movement list PER POSITION instead: 273
+   * round trips on production, whose rows were then summed in the browser.
+   * That was a fan-out AND a wrong number, because the list is capped and a
+   * busy position would have undercounted itself. Individual timeline rows
+   * are now fetched by the card that is opened — the shape the legacy
+   * events have had all along.
+   */
+  const [catalog, series, settings, legacyTotals, tradeTotals] = await Promise.all([
     fetchCatalog({ includeHidden: true }),
     fetchSeries(),
     // The shop-wide percentage, so every card can say what "automatic" means
     // instead of showing a number with no explanation (ADR-0045).
     fetchShopSettings(),
-    // Every card's `Eingekauft` and `Verkauft` need the reconstructed 2026
-    // totals, and one call answers the whole page (ADR-0102). The individual
-    // events are fetched by the card that is opened, not by this page.
     fetchLegacyTotals(),
+    fetchTradeTotals(),
   ]);
   const { positions, outsideScope } = await fetchInventory(catalog);
-
-  /*
-   * One round of movement queries, in parallel, rather than one per card on
-   * demand.
-   *
-   * The limit is the function's own maximum rather than a display cut-off,
-   * because these rows now feed `Eingekauft` and `Verkauft` as well as the
-   * history: a truncated list would silently undercount. 200 is far above
-   * what any position holds — the busiest carries a few dozen — and the
-   * database refuses more in any case.
-   */
-  const histories = await Promise.all(
-    positions.map(async (position) =>
-      [position.inventoryId, await fetchMovements(position.inventoryId, 200)] as const),
-  );
-  const movements: Record<number, Movement[]> = {};
-  for (const [id, list] of histories) movements[id] = list;
 
   return (
     <main className="mx-auto w-full max-w-5xl px-4 pt-8 pb-10 md:pt-12">
@@ -63,8 +54,8 @@ export default async function InventoryPage() {
 
       <InventoryView
         positions={positions}
-        movements={movements}
         legacyTotals={Object.fromEntries(legacyTotals)}
+        tradeTotals={Object.fromEntries(tradeTotals)}
         catalog={catalog}
         series={series}
         outsideScope={outsideScope.length}

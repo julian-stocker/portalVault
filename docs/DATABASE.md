@@ -2212,6 +2212,75 @@ nicht mit einem leeren Ledger.
 
 ---
 
+### 3.3ai Eine Definition, zwei Leser: Zeitleiste und Lebenszeit-Zähler (Migration `0086`)
+
+`Eingekauft` und `Verkauft` hingen zur Hälfte an einer gekappten Liste: die Legacy-Hälfte kam
+aggregiert aus `seller_legacy_stock_summary()`, die operative summierte der Browser aus den
+Zeilen von `seller_business_movements()` — und die begrenzt `p_limit`, hart bei 500. Eine
+Position mit mehr Bewegungen hätte still zu wenig gezählt.
+
+**`0086` gibt dem operativen Pfad die Form, die der Legacy-Pfad seit `0079` hat: ein
+vollständiges Aggregat für die Seite, Einzelereignisse auf Abruf.** Additiv — nichts gelöscht,
+keine Tabelle, keine Spalte, keine Policy verändert.
+
+| Objekt | |
+|---|---|
+| `public.business_movements` | **die einzige Definition einer operativen Geschäftsbewegung.** View über `inventory_movements` ⨝ `shop_inventory`. Intern: `revoke all … from public, anon, authenticated`, kein `grant` |
+| `seller_business_movements(bigint, integer)` | liest den View **paginiert** für die Anzeige. Signatur, Rückgabespalten, Sortierung, Limit und Gate unverändert gegenüber `0085`; nur der Filter steht nicht mehr im Rumpf |
+| `seller_business_trade_totals()` | aggregiert **denselben** View **vollständig, ohne `LIMIT` und ohne `OFFSET`**, eine Zeile je `inventory_id` mit `purchased_units` und `sold_units` |
+
+Warum ein View und keine zweite Filterkopie: stünde das Prädikat zweimal da, könnte jemand eine
+Stelle ändern und die andere vergessen — Zeitleiste und Zähler würden sich widersprechen, ohne
+dass es auffällt. So meinen beide dieselbe Menge **durch Konstruktion**.
+
+Die Ausschlüsse sind unverändert die aus 3.3ag/`0085` und stehen jetzt genau einmal:
+`initial_import`, Fixtures ab SKY-9000, Bewegungen einer Sandbox-Bestellung (hin und zurück)
+und Bewegungen eines `is_test`-Verkaufs (hin und zurück). **Jede ist eine Referenz oder eine
+geprüfte Spalte; keine liest `note`, keine rät über `reason`.**
+
+#### Was die drei Zahlen einer Karte sind
+
+```
+Eingekauft = Legacy-Einkäufe          + operative Einkäufe      beide vollständig aggregiert
+Verkauft   = Legacy-Verkäufe          + operative Verkäufe      beide vollständig aggregiert
+Bestand    = shop_inventory.quantity                            und sonst nichts
+```
+
+`return`, `correction`, `writeoff`, `opening_balance` und `legacy_adjustment` zählen in keinen
+der beiden Handelszähler. **Das Limit der Zeitleiste ist reine Darstellung** — `tradeCounters()`
+nimmt zwei Aggregate und keine Liste, eine Zeitleiste lässt sich nicht mehr übergeben.
+
+#### Ladeverhalten der Lagerseite
+
+Vorher ein Movement-RPC **je Position**, dessen Zeilen dann im Browser summiert wurden; jetzt
+zwei Aggregate für die ganze Seite und die Detailhistorie — operativ **und** legacy zusammen in
+einem Roundtrip — erst beim Öffnen einer Karte.
+
+| | vorher | nachher |
+|---|---|---|
+| Staging (278 Positionen) | **283** Requests | **6** |
+| Production (273 Positionen) | **278** Requests | **6** |
+| je geöffneter Karte | 1 (nur Legacy) | 1 (beide Quellen) |
+
+#### Rollout
+
+Staging und Production am **2026-09-21**, beide `Success. No rows returned`, beide read-only
+verifiziert: Objekte und Grants vorhanden, `anon` bekommt auf View und Funktion `42501`, beide
+Gates antworten mit demselben `seller operator role required`, und der Schema-Diff zeigt genau
+die drei angekündigten Objekte.
+
+**Keine einzige Datenzeile hat sich bewegt** — auf Production byte-genau belegt über SHA-256 je
+Tabelle gegen den erwarteten Zustand: `shop_inventory`, `legacy_stock_events`,
+`inventory_import_rows`, `purchases`, `purchase_items`, `sales`, `sale_items`,
+`settlement_adjustments`, `orderbook_audit`, `skylanders`.
+
+Beide operativen Ledger waren beim Rollout leer, Production stand vorher wie nachher bei
+**824 real loose · 0 boxed · 0 reserviert · 0 `inventory_movements` · 2 671
+`legacy_stock_events`**. Die Zähler sind damit heute exakt die Legacy-Summen — auf einem Weg,
+der auch bei der tausendsten Bewegung noch stimmt.
+
+---
+
 ---
 
 ## 4. Beziehungen
