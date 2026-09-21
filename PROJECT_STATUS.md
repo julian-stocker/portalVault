@@ -67,8 +67,48 @@ Getrennte Konfiguration je Welt, ohne Rückfall: `STRIPE_SECRET_KEY_{LIVE,SANDBO
 das Endpoint-Secret, das die Signatur verifiziert, korroboriert durch das mitsignierte
 `livemode` und durch die Welt der Bestellung, die das Event nennt.
 
-**Stand:** `0077` und `0078` auf **Staging angewandt**, Edge Functions dort deployt, Code noch
-nicht committet. **Production unverändert** — keine der beiden Migrationen ist dort angewandt.
+**Stand:** `0077` und `0078` sind auf **Staging und Production** angewandt, die Edge Functions
+auf beiden Projekten deployt — Production: **`create-payment` v10, `stripe-webhook` v11**, beide
+ACTIVE seit 2026-09-21 11:05.
+
+**Die LIVE-Infrastruktur steht, und echtes Bezahlen ist trotzdem aus.** Auf Production liegen
+seit 2026-09-21 `STRIPE_SECRET_KEY_LIVE` und `STRIPE_WEBHOOK_SECRET_LIVE` (beide im
+Digest-Vergleich verschieden von ihren Sandbox-Gegenstücken), und in Stripe existiert ein
+Live-Endpoint auf dieselbe Function-URL wie der Sandbox-Endpoint — das Secret, das die Signatur
+verifiziert, bestimmt die Welt. Staging hat **keine** LIVE-Credentials.
+
+`commerce_settings.mode` steht unverändert auf **`sandbox`**. Damit ist der Live-Schlüssel
+konfiguriert und **unerreichbar**: Ein normales Konto bekommt keine Zahlungswelt, und ohne
+Zahlungswelt entsteht nicht einmal eine Bestellung — der BEFORE-INSERT-Trigger aus `0077`
+verweigert sie.
+
+*Verifikation nach dem LIVE-Deploy, 12/12 grün und ausschließlich lesend* (2026-09-21):
+Schalter `sandbox` · normales Konto → `null` · Gast → `null` · Tester → `sandbox` ·
+`commerce_access` geschlossen · Baseline auf das Stück unverändert · Webhook antwortet `400`
+statt `503`, beide Secret-Paare sind also geladen.
+
+**Nicht verifizierbar und deshalb benannt:** Das Präfix des Live-Schlüssels (`sk_live_`) prüft
+`selectStripeKey` erst zur Laufzeit, und den Moment gibt es erst nach Schritt 5. Secrets sind
+über die API nur als Digest sichtbar. Beide Werte wurden vom Betreiber visuell im
+Stripe-Dashboard bestätigt.
+
+**Production-Baseline nach dem Sandbox-E2E vom 2026-09-21** — ein verkauftes Stück gegenüber
+der Baseline vom 2026-09-20:
+
+| | |
+|---|---|
+| Gesamtbestand | **1 200 Stück** |
+| davon real verkäuflich | **991 Stück** |
+| davon Fixtures (`SKY-9994`, `SKY-9998`) | **209 Stück** — unverändert |
+| reserviert | **0** |
+| `inventory_movements` | **629** |
+| Bestellungen · `sales` | **6** · **296** |
+
+Durch das Anlegen der LIVE-Secrets und den Redeploy hat sich daran **nichts** geändert —
+nachgeprüft nach Schritt 4.
+
+Die eine Differenz ist die Testbestellung `SI-2026-001008`: `SKY-0021 loose ×1`, genau eine
+Bewegung (`#769`, −1, `reason = sale`).
 
 *Matrix auf Staging, 14/14* (`npm run verify:payment-mode:staging`): alle sechs Zeilen gegen die
 echte Datenbank, mit echtem Tester, echtem Nicht-Testerkonto und Gast, Shop-Schalter durch alle
@@ -77,7 +117,13 @@ bei Shop `live` ohne Live-Schlüssel bricht **fail closed** ab (`503 provider_un
 Session), und ein Tester bei Shop `live` erhält weiterhin eine `sandbox`-Order mit
 `cs_test_`-Session.
 
-*Sandbox-E2E grün, `SI-2026-001065`* — der erste echte Stripe-Durchlauf auf diesem Schema:
+*Sandbox-E2E grün auf **Production**, `SI-2026-001008`* (2026-09-21): Order `sandbox` →
+Sandbox-Schlüssel → `cs_test_`-Session → Webhook `confirmed` → `paid`, Reservierung `converted`,
+**genau eine** Bewegung über genau die gekaufte Menge, interner Verkauf `#296` mit
+`created_by = null`, Rechnung ausgestellt. Jede Summe trifft die Baseline auf das Stück.
+
+*Sandbox-E2E grün auf Staging, `SI-2026-001065`* — der erste echte Stripe-Durchlauf auf diesem
+Schema:
 Order `sandbox` → Sandbox-Schlüssel → `cs_test_`-Session → Webhook `confirmed` → Bestellung
 `paid`, Reservierung `converted`, **genau eine** Bewegung über genau die gekaufte Menge, interne
 Verkaufszeile mit `created_by = null`, Rechnung ausgestellt. Eine zweite Bestätigung derselben
@@ -134,6 +180,9 @@ PASS**, ausschließlich lesend.
 | davon Fixtures (`SKY-9994`, `SKY-9998`) | **209 Stück** · 4 Positionen |
 | reserviert | **0** |
 | `inventory_movements` | **628** |
+
+*Der Stand vom 2026-09-20. Die heute gültige Baseline steht oben im Stripe-Abschnitt — seit dem
+Production-Sandbox-E2E vom 2026-09-21 ist sie um ein verkauftes Stück verschoben.*
 
 **Keine der zehn Migrationen hat eine Inventory-Bewegung erzeugt.** Die jüngste Bewegung
 datiert weiterhin auf 2026-09-18 und stammt aus dem Bestandsabgleich, nicht aus dem Rollout.

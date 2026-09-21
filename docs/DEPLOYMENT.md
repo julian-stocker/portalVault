@@ -414,6 +414,41 @@ Der frühere **einzelne** `STRIPE_SECRET_KEY` wird nicht mehr gelesen. Beim Umst
 `STRIPE_SECRET_KEY_SANDBOX` seinen bisherigen Wert; die alte Variable kann danach entfernt
 werden.
 
+**Rolloutstand (2026-09-21).** `0077` und `0078` sind auf **Staging und Production** angewandt.
+Die Functions sind auf beiden Projekten deployt — Production: **`create-payment` v10,
+`stripe-webhook` v11**, beide ACTIVE seit 11:05.
+
+**Production hält seit dem 2026-09-21 auch die LIVE-Credentials** — `STRIPE_SECRET_KEY_LIVE`
+und `STRIPE_WEBHOOK_SECRET_LIVE`, beide im Digest-Vergleich verschieden von ihren
+Sandbox-Gegenstücken, dazu ein Live-Endpoint in Stripe auf dieselbe Function-URL wie der
+Sandbox-Endpoint. **Staging hat keine LIVE-Credentials und soll keine bekommen.**
+
+**Echtes Bezahlen ist trotzdem aus, und zwar an einer einzigen Stelle:**
+`commerce_settings.mode` steht auf `sandbox`. Ein normales Konto bekommt damit keine
+Zahlungswelt, und ohne Welt entsteht nicht einmal eine Bestellung — der BEFORE-INSERT-Trigger
+aus `0077` verweigert sie, bevor der Schlüssel überhaupt gebraucht würde. Ein Tester zahlt
+unverändert in der Sandbox. Der Schalter ist der **letzte** Schritt und jederzeit durch
+dieselbe Einstellung zurücknehmbar.
+
+Nach dem LIVE-Deploy read-only verifiziert, 12/12: Schalter `sandbox`, normales Konto und Gast
+ohne Zahlungswelt, Tester `sandbox`, Baseline unverändert (1 200 gesamt · 991 real · 209
+Fixtures · 0 reserviert · 629 Bewegungen), Webhook antwortet `400` statt `503`.
+
+> **Was sich erst beim ersten Live-Kauf zeigt.** `selectStripeKey` prüft das Schlüsselpräfix
+> (`sk_live_`/`rk_live_`) zur Laufzeit, und Secrets sind über die API nur als SHA-256-Digest
+> sichtbar — ein vertauschter Schlüssel fällt daher erst nach Schritt 5 auf, dann aber fail
+> closed: `503 provider_unconfigured` mit `stripe_key_is_test_but_mode_is_live` im Log, keine
+> Fehlbuchung. Dasselbe gilt für das Live-Webhook-Secret: gehört es zu einem anderen Endpoint,
+> meldet Stripes Zustellprotokoll `400 invalid_signature`. Beide Werte vor Schritt 5 im
+> Dashboard gegenlesen.
+
+Je ein Sandbox-E2E ist durchgelaufen und read-only verifiziert: `SI-2026-001065` auf Staging,
+`SI-2026-001008` auf Production. Beide mit genau einer Lagerbewegung über genau die gekaufte
+Menge.
+
+Die früheren Einzelvariablen `STRIPE_SECRET_KEY` und `STRIPE_WEBHOOK_SECRET` liegen auf beiden
+Projekten noch, werden vom Code aber nicht mehr gelesen und können entfernt werden.
+
 **Ein Publishable Key wird nicht gebraucht.** SkyIsles benutzt Stripe Checkout per Redirect —
 der Browser bekommt eine fertige `url` und nie einen Schlüssel. Es gibt deshalb keine
 `NEXT_PUBLIC_STRIPE_*`-Variable, und es soll keine geben.
