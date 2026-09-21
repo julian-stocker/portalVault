@@ -92,23 +92,28 @@ statt `503`, beide Secret-Paare sind also geladen.
 über die API nur als Digest sichtbar. Beide Werte wurden vom Betreiber visuell im
 Stripe-Dashboard bestätigt.
 
-**Production-Baseline nach dem Sandbox-E2E vom 2026-09-21** — ein verkauftes Stück gegenüber
-der Baseline vom 2026-09-20:
+**Production-Baseline, Stand 2026-09-21:**
 
 | | |
 |---|---|
-| Gesamtbestand | **1 200 Stück** |
-| davon real verkäuflich | **991 Stück** |
-| davon Fixtures (`SKY-9994`, `SKY-9998`) | **209 Stück** — unverändert |
+| Gesamtbestand | **1 201 Stück** |
+| davon real verkäuflich | **992 Stück** |
+| davon Fixtures (`SKY-9994`, `SKY-9998`) | **209 Stück** |
 | reserviert | **0** |
-| `inventory_movements` | **629** |
+| `inventory_movements` | **630** |
 | Bestellungen · `sales` | **6** · **296** |
 
-Durch das Anlegen der LIVE-Secrets und den Redeploy hat sich daran **nichts** geändert —
+Durch das Anlegen der LIVE-Secrets und den Redeploy hat sich am Bestand **nichts** geändert —
 nachgeprüft nach Schritt 4.
 
-Die eine Differenz ist die Testbestellung `SI-2026-001008`: `SKY-0021 loose ×1`, genau eine
-Bewegung (`#769`, −1, `reason = sale`).
+**Der Bestand steht wieder auf dem Wert vom 2026-09-20, und das Journal erzählt trotzdem
+lückenlos, was passiert ist.** Die Testbestellung `SI-2026-001008` hat `SKY-0021 loose ×1`
+zunächst **korrekt ausgebucht** — Bewegung `#769`, −1, `reason = sale`. Anschließend hat der
+Betreiber den Testbestand **append-only zurückgeführt**: Bewegung `#770`, +1, `reason = return`,
+Notiz `sandbox test order SI-2026-001008`. Zwei Bewegungen, die sich in der Summe aufheben,
+keine gelöscht und keine Zahl von Hand korrigiert — deshalb 630 statt 628. Der Vorgang steht
+auf `fulfillment_status = shipped` mit den Ereignissen `sandbox_stock_reverted`,
+`tracking_updated`, `order_shipped`.
 
 *Matrix auf Staging, 14/14* (`npm run verify:payment-mode:staging`): alle sechs Zeilen gegen die
 echte Datenbank, mit echtem Tester, echtem Nicht-Testerkonto und Gast, Shop-Schalter durch alle
@@ -119,8 +124,10 @@ Session), und ein Tester bei Shop `live` erhält weiterhin eine `sandbox`-Order 
 
 *Sandbox-E2E grün auf **Production**, `SI-2026-001008`* (2026-09-21): Order `sandbox` →
 Sandbox-Schlüssel → `cs_test_`-Session → Webhook `confirmed` → `paid`, Reservierung `converted`,
-**genau eine** Bewegung über genau die gekaufte Menge, interner Verkauf `#296` mit
-`created_by = null`, Rechnung ausgestellt. Jede Summe trifft die Baseline auf das Stück.
+**genau eine** Bewegung über genau die gekaufte Menge (`#769`, −1), interner Verkauf `#296`
+mit `created_by = null`, Rechnung ausgestellt. Jede Summe traf die Baseline auf das Stück. Dass
+der Testbestand danach über `#770` zurückgeführt wurde, ändert daran nichts: Die Ausbuchung hat
+stattgefunden und ist im Journal nachlesbar.
 
 *Sandbox-E2E grün auf Staging, `SI-2026-001065`* — der erste echte Stripe-Durchlauf auf diesem
 Schema:

@@ -431,8 +431,15 @@ unverändert in der Sandbox. Der Schalter ist der **letzte** Schritt und jederze
 dieselbe Einstellung zurücknehmbar.
 
 Nach dem LIVE-Deploy read-only verifiziert, 12/12: Schalter `sandbox`, normales Konto und Gast
-ohne Zahlungswelt, Tester `sandbox`, Baseline unverändert (1 200 gesamt · 991 real · 209
-Fixtures · 0 reserviert · 629 Bewegungen), Webhook antwortet `400` statt `503`.
+ohne Zahlungswelt, Tester `sandbox`, Bestand durch den LIVE-Rollout unverändert, Webhook
+antwortet `400` statt `503`.
+
+**Production-Baseline, Stand 2026-09-21: 1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert ·
+630 Bewegungen.** Der Sandbox-E2E `SI-2026-001008` hat `SKY-0021 loose ×1` korrekt ausgebucht
+(`#769`, −1, `sale`); der Testbestand wurde danach append-only über `#770` (+1, `return`,
+Notiz `sandbox test order SI-2026-001008`) zurückgeführt. Der Bestand ist deshalb wieder auf dem
+Wert von vorher, die Bewegungszahl aber um zwei höher — nichts wurde gelöscht oder von Hand
+korrigiert.
 
 > **Was sich erst beim ersten Live-Kauf zeigt.** `selectStripeKey` prüft das Schlüsselpräfix
 > (`sk_live_`/`rk_live_`) zur Laufzeit, und Secrets sind über die API nur als SHA-256-Digest
