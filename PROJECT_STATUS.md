@@ -17,7 +17,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
 > | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
 > | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
-> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow) |
+> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow), `0077`–`0078` und `0079`–`0082` am **2026-09-21** (Zahlungswelt je Aufrufer, Legacy-Lagerhistorie) |
 > | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
 > | Production-Testbestellungen | **keine weiteren** |
 >
@@ -46,6 +46,100 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Legacy-Lagerhistorie 2026 auf Production (2026-09-21) — abgeschlossen
+
+Der Bestand hat jetzt eine Geschichte. Die Lagerakte einer Figur begann bisher mit
+`initial_import` und sagte nichts darüber, woher die Stücke kamen; ab sofort steht daneben eine
+rekonstruierte Business-Historie ab dem 01.01.2026, und der operative Bestand entspricht exakt
+Spalte F der Arbeitsmappe.
+
+**Der fachliche Schnitt ist der 01.01.2026.** Alles davor bleibt private Tätigkeit und ist
+**nicht importiert** — weder das Blatt `Order 2025` noch die fünfzehn Einkaufsgruppen aus
+Dezember 2025, die oben im Blatt `Order 2026` stehen. Sie erscheinen nirgends als Einkauf,
+Verkauf oder sichtbare Historie; was die private Zeit hinterlassen hat, geht ausschließlich in
+einen technischen Startwert je Position ein.
+
+**`legacy_stock_events` ist nicht das Lagerjournal.** Es ist eine additive, append-only
+Rekonstruktion und bewegt keinen Bestand. **`inventory_movements` bleibt das kanonische
+append-only Ledger dessen, was SkyIsles tatsächlich operativ gebucht hat** — der Legacy-Import
+hat dort keine einzige Zeile erzeugt und nichts rückdatiert.
+
+### Die importierte Historie
+
+| Art | Anzahl | Summe |
+|---|---|---|
+| `opening_balance` | 263 | +742 |
+| `purchase` | 1 245 | +1 245 |
+| `sale` | 1 145 | −1 145 |
+| `correction` | 3 | −3 |
+| `legacy_adjustment` | 15 | **−15** |
+| **gesamt** | **2 671** | |
+
+**600 unterstützte Positionen (SKY-ID + `loose`) rekonstruieren exakt auf 824 Einheiten =
+Excel F.** Ein zweiter Import-Lauf schreibt nichts (idempotent über einen lesbaren
+`import_fingerprint`).
+
+### Der Bestandsabgleich
+
+**Exakt 90 append-only `correction`-Bewegungen, netto −168:** 77 Abgänge (−187) und 13 Zugänge
+(+19). Die Zugänge sind **ausnahmslos Software** — Production führte bis dahin keine einzige
+Spieleinheit. Kein Bestandswert wurde direkt geschrieben; jede Änderung lief über
+`system_record_inventory_movement`, dessen Guard `quantity + delta >= reserved` in der
+WHERE-Klausel steht und damit nicht umgangen werden kann.
+
+### Production-Baseline nach dem Rollout
+
+| | |
+|---|---|
+| `inventory_movements` | **720** |
+| echter loser Bestand | **824** = Excel F |
+| Fixtures (`SKY-9994`, `SKY-9998`) | **209** |
+| Gesamtbestand `shop_inventory` | **1 033** |
+| reserviert | **0** |
+| `legacy_stock_events` | **2 671** |
+| geschlossene Legacy-Verkaufspositionen | **191** |
+
+Ein erneuter Abgleichlauf ist ein vollständiger No-op.
+
+### Die 191 geschlossenen Positionen — und die eine, die offen bleibt
+
+Nach dem Abgleich wurden **191 offene Legacy-Verkaufspositionen ohne Inventory-Movement
+geschlossen** (187 mit SKY-ID auf 76 Figuren, 4 ohne). Ihre Bestandswirkung steckte bereits in
+Spalte F; ein zweites Ausbuchen hätte dieselben Stücke doppelt entfernt. Die Bewegungszahl blieb
+deshalb bei 720.
+
+**Genau eine Position bleibt absichtlich offen:**
+
+| | |
+|---|---|
+| Position | `sale_item#879` |
+| Verkauf | Sale #228 |
+| Quelle | `Order 2026`, Zeile 1110 |
+| Artikel | „2.0 Stitch", **keine SKY-ID** |
+| Grund | `stock_released_at IS NULL` |
+
+Der Release-Guard aus `0071` wurde **bewusst nicht umgangen** und die Position nicht künstlich
+bereinigt. Ob dieser historische Verkauf freigegeben wird, ist eine Entscheidung des Betreibers.
+
+### Die Migrationen
+
+| | Rolle |
+|---|---|
+| `0079` | `legacy_stock_events` — Tabelle, CHECKs, Append-only-Trigger, RLS ohne Policy, zwei seller-gated Lesefunktionen |
+| `0080` | korrigiert eine importierte Verkaufszeile: `Order 2026!1381` verweist auf `T!I124` = SKY-0419 Kaos [T], nicht auf SKY-0563 Kaos [I]. Vier Katalogfiguren heißen Kaos |
+| `0081` | der Abschlussweg für abgeglichene Legacy-Positionen, dreigeteilt wie das Ledger. `seller_settle_sale_item()` aus `0073` bleibt unverändert |
+| `0082` | **Rechtekorrektur:** `0081` entzog dem internen Regelhalter das EXECUTE-Recht nur von drei Rollen, `service_role` behielt es. Sachlich hing wenig daran — dieselbe Rolle darf den Wrapper ohnehin aufrufen —, aber die Zusicherung „kein Rolle hält EXECUTE" war damit falsch |
+
+### Keine historische Lagerkurve
+
+**Lager V2 darf aus Legacy-Ereignissen keinen Running Balance berechnen oder anzeigen.** Die
+Rekonstruktion garantiert das **Ende**, nicht den Verlauf: Zwischenstände dürfen negativ sein
+und sind es bei fünfzehn Figuren. Eine durch diese Punkte gezogene Linie behauptete eine
+Genauigkeit, die es nicht gibt. `seller_legacy_stock_events()` liefert deshalb Ereignisse und
+nie eine laufende Summe. `opening_balance`, `legacy_adjustment`, Korrekturen und Retouren zählen
+weder als Eingekauft noch als Verkauft. Begründung und verworfene Alternativen: **ADR-0102**,
+Struktur und Zahlen: `docs/DATABASE.md` 3.3ag.
 
 ## Stripe LIVE und SANDBOX nebeneinander (2026-09-21) — auf Staging verifiziert
 
@@ -92,6 +186,7 @@ dieselbe Einstellung zurücknehmbar.
 | normales Konto · Gast | **`live`** |
 | `commerce_access` mit dem `anon`-Schlüssel eines Besuchers | `may_checkout: true` · `reason: open` · `is_sandbox: false` |
 | Baseline | **1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert · 630 Bewegungen** |
+| | *Stand in diesem Moment. Die heute gültige Baseline steht im Abschnitt zur Legacy-Lagerhistorie.* |
 | durch den Schalter entstanden | **keine** Bestellung, **kein** Payment Attempt, **kein** Payment Event, **keine** Lagerbewegung |
 | Functions | `create-payment` **v10**, `stripe-webhook` **v11**, `send-order-mail` **v8** — alle ACTIVE |
 
@@ -117,7 +212,8 @@ Checkout in `503 provider_unconfigured` mit `stripe_key_is_test_but_mode_is_live
 `400 invalid_signature` und die Bestellung bliebe `pending`. Secrets sind über die API nur als
 Digest sichtbar; beide Werte wurden vom Betreiber im Stripe-Dashboard gegengelesen.
 
-**Production-Baseline, Stand 2026-09-21:**
+**Production-Baseline unmittelbar vor der Legacy-Migration** — überholt, die heute gültigen
+Werte stehen im Abschnitt zur Legacy-Lagerhistorie:
 
 | | |
 |---|---|

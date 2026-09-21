@@ -1796,6 +1796,126 @@ Nachgewiesen behoben am 2026-09-21 mit `SI-2026-001065`: `payment_events.outcome
 Reservierung `converted`, genau **eine** Bewegung über genau die gekaufte Menge, und die
 Verkaufszeile mit `created_by = null`.
 
+### 3.3ag Rekonstruierte Legacy-Historie neben dem Ledger (Migrationen `0079`–`0082`, ADR-0102)
+
+**Der fachliche Schnitt ist der 01.01.2026.** Alles davor ist private Tätigkeit des Betreibers
+und wird nicht zu SkyIsles-Geschäftsvorfällen: das gesamte Blatt `Order 2025` **und** die
+fünfzehn Einkaufsgruppen aus Dezember 2025, die oben im Blatt `Order 2026` stehen. Sie sind
+nirgends als Einkauf, Verkauf oder sichtbare Historie vorhanden; was die private Zeit
+hinterlassen hat, geht ausschließlich in **einen** technischen Startwert je Position ein.
+
+#### `legacy_stock_events` ist nicht das Lagerjournal
+
+| | `inventory_movements` | `legacy_stock_events` |
+|---|---|---|
+| Was es ist | das **operative Ledger** — was SkyIsles tatsächlich gebucht hat | eine **Rekonstruktion** des Geschäftsjahres 2026 aus der Arbeitsmappe |
+| Bewegt Bestand | ja | **nein** |
+| Rückdatierung | ausgeschlossen | die Ereignisse tragen ihr historisches Datum |
+| Quelle einer Menge | ja | **nie** — Bestand kommt aus `shop_inventory` |
+| Änderbar | append-only | append-only, Rücknahme nur als Ganzes per `truncate` |
+
+Beides in einer Tabelle zu führen hieße, dass ein Leser eine gebuchte Tatsache nicht mehr von
+einer rekonstruierten unterscheiden kann. **`inventory_movements` bleibt das kanonische
+append-only Ledger dessen, was SkyIsles operativ gebucht hat**; der Legacy-Import erzeugt dort
+keine einzige Zeile.
+
+#### Die fünf Ereignisarten
+
+| Art | Bedeutung |
+|---|---|
+| `purchase` | dokumentierter Business-Einkauf 2026, `+1` je Stück |
+| `sale` | dokumentierter Business-Verkauf 2026, `−1` je Stück |
+| `correction` | die `Korrektur >`-Zeilen der Mappe. Sie zählt sie selbst als Abgang: für `I!74` liest ihr Verkaufszähler 5 = 3 Verkäufe + 2 Korrekturen |
+| `opening_balance` | **technischer** Startwert zum 01.01.2026, kein Einkauf |
+| `legacy_adjustment` | der Rest, wo selbst null ein zu hoher Start wäre. Gleiches Datum, gleiche technische Natur, **negativ** |
+
+Die Rekonstruktion rechnet **rückwärts** vom Endbestand der Mappe, weil nur er belastbar ist:
+
+```
+raw_start = Endbestand − Einkäufe + Verkäufe + Korrekturen
+opening_balance = max(0, raw_start)      legacy_adjustment = min(0, raw_start)
+```
+
+**Ein negativer `legacy_adjustment` behauptet nichts Physisches.** Er sagt: *„Die Legacy-Daten
+rekonstruieren hier nicht vollständig."* Genau deshalb gilt die Regel:
+
+> **Die Oberfläche darf aus Legacy-Ereignissen keinen historischen Zwischenbestand berechnen
+> oder anzeigen.** Die Legacy-Historie ist dafür nicht vollständig genug; eine daraus gezogene
+> laufende Linie wäre eine Genauigkeit, die diese Entscheidung bewusst aufgegeben hat.
+> `seller_legacy_stock_events()` liefert deshalb Ereignisse und nie eine laufende Summe.
+
+`opening_balance`, `legacy_adjustment`, Korrekturen und Retouren zählen **weder als Eingekauft
+noch als Verkauft**; `seller_legacy_stock_summary()` trennt das an genau einer Stelle, damit
+kein Screen die Regel kennen muss.
+
+#### Struktur, die die Regeln erzwingt
+
+`occurred_at` ist ein **date** — die Mappe kennt den Tag und nie die Stunde. CHECKs verbieten
+jedes Datum vor dem Schnitt, erlauben die beiden technischen Arten ausschließlich am
+01.01.2026, fixieren die Richtung je Art und verlangen, dass ein Mappenereignis seine Quellzeile
+nennt und ein technisches keine hat. Partielle Unique-Indizes lassen je Position höchstens einen
+`opening_balance` und einen `legacy_adjustment` zu; `import_fingerprint` ist eindeutig und
+**lesbar statt gehasht**, weil diese Zeilen mit dem Auge gegen die Mappe geprüft werden.
+RLS ist an und hat **keine Policy** — gelesen wird über zwei seller-gated Funktionen.
+
+`market_price_snapshot` ist der kanonische Katalogpreis zum Migrationsschnitt, für alle
+Ereignisse einer Figur identisch. **NULL ist zulässig** und bleibt es: zwei unterstützte Figuren
+haben keinen kanonischen Preis, und einen zu erfinden wäre schlechter als keinen.
+
+#### Die vier Migrationen
+
+| | Rolle |
+|---|---|
+| `0079` | legt `legacy_stock_events` an — Tabelle, CHECKs, Indizes, Append-only-Trigger, RLS ohne Policy, `seller_legacy_stock_events()` und `seller_legacy_stock_summary()` |
+| `0080` | korrigiert **eine** importierte Verkaufszeile. `Order 2026!1381` verweist über die Formel auf `T!I124` = SKY-0419 Kaos [T]; der Verkaufsimport hatte sie nach dem Freitext „Kaos" auf SKY-0563 Kaos [I] gelegt. Vier Katalogfiguren heißen Kaos, der Name konnte es also nie entscheiden. Läuft fail-closed: genau eine ungebuchte Zeile muss passen, sonst Rollback |
+| `0081` | der Abschlussweg für die abgeglichenen Legacy-Verkaufspositionen — `apply_reconciled_legacy_settlement()` (intern), `seller_…` (Operator), `system_…` (nur `service_role`), dieselbe Dreiteilung wie beim Ledger. `seller_settle_sale_item()` aus `0073` bleibt unverändert und weist diese Positionen weiter ab |
+| `0082` | **Rechtekorrektur.** `0081` nennt `apply_reconciled_legacy_settlement()` intern, entzog das Recht aber nur `public, anon, authenticated` — `service_role` behielt es. `0003` nennt bei `apply_inventory_movement` vier Rollen; `0082` zieht das nach. Sachlich hing wenig daran, weil genau diese Rolle den Wrapper ohnehin aufrufen darf und der Wrapper keine eigene Prüfung enthält. Verloren war die **Zusicherung**: „kein Rolle hält EXECUTE" ist der Satz, auf den sich später jemand verlässt |
+
+#### Warum `0081` eine eigene Tür braucht
+
+`seller_settle_sale_item()` weist jede Katalogfigur ab, deren `legacy_stock_flag` nicht `-` ist,
+mit der Begründung, ein Abschluss ohne Bewegung dürfe nie zum Weg werden, auf dem Bestand still
+verschwindet. Das galt, solange das Regal die Unbekannte war. Nach dem Abgleich ist Spalte F die
+vereinbarte Wahrheit und ihre Wirkung steht bereits im Bestand — ein zweites Ausbuchen würde
+dieselben Stücke doppelt entfernen. Deshalb eine **engere** Tür statt einer Aufweichung der
+alten: nur freigegebene, nicht stornierte, nicht-Test-Verkäufe aus der Mappe, ohne Bewegung, und
+nur dort, wo die Mappe selbst **kein** Ergebnis vermerkt hat. Geschrieben werden ein Zeitstempel
+und eine Notiz.
+
+#### Der Production-Rollout, Stand 2026-09-21 — abgeschlossen
+
+**Importierte Historie: 2 671 Ereignisse.**
+
+| Art | Anzahl | Summe |
+|---|---|---|
+| `opening_balance` | 263 | +742 |
+| `purchase` | 1 245 | +1 245 |
+| `sale` | 1 145 | −1 145 |
+| `correction` | 3 | −3 |
+| `legacy_adjustment` | 15 | **−15** |
+
+**600 unterstützte Positionen (SKY-ID + `loose`) rekonstruieren exakt auf 824 Einheiten = Spalte
+F der Arbeitsmappe.** Ausgeschlossen blieben 1 056 Quellzeilen: 552 vor dem Schnitt, 220
+Nicht-Figuren (`DI A`, `ZB`, Swap-Hälften), 136 ohne Bestandsmarker, 79 beschädigt, 65 ohne
+Formelreferenz und 4 mit einem Datum in der Zukunft.
+
+**Bestandsabgleich: exakt 90 append-only `correction`-Bewegungen, netto −168** — 77 Abgänge
+(−187) und 13 Zugänge (+19). Die Zugänge sind **ausnahmslos Software**: Production führte bis
+dahin keine einzige Spieleinheit, obwohl die Mappe welche ausweist.
+
+**Production danach:** `inventory_movements` **720** · echter loser Bestand **824** · Fixtures
+**209** · Gesamtbestand **1 033** · reserviert **0**.
+
+**191 offene Legacy-Verkaufspositionen wurden anschließend ohne Inventory-Movement
+geschlossen** (187 mit SKY-ID auf 76 Figuren, 4 ohne) — die Bewegungszahl blieb bei 720.
+
+**Genau eine Position bleibt absichtlich offen:** `sale_item#879`, Sale #228, `Order 2026`
+Zeile 1110, „2.0 Stitch", ohne SKY-ID. Ihr Verkauf hat `stock_released_at IS NULL`; der
+Release-Guard aus `0071` wurde **bewusst nicht umgangen** und die Position nicht künstlich
+bereinigt. Die Freigabe ist eine Entscheidung des Betreibers, keine Aufräumarbeit.
+
+---
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

@@ -434,16 +434,21 @@ Schalter, Parameter oder Codepfad, der ihn nach `live` bringt.
 Unmittelbar nach dem Umlegen read-only verifiziert, **13/13**: Schalter `live` · App-Tester
 `sandbox` · normales Konto und Gast `live` · `commerce_access` mit dem `anon`-Schlüssel eines
 Besuchers `{may_checkout: true, reason: open, is_sandbox: false}` · Baseline unverändert
-(1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert · 630 Bewegungen) · **durch den Schalter
-selbst entstand keine Bestellung, kein Payment Attempt, kein Payment Event und keine
+(damals 1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert · 630 Bewegungen) · **durch den
+Schalter selbst entstand keine Bestellung, kein Payment Attempt, kein Payment Event und keine
 Lagerbewegung** · Functions `create-payment` v10, `stripe-webhook` v11, `send-order-mail` v8
 alle ACTIVE.
 
 **Der erste echte LIVE-Kauf steht noch aus** und wird anschließend read-only verifiziert —
 dieselbe Kette wie bei den Sandbox-Durchläufen.
 
-**Production-Baseline, Stand 2026-09-21: 1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert ·
-630 Bewegungen.** Der Sandbox-E2E `SI-2026-001008` hat `SKY-0021 loose ×1` korrekt ausgebucht
+**Production-Baseline, Stand 2026-09-21 nach der Legacy-Lagermigration: 1 033 gesamt · 824 real
+(= Spalte F der Arbeitsmappe) · 209 Fixtures · 0 reserviert · 720 Bewegungen.** Die 90
+`correction`-Bewegungen des Bestandsabgleichs und die 2 671 rekonstruierten
+`legacy_stock_events` stehen in `PROJECT_STATUS.md` und `docs/DATABASE.md` 3.3ag; die Zahlen
+davor (1 201 / 992 / 630) gelten nur bis zu diesem Rollout.
+
+Der Sandbox-E2E `SI-2026-001008` hat `SKY-0021 loose ×1` korrekt ausgebucht
 (`#769`, −1, `sale`); der Testbestand wurde danach append-only über `#770` (+1, `return`,
 Notiz `sandbox test order SI-2026-001008`) zurückgeführt. Der Bestand ist deshalb wieder auf dem
 Wert von vorher, die Bewegungszahl aber um zwei höher — nichts wurde gelöscht oder von Hand

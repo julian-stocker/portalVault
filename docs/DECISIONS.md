@@ -8765,3 +8765,98 @@ lassen (kuriert das Symptom für vier von fünf Minuten und die Sackgasse nie) �
 beim Loslassen stornieren oder löschen (ein Schreibvorgang für ein Anzeigeproblem, und er
 zerstörte den Beleg) · `confirmed` und `refunded` ebenfalls loslassen (dort ist Geld geflossen,
 das gehört sichtbar).
+
+---
+
+## ADR-0102 — Die Legacy-Historie steht neben dem Ledger, nicht darin
+
+**Status:** entschieden und auf Production umgesetzt (2026-09-21)
+**Betrifft:** `legacy_stock_events`, `inventory_movements`, Migrationen `0079`–`0082`,
+Lager V2
+
+### Kontext
+
+Der Bestand in SkyIsles war eine Zahl ohne Geschichte. Die Lagerakte einer Figur begann mit
+`initial_import` und sagte nichts darüber, woher die Stücke kamen — obwohl der Betreiber das
+Geschäftsjahr 2026 in einer Arbeitsmappe lückenhaft, aber vorhanden geführt hat.
+
+Gleichzeitig war der physische Bestand in Production **nicht** der der Mappe. Spalte F der acht
+Bestandsblätter ist die Wahrheit über das Regal; Production lag darüber, weil 187
+Verkaufspositionen nie ausgebucht worden waren, und darunter, weil Software nie eingebucht war.
+
+### Entscheidung
+
+**Der Business-Zeitraum beginnt am 01.01.2026.** Alles davor ist private Tätigkeit und wird
+nicht importiert — weder das Blatt `Order 2025` noch die Dezember-2025-Einkäufe, die im Blatt
+`Order 2026` stehen. Sie gehen ausschließlich in einen technischen Startwert je Position ein
+und erscheinen nirgends als Geschäftsvorfall.
+
+**Die rekonstruierte Historie lebt in einer eigenen Tabelle.** `legacy_stock_events` ist
+additiv, append-only und bewegt keinen Bestand. `inventory_movements` bleibt das kanonische
+Ledger dessen, was SkyIsles tatsächlich gebucht hat, und bekommt **keine rückdatierte Zeile**.
+
+**Die Rekonstruktion rechnet rückwärts vom Endbestand der Mappe.** Nur er ist belastbar, also
+wird der Start aus ihm abgeleitet und nicht umgekehrt. Wo das unter null führt, wird der
+Startwert auf null geklemmt und der Rest als negativer `legacy_adjustment` am selben Tag
+geführt.
+
+**Der reale Bestand wird getrennt davon per append-only `correction`-Bewegungen auf Spalte F
+gebracht**, und erst danach werden die offenen Legacy-Verkaufspositionen ohne Bewegung
+geschlossen. Die Reihenfolge ist das ganze Argument: umgekehrt lägen die Stücke im Regal, und
+nichts sagte mehr, dass sie dort nicht hingehören.
+
+### Was ausdrücklich aufgegeben wurde
+
+**Eine plausible historische Lagerkurve.** Die Zwischenstände der Rekonstruktion dürfen negativ
+sein, und bei fünfzehn Figuren sind sie es. Der Betreiber hat Geschlossenheit über Plausibilität
+gestellt: garantiert ist das **Ende**, nicht der Verlauf.
+
+Daraus folgt eine harte Regel für die Oberfläche: **Lager V2 darf aus Legacy-Ereignissen keinen
+historischen Running Balance berechnen oder anzeigen.** Eine durch diese Punkte gezogene Linie
+behauptete eine Genauigkeit, die es nicht gibt. `seller_legacy_stock_events()` gibt deshalb
+Ereignisse zurück und nie eine laufende Summe; der aktuelle Bestand kommt weiterhin allein aus
+`shop_inventory`.
+
+Ebenfalls aufgegeben: **historische Marktpreise.** Die alte Excel-Logik rechnete ohnehin mit den
+jeweils aktuellen Katalogwerten, also bekommt jedes Legacy-Ereignis den kanonischen Preis zum
+Migrationsschnitt. Alle Ereignisse einer Figur teilen sich denselben Snapshot. Wo der Katalog
+keinen Preis kennt, bleibt er **NULL** — erfunden wird keiner.
+
+### Verworfene Alternativen
+
+**Order 2025 mitimportieren.** Fachlich falsch: private Vorgänge sind keine
+SkyIsles-Geschäftsvorfälle. Messbar auch datenseitig unpassend — die Bestandszähler der Mappe
+bilden ausschließlich das 2026er Blatt ab; jede Variante, die 2025 einbezieht, verschlechtert
+die Übereinstimmung drastisch.
+
+**Die Legacy-Ereignisse als `inventory_movements` schreiben.** Hätte die Lagerakte in einem Zug
+erklärt und dafür die einzige Eigenschaft zerstört, die das Ledger wertvoll macht: dass jede
+Zeile darin etwas ist, das wirklich gebucht wurde.
+
+**Den Startwert so wählen, dass die Kurve nie negativ wird.** Rechnerisch möglich, aber es hätte
+denselben Mangel an Datenlage in eine Zahl gegossen, die plausibel aussieht. Der negative
+`legacy_adjustment` sagt stattdessen offen, dass hier etwas fehlt.
+
+**`seller_settle_sale_item()` aufweichen.** Diese Funktion weist Katalogfiguren ohne
+Workbook-Flag ab, damit ein Abschluss ohne Bewegung nie zum Weg wird, auf dem Bestand still
+verschwindet. Die Sperre bleibt richtig; `0081` baut eine engere Tür daneben, statt die alte zu
+öffnen.
+
+**Die eine nicht freigegebene Position mitschließen.** `sale_item#879` (Sale #228,
+`Order 2026` Zeile 1110, „2.0 Stitch") gehört zu einem historischen Verkauf, den `0071` nicht
+freigegeben hat. Der Guard wurde nicht umgangen: die Position bleibt offen, bis der Betreiber
+entscheidet. Eine Migration, die einen Freigabemechanismus umgeht, um eine Zahl rund zu machen,
+wäre genau die Sorte Aufräumarbeit, gegen die dieser Guard existiert.
+
+### Konsequenzen
+
+- **Eingekauft** und **Verkauft** in Lager V2 zählen ausschließlich dokumentierten Handel ab
+  dem 01.01.2026 plus künftige echte Vorgänge. `opening_balance`, `legacy_adjustment`,
+  Korrekturen und Retouren zählen in keine der beiden Kennzahlen.
+- **Bestand** ist und bleibt `shop_inventory.quantity`.
+- Die Rekonstruktion ist als Ganzes rücknehmbar (`truncate`), einzelne Zeilen nicht.
+- Der Import ist über einen lesbaren `import_fingerprint` idempotent; ein zweiter Lauf schreibt
+  nichts.
+- Production-Ergebnis vom 2026-09-21: 2 671 Ereignisse, 600 Positionen auf 824 Einheiten,
+  90 Korrekturbewegungen netto −168, 191 Positionen ohne Bewegung geschlossen, eine bewusst
+  offen. Zahlen und Ablauf: `docs/DATABASE.md` 3.3ag.
