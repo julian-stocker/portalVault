@@ -161,5 +161,27 @@ const serviceRpc = await db.rpc("seller_legacy_stock_summary");
 check(serviceRpc.error !== null, "a caller without an operator session is refused",
   serviceRpc.error?.code ?? "CALL SUCCEEDED");
 
+/*
+ * The internal rule-holders must be reachable through their wrappers and
+ * nowhere else. 0081 shipped with a revoke that named three roles instead of
+ * four, so the service role could call `apply_…` directly; 0082 closed it.
+ * A probe with an id that cannot exist proves the grant without touching a
+ * row: permission is checked before the body, so `42501` means shut and
+ * `P0002` means the body ran.
+ */
+for (const internal of ["apply_reconciled_legacy_settlement"]) {
+  const direct = await db.rpc(internal, { p_item_id: -1 });
+  check(direct.error?.code === "42501", `${internal}() is internal to every role`,
+    direct.error?.code ?? "CALL SUCCEEDED");
+}
+for (const [wrapper, args] of [
+  ["system_settle_reconciled_legacy_item", { p_item_id: -1 }],
+  ["seller_settle_reconciled_legacy_item", { p_item_id: -1 }],
+] as const) {
+  const asAnon = await anon.rpc(wrapper, args);
+  check(asAnon.error !== null && asAnon.error.code !== "P0002",
+    `anon cannot call ${wrapper}()`, asAnon.error?.code ?? "CALL SUCCEEDED");
+}
+
 console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} CHECK(S) FAILED`}`);
 process.exit(failures === 0 ? 0 : 1);
