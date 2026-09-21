@@ -423,16 +423,24 @@ und `STRIPE_WEBHOOK_SECRET_LIVE`, beide im Digest-Vergleich verschieden von ihre
 Sandbox-Gegenstücken, dazu ein Live-Endpoint in Stripe auf dieselbe Function-URL wie der
 Sandbox-Endpoint. **Staging hat keine LIVE-Credentials und soll keine bekommen.**
 
-**Echtes Bezahlen ist trotzdem aus, und zwar an einer einzigen Stelle:**
-`commerce_settings.mode` steht auf `sandbox`. Ein normales Konto bekommt damit keine
-Zahlungswelt, und ohne Welt entsteht nicht einmal eine Bestellung — der BEFORE-INSERT-Trigger
-aus `0077` verweigert sie, bevor der Schlüssel überhaupt gebraucht würde. Ein Tester zahlt
-unverändert in der Sandbox. Der Schalter ist der **letzte** Schritt und jederzeit durch
-dieselbe Einstellung zurücknehmbar.
+**GO-LIVE am 2026-09-21: `commerce_settings.mode = live`.** Echte Kundschaft zahlt seither
+echt. Der Schalter ist der letzte Schritt des Rollouts, besteht aus genau einer Spalte und ist
+jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-Nach dem LIVE-Deploy read-only verifiziert, 12/12: Schalter `sandbox`, normales Konto und Gast
-ohne Zahlungswelt, Tester `sandbox`, Bestand durch den LIVE-Rollout unverändert, Webhook
-antwortet `400` statt `503`.
+**Ein App-Tester zahlt davon unberührt weiter in der Sandbox** (ADR-0100) — sein Zweig steht in
+`payment_mode_for_user()` vor der Shop-Abfrage und kehrt bedingungslos zurück. Es gibt keinen
+Schalter, Parameter oder Codepfad, der ihn nach `live` bringt.
+
+Unmittelbar nach dem Umlegen read-only verifiziert, **13/13**: Schalter `live` · App-Tester
+`sandbox` · normales Konto und Gast `live` · `commerce_access` mit dem `anon`-Schlüssel eines
+Besuchers `{may_checkout: true, reason: open, is_sandbox: false}` · Baseline unverändert
+(1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert · 630 Bewegungen) · **durch den Schalter
+selbst entstand keine Bestellung, kein Payment Attempt, kein Payment Event und keine
+Lagerbewegung** · Functions `create-payment` v10, `stripe-webhook` v11, `send-order-mail` v8
+alle ACTIVE.
+
+**Der erste echte LIVE-Kauf steht noch aus** und wird anschließend read-only verifiziert —
+dieselbe Kette wie bei den Sandbox-Durchläufen.
 
 **Production-Baseline, Stand 2026-09-21: 1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert ·
 630 Bewegungen.** Der Sandbox-E2E `SI-2026-001008` hat `SKY-0021 loose ×1` korrekt ausgebucht

@@ -43,8 +43,9 @@ Die vollständige Änderungshistorie liegt in Git.
 >    Datenminimierung, die versprochen und nicht geliefert wird.
 > 2. **Business-Bestellmail** und weitere UX-/Funktionsänderungen.
 >
-> Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
-> Betreiber stellt den Modus auf `closed` zurück.
+> **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
+> bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
+> Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
 ## Stripe LIVE und SANDBOX nebeneinander (2026-09-21) — auf Staging verifiziert
 
@@ -77,20 +78,44 @@ Digest-Vergleich verschieden von ihren Sandbox-Gegenstücken), und in Stripe exi
 Live-Endpoint auf dieselbe Function-URL wie der Sandbox-Endpoint — das Secret, das die Signatur
 verifiziert, bestimmt die Welt. Staging hat **keine** LIVE-Credentials.
 
-`commerce_settings.mode` steht unverändert auf **`sandbox`**. Damit ist der Live-Schlüssel
-konfiguriert und **unerreichbar**: Ein normales Konto bekommt keine Zahlungswelt, und ohne
-Zahlungswelt entsteht nicht einmal eine Bestellung — der BEFORE-INSERT-Trigger aus `0077`
-verweigert sie.
+### Go-Live am 2026-09-21
 
-*Verifikation nach dem LIVE-Deploy, 12/12 grün und ausschließlich lesend* (2026-09-21):
-Schalter `sandbox` · normales Konto → `null` · Gast → `null` · Tester → `sandbox` ·
-`commerce_access` geschlossen · Baseline auf das Stück unverändert · Webhook antwortet `400`
-statt `503`, beide Secret-Paare sind also geladen.
+**`commerce_settings.mode = live`.** Der letzte Schritt war genau eine Spalte, und er ist durch
+dieselbe Einstellung zurücknehmbar.
 
-**Nicht verifizierbar und deshalb benannt:** Das Präfix des Live-Schlüssels (`sk_live_`) prüft
-`selectStripeKey` erst zur Laufzeit, und den Moment gibt es erst nach Schritt 5. Secrets sind
-über die API nur als Digest sichtbar. Beide Werte wurden vom Betreiber visuell im
-Stripe-Dashboard bestätigt.
+*Verifikation unmittelbar danach, 13/13 grün und ausschließlich lesend:*
+
+| | |
+|---|---|
+| `commerce_settings.mode` | **`live`** |
+| App-Tester | **`sandbox`** — unberührt vom Schalter |
+| normales Konto · Gast | **`live`** |
+| `commerce_access` mit dem `anon`-Schlüssel eines Besuchers | `may_checkout: true` · `reason: open` · `is_sandbox: false` |
+| Baseline | **1 201 gesamt · 992 real · 209 Fixtures · 0 reserviert · 630 Bewegungen** |
+| durch den Schalter entstanden | **keine** Bestellung, **kein** Payment Attempt, **kein** Payment Event, **keine** Lagerbewegung |
+| Functions | `create-payment` **v10**, `stripe-webhook` **v11**, `send-order-mail` **v8** — alle ACTIVE |
+
+Der Schnappschuss unmittelbar vor und nach der Anweisung ist identisch: Der Schalter selbst
+bewegt nichts, er entscheidet nur, welche Welt ein Aufrufer bekommt.
+
+**Dass ein Tester bei offenem Shop weiter in der Sandbox zahlt, ist hier zum ersten Mal in
+echt belegt** — vorher war es Matrix und Staging, jetzt ist es der Produktivzustand.
+
+**LIVE und SANDBOX sind getrennt konfiguriert:** `STRIPE_SECRET_KEY_{LIVE,SANDBOX}` und
+`STRIPE_WEBHOOK_SECRET_{LIVE,SANDBOX}` auf Production, je ein eigener Stripe-Endpoint auf
+dieselbe Function-URL. Staging hat **keine** LIVE-Credentials.
+
+**Der erste echte LIVE-Kauf steht noch aus** und soll anschließend read-only verifiziert
+werden — dieselbe Kette wie bei den Sandbox-Durchläufen: Webhook, `payment_events.outcome`,
+Versuch, `paid_at`, Reservierung, interner Verkauf, Bestand und genau eine Bewegung über genau
+die gekaufte Menge.
+
+**Zwei Dinge zeigen sich erst daran, und beide fallen fail closed aus.** Das Präfix des
+Live-Schlüssels prüft `selectStripeKey` zur Laufzeit; steckt dort ein Testschlüssel, endet der
+Checkout in `503 provider_unconfigured` mit `stripe_key_is_test_but_mode_is_live`. Gehört
+`STRIPE_WEBHOOK_SECRET_LIVE` zu einem anderen Endpoint, meldet Stripes Zustellprotokoll
+`400 invalid_signature` und die Bestellung bliebe `pending`. Secrets sind über die API nur als
+Digest sichtbar; beide Werte wurden vom Betreiber im Stripe-Dashboard gegengelesen.
 
 **Production-Baseline, Stand 2026-09-21:**
 
@@ -141,8 +166,8 @@ Stale-Checkout-Fix. Ein dritter Befund blieb: Ein Webhook-Secret muss zum Endpoi
 tatsächlich zustellt — beide Projekte hängen am selben Stripe-Testkonto, jedes Event erreicht
 beide, und jedes Projekt legt das fremde als `unknown_payment` ab.
 
-Live-Zahlung bleibt aus — zwei unabhängige Sperren: der Shop-Schalter steht nicht auf `live`,
-und `STRIPE_SECRET_KEY_LIVE` ist nicht gesetzt.
+**Staging bleibt auf `sandbox` und ohne LIVE-Credentials** — dort kann niemand echt bezahlen,
+und das soll so bleiben. Der Go-Live betrifft ausschließlich Production (siehe oben).
 
 **Offen:** `SI-2026-001064` steht als Sandbox-Spätzahlungsfall — bei Stripe bezahlt, Webhook
 schlug damals am `0078`-Fehler fehl, Bestellung inzwischen `expired`. Bewusst nicht von Hand
