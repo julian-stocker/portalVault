@@ -800,6 +800,9 @@
 
   .ob-item {
     /* Fallback = Einkauf: # · Serie · Figur · Marktwert · Status · Aktion.
+       Verkauf renders a seventh cell — a status dot ahead of the number —
+       and overrides this with its own list, which is what the property is
+       for. Einkauf keeps exactly the six tracks and the width it had.
        `Serie` is identity information, not decoration: display names repeat
        across the six games, so `Drobot` alone does not say which shelf it
        came off. Its width is taken from the flexible `Figur` track, never

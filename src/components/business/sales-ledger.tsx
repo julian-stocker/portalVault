@@ -43,12 +43,10 @@ const SALE_COLUMNS =
   + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 7.5rem 5.5rem";
 
 /*
- * NO ITEM TRACK LIST HERE, AND THAT IS THE POINT.
- *
- * `.ob-item`'s fallback in `globals.css` is the Einkauf list —
- * `# · Serie · Figur · Marktwert · Status · Aktion` — and an expanded sale
- * now renders exactly those six cells, so it inherits the rule instead of
- * overriding it. One layout, one place to change it.
+ * The item track list lives in `sale-indicator.tsx` and is shared with the
+ * detail screen: seven cells, the Einkauf six with a narrow indicator in
+ * front. One constant, both sale screens — the thing that produced two
+ * different sale layouts in the first place.
  *
  * The four-column version this replaces folded `#` and `Serie` into the
  * figure cell's tooltip, where a phone could not reach them, and gave `Figur`
@@ -63,11 +61,12 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 
 import { formatPrice } from "@/lib/format";
+import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
   from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
-import { countryLabel, saleItemActions, saleStockStatus } from "@/lib/orderbook/sales-view";
+import { countryLabel, saleItemActions, saleStockStatus, saleItemIndicator } from "@/lib/orderbook/sales-view";
 import { SaleDetails } from "./sale-details";
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
@@ -220,7 +219,8 @@ export function SalesLedger({ sales, summary, backHref }: {
       <Summary summary={summary} />
       {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
 
-      <LedgerTable columns={SALE_COLUMNS} minWidth={SALE_MIN_WIDTH}>
+      <LedgerTable columns={SALE_COLUMNS} itemColumns={SALE_ITEM_COLUMNS}
+                   minWidth={SALE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
           <span>{copy.columns.country}</span>
@@ -359,6 +359,9 @@ function SaleDetail({ sale, detail, pending, act }: {
         come back out of the tooltip and get the tracks they have next door.
       */}
       <LedgerItemHead>
+        {/* No heading: the column is one glyph wide and the dot names
+            itself through its aria-label. */}
+        <span aria-hidden="true" />
         <span>#</span>
         <span>{copy.itemColumns.series}</span>
         <span>{copy.itemColumns.figure}</span>
@@ -372,6 +375,9 @@ function SaleDetail({ sale, detail, pending, act }: {
         {order
           ? lines.map((line, index) => (
               <LedgerItemRow key={String(line.id)}>
+                {/* Commerce booked it when the order was paid: done. */}
+                <SaleIndicator indicator={saleItemIndicator("outbooked", true)}
+                               label={copy.itemIndicator.outbooked} />
                 <span className="tabular-nums text-xs text-muted">{index + 1}</span>
                 <span className="truncate text-xs text-muted">
                   {line.series_code ? String(line.series_code) : "—"}
@@ -408,6 +414,11 @@ function SaleDetail({ sale, detail, pending, act }: {
               const run = can.primary ? primary[can.primary] : undefined;
               return (
                 <LedgerItemRow key={String(item.id)}>
+                  <SaleIndicator
+                    indicator={saleItemIndicator(can.status, sale.shippedAt !== null)}
+                    label={can.status === "outbooked" && sale.shippedAt === null
+                      ? copy.itemIndicator.outbookedUnshipped
+                      : copy.itemIndicator[can.status]} />
                   <span className="tabular-nums text-xs text-muted">
                     {item.position === null || item.position === undefined
                       ? "—" : String(item.position)}

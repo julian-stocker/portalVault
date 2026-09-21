@@ -28,7 +28,8 @@ import {
   addSaleItem, announceSaleItemReturn, bookSaleItem, removeSaleItem, restockSaleItem,
   returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
 } from "@/lib/orderbook/sales-actions";
-import { saleItemActions, saleItemEdits } from "@/lib/orderbook/sales-view";
+import { saleItemActions, saleItemEdits, saleItemIndicator } from "@/lib/orderbook/sales-view";
+import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureSearch } from "./figure-search";
 import {
@@ -39,18 +40,17 @@ const copy = de.business.sales;
 const book = de.business.orderbook;
 
 /*
- * NO TRACK LIST HERE. `.ob-item`'s fallback in `globals.css` is the Einkauf
- * list — `# · Serie · Figur · Marktwert · Status · Aktion` — and this screen
- * renders exactly those six cells, so it inherits the rule rather than
- * overriding it with a second one.
+ * The track list comes from `sale-indicator.tsx` and is shared with the
+ * ledger's expansion, so the two sale screens cannot drift apart. It is the
+ * Einkauf list with one narrow cell in front — see SALE_ITEM_COLUMNS.
  *
- * The floor is the one number this screen still owns, because it has no
- * ledger around it to inherit a width from. The five fixed tracks, the five
- * gaps and the padding come to 35.75rem; 44 leaves `Figur` a little over
- * 8rem, which is about twenty characters — the same readable minimum
- * `mobile-layout.test.ts` holds every item table to.
+ * The floor is the one number this screen owns, because it has no ledger
+ * around it to inherit a width from. The six fixed tracks, the six gaps and
+ * the padding come to 37.75rem; 46 leaves `Figur` a little over 8rem, which
+ * is about twenty characters — the readable minimum `mobile-layout.test.ts`
+ * holds every item table to.
  */
-const ITEM_MIN_WIDTH = "44rem";
+const ITEM_MIN_WIDTH = "46rem";
 
 export function SaleItems({ saleId, items, catalog, historical, internal,
                            frozen, cancelled, shipped = false }: {
@@ -88,7 +88,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
         </p>
       ) : null}
 
-      <LedgerTable minWidth={ITEM_MIN_WIDTH}>
+      <LedgerTable itemColumns={SALE_ITEM_COLUMNS} minWidth={ITEM_MIN_WIDTH}>
         <LedgerItemHead>
           {/*
             THE SAME SIX COLUMNS AN EXPANDED PURCHASE HAS. `Bestand` and
@@ -98,6 +98,11 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
             their own tracks instead of hiding in the figure cell's tooltip,
             where a phone cannot reach them.
           */}
+          {/* The indicator column has no heading: a word would be wider
+              than the column and would claim to be the status, which is
+              five columns along and spelled out. The dot names itself
+              through its aria-label. */}
+          <span aria-hidden="true" />
           <span>#</span>
           <span>{book.itemColumns.series}</span>
           <span>{copy.itemColumns.figure}</span>
@@ -132,6 +137,10 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
               || can.primary === "announce_return";
             return (
               <LedgerItemRow key={String(item.id)}>
+                <SaleIndicator indicator={saleItemIndicator(can.status, shipped)}
+                               label={can.status === "outbooked" && !shipped
+                                 ? copy.itemIndicator.outbookedUnshipped
+                                 : copy.itemIndicator[can.status]} />
                 <span className="tabular-nums text-xs text-muted">
                   {item.position === null || item.position === undefined
                     ? "—" : String(item.position)}

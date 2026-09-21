@@ -45,6 +45,7 @@ const SALES_PAGE = read("src/app/(business)/business/orderbuch/verkauf/page.tsx"
 const PURCHASE_PAGE = read("src/app/(business)/business/orderbuch/page.tsx");
 const NAV = read("src/components/business/orderbook-nav.tsx");
 const SALE_ITEMS = read("src/components/business/sale-items.tsx");
+const INDICATOR = read("src/components/business/sale-indicator.tsx");
 
 /**
  * The phones this has to work on, in CSS pixels.
@@ -99,23 +100,23 @@ describe("the ledger at phone widths", () => {
       .exec(CSS)![1]) * REM;
     const box = (px: number) => Math.min(px, cap);
     /*
-     * ONE TRACK LIST FOR ALL THREE, read from the rule's own fallback.
-     *
-     * Verkauf used to bring its own — four columns in the ledger and four
-     * on the detail screen — and that is exactly what this file was written
-     * to catch: `Figur` as `minmax(9rem, 1fr)` inside a 71rem box collects
-     * all the slack and pushes the rest out of view. Now both sale screens
-     * render the six cells the fallback describes, so there is one layout
-     * to hold to the readable minimum and three widths to hold it at.
+     * TWO LISTS, NOT THREE. Einkauf renders the rule\'s own fallback; both
+     * sale screens render ONE shared constant that is that list with a
+     * narrow indicator in front. What this file exists to catch is a third
+     * one appearing — `Figur` as `minmax(9rem, 1fr)` inside a 71rem box
+     * collects all the slack and pushes the rest out of view, which is what
+     * the old four-column variant did.
      */
-    const shared = /grid-template-columns: var\(--ob-item-columns,\s*([^)]*\)[^;]*)/
+    const einkauf = /grid-template-columns: var\(--ob-item-columns,\s*([^)]*\)[^;]*)/
       .exec(CSS)![1].replace(/\s+/g, " ").trim();
+    const verkauf = /export const SALE_ITEM_COLUMNS =\s*\n?\s*"([^"]*)"/
+      .exec(INDICATOR)![1].replace(/\s+/g, " ").trim();
     return [
-      ["Einkauf", shared,
+      ["Einkauf", einkauf,
         box(Number(/const PURCHASE_MIN_WIDTH = "([\d.]+)rem"/.exec(PURCHASE_LEDGER)![1]) * REM)],
-      ["Verkaufsbuch", shared,
+      ["Verkaufsbuch", verkauf,
         box(Number(/const SALE_MIN_WIDTH = "([\d.]+)rem"/.exec(SALES_LEDGER)![1]) * REM)],
-      ["Verkauf-Detail", shared,
+      ["Verkauf-Detail", verkauf,
         box(Number(/const ITEM_MIN_WIDTH = "([\d.]+)rem"/.exec(SALE_ITEMS)![1]) * REM)],
     ];
   };

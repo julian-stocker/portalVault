@@ -34,15 +34,37 @@ function message(error: { code?: string; message?: string }): string {
   if (text.includes("no stock position")) return copy.errors.noStock;
   if (text.includes("not a catalog figure")) return copy.errors.notAFigure;
   if (text.includes("historical sales never move stock")) return copy.errors.historical;
+  /*
+   * The four refusals 0073 added to `seller_book_sale_item`, which had no
+   * pattern here and therefore all arrived as "Das hat nicht geklappt." —
+   * the database gave a precise reason and the screen threw it away.
+   */
+  if (text.includes("nothing left the shelf")) return copy.errors.saleCancelled;
+  if (text.includes("already moved this stock")) return copy.errors.commerceOwned;
+  if (text.includes("already closed")) return copy.errors.alreadySettled;
+  if (text.includes("not taken from stock")) return copy.errors.notFromStock;
   if (text.includes("mark the item as returned")) return copy.errors.returnFirst;
-  if (text.includes("never left stock")) return copy.errors.neverBooked;
+  if (text.includes("never left stock")
+      || text.includes("nothing was booked out of stock")) return copy.errors.neverBooked;
   if (text.includes("already restocked")) return copy.errors.alreadyRestocked;
   if (text.includes("belong to the order") || text.includes("owns its shipping")
       || text.includes("takes its items from the order") || text.includes("belong to commerce")
       || text.includes("takes its date from the order")) return copy.errors.commerceOwned;
   if (text.includes("a fee is a positive amount")) return copy.errors.positiveFee;
   if (text.includes("stock movements; reverse them first")) return copy.errors.hasMovements;
-  if (text.includes("booked out; reverse")) return copy.errors.itemBooked;
+  if (text.includes("booked out; reverse")
+      || text.includes("left the shelf; reverse the booking")) return copy.errors.itemBooked;
+  /*
+   * The rest of 0073's and 0074's refusals. `seller_settle_sale_item`,
+   * `seller_set_sale_item_not_shipped` and `seller_announce_sale_item_return`
+   * were as unmapped as the booking path — the guard test below walks every
+   * `raise exception` in all four functions, so a new one cannot be added
+   * without a sentence again.
+   */
+  if (text.includes("lines are owned by commerce")) return copy.errors.commerceOwned;
+  if (text.includes("historical sale has not been released")) return copy.errors.notReleased;
+  if (text.includes("leaves stock by being booked")) return copy.errors.mustBeBooked;
+  if (text.includes("return has already arrived")) return copy.errors.returnArrived;
   if (text.includes("created from a paid order")) return copy.errors.internalAutomatic;
   if (text.includes("test status from the order")) return copy.errors.internalTestDerived;
   if (text.includes("outside the plausible range")) return copy.errors.dateRange;
@@ -51,6 +73,16 @@ function message(error: { code?: string; message?: string }): string {
   if (text.includes("legacy workbook")) return copy.errors.historicalItem;
   if (text.includes("part of that record")) return copy.errors.bookedItem;
   if (text.includes("too many items, fees or adjustments")) return copy.errors.tooMany;
+  /*
+   * Nothing matched, so the customer gets the generic sentence — but the
+   * reason is no longer lost. It goes to the server log with its Postgres
+   * code, because the alternative is what happened with 0073's refusals:
+   * an unmapped message is invisible, and the next one will be too.
+   *
+   * Code and message only. A PostgREST error also carries `details` and
+   * `hint`, and those can quote the failing statement.
+   */
+  console.error(`orderbook sale action: unmapped ${error.code ?? "?"} ${text}`);
   return de.admin.writeFailed;
 }
 

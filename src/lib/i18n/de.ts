@@ -1306,6 +1306,24 @@ export const de = {
         not_shipped: "Nicht verschickt",
         settled: "Erledigt",
       },
+
+      /**
+       * Was der Statuspunkt vorliest. Dieselben acht Zustände, aber als
+       * ganzer Satz — der Punkt sagt „noch etwas zu tun?", das Label sagt
+       * was. Ohne ihn wäre die Spalte reine Farbe.
+       */
+      itemIndicator: {
+        open: "Offen — noch nicht ausgebucht",
+        shipped: "Verschickt — noch nicht ausgebucht",
+        outbooked: "Ausgebucht und verschickt",
+        /* Der eine Fall, den der Zustand allein nicht trennt (gelb ✓). */
+        outbookedUnshipped: "Ausgebucht — noch nicht verschickt",
+        return_announced: "Retoure angekündigt — noch nicht eingetroffen",
+        returned: "Retoure eingetroffen — noch nicht eingelagert",
+        restocked: "Retoure abgeschlossen — wieder im Bestand",
+        settled: "Erledigt — ohne Lagerbewegung abgeschlossen",
+        not_shipped: "Nicht verschickt — nichts gebucht",
+      },
       itemActionLabels: {
         book: "Ausbuchen",
         announce_return: "Retoure melden",
@@ -1366,6 +1384,22 @@ export const de = {
         noStock: "Für diesen Artikel gibt es keinen Lagerbestand.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und hat keinen Lagerplatz.",
         historical: "Historische Verkäufe verändern den Bestand nicht.",
+        /* Der barrierefreie Name des Statuspunkts. Farbe allein trägt nie. */
+        saleCancelled:
+          "Diese Bestellung ist storniert — es hat nichts das Lager verlassen.",
+        alreadySettled:
+          "Diese Position ist bereits ohne Lagerbewegung abgeschlossen. " +
+          "Nimm „Erledigt“ zuerst zurück.",
+        notReleased:
+          "Dieser historische Verkauf ist noch nicht freigegeben. " +
+          "Gib die Bestellung zuerst frei.",
+        mustBeBooked:
+          "Eine Katalogfigur verl\u00e4sst den Bestand durch Ausbuchen, nicht durch Abschlie\u00dfen.",
+        returnArrived:
+          "Diese Retoure ist bereits eingetroffen und kann nicht mehr zur\u00fcckgenommen werden.",
+        notFromStock:
+          "Das Arbeitsbuch verzeichnet dieses Exemplar als verschickt, aber nie dem Lager " +
+          "entnommen. Schließe die Position stattdessen über „Erledigt“ ab.",
         returnFirst: "Markiere die Retoure zuerst als eingegangen.",
         neverBooked: "Dieser Artikel wurde nie ausgebucht.",
         alreadyRestocked: "Dieser Artikel wurde bereits wieder eingelagert.",

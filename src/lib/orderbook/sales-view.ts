@@ -130,6 +130,60 @@ export function saleItemClosed(item: SaleItemFacts): boolean {
 export const notFromStock = (item: { legacy_stock_flag?: string | null }): boolean =>
   (item.legacy_stock_flag ?? null) === "-";
 
+/**
+ * The indicator, and why it is derived rather than stored.
+ *
+ * It answers one question at a glance — "is anything still expected of me
+ * here?" — and it answers it from the same facts the status text does. There
+ * is no new column, no migration and no second truth that could disagree
+ * with `sale_item_is_closed()`.
+ *
+ * Five tones, and the split between two of them is the only thing the status
+ * alone cannot say: an OUTBOOKED position is finished if the parcel has gone
+ * and still owes a shipment if it has not. That is why `shipped` is a
+ * parameter here as it is everywhere else — it is a fact about the sale, not
+ * about the line.
+ *
+ * `grey`   nothing has happened yet: open, or the parcel is out and the
+ *          shelf has not been touched.
+ * `amber`  the stock left, the parcel has not. Still owed.
+ * `green`  done and nothing outstanding — booked and shipped, closed without
+ *          a movement, or deliberately never sent.
+ * `orange` somebody has to act: a return is on its way or has arrived and is
+ *          not back on the shelf.
+ * `returned` the return is finished and the piece is back in stock.
+ *
+ * COLOUR IS NEVER THE ONLY CARRIER. Each tone has its own glyph, and the
+ * caller renders the status name as the accessible label — so the column
+ * works in greyscale, under forced colours and for a screen reader.
+ */
+export type SaleItemTone = "grey" | "amber" | "green" | "orange" | "returned";
+
+export type SaleItemIndicator = { tone: SaleItemTone; glyph: "\u25cb" | "\u2713" | "!" };
+
+export function saleItemIndicator(status: SaleItemStatus, shipped: boolean): SaleItemIndicator {
+  switch (status) {
+    case "restocked":
+      return { tone: "returned", glyph: "\u2713" };
+    case "returned":
+    case "return_announced":
+      return { tone: "orange", glyph: "!" };
+    case "outbooked":
+      /* The one split the status cannot make on its own. */
+      return shipped ? { tone: "green", glyph: "\u2713" } : { tone: "amber", glyph: "\u2713" };
+    case "settled":
+    case "not_shipped":
+      /*
+       * Both are deliberate endings with nothing outstanding, so both are
+       * green — and both keep their own label, because "closed without a
+       * movement" and "never sent" are not the same thing to a reader.
+       */
+      return { tone: "green", glyph: "\u2713" };
+    default:
+      return { tone: "grey", glyph: "\u25cb" };
+  }
+}
+
 /** What the one action button on a position should do. */
 export type SaleItemAction =
   | "book" | "announce_return" | "mark_returned" | "restock"

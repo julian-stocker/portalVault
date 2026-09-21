@@ -595,7 +595,13 @@ describe("the ledger renders as a table, not as stacked lines", () => {
   it("the item row has exactly six tracks, and Aktion keeps its track", () => {
     const columns = tracks(ledgerCss.all, "ob-item");
     expect(columns).toHaveLength(6);
-    // # · Serie · Figur · Marktwert · Status · Aktion
+    /*
+     * # · Serie · Figur · Marktwert · Status · Aktion
+     *
+     * Unchanged by Verkauf\'s status dot. Verkauf renders a seventh cell and
+     * overrides the list with its own — which is what `--ob-item-columns` is
+     * for — so Einkauf keeps exactly these six tracks and this width.
+     */
     expect(columns[0]).toBe("2.5rem");                  // #
     expect(columns[1]).toBe("9.5rem");                  // Serie, fixed
     expect(columns[2]).toContain("minmax(0");           // Figur takes the rest
