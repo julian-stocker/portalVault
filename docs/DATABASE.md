@@ -1710,6 +1710,92 @@ kommt im ganzen Satz einmal vor, im **Rumpf** von `seller_book_sale_item`, und l
 jemand später *Ausbuchen* drückt.
 
 
+### 3.3ae Die Zahlungswelt gehört dem Aufrufer, nicht dem Shop (Migration `0077`, ADR-0100)
+
+Bis `0021` war die Zahlungswelt eine Eigenschaft des **Shops**: ein
+`commerce_settings.mode` für alle, ein Stripe-Schlüssel pro Deployment. Seit `0077` ist sie eine
+Eigenschaft des **Aufrufers**, abgeleitet aus zwei Tatsachen, die er nicht beeinflussen kann:
+
+| Shop-Schalter | Konto | Welt |
+|---|---|---|
+| `live` | normal | **live** |
+| `live` | Tester | **sandbox** |
+| `sandbox` / `closed` | normal | **keine Zahlung** |
+| `sandbox` / `closed` | Tester | **sandbox** |
+
+**Die Invariante: ein Tester ist immer in der Sandbox.** Es gibt keinen Schalter, Parameter und
+Codepfad, der ihn nach `live` bringt. In `payment_mode_for_user()` steht der Testerzweig als
+erster Zweig eines `case` und kehrt bedingungslos zurück — die Reihenfolge *ist* die Regel.
+
+```sql
+payment_mode_for_user(uuid)  -- 'sandbox' | 'live' | NULL
+effective_payment_mode()     -- dasselbe für auth.uid()
+```
+
+`NULL` heißt „keine Zahlung möglich" und ist **nie** ein Rückfall auf etwas anderes. Jeder
+Aufrufer behandelt `NULL` als Verweigerung.
+
+**Der Shop-Schalter steuert nur noch normale Konten.** `commerce_settings.mode` behält seine drei
+Werte und seine Bedeutung für Kundschaft — nur `live` lässt ein normales Konto zahlen —, hat aber
+über Tester keine Aussage mehr. Genau das erlaubt, Production mit Testkonten vollständig
+durchzuspielen, während echtes Bezahlen für Kundschaft noch aus ist.
+
+**Der Stempel gehört der Datenbank.** `orders_stamp_payment_mode_trg` ist ein BEFORE-INSERT-Trigger
+auf `orders`, der `commerce_mode` aus der Regel setzt und **überschreibt, was das INSERT trug**;
+ohne Welt wird die Bestellung gar nicht erst angelegt. `create_order()` bleibt unangetastet, seine
+Torprüfung fragt weiterhin `commerce_checkout_allowed()` — das jetzt `effective_payment_mode() is
+not null` ist.
+
+**Verglichen wird gegen die Berechtigung des Eigentümers, nicht gegen den Shop-Schalter.**
+`authorize_order_payment()`, `order_payment_mode()` und `start_payment_attempt()` fordern
+übereinstimmend `o.commerce_mode = payment_mode_for_user(o.user_id)`. Daraus folgt beides, was
+gebraucht wird:
+
+- Die Sandbox-Bestellung eines Testers bleibt zahlbar, auch nachdem der Shop live gegangen ist.
+- Eine **alte** Sandbox-Bestellung eines Nicht-Testers wird dadurch **nicht** live, sondern
+  unbezahlbar — die sichere Hälfte dieser Wahl. Kein bestehender Vorgang wird umgedeutet.
+
+**Für die beiden Edge Functions** gibt es zwei Lesefunktionen: `order_payment_mode(order_id)`
+sagt `create-payment`, welchen Stripe-Schlüssel eine Bestellung verlangt, und
+`payment_attempt_mode(provider, payment_id)` sagt dem Webhook, in welcher Welt der Vorgang liegt,
+den ein Event nennt — damit ein Sandbox-Event nachweislich keinen Live-Vorgang verändern kann.
+
+**Keine Lagerbewegung.** `0077` legt vier Funktionen, einen Trigger und zwei Lesefunktionen an und
+schreibt keine einzige Zeile Bestand.
+
+### 3.3af Der interne Verkaufstrigger konnte nie feuern (Migration `0078`)
+
+`orders_register_sale()` aus `0059` schreibt eine Orderbuch-Verkaufszeile, sobald eine
+Bestellung bezahlt ist. Sein INSERT füllte `sales.created_by` mit `new.id * 0 + null` —
+`new.id` ist `orders.id`, also **bigint**, und `sales.created_by` ist `uuid` mit Fremdschlüssel
+auf `auth.users`. PostgreSQL verweigert das:
+
+```
+42804  column "created_by" is of type uuid but expression is of type bigint
+```
+
+Der **Wert** war nie falsch (`x * 0 + null` ist für jedes x null), nur sein **Typ**. `0078`
+schreibt dieselbe Aussage als schlichtes `null`. Das ist kein Cast über einen falschen Wert und
+erfindet keinen Akteur: Der Trigger läuft aus einem Provider-Webhook als Service-Role und hat
+kein `auth.uid()` — es gibt hier keinen Menschen, und alle bestehenden internen Verkäufe tragen
+dort bereits NULL.
+
+**Warum es erst am 2026-09-21 auffiel.** Der Fehler entsteht zur Laufzeit, nicht beim Anlegen,
+also lief `0059` sauber durch und wartete auf die erste echte Zahlung danach. Es gab keine: Alle
+vierzehn internen Verkäufe auf Staging tragen denselben `created_at` — `2026-09-18T20:31:20Z` —,
+weil `0060` sie für Bestellungen nachtrug, die Tage vorher bezahlt worden waren. Die erste echte
+`confirm_order_payment()` nach `0059` scheiterte sofort, zweimal, mit identischem 500 auf dem
+gewöhnlichen **und** dem Spätzahlungspfad — beide teilen sich das `update orders set
+payment_status = 'paid'`, das diesen Trigger auslöst.
+
+**Folgen für Geld und Bestand: keine.** Die Exception verlässt `confirm_order_payment()`, die
+ganze Transaktion rollt zurück — keine bezahlte Bestellung, keine umgewandelte Reservierung,
+keine Bewegung, nicht einmal die `payment_events`-Zeile, die die Funktion als Erstes schreibt.
+
+Nachgewiesen behoben am 2026-09-21 mit `SI-2026-001065`: `payment_events.outcome = confirmed`,
+Reservierung `converted`, genau **eine** Bewegung über genau die gekaufte Menge, und die
+Verkaufszeile mit `created_by = null`.
+
 ### 3.4 `profiles` — 1:1 zu `auth.users`
 
 | Spalte | Typ | Regel |

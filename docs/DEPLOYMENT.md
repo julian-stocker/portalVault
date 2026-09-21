@@ -363,36 +363,60 @@ stattfinden kann.
 
 | Name | |
 |---|---|
-| `STRIPE_WEBHOOK_SECRET` | `whsec_…`, **pro Endpoint verschieden**. Staging und Production teilen ihn nie. Ohne ihn antwortet die Function auf jeden POST `503` und prüft nichts — fail closed. |
-| `STRIPE_LIVEMODE` | ungesetzt auf Staging (Default `false`). Eine Production-Deployment braucht `true`, sonst verwirft sie jedes Live-Event als `livemode_mismatch`. |
+| `STRIPE_WEBHOOK_SECRET_SANDBOX` | `whsec_…` des **Test-Endpoints**. Ohne ihn werden Sandbox-Zustellungen als ungültige Signatur abgewiesen. |
+| `STRIPE_WEBHOOK_SECRET_LIVE` | `whsec_…` des **Live-Endpoints**. Ungesetzt lassen, solange Live-Zahlung nicht eingerichtet ist — dann werden Live-Events abgewiesen, was in dieser Phase der gewollte Zustand ist. |
 
-> **Seit `0021` muss `STRIPE_LIVEMODE` mit dem Commerce-Modus übereinstimmen** (ADR-0060). Die
-> Function liest `commerce_mode()` bei jeder Zustellung und verarbeitet **gar nichts**, solange
-> die beiden sich widersprechen: `live` verlangt den *effektiven* Wert `true`, `sandbox` und
-> `closed` verlangen `false`. Die Antwort ist `503`, nicht `200` — Stripe behält das Event, und
-> eine korrigierte Konfiguration holt die Zustellung nach, statt sie zu verlieren.
+Sind **beide** ungesetzt, antwortet die Function auf jeden POST `503` und prüft nichts — fail
+closed.
+
+> **Seit `0077` entscheidet die Signatur, nicht eine Umgebungsvariable** (ADR-0100). Die
+> Function probiert die konfigurierten Endpoint-Secrets der Reihe nach; **dasjenige, das die
+> Signatur verifiziert, bestimmt die Welt**. Ein Endpoint-Secret gehört zu genau einem
+> Stripe-Konto in genau einem Modus, und nur Stripe kann einen Body erzeugen, der dagegen
+> verifiziert — die Welt ist damit nichts, was ein Absender wählen kann. **Keine URL, kein
+> Query-Parameter, kein Header, kein Feld im Body.**
 >
-> **Für `sandbox` und `closed` genügt es, die Variable nicht zu setzen; sie muss nicht
-> ausdrücklich auf `false` stehen.** Gelesen wird `Deno.env.get("STRIPE_LIVEMODE") === "true"` —
-> ein Boolean, nie `undefined`. „Ungesetzt" und „`false`" sind damit derselbe Wert, es gibt
-> keinen dritten Zustand, auf den man fail-closed reagieren könnte, und der einzige Eingabewert,
-> der Live-Events überhaupt freischaltet, ist die **exakte** Zeichenkette `true`. Die
-> Asymmetrie zeigt bewusst in die sichere Richtung.
+> `STRIPE_LIVEMODE` **gibt es nicht mehr und darf nicht wieder eingeführt werden.** Ein
+> Deployment gehört seit `0077` zu beiden Welten gleichzeitig — Tester zahlen in der Sandbox,
+> während Kundschaft live zahlt —, also kann ein einzelnes Flag die Frage gar nicht mehr
+> beantworten. Es könnte nur noch irreführen.
 >
-> Umgekehrt heißt das: Ein Tippfehler (`TRUE`, `1`, `yes`) wird als `false` gelesen. Für
-> `sandbox` ist das ohnehin der gewollte Zustand. Für `live` ist es ein **Ausfall, kein
-> Geldfehler** — jedes Event wird mit `503` abgewiesen, und die Logzeile
-> `commerce_mode_live_but_STRIPE_LIVEMODE_false` benennt die Ursache genau.
+> **Zwei weitere Schlösser hinter der Signatur**, beide `503`, damit Stripe das Event behält und
+> eine korrigierte Konfiguration die Zustellung nachholt:
+>
+> 1. Das von Stripe **mitsignierte `livemode`** des Events muss zu dem Secret passen, das
+>    verifiziert hat (`event_livemode_true_but_secret_is_sandbox`).
+> 2. Die Bestellung, die das Event nennt, muss **in derselben Welt liegen**
+>    (`attempt_is_live_but_event_is_sandbox`). Damit kann ein Sandbox-Webhook keinen
+>    Live-Vorgang verändern und umgekehrt — nicht weil Session-IDs zweier Stripe-Konten
+>    unwahrscheinlich kollidieren, sondern weil es geprüft wird.
 >
 > **Es gibt keine `COMMERCE_MODE`-Variable und soll keine geben.** Der Modus hat eine Quelle: die
-> Datenbank. Eine zweite könnte von der abweichen, die `create_order()` auf die Bestellung
-> stempelt — und die Abweichung wäre erst sichtbar, wenn jemand echtes Geld bezahlt hat.
+> Datenbank. Eine zweite könnte von der abweichen, die auf die Bestellung gestempelt ist — und
+> die Abweichung wäre erst sichtbar, wenn jemand echtes Geld bezahlt hat.
 >
-> Dasselbe gilt für `create-payment` in der anderen Richtung: Es vergleicht den Modus mit dem
-> **Präfix des eigenen `STRIPE_SECRET_KEY`** (`sk_test_`/`rk_test_` gegen `sk_live_`/`rk_live_`)
-> und antwortet bei jeder Unklarheit `503 provider_unconfigured` — unlesbarer Modus, unlesbarer
-> Schlüssel, fehlender Schlüssel, geschlossener Shop. Ein Sandbox-Deployment kann damit keinen
-> Live-Schlüssel benutzen, und ein Live-Shop keinen Testschlüssel.
+> **`create-payment` wählt spiegelbildlich.** Es liest `order_payment_mode(order_id)` — die Welt
+> der **Bestellung**, nicht die des Shops — und nimmt dafür `STRIPE_SECRET_KEY_LIVE` bzw.
+> `STRIPE_SECRET_KEY_SANDBOX`. Jede Unklarheit endet in `503 provider_unconfigured`: unlesbare
+> Welt, fehlender Schlüssel, unlesbarer Schlüssel, oder ein Schlüssel, dessen Präfix
+> (`sk_test_`/`rk_test_` gegen `sk_live_`/`rk_live_`) der Welt widerspricht. **Ein fehlender
+> Schlüssel fällt niemals auf die andere Welt zurück** — weder wird aus einer fehlenden
+> Live-Konfiguration eine Testbuchung noch aus einer fehlenden Sandbox-Konfiguration eine echte.
+
+**Secrets für `create-payment`:**
+
+| Name | |
+|---|---|
+| `STRIPE_SECRET_KEY_SANDBOX` | `sk_test_…` bzw. `rk_test_…`. Ohne ihn können Testkonten nicht bezahlen. |
+| `STRIPE_SECRET_KEY_LIVE` | `sk_live_…` bzw. `rk_live_…`. Ungesetzt lassen, solange Live-Zahlung nicht freigegeben ist: Live-Bestellungen erhalten dann `503 provider_unconfigured`. |
+
+Der frühere **einzelne** `STRIPE_SECRET_KEY` wird nicht mehr gelesen. Beim Umstellen bekommt
+`STRIPE_SECRET_KEY_SANDBOX` seinen bisherigen Wert; die alte Variable kann danach entfernt
+werden.
+
+**Ein Publishable Key wird nicht gebraucht.** SkyIsles benutzt Stripe Checkout per Redirect —
+der Browser bekommt eine fertige `url` und nie einen Schlüssel. Es gibt deshalb keine
+`NEXT_PUBLIC_STRIPE_*`-Variable, und es soll keine geben.
 
 Ein Stripe-**API**-Schlüssel wird nicht gesetzt und darf nicht gesetzt werden: der signierte Body
 ist autoritativ, es wird nichts nachgeladen — und eine Function ohne API-Key kann nicht abbuchen,

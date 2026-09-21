@@ -46,6 +46,76 @@ Die vollständige Änderungshistorie liegt in Git.
 > Production steht auf `commerce_mode = sandbox` mit **einem** freigeschalteten Testkonto; der
 > Betreiber stellt den Modus auf `closed` zurück.
 
+## Stripe LIVE und SANDBOX nebeneinander (2026-09-21) — auf Staging verifiziert
+
+Die Zahlungswelt ist nicht mehr eine Eigenschaft des Shops, sondern des Aufrufers (ADR-0100,
+Migration `0077`, `docs/DATABASE.md` 3.3ae):
+
+| Shop-Schalter | Konto | Welt |
+|---|---|---|
+| `live` | normal | **live** |
+| `live` | Tester | **sandbox** |
+| `sandbox` / `closed` | normal | **keine Zahlung** |
+| `sandbox` / `closed` | Tester | **sandbox** |
+
+**Ein Tester ist immer in der Sandbox** — der Testerzweig steht als erster in
+`payment_mode_for_user()` und kehrt bedingungslos zurück. Damit lässt sich Production mit
+Testkonten vollständig durchspielen, während echtes Bezahlen für Kundschaft aus bleibt.
+
+Getrennte Konfiguration je Welt, ohne Rückfall: `STRIPE_SECRET_KEY_{LIVE,SANDBOX}` und
+`STRIPE_WEBHOOK_SECRET_{LIVE,SANDBOX}`. `STRIPE_LIVEMODE` entfällt — beim Webhook entscheidet
+das Endpoint-Secret, das die Signatur verifiziert, korroboriert durch das mitsignierte
+`livemode` und durch die Welt der Bestellung, die das Event nennt.
+
+**Stand:** `0077` und `0078` auf **Staging angewandt**, Edge Functions dort deployt, Code noch
+nicht committet. **Production unverändert** — keine der beiden Migrationen ist dort angewandt.
+
+*Matrix auf Staging, 14/14* (`npm run verify:payment-mode:staging`): alle sechs Zeilen gegen die
+echte Datenbank, mit echtem Tester, echtem Nicht-Testerkonto und Gast, Shop-Schalter durch alle
+drei Stellungen und in `finally` zurückgesetzt. Dazu über die deployte Function: normales Konto
+bei Shop `live` ohne Live-Schlüssel bricht **fail closed** ab (`503 provider_unconfigured`, keine
+Session), und ein Tester bei Shop `live` erhält weiterhin eine `sandbox`-Order mit
+`cs_test_`-Session.
+
+*Sandbox-E2E grün, `SI-2026-001065`* — der erste echte Stripe-Durchlauf auf diesem Schema:
+Order `sandbox` → Sandbox-Schlüssel → `cs_test_`-Session → Webhook `confirmed` → Bestellung
+`paid`, Reservierung `converted`, **genau eine** Bewegung über genau die gekaufte Menge, interne
+Verkaufszeile mit `created_by = null`, Rechnung ausgestellt. Eine zweite Bestätigung derselben
+Zahlung antwortet `already_confirmed` und ändert nichts — schreibfrei nachgewiesen.
+
+Zwei Fehler kamen dabei ans Licht und sind behoben: `0078` (siehe unten) und der
+Stale-Checkout-Fix. Ein dritter Befund blieb: Ein Webhook-Secret muss zum Endpoint passen, der
+tatsächlich zustellt — beide Projekte hängen am selben Stripe-Testkonto, jedes Event erreicht
+beide, und jedes Projekt legt das fremde als `unknown_payment` ab.
+
+Live-Zahlung bleibt aus — zwei unabhängige Sperren: der Shop-Schalter steht nicht auf `live`,
+und `STRIPE_SECRET_KEY_LIVE` ist nicht gesetzt.
+
+**Offen:** `SI-2026-001064` steht als Sandbox-Spätzahlungsfall — bei Stripe bezahlt, Webhook
+schlug damals am `0078`-Fehler fehl, Bestellung inzwischen `expired`. Bewusst nicht von Hand
+korrigiert.
+
+---
+
+## Eine abgelaufene Bestellung blockiert die Kasse nicht mehr (2026-09-21)
+
+`open-order.ts` führte `expired` und `failed` nicht unter den erledigten Zuständen, also bot die
+Kasse „Zahlung erneut starten" auf einer Bestellung an, die `start_payment_attempt()`
+grundsätzlich verweigert — dessen **erste** Prüfung ist `payment_status <> 'pending'`. Dahinter
+lag die eigentliche Sackgasse: Das Bestellpanel ersetzt das Formular, und vergessen wurde die
+Notiz in `sessionStorage` nur, wenn die Datenbank gar keine Zeile lieferte. Die Meldung „lege den
+Artikel erneut in den Warenkorb" war damit konstruktionsbedingt nicht befolgbar.
+
+Neu: `ABANDONED` = `expired` / `failed` / `cancelled` — nichts belastet, nichts mehr zu tun. Eine
+solche Bestellung bekommt keinen Button **und wird nicht wieder geöffnet**; eine markierte
+(`needs_resolution`) dagegen nie losgelassen. Antwortet der Zahlungsstart `not_payable`, lässt
+der Browser die Bestellung sofort los — das schließt das Fenster von bis zu fünf Minuten, bis
+`expire_stale_checkouts()` per `pg_cron` nachzieht. **Nichts wird geschrieben und nichts
+gelöscht:** Bestellung, Versuche und Reservierungen bleiben, wie die Datenbank sie hinterlassen
+hat. Der Sweeper selbst war nie defekt.
+
+---
+
 ## Orderbuch-Workflow Einkauf und Verkauf auf Production (2026-09-20) — abgeschlossen
 
 Der Orderbuch-Block ist fachlich vollständig: Einkauf **und** Verkauf laufen auf Production.

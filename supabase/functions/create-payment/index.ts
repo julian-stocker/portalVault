@@ -35,8 +35,8 @@ import {
   buildSessionForm,
   idempotencyKey,
   parseAllowlist,
-  providerConfigProblem,
   parsePaymentRequest,
+  selectStripeKey,
   redirectUrls,
   resolveAllowedOrigin,
   sessionExpiresAt,
@@ -61,7 +61,21 @@ const STRIPE_API = "https://api.stripe.com/v1/checkout/sessions";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const STRIPE_SECRET_KEY = Deno.env.get("STRIPE_SECRET_KEY");
+/**
+ * ONE DEPLOYMENT, BOTH WORLDS, TWO SECRETS THAT NEVER MEET.
+ *
+ * Since 0077 a tester is in the sandbox while customers are live, so this
+ * function has to be able to reach either Stripe account — and the choice is
+ * made per ORDER, from the world the database stamped on it, never from
+ * anything the caller sent.
+ *
+ * Neither is required at boot. A deployment that holds only the sandbox key
+ * serves testers and refuses live orders, which is exactly the state we want
+ * while live payment is being prepared. What must never happen is a fallback
+ * from one to the other, and there is none: see selectStripeKey().
+ */
+const STRIPE_SECRET_KEY_LIVE = Deno.env.get("STRIPE_SECRET_KEY_LIVE");
+const STRIPE_SECRET_KEY_SANDBOX = Deno.env.get("STRIPE_SECRET_KEY_SANDBOX");
 const SITE_URL = Deno.env.get("SITE_URL") ?? "http://localhost:3000";
 
 /**
@@ -149,10 +163,6 @@ Deno.serve(async (req: Request) => {
   if (origin !== null && resolveAllowedOrigin(origin, ALLOWED_ORIGINS) === null) {
     return fail(403, "origin_not_allowed", "Nicht erlaubt.", origin);
   }
-  if (!STRIPE_SECRET_KEY) {
-    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
-      "STRIPE_SECRET_KEY is not set");
-  }
 
   // ---- 1. the request ------------------------------------------------------
   let parsed;
@@ -192,30 +202,6 @@ Deno.serve(async (req: Request) => {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
-  // ---- 2b. does this deployment's Stripe key match the world we are in? ----
-  //
-  // The mode is read from the database, which is the only place it exists.
-  // Deriving it from an environment variable here would create a second
-  // source of truth that could drift from the one `create_order()` stamps on
-  // the order — and the drift would be invisible until a tester was charged
-  // real money.
-  //
-  // Every unclear answer refuses. A database that cannot be reached, a mode
-  // that cannot be read, a key whose prefix says the other world: all of them
-  // end here, before Stripe is contacted.
-  const modeRow = await admin.rpc("commerce_mode");
-  if (modeRow.error) {
-    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
-      modeRow.error);
-  }
-  const configProblem = providerConfigProblem(modeRow.data, STRIPE_SECRET_KEY);
-  if (configProblem !== null) {
-    // The reason is logged, never returned: a visitor learns that payment is
-    // unavailable, not which key this deployment holds.
-    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
-      `commerce mode and Stripe key disagree: ${configProblem}`);
-  }
-
   // ---- 3. may this caller pay for this order? ------------------------------
   //
   // The existing contract from 0013, unchanged. Not the order number, not the
@@ -232,6 +218,34 @@ Deno.serve(async (req: Request) => {
     // Same answer whether the order is missing or simply not theirs.
     return fail(403, "unauthorized", "Diese Bestellung gehört zu einer anderen Sitzung.", origin);
   }
+
+  // ---- 3b. which Stripe world is this order in, and can we pay in it? -----
+  //
+  // The mode is read from the database, which is the only place it exists.
+  // Deriving it here — from an environment variable, from the shop switch, or
+  // worst of all from the request — would create a second source of truth
+  // that could drift from the one stamped on the order, and the drift would
+  // be invisible until a tester was charged real money.
+  //
+  // `order_payment_mode()` answers only while the order's stamp still matches
+  // what its owner is entitled to, so a stale sandbox order gets NULL rather
+  // than a live charge. Every unclear answer ends here, before Stripe.
+  const modeRow = await admin.rpc("order_payment_mode", { p_order_id: orderId });
+  if (modeRow.error) {
+    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
+      modeRow.error);
+  }
+  const choice = selectStripeKey(modeRow.data, {
+    live: STRIPE_SECRET_KEY_LIVE,
+    sandbox: STRIPE_SECRET_KEY_SANDBOX,
+  });
+  if ("problem" in choice) {
+    // The reason is logged, never returned: a visitor learns that payment is
+    // unavailable, not which world they are in or which keys we hold.
+    return fail(503, "provider_unconfigured", "Zahlung ist derzeit nicht verfügbar.", origin,
+      `cannot pay for order ${orderId}: ${choice.problem}`);
+  }
+  const stripeKey = choice.key;
 
   // ---- 4. open or reuse the attempt ---------------------------------------
   //
@@ -326,7 +340,7 @@ Deno.serve(async (req: Request) => {
     const response = await fetch(STRIPE_API, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${STRIPE_SECRET_KEY}`,
+        "Authorization": `Bearer ${stripeKey}`,
         "Content-Type": "application/x-www-form-urlencoded",
         // Bound to the attempt, so a retry replays the same session instead
         // of creating a second payable one.
@@ -391,7 +405,7 @@ Deno.serve(async (req: Request) => {
       await fetch(`${STRIPE_API}/${session.id}/expire`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${STRIPE_SECRET_KEY}`,
+          "Authorization": `Bearer ${stripeKey}`,
           },
       });
     } catch (error) {

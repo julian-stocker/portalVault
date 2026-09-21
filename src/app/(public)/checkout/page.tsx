@@ -65,6 +65,16 @@ export default async function CheckoutPage({
         {de.checkout.title}
       </h1>
       <div className="mt-5">
+        {access.mayCheckout && access.isSandbox ? (
+          /* A tester is always in the sandbox (0077). Saying so before the
+             card details, not after. */
+          <section className="mb-4 rounded-xl border border-amber-300/25 bg-amber-200/10 p-4">
+            <h2 className="text-sm font-semibold text-amber-100">
+              {de.checkout.sandboxHeading}
+            </h2>
+            <p className="mt-1 text-sm text-amber-100/80">{de.checkout.sandboxBody}</p>
+          </section>
+        ) : null}
         {access.mayCheckout ? (
           <CheckoutView
             offers={offerRecord(offers)}

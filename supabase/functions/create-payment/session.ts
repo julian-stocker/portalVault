@@ -436,28 +436,45 @@ export function stripeKeyMode(key: string | undefined | null): "test" | "live" |
 }
 
 /**
- * The whole Stripe-safety rule, as one pure question.
+ * Which Stripe secret a given payment world must be paid with.
  *
- * Returns a short reason when the deployment must refuse, and `null` when the
- * key and the mode describe the same world. Every unclear case is a reason:
- * an unreadable mode, an unreadable key, a missing key, a closed shop. There
- * is no branch that shrugs and continues.
+ * Until 0077 there was one key per deployment and the question was whether it
+ * matched the shop switch. Both worlds are now reachable at the same time —
+ * a tester is in the sandbox while customers are live — so the key is chosen
+ * by the world the ORDER belongs to, and the deployment holds both.
  *
- * This is what keeps "sandbox" honest. A sandbox that could reach a live key
- * would charge a tester real money for a test purchase, and a live shop
- * running on test keys would take orders nobody ever paid for.
+ * Every unclear case is a refusal and none of them falls back to the other
+ * world. That is the whole point: a missing live key must never quietly
+ * become a test charge, and a missing test key must never quietly charge a
+ * tester real money.
  */
-export function providerConfigProblem(
-  mode: unknown,
-  stripeKey: string | undefined | null,
-): string | null {
-  if (!isCommerceMode(mode)) return "unknown_commerce_mode";
-  if (mode === "closed") return "commerce_closed";
-  if (!stripeKey) return "missing_stripe_key";
+export type PaymentMode = "live" | "sandbox";
 
-  const keyMode = stripeKeyMode(stripeKey);
-  if (keyMode === "unknown") return "unrecognised_stripe_key";
+export function isPaymentMode(value: unknown): value is PaymentMode {
+  return value === "live" || value === "sandbox";
+}
 
+export type StripeKeyring = {
+  live?: string | null;
+  sandbox?: string | null;
+};
+
+export type StripeKeyChoice = { key: string } | { problem: string };
+
+export function selectStripeKey(mode: unknown, keys: StripeKeyring): StripeKeyChoice {
+  // An unreadable world is not a world. No default, in either direction.
+  if (!isPaymentMode(mode)) return { problem: `unknown_payment_mode:${String(mode)}` };
+
+  const key = mode === "live" ? keys.live : keys.sandbox;
+  if (!key) return { problem: `missing_stripe_key_for_${mode}` };
+
+  const keyMode = stripeKeyMode(key);
+  if (keyMode === "unknown") return { problem: `unrecognised_stripe_key_for_${mode}` };
+
+  // The key has to say the same thing the mode does. A `sk_live_` sitting in
+  // the sandbox slot is a configuration accident that would charge testers.
   const wanted = mode === "live" ? "live" : "test";
-  return keyMode === wanted ? null : `stripe_key_is_${keyMode}_but_mode_is_${mode}`;
+  if (keyMode !== wanted) return { problem: `stripe_key_is_${keyMode}_but_mode_is_${mode}` };
+
+  return { key };
 }

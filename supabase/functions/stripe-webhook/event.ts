@@ -267,23 +267,63 @@ export function expectedLivemode(mode: string | null | undefined): boolean {
 }
 
 /**
- * Does this deployment's own configuration agree with itself?
+ * WHICH WORLD AN EVENT CAME FROM IS DECIDED BY THE SIGNATURE, NOTHING ELSE.
  *
- * `STRIPE_LIVEMODE` is what the endpoint was told; the commerce mode is what
- * the database knows. They describe the same thing, so a disagreement is a
- * misconfiguration rather than a decision to make — and the only safe
- * response to it is to process nothing at all.
+ * Until 0077 this deployment belonged to one world and said so in an
+ * environment variable. Both worlds are now live at once — testers pay in the
+ * sandbox while customers pay for real — so "which world is this" cannot be a
+ * constant any more, and it must not become a URL, a query parameter or a
+ * field in the body either. All three are things a sender chooses.
  *
- * Returns a short reason to log, or `null` when the two agree.
+ * A Stripe endpoint secret is not. Each one belongs to exactly one Stripe
+ * account in exactly one mode, and only Stripe can produce a body that
+ * verifies against it. So the secret that verifies IS the answer, and it is
+ * an answer no caller can influence.
+ *
+ * Two further locks sit behind it, because one cryptographic fact deserves
+ * cheap corroboration: the event's own `livemode` flag must agree, and the
+ * order the event names must live in the same world.
  */
-export function livemodeConfigConflict(
-  mode: string | null | undefined,
-  expectLivemodeFromEnv: boolean,
+export type WebhookMode = "live" | "sandbox";
+
+export function isWebhookMode(value: unknown): value is WebhookMode {
+  return value === "live" || value === "sandbox";
+}
+
+/**
+ * Does the event's own flag agree with the secret that verified it?
+ *
+ * Stripe sets `livemode` itself and signs it along with everything else, so a
+ * disagreement here cannot be forged — it would mean a test secret was
+ * configured against a live endpoint or the reverse. That is a
+ * misconfiguration, and the only safe thing to do with a misconfigured
+ * payment endpoint is nothing.
+ */
+export function eventWorldConflict(
+  eventLivemode: unknown,
+  mode: WebhookMode,
 ): string | null {
-  if (mode !== "closed" && mode !== "sandbox" && mode !== "live") {
-    return `unknown_commerce_mode:${String(mode)}`;
-  }
-  return expectedLivemode(mode) === expectLivemodeFromEnv
+  if (typeof eventLivemode !== "boolean") return "event_without_livemode";
+  return eventLivemode === expectedLivemode(mode)
     ? null
-    : `commerce_mode_${mode}_but_STRIPE_LIVEMODE_${expectLivemodeFromEnv}`;
+    : `event_livemode_${eventLivemode}_but_secret_is_${mode}`;
+}
+
+/**
+ * Does the order this event names live in the world the event came from?
+ *
+ * The last lock, and the one that makes "a sandbox webhook can never change a
+ * live order" true by construction rather than by the improbability of a
+ * session-id collision across two Stripe accounts.
+ *
+ * `null` means no attempt carries this payment id. That is not a conflict: it
+ * is the ordinary `unknown_payment` case, which the database already handles
+ * and which an expiry event for an orphaned session produces legitimately.
+ */
+export function attemptWorldConflict(
+  attemptMode: string | null | undefined,
+  mode: WebhookMode,
+): string | null {
+  if (attemptMode === null || attemptMode === undefined) return null;
+  return attemptMode === mode ? null : `attempt_is_${attemptMode}_but_event_is_${mode}`;
 }

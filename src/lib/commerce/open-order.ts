@@ -38,11 +38,46 @@ export type OpenOrderView = {
 };
 
 /**
- * Statuses that end the matter. None of them may show a start-or-retry
- * button: money has either arrived or the order is closed, and inviting a
- * second payment would be inviting a second charge.
+ * Statuses where money is involved. None of them may show a start-or-retry
+ * button — inviting a second payment would be inviting a second charge — and
+ * the customer must keep seeing the order, because it is their money.
  */
-const SETTLED = new Set(["paid", "cancelled", "refunded", "partially_refunded"]);
+const SETTLED = new Set(["paid", "refunded", "partially_refunded"]);
+
+/**
+ * Statuses where nothing was charged and nothing can still be done.
+ *
+ * `start_payment_attempt()` refuses any order that is not `pending`, so an
+ * `expired`, `failed` or `cancelled` order can never be paid — not now, not
+ * after a reload, not ever. It was still being offered `Zahlung erneut
+ * starten`, which is exactly the button the comment above says not to offer:
+ * one the database cannot honour.
+ *
+ * Worse than the dead button was the dead end behind it. The checkout panel
+ * replaces the form, so an order in this state occupied `/checkout`
+ * indefinitely — and the message it printed, "lege den Artikel erneut in den
+ * Warenkorb", could not be acted on, because refilling the cart still landed
+ * on the same remembered order.
+ *
+ * The rule and what was rejected with it: ADR-0101.
+ *
+ * So these are not merely button-less: they are not resumed at all. Nothing
+ * is written and nothing is deleted — the order stays exactly as it is, and
+ * the browser simply stops treating it as the one it is in the middle of.
+ */
+const ABANDONED = new Set(["expired", "failed", "cancelled"]);
+
+/**
+ * May the browser stop treating this order as its open one?
+ *
+ * A flagged order never qualifies, whatever its status says: somebody is
+ * looking at it, the customer's money may already be with us, and it must
+ * stay visible.
+ */
+export function isAbandoned(paymentStatus: string, needsResolution: boolean): boolean {
+  if (needsResolution) return false;
+  return ABANDONED.has(paymentStatus);
+}
 
 export function readPaymentState(row: unknown): OpenOrderView | null {
   if (typeof row !== "object" || row === null) return null;
@@ -79,5 +114,7 @@ export function ctaFor(
   // offering none.
   if (needsResolution) return "none";
   if (SETTLED.has(paymentStatus)) return "none";
+  // Never payable again, so never a button. See ABANDONED.
+  if (ABANDONED.has(paymentStatus)) return "none";
   return attempts > 0 ? "retry" : "start";
 }

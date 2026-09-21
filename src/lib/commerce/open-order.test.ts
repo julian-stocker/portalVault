@@ -14,10 +14,30 @@ describe("the payment button says what actually happened", () => {
   it("offers a retry only once something has been attempted", () => {
     expect(ctaFor("pending", 1, false)).toBe("retry");
     expect(ctaFor("pending", 7, false)).toBe("retry");
-    expect(ctaFor("failed", 2, false)).toBe("retry");
-    // `expired` is the reservation, not the money: the order may still be
-    // paid, and start_payment_attempt() is what decides.
-    expect(ctaFor("expired", 1, false)).toBe("retry");
+  });
+
+  /**
+   * This test used to assert the opposite, on the premise that "`expired` is
+   * the reservation, not the money: the order may still be paid, and
+   * start_payment_attempt() is what decides."
+   *
+   * The premise was wrong, and the function it appealed to is the proof. Its
+   * FIRST check is `if v_order.payment_status <> 'pending' then raise` — so an
+   * order whose payment_status is `expired`, `failed` or `cancelled` is
+   * refused before the hold is even looked at. The wording conflated
+   * `order_reservations.expires_at` with `orders.payment_status`; only the
+   * second one is what this function reads.
+   *
+   * The cost of the mistake was a dead end: the panel offered `Zahlung erneut
+   * starten`, the database answered 409, and the checkout page stayed
+   * occupied by an order that could never be paid.
+   */
+  it("offers nothing on an order that can never be paid again", () => {
+    for (const status of ["expired", "failed", "cancelled"]) {
+      expect(ctaFor(status, 0, false), status).toBe("none");
+      expect(ctaFor(status, 1, false), status).toBe("none");
+      expect(ctaFor(status, 9, false), status).toBe("none");
+    }
   });
 
   it("offers nothing at all once the money has arrived", () => {

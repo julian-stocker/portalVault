@@ -497,17 +497,17 @@ describe("the Deno entry point, held to its contract", () => {
     // start_payment_attempt appears twice: once to open or reuse the attempt,
     // once to re-read it when a concurrent request won the attach race.
     //
-    // `commerce_mode` was added by ADR-0060 and is a pure read: the mode has
-    // one home, and this function asks it rather than keeping a second copy
-    // in an environment variable that could drift from the one stamped on
-    // the order.
+    // `order_payment_mode` replaced ADR-0060's `commerce_mode` in 0077 and is
+    // a pure read of the same kind: the world has one home — the stamp on the
+    // order — and this function asks it rather than keeping a second copy in
+    // an environment variable that could drift from it.
     const rpcs = [...entryCode.matchAll(/\.rpc\(\s*"(\w+)"/g)].map((m) => m[1]);
     expect([...new Set(rpcs)].sort()).toEqual(["attach_provider_payment",
                                                "authorize_order_payment",
-                                               "commerce_mode",
+                                               "order_payment_mode",
                                                "start_payment_attempt"]);
     expect(rpcs.filter((r) => r === "start_payment_attempt")).toHaveLength(2);
-    expect(rpcs.filter((r) => r === "commerce_mode")).toHaveLength(1);
+    expect(rpcs.filter((r) => r === "order_payment_mode")).toHaveLength(1);
   });
 
   it("authorises through the existing contract, not a parallel one", () => {
@@ -592,7 +592,13 @@ describe("the Deno entry point, held to its contract", () => {
 
   it("hard-codes no secret and reads them from the environment", () => {
     expect(entry).not.toMatch(/sk_live_|sk_test_|whsec_|eyJ[A-Za-z0-9_-]{10}/);
-    for (const name of ["SUPABASE_SERVICE_ROLE_KEY", "STRIPE_SECRET_KEY", "SUPABASE_ANON_KEY"]) {
+    for (const name of [
+      "SUPABASE_SERVICE_ROLE_KEY",
+      // Two keys since 0077, one per world, and never a single fallback one.
+      "STRIPE_SECRET_KEY_LIVE",
+      "STRIPE_SECRET_KEY_SANDBOX",
+      "SUPABASE_ANON_KEY",
+    ]) {
       expect(entry).toContain(`Deno.env.get("${name}")`);
     }
   });

@@ -393,7 +393,7 @@ describe("the Edge Function calls the SDK the one correct way", () => {
     // Parsing first and re-serialising changes whitespace and key order, and
     // the signature is over the exact bytes Stripe sent.
     expect(entry).toContain("await req.text()");
-    expect(entry).toContain("constructEventAsync(\n      rawBody,");
+    expect(entry).toContain("constructEventAsync(\n        rawBody,");
     expect(entry).not.toMatch(/JSON\.stringify\(\s*event/);
     // The body is never parsed before verification.
     const beforeVerify = entry.slice(0, entry.indexOf("constructEventAsync"));
@@ -433,8 +433,10 @@ describe("the Edge Function calls the SDK the one correct way", () => {
     expect(code).not.toContain('req.method === "OPTIONS"');
   });
 
-  it("fails closed without the webhook secret", () => {
-    expect(entry).toContain("if (!WEBHOOK_SECRET)");
+  it("fails closed without any webhook secret", () => {
+    // Since 0077 there are two, one per world. Neither configured means
+    // nothing can be verified, and nothing may be accepted.
+    expect(entry).toContain("if (!ENDPOINT_SECRETS.some(([, secret]) => secret))");
     expect(entry).toContain("not_configured");
   });
 

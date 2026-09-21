@@ -33,27 +33,35 @@
 import Stripe from "npm:stripe@18";
 
 import {
+  attemptWorldConflict,
   decide,
+  eventWorldConflict,
+  expectedLivemode,
   statusForOutcome,
   type DbOutcome,
   type StripeEventShape,
-  livemodeConfigConflict,
+  type WebhookMode,
 } from "./event.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET");
+const WEBHOOK_SECRET_LIVE = Deno.env.get("STRIPE_WEBHOOK_SECRET_LIVE");
+const WEBHOOK_SECRET_SANDBOX = Deno.env.get("STRIPE_WEBHOOK_SECRET_SANDBOX");
 const MAIL_SECRET = Deno.env.get("MAIL_FUNCTION_SECRET");
 
 /**
- * Which world this deployment belongs to.
+ * The two endpoints this one URL serves, and the order they are tried in.
  *
- * Staging must never act on a live event and production never on a test one.
- * The webhook secrets differ per endpoint so this should be unreachable; it is
- * the second lock, and it costs one comparison. Default `false` means a
- * deployment that forgets to say is a test deployment — fail closed.
+ * Sandbox first because it is the one that fires during development, and the
+ * cost of a failed verification is one HMAC. A secret that is not configured
+ * is skipped, so a deployment holding only the sandbox secret accepts sandbox
+ * events and rejects live ones outright — which is the state we deliberately
+ * sit in while live payment is being prepared.
  */
-const EXPECT_LIVEMODE = Deno.env.get("STRIPE_LIVEMODE") === "true";
+const ENDPOINT_SECRETS: ReadonlyArray<readonly [WebhookMode, string | undefined]> = [
+  ["sandbox", WEBHOOK_SECRET_SANDBOX],
+  ["live", WEBHOOK_SECRET_LIVE],
+];
 
 /**
  * No API key is configured and none is needed.
@@ -88,10 +96,10 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") {
     return respond(405, { error: "method_not_allowed" });
   }
-  if (!WEBHOOK_SECRET) {
-    // Fail closed. A deployment without the secret cannot verify anything, and
+  if (!ENDPOINT_SECRETS.some(([, secret]) => secret)) {
+    // Fail closed. A deployment without any secret cannot verify anything, and
     // must not accept anything either.
-    console.error("stripe-webhook: STRIPE_WEBHOOK_SECRET is not set");
+    console.error("stripe-webhook: neither STRIPE_WEBHOOK_SECRET_LIVE nor _SANDBOX is set");
     return respond(503, { error: "not_configured" });
   }
 
@@ -113,47 +121,55 @@ Deno.serve(async (req: Request) => {
   // variant reaches for Node's crypto and does not work in this runtime.
   // Timestamp tolerance, multiple v1 signatures during secret rotation and the
   // constant-time comparison are all the SDK's job (ADR-0054).
-  let event: StripeEventShape;
-  try {
-    event = (await stripe.webhooks.constructEventAsync(
-      rawBody,
-      signature,
-      WEBHOOK_SECRET,
-      undefined,
-      cryptoProvider,
-    )) as unknown as StripeEventShape;
-  } catch (error) {
-    // The message can name the tolerance window or the header shape. Neither
-    // is secret, but neither is the caller's business.
-    console.error("stripe-webhook signature rejected:", (error as Error).message);
+  //
+  // AND THE SECRET THAT VERIFIES IS THE WORLD. Each Stripe endpoint secret
+  // belongs to exactly one account in exactly one mode, and only Stripe can
+  // produce a body that verifies against it — so this identifies the world
+  // without trusting one byte the sender chose. No URL, no query parameter,
+  // no header, no field in the body.
+  let event: StripeEventShape | null = null;
+  let mode: WebhookMode | null = null;
+  let lastFailure = "no secret matched";
+
+  for (const [candidate, secret] of ENDPOINT_SECRETS) {
+    if (!secret) continue;
+    try {
+      event = (await stripe.webhooks.constructEventAsync(
+        rawBody,
+        signature,
+        secret,
+        undefined,
+        cryptoProvider,
+      )) as unknown as StripeEventShape;
+      mode = candidate;
+      break;
+    } catch (error) {
+      // The message can name the tolerance window or the header shape.
+      // Neither is secret, but neither is the caller's business.
+      lastFailure = (error as Error).message;
+    }
+  }
+
+  if (!event || !mode) {
+    console.error("stripe-webhook signature rejected:", lastFailure);
     return respond(400, { error: "invalid_signature" });
   }
 
-  // ---- 2b. does this deployment agree with itself? -------------------------
+  // ---- 2b. do the event and the secret agree about the world? -------------
   //
-  // `STRIPE_LIVEMODE` says which endpoint this is; the commerce mode in the
-  // database says which world the shop is in. They are two statements about
-  // the same thing, so a disagreement is not a case to handle — it is a
-  // misconfiguration, and the only safe thing to do with a misconfigured
-  // payment endpoint is nothing.
-  //
-  // 503 rather than 200: Stripe keeps the event and retries, so fixing the
-  // configuration recovers the delivery instead of losing it.
-  let mode: string | null;
-  try {
-    mode = await readCommerceMode();
-  } catch (error) {
-    console.error("stripe-webhook cannot read the commerce mode:", describe(error));
-    return respond(503, { error: "not_configured" });
-  }
-  const conflict = livemodeConfigConflict(mode, EXPECT_LIVEMODE);
-  if (conflict !== null) {
-    console.error(`stripe-webhook refusing every event: ${conflict}`);
+  // Stripe signs `livemode` along with everything else, so this cannot be
+  // forged; a disagreement means a test secret is configured against a live
+  // endpoint or the reverse. 503 rather than 200, because Stripe keeps the
+  // event and retries — fixing the configuration recovers the delivery
+  // instead of losing it.
+  const worldConflict = eventWorldConflict(event.livemode, mode);
+  if (worldConflict !== null) {
+    console.error(`stripe-webhook refusing event: ${worldConflict}`);
     return respond(503, { error: "not_configured" });
   }
 
   // ---- 3. what this event means -------------------------------------------
-  const decision = decide(event, EXPECT_LIVEMODE);
+  const decision = decide(event, expectedLivemode(mode));
 
   if (decision.action === "ignore") {
     // 200 and no row. The endpoint subscribes to four types, Stripe's own
@@ -163,6 +179,26 @@ Deno.serve(async (req: Request) => {
     // and would poison the one query that matters for monitoring.
     console.log(`stripe-webhook ignored ${event.type}: ${decision.reason}`);
     return respond(200, { received: true, ignored: decision.reason });
+  }
+
+  // ---- 3b. and does the order it names live in that world? ----------------
+  //
+  // The lock that makes "a sandbox event can never change a live order" a
+  // fact rather than a probability. Checked before either database function
+  // is reached, so a mismatch changes nothing at all.
+  let attemptMode: string | null;
+  try {
+    attemptMode = await readAttemptMode(decision.sessionId);
+  } catch (error) {
+    console.error("stripe-webhook cannot read the attempt's world:", describe(error));
+    return respond(503, { error: "not_configured" });
+  }
+  const crossWorld = attemptWorldConflict(attemptMode, mode);
+  if (crossWorld !== null) {
+    console.error(
+      `stripe-webhook refusing ${maskSession(decision.sessionId)}: ${crossWorld}`,
+    );
+    return respond(503, { error: "not_configured" });
   }
 
   // ---- 4. the database decides everything else ----------------------------
@@ -374,25 +410,29 @@ async function callDatabase(
 }
 
 /**
- * The commerce mode, straight from the database.
+ * The world the order behind one provider payment belongs to.
  *
  * Same transport as `callDatabase()` — a plain POST with the service key —
  * because this function holds no supabase-js client and needs none for one
- * scalar. A failure throws, and the caller turns that into a 503.
+ * scalar. `null` means no attempt carries this payment id, which is the
+ * ordinary unknown-payment case and not a refusal. A failure throws, and the
+ * caller turns that into a 503.
  */
-async function readCommerceMode(): Promise<string | null> {
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/commerce_mode`, {
+async function readAttemptMode(sessionId: string): Promise<string | null> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/payment_attempt_mode`, {
     method: "POST",
     headers: {
       apikey: SERVICE_KEY,
       Authorization: `Bearer ${SERVICE_KEY}`,
       "Content-Type": "application/json",
     },
-    body: "{}",
+    body: JSON.stringify({ p_provider: "stripe", p_provider_payment_id: sessionId }),
   });
   const payload = await response.json();
   if (!response.ok) {
-    throw new Error(`commerce_mode: ${payload?.code ?? response.status} ${payload?.message ?? ""}`);
+    throw new Error(
+      `payment_attempt_mode: ${payload?.code ?? response.status} ${payload?.message ?? ""}`,
+    );
   }
   return typeof payload === "string" ? payload : null;
 }

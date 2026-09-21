@@ -46,6 +46,7 @@ import {
   rememberPaymentToken,
 } from "@/lib/commerce/capability";
 import { readOpenOrderState, type OpenOrderView } from "@/lib/commerce/open-order-client";
+import { isAbandoned } from "@/lib/commerce/open-order";
 import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
 import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
 import { conditionLabel } from "@/lib/shop/condition";
@@ -325,6 +326,24 @@ export function CheckoutView({
           return;
         }
 
+        /*
+         * Expired, failed or cancelled: nothing was charged and nothing can
+         * still be done with it. Resuming would put the panel back over the
+         * form and leave the customer with an instruction — "put the article
+         * back in the cart" — that they cannot act on, because the refilled
+         * cart lands on this same remembered order.
+         *
+         * So the browser stops treating it as its open one. The order itself
+         * is untouched: no write, no delete, and it stays under „Meine
+         * Bestellungen" exactly as the database left it.
+         */
+        if (isAbandoned(state.paymentStatus, state.needsResolution)) {
+          forgetOpenOrder(principal);
+          forgetPaymentToken(principal, open.orderNumber);
+          setResumeChecked(true);
+          return;
+        }
+
         setOpenState(state);
         setPlaced({
           orderId: open.orderId,
@@ -501,6 +520,26 @@ export function CheckoutView({
 
     setRedirecting(false);
     setPaymentError(messageFor(outcome.reason));
+
+    /*
+     * `not_payable` is the database saying this order can never be handed
+     * over again — the hold lapsed, or it is no longer pending.
+     *
+     * The sweeper turns such an order into `expired` within five minutes, but
+     * until it runs the order still reads `pending`, so the rule above would
+     * resume it and the customer would sit in a dead end for those minutes.
+     * Letting go here closes that window: the form comes back with the
+     * message still on it, and the rebuilt cart can become a new order.
+     *
+     * The order is not touched. Only this browser's note about it is dropped.
+     */
+    if (outcome.reason === "not_payable") {
+      const principal = currentPrincipal();
+      forgetOpenOrder(principal);
+      forgetPaymentToken(principal, order.orderNumber);
+      setOpenState(null);
+      setPlaced(null);
+    }
   }
 
   /** Start the payment again for an order that already exists. */
@@ -639,6 +678,19 @@ export function CheckoutView({
         void submit();
       }}
     >
+      {/*
+        Why a payment error can appear above the FORM and not only above the
+        order panel: when the database says an order can never be paid again,
+        the browser lets go of it (see `toPayment`) and the form comes back.
+        The reason has to come with it — dropping the customer onto a blank
+        form after a failed payment would explain nothing.
+      */}
+      {paymentError ? (
+        <p role="alert" className={`${PANEL} text-sm text-danger`}>
+          {paymentError}
+        </p>
+      ) : null}
+
       {/* ------------------------------------------------------------ contact */}
       <section className={PANEL}>
         <h2 className="mb-3 text-sm font-semibold">{de.checkout.contactHeading}</h2>

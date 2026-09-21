@@ -27,10 +27,26 @@ export type CheckoutAccessReason = "open" | "testers_only" | "closed";
 export type CheckoutAccess = {
   mayCheckout: boolean;
   reason: CheckoutAccessReason;
+  /**
+   * Will this visitor's own checkout charge real money?
+   *
+   * `true` means it will not — they are a commerce tester and pay in Stripe's
+   * sandbox, whatever the shop switch says (0077). It describes the caller to
+   * the caller and reveals nothing about anyone else: a tester already knows
+   * they are a tester, and a normal visitor always reads `false`.
+   *
+   * A checkout that asks for card details has to be able to say out loud that
+   * it is a test. Defaulting to `false` keeps the silent case the honest one.
+   */
+  isSandbox: boolean;
 };
 
 /** What a caller gets when the question cannot be answered. */
-export const CHECKOUT_CLOSED: CheckoutAccess = { mayCheckout: false, reason: "closed" };
+export const CHECKOUT_CLOSED: CheckoutAccess = {
+  mayCheckout: false,
+  reason: "closed",
+  isSandbox: false,
+};
 
 function isReason(value: unknown): value is CheckoutAccessReason {
   return value === "open" || value === "testers_only" || value === "closed";
@@ -45,15 +61,17 @@ function isReason(value: unknown): value is CheckoutAccessReason {
  */
 export function readAccess(row: unknown): CheckoutAccess {
   if (typeof row !== "object" || row === null) return CHECKOUT_CLOSED;
-  const raw = row as { may_checkout?: unknown; reason?: unknown };
+  const raw = row as { may_checkout?: unknown; reason?: unknown; is_sandbox?: unknown };
   if (raw.may_checkout !== true) {
     // "open" is not a reason a refusal may carry. A row that says both would
     // be contradictory, and the interface must not resolve that in favour of
     // the permissive half.
     const reason = isReason(raw.reason) && raw.reason !== "open" ? raw.reason : "closed";
-    return { mayCheckout: false, reason };
+    return { mayCheckout: false, reason, isSandbox: false };
   }
-  return { mayCheckout: true, reason: "open" };
+  // Only a literal `true` counts. A missing or malformed column must not be
+  // read as "this is only a test" on a checkout that would take real money.
+  return { mayCheckout: true, reason: "open", isSandbox: raw.is_sandbox === true };
 }
 
 export async function checkoutAccess(): Promise<CheckoutAccess> {

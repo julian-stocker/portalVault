@@ -2662,6 +2662,18 @@ export const de = {
     testersOnlyBody:
       "Der Verkauf ist gerade nur für einen kleinen Kreis freigeschaltet. " +
       "Der Warenkorb bleibt erhalten.",
+
+    /**
+     * Nur Testkonten sehen das — und sie müssen es sehen.
+     *
+     * Ein Testkonto bezahlt immer in der Stripe-Sandbox, auch wenn der Shop
+     * für Kundschaft längst live ist (0077). Wer gleich Kartendaten eingibt,
+     * muss vorher wissen, dass kein echtes Geld fließt.
+     */
+    sandboxHeading: "Testzahlung",
+    sandboxBody:
+      "Dieses Konto ist ein Testkonto. Die Zahlung läuft über die " +
+      "Stripe-Sandbox, es wird kein echtes Geld abgebucht.",
     contactHeading: "Kontakt",
     email: "E-Mail",
     emailHint: "An diese Adresse geht die Bestellbestätigung.",

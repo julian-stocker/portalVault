@@ -8593,3 +8593,175 @@ Positionen öffnen (dann wäre es ein stiller Weg, Bestand verschwinden zu lasse
 Fall aufweichen müssen, der sie nicht braucht) · die zwei Smoke-Verkäufe löschen (würde echte
 Bewegungen verwaisen lassen oder am `on delete restrict` scheitern) · `returned_at` das
 Einlagern miterledigen lassen (verwischt genau die Grenze, die dieser ADR zieht).
+
+
+---
+
+## ADR-0100 — Ein Tester ist immer in der Sandbox
+
+**Status:** akzeptiert (2026-09-21) · Migration `0077` · Datenmodell, RPC, Edge Functions
+
+### Kontext
+
+Zwei Dinge sollen gleichzeitig gelten, und mit dem Modell aus ADR-0060 ging genau das nicht:
+
+1. Wir wollen **Production mit Testkonten durchspielen**, während echtes Bezahlen für Kundschaft
+   noch aus ist.
+2. Sobald echtes Bezahlen an ist, darf **ein Tester niemals echtes Geld** bezahlen.
+
+Bisher war die Zahlungswelt eine Eigenschaft des **Shops**: ein `commerce_settings.mode` für
+alle, ein `STRIPE_SECRET_KEY` pro Deployment, ein `STRIPE_LIVEMODE` pro Webhook-Endpoint. Daraus
+folgte zwangsläufig: Shop `live` heißt, auch der Tester zahlt live. Shop `closed` heißt, auch der
+Tester zahlt gar nicht. Beide Zustände sind falsch, und keiner von beiden ließ sich durch einen
+Schalter reparieren — ein Schalter hätte nur einen weiteren Weg geschaffen, einen Tester nach
+`live` zu bringen.
+
+### Entscheidung
+
+**Die Zahlungswelt ist eine Eigenschaft des Aufrufers, abgeleitet aus zwei Tatsachen, die er
+nicht beeinflussen kann.**
+
+```
+Tester                          -> sandbox   (immer, unter jedem Shop-Schalter)
+kein Tester, Shop live          -> live
+kein Tester, Shop nicht live    -> keine Zahlung
+```
+
+**Der Testerzweig steht zuerst und kehrt bedingungslos zurück.** In `payment_mode_for_user()` ist
+das ein `case`, dessen erster Zweig trifft — die Reihenfolge ist die Invariante, nicht ein
+Kommentar über sie. Es gibt keinen Parameter, kein Flag und keinen zweiten Pfad, der einen Tester
+nach `live` bringt; ein Test führt die Matrix erschöpfend durch und hält fest, dass `sandbox`
+genau für Tester und für niemanden sonst herauskommt.
+
+**Der Shop-Schalter steuert nur noch normale Konten.** `commerce_settings.mode` behält seine drei
+Werte; `live` ist der einzige, unter dem ein normales Konto zahlt. Über Tester sagt er nichts
+mehr.
+
+**Die Entscheidung fällt vollständig serverseitig, an einer Stelle.** Der Client schickt eine
+Bestellnummer und höchstens ein Zahlungstoken — es gibt kein Feld, aus dem eine Welt gelesen
+werden könnte, weil der Parser nur diese beiden kennt. Der Stempel auf der Bestellung wird von
+einem BEFORE-INSERT-Trigger gesetzt, der überschreibt, was das INSERT trug: die Welt ist nicht
+einmal für `create_order()` wählbar.
+
+**Getrennte Stripe-Konfiguration je Welt, ohne Rückfall.** `STRIPE_SECRET_KEY_LIVE` und
+`STRIPE_SECRET_KEY_SANDBOX`, `STRIPE_WEBHOOK_SECRET_LIVE` und `STRIPE_WEBHOOK_SECRET_SANDBOX`.
+Fehlt der Schlüssel einer Welt, wird in dieser Welt nicht bezahlt — es wird **nie** der andere
+genommen. Ein Publishable Key existiert nicht: Stripe Checkout läuft per Redirect, der Browser
+bekommt eine fertige URL.
+
+**Beim Webhook entscheidet die Signatur, nicht die Konfiguration.** Ein Stripe-Endpoint-Secret
+gehört zu genau einem Konto in genau einem Modus, und nur Stripe kann einen Body erzeugen, der
+dagegen verifiziert. Das Secret, das verifiziert, **ist** die Antwort — eine Antwort, die kein
+Absender wählen kann. Deshalb keine URL, kein Query-Parameter, kein Header und kein Feld im Body.
+`STRIPE_LIVEMODE` entfällt ersatzlos: ein Deployment gehört jetzt zu beiden Welten gleichzeitig,
+ein einzelnes Flag könnte die Frage nicht mehr beantworten und nur noch irreführen.
+
+Zwei Schlösser korroborieren die Signatur: das von Stripe mitsignierte `livemode` des Events, und
+die Welt der Bestellung, die das Event nennt. Beide antworten mit `503`, damit Stripe das Event
+behält.
+
+### Bestehende Vorgänge werden nicht umgedeutet
+
+`orders.commerce_mode` bleibt, was es war — `orders_protect_immutable()` verweigert eine Änderung
+seit `0021`, und `0077` legt keinen Pfad an, der es täte. Was sich ändert, ist **wogegen** der
+Stempel verglichen wird: gegen die Berechtigung des Eigentümers statt gegen den Shop-Schalter.
+Daraus folgt beides:
+
+- Die Sandbox-Bestellung eines Testers bleibt zahlbar, auch nachdem der Shop live ist.
+- Eine alte Sandbox-Bestellung eines Nicht-Testers wird **nicht** live, sondern unbezahlbar. Das
+  ist die sichere Hälfte: eine Testbestellung, die niemand mehr abschließen kann, ist ein
+  Aufräumfall — eine Testbestellung, die plötzlich echtes Geld kostet, wäre keiner.
+
+### Konsequenzen
+
+`create_order()` bleibt unangetastet — 271 Zeilen, deren übrige Regeln anderswo geprüft sind. Was
+sich ändert, sind die kleinen Funktionen, die es aufruft, plus der Trigger als Boden darunter.
+`start_payment_attempt()` musste mitkommen und wurde **programmatisch aus `0021` extrahiert und
+gepatcht statt abgetippt**; ein Test wiederholt die Extraktion und schlägt fehl, sobald irgendeine
+andere Zeile abgewichen ist.
+
+`commerce_access()` bekommt eine dritte Spalte `is_sandbox` und musste dafür gedroppt werden —
+PostgreSQL ändert keinen Rückgabetyp per `create or replace`. Die Kasse zeigt Testkonten damit
+vorab an, dass kein echtes Geld fließt; ein Checkout, der Kartendaten verlangt, muss das sagen
+können.
+
+**Live-Zahlung bleibt vorerst aus.** Die Infrastruktur steht, aber solange
+`commerce_settings.mode` nicht auf `live` steht, bekommt kein normales Konto eine Welt — und
+solange `STRIPE_SECRET_KEY_LIVE` nicht gesetzt ist, gäbe es selbst dann keinen Schlüssel dafür.
+Zwei unabhängige Sperren, von denen jede einzeln genügt.
+
+### Verworfen
+
+Ein zweiter Schalter „Tester zahlen live" (genau der Pfad, den dieser ADR ausschließt) · die Welt
+aus der Webhook-URL oder einem Query-Parameter lesen (beides wählt der Absender) · ein
+gemeinsamer Stripe-Schlüssel mit Umschaltung zur Laufzeit (ein Tippfehler wäre eine Abbuchung) ·
+`STRIPE_LIVEMODE` behalten (kann die Frage nicht mehr beantworten) · bestehende Sandbox-Orders auf
+`live` umstempeln (würde genau die Umdeutung erzeugen, die ausgeschlossen sein soll) ·
+`confirm_order_payment()` um einen Modusparameter erweitern (eine große, gut geprüfte Funktion
+anfassen, wo eine additive Lesefunktion vor ihr dasselbe leistet).
+
+
+---
+
+## ADR-0101 — Eine Bestellung, die nie wieder bezahlt werden kann, hält die Kasse nicht fest
+
+**Status:** akzeptiert (2026-09-21) · keine Migration · Client
+
+### Kontext
+
+Nach einer abgelaufenen Haltefrist öffnete `/checkout` immer wieder dieselbe Bestellung. Die
+Seite sagte „Die Reservierung für diese Bestellung ist abgelaufen. Bitte lege den Artikel erneut
+in den Warenkorb" — und ein neu gefüllter Warenkorb landete erneut auf genau dieser Bestellung.
+
+Zwei Dinge trafen zusammen. `open-order.ts` führte `expired` und `failed` nicht unter den
+erledigten Zuständen, bot also `Zahlung erneut starten` an; `start_payment_attempt()` verweigert
+aber **jede** Bestellung, die nicht `pending` ist — das ist dort die allererste Prüfung. Und das
+Bestellpanel ersetzt das Formular, während die Notiz in `sessionStorage` nur vergessen wurde,
+wenn die Datenbank gar keine Zeile lieferte. Die Anweisung war damit nicht befolgbar.
+
+Ein Test hielt die falsche Annahme sogar ausdrücklich fest: *„`expired` ist die Reservierung,
+nicht das Geld: die Bestellung kann noch bezahlt werden, und `start_payment_attempt()`
+entscheidet."* Die Prämisse verwechselte `order_reservations.expires_at` mit
+`orders.payment_status`; gelesen wird nur das zweite.
+
+### Entscheidung
+
+**Was nie wieder bezahlt werden kann, ist keine offene Bestellung — und belegt die Kasse nicht.**
+
+```
+SETTLED    paid · refunded · partially_refunded    Geld im Spiel → sichtbar lassen, kein Button
+ABANDONED  expired · failed · cancelled            nichts belastet → kein Button UND nicht wieder öffnen
+```
+
+**Eine markierte Bestellung (`needs_resolution`) wird nie losgelassen**, was auch immer ihr
+Status sagt: Dort schaut ein Mensch hin, und möglicherweise liegt Geld bei uns.
+
+**Und die Datenbank darf früher recht haben als der Sweeper.** Antwortet der Zahlungsstart
+`not_payable`, lässt der Browser die Bestellung sofort los. `expire_stale_checkouts()` zieht per
+`pg_cron` binnen fünf Minuten nach; bis dahin liest die Bestellung noch `pending`, und ohne
+diesen zweiten Griff säße die Kundschaft genau diese Minuten in der Sackgasse. Die 409 ist
+dieselbe Tatsache, nur früher.
+
+### Konsequenzen
+
+**Es wird nichts geschrieben und nichts gelöscht.** Bestellung, Zahlungsversuche und
+Reservierungen bleiben exakt, wie die Datenbank sie hinterlassen hat; geändert hat sich nur,
+woran der Browser sich erinnert. Ein Test hält fest, dass der betroffene Codeblock weder
+`orders` schreibt noch `release_order_reservations` oder `expire_stale_checkouts` aufruft.
+
+Die Begründung überlebt den Wechsel: Der Zahlungsfehler wird jetzt auch **über** dem Formular
+gerendert, sonst landete man nach einem Fehlschlag auf einem leeren Formular ohne Erklärung.
+
+Ein Regressionstest liest die Prämisse direkt aus `0021` nach — sollte `payment_status <>
+'pending'` je aufhören, die erste Prüfung zu sein, schlägt er fehl.
+
+**Der Sweeper war nie defekt.** Er lief planmäßig alle fünf Minuten; der Fehler lag
+ausschließlich darin, was die Kasse mit dem Ergebnis anfing.
+
+### Verworfen
+
+`expired` weiter als zahlbar behandeln (die widerlegte Prämisse) · den Sweeper häufiger laufen
+lassen (kuriert das Symptom für vier von fünf Minuten und die Sackgasse nie) · die Bestellung
+beim Loslassen stornieren oder löschen (ein Schreibvorgang für ein Anzeigeproblem, und er
+zerstörte den Beleg) · `confirmed` und `refunded` ebenfalls loslassen (dort ist Geld geflossen,
+das gehört sichtbar).
