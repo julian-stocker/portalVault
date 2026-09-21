@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUSINESS_CUT, DATE_REPAIRS, classifyLegacyRows, eventFingerprint, groupDate,
   ORDER_2026_PURCHASE_COLUMNS, ORDER_2026_SALE_COLUMNS,
-  isDamaged, orderRowsFromGrid, planPosition, planProblems, referenceKey,
+  isDamaged, isFixtureSkyId, orderRowsFromGrid, planPosition, planProblems, referenceKey,
   technicalFingerprint, type OrderRow, type Resolver,
 } from "./legacy-history";
 
@@ -337,5 +337,37 @@ describe("shaping an order block out of a worksheet grid", () => {
     expect(ORDER_2026_SALE_COLUMNS.stock).toBe("L");
     expect(ORDER_2026_SALE_COLUMNS.position).toBe("N");
     expect(ORDER_2026_PURCHASE_COLUMNS.stock).toBe("D");
+  });
+});
+
+describe("test fixtures are never reconciled against the workbook", () => {
+  /**
+   * The near miss this exists for: a first cut matched fixtures by the string
+   * `SKY-99`, and Staging's `SKY-9101 Smoke Test Figur` slipped through into
+   * a reconciliation plan with a delta of −5. The workbook has no row for it,
+   * so the plan read "the shop holds five the workbook does not" and would
+   * have emptied the position the smoke suite books against.
+   */
+  it("recognises every fixture actually present in either environment", () => {
+    for (const skyId of ["SKY-9101", "SKY-9994", "SKY-9998"]) {
+      expect(isFixtureSkyId(skyId), skyId).toBe(true);
+    }
+  });
+
+  it("leaves the real catalog alone, right up to its edge", () => {
+    for (const skyId of ["SKY-0001", "SKY-0419", "SKY-0821", "SKY-0822", "SKY-0899"]) {
+      expect(isFixtureSkyId(skyId), skyId).toBe(false);
+    }
+  });
+
+  it("does not mistake a number that merely contains 99", () => {
+    expect(isFixtureSkyId("SKY-0099")).toBe(false);
+    expect(isFixtureSkyId("SKY-0990")).toBe(false);
+  });
+
+  it("says no to anything that is not a plain SKY number", () => {
+    for (const value of ["", "SKY-", "sky-9999", "SKY-99A9", "9999"]) {
+      expect(isFixtureSkyId(value), JSON.stringify(value)).toBe(false);
+    }
   });
 });

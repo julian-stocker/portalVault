@@ -31,23 +31,20 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { requireStagingIfRequested } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings } from "../src/lib/import/sheet-rows.ts";
-import { cellAt, readCellGrid } from "../src/lib/import/cell-grid.ts";
-import {
-  LEGACY_DAMAGE_MARKER, SWAP_FORCE_HALF, indexCatalog, normalise,
-  type CatalogEntry,
-} from "../src/lib/orderbook/order-2026.ts";
+import { readCellGrid } from "../src/lib/import/cell-grid.ts";
+import { indexCatalog, type CatalogEntry } from "../src/lib/orderbook/order-2026.ts";
 import {
   BUSINESS_CUT, LEGACY_CONDITION, classifyLegacyRows, eventFingerprint,
   ORDER_2026_PURCHASE_COLUMNS, ORDER_2026_SALE_COLUMNS,
-  orderRowsFromGrid, planPosition, planProblems, technicalFingerprint,
-  type Exclusion, type LegacyEvent, type PositionPlan,
+  orderRowsFromGrid, planPosition, planProblems, resolveWorkbookPositions,
+  resolverFor, technicalFingerprint,
+  type LegacyEvent, type PositionPlan,
 } from "../src/lib/orderbook/legacy-history.ts";
 
 const WORKBOOK = process.env.SKYISLES_WORKBOOK
   ?? `${process.env.HOME}/Documents/eCommerce/skylanders.xlsx`;
 const ORDER_SHEET = "Order 2026";
 const STOCK_SHEETS = ["SA", "G", "SF", "T", "SC", "I", "ZB", "DI A"] as const;
-const FIGURE_SHEETS = new Set(["SA", "G", "SF", "T", "SC", "I"]);
 const APPLY = process.argv.includes("--apply");
 
 /**
@@ -110,37 +107,11 @@ const shared = parseSharedStrings(parts.sharedStrings);
 const orderXml = parts.sheets.get(ORDER_SHEET);
 if (!orderXml) { console.error(`Sheet "${ORDER_SHEET}" not found.`); process.exit(1); }
 
-/** Reference → figure, and the workbook's final stock per figure. */
-const skyOfReference = new Map<string, string>();
-const reasonOfReference = new Map<string, Exclusion>();
-const finalStock = new Map<string, number>();
-for (const sheet of STOCK_SHEETS) {
-  const xml = parts.sheets.get(sheet);
-  if (!xml) continue;
-  const grid = readCellGrid(xml, shared);
-  for (const row of [...grid.keys()].sort((a, b) => a - b)) {
-    if (row < 4) continue;
-    const name = cellAt(grid, row, "B").value;
-    if (name === "") continue;
-    const key = `${sheet}!${row}`;
-    if (!FIGURE_SHEETS.has(sheet)
-        || SWAP_FORCE_HALF.test(name)
-        || LEGACY_DAMAGE_MARKER.test(name) || /BESCH[ÄA]DIGT/i.test(name)) {
-      reasonOfReference.set(key, "not_a_figure");
-      continue;
-    }
-    const hit = catalogIndex.get(`${sheet}|${name}`) ?? catalogIndex.get(`${sheet}|${normalise(name)}`) ?? [];
-    if (hit.length !== 1) { reasonOfReference.set(key, "not_a_figure"); continue; }
-    skyOfReference.set(key, hit[0].skyId);
-    finalStock.set(hit[0].skyId,
-      (finalStock.get(hit[0].skyId) ?? 0) + (Number(cellAt(grid, row, "F").value) || 0));
-  }
-}
-
-const resolve = (reference: string) => ({
-  skyId: skyOfReference.get(reference) ?? null,
-  reason: skyOfReference.has(reference) ? null : (reasonOfReference.get(reference) ?? "not_a_figure"),
-});
+const workbook = resolveWorkbookPositions(
+  new Map(STOCK_SHEETS.map((sheet) => [sheet, readCellGrid(parts.sheets.get(sheet) ?? "", shared)])),
+  catalogIndex);
+const { finalStock } = workbook;
+const resolve = resolverFor(workbook);
 
 const orderGrid = readCellGrid(orderXml, shared);
 const events: LegacyEvent[] = [

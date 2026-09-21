@@ -48,7 +48,7 @@
  */
 
 import { cellAt, type CellGrid } from "../import/cell-grid.ts";
-import { serialToIso } from "./order-2026.ts";
+import { SWAP_FORCE_HALF, normalise, serialToIso } from "./order-2026.ts";
 
 /** The business start. Everything earlier is private and excluded. */
 export const BUSINESS_CUT = "2026-01-01";
@@ -368,4 +368,108 @@ export function orderRowsFromGrid(grid: CellGrid, columns: OrderColumns): OrderR
         position: cellAt(grid, row, columns.position).value,
       };
     });
+}
+
+/** The eight sheets the workbook keeps stock on. `ZB` and `DI A` are not figures. */
+export const WORKBOOK_SHEETS = ["SA", "G", "SF", "T", "SC", "I", "ZB", "DI A"] as const;
+const FIGURE_SHEETS: ReadonlySet<string> = new Set(["SA", "G", "SF", "T", "SC", "I"]);
+
+/** First data row of a stock sheet. Rows 1-3 are captions. */
+export const FIRST_STOCK_ROW = 4;
+
+export type WorkbookPositions = {
+  /** `T!124` → SKY-ID, for every row that resolves to exactly one figure. */
+  skyOfReference: Map<string, string>;
+  /** Why a reference does not name a figure. */
+  reasonOfReference: Map<string, Exclusion>;
+  /** Column F summed per figure — the final physical stock, and the target. */
+  finalStock: Map<string, number>;
+};
+
+/**
+ * Read the eight stock sheets into figures and their final stock.
+ *
+ * ONE PLACE, ON PURPOSE. The history importer, its verifier and the stock
+ * reconciliation all need exactly this, and the last time a reader like this
+ * existed three times over, one of the copies had a regex defect that the
+ * other two did not. A reconciliation that resolved figures even slightly
+ * differently from the import would move real stock on a different reading of
+ * the same file.
+ *
+ * `catalogIndex` comes from `indexCatalog`, which keys on `series|name` both
+ * exactly and normalised. A row that matches no entry, or more than one, is
+ * not a figure here — there is no fuzzy fallback and there must not be.
+ */
+export function resolveWorkbookPositions(
+  grids: ReadonlyMap<string, CellGrid>,
+  catalogIndex: ReadonlyMap<string, readonly { skyId: string }[]>,
+): WorkbookPositions {
+  const skyOfReference = new Map<string, string>();
+  const reasonOfReference = new Map<string, Exclusion>();
+  const finalStock = new Map<string, number>();
+
+  for (const sheet of WORKBOOK_SHEETS) {
+    const grid = grids.get(sheet);
+    if (!grid) continue;
+
+    for (const row of [...grid.keys()].sort((a, b) => a - b)) {
+      if (row < FIRST_STOCK_ROW) continue;
+      const name = cellAt(grid, row, "B").value;
+      if (name === "") continue;
+
+      const key = `${sheet}!${row}`;
+      if (!FIGURE_SHEETS.has(sheet)
+          || SWAP_FORCE_HALF.test(name)
+          || isDamaged(name, "")) {
+        reasonOfReference.set(key, "not_a_figure");
+        continue;
+      }
+
+      const hit = catalogIndex.get(`${sheet}|${name}`)
+        ?? catalogIndex.get(`${sheet}|${normalise(name)}`)
+        ?? [];
+      if (hit.length !== 1) {
+        reasonOfReference.set(key, "not_a_figure");
+        continue;
+      }
+
+      skyOfReference.set(key, hit[0].skyId);
+      finalStock.set(hit[0].skyId,
+        (finalStock.get(hit[0].skyId) ?? 0) + (Number(cellAt(grid, row, "F").value) || 0));
+    }
+  }
+
+  return { skyOfReference, reasonOfReference, finalStock };
+}
+
+/** The resolver `classifyLegacyRows` wants, built from resolved positions. */
+export function resolverFor(positions: WorkbookPositions): Resolver {
+  return (reference) => ({
+    skyId: positions.skyOfReference.get(reference) ?? null,
+    reason: positions.skyOfReference.has(reference)
+      ? null
+      : (positions.reasonOfReference.get(reference) ?? "not_a_figure"),
+  });
+}
+
+/**
+ * Where the real catalog stops and the test figures begin.
+ *
+ * SKY-IDs are permanent identities and are never derived or reused
+ * (CLAUDE.md), so the boundary cannot be guessed from a name — `Inventory
+ * Fixture` and `Smoke Test Figur` carry ordinary series codes, one of them is
+ * even `is_active`. What separates them is the reserved numeric range the
+ * test suites allocate from: the real catalog ends in the low 800s, fixtures
+ * live from 9000 up.
+ *
+ * This matters because the stock reconciliation targets the workbook, and a
+ * fixture is in no workbook. Treating one as "a figure the workbook says we
+ * hold zero of" would empty the position every RLS and inventory suite
+ * depends on — quietly, and on the first run.
+ */
+export const FIRST_FIXTURE_NUMBER = 9000;
+
+export function isFixtureSkyId(skyId: string): boolean {
+  const match = /^SKY-(\d+)$/.exec(skyId);
+  return match !== null && Number(match[1]) >= FIRST_FIXTURE_NUMBER;
 }
