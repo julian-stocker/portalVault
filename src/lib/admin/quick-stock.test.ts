@@ -28,6 +28,7 @@ function code(path: string): string {
 
 const STEPPER = "src/components/admin/stock-stepper.tsx";
 const CARD = "src/components/admin/inventory-card.tsx";
+const VIEW = "src/components/admin/inventory-view.tsx";
 const DIALOG = "src/components/admin/stock-dialog.tsx";
 const ACTIONS = "src/lib/admin/actions.ts";
 const FOUNDATION = "supabase/migrations/0003_shop_foundation.sql";
@@ -55,11 +56,37 @@ describe("a tap is a movement", () => {
     ]);
   });
 
-  it("moves by exactly one, in one direction", () => {
+  /**
+   * Lager V2 turned the taps into a draft. Until then every tap wrote its
+   * own movement: three taps from 3 to 6 left three journal rows, and a
+   * mis-tap corrected back left five. The journal stayed honest and stopped
+   * reading like one.
+   */
+  it("moves a draft by one, and the shelf by nothing", () => {
     expect(stepper).toContain("function bump(step: 1 | -1)");
-    expect(stepper).toContain("delta: step,");
+    expect(stepper).toContain("setDraft((current) => current + step)");
     expect(stepper).toContain("bump(1)");
     expect(stepper).toContain("bump(-1)");
+    // A tap is not a write: the only call that books sits in save().
+    expect(stepper).toMatch(/function save\(\)[\s\S]*?await bookMovement\(\{/);
+  });
+
+  it("books one movement for the net difference", () => {
+    expect(stepper).toContain("const delta = draftDelta(draft, quantity);");
+    expect(stepper).toContain("delta,");
+  });
+
+  it("writes nothing when the draft is back where it started", () => {
+    // Not a zero-delta row the database would refuse anyway — no row at all,
+    // because nothing happened.
+    expect(stepper).toContain("const dirty = delta !== 0;");
+    expect(stepper).toContain("if (!dirty) return;");
+  });
+
+  it("offers the save only once there is something to save", () => {
+    expect(stepper).toContain("{dirty ? (");
+    expect(stepper).toContain("de.inventory.draftSave");
+    expect(stepper).toContain("de.inventory.draftDiscard");
   });
 
   it("never assigns a quantity", () => {
@@ -94,10 +121,11 @@ describe("rapid taps", () => {
   const stepper = code(STEPPER);
 
   it("sends a delta, never a target", () => {
-    // Why concurrent taps cannot lose an update: two requests that each say
-    // "+1" compose, two that each say "= 8" do not.
-    expect(stepper).toContain("delta: step,");
-    expect(stepper).not.toMatch(/delta:\s*(shown|quantity)/);
+    // Why two saves cannot lose an update: two requests that each say "+2"
+    // compose, two that each say "= 8" do not. Still true of the draft —
+    // what travels is `draft − saved`, not `draft`.
+    expect(stepper).toContain("const delta = draftDelta(draft, quantity);");
+    expect(stepper).not.toMatch(/delta:\s*(draft|shown|quantity)\b/);
   });
 
   it("lets the database serialise them", () => {
@@ -107,10 +135,12 @@ describe("rapid taps", () => {
     expect(foundation).toContain("set quantity = quantity + p_delta");
   });
 
-  it("holds the optimistic value until the transition that made it settles", () => {
-    // useOptimistic, not a manual counter reset by an effect: the value
-    // disappears exactly when the refreshed server value arrives.
-    expect(stepper).toContain("useOptimistic");
+  it("lands the draft on the server value once the save has gone through", () => {
+    // Adjusted while rendering, the way React documents it — an effect
+    // would render the stale number once and cascade a second pass.
+    expect(stepper).toContain("if (seen !== quantity) {");
+    expect(stepper).toContain("setDraft(quantity);");
+    expect(stepper).not.toContain("useEffect");
     expect(stepper).toContain("startTransition(async () => {");
     expect(stepper).toContain("router.refresh();");
   });
@@ -126,8 +156,9 @@ describe("the floor", () => {
 
   it("stops at reserved rather than at zero", () => {
     // reserved is never below 0, so this covers negative stock as well.
-    expect(stepper).toContain("const canDecrease = shown > reserved;");
-    expect(stepper).toContain("disabled={!canDecrease}");
+    expect(stepper).toContain("const floor = draftFloor(reserved);");
+    expect(stepper).toContain("if (step === -1 && draft <= floor)");
+    expect(stepper).toContain("disabled={pending || draft <= floor}");
   });
 
   it("does not replace the database's guard", () => {
@@ -150,16 +181,26 @@ describe("the detailed booking is still there", () => {
     expect(dialog).toContain("de.inventory.preview(quantity, after)");
   });
 
-  it("is one tap away from the card", () => {
+  /**
+   * Lager V2 took "Weitere Buchung" off the card. `−/+` plus a save is the
+   * manual correction path now, and a second button that books the same
+   * movement behind a reason field was two ways to say one thing.
+   *
+   * The dialog itself stays: it is how a position that does not exist yet
+   * gets its first movement, which the stepper cannot do — there is no
+   * quantity to step from.
+   */
+  it("is gone from the card, where the stepper now does that job", () => {
     const card = code(CARD);
-    expect(card).toContain("<StockDialog");
-    expect(card).toContain("setBooking(true)");
-    expect(card).toContain("de.inventory.changeStock");
+    expect(card).not.toContain("<StockDialog");
+    expect(card).not.toContain("de.inventory.changeStock");
+    expect(card).toContain("<StockStepper");
   });
 
-  it("is no longer the only way to change stock", () => {
-    const card = code(CARD);
-    expect(card).toContain("<StockStepper");
+  it("is still how a new position is opened", () => {
+    const view = code(VIEW);
+    expect(view).toContain("<StockDialog");
+    expect(view).toContain("de.inventory.newPosition");
   });
 });
 

@@ -10,7 +10,7 @@
  */
 export function AdminThumb({ src, name }: { src: string | null; name: string }) {
   return (
-    <span className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-sky-sm bg-plate ring-1 ring-card-border/70">
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-sky-sm bg-plate ring-1 ring-card-border/70">
       {src ? (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img

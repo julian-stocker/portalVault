@@ -1,22 +1,29 @@
 /**
- * One stock position, as an operator uses it.
+ * One stock position, as an operator uses it (Lager V2).
  *
  * A card rather than a table row, because this page is used on a phone with
- * one thumb: the three things that change daily — stock, price, offered or
- * not — are full-width controls, not icons. Desktop gets the same card in a
- * wider grid; shrinking a seven-column table onto 390 px was the alternative
- * and it is not a usable one.
+ * one thumb. The layout follows the three questions in the order they are
+ * asked: what is this, how much of it is there, what does it cost — and then,
+ * on request, where the number came from.
  *
- * Everything it writes goes through the shop functions (ADR-0037): stock via
- * a movement, price and listing via `set_shop_listing`. The card never
- * assigns `quantity`, never touches `reserved`, and never confuses the shop
- * price with the catalog's market price.
+ *   [40px] Bash · SKY-0007 · Spyro's Adventure · Lose     [Im Shop]
+ *   Eingekauft 8    Verkauft 12    Bestand [−] 4 [+]
+ *   Marktpreis 4,99 €    Shoppreis 4,49 € · Automatisch · 90 %
+ *   ──────────────────────────────────────────────────────────
+ *   Historie                                        17 Einträge
  *
- * V6 split the daily job from the rare one (ADR-0047). Correcting a shelf
- * count is `−  7  +`, right where the number is; everything that needs a
- * reason, a note or a cost — a purchase, a sale, a write-off — lives behind
- * "Weitere Buchung". Both book an ordinary movement; only the number of
- * interactions differs.
+ * THREE ROWS, EACH ONE LINE. A card is a dossier in a list of hundreds, not
+ * a detail page. Two earlier passes stacked these and then tried to claw
+ * the height back with smaller paddings; this one starts from the row.
+ *
+ * Each row groups its content to the LEFT and lets the spare width sit at
+ * the end, rather than pushing the last item to the far edge. On a wide
+ * card `justify-between` was what produced the empty middle.
+ *
+ * WRITES. Stock through one movement per save (`StockStepper`), price and
+ * release through `set_shop_listing` (`PriceEditor`, the switch). The card
+ * never assigns `quantity`, never touches `reserved`, and never confuses the
+ * shop price with the catalog's market price (ADR-0033, ADR-0037).
  */
 "use client";
 
@@ -25,60 +32,86 @@ import { useState, useTransition } from "react";
 
 import { AdminThumb } from "@/components/admin/admin-thumb";
 import { PriceEditor } from "@/components/admin/price-editor";
-import { StockDialog } from "@/components/admin/stock-dialog";
+import { StockLedger } from "@/components/admin/stock-ledger";
 import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
 import type { InventoryPosition, Movement } from "@/lib/admin/inventory-model";
+import { loadLegacyEvents } from "@/lib/admin/legacy-actions";
+import {
+  mergeHistory, tradeCounters, type LedgerEntry, type LegacyEvent, type LegacyTotals,
+} from "@/lib/admin/stock-history";
 import { automaticShopPrice } from "@/lib/shop/offer";
 import { formatNumber, formatPrice } from "@/lib/format";
 import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
-function Figure({ label, value, tone }: { label: string; value: string; tone?: string }) {
+const copy = de.inventory;
+
+/** A counter: quiet label, number beside it. One line, no box. */
+function Counter({ label, value }: { label: string; value: number }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11px] text-muted">{label}</dt>
-      <dd className={`text-sm tabular-nums ${tone ?? ""}`}>{value}</dd>
-    </div>
+    <span className="flex min-w-0 items-baseline gap-1">
+      <span className="truncate text-[11px] text-muted">{label}</span>
+      <span className="text-sm font-medium tabular-nums">{formatNumber(value)}</span>
+    </span>
   );
 }
 
 export function InventoryCard({
   position,
   movements,
+  legacyTotals,
   percentage,
 }: {
   position: InventoryPosition;
   /** Already loaded by the page; the card renders, it does not fetch. */
   movements: readonly Movement[];
+  /** The reconstruction's totals for this position, if it has any. */
+  legacyTotals?: LegacyTotals;
   /** The shop-wide percentage, for the "Automatisch · 90 %" line (ADR-0045). */
   percentage: number;
 }) {
   const router = useRouter();
-  const [booking, setBooking] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [legacy, setLegacy] = useState<LegacyEvent[] | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const figure = position.figure;
+  const { purchased, sold } = tradeCounters(legacyTotals, movements);
 
   /**
-   * What this position would cost without its override.
-   *
-   * Only needed while an override IS set — otherwise `effectivePrice` already
-   * is the automatic price and the database computed it. `automaticShopPrice`
-   * mirrors `public.shop_price` exactly, on integers: an earlier version
-   * multiplied floats here and showed 14,98 € where the shop charges
-   * 14,99 € (ADR-0045).
+   * What this position would cost without its override. Only needed while an
+   * override IS set — otherwise `effectivePrice` already is the automatic
+   * price and the database computed it (ADR-0045).
    */
   const automaticPrice = automaticShopPrice(figure?.marketPrice ?? null, percentage);
-
   const conditionLabel =
-    position.condition === "loose" ? de.inventory.conditionLoose : de.inventory.conditionBoxed;
+    position.condition === "loose" ? copy.conditionLoose : copy.conditionBoxed;
 
   /**
-   * Price and listing travel together, because `set_shop_listing` writes both.
-   * Whichever one is being changed, the other is sent as it stands.
+   * The events are fetched on first open, not with the page.
+   *
+   * 2 671 reconstructed rows sit across 600 positions and only an opened
+   * card shows any of them. One call per open beats 264 on load.
+   */
+  function toggleHistory() {
+    const next = !showHistory;
+    setShowHistory(next);
+    if (!next || legacy !== null || loadingHistory) return;
+    setLoadingHistory(true);
+    void loadLegacyEvents(position.skyId, position.condition)
+      .then((events) => setLegacy(events))
+      .catch(() => setLegacy([]))
+      .finally(() => setLoadingHistory(false));
+  }
+
+  const entries: LedgerEntry[] = mergeHistory(legacy ?? [], movements);
+
+  /**
+   * Price and listing travel together, because `set_shop_listing` writes
+   * both. Whichever one is being changed, the other is sent as it stands.
    */
   function save(next: { salePrice?: number | null; isListed?: boolean }) {
     setFailed(null);
@@ -99,61 +132,64 @@ export function InventoryCard({
   }
 
   return (
-    <article className="flex flex-col gap-3 rounded-sky-lg bg-surface/80 p-3 ring-1 ring-border/70">
-      <div className="flex items-start gap-3">
+    <article className="flex flex-col gap-2 rounded-sky-lg bg-surface/80 p-2.5 ring-1 ring-border/70">
+      {/* 1. What this is — one line. The picture is a fixed square and
+             never a flex child that can be squeezed; the name is the only
+             part that gives. */}
+      <div className="flex items-center gap-2">
         <AdminThumb
           src={figure ? imageSrc(figure) : null}
           name={figure?.displayName ?? position.skyId}
         />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{figure?.displayName ?? position.skyId}</p>
-          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+        <p className="min-w-0 flex-1 truncate text-xs leading-tight">
+          <span className="text-sm font-medium">{figure?.displayName ?? position.skyId}</span>
+          <span className="text-muted">
+            {" · "}
             <span className="font-mono">{position.skyId}</span>
-            {figure ? <span>· {figure.seriesLabel}</span> : null}
-            <span>· {conditionLabel}</span>
-          </p>
-        </div>
+            {figure ? ` · ${figure.seriesLabel}` : ""}
+            {` · ${conditionLabel}`}
+          </span>
+        </p>
+
         {/* The shop release, and the control that changes it (ADR-0048).
             "Im Shop" means released, never "in stock": the two are separate
-            questions and both states of each are real — released and sold
-            out, in stock and deliberately withheld. */}
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          <button
-            type="button"
-            onClick={() => save({ isListed: !position.isListed })}
-            aria-pressed={position.isListed}
-            aria-busy={pending || undefined}
-            className={
-              "min-h-9 shrink-0 rounded-full px-3 text-xs font-medium whitespace-nowrap ring-1 " +
-              (position.isListed
-                ? "bg-status-ground text-status-ink ring-status-line"
-                : "bg-surface text-muted ring-border/70")
-            }
-          >
-            {position.isListed ? de.inventory.listed : de.inventory.notListed}
-          </button>
-
-          {/* Why a released position is nevertheless not on sale. Said here
-              rather than by dimming the switch, which would read as "the
-              release is off" — it is not (ADR-0048). */}
-          {position.isListed && position.available <= 0 ? (
-            <span className="text-[11px] leading-tight text-muted">
-              {de.inventory.soldOutHint}
-            </span>
-          ) : null}
-          {position.isListed && position.effectivePrice === null ? (
-            <span className="text-[11px] leading-tight text-danger">
-              {de.inventory.noPriceHint}
-            </span>
-          ) : null}
-        </div>
+            questions and both states of each are real. */}
+        <button
+          type="button"
+          onClick={() => save({ isListed: !position.isListed })}
+          aria-pressed={position.isListed}
+          aria-busy={pending || undefined}
+          className={
+            "min-h-7 shrink-0 rounded-full px-2.5 text-[11px] font-medium whitespace-nowrap ring-1 " +
+            (position.isListed
+              ? "bg-status-ground text-status-ink ring-status-line"
+              : "bg-surface text-muted ring-border/70")
+          }
+        >
+          {position.isListed ? copy.listed : copy.notListed}
+        </button>
       </div>
 
-      {/* The daily control, given the room it deserves: the number and the
-          two ways to change it, on one line, at 44 px each (ADR-0047). */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0">
-          <p className="text-[11px] text-muted">{de.inventory.quantity}</p>
+      {/* The two reasons a released position is nevertheless not on sale.
+          Their own line, so they never widen the header. */}
+      {position.isListed && (position.available <= 0 || position.effectivePrice === null) ? (
+        <p className="text-[11px] leading-tight text-muted">
+          {position.effectivePrice === null ? (
+            <span className="text-danger">{copy.noPriceHint}</span>
+          ) : (
+            copy.soldOutHint
+          )}
+        </p>
+      ) : null}
+
+      {/* 2. How much of it there is — one line, grouped left. `Bestand`
+             is last because it is the one that gets touched, so it ends up
+             beside the stepper instead of splitting it. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Counter label={copy.purchased} value={purchased} />
+        <Counter label={copy.sold} value={sold} />
+        <span className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted">{copy.stockLabel}</span>
           <StockStepper
             skyId={position.skyId}
             condition={position.condition}
@@ -161,45 +197,40 @@ export function InventoryCard({
             reserved={position.reserved}
             onFailed={setFailed}
           />
-        </div>
+        </span>
+        {/* Only when something is actually promised to a checkout —
+            otherwise this repeats the number beside it. */}
+        {position.reserved > 0 ? (
+          <span className="text-[11px] text-muted">
+            {copy.draftReserved(position.reserved)} · {copy.available}{" "}
+            <span className="tabular-nums">{formatNumber(position.available)}</span>
+          </span>
+        ) : null}
+      </div>
 
-        <dl className="flex flex-wrap items-start gap-x-5 gap-y-2">
-          {/* Reserved is shown only when it is not zero — a column of noughts
-              on every card says nothing, and nothing writes it in V1. */}
-          {position.reserved > 0 ? (
-            <Figure label={de.inventory.reserved} value={formatNumber(position.reserved)} />
-          ) : null}
-          <Figure
-            label={de.inventory.available}
-            value={formatNumber(position.available)}
-            tone={position.available > 0 ? "text-foreground" : "text-muted"}
-          />
-          <Figure
-            label={de.inventory.marketPrice}
-            value={
-              figure?.marketPrice === null || figure === null
-                ? "—"
-                : formatPrice(figure.marketPrice)
+      {/* 3. What it costs — one line, grouped left. */}
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+        <span className="flex items-baseline gap-1.5">
+          <span className="text-[11px] text-muted">{copy.marketPrice}</span>
+          <span className="text-sm tabular-nums">
+            {figure === null || figure.marketPrice === null
+              ? "—"
+              : formatPrice(figure.marketPrice)}
+          </span>
+        </span>
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="text-[11px] text-muted">{copy.salePrice}</span>
+          {/* What the shop charges, and whether it follows the rule
+              (ADR-0045). The automatic figure is the database's. */}
+          <PriceEditor
+            position={position}
+            automaticPrice={
+              position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
             }
-            tone="text-muted"
+            percentage={percentage}
+            onFailed={setFailed}
           />
-          <div className="min-w-0">
-            <dt className="text-[11px] text-muted">{de.inventory.salePrice}</dt>
-            <dd>
-              {/* What the shop charges, and whether it follows the rule
-                  (ADR-0045). The automatic figure is the database's, not a
-                  second calculation. */}
-              <PriceEditor
-                position={position}
-                automaticPrice={
-                  position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
-                }
-                percentage={percentage}
-                onFailed={setFailed}
-              />
-            </dd>
-          </div>
-        </dl>
+        </span>
       </div>
 
       {failed ? (
@@ -208,60 +239,38 @@ export function InventoryCard({
         </p>
       ) : null}
 
-      {booking ? (
-        <StockDialog
-          skyId={position.skyId}
-          condition={position.condition}
-          quantity={position.quantity}
-          reserved={position.reserved}
-          onDone={() => {
-            setBooking(false);
-            router.refresh();
-          }}
-        />
-      ) : (
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setBooking(true)}
-            className="min-h-10 flex-1 rounded-sky-md bg-surface px-4 text-sm font-medium ring-1 ring-border-strong hover:bg-border/30"
-          >
-            {de.inventory.changeStock}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowHistory((open) => !open)}
-            aria-expanded={showHistory}
-            className="text-xs text-muted underline underline-offset-2 hover:text-foreground"
-          >
-            {de.inventory.history}
-          </button>
-        </div>
-      )}
+      {/* 4. Where the number came from. */}
+      <div className="border-t border-border/30 pt-1.5">
+        <button
+          type="button"
+          onClick={toggleHistory}
+          aria-expanded={showHistory}
+          className="flex w-full items-baseline justify-between gap-2 text-xs text-muted hover:text-foreground"
+        >
+          <span className="flex items-baseline gap-1.5">
+            <span aria-hidden="true" className="text-[10px]">{showHistory ? "▴" : "▾"}</span>
+            {copy.history}
+          </span>
+          {/* Only once the reconstruction has arrived: before that this
+              would count the booked movements alone and then jump. */}
+          {legacy !== null ? (
+            <span className="text-[11px] tabular-nums">{copy.historyCount(entries.length)}</span>
+          ) : null}
+        </button>
 
-      {showHistory ? (
-        /* Read-only, and structurally so: movements are append-only in the
-           database and there is no function that edits or deletes one. A
-           wrong booking is answered with a correction. */
-        <ul className="flex flex-col gap-1 border-t border-border/60 pt-2 text-xs text-muted">
-          {movements.length === 0 ? (
-            <li>{de.inventory.noHistory}</li>
-          ) : (
-            movements.map((movement) => (
-              <li key={movement.id} className="flex flex-wrap gap-x-2 tabular-nums">
-                <span className={movement.delta > 0 ? "text-foreground" : ""}>
-                  {movement.delta > 0 ? "+" : ""}
-                  {formatNumber(movement.delta)}
-                </span>
-                <span>· {de.inventory.reasons[movement.reason] ?? movement.reason}</span>
-                <span>· {new Date(movement.createdAt).toLocaleDateString("de-AT")}</span>
-                {movement.unitCost !== null ? <span>· {formatPrice(movement.unitCost)}</span> : null}
-                {movement.note ? <span className="truncate">· {movement.note}</span> : null}
-              </li>
-            ))
-          )}
-        </ul>
-      ) : null}
+        {showHistory ? (
+          <div className="mt-1.5">
+            {loadingHistory && legacy === null ? (
+              <p className="px-1 py-2 text-xs text-muted">{copy.historyLoading}</p>
+            ) : (
+              /* Read-only, and structurally so: movements are append-only
+                 and legacy events are too. A wrong booking is answered with
+                 a correction, never an edit. */
+              <StockLedger entries={entries} />
+            )}
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }

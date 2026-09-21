@@ -2378,8 +2378,46 @@ export const de = {
     preview: (from: number, to: number) => `Aktuell ${from} → danach ${to}`,
     book: "Buchen",
     cancel: "Abbrechen",
-    history: "Letzte Bewegungen",
+    history: "Historie",
     noHistory: "Noch keine Bewegungen.",
+
+    /* Lager V2 — die Dreiergruppe über der Karte. */
+    purchased: "Eingekauft",
+    sold: "Verkauft",
+    stockLabel: "Bestand",
+
+    /* Der Entwurf: −/+ ändern erst nur eine Zahl auf dem Schirm. */
+    draftSave: "Bestand speichern",
+    draftDiscard: "Verwerfen",
+    draftPending: (delta: number) =>
+      `${delta > 0 ? "+" : "−"}${Math.abs(delta)} noch nicht gespeichert`,
+    draftReserved: (n: number) => `${n} reserviert`,
+
+    /* Die Historientabelle. */
+    historyCount: (n: number) => (n === 1 ? "1 Eintrag" : `${n} Einträge`),
+    historyLoading: "Historie wird geladen …",
+    historyDate: "Datum",
+    historyKind: "Typ",
+    historyBooking: "Buchung",
+    historyAmount: "Menge",
+    historyValue: "Marktwert",
+    historyLegacy: "Historisch",
+    historyLegacyMark: "rekonstruiert",
+    historyOperativeMark: "gebucht",
+    historyNoValue: "—",
+    historySource: (sheet: string, row: number) => `${sheet}, Zeile ${row}`,
+    historyHint:
+      "Älteste oben, neueste unten. ○ rekonstruiert, ● gebucht. Zeile antippen zeigt die " +
+      "Quelle. Ein laufender historischer Bestand wird daraus bewusst nicht berechnet.",
+
+    /* Ereignisarten der rekonstruierten Historie (ADR-0102). */
+    legacyKinds: {
+      opening_balance: "Startbestand",
+      purchase: "Einkauf",
+      sale: "Verkauf",
+      correction: "Korrektur",
+      legacy_adjustment: "Bestandsabgleich",
+    } as Record<string, string>,
     noPositions: "Noch keine Lagerposition.",
     empty: "Keine Position gefunden.",
     emptyHint: "Suche nach einem Namen oder einer SKY-ID, um Bestand anzulegen.",

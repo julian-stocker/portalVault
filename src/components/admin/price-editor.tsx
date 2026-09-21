@@ -78,16 +78,17 @@ export function PriceEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="min-w-0 text-left underline decoration-dotted underline-offset-4 hover:decoration-solid"
+        className="inline-flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-left underline decoration-dotted underline-offset-4 hover:decoration-solid"
       >
-        <span className="block text-sm tabular-nums">
+        <span className="text-sm tabular-nums">
           {position.effectivePrice === null
             ? de.inventory.noPrice
             : formatPrice(position.effectivePrice)}
         </span>
-        {/* Where the number came from. One line, always present, so the two
-            states are told apart by reading rather than by remembering. */}
-        <span className="block text-[11px] leading-tight text-muted">
+        {/* Where the number came from. Always present, so the two states are
+            told apart by reading rather than by remembering — beside the
+            price rather than under it, which is a line of card height. */}
+        <span className="text-[11px] leading-tight text-muted">
           {position.priceSource === "manual"
             ? de.inventory.priceManual
             : automaticPrice === null
