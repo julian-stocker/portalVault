@@ -880,12 +880,25 @@ describe("the ledger renders as a table", () => {
   };
   /** The <span> cells a JSX block opens. These cells never nest. */
   /**
-   * One grid cell per direct child, and a cell is not always a `<span>`:
-   * Verkauf\'s indicator column is a `<SaleIndicator/>`, which renders one.
-   * Counting only spans made a seven-cell row look like six.
+   * One grid cell per DIRECT child, and a cell is not always a `<span>`.
+   *
+   * Two things this has had to learn. Verkauf\'s indicator column is a
+   * `<SaleIndicator/>`, so counting only spans made a seven-cell row look
+   * like six. And a cell may contain a span of its own — the held-for-
+   * reconciliation note lives inside the action cell — so counting every
+   * span made the same row look like eight. Depth is the only honest answer.
    */
-  const cells = (block: string): number =>
-    (block.match(/<(?:span|SaleIndicator)[\s/>]/g) ?? []).length;
+  const cells = (block: string): number => {
+    let depth = 0;
+    let count = 0;
+    for (const m of block.matchAll(/<(\/?)(span|SaleIndicator)\b[^>]*?(\/?)>/g)) {
+      const [, closing, , selfClosing] = m;
+      if (closing) { depth -= 1; continue; }
+      if (depth === 0) count += 1;
+      if (!selfClosing) depth += 1;
+    }
+    return count;
+  };
   /** The children of one JSX element, by its opening tag. */
   const inside = (source: string, open: string, close: string): string => {
     const i = source.indexOf(open);

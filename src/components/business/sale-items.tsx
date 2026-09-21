@@ -28,7 +28,9 @@ import {
   addSaleItem, announceSaleItemReturn, bookSaleItem, removeSaleItem, restockSaleItem,
   returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
 } from "@/lib/orderbook/sales-actions";
-import { saleItemActions, saleItemEdits, saleItemIndicator } from "@/lib/orderbook/sales-view";
+import {
+  legacyRecorded, saleItemActions, saleItemEdits, saleItemIndicator,
+} from "@/lib/orderbook/sales-view";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureSearch } from "./figure-search";
@@ -117,7 +119,9 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
           ) : items.map((item) => {
             const can = saleItemActions(item as never, {
               frozen: frozen ?? historical, cancelled: cancelled ?? false, shipped,
+              historical,
             });
+            const recorded = legacyRecorded(item as never);
             const edits = saleItemEdits(item as never, { historical, internal });
             const itemId = Number(item.id);
             const id = Number(item.id);
@@ -137,10 +141,16 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
               || can.primary === "announce_return";
             return (
               <LedgerItemRow key={String(item.id)}>
-                <SaleIndicator indicator={saleItemIndicator(can.status, shipped)}
-                               label={can.status === "outbooked" && !shipped
-                                 ? copy.itemIndicator.outbookedUnshipped
-                                 : copy.itemIndicator[can.status]} />
+                <SaleIndicator
+                  indicator={saleItemIndicator(can.status, shipped, { historical, recorded })}
+                  label={historical && recorded
+                      && (can.status === "open" || can.status === "shipped")
+                    ? copy.itemIndicator.legacyComplete
+                    : can.heldForReconciliation
+                      ? copy.itemIndicator.legacyPending
+                      : can.status === "outbooked" && !shipped
+                        ? copy.itemIndicator.outbookedUnshipped
+                        : copy.itemIndicator[can.status]} />
                 <span className="tabular-nums text-xs text-muted">
                   {item.position === null || item.position === undefined
                     ? "—" : String(item.position)}
@@ -165,6 +175,13 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                 <span className="flex flex-wrap justify-end gap-2 text-right">
                   {/* Only what the server would accept. An impossible button
                       invites a click that ends in a rule the screen knew. */}
+                  {/* Held, not refused: the database would accept it, and
+                      the reconciled stock already contains its effect. */}
+                  {can.heldForReconciliation ? (
+                    <span className="text-xs text-muted" title={copy.errors.heldForReconciliation}>
+                      {copy.itemActionHeld}
+                    </span>
+                  ) : null}
                   {can.primary ? (
                     <button type="button" disabled={pending} onClick={primary[can.primary]}
                             className={quiet

@@ -1312,6 +1312,9 @@ export const de = {
        * ganzer Satz — der Punkt sagt „noch etwas zu tun?", das Label sagt
        * was. Ohne ihn wäre die Spalte reine Farbe.
        */
+      /* Was in der Aktionsspalte steht, wenn nur zurückgehalten wird. */
+      itemActionHeld: "Abgleich ausstehend",
+
       itemIndicator: {
         open: "Offen — noch nicht ausgebucht",
         shipped: "Verschickt — noch nicht ausgebucht",
@@ -1323,6 +1326,12 @@ export const de = {
         restocked: "Retoure abgeschlossen — wieder im Bestand",
         settled: "Erledigt — ohne Lagerbewegung abgeschlossen",
         not_shipped: "Nicht verschickt — nichts gebucht",
+        /* Importierte Zeile, die das Arbeitsbuch bereits abgeschlossen hat. */
+        legacyComplete:
+          "Historisch abgeschlossen — laut Arbeitsbuch erledigt, Bestand bereits berücksichtigt",
+        /* Importiert, aber ohne Vermerk: hier fehlt noch eine Entscheidung. */
+        legacyPending:
+          "Historisch — ohne Vermerk im Arbeitsbuch, wartet auf den Bestandsabgleich",
       },
       itemActionLabels: {
         book: "Ausbuchen",
@@ -1390,6 +1399,9 @@ export const de = {
         alreadySettled:
           "Diese Position ist bereits ohne Lagerbewegung abgeschlossen. " +
           "Nimm „Erledigt“ zuerst zurück.",
+        heldForReconciliation:
+          "Historische Verkäufe werden bis zum Excel-Bestandsabgleich nicht ausgebucht — " +
+          "ihr Bestandseffekt steckt bereits im abgeglichenen Lager.",
         notReleased:
           "Dieser historische Verkauf ist noch nicht freigegeben. " +
           "Gib die Bestellung zuerst frei.",

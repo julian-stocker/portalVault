@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 
 import { de } from "@/lib/i18n/de";
-import { saleItemIndicator, type SaleItemStatus } from "./sales-view";
+import {
+  legacyRecorded, saleItemActions, saleItemIndicator, type SaleItemStatus,
+} from "./sales-view";
 
 /**
  * Two things a sold position has to communicate, and the two ways it failed.
@@ -103,6 +105,123 @@ describe("the indicator is derived, and says the same thing twice", () => {
     }
     const migrations = readdirSync("supabase/migrations");
     expect(migrations.some((m) => /indicator|tone/i.test(m))).toBe(false);
+  });
+});
+
+describe("imported history is finished, and is not booked out from here", () => {
+  const item = (over: Record<string, unknown> = {}) => ({
+    sky_id: "SKY-0010", movement_id: null, return_movement_id: null,
+    returned_at: null, return_announced_at: null, settled_at: null,
+    not_shipped_at: null, legacy_stock_flag: null, ...over,
+  }) as never;
+  const ctx = (over: Record<string, unknown> = {}) =>
+    ({ frozen: false, cancelled: false, shipped: true, ...over }) as never;
+
+  /**
+   * The three markers column L of the workbook can carry, and the absence
+   * of one. 1 061 of Production's 1 253 imported lines have a marker; the
+   * 192 that do not are exactly the ones 0071 released to be worked on.
+   */
+  it("reads the workbook's own outcome markers, and nothing else", () => {
+    for (const flag of ["x", "-", "r"]) {
+      expect(legacyRecorded({ legacy_stock_flag: flag }), flag).toBe(true);
+    }
+    for (const flag of [null, undefined, "", "X", "done", " x"]) {
+      expect(legacyRecorded({ legacy_stock_flag: flag as string }), String(flag)).toBe(false);
+    }
+  });
+
+  it("a recorded historical line is green, not a grey circle", () => {
+    for (const flag of ["x", "-", "r"]) {
+      for (const status of ["open", "shipped"] as const) {
+        const dot = saleItemIndicator(status, true, { historical: true, recorded: true });
+        expect(dot, `${flag}/${status}`).toEqual({ tone: "green", glyph: "✓" });
+      }
+    }
+  });
+
+  /** The 192 with no marker: a decision is genuinely missing. */
+  it("an unrecorded historical line stays grey", () => {
+    expect(saleItemIndicator("shipped", true, { historical: true, recorded: false }).tone)
+      .toBe("grey");
+    expect(saleItemIndicator("open", false, { historical: true, recorded: false }).tone)
+      .toBe("grey");
+  });
+
+  /**
+   * Present-tense work outranks the workbook. A line that HAS a movement or
+   * a return in flight is describing today, not 2026's import.
+   */
+  it("never paints over a live movement or a return", () => {
+    const legacy = { historical: true, recorded: true };
+    expect(saleItemIndicator("return_announced", true, legacy).tone).toBe("orange");
+    expect(saleItemIndicator("returned", true, legacy).tone).toBe("orange");
+    expect(saleItemIndicator("restocked", true, legacy).tone).toBe("returned");
+    expect(saleItemIndicator("outbooked", false, legacy).tone).toBe("amber");
+  });
+
+  it("a non-historical sale is unaffected by the marker", () => {
+    expect(saleItemIndicator("shipped", true, { historical: false, recorded: true }).tone)
+      .toBe("grey");
+    // And the old two-argument call still means what it did.
+    expect(saleItemIndicator("shipped", true).tone).toBe("grey");
+  });
+
+  /**
+   * THE DOUBLE-BOOKING HOLD.
+   *
+   * `seller_book_sale_item` would accept the 192 released lines — 0071
+   * released them for exactly that. But the reconciled workbook stock
+   * already contains their effect, so booking one now takes the same piece
+   * off the shelf twice. The refusal therefore lives here, and it is a hold
+   * rather than a rule: nothing in the database changed.
+   */
+  it("offers no Ausbuchen on an imported line, released or not", () => {
+    const can = saleItemActions(item(), ctx({ historical: true }));
+    expect(can.primary).toBeNull();
+    expect(can.heldForReconciliation).toBe(true);
+  });
+
+  it("still offers it on a normal sale", () => {
+    const can = saleItemActions(item(), ctx({ historical: false }));
+    expect(can.primary).toBe("book");
+    expect(can.heldForReconciliation).toBe(false);
+  });
+
+  /** Timestamps write no movement, so they are not held back. */
+  it("keeps the endings that move no stock", () => {
+    const notAFigure = saleItemActions(item({ sky_id: null }), ctx({ historical: true }));
+    expect(notAFigure.primary).toBe("settle");
+    const shelf = saleItemActions(item(), ctx({ historical: true }));
+    expect(shelf.canNotShip).toBe(true);
+  });
+
+  it("holds nothing back on a frozen or cancelled sale, which had nothing to offer", () => {
+    for (const over of [{ frozen: true }, { cancelled: true }]) {
+      const can = saleItemActions(item(), ctx({ historical: true, ...over }));
+      expect(can.primary).toBeNull();
+      expect(can.heldForReconciliation).toBe(false);
+    }
+  });
+
+  it("both sale screens pass the flag and say why the button is gone", () => {
+    for (const source of [
+      readFileSync("src/components/business/sales-ledger.tsx", "utf8"),
+      readFileSync("src/components/business/sale-items.tsx", "utf8"),
+    ]) {
+      expect(source).toContain("historical,");
+      expect(source).toContain("legacyRecorded(item as never)");
+      expect(source).toContain("can.heldForReconciliation");
+      expect(source).toContain("itemActionHeld");
+    }
+  });
+
+  it("creates no inventory movement to achieve any of it", () => {
+    const view = readFileSync("src/lib/orderbook/sales-view.ts", "utf8");
+    for (const forbidden of ["record_inventory_movement", "apply_inventory_movement",
+                             "shop_inventory", "rpc("]) {
+      expect(view).not.toContain(forbidden);
+    }
   });
 });
 

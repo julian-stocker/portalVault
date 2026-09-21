@@ -131,6 +131,35 @@ export const notFromStock = (item: { legacy_stock_flag?: string | null }): boole
   (item.legacy_stock_flag ?? null) === "-";
 
 /**
+ * The three outcomes column L of `Order 2026` can record, and nothing else.
+ *
+ *   x  taken from tracked stock
+ *   -  shipped, but deliberately never taken from it
+ *   r  returned
+ *
+ * A row carrying one of them is FINISHED HISTORY: the workbook already says
+ * what became of that copy, and the reconciled inventory already reflects it.
+ * A row carrying none — the marker is NULL — is the opposite: nothing was
+ * recorded, so somebody still has to decide.
+ */
+const LEGACY_OUTCOMES = ["x", "-", "r"] as const;
+
+/**
+ * Did the workbook already settle this line?
+ *
+ * This is the whole distinction the Verkauf screens were missing. 1 061 of
+ * Production's 1 253 imported lines carry a marker and are done; the other
+ * 192 are the ones 0071 released precisely BECAUSE nothing was recorded for
+ * them. Reading "no movement in our ledger" as "still open" called all 1 253
+ * open, which is why finished history showed a grey circle.
+ *
+ * It is derived, not stored: the markers arrived with the import and no RPC
+ * writes them.
+ */
+export const legacyRecorded = (item: { legacy_stock_flag?: string | null }): boolean =>
+  (LEGACY_OUTCOMES as readonly string[]).includes(item.legacy_stock_flag ?? "");
+
+/**
  * The indicator, and why it is derived rather than stored.
  *
  * It answers one question at a glance — "is anything still expected of me
@@ -161,7 +190,23 @@ export type SaleItemTone = "grey" | "amber" | "green" | "orange" | "returned";
 
 export type SaleItemIndicator = { tone: SaleItemTone; glyph: "\u25cb" | "\u2713" | "!" };
 
-export function saleItemIndicator(status: SaleItemStatus, shipped: boolean): SaleItemIndicator {
+export function saleItemIndicator(
+  status: SaleItemStatus,
+  shipped: boolean,
+  /**
+   * Imported history, and what the workbook recorded for it.
+   *
+   * `recorded` outranks the live derivation for the two states that only
+   * mean "our ledger has no movement for this" — which is true of every
+   * imported line and says nothing about whether the sale is finished.
+   * Anything with a real movement or a return in flight is NOT overridden:
+   * that is present-tense work and it wins.
+   */
+  legacy?: { historical: boolean; recorded: boolean },
+): SaleItemIndicator {
+  if (legacy?.historical && legacy.recorded && (status === "open" || status === "shipped")) {
+    return { tone: "green", glyph: "\u2713" };
+  }
   switch (status) {
     case "restocked":
       return { tone: "returned", glyph: "\u2713" };
@@ -210,11 +255,29 @@ export function saleItemActions(
     cancelled: boolean;
     /** The order went out. */
     shipped: boolean;
+    /**
+     * An imported sale, released or not.
+     *
+     * HISTORY IS NOT BOOKED OUT FROM HERE, and that is a deliberate hold
+     * rather than a rule of the database. The reconciled stock in the new
+     * workbook ALREADY contains the effect of these sales, so writing a
+     * `sale_external` movement for one now would take the same piece off the
+     * shelf twice. `seller_book_sale_item` would happily accept it for the
+     * 192 released lines — which is exactly why the refusal has to be here,
+     * until the Excel-against-Production reconciliation says otherwise.
+     *
+     * Nothing else is withheld: `settle` and `not shipped` write a timestamp
+     * and never a movement, so they stay available.
+     */
+    historical?: boolean;
   },
-): { status: SaleItemStatus; primary: SaleItemAction; canNotShip: boolean } {
+): {
+  status: SaleItemStatus; primary: SaleItemAction; canNotShip: boolean;
+  heldForReconciliation: boolean;
+} {
   const status = saleItemStatus(item, context.shipped);
   if (context.frozen || context.cancelled) {
-    return { status, primary: null, canNotShip: false };
+    return { status, primary: null, canNotShip: false, heldForReconciliation: false };
   }
   /*
    * TWO ENDINGS FOR A POSITION THAT NEVER LEAVES THE SHELF, AND THEY ARE
@@ -227,8 +290,10 @@ export function saleItemActions(
    *                nothing left, so nothing has to be recorded as leaving.
    */
   const shelfBound = item.sky_id !== null && !notFromStock(item);
+  /* See `historical` above: no imported line moves stock from this screen. */
+  const mayBook = shelfBound && !context.historical;
   const primary: SaleItemAction =
-    status === "shipped" ? (shelfBound ? "book" : "settle")
+    status === "shipped" ? (mayBook ? "book" : shelfBound ? null : "settle")
     : status === "outbooked" ? "announce_return"
     : status === "return_announced" ? "mark_returned"
     : status === "returned" ? "restock"
@@ -240,6 +305,9 @@ export function saleItemActions(
     status,
     primary,
     canNotShip: (status === "open" || status === "shipped") && shelfBound,
+    /** True where a booking is only being held back, not refused outright. */
+    heldForReconciliation: Boolean(context.historical) && shelfBound
+      && (status === "open" || status === "shipped"),
   };
 }
 

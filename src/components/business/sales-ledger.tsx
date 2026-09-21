@@ -66,7 +66,7 @@ import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
   from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
-import { countryLabel, saleItemActions, saleStockStatus, saleItemIndicator } from "@/lib/orderbook/sales-view";
+import { countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyRecorded } from "@/lib/orderbook/sales-view";
 import { SaleDetails } from "./sale-details";
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
@@ -396,7 +396,9 @@ function SaleDetail({ sale, detail, pending, act }: {
                 frozen: historical && sale.stockReleasedAt === null,
                 cancelled: sale.cancelledAt !== null,
                 shipped: sale.shippedAt !== null,
+                historical,
               });
+              const recorded = legacyRecorded(item as never);
               const id = Number(item.id);
               const strong = can.status === "outbooked" || can.status === "restocked";
               /*
@@ -415,10 +417,16 @@ function SaleDetail({ sale, detail, pending, act }: {
               return (
                 <LedgerItemRow key={String(item.id)}>
                   <SaleIndicator
-                    indicator={saleItemIndicator(can.status, sale.shippedAt !== null)}
-                    label={can.status === "outbooked" && sale.shippedAt === null
-                      ? copy.itemIndicator.outbookedUnshipped
-                      : copy.itemIndicator[can.status]} />
+                    indicator={saleItemIndicator(can.status, sale.shippedAt !== null,
+                      { historical, recorded })}
+                    label={historical && recorded
+                        && (can.status === "open" || can.status === "shipped")
+                      ? copy.itemIndicator.legacyComplete
+                      : can.heldForReconciliation
+                        ? copy.itemIndicator.legacyPending
+                        : can.status === "outbooked" && sale.shippedAt === null
+                          ? copy.itemIndicator.outbookedUnshipped
+                          : copy.itemIndicator[can.status]} />
                   <span className="tabular-nums text-xs text-muted">
                     {item.position === null || item.position === undefined
                       ? "—" : String(item.position)}
@@ -439,7 +447,15 @@ function SaleDetail({ sale, detail, pending, act }: {
                   </span>
                   <span className="text-right">
                     {/* Only what the server would accept. An impossible button
-                        invites a click that ends in a rule the screen knew. */}
+                        invites a click that ends in a rule the screen knew —
+                        and, for imported history, one the database WOULD
+                        accept but the reconciled stock must not see twice. */}
+                    {can.heldForReconciliation ? (
+                      <span className="text-xs text-muted"
+                            title={copy.errors.heldForReconciliation}>
+                        {copy.itemActionHeld}
+                      </span>
+                    ) : null}
                     {run ? (
                       <button type="button" disabled={pending} onClick={run}
                               className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
