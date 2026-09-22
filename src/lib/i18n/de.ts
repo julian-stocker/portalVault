@@ -1317,14 +1317,17 @@ export const de = {
         return_announced: "Retoure",
         returned: "Retoure angekommen",
         restocked: "Wieder eingelagert ✓",
-        not_shipped: "Nicht verschickt",
+        /* Storniert: verkauft, aber nie rausgegangen — und deshalb auch nie
+           ausgebucht. Ein Ende, kein Zwischenstand. */
+        not_shipped: "Storniert",
         settled: "Erledigt",
       },
 
       /* Die Statusspalte einer importierten Zeile — was das Arbeitsbuch sagt. */
       legacyStates: {
         shipped: "Verschickt",
-        not_shipped: "Nicht verschickt",
+        /* Spalte L `-`/`-`: die Arbeitsmappe sagt, dieses Stück ging nie raus. */
+        not_shipped: "Storniert",
         returned: "Retoure",
         lost: "Verloren",
         shipped_unreferenced: "Verschickt",
@@ -1349,7 +1352,7 @@ export const de = {
         returned: "Retoure eingetroffen — noch nicht eingelagert",
         restocked: "Retoure abgeschlossen — wieder im Bestand",
         settled: "Erledigt — ohne Lagerbewegung abgeschlossen",
-        not_shipped: "Nicht verschickt — nichts gebucht",
+        not_shipped: "Storniert — nichts gebucht, Bestand unverändert",
         /*
          * Die vier Ausgänge, die das Arbeitsbuch selbst festhält (Spalte L).
          * Sie schlagen jeden abgeleiteten Zustand einer importierten Zeile,
@@ -1381,12 +1384,16 @@ export const de = {
         restock: "Einlagern",
         settle: "Erledigt",
         unsettle: "Zurücknehmen",
-        unmark_not_shipped: "Zurücknehmen",
+        /* Storniert ist kein Zwischenstand, aber auch keine Einbahnstraße:
+           solange die Position storniert ist, steht hier der Weg zurück. */
+        unmark_not_shipped: "Rückgängig",
       },
       /* Positionsebene — `notShipped` oben gehört dem Versandschalter der
          ganzen Bestellung und bedeutet etwas anderes. */
-      markNotShippedItem: "Nicht verschickt",
-      notShippedItemHint: "Ging nicht mit raus — bleibt im Bestand, wird nicht ausgebucht.",
+      markNotShippedItem: "Stornieren",
+      notShippedItemHint: "Nicht verkauft — bleibt im Bestand, wird nicht ausgebucht.",
+      /* Keine Rückfrage: das × schreibt nur einen Zeitstempel, bewegt keinen
+         Bestand, und „Rückgängig" steht danach dauerhaft daneben. */
       states: { settled: "Erledigt" },
       /* Lagerstatus eines ganzen Verkaufs (0072). */
       stock: {
@@ -1430,8 +1437,30 @@ export const de = {
         bookedItem:
           "Diese Position ist ausgebucht. Nimm die Lagerbewegung zurück, bevor du sie änderst.",
         tooMany: "Zu viele Positionen, Gebühren oder Korrekturen auf einmal.",
-        reserved: "Dieser Artikel ist aktuell für eine SkyIsles-Bestellung reserviert.",
-        noStock: "Für diesen Artikel gibt es keinen Lagerbestand.",
+        /*
+         * DIE BEIDEN GRÜNDE, AUS DENEN EIN ABGANG ABGELEHNT WIRD (0093).
+         *
+         * Bis 0093 warf die Datenbank für beide denselben Satz, und weil er
+         * das Wort „reserved" enthielt, bekam der Betreiber auch für eine
+         * Figur ohne jeden Bestand die Reservierungsmeldung — und suchte
+         * nach einer Bestellung, die es nicht gab.
+         *
+         * Ohne Figurennamen: an dieser Stelle liegt nur die Positions-ID
+         * vor, und eine zweite Abfrage nur für einen Satz ist sie nicht wert.
+         */
+        reserved:
+          "Dieser Artikel ist aktuell für eine SkyIsles-Bestellung reserviert " +
+          "und kann nicht für diesen Verkauf ausgebucht werden.",
+        noStock:
+          "Dieser Artikel ist aktuell nicht auf Lager und kann nicht ausgebucht werden.",
+        /*
+         * Der alte, mehrdeutige Satz derselben Funktion — solange eine
+         * Umgebung 0093 noch nicht hat. Er behauptet nichts, was er nicht
+         * weiß, und verschwindet mit der letzten nicht migrierten Umgebung.
+         */
+        stockUnavailable:
+          "Dieser Artikel ist aktuell nicht verfügbar — kein freier Bestand " +
+          "oder für eine SkyIsles-Bestellung reserviert.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und hat keinen Lagerplatz.",
         historical: "Historische Verkäufe verändern den Bestand nicht.",
         /* Der barrierefreie Name des Statuspunkts. Farbe allein trägt nie. */

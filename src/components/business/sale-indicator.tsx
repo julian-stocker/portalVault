@@ -35,8 +35,27 @@ import type { SaleItemIndicator } from "@/lib/orderbook/sales-view";
  * 1.25rem is a glyph and nothing else. It is deliberately too narrow for a
  * word: this column is a signal, and the sentence lives in `Status`.
  */
+/*
+ * ZWEI SPUREN WEICHEN VON EINKAUF AB, UND BEIDE AUS DEMSELBEN GRUND: DIESE
+ * TABELLE RENDERT ETWAS ANDERES IN DIE ZELLE.
+ *
+ * `Serie` — Einkauf zeigt dort `seriesLabel`, den ausgeschriebenen Namen der
+ * Serie („Spyro's Adventure"), und 9,5rem sind dafür knapp bemessen. Ein
+ * Verkauf zeigt `series_code`: ein bis zwei Zeichen, `T`, `SA`, `SF`. Neun
+ * Komma fünf Rem für „T" waren eine Lücke mitten in der Zeile, und sie ging
+ * der Figurenspalte ab, die als einzige flexible Spur alles bekommt, was die
+ * festen übrig lassen. 3,5rem sind bequem für drei Zeichen plus Innenabstand.
+ *
+ * `Aktion` — seit 0090/0092 stehen dort ZWEI Steuerelemente nebeneinander:
+ * „Verschickt" und das kleine × zum Stornieren. In 6,5rem passten sie nicht,
+ * und der Flex-Container brach um. 9rem ist, was beide zusammen brauchen
+ * (Knopf ~5,6rem, × 2,25rem, Abstand 0,5rem).
+ *
+ * Einkauf bleibt unberührt: es rendert den Fallback der CSS-Regel, und diese
+ * Liste überschreibt ihn nur für die beiden Verkaufsbildschirme.
+ */
 export const SALE_ITEM_COLUMNS =
-  "1.25rem 2.5rem 9.5rem minmax(0, 1fr) 6rem 6rem 6.5rem";
+  "1.25rem 2.5rem 3.5rem minmax(0, 1fr) 6rem 6rem 9rem";
 
 /**
  * One class per tone. Written out rather than composed, because Tailwind

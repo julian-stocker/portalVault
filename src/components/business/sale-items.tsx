@@ -60,11 +60,15 @@ const book = de.business.orderbook;
  *
  * The floor is the one number this screen owns, because it has no ledger
  * around it to inherit a width from. The six fixed tracks, the six gaps and
- * the padding come to 37.75rem; 46 leaves `Figur` a little over 8rem, which
+ * the padding come to 34.25rem; 42.5 leaves `Figur` a little over 8rem, which
  * is about twenty characters — the readable minimum `mobile-layout.test.ts`
  * holds every item table to.
+ *
+ * Es sinkt mit der `Serie`-Spur: sechs Rem weniger feste Breite heißt sechs
+ * Rem weniger Boden. Der Gewinn gehört der Figurenspalte, nicht dem Rand —
+ * bliebe der Boden stehen, hätte die Tabelle nur mehr Leerraum.
  */
-const ITEM_MIN_WIDTH = "46rem";
+const ITEM_MIN_WIDTH = "42.5rem";
 
 export function SaleItems({ saleId, items, catalog, historical, internal,
                            frozen, cancelled, shipped = false }: {
@@ -192,7 +196,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                         : can.status === "not_shipped" ? copy.notShippedItemHint : undefined}>
                   {outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}
                 </span>
-                <span className="flex flex-wrap justify-end gap-2 text-right">
+                <span className="flex items-center justify-end gap-2 text-right">
                   {/* Only what the server would accept. An impossible button
                       invites a click that ends in a rule the screen knew. */}
                   {/* Held, not refused: the database would accept it, and
@@ -213,11 +217,23 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                   ) : null}
                   {/* The one secondary: a parcel can go out without a piece
                       in it, and then nothing is booked because nothing left. */}
+                  {/*
+                    STORNIEREN — das kleine × neben „Verschickt".
+                    Zwei Wege aus einer offenen Position: verschickt (und
+                    ausgebucht) oder storniert (und nie bewegt). Ein Klick,
+                    keine Rückfrage: geschrieben wird `not_shipped_at` über
+                    den bestehenden Weg — keine Bewegung, kein Bestand —, und
+                    der Rückweg steht danach als „Rückgängig" dauerhaft in
+                    derselben Spalte. Eine Ja/Nein-Stufe sicherte hier nichts
+                    ab, was nicht ohnehin in einem Klick umkehrbar wäre.
+                  */}
                   {can.canNotShip ? (
-                    <button type="button" disabled={pending} title={copy.notShippedItemHint}
+                    <button type="button" disabled={pending}
+                            title={copy.notShippedItemHint}
+                            aria-label={copy.markNotShippedItem}
                             onClick={() => act(() => setSaleItemNotShipped(id, saleId, true))}
-                            className="min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50">
-                      {copy.markNotShippedItem}
+                            className="flex size-9 shrink-0 items-center justify-center rounded-sky-md text-sm text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 disabled:opacity-40">
+                      ×
                     </button>
                   ) : null}
                   {/* A line that never left the shelf may simply be wrong:

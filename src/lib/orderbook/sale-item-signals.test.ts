@@ -42,8 +42,26 @@ describe("the indicator is derived, and says the same thing twice", () => {
     expect(saleItemIndicator("outbooked", true)).toEqual({ tone: "green", glyph: "✓" });
     for (const shipped of [true, false]) {
       expect(saleItemIndicator("settled", shipped).tone).toBe("green");
-      expect(saleItemIndicator("not_shipped", shipped).tone).toBe("green");
     }
+  });
+
+  /*
+   * STORNIERT IST EIN ENDE OHNE ERFOLG, UND SIEHT AUCH SO AUS.
+   *
+   * Es teilte sich den grünen Haken mit `settled`, und eine stornierte
+   * Position las sich wie eine erledigte. Sie ist weiterhin abgeschlossen —
+   * `saleItemClosed` ist davon unberührt —, trägt aber das Symbol, das es
+   * für diesen Ausgang schon gab: den grauen Rückwärtspfeil der importierten
+   * `-`/`-`-Zeile. Ein Zustand, ein Symbol.
+   */
+  it("grey ↩ for a position that never went out", () => {
+    for (const shipped of [true, false]) {
+      expect(saleItemIndicator("not_shipped", shipped)).toEqual({ tone: "grey", glyph: "↩" });
+    }
+    expect(saleItemIndicator("not_shipped", false).glyph).not.toBe("✓");
+    // Dasselbe Symbol, das die Arbeitsmappe für denselben Ausgang bekommt.
+    expect(saleItemIndicator("settled", false, { historical: true, outcome: "not_shipped" }))
+      .toEqual(saleItemIndicator("not_shipped", false));
   });
 
   it("orange ! while a return is in flight or waiting to be put away", () => {
@@ -61,7 +79,7 @@ describe("the indicator is derived, and says the same thing twice", () => {
     for (const state of ALL_STATES) {
       const dot = saleItemIndicator(state, true);
       expect(["grey", "amber", "green", "orange", "returned"], state).toContain(dot.tone);
-      expect(["○", "✓", "!"], state).toContain(dot.glyph);
+      expect(["○", "✓", "!", "↩"], state).toContain(dot.glyph);
     }
   });
 
@@ -320,10 +338,50 @@ describe("the indicator is a column of its own, and the sticky one", () => {
 
   /** Einkauf must not pay for a column it does not render. */
   it("Verkauf's seven are Einkauf's six with one narrow cell in front", () => {
-    expect(tracks(SALE).slice(1)).toEqual(tracks(EINKAUF));
+    /*
+     * ZWEI SPUREN WEICHEN AB, UND BEIDE, WEIL DIE ZELLE ETWAS ANDERES ENTHÄLT.
+     *
+     * `Serie` — Einkauf schreibt die Serie aus (`seriesLabel`), ein Verkauf
+     * zeigt das Kürzel (`series_code`, ein bis zwei Zeichen). 9,5rem für „T"
+     * waren eine Lücke, die der Figurenspalte abging.
+     *
+     * `Aktion` — die Aktionsspalte eines Verkaufs trägt seit 0090/0092 zwei
+     * Steuerelemente nebeneinander, „Verschickt" und das × zum Stornieren;
+     * ein Einkauf hat dort höchstens eines.
+     *
+     * Der Rest bleibt Spur für Spur derselbe: wer eine dritte Abweichung
+     * einführt, fällt hier auf und muss sie begründen.
+     */
+    expect(tracks(SALE).slice(3, -1)).toEqual(tracks(EINKAUF).slice(2, -1));
     expect(tracks(SALE)[0]).toBe("1.25rem");
+    expect(tracks(SALE)[1]).toBe(tracks(EINKAUF)[0]);   // `#`, unverändert
+    // Die Kürzelspalte ist deutlich schmaler als die ausgeschriebene.
+    expect(tracks(SALE)[2]).toBe("3.5rem");
+    expect(tracks(EINKAUF)[1]).toBe("9.5rem");
+    expect(Number(/([\d.]+)rem/.exec(tracks(SALE)[2])![1]))
+      .toBeLessThan(Number(/([\d.]+)rem/.exec(tracks(EINKAUF)[1])![1]) / 2);
+    // Und die flexible Figurenspalte steht bei beiden an derselben Stelle.
+    expect(tracks(SALE)[3]).toBe("minmax(0, 1fr)");
+    expect(tracks(SALE).at(-1)).toBe("9rem");
+    expect(tracks(EINKAUF).at(-1)).toBe("6.5rem");
     // The purchase number keeps the width it always had.
     expect(tracks(EINKAUF)[0]).toBe("2.5rem");
+  });
+
+  /*
+   * Und der Platz, der dabei frei wird, landet in der Figurenspalte — nicht
+   * im Rand. Deshalb sinkt der Boden der Detailansicht mit, sonst wäre der
+   * Gewinn nur Leerraum.
+   */
+  it("hands the freed width to the figure column, not to the margin", () => {
+    const floor = Number(/const ITEM_MIN_WIDTH = "([\d.]+)rem"/.exec(DETAIL)![1]);
+    const fixed = tracks(SALE).filter((t) => t.includes("rem") && !t.includes("minmax"))
+      .reduce((sum, t) => sum + Number(/([\d.]+)rem/.exec(t)![1]), 0);
+    const chrome = 0.75 * 6 + 1.5;
+    const figure = floor - fixed - chrome;
+    expect(figure).toBeGreaterThanOrEqual(8);
+    // Kein aufgeblähter Boden: die Figur bekommt den Gewinn, nicht der Rand.
+    expect(figure).toBeLessThan(9);
   });
 
   /**

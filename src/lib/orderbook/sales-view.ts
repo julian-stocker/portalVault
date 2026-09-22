@@ -315,13 +315,24 @@ export function saleItemIndicator(
       /* The one split the status cannot make on its own. */
       return shipped ? { tone: "green", glyph: "\u2713" } : { tone: "amber", glyph: "\u2713" };
     case "settled":
+      /* Closed without a movement, and nothing outstanding: a success. */
+      return { tone: "green", glyph: "\u2713" };
     case "not_shipped":
       /*
-       * Both are deliberate endings with nothing outstanding, so both are
-       * green — and both keep their own label, because "closed without a
-       * movement" and "never sent" are not the same thing to a reader.
+       * STORNIERT IST EIN ENDE, ABER KEIN ERFOLG.
+       *
+       * Bis hierher teilte es sich den grünen Haken mit `settled`, und eine
+       * stornierte Position sah aus wie eine erledigte — derselbe Haken, den
+       * `outbooked` und `restocked` für eine echte Bewegung tragen. Das Ende
+       * bleibt terminal (`saleItemClosed` ist davon unberührt), nur das
+       * Symbol sagt jetzt, welches Ende es war.
+       *
+       * Genommen wird das, das es für genau diesen Ausgang schon gibt: der
+       * graue Rückwärtspfeil, mit dem eine importierte `-`/`-`-Zeile seit
+       * 2026-09-21 dargestellt wird. Ein Zustand, ein Symbol — gleich, ob
+       * ihn die Arbeitsmappe festhält oder ein Klick auf das ×.
        */
-      return { tone: "green", glyph: "\u2713" };
+      return { tone: "grey", glyph: "\u21a9" };
     default:
       return { tone: "grey", glyph: "\u25cb" };
   }
@@ -403,6 +414,17 @@ export function saleItemActions(
    * Transaktion. `book` bleibt für den Fall, dass der Versand schon gesetzt
    * ist und nur noch die Position fehlt — derselbe Weg, anderes Wort.
    */
+  /*
+   * RÜCKGÄNGIG GIBT ES NUR, WO ES AUCH ETWAS ZURÜCKZUNEHMEN GIBT.
+   *
+   * Eine stornierte operative Position trägt `not_shipped_at`, und
+   * `seller_set_sale_item_not_shipped(false)` räumt es wieder weg — ohne
+   * Bewegung, ohne Bestandsänderung. Eine importierte `-`/`-`-Zeile trägt
+   * es NICHT: ihr „Storniert" kommt aus den Spalten L/M der Arbeitsmappe,
+   * und die werden hier nicht umgeschrieben. Deshalb bleibt die Aktion bei
+   * `historical` aus — nicht, weil die Datenbank sie ablehnte, sondern weil
+   * sie am falschen Fakt zöge.
+   */
   const primary: SaleItemAction =
     status === "open" && mayBook ? "ship"
     : status === "shipped" ? (mayBook ? "book" : shelfBound ? null : "settle")
@@ -410,7 +432,7 @@ export function saleItemActions(
     : status === "return_announced" ? "mark_returned"
     : status === "returned" ? "restock"
     : status === "settled" ? "unsettle"
-    : status === "not_shipped" ? "unmark_not_shipped"
+    : status === "not_shipped" ? (context.historical ? null : "unmark_not_shipped")
     : status === "open" && !shelfBound ? "settle"
     : null;
   return {

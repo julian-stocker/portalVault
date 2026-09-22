@@ -3011,6 +3011,31 @@ Null betroffene Zeilen heißt „reicht nicht" und wird als Ausnahme geworfen. E
 Fenster zwischen Prüfen und Schreiben, also kein `read → calculate → write`. Der
 Journaleintrag folgt in derselben Transaktion: entweder beides oder nichts.
 
+**Und die Ablehnung nennt seit `0093` ihren Grund.** „Reicht nicht" deckte zwei Lagen ab, die
+nichts miteinander zu tun haben: nichts da (`quantity 0`, `reserved 0`, Abgang `-1`) und etwas
+da, aber einer Bestellung versprochen (`quantity 1`, `reserved 1`). Beide kamen als ein Satz
+heraus, in dem das Wort `reserved` stand — das Orderbuch übersetzte ihn in „für eine
+SkyIsles-Bestellung reserviert" und zeigte das auch für Figuren ohne Lagerzeile und ohne jede
+Reservierung an. `0093` lässt den Wächter unberührt und teilt nur den Satz danach:
+
+```sql
+if v_updated = 0 then
+  select quantity, reserved into v_quantity, v_reserved   -- die Zeile ist gesperrt,
+    from public.shop_inventory where id = v_inventory_id;  -- das UPDATE hat nichts verändert
+
+  if v_quantity + p_delta < 0 then
+    raise exception 'insufficient stock for % / %: …' using errcode = 'check_violation';
+  end if;
+  raise exception 'movement would consume reserved stock for % / %: …'
+    using errcode = 'check_violation';
+end if;
+```
+
+Kein zweiter Wächter: der Zweig läuft ausschließlich, nachdem bereits abgelehnt wurde, und
+liest genau die Zahlen, gegen die entschieden wurde. Signatur, `security definer`,
+`search_path`, Grants, Reihenfolge und SQLSTATE sind unverändert — nur die Begründung ist
+präziser. Das Orderbuch ordnet beide Meldungen je einem eigenen deutschen Satz zu.
+
 #### Unveränderlichkeit und Anhängejournal
 
 `shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die

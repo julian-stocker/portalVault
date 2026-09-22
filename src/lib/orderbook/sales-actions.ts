@@ -30,7 +30,24 @@ const paths = (id?: number) =>
 function message(error: { code?: string; message?: string }): string {
   const text = error.message ?? "";
   if (error.code === "42501") return de.admin.notAllowed;
-  if (text.includes("below its reserved")) return copy.errors.reserved;
+  /*
+   * DIE ZWEI GRÜNDE, AUS DENEN DAS REGAL EINEN ABGANG ABLEHNT (0093).
+   *
+   * `apply_inventory_movement` warf bis 0093 für beide denselben Satz. Er
+   * enthielt das Wort „reserved", also landete jede Ablehnung hier bei der
+   * Reservierungsmeldung — auch für eine Figur mit Bestand 0 und ohne eine
+   * einzige Reservierung im ganzen System. Der Wächter war richtig, die
+   * Erklärung war es nicht.
+   */
+  if (text.includes("insufficient stock for")) return copy.errors.noStock;
+  if (text.includes("would consume reserved stock")) return copy.errors.reserved;
+  /*
+   * Der Satz von vor 0093. Er bleibt zugeordnet, bis jede Umgebung migriert
+   * ist — sonst fiele genau diese Ablehnung auf einer noch nicht migrierten
+   * Datenbank in die generische Meldung. Mehrdeutig, also wird auch nichts
+   * Eindeutiges behauptet.
+   */
+  if (text.includes("below its reserved")) return copy.errors.stockUnavailable;
   if (text.includes("no stock position")) return copy.errors.noStock;
   if (text.includes("not a catalog figure")) return copy.errors.notAFigure;
   if (text.includes("historical sales never move stock")) return copy.errors.historical;

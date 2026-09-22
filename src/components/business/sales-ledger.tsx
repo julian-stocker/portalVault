@@ -58,13 +58,14 @@ const SALE_COLUMNS =
 /* 7.5rem wider than before: the Lager column carries words, not a tick. */
 const SALE_MIN_WIDTH = "71rem";
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { formatPrice } from "@/lib/format";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
-  restockSaleItem, shipSaleItem } from "@/lib/orderbook/sales-actions";
+  restockSaleItem, setSaleItemNotShipped, shipSaleItem } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
 import {
   countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyOutcome,
@@ -167,18 +168,39 @@ function Summary({ summary }: { summary: SalesSummary }) {
 
 type Detail = Record<string, unknown>;
 
-export function SalesLedger({ sales, summary, backHref }: {
+export function SalesLedger({ sales, summary, backHref, openSale }: {
   sales: SaleRow[]; summary: SalesSummary; backHref: string;
+  /**
+   * Ein Verkauf, der beim Laden schon offen sein soll (`?verkauf=`).
+   *
+   * Dafür gibt es genau einen Anlass: gerade angelegt. Das Formular
+   * schickte bisher auf die eigene Detailseite; jetzt landet der Betreiber
+   * im Verkaufsbuch, sieht die Zeile in ihrer Umgebung — und bekommt
+   * dieselbe Übersicht und dasselbe Bearbeitungsfenster wie bei jedem
+   * anderen Verkauf, statt einer zweiten Oberfläche für denselben Zweck.
+   */
+  openSale?: number;
 }) {
   const [open, setOpen] = useState<ReadonlySet<number>>(
-    () => new Set(sales.filter((s) => s.matchItems.length > 0).map((s) => s.id)));
+    () => new Set([...sales.filter((s) => s.matchItems.length > 0).map((s) => s.id),
+                   ...(openSale !== undefined ? [openSale] : [])]));
   const [details, setDetails] = useState<Record<number, Detail | "failed">>({});
   /*
    * Which sale's breakdown is open. Separate from `open`, which is the item
    * list: the chevron and the Details button are two controls doing two
    * things, and neither may move the other.
    */
-  const [showing, setShowing] = useState<number | null>(null);
+  /*
+   * Der gerade angelegte Verkauf steht von der ersten Darstellung an offen:
+   * aufgeklappt (siehe `open`) und im Bearbeitungsfenster. Die Positionen mit
+   * „Verschickt" und „×" liegen in der aufgeklappten Zeile, die Kopfdaten im
+   * Fenster — schließt der Betreiber das Fenster, steht er genau dort, wo er
+   * weiterarbeitet. Kein Effekt nötig: `openSale` kommt aus der Adresse, das
+   * Schließen räumt sie auf, und geladen wird die Zeile ohnehin über `open`.
+   */
+  const [showing, setShowing] = useState<number | null>(
+    () => (openSale !== undefined && sales.some((s) => s.id === openSale) ? openSale : null));
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const loading = useRef<Set<number>>(new Set());
@@ -346,7 +368,13 @@ export function SalesLedger({ sales, summary, backHref }: {
       */}
       {showingSale ? (
         <SaleDetails key={showingSale.id} sale={showingSale} detail={details[showingSale.id]}
-                     open onClose={() => setShowing(null)}
+                     open onClose={() => {
+                       setShowing(null);
+                       /* `?verkauf=` hat seinen Zweck erfüllt: ohne das
+                          Aufräumen öffnete ein Neuladen dasselbe Fenster
+                          wieder, und der Zurück-Knopf führte im Kreis. */
+                       if (openSale !== undefined) router.replace(backHref);
+                     }}
                      onSaved={() => { loading.current.delete(showingSale.id); load(showingSale.id, true); }} />
       ) : null}
     </>
@@ -431,6 +459,14 @@ function SaleDetail({ sale, detail, pending, act }: {
                 /* „Bestätigen": Wareneingang und Einbuchung in einem Aufruf (0092). */
                 mark_returned: () => act(sale.id, () => receiveSaleItemReturn(id, sale.id)),
                 restock: () => act(sale.id, () => restockSaleItem(id, sale.id)),
+                /*
+                 * Der Rückweg gehört dorthin, wo das × steht. Stornieren war
+                 * hier möglich, Zurücknehmen nicht — die Position blieb in
+                 * der Liste als „Storniert" stehen, ohne Ausweg, und der
+                 * Betreiber musste auf die Detailseite wechseln. Derselbe
+                 * Aufruf wie dort, nur mit `false` (0074).
+                 */
+                unmark_not_shipped: () => act(sale.id, () => setSaleItemNotShipped(id, sale.id, false)),
               };
               const run = can.primary ? primary[can.primary] : undefined;
               return (
@@ -460,10 +496,18 @@ function SaleDetail({ sale, detail, pending, act }: {
                   <span className="ob-money text-right tabular-nums">
                     {item.market_price === null ? "—" : formatPrice(Number(item.market_price))}
                   </span>
+                  {/*
+                    DIESELBE ANTWORT WIE AUF DER DETAILSEITE. Die Zelle zeigte
+                    den abgeleiteten Zustand auch dann, wenn die Arbeitsmappe
+                    etwas anderes festhält — eine stornierte Legacy-Position
+                    las sich hier als „Verschickt (nicht ausgebucht)", während
+                    die Detailseite „Storniert" sagte. Zwei Bildschirme, eine
+                    Wahrheit.
+                  */}
                   <span className={`truncate text-center text-xs ${strong ? "text-fg" : "text-muted"}`}>
-                    {copy.itemStates[can.status]}
+                    {outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}
                   </span>
-                  <span className="text-right">
+                  <span className="flex items-center justify-end gap-2 text-right">
                     {/* Only what the server would accept. An impossible button
                         invites a click that ends in a rule the screen knew —
                         and, for imported history, one the database WOULD
@@ -478,6 +522,16 @@ function SaleDetail({ sale, detail, pending, act }: {
                       <button type="button" disabled={pending} onClick={run}
                               className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
                         {copy.itemActionLabels[can.primary!]}
+                      </button>
+                    ) : null}
+                    {/* Stornieren, in einem Klick wie auf der Detailseite. */}
+                    {can.canNotShip ? (
+                      <button type="button" disabled={pending}
+                              title={copy.notShippedItemHint}
+                              aria-label={copy.markNotShippedItem}
+                              onClick={() => act(sale.id, () => setSaleItemNotShipped(id, sale.id, true))}
+                              className="size-9 shrink-0 rounded-sky-md text-sm text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 disabled:opacity-40">
+                        ×
                       </button>
                     ) : null}
                   </span>

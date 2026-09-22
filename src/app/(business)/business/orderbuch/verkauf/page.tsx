@@ -36,9 +36,19 @@ const book = de.business.orderbook;
 const MONTHS = ["Januar","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 
 export default async function SalesPage({ searchParams }: {
-  searchParams: Promise<{ bereich?: string; jahr?: string; monat?: string; q?: string; status?: string }>;
+  searchParams: Promise<{ bereich?: string; jahr?: string; monat?: string; q?: string;
+                          status?: string; verkauf?: string }>;
 }) {
   const params = await searchParams;
+  /*
+   * `?verkauf=` öffnet einen Verkauf sofort im vorhandenen Fenster.
+   *
+   * Das Anlegen-Formular schickt hierher statt auf die eigene Detailseite:
+   * eine Oberfläche für denselben Zweck reicht. Die Route `/verkauf/[id]`
+   * bleibt für Direktaufrufe bestehen.
+   */
+  const openSale = Number.isFinite(Number(params.verkauf)) && Number(params.verkauf) > 0
+    ? Number(params.verkauf) : undefined;
   const scope = parseScope(params.bereich);
   const year = parseYearFilter(params.jahr);
   const month = params.monat ? Number(params.monat) : undefined;
@@ -150,7 +160,8 @@ export default async function SalesPage({ searchParams }: {
       {ledger.sales.length === 0 ? (
         <p className="mt-8 text-sm text-muted">{empty}</p>
       ) : (
-        <SalesLedger key={here} sales={ledger.sales} summary={ledger.summary} backHref={here} />
+        <SalesLedger key={here} sales={ledger.sales} summary={ledger.summary} backHref={here}
+                     openSale={openSale} />
       )}
     </main>
   );

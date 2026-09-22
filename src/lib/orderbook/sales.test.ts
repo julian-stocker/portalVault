@@ -28,6 +28,7 @@ import {
 } from "./sales-2026.ts";
 import { indexCatalog, type CatalogEntry } from "./order-2026.ts";
 import { SALE_TEMPLATES } from "./sale-template.ts";
+import { SALE_ITEM_COLUMNS } from "@/components/business/sale-indicator";
 import { de } from "@/lib/i18n/de";
 import {
   adjustmentsTotal, feesTotal, groupFees, labelTotal,
@@ -35,10 +36,11 @@ import {
 } from "./sales-money.ts";
 import {
   CHANNEL_LABELS, FEE_LABELS, MANUAL_CHANNELS, SETTLEMENT_LABELS, countryLabel,
-  parseScope, rpcScope, saleItemActions, saleItemClosed,
+  legacyOutcome, parseScope, rpcScope, saleItemActions, saleItemClosed,
+  saleItemIndicator, saleItemStatus,
   safeSalesBackHref, saleStockStatus, salesHref, sortSales,
 } from "./sales-view.ts";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const SQL = migrationSource("0059_orderbook_sales.sql");
@@ -2263,8 +2265,13 @@ describe("every action the rules produce is wired where it is offered", () => {
    * eine Retoure weiterschieben. Eine Position ohne Bewegung zu schließen
    * ist eine Entscheidung und gehört auf die Detailseite, wo der ganze
    * Verkauf sichtbar ist. Wer das ändert, ändert diese Liste — bewusst.
+   *
+   * `unmark_not_shipped` steht NICHT mehr darauf: das × zum Stornieren gibt
+   * es hier, also muss es hier auch den Weg zurück geben. Eine Aktion, die
+   * nur in einem der beiden Bildschirme rückgängig zu machen ist, ist eine
+   * Sackgasse in dem anderen.
    */
-  const LEDGER_OMITS = ["settle", "unsettle", "unmark_not_shipped"];
+  const LEDGER_OMITS = ["settle", "unsettle"];
 
   /** Alles, was `saleItemActions` über den Zustandsraum hinweg zurückgibt. */
   function producedActions(): string[] {
@@ -2521,5 +2528,270 @@ describe("returning an external position, announced first and booked second", ()
   it("an item without a figure never enters this path", () => {
     expect(saleItemActions(item({ sky_id: null }), ctx).primary).toBe("settle");
     expect(saleItemActions(item({ sky_id: null, movement_id: null }), ctx).primary).not.toBe("ship");
+  });
+});
+
+/* ===================================================================== */
+/**
+ * STORNIEREN — DER ZWEITE WEG AUS EINER OFFENEN POSITION.
+ *
+ * Verkauft und verschickt ist der eine Ausgang; nie rausgegangen der andere.
+ * Beide sind Enden, nur bewegt der zweite nichts: kein Movement, kein
+ * Bestand, keine Buchung, die später zurückgenommen werden müsste.
+ *
+ * Das Datenmodell konnte das seit 0074 — `not_shipped_at`, geschrieben von
+ * `seller_set_sale_item_not_shipped`, und `sale_item_is_closed()` zählt es
+ * als abgeschlossen. Gefehlt hat nur das Wort: der Zustand hieß „Nicht
+ * verschickt" und stand als Textlink neben der Zeile. Jetzt heißt er
+ * „Storniert" und sitzt als × neben „Verschickt".
+ */
+describe("cancelling an open position", () => {
+  const CANCEL = code(latestFunction("seller_set_sale_item_not_shipped").body);
+  const CLOSED = code(latestFunction("sale_item_is_closed").body);
+  const DETAIL = readFileSync(join(process.cwd(), "src/components/business/sale-items.tsx"), "utf8");
+  const LEDGER = readFileSync(join(process.cwd(), "src/components/business/sales-ledger.tsx"), "utf8");
+  const item = (over: Record<string, unknown> = {}) => ({
+    movement_id: null, return_movement_id: null, returned_at: null,
+    return_announced_at: null, settled_at: null, not_shipped_at: null,
+    sky_id: "SKY-0139", legacy_stock_flag: null, ...over,
+  } as never);
+  const ctx = { frozen: false, cancelled: false, shipped: false, historical: false };
+
+  it("1. an open position offers shipping AND cancelling", () => {
+    const can = saleItemActions(item(), ctx);
+    expect(can.status).toBe("open");
+    expect(can.primary).toBe("ship");
+    expect(can.canNotShip).toBe(true);
+  });
+
+  it("2. cancelling writes one timestamp and never touches stock", () => {
+    expect(CANCEL).toContain("set not_shipped_at = now()");
+    expect(CANCEL).not.toContain("record_inventory_movement");
+    expect(CANCEL).not.toContain("shop_inventory");
+    expect(CANCEL).not.toContain("inventory_movements");
+    expect(CANCEL).not.toContain("legacy_stock_events");
+    // Und zweimal klicken ändert nichts mehr.
+    expect(CANCEL).toContain("if v_item.not_shipped_at is not null then return; end if;");
+  });
+
+  it("3. a cancelled position is terminal on screen", () => {
+    const can = saleItemActions(item({ not_shipped_at: "t" }), ctx);
+    expect(can.status).toBe("not_shipped");
+    expect(can.primary).toBe("unmark_not_shipped");   // nur zurücknehmen
+    expect(can.canNotShip).toBe(false);               // kein zweites Stornieren
+    expect(de.business.sales.itemStates.not_shipped).toBe("Storniert");
+    // Terminal heißt geschlossen — und bleibt es.
+    expect(saleItemClosed(item({ not_shipped_at: "t" }))).toBe(true);
+  });
+
+  it("4. a booked position cannot be cancelled", () => {
+    expect(saleItemActions(item({ movement_id: 5 }), ctx).canNotShip).toBe(false);
+    // Und die Datenbank lehnt es unabhängig von der Oberfläche ab.
+    expect(CANCEL).toContain("this position left the shelf; reverse the booking first");
+    expect(CANCEL).toContain("this position is already closed");
+    expect(CANCEL).toContain("an order''s lines are owned by commerce");
+  });
+
+  it("5. a cancelled position does not hold the sale open", () => {
+    expect(CLOSED).toContain("p_item.not_shipped_at is not null");
+    expect(saleItemClosed(item({ not_shipped_at: "t" }))).toBe(true);
+  });
+
+  it("6. three shipped and one cancelled is a finished sale", () => {
+    const sale = { source: "manual", cancelledAt: null, stockReleasedAt: null, orderId: null,
+      itemCount: 4, outbookedCount: 3, restockedCount: 0, settledCount: 0,
+      notShippedCount: 1, closedCount: 4 };
+    expect(saleStockStatus(sale)).not.toBe("open");
+    expect(saleStockStatus(sale)).not.toBe("partial");
+    // Und eine einzelne stornierte Position ebenso.
+    expect(saleStockStatus({ ...sale, itemCount: 1, outbookedCount: 0, notShippedCount: 1,
+                             closedCount: 1 })).not.toBe("open");
+  });
+
+  it("7. the workbook's own `-`/`-` reads as cancelled, and moves nothing", () => {
+    expect(legacyOutcome({ legacy_stock_flag: "-", legacy_shipped_flag: "-", sky_id: "SKY-0181" }))
+      .toBe("not_shipped");
+    expect(de.business.sales.legacyStates.not_shipped).toBe("Storniert");
+    // Beide Bildschirme lesen dasselbe — das war vorher nur auf der
+    // Detailseite so, die Liste zeigte den abgeleiteten Zustand.
+    const cell = "{outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}";
+    expect(DETAIL).toContain(cell);
+    expect(LEDGER).toContain(cell);
+  });
+
+  it("8. shipping and returning are untouched", () => {
+    expect(saleItemActions(item(), ctx).primary).toBe("ship");
+    expect(saleItemActions(item({ movement_id: 5 }), ctx).primary).toBe("announce_return");
+    expect(saleItemActions(item({ movement_id: 5, return_announced_at: "t" }), ctx).primary)
+      .toBe("mark_returned");
+  });
+
+  it("the × is secondary, labelled and cancels in one click", () => {
+    for (const source of [DETAIL, LEDGER]) {
+      expect(source).toContain("aria-label={copy.markNotShippedItem}");
+      // Ein Klick schreibt direkt — keine Zwischenstufe mehr.
+      expect(source).toMatch(/onClick=\{\(\) => act\(.*setSaleItemNotShipped\(id, sale/);
+      expect(source).not.toContain("setCancelling");
+      expect(source).not.toContain("cancelItemConfirm");
+      expect(source).not.toContain("cancelItemYes");
+      expect(source).not.toContain("cancelItemNo");
+    }
+    expect(de.business.sales.markNotShippedItem).toBe("Stornieren");
+    // Und die Rückfragetexte sind auch aus dem Wortschatz verschwunden.
+    const sales = de.business.sales as Record<string, unknown>;
+    expect(sales.cancelItemConfirm).toBeUndefined();
+    expect(sales.cancelItemYes).toBeUndefined();
+    expect(sales.cancelItemNo).toBeUndefined();
+  });
+
+  /* ------------------------------------------------------------------ */
+  /*
+   * RÜCKGÄNGIG — DAUERHAFT, SOLANGE DIE POSITION STORNIERT IST.
+   *
+   * Der Weg zurück ist derselbe, den 0074 schon kennt: dieselbe Funktion
+   * mit `false`. Sie räumt `not_shipped_at` weg und sonst nichts — keine
+   * Bewegung, kein Bestand, kein zweiter Buchungspfad.
+   */
+  it("9. a cancelled position keeps `Rückgängig` available", () => {
+    const can = saleItemActions(item({ not_shipped_at: "t" }), ctx);
+    expect(can.primary).toBe("unmark_not_shipped");
+    expect(de.business.sales.itemActionLabels.unmark_not_shipped).toBe("Rückgängig");
+    // Beide Bildschirme hängen an genau diesem Weg.
+    expect(DETAIL).toContain("unmark_not_shipped: run(() => setSaleItemNotShipped(id, saleId, false))");
+    expect(LEDGER)
+      .toContain("unmark_not_shipped: () => act(sale.id, () => setSaleItemNotShipped(id, sale.id, false))");
+  });
+
+  it("10. undoing clears the timestamp and moves nothing", () => {
+    expect(CANCEL).toContain("if not p_not_shipped then");
+    expect(CANCEL).toContain("update public.sale_items set not_shipped_at = null");
+    // Die ganze Funktion kennt keinen Bestandspfad — für beide Richtungen.
+    expect(CANCEL).not.toContain("record_inventory_movement");
+    expect(CANCEL).not.toContain("shop_inventory");
+  });
+
+  it("11. undoing makes the position — and the sale — open again", () => {
+    const back = item({ not_shipped_at: null });
+    expect(saleItemStatus(back, false)).toBe("open");
+    expect(saleItemClosed(back)).toBe(false);
+    const can = saleItemActions(back, ctx);
+    expect(can.primary).toBe("ship");
+    expect(can.canNotShip).toBe(true);
+    // Ein Verkauf, der nur wegen der Stornierung geschlossen war, ist es nicht mehr.
+    const sale = { source: "manual", cancelledAt: null, stockReleasedAt: null, orderId: null,
+      itemCount: 1, outbookedCount: 0, restockedCount: 0, settledCount: 0 };
+    expect(saleStockStatus({ ...sale, notShippedCount: 1, closedCount: 1 })).not.toBe("open");
+    expect(saleStockStatus({ ...sale, notShippedCount: 0, closedCount: 0 })).toBe("open");
+  });
+
+  it("12. cancelled does not wear the green success tick", () => {
+    const cancelled = saleItemIndicator("not_shipped", false);
+    expect(cancelled.tone).not.toBe("green");
+    expect(cancelled.glyph).not.toBe("\u2713");
+    // Es ist das Symbol, das es für genau diesen Ausgang schon gibt.
+    const legacy = saleItemIndicator("settled", false,
+      { historical: true, outcome: "not_shipped" });
+    expect(cancelled).toEqual(legacy);
+    expect(cancelled).toEqual({ tone: "grey", glyph: "\u21a9" });
+    // Die beiden echten Bewegungen behalten ihren Haken.
+    expect(saleItemIndicator("outbooked", true)).toEqual({ tone: "green", glyph: "\u2713" });
+    expect(saleItemIndicator("restocked", false).glyph).toBe("\u2713");
+    // Und `Erledigt` ist ein anderer Ausgang und bleibt grün.
+    expect(saleItemIndicator("settled", false)).toEqual({ tone: "green", glyph: "\u2713" });
+  });
+
+  it("13. the workbook's `-`/`-` shows cancelled, but never `Rückgängig`", () => {
+    const legacyItem = item({ legacy_stock_flag: "-", legacy_shipped_flag: "-", settled_at: "t" });
+    const can = saleItemActions(legacyItem, { ...ctx, historical: true });
+    expect(can.primary).not.toBe("unmark_not_shipped");
+    // Auch dann nicht, wenn die Zeile den Zeitstempel selbst trüge.
+    expect(saleItemActions(item({ not_shipped_at: "t" }), { ...ctx, historical: true }).primary)
+      .toBeNull();
+    // Der Status bleibt „Storniert", das Icon dasselbe wie operativ.
+    expect(legacyOutcome(legacyItem as never)).toBe("not_shipped");
+    expect(saleItemIndicator("not_shipped", false, { historical: true, outcome: "not_shipped" }))
+      .toEqual({ tone: "grey", glyph: "\u21a9" });
+  });
+});
+
+/* ===================================================================== */
+/**
+ * ZWEI AKTIONEN, EINE ZEILE — UND EIN ZIEL NACH DEM ANLEGEN.
+ *
+ * Das × stand unter „Verschickt", weil die Aktionsspalte 6,5rem breit war
+ * und der Flex-Container umbrach. Und das Formular schickte auf eine eigene
+ * Detailseite, obwohl das Verkaufsbuch dieselbe Ansicht längst als Fenster
+ * hat. Beides ist Darstellung; an der Lager- und Statuslogik ändert sich
+ * nichts, was die Fälle darunter absichern.
+ */
+describe("the two actions of an open position sit side by side", () => {
+  const DETAIL = readFileSync(join(process.cwd(), "src/components/business/sale-items.tsx"), "utf8");
+  const LEDGER = readFileSync(join(process.cwd(), "src/components/business/sales-ledger.tsx"), "utf8");
+  const NEW = readFileSync(join(process.cwd(), "src/components/business/new-sale.tsx"), "utf8");
+  const PAGE = readFileSync(join(process.cwd(),
+    "src/app/(business)/business/orderbuch/verkauf/page.tsx"), "utf8");
+
+  it("gives the action column room for both controls", () => {
+    const tracks = SALE_ITEM_COLUMNS.trim().split(/\s+(?![^(]*\))/);
+    expect(tracks.at(-1)).toBe("9rem");
+  });
+
+  it("lays the cell out in a row, not a wrapping stack", () => {
+    for (const source of [DETAIL, LEDGER]) {
+      expect(source).toContain('className="flex items-center justify-end gap-2 text-right"');
+      expect(source).not.toContain('className="flex flex-wrap justify-end gap-2 text-right"');
+    }
+  });
+
+  it("shows both controls at once, with nothing stepping aside", () => {
+    // Ohne Rückfrage gibt es auch keinen Zustand, der den Hauptknopf ausblendet.
+    expect(DETAIL).toContain("{can.primary ? (");
+    expect(LEDGER).toContain("{run ? (");
+    for (const source of [DETAIL, LEDGER]) {
+      expect(source).not.toContain("cancelling");
+    }
+  });
+
+  it("sends a new sale to the ledger, opened, not to a page of its own", () => {
+    expect(NEW).toContain("router.push(`/business/orderbuch/verkauf?verkauf=${created.id}`)");
+    expect(NEW).not.toContain("router.push(`/business/orderbuch/verkauf/${created.id}`)");
+  });
+
+  it("the ledger opens that sale once, expanded and in the existing overlay", () => {
+    expect(PAGE).toContain("openSale={openSale}");
+    expect(PAGE).toContain("Number(params.verkauf)");
+    expect(LEDGER).toContain("openSale?: number;");
+    // Das Fenster steht ab der ersten Darstellung offen - ohne Effekt, der
+    // nach dem Rendern noch einmal Zustand setzt.
+    expect(LEDGER).toContain(
+      "useState<number | null>(\n    () => (openSale !== undefined && sales.some((s) => s.id === openSale) ? openSale : null))");
+    // Aufgeklappt, damit Positionen und ihre Aktionen sichtbar sind.
+    expect(LEDGER).toContain("...(openSale !== undefined ? [openSale] : [])");
+    // Geladen wird die Zeile ueber genau den bestehenden Mount-Effekt.
+    expect(LEDGER).toContain("for (const id of open) load(id);");
+  });
+
+  it("clears the parameter when the overlay closes", () => {
+    expect(LEDGER).toContain("if (openSale !== undefined) router.replace(backHref);");
+  });
+
+  it("keeps the deep link route in place", () => {
+    expect(existsSync(join(process.cwd(),
+      "src/app/(business)/business/orderbuch/verkauf/[id]/page.tsx"))).toBe(true);
+  });
+
+  it("changes nothing about stock semantics", () => {
+    // Dieselben Entscheidungen wie zuvor, unabhängig von der Darstellung.
+    const item = (over: Record<string, unknown> = {}) => ({
+      movement_id: null, return_movement_id: null, returned_at: null,
+      return_announced_at: null, settled_at: null, not_shipped_at: null,
+      sky_id: "SKY-0139", legacy_stock_flag: null, ...over,
+    } as never);
+    const ctx = { frozen: false, cancelled: false, shipped: false, historical: false };
+    expect(saleItemActions(item(), ctx)).toMatchObject({ primary: "ship", canNotShip: true });
+    expect(saleItemActions(item({ not_shipped_at: "t" }), ctx))
+      .toMatchObject({ status: "not_shipped", primary: "unmark_not_shipped", canNotShip: false });
+    expect(saleItemActions(item({ movement_id: 5 }), ctx))
+      .toMatchObject({ status: "outbooked", primary: "announce_return", canNotShip: false });
   });
 });

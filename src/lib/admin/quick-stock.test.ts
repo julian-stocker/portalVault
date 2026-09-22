@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import { MOVEMENT_REASONS, isMovementReason } from "@/lib/admin/inventory-model";
+import { code as migrationCode, latestFunction } from "@/test-support/migrations";
 
 /**
  * `−  7  +` (ADR-0047).
@@ -162,9 +163,17 @@ describe("the floor", () => {
   });
 
   it("does not replace the database's guard", () => {
-    const foundation = code(FOUNDATION);
-    expect(foundation).toContain("and quantity + p_delta >= reserved");
-    expect(foundation).toContain("would take % / % below its reserved quantity");
+    /*
+     * Gelesen wird die LETZTE Fassung der Funktion, nicht 0003. Der Wächter
+     * steht dort unverändert; 0093 hat nur den Satz danach geteilt, und ein
+     * Test, der weiter 0003 liest, hätte das nicht gemerkt.
+     */
+    const applied = migrationCode(latestFunction("apply_inventory_movement").body);
+    expect(applied).toContain("and quantity + p_delta >= reserved");
+    // Zwei Ablehnungen statt einer — und der alte Sammelsatz ist weg.
+    expect(applied).toContain("insufficient stock for % / %");
+    expect(applied).toContain("movement would consume reserved stock for % / %");
+    expect(applied).not.toContain("below its reserved quantity");
   });
 
   it("shows what the database says when it refuses", () => {

@@ -179,7 +179,17 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         adjustments: money.adjustments,
       });
       if (!created.ok) { setError(created.message); return; }
-      router.push(`/business/orderbuch/verkauf/${created.id}`);
+      /*
+       * ZURÜCK INS VERKAUFSBUCH, NICHT AUF EINE EIGENE SEITE.
+       *
+       * Der neue Verkauf wird dort sofort geöffnet — aufgeklappt mit seinen
+       * Positionen und im bestehenden Bearbeitungsfenster. Alles, was danach
+       * kommt (verschicken, stornieren, Gebühren nachtragen), passiert
+       * ohnehin hier; eine zweite Detailoberfläche dafür wäre eine zweite
+       * Oberfläche für denselben Zweck. `/verkauf/[id]` bleibt für
+       * Direktaufrufe erreichbar.
+       */
+      router.push(`/business/orderbuch/verkauf?verkauf=${created.id}`);
     });
   }
 
