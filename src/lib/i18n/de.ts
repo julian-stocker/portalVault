@@ -1307,6 +1307,16 @@ export const de = {
         settled: "Erledigt",
       },
 
+      /* Die Statusspalte einer importierten Zeile — was das Arbeitsbuch sagt. */
+      legacyStates: {
+        shipped: "Verschickt",
+        not_shipped: "Nicht verschickt",
+        returned: "Retoure",
+        lost: "Verloren",
+        shipped_unreferenced: "Verschickt",
+        unresolved: "Ungeklärt",
+      } as Record<string, string>,
+
       /**
        * Was der Statuspunkt vorliest. Dieselben acht Zustände, aber als
        * ganzer Satz — der Punkt sagt „noch etwas zu tun?", das Label sagt
@@ -1326,6 +1336,20 @@ export const de = {
         restocked: "Retoure abgeschlossen — wieder im Bestand",
         settled: "Erledigt — ohne Lagerbewegung abgeschlossen",
         not_shipped: "Nicht verschickt — nichts gebucht",
+        /*
+         * Die vier Ausgänge, die das Arbeitsbuch selbst festhält (Spalte L).
+         * Sie schlagen jeden abgeleiteten Zustand einer importierten Zeile,
+         * `settled_at` eingeschlossen — der sagt nur, dass WIR sie ohne
+         * Bewegung geschlossen haben, nicht was mit der Figur geschah.
+         */
+        legacyShipped: "Verschickt — laut Arbeitsbuch ausgeliefert und ausgetragen",
+        legacyNotShipped: "Nicht verschickt — laut Arbeitsbuch nie ausgeliefert und nie ausgetragen",
+        legacyReturned: "Retoure — verschickt, zurückgekommen und wieder eingelagert",
+        legacyLost: "Verloren — verschickt und auf dem Versandweg verloren gegangen",
+        /* Verkauft und verschickt, aber nie Teil des Figurenlagers. */
+        legacyShippedUnreferenced: "Verschickt — kein Bezug zum Figurenlager",
+        /* Eine Kennzeichnung, die niemand definiert hat. Nicht raten. */
+        legacyUnresolved: "Ungeklärt — die Kennzeichnung im Arbeitsbuch ist nicht eindeutig",
         /* Importierte Zeile, die das Arbeitsbuch bereits abgeschlossen hat. */
         legacyComplete:
           "Historisch abgeschlossen — laut Arbeitsbuch erledigt, Bestand bereits berücksichtigt",

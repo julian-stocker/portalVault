@@ -3,7 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 
 import { de } from "@/lib/i18n/de";
 import {
-  legacyRecorded, saleItemActions, saleItemIndicator, type SaleItemStatus,
+  legacyOutcome, saleItemActions, saleItemIndicator,
+  type LegacyOutcome, type SaleItemStatus,
 } from "./sales-view";
 
 /**
@@ -122,29 +123,98 @@ describe("imported history is finished, and is not booked out from here", () => 
    * of one. 1 061 of Production's 1 253 imported lines have a marker; the
    * 192 that do not are exactly the ones 0071 released to be worked on.
    */
-  it("reads the workbook's own outcome markers, and nothing else", () => {
-    for (const flag of ["x", "-", "r"]) {
-      expect(legacyRecorded({ legacy_stock_flag: flag }), flag).toBe(true);
-    }
-    for (const flag of [null, undefined, "", "X", "done", " x"]) {
-      expect(legacyRecorded({ legacy_stock_flag: flag as string }), String(flag)).toBe(false);
+  /*
+   * THE FOUR OUTCOMES, BINDING SINCE 2026-09-21 (0087).
+   *
+   * Column L decides; column M is consulted only for the one pair L cannot
+   * resolve alone. Until this date all three of x, `-` and r got the same
+   * green tick, so a figure that never shipped looked delivered.
+   */
+  it("derives one outcome per workbook marker", () => {
+    expect(legacyOutcome({ legacy_stock_flag: "x", legacy_shipped_flag: "x", sky_id: "SKY-0001" }))
+      .toBe("shipped");
+    expect(legacyOutcome({ legacy_stock_flag: "-", legacy_shipped_flag: "-", sky_id: "SKY-0001" }))
+      .toBe("not_shipped");
+    expect(legacyOutcome({ legacy_stock_flag: "r", legacy_shipped_flag: "x", sky_id: "SKY-0001" }))
+      .toBe("returned");
+    expect(legacyOutcome({ legacy_stock_flag: "l", legacy_shipped_flag: "x", sky_id: "SKY-0001" }))
+      .toBe("lost");
+  });
+
+  it("lets column L decide when M contradicts it", () => {
+    // The owner's ruling: a stray `x` in M is an old typing mistake.
+    expect(legacyOutcome({ legacy_stock_flag: "l", legacy_shipped_flag: "-", sky_id: "SKY-1" }))
+      .toBe("lost");
+    expect(legacyOutcome({ legacy_stock_flag: "r", legacy_shipped_flag: "r", sky_id: "SKY-1" }))
+      .toBe("returned");
+    expect(legacyOutcome({ legacy_stock_flag: "x", legacy_shipped_flag: "", sky_id: "SKY-1" }))
+      .toBe("shipped");
+  });
+
+  /** The Battlecast packs: sold and shipped, never in the figure inventory. */
+  it("calls an unreferenced `-`/`x` line shipped without a stock claim", () => {
+    expect(legacyOutcome({ legacy_stock_flag: "-", legacy_shipped_flag: "x", sky_id: null }))
+      .toBe("shipped_unreferenced");
+  });
+
+  /*
+   * THE SAME PAIR ON A REAL FIGURE IS NOT SILENTLY TREATED AS BATTLECAST.
+   *
+   * Nobody has defined what `-`/`x` means for a referenced figure, so it is
+   * not guessed. No such row exists today; this keeps it that way.
+   */
+  it("refuses to interpret a referenced `-`/`x`", () => {
+    expect(legacyOutcome({ legacy_stock_flag: "-", legacy_shipped_flag: "x", sky_id: "SKY-0181" }))
+      .toBe("unresolved");
+  });
+
+  it("says nothing where the workbook recorded nothing", () => {
+    for (const flag of [null, undefined, "", "  "]) {
+      expect(legacyOutcome({ legacy_stock_flag: flag as string, sky_id: "SKY-1" }), String(flag))
+        .toBeNull();
     }
   });
 
-  it("a recorded historical line is green, not a grey circle", () => {
-    for (const flag of ["x", "-", "r"]) {
-      for (const status of ["open", "shipped"] as const) {
-        const dot = saleItemIndicator(status, true, { historical: true, recorded: true });
-        expect(dot, `${flag}/${status}`).toEqual({ tone: "green", glyph: "✓" });
-      }
+  it("does not invent a meaning for an undefined marker", () => {
+    for (const flag of ["q", "done", "1"]) {
+      expect(legacyOutcome({ legacy_stock_flag: flag, sky_id: "SKY-1" }), flag).toBe("unresolved");
     }
   });
 
-  /** The 192 with no marker: a decision is genuinely missing. */
+  it("gives each outcome its own dot, and only shipped gets the tick", () => {
+    const dot = (outcome: LegacyOutcome) =>
+      saleItemIndicator("shipped", true, { historical: true, outcome });
+    expect(dot("shipped")).toEqual({ tone: "green", glyph: "✓" });
+    expect(dot("shipped_unreferenced")).toEqual({ tone: "green", glyph: "✓" });
+    expect(dot("returned").glyph).not.toBe("✓");
+    expect(dot("lost").glyph).not.toBe("✓");
+    expect(dot("not_shipped").glyph).not.toBe("✓");
+    // Four distinct appearances, so no two states look alike.
+    const seen = (["shipped", "returned", "lost", "not_shipped"] as const)
+      .map((o) => JSON.stringify(dot(o)));
+    expect(new Set(seen).size).toBe(4);
+  });
+
+  /*
+   * `settled_at` IS OUR BOOKKEEPING, NOT A FACT ABOUT THE OBJECT.
+   *
+   * 0081 wrote it on 191 imported lines in one run. It must not turn a line
+   * the workbook calls lost or never-shipped into a green "Erledigt".
+   */
+  it("does not let settled_at overwrite the workbook's outcome", () => {
+    for (const outcome of ["lost", "not_shipped", "returned"] as const) {
+      const dot = saleItemIndicator("settled", true, { historical: true, outcome });
+      expect(dot.glyph, outcome).not.toBe("✓");
+    }
+    expect(saleItemIndicator("settled", true, { historical: true, outcome: "shipped" }))
+      .toEqual({ tone: "green", glyph: "✓" });
+  });
+
+  /** The 192 with no marker are gone from the workbook, but the rule stays. */
   it("an unrecorded historical line stays grey", () => {
-    expect(saleItemIndicator("shipped", true, { historical: true, recorded: false }).tone)
+    expect(saleItemIndicator("shipped", true, { historical: true, outcome: null }).tone)
       .toBe("grey");
-    expect(saleItemIndicator("open", false, { historical: true, recorded: false }).tone)
+    expect(saleItemIndicator("open", false, { historical: true, outcome: null }).tone)
       .toBe("grey");
   });
 
@@ -153,7 +223,7 @@ describe("imported history is finished, and is not booked out from here", () => 
    * a return in flight is describing today, not 2026's import.
    */
   it("never paints over a live movement or a return", () => {
-    const legacy = { historical: true, recorded: true };
+    const legacy = { historical: true, outcome: "shipped" as LegacyOutcome };
     expect(saleItemIndicator("return_announced", true, legacy).tone).toBe("orange");
     expect(saleItemIndicator("returned", true, legacy).tone).toBe("orange");
     expect(saleItemIndicator("restocked", true, legacy).tone).toBe("returned");
@@ -161,7 +231,7 @@ describe("imported history is finished, and is not booked out from here", () => 
   });
 
   it("a non-historical sale is unaffected by the marker", () => {
-    expect(saleItemIndicator("shipped", true, { historical: false, recorded: true }).tone)
+    expect(saleItemIndicator("shipped", true, { historical: false, outcome: "shipped" }).tone)
       .toBe("grey");
     // And the old two-argument call still means what it did.
     expect(saleItemIndicator("shipped", true).tone).toBe("grey");
@@ -210,7 +280,7 @@ describe("imported history is finished, and is not booked out from here", () => 
       readFileSync("src/components/business/sale-items.tsx", "utf8"),
     ]) {
       expect(source).toContain("historical,");
-      expect(source).toContain("legacyRecorded(item as never)");
+      expect(source).toContain("legacyOutcome(item as never)");
       expect(source).toContain("can.heldForReconciliation");
       expect(source).toContain("itemActionHeld");
     }

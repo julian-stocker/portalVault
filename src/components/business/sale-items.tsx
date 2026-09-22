@@ -29,7 +29,7 @@ import {
   returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
 } from "@/lib/orderbook/sales-actions";
 import {
-  legacyRecorded, saleItemActions, saleItemEdits, saleItemIndicator,
+  legacyOutcome, saleItemActions, saleItemEdits, saleItemIndicator, type LegacyOutcome,
 } from "@/lib/orderbook/sales-view";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
@@ -39,6 +39,17 @@ import {
 } from "./ledger-table";
 
 const copy = de.business.sales;
+
+/** Outcome → the sentence the status dot reads out. */
+const LEGACY_LABEL: Record<LegacyOutcome, keyof typeof de.business.sales.itemIndicator> = {
+  shipped: "legacyShipped",
+  not_shipped: "legacyNotShipped",
+  returned: "legacyReturned",
+  lost: "legacyLost",
+  shipped_unreferenced: "legacyShippedUnreferenced",
+  unresolved: "legacyUnresolved",
+};
+
 const book = de.business.orderbook;
 
 /*
@@ -121,7 +132,14 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
               frozen: frozen ?? historical, cancelled: cancelled ?? false, shipped,
               historical,
             });
-            const recorded = legacyRecorded(item as never);
+            /*
+             * What the workbook recorded for this line. It decides the status
+             * of an imported row outright — `settled_at` is our bookkeeping,
+             * not a statement about the object (0087).
+             */
+            const derived = can.status === "open" || can.status === "shipped"
+              || can.status === "settled" || can.status === "not_shipped";
+            const outcome = historical && derived ? legacyOutcome(item as never) : null;
             const edits = saleItemEdits(item as never, { historical, internal });
             const itemId = Number(item.id);
             const id = Number(item.id);
@@ -142,10 +160,9 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
             return (
               <LedgerItemRow key={String(item.id)}>
                 <SaleIndicator
-                  indicator={saleItemIndicator(can.status, shipped, { historical, recorded })}
-                  label={historical && recorded
-                      && (can.status === "open" || can.status === "shipped")
-                    ? copy.itemIndicator.legacyComplete
+                  indicator={saleItemIndicator(can.status, shipped, { historical, outcome })}
+                  label={outcome !== null
+                    ? copy.itemIndicator[LEGACY_LABEL[outcome]]
                     : can.heldForReconciliation
                       ? copy.itemIndicator.legacyPending
                       : can.status === "outbooked" && !shipped
@@ -170,7 +187,7 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                 <span className={`truncate text-center text-xs ${strong ? "text-fg" : "text-muted"}`}
                       title={can.status === "settled" ? copy.settleHint
                         : can.status === "not_shipped" ? copy.notShippedItemHint : undefined}>
-                  {copy.itemStates[can.status]}
+                  {outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}
                 </span>
                 <span className="flex flex-wrap justify-end gap-2 text-right">
                   {/* Only what the server would accept. An impossible button

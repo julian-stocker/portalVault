@@ -104,7 +104,26 @@ export type Exclusion =
   | "before_cut"
   | "not_stock_relevant";
 
-export type LegacyEventKind = "purchase" | "sale" | "correction";
+export type LegacyEventKind = "purchase" | "sale" | "return" | "correction";
+
+/**
+ * The four outcomes column L of `Order 2026` records, and what each costs the
+ * shelf. Binding since 2026-09-21; the owner named them himself.
+ *
+ *   x  shipped and taken out                        one `sale`, −1
+ *   -  never shipped, never taken out               nothing at all
+ *   l  shipped, taken out, lost in transit          one `sale`, −1
+ *   r  shipped, taken out, came back as a return    `sale` −1 AND `return` +1
+ *
+ * `l` gets no kind of its own because the shelf cannot tell lost from sold:
+ * in both cases the piece left and is not coming back. That difference is
+ * commercial and lives in `sale_items.legacy_stock_flag`.
+ *
+ * Anything else — an empty marker, or a letter nobody defined — is NOT
+ * guessed at. It is excluded as `not_stock_relevant`, which is the same
+ * fail-closed answer the importer has always given.
+ */
+export const SALE_OUTCOME_FLAGS = ["x", "-", "l", "r"] as const;
 
 export type LegacyEvent = {
   kind: LegacyEventKind;
@@ -197,7 +216,21 @@ export function classifyLegacyRows(
     else if (current === "") excluded = "unreadable_date";
     else if (current > options.today) excluded = "future_date";
     else if (current < BUSINESS_CUT) excluded = "before_cut";
-    else if (!isCorrection && row.stockFlag !== "x") excluded = "not_stock_relevant";
+    /*
+     * WHICH MARKERS MOVE STOCK.
+     *
+     * A purchase counts only on `x`: a documented buy is not automatically a
+     * shelf entry, and the owner keeps some pieces aside deliberately.
+     *
+     * A sale counts on `x` and on `l` — shipped is shipped, and a parcel lost
+     * in transit does not come back — and on `r`, which additionally books
+     * the incoming half below. `-` moves nothing.
+     */
+    const outgoing = row.stockFlag === "x" || row.stockFlag === "l" || row.stockFlag === "r";
+    if (excluded === null && !isCorrection) {
+      const moves = side === "purchase" ? row.stockFlag === "x" : outgoing;
+      if (!moves) excluded = "not_stock_relevant";
+    }
 
     events.push({
       kind,
@@ -210,6 +243,32 @@ export function classifyLegacyRows(
       quantity: kind === "purchase" ? 1 : -1,
       excluded,
     });
+
+    /*
+     * THE RETURN'S OTHER HALF.
+     *
+     * Emitted only where the sale itself was included — same row, same date,
+     * same figure, opposite sign. It rides on the sale's own admission rather
+     * than being tested again, so the two can never disagree: a row that is
+     * excluded for any reason contributes neither half, and the position
+     * cannot end up with a return whose sale is missing.
+     *
+     * `eventFingerprint` hashes the kind, so the two halves of one row get
+     * distinct identities and the unique index is satisfied.
+     */
+    if (side === "sale" && !isCorrection && row.stockFlag === "r" && excluded === null) {
+      events.push({
+        kind: "return",
+        sourceSheet: options.sheet,
+        sourceRow: row.row,
+        occurredAt: current,
+        rawName: row.name,
+        reference,
+        skyId: resolved.skyId,
+        quantity: 1,
+        excluded: null,
+      });
+    }
   }
 
   return events;
@@ -222,6 +281,8 @@ export type PositionPlan = {
   finalStock: number;
   purchases: number;
   sales: number;
+  /** The incoming half of a workbook return (column L = r). */
+  returns: number;
   corrections: number;
   /** What the backwards calculation produced, negative included. */
   rawStart: number;
@@ -252,8 +313,15 @@ export function planPosition(
   const included = events.filter((event) => event.excluded === null);
   const purchases = included.filter((event) => event.kind === "purchase").length;
   const sales = included.filter((event) => event.kind === "sale").length;
+  const returns = included.filter((event) => event.kind === "return").length;
   const corrections = included.filter((event) => event.kind === "correction").length;
 
+  /*
+   * `net` sums the SIGNED quantities, so a return's +1 cancels its sale's −1
+   * here without any special case — and `rawStart = finalStock − net` stays
+   * correct by construction. That is why 0087 needed no change to this
+   * arithmetic: a returned piece never left the year's balance.
+   */
   const net = included.reduce((sum, event) => sum + event.quantity, 0);
   const rawStart = finalStock - net;
   const openingBalance = Math.max(0, rawStart);
@@ -265,6 +333,7 @@ export function planPosition(
     finalStock,
     purchases,
     sales,
+    returns,
     corrections,
     rawStart,
     openingBalance,

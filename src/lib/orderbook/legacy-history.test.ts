@@ -26,6 +26,48 @@ const resolve: Resolver = (reference) =>
 const classify = (rows: OrderRow[], side: "purchase" | "sale" = "sale") =>
   classifyLegacyRows(rows, side, { sheet: "Order 2026", resolve, today: "2026-09-21" });
 
+/*
+ * WHAT A RETURN DOES TO THE RECONSTRUCTION, AND WHAT IT DELIBERATELY DOES NOT.
+ *
+ * `rawStart = finalStock − net` sums SIGNED quantities, so a return's +1
+ * cancels its sale's −1 with no special case. That is why 0087 changed the
+ * vocabulary and not this arithmetic — and it is worth a test, because the
+ * next person to touch `planPosition` needs to see that the cancellation is
+ * intended rather than accidental.
+ */
+describe("a return nets to zero over the whole position", () => {
+  const ev = (kind: "purchase" | "sale" | "return", row: number) => ({
+    kind, sourceSheet: "Order 2026", sourceRow: row, occurredAt: "2026-05-01",
+    rawName: "X", reference: "G!I50", skyId: "SKY-0001",
+    quantity: kind === "sale" ? -1 : 1, excluded: null,
+  }) as never;
+
+  it("leaves the opening balance untouched", () => {
+    const withReturn = planPosition("SKY-0001", 3,
+      [ev("purchase", 10), ev("sale", 11), ev("return", 11)]);
+    const without = planPosition("SKY-0001", 3, [ev("purchase", 10)]);
+    expect(withReturn.openingBalance).toBe(without.openingBalance);
+    expect(withReturn.reconstructedFinal).toBe(3);
+    expect(withReturn.returns).toBe(1);
+    expect(withReturn.sales).toBe(1);
+  });
+
+  it("a lost sale costs exactly one, unlike a return", () => {
+    // `l` is imported as an ordinary sale, so the shelf loses a piece.
+    const lost = planPosition("SKY-0001", 3, [ev("purchase", 10), ev("sale", 11)]);
+    const returned = planPosition("SKY-0001", 3,
+      [ev("purchase", 10), ev("sale", 11), ev("return", 11)]);
+    expect(lost.openingBalance - returned.openingBalance).toBe(1);
+  });
+
+  it("still reconstructs exactly to the workbook", () => {
+    const plan = planPosition("SKY-0001", 7,
+      [ev("purchase", 1), ev("purchase", 2), ev("sale", 3), ev("return", 3), ev("sale", 4)]);
+    expect(plan.reconstructedFinal).toBe(plan.finalStock);
+    expect(planProblems([plan])).toEqual([]);
+  });
+});
+
 describe("the group date belongs to the first row and to no other", () => {
   /**
    * The observed trap: `Order 2026!K185` holds a lone `.` in the middle of a
@@ -111,11 +153,89 @@ describe("what never becomes a stock event", () => {
   });
 
   it("drops a position the workbook did not move through stock", () => {
-    for (const flag of ["-", "r", ""]) {
+    // `-` never left the shelf and an empty marker says nothing. Both stay
+    // out. `r` and `l` DID leave it and are covered below.
+    for (const flag of ["-", "", "q"]) {
       const [event] = classify([header(4),
         row({ row: 5, dateRaw: serial(5), name: "X", reference: "G!I50", stockFlag: flag })]);
       expect(event.excluded, flag).toBe("not_stock_relevant");
     }
+  });
+
+  /*
+   * THE FOUR SALE OUTCOMES (0087). Binding since 2026-09-21.
+   *
+   * Before that the importer knew only `x`, so a lost parcel and a return
+   * produced no event at all. The end total still came out right — the
+   * opening balance is computed backwards from it and absorbs anything
+   * missing — which is precisely why nobody noticed: the SUM was always
+   * correct and the STORY was not.
+   */
+  describe("what each sale marker books", () => {
+    const sale = (flag: string) => classify([header(4),
+      row({ row: 5, dateRaw: serial(5), name: "X", reference: "G!I50", stockFlag: flag })]);
+
+    it("x books one sale of −1", () => {
+      const events = sale("x");
+      expect(events.map((e) => [e.kind, e.quantity, e.excluded]))
+        .toEqual([["sale", -1, null]]);
+    });
+
+    it("l books one sale of −1, because lost is not coming back", () => {
+      const events = sale("l");
+      expect(events.map((e) => [e.kind, e.quantity, e.excluded]))
+        .toEqual([["sale", -1, null]]);
+    });
+
+    it("r books a sale AND a return, netting to zero", () => {
+      const events = sale("r").filter((e) => e.excluded === null);
+      expect(events.map((e) => [e.kind, e.quantity]))
+        .toEqual([["sale", -1], ["return", 1]]);
+      expect(events.reduce((sum, e) => sum + e.quantity, 0)).toBe(0);
+    });
+
+    it("gives the two halves of a return distinct fingerprints", () => {
+      const [outgoing, incoming] = sale("r");
+      expect(eventFingerprint(outgoing)).not.toBe(eventFingerprint(incoming));
+      expect(eventFingerprint(incoming)).toContain("|return|");
+    });
+
+    it("books no return where the sale itself was excluded", () => {
+      // Same row, but the reference is not a figure. Neither half may appear.
+      const events = classify([header(4),
+        row({ row: 5, dateRaw: serial(5), name: "Portal", reference: "ZB!I8", stockFlag: "r" })]);
+      expect(events.filter((e) => e.kind === "return")).toHaveLength(0);
+      expect(events.every((e) => e.excluded !== null)).toBe(true);
+    });
+
+    it("- books nothing at all", () => {
+      expect(sale("-").filter((e) => e.excluded === null)).toHaveLength(0);
+    });
+
+    it("never books a return on the purchase side", () => {
+      const events = classify([header(4),
+        row({ row: 5, dateRaw: serial(5), name: "X", reference: "G!I50", stockFlag: "r" })],
+        "purchase");
+      expect(events.filter((e) => e.kind === "return")).toHaveLength(0);
+      expect(events[0].excluded).toBe("not_stock_relevant");
+    });
+
+    /*
+     * A DOCUMENTED PURCHASE IS NOT AUTOMATICALLY A SHELF ENTRY.
+     *
+     * The owner keeps pieces aside deliberately; column D says which ones
+     * reached the inventory. Only `x` counts, and that is unchanged.
+     */
+    it("counts a purchase only on x", () => {
+      for (const [flag, expected] of [["x", null], ["-", "not_stock_relevant"],
+                                      ["", "not_stock_relevant"], ["l", "not_stock_relevant"]] as const) {
+        const [event] = classify([header(4),
+          row({ row: 5, dateRaw: serial(5), name: "X", reference: "G!I50", stockFlag: flag })],
+          "purchase");
+        expect(event.excluded, flag).toBe(expected);
+        if (expected === null) expect(event.quantity).toBe(1);
+      }
+    });
   });
 
   it("asks about damage before anything else", () => {

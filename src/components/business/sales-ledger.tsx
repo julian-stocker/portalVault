@@ -66,7 +66,20 @@ import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
   from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
-import { countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyRecorded } from "@/lib/orderbook/sales-view";
+import {
+  countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyOutcome,
+  type LegacyOutcome,
+} from "@/lib/orderbook/sales-view";
+
+/** Outcome → the sentence the status dot reads out (0087). */
+const LEGACY_LABEL: Record<LegacyOutcome, keyof typeof de.business.sales.itemIndicator> = {
+  shipped: "legacyShipped",
+  not_shipped: "legacyNotShipped",
+  returned: "legacyReturned",
+  lost: "legacyLost",
+  shipped_unreferenced: "legacyShippedUnreferenced",
+  unresolved: "legacyUnresolved",
+};
 import { SaleDetails } from "./sale-details";
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
@@ -398,7 +411,9 @@ function SaleDetail({ sale, detail, pending, act }: {
                 shipped: sale.shippedAt !== null,
                 historical,
               });
-              const recorded = legacyRecorded(item as never);
+              const derived = can.status === "open" || can.status === "shipped"
+              || can.status === "settled" || can.status === "not_shipped";
+            const outcome = historical && derived ? legacyOutcome(item as never) : null;
               const id = Number(item.id);
               const strong = can.status === "outbooked" || can.status === "restocked";
               /*
@@ -418,10 +433,9 @@ function SaleDetail({ sale, detail, pending, act }: {
                 <LedgerItemRow key={String(item.id)}>
                   <SaleIndicator
                     indicator={saleItemIndicator(can.status, sale.shippedAt !== null,
-                      { historical, recorded })}
-                    label={historical && recorded
-                        && (can.status === "open" || can.status === "shipped")
-                      ? copy.itemIndicator.legacyComplete
+                      { historical, outcome })}
+                    label={outcome !== null
+                      ? copy.itemIndicator[LEGACY_LABEL[outcome]]
                       : can.heldForReconciliation
                         ? copy.itemIndicator.legacyPending
                         : can.status === "outbooked" && sale.shippedAt === null

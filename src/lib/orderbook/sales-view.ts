@@ -120,6 +120,68 @@ export function saleItemClosed(item: SaleItemFacts): boolean {
 }
 
 /**
+ * THE FOUR OUTCOMES THE WORKBOOK RECORDS, AND THE TWO IT DOES NOT.
+ *
+ * Column L is the owner's own record of what became of one copy, and since
+ * 2026-09-21 its four letters are binding:
+ *
+ *   x  shipped and taken off the shelf                     ✓ Verschickt
+ *   -  never shipped, never taken off                      ↩ Nicht verschickt
+ *   r  shipped, taken off, came back as a return           ⇄ Retoure
+ *   l  shipped, taken off, lost in transit                 ⊘ Verloren
+ *
+ * Column M agrees with L everywhere it matters and is NOT consulted for
+ * those four: where the two disagree the owner has said L decides, because M
+ * carries old typing mistakes. It is consulted in exactly one place — the
+ * combination below that L alone cannot resolve.
+ *
+ * `-` WITH M = `x` IS TWO DIFFERENT THINGS, AND ONLY ONE IS SAFE TO ASSUME.
+ *
+ * Fifteen rows carry it, all Battlecast card packs, none with a SKY-ID: sold
+ * and shipped, but nothing left the FIGURE inventory because they were never
+ * in it. That is a real state and it gets its own answer — shipped, with no
+ * claim about stock at all.
+ *
+ * The same pair on a row that DOES name a figure would mean something else
+ * entirely, and nobody has said what. So it is not guessed: it comes back
+ * `unresolved` and shows as open. Fail-closed, like every other unknown in
+ * this importer. Today no such row exists, and a test keeps it that way.
+ *
+ * REFUNDS ARE NOT CONSULTED. Money says nothing reliable here: a full refund
+ * covers a return, a loss in transit and an order cancelled before dispatch,
+ * and those three have opposite stock effects (ADR-0102 addendum).
+ */
+export type LegacyOutcome =
+  | "shipped" | "not_shipped" | "returned" | "lost"
+  | "shipped_unreferenced" | "unresolved";
+
+export function legacyOutcome(item: {
+  legacy_stock_flag?: string | null;
+  legacy_shipped_flag?: string | null;
+  sky_id?: string | null;
+}): LegacyOutcome | null {
+  const stock = (item.legacy_stock_flag ?? "").trim().toLowerCase();
+  const shipped = (item.legacy_shipped_flag ?? "").trim().toLowerCase();
+  // No marker at all: the workbook recorded nothing, so this says nothing.
+  if (stock === "") return null;
+  if (stock === "x") return "shipped";
+  if (stock === "r") return "returned";
+  if (stock === "l") return "lost";
+  if (stock === "-") {
+    if (shipped === "-") return "not_shipped";
+    if (shipped === "x") {
+      return (item.sky_id ?? null) === null ? "shipped_unreferenced" : "unresolved";
+    }
+  }
+  return "unresolved";
+}
+
+/** Does this outcome mean the piece really went out the door? */
+export const legacyWasShipped = (outcome: LegacyOutcome | null): boolean =>
+  outcome === "shipped" || outcome === "shipped_unreferenced"
+  || outcome === "returned" || outcome === "lost";
+
+/**
  * Did the workbook say this copy never came off the shelf? (0073)
  *
  * Column L of `Order 2026` — `-` on 48 rows, 25 of them shipped. It belongs
@@ -188,7 +250,10 @@ export const legacyRecorded = (item: { legacy_stock_flag?: string | null }): boo
  */
 export type SaleItemTone = "grey" | "amber" | "green" | "orange" | "returned";
 
-export type SaleItemIndicator = { tone: SaleItemTone; glyph: "\u25cb" | "\u2713" | "!" };
+export type SaleItemIndicator = {
+  tone: SaleItemTone;
+  glyph: "\u25cb" | "\u2713" | "!" | "\u21c4" | "\u2298" | "\u21a9";
+};
 
 export function saleItemIndicator(
   status: SaleItemStatus,
@@ -196,16 +261,49 @@ export function saleItemIndicator(
   /**
    * Imported history, and what the workbook recorded for it.
    *
-   * `recorded` outranks the live derivation for the two states that only
-   * mean "our ledger has no movement for this" — which is true of every
-   * imported line and says nothing about whether the sale is finished.
-   * Anything with a real movement or a return in flight is NOT overridden:
-   * that is present-tense work and it wins.
+   * THE WORKBOOK'S OWN OUTCOME OUTRANKS EVERY DERIVED STATE ON AN IMPORTED
+   * LINE, `settled_at` included. That timestamp says only "closed here
+   * without a movement" — a technical fact about OUR ledger, written in bulk
+   * by 0081 — and it must not overwrite what the owner recorded about the
+   * physical object. A line the workbook calls lost is lost, whether or not
+   * somebody ticked it off on this side.
+   *
+   * Until 2026-09-21 this parameter was a single boolean, `recorded`, and it
+   * gave the same green tick to x, `-` and r. Three different endings, one
+   * symbol, and a figure that never shipped looked delivered.
    */
-  legacy?: { historical: boolean; recorded: boolean },
+  legacy?: { historical: boolean; outcome: LegacyOutcome | null },
 ): SaleItemIndicator {
-  if (legacy?.historical && legacy.recorded && (status === "open" || status === "shipped")) {
-    return { tone: "green", glyph: "\u2713" };
+  /*
+   * WHICH STATES THE WORKBOOK OUTRANKS, AND WHICH IT DOES NOT.
+   *
+   * It outranks the four that are derived from an ABSENCE — `open` and
+   * `shipped` (no movement here), `settled` and `not_shipped` (a timestamp
+   * we wrote). None of those says anything about the physical object, and
+   * `settled_at` in particular was written in bulk by 0081.
+   *
+   * It does NOT outrank a real movement or a return in flight. Those are
+   * present-tense work on this side and they are newer than any import. No
+   * imported line carries one today; the rule exists so that the day one
+   * does, today wins over 2026's spreadsheet.
+   */
+  const derivedFromAbsence = status === "open" || status === "shipped"
+    || status === "settled" || status === "not_shipped";
+  if (legacy?.historical && derivedFromAbsence
+      && legacy.outcome !== null && legacy.outcome !== undefined) {
+    switch (legacy.outcome) {
+      case "shipped":
+      case "shipped_unreferenced":
+        return { tone: "green", glyph: "\u2713" };
+      case "returned":
+        return { tone: "returned", glyph: "\u21c4" };
+      case "lost":
+        return { tone: "amber", glyph: "\u2298" };
+      case "not_shipped":
+        return { tone: "grey", glyph: "\u21a9" };
+      case "unresolved":
+        return { tone: "grey", glyph: "\u25cb" };
+    }
   }
   switch (status) {
     case "restocked":
