@@ -1167,6 +1167,20 @@ export const de = {
         feeAddLabel: "Weitere Gebühr",
         feeRemove: (label: string) => `${label} entfernen`,
         feeLabelPlaceholder: "Bezeichnung",
+        /*
+         * Gebührenarten. Der Name steht neben dem Betrag UND wird als
+         * `sale_fees.label` gespeichert; verrechnet wird weiter über `kind`.
+         */
+        feeAddFee: "+ Gebühr",
+        feeTypeHeading: "Gebührenart",
+        feeTypes: {
+          transaction: "Transaktionsgebühr",
+          listing: "Anzeigegebühr",
+          advertising: "Werbegebühr",
+          payment: "Zahlungsgebühr",
+          shipping_label: "Versandkosten (Label)",
+          other: "Sonstige Gebühr",
+        },
         /* Der Schalter, der über die Auszahlung entscheidet. */
         settledBy: "Abgezogen von",
         settledChannel: "Kanal",

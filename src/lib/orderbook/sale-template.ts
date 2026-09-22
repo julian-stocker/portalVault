@@ -54,22 +54,80 @@ export type SaleTemplate = {
 };
 
 /**
+ * DIE GEBÜHRENARTEN, DIE DER BETREIBER KENNT — UND WIE SIE GESPEICHERT WERDEN.
+ *
+ * Ein Marktplatz rechnet in mehreren Posten ab: Transaktion, Anzeige,
+ * Werbung, Zahlung. Für das Lager und die Auszahlung sind sie alle dasselbe —
+ * Geld, das der Kanal einbehält —, für den Beleg sind sie es nicht.
+ *
+ * DESHALB ZWEI EBENEN, BEIDE SCHON VORHANDEN (0059):
+ *
+ *   `kind`   die Verrechnungskategorie, die die Datenbank kennt und jede
+ *            Auswertung summiert: payment · marketplace · shipping_label ·
+ *            other. Sie bleibt unverändert, und deshalb braucht diese
+ *            Erweiterung KEINE Migration.
+ *   `label`  der Name der Gebührenart, wie der Betreiber sie gewählt hat.
+ *            Die Spalte gibt es seit 0059; bisher füllte das Formular sie nur
+ *            für `other`, weil nur dort ein CHECK sie verlangt. Jetzt trägt
+ *            jede neue Zeile ihren Namen — und die historischen Zeilen, die
+ *            keinen haben, zeigen weiterhin den Namen ihrer Kategorie
+ *            (`feeName()` im Detailfenster fällt darauf zurück).
+ *
+ * Die Auszahlung interessiert sich für keine dieser beiden Ebenen:
+ * `plannedPayout` zieht jede Gebühr ab, die der Kanal einbehalten hat, egal
+ * welcher Art. Mehr Gebührenzeilen heißt deshalb automatisch mehr Abzug, und
+ * es gibt keine Stelle, die eine einzelne Art gesondert behandelt.
+ */
+export type SaleFeeType = {
+  /** Stabil, nur intern — landet nirgends in der Datenbank. */
+  id: string;
+  /** `sale_fees.label`. Leer heißt: der Betreiber benennt sie selbst. */
+  label: string;
+  /** `sale_fees.kind`, die Verrechnungskategorie. */
+  kind: string;
+  settledBy: SettledBy;
+};
+
+export const SALE_FEE_TYPES: readonly SaleFeeType[] = [
+  { id: "transaction", label: "Transaktionsgebühr", kind: "payment", settledBy: "channel" },
+  { id: "listing", label: "Anzeigegebühr", kind: "marketplace", settledBy: "channel" },
+  { id: "advertising", label: "Werbegebühr", kind: "marketplace", settledBy: "channel" },
+  { id: "payment", label: "Zahlungsgebühr", kind: "payment", settledBy: "channel" },
+  { id: "shipping_label", label: "Versandkosten (Label)", kind: "shipping_label", settledBy: "channel" },
+  { id: "other", label: "", kind: "other", settledBy: "channel" },
+];
+
+export function saleFeeType(id: string): SaleFeeType | undefined {
+  return SALE_FEE_TYPES.find((t) => t.id === id);
+}
+
+/** Eine Gebührenzeile aus einer gewählten Art. */
+export function feeFromType(key: string, typeId: string): FeeDraft {
+  const type = saleFeeType(typeId) ?? SALE_FEE_TYPES[SALE_FEE_TYPES.length - 1];
+  return { key, kind: type.kind, label: type.label, amount: "", settledBy: type.settledBy };
+}
+
+/**
  * eBay, as the reconciliation actually works.
  *
- * Two fee rows up front because every eBay settlement in the workbook has
- * them: the marketplace commission, and the label. The label defaults to
- * `channel` — bought through eBay is the normal case — and the operator flips
- * it to `external` for one bought at the post office.
+ * Zwei Zeilen vorab, weil jede eBay-Abrechnung der Arbeitsmappe sie hat: die
+ * Transaktionsgebühr und das Label. Das Label steht auf `channel` — über eBay
+ * gekauft ist der Normalfall —, und der Betreiber stellt es auf `external`
+ * für eines von der Post.
  *
- * The payment fee is NOT prefilled. eBay's managed payments folds it into the
- * commission for most of the workbook's orders, and an input pre-seeded with
- * a row that is usually empty invites a zero where there should be nothing.
+ * MEHR NICHT. Anzeige-, Werbe- und Zahlungsgebühr fallen nicht bei jedem
+ * Verkauf an; vorausgefüllte Zeilen, die meistens leer bleiben, laden zu
+ * einer Null ein, wo nichts stehen sollte. Sie stehen stattdessen unter
+ * „+ Gebühr" bereit.
+ *
+ * Es gibt weiterhin kein eBay-Feld und keine eBay-Spalte: das hier ist eine
+ * Vorbelegung von zwei gewöhnlichen `sale_fees`-Zeilen.
  */
 const EBAY: SaleTemplate = {
   id: "ebay",
   channel: "ebay",
   defaultFees: [
-    { kind: "marketplace", label: "eBay-Gebühr", settledBy: "channel" },
+    { kind: "payment", label: "Transaktionsgebühr", settledBy: "channel" },
     { kind: "shipping_label", label: "Versandkosten (Label)", settledBy: "channel" },
   ],
   showsDiscount: true,
@@ -127,13 +185,20 @@ export function feePlans(drafts: readonly FeeDraft[]): FeePlan[] {
     if (raw === "") continue;
     const amount = Number(raw);
     if (!Number.isFinite(amount) || amount <= 0) continue;
+    const label = d.label.trim();
     out.push({
       kind: d.kind,
       amount,
       settled_by: d.settledBy,
-      // Only `other` needs one stored; for the known kinds the label is the
-      // screen's word for it, not data.
-      ...(d.kind === "other" ? { label: d.label } : {}),
+      /*
+       * Der Name der Gebührenart wird MITGESPEICHERT, nicht nur bei `other`.
+       * Vorher war das Etikett reine Bildschirmsprache; seit es mehrere
+       * Arten pro Kategorie gibt (Anzeige- und Werbegebühr sind beide
+       * `marketplace`), wäre die Unterscheidung sonst beim Speichern weg.
+       * Leer bleibt leer — die Spalte ist nullable, und eine Zeile ohne
+       * Namen zeigt weiterhin den ihrer Kategorie.
+       */
+      ...(label === "" ? {} : { label }),
     });
   }
   return out;

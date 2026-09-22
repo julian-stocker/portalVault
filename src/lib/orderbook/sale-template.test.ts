@@ -30,8 +30,8 @@ import { join } from "node:path";
 import { de } from "@/lib/i18n/de";
 import { code, latestFunction, migrationSource } from "@/test-support/migrations";
 import {
-  SALE_TEMPLATES, extraFee, feePlans, initialFees, invalidFees, payoutView,
-  saleFormMoney, saleTemplate, unlabelledFees, type FeeDraft,
+  SALE_FEE_TYPES, SALE_TEMPLATES, extraFee, feeFromType, feePlans, initialFees, invalidFees,
+  payoutView, saleFeeType, saleFormMoney, saleTemplate, unlabelledFees, type FeeDraft,
 } from "./sale-template.ts";
 import { parseMoney, parseSignedMoney, plannedPayout, roundMoney } from "./sales-money.ts";
 import { saleItemEdits } from "./sales-view.ts";
@@ -101,7 +101,8 @@ describe("the template is layout, not a data model", () => {
 
   it("starts eBay with the two rows every workbook settlement has", () => {
     const rows = initialFees(saleTemplate("ebay"), key);
-    expect(rows.map((r) => r.kind)).toEqual(["marketplace", "shipping_label"]);
+    // Transaktionsgebühr und Label — beide gewöhnliche Zeilen, beide entfernbar.
+    expect(rows.map((r) => r.kind)).toEqual(["payment", "shipping_label"]);
     // The label defaults to channel-settled, which is the normal case.
     expect(rows[1].settledBy).toBe("channel");
     expect(rows.every((r) => r.amount === "")).toBe(true);
@@ -145,9 +146,17 @@ describe("several fees, which is the ordinary case", () => {
     expect(feePlans([fee({ amount: "1,05" })])[0].amount).toBe(1.05);
   });
 
-  it("stores a label only for `other`, which is the only kind that needs one", () => {
-    expect(feePlans([fee({ amount: "1" })])[0].label).toBeUndefined();
+  it("stores the name of the fee type, and nothing where there is no name", () => {
+    /*
+     * Bis es mehrere Arten je Kategorie gab, war das Etikett reine
+     * Bildschirmsprache und wurde nur für `other` gespeichert. Jetzt trägt
+     * jede benannte Zeile ihren Namen — sonst wären Anzeige- und Werbegebühr
+     * nach dem Speichern nicht mehr zu unterscheiden.
+     */
+    expect(feePlans([fee({ label: "Anzeigegebühr", amount: "1" })])[0].label)
+      .toBe("Anzeigegebühr");
     expect(feePlans([fee({ kind: "other", label: "Porto", amount: "1" })])[0].label).toBe("Porto");
+    expect(feePlans([fee({ label: "  ", amount: "1" })])[0].label).toBeUndefined();
   });
 
   it("names a row that is text rather than a number", () => {
@@ -620,5 +629,149 @@ describe("the German copy", () => {
   it("maps the new refusals to sentences instead of raw SQL", () => {
     expect(ACTIONS).toContain('text.includes("legacy workbook")');
     expect(de.business.sales.errors.historicalItem).toContain("Excel-Historie");
+  });
+});
+
+/* ===================================================================== */
+/**
+ * MEHRERE GEBÜHRENARTEN, EINE VERRECHNUNG.
+ *
+ * Ein Marktplatz rechnet in Posten ab — Transaktion, Anzeige, Werbung,
+ * Zahlung —, das Lager und die Auszahlung kennen nur „was der Kanal
+ * einbehalten hat". Beides passt in das Modell von 0059, ohne es zu ändern:
+ * `kind` bleibt die Verrechnungskategorie, `label` trägt den Namen der Art.
+ */
+describe("fee types are a name on top of the kinds the database already has", () => {
+  it("offers exactly the types the screen lists, each mapped to a stored kind", () => {
+    expect(SALE_FEE_TYPES.map((t) => t.id)).toEqual([
+      "transaction", "listing", "advertising", "payment", "shipping_label", "other",
+    ]);
+    // Jede Art landet in einer Kategorie, die die CHECK-Bedingung kennt.
+    const known = ["payment", "marketplace", "shipping_label", "other"];
+    for (const type of SALE_FEE_TYPES) expect(known, type.id).toContain(type.kind);
+    // Und keine erfindet eine neue: die Migration bleibt unnötig.
+    const sales = migrationSource("0059_orderbook_sales.sql");
+    expect(code(sales)).toContain("sale_fees_kind_known");
+    expect(code(sales)).toContain("'payment', 'marketplace', 'shipping_label', 'other'");
+  });
+
+  it("keeps two different types inside one kind apart by their label", () => {
+    const listing = feeFromType(key(), "listing");
+    const advertising = feeFromType(key(), "advertising");
+    expect(listing.kind).toBe("marketplace");
+    expect(advertising.kind).toBe("marketplace");
+    expect(listing.label).toBe("Anzeigegebühr");
+    expect(advertising.label).toBe("Werbegebühr");
+
+    const plans = feePlans([{ ...listing, amount: "0,55" }, { ...advertising, amount: "1,20" }]);
+    expect(plans).toEqual([
+      { kind: "marketplace", amount: 0.55, settled_by: "channel", label: "Anzeigegebühr" },
+      { kind: "marketplace", amount: 1.2, settled_by: "channel", label: "Werbegebühr" },
+    ]);
+  });
+
+  it("falls back to the free row rather than crashing on an unknown type", () => {
+    expect(feeFromType("k", "vermittlungsprovision").kind).toBe("other");
+    expect(saleFeeType("vermittlungsprovision")).toBeUndefined();
+  });
+
+  it("still requires a name for a free row, and stores none when there is none", () => {
+    const free = extraFee(key(), "");
+    expect(unlabelledFees([{ ...free, amount: "1,00" }])).toHaveLength(1);
+    // Ohne Betrag ist auch ohne Namen nichts zu speichern.
+    expect(unlabelledFees([free])).toHaveLength(0);
+    expect(feePlans([{ ...free, amount: "1,00" }])).toEqual([
+      { kind: "other", amount: 1, settled_by: "channel" },
+    ]);
+  });
+
+  it("adds and removes rows without touching the others", () => {
+    let rows: FeeDraft[] = initialFees(saleTemplate("ebay"), (n) => `init${n}`);
+    expect(rows).toHaveLength(2);
+    rows = [...rows, feeFromType(key(), "listing"), feeFromType(key(), "advertising")];
+    expect(rows).toHaveLength(4);
+    const dropped = rows[2].key;
+    rows = rows.filter((r) => r.key !== dropped);
+    expect(rows.map((r) => r.label))
+      .toEqual(["Transaktionsgebühr", "Versandkosten (Label)", "Werbegebühr"]);
+  });
+
+  it("THE WORKED EXAMPLE: 17,09 + 5,99 − 3,84 − 0,55 − 5,19 = 13,50", () => {
+    const fees = feePlans([
+      { ...feeFromType(key(), "transaction"), amount: "3,84" },
+      { ...feeFromType(key(), "listing"), amount: "0,55" },
+      { ...feeFromType(key(), "shipping_label"), amount: "5,19" },
+    ]);
+    expect(fees).toHaveLength(3);
+    expect(payoutView({ subtotal: 17.09, shipping: 5.99, discount: 0, fees, adjustments: [] }))
+      .toBe(13.5);
+  });
+
+  it("deducts every channel fee, whatever its type — and no external one", () => {
+    const fees = feePlans([
+      { ...feeFromType(key(), "transaction"), amount: "1,00" },
+      { ...feeFromType(key(), "listing"), amount: "1,00" },
+      { ...feeFromType(key(), "advertising"), amount: "1,00" },
+      { ...feeFromType(key(), "payment"), amount: "1,00" },
+      { ...feeFromType(key(), "shipping_label"), amount: "1,00", settledBy: "external" as const },
+    ]);
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees, adjustments: [] })).toBe(16);
+  });
+
+  it("leaves the historical rows alone: no label, summed by kind as before", () => {
+    /*
+     * Die 825 importierten Gebührenzeilen tragen `label = NULL` und eine der
+     * vier Kategorien. Nichts an dieser Erweiterung verlangt ein Etikett, und
+     * das Detailfenster zeigt für sie weiterhin den Namen der Kategorie.
+     */
+    const historical = [
+      { kind: "payment", amount: 3.84, settled_by: "channel" },
+      { kind: "marketplace", amount: 0.55, settled_by: "channel" },
+      { kind: "shipping_label", amount: 5.19, settled_by: "channel" },
+    ];
+    expect(historical.every((f) => !("label" in f))).toBe(true);
+    expect(payoutView({ subtotal: 17.09, shipping: 5.99, discount: 0,
+                        fees: historical, adjustments: [] })).toBe(13.5);
+    expect(read("src/components/business/sale-details.tsx"))
+      .toContain("return modal.feeKinds[fee.kind as keyof typeof modal.feeKinds] ?? fee.kind;");
+  });
+});
+
+/* ===================================================================== */
+describe("the eBay template suggests a transaction fee, it does not hard-wire one", () => {
+  it("opens with a transaction fee and a label, both ordinary fee rows", () => {
+    const rows = initialFees(saleTemplate("ebay"), (n) => `init${n}`);
+    expect(rows.map((r) => [r.kind, r.label])).toEqual([
+      ["payment", "Transaktionsgebühr"],
+      ["shipping_label", "Versandkosten (Label)"],
+    ]);
+    // Beide sind entfernbar: nichts an ihnen ist besonders.
+    expect(rows.filter((r) => r.key !== rows[0].key)).toHaveLength(1);
+  });
+
+  it("no longer knows a field called eBay-Gebühr", () => {
+    expect(ts(TEMPLATE_SRC)).not.toContain("eBay-Gebühr");
+    expect(ts(NEW_SALE)).not.toContain("eBay-Gebühr");
+  });
+
+  it("the manual template still starts empty", () => {
+    expect(initialFees(saleTemplate("manual"), (n) => `m${n}`)).toEqual([]);
+  });
+
+  it("the form offers the types and keeps the free row", () => {
+    expect(NEW_SALE).toContain("create.feeAddFee");
+    expect(NEW_SALE).toContain("create.feeAdd");
+    expect(NEW_SALE).toContain("feeFromType(key(), type.id)");
+    expect(NEW_SALE).toContain("SALE_FEE_TYPES.map");
+    // Entfernen bleibt für jede Zeile möglich, auch für die vorbelegten.
+    expect(NEW_SALE).toContain("setFees((f) => f.filter((x) => x.key !== fee.key))");
+  });
+
+  it("names every type in German, once", () => {
+    const names = de.business.sales.create.feeTypes;
+    for (const type of SALE_FEE_TYPES) {
+      expect(names[type.id as keyof typeof names], type.id).toBeTruthy();
+    }
+    expect(de.business.sales.create.feeAddFee).toBe("+ Gebühr");
   });
 });

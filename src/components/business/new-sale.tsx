@@ -50,8 +50,8 @@ import { draftPayload, draftUnitCount, type DraftLine } from "@/lib/orderbook/dr
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { parseMoney, parseSignedMoney } from "@/lib/orderbook/sales-money";
 import {
-  SALE_TEMPLATES, extraFee, initialFees, invalidFees, saleFormMoney,
-  saleTemplate, unlabelledFees, type FeeDraft, type SettledBy,
+  SALE_FEE_TYPES, SALE_TEMPLATES, extraFee, feeFromType, initialFees, invalidFees,
+  saleFormMoney, saleTemplate, unlabelledFees, type FeeDraft, type SettledBy,
 } from "@/lib/orderbook/sale-template";
 import { FigureDraft } from "./figure-draft";
 import { Field, FieldRow, FormSection, INPUT, MONEY, QuietRow } from "./form-section";
@@ -114,6 +114,8 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
    */
   const [fees, setFees] = useState<FeeDraft[]>(
     () => initialFees(saleTemplate("ebay"), (n) => `init${n}`));
+  /* Offen, während der Betreiber eine Gebührenart wählt. */
+  const [feeMenuOpen, setFeeMenuOpen] = useState(false);
   const [adjustment, setAdjustment] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
@@ -294,11 +296,46 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
           ))}
         </ul>
 
-        <button type="button" disabled={pending}
-                onClick={() => { const row = extraFee(key(), ""); setFees((f) => [...f, row]); }}
-                className="min-h-11 self-start text-xs text-muted underline underline-offset-2 sm:min-h-8">
-          {create.feeAdd}
-        </button>
+        {/*
+          „+ Gebühr" — die Arten, die ein Marktplatz tatsächlich abrechnet.
+          Kein Auswahlfeld in der Zeile, sondern eine Auswahl VOR der Zeile:
+          die Art bestimmt Name, Verrechnungskategorie und die Vorgabe für
+          „Kanal"; danach ist es eine gewöhnliche Gebührenzeile wie jede
+          andere — Betrag, Schalter, ×.
+        */}
+        <div className="flex flex-col gap-2 self-start">
+          <div className="flex flex-wrap items-center gap-4">
+            <button type="button" disabled={pending} aria-expanded={feeMenuOpen}
+                    onClick={() => setFeeMenuOpen((open) => !open)}
+                    className="min-h-11 text-xs text-muted underline underline-offset-2 sm:min-h-8">
+              {create.feeAddFee}
+            </button>
+            <button type="button" disabled={pending}
+                    onClick={() => { const row = extraFee(key(), ""); setFees((f) => [...f, row]); }}
+                    className="min-h-11 text-xs text-muted underline underline-offset-2 sm:min-h-8">
+              {create.feeAdd}
+            </button>
+          </div>
+
+          {feeMenuOpen ? (
+            <ul aria-label={create.feeTypeHeading}
+                className="flex flex-col gap-1 rounded-sky-md p-2 ring-1 ring-border/70">
+              {SALE_FEE_TYPES.map((type) => (
+                <li key={type.id}>
+                  <button type="button" disabled={pending}
+                          onClick={() => {
+                            const row = feeFromType(key(), type.id);
+                            setFees((f) => [...f, row]);
+                            setFeeMenuOpen(false);
+                          }}
+                          className="min-h-11 w-full rounded-sky-sm px-2 text-left text-sm hover:bg-fg/5 sm:min-h-9">
+                    {create.feeTypes[type.id as keyof typeof create.feeTypes] ?? type.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
 
         {template.showsAdjustment ? (
           <FieldRow>
