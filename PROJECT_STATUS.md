@@ -47,7 +47,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-## Legacy-Nachkorrektur A–D (2026-09-22, `0087`–`0089`) — auf Staging abgeschlossen
+## Legacy-Nachkorrektur A–D (2026-09-22, `0087`–`0089`) — auf Staging UND Production abgeschlossen
 
 Der Verkäufer hat `skylanders.xlsx` vor dem Go-Live ein letztes Mal aktualisiert: vier weitere
 Verkäufe, korrigierte Marker in Spalte L, **Spalte F von 824 auf 806**. Gleichzeitig wurde die
@@ -79,10 +79,40 @@ append-only (der Importer hat keinen Lösch- oder Änderungspfad; das Entfernen 
 Arbeitsmappe — eine versehentlich getrimmte Zeile wurde zurückgesetzt und gegen drei
 Regressionstests abgesichert.
 
-**Production steht unverändert auf dem Stand vom 2026-09-21** (2 671 Ereignisse, 824 lose
-Stück, 0 Bewegungen). Der dortige Lauf wiederholt A–D in derselben Reihenfolge mit **neu
-gemessenen** Zahlen — Ids, Zielwerte und die Zahl der unberührten Positionen sind
-umgebungsspezifisch — und braucht eine ausdrückliche Freigabe.
+### Production, am selben Tag nachgezogen
+
+Jede Phase wurde dort mit **neu gemessenen** Zahlen wiederholt — Ids, Zielwerte und die Zahl
+der unberührten Positionen sind umgebungsspezifisch, nichts wurde aus Staging übernommen.
+
+| Phase | Production-Ergebnis |
+|---|---|
+| **A** | 219 `sale_items` und 15 `purchase_items` korrigiert · 32 Verkaufs- und 13 Einkaufsabdrücke gestempelt · 4 neue Verkaufsgruppen mit 27 Positionen und 12 Gebühren importiert |
+| **C** | neun überholte Ereignisse entfernt (2 671 → 2 662), 79 ergänzt → **2 741 / Σ 806** |
+| **D** | 27 UPDATE, 6 INSERT, netto **−18** → **279 lose Positionen / Σ 806**, **ohne eine einzige Bewegung** |
+
+**Production-Endzustand:** Verkäufe **296** / `sale_items` **1 280** · Einkäufe **84** /
+`purchase_items` **2 114** · `sale_fees` **825** · `sale_refunds` **41** ·
+`settlement_adjustments` **4** · `legacy_stock_events` **2 741 / Σ 806** · realer loser Bestand
+**806** auf 279 Positionen · boxed 0 · reserviert 0 · Fixtures 0 · `inventory_movements` **0**.
+
+**Legacy-Historie und verfügbarer Bestand stimmen erstmals überein — beide 806**, positionsweise
+ohne eine einzige Abweichung, und der operative Ledger beginnt leer. Alle drei Phasen sind
+idempotent: ein erneuter Sync-, Import- oder History-Lauf plant nichts.
+
+### Die Baseline-Tür ist zu
+
+`tools/sql/cutover-baseline-806.sql` ist verbraucht und im Kopf als
+`EXECUTED ON PRODUCTION · DO NOT RUN AGAIN` markiert. Zwei unabhängige Gates halten das durch:
+**1j** bricht ab, sobald jede Zielposition ihren Wert bereits trägt, **1a**, sobald auch nur eine
+`inventory_movement` existiert. **Jede künftige reale Bestandsänderung läuft ausschließlich über
+die regulären operativen Movement-Pfade** (`apply_inventory_movement`) — eine Abweichung ist ab
+jetzt eine Korrekturbuchung, kein Skript.
+
+Ebenfalls verbraucht: `tools/sql/phase-c-legacy-history-prune.sql` (beide Umgebungen).
+`tools/rebaseline-legacy-purchase-fingerprints.mts` und `tools/fix-legacy-raw-name.mts` liefen
+**nur auf Staging** und sind entsprechend markiert; auf Production war beides nicht nötig — die
+Fingerabdruck-Abweichung war dort als `date_already_applied` erklärt, und der Namensfehler
+konnte nicht mehr entstehen.
 
 ## Lager V2: Zähler außerhalb der Zeitleiste (2026-09-21, `0086`) — abgeschlossen
 

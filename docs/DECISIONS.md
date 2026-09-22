@@ -8981,8 +8981,8 @@ Stück sind die Cutover-Baseline; die Vergangenheit erklären ausschließlich di
 
 ## ADR-0104 — Die Arbeitsmappe wurde nach dem Cutover noch einmal korrigiert
 
-**Status:** angenommen · 2026-09-22 · auf Staging vollständig ausgeführt und verifiziert,
-Production offen
+**Status:** angenommen · 2026-09-22 · auf Staging **und Production** vollständig ausgeführt
+und unabhängig verifiziert
 **Betrifft:** ADR-0102 (Legacy-Historie neben dem Ledger), ADR-0103 (Pre-Go-Live-Cutover),
 Migrationen `0087`–`0089`, `tools/sync-legacy-orderbook.mts`,
 `tools/sql/phase-c-legacy-history-prune.sql`, `tools/sql/cutover-baseline-806.sql`
@@ -9088,9 +9088,51 @@ Kein Gate hängt an dieser Zahl; geprüft werden Σ Zielwerte, Endsumme und null
   **0** · `inventory_movements` **0**.
 - **Legacy-Historie und operativer Bestand stimmen erstmals überein** — beide 806 —, und der
   operative Ledger beginnt weiterhin leer.
-- Production steht unverändert auf dem Stand vom 2026-09-21 (2 671 Ereignisse, 824 lose
-  Stück). Der dortige Lauf wiederholt A–D in derselben Reihenfolge, mit **neu gemessenen**
-  Zahlen: Ids, Zielwerte und die Zahl der unberührten Positionen sind umgebungsspezifisch.
+- **Production-Endzustand 2026-09-22, in derselben Reihenfolge und mit neu gemessenen Zahlen
+  erreicht:** Verkäufe **296** / `sale_items` **1 280** · Einkäufe **84** / `purchase_items`
+  **2 114** · `sale_fees` **825** · `sale_refunds` **41** · `settlement_adjustments` **4** ·
+  `legacy_stock_events` **2 741 / Σ 806** · realer loser Bestand **806** auf **279**
+  Positionen · boxed 0 · reserviert 0 · Fixtures 0 · `inventory_movements` **0**. Historie und
+  verfügbarer Bestand stimmen dort ebenfalls überein, positionsweise ohne Abweichung.
+- **Das Baseline-Verfahren ist verbraucht und wird nicht wiederverwendet.**
+  `tools/sql/cutover-baseline-806.sql` trägt `EXECUTED ON PRODUCTION · DO NOT RUN AGAIN`; Gate
+  1j verweigert einen zweiten Lauf, sobald jede Zielposition ihren Wert trägt, Gate 1a, sobald
+  eine einzige Bewegung existiert. Ab jetzt entsteht jede reale Bestandsänderung ausschließlich
+  über die operativen Movement-Pfade (ADR-0044, ADR-0048 Entscheidung 5) — eine Abweichung ist
+  eine Korrekturbuchung, kein Skript.
+- **Die Excel war ausschließlich die Pre-Go-Live-Source-of-Truth.** Mit dem Cutover endet ihre
+  Rolle: die Geschäftshistorie beginnt am **01.01.2026**, Aktivität aus 2025 wurde bewusst nicht
+  importiert (552 Zeilen `before_cut`), und die `legacy_stock_events` sind **Historie, keine
+  operativen Bewegungen** — nichts bucht aus ihnen, keine Menge wird aus ihnen abgeleitet.
+- Zwei Einmal-Werkzeuge liefen **nur auf Staging** und sind so markiert:
+  `tools/rebaseline-legacy-purchase-fingerprints.mts` (auf Production war dieselbe
+  Abweichungsklasse als `date_already_applied` erklärt und wurde regulär gestempelt) und
+  `tools/fix-legacy-raw-name.mts` (auf Production konnte der Fehler nicht mehr entstehen).
+  `tools/sql/phase-c-legacy-history-prune.sql` lief in beiden Umgebungen und ist ebenfalls
+  verbraucht.
 - Die einmaligen Skripte bleiben als Protokoll im Repository, ohne Zahlen: Zielwerte je Figur
   und die zu entfernenden Zeilen sind Lagerdaten (`docs/SECURITY.md`) und werden vor jedem Lauf
   erzeugt, einmal ausgeführt und danach verworfen.
+
+### Nachtrag 2026-09-22 — ein nachgetragenes Datum ist keine Abweichung
+
+Production brachte zwei Fälle mit, die Staging nicht hatte, und beide hatten dieselbe Ursache:
+der Abdruck hasht das Datum, und beim Import stand dort `null` — einmal, weil die Datumszelle
+einen Tippfehler trägt (`16.04.206`, Kopfzeile 545), dreizehnmal, weil die Einkaufsgruppe
+damals noch undatiert war (`0058`). Das Datum kam später über `tools/apply-workbook-dates.mts`
+in die Datenbank, das bewusst nur diese eine Spalte schreibt und den Abdruck nicht anfasst.
+
+Der Sync las beides als Widerspruch. Statt einer zweiten namentlichen Ausnahmeliste wurde die
+Regel allgemein gefasst, beweisbar und weiterhin fail-closed:
+
+- **Eine Mappe ohne lesbares Datum behauptet nichts.** `saleDateDiff` erzeugt keinen
+  Unterschied, wenn die Arbeitsmappe kein Datum liefert. Liefert sie eines und die Datenbank
+  trägt ein anderes, bleibt es ein Unterschied — dafür existiert `0089`.
+- **`date_already_applied`** gilt für eine Einkaufsgruppe nur, wenn der gespeicherte Abdruck
+  nachgerechnet dem Abdruck derselben Zeilen **mit `date = null`** entspricht, die Mappe ein
+  Datum nennt, die Datenbank exakt dieses Datum bereits trägt und Kopfzeile, Gesamtkosten und
+  jede Positionszeile unverändert sind. Hat sich zusätzlich eine Zeile geändert, greift die
+  Erklärung nicht: dann korrigiert erst der Item-Sync und stempelt danach.
+
+Auf Production erklärte das einen Verkauf und neun Einkaufsgruppen; vier weitere blieben
+gewöhnliche `item`-Fälle. Der Beweis ist ein Hash-Treffer, keine Plausibilität.

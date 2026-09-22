@@ -1,9 +1,12 @@
 -- ###########################################################################
 -- ##                                                                       ##
--- ##   EINMALIG JE UMGEBUNG · ONE-TIME · DO NOT REUSE                      ##
+-- ##   EINMALIG JE UMGEBUNG · ONE-TIME · EXECUTED · DO NOT RUN AGAIN       ##
 -- ##                                                                       ##
 -- ##   Staging     2026-09-22  ausgeführt und unabhängig verifiziert       ##
--- ##   Production  offen (Phase C dort noch nicht begonnen)                 ##
+-- ##   Production  2026-09-22  ausgeführt und unabhängig verifiziert       ##
+-- ##                                                                       ##
+-- ##   Auf beiden Umgebungen wurden neun Zeilen entfernt (2671 → 2662),    ##
+-- ##   danach ergänzte der reguläre Importer 79 Zeilen auf 2741 / Σ 806.   ##
 -- ##                                                                       ##
 -- ##   Dieses Skript ist KEIN Betriebsprozess, KEIN Werkzeug zur Pflege     ##
 -- ##   der Historie und KEINE Schemaänderung. Es steht bewusst nicht        ##

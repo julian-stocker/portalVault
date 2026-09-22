@@ -2354,9 +2354,39 @@ aus der aktualisierten Arbeitsmappe wurden über die einmalige Baseline
 (`tools/sql/cutover-baseline-806.sql`, 27 UPDATE / 6 INSERT / 243 unverändert) angeglichen —
 **ohne eine einzige `inventory_movement`**. Der operative Ledger beginnt weiterhin leer.
 
-**Production steht unverändert auf dem Stand vom 2026-09-21** (2 671 Ereignisse, 824 lose
-Stück, 0 Bewegungen). Der dortige Lauf wiederholt A–D mit neu gemessenen Zahlen: Ids,
-Zielwerte und die Zahl der unberührten Positionen sind umgebungsspezifisch.
+#### Production-Endzustand nach A–D (2026-09-22)
+
+Jede Phase wurde dort mit neu gemessenen Zahlen wiederholt; nichts wurde aus Staging
+übernommen. Der Unterschied zu Staging bleibt auf Zeilen mit `quantity = 0` und auf
+Staging-eigene Testdaten beschränkt.
+
+| | |
+|---|---|
+| Verkäufe / `sale_items` | **296** / **1 280** |
+| Einkäufe / `purchase_items` | **84** / **2 114** |
+| `sale_fees` · `sale_refunds` · `settlement_adjustments` | **825** · **41** · **4** |
+| `legacy_stock_events` | **2 741**, Summe **806** |
+| | `purchase` 1 259 · `sale` 1 182 · `return` 14 · `correction` 3 |
+| | `opening_balance` 262 (+739) · `legacy_adjustment` 21 (−21) |
+| `shop_inventory` | **279 lose Positionen**, Summe **806** |
+| boxed · reserviert · Fixtures | 0 · 0 · 0 |
+| `inventory_movements` | **0** |
+
+Phase A korrigierte 219 `sale_items` und 15 `purchase_items`, stempelte 32 Verkaufs- und 13
+Einkaufsabdrücke und importierte vier neue Verkaufsgruppen (27 Positionen, 12 Gebühren).
+Phase C entfernte neun überholte Ereignisse (2 671 → 2 662) und ergänzte 79 auf 2 741.
+Phase D setzte 27 Positionen auf Spalte F und legte 6 an — netto −18, **ohne eine einzige
+`inventory_movement`**.
+
+**Damit stimmen rekonstruierte Historie und verfügbarer Bestand erstmals überein: beide 806**,
+positionsweise ohne Abweichung (245 Positionen mit Bestand, 0 Differenzen). Der operative
+Ledger beginnt weiterhin leer; die Herkunft des Bestands erklären ausschließlich die
+`legacy_stock_events`.
+
+**Das Baseline-Verfahren ist verbraucht.** `tools/sql/cutover-baseline-806.sql` trägt
+`EXECUTED ON PRODUCTION · DO NOT RUN AGAIN`, und zwei Gates halten es geschlossen: 1j, sobald
+jede Zielposition ihren Wert schon trägt, und 1a, sobald eine einzige Bewegung existiert. Jede
+weitere Bestandsänderung entsteht über `apply_inventory_movement` (ADR-0044, ADR-0048).
 
 ---
 

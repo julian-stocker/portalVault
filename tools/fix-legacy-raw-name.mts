@@ -1,7 +1,8 @@
 /**
  * ╔══════════════════════════════════════════════════════════════════════╗
  * ║  EINMALIGE KORREKTUR — EINE ZEILE, EIN FELD                          ║
- * ║  sale_item #1219 · Verkauf #303 · Quellzeile 1506                    ║
+ * ║  STAGING ONLY · EXECUTED 2026-09-22 · DO NOT RUN AGAIN               ║
+ * ║  Quellzeile 1506 der Arbeitsmappe                                    ║
  * ╚══════════════════════════════════════════════════════════════════════╝
  *
  * WAS PASSIERT IST
@@ -30,7 +31,9 @@
  * wäre eine Behauptung; der Plan ist die Quelle.
  *
  * NACH DEM LAUF IST DIESES WERKZEUG ERLEDIGT. Ein zweiter Lauf findet den
- * DB-Wert bereits korrekt vor und bricht am Gate ab.
+ * DB-Wert bereits korrekt vor und bricht am Gate ab. Auf PRODUCTION wurde es
+ * nie gebraucht: dort lief der Sync erst, nachdem die Ursache behoben war,
+ * und kein Name hat je ein Leerzeichen verloren.
  *
  *   npm run fix:legacy-raw-name:staging              # Vorschau
  *   npm run fix:legacy-raw-name:staging -- --apply   # schreibt eine Zeile

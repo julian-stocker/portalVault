@@ -1,9 +1,20 @@
 -- ###########################################################################
 -- ##                                                                       ##
--- ##   ONE-TIME · PRE-GO-LIVE ONLY · DO NOT RUN AGAIN AFTER GO-LIVE        ##
+-- ##   ONE-TIME PRE-GO-LIVE BASELINE · EXECUTED ON PRODUCTION              ##
+-- ##   DO NOT RUN AGAIN                                                     ##
 -- ##                                                                       ##
 -- ##   Staging     2026-09-22  ausgeführt und unabhängig verifiziert       ##
--- ##   Production  offen                                                    ##
+-- ##   Production  2026-09-22  ausgeführt und unabhängig verifiziert       ##
+-- ##                                                                       ##
+-- ##   ERGEBNIS AUF PRODUCTION: 279 lose Realpositionen, Summe 806 —       ##
+-- ##   27 UPDATE, 6 INSERT, netto −18, und `inventory_movements` blieb     ##
+-- ##   dabei bei NULL. Legacy-Historie und verfügbarer Bestand stehen      ##
+-- ##   seither beide auf 806.                                              ##
+-- ##                                                                       ##
+-- ##   AB HIER GILT AUSSCHLIESSLICH DER REGULÄRE WEG: jede reale           ##
+-- ##   Bestandsänderung entsteht über die operativen SkyIsles-Movement-    ##
+-- ##   Pfade (`apply_inventory_movement`), niemals wieder über dieses      ##
+-- ##   oder ein ähnliches Skript.                                          ##
 -- ##                                                                       ##
 -- ##   DIESE DATEI IST KEIN SYNCHRONISATIONSWERKZEUG. Sie gleicht den      ##
 -- ##   Bestand nicht „wieder ab", wenn die Arbeitsmappe sich erneut        ##
@@ -47,13 +58,12 @@
 --    6 INSERT für Positionen, die es noch nicht gibt
 --      unverändert: je Umgebung verschieden, siehe unten
 --
--- DIE ZAHL DER UNBERÜHRTEN POSITIONEN IST UMGEBUNGSABHÄNGIG.
+-- DIE ZAHL DER UNBERÜHRTEN POSITIONEN WAR UMGEBUNGSABHÄNGIG.
 --
 --   Staging      270 bestehende lose Realpositionen → 27 / 6 / 243 unchanged
---   Production   nach dem Snapshot vom 2026-09-21 273 bestehende
---                → 27 / 6 / 246 unchanged, ABER unmittelbar vor dem
---                Production-Apply erneut read-only zu messen und zu
---                bestätigen. Diese Zahl wird hier NICHT vorausgesetzt.
+--   Production   273 bestehende → 27 / 6 / 246 unchanged, unmittelbar vor
+--                dem Lauf read-only gemessen und bestätigt, nicht
+--                vorausgesetzt.
 --
 -- Der Unterschied sind ausschließlich Zeilen mit `quantity = 0`: zehn
 -- Positionen führt nur Production, sieben nur Staging, und keine einzige
@@ -90,9 +100,24 @@ create temporary table _target (
   quantity integer not null check (quantity >= 0)
 ) on commit drop;
 
+/*
+ * Der Zustand, für den die Zielwerte gerechnet wurden.
+ *
+ * Ein Zielwert ist nur so gut wie der Bestand, gegen den er ermittelt wurde.
+ * Hat sich zwischen Erzeugung und Lauf etwas bewegt, sind die 27 UPDATE und
+ * 6 INSERT nicht mehr dieselbe Änderung — dann lieber abbrechen als eine
+ * Zahl setzen, die niemand mehr nachgerechnet hat. Der Preview liefert
+ * beides mit; Gate 1k vergleicht.
+ */
+create temporary table _expect_before (
+  loose_rows integer not null,
+  loose_sum  integer not null
+) on commit drop;
+
 -- >>> HIER DIE VOM PREVIEW ERZEUGTEN ZEILEN EINSETZEN <<<
 -- insert into _target (sky_id, quantity) values
 --   ('SKY-XXXX', N), … ;
+-- insert into _expect_before (loose_rows, loose_sum) values (<Zeilen>, <Summe>);
 --
 -- DIESE ZEILEN STEHEN NICHT IM REPOSITORY UND KOMMEN AUCH NICHT HINEIN.
 -- Es sind Lagerzahlen je Figur (docs/SECURITY.md). Die ausführungsfertige
@@ -152,6 +177,14 @@ begin
     raise exception 'ABBRUCH: Σ legacy_stock_events = %, erwartet 806 — Phase C fehlt', v_n;
   end if;
 
+  -- 1i. Keine bestehende reale Position darf im Ziel fehlen. Sonst bliebe
+  --     ein Bestand stehen, den die Arbeitsmappe nicht mehr kennt.
+  select count(*) into v_n from public.shop_inventory i
+   where i.condition = 'loose'
+     and (regexp_replace(i.sky_id, '^SKY-', ''))::bigint < 9000
+     and not exists (select 1 from _target t where t.sky_id = i.sky_id);
+  if v_n <> 0 then raise exception 'ABBRUCH: % Lagerposition(en) ohne Zielwert', v_n; end if;
+
   -- 1j. BEREITS AUSGEFÜHRT? Dann ist hier nichts mehr zu tun, und ein
   --     zweiter Lauf wäre kein Cutover, sondern eine Gewohnheit. Das
   --     Skript beendet sich mit einem Fehler statt mit einem stillen
@@ -166,13 +199,27 @@ begin
       'dieses ONE-TIME-Skript wurde auf diesem Bestand offenbar schon ausgefuehrt';
   end if;
 
-  -- 1i. Keine bestehende reale Position darf im Ziel fehlen. Sonst bliebe
-  --     ein Bestand stehen, den die Arbeitsmappe nicht mehr kennt.
-  select count(*) into v_n from public.shop_inventory i
-   where i.condition = 'loose'
-     and (regexp_replace(i.sky_id, '^SKY-', ''))::bigint < 9000
-     and not exists (select 1 from _target t where t.sky_id = i.sky_id);
-  if v_n <> 0 then raise exception 'ABBRUCH: % Lagerposition(en) ohne Zielwert', v_n; end if;
+  -- 1k. DER VORZUSTAND. Gegen ihn wurden die Zielwerte gerechnet.
+  select count(*) into v_n from _expect_before;
+  if v_n <> 1 then
+    raise exception 'ABBRUCH: _expect_before braucht genau eine Zeile, hat %', v_n;
+  end if;
+
+  select count(*), coalesce(sum(quantity), 0) into v_n, v_sum
+    from public.shop_inventory
+   where condition = 'loose'
+     and (regexp_replace(sky_id, '^SKY-', ''))::bigint < 9000;
+  if v_n <> (select loose_rows from _expect_before)
+     or v_sum <> (select loose_sum from _expect_before) then
+    raise exception 'ABBRUCH: loser Realbestand ist %/% Stueck, erwartet %/%',
+      v_n, v_sum, (select loose_rows from _expect_before), (select loose_sum from _expect_before);
+  end if;
+
+  -- 1l. Keine fremde condition. Dieses Skript kennt nur `loose`.
+  select count(*) into v_n from public.shop_inventory where condition <> 'loose';
+  if v_n <> 0 then
+    raise exception 'ABBRUCH: % Lagerzeile(n) mit anderer condition als loose', v_n;
+  end if;
 
   raise notice 'Gates bestanden. Zielsumme %, % Positionen.', v_sum, (select count(*) from _target);
 end;

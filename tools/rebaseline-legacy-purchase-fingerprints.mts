@@ -2,8 +2,13 @@
  * ###########################################################################
  * ##                                                                       ##
  * ##   PRE-GO-LIVE ONE-TIME LEGACY FINGERPRINT REBASELINE                  ##
+ * ##   STAGING ONLY · EXECUTED 2026-09-22 · DO NOT RUN AGAIN               ##
  * ##                                                                       ##
- * ##   Einmalig für die Einkaufsgruppen #82–#93. Danach nicht wieder.      ##
+ * ##   Einmalig für die Einkaufsgruppen #82–#93 auf STAGING. Danach nicht  ##
+ * ##   wieder — und auf PRODUCTION nie: dort war dieselbe Klasse von       ##
+ * ##   Abweichung inzwischen erklärt. Der Sync erkennt sie seither als     ##
+ * ##   `date_already_applied` (ADR-0104) und stempelt sie auf dem          ##
+ * ##   regulären Weg, mit Beweis statt Ausnahmeliste.                      ##
  * ##                                                                       ##
  * ###########################################################################
  *

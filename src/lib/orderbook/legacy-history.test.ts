@@ -471,14 +471,17 @@ describe("the history importer reconciles instead of only inserting", () => {
     expect(SQL).not.toMatch(/'SKY-\d{4}'/);
     expect(SQL).toContain(">>> HIER DEN VOM PREVIEW ERZEUGTEN BLOCK EINSETZEN <<<");
     expect(SQL).toContain("ONE-TIME");
-    expect(SQL).toContain("DO NOT REUSE");
+    // Verbraucht: beide Umgebungen gelaufen, Wiederholung ausgeschlossen.
+    expect(SQL).toContain("DO NOT RUN AGAIN");
+    expect(SQL).toContain("EXECUTED");
   });
 
   it("the one-time baseline script keeps its values out of the repository too", () => {
     const SQL = readFileSync("tools/sql/cutover-baseline-806.sql", "utf8");
     expect(SQL).not.toMatch(/'SKY-\d{4}'/);
-    expect(SQL).toContain("ONE-TIME");
-    expect(SQL).toContain("DO NOT RUN AGAIN AFTER GO-LIVE");
+    expect(SQL).toContain("ONE-TIME PRE-GO-LIVE BASELINE");
+    expect(SQL).toContain("EXECUTED ON PRODUCTION");
+    expect(SQL).toContain("DO NOT RUN AGAIN");
     // Gate 1a schliesst die Tür nach der ersten Bewegung …
     expect(SQL).toContain("from public.inventory_movements");
     // … und Gate 1j nach dem ersten erfolgreichen Lauf.
