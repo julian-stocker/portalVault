@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   BUSINESS_CUT, DATE_REPAIRS, classifyLegacyRows, eventFingerprint, groupDate,
@@ -375,6 +376,120 @@ describe("the gate before anything is written", () => {
 
   it("refuses a negative opening balance", () => {
     expect(planProblems([{ ...good, openingBalance: -1 }])).not.toEqual([]);
+  });
+});
+
+/**
+ * Warum der Importer nicht mehr nur einfügen darf.
+ *
+ * Der technische Abdruck von `opening_balance` und `legacy_adjustment` ist
+ * `(Art, Figur, Zustand)` — ohne Menge. Korrigiert der Verkäufer eine Zeile
+ * in der Arbeitsmappe, ändert sich der Startbestand einer Figur, der Abdruck
+ * aber nicht: ein rein additiver Lauf hielte die Zeile für „schon da" und
+ * behielte die alte Zahl. Die Summe stimmte danach nie wieder, und nichts
+ * hätte es gemeldet. Deshalb vergleicht der Lauf die fachlichen Felder und
+ * verlangt für Ersetzen und Verwerfen ein ausdrückliches `--rebuild`.
+ */
+describe("the history importer reconciles instead of only inserting", () => {
+  const TOOL = readFileSync("tools/import-legacy-history.mts", "utf8");
+
+  it("compares the business fields, not just the fingerprint", () => {
+    expect(TOOL).toContain("const same = (a: StoredRow, b: EventRow) =>");
+    for (const field of ["sky_id", "condition", "event_type", "quantity", "occurred_at",
+                         "source_sheet", "source_row", "note"]) {
+      expect(TOOL.slice(TOOL.indexOf("const same = (a: StoredRow"),
+                        TOOL.indexOf("const pending = rows.filter")), field).toContain(field);
+    }
+  });
+
+  it("leaves the price snapshot out of the comparison", () => {
+    /*
+     * `market_price_snapshot` ist der Preis zum Importzeitpunkt, keine
+     * Aussage der Arbeitsmappe. Stünde er im Vergleich, gälte nach jeder
+     * Preisaktualisierung die halbe Historie als geändert.
+     */
+    const compare = TOOL.slice(TOOL.indexOf("const same = (a: StoredRow"),
+                               TOOL.indexOf("const pending = rows.filter"));
+    expect(compare).not.toContain("market_price_snapshot");
+  });
+
+  it("stops instead of writing when rows would have to be removed", () => {
+    expect(TOOL).toContain("if (APPLY && removals.length > 0)");
+    const guard = TOOL.slice(TOOL.indexOf("if (APPLY && removals.length > 0)"),
+                             TOOL.indexOf("let written = 0;"));
+    expect(guard).toContain("process.exit(1)");
+    expect(guard).toContain("Nothing was written");
+    // Und es sagt, wo das Entfernen tatsächlich geprüft wird.
+    expect(guard).toContain("tools/sql/phase-c-legacy-history-prune.sql");
+  });
+
+  it("never deletes or updates: the table stays append-only", () => {
+    /*
+     * 0079 verbietet UPDATE und DELETE per Trigger. Ein Werkzeug, das sich
+     * seine eigene Vorgeschichte wegräumen könnte, wäre kein Protokoll mehr
+     * — der Schutz bleibt, und dieses Werkzeug versucht ihn nicht einmal.
+     */
+    expect(TOOL).not.toContain(".delete()");
+    expect(TOOL).not.toContain(".update(");
+    expect(TOOL).not.toContain("disable trigger");
+    expect(TOOL).toContain('db.from("legacy_stock_events").insert(batch)');
+  });
+
+  it("the one-time prune script removes exactly nine named rows and nothing else", () => {
+    const SQL = readFileSync("tools/sql/phase-c-legacy-history-prune.sql", "utf8");
+    // Es schaltet den Schutz nur für diese eine Transaktion ab.
+    expect(SQL).toContain("begin;");
+    expect(SQL).toContain("disable trigger legacy_stock_events_no_update");
+    expect(SQL).toContain("enable trigger legacy_stock_events_no_update");
+    expect(SQL.indexOf("enable trigger")).toBeGreaterThan(SQL.indexOf("disable trigger"));
+    expect(SQL).toContain("commit;");
+    // Genau ein DELETE, und es trifft nur die geprüfte Liste.
+    expect(SQL.match(/delete from/g)).toHaveLength(1);
+    expect(SQL).toContain("delete from public.legacy_stock_events e\n using phase_c_prune p");
+    for (const other of ["inventory_movements e", "shop_inventory", "sale_items", "purchase_items"]) {
+      expect(SQL.slice(SQL.indexOf("delete from"), SQL.indexOf("enable trigger")), other)
+        .not.toContain(other);
+    }
+    // Vorher und nachher wird gezählt, sonst rollt alles zurück — gegen die
+    // mitgelieferte Erwartung, nicht gegen eine eingebaute Zahl.
+    expect(SQL).toContain("create temporary table phase_c_expect");
+    expect(SQL).toContain("select rows_before, rows_after into v_before, v_after");
+    expect(SQL).toContain("phase_c_prune ist leer");
+    // Und der Bestand wird gegen seinen eigenen Vorher-Stand geprüft.
+    expect(SQL).toContain("create temporary table phase_c_stock_before");
+    expect(SQL).toContain("shop_inventory-Zeile(n) haben sich veraendert");
+  });
+
+  it("carries no per-figure quantities into the repository", () => {
+    /*
+     * Die zu entfernenden Zeilen tragen Mengen je Figur — das ist genau die
+     * Klasse Daten, die docs/SECURITY.md aus dem Repository heraushält. Sie
+     * sind ausserdem umgebungsspezifisch: auf Production sind es andere Ids.
+     * Deshalb steht hier der Rahmen, und der Block wird je Lauf erzeugt.
+     */
+    const SQL = readFileSync("tools/sql/phase-c-legacy-history-prune.sql", "utf8");
+    expect(SQL).not.toMatch(/'SKY-\d{4}'/);
+    expect(SQL).toContain(">>> HIER DEN VOM PREVIEW ERZEUGTEN BLOCK EINSETZEN <<<");
+    expect(SQL).toContain("ONE-TIME");
+    expect(SQL).toContain("DO NOT REUSE");
+  });
+
+  it("the one-time baseline script keeps its values out of the repository too", () => {
+    const SQL = readFileSync("tools/sql/cutover-baseline-806.sql", "utf8");
+    expect(SQL).not.toMatch(/'SKY-\d{4}'/);
+    expect(SQL).toContain("ONE-TIME");
+    expect(SQL).toContain("DO NOT RUN AGAIN AFTER GO-LIVE");
+    // Gate 1a schliesst die Tür nach der ersten Bewegung …
+    expect(SQL).toContain("from public.inventory_movements");
+    // … und Gate 1j nach dem ersten erfolgreichen Lauf.
+    expect(SQL).toContain("dieses ONE-TIME-Skript wurde auf diesem Bestand offenbar schon ausgefuehrt");
+  });
+
+  it("still touches no operative table anywhere", () => {
+    for (const table of ['from("inventory_movements")', 'from("shop_inventory")',
+                         'from("sale_items")', 'from("purchase_items")']) {
+      expect(TOOL, table).not.toContain(table);
+    }
   });
 });
 

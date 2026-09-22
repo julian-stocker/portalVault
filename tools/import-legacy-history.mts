@@ -2,12 +2,19 @@
  * Import the reconstructed 2026 legacy stock history (ADR-0102).
  *
  *   npm run legacy:history:staging              preview, writes nothing
- *   npm run legacy:history:staging -- --apply   writes legacy_stock_events
+ *   npm run legacy:history:staging -- --apply   inserts what is missing
  *
  * IT WRITES ONE TABLE AND NOTHING ELSE. No `inventory_movements`, no
  * `shop_inventory`, no purchase and no sale. The reconstructed history is
  * additive and never touches the operative ledger — bringing the real stock
  * onto the workbook's figure is a separate, append-only reconciliation run.
+ *
+ * THIS TOOL ONLY EVER INSERTS, because the table is append-only (0079) and
+ * stays that way. When a corrected workbook makes rows change or fall out of
+ * the plan, the run names them and refuses: removing them is a deliberate,
+ * separately reviewed act through `tools/sql/phase-c-legacy-history-prune.sql`.
+ * See the reconciliation block below for why a fingerprint alone is not
+ * enough to notice a changed opening balance.
  *
  * WHY THE SERVICE ROLE HERE, AGAINST THE USUAL RULE
  *
@@ -140,6 +147,7 @@ console.log("── Reconstruction ──");
 console.log(`  positions ................ ${plans.length}`);
 console.log(`  purchase events .......... ${included.filter((e) => e.kind === "purchase").length}`);
 console.log(`  sale events .............. ${included.filter((e) => e.kind === "sale").length}`);
+console.log(`  return events ............ ${included.filter((e) => e.kind === "return").length}`);
 console.log(`  correction events ........ ${included.filter((e) => e.kind === "correction").length}`);
 console.log(`  opening_balance > 0 ...... ${plans.filter((p) => p.openingBalance > 0).length}  sum ${plans.reduce((s, p) => s + p.openingBalance, 0)}`);
 console.log(`  legacy_adjustment ........ ${plans.filter((p) => p.legacyAdjustment !== 0).length}  sum ${plans.reduce((s, p) => s + p.legacyAdjustment, 0)}`);
@@ -215,14 +223,86 @@ if (duplicates > 0) {
   process.exit(1);
 }
 
-const existing = new Set((await page<{ import_fingerprint: string }>(
-  "legacy_stock_events", "import_fingerprint", "import_fingerprint")).map((row) => row.import_fingerprint));
-const pending = rows.filter((row) => !existing.has(row.import_fingerprint));
+/*
+ * WAS IN DER DATENBANK STEHT — UND OB ES NOCH STIMMT.
+ *
+ * Bis hierher war dieser Import rein additiv: was der Abdruck schon kennt,
+ * bleibt liegen. Das trägt, solange die Arbeitsmappe nur wächst. Es trägt
+ * NICHT, wenn der Verkäufer eine Zeile korrigiert:
+ *
+ *   · Eine Zeile verschwindet aus dem Plan (ein `x` wurde zu `-`) — ihr
+ *     Ereignis bleibt sonst für immer in der Historie stehen.
+ *   · Der TECHNISCHE Abdruck von `opening_balance` und `legacy_adjustment`
+ *     ist `(Art, Figur, Zustand)` und enthält KEINE Menge. Ändert sich der
+ *     Startbestand einer Figur, trägt die alte Zeile denselben Abdruck und
+ *     gilt als „schon da" — die Datenbank behielte stillschweigend die alte
+ *     Zahl, und die Summe stimmte nie wieder.
+ *
+ * Deshalb wird hier verglichen statt nur nachgeschlagen, und zwar über die
+ * fachlichen Felder. `market_price_snapshot` gehört NICHT dazu: es ist der
+ * Preis zum Zeitpunkt des Imports, keine Aussage der Arbeitsmappe.
+ */
+type StoredRow = EventRow & { id: number };
+const storedRows = await page<StoredRow>("legacy_stock_events",
+  "id, sky_id, condition, event_type, quantity, occurred_at, source_sheet, source_row, import_fingerprint, note",
+  "id");
+const stored = new Map(storedRows.map((row) => [row.import_fingerprint, row]));
+
+const same = (a: StoredRow, b: EventRow) =>
+  a.sky_id === b.sky_id && a.condition === b.condition && a.event_type === b.event_type
+  && a.quantity === b.quantity && String(a.occurred_at).slice(0, 10) === String(b.occurred_at).slice(0, 10)
+  && (a.source_sheet ?? null) === (b.source_sheet ?? null)
+  && (a.source_row ?? null) === (b.source_row ?? null)
+  && (a.note ?? null) === (b.note ?? null);
+
+const pending = rows.filter((row) => !stored.has(row.import_fingerprint));
+const drifted = rows.map((row) => {
+  const was = stored.get(row.import_fingerprint);
+  return was !== undefined && !same(was, row) ? { was, now: row } : null;
+}).filter((x): x is { was: StoredRow; now: EventRow } => x !== null);
+const planned = new Set(rows.map((row) => row.import_fingerprint));
+const stale = storedRows.filter((row) => !planned.has(row.import_fingerprint));
 
 console.log("\n── Rows ──");
 console.log(`  planned .................. ${rows.length}`);
-console.log(`  already present .......... ${rows.length - pending.length}`);
+console.log(`  in the database .......... ${storedRows.length}`);
+console.log(`  unchanged ................ ${rows.length - pending.length - drifted.length}`);
 console.log(`  to insert ................ ${pending.length}`);
+console.log(`  changed (replace) ........ ${drifted.length}`);
+console.log(`  no longer planned (drop) . ${stale.length}`);
+for (const { was, now } of drifted.slice(0, 40)) {
+  console.log(`    ~ #${was.id} ${was.event_type} ${was.sky_id}` +
+    ` ${was.quantity} → ${now.quantity}` +
+    `${was.occurred_at.slice(0, 10) === now.occurred_at.slice(0, 10) ? "" : ` · ${was.occurred_at.slice(0, 10)} → ${now.occurred_at.slice(0, 10)}`}`);
+}
+for (const row of stale.slice(0, 40)) {
+  console.log(`    - #${row.id} ${row.event_type} ${row.sky_id} ${row.quantity}` +
+    ` ${row.source_sheet ?? "—"}:${row.source_row ?? "—"} ${JSON.stringify(row.note ?? "")}`);
+}
+const after = rows.length;
+console.log(`  after a full rebuild ..... ${after}`);
+
+/*
+ * FAIL CLOSED, STATT EINE HALB ALTE HISTORIE ZU HINTERLASSEN.
+ *
+ * Einfügen darf dieses Werkzeug. Entfernen nicht — `legacy_stock_events` ist
+ * append-only (0079), und dieser Schutz bleibt: ein Importer, der sich seine
+ * eigene Vorgeschichte wegräumen kann, ist kein Protokoll mehr. Stehen also
+ * geänderte oder entfallene Zeilen an, nennt der Lauf sie vollständig und
+ * hält an. Das Entfernen ist ein eigener, einzeln geprüfter Vorgang über
+ * `tools/sql/phase-c-legacy-history-prune.sql`, danach fügt ein gewöhnliches
+ * `--apply` den Rest ein.
+ */
+const removals = [...drifted.map((d) => d.was), ...stale];
+if (APPLY && removals.length > 0) {
+  console.error(`\nFAIL-CLOSED: ${drifted.length} changed and ${stale.length} obsolete row(s)` +
+    ` stand in the way of the plan.`);
+  console.error("  This tool only inserts; legacy_stock_events is append-only by design.");
+  console.error("  Remove exactly the rows listed above with the reviewed one-time script");
+  console.error("  tools/sql/phase-c-legacy-history-prune.sql, then run --apply again.");
+  console.error("  Nothing was written.");
+  process.exit(1);
+}
 const withoutPrice = pending.filter((row) => row.market_price_snapshot === null);
 if (withoutPrice.length > 0) {
   const figures = [...new Set(withoutPrice.map((row) => row.sky_id))];
@@ -235,8 +315,9 @@ if (!APPLY) {
 }
 
 let written = 0;
-for (let from = 0; from < pending.length; from += 500) {
-  const batch = pending.slice(from, from + 500);
+const toWrite = pending;
+for (let from = 0; from < toWrite.length; from += 500) {
+  const batch = toWrite.slice(from, from + 500);
   const { error } = await db.from("legacy_stock_events").insert(batch);
   if (error) {
     console.error(`\nInsert failed at row ${from}: ${error.message}`);
@@ -244,6 +325,6 @@ for (let from = 0; from < pending.length; from += 500) {
     process.exit(1);
   }
   written += batch.length;
-  console.log(`  inserted ${written}/${pending.length}`);
+  console.log(`  inserted ${written}/${toWrite.length}`);
 }
 console.log(`\nDone. ${written} row(s) written.`);
