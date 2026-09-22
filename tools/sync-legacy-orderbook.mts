@@ -32,7 +32,7 @@ import {
   STOCK_SHEETS, groupRows, indexCatalog, parseOrderSheet, type CatalogEntry,
 } from "../src/lib/orderbook/order-2026.ts";
 import { groupSales, parseSalesSheet } from "../src/lib/orderbook/sales-2026.ts";
-import { planBatch } from "../src/lib/orderbook/batch-import.ts";
+import { planBatch, purchaseFingerprint } from "../src/lib/orderbook/batch-import.ts";
 import {
   buildSelfUsage, buildTightNameIndex, planSales, tighten,
   type SalePlan, type SalesPlanDeps,
@@ -42,7 +42,8 @@ import {
   type StoredLine, type SyncPlan, type WorkbookLine,
 } from "../src/lib/orderbook/legacy-sync.ts";
 import {
-  importGateOpen, planGroups, type GroupFacts, type HeaderDiff,
+  classifyPurchaseGroup, importGateOpen, mayRestampPurchase, planGroups, saleDateDiff,
+  type GroupFacts, type HeaderDiff, type PurchaseVerdict,
 } from "../src/lib/orderbook/legacy-sync-groups.ts";
 
 const WORKBOOK = process.env.SKYISLES_WORKBOOK
@@ -283,9 +284,8 @@ for (const p of salePlans) {
   if (knownHeader !== undefined && knownHeader !== p.headerRow) {
     headerDiffs.push({ field: "headerRow", from: String(knownHeader), to: String(p.headerRow) });
   }
-  if (txt(sale.sold_at).slice(0, 10) !== txt(p.date)) {
-    headerDiffs.push({ field: "date", from: txt(sale.sold_at).slice(0, 10), to: txt(p.date) });
-  }
+  const dateDiff = saleDateDiff(txt(sale.sold_at), txt(p.date));
+  if (dateDiff !== null) headerDiffs.push(dateDiff);
   if (txt(sale.buyer_ref) !== txt(g?.buyer)) {
     headerDiffs.push({ field: "buyer", from: txt(sale.buyer_ref), to: txt(g?.buyer) });
   }
@@ -322,15 +322,54 @@ const explainedPurchases = new Set<number>([
   ...purchasePlan.insertsIntoExistingGroup.map((i) => i.groupId as number),
 ]);
 const purchaseRestamp: number[] = [];
-const purchaseUnexplained: { purchaseId: number; headerRow: number }[] = [];
+const purchaseUnexplained: { purchaseId: number; headerRow: number; reason: string }[] = [];
+const purchaseVerdicts = new Map<number, PurchaseVerdict>();
+const purchaseById = new Map(purchases.map((r) => [r.id, r]));
+const purchaseHeaderOf = (note: unknown) => {
+  const m = /Kopfzeile (\d+)/.exec(String(note ?? ""));
+  return m ? Number(m[1]) : null;
+};
 for (const p of purchaseBatch.plans) {
   if (p.status !== "eligible") continue;
   const ids = new Set((p.preview.migrated as unknown as MigratedItem[])
     .map((i) => rowToPurchase.get(i.sourceRow)).filter((x): x is number => x !== undefined));
   if (ids.size !== 1) continue;                        // wirklich neue Gruppe
   const purchaseId = [...ids][0];
-  if (explainedPurchases.has(purchaseId)) purchaseRestamp.push(purchaseId);
-  else purchaseUnexplained.push({ purchaseId, headerRow: p.headerRow });
+  const row = purchaseById.get(purchaseId);
+
+  /*
+   * DER BEWEIS FÜR `date_already_applied`, HIER GERECHNET, NICHT GERATEN.
+   *
+   * Derselbe Abdruck, dieselben Zeilen — nur mit dem Datum, das die Gruppe
+   * beim Import hatte: keines. Stimmt er dann mit dem gespeicherten überein,
+   * beschreibt der gespeicherte beweisbar den früheren Zustand DIESER
+   * Gruppe. Gerechnet wird über `preview.all`, weil der Abdruck das tut.
+   */
+  const dateless = await purchaseFingerprint(
+    { headerRow: p.headerRow, date: null, totalCost: p.totalCost } as never,
+    p.preview.all as never);
+
+  const verdict = classifyPurchaseGroup({
+    purchaseId,
+    headerRow: p.headerRow as number,
+    fingerprintMatches: txt(row?.import_fingerprint) === p.fingerprint,
+    matchesDatelessFingerprint: txt(row?.import_fingerprint) === dateless,
+    workbookDate: txt(p.date),
+    storedDate: txt((row as unknown as { purchased_at?: string })?.purchased_at),
+    itemsChanged: explainedPurchases.has(purchaseId),
+    headerRowMatches: purchaseHeaderOf((row as unknown as { note?: string })?.note) === p.headerRow,
+    totalCostMatches: Number((row as unknown as { total_cost?: number })?.total_cost ?? 0)
+      === Number(p.totalCost ?? 0),
+    legacySource: txt(row?.source) === LEGACY_SOURCE,
+    hasMovement: purchaseItems.some((i) => i.purchase_id === purchaseId
+      && (i as unknown as { movement_id: number | null }).movement_id !== null),
+  });
+  purchaseVerdicts.set(purchaseId, verdict);
+  if (verdict.kind === "unexplained") {
+    purchaseUnexplained.push({ purchaseId, headerRow: p.headerRow, reason: verdict.reason });
+  } else if (mayRestampPurchase(verdict)) {
+    purchaseRestamp.push(purchaseId);
+  }
 }
 
 console.log("── GRUPPEN UND FINGERABDRÜCKE ──");
@@ -350,6 +389,13 @@ for (const kind of ["in_sync", "item", "sold_at", "item_and_sold_at", "unpersist
 console.log(`  Verkaufsabdrücke zu stempeln .......... ${groupPlan.restamp.length}`);
 console.log(`  sold_at zu schreiben (0089) ........... ${groupPlan.soldAtWrites.length}` +
   (groupPlan.soldAtWrites.length ? `: ${groupPlan.soldAtWrites.map((w) => `#${w.saleId}→${w.soldAt}`).join(" ")}` : ""));
+for (const kind of ["item", "date_already_applied"]) {
+  const list = [...purchaseVerdicts].filter(([, v]) => v.kind === kind).map(([id]) => id);
+  if (list.length > 0) {
+    console.log(`  Einkauf ${kind.padEnd(20)} ${String(list.length).padStart(4)}` +
+      `   → ${list.slice(0, 12).map((i) => `#${i}`).join(" ")}${list.length > 12 ? " …" : ""}`);
+  }
+}
 console.log(`  Einkaufsabdrücke zu stempeln .......... ${purchaseRestamp.length}` +
   (purchaseRestamp.length ? `   → ${purchaseRestamp.slice(0, 12).map((i) => `#${i}`).join(" ")}${purchaseRestamp.length > 12 ? " …" : ""}` : ""));
 if (groupPlan.unexplained.length > 0) {
@@ -358,7 +404,8 @@ if (groupPlan.unexplained.length > 0) {
 }
 if (purchaseUnexplained.length > 0) {
   console.log(`  UNERKLÄRTE EINKÄUFE — kein Stempel:`);
-  for (const u of purchaseUnexplained) console.log(`     ! purchase #${u.purchaseId} (Kopf ${u.headerRow})`);
+  for (const u of purchaseUnexplained)
+    console.log(`     ! purchase #${u.purchaseId} (Kopf ${u.headerRow}): ${u.reason}`);
 }
 console.log("");
 

@@ -3,8 +3,9 @@ import { readFileSync } from "node:fs";
 
 import {
   SYNCABLE_HEADER_FIELDS, UNPERSISTED_FIELDS, VERIFIABLE_HEADER_FIELDS,
-  classifyGroup, importGateOpen, mayRestamp, needsSoldAt, planGroups,
-  type GroupFacts,
+  classifyGroup, classifyPurchaseGroup, importGateOpen, mayRestamp, mayRestampPurchase,
+  needsSoldAt, planGroups, saleDateDiff,
+  type GroupFacts, type PurchaseFacts,
 } from "./legacy-sync-groups";
 
 /**
@@ -223,10 +224,23 @@ describe("the tool is wired to the gate", () => {
   });
 
   it("compares every verifiable canonical header field", () => {
-    for (const field of ['field: "headerRow"', 'field: "date"',
-                         'field: "buyer"', 'field: "moneyU"']) {
+    for (const field of ['field: "headerRow"', 'field: "buyer"', 'field: "moneyU"']) {
       expect(TOOL, field).toContain(field);
     }
+    // Das Datum läuft über `saleDateDiff`, damit ein fehlender Mappenwert
+    // kein Widerspruch ist — die Regel steht an einer Stelle, nicht im Werkzeug.
+    expect(TOOL).toContain("const dateDiff = saleDateDiff(txt(sale.sold_at), txt(p.date));");
+    expect(TOOL).toContain("if (dateDiff !== null) headerDiffs.push(dateDiff);");
+  });
+
+  it("proves the purchase date explanation instead of assuming it", () => {
+    // Der frühere Abdruck wird nachgerechnet — über `preview.all`, wie der
+    // Abdruck selbst — und nur ein Treffer zählt als Erklärung.
+    expect(TOOL).toContain("const dateless = await purchaseFingerprint(");
+    expect(TOOL).toContain("{ headerRow: p.headerRow, date: null, totalCost: p.totalCost } as never");
+    expect(TOOL).toContain("p.preview.all as never");
+    expect(TOOL).toContain("matchesDatelessFingerprint: txt(row?.import_fingerprint) === dateless");
+    expect(TOOL).toContain("classifyPurchaseGroup({");
   });
 
   it("counts the comparison as incomplete without a known header row", () => {
@@ -275,4 +289,128 @@ describe("the tool is wired to the gate", () => {
     }
   });
 
+});
+
+/**
+ * Die Verkaufsgruppe ab Kopfzeile 545 und die dreizehn undatierten Einkäufe.
+ *
+ * Beide Fälle haben dieselbe Ursache: der Abdruck hasht das Datum, und beim
+ * Import war dort `null` — einmal, weil die Zelle einen Tippfehler trägt
+ * (`16.04.206`), dreizehnmal, weil die Gruppe damals noch undatiert war.
+ * Das Datum kam später über `apply-workbook-dates.mts` in die Datenbank,
+ * ohne den Abdruck anzufassen. Was aussah wie ein Widerspruch, ist die
+ * Vorgeschichte derselben Gruppe.
+ */
+describe("a date the workbook cannot state is not a contradiction", () => {
+  it("makes no diff when the workbook has no date and the database has one", () => {
+    expect(saleDateDiff("2026-04-16", "")).toBeNull();
+    expect(saleDateDiff("2026-04-16", "   ")).toBeNull();
+  });
+
+  it("makes no diff when both agree", () => {
+    expect(saleDateDiff("2026-04-16", "2026-04-16")).toBeNull();
+    // Der gespeicherte Wert darf ein Zeitstempel sein.
+    expect(saleDateDiff("2026-04-16T00:00:00+00:00", "2026-04-16")).toBeNull();
+  });
+
+  it("still reports a real disagreement", () => {
+    expect(saleDateDiff("2026-04-16", "2026-04-17"))
+      .toEqual({ field: "date", from: "2026-04-16", to: "2026-04-17" });
+    // Und auch dann, wenn die Datenbank noch gar kein Datum trägt.
+    expect(saleDateDiff("", "2026-03-18"))
+      .toEqual({ field: "date", from: "", to: "2026-03-18" });
+  });
+
+  it("feeds the ordinary classification, which stays fail-closed", () => {
+    const base: GroupFacts = {
+      saleId: 1, headerRow: 545, fingerprintMatches: true,
+      headerDiffs: [], itemsChanged: false, allVerifiableCompared: true,
+    };
+    // Kein Diff mehr → die Gruppe ist schlicht in_sync.
+    expect(classifyGroup(base)).toEqual({ kind: "in_sync" });
+    // Ein echter Datumsunterschied bleibt ein Widerspruch, wenn der Abdruck passt.
+    expect(classifyGroup({ ...base, headerDiffs: [saleDateDiff("2026-04-16", "2026-04-17")!] }).kind)
+      .toBe("unexplained");
+  });
+});
+
+describe("a purchase whose date was applied after the import", () => {
+  const facts = (over: Partial<PurchaseFacts> = {}): PurchaseFacts => ({
+    purchaseId: 1, headerRow: 1989,
+    fingerprintMatches: false,
+    matchesDatelessFingerprint: true,
+    workbookDate: "2026-08-21",
+    storedDate: "2026-08-21",
+    itemsChanged: false,
+    headerRowMatches: true,
+    totalCostMatches: true,
+    legacySource: true,
+    hasMovement: false,
+    ...over,
+  });
+
+  it("is explained only when the older fingerprint is actually reproduced", () => {
+    const verdict = classifyPurchaseGroup(facts());
+    expect(verdict).toEqual({ kind: "date_already_applied", date: "2026-08-21" });
+    expect(mayRestampPurchase(verdict)).toBe(true);
+  });
+
+  it("refuses when the dateless fingerprint does not match", () => {
+    /*
+     * Ohne diesen Beweis wäre die Erklärung eine Vermutung: „der Abdruck ist
+     * bestimmt alt". Genau das soll dieses Tor verhindern.
+     */
+    const verdict = classifyPurchaseGroup(facts({ matchesDatelessFingerprint: false }));
+    expect(verdict.kind).toBe("unexplained");
+    expect(mayRestampPurchase(verdict)).toBe(false);
+  });
+
+  it("refuses when the database does not already carry that very date", () => {
+    expect(classifyPurchaseGroup(facts({ storedDate: "2026-08-22" })).kind).toBe("unexplained");
+    expect(classifyPurchaseGroup(facts({ storedDate: "" })).kind).toBe("unexplained");
+  });
+
+  it("refuses when the workbook itself has no date", () => {
+    expect(classifyPurchaseGroup(facts({ workbookDate: "", storedDate: "" })).kind)
+      .toBe("unexplained");
+  });
+
+  /*
+   * DIE VIER GRUPPEN, DIE NICHT HIERHER GEHÖREN — Kopfzeilen 2088, 2268,
+   * 2278 und 2283.
+   *
+   * Bei ihnen hat sich zusätzlich eine Positionszeile geändert. Dann ist der
+   * gespeicherte Abdruck nicht mehr der frühere Zustand DIESER Gruppe, und
+   * es bleibt beim gewöhnlichen Weg — erst die Zeilen korrigieren, danach
+   * stempeln. `item` ist deshalb kein Freibrief, sondern die Zusage, dass
+   * dieser Lauf die Ursache tatsächlich behebt.
+   */
+  it("never explains a group by its date when a row changed as well", () => {
+    const verdict = classifyPurchaseGroup(facts({ itemsChanged: true }));
+    expect(verdict).toEqual({ kind: "item" });
+    expect(verdict.kind).not.toBe("date_already_applied");
+  });
+
+  it("fails closed on every header component it cannot explain", () => {
+    for (const over of [{ headerRowMatches: false }, { totalCostMatches: false },
+                        { legacySource: false }, { hasMovement: true }] as const) {
+      const verdict = classifyPurchaseGroup(facts(over));
+      expect(verdict.kind, JSON.stringify(over)).toBe("unexplained");
+      expect(mayRestampPurchase(verdict)).toBe(false);
+    }
+  });
+
+  it("fails closed on a combination nobody has described", () => {
+    // Abdruck weicht ab, nichts Prüfbares erklärt es, kein Datumsbeweis.
+    const verdict = classifyPurchaseGroup(facts({
+      matchesDatelessFingerprint: false, workbookDate: "2026-08-21", storedDate: "2026-08-21",
+    }));
+    expect(verdict.kind).toBe("unexplained");
+  });
+
+  it("calls a matching fingerprint in_sync, and a matching one with changed rows a contradiction", () => {
+    expect(classifyPurchaseGroup(facts({ fingerprintMatches: true })).kind).toBe("in_sync");
+    expect(classifyPurchaseGroup(facts({ fingerprintMatches: true, itemsChanged: true })).kind)
+      .toBe("unexplained");
+  });
 });

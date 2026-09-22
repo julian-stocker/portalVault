@@ -147,6 +147,133 @@ export function needsSoldAt(verdict: GroupVerdict): { to: string } | null {
     ? { to: verdict.to } : null;
 }
 
+/**
+ * EIN FEHLENDES DATUM IST KEIN GEGENTEILIGES DATUM.
+ *
+ * Drei Gruppen der Arbeitsmappe tragen in der Datumszelle einen Tippfehler
+ * (`16.04.206`). Der Verkaufs-Parser kann daraus kein Datum machen und
+ * liefert leer; der Abdruck hasht an dieser Stelle `null` — beim Import wie
+ * heute. Das Datum selbst steht trotzdem in der Datenbank, weil
+ * `tools/apply-workbook-dates.mts` es getrennt nachgetragen hat: ein
+ * Re-Import hätte die Gruppe verdoppelt.
+ *
+ * Verglich man beides stumpf, sagte die Mappe „kein Datum" und die Datenbank
+ * „16.04.2026", und der Sync meldete einen Widerspruch, den es nicht gibt —
+ * die Gruppe ab Kopfzeile 545 war genau das. Eine Zelle, die kein Datum
+ * enthält, behauptet aber nichts; sie schweigt.
+ *
+ * Benannt wird hier die Kopfzeile, nicht die Datensatz-Id: die Id einer
+ * Gruppe unterscheidet sich je Umgebung, die Zeile der Arbeitsmappe nicht.
+ *
+ * ABWEICHENDE DATEN BLEIBEN EINE ABWEICHUNG. Liefert die Mappe ein gültiges
+ * Datum und die Datenbank trägt ein anderes, entsteht der Unterschied
+ * weiterhin — das ist der Fall, für den 0089 überhaupt existiert.
+ */
+export function saleDateDiff(storedDate: string, workbookDate: string): HeaderDiff | null {
+  const workbook = workbookDate.trim();
+  if (workbook === "") return null;
+  const stored = storedDate.trim().slice(0, 10);
+  return stored === workbook ? null : { field: "date", from: stored, to: workbook };
+}
+
+/**
+ * Die Einkaufsseite: warum ein Abdruck abweicht, obwohl nichts abweicht.
+ *
+ * `canonicalPurchaseIdentity` hasht das Datum. Dreizehn Einkaufsgruppen
+ * wurden importiert, als ihre Datumszelle noch leer war (`0058`, undatierte
+ * Einkäufe); ihr Abdruck hasht deshalb `null`. Später trug
+ * `apply-workbook-dates.mts` das inzwischen gepflegte Datum in
+ * `purchases.purchased_at` nach — ohne den Abdruck anzufassen, weil das
+ * Werkzeug bewusst nur ein Feld schreibt.
+ *
+ * Das Ergebnis sieht aus wie eine unerklärte Abweichung und ist das Gegenteil:
+ * der gespeicherte Abdruck beschreibt beweisbar den FRÜHEREN Zustand
+ * derselben Gruppe. Der Beweis wird verlangt, nicht vermutet — der Aufrufer
+ * rechnet den Abdruck der heutigen Mappenzeilen mit `date = null` nach, und
+ * nur wenn er exakt dem gespeicherten entspricht, gilt diese Erklärung.
+ *
+ * Sie deckt AUSSCHLIESSLICH das Datum ab. Hat sich zusätzlich eine
+ * Positionszeile geändert, ist der Abdruck nicht mehr der frühere Zustand
+ * dieser Gruppe, die Rechnung geht nicht auf, und es bleibt beim
+ * gewöhnlichen Weg: erst die Zeilen über den Item-Sync korrigieren, danach
+ * regulär stempeln.
+ */
+export type PurchaseFacts = {
+  purchaseId: number;
+  headerRow: number;
+  /** Stimmt der gespeicherte Abdruck mit dem der heutigen Mappe überein? */
+  fingerprintMatches: boolean;
+  /**
+   * Entspricht der gespeicherte Abdruck dem, was dieselben Zeilen mit
+   * `date = null` ergeben? Das ist der Beweis, nicht die Vermutung.
+   */
+  matchesDatelessFingerprint: boolean;
+  /** Das Datum der Arbeitsmappe, leer wenn sie keines liefert. */
+  workbookDate: string;
+  /** `purchases.purchased_at`, auf den Tag gekürzt. */
+  storedDate: string;
+  /** Hat eine Positionszeile sich geändert, fehlt sie oder ist sie neu? */
+  itemsChanged: boolean;
+  /** Stimmen Kopfzeile und Gesamtkosten? */
+  headerRowMatches: boolean;
+  totalCostMatches: boolean;
+  /** Ist es wirklich eine Arbeitsmappen-Gruppe ohne Ledger-Bindung? */
+  legacySource: boolean;
+  hasMovement: boolean;
+};
+
+export type PurchaseVerdict =
+  | { kind: "in_sync" }
+  | { kind: "item" }
+  | { kind: "date_already_applied"; date: string }
+  | { kind: "unexplained"; reason: string };
+
+export function classifyPurchaseGroup(facts: PurchaseFacts): PurchaseVerdict {
+  if (!facts.legacySource) {
+    return { kind: "unexplained", reason: "kein Arbeitsmappen-Einkauf" };
+  }
+  if (facts.hasMovement) {
+    return { kind: "unexplained", reason: "Positionen haengen am Ledger" };
+  }
+  if (!facts.headerRowMatches) {
+    return { kind: "unexplained", reason: "Kopfzeile weicht ab" };
+  }
+  if (!facts.totalCostMatches) {
+    return { kind: "unexplained", reason: "Gesamtkosten weichen ab" };
+  }
+
+  if (facts.fingerprintMatches) {
+    // Derselbe Widerspruch wie auf der Verkaufsseite: der Abdruck behauptet
+    // Gleichheit, die Zeilen sagen etwas anderes.
+    return facts.itemsChanged
+      ? { kind: "unexplained", reason: "Abdruck stimmt, obwohl sich Positionen unterscheiden" }
+      : { kind: "in_sync" };
+  }
+
+  // Positionsänderungen erklären den Abdruck auf dem gewöhnlichen Weg: der
+  // Item-Sync korrigiert sie, danach wird gestempelt.
+  if (facts.itemsChanged) return { kind: "item" };
+
+  const workbook = facts.workbookDate.trim();
+  const stored = facts.storedDate.trim().slice(0, 10);
+  if (workbook !== "" && stored === workbook && facts.matchesDatelessFingerprint) {
+    return { kind: "date_already_applied", date: workbook };
+  }
+
+  if (workbook !== "" && stored !== workbook) {
+    return { kind: "unexplained", reason: `Datum weicht ab: "${stored}" statt "${workbook}"` };
+  }
+  return {
+    kind: "unexplained",
+    reason: "Abdruck weicht ab, ohne dass eine geprüfte Ursache ihn erklärt",
+  };
+}
+
+/** Darf diese Einkaufsgruppe neu gestempelt werden? */
+export function mayRestampPurchase(verdict: PurchaseVerdict): boolean {
+  return verdict.kind === "item" || verdict.kind === "date_already_applied";
+}
+
 export type GroupPlan = {
   verdicts: Map<number, GroupVerdict>;
   restamp: number[];
