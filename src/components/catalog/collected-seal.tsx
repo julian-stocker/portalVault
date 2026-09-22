@@ -116,7 +116,27 @@ const RIGHT = `calc(${WINDOW_FILL.right} / 2)`;
  * 400 px `-sm` variant is already generous. A loader would add a request
  * shape and a wrapper for nothing.
  */
+/**
+ * OB DIE MARKE ÜBERHAUPT GEZEICHNET WIRD (V4.7).
+ *
+ * Seit der goldene Layer hinter einer gesammelten Karte liegt, übernimmt
+ * dieser die Hervorhebung allein. Die Marke oben rechts wäre daneben eine
+ * zweite Aussage über dieselbe Sache, und der Betreiber will das Ergebnis
+ * zuerst ohne sie beurteilen.
+ *
+ * Ausgeschaltet, nicht ausgebaut: die Grafik, ihre Stelle in der
+ * Asset-Pipeline, die Geometrie unten und die Aufrufstelle in der Karte
+ * bleiben unverändert. Ein `true` hier bringt sie zurück, ohne dass
+ * irgendetwas anderes angefasst werden muss.
+ *
+ * Nur die Besitzmarke. Das Abzeichen für Varianten ist eine andere
+ * Komponente und bleibt unberührt, und „◆ In deiner Sammlung" steht
+ * ohnehin im Text der Karte und nicht hier.
+ */
+const SHOW_OWNERSHIP_SEAL = false;
+
 export function CollectedSeal() {
+  if (!SHOW_OWNERSHIP_SEAL) return null;
   return (
     <span
       aria-hidden="true"

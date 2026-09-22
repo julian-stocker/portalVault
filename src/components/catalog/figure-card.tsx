@@ -38,6 +38,10 @@ import { CollectedSeal } from "@/components/catalog/collected-seal";
 import { VariantSeal } from "@/components/catalog/variant-seal";
 import {
   CARD_ASPECT,
+  COLLECTED_GLOW,
+  COLLECTED_GLOW_OFFSET_X,
+  COLLECTED_GLOW_SCALE_X,
+  COLLECTED_GLOW_SCALE_Y,
   GRID_AREAS,
   GRID_ROWS,
   INSET,
@@ -470,6 +474,47 @@ export function FigureCard({
           : {}),
       } as CSSProperties}
     >
+      {/*
+       * LAYER 0 — the golden aura, BEHIND everything, for an owned figure.
+       *
+       * First child, so every later sibling paints over it: the body, the
+       * template, the badges and the trade row are all `absolute inset-0`
+       * further down and need no `z-index` to win. The card itself is
+       * untouched — same box, same grid, same slots.
+       *
+       * It overflows the card on purpose. `inset-0` would hide it exactly
+       * under the artwork; instead it is pinned to the card's CENTRE and
+       * given a width and a height a few per cent larger. Both are
+       * percentages of the card, so it scales with every breakpoint and
+       * stays centred at any size — and both are still centred, so the two
+       * factors change how far it reaches, never where it sits.
+       *
+       * `max-w-none` because Tailwind's reset caps images at 100 % of their
+       * box, which is precisely the overflow this needs.
+       *
+       * No CSS glow anywhere: the light is drawn in the PNG.
+       */}
+      {owned ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={COLLECTED_GLOW.src}
+          srcSet={`${COLLECTED_GLOW.small} 400w, ${COLLECTED_GLOW.src} 640w`}
+          sizes="(max-width: 640px) 50vw, 220px"
+          alt=""
+          aria-hidden="true"
+          draggable={false}
+          className="pointer-events-none absolute left-1/2 top-1/2 max-w-none select-none"
+          style={{
+            width: `${COLLECTED_GLOW_SCALE_X * 100}%`,
+            height: `${COLLECTED_GLOW_SCALE_Y * 100}%`,
+            /* The centring, plus the small correction for the artwork's own
+               off-centre ring. Both in one transform, so there is one place
+               that decides where this sits. */
+            transform: `translate(calc(-50% + ${COLLECTED_GLOW_OFFSET_X}), -50%)`,
+          }}
+        />
+      ) : null}
+
       {!interactive ? (
         /* Static body: the picture is a picture. An administrator's actions
            are named controls, never a tap on the card (ADR-0042). */

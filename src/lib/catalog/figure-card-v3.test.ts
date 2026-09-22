@@ -64,7 +64,14 @@ const num = (s: string) => Number.parseFloat(s);
 // ---------------------------------------------------------------------------
 
 describe("the shipped templates", () => {
-  const SHIPPED = ["card", "special", "elite", "dark", "legendary", "chase", "prestige", "collected"];
+  /*
+   * Sieben Karten, die Besitz-Marke — und seit V4.7 der goldene Layer, der
+   * HINTER einer gesammelten Karte liegt. Er teilt sich die Kartenleinwand,
+   * wird aber nie als Karte gerendert: `COLLECTED_GLOW` steht bewusst außerhalb
+   * von `CARD_ARTWORK`, damit `artworkFor(...)` ihn nicht erreichen kann.
+   */
+  const SHIPPED = ["card", "special", "elite", "dark", "legendary", "chase", "prestige",
+                   "collected", "collected.layer"];
 
   it.each(SHIPPED)("%s exists in two widths", (name) => {
     for (const file of [`public/images/cards/${name}.webp`, `public/images/cards/${name}-sm.webp`]) {

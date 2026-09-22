@@ -107,6 +107,53 @@ const TEMPLATES = [
  */
 const OVERLAYS = ["collected"] as const;
 
+/**
+ * Not a card and not a mark: the glow drawn BEHIND one.
+ *
+ * `collected.layer.png` is a transparent golden aura on the card canvas. The
+ * card renders it a few per cent larger than itself and centred, so the light
+ * spills out around all four edges — which is why it shares the canvas: at
+ * the same ratio, one scale factor is all the geometry there is.
+ *
+ * It cannot go through the card checks. Those assert a transparent image
+ * WINDOW and a transparent CORNER, because a card is a frame with a hole in
+ * it; this file is transparent nearly everywhere and has neither. Its own
+ * checks are the ones that mean something here: the card canvas, a real alpha
+ * channel, and mostly — but not entirely — see-through. A file that is 100 %
+ * clear is an empty export, and one that is opaque would black out the card.
+ */
+const LAYERS = ["collected.layer"] as const;
+
+/**
+ * GEOMETRIE DES GLOW-LAYERS — GEMESSEN, NICHT GERATEN.
+ *
+ * Die Quelle ist als RAHMEN auf der Kartenfläche gezeichnet, nicht als Aura
+ * um sie herum: der helle Ring liegt INNERHALB der Leinwand, mit einem
+ * schmalen und ungleichen transparenten Rand (links 11 px, rechts 5, oben 35,
+ * unten 48). Beides zusammen war der Grund, warum bei 1,05 nichts zu sehen
+ * war — der helle Ring lag unter der Karte, und was überstand, war nur das
+ * schwache Auslaufen. Unten stand gar nichts über, weil dort 48 px leer sind.
+ *
+ * WAS HIER PASSIERT, UND WAS AUSDRÜCKLICH NICHT
+ *
+ * Der Inhalt wird auf seine tatsächliche Bounding-Box beschnitten, gleichmäßig
+ * skaliert und mittig auf eine transparente Kartenleinwand gesetzt. Damit ist
+ * der Rand auf allen vier Seiten gleich, und die Leinwand bleibt exakt
+ * 1007×1562 — dasselbe Seitenverhältnis wie die Karte, also genügt im Browser
+ * eine einzige Skalierungszahl.
+ *
+ * NICHT auf jedes Alpha > 0 beschnitten: die Schwelle ignoriert nur den
+ * unsichtbaren Saum. Und der Inhalt füllt die Leinwand NICHT ganz aus —
+ * `CONTENT_SHARE` lässt ringsum einen transparenten Sicherheitsrand, damit das
+ * Auslaufen nicht an der Leinwandkante hart abbricht und die WebP-Skalierung
+ * keine Kante zu greifen bekommt.
+ *
+ * Nichts wird gestreckt: die Bounding-Box behält ihr Seitenverhältnis, sie
+ * wird nur einbeschrieben und zentriert.
+ */
+const GLOW_ALPHA = 10;        // darunter ist der Saum unsichtbar
+const CONTENT_SHARE = 0.94;   // 3 % transparenter Sicherheitsrand je Seite
+
 const kb = (bytes: number) => `${Math.round(bytes / 1024)} KB`;
 
 await mkdir(TARGET, { recursive: true });
@@ -135,6 +182,32 @@ async function transparency(
 }
 
 const pct = (share: number) => `${(share * 100).toFixed(1)} %`;
+
+/**
+ * Die Bounding-Box aller Pixel, die heller als `threshold` sind.
+ *
+ * Gelesen wird der dekodierte Alphakanal, aus demselben Grund wie in
+ * `transparency()`: `hasAlpha` sagt nur, dass ein Kanal da ist.
+ */
+async function alphaBounds(file: string, threshold: number) {
+  const { data, info } = await sharp(file).ensureAlpha().raw()
+    .toBuffer({ resolveWithObject: true });
+  const { width, height, channels } = info;
+  let left = width, right = -1, top = height, bottom = -1;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * channels + 3] > threshold) {
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        if (y > bottom) bottom = y;
+      }
+    }
+  }
+  return { left, top, width: right - left + 1, height: bottom - top + 1,
+           marginLeft: left, marginRight: width - 1 - right,
+           marginTop: top, marginBottom: height - 1 - bottom };
+}
 
 /*
  * Every rejection, not just the first.
@@ -263,6 +336,98 @@ for (const name of OVERLAYS) {
   for (const { suffix, width } of WIDTHS) {
     const to = `${TARGET}/${name}${suffix}.webp`;
     await sharp(from)
+      .resize({ width, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: 88, alphaQuality: 100, effort: 6 })
+      .toFile(to);
+    const out = await stat(to);
+    console.log(`  → ${to}  ${width}px  ${kb(out.size)}`);
+  }
+}
+
+/* ----------------------------------------------------------------- layer */
+
+for (const name of LAYERS) {
+  const from = `${SOURCE}/${name}.png`;
+  const meta = await sharp(from).metadata();
+
+  if (meta.width !== CANVAS.width || meta.height !== CANVAS.height) {
+    reject(
+      `${from} is ${meta.width}×${meta.height}; the glow shares the card canvas ` +
+        `${CANVAS.width}×${CANVAS.height}, so that one scale factor centres it`,
+    );
+    continue;
+  }
+  if (!meta.hasAlpha) {
+    reject(`${from} has no alpha channel — it would cover the card as a block`);
+    continue;
+  }
+
+  const clear = await transparency(from, {
+    left: 0,
+    top: 0,
+    width: meta.width as number,
+    height: meta.height as number,
+  });
+  /* Between the two failures that matter: an empty export and a solid slab. */
+  if (clear < 0.05) {
+    reject(`${from}: only ${pct(clear)} transparent — this is a block, not a glow.`);
+    continue;
+  }
+  if (clear > 0.995) {
+    reject(`${from}: ${pct(clear)} transparent — there is nothing drawn in it.`);
+    continue;
+  }
+
+  const source = await stat(from);
+  const box = await alphaBounds(from, GLOW_ALPHA);
+  console.log(`\n${from}  ${meta.width}×${meta.height}  ${pct(clear)} clear  ${kb(source.size)}`);
+  console.log(
+    `  glow box  ${box.width}×${box.height} at ${box.left},${box.top}  ` +
+      `margins L${box.marginLeft} R${box.marginRight} T${box.marginTop} B${box.marginBottom}`,
+  );
+
+  /*
+   * Beschneiden, gleichmäßig einbeschreiben, zentrieren. `fit: inside` auf
+   * einem Kasten mit BEIDEN Maßen ist eine reine Skalierung — kein Zuschnitt,
+   * keine Streckung —, und `extend` füllt den Rest mit echtem Nichts.
+   */
+  const fitted = await sharp(from)
+    .extract({ left: box.left, top: box.top, width: box.width, height: box.height })
+    .resize({
+      width: Math.round(CANVAS.width * CONTENT_SHARE),
+      height: Math.round(CANVAS.height * CONTENT_SHARE),
+      fit: "inside",
+    })
+    .toBuffer({ resolveWithObject: true });
+
+  const padX = CANVAS.width - fitted.info.width;
+  const padY = CANVAS.height - fitted.info.height;
+  const normalised = await sharp(fitted.data)
+    .extend({
+      left: Math.floor(padX / 2), right: Math.ceil(padX / 2),
+      top: Math.floor(padY / 2), bottom: Math.ceil(padY / 2),
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .png()
+    .toBuffer();
+
+  const check = await sharp(normalised).metadata();
+  if (check.width !== CANVAS.width || check.height !== CANVAS.height) {
+    reject(
+      `${from}: normalising produced ${check.width}×${check.height}; the layer must stay ` +
+        `on the card canvas or one scale factor stops centring it`,
+    );
+    continue;
+  }
+  console.log(
+    `  normalised  content ${fitted.info.width}×${fitted.info.height} ` +
+      `centred on ${CANVAS.width}×${CANVAS.height}  ` +
+      `margin ${Math.floor(padX / 2)} / ${Math.floor(padY / 2)}`,
+  );
+
+  for (const { suffix, width } of WIDTHS) {
+    const to = `${TARGET}/${name}${suffix}.webp`;
+    await sharp(normalised)
       .resize({ width, fit: "inside", withoutEnlargement: true })
       .webp({ quality: 88, alphaQuality: 100, effort: 6 })
       .toFile(to);

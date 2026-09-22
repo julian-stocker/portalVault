@@ -273,6 +273,81 @@ export const CARD_ARTWORK: Readonly<Record<CardType, CardArtwork>> = {
 export const OWNERSHIP_OVERLAY: CardArtwork = art("collected");
 
 /**
+ * The golden aura drawn BEHIND an owned figure's card.
+ *
+ * Same canvas as the cards, so it needs no geometry of its own: centre it and
+ * scale it, and it lines up by construction. It is a finished PNG with its
+ * own alpha — there is no CSS glow, no `box-shadow` and no filter anywhere
+ * near it, because the light has a shape the artwork draws and a rectangle
+ * with a blur does not.
+ *
+ * Kept out of `CARD_ARTWORK` for the same reason as the seal above: it is not
+ * a card a figure can be printed on, and it must never be reachable through
+ * `artworkFor(...)`.
+ */
+export const COLLECTED_GLOW: CardArtwork = art("collected.layer");
+
+/**
+ * How much bigger than the card the glow is drawn — MEASURED, not guessed.
+ *
+ * TWO NUMBERS, BECAUSE THE ARTWORK IS NOT EVENLY THICK.
+ *
+ * The layer is a RING, and what the eye reads is its bright band, not its
+ * faint tail. The card edge therefore has to land INSIDE that band. Measured
+ * on the shipped derivative, in canvas pixels (1007 × 1562):
+ *
+ *   bright band (alpha > 200)   left 46–107   top 79–134
+ *   content     (alpha > 10)    x 30–976      y 74–1487
+ *
+ * A layer drawn at scale S puts the card's left edge at `1007 · (1 − 1/S) / 2`
+ * and its top edge at `1562 · (1 − 1/S) / 2`; one canvas pixel is then
+ * `S · cardWidth / 1007` on screen, on both axes. With a single S that gave
+ * 5.9 px of bright glow at the sides but 7.3 px above and below — the band is
+ * simply drawn thicker there, and the uniform scale carried the difference
+ * straight through.
+ *
+ * Solving that for the same 5.9 px of BAND gave Sy = 1.1512, and on screen it
+ * still stood noticeably further out than the sides. The band was the wrong
+ * target: what the eye reads at the top and bottom is the whole outer
+ * contour, faint tail included, and that tail is drawn differently there than
+ * at the sides. So Y is set from the rendered result rather than from the
+ * alpha channel — the measurement above stays as the record of how the range
+ * was found, not as the rule for this number.
+ *
+ * X stays at 1.16, which the operator judged correct at the sides and which
+ * must not move. The difference between the axes is a deliberate, accepted
+ * stretch of an abstract glow — the CARD is untouched by it, and both axes
+ * stay centred, so nothing shifts up or down.
+ *
+ * Useful range for X, where the card edge stays inside the side band:
+ * 1.11 – 1.19. Y is judged in the browser; lower it to pull the top and
+ * bottom glow closer to the card edge.
+ */
+export const COLLECTED_GLOW_SCALE_X = 1.16;
+export const COLLECTED_GLOW_SCALE_Y = 1.12;
+
+/**
+ * A hair to the right, because the artwork is not centred in its own canvas.
+ *
+ * The ring sat a little further from the left edge of the source than from
+ * the right — the measured margins were 11 px and 5 px before normalising,
+ * and cropping to the content box carried that asymmetry into the middle
+ * rather than removing it. Scaled up by 1.16 it reads as a sliver of glow
+ * standing out past the card's left edge that is not there on the right.
+ *
+ * So the LAYER moves, not the card: a small shift added to the centring
+ * transform. `cqw` is one per cent of the card's own width — the card is the
+ * `@container` — so this is a share of the card and not a fixed pixel count,
+ * and it scales with every breakpoint exactly as the glow does. At the
+ * catalog's ~220 px card, 0.45 cqw is about 1 px.
+ *
+ * It cannot move the card, the artwork or anything else: it lives inside the
+ * glow's own `transform`, and the glow is a `pointer-events-none` image
+ * behind everything.
+ */
+export const COLLECTED_GLOW_OFFSET_X = "0.45cqw";
+
+/**
  * The card a figure is printed on.
  *
  * Takes the type and nothing else. Ownership used to be a second parameter
