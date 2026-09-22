@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 
 import {
   checkStagingTarget,
+  chooseEnvironment,
+  ENVIRONMENT_FLAG,
+  PRODUCTION_CONFIRMATION,
   projectOrigin,
   projectRef,
   readEnvFile,
@@ -306,5 +309,141 @@ describe("every staging-only writer is actually guarded", () => {
         `"${name}" writes but does not name its environment`,
       ).toBe(true);
     }
+  });
+});
+
+/**
+ * Welche Umgebung ein Werkzeug bedient, das beide kann.
+ *
+ * Der Sales-Importer lief lange nur gegen Staging. Für den Cutover muss er
+ * auch Production bedienen — und genau da wäre ein Default der Fehler
+ * gewesen: still auf Production zu zeigen, weil jemand ein Flag vergaß.
+ * Also wird die Umgebung gewählt, nie geerbt, und Production zweimal.
+ */
+describe("choosing an environment is an act, not a default", () => {
+  it("refuses a run that names no environment", () => {
+    const choice = chooseEnvironment(["--apply"]);
+    expect(choice.ok).toBe(false);
+    if (!choice.ok) expect(choice.message).toContain(ENVIRONMENT_FLAG);
+  });
+
+  it("refuses an environment that does not exist", () => {
+    for (const value of ["prod", "live", "Staging2", "", "--apply"]) {
+      const choice = chooseEnvironment([ENVIRONMENT_FLAG, value]);
+      expect(choice.ok, value).toBe(false);
+    }
+  });
+
+  it("accepts staging on its own, as before", () => {
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "staging"]))
+      .toEqual({ ok: true, environment: "staging" });
+    expect(chooseEnvironment([`${ENVIRONMENT_FLAG}=staging`, "--apply", "--confirm-staging"]))
+      .toEqual({ ok: true, environment: "staging" });
+  });
+
+  it("refuses production without its second word", () => {
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production"]).ok).toBe(false);
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", "--apply"]).ok).toBe(false);
+    // Ein anderes Bekenntnis zählt nicht.
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", "--confirm-staging"]).ok).toBe(false);
+  });
+
+  it("accepts production only when it is named twice", () => {
+    expect(chooseEnvironment([ENVIRONMENT_FLAG, "production", PRODUCTION_CONFIRMATION]))
+      .toEqual({ ok: true, environment: "production" });
+  });
+
+  it("never lets one run mean two environments", () => {
+    const choice = chooseEnvironment([ENVIRONMENT_FLAG, "staging", ENVIRONMENT_FLAG, "production",
+                                      PRODUCTION_CONFIRMATION]);
+    expect(choice.ok).toBe(false);
+    if (!choice.ok) expect(choice.message).toContain("One run, one environment");
+  });
+
+  it("does not turn a stray confirmation into a choice", () => {
+    // `--confirm-production` allein wählt nichts aus.
+    expect(chooseEnvironment([PRODUCTION_CONFIRMATION]).ok).toBe(false);
+    expect(chooseEnvironment([PRODUCTION_CONFIRMATION, "--apply"]).ok).toBe(false);
+  });
+});
+
+describe("the sales importer keeps both guards and every data gate", () => {
+  const TOOL = readFileSync("tools/import-sales.mts", "utf8");
+  const PACKAGE = JSON.parse(readFileSync("package.json", "utf8")) as
+    { scripts: Record<string, string> };
+
+  it("chooses before it connects, and checks the identity afterwards", () => {
+    expect(TOOL).toContain("const choice = chooseEnvironment(process.argv.slice(2));");
+    expect(TOOL).toContain('requireProduction("orderbook:sales-import")');
+    expect(TOOL).toContain('requireStaging("orderbook:sales-import")');
+    // Die Wahl steht vor jedem Schreibweg.
+    expect(TOOL.indexOf("chooseEnvironment(")).toBeLessThan(TOOL.indexOf("await apply(client"));
+    // Und `requireStaging` ist nicht ersatzlos verschwunden.
+    expect(TOOL).toMatch(/requireStaging\(/);
+  });
+
+  it("asks for the environment's own confirmation before an apply", () => {
+    expect(TOOL).toContain('? "confirm-production" : "confirm-staging"');
+    expect(TOOL).toContain("if (!flag(confirmation))");
+    expect(TOOL).toContain("Nothing was written");
+  });
+
+  it("gives each environment its own script, and neither borrows the other", () => {
+    const staging = PACKAGE.scripts["orderbook:sales-import:staging"];
+    const production = PACKAGE.scripts["orderbook:sales-import:prod"];
+    expect(staging).toContain("--env-file=.env.staging");
+    expect(staging).toContain("--env staging");
+    expect(staging).toContain(`${REQUIRE_STAGING_FLAG}=1`);
+    expect(staging).not.toContain(".env.local");
+    expect(staging).not.toContain("production");
+
+    expect(production).toContain("--env-file=.env.local");
+    expect(production).toContain("--env production");
+    expect(production).toContain(PRODUCTION_CONFIRMATION);
+    expect(production).not.toContain(".env.staging");
+    expect(production).not.toContain(`${REQUIRE_STAGING_FLAG}=1`);
+    // Kein Apply im Skript selbst: das bleibt eine bewusste Eingabe.
+    expect(production).not.toContain("--apply");
+    expect(staging).not.toContain("--apply");
+  });
+
+  it("still refuses to write unless every dataset gate holds", () => {
+    const fn = TOOL.slice(TOOL.indexOf("function applyInvariants"));
+    for (const [what, wanted] of [
+      ["Quellgruppen", "297"], ["echte Verkäufe", "296"],
+      ["eigenständige Korrekturen", "1"], ["unaufgelöste Positionen", "0"],
+      ["mehrdeutige Positionen", "0"], ["ungültige Positionen", "0"],
+      ["Auszahlungsabweichungen", "0"], ["Fingerabdruck-Kollisionen", "0"],
+      ["blockierte Gruppen", "0"],
+    ] as const) {
+      expect(fn, what).toContain(`expect("${what}"`);
+      expect(fn.slice(fn.indexOf(`expect("${what}"`)), what).toContain(wanted);
+    }
+    // Und die Gates stehen vor dem ersten Schreibvorgang.
+    expect(TOOL).toMatch(/const failures = applyInvariants\(plans\);[\s\S]*?process\.exit\(1\)/);
+  });
+
+  it("has no allow-list for the four new groups in its executable code", () => {
+    /*
+     * Die vier Kopfzeilen dürfen im Kommentar stehen — sie begründen den
+     * Dataset-Snapshot 297/296. Was sie nicht dürfen: den Import steuern.
+     * Geprüft wird deshalb der ausgeführte Code, nicht die Erklärung.
+     */
+    const code = TOOL.split("\n")
+      .filter((l) => { const t = l.trimStart();
+        return !t.startsWith("*") && !t.startsWith("//") && !t.startsWith("/*"); })
+      .join("\n");
+    for (const headerRow of ["1553", "1561", "1567", "1577"]) {
+      expect(code, headerRow).not.toContain(headerRow);
+    }
+    // Und es gibt überhaupt keine Kopfzeilen-Auswahl: importiert wird, was
+    // der Plan als `eligible` führt.
+    expect(TOOL).toContain('plans.filter((p) => p.status === "eligible")');
+  });
+
+  it("still signs in as an operator and writes through the import RPCs", () => {
+    expect(TOOL).toContain("signInWithPassword");
+    expect(TOOL).toContain('client.rpc("seller_import_sale_group"');
+    expect(TOOL).toContain('client.rpc("seller_import_settlement_adjustment"');
   });
 });

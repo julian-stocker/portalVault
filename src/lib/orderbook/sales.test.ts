@@ -1378,21 +1378,30 @@ describe("the historical apply gate", () => {
   it("--apply alone is refused; the environment must be named out loud", () => {
     /*
      * `--apply` is one word away from `--preview` in a shell history, and this
-     * one writes historical sales. The second flag cannot be reached by editing the
-     * end of the previous command.
+     * one writes historical sales. The second flag cannot be reached by editing
+     * the end of the previous command — and it is the flag of the environment
+     * actually chosen, so a staging confirmation never authorises production.
      */
-    expect(TOOL).toMatch(/if \(!flag\("confirm-staging"\)\) \{/);
-    expect(TOOL).toContain("Apply requires --confirm-staging as well as --apply");
+    expect(TOOL).toContain('? "confirm-production" : "confirm-staging"');
+    expect(TOOL).toMatch(/if \(!flag\(confirmation\)\) \{/);
+    expect(TOOL).toContain("Apply requires --${confirmation} as well as --apply");
     // And the refusal exits non-zero rather than falling through to a write.
-    const guard = TOOL.slice(TOOL.indexOf('if (!flag("confirm-staging"))'),
+    const guard = TOOL.slice(TOOL.indexOf("if (!flag(confirmation))"),
                              TOOL.indexOf("await apply(client"));
     expect(guard).toContain("process.exit(1)");
-    expect(TOOL.indexOf('flag("confirm-staging")')).toBeLessThan(TOOL.indexOf("await apply(client"));
+    expect(TOOL.indexOf("flag(confirmation)")).toBeLessThan(TOOL.indexOf("await apply(client"));
   });
 
-  it("the target is proven to be Staging before anything is written", () => {
-    expect(TOOL).toMatch(/const url = requireStaging\("orderbook:sales-import"\);/);
-    expect(TOOL.indexOf("requireStaging(")).toBeLessThan(TOOL.indexOf("await apply(client"));
+  it("the target is proven to be the chosen environment before anything is written", () => {
+    // Die Umgebung wird gewählt, nie geerbt — und danach durch denselben
+    // Identitätsvergleich bestätigt, den es vorher schon gab.
+    expect(TOOL).toMatch(/const choice = chooseEnvironment\(process\.argv\.slice\(2\)\);/);
+    expect(TOOL).toMatch(/requireProduction\("orderbook:sales-import"\)/);
+    expect(TOOL).toMatch(/requireStaging\("orderbook:sales-import"\)/);
+    // Reihenfolge innerhalb von main(), nicht in der Importzeile.
+    const main = TOOL.slice(TOOL.indexOf("async function main("));
+    expect(main.indexOf("chooseEnvironment(")).toBeLessThan(main.indexOf("requireStaging("));
+    expect(main.indexOf("requireStaging(")).toBeLessThan(main.indexOf("await apply(client"));
   });
 
   it("a preview that fails any invariant refuses the whole run", () => {

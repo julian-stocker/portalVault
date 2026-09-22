@@ -1,8 +1,18 @@
 /**
  * Historical Verkauf import (ADR-0089).
  *
- *   npm run orderbook:sales-import:staging -- --preview
- *   npm run orderbook:sales-import:staging -- --apply
+ *   npm run orderbook:sales-import:staging               Vorschau
+ *   npm run orderbook:sales-import:staging -- --apply --confirm-staging
+ *   npm run orderbook:sales-import:prod                  Vorschau
+ *   npm run orderbook:sales-import:prod -- --apply
+ *
+ * ZWEI UMGEBUNGEN, KEINE VORAUSWAHL. Das Werkzeug lief lange nur gegen
+ * Staging und rief `requireStaging()` unbedingt auf. Für den Cutover muss es
+ * auch Production bedienen — aber Production wird gewählt, nie geerbt:
+ * `--env production --confirm-production`, beides wörtlich, sonst passiert
+ * nichts. Welche Umgebung wirklich am anderen Ende hängt, entscheidet danach
+ * derselbe Identitätsvergleich wie bisher (`requireStaging` /
+ * `requireProduction`) — das Flag sagt nur, was gemeint war.
  *
  * Same discipline as the Einkauf importer: selective workbook read, a real
  * Seller Operator session, preview by default, and an apply that re-reads the
@@ -14,7 +24,7 @@
 import { openAsBlob } from "node:fs";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { requireStaging } from "./lib/staging-guard.mts";
+import { chooseEnvironment, requireProduction, requireStaging } from "./lib/staging-guard.mts";
 import { readWorkbookParts } from "../src/lib/import/xlsx-reader.ts";
 import { parseSharedStrings, parseSheet } from "../src/lib/import/sheet-rows.ts";
 import { STOCK_SHEETS, groupRows, indexCatalog, parseOrderSheet, type CatalogEntry } from "../src/lib/orderbook/order-2026.ts";
@@ -458,7 +468,16 @@ async function apply(client: SupabaseClient, plans: SalePlan[], factor: number):
 }
 
 async function main(): Promise<void> {
-  const url = requireStaging("orderbook:sales-import");
+  const choice = chooseEnvironment(process.argv.slice(2));
+  if (!choice.ok) {
+    console.error("\n  ENVIRONMENT GUARD — refusing to run.");
+    console.error(`  ${choice.message}`);
+    console.error("  Nothing has been written.\n");
+    process.exit(1);
+  }
+  const url = choice.environment === "production"
+    ? requireProduction("orderbook:sales-import")
+    : requireStaging("orderbook:sales-import");
   const client = await operatorClient();
   console.log(`\n=== PREVIEW — ${ORDER_SHEET}, historische Verkäufe ===`);
   const { plans, bytes, factor, importedAdjustments } = await readAndPlan(client);
@@ -473,11 +492,15 @@ async function main(): Promise<void> {
    * Apply is authorised, but not by `--apply` alone.
    *
    * `--apply` is one word away from `--preview` in a shell history, and this
-   * one writes historical sales. The second flag names the environment out loud, so
-   * the command cannot be arrived at by editing the end of the previous one.
+   * one writes historical sales. The second flag names the environment out
+   * loud, so the command cannot be arrived at by editing the end of the
+   * previous one. Auf Production ist dieses Wort bereits gefallen —
+   * `--confirm-production` wählt die Umgebung überhaupt erst aus.
    */
-  if (!flag("confirm-staging")) {
-    console.error("\n  Apply requires --confirm-staging as well as --apply.");
+  const confirmation = choice.environment === "production"
+    ? "confirm-production" : "confirm-staging";
+  if (!flag(confirmation)) {
+    console.error(`\n  Apply requires --${confirmation} as well as --apply.`);
     console.error(`  Target would be: ${new URL(url).hostname.split(".")[0]}`);
     console.error("  Nothing was written.\n");
     process.exit(1);

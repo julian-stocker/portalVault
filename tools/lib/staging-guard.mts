@@ -223,6 +223,71 @@ export function checkStagingTarget(target: Target, reference: Reference): GuardV
   return { ok: true, origin: targetOrigin, ref: projectRef(target.url) };
 }
 
+/**
+ * WELCHE UMGEBUNG — AUSDRÜCKLICH, NIE GERATEN.
+ *
+ * Ein Werkzeug, das beide Umgebungen bedient, darf keine Vorauswahl treffen.
+ * Ein Default wäre entweder nutzlos (Staging, und der Production-Lauf bricht
+ * ohnehin ab) oder gefährlich (Production, und ein vergessenes Flag schreibt
+ * in die echten Daten). Also: ohne Angabe passiert nichts.
+ *
+ * Production verlangt zusätzlich ein zweites, wörtliches Bekenntnis. Das ist
+ * dieselbe Idee wie `--confirm-staging` beim Apply: ein Flag, das man nicht
+ * durch Editieren des Zeilenendes erreicht, sondern nur durch Hinschreiben.
+ *
+ * Diese Funktion entscheidet nur über die ABSICHT. Ob das Ziel wirklich die
+ * gewünschte Umgebung ist, entscheiden danach `requireStaging()` bzw.
+ * `requireProduction()` — durch exakten Vergleich zweier Identitäten, nicht
+ * durch das Flag. Ein falsch gesetztes `--env` kommt damit nicht weit.
+ */
+export type EnvironmentChoice =
+  | { ok: true; environment: "staging" | "production" }
+  | { ok: false; message: string };
+
+export const ENVIRONMENT_FLAG = "--env";
+export const PRODUCTION_CONFIRMATION = "--confirm-production";
+
+export function chooseEnvironment(argv: readonly string[]): EnvironmentChoice {
+  const values: string[] = [];
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    if (arg === ENVIRONMENT_FLAG) values.push(argv[i + 1] ?? "");
+    else if (arg.startsWith(`${ENVIRONMENT_FLAG}=`)) values.push(arg.slice(ENVIRONMENT_FLAG.length + 1));
+  }
+
+  if (values.length === 0) {
+    return {
+      ok: false,
+      message: `no ${ENVIRONMENT_FLAG} given. Name the environment out loud: ` +
+        `${ENVIRONMENT_FLAG} staging or ${ENVIRONMENT_FLAG} production.`,
+    };
+  }
+  if (values.length > 1) {
+    return {
+      ok: false,
+      message: `${ENVIRONMENT_FLAG} was given ${values.length} times (${values.join(", ")}). ` +
+        "One run, one environment.",
+    };
+  }
+
+  const value = values[0].trim().toLowerCase();
+  if (value !== "staging" && value !== "production") {
+    return {
+      ok: false,
+      message: `${ENVIRONMENT_FLAG} ${JSON.stringify(values[0])} is not an environment. ` +
+        "Only staging and production exist.",
+    };
+  }
+  if (value === "production" && !argv.includes(PRODUCTION_CONFIRMATION)) {
+    return {
+      ok: false,
+      message: `production also needs ${PRODUCTION_CONFIRMATION}. ` +
+        "The environment is named twice on purpose.",
+    };
+  }
+  return { ok: true, environment: value };
+}
+
 /** Reads the two reference files from disk. */
 export function referenceFromDisk(): Reference {
   return {
