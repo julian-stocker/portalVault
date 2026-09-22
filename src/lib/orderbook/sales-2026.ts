@@ -3,7 +3,7 @@
  *
  * THE SHEET'S SHAPE, MEASURED
  *
- *     row 1 / row 4   headers, repeated above every one of the 293 orders
+ *     row 1 / row 4   headers, repeated above every one of the 297 orders
  *     K   Datum       Excel serial, FIRST ITEM ROW ONLY
  *     L   header "T"  inventory marker   x | - | r | (leer)
  *     M   header "S"  shipping marker    x | - | r | (leer)
@@ -24,7 +24,7 @@
  * name here is the worksheet letter and every comment says which header it
  * carries.
  *
- * 1 256 item rows · 293 orders · 2026-01-01 … 2028-06-28 (one typo) · no
+ * 1 283 item rows · 297 orders · 2026-01-01 … 2028-06-28 (one typo) · no
  * merged cells.
  */
 
@@ -101,7 +101,7 @@ export function parseSalesSheet(xml: string, shared: readonly string[]): SalesRo
       artikel, artikelFormula: formula.O ?? "",
       marketFormula: formula.P ?? "", marketValue: value.P ?? "",
       money, buyer: value.AG ?? "",
-      // `AE` carries a formula on all 293 order rows, which is how an order's
+      // `AE` carries a formula on all 297 order rows, which is how an order's
       // first row is recognised — see groupSales.
       ...({} as Record<string, never>),
     });
@@ -145,7 +145,7 @@ const money = (raw: string): number => {
 /**
  * Split the sales area into orders.
  *
- * An order opens where the order-level `AE` formula sits — on all 293 of them,
+ * An order opens where the order-level `AE` formula sits — on all 297 of them,
  * one shape, and the only marker that is present on every order and on no item
  * row. Not the date: four orders have a typo where their date should be, and
  * one of those is empty.

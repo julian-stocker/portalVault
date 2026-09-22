@@ -58,7 +58,9 @@
     "verify:sale-locks:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sale-locks.mts",
     "cards:build": "node tools/build-card-templates.mts",
     "verify:payment-mode:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-payment-mode.mts",
-    "verify:sandbox-e2e:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sandbox-e2e.mts"
+    "verify:sandbox-e2e:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sandbox-e2e.mts",
+    "sync:orderbook:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/sync-legacy-orderbook.mts",
+    "sync:orderbook:prod": "node --env-file=.env.local tools/sync-legacy-orderbook.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

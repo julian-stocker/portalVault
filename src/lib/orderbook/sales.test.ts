@@ -563,7 +563,7 @@ describe("grouping, dates and fingerprints", () => {
   });
 
   it("the fingerprint keys on the header row, because date+buyer collides", () => {
-    // 14 collisions across the 293 orders — (date, buyer) is not identity.
+    // 18 collisions across the 297 orders — (date, buyer) is not identity.
     const identity = canonicalSaleIdentity(
       { headerRow: 37, date: "2026-01-04", buyer: "x", money: { U: 1, AE: 2 } } as never, []);
     expect(identity).toContain("37");
@@ -1378,7 +1378,7 @@ describe("the historical apply gate", () => {
   it("--apply alone is refused; the environment must be named out loud", () => {
     /*
      * `--apply` is one word away from `--preview` in a shell history, and this
-     * one writes 292 sales. The second flag cannot be reached by editing the
+     * one writes historical sales. The second flag cannot be reached by editing the
      * end of the previous command.
      */
     expect(TOOL).toMatch(/if \(!flag\("confirm-staging"\)\) \{/);
@@ -1399,7 +1399,7 @@ describe("the historical apply gate", () => {
     // Read from the plan being applied, not from a report printed earlier.
     const fn = TOOL.slice(TOOL.indexOf("function applyInvariants"));
     for (const [what, wanted] of [
-      ["Quellgruppen", "293"], ["echte Verkäufe", "292"],
+      ["Quellgruppen", "297"], ["echte Verkäufe", "296"],
       ["eigenständige Korrekturen", "1"], ["unaufgelöste Positionen", "0"],
       ["mehrdeutige Positionen", "0"], ["ungültige Positionen", "0"],
       ["Auszahlungsabweichungen", "0"], ["Fingerabdruck-Kollisionen", "0"],

@@ -217,7 +217,7 @@ function report(plans: SalePlan[], bytes: number, importedAdjustments: Set<strin
   /*
    * One identity universe, two destinations.
    *
-   * All 293 source groups are fingerprinted the same way; 292 of them became
+   * All 297 source groups are fingerprinted the same way; 296 of them became
    * sales and one became a standalone settlement adjustment (0061). Counting
    * only the sales would make the book look one short forever.
    */
@@ -316,8 +316,21 @@ function applyInvariants(plans: SalePlan[]): string[] {
   const expect = (what: string, actual: number, wanted: number) => {
     if (actual !== wanted) failures.push(`${what}: ${actual}, erwartet ${wanted}`);
   };
-  expect("Quellgruppen", plans.length, 293);
-  expect("echte Verkäufe", real.length, 292);
+  /*
+   * The two dataset counts are a measured snapshot, not a rule the workbook
+   * may rewrite. They read 293/292 for the book as it stood at the first
+   * import. The owner has since added four sales — header rows 1553, 1561,
+   * 1567 and 1577, 27 positions, 2026-09-19 to 2026-09-21 — and nothing else
+   * moved: the 292 older sales are all still `already_imported` and the one
+   * standalone correction is still matched by its fingerprint, so every
+   * header value and every position row behind those 293 groups is
+   * unchanged. Raising these two numbers by four is the whole of that.
+   *
+   * The next sale the owner writes will fail this gate again. That is what
+   * it is for: a dataset count that follows the file explains nothing.
+   */
+  expect("Quellgruppen", plans.length, 297);
+  expect("echte Verkäufe", real.length, 296);
   expect("eigenständige Korrekturen", corrections.length, 1);
   expect("unaufgelöste Positionen", items.filter((i) => i.classification === "unmatched").length, 0);
   expect("mehrdeutige Positionen", items.filter((i) => i.classification === "ambiguous").length, 0);
@@ -460,7 +473,7 @@ async function main(): Promise<void> {
    * Apply is authorised, but not by `--apply` alone.
    *
    * `--apply` is one word away from `--preview` in a shell history, and this
-   * one writes 292 sales. The second flag names the environment out loud, so
+   * one writes historical sales. The second flag names the environment out loud, so
    * the command cannot be arrived at by editing the end of the previous one.
    */
   if (!flag("confirm-staging")) {
