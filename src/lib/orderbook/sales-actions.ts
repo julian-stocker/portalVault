@@ -159,11 +159,29 @@ export async function setSaleDate(
 export async function updateSaleMeta(
   id: number,
   fields: { country?: string | null; buyerRef?: string | null;
-            externalRef?: string | null; note?: string | null },
+            externalRef?: string | null; note?: string | null;
+            /** Das Verkaufsdatum. `undefined` heißt „nicht anfassen", `null` „löschen". */
+            soldAt?: string | null },
   expectedUpdatedAt?: string | null,
 ) {
+  /*
+   * DATUM UND METADATEN IN EINEM SCHREIBVORGANG (0091).
+   *
+   * Vorher rief der Dialog erst `setSaleDate` und danach diese Funktion auf
+   * — beide mit demselben `expected_updated_at`. Der erste Aufruf setzt
+   * `updated_at` neu, der zweite prüfte gegen den alten Wert und bekam
+   * `PT409`: der Betreiber kollidierte mit sich selbst, und die Metadaten
+   * blieben ungespeichert.
+   *
+   * `seller_update_sale` schreibt das Datum längst mit. Drei Zustände, wie
+   * die Funktion sie erwartet: Feld weggelassen → unverändert, `null` →
+   * `p_clear_date`, ein Datum → `p_sold_at`.
+   */
+  const touchesDate = "soldAt" in fields;
   return run("seller_update_sale", {
     p_id: id,
+    p_sold_at: touchesDate ? fields.soldAt ?? null : null,
+    p_clear_date: touchesDate && (fields.soldAt ?? null) === null,
     p_country: fields.country ?? null,
     p_buyer_ref: fields.buyerRef ?? null,
     p_external_ref: fields.externalRef ?? null,
@@ -263,6 +281,16 @@ export async function removeSaleItem(itemId: number, saleId: number) {
 export async function bookSaleItem(itemId: number, saleId: number) {
   return run("seller_book_sale_item", { p_item_id: itemId }, saleId);
 }
+/**
+ * Verschickt — ausbuchen und den Versand datieren, in einem Aufruf (0090).
+ *
+ * Kein zweiter Buchungsweg: `seller_ship_sale_item` ruft serverseitig
+ * `seller_book_sale_item` auf und schreibt daneben nur `sales.shipped_at`,
+ * falls es noch keines gibt. Ein zweiter Klick bewegt nichts mehr.
+ */
+export async function shipSaleItem(itemId: number, saleId: number) {
+  return run("seller_ship_sale_item", { p_item_id: itemId }, saleId);
+}
 /*
  * Erledigt — the ending for a position that never stood on a shelf (0073).
  * Writes one timestamp and never a movement; the database refuses it for any
@@ -286,6 +314,17 @@ export async function unbookSaleItem(itemId: number, saleId: number) {
 }
 export async function returnSaleItem(itemId: number, saleId: number, returned: boolean) {
   return run("seller_return_sale_item", { p_item_id: itemId, p_returned: returned }, saleId);
+}
+/**
+ * Bestätigen — die Retoure ist da und liegt wieder im Regal (0092).
+ *
+ * Ein Vorgang, ein Aufruf: `seller_receive_sale_item_return` setzt
+ * `returned_at` und bucht über `seller_restock_sale_item` die eine +1 —
+ * beides in derselben Transaktion, beides über die vorhandenen Wege. Ein
+ * zweiter Klick gibt dieselbe Bewegung zurück und bewegt nichts.
+ */
+export async function receiveSaleItemReturn(itemId: number, saleId: number) {
+  return run("seller_receive_sale_item_return", { p_item_id: itemId }, saleId);
 }
 export async function restockSaleItem(itemId: number, saleId: number) {
   return run("seller_restock_sale_item", { p_item_id: itemId }, saleId);

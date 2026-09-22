@@ -670,8 +670,10 @@ describe("one position, one status, one action (0074/0075)", () => {
      * The physical story, one step at a time. Each step is one fact the
      * database records, and each shows exactly one status.
      */
+    // Offen heißt seit 0090 nicht mehr „keine Aktion": ein Klick verschickt
+    // die Position und datiert den Versand des Verkaufs.
     expect(saleItemActions(item(), ctx({ shipped: false })))
-      .toMatchObject({ status: "open", primary: null });
+      .toMatchObject({ status: "open", primary: "ship" });
     expect(saleItemActions(item(), ctx()))
       .toMatchObject({ status: "shipped", primary: "book" });
     expect(saleItemActions(item({ movement_id: 5 }), ctx()))
@@ -1872,10 +1874,9 @@ describe("the Details overlay maintains an external sale", () => {
   });
 
   it("every write carries the concurrency token the dialog was opened with", () => {
-    for (const call of ["setSaleDate(sale.id, wanted, sale.updatedAt)",
-                        "}, sale.updatedAt)"]) {
-      expect(DETAILS, call).toContain(call);
-    }
+    // Seit 0091 ist „das Datum" kein eigener Schreibvorgang mehr: der Dialog
+    // gibt den Token einmal mit, und zwar an den einen Aufruf.
+    expect(DETAILS).toContain("}, sale.updatedAt)");
     for (const fn of ["setSaleDate", "updateSaleMeta", "updateSaleFee",
                       "updateSaleRefund"]) {
       expect(ACTIONS, fn).toMatch(new RegExp(`${fn}[\\s\\S]*?p_expected_updated_at`));
@@ -2114,5 +2115,411 @@ describe("operational creation workflows", () => {
     expect(list).toContain("p_scope = 'external' and b.order_id is null");
     // `source` describes where a row came from, not how it was sold.
     expect(list).not.toMatch(/p_scope[\s\S]{0,120}excel_order_2026/);
+  });
+});
+
+/* ===================================================================== */
+/**
+ * „VERSCHICKT" IST EIN KLICK — UND DERSELBE BUCHUNGSWEG (0090).
+ *
+ * Vorher bot eine frisch angelegte externe Position nichts an: `Ausbuchen`
+ * erschien erst, wenn der ganze Verkauf über den Versandschalter auf
+ * „verschickt" stand. Ein Verkauf, den niemand zweimal anfasste, ließ den
+ * Bestand also unverändert stehen.
+ *
+ * Die Lösung ist KEIN zweiter Buchungsweg: `seller_ship_sale_item` ruft
+ * `seller_book_sale_item` auf und schreibt daneben nur das Versanddatum.
+ */
+describe("shipping one external position, in a single step", () => {
+  const SHIP = code(latestFunction("seller_ship_sale_item").body);
+  const item = (over: Record<string, unknown> = {}) => ({
+    movement_id: null, returned_at: null, return_movement_id: null,
+    settled_at: null, not_shipped_at: null, return_announced_at: null,
+    sky_id: "SKY-0203", legacy_stock_flag: null, ...over,
+  } as never);
+  const ctx = (over: Record<string, unknown> = {}) =>
+    ({ frozen: false, cancelled: false, shipped: false, ...over } as never);
+
+  it("offers it on an open position with a figure", () => {
+    expect(saleItemActions(item(), ctx())).toMatchObject({ status: "open", primary: "ship" });
+    expect(de.business.sales.itemActionLabels.ship).toBe("Verschickt");
+  });
+
+  it("books through the one existing path and writes no stock itself", () => {
+    expect(SHIP).toContain("v_mid := public.seller_book_sale_item(p_item_id)");
+    // Keine zweite Buchung: weder eine eigene Bewegung noch ein Griff in den Bestand.
+    expect(SHIP).not.toContain("record_inventory_movement");
+    expect(SHIP).not.toContain("apply_inventory_movement");
+    expect(SHIP).not.toContain("shop_inventory");
+    expect(SHIP).not.toContain("insert into public.inventory_movements");
+    expect(SHIP).not.toContain("legacy_stock_events");
+  });
+
+  it("stamps the shipping date once, so a second position does not move it", () => {
+    expect(SHIP).toContain("shipped_at = coalesce(shipped_at, now())");
+    // Und sonst nichts an diesem Verkauf.
+    const update = SHIP.slice(SHIP.indexOf("update public.sales"), SHIP.indexOf("return v_mid"));
+    for (const column of ["items_subtotal", "shipping_charged", "discount_amount",
+                          "cancelled_at", "stock_released_at", "import_fingerprint"]) {
+      expect(update, column).not.toContain(column);
+    }
+  });
+
+  it("cannot book twice: the inner call returns the movement it already has", () => {
+    const BOOK = code(latestFunction("seller_book_sale_item").body);
+    expect(BOOK).toContain("if v_item.movement_id is not null then return v_item.movement_id;");
+    // Eine zweite Bewegung entsteht also nicht, und das Datum bleibt das erste.
+    expect(SHIP).toContain("coalesce(shipped_at, now())");
+  });
+
+  it("is gated like every other seller function", () => {
+    expect(SHIP).toContain("if not public.can_operate_active_seller() then");
+    const source = migrationSource("0090_ship_sale_item.sql");
+    expect(source).toContain("security definer");
+    expect(source).toContain("set search_path = ''");
+    expect(source).toContain("revoke all on function public.seller_ship_sale_item(bigint) from public, anon;");
+    expect(source).toContain("grant execute on function public.seller_ship_sale_item(bigint) to authenticated;");
+  });
+
+  it("refuses the endings that mean nothing left the shelf", () => {
+    expect(SHIP).toContain("if v_item.settled_at is not null then");
+    expect(SHIP).toContain("if v_item.not_shipped_at is not null then");
+    // Und im Formular werden sie gar nicht erst angeboten.
+    expect(saleItemActions(item({ settled_at: "t" }), ctx()).primary).toBe("unsettle");
+    expect(saleItemActions(item({ not_shipped_at: "t" }), ctx()).primary).toBe("unmark_not_shipped");
+  });
+
+  it("leaves the refusals where they already are — in the booking path", () => {
+    const BOOK = code(latestFunction("seller_book_sale_item").body);
+    expect(BOOK).toContain("historical sales never move stock");
+    expect(BOOK).toContain("the order already moved this stock");
+    expect(BOOK).toContain("this item is not a catalog figure and has no stock position");
+    // Zu wenig Bestand entscheidet der kanonische Bewegungspfad.
+    expect(BOOK).toContain("public.record_inventory_movement(");
+  });
+
+  it("shows nothing to ship where there is no figure — that line is settled instead", () => {
+    expect(saleItemActions(item({ sky_id: null }), ctx()).primary).toBe("settle");
+  });
+
+  it("offers it once: a booked position moves on to the return actions", () => {
+    expect(saleItemActions(item({ movement_id: 7 }), ctx()))
+      .toMatchObject({ status: "outbooked", primary: "announce_return" });
+    expect(saleItemActions(item({ movement_id: 7 }), ctx({ shipped: true })).primary)
+      .not.toBe("ship");
+  });
+
+  it("treats every position on its own", () => {
+    // Zwei Positionen desselben Verkaufs, eine gebucht: nur die andere wird
+    // noch angeboten, und die Buchung adressiert die Position, nicht den Verkauf.
+    expect(saleItemActions(item(), ctx()).primary).toBe("ship");
+    expect(saleItemActions(item({ movement_id: 7 }), ctx()).primary).toBe("announce_return");
+    expect(SHIP).toContain("where id = p_item_id");
+    expect(readFileSync(join(process.cwd(), "src/components/business/sale-items.tsx"), "utf8"))
+      .toContain("ship: run(() => shipSaleItem(id, saleId))");
+  });
+
+  it("does not offer it for an imported sale — history never moves stock here", () => {
+    const held = saleItemActions(item({ source_row: 42 }), ctx({ historical: true }));
+    expect(held.primary).toBeNull();
+    expect(held.heldForReconciliation).toBe(true);
+  });
+
+  it("takes the sale out of `Offen` once every position has left", () => {
+    const sale = {
+      source: "manual", cancelledAt: null, stockReleasedAt: null, orderId: null,
+      itemCount: 2, outbookedCount: 0, restockedCount: 0, settledCount: 0,
+      notShippedCount: 0, closedCount: 0,
+    };
+    expect(saleStockStatus(sale)).toBe("open");
+    expect(saleStockStatus({ ...sale, outbookedCount: 1, closedCount: 1 })).toBe("partial");
+    expect(saleStockStatus({ ...sale, outbookedCount: 2, closedCount: 2 })).toBe("outbooked");
+  });
+});
+
+/* ===================================================================== */
+/**
+ * ZWEI BILDSCHIRME, EINE AKTIONSLISTE.
+ *
+ * `saleItemActions` entscheidet für beide: die Detailseite
+ * (`sale-items.tsx`) und die aufgeklappte Position in der Verkaufsliste
+ * (`sales-ledger.tsx`). Jede rendert ihren Knopf über eine eigene
+ * Handler-Tabelle — und genau da ging `ship` verloren: die Regel lieferte
+ * `primary = "ship"`, die Liste kannte den Schlüssel nicht, und
+ * `{run ? <button/> : null}` zeigte nichts. Statusspalte „Offen", Spalte
+ * „Aktion" leer.
+ *
+ * Dieser Block prüft deshalb nicht Text, sondern Deckung: jede Aktion, die
+ * die Regel tatsächlich hervorbringt, muss in der Detailseite verdrahtet
+ * sein — und in der Liste entweder verdrahtet oder hier ausdrücklich als
+ * bewusst ausgelassen benannt.
+ */
+describe("every action the rules produce is wired where it is offered", () => {
+  const DETAIL = readFileSync(join(process.cwd(), "src/components/business/sale-items.tsx"), "utf8");
+  const LEDGER = readFileSync(join(process.cwd(), "src/components/business/sales-ledger.tsx"), "utf8");
+
+  /*
+   * Die Liste bietet bewusst nur die Aktionen an, die Bestand bewegen oder
+   * eine Retoure weiterschieben. Eine Position ohne Bewegung zu schließen
+   * ist eine Entscheidung und gehört auf die Detailseite, wo der ganze
+   * Verkauf sichtbar ist. Wer das ändert, ändert diese Liste — bewusst.
+   */
+  const LEDGER_OMITS = ["settle", "unsettle", "unmark_not_shipped"];
+
+  /** Alles, was `saleItemActions` über den Zustandsraum hinweg zurückgibt. */
+  function producedActions(): string[] {
+    const out = new Set<string>();
+    const base = {
+      movement_id: null as number | null, return_movement_id: null as number | null,
+      returned_at: null as string | null, return_announced_at: null as string | null,
+      settled_at: null as string | null, not_shipped_at: null as string | null,
+      sky_id: "SKY-0203" as string | null, legacy_stock_flag: null as string | null,
+    };
+    const variants: Record<string, unknown>[] = [
+      {}, { sky_id: null }, { legacy_stock_flag: "-" },
+      { movement_id: 1 }, { movement_id: 1, return_announced_at: "t" },
+      { movement_id: 1, returned_at: "t" },
+      { movement_id: 1, returned_at: "t", return_movement_id: 2 },
+      { settled_at: "t" }, { not_shipped_at: "t" },
+    ];
+    for (const over of variants) {
+      for (const shipped of [false, true]) {
+        for (const historical of [false, true]) {
+          const { primary } = saleItemActions({ ...base, ...over } as never,
+            { frozen: false, cancelled: false, shipped, historical });
+          if (primary !== null) out.add(primary);
+        }
+      }
+    }
+    return [...out].sort();
+  }
+
+  it("produces the actions both screens have to know about", () => {
+    // Wächter: fällt eine Aktion weg oder kommt eine dazu, schlägt das hier
+    // zuerst auf — und die beiden Prüfungen darunter nennen den Ort.
+    expect(producedActions()).toEqual([
+      "announce_return", "book", "mark_returned", "restock", "settle", "ship", "unmark_not_shipped", "unsettle",
+    ]);
+  });
+
+  it("the detail screen wires every one of them", () => {
+    const map = DETAIL.slice(DETAIL.indexOf("const primary: Record<string, () => void> = {"),
+                             DETAIL.indexOf("const quiet ="));
+    for (const action of producedActions()) {
+      expect(map, `${action} fehlt auf der Detailseite`).toContain(`${action}:`);
+    }
+  });
+
+  it("the ledger wires every one it does not deliberately omit", () => {
+    const map = LEDGER.slice(LEDGER.indexOf("const primary: Partial<Record<string, () => void>> = {"),
+                             LEDGER.indexOf("const run = can.primary"));
+    for (const action of producedActions()) {
+      if (LEDGER_OMITS.includes(action)) {
+        expect(map, `${action} soll in der Liste fehlen`).not.toContain(`${action}:`);
+      } else {
+        expect(map, `${action} fehlt in der Verkaufsliste`).toContain(`${action}:`);
+      }
+    }
+  });
+
+  it("both call the same server action for shipping", () => {
+    expect(DETAIL).toContain("ship: run(() => shipSaleItem(id, saleId))");
+    expect(LEDGER).toContain("ship: () => act(sale.id, () => shipSaleItem(id, sale.id))");
+  });
+
+  it("an open, shelf-bound position on an external sale offers it", () => {
+    const item = {
+      movement_id: null, return_movement_id: null, returned_at: null,
+      return_announced_at: null, settled_at: null, not_shipped_at: null,
+      sky_id: "SKY-0139", legacy_stock_flag: null,
+    } as never;
+    expect(saleItemActions(item, { frozen: false, cancelled: false, shipped: false,
+                                   historical: false }))
+      .toMatchObject({ status: "open", primary: "ship" });
+  });
+});
+
+/* ===================================================================== */
+/**
+ * EIN SPEICHERN, EIN SCHREIBVORGANG (0091).
+ *
+ * Der Dialog schrieb Datum und Metadaten nacheinander, beide mit demselben
+ * `expected_updated_at`. Der erste Aufruf setzte `updated_at` neu, der
+ * zweite prüfte gegen den alten Wert — `PT409` gegen den eigenen Schreib-
+ * vorgang, und die Metadaten blieben liegen.
+ */
+describe("saving a sale's metadata is one write", () => {
+  const UPDATE = code(latestFunction("seller_update_sale").body);
+  const DETAILS = readFileSync(join(process.cwd(), "src/components/business/sale-details.tsx"), "utf8");
+  const ACTIONS = readFileSync(join(process.cwd(), "src/lib/orderbook/sales-actions.ts"), "utf8");
+
+  it("writes date and metadata in the same statement, behind one guard", () => {
+    expect(UPDATE.match(/orderbook_guard_stale/g)).toHaveLength(1);
+    expect(UPDATE.match(/update public\.sales/g)).toHaveLength(1);
+    const statement = UPDATE.slice(UPDATE.indexOf("update public.sales"), UPDATE.indexOf("-- One audit"));
+    for (const column of ["sold_at", "destination_country_code", "buyer_ref",
+                          "external_order_ref", "note", "updated_at"]) {
+      expect(statement, column).toContain(column);
+    }
+  });
+
+  it("checks the date range on this path too, as the separate one always did", () => {
+    expect(UPDATE).toContain("that sale date is outside the plausible range");
+    const DATE = code(latestFunction("seller_set_sale_date").body);
+    expect(DATE).toContain("that sale date is outside the plausible range");
+  });
+
+  it("keeps every other guard of that function", () => {
+    expect(UPDATE).toContain("if not public.can_operate_active_seller() then");
+    expect(UPDATE).toContain("these belong to the order, not to the Orderbuch");
+    expect(UPDATE).toContain("a destination country is a two-letter code");
+    const source = migrationSource("0091_update_sale_date_range.sql");
+    expect(source).toContain("security definer");
+    expect(source).toContain("set search_path = ''");
+    expect(source).toContain("from public, anon;");
+    expect(source).toContain("to authenticated;");
+  });
+
+  it("the dialog no longer writes twice with one token", () => {
+    const save = DETAILS.slice(DETAILS.indexOf("async function saveMeta()"),
+                               DETAILS.indexOf("return (", DETAILS.indexOf("async function saveMeta()")));
+    expect(save.match(/await run\(/g)).toHaveLength(1);
+    expect(save).not.toContain("setSaleDate");
+    // Und das Datum reist im selben Aufruf mit.
+    expect(save).toContain("soldAt: wanted");
+  });
+
+  it("passes the three date states the function expects", () => {
+    const fn = ACTIONS.slice(ACTIONS.indexOf("export async function updateSaleMeta"),
+                             ACTIONS.indexOf("export async function setSaleShipped"));
+    expect(fn).toContain('const touchesDate = "soldAt" in fields;');
+    expect(fn).toContain("p_sold_at: touchesDate ? fields.soldAt ?? null : null");
+    expect(fn).toContain('p_clear_date: touchesDate && (fields.soldAt ?? null) === null');
+  });
+
+  it("leaves the date-only path alone for the tools that use it", () => {
+    expect(ACTIONS).toContain('return run("seller_set_sale_date"');
+    expect(readFileSync(join(process.cwd(), "tools/apply-workbook-dates.mts"), "utf8"))
+      .toContain('db.rpc("seller_set_sale_date"');
+  });
+});
+
+/* ===================================================================== */
+/**
+ * DIE RETOURE IN ZWEI STUFEN — UND WARUM DER BILDSCHIRM SIE NICHT SAH.
+ *
+ * Das Datenmodell konnte den Ablauf seit 0074 vollständig: `return_announced_at`
+ * ist die Ankündigung, `returned_at` der Wareneingang, `return_movement_id`
+ * die Einbuchung. Was fehlte, war die Projektion: `seller_sale()` — die
+ * Quelle beider Ansichten — lieferte `return_announced_at` nie mit. Der
+ * Klick schrieb, der Bildschirm sah nichts und bot denselben Knopf erneut an.
+ *
+ * 0092 holt die drei fehlenden Felder nach und fasst den Wareneingang in
+ * einen Aufruf: dieselben zwei Funktionen, eine Transaktion.
+ */
+describe("returning an external position, announced first and booked second", () => {
+  const PROJECTION = code(latestFunction("seller_sale").body);
+  const RECEIVE = code(latestFunction("seller_receive_sale_item_return").body);
+  const ANNOUNCE = code(latestFunction("seller_announce_sale_item_return").body);
+  const RESTOCK = code(latestFunction("seller_restock_sale_item").body);
+  const DETAIL = readFileSync(join(process.cwd(), "src/components/business/sale-items.tsx"), "utf8");
+  const LEDGER = readFileSync(join(process.cwd(), "src/components/business/sales-ledger.tsx"), "utf8");
+  const item = (over: Record<string, unknown> = {}) => ({
+    movement_id: null, return_movement_id: null, returned_at: null,
+    return_announced_at: null, settled_at: null, not_shipped_at: null,
+    sky_id: "SKY-0139", legacy_stock_flag: null, ...over,
+  } as never);
+  const ctx = { frozen: false, cancelled: false, shipped: false, historical: false };
+
+  it("THE ROOT CAUSE: the projection now carries what the screen has to read", () => {
+    for (const field of ["'return_announced_at', i.return_announced_at",
+                         "'settled_at', i.settled_at",
+                         "'not_shipped_at', i.not_shipped_at"]) {
+      expect(PROJECTION, field).toContain(field);
+    }
+    // Und die Felder, die sie immer schon hatte, sind noch da.
+    for (const field of ["'movement_id', i.movement_id", "'returned_at', i.returned_at",
+                         "'return_movement_id', i.return_movement_id"]) {
+      expect(PROJECTION, field).toContain(field);
+    }
+  });
+
+  it("walks the lifecycle the operator sees", () => {
+    // Offen → verschicken.
+    expect(saleItemActions(item(), ctx)).toMatchObject({ status: "open", primary: "ship" });
+    // Verschickt und ausgebucht → Retoure ankündigen.
+    expect(saleItemActions(item({ movement_id: 669 }), ctx))
+      .toMatchObject({ status: "outbooked", primary: "announce_return" });
+    // Angekündigt → den Wareneingang bestätigen.
+    expect(saleItemActions(item({ movement_id: 669, return_announced_at: "t" }), ctx))
+      .toMatchObject({ status: "return_announced", primary: "mark_returned" });
+    // Eingebucht → nichts mehr zu tun.
+    expect(saleItemActions(item({ movement_id: 669, return_announced_at: "t",
+                                  returned_at: "t", return_movement_id: 670 }), ctx))
+      .toMatchObject({ status: "restocked", primary: null });
+  });
+
+  it("names the two steps as the operator does", () => {
+    const labels = de.business.sales.itemActionLabels;
+    expect(labels.announce_return).toBe("Retoure");
+    expect(labels.mark_returned).toBe("Bestätigen");
+    expect(de.business.sales.itemStates.return_announced).toBe("Retoure");
+    // Der Endzustand ist der vorhandene, kein neuer.
+    expect(de.business.sales.itemStates.restocked).toBe("Wieder eingelagert ✓");
+  });
+
+  it("announcing moves no stock and cannot be announced twice", () => {
+    expect(ANNOUNCE).toContain("if v_item.return_announced_at is not null then return; end if;");
+    expect(ANNOUNCE).not.toContain("record_inventory_movement");
+    expect(ANNOUNCE).not.toContain("shop_inventory");
+    // Etwas muss das Regal verlassen haben, sonst ist es keine Retoure.
+    expect(ANNOUNCE).toContain("nothing was booked out of stock for this position");
+  });
+
+  it("confirming books exactly one +1, through the path that always did", () => {
+    expect(RECEIVE).toContain("perform public.seller_return_sale_item(p_item_id, true)");
+    expect(RECEIVE).toContain("v_mid := public.seller_restock_sale_item(p_item_id)");
+    // Die Funktion bucht nichts selbst.
+    expect(RECEIVE).not.toContain("record_inventory_movement");
+    expect(RECEIVE).not.toContain("shop_inventory");
+    expect(RECEIVE).not.toContain("legacy_stock_events");
+    // Und die +1 entsteht dort, wo sie hingehört.
+    expect(RESTOCK).toContain("public.record_inventory_movement(");
+    expect(RESTOCK).toContain(", 1, 'return',");
+  });
+
+  it("cannot book the return twice", () => {
+    expect(RECEIVE).toContain("if v_item.return_movement_id is not null then");
+    expect(RECEIVE).toContain("return v_item.return_movement_id;");
+    // Auch der innere Weg ist für sich idempotent.
+    expect(RESTOCK).toContain("if v_item.return_movement_id is not null then return v_item.return_movement_id;");
+  });
+
+  it("refuses a position that never left the shelf", () => {
+    expect(RECEIVE).toContain("nothing was booked out of stock for this position");
+    expect(RESTOCK).toContain("this item never left stock");
+  });
+
+  it("keeps history out of it", () => {
+    expect(RESTOCK).toContain("historical sales never move stock");
+    const source = migrationSource("0092_sale_item_return_receipt.sql");
+    expect(source).not.toContain("legacy_stock_events");
+    expect(source).toContain("security definer");
+    expect(source).toContain("set search_path = ''");
+    expect(source).toContain("revoke all on function public.seller_receive_sale_item_return(bigint) from public, anon;");
+    expect(source).toContain("grant execute on function public.seller_receive_sale_item_return(bigint) to authenticated;");
+  });
+
+  it("both screens confirm through the same server action", () => {
+    expect(DETAIL).toContain("mark_returned: run(() => receiveSaleItemReturn(id, saleId))");
+    expect(LEDGER).toContain("mark_returned: () => act(sale.id, () => receiveSaleItemReturn(id, sale.id))");
+    // Und der alte Einzelschritt bleibt für Zeilen, die schon `returned_at` tragen.
+    expect(DETAIL).toContain("restock: run(() => restockSaleItem(id, saleId))");
+    expect(LEDGER).toContain("restock: () => act(sale.id, () => restockSaleItem(id, sale.id))");
+  });
+
+  it("an item without a figure never enters this path", () => {
+    expect(saleItemActions(item({ sky_id: null }), ctx).primary).toBe("settle");
+    expect(saleItemActions(item({ sky_id: null, movement_id: null }), ctx).primary).not.toBe("ship");
   });
 });

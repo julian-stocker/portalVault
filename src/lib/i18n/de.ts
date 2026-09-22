@@ -1312,9 +1312,9 @@ export const de = {
        */
       itemStates: {
         open: "Offen",
-        shipped: "Verschickt",
-        outbooked: "Ausgebucht ✓",
-        return_announced: "Retoure unterwegs",
+        shipped: "Verschickt (nicht ausgebucht)",
+        outbooked: "Verschickt ✓",
+        return_announced: "Retoure",
         returned: "Retoure angekommen",
         restocked: "Wieder eingelagert ✓",
         not_shipped: "Nicht verschickt",
@@ -1372,9 +1372,12 @@ export const de = {
           "Historisch — ohne Vermerk im Arbeitsbuch, wartet auf den Bestandsabgleich",
       },
       itemActionLabels: {
+        /* Ein Klick: ausbuchen und den Versand datieren (0090). */
+        ship: "Verschickt",
         book: "Ausbuchen",
-        announce_return: "Retoure melden",
-        mark_returned: "Retoure angekommen",
+        /* Zwei Stufen, zwei Wörter: ankündigen, dann den Eingang bestätigen. */
+        announce_return: "Retoure",
+        mark_returned: "Bestätigen",
         restock: "Einlagern",
         settle: "Erledigt",
         unsettle: "Zurücknehmen",

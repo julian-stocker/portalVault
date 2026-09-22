@@ -25,7 +25,8 @@ import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
-  addSaleItem, announceSaleItemReturn, bookSaleItem, removeSaleItem, restockSaleItem,
+  addSaleItem, announceSaleItemReturn, bookSaleItem, receiveSaleItemReturn, removeSaleItem,
+  restockSaleItem, shipSaleItem,
   returnSaleItem, setSaleItemNotShipped, setSaleItemSky, settleSaleItem,
 } from "@/lib/orderbook/sales-actions";
 import {
@@ -147,9 +148,11 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
             const strong = can.status === "outbooked" || can.status === "restocked";
             const run = (fn: () => Promise<unknown>) => () => act(fn as never);
             const primary: Record<string, () => void> = {
+              ship: run(() => shipSaleItem(id, saleId)),
               book: run(() => bookSaleItem(id, saleId)),
               announce_return: run(() => announceSaleItemReturn(id, saleId, true)),
-              mark_returned: run(() => returnSaleItem(id, saleId, true)),
+              /* „Bestätigen": Wareneingang und Einbuchung in einem Aufruf (0092). */
+              mark_returned: run(() => receiveSaleItemReturn(id, saleId)),
               restock: run(() => restockSaleItem(id, saleId)),
               settle: run(() => settleSaleItem(id, saleId, true)),
               unsettle: run(() => settleSaleItem(id, saleId, false)),
@@ -203,7 +206,8 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
                     <button type="button" disabled={pending} onClick={primary[can.primary]}
                             className={quiet
                               ? "min-h-9 px-2 text-xs text-muted underline underline-offset-2 disabled:opacity-50"
-                              : `${can.primary === "book" ? ACTION_PRIMARY : ACTION_NEUTRAL} min-h-9 w-auto px-2 text-xs disabled:opacity-50`}>
+                              : `${can.primary === "book" || can.primary === "ship"
+                                    ? ACTION_PRIMARY : ACTION_NEUTRAL} min-h-9 w-auto px-2 text-xs disabled:opacity-50`}>
                       {copy.itemActionLabels[can.primary]}
                     </button>
                   ) : null}

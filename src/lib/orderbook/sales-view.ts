@@ -329,7 +329,7 @@ export function saleItemIndicator(
 
 /** What the one action button on a position should do. */
 export type SaleItemAction =
-  | "book" | "announce_return" | "mark_returned" | "restock"
+  | "ship" | "book" | "announce_return" | "mark_returned" | "restock"
   | "settle" | "unsettle" | "unmark_not_shipped" | null;
 
 /**
@@ -390,8 +390,22 @@ export function saleItemActions(
   const shelfBound = item.sky_id !== null && !notFromStock(item);
   /* See `historical` above: no imported line moves stock from this screen. */
   const mayBook = shelfBound && !context.historical;
+  /*
+   * OFFEN IST BEREITS EIN ZUSTAND, IN DEM MAN VERSCHICKEN KANN (0090).
+   *
+   * Vorher bot diese Spalte für eine offene Position mit Regalbezug nichts
+   * an: `Ausbuchen` erschien erst, nachdem der Versandschalter des ganzen
+   * Verkaufs umgelegt war. Für einen frisch angelegten externen Verkauf hieß
+   * das eine leere Aktionsspalte — und einen Bestand, der stehen blieb.
+   *
+   * `ship` ist deshalb dieselbe Buchung, nur einen Schritt früher: ein Klick
+   * bucht die Position aus UND datiert den Versand des Verkaufs, in einer
+   * Transaktion. `book` bleibt für den Fall, dass der Versand schon gesetzt
+   * ist und nur noch die Position fehlt — derselbe Weg, anderes Wort.
+   */
   const primary: SaleItemAction =
-    status === "shipped" ? (mayBook ? "book" : shelfBound ? null : "settle")
+    status === "open" && mayBook ? "ship"
+    : status === "shipped" ? (mayBook ? "book" : shelfBound ? null : "settle")
     : status === "outbooked" ? "announce_return"
     : status === "return_announced" ? "mark_returned"
     : status === "returned" ? "restock"

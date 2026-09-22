@@ -63,8 +63,8 @@ import Link from "next/link";
 import { formatPrice } from "@/lib/format";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
-import { announceSaleItemReturn, bookSaleItem, loadSale, restockSaleItem, returnSaleItem }
-  from "@/lib/orderbook/sales-actions";
+import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
+  restockSaleItem, shipSaleItem } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
 import {
   countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyOutcome,
@@ -423,9 +423,13 @@ function SaleDetail({ sale, detail, pending, act }: {
                * belong on the detail screen where the whole sale is visible.
                */
               const primary: Partial<Record<string, () => void>> = {
+                /* Derselbe Weg wie auf der Detailseite: ausbuchen und den
+                   Versand datieren, in einer Transaktion (0090). */
+                ship: () => act(sale.id, () => shipSaleItem(id, sale.id)),
                 book: () => act(sale.id, () => bookSaleItem(id, sale.id)),
                 announce_return: () => act(sale.id, () => announceSaleItemReturn(id, sale.id, true)),
-                mark_returned: () => act(sale.id, () => returnSaleItem(id, sale.id, true)),
+                /* „Bestätigen": Wareneingang und Einbuchung in einem Aufruf (0092). */
+                mark_returned: () => act(sale.id, () => receiveSaleItemReturn(id, sale.id)),
                 restock: () => act(sale.id, () => restockSaleItem(id, sale.id)),
               };
               const run = can.primary ? primary[can.primary] : undefined;

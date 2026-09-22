@@ -24,7 +24,7 @@ import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
   addSaleFee, addSaleRefund, loadSaleAudit, removeSaleFee, removeSaleRefund,
-  setSaleDate, updateSaleFee, updateSaleMeta,
+  updateSaleFee, updateSaleMeta,
 } from "@/lib/orderbook/sales-actions";
 import {
   adjustmentsTotal, groupFees, refundsTotal,
@@ -215,15 +215,18 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
 
   async function saveMeta() {
     /*
-     * The date is its own function because clearing it is a deliberate act —
-     * `seller_update_sale` cannot express "set this back to unknown", and a
-     * null there means "leave it alone".
+     * EIN SPEICHERN, EIN SCHREIBVORGANG (0091).
+     *
+     * Vorher liefen hier zwei Aufrufe hintereinander — erst das Datum, dann
+     * die Metadaten —, beide mit demselben `sale.updatedAt`. Der erste
+     * setzte `updated_at` neu, der zweite prüfte gegen den alten Wert und
+     * scheiterte mit `PT409`. `seller_update_sale` schreibt beides in
+     * derselben Anweisung, mit einem einzigen Concurrency-Token: entweder
+     * alles oder nichts.
      */
     const wanted = draft.soldAt.trim() === "" ? null : draft.soldAt.trim();
-    if (wanted !== (sale.soldAt ?? null)) {
-      if (!(await run(() => setSaleDate(sale.id, wanted, sale.updatedAt)))) return;
-    }
     await run(() => updateSaleMeta(sale.id, {
+      ...(wanted !== (sale.soldAt ?? null) ? { soldAt: wanted } : {}),
       country: draft.country.trim() || null,
       buyerRef: draft.buyer.trim() || null,
       externalRef: draft.reference.trim() || null,
