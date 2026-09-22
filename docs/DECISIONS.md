@@ -8976,3 +8976,121 @@ Stück sind die Cutover-Baseline; die Vergangenheit erklären ausschließlich di
   eine lokale Sicherung; keine Zeile daraus gehört ins Repository** (`docs/SECURITY.md`).
 - Lager V2 zeigt ab dem Cutover keine operative Bewegung mehr, nur noch die rekonstruierte
   Legacy-Historie — bis die erste echte Bewegung gebucht wird.
+
+---
+
+## ADR-0104 — Die Arbeitsmappe wurde nach dem Cutover noch einmal korrigiert
+
+**Status:** angenommen · 2026-09-22 · auf Staging vollständig ausgeführt und verifiziert,
+Production offen
+**Betrifft:** ADR-0102 (Legacy-Historie neben dem Ledger), ADR-0103 (Pre-Go-Live-Cutover),
+Migrationen `0087`–`0089`, `tools/sync-legacy-orderbook.mts`,
+`tools/sql/phase-c-legacy-history-prune.sql`, `tools/sql/cutover-baseline-806.sql`
+
+### Ausgangslage
+
+Der Cutover vom 2026-09-21 hatte den operativen Ledger geleert und 2 671 `legacy_stock_events`
+als Erklärung der Vergangenheit stehen gelassen. Danach aktualisierte der Verkäufer die
+Source of Truth — `skylanders.xlsx` — ein letztes Mal vor dem Go-Live: vier weitere Verkäufe,
+korrigierte Marker in Spalte L, ein präzisierter Endbestand. **Spalte F sank von 824 auf 806.**
+
+Zugleich wurde die Bedeutung von Spalte L verbindlich festgelegt. Vorher kannte der Import
+genau einen Ausgang (`x`), alles andere fiel unter „nicht bestandsrelevant":
+
+| Marker | Bedeutung | Lagerwirkung |
+|---|---|---|
+| `x` | verschickt, ausgetragen | `sale` −1 |
+| `-` | nie verschickt, nie ausgetragen | kein Ereignis |
+| `r` | verschickt, ausgetragen, als Retoure zurück | `sale` −1 **und** `return` +1 |
+| `l` | verschickt, ausgetragen, auf dem Weg verloren | `sale` −1 |
+
+`-` mit `M = x` und **ohne** SKY-ID sind die Battlecast-Kartenpakete: verkauft und verschickt,
+aber nie im Figurenlager. Dieselbe Kombination auf einer Zeile **mit** SKY-ID ist undefiniert
+und wird nicht geraten — sie bleibt `unresolved`. Refunds spielen in keiner Ableitung eine
+Rolle: eine volle Erstattung deckt Retoure, Verlust und Abbruch vor Versand gleichermaßen ab,
+und die drei haben gegenläufige Lagerwirkungen.
+
+### Entscheidung
+
+Die Nachkorrektur läuft in vier Phasen, jede für sich gegatet und read-only verifiziert.
+
+**Phase A — Orderbuch zeilenweise nachziehen.** Die Importer erkennen eine Gruppe am
+Fingerabdruck über ihre Zeilen; eine korrigierte Zeile macht die Gruppe unkenntlich, und ein
+zweiter Import legte sie doppelt an. `0088` und `0089` geben sechs `service_role`-Funktionen,
+die eine bestehende Legacy-Zeile **über `source_row`** korrigieren statt sie zu ersetzen.
+`source_row` ist die Identität, niemals Name oder Marker — genau die werden ja korrigiert.
+
+**Phase B — Fingerabdrücke einmalig neu setzen.** Dreizehn Einkaufsgruppen (#81–#93) trugen
+Abdrücke, die keine Änderung dieses Laufs erklärt. Nachgewiesen: sie wichen bereits gegen den
+Snapshot ab, und die Zeilenkorrekturen berührten nur vier davon. Ein einmaliges Werkzeug hat
+sie aus dem **Plan des Importers** neu gestempelt — nie aus einem nachgebauten Algorithmus.
+**Das ist keine Lockerung des fail-closed Gates**, sondern eine benannte, protokollierte
+Ausnahme für dreizehn namentlich bekannte Gruppen.
+
+**Phase C — Historie neu aufbauen.** `0087` ergänzt `return` als sechsten Ereignistyp mit
+positiver Richtung. Der Neuaufbau ergibt **2 741 Ereignisse mit der Summe 806**.
+
+**Phase D — Cutover-Baseline auf 806.** 27 Positionen bekommen den Wert aus Spalte F, 6 neue
+Positionen entstehen, **ohne eine einzige `inventory_movement`**.
+
+### Was dabei nicht aufgeweicht wurde
+
+**`legacy_stock_events` bleibt append-only.** Der Neuaufbau brauchte neun Zeilen weniger, und
+der Importer kann sie nicht entfernen — er hat keinen `delete`- und keinen `update`-Pfad und
+soll keinen bekommen. Stattdessen nennt er sie vollständig und **hält an**; das Entfernen ist
+ein eigener, einzeln geprüfter Vorgang über `tools/sql/phase-c-legacy-history-prune.sql`, der
+den Trigger für die Dauer **einer** Transaktion aussetzt und in derselben Transaktion wieder
+schließt. Ein Importer, der sich seine eigene Vorgeschichte wegräumen kann, wäre kein Protokoll
+mehr.
+
+**Der Grund, warum das überhaupt auffiel, gehört in die Akte:** der technische Abdruck von
+`opening_balance` und `legacy_adjustment` ist `(Art, Figur, Zustand)` und enthält **keine
+Menge**. Ein rein additiver Lauf hätte eine geänderte Startmenge für „schon da" gehalten und
+die alte Zahl behalten — die Summe hätte nie wieder gestimmt, und nichts hätte es gemeldet.
+Der Importer vergleicht deshalb seit `2026-09-22` die fachlichen Felder, nicht nur den Abdruck.
+
+**Namen bleiben roh.** Der Sync reichte `raw_name` zeitweise durch `trim()`, und weil die
+Sync-Funktion bei jedem Update alle vier Spalten schreibt, verlor genau eine Zeile ihr
+abschließendes Leerzeichen — Beifang eines Flag-Updates, von keinem Vergleich angezeigt.
+Ursache behoben (der Rohwert wird durchgereicht, verglichen wird weiter normalisiert), die
+eine Zeile über den bestehenden Schreibweg zurückgesetzt, drei Regressionstests dagegen.
+
+**Die Baseline bleibt einmalig.** `cutover-baseline-806.sql` bricht ab, sobald eine einzige
+`inventory_movement` existiert (Gate 1a) — nach dem ersten echten Verkauf ist die Tür zu — und
+seit dem Staging-Lauf zusätzlich, sobald jede Zielposition ihren Zielwert bereits trägt
+(Gate 1j). Es ist **kein Synchronisationswerkzeug**: ändert sich die Arbeitsmappe nach dem
+Go-Live erneut, ist das eine Korrekturbewegung im Ledger.
+
+### Verworfene Alternativen
+
+**33 `correction`-Bewegungen buchen.** Hätte die allerersten Einträge des frischen Ledgers mit
+etwas gefüllt, das SkyIsles nie getan hat — genau das, was der Cutover beseitigen sollte. Die
+18 Stück Differenz sind kein Geschäftsvorgang, sondern eine aktualisierte Quelle.
+
+**Den Trigger dauerhaft abschwächen oder dem Importer einen Löschpfad geben.** Beides hätte
+einen Einzelfall in eine dauerhafte Fähigkeit verwandelt.
+
+**Abweichende Gruppen einfach neu stempeln.** Ein Abdruck, der nicht mehr passt, sagt nur
+*dass* sich etwas geändert hat, nicht *was*. Jede Abweichung wird erst erklärt (`item`,
+`sold_at`, `unpersisted`), dann gestempelt; alles andere bleibt `unexplained` und blockiert.
+
+**Die Erwartung „246 unveränderte Positionen" auf Staging übernehmen.** Sie stammte aus
+Production. Beide Umgebungen tragen Σ 824 lose Stück, unterscheiden sich aber in Zeilen mit
+`quantity = 0`: zehn führt nur Production, sieben nur Staging. Auf Staging sind es **243**.
+Kein Gate hängt an dieser Zahl; geprüft werden Σ Zielwerte, Endsumme und null Bewegungen.
+
+### Konsequenzen
+
+- **Staging-Endzustand 2026-09-22:** Verkäufe **296** / `sale_items` **1 280** · Einkäufe **87**
+  (davon Legacy **84**) / `purchase_items` **2 121** (Legacy **2 114**) · `sale_fees` **825** ·
+  `sale_refunds` **41** · `settlement_adjustments` **4** · `legacy_stock_events` **2 741** mit
+  Summe **806** · realer loser Bestand **806** · boxed **10** · reserviert **0** · Fixtures
+  **0** · `inventory_movements` **0**.
+- **Legacy-Historie und operativer Bestand stimmen erstmals überein** — beide 806 —, und der
+  operative Ledger beginnt weiterhin leer.
+- Production steht unverändert auf dem Stand vom 2026-09-21 (2 671 Ereignisse, 824 lose
+  Stück). Der dortige Lauf wiederholt A–D in derselben Reihenfolge, mit **neu gemessenen**
+  Zahlen: Ids, Zielwerte und die Zahl der unberührten Positionen sind umgebungsspezifisch.
+- Die einmaligen Skripte bleiben als Protokoll im Repository, ohne Zahlen: Zielwerte je Figur
+  und die zu entfernenden Zeilen sind Lagerdaten (`docs/SECURITY.md`) und werden vor jedem Lauf
+  erzeugt, einmal ausgeführt und danach verworfen.

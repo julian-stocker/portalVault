@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-21 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-22 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -47,6 +47,43 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Legacy-Nachkorrektur A–D (2026-09-22, `0087`–`0089`) — auf Staging abgeschlossen
+
+Der Verkäufer hat `skylanders.xlsx` vor dem Go-Live ein letztes Mal aktualisiert: vier weitere
+Verkäufe, korrigierte Marker in Spalte L, **Spalte F von 824 auf 806**. Gleichzeitig wurde die
+Bedeutung der Marker verbindlich: `x` verschickt · `-` nie verschickt · `r` Retoure
+(`sale` −1 **und** `return` +1) · `l` auf dem Weg verloren (wie ein Verkauf). Begründung und
+verworfene Alternativen: **ADR-0104**, Datenbankseite: `docs/DATABASE.md` 3.3aj.
+
+| Phase | Gegenstand | Werkzeug / Migration | Stand |
+|---|---|---|---|
+| **A** | Orderbuch zeilenweise nachziehen, vier neue Verkäufe importieren | `0088`, `0089`, `tools/sync-legacy-orderbook.mts` | **abgeschlossen** |
+| **B** | dreizehn Einkaufs-Fingerabdrücke einmalig neu stempeln | `tools/rebaseline-legacy-purchase-fingerprints.mts` | **abgeschlossen** |
+| **C** | Historie neu aufbauen, `return` als sechster Typ | `0087`, `tools/sql/phase-c-legacy-history-prune.sql` | **abgeschlossen** |
+| **D** | Cutover-Baseline 824 → 806, ohne Bewegung | `tools/sql/cutover-baseline-806.sql` | **abgeschlossen** |
+
+**Staging-Endzustand:** Verkäufe **296** / `sale_items` **1 280** · Einkäufe **87** (Legacy
+**84**) / `purchase_items` **2 121** (Legacy **2 114**) · `sale_fees` **825** · `sale_refunds`
+**41** · `settlement_adjustments` **4** · `legacy_stock_events` **2 741** mit Summe **806** ·
+realer loser Bestand **806** · boxed **10** · reserviert **0** · Fixtures **0** ·
+`inventory_movements` **0**.
+
+**Legacy-Historie und operativer Bestand stimmen erstmals beide auf 806**, und der operative
+Ledger beginnt weiterhin leer. Die Rekonstruktion trifft alle 600 unterstützten Positionen
+exakt, `verify:legacy-history:staging` meldet ALL CHECKS PASSED, und ein erneuter Lauf von
+Orderbuch-Sync und History-Import plant **nichts** — beide sind idempotent.
+
+Zwei Dinge blieben dabei ausdrücklich unangetastet: `legacy_stock_events` ist weiter
+append-only (der Importer hat keinen Lösch- oder Änderungspfad; das Entfernen der neun
+überholten Zeilen war ein eigener, einzeln geprüfter Vorgang), und Namen bleiben roh aus der
+Arbeitsmappe — eine versehentlich getrimmte Zeile wurde zurückgesetzt und gegen drei
+Regressionstests abgesichert.
+
+**Production steht unverändert auf dem Stand vom 2026-09-21** (2 671 Ereignisse, 824 lose
+Stück, 0 Bewegungen). Der dortige Lauf wiederholt A–D in derselben Reihenfolge mit **neu
+gemessenen** Zahlen — Ids, Zielwerte und die Zahl der unberührten Positionen sind
+umgebungsspezifisch — und braucht eine ausdrückliche Freigabe.
+
 ## Lager V2: Zähler außerhalb der Zeitleiste (2026-09-21, `0086`) — abgeschlossen
 
 Zwei Defekte, die dieselbe Ursache hatten: eine Abfrage bediente zwei Anforderungen, die sich
@@ -85,6 +122,11 @@ sind damit heute exakt die Legacy-Summen. Details: `docs/DATABASE.md` 3.3ai, ADR
 ---
 
 ## Pre-Go-Live-Cutover auf Staging und Production (2026-09-21) — abgeschlossen
+
+> **Die Zahlen dieses Abschnitts sind der Stand vom 2026-09-21 und gelten unverändert für
+> Production.** Staging steht seit dem 2026-09-22 auf der korrigierten Arbeitsmappe
+> (806 lose Stück, 2 741 Ereignisse) — siehe Abschnitt Legacy-Nachkorrektur A-D und ADR-0104.
+
 
 **Der operative Ledger beginnt leer.** Vor dem Go-Live standen zwei Sorten Inhalt nebeneinander:
 die reale Geschäftshistorie, die vollständig außerhalb der Plattform entstanden ist, und alles,
@@ -150,6 +192,11 @@ verschoben.
 ---
 
 ## Legacy-Lagerhistorie 2026 auf Production (2026-09-21) — abgeschlossen
+
+> **Die Zahlen dieses Abschnitts sind der Stand vom 2026-09-21 und gelten unverändert für
+> Production.** Staging steht seit dem 2026-09-22 auf der korrigierten Arbeitsmappe
+> (806 lose Stück, 2 741 Ereignisse) — siehe Abschnitt Legacy-Nachkorrektur A-D und ADR-0104.
+
 
 Der Bestand hat jetzt eine Geschichte. Die Lagerakte einer Figur begann bisher mit
 `initial_import` und sagte nichts darüber, woher die Stücke kamen; ab sofort steht daneben eine

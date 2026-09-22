@@ -2281,6 +2281,85 @@ der auch bei der tausendsten Bewegung noch stimmt.
 
 ---
 
+### 3.3aj Die Arbeitsmappe nach dem Cutover: `return`, Zeilensync, neue Baseline (`0087`–`0089`)
+
+Vollständige Begründung: **ADR-0104**. Hier steht, was in der Datenbank anders ist.
+
+**`0087` — ein sechster Ereignistyp.** `legacy_stock_events.event_type` kennt jetzt zusätzlich
+`return`, mit fester Richtung `quantity > 0`. Die Migration fasst genau zwei Constraints an,
+`legacy_stock_events_type_known` und `legacy_stock_events_direction`, beide im Wortlaut von
+`0079` plus dem neuen Typ. Tabelle, Spalten, RLS, der Append-only-Trigger, die partiellen
+Unique-Indizes, der Cut auf 2026-01-01 und `legacy_stock_events_source_matches_kind` bleiben
+unverändert — und die letzte Regel gilt auch für `return`: ein Arbeitsmappen-Ereignis nennt
+seine Quellzeile.
+
+Eine Retoure ist damit **zwei** Ereignisse auf derselben Quellzeile: `sale` −1 und `return` +1.
+Die Bestandswirkung ist dieselbe wie vorher (netto 0), sichtbar ist jetzt aber, dass die Figur
+draußen war. `l` (Verlust auf dem Weg) bekommt **keinen** eigenen Typ: lagerseitig ist das ein
+Verkauf, und der kaufmännische Unterschied steht strukturiert in `sale_items.legacy_stock_flag`.
+
+**`0088`/`0089` — sechs `service_role`-Funktionen, die eine Zeile korrigieren.**
+
+| Funktion | schreibt | Identität |
+|---|---|---|
+| `system_sync_legacy_sale_item` | `raw_name`, `sky_id`, beide Legacy-Marker | `sale_items.id`, Zeile muss `source_row` haben |
+| `system_sync_legacy_purchase_item` | dieselben vier Spalten der Einkaufsseite | `purchase_items.id` |
+| `system_add_legacy_sale_item` / `..._purchase_item` | eine fehlende Position derselben Gruppe | Gruppe + `source_row` |
+| `system_set_legacy_sale_fingerprint` / `..._purchase_fingerprint` | nur `import_fingerprint` | Gruppen-Id |
+| `system_sync_legacy_sale_group` (`0089`) | **nur** `sold_at` | `sales.id` |
+
+Jede prüft `source = 'excel_order_2026'`, lehnt eine an eine Bestellung gehängte Zeile ab und
+verlangt eine Quellzeile. Keine dieser Funktionen erreicht `settled_at`, Movement-Ids, Preise,
+Positionsnummern, Gebühren, Erstattungen oder Audit-Zeilen — sie stehen nicht in den
+UPDATE-Listen. Alle sind `security definer set search_path = ''`, `revoke all` von `public`,
+`anon`, `authenticated`, `grant execute` nur an `service_role` (Muster aus `0003`, `0035`,
+`0081`).
+
+**Warum überhaupt ein Zeilensync.** Der Import erkennt eine Gruppe an einem Fingerabdruck über
+ihre Zeilen. Korrigiert der Verkäufer einen Marker, ist die Gruppe unkenntlich und ein zweiter
+Lauf legte sie **doppelt** an. Der Sync gleicht deshalb über `source_row` ab — die einzige
+stabile Identität einer Arbeitsmappenzeile — und stempelt den Abdruck erst neu, wenn die
+Abweichung erklärt ist (`item`, `sold_at`, `unpersisted`); alles andere bleibt `unexplained`
+und blockiert den Lauf.
+
+**Append-only hat gehalten.** Der Neuaufbau der Historie brauchte neun Zeilen weniger.
+`tools/import-legacy-history.mts` kann sie nicht entfernen — kein `delete`, kein `update` —,
+nennt sie vollständig und bricht ab. Das Entfernen ist ein eigener einmaliger Vorgang
+(`tools/sql/phase-c-legacy-history-prune.sql`), der `legacy_stock_events_no_update` für die
+Dauer **einer** Transaktion aussetzt und in derselben Transaktion wieder schließt.
+
+Der Anlass gehört dazu: der technische Abdruck von `opening_balance` und `legacy_adjustment`
+ist `(Art, Figur, Zustand)` und enthält **keine Menge**. Ein rein additiver Lauf hätte eine
+geänderte Startmenge als „schon vorhanden" gelesen und die alte Zahl behalten. Der Importer
+vergleicht deshalb die fachlichen Felder; `market_price_snapshot` bleibt ausgenommen, das ist
+der Preis zum Importzeitpunkt und keine Aussage der Arbeitsmappe.
+
+#### Staging-Endzustand nach A–D (2026-09-22)
+
+| | |
+|---|---|
+| Verkäufe / `sale_items` | **296** / **1 280** |
+| Einkäufe gesamt / davon Legacy | **87** / **84** |
+| `purchase_items` gesamt / davon Legacy | **2 121** / **2 114** |
+| `sale_fees` · `sale_refunds` · `settlement_adjustments` | **825** · **41** · **4** |
+| `legacy_stock_events` | **2 741**, Summe **806** |
+| | `purchase` 1 259 · `sale` 1 182 · `return` 14 · `correction` 3 |
+| | `opening_balance` 262 (+739) · `legacy_adjustment` 21 (−21) |
+| realer loser Bestand | **806** = Spalte F |
+| boxed · reserviert · Fixtures | **10** · **0** · **0** |
+| `inventory_movements` | **0** |
+
+**Legacy-Historie und operativer Bestand stimmen erstmals überein.** Die 18 Stück Differenz
+aus der aktualisierten Arbeitsmappe wurden über die einmalige Baseline
+(`tools/sql/cutover-baseline-806.sql`, 27 UPDATE / 6 INSERT / 243 unverändert) angeglichen —
+**ohne eine einzige `inventory_movement`**. Der operative Ledger beginnt weiterhin leer.
+
+**Production steht unverändert auf dem Stand vom 2026-09-21** (2 671 Ereignisse, 824 lose
+Stück, 0 Bewegungen). Der dortige Lauf wiederholt A–D mit neu gemessenen Zahlen: Ids,
+Zielwerte und die Zahl der unberührten Positionen sind umgebungsspezifisch.
+
+---
+
 ---
 
 ## 4. Beziehungen

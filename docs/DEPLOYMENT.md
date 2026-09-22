@@ -448,6 +448,13 @@ beginnt ab dem Cutover leer und enthält künftig ausschließlich echte operativ
 SkyIsles-Bewegungen; die gesamte Vergangenheit ab 01.01.2026 steht in den 2 671
 `legacy_stock_events`. Ablauf, Zahlen und Verifikation: `docs/DATABASE.md` 3.3ah und ADR-0103.
 
+**Staging steht seit 2026-09-22 auf der korrigierten Arbeitsmappe: 806 real · 0 Fixtures ·
+0 reserviert · 0 Bewegungen · 2 741 `legacy_stock_events` mit Summe 806** (ADR-0104,
+`docs/DATABASE.md` 3.3aj). Die Quelle wurde vor dem Go-Live ein letztes Mal aktualisiert —
+Spalte F sank von 824 auf 806 —, und die Angleichung lief als einmalige Baseline ohne eine
+einzige Bewegung. **Production folgt erst nach ausdrücklicher Freigabe**; bis dahin sind die
+beiden Umgebungen in genau dieser Zahl verschieden, und das ist der erwartete Zustand.
+
 Die Zahlen davor gelten nur bis zum jeweiligen Rollout und sind nicht mehr der Ist-Stand:
 1 201 / 992 / 630 vor der Legacy-Lagermigration, 1 033 / 824 / 209 / 720 zwischen ihr und dem
 Cutover.
