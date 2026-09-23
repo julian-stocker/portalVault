@@ -2420,6 +2420,33 @@ export const de = {
   inventory: {
     title: "Lager",
     subline: "Bestand, Preise und Angebote von SkyIsles.",
+    /*
+     * Die kompakte Lagerübersicht über der Suche (V4.9).
+     *
+     * Vier Kennzahlen, und die Beschriftungen sagen ausdrücklich, WELCHE
+     * Stücke gemeint sind: „Im Shop" zählt nicht Positionen, sondern kaufbare
+     * Stücke, und „Marktwert" ist der gespeicherte Marktpreis — der
+     * Katalog-Aufschlag aus 0094 gilt hier bewusst nicht.
+     */
+    overview: {
+      heading: "Lagerübersicht",
+      stock: "Lagerbestand",
+      stockHint: "Alle physisch vorhandenen Stück",
+      /* Steht zwischen Bestand und Angebot, weil es genau die Differenz
+         erklärt: reservierte Ware liegt im Lager, ist aber nicht kaufbar. */
+      reserved: "Reserviert",
+      reservedHint: "Davon für offene Bestellungen gehalten",
+      offered: "Im Shop",
+      offeredHint: "Stück, die aktuell kaufbar sind",
+      marketValue: "Marktwert",
+      marketValueHint: "Gesamter Bestand zum hinterlegten Marktpreis",
+      shopValue: "Shopwert",
+      shopValueHint: "Angebotene Stück zum Shop-Preis",
+      withoutPrice: (n: number) =>
+        n === 1
+          ? "1 Position ohne Marktpreis ist nicht im Marktwert enthalten."
+          : `${n} Positionen ohne Marktpreis sind nicht im Marktwert enthalten.`,
+    },
     searchLabel: "Figur oder SKY-ID suchen",
     positions: (n: number) => (n === 1 ? "1 Position" : `${n} Positionen`),
     condition: "Zustand",

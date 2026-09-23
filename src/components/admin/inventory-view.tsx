@@ -20,6 +20,8 @@ import { AdminThumb } from "@/components/admin/admin-thumb";
 import { CONDITIONS, type Condition, type InventoryPosition } from "@/lib/admin/inventory-model";
 import { positionKey } from "@/lib/admin/position-key";
 import type { TradeTotals } from "@/lib/admin/stock-history";
+import { InventoryOverviewPanel } from "@/components/admin/inventory-overview";
+import { inventoryOverview } from "@/lib/admin/inventory-overview";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { imageSrc } from "@/lib/catalog/image";
@@ -111,8 +113,25 @@ export function InventoryView({
       .slice(0, 12);
   }, [searching, positions, catalog, normalized, query]);
 
+  /*
+   * Die Kennzahlen über der Suche (V4.9).
+   *
+   * Aus GENAU DEN ZEILEN, die diese Ansicht ohnehin hält — keine zweite
+   * Abfrage, kein Aufruf je Position. `positions` ist die operative Liste
+   * (`shop_inventory` über `admin_shop_inventory()`), und sie ist die
+   * aktuelle Bestandswahrheit; nichts hier summiert Bewegungen nach oder
+   * liest eine historische Zahl.
+   *
+   * Bewusst NICHT gefiltert: die Übersicht beschreibt das Lager, nicht die
+   * gerade sichtbare Auswahl. Eine Zahl, die sich beim Tippen in der Suche
+   * ändert, wäre keine Kennzahl mehr.
+   */
+  const overview = useMemo(() => inventoryOverview(positions), [positions]);
+
   return (
     <div className="flex flex-col gap-5">
+      <InventoryOverviewPanel overview={overview} />
+
       <div className="flex flex-col gap-3">
         <label className="sr-only" htmlFor="inventory-search">
           {de.inventory.searchLabel}
