@@ -11,6 +11,7 @@ import {
   countCollectibleFiguresBySeries,
   fetchSeries,
 } from "@/lib/catalog/queries";
+import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchCollection } from "@/lib/collection/queries";
 import { de } from "@/lib/i18n/de";
 
@@ -44,17 +45,25 @@ export default async function CollectionPage() {
   const profile = await currentProfile();
   if (!profile?.username) redirect(ONBOARDING_PATH);
 
-  const [owned, series, catalogTotal, bySeries] = await Promise.all([
+  const [owned, series, catalogTotal, bySeries, marketBoost] = await Promise.all([
     fetchCollection(),
     fetchSeries(),
     countCollectibleFigures(),
     countCollectibleFiguresBySeries(),
+    /*
+     * The temporary catalog market-value boost (0094, ADR-0105). ONE call for
+     * the whole page: the cards, the table and every sum below are built from
+     * the same percentage, so the collection cannot contradict the catalog it
+     * is made of. No card and no row asks for it.
+     */
+    fetchCatalogMarketBoost(),
   ]);
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
       <CollectionHeading />
-      <CollectionView owned={owned} series={series} totals={{ total: catalogTotal, bySeries }} />
+      <CollectionView owned={owned} series={series} totals={{ total: catalogTotal, bySeries }}
+                      marketBoostPercent={marketBoost} />
     </main>
   );
 }

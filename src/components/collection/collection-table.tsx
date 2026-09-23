@@ -18,13 +18,23 @@ import Link from "next/link";
 
 import { useCollectionMutation } from "@/components/collection/use-collection-mutation";
 import { elementLabel } from "@/lib/catalog/element";
+import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import type { CollectionRow } from "@/lib/collection/view";
 import { formatNumber, formatPrice } from "@/lib/format";
 import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 
-function rowValue(row: CollectionRow): number | null {
-  return row.figure.marketPrice === null ? null : row.quantity * row.figure.marketPrice;
+/**
+ * What a row is worth: the UNIT value the row also prints, times the count.
+ *
+ * The boost is applied to the single figure first and the product is taken
+ * from that rounded cent amount (0094). Multiplying the stored price by the
+ * quantity and boosting the result would give a number the row's own
+ * market-value cell does not explain.
+ */
+function rowValue(row: CollectionRow, boostPercent: number): number | null {
+  const unit = catalogDisplayMarketPrice(row.figure.marketPrice, boostPercent);
+  return unit === null ? null : row.quantity * unit;
 }
 
 /**
@@ -112,9 +122,17 @@ function RemoveCell({
 export function CollectionTable({
   rows,
   onRemove,
+  marketBoostPercent = NO_MARKET_BOOST,
 }: {
   rows: readonly CollectionRow[];
   onRemove: (skyId: string, quantity: number) => void;
+  /**
+   * The catalog market-value boost, in per cent (0094, ADR-0105).
+   *
+   * The table says what the cards say, and the collection's totals are built
+   * from the same unit values. Default 0 — the stored price.
+   */
+  marketBoostPercent?: number;
 }) {
   return (
     <>
@@ -154,7 +172,7 @@ export function CollectionTable({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const total = rowValue(row);
+            const total = rowValue(row, marketBoostPercent);
             return (
               <tr key={row.figure.skyId} className="border-b border-border/60 last:border-0">
                 <td className="py-2 pr-3">
@@ -182,7 +200,8 @@ export function CollectionTable({
                 <td className="py-2 pr-4 text-center tabular-nums text-muted">
                   {row.figure.marketPrice === null
                     ? de.catalog.noPrice
-                    : formatPrice(row.figure.marketPrice)}
+                    : formatPrice(
+                        catalogDisplayMarketPrice(row.figure.marketPrice, marketBoostPercent))}
                 </td>
                 <td className="py-2 pr-4 text-center font-medium tabular-nums">
                   {total === null ? "—" : formatPrice(total)}
@@ -200,7 +219,7 @@ export function CollectionTable({
           value on the second — the four things worth scanning. */}
       <ul className="flex flex-col md:hidden">
         {rows.map((row) => {
-          const total = rowValue(row);
+          const total = rowValue(row, marketBoostPercent);
           return (
             <li
               key={row.figure.skyId}

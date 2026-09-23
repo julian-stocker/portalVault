@@ -54,6 +54,7 @@ export function CatalogCard({
   showSeries = false,
   onOpenOffers,
   onEdit,
+  marketBoostPercent = 0,
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -98,6 +99,14 @@ export function CatalogCard({
    * state and renders one dialog for the whole page.
    */
   onOpenOffers?: () => void;
+  /**
+   * The temporary catalog market-value boost, in per cent (0094).
+   *
+   * Handed straight through to `FigureCard`, like `offers`: one value for the
+   * whole grid, read once per request by the page. Default 0, so a surface
+   * that does not pass one shows the stored price.
+   */
+  marketBoostPercent?: number;
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -134,6 +143,7 @@ export function CatalogCard({
     return (
       <FigureCard
         figure={figure}
+        marketBoostPercent={marketBoostPercent}
         // No ownership frame and no crown: the business account manages the
         // catalog, it does not collect from it (ADR-0042). The VARIANT SEAL
         // does appear — it is a property of the figure, not of a viewer, and
@@ -213,6 +223,7 @@ export function CatalogCard({
     return (
       <FigureCard
         figure={figure}
+        marketBoostPercent={marketBoostPercent}
         ownership="catalog"
         href={signInHref}
         highlighted={highlighted}
@@ -226,6 +237,7 @@ export function CatalogCard({
   return (
     <FigureCard
       figure={figure}
+      marketBoostPercent={marketBoostPercent}
       ownership="catalog"
       collected={collected}
       /*

@@ -30,12 +30,27 @@ export type PlatformSettings = {
    * (ADR-0077). NULL until an address exists; none is invented.
    */
   supportEmail: string | null;
+  /**
+   * TEMPORARY, DISPLAY ONLY (0094).
+   *
+   * Per cent added to `skylanders.market_price` when a PUBLIC CATALOG surface
+   * prints a market value. It is a platform setting because the catalog is
+   * the platform's; the seller's own `shop_settings.price_percentage` is a
+   * different number for a different purpose and lives under `/business`.
+   *
+   * Nothing that calculates reads it — not `shop_price()`, not the buy-in
+   * factor, not a snapshot, not the collection value. 0 switches the visible
+   * effect off.
+   */
+  catalogMarketBoostPercent: number;
   updatedAt: string | null;
 };
 
 export const NO_PLATFORM_SETTINGS: PlatformSettings = {
   contactEmail: null,
   supportEmail: null,
+  /* Fail closed: no settings means no boost, which shows the stored price. */
+  catalogMarketBoostPercent: 0,
   updatedAt: null,
 };
 
@@ -53,6 +68,10 @@ export const fetchPlatformSettings = cache(async (): Promise<PlatformSettings> =
   return {
     contactEmail: row.contact_email ?? null,
     supportEmail: row.support_email ?? null,
+    catalogMarketBoostPercent:
+      row.catalog_market_boost_percent === null || row.catalog_market_boost_percent === undefined
+        ? 0
+        : Number(row.catalog_market_boost_percent),
     updatedAt: row.updated_at ?? null,
   };
 });

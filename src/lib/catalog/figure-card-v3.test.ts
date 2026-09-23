@@ -497,7 +497,11 @@ describe("normal card information is black", () => {
   it.each([
     ["the name", /\{figure\.displayName\}/],
     ["the market value label", /marketValue/],
-    ["the market value", /formatPrice\(figure\.marketPrice\)/],
+    /* Seit 0094 geht der gespeicherte Preis durch den Anzeige-Aufschlag des
+       Katalogs, bevor er gedruckt wird — derselbe Wert, dieselbe Zelle, nur
+       eine reine Funktion davor. `marketBoostPercent` ist 0, wo keine
+       Katalogfläche ihn setzt. */
+    ["the market value", /formatPrice\(catalogDisplayMarketPrice\(figure\.marketPrice, marketBoostPercent\)\)/],
   ])("%s is on the card", (_, pattern) => {
     expect(card).toMatch(pattern);
   });
@@ -822,7 +826,11 @@ describe("market value and offer price are two different things", () => {
   it("the market value is labelled, so the two numbers cannot merge", () => {
     const card = code(CARD);
     expect(card).toContain("de.catalog.marketValue");
-    expect(card).toContain("formatPrice(figure.marketPrice)");
+    expect(card)
+      .toContain("formatPrice(catalogDisplayMarketPrice(figure.marketPrice, marketBoostPercent))");
+    // Und der gespeicherte Preis bleibt die Quelle: der Aufschlag ist eine
+    // Funktion darum herum, kein zweiter Wert auf der Figur (0094).
+    expect(card).toContain("figure.marketPrice === null");
   });
 
   it("the market value is in the market row and the offer is on the plate", () => {

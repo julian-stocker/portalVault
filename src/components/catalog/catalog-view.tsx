@@ -63,6 +63,7 @@ export function CatalogView({
   offers = {},
   seller = null,
   categories = [],
+  marketBoostPercent = 0,
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -105,6 +106,14 @@ export function CatalogView({
    * admin page and none to the public one.
    */
   categories?: readonly CategoryOption[];
+  /**
+   * The temporary catalog market-value boost, in per cent (0094).
+   *
+   * Read once per request by the page and handed down; no card and no dialog
+   * fetches it. 0 means the stored price is shown, which is also what a
+   * surface gets that passes nothing.
+   */
+  marketBoostPercent?: number;
 }) {
   // A series is always chosen (ADR-0038). The first one is the default, so
   // the catalog opens on Spyro's Adventure rather than on all 561 at once.
@@ -363,6 +372,7 @@ export function CatalogView({
         admin={admin}
         visible={isVisible(figure)}
         offers={offers[figure.skyId] ?? EMPTY_OFFERS}
+        marketBoostPercent={marketBoostPercent}
         onOpenOffers={() => setQuickViewSkyId(figure.skyId)}
         onEdit={() => setEditSkyId(figure.skyId)}
       />
@@ -628,6 +638,7 @@ export function CatalogView({
         }
         seller={seller}
         guest={!signedIn}
+        marketBoostPercent={marketBoostPercent}
         onClose={() => setQuickViewSkyId(null)}
       />
 

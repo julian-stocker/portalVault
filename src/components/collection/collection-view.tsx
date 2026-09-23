@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useDeferredValue, useMemo, useState, useSyncExternalStore } from "react";
 
 import { FigureCard } from "@/components/catalog/figure-card";
+import { NO_MARKET_BOOST } from "@/lib/catalog/market-boost";
 import { CollectionAction } from "@/components/collection/collection-action";
 import { CollectionOverview } from "@/components/collection/collection-overview";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
@@ -62,6 +63,7 @@ export function CollectionView({
   owned,
   series,
   totals,
+  marketBoostPercent = NO_MARKET_BOOST,
 }: {
   owned: readonly CollectionEntry[];
   series: readonly SeriesOption[];
@@ -70,6 +72,19 @@ export function CollectionView({
    * denominators here, not 561 figures it never draws (V4.3).
    */
   totals: CatalogTotals;
+  /**
+   * The temporary catalog market-value boost, in per cent (0094, ADR-0105).
+   *
+   * ONE VALUE FOR THE WHOLE SCREEN. Read once by the page and handed to every
+   * consumer below — the cards, the table and all three sums. A collection in
+   * which the cards said one thing and the total another would be worse than
+   * either number alone, so there is one percentage and it reaches all five
+   * call sites; a test walks them.
+   *
+   * It stops at the collection. The shop price, the buy-in factor, every
+   * snapshot and the whole Business side keep reading the stored price.
+   */
+  marketBoostPercent?: number;
 }) {
   const base = useMemo(() => buildCollectionRows(owned), [owned]);
 
@@ -130,16 +145,22 @@ export function CollectionView({
 
   // Statistics and series progress still see every catalog row: 448 of 561 is
   // only meaningful if both halves count the same set.
-  const stats = useMemo(() => collectionStats(counted, totals.total), [counted, totals.total]);
+  const stats = useMemo(
+    () => collectionStats(counted, totals.total, marketBoostPercent),
+    [counted, totals.total, marketBoostPercent],
+  );
 
   // Follows the tabs, never the search box: a summary that moved while you
   // typed would stop being a fact about the segment.
-  const summary = useMemo(() => segmentSummary(rows, scope, totals), [rows, scope, totals]);
+  const summary = useMemo(
+    () => segmentSummary(rows, scope, totals, marketBoostPercent),
+    [rows, scope, totals, marketBoostPercent],
+  );
 
   // Only while the filter is on: an extra line, never a second summary.
   const duplicates = useMemo(
-    () => (filters.duplicatesOnly ? duplicateSummary(rows, scope) : null),
-    [filters.duplicatesOnly, rows, scope],
+    () => (filters.duplicatesOnly ? duplicateSummary(rows, scope, marketBoostPercent) : null),
+    [filters.duplicatesOnly, rows, scope, marketBoostPercent],
   );
 
   const normalized = normalizeForSearch(deferredQuery);
@@ -223,6 +244,7 @@ export function CollectionView({
       <FigureCard
         key={row.figure.skyId}
         figure={row.figure}
+        marketBoostPercent={marketBoostPercent}
         quantity={row.quantity}
         /*
          * THE SAME OWNED STATE AS THE CATALOG (V3.2).
@@ -394,7 +416,8 @@ export function CollectionView({
                     ratio={section.ratio}
                   />
                   {mode === "table" ? (
-                    <CollectionTable rows={section.rows} onRemove={onQuantityChange} />
+                    <CollectionTable rows={section.rows} onRemove={onQuantityChange}
+                                     marketBoostPercent={marketBoostPercent} />
                   ) : (
                     <FigureGrid>{section.rows.map(showcaseCard)}</FigureGrid>
                   )}
@@ -404,7 +427,8 @@ export function CollectionView({
           ) : mode === "table" ? (
             /* Only reachable for rows no game claims — an owned figure whose
                series left the catalog. Rare, but it must not vanish. */
-            <CollectionTable rows={visible} onRemove={onQuantityChange} />
+            <CollectionTable rows={visible} onRemove={onQuantityChange}
+                            marketBoostPercent={marketBoostPercent} />
           ) : (
             <FigureGrid dense={false}>{visible.map(showcaseCard)}</FigureGrid>
           )}

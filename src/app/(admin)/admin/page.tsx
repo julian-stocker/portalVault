@@ -77,6 +77,7 @@ export default async function AdminPage() {
         <PlatformSettings
           contactEmail={platform.contactEmail}
           supportEmail={platform.supportEmail}
+          catalogMarketBoostPercent={platform.catalogMarketBoostPercent}
         />
       </div>
 

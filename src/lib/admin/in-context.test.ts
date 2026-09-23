@@ -229,6 +229,10 @@ describe("the same mutations as /admin, not new ones", () => {
         // The platform's own support address — its own writer, because it is
         // a different authority from the seller's contacts (ADR-0077).
         "admin_set_platform_support",
+        // 0094 — der temporäre Katalog-Aufschlag. Eine Plattformeinstellung
+        // mit eigenem Schreiber, und wie alle anderen hier: nicht von der
+        // Katalogkarte aufgerufen, sondern nur aus dem Adminbereich.
+        "admin_set_catalog_market_boost",
       ]),
     );
   });

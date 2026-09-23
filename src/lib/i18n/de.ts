@@ -2013,6 +2013,21 @@ export const de = {
       contactEmailHint:
         "Erscheint später im Impressum und in der Datenschutzerklärung. Steht in keiner " +
         "Bestellmail.",
+      /*
+       * Der temporäre Katalog-Aufschlag (0094).
+       *
+       * Bewusst hier bei den Plattformdaten und nicht im Geschäftsbereich:
+       * der Katalog gehört SkyIsles, der Verkaufspreis dem Verkäufer. Der
+       * Hilfetext sagt beides, weil die Zahl sonst wie ein Preisregler
+       * aussieht — und genau das ist sie nicht.
+       */
+      marketBoost: "Katalog-Marktwert-Boost",
+      marketBoostHint:
+        "Temporärer Aufschlag auf den im öffentlichen Katalog angezeigten Marktwert. " +
+        "Der gespeicherte Marktpreis und interne Kalkulationen bleiben unverändert — " +
+        "Shoppreise, Sammlungswert, Orderbuch und Snapshots rechnen weiter mit dem " +
+        "gespeicherten Wert. 0 % schaltet den sichtbaren Effekt ab.",
+      boostRange: "Der Aufschlag muss zwischen 0 und 50 Prozent liegen.",
       save: "Speichern",
       saved: "Gespeichert.",
       invalidEmail: "Das sieht nicht nach einer E-Mail-Adresse aus.",

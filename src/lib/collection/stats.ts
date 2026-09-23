@@ -6,6 +6,7 @@
  * (ADR-0010).
  */
 import { isCollectible } from "@/lib/catalog/collectible";
+import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import type { CollectionEntry } from "@/lib/catalog/types";
 
 export type CollectionStats = {
@@ -64,6 +65,18 @@ function roundToCents(value: number): number {
 export function collectionStats(
   entries: readonly CollectionEntry[],
   catalogTotal: number,
+  /**
+   * The temporary catalog market-value boost, in per cent (0094, ADR-0105).
+   *
+   * The collection is valued at what the catalog SAYS a figure is worth, so
+   * it follows the same percentage — a collection that contradicted the
+   * cards it is made of would be worse than either number alone.
+   *
+   * It is a display valuation and stops here: the shop price, the buy-in
+   * factor, every snapshot and the whole Business side keep reading the
+   * stored price. Default 0, which is the stored price exactly.
+   */
+  boostPercent: number = NO_MARKET_BOOST,
 ): CollectionStats {
   let distinctFigures = 0;
   let countedFigures = 0;
@@ -93,7 +106,16 @@ export function collectionStats(
     if (entry.figure.marketPrice === null) {
       withoutPrice += 1;
     } else {
-      estimatedValue += entry.quantity * entry.figure.marketPrice;
+      /*
+       * THE UNIT PRICE IS ROUNDED FIRST, THEN MULTIPLIED.
+       *
+       * 4.99 at 5 % is 5.24 on the card, so three copies must be 15.72 —
+       * not 4.99 x 3 x 1.05 = 15.7185, which would round to 15.72 here but
+       * disagrees with the cards as soon as the numbers are less kind. One
+       * unit price, shown and summed.
+       */
+      estimatedValue +=
+        entry.quantity * (catalogDisplayMarketPrice(entry.figure.marketPrice, boostPercent) ?? 0);
     }
     if (!entry.figure.isActive) inactiveOwned += 1;
     if (!entry.figure.catalogVisible) hiddenOwned += 1;

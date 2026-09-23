@@ -1073,6 +1073,34 @@ CHECK, `return_postage_borne_by` (`customer` | `seller`, Vorgabe `customer`), `d
 **Plattform.** `platform_settings.support_email` — die Adresse von SkyIsles selbst. NULL, bis es
 eine gibt; keine Adresse steht im Code. `contact_email` wird **nicht** umbenannt.
 
+#### Der temporäre Katalog-Marktwert-Boost (`0094`, ADR-0105)
+
+`platform_settings.catalog_market_boost_percent numeric(5,2) not null default 5.00`, CHECK
+`>= 0 and <= 50`.
+
+**Eine Anzeigeeinstellung, keine Preisregel.** Der gespeicherte `skylanders.market_price` bleibt
+die Source of Truth und bleibt unverändert; dieser Prozentsatz beeinflusst ausschließlich, was
+**öffentliche Katalogflächen drucken** — der Katalog, `/shop`, die Figurenseite — und was die
+**Sammlung** bewertet: Karten, Tabelle, Sammlungswert, Segment- und Duplikatssummen. Die
+Sammlung ist eine Bewertung für denselben Nutzer, der die Karten sieht; sie folgt deshalb
+derselben Zahl, und zwar vollständig oder gar nicht.
+
+Was weiterhin mit dem gespeicherten Wert rechnet: `shop_price()` und damit jeder Shoppreis und
+die Kasse, die Lagervorschau `automaticShopPrice()`, der Buy-in-Faktor, das Orderbuch, Einkauf
+und Verkauf, Fees und Payout sowie jeder `market_price_snapshot` in `sale_items` und
+`legacy_stock_events`. `0` schaltet den sichtbaren Effekt ab.
+
+Gesetzt unter `/admin` durch `admin_set_catalog_market_boost(numeric)` hinter
+`is_platform_admin()` — ein Seller-Operator hält diese Berechtigung nicht, und
+`admin_set_shop_percentage()` (die Regel des Verkäufers) bleibt davon unberührt. Gelesen durch
+`catalog_market_boost()`, die **genau diese eine Zahl** zurückgibt und `anon` sowie
+`authenticated` gewährt ist, weil der Katalog ohne Konto nutzbar ist. `platform_settings` selbst
+bleibt für jede Clientrolle gesperrt; `0094` öffnet keinen Tabellenzugriff. Eine Abfrage pro
+Request, als Prop weitergereicht — kein Lesezugriff je Karte.
+
+Temporär und leicht rückbaubar: Spalte und die beiden Funktionen fallen lassen, zwei Module
+löschen, drei Props entfernen. Es wurde nichts migriert und kein Wert überschrieben.
+
 #### Versand ist Konfiguration
 
 | | |

@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { CatalogView } from "@/components/catalog/catalog-view";
 import { isCatalogGroup } from "@/lib/catalog/group";
 import { fetchFigureFormOptions } from "@/lib/admin/queries";
+import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { offerRecord } from "@/lib/shop/offer";
@@ -40,7 +41,7 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned, offers, seller, formOptions] = await Promise.all([
+  const [user, figures, series, owned, offers, seller, formOptions, marketBoost] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
@@ -58,6 +59,13 @@ export default async function CatalogPage({
     // can create a figure, so a collector's render does not pay for them —
     // and the create dialog needs no request of its own when it opens.
     admin ? fetchFigureFormOptions() : Promise.resolve(null),
+    /*
+     * The temporary catalog market-value boost (0094). ONE call for the whole
+     * page, in the same round as everything else — no card asks for it, and
+     * it is not duplicated into a figure row. Display only: `market_price`
+     * itself arrives unchanged in `figures` above and stays that way.
+     */
+    fetchCatalogMarketBoost(),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -88,6 +96,7 @@ export default async function CatalogPage({
         offers={offerRecord(offers)}
         seller={seller}
         categories={formOptions?.categories ?? []}
+        marketBoostPercent={marketBoost}
       />
     </main>
   );

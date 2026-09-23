@@ -9136,3 +9136,102 @@ Regel allgemein gefasst, beweisbar und weiterhin fail-closed:
 
 Auf Production erklärte das einen Verkauf und neun Einkaufsgruppen; vier weitere blieben
 gewöhnliche `item`-Fälle. Der Beweis ist ein Hash-Treffer, keine Plausibilität.
+
+---
+
+## ADR-0105 — Der Katalog zeigt einen aufgeschlagenen Marktwert, rechnet aber mit dem gespeicherten
+
+**Status:** angenommen · 2026-09-23 · **temporär**, bis ein echter Marktpreis berechnet werden kann
+**Betrifft:** ADR-0010 (`market_price` nullable, nie 0), ADR-0045 (Shoppreis aus Marktpreis ×
+Prozentsatz), ADR-0064 / ADR-0077 (Plattform und Verkäufer sind getrennte Autoritäten),
+Migration `0094`
+
+### Ausgangslage
+
+`skylanders.market_price` ist heute faktisch der Shoppreis eines Mitbewerbers und liegt nach
+Einschätzung des Betreibers rund fünf Prozent unter dem realen Marktwert. Ein besserer Preis
+lässt sich noch nicht berechnen — die Datenquelle dafür existiert nicht.
+
+### Entscheidung
+
+Der **öffentliche Katalog zeigt** einen prozentual aufgeschlagenen Marktwert. Der
+**gespeicherte Wert bleibt unverändert** und bleibt die Source of Truth.
+
+Der Aufschlag entsteht so spät wie möglich: eine reine Funktion
+`catalogDisplayMarketPrice(storedMarketPrice, boostPercent)` in der Komponente, die die Zahl
+druckt. Er wird nirgends gespeichert, nirgends zurückgerechnet und von keiner Kalkulation
+gelesen.
+
+| | rechnet mit |
+|---|---|
+| Shoppreis (`shop_price()`, `shop_offers()`, Checkout) | gespeichertem `market_price` |
+| `automaticShopPrice()` — die Vorschau im Lager | gespeichertem `market_price` |
+| Buy-in-Faktor, Orderbuch, Einkauf, Verkauf | gespeichertem `market_price` |
+| `market_price_snapshot` in `sale_items` und `legacy_stock_events` | gespeichertem `market_price` |
+| **öffentliche Kataloganzeige** | **aufgeschlagenem Wert** |
+| **Sammlung** — Karten, Tabelle, Sammlungswert, Segment- und Duplikatssummen | **aufgeschlagenem Wert** |
+
+**0 % schaltet den sichtbaren Effekt ab** — der Katalog zeigt dann wieder exakt den
+gespeicherten Wert.
+
+### Die Sammlung gehört dazu
+
+Ursprünglich war `/collection` ausgenommen. Das war falsch herum gedacht: die Sammlung ist eine
+Bewertung **für denselben Nutzer, der die Karten sieht**, und eine Sammlung, deren Summe der
+Zahl auf ihren eigenen Karten widerspricht, ist schlechter als jede der beiden Zahlen allein.
+Sie folgt deshalb demselben Prozentsatz — Karten, Tabelle, Sammlungswert, Segmentsummen und die
+Duplikatssumme.
+
+Was dabei zählt, ist **alles oder nichts**: nähme eine der fünf Verbrauchsstellen den Aufschlag
+und eine andere nicht, stünden auf einem Bildschirm zwei Bewertungen desselben Regals. Die
+Seite liest den Wert **einmal** und reicht ihn an alle fünf weiter; ein Test läuft sie ab.
+
+**Die Reihenfolge der Rundung ist Teil der Entscheidung.** Erst den Einzelwert auf Cent runden,
+dann mit der Menge multiplizieren — 4,99 € bei 5 % sind 5,24 € auf der Karte, also sind drei
+Stück 15,72 €. Der andere Weg (4,99 × 3 × 1,05) ergibt an anderer Stelle 6,54 € statt 6,51 € und
+widerspricht damit der Karte, aus der die Summe gebildet wurde.
+
+Nicht dazu gehört die Geschäftsseite: Shoppreis, `automaticShopPrice()`, Lager, Orderbuch,
+Einkauf, Verkauf, Buy-in-Faktor, Snapshots, Fees und Payout rechnen unverändert mit dem
+gespeicherten Wert.
+
+### Warum eine Prop und kein Kontext
+
+`FigureCard` wird von vier Oberflächen gerendert. Alle vier reichen den Prozentsatz inzwischen
+hinein, aber der Default bleibt `0` und die Prop bleibt explizit: so ist die Liste der
+Aufrufstellen, die ihn setzen, die vollständige Liste der Orte, an denen der Aufschlag gilt —
+nachlesbar, statt aus einem Kontext oder einem Modul-Lesezugriff erschlossen. `collection/queries.ts`
+und `toFigure()` bleiben ausdrücklich außen vor: sie bauen die kanonischen Zeilen.
+
+### Warum `platform_settings` und nicht `shop_settings`
+
+Der Katalog gehört SkyIsles (ADR-0064, ADR-0076). `shop_settings.price_percentage` ist die
+Preisregel des **Verkäufers** und wird seit `0041` unter `/business` bearbeitet. Eine
+Katalogeinstellung dort wäre genau die Vermischung der beiden Rollen, die `0041` aufgelöst hat.
+Gesetzt wird der Wert deshalb unter `/admin` im Panel `Plattformdaten`, geschrieben von
+`admin_set_catalog_market_boost()` hinter `is_platform_admin()`. Ein Seller-Operator hält diese
+Berechtigung nicht.
+
+Gelesen wird über `catalog_market_boost()` — eine Funktion, die **genau eine Zahl** zurückgibt
+und `anon` sowie `authenticated` gewährt ist, weil der Katalog ohne Konto vollständig nutzbar
+ist. `platform_settings` selbst bleibt für jede Clientrolle gesperrt; es entsteht kein neuer
+Tabellenzugriff. Eine Abfrage pro Request, über `cache()` memoisiert und als Prop
+weitergereicht — kein N+1, keine Duplizierung je Figurenzeile.
+
+### Rundung
+
+Ganzzahlarithmetik auf Cent, halb weg von Null — dieselbe Technik wie `automaticShopPrice()`
+und dasselbe Ergebnis wie `round(numeric, 2)` in Postgres. Der Grund ist ein realer Fehler:
+`Math.round(16.65 * 90) / 100` ergibt 14.98 statt 14.99, weil 16.65 × 90 binär
+1498.4999999999998 ist. `NULL` bleibt `NULL` (ADR-0010) — ein Aufschlag auf nichts ist nichts,
+niemals 0.
+
+### Konsequenzen
+
+Marktwert und Shoppreis stehen sichtbar in einem anderen Verhältnis zueinander als zuvor; der
+Erklärtext „Marktwert und Shoppreis" bleibt richtig, weil er den Marktwert als Referenz
+beschreibt und keinen Zusammenhang zusagt.
+
+**Rückbau:** Spalte fallen lassen, `market-boost.ts` und `market-boost-server.ts` löschen, drei
+Props entfernen. Es wurde nichts migriert, kein Wert überschrieben und kein Preismodell
+umgebaut.

@@ -36,6 +36,7 @@ export function ShopView({
   signedIn,
   highlightSkyId = null,
   seller = null,
+  marketBoostPercent = 0,
 }: {
   entries: readonly ShopEntry[];
   /** Which of the offered figures the visitor already owns. Empty signed out. */
@@ -45,6 +46,14 @@ export function ShopView({
   highlightSkyId?: string | null;
   /** Who sells on SkyIsles, from the page's own queries (ADR-0064). */
   seller?: PublicSeller | null;
+  /**
+   * The temporary catalog market-value boost, in per cent (0094).
+   *
+   * Read once per request by the page and handed down; no card and no dialog
+   * fetches it. 0 means the stored price is shown, which is also what a
+   * surface gets that passes nothing.
+   */
+  marketBoostPercent?: number;
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -131,6 +140,7 @@ export function ShopView({
               }
               highlighted={highlightSkyId === entry.figure.skyId}
               offers={entry.offers}
+              marketBoostPercent={marketBoostPercent}
               onOpenOffers={() => setQuickViewSkyId(entry.figure.skyId)}
               // Unlike the catalog, this grid mixes all six games, so the
               // series is worth naming on every card.
@@ -152,6 +162,7 @@ export function ShopView({
         }
         seller={seller}
         guest={!signedIn}
+        marketBoostPercent={marketBoostPercent}
         onClose={() => setQuickViewSkyId(null)}
       />
     </div>

@@ -178,3 +178,61 @@ describe("collectionStats", () => {
     expect(stats.distinctFigures).toBe(2);
   });
 });
+
+/* ===================================================================== */
+/**
+ * DIE SAMMLUNG WIRD MIT DEM BEWERTET, WAS DER KATALOG SAGT (0094, ADR-0105).
+ *
+ * Der gespeicherte `market_price` bleibt kanonisch — Shoppreis, Buy-in-Faktor,
+ * Snapshots und die ganze Geschäftsseite rechnen weiter mit ihm. Die Sammlung
+ * ist aber eine Bewertung für denselben Nutzer, der die Karten sieht, und
+ * müsste sonst der Zahl auf der Karte widersprechen.
+ *
+ * Die Reihenfolge ist der Kern: ERST den Einzelwert auf Cent runden, DANN mit
+ * der Menge multiplizieren. 4,99 € bei 5 % ist 5,24 € auf der Karte, also sind
+ * drei Stück 15,72 € — nicht 4,99 × 3 × 1,05.
+ */
+describe("the collection follows the catalog's market value", () => {
+  it("values one copy at the boosted unit price", () => {
+    expect(collectionStats([entry(10)], 1, 5).estimatedValue).toBe(10.5);
+    expect(collectionStats([entry(4.99)], 1, 5).estimatedValue).toBe(5.24);
+    expect(collectionStats([entry(16.65)], 1, 7.5).estimatedValue).toBe(17.9);
+  });
+
+  it("rounds the unit first and multiplies afterwards", () => {
+    // 4.99 → 5.24 auf der Karte, drei Stück also 15.72.
+    expect(collectionStats([entry(4.99, 3)], 1, 5).estimatedValue).toBe(15.72);
+    // Und nicht 4.99 * 3 * 1.05 = 15.7185 — hier zufällig gleich gerundet,
+    // deshalb ein Fall, in dem sich die beiden Wege unterscheiden:
+    expect(collectionStats([entry(0.89, 7)], 1, 5).estimatedValue).toBe(6.51);   // 0.93 * 7
+    expect(Number((0.89 * 7 * 1.05).toFixed(2))).toBe(6.54);                     // der falsche Weg
+  });
+
+  it("boost 0 is exactly what the collection was worth before", () => {
+    const entries = [entry(10, 2), entry(4.99, 3), entry(0.89, 7)];
+    expect(collectionStats(entries, 1, 0).estimatedValue)
+      .toBe(collectionStats(entries, 1).estimatedValue);
+    expect(collectionStats(entries, 1, 0).estimatedValue).toBe(20 + 14.97 + 6.23);
+  });
+
+  it("a figure without a price stays out of the sum, boosted or not", () => {
+    const stats = collectionStats([entry(null, 4), entry(10, 1)], 1, 5);
+    expect(stats.withoutPrice).toBe(1);
+    expect(stats.estimatedValue).toBe(10.5);
+    // Never 0 EUR for the unknown one (ADR-0010).
+    expect(collectionStats([entry(null, 4)], 1, 5).estimatedValue).toBe(0);
+    expect(collectionStats([entry(null, 4)], 1, 5).withoutPrice).toBe(1);
+  });
+
+  it("counts pieces and figures exactly as before — only the value moves", () => {
+    const entries = [entry(10, 2), entry(null, 3)];
+    const plain = collectionStats(entries, 5);
+    const boosted = collectionStats(entries, 5, 7.5);
+    expect(boosted.distinctFigures).toBe(plain.distinctFigures);
+    expect(boosted.countedFigures).toBe(plain.countedFigures);
+    expect(boosted.totalPieces).toBe(plain.totalPieces);
+    expect(boosted.progress).toBe(plain.progress);
+    expect(boosted.withoutPrice).toBe(plain.withoutPrice);
+    expect(boosted.estimatedValue).toBeGreaterThan(plain.estimatedValue);
+  });
+});

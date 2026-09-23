@@ -435,6 +435,31 @@ export async function setPlatformSupport(supportEmail: string): Promise<AdminRes
   return call("admin_set_platform_support", { p_support_email: supportEmail }, ["/admin"], "platform");
 }
 
+/**
+ * The temporary catalog market-value boost (0094).
+ *
+ * A PLATFORM setting, so it takes the platform capability — a Business
+ * operator is refused here and refused again in the database. It writes one
+ * number that only the public catalog's DISPLAY reads: no price is
+ * recomputed, no snapshot moves, and `admin_set_shop_percentage()` — the
+ * seller's own percentage — is a different function for a different thing.
+ *
+ * Revalidates the surfaces that print a market value, so the new percentage
+ * is on screen at the next request rather than after a cache expires.
+ */
+export async function setCatalogMarketBoost(percent: number): Promise<AdminResult> {
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
+  if (!Number.isFinite(percent) || percent < 0 || percent > 50) {
+    return { ok: false, message: de.admin.platform.boostRange };
+  }
+  return call(
+    "admin_set_catalog_market_boost",
+    { p_percent: percent },
+    ["/admin", "/", "/shop"],
+    "platform",
+  );
+}
+
 /** Enables or disables one delivery country. The server decides, always. */
 export async function setShippingCountry(
   countryCode: string,

@@ -48,6 +48,7 @@ import { ElementChip } from "@/components/catalog/character-panel";
 import { Modal } from "@/components/ui/modal";
 import { OfferAddButton } from "@/components/shop/offer-panel";
 import { formatPrice } from "@/lib/format";
+import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import { de } from "@/lib/i18n/de";
 import type { QuickViewModel } from "@/lib/ui/quick-view";
 import type { PublicSeller } from "@/lib/shop/seller";
@@ -82,6 +83,7 @@ export function QuickView({
   seller,
   guest,
   onClose,
+  marketBoostPercent = NO_MARKET_BOOST,
 }: {
   /** `null` closes the dialog — and is also what a figure with no offer gives. */
   model: QuickViewModel | null;
@@ -101,6 +103,18 @@ export function QuickView({
   /** Whether nobody is signed in. Passed down from the server (ADR-0061). */
   guest: boolean;
   onClose: () => void;
+  /**
+   * The temporary catalog market-value boost, in per cent (0094).
+   *
+   * The panel opens over a catalog card and has to say the same number that
+   * card says. Explicit and zero by default, for the same reason as on the
+   * card: a surface that does not pass one shows the stored price.
+   *
+   * The OFFER prices below are untouched by it — they come from
+   * `shop_offers()`, which computes them from the stored market price in the
+   * database. Only the `Marktwert` line is boosted.
+   */
+  marketBoostPercent?: number;
 }) {
   const headingId = "quick-view-name";
 
@@ -251,7 +265,9 @@ export function QuickView({
                     : "text-base leading-tight font-semibold text-on-deep tabular-nums"
                 }
               >
-                {model.marketPrice === null ? de.catalog.noPrice : formatPrice(model.marketPrice)}
+                {model.marketPrice === null
+                  ? de.catalog.noPrice
+                  : formatPrice(catalogDisplayMarketPrice(model.marketPrice, marketBoostPercent))}
               </span>
             </p>
 

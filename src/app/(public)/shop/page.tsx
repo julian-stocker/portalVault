@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { ShopView } from "@/components/shop/shop-view";
 import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
+import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchCatalog } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchOffers } from "@/lib/shop/queries";
@@ -46,7 +47,7 @@ export default async function ShopPage({
   const params = await searchParams;
   const admin = await isAdmin();
 
-  const [user, catalog, offers, owned, seller] = await Promise.all([
+  const [user, catalog, offers, owned, seller, marketBoost] = await Promise.all([
     currentUser(),
     // Hidden figures are filtered by `shopEntries()`, but asking for them here
     // would put them in the browser's payload on the way. The public slice is
@@ -56,6 +57,10 @@ export default async function ShopPage({
     admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
     // Who sells here (ADR-0064, migration 0027). One call for the page.
     fetchSellerPublic(),
+    /* The temporary catalog market-value boost (0094), one call for the page.
+       It changes the `Marktwert` line on the cards; the OFFER prices beside
+       it come from `shop_offers()` and are untouched. */
+    fetchCatalogMarketBoost(),
   ]);
 
   /* The seller names itself — this page never hard-codes who sells (ADR-0075).
@@ -98,6 +103,7 @@ export default async function ShopPage({
           signedIn={Boolean(user)}
           seller={seller}
           highlightSkyId={highlight}
+          marketBoostPercent={marketBoost}
         />
       </div>
     </main>

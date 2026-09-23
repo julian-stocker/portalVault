@@ -14,6 +14,7 @@
  * rendering, and these functions decide what the numbers mean.
  */
 import { isCollectible } from "@/lib/catalog/collectible";
+import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import type { CatalogFigure, CollectionEntry } from "@/lib/catalog/types";
 
 /** One collectible and how many of it are owned. Zero means missing. */
@@ -184,6 +185,8 @@ export function segmentSummary(
   rows: readonly CollectionRow[],
   scope: CollectionScope,
   totals: CatalogTotals,
+  /** The catalog market-value boost, in per cent (0094). See `collectionStats`. */
+  boostPercent: number = NO_MARKET_BOOST,
 ): SegmentSummary {
   let owned = 0;
   let value = 0;
@@ -195,7 +198,9 @@ export function segmentSummary(
     if (row.figure.isActive && row.figure.catalogVisible && row.quantity > 0) owned += 1;
     // The value counts what is owned, active or not: owning it is owning it.
     if (row.quantity > 0 && row.figure.marketPrice !== null) {
-      value += row.quantity * row.figure.marketPrice;
+      /* Unit price first, then the count — the same order the cards imply. */
+      value +=
+        row.quantity * (catalogDisplayMarketPrice(row.figure.marketPrice, boostPercent) ?? 0);
     }
   }
 
@@ -236,6 +241,8 @@ export type DuplicateSummary = {
 export function duplicateSummary(
   rows: readonly CollectionRow[],
   scope: CollectionScope,
+  /** The catalog market-value boost, in per cent (0094). See `collectionStats`. */
+  boostPercent: number = NO_MARKET_BOOST,
 ): DuplicateSummary {
   let figures = 0;
   let extraCopies = 0;
@@ -248,7 +255,9 @@ export function duplicateSummary(
     extraCopies += extra;
     // A figure without a price is left out of the sum, never treated as
     // 0 € (ADR-0010) — the same rule the segment value follows.
-    if (row.figure.marketPrice !== null) value += extra * row.figure.marketPrice;
+    if (row.figure.marketPrice !== null) {
+      value += extra * (catalogDisplayMarketPrice(row.figure.marketPrice, boostPercent) ?? 0);
+    }
   }
 
   return { figures, extraCopies, value: roundToCents(value) };

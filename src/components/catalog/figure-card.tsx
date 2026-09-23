@@ -35,6 +35,7 @@ import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
 
 import { CollectedSeal } from "@/components/catalog/collected-seal";
+import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import { VariantSeal } from "@/components/catalog/variant-seal";
 import {
   CARD_ASPECT,
@@ -122,6 +123,7 @@ export function FigureCard({
   interactive = true,
   muted = false,
   knowsCollection = false,
+  marketBoostPercent = NO_MARKET_BOOST,
 }: {
   figure: CatalogFigure;
   /** What stands on the silver plate. Its row is painted into the artwork. */
@@ -158,6 +160,24 @@ export function FigureCard({
    * `understatesCard`.
    */
   knowsCollection?: boolean;
+  /**
+   * The temporary catalog market-value boost, in per cent (0094).
+   *
+   * EXPLICIT, AND ZERO BY DEFAULT. This card is rendered by four surfaces and
+   * only three of them are catalog surfaces: the catalog, the shop page and
+   * the figure page's siblings pass the configured percentage, the COLLECTION
+   * does not — there the card sits beside a collection total computed from
+   * the stored price, and a boosted card would contradict it.
+   *
+   * A context or a module-level read would have made that distinction
+   * invisible. As a prop, the list of places where the boost applies is the
+   * list of call sites that pass it.
+   *
+   * It changes the printed number and nothing else. `figure.marketPrice` is
+   * still the stored, canonical price, and it is what leaves this component
+   * in every other direction.
+   */
+  marketBoostPercent?: number;
 }) {
   const copies = duplicateBadge(quantity);
   const owned = marksOwnership(ownership, collected);
@@ -352,7 +372,12 @@ export function FigureCard({
               (figure.marketPrice === null ? "text-template-ink-muted" : "text-template-ink")
             }
           >
-            {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+            {figure.marketPrice === null
+              ? de.catalog.noPrice
+              /* The boost is applied HERE, at the last possible moment, and
+                 the stored price is what every other reader of this figure
+                 still sees (0094). */
+              : formatPrice(catalogDisplayMarketPrice(figure.marketPrice, marketBoostPercent))}
           </span>
         </Slot>
 

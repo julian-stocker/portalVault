@@ -6,6 +6,8 @@ import { CharacterPanel, ElementChip } from "@/components/catalog/character-pane
 import { CollectButton } from "@/components/catalog/collect-button";
 import { OfferPanel } from "@/components/shop/offer-panel";
 import { FigureCard } from "@/components/catalog/figure-card";
+import { catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
+import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { firstReleaseSeries } from "@/lib/catalog/character";
 import { isCollectible } from "@/lib/catalog/collectible";
@@ -62,10 +64,13 @@ export default async function FigurePage({ params }: Params) {
   if (!detail || !figure || !isCollectible(figure) || !figure.catalogVisible) notFound();
 
   const supabase = await createClient();
-  const [{ data: auth }, owned, offers] = await Promise.all([
+  const [{ data: auth }, owned, offers, marketBoost] = await Promise.all([
     supabase.auth.getUser(),
     fetchOwnedSkyIds(),
     fetchOffers(),
+    /* The temporary catalog market-value boost (0094). One call for the page:
+       the market value below and the sibling cards say the same number. */
+    fetchCatalogMarketBoost(),
   ]);
 
   // Derived, not stored: the earliest series among this character's figures,
@@ -142,7 +147,9 @@ export default async function FigurePage({ params }: Params) {
                   : "text-2xl font-semibold tabular-nums"
               }
             >
-              {figure.marketPrice === null ? de.catalog.noPrice : formatPrice(figure.marketPrice)}
+              {figure.marketPrice === null
+                ? de.catalog.noPrice
+                : formatPrice(catalogDisplayMarketPrice(figure.marketPrice, marketBoost))}
             </span>
           </div>
 
@@ -194,7 +201,8 @@ export default async function FigurePage({ params }: Params) {
           <h2 className="text-sm font-medium">{de.character.related}</h2>
           <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {detail.related.map((sibling) => (
-              <FigureCard key={sibling.skyId} figure={sibling} />
+              <FigureCard key={sibling.skyId} figure={sibling}
+                          marketBoostPercent={marketBoost} />
             ))}
           </div>
         </section>

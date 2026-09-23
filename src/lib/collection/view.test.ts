@@ -509,3 +509,60 @@ describe("hasActiveFilter — when a reset is worth offering", () => {
     expect(hasActiveFilter(COLLECTION_ALL, "", { duplicatesOnly: true })).toBe(true);
   });
 });
+
+/* ===================================================================== */
+/**
+ * DIE DREI SUMMEN DER SAMMLUNG FOLGEN DEMSELBEN AUFSCHLAG (0094, ADR-0105).
+ *
+ * `collectionStats`, `segmentSummary` und `duplicateSummary` beantworten drei
+ * verschiedene Fragen über dieselbe Sammlung. Wenn eine davon den Aufschlag
+ * nähme und eine nicht, stünden auf einem Bildschirm zwei Bewertungen
+ * desselben Regals. Also alle drei, mit derselben Zahl — und dieselbe
+ * Reihenfolge wie auf der Karte: Einzelwert runden, dann multiplizieren.
+ */
+describe("the collection's sums follow the catalog boost", () => {
+  const TOTALS = { total: 561, bySeries: { SA: 3, G: 2 } };
+  const a = figure("SKY-0001", { marketPrice: 4.99, seriesCode: "SA", seriesLabel: "SA" });
+  const b = figure("SKY-0002", { marketPrice: 0.89, seriesCode: "SA", seriesLabel: "SA" });
+  const none = figure("SKY-0003", { marketPrice: null, seriesCode: "SA", seriesLabel: "SA" });
+  const rows = buildCollectionRows([entry(a, 3), entry(b, 7), entry(none, 2)]);
+
+  it("segmentSummary values every copy at the boosted unit price", () => {
+    // 4.99 → 5.24 x 3 = 15.72   ·   0.89 → 0.93 x 7 = 6.51
+    expect(segmentSummary(rows, COLLECTION_ALL, TOTALS, 5).value).toBe(22.23);  // 15.72 + 6.51
+    // 7,5 %: 5.36 x 3 = 16.08   ·   0.96 x 7 = 6.72
+    expect(segmentSummary(rows, COLLECTION_ALL, TOTALS, 7.5).value).toBe(22.8);  // 16.08 + 6.72
+  });
+
+  it("duplicateSummary values the extra copies at the same unit price", () => {
+    // Zusätze: 2 x 5.24 = 10.48   ·   6 x 0.93 = 5.58
+    expect(duplicateSummary(rows, COLLECTION_ALL, 5).value).toBe(16.06);  // 10.48 + 5.58
+    // Und die Stückzahlen ändern sich durch den Aufschlag nicht.
+    expect(duplicateSummary(rows, COLLECTION_ALL, 5).extraCopies)
+      .toBe(duplicateSummary(rows, COLLECTION_ALL).extraCopies);
+  });
+
+  it("boost 0 is exactly the old answer, for both", () => {
+    expect(segmentSummary(rows, COLLECTION_ALL, TOTALS, 0).value)
+      .toBe(segmentSummary(rows, COLLECTION_ALL, TOTALS).value);
+    expect(duplicateSummary(rows, COLLECTION_ALL, 0).value)
+      .toBe(duplicateSummary(rows, COLLECTION_ALL).value);
+    expect(segmentSummary(rows, COLLECTION_ALL, TOTALS, 0).value).toBe(21.2);  // 14.97 + 6.23
+  });
+
+  it("the segment and the statistics still agree once both are boosted", () => {
+    const counted = ownedEntries(rows);
+    for (const boost of [0, 5, 7.5]) {
+      expect(segmentSummary(rows, COLLECTION_ALL, TOTALS, boost).value, String(boost))
+        .toBe(collectionStats(counted, 561, boost).estimatedValue);
+    }
+  });
+
+  it("a figure without a price is left out, whatever the boost", () => {
+    for (const boost of [0, 5, 7.5]) {
+      const only = buildCollectionRows([entry(none, 4)]);
+      expect(segmentSummary(only, COLLECTION_ALL, TOTALS, boost).value, String(boost)).toBe(0);
+      expect(duplicateSummary(only, COLLECTION_ALL, boost).value, String(boost)).toBe(0);
+    }
+  });
+});
