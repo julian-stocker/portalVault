@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 /**
  * The auth screens say why somebody is standing in front of them (F11).
@@ -49,21 +49,109 @@ describe("both screens explain the context", () => {
 });
 
 describe("registration is offered where it is the likely intent", () => {
-  it("promotes it to an action after a collect attempt", () => {
-    expect(login).toContain("favoursRegistration(context)");
-    expect(login).toContain("de.auth.login.registerAction");
+  /**
+   * EIN UMSCHALTER, UND SONST NICHTS (V4.8).
+   *
+   * Nach einem Sammelversuch bot /login „Konto erstellen" zusätzlich als
+   * eigenen Knopf an (F11). Seit der Umschalter über der Überschrift steht,
+   * wäre das ein DRITTER Weg zwischen denselben zwei Seiten. Die Erklärung,
+   * warum jemand hier steht, bleibt — das doppelte Angebot ist weg.
+   */
+  it("offers exactly one way to the other screen", () => {
+    expect(login).not.toContain("registerAction");
+    expect(login).not.toContain("orSignIn");
+    expect(login).not.toContain("favoursRegistration");
+    expect(login).not.toContain("ACTION_NEUTRAL");
+    const vocabulary = readFileSync("src/lib/i18n/de.ts", "utf8");
+    expect(vocabulary).not.toContain("registerAction:");
+    expect(vocabulary).not.toContain("orSignIn:");
+
+    // Genau ein Link auf die jeweils andere Route, und der kommt aus dem
+    // Umschalter, nicht aus der Seite.
+    for (const [name, source] of [["login", login], ["register", register]] as const) {
+      expect(source.match(/href=\{?["`]\/(login|register)/g) ?? [], name).toHaveLength(0);
+    }
+    expect(code(FORM_FIELD).match(/href=\{`\/(login|register)\$\{query\}`\}/g) ?? [])
+      .toHaveLength(2);
   });
 
-  it("keeps the footnote link when it is not", () => {
-    expect(login).toContain("de.auth.login.noAccount");
-    expect(login).toContain("de.auth.login.registerLink");
-    // One or the other, never both — two routes to the same page on one card
-    // is a card that looks unsure.
-    expect(login).toContain("offerRegistration ? null : (");
+  it("keeps the sentence that says why somebody is here", () => {
+    expect(login).toContain("const context = authContext(target);");
+    expect(login).toContain("<AuthContextNote context={context} />");
+  });
+
+  /**
+   * DER WECHSEL STEHT JETZT OBEN (V4.8).
+   *
+   * Die beiden Fußzeilen — „Noch kein Konto?" auf /login und „Du hast schon
+   * ein Konto?" auf /register — sagten dasselbe wie der Umschalter, nur
+   * weiter unten und zweimal. Sie sind ersatzlos weg; der Umschalter ist der
+   * eine Weg zwischen den beiden Seiten.
+   */
+  it("drops the footnote links, because the switch is above the heading", () => {
+    for (const source of [login, register]) {
+      expect(source).not.toContain("noAccount");
+      expect(source).not.toContain("registerLink");
+      expect(source).not.toContain("haveAccount");
+      expect(source).not.toContain("signInLink");
+    }
+    const vocabulary = readFileSync("src/lib/i18n/de.ts", "utf8");
+    for (const gone of ["noAccount:", "registerLink:", "haveAccount:", "signInLink:"]) {
+      expect(vocabulary, gone).not.toContain(gone);
+    }
+  });
+
+  /**
+   * ZWEI LINKS, KEIN CLIENT-TOGGLE.
+   *
+   * `/login` und `/register` bleiben eigene Routen mit eigenen Server
+   * Actions, eigenen Metadaten und eigener `next`-Bedeutung. Der Umschalter
+   * navigiert nur — sonst gäbe es „anmelden" zweimal, einmal als Route und
+   * einmal als Zustand in einer Komponente.
+   */
+  it("switches by navigating, and carries `next` both ways", () => {
+    expect(login).toContain('tabs={<AuthTabs active="login" target={target} />}');
+    expect(register).toContain('tabs={<AuthTabs active="register" target={target} />}');
+
+    const tabs = code(FORM_FIELD);
+    expect(tabs).toContain("const query = `?next=${encodeURIComponent(target)}`;");
+    expect(tabs).toContain("href={`/login${query}`}");
+    expect(tabs).toContain("href={`/register${query}`}");
+    // No form and no state: it is navigation, not a second sign-in.
+    expect(tabs).not.toContain("useState");
+    expect(tabs).not.toContain("signInAction");
+    expect(tabs).not.toContain("signUpAction");
+  });
+
+  it("says which side is current, not only which side is brighter", () => {
+    const tabs = code(FORM_FIELD);
+    expect(tabs).toContain('aria-current={active === "login" ? "page" : undefined}');
+    expect(tabs).toContain('aria-current={active === "register" ? "page" : undefined}');
+    expect(tabs).toContain("aria-label={de.auth.tabs.label}");
+    // Two equal segments across the panel, and a touch target on a phone.
+    expect(tabs).toContain("grid grid-cols-2");
+    expect(tabs).toContain("min-h-11");
+  });
+
+  it("sits above the heading, and only where there are two ways in", () => {
+    const card = code(FORM_FIELD);
+    const at = card.indexOf("{tabs}");
+    expect(at).toBeGreaterThan(-1);
+    expect(card.indexOf("<h1", at)).toBeGreaterThan(at);
+    // Optional: the password screens are not a choice between two doors.
+    expect(card).toContain("tabs?: ReactNode;");
+    for (const screen of ["src/app/(auth)/forgot-password/page.tsx",
+                          "src/app/(auth)/reset-password/page.tsx"]) {
+      if (!existsSync(screen)) continue;
+      expect(code(screen), screen).not.toContain("AuthTabs");
+    }
   });
 
   it("carries the same next to the registration screen", () => {
-    expect(login).toContain("/register?next=${encodeURIComponent(target)}");
+    // Jetzt aus dem Umschalter, mit demselben bereinigten Ziel wie zuvor.
+    expect(login).toContain('tabs={<AuthTabs active="login" target={target} />}');
+    expect(code(FORM_FIELD)).toContain("const query = `?next=${encodeURIComponent(target)}`;");
+    expect(code(FORM_FIELD)).toContain("href={`/register${query}`}");
   });
 
   it("uses a stronger intro on the registration screen for the same case", () => {

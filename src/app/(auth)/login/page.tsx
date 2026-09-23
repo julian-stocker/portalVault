@@ -2,10 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { AuthForm } from "@/components/auth/auth-form";
-import { AuthCard, AuthContextNote } from "@/components/auth/form-field";
-import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { AuthCard, AuthContextNote, AuthTabs } from "@/components/auth/form-field";
 import { signInAction } from "@/lib/auth/actions";
-import { authContext, favoursRegistration } from "@/lib/auth/context";
+import { authContext } from "@/lib/auth/context";
 import { PASSWORD_CHANGED_PARAM, safeRedirect } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
 
@@ -30,15 +29,19 @@ export default async function LoginPage({
    *
    * Read from the sanitised target, never from the raw parameter — so a
    * redirect `safeRedirect()` rejected can never produce a sentence either.
-   * It changes one paragraph and the prominence of one link; the `next`
-   * semantics, the action and the redirect are untouched.
+   * It changes one paragraph and nothing else; the `next` semantics, the
+   * action and the redirect are untouched.
+   *
+   * It used to change more: after a collect attempt the screen also promoted
+   * "Konto erstellen" to a button of its own. Since the switch sits above the
+   * heading (V4.8) that was a THIRD route between the same two pages, and a
+   * card that offers one thing three times reads as unsure. The sentence
+   * stays, the duplicate offer is gone.
    */
   const context = authContext(target);
-  const offerRegistration = favoursRegistration(context);
-  const registerHref = `/register?next=${encodeURIComponent(target)}`;
 
   return (
-    <AuthCard title={de.auth.login.title}>
+    <AuthCard title={de.auth.login.title} tabs={<AuthTabs active="login" target={target} />}>
       {passwordChanged ? (
         <p role="status"
            className="mb-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
@@ -47,6 +50,8 @@ export default async function LoginPage({
       ) : null}
 
       <AuthContextNote context={context} />
+
+      <p className="text-muted">{de.auth.login.intro}</p>
 
       <AuthForm
         action={signInAction}
@@ -64,33 +69,14 @@ export default async function LoginPage({
       />
 
       {/*
-       * Somebody who just tapped a figure to collect it almost certainly has
-       * no account — nobody signs out and then browses a catalog to collect
-       * something. So there, and only there, "Konto erstellen" stops being a
-       * footnote under the form and becomes an action beside it. Same
-       * destination, same flow, carrying the same `next`.
+       * Nur noch der vergessene Zugang. Der Wechsel zur Registrierung steht
+       * oben im Umschalter und braucht keine zweite Fußzeile — zwei Wege zur
+       * selben Seite auf einer Karte ist eine Karte, die sich unsicher ist.
        */}
-      {offerRegistration ? (
-        <div className="flex flex-col gap-2">
-          <Link href={registerHref} className={ACTION_NEUTRAL}>
-            {de.auth.login.registerAction}
-          </Link>
-          <p className="text-center text-xs text-muted">{de.auth.login.orSignIn}</p>
-        </div>
-      ) : null}
-
       <div className="flex flex-col gap-1 text-sm text-muted">
         <Link href="/forgot-password" className="underline">
           {de.auth.login.forgot}
         </Link>
-        {offerRegistration ? null : (
-          <span>
-            {de.auth.login.noAccount}{" "}
-            <Link href={registerHref} className="underline">
-              {de.auth.login.registerLink}
-            </Link>
-          </span>
-        )}
       </div>
     </AuthCard>
   );

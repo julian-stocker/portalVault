@@ -3153,21 +3153,22 @@ export const de = {
         "Mit einem kostenlosen Konto merkt sich SkyIsles, welche Figuren du besitzt — und " +
         "zeigt dir, was in jeder Serie noch fehlt.",
       submit: "Konto erstellen",
-      haveAccount: "Du hast schon ein Konto?",
-      signInLink: "Anmelden",
+    },
+    /*
+     * Der Umschalter oben im Panel (V4.8). Er ersetzt die beiden Fußzeilen
+     * („Noch kein Konto?" / „Du hast schon ein Konto?"), die dasselbe zweimal
+     * und weiter unten gesagt haben.
+     */
+    tabs: {
+      label: "Anmelden oder Konto erstellen",
+      login: "Anmelden",
+      register: "Konto erstellen",
     },
     login: {
       title: "Anmelden",
+      intro: "Melde dich an, um deine Sammlung weiterzuführen.",
       submit: "Anmelden",
       forgot: "Passwort vergessen?",
-      noAccount: "Noch kein Konto?",
-      registerLink: "Konto erstellen",
-      /**
-       * Dieselbe Zielseite, stärker angeboten: wer gerade eine Figur sammeln
-       * wollte, hat mit hoher Wahrscheinlichkeit noch kein Konto (F11).
-       */
-      registerAction: "Kostenloses Konto erstellen",
-      orSignIn: "Du hast schon ein Konto? Melde dich hier an.",
     },
     verifyEmail: {
       title: "Prüfe dein Postfach",

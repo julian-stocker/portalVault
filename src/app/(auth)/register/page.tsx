@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import { AuthForm } from "@/components/auth/auth-form";
-import { AuthCard, AuthContextNote } from "@/components/auth/form-field";
+import { AuthCard, AuthContextNote, AuthTabs } from "@/components/auth/form-field";
 import { signUpAction } from "@/lib/auth/actions";
 import { authContext, favoursRegistration } from "@/lib/auth/context";
 import { safeRedirect } from "@/lib/auth/redirect";
@@ -33,7 +32,7 @@ export default async function RegisterPage({
    * promises a landing.
    */
   return (
-    <AuthCard title={de.auth.register.title}>
+    <AuthCard title={de.auth.register.title} tabs={<AuthTabs active="register" target={target} />}>
       <AuthContextNote context={context} />
 
       <p className="text-muted">
@@ -53,13 +52,6 @@ export default async function RegisterPage({
           },
         ]}
       />
-
-      <p className="text-sm text-muted">
-        {de.auth.register.haveAccount}{" "}
-        <Link href={`/login?next=${encodeURIComponent(target)}`} className="underline">
-          {de.auth.register.signInLink}
-        </Link>
-      </p>
     </AuthCard>
   );
 }

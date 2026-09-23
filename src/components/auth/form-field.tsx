@@ -1,4 +1,5 @@
 /** Shared form primitives for the auth screens. Presentation only. */
+import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
@@ -123,13 +124,70 @@ export function SubmitButton({ label, pending }: { label: string; pending: boole
   );
 }
 
-export function AuthCard({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * The two ways in, as one control.
+ *
+ * TWO LINKS, NOT A CLIENT TOGGLE. `/login` and `/register` are separate
+ * routes with separate server actions, separate metadata and separate
+ * `next` semantics, and both stay directly addressable. A tab that swapped
+ * forms in the browser would either duplicate that or hide it; this one
+ * simply navigates, so there is exactly one implementation of "sign in" and
+ * one of "create an account", and the back button keeps working.
+ *
+ * `next` travels with both, so a visitor who came from a figure lands where
+ * they were headed whichever segment they pick.
+ *
+ * The active segment lifts onto the panel's own ground with the panel's own
+ * gold hairline; the other stays flat and quiet. `aria-current="page"` is
+ * what says which is which to a screen reader — the colour is not the
+ * information.
+ */
+export function AuthTabs({ active, target }: {
+  active: "login" | "register";
+  /** The sanitised destination, already through `safeRedirect()`. */
+  target: string;
+}) {
+  const query = `?next=${encodeURIComponent(target)}`;
+  const segment = (on: boolean) =>
+    "flex min-h-11 items-center justify-center rounded-sky-md px-3 text-sm font-medium "
+    + "transition-colors focus-ring "
+    + (on
+      ? "bg-deep/80 text-fg ring-1 ring-gold-line"
+      : "text-muted hover:text-fg");
+
+  return (
+    <nav aria-label={de.auth.tabs.label}
+         className="grid grid-cols-2 gap-1 rounded-sky-md bg-surface/60 p-1 ring-1 ring-border/70">
+      <Link href={`/login${query}`} aria-current={active === "login" ? "page" : undefined}
+            className={segment(active === "login")}>
+        {de.auth.tabs.login}
+      </Link>
+      <Link href={`/register${query}`} aria-current={active === "register" ? "page" : undefined}
+            className={segment(active === "register")}>
+        {de.auth.tabs.register}
+      </Link>
+    </nav>
+  );
+}
+
+export function AuthCard({ title, tabs, children }: {
+  title: string;
+  /**
+   * The segmented switch, above the heading (V4.8).
+   *
+   * Optional, because the password screens — forgot, reset, verify — are not
+   * one of two ways in and would be lying if they offered a choice.
+   */
+  tabs?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-sm flex-col justify-center px-6 py-16">
       {/* A panel rather than text on the sky (ADR-0038, V3): a sign-in form
           floating on a gradient has nothing to sit on, and the deep ground
           is what keeps the inputs legible over the horizon glow. */}
       <div className="flex flex-col gap-6 rounded-sky-lg bg-deep/80 p-6 ring-1 ring-gold-line backdrop-blur-sm">
+        {tabs}
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         {children}
       </div>
