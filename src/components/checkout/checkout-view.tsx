@@ -46,7 +46,7 @@ import {
   rememberPaymentToken,
 } from "@/lib/commerce/capability";
 import { readOpenOrderState, type OpenOrderView } from "@/lib/commerce/open-order-client";
-import { isAbandoned } from "@/lib/commerce/open-order";
+import { resumeAction } from "@/lib/commerce/open-order";
 import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
 import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
 import { conditionLabel } from "@/lib/shop/condition";
@@ -327,17 +327,23 @@ export function CheckoutView({
         }
 
         /*
+         * Two reasons to let go, and `resumeAction()` holds both.
+         *
          * Expired, failed or cancelled: nothing was charged and nothing can
          * still be done with it. Resuming would put the panel back over the
          * form and leave the customer with an instruction — "put the article
          * back in the cart" — that they cannot act on, because the refilled
          * cart lands on this same remembered order.
          *
-         * So the browser stops treating it as its open one. The order itself
-         * is untouched: no write, no delete, and it stays under „Meine
-         * Bestellungen" exactly as the database left it.
+         * And, since the paid-order bug: a SETTLED order that was not named in
+         * the address. Its checkout is over; keeping the note would block the
+         * next purchase for as long as the parcel is unpacked.
+         *
+         * The order itself is untouched either way: no write, no delete, and
+         * it stays under „Meine Bestellungen" exactly as the database left it.
          */
-        if (isAbandoned(state.paymentStatus, state.needsResolution)) {
+        if (resumeAction(
+              state.paymentStatus, state.needsResolution, resumeOrderNumber) === "forget") {
           forgetOpenOrder(principal);
           forgetPaymentToken(principal, open.orderNumber);
           setResumeChecked(true);

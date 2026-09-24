@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { ctaFor, isAbandoned, readPaymentState } from "./open-order";
+import { ctaFor, isAbandoned, readPaymentState, resumeAction } from "./open-order";
 
 /**
  * A checkout that cannot be finished must not occupy the checkout page.
@@ -94,7 +94,10 @@ describe("an order that can never be paid again is let go", () => {
 describe("the checkout page acts on it", () => {
   it("does not resume an order it has let go of", () => {
     const effect = VIEW.slice(VIEW.indexOf("const open = recallOpenOrder("));
-    const guard = effect.indexOf("isAbandoned(state.paymentStatus, state.needsResolution)");
+    // Seit dem Paid-Bug entscheidet `resumeAction()` beide Faelle: die drei
+    // Status ohne Zahlung und eine abgeschlossene Bestellung, nach der
+    // niemand gefragt hat.
+    const guard = effect.indexOf("resumeAction(");
     const resume = effect.indexOf("setPlaced({");
     expect(guard).toBeGreaterThan(-1);
     // Before the resume, or it would not prevent anything.
@@ -141,5 +144,112 @@ describe("the checkout page acts on it", () => {
     expect(effect).not.toContain('.from("orders")');
     expect(effect).not.toContain("release_order_reservations");
     expect(effect).not.toContain("expire_stale_checkouts");
+  });
+});
+
+/* ===================================================================== */
+/**
+ * EINE BEZAHLTE BESTELLUNG DARF DEN NÄCHSTEN EINKAUF NICHT BLOCKIEREN.
+ *
+ * Beobachtet auf Staging: `SI-2026-001066` war `paid` und `unfulfilled`. Ein
+ * neuer Warenkorb, ein erneuter Klick auf „Zur Kasse" — und statt eines neuen
+ * Checkouts erschien wieder die alte Bestellung mit „Für diese Bestellung ist
+ * nichts mehr zu tun". Solange der Betreiber nicht versendet hatte, war kein
+ * zweiter Einkauf möglich.
+ *
+ * Ursache: `isAbandoned()` war der einzige Weg, die Notiz im `sessionStorage`
+ * loszuwerden, und es kennt nur die drei Status ohne Zahlung. `paid` fiel in
+ * `SETTLED` — kein Knopf, aber die Notiz blieb, und das Panel ersetzt das
+ * Formular.
+ *
+ * Die Unterscheidung ist nicht der Status, sondern WIE die Bestellung erreicht
+ * wurde: benannt in der Adresse, oder nur in diesem Tab erinnert.
+ */
+describe("a settled order does not occupy the checkout", () => {
+  it("is let go of when nobody asked for it", () => {
+    for (const status of ["paid", "refunded", "partially_refunded"]) {
+      // `undefined` ist genau das, was `/checkout` ohne `?order=` durchreicht.
+      expect(resumeAction(status, false, undefined), status).toBe("forget");
+    }
+  });
+
+  it("is still shown to somebody who asked for it by name", () => {
+    // `/checkout?order=…` — die Adresse, an die Stripe eine abgebrochene
+    // Zahlung zurückschickt, und die jemand nach der Zahlung aufrufen kann.
+    for (const status of ["paid", "refunded", "partially_refunded"]) {
+      expect(resumeAction(status, false, "SI-2026-001066"), status).toBe("resume");
+    }
+  });
+
+  it("keeps an unfinished checkout, addressed or not", () => {
+    expect(resumeAction("pending", false, undefined)).toBe("resume");
+    expect(resumeAction("pending", false, "SI-2026-001066")).toBe("resume");
+  });
+
+  it("still lets go of the three statuses where nothing was charged", () => {
+    for (const status of ["expired", "failed", "cancelled"]) {
+      // Auch wenn danach gefragt wurde: es gibt dort nichts zu tun.
+      expect(resumeAction(status, false, undefined), status).toBe("forget");
+      expect(resumeAction(status, false, "SI-2026-001066"), status).toBe("forget");
+    }
+  });
+
+  it("never lets go of a flagged order", () => {
+    for (const status of ["pending", "paid", "expired", "failed", "cancelled"]) {
+      expect(resumeAction(status, true, undefined), status).toBe("resume");
+      expect(resumeAction(status, true, "SI-2026-001066"), status).toBe("resume");
+    }
+  });
+
+  it("does not change what the button says", () => {
+    // `cta` ist eine andere Frage und bleibt, wie sie war: bei Geld kein Knopf.
+    expect(ctaFor("paid", 0, false)).toBe("none");
+    expect(ctaFor("pending", 0, false)).toBe("start");
+    expect(ctaFor("pending", 2, false)).toBe("retry");
+  });
+
+  it("and `isAbandoned` keeps its own meaning", () => {
+    // „Nichts wurde belastet und nichts ist mehr möglich" — davon ist eine
+    // bezahlte Bestellung weiterhin nicht betroffen.
+    expect(isAbandoned("paid", false)).toBe(false);
+    expect(isAbandoned("expired", false)).toBe(true);
+  });
+
+  /**
+   * DER FEHLER IM ERSTEN FIX, ALS LAUFENDER TEST.
+   *
+   * `resumeAction()` bekam anfangs ein fertiges `addressed: boolean`, und der
+   * Aufrufer bildete es mit `resumeOrderNumber !== ""`. `/checkout` ohne
+   * Query reicht aber `undefined` durch — `undefined !== ""` ist `true`, also
+   * galt jede bezahlte Bestellung als „benannt" und blieb stehen. Der alte
+   * Test prüfte nur, dass dieser Ausdruck im Quelltext steht, und hat den
+   * Fehler damit festgeschrieben statt ihn zu fangen.
+   *
+   * Seither nimmt die Funktion den Wert selbst. Diese Fälle sind die, die im
+   * Browser tatsächlich ankommen.
+   */
+  it("lets go of a paid order for every address that names nothing", () => {
+    for (const nothing of [undefined, null, "", "   "]) {
+      expect(resumeAction("paid", false, nothing), String(nothing)).toBe("forget");
+    }
+  });
+
+  it("the page hands over the order number itself, not a verdict about it", () => {
+    // Der Wert wird durchgereicht; die Ableitung steht in `resumeAction()`.
+    expect(VIEW).toContain(
+      "state.paymentStatus, state.needsResolution, resumeOrderNumber)",
+    );
+    // Und niemand baut sich hier wieder selbst einen Wahrheitswert.
+    expect(VIEW).not.toContain('resumeOrderNumber !== ""');
+    expect(VIEW).not.toContain("Boolean(resumeOrderNumber)");
+  });
+
+  it("writes nothing while letting go", () => {
+    const effect = VIEW.slice(VIEW.indexOf("const open = recallOpenOrder("));
+    // Und nichts wird geschrieben oder gelöscht — nur die Notiz fällt weg.
+    const block = effect.slice(effect.indexOf("resumeAction("), effect.indexOf("setPlaced({"));
+    expect(block).toContain("forgetOpenOrder(principal)");
+    expect(block).not.toContain("supabase");
+    expect(block).not.toContain("rpc(");
   });
 });

@@ -79,6 +79,61 @@ export function isAbandoned(paymentStatus: string, needsResolution: boolean): bo
   return ABANDONED.has(paymentStatus);
 }
 
+/**
+ * Keep treating this order as the one this browser is in the middle of — or
+ * let go of the note?
+ *
+ * THE BUG THIS ANSWERS. `isAbandoned()` was the only way the note was ever
+ * dropped, and it covers only the three statuses where nothing was charged. A
+ * PAID order therefore occupied `/checkout` forever: the panel said "Für diese
+ * Bestellung ist nichts mehr zu tun" and the form never came back, so the
+ * customer could not start a SECOND purchase while the first was waiting to be
+ * packed. Shipping is the seller's business; it has nothing to do with whether
+ * somebody may buy again.
+ *
+ * THE DISTINCTION THAT WAS MISSING is not the status but how the order was
+ * reached. Named in the address — `/checkout?order=…`, which is where Stripe
+ * sends a cancelled payment — it is the order the customer is asking about,
+ * and a settled one should still explain itself. Merely remembered in this
+ * tab, with a fresh cart on screen, it is a leftover note, and a settled order
+ * has no checkout step left to resume.
+ *
+ * Nothing is written and nothing is deleted either way. The order stays
+ * exactly as the database left it and keeps its place under „Meine
+ * Bestellungen"; only this browser's note about it is dropped.
+ */
+export function resumeAction(
+  paymentStatus: string,
+  needsResolution: boolean,
+  /**
+   * The order number out of `?order=…`, exactly as the page received it —
+   * `undefined` when the address carried none.
+   *
+   * IT TAKES THE VALUE, NOT A VERDICT, AND THAT IS THE POINT. The first
+   * version of this took `addressed: boolean` and the caller derived it with
+   * `resumeOrderNumber !== ""`. But the page passes `undefined` when there is
+   * no query, and `undefined !== ""` is `true` — so every settled order
+   * counted as addressed and the bug this function exists for survived its
+   * own fix. Deriving it here is the only place that cannot be got wrong
+   * twice.
+   */
+  resumeOrderNumber: string | null | undefined,
+): "resume" | "forget" {
+  // Named in the address. A blank query (`?order=`) names nothing.
+  const addressed = (resumeOrderNumber ?? "").trim() !== "";
+
+  // A flagged order is waiting for a person and must stay visible, whatever
+  // its status says and however it was reached.
+  if (needsResolution) return "resume";
+  // Never payable again, and nothing was charged: see ABANDONED.
+  if (ABANDONED.has(paymentStatus)) return "forget";
+  // The money is in. There is no checkout step left — but if somebody asked
+  // for this order by name, they get the answer rather than an empty form.
+  if (SETTLED.has(paymentStatus)) return addressed ? "resume" : "forget";
+  // `pending`: the one status that really is a checkout in the middle of it.
+  return "resume";
+}
+
 export function readPaymentState(row: unknown): OpenOrderView | null {
   if (typeof row !== "object" || row === null) return null;
   const raw = row as Partial<PaymentStateRow>;
