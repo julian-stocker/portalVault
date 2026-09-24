@@ -649,17 +649,36 @@ export const de = {
       },
       handled: "Erledigt",
       open: "Offen",
-      refundedSoFar: (amount: string) => `Bereits erstattet: ${amount}`,
+      /* Ohne den Betrag: der steht daneben und wird dort eingefaerbt. */
+      refundedSoFar: "Bereits erstattet:",
 
-      refundHeading: "Erstattung festhalten",
+      refundHeading: "Erstattung bestätigen",
       refundHint:
         "Erstattet wird bei Stripe. Hier wird der Betrag festgehalten, damit Bestellung, " +
         "Berichte und Kundenansicht übereinstimmen.",
       amount: "Betrag",
       reason: "Grund (optional)",
       providerId: "Stripe-Erstattungs-ID (optional)",
-      record: "Erstattung festhalten",
+      record: "Erstattung bestätigen",
+      /* Was der Vorschlag abdeckt — eine Zeile je offener Position. */
+      allocationLine: (quantity: number, name: string) => `${quantity}× ${name}`,
+      /*
+       * Der Versand als eigene, ausdrückliche Entscheidung (0097). Kein Haken
+       * im Voraus: ob die Hinsendekosten zu erstatten sind, hängt am Fall —
+       * beim Widerruf ja, bei einem einzelnen Positionsstorno in der Regel
+       * nicht — und keine Regel im System kann das auseinanderhalten.
+       */
+      refundShipping: (amount: string) =>
+        `Versandkosten von ${amount} mit erstatten (beim Widerruf üblich)`,
+      shippingAllocation: "Versandkosten",
+      refundClosesWithdrawal:
+        "Mit dieser Rückerstattung wird der Widerruf als bearbeitet markiert.",
+      unattributed: (amount: string) =>
+        `${amount} bereits erstattet ohne Zuordnung zu einer Position — ` +
+        `falls das hierher gehört, bitte den Betrag entsprechend verringern.`,
       recording: "Wird gespeichert …",
+      allocationsInvalid:
+        "Die Aufteilung ergibt nicht den Erstattungsbetrag.",
       amountInvalid: "Bitte gib einen Betrag größer als 0 ein.",
       refundRefused: "Das geht nicht: mehr als bezahlt wurde, oder die Bestellung ist unbezahlt.",
       refundFailed: "Das hat nicht geklappt.",
@@ -1211,11 +1230,13 @@ export const de = {
        * Die Finanzzeile trägt die Überschriften des Arbeitsbuchs.
        * `Order 2026!T4` heißt wörtlich „EU" und enthält das Länderkürzel —
        * nachgesehen, nicht geraten. Ebenso U „Summe", V „Versand",
-       * W „Rabatt", AD „Refund", AE „Auszahlung".
+       * W „Rabatt", AD „Refund", AE „Auszahlung". Die Spalte AD heißt auf dem
+       * Bildschirm „Rückerstattung" — die Arbeitsmappe darf englisch
+       * abkürzen, die deutsche Oberfläche nicht.
        */
       columns: {
         date: "Datum", country: "EU", sum: "Summe", shipping: "Versand",
-        discount: "Rabatt", fees: "Fees", label: "Label", refund: "Refund",
+        discount: "Rabatt", fees: "Fees", label: "Label", refund: "Rückerstattung",
         payout: "Auszahlung", stock: "Lager", details: "Details",
         /* Weiterhin gebraucht: Filter, Detailansicht, Intern-Spalte. */
         channel: "Kanal", countryName: "Land", items: "Artikel",
@@ -1235,7 +1256,7 @@ export const de = {
         /* Nie `channel` / `external` zeigen — der Inhaber liest, wer bezahlt
            hat, nicht den Enum-Wert. */
         settledChannel: "Über Kanal", settledExternal: "Extern bezahlt",
-        refunds: "Refunds",
+        refunds: "Rückerstattungen",
         adjustments: "Auszahlungskorrekturen",
         payout: "Auszahlung",
         shippingState: "Versand",
@@ -1421,8 +1442,8 @@ export const de = {
       shipped: "Versendet", notShipped: "Nicht versendet",
       markShipped: "Als versendet markieren", markNotShipped: "Versand zurücknehmen",
       /* Geld */
-      addFee: "+ Gebühr", addRefund: "+ Refund", addItem: "+ Artikel",
-      amounts: "Beträge", fees: "Gebühren", refunds: "Refunds",
+      addFee: "+ Gebühr", addRefund: "+ Rückerstattung", addItem: "+ Artikel",
+      amounts: "Beträge", fees: "Gebühren", refunds: "Rückerstattungen",
       subtotal: "Summe", shipping: "Versand", discount: "Rabatt",
       buyIn: "Buy In", factor: "Einkaufsfaktor",
       buyInHint: "Rechnerischer Wert, nicht der tatsächliche Einkaufspreis dieses Stücks.",
@@ -1430,6 +1451,26 @@ export const de = {
       expand: "Verkauf aufklappen", collapse: "Verkauf zuklappen",
       loadingItems: "Wird geladen …", itemsFailed: "Konnte nicht geladen werden.",
       commerceOwned: "Von der Bestellung übernommen",
+      /*
+       * Die Positionen einer internen Bestellung (0096). Vorher stand hier
+       * für jede bezahlte Zeile „Verschickt ✓" — auch für eine stornierte.
+       * Ein Teilstorno bekommt keinen eigenen Zustand, sondern die Teile
+       * nebeneinander: „1 storniert · 2 verschickt".
+       */
+      commerceLine: {
+        cancelled: "Storniert",
+        returned: "Retoure",
+        cancelledPart: (n: number) => `${n} storniert`,
+        returnedPart: (n: number) => `${n} retour`,
+        shippedPart: (n: number) => `${n} verschickt`,
+        openPart: (n: number) => `${n} offen`,
+        separator: " · ",
+        cancelledHint: "Über die Bestellung storniert — diese Menge geht nicht raus.",
+        mixedHint: "Nur ein Teil dieser Position geht noch raus.",
+        /* Ausgebucht heißt nicht verschickt: das Stück ist beim Bezahlen vom
+           Regal gegangen, das Paket aber noch nicht. */
+        openHint: "Bezahlt und ausgebucht — das Paket ist noch nicht raus.",
+      },
       errors: {
         /* 0065: eine Werkbuch-Position wird weder gelöscht noch umgehängt. */
         historicalItem:
@@ -2139,6 +2180,108 @@ export const de = {
     orders: {
       title: "Bestellungen",
       linkHint: "Bezahlte Bestellungen sehen und als versendet markieren.",
+
+      /*
+       * Positionsstorno, Retoure und der Erstattungsstand (0095).
+       *
+       * Der Alltagsfall: acht Figuren, eine nicht lieferbar. Die Wörter sind
+       * bewusst getrennt — „storniert" heißt, die Ware geht nicht raus;
+       * „zurück" heißt, sie kam wieder. Und der Bestand ist eine dritte
+       * Aussage, die nur der Mensch am Regal treffen kann.
+       */
+      lineActions: {
+        cancel: "Position stornieren",
+        cancelHeading: "Position stornieren",
+        receiveReturn: "Rücksendung buchen",
+        receiveHeading: "Rücksendung buchen",
+        quantity: "Menge",
+        reason: "Grund (optional)",
+        /*
+         * ZWEI FRAGEN, ZWEI ANTWORTEN (0097). Warum storniert wurde, und ob
+         * das Stück im Regal liegt. Die erste sagt nichts über die zweite:
+         * eine beschädigte Figur kann sehr wohl dort liegen, und ein
+         * Käuferwunsch kann ein leeres Fach vorfinden.
+         */
+        reasonQuestion: "Warum wird storniert?",
+        reasons: {
+          buyer_request: "Käuferwunsch",
+          item_not_found: "Artikel nicht auffindbar",
+          item_damaged: "Artikel beschädigt",
+          stock_incorrect: "Falscher Lagerbestand",
+          other: "Sonstiges",
+        },
+        reasonMissing: "Bitte wähle zuerst einen Grund für die Stornierung.",
+        reasonNote: "Beschreibung",
+        reasonNoteHint: "Nur bei „Sonstiges“ — was war es?",
+        confirm: "Stornieren",
+        confirmReturn: "Einbuchen",
+        cancelAction: "Abbrechen",
+        /* Die EINE Frage an den Operator. Keine Vorauswahl. */
+        presenceQuestion: "Ist die Ware physisch vorhanden und wieder verkäuflich?",
+        presentLabel: "Ja, liegt im Lager",
+        missingLabel: "Nein, Artikel ist nicht vorhanden",
+        presenceMissing: "Bitte beantworte zuerst, ob die Ware vorhanden ist.",
+        presenceHint:
+          "„Nein“ bucht keinen Bestand auf: der Verkauf wird rückgängig gemacht und der " +
+          "Fehlbestand im selben Zug abgeschrieben.",
+        quantityInvalid: "Die Menge muss eine ganze Zahl größer als 0 sein.",
+        tooMany: "So viele sind für diese Position nicht mehr offen.",
+        alreadyShipped: "Diese Bestellung ist bereits versendet — das ist eine Retoure.",
+        notShipped: "Diese Bestellung ist noch nicht versendet.",
+        neverBooked: "Diese Position hat das Lager nie verlassen.",
+        notPaid: "Nur eine bezahlte Bestellung hat Positionen zum Stornieren.",
+        wrongMode: "Diese Bestellung gehört zu einer anderen Umgebung.",
+        sandboxReverted: "Für diese Testbestellung wurde der Bestand bereits zurückgebucht.",
+        /* Was in der Positionszeile steht. */
+        cancelledCount: (n: number) => `${n} storniert`,
+        returnedCount: (n: number) => `${n} zurück`,
+        toDeliver: (n: number) => (n === 1 ? "1 zu liefern" : `${n} zu liefern`),
+        outcomeRestocked: "wieder im Lager",
+        outcomeShortfall: "nicht vorhanden",
+        outcomeNone: "kein Lagerabgang",
+      },
+
+      /* Der Geldstand der Bestellung, über den Positionen. */
+      money: {
+        total: "Bestellwert",
+        refunded: "Erstattet",
+        open: "Erstattung offen",
+        openHint: "Vorschlag aus den stornierten Positionen. Erstattet wird in Stripe.",
+      },
+
+      /*
+       * Zwei getrennte Bereiche (0096). „Vom Käufer bezahlt" ist das Geld des
+       * Kunden — nur eine Erstattung verändert es. „Verkaufserlös" ist das,
+       * was davon bei diesem Betrieb bleibt. Der Rabatt steckt bereits im
+       * bezahlten Betrag und wird unten NICHT noch einmal abgezogen.
+       */
+      finance: {
+        paidTitle: "Vom Käufer bezahlt",
+        subtotal: "Zwischensumme",
+        shipping: "Versand",
+        discount: "Rabatt",
+        refunded: "Rückerstattung",
+        remaining: "Verbleibender Betrag",
+        remainingHint:
+          "Bezahlter Betrag abzüglich dokumentierter Rückerstattungen. " +
+          "Ein Storno allein verändert ihn nicht.",
+
+        proceedsTitle: "Verkaufserlös",
+        costsTitle: "Verkaufskosten",
+        fees: "Gebühren",
+        shippingLabel: "Versandetikett",
+        proceeds: "Bestelleinnahmen",
+        noCosts: "Noch keine Verkaufskosten erfasst.",
+        costsHint: "Aus den Posten des zugehörigen Verkaufs im Orderbuch.",
+      },
+
+      withdrawalBanner: (date: string) => `Widerruf eingegangen am ${date}`,
+      withdrawalBlocksShipping:
+        "Versand gesperrt: Der Kunde hat den Vertrag widerrufen. Kläre den Widerruf, " +
+        "bevor etwas rausgeht.",
+      nothingToShip: "Von dieser Bestellung ist nichts mehr zu liefern.",
+      cancelledBanner: "Diese Bestellung ist storniert.",
+
       empty: "Keine Bestellungen.",
       openOnly: "Nur offene",
       all: "Alle",
@@ -2412,6 +2555,11 @@ export const de = {
         not_paid: "Nicht bezahlt — Versand gesperrt.",
         needs_resolution: "Prüfung erforderlich — Versand gesperrt.",
         already_shipped: "Bereits versendet.",
+        cancelled: "Bestellung storniert — es gibt nichts mehr zu versenden.",
+        /* Die beiden Gründe, die 0095 in der Datenbank ergänzt hat und die
+           der Bildschirm bis jetzt nicht kannte. */
+        withdrawn: "Widerruf offen — Versand gesperrt, bis er geklärt ist.",
+        nothing_to_ship: "Nichts mehr zu liefern — alle Positionen storniert.",
       },
     },
   },

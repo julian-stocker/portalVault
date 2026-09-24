@@ -32,12 +32,29 @@ type Field = "orderNumber" | "name" | "email";
 
 const PANEL = "rounded-sky-lg bg-surface/80 p-5 ring-1 ring-border/70";
 
-export function WithdrawalFlow() {
+export function WithdrawalFlow({ context = null }: {
+  /**
+   * The order the visitor came from, IF the server was able to authorise it
+   * (0095). Null for every guest and every stranger — and then this is the
+   * form it has always been, with three empty fields.
+   *
+   * The fields stay real inputs rather than hidden values: the consumer must
+   * be able to see and correct what is being declared in their name. What
+   * they cannot do is invent a context — this one was read server-side from
+   * the order itself.
+   */
+  context?: {
+    orderNumber: string;
+    customerEmail: string;
+    consumerName: string | null;
+    declared: boolean;
+  } | null;
+}) {
   const copy = de.withdrawal;
   const [step, setStep] = useState<Step>("form");
-  const [orderNumber, setOrderNumber] = useState("");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [orderNumber, setOrderNumber] = useState(context?.orderNumber ?? "");
+  const [name, setName] = useState(context?.consumerName ?? "");
+  const [email, setEmail] = useState(context?.customerEmail ?? "");
   const [declaration, setDeclaration] = useState("");
   const [errors, setErrors] = useState<Partial<Record<Field, string>>>({});
   const [pending, startTransition] = useTransition();

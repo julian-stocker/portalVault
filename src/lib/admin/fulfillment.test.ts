@@ -203,7 +203,10 @@ describe("the items presentation, on both screens", () => {
   });
 
   it("replaced the prose rows entirely", () => {
-    expect(detail).toContain("<OrderLinesTable lines={lines} />");
+    // Seit 0095 bekommt die Tabelle zusaetzlich einen Aktions-Slot je Position
+    // — dieselbe Tabelle, dieselben Daten, ein Knopf daneben.
+    expect(detail).toContain("<OrderLinesTable");
+    expect(detail).toContain("lines={lines}");
     expect(detail).not.toContain("{lines.map(");
   });
 });

@@ -3064,6 +3064,69 @@ liest genau die Zahlen, gegen die entschieden wurde. Signatur, `security definer
 `search_path`, Grants, Reihenfolge und SQLSTATE sind unverändert — nur die Begründung ist
 präziser. Das Orderbuch ordnet beide Meldungen je einem eigenen deutschen Satz zu.
 
+#### Positionsstorno, Retoure und Fehlbestand (`0095`, ADR-0106)
+
+`order_line_events` ist das anhängende Journal je Bestellposition: `kind` ist `cancelled` oder
+`returned`, `quantity` die betroffene Menge, `stock_outcome` sagt, was das Regal tat.
+
+| `stock_outcome` | Bewegungen | wann |
+|---|---|---|
+| `restocked` | `+qty 'return'` | Storno vor Versand, Ware liegt da · **jede** Retoure |
+| `shortfall` | `+qty 'return'` **und** `−qty 'correction'` | Storno, Ware war physisch nie da — netto 0 |
+| `none` | keine | Position wurde nie ausgebucht |
+
+Die Formen sind CHECK-Bedingungen, keine Konvention: eine Retoure ist immer `restocked`, ein
+Fehlbestand hat immer beide Bewegungen, `none` hat keine, und jede Bewegung gehört über einen
+Unique-Index zu höchstens einem Ereignis.
+
+**Mengen stehen nirgends als Spalte.** `order_line_quantities(order_line_id)` rechnet bestellt,
+storniert, retourniert, lieferbar und offen aus diesem Journal; `order_fulfillable_total(order_id)`
+summiert es über die Bestellung. Der Versand (`admin_mark_order_shipped`) weist ab, wenn ein
+Widerruf vorliegt oder nichts mehr zu liefern ist — **ein Teilstorno sperrt ihn nicht**.
+
+Geschrieben wird ausschließlich über `seller_cancel_order_line()` und
+`seller_receive_order_return()`, beide `security definer` hinter `can_operate_active_seller()`,
+beide über `apply_inventory_movement()`. Der Bestandsausgang wird **im Server** bestimmt: aus
+`order_reservations.movement_id` (wurde überhaupt ausgebucht?) plus der einen Frage an den
+Operator, ob die Ware da ist.
+
+`order_refund_allocations` sagt, wofür eine Erstattung war — `line` (mit Menge), `shipping`,
+`goodwill`, `other`. Optional und 1:n; wo sie existieren, ergeben sie den Betrag exakt.
+`order_refunds` selbst und `occurred_at` bleiben unverändert (ADR-0083).
+
+#### Positionsstand und Verkaufskosten in den Projektionen (`0096`)
+
+Rein lesend und additiv — keine Tabelle, keine Spalte, keine Regel.
+
+`seller_sale()` liefert für eine interne Bestellung die Positionen der Bestellung. Seit `0096`
+tragen sie `cancelled`, `returned`, `fulfillable` und `outstanding` aus
+`order_line_quantities()` mit. Vorher hatte das Orderbuch keine Grundlage für den Zustand einer
+Position und druckte für jede bezahlte Zeile `Verschickt ✓` — auch für eine über `0095`
+stornierte. Beide Bildschirme lesen jetzt dieselbe Funktion.
+
+`order_sale_costs(order_id)` summiert `sale_fees` des zugehörigen Verkaufs in zwei Beträge:
+Gebühren (`payment`, `marketplace`, `other`) und Versandetikett (`shipping_label`).
+`admin_order()` reicht sie als `costs` durch. Kein Client hält EXECUTE; erreichbar nur über
+`admin_order()`, das die Berechtigung schon geprüft hat. Anders als `sale_expected_payout()`
+filtert sie **nicht** nach `settled_by`: sie beantwortet, was die Bestellung eingebracht hat,
+nicht, was der Kanal überweist.
+
+#### Stornierungsgrund (`0097`)
+
+`order_line_events.reason_code` — `buyer_request`, `item_not_found`, `item_damaged`,
+`stock_incorrect`, `other`, per CHECK, und nur auf `kind = 'cancelled'`. Freitext bleibt in
+`reason`, vor allem bei `other`.
+
+**Der Grund entscheidet nichts über den Bestand.** `stock_outcome` kommt weiterhin
+ausschließlich aus der technischen Tatsache `order_reservations.movement_id` plus der einen
+Frage an den Operator, ob die Ware physisch da ist — `p_reason_code` taucht in der Berechnung
+nicht auf. „Artikel beschädigt" sagt nichts darüber, ob das Stück im Regal liegt.
+
+`seller_cancel_order_line` hat dafür einen fünften Parameter bekommen; die 4-stellige Fassung
+wird **vorher gelöscht**, sonst entstünde eine Überladung und PostgREST antwortet mit PGRST203.
+`admin_order()` projiziert `reason_code` noch nicht — heute zeigt kein Bildschirm die
+Ereignisgründe an.
+
 #### Unveränderlichkeit und Anhängejournal
 
 `shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die

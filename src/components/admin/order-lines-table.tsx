@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { snapshotImageSource, imageSrc } from "@/lib/catalog/image";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -27,6 +29,8 @@ import { de } from "@/lib/i18n/de";
  * order twice and hoping the two stay in step.
  */
 export type OrderLine = {
+  /** Since 0095: what the two position actions address. */
+  id?: number;
   sky_id: string;
   condition: string;
   name: string;
@@ -37,7 +41,38 @@ export type OrderLine = {
   quantity: number;
   unit_price: string | number;
   line_total: string | number;
+  /*
+   * The derived quantities (0095). Sums over `order_line_events`; absent on a
+   * database without that migration, and then the row reads exactly as it did
+   * before — `quantity`, and nothing about cancellations.
+   */
+  cancelled?: number;
+  returned?: number;
+  fulfillable?: number;
+  /** How many may still be cancelled, and how many may still come back. */
+  cancellable?: number;
+  returnable?: number;
 };
+
+/**
+ * What became of the ordered pieces, in one short line under the name.
+ *
+ * Only when something happened. An untouched position says nothing extra —
+ * the ordinary case stays as quiet as it was.
+ */
+function lineStatus(line: OrderLine): string | null {
+  const copy = de.admin.orders.lineActions;
+  const cancelled = line.cancelled ?? 0;
+  const returned = line.returned ?? 0;
+  if (cancelled === 0 && returned === 0) return null;
+
+  const parts: string[] = [];
+  if (cancelled > 0) parts.push(copy.cancelledCount(cancelled));
+  if (returned > 0) parts.push(copy.returnedCount(returned));
+  const left = line.fulfillable ?? line.quantity - cancelled;
+  if (cancelled > 0 && left > 0) parts.push(copy.toDeliver(left));
+  return parts.join(" · ");
+}
 
 /** A fixed box, so a missing or oddly shaped picture cannot move the row. */
 const THUMB = "h-12 w-12 shrink-0 rounded-sky-sm bg-surface object-contain ring-1 ring-border/60";
@@ -87,7 +122,18 @@ function series(line: OrderLine): string {
   return value === "" ? de.admin.orders.lineSeriesUnknown : value;
 }
 
-export function OrderLinesTable({ lines }: { lines: OrderLine[] }) {
+export function OrderLinesTable({ lines, action }: {
+  lines: OrderLine[];
+  /**
+   * What the operator may do with one position (0095).
+   *
+   * A render slot rather than a prop bag: the controls are interactive and
+   * live in a client component, while this table stays the server-rendered
+   * snapshot it has always been. A surface that only shows the order — the
+   * customer's own page — passes nothing and gets exactly what it got before.
+   */
+  action?: (line: OrderLine) => ReactNode;
+}) {
   const copy = de.admin.orders;
 
   return (
@@ -119,6 +165,7 @@ export function OrderLinesTable({ lines }: { lines: OrderLine[] }) {
           <th scope="col" className="py-2 text-right font-medium">
             {copy.lineTotal}
           </th>
+          {action ? <th scope="col" className="py-2 pl-3" /> : null}
         </tr>
       </thead>
 
@@ -146,6 +193,12 @@ export function OrderLinesTable({ lines }: { lines: OrderLine[] }) {
               <span className="mt-0.5 hidden text-xs text-muted tabular-nums md:block">
                 {line.sky_id}
               </span>
+              {/* Nur wenn etwas passiert ist — eine unberührte Position bleibt still. */}
+              {lineStatus(line) ? (
+                <span className="mt-0.5 block text-xs font-medium text-own-ink">
+                  {lineStatus(line)}
+                </span>
+              ) : null}
             </td>
 
             {/* On the phone the series and condition share the line under the
@@ -169,6 +222,12 @@ export function OrderLinesTable({ lines }: { lines: OrderLine[] }) {
             <td className="col-start-3 row-start-1 text-right font-semibold tabular-nums md:table-cell md:py-2 md:font-medium">
               {formatPrice(Number(line.line_total))}
             </td>
+
+            {action ? (
+              <td className="col-span-3 md:table-cell md:py-2 md:pl-3 md:text-right">
+                {action(line)}
+              </td>
+            ) : null}
           </tr>
         ))}
       </tbody>

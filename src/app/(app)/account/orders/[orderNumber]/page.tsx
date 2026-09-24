@@ -180,7 +180,7 @@ export default async function MyOrderPage({
            * footer, because that is where somebody looks for it.
            */}
           <Link
-            href={WITHDRAWAL_PATH}
+            href={`${WITHDRAWAL_PATH}?bestellung=${encodeURIComponent(String(order.order_number))}`}
             className="rounded-sky-md bg-surface/80 px-4 py-3 text-sm ring-1 ring-border/70 hover:ring-border-strong"
           >
             {de.withdrawal.orderEntry}

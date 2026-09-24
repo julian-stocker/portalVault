@@ -54,6 +54,8 @@ export type AdminOrderDetail = {
     commerce_mode: string;
     /** Sandbox only: have the return movements already been booked? */
     stock_reverted: boolean;
+    /** Set when nothing is left to deliver (0095). */
+    cancelled_at?: string | null;
   };
   address: {
     first_name: string;
@@ -68,13 +70,67 @@ export type AdminOrderDetail = {
     phone: string | null;
   } | null;
   lines: {
+    /** Since 0095: the two position RPCs address a line, not an article. */
+    id?: number;
     sky_id: string;
     condition: string;
     name: string;
     quantity: number;
     unit_price: string | number;
     line_total: string | number;
+    /*
+     * The derived quantities (0095). Sums over `order_line_events`, computed
+     * by `order_line_quantities()` — never stored, so they cannot drift from
+     * the ledger they come from. Optional, because a database without 0095
+     * answers without them and the screen then shows the ordered quantity.
+     */
+    cancelled?: number;
+    returned?: number;
+    fulfillable?: number;
+    outstanding?: number;
+    cancellable?: number;
+    returnable?: number;
+    /** Did this position ever leave stock? Decides the cancellation outcome. */
+    was_booked_out?: boolean;
   }[];
+  /** The append-only line ledger (0095). */
+  line_events?: {
+    order_line_id: number;
+    kind: "cancelled" | "returned";
+    quantity: number;
+    stock_outcome: "restocked" | "shortfall" | "none";
+    occurred_at: string;
+    reason: string | null;
+  }[];
+  /** The consumer's declaration, if there is one (0047). */
+  withdrawal?: {
+    id: number;
+    received_at: string;
+    handled_at: string | null;
+    consumer_name: string;
+  } | null;
+  /** What has been repaid, and what for (0047, allocations 0095). */
+  refunds?: {
+    id: number;
+    amount: string | number;
+    occurred_at: string;
+    reason: string | null;
+    provider_refund_id: string | null;
+    allocations: {
+      type: "line" | "shipping" | "goodwill" | "other";
+      order_line_id: number | null;
+      quantity: number | null;
+      amount: string | number;
+    }[];
+  }[];
+  /** Pieces still to be delivered across every line (0095). */
+  fulfillable_total?: number;
+  /**
+   * What selling this order cost, from `sale_fees` of the sale it belongs to
+   * (0096). Absent on an environment that has not run 0096; both sums are 0
+   * where nothing has been recorded.
+   */
+  costs?: { fees: string | number; shipping_label: string | number } | null;
   events: {
     event_type: string;
     actor_kind: string;
@@ -160,38 +216,90 @@ export function hasOpenWork(counts: OpenOrderCounts): boolean {
 /* -------------------------------------------------------------- shipping */
 
 /** Why an order cannot be shipped, or null when it can. */
-export type ShipBlocker = "not_paid" | "needs_resolution" | "already_shipped";
+export type ShipBlocker =
+  | "not_paid" | "needs_resolution" | "already_shipped" | "cancelled"
+  | "withdrawn" | "nothing_to_ship";
+
+/** Payment states in which `admin_mark_order_shipped()` accepts an order. */
+const SHIPPABLE_PAYMENT = new Set(["paid", "partially_refunded"]);
+
+export type ShipFacts = {
+  payment_status: string;
+  fulfillment_status: string;
+  needs_resolution: boolean;
+  /** A withdrawal has been declared for this order (0095). */
+  withdrawalDeclared?: boolean;
+  /** `order_fulfillable_total()` — pieces still to be delivered (0095). */
+  fulfillableTotal?: number;
+};
 
 /**
- * The same four conditions the database enforces, in the same order.
+ * The conditions the database enforces, in a shape the screen can use.
+ *
+ * WHY THIS DRIFTED, AND WHAT IT COST. `admin_mark_order_shipped()` grew two
+ * guards in 0095 — an open withdrawal and "nothing left to deliver" — and
+ * accepted `partially_refunded` alongside `paid`, because a partial refund
+ * became daily business. This function was not updated, so the screen and
+ * the database disagreed in both directions at once: it OFFERED the button
+ * for a withdrawn order, where the click could only end in an error, and it
+ * HID the button for every partially refunded order, which the database
+ * would have shipped. The second one is the worse of the two — it locked a
+ * legitimate parcel behind a message that said „Nicht bezahlt".
+ *
+ * A second copy of this logic lived in `order-lines.ts` as `shipBlock()`,
+ * answered exactly the two missing cases, was tested — and was called from
+ * nowhere. It is gone: one question, one answer.
  *
  * `needs_resolution` is checked before the payment status on purpose: such an
  * order IS paid, and reporting "not paid" would send the operator looking for
  * the wrong thing. It is paid and nothing was booked — that is the message.
  */
-export function shipBlocker(order: {
-  payment_status: string;
-  fulfillment_status: string;
-  needs_resolution: boolean;
-}): ShipBlocker | null {
+export function shipBlocker(order: ShipFacts): ShipBlocker | null {
   if (order.needs_resolution) return "needs_resolution";
-  if (order.payment_status !== "paid") return "not_paid";
+  /*
+   * STORNIERT SCHLÄGT ALLES ANDERE, UND ZWAR VOR DER ZAHLUNGSPRÜFUNG.
+   *
+   * Zwei Anläufe hat dieser Zweig gebraucht. Zuerst fiel `cancelled` in den
+   * Sammelfall unten und der Bildschirm meldete „Bereits versendet." — auf
+   * SI-2026-001066, widerrufen, vollständig storniert, nie verschickt. Nach
+   * dem Storno wurde die Bestellung vollständig erstattet, `refunded` fiel
+   * aus SHIPPABLE_PAYMENT, und dieselbe Bestellung meldete „Nicht bezahlt".
+   * Auch falsch, und aus demselben Grund: der Zweig stand zu weit unten.
+   *
+   * Eine stornierte Bestellung hat genau eine Auskunft verdient, und sie
+   * hängt nicht am Geld. Ob bezahlt, teilerstattet oder vollständig
+   * zurückgezahlt — es gibt nichts mehr zu versenden, und das ist der Satz.
+   * Gesperrt bleibt sie ohnehin dreifach: der Status ist nicht
+   * `unfulfilled`, `fulfillable_total` ist 0, und die Datenbank prüft beides
+   * noch einmal.
+   */
+  if (order.fulfillment_status === "cancelled") return "cancelled";
+  // `refunded` is not in the set: when everything has been paid back,
+  // nothing goes out.
+  if (!SHIPPABLE_PAYMENT.has(order.payment_status)) return "not_paid";
   /*
    * `shipped` is no longer a blocker (ADR-0074): the status control renders
    * the way back from it. Only the states with no workflow behind them —
-   * `preparing`, `completed`, `cancelled` — still have nothing to offer.
+   * `preparing` and `completed` — still have nothing to offer.
    */
   if (order.fulfillment_status !== "unfulfilled" && order.fulfillment_status !== "shipped") {
     return "already_shipped";
   }
+  /*
+   * THE LAST TWO ONLY BLOCK THE WAY FORWARD, NEVER THE WAY BACK. They are
+   * reasons not to post a parcel; an order that has already gone out keeps
+   * its „Versand zurücknehmen", which is governed by its own function.
+   */
+  if (order.fulfillment_status === "unfulfilled") {
+    if (order.withdrawalDeclared === true) return "withdrawn";
+    if (order.fulfillableTotal !== undefined && order.fulfillableTotal <= 0) {
+      return "nothing_to_ship";
+    }
+  }
   return null;
 }
 
-export function canShip(order: {
-  payment_status: string;
-  fulfillment_status: string;
-  needs_resolution: boolean;
-}): boolean {
+export function canShip(order: ShipFacts): boolean {
   return shipBlocker(order) === null;
 }
 

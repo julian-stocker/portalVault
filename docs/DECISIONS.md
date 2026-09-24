@@ -9235,3 +9235,152 @@ beschreibt und keinen Zusammenhang zusagt.
 **Rückbau:** Spalte fallen lassen, `market-boost.ts` und `market-boost-server.ts` löschen, drei
 Props entfernen. Es wurde nichts migriert, kein Wert überschrieben und kein Preismodell
 umgebaut.
+
+---
+
+## ADR-0106 — Storno, Retoure und Fehlbestand sind drei Ereignisse; Geld ist ein viertes
+
+**Status:** angenommen · 2026-09-23 · Migration `0095`
+**Betrifft:** ADR-0010 (`market_price`/Preise nie 0), ADR-0037 (Bestandsjournal), ADR-0043
+(Bestellung und Bestand), ADR-0083 (Geld ist die Summe der Ereignisse), ADR-0086 (Widerruf),
+ADR-0102 (Legacy neben dem Ledger)
+
+### Ausgangslage
+
+Acht Figuren für 27,04 €, eine davon zu 3,49 € nicht lieferbar. Der Alltagsfall, und es gab
+keinen Weg dafür: `fulfillment_status = 'cancelled'` stand seit `0010` im CHECK und wurde von
+niemandem geschrieben, eine Rückgabe konnte nur `admin_revert_sandbox_stock()` buchen — und das
+weist jede Live-Bestellung ab. Ein Widerruf lebte ausschließlich in `withdrawal_requests` und
+hinderte niemanden daran, die Ware trotzdem zu versenden.
+
+### Entscheidung
+
+**Drei Bestandsereignisse, und sie werden nicht verwechselt.**
+
+| | Auslöser | Bestand |
+|---|---|---|
+| `restocked` | Storno vor Versand, Ware liegt im Regal | `+qty 'return'` |
+| `shortfall` | Storno, Ware war physisch nie da | `+qty 'return'` **und** `−qty 'correction'`, netto 0 |
+| `none` | Position wurde nie ausgebucht | keine Bewegung |
+| Retoure | gelieferte Ware kommt zurück | `+qty 'return'` |
+
+Der Fehlbestand ist der Grund für die Doppelbuchung. Wer eine nie vorhandene Figur mit `+1`
+zurückbucht, stellt das Phantom wieder her, das der Verkauf gerade zufällig korrigiert hatte.
+Beide Bewegungen entstehen im selben RPC und damit in derselben Transaktion; schlägt eine fehl,
+existiert auch die andere nicht und es wird kein Ereignis geschrieben.
+
+**Der Client entscheidet den Ausgang nicht.** Ob eine Position ausgebucht wurde, liest der
+Server aus `order_reservations.movement_id`. Der Operator beantwortet genau eine Frage — „liegt
+die Ware da?" — und `seller_cancel_order_line()` verbindet beides. „War nie ausgebucht" steht
+bewusst nicht zur Wahl: ein Mensch, den man danach fragt, kann es nur falsch beantworten.
+
+**Mengen werden nicht gespeichert.** `order_line_events` ist anhängend; storniert, retourniert,
+lieferbar und offen sind Summen darüber (`order_line_quantities()`, gespiegelt in
+`lib/commerce/order-lines.ts`). Ein Zähler neben einem Ledger ist eine zweite Wahrheit, und die
+einzige Frage an eine zweite Wahrheit ist, wann sie abweicht.
+
+**Der Versand unterscheidet zwei Gründe.** Ein offener Widerruf sperrt ihn in der Datenbank; eine
+Bestellung ohne lieferbare Menge ebenfalls. **Ein Teilstorno sperrt nicht** — acht Figuren mit
+einer stornierten sind sieben Figuren, die jemand erwartet.
+
+**Geld bleibt getrennt.** Kein Storno bewegt Geld, keine Erstattung bewegt Bestand, und Stripe
+wird weiterhin nicht von hier aus geschrieben. Neu ist nur, dass eine Erstattung sagen kann,
+wofür sie war: `order_refund_allocations` (1:n — Position, Teilmenge, mehrere Positionen,
+Versand, Kulanz). Wo es Zuordnungen gibt, ergeben sie den Betrag exakt; eine Erstattung ohne
+bleibt gültig, und jede vor `0095` erfasste Zeile ist unverändert vollständig.
+
+### Konsequenzen
+
+Der Monatsabschluss kann später ohne weiteres Modell beantworten, warum 3,49 € erstattet wurden
+und in welchem Monat: `order_refunds.occurred_at` bleibt der Zeitpunkt des Geldes, `orders`
+bleibt der Verkauf, und **der ursprüngliche Verkauf wird nie überschrieben** (ADR-0083).
+
+`fulfillment_status='cancelled'` wird erstmals geschrieben — ein Wert, den das CHECK seit `0010`
+kennt. Der Trigger aus `0039` erlaubt dafür genau einen Übergang dazu: `unfulfilled → cancelled`.
+Nicht `shipped → cancelled` (eine versendete Bestellung wird retourniert), nicht `cancelled → *`
+(terminal). `payment_status` bleibt unberührt: eine bezahlte Bestellung ist bezahlt, bis Geld
+zurückgeht, und `paid_at` hängt an einem CHECK, der das erzwingt.
+
+## ADR-0107 — Warum, was und wie viel Geld sind drei Fragen mit drei Antworten
+
+**Status:** angenommen · 2026-09-24 · Migrationen `0096`, `0097`
+**Betrifft:** ADR-0074 (Versand ist umkehrbar), ADR-0083 (Geld ist die Summe der Ereignisse),
+ADR-0086 (Widerruf und Erstattung), ADR-0106 (Storno, Retoure, Fehlbestand)
+
+`0095` hat den Positionsstorno gebracht, der Durchstich auf Staging hat drei Stellen gezeigt,
+an denen die Umsetzung eine Frage mit der Antwort auf eine andere beantwortet hat. Diese ADR
+hält fest, wie die drei sauber getrennt bleiben.
+
+### Entscheidung
+
+**1. Der Stornogrund entscheidet nichts über den Bestand.**
+
+`reason_code` (`0097`) sagt, **warum** storniert wurde: `buyer_request`, `item_not_found`,
+`item_damaged`, `stock_incorrect`, `other` — CHECK-gebunden, nur auf `kind = 'cancelled'`,
+Freitext bleibt in `reason`. `stock_outcome` sagt, **was das Regal tat**, und wird weiterhin
+allein aus der technischen Tatsache `order_reservations.movement_id` plus der einen Frage an den
+Menschen abgeleitet. Keines der beiden wird aus dem anderen gefolgert, in keiner Richtung.
+
+Der Grund dafür steht im Wortlaut selbst: „Artikel beschädigt" klingt wie eine Auskunft über das
+Regal und ist keine — eine beschädigte Figur liegt meistens sehr wohl dort. „Artikel nicht
+auffindbar" ebenso wenig: das Stück kann vor Monaten ausgebucht worden sein. Deshalb wird die
+Bestandsfrage **immer** gestellt, und keine der beiden Fragen hat eine Vorauswahl.
+
+**2. Es gibt ein Versandgate, nicht zwei.**
+
+Bildschirm und Datenbank bilden dieselben fachlichen Sperrgründe ab. `shipBlocker()` ist die
+einzige Antwort auf „darf diese Bestellung raus?"; die zweite Fassung (`shipBlock()` in
+`lib/commerce/order-lines.ts`) ist entfallen — sie war getestet, beantwortete die beiden Gründe
+aus `0095` korrekt und wurde von nirgendwo aufgerufen. Genau deshalb fiel monatelang nicht auf,
+dass der Bildschirm eine widerrufene Bestellung zum Versand anbot und eine teilerstattete
+sperrte, obwohl `admin_mark_order_shipped()` es umgekehrt sah.
+
+Die Reihenfolge der Gründe ist fachlich, nicht zufällig:
+
+```
+needs_resolution → cancelled → not_paid → already_shipped → withdrawn → nothing_to_ship
+```
+
+`needs_resolution` bleibt oberste Priorität: die Bestellung wartet auf einen Menschen, und jede
+andere Auskunft schickte ihn auf die falsche Fährte. **`cancelled` steht vor der
+Zahlungsprüfung**, weil eine stornierte Bestellung genau eine Auskunft verdient und die nicht am
+Geld hängt — bezahlt, teilerstattet oder vollständig zurückgezahlt, es gibt nichts mehr zu
+versenden. Zwei Anläufe hat dieser Zweig gebraucht: erst meldete er „Bereits versendet", dann
+„Nicht bezahlt", beide Male auf derselben widerrufenen, nie verschickten Bestellung.
+
+**3. Eine Erstattung wird vorgeschlagen, nie ausgelöst.**
+
+Der Positionsvorschlag rechnet **kumulativ über `cancelled + returned`**. Beide greifen auf
+denselben Vorrat zu (`order_line_quantities()` leitet `cancellable` wie `returnable` aus
+`ordered − cancelled − returned` ab), also kann ein Stück nicht in beiden Töpfen liegen, und die
+Summe kann `line_total` nie überschreiten. Abgezogen werden die **bereits zugeordneten
+`line`-Allocations dieser Position** — nicht die Erstattungssummen der Bestellung: eine
+Versanderstattung sagt nichts über den Wert einer Figur. Kumulativ statt stückweise addiert,
+damit das letzte Stück den Rundungsrest trägt und drei Drittel von 1,00 € wieder genau 1,00 €
+ergeben.
+
+**Der Versand ist eine eigene `shipping`-Allocation** — `order_line_id` NULL, `quantity` NULL,
+die Form, die `order_refund_allocations` seit `0095` dafür hat; keine Migration war nötig. Er
+wird **niemals vorausgewählt**: beim Widerruf sind die Hinsendekosten zu erstatten (§ 357 Abs. 2
+BGB), bei einem einzelnen Positionsstorno in aller Regel nicht, und keine Regel im System kann
+die beiden Fälle auseinanderhalten. Angeboten wird die Frage nur, wo der Vertrag rückabgewickelt
+wird — stornierte Bestellung oder offener Widerruf.
+
+**Storno, Retoure und Widerruf erzeugen niemals selbst eine Erstattung.** Sie bewegen Ware oder
+halten eine Erklärung fest; Geld bewegt ausschließlich der Operator, ausdrücklich, in Stripe und
+hier dokumentiert. Die eine bestehende Kopplung bleibt, wie ADR-0086 sie eingeführt hat: wird
+`seller_record_refund()` mit einer `withdrawal_request_id` gerufen, markiert sie den Widerruf als
+bearbeitet — die Rückzahlung **ist** die Erledigung. Neu ist nur, dass das Formular es sagt,
+statt es nebenbei zu tun.
+
+### Konsequenzen
+
+Betrag und Aufteilung einer Erstattung stammen aus **einer** Liste, also können sie nicht
+auseinanderlaufen; die Prüfung „die Teile ergeben das Ganze" (Client, Server, Datenbank) ist
+damit eine Zusicherung statt einer Hürde. Ein Vorschlag, den der Operator von Hand ändert,
+reist weiterhin **ohne** Aufteilung — eine falsche wäre schlechter als keine, und was dabei
+unzugeordnet bleibt, weist der Bildschirm aus, statt es zu raten.
+
+Was noch offen ist, bewusst: `order_refund_allocations` kennt keine Obergrenze je Position. Aus
+der Oberfläche ist sie nicht erreichbar, und `Σ order_refunds ≤ orders.total_amount` deckelt das
+Geld; ein CHECK dafür ist nach dem Durchstich zu bewerten, nicht vorher.

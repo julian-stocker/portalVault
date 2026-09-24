@@ -22,6 +22,7 @@ import { revalidatePath } from "next/cache";
 
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
+import { allocationsValid, type RefundAllocation } from "@/lib/commerce/order-lines";
 import { createClient } from "@/lib/supabase/server";
 
 export type RefundResult = { ok: true; refundedTotal: string } | { ok: false; message: string };
@@ -32,11 +33,24 @@ export async function recordRefund(input: {
   reason?: string;
   withdrawalId?: number;
   providerRefundId?: string;
+  /**
+   * What the amount was for (0095).
+   *
+   * Optional, and 1:n — a repayment may cover one position, a part of one,
+   * several, the shipping or goodwill. Where it is given, the parts must add
+   * up to the amount exactly; the database checks that again before it writes
+   * anything, so a half-allocated refund cannot exist.
+   */
+  allocations?: readonly RefundAllocation[];
 }): Promise<RefundResult> {
   if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
 
   if (!Number.isFinite(input.amount) || input.amount <= 0) {
     return { ok: false, message: de.business.withdrawals.amountInvalid };
+  }
+  const allocations = input.allocations ?? [];
+  if (!allocationsValid(allocations, input.amount)) {
+    return { ok: false, message: de.business.withdrawals.allocationsInvalid };
   }
 
   const supabase = await createClient();
@@ -46,6 +60,12 @@ export async function recordRefund(input: {
     p_reason: input.reason?.trim() || null,
     p_withdrawal_id: input.withdrawalId ?? null,
     p_provider_refund_id: input.providerRefundId?.trim() || null,
+    p_allocations: allocations.length === 0 ? null : allocations.map((one) => ({
+      type: one.type,
+      order_line_id: one.orderLineId,
+      quantity: one.quantity,
+      amount: one.amount,
+    })),
   });
 
   if (error) {
@@ -61,5 +81,6 @@ export async function recordRefund(input: {
 
   revalidatePath("/business/widerrufe");
   revalidatePath(`/business/orders/${input.orderNumber}`);
+  revalidatePath("/business/orders");
   return { ok: true, refundedTotal: String(row.refunded_total ?? "0") };
 }

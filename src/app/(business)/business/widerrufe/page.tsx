@@ -3,7 +3,7 @@ import Link from "next/link";
 
 import { RefundForm } from "@/components/admin/refund-form";
 import { fetchWithdrawals, type SellerWithdrawal } from "@/lib/admin/withdrawals";
-import { formatPrice } from "@/lib/format";
+import { formatDeduction, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 
 export const metadata: Metadata = { title: de.business.withdrawals.heading };
@@ -113,7 +113,11 @@ function WithdrawalRow({ entry }: { entry: SellerWithdrawal }) {
       </dl>
 
       {refunded > 0 ? (
-        <p className="mt-3 text-sm">{copy.refundedSoFar(formatPrice(refunded))}</p>
+        /* Ein Abzug, auch hier — nur der Betrag ist rot, nicht der Satz. */
+        <p className="mt-3 text-sm">
+          {copy.refundedSoFar}{" "}
+          <span className="tabular-nums text-danger">{formatDeduction(refunded)}</span>
+        </p>
       ) : null}
 
       <RefundForm orderNumber={entry.order_number} withdrawalId={entry.id} />
