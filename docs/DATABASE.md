@@ -3127,6 +3127,47 @@ wird **vorher gelöscht**, sonst entstünde eine Überladung und PostgREST antwo
 `admin_order()` projiziert `reason_code` noch nicht — heute zeigt kein Bildschirm die
 Ereignisgründe an.
 
+#### Bestellnachrichten und Systemmeldungen (`0098`, ADR-0108)
+
+`order_messages` — Text zwischen Käufer und Betrieb, immer an eine Bestellung gebunden.
+`author_kind` kennt nur `customer` und `seller`; **`system` gibt es dort nicht**. Ein Trigger
+(`order_messages_protect`) weist UPDATE und DELETE ab, `body` ist per CHECK auf 1–2000 Zeichen
+begrenzt. Beide neuen Tabellen haben RLS an und `revoke all … from public, anon, authenticated` —
+jeder Zugriff läuft über die Funktionen.
+
+**Systemmeldungen sind keine Zeilen, sondern eine Projektion** aus `order_events` — und der Kanal
+ist ein Gespräch, keine Bestellhistorie: **genau zwei** Ereignistypen erscheinen im Strang,
+`order_shipped` und `refund_recorded`. Sie beantworten je eine Frage, die sonst jemand stellen
+müsste („Wo ist mein Paket?", „Wo ist mein Geld?"). Alles andere bleibt unverändert in
+`order_events` und auf dem Bestellschirm. Aus der Payload sind **`quantity` und `amount`**
+freigegeben — interne Identitäten, `order_line_id` eingeschlossen, verlassen den Kundenkanal
+nicht.
+
+Posteingang und Ungelesen-Zählung lesen dieselbe Funktion, verengen sich also mit: eine
+Bestellung ohne menschliche Nachricht und ohne eines dieser beiden Ereignisse erzeugt keine
+Zeile im Strang und erscheint deshalb gar nicht erst im Posteingang. Damit ist eine gefälschte Systemmeldung strukturell unmöglich: In
+`order_messages` darf sie nicht stehen, und `order_events` hat seit `0010` weder Schreib-Policy
+noch Grant.
+
+`order_conversation_reads` hält **einen Wasserstand je (Bestellung, Seite)** statt eines Status
+je Nachricht — eine projizierte Zeile hat nichts, woran ein Häkchen hinge. Ungelesen ist, was
+neuer ist als der eigene Stand **und nicht von einem selbst**: bei Nachrichten über
+`author_kind`, bei Ereignissen über `actor_kind`.
+
+**Der Schnitt bei der Einführung** ist kein Sonderfall im Zählen, sondern eine Tatsache in
+Daten: die Migration setzt einmalig für jede bestehende Bestellung beide Seiten auf „jetzt
+gelesen" (`where not exists (select 1 from order_conversation_reads)`, dazu `on conflict do
+nothing`). Historisches bleibt im Verlauf sichtbar und zählt nicht als neu; alles ab der
+Einführung zählt normal. Es wird kein Ereignis erfunden und keines verändert.
+
+Sieben Funktionen für Clients (`order_conversation`, `post_order_message`,
+`mark_order_conversation_read`, `my_conversations`, `seller_conversations`, `my_unread_total`,
+`seller_unread_total`), drei interne ohne jedes Clientrecht (`order_conversation_role`,
+`order_conversation_events`, `conversation_summaries`). Adressiert wird über die Bestellnummer;
+unbekannt, fremd und Gastbestellung antworten identisch. Das Rate Limit — 20 menschliche
+Nachrichten je Bestellung und Stunde — zählt unter einem Advisory-Lock auf die Bestellung und
+weist ab, bevor geschrieben wird.
+
 #### Unveränderlichkeit und Anhängejournal
 
 `shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die

@@ -9384,3 +9384,145 @@ unzugeordnet bleibt, weist der Bildschirm aus, statt es zu raten.
 Was noch offen ist, bewusst: `order_refund_allocations` kennt keine Obergrenze je Position. Aus
 der Oberfläche ist sie nicht erreichbar, und `Σ order_refunds ≤ orders.total_amount` deckelt das
 Geld; ein CHECK dafür ist nach dem Durchstich zu bewerten, nicht vorher.
+
+## ADR-0108 — Eine Systemmeldung ist kein Beitrag, sie ist eine Projektion
+
+**Status:** angenommen · 2026-09-24 · Migration `0098`
+**Betrifft:** ADR-0032 (Shop und Rollen), ADR-0063 (Zählen ist nicht Listen),
+ADR-0082 (Badges sind Aggregate), ADR-0086 (Widerruf und Erstattung), ADR-0106 (Ereignisse
+statt Zähler)
+
+Käufer und Betrieb sollen sich zu einer Bestellung schreiben können, und dazwischen soll stehen,
+was mit der Bestellung geschehen ist. Die naheliegende Umsetzung — eine Nachrichtentabelle mit
+einer Spalte `kind in ('human','system')` und ein Trigger, der Systemzeilen hineinschreibt —
+wird hier nicht genommen.
+
+### Entscheidung
+
+**Systemereignisse werden nicht kopiert, sondern beim Lesen projiziert.** Sie stehen seit `0010`
+in `order_events`, geschrieben von denselben security-definer-Funktionen, die die Wirkung
+auslösen, in derselben Transaktion. Eine Kopie in einer Nachrichtentabelle wäre eine zweite
+Wahrheit, und die einzige Frage an eine zweite Wahrheit ist, wann sie abweicht.
+
+Daraus folgt die Unfälschbarkeit, ohne dass sie jemand durchsetzen müsste: `order_messages`
+lässt per CHECK nur `customer` und `seller` als Urheber zu, `system` gibt es dort nicht. Und
+`order_events` kann kein Client beschreiben — auf der Tabelle existiert seit `0010` keine
+Schreib-Policy und kein Grant. Eine gefälschte Systemmeldung hat keinen Ort, an dem sie stehen
+könnte.
+
+**Die Whitelist steht in SQL, die Payload bleibt drinnen.** Und sie ist kurz: **zwei**
+Ereignistypen erscheinen im Strang, `order_shipped` und `refund_recorded`. Anfangs waren es
+sieben — fachlich richtig, im Gespräch falsch: eine Bestellung erzeugt davon schnell ein Dutzend,
+und die zwei Sätze zwischen Menschen gingen darin unter. Der Kanal ist Kommunikation, keine
+Bestellhistorie; die hat ihren Ort in `order_events` und auf dem Bestellschirm. Übrig bleiben die
+beiden, die eine Frage beantworten, die sonst jemand stellen müsste. Von der
+Payload sind genau zwei Felder freigegeben — `quantity` und `amount` — und alles andere bleibt,
+wo es ist: `order_line_id`, `movement_id`, `correction_movement_id`, `refund_id`, `attempt_id`,
+`invoice_number`, `stock_outcome`, `withdrawal_request_id`. `order_line_id` war kurz dabei, mit
+dem Argument, der Lesende habe die Bestellung ohnehin vor sich; es ist trotzdem ein interner
+Primärschlüssel, und die Regel lautet nicht „im Einzelfall ungefährlich", sondern „interne
+Identitäten verlassen den Kundenkanal nicht". Soll eine Meldung später eine Position benennen,
+bekommt sie eine kontrollierte öffentliche Projektion — eine Positionsnummer innerhalb der
+Bestellung etwa — und nicht den Schlüssel. Den deutschen Satz baut die
+Oberfläche aus dem Ereignistyp. Aus einem Systemereignis kann deshalb kein freier Text und kein
+Markup in die Seite gelangen.
+
+**Ungelesen ist ein Wasserstand, kein Status je Nachricht.** Ein Strang aus zwei Quellen hat für
+eine projizierte Zeile nichts, woran ein Häkchen hinge. Also ein Zeitstempel je (Bestellung,
+Seite). Was zählt, ist neuer als der eigene Stand **und nicht von einem selbst** — bei
+Nachrichten über `author_kind`, bei Ereignissen über `actor_kind`: was der Betrieb ausgelöst hat,
+ist für den Betrieb gelesen. Ohne diese Unterscheidung stünde am Business-Bereich ein Zähler,
+der die eigenen Klicks mitzählt.
+
+**Der Schnitt bei der Einführung ist eine Tatsache in Daten, kein Zweig im Code.** „Kein
+Wasserstand" heißt „alles ungelesen" — für eine neue Unterhaltung richtig, am Einführungstag
+falsch: jede je versendete, stornierte oder erstattete Bestellung bekäme rückwirkend rote Punkte
+für längst Erledigtes. Die Migration setzt deshalb einmalig für jede bestehende Bestellung beide
+Seiten auf „jetzt gelesen". Historisches bleibt im Verlauf sichtbar, zählt aber nicht als neu;
+alles ab der Einführung zählt normal. Kein Stichtag als Konstante, kein erfundenes Ereignis,
+keine Zeile in `order_events` angefasst — und die Zählung kennt weiterhin genau eine Regel.
+
+**`reader` ist die Seite, nicht die Person.** Der Betrieb hat einen gemeinsamen Lesestand. Alles
+andere führte eine Operator-Identität ein, die dieses Produkt nicht haben soll, solange es einen
+Verkäufer gibt (CLAUDE.md).
+
+**Gäste haben in V1 keine Unterhaltung.** Eine Gastbestellung hat kein Konto und damit keine
+Gegenseite, die je läse; ein Strang, in den nur einer schreiben kann, ist ein Zettel. Die
+Checkout-Capability wäre der technisch mögliche zweite Weg und wird bewusst nicht genommen: sie
+lebt in einem Tab, eine Korrespondenz lebt länger. Gäste bekommen weiterhin E-Mail.
+
+**Adressiert wird über die Bestellnummer, und alle Fehlschläge klingen gleich.** Unbekannt,
+fremd, Gast — dreimal dieselbe Antwort, wie bei `my_order()`. Sonst wäre die Funktion ein Orakel
+für fremde Bestellnummern.
+
+**Die Zahlen am Rand sind Aggregate.** ADR-0082 hält fest, was passiert, wenn ein Badge über eine
+gedeckelte Liste zählt: der alte log ab der 101. offenen Bestellung. Dieselbe Falle stellt sich
+hier sofort wieder; `my_unread_total()` und `seller_unread_total()` summieren deshalb über eine
+Aggregatfunktion.
+
+### Konsequenzen
+
+Der Posteingang sortiert **ungelesen zuerst, dann neueste Aktivität** — nicht „älteste
+unbeantwortete zuerst": V1 kennt kein „beantwortet", und nach einem Zustand zu sortieren, den es
+nicht gibt, wäre eine Behauptung.
+
+Geschrieben werden darf unbefristet, auch nach Versand, Storno, Erstattung und Abschluss. Eine
+Rückfrage kommt oft erst dann, und eine gesperrte Unterhaltung erzeugt eine E-Mail, die niemand
+zuordnen kann.
+
+Was V1 nicht hat und bewusst offen lässt: Anhänge, Bearbeiten, Löschen, Realtime, Mail bei neuer
+Nachricht, Chat außerhalb einer Bestellung, Lesebestätigung je Nachricht, Suche, Vorlagen,
+Moderation. Der Weg zu feinerem Lesetracking bleibt offen — ein Wasserstand lässt sich später
+verfeinern, eine kopierte Systemzeile ließe sich nicht mehr zurücknehmen.
+
+## ADR-0109 — Eine Tür ins Konto, und der Ausgang steht an ihrem Ende
+
+**Status:** angenommen · 2026-09-25 · ersetzt die Platzierung aus ADR-0085, keine Migration
+**Betrifft:** ADR-0062 (Abmelden ist keine Einstellung), ADR-0080 („Mein Konto", kein Zahnrad),
+ADR-0085 (Abmelden auf „Profil"), ADR-0108 (Nachrichten)
+
+### Ausgangslage
+
+V3.4.1 stellte ein Kontosymbol in den Kopf und verbot per Test ein zweites: ein ausgeschriebener
+Eintrag in der Leiste plus ein Symbol oben wären zwei Wege in denselben Raum gewesen. V3.4.2
+machte trotzdem zwei daraus, mit dem Argument, es seien zwei verschiedene Seiten — Name plus
+Person auf `/account/profile`, ein Kartensymbol daneben auf `/account`.
+
+Das Argument stimmte formal und in der Sache nicht: das Profil ist eine **Kachel innerhalb** des
+Kontos, keine Nebentür. Zwei Symbole nebeneinander, beide ohne Beschriftung, beide in denselben
+Bereich — und keinem sah man an, welches wohin führt.
+
+### Entscheidung
+
+**Ein Konto-Knopf im Kopf, mit dem Personensymbol, Ziel `/account`.** Das Kartensymbol und seine
+Aktion sind entfernt, der zugehörige Glyph ebenfalls — ein Symbol ohne Verwender ist der Anfang
+einer Wiederverwendung an der falschen Stelle.
+
+**Die Zahl ungelesener Nachrichten zieht mit.** Sie saß am Kartensymbol und wäre mit ihm
+verschwunden; sie sitzt jetzt am Personensymbol und steht zusätzlich im vorgelesenen Namen, weil
+eine Marke allein für jemanden, der sie nicht sieht, nichts ist.
+
+**Der aktive Zustand folgt wieder `activeSection()`.** Die frühere Feinunterscheidung zwischen
+`/account/profile` und dem Rest gibt es nicht mehr; jede Konto-Route lässt den einen Knopf
+leuchten.
+
+**Abmelden steht unten auf `/account`, sichtbar abgetrennt** — und damit dort, wo ADR-0085 es
+ausdrücklich nicht haben wollte. Die damalige Begründung war: `/settings` leitet auf `/account`
+um, ein Knopf dort wäre also ein Knopf unter Einstellungen. Das galt, solange der Kopf zwei Türen
+hatte und „Profil" ein eigener Ort war. Seit es nur eine gibt, **ist** diese Seite der Bereich,
+und der Ausgang gehört an sein Ende statt in eine Kachel, in der ihn niemand sucht.
+
+Unverändert bleibt, was ADR-0062 festhält: nicht unter „Konto & Sicherheit" — dort wird etwas am
+Konto geändert, und Gehen ist keine Änderung daran. Und weiterhin ein POST, nie ein Link: ein
+Vorauslader darf keine Sitzung beenden können.
+
+### Konsequenzen
+
+`/account/profile` bleibt als Kachel bestehen und trägt weiterhin die Änderung des
+Benutzernamens; verloren geht keine Funktion. Die Kachelreihenfolge ist Profil · Kontakt &
+Lieferadresse · Meine Bestellungen · Nachrichten · Konto & Sicherheit, darunter abgetrennt der
+Ausgang.
+
+Ein Test hält fest, dass es genau eine Konto-Aktion im Kopf gibt, dass sie auf `/account` führt,
+dass weder die alte Aktion noch ihr Glyph irgendwo überlebt haben, und dass `action="/auth/signout"`
+im gesamten `src/app`-Baum **genau einmal** vorkommt.
