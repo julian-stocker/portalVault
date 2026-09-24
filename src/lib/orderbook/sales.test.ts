@@ -1248,7 +1248,10 @@ describe("the Excel financial row", () => {
     expect(de.business.sales.columns.sum).toBe("Summe");
     expect(de.business.sales.columns.shipping).toBe("Versand");
     expect(de.business.sales.columns.discount).toBe("Rabatt");
-    expect(de.business.sales.columns.refund).toBe("Refund");
+    /* 0097: Die Arbeitsmappe darf ihre Spalte AD „Refund" nennen, die
+       deutsche Oberflaeche nicht. Ueberschrift und Wert sind das Einzige,
+       was sich geaendert hat — die Spalte selbst steht unveraendert da. */
+    expect(de.business.sales.columns.refund).toBe("Rückerstattung");
     expect(de.business.sales.columns.payout).toBe("Auszahlung");
   });
 

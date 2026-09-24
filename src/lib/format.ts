@@ -40,6 +40,24 @@ export function formatPrice(value: number | null | undefined): string {
   return moneyFormat.format(value);
 }
 
+/**
+ * An amount that reduces what is left, written as the deduction it is.
+ *
+ * PRÄSENTATION, SONST NICHTS. Refunds, Gebühren und Rabatte stehen in der
+ * Datenbank als positive Beträge, und daran ändert sich nichts: `order_refunds
+ * .amount` hat einen CHECK auf `> 0`, und jede Summe im System rechnet damit
+ * weiter wie bisher. Nur der Bildschirm sagt, in welche Richtung das Geld
+ * ging — „5,83 €" unter „Rückerstattung" liest sich sonst wie eine Einnahme.
+ *
+ * Eine Null bekommt kein Minus: „−0,00 €" behauptet eine Bewegung, die es
+ * nicht gab. Ein bereits negativer Wert wird nicht zweimal gedreht.
+ */
+export function formatDeduction(value: number | null | undefined): string {
+  if (typeof value !== "number" || Number.isNaN(value)) return formatPrice(value);
+  if (value === 0) return formatPrice(0);
+  return `\u2212${formatPrice(Math.abs(value))}`;
+}
+
 export function formatNumber(value: number | null | undefined): string {
   return numberFormat.format(typeof value === "number" ? value : 0);
 }

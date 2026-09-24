@@ -156,10 +156,16 @@ describe("a flagged order cannot be missed", () => {
 });
 
 describe("the fulfilment rule itself did not move", () => {
-  it("the four refusals are unchanged", () => {
+  it("the refusals are unchanged, and the two from 0095 were added", () => {
     const orders = code(ORDERS);
     expect(orders).toContain('if (order.needs_resolution) return "needs_resolution";');
-    expect(orders).toContain('if (order.payment_status !== "paid") return "not_paid";');
+    /*
+     * 0097: `paid` allein war falsch. `admin_mark_order_shipped()` akzeptiert
+     * seit 0095 auch `partially_refunded` — der Alltagsfall nach einem
+     * Positionsstorno —, und der Bildschirm sperrte ihn mit „Nicht bezahlt".
+     */
+    expect(orders).toContain('if (!SHIPPABLE_PAYMENT.has(order.payment_status)) return "not_paid";');
+    expect(orders).toContain('new Set(["paid", "partially_refunded"])');
     /*
      * `shipped` stopped being a blocker in 0039 — the control renders the way
      * back from it. The states with no workflow behind them still block.
@@ -167,10 +173,15 @@ describe("the fulfilment rule itself did not move", () => {
     expect(orders).toContain(
       'if (order.fulfillment_status !== "unfulfilled" && order.fulfillment_status !== "shipped") {',
     );
+    // Und die beiden Gründe, die nur den Hinweg sperren.
+    expect(orders).toContain('return "withdrawn"');
+    expect(orders).toContain('return "nothing_to_ship"');
   });
 
   it("the detail page still blocks on shipBlocker, not on the confirmation", () => {
-    expect(detail).toContain("const blocker = shipBlocker(order);");
+    expect(detail).toContain("const blocker = shipBlocker({");
+    expect(detail).toContain("withdrawalDeclared:");
+    expect(detail).toContain("fulfillableTotal: detail.fulfillable_total,");
     expect(detail).toContain("{blocker === null ? (");
   });
 

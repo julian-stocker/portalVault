@@ -20,7 +20,7 @@
 import { useEffect, useId, useState } from "react";
 
 import { Modal } from "@/components/ui/modal";
-import { formatPrice } from "@/lib/format";
+import { formatDeduction, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
   addSaleFee, addSaleRefund, loadSaleAudit, removeSaleFee, removeSaleRefund,
@@ -58,8 +58,14 @@ function refundReason(reason: string | null): string | null {
 }
 
 /** One `Label  Betrag` line. */
-function Line({ label, value, hint, strong }: {
+/*
+ * `negative` faerbt NUR den Betrag, nie die Zeile: die Beschriftung ist eine
+ * Tatsache, kein Alarm. Genommen wird `--danger`, das es im Designsystem
+ * schon gibt — keine zweite Rotstufe fuer denselben Zweck.
+ */
+function Line({ label, value, hint, strong, negative }: {
   label: string; value: string; hint?: string | null; strong?: boolean;
+  negative?: boolean;
 }) {
   return (
     <div className="flex items-baseline justify-between gap-4 py-0.5">
@@ -67,7 +73,8 @@ function Line({ label, value, hint, strong }: {
         {label}
         {hint ? <span className="ml-2 text-xs text-muted">{hint}</span> : null}
       </span>
-      <span className={`ob-money tabular-nums ${strong ? "text-sm font-medium" : "text-sm"}`}>
+      <span className={`ob-money tabular-nums ${strong ? "text-sm font-medium" : "text-sm"}${
+        negative ? " text-danger" : ""}`}>
         {value}
       </span>
     </div>
@@ -329,7 +336,8 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
           <Line label={copy.columns.sum} value={formatPrice(sale.itemsSubtotal ?? 0)} />
           <Line label={copy.columns.shipping} value={formatPrice(sale.shippingCharged ?? 0)} />
           <Line label={copy.columns.discount} value={formatPrice(sale.discountAmount ?? 0)} />
-          <Line label={copy.columns.refund} value={formatPrice(sale.refunded)} />
+          {/* Eine Rueckerstattung mindert, was vom Verkauf bleibt (0097). */}
+          <Line label={copy.columns.refund} value={formatDeduction(sale.refunded)} negative />
         </Section>
 
         {/*
@@ -418,7 +426,7 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
                 <div className="flex-1">
                   <Line label={refund.occurred_at ? formatDate(String(refund.occurred_at).slice(0, 10)) : "—"}
                         hint={refundReason(refund.reason)}
-                        value={formatPrice(Number(refund.amount))} />
+                        value={formatDeduction(Number(refund.amount))} negative />
                 </div>
                 {editing ? (
                   <button type="button" disabled={saving}
@@ -430,7 +438,8 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
               </div>
             ))}
             {refunds.length > 1
-              ? <Line label={modal.refunds} value={formatPrice(refundsTotal(refunds))} strong /> : null}
+              ? <Line label={modal.refunds} value={formatDeduction(refundsTotal(refunds))}
+                      strong negative /> : null}
             {editing ? (
               <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/40 pt-2">
                 <input value={newRefund.amount} disabled={saving} inputMode="decimal"

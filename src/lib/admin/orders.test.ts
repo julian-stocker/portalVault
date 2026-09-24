@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+
+import { de } from "@/lib/i18n/de";
 import { readFileSync } from "node:fs";
 
 import {
@@ -69,9 +71,60 @@ describe("only a paid, unflagged, unshipped order may be shipped", () => {
   });
 
   it("still refuses the states with no workflow behind them", () => {
-    for (const status of ["completed", "cancelled", "preparing"]) {
+    for (const status of ["completed", "preparing"]) {
       expect(shipBlocker(order({ fulfillment_status: status })), status).toBe("already_shipped");
     }
+  });
+
+  /*
+   * 0097: `cancelled` fiel in denselben Zweig und meldete „Bereits
+   * versendet." — auf SI-2026-001066, widerrufen, vollstaendig storniert und
+   * nie verschickt. Gesperrt bleibt sie, aber mit dem richtigen Satz.
+   */
+  it("says a cancelled order is cancelled, not shipped", () => {
+    expect(shipBlocker(order({ fulfillment_status: "cancelled" }))).toBe("cancelled");
+    expect(de.admin.orders.blocker.cancelled)
+      .toBe("Bestellung storniert — es gibt nichts mehr zu versenden.");
+    expect(de.admin.orders.blocker.cancelled).not.toContain("versendet.");
+  });
+
+  /**
+   * UND ZWAR UNABHÄNGIG VOM GELD. Nach der vollen Erstattung von
+   * SI-2026-001066 fiel `refunded` aus den versandfähigen Zahlungsstatus,
+   * die Zahlungsprüfung stand weiter oben, und dieselbe stornierte
+   * Bestellung meldete „Nicht bezahlt". Der Storno-Zweig steht deshalb jetzt
+   * vor der Zahlungsprüfung.
+   */
+  it("says cancelled whatever the payment status is", () => {
+    for (const payment of ["paid", "partially_refunded", "refunded"]) {
+      expect(
+        shipBlocker(order({ fulfillment_status: "cancelled", payment_status: payment })),
+        payment,
+      ).toBe("cancelled");
+    }
+  });
+
+  it("still calls an unpaid order unpaid when it is not cancelled", () => {
+    for (const payment of ["pending", "failed", "expired", "refunded"]) {
+      expect(
+        shipBlocker(order({ fulfillment_status: "unfulfilled", payment_status: payment })),
+        payment,
+      ).toBe("not_paid");
+    }
+    // Und die beiden versandfähigen bleiben versandfähig.
+    for (const payment of ["paid", "partially_refunded"]) {
+      expect(
+        shipBlocker(order({ fulfillment_status: "unfulfilled", payment_status: payment })),
+        payment,
+      ).toBeNull();
+    }
+  });
+
+  it("keeps the flag ahead of everything, cancelled included", () => {
+    // Eine markierte Bestellung wartet auf einen Menschen, auch eine stornierte.
+    expect(shipBlocker(order({
+      fulfillment_status: "cancelled", needs_resolution: true,
+    }))).toBe("needs_resolution");
   });
 });
 
