@@ -128,7 +128,16 @@ describe("a flagged order cannot be missed", () => {
   });
 
   it("the badge says what the number means", () => {
-    expect(nav).toContain("de.admin.orders.badgeLabel(count)");
+    /*
+     * Die Marke steht seit der Kontokachel in einer eigenen Datei — dieselbe
+     * an zwei Orten, statt zweimal abgeschrieben. Der vorgelesene Satz ist
+     * dort ein Parameter, weil „drei Bestellungen brauchen Aufmerksamkeit"
+     * etwas anderes ist als „drei ungelesene Nachrichten"; der Standard
+     * bleibt der alte.
+     */
+    const badge = readFileSync("src/components/ui/attention-badge.tsx", "utf8");
+    expect(badge).toContain("label ?? de.admin.orders.badgeLabel(count)");
+    expect(nav).toContain("<AttentionBadge count=");
   });
 
   it("nothing polls and no new infrastructure was added", () => {

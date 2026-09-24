@@ -18,6 +18,7 @@ import { notFound } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 
@@ -31,7 +32,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   // Two independent reads, once the gate has passed. Both memoised per
   // request, so the admin home page below counts the same rows without a
   // second round trip, and the operator's own handle costs one indexed read.
-  const [openOrders, profile] = await Promise.all([fetchOpenOrderCounts(), currentProfile()]);
+  const [openOrders, profile, mine, seller] = await Promise.all([
+    fetchOpenOrderCounts(), currentProfile(),
+    fetchMyUnread(), sellerOperator ? fetchSellerUnread() : Promise.resolve(0),
+  ]);
+  /* Auch hier: die Zahl gehört an den Menschen, nicht an den Bereich. */
+  const unread = { mine, seller };
 
   return (
     /* No WorldZone: the admin area is a workbench, not a shop window. The
@@ -47,6 +53,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
            happens to be (ADR-0077). */
         business={sellerOperator}
         openOrders={openOrders}
+        unread={unread}
         username={profile?.username ?? null}
       />
       {children}

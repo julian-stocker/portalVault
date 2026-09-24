@@ -5,6 +5,7 @@ import { GUEST_CART_KEY, cartCount, decodeCart, encodeCart, addLine } from "@/li
 import { GUEST } from "@/lib/auth/principal";
 import { addToCart, bindPrincipal, getSnapshot, resetCartStore } from "@/lib/cart/store";
 import { de } from "@/lib/i18n/de";
+import { activeSection } from "@/lib/nav/sections";
 
 /**
  * The masthead (V3.4), and the floating cart it replaced.
@@ -263,45 +264,41 @@ describe("the bar carries marks, the header carries actions (V3.4.1)", () => {
 });
 
 /**
- * The two account actions (V3.4.2).
+ * Die eine Konto-Aktion im Kopf.
  *
- * V3.4.1 put one icon in the header and forbade a second, because a word in
- * the bar plus an icon up here would have been two ways into one room. This
- * is a different arrangement and the rule still holds: the two lead to two
- * different pages, and the active state can light up on only one of them.
+ * V3.4.1 hatte ein Symbol und verbot ein zweites — ein Wort in der Leiste
+ * plus ein Symbol oben wären zwei Wege in denselben Raum gewesen. V3.4.2
+ * machte trotzdem zwei daraus: Name plus Person auf `/account/profile`, ein
+ * Kartensymbol daneben auf `/account`. Zwei Symbole für denselben Bereich,
+ * und keinem sah man an, welches wohin führt — das Profil ist eine Kachel im
+ * Konto, keine Nebentür.
  *
- *   name + person  ->  /account/profile
- *   cog            ->  /account
+ * Jetzt wieder genau eine:  name + person  ->  /account
+ *
+ * Die Zahl ungelesener Nachrichten hing am Kartensymbol und sitzt seither an
+ * diesem Knopf; mit dem Symbol wäre sie sonst verschwunden.
  */
-describe("the header carries a profile and an account action", () => {
-  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function AccountHubAction("));
-  const settingsFn = nav.slice(nav.indexOf("function AccountHubAction("), nav.indexOf("function NavItem("));
+describe("the header carries one account action", () => {
+  const profileFn = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function NavItem("));
   const group = nav.slice(nav.indexOf('<div className="ml-auto flex min-w-0 items-center'));
 
-  it("has a slice of each to inspect", () => {
+  it("has a slice to inspect", () => {
     expect(profileFn.length).toBeGreaterThan(200);
-    expect(settingsFn.length).toBeGreaterThan(200);
     expect(group.length).toBeGreaterThan(100);
   });
 
-  it("sends the two to two different pages", () => {
-    expect(profileFn).toContain('href={signedIn ? "/account/profile" : "/login"}');
-    expect(settingsFn).toContain('href="/account"');
-    // The rule V3.4.1 established, kept: nothing leads twice to one place.
-    expect(profileFn).not.toContain('href="/account"');
+  it("führt auf die Kontoübersicht, und es gibt keine zweite Tür", () => {
+    expect(profileFn).toContain('href={signedIn ? "/account" : "/login"}');
+    expect(profileFn).not.toContain('"/account/profile"');
+    expect(nav).not.toContain("AccountHubAction");
+    expect(nav).not.toContain("AccountHubGlyph");
   });
 
-  it("offers no settings to somebody who is not signed in", () => {
-    expect(group).toContain("{signedIn ? <AccountHubAction active={accountHubActive} /> : null}");
-  });
-
-  it("orders them name, person, account card, cart", () => {
+  it("orders them name, person, cart", () => {
     const profile = group.indexOf("<ProfileAction");
-    const settings = group.indexOf("<AccountHubAction");
     const cart = group.indexOf("<CartBadge />");
     expect(profile).toBeGreaterThan(-1);
-    expect(settings).toBeGreaterThan(profile);
-    expect(cart).toBeGreaterThan(settings);
+    expect(cart).toBeGreaterThan(profile);
     // Inside the profile link: the name, then the glyph.
     const name = profileFn.indexOf("{name}");
     const glyph = profileFn.indexOf("<AccountGlyph");
@@ -309,18 +306,27 @@ describe("the header carries a profile and an account action", () => {
     expect(glyph).toBeGreaterThan(name);
   });
 
-  it("gives both an accessible name, since neither shows a label", () => {
+  it("gives it an accessible name, since it shows no label", () => {
     expect(profileFn).toContain("aria-label={label}");
     expect(profileFn).toContain(
-      "const label = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;",
+      "const base = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;",
     );
-    expect(settingsFn).toContain("aria-label={de.nav.account}");
+    /* Und die Zahl ungelesener Nachrichten gehört in diesen Namen: eine Marke
+       allein ist für jemanden, der sie nicht sieht, gar nichts. */
+    expect(profileFn).toContain("unread > 0 ? `${base}");
+    expect(profileFn).toContain("de.messages.unreadBadgeLabel(unread)");
     // Existing German, not invented words.
     expect(de.nav.profile).toBe("Profil");
-    expect(de.nav.account).toBe("Mein Konto");
     expect(de.nav.signIn).toBe("Anmelden");
     // The label carries the visible name, because aria-label replaces content.
     expect(de.nav.profileOf("yulez")).toContain("yulez");
+  });
+
+  it("trägt die Nachrichtenmarke am Symbol, nicht neben dem Namen", () => {
+    const box = profileFn.slice(profileFn.indexOf("<AccountGlyph"));
+    expect(box).toContain("<AttentionBadge count={unread}");
+    // Die Marke sitzt im 44-px-Kasten des Symbols, also `relative`.
+    expect(profileFn).toContain('<span className="relative flex h-11 w-11 shrink-0');
   });
 
   it("shows nothing at all when there is no username", () => {
@@ -334,23 +340,18 @@ describe("the header carries a profile and an account action", () => {
     expect(nav).toContain("username?: string | null;");
   });
 
-  it("keeps both neutral — not the ownership gold, not the commerce amber", () => {
-    for (const [what, fn] of [["profile", profileFn], ["settings", settingsFn]] as const) {
-      expect(fn, what).toContain("text-on-deep-muted hover:text-on-deep");
-      expect(fn, what).not.toContain("commerce");
-      expect(fn, what).not.toMatch(/own-ink|brand|gold/);
-    }
+  it("bleibt neutral — nicht das Gold des Besitzes, nicht das Bernstein des Handels", () => {
+    expect(profileFn).toContain("text-on-deep-muted hover:text-on-deep");
+    expect(profileFn).not.toContain("commerce");
+    expect(profileFn).not.toMatch(/own-ink|brand|gold/);
   });
 
-  it("clears 44 px on both and keeps a visible focus", () => {
-    // The profile's target is the glyph's own box, so the name cannot squeeze it.
-    expect(profileFn).toContain('<span className="flex h-11 w-11 shrink-0 items-center justify-center">');
+  it("clears 44 px and keeps a visible focus", () => {
+    // The target is the glyph's own box, so the name cannot squeeze it.
+    expect(profileFn).toContain("flex h-11 w-11 shrink-0 items-center justify-center");
     expect(profileFn).toContain("focus-ring");
-    expect(settingsFn).toContain("flex h-11 w-11 shrink-0 items-center justify-center");
-    expect(settingsFn).toContain("focus-ring");
     // Marks stay 18 px; shrinking an icon is not how space is found.
     expect(profileFn).toContain('<AccountGlyph className="h-[18px] w-[18px]" />');
-    expect(settingsFn).toContain('<AccountHubGlyph className="h-[18px] w-[18px]" />');
   });
 
   it("is offered to the administrator, unlike the cart", () => {
@@ -394,8 +395,10 @@ describe("a long username moves nothing", () => {
   });
 
   it("holds every icon box rigid", () => {
+    /* Seit der Zusammenlegung ist es ein Kasten statt zweier — starr bleibt
+       er trotzdem, sonst quetschte ein langer Name das Symbol. */
     const boxes = nav.match(/h-11 w-11 shrink-0/g) ?? [];
-    expect(boxes.length, "profile and settings both need a rigid box").toBeGreaterThanOrEqual(2);
+    expect(boxes.length, "the account glyph needs a rigid box").toBeGreaterThanOrEqual(1);
     expect(code(BADGE)).toContain("min-h-11 min-w-11");
   });
 
@@ -418,11 +421,21 @@ describe("a long username moves nothing", () => {
 /**
  * Exactly one of the two is ever the current page.
  */
-describe("the active state splits between profile and account", () => {
-  it("reads one level finer than activeSection(), and only here", () => {
-    expect(nav).toContain('const profileActive = (pathname ?? "/") === "/account/profile";');
-    expect(nav).toContain("const accountHubActive = inAccount && !profileActive;");
-    expect(nav).toContain('const inAccount = active === "account";');
+/**
+ * Ein Knopf, ein Zustand.
+ *
+ * Vorher las der Kopf eine Ebene feiner als `activeSection()`, um zwischen
+ * Profil und Rest zu unterscheiden. Die Unterscheidung gibt es nicht mehr:
+ * jede Konto-Route lässt den einen Knopf leuchten.
+ */
+describe("der aktive Zustand folgt dem Abschnitt", () => {
+  it("liest genau das, was activeSection() sagt", () => {
+    expect(nav).toContain('const accountActive = active === "account";');
+    expect(nav).toContain("active={accountActive}");
+    // Die frühere Feinunterscheidung ist weg.
+    expect(nav).not.toContain("profileActive");
+    expect(nav).not.toContain("accountHubActive");
+    expect(nav).not.toContain("const inAccount");
   });
 
   it("leaves the section model alone", () => {
@@ -433,22 +446,15 @@ describe("the active state splits between profile and account", () => {
     expect(sections).not.toContain('"account-profile"');
   });
 
-  it("never marks both, on any account route", () => {
-    // The rule expressed as arithmetic over the real paths.
-    const inAccount = (p: string) => p === "/account" || p.startsWith("/account/") || p === "/settings" || p === "/onboarding";
+  it("markiert jede Konto-Route, und keine andere", () => {
     for (const path of [
       "/account", "/account/profile", "/account/security", "/account/contact",
-      "/account/orders", "/account/orders/SI-2026-001042", "/settings", "/onboarding", "/",
+      "/account/orders", "/account/orders/SI-2026-001042", "/settings", "/onboarding",
     ]) {
-      const profile = path === "/account/profile";
-      const settings = inAccount(path) && !profile;
-      expect([profile, settings].filter(Boolean).length, path).toBeLessThanOrEqual(1);
-      // And inside the account area exactly one of them is always current,
-      // so the header never goes blank where it should be marked.
-      if (inAccount(path)) {
-        expect([profile, settings].filter(Boolean).length, path).toBe(1);
-      }
+      expect(activeSection(path), path).toBe("account");
     }
+    expect(activeSection("/")).not.toBe("account");
+    expect(activeSection("/collection")).not.toBe("account");
   });
 });
 

@@ -2911,6 +2911,60 @@ export const de = {
    * ausdrücklich, statt eine abgeschlossene Zahlung anzudeuten.
    */
   /** Der Kontobereich (ADR-0061). Mobile-first, eine Ebene, klare Namen. */
+  /**
+   * Nachrichten zu einer Bestellung (0098).
+   *
+   * Die Sätze zu den Systemereignissen stehen hier und nicht in der
+   * Datenbank: sie liefert einen Typ und höchstens zwei Zahlen, der Satz
+   * entsteht daraus. Deshalb kann aus einem Systemereignis kein freier Text
+   * und kein Markup in die Seite gelangen.
+   */
+  messages: {
+    title: "Nachrichten",
+    hint: "Fragen zu einer Bestellung — und was mit ihr passiert ist.",
+    empty: "Noch keine Nachrichten.",
+    emptyHint: "Sobald es zu einer Bestellung etwas zu besprechen gibt, steht es hier.",
+    threadHeading: "Nachrichten zur Bestellung",
+    open: "Unterhaltung öffnen",
+    unreadOne: "1 neu",
+    unreadMany: (n: number) => `${n} neu`,
+    unreadBadgeLabel: (n: number) => `${n} ungelesene Nachrichten`,
+    entries: (n: number) => (n === 1 ? "1 Eintrag" : `${n} Einträge`),
+    systemLabel: "System",
+    youLabel: "Du",
+    /* Kein Handelsname als Literal: er steht in der Datenbank, und ihn
+       umzubenennen ist eine Zeile und kein grep (ADR-0064). Für eine
+       Sprechblase reicht die Rolle. */
+    sellerLabel: "Verkäufer",
+    customerLabel: "Kundschaft",
+    placeholder: "Nachricht schreiben …",
+    send: "Senden",
+    sending: "Wird gesendet …",
+    remaining: (n: number) => `noch ${n} Zeichen`,
+    /* Die Marke an einem Eintrag, der seit dem letzten Öffnen dazukam. */
+    newSince: "Neu",
+    guestHint:
+      "Für Bestellungen ohne Konto gibt es keine Unterhaltung. " +
+      "Schreib uns in dem Fall bitte per E-Mail.",
+    /*
+     * Zwei Sätze, nicht sieben: der Kanal ist ein Gespräch, keine
+     * Bestellhistorie. Versand und Erstattung beantworten je eine Frage, die
+     * sonst jemand stellen müsste.
+     */
+    events: {
+      order_shipped: "Bestellung versendet.",
+      refund_recorded: (amount: string) => `Rückerstattung über ${amount} abgeschlossen.`,
+      refund_recorded_plain: "Rückerstattung abgeschlossen.",
+    },
+    errors: {
+      empty: "Bitte schreib etwas, bevor du sendest.",
+      tooLong: "Die Nachricht ist zu lang — höchstens 2000 Zeichen.",
+      tooMany: "Zu viele Nachrichten in kurzer Zeit. Bitte versuch es später noch einmal.",
+      notAllowed: "Diese Unterhaltung gibt es nicht.",
+      failed: "Das hat nicht geklappt.",
+    },
+  },
+
   account: {
     title: "Mein Konto",
     overviewHint: "Alles, was zu deinem Konto gehört.",
@@ -2983,6 +3037,12 @@ export const de = {
         needs_attention: "Wird geprüft",
         closed: "Abgeschlossen",
       } as Record<string, string>,
+    },
+    /* Die Kachel auf /account. Eigener Text, weil `de.messages.hint` den
+       Verlauf einer einzelnen Bestellung beschreibt, nicht den Bereich. */
+    messages: {
+      title: "Nachrichten",
+      hint: "Fragen und Nachrichten zu deinen Bestellungen.",
     },
     security: {
       title: "Konto & Sicherheit",
@@ -3269,6 +3329,7 @@ export const de = {
   },
 
   nav: {
+    messages: "Nachrichten",
     primary: "Hauptnavigation",
     catalog: "Katalog",
     collection: "Sammlung",

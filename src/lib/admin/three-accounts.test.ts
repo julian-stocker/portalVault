@@ -610,7 +610,7 @@ describe("the server gate matches the database predicate", () => {
 });
 
 describe("signing out belongs to the account, whoever the account is", () => {
-  it("is rendered exactly once, on Profil", () => {
+  it("is rendered exactly once, on the account hub", () => {
     /*
      * This test used to expect the hub and passed while the defect was
      * visible in the browser — `/settings` permanently redirects to
@@ -624,13 +624,13 @@ describe("signing out belongs to the account, whoever the account is", () => {
       .filter((name) => name.endsWith(".tsx"))
       .map((name) => `src/app/${name}`)
       .filter((file) => readFileSync(file, "utf8").includes('action="/auth/signout"'));
-    expect(renders).toEqual(["src/app/(app)/account/profile/page.tsx"]);
+    expect(renders).toEqual(["src/app/(app)/account/page.tsx"]);
   });
 
   it("and the same one for a collector, a seller and an administrator", () => {
     // Logging out ends a session, which every account type has. Duplicating
     // it into the Business or Admin areas would make it a role action.
-    const profile = source("src/app/(app)/account/profile/page.tsx");
+    const profile = source("src/app/(app)/account/page.tsx");
     expect(profile).not.toContain("capabilities");
     expect(profile).not.toContain("sellerOperator");
     expect(profile).not.toContain("platformAdmin");
@@ -638,7 +638,7 @@ describe("signing out belongs to the account, whoever the account is", () => {
   });
 
   it("is a POST, so no prefetch can end a session", () => {
-    const page = source("src/app/(app)/account/profile/page.tsx");
+    const page = source("src/app/(app)/account/page.tsx");
     expect(page).toContain('method="post"');
     expect(page).toContain("de.nav.signOut");
   });

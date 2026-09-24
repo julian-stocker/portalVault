@@ -23,6 +23,7 @@ import { notFound } from "next/navigation";
 
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 
@@ -32,7 +33,12 @@ export default async function BusinessLayout({ children }: { children: React.Rea
   const { sellerOperator, platformAdmin } = await capabilities();
   if (!sellerOperator) notFound();
 
-  const [openOrders, profile] = await Promise.all([fetchOpenOrderCounts(), currentProfile()]);
+  const [openOrders, profile, mine, seller] = await Promise.all([
+    fetchOpenOrderCounts(), currentProfile(), fetchMyUnread(), fetchSellerUnread(),
+  ]);
+  /* Zwei Posteingänge, zwei Zahlen (0098): der des Betriebs und das eigene
+     Konto. Ein Verkäufer hat beide, und sie stehen an verschiedenen Stellen. */
+  const unread = { mine, seller };
 
   return (
     /* No WorldZone and no footer, for the same reasons the admin area has
@@ -45,6 +51,7 @@ export default async function BusinessLayout({ children }: { children: React.Rea
            rather than what this area happens to be (ADR-0077). */
         admin={platformAdmin}
         openOrders={openOrders}
+        unread={unread}
         username={profile?.username ?? null}
       />
       {children}

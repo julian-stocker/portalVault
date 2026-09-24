@@ -12,6 +12,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { SIGN_IN_PATH } from "@/lib/auth/redirect";
@@ -24,6 +25,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const { platformAdmin, sellerOperator } = await capabilities();
   // Zeroes without a query for a collector; see `fetchOpenOrderCounts()`.
   const openOrders = await fetchOpenOrderCounts();
+  /*
+   * Die zwei Posteingänge (0098). Beide Zahlen kommen aus Aggregaten und
+   * antworten einem Unbeteiligten mit 0, ohne dass hier eine Rolle geprüft
+   * werden müsste.
+   */
+  const unread = {
+    mine: await fetchMyUnread(),
+    seller: sellerOperator ? await fetchSellerUnread() : 0,
+  };
+
 
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -38,6 +49,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         admin={platformAdmin}
         business={sellerOperator}
         openOrders={openOrders}
+        unread={unread}
         username={profile.username}
       />
       <div className="relative flex-1">

@@ -31,8 +31,9 @@ import {
   CatalogGlyph,
   CollectionGlyph,
   InventoryGlyph,
-  AccountHubGlyph,
+  MessagesGlyph,
 } from "@/components/layout/nav-glyphs";
+import { AttentionBadge } from "@/components/ui/attention-badge";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
 import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
@@ -101,7 +102,7 @@ const DESTINATIONS: readonly {
    * counted on /admin, not shouted about in the bar — three loud levels mean
    * none of them is.
    */
-  badge?: (counts: OpenOrderCounts) => number;
+  badge?: (counts: OpenOrderCounts, unread: Unread) => number;
 }[] = [
   {
     href: "/",
@@ -170,6 +171,22 @@ const DESTINATIONS: readonly {
   },
 
   {
+    href: "/business/nachrichten",
+    label: de.nav.messages,
+    section: "messages",
+    icon: MessagesGlyph,
+    /*
+     * Der Posteingang des Betriebs (0098). Eigener Punkt und nicht eine Zahl
+     * an „Shop": eine Rückfrage zu einer Bestellung ist eine andere Aufgabe
+     * als eine Bestellung, die auf Versand wartet, und sie wird an einem
+     * anderen Ort erledigt.
+     */
+    applies: (viewer) => viewer.business,
+    prefetch: () => false,
+    badge: (_counts, unread) => unread.seller,
+  },
+
+  {
     href: "/admin",
     label: de.nav.admin,
     section: "admin",
@@ -196,11 +213,22 @@ const DESTINATIONS: readonly {
 ];
 
 
+/**
+ * Ungelesenes, getrennt nach Seite (0098).
+ *
+ * Zwei Zahlen und nicht eine: der Betrieb und das eigene Konto sind zwei
+ * Posteingänge, und ein Verkäufer hat beide. Welche gefüllt ist, entscheidet
+ * das Layout — es weiß, wessen Seite gerade gezeigt wird.
+ */
+export type Unread = { mine: number; seller: number };
+export const NO_UNREAD: Unread = { mine: 0, seller: 0 };
+
 function itemsFor(
   signedIn: boolean,
   admin: boolean,
   business: boolean,
   counts: OpenOrderCounts,
+  unread: Unread,
 ): Item[] {
   /*
    * Collector = neither privileged membership, which is what "USER" means
@@ -216,7 +244,7 @@ function itemsFor(
       section,
       icon,
       prefetch: prefetch?.(viewer),
-      badge: badge?.(counts) ?? 0,
+      badge: badge?.(counts, unread) ?? 0,
     }),
   );
 }
@@ -258,34 +286,21 @@ function PendingDot() {
  * this is not an offer. The count is repeated in the accessible name, because
  * a bare number over a word is not a sentence.
  */
-function AttentionBadge({ count }: { count: number }) {
-  return (
-    <span
-      className={
-        "ml-1.5 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 " +
-        "bg-danger/20 text-[11px] leading-4 font-semibold text-danger tabular-nums " +
-        "ring-1 ring-danger/60"
-      }
-    >
-      <span aria-hidden="true">{count > 99 ? "99+" : count}</span>
-      <span className="sr-only">{de.admin.orders.badgeLabel(count)}</span>
-    </span>
-  );
-}
 
 /**
- * Who you are — and, beside it, the account itself (V3.4.2).
+ * Who you are, and the way into the account (V3.4.2, wieder zusammengelegt).
  *
- * TWO ACTIONS, TWO DESTINATIONS. V3.4.1 had one door to the account area and
- * a test that forbade a second, because a spelled-out entry in the bar and an
- * icon in the header would have been two ways into one room. This is a
- * different arrangement: the two now lead to two different pages.
+ * EINE AKTION, EIN ZIEL. Eine Zeit lang standen hier zwei: Name plus Person
+ * führten auf `/account/profile`, die Karte daneben auf `/account`. Zwei
+ * Symbole für denselben Bereich, und niemand konnte ihnen ansehen, welches
+ * wohin führt — das Profil ist ja eine Kachel innerhalb des Kontos, keine
+ * Nebentür. Jetzt gibt es wieder genau einen Knopf, und er führt dorthin, wo
+ * alles steht.
  *
- *   name + person  ->  /account/profile   who this account is
- *   card           ->  /account           everything on file about it
+ *   name + person  ->  /account   alles zum Konto, das Profil eingeschlossen
  *
- * The rule the old test protected is intact — nothing leads twice to the same
- * place, and the active state can only ever light up on one of them.
+ * Die Zahl ungelesener Nachrichten sitzt seither an diesem einen Knopf. Sie
+ * hing vorher an der Karte; mit ihr wäre sie verschwunden.
  *
  * THE NAME IS THE USERNAME, and nothing else. `profiles.username` is three to
  * twenty characters of `[a-zA-Z0-9_]`, so it is a handle rather than a name —
@@ -300,11 +315,14 @@ function ProfileAction({
   signedIn,
   username,
   active,
+  unread,
 }: {
   signedIn: boolean;
   /** `null` before onboarding, and for everybody who is not signed in. */
   username: string | null;
   active: boolean;
+  /** Ungelesene Nachrichten dieses Kontos. 0 für alle anderen. */
+  unread: number;
 }) {
   const name = signedIn ? username : null;
   /*
@@ -312,11 +330,14 @@ function ProfileAction({
    * is on screen the label has to carry it too — otherwise the one thing a
    * sighted visitor reads is the one thing a screen reader never hears.
    */
-  const label = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;
+  const base = !signedIn ? de.nav.signIn : name ? de.nav.profileOf(name) : de.nav.profile;
+  /* Die Zahl gehört in den vorgelesenen Namen: eine Marke allein ist für
+     jemanden, der sie nicht sieht, gar nichts. */
+  const label = unread > 0 ? `${base} — ${de.messages.unreadBadgeLabel(unread)}` : base;
 
   return (
     <Link
-      href={signedIn ? "/account/profile" : "/login"}
+      href={signedIn ? "/account" : "/login"}
       aria-label={label}
       aria-current={active ? "page" : undefined}
       /*
@@ -349,37 +370,10 @@ function ProfileAction({
         </span>
       ) : null}
       {/* 44 px around an 18 px mark. Fixed, so the name cannot squeeze it. */}
-      <span className="flex h-11 w-11 shrink-0 items-center justify-center">
+      <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
         <AccountGlyph className="h-[18px] w-[18px]" />
+        {unread > 0 ? <AttentionBadge count={unread} label={de.messages.unreadBadgeLabel(unread)} /> : null}
       </span>
-    </Link>
-  );
-}
-
-/**
- * The account hub, for somebody who is already in.
- *
- * Signed out there is nothing to configure, so there is no cog — the person
- * beside it is the way in, and it says "Anmelden".
- *
- * Named "Mein Konto", which is the heading the page itself carries. Not
- * "Einstellungen": that word promises a settings screen, and this opens the
- * hub with its four sections. The mark had to follow — a cog said the word
- * the label refused to (ADR-0080).
- */
-function AccountHubAction({ active }: { active: boolean }) {
-  return (
-    <Link
-      href="/account"
-      aria-label={de.nav.account}
-      aria-current={active ? "page" : undefined}
-      className={
-        "focus-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full " +
-        "transition-colors " +
-        (active ? "text-on-deep" : "text-on-deep-muted hover:text-on-deep")
-      }
-    >
-      <AccountHubGlyph className="h-[18px] w-[18px]" />
     </Link>
   );
 }
@@ -443,6 +437,7 @@ export function SiteNav({
   admin = false,
   business = false,
   openOrders = NO_OPEN_ORDERS,
+  unread = NO_UNREAD,
   username = null,
 }: {
   signedIn: boolean;
@@ -466,10 +461,12 @@ export function SiteNav({
    * find that out — `fetchOpenOrderCounts()` asks `isAdmin()` first.
    */
   openOrders?: OpenOrderCounts;
+  /** Ungelesene Nachrichten, je Seite (0098). Nullen ohne eine Abfrage. */
+  unread?: Unread;
 }) {
   const pathname = usePathname();
   const active = activeSection(pathname ?? "/");
-  const items = itemsFor(signedIn, admin, business, openOrders);
+  const items = itemsFor(signedIn, admin, business, openOrders, unread);
 
   /**
    * The cart confirmation belongs to the same question as the header cart —
@@ -492,12 +489,10 @@ export function SiteNav({
    * rest of the product wants, and widening it would change what `/settings`
    * and `/onboarding` mean everywhere else for the sake of one header.
    *
-   * Mutually exclusive by construction: the hub takes every account route the
-   * profile page does not, so the two can never both be `aria-current`.
+   * Ein Knopf, ein Zustand: jede Konto-Route lässt ihn leuchten. Die frühere
+   * Aufteilung zwischen Profil und Rest gibt es nicht mehr.
    */
-  const inAccount = active === "account";
-  const profileActive = (pathname ?? "/") === "/account/profile";
-  const accountHubActive = inAccount && !profileActive;
+  const accountActive = active === "account";
 
   const shopping = !admin;
 
@@ -619,9 +614,12 @@ export function SiteNav({
        * [cart]`.
        */}
       <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
-        <ProfileAction signedIn={signedIn} username={username} active={profileActive} />
-        {/* Nothing to configure when nobody is signed in. */}
-        {signedIn ? <AccountHubAction active={accountHubActive} /> : null}
+        <ProfileAction
+          signedIn={signedIn}
+          username={username}
+          active={accountActive}
+          unread={unread.mine}
+        />
         {/*
          * THE ONLY CART ENTRY POINT (V3.4, ADR-0043), at the outer edge.
          *

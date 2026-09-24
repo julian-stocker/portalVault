@@ -3,6 +3,7 @@ import { SiteFooter } from "@/components/layout/site-footer";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
+import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { currentUser } from "@/lib/auth/user";
@@ -32,6 +33,20 @@ export default async function PublicLayout({ children }: { children: React.React
   // touching the database. A flagged order has to be visible from wherever
   // the operator is, not only from inside /business.
   const openOrders = await fetchOpenOrderCounts();
+  /*
+   * Und dieselbe Überlegung für die Nachrichten: eine ungelesene Nachricht
+   * muss sichtbar sein, wo der Mensch gerade steht, nicht nur in seinem
+   * Bereich. Der Katalog ist eine öffentliche Route, und ein angemeldeter
+   * Betreiber steht dort genauso oft wie unter /business.
+   *
+   * Beide Zahlen nur, wenn es jemanden gibt, den sie betreffen — ein
+   * ausgeloggter Besucher löst hier keine einzige Abfrage aus, genau wie bei
+   * `fetchOpenOrderCounts()` oben.
+   */
+  const unread = {
+    mine: user ? await fetchMyUnread() : 0,
+    seller: caps.sellerOperator ? await fetchSellerUnread() : 0,
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -42,6 +57,7 @@ export default async function PublicLayout({ children }: { children: React.React
         admin={caps.platformAdmin}
         business={caps.sellerOperator}
         openOrders={openOrders}
+        unread={unread}
         username={profile?.username ?? null}
       />
       {/* `flex-1` so a short page still pushes the footer to the bottom of the

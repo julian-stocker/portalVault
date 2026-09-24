@@ -18,6 +18,7 @@ export type NavSection =
   | "admin"
   | "business"
   | "inventory"
+  | "messages"
   | "cart"
   | "shop"
   | "about";
@@ -36,6 +37,11 @@ export function activeSection(pathname: string): NavSection | null {
   // /dashboard redirects to /collection; both belong to the same section, so
   // the highlight does not flicker during the redirect.
   if (path === "/collection" || path === "/dashboard") return "collection";
+
+  // Beide Posteingänge gehören zu „Nachrichten" (0098) — der des Betriebs
+  // und der der Kundschaft. Der Käufer erreicht seinen über das Kontosymbol,
+  // aber die Seite selbst ist dieselbe Sache.
+  if (path === "/business/nachrichten" || path === "/account/nachrichten") return "messages";
 
   // The cart is reached from the header badge, not from the bar (ADR-0043),
   // so nothing in the bar lights up for it — but it is still its own section

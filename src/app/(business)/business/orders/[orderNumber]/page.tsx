@@ -8,6 +8,7 @@ import { OrderLinesTable } from "@/components/admin/order-lines-table";
 import { OrderReviewPanel } from "@/components/admin/order-review-panel";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
+import { ConversationThread } from "@/components/messages/conversation-thread";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
 import { TrackingForm } from "@/components/admin/tracking-form";
 import { TrackingLink } from "@/components/commerce/tracking-link";
@@ -19,6 +20,7 @@ import { openLineRefunds, openRefundTotal, openShippingRefund, unattributedRefun
   from "@/lib/commerce/order-lines";
 import { LABEL_KIND, orderMoney } from "@/lib/commerce/order-money";
 import { de } from "@/lib/i18n/de";
+import { fetchConversation } from "@/lib/messages/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +74,7 @@ export default async function AdminOrderPage({
    * Mengen laut ihrer Positionen gekostet haben; erstattet wird trotzdem von
    * Hand in Stripe, und was der Operator dort tat, steht in `refunds`.
    */
+  const conversation = await fetchConversation(order.order_number);
   const withdrawal = detail.withdrawal ?? null;
   const refunds = detail.refunds ?? [];
   /*
@@ -456,6 +459,18 @@ export default async function AdminOrderPage({
           <p className="text-sm text-muted">{copy.blocker[blocker]}</p>
         )}
       </div>
+
+      {/* ------------------------------------------------------- Nachrichten */}
+      {/*
+        Unter dem Versand, über der Mail: die Unterhaltung gehört zur
+        Bearbeitung, nicht zum Protokoll. `null` heißt Gastbestellung — dann
+        gibt es nichts zu zeigen und keinen Hinweis darauf, dass es etwas gäbe.
+      */}
+      {conversation === null ? null : (
+        <div id="nachrichten" className="scroll-mt-8">
+          <ConversationThread conversation={conversation} />
+        </div>
+      )}
 
       {/* --------------------------------------------------------------- mail */}
       <OrderMailPanel orderNumber={order.order_number} mail={mail ?? []} />

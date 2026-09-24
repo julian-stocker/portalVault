@@ -3,12 +3,14 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 
 import { AccountHeader } from "@/components/account/account-header";
+import { ConversationThread } from "@/components/messages/conversation-thread";
 import { TrackingLink } from "@/components/commerce/tracking-link";
 import { fetchMyOrder } from "@/lib/account/orders";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { formatDate, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+import { fetchConversation } from "@/lib/messages/queries";
 import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
 
 export const metadata: Metadata = { title: de.account.orders.title };
@@ -44,6 +46,7 @@ export default async function MyOrderPage({
   if (!document?.order) notFound();
 
   const order = document.order as Record<string, string | number | boolean | null>;
+  const conversation = await fetchConversation(String(order.order_number));
   const copy = de.account.orders;
   const address = document.address;
 
@@ -187,6 +190,17 @@ export default async function MyOrderPage({
           </Link>
         </div>
       </section>
+
+      {/*
+        Die Unterhaltung zur Bestellung — dort, wo die Frage entsteht.
+        `null` heißt Gastbestellung; dann steht hier nichts, und zwar ohne
+        Hinweis darauf, dass hier etwas stehen könnte.
+      */}
+      {conversation === null ? null : (
+        <div id="nachrichten" className="scroll-mt-8">
+          <ConversationThread conversation={conversation} />
+        </div>
+      )}
     </main>
   );
 }

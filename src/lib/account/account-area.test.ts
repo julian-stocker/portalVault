@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { customerStatus, readMyOrders } from "./orders";
 import { contactRow, hasContact, readContact, EMPTY_CONTACT } from "./contacts";
 import { activeSection } from "@/lib/nav/sections";
+import { de } from "@/lib/i18n/de";
 
 /**
  * The account area, and the rules that keep it honest.
@@ -41,39 +42,60 @@ describe("the account area is one place with four destinations", () => {
     expect(source("src/lib/supabase/middleware.ts")).toContain('"/account"');
   });
 
-  it("the hub is reached from the header, by its own action", () => {
-    /*
-     * V3.4.1 moved the account out of the phone's bar into the masthead;
-     * V3.4.2 split that one icon into two, because the hub and the profile
-     * page are two different places and one control could only ever open one
-     * of them.
-     */
+  /**
+   * EINE TÜR INS KONTO, UND SIE TRÄGT DAS PERSONENSYMBOL.
+   *
+   * V3.4.1 hatte eine, V3.4.2 machte zwei daraus — Name plus Person auf
+   * `/account/profile`, eine Karte daneben auf `/account`. Zwei Symbole für
+   * denselben Bereich, und keinem sah man an, welches wohin führt: das Profil
+   * ist eine Kachel im Konto, keine Nebentür. Jetzt wieder eine.
+   */
+  it("wird über genau einen Knopf im Kopf erreicht", () => {
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav).toContain('<AccountHubAction active={accountHubActive} />');
-    const settings = nav.slice(nav.indexOf("function AccountHubAction("));
-    expect(settings.slice(0, settings.indexOf("</Link>"))).toContain('href="/account"');
+    expect(nav.match(/<ProfileAction\b/g)).toHaveLength(1);
+    // Die zweite Tür ist weg, samt ihrem Symbol.
+    expect(nav).not.toContain("AccountHubAction");
+    expect(nav).not.toContain("AccountHubGlyph");
+    expect(existsSync("src/components/layout/nav-glyphs.tsx")).toBe(true);
+    expect(source("src/components/layout/nav-glyphs.tsx")).not.toContain("AccountHubGlyph");
   });
 
-  it("offers exactly one way to each of the two", () => {
-    /*
-     * The rule has not moved: nothing leads twice to one page. What changed
-     * is that there are two pages.
-     */
+  it("und dieser Knopf führt auf die Übersicht, nicht auf eine Unterseite", () => {
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav.match(/<ProfileAction /g)).toHaveLength(1);
-    expect(nav.match(/<AccountHubAction /g)).toHaveLength(1);
-    // And neither is back in the bar.
+    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function NavItem("));
+    expect(profile).toContain('href={signedIn ? "/account" : "/login"}');
+    expect(profile).not.toContain('"/account/profile"');
+  });
+
+  it("und ist auch nicht zurück in der Leiste", () => {
+    const nav = source("src/components/layout/site-nav.tsx");
     expect(nav).not.toContain('href: "/account"');
     expect(nav).not.toContain('href: "/login"');
     expect(nav).not.toContain('section: "account"');
   });
 
-  it("keeps the profile page as its own destination", () => {
-    const nav = source("src/components/layout/site-nav.tsx");
-    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function AccountHubAction("));
-    expect(profile).toContain('href={signedIn ? "/account/profile" : "/login"}');
-    // It is one of the hub's four sections and stays one.
+  it("das Profil bleibt eine Kachel der Übersicht", () => {
     expect(source("src/app/(app)/account/page.tsx")).toContain('{ href: "/account/profile"');
+    expect(existsSync("src/app/(app)/account/profile/page.tsx")).toBe(true);
+  });
+
+  /* Die Zahl ungelesener Nachrichten hing an der Karte — mit ihr wäre sie
+     verschwunden. Sie sitzt jetzt am verbleibenden Knopf. */
+  it("trägt die Nachrichtenmarke weiter", () => {
+    const nav = source("src/components/layout/site-nav.tsx");
+    expect(nav).toContain("unread={unread.mine}");
+    const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function NavItem("));
+    expect(profile).toContain("<AttentionBadge count={unread}");
+    expect(profile).toContain("de.messages.unreadBadgeLabel(unread)");
+    // Und der vorgelesene Name nennt sie mit.
+    expect(profile).toContain("unread > 0 ? `${base}");
+  });
+
+  it("leuchtet auf jeder Konto-Route, nicht nur auf einer", () => {
+    const nav = source("src/components/layout/site-nav.tsx");
+    expect(nav).toContain('const accountActive = active === "account";');
+    expect(nav).not.toContain("accountHubActive");
+    expect(nav).not.toContain("profileActive");
   });
 
   it("the old path still resolves instead of 404ing", () => {
@@ -90,36 +112,42 @@ describe("the account area is one place with four destinations", () => {
     expect(activeSection("/settings")).toBe("account");
   });
 
-  it("signing out sits on Profil — not the hub, not the bar, not under security", () => {
-    /*
-     * A destructive-feeling control on every screen is one somebody
-     * eventually hits by accident on a phone. It is also not a *setting*:
-     * „Konto & Sicherheit" is for changing something about the account, and
-     * leaving is not a change to it (ADR-0062).
-     *
-     * And it is not on the hub either (ADR-0085). It was, and the reason that
-     * looked acceptable is three lines below this one: `/settings`
-     * permanently redirects to `/account`, so a button on the hub IS a button
-     * under Settings, whatever the route is called. „Profil" is the account's
-     * own identity, and ending that session belongs at the bottom of it.
-     */
-    expect(source("src/app/(app)/account/profile/page.tsx")).toContain('action="/auth/signout"');
-    expect(source("src/app/(app)/account/page.tsx")).not.toContain("/auth/signout");
-    expect(source("src/app/(app)/account/security/page.tsx")).not.toContain("/auth/signout");
-    expect(source("src/components/layout/site-nav.tsx")).not.toContain("/auth/signout");
+  /**
+   * ABMELDEN UNTEN AUF DER ÜBERSICHT (ADR-0085 umgekehrt).
+   *
+   * Die frühere Begründung: `/settings` leitet auf `/account` um, ein Knopf
+   * dort wäre also ein Knopf unter Einstellungen — und Abmelden ist keine
+   * Einstellung. Das galt, solange der Kopf zwei Türen hatte und „Profil"
+   * eine eigene war. Seit es nur noch eine Tür gibt, ist diese Seite der
+   * Bereich, und der Ausgang gehört an sein Ende statt in eine Kachel, in der
+   * ihn niemand sucht.
+   *
+   * Nicht unter „Konto & Sicherheit": dort wird etwas am Konto geändert, und
+   * Gehen ist keine Änderung daran (ADR-0062). Nicht im Kopf und nicht in der
+   * Leiste: ein Knopf, der die Sitzung beendet, gehört nicht auf jeden
+   * Bildschirm.
+   */
+  it("Abmelden steht unten auf der Übersicht", () => {
+    expect(source("src/app/(app)/account/page.tsx")).toContain('action="/auth/signout"');
+    expect(source("src/app/(app)/account/page.tsx")).toContain("border-t border-border/70");
   });
 
-  it("and therefore not on what /settings actually renders", () => {
-    // The redirect destination is the hub, and the hub has no logout.
-    const settings = source("src/app/(app)/settings/page.tsx");
-    expect(settings).toContain('permanentRedirect("/account")');
-    expect(source("src/app/(app)/account/page.tsx")).not.toContain("signout");
+  it("und nirgendwo sonst", () => {
+    for (const path of ["src/app/(app)/account/profile/page.tsx",
+                        "src/app/(app)/account/security/page.tsx",
+                        "src/components/layout/site-nav.tsx"]) {
+      expect(source(path), path).not.toContain("/auth/signout");
+    }
   });
 
-  it("is a POST, so a prefetcher can never end somebody's session", () => {
-    const profile = source("src/app/(app)/account/profile/page.tsx");
-    expect(profile).toContain('method="post"');
-    expect(profile).not.toContain('href="/auth/signout"');
+  it("genau einmal", () => {
+    expect(source("src/app/(app)/account/page.tsx").match(/auth\/signout/g)).toHaveLength(1);
+  });
+
+  it("ist ein POST, damit kein Vorauslader eine Sitzung beendet", () => {
+    const hub = source("src/app/(app)/account/page.tsx");
+    expect(hub).toContain('method="post"');
+    expect(hub).not.toContain('href="/auth/signout"');
   });
 
   it("every account type can reach it — USER, BUSINESS and ADMIN alike", () => {
@@ -287,5 +315,70 @@ describe("the checkout prefills but never delegates", () => {
     // Keeping somebody's postal address is their decision, not something
     // that happens to them.
     expect(view).toContain("useState(false)");
+  });
+});
+
+/**
+ * Die Nachrichtenkachel auf /account (0098-UI).
+ *
+ * Sie steht zwischen „Meine Bestellungen" und „Konto & Sicherheit", weil
+ * Nachrichten zu Bestellungen gehören — und trägt dieselbe Marke wie der
+ * Kopf, damit beide Zahlen nicht auseinanderlaufen können.
+ */
+describe("Nachrichten auf der Kontoübersicht", () => {
+  const page = readFileSync("src/app/(app)/account/page.tsx", "utf8");
+
+  it("steht zwischen Bestellungen und Sicherheit", () => {
+    const order = ["/account/orders", "/account/nachrichten", "/account/security"]
+      .map((href) => page.indexOf(`"${href}"`));
+    expect(order.every((at) => at > -1)).toBe(true);
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+  });
+
+  it("trägt Titel und Untertitel", () => {
+    expect(de.account.messages.title).toBe("Nachrichten");
+    expect(de.account.messages.hint).toBe("Fragen und Nachrichten zu deinen Bestellungen.");
+  });
+
+  it("zeigt die Marke nur, wenn etwas ungelesen ist", () => {
+    expect(page).toContain('{"unread" in section && unread > 0 ? (');
+    expect(page).toContain("<AttentionBadge count={unread}");
+  });
+
+  it("nennt der Vorlesehilfe, was die Zahl bedeutet", () => {
+    expect(page).toContain("label={de.messages.unreadBadgeLabel(unread)}");
+  });
+
+  /*
+   * `fetchMyUnread` ist `cache()`-gebunden: das Layout hat sie für dieselbe
+   * Anfrage bereits geholt, die Kachel teilt sich denselben Rundgang. Kein
+   * zweiter RPC, kein Polling, keine eigene Zählung.
+   */
+  it("holt die Zahl aus dem bestehenden Datenfluss", () => {
+    expect(page).toContain("const unread = await fetchMyUnread();");
+    expect(readFileSync("src/lib/messages/queries.ts", "utf8"))
+      .toContain("export const fetchMyUnread = cache(");
+    for (const forbidden of ["setInterval", "setTimeout", 'rpc("', "useEffect"]) {
+      expect(page, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("lässt den Kopf unverändert", () => {
+    const nav = readFileSync("src/components/layout/site-nav.tsx", "utf8");
+    expect(nav).toContain("unread={unread.mine}");
+    expect(nav).toContain('href: "/business/nachrichten"');
+  });
+
+  /* Eine Marke, zwei Orte — nicht zweimal abgeschrieben. */
+  it("benutzt dieselbe Marke wie der Kopf", () => {
+    const badge = readFileSync("src/components/ui/attention-badge.tsx", "utf8");
+    expect(badge).toContain("export function AttentionBadge");
+    expect(page).toContain('from "@/components/ui/attention-badge"');
+    expect(readFileSync("src/components/layout/site-nav.tsx", "utf8"))
+      .toContain('from "@/components/ui/attention-badge"');
+    // Und nirgends eine zweite Definition.
+    expect(readFileSync("src/components/layout/site-nav.tsx", "utf8"))
+      .not.toContain("function AttentionBadge(");
   });
 });

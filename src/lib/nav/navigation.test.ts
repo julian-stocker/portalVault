@@ -228,7 +228,10 @@ describe("the main sections keep their prefetch", () => {
 
   it("still switches prefetch off for the operator destinations only", () => {
     const nav = code(NAV);
-    expect(nav.match(/prefetch: \(\) => false/g)).toHaveLength(3);
+    /* Vier seit 0098: Shop, Lager, Nachrichten des Betriebs, Admin. Alle vier
+       sind Ziele, die nur ein Operator sieht — vorauszuladen hieße, für jeden
+       anderen eine Anfrage und eine Sitzungsprüfung zu bezahlen. */
+    expect(nav.match(/prefetch: \(\) => false/g)).toHaveLength(4);
   });
 
   it("leaves the cart, the shop and the about page prefetching", () => {

@@ -28,17 +28,19 @@ describe("the account is an account, not a settings screen", () => {
     /*
      * The label already said "Mein Konto" and a comment already argued against
      * the word "Einstellungen" — above a cog. An affordance outvotes a label
-     * it contradicts.
+     * it contradicts. Das Kartensymbol, das den Zahn ablöste, ist inzwischen
+     * selbst weg: es gibt nur noch einen Konto-Knopf, und der trägt das
+     * Personensymbol.
      */
-    expect(nav).toContain("AccountHubGlyph");
     expect(nav).not.toContain("SettingsGlyph");
     expect(nav).not.toContain("function SettingsAction(");
-    expect(nav).toContain("function AccountHubAction(");
+    expect(nav).not.toContain("AccountHubGlyph");
+    expect(nav).toContain("function ProfileAction(");
   });
 
   it("still leads to the hub, by its own accessible name", () => {
-    expect(nav).toContain('href="/account"');
-    expect(nav).toContain("aria-label={de.nav.account}");
+    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
+    expect(nav).toContain("de.nav.profile");
     expect(copy).toContain('account: "Mein Konto"');
   });
 
@@ -51,14 +53,14 @@ describe("the account is an account, not a settings screen", () => {
     expect(copy).toContain('title: "Mein Konto"');
   });
 
-  it("keeps logout exactly once, and on Profil rather than the hub", () => {
-    // The hub is what `/settings` redirects to, so a button there reads as a
-    // Settings button however the route is named (ADR-0085).
+  it("keeps logout exactly once, and on the hub rather than in a tile", () => {
     const renders = (readdirSync("src/app", { recursive: true }) as string[])
       .filter((name) => name.endsWith(".tsx"))
       .map((name) => `src/app/${name}`)
       .filter((file) => readFileSync(file, "utf8").includes('action="/auth/signout"'));
-    expect(renders).toEqual(["src/app/(app)/account/profile/page.tsx"]);
+    /* Umgezogen ans Ende der Übersicht: seit es nur eine Tür ins Konto gibt,
+       ist diese Seite der Bereich und nicht mehr eine Kachel darin. */
+    expect(renders).toEqual(["src/app/(app)/account/page.tsx"]);
   });
 
   it("puts logout in no management area", () => {
