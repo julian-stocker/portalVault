@@ -61,12 +61,13 @@ import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
-import { formatPrice } from "@/lib/format";
+import { formatDeduction, formatPrice } from "@/lib/format";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
   restockSaleItem, setSaleItemNotShipped, shipSaleItem } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
+import { commerceLineIndicator, commerceLineStatus } from "@/lib/orderbook/commerce-line-status";
 import {
   countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyOutcome,
   type LegacyOutcome,
@@ -308,8 +309,11 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                   <span className="ob-money text-right tabular-nums text-muted">
                     {formatPrice(sale.labelTotal)}
                   </span>
-                  <span className="ob-money text-right tabular-nums text-muted">
-                    {formatPrice(sale.refunded)}
+                  {/* Ein Abzug, und er sieht auch so aus (0097). Gespeichert
+                      bleibt der Betrag positiv. */}
+                  <span className={`ob-money text-right tabular-nums ${
+                    sale.refunded > 0 ? "text-danger" : "text-muted"}`}>
+                    {formatDeduction(sale.refunded)}
                   </span>
                   <span className="text-right"><Payout sale={sale} /></span>
                   <span className="text-center"><Stock sale={sale} /></span>
@@ -414,11 +418,35 @@ function SaleDetail({ sale, detail, pending, act }: {
       <ul className="divide-y divide-border/40">
         {/* An internal sale shows the ORDER's lines. There is no copy to show. */}
         {order
-          ? lines.map((line, index) => (
+          ? lines.map((line, index) => {
+              /*
+               * NICHT MEHR EINE KONSTANTE FÜR ALLE (0096).
+               *
+               * Hier stand für jede bezahlte Zeile „Verschickt ✓" — eine
+               * Aussage über die Zahlung, als Aussage über das Paket
+               * gedruckt. Seit 0095 kann eine Position storniert sein oder
+               * zurückkommen, und `seller_sale()` liefert die Mengen seit
+               * 0096 mit. Ein Teilstorno zeigt die Teile nebeneinander,
+               * statt die ganze Position falsch zu etikettieren.
+               */
+              const state = commerceLineStatus({
+                quantity: Number(line.quantity),
+                cancelled: line.cancelled as number | null | undefined,
+                returned: line.returned as number | null | undefined,
+              }, String(order.fulfillment_status ?? ""));
+              const text = state.kind === "cancelled" ? copy.commerceLine.cancelled
+                : state.kind === "returned" ? copy.commerceLine.returned
+                : state.kind === "shipped" ? copy.itemStates.outbooked
+                : state.kind === "open" ? copy.itemStates.open
+                : state.parts.map((part) =>
+                    part.kind === "cancelled" ? copy.commerceLine.cancelledPart(part.quantity)
+                    : part.kind === "returned" ? copy.commerceLine.returnedPart(part.quantity)
+                    : part.kind === "shipped" ? copy.commerceLine.shippedPart(part.quantity)
+                    : copy.commerceLine.openPart(part.quantity),
+                  ).join(copy.commerceLine.separator);
+              return (
               <LedgerItemRow key={String(line.id)}>
-                {/* Commerce booked it when the order was paid: done. */}
-                <SaleIndicator indicator={saleItemIndicator("outbooked", true)}
-                               label={copy.itemIndicator.outbooked} />
+                <SaleIndicator indicator={commerceLineIndicator(state)} label={text} />
                 <span className="tabular-nums text-xs text-muted">{index + 1}</span>
                 <span className="truncate text-xs text-muted">
                   {line.series_code ? String(line.series_code) : "—"}
@@ -427,11 +455,18 @@ function SaleDetail({ sale, detail, pending, act }: {
                   {String(line.quantity)}× {String(line.name ?? "")}
                 </span>
                 <span className="ob-money text-right tabular-nums">{formatPrice(Number(line.unit_price))}</span>
-                {/* Commerce already moved the stock when the order was paid. */}
-                <span className="text-center text-xs text-muted">{copy.itemStates.outbooked}</span>
+                <span
+                  className={`truncate text-center text-xs ${
+                    state.kind === "shipped" ? "text-muted" : "text-fg"}`}
+                  title={state.kind === "cancelled" ? copy.commerceLine.cancelledHint
+                    : state.kind === "mixed" ? copy.commerceLine.mixedHint
+                    : state.kind === "open" ? copy.commerceLine.openHint : undefined}>
+                  {text}
+                </span>
                 <span className="text-right text-xs text-muted">{copy.commerceOwned}</span>
               </LedgerItemRow>
-            ))
+              );
+            })
           : items.map((item) => {
               const can = saleItemActions(item as never, {
                 frozen: historical && sale.stockReleasedAt === null,
