@@ -93,7 +93,7 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
   }
 
   return (
-    <form onSubmit={submit} className="mt-6 flex flex-col gap-5">
+    <form onSubmit={submit} className="mt-6 flex flex-col gap-5 sm:gap-4">
       {error ? (
         <p role="alert" className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">{error}</p>
       ) : null}
@@ -123,7 +123,7 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
         price, and they move as it is typed.
       */}
       <FormSection title={copy.newSections.amount}>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end sm:gap-2">
           <Field label={copy.purchasePrice}>
             <input type="text" inputMode="decimal" required value={cost} placeholder="0,00"
                    onChange={(e) => setCost(e.target.value)} className={MONEY} />

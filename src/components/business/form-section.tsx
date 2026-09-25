@@ -29,9 +29,16 @@
  */
 import type { ReactNode } from "react";
 
-/** A field control: full width, 44px tall, thumb-sized on a phone. */
+/**
+ * A field control: full width, 44px tall, thumb-sized on a phone.
+ *
+ * `sm:min-h-9` is the desktop half of that sentence. A mouse does not need a
+ * 44px target, and eight pixels per field is most of what makes these two
+ * forms long enough to scroll. The phone keeps the big one — which is why the
+ * shrink is behind the breakpoint and never the other way round.
+ */
 export const INPUT =
-  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70";
+  "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm ring-1 ring-border/70 sm:min-h-9";
 
 /** The same, for an amount. Right-aligned, lining figures, never wrapped. */
 export const MONEY = `ob-money ${INPUT} text-right tabular-nums`;
@@ -47,7 +54,7 @@ export function FormSection({ title, children }: {
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex flex-col gap-2 sm:gap-1.5">
       <h2 className="border-b border-border/60 pb-1 text-xs font-medium uppercase tracking-wide text-muted">
         {title}
       </h2>
@@ -70,7 +77,7 @@ export function Field({ label, hint, children }: {
   children: ReactNode;
 }) {
   return (
-    <label className="flex min-w-0 flex-col gap-1">
+    <label className="flex min-w-0 flex-col gap-1 sm:gap-0.5">
       <span className="text-xs text-muted">{label}</span>
       {children}
       {hint ? <span className="text-xs text-muted">{hint}</span> : null}
@@ -92,7 +99,7 @@ export function FieldRow({ columns = 2, children }: {
   children: ReactNode;
 }) {
   return (
-    <div className={`grid grid-cols-1 gap-3 ${columns === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
+    <div className={`grid grid-cols-1 gap-3 sm:gap-2 ${columns === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
       {children}
     </div>
   );
@@ -106,5 +113,5 @@ export function FieldRow({ columns = 2, children }: {
  * matter.
  */
 export function QuietRow({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{children}</div>;
+  return <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-2">{children}</div>;
 }

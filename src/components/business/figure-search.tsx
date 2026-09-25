@@ -112,7 +112,19 @@ export function FigureSearch({
           enterKeyHint="done"
           aria-controls={listId}
           aria-describedby={message ? `${listId}-msg` : undefined}
-          className="min-h-11 w-full rounded-sky-md bg-surface px-3 ring-1 ring-border/70 focus-ring"
+          /*
+           * Dieselbe Geometrie wie `INPUT` in `form-section.tsx` — das Feld
+           * stand hier als eigene Kopie und hat die Verdichtung deshalb nicht
+           * mitbekommen: auf dem Desktop war es 44 statt 36 Pixel hoch und
+           * durch die geerbte Grundschrift auch größer als jedes andere Feld
+           * der beiden Formulare.
+           *
+           * Nur der Desktop wird angeglichen. Auf dem Telefon bleiben 44 px
+           * und 16 px stehen, und das ist hier kein Versäumnis: iOS zoomt die
+           * Seite beim Fokus auf ein Feld unter 16 px, und dies ist das eine
+           * Feld, in das am Telefon wirklich getippt wird.
+           */
+          className="min-h-11 w-full rounded-sky-md bg-surface px-3 ring-1 ring-border/70 focus-ring sm:min-h-9 sm:text-sm"
         />
       </label>
 

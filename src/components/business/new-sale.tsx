@@ -194,7 +194,7 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
   }
 
   return (
-    <form onSubmit={submit} className="mt-4 flex flex-col gap-5">
+    <form onSubmit={submit} className="mt-4 flex flex-col gap-5 sm:gap-4">
       {error ? (
         <p role="alert" className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
           {error}
@@ -276,7 +276,7 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         they did.
       */}
       <FormSection title={create.sections.costs}>
-        <ul className="flex flex-col gap-3 sm:gap-2">
+        <ul className="flex flex-col gap-3 sm:gap-1.5">
           {fees.map((fee) => (
             <li key={fee.key}
                 className="grid grid-cols-[1fr_auto_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_auto_auto]">
@@ -299,7 +299,7 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
               <button type="button" disabled={pending}
                       aria-label={create.feeRemove(fee.label || create.feeAddLabel)}
                       onClick={() => setFees((f) => f.filter((x) => x.key !== fee.key))}
-                      className="flex size-11 shrink-0 items-center justify-center rounded-sky-md text-sm ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-40 sm:size-9">
+                      className="flex size-11 shrink-0 items-center justify-center rounded-sky-md text-sm ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-40 sm:size-8">
                 ×
               </button>
             </li>
@@ -371,7 +371,7 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         under it; the number moves when any amount above it does, which
         teaches the formula faster than the sentence did.
       */}
-      <div className="rounded-sky-lg bg-surface p-3 ring-1 ring-border-strong">
+      <div className="rounded-sky-lg bg-surface p-3 ring-1 ring-border-strong sm:px-4 sm:py-2.5">
         <dl className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <dt className="text-xs font-medium uppercase tracking-wide text-muted">
             {create.sections.payout}

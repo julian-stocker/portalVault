@@ -23,7 +23,7 @@ export default async function NewPurchasePage({ searchParams }: {
    */
   const [{ test }, catalog] = await Promise.all([searchParams, fetchOrderbookCatalog()]);
   return (
-    <main className="mx-auto w-full max-w-lg px-4 pt-8 pb-10 md:pt-12">
+    <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
       <Link href="/business/orderbuch"
             className="inline-flex min-h-11 items-center text-sm text-muted hover:text-fg">
         ← {de.business.orderbook.back}

@@ -15,7 +15,7 @@ export default async function NewSalePage({ searchParams }: {
      screen: one query here rather than one per keystroke on a phone. */
   const [{ test }, catalog] = await Promise.all([searchParams, fetchOrderbookCatalog()]);
   return (
-    <main className="mx-auto w-full max-w-lg px-4 pt-8 pb-10 md:pt-12">
+    <main className="mx-auto w-full max-w-3xl px-4 pt-8 pb-10 md:pt-12">
       <Link href="/business/orderbuch/verkauf?bereich=extern"
             className="inline-flex min-h-11 items-center text-sm text-muted hover:text-fg">
         ← {de.business.sales.backToLedger}

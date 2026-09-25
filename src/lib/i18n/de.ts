@@ -1035,7 +1035,13 @@ export const de = {
         quantity: (name: string, n: number) => `${name}: ${n} Stück`,
         remove: "Entfernen",
         removeOne: (name: string) => `${name} entfernen`,
+        /* Zwei Beschriftungen für dieselbe Handlung, weil sie an zwei
+           verschiedenen Stellen steht. In der Positionsliste eines Einkaufs
+           steht sie neben „Zuordnung ändern" und muss sich davon
+           unterscheiden; in der kompakten Figurenzeile steht sie zwischen
+           Preis und Menge, wo jedes zweite Wort die Spalte verbreitert. */
         change: "Figur ändern",
+        changeShort: "Ändern",
         changeOne: (name: string) => `${name} austauschen`,
         changeCancel: "Abbrechen",
         /* Marktwert und Faktor, live. Unbekannt ist nicht null. */
