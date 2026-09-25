@@ -1,3 +1,24 @@
+# Cutover-Baseline 824 → 806, ohne Bewegung (2026-09-22)
+
+> **Historisches Protokoll — bereits ausgeführt — nicht erneut ausführen.**
+>
+> Dies ist **kein Runbook und keine Anleitung.** Der Vorgang ist abgeschlossen; die Datei steht
+> hier ausschließlich, damit nachlesbar bleibt, was genau passiert ist.
+>
+> | | |
+> |---|---|
+> | Ausgeführt auf Staging | 2026-09-22, unabhängig verifiziert |
+> | Ausgeführt auf Production | 2026-09-22, unabhängig verifiziert |
+> | Wiederholung | **ausgeschlossen** — das Verfahren ist verbraucht. Gate 1a bricht ab, sobald auch nur eine Zeile in `inventory_movements` steht — auf Production sind es heute 32 —, Gate 1j nach dem ersten erfolgreichen Lauf. **806 ist kein Sollbestand**, sondern der Stand eines Tages; jede spaetere Abweichung gehoert ins Ledger |
+> | Früherer Pfad | `tools/sql/cutover-baseline-806.sql` (bis 2026-09-25 ausführbar im Repository) |
+>
+> Verschoben am 2026-09-25 aus `tools/sql/` hierher: die Vorgänge sind verbraucht, und eine
+> Markdown-Datei lässt sich nicht versehentlich in den SQL-Editor ziehen und ausführen. **Der
+> SQL-Text darunter ist unverändert** — Zeichen für Zeichen der Stand, der gelaufen ist.
+
+## Der ausgeführte SQL-Text
+
+```sql
 -- ###########################################################################
 -- ##                                                                       ##
 -- ##   ONE-TIME PRE-GO-LIVE BASELINE · EXECUTED ON PRODUCTION              ##
@@ -318,3 +339,4 @@ $$;
 
 -- Erst nach dieser Zeile ist etwas passiert.
 commit;
+```

@@ -33,29 +33,38 @@ kein Stripe Connect · keine Provisionen oder Payouts · keine privaten Verkäuf
 Marketplace-Fan-out-Logik. **Der Marketplace-Stopp aus ADR-0021 gilt unverändert** — auch nicht
 konzeptionell, auch nicht „nur das Datenmodell".
 
-**Vorhanden:** `shop_admins` + `is_shop_admin()`, `shop_inventory`, `inventory_movements`,
-`/admin/inventory`, das öffentliche Angebot `shop_offers()` und ein lokaler Warenkorb.
-**Nicht vorhanden und nicht einzuplanen:** Bestellungen, Checkout, Zahlung, Versand,
-Kundenverwaltung, Rabatte, Coupons. **Solange du nicht ausdrücklich dazu beauftragt wirst,
-implementierst du davon nichts.**
+**Vorhanden und im Betrieb (Stand 2026-09-25):** Lager (`shop_inventory`,
+`inventory_movements`, `/business/inventory`), öffentlicher Shop (`shop_offers()`, `/shop`),
+Warenkorb, **Checkout mit Gastkauf**, **Stripe-Zahlung im Live-Modus**, Bestellungen,
+Versandarten und Versandkostenregel (Deutschland), Rechnungen und Transaktionsmails,
+Storno · Retoure · Erstattung · Widerruf, Orderbuch für externe Verkäufe, Bestellnachrichten
+zwischen Käufer und Betrieb. Rollen: Plattformadmin (`/admin`) und Verkäuferbetrieb
+(`/business`) sind getrennt (ADR-0077). Der genaue Stand steht in `PROJECT_STATUS.md`.
+
+**Nicht vorhanden und nicht einzuplanen:** Rabatte, Coupons, Gutscheine — und alles aus der
+Marketplace-Liste oben. **Solange du nicht ausdrücklich dazu beauftragt wirst, implementierst
+du davon nichts.**
 
 PortalVault löst ein bestehendes, funktionierendes Legacy-Projekt ab (statische Seite,
 Excel als Source of Truth). Das Legacy-Projekt liegt unter `../webpage`.
 
 ---
 
-## Tech Stack (Stand: 2026-09-03)
+## Tech Stack (Stand: 2026-09-25)
 
 | Bereich | Technologie |
 |---|---|
 | Frontend | Next.js (App Router), TypeScript, Tailwind CSS |
 | Daten | Supabase (PostgreSQL), Supabase Auth, Row Level Security |
-| Hosting | Vercel (noch nicht eingerichtet) |
+| Hosting | Vercel, Production von `main` auf `https://skyisles.app` |
 | Versionierung | Git / GitHub (`git@github.com:julian-stocker/portalVault.git`) |
 
 Installiert und lauffähig: Next.js 16 (App Router, Turbopack), React 19, TypeScript,
-Tailwind CSS v4, ESLint 9. Supabase ist **noch nicht** angebunden.
-Der aktuelle Stand steht in `PROJECT_STATUS.md`.
+Tailwind CSS v4, ESLint 9. Supabase ist angebunden — zwei Projekte, Staging und Production,
+beide in der EU-Region, Migrationen unter `supabase/migrations/` und drei Edge Functions
+(`create-payment`, `stripe-webhook`, `send-order-mail`). Zahlungen laufen über Stripe; die
+Schlüssel liegen ausschließlich in den Function-Secrets, nie im Repository und nie bei Vercel.
+Der aktuelle Stand steht in `PROJECT_STATUS.md`, die Umgebungen in `docs/DEPLOYMENT.md`.
 
 ```bash
 npm run dev           # Entwicklungsserver (Production-Daten! meist dev:staging nehmen)

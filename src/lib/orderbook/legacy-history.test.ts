@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   BUSINESS_CUT, DATE_REPAIRS, classifyLegacyRows, eventFingerprint, groupDate,
@@ -420,7 +421,7 @@ describe("the history importer reconciles instead of only inserting", () => {
     expect(guard).toContain("process.exit(1)");
     expect(guard).toContain("Nothing was written");
     // Und es sagt, wo das Entfernen tatsächlich geprüft wird.
-    expect(guard).toContain("tools/sql/phase-c-legacy-history-prune.sql");
+    expect(guard).toContain("docs/history/2026-09-22-phase-c-legacy-history-prune.md");
   });
 
   it("never deletes or updates: the table stays append-only", () => {
@@ -436,7 +437,7 @@ describe("the history importer reconciles instead of only inserting", () => {
   });
 
   it("the one-time prune script removes exactly nine named rows and nothing else", () => {
-    const SQL = readFileSync("tools/sql/phase-c-legacy-history-prune.sql", "utf8");
+    const SQL = readFileSync("docs/history/2026-09-22-phase-c-legacy-history-prune.md", "utf8");
     // Es schaltet den Schutz nur für diese eine Transaktion ab.
     expect(SQL).toContain("begin;");
     expect(SQL).toContain("disable trigger legacy_stock_events_no_update");
@@ -467,7 +468,7 @@ describe("the history importer reconciles instead of only inserting", () => {
      * sind ausserdem umgebungsspezifisch: auf Production sind es andere Ids.
      * Deshalb steht hier der Rahmen, und der Block wird je Lauf erzeugt.
      */
-    const SQL = readFileSync("tools/sql/phase-c-legacy-history-prune.sql", "utf8");
+    const SQL = readFileSync("docs/history/2026-09-22-phase-c-legacy-history-prune.md", "utf8");
     expect(SQL).not.toMatch(/'SKY-\d{4}'/);
     expect(SQL).toContain(">>> HIER DEN VOM PREVIEW ERZEUGTEN BLOCK EINSETZEN <<<");
     expect(SQL).toContain("ONE-TIME");
@@ -477,7 +478,7 @@ describe("the history importer reconciles instead of only inserting", () => {
   });
 
   it("the one-time baseline script keeps its values out of the repository too", () => {
-    const SQL = readFileSync("tools/sql/cutover-baseline-806.sql", "utf8");
+    const SQL = readFileSync("docs/history/2026-09-22-cutover-baseline-806.md", "utf8");
     expect(SQL).not.toMatch(/'SKY-\d{4}'/);
     expect(SQL).toContain("ONE-TIME PRE-GO-LIVE BASELINE");
     expect(SQL).toContain("EXECUTED ON PRODUCTION");
@@ -493,6 +494,58 @@ describe("the history importer reconciles instead of only inserting", () => {
                          'from("sale_items")', 'from("purchase_items")']) {
       expect(TOOL, table).not.toContain(table);
     }
+  });
+
+  it("KEIN ausführbares Einmal-SQL liegt mehr unter tools/", () => {
+    /*
+     * Die drei verbrauchten Vorgänge — Pre-Go-Live-Reset, Cutover-Baseline und
+     * Phase-C-Prune — lagen bis 2026-09-25 als `.sql` in `tools/sql/`. Jede
+     * einzelne trug im Kopf „DO NOT RUN AGAIN", und genau das war der ganze
+     * Schutz: ein Kommentar hält niemanden auf, der eine Datei in den
+     * SQL-Editor zieht. Der Reset löscht `inventory_movements` unbedingt, und
+     * Production hat seit dem Cutover echte operative Bewegungen.
+     *
+     * Der Inhalt ist vollständig erhalten — als Protokoll unter
+     * `docs/history/`, wo er nicht ausführbar ist. Diese Prüfung hält fest,
+     * dass keine neue ausführbare Kopie zurückkommt.
+     */
+    const stack = [join(process.cwd(), "tools")];
+    const found: string[] = [];
+    while (stack.length > 0) {
+      for (const entry of readdirSync(stack.pop()!, { withFileTypes: true })) {
+        const path = join(entry.parentPath, entry.name);
+        if (entry.isDirectory()) stack.push(path);
+        else if (entry.name.endsWith(".sql")) found.push(path);
+      }
+    }
+    expect(found, "Einmal-SQL gehört nach docs/history/, nicht nach tools/").toEqual([]);
+
+    // Und die drei Protokolle stehen dort, vollständig.
+    for (const protocol of [
+      "docs/history/2026-09-21-pre-go-live-reset.md",
+      "docs/history/2026-09-22-cutover-baseline-806.md",
+      "docs/history/2026-09-22-phase-c-legacy-history-prune.md",
+    ]) {
+      const text = readFileSync(protocol, "utf8");
+      expect(text, protocol).toContain("Historisches Protokoll");
+      expect(text, protocol).toContain("nicht erneut ausführen");
+      expect(text, protocol).toContain("kein Runbook");
+      // Der SQL-Text selbst, unverändert im Codeblock.
+      expect(text, protocol).toContain("```sql");
+      expect(text, protocol).toContain("DO NOT RUN AGAIN");
+    }
+  });
+
+  it("das ungeschützte Rebaseline-Werkzeug ist weg", () => {
+    /*
+     * `tools/rebaseline-legacy-purchase-fingerprints.mts` war das einzige
+     * schreibende Werkzeug ohne `staging-guard.mts`: es nannte sein Ziel und
+     * schrieb mit `--apply`. Einmalig gelaufen, Anlass erledigt — der reguläre
+     * Sync erkennt dieselbe Abweichung seither als `date_already_applied`
+     * (ADR-0104). Git bewahrt den Quelltext.
+     */
+    expect(existsSync(join(process.cwd(), "tools/rebaseline-legacy-purchase-fingerprints.mts")))
+      .toBe(false);
   });
 });
 

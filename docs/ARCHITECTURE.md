@@ -1,9 +1,9 @@
 # Architektur
 
-Stand: 2026-09-03. Das Next.js-Grundgerüst (V1.1) existiert; darüber hinaus gibt es noch
-keine Anwendungslogik. Dieses Dokument beschreibt die Zielarchitektur. Bestätigte
-Entscheidungen sind als solche markiert, alles andere trägt **OPEN** oder **VORSCHLAG** und ist
-in `docs/DECISIONS.md` als Entscheidung geführt.
+Stand: 2026-09-25. Katalog, Konten, Sammlung, Shop, Checkout, Zahlung und der Verkäuferbetrieb
+sind gebaut und in Produktion. Dieses Dokument beschreibt die Architektur, nach der sie gebaut
+sind; wo noch etwas offen ist, trägt es **OPEN** oder **VORSCHLAG** und ist in
+`docs/DECISIONS.md` als Entscheidung geführt.
 
 ---
 

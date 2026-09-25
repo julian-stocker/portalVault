@@ -17,10 +17,12 @@ export const metadata: Metadata = {
   /*
    * TEMPORARY — remove this block at the public beta gate.
    *
-   * The site now answers on its own domain, https://skyisles.app, but it is
-   * still not open: there is no checkout, no legal page and no transactional
-   * mail. The trigger for removing this is that release gate, not the domain —
-   * having an address and being ready to be found are different things.
+   * Corrected on 2026-09-25: this used to say there is "no checkout, no legal
+   * page and no transactional mail". All three exist, and the shop has been
+   * taking real money since 2026-09-21. What is still missing is the decision
+   * to be found — the trigger for removing this block is that release gate,
+   * not the domain and not the feature set. Having an address and being ready
+   * to be found are different things.
    *
    * Vercel sets `X-Robots-Tag: noindex` on preview deployments by itself but
    * NOT on production ones, and this is a production deployment from `main`,

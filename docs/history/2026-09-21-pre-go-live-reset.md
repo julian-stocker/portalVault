@@ -1,3 +1,24 @@
+# Pre-Go-Live-Reset des operativen Shops (2026-09-21)
+
+> **Historisches Protokoll — bereits ausgeführt — nicht erneut ausführen.**
+>
+> Dies ist **kein Runbook und keine Anleitung.** Der Vorgang ist abgeschlossen; die Datei steht
+> hier ausschließlich, damit nachlesbar bleibt, was genau passiert ist.
+>
+> | | |
+> |---|---|
+> | Ausgeführt auf Staging | 2026-09-21, unabhängig verifiziert |
+> | Ausgeführt auf Production | 2026-09-21, unabhängig verifiziert |
+> | Wiederholung | **ausgeschlossen** — ein zweiter Lauf waere Datenverlust. Seit dem Cutover enthaelt `inventory_movements` ausschliesslich echte operative Bewegungen, und Zeile 441 des Skripts loescht sie unbedingt. Die Abbruchkriterien pruefen auf echtes Geld und auf die Workbook-Historie, **nicht** auf „schon einmal gelaufen“ — sie sind kein Schutz gegen eine Wiederholung. Ein Bestandsfehler wird mit einer Korrekturbewegung beantwortet, nicht mit einem leeren Ledger (ADR-0103) |
+> | Früherer Pfad | `tools/sql/pre-go-live-reset.sql` (bis 2026-09-25 ausführbar im Repository) |
+>
+> Verschoben am 2026-09-25 aus `tools/sql/` hierher: die Vorgänge sind verbraucht, und eine
+> Markdown-Datei lässt sich nicht versehentlich in den SQL-Editor ziehen und ausführen. **Der
+> SQL-Text darunter ist unverändert** — Zeichen für Zeichen der Stand, der gelaufen ist.
+
+## Der ausgeführte SQL-Text
+
+```sql
 -- ###########################################################################
 -- ##                                                                       ##
 -- ##   ONE-TIME — BEREITS AUSGEFÜHRT — DO NOT RUN AGAIN                    ##
@@ -610,3 +631,4 @@ $$;
 
 -- Erst nach dieser Zeile ist etwas passiert. Bis dahin: rollback jederzeit.
 commit;
+```

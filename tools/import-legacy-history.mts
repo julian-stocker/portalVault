@@ -12,7 +12,8 @@
  * THIS TOOL ONLY EVER INSERTS, because the table is append-only (0079) and
  * stays that way. When a corrected workbook makes rows change or fall out of
  * the plan, the run names them and refuses: removing them is a deliberate,
- * separately reviewed act through `tools/sql/phase-c-legacy-history-prune.sql`.
+ * separately reviewed act; the one it was done with is a protocol now
+ * (`docs/history/2026-09-22-phase-c-legacy-history-prune.md`).
  * See the reconciliation block below for why a fingerprint alone is not
  * enough to notice a changed opening balance.
  *
@@ -289,17 +290,19 @@ console.log(`  after a full rebuild ..... ${after}`);
  * append-only (0079), und dieser Schutz bleibt: ein Importer, der sich seine
  * eigene Vorgeschichte wegräumen kann, ist kein Protokoll mehr. Stehen also
  * geänderte oder entfallene Zeilen an, nennt der Lauf sie vollständig und
- * hält an. Das Entfernen ist ein eigener, einzeln geprüfter Vorgang über
- * `tools/sql/phase-c-legacy-history-prune.sql`, danach fügt ein gewöhnliches
- * `--apply` den Rest ein.
+ * hält an. Das Entfernen ist ein eigener, einzeln geprüfter Vorgang; 2026-09
+ * wurde er einmal je Umgebung ausgeführt und liegt seither nur noch als
+ * Protokoll vor (`docs/history/2026-09-22-phase-c-legacy-history-prune.md`).
+ * Danach fügt ein gewöhnliches `--apply` den Rest ein.
  */
 const removals = [...drifted.map((d) => d.was), ...stale];
 if (APPLY && removals.length > 0) {
   console.error(`\nFAIL-CLOSED: ${drifted.length} changed and ${stale.length} obsolete row(s)` +
     ` stand in the way of the plan.`);
   console.error("  This tool only inserts; legacy_stock_events is append-only by design.");
-  console.error("  Remove exactly the rows listed above with the reviewed one-time script");
-  console.error("  tools/sql/phase-c-legacy-history-prune.sql, then run --apply again.");
+  console.error("  Removing them is a separate, reviewed act — not this tool's job, and not");
+  console.error("  a script that still lies ready to run. The one it was done with in 2026-09");
+  console.error("  is a protocol now: docs/history/2026-09-22-phase-c-legacy-history-prune.md.");
   console.error("  Nothing was written.");
   process.exit(1);
 }

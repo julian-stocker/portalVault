@@ -1,8 +1,10 @@
 # Datenbankmodell (PostgreSQL / Supabase)
 
-Stand: 2026-09-03 — **Vorschlag. Noch nichts angelegt, kein SQL ausgeführt.**
-Das SQL unten ist der Entwurf für die erste Migration und muss vor der Ausführung freigegeben
-werden. Jede Schemaänderung wird als nummerierte Datei unter `supabase/migrations/` versioniert.
+Stand: 2026-09-25. **Angewandt.** Production trägt alle Migrationen bis einschließlich `0098`,
+Staging denselben Stand. Der erste Abschnitt unten ist noch der ursprüngliche Entwurf der
+Migration `0001` und als Entwurf lesbar; alles danach beschreibt das Schema, wie es heute
+läuft. Jede Schemaänderung ist eine nummerierte Datei unter `supabase/migrations/` und wird im
+SQL-Editor angewandt (ADR-0051).
 
 ---
 
@@ -2163,7 +2165,7 @@ zeigten diese in der Verifikation sofort die beabsichtigten Rechte.
 
 Am **2026-09-21** wurde der operative Shop einmalig zurückgesetzt — zuerst Staging, dann
 Production, jeweils in **einer** Transaktion und anschließend unabhängig verifiziert. Das
-Skript liegt als Protokoll unter `tools/sql/pre-go-live-reset.sql`, deutlich als
+Skript liegt als Protokoll unter `docs/history/2026-09-21-pre-go-live-reset.md`, deutlich als
 `ONE-TIME — DO NOT RUN AGAIN` markiert, und **nicht** unter `supabase/migrations/`: es ist
 keine Schemaänderung und darf auf einer frischen Datenbank nie laufen.
 
@@ -2353,7 +2355,7 @@ und blockiert den Lauf.
 **Append-only hat gehalten.** Der Neuaufbau der Historie brauchte neun Zeilen weniger.
 `tools/import-legacy-history.mts` kann sie nicht entfernen — kein `delete`, kein `update` —,
 nennt sie vollständig und bricht ab. Das Entfernen ist ein eigener einmaliger Vorgang
-(`tools/sql/phase-c-legacy-history-prune.sql`), der `legacy_stock_events_no_update` für die
+(`docs/history/2026-09-22-phase-c-legacy-history-prune.md`), der `legacy_stock_events_no_update` für die
 Dauer **einer** Transaktion aussetzt und in derselben Transaktion wieder schließt.
 
 Der Anlass gehört dazu: der technische Abdruck von `opening_balance` und `legacy_adjustment`
@@ -2379,7 +2381,7 @@ der Preis zum Importzeitpunkt und keine Aussage der Arbeitsmappe.
 
 **Legacy-Historie und operativer Bestand stimmen erstmals überein.** Die 18 Stück Differenz
 aus der aktualisierten Arbeitsmappe wurden über die einmalige Baseline
-(`tools/sql/cutover-baseline-806.sql`, 27 UPDATE / 6 INSERT / 243 unverändert) angeglichen —
+(`docs/history/2026-09-22-cutover-baseline-806.md`, 27 UPDATE / 6 INSERT / 243 unverändert) angeglichen —
 **ohne eine einzige `inventory_movement`**. Der operative Ledger beginnt weiterhin leer.
 
 #### Production-Endzustand nach A–D (2026-09-22)
@@ -2411,7 +2413,7 @@ positionsweise ohne Abweichung (245 Positionen mit Bestand, 0 Differenzen). Der 
 Ledger beginnt weiterhin leer; die Herkunft des Bestands erklären ausschließlich die
 `legacy_stock_events`.
 
-**Das Baseline-Verfahren ist verbraucht.** `tools/sql/cutover-baseline-806.sql` trägt
+**Das Baseline-Verfahren ist verbraucht.** `docs/history/2026-09-22-cutover-baseline-806.md` trägt
 `EXECUTED ON PRODUCTION · DO NOT RUN AGAIN`, und zwei Gates halten es geschlossen: 1j, sobald
 jede Zielposition ihren Wert schon trägt, und 1a, sobald eine einzige Bewegung existiert. Jede
 weitere Bestandsänderung entsteht über `apply_inventory_movement` (ADR-0044, ADR-0048).

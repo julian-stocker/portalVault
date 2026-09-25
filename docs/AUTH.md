@@ -1,6 +1,8 @@
 # Authentifizierung
 
-Stand: 2026-09-03 — **geplant, noch nichts implementiert.**
+Stand: 2026-09-25 — **umgesetzt und im Betrieb.** Registrierung, Login, Bestätigung,
+Passwort-Reset, Onboarding und die geschützten Bereiche laufen; dieses Dokument beschreibt die
+Regeln, nach denen sie gebaut sind.
 
 Grundsatz: **Wir bauen kein eigenes Passwortsystem.** Registrierung, Passwort-Hashing,
 E-Mail-Verifizierung, Token, Sessions und Passwort-Reset übernimmt Supabase Auth vollständig.

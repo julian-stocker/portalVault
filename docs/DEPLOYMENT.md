@@ -2,16 +2,20 @@
 
 Wie SkyIsles öffentlich erreichbar wird — und was dabei **nicht** mitfliegt.
 
-Stand: 2026-09-08. Aktuelle Stufe: **eigene Domain, noch nicht öffentlich**
+Stand: 2026-09-25. Aktuelle Stufe: **live und im Verkauf, aber noch nicht auffindbar**
 
     https://skyisles.app
 
 **Die kanonische öffentliche Adresse — und die einzige, die funktioniert.**
 Production-Deployment vom Branch `main`, über Vercel eingerichtet, in der
 Supabase-Auth-Konfiguration als Site URL hinterlegt. Erreichbarkeit zuletzt
-bestätigt am 2026-09-20. Kein offizieller Start: es gibt zwar seit B1 eine
-Kasse, aber weder Zahlung noch Rechtstexte noch Transaktionsmails — `noindex`
-bleibt bis zum Beta-Gate bestehen.
+bestätigt am 2026-09-25.
+
+**Kasse, Zahlung, Rechtstexte und Transaktionsmails sind vorhanden**; seit dem
+Go-Live am 2026-09-21 zahlt echte Kundschaft echt (siehe „Stripe" weiter
+unten). Was fehlt, ist nur noch das Beta-Gate: `noindex` steht weiterhin auf
+jeder Route, die Seite wird also gefunden, wer die Adresse kennt — und von
+keiner Suchmaschine. Die Checkliste dafür steht unter „Noindex".
 
 **Die alte technische Vercel-Adresse `portal-vault-lovat.vercel.app` ist tot.**
 Sie antwortet mit `DEPLOYMENT_NOT_FOUND` (geprüft am 2026-09-20) und ist damit
@@ -168,9 +172,13 @@ ausgeliefert sind nur die Derivate unter `public/images/brand/`.
 `../webpage`, `skylanders.xlsx`, Lager-, Order- und EÜR-Daten sind weder im
 Repository noch in der Datenbank. Vollständige Liste: `docs/SECURITY.md`.
 
-Die Shop-Grundlage existiert in der Datenbank (Migration `0003`), aber es gibt
-keine Shop-Route, keine Shop-UI und keinen öffentlichen Zugriff:
-`shop_admins` und `inventory_movements` sind für `anon` nicht einmal lesbar.
+Die Shop-Grundlage entstand mit Migration `0003`. Inzwischen gibt es `/shop`,
+die Angebotszeilen im Katalog und den vollständigen Kaufweg — was für `anon`
+sichtbar ist, bleibt aber genau dieselbe schmale Projektion: `shop_offers()`
+nennt `sky_id`, `condition`, `price` und ein `available`-Flag, keine Menge.
+`shop_admins` und `inventory_movements` sind für `anon` nach wie vor nicht
+einmal lesbar (read-only nachgemessen am 2026-09-25: von 63 exponierten
+Relationen sind fünf für `anon` lesbar, alle fünf Katalogdaten).
 
 ---
 
@@ -179,8 +187,22 @@ keine Shop-Route, keine Shop-UI und keinen öffentlichen Zugriff:
 `public.expire_stale_checkouts()` gibt abgelaufene Reservierungen frei und schließt die
 Bestellungen, die mit ihnen verfallen sind.
 
-**Auf `skyisles-staging` eingerichtet und verifiziert (2026-09-11). Auf Production noch NICHT
-eingerichtet.**
+**Auf `skyisles-staging` eingerichtet und verifiziert (2026-09-11). Auf Production ebenfalls
+eingerichtet und am 2026-09-25 nachgewiesen:**
+
+| | |
+|---|---|
+| `jobname` | `expire-stale-checkouts` |
+| `schedule` | `*/5 * * * *` |
+| `active` | `true` |
+| `command` | `select public.expire_stale_checkouts();` |
+| Läufe | die letzten 20 geprüften: alle `succeeded`, je `1 row`, exakt im Fünf-Minuten-Takt |
+
+Bis zum 2026-09-25 stand hier „auf Production noch NICHT eingerichtet". Das war falsch und ist
+die Art Satz, die Schaden anrichtet: pg_cron lässt doppelte Jobnamen zu, ein „Nachinstallieren"
+hätte also einen zweiten Job derselben Sache erzeugt. **Vor jedem erneuten `cron.schedule` gilt
+deshalb unverändert der `cron.unschedule`-Schritt weiter unten** — und vorher ein Blick in
+`cron.job`, ob der Name schon dasteht.
 
 **Was der Job tatsächlich tut — und was nicht.** Er ist *nicht* der Weg, auf dem Bestand
 rechtzeitig zurückkommt: `create_order()` ruft `release_expired_reservations(p_inventory_ids)`
@@ -414,7 +436,13 @@ Der frühere **einzelne** `STRIPE_SECRET_KEY` wird nicht mehr gelesen. Beim Umst
 `STRIPE_SECRET_KEY_SANDBOX` seinen bisherigen Wert; die alte Variable kann danach entfernt
 werden.
 
-**Rolloutstand (2026-09-21).** `0077` und `0078` sind auf **Staging und Production** angewandt.
+**Rolloutstand (Stand 2026-09-25).** Production trägt alle Migrationen bis einschließlich
+`0098`: `0077`/`0078` und `0079`–`0085` am 2026-09-21, `0093`/`0094` am 2026-09-23, der
+Commerce-Block `0095`–`0097` am 2026-09-24 und `0098` (Bestellnachrichten) am 2026-09-25, jede
+read-only nachgeprüft und ohne Datendrift. Der Absatz darunter beschreibt den Stand vom
+2026-09-21, als `0077` und `0078` angewandt wurden.
+
+`0077` und `0078` sind auf **Staging und Production** angewandt.
 Die Functions sind auf beiden Projekten deployt — Production: **`create-payment` v10,
 `stripe-webhook` v11**, beide ACTIVE seit 11:05.
 
@@ -455,7 +483,7 @@ aktualisiert — Spalte F sank von 824 auf 806 —, und die Angleichung lief in 
 als einmalige Baseline **ohne eine einzige Bewegung**. Production trägt den Bestand auf 279
 Positionen, Staging auf 276; der Unterschied sind ausschließlich Zeilen mit `quantity = 0`.
 
-**Die Baseline ist damit verbraucht.** `tools/sql/cutover-baseline-806.sql` ist als
+**Die Baseline ist damit verbraucht.** `docs/history/2026-09-22-cutover-baseline-806.md` ist als
 `EXECUTED ON PRODUCTION · DO NOT RUN AGAIN` markiert; jede weitere reale Bestandsänderung
 entsteht über die regulären operativen Movement-Pfade.
 

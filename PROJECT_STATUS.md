@@ -59,8 +59,8 @@ verworfene Alternativen: **ADR-0104**, Datenbankseite: `docs/DATABASE.md` 3.3aj.
 |---|---|---|---|
 | **A** | Orderbuch zeilenweise nachziehen, vier neue Verkäufe importieren | `0088`, `0089`, `tools/sync-legacy-orderbook.mts` | **abgeschlossen** |
 | **B** | dreizehn Einkaufs-Fingerabdrücke einmalig neu stempeln | `tools/rebaseline-legacy-purchase-fingerprints.mts` | **abgeschlossen** |
-| **C** | Historie neu aufbauen, `return` als sechster Typ | `0087`, `tools/sql/phase-c-legacy-history-prune.sql` | **abgeschlossen** |
-| **D** | Cutover-Baseline 824 → 806, ohne Bewegung | `tools/sql/cutover-baseline-806.sql` | **abgeschlossen** |
+| **C** | Historie neu aufbauen, `return` als sechster Typ | `0087`, `docs/history/2026-09-22-phase-c-legacy-history-prune.md` | **abgeschlossen** |
+| **D** | Cutover-Baseline 824 → 806, ohne Bewegung | `docs/history/2026-09-22-cutover-baseline-806.md` | **abgeschlossen** |
 
 **Staging-Endzustand:** Verkäufe **296** / `sale_items` **1 280** · Einkäufe **87** (Legacy
 **84**) / `purchase_items` **2 121** (Legacy **2 114**) · `sale_fees` **825** · `sale_refunds`
@@ -101,14 +101,14 @@ idempotent: ein erneuter Sync-, Import- oder History-Lauf plant nichts.
 
 ### Die Baseline-Tür ist zu
 
-`tools/sql/cutover-baseline-806.sql` ist verbraucht und im Kopf als
+`docs/history/2026-09-22-cutover-baseline-806.md` ist verbraucht und im Kopf als
 `EXECUTED ON PRODUCTION · DO NOT RUN AGAIN` markiert. Zwei unabhängige Gates halten das durch:
 **1j** bricht ab, sobald jede Zielposition ihren Wert bereits trägt, **1a**, sobald auch nur eine
 `inventory_movement` existiert. **Jede künftige reale Bestandsänderung läuft ausschließlich über
 die regulären operativen Movement-Pfade** (`apply_inventory_movement`) — eine Abweichung ist ab
 jetzt eine Korrekturbuchung, kein Skript.
 
-Ebenfalls verbraucht: `tools/sql/phase-c-legacy-history-prune.sql` (beide Umgebungen).
+Ebenfalls verbraucht: `docs/history/2026-09-22-phase-c-legacy-history-prune.md` (beide Umgebungen).
 `tools/rebaseline-legacy-purchase-fingerprints.mts` und `tools/fix-legacy-raw-name.mts` liefen
 **nur auf Staging** und sind entsprechend markiert; auf Production war beides nicht nötig — die
 Fingerabdruck-Abweichung war dort als `date_already_applied` erklärt, und der Namensfehler
@@ -215,7 +215,7 @@ zweiter Lauf wäre Datenverlust, und die Gates würden ihn nicht verhindern — 
 echtes Geld und auf die Workbook-Historie, nicht darauf, ob das Skript schon einmal lief. Ein
 Bestandsfehler wird mit einer Korrekturbewegung beantwortet, nicht mit einem leeren Ledger.
 
-`tools/sql/pre-go-live-reset.sql` bleibt als **Protokoll** liegen, deutlich als
+`docs/history/2026-09-21-pre-go-live-reset.md` bleibt als **Protokoll** liegen, deutlich als
 `ONE-TIME — DO NOT RUN AGAIN` markiert, und wird **nicht** nach `supabase/migrations/`
 verschoben.
 
@@ -2501,90 +2501,42 @@ und AVV, Aufbewahrungsfristen, Kontolöschung. Siehe `docs/LEGAL.md` Abschnitt 9
 
 ---
 
-## Aktuell implementiert
+## Ist-Stand (2026-09-25)
+
+Die drei Abschnitte, die hier bis zum 2026-09-25 standen — „Aktuell implementiert", „Noch nicht
+implementiert" und „Technischer Zustand" — waren auf dem Stand von V1.5/V1.6 eingefroren: sie
+nannten Migration `0007` als „nicht ausgeführt", 628 Tests, „Datenbank: 0 Datenzeilen" und
+„Deployment: nicht eingerichtet". Die Chronik darüber ist weitergeschrieben worden, diese
+Tabellen nicht. Sie sind durch den folgenden Block ersetzt; die datierten Nachweise darunter
+bleiben unverändert stehen.
 
 | | |
 |---|---|
-| Next.js 16.3.4, App Router, Turbopack | ✅ |
-| React 19.2.8, TypeScript 5 (`strict`) | ✅ |
-| Tailwind CSS v4, ESLint 9 (`eslint-config-next`) | ✅ |
-| Import-Alias `@/*` → `src/*` | ✅ |
-| Sichere `.gitignore` (Secrets, Excel, interne Legacy-Daten) | ✅ |
-| `.env.example` mit Platzhaltern, ohne echte Werte | ✅ |
-| npm-Skripte `dev` · `build` · `start` · `lint` · `typecheck` · `check` | ✅ |
-| Wurzellayout mit `lang="de"`, Metadaten | ✅ |
-| Englischer Codebase, deutsche Oberfläche (ADR-0019) | ✅ |
-| Zentrale Texte `src/lib/i18n/de.ts` — Schlüssel englisch, Werte deutsch | ✅ |
-| Formatierung `src/lib/format.ts`, Locale `de-AT` | ✅ |
-| Vorläufige Startseite | ✅ |
-| Vollständige Projektdokumentation in `docs/` | ✅ |
-| `supabase/migrations/0001_initial_schema.sql` — geschrieben, **ausgeführt und strukturell verifiziert** | ✅ |
-| `@supabase/supabase-js` als Abhängigkeit | ✅ |
-| `tools/verify-rls.mts` — funktionale RLS-Prüfungen, `npm run verify:rls` | ✅ **ausgeführt, 103/103 bestanden** |
-| `src/lib/catalog/slug.ts` — Slug-Regel nach ADR-0011, 15 Unit-Tests | ✅ |
-| `tools/import-catalog.mts` — Katalogimport, `npm run catalog:import` | ✅ **ausgeführt**, 636 Zeilen geschrieben |
-| Katalogdaten in Supabase: 6 Serien, 30 Kategorien, 600 Figuren | ✅ |
-| `data/catalog/products.json` — Import-Input, 600 Artikel | ✅ |
-| `public/images/skylanders/` — 475 WebP, 11 MB | ✅ |
-| Vitest als Unit-Test-Werkzeug (ADR-0013), `npm test` | ✅ 628 Tests |
-| `@supabase/ssr`, Browser-/Server-/Proxy-Clients | ✅ |
-| Auth-Routen: Registrierung, Login, Logout, Bestätigung, Passwort-Reset | ✅ |
-| Onboarding und Benutzernamenänderung (ADR-0016) | ✅ |
-| Geschützter Bereich `/dashboard`, `/settings` über `src/proxy.ts` | ✅ |
-| Sichere Redirect-Validierung gegen offene Weiterleitungen | ✅ |
-| Katalog als Startseite `/`, ohne Konto nutzbar (ADR-0025) | ✅ |
-| Suche und Serienfilter clientseitig (ADR-0026) | ✅ |
-| Besitzfilter `Alle · Besitz · Fehlen`, nur für angemeldete Sammler | ✅ |
-| Kaufaktion auf der Katalogkarte, nur für kaufbare Angebote | ✅ |
-| Owned-Toggle, Mutation als Endzustand (ADR-0027) | ✅ |
-| Detailseite `/skylanders/<slug>` | ✅ |
-| `/collection` mit Fortschritt und Sammlungswert | ✅ |
-| Entfernen im Katalog **und** auf `/collection`, mit Rückgängig (ADR-0031) | ✅ |
-| `characters` + `skylanders.character_id`, RLS und Grants (Migration 0002) | ✅ **ausgeführt**, 19 Charaktere, 90 verknüpfte SKY-IDs |
-| 19 kuratierte Pilotcharaktere, 104 verknüpfte SKY-IDs (ADR-0034) | ✅ Datei + Werkzeug |
-| `tools/import-characters.mts`, `npm run characters:import` | ✅ Dry-Run geprüft |
-| Charakterbereich und verwandte Figuren auf der Detailseite | ✅ |
-| Gemeinsame responsive Navigation, mobile-first | ✅ |
-| SkyIsles als sichtbarer Produktname (ADR-0028) | ✅ |
-| Supabase-Projekt in EU-Region, 5 Tabellen, RLS, 10 Policies, 5 Trigger, 3 Funktionen | ✅ |
-| `supabase/migrations/0006_public_shop_offers.sql` — `shop_offers()`, `non_collectible_categories()` | ✅ **ausgeführt und verifiziert** |
-| `supabase/migrations/0007_shop_pricing_and_images.sql` — Preise, Bilder, Storage-Policies | ⚠️ geschrieben, **nicht ausgeführt** |
-| Quick Stock `−  7  +` auf der Lagerkarte (ADR-0047) | ✅ Code, wartet auf `0007` |
-| Abgeleitete Shoppreise, `/admin` → Shop-Einstellungen (ADR-0045) | ✅ Code, wartet auf `0007` |
-| Bild-Upload im Admin, zentrale Bildauflösung (ADR-0046) | ✅ Code, wartet auf `0007` + Bucket |
-| Angebotszeile auf der Katalogkarte und Angebotsblock auf der Figurenseite (ADR-0043) | ✅ |
-| Warenkorb `/cart`, Header-Symbol mit Zähler, `localStorage` (ADR-0043) | ✅ |
-| `tools/verify-shop.mts` — schreibfreie Shop-Verifikation, `npm run verify:shop` | ✅ **15/15 bestanden** |
-| `tools/import-legacy-inventory.mts` + `tools/lib/xlsx.mts` + `src/lib/shop/legacy-plan.ts` (ADR-0044) | ✅ **ausgeführt: 218 Positionen, 762 Stück**; zweiter Lauf 0 Änderungen |
-| Legacy-Geschäftsbestand im Lager: 218 Positionen `loose`, `unit_cost` NULL, ungelistet | ✅ |
+| **Öffentlich** | `https://skyisles.app`, Production von `main` über Vercel. `noindex, nofollow` auf jeder Route — **der einzige verbliebene Go-Live-Punkt** (Checkliste in `docs/DEPLOYMENT.md`). |
+| **Katalog** | 570 Figuren, 6 Serien, 30 Kategorien, Suche, Serien- und Gruppenfilter, Verfügbarkeits- und Besitzfilter, Schnellansicht, Charakterdaten. |
+| **Sammlung** | Besitz, Menge, Fortschritt, Sammlungswert, Entfernen mit Rückgängig. |
+| **Shop** | `/shop` mit 216 verfügbaren Angeboten (Stand der Messung), Angebotszeilen im Katalog, Zustand und Versandhinweis an jedem Angebot (ADR-0110). |
+| **Kauf** | Warenkorb, Kasse **mit Gastkauf**, Reservierung (20 Minuten), Stripe im **Live-Modus** seit 2026-09-21, Webhook, Rechnungen, Transaktionsmails über Resend. |
+| **Nach dem Kauf** | Bestellübersicht für Konto und Gast, Versandstatus, Storno, Retoure, Erstattung mit Aufteilung, Widerruf, Bestellnachrichten zwischen Käufer und Betrieb (`0098`, ADR-0108). |
+| **Betrieb** | `/business`: Lager, Import, Angebote, Bestellungen, Orderbuch (Einkauf und externe Verkäufe), Widerrufe, Monatsberichte, Versandeinstellungen. Getrennt von `/admin` (ADR-0077). |
+| **Datenbank** | 98 Migrationen, Production und Staging auf demselben Stand (`0098`). RLS auf allen 60 Tabellen; von 63 exponierten Relationen sind fünf für `anon` lesbar, alle fünf Katalogdaten. |
+| **Zeitgeber** | `expire-stale-checkouts` per pg_cron auf Production, `*/5 * * * *`, aktiv, Läufe erfolgreich. |
+| **Tests** | Lint, Typecheck, Build grün; 191 Vitest-Dateien, 5 892 Unit-Tests. Dazu 14 `verify:*`-Werkzeuge als Laufzeitnachweise gegen echte Datenbanken. |
+| **Entscheidungen** | ADR-0001 bis ADR-0110 in `docs/DECISIONS.md`. |
 
-## Noch nicht implementiert
+**Production-Bestand (read-only gemessen am 2026-09-25):** 279 Lagerpositionen · 32 operative
+Bewegungen · 2 741 Legacy-Ereignisse · 300 Verkäufe mit 1 312 Positionen · 84 Einkäufe ·
+**0 Checkout-Bestellungen** — es hat dort noch kein echter Kunde gekauft.
 
-- `@supabase/ssr` und die Cookie-basierte Session-Anbindung in Next.js — **bewusst offen**,
-  kommt mit dem Auth-UI (V1.4); für den RLS-Test war sie nicht nötig
-- Supabase CLI (nicht initialisiert, kein Remote-Link — Migration lief über den SQL-Editor)
-- Mengen-/Duplikat-UI — `quantity` wird korrekt gerechnet, ist aber nicht bedienbar (V1.6).
-  Entfernen löscht deshalb immer die ganze Zeile, und ein „Rückgängig" setzt auf 1 zurück
-- LightCore-Normalisierung und weitere Datenqualitätsfälle (ADR-0030, „bewusst nicht behandelt")
-- Playwright-End-to-End-Tests (ADR-0013, sobald die Sammlungs-UX steht)
+**Noch offen**
 
----
+- `noindex` entfernen, Sitemap und `metadataBase` ergänzen — der Beta-Start.
+- Der erste echte Kauf als Beweis, dass die Stripe-Live-Kette trägt (Plan im Audit vom
+  2026-09-25).
+- Kein Alarm auf unverarbeitete `payment_events` oder fehlgeschlagene Cron-Läufe.
+- Keine Lieferzeitzusage (`sellers.dispatch_statement` ist bewusst leer).
+- Playwright-End-to-End-Tests (ADR-0013).
 
-## Technischer Zustand
-
-| Bereich | Zustand |
-|---|---|
-| Frontend | Katalog, Detailseiten, Auth-UI und Sammlung lauffähig; 15 Routen im Build |
-| Datenbank | Schema ausgeführt und strukturell verifiziert. Supabase-Projekt (EU-Region) vorhanden, 0 Datenzeilen. Repository-Datei und Datenbankstand sind identisch. |
-| Auth | Kein UI. Die Datenbankseite ist fertig und funktional verifiziert: Trigger, Policies und Rechte greifen nachweislich (`tools/verify-rls.mts`, 31/31). Konzept in `docs/AUTH.md` |
-| Deployment | nicht eingerichtet, ausdrücklich noch nicht vorgesehen |
-| Tests | Lint / Typecheck / Build, 628 Unit-Tests (`npm test`) und die funktionalen Prüfungen (`verify:rls`, `verify:editorial`, `verify:inventory`, `verify:shop`) |
-
-Konten vorhanden: GitHub, Supabase, Vercel. Das Supabase-Projekt ist angelegt (**EU-Region**,
-ADR-0015). Vercel ist eingerichtet, die kanonische Domain ist **`https://skyisles.app`**
-(noch `noindex` bis zum Beta-Gate).
-
----
 
 ## Zuletzt verifizierte Prüfungen
 
@@ -2892,8 +2844,8 @@ Drei Hinweise ohne Handlungsbedarf:
 | Excel und PostgreSQL könnten auseinanderlaufen | Zuständigkeit je Datenbereich, einbahniger Datenfluss (ADR-0003, ADR-0006) |
 | Fehlerhafte RLS-Policy legt Benutzerdaten offen | RLS auf jeder Tabelle, `WITH CHECK` überall, Test mit zweitem Konto vor dem Deploy (ADR-0013) |
 | Bildidentitäten beim Kopieren verlieren | content-adressierte Dateinamen unverändert übernehmen, Referenzen nach dem Import prüfen (ADR-0009) |
-| Rechtliche Anforderungen vor der öffentlichen Beta | Impressum und Datenschutzerklärung sind Teil von V1.7 |
-| E-Mail-Zustellung in der Beta | Supabase-Standardversand ist stark limitiert; produktiver Versand vor der Beta separat entscheiden (ADR-0018) |
+| Rechtliche Anforderungen | erledigt: Impressum, Datenschutz, AGB, Widerrufsbelehrung, Versand und Zahlung stehen als eigene Seiten, die Angaben kommen aus `sellers` (ADR-0086, `docs/LEGAL.md`) |
+| E-Mail-Zustellung | erledigt: Transaktionsmails laufen über Resend aus `send-order-mail`, nicht über den Supabase-Standardversand (ADR-0018) |
 | Legacy-Build könnte künftig nicht mehr laufen | Abhängigkeiten dokumentiert (Python 3, `cwebp`); Legacy bleibt unverändert erhalten |
 
 ---
@@ -2949,36 +2901,35 @@ Keine davon blockiert V1.2.
 |---|---|---|
 | 0022 | Welche Funktionen sind Premium, zu welchem Preis? Ist Menge/Duplikat Free oder Premium? | vor jeder Zahlungslogik, nicht vor V1.7 |
 | — | Self-Service-Kontolöschung und Datenexport (DSGVO) in V1 oder später? | vor der Beta |
-| 0032 | Wie wird `shop_admin` technisch getragen und vergeben? Fest steht nur, wo **nicht**: nicht an einer E-Mail, nicht auf `profiles` | vor jeder Shop-Schreiboperation |
+| ~~0032~~ | ~~Wie wird `shop_admin` technisch getragen?~~ **entschieden** — eigene Tabelle plus `is_shop_admin()`, seit ADR-0077 getrennt in Plattformadmin und Verkäuferbetrieb |
 | 0032 | Ist der Shop an dieselbe Wachstumsbedingung geknüpft wie der Marketplace (ADR-0021)? | vor jeder Umsetzungsplanung |
 | 0033 | Sind Coupons mit automatischen Lager-Rabatten kombinierbar, und was hat Vorrang? | vor jeder Rabattlogik |
 | 0033 | Endgültige Rabattschwellen und Prozentsätze (5/10/15 % sind Beispielwerte) | vor jeder Rabattlogik |
 | 0033 | Coupon-Details: Gültigkeitszeitraum, Mindestbestellwert, Nutzungslimit, Einmalcodes | vor jeder Coupon-Struktur |
-| — | Welcher Payment-Provider? | vor jedem Checkout |
+| ~~—~~ | ~~Welcher Payment-Provider?~~ **entschieden** — Stripe Checkout, live seit 2026-09-21 (ADR-0051, ADR-0100) |
 | — | Sind eBay-beigelegte Rabattcodes nach den dann geltenden eBay-Richtlinien zulässig? | vor jedem Werbemittel in eBay-Paketen |
 
 ---
 
 ## Nächster geplanter Schritt
 
-**Zuerst: `0007` anwenden** (siehe oben), dann `npm run verify:shop` und
-`npm run verify:inventory`, dann deployen.
+**Der Beta-Start.** Der Shop verkauft technisch, wird aber von keiner Suchmaschine gefunden.
+Der Schritt besteht aus drei Dingen, in dieser Reihenfolge:
 
-**Danach: der erste echte Shopartikel.** Der Legacy-Bestand liegt im Lager, ist aber bewusst
-ungelistet und ohne Preis. Der nächste Schritt ist eine bewusste Einzelentscheidung des
-Betreibers in `/admin/inventory`: Preis setzen, listen — und damit das erste öffentliche
-Angebot erzeugen. Keine Massenlistung, keine automatische Preisbildung (ADR-0037, ADR-0043).
+1. **Die Stripe-Live-Kette beweisen** — ein kleiner echter Kauf mit echter Karte, als Gast und
+   ausdrücklich **nicht** mit dem Tester-Konto (das zahlt bedingungslos in der Sandbox,
+   ADR-0100). Danach der reguläre Weg zurück: Position stornieren, Erstattung bestätigen.
+2. **Die Stripe- und Mail-Secrets auf Production bestätigen** — Live-Schlüssel, Live-Webhook,
+   Kontofreigabe, Auszahlungen. Aus dem Repository heraus nicht prüfbar; die genaue Klickfolge
+   steht im Audit vom 2026-09-25.
+3. **`noindex` entfernen** — `robots`-Block in `src/app/layout.tsx`, `robots.test.ts` löschen,
+   Sitemap und `metadataBase` ergänzen, diese Datei und `docs/DEPLOYMENT.md` nachziehen. Zuletzt,
+   weil Indexierung nicht zurücknehmbar ist.
 
-Danach offen und **nicht** gebaut: Bestellungen, Checkout, Zahlung, Versand, Reservierungen,
-Rabatte, Coupons.
+Danach, ohne Reihenfolge: ein Alarm auf unverarbeitete `payment_events` und fehlgeschlagene
+Cron-Läufe · eine Lieferzeitzusage, sobald eine gehalten werden kann · Playwright (ADR-0013).
 
-**V1.6 — Ausbau.** Weitere Sammlungsansichten (kompakt, Tabelle), Fortschritt je Serie,
-Mengen-/Duplikat-UI (**dabei die offene Grenze aus ADR-0031 mitlösen: ein „Rückgängig" setzt
-die Menge heute auf 1 zurück**), Kategorie-Zwischenüberschriften im Katalog, Filter und Sortierung
-innerhalb der Sammlung, Mobile-Feinschliff. Und Playwright, sobald die Sammlungs-UX steht
-(ADR-0013).
+**Nicht gebaut und nicht eingeplant:** Rabatte, Coupons, Gutscheine — und alles aus der
+Marketplace-Liste (ADR-0021).
 
-Danach **V1.7** — Beta-Reife: Impressum, Datenschutzerklärung, produktiver E-Mail-Versand
-(ADR-0018) und erst dann ein Deployment.
-
-**Wartet auf die ausdrückliche Freigabe des Nutzers.**
+**Jeder dieser Schritte wartet auf die ausdrückliche Freigabe des Nutzers.**

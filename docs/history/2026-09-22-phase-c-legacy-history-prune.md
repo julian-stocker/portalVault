@@ -1,3 +1,24 @@
+# Phase C — neun Zeilen aus der Legacy-Historie entfernt (2026-09-22)
+
+> **Historisches Protokoll — bereits ausgeführt — nicht erneut ausführen.**
+>
+> Dies ist **kein Runbook und keine Anleitung.** Der Vorgang ist abgeschlossen; die Datei steht
+> hier ausschließlich, damit nachlesbar bleibt, was genau passiert ist.
+>
+> | | |
+> |---|---|
+> | Ausgeführt auf Staging | 2026-09-22, unabhängig verifiziert |
+> | Ausgeführt auf Production | 2026-09-22, unabhängig verifiziert |
+> | Wiederholung | **ausgeschlossen** — einmalig je Umgebung. Das Skript verlangt `inventory_movements = 0` und einen von Hand eingesetzten Preview-Block; ohne ihn bricht es sofort ab. Die Legacy-Historie selbst bleibt unveraendert Bestandteil des Systems |
+> | Früherer Pfad | `tools/sql/phase-c-legacy-history-prune.sql` (bis 2026-09-25 ausführbar im Repository) |
+>
+> Verschoben am 2026-09-25 aus `tools/sql/` hierher: die Vorgänge sind verbraucht, und eine
+> Markdown-Datei lässt sich nicht versehentlich in den SQL-Editor ziehen und ausführen. **Der
+> SQL-Text darunter ist unverändert** — Zeichen für Zeichen der Stand, der gelaufen ist.
+
+## Der ausgeführte SQL-Text
+
+```sql
 -- ###########################################################################
 -- ##                                                                       ##
 -- ##   EINMALIG JE UMGEBUNG · ONE-TIME · EXECUTED · DO NOT RUN AGAIN       ##
@@ -213,3 +234,4 @@ begin
 end $$;
 
 commit;
+```
