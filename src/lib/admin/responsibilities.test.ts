@@ -407,7 +407,11 @@ describe("customer-facing copy names the right seller", () => {
       expect(source(file), file).not.toContain("yulez.collectibles");
     }
     expect(code("src/app/(public)/checkout/page.tsx")).toContain("fetchSellerPublic()");
-    expect(code("src/app/(public)/shop/page.tsx")).toContain("de.shop.page.intro(seller.displayName)");
+    /* Der Satz nennt seit 2026-09-25 zusätzlich die Versandfreigrenze, und
+       zwar aus `shipping_free_from()` statt als Zahl im Text — der
+       Verkäufername kommt weiterhin aus `seller_public()`. */
+    expect(code("src/app/(public)/shop/page.tsx"))
+      .toContain("de.shop.page.intro(seller.displayName, shippingFrom)");
   });
 
   it("falls back to a neutral sentence rather than a guessed name", () => {

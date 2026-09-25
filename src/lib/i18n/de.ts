@@ -8,6 +8,23 @@
  * Convention (ADR-0019): keys are English, values are German.
  * Rule: no user-facing strings inline in JSX — always go through this object.
  */
+/**
+ * „ab € 75,00 versandkostenfrei" — eine Formulierung, drei Fundstellen.
+ *
+ * Der Betrag kommt IMMER von `fetchFreeShippingFrom()` (also aus
+ * `shipping_free_from()`) und ist nirgends als Zahl geschrieben. Bis
+ * 2026-09-25 stand er als Literal im Shop-Intro; die Freigrenze ist eine
+ * Einstellung des Verkäufers, und eine Kopie davon im Text wird still falsch,
+ * sobald er sie ändert.
+ */
+const freeFrom = (amount: string) => `ab ${amount} versandkostenfrei`;
+
+/** Der Versandsatz des Shop-Intros. Ohne lesbare Grenze nur das Lieferland. */
+const shippingSentence = (amount: string | null) =>
+  amount === null
+    ? "Versand innerhalb Deutschlands."
+    : `Versand innerhalb Deutschlands, ${freeFrom(amount)}.`;
+
 export const de = {
   locale: "de-AT",
 
@@ -2772,6 +2789,20 @@ export const de = {
     addAnotherFor: (name: string, price: string) =>
       `${name} für ${price} noch einmal in den Warenkorb legen`,
     offerHeading: "Angebot",
+    /*
+     * DER VERSANDHINWEIS AM ANGEBOT — ein Satz, zwei Flächen.
+     *
+     * Er steht dort, wo der Preis steht: auf der Figurenseite und in der
+     * Schnellansicht, also überall, wo in den Warenkorb gelegt werden kann.
+     * Beide rendern dieselbe Komponente mit diesen Schlüsseln, damit die
+     * Aussage nicht auseinanderläuft.
+     *
+     * Ohne lesbare Freigrenze bleibt die Fassung ohne Zahl stehen. Lieber
+     * weniger sagen als einen Betrag erfinden.
+     */
+    shippingNote: (amount: string) => `Preis zzgl. Versand, ${freeFrom(amount)}.`,
+    shippingNoteBare: "Preis zzgl. Versand.",
+    shippingLink: "Versandkosten ›",
 
     /**
      * Die Shop-Oberfläche (UX-Beta, F8).
@@ -2789,12 +2820,18 @@ export const de = {
       /** Sagt, wer verkauft. Keine Lieferzeit — es ist keine entschieden. */
       /* Der Verkäufername kommt aus `seller_public()`; ohne ihn steht hier die
          neutrale Fassung, nie ein geratener Name (ADR-0075). */
-      intro: (name: string) =>
+      /*
+       * Der zweite Satz nennt die Freigrenze, sobald sie gelesen werden kann
+       * — und sonst nur das Lieferland. Der Betrag stand hier bis 2026-09-25
+       * als „75 €" im Text; er kommt jetzt aus derselben Quelle wie der
+       * Hinweis am Angebot und wie `/versand`.
+       */
+      intro: (name: string, amount: string | null) =>
         `Diese Figuren verkauft ${name} über SkyIsles — kein Marktplatz, ein Verkäufer. ` +
-        "Versand innerhalb Deutschlands, ab 75 € Warenwert versandkostenfrei.",
-      introFallback:
+        shippingSentence(amount),
+      introFallback: (amount: string | null) =>
         "Diese Figuren verkauft der Verkäufer dieses Shops über SkyIsles — kein Marktplatz, " +
-        "ein Verkäufer. Versand innerhalb Deutschlands, ab 75 € Warenwert versandkostenfrei.",
+        `ein Verkäufer. ${shippingSentence(amount)}`,
       count: (n: number) => (n === 1 ? "1 Figur im Angebot" : `${n} Figuren im Angebot`),
       searchLabel: "Im Angebot suchen",
       /** Kein Treffer, obwohl es Angebote gibt. */

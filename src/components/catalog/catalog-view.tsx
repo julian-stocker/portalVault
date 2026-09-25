@@ -64,6 +64,7 @@ export function CatalogView({
   seller = null,
   categories = [],
   marketBoostPercent = 0,
+  freeShippingFrom = null,
 }: {
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
@@ -97,6 +98,12 @@ export function CatalogView({
    * rather than inventing one.
    */
   seller?: PublicSeller | null;
+  /**
+   * Warenwert, ab dem der Versand entfällt — gereicht bis in die
+   * Schnellansicht, die denselben Hinweis zeigt wie die Figurenseite.
+   * `null` heißt „ohne Zahl sagen"; erfunden wird keine.
+   */
+  freeShippingFrom?: number | null;
   /**
    * The controlled category list the create dialog offers (V3.9).
    *
@@ -637,6 +644,7 @@ export function CatalogView({
             : null
         }
         seller={seller}
+        freeShippingFrom={freeShippingFrom}
         guest={!signedIn}
         marketBoostPercent={marketBoostPercent}
         onClose={() => setQuickViewSkyId(null)}

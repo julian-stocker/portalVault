@@ -4,16 +4,21 @@ import { ShopView } from "@/components/shop/shop-view";
 import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
+import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { fetchCatalog } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchOffers } from "@/lib/shop/queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { shopEntries } from "@/lib/shop/surface";
 import { de } from "@/lib/i18n/de";
+import { formatPrice } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: de.shop.page.title,
-  description: de.shop.page.introFallback,
+  /* Ohne Datenbankzugriff in den statischen Metadaten: die Beschreibung nennt
+     die Freigrenze deshalb nicht. Eine Zahl, die nur hier stünde, wäre wieder
+     eine Kopie. */
+  description: de.shop.page.introFallback(null),
 };
 
 /**
@@ -47,7 +52,7 @@ export default async function ShopPage({
   const params = await searchParams;
   const admin = await isAdmin();
 
-  const [user, catalog, offers, owned, seller, marketBoost] = await Promise.all([
+  const [user, catalog, offers, owned, seller, marketBoost, freeShippingFrom] = await Promise.all([
     currentUser(),
     // Hidden figures are filtered by `shopEntries()`, but asking for them here
     // would put them in the browser's payload on the way. The public slice is
@@ -61,14 +66,19 @@ export default async function ShopPage({
        It changes the `Marktwert` line on the cards; the OFFER prices beside
        it come from `shop_offers()` and are untouched. */
     fetchCatalogMarketBoost(),
+    /* Die Versandfreigrenze — dieselbe Quelle wie `/versand` und wie der
+       Hinweis am Angebot. Der Satz unten trug sie bis 2026-09-25 als
+       Literal im Text. */
+    fetchFreeShippingFrom(),
   ]);
 
   /* The seller names itself — this page never hard-codes who sells (ADR-0075).
      Without an active seller the neutral sentence stands; a guessed name
      would be worse than none. */
+  const shippingFrom = freeShippingFrom === null ? null : formatPrice(freeShippingFrom);
   const intro = seller
-    ? de.shop.page.intro(seller.displayName)
-    : de.shop.page.introFallback;
+    ? de.shop.page.intro(seller.displayName, shippingFrom)
+    : de.shop.page.introFallback(shippingFrom);
 
   const entries = shopEntries(catalog, offers);
 
@@ -104,6 +114,7 @@ export default async function ShopPage({
           seller={seller}
           highlightSkyId={highlight}
           marketBoostPercent={marketBoost}
+          freeShippingFrom={freeShippingFrom}
         />
       </div>
     </main>

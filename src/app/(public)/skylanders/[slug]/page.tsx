@@ -8,6 +8,7 @@ import { OfferPanel } from "@/components/shop/offer-panel";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
+import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { firstReleaseSeries } from "@/lib/catalog/character";
 import { isCollectible } from "@/lib/catalog/collectible";
@@ -64,13 +65,16 @@ export default async function FigurePage({ params }: Params) {
   if (!detail || !figure || !isCollectible(figure) || !figure.catalogVisible) notFound();
 
   const supabase = await createClient();
-  const [{ data: auth }, owned, offers, marketBoost] = await Promise.all([
+  const [{ data: auth }, owned, offers, marketBoost, freeShippingFrom] = await Promise.all([
     supabase.auth.getUser(),
     fetchOwnedSkyIds(),
     fetchOffers(),
     /* The temporary catalog market-value boost (0094). One call for the page:
        the market value below and the sibling cards say the same number. */
     fetchCatalogMarketBoost(),
+    /* Die Versandfreigrenze für den Hinweis am Angebot. Derselbe Aufruf, den
+       `/versand` macht, `cache()`-gebunden und in dieselbe Runde gehängt. */
+    fetchFreeShippingFrom(),
   ]);
 
   // Derived, not stored: the earliest series among this character's figures,
@@ -166,6 +170,7 @@ export default async function FigurePage({ params }: Params) {
                where the basket is kept; an account is not, because for them
                it is kept on the server and needs no explaining (ADR-0061). */
             guest={auth.user === null}
+            freeShippingFrom={freeShippingFrom}
           />
 
           <CollectButton

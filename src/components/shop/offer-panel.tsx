@@ -27,6 +27,7 @@ import { useAddToCart } from "@/components/cart/use-add-to-cart";
 import { useCart } from "@/components/cart/use-cart";
 import { CartCheckedGlyph, CartGlyph } from "@/components/shop/cart-glyph";
 import { conditionLabel } from "@/lib/shop/condition";
+import { ShippingNote } from "@/components/shop/shipping-note";
 import { ACTION_COMMERCE_COMPACT, ACTION_SHOP, COMMERCE_SURFACE } from "@/components/ui/action";
 import { keyOf, lineKey } from "@/lib/cart/cart";
 import { v1BuyableOffers, type Offer } from "@/lib/shop/offer";
@@ -141,6 +142,7 @@ export function OfferPanel({
   name,
   imageSrc,
   guest,
+  freeShippingFrom = null,
 }: {
   offers: readonly Offer[];
   /** The figure's display name, stored with the cart line as its label. */
@@ -154,6 +156,11 @@ export function OfferPanel({
    * again — a signed-in visitor would see the guest notice permanently.
    */
   guest: boolean;
+  /**
+   * Warenwert, ab dem der Versand entfällt — aus `fetchFreeShippingFrom()`.
+   * `null` heißt „sagt den Satz ohne Zahl"; hier wird nie eine erfunden.
+   */
+  freeShippingFrom?: number | null;
 }) {
   /* The V1 truth (V3.3): loose and in stock. A figure whose only listing is
      boxed shows no panel here either — the page must not offer what the
@@ -201,12 +208,26 @@ export function OfferPanel({
             className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2"
           >
             <div className="flex min-w-0 flex-col">
-              {/* Only worth naming when there is something to tell apart. */}
-              {buyable.length > 1 ? (
-                <span className="text-xs text-muted">{conditionLabel(offer.condition)}</span>
-              ) : null}
+              {/*
+               * DER ZUSTAND STEHT IMMER DA — und zwar in der Preiszeile.
+               *
+               * Bis 2026-09-25 erschien er nur, wenn es mehr als eine
+               * kaufbare Kondition gab. Da V1 ausschließlich `loose`
+               * verkauft, hieß das: nie. Die Begründung war, dass ein Wort,
+               * das nichts unterscheidet, nur Platz kostet — sie übersieht,
+               * wonach jemand bei einer gebrauchten Sammelfigur zuerst
+               * fragt. Schweigen heißt hier nicht „Standard", es heißt gar
+               * nichts.
+               *
+               * Inline statt in eigener Zeile: die Angabe kostet so keine
+               * Höhe, und `conditionLabel()` bleibt die einzige Übersetzung
+               * — dieselbe, die Warenkorb, Kasse und Bestellmail benutzen.
+               */}
               <span className="text-xl leading-tight font-semibold tabular-nums">
                 {formatPrice(offer.price)}
+                <span className="ml-1.5 text-xs font-normal text-muted">
+                  · {conditionLabel(offer.condition)}
+                </span>
               </span>
             </div>
 
@@ -215,16 +236,22 @@ export function OfferPanel({
         ))}
       </ul>
 
-      {/* GUESTS ONLY (ADR-0061). A signed-in basket lives in `cart_items`
-          and follows the account across devices, so the old unconditional
-          sentence told exactly the people who had solved this problem that
-          they still had it. Decided on the server, so the right answer is in
-          the first paint — a client-side read would flash the wrong one. */}
-      {guest ? (
-        <p className="text-[11px] leading-snug text-muted">
-          {de.cart.guestOnly} {de.cart.guestOnlyHint}
-        </p>
-      ) : null}
+      <div className="flex flex-col gap-1">
+        {/* Was zum Preis dazukommt, direkt unter ihm — nicht erst auf
+            `/versand`. Eine Zeile je Angebotsblock, nicht je Angebot. */}
+        <ShippingNote freeFrom={freeShippingFrom} />
+
+        {/* GUESTS ONLY (ADR-0061). A signed-in basket lives in `cart_items`
+            and follows the account across devices, so the old unconditional
+            sentence told exactly the people who had solved this problem that
+            they still had it. Decided on the server, so the right answer is in
+            the first paint — a client-side read would flash the wrong one. */}
+        {guest ? (
+          <p className="text-[11px] leading-snug text-muted">
+            {de.cart.guestOnly} {de.cart.guestOnlyHint}
+          </p>
+        ) : null}
+      </div>
     </section>
   );
 }

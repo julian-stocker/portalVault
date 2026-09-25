@@ -8,6 +8,7 @@ import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
+import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 import { isAdmin } from "@/lib/auth/admin";
@@ -41,7 +42,8 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned, offers, seller, formOptions, marketBoost] = await Promise.all([
+  const [user, figures, series, owned, offers, seller, formOptions, marketBoost,
+         freeShippingFrom] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
     fetchSeries(),
@@ -66,6 +68,11 @@ export default async function CatalogPage({
      * itself arrives unchanged in `figures` above and stays that way.
      */
     fetchCatalogMarketBoost(),
+    /* Die Versandfreigrenze für den Hinweis in der Schnellansicht — dieselbe
+       Quelle wie `/versand` und wie die Figurenseite, ein Aufruf für die
+       ganze Seite. Für den Betrieb uninteressant, aber billiger als eine
+       Verzweigung. */
+    fetchFreeShippingFrom(),
   ]);
 
   // Only used to outline a card after coming back from sign-in. It changes
@@ -95,6 +102,7 @@ export default async function CatalogPage({
         // boundary and would arrive empty.
         offers={offerRecord(offers)}
         seller={seller}
+        freeShippingFrom={freeShippingFrom}
         categories={formOptions?.categories ?? []}
         marketBoostPercent={marketBoost}
       />

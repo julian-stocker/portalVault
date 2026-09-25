@@ -47,6 +47,8 @@ import Link from "next/link";
 import { ElementChip } from "@/components/catalog/character-panel";
 import { Modal } from "@/components/ui/modal";
 import { OfferAddButton } from "@/components/shop/offer-panel";
+import { ShippingNote } from "@/components/shop/shipping-note";
+import { conditionLabel } from "@/lib/shop/condition";
 import { formatPrice } from "@/lib/format";
 import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import { de } from "@/lib/i18n/de";
@@ -84,9 +86,16 @@ export function QuickView({
   guest,
   onClose,
   marketBoostPercent = NO_MARKET_BOOST,
+  freeShippingFrom = null,
 }: {
   /** `null` closes the dialog — and is also what a figure with no offer gives. */
   model: QuickViewModel | null;
+  /**
+   * Warenwert, ab dem der Versand entfällt — aus `fetchFreeShippingFrom()`,
+   * von der Seite gereicht. Dieselbe Zahl, die die Figurenseite nennt.
+   * `null` heißt „ohne Zahl sagen".
+   */
+  freeShippingFrom?: number | null;
   /**
    * Who sells on SkyIsles, from the page payload (ADR-0064, migration 0027).
    *
@@ -346,16 +355,33 @@ export function QuickView({
                        * and a star here would be decoration pretending to be
                        * evidence.
                        */}
-                      {seller ? (
-                        <span className="min-w-0">
+                      <span className="min-w-0">
+                        {seller ? (
                           <span className="block truncate text-[13px] leading-tight text-on-deep">
                             {seller.displayName}
                           </span>
-                          <span className="block text-[11px] leading-tight text-on-deep-muted">
-                            {de.quickView.sellerKind}
-                          </span>
+                        ) : null}
+                        {/*
+                          DER ZUSTAND KOMMT ZURÜCK — auf derselben Zeile wie
+                          die Verkäuferart, nicht auf einer eigenen.
+
+                          Er stand hier bis V3.4 und wurde entfernt, weil
+                          „Lose" das Einzige benennt, was es gibt. Diese
+                          Begründung stimmt formal und beantwortet die falsche
+                          Frage: Wer eine gebrauchte Sammelfigur kauft, will
+                          zuerst wissen, was er bekommt, und Schweigen ist
+                          dafür keine Antwort. Von hier aus kann direkt in den
+                          Warenkorb gelegt werden, also muss es hier stehen —
+                          dieselbe Regel wie auf der Figurenseite.
+
+                          Kostet keine Höhe: die zweite Zeile gab es schon.
+                          `conditionLabel()` bleibt die einzige Übersetzung.
+                        */}
+                        <span className="block text-[11px] leading-tight text-on-deep-muted">
+                          {conditionLabel(offer.condition)}
+                          {seller ? ` · ${de.quickView.sellerKind}` : ""}
                         </span>
-                      ) : null}
+                      </span>
                     </div>
 
                     <OfferAddButton
@@ -368,6 +394,10 @@ export function QuickView({
                   </li>
                 ))}
               </ul>
+
+              {/* Derselbe Satz wie im Angebotsblock der Figurenseite, aus
+                  derselben Komponente — nur im dunklen Ton dieser Fläche. */}
+              <ShippingNote freeFrom={freeShippingFrom} tone="deep" />
             </section>
 
             {/*

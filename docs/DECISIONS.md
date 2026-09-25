@@ -9526,3 +9526,45 @@ Ausgang.
 Ein Test hält fest, dass es genau eine Konto-Aktion im Kopf gibt, dass sie auf `/account` führt,
 dass weder die alte Aktion noch ihr Glyph irgendwo überlebt haben, und dass `action="/auth/signout"`
 im gesamten `src/app`-Baum **genau einmal** vorkommt.
+
+## ADR-0110 — Wer kaufen kann, muss lesen können, was er kauft
+
+**Status:** ANGENOMMEN (2026-09-25) · reine Darstellung, keine Migration
+
+**Problem.** Auf `/skylanders/<slug>` und in der Schnellansicht des Katalogs steht ein Preis
+neben einem Kaufknopf. Beides sagte bis heute **nicht**, in welchem Zustand die Figur verkauft
+wird und dass Versandkosten hinzukommen. Der Zustand war an `buyable.length > 1` gebunden, und
+weil V1 ausschließlich `loose` verkauft (`0028`, `0029`), hieß das: nie. In der Schnellansicht
+war er in V3.4 ausdrücklich **entfernt** worden, mit der Begründung, „Lose" benenne das Einzige,
+was es gibt; ein zweiter Test verbot dort jede Erwähnung von Versand, weil dessen Betrag vom
+ganzen Warenkorb abhängt.
+
+**Beides war formal richtig und beantwortete die falsche Frage.** Wer eine gebrauchte
+Sammelfigur kauft, fragt zuerst „mit oder ohne Verpackung" — ein weggelassener Zustand liest
+sich nicht als „Standard", sondern als fehlende Angabe. Und ein Preis neben einem Kaufknopf, der
+nicht sagt, dass Versand dazukommt, ist eine unvollständige Aussage über den Gesamtbetrag; der
+Hinweis lag eine Seite weiter unter `/versand`.
+
+**Entscheidung.** Jede Fläche, von der aus in den Warenkorb gelegt werden kann, nennt den
+Zustand und trägt einen Versandhinweis. Das sind heute genau zwei: der Angebotsblock der
+Figurenseite und die Angebotszeile der Schnellansicht. Beide benutzen `conditionLabel()` — die
+Übersetzung, die Warenkorb, Kasse und Bestellmail schon benutzen — und **dieselbe** Komponente
+`ShippingNote`, damit die Aussage nicht auseinanderläuft.
+
+Der Versandhinweis nennt **keinen** Versandpreis: der hängt am Warenkorb, und diese Hälfte der
+alten Begründung gilt weiter. Er nennt die Freigrenze und verlinkt auf `/versand`.
+
+**Die Freigrenze ist kein Text, sondern eine Einstellung.** Sie kommt aus
+`shipping_free_from()` über `fetchFreeShippingFrom()` — derselben Funktion, aus der `/versand`
+liest. Ist sie nicht lesbar, steht der Satz ohne Zahl; erfunden wird keine. Bei der Gelegenheit
+sind die beiden Literale „ab 75 € Warenwert versandkostenfrei" aus dem Shop-Intro verschwunden:
+eine Kopie einer Einstellung wird still falsch, sobald der Verkäufer sie ändert.
+
+**Konsequenzen.** Der Zustand kostet keine zusätzliche Zeile — auf der Figurenseite steht er
+hinter dem Preis, in der Schnellansicht auf der Zeile, die die Verkäuferart ohnehin trug. Zwei
+Tests, die das Gegenteil festhielten (`quick-view-ux.test.ts`), sind mit dieser Begründung
+umgeschrieben; `offer-disclosure.test.ts` hält die neue Regel fest, einschließlich des Verbots,
+irgendwo auf diesem Weg wieder einen Geldbetrag in den Text zu schreiben.
+
+**Was ausdrücklich nicht entschieden wurde:** eine Lieferzeitzusage. Das Feld
+(`sellers.dispatch_statement`) existiert und bleibt leer, solange keine zugesagt werden kann.

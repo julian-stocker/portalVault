@@ -489,10 +489,31 @@ describe("the offers are a list, and it is honest about what it knows", () => {
     expect(code("src/lib/shop/seller.ts")).not.toContain("rating");
   });
 
-  it("shows no shipping cost, because it depends on the whole basket", () => {
-    for (const fake of ["Versand", "shipping", "Lieferzeit", "delivery"]) {
+  it("names no delivery time and no per-article shipping price", () => {
+    /*
+     * REVIDIERT AM 2026-09-25 — aber nur zur Hälfte.
+     *
+     * Die alte Fassung verbot das Wort „Versand" hier ganz, mit der
+     * Begründung, Versandkosten hingen am ganzen Warenkorb und ließen sich
+     * je Artikel nicht beziffern. Das stimmt für den BETRAG und gilt
+     * unverändert: es steht hier kein Versandpreis.
+     *
+     * Es stimmt nicht für die TATSACHE, dass Versand hinzukommt. Aus dieser
+     * Zeile kann direkt in den Warenkorb gelegt werden, und wer einen Preis
+     * neben einem Kaufknopf sieht, muss erfahren, dass er nicht der
+     * Endbetrag ist. Der Satz steht deshalb genau einmal unter der Liste,
+     * aus derselben Komponente wie auf der Figurenseite, und verlinkt auf
+     * `/versand` statt eine Zahl zu behaupten.
+     */
+    expect(quick).toContain("<ShippingNote");
+    expect(quick).toContain('tone="deep"');
+    // Weiterhin verboten: eine Lieferzusage und ein Versandbetrag je Artikel.
+    for (const fake of ["Lieferzeit", "delivery", "shippingAmount", "shipping_quote"]) {
       expect(quick, `${fake} cannot be stated per article`).not.toContain(fake);
     }
+    // Der Betrag, den der Hinweis nennt, ist die Freigrenze aus der
+    // Datenbank — keine Zahl in dieser Datei.
+    expect(quick).not.toMatch(/\d+[.,]\d{2}\s*€|€\s*\d/);
   });
 
   it("states no stock level — availability is a boolean already spent", () => {
@@ -518,23 +539,42 @@ describe("one offer is one compact line", () => {
     expect(row).toContain("flex items-center justify-between");
   });
 
-  it("names no condition, anywhere in the row", () => {
+  it("names the condition, once, out of the shared translation", () => {
     /*
-     * "Lose € 4,49" labelled the only thing there is. V1 sells loose figures
-     * and nothing else, so the word distinguished the offer from nothing.
+     * REVIDIERT AM 2026-09-25. Die frühere Fassung verlangte hier das
+     * Gegenteil: „'Lose € 4,49' labelled the only thing there is" — V1
+     * verkauft ausschließlich lose Figuren, also unterschied das Wort nichts.
      *
-     * If a second condition is ever sold, the label belongs back here —
-     * `OFFER_CONDITIONS` still has two entries, and `conditionLabel()` still
-     * translates both for the cart, the checkout and the order mail, where a
-     * historical boxed line still has to say what it was.
+     * Formal richtig, fachlich falsch. Bei einer gebrauchten Sammelfigur ist
+     * „mit oder ohne Verpackung" die erste Frage vor dem Kauf, und aus dieser
+     * Zeile kann direkt gekauft werden. Ein weggelassener Zustand liest sich
+     * nicht als „Standard", sondern als fehlende Angabe. Die Regel ist jetzt:
+     * jede Fläche, von der in den Warenkorb gelegt werden kann, nennt den
+     * Zustand — Figurenseite wie Schnellansicht.
+     *
+     * Was NICHT zurückkommt: eine zweite Übersetzung. Es bleibt
+     * `conditionLabel()`, dieselbe Funktion, die Warenkorb, Kasse und
+     * Bestellmail benutzen.
      */
-    expect(row).not.toContain("conditionLabel");
-    expect(quick).not.toContain("@/lib/shop/condition");
+    expect(quick).toContain('from "@/lib/shop/condition"');
+    expect(row).toContain("conditionLabel(offer.condition)");
+    // Genau einmal je Zeile, und nicht zusätzlich im Kaufknopf.
+    expect((row.match(/conditionLabel\(/g) ?? [])).toHaveLength(1);
+    // Kein deutsches Zustandswort als Literal — die Übersetzung hat einen Ort.
+    for (const literal of ['"Lose"', '"OVP"', "'Lose'", "'OVP'"]) {
+      expect(quick, literal).not.toContain(literal);
+    }
+  });
 
-    // `key={offer.condition}` is React bookkeeping and stays; what must not
-    // come back is the condition read as something to display.
-    const rendered = row.slice(row.indexOf("key={offer.condition}") + 21);
-    expect(rendered).not.toContain("offer.condition");
+  it("costs the row no extra line: the condition shares the seller line", () => {
+    /*
+     * Die linke Spalte hatte zwei Zeilen — Verkäufername und Verkäuferart.
+     * Der Zustand tritt neben die zweite, statt eine dritte zu eröffnen. Ohne
+     * veröffentlichten Verkäufer bleibt er allein stehen, dann ist es eine
+     * Zeile statt zwei.
+     */
+    expect(row).toContain("{conditionLabel(offer.condition)}");
+    expect(row).toContain("{seller ? ` · ${de.quickView.sellerKind}` : \"\"}");
   });
 
   it("prints the price once, on the button that charges it (V3.4)", () => {

@@ -37,6 +37,7 @@ export function ShopView({
   highlightSkyId = null,
   seller = null,
   marketBoostPercent = 0,
+  freeShippingFrom = null,
 }: {
   entries: readonly ShopEntry[];
   /** Which of the offered figures the visitor already owns. Empty signed out. */
@@ -54,6 +55,12 @@ export function ShopView({
    * surface gets that passes nothing.
    */
   marketBoostPercent?: number;
+  /**
+   * Warenwert, ab dem der Versand entfällt — gereicht bis in die
+   * Schnellansicht, die denselben Hinweis zeigt wie die Figurenseite.
+   * `null` heißt „ohne Zahl sagen"; erfunden wird keine.
+   */
+  freeShippingFrom?: number | null;
 }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -161,6 +168,7 @@ export function ShopView({
             : null
         }
         seller={seller}
+        freeShippingFrom={freeShippingFrom}
         guest={!signedIn}
         marketBoostPercent={marketBoostPercent}
         onClose={() => setQuickViewSkyId(null)}
