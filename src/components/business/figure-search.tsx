@@ -21,7 +21,7 @@
  */
 "use client";
 
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState, type RefObject } from "react";
 
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
@@ -40,6 +40,8 @@ export function FigureSearch({
   disabled = false,
   onCancel,
   limit = MAX_RESULTS,
+  showImage = false,
+  inputRef,
 }: {
   catalog: readonly FigureChoice[];
   /** Called with the chosen row. The box clears itself and stays focused. */
@@ -51,10 +53,30 @@ export function FigureSearch({
   /** Rendered as a quiet `Abbrechen` when the search is a mode, not a field. */
   onCancel?: () => void;
   limit?: number;
+  /*
+   * Das Bild vor dem Namen. AUS, wo dieser Kasten schon steht: Einkauf,
+   * Verkauf und Remap zeigen seit `0064` Serie, Name, SKY-ID und Preis, und
+   * eine Zeile, die über Nacht ein Bild bekommt, wäre eine Änderung an drei
+   * abgenommenen Bildschirmen. Der Kalkulator schaltet es ein, weil man ein
+   * Kleinanzeigen-Foto mit einem Bild vergleicht und nicht mit einem Namen.
+   */
+  showImage?: boolean;
+  /*
+   * Zugriff auf das Eingabefeld von außen.
+   *
+   * `autoFocus` allein genügt nicht, sobald dieser Kasten in einem `Modal`
+   * steht: React setzt den Autofokus beim Einhängen, und der Dialog holt
+   * sich den Fokus danach in seinem eigenen Effekt auf das Panel (bewusst —
+   * er soll keine Handlung unter die Leertaste legen). Wer das Feld
+   * trotzdem sofort bespielbar haben will, fokussiert es über diese Referenz
+   * in einem Effekt, der nach dem des Dialogs läuft.
+   */
+  inputRef?: RefObject<HTMLInputElement | null>;
 }) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
+  const own = useRef<HTMLInputElement>(null);
+  const input = inputRef ?? own;
   const listId = useId();
 
   const results = useMemo(() => searchFigures(catalog, query, limit), [catalog, query, limit]);
@@ -145,6 +167,18 @@ export function FigureSearch({
                 index === active ? "bg-surface ring-fg/40" : "ring-border/70 hover:ring-fg/30"
               }`}
             >
+              {showImage ? (
+                <span className="h-8 w-8 shrink-0 overflow-hidden rounded-sky-sm bg-deep/40 ring-1 ring-border/60">
+                  {choice.image ? (
+                    /* Wie `FigureImage`: die Dateien sind vorab auf 640 px
+                       optimiert und liegen statisch, `next/image` würde sie
+                       zur Laufzeit erneut rechnen (ADR-0026). */
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={choice.image} alt="" loading="lazy"
+                         className="h-full w-full object-contain" />
+                  ) : null}
+                </span>
+              ) : null}
               {/* Serie zuerst: sie unterscheidet zwei gleich benannte Figuren
                   schneller als der Name, den man gerade getippt hat. */}
               <span className="w-10 shrink-0 text-xs uppercase tabular-nums text-muted">

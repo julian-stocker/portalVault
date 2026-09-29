@@ -1187,6 +1187,30 @@ schreibt.
 
 ---
 
+### Geschäftszahlen sind keine Kundendaten — und keine öffentlichen (`0103`)
+
+Ein Kunde darf wissen, was eine Figur kostet. Er darf **nicht** wissen, zu welchem Anteil am
+Marktwert der Betrieb sie eingekauft hat. Diese Zahl — `orderbook_global_factor()`, Ausgaben ÷
+bekannter Marktwert über alle Einkäufe — stand seit `0059` versehentlich jedem angemeldeten
+Konto per RPC offen: der Rechteblock am Ende jener Migration vergab `grant execute … to
+authenticated` für neunzehn `seller_*`-Funktionen, und diese eine lief mit, obwohl sie als
+einzige keinen Rollenwächter im Rumpf trägt.
+
+`0103` entzieht das Recht und stellt `seller_buy_in_factor()` daneben — derselbe Wert hinter
+`can_operate_active_seller()`, `NULL` für alle anderen.
+
+**Die Regel dahinter, für jede künftige Funktion:** ein Sammel-`grant` über eine Liste von
+Funktionsnamen ist nur so sicher wie die schwächste darin. Wer eine Funktion in einen solchen
+Block aufnimmt, muss sie einzeln daraufhin ansehen, ob sie ihren Wächter selbst trägt. Trägt sie
+ihn nicht und kann sie ihn nicht tragen — weil sie aus einem Trigger oder einem Webhook ohne
+`auth.uid()` gerufen wird —, dann gehört sie nicht in den Block, sondern hinter eine eigene,
+bewachte Tür.
+
+**Und eine zweite:** eine Server Action, die vorher `canOperateSeller()` fragt, ist kein Ersatz
+für ein Recht in der Datenbank. Sie schützt ihren eigenen Weg; ein direkter RPC-Aufruf geht
+daran vorbei. Beides zusammen ist die Absicht — die Datenbank entscheidet, die Anwendung erspart
+die Runde.
+
 ## 7. Datenschutz (DSGVO)
 
 Sobald Benutzerkonten existieren, werden personenbezogene Daten verarbeitet:

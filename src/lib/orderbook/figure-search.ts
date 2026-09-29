@@ -34,6 +34,13 @@ export type FigureChoice = {
   series: string;
   /** `null` is "no price known" and is never treated as zero. */
   marketPrice: number | null;
+  /*
+   * Das aufgelöste Bild, oder `null`. OPTIONAL und bewusst nachgereicht:
+   * die drei Orderbuch-Bildschirme brauchen es nicht und zeigen es nicht,
+   * der Kalkulator (V1) zeigt es. Ein Feld, das `undefined` sein darf, hält
+   * bestehende Aufrufer unverändert gültig.
+   */
+  image?: string | null;
 };
 
 /** Below this, a query matches too much to be worth showing. */

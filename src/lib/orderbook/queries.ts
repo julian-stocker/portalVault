@@ -8,6 +8,8 @@ import { cache } from "react";
 
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
+import { imageSrc } from "@/lib/catalog/image";
+import type { FigureChoice } from "./figure-search";
 import {
   EMPTY_COUNTS, readCounts, type ClassificationCounts, type StatusScope,
 } from "./classification";
@@ -235,25 +237,44 @@ export const fetchPurchaseYears = cache(async (): Promise<number[]> => {
  * story and one definition of "the catalog", not two.
  */
 export const fetchOrderbookCatalog = cache(
-  async (): Promise<{ skyId: string; name: string; series: string; marketPrice: number | null }[]> => {
+  async (): Promise<FigureChoice[]> => {
     if (!(await canOperateSeller())) return [];
     const supabase = await createClient();
     const [catalog, prices] = await Promise.all([
       supabase.rpc("seller_import_catalog"),
-      supabase.from("skylanders").select("sky_id, market_price"),
+      /* Bild und Preis in einem Zug: `skylanders` ist weltlesbar, die Zeile
+         wird ohnehin geholt, und der Kalkulator braucht beides. Aufgelöst
+         wird über `imageSrc()` — dieselbe eine Stelle, die seit ADR-0046
+         entscheidet, welche der drei Quellen gilt. */
+      supabase.from("skylanders").select("sky_id, market_price, image_file, image_override_path"),
     ]);
     if (catalog.error || !Array.isArray(catalog.data)) return [];
-    const priceOf = new Map(
+    const facts = new Map(
       (Array.isArray(prices.data) ? prices.data : []).map((r) => {
-        const row = r as { sky_id: string; market_price: number | string | null };
-        return [row.sky_id, row.market_price === null ? null : Number(row.market_price)];
+        const row = r as {
+          sky_id: string;
+          market_price: number | string | null;
+          image_file: string | null;
+          image_override_path: string | null;
+        };
+        return [row.sky_id, {
+          marketPrice: row.market_price === null ? null : Number(row.market_price),
+          image: imageSrc({
+            imageFile: row.image_file,
+            imageOverridePath: row.image_override_path,
+          }),
+        }];
       }),
     );
-    return (catalog.data as Record<string, unknown>[]).map((r) => ({
-      skyId: String(r.sky_id),
-      name: String(r.name),
-      series: String(r.series_code),
-      marketPrice: priceOf.get(String(r.sky_id)) ?? null,
-    }));
+    return (catalog.data as Record<string, unknown>[]).map((r) => {
+      const fact = facts.get(String(r.sky_id));
+      return {
+        skyId: String(r.sky_id),
+        name: String(r.name),
+        series: String(r.series_code),
+        marketPrice: fact?.marketPrice ?? null,
+        image: fact?.image ?? null,
+      };
+    });
   },
 );

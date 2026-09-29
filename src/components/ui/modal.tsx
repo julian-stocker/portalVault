@@ -78,6 +78,13 @@ function useIsBrowser(): boolean {
 const WIDTH = {
   md: "max-w-md",
   lg: "max-w-[660px]",
+  /*
+   * Eine Arbeitsfläche, kein Hinweis. Der Figuren-Kalkulator zeigt Suche,
+   * Treffer, Positionsliste und Summe gleichzeitig; bei 660 px müsste man
+   * zwischen Tippen und Nachrechnen scrollen. Auf dem Telefon ändert das
+   * nichts — dort begrenzt ohnehin die Bildschirmbreite.
+   */
+  xl: "max-w-[980px]",
 } as const;
 
 export function Modal({

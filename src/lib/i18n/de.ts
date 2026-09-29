@@ -3028,6 +3028,70 @@ export const de = {
   },
 
   /**
+   * Der Figuren-Kalkulator (V1) — ein Werkzeug des Betriebs, kein Shop-Text.
+   *
+   * Er steht bewusst nicht unter `business.orderbook`: das Orderbuch
+   * verbucht, was tatsächlich gekauft wurde, dieser Rechner überschlägt, was
+   * ein Angebot wert wäre. Zwei Dinge, zwei Wortfelder.
+   */
+  calculator: {
+    open: "Kalkulator",
+    openLabel: "Figuren-Kalkulator öffnen",
+    title: "Figuren-Kalkulator",
+    /* Der Satz, der die Zahlen einordnet: Marktwert, nicht Shoppreis. */
+    hint: "Marktwert aus dem Katalog. Nur eine Überschlagsrechnung — es wird nichts gespeichert.",
+    close: "Schließen",
+
+    searchLabel: "Figur suchen",
+    searchPlaceholder: "Figur suchen und mit Enter hinzufügen …",
+    loading: "Katalog wird geladen …",
+    loadFailed: "Der Katalog konnte nicht geladen werden.",
+
+    empty: "Noch keine Figur in der Kalkulation.",
+    emptyHint: "Tippe einen Figurennamen und drücke Enter. Dieselbe Figur erneut erhöht die Menge.",
+
+    /* Positionen */
+    positionsLabel: "Positionen",
+    unitsLabel: "Stück",
+    totalLabel: "Gesamtwert",
+    unitValue: "Einzelwert",
+    lineValue: "Positionswert",
+    quantity: "Menge",
+    more: (name: string) => `Eine ${name} mehr`,
+    less: (name: string) => `Eine ${name} weniger`,
+    remove: (name: string) => `${name} entfernen`,
+    removeLabel: "Entfernen",
+    /* Sichtbar an einer Position, deren Wert der Händler selbst gesetzt hat. */
+    manual: "eigener Wert",
+    manualReset: "Katalogwert",
+    resetLabel: (name: string) => `${name} auf den Katalogwert zurücksetzen`,
+    noPrice: "Kein Marktwert bekannt",
+    withoutValue: (n: number) =>
+      n === 1 ? "1 Position ohne Wert" : `${n} Positionen ohne Wert`,
+
+    /* Die Entscheidungszahl */
+    factorLabel: "Kalkulationsfaktor",
+    factorHint: "Anteil des Marktwerts, den du höchstens zahlen willst.",
+    /*
+     * Der eigene Schnitt aus dem Orderbuch — Referenz, nicht Vorgabe. Er
+     * steht daneben, damit beim Verstellen sichtbar bleibt, wovon man
+     * gerade abweicht.
+     */
+    historicFactor: (percent: number) => `Historischer Ankaufsfaktor: ${percent} %`,
+    /* Ohne Datenlage wird der Rückfall NICHT als historischer Wert ausgegeben. */
+    historicFactorNone: "Kein historischer Ankaufsfaktor verfügbar",
+    maxPurchase: "Max. Einkaufspreis",
+    maxPurchaseHint: "Gesamtwert × Ankaufsfaktor. Rechnerischer Wert, kein Angebot.",
+
+    cancel: "Abbrechen",
+    clear: "Kalkulation leeren",
+    clearConfirm: (n: number) =>
+      n === 1
+        ? "Die eine Position wird entfernt. Fortfahren?"
+        : `Alle ${n} Positionen werden entfernt. Fortfahren?`,
+  },
+
+  /**
    * Was auf dem Bildschirm steht, während etwas dauert.
    *
    * Absichtlich wenige, allgemeine Sätze: die gemeinsame Pending-Komponente

@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-28 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-29 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -51,6 +51,80 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Der eigene Ankaufsfaktor ist kein öffentlicher Wert (2026-09-29, `0103`) — gebaut, nicht angewendet
+
+**Beim Bau des Kalkulators gefunden.** `orderbook_global_factor()` — Ausgaben ÷ bekannter
+Marktwert über alle Einkäufe — stand seit `0059` jedem angemeldeten Konto per RPC offen. Der
+Rechteblock am Ende jener Migration vergibt `grant execute … to authenticated` für neunzehn
+`seller_*`-Funktionen; diese eine lief mit, obwohl sie als einzige **keinen** Rollenwächter im
+Rumpf trägt. Zu welchem Anteil am Marktwert ein Betrieb einkauft, ist eine Geschäftszahl.
+
+`0103` ist eine reine **Rechteänderung**: Entzug für jede Clientrolle, daneben
+`seller_buy_in_factor()` mit `can_operate_active_seller()` davor und `NULL` für alle anderen.
+Formel, Rumpf und Signatur der alten Funktion bleiben unangetastet — bewusst **ohne**
+`create or replace`, weil ein Neuanlegen die ACL zurücksetzt (die Lehre aus `0100`).
+
+**Kein Wächter im Rumpf der alten Funktion**, und das ist der Kern: `orders_register_sale()`
+ruft sie beim Bezahlen aus dem Stripe-Webhook als Service Role ohne `auth.uid()` auf;
+`security definer` wechselt die Rolle, nicht die JWT-Ansprüche. Ein Wächter dort würde den
+Buy-in-Schnappschuss leeren, und `0078` hält fest, was ein Fehlgriff in diesem Pfad kostet. Alle
+drei inneren Aufrufer sind `security definer` und erreichen die Funktion weiterhin als ihr
+Eigentümer.
+
+**Stand:** Migration geschrieben und statisch geprüft, **auf keiner Umgebung angewendet**. Der
+Kalkulator liest den Faktor bereits über `seller_buy_in_factor()` — bis `0103` läuft, gibt es
+diese Funktion nicht, der Aufruf schlägt fehl und der Kalkulator zeigt den 50-%-Rückfall.
+Deshalb gehören Migration und Anwendungscode in **eine** Auslieferung, Datenbank zuerst.
+
+## Figuren-Kalkulator für den Betrieb (2026-09-29) — gebaut, nicht committet
+
+**Wofür.** Auf Kleinanzeigen steht ein Paket mit zwanzig bis vierzig Skylanders. Der Betrieb will
+in zwei Minuten wissen, was es ungefähr wert ist und was er dafür höchstens zahlen will. Bisher
+lief das über eine Tabelle neben dem Browser.
+
+**Was es ist.** Ein Taschenrechner-Symbol im Kopf, nur für Konten mit Betriebsrolle, und dahinter
+ein Dialog: Figur suchen, Enter, nächste Figur. Jede Position startet mit dem Marktwert aus dem
+Katalog, lässt sich in Menge und Einzelwert von Hand überschreiben, und unten stehen dauerhaft
+Positionen, Stückzahl, Gesamtwert und — hervorgehoben — der **maximale Einkaufspreis**
+(Gesamtwert × Ankaufsfaktor).
+
+**Der Ankaufsfaktor startet beim eigenen Schnitt.** `orderbook_global_factor()` — Ausgaben ÷
+bekannter Marktwert über alle Einkäufe, seit `0059` dieselbe Zahl, die `seller_create_sale()` als
+Buy-in-Schnappschuss einfriert — wird beim Öffnen **gelesen** und als Startwert des
+Kalkulationsfaktors gesetzt. Das Ziel des Betriebs ist, den eigenen Schnitt zu halten oder zu
+senken, also ist er der sinnvolle Ausgangspunkt. Danach ist das Feld frei; die Referenz bleibt
+dezent daneben stehen, damit sichtbar ist, wovon man gerade abweicht. Ohne belastbare Datenlage
+(`NULL` oder ≤ 0) stehen 50 % im Feld und daneben ausdrücklich „Kein historischer Ankaufsfaktor
+verfügbar" — der Rückfall wird nicht als Kennzahl ausgegeben. Die Formel bleibt in der Datenbank
+und wird nicht in TypeScript nachgebaut; der Aufruf ist read-only und prüft vorher
+`canOperateSeller()`.
+
+**Der Wert kommt aus `skylanders.market_price`.** Das ist im Projekt der kanonische Marktwert und
+genau der, gegen den das Orderbuch seit `0053`/`0059` seinen Einkaufsfaktor bildet
+(`purchase_market_value()` = `coalesce(market_price_snapshot, market_price)`,
+`orderbook_global_factor()` = Ausgaben ÷ bekannter Marktwert). **Nicht** der Shoppreis
+(`shop_price()` ist die Verkaufsseite und für ein Paket, das noch gar nicht im Lager liegt, meist
+undefiniert) und **nicht** der Katalog-Aufschlag aus `0094`, der ausdrücklich eine
+Anzeigeeinstellung ist und dessen eigene Migration den Buy-in-Faktor als unberührt nennt.
+
+**Wiederverwendet statt neu gebaut:** die Rollenprüfung (`business` im Kopf, `canOperateSeller()`
+auf dem Server), der `Modal`-Dialog samt Escape, Fokus und Portal, die Figurensuche aus `0064`
+mit ihrer Tastaturführung, `imageSrc()` für die Bilder, `formatPrice` für die Beträge. Neu sind
+eine `xl`-Breite am Dialog und ein optionales Bild in der Trefferzeile — beides additiv, die drei
+Orderbuch-Bildschirme sehen unverändert aus.
+
+**Geld ist ganzzahlig.** Jeder Betrag ist ein Cent-Integer; gerundet wird beim Eintritt und beim
+Prozentsatz, sonst nie. Die Rechnung steht als reine Funktion in `src/lib/calculator/calculation.ts`
+und hat 34 eigene Tests.
+
+**Grenzen von V1, bewusst:** keine Migration, keine Tabelle, keine Speicherung. Das Fenster
+bleibt nach dem ersten Öffnen eingehängt, also überlebt eine Kalkulation das Schließen —
+dreißig getippte Figuren dürfen nicht an einem versehentlichen Escape hängen. Ein Neuladen
+verwirft sie. Der Rechner schreibt nichts — kein Lager, keine Bewegung, keine
+Bestellung, kein Warenkorb, kein Katalogpreis; ein von Hand gesetzter Wert gilt für diese eine
+Sitzung. Ein Test hält das für alle vier Dateien fest. **Später separat denkbar:** Kalkulation
+speichern und benennen, Historie, Quelle/Verkäufer, Export, Übernahme in einen echten Einkauf.
 
 ## Benachrichtigung, Zahlungsart und Wartezeit (2026-09-25 bis 2026-09-28, `0099`–`0102`) — auf Staging abgeschlossen, Production ausstehend
 

@@ -157,3 +157,21 @@ export function AccountGlyph({ className = "h-5 w-5" }: { className?: string }) 
     </Glyph>
   );
 }
+
+/**
+ * Der Kalkulator: ein Taschenrechner — Gehäuse, Anzeige, vier Tasten.
+ *
+ * Bewusst kein Gleichheitszeichen und keine Rechenzeichen: bei 18 px wird
+ * jedes Symbol im Inneren zu Grieß. Die Silhouette trägt die Bedeutung,
+ * genau wie beim Warenkorb daneben.
+ */
+export function CalculatorGlyph({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <rect x="4.75" y="3.25" width="14.5" height="17.5" rx="2.25" />
+      <path d="M8 7.25h8" />
+      <path d="M9 12.25h.01M12 12.25h.01M15 12.25h.01" />
+      <path d="M9 16.25h.01M12 16.25h.01M15 16.25h.01" />
+    </Glyph>
+  );
+}

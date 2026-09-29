@@ -34,6 +34,7 @@ import {
   MessagesGlyph,
 } from "@/components/layout/nav-glyphs";
 import { AttentionBadge } from "@/components/ui/attention-badge";
+import { CalculatorLauncher } from "@/components/calculator/calculator-launcher";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
 import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
@@ -645,6 +646,16 @@ export function SiteNav({
        * [cart]`.
        */}
       <div className="ml-auto flex min-w-0 items-center gap-0.5 sm:gap-1">
+        {/*
+         * DER FIGUREN-KALKULATOR, NUR FÜR DEN BETRIEB.
+         *
+         * Vor dem Konto, weil er ein Werkzeug ist und kein Ort: die Reihe
+         * liest sich als [Werkzeug] [wer du bist] [was du kaufst]. Dieselbe
+         * Fähigkeit, die `/business` freischaltet — keine zweite Rollenlogik
+         * (ADR-0077). Für Kundschaft und für den Plattformadmin ohne
+         * Betriebsrolle steht hier nichts.
+         */}
+        {business ? <CalculatorLauncher /> : null}
         <ProfileAction
           signedIn={signedIn}
           username={username}

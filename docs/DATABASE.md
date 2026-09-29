@@ -3280,6 +3280,57 @@ Nummernfolge, Bezug auf Originalrechnung und auslösendes Ereignis, eigener Schn
 eine fachliche und steuerliche Entscheidung, die vor jeder Implementierung getrennt getroffen
 wird.
 
+#### Einkaufskennzahl, Snapshot und Kalkulator — drei Dinge, eine Quellzahl
+
+Weil die drei leicht verwechselt werden und einmal verwechselt wurden, hier ausdrücklich:
+
+| | was es ist | wer es benutzt |
+|---|---|---|
+| **`orderbook_global_factor()`** | die **historische Einkaufskennzahl**: Ausgaben ÷ bekannter Marktwert über **alle externen Einkäufe** (`purchases`). Ein Verhältnis, kein Betrag. Nicht gespeichert — bei jedem Lesen gerechnet. | der Snapshot beim Anlegen eines Verkaufs; der Kalkulator über `seller_buy_in_factor()` |
+| **Kalkulator** | nimmt den **aktuellen** Faktor als **editierbaren Startwert** für ein Angebot, das noch **nicht gekauft** ist. Rein im Browser; das Verstellen ist eine Zahl auf dem Schirm. | niemand — er schreibt nichts |
+| **`sales.buy_in_factor_snapshot`** | ein **analytischer Schnappschuss** desselben Verhältnisses zum Zeitpunkt, an dem **ein Verkauf** bestätigt wurde. Damit ein späterer Einkauf den Faktor verändern kann, ohne alte Verkäufe rückwirkend umzurechnen. | ausschließlich `sale_buy_in()` |
+
+**Der Snapshot beeinflusst keine operative Logik.** Nicht den Umsatz (`sale_expected_payout()`
+rechnet nur mit tatsächlich geflossenen Beträgen), nicht die Monatsberichte (`0045`: Anzahl,
+Wert, Ware, Versand, Rabatt — kein Faktor), nicht Lager, Zahlung, Rechnung, Steuer oder
+Checkout. Ein Wareneinsatz- oder Gewinnbegriff existiert im Projekt nicht.
+
+**Und er ist kein Wareneinsatz je Figur.** Der Einkauf allokiert seine Kosten bewusst **nicht**
+auf einzelne Stücke — ein Paket kostet 80 €, nicht 3,20 € je Figur. `sale_buy_in()` ist
+Marktwert × Verhältnis und trägt sein Warnschild im eigenen Kommentar: „analytical only … has
+never been the acquisition cost of any particular figure". Wer daraus je eine Ergebnisrechnung
+bauen will, braucht zuerst eine echte Allokation, nicht diesen Schätzer.
+
+**Stand heute ist `sale_buy_in()` unbenutzt:** die Zahl wird berechnet und in die
+`seller_sale()`-Antwort gelegt, aber von keiner Oberfläche gelesen; die zugehörigen Texte in
+`de.ts` (`buyIn`, `factor`, `buyInHint`) sind unbenutzt. Entweder fehlt die Ansicht noch, oder
+die Kennzahl ist verwaist — zu entscheiden, wenn jemand sie braucht.
+
+#### Der eigene Ankaufsfaktor ist kein öffentlicher Wert (`0103`)
+
+`orderbook_global_factor()` rechnet seit `0059` Ausgaben ÷ bekannter Marktwert über alle
+Einkäufe — die Kennzahl, zu welchem Anteil am Marktwert dieser Betrieb einkauft. In derselben
+Migration steht der richtige Entzug (`0059:512`) und achthundert Zeilen später, im Rechteblock
+für neunzehn `seller_*`-Funktionen, der Satz, der ihn aufhebt (`0059:1370-1371`). Diese eine
+Funktion lief mit — als einzige **ohne** Rollenwächter im Rumpf. Jedes angemeldete Konto konnte
+die Zahl also direkt per RPC abrufen.
+
+`0103` nimmt ihr das Recht und stellt `seller_buy_in_factor()` daneben: derselbe Wert, mit
+`can_operate_active_seller()` davor, `NULL` für alle anderen — „nicht deins" und „noch keine
+Einkäufe" sehen gleich aus, wie bei `seller_attention_total()` seit `0099`.
+
+**Kein Wächter im Rumpf der alten Funktion, und das ist der Kern der Entscheidung.**
+`orders_register_sale()` ruft sie beim Bezahlen einer Bestellung aus dem Stripe-Webhook als
+Service Role ohne `auth.uid()`; `security definer` wechselt die Rolle, nicht die JWT-Ansprüche.
+Ein Wächter dort würde den Buy-in-Schnappschuss stillschweigend leeren — und `0078` hält fest,
+was ein Fehlgriff in genau diesem Pfad kostet. Die drei inneren Aufrufer
+(`orders_register_sale()`, `seller_book_sale_item()` in beiden Fassungen) sind `security definer`
+und erreichen die Funktion als ihr Eigentümer; der Entzug trifft sie nicht.
+
+**Formel, Rumpf und Signatur bleiben unverändert** — `0103` ist eine reine Rechteänderung, ohne
+`create or replace` auf der alten Funktion, weil ein Neuanlegen die ACL zurücksetzen würde
+(die Lehre aus `0100`).
+
 #### Unveränderlichkeit und Anhängejournal
 
 `shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die
