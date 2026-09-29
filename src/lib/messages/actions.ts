@@ -22,6 +22,7 @@ import { revalidatePath } from "next/cache";
 
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/server";
+import { notify } from "@/lib/commerce/notify";
 import { messageIsSendable } from "./conversation";
 
 export type SendResult = { ok: true } | { ok: false; message: string };
@@ -55,13 +56,36 @@ export async function sendOrderMessage(input: {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.rpc("post_order_message", {
+  const { data, error } = await supabase.rpc("post_order_message", {
     p_order_number: input.orderNumber,
     p_body: body,
   });
   if (error) return { ok: false, message: message(error) };
 
   revalidateConversations();
+
+  /*
+   * DER HINWEIS AN DIE ANDERE SEITE (0100).
+   *
+   * Die Richtung ergibt sich aus `author_kind`, das die Datenbank selbst
+   * gesetzt hat — nicht aus etwas, das dieser Aufruf behauptet. `ref` ist die
+   * Nachricht, damit die zweite Nachricht nicht als Wiederholung der ersten
+   * gilt.
+   *
+   * OB überhaupt gesendet wird, entscheidet `send-order-mail`: ein lebhaftes
+   * Gespräch soll keine Maillawine sein, und die Regel dafür kennt nur die
+   * Datenbank (`message_notice_due`, 0100). Hier wird nichts gedrosselt und
+   * nichts geraten.
+   *
+   * Der Lesestand bleibt unberührt. Eine Mail sagt Bescheid, sie liest nicht.
+   */
+  const row = (data ?? {}) as { id?: number; author_kind?: string };
+  await notify({
+    orderNumber: input.orderNumber,
+    kind: row.author_kind === "seller" ? "message_to_customer" : "message_to_seller",
+    ref: row.id ?? null,
+  });
+
   return { ok: true };
 }
 

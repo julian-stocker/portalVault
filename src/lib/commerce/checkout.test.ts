@@ -183,7 +183,9 @@ describe("submitting", () => {
     expect(view).toContain("if (busy.current) return;");
     const guard = view.indexOf("if (busy.current) return;");
     expect(guard).toBeLessThan(view.indexOf("await placeOrder("));
-    expect(view).toContain("disabled={pending}");
+    // Der zweite Riegel neben `busy`: der Knopf selbst. Seit dem
+    // Loading-Feedback sperrt ihn `PendingButton` anhand von `pending`.
+    expect(view).toContain("pending={pending}");
   });
 
   it("releases the guard however the attempt ends", () => {

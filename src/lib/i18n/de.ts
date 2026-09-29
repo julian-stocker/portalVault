@@ -538,6 +538,9 @@ export const de = {
     title: "Shop",
     /** Klein und sekundär, wie das Admin-Pendant (ADR-0077). */
     modeBadge: "Business",
+    /** Der vorgelesene Satz zur Marke an „Bestellungen" (0099). */
+    newOrdersBadgeLabel: (n: number) =>
+      n === 1 ? "1 Bestellung mit Neuigkeiten" : `${n} Bestellungen mit Neuigkeiten`,
     /**
      * Die Bereiche des Shops (ADR-0080).
      *
@@ -581,6 +584,19 @@ export const de = {
       orderbook: {
         title: "Orderbuch",
         hint: "Einkäufe, Paketprüfung und Einbuchen in den Bestand.",
+      },
+      /* Der Posteingang des Betriebs — dieselbe Karte, die auch in der
+         Navigation steht, damit `/business` als Kontobereich vollständig
+         ist (0099). */
+      messages: {
+        title: "Nachrichten",
+        hint: "Rückfragen der Kundschaft zu einzelnen Bestellungen.",
+      },
+      /* Login-Daten liegen für alle Rollen an derselben Stelle. Von hier
+         verlinkt, damit sie aus der Betriebsperspektive erreichbar bleiben. */
+      security: {
+        title: "Konto & Sicherheit",
+        hint: "Passwort und Benutzername des Logins, für alle Bereiche.",
       },
       imports: {
         title: "Bestand abgleichen",
@@ -2944,6 +2960,9 @@ export const de = {
     guestOnlyHint: "Melde dich an, damit er auf deinen Geräten erhalten bleibt.",
     noCheckout: "Bestellen ist noch nicht möglich.",
     toCheckout: "Zur Kasse",
+    /* Nur sichtbar, wenn die Navigation wirklich wartet — die Kasse lädt
+       Angebote und Versandarten vom Server. */
+    toCheckoutPending: "Kasse wird geöffnet …",
   },
 
   /**
@@ -3008,7 +3027,39 @@ export const de = {
     },
   },
 
+  /**
+   * Was auf dem Bildschirm steht, während etwas dauert.
+   *
+   * Absichtlich wenige, allgemeine Sätze: die gemeinsame Pending-Komponente
+   * steht an sehr verschiedenen Stellen, und ein Formular, das seinen eigenen
+   * Vorgang benennen kann, gibt der Komponente den passenden Satz mit. Diese
+   * hier sind der Rückfall, wenn es keinen gibt.
+   */
+  pending: {
+    /** Eine Navigation, die tatsächlich wartet. */
+    loading: "Wird geladen …",
+    /** Eine Aktion, die gerade läuft, ohne eigenen Namen. */
+    working: "Wird ausgeführt …",
+    /** Ein Formular, das gerade abgeschickt wird. */
+    submitting: "Wird gesendet …",
+    /** Ein Speichervorgang. */
+    saving: "Wird gespeichert …",
+  },
+
+  /**
+   * Aufmerksamkeit an einer Bestellung (0099) — für beide Rollen dieselben
+   * Wörter, weil es dieselbe Sache ist.
+   */
+  attention: {
+    new: "Neu",
+    newLabel: (n: number) =>
+      n === 1 ? "1 neue Meldung zu dieser Bestellung" : `${n} neue Meldungen zu dieser Bestellung`,
+  },
+
   account: {
+    /** Der vorgelesene Satz zur Marke an „Meine Bestellungen" (0099). */
+    newOrdersBadgeLabel: (n: number) =>
+      n === 1 ? "1 Bestellung mit Neuigkeiten" : `${n} Bestellungen mit Neuigkeiten`,
     title: "Mein Konto",
     overviewHint: "Alles, was zu deinem Konto gehört.",
 
@@ -3033,6 +3084,18 @@ export const de = {
     },
     orders: {
       title: "Meine Bestellungen",
+      /* Was seither geschah — auf der Position und auf der Bestellung (0102).
+         Die ursprünglichen Angaben bleiben daneben stehen. */
+      lineCancelled: (n: number, of: number) => `${n} von ${of} storniert`,
+      lineReturned: (n: number) => (n === 1 ? "1 zurückgenommen" : `${n} zurückgenommen`),
+      lineRefunded: "Rückerstattet",
+      lineOutstanding: (n: number) => `Verbleibend: ${n}`,
+      originalTotal: "Ursprünglicher Gesamtbetrag",
+      refundedTotal: "Rückerstattungen",
+      remainingTotal: "Verbleibender Betrag",
+      paymentMethod: "Zahlung",
+      /* Karte ohne bekannte Marke. Nie geraten (0101). */
+      paymentCard: "Karte",
       hint: "Alle Bestellungen dieses Kontos.",
       empty: "Du hast noch nichts bestellt.",
       emptyHint: "Sobald du bestellst, findest du hier den Stand.",
@@ -3170,6 +3233,14 @@ export const de = {
     submit: "Zahlungspflichtig bestellen",
     submitting: "Bestellung wird angelegt …",
     redirecting: "Weiterleitung zur Zahlung …",
+    /*
+     * Der Satz über der ganzen Seite, während der Browser sie verlässt
+     * (UX-Loading). Er sagt, was passiert, und der Hinweis darunter, wohin —
+     * damit die fremd aussehende Stripe-Seite danach nicht überrascht.
+     */
+    redirectOverlay: "Checkout wird vorbereitet …",
+    redirectOverlayHint:
+      "Du wirst gleich zur gesicherten Zahlungsseite von Stripe weitergeleitet.",
     paymentFollows:
       "Im nächsten Schritt wirst du zur gesicherten Zahlungsseite von Stripe weitergeleitet. " +
       "Die Ware wird währenddessen für dich vorgemerkt.",

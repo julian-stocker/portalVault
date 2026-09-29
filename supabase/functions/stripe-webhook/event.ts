@@ -32,6 +32,15 @@ export const HANDLED_EVENTS = [
   "checkout.session.expired",
   "checkout.session.async_payment_succeeded",
   "checkout.session.async_payment_failed",
+  /*
+   * Seit 0101: WOMIT bezahlt wurde. Die Session sagt es nicht — Marke, last4
+   * und Wallet hängen am PaymentIntent, eine Ebene tiefer. Dieses Ereignis
+   * trägt sie im Payload, ohne dass diese Function einen Stripe-Schlüssel
+   * halten müsste. Genau das ist der Grund, es zu abonnieren statt
+   * nachzuladen: der eine Endpunkt, den das offene Internet erreicht, soll
+   * weiterhin nichts belasten und nichts erstatten können.
+   */
+  "charge.succeeded",
 ] as const;
 
 export type HandledEvent = (typeof HANDLED_EVENTS)[number];
@@ -44,6 +53,7 @@ export type CheckoutSession = {
   payment_status: string | null;
   amount_total: number | null;
   currency: string | null;
+  payment_intent: string | null;
 };
 
 export type StripeEventShape = {
@@ -101,6 +111,17 @@ export type Decision =
       /** An unmatched session here needs no retry — see `unknownIsFinal`. */
       unknownIsFinal: boolean;
     }
+  /*
+   * 0101: kein Geld, keine Bestellung — nur der Schnappschuss, womit bezahlt
+   * wurde. Eigene Handlung, weil sie weder einen Versuch schließt noch eine
+   * Zahlung bestätigt und deshalb an keinem der beiden Pfade hängen darf.
+   */
+  | {
+      action: "method";
+      eventId: string;
+      eventType: string;
+      charge: ChargeShape;
+    }
   | { action: "ignore"; reason: IgnoreReason };
 
 export type IgnoreReason =
@@ -124,6 +145,57 @@ function asSession(object: unknown): CheckoutSession | null {
     payment_status: typeof raw.payment_status === "string" ? raw.payment_status : null,
     amount_total: typeof raw.amount_total === "number" ? raw.amount_total : null,
     currency: typeof raw.currency === "string" ? raw.currency : null,
+    /* 0101: der PaymentIntent, gegen den die Ladung später zugeordnet wird.
+       Stripe schickt ihn als Zeichenkette oder, bei `expand`, als Objekt. */
+    payment_intent: typeof raw.payment_intent === "string"
+      ? raw.payment_intent
+      : typeof raw.payment_intent === "object" && raw.payment_intent !== null &&
+          typeof (raw.payment_intent as { id?: unknown }).id === "string"
+        ? (raw.payment_intent as { id: string }).id
+        : null,
+  };
+}
+
+/**
+ * Die Ladung, auf das Nötigste gelesen (0101).
+ *
+ * Nur fünf Felder, und keines davon ist Geld: der Betrag steht bereits
+ * verbindlich auf der Bestellung, und diese Funktion beantwortet ausschließlich
+ * „womit wurde bezahlt". Alles andere im Payload bleibt liegen — dieselbe
+ * Zurückhaltung, mit der `asSession()` sechs Felder behält.
+ */
+export type ChargeShape = {
+  paymentIntent: string | null;
+  methodType: string | null;
+  cardBrand: string | null;
+  cardLast4: string | null;
+  walletType: string | null;
+};
+
+export function asCharge(object: unknown): ChargeShape | null {
+  if (typeof object !== "object" || object === null) return null;
+  const raw = object as Record<string, unknown>;
+  if (raw.object !== "charge") return null;
+
+  const intent = typeof raw.payment_intent === "string" ? raw.payment_intent : null;
+  const details = (typeof raw.payment_method_details === "object" &&
+    raw.payment_method_details !== null)
+    ? raw.payment_method_details as Record<string, unknown>
+    : {};
+  const type = typeof details.type === "string" ? details.type : null;
+  const card = (typeof details.card === "object" && details.card !== null)
+    ? details.card as Record<string, unknown>
+    : {};
+  const wallet = (typeof card.wallet === "object" && card.wallet !== null)
+    ? card.wallet as Record<string, unknown>
+    : {};
+
+  return {
+    paymentIntent: intent,
+    methodType: type,
+    cardBrand: typeof card.brand === "string" ? card.brand : null,
+    cardLast4: typeof card.last4 === "string" ? card.last4 : null,
+    walletType: typeof wallet.type === "string" ? wallet.type : null,
   };
 }
 
@@ -157,6 +229,18 @@ export function decide(event: StripeEventShape, expectLivemode: boolean): Decisi
   }
   if (!(HANDLED_EVENTS as readonly string[]).includes(event.type)) {
     return { action: "ignore", reason: "not_a_handled_type" };
+  }
+
+  /*
+   * Die Ladung trägt keine Checkout-Session und darf deshalb nicht durch die
+   * Sessionprüfung darunter laufen (0101).
+   */
+  if (event.type === "charge.succeeded") {
+    const charge = asCharge(event.data?.object);
+    if (!charge || !charge.paymentIntent || !charge.methodType) {
+      return { action: "ignore", reason: "malformed" };
+    }
+    return { action: "method", eventId: event.id, eventType: event.type, charge };
   }
 
   const session = asSession(event.data?.object);

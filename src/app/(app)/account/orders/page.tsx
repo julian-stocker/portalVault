@@ -4,6 +4,9 @@ import { redirect } from "next/navigation";
 
 import { AccountHeader } from "@/components/account/account-header";
 import { fetchMyOrders } from "@/lib/account/orders";
+import { fetchMyOrderAttention } from "@/lib/attention/queries";
+import { unreadOrderNumbers } from "@/lib/attention/attention";
+import { NewChip } from "@/components/ui/new-chip";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { formatDate, formatPrice } from "@/lib/format";
@@ -28,7 +31,16 @@ export default async function MyOrdersPage() {
   if (!profile) redirect(SIGN_IN_PATH);
   if (!profile.username) redirect(ONBOARDING_PATH);
 
-  const orders = await fetchMyOrders();
+  const [orders, attention] = await Promise.all([fetchMyOrders(), fetchMyOrderAttention()]);
+  /*
+   * DIESE LISTE MARKIERT NICHTS ALS GELESEN (0099).
+   *
+   * Sie liest nur, welche Bestellungen etwas Neues haben. Gelesen wird beim
+   * Öffnen der einzelnen Bestellung — eine Liste überfliegt man, und sie als
+   * „alles gesehen" zu werten nähme genau die Marke weg, derentwegen man
+   * hinsieht.
+   */
+  const fresh = unreadOrderNumbers(attention);
   const copy = de.account.orders;
 
   return (
@@ -57,6 +69,7 @@ export default async function MyOrdersPage() {
                         {copy.testBadge}
                       </span>
                     ) : null}
+                    <NewChip count={fresh.has(order.orderNumber) ? 1 : 0} />
                   </span>
                   <span className="text-sm font-semibold tabular-nums">
                     {formatPrice(order.totalAmount)}

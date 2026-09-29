@@ -362,22 +362,47 @@ export function resolutionAlert(order: MailOrder): RenderedMail {
  */
 export type MailSite = { origin: string };
 
-/** The contracting party, in one line. Falls back only if the snapshot is bare. */
-function sellerLine(order: MailOrder): string {
-  const legal = order.seller?.legal_name?.trim();
+/**
+ * Der Name, unter dem der Shop im Fließtext auftritt.
+ *
+ * DER HANDELSNAME, NICHT DIE VOLLE RECHTLICHE IDENTITÄT. Bis hierher stand
+ * mitten im Satz die Konstruktion „<rechtlicher Name>, handelnd unter
+ * <Handelsname>" — juristisch einwandfrei, aber ein privater Name an einer
+ * Stelle, an der der Kunde den Shop erwartet, bei dem er bestellt hat.
+ *
+ * DIE RECHTLICHE IDENTITÄT GEHT DABEI NICHT VERLOREN, sie wandert nur dahin,
+ * wo sie hingehört: in den Fußblock jeder Mail (`sellerFooter`), vollständig
+ * und mit Anschrift. § 312f Abs. 2 BGB verlangt die Bestätigung auf einem
+ * dauerhaften Datenträger samt Identität des Unternehmers — er verlangt
+ * nicht, dass sie im Anschreiben steht. Rechnung und AGB bleiben unberührt;
+ * dort steht weiterhin der volle Name (ADR-0086, `docs/LEGAL.md`).
+ *
+ * Aus dem Snapshot der Bestellung, nie aus einer Konstante: eine spätere
+ * Namensänderung darf nicht umschreiben, bei wem jemand bestellt hat.
+ */
+function shopName(order: MailOrder): string {
   const trade = order.seller?.name?.trim();
-  if (legal && trade) return `${legal}, handelnd unter ${trade}`;
-  if (legal) return legal;
-  if (trade) return trade;
-  return "der Verkäufer dieses Shops";
+  const legal = order.seller?.legal_name?.trim();
+  return trade || legal || "diesem Shop";
 }
 
+/**
+ * Die vollständige Anschrift des Vertragspartners, für den Fußblock.
+ *
+ * Handelsname zuerst, darunter der rechtliche Name: so steht es auf einem
+ * Briefkopf, und so sucht ein Leser es. Die Reihenfolge war umgekehrt, was
+ * den privaten Namen zur Überschrift des Blocks machte.
+ *
+ * Das Land fehlt noch: es liegt als `seller_country_code` im
+ * Rechtssnapshot, wird vom Mail-Payload aber nicht mitgegeben. Das
+ * nachzureichen ist eine Migration, keine Textänderung.
+ */
 function sellerAddress(order: MailOrder): string[] {
   const s = order.seller;
   if (!s) return [];
   return [
-    s.legal_name ?? "",
     s.name ?? "",
+    s.legal_name ?? "",
     s.street ?? "",
     [s.postal_code, s.city].filter(Boolean).join(" "),
     s.email ? `E-Mail: ${s.email}` : "",
@@ -458,30 +483,61 @@ const withdrawalSummary = (site: MailSite): readonly string[] => [
  * the seller bound to an order they may not be able to fill.
  */
 export function orderReceived(order: MailOrder, site: MailSite): RenderedMail {
-  const subject = `Bestellung ${order.order_number} — bei uns eingegangen`;
+  /*
+   * DER BETREFF MUSS DEN UNTERSCHIED SCHON IM POSTEINGANG MACHEN.
+   *
+   * Er hiess „Bestellung … — bei uns eingegangen". Richtig, und im
+   * Posteingang neben der spaeteren „… — bestätigt" zwei Zeilen, die
+   * aussehen wie zweimal dasselbe. Beim ersten echten Kauf war genau das der
+   * Eindruck: zwei Bestaetigungen fuer eine Bestellung.
+   *
+   * Der Betreff nennt deshalb beides — den Eingang UND den offenen Punkt.
+   * Fachlich aendert sich nichts: dies ist weiterhin die Zugangsbestaetigung
+   * nach § 312i Abs. 1 Nr. 3 BGB und ausdruecklich keine Annahme, und der
+   * Vertragsschluss haengt unveraendert an der Zahlung (docs/LEGAL.md).
+   */
+  const subject = `Bestellung ${order.order_number} — eingegangen, Zahlung noch offen`;
   const footer = sellerFooter(order, site);
 
+  /*
+   * Vier Aussagen, in dieser Reihenfolge, und keine davon im Nebensatz:
+   * empfangen · Zahlung noch nicht bestaetigt · dies ist keine Annahme ·
+   * die Bestaetigung folgt nach der Zahlung.
+   */
+  const statusLines = [
+    "Deine Zahlung ist noch nicht bestätigt.",
+    "Diese E-Mail ist noch keine Bestellbestätigung und keine Annahme.",
+    "Sobald die Zahlung bestätigt ist, bekommst du die Bestellbestätigung mit Rechnung.",
+  ];
+
   const body =
-    H1("Deine Bestellung ist bei uns eingegangen.") +
+    H1("Bestellung eingegangen — Zahlung noch nicht bestätigt.") +
     P(
-      `Wir haben deine Bestellung ${order.order_number} erhalten. Sobald deine Zahlung ` +
-        "bestätigt ist, schicken wir dir die Bestellbestätigung — erst damit kommt der " +
-        "Kaufvertrag zustande.",
+      `Wir haben deine Bestellung ${order.order_number} erhalten. Danke dafür. ` +
+        "Sie ist damit bei uns, aber noch nicht abgeschlossen.",
     ) +
+    `<div style="margin:20px 0 0;padding:14px 16px;background:#f6f3ec;border-radius:8px">` +
+    `<strong style="font-size:14px">Was das heißt</strong>` +
+    statusLines.map((line) => P(line)).join("") +
+    `</div>` +
     P(
-      "Diese E-Mail bestätigt nur den Eingang deiner Bestellung. Sie ist noch keine Annahme " +
-        "und noch keine Rechnung.",
+      `Der Kaufvertrag mit ${shopName(order)} kommt erst mit dieser Bestellbestätigung ` +
+        "zustande. Kommt keine Zahlung zustande, entsteht kein Vertrag und es wird nichts " +
+        "berechnet.",
     ) +
     lineTable(order) +
     addressBlock(order).html;
 
   const text =
-    "Deine Bestellung ist bei uns eingegangen.\n\n" +
-    `Wir haben deine Bestellung ${order.order_number} erhalten. Sobald deine Zahlung ` +
-    "bestätigt ist, schicken wir dir die Bestellbestätigung - erst damit kommt der " +
-    "Kaufvertrag zustande.\n\n" +
-    "Diese E-Mail bestätigt nur den Eingang deiner Bestellung. Sie ist noch keine Annahme " +
-    "und noch keine Rechnung.\n\n" +
+    "Bestellung eingegangen - Zahlung noch nicht bestätigt.\n\n" +
+    `Wir haben deine Bestellung ${order.order_number} erhalten. Danke dafür. ` +
+    "Sie ist damit bei uns, aber noch nicht abgeschlossen.\n\n" +
+    "Was das heißt:\n" +
+    statusLines.map((line) => `- ${line}`).join("\n") +
+    "\n\n" +
+    `Der Kaufvertrag mit ${shopName(order)} kommt erst mit dieser Bestellbestätigung ` +
+    "zustande. Kommt keine Zahlung zustande, entsteht kein Vertrag und es wird nichts " +
+    "berechnet.\n\n" +
     lineText(order) +
     addressBlock(order).text +
     footer.text;
@@ -504,10 +560,12 @@ export function orderConfirmation(order: MailOrder, site: MailSite): RenderedMai
     H1("Deine Bestellung ist bestätigt.") +
     P(
       `Wir haben deine Zahlung erhalten und nehmen deine Bestellung ${order.order_number} ` +
-        `hiermit an. Damit ist der Kaufvertrag zwischen dir und ${sellerLine(order)} ` +
-        "zustande gekommen.",
+        "hiermit an.",
     ) +
-    P("Du hörst wieder von uns, sobald die Sendung unterwegs ist.") +
+    P(
+      `Vielen Dank für deine Bestellung bei ${shopName(order)}. Du hörst wieder von uns, ` +
+        "sobald deine Sendung unterwegs ist.",
+    ) +
     lineTable(order) +
     addressBlock(order).html +
     (invoice
@@ -521,9 +579,9 @@ export function orderConfirmation(order: MailOrder, site: MailSite): RenderedMai
   const text =
     "Deine Bestellung ist bestätigt.\n\n" +
     `Wir haben deine Zahlung erhalten und nehmen deine Bestellung ${order.order_number} ` +
-    `hiermit an. Damit ist der Kaufvertrag zwischen dir und ${sellerLine(order)} zustande ` +
-    "gekommen.\n\n" +
-    "Du hörst wieder von uns, sobald die Sendung unterwegs ist.\n\n" +
+    "hiermit an.\n\n" +
+    `Vielen Dank für deine Bestellung bei ${shopName(order)}. Du hörst wieder von uns, ` +
+    "sobald deine Sendung unterwegs ist.\n\n" +
     lineText(order) +
     addressBlock(order).text +
     (invoice ? `\n\nRechnung ${invoice}: ${site.origin}/rechnung/${order.order_number}` : "") +
@@ -642,6 +700,135 @@ export function berlinDateTime(value: string): string {
   }).format(date) + " Uhr";
 }
 
+
+/* ------------------------------------------- 6. die Hinweise (0100)
+ *
+ * WAS SIE SIND UND WAS SIE NICHT SIND. Diese vier Mails tragen keine
+ * rechtliche Erklärung und keinen Beleg — sie sagen, dass in SkyIsles etwas
+ * passiert ist, und wo es steht. Der Zustand selbst bleibt in der Anwendung;
+ * die Mail verschiebt keinen Lesestand und keine Marke (0098, 0099).
+ *
+ * Deshalb sind sie kurz, tragen einen Link und wiederholen weder Positionen
+ * noch Beträge, die anderswo verbindlich stehen.
+ */
+
+/** Eine Position wurde gestrichen. Die Erstattung folgt als eigene Mail. */
+export function cancellationNotice(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `Bestellung ${order.order_number} — Position storniert`;
+  const footer = sellerFooter(order, site);
+  const link = `${site.origin}/account/orders/${order.order_number}`;
+
+  const body =
+    H1("Eine Position deiner Bestellung wurde storniert.") +
+    P(
+      `An deiner Bestellung ${order.order_number} hat sich etwas geändert: eine Position ` +
+        "wurde ganz oder teilweise storniert. Was genau, steht auf der Bestellung selbst — " +
+        "die ursprünglichen Angaben bleiben dort sichtbar, daneben steht, was seither " +
+        "geschehen ist.",
+    ) +
+    P(`Deine Bestellung: ${link}`) +
+    P(
+      "Wurde für die stornierte Menge bereits gezahlt, erstatten wir sie. Darüber " +
+        "bekommst du eine eigene Nachricht.",
+    );
+
+  const text =
+    "Eine Position deiner Bestellung wurde storniert.\n\n" +
+    `An deiner Bestellung ${order.order_number} hat sich etwas geändert: eine Position ` +
+    "wurde ganz oder teilweise storniert. Was genau, steht auf der Bestellung selbst.\n\n" +
+    `Deine Bestellung: ${link}\n\n` +
+    "Wurde für die stornierte Menge bereits gezahlt, erstatten wir sie. Darüber bekommst " +
+    "du eine eigene Nachricht.\n\n" +
+    footer.text;
+
+  return { subject, html: WRAP(subject, body + footer.html), text };
+}
+
+/** Der Betrieb hat geschrieben. */
+export function messageToCustomer(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `Bestellung ${order.order_number} — neue Nachricht`;
+  const footer = sellerFooter(order, site);
+  const link = `${site.origin}/account/orders/${order.order_number}#nachrichten`;
+
+  /*
+   * KEIN NACHRICHTENTEXT IN DER MAIL. Eine Mail ist nicht widerrufbar und
+   * landet in fremden Postfächern; der Inhalt bleibt dort, wo beide Seiten
+   * ihn im Zusammenhang sehen. Die Mail sagt, dass es etwas zu lesen gibt.
+   */
+  const body =
+    H1("Du hast eine neue Nachricht zu deiner Bestellung.") +
+    P(`Zu deiner Bestellung ${order.order_number} liegt eine neue Nachricht für dich bereit.`) +
+    P(`Zum Gespräch: ${link}`);
+
+  const text =
+    "Du hast eine neue Nachricht zu deiner Bestellung.\n\n" +
+    `Zu deiner Bestellung ${order.order_number} liegt eine neue Nachricht für dich bereit.\n\n` +
+    `Zum Gespräch: ${link}\n\n` +
+    footer.text;
+
+  return { subject, html: WRAP(subject, body + footer.html), text };
+}
+
+/** Die Kundschaft hat geschrieben — an den Betrieb. */
+export function messageToSeller(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `${order.order_number}: neue Kundennachricht`;
+  const link = `${site.origin}/business/orders/${order.order_number}#nachrichten`;
+
+  const body =
+    H1("Neue Kundennachricht") +
+    P(`Zu Bestellung ${order.order_number} ist eine Nachricht der Kundschaft eingegangen.`) +
+    P(`Zum Gespräch: ${link}`);
+
+  const text =
+    "Neue Kundennachricht\n\n" +
+    `Zu Bestellung ${order.order_number} ist eine Nachricht der Kundschaft eingegangen.\n\n` +
+    `Zum Gespräch: ${link}\n`;
+
+  return { subject, html: WRAP(subject, body), text };
+}
+
+/** Eine bezahlte Bestellung ist da — an den Betrieb. */
+export function newOrderNotice(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `${order.order_number}: neue bezahlte Bestellung`;
+  const link = `${site.origin}/business/orders/${order.order_number}`;
+
+  const body =
+    H1("Neue bezahlte Bestellung") +
+    P(`${order.order_number} ist bezahlt und wartet auf Versand.`) +
+    lineTable(order) +
+    P(`Zur Bestellung: ${link}`);
+
+  const text =
+    "Neue bezahlte Bestellung\n\n" +
+    `${order.order_number} ist bezahlt und wartet auf Versand.\n\n` +
+    lineText(order) +
+    `Zur Bestellung: ${link}\n`;
+
+  return { subject, html: WRAP(subject, body), text };
+}
+
+/** Ein Widerruf ist erklärt worden — an den Betrieb. */
+export function withdrawalNotice(order: MailOrder, site: MailSite): RenderedMail {
+  const subject = `${order.order_number}: Widerruf erklärt`;
+  const link = `${site.origin}/business/orders/${order.order_number}`;
+
+  const body =
+    H1("Widerruf erklärt") +
+    P(
+      `Zu Bestellung ${order.order_number} ist ein Widerruf eingegangen. Der ` +
+        "Eingangszeitpunkt ist gesetzlich maßgeblich und steht auf der Bestellung.",
+    ) +
+    P(`Zur Bestellung: ${link}`);
+
+  const text =
+    "Widerruf erklärt\n\n" +
+    `Zu Bestellung ${order.order_number} ist ein Widerruf eingegangen. Der Eingangszeitpunkt ` +
+    "ist gesetzlich maßgeblich und steht auf der Bestellung.\n\n" +
+    `Zur Bestellung: ${link}\n`;
+
+  return { subject, html: WRAP(subject, body), text };
+}
+
 /* ------------------------------------------------------------------ dispatch */
 
 
@@ -651,6 +838,15 @@ export const MAIL_KINDS = [
   "shipping_confirmation",
   "refund_confirmation",
   "resolution_alert",
+  /*
+   * Seit 0100: die Arten, die MEHRFACH je Bestellung vorkommen können, und
+   * die zwei, die den Betrieb erreichen. Jede von ihnen trägt eine `ref`.
+   */
+  "cancellation_notice",
+  "message_to_customer",
+  "message_to_seller",
+  "new_order_notice",
+  "withdrawal_notice",
   /*
    * Historical. `order_confirmation` replaced it in 0047 when the contract
    * model was settled: the mail after payment is the seller's ACCEPTANCE, and
@@ -679,12 +875,32 @@ export function render(kind: MailKind, order: MailOrder, site: MailSite): Render
       return refundConfirmation(order, site);
     case "resolution_alert":
       return resolutionAlert(order);
+    case "cancellation_notice":
+      return cancellationNotice(order, site);
+    case "message_to_customer":
+      return messageToCustomer(order, site);
+    case "message_to_seller":
+      return messageToSeller(order, site);
+    case "new_order_notice":
+      return newOrderNotice(order, site);
+    case "withdrawal_notice":
+      return withdrawalNotice(order, site);
   }
 }
 
 /** Who a mail is for. Decides the recipient and whether a Reply-To is set. */
 export function goesToCustomer(kind: MailKind): boolean {
-  return kind !== "resolution_alert";
+  /*
+   * Die Richtung hängt an der ART, nicht an einem Feld. Deshalb heißen die
+   * beiden Nachrichtenhinweise `message_to_customer` und `message_to_seller`
+   * statt `message_notice` mit einem Empfänger daneben: eine Art, die beides
+   * sein kann, macht aus dieser Entscheidung eine Verzweigung mit zwei
+   * Wahrheiten.
+   */
+  return kind !== "resolution_alert" &&
+    kind !== "message_to_seller" &&
+    kind !== "new_order_notice" &&
+    kind !== "withdrawal_notice";
 }
 
 /**
@@ -697,6 +913,18 @@ export function goesToCustomer(kind: MailKind): boolean {
  *
  * Resend allows 256 characters; this is well under thirty.
  */
-export function idempotencyKey(kind: MailKind, orderNumber: string): string {
-  return `skyisles/${kind.replace(/_/g, "-")}/${orderNumber}`;
+export function idempotencyKey(
+  kind: MailKind,
+  orderNumber: string,
+  ref: string | null = null,
+): string {
+  /*
+   * Seit 0100 gehört die Ereignisreferenz in den Schlüssel. Ohne sie hielte
+   * Resend die zweite Erstattungsmail derselben Bestellung für eine
+   * Wiederholung der ersten und verwürfe sie — die Zustellsperre in der
+   * Datenbank hätte sie bereits durchgelassen, und niemand sähe, warum nichts
+   * ankommt. Ohne `ref` bleibt der Schlüssel Zeichen für Zeichen der alte.
+   */
+  const base = `skyisles/${kind.replace(/_/g, "-")}/${orderNumber}`;
+  return ref ? `${base}/${ref.replace(/[^A-Za-z0-9_-]/g, "")}` : base;
 }

@@ -7,6 +7,21 @@ import { fetchShopYearToDate } from "@/lib/admin/shop-kpi";
 import { formatNumber, formatPrice } from "@/lib/format";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
+import { AttentionBadge } from "@/components/ui/attention-badge";
+import { SignOutForm } from "@/components/account/sign-out-form";
+import { fetchSellerAttentionTotal } from "@/lib/attention/queries";
+import { fetchSellerUnread } from "@/lib/messages/queries";
+
+/** Welche Zahl an einer Karte steht — oder 0, wenn sie keinen Kanal hat. */
+function badgeFor(
+  channel: "orders" | "messages" | undefined,
+  attention: number,
+  unread: number,
+): number {
+  if (channel === "orders") return attention;
+  if (channel === "messages") return unread;
+  return 0;
+}
 
 export const metadata: Metadata = { title: de.business.title };
 
@@ -28,27 +43,50 @@ export const metadata: Metadata = { title: de.business.title };
  * for the product already: a dead link is worse than a missing one. The
  * section is recorded in ADR-0080 instead of drawn here.
  */
-const AREAS: readonly { href: string; copy: { title: string; hint: string } }[] = [
+const AREAS: readonly {
+  href: string;
+  copy: { title: string; hint: string };
+  /* Welcher Aufmerksamkeitskanal an dieser Karte hängt (0099). Ohne Angabe
+     trägt die Karte keine Marke — die meisten Bereiche sind Werkzeuge, keine
+     Posteingänge. */
+  channel?: "orders" | "messages";
+}[] = [
   { href: "/business/profile", copy: de.business.areas.profile },
   { href: "/business/offers", copy: de.business.areas.offers },
   { href: "/business/inventory", copy: de.business.areas.inventory },
-  { href: "/business/orders", copy: de.business.areas.orders },
+  { href: "/business/orders", copy: de.business.areas.orders, channel: "orders" },
+  { href: "/business/nachrichten", copy: de.business.areas.messages, channel: "messages" },
   { href: "/business/orderbuch", copy: de.business.areas.orderbook },
   { href: "/business/shipping", copy: de.business.areas.shipping },
   { href: "/business/legal", copy: de.business.areas.legal },
   { href: "/business/reports", copy: de.business.areas.reports },
   { href: "/business/widerrufe", copy: de.business.areas.withdrawals },
   { href: "/business/inventory/import", copy: de.business.areas.imports },
+  /*
+   * DIE GEMEINSAMEN KONTOEINSTELLUNGEN, AUCH VON HIER AUS (0099).
+   *
+   * Seit das Konto-Symbol für ein Betriebskonto hierher führt, ist dies sein
+   * Kontobereich — und Passwort und Benutzername liegen weiterhin unter
+   * `/account/security`, weil sie zum Login gehören und nicht zum Shop. Ohne
+   * diese Karte wären sie aus der Betriebsperspektive nicht mehr erreichbar.
+   */
+  { href: "/account/security", copy: de.business.areas.security },
 ];
 
 export default async function BusinessPage() {
   // Memoised per request — the layout above already counted these rows.
-  const [openOrders, seller, year] = await Promise.all([
+  const [openOrders, seller, year, attention, unread] = await Promise.all([
     fetchOpenOrderCounts(),
     fetchSellerPublic(),
     // One aggregate, in parallel with the rest. The shop's navigation never
     // waits on a year of orders because it never asks for them (ADR-0081).
     fetchShopYearToDate(),
+    /* Die zwei Zahlen dieser Rolle. `cache()`-gebunden, das Layout über
+       dieser Seite hat sie für dieselbe Anfrage bereits geholt — die Karten
+       und das Symbol am Kopf teilen sich einen Rundgang und können deshalb
+       gar nicht auseinanderlaufen. */
+    fetchSellerAttentionTotal(),
+    fetchSellerUnread(),
   ]);
   const orders = de.admin.orders;
   const flagged = openOrders.needsResolution > 0;
@@ -130,11 +168,36 @@ export default async function BusinessPage() {
             href={area.href}
             className="rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
           >
-            <span className="block font-medium">{area.copy.title}</span>
+            <span className="flex items-start justify-between gap-3">
+              <span className="block font-medium">{area.copy.title}</span>
+              {/* Die Marke der Karte ist die Zahl IHRES Kanals — nie eine
+                  Summe und nie ein Status. „Zu versenden" steht oben auf der
+                  Arbeitskarte und bleibt dort (ADR-0050). */}
+              {badgeFor(area.channel, attention, unread) > 0 ? (
+                <AttentionBadge
+                  count={badgeFor(area.channel, attention, unread)}
+                  label={
+                    area.channel === "messages"
+                      ? de.messages.unreadBadgeLabel(badgeFor(area.channel, attention, unread))
+                      : de.business.newOrdersBadgeLabel(badgeFor(area.channel, attention, unread))
+                  }
+                />
+              ) : null}
+            </span>
             <span className="mt-1 block text-sm text-muted">{area.copy.hint}</span>
           </Link>
         ))}
       </nav>
+
+      {/*
+       * DER AUSGANG, AUCH HIER (ADR-0111).
+       *
+       * Seit das Konto-Symbol ein Betriebskonto hierher führt, ist dies sein
+       * Kontobereich — und ein Kontobereich ohne Abmelden ist eine Sackgasse.
+       * Dieselbe Komponente wie auf `/account`: eine Umsetzung, ein Endpunkt,
+       * zwei Stellen, die sie zeigen.
+       */}
+      <SignOutForm />
     </main>
   );
 }

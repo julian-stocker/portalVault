@@ -238,7 +238,7 @@ describe("the provider is used as documented", () => {
   });
 
   it("passes the idempotency key in the options argument, as the SDK expects", () => {
-    expect(fn).toContain("idempotencyKey: idempotencyKey(kind, order.order_number)");
+    expect(fn).toContain("idempotencyKey: idempotencyKey(kind, order.order_number, ref)");
   });
 
   it("treats a 409 as ambiguous, never as a plain failure", () => {

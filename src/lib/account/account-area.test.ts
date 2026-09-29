@@ -63,7 +63,15 @@ describe("the account area is one place with four destinations", () => {
   it("und dieser Knopf führt auf die Übersicht, nicht auf eine Unterseite", () => {
     const nav = source("src/components/layout/site-nav.tsx");
     const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function NavItem("));
-    expect(profile).toContain('href={signedIn ? "/account" : "/login"}');
+    /*
+     * SEIT 0099 ENTSCHEIDET DIE AKTIVE ROLLE ÜBER DIE TÜR.
+     *
+     * Vorher führte dieses Symbol jeden nach `/account` — auch ein
+     * Betriebskonto, für das `/account` die Käuferperspektive ist („Meine
+     * Bestellungen") und das nach ADR-0078 gar nicht kaufen kann. Es bleibt
+     * bei EINER Tür je Person; welche es ist, hängt jetzt an der Rolle.
+     */
+    expect(profile).toContain('href={!signedIn ? "/login" : business ? "/business" : "/account"}');
     expect(profile).not.toContain('"/account/profile"');
   });
 
@@ -83,7 +91,12 @@ describe("the account area is one place with four destinations", () => {
      verschwunden. Sie sitzt jetzt am verbleibenden Knopf. */
   it("trägt die Nachrichtenmarke weiter", () => {
     const nav = source("src/components/layout/site-nav.tsx");
-    expect(nav).toContain("unread={unread.mine}");
+    /* Seit 0099 trägt das Symbol die SUMME der Kanäle der aktiven Rolle —
+       Nachrichten plus Bestellereignisse —, ausgerechnet statt nebeneinander
+       erhoben, damit Symbol und Karten nicht auseinanderlaufen können. */
+    expect(nav).toContain("unread={roleAttention(");
+    expect(nav).toContain("{ messages: unread.seller, orders: attention.seller }");
+    expect(nav).toContain("{ messages: unread.mine, orders: attention.mine }");
     const profile = nav.slice(nav.indexOf("function ProfileAction("), nav.indexOf("function NavItem("));
     expect(profile).toContain("<AttentionBadge count={unread}");
     expect(profile).toContain("de.messages.unreadBadgeLabel(unread)");
@@ -128,26 +141,41 @@ describe("the account area is one place with four destinations", () => {
    * Bildschirm.
    */
   it("Abmelden steht unten auf der Übersicht", () => {
-    expect(source("src/app/(app)/account/page.tsx")).toContain('action="/auth/signout"');
-    expect(source("src/app/(app)/account/page.tsx")).toContain("border-t border-border/70");
+    /* Seit ADR-0111 aus einer gemeinsamen Komponente: die Rolle bestimmt die
+       Tür ins Konto, und jede Tür braucht ihren Ausgang. */
+    expect(source("src/app/(app)/account/page.tsx")).toContain("<SignOutForm />");
+    expect(source("src/components/account/sign-out-form.tsx"))
+      .toContain("border-t border-border/70");
   });
 
-  it("und nirgendwo sonst", () => {
+  it("und nirgendwo sonst auf dem Weg dorthin", () => {
     for (const path of ["src/app/(app)/account/profile/page.tsx",
                         "src/app/(app)/account/security/page.tsx",
                         "src/components/layout/site-nav.tsx"]) {
       expect(source(path), path).not.toContain("/auth/signout");
+      expect(source(path), path).not.toContain("SignOutForm");
     }
   });
 
-  it("genau einmal", () => {
-    expect(source("src/app/(app)/account/page.tsx").match(/auth\/signout/g)).toHaveLength(1);
+  it("genau eine Umsetzung, an genau zwei Stellen gezeigt", () => {
+    /*
+     * Die Zahl, die zählt, ist nicht „wie oft steht ein Knopf auf dem
+     * Bildschirm", sondern „wie viele Abmeldungen gibt es". Eine: ein
+     * Formular, ein Endpunkt. Gezeigt wird sie in den beiden Kontobereichen
+     * — dem des Käufers und dem des Betriebs.
+     */
+    /* Das Attribut, nicht jede Erwähnung: der Kommentar darüber nennt den
+       Endpunkt beim Namen, und das soll er. */
+    expect(source("src/components/account/sign-out-form.tsx")
+      .match(/action="\/auth\/signout"/g)).toHaveLength(1);
+    const shown = ["src/app/(app)/account/page.tsx", "src/app/(business)/business/page.tsx"];
+    for (const path of shown) expect(source(path), path).toContain("<SignOutForm />");
   });
 
   it("ist ein POST, damit kein Vorauslader eine Sitzung beendet", () => {
-    const hub = source("src/app/(app)/account/page.tsx");
-    expect(hub).toContain('method="post"');
-    expect(hub).not.toContain('href="/auth/signout"');
+    const form = source("src/components/account/sign-out-form.tsx");
+    expect(form).toContain('method="post"');
+    expect(form).not.toContain('href="/auth/signout"');
   });
 
   it("every account type can reach it — USER, BUSINESS and ADMIN alike", () => {
@@ -181,7 +209,7 @@ describe("the account area is one place with four destinations", () => {
   it("and the hub still leads to Profil, so the button is one tap from it", () => {
     // Moving it must not make it harder to find than it was.
     const hub = source("src/app/(app)/account/page.tsx");
-    expect(hub).toContain('{ href: "/account/profile", copy: de.account.profile }');
+    expect(hub).toContain('{ href: "/account/profile", copy: de.account.profile');
   });
 
   it("security keeps the password and is where account changes will land", () => {
@@ -342,12 +370,19 @@ describe("Nachrichten auf der Kontoübersicht", () => {
   });
 
   it("zeigt die Marke nur, wenn etwas ungelesen ist", () => {
-    expect(page).toContain('{"unread" in section && unread > 0 ? (');
-    expect(page).toContain("<AttentionBadge count={unread}");
+    /* Seit 0099 hat jede Kachel ihren EIGENEN Kanal: „Nachrichten" die
+       ungelesenen Nachrichten, „Meine Bestellungen" die ungesehenen
+       Bestellereignisse. Eine Karte trägt nie die Summe — die steht am
+       Symbol darüber. */
+    expect(page).toContain("badgeFor(section, unread, attention) > 0 ? (");
+    expect(page).toContain("<AttentionBadge");
+    expect(page).toContain('if (section.channel === "messages") return unread;');
+    expect(page).toContain('if (section.channel === "orders") return attention;');
   });
 
   it("nennt der Vorlesehilfe, was die Zahl bedeutet", () => {
-    expect(page).toContain("label={de.messages.unreadBadgeLabel(unread)}");
+    expect(page).toContain("de.messages.unreadBadgeLabel(badgeFor(section, unread, attention))");
+    expect(page).toContain("de.account.newOrdersBadgeLabel(badgeFor(section, unread, attention))");
   });
 
   /*
@@ -356,7 +391,8 @@ describe("Nachrichten auf der Kontoübersicht", () => {
    * zweiter RPC, kein Polling, keine eigene Zählung.
    */
   it("holt die Zahl aus dem bestehenden Datenfluss", () => {
-    expect(page).toContain("const unread = await fetchMyUnread();");
+    expect(page).toContain("fetchMyUnread(),");
+    expect(page).toContain("fetchMyAttentionTotal(),");
     expect(readFileSync("src/lib/messages/queries.ts", "utf8"))
       .toContain("export const fetchMyUnread = cache(");
     for (const forbidden of ["setInterval", "setTimeout", 'rpc("', "useEffect"]) {
@@ -366,7 +402,12 @@ describe("Nachrichten auf der Kontoübersicht", () => {
 
   it("lässt den Kopf unverändert", () => {
     const nav = readFileSync("src/components/layout/site-nav.tsx", "utf8");
-    expect(nav).toContain("unread={unread.mine}");
+    /* Seit 0099 trägt das Symbol die SUMME der Kanäle der aktiven Rolle —
+       Nachrichten plus Bestellereignisse —, ausgerechnet statt nebeneinander
+       erhoben, damit Symbol und Karten nicht auseinanderlaufen können. */
+    expect(nav).toContain("unread={roleAttention(");
+    expect(nav).toContain("{ messages: unread.seller, orders: attention.seller }");
+    expect(nav).toContain("{ messages: unread.mine, orders: attention.mine }");
     expect(nav).toContain('href: "/business/nachrichten"');
   });
 

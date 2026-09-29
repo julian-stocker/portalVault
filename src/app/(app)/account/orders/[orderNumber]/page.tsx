@@ -4,11 +4,15 @@ import { notFound, redirect } from "next/navigation";
 
 import { AccountHeader } from "@/components/account/account-header";
 import { ConversationThread } from "@/components/messages/conversation-thread";
+import { MarkOrderSeen } from "@/components/orders/mark-order-seen";
+import { fetchMyOrderAttention } from "@/lib/attention/queries";
+import { unreadOrderNumbers } from "@/lib/attention/attention";
 import { TrackingLink } from "@/components/commerce/tracking-link";
 import { fetchMyOrder } from "@/lib/account/orders";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { formatDate, formatPrice } from "@/lib/format";
+import { paymentMethodLabel } from "@/lib/commerce/payment-method";
 import { de } from "@/lib/i18n/de";
 import { fetchConversation } from "@/lib/messages/queries";
 import { WITHDRAWAL_PATH } from "@/lib/legal/widerruf";
@@ -18,7 +22,21 @@ export const metadata: Metadata = { title: de.account.orders.title };
 type Detail = {
   order: Record<string, unknown>;
   address: Record<string, string | null> | null;
-  lines: { sky_id: string; condition: string; name: string; quantity: number; line_total: string | number }[];
+  lines: {
+    sky_id: string;
+    condition: string;
+    name: string;
+    quantity: number;
+    line_total: string | number;
+    /* Seit 0102 dieselben Mengen, die der Betrieb sieht — und die dieser
+       Position zugeordnete Erstattung. Ältere Antworten kennen sie nicht,
+       deshalb optional: eine Seite, die auf ein Feld wartet, ist schlechter
+       als eine, die ohne es auskommt. */
+    cancelled?: number;
+    returned?: number;
+    outstanding?: number;
+    refunded?: string | number;
+  }[];
 };
 
 /**
@@ -46,7 +64,19 @@ export default async function MyOrderPage({
   if (!document?.order) notFound();
 
   const order = document.order as Record<string, string | number | boolean | null>;
+  /*
+   * Was seither geschah, auf Bestellebene (0102). `refunded_total` fehlt in
+   * Antworten von vor dieser Migration — dann ist es 0 und die drei Zeilen
+   * erscheinen gar nicht erst.
+   */
+  const refunded = Number(order.refunded_total ?? 0);
+  const method = paymentMethodLabel(order.payment_method);
+
   const conversation = await fetchConversation(String(order.order_number));
+  /* Öffnen heißt gesehen (0099) — für die Bestellereignisse dieser einen
+     Bestellung, nicht für den Nachrichtenstrang: den markiert er selbst. */
+  const attention = await fetchMyOrderAttention();
+  const unseen = unreadOrderNumbers(attention).has(String(order.order_number));
   const copy = de.account.orders;
   const address = document.address;
 
@@ -101,8 +131,35 @@ export default async function MyOrderPage({
             </dd>
           </>
         ) : null}
-        <dt className="text-muted">{copy.total}</dt>
+        {/*
+          DIE DREI BETRÄGE STEHEN NEBENEINANDER, NICHT ÜBEREINANDER (0102).
+
+          Der ursprüngliche Gesamtbetrag bleibt, was vereinbart war — er steht
+          so auf der Rechnung und wird nicht umgeschrieben. Daneben, was
+          seither zurückging, und was davon übrig ist. Erstattungen erscheinen
+          nur, wenn es welche gab; eine Zeile „−0,00 €" wäre eine Behauptung
+          über einen Vorgang, den es nicht gab.
+        */}
+        <dt className="text-muted">{refunded > 0 ? copy.originalTotal : copy.total}</dt>
         <dd className="font-semibold tabular-nums">{formatPrice(Number(order.total_amount))}</dd>
+        {refunded > 0 ? (
+          <>
+            <dt className="text-muted">{copy.refundedTotal}</dt>
+            <dd className="font-semibold tabular-nums text-danger">
+              −{formatPrice(refunded)}
+            </dd>
+            <dt className="text-muted">{copy.remainingTotal}</dt>
+            <dd className="font-semibold tabular-nums">
+              {formatPrice(Number(order.remaining_total ?? Number(order.total_amount) - refunded))}
+            </dd>
+          </>
+        ) : null}
+        {method ? (
+          <>
+            <dt className="text-muted">{copy.paymentMethod}</dt>
+            <dd className="tabular-nums">{method}</dd>
+          </>
+        ) : null}
       </dl>
 
       <section className="flex flex-col gap-2">
@@ -115,11 +172,39 @@ export default async function MyOrderPage({
               key={`${line.sky_id}/${line.condition}`}
               className="flex items-baseline justify-between gap-4 rounded-sky-md bg-surface/80 px-4 py-3 text-sm ring-1 ring-border/70"
             >
-              <span>
-                {line.quantity} × {line.name}
-                <span className="ml-2 text-muted">
-                  {line.condition === "boxed" ? "OVP" : "Lose"}
+              <span className="flex min-w-0 flex-col gap-0.5">
+                <span>
+                  {line.quantity} × {line.name}
+                  <span className="ml-2 text-muted">
+                    {line.condition === "boxed" ? "OVP" : "Lose"}
+                  </span>
                 </span>
+                {/*
+                  WAS SEITHER GESCHAH — unter der Position, nicht statt ihr
+                  (0102). `quantity` und `line_total` bleiben, was bestellt
+                  wurde; eine Bestellhistorie, die ihre eigene Vergangenheit
+                  überschreibt, ist keine.
+                */}
+                {(line.cancelled ?? 0) > 0 ? (
+                  <span className="text-xs text-muted">
+                    {copy.lineCancelled(line.cancelled ?? 0, line.quantity)}
+                  </span>
+                ) : null}
+                {(line.returned ?? 0) > 0 ? (
+                  <span className="text-xs text-muted">
+                    {copy.lineReturned(line.returned ?? 0)}
+                  </span>
+                ) : null}
+                {Number(line.refunded ?? 0) > 0 ? (
+                  <span className="text-xs text-danger">
+                    {copy.lineRefunded} −{formatPrice(Number(line.refunded))}
+                  </span>
+                ) : null}
+                {(line.cancelled ?? 0) > 0 || (line.returned ?? 0) > 0 ? (
+                  <span className="text-xs text-muted">
+                    {copy.lineOutstanding(line.outstanding ?? line.quantity)}
+                  </span>
+                ) : null}
               </span>
               <span className="tabular-nums">{formatPrice(Number(line.line_total))}</span>
             </li>
@@ -201,6 +286,7 @@ export default async function MyOrderPage({
           <ConversationThread conversation={conversation} />
         </div>
       )}
+          <MarkOrderSeen orderNumber={String(order.order_number)} unseen={unseen} />
     </main>
   );
 }

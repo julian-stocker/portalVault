@@ -39,6 +39,7 @@ import { Wordmark } from "@/components/layout/wordmark";
 import { NO_OPEN_ORDERS, type OpenOrderCounts } from "@/lib/admin/orders";
 import { activeSection, type NavSection } from "@/lib/nav/sections";
 import { de } from "@/lib/i18n/de";
+import { roleAttention } from "@/lib/attention/attention";
 
 type Item = {
   href: string;
@@ -223,6 +224,16 @@ const DESTINATIONS: readonly {
 export type Unread = { mine: number; seller: number };
 export const NO_UNREAD: Unread = { mine: 0, seller: 0 };
 
+/**
+ * Was an Bestellungen ungesehen ist — je Rolle (0099).
+ *
+ * Dieselbe Form wie `Unread`, weil es dieselbe Sache in einem zweiten Kanal
+ * ist: ein Wasserstand je (Bestellung, Seite), eine Zahl je Seite. Beide
+ * zusammen ergeben die Zahl am Konto-Symbol.
+ */
+export type Attention = { mine: number; seller: number };
+export const NO_ATTENTION: Attention = { mine: 0, seller: 0 };
+
 function itemsFor(
   signedIn: boolean,
   admin: boolean,
@@ -316,13 +327,19 @@ function ProfileAction({
   username,
   active,
   unread,
+  business,
 }: {
   signedIn: boolean;
   /** `null` before onboarding, and for everybody who is not signed in. */
   username: string | null;
   active: boolean;
-  /** Ungelesene Nachrichten dieses Kontos. 0 für alle anderen. */
+  /**
+   * Die Summe der Kanäle der AKTIVEN ROLLE — Nachrichten plus Bestellungen.
+   * Nicht „meine Nachrichten"; siehe `accountHref` weiter unten.
+   */
   unread: number;
+  /** Ob dieses Konto den Betrieb führt. Entscheidet Tür und Zahl (0099). */
+  business: boolean;
 }) {
   const name = signedIn ? username : null;
   /*
@@ -337,7 +354,18 @@ function ProfileAction({
 
   return (
     <Link
-      href={signedIn ? "/account" : "/login"}
+      /*
+       * DIE AKTIVE ROLLE BESTIMMT DIE TÜR (0099).
+       *
+       * Bis hierher führte dieses Symbol für jeden nach `/account` und trug
+       * `unread.mine`. Für ein Betriebskonto war beides falsch: `/account`
+       * ist die Käuferperspektive („Meine Bestellungen"), und ein Betrieb
+       * kauft nicht bei sich selbst — ein Konto ist genau eines von user,
+       * business oder admin (ADR-0078), die Zahl war also strukturell 0.
+       * Die Aufmerksamkeit des Betriebs lag derweil an drei anderen Stellen,
+       * keine davon hier.
+       */
+      href={!signedIn ? "/login" : business ? "/business" : "/account"}
       aria-label={label}
       aria-current={active ? "page" : undefined}
       /*
@@ -438,6 +466,7 @@ export function SiteNav({
   business = false,
   openOrders = NO_OPEN_ORDERS,
   unread = NO_UNREAD,
+  attention = NO_ATTENTION,
   username = null,
 }: {
   signedIn: boolean;
@@ -445,6 +474,8 @@ export function SiteNav({
   admin?: boolean;
   /** May run the shop. Grants nothing on the catalog (ADR-0077). */
   business?: boolean;
+  /** Ungesehene Bestellereignisse je Rolle (0099). */
+  attention?: Attention;
   /**
    * The signed-in visitor's handle, from `profiles.username` (V3.4.2).
    *
@@ -618,7 +649,15 @@ export function SiteNav({
           signedIn={signedIn}
           username={username}
           active={accountActive}
-          unread={unread.mine}
+          business={business}
+          /* Die Summe der Kanäle der aktiven Rolle — ausgerechnet, nicht
+             nebeneinander erhoben: so können Symbol und Karten nicht
+             auseinanderlaufen. */
+          unread={roleAttention(
+            business
+              ? { messages: unread.seller, orders: attention.seller }
+              : { messages: unread.mine, orders: attention.mine },
+          )}
         />
         {/*
          * THE ONLY CART ENTRY POINT (V3.4, ADR-0043), at the outer edge.

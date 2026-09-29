@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import { markOrderShipped, unmarkOrderShipped } from "@/lib/admin/order-actions";
 import { de } from "@/lib/i18n/de";
 
@@ -101,20 +102,15 @@ export function ShipOrderForm({
        * status back is a correction and takes the neutral one. Neither is
        * styled as destructive, because neither is.
        */}
-      <button
+      <PendingButton
         type="button"
         onClick={() => void change()}
-        disabled={pending}
-        className={`${shipped ? ACTION_NEUTRAL : ACTION_PRIMARY} w-auto self-start disabled:opacity-60`}
+        pending={pending}
+        pendingLabel={shipped ? copy.unshipping : copy.shipping_}
+        className={`${shipped ? ACTION_NEUTRAL : ACTION_PRIMARY} w-auto gap-2 self-start disabled:opacity-60`}
       >
-        {pending
-          ? shipped
-            ? copy.unshipping
-            : copy.shipping_
-          : shipped
-            ? copy.unshipAction
-            : copy.shipAction}
-      </button>
+        {shipped ? copy.unshipAction : copy.shipAction}
+      </PendingButton>
     </div>
   );
 }

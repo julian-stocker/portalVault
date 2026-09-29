@@ -13,6 +13,7 @@ import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { SIGN_IN_PATH } from "@/lib/auth/redirect";
@@ -30,9 +31,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * antworten einem Unbeteiligten mit 0, ohne dass hier eine Rolle geprüft
    * werden müsste.
    */
+  /* Zwei Kanäle je Rolle (0099): Nachrichten und Bestellereignisse. Beide
+     `cache()`-gebunden, beide in derselben Anfrage — deshalb kann die Zahl am
+     Symbol nicht von den Zahlen an den Karten abweichen. */
   const unread = {
     mine: await fetchMyUnread(),
     seller: sellerOperator ? await fetchSellerUnread() : 0,
+  };
+  const attention = {
+    mine: await fetchMyAttentionTotal(),
+    seller: sellerOperator ? await fetchSellerAttentionTotal() : 0,
   };
 
 
@@ -50,6 +58,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         business={sellerOperator}
         openOrders={openOrders}
         unread={unread}
+        attention={attention}
         username={profile.username}
       />
       <div className="relative flex-1">

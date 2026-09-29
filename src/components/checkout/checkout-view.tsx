@@ -49,6 +49,7 @@ import { readOpenOrderState, type OpenOrderView } from "@/lib/commerce/open-orde
 import { resumeAction } from "@/lib/commerce/open-order";
 import { watchPageShow } from "@/lib/commerce/checkout-lifecycle";
 import { startPayment, type PaymentStartFailure } from "@/lib/commerce/start-payment";
+import { BusyOverlay, PendingButton } from "@/components/ui/pending";
 import { conditionLabel } from "@/lib/shop/condition";
 import {
   DEFAULT_SHIPPING_METHOD,
@@ -577,6 +578,28 @@ export function CheckoutView({
 
     return (
       <div className={`${PANEL} flex flex-col gap-4`}>
+        {/*
+         * DER EINZIGE MOMENT, FÜR DEN EIN KNOPF ZU KLEIN IST (UX-Loading).
+         *
+         * Zwischen dem Druck und `window.location.assign()` liegt ein
+         * Netzaufruf, der die Zahlung anlegt. In dieser Zeit sieht die Seite
+         * aus wie vorher, obwohl sie gleich verschwindet — und genau hier
+         * wurde bisher ein zweites Mal geklickt.
+         *
+         * Nur in diesem Panel, weil `redirecting` nur hier wahr sein kann:
+         * `toPayment` läuft erst, nachdem die Bestellung existiert und
+         * `placed` gesetzt ist. Für den Weg zur Kasse und für das Anlegen der
+         * Bestellung gibt es kein Overlay — dafür genügt der Knopf.
+         *
+         * Es verschwindet von selbst, wenn die Übergabe scheitert
+         * (`setRedirecting(false)`) und wenn der Browser die Seite aus dem
+         * bfcache zurückholt (`watchPageShow` weiter oben).
+         */}
+        <BusyOverlay
+          show={redirecting}
+          label={de.checkout.redirectOverlay}
+          hint={de.checkout.redirectOverlayHint}
+        />
         <h2 className="text-lg font-semibold">
           {de.checkout.payment.openOrder(placed.orderNumber)}
         </h2>
@@ -635,18 +658,15 @@ export function CheckoutView({
               second one (ADR-0061). A freshly placed order has made no
               attempt yet, which is exactly `start`. */}
           {cta === "none" ? null : (
-            <button
+            <PendingButton
               type="button"
               onClick={() => void retryPayment()}
-              disabled={redirecting}
-              className={`${ACTION_NEUTRAL} w-auto disabled:opacity-40`}
+              pending={redirecting}
+              pendingLabel={de.checkout.redirecting}
+              className={`${ACTION_NEUTRAL} w-auto gap-2 disabled:opacity-40`}
             >
-              {redirecting
-                ? de.checkout.redirecting
-                : cta === "retry"
-                  ? de.checkout.payment.retry
-                  : de.checkout.payment.start}
-            </button>
+              {cta === "retry" ? de.checkout.payment.retry : de.checkout.payment.start}
+            </PendingButton>
           )}
           <Link href="/" className="text-sm underline underline-offset-4">
             {de.checkout.result.toCatalog}
@@ -877,14 +897,15 @@ export function CheckoutView({
           * press. The label carries the rest — it reads `submitting` while
           * `pending`.
           */}
-        <button
+        <PendingButton
           type="submit"
-          disabled={pending}
-          className={`${ACTION_COMMERCE_BLOCK} disabled:opacity-70`}
+          pending={pending}
+          pendingLabel={de.checkout.submitting}
+          className={`${ACTION_COMMERCE_BLOCK} gap-2 disabled:opacity-70`}
           style={COMMERCE_SURFACE}
         >
-          {pending ? de.checkout.submitting : de.checkout.submit}
-        </button>
+          {de.checkout.submit}
+        </PendingButton>
       </div>
     </form>
   );

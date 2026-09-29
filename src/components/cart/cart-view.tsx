@@ -28,6 +28,7 @@ import { useCart } from "@/components/cart/use-cart";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { conditionLabel } from "@/lib/shop/condition";
 import { ACTION_COMMERCE_BLOCK, ACTION_NEUTRAL, COMMERCE_SURFACE } from "@/components/ui/action";
+import { PendingLink } from "@/components/ui/pending";
 import {
   cartTotal,
   keyOf,
@@ -252,9 +253,20 @@ export function CartView({
             somebody takes towards paying, which is the one thing the commerce
             role exists to mark (V3.2). Same geometry as before; only the
             metal changed. */}
-        <Link href="/checkout" className={ACTION_COMMERCE_BLOCK} style={COMMERCE_SURFACE}>
+        {/* Der Weg in die Kasse ist der einzige Schritt hier, der auf den
+            Server wartet: sie lädt Angebote, Versandarten und den offenen
+            Bestellzustand. Bis V4 stand in dieser Zeit gar nichts — jetzt
+            zeigt der Knopf ein Rad, aber nur, wenn tatsächlich gewartet wird
+            (`useLinkStatus`). Ist die Route vorgeladen, bleibt alles wie es
+            war. */}
+        <PendingLink
+          href="/checkout"
+          className={ACTION_COMMERCE_BLOCK}
+          style={COMMERCE_SURFACE}
+          pendingLabel={de.cart.toCheckoutPending}
+        >
           {de.cart.toCheckout}
-        </Link>
+        </PendingLink>
 
         {/*
          * § 312j Abs. 1 BGB: at the LATEST at the start of the ordering

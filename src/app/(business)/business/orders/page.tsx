@@ -21,6 +21,9 @@ import { OrderTabs } from "@/components/admin/order-tabs";
 import { attentionOf, type AdminOrderRow } from "@/lib/admin/orders";
 import { berlinToday, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
+import { NewChip } from "@/components/ui/new-chip";
+import { fetchSellerOrderAttention } from "@/lib/attention/queries";
+import { unreadOrderNumbers } from "@/lib/attention/attention";
 
 export const metadata: Metadata = { title: de.admin.orders.title };
 export const dynamic = "force-dynamic";
@@ -254,17 +257,32 @@ async function OpenOnlyView() {
   );
 }
 
-function OrderList({ orders }: { orders: readonly AdminOrderRow[] }) {
+/**
+ * Eine Liste von Bestellungen — und an jeder, die etwas Neues hat, ein „Neu".
+ *
+ * Holt den Lesestand selbst, statt ihn durch zwei Ansichten zu reichen:
+ * `fetchSellerOrderAttention()` ist `cache()`-gebunden, also kostet auch die
+ * dritte Liste auf derselben Seite keinen zweiten Rundgang.
+ *
+ * SIE MARKIERT NICHTS ALS GELESEN. Das passiert beim Öffnen der einzelnen
+ * Bestellung (0099).
+ */
+async function OrderList({ orders }: { orders: readonly AdminOrderRow[] }) {
+  const fresh = unreadOrderNumbers(await fetchSellerOrderAttention());
   return (
     <ul className="mt-4 flex flex-col gap-2">
       {orders.map((order) => (
-        <OrderRow key={order.order_number} order={order} />
+        <OrderRow
+          key={order.order_number}
+          order={order}
+          fresh={fresh.has(order.order_number)}
+        />
       ))}
     </ul>
   );
 }
 
-function OrderRow({ order }: { order: AdminOrderRow }) {
+function OrderRow({ order, fresh }: { order: AdminOrderRow; fresh: boolean }) {
   const attention = attentionOf(order.attention);
   const copy = de.admin.orders;
 
@@ -297,6 +315,7 @@ function OrderRow({ order }: { order: AdminOrderRow }) {
                 {de.admin.commerce.sandboxBadge}
               </span>
             ) : null}
+            <NewChip count={fresh ? 1 : 0} />
           </span>
           <span className="text-sm font-semibold tabular-nums">
             {formatPrice(Number(order.total_amount))}

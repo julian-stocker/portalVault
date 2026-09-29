@@ -115,7 +115,12 @@ describe("die Navigation zeichnet die Zahl aus dem, was sie bekommt", () => {
   });
 
   it("und den eigenen Stand für das Kontosymbol", () => {
-    expect(nav).toContain("unread={unread.mine}");
+    /* Seit 0099 trägt das Symbol die SUMME der Kanäle der aktiven Rolle —
+       Nachrichten plus Bestellereignisse —, ausgerechnet statt nebeneinander
+       erhoben, damit Symbol und Karten nicht auseinanderlaufen können. */
+    expect(nav).toContain("unread={roleAttention(");
+    expect(nav).toContain("{ messages: unread.seller, orders: attention.seller }");
+    expect(nav).toContain("{ messages: unread.mine, orders: attention.mine }");
   });
 
   it("fällt ohne Angabe auf zwei Nullen zurück, statt zu raten", () => {

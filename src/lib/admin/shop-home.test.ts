@@ -39,7 +39,15 @@ describe("the account is an account, not a settings screen", () => {
   });
 
   it("still leads to the hub, by its own accessible name", () => {
-    expect(nav).toContain('href={signedIn ? "/account" : "/login"}');
+    /*
+     * SEIT 0099 ENTSCHEIDET DIE AKTIVE ROLLE ÜBER DIE TÜR.
+     *
+     * Vorher führte dieses Symbol jeden nach `/account` — auch ein
+     * Betriebskonto, für das `/account` die Käuferperspektive ist („Meine
+     * Bestellungen") und das nach ADR-0078 gar nicht kaufen kann. Es bleibt
+     * bei EINER Tür je Person; welche es ist, hängt jetzt an der Rolle.
+     */
+    expect(nav).toContain('href={!signedIn ? "/login" : business ? "/business" : "/account"}');
     expect(nav).toContain("de.nav.profile");
     expect(copy).toContain('account: "Mein Konto"');
   });
@@ -53,25 +61,52 @@ describe("the account is an account, not a settings screen", () => {
     expect(copy).toContain('title: "Mein Konto"');
   });
 
-  it("keeps logout exactly once, and on the hub rather than in a tile", () => {
-    const renders = (readdirSync("src/app", { recursive: true }) as string[])
+  it("keeps exactly one logout implementation, shown in each account area", () => {
+    /*
+     * Keine Seite schreibt das Formular mehr selbst — es gibt eine Komponente
+     * und einen Endpunkt. Seit ADR-0111 führt die Rolle in zwei verschiedene
+     * Kontobereiche, und jeder von beiden zeigt sie: ein Betriebskonto landet
+     * auf `/business`, und ein Kontobereich ohne Ausgang ist eine Sackgasse.
+     */
+    const inline = (readdirSync("src/app", { recursive: true }) as string[])
       .filter((name) => name.endsWith(".tsx"))
       .map((name) => `src/app/${name}`)
       .filter((file) => readFileSync(file, "utf8").includes('action="/auth/signout"'));
-    /* Umgezogen ans Ende der Übersicht: seit es nur eine Tür ins Konto gibt,
-       ist diese Seite der Bereich und nicht mehr eine Kachel darin. */
-    expect(renders).toEqual(["src/app/(app)/account/page.tsx"]);
+    expect(inline).toEqual([]);
+
+    const shows = (readdirSync("src/app", { recursive: true }) as string[])
+      .filter((name) => name.endsWith(".tsx"))
+      .map((name) => `src/app/${name}`)
+      .filter((file) => readFileSync(file, "utf8").includes("<SignOutForm />"))
+      .sort();
+    expect(shows).toEqual([
+      "src/app/(app)/account/page.tsx",
+      "src/app/(business)/business/page.tsx",
+    ]);
   });
 
-  it("puts logout in no management area", () => {
-    // Every page under the Business and Admin route groups, not three of them.
+  it("puts logout in no working screen — only in the two account hubs", () => {
+    /*
+     * REVIDIERT MIT ADR-0111, und nur zur Hälfte. Die Regel war: kein
+     * Abmelden in einem Verwaltungsbereich, weil es eine Rollenhandlung
+     * daraus machte. Sie galt, solange das Konto-Symbol jede Rolle nach
+     * `/account` führte.
+     *
+     * Seit die Rolle die Tür bestimmt, ist `/business` der Kontobereich des
+     * Betriebs — der Knopf gehört dorthin und nirgends sonst. Auf keinem
+     * Arbeitsbildschirm (Lager, Bestellungen, Orderbuch, Berichte, Admin)
+     * steht er, und das bleibt geprüft.
+     */
     const managed = (readdirSync("src/app", { recursive: true }) as string[])
       .filter((name) => name.endsWith(".tsx"))
       .filter((name) => name.startsWith("(business)") || name.startsWith("(admin)"))
+      .filter((name) => name !== "(business)/business/page.tsx")
       .map((name) => `src/app/${name}`);
     expect(managed.length).toBeGreaterThan(8);
     for (const file of managed) {
-      expect(readFileSync(file, "utf8"), file).not.toContain("signout");
+      const source = readFileSync(file, "utf8");
+      expect(source, file).not.toContain("signout");
+      expect(source, file).not.toContain("SignOutForm");
     }
   });
 });

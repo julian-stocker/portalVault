@@ -16,6 +16,7 @@
 import { useRef, useState } from "react";
 
 import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import { TrackingLink } from "@/components/commerce/tracking-link";
 import { setTrackingNumber } from "@/lib/admin/order-actions";
 import { normaliseTracking, TRACKING_MAX_LENGTH, trackingTooLong } from "@/lib/admin/orders";
@@ -97,14 +98,16 @@ export function TrackingForm({
         <span className="text-xs text-muted">{copy.trackingEditHint}</span>
       </label>
 
-      <button
+      <PendingButton
         type="button"
-        disabled={pending || unchanged}
+        pending={pending}
+        pendingLabel={de.pending.saving}
+        disabled={unchanged}
         onClick={() => void save()}
-        className={`${ACTION_NEUTRAL} mt-3 disabled:opacity-40`}
+        className={`${ACTION_NEUTRAL} mt-3 gap-2 disabled:opacity-40`}
       >
         {trackingNumber === null ? copy.trackingSave : copy.trackingReplace}
-      </button>
+      </PendingButton>
 
       {note ? <p className="mt-3 text-sm text-muted">{note}</p> : null}
       {error ? (

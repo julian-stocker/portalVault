@@ -3,11 +3,24 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AttentionBadge } from "@/components/ui/attention-badge";
-import { ACTION_NEUTRAL } from "@/components/ui/action";
+import { SignOutForm } from "@/components/account/sign-out-form";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { de } from "@/lib/i18n/de";
 import { fetchMyUnread } from "@/lib/messages/queries";
+import { fetchMyAttentionTotal } from "@/lib/attention/queries";
+import { capabilities } from "@/lib/auth/capabilities";
+
+/** Welche Zahl an einer Kachel steht — oder 0, wenn sie keinen Kanal hat. */
+function badgeFor(
+  section: { readonly channel?: "orders" | "messages" },
+  unread: number,
+  attention: number,
+): number {
+  if (section.channel === "messages") return unread;
+  if (section.channel === "orders") return attention;
+  return 0;
+}
 
 export const metadata: Metadata = { title: de.account.title };
 
@@ -26,15 +39,25 @@ export const metadata: Metadata = { title: de.account.title };
  * is not a layout problem.
  */
 const SECTIONS = [
-  { href: "/account/profile", copy: de.account.profile },
-  { href: "/account/contact", copy: de.account.contact },
-  { href: "/account/orders", copy: de.account.orders },
+  { href: "/account/profile", copy: de.account.profile, channel: undefined },
+  { href: "/account/contact", copy: de.account.contact, channel: undefined },
   /*
-   * Nachrichten stehen bei den Bestellungen, weil sie zu ihnen gehören — und
-   * vor „Konto & Sicherheit", das die Liste beschließt.
+   * DIE ZWEI KÄUFERKACHELN — und nur für ein Käuferkonto (0099).
+   *
+   * Ein Konto ist genau eines von user, business oder admin (ADR-0078); ein
+   * Betrieb kauft nicht bei sich selbst. Für ihn wären beide Kacheln
+   * strukturell leer, und seine eigene Perspektive liegt seit 0099 unter
+   * `/business`. Profil, Kontakt und Sicherheit bleiben allen, weil sie zum
+   * Login gehören und nicht zur Rolle.
    */
-  { href: "/account/nachrichten", copy: de.account.messages, unread: true },
-  { href: "/account/security", copy: de.account.security },
+  { href: "/account/orders", copy: de.account.orders, channel: "orders", buyer: true },
+  {
+    href: "/account/nachrichten",
+    copy: de.account.messages,
+    channel: "messages",
+    buyer: true,
+  },
+  { href: "/account/security", copy: de.account.security, channel: undefined },
 ] as const;
 
 export default async function AccountPage() {
@@ -48,7 +71,14 @@ export default async function AccountPage() {
    * denselben Rundgang zur Datenbank — die Kachel und die Zahl am Kopf
    * können deshalb gar nicht auseinanderlaufen.
    */
-  const unread = await fetchMyUnread();
+  const [unread, attention, caps] = await Promise.all([
+    fetchMyUnread(),
+    fetchMyAttentionTotal(),
+    capabilities(),
+  ]);
+  /* Käuferkacheln nur für ein Käuferkonto. Kein Redirect für den Betrieb:
+     Passwort und Benutzername liegen hier, und die braucht er auch. */
+  const sections = SECTIONS.filter((s) => !("buyer" in s) || !caps.sellerOperator);
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 pt-8 pb-10 md:pt-12">
@@ -58,7 +88,7 @@ export default async function AccountPage() {
       </header>
 
       <nav className="flex flex-col gap-2">
-        {SECTIONS.map((section) => (
+        {sections.map((section) => (
           <Link
             key={section.href}
             href={section.href}
@@ -68,9 +98,18 @@ export default async function AccountPage() {
               <span className="block font-medium">{section.copy.title}</span>
               <span className="mt-0.5 block text-sm text-muted">{section.copy.hint}</span>
             </span>
-            {/* Dieselbe Marke wie am Kopf, mit dem Satz, der hierher gehört. */}
-            {"unread" in section && unread > 0 ? (
-              <AttentionBadge count={unread} label={de.messages.unreadBadgeLabel(unread)} />
+            {/* Die Marke der Karte ist die Zahl IHRES Kanals — dieselbe
+                Aufteilung wie im Betrieb, damit beide Rollen dasselbe
+                Verhalten haben (0099). */}
+            {badgeFor(section, unread, attention) > 0 ? (
+              <AttentionBadge
+                count={badgeFor(section, unread, attention)}
+                label={
+                  "channel" in section && section.channel === "messages"
+                    ? de.messages.unreadBadgeLabel(badgeFor(section, unread, attention))
+                    : de.account.newOrdersBadgeLabel(badgeFor(section, unread, attention))
+                }
+              />
             ) : null}
           </Link>
         ))}
@@ -86,17 +125,13 @@ export default async function AccountPage() {
        *
        * Das galt, solange der Kopf zwei Türen ins Konto hatte und das Profil
        * eine eigene war. Seit es nur noch eine gibt, ist diese Seite der
-       * Bereich, und der Ausgang gehört an sein Ende — nicht eine Kachel tief
-       * in „Profil", wo ihn niemand sucht.
+       * Bereich, und der Ausgang gehört an sein Ende.
        *
-       * Sichtbar getrennt, weil er das Einzige hier ist, das nichts ändert,
-       * sondern beendet.
+       * Seit ADR-0111 hat der Betrieb seinen eigenen Kontobereich, und der
+       * Knopf steht dort ebenfalls — dieselbe Komponente, nicht ein zweites
+       * Formular.
        */}
-      <form action="/auth/signout" method="post" className="border-t border-border/70 pt-6">
-        <button type="submit" className={ACTION_NEUTRAL}>
-          {de.nav.signOut}
-        </button>
-      </form>
+      <SignOutForm />
     </main>
   );
 }

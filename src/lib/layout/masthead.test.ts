@@ -288,7 +288,15 @@ describe("the header carries one account action", () => {
   });
 
   it("führt auf die Kontoübersicht, und es gibt keine zweite Tür", () => {
-    expect(profileFn).toContain('href={signedIn ? "/account" : "/login"}');
+    /*
+     * SEIT 0099 ENTSCHEIDET DIE AKTIVE ROLLE ÜBER DIE TÜR.
+     *
+     * Vorher führte dieses Symbol jeden nach `/account` — auch ein
+     * Betriebskonto, für das `/account` die Käuferperspektive ist („Meine
+     * Bestellungen") und das nach ADR-0078 gar nicht kaufen kann. Es bleibt
+     * bei EINER Tür je Person; welche es ist, hängt jetzt an der Rolle.
+     */
+    expect(profileFn).toContain('href={!signedIn ? "/login" : business ? "/business" : "/account"}');
     expect(profileFn).not.toContain('"/account/profile"');
     expect(nav).not.toContain("AccountHubAction");
     expect(nav).not.toContain("AccountHubGlyph");

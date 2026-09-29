@@ -19,6 +19,7 @@ import { notFound } from "next/navigation";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 
@@ -38,6 +39,10 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   ]);
   /* Auch hier: die Zahl gehört an den Menschen, nicht an den Bereich. */
   const unread = { mine, seller };
+  const attention = {
+    mine: await fetchMyAttentionTotal(),
+    seller: sellerOperator ? await fetchSellerAttentionTotal() : 0,
+  };
 
   return (
     /* No WorldZone: the admin area is a workbench, not a shop window. The
@@ -54,6 +59,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         business={sellerOperator}
         openOrders={openOrders}
         unread={unread}
+        attention={attention}
         username={profile?.username ?? null}
       />
       {children}

@@ -181,6 +181,45 @@ Deno.serve(async (req: Request) => {
     return respond(200, { received: true, ignored: decision.reason });
   }
 
+  /*
+   * ---- 3a. WOMIT BEZAHLT WURDE (0101) ------------------------------------
+   *
+   * Eigener Zweig, und er endet hier: die Ladung schließt keinen Versuch und
+   * bestätigt keine Zahlung. Sie trägt nur, was die Session nicht weiß —
+   * Typ, Kartenmarke, letzte vier Ziffern, Wallet —, und `record_payment_method()`
+   * schreibt das genau einmal.
+   *
+   * REIHENFOLGE IST NICHT ZUGESICHERT. Kommt die Ladung vor der Session,
+   * kennt noch kein Versuch ihren PaymentIntent; die Funktion antwortet
+   * `unknown_intent`, und darauf gehört ein 500 — dasselbe Muster, mit dem
+   * `unknown_payment` seit 0012 umgeht. Stripe wiederholt, und der zweite
+   * Versuch findet ihn.
+   *
+   * Alles andere ist ein 200: ein Schnappschuss, der nicht geschrieben werden
+   * konnte, ist eine fehlende Anzeige, kein fehlendes Geld.
+   */
+  if (decision.action === "method") {
+    let recorded: unknown;
+    try {
+      recorded = await rpc("record_payment_method", {
+        p_provider_intent_id: decision.charge.paymentIntent,
+        p_method_type: decision.charge.methodType,
+        p_card_brand: decision.charge.cardBrand,
+        p_card_last4: decision.charge.cardLast4,
+        p_wallet_type: decision.charge.walletType,
+      });
+    } catch (error) {
+      console.error("stripe-webhook: record_payment_method failed:", describe(error));
+      return respond(500, { error: "internal" });
+    }
+    if (recorded === "unknown_intent") {
+      console.log("stripe-webhook: charge before session, letting Stripe retry");
+      return respond(500, { error: "not_yet" });
+    }
+    console.log(`stripe-webhook charge ${event.type} -> ${recorded}`);
+    return respond(200, { received: true, outcome: recorded });
+  }
+
   // ---- 3b. and does the order it names live in that world? ----------------
   //
   // The lock that makes "a sandbox event can never change a live order" a
@@ -228,13 +267,91 @@ Deno.serve(async (req: Request) => {
    * `duplicate_event` or `already_confirmed`, neither of which is in this map.
    * The delivery row behind `claim_order_mail()` is the second guard.
    */
+  /*
+   * Die Intent-Id der bestätigten Session festhalten (0101), damit die Ladung
+   * sich später zuordnen lässt. Nebenbei und ohne Folgen: schlägt es fehl,
+   * fehlt später die Zahlungsart, nicht das Geld.
+   */
+  const intentId = session0101(event);
+  if (decision.action === "confirm" && intentId) {
+    try {
+      await rpc("attach_payment_intent", {
+        p_provider_payment_id: decision.sessionId,
+        p_provider_intent_id: intentId,
+      });
+    } catch (error) {
+      /*
+       * Ohne Folgen — aber nicht ohne Spur. Genau das stumme Verschlucken
+       * hat den Fehler verborgen, der diese Zeilen nötig gemacht hat: der
+       * Aufruf ging nie hinaus, und niemand erfuhr davon. Jeder andere
+       * Fehlerpfad dieser Datei endet in einer Logzeile; dieser jetzt auch.
+       */
+      console.error(`stripe-webhook: attach_payment_intent failed: ${describe(error)}`);
+    }
+  }
+
   await mailFor(outcome, decision.sessionId);
+
+  /*
+   * DER BETRIEB ERFÄHRT VON EINER NEUEN BEZAHLTEN BESTELLUNG (0100).
+   *
+   * Einmal je Bestellung, deshalb ohne `ref`. Nach der Kundenmail, weil deren
+   * Reihenfolge die des Vertrags ist; und wie sie ohne Einfluss auf die
+   * Antwort an Stripe.
+   */
+  if (outcome === "confirmed") {
+    await noticeToSeller(decision.sessionId);
+  }
 
   console.log(
     `stripe-webhook ${event.type} ${maskSession(decision.sessionId)} -> ${outcome} (${status})`,
   );
   return respond(status, { received: true, outcome });
 });
+
+/**
+ * Die PaymentIntent-Id aus dem Rohereignis (0101).
+ *
+ * `asSession()` liest sie mit; hier wird sie nur wieder herausgeholt, ohne
+ * das Entscheidungsobjekt zu verbreitern — der Intent gehört nicht zur
+ * Zahlungsentscheidung, sondern zur Anzeige.
+ */
+function session0101(event: StripeEventShape): string | null {
+  const raw = event.data?.object as { payment_intent?: unknown } | undefined;
+  const value = raw?.payment_intent;
+  if (typeof value === "string" && value !== "") return value;
+  if (typeof value === "object" && value !== null) {
+    const id = (value as { id?: unknown }).id;
+    if (typeof id === "string" && id !== "") return id;
+  }
+  return null;
+}
+
+/**
+ * Den Betrieb über eine neue bezahlte Bestellung unterrichten (0100).
+ *
+ * Über dieselbe Function wie jede andere Mail und mit demselben Geheimnis —
+ * und wie `mailFor()` ohne jede Folge für die Antwort an Stripe: eine
+ * bestätigte Zahlung bleibt bestätigt, auch wenn der Hinweis nicht hinausgeht.
+ */
+async function noticeToSeller(sessionId: string): Promise<void> {
+  if (!MAIL_SECRET) return;
+  try {
+    const orderNumber = await orderNumberFor(sessionId);
+    if (!orderNumber) return;
+    await fetch(`${SUPABASE_URL}/functions/v1/send-order-mail`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-skyisles-mail-secret": MAIL_SECRET,
+        Authorization: `Bearer ${SERVICE_KEY}`,
+      },
+      body: JSON.stringify({ orderNumber, kind: "new_order_notice" }),
+    });
+  } catch (error) {
+    console.error(`stripe-webhook: seller notice failed: ${describe(error)}`);
+  }
+}
 
 /** Which mail, if any, an outcome deserves. Anything absent sends nothing. */
 const MAIL_FOR_OUTCOME: Record<string, string> = {
@@ -407,6 +524,39 @@ async function callDatabase(
     throw new Error(`${fn}: ${payload?.code ?? response.status} ${payload?.message ?? ""}`);
   }
   return payload as DbOutcome;
+}
+
+/**
+ * Ein RPC über denselben Weg wie alles andere hier: ein POST auf PostgREST
+ * mit dem Service-Role-Schlüssel (0101).
+ *
+ * WARUM KEIN SUPABASE-CLIENT. Diese Function hält keinen und braucht keinen —
+ * `callDatabase()`, `readAttemptMode()`, `orderNumberFor()` und
+ * `issueInvoice()` sprechen seit B2.3 alle nacktes `fetch`. Die beiden
+ * 0101-Aufrufe waren zunächst gegen einen `admin`-Client geschrieben, den es
+ * in dieser Datei nie gab: ein freier Bezeichner, der beim Bündeln nicht
+ * auffällt und zur Laufzeit als `ReferenceError` aus dem Handler fliegt.
+ * Damit starb die Anfrage nach der bereits bestätigten Zahlung und vor
+ * Rechnung und Mails. Ein Test hält diese Datei jetzt frei von Client-Idiomen.
+ *
+ * Wirft bei allem, was nicht 2xx ist — die beiden Aufrufstellen entscheiden
+ * selbst, was das für ihre Antwort an Stripe bedeutet.
+ */
+async function rpc(fn: string, body: Record<string, unknown>): Promise<unknown> {
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: {
+      apikey: SERVICE_KEY,
+      Authorization: `Bearer ${SERVICE_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(`${fn}: ${payload?.code ?? response.status} ${payload?.message ?? ""}`);
+  }
+  return payload;
 }
 
 /**

@@ -610,7 +610,7 @@ describe("the server gate matches the database predicate", () => {
 });
 
 describe("signing out belongs to the account, whoever the account is", () => {
-  it("is rendered exactly once, on the account hub", () => {
+  it("has one implementation, shown once per account area", () => {
     /*
      * This test used to expect the hub and passed while the defect was
      * visible in the browser — `/settings` permanently redirects to
@@ -618,29 +618,75 @@ describe("signing out belongs to the account, whoever the account is", () => {
      * (ADR-0085). Asserting the route it happened to be on is not the same as
      * asserting where it belongs.
      *
-     * Every `.tsx` under `src/app`, not a sample: a second one anywhere fails.
+     * Every `.tsx` under `src/app`, not a sample.
+     *
+     * SEIT ADR-0111 führt die Rolle in zwei Kontobereiche, und der Ausgang
+     * folgt ihr: `/account` für das Käuferkonto, `/business` für den Betrieb.
+     * Verdoppelt ist damit die TÜR, nicht die Abmeldung — es gibt genau eine
+     * Umsetzung (`SignOutForm`) und genau einen Endpunkt, und keine Seite
+     * schreibt das Formular mehr selbst. Genau das war die Regression, die
+     * dieser Test vorher nicht fangen konnte: er prüfte die Stelle, nicht die
+     * Erreichbarkeit.
      */
-    const renders = (readdirSync("src/app", { recursive: true }) as string[])
+    const inline = (readdirSync("src/app", { recursive: true }) as string[])
       .filter((name) => name.endsWith(".tsx"))
       .map((name) => `src/app/${name}`)
       .filter((file) => readFileSync(file, "utf8").includes('action="/auth/signout"'));
-    expect(renders).toEqual(["src/app/(app)/account/page.tsx"]);
+    expect(inline).toEqual([]);
+
+    const shows = (readdirSync("src/app", { recursive: true }) as string[])
+      .filter((name) => name.endsWith(".tsx"))
+      .map((name) => `src/app/${name}`)
+      .filter((file) => readFileSync(file, "utf8").includes("<SignOutForm />"))
+      .sort();
+    expect(shows).toEqual([
+      "src/app/(app)/account/page.tsx",
+      "src/app/(business)/business/page.tsx",
+    ]);
   });
 
   it("and the same one for a collector, a seller and an administrator", () => {
-    // Logging out ends a session, which every account type has. Duplicating
-    // it into the Business or Admin areas would make it a role action.
+    /*
+     * Logging out ends a session, which every account type has. Duplicating
+     * it into the Business or Admin areas would make it a role action — so
+     * the FORM stays here alone, and nothing about it is conditional.
+     *
+     * Seit 0099 kennt diese Seite die Rolle trotzdem, für eine andere Frage:
+     * ein Betriebskonto bekommt die zwei Käuferkacheln nicht angeboten, weil
+     * es nach ADR-0078 nicht kaufen kann. Der Ausgang bleibt davon
+     * unberührt — geprüft wird das unten Zeile für Zeile.
+     */
     const profile = source("src/app/(app)/account/page.tsx");
-    expect(profile).not.toContain("capabilities");
-    expect(profile).not.toContain("sellerOperator");
-    expect(profile).not.toContain("platformAdmin");
-    expect(profile).not.toContain("accountType");
+    const signOut = profile.slice(profile.indexOf('action="/auth/signout"'));
+    for (const role of ["capabilities", "sellerOperator", "platformAdmin", "accountType"]) {
+      expect(signOut, role).not.toContain(role);
+    }
+    // Und die Kacheln, die bleiben: Profil, Kontakt und Sicherheit sind an
+    // keine Rolle gebunden.
+    expect(profile).toContain('{ href: "/account/profile"');
+    expect(profile).toContain('{ href: "/account/security"');
+    expect(profile).toContain('!("buyer" in s) || !caps.sellerOperator');
   });
 
   it("is a POST, so no prefetch can end a session", () => {
-    const page = source("src/app/(app)/account/page.tsx");
-    expect(page).toContain('method="post"');
-    expect(page).toContain("de.nav.signOut");
+    const form = source("src/components/account/sign-out-form.tsx");
+    expect(form).toContain('method="post"');
+    expect(form).toContain("de.nav.signOut");
+  });
+
+  it("und jede Rolle erreicht ihn aus ihrer eigenen Tür", () => {
+    /*
+     * Die Regression, die das hier fängt: ADR-0111 hat das Konto-Symbol
+     * rollenabhängig gemacht — Betriebskonto nach `/business` —, und dort
+     * stand kein Ausgang. Wer als Verkäufer angemeldet war, kam ohne
+     * Handeingabe von `/account` nicht mehr heraus.
+     */
+    const nav = source("src/components/layout/site-nav.tsx");
+    expect(nav).toContain('href={!signedIn ? "/login" : business ? "/business" : "/account"}');
+    for (const hub of ["src/app/(app)/account/page.tsx",
+                       "src/app/(business)/business/page.tsx"]) {
+      expect(source(hub), hub).toContain("<SignOutForm />");
+    }
   });
 
   it("and there is only one way to sign out at all", () => {

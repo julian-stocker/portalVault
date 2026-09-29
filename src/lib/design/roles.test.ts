@@ -764,7 +764,14 @@ describe("the commerce role is worn where a purchase is started", () => {
   });
 
   it("takes the checkout step out of silver without moving it", () => {
-    expect(cart).toContain("className={ACTION_COMMERCE_BLOCK} style={COMMERCE_SURFACE}");
+    /*
+     * Seit dem Loading-Feedback ist dieser Schritt ein `PendingLink` und
+     * nicht mehr ein nacktes `<Link>` — dieselben beiden Attribute, nur auf
+     * eigenen Zeilen, weil das Element jetzt mehr Eigenschaften trägt.
+     * Geprüft wird weiterhin die Rolle, nicht die Zeilenumbrüche.
+     */
+    expect(cart).toContain("className={ACTION_COMMERCE_BLOCK}");
+    expect(cart).toContain("style={COMMERCE_SURFACE}");
     expect(cart).not.toContain("ACTION_TRADE");
   });
 
@@ -802,7 +809,7 @@ describe("the commerce role is worn where a purchase is started", () => {
      * most concrete purchase action there is, so the funnel would have ended
      * in a different colour from the three steps leading to it.
      */
-    expect(checkoutCode).toContain("className={`${ACTION_COMMERCE_BLOCK} disabled:opacity-70`}");
+    expect(checkoutCode).toContain("${ACTION_COMMERCE_BLOCK} gap-2 disabled:opacity-70");
     expect(checkoutCode).toContain("style={COMMERCE_SURFACE}");
     // Stripped of comments: the prose above the button names the role it used
     // to wear, and a raw search would read the explanation as the bug.
@@ -817,8 +824,16 @@ describe("the commerce role is worn where a purchase is started", () => {
      * depended on which colour was underneath.
      */
     expect(checkoutCode).toContain("disabled:opacity-70");
-    expect(checkoutCode).toContain("disabled={pending}");
-    expect(checkoutCode).toContain("{pending ? de.checkout.submitting : de.checkout.submit}");
+    /*
+     * Gesperrt wird jetzt in `PendingButton` — `disabled={disabled || pending}`
+     * steht dort einmal für alle Knöpfe, statt an jeder Aufrufstelle. Hier
+     * wird deshalb geprüft, dass dieser Knopf der gemeinsame ist und sein
+     * Arbeitszustand aus `pending` kommt; das Sperren selbst hat
+     * `ui/pending.test.ts`.
+     */
+    expect(checkoutCode).toContain("pending={pending}");
+    expect(checkoutCode).toContain("pendingLabel={de.checkout.submitting}");
+    expect(checkoutCode).toContain("{de.checkout.submit}");
   });
 
   it("gives all four steps of the funnel the same role", () => {

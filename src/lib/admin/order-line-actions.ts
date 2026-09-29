@@ -20,6 +20,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { notify } from "@/lib/commerce/notify";
+
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { isCancelReason, type CancelReason, type StockPresence }
   from "@/lib/commerce/order-lines";
@@ -102,6 +104,24 @@ export async function cancelOrderLine(input: {
 
   for (const path of paths(input.orderNumber)) revalidatePath(path);
   const row = (data ?? {}) as Record<string, unknown>;
+
+  /*
+   * DER HINWEIS AN DIE KUNDSCHAFT (0100).
+   *
+   * Ein Teilstorno ändert, was jemand bekommt — das ist die eigentliche
+   * Nachricht, und bis hierher stand sie nirgends in einem Postfach. `ref`
+   * ist das Zeilenereignis, das die Datenbank gerade geschrieben hat, damit
+   * ein zweites Teilstorno derselben Bestellung eine eigene Mail bekommt.
+   *
+   * Über die Erstattung geht eine eigene Nachricht; sie ist ein zweiter
+   * Vorgang und oft eine Minute später.
+   */
+  await notify({
+    orderNumber: input.orderNumber,
+    kind: "cancellation_notice",
+    ref: (row.event_id as number | null) ?? null,
+  });
+
   return {
     ok: true,
     stockOutcome: String(row.stock_outcome ?? "none"),

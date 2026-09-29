@@ -14,6 +14,7 @@
 import { useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import { recordRefund } from "@/lib/admin/refund-actions";
 import { formatPrice } from "@/lib/format";
 import type { RefundAllocation } from "@/lib/commerce/order-lines";
@@ -215,9 +216,14 @@ export function RefundForm({
             className={`${field} w-44`}
           />
         </label>
-        <button type="submit" disabled={pending} className={ACTION_PRIMARY}>
-          {pending ? copy.recording : copy.record}
-        </button>
+        <PendingButton
+          type="submit"
+          pending={pending}
+          pendingLabel={copy.recording}
+          className={`${ACTION_PRIMARY} gap-2`}
+        >
+          {copy.record}
+        </PendingButton>
       </div>
 
       {/*

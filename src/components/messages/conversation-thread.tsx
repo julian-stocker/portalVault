@@ -39,6 +39,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { markConversationRead, sendOrderMessage } from "@/lib/messages/actions";
+import { PendingButton } from "@/components/ui/pending";
 import {
   MESSAGE_MAX, messageIsSendable, systemEventText,
   type Conversation, type ConversationItem,
@@ -243,13 +244,15 @@ export function ConversationThread({ conversation }: { conversation: Conversatio
                 className="max-h-40 min-h-11 w-full resize-none rounded-sky-md bg-surface px-3 py-2.5 text-sm leading-5 ring-1 ring-border/70 focus-ring [field-sizing:content]"
               />
             </label>
-            <button
+            <PendingButton
               type="submit"
-              disabled={pending || body.trim() === ""}
-              className="min-h-11 shrink-0 rounded-sky-md bg-surface-raised px-4 text-sm font-medium ring-1 ring-border-strong transition-colors hover:bg-border/40 focus-ring disabled:opacity-50"
+              pending={pending}
+              pendingLabel={copy.sending}
+              disabled={body.trim() === ""}
+              className="flex min-h-11 shrink-0 items-center gap-2 rounded-sky-md bg-surface-raised px-4 text-sm font-medium ring-1 ring-border-strong transition-colors hover:bg-border/40 focus-ring disabled:opacity-50"
             >
-              {pending ? copy.sending : copy.send}
-            </button>
+              {copy.send}
+            </PendingButton>
           </div>
 
           {tight ? (

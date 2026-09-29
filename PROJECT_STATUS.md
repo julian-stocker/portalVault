@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-22 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-09-28 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -24,7 +24,12 @@ Die vollständige Änderungshistorie liegt in Git.
 > Offene Themen werden gesammelt auf Staging bearbeitet, aber **fachlich getrennt und in
 > kleinen, nachvollziehbaren Änderungen** — eine Sache, eine Migration, ein Commit.
 >
-> **Laufender Block: Plattform und Verkäufer trennen (ADR-0064), M0–M2.**
+> **Laufender Block (2026-09-28): Benachrichtigung, Zahlungsart und Wartezeit — `0099`–`0102`.**
+> Auf Staging abgeschlossen und an einer Verifikationsbestellung verifiziert; der
+> Production-Rollout ist vorbereitet und freigegeben, aber **noch nicht ausgeführt**. Der
+> Abschnitt weiter unten hält Umfang, Korrekturen und Umgebungsstand fest.
+>
+> **Vorheriger Block: Plattform und Verkäufer trennen (ADR-0064), M0–M2.**
 >
 > | Phase | Gegenstand | Migration | Stand |
 > |---|---|---|---|
@@ -46,6 +51,64 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Benachrichtigung, Zahlungsart und Wartezeit (2026-09-25 bis 2026-09-28, `0099`–`0102`) — auf Staging abgeschlossen, Production ausstehend
+
+**Anlass war ein echter Vorgang.** An `SI-2026-001009` wurde eine von zwei Positionen storniert
+und 0,76 € erstattet. In der Datenbank stand das vollständig und richtig — der Käufer sah davon
+nichts: unveränderte Positionen, unveränderter Gesamtbetrag, keine Mail. Die Vorlage
+`refund_confirmation` lag seit `0047` fertig da, ohne Aufrufer. Daraus wurde ein Block aus vier
+Migrationen, zwei Edge Functions und einer Reihe von Oberflächenänderungen (ADR-0111, ADR-0112,
+ADR-0113).
+
+### Was gebaut wurde
+
+| Migration | Gegenstand |
+|---|---|
+| `0099` | `order_attention_reads` — ein Wasserstand je (Bestellung, Seite), Zwilling zu `order_conversation_reads`. Zwei Whitelists entscheiden, welches Ereignis welche Seite angeht; der Absender entscheidet, ob es von der anderen Seite kam. **Gezählt werden Bestellungen mit Ungelesenem, nicht Ereignisse.** Kein Status wird je zu einer Marke. |
+| `0100` | `order_mail.ref` plus Unique-Index über `(order_id, kind, coalesce(ref, ''))` — „genau einmal" gilt seither je **Ereignis**, nicht je Art. Vier Mailfunktionen mit `p_ref text default null` neu angelegt, `message_notice_due()` drosselt Nachrichtenhinweise ohne Zeitgeber. |
+| `0101` | Zahlungsart als Schnappschuss auf `payment_attempts` — Typ, Kartenmarke, letzte vier Ziffern, Wallet. Aus `charge.succeeded`, damit die Webhook-Function weiterhin **keinen** Stripe-Secret-Key hält. Write-once über `method_recorded_at`. |
+| `0102` | `my_order()` liefert dem Käufer dieselben Mengen, die der Betrieb sieht — `order_line_quantities()`, je Position die zugeordnete Erstattung, auf Bestellebene `refunded_total` / `remaining_total` / `payment_method`. Die ursprüngliche Position bleibt unverändert. |
+
+**Anwendung und Functions:** Aufmerksamkeitsmarken in beiden Bereichen (`src/lib/attention/`,
+`NewChip`, `MarkOrderSeen`) · `notify()` als einzige Stelle, die Hinweismails auslöst ·
+`paymentMethodLabel()` · fünf neue Mailvorlagen und ein umgeschriebenes `orderReceived`
+(„eingegangen, Zahlung noch offen" — ausdrücklich keine Annahme) · `stripe-webhook` verarbeitet
+`charge.succeeded` und unterrichtet den Betrieb über eine neue bezahlte Bestellung.
+
+**Drei Korrekturen, die aus dem Rollout selbst kamen:**
+
+1. **Rechtelücke in `0100`.** `drop function` + `create` gibt eine Funktion mit Postgres'
+   Default an `PUBLIC` heraus — die vier Mail-RPCs waren danach anon-aufrufbar. Behoben durch
+   explizite `revoke`-Zeilen in derselben Migration; ein Test (`revoke-coverage.test.ts`)
+   erzwingt seither, dass jedes `drop`+`create` seine Rechte im selben File nennt.
+2. **Logout fehlte** im Betriebsbereich, seit ADR-0111 das Profilsymbol rollenabhängig
+   verlinkt. Behoben mit einer gemeinsamen `SignOutForm`.
+3. **`stripe-webhook` rief einen `admin`-Client auf, den diese Function nie besaß.** Ein freier
+   Bezeichner, beim Bündeln unauffällig, zur Laufzeit ein `ReferenceError` — die Anfrage starb
+   nach der bestätigten Zahlung und vor Rechnung und Mails. Behoben durch denselben
+   PostgREST-`fetch`-Weg, den die Datei überall sonst benutzt;
+   `webhook-rpc-transport.test.ts` hält alle Edge Functions frei von undeklarierten Bezeichnern.
+
+### Zusätzlich in diesem Block
+
+- **Sofortiges Loading-Feedback** (ADR-0113): eine gemeinsame Komponente — Spinner,
+  `PendingButton`, `PendingLink`, `BusyOverlay`. Das Overlay steht an genau einer Stelle: der
+  Übergabe an Stripe.
+- **Mailtexte**: die Annahmeerklärung nennt im Fließtext den **Handelsnamen**; die vollständige
+  rechtliche Identität steht im Fußblock jeder Mail. Rechnung und AGB unverändert.
+
+### Stand der Umgebungen
+
+| | Stand |
+|---|---|
+| **Staging** `qqxcpesbwfxzgytkdsac` | `0099`–`0102` angewendet, beide Edge Functions deployt, `charge.succeeded` abonniert. Verifikationsbestellung **SI-2026-001069** vollständig grün: drei Mails, Rechnung `SI-R-2026-000005`, Zahlungsart `card · visa · 4242` geschnappschusst. |
+| **Production** `zmiwxswrpkmizvqsgype` | **Noch nichts davon.** Alle vier Migrationen fehlen, beide Functions stehen auf dem Stand vor diesem Block. Rollout vorbereitet und freigegeben, Ausführung ausstehend. |
+
+**Offen und bewusst nicht gebaut:** das Korrekturdokument zu Storno und Erstattung. Die
+Originalrechnung bleibt unveränderlich; ob daneben eine Gutschrift tritt, mit welcher
+Nummernfolge und welchen Pflichtangaben, ist eine steuerliche Frage und wird vor jeder
+Implementierung getrennt entschieden.
 
 ## Legacy-Nachkorrektur A–D (2026-09-22, `0087`–`0089`) — auf Staging UND Production abgeschlossen
 

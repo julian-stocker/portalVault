@@ -9568,3 +9568,154 @@ irgendwo auf diesem Weg wieder einen Geldbetrag in den Text zu schreiben.
 
 **Was ausdrücklich nicht entschieden wurde:** eine Lieferzeitzusage. Das Feld
 (`sellers.dispatch_statement`) existiert und bleibt leer, solange keine zugesagt werden kann.
+
+
+## ADR-0111 — Die aktive Rolle bestimmt die Perspektive, und Status ist keine Benachrichtigung
+
+**Status:** ANGENOMMEN (2026-09-25) · Migration `0099`
+
+**Problem, zweimal aufgefallen am ersten echten Kauf.**
+
+*Erstens:* Das Konto-Symbol im Kopf führte jeden nach `/account` und trug `unread.mine`. Für ein
+Betriebskonto war beides falsch. `/account` ist die Käuferperspektive („Meine Bestellungen"), und
+ein Konto ist genau eines von user, business oder admin (ADR-0078) — ein Betrieb kauft nicht bei
+sich selbst, die Zahl war also strukturell 0. Die Aufmerksamkeit des Betriebs lag derweil an drei
+anderen Stellen: eine Statuszahl auf „Shop", eine Ungelesen-Zahl auf „Nachrichten", nichts am
+Konto.
+
+*Zweitens:* Es gab überhaupt nur einen Aufmerksamkeitsbegriff — den der Nachrichten (0098). Für
+Bestellungen zählte `seller_open_order_counts()` einen **Status**: solange eine Bestellung
+unversandt war, stand die Zahl da, ganz gleich wie oft man hingesehen hatte.
+
+**Entscheidung.**
+
+1. **Die aktive Rolle bestimmt die Tür.** Das Symbol führt ein Käuferkonto nach `/account`, ein
+   Betriebskonto nach `/business`. Eine Tür je Person, nicht zwei — welche es ist, hängt an der
+   Rolle. `/business` ist damit der Kontobereich des Betriebs und bekommt „Konto & Sicherheit"
+   dazu, weil Passwort und Benutzername zum Login gehören und nicht zum Shop.
+2. **Drei Ebenen, eine Rechnung.** Symbol = Summe der Kanäle der Rolle · Karte = Zahl ihres
+   Kanals · Eintrag = „Neu". Die Summe wird **ausgerechnet**, nicht nebeneinander erhoben — nur
+   so können die Ebenen nicht auseinanderlaufen.
+3. **Status ist keine Benachrichtigung.** Gezählt werden Ereignisse gegen einen Lesestand. Eine
+   Marke verschwindet, sobald man hingesehen hat; „zu versenden" bleibt Arbeit und bleibt auf der
+   Arbeitskarte (ADR-0050).
+4. **Gelesen wird beim Öffnen der Bestellung**, nie beim Öffnen einer Liste. Eine Liste
+   überfliegt man.
+5. **Zwei Kanäle, strikt getrennt.** „Nachrichten" zählt Menschen, „Bestellungen" zählt
+   Ereignisse. `order_shipped` und `refund_recorded` wandern dafür aus der Ungelesen-Zählung des
+   Nachrichtenkanals in den Bestellkanal — **im Strang bleiben sie sichtbar** (ADR-0108 gilt
+   unverändert für die Darstellung). Sonst trüge eine Zustellung an zwei Marken bei.
+
+**Warum kein Notification-System.** Es gibt keine Queue, keinen Fan-out, keine Push-Infrastruktur
+und keine zweite Wahrheit. 0099 ist die Anwendung eines vorhandenen Musters auf einen zweiten
+Gegenstand: Wasserstand je (Bestellung, Seite), Strom, `from_other`. Ein künftiges Ereignis —
+Rückgabe eingegangen, Tracking ergänzt — braucht einen Eintrag in einer Whitelist, sonst nichts.
+
+**Und die Mail davor bleibt.** Beim selben Kauf fiel auf, dass vor Stripe „Bestellung … bei uns
+eingegangen" und nach der Zahlung „Bestellung … bestätigt" ankommt — im Posteingang zwei Zeilen,
+die wie zwei Bestätigungen aussehen. Die erste ist die Zugangsbestätigung nach § 312i Abs. 1 Nr. 3
+BGB und ausdrücklich keine Annahme; **das Vertragsmodell aus ADR-0086 bleibt unverändert.**
+Geändert ist nur die Deutlichkeit: der Betreff nennt jetzt auch den offenen Punkt („eingegangen,
+Zahlung noch offen"), und der Text sagt in einem abgesetzten Block, dass die Zahlung noch nicht
+bestätigt ist, dass dies keine Annahme ist und was als Nächstes kommt.
+
+**Konsequenzen.** Vier Layouts reichen eine zweite Zahl durch. `/account` zeigt die beiden
+Käuferkacheln nur einem Käuferkonto — Profil, Kontakt und Sicherheit bleiben allen, weil sie zum
+Login gehören. Sieben Tests, die die alte einzelne Tür festhielten, sind mit dieser Begründung
+umgeschrieben; `symmetry.test.ts` hält die neue Regel fest, einschließlich des Verbots, in
+`0099` jemals einen Bestellstatus zu lesen.
+
+
+## ADR-0112 — Beide Seiten sehen dieselbe Bestellung, und ein Hinweis kennt sein Ereignis
+
+**Status:** ANGENOMMEN (2026-09-27) · Migrationen `0100`, `0101`, `0102`, Korrektur an `0099`
+
+**Anlass: ein echter Teilstorno.** An `SI-2026-001009` wurde eines von zwei Anvil Rain storniert
+und 0,76 € erstattet. In der Datenbank stand das vollständig und richtig. Der Käufer sah
+weiterhin „2 × Anvil Rain — 1,52 €", einen Gesamtbetrag von 7,85 € und erfuhr von der Erstattung
+nur über eine Systemzeile im Nachrichtenbereich. Eine Mail bekam er nicht: die Vorlage
+`refund_confirmation` lag seit `0047` fertig da — ohne Aufrufer.
+
+**Vier Entscheidungen.**
+
+1. **Der Käufer bekommt dieselben Zahlen wie der Betrieb** (`0102`). `my_order()` hängt an jede
+   Position `order_line_quantities()`, denselben Helfer, den `admin_order()` seit `0096` benutzt,
+   und die der Position zugeordnete Erstattung. Kein zweiter Rechenweg: wo zwei Seiten dieselbe
+   Bestellung ansehen, dürfen sie nicht zwei Antworten bekommen. **Die ursprüngliche Position
+   bleibt unverändert** — was bestellt wurde, steht so auf der Rechnung; was seither geschah,
+   tritt daneben.
+
+2. **Storno ist für den Käufer eine Nachricht** (Korrektur an `0099`). `order_line_cancelled` und
+   `order_cancelled` kommen in die Käufer-Whitelist. Der erste echte Fall hat gezeigt, warum die
+   Liste ohne sie zu kurz war: es gab eine Meldung über das Geld, aber keine über die Änderung
+   der Bestellung — und die ist die eigentliche. Zugleich zählen die beiden Summenfunktionen
+   jetzt **Bestellungen statt Ereignisse**: drei neue Meldungen an einer Bestellung sind eine
+   Bestellung, in die man sehen muss, und am Eintrag steht ein „Neu", nicht drei.
+
+3. **Ein Hinweis kennt sein Ereignis** (`0100`). `order_mail` bekommt `ref` und einen eindeutigen
+   Index über `(order_id, kind, coalesce(ref, ''))`. Erst damit ist „genau einmal" je Ereignis
+   statt je Art — vorher war die zweite Erstattungsmail nicht unterdrückt, sondern unmöglich.
+   Bestehende Zeilen tragen `ref = NULL` und bleiben so einzigartig wie zuvor.
+   **Die Drosselung für Nachrichten braucht keinen Zeitgeber:** gesendet wird, wenn der Empfänger
+   seit dem letzten Hinweis hineingesehen hat. Hat er nicht, liegt der Hinweis schon in seinem
+   Postfach. **Und eine Mail verschiebt niemals einen Lesestand** — `0098`/`0099` bleiben die
+   einzige Wahrheit darüber, was gesehen wurde.
+
+4. **Die Zahlungsart wird geschnappschusst, nicht abgefragt** (`0101`). `charge.succeeded` trägt
+   Typ, Marke, letzte vier Ziffern und Wallet im Payload; die Alternative — die Session mit
+   `expand` nachladen — verlangte einen Stripe-Secret-Key in der Webhook-Function. Die hält
+   bewusst keinen, und diese Eigenschaft ist mehr wert als der kürzere Weg. Geschrieben wird
+   genau einmal; kommt die Ladung vor der Session, lässt ein 500 Stripe wiederholen. Für ältere
+   Bestellungen bleibt die Zahlungsart **unbekannt** und wird nicht erraten.
+
+**Nicht entschieden und nicht gebaut:** das Korrekturdokument zu Storno und Erstattung. Die
+Originalrechnung bleibt unveränderlich — sie dokumentiert den Vertrag, wie er geschlossen wurde.
+Ob daneben eine Gutschrift, eine Korrekturrechnung oder etwas anderes tritt, mit welcher
+Nummernfolge und welchen Pflichtangaben, ist eine fachliche und steuerliche Frage und wird vor
+jeder Implementierung getrennt entschieden. Ebenfalls offen: der Hinweis an den Betrieb bei einem
+Widerruf. Die Art und die Vorlage stehen bereit, der Auslöser fehlt — wer widerruft, kann ein
+Gast ohne Token sein, und der saubere Auslösepunkt ist der Widerrufszweig der Mail-Function.
+In der Anwendung sieht der Betrieb den Widerruf bereits: `withdrawal_declared` steht seit `0099`
+auf seiner Whitelist.
+
+---
+
+## ADR-0113 — Wartezeit ist ein Zustand der Oberfläche, kein Systemdialog
+
+**Status:** ANGENOMMEN (2026-09-28) · keine Migration · `src/components/ui/pending.tsx`
+
+**Anlass.** Zwischen „geklickt" und „etwas passiert" lagen an mehreren Stellen mehrere hundert
+Millisekunden bis Sekunden, in denen sich auf dem Bildschirm nichts bewegte: der Weg in die
+Kasse (die Angebote, Versandarten und den offenen Bestellzustand lädt), das Anlegen der
+Bestellung, die Übergabe an Stripe, jede Anmeldung, jedes Geschäftsformular mit Server Action.
+Die stärkste vorhandene Rückmeldung war ein getauschter Text; auf den Auth-Screens waren es drei
+Punkte. Ein Spinner existierte im ganzen Produkt nicht. Wer nichts sieht, drückt noch einmal.
+
+**Entscheidung.** Eine gemeinsame Komponente, vier Bausteine, ein Ort:
+
+- **`Spinner`** — erbt `currentColor`, ist `aria-hidden`, steht bei `prefers-reduced-motion`
+  still. Die Aussage steckt im Text und im gesperrten Knopf, nicht in der Drehung.
+- **`PendingButton`** — sperrt sich selbst (`disabled={disabled || pending}`), setzt `aria-busy`
+  und tauscht die Beschriftung gegen den Satz, den die Aufrufstelle mitgibt. Das Sperren steht
+  damit einmal im Produkt statt an jeder Aufrufstelle.
+- **`PendingLink`** — zeigt über `useLinkStatus()` nur dann etwas, wenn die Navigation
+  **tatsächlich** wartet. Eine vorgeladene Route wechselt sofort und blitzt nicht.
+- **`BusyOverlay`** — die ganze Seite, gedimmt und 3 px unscharf, mit derselben Verdunkelung wie
+  das Modal.
+
+**Das Overlay steht an genau einer Stelle:** zwischen dem Druck auf „Zahlung starten" und
+`window.location.assign()` zu Stripe. Nur dort verlässt der Browser die Seite, und nur dort ist
+ein Knopf zu klein. Für den Weg zur Kasse und für das Anlegen der Bestellung genügt der Knopf —
+ein Vollbild für 200 ms wäre Lärm. Es ist bewusst **kein Dialog**: keine `role="dialog"`, kein
+`aria-modal`, kein Fokusfang. Es gibt nichts zu bedienen, und die Seite ist gleich weg. Es
+verschwindet von selbst, wenn die Übergabe scheitert und wenn der Browser die Seite aus dem
+bfcache zurückholt — beide Wege bestanden schon und bleiben die einzigen.
+
+**Vorlesen statt nur zeichnen.** Der sichtbare Text eines gesperrten Knopfes wird beim Wechsel
+nicht angesagt, und eine Live-Region, die erst mit ihrem Text entsteht, meldet sich unzuverlässig.
+Deshalb trägt jeder Baustein eine `role="status"`-Region, die immer im Dokument steht und im
+Ruhezustand leer ist.
+
+**Konsequenz.** Der einzige Spinner des Produkts lebt in dieser Datei; ein Test hält die übrigen
+Komponenten frei von `animate-spin`. Neue Knöpfe mit Wartezeit nehmen `PendingButton`, statt ihre
+eigene Variante zu bauen.

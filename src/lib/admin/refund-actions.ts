@@ -20,6 +20,8 @@
 
 import { revalidatePath } from "next/cache";
 
+import { notify } from "@/lib/commerce/notify";
+
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 import { allocationsValid, type RefundAllocation } from "@/lib/commerce/order-lines";
@@ -78,6 +80,23 @@ export async function recordRefund(input: {
   }
 
   const row = (data ?? {}) as Record<string, unknown>;
+
+  /*
+   * DER HINWEIS AN DIE KUNDSCHAFT (0100).
+   *
+   * Bis hierher erfuhr sie von einer Erstattung nur, wenn sie von selbst in
+   * den Nachrichtenbereich sah — die Vorlage lag seit 0047 fertig da, ohne
+   * Aufrufer. `ref` ist die Erstattung selbst, damit eine zweite Erstattung
+   * derselben Bestellung eine eigene Mail bekommt statt als Wiederholung der
+   * ersten zu gelten.
+   *
+   * Nach dem Schreiben, nie davor, und ohne die Handlung scheitern zu lassen.
+   */
+  await notify({
+    orderNumber: input.orderNumber,
+    kind: "refund_confirmation",
+    ref: typeof row.refund_id === "number" ? row.refund_id : null,
+  });
 
   revalidatePath("/business/widerrufe");
   revalidatePath(`/business/orders/${input.orderNumber}`);

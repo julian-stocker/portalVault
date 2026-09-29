@@ -289,13 +289,43 @@ describe("the environment refuses the wrong world", () => {
 // ---------------------------------------------------------------------------
 
 describe("only four event types are acted on", () => {
-  it("handles exactly the four V1 subscribes to", () => {
+  it("handles exactly the five it subscribes to", () => {
+    /*
+     * Vier davon sind Geld und Zustand einer Sitzung. Der fünfte, seit 0101,
+     * ist WOMIT bezahlt wurde: Marke, letzte vier Ziffern und Wallet hängen
+     * am PaymentIntent und stehen in keiner Session. Ihn zu abonnieren ist
+     * der Weg, der OHNE Stripe-Schlüssel in dieser Function auskommt — und
+     * dass sie keinen hält, ist eine Eigenschaft, die bleiben soll.
+     */
     expect([...HANDLED_EVENTS]).toEqual([
       "checkout.session.completed",
       "checkout.session.expired",
       "checkout.session.async_payment_succeeded",
       "checkout.session.async_payment_failed",
+      "charge.succeeded",
     ]);
+  });
+
+  it("und die Ladung ist ein eigener Weg, der kein Geld anfasst", () => {
+    const index = readFileSync("supabase/functions/stripe-webhook/index.ts", "utf8");
+    // Sie ruft den Schnappschuss und endet dort — keine Bestätigung, kein
+    // Versuch, keine Reservierung.
+    expect(index).toContain('if (decision.action === "method")');
+    /*
+     * Über den gemeinsamen `rpc()`-Helfer dieser Function, nicht über einen
+     * Client. Hier stand bis zur Korrektur `admin.rpc(…)` — ein Bezeichner,
+     * den die Datei nie deklariert hat. Dieser Test hat die Schreibweise
+     * abgeschrieben statt sie zu prüfen und konnte den Fehler deshalb nicht
+     * finden; `webhook-rpc-transport.test.ts` prüft ihn jetzt als Regel.
+     */
+    expect(index).toContain('await rpc("record_payment_method"');
+    expect(index).not.toMatch(/[A-Za-z_$][\w$]*\s*\.\s*rpc\s*\(/);
+    const branch = index.slice(index.indexOf('if (decision.action === "method")'));
+    const body = branch.slice(0, branch.indexOf("// ---- 3b."));
+    for (const forbidden of ["confirm_order_payment", "fail_payment_attempt",
+                             "convert_order_reservations", "mailFor"]) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
   });
 
   it("ignores everything else, payment_intent.payment_failed included", () => {

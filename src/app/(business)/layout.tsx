@@ -24,6 +24,7 @@ import { notFound } from "next/navigation";
 import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 
@@ -33,12 +34,16 @@ export default async function BusinessLayout({ children }: { children: React.Rea
   const { sellerOperator, platformAdmin } = await capabilities();
   if (!sellerOperator) notFound();
 
-  const [openOrders, profile, mine, seller] = await Promise.all([
+  const [openOrders, profile, mine, seller, mineOrders, sellerOrders] = await Promise.all([
     fetchOpenOrderCounts(), currentProfile(), fetchMyUnread(), fetchSellerUnread(),
+    fetchMyAttentionTotal(), fetchSellerAttentionTotal(),
   ]);
   /* Zwei Posteingänge, zwei Zahlen (0098): der des Betriebs und das eigene
      Konto. Ein Verkäufer hat beide, und sie stehen an verschiedenen Stellen. */
   const unread = { mine, seller };
+  /* Der zweite Kanal (0099): was an Bestellungen seit dem letzten Blick
+     passiert ist. Am Symbol steht die Summe beider. */
+  const attention = { mine: mineOrders, seller: sellerOrders };
 
   return (
     /* No WorldZone and no footer, for the same reasons the admin area has
@@ -52,6 +57,7 @@ export default async function BusinessLayout({ children }: { children: React.Rea
         admin={platformAdmin}
         openOrders={openOrders}
         unread={unread}
+        attention={attention}
         username={profile?.username ?? null}
       />
       {children}

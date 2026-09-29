@@ -3170,6 +3170,116 @@ unbekannt, fremd und Gastbestellung antworten identisch. Das Rate Limit — 20 m
 Nachrichten je Bestellung und Stunde — zählt unter einem Advisory-Lock auf die Bestellung und
 weist ab, bevor geschrieben wird.
 
+#### Aufmerksamkeit an der Bestellung (`0099`, ADR-0111)
+
+`order_attention_reads` ist der Zwilling von `order_conversation_reads`: ein Wasserstand je
+(Bestellung, Seite), dieselben Spalten, dieselben Rechte (RLS an, `revoke all` für jede
+Clientrolle). Zwei Tabellen und nicht eine, weil zwei Kanäle zwei Lesestände sind — wer seine
+Nachrichten liest, hat damit die Versandmeldung nicht gesehen.
+
+**Gezählt werden Ereignisse gegen einen Lesestand, nie ein Status.** In der ganzen Migration
+kommt kein `payment_status`, kein `fulfillment_status` und kein `needs_resolution` vor; ein Test
+hält das fest. „Bezahlt und noch nicht versendet" bleibt Arbeit und bleibt in
+`seller_open_order_counts()` auf der Arbeitskarte — eine Marke, die das Ansehen nicht wegnimmt,
+ist nach der dritten Bestellung nur noch Farbe.
+
+Zwei Filter entscheiden, was eine Seite angeht: der **Typ** (Whitelist) und der **Absender**
+(`actor_kind`). Verkäufer: `payment_succeeded`, `withdrawal_declared`, `payment_amount_mismatch`,
+`late_payment_unresolved`. Käufer: `order_shipped`, `refund_recorded`. Was die eigene Seite
+ausgelöst hat, ist per Definition gelesen.
+
+| Funktion | Recht | |
+|---|---|---|
+| `order_attention_role(order_id)` | niemand | `customer` \| `seller` \| `NULL`. Anders als `order_conversation_role()` antwortet eine **Gastbestellung** dem Betrieb mit `seller`: ein Gast hat keine Unterhaltung, der Betrieb aber eine Bestellung. |
+| `order_attention_events(order_id, role)` | niemand | Die Whitelist plus `from_other`. Kein Payload — diese Funktion beantwortet „wie viel ist neu", nicht „was steht drin". |
+| `attention_summaries(role)` | niemand | Eine Zeile je Bestellung mit etwas zu melden, ungelesen zuerst. |
+| `mark_order_attention_read(order_number)` | authenticated | Beim Öffnen der **Bestellung**, nie einer Liste. Idempotent und monoton. |
+| `my_order_attention()` / `seller_order_attention()` | authenticated | Die Listen für „Neu" am Eintrag. |
+| `my_attention_total()` / `seller_attention_total()` | authenticated | Die Zahlen für Karte und Symbol. Aggregate, keine gezählten Seiten (ADR-0082). |
+
+**Eine Änderung an `0098`:** `conversation_summaries()` zählt seit `0099` nur noch menschliche
+Nachrichten. `order_conversation()` ist unberührt — im Strang stehen `order_shipped` und
+`refund_recorded` weiterhin als Systemzeilen (ADR-0108); verschoben ist ausschließlich, **wo sie
+gezählt werden**, sonst trüge dieselbe Zustellung an zwei Marken bei.
+
+**Der Schnitt bei der Einführung** ist derselbe wie in `0098`: jede bestehende Bestellung startet
+beidseitig als gesehen, `where not exists (…)` macht den Block einmalig.
+
+#### Eine Mail je Ereignis (`0100`, ADR-0112)
+
+`order_mail` trug seit `0019` den Schlüssel `(order_id, kind)` — eine Mail je Art und
+Bestellung, für immer. Für Bestätigung und Versand ist das richtig. Für Erstattungen, Stornos
+und Nachrichten war es keine Unterdrückung, sondern eine **Unmöglichkeit**: die zweite Mail
+derselben Art konnte nicht existieren.
+
+Neu ist eine nullbare Spalte `ref` und ein eindeutiger Index über
+`(order_id, kind, coalesce(ref, ''))`. `ref` nennt das auslösende Ereignis — eine
+`order_refunds.id`, eine `order_line_events.id`, eine `order_messages.id`. **Bestehende Zeilen
+tragen `ref = NULL` und bleiben exakt so einzigartig wie bisher.** `coalesce` ist dabei
+wesentlich: ohne es kollidierte NULL im Index nicht mit sich selbst, und die Bestätigungsmail
+käme doppelt. Die Migration erzeugt keine einzige neue Mail.
+
+`claim_order_mail()`, `mark_order_mail_sent/_failed/_unresolved()` bekommen `p_ref` als letzten
+Parameter mit Vorgabewert — per `drop function` und Neuanlage, weil `create or replace` bei
+geänderter Argumentliste eine Überladung erzeugt und PostgREST darauf mit `PGRST203` antwortet
+(auch der Service Role, die diese vier ruft). Der Resend-Idempotenzschlüssel trägt `ref`
+ebenfalls, sonst hielte der Anbieter die zweite Erstattungsmail für eine Wiederholung der ersten.
+
+Neue Arten: `cancellation_notice`, `message_to_customer`, `message_to_seller`,
+`new_order_notice`, `withdrawal_notice`. Die Richtung hängt an der **Art**, nicht an einem Feld —
+eine Art, die beides sein kann, macht aus `goesToCustomer()` eine Verzweigung mit zwei Wahrheiten.
+
+**Die Drosselung** steht in `message_notice_due(order_number, recipient)`: ein Hinweis geht raus,
+wenn der Empfänger seit dem letzten hineingesehen hat — oder wenn es noch keinen gab. Sonst liegt
+in seinem Postfach bereits ein ungelesener Hinweis auf dasselbe Gespräch. Kein Zeitgeber, kein
+Zähler; beide Angaben stehen schon da (`order_conversation_reads.last_read_at` gegen
+`order_mail.sent_at`). Kein Clientrecht — entschieden wird in der Edge Function, die ohnehin als
+Service Role läuft.
+
+**Eine Mail verschiebt niemals einen Wasserstand.** `0098`/`0099` bleiben die einzige Wahrheit
+darüber, was gesehen wurde.
+
+#### Womit bezahlt wurde (`0101`, ADR-0112)
+
+`payment_attempts` bekommt `provider_intent_id`, `payment_method_type`, `card_brand`,
+`card_last4`, `wallet_type`, `method_recorded_at`. Vier Ziffern und ein Markenname, mehr nicht —
+ein CHECK erzwingt `^[0-9]{4}$`, und eine Marke ohne Kartentyp ist strukturell ausgeschlossen.
+
+Die Angaben kommen aus **`charge.succeeded`**, das der Webhook seit `0101` mitbehandelt. Der Weg
+über `sessions.retrieve(..., expand)` wäre der andere gewesen und hätte einen Stripe-Secret-Key in
+der Webhook-Function verlangt — die hält bewusst keinen, damit der eine Endpunkt, den das offene
+Internet erreicht, nichts belasten und nichts erstatten kann. Diese Eigenschaft bleibt.
+
+`attach_payment_intent()` hält fest, welcher PaymentIntent zu einer Session gehört;
+`record_payment_method()` schreibt den Schnappschuss **genau einmal** (`method_recorded_at` ist
+der Wächter). Trifft die Ladung vor der Session ein — Stripe sichert keine Reihenfolge zu —,
+antwortet sie `unknown_intent`, die Function gibt 500 zurück und Stripe wiederholt; dasselbe
+Muster, mit dem `unknown_payment` seit `0012` umgeht.
+
+**Nicht rückwirkend.** Für Bestellungen vor `0101` bleiben die Felder NULL und die Anzeige sagt
+nichts. Eine Kartenmarke aus einer unsicheren Quelle zu erraten wäre schlimmer als eine Lücke.
+
+#### Der Käufer sieht seinen Commerce-Stand (`0102`, ADR-0112)
+
+`my_order()` war seit `0039` unverändert — vor dem gesamten Commerce-Block — und kannte weder
+Storno noch Retoure noch Erstattung. Es projiziert jetzt je Position zusätzlich `cancelled`,
+`returned`, `fulfillable`, `outstanding` aus **demselben** `order_line_quantities()`, das
+`admin_order()` seit `0096` benutzt, dazu die der Position zugeordnete Erstattung aus
+`order_refund_allocations` (`allocation_type = 'line'`; der Versandanteil gehört keiner Position
+und erscheint nur in der Summe). Auf Bestellebene kommen `refunded_total` und `remaining_total`
+hinzu, dazu der Zahlungsschnappschuss aus `0101`.
+
+**Die ursprüngliche Position wird nicht umgeschrieben:** `quantity` und `line_total` bleiben, was
+bestellt wurde — so steht es auf der Rechnung. Was seither geschah, tritt daneben. Keine neue
+Tabelle, keine neue Spalte, kein zweiter Rechenweg.
+
+**Offener Folgepunkt — nicht implementiert:** Storno und Erstattung lassen die Originalrechnung
+unberührt, und das ist richtig; sie dokumentiert den Vertrag, wie er geschlossen wurde. Ob und in
+welcher Form zusätzlich ein **unveränderliches Korrekturdokument** entsteht — eigene
+Nummernfolge, Bezug auf Originalrechnung und auslösendes Ereignis, eigener Schnappschuss —, ist
+eine fachliche und steuerliche Entscheidung, die vor jeder Implementierung getrennt getroffen
+wird.
+
 #### Unveränderlichkeit und Anhängejournal
 
 `shop_inventory.sky_id` und `condition` sind per Trigger unveränderlich — **auch für die

@@ -43,6 +43,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { createSaleWithDetails } from "@/lib/orderbook/sales-actions";
@@ -392,13 +393,13 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         </label>
       </FormSection>
 
-      <button type="submit" disabled={pending}
-              className={`${ACTION_PRIMARY} min-h-11 w-full disabled:opacity-60 sm:w-auto sm:self-start`}>
+      <PendingButton type="submit" pending={pending} pendingLabel={de.pending.saving}
+              className={`${ACTION_PRIMARY} min-h-11 w-full gap-2 disabled:opacity-60 sm:w-auto sm:self-start`}>
         {create.submit}
         {draftUnitCount(lines) > 0
           ? ` · ${de.business.orderbook.figures.units(draftUnitCount(lines))}`
           : ""}
-      </button>
+      </PendingButton>
     </form>
   );
 }

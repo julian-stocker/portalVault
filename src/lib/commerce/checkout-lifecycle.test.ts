@@ -233,7 +233,9 @@ describe("the checkout wires the reset up, and keeps its other guards", () => {
   });
 
   it("still disables the button while a redirect is running", () => {
-    expect(view).toContain("disabled={redirecting}");
+    // Über `PendingButton`, der `disabled={disabled || pending}` selbst setzt
+    // — und der dabei zusätzlich ein Rad zeigt.
+    expect(view).toContain("pending={redirecting}");
   });
 
   it("starts no second payment session of its own", () => {

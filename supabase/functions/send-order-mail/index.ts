@@ -107,7 +107,14 @@ function secretMatches(given: string | null): boolean {
   return diff === 0;
 }
 
-type Caller = { kind: "webhook" } | { kind: "admin"; userId: string } | { kind: "checkout" } | null;
+type Caller =
+  | { kind: "webhook" }
+  | { kind: "admin"; userId: string }
+  /* Seit 0100: die Kundschaft, aber nur für die eigene Bestellung und nur für
+     die zwei Nachrichtenhinweise. */
+  | { kind: "party"; userId: string }
+  | { kind: "checkout" }
+  | null;
 
 async function authorise(req: Request): Promise<Caller> {
   if (secretMatches(req.headers.get("x-skyisles-mail-secret"))) return { kind: "webhook" };
@@ -127,6 +134,35 @@ async function authorise(req: Request): Promise<Caller> {
   if (roleError || isAdmin !== true) return null;
 
   return { kind: "admin", userId: data.user.id };
+}
+
+/**
+ * Darf dieser Aufrufer einen Hinweis zu DIESER Bestellung auslösen? (0100)
+ *
+ * Nur für die zwei Nachrichtenhinweise, nur mit einem verifizierten Token und
+ * nur, wenn die Bestellung dem Konto gehört. Kein Shop-Admin-Recht nötig — der
+ * Betrieb kommt ohnehin über `authorise()` herein.
+ *
+ * Die Prüfung stellt der Service-Role-Client, nicht der Aufrufer: `orders`
+ * ist für Clientrollen gesperrt, und eine Antwort von dort wäre keine.
+ */
+async function authoriseParty(req: Request, orderNumber: string): Promise<Caller> {
+  const authorization = req.headers.get("Authorization");
+  const bearer = authorization?.startsWith("Bearer ") ? authorization.slice(7) : null;
+  if (!bearer) return null;
+
+  const { data, error } = await admin.auth.getUser(bearer);
+  if (error || !data.user) return null;
+
+  const { data: rows, error: orderError } = await admin
+    .from("orders")
+    .select("id")
+    .eq("order_number", orderNumber)
+    .eq("user_id", data.user.id)
+    .limit(1);
+  if (orderError || !rows || rows.length === 0) return null;
+
+  return { kind: "party", userId: data.user.id };
 }
 
 /**
@@ -242,6 +278,7 @@ Deno.serve(async (req) => {
     kind?: unknown;
     force?: unknown;
     withdrawalId?: unknown;
+    ref?: unknown;
   };
   try {
     body = await req.json();
@@ -275,6 +312,20 @@ Deno.serve(async (req) => {
   const kind: MailKind = body.kind;
 
   /*
+   * WELCHES EREIGNIS (0100).
+   *
+   * Eine Bestellung kann zwei Erstattungen haben, drei Teilstornos und ein
+   * Dutzend Nachrichten. `ref` nennt das auslösende Ereignis — eine
+   * `order_refunds.id`, eine `order_line_events.id`, eine `order_messages.id`
+   * —, und erst damit ist „genau einmal" je Ereignis statt je Art. Die
+   * einmaligen Arten schicken weiterhin ohne `ref` und bleiben so einzigartig,
+   * wie sie es seit 0019 sind.
+   */
+  const ref = typeof body.ref === "string" && body.ref.trim() !== ""
+    ? body.ref.trim().slice(0, 64)
+    : null;
+
+  /*
    * THE ORDER ACKNOWLEDGEMENT IS REACHABLE WITHOUT A TOKEN, and it has to be:
    * § 312i Abs. 1 Nr. 3 BGB requires the receipt of an order to be confirmed
    * without undue delay, and most orders are placed by guests who hold no
@@ -286,7 +337,23 @@ Deno.serve(async (req) => {
    * that order's own acknowledgement to be sent to that order's own customer,
    * once — which is a message the customer was going to receive anyway.
    */
-  const caller = kind === "order_received" ? { kind: "checkout" as const } : await authorise(req);
+  /*
+   * WER EINEN NACHRICHTENHINWEIS AUSLÖSEN DARF (0100).
+   *
+   * Der Betrieb ist Shop-Admin und kommt durch `authorise()`. Die Kundschaft
+   * nicht — und soll es auch nicht allgemein: `authoriseParty()` lässt genau
+   * die beiden Nachrichtenhinweise zu und nur für die eigene Bestellung.
+   *
+   * Der Empfänger wird davon nicht berührt. Er ergibt sich aus der ART der
+   * Mail und aus der Bestellung, nie aus etwas, das der Aufrufer mitschickt —
+   * ein fremdes Postfach ist auf diesem Weg nicht erreichbar.
+   */
+  const caller = kind === "order_received"
+    ? { kind: "checkout" as const }
+    : (await authorise(req)) ??
+      (kind === "message_to_customer" || kind === "message_to_seller"
+        ? await authoriseParty(req, orderNumber)
+        : null);
   if (!caller) return respond(401, { error: "not_authorised" });
 
   // Only a verified administrator may overrule an unresolved record. A webhook
@@ -294,11 +361,40 @@ Deno.serve(async (req) => {
   const force = caller.kind === "admin" && body.force === true;
 
   try {
+    /*
+     * ---- 0. die Drosselung, und nur für Nachrichtenhinweise (0100) --------
+     *
+     * Ein lebhaftes Gespräch darf keine Maillawine sein. `message_notice_due()`
+     * vergleicht den Lesestand des Empfängers mit dem Zeitpunkt des letzten
+     * Hinweises: gesendet wird, wenn er seit dem letzten hineingesehen hat —
+     * oder wenn es noch keinen gab. Hat er nicht, liegt in seinem Postfach
+     * bereits ein ungelesener Hinweis auf genau dieses Gespräch.
+     *
+     * VOR dem Anspruch, nicht danach: ein Anspruch, der nicht versendet wird,
+     * bliebe als `sending` stehen und sperrte den nächsten echten Hinweis.
+     *
+     * Die Entscheidung gehört hierher, weil diese Function als Service Role
+     * läuft. Die Funktion hat kein Clientrecht — wer sie fragen könnte,
+     * erführe etwas über fremde Bestellungen.
+     */
+    if (kind === "message_to_customer" || kind === "message_to_seller") {
+      const { data: due, error: dueError } = await admin.rpc("message_notice_due", {
+        p_order_number: orderNumber,
+        p_recipient: kind === "message_to_customer" ? "customer" : "seller",
+      });
+      // Im Zweifel nicht senden: eine ausgebliebene Erinnerung ist ein
+      // kleinerer Schaden als zwanzig Mails zu einem Gespräch.
+      if (dueError || due !== true) {
+        return respond(200, { sent: false, outcome: "not_due" });
+      }
+    }
+
     // ---------------------------------------------------------- 1. the claim
     const { data: claim, error: claimError } = await admin.rpc("claim_order_mail", {
       p_order_number: orderNumber,
       p_kind: kind,
       p_force: force,
+      p_ref: ref,
     });
     if (claimError) throw new Error(`claim: ${claimError.message}`);
 
@@ -319,6 +415,7 @@ Deno.serve(async (req) => {
         p_order_number: orderNumber,
         p_kind: kind,
         p_error: "order_vanished",
+        p_ref: ref,
       });
       return respond(404, { error: "unknown_order" });
     }
@@ -339,6 +436,7 @@ Deno.serve(async (req) => {
         p_order_number: orderNumber,
         p_kind: kind,
         p_error: "no_recipient_configured",
+        p_ref: ref,
       });
       return respond(200, { sent: false, outcome: "no_recipient" });
     }
@@ -361,7 +459,7 @@ Deno.serve(async (req) => {
       {
         // Stable per logical mail, never per attempt. Resend deduplicates on
         // it for 24 hours, which is the second guard behind the delivery row.
-        idempotencyKey: idempotencyKey(kind, order.order_number),
+        idempotencyKey: idempotencyKey(kind, order.order_number, ref),
       },
     );
 
@@ -384,6 +482,7 @@ Deno.serve(async (req) => {
         p_order_number: orderNumber,
         p_kind: kind,
         p_error: name,
+        p_ref: ref,
       });
 
       console.error(`send-order-mail: ${kind} ${orderNumber} -> ${name}`);
@@ -394,6 +493,7 @@ Deno.serve(async (req) => {
       p_order_number: orderNumber,
       p_kind: kind,
       p_message_id: sent?.id ?? null,
+      p_ref: ref,
     });
 
     return respond(200, { sent: true, outcome: "sent" });
@@ -408,6 +508,7 @@ Deno.serve(async (req) => {
         p_order_number: orderNumber,
         p_kind: kind,
         p_error: "transport_or_crash",
+        p_ref: ref,
       })
       .catch(() => {});
 

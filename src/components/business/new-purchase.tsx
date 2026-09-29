@@ -28,6 +28,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { createPurchaseWithItems } from "@/lib/orderbook/actions";
@@ -169,11 +170,11 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
         </label>
       </FormSection>
 
-      <button type="submit" disabled={pending}
-              className={`${ACTION_PRIMARY} min-h-11 w-full disabled:opacity-60 sm:w-auto sm:self-start`}>
+      <PendingButton type="submit" pending={pending} pendingLabel={de.pending.saving}
+              className={`${ACTION_PRIMARY} min-h-11 w-full gap-2 disabled:opacity-60 sm:w-auto sm:self-start`}>
         {copy.submitPurchase}
         {units > 0 ? ` · ${figures.units(units)}` : ""}
-      </button>
+      </PendingButton>
     </form>
   );
 }

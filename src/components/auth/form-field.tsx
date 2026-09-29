@@ -3,6 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
+import { PendingButton } from "@/components/ui/pending";
 import type { AuthContext } from "@/lib/auth/context";
 import { de } from "@/lib/i18n/de";
 
@@ -110,17 +111,24 @@ export function FormMessage({ tone, children }: { tone: "error" | "success"; chi
 }
 
 export function SubmitButton({ label, pending }: { label: string; pending: boolean }) {
+  /*
+   * A form submit genuinely must not run twice, so unlike the card actions
+   * this one does disable while pending — `PendingButton` does that itself.
+   *
+   * Es stand hier „…", und das war die schwächste Rückmeldung im ganzen
+   * Produkt: drei Punkte, wo eben noch „Anmelden" stand. Eine Anmeldung
+   * wartet auf Supabase, also auf ein fremdes Netz, und das kann dauern.
+   * Jetzt dreht sich ein Rad und es steht da, was geschieht.
+   */
   return (
-    // A form submit genuinely must not run twice, so unlike the card actions
-    // this one does disable while pending.
-    <button
+    <PendingButton
       type="submit"
-      disabled={pending}
-      aria-busy={pending || undefined}
-      className={`${ACTION_PRIMARY} disabled:opacity-60`}
+      pending={pending}
+      pendingLabel={de.pending.submitting}
+      className={`${ACTION_PRIMARY} gap-2 disabled:opacity-60`}
     >
-      {pending ? "…" : label}
-    </button>
+      {label}
+    </PendingButton>
   );
 }
 

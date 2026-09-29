@@ -324,7 +324,12 @@ describe("Gastbestellungen bleiben ohne Unterhaltung", () => {
 
 describe("die Zahlen am Rand", () => {
   it("hängen am Kontosymbol und am Menüpunkt des Betriebs", () => {
-    expect(NAV).toContain("unread={unread.mine}");
+    /* Seit 0099 trägt das Symbol die SUMME der Kanäle der aktiven Rolle —
+       Nachrichten plus Bestellereignisse —, ausgerechnet statt nebeneinander
+       erhoben, damit Symbol und Karten nicht auseinanderlaufen können. */
+    expect(NAV).toContain("unread={roleAttention(");
+    expect(NAV).toContain("{ messages: unread.seller, orders: attention.seller }");
+    expect(NAV).toContain("{ messages: unread.mine, orders: attention.mine }");
     expect(NAV).toContain("badge: (_counts, unread) => unread.seller,");
     expect(NAV).toContain('href: "/business/nachrichten"');
   });
@@ -404,8 +409,15 @@ describe("kein Weg an den RPCs vorbei", () => {
 
   it("die Aktion setzt keine Urheberseite", () => {
     const fn = code("src/lib/messages/actions.ts");
-    expect(fn).not.toContain("author_kind");
+    /*
+     * Sie SETZT sie nicht — sie LIEST sie seit 0100 aus der Antwort, um zu
+     * wissen, wohin der Mailhinweis geht. Der Unterschied ist der ganze
+     * Punkt: `p_author` gibt es nicht und darf es nicht geben, die Seite
+     * entscheidet `order_conversation_role()` in der Datenbank.
+     */
     expect(fn).not.toContain("p_author");
+    expect(fn).not.toContain('author_kind:');
+    expect(fn).toContain('row.author_kind === "seller" ? "message_to_customer" : "message_to_seller"');
     // Sie kommt aus `order_conversation_role()`, und zwar dort.
     expect(SQL).toContain("values (v_order_id, v_role, (select auth.uid()), v_body)");
   });

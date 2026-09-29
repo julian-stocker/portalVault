@@ -4,6 +4,7 @@ import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
 import { currentUser } from "@/lib/auth/user";
@@ -47,6 +48,12 @@ export default async function PublicLayout({ children }: { children: React.React
     mine: user ? await fetchMyUnread() : 0,
     seller: caps.sellerOperator ? await fetchSellerUnread() : 0,
   };
+  /* Zweiter Kanal (0099). Ohne Konto beides 0, und dafür wird nichts
+     gefragt — dieselbe Zurückhaltung wie bei den Nachrichten. */
+  const attention = {
+    mine: user ? await fetchMyAttentionTotal() : 0,
+    seller: caps.sellerOperator ? await fetchSellerAttentionTotal() : 0,
+  };
 
   return (
     <div className="relative flex min-h-screen flex-col">
@@ -58,6 +65,7 @@ export default async function PublicLayout({ children }: { children: React.React
         business={caps.sellerOperator}
         openOrders={openOrders}
         unread={unread}
+        attention={attention}
         username={profile?.username ?? null}
       />
       {/* `flex-1` so a short page still pushes the footer to the bottom of the

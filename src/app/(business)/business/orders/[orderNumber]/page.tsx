@@ -9,6 +9,9 @@ import { OrderReviewPanel } from "@/components/admin/order-review-panel";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
 import { SandboxOrderPanel } from "@/components/admin/sandbox-order-panel";
 import { ConversationThread } from "@/components/messages/conversation-thread";
+import { MarkOrderSeen } from "@/components/orders/mark-order-seen";
+import { fetchSellerOrderAttention } from "@/lib/attention/queries";
+import { unreadOrderNumbers } from "@/lib/attention/attention";
 import { ShipOrderForm } from "@/components/admin/ship-order-form";
 import { TrackingForm } from "@/components/admin/tracking-form";
 import { TrackingLink } from "@/components/commerce/tracking-link";
@@ -75,6 +78,9 @@ export default async function AdminOrderPage({
    * Hand in Stripe, und was der Operator dort tat, steht in `refunds`.
    */
   const conversation = await fetchConversation(order.order_number);
+  /* Öffnen heißt gesehen (0099). Spiegelbildlich zur Käuferseite. */
+  const unseen = unreadOrderNumbers(await fetchSellerOrderAttention())
+    .has(order.order_number);
   const withdrawal = detail.withdrawal ?? null;
   const refunds = detail.refunds ?? [];
   /*
@@ -490,6 +496,7 @@ export default async function AdminOrderPage({
           </li>
         ))}
       </ol>
+          <MarkOrderSeen orderNumber={order.order_number} unseen={unseen} />
     </main>
   );
 }
