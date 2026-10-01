@@ -1211,6 +1211,105 @@ für ein Recht in der Datenbank. Sie schützt ihren eigenen Weg; ein direkter RP
 daran vorbei. Beides zusammen ist die Absicht — die Datenbank entscheidet, die Anwendung erspart
 die Runde.
 
+### Die Datensicherung des Betriebs (`0104`, ADR-0114)
+
+Ein Betriebskonto kann seine Geschäftsdaten als eine JSON-Datei herunterladen. Das ist der
+einzige Weg, auf dem diese Daten SkyIsles gebündelt verlassen — entsprechend eng ist er gebaut.
+
+**Wer darf.** Ausschließlich `can_operate_active_seller()`. Der Wächter sitzt **in der
+Datenbank**, in `seller_business_backup()`; die Prüfung `canOperateSeller()` in der Route ist
+Bequemlichkeit, nicht die Grenze. Ein direkter RPC-Aufruf geht an der Route vorbei, nicht am
+Wächter. Für jeden anderen liefert die Funktion `NULL`.
+
+**Womit.** Die Route ruft mit der **echten Benutzersitzung** (`createClient()` aus dem Cookie),
+**niemals** mit Service Role. Dieses Deployment hält keinen Service-Role-Schlüssel, und das
+bleibt so (`docs/DEPLOYMENT.md`).
+
+**`NULL` ist kein leeres Backup.** So antwortet die Funktion einem Konto ohne Betriebsrolle. Die
+Route macht daraus **404**, niemals eine Datei mit leerem Datenteil — die sähe aus wie eine
+Sicherung, in der nichts drinsteht. 404 und nicht 403, wie überall hier: unbekannt und
+nicht-deins antworten gleich.
+
+**Was drinsteht.** Lagerbestand, Lagerbewegungen, Einkaufskosten, Verkäufe, Gebühren,
+Bestellungen — und **Rechnungen mit Namen und Anschriften der Käufer**. Aufbewahrungspflichtig
+nach § 147 AO und deshalb enthalten, aber personenbezogen. Was bewusst draußen bleibt, steht in
+`src/lib/backup/manifest.ts`: Auth- und Kontodaten, gespeicherte Kundenadressen,
+Nachrichteninhalte, Zahlungstechnik samt Kartendaten, `client_salt` und die gesamte
+Legacy-Importmaschinerie.
+
+**Nichts wird protokolliert.** Kein Dokument, kein Ausschnitt, keine Zeilenzahl — und **keine
+Datenbank-Fehlermeldung**: die kann einen Tabellennamen tragen. Die Route hat kein einziges
+`console.*`, Fehlerantworten sind `Not found` und `Backup failed` ohne Inhalt.
+
+**Auslieferung.** `Cache-Control: private, no-store`, `Content-Disposition: attachment`,
+`X-Content-Type-Options: nosniff`. Keine Datei auf dem Server, kein Zwischenspeicher, nichts in
+`localStorage`, `sessionStorage` oder IndexedDB.
+
+**Eine Sicherung gehört niemals ins Repository.** `.gitignore` sperrt
+`skyisles-business-backup-*.json`, und `src/lib/backup/download.test.ts` hält die Regel dort
+fest, damit sie bei einem Aufräumen nicht verschwindet. Die Datei gehört auf die eigene Platte —
+nach Art. 32 DSGVO ist sie dort weiter zu schützen.
+
+**Kein Restore in V1, und das ist eine Sicherheitsaussage.** `restore_supported` ist `false`.
+Ein späterer Restore darf **nicht** einfach JSON in Tabellen zurückschreiben: er braucht einen
+eigenen, validierten Vertrag — Versionsprüfung, Schemaprüfung, Probelauf, Prüfung der
+referenziellen Integrität und einen ausdrücklichen Schreibpfad. `inventory_movements` bleibt
+dabei append-only; ein Restore, der Bewegungen zurückschreibt oder Bestände setzt, ist genau
+der verbotene Weg aus der Excel-Zeit. Solange es diesen Vertrag nicht gibt, bleibt
+`restore_supported = false` unverändert.
+
+### Die Datensicherung der Plattform (`0105`–`0107`, ADR-0115)
+
+Der Plattformadmin kann die **gesamte** Plattform als ZIP herunterladen. Das ist die schwerere
+der beiden Sicherungen und entsprechend eng gebaut.
+
+**Wer darf.** Ausschließlich `is_platform_admin()`, geprüft **in der Datenbank** — in
+`system_platform_export()` (`0105`) und `system_auth_inventory()` (`0107`). `isPlatformAdmin()`
+in Route und Server Action ist Bequemlichkeit und die Quelle der deutschen Meldung, nicht die
+Grenze. Für alle anderen liefern beide Funktionen `NULL`; die Route antwortet **404**, nicht
+403 (ADR-0039).
+
+**Womit.** Mit der **echten Adminsitzung**, niemals mit Service Role — auch nicht für Storage:
+der Bucket `catalog` ist seit `0007` öffentlich lesbar, also genügt die Sitzung. `0106` entzieht
+`service_role` darüber hinaus EXECUTE auf `system_platform_export()` und jedes Recht auf
+`platform_export_runs`; beides stammte aus Supabase' Default-Privileges, nicht aus einer
+Migration. `docs/DEPLOYMENT.md` bleibt gültig: der Service-Role-Schlüssel gehört nicht nach
+Vercel, und dieser Weg braucht ihn nicht.
+
+**Was im Archiv nicht steht.** `AUTH_FORBIDDEN_FIELDS` sperrt zwölf Auth-Felder — Passwort-
+nachweis, alle Einmaltokens, `raw_app_meta_data`, `raw_user_meta_data`, `identities`,
+`factors`, `encrypted_secret`. `PLATFORM_FORBIDDEN_FIELDS` sperrt 33 Felder insgesamt, darunter
+`client_salt`, die Zahlungstoken, alle Stripe- und Resend-Kennungen und den Kartenschnappschuss.
+Durchgesetzt an **zwei** Stellen: die SQL nennt sie nicht, und `authInventoryDocument()`
+**wirft**, wenn eine Quelle trotzdem eines mitschickt — die Reduktion allein würde ein
+versehentliches `select *` still schlucken.
+
+**`provider` ist abgeleitet, nicht exportiert.** `raw_app_meta_data ->> 'provider'` liefert
+`text`; das Objekt selbst verlässt die Datenbank nicht. Ein Test unterscheidet diese erlaubte
+Form von einem Export des Objekts und prüft sich dabei selbst gegen die verbotene Variante.
+
+**Das Auth-Inventar ist kein Auth-Restore.** Sieben Felder je Konto, keine Anmeldung
+nachbildbar, kein Konto wiederherstellbar. Der Disclaimer steht im Manifest, in der SQL, im
+Archiv und auf der Seite — vier Stellen, weil ein Backup, das jemand für einen Restore hält,
+gefährlicher ist als gar keins.
+
+**Was nie protokolliert wird.** Kein Dokument, kein Ausschnitt, keine E-Mail-Adresse, kein
+Objektpfad, keine Zeilenzahl, keine Kennung. Keine Meldung aus Datenbank oder Storage-API
+verlässt den Server: die eine kann einen Tabellennamen tragen, die andere eine signierte
+Adresse. Die Historie trägt einen Fehlschlag als **Stufe**, nie als Text.
+
+**Die Historie ist ein Nachweis.** `platform_export_runs` ist von außen vollständig geschlossen
+(RLS, keine Policy, keine Grants, kein `service_role`) und append-only; `received` und `failed`
+sind endgültig, Löschen ist unmöglich. Sie enthält bewusst keine Inhalte und keine
+personenbezogenen Daten, deshalb kann die Oberfläche sie vollständig anzeigen — die Prüfsumme
+trotzdem nur gekürzt.
+
+**Konsequenz für das Repository.** Das Archiv enthält die E-Mail-Adressen aller Konten, Namen
+und Anschriften aus Bestellungen und Rechnungen, Lagerzahlen und Einkaufspreise. `.gitignore`
+sperrt `skyisles-platform-backup-*.zip` neben `skyisles-business-backup-*.json`, und je ein
+Test hält beide Regeln fest. Die Seite sagt es auch dem Menschen: nicht ins Repository, nicht
+nach Git oder GitHub, in keinen geteilten Ordner, in keinen fremd lesbaren Cloud-Speicher.
+
 ## 7. Datenschutz (DSGVO)
 
 Sobald Benutzerkonten existieren, werden personenbezogene Daten verarbeitet:

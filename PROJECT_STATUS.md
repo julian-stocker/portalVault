@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-09-29 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-01 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -51,6 +51,103 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Datensicherung für den Betrieb (2026-09-30, `0104`, ADR-0114) — fertig, nicht committet
+
+**Anlass.** Die Datenbank ist die operative Wahrheit; die alte Arbeitsmappe war damit faktisch
+zur Notfallquelle geworden, ohne es sein zu dürfen. Supabase sichert die Datenbank — das ist
+ein Infrastruktur-Backup beim Anbieter. Was fehlte, ist eine **portable Kopie der
+Geschäftsdaten**, die der Betrieb selbst aufbewahren und öffnen kann.
+
+**Vier Teile.** `src/lib/backup/manifest.ts` ist der fachliche Exportvertrag (25 Bereiche, 273
+übernommene Felder, 4 gebildete, 38 begründet ausgelassene, 24 ganz ausgeschlossene Tabellen,
+30 global gesperrte Felder). `seller_business_backup()` aus `0104` liefert das Dokument in
+**einem** Statement, also aus einer MVCC-Momentaufnahme. Die Route
+`/business/datensicherung/download` prüft, ruft mit der Benutzersitzung und ergänzt
+`source_project` und `counts`. Die Seite `/business/datensicherung` erklärt und lädt herunter.
+
+**Stand der Umgebungen.**
+
+| | |
+|---|---|
+| **Staging** `qqxcpesbwfxzgytkdsac` | `0104` angewendet. Export validiert: **25/25 Bereiche**, figures-Invariante **386/386** (0 fehlend, 0 überzählig), **ca. 1,71 MiB** kompakt bei 5 479 Datensätzen, Geldwerte als Strings, keine gesperrten Felder, keine Legacy-Daten, **0 persistente Writes**. ACL und Rollenproben grün, Kundenkonto erhält `NULL`. |
+| **Production** `zmiwxswrpkmizvqsgype` | `0104` angewendet. ACL identisch zum validierten Staging-Zustand, Kundenkonto erhält `NULL`. **Postflight: 0 persistente Abweichungen** über 25 Bereichsquellen, Lager, Orderbuch und die reale Bestellung. |
+| **Anwendung** | Route und Oberfläche **lokal gebaut**, nicht committet, nicht deployt. |
+
+**Browser-Smoke-Test bestanden** — angemeldet als Betrieb, ein tatsächlicher Download gegen
+Staging. Damit ist nicht nur die Quelle geprüft, sondern auch das Verhalten im Browser.
+
+**Ausdrücklich später:** ein **Restore** (eigenes Feature mit Versions- und Schemaprüfung,
+Probelauf, Integritätsprüfung und getrennt freigegebenem Schreibpfad; `restore_supported` bleibt
+bis dahin `false`) und das **Excel-Backup**, das ausschließlich aus demselben JSON-Datenmodell
+erzeugt wird — kein zweiter Datenpfad.
+
+## Datensicherung der Plattform (2026-10-01, `0105`–`0107`, ADR-0115) — auf Staging validiert, nicht committet
+
+**Zwei getrennte Konzepte, nicht zwei Ansichten desselben.** Der **Business-Export** (`0104`,
+oben) gehört dem Betrieb: seine eigenen Geschäftsdaten, 25 Bereiche, eine JSON-Datei. Das
+**Platform-Backup** gehört dem Plattformbetreiber: alles, was nötig wäre, um SkyIsles nach
+einem Totalverlust wieder aufzubauen, 53 Bereiche plus Konten-Inventar plus Storage-Dateien,
+als ZIP. Verschiedene Leser, verschiedene Feldregeln, verschiedene Wächter — und deshalb
+verschiedene Manifeste, verschiedene Funktionen und verschiedene Oberflächen. `0104` wurde
+dafür nicht angefasst.
+
+**Anlass.** Production läuft auf **Supabase Free**: keine nativen Backups, kein PITR. Auf
+Anwendungsebene ist dieser Export damit die einzige Absicherung, die wir selbst in der Hand
+haben. Er ist trotzdem **kein Infrastruktur-Backup** — er kennt kein Schema, keine Funktionen,
+keine Policies, keine Sequenzstände und keine Passwörter.
+
+**Kein automatischer Lauf im eigenen Projekt.** Ein Zeitplan, der die Sicherung in denselben
+Supabase-Account schreibt, wäre keine Sicherung, sondern eine zweite Kopie im selben
+Brandabschnitt. Deshalb: **manuell**, vom Plattformadmin ausgelöst, als Datei auf seinen
+Rechner. Kein `pg_cron`, kein Bucket, keine Rotation, kein Cloud-Dienst.
+
+**Die Teile.** `src/lib/backup/platform-manifest.ts` ist der Vertrag (53 Bereiche, 486 Felder,
+davon 4 gebildete, 9 ganz ausgeschlossene Tabellen, 33 global gesperrte Felder).
+`system_platform_export()` (`0105`) liefert `database.json` in **einem** Statement.
+`system_auth_inventory()` (`0107`) liefert das Konten-Inventar. `platform_export_runs` samt
+`admin_platform_export_runs()`, `admin_record_platform_export()` und
+`admin_settle_platform_export()` (`0105`/`0106`) führen die Historie — append-only, mit
+Trigger-Schutz. `src/lib/zip/` schreibt das Archiv streamend, ohne neue Abhängigkeit.
+`/admin/datensicherung` erklärt, lädt herunter, bestätigt und zeigt die Historie.
+
+**Das Auth-Inventar ist kein Auth-Restore.** Sieben Felder je Konto; `provider` wird aus
+`raw_app_meta_data ->> 'provider'` **abgeleitet**, das Objekt selbst verlässt die Datenbank
+nicht. Keine Passwörter, keine Tokens, keine MFA-Geheimnisse, keine Anbieteridentitäten. Nach
+einem Wiederaufbau ordnet man Konten über die **E-Mail-Adresse** zu und setzt Passwörter neu.
+
+**`generated` und `received` sind nicht dasselbe.** `generated` heißt: der Server hat das
+vollständige Archiv erzeugt und ausgeliefert. `received` heißt: der Browser-Fetch ist
+abgeschlossen, der vollständige Blob lag clientseitig vor, und genau **ein** `generated`-Lauf
+seit dem Beginn dieses Downloads war eindeutig zuordenbar. Dass die Datei dauerhaft auf einer
+Platte liegt, behauptet `received` ausdrücklich **nicht** — das kann ein Browser nicht
+beweisen. Nur `received` zählt für die Fälligkeit.
+
+**Stand der Umgebungen.**
+
+| | |
+|---|---|
+| **Staging** `qqxcpesbwfxzgytkdsac` | `0105`–`0107` angewendet und **vollständig validiert**. Realer End-to-End-Durchlauf im Browser: Archiv 2 156 313 Bytes, **53/53 Bereiche**, 36/36 Storage-Dateien, `storage_missing_count = 0`, Auth-Inventar 16 Konten, `source_project` und `commerce_mode` korrekt, ZIP/CRC gültig, lokaler SHA256 = Historienwert. Die Kette `generated → received` hat gegriffen. |
+| **Production** `zmiwxswrpkmizvqsgype` | **nicht angewendet.** `0105`–`0107` sind dort noch offen. |
+| **Anwendung** | Route, Oberfläche, Bestätigung und Fälligkeitsanzeige **lokal gebaut**, nicht committet, nicht deployt. |
+
+**Zwei `received`-Läufe auf Staging** (ids 22 und 23) stammen aus einem **manuell doppelt
+ausgelösten** Test, nicht aus einem Fehler. Beide sind korrekt gebucht und bleiben als
+Historienzeilen stehen; `received` ist eine Aussage über den Empfang, nicht über dauerhafte
+Aufbewahrung. Dass **beide** bestätigt wurden, belegt die Eindeutigkeitsregel: zwei Downloads
+im selben Zeitfenster wären beide `generated` geblieben.
+
+**Postflight: 0 Abweichungen bei 79 geprüften Einzelwerten** — 53 Bereichszähler (Σ 6012), die
+Lagerinvarianten (Σ quantity 808, Σ reserved 0, Σ delta −8), 20 Max-IDs, `auth.users` 16,
+`commerce_mode`, `orderbook_global_factor()` und das Storage-Inventar (36 Dateien,
+2 055 123 Bytes). Die einzige persistente Änderung waren die beiden Historienzeilen. Der Export
+ist damit nachweislich read-only.
+
+**Noch offen:** der **Production-Rollout** von `0105`–`0107` und das Deployment der Anwendung.
+
+**Ausdrücklich später:** ein **Restore** — `restore_supported` bleibt in beiden Formaten
+`false`, und es gibt bewusst keinen Schreibpfad zurück. Ebenso das **Excel-Backup**, das
+ausschließlich aus demselben JSON-Datenmodell erzeugt wird; kein zweiter Datenpfad.
 
 ## Der eigene Ankaufsfaktor ist kein öffentlicher Wert (2026-09-29, `0103`) — gebaut, nicht angewendet
 

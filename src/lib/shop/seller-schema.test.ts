@@ -124,7 +124,15 @@ describe("this is an identity, not a marketplace", () => {
      * that promise the thing this test is checking for.
      */
     /*
-     * ONE EXCEPTION since 0041, and it is the opposite of a marketplace:
+     * TWO EXCEPTIONS, and neither is a marketplace.
+     *
+     * Since 0105 the platform export COPIES the membership row out, so it
+     * reads the column that already exists. An export that dropped it would
+     * lose which shop an operator belongs to — a hole in a backup, to
+     * satisfy a guard about something else. The floor below keeps that
+     * exemption to exactly one projection.
+     *
+     * The original note from 0041, unchanged:
      * `seller_operators.seller_id` names which shop an ACCOUNT may operate
      * (ADR-0077). A membership, not a partition of commerce. Its own file
      * checks that it reaches no commerce table.
@@ -141,7 +149,8 @@ describe("this is an identity, not a marketplace", () => {
           f.endsWith(".sql") &&
           !f.startsWith("0041_") &&
           !f.startsWith("0042_") &&
-          !f.startsWith("0051_"),
+          !f.startsWith("0051_") &&
+          !f.startsWith("0105_"),
       )
       .map((f) => readFileSync(`${MIGRATIONS}/${f}`, "utf8"))
       .join("\n")
@@ -175,6 +184,29 @@ describe("this is an identity, not a marketplace", () => {
     for (const match of sql051.matchAll(/(\w+)\.seller_id/g)) {
       expect(["o", "old", "new"], match[0]).toContain(match[1]);
     }
+  });
+
+  it("and 0105's exemption really is only the copied membership", () => {
+    /*
+     * The platform export may name `seller_id` once, on the row it copies
+     * out of `seller_operators`. It must not filter commerce by it, must not
+     * add a column anywhere, and must not take it as a parameter — any of
+     * those would be the marketplace shape ADR-0021 stopped.
+     */
+    const sql105 = readFileSync(`${MIGRATIONS}/0105_platform_export.sql`, "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n")
+      .replace(/'(?:[^']|'')*'/g, "''");
+
+    // Exactly one mention, and it is the projection's own alias.
+    const mentions = [...sql105.matchAll(/[\w.]*seller_id/g)].map((m) => m[0]);
+    expect(mentions).toEqual(["t.seller_id"]);
+
+    // Read out, never used to shape anything.
+    expect(sql105).not.toMatch(/where[^;]*seller_id/i);
+    expect(sql105).not.toMatch(/add column[^;]*seller_id/i);
+    expect(sql105).not.toContain("p_seller_id");
   });
 
   it("says in its own comment that it is not a relation", () => {

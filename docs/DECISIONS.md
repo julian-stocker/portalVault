@@ -9719,3 +9719,160 @@ Ruhezustand leer ist.
 **Konsequenz.** Der einzige Spinner des Produkts lebt in dieser Datei; ein Test hält die übrigen
 Komponenten frei von `animate-spin`. Neue Knöpfe mit Wartezeit nehmen `PendingButton`, statt ihre
 eigene Variante zu bauen.
+
+---
+
+## ADR-0114 — SkyIsles hat ein eigenes, portables Backupformat für den Betrieb
+
+**Status:** ANGENOMMEN (2026-09-30) · Migration `0104` · `src/lib/backup/`
+
+**Anlass.** Früher war die Arbeitsmappe die Referenz für Lagerbestand und Geschäftsdaten.
+Inzwischen ist die Datenbank die operative Wahrheit — und damit war die Excel-Datei faktisch
+zur Notfallquelle geworden, ohne es je sein zu dürfen. Sie ist veraltet, sie kennt die
+Bestellungen des Shops nicht, und der Weg zurück aus ihr ist ausdrücklich verboten
+(Pre-Go-Live-Cutover, `docs/SECURITY.md`).
+
+Supabase sichert die Datenbank. Das ist ein Infrastruktur-Backup: es gehört dem Anbieter, es
+liegt beim Anbieter, und es ist nicht lesbar ohne ihn. Was gefehlt hat, ist eine **portable
+Kopie der Geschäftsdaten**, die der Betrieb selbst aufbewahren und öffnen kann.
+
+**Entscheidung.** SkyIsles besitzt ein **versioniertes, portables Business-Backupformat**
+zusätzlich zu den Infrastruktur-Sicherungen. `format = skyisles-business-backup`,
+`format_version = 1`.
+
+**Vier Teile, jeder mit genau einer Aufgabe.**
+
+| | |
+|---|---|
+| `src/lib/backup/manifest.ts` | **der fachliche Exportvertrag** — 25 Bereiche, welche Felder enthalten sind, welche bewusst fehlen und warum, welche gebildet werden, welche global gesperrt sind und wo personenbezogene Daten stehen dürfen |
+| `seller_business_backup()` (`0104`) | **die konsistente Momentaufnahme** — ein Statement, eine MVCC-Sicht, hinter `can_operate_active_seller()` |
+| `/business/datensicherung/download` | **Authentifizierung, Route-Metadaten, Dateiantwort** — echte Benutzersitzung, `source_project` und `counts`, `attachment` mit `private, no-store` |
+| `/business/datensicherung` | **der manuelle Download** mit der nötigen Aufklärung |
+
+Der Vertrag steht im Manifest und nicht in der SQL, weil die Auswahl die eigentliche
+Entscheidung ist: als Code kann ein Test sie prüfen, und niemand muss beim Lesen einer
+300-zeiligen `jsonb_build_object`-Anweisung erraten, ob ein Feld absichtlich fehlt.
+
+**Bewusste Grenzen von V1.** Kein Restore. Kein Upload. Keine automatische Sicherung. Kein
+Excel. **Keine zweite Exportlogik** — alles kommt aus der einen Funktion, die Route fragt keine
+Tabelle selbst. **Kein Service-Role-Bypass** — die Route läuft mit der Sitzung des Benutzers,
+und dieses Deployment hält ohnehin keinen solchen Schlüssel.
+
+**Versionierung.** `format_version` wird erhöht, wenn sich die **Bedeutung** bestehender Daten
+ändert oder ein Bereich beziehungsweise ein Feldvertrag unverträglich verändert oder entfernt
+wird. Rein additive, verträgliche Erweiterungen — ein neues Feld, ein neuer Bereich — erhöhen
+sie **nicht**; so steht es im Manifest, und so bleibt es. Ein Leser muss sich darauf verlassen
+können, dass eine gleiche Versionsnummer dasselbe bedeutet.
+
+**Der Restore ist ein eigenes Feature, kein Nachtrag.** `restore_supported = false` ist eine
+Zusage und darf nicht geändert werden, bevor es gibt: eine Versionsprüfung, eine Schemaprüfung
+des gelesenen Dokuments, einen Probelauf ohne Schreibzugriff, eine Prüfung der referenziellen
+Integrität und einen ausdrücklichen, getrennt freigegebenen Schreibpfad. **`inventory_movements`
+bleibt dabei append-only:** ein Restore, der Bewegungen zurückschreibt oder Bestände setzt, ist
+genau der Weg aus der Excel-Zeit, der dauerhaft verboten ist. Ein Wiederaufbau müsste einen
+leeren Mandanten neu bespielen, nicht einen laufenden korrigieren.
+
+**Konsequenz.** Eine heruntergeladene Sicherung enthält Lagerzahlen, Einkaufskosten und die
+Käuferdaten der Rechnungen — genau das, was nie ins Repository darf. `.gitignore` sperrt
+`skyisles-business-backup-*.json`, und ein Test hält die Regel dort fest.
+
+## ADR-0115 — Das Platform-Backup ist ein eigenes Format, nicht die große Ansicht des Business-Exports
+
+**Status:** angenommen, 2026-10-01 · auf Staging validiert, Production offen
+**Bezug:** ADR-0114 (Business-Export), ADR-0064 (zwei Rollen, ein Rechtssubjekt),
+ADR-0077 (Plattform und Betrieb sind getrennte Autoritäten), ADR-0046 (Bildquellen)
+**Migrationen:** `0105` (Export und Historie), `0106` (Historienzugriff, Service-Role-Enge),
+`0107` (Auth-Inventar)
+
+**Problem.** `0104` gibt dem Betrieb seine Geschäftsdaten. Was fehlte, ist die Sicherung der
+**Plattform**: Katalog, Konten, Sammlungen, Verkäufer- und Shopdaten, Lager, Orderbuch,
+Bestellungen, Tester, dazu das Inventar der Benutzerkonten und die Bilddateien. Und der Anlass
+ist kein Komfort: **Production läuft auf Supabase Free — keine nativen Backups, kein PITR.**
+
+**Entscheidung — zwei Formate, nicht eines mit Schalter.** Der Business-Export und das
+Platform-Backup bleiben getrennt: eigenes Manifest (`platform-manifest.ts`), eigene Funktionen,
+eigene Route, eigene Oberfläche. `manifest.ts` und `seller_business_backup()` wurden dafür
+**nicht angefasst**.
+
+Der Grund ist nicht Ordnungsliebe. Die beiden Projektionen unterscheiden sich in fast allem:
+25 gegenüber 53 Bereichen, verschiedene Feldregeln, verschiedene Ausschlüsse, verschiedene
+Wächter (`can_operate_active_seller()` gegenüber `is_platform_admin()`), verschiedene Leser.
+Ein gemeinsames Fundament hätte eine eingefrorene, auf Production validierte Funktion
+umgebaut, um zwei Dinge zu vereinen, die nur oberflächlich gleich aussehen. Der frühere
+Entwurf einer gemeinsamen Basis (`0105_backup_document_split`) wurde aus genau diesem Grund
+verworfen.
+
+**Entscheidung — manuell, kein automatischer Lauf im eigenen Projekt.** Ein Zeitplan, der die
+Sicherung in denselben Supabase-Account schreibt, ist keine Sicherung, sondern eine zweite
+Kopie im selben Brandabschnitt. V1 hat deshalb: kein `pg_cron`, keinen Bucket, keine Rotation,
+keinen externen Speicherdienst. Der Plattformadmin löst den Export aus und trägt die Datei
+heraus; eine **Erinnerung** ersetzt die Automatik.
+
+**Entscheidung — das Auth-Inventar ist kein Auth-Restore, und das muss überall so stehen.**
+Exportiert werden sieben Felder je Konto (`id`, `email`, `created_at`, `last_sign_in_at`,
+`email_confirmed_at`, `provider`, `banned_until`). `provider` wird aus
+`raw_app_meta_data ->> 'provider'` **abgeleitet** — das Objekt selbst steht in
+`AUTH_FORBIDDEN_FIELDS` und verlässt die Datenbank nicht. Keine Passwörter, keine Tokens, keine
+MFA-Geheimnisse, keine Anbieteridentitäten. Aus dieser Datei lässt sich kein Konto
+wiederherstellen; nach einem Wiederaufbau ordnet man über die **E-Mail-Adresse** zu und setzt
+Passwörter neu. Der Disclaimer steht im Manifest, in der SQL, im Archiv und auf der Seite.
+
+**Entscheidung — `generated` und `received` bedeuten verschiedene Dinge.**
+
+| | |
+|---|---|
+| `generated` | Der Server hat das vollständige Archiv erzeugt und ausgeliefert. Größe und Prüfsumme des Stroms sind bekannt. Ob die Datei ankam, weiß er nicht. |
+| `received` | Der Browser-Fetch ist abgeschlossen, der vollständige Blob lag clientseitig vor, und genau **ein** `generated`-Lauf seit dem Beginn dieses Downloads war eindeutig zuordenbar. |
+| `failed` | Erzeugung oder Bestätigung gescheitert — als **Stufe**, nie als Fehlertext. |
+
+Ausdrücklich **nicht** behauptet: dass die Datei dauerhaft auf einer Platte liegt. Das kann ein
+Browser nicht beweisen, und ein Zustand, der mehr behauptet als er weiß, ist als Nachweis
+wertlos. „`downloaded`" wäre genau so ein Zustand und gibt es deshalb nicht. Für die
+Fälligkeit zählt **nur `received`**: ein erzeugtes Archiv, das niemand hat, ist keine Sicherung.
+
+**Entscheidung — die Historie ist ein Nachweis, also unveränderlich.** `platform_export_runs`
+entsteht nur über `admin_record_platform_export()` und immer als `generated`; `received` und
+`failed` sind endgültig. Zwei Schlösser halten das: die Funktion und ein Trigger in der Form
+von `order_mail_protect()` (`0019`). Gelöscht wird nie. Die Tabelle trägt bewusst **keine**
+Inhalte, keine Käuferdaten, keine Storage-Pfade und keine Datenbankfehlermeldungen — eine
+Postgres-Meldung kann Werte aus Zeilen enthalten.
+
+**Entscheidung — die Zuordnung ist exakt oder gar nicht.** Nach dem Download sucht die
+Bestätigung genau einen `generated`-Lauf seit dem gemerkten Startzeitpunkt. Null Kandidaten
+oder mehrere heißen: **nicht bestätigen**. Den neuesten zu nehmen wäre der Fehler, den niemand
+bemerkt — bei zwei gleichzeitigen Downloads stünde `received` an einer Datei, die keiner
+geprüft hat. `id` und `sha256` kommen aus der Historienzeile, nie vom Aufrufer.
+
+**Entscheidung — eine fehlende Storage-Datei bricht den Export nicht ab, sie wird genannt.**
+Das Storage-Manifest trennt drei Ursachen und zählt alle drei in `storage_missing_count`:
+`missing_from_bucket` (laut Datenbank erwartet, nicht im Bucket), `unreadable` (aufgelistet,
+nicht lesbar oder Länge widersprüchlich) und `rejected` (kein sicherer Archivpfad). Ein Backup
+mit stillschweigender Lücke ist schlimmer als eines, das die Lücke benennt. Die Auflistung
+steigt **beliebig tief** ab; eine Überschreitung der Schleifengrenzen ist ein **Fehler**, kein
+Überspringen.
+
+**Entscheidung — kein Service-Role-Weg.** Die Route läuft mit der Sitzung des Admins; die
+Datenbank entscheidet über `is_platform_admin()`. `0106` entzieht `service_role` zusätzlich
+EXECUTE auf `system_platform_export()` und jedes Recht auf `platform_export_runs` — beides
+stammte aus Supabase' Default-Privileges, nicht aus einer Migration. Ein Recht, das nur deshalb
+harmlos ist, weil eine zweite Bedingung gerade nicht zutrifft, ist kein Schutz. Die globalen
+Default-Privileges bleiben unverändert: sie zu ändern träfe jedes künftige Objekt des Schemas,
+auch die, die `service_role` für Zahlungen und Mails braucht.
+
+**Entscheidung — eigener ZIP-Schreiber, keine neue Abhängigkeit.** `src/lib/zip/` schreibt das
+Archiv mit `CompressionStream("deflate-raw")` aus der Laufzeit. Es streamt: jeder Eintrag wird
+einmal gesehen, sofort geschrieben und danach nur noch als Kopfdatensatz behalten, und die
+Einträge entstehen faul. Im Speicher liegen damit das Datenbankdokument und **genau ein**
+Storage-Objekt — nicht das Archiv. Die Prüfsumme entsteht am durchlaufenden Strom; ein zweiter
+Durchlauf hieße, das Archiv doppelt zu erzeugen oder vollständig zu puffern.
+
+**Die Reihenfolge im Archiv ist nicht kosmetisch.** `database.json`, `auth-users.json`, die
+Storage-Dateien, dann `storage-manifest.json` und `manifest.json`. Die beiden Manifeste stehen
+am Ende, weil ihre Zählwerte erst feststehen, wenn die letzte Datei durch ist. Ein Deckblatt,
+das Vollständigkeit behauptet, die das Archiv nicht hat, wäre schlimmer als ein Deckblatt an
+unerwarteter Stelle; ein ZIP hat keine vorgeschriebene Reihenfolge.
+
+**Konsequenz.** Das Archiv enthält die E-Mail-Adressen aller Konten, Namen und Anschriften aus
+Bestellungen und Rechnungen, Lagerzahlen und Einkaufspreise — die schwerere Datei von beiden.
+`.gitignore` sperrt `skyisles-platform-backup-*.zip`, und ein Test hält die Regel dort fest.
+`restore_supported` bleibt `false`, in beiden Formaten.

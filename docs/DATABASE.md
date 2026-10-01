@@ -3280,6 +3280,135 @@ Nummernfolge, Bezug auf Originalrechnung und auslösendes Ereignis, eigener Schn
 eine fachliche und steuerliche Entscheidung, die vor jeder Implementierung getrennt getroffen
 wird.
 
+#### Die Datensicherung des Betriebs (`0104`, ADR-0114)
+
+`seller_business_backup()` liefert die Geschäftsdaten des Betriebs als **ein** JSON-Dokument.
+`stable`, `security definer`, `set search_path = ''`, hinter `can_operate_active_seller()`;
+`NULL` für alle anderen. Sie schreibt nichts.
+
+**Der Vertrag steht nicht hier.** Welche Bereiche und welche Felder enthalten sind, welche
+bewusst fehlen und warum, definiert **`src/lib/backup/manifest.ts`** — maschinenlesbar, mit
+Begründung je Ausschluss. Diese Datei hier zu duplizieren hieße, zwei Wahrheiten über dieselbe
+Auswahl zu führen. `src/lib/backup/backup-sql.test.ts` vergleicht Manifest und SQL Feld für
+Feld und schlägt an, sobald sie auseinanderlaufen.
+
+| | |
+|---|---|
+| `format` | `skyisles-business-backup` |
+| `format_version` | `1` |
+| Bereiche | **25**, jeder eine Liste unter `data` |
+| `restore_supported` | **`false`** — V1 unterstützt keinen Import |
+
+**Eine Momentaufnahme.** `language sql` mit **genau einem** `select`: ein Statement sieht genau
+eine MVCC-Momentaufnahme, also stammen alle 25 Bereiche aus demselben Augenblick — ohne
+`begin`, ohne Isolationsstufe, ohne Sperre. Käme während des Exports eine Bestellung an, wäre
+sie entweder ganz oder gar nicht enthalten, aber nie eine Bewegung ohne ihre Bestellung.
+`snapshot_txid` hält den Schnappschuss fest (`pg_current_snapshot()`, `stable` und lesend —
+ausdrücklich **nicht** `txid_current()`, das eine Transaktionsnummer vergäbe).
+
+**Portabel statt datenbankintern.** `inventory_movements` und `order_reservations` verweisen
+intern nur auf `shop_inventory.id`. Eine Zeilennummer ist außerhalb dieser Datenbank wertlos
+und die Zeile kann später fehlen, deshalb tragen beide Bereiche zusätzlich `sky_id` und
+`condition`. Das sind die einzigen vier gebildeten Felder.
+
+**Werteregeln.** Geldbeträge und Verhältnisse als **String** (`::text`) — `jsonb` kennt nur
+`numeric`, aber jeder Leser danach hat einen Gleitkommatyp, und aus `7.85` würde irgendwo
+`7.849999999999999`. `null` bleibt `null` und wird nie weggelassen: ein fehlendes Feld ist
+keine Aussage. Jeder Bereich ist **deterministisch sortiert**, damit zwei Sicherungen desselben
+Zustands vergleichbar sind.
+
+**Zwei Metadaten kommen nicht aus der Datenbank.** `source_project` — ein Postgres kennt seine
+Supabase-Projektreferenz nicht; die Route leitet sie aus `NEXT_PUBLIC_SUPABASE_URL` ab, der
+Adresse, über die der Aufruf gerade lief. Und `counts`, die Zeilenzahl je Bereich, die die
+Route aus dem **fertigen Dokument** zählt statt die Tabellen erneut zu fragen: eine zweite
+Abfrage wäre eine zweite Momentaufnahme, und die Prüfgröße zählte einen anderen Augenblick als
+die Daten, die sie prüfen soll. `BACKUP_METADATA_SOURCE` im Manifest hält fest, was woher
+kommt.
+
+**Production und Staging dürfen nicht verwechselt werden.** Beide liefern strukturgleiche
+Dateien mit sehr ähnlichen Zahlen — `orderbook_global_factor()` etwa steht auf `0.376338`
+gegenüber `0.376347`. Unterschieden werden sie an **`source_project`** und an `commerce_mode`.
+Eine Datei ohne `source_project` ist nicht vertrauenswürdig zuzuordnen; ein erfundener Wert
+wäre schlimmer als ein fehlender, deshalb liefert die Route dort lieber `null`.
+
+#### Die Datensicherung der Plattform (`0105`–`0107`, ADR-0115)
+
+Drei Migrationen, eine Aufgabe: alles mitnehmen, was nötig wäre, um SkyIsles nach einem
+Totalverlust wieder aufzubauen. **Getrennt vom Business-Export** (`0104`) — verschiedene Leser,
+verschiedene Feldregeln, verschiedene Wächter; `0104` wurde dafür nicht angefasst.
+
+| Funktion | Migration | Liefert |
+|---|---|---|
+| `system_platform_export()` | `0105` | `database.json` — **53** Bereiche in einem Statement |
+| `system_auth_inventory()` | `0107` | `auth-users.json` — sieben Felder je Konto |
+| `admin_platform_export_runs()` | `0106` | die Historie, neueste zuerst (`order by id desc`) |
+| `admin_record_platform_export()` | `0106` | ein Lauf, immer als `generated`, gibt die `id` zurück |
+| `admin_settle_platform_export()` | `0106` | `received` (Prüfsumme muss stimmen) oder `failed` |
+
+Alle fünf: `security definer`, `set search_path = ''`, hinter `is_platform_admin()`. Die
+lesenden tragen den Wächter als `where`-Bedingung und liefern anderen eine leere Menge
+beziehungsweise `NULL`; die schreibenden werfen `insufficient_privilege`, weil ein
+stillschweigend verworfener Schreibvorgang wie Erfolg aussieht.
+
+**Der Vertrag steht in `src/lib/backup/platform-manifest.ts`** — 53 Bereiche, 486 Felder, davon
+4 gebildete, 9 ganz ausgeschlossene Tabellen, 33 global gesperrte Felder, jeder Ausschluss mit
+Begründung. `platform-sql.test.ts` vergleicht Manifest und SQL Feld für Feld.
+
+**Warum der `data`-Block aus sechs Teilen besteht.** PostgreSQL nimmt höchstens **100**
+Argumente pro Funktionsaufruf (`FUNC_MAX_ARGS`). 53 Bereiche als Schlüssel/Wert-Paare sind 106
+— ein einziges `jsonb_build_object()` scheitert daran mit `54023`, und zwar schon beim Anlegen
+der Funktion, weil Postgres SQL-Rümpfe sofort analysiert. Deshalb sechs Aufrufe entlang der
+Gruppen, in die `PLATFORM_SECTIONS` ohnehin gegliedert ist, verkettet mit `||`. Das ist **kein**
+zweiter Moment: `||` auf zwei `jsonb`-Objekten mischt nur Schlüssel, alles bleibt ein Ausdruck
+in einem Statement. Ein Test hält jeden Aufruf unter 80 Argumenten.
+
+**`platform_export_runs` — zwölf Spalten, und keine mehr.** `id`, `status`, `created_at`,
+`received_at`, `format_version`, `source_project`, `size_bytes`, `sha256`, `section_count`,
+`storage_file_count`, `storage_missing_count`, `failure_stage`. Kein `generated_at` (wäre stets
+`created_at`), kein `failed_at`, kein `format` (hätte einen Wert), kein `created_by` (ein
+Plattformadmin). Und ausdrücklich **kein Archiv, kein JSON, keine Käuferdaten, keine
+Storage-Pfade, keine Datenbankfehlermeldung** — ein Fehlschlag steht als Stufe da, nie als
+Text, weil eine Postgres-Meldung Werte aus Zeilen enthalten kann.
+
+Die Tabelle ist von außen **vollständig geschlossen**: RLS an, keine Policy, keine Grants, und
+seit `0106` auch `service_role` ohne Recht. Der Weg hinein führt ausschließlich über die drei
+Funktionen. Acht CHECK-Constraints halten die Zustandsmaschine; zwei Trigger
+(`platform_export_runs_protect`, `platform_export_runs_no_delete`, in der Form von
+`order_mail_protect()` aus `0019`) halten sie ein zweites Mal — gegen jeden Schreibweg, den es
+heute noch nicht gibt.
+
+**Die Zustandsmaschine.** `generated` ist der einzige Anfang und der einzige offene Zustand;
+`received` und `failed` sind endgültig. Beim Abschluss wird die übergebene Prüfsumme mit der
+gespeicherten **verglichen**, nicht übernommen — `received` heißt: die Datei, die ankam, ist
+die Datei, die ging. Die gemessenen Tatsachen (Größe, Hash, Zählwerte, Herkunft, Entstehung)
+werden einmal geschrieben.
+
+**`system_auth_inventory()` ist ein Inventar, kein Auth-Backup.** `provider` wird aus
+`raw_app_meta_data ->> 'provider'` **abgeleitet**; `->>` liefert `text`, das Objekt selbst
+steht in `AUTH_FORBIDDEN_FIELDS` und verlässt die Datenbank nicht. Kein `encrypted_password`,
+kein Token, kein `identities`, kein `factors`, kein `encrypted_secret`. Kein `where`-Filter:
+ein Inventar, das still Konten weglässt, ist die Sorte Lücke, gegen die der ganze Export
+gebaut ist. Bekannte Grenze: Supabase' `deleted_at` lässt sich mit sieben Feldern nicht
+ausdrücken — das Projekt löscht heute keine Konten weich, und die ehrliche Antwort wäre ein
+zusätzliches Feld samt erhöhtem `format_version`, nicht ein stiller Filter.
+
+**Zwei Aufrufe, zwei Momentaufnahmen.** `database.json` und `auth-users.json` sind zwei RPCs.
+Vertretbar: `auth.users` und die Fremdschlüssel in `public` ändern sich nur beim Anlegen oder
+Löschen eines Kontos, und ein zusätzliches Konto im Inventar ohne Zeilen in `public` ist
+harmlos. Die umgekehrte Richtung fällt beim Lesen sofort auf, weil die UUID dann nirgends
+auflösbar ist.
+
+**Storage.** Der Bucket `catalog` ist seit `0007` öffentlich lesbar (`catalog_images_read` für
+`anon, authenticated`), die Schreibrechte hängen an `is_shop_admin()`. Der Export braucht
+deshalb **keinen** Service-Role-Schlüssel: Auflistung und Download laufen über die Sitzung des
+Admins, genau wie der Uploadweg in `image-actions.ts`. Welche Objekte erwartet werden, sagt
+`skylanders.image_override_path` **aus dem fertigen Dokument** — nicht aus einer zweiten
+Abfrage, sonst prüfte die Erwartung einen anderen Augenblick als die Daten.
+
+**Werteregeln wie bei `0104`:** Geld als String (`::text`), `null` bleibt `null`, jeder Bereich
+deterministisch sortiert, `pg_current_snapshot()` statt `txid_current()`, `source_project` von
+der Route aus `NEXT_PUBLIC_SUPABASE_URL`.
+
 #### Einkaufskennzahl, Snapshot und Kalkulator — drei Dinge, eine Quellzahl
 
 Weil die drei leicht verwechselt werden und einmal verwechselt wurden, hier ausdrücklich:

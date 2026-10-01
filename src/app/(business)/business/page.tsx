@@ -62,6 +62,7 @@ const AREAS: readonly {
   { href: "/business/reports", copy: de.business.areas.reports },
   { href: "/business/widerrufe", copy: de.business.areas.withdrawals },
   { href: "/business/inventory/import", copy: de.business.areas.imports },
+  { href: "/business/datensicherung", copy: de.business.areas.backup },
   /*
    * DIE GEMEINSAMEN KONTOEINSTELLUNGEN, AUCH VON HIER AUS (0099).
    *

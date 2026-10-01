@@ -62,11 +62,18 @@ describe("guard 1 — no table carries a seller", () => {
      * names `seller_id` only to exclude the grant being withdrawn from the
      * count of those remaining. `seller-schema.test.ts` proves it reaches no
      * commerce table.
+     *
+     * `0105` joins it because the platform export COPIES the membership row
+     * out. Leaving the column out of the backup would lose which shop an
+     * operator belongs to — a hole in a backup, to satisfy a guard about
+     * something else. `seller-schema.test.ts` holds it to exactly one
+     * mention, `t.seller_id`, in that one projection.
      */
     const MEMBERSHIP = [
       "0041_three_account_authorization.sql",
       "0042_strict_account_types.sql",
       "0051_admin_predicate_and_business_usernames.sql",
+      "0105_platform_export.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")

@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { BackupDueNotice } from "@/components/admin/backup-due-notice";
 import { BusinessAccountsPanel } from "@/components/admin/business-accounts-panel";
 import { PlatformSettings } from "@/components/admin/platform-settings";
 import { TesterPanel } from "@/components/admin/tester-panel";
 import { fetchPlatformSettings } from "@/lib/admin/platform";
+import { fetchPlatformExportRuns } from "@/lib/admin/backup-history";
 import { fetchAdminCategories } from "@/lib/admin/queries";
 import { fetchSellerOperators } from "@/lib/admin/seller-operators";
 import { fetchTesterState } from "@/lib/admin/tester";
@@ -25,11 +27,14 @@ export const metadata: Metadata = { title: de.admin.title };
  * here — there is no link, and there would be no page if they followed one.
  */
 export default async function AdminPage() {
-  const [categories, platform, testers, operators] = await Promise.all([
+  const [categories, platform, testers, operators, backupRuns] = await Promise.all([
     fetchAdminCategories(),
     fetchPlatformSettings(),
     fetchTesterState(),
     fetchSellerOperators(),
+    /* Dieselbe Anfrage trägt die Erinnerung. Kein Zeitplan, keine Tabelle,
+       keine Automation — nur die Historie, die es ohnehin gibt. */
+    fetchPlatformExportRuns(),
   ]);
   const unclassified = categories.filter((c) => c.catalogGroup === null && c.figures > 0);
 
@@ -79,6 +84,25 @@ export default async function AdminPage() {
           supportEmail={platform.supportEmail}
           catalogMarketBoostPercent={platform.catalogMarketBoostPercent}
         />
+      </div>
+
+      {/*
+        Die Sicherung der Plattform. Der Hinweis erscheint nur, wenn seit mehr
+        als sieben Tagen keine BESTÄTIGTE Sicherung vorliegt — ein erzeugtes
+        Archiv, das niemand hat, zählt nicht.
+      */}
+      <BackupDueNotice runs={backupRuns} />
+
+      <div className="mt-8">
+        <Link
+          href="/admin/datensicherung"
+          className="block rounded-sky-lg bg-surface/80 px-5 py-4 ring-1 ring-border/70 hover:ring-border-strong"
+        >
+          <span className="font-medium">{de.admin.platformBackup.title}</span>
+          <span className="mt-1 block text-sm text-muted">
+            {de.admin.platformBackup.navHint}
+          </span>
+        </Link>
       </div>
 
       <p className="mt-8 text-sm text-muted">{de.admin.completionNote}</p>

@@ -86,3 +86,24 @@ Thumbs.db
 # uploaded live in Supabase Storage, not in Git (ADR-0046); an export of them
 # is a safety copy, not a repository asset.
 /.backups/
+
+# --- Business backups (ADR-0114) ------------------------------------------
+# A downloaded business backup carries stock figures, purchase costs and the
+# buyer names and addresses from the invoices — exactly the three kinds of
+# data docs/SECURITY.md forbids in this repository. The file is meant to live
+# on the owner's own disk, never here.
+#
+# Deliberately narrow: the file name is fixed by backupFileName() in
+# src/lib/backup/document.ts, so the pattern can be. Ignoring `*.json`
+# wholesale would silently swallow package.json, tsconfig.json and the
+# curated data under data/.
+#
+# `backup-download.test.ts` keeps this rule from disappearing again.
+skyisles-business-backup-*.json
+
+# Dasselbe für die Plattformsicherung, und sie ist die schwerere: sie enthält
+# zusätzlich das Auth-Inventar mit den E-Mail-Adressen aller Konten und die
+# Storage-Dateien. Name fixiert durch platformArchiveFileName() in
+# src/lib/backup/platform-archive.ts; `platform-archive.test.ts` hält diese
+# Zeile fest.
+skyisles-platform-backup-*.zip

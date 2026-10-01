@@ -602,6 +602,53 @@ export const de = {
         title: "Bestand abgleichen",
         hint: "Lagerbestand aus deiner Excel-Tabelle übernehmen.",
       },
+      backup: {
+        title: "Datensicherung",
+        hint: "Deine Geschäftsdaten als Datei herunterladen und außerhalb aufbewahren.",
+      },
+    },
+
+    /**
+     * Die Datensicherung (V1).
+     *
+     * Der Text muss drei Dinge unmissverständlich sagen, weil alle drei
+     * teuer sind, wenn sie missverstanden werden: die Datei enthält
+     * Käuferdaten, sie gehört nirgends hin, wo sie geteilt wird, und sie
+     * lässt sich NICHT zurückspielen. Ein Backup, das man für einen Restore
+     * hält, ist gefährlicher als gar keins.
+     */
+    backup: {
+      title: "Datensicherung",
+      lead:
+        "Lade deine Geschäftsdaten als eine Datei herunter und bewahre sie außerhalb von " +
+        "SkyIsles auf — auf deinem Rechner oder einer externen Festplatte.",
+      contains: "Was enthalten ist",
+      containsItems: [
+        "Der aktuelle Lagerbestand und alle Lagerbewegungen.",
+        "Einkäufe und Einkaufspositionen mit den eingefrorenen Marktwerten.",
+        "Verkäufe, Positionen, Gebühren, Erstattungen und Korrekturen.",
+        "Bestellungen aus dem Shop, ihre Positionen, Stornos und Erstattungen.",
+        "Rechnungen und die Stammdaten der vorkommenden Figuren.",
+      ],
+      personal: "Personenbezogene Daten",
+      personalText:
+        "Die Datei enthält personenbezogene Daten, insbesondere Namen und Anschriften aus " +
+        "den Rechnungen. Behandle sie vertraulich. Sie gehört nicht in ein Repository, " +
+        "nicht nach Git oder GitHub und in keinen geteilten Ordner.",
+      purpose: "Wofür sie gedacht ist",
+      purposeText:
+        "Zur Datensicherung und zur Nachvollziehbarkeit. Sie ersetzt nicht die Sicherung " +
+        "der Datenbank selbst, sondern ist ein portables Exportformat deiner " +
+        "Geschäftsdaten.",
+      noRestore: "Kein automatisches Zurückspielen",
+      noRestoreText:
+        "Ein Import oder Restore wird derzeit ausdrücklich nicht unterstützt. Die Datei " +
+        "ist eine Kopie zum Lesen und Aufbewahren.",
+      download: "Datensicherung herunterladen",
+      downloading: "Sicherung wird erstellt …",
+      failed: "Die Sicherung konnte nicht erstellt werden. Bitte versuche es noch einmal.",
+      denied: "Für dieses Konto steht keine Datensicherung bereit.",
+      done: (size: string) => `Sicherung erstellt (${size}).`,
     },
     hint:
       "Bestellungen, Bestand, Preise und die Angaben des Verkäufers. Der Katalog gehört " +
@@ -2600,6 +2647,120 @@ export const de = {
         withdrawn: "Widerruf offen — Versand gesperrt, bis er geklärt ist.",
         nothing_to_ship: "Nichts mehr zu liefern — alle Positionen storniert.",
       },
+    },
+    /**
+     * Die Plattformsicherung (Platform-Backup).
+     *
+     * Der Text ist hier der eigentliche Inhalt der Seite. Vier Aussagen müssen
+     * hängen bleiben, weil jede teuer ist, wenn sie missverstanden wird: die
+     * Datei enthält die ganze Plattform einschließlich personenbezogener Daten ·
+     * das Auth-Inventar ist KEIN Auth-Restore · sie gehört in keinen geteilten
+     * Ort · zurückspielen lässt sie sich nicht. Ein Backup, das jemand für einen
+     * Restore hält, ist gefährlicher als gar keins.
+     */
+    platformBackup: {
+      title: "Datensicherung der Plattform",
+      navHint: "Die ganze Plattform als Datei sichern und außerhalb aufbewahren.",
+      lead:
+        "Lade die vollständige Datensicherung von SkyIsles als eine ZIP-Datei herunter und " +
+        "bewahre sie außerhalb der Plattform auf — auf deinem Rechner oder einer externen " +
+        "Festplatte. Diese Sicherung ist die einzige, die wir selbst in der Hand haben.",
+
+      contains: "Was enthalten ist",
+      containsItems: [
+        "Die Plattform-Datenbank mit allen 53 Bereichen.",
+        "Den vollständigen Katalog samt Kategorien, Serien und Charakterdaten.",
+        "Konten, Profile und Sammlungsdaten der Nutzer.",
+        "Verkäufer- und Shopdaten samt Versandarten und Einstellungen.",
+        "Lager und Orderbuch: Bestand, Bewegungen, Einkäufe, Verkäufe, Gebühren.",
+        "Bestellungen mit Positionen, Adressen, Rechnungen und Erstattungen.",
+        "Tester und ihre Berechtigungen.",
+        "Ein Inventar der Benutzerkonten (siehe unten).",
+        "Die Bilddateien aus dem catalog-Speicher.",
+      ],
+
+      authTitle: "Das Auth-Inventar ist kein Auth-Restore",
+      authText:
+        "Enthalten sind nur Kennung, E-Mail-Adresse, Anmeldeart und die Zeitpunkte von " +
+        "Registrierung, Bestätigung und letzter Anmeldung. Passwörter, Tokens und " +
+        "Zweitfaktor-Geheimnisse werden ausdrücklich NICHT exportiert. Aus dieser Datei " +
+        "lässt sich kein Konto wiederherstellen und keine Anmeldung nachbilden; nach einem " +
+        "Wiederaufbau ordnet man Konten über die E-Mail-Adresse zu und setzt Passwörter neu.",
+
+      personal: "Personenbezogene und geschäftlich sensible Daten",
+      personalText:
+        "Die Datei enthält E-Mail-Adressen aller Konten, Namen und Anschriften aus den " +
+        "Bestellungen und Rechnungen, Lagerbestände und Einkaufspreise. Behandle sie " +
+        "vertraulich. Sie gehört nicht in ein Repository, nicht nach Git oder GitHub, in " +
+        "keinen geteilten Ordner und in keinen Cloud-Speicher, den andere lesen können.",
+
+      noRestore: "Kein automatisches Zurückspielen",
+      noRestoreText:
+        "Ein Import oder Restore wird derzeit ausdrücklich nicht unterstützt. Die Datei ist " +
+        "eine vollständige, lesbare Kopie zum Aufbewahren — kein Wiederherstellungspunkt.",
+
+      /* Der Knopf und seine Zustände. */
+      download: "Plattform-Datensicherung erstellen",
+      downloading: "Datensicherung wird erstellt …",
+      confirming: "Sicherungslauf wird bestätigt …",
+      doneConfirmed: "Datensicherung erstellt und bestätigt.",
+      doneUnconfirmed:
+        "Datensicherung heruntergeladen. Die automatische Bestätigung konnte nicht " +
+        "abgeschlossen werden.",
+      failed: "Die Datensicherung konnte nicht erstellt werden.",
+      denied: "Für dieses Konto steht keine Datensicherung bereit.",
+
+      /* Die Historie. */
+      historyTitle: "Bisherige Sicherungen",
+      historyEmpty: "Es gibt noch keine Sicherungsläufe.",
+      historyCreated: "Erstellt",
+      historyStatus: "Status",
+      historySize: "Größe",
+      historyFiles: "Storage-Dateien",
+      historyMissing: "Fehlend",
+      historyHash: "Prüfsumme",
+      historySections: "Bereiche",
+      status: {
+        generated: "Erzeugt",
+        received: "Bestätigt",
+        failed: "Gescheitert",
+      } as Record<string, string>,
+      statusHint: {
+        generated: "Das Archiv wurde erzeugt und ausgeliefert, aber nicht bestätigt.",
+        received: "Die Datei lag vollständig beim Empfänger.",
+        failed: "Der Lauf ist gescheitert.",
+      } as Record<string, string>,
+      /* Die sechs Stufen aus dem CHECK in 0105, auf Deutsch. */
+      failureStage: {
+        database: "beim Lesen der Datenbank",
+        auth_inventory: "beim Lesen des Konten-Inventars",
+        storage_manifest: "beim Auflisten der Speicherdateien",
+        storage_files: "beim Herunterladen der Speicherdateien",
+        archive: "beim Erzeugen des Archivs",
+        confirmation: "bei der Bestätigung",
+      } as Record<string, string>,
+      failureUnknown: "aus einem nicht benannten Grund",
+      missingHint: (n: number) =>
+        n === 1
+          ? "1 Speicherdatei fehlt in dieser Sicherung."
+          : `${n} Speicherdateien fehlen in dieser Sicherung.`,
+
+      /* Die Erinnerung im Adminbereich. */
+      dueTitle: "Datensicherung fällig",
+      dueNever:
+        "Es gibt noch keine bestätigte Datensicherung der Plattform. Production läuft auf " +
+        "einem Tarif ohne eigene Datenbank-Backups — diese Sicherung ist die einzige.",
+      dueSince: (days: number) =>
+        days === 1
+          ? "Die letzte bestätigte Datensicherung ist 1 Tag her."
+          : `Die letzte bestätigte Datensicherung ist ${days} Tage her.`,
+      dueAction: "Jetzt sichern",
+      upToDate: (days: number) =>
+        days === 0
+          ? "Letzte bestätigte Sicherung: heute."
+          : days === 1
+            ? "Letzte bestätigte Sicherung: gestern."
+            : `Letzte bestätigte Sicherung: vor ${days} Tagen.`,
     },
   },
 
