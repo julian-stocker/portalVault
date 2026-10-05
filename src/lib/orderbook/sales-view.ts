@@ -109,6 +109,53 @@ export function saleItemStatus(
   return shipped ? "shipped" : "open";
 }
 
+/**
+ * DER EXTERNAL HOLD EINER POSITION, ALS EIN WORT (0110).
+ *
+ * `seller_sale` liefert zwei Tatsachen pro Position — `held` und
+ * `stock_available` — und bewusst keine Bewertung. Hier entsteht daraus die
+ * eine Aussage, die der Bildschirm zeigt. Zwei Tatsachen, weil drei Lagen zu
+ * unterscheiden sind und ein Boolean nur zwei trennt:
+ *
+ *   held             Bestand ist für diese Position reserviert
+ *   no_stock         es gibt eine Lagerzeile, aber nichts ist frei
+ *   no_inventory     es gibt für diese Figur gar keine lose Lagerzeile
+ *   holdable         frei, aber nicht gehalten — der Knopf lohnt sich
+ *   not_applicable   die Position hält nichts und soll nichts halten:
+ *                    kein Katalogartikel, schon ausgebucht, oder auf einem
+ *                    der drei Enden angekommen
+ *
+ * DIESELBE REIHENFOLGE WIE `hold_sale_item()` IN 0110. Die Datenbank
+ * entscheidet, ob ein Hold entsteht; diese Funktion entscheidet nur, was
+ * darüber dasteht — und sie darf nicht etwas anderes behaupten.
+ */
+export type SaleItemHold =
+  | "held" | "no_stock" | "no_inventory" | "holdable" | "not_applicable";
+
+export type SaleItemHoldFacts = SaleItemFacts & {
+  held?: boolean | null;
+  stock_available?: number | string | null;
+};
+
+export function saleItemHold(item: SaleItemHoldFacts): SaleItemHold {
+  if (item.held === true) return "held";
+  /*
+   * Alles, was `hold_sale_item` mit einem Grund ablehnt, ist hier dasselbe
+   * Wort: die Position hält nichts, und daran ist nichts zu tun.
+   */
+  if (item.sky_id === null) return "not_applicable";
+  if (item.movement_id !== null) return "not_applicable";
+  if (item.return_movement_id !== null) return "not_applicable";
+  if (item.returned_at !== null) return "not_applicable";
+  if ((item.return_announced_at ?? null) !== null) return "not_applicable";
+  if ((item.settled_at ?? null) !== null) return "not_applicable";
+  if ((item.not_shipped_at ?? null) !== null) return "not_applicable";
+
+  const available = item.stock_available ?? null;
+  if (available === null) return "no_inventory";
+  return Number(available) >= 1 ? "holdable" : "no_stock";
+}
+
 /** Is there anything left to do? Mirrors `sale_item_is_closed()` in 0075. */
 export function saleItemClosed(item: SaleItemFacts): boolean {
   return item.return_movement_id !== null

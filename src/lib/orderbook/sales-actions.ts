@@ -11,6 +11,8 @@ import { revalidatePath } from "next/cache";
 
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
+import { fetchOrderbookCatalog } from "@/lib/orderbook/queries";
+import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { createClient } from "@/lib/supabase/server";
 
 export type Result = { ok: true } | { ok: false; message: string };
@@ -48,6 +50,14 @@ function message(error: { code?: string; message?: string }): string {
    * Eindeutiges behauptet.
    */
   if (text.includes("below its reserved")) return copy.errors.stockUnavailable;
+  /*
+   * Die beiden Ablehnungen aus dem Hold-Verbrauch (0110). Sie sollten nie
+   * auftreten; wenn doch, ist nichts geschrieben worden, und genau das soll
+   * der Satz sagen. `below the hold being` trifft beide Formen — freigeben
+   * und verbrauchen —, weil sie dasselbe bedeuten.
+   */
+  if (text.includes("changed state concurrently")) return copy.errors.holdRace;
+  if (text.includes("below the hold being")) return copy.errors.holdMismatch;
   if (text.includes("no stock position")) return copy.errors.noStock;
   if (text.includes("not a catalog figure")) return copy.errors.notAFigure;
   if (text.includes("historical sales never move stock")) return copy.errors.historical;
@@ -110,6 +120,58 @@ async function run(fn: string, args: Record<string, unknown>, id?: number): Prom
   if (error) return { ok: false, message: message(error) };
   for (const p of paths(id)) revalidatePath(p);
   return { ok: true };
+}
+
+/** Was eine Positionsaktion zurückgibt: die Ablehnung, oder der neue Zustand. */
+export type ItemResult =
+  | { ok: true; sale: Record<string, unknown> | null }
+  | { ok: false; message: string };
+
+/**
+ * EINE POSITIONSAKTION. WIE `run`, ABER OHNE `revalidatePath`.
+ *
+ * WARUM DAS EINE EIGENE FUNKTION IST.
+ *
+ * `revalidatePath` kostet auf diesen Bildschirmen keinen Cache-Eintrag —
+ * beide Routen sind dynamisch und haben keinen. Es kostet einen
+ * vollständigen Server-Render der GERADE ANGEZEIGTEN Route, den Next in
+ * dieselbe Antwort legt: „When a Server Action triggers an immediate
+ * revalidation, Next.js does the work inside one HTTP request: it runs the
+ * action, then re-renders the current route server-side." Für
+ * `/verkauf/[id]` hieß das nach JEDEM Klick auf eine einzelne Position
+ * `fetchSale` UND `fetchOrderbookCatalog` — letzteres zwei weitere Abfragen
+ * und über 64 KB Katalog, die mit der gebuchten Figur nichts zu tun haben.
+ * Und die Transition blieb solange pending, also war jeder Knopf auf dem
+ * Bildschirm tot.
+ *
+ * STATT DER ROUTE WIRD DER EINE VERKAUF NACHGELESEN — und zwar hier, in
+ * derselben Antwort. Next schickt Server Actions pro Client NACHEINANDER
+ * los; ein zweiter Aufruf aus dem Browser hätte sich hinter den nächsten
+ * Klick gestellt. Eine Runde, ein Lesevorgang, ein autoritativer Zustand.
+ *
+ * `seller_sale` ist dieselbe Projektion, aus der die Seite ohnehin rendert
+ * (`fetchSale`). Der Client erfindet nichts: er ersetzt seine Positionen
+ * durch die, die gerade in der Datenbank stehen.
+ *
+ * Die Ledger-Liste wird NICHT invalidiert. Sie ist eine andere, ebenfalls
+ * dynamische Route ohne Cache-Eintrag; wer dorthin navigiert, bekommt einen
+ * frischen Server-Render, und wer dort arbeitet, liest seine Zeile über
+ * dieselbe Projektion nach.
+ */
+async function runItem(
+  fn: string, args: Record<string, unknown>, saleId: number,
+): Promise<ItemResult> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc(fn, args);
+  if (error) return { ok: false, message: message(error) };
+
+  const fresh = await supabase.rpc("seller_sale", { p_id: saleId });
+  return {
+    ok: true,
+    sale: fresh.error || fresh.data === null || typeof fresh.data !== "object"
+      ? null : (fresh.data as Record<string, unknown>),
+  };
 }
 
 export async function createSale(
@@ -282,21 +344,35 @@ export async function createSaleWithDetails(input: {
  * than offering a click that can only end in a refusal.
  */
 export async function setSaleItemSky(itemId: number, skyId: string, saleId: number) {
-  return run("seller_set_sale_item_sky", { p_item_id: itemId, p_sky_id: skyId }, saleId);
+  return runItem("seller_set_sale_item_sky", { p_item_id: itemId, p_sky_id: skyId }, saleId);
 }
 
 export async function addSaleItem(saleId: number, skyId: string | null, rawName: string | null, condition: string) {
-  return run("seller_add_sale_item", { p_sale_id: saleId, p_sky_id: skyId,
+  return runItem("seller_add_sale_item", { p_sale_id: saleId, p_sky_id: skyId,
     p_raw_name: rawName, p_condition: condition }, saleId);
 }
 
 export async function removeSaleItem(itemId: number, saleId: number) {
-  return run("seller_remove_sale_item", { p_item_id: itemId }, saleId);
+  return runItem("seller_remove_sale_item", { p_item_id: itemId }, saleId);
+}
+
+/**
+ * Reservieren — ein zweiter Versuch, Bestand für diese Position zu halten (0110).
+ *
+ * Der erste läuft beim Anlegen von selbst; dieser ist für danach: die Figur
+ * war nicht da, jetzt ist sie da. `seller_hold_sale_item` gibt einen stabilen
+ * Grund zurück statt eines Satzes — `held`, `already_held`, `no_stock`,
+ * `no_inventory` —, und die Oberfläche liest den neuen Zustand ohnehin aus
+ * `seller_sale` nach. Der Grund wird deshalb nicht hochgereicht: zwei
+ * Darstellungen derselben Lage wären eine zu viel.
+ */
+export async function holdSaleItem(itemId: number, saleId: number) {
+  return runItem("seller_hold_sale_item", { p_item_id: itemId }, saleId);
 }
 
 /* Stock. Never optimistic: the row changes when the database says it changed. */
 export async function bookSaleItem(itemId: number, saleId: number) {
-  return run("seller_book_sale_item", { p_item_id: itemId }, saleId);
+  return runItem("seller_book_sale_item", { p_item_id: itemId }, saleId);
 }
 /**
  * Verschickt — ausbuchen und den Versand datieren, in einem Aufruf (0090).
@@ -306,7 +382,7 @@ export async function bookSaleItem(itemId: number, saleId: number) {
  * falls es noch keines gibt. Ein zweiter Klick bewegt nichts mehr.
  */
 export async function shipSaleItem(itemId: number, saleId: number) {
-  return run("seller_ship_sale_item", { p_item_id: itemId }, saleId);
+  return runItem("seller_ship_sale_item", { p_item_id: itemId }, saleId);
 }
 /*
  * Erledigt — the ending for a position that never stood on a shelf (0073).
@@ -314,23 +390,23 @@ export async function shipSaleItem(itemId: number, saleId: number) {
  * catalog figure that is not marked as not-from-stock.
  */
 export async function settleSaleItem(itemId: number, saleId: number, settled: boolean) {
-  return run("seller_settle_sale_item", { p_item_id: itemId, p_settled: settled }, saleId);
+  return runItem("seller_settle_sale_item", { p_item_id: itemId, p_settled: settled }, saleId);
 }
 /* Nicht verschickt — die Ware blieb im Regal, also wird nichts gebucht (0074). */
 export async function setSaleItemNotShipped(itemId: number, saleId: number, notShipped: boolean) {
-  return run("seller_set_sale_item_not_shipped",
+  return runItem("seller_set_sale_item_not_shipped",
     { p_item_id: itemId, p_not_shipped: notShipped }, saleId);
 }
 /* Retoure unterwegs — angekündigt, noch nicht da (0074). */
 export async function announceSaleItemReturn(itemId: number, saleId: number, announced: boolean) {
-  return run("seller_announce_sale_item_return",
+  return runItem("seller_announce_sale_item_return",
     { p_item_id: itemId, p_announced: announced }, saleId);
 }
 export async function unbookSaleItem(itemId: number, saleId: number) {
-  return run("seller_unbook_sale_item", { p_item_id: itemId }, saleId);
+  return runItem("seller_unbook_sale_item", { p_item_id: itemId }, saleId);
 }
 export async function returnSaleItem(itemId: number, saleId: number, returned: boolean) {
-  return run("seller_return_sale_item", { p_item_id: itemId, p_returned: returned }, saleId);
+  return runItem("seller_return_sale_item", { p_item_id: itemId, p_returned: returned }, saleId);
 }
 /**
  * Bestätigen — die Retoure ist da und liegt wieder im Regal (0092).
@@ -341,10 +417,10 @@ export async function returnSaleItem(itemId: number, saleId: number, returned: b
  * zweiter Klick gibt dieselbe Bewegung zurück und bewegt nichts.
  */
 export async function receiveSaleItemReturn(itemId: number, saleId: number) {
-  return run("seller_receive_sale_item_return", { p_item_id: itemId }, saleId);
+  return runItem("seller_receive_sale_item_return", { p_item_id: itemId }, saleId);
 }
 export async function restockSaleItem(itemId: number, saleId: number) {
-  return run("seller_restock_sale_item", { p_item_id: itemId }, saleId);
+  return runItem("seller_restock_sale_item", { p_item_id: itemId }, saleId);
 }
 
 export async function addSaleFee(
@@ -432,6 +508,29 @@ export async function addAdjustment(
     p_amount: kind === "credit" ? Math.abs(amount) : -Math.abs(amount),
     p_reason: reason, p_note: note,
   }, saleId);
+}
+
+/**
+ * Der Figurenkatalog, erst wenn die Suche gebraucht wird.
+ *
+ * WARUM NICHT MEHR ALS PROP DER DETAILSEITE. `fetchOrderbookCatalog()` ist
+ * zwei Abfragen — `seller_import_catalog()` und die 605 Preis- und Bildzeilen
+ * aus `skylanders`, über 64 KB — und die Detailseite braucht ihn für genau
+ * eine Sache: das Hinzufügen oder Umhängen einer Figur. Im Render stand er
+ * trotzdem bei jedem Aufruf und, solange `revalidatePath` dort noch lief,
+ * nach jedem einzelnen Klick erneut.
+ *
+ * Jetzt lädt ihn die Positionsliste beim ersten Hineingreifen in das
+ * Suchfeld. `MIN_QUERY` ist 2, also ist er da, bevor das erste Ergebnis
+ * überhaupt gezeigt werden dürfte.
+ *
+ * Die Anlegemasken (`/verkauf/neu`, `/orderbuch/neu`) behalten ihn als Prop:
+ * dort ist die Figurensuche der Zweck des Bildschirms und nicht ein Werkzeug
+ * am Rand.
+ */
+export async function loadOrderbookFigures(): Promise<FigureChoice[]> {
+  if (!(await canOperateSeller())) return [];
+  return fetchOrderbookCatalog();
 }
 
 /** The items of one sale, fetched when its row is expanded. */

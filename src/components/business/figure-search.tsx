@@ -41,6 +41,7 @@ export function FigureSearch({
   onCancel,
   limit = MAX_RESULTS,
   showImage = false,
+  loading = false,
   inputRef,
 }: {
   catalog: readonly FigureChoice[];
@@ -61,6 +62,17 @@ export function FigureSearch({
    * Kleinanzeigen-Foto mit einem Bild vergleicht und nicht mit einem Namen.
    */
   showImage?: boolean;
+  /*
+   * Der Katalog ist noch unterwegs.
+   *
+   * Ohne dieses Wissen wäre ein leerer Katalog nicht von einem
+   * fehlgeschlagenen zu unterscheiden, und der Kasten würde „konnte nicht
+   * geladen werden" behaupten, während er gerade geladen wird. Gebraucht
+   * wird es nur dort, wo der Katalog beim ersten Hineingreifen nachgeladen
+   * wird (Verkaufs-Detailseite); wo er als Prop ankommt, bleibt es `false`
+   * und ändert nichts.
+   */
+  loading?: boolean;
   /*
    * Zugriff auf das Eingabefeld von außen.
    *
@@ -111,8 +123,13 @@ export function FigureSearch({
     }
   }
 
+  /*
+   * Ein leerer Katalog heisst nicht dasselbe wie ein gescheiterter. Solange
+   * `loading` gesetzt ist, sagt der Kasten, dass er wartet — und erst danach,
+   * falls dann noch nichts da ist, dass es nicht geklappt hat.
+   */
   const message =
-    state === "noCatalog" ? copy.noCatalog
+    state === "noCatalog" ? (loading ? copy.loadingCatalog : copy.noCatalog)
       : state === "tooShort" ? copy.tooShort
         : state === "empty" ? copy.empty
           : null;
@@ -126,7 +143,7 @@ export function FigureSearch({
           type="search"
           value={query}
           autoFocus={autoFocus}
-          disabled={disabled || state === "noCatalog"}
+          disabled={disabled || (state === "noCatalog" && !loading)}
           onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
           onKeyDown={onKeyDown}
           placeholder={placeholder}

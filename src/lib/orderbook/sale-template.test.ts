@@ -520,8 +520,19 @@ describe("0065 — the migration", () => {
     expect(body).not.toMatch(/grant[^;]*on table/);
   });
 
-  it("is the last word on removal, so the hardening is what runs", () => {
-    expect(latestFunction("seller_remove_sale_item").file).toBe("0065_sale_create_with_details.sql");
+  it("the hardening is what runs, whichever migration last wrote it", () => {
+    /*
+     * HIER STAND `…file).toBe("0065_…")`. Das war eine Momentaufnahme: `0110`
+     * hat dieselbe Funktion um die Hold-Freigabe erweitert, ohne dass an
+     * `0065`s Härtung etwas falsch geworden wäre. Was zählt, ist, dass die
+     * GELTENDE Fassung sie noch trägt — also wird die gefaltete Historie
+     * gelesen und nicht ein Dateiname behauptet.
+     */
+    const live = code(latestFunction("seller_remove_sale_item").body);
+    expect(live).toContain("this item is booked out; reverse the stock movement before removing it");
+    expect(live).toContain("this item came from the legacy workbook");
+    expect(live).toContain("an internal sale takes its items from the order");
+    expect(live).toContain("for update");
   });
 });
 
@@ -617,11 +628,23 @@ describe("the German copy", () => {
 
   it("the sentence about stock left the form, not the product", () => {
     /*
-     * `Anlegen ist kein Ausbuchen` is still true and still said — on the
-     * item list, where `Ausbuchen` is the button being described. Under a
-     * submit button it was one more line of prose to scroll past.
+     * WO der Satz steht, ist unverändert: auf der Positionsliste, wo
+     * `Ausbuchen` der beschriebene Knopf ist. Unter einem Absende-Knopf war
+     * er eine Zeile Prosa zum Vorbeiscrollen.
+     *
+     * WAS er sagt, hat 0110 verschoben. „Das Anlegen ändert den Bestand
+     * nicht" war bis 0109 wahr; seit 0110 reserviert das Anlegen, und die
+     * Figur verschwindet damit aus dem Shop-Angebot. Der Anker folgt der
+     * Tatsache — die drei Dinge, die der Satz jetzt sagen MUSS, stehen
+     * einzeln darunter.
      */
-    expect(de.business.sales.create.stockHint).toContain("ändert den Bestand nicht");
+    expect(de.business.sales.create.stockHint).not.toContain("ändert den Bestand nicht");
+    expect(de.business.sales.create.stockHint).toContain("reserviert");
+    expect(de.business.sales.create.stockHint).toContain("Shop-Angebot");
+    expect(de.business.sales.create.stockHint).toContain("Ausbuchen");
+    expect(de.business.sales.create.stockHint).toContain("ohne Reservierung");
+    // Und der Einkauf-Zwilling bleibt wahr: ein Einkauf hält nichts.
+    expect(de.business.orderbook.createStockHint).toContain("ändert den Bestand nicht");
     expect(NEW_SALE).not.toContain("create.stockHint");
     expect(read("src/components/business/sale-items.tsx")).toContain("create.stockHint");
   });

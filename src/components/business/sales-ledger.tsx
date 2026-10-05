@@ -57,7 +57,7 @@ const SALE_COLUMNS =
 
 /* 7.5rem wider than before: the Lager column carries words, not a tick. */
 const SALE_MIN_WIDTH = "71rem";
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -202,7 +202,16 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
   const [showing, setShowing] = useState<number | null>(
     () => (openSale !== undefined && sales.some((s) => s.id === openSale) ? openSale : null));
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  /*
+   * WELCHE POSITION GERADE LÄUFT, nicht „läuft irgendetwas".
+   *
+   * Hier stand ein `useTransition`, dessen `pending` an jedem Knopf jeder
+   * Position jeder aufgeklappten Zeile hing. Ein Klick sperrte das ganze
+   * Verkaufsbuch, bis Next die Route neu gerendert hatte. Jetzt ist die
+   * Menge der beschäftigten Positionen der Zustand, und `sale_items.id` ist
+   * über alle Verkäufe eindeutig — eine Menge genügt für die ganze Liste.
+   */
+  const [busy, setBusy] = useState<ReadonlySet<number>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   const loading = useRef<Set<number>>(new Set());
 
@@ -233,15 +242,45 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Never optimistic. The server decides, then the row is re-read. */
-  const act = (id: number, run: () => Promise<{ ok: boolean; message?: string }>) => {
+  /*
+   * Never optimistic. The server decides, then the row is re-read.
+   *
+   * `saleId` sagt, welche Zeile nachgelesen wird; `key` ist die Position,
+   * die währenddessen gesperrt ist. Zwei verschiedene Positionen — auch in
+   * zwei verschiedenen Verkäufen — behindern sich nicht mehr.
+   */
+  const act = (
+    saleId: number, key: number, run: () => Promise<{ ok: boolean; message?: string }>,
+  ) => {
+    if (busy.has(key)) return;
+    setBusy((current) => new Set(current).add(key));
     setError(null);
-    startTransition(async () => {
-      const result = await run();
-      if (!result.ok) { setError(result.message ?? null); return; }
-      loading.current.delete(id);
-      load(id, true);
-    });
+    void (async () => {
+      try {
+        const result = await run();
+        if (!result.ok) { setError(result.message ?? null); return; }
+        loading.current.delete(saleId);
+        load(saleId, true);
+        /*
+         * DIE EINGEKLAPPTE ZEILE GEHÖRT DER LISTE, NICHT DEM DETAIL.
+         *
+         * `load` erneuert die Positionen aus `seller_sale`. Die Spalte
+         * `Lager` der Zeile daneben kommt aber aus `seller_sales` — mit
+         * `outbookedCount`, `settledCount` und `closedCount`, die `0072`
+         * und `0075` dort und nur dort entscheiden. Die hier nachzurechnen
+         * wäre eine zweite Wahrheit über denselben Bestand.
+         *
+         * Also wird die Liste nachgeholt, statt sie nachzuahmen — und zwar
+         * OHNE darauf zu warten: die Zeile ist schon frei, die Positionen
+         * sind schon aktuell, und dieses eine Wort darf einen Takt später
+         * nachkommen. Kein `revalidatePath`: das legt den Server-Render in
+         * die Antwort der Aktion und hätte den Klick wieder verlängert.
+         */
+        router.refresh();
+      } finally {
+        setBusy((current) => { const next = new Set(current); next.delete(key); return next; });
+      }
+    })();
   };
 
   const showingSale = sales.find((s) => s.id === showing) ?? null;
@@ -350,7 +389,7 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                     ) : detail === "failed" ? (
                       <p className="px-3 py-2 text-xs text-muted">{copy.itemsFailed}</p>
                     ) : (
-                      <SaleDetail sale={sale} detail={detail} pending={pending} act={act} />
+                      <SaleDetail sale={sale} detail={detail} busy={busy} act={act} />
                     )}
                     <div className="px-3 pt-1.5">
                       <Link href={`/business/orderbuch/verkauf/${sale.id}?zurueck=${encodeURIComponent(backHref)}`}
@@ -386,9 +425,12 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
 }
 
 /** The expanded body: items, money and the payout, in the order work happens. */
-function SaleDetail({ sale, detail, pending, act }: {
-  sale: SaleRow; detail: Detail; pending: boolean;
-  act: (id: number, run: () => Promise<{ ok: boolean; message?: string }>) => void;
+function SaleDetail({ sale, detail, busy, act }: {
+  sale: SaleRow; detail: Detail;
+  /** Die gerade laufenden Positionen, nach `sale_items.id`. */
+  busy: ReadonlySet<number>;
+  act: (saleId: number, key: number,
+        run: () => Promise<{ ok: boolean; message?: string }>) => void;
 }) {
   const order = detail.order as Record<string, unknown> | null;
   const items = (detail.items ?? []) as Record<string, unknown>[];
@@ -488,12 +530,12 @@ function SaleDetail({ sale, detail, pending, act }: {
               const primary: Partial<Record<string, () => void>> = {
                 /* Derselbe Weg wie auf der Detailseite: ausbuchen und den
                    Versand datieren, in einer Transaktion (0090). */
-                ship: () => act(sale.id, () => shipSaleItem(id, sale.id)),
-                book: () => act(sale.id, () => bookSaleItem(id, sale.id)),
-                announce_return: () => act(sale.id, () => announceSaleItemReturn(id, sale.id, true)),
+                ship: () => act(sale.id, id, () => shipSaleItem(id, sale.id)),
+                book: () => act(sale.id, id, () => bookSaleItem(id, sale.id)),
+                announce_return: () => act(sale.id, id, () => announceSaleItemReturn(id, sale.id, true)),
                 /* „Bestätigen": Wareneingang und Einbuchung in einem Aufruf (0092). */
-                mark_returned: () => act(sale.id, () => receiveSaleItemReturn(id, sale.id)),
-                restock: () => act(sale.id, () => restockSaleItem(id, sale.id)),
+                mark_returned: () => act(sale.id, id, () => receiveSaleItemReturn(id, sale.id)),
+                restock: () => act(sale.id, id, () => restockSaleItem(id, sale.id)),
                 /*
                  * Der Rückweg gehört dorthin, wo das × steht. Stornieren war
                  * hier möglich, Zurücknehmen nicht — die Position blieb in
@@ -501,9 +543,10 @@ function SaleDetail({ sale, detail, pending, act }: {
                  * Betreiber musste auf die Detailseite wechseln. Derselbe
                  * Aufruf wie dort, nur mit `false` (0074).
                  */
-                unmark_not_shipped: () => act(sale.id, () => setSaleItemNotShipped(id, sale.id, false)),
+                unmark_not_shipped: () => act(sale.id, id, () => setSaleItemNotShipped(id, sale.id, false)),
               };
               const run = can.primary ? primary[can.primary] : undefined;
+              const working = busy.has(id);
               return (
                 <LedgerItemRow key={String(item.id)}>
                   <SaleIndicator
@@ -554,17 +597,17 @@ function SaleDetail({ sale, detail, pending, act }: {
                       </span>
                     ) : null}
                     {run ? (
-                      <button type="button" disabled={pending} onClick={run}
+                      <button type="button" disabled={working} onClick={run}
                               className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
                         {copy.itemActionLabels[can.primary!]}
                       </button>
                     ) : null}
                     {/* Stornieren, in einem Klick wie auf der Detailseite. */}
                     {can.canNotShip ? (
-                      <button type="button" disabled={pending}
+                      <button type="button" disabled={working}
                               title={copy.notShippedItemHint}
                               aria-label={copy.markNotShippedItem}
-                              onClick={() => act(sale.id, () => setSaleItemNotShipped(id, sale.id, true))}
+                              onClick={() => act(sale.id, id, () => setSaleItemNotShipped(id, sale.id, true))}
                               className="size-9 shrink-0 rounded-sky-md text-sm text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 disabled:opacity-40">
                         ×
                       </button>

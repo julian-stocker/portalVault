@@ -17,7 +17,9 @@ import { useMemo, useState } from "react";
 import { InventoryCard } from "@/components/admin/inventory-card";
 import { StockDialog } from "@/components/admin/stock-dialog";
 import { AdminThumb } from "@/components/admin/admin-thumb";
-import { CONDITIONS, type Condition, type InventoryPosition } from "@/lib/admin/inventory-model";
+import {
+  OPERATIVE_CONDITION, type Condition, type InventoryPosition,
+} from "@/lib/admin/inventory-model";
 import { positionKey } from "@/lib/admin/position-key";
 import type { TradeTotals } from "@/lib/admin/stock-history";
 import { InventoryOverviewPanel } from "@/components/admin/inventory-overview";
@@ -105,11 +107,18 @@ export function InventoryView({
           matchesQuery(figure, normalized) ||
           figure.skyId.toLowerCase().includes(query.trim().toLowerCase()),
       )
-      .flatMap((figure) =>
-        CONDITIONS.filter((condition) => !held.has(`${figure.skyId}:${condition}`)).map(
-          (condition) => ({ figure, condition }),
-        ),
-      )
+      /*
+       * NUR DIE OPERATIVE POSITION (0108). Vorher stand hier
+       * `CONDITIONS.filter(...)`, und die Übersicht bot deshalb für jede
+       * Figur ZWEI neue Positionen an — Lose und OVP. So sind die acht
+       * OVP-Zeilen auf Staging entstanden.
+       *
+       * Seit 0108 weist `record_inventory_movement()` jede andere Condition
+       * ab. Ein Knopf, von dem schon bekannt ist, dass die Datenbank ihn
+       * ablehnt, ist keine Auswahl, sondern eine Falle.
+       */
+      .filter((figure) => !held.has(`${figure.skyId}:${OPERATIVE_CONDITION}`))
+      .map((figure) => ({ figure, condition: OPERATIVE_CONDITION as Condition }))
       .slice(0, 12);
   }, [searching, positions, catalog, normalized, query]);
 
@@ -227,9 +236,8 @@ export function InventoryView({
                       <p className="truncate text-sm">{figure.displayName}</p>
                       <p className="text-[11px] text-muted">
                         <span className="font-mono">{figure.skyId}</span> ·{" "}
-                        {condition === "loose"
-                          ? de.inventory.conditionLoose
-                          : de.inventory.conditionBoxed}{" "}
+                        {/* Immer die operative Position — siehe `openable`. */}
+                        {de.inventory.conditionLoose}{" "}
                         · {de.inventory.noPositions}
                       </p>
                     </div>

@@ -2093,9 +2093,28 @@ describe("operational creation workflows", () => {
      * across the six games, and this screen still makes no lookup of its own.
      */
     expect(SALE_ITEMS).toContain("FigureSearch");
-    expect(SALE_ITEMS).toContain("catalog={catalog}");
+    /*
+     * DER KATALOG KOMMT NICHT MEHR ALS PROP DER DETAILSEITE.
+     *
+     * Er kostet zwei Abfragen und über 64 KB und wird auf diesem Bildschirm
+     * für genau eine Sache gebraucht — eine Figur hinzufügen oder umhängen.
+     * Im Render stand er trotzdem bei jedem Aufruf. Jetzt lädt die
+     * Positionsliste ihn beim ersten Hineingreifen in das Suchfeld über
+     * `loadOrderbookFigures` nach, und `/verkauf/neu` behält ihn als Prop,
+     * weil die Figurensuche dort der Zweck des Bildschirms ist.
+     *
+     * Was dieser Test weiterhin behauptet, unverändert: EINE Quelle, EINE
+     * Suche, kein zweiter Lookup auf diesem Bildschirm.
+     */
+    expect(SALE_ITEMS).toContain("catalog={available}");
+    expect(SALE_ITEMS).toContain("const available = catalog ?? figures ?? [];");
+    expect(SALE_ITEMS).toContain("loadOrderbookFigures()");
     expect(SALE_ITEMS).not.toContain("catalog.filter");        // no second search
     expect(SALE_ITEMS).not.toContain("seller_import_catalog"); // no second lookup
+    // Und die eine Quelle bleibt `fetchOrderbookCatalog` — die Action reicht
+    // sie nur durch, statt eine zweite Abfrage danebenzustellen.
+    expect(read("src/lib/orderbook/sales-actions.ts"))
+      .toContain("return fetchOrderbookCatalog();");
     const picker = read("src/components/business/figure-search.tsx");
     expect(picker).toContain("{choice.series}");
     expect(picker).toContain("{choice.skyId}");
@@ -2334,7 +2353,7 @@ describe("every action the rules produce is wired where it is offered", () => {
 
   it("both call the same server action for shipping", () => {
     expect(DETAIL).toContain("ship: run(() => shipSaleItem(id, saleId))");
-    expect(LEDGER).toContain("ship: () => act(sale.id, () => shipSaleItem(id, sale.id))");
+    expect(LEDGER).toContain("ship: () => act(sale.id, id, () => shipSaleItem(id, sale.id))");
   });
 
   it("an open, shelf-bound position on an external sale offers it", () => {
@@ -2522,10 +2541,10 @@ describe("returning an external position, announced first and booked second", ()
 
   it("both screens confirm through the same server action", () => {
     expect(DETAIL).toContain("mark_returned: run(() => receiveSaleItemReturn(id, saleId))");
-    expect(LEDGER).toContain("mark_returned: () => act(sale.id, () => receiveSaleItemReturn(id, sale.id))");
+    expect(LEDGER).toContain("mark_returned: () => act(sale.id, id, () => receiveSaleItemReturn(id, sale.id))");
     // Und der alte Einzelschritt bleibt für Zeilen, die schon `returned_at` tragen.
     expect(DETAIL).toContain("restock: run(() => restockSaleItem(id, saleId))");
-    expect(LEDGER).toContain("restock: () => act(sale.id, () => restockSaleItem(id, sale.id))");
+    expect(LEDGER).toContain("restock: () => act(sale.id, id, () => restockSaleItem(id, sale.id))");
   });
 
   it("an item without a figure never enters this path", () => {
@@ -2662,7 +2681,7 @@ describe("cancelling an open position", () => {
     // Beide Bildschirme hängen an genau diesem Weg.
     expect(DETAIL).toContain("unmark_not_shipped: run(() => setSaleItemNotShipped(id, saleId, false))");
     expect(LEDGER)
-      .toContain("unmark_not_shipped: () => act(sale.id, () => setSaleItemNotShipped(id, sale.id, false))");
+      .toContain("unmark_not_shipped: () => act(sale.id, id, () => setSaleItemNotShipped(id, sale.id, false))");
   });
 
   it("10. undoing clears the timestamp and moves nothing", () => {

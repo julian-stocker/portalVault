@@ -12,13 +12,49 @@
  *   tooling no client role can execute
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
+import { V1_CONDITION } from "@/lib/shop/offer";
 
-/** V1 knows exactly two, and the database CHECK is the vocabulary. */
+/**
+ * The vocabulary the database still knows — `loose` and `boxed`.
+ *
+ * NOT the set an operator may choose from any more; see
+ * `OPERATIVE_CONDITION`. This list stays because historical rows exist and
+ * have to be *read* and *labelled*: an old order line, an imported workbook
+ * row and the eight Staging fixture positions are all genuinely `boxed`, and
+ * a screen that printed "Lose" over them would be lying about the past.
+ */
 export const CONDITIONS = ["loose", "boxed"] as const;
 export type Condition = (typeof CONDITIONS)[number];
 
 export function isCondition(value: unknown): value is Condition {
   return typeof value === "string" && (CONDITIONS as readonly string[]).includes(value);
+}
+
+/**
+ * The one condition SkyIsles trades (0108).
+ *
+ * SkyIsles handelt ausschließlich mit losen Figuren. OVP is no longer an
+ * operative product; whoever wants to trade originally packaged figures uses
+ * another platform for that.
+ *
+ * NOT a fourth copy of the rule: this is `V1_CONDITION` from
+ * `lib/shop/offer.ts`, which is itself the client-side twin of
+ * `public.v1_sale_condition()` (0028). Since 0108 the database refuses any
+ * other condition in `record_inventory_movement()` and `set_shop_listing()`,
+ * so a screen that offered one would be offering a refusal.
+ * `loose-only-ui.test.ts` holds the three expressions of the rule together.
+ */
+export const OPERATIVE_CONDITION: Condition = V1_CONDITION;
+
+/**
+ * May an operator still act on this position?
+ *
+ * `false` for a historical `boxed` row: it is shown, it is labelled, its
+ * history is readable — but booking, pricing and listing it would be refused
+ * by 0108, so those controls are not offered. Reading is never gated.
+ */
+export function isOperativeCondition(value: unknown): boolean {
+  return value === OPERATIVE_CONDITION;
 }
 
 /**

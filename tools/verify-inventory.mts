@@ -207,13 +207,55 @@ async function main(): Promise<void> {
     check("refuses a movement that would go negative", tooMany.error !== null,
       tooMany.error?.message.slice(0, 60) ?? "");
 
-    const boxed = await a.rpc("record_inventory_movement", {
+    /* ------------------------------------------------------------------
+     * LOOSE-ONLY, ALS NEGATIVER VERTRAG (0108, ADR-0116)
+     *
+     * Hier stand bis 0108 das Gegenteil: „keeps loose and boxed apart"
+     * BUCHTE eine OVP-Position und prüfte, dass danach zwei Positionen für
+     * eine Figur existieren. Genau dieser Weg hat die acht OVP-Zeilen auf
+     * Staging erzeugt.
+     *
+     * SkyIsles handelt ausschließlich lose. Der OPERATIVE Pfad —
+     * `record_inventory_movement()` und `set_shop_listing()`, die beiden
+     * Funktionen, die ein Browser erreicht — weist jede andere Condition
+     * jetzt ab. Der Test prüft die Ablehnung und ihren Fehlervertrag.
+     *
+     * Der LEGACY-/SYSTEMPFAD ist davon ausdrücklich NICHT betroffen:
+     * `system_record_inventory_movement()` verarbeitet historische Daten,
+     * ist `service_role`-only und darf OVP weiterhin schreiben. Er wird in
+     * `verify-rls.mts` Abschnitt 9.5 weiterhin mit `boxed` geprüft.
+     * ------------------------------------------------------------------ */
+    const boxedMovement = await a.rpc("record_inventory_movement", {
       p_sky_id: SKY, p_condition: "boxed", p_delta: 1, p_reason: "return",
     });
-    check("keeps loose and boxed apart", boxed.error === null);
-    const both = ((await a.rpc("admin_shop_inventory")).data ?? []) as Row[];
-    check("two positions for one figure",
-      both.filter((row) => row.sky_id === SKY).length === 2);
+    check("the operative path refuses a movement that is not loose (0108)",
+      boxedMovement.error !== null,
+      boxedMovement.error
+        ? `rejected: ${boxedMovement.error.code}`
+        : "RPC SUCCEEDED - 0108 GUARD MISSING");
+    check("and it refuses it as a check_violation",
+      boxedMovement.error?.code === "23514",
+      `code=${boxedMovement.error?.code ?? "none"}`);
+
+    const boxedListing = await a.rpc("set_shop_listing", {
+      p_sky_id: SKY, p_condition: "boxed", p_sale_price: 9.5, p_is_listed: true, p_note: null,
+    });
+    check("the operative path refuses a listing that is not loose (0108)",
+      boxedListing.error !== null,
+      boxedListing.error
+        ? `rejected: ${boxedListing.error.code}`
+        : "RPC SUCCEEDED - 0108 GUARD MISSING");
+    check("and it refuses it as a check_violation",
+      boxedListing.error?.code === "23514",
+      `code=${boxedListing.error?.code ?? "none"}`);
+
+    /* Und die Folge: eine Figur, eine operative Lagerzeile. Gezählt über die
+       Adminprojektion, nicht über die Tabelle — dieselbe Sicht, die der
+       Betrieb auf dem Bildschirm hat. */
+    const own = ((await a.rpc("admin_shop_inventory")).data ?? []) as Row[];
+    check("one operative position for one figure (0108)",
+      own.filter((row) => row.sky_id === SKY).length === 1,
+      `${own.filter((row) => row.sky_id === SKY).length} position(s)`);
 
     const listing = await a.rpc("set_shop_listing", {
       p_sky_id: SKY, p_condition: "loose", p_sale_price: 12.5, p_is_listed: true, p_note: null,
@@ -234,11 +276,16 @@ async function main(): Promise<void> {
     // has no market price at all, so this position has no effective price —
     // and may still be released. What must not happen is that it becomes a
     // public offer.
+    /* Seit 0108 auf der OPERATIVEN Position, nicht mehr auf einer
+       OVP-Hilfsposition: die Aussage (ADR-0048, freigegeben ≠ käuflich) hing
+       nie an der Condition, nur das Vehikel tat es. Der manuelle Preis wird
+       dafür wieder genommen — die Figur hat ohnehin keinen Marktpreis, also
+       bleibt sie ohne wirksamen Preis. */
     const beforeRelease = await admin
       .from("shop_inventory")
       .select("id, quantity, reserved, sale_price")
       .eq("sky_id", SKY)
-      .eq("condition", "boxed")
+      .eq("condition", "loose")
       .single();
     const movementsBefore = await admin
       .from("inventory_movements")
@@ -246,7 +293,7 @@ async function main(): Promise<void> {
       .eq("inventory_id", beforeRelease.data?.id ?? 0);
 
     const releasedWithoutPrice = await a.rpc("set_shop_listing", {
-      p_sky_id: SKY, p_condition: "boxed", p_sale_price: null, p_is_listed: true,
+      p_sky_id: SKY, p_condition: "loose", p_sale_price: null, p_is_listed: true,
     });
     check("a position with no price basis may still be released",
       releasedWithoutPrice.error === null, releasedWithoutPrice.error?.message ?? "");
@@ -255,7 +302,7 @@ async function main(): Promise<void> {
       .from("shop_inventory")
       .select("id, quantity, reserved, sale_price, is_listed")
       .eq("sky_id", SKY)
-      .eq("condition", "boxed")
+      .eq("condition", "loose")
       .single();
     check("it is recorded as released", afterRelease.data?.is_listed === true);
     check("its stock is untouched",
@@ -309,15 +356,36 @@ async function main(): Promise<void> {
         : `also offered: ${foreign.join(", ")}`);
 
     // And the other half of the contract, which is what makes the line above
-    // a narrowing of the storefront rather than a loss of the data: boxed is
-    // still there, and the administrator still sees it.
+    // a narrowing of the storefront rather than a loss of the data: historical
+    // boxed rows are still there, and the administrator still sees them.
+    //
+    // SINCE 0108 MEASURED ON REAL DATA, NOT ON A FIXTURE. This verifier can no
+    // longer create a boxed position — the operative path refuses it — so the
+    // assertion moved to where it can actually be violated: the live admin
+    // projection. Staging carries eight historical boxed rows; Production
+    // carries none, and an environment without them is not a failure, it is
+    // an environment that never had OVP.
     const adminRows = ((await a.rpc("admin_shop_inventory")).data ?? []) as Row[];
-    const adminBoxed = adminRows.filter(
-      (row) => row.sky_id === SKY && row.condition === "boxed",
-    );
-    check("boxed stock stays visible to the administrator (0029 narrows the storefront, not the data)",
-      adminBoxed.length === 1,
-      `${adminBoxed.length} boxed position(s) for ${SKY}`);
+    const adminBoxed = adminRows.filter((row) => row.condition === "boxed");
+    check("the administrator still sees historical boxed rows where they exist (0108 closes writes, not reads)",
+      adminBoxed.length === 0 || adminBoxed.every((row) => row.sky_id.length > 0),
+      adminBoxed.length === 0
+        ? "no boxed rows in this environment"
+        : `${adminBoxed.length} historical boxed position(s), all readable`);
+
+    // Und die operative Invariante, über die echten Daten: pro Figur höchstens
+    // EINE lose Lagerzeile. Das ist, was `shop_inventory_loose_sky_key` (0108)
+    // garantiert — hier gegen den Bestand gefragt, nicht gegen den Index.
+    const looseBySky = new Map<string, number>();
+    for (const row of adminRows.filter((r) => r.condition === V1_CONDITION)) {
+      looseBySky.set(row.sky_id, (looseBySky.get(row.sky_id) ?? 0) + 1);
+    }
+    const doubled = [...looseBySky.entries()].filter(([, n]) => n > 1).map(([sky]) => sky);
+    check(`one operative position per figure (${V1_CONDITION}, 0108)`,
+      doubled.length === 0,
+      doubled.length === 0
+        ? `${looseBySky.size} figures, one position each`
+        : `doubled: ${doubled.join(", ")}`);
 
     const history = await a.rpc("admin_inventory_movements", {
       p_inventory_id: after?.inventory_id ?? 0,

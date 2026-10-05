@@ -1103,6 +1103,9 @@ export const de = {
         tooShort: "Mindestens zwei Zeichen eingeben.",
         empty: "Keine Figur gefunden.",
         noCatalog: "Der Katalog konnte nicht geladen werden.",
+        /* Der Katalog ist unterwegs. Unterscheidet sich von `noCatalog`:
+           „noch nicht da" ist kein Fehlschlag. */
+        loadingCatalog: "Katalog wird geladen …",
         results: "Suchergebnisse",
         selected: "Ausgewählte Figuren",
         none: "Noch keine Figur ausgewählt.",
@@ -1232,9 +1235,19 @@ export const de = {
         buyer: "Käufer", reference: "Referenz", note: "Notiz",
         subtotal: "Summe", shipping: "Versand", discount: "Rabatt",
         submit: "Verkauf anlegen",
-        /* Anlegen ist noch keine Lagerbewegung. */
-        stockHint: "Das Anlegen ändert den Bestand nicht. "
-          + "Erst „Ausbuchen“ bei der einzelnen Position nimmt sie aus dem Lager.",
+        /*
+         * SEIT 0110 RESERVIERT DAS ANLEGEN.
+         *
+         * Hier stand „Das Anlegen ändert den Bestand nicht." Das war bis
+         * 0109 wahr und ist seit 0110 die Hälfte der Wahrheit: `quantity`
+         * sinkt weiterhin erst beim Ausbuchen, aber `reserved` steigt sofort
+         * — und damit verschwindet die Figur aus `shop_offers()`. Ein Satz,
+         * der das verschweigt, erklärt dem Betreiber nicht, warum sein Shop
+         * eine Figur nicht mehr anbietet.
+         */
+        stockHint: "Das Anlegen reserviert vorhandene Ware: sie verschwindet aus dem "
+          + "Shop-Angebot, bleibt aber im Lager. Erst „Ausbuchen“ nimmt sie heraus. "
+          + "Ist nichts frei, entsteht die Position trotzdem — dann ohne Reservierung.",
         invalidAmount: "Bitte einen gültigen Betrag eintragen.",
         /* Standard: aus. Der Normalfall darf nicht umständlicher werden. */
         testFlag: "Testvorgang",
@@ -1448,6 +1461,23 @@ export const de = {
        */
       /* Was in der Aktionsspalte steht, wenn nur zurückgehalten wird. */
       itemActionHeld: "Abgleich ausstehend",
+      /*
+       * DER EXTERNAL HOLD EINER POSITION (0110).
+       *
+       * Drei Lagen, drei Sätze — und der Unterschied zwischen „kein Bestand"
+       * und „keine Lagerposition" ist keine Spitzfindigkeit: das erste löst
+       * sich durch einen Einkauf, das zweite durch eine Lagerzeile.
+       */
+      hold: {
+        held: "Reserviert",
+        heldHint: "Für diesen Verkauf reserviert und im SkyIsles-Shop nicht mehr verfügbar.",
+        noStock: "Kein Bestand",
+        noStockHint: "Kein freies Stück im Lager — die Position bleibt bestehen, hält aber nichts.",
+        noInventory: "Keine Lagerposition",
+        noInventoryHint: "Für diese Figur gibt es keine lose Lagerzeile, also nichts zu reservieren.",
+        action: "Reservieren",
+        actionHint: "Noch einmal versuchen, ein loses Stück für diese Position zu reservieren.",
+      },
 
       itemIndicator: {
         open: "Offen — noch nicht ausgebucht",
@@ -1588,6 +1618,19 @@ export const de = {
         stockUnavailable:
           "Dieser Artikel ist aktuell nicht verfügbar — kein freier Bestand " +
           "oder für eine SkyIsles-Bestellung reserviert.",
+        /*
+         * ZWEI ABLEHNUNGEN, DIE NIE AUFTRETEN SOLLTEN (0110).
+         *
+         * Beide kommen aus `convert_sale_item_hold` bzw.
+         * `release_sale_item_hold` und bedeuten, dass Reservierung und
+         * Bestand auseinander sind. `0010` nennt den Grund, warum sie laut
+         * sind und nicht klemmen: ein geklemmter Wert versteckt die
+         * Abweichung für immer. Ein Satz dafür ist trotzdem besser als die
+         * allgemeine Meldung — der Betreiber soll wissen, dass NICHTS
+         * geschrieben wurde.
+         */
+        holdRace: "Die Reservierung hat sich gerade geändert. Bitte noch einmal versuchen.",
+        holdMismatch: "Reservierung und Bestand stimmen nicht überein. Es wurde nichts geschrieben; bitte den Bestand prüfen.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und hat keinen Lagerplatz.",
         historical: "Historische Verkäufe verändern den Bestand nicht.",
         /* Der barrierefreie Name des Statuspunkts. Farbe allein trägt nie. */
@@ -2825,6 +2868,19 @@ export const de = {
     listingOn: "Im Shop",
     listingOff: "Nicht im Shop",
     seriesAll: "Alle Serien",
+    /*
+     * Eine historische OVP-Position (0108, ADR-0116).
+     *
+     * SkyIsles handelt ausschließlich lose. Eine solche Zeile wird weiterhin
+     * ANGEZEIGT, mit ihrer Historie und ihrem Etikett — aber Buchen, Preisen
+     * und Listen weist die Datenbank ab, deshalb bietet die Oberfläche es
+     * nicht an. Der Satz sagt beides: warum nichts geht, und dass die Zahlen
+     * echt sind.
+     */
+    historicalCondition: "Historische OVP-Position",
+    historicalConditionHint:
+      "SkyIsles handelt ausschließlich lose Figuren. Diese Position bleibt als Beleg " +
+      "erhalten, kann aber nicht mehr gebucht, bepreist oder gelistet werden.",
     changeStock: "Weitere Buchung",
     increase: "Bestand um 1 erhöhen",
     decrease: "Bestand um 1 verringern",

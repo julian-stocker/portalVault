@@ -333,7 +333,20 @@ describe("J — the inventory verifier's ADR-0048 check still bites", () => {
   });
 
   it("still proves boxed survives where it belongs", () => {
-    expect(verifier).toContain("boxed stock stays visible to the administrator");
+    /*
+     * DIE ABSICHT IST UNVERÄNDERT, DER ANKER IST GEWANDERT (0108).
+     *
+     * `0029` verengt den Laden, nicht die Daten — und dieser Test hält fest,
+     * dass der Verifier das auch beweist. Bis 0108 tat er es an einer
+     * OVP-Position, die er sich selbst anlegte; seit 0108 weist der operative
+     * Pfad das ab, also fragt er stattdessen die echte Adminprojektion. Eine
+     * Umgebung ohne OVP-Zeilen (Production) ist dabei kein Fehlschlag,
+     * sondern eine Umgebung, die nie OVP hatte.
+     */
+    expect(verifier).toContain("the administrator still sees historical boxed rows where they exist");
+    expect(verifier).toContain("0108 closes writes, not reads");
+    // Und über die echten Zeilen, nicht über eine Vorrichtung.
+    expect(verifier).toContain('adminRows.filter((row) => row.condition === "boxed")');
   });
 });
 

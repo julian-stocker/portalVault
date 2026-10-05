@@ -13,7 +13,6 @@ import { SaleItems } from "@/components/business/sale-items";
 import { TestFlag } from "@/components/business/test-flag";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
-import { fetchOrderbookCatalog } from "@/lib/orderbook/queries";
 import { fetchSale } from "@/lib/orderbook/sales-queries";
 import { CHANNEL_LABELS, countryLabel, safeSalesBackHref } from "@/lib/orderbook/sales-view";
 
@@ -32,9 +31,16 @@ export default async function SalePage({
 }) {
   const [{ id }, query] = await Promise.all([params, searchParams]);
   const back = safeSalesBackHref(query.zurueck);
-  const [detail, catalog] = await Promise.all([
-    fetchSale(Number(id)), fetchOrderbookCatalog(),
-  ]);
+  /*
+   * NUR DER VERKAUF.
+   *
+   * Hier stand `fetchOrderbookCatalog()` daneben — `seller_import_catalog()`
+   * plus 605 Preis- und Bildzeilen aus `skylanders`, über 64 KB —, obwohl
+   * dieser Bildschirm den Katalog für genau eine Sache braucht: eine Figur
+   * hinzufügen oder umhängen. `SaleItems` lädt ihn jetzt beim ersten
+   * Hineingreifen in das Suchfeld selbst nach.
+   */
+  const detail = await fetchSale(Number(id));
   if (!detail) notFound();
 
   const sale = (detail.sale ?? {}) as Record<string, unknown>;
@@ -130,7 +136,7 @@ export default async function SalePage({
         An internal sale shows the ORDER's lines; there is no second copy of
         them to manage. `SaleItems` renders them read-only in that case.
       */}
-      <SaleItems saleId={Number(id)} catalog={catalog}
+      <SaleItems saleId={Number(id)}
                  internal={internal} historical={historical}
                  frozen={frozen} cancelled={cancelled}
                  items={internal

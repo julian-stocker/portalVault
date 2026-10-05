@@ -9876,3 +9876,147 @@ unerwarteter Stelle; ein ZIP hat keine vorgeschriebene Reihenfolge.
 Bestellungen und Rechnungen, Lagerzahlen und Einkaufspreise — die schwerere Datei von beiden.
 `.gitignore` sperrt `skyisles-platform-backup-*.zip`, und ein Test hält die Regel dort fest.
 `restore_supported` bleibt `false`, in beiden Formaten.
+
+
+## ADR-0116 — Ein externer Verkauf hält seinen Bestand, und er hält ihn in derselben Buchhaltung wie der Shop
+
+**Status:** angenommen, 2026-10-05 · auf Staging validiert, auf Production angewendet
+**Bezug:** ADR-0021/ADR-0064 (Marketplace-Stopp, zwei Rollen), ADR-0037 (Lager),
+ADR-0044 (jede Bestandsänderung ist eine Journalzeile), ADR-0048 (Listung ist redaktionell),
+ADR-0077 (Plattform und Betrieb sind getrennte Autoritäten), ADR-0089 (ein Verkaufsbuch,
+zwei Herkünfte)
+**Migrationen:** `0108` (Loose-only-Lager), `0109` (External-Hold-Schema),
+`0110` (External-Hold-Laufzeit)
+
+**Problem.** Ein externer Verkauf — eBay, Kleinanzeigen — ist in dem Moment fachlich verkauft,
+in dem der Betreiber ihn anlegt. Die Figur darf ab dann nicht mehr über den SkyIsles-Shop
+weggehen. Ausgebucht ist sie aber nicht: sie liegt im Regal, bis das Paket raus ist. Diese
+Zwischenzeit kannte die Datenbank seit `0010` — für Shop-Bestellungen. Für externe Verkäufe
+nicht: zwischen Anlegen und Ausbuchen war die Figur im Shop weiter kaufbar, und zwei Kunden
+konnten dasselbe Stück bekommen.
+
+**Entscheidung 1 — eine Hold-Tabelle, nicht zwei.** `order_reservations` bekommt eine zweite
+Eigentümerspalte `sale_item_id`; `order_id` und `expires_at` werden nullable. Ein Checkout-Hold
+gehört einer Bestellung, ein External Hold **genau einer** Verkaufsposition, und ein CHECK
+erzwingt, dass immer **genau ein** Eigentümer gesetzt ist:
+
+```sql
+check ((order_id is null) <> (sale_item_id is null))
+```
+
+Die Alternative wäre eine eigene `sale_reservations`-Tabelle gewesen. Dagegen sprach nicht
+Ordnungsliebe, sondern dass die Invarianten bereits passen und nicht bloß ähnlich sind:
+`state` (`active → released | converted`) **ist** Hold → Freigabe → Verbrauch, `movement_id`
+ist unique und nur bei `converted` erlaubt, Löschen ist per Trigger verboten, und
+`shop_inventory.reserved` wird an drei Stellen mit derselben geführten WHERE-Klausel bewacht.
+Eine zweite Tabelle hätte eine **zweite Buchhaltung über dieselbe Zahl** bedeutet — und
+`public.reservation_reconciliation` summiert ohnehin alle aktiven Reservierungen ohne Filter
+auf `order_id`, deckt externe Holds also vom ersten Tag an ab, ohne geändert zu werden.
+
+**Kein Rename.** Die Tabelle heißt weiter `order_reservations`, obwohl sie zwei Bedeutungen
+trägt: `0104` und `0105` nennen sie wörtlich, sind eingefroren und auf Production angewendet.
+Die zweite Bedeutung steht im Tabellenkommentar.
+
+**Entscheidung 2 — `sale_item_id`, nicht `sale_id`.** `sale_items` ist eine Zeile pro
+physischem Objekt und hat bewusst keine Menge (ADR-0089). Ein Hold auf `(sale_id, inventory_id)`
+müsste eine Menge führen und beim Ausbuchen **einer** Position teilweise verbraucht werden —
+das kann `convert_order_reservations` nicht, es wandelt ganze Reservierungen. Eins zu eins:
+eine Position, ein Hold, `quantity = 1`, erzwungen durch
+`check (sale_item_id is null or quantity = 1)`.
+
+**Entscheidung 3 — ein External Hold läuft nie ab.** `check (sale_item_id is null or
+expires_at is null)`, und das Gegenstück `check (order_id is null or expires_at is not null)`
+für Checkouts. Ein Checkout-Hold muss ablaufen, sonst ist er ein Leck, das niemand bemerkt;
+ein externer Hold endet dadurch, dass die Position ausgebucht, storniert oder entfernt wird,
+und nicht nach `reservation_ttl()`. Der Constraint ist stärker als ein Filter im Sweep: er
+sagt, dass die Zeile **kein** Ablaufdatum hat, und überlebt damit eine spätere Änderung von
+`release_expired_reservations`.
+
+**Entscheidung 4 — höchstens ein aktiver Hold, Historie beliebig.** Ein partieller
+Unique-Index auf `(sale_item_id) where state = 'active'`. Eine Rückbuchung reaktiviert den
+gewandelten Hold **nicht**, sondern legt einen neuen an; der alte bleibt mit seiner
+`movement_id` stehen. Die Verknüpfung zum Journal ist append-only, weil das Journal es ist
+(ADR-0044).
+
+**Entscheidung 5 — ein Hold erfindet nie Bestand, und „kein Bestand" ist keine Störung.** Der
+Wächter ist die WHERE-Klausel `quantity - reserved >= 1`, nicht ein vorangestelltes SELECT;
+`check (reserved <= quantity)` ist der Boden darunter. Greift sie nicht, entsteht kein Hold und
+keine Zeile — die Verkaufsposition bleibt gültig und bekommt eine **stabile, maschinenlesbare
+Kennung** (`no_stock`, `no_inventory`, …) statt einer Ausnahme. **Eine teilweise reservierte
+externe Order ist ein zulässiger Zustand.** Würde geworfen, müsste die Anlage eines Verkaufs
+mit zwanzig Positionen jede Ausnahme einzeln abfangen, und ein `exception when others`
+verschluckt irgendwann genau das, was laut werden soll. Die drei Ablehnungen, die nie gehen
+werden — interner Verkauf, gefrorene Historie, stornierte Order —, stehen im öffentlichen
+`seller_hold_sale_item` und werfen `restrict_violation`, dort wo ein Mensch klickt.
+
+**Entscheidung 6 — Verbrauch heißt: erst freigeben, dann buchen.** Nicht umgekehrt. Der
+Wächter in `apply_inventory_movement` ist `quantity + p_delta >= reserved` und stolperte sonst
+über den eigenen Hold — `0025` hat diese Reihenfolge für den Checkout schon festgeschrieben.
+`seller_book_sale_item` kennt `reserved` deshalb **nicht**: die Arithmetik steht in
+`convert_sale_item_hold`, damit es keine zweite Stelle gibt, an der jemand `reserved` rechnet.
+Es gibt genau drei solche Stellen je Eigentümer, und keine vierte.
+
+**Entscheidung 7 — Loose-only ist der operative V1-Vertrag.** SkyIsles handelt dauerhaft
+ausschließlich mit losen Figuren. `0108` benennt das als partiellen Unique-Index über die losen
+Zeilen und lässt `record_inventory_movement` und `set_shop_listing` `v1_sale_condition()`
+fragen — dieselbe Funktion, die `shop_offers()` und `create_order()` seit `0028` fragen. Ein
+External Hold entsteht nur auf der operativen Position.
+
+**Kein `check (condition = 'loose')` auf `shop_inventory`,** und **keine Spalte entfernt.**
+Ein CHECK fröre jede historische OVP-Zeile für immer ein, inklusive jeder Berichtigung — beide
+operativen Schreibwege arbeiten per `insert … on conflict`. Historische Werte bleiben lesbar:
+eine alte Verkaufsposition dokumentiert weiterhin, dass sie OVP war. Das Entfernen der
+`condition`-Spalten ist ein eigener, später bewusst geplanter Schritt zusammen mit einem
+Backup-Format V2.
+
+**Entscheidung 8 — gefrorene Historie bewegt niemals Bestand, in keiner Richtung.**
+`seller_book_sale_item` lehnt die 275 nicht freigegebenen Arbeitsmappen-Verkäufe seit `0073`
+ab; `seller_unbook_sale_item` tut es seit `0110` wortgleich, und ein historischer Verkauf
+bekommt auch keinen Hold. Die Symmetrie ist am Text ablesbar und nicht nur gemeint.
+
+**Entscheidung 9 — Storno, Entfernen und Retoure bleiben getrennte Wege.** Sobald eine
+Verkaufsposition Retourentatsachen trägt — `return_announced_at`, `returned_at` oder
+`return_movement_id` —, verändert nichts aus dem Storno- oder Entfernen-Pfad ihren Retouren-
+oder Bestandszustand. „Order stornieren" und „Retourenstatus einer Position zurücknehmen" sind
+zwei fachliche Aktionen und werden nicht implizit gekoppelt. Technisch deckungsgleich: eine
+eingelagerte Retoure hat ihren Bestand schon zurückgebracht, eine zweite `+1 correction` würde
+Bestand erfinden — und `check (return_announced_at is null or movement_id is not null)` aus
+`0074` hätte ein automatisches Zurückbuchen mit `23514` abgebrochen. `seller_unbook_sale_item`
+schützt diese Invariante seit `0110` selbst, statt sich auf die Oberfläche zu verlassen.
+
+**Entscheidung 10 — Status bleibt eine Oberfläche auf Zeitstempeln.** Keine neue
+`status`-Spalte. ADR-0089 hat Geld, Bestand und Versand bewusst als drei unabhängige
+Dimensionen angelegt; eine Statusspalte müsste deren Produkt kodieren und wäre eine zweite
+Wahrheit. `active`/`released`/`converted` auf dem Hold bleibt unverändert das einzige
+Zustandsmodell der Reservierung.
+
+**Restrisiko — ausdrücklich nicht bestanden.** Die **Zwei-Session-Concurrency-Verifikation
+wurde NICHT durchgeführt.** Zwei echte parallele Sessions am letzten verfügbaren Stück sind
+weder für zwei External Holds noch für External Hold gegen Shop-Checkout geprüft worden. Der
+Supabase SQL Editor serialisiert seine Läufe, und das Projekt hat keinen eingerichteten Weg zu
+zwei unabhängigen PostgreSQL-Verbindungen — kein `psql`, kein Postgres-Treiber, kein
+Connection String im Repository. Das wurde bewusst als Restrisiko akzeptiert und **darf nicht
+als bestanden dokumentiert werden.**
+
+Was **ist** bewiesen: eine umfangreiche Single-Transaction-Verifikation auf Staging mit
+`BEGIN … ROLLBACK` über alle siebzehn Verträge — erfolgreicher Hold, `already_held`,
+`no_stock`, `no_inventory`, Release, doppeltes Release, erneuter Hold, Consume, doppeltes
+Consume, `drift = 0` nach jedem Schritt, `reserved` nie negativ und nie über `quantity`, genau
+eine `sale_external`-Bewegung, Hold korrekt `converted` mit `movement_id`, die bestehenden
+Checkout-Reservierungen unverändert, und der Ausgangszustand nach dem Rollback vollständig
+zurück. Dazu der Serialisierungspunkt als Codevertrag: `for update` vor jeder Entscheidung,
+geführte WHERE-Klausel statt vorangestelltem SELECT, Sperrordnung aufsteigend nach `id` wie in
+`0010`/`0025` — als Test festgeschrieben, nicht als Kommentar.
+
+**Konsequenzen.** `reservations_deny_delete()` erlaubt genau eine Löschung: einen externen Hold
+im Zustand `released` ohne Bewegung, zusammen mit seiner Position. `order_reservations.sale_item_id`
+fehlt in den eingefrorenen Backups `0104`/`0105` — die Summe der Holds steht über
+`shop_inventory.reserved` darin, die Zuordnung nicht; eine additive Folgemigration ist geplant.
+Die Hold-Anzeige im Verkaufsbuch und zwei deutsche Sätze für derzeit unerreichbare
+DB-Ablehnungen sind bewusst als Follow-up offen.
+
+**Verworfen.** Eine zweite Hold-Tabelle (zweite Buchhaltung). Eine `status`-Spalte auf `sales`
+(zweite Wahrheit). `check (condition = 'loose')` auf `shop_inventory` (fröre die Historie ein).
+Automatisches `is_listed = false` bei fehlendem Bestand (Listung ist redaktionell, ADR-0048).
+Alles-oder-nichts beim Ausbuchen einer teilweise reservierten Order.
+

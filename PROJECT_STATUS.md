@@ -2772,6 +2772,63 @@ Bewegungen · 2 741 Legacy-Ereignisse · 300 Verkäufe mit 1 312 Positionen · 8
 - Playwright-End-to-End-Tests (ADR-0013).
 
 
+## Loose-only-Lager und External Holds (Stand 2026-10-05)
+
+**Abgeschlossen.** Drei Migrationen auf **Staging und Production angewendet und
+postflight-verifiziert**; der Anwendungscode dieses Releases gehört dazu.
+
+| Migration | SHA256 | Inhalt |
+|---|---|---|
+| `0108_loose_only_inventory.sql` | `aaef73e2…d5b1f1c` | partieller Unique-Index über die losen Lagerzeilen, Loose-only-Guard in `record_inventory_movement` und `set_shop_listing` |
+| `0109_external_hold_schema.sql` | `dd9c6106…7839ef3` | `order_reservations.sale_item_id`, vier Hold-Constraints, FK, partieller Unique-Index, engerer Löschschutz |
+| `0110_external_hold_runtime.sql` | `53f7d25a…8e44948` | fünf neue Funktionen, neun ersetzte — Hold, Release, Verbrauch |
+
+**Was sich fachlich geändert hat.** Ein externer Verkauf reserviert seinen Bestand von der
+Anlage bis zum Versand. `reserved` steigt beim Anlegen einer Position, die Figur verschwindet
+damit sofort aus `shop_offers()`, und `quantity` sinkt erst beim Ausbuchen. Ist nichts frei,
+entsteht die Position trotzdem und hält nichts — eine teilweise reservierte externe Order ist
+ein zulässiger Zustand. Gehalten wird in derselben Tabelle wie ein Shop-Checkout
+(`order_reservations`), mit genau einem Eigentümer je Zeile. Details in
+`docs/DATABASE.md` 3.3ak, Begründung in **ADR-0116**.
+
+**Loose-only ist der operative Vertrag.** Die Lageroberfläche bietet keine OVP-Position mehr
+an; historische OVP-Zeilen und `condition`-Spalten bleiben vollständig lesbar und wurden nicht
+angefasst. Production trug bereits **null** boxed-Zeilen; auf Staging wurden die sieben noch
+gelisteten Fixture-Zeilen vor `0108` über `set_shop_listing` entlistet, ohne Mengenänderung und
+ohne Bewegung.
+
+**Oberfläche und Performance.** Die Positionsliste zeigt pro Zeile `Reserviert`, `Kein Bestand`
+oder `Keine Lagerposition` und bietet einen zweiten Reservierungsversuch an. Im selben Release
+wurde der Wartezwang beim Bearbeiten einzelner Positionen beseitigt: statt eines gemeinsamen
+`pending` für den ganzen Bildschirm sperrt jetzt nur die laufende Zeile, und die Aktion liest
+den einen Verkauf über `seller_sale` nach, statt die ganze Route neu rendern zu lassen. Der
+Figurenkatalog verlässt dafür den Render der Detailseite und wird erst beim Hineingreifen in
+die Suche geladen.
+
+**Verifikation.** 221 Vitest-Dateien, 6 969 Unit-Tests, Lint/Typecheck/Build grün. Auf Staging
+eine vollständige `BEGIN … ROLLBACK`-Laufzeitprobe über alle siebzehn Verträge, mit
+dokumentiertem Sequenzverbrauch und einem Read-only-Postcheck, der den Ausgangszustand
+vollständig bestätigt hat.
+
+**Restrisiko, ausdrücklich nicht bestanden.** Die **Zwei-Session-Concurrency-Verifikation wurde
+NICHT durchgeführt** — weder zwei External Holds auf das letzte Stück noch External Hold gegen
+Shop-Checkout. Der SQL Editor serialisiert seine Läufe, und das Projekt hat keinen
+eingerichteten Weg zu zwei unabhängigen PostgreSQL-Sessions. Bewusst als Restrisiko akzeptiert;
+siehe ADR-0116.
+
+**Follow-ups, bewusst offen**
+
+- Keine Hold-Anzeige im Verkaufsbuch (`sales-ledger.tsx`); die Daten liegen vor, werden dort
+  aber nicht gerendert.
+- Zwei DB-Ablehnungen ohne deutschen Satz: die `return_announced_at`-Sperre in
+  `seller_unbook_sale_item` (derzeit in keiner Oberfläche erreichbar) und die
+  `0108`-Ablehnung im Admin-Schreibweg (nach diesem Release per Klick unerreichbar).
+- `order_reservations.sale_item_id` fehlt in den eingefrorenen Backups `0104`/`0105`. Die
+  Summe der Holds steht über `shop_inventory.reserved` darin, die Zuordnung nicht. Eine
+  additive Folgemigration ist geplant.
+- Die beiden Race-Tests, sobald ein Weg zu zwei Sessions eingerichtet ist.
+
+
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt

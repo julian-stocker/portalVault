@@ -980,8 +980,23 @@ async function main(): Promise<void> {
       await admin.from("shop_inventory").update({ reserved: 0 }).eq("id", inventoryId);
 
       // ---------------------------------------------------- 9.5 initial_import
+      //
+      // OPERATIV GEGEN LEGACY, SEIT 0108 (ADR-0116).
+      //
+      // Die nächsten zwei Prüfungen gehen über `record_inventory_movement()`,
+      // den OPERATIVEN Pfad, den ein Browser erreicht. Sie prüfen die Regeln
+      // von `initial_import` — kein Kostenansatz, kein negatives Delta — und
+      // die hängen nicht an der Condition. Sie liefen bis 0108 mit `boxed`;
+      // das wäre jetzt aus dem falschen Grund rot und hätte weiter „bestanden",
+      // ohne noch zu prüfen, was der Name behauptet. Deshalb `loose`.
+      //
+      // Die DANACH folgenden Prüfungen gehen über
+      // `system_record_inventory_movement()` — den LEGACY-/SYSTEMPFAD, der
+      // historische Eröffnungsbestände verarbeitet, `service_role`-only ist
+      // und kein Teil des normalen SkyIsles-Wegs. Er darf OVP weiterhin
+      // schreiben, und genau das wird dort weiterhin mit `boxed` geprüft.
       const importCost = await a.rpc("record_inventory_movement", {
-        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 1, p_reason: "initial_import",
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "initial_import",
         p_unit_cost: 1, p_currency: "EUR",
       });
       check(
@@ -991,7 +1006,7 @@ async function main(): Promise<void> {
       );
 
       const importNegative = await a.rpc("record_inventory_movement", {
-        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: -1, p_reason: "initial_import",
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -1, p_reason: "initial_import",
       });
       check(
         "initial_import refuses a negative delta",
@@ -1001,6 +1016,12 @@ async function main(): Promise<void> {
 
       // Booked on the first run ever; refused with 23505 on every run after —
       // both outcomes prove the partial unique index is in place.
+      //
+      // `boxed` BLEIBT HIER ABSICHTLICH (0108). Dies ist der Legacy-Pfad für
+      // historische Eröffnungsbestände; er ist `service_role`-only, kein
+      // Browser erreicht ihn, und er muss OVP weiterhin schreiben können,
+      // damit alte Daten überhaupt einspielbar bleiben. Die Condition ist
+      // hier zugleich das, was diese Prüfung von der operativen trennt.
       const systemImport = await admin.rpc("system_record_inventory_movement", {
         p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 7, p_reason: "initial_import",
         p_note: "verify-rls opening balance",
@@ -1043,6 +1064,47 @@ async function main(): Promise<void> {
         "a second opening balance for the same position is refused (idempotent import)",
         secondImport.error?.code === "23505",
         secondImport.error ? `rejected: ${secondImport.error.code}` : "RPC SUCCEEDED - IMPORT WOULD DOUBLE STOCK",
+      );
+
+      // --------------------------------------------------- 9.5b loose-only (0108)
+      //
+      // SkyIsles handelt ausschließlich mit losen Figuren. Der operative Pfad
+      // weist jede andere Condition ab; der Fehlervertrag ist
+      // `check_violation` (23514), derselbe Code, den eine unzulässige Menge
+      // schon bekam — die Anwendung bildet ihn bereits auf dieselbe Antwort
+      // ab. Loose muss daneben unverändert funktionieren.
+      const looseStillWorks = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: 1, p_reason: "purchase",
+        p_unit_cost: 1, p_currency: "EUR",
+      });
+      check(
+        "loose still books after 0108",
+        !looseStillWorks.error,
+        looseStillWorks.error ? `REFUSED: ${looseStillWorks.error.code}` : `movement ${looseStillWorks.data}`,
+      );
+      if (!looseStillWorks.error) {
+        await a.rpc("record_inventory_movement", {
+          p_sky_id: SHOP_SKY_ID, p_condition: "loose", p_delta: -1, p_reason: "correction",
+          p_note: "verify-rls: loose-only probe reversed",
+        });
+      }
+
+      const boxedMovement = await a.rpc("record_inventory_movement", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_delta: 1, p_reason: "purchase",
+      });
+      check(
+        "the operative movement path refuses a condition other than loose (0108)",
+        boxedMovement.error?.code === "23514",
+        boxedMovement.error ? `rejected: ${boxedMovement.error.code}` : "RPC SUCCEEDED - 0108 GUARD MISSING",
+      );
+
+      const boxedListing = await a.rpc("set_shop_listing", {
+        p_sky_id: SHOP_SKY_ID, p_condition: "boxed", p_sale_price: 9.5, p_is_listed: true,
+      });
+      check(
+        "the operative listing path refuses a condition other than loose (0108)",
+        boxedListing.error?.code === "23514",
+        boxedListing.error ? `rejected: ${boxedListing.error.code}` : "RPC SUCCEEDED - 0108 GUARD MISSING",
       );
 
       // ----------------------------------------------------- 9.6 schema guards
@@ -1180,6 +1242,12 @@ async function main(): Promise<void> {
       );
 
       // ------------------------------------------- 9.7 identity and append-only
+      //
+      // `boxed` ist hier kein operativer Wunsch, sondern nur EIN ANDERER WERT:
+      // geprüft wird `shop_inventory_identity_immutable` (0003), der jedes
+      // Umhängen einer Position verweigert — auch für die Service Role, auch
+      // nach 0108. Ein CHECK auf `condition` gibt es bewusst nicht; die
+      // Ablehnung kommt vom Trigger.
       const repoint = await admin
         .from("shop_inventory")
         .update({ condition: "boxed" })

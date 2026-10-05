@@ -35,7 +35,7 @@ import { PriceEditor } from "@/components/admin/price-editor";
 import { StockLedger } from "@/components/admin/stock-ledger";
 import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
-import type { InventoryPosition } from "@/lib/admin/inventory-model";
+import { isOperativeCondition, type InventoryPosition } from "@/lib/admin/inventory-model";
 import { loadCardHistory } from "@/lib/admin/legacy-actions";
 import {
   mergeHistory, tradeCounters,
@@ -95,6 +95,17 @@ export function InventoryCard({
   const automaticPrice = automaticShopPrice(figure?.marketPrice ?? null, percentage);
   const conditionLabel =
     position.condition === "loose" ? copy.conditionLoose : copy.conditionBoxed;
+
+  /*
+   * HISTORISCH ODER OPERATIV (0108).
+   *
+   * SkyIsles handelt ausschließlich lose. Eine OVP-Position bleibt sichtbar,
+   * behält ihr Etikett und ihre Historie — aber `record_inventory_movement()`
+   * und `set_shop_listing()` weisen sie seit 0108 ab. Die drei Steuerungen,
+   * die genau dort hinführen, werden deshalb nicht angeboten: Listung,
+   * Bestandsschritte und Preis. Lesen bleibt ungehindert.
+   */
+  const operative = isOperativeCondition(position.condition);
 
   /**
    * BOTH sources are fetched on first open, not with the page.
@@ -166,21 +177,37 @@ export function InventoryCard({
         {/* The shop release, and the control that changes it (ADR-0048).
             "Im Shop" means released, never "in stock": the two are separate
             questions and both states of each are real. */}
-        <button
-          type="button"
-          onClick={() => save({ isListed: !position.isListed })}
-          aria-pressed={position.isListed}
-          aria-busy={pending || undefined}
-          className={
-            "min-h-7 shrink-0 rounded-full px-2.5 text-[11px] font-medium whitespace-nowrap ring-1 " +
-            (position.isListed
-              ? "bg-status-ground text-status-ink ring-status-line"
-              : "bg-surface text-muted ring-border/70")
-          }
-        >
-          {position.isListed ? copy.listed : copy.notListed}
-        </button>
+        {operative ? (
+          <button
+            type="button"
+            onClick={() => save({ isListed: !position.isListed })}
+            aria-pressed={position.isListed}
+            aria-busy={pending || undefined}
+            className={
+              "min-h-7 shrink-0 rounded-full px-2.5 text-[11px] font-medium whitespace-nowrap ring-1 " +
+              (position.isListed
+                ? "bg-status-ground text-status-ink ring-status-line"
+                : "bg-surface text-muted ring-border/70")
+            }
+          >
+            {position.isListed ? copy.listed : copy.notListed}
+          </button>
+        ) : (
+          /* Kein Knopf, nur der Zustand: 0108 würde das Umschalten ablehnen. */
+          <span className="min-h-7 shrink-0 rounded-full bg-surface px-2.5 text-[11px] font-medium whitespace-nowrap text-muted ring-1 ring-border/70">
+            {position.isListed ? copy.listed : copy.notListed}
+          </span>
+        )}
       </div>
+
+      {/* Warum hier nichts zu bedienen ist — einmal gesagt, nicht an drei
+          Stellen angedeutet. */}
+      {!operative ? (
+        <p className="rounded-sky-md bg-status-ground px-2.5 py-1.5 text-[11px] leading-tight text-status-ink ring-1 ring-status-line">
+          <span className="font-medium">{copy.historicalCondition}</span>{" "}
+          {copy.historicalConditionHint}
+        </p>
+      ) : null}
 
       {/* The two reasons a released position is nevertheless not on sale.
           Their own line, so they never widen the header. */}
@@ -202,13 +229,21 @@ export function InventoryCard({
         <Counter label={copy.sold} value={sold} />
         <span className="flex items-center gap-1.5">
           <span className="text-[11px] text-muted">{copy.stockLabel}</span>
-          <StockStepper
-            skyId={position.skyId}
-            condition={position.condition}
-            quantity={position.quantity}
-            reserved={position.reserved}
-            onFailed={setFailed}
-          />
+          {operative ? (
+            <StockStepper
+              skyId={position.skyId}
+              condition={position.condition}
+              quantity={position.quantity}
+              reserved={position.reserved}
+              onFailed={setFailed}
+            />
+          ) : (
+            /* Die Zahl bleibt, die Schritte nicht: eine Bewegung auf dieser
+               Position weist 0108 ab. */
+            <span className="text-sm font-medium tabular-nums">
+              {formatNumber(position.quantity)}
+            </span>
+          )}
         </span>
         {/* Only when something is actually promised to a checkout —
             otherwise this repeats the number beside it. */}
@@ -234,14 +269,22 @@ export function InventoryCard({
           <span className="text-[11px] text-muted">{copy.salePrice}</span>
           {/* What the shop charges, and whether it follows the rule
               (ADR-0045). The automatic figure is the database's. */}
-          <PriceEditor
-            position={position}
-            automaticPrice={
-              position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
-            }
-            percentage={percentage}
-            onFailed={setFailed}
-          />
+          {operative ? (
+            <PriceEditor
+              position={position}
+              automaticPrice={
+                position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
+              }
+              percentage={percentage}
+              onFailed={setFailed}
+            />
+          ) : (
+            /* Nur der Wert: `set_shop_listing` schreibt Preis und Listung
+               gemeinsam und weist diese Position seit 0108 ab. */
+            <span className="text-sm tabular-nums">
+              {position.effectivePrice === null ? "–" : formatPrice(position.effectivePrice)}
+            </span>
+          )}
         </span>
       </div>
 

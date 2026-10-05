@@ -2420,6 +2420,204 @@ weitere Bestandsänderung entsteht über `apply_inventory_movement` (ADR-0044, A
 
 ---
 
+### 3.3ak Loose-only-Lager und External Holds (`0108`, `0109`, `0110`, ADR-0116)
+
+Drei Migrationen, die zusammen eine Lücke schließen: ein externer Verkauf ist in dem Moment
+fachlich verkauft, in dem er angelegt wird, und die Figur darf ab dann nicht mehr über den
+SkyIsles-Shop weggehen — sie ist aber noch nicht ausgebucht, sondern liegt im Regal, bis das
+Paket raus ist. Angewendet auf Staging und Production am 2026-10-05.
+
+#### Die drei Mengen auf `shop_inventory`
+
+| Spalte | Bedeutung | wer schreibt sie |
+|---|---|---|
+| `quantity` | Was physisch im Regal liegt. | **ausschließlich** `apply_inventory_movement` — und die schreibt in derselben Transaktion die Journalzeile in `inventory_movements`. Es gibt keinen zweiten Weg (ADR-0044) |
+| `reserved` | Was zugesagt ist und deshalb nicht mehr verkauft werden darf. | sechs Funktionen, drei je Eigentümer — siehe unten |
+| `available_quantity` | `quantity - reserved`, **generated always as … stored** (`0003`) | niemand. Eine Definition, überall gelesen, nirgends kopiert |
+
+`shop_offers()` und `shop_quantity_available()` fragen ausschließlich `available_quantity`.
+Steigt `reserved`, verschwindet die Figur im selben Moment aus dem öffentlichen Angebot —
+ohne dass eine Zeile des Shop-Codes davon wüsste.
+
+Drei Constraints sind der Boden darunter, alle aus `0003`:
+
+```sql
+check (quantity >= 0)
+check (reserved >= 0)
+check (reserved <= quantity)      -- shop_inventory_reserved_within_quantity
+```
+
+#### `0108` — SkyIsles führt nur lose Figuren
+
+Zwei Dinge, und nur zwei.
+
+**Ein partieller Unique-Index benennt die operative Identität:**
+
+```sql
+create unique index shop_inventory_loose_sky_key
+  on public.shop_inventory (sky_id)
+  where condition = 'loose';
+```
+
+Partiell, damit historische OVP-Zeilen daneben bestehen bleiben können — ein volles
+`unique (sky_id)` hätte sie verboten. Das Prädikat ist das Literal `'loose'` und **nicht**
+`v1_sale_condition()`: ein Index-Prädikat wird beim Schreiben ausgewertet und das Ergebnis
+gespeichert, eine spätere Funktionsänderung würde bestehende Einträge nicht neu bewerten.
+`shop_inventory_sky_condition_key (sky_id, condition)` aus `0003` bleibt daneben bestehen und
+ist weiterhin das Konfliktziel jedes Upserts.
+
+**Die zwei operativen Schreibtüren fragen die Regel:** `record_inventory_movement` und
+`set_shop_listing` lehnen seit `0108` jede Condition außer `v1_sale_condition()` mit
+`check_violation` ab. Signaturen unverändert, also keine neue Overload.
+
+**Kein `check (condition = 'loose')` auf der Tabelle.** Das wäre der naheliegende Griff und
+wäre falsch: `set_shop_listing` und `apply_inventory_movement` schreiben per
+`insert … on conflict`, und ein solcher CHECK fröre jede historische OVP-Zeile für immer ein —
+auch für eine Berichtigung. Die Regel gehört in die Funktionen, wo sie eine Ausnahme kennen
+kann. **Keine Spalte wurde entfernt**, keine Zeile geändert; `condition` bleibt in jeder
+Tabelle lesbar, damit eine alte Verkaufsposition weiterhin dokumentiert, dass sie OVP war.
+
+#### `0109` — `order_reservations` bekommt einen zweiten Eigentümer
+
+Dieselbe Tabelle hält jetzt zwei Arten von Zusage. Kein Rename: `0104` und `0105` nennen sie
+wörtlich und sind eingefroren.
+
+```
+order_reservations
+  order_id      bigint NULL   → orders(id)       ein Checkout
+  sale_item_id  bigint NULL   → sale_items(id)   eine externe Verkaufsposition  (NEU)
+  inventory_id  bigint not null
+  quantity      integer not null
+  state         text not null    active | released | converted
+  expires_at    timestamptz NULL
+  movement_id   bigint unique
+```
+
+Vier Constraints trennen die beiden Welten:
+
+```sql
+check ((order_id is null) <> (sale_item_id is null))   -- genau ein Eigentümer
+check (order_id is null or expires_at is not null)     -- ein Checkout läuft ab
+check (sale_item_id is null or expires_at is null)     -- ein External Hold nie
+check (sale_item_id is null or quantity = 1)           -- eine Position ist ein Objekt
+```
+
+Der dritte ist stärker als ein Filter: `release_expired_reservations` vergleicht
+`expires_at <= now()`, und NULL erfüllt das nicht — aber das ist eine Eigenschaft des
+Vergleichs. Hier steht es als Zusage der Tabelle, dass ein externer Hold **kein** Ablaufdatum
+hat und kein Sweep ihn finden kann.
+
+Dazu ein partieller Unique-Index:
+
+```sql
+create unique index order_reservations_one_active_hold_per_item
+  on public.order_reservations (sale_item_id)
+  where sale_item_id is not null and state = 'active';
+```
+
+Höchstens **ein aktiver** Hold pro Position; `released` und `converted` dürfen sich stapeln,
+weil eine Rückbuchung einen **neuen** Hold anlegt und der alte mit seiner `movement_id` als
+Historie stehen bleibt. `order_reservations_one_per_position unique (order_id, inventory_id)`
+aus `0010` bleibt wortgleich und greift bei `order_id is null` nicht.
+
+**`reservations_deny_delete()` lernte genau eine Ausnahme.** Der Satz aus `0010` — „a
+reservation is released, never deleted" — gilt unverändert für alles, was je eine Bewegung war
+oder noch Bestand hält. Ein **externer** Hold im Zustand `released` ohne `movement_id` und ohne
+`reverted_movement_id` verschwindet dagegen mit seiner Position (FK `on delete cascade`). Jede
+andere Referenzaktion wäre blockiert: `restrict` machte jede Position mit Hold-Historie
+unlöschbar, `set null` verletzte den Eigentümer-CHECK, und ein Cascade ohne diese Ausnahme
+scheiterte am Trigger selbst.
+
+#### `0110` — der Lebenszyklus
+
+Sechs Funktionen schreiben `reserved`, drei je Eigentümer, und jede mit derselben geführten
+WHERE-Klausel:
+
+| | Checkout (`0010`, `0025`) | External Hold (`0110`) |
+|---|---|---|
+| halten | `reserve_for_order` | `hold_sale_item` |
+| freigeben | `release_order_reservations`, `release_expired_reservations` | `release_sale_item_hold` |
+| verbrauchen | `convert_order_reservations` | `convert_sale_item_hold` |
+
+```sql
+halten      update shop_inventory set reserved = reserved + 1
+             where id = … and quantity - reserved >= 1;     -- der Wächter IST die Klausel
+freigeben   update shop_inventory set reserved = reserved - q
+             where id = … and reserved >= q;                -- sonst data_corrupted, nie geklemmt
+verbrauchen freigeben, DANN buchen — nie umgekehrt
+```
+
+**Die Reihenfolge beim Verbrauch ist nicht verhandelbar.** `0025` sagt warum: *„Release the
+hold before booking, or the guard below trips on it."* Der Wächter in
+`apply_inventory_movement` ist `quantity + p_delta >= reserved` und stolperte sonst über den
+eigenen Hold. `convert_sale_item_hold` holt deshalb erst den Anspruch
+(`state = 'converted' where state = 'active'` — wer diesen UPDATE verliert, tut nichts), senkt
+dann `reserved`, und die `movement_id` schreibt der Aufrufer **nach** der Buchung, weil
+`order_reservations_movement_only_when_converted` sie nur im Zustand `converted` erlaubt.
+
+**Der Zustandsverlauf:**
+
+```
+(kein Hold) ──hold_sale_item──▶ active ──release──▶ released   (terminal)
+                 │                  │
+                 │ no_stock /        └──convert──▶ converted   (terminal, movement_id)
+                 │ no_inventory
+                 ▼
+            (kein Hold, Position bleibt gültig)
+```
+
+Beide Endzustände sind terminal. Es gibt keinen Rückübergang auf derselben Zeile: ein erneuter
+Hold ist immer eine neue Zeile.
+
+**Wer hält und wer gibt frei:**
+
+| Ereignis | Wirkung |
+|---|---|
+| `seller_add_sale_item` (und damit `seller_create_sale_with_details`) | Hold-Versuch, `reserved +1` falls frei |
+| `seller_hold_sale_item` | erneuter Versuch, für den Fall „Bestand ist jetzt da" |
+| `seller_book_sale_item` | Hold verbraucht: `reserved −1`, dann `quantity −1` über das Journal |
+| `seller_unbook_sale_item` | `quantity +1` als `correction`, alter Hold bleibt `converted`, **neuer** `active`-Hold — außer die Order ist storniert |
+| `seller_settle_sale_item`, `seller_set_sale_item_not_shipped` | Hold freigegeben; die Rücknahme hält wieder |
+| `seller_remove_sale_item`, `seller_delete_sale` | Hold freigegeben, **bevor** gelöscht wird |
+
+**Ein Hold erfindet nie Bestand.** Ist nichts frei, entsteht kein Hold, keine Zeile, keine
+Bestandsänderung — die Verkaufsposition bleibt trotzdem gültig und meldet einen Grund. Eine
+teilweise reservierte externe Order ist ein zulässiger Zustand.
+
+`hold_sale_item` gibt deshalb **stabile Kennungen** zurück statt zu werfen, weil „kein Bestand"
+eine Tatsache und keine Störung ist: `held`, `already_held`, `no_stock`, `no_inventory`,
+`not_a_figure`, `not_loose`, `already_booked`, `settled`, `not_shipped`, `return_announced`,
+`returned`, `return_already_restocked`, `internal_sale`, `historical`, `cancelled`. Der
+öffentliche Weg `seller_hold_sale_item` lehnt davor ab, was gar nicht gehalten werden darf —
+interner Verkauf, gefrorene Historie, stornierte Order — und gibt alles Übrige als Grund
+weiter. `hold_sale_item`, `release_sale_item_hold` und `convert_sale_item_hold` sind intern:
+**keine Rolle hält EXECUTE**, genau wie bei `apply_inventory_movement` seit `0003`.
+
+**Sperrordnung.** Jeder Schreiber nimmt `shop_inventory` **aufsteigend nach `id`** und sperrt
+die Zeile, **bevor** er entscheidet. Das ist die Ordnung aus `0010`/`0025` — *„the same order
+every caller takes, so a sweep and a checkout cannot deadlock against each other"* — und
+`seller_create_sale_with_details` sperrt deshalb alle betroffenen Zeilen einmal vorweg, bevor
+sie ihre Positionen anlegt.
+
+**Gefrorene Historie bewegt niemals Bestand, in keiner Richtung.** `seller_book_sale_item`
+lehnt `source = 'excel_order_2026' and stock_released_at is null` seit `0073` ab;
+`seller_unbook_sale_item` tut es seit `0110` wortgleich. Ein historischer Verkauf bekommt auch
+keinen Hold.
+
+#### Was die Abstimmung unverändert leistet
+
+`public.reservation_reconciliation` (`0010`) vergleicht `shop_inventory.reserved` mit der Summe
+**aller** aktiven Reservierungen je Lagerposition — ohne Filter auf `order_id`. Die Sicht deckt
+externe Holds damit vom ersten Tag an ab, ohne geändert worden zu sein, und
+`npm run verify:commerce` hält `drift = 0` fest.
+
+#### Eine bekannte Lücke in der Datensicherung
+
+`0104` und `0105` zählen die Spalten von `order_reservations` wörtlich auf und sind eingefroren.
+`sale_item_id` ist dort **nicht** enthalten: die **Summe** der Holds steht über
+`shop_inventory.reserved` im Backup, die Zuordnung Hold ↔ Verkaufsposition nicht. Eine additive
+Folgemigration ist geplant und nicht Teil dieses Releases.
+
 ---
 
 ## 4. Beziehungen
