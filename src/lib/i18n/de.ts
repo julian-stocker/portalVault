@@ -1138,6 +1138,22 @@ export const de = {
         /* Ohne Figur speichern bleibt erlaubt (0063): der Einkauf ist dann
            „Unvollständig" und wird später ergänzt. */
         limit: (n: number) => `Mehr als ${n} Figuren auf einmal gehen nicht.`,
+
+        /*
+         * DER AUSWEG AUS EINER ERFOLGLOSEN SUCHE.
+         *
+         * Der getippte Name steht IM Knopf, weil er das Einzige ist, was die
+         * Position identifiziert: „+ Hinzufügen" allein würde nicht sagen,
+         * was gleich angelegt wird. Erscheint nur, wo der Bildschirm freie
+         * Artikel erlaubt — Verkauf — und nur, wenn der Katalog nichts
+         * gefunden hat.
+         */
+        addFree: (name: string) => `+ „${name}" ohne Katalogzuordnung hinzufügen`,
+        freeHeading: "Ohne Katalogzuordnung",
+        freeHint: "Kein Katalogartikel: keine SKY-ID, kein Lagerbezug, keine Reservierung.",
+        freeUnits: (n: number) =>
+          n === 1 ? "1 Position" : `${n.toLocaleString("de-AT")} Positionen`,
+        freeSelected: "Positionen ohne Katalogzuordnung",
       },
 
       /*
@@ -1249,6 +1265,20 @@ export const de = {
           + "Shop-Angebot, bleibt aber im Lager. Erst „Ausbuchen“ nimmt sie heraus. "
           + "Ist nichts frei, entsteht die Position trotzdem — dann ohne Reservierung.",
         invalidAmount: "Bitte einen gültigen Betrag eintragen.",
+        /*
+         * DAS DATUM IST PFLICHT — und zwar erst beim ANLEGEN.
+         *
+         * Ein Verkauf ohne Datum landet im Verkaufsbuch unter „ohne Datum",
+         * ganz unten, und fehlt in jeder Monatssumme. Das war für die 292
+         * importierten Arbeitsmappenzeilen nötig (manche tragen keines) und
+         * ist beim Eintippen eines neuen Verkaufs ein Versehen: das Datum
+         * steht auf der Abrechnung, die gerade offen ist.
+         *
+         * Bestehende undatierte Verkäufe bleiben unangetastet, und das
+         * Bearbeiten eines Verkaufs verlangt weiterhin kein Datum — die
+         * Pflicht gilt genau dort, wo der Fehler entsteht.
+         */
+        dateRequired: "Bitte das Verkaufsdatum eintragen.",
         /* Standard: aus. Der Normalfall darf nicht umständlicher werden. */
         testFlag: "Testvorgang",
         testFlagHint: "Zählt in keiner Geschäftssumme mit und steht unter „Test“.",
@@ -1291,6 +1321,9 @@ export const de = {
          */
         feeAddFee: "+ Gebühr",
         feeTypeHeading: "Gebührenart",
+        /* Die Auswahl enthält seit der Rückerstattung nicht mehr nur
+           Gebühren. „Kostenart" ist, was sie wirklich anbietet. */
+        costTypeHeading: "Kostenart",
         feeTypes: {
           transaction: "Transaktionsgebühr",
           listing: "Anzeigegebühr",
@@ -1298,7 +1331,33 @@ export const de = {
           payment: "Zahlungsgebühr",
           shipping_label: "Versandkosten (Label)",
           other: "Sonstige Gebühr",
+          refund: "Rückerstattung",
         },
+
+        /*
+         * DIE RÜCKERSTATTUNG STEHT IN DER KOSTENLISTE UND IST KEINE GEBÜHR.
+         *
+         * Sie wird in `sale_refunds` gespeichert, nicht in `sale_fees`, und
+         * sie mindert die Auszahlung nicht: der Kanal überweist, was er
+         * überweist, und die Erstattung ist ein eigenes Ereignis danach.
+         * Deshalb trägt die Zeile auch keinen „Abgezogen von"-Schalter.
+         */
+        refundLabel: "Rückerstattung",
+        refundHint: "Wird als Rückerstattung gespeichert, nicht als Gebühr — "
+          + "und mindert die Auszahlung nicht.",
+        /*
+         * TEILERFOLG, UND ER WIRD AUCH SO GENANNT.
+         *
+         * Der Verkauf entsteht in einem Aufruf, die Rückerstattung in einem
+         * zweiten (`seller_add_sale_refund`). Scheitert der zweite, EXISTIERT
+         * der Verkauf — „Anlegen fehlgeschlagen" wäre dann falsch und würde
+         * zu einem zweiten Verkauf führen. Es gibt bewusst keinen
+         * automatischen zweiten Versuch: er könnte eine doppelte Erstattung
+         * erzeugen, und zwei Erstattungen sind schlimmer als eine fehlende.
+         */
+        refundFailed: "Der Verkauf wurde angelegt. Die Rückerstattung konnte nicht "
+          + "gespeichert werden und ist noch nicht erfasst.",
+        openCreatedSale: "Verkauf öffnen und Rückerstattung nachtragen",
         /* Der Schalter, der über die Auszahlung entscheidet. */
         settledBy: "Abgezogen von",
         settledChannel: "Kanal",
@@ -1337,6 +1396,11 @@ export const de = {
         date: "Datum", country: "EU", sum: "Summe", shipping: "Versand",
         discount: "Rabatt", fees: "Fees", label: "Label", refund: "Rückerstattung",
         payout: "Auszahlung", stock: "Lager", details: "Details",
+        /* Die Spur ist 4,5rem breit und muss „−12,34 €" tragen. Der ganze
+           Name steht im Geldfenster, wo der Betrag erklärt wird. */
+        refundShort: "Rückerst.",
+        buyer: "Käufer",
+
         /* Weiterhin gebraucht: Filter, Detailansicht, Intern-Spalte. */
         channel: "Kanal", countryName: "Land", items: "Artikel",
         order: "Bestellung", gross: "Gesamt",
@@ -1552,6 +1616,13 @@ export const de = {
         openHint: "Noch nichts ausgebucht",
         partial: "Teilweise ausgebucht",
       },
+      /* Die Position läuft gerade. Keine Behauptung über das Ergebnis —
+         siehe `act` in `sales-ledger.tsx`. */
+      itemRunning: "läuft …",
+      /* Die Artikelzahl in der Verkaufszeile. Ausgeschrieben, weil „3" allein
+         in einer Spalte neben Geldbeträgen nach einem Betrag aussieht. */
+      itemsCount: (n: number) =>
+        n === 1 ? "1 Artikel" : `${n.toLocaleString("de-AT")} Artikel`,
       unbook: "Ausbuchen zurücknehmen",
       returnItem: "Retoure eingegangen", returned: "Retoure",
       restock: "Wieder einlagern", restocked: "Wieder eingelagert",

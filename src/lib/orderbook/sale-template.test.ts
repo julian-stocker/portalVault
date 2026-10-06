@@ -30,7 +30,9 @@ import { join } from "node:path";
 import { de } from "@/lib/i18n/de";
 import { code, latestFunction, migrationSource } from "@/test-support/migrations";
 import {
-  SALE_FEE_TYPES, SALE_TEMPLATES, extraFee, feeFromType, feePlans, initialFees, invalidFees,
+  REFUND_COST_ID, SALE_COST_TYPES, SALE_FEE_TYPES, SALE_TEMPLATES, extraFee, feeFromType,
+  feePlans, initialFees, initialRefunds, invalidFees, invalidRefunds, refundAmounts,
+  refundDraft,
   payoutView, saleFeeType, saleFormMoney, saleTemplate, unlabelledFees, type FeeDraft,
 } from "./sale-template.ts";
 import { parseMoney, parseSignedMoney, plannedPayout, roundMoney } from "./sales-money.ts";
@@ -99,13 +101,74 @@ describe("the template is layout, not a data model", () => {
     expect(ts(NEW_SALE)).toContain("template.showsDiscount");
   });
 
-  it("starts eBay with the two rows every workbook settlement has", () => {
+  it("starts eBay with the three fee rows a settlement actually carries", () => {
     const rows = initialFees(saleTemplate("ebay"), key);
-    // Transaktionsgebühr und Label — beide gewöhnliche Zeilen, beide entfernbar.
-    expect(rows.map((r) => r.kind)).toEqual(["payment", "shipping_label"]);
+    /*
+     * Transaktionsgebühr, Label und Anzeigegebühr — gewöhnliche Zeilen, alle
+     * entfernbar, alle leer. Die Anzeigegebühr kam dazu, weil sie in der
+     * Praxis regelmäßig anfällt und sonst von Hand aus dem Menü geholt
+     * werden musste; `kind` bleibt `marketplace`, also dieselbe Semantik wie
+     * unter „+ Gebühr", und deshalb braucht es keine Migration.
+     */
+    expect(rows.map((r) => r.kind)).toEqual(["payment", "shipping_label", "marketplace"]);
+    expect(rows.map((r) => r.label))
+      .toEqual(["Transaktionsgebühr", "Versandkosten (Label)", "Anzeigegebühr"]);
     // The label defaults to channel-settled, which is the normal case.
     expect(rows[1].settledBy).toBe("channel");
     expect(rows.every((r) => r.amount === "")).toBe(true);
+  });
+
+  it("and with ONE refund row, which is not a fee at all", () => {
+    /*
+     * DIE VIERTE VORBELEGTE ZEILE, UND SIE LIEGT IN EINER ANDEREN TABELLE.
+     *
+     * `sale_refunds`, nicht `sale_fees`: eine Rückerstattung ist
+     * zurückgegebenes Geld und keine Gebühr des Kanals. Sie steht im
+     * Formular in derselben Liste, weil sie in derselben Arbeit eingetippt
+     * wird — als eigener Typ, damit sie nirgends in `p_fees` geraten kann.
+     */
+    const rows = initialRefunds(saleTemplate("ebay"), key);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].amount).toBe("");
+    expect(Object.keys(rows[0]).sort()).toEqual(["amount", "key"]);
+    // Kein `kind`, kein `settledBy` — beides hätte hier keine Bedeutung.
+    expect(initialRefunds(saleTemplate("manual"), key)).toEqual([]);
+  });
+
+  it("drops an empty or zero refund instead of storing nothing as a record", () => {
+    expect(refundAmounts([{ key: "a", amount: "" }])).toEqual([]);
+    expect(refundAmounts([{ key: "a", amount: "0" }])).toEqual([]);
+    expect(refundAmounts([{ key: "a", amount: "0,00" }])).toEqual([]);
+    expect(refundAmounts([{ key: "a", amount: "12,50" }])).toEqual([12.5]);
+    // Mehrere Zeilen sind mehrere Datensätze, in der eingetippten Reihenfolge.
+    expect(refundAmounts([{ key: "a", amount: "1,00" }, { key: "b", amount: "2,00" }]))
+      .toEqual([1, 2]);
+    // Und was kein Betrag ist, wird gemeldet statt stillschweigend verworfen.
+    expect(invalidRefunds([{ key: "a", amount: "zwölf" }])).toHaveLength(1);
+    expect(invalidRefunds([{ key: "a", amount: "" }])).toHaveLength(0);
+  });
+
+  it("never lets a refund reach the fee payload", () => {
+    /*
+     * Das ist der ganze Grund für den eigenen Typ. Ein Refund als `other`
+     * würde als Gebühr summiert, die Auszahlung mindern und in jeder
+     * Auswertung als Kosten des Kanals erscheinen.
+     */
+    // Eine `RefundDraft` hat weder `kind` noch `settledBy`, ist also schon
+    // als Typ keine Gebührenzeile — `feePlans` könnte sie nicht lesen.
+    const refund = refundDraft("r");
+    expect("kind" in refund).toBe(false);
+    expect("settledBy" in refund).toBe(false);
+    // Und es gibt keine Gebührenart namens `refund`.
+    expect(SALE_FEE_TYPES.some((t) => t.id === REFUND_COST_ID)).toBe(false);
+    expect(TEMPLATE_SRC).not.toMatch(/kind:\s*"refund"/);
+    // Im Formular liegen sie in zwei getrennten Zuständen.
+    expect(NEW_SALE).toContain("const [refunds, setRefunds] = useState<RefundDraft[]>");
+    expect(NEW_SALE).toContain("refunds: refundAmounts(refunds),");
+    expect(NEW_SALE).not.toContain("setFees((f) => [...f, refundDraft");
+    // Und die Auszahlung kennt Rückerstattungen weiterhin nicht.
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [], adjustments: [] }))
+      .toBe(20);
   });
 
   it("starts the plain template with none, so nothing has to be cleared away", () => {
@@ -710,13 +773,13 @@ describe("fee types are a name on top of the kinds the database already has", ()
 
   it("adds and removes rows without touching the others", () => {
     let rows: FeeDraft[] = initialFees(saleTemplate("ebay"), (n) => `init${n}`);
-    expect(rows).toHaveLength(2);
-    rows = [...rows, feeFromType(key(), "listing"), feeFromType(key(), "advertising")];
-    expect(rows).toHaveLength(4);
-    const dropped = rows[2].key;
+    expect(rows).toHaveLength(3);
+    rows = [...rows, feeFromType(key(), "payment"), feeFromType(key(), "advertising")];
+    expect(rows).toHaveLength(5);
+    const dropped = rows[3].key;
     rows = rows.filter((r) => r.key !== dropped);
     expect(rows.map((r) => r.label))
-      .toEqual(["Transaktionsgebühr", "Versandkosten (Label)", "Werbegebühr"]);
+      .toEqual(["Transaktionsgebühr", "Versandkosten (Label)", "Anzeigegebühr", "Werbegebühr"]);
   });
 
   it("THE WORKED EXAMPLE: 17,09 + 5,99 − 3,84 − 0,55 − 5,19 = 13,50", () => {
@@ -762,14 +825,15 @@ describe("fee types are a name on top of the kinds the database already has", ()
 
 /* ===================================================================== */
 describe("the eBay template suggests a transaction fee, it does not hard-wire one", () => {
-  it("opens with a transaction fee and a label, both ordinary fee rows", () => {
+  it("opens with three ordinary fee rows and nothing hard-wired", () => {
     const rows = initialFees(saleTemplate("ebay"), (n) => `init${n}`);
     expect(rows.map((r) => [r.kind, r.label])).toEqual([
       ["payment", "Transaktionsgebühr"],
       ["shipping_label", "Versandkosten (Label)"],
+      ["marketplace", "Anzeigegebühr"],
     ]);
-    // Beide sind entfernbar: nichts an ihnen ist besonders.
-    expect(rows.filter((r) => r.key !== rows[0].key)).toHaveLength(1);
+    // Alle sind entfernbar: nichts an ihnen ist besonders.
+    expect(rows.filter((r) => r.key !== rows[0].key)).toHaveLength(2);
   });
 
   it("no longer knows a field called eBay-Gebühr", () => {
@@ -781,13 +845,39 @@ describe("the eBay template suggests a transaction fee, it does not hard-wire on
     expect(initialFees(saleTemplate("manual"), (n) => `m${n}`)).toEqual([]);
   });
 
-  it("the form offers the types and keeps the free row", () => {
+  it("the form offers the cost types and keeps the free row", () => {
     expect(NEW_SALE).toContain("create.feeAddFee");
     expect(NEW_SALE).toContain("create.feeAdd");
     expect(NEW_SALE).toContain("feeFromType(key(), type.id)");
-    expect(NEW_SALE).toContain("SALE_FEE_TYPES.map");
+    /*
+     * Die Auswahl heißt jetzt `SALE_COST_TYPES`: dieselben Gebührenarten,
+     * plus die Rückerstattung. `storage` entscheidet, in welche der beiden
+     * Listen die Zeile geht — kein `if` auf einen Namen.
+     */
+    expect(NEW_SALE).toContain("SALE_COST_TYPES.map");
+    expect(NEW_SALE).toContain('if (type.storage === "refund") {');
+    expect(NEW_SALE).toContain("setRefunds((r) => [...r, row]);");
     // Entfernen bleibt für jede Zeile möglich, auch für die vorbelegten.
     expect(NEW_SALE).toContain("setFees((f) => f.filter((x) => x.key !== fee.key))");
+    expect(NEW_SALE).toContain("setRefunds((r) => r.filter((x) => x.key !== refund.key))");
+  });
+
+  it("the cost menu is the fee list plus exactly one refund entry", () => {
+    expect(SALE_COST_TYPES.map((t) => t.id))
+      .toEqual([...SALE_FEE_TYPES.map((t) => t.id), REFUND_COST_ID]);
+    expect(SALE_COST_TYPES.filter((t) => t.storage === "refund")).toHaveLength(1);
+    // Abgeleitet, nicht abgeschrieben: die Gebührenarten können nicht driften.
+    for (const type of SALE_FEE_TYPES) {
+      const entry = SALE_COST_TYPES.find((t) => t.id === type.id);
+      expect(entry?.label, type.id).toBe(type.label);
+      expect(entry?.storage, type.id).toBe("fee");
+    }
+    // Und jede Art hat ihren deutschen Namen, die Rückerstattung eingeschlossen.
+    const names = de.business.sales.create.feeTypes;
+    for (const type of SALE_COST_TYPES) {
+      expect(names[type.id as keyof typeof names], type.id).toBeTruthy();
+    }
+    expect(names.refund).toBe("Rückerstattung");
   });
 
   it("names every type in German, once", () => {

@@ -44,7 +44,7 @@
  */
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 import { de } from "@/lib/i18n/de";
 import { formatPrice } from "@/lib/format";
@@ -80,6 +80,8 @@ export function FigureDraft({
   onChange,
   disabled = false,
   hint = copy.hint,
+  onFree,
+  children,
 }: {
   lines: DraftLine[];
   catalog: readonly FigureChoice[];
@@ -87,6 +89,22 @@ export function FigureDraft({
   disabled?: boolean;
   /** One line under the heading. The sale form says something else here. */
   hint?: string;
+  /*
+   * Freie Positionen erlauben — nur dort, wo der Bildschirm sie kennt.
+   *
+   * Durchgereicht an die SUCHE OBEN und bewusst nicht an das
+   * Korrekturfeld in einer Zeile: „Ändern" tauscht eine Figur gegen eine
+   * andere Figur. Eine Katalogzeile in eine freie Position zu verwandeln
+   * wäre eine andere Handlung mit anderen Folgen (die Reservierung fällt
+   * weg) und gehört nicht unter denselben Knopf.
+   *
+   * Der Einkauf übergibt es nicht und bleibt damit unverändert: dort wird
+   * eine Position ohne Katalogzuordnung weiter über `AddPurchaseItem`
+   * angelegt.
+   */
+  onFree?: (name: string) => void;
+  /** Was unter der Figurenliste steht — beim Verkauf die freien Positionen. */
+  children?: ReactNode;
 }) {
   /** The line whose identity is being corrected, by SKY-ID. One at a time. */
   const [changing, setChanging] = useState<string | null>(null);
@@ -101,6 +119,7 @@ export function FigureDraft({
       <FigureSearch
         catalog={catalog}
         disabled={disabled}
+        onFree={onFree}
         onSelect={(choice) => onChange(addFigure(lines, choice))}
       />
 
@@ -194,6 +213,8 @@ export function FigureDraft({
           ))}
         </ul>
       )}
+
+      {children}
     </section>
   );
 }

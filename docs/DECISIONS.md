@@ -10020,3 +10020,131 @@ DB-Ablehnungen sind bewusst als Follow-up offen.
 Automatisches `is_listed = false` bei fehlendem Bestand (Listung ist redaktionell, ADR-0048).
 Alles-oder-nichts beim Ausbuchen einer teilweise reservierten Order.
 
+
+
+## ADR-0117 — Freie Orderbuch-Positionen, Rückerstattungen und die verdichtete Verkaufszeile
+
+**Status:** angenommen, 2026-10-06 · Anwendungscode, **keine Migration**
+**Bezug:** ADR-0019 (Code englisch, Oberfläche deutsch), ADR-0089 (ein Verkaufsbuch, zwei
+Herkünfte · Geld, Bestand und Versand sind drei unabhängige Dimensionen), ADR-0092 (eine
+Vorlage ist Layout, nicht Speicherung), ADR-0095 (die Auszahlung ist abgeleitet),
+ADR-0116 (ein externer Verkauf hält seinen Bestand)
+**Migrationen:** keine. Der Datenvertrag steht seit `0059`, das Reservierungsverhalten seit
+`0110`; beide wurden nicht angefasst.
+
+**Problem.** Fünf Dinge am externen Verkaufsablauf kosteten jeden Tag Zeit oder erzeugten
+falsche Daten: ein Verkauf ließ sich ohne Datum anlegen und verschwand dann unter „ohne Datum";
+ein Portal oder ein Spiel musste als Figur erfunden oder weggelassen werden; die Anzeigegebühr
+und eine Rückerstattung waren jedes Mal aus einem Menü zu holen; fünf Positionen hintereinander
+auszubuchen hieß fünfmal auf ein Neuladen der Tabelle warten; und die Verkaufszeile war 71rem
+breit, zeigte aber weder die Artikelzahl noch den Käufer.
+
+**Entscheidung 1 — eine freie Position ist eine gewöhnliche `sale_items`-Zeile mit
+`sky_id NULL` und `raw_name`.** Keine zweite Produkt- oder Inventarstruktur, keine
+Nicht-Katalog-Tabelle, keine erfundene SKY-ID. Der Vertrag dafür existiert seit `0059` und wird
+hier nur erreichbar gemacht:
+
+```sql
+constraint sale_items_identifiable
+  check (sky_id is not null or (raw_name is not null and length(btrim(raw_name)) > 0))
+constraint sale_items_movement_needs_figure
+  check (movement_id is null or sky_id is not null)
+```
+
+Die erste Zeile erlaubt die Position, die zweite macht sie für das Lager unsichtbar: ohne
+`sky_id` kein `movement_id`, und ohne `movement_id` keine `inventory_movements`-Zeile. Production
+enthält heute 54 solche Positionen. Es folgt daraus, ohne weitere Regel: **kein Katalogeintrag,
+keine `shop_inventory`-Zeile, kein External Hold, kein `reserved`, keine Bewegung** —
+`hold_sale_item` gibt `not_a_figure` zurück, bevor es `shop_inventory` überhaupt ansieht
+(`0110`). Eine SKY-ID wird nie abgeleitet und nie neu vergeben (CLAUDE.md, Regel 2); der
+eingegebene Name wird roh gespeichert, nur außen beschnitten (Regel 4).
+
+Im Entwurf des Anlegeformulars sind freie Positionen ein **eigenes Modell** neben den
+Figurenzeilen (`free-items.ts`), weil eine `DraftLine` über ihre SKY-ID identifiziert ist. Ein
+Platzhalter in diesem Feld wäre genau das, was Regel 2 verbietet, und der Einkauf, der dasselbe
+Modell benutzt, bleibt dadurch unberührt.
+
+**Entscheidung 2 — eine Rückerstattung bleibt `sale_refunds` und wird NICHT als `sale_fees`
+modelliert.** Zurückgegebenes Geld ist keine Gebühr des Kanals. Ein Refund als `other` würde
+als Gebühr summiert, über `plannedPayout` die Auszahlung mindern und in jeder Auswertung als
+Kosten des Kanals erscheinen; `seller_sales()` liest Rückerstattungen seit `0059` aus
+`sale_refunds`, und zwei Quellen für eine Zahl sind eine zu viel. `sale_fees.kind` bleibt bei
+seinen vier Werten — deshalb braucht diese Erweiterung keine Migration. Im Formular ist die
+Rückerstattung ein **eigener Draft-Typ ohne `kind` und ohne `settled_by`**: sie kann
+strukturell nicht in `p_fees` geraten, und die Zeile trägt bewusst keinen
+„Abgezogen von"-Schalter.
+
+**Entscheidung 3 — beim Anlegen ist der Refund bewusst ein zweiter RPC, und ein partieller
+Erfolg ist ein zulässiger Ausgang.** `seller_create_sale_with_details` hat keinen
+Refund-Parameter; die Alternative wäre eine Signaturänderung samt Migration für einen Fall, der
+kein neues Verhalten braucht. Also: Verkauf, Positionen, Gebühren und Korrekturen entstehen
+weiterhin in **einer** Transaktion, und eine optionale Rückerstattung schreibt danach
+`seller_add_sale_refund`.
+
+Scheitert nur der zweite Schritt, **existiert der Verkauf**. Die Oberfläche darf das nicht als
+Fehlschlag des Ganzen melden — der Betreiber würde es erneut versuchen und hätte zwei Verkäufe.
+Sie meldet deshalb genau das, was gilt: angelegt, Rückerstattung nicht gespeichert, hier ist
+der Verkauf zum Nachtragen; der Absende-Knopf ist danach gesperrt. **Kein automatischer zweiter
+Versuch**, denn ein Wiederholungsversuch, dessen erster Aufruf die Zeile doch geschrieben hat,
+erzeugt eine doppelte Erstattung — und zwei Erstattungen sind schwerer zu bemerken als eine
+fehlende. Ein leeres Feld oder ein Betrag von null erzeugt keinen Datensatz.
+
+**Entscheidung 4 — die vorbelegten Kostenzeilen folgen der Abrechnung, nicht der Sparsamkeit.**
+Die eBay-Vorlage öffnet mit Transaktionsgebühr, Versandkosten (Label) und **Anzeigegebühr**
+(`kind = marketplace`, dieselbe Semantik wie im Menü) plus einer Rückerstattungszeile. Die
+frühere Begründung — „eine meist leere Zeile lädt zu einer Null ein" — hielt nicht: leere
+Zeilen werden beim Speichern fallen gelassen, eine fehlende Zeile kostet zwei Klicks und
+manchmal den Eintrag. Alle vier sind gewöhnliche, entfernbare Zeilen; die Vorlage bleibt
+Layout und keine Speicherung (ADR-0092).
+
+**Entscheidung 5 — der Pending-Zustand einer Position behauptet keinen erfolgreichen
+Endzustand.** Die angeklickte Zeile reagiert sofort — Status „läuft …", Knopf gesperrt —, aber
+sie schreibt kein Ergebnis vor. Ein vorweggenommenes „Ausgebucht" müsste den Endzustand aus den
+Zeitstempeln erraten, die die Datenbank gerade schreibt: eine zweite Wahrheit neben
+`saleItemActions`, und bei einer Ablehnung hätte die Zeile gelogen. Der autoritative Zustand
+kommt mit der Antwort der Aktion selbst, die `seller_sale` in derselben Server Action nachliest
+(`0110`).
+
+Daraus folgt der ganze schnelle Ablauf: die aufgeklappte Liste wird beim Nachlesen **nicht
+geleert**, überholte Antworten werden über eine Lesemarke je Verkauf verworfen, ein zweiter
+Klick auf dieselbe Position fällt an einer sofort wirksamen Sperre, verschiedene Positionen
+laufen gleichzeitig, eine Ablehnung rollt **nur ihre** Zeile zurück und trägt ihre Meldung in
+dieser Zeile — und `router.refresh()` läuft **einmal für alle**, gebündelt am Ereignis
+(niemand mehr unterwegs), nicht an einer Wartezeit. **Kein Timeout als Lösung.**
+
+**Entscheidung 6 — die Auszahlung bleibt im Geldfenster und ist keine Hauptspalte.** Sie ist
+eine abgeleitete Zahl (`sale_expected_payout()`, ADR-0095) und gehört dorthin, wo die Beträge
+stehen, aus denen sie entsteht. In der Zeile kostete sie 6,5rem für eine Zahl, die man beim
+Abgleich einer Abrechnung braucht — und dann ist das Fenster ohnehin offen. Nichts wird
+nachgerechnet, nichts ist unerreichbar geworden.
+
+**Entscheidung 7 — der Lagerstatus wird kompakt in der Artikelspalte dargestellt.** Statt einer
+7,5rem-Textspalte steht ein Punkt vor der Positionszahl. Der Status kommt unverändert aus
+`saleStockStatus()`; `saleStockIndicator()` übersetzt ihn **nur** in Ton und Zeichen — keine
+neue Statuslogik, keine zweite Wahrheit, die Spalte könnte jederzeit zurückkommen. **Farbe ist
+nie der einzige Träger:** jeder Zustand hat sein eigenes Zeichen aus derselben Reihe, die eine
+Position benutzt, und der vollständige Satz steht im `title` **und** im zugänglichen Namen. Die
+Zeile zeigt dafür zwei Dinge, die sie vorher nicht zeigte: Artikelzahl und Käufer, beide aus
+`seller_sales()`.
+
+**Entscheidung 8 — das Datum ist beim Anlegen Pflicht, und zwar serverseitig.**
+`sales.sold_at` bleibt nullbar: `0059` lässt es bewusst offen, weil Zeilen der Arbeitsmappe
+keines tragen, und das Bearbeiten eines bestehenden Verkaufs verlangt weiterhin keines. Ein neu
+getippter Verkauf ohne Datum ist dagegen immer ein Versehen. Geprüft wird im Formular **und**
+in `createSaleWithDetails` vor dem RPC — ein `required`-Attribut ist eine Bitte an den Browser,
+und eine Server Action ist über ihre eigene Route aufrufbar.
+
+**Konsequenzen.** Keine Migration, kein neues Vokabular in der Datenbank, keine Änderung an
+`0108`–`0110`. Eine Rückerstattung aus dem Anlegeformular trägt keinen Grund
+(`sale_refunds.reason` bleibt NULL); der Grund ist nachträglich im Geldfenster wählbar. Die
+Positionsliste eines einzelnen Verkaufs behält ihre Doppelklickprüfung über `busy` statt eines
+Refs, weil `react-hooks/refs` dort das Ref verbietet — ein zweiter Klick trifft weiterhin die
+Datenbank, die ihn ablehnt. Die manuelle Abnahme im Browser war zum Zeitpunkt dieser
+Entscheidung noch offen.
+
+**Verworfen.** Eine zweite Produkt- oder Inventarstruktur für Nicht-Katalogartikel. Ein
+Platzhalter in `sale_items.sky_id`. Ein fünfter `sale_fees.kind` namens `refund` und ein Refund
+als `other`. Eine Signaturänderung an `seller_create_sale_with_details` samt Migration `0111`
+nur für den Refund-Parameter. Ein automatischer Wiederholungsversuch für die Rückerstattung.
+Ein optimistisch vorweggenommener Positionszustand. Ein Timer zum Bündeln des Refreshs. Das
+vollständige Verstecken des Lagerstatus.

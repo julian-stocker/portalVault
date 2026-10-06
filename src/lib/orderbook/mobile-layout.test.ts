@@ -299,18 +299,31 @@ describe("the creation forms at phone widths", () => {
     expect(SM_BREAKPOINT).toBeGreaterThan(PHONES[PHONES.length - 1]);
   });
 
-  it("stacks a fee row on a phone: name on one line, its controls on the next", () => {
+  it("stacks a cost row on a phone: name on one line, its controls on the next", () => {
     /*
      * A fee is four controls — name, amount, who kept it, remove. Four do
      * not fit across 320px, so the name takes the first line by spanning
      * every column, and the three narrow ones share the second. At `sm:`
      * they are one line again.
+     *
+     * DIE RÜCKERSTATTUNGSZEILE STEHT IN DERSELBEN LISTE und muss deshalb
+     * dasselbe Raster tragen — sonst stünden zwei Zeilenarten in einem
+     * `<ul>` mit verschiedenen Spalten untereinander. Sie hat keinen
+     * Abrechnungsschalter und lässt die Zelle leer, statt sie wegzulassen:
+     * sonst rutschte ihr × in die Spalte des Schalters.
      */
-    const row = NEW_SALE.slice(NEW_SALE.indexOf("{fees.map("), NEW_SALE.indexOf("</ul>"));
-    expect(row).toContain("grid-cols-[1fr_auto_auto]");
-    expect(row).toContain("sm:grid-cols-[minmax(0,1fr)_6rem_auto_auto]");
-    expect((row.match(/col-span-3/g) ?? []).length).toBe(2);   // the two label variants
-    expect((row.match(/sm:col-span-1/g) ?? []).length).toBe(2);
+    const list = NEW_SALE.slice(NEW_SALE.indexOf("{fees.map("), NEW_SALE.indexOf("</ul>"));
+    const refund = list.slice(list.indexOf("{refunds.map("));
+    expect(refund).not.toBe("");
+    for (const [name, row] of [["Gebühr", list], ["Rückerstattung", refund]] as const) {
+      expect(row, name).toContain("grid-cols-[1fr_auto_auto]");
+      expect(row, name).toContain("sm:grid-cols-[minmax(0,1fr)_6rem_auto_auto]");
+    }
+    // Zwei Etikettvarianten bei der Gebühr, eine bei der Rückerstattung.
+    expect((list.match(/col-span-3/g) ?? []).length).toBe(3);
+    expect((list.match(/sm:col-span-1/g) ?? []).length).toBe(3);
+    // Die leere Zelle, die das Raster zusammenhält.
+    expect(refund).toContain('<span aria-hidden="true" />');
   });
 
   it("keeps every control a 44px touch target on a phone", () => {

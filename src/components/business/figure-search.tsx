@@ -42,6 +42,7 @@ export function FigureSearch({
   limit = MAX_RESULTS,
   showImage = false,
   loading = false,
+  onFree,
   inputRef,
 }: {
   catalog: readonly FigureChoice[];
@@ -73,6 +74,25 @@ export function FigureSearch({
    * und ändert nichts.
    */
   loading?: boolean;
+  /*
+   * „Nichts gefunden" ist manchmal die richtige Antwort.
+   *
+   * Ein Portal, ein Spiel, ein Konvolut-Restposten steht in keinem
+   * Figurenkatalog und soll trotzdem auf den Verkauf. Wo dieser Rückfall
+   * erlaubt ist, hängt der Aufrufer ihn hier ein: der Kasten zeigt dann
+   * statt „Keine Figur gefunden" einen Knopf, der den eingegebenen Namen
+   * übernimmt — als `raw_name`, ohne `sky_id`, siehe `free-items.ts`.
+   *
+   * NUR BEI `empty`. Solange die Eingabe zu kurz ist oder Treffer da sind,
+   * erscheint er nicht: er ist der Ausweg aus einer erfolglosen Suche und
+   * keine zweite Art, etwas hinzuzufügen.
+   *
+   * NICHT AUF `Enter`. Die Taste nimmt die hervorgehobene Zeile, und wo
+   * keine ist, tut sie nichts. Ein freier Artikel entsteht durch einen
+   * Klick auf einen benannten Knopf, nicht durch eine Taste, die eben noch
+   * etwas anderes bedeutet hat.
+   */
+  onFree?: (name: string) => void;
   /*
    * Zugriff auf das Eingabefeld von außen.
    *
@@ -128,11 +148,20 @@ export function FigureSearch({
    * `loading` gesetzt ist, sagt der Kasten, dass er wartet — und erst danach,
    * falls dann noch nichts da ist, dass es nicht geklappt hat.
    */
+  const free = onFree !== undefined && state === "empty" ? query.trim() : null;
   const message =
     state === "noCatalog" ? (loading ? copy.loadingCatalog : copy.noCatalog)
       : state === "tooShort" ? copy.tooShort
-        : state === "empty" ? copy.empty
+        : state === "empty" && free === null ? copy.empty
           : null;
+
+  /** Den eingegebenen Namen übernehmen — roh, nur außen beschnitten. */
+  function chooseFree(name: string) {
+    onFree?.(name);
+    setQuery("");
+    setHighlight(0);
+    input.current?.focus();
+  }
 
   return (
     <div className="flex flex-col gap-1">
@@ -169,6 +198,21 @@ export function FigureSearch({
 
       {message ? (
         <p id={`${listId}-msg`} className="text-xs text-muted">{message}</p>
+      ) : null}
+
+      {/*
+        Der Ausweg aus einer erfolglosen Suche. Er trägt den Namen, den der
+        Betreiber getippt hat, damit der Knopf sagt, was er anlegt — und
+        damit er nicht mit einem Treffer verwechselt wird, steht er unter der
+        (dann leeren) Trefferliste und sieht aus wie ein Hinweis mit Knopf,
+        nicht wie eine Zeile.
+      */}
+      {free !== null ? (
+        <button type="button" disabled={disabled}
+                onClick={() => chooseFree(free)}
+                className="min-h-11 self-start rounded-sky-md px-3 text-left text-sm ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-60 sm:min-h-9">
+          {copy.addFree(free)}
+        </button>
       ) : null}
 
       <ul id={listId} aria-label={copy.results}

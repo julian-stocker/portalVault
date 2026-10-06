@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-01 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-06 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -2756,7 +2756,7 @@ bleiben unverändert stehen.
 | **Datenbank** | 98 Migrationen, Production und Staging auf demselben Stand (`0098`). RLS auf allen 60 Tabellen; von 63 exponierten Relationen sind fünf für `anon` lesbar, alle fünf Katalogdaten. |
 | **Zeitgeber** | `expire-stale-checkouts` per pg_cron auf Production, `*/5 * * * *`, aktiv, Läufe erfolgreich. |
 | **Tests** | Lint, Typecheck, Build grün; 191 Vitest-Dateien, 5 892 Unit-Tests. Dazu 14 `verify:*`-Werkzeuge als Laufzeitnachweise gegen echte Datenbanken. |
-| **Entscheidungen** | ADR-0001 bis ADR-0110 in `docs/DECISIONS.md`. |
+| **Entscheidungen** | ADR-0001 bis ADR-0117 in `docs/DECISIONS.md`. |
 
 **Production-Bestand (read-only gemessen am 2026-09-25):** 279 Lagerpositionen · 32 operative
 Bewegungen · 2 741 Legacy-Ereignisse · 300 Verkäufe mit 1 312 Positionen · 84 Einkäufe ·
@@ -2827,6 +2827,38 @@ siehe ADR-0116.
   Summe der Holds steht über `shop_inventory.reserved` darin, die Zuordnung nicht. Eine
   additive Folgemigration ist geplant.
 - Die beiden Race-Tests, sobald ein Weg zu zwei Sessions eingerichtet ist.
+
+
+## Orderbuch-UX: Datum, freie Artikel, Kosten, Tempo, Übersicht (Stand 2026-10-06)
+
+**Anwendungscode, KEINE Migration.** Fünf Verbesserungen am externen Verkaufsablauf, alle auf
+dem Datenvertrag, der seit `0059`/`0110` steht. `0108`–`0110` wurden nicht angefasst.
+Entscheidungen in **ADR-0117**.
+
+| Punkt | Was jetzt gilt |
+|---|---|
+| **Datum beim Anlegen** | Pflicht, im Formular **und** in der Server Action (`createSaleWithDetails` prüft `YYYY-MM-DD` vor dem RPC). `sales.sold_at` bleibt nullbar, bestehende undatierte Verkäufe und das Bearbeiten sind unberührt. |
+| **Freie Orderbuch-Artikel** | Ein Portal, ein Spiel, ein Restposten wird als gewöhnliche `sale_items`-Zeile mit `sky_id NULL` und `raw_name` gespeichert. **Kein Katalogeintrag, keine Lagerposition, kein Hold, keine Bewegung** — `hold_sale_item` gibt `not_a_figure` zurück, `sale_items_movement_needs_figure` verbietet die Bewegung. Angeboten von der Figurensuche, wenn der Katalog nichts gefunden hat. |
+| **Anzeigegebühr als Default** | Die eBay-Vorlage öffnet mit drei Gebührenzeilen — Transaktionsgebühr, Versandkosten (Label), **Anzeigegebühr** (`kind = marketplace`, bestehende Semantik) — plus einer Rückerstattungszeile. Alle leer, alle entfernbar. |
+| **Refund beim Anlegen** | Zweiter Schritt über `seller_add_sale_refund`, **nicht** als `sale_fees`. Schlägt nur er fehl, bleibt der Verkauf bestehen und die Oberfläche meldet einen **partiellen Erfolg** mit Link zum Nachtragen; kein automatischer zweiter Versuch. |
+| **Schneller Multi-Item-Workflow** | Fünf Positionen lassen sich unmittelbar hintereinander ausbuchen: die aufgeklappte Liste wird beim Nachlesen nicht geleert, die laufende Zeile zeigt „läuft …", der neue Zustand kommt mit der Antwort der Aktion, überholte Antworten werden verworfen, und `router.refresh()` läuft **einmal für alle** statt einmal pro Klick — gebündelt am Ereignis, ohne Timer. |
+| **Verdichtete Verkaufsübersicht** | `Datum · EU · Artikel · Summe · Versand · Rabatt · Fees · Label · Rückerst. · Käufer`, 54rem statt 71rem. Die Artikelspalte trägt die Positionszahl mit dem Lagerstatus als Punkt davor (Zeichen plus voller Satz in Tooltip und zugänglichem Namen). Auszahlung und Einzelansicht bleiben über das Geld-/Detailfenster erreichbar. |
+
+**Verifikation.** 222 Vitest-Dateien, 7 012 Unit-Tests, Lint/Typecheck/Build grün. Die
+geforderten Nachweise liegen als eigene Datei vor (`src/lib/orderbook/orderbook-ux.test.ts`,
+37 Tests): Verkauf ohne Datum wird abgewiesen, Katalogartikel reserviert weiter, freier Artikel
+ohne Katalog-, Lager-, Hold- und Bewegungswirkung, vier Default-Kostenzeilen, Refund in
+`sale_refunds`, partieller Erfolg, Doppelklickschutz, gebündelter Refresh, Tabellenlayout.
+
+**Offen**
+
+- **Manuelle Abnahme im Browser** steht noch aus: Spaltenbreiten, Tooltip des Lagerpunkts,
+  schnelles Ausbuchen, Verhalten bei kleinem Viewport.
+- Eine Rückerstattung aus dem Anlegeformular trägt **keinen Grund** (`sale_refunds.reason`
+  bleibt NULL); der Grund ist nachträglich im Geldfenster wählbar.
+- Die Positionsliste eines einzelnen Verkaufs behält die schwächere Doppelklickprüfung über
+  `busy` statt eines Refs — `react-hooks/refs` verbietet dort das Ref, und ein zweiter Klick
+  trifft weiterhin die Datenbank, die ihn ablehnt.
 
 
 ## Zuletzt verifizierte Prüfungen

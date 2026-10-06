@@ -458,12 +458,22 @@ export function SaleItems({ saleId, items, catalog, historical, internal,
           {/* The same picker the create form and the Einkauf use. Selecting a
               result adds ONE physical unit; the same figure may be added
               again, because two copies are two objects. */}
+          {/*
+            UND WAS IN KEINEM KATALOG STEHT, geht denselben Weg wie beim
+            Anlegen: findet die Suche nichts, übernimmt sie den getippten
+            Namen als `raw_name` — ohne `sky_id`, also ohne Lagerbezug,
+            ohne Reservierung und ohne mögliche Bewegung (`0059`,
+            `sale_items_movement_needs_figure`). Ein Portal, das beim
+            Anlegen vergessen wurde, muss nicht als Figur erfunden werden.
+          */}
           <FigureSearch
             catalog={available}
             loading={loadingFigures}
             disabled={busy.has(ADD_ITEM)}
             onSelect={(choice) =>
               act(ADD_ITEM, () => addSaleItem(saleId, choice.skyId, null, "loose"))}
+            onFree={(name) =>
+              act(ADD_ITEM, () => addSaleItem(saleId, null, name, "loose"))}
           />
           <p className="mt-2 text-xs text-muted">{copy.create.stockHint}</p>
         </div>

@@ -16,11 +16,33 @@
  * and `sales.reported_payout_amount`. There is no eBay table and no eBay
  * column — see `sale-template.ts`.
  *
- * ONE PRESS, ONE TRANSACTION. This used to create the sale, then send the
- * amounts in a second call, and leave the fees and the payout to be typed
- * into Details afterwards. Its own comment admitted the hole: "a failure on
- * the second step leaves a sale to correct in Details". That is now
- * `seller_create_sale_with_details`, and a failure anywhere leaves nothing.
+ * WAS EIN DRUCK AUF „ANLEGEN" AUSLÖST: EIN ATOMARER SCHRITT UND EIN
+ * OPTIONALER ZWEITER.
+ *
+ * Erster Schritt, unverändert atomar: `seller_create_sale_with_details`
+ * schreibt den Verkauf, seine Positionen, seine Gebühren und seine
+ * Korrekturen in EINER Transaktion. Sie stehen oder fallen gemeinsam. Das
+ * ist der Weg, der die alte Lücke geschlossen hat — früher entstand erst der
+ * Verkauf, dann in einem zweiten Aufruf die Beträge, und Gebühren und
+ * Auszahlung waren danach in Details nachzutragen.
+ *
+ * Zweiter Schritt, nur falls ein Erstattungsbetrag eingetragen wurde: eine
+ * RÜCKERSTATTUNG, über `seller_add_sale_refund`. Sie gehört in
+ * `sale_refunds` und nicht in `sale_fees` — zurückgegebenes Geld ist keine
+ * Gebühr des Kanals —, und die Anlage-Funktion hat keinen Parameter dafür.
+ *
+ * SCHLÄGT NUR DER ZWEITE SCHRITT FEHL, BLEIBT DER VERKAUF BESTEHEN, und die
+ * Oberfläche behandelt das ausdrücklich als PARTIELLEN ERFOLG: sie leitet
+ * nicht weiter, sagt „angelegt, Rückerstattung nicht gespeichert", sperrt
+ * den Absende-Knopf (ein zweiter Druck legte einen zweiten Verkauf an) und
+ * verlinkt den bestehenden Verkauf zum Nachtragen. Kein automatischer
+ * zweiter Versuch — er könnte doppelt erstatten.
+ *
+ * DAS DATUM IST PFLICHT. Nicht, weil die Spalte es verlangt (0059 lässt
+ * `sold_at` bewusst null, für die undatierten Zeilen der Arbeitsmappe),
+ * sondern weil ein neu getippter Verkauf ohne Datum ein Versehen ist: er
+ * landet im Verkaufsbuch unter „ohne Datum" und fehlt in jeder Monatssumme.
+ * Geprüft wird im Formular UND in der Server Action.
  *
  * THE PAYOUT IS COMPUTED BY THE IMPORTER'S OWN FUNCTION. `saleFormMoney`
  * calls `payoutView`, which calls `plannedPayout` — what reconstructed 292
@@ -32,13 +54,35 @@
  * separately at first, which is how a screen ends up showing a
  * reconciliation that the saved sale does not match.
  *
- * CREATING A SALE IS NOT A STOCK MOVEMENT. The parcel is often recorded
- * before it is packed. This writes a sale, its money and its items and
- * touches no inventory at all — `Ausbuchen`, on the individual item, is the
- * one action that does, and the screen says so before the form is submitted.
+ * DAS ANLEGEN BERÜHRT DAS LAGER — ALS RESERVIERUNG, NICHT ALS ABGANG (0110).
+ *
+ * Der genaue Vertrag, Spalte für Spalte:
+ *
+ *   `reserved`   STEIGT. Pro Katalogposition, für die eine lose Einheit frei
+ *                ist, entsteht ein External Hold (`order_reservations` mit
+ *                `sale_item_id`). Die Figur verschwindet damit sofort aus
+ *                `shop_offers()` — sie ist verkauft, nur noch nicht gepackt.
+ *                Ist nichts frei, entsteht die Position trotzdem, dann ohne
+ *                Reservierung.
+ *   `quantity`   UNVERÄNDERT. Das Paket wird oft vor dem Packen erfasst.
+ *                `Ausbuchen` an der einzelnen Position ist weiterhin die
+ *                eine Handlung, die den Bestand senkt, und sie schreibt die
+ *                `inventory_movements`-Zeile dazu.
+ *
+ * Eine Position ohne `sky_id` ist von beidem ausgenommen: kein Hold, keine
+ * mögliche Bewegung (siehe unten). Der erklärende Satz für den Betreiber
+ * steht neben der Positionsliste, wo der beschriebene Knopf ist, und nicht
+ * hier unter dem Absende-Knopf.
+ *
+ * UND MANCHES IST KEINE FIGUR. Ein Portal, ein Spiel, ein Restposten gehört
+ * zum Verkauf und zum Geld, aber in keinen Figurenkatalog. Findet die Suche
+ * nichts, übernimmt sie den getippten Namen als `raw_name` ohne `sky_id` —
+ * ohne Lagerbezug, ohne Reservierung, und per CHECK ohne jede Möglichkeit
+ * einer Lagerbewegung. Siehe `free-items.ts`.
  */
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState, useTransition } from "react";
 
@@ -47,14 +91,21 @@ import { PendingButton } from "@/components/ui/pending";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { createSaleWithDetails } from "@/lib/orderbook/sales-actions";
-import { draftPayload, draftUnitCount, type DraftLine } from "@/lib/orderbook/draft";
+import {
+  MAX_DRAFT_UNITS, draftPayload, draftUnitCount, type DraftLine,
+} from "@/lib/orderbook/draft";
+import {
+  addFreeItem, freeItemCount, freeItemPayload, type FreeItemLine,
+} from "@/lib/orderbook/free-items";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { parseMoney, parseSignedMoney } from "@/lib/orderbook/sales-money";
 import {
-  SALE_FEE_TYPES, SALE_TEMPLATES, extraFee, feeFromType, initialFees, invalidFees,
-  saleFormMoney, saleTemplate, unlabelledFees, type FeeDraft, type SettledBy,
+  SALE_COST_TYPES, SALE_TEMPLATES, extraFee, feeFromType, initialFees,
+  initialRefunds, invalidFees, invalidRefunds, refundAmounts, refundDraft, saleFormMoney,
+  saleTemplate, unlabelledFees, type FeeDraft, type RefundDraft, type SettledBy,
 } from "@/lib/orderbook/sale-template";
 import { FigureDraft } from "./figure-draft";
+import { FreeItems } from "./free-items";
 import { Field, FieldRow, FormSection, INPUT, MONEY, QuietRow } from "./form-section";
 
 const copy = de.business.sales;
@@ -104,6 +155,13 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
   const [reference, setReference] = useState("");
   const [note, setNote] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([]);
+  /*
+   * Positionen ohne Katalogzuordnung, getrennt von den Figuren gehalten.
+   *
+   * Ein `DraftLine` ist über seine SKY-ID identifiziert; diese hier haben
+   * keine und bekommen auch keine erfundene. Siehe `free-items.ts`.
+   */
+  const [freeLines, setFreeLines] = useState<FreeItemLine[]>([]);
   const [subtotal, setSubtotal] = useState("");
   const [shipping, setShipping] = useState("");
   const [discount, setDiscount] = useState("");
@@ -115,12 +173,28 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
    */
   const [fees, setFees] = useState<FeeDraft[]>(
     () => initialFees(saleTemplate("ebay"), (n) => `init${n}`));
-  /* Offen, während der Betreiber eine Gebührenart wählt. */
+  /*
+   * Die Rückerstattungszeilen. EIGENER ZUSTAND, und das ist der Punkt: so
+   * kann keine von ihnen versehentlich in `p_fees` geraten. Sie stehen
+   * trotzdem in derselben Liste wie die Gebühren, weil der Betreiber sie in
+   * derselben Arbeit eintippt.
+   */
+  const [refunds, setRefunds] = useState<RefundDraft[]>(
+    () => initialRefunds(saleTemplate("ebay"), (n) => `initR${n}`));
+  /* Offen, während der Betreiber eine Kostenart wählt. */
   const [feeMenuOpen, setFeeMenuOpen] = useState(false);
   const [adjustment, setAdjustment] = useState("");
   const [adjustmentNote, setAdjustmentNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Der Verkauf steht, die Rückerstattung nicht.
+   *
+   * Dann wird NICHT weitergeleitet: die Meldung muss gelesen werden, und der
+   * Knopf muss gesperrt sein — ein zweiter Druck würde einen zweiten Verkauf
+   * anlegen, nicht die fehlende Erstattung nachtragen.
+   */
+  const [partial, setPartial] = useState<number | null>(null);
   const [pending, startTransition] = useTransition();
 
   /*
@@ -137,6 +211,11 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
     const suggested = initialFees(saleTemplate(id), () => key())
       .filter((s) => !kept.some((k) => k.kind === s.kind && k.settledBy === s.settledBy));
     setFees([...kept, ...suggested]);
+    /* Dieselbe Regel für die Erstattungszeile: eingetippt bleibt stehen. */
+    const keptRefunds = refunds.filter((r) => r.amount.trim() !== "");
+    setRefunds(keptRefunds.length > 0
+      ? keptRefunds
+      : initialRefunds(saleTemplate(id), () => key()));
   }
 
   /*
@@ -152,6 +231,19 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
   function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    /* Der Verkauf existiert schon — ein zweiter Druck legt keinen zweiten an. */
+    if (partial !== null) return;
+
+    /*
+     * DAS DATUM ZUERST, UND AUCH HIER.
+     *
+     * Das Feld trägt `required`, also kommt ein leeres Datum normalerweise
+     * nicht bis hierher. „Normalerweise" ist kein Verlass: die Prüfung steht
+     * trotzdem, weil sie der deutsche Satz ist (die Browserblase ist der des
+     * Browsers), und die eigentliche Sperre liegt ohnehin im Server —
+     * `createSaleWithDetails` weist einen Verkauf ohne Datum ab.
+     */
+    if (soldAt.trim() === "") { setError(create.dateRequired); return; }
 
     // Validation still parses each field on its own, because the operator has
     // to be told which one is wrong — `saleFormMoney` coerces to keep the live
@@ -160,14 +252,24 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
     if ([subtotal, shipping, discount].some((v) => parseMoney(v) === null)) {
       setError(create.invalidAmount); return;
     }
+    /*
+     * Figuren UND freie Positionen zählen gegen dieselbe Obergrenze: `p_items`
+     * nimmt 200 Elemente, und `addFigure` kennt nur seine eigene Hälfte. Die
+     * Summe ist deshalb hier zu prüfen — sonst käme als Antwort ein
+     * `program_limit_exceeded` aus der Datenbank statt eines Satzes.
+     */
+    if (draftUnitCount(lines) + freeItemCount(freeLines) > MAX_DRAFT_UNITS) {
+      setError(de.business.orderbook.figures.limit(MAX_DRAFT_UNITS)); return;
+    }
     if (invalidFees(fees).length > 0) { setError(create.invalidAmount); return; }
     if (unlabelledFees(fees).length > 0) { setError(create.feeNeedsLabel); return; }
+    if (invalidRefunds(refunds).length > 0) { setError(create.invalidAmount); return; }
     if (parseSignedMoney(adjustment) === null) { setError(create.invalidAmount); return; }
 
     startTransition(async () => {
       const created = await createSaleWithDetails({
         channel: template.channel,
-        soldAt: soldAt.trim() || null,
+        soldAt: soldAt.trim(),
         country: country.trim().toUpperCase() || null,
         reference: reference.trim() || null,
         buyer: buyer.trim() || null,
@@ -175,11 +277,24 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         isTest,
         // Exactly what the panel showed — the same object, not a second build.
         subtotal: money.subtotal, shipping: money.shipping, discount: money.discount,
-        items: draftPayload(lines),
+        /*
+         * Figuren und freie Positionen, ein Element pro physischem Stück.
+         * Eine freie Position trägt `raw_name` und KEIN `sky_id`-Feld — die
+         * Reservierung in `seller_add_sale_item` greift deshalb nicht, und
+         * eine Lagerbewegung ist für sie per CHECK unmöglich.
+         */
+        items: [...draftPayload(lines), ...freeItemPayload(freeLines)],
         fees: money.fees,
+        /*
+         * Rückerstattungen gehen NICHT in `p_fees`. Sie werden nach dem
+         * Anlegen über `seller_add_sale_refund` geschrieben; schlägt das
+         * fehl, bleibt der Verkauf bestehen und sagt das auch.
+         */
+        refunds: refundAmounts(refunds),
         adjustments: money.adjustments,
       });
       if (!created.ok) { setError(created.message); return; }
+      if (created.refund === "failed") { setPartial(created.id); return; }
       /*
        * ZURÜCK INS VERKAUFSBUCH, NICHT AUF EINE EIGENE SEITE.
        *
@@ -203,6 +318,24 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
       ) : null}
 
       {/*
+        TEILERFOLG. Der Verkauf steht, die Rückerstattung nicht — und das
+        Formular bleibt stehen, statt weiterzuleiten, damit dieser Satz
+        gelesen wird. Der Weg nach vorn ist der Link: dort trägt der
+        Betreiber die Erstattung am bestehenden Verkauf nach. Automatisch
+        wird nichts wiederholt.
+      */}
+      {partial !== null ? (
+        <div role="alert"
+             className="flex flex-col gap-1 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border-strong">
+          <p>{create.refundFailed}</p>
+          <Link href={`/business/orderbuch/verkauf?verkauf=${partial}`}
+                className="self-start text-xs underline underline-offset-2">
+            {create.openCreatedSale}
+          </Link>
+        </div>
+      ) : null}
+
+      {/*
         1. WHAT THE SALE IS. Date and channel first, because the channel
         decides which fields the rest of the form even shows. The three
         optional identifiers sit under them, quieter, in one row.
@@ -210,7 +343,12 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
       <FormSection title={create.sections.sale}>
         <FieldRow>
           <Field label={create.date}>
+            {/* `required` ist die unmittelbare Rückmeldung; der verbindliche
+                Satz steht in `submit`, und die eigentliche Sperre im
+                Server. Bestehende undatierte Verkäufe sind davon nicht
+                betroffen — hier wird nur ANGELEGT. */}
             <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+                   required aria-required="true"
                    disabled={pending} className={INPUT} />
           </Field>
           <Field label={create.channel}>
@@ -240,9 +378,21 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         </QuietRow>
       </FormSection>
 
-      {/* 2. Figures — the same picker the Einkauf uses. */}
+      {/*
+        2. Figures — the same picker the Einkauf uses, plus the one thing the
+        Einkauf solves elsewhere: a position that is not in the catalog at
+        all. The search offers the typed name when it found nothing, and the
+        result lands in its own list below the figures (`FreeItems`), because
+        it has neither a series nor a market value and is not a Lagerposition.
+      */}
       <FormSection title={create.sections.figures}>
-        <FigureDraft lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
+        <FigureDraft lines={lines} catalog={catalog} onChange={setLines} disabled={pending}
+                     onFree={(name) => setFreeLines((f) =>
+                       addFreeItem(f, name, key(),
+                                   MAX_DRAFT_UNITS - draftUnitCount(lines) - freeItemCount(f)))}>
+          <FreeItems lines={freeLines} disabled={pending} onChange={setFreeLines}
+                     budget={MAX_DRAFT_UNITS - draftUnitCount(lines)} />
+        </FigureDraft>
       </FormSection>
 
       {/* 3. What came in. Three narrow numbers, so three abreast once there
@@ -305,6 +455,38 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
               </button>
             </li>
           ))}
+
+          {/*
+            DIE RÜCKERSTATTUNGSZEILE — gleiches Raster, andere Tabelle.
+
+            Sie steht hier, weil der Betreiber sie in derselben Arbeit
+            eintippt wie die Gebühren, und sie trägt bewusst KEINEN
+            „Abgezogen von"-Schalter: eine Erstattung mindert nicht, was der
+            Kanal einbehält. Die dritte Zelle bleibt deshalb leer statt zu
+            verschwinden — sonst rutschte das × in die Spalte des Schalters
+            und die Zeilen stünden nicht mehr untereinander.
+          */}
+          {refunds.map((refund) => (
+            <li key={refund.key}
+                className="grid grid-cols-[1fr_auto_auto] items-center gap-2 sm:grid-cols-[minmax(0,1fr)_6rem_auto_auto]">
+              <span className="col-span-3 min-w-0 truncate text-sm sm:col-span-1"
+                    title={create.refundHint}>
+                {create.refundLabel}
+              </span>
+              <input value={refund.amount} inputMode="decimal" disabled={pending}
+                     aria-label={create.refundLabel}
+                     onChange={(e) => setRefunds((r) => r.map((x) =>
+                       x.key === refund.key ? { ...x, amount: e.target.value } : x))}
+                     className={`${MONEY} w-24 shrink-0 sm:w-full`} />
+              <span aria-hidden="true" />
+              <button type="button" disabled={pending}
+                      aria-label={create.feeRemove(create.refundLabel)}
+                      onClick={() => setRefunds((r) => r.filter((x) => x.key !== refund.key))}
+                      className="flex size-11 shrink-0 items-center justify-center rounded-sky-md text-sm ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-40 sm:size-8">
+                ×
+              </button>
+            </li>
+          ))}
         </ul>
 
         {/*
@@ -329,14 +511,22 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
           </div>
 
           {feeMenuOpen ? (
-            <ul aria-label={create.feeTypeHeading}
+            <ul aria-label={create.costTypeHeading}
                 className="flex flex-col gap-1 rounded-sky-md p-2 ring-1 ring-border/70">
-              {SALE_FEE_TYPES.map((type) => (
+              {SALE_COST_TYPES.map((type) => (
                 <li key={type.id}>
+                  {/* `storage` entscheidet, in welche der beiden Listen die
+                      Zeile geht — und damit in welche Tabelle sie später
+                      geschrieben wird. Kein `if` auf einen Namen. */}
                   <button type="button" disabled={pending}
                           onClick={() => {
-                            const row = feeFromType(key(), type.id);
-                            setFees((f) => [...f, row]);
+                            if (type.storage === "refund") {
+                              const row = refundDraft(key());
+                              setRefunds((r) => [...r, row]);
+                            } else {
+                              const row = feeFromType(key(), type.id);
+                              setFees((f) => [...f, row]);
+                            }
                             setFeeMenuOpen(false);
                           }}
                           className="min-h-11 w-full rounded-sky-sm px-2 text-left text-sm hover:bg-fg/5 sm:min-h-9">
@@ -393,11 +583,22 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
         </label>
       </FormSection>
 
-      <PendingButton type="submit" pending={pending} pendingLabel={de.pending.saving}
+      {/*
+        Nach einem Teilerfolg GESPERRT: der Verkauf existiert, und ein
+        zweiter Druck würde einen zweiten anlegen statt die fehlende
+        Rückerstattung nachzutragen.
+      */}
+      <PendingButton type="submit" pending={pending} disabled={partial !== null}
+              pendingLabel={de.pending.saving}
               className={`${ACTION_PRIMARY} min-h-11 w-full gap-2 disabled:opacity-60 sm:w-auto sm:self-start`}>
         {create.submit}
         {draftUnitCount(lines) > 0
           ? ` · ${de.business.orderbook.figures.units(draftUnitCount(lines))}`
+          : ""}
+        {/* Freie Positionen sind keine Figuren und werden deshalb auch nicht
+            als solche gezählt. */}
+        {freeItemCount(freeLines) > 0
+          ? ` · ${de.business.orderbook.figures.freeUnits(freeItemCount(freeLines))}`
           : ""}
       </PendingButton>
     </form>

@@ -274,6 +274,23 @@ export async function setSaleShipped(id: number, shipped: boolean) {
 }
 
 /**
+ * Was aus dem Anlegen zurückkommt — mit der Rückerstattung als eigener Lage.
+ *
+ * Zwei Aufrufe, zwei Transaktionen: `seller_create_sale_with_details` legt
+ * den Verkauf samt Positionen, Gebühren und Korrekturen in EINER Transaktion
+ * an, und `seller_add_sale_refund` schreibt danach die Rückerstattung. Dass
+ * der zweite scheitern kann, ohne den ersten zurückzunehmen, ist keine
+ * Schwäche der Umsetzung, sondern die Lage: der Verkauf EXISTIERT dann.
+ *
+ * Deshalb gibt es drei Antworten und nicht zwei. „Fehlgeschlagen" für einen
+ * angelegten Verkauf wäre die gefährlichste von allen — der Betreiber würde
+ * es erneut versuchen und hätte zwei Verkäufe.
+ */
+export type CreatedSale =
+  | { ok: true; id: number; refund: "none" | "saved" | "failed" }
+  | { ok: false; message: string };
+
+/**
  * Creating an external sale whole (0065, ADR-0092).
  *
  * ONE CALL, ONE TRANSACTION. The old path was `seller_create_sale`, then a
@@ -283,13 +300,29 @@ export async function setSaleShipped(id: number, shipped: boolean) {
  * half-entered sale is not a cosmetic problem: it compares a reported payout
  * against a figure that is missing two fees.
  *
- * `items` is one element per physical unit; duplicates are expected. Nothing
- * here moves stock — `Ausbuchen` on the individual item still does that, and
- * only that.
+ * `items` is one element per physical unit; duplicates are expected. Each is
+ * either a catalog figure (`sky_id`) or a free position (`raw_name`) — see
+ * `free-items.ts`. Nothing here moves stock; `Ausbuchen` on the individual
+ * item still does that, and only that. Was `0110` hinzugefügt hat, ist die
+ * Reservierung: eine Figur, die frei ist, wird beim Anlegen gehalten.
+ *
+ * EINE AUSNAHME VON „EIN AUFRUF": DIE RÜCKERSTATTUNG. Sie gehört in
+ * `sale_refunds` und nicht in `sale_fees`, und es gibt keinen Parameter
+ * dafür — also schreibt sie ein zweiter Aufruf, nach dem ersten. Siehe
+ * `CreatedSale`: der Teilerfolg wird gemeldet, nicht verschwiegen.
  */
 export async function createSaleWithDetails(input: {
   channel: string;
-  soldAt: string | null;
+  /**
+   * `YYYY-MM-DD`, und PFLICHT (nicht `null`).
+   *
+   * Historische Verkäufe dürfen undatiert sein — 0059 lässt `sold_at` null,
+   * weil manche Zeilen der Arbeitsmappe keines tragen — und das Bearbeiten
+   * eines bestehenden Verkaufs verlangt weiterhin keines. Beim ANLEGEN ist
+   * ein fehlendes Datum dagegen immer ein Versehen: der Verkauf landet im
+   * Verkaufsbuch unter „ohne Datum" und fehlt in jeder Monatssumme.
+   */
+  soldAt: string;
   country: string | null;
   reference: string | null;
   buyer: string | null;
@@ -298,15 +331,37 @@ export async function createSaleWithDetails(input: {
   subtotal: number;
   shipping: number;
   discount: number;
-  items: readonly { sky_id: string }[];
+  /**
+   * Ein Element pro physischem Stück.
+   *
+   * Entweder ein Katalogartikel (`sky_id`) oder eine freie Position
+   * (`raw_name`, keine `sky_id`). Beide Formen nimmt
+   * `seller_create_sale_with_details` seit 0110 unverändert an; der CHECK
+   * `sale_items_identifiable` verlangt genau eine von beiden.
+   */
+  items: readonly ({ sky_id: string } | { raw_name: string })[];
   fees: readonly { kind: string; amount: number; settled_by: string; label?: string }[];
+  /** Beträge in Euro, alle > 0. Jeder wird eine Zeile in `sale_refunds`. */
+  refunds?: readonly number[];
   adjustments: readonly { amount: number; reason?: string; note?: string }[];
-}) {
+}): Promise<CreatedSale> {
   if (!(await canOperateSeller())) return { ok: false as const, message: de.admin.notAllowed };
+  /*
+   * DIE SERVERSEITIGE DATUMSPFLICHT.
+   *
+   * Nicht „auch im Client", sondern: das Formular ist die Bequemlichkeit und
+   * dies die Regel. Ein `required`-Attribut ist eine Bitte an den Browser,
+   * und diese Funktion ist eine Server Action — sie ist über ihre eigene
+   * Route aufrufbar, ganz ohne das Formular.
+   */
+  const soldAt = input.soldAt.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(soldAt)) {
+    return { ok: false as const, message: de.business.sales.create.dateRequired };
+  }
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_create_sale_with_details", {
     p_channel: input.channel,
-    p_sold_at: input.soldAt,
+    p_sold_at: soldAt,
     p_country: input.country,
     p_external_ref: input.reference,
     p_buyer_ref: input.buyer,
@@ -331,8 +386,37 @@ export async function createSaleWithDetails(input: {
   if (error || typeof data !== "number") {
     return { ok: false as const, message: message(error ?? {}) };
   }
+
+  /*
+   * DIE RÜCKERSTATTUNG, DANACH UND IN IHRER EIGENEN TABELLE (ADR-0089).
+   *
+   * `sale_refunds`, nie `sale_fees`: eine Erstattung ist zurückgegebenes
+   * Geld und keine Gebühr des Kanals. `seller_sales()` liest sie seit 0059
+   * von dort, und sie mindert die Auszahlung nicht.
+   *
+   * KEIN AUTOMATISCHER ZWEITER VERSUCH. Ein Wiederholungsversuch, dessen
+   * erster Aufruf die Zeile doch geschrieben hat, erzeugt eine doppelte
+   * Erstattung — und zwei Erstattungen sind schwerer zu bemerken und zu
+   * reparieren als eine fehlende. Die erste gescheiterte Zeile bricht
+   * deshalb ab, und die Oberfläche sagt, was zu tun ist.
+   */
+  let refund: "none" | "saved" | "failed" = "none";
+  for (const amount of input.refunds ?? []) {
+    if (!(amount > 0)) continue;
+    const { error: refundError } = await supabase.rpc("seller_add_sale_refund", {
+      p_sale_id: data,
+      p_amount: amount,
+      /* Am Verkaufstag erstattet, bis jemand etwas anderes einträgt. */
+      p_occurred_at: soldAt,
+      p_reason: null,
+      p_note: null,
+    });
+    if (refundError) { refund = "failed"; break; }
+    refund = "saved";
+  }
+
   revalidatePath("/business/orderbuch/verkauf");
-  return { ok: true as const, id: data };
+  return { ok: true as const, id: data, refund };
 }
 
 /**

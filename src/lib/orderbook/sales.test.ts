@@ -941,19 +941,26 @@ describe("the ledger renders as a table", () => {
     expect(noComments(LEDGER)).not.toMatch(/ob-sale/);
   });
 
-  it("the collapsed sale has exactly eleven cells, in header and in row alike", () => {
+  it("the collapsed sale has exactly ten cells, in header and in row alike", () => {
     /*
      * If the markup and the track list disagree the extra cells wrap onto a
      * second line — the failure the owner photographed twice.
+     *
+     * ELF WAREN ES, BIS DIE ZEILE VERDICHTET WURDE. `Auszahlung` ist eine
+     * abgeleitete Zahl und steht jetzt dort, wo die Beträge stehen, aus
+     * denen sie entsteht (Geldfenster); `Lager` war 7,5rem Text und ist ein
+     * Punkt in `Artikel` geworden; `Details` hatte eine eigene Spalte für
+     * einen Knopf, der jetzt in der aufgeklappten Zeile steht. Dafür sind
+     * `Artikel` und `Käufer` neu — zwei Angaben, die vorher gar nicht in
+     * der Zeile standen.
      */
-    // Eleven since 0072: `Lager` joined the row, between Auszahlung and
-    // Details, because a sale now has a stock state worth a word.
     const columns = constTracks("SALE_COLUMNS");
-    expect(columns).toHaveLength(11);
-    expect(cells(inside(LEDGER, "<LedgerHead>", "</LedgerHead>"))).toBe(11);
-    // The row's last cell wraps the Details button, so it is a cell like the
-    // others and the counts still have to agree.
-    expect(cells(inside(LEDGER, "<LedgerRow ", "</LedgerRow>"))).toBe(11);
+    expect(columns).toHaveLength(10);
+    expect(cells(inside(LEDGER, "<LedgerHead>", "</LedgerHead>"))).toBe(10);
+    expect(cells(inside(LEDGER, "<LedgerRow ", "</LedgerRow>"))).toBe(10);
+    // Und die letzte Spur ist die einzige mitwachsende: der Käufer.
+    expect(columns[columns.length - 1]).toBe("minmax(6rem, 1fr)");
+    expect(columns.slice(0, -1).every((t) => /^[\d.]+rem$/.test(t))).toBe(true);
   });
 
   it("Intern and Extern are one table, with no scope-dependent cell left", () => {
@@ -1090,14 +1097,28 @@ describe("the ledger renders as a table", () => {
   it("money cells never wrap", () => {
     expect(components).toMatch(/\.ob-money \{ white-space: nowrap; \}/);
     const row = inside(LEDGER, "<LedgerRow ", "</LedgerRow>");
-    // Summe, Versand, Rabatt and Refund each carry it directly.
-    expect((row.match(/ob-money/g) ?? []).length).toBeGreaterThanOrEqual(4);
-    expect(LEDGER).toMatch(/function Payout[\s\S]*?ob-money/);
+    /*
+     * Summe, Versand, Rabatt, Fees, Label und Rückerstattung tragen es
+     * direkt — und seit die Spuren fest und schmal sind, ist das keine
+     * Vorsichtsmaßnahme mehr, sondern die Bedingung dafür: ein Umbruch in
+     * einer 4,25rem-Spur würde die Zeile zweizeilig machen.
+     */
+    expect((row.match(/ob-money/g) ?? []).length).toBeGreaterThanOrEqual(6);
   });
 
-  it("one payout column in the ledger, and one line in the overlay", () => {
+  it("no payout column in the ledger, and one line in the overlay", () => {
+    /*
+     * DIE AUSZAHLUNG IST AUS DER TABELLE HERAUS, NICHT WEG.
+     *
+     * Sie ist eine abgeleitete Zahl (`sale_expected_payout()`), und sie
+     * steht jetzt dort, wo die Beträge stehen, aus denen sie entsteht: im
+     * Geld-/Detailfenster. In der Zeile kostete sie 6,5rem für eine Zahl,
+     * die man nur beim Abgleichen einer Abrechnung braucht — und dann hat
+     * man das Fenster ohnehin offen.
+     */
     const head = inside(LEDGER, "<LedgerHead>", "</LedgerHead>");
-    expect(head).toContain("copy.columns.payout");
+    expect(head).not.toContain("copy.columns.payout");
+    expect(inside(LEDGER, "<LedgerRow ", "</LedgerRow>")).not.toContain("expectedPayout");
     expect(head).not.toContain("copy.columns.expected");
     expect(head).not.toContain("copy.columns.difference");
     /*
@@ -1229,20 +1250,34 @@ describe("the Excel financial row", () => {
   });
 
   it("Auszahlung is the computed figure, with nothing to prefer it over", () => {
-    // One cell, one number, no `offen` state (ADR-0095).
-    expect(LEDGER).toContain("formatPrice(sale.expectedPayout)");
+    /*
+     * One number, no `offen` state (ADR-0095) — und sie steht im
+     * Geldfenster, seit die Zeile verdichtet wurde. Der Betreiber muss sie
+     * weiterhin erreichen, ohne etwas nachzurechnen: das ist, was hier
+     * geprüft wird.
+     */
+    expect(DETAILS).toContain("expected");
+    expect(DETAILS).toContain("copy.summary.expected");
+    expect(DETAILS).toContain("sale_expected_payout()");
+    // Nichts davon ist in die Liste zurückgewandert.
     expect(LEDGER).not.toContain("reportedPayout");
     expect(LEDGER).not.toContain("payoutCell");
-    // A sale with no computable payout still reads as a dash, never 0,00 €.
-    expect(LEDGER).toContain("sale.expectedPayout === null");
+    expect(LEDGER).not.toContain("function Payout");
   });
 
-  it("the ledger row shows the workbook's own ten headings", () => {
+  it("the ledger row shows the workbook's own headings, plus Artikel and Käufer", () => {
     const head = LEDGER.slice(LEDGER.indexOf("<LedgerHead>"), LEDGER.indexOf("</LedgerHead>"));
-    for (const key of ["date", "country", "sum", "shipping", "discount", "fees",
-                       "label", "refund", "payout", "details"]) {
+    for (const key of ["date", "country", "items", "sum", "shipping", "discount", "fees",
+                       "label", "refundShort", "buyer"]) {
       expect(head, key).toContain(`copy.columns.${key}`);
     }
+    // Und die drei, die die Zeile verlassen haben, stehen nicht mehr darin.
+    for (const gone of ["payout", "stock", "details"]) {
+      expect(head, gone).not.toContain(`copy.columns.${gone}`);
+    }
+    expect(de.business.sales.columns.items).toBe("Artikel");
+    expect(de.business.sales.columns.buyer).toBe("Käufer");
+    expect(de.business.sales.columns.refundShort).toBe("Rückerst.");
     // `Order 2026!T4` is literally `EU`, and it holds a country code.
     expect(de.business.sales.columns.country).toBe("EU");
     expect(de.business.sales.columns.sum).toBe("Summe");
@@ -1263,30 +1298,26 @@ describe("the Excel financial row", () => {
     expect(DETAILS).toContain("copy.shipped");
   });
 
-  it("Details is a button of its own and does not toggle the item list", () => {
+  it("Details is reachable from the expanded row, and still a control of its own", () => {
     /*
-     * The row carries a transparent overlay button. A Details control sitting
-     * under it would open the breakdown AND collapse the items; above it and
-     * stopping propagation, it does only its own job.
+     * KEINE EIGENE SPALTE MEHR, UND DESHALB AUCH KEIN `stopPropagation`.
+     *
+     * Der Knopf stand in einer 5,5rem-Spur jeder Zeile und musste die
+     * durchsichtige Überlagerung der Zeile überstimmen — daher `z-20` und
+     * das Stoppen des Ereignisses. Er steht jetzt in der aufgeklappten
+     * Zeile neben dem Link auf die Einzelansicht, wo keine Überlagerung
+     * darüber liegt: dasselbe Fenster, ein Klick mehr zum Aufklappen, und
+     * eine Spalte weniger in dreißig Zeilen.
      */
     const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));
-    expect(row).toMatch(/onClick=\{\(event\) => \{ event\.stopPropagation\(\); onDetails\(sale\.id\); \}\}/);
-    /*
-     * AND IT HAS TO OUTRANK THE OVERLAY, NOT MERELY CARRY A Z-INDEX.
-     *
-     * This test used to assert `relative z-10`, and it kept passing when
-     * the overlay was given `z-10` too — at equal z-index the later element
-     * wins, so the overlay swallowed the click and `Details` expanded the
-     * item list instead of opening the dialog. The number alone proves
-     * nothing; the comparison does.
-     */
-    const primitives = read("src/components/business/ledger-table.tsx");
-    const overlay = /absolute inset-0 z-(\d+)/.exec(primitives);
-    const details = /relative z-(\d+) text-center/.exec(row);
-    expect(overlay, "overlay z-index").not.toBeNull();
-    expect(details, "details z-index").not.toBeNull();
-    expect(Number(details![1]), "Details must sit above the row overlay")
-      .toBeGreaterThan(Number(overlay![1]));
+    expect(row).not.toContain("onDetails");
+    expect(row).not.toContain("stopPropagation");
+    const expansion = LEDGER.slice(LEDGER.indexOf("<LedgerExpansion"),
+                                   LEDGER.indexOf("</LedgerExpansion>"));
+    expect(expansion).toContain("onClick={() => onDetails(sale.id)}");
+    expect(expansion).toContain("{copy.columns.details}");
+    // Und die Einzelansicht bleibt daneben erreichbar — keine Information weg.
+    expect(expansion).toContain("{copy.detail}");
     // Two separate pieces of state: one for items, one for the dialog.
     expect(LEDGER).toContain("const [showing, setShowing]");
     expect(LEDGER).toMatch(/const onDetails = \(id: number\) => \{ setShowing\(id\); load\(id\); \};/);
@@ -1938,10 +1969,10 @@ describe("the Details overlay maintains an external sale", () => {
     expect(DETAILS).toContain("modal.editedSince");
   });
 
-  it("the ledger shows the ten workbook columns", () => {
+  it("the ledger shows the money columns the workbook has", () => {
     const head = LEDGER.slice(LEDGER.indexOf("<LedgerHead>"), LEDGER.indexOf("</LedgerHead>"));
     for (const key of ["date", "country", "sum", "shipping", "discount",
-                       "fees", "label", "refund", "payout", "details"]) {
+                       "fees", "label", "refundShort"]) {
       expect(head, key).toContain(`copy.columns.${key}`);
     }
     // Fees and Label come from the read model, not from a client-side sum.
@@ -2638,7 +2669,16 @@ describe("cancelling an open position", () => {
     // Detailseite so, die Liste zeigte den abgeleiteten Zustand.
     const cell = "{outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}";
     expect(DETAIL).toContain(cell);
-    expect(LEDGER).toContain(cell);
+    /*
+     * Im Verkaufsbuch steht vor derselben Antwort seit der Verdichtung noch
+     * zweierlei: eine Ablehnung, die nur dieser Zeile gehört, und „läuft …",
+     * solange die Position unterwegs ist. Die Antwort selbst ist unverändert
+     * dieselbe — sie ist bloß nicht mehr das Erste, was geprüft wird.
+     */
+    expect(LEDGER).toContain(": outcome !== null ? copy.legacyStates[outcome]");
+    expect(LEDGER).toContain(": copy.itemStates[can.status]}");
+    expect(LEDGER).toContain("{failure !== null ? failure");
+    expect(LEDGER).toContain(": working ? copy.itemRunning");
   });
 
   it("8. shipping and returning are untouched", () => {

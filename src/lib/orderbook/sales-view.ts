@@ -576,6 +576,51 @@ export function saleStockStatus(sale: {
   return "closed";
 }
 
+/**
+ * Der Lagerstatus eines Verkaufs als Punkt — dieselbe Aussage, weniger Platz.
+ *
+ * KEINE NEUE STATUSLOGIK. Die Eingabe ist das Ergebnis von
+ * `saleStockStatus()`, unverändert; diese Funktion übersetzt es nur in Ton
+ * und Zeichen. Es gibt deshalb keine zweite Wahrheit über denselben Bestand,
+ * und die Spalte `Lager` könnte jederzeit zurückkommen, ohne dass etwas
+ * anderes behauptet würde.
+ *
+ * WARUM DIE WÖRTER AUS DER TABELLE VERSCHWINDEN. „Ausgebucht ✓" brauchte
+ * 7,5rem der Verkaufszeile — mehr als Summe und Versand zusammen —, und die
+ * Antwort, auf die der Betreiber schaut, ist eine von zwei: fertig oder
+ * nicht. Der Satz ist nicht weg, er steht im `title` und im zugänglichen
+ * Namen des Punkts; die Zahl der Artikel steht daneben, wo vorher nichts
+ * stand.
+ *
+ * FARBE IST NIE DER EINZIGE TRÄGER. Jeder Ton hat sein eigenes Zeichen, und
+ * das Zeichen steht in derselben Reihe, die eine Position benutzt (○ ✓ ! ⇄
+ * ⊘ ↩) — damit bedeutet derselbe Haken auf beiden Ebenen dasselbe.
+ */
+export function saleStockIndicator(status: SaleStockStatus): SaleItemIndicator {
+  switch (status) {
+    /* Jede Position ausgebucht und nichts zurückgekommen: erledigt. */
+    case "outbooked":
+      return { tone: "green", glyph: "\u2713" };
+    /* Alles zurück und wieder eingelagert — wie `restocked` auf Positionsebene. */
+    case "returned":
+      return { tone: "returned", glyph: "\u2713" };
+    /* Abgeschlossen, aber nicht jedes Stück über eine Bewegung. */
+    case "closed":
+      return { tone: "green", glyph: "\u2713" };
+    /* Teilweise: hier ist die Lagerarbeit noch offen, und genau das soll man sehen. */
+    case "partial":
+      return { tone: "amber", glyph: "!" };
+    /* Storniert ist ein Ende, aber keines mit Lagerabgang. */
+    case "cancelled":
+      return { tone: "grey", glyph: "\u21a9" };
+    /* Historisch oder eine Bestellung: von hier aus nicht zu bearbeiten. */
+    case "frozen":
+      return { tone: "grey", glyph: "\u2298" };
+    default:
+      return { tone: "grey", glyph: "\u25cb" };
+  }
+}
+
 /** Newest first, undated last — the same rule the Einkauf ledger follows. */
 export function sortSales<T extends { soldAt: string | null; id: number }>(rows: readonly T[]): T[] {
   return [...rows].sort((a, b) => {

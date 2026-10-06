@@ -48,6 +48,14 @@ export type SaleTemplate = {
   channel: string;
   /** The rows the form opens with. The operator may clear or delete any. */
   defaultFees: readonly Omit<FeeDraft, "key" | "amount">[];
+  /**
+   * Whether the Kosten list opens with a Rückerstattung row.
+   *
+   * It is NOT a fee and never becomes one — see `RefundDraft`. The flag is
+   * here because the question "which rows does this layout start with" is
+   * the template's, and the answer now spans two storages.
+   */
+  opensRefund: boolean;
   /** Whether the layout offers these at all. */
   showsDiscount: boolean;
   showsAdjustment: boolean;
@@ -110,18 +118,26 @@ export function feeFromType(key: string, typeId: string): FeeDraft {
 /**
  * eBay, as the reconciliation actually works.
  *
- * Zwei Zeilen vorab, weil jede eBay-Abrechnung der Arbeitsmappe sie hat: die
- * Transaktionsgebühr und das Label. Das Label steht auf `channel` — über eBay
- * gekauft ist der Normalfall —, und der Betreiber stellt es auf `external`
- * für eines von der Post.
+ * VIER ZEILEN VORAB, WEIL DER BETREIBER SIE VIER MAL VON VIER STELLEN HOLEN
+ * MUSSTE. Zwei standen hier („MEHR NICHT", mit dem Argument, eine meist leere
+ * Zeile lade zu einer Null ein) — und die eBay-Abrechnung, die danach
+ * abgeglichen wird, hat in der Praxis regelmäßig auch eine Anzeigegebühr und
+ * eine Rückerstattung. Eine Zeile, die dasteht und leer bleibt, kostet einen
+ * Blick; eine, die fehlt, kostet zwei Klicks und manchmal den Eintrag.
  *
- * MEHR NICHT. Anzeige-, Werbe- und Zahlungsgebühr fallen nicht bei jedem
- * Verkauf an; vorausgefüllte Zeilen, die meistens leer bleiben, laden zu
- * einer Null ein, wo nichts stehen sollte. Sie stehen stattdessen unter
- * „+ Gebühr" bereit.
+ *   Transaktionsgebühr      `sale_fees`, kind `payment`
+ *   Versandkosten (Label)   `sale_fees`, kind `shipping_label`
+ *   Anzeigegebühr           `sale_fees`, kind `marketplace`   ← bestehende
+ *                           Semantik, dieselbe wie unter „+ Gebühr"
+ *   Rückerstattung          `sale_refunds` — KEINE Gebühr, siehe `RefundDraft`
+ *
+ * Das Label steht auf `channel` — über eBay gekauft ist der Normalfall —, und
+ * der Betreiber stellt es auf `external` für eines von der Post. Leer bleibt
+ * leer: `feePlans` und `refundAmounts` lassen jede Zeile ohne Betrag fallen,
+ * es entsteht also kein Datensatz über null Euro.
  *
  * Es gibt weiterhin kein eBay-Feld und keine eBay-Spalte: das hier ist eine
- * Vorbelegung von zwei gewöhnlichen `sale_fees`-Zeilen.
+ * Vorbelegung gewöhnlicher Zeilen in zwei vorhandenen Tabellen.
  */
 const EBAY: SaleTemplate = {
   id: "ebay",
@@ -129,7 +145,9 @@ const EBAY: SaleTemplate = {
   defaultFees: [
     { kind: "payment", label: "Transaktionsgebühr", settledBy: "channel" },
     { kind: "shipping_label", label: "Versandkosten (Label)", settledBy: "channel" },
+    { kind: "marketplace", label: "Anzeigegebühr", settledBy: "channel" },
   ],
+  opensRefund: true,
   showsDiscount: true,
   showsAdjustment: true,
 };
@@ -146,6 +164,8 @@ const MANUAL: SaleTemplate = {
   id: "manual",
   channel: "manual",
   defaultFees: [],
+  /* Aus demselben Grund wie `defaultFees: []`: hier wird nichts angenommen. */
+  opensRefund: false,
   showsDiscount: true,
   showsAdjustment: true,
 };
@@ -170,6 +190,94 @@ export function initialFees(template: SaleTemplate, key: (n: number) => string):
 export function extraFee(key: string, label: string): FeeDraft {
   return { key, kind: "other", label, amount: "", settledBy: "channel" };
 }
+
+/**
+ * DIE RÜCKERSTATTUNG IST KEINE GEBÜHR, UND DESHALB IST SIE EIN EIGENER TYP.
+ *
+ * Sie steht im Formular in derselben Liste wie die Gebühren, weil der
+ * Betreiber sie in derselben Arbeit einträgt — aber sie wird anders
+ * gespeichert, und zwar in `sale_refunds` (0059). Dort gehört sie fachlich
+ * hin: eine Rückerstattung ist zurückgegebenes Geld und sagt nichts darüber,
+ * ob etwas zurückkam; eine Gebühr ist einbehaltenes Geld des Kanals.
+ *
+ * WARUM NICHT EINFACH EIN `FeeDraft` MIT `kind = 'refund'`:
+ *
+ *   `sale_fees.kind` kennt genau vier Werte — payment · marketplace ·
+ *   shipping_label · other — und ein fünfter wäre eine Migration. Ein Refund
+ *   als `other` wäre schlimmer: er würde als Gebühr summiert, die Auszahlung
+ *   über `plannedPayout` mindern und in jeder Auswertung als Kosten des
+ *   Kanals erscheinen. `seller_sales()` liest Rückerstattungen seit 0059 aus
+ *   `sale_refunds`; zwei Quellen für eine Zahl sind eine zu viel.
+ *
+ * Ein eigener Typ macht diesen Unterschied deshalb unübersehbar: es gibt
+ * keine Stelle, an der eine `RefundDraft`-Zeile versehentlich in `p_fees`
+ * geraten könnte, weil sie nie in `fees` liegt.
+ *
+ * AUCH NICHT TEIL DER AUSZAHLUNG. `payoutView` übergibt bewusst `[]` für
+ * Refunds — eine Rückerstattung mindert nicht, was der Kanal überweist,
+ * sondern ist ein eigenes Ereignis danach.
+ */
+export type RefundDraft = {
+  /** Stable across re-renders. Never a database value. */
+  key: string;
+  amount: string;
+};
+
+export function refundDraft(key: string): RefundDraft {
+  return { key, amount: "" };
+}
+
+/** Die Rückerstattungszeilen, mit denen eine Vorlage aufgeht. */
+export function initialRefunds(
+  template: SaleTemplate, key: (n: number) => string,
+): RefundDraft[] {
+  return template.opensRefund ? [refundDraft(key(0))] : [];
+}
+
+/**
+ * Rückerstattungszeilen → die Beträge, die gespeichert werden.
+ *
+ * Dieselbe Regel wie bei `feePlans`: eine leere Zeile ist keine
+ * Rückerstattung über null Euro, sondern keine Rückerstattung. Und ein
+ * Betrag von 0 erzeugt nichts — `sale_refunds_amount_positive` würde ihn
+ * zwar annehmen, aber eine Erstattung von nichts ist keine.
+ */
+export function refundAmounts(drafts: readonly RefundDraft[]): number[] {
+  const out: number[] = [];
+  for (const d of drafts) {
+    const amount = parseMoney(d.amount);
+    if (amount === null || amount <= 0) continue;
+    out.push(amount);
+  }
+  return out;
+}
+
+/** True für jede Zeile, in der etwas steht, das kein Betrag ist. */
+export function invalidRefunds(drafts: readonly RefundDraft[]): RefundDraft[] {
+  return drafts.filter((d) => d.amount.trim() !== "" && parseMoney(d.amount) === null);
+}
+
+/**
+ * Was unter „+ Gebühr" zur Auswahl steht: die Gebührenarten UND die
+ * Rückerstattung.
+ *
+ * Eine Liste, weil es für den Betreiber eine Frage ist („was für ein Posten
+ * ist das?"), und `storage` sagt, in welche der beiden Tabellen die gewählte
+ * Zeile geht. Die Gebührenarten bleiben `SALE_FEE_TYPES` — diese Liste
+ * leitet sich daraus ab und kann nicht von ihr abweichen.
+ */
+export type SaleCostType = {
+  id: string;
+  label: string;
+  storage: "fee" | "refund";
+};
+
+export const REFUND_COST_ID = "refund";
+
+export const SALE_COST_TYPES: readonly SaleCostType[] = [
+  ...SALE_FEE_TYPES.map((t) => ({ id: t.id, label: t.label, storage: "fee" as const })),
+  { id: REFUND_COST_ID, label: "Rückerstattung", storage: "refund" as const },
+];
 
 /**
  * Fee rows → what `plannedPayout` and the RPC both take.

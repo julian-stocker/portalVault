@@ -113,9 +113,33 @@ describe("kein gemeinsames pending mehr", () => {
     });
 
     it(`${name} verwirft den zweiten Klick auf dieselbe Zeile`, () => {
-      expect(source).toContain("if (busy.has(");
+      expect(source).toMatch(/if \((?:inflight\.current|busy)\.has\(/);
     });
   }
+
+  it("und im Verkaufsbuch ist die Sperre ein Ref, nicht der Zustand", () => {
+    /*
+     * WARUM DORT STRENGER.
+     *
+     * `busy` ist der Zustand des LETZTEN Renders. Ein Doppelklick findet
+     * innerhalb eines Durchlaufs statt: beide Klicks sehen dasselbe alte
+     * `busy` und kämen beide durch. Ein Ref ist sofort aktuell.
+     *
+     * Im Verkaufsbuch zählt das, weil dort schnell hintereinander über
+     * mehrere aufgeklappte Verkäufe hinweg ausgebucht wird — das war der
+     * Anlass. Die Positionsliste eines einzelnen Verkaufs behält ihre
+     * bisherige Prüfung: `act` wird dort im selben Bauteil durch
+     * `rows.map` gereicht, und `react-hooks/refs` verbietet, ein Ref in
+     * eine Funktion zu geben, die das Rendern aufruft. Ein zweiter Klick
+     * dort trifft weiterhin die Datenbank, die ihn ablehnt — ein Fehler
+     * in einer Zeile, keine zweite Buchung.
+     */
+    expect(ledger).toContain("const inflight = useRef<Set<number>>(new Set());");
+    expect(ledger).toContain("if (inflight.current.has(key)) return;");
+    expect(ledger).toContain("inflight.current.add(key);");
+    // Und in `finally` wieder frei, wie `busy`.
+    expect(ledger).toContain("inflight.current.delete(key);");
+  });
 
   it("das Detail sperrt genau die Zeile, die läuft", () => {
     expect(detail).toContain("const working = busy.has(id);");
@@ -145,6 +169,15 @@ describe("kein gemeinsames pending mehr", () => {
     expect(detail).toContain("const [failed, setFailed] = useState<ReadonlyMap<number, string>>");
     expect(detail).toContain("new Map(current).set(key, result.message)");
     expect(detail).toContain("problems.map((problem)");
+    /*
+     * Im Verkaufsbuch stand dafür EINE Meldung über der ganzen Tabelle. Bei
+     * fünf schnellen Klicks war damit nicht zu sehen, welche Position
+     * abgelehnt wurde — und die nächste Meldung überschrieb die vorige.
+     */
+    expect(ledger).toContain("const [failed, setFailed] = useState<ReadonlyMap<number, string>>");
+    expect(ledger).toContain("new Map(current).set(key, result.message)");
+    expect(ledger).toContain("const failure = failed.get(id) ?? null;");
+    expect(ledger).toContain("failed: ReadonlyMap<number, string>;");
   });
 });
 
@@ -192,13 +225,49 @@ describe("revalidatePath ist aus dem Positions-Hotpath verschwunden", () => {
     expect(ledger).not.toContain("await router.refresh()");
     expect(ledger).not.toContain("revalidatePath");
     const at = ledger.indexOf("router.refresh();");
-    expect(ledger.lastIndexOf("load(saleId, true);", at)).toBeGreaterThan(-1);
-    expect(ledger.indexOf("} finally {", at)).toBeGreaterThan(at);
+    expect(ledger.lastIndexOf("} finally {", at)).toBeGreaterThan(-1);
+    /*
+     * UND EINMAL FÜR ALLE, NICHT EINMAL PRO KLICK.
+     *
+     * Fünf Positionen schnell hintereinander hießen fünf Server-Renders der
+     * ganzen Route — der eigentliche Grund für das Flackern. Gebündelt wird
+     * am Ereignis und nicht an einer Wartezeit: solange noch eine Aktion
+     * unterwegs ist, wird nicht nachgeholt; die letzte holt für alle nach.
+     * Wer nur einmal klickt, bekommt den Refresh sofort.
+     */
+    expect(ledger).toContain("const outstanding = useRef(0);");
+    expect(ledger).toContain("outstanding.current += 1;");
+    expect(ledger).toContain("outstanding.current -= 1;");
+    expect(ledger).toContain("if (outstanding.current === 0 && listStale.current) {");
+    // Kein Timer als eigentliche Lösung.
+    for (const timer of ["setTimeout", "setInterval", "requestAnimationFrame", "debounce"]) {
+      expect(ledger, timer).not.toContain(timer);
+    }
     // Und die Entscheidung selbst bleibt die eine Funktion.
     expect(ledger).toContain("saleStockStatus(sale)");
     for (const forbidden of ["outbookedCount =", "settledCount =", "closedCount ="]) {
       expect(ledger, forbidden).not.toContain(forbidden);
     }
+  });
+
+  it("die aufgeklappten Positionen bleiben beim Nachlesen stehen", () => {
+    /*
+     * DER EIGENTLICHE FLACKERGRUND, ALS ZUSICHERUNG.
+     *
+     * `load(id, true)` hat `details[id]` gelöscht, bevor es neu gelesen hat
+     * — die aufgeklappte Liste fiel damit auf „Positionen werden geladen …"
+     * zurück, einmal pro Klick, mitten unter dem Finger. Eine Sekunde
+     * veraltet ist unendlich viel besser als eine Sekunde nicht da.
+     */
+    expect(ledger).not.toMatch(/delete next\[id\]/);
+    expect(ledger).not.toMatch(/delete next\[saleId\]/);
+    /*
+     * Und eine überholte Antwort schreibt nicht über den neueren Zustand:
+     * zwei Klicks heißen zwei Antworten, und die Reihenfolge, in der sie
+     * zurückkommen, ist nicht die, in der sie losgeschickt wurden.
+     */
+    expect(ledger).toContain("const reads = useRef<Map<number, number>>(new Map());");
+    expect(ledger).toContain("if (reads.current.get(id) !== token) return;");
   });
 
   it("der Katalog liegt nicht mehr im Render der Detailseite", () => {

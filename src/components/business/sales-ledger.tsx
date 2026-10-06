@@ -28,19 +28,41 @@
  */
 
 /*
- * The financial row, in the workbook's own order and under its own headings:
- * `Order 2026!T4` is literally `EU`, U `Summe`, V `Versand`, W `Rabatt`,
- * X+AA the fees, Y+Z the labels, AD `Refund`, AE `Auszahlung`.
+ * ZEHN SPALTEN, UND DIE FLEXIBLE IST DER KÄUFER.
  *
- * Datum · EU · Summe · Versand · Rabatt · Fees · Label · Refund · Auszahlung ·
- * Lager · Details
+ * Datum · EU · Artikel · Summe · Versand · Rabatt · Fees · Label ·
+ * Rückerst. · Käufer
  *
- * `Fees` and `Label` are disjoint halves of the same fee table and arrive as
- * aggregates from `seller_sales()` (0062) — a label is never in both.
+ * Die Überschriften sind weiter die der Arbeitsmappe: `Order 2026!T4` heißt
+ * wörtlich `EU`, U `Summe`, V `Versand`, W `Rabatt`, X+AA die Gebühren, Y+Z
+ * die Labels, AD `Refund`. `Fees` und `Label` sind disjunkte Hälften
+ * derselben Gebührentabelle und kommen als Aggregate aus `seller_sales()`
+ * (0062) — ein Label steht nie in beiden.
+ *
+ * WAS SICH GEÄNDERT HAT UND WARUM
+ *
+ *   `Artikel`      neu. Die Zahl der Positionen stand nirgends in der Zeile,
+ *                  obwohl `seller_sales()` sie seit 0062 mitliefert — man
+ *                  musste aufklappen, um „ein Stück oder sieben" zu wissen.
+ *                  Der Lagerstatus sitzt als Punkt davor (siehe `StockDot`).
+ *   `Käufer`       neu, und die einzige Spur, die mitwächst: `buyer_ref` ist
+ *                  das, womit der Betreiber eine Zeile wiedererkennt, wenn
+ *                  eine Nachricht kommt.
+ *   `Auszahlung`   aus der Tabelle heraus. Eine abgeleitete Zahl
+ *                  (`sale_expected_payout()`), die im Geldfenster steht, wo
+ *                  die Beträge stehen, aus denen sie entsteht.
+ *   `Lager`        war 7,5rem Text — mehr als Summe und Versand zusammen.
+ *                  Dieselbe Aussage steht jetzt als Punkt in `Artikel`, mit
+ *                  demselben Satz im Tooltip und im zugänglichen Namen.
+ *   `Details`      keine eigene Spalte mehr. Der Knopf steht in der
+ *                  aufgeklappten Zeile, neben dem Link auf die Einzelansicht.
+ *
+ * Die Geldspuren sind fest und schmal, nicht mehr `minmax(5rem, 1fr)`: acht
+ * mitwachsende Geldspalten haben die Tabelle auf 71rem gehalten, obwohl
+ * „12,34 €" in 4rem passt. Der gewonnene Platz geht an den Käufer.
  */
 const SALE_COLUMNS =
-  "6rem 3rem minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) "
-  + "minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(5rem, 1fr) minmax(6.5rem, 1fr) 7.5rem 5.5rem";
+  "5.5rem 2.25rem 5.5rem 5rem 4.25rem 4.25rem 4.25rem 4.25rem 4.5rem minmax(6rem, 1fr)";
 
 /*
  * The item track list lives in `sale-indicator.tsx` and is shared with the
@@ -55,8 +77,13 @@ const SALE_COLUMNS =
  * a row of empty cells with a button at the end of it.
  */
 
-/* 7.5rem wider than before: the Lager column carries words, not a tick. */
-const SALE_MIN_WIDTH = "71rem";
+/*
+ * 17rem schmaler als vorher: zehn Spuren statt elf, und die acht Geldspuren
+ * sind fest statt mitwachsend. Was die Spuren an ihren Untergrenzen brauchen,
+ * plus die Lücken, plus den Innenabstand der Zeile — `sales.test.ts` rechnet
+ * das nach, damit diese Zahl keine Schätzung bleibt.
+ */
+const SALE_MIN_WIDTH = "54rem";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -65,12 +92,13 @@ import { formatDeduction, formatPrice } from "@/lib/format";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
-  restockSaleItem, setSaleItemNotShipped, shipSaleItem } from "@/lib/orderbook/sales-actions";
+  restockSaleItem, setSaleItemNotShipped, shipSaleItem,
+  type ItemResult } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
 import { commerceLineIndicator, commerceLineStatus } from "@/lib/orderbook/commerce-line-status";
 import {
-  countryLabel, saleItemActions, saleStockStatus, saleItemIndicator, legacyOutcome,
-  type LegacyOutcome,
+  countryLabel, saleItemActions, saleStockIndicator, saleStockStatus, saleItemIndicator,
+  legacyOutcome, type LegacyOutcome,
 } from "@/lib/orderbook/sales-view";
 
 /** Outcome → the sentence the status dot reads out (0087). */
@@ -95,22 +123,24 @@ const formatDate = (iso: string | null): string =>
     : new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
 
 /**
- * The payout cell (ADR-0095).
+ * Der Lagerstatus eines Verkaufs, als Punkt vor der Artikelzahl (0072/0075).
  *
- * One number, computed. There used to be two — what the channel had reported
- * and what it should have paid — with `offen` standing in until somebody
- * typed the first. That reconciliation is gone: the payout is derived from
- * the sale's own figures by `sale_expected_payout()`, so there is nothing to
- * be pending about.
- */
-/**
- * The stock column (0072).
+ * DIESELBE AUSSAGE WIE DIE SPALTE `Lager`, DIE ER ERSETZT. Status und Satz
+ * kommen unverändert aus `saleStockStatus()` und `copy.stock`; `saleStockIndicator`
+ * übersetzt nur in Ton und Zeichen. Es wird nichts nachgerechnet und nichts
+ * neu entschieden — `outbookedCount`, `settledCount` und `closedCount`
+ * entstehen in `seller_sales()` und nirgends sonst.
  *
- * `Ausgebucht ✓` only where every position owns a `sale_external` movement.
- * A sale finished partly by settling says `Erledigt` and carries no tick:
- * it is done, and two of its pieces never left figure inventory.
+ * NICHT NUR FARBE: jeder Ton hat sein eigenes Zeichen, und der ganze Satz
+ * steht im `title` UND im zugänglichen Namen. Der Punkt ist damit auch in
+ * Graustufen, unter `forced-colors` und für einen Screenreader lesbar — und
+ * verloren geht gegenüber der Textspalte nichts außer der Breite.
+ *
+ * `Ausgebucht ✓` heißt weiterhin: jede Position besitzt eine
+ * `sale_external`-Bewegung. Ein Verkauf, der teils durch „Erledigt"
+ * geschlossen wurde, sagt `Abgeschlossen` und trägt den grauen Haken nicht.
  */
-function Stock({ sale }: { sale: SaleRow }) {
+function StockDot({ sale }: { sale: SaleRow }) {
   const status = saleStockStatus(sale);
   const c = copy.stock;
   const text = status === "outbooked" ? c.outbooked
@@ -128,23 +158,8 @@ function Stock({ sale }: { sale: SaleRow }) {
     : status === "frozen" ? c.frozenHint
     : status === "partial" ? c.partial
     : c.openHint;
-  /* The tick belongs to the two states a real movement stands behind. */
-  const strong = status === "outbooked" || status === "returned";
-  return (
-    <span className={"truncate text-xs " + (strong ? "text-fg" : "text-muted")}
-          title={title} aria-label={title}>
-      {text}
-    </span>
-  );
-}
-
-function Payout({ sale }: { sale: SaleRow }) {
-  if (sale.expectedPayout === null) return <span className="text-xs text-muted">—</span>;
-  return (
-    <span className="ob-money tabular-nums" title={copy.summary.expected}>
-      {formatPrice(sale.expectedPayout)}
-    </span>
-  );
+  /* Zustand und Begründung, in einem Namen: „Offen — noch nichts ausgebucht". */
+  return <SaleIndicator indicator={saleStockIndicator(status)} label={`${text} — ${title}`} />;
 }
 
 function Summary({ summary }: { summary: SalesSummary }) {
@@ -212,17 +227,75 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
    * über alle Verkäufe eindeutig — eine Menge genügt für die ganze Liste.
    */
   const [busy, setBusy] = useState<ReadonlySet<number>>(() => new Set());
-  const [error, setError] = useState<string | null>(null);
+  /*
+   * FEHLER GEHÖREN DER POSITION, NICHT DER TABELLE.
+   *
+   * Hier stand eine einzige Meldung über dem Verkaufsbuch. Bei schnellem
+   * Arbeiten war dann nicht zu sehen, WELCHE der fünf gerade angeklickten
+   * Positionen abgelehnt wurde — und die nächste Meldung überschrieb die
+   * vorige. Jetzt steht sie in der Zeile, die sie betrifft, und nur diese
+   * Zeile fällt auf ihren alten Zustand zurück.
+   *
+   * Der gemeinsame `error`-Zustand über der Tabelle ist damit weg und nicht
+   * bloß unbenutzt: eine Stelle, die eine Meldung anzeigen KÖNNTE, aber von
+   * nichts mehr gefüllt wird, ist eine Einladung, sie wieder zu füllen.
+   */
+  const [failed, setFailed] = useState<ReadonlyMap<number, string>>(() => new Map());
   const loading = useRef<Set<number>>(new Set());
+  /*
+   * DIE LAUFENDE NUMMER DER LETZTEN LESEANFRAGE JE VERKAUF.
+   *
+   * Zwei Klicks hintereinander heißen zwei Antworten, und sie kommen nicht
+   * zwingend in der Reihenfolge zurück, in der sie losgeschickt wurden. Ohne
+   * diese Nummer kann die ältere die jüngere überschreiben — und die Zeile
+   * zeigt wieder den Zustand VOR dem zweiten Klick. Jede Leseanfrage merkt
+   * sich ihre Nummer und schreibt nur, wenn sie noch die aktuelle ist.
+   */
+  const reads = useRef<Map<number, number>>(new Map());
+  /*
+   * WELCHE POSITIONEN GERADE LAUFEN — als Ref, nicht als State.
+   *
+   * `busy` ist die Darstellung; dies ist die Sperre. Zwei Klicks auf
+   * dieselbe Position innerhalb eines Renderdurchlaufs sehen beide noch das
+   * alte `busy` und kämen beide durch; ein Ref ist sofort aktuell.
+   */
+  const inflight = useRef<Set<number>>(new Set());
+  /*
+   * DAS BÜNDELN DES LISTEN-REFRESHS, OHNE TIMER.
+   *
+   * `router.refresh()` holt die eingeklappte Zeile nach — Artikelzahl und
+   * Lagerpunkt kommen aus `seller_sales()` und nicht aus `seller_sale()`.
+   * Pro Klick einer davon war der eigentliche Grund für das Flackern: fünf
+   * Klicks hintereinander hießen fünf Server-Renders der ganzen Route.
+   *
+   * Gebündelt wird am EREIGNIS, nicht an einer Wartezeit: solange noch eine
+   * Positionsaktion unterwegs ist, wird nicht nachgeholt. Die letzte, die
+   * fertig wird, holt einmal für alle nach. Kein Timeout, keine künstliche
+   * Verzögerung — wer nur einmal klickt, bekommt den Refresh sofort.
+   */
+  const outstanding = useRef(0);
+  const listStale = useRef(false);
 
   const load = useCallback((id: number, force = false) => {
-    if (loading.current.has(id)) return;
+    if (!force && loading.current.has(id)) return;
+    const token = (reads.current.get(id) ?? 0) + 1;
+    reads.current.set(id, token);
     loading.current.add(id);
     void loadSale(id).then((d) => {
+      /* Eine überholte Antwort schreibt nicht über den neueren Zustand. */
+      if (reads.current.get(id) !== token) return;
       loading.current.delete(id);
       setDetails((current) => ({ ...current, [id]: d ?? "failed" }));
     });
-    if (force) setDetails((current) => { const next = { ...current }; delete next[id]; return next; });
+    /*
+     * UND DIE ALTEN ZEILEN BLEIBEN STEHEN.
+     *
+     * Hier wurde `details[id]` beim Nachlesen gelöscht, womit die
+     * aufgeklappte Liste auf „Positionen werden geladen …" zurückfiel —
+     * einmal pro Klick, mitten unter dem Finger. Die Liste ist eine
+     * Sekunde lang veraltet; das ist unendlich viel besser, als dass sie
+     * eine Sekunde lang nicht da ist.
+     */
   }, []);
 
   /* Details reuses the same lazily-loaded payload the item list uses. */
@@ -243,42 +316,81 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
   }, []);
 
   /*
-   * Never optimistic. The server decides, then the row is re-read.
+   * EINE POSITION ANFASSEN, WÄHREND VIER ANDERE NOCH LAUFEN.
    *
-   * `saleId` sagt, welche Zeile nachgelesen wird; `key` ist die Position,
+   * `saleId` sagt, welcher Verkauf nachgelesen wird; `key` ist die Position,
    * die währenddessen gesperrt ist. Zwei verschiedene Positionen — auch in
-   * zwei verschiedenen Verkäufen — behindern sich nicht mehr.
+   * zwei verschiedenen Verkäufen — behindern sich nicht.
+   *
+   * WAS „OPTIMISTISCH" HIER HEISST, UND WAS NICHT.
+   *
+   * Die angeklickte Zeile reagiert sofort: ihr Status sagt „läuft …" und ihr
+   * Knopf ist gesperrt, bevor der Server antwortet. Sie behauptet aber NICHT
+   * das Ergebnis. Ein vorweggenommenes „Ausgebucht" müsste den Endzustand
+   * aus den Zeitstempeln erraten, die die Datenbank gerade schreibt — das
+   * wäre eine zweite Wahrheit über denselben Bestand, und bei einer
+   * Ablehnung hätte die Zeile eine Sekunde lang gelogen. `saleItemActions`
+   * bleibt die einzige Stelle, die einen Positionszustand bestimmt.
+   *
+   * DEN ENDZUSTAND BRINGT DIE ANTWORT SELBST MIT. `runItem` liest
+   * `seller_sale` in derselben Server Action nach (0110), also ist der neue
+   * Zustand da, sobald der Klick fertig ist — keine zweite Runde zum Server
+   * und kein Fenster, in dem die Liste veraltet ist.
    */
-  const act = (
-    saleId: number, key: number, run: () => Promise<{ ok: boolean; message?: string }>,
-  ) => {
-    if (busy.has(key)) return;
+  const act = (saleId: number, key: number, run: () => Promise<ItemResult>) => {
+    /* Dieselbe Position zweimal: der zweite Klick fällt hier, nicht im Server. */
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
+    outstanding.current += 1;
     setBusy((current) => new Set(current).add(key));
-    setError(null);
+    setFailed((current) => {
+      if (!current.has(key)) return current;
+      const next = new Map(current); next.delete(key); return next;
+    });
     void (async () => {
       try {
         const result = await run();
-        if (!result.ok) { setError(result.message ?? null); return; }
-        loading.current.delete(saleId);
-        load(saleId, true);
+        if (!result.ok) {
+          /* Zurück auf den alten Zustand — und nur diese Zeile. */
+          setFailed((current) => new Map(current).set(key, result.message));
+          return;
+        }
+        const items = (result.sale as Detail | null)?.items;
+        if (Array.isArray(items)) {
+          /*
+           * Die Antwort IST der neue Zustand dieses Verkaufs. Sie zählt
+           * als Leseanfrage, damit eine noch unterwegs befindliche ältere
+           * sie nicht wieder überschreibt.
+           */
+          reads.current.set(saleId, (reads.current.get(saleId) ?? 0) + 1);
+          loading.current.delete(saleId);
+          setDetails((current) => ({ ...current, [saleId]: result.sale as Detail }));
+        } else {
+          /* Das Nachlesen in der Aktion ist fehlgeschlagen, die Aktion nicht. */
+          load(saleId, true);
+        }
         /*
          * DIE EINGEKLAPPTE ZEILE GEHÖRT DER LISTE, NICHT DEM DETAIL.
          *
-         * `load` erneuert die Positionen aus `seller_sale`. Die Spalte
-         * `Lager` der Zeile daneben kommt aber aus `seller_sales` — mit
+         * Artikelzahl und Lagerpunkt kommen aus `seller_sales` — mit
          * `outbookedCount`, `settledCount` und `closedCount`, die `0072`
          * und `0075` dort und nur dort entscheiden. Die hier nachzurechnen
          * wäre eine zweite Wahrheit über denselben Bestand.
          *
-         * Also wird die Liste nachgeholt, statt sie nachzuahmen — und zwar
-         * OHNE darauf zu warten: die Zeile ist schon frei, die Positionen
-         * sind schon aktuell, und dieses eine Wort darf einen Takt später
-         * nachkommen. Kein `revalidatePath`: das legt den Server-Render in
-         * die Antwort der Aktion und hätte den Klick wieder verlängert.
+         * Also wird die Liste nachgeholt statt nachgeahmt — aber einmal für
+         * alle, siehe `outstanding`. Kein `revalidatePath`: das legt den
+         * Server-Render in die Antwort der Aktion und hätte den Klick
+         * wieder verlängert.
          */
-        router.refresh();
+        listStale.current = true;
       } finally {
+        inflight.current.delete(key);
         setBusy((current) => { const next = new Set(current); next.delete(key); return next; });
+        outstanding.current -= 1;
+        if (outstanding.current === 0 && listStale.current) {
+          listStale.current = false;
+          router.refresh();
+        }
       }
     })();
   };
@@ -292,22 +404,22 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
   return (
     <>
       <Summary summary={summary} />
-      {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
 
       <LedgerTable columns={SALE_COLUMNS} itemColumns={SALE_ITEM_COLUMNS}
                    minWidth={SALE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
           <span>{copy.columns.country}</span>
+          <span>{copy.columns.items}</span>
           <span className="text-right">{copy.columns.sum}</span>
           <span className="text-right">{copy.columns.shipping}</span>
           <span className="text-right">{copy.columns.discount}</span>
           <span className="text-right">{copy.columns.fees}</span>
           <span className="text-right">{copy.columns.label}</span>
-          <span className="text-right">{copy.columns.refund}</span>
-          <span className="text-right">{copy.columns.payout}</span>
-          <span className="text-center">{copy.columns.stock}</span>
-          <span className="text-center">{copy.columns.details}</span>
+          {/* Abgekürzt, weil die Spur 4,5rem breit ist und „−12,34 €" darin
+              stehen muss. Der ganze Name steht im Geldfenster. */}
+          <span className="text-right">{copy.columns.refundShort}</span>
+          <span>{copy.columns.buyer}</span>
         </LedgerHead>
 
         <ul className="divide-y divide-border/60">
@@ -330,6 +442,18 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                   {/* `EU` in the workbook, and what it holds is the code. */}
                   <span className="truncate text-xs text-muted" title={countryLabel(sale.country)}>
                     {sale.country ?? "—"}
+                  </span>
+                  {/*
+                    ARTIKEL — die Zahl der Positionen, mit dem Lagerstatus
+                    davor. Beides kommt aus `seller_sales()`; die Zahl stand
+                    bisher nur in der aufgeklappten Zeile, der Status in einer
+                    eigenen 7,5rem-Textspalte.
+                  */}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <StockDot sale={sale} />
+                    <span className="truncate text-xs tabular-nums text-muted">
+                      {copy.itemsCount(sale.itemCount)}
+                    </span>
                   </span>
                   <span className="ob-money text-right tabular-nums">
                     {formatPrice(sale.itemsSubtotal ?? 0)}
@@ -354,25 +478,15 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                     sale.refunded > 0 ? "text-danger" : "text-muted"}`}>
                     {formatDeduction(sale.refunded)}
                   </span>
-                  <span className="text-right"><Payout sale={sale} /></span>
-                  <span className="text-center"><Stock sale={sale} /></span>
                   {/*
-                    A REAL BUTTON, AND IT HAS TO OUTRANK THE ROW'S OVERLAY.
-
-                    `z-20`, not `z-10`. The overlay that makes the whole row a
-                    disclosure control carries `z-10` so it sits above the
-                    sticky first column — and it comes LATER in the DOM, so at
-                    equal z-index it wins and swallows this click. That is
-                    exactly what happened: `Details` expanded the item list
-                    instead of opening the dialog, and `stopPropagation` never
-                    ran because the event never reached this button.
+                    KÄUFER — die einzige mitwachsende Spur, und die letzte.
+                    Sie bekommt, was die festen Spuren übrig lassen: ein
+                    eBay-Benutzername ist mal sechs und mal dreißig Zeichen
+                    lang, und abgeschnitten steht er immer noch im `title`.
                   */}
-                  <span className="relative z-20 text-center">
-                    <button type="button"
-                            onClick={(event) => { event.stopPropagation(); onDetails(sale.id); }}
-                            className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg">
-                      {copy.columns.details}
-                    </button>
+                  <span className="truncate text-xs text-muted"
+                        title={sale.buyerRef ?? undefined}>
+                    {sale.buyerRef ?? "—"}
                   </span>
                 </LedgerRow>
 
@@ -389,9 +503,25 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                     ) : detail === "failed" ? (
                       <p className="px-3 py-2 text-xs text-muted">{copy.itemsFailed}</p>
                     ) : (
-                      <SaleDetail sale={sale} detail={detail} busy={busy} act={act} />
+                      <SaleDetail sale={sale} detail={detail} busy={busy}
+                                  failed={failed} act={act} />
                     )}
-                    <div className="px-3 pt-1.5">
+                    {/*
+                      DETAILS UND EINZELANSICHT, BEIDE HIER UNTEN.
+
+                      `Details` hatte eine eigene 5,5rem-Spalte in jeder
+                      Zeile, für einen Knopf, der bei einem von dreißig
+                      Verkäufen gedrückt wird. Er steht jetzt in der
+                      aufgeklappten Zeile neben dem Link, der schon dort
+                      war — erreichbar bleibt also beides, nur kostet es
+                      keine Spalte mehr. Kein `stopPropagation` nötig: hier
+                      liegt keine Überlagerung der Zeile darüber.
+                    */}
+                    <div className="flex flex-wrap items-center gap-4 px-3 pt-1.5">
+                      <button type="button" onClick={() => onDetails(sale.id)}
+                              className="text-xs text-muted underline underline-offset-2 hover:text-fg">
+                        {copy.columns.details}
+                      </button>
                       <Link href={`/business/orderbuch/verkauf/${sale.id}?zurueck=${encodeURIComponent(backHref)}`}
                             className="text-xs text-muted underline underline-offset-2">
                         {copy.detail}
@@ -425,12 +555,13 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
 }
 
 /** The expanded body: items, money and the payout, in the order work happens. */
-function SaleDetail({ sale, detail, busy, act }: {
+function SaleDetail({ sale, detail, busy, failed, act }: {
   sale: SaleRow; detail: Detail;
   /** Die gerade laufenden Positionen, nach `sale_items.id`. */
   busy: ReadonlySet<number>;
-  act: (saleId: number, key: number,
-        run: () => Promise<{ ok: boolean; message?: string }>) => void;
+  /** Die abgelehnten, mit ihrer Meldung — je Position, nicht je Tabelle. */
+  failed: ReadonlyMap<number, string>;
+  act: (saleId: number, key: number, run: () => Promise<ItemResult>) => void;
 }) {
   const order = detail.order as Record<string, unknown> | null;
   const items = (detail.items ?? []) as Record<string, unknown>[];
@@ -547,6 +678,8 @@ function SaleDetail({ sale, detail, busy, act }: {
               };
               const run = can.primary ? primary[can.primary] : undefined;
               const working = busy.has(id);
+              /* Abgelehnt: die Zeile steht wieder, wie sie stand, und sagt warum. */
+              const failure = failed.get(id) ?? null;
               return (
                 <LedgerItemRow key={String(item.id)}>
                   <SaleIndicator
@@ -582,8 +715,13 @@ function SaleDetail({ sale, detail, busy, act }: {
                     die Detailseite „Storniert" sagte. Zwei Bildschirme, eine
                     Wahrheit.
                   */}
-                  <span className={`truncate text-center text-xs ${strong ? "text-fg" : "text-muted"}`}>
-                    {outcome !== null ? copy.legacyStates[outcome] : copy.itemStates[can.status]}
+                  <span className={`truncate text-center text-xs ${
+                    failure !== null ? "text-danger" : strong ? "text-fg" : "text-muted"}`}
+                        title={failure ?? undefined}>
+                    {failure !== null ? failure
+                      : working ? copy.itemRunning
+                        : outcome !== null ? copy.legacyStates[outcome]
+                          : copy.itemStates[can.status]}
                   </span>
                   <span className="flex items-center justify-end gap-2 text-right">
                     {/* Only what the server would accept. An impossible button
