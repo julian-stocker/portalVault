@@ -73,8 +73,17 @@ export function orderMoney(input: {
   itemsSubtotal: unknown;
   shippingAmount: unknown;
   discountAmount: unknown;
-  /** One entry per `order_refunds` row. Partial refunds add up. */
-  refunds: readonly { amount: unknown }[];
+  /**
+   * One entry per `order_refunds` row. Partial refunds add up.
+   *
+   * SEIT 0111 ZÄHLT NUR BESTÄTIGTES GELD. Eine gebuchte, aber nie beim
+   * Zahlungsdienst ausgelöste Erstattung hat den Erlös nicht gemindert — sie
+   * hier mitzurechnen hätte die Einnahme um einen Betrag kleiner gemacht, der
+   * nie das Konto verlassen hat. Der Zustand reist deshalb mit; fehlt er, gilt
+   * die Zeile als nicht erstattet, denn die vorsichtige Richtung ist hier die
+   * richtige.
+   */
+  refunds: readonly { amount: unknown; provider_status?: string | null }[];
   /** One entry per `sale_fees` row of the sale this order belongs to. */
   costs: readonly OrderCost[];
 }): OrderMoney {
@@ -84,7 +93,10 @@ export function orderMoney(input: {
   const paid = subtotal + shipping - discount;
 
   let refunded = 0;
-  for (const one of input.refunds) refunded += Math.max(0, cents(one.amount));
+  for (const one of input.refunds) {
+    if ((one.provider_status ?? "none") !== "succeeded") continue;
+    refunded += Math.max(0, cents(one.amount));
+  }
 
   let fees = 0;
   let label = 0;

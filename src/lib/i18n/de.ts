@@ -762,6 +762,62 @@ export const de = {
       amountInvalid: "Bitte gib einen Betrag größer als 0 ein.",
       refundRefused: "Das geht nicht: mehr als bezahlt wurde, oder die Bestellung ist unbezahlt.",
       refundFailed: "Das hat nicht geklappt.",
+
+      /*
+       * SEIT 0111 LÖST SKYISLES DIE ERSTATTUNG SELBST AUS.
+       *
+       * Die Texte unterscheiden deshalb drei Lagen, die vorher alle „erledigt"
+       * hießen: Geld ist zurück · gebucht, aber beim Zahlungsdienst noch nicht
+       * angekommen · vom Zahlungsdienst abgelehnt. Die mittlere ist die
+       * wichtigste, weil sie bei SI-2026-001009 unsichtbar war.
+       */
+      refundHeadingNew: "Rückerstattung auslösen",
+      refundHintNew:
+        "SkyIsles löst die Erstattung bei Stripe aus. Gebucht wird sofort, als erstattet "
+        + "gilt sie erst, wenn Stripe bestätigt hat.",
+      recordNew: "Erstattung auslösen",
+      /* Für eine Erstattung, die außerhalb von SkyIsles stattgefunden hat. */
+      providerIdHint:
+        "Nur ausfüllen, wenn außerhalb von SkyIsles erstattet wurde — dann wird hier "
+        + "nichts ausgelöst, sondern die vorhandene Erstattung festgehalten.",
+
+      /** Die vier Zustände einer Erstattung, benannt. */
+      providerStates: {
+        none: "gebucht, nicht ausgelöst",
+        pending: "beim Zahlungsdienst",
+        succeeded: "erstattet",
+        failed: "abgelehnt",
+      },
+      providerStateHints: {
+        none: "Gebucht, aber kein Geld unterwegs. Die Kundschaft sieht diese Erstattung nicht.",
+        pending: "Gesendet, noch ohne Bestätigung. „Zustand prüfen“ sieht bei Stripe nach, "
+          + "bevor irgendetwas erneut gesendet wird.",
+        succeeded: "Von Stripe bestätigt. Erst damit gilt sie der Kundschaft gegenüber als erstattet.",
+        failed: "Stripe hat abgelehnt. Ein neuer Versuch ist möglich und bekommt einen neuen "
+          + "Idempotenzschlüssel.",
+      },
+      submitRefund: "Beim Zahlungsdienst auslösen",
+      resumeRefund: "Zustand prüfen",
+      refundsHeading: "Rückerstattungen",
+      refundSettledTotal: "Erstattet:",
+      refundUnsettledTotal: "Gebucht, nicht erstattet:",
+      providerRefundLabel: "Stripe:",
+      providerAttempt: (n: number) => (n === 1 ? "1. Versuch" : `${n}. Versuch`),
+
+      /*
+       * Drei Sätze für drei Ausgänge. Keiner von ihnen behauptet einen
+       * Geldfluss, und der mittlere sagt ausdrücklich, dass der Verkauf
+       * bestehen bleibt — „fehlgeschlagen“ würde zu einer zweiten Buchung
+       * führen.
+       */
+      providerUnresolved:
+        "Die Buchung steht, aber Stripe hat nicht geantwortet. Nichts wurde doppelt "
+        + "erstattet — bitte den Zustand prüfen, bevor erneut ausgelöst wird.",
+      providerRefused: (code: string) =>
+        `Stripe hat die Erstattung abgelehnt (${code}). Die Buchung bleibt bestehen; `
+        + "ein neuer Versuch ist möglich.",
+      providerRefusedToTry: (reason: string) =>
+        `Es wurde nichts gesendet (${reason}). Die Buchung bleibt bestehen.`,
     },
 
     /**

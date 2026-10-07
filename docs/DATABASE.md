@@ -3114,6 +3114,108 @@ Entscheidungen sie nicht verbauen:
 | Zustände `keep` / `sell` / `trade` | Spalte auf `collection_items`, Unique-Constraint entfernen | Surrogat-PK und Fremdschlüssel bleiben unverändert |
 | mehrere Bilder je Figur | `skylander_images (sky_id, file, position)`; `image_file` wird zum Primärbild | Bildidentität ist der Dateiname, nicht die URL |
 
+
+### 3.3al Eine Erstattung ist erst erstattet, wenn der Zahlungsdienst sie bestätigt (`0111`, ADR-0118)
+
+**Der Anlass war ein echter Vorfall.** Bei `SI-2026-001009` wurde eine Position über 0,76 €
+storniert und acht Sekunden später „Erstattung bestätigt" geklickt. Danach stand die Bestellung
+auf `partially_refunded`, die Kundenansicht zeigte „−0,76 €", der Nachrichtenkanal
+„Rückerstattung abgeschlossen" — und bei Stripe war **nichts** erstattet. Kein Programmierfehler:
+`order_refunds.provider_refund_id` war optional, nullable und von nichts geprüft. Es gab einen
+Zustand für zwei Tatsachen.
+
+**Die Trennung.** `order_refunds` ist die **Buchung** — was erstattet werden soll. Neu ist
+`provider_status` als der **Geldfluss**:
+
+| Wert | Bedeutung |
+|---|---|
+| `none` | gebucht, nie an einen Zahlungsdienst geschickt. Für die Kundschaft existiert diese Erstattung nicht. |
+| `pending` | gesendet, keine Bestätigung. Kein Geld und kein Nein — ein offener Vorgang, der **fortgesetzt** wird, nicht wiederholt. |
+| `succeeded` | der Zahlungsdienst hat bestätigt. **Erst hier ist es Geld.** |
+| `failed` | abgelehnt oder zurückgezogen. Die Kennung bleibt stehen, das Geld nicht. |
+
+Dazu `provider`, `provider_payment_ref` (das `pi_…`/`ch_…`, gegen das erstattet wurde),
+`provider_confirmed_by` (`api` · `webhook` · `operator`), `idempotency_key`, `provider_attempts`,
+`requested_at`, `settled_at`, `failure_code`.
+
+**Was die Lücke strukturell schließt.** `order_refunds_settled_needs_proof`:
+`provider_status = 'succeeded'` ist ohne `provider_refund_id`, `provider` und `settled_at`
+unmöglich. Dazu ein Trigger (`order_refunds_guard_proof`), der `idempotency_key` und
+`provider_refund_id` **einmal** schreiben lässt, eine bestätigte Erstattung nicht in eine
+unbestätigte zurückdreht und den Betrag einer bereits gesendeten Erstattung festhält.
+
+**Zwei Summen, und der Unterschied ist nötig.**
+
+| Funktion | zählt | wofür |
+|---|---|---|
+| `order_refunded_total(order_id)` | nur `succeeded` | `orders.payment_status`, Kundenansicht, Mail, Geldaufstellung |
+| `order_refunds_booked_total(order_id)` | alles | die Obergrenze: zweimal den ganzen Betrag zu BUCHEN bleibt unmöglich, auch solange keine der Buchungen ausgelöst ist |
+
+`refresh_order_payment_status(order_id)` spiegelt `paid` / `partially_refunded` / `refunded` aus
+der ersten Summe und fasst `pending`, `failed`, `expired` und `cancelled` nicht an — eine
+Erstattung verringert eine bezahlte Bestellung, sie belebt keine abgebrochene.
+
+**Der Weg einer Erstattung, in sechs Schritten.**
+
+1. `seller_record_refund()` **bucht** — Signatur und Prüfungen unverändert aus `0095`; die Zeile
+   entsteht als `none`. Eine mitgegebene fremde Kennung macht sie sofort `succeeded`,
+   bestätigt `operator`.
+2. `submit_order_refund(refund_id)` nimmt den **Anspruch** unter Zeilensperre, erhöht
+   `provider_attempts` und leitet daraus den Idempotenzschlüssel ab.
+3. Die Edge Function `refund-payment` wählt den Restricted Key zur **Welt der Bestellung**
+   (`orders.commerce_mode`, kein Rückfall zwischen live und sandbox).
+4. Sie löst die Zahlung auf — fehlt `payment_attempts.provider_intent_id` (Bestellungen von vor
+   `0101`), liest sie die Checkout-Session und trägt sie über `attach_payment_intent()` nach.
+5. Sie **gleicht ab**: `GET /v1/refunds?payment_intent=…`. Liegt dort eine Erstattung mit
+   unserer `metadata.order_refund_id`, wird nur angeheftet und **nicht** erstattet.
+6. `POST /v1/refunds` mit dem Schlüssel aus Schritt 2, dann `attach_order_refund()` — oder, bei
+   ausdrücklicher Ablehnung, `fail_order_refund()`. Bei unklarer Lage **nichts**: die Buchung
+   bleibt `pending` und ist über `resume_order_refund()` fortsetzbar.
+
+**Vier Idempotenzschichten**, jede gegen einen anderen Ausfall: der DB-Anspruch unter Sperre
+(Doppelklick) · der aus der Zeile abgeleitete Stripe-Idempotenzschlüssel (verlorene Antwort
+innerhalb von Stripes 24-Stunden-Fenster) · der lesende Abgleich vor jedem POST (der Fall
+**danach**, und eine im Dashboard erstattete Summe) · `attach_order_refund()`, das dieselbe
+Kennung als `already_attached` meldet und eine andere zurückweist.
+
+**Der Webhook bestätigt, er erstattet nicht.** `record_refund_event()` entprellt über denselben
+Eindeutigkeitsindex auf `payment_events (provider, provider_event_id)`, mit dem `0012`
+Zahlungsereignisse entprellt, und ordnet in drei Stufen zu: unsere Metadaten-Kennung → die
+Provider-Kennung → Zahlung plus gleicher offener Betrag. Was sich nicht zuordnen lässt, wird als
+`unmatched_refund` festgehalten statt verworfen. `payment_events.outcome` kennt dafür zwei Werte
+mehr (`unmatched_refund`, `refund_failed`). `stripe-webhook` hält weiterhin **keinen**
+API-Schlüssel.
+
+Abonniert sind **`refund.created`** und **`refund.updated`**; die Ereigniskennung ist
+`<evt_…>:<re_…>`, damit zwei Ereignisse zur selben Erstattung beide verarbeitet werden und das
+zweite `already_settled` meldet. **`charge.refunded` wurde mit ADR-0119 wieder entfernt** — es
+trägt die einzelnen Erstattungen nur, solange Stripe `refunds` in das Charge-Objekt einbettet, und
+ohne `re_…` gibt es keinen Beweis zum Anheften. Kommt es trotzdem an, antwortet die Function
+`200 not_a_handled_type` und schreibt nichts.
+
+**Die Erstattungsmail darf der Betrieb auslösen (ADR-0119).** `send-order-mail` fragt nach
+`is_shop_admin_for()` auch `can_operate_seller_for()` — ohne das ging die Mail „Wir haben deine
+Erstattung angewiesen" nie hinaus, weil ein Verkäufer-Operator seit ADR-0077 kein Plattformadmin
+ist. `force` bleibt beim Plattformadmin, die Mail-Idempotenz über (Bestellung, Art, `ref`)
+unverändert.
+
+**Zwei Ereignisarten statt einer.** Die Buchung schreibt `refund_booked`, die Bestätigung
+`refund_recorded`. Damit bleiben `order_conversation()` (`0098`) und die Aufmerksamkeitszähler
+(`0099`) Zeile für Zeile unverändert — sie lesen `refund_recorded`, und der Satz „Rückerstattung
+über X abgeschlossen" wird einfach wahr. `refund_provider_failed` ist der dritte und erreicht die
+Kundschaft nicht.
+
+**Das Orderbuch ist davon ausgenommen, und das ist fachlich.** `sale_refunds` und
+`seller_add_sale_refund()` bleiben unverändert: eBay erstattet außerhalb von SkyIsles, dort **ist**
+die Buchung die Wahrheit, und es gibt keinen Zahlungsdienst, den SkyIsles fragen könnte.
+
+**Was `0111` nicht anfasst:** Bestand, Reservierungen, Positionszustände, Stornierung, Retoure.
+Eine Erstattung war nie und ist nie eine Lagerbewegung.
+
+**Bekannte Lücke.** Die eingefrorenen Backups `0104`/`0105` zählen die Spalten von
+`order_refunds` einzeln auf und kennen die neun neuen nicht — dieselbe Klasse wie
+`order_reservations.sale_item_id` (3.3ak). Eine additive Folgemigration ist dafür vorgesehen.
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**

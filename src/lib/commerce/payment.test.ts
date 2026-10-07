@@ -492,18 +492,24 @@ describe("B2.1 ships no provider integration", () => {
     expect(files.some((f) => String(f).includes("webhook"))).toBe(false);
     /*
      * The guard that matters is not "there is exactly one" — it is that a new
-     * privileged runtime is a deliberate, named addition (ADR-0051). Three
+     * privileged runtime is a deliberate, named addition (ADR-0051). FOUR
      * exist now, each with its own reason:
      *
      *   create-payment    B2.2b, the only caller of the payment functions
      *   stripe-webhook    B2.3, the only thing that may say money arrived
      *   send-order-mail   transactional mail, the only holder of the Resend key
+     *   refund-payment    0111, the only thing that may give money back — and
+     *                     the only holder of the restricted refund key. It was
+     *                     discussed before it was built: ADR-0118, after
+     *                     SI-2026-001009 showed what a refund without a
+     *                     provider call costs.
      *
-     * A fourth fails this test, which is when it should be discussed rather
+     * A fifth fails this test, which is when it should be discussed rather
      * than silently widened.
      */
     expect(readdirSync("supabase/functions").sort()).toEqual([
       "create-payment",
+      "refund-payment",
       "send-order-mail",
       "stripe-webhook",
     ]);

@@ -223,6 +223,18 @@ describe("the retry cannot resend a delivered mail", () => {
     expect(fn.indexOf("admin.auth.getUser(bearer)")).toBeLessThan(
       fn.indexOf('admin.rpc("is_shop_admin_for"'),
     );
+    /*
+     * ZWEI ROLLEN, BEIDE AUS DER DATENBANK (ADR-0119). Seit `0111` löst der
+     * Verkäuferbetrieb Erstattungen selbst aus, und die Mail dazu gehört zu
+     * der Handlung — ein Operator ist aber seit ADR-0077 kein Plattformadmin.
+     * Gefragt wird deshalb beides, nacheinander, und beides die Datenbank.
+     */
+    expect(fn).toContain('"can_operate_seller_for", { p_user_id: data.user.id }');
+    expect(fn.indexOf('admin.rpc("is_shop_admin_for"')).toBeLessThan(
+      fn.indexOf("can_operate_seller_for"),
+    );
+    // Ein verifizierter Token allein bleibt nichts: ohne Rolle endet es bei null.
+    expect(fn).toContain("return null;");
   });
 
   it("compares the shared secret without leaking its length by early exit", () => {

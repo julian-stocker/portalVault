@@ -116,6 +116,18 @@ export type AdminOrderDetail = {
     occurred_at: string;
     reason: string | null;
     provider_refund_id: string | null;
+    /*
+     * Der Geldfluss, getrennt von der Buchung (0111). `none` heißt gebucht und
+     * nie ausgelöst — bis 0111 war dieser Zustand von „erstattet" nicht zu
+     * unterscheiden, und genau daran ist SI-2026-001009 gescheitert.
+     */
+    provider?: string | null;
+    provider_status?: string | null;
+    provider_confirmed_by?: string | null;
+    provider_attempts?: number | null;
+    requested_at?: string | null;
+    settled_at?: string | null;
+    failure_code?: string | null;
     allocations: {
       type: "line" | "shipping" | "goodwill" | "other";
       order_line_id: number | null;

@@ -536,11 +536,13 @@ describe("no provider, no secret, no scheduler, no new reach", () => {
 
   it("adds no Edge Function of its own and no provider dependency", () => {
     // 0015 itself introduces none. The functions that exist came with their
-    // own phases — create-payment (B2.2b), stripe-webhook (B2.3) and
-    // send-order-mail (transactional mail) — and none of them calls anything
-    // 0015 added beyond start_payment_attempt(), never the expiry reader.
+    // own phases — create-payment (B2.2b), stripe-webhook (B2.3),
+    // send-order-mail (transactional mail) and refund-payment (0111, the only
+    // thing that may give money back) — and none of them calls anything 0015
+    // added beyond start_payment_attempt(), never the expiry reader.
     expect(readdirSync("supabase/functions").sort()).toEqual([
       "create-payment",
+      "refund-payment",
       "send-order-mail",
       "stripe-webhook",
     ]);

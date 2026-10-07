@@ -92,6 +92,10 @@ const EDGE_FUNCTIONS = [
   "supabase/functions/send-order-mail/index.ts",
   "supabase/functions/send-order-mail/templates.ts",
   "supabase/functions/create-payment/index.ts",
+  // 0111: die Function, die Geld zurückgibt. Genau hier wäre ein freier
+  // Bezeichner am teuersten.
+  "supabase/functions/refund-payment/index.ts",
+  "supabase/functions/refund-payment/refund.ts",
 ];
 
 describe("keine Edge Function ruft etwas auf, das es nicht gibt", () => {
@@ -252,7 +256,8 @@ describe("eine Ladung trägt die Zahlungsart und sonst nichts", () => {
    */
   const branch = webhook.slice(
     webhook.indexOf('decision.action === "method"'),
-    webhook.indexOf("let attemptMode"),
+    // Seit 0111 folgt der Erstattungszweig; er hat seinen eigenen Abschnitt.
+    webhook.indexOf('decision.action === "refunds"'),
   );
 
   const charge = (extra: Record<string, unknown> = {}): StripeEventShape =>
@@ -347,5 +352,52 @@ describe("die Idempotenz bleibt, wo sie war", () => {
     // Korrektur fasst 0101 nicht an.
     expect(migration).toContain("method_recorded_at");
     expect(migration).toContain("unknown_intent");
+  });
+});
+
+
+/* ===================================================================== */
+describe("der Erstattungszweig bestätigt Geld und bewegt keines (0111)", () => {
+  const webhook = readFileSync("supabase/functions/stripe-webhook/index.ts", "utf8");
+  const branch = webhook.slice(
+    webhook.indexOf('decision.action === "refunds"'),
+    webhook.indexOf("let attemptMode"),
+  );
+
+  it("endet in sich und erreicht den Zahlungspfad nicht", () => {
+    expect(branch).not.toContain("confirm_order_payment");
+    expect(branch).not.toContain("callDatabase");
+    expect(webhook.indexOf('decision.action === "refunds"'))
+      .toBeLessThan(webhook.indexOf("await callDatabase(decision)"));
+  });
+
+  it("ruft genau eine Datenbankfunktion, und keinen Zahlungsdienst", () => {
+    expect(branch).toContain('rpc("record_refund_event"');
+    /*
+     * Diese Function hält weiterhin KEINEN Stripe-Schlüssel — sie bestätigt,
+     * was im signierten Rumpf steht, und fragt Stripe nichts. Genau diese
+     * Eigenschaft ist der Grund, warum der Erstattungsaufruf in einer
+     * ANDEREN Function liegt.
+     */
+    for (const forbidden of ["api.stripe.com", "STRIPE_REFUND_KEY", "Idempotency-Key"]) {
+      expect(webhook, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("gibt jeder Erstattung einer Lieferung ihre eigene Ereigniskennung", () => {
+    /*
+     * `charge.refunded` trägt ALLE Erstattungen des Charges. Ohne den Zusatz
+     * würde die zweite Teilerstattung derselben Lieferung als Duplikat der
+     * ersten verworfen — die Entprellung hängt an
+     * `(provider, provider_event_id)`.
+     */
+    expect(branch).toContain("p_provider_event_id: `${decision.eventId}:${refund.id}`");
+  });
+
+  it("antwortet 500 nur, wenn die Datenbank nicht antwortet", () => {
+    // Damit Stripe wiederholt. Ein Befund wie `unmatched_refund` ist dagegen
+    // ein 200: festgehalten, und kein Grund, eine Lieferung zu verweigern.
+    expect(branch).toContain('return respond(500, { error: "internal" });');
+    expect(branch).toContain("return respond(200, { received: true, outcomes });");
   });
 });

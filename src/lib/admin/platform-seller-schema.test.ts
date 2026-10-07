@@ -68,12 +68,20 @@ describe("guard 1 — no table carries a seller", () => {
      * operator belongs to — a hole in a backup, to satisfy a guard about
      * something else. `seller-schema.test.ts` holds it to exactly one
      * mention, `t.seller_id`, in that one projection.
+     *
+     * `0111` joins it for the narrowest reason yet: `can_operate_seller_for()`
+     * is the uuid-parameter twin of `can_operate_active_seller()` from 0041
+     * and READS the same membership join, word for word, so an Edge Function
+     * holding a verified user id can ask the same question a request can. No
+     * table gains a column, no order and no inventory row learns about a
+     * seller. The test below holds it to the predicate.
      */
     const MEMBERSHIP = [
       "0041_three_account_authorization.sql",
       "0042_strict_account_types.sql",
       "0051_admin_predicate_and_business_usernames.sql",
       "0105_platform_export.sql",
+      "0111_stripe_refund_contract.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")
@@ -82,6 +90,26 @@ describe("guard 1 — no table carries a seller", () => {
         .join("\n")
         .replace(/'(?:[^']|'')*'/g, "''");
       expect(body, `${file} introduces seller_id`).not.toMatch(/seller_id/i);
+    }
+  });
+
+  it("0111's seller_id is the same membership read, and nothing else", () => {
+    /*
+     * Genau eine Stelle, genau ein Join, genau die aus 0041. Keine Tabelle
+     * bekommt eine Spalte, keine Bestellung und keine Lagerzeile erfährt von
+     * einem Verkäufer — die Erstattungsfunction fragt dieselbe Mitgliedschaft
+     * ab, die eine Anfrage abfragt.
+     */
+    const body = readFileSync(`${MIGRATIONS}/0111_stripe_refund_contract.sql`, "utf8")
+      .split("\n")
+      .filter((line) => !line.trimStart().startsWith("--"))
+      .join("\n");
+    expect((body.match(/seller_id/g) ?? []).length).toBe(1);
+    expect(body).toContain("join public.seller_operators o on o.seller_id = s.id");
+    // Und keine Erstattungs- oder Bestelltabelle bekommt dadurch einen Verkäufer.
+    for (const commerce of ["order_refunds", "orders", "order_lines", "payment_attempts"]) {
+      expect(body, commerce).not.toMatch(
+        new RegExp(`alter table public\\.${commerce}[\\s\\S]{0,400}seller_id`));
     }
   });
 

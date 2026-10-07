@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { OrderLineActions } from "@/components/admin/order-line-actions";
 import { RefundForm } from "@/components/admin/refund-form";
+import { RefundList } from "@/components/admin/refund-list";
 import { OrderLinesTable } from "@/components/admin/order-lines-table";
 import { OrderReviewPanel } from "@/components/admin/order-review-panel";
 import { OrderMailPanel } from "@/components/admin/order-mail-panel";
@@ -335,6 +336,25 @@ export default async function AdminOrderPage({
           openShipping={shippingOffer}
         />
       ) : null}
+
+      {/*
+        UND DANACH, WAS DARAUS GEWORDEN IST (0111).
+        Jede Erstattung mit ihrem Geldfluss-Zustand. Eine gebuchte, nie
+        ausgelöste Erstattung war vorher unsichtbar — genau so konnte
+        `order_refunds#1` über 0,76 € zwei Wochen dastehen, ohne dass
+        irgendetwas auf dem Bildschirm sagte, dass bei Stripe nie etwas
+        passiert ist.
+      */}
+      <RefundList orderNumber={order.order_number} refunds={refunds.map((one) => ({
+        id: one.id,
+        amount: one.amount,
+        occurred_at: one.occurred_at,
+        reason: one.reason,
+        provider_status: one.provider_status,
+        provider_refund_id: one.provider_refund_id,
+        provider_attempts: one.provider_attempts,
+        failure_code: one.failure_code,
+      }))} />
 
       <section className="mt-4 rounded-sky-md bg-surface/80 p-4 ring-1 ring-border/70">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted">

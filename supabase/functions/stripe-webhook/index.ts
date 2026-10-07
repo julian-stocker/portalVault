@@ -37,6 +37,7 @@ import {
   decide,
   eventWorldConflict,
   expectedLivemode,
+  refundStatusMeaning,
   statusForOutcome,
   type DbOutcome,
   type StripeEventShape,
@@ -218,6 +219,59 @@ Deno.serve(async (req: Request) => {
     }
     console.log(`stripe-webhook charge ${event.type} -> ${recorded}`);
     return respond(200, { received: true, outcome: recorded });
+  }
+
+  /*
+   * ---- 3a2. DIE ERSTATTUNG, BESTÄTIGT (0111) -----------------------------
+   *
+   * Eigener Zweig und er endet hier: eine Erstattung schließt keinen
+   * Zahlungsversuch und bestätigt keine Zahlung. Sie bestätigt GELD, das
+   * zurückgegangen ist — oder nimmt diese Bestätigung zurück.
+   *
+   * KEIN SCHLÜSSEL, KEIN AUFRUF. Diese Function erstattet nichts und fragt
+   * Stripe nichts; sie reicht weiter, was im signierten Rumpf steht.
+   * `record_refund_event()` entprellt über denselben Eindeutigkeitsindex, mit
+   * dem `0012` Zahlungsereignisse entprellt, und ordnet in drei Stufen zu:
+   * unsere Metadaten-Kennung, die Provider-Kennung, dann Zahlung plus
+   * gleicher offener Betrag.
+   *
+   * EINE EIGENE EREIGNISKENNUNG JE ERSTATTUNG — `<event.id>:<re_…>`.
+   *
+   * Heute trägt jede Lieferung genau eine Erstattung (`refund.created` /
+   * `refund.updated`), die Schleife läuft also einmal. Der Zusatz bleibt
+   * trotzdem: `refund.created` und `refund.updated` DERSELBEN Erstattung sind
+   * zwei Ereignisse mit zwei `evt_…`, und sollte je eine Ladung mehrere
+   * Erstattungen tragen, gälte die zweite ohne ihn als Duplikat der ersten —
+   * die Entprellung hängt an `(provider, provider_event_id)`.
+   *
+   * IMMER 200, mit einer Ausnahme: kann die Datenbank gerade nicht
+   * antworten, ist ein 500 richtig, damit Stripe wiederholt. Alles andere —
+   * auch `unmatched_refund` — ist ein festgehaltener Befund und kein Grund,
+   * eine Lieferung zu verweigern.
+   */
+  if (decision.action === "refunds") {
+    const outcomes: string[] = [];
+    for (const refund of decision.refunds) {
+      try {
+        const result = await rpc("record_refund_event", {
+          p_provider: "stripe",
+          p_provider_event_id: `${decision.eventId}:${refund.id}`,
+          p_event_type: decision.eventType,
+          p_provider_refund_id: refund.id,
+          p_status: refundStatusMeaning(refund.status),
+          p_amount_cents: refund.amountCents,
+          p_payment_ref: refund.paymentRef,
+          p_refund_id: refund.ownRefundId,
+          p_failure_code: refund.failureReason,
+        });
+        outcomes.push(String(result));
+      } catch (error) {
+        console.error("stripe-webhook: record_refund_event failed:", describe(error));
+        return respond(500, { error: "internal" });
+      }
+    }
+    console.log(`stripe-webhook ${event.type} -> ${outcomes.join(", ")}`);
+    return respond(200, { received: true, outcomes });
   }
 
   // ---- 3b. and does the order it names live in that world? ----------------

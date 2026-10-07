@@ -436,6 +436,40 @@ Der frühere **einzelne** `STRIPE_SECRET_KEY` wird nicht mehr gelesen. Beim Umst
 `STRIPE_SECRET_KEY_SANDBOX` seinen bisherigen Wert; die alte Variable kann danach entfernt
 werden.
 
+**Secrets für `refund-payment` (`0111`, ADR-0118): KEINE NEUEN.**
+
+Die Function liest **dieselben** Schlüssel wie `create-payment` — `STRIPE_SECRET_KEY_SANDBOX`
+bzw. `STRIPE_SECRET_KEY_LIVE` — und wählt nach derselben Regel: die Welt kommt aus der
+**Bestellung** (`orders.commerce_mode`), **kein Rückfall** zwischen live und sandbox, und ein
+`sk_live_` im Sandbox-Fach wird erkannt und abgelehnt. Staging hält nur den Sandbox-Schlüssel und
+verweigert damit Live-Erstattungen von selbst (`missing_refund_key_for_live`).
+
+> **Ein eigenes Restricted-Key-Paar wurde bewusst verworfen.** Es gibt genau einen Sandbox- und
+> genau einen Live-Aufbau; ein zweites Paar hätte eine zweite Rotation, eine zweite Ablaufstelle
+> und eine zweite Art gebracht, eine Erstattung an fehlender Konfiguration scheitern zu lassen
+> (ADR-0118).
+
+**Was die Grenze stattdessen trägt: die Endpunktliste der Function.** Der Schlüssel darf bei
+Stripe mehr, als diese Function tun soll — also ist der Code die Grenze, und sie ist kurz:
+
+| Aufruf | wofür |
+|---|---|
+| `POST /v1/refunds` | erstatten, mit dem Idempotenzschlüssel aus `order_refunds` |
+| `GET /v1/refunds?payment_intent=…` | der lesende Abgleich **vor** jedem Senden |
+| `GET /v1/checkout/sessions/{id}` | die PaymentIntent-Kennung einer Bestellung von vor `0101` nachtragen |
+
+Mehr erreicht sie nicht: keine Zahlung, keine Session-Erzeugung, kein Kundenobjekt, kein Payout.
+`refund-contract.test.ts` liest diese Liste aus dem Quelltext und lässt keinen vierten Endpunkt
+zu — das ist die prüfbare Zusicherung, die an die Stelle des engeren Schlüssels tritt. Wird der
+Schlüssel später doch eingeschränkt, passt ein `rk_…` ohne Codeänderung; nötig wären dann
+*Refunds: write* und *Checkout Sessions: read*, **nicht** PaymentIntents und **nicht** Charges.
+
+`stripe-webhook` braucht für `0111` **kein** neues Secret: es bestätigt Erstattungen aus dem
+signierten Ereignis und hält weiterhin keinen API-Schlüssel. In Stripe müssen dafür drei Events
+zusätzlich abonniert werden: `charge.refunded`, `refund.created`, `refund.updated` (bei älteren
+API-Versionen heißt das letzte `charge.refund.updated` — die verfügbaren Namen hängen an der
+API-Version des Kontos und sind im Dashboard zu prüfen).
+
 **Rolloutstand (Stand 2026-09-25).** Production trägt alle Migrationen bis einschließlich
 `0098`: `0077`/`0078` und `0079`–`0085` am 2026-09-21, `0093`/`0094` am 2026-09-23, der
 Commerce-Block `0095`–`0097` am 2026-09-24 und `0098` (Bestellnachrichten) am 2026-09-25, jede

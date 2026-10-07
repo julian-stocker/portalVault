@@ -1,13 +1,29 @@
 /**
- * Recording a repayment against a withdrawal (ADR-0086).
+ * Eine Rückerstattung auslösen (ADR-0086, neu gefasst in ADR-0118).
  *
- * IT DOES NOT MOVE MONEY, and the copy says so. The refund is issued in
- * Stripe, where the original payment lives and where it can actually be
- * authorised; this records the amount so the order, the monthly reports and
- * the customer's own page agree about what happened.
+ * ES BEWEGT GELD — SEIT 0111, und die Beschriftung sagt es. Vorher hieß der
+ * Knopf „Erstattung bestätigen" und meinte: der Operator hat bei Stripe
+ * erstattet und hält es hier fest. Genau diese zwei Schritte sind bei
+ * SI-2026-001009 auseinandergefallen; der zweite wurde geklickt, der erste nie
+ * getan.
  *
- * The database refuses more than was paid and refuses an unpaid order, so the
- * worst a mistyped figure produces is a refusal rather than a wrong record.
+ * Jetzt bucht ein Druck die Erstattung UND bittet Stripe, sie auszuführen.
+ * Drei Ausgänge, drei Sätze:
+ *
+ *   erstattet   Stripe hat bestätigt. Erst damit sieht die Kundschaft etwas,
+ *               und erst damit geht die Mail hinaus.
+ *   gebucht     Die Zeile steht, Stripe hat sie nicht angenommen oder nicht
+ *               geantwortet. KEIN Fehlschlag des Ganzen — in der Liste
+ *               darunter steht sie mit ihrem Zustand und einem erneuten
+ *               Versuch.
+ *   abgelehnt   Vor dem Buchen abgewiesen, etwa mehr als bezahlt wurde.
+ *
+ * Das Feld für die Stripe-Erstattungs-ID bleibt, aber für den umgekehrten
+ * Fall: eine Erstattung, die außerhalb von SkyIsles stattfand, wird damit
+ * festgehalten statt ausgelöst.
+ *
+ * Die Datenbank weist mehr als bezahlt wurde und eine unbezahlte Bestellung
+ * ab, also kostet ein vertippter Betrag eine Ablehnung und keine falsche Zeile.
  */
 "use client";
 
@@ -127,15 +143,27 @@ export function RefundForm({
         providerRefundId: providerId,
         allocations,
       });
-      if (result.ok) setAmount("");
-      else setMessage(result.message);
+      /*
+       * EIN TEILERFOLG IST KEIN FEHLER UND KEIN ERFOLG.
+       *
+       * `booked` heißt: die Zeile steht, das Geld nicht. Das Feld wird
+       * trotzdem geleert, denn die Buchung IST entstanden — ein zweites
+       * Absenden erzeugte eine zweite. Was offen ist, steht in der Liste
+       * darunter, mit dem Knopf, es auszulösen.
+       */
+      if (result.ok) {
+        setAmount("");
+        setMessage(result.state === "booked" ? result.message : null);
+      } else {
+        setMessage(result.message);
+      }
     });
   }
 
   return (
     <form onSubmit={submit} className="mt-4 border-t border-border/60 pt-4">
-      <h3 className="text-sm font-semibold">{copy.refundHeading}</h3>
-      <p className="mt-1 text-xs text-muted">{copy.refundHint}</p>
+      <h3 className="text-sm font-semibold">{copy.refundHeadingNew}</h3>
+      <p className="mt-1 text-xs text-muted">{copy.refundHintNew}</p>
 
       {/*
         WAS DER VORSCHLAG ABDECKT — sichtbar, nicht versteckt. Der Betrag ist
@@ -213,6 +241,7 @@ export function RefundForm({
           <input
             value={providerId}
             onChange={(event) => setProviderId(event.target.value)}
+            title={copy.providerIdHint}
             className={`${field} w-44`}
           />
         </label>
@@ -222,7 +251,7 @@ export function RefundForm({
           pendingLabel={copy.recording}
           className={`${ACTION_PRIMARY} gap-2`}
         >
-          {copy.record}
+          {copy.recordNew}
         </PendingButton>
       </div>
 

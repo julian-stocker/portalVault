@@ -5,17 +5,37 @@
  * reaches Vercel or a browser (ADR-0051). Everything else about a mail —
  * whether it may be sent, whether it already was — is decided by the database.
  *
- * TWO CALLERS, TWO PROOFS
+ * DREI BEWEISE, DREI AUFRUFER
  *
  *   stripe-webhook   a shared secret in `x-skyisles-mail-secret`. Both
  *                    functions run inside the same Supabase project; this is
  *                    not the publicly executable RPC ADR-0051 rejected.
- *   the admin area   a real user JWT, verified here, then `is_shop_admin()`
- *                    asked of the database. A claim in a request body never
+ *   der Plattform-   a real user JWT, verified here, then `is_shop_admin()`
+ *   admin            asked of the database. A claim in a request body never
  *                    authorises anything.
+ *   der Verkäufer-   ebenso ein echter Benutzertoken, danach
+ *   betrieb          `can_operate_seller_for()` — dieselbe Mitgliedschaft, die
+ *                    ihn Bestellungen bearbeiten und Erstattungen auslösen
+ *                    lässt (ADR-0077, ADR-0119).
  *
- * Only an administrator may pass `force`, and only `force` gets past an
- * `unresolved` delivery record. A webhook can never set it.
+ * WARUM DER DRITTE DAZUKAM. Seit `0111` löst der Betrieb Rückerstattungen
+ * selbst aus — und die Mail „Wir haben deine Erstattung angewiesen" gehört zu
+ * dieser Handlung. Sie ging trotzdem nie hinaus: `authorise()` verlangte
+ * `is_shop_admin_for()`, und ein Verkäufer-Operator ist seit ADR-0077
+ * ausdrücklich KEIN Plattformadmin. `notify()` schluckt den Fehlschlag, also
+ * fiel es erst beim ersten echten Erstattungstest auf — auf Staging existierte
+ * keine einzige `order_mail`-Zeile der vier betriebsgetriebenen Arten.
+ *
+ * Wer eine Bestellung bearbeiten darf, darf die daraus folgende
+ * transaktionale Mail auslösen. Wer das nicht darf, kommt nicht herein: ein
+ * gewöhnliches angemeldetes Konto ist weder Admin noch Operator und erreicht
+ * nur `authoriseParty()` — die zwei Nachrichtenhinweise, und nur für die
+ * eigene Bestellung.
+ *
+ * NUR ein Administrator darf `force` setzen, und nur `force` kommt an einer
+ * `unresolved`-Zustellung vorbei. Ein Webhook kann es nie, und ein
+ * Verkäufer-Operator **auch nicht** — das Überstimmen einer unklaren
+ * Zustellung bleibt bewusst beim Plattformadmin.
  *
  * WHAT IT DOES NOT DO
  *
@@ -110,6 +130,10 @@ function secretMatches(given: string | null): boolean {
 type Caller =
   | { kind: "webhook" }
   | { kind: "admin"; userId: string }
+  /* Seit ADR-0119: der Verkäuferbetrieb. Darf alles, was der Admin darf,
+     außer `force` — siehe Dateikopf. Keine Migration: die Rolle existiert
+     seit `0041`, die uuid-Abfrage dazu seit `0111`. */
+  | { kind: "operator"; userId: string }
   /* Seit 0100: die Kundschaft, aber nur für die eigene Bestellung und nur für
      die zwei Nachrichtenhinweise. */
   | { kind: "party"; userId: string }
@@ -131,9 +155,28 @@ async function authorise(req: Request): Promise<Caller> {
   const { data: isAdmin, error: roleError } = await admin.rpc("is_shop_admin_for", {
     p_user_id: data.user.id,
   });
-  if (roleError || isAdmin !== true) return null;
+  if (!roleError && isAdmin === true) return { kind: "admin", userId: data.user.id };
 
-  return { kind: "admin", userId: data.user.id };
+  /*
+   * ZWEITE FRAGE, ZWEITE ROLLE — und sie ist die engere.
+   *
+   * `can_operate_seller_for()` ist das uuid-Gegenstück zu
+   * `can_operate_active_seller()` aus `0041`: ein FREIGESCHALTETER Operator
+   * eines AKTIVEN Verkäufers. Beide Bedingungen zählen — ein abgeschalteter
+   * Operator und ein Operator eines inaktiven Verkäufers kommen nicht durch,
+   * und ein gewöhnliches Konto erst gar nicht.
+   *
+   * Gefragt wird die Datenbank, nicht der Token: eine Rolle steht in
+   * `seller_operators`, nie in einem Claim.
+   */
+  const { data: isOperator, error: operatorError } = await admin.rpc(
+    "can_operate_seller_for", { p_user_id: data.user.id },
+  );
+  if (!operatorError && isOperator === true) {
+    return { kind: "operator", userId: data.user.id };
+  }
+
+  return null;
 }
 
 /**

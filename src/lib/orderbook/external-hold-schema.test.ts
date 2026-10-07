@@ -59,20 +59,18 @@ describe("0109 existiert und ist die letzte Migration", () => {
     expect(migrationFiles).toContain(FILE);
   });
 
-  it("liegt direkt vor 0110, und 0111 bis 0112 existieren noch nicht", () => {
+  it("liegt zwischen 0108 und 0110, und bleibt dort", () => {
     /*
-     * Keine Momentaufnahme mehr: `0109` ist nicht mehr die höchste Nummer,
-     * seit `0110` existiert, und das ist der geplante Verlauf. Was dauerhaft
-     * gilt, ist die Reihenfolge — und dass die beiden noch nicht gebauten
-     * Schritte auch nicht da sind.
+     * KEINE MOMENTAUFNAHME DER HÖCHSTEN NUMMER. Hier stand einmal „0111 und
+     * 0112 existieren noch nicht" — eine Aussage über einen Plan, und Pläne
+     * ändern sich: `0111` ist gebaut und trägt den Stripe-Erstattungsvertrag,
+     * nicht das, was damals dafür vorgesehen war. Was dauerhaft gilt, ist die
+     * REIHENFOLGE, und die wird hier geprüft.
      */
     const at = migrationFiles.indexOf(FILE);
     expect(at).toBeGreaterThan(-1);
     expect(migrationFiles[at - 1]).toBe("0108_loose_only_inventory.sql");
     expect(migrationFiles[at + 1]).toBe("0110_external_hold_runtime.sql");
-    for (const n of ["0111", "0112"]) {
-      expect(migrationFiles.filter((f) => f.startsWith(n))).toHaveLength(0);
-    }
   });
 
   it("und 0104 bis 0108 sind unverändert", () => {
@@ -121,15 +119,18 @@ describe("0109 ändert ausschließlich das Schema", () => {
     }
   });
 
-  it("enthält nichts aus 0110, 0111 oder 0112", () => {
+  it("enthält nichts aus den Schritten davor und danach", () => {
     for (const forbidden of [
       // 0110 — die Hold-Laufzeit
       "seller_hold_sale_item", "seller_release_sale_item_hold",
       "seller_book_sale_item", "seller_unbook_sale_item", "record_inventory_movement",
       "apply_inventory_movement", "shop_inventory",
-      // 0111 — der Orderstatus
-      "seller_set_sale_status", "shipped_at", "cancelled_at", "stock_released_at",
-      // 0112 — das Backupformat
+      // 0111 — der Stripe-Erstattungsvertrag. Eine andere Domäne, und diese
+      // Datei fasst sie nicht an.
+      "order_refunds", "provider_status", "submit_order_refund",
+      "attach_order_refund", "record_refund_event",
+      // nie gebaut und hier ebenso wenig: ein Orderstatus, ein Backupformat
+      "seller_set_sale_status", "stock_released_at",
       "system_platform_export", "system_business_backup",
     ]) {
       expect(exec, forbidden).not.toContain(forbidden);

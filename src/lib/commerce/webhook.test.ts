@@ -288,14 +288,27 @@ describe("the environment refuses the wrong world", () => {
 
 // ---------------------------------------------------------------------------
 
-describe("only four event types are acted on", () => {
-  it("handles exactly the five it subscribes to", () => {
+describe("only the event types it subscribes to are acted on", () => {
+  it("handles exactly the seven it subscribes to", () => {
     /*
      * Vier davon sind Geld und Zustand einer Sitzung. Der fünfte, seit 0101,
      * ist WOMIT bezahlt wurde: Marke, letzte vier Ziffern und Wallet hängen
-     * am PaymentIntent und stehen in keiner Session. Ihn zu abonnieren ist
-     * der Weg, der OHNE Stripe-Schlüssel in dieser Function auskommt — und
-     * dass sie keinen hält, ist eine Eigenschaft, die bleiben soll.
+     * am PaymentIntent und stehen in keiner Session.
+     *
+     * Die zwei letzten, seit 0111, sind die ERSTATTUNG. Sie sind der zweite,
+     * unabhängige Weg zur Bestätigung — und für zwei Lagen der einzige: eine
+     * verlorene Antwort unseres eigenen Aufrufs, und eine Erstattung, die eine
+     * Bank Tage später zurückweist.
+     *
+     * `charge.refunded` stand hier und ist mit ADR-0119 wieder gegangen: es
+     * trug die einzelnen Erstattungen nur, solange Stripe `refunds` in das
+     * Charge-Objekt einbettete, und darauf ist unter der API-Version dieses
+     * Kontos kein Verlass. Ohne die Liste gibt es keine `re_…` und damit
+     * keinen Beweis — bliebe nur Zuordnung über den Betrag, also Raten.
+     *
+     * Alle sieben zu abonnieren ist der Weg, der OHNE Stripe-Schlüssel in
+     * dieser Function auskommt — und dass sie keinen hält, ist eine
+     * Eigenschaft, die bleiben soll.
      */
     expect([...HANDLED_EVENTS]).toEqual([
       "checkout.session.completed",
@@ -303,7 +316,36 @@ describe("only four event types are acted on", () => {
       "checkout.session.async_payment_succeeded",
       "checkout.session.async_payment_failed",
       "charge.succeeded",
+      "refund.created",
+      "refund.updated",
     ]);
+  });
+
+  it("und `charge.refunded` ist bewusst keines von ihnen", () => {
+    /*
+     * Es darf ankommen — ein Endpoint, der es noch abonniert hat, bekommt eine
+     * saubere Antwort und keinen Fehler. Es darf nur nichts bewirken.
+     */
+    expect([...HANDLED_EVENTS]).not.toContain("charge.refunded");
+    expect(decide(event("charge.refunded"), false))
+      .toEqual({ action: "ignore", reason: "not_a_handled_type" });
+    // Und der Parser, der die eingebettete Liste gelesen hat, ist weg.
+    const source = readFileSync("supabase/functions/stripe-webhook/event.ts", "utf8");
+    expect(source).not.toContain("refundsOfCharge");
+    expect(source).not.toMatch(/raw\.refunds/);
+  });
+
+  it("und die Erstattung ist ein eigener Weg, der kein Geld anfasst", () => {
+    const index = readFileSync("supabase/functions/stripe-webhook/index.ts", "utf8");
+    expect(index).toContain('if (decision.action === "refunds")');
+    expect(index).toContain('await rpc("record_refund_event"');
+    const branch = index.slice(index.indexOf('if (decision.action === "refunds")'));
+    const body = branch.slice(0, branch.indexOf("// ---- 3b."));
+    for (const forbidden of ["confirm_order_payment", "fail_payment_attempt",
+                             "convert_order_reservations", "mailFor",
+                             "api.stripe.com", "Idempotency-Key"]) {
+      expect(body, forbidden).not.toContain(forbidden);
+    }
   });
 
   it("und die Ladung ist ein eigener Weg, der kein Geld anfasst", () => {
@@ -334,8 +376,10 @@ describe("only four event types are acted on", () => {
     for (const type of [
       "payment_intent.payment_failed",
       "payment_intent.succeeded",
-      "charge.refunded",
+      // `charge.refunded` stand hier, bis 0111 es abonniert hat. Es gehört
+      // jetzt zu den behandelten und hat seinen eigenen Zweig.
       "checkout.session.async_payment_pending",
+      "charge.dispute.created",
       "invoice.paid",
     ]) {
       expect(decide(event(type), false), type).toEqual({
@@ -343,6 +387,18 @@ describe("only four event types are acted on", () => {
         reason: "not_a_handled_type",
       });
     }
+  });
+
+  it("verwirft ein Erstattungsereignis ohne lesbare Ladung", () => {
+    /*
+     * Abonniert heißt nicht vertraut. Ein `refund.created` oder
+     * `refund.updated`, das kein Erstattungsobjekt trägt, ist `malformed` —
+     * und nicht etwa eine Erstattung über null.
+     */
+    expect(decide(event("refund.updated"), false))
+      .toEqual({ action: "ignore", reason: "malformed" });
+    expect(decide(event("refund.created"), false))
+      .toEqual({ action: "ignore", reason: "malformed" });
   });
 });
 

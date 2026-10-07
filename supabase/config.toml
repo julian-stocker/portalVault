@@ -37,3 +37,18 @@ verify_jwt = false
 # before the function runs and the second is accepted without the check that
 # matters. The function authorises both itself (see index.ts, `authorise`).
 verify_jwt = false
+
+[functions.refund-payment]
+# MUST stay false, for the same reason send-order-mail's is.
+#
+# The caller is a Server Action sending the operator's own user token. With
+# verification on, the platform would accept that token without the check that
+# actually matters — whether the account behind it may run the shop — and it
+# could not tell "no user" apart from "invalid user". The function verifies the
+# token itself and then asks the database for the role
+# (`can_operate_seller_for`), which is the same gate the booking passed.
+#
+# It also cannot invent a refund: the request body names an order_refunds id
+# and nothing else, so the amount, the order and the world all come from the
+# database.
+verify_jwt = false

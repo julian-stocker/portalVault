@@ -228,10 +228,26 @@ describe("a refund may say what it was for", () => {
     expect(REFUND).toContain("where l.id = v_line and l.order_id = v_order.id");
   });
 
-  it("still moves no money and no stock", () => {
+  it("still moves no stock, and books money without claiming it moved", () => {
+    /*
+     * BESTAND: unverändert tabu. Eine Erstattung war nie und ist nie eine
+     * Lagerbewegung.
+     *
+     * GELD: seit `0111` nennt die Funktion `stripe` — aber nur als Namen des
+     * Zahlungsdienstes in `provider`, nicht als Aufruf. SQL kann Stripe nicht
+     * erreichen, und das ist genau der Grund, warum der Aufruf in einer Edge
+     * Function liegt. Was hier zählt, ist die Richtung: eine frische Buchung
+     * ist `none`, und `succeeded` ist ohne Beweis unmöglich.
+     */
     expect(REFUND).not.toContain("apply_inventory_movement");
     expect(REFUND).not.toContain("shop_inventory");
-    expect(REFUND).not.toContain("stripe");
+    expect(REFUND).not.toContain("record_inventory_movement");
+    // Kein Netz aus SQL heraus.
+    expect(REFUND).not.toContain("api.stripe.com");
+    expect(REFUND).not.toContain("http");
+    // Und der Status wird gespiegelt, nicht behauptet.
+    expect(REFUND).toContain("perform public.refresh_order_payment_status(v_order.id);");
+    expect(REFUND).not.toMatch(/set payment_status = case when/);
   });
 
   it("the allocation table allows the five shapes the operator needs", () => {
@@ -465,10 +481,28 @@ describe("documenting the repayment", () => {
   const ACTION = source("src/lib/admin/refund-actions.ts");
   const ORDER_PAGE = source("src/app/(business)/business/orders/[orderNumber]/page.tsx");
 
-  it("still moves no money", () => {
-    expect(FORM).not.toContain("stripe");
-    expect(ACTION).not.toContain("stripe");
-    expect(ACTION).toContain("WHAT THIS DOES NOT DO: move money");
+  it("moves money only through the one function that may, and never from SQL", () => {
+    /*
+     * HIER STAND „still moves no money" — und das war die Lücke, nicht die
+     * Zusicherung. Bis `0111` rief niemand Stripe, der Operator musste
+     * zusätzlich ins Dashboard, und bei SI-2026-001009 ist genau dieser
+     * zweite Schritt ausgefallen.
+     *
+     * Jetzt löst SkyIsles aus — aber nicht von hier: die Server Action bittet
+     * die Edge Function `refund-payment`, die den Restricted Key hält. Das
+     * Web-Deployment hält keinen Schlüssel, der Geld bewegen kann (ADR-0051),
+     * und diese Zusicherung prüft genau das.
+     */
+    expect(ACTION).toContain('supabase.functions.invoke("refund-payment"');
+    // Kein Stripe-Schlüssel und kein Stripe-Endpunkt im Web-Deployment.
+    for (const forbidden of ["api.stripe.com", "STRIPE_SECRET", "STRIPE_REFUND_KEY", "sk_live"]) {
+      expect(ACTION, forbidden).not.toContain(forbidden);
+      expect(FORM, forbidden).not.toContain(forbidden);
+    }
+    // Und die Mail hängt an der Bestätigung, nicht an der Buchung.
+    expect(ACTION).toContain("async function announce(");
+    expect(ACTION.indexOf("await announce("))
+      .toBeGreaterThan(ACTION.indexOf('if (outcome.kind !== "settled")'));
   });
 
   it("carries the allocation only while the amount is the suggested one", () => {

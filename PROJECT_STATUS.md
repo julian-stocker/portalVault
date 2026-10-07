@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-06 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-07 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -2756,7 +2756,7 @@ bleiben unverändert stehen.
 | **Datenbank** | 98 Migrationen, Production und Staging auf demselben Stand (`0098`). RLS auf allen 60 Tabellen; von 63 exponierten Relationen sind fünf für `anon` lesbar, alle fünf Katalogdaten. |
 | **Zeitgeber** | `expire-stale-checkouts` per pg_cron auf Production, `*/5 * * * *`, aktiv, Läufe erfolgreich. |
 | **Tests** | Lint, Typecheck, Build grün; 191 Vitest-Dateien, 5 892 Unit-Tests. Dazu 14 `verify:*`-Werkzeuge als Laufzeitnachweise gegen echte Datenbanken. |
-| **Entscheidungen** | ADR-0001 bis ADR-0117 in `docs/DECISIONS.md`. |
+| **Entscheidungen** | ADR-0001 bis ADR-0119 in `docs/DECISIONS.md`. |
 
 **Production-Bestand (read-only gemessen am 2026-09-25):** 279 Lagerpositionen · 32 operative
 Bewegungen · 2 741 Legacy-Ereignisse · 300 Verkäufe mit 1 312 Positionen · 84 Einkäufe ·
@@ -2859,6 +2859,56 @@ ohne Katalog-, Lager-, Hold- und Bewegungswirkung, vier Default-Kostenzeilen, Re
 - Die Positionsliste eines einzelnen Verkaufs behält die schwächere Doppelklickprüfung über
   `busy` statt eines Refs — `react-hooks/refs` verbietet dort das Ref, und ein zweiter Klick
   trifft weiterhin die Datenbank, die ihn ablehnt.
+
+
+## Stripe-Erstattungen: SkyIsles löst selbst aus (Stand 2026-10-07)
+
+**Gebaut, NICHT angewendet und NICHT deployt.** Migration `0111` liegt im Repository, die Edge
+Function `refund-payment` ebenso; Staging-Anwendung, Secrets und Deploy stehen aus. Entscheidungen
+in **ADR-0118**, Datenmodell in `docs/DATABASE.md` 3.3al, Secrets und Key-Rechte in
+`docs/DEPLOYMENT.md`.
+
+**Der Anlass.** Bei `SI-2026-001009` — der ersten echten Production-Bestellung — wurde eine
+Position über 0,76 € storniert und acht Sekunden später „Erstattung bestätigt" geklickt. SkyIsles
+zeigte danach „teilweise erstattet", die Kundenansicht „−0,76 €", der Nachrichtenkanal
+„Rückerstattung abgeschlossen" — **bei Stripe war nichts erstattet.** Kein Programmierfehler:
+`provider_refund_id` war optional und von nichts geprüft, also gab es einen Zustand für zwei
+Tatsachen. Der Betrag steht der Kundschaft weiterhin zu.
+
+**Was sich ändert**
+
+| | |
+|---|---|
+| **Geldfluss als eigener Zustand** | `order_refunds.provider_status`: `none` · `pending` · `succeeded` · `failed`. Nur `succeeded` ist Geld — daran hängen `payment_status`, Kundenansicht, Nachrichtenzeile, Mail und die Geldaufstellung. `succeeded` ohne Provider-Kennung ist per CHECK unmöglich. |
+| **SkyIsles löst aus** | Neue Edge Function `refund-payment`. **Keine neuen Secrets** — sie liest `STRIPE_SECRET_KEY_SANDBOX`/`_LIVE` wie `create-payment`, erreicht aber nur drei Stripe-Endpunkte (erstatten, abgleichen, Session lesen); die Liste ist als Test festgeschrieben. Kein Gang ins Stripe-Dashboard mehr. |
+| **Vier Idempotenzschichten** | DB-Anspruch unter Zeilensperre · Idempotenzschlüssel aus Zeile und Versuchsnummer · **lesender Abgleich vor jedem POST** · write-once-Anheften. Ein Timeout kann keinen zweiten Refund erzeugen; kein Timer. |
+| **Unklar ≠ gescheitert** | Nur eine ausdrückliche Ablehnung macht `failed`. Alles andere bleibt `pending` und ist über „Zustand prüfen" fortsetzbar. |
+| **Webhook bestätigt** | `refund.created` und `refund.updated` neu abonniert, entprellt über `payment_events`. `charge.refunded` wurde bewusst wieder entfernt (ADR-0119): es trägt die einzelnen Erstattungen nur, solange Stripe `refunds` in den Charge einbettet. `stripe-webhook` hält weiterhin keinen API-Schlüssel. |
+| **Mail-Rolle** | `send-order-mail` autorisiert neben dem Plattformadmin auch den Verkäufer-Operator (ADR-0119). Vorher ging **keine** betriebsgetriebene Mail hinaus — die Erstattungsmail eingeschlossen. `force` bleibt beim Plattformadmin. |
+| **Mail-Gate** | „Wir haben deine Erstattung angewiesen" geht erst nach der Bestätigung hinaus. |
+| **Orderbuch unberührt** | `sale_refunds` bleibt reine Buchhaltung: eBay erstattet außerhalb von SkyIsles. |
+
+**Keine Legacy-Sonderregel — und eine bewusste Folge.** Mit `0111` fällt `SI-2026-001009` auf
+`paid` zurück, und die 0,76 € erscheinen in der Kundenansicht vorübergehend **nicht** als
+erstattet. Das ist die Wahrheit und ausdrücklich gewollt; nach der echten Stripe-Erstattung
+spiegelt `attach_order_refund()` die Bestellung von selbst zurück.
+
+**Verifikation bisher.** 223 Vitest-Dateien, 7 084 Unit-Tests, Lint/Typecheck/Build grün. Die
+neue `refund-contract.test.ts` deckt die elf geforderten Nachweise ab: erfolgreicher Aufruf ·
+Stripe-Fehler nie als Erfolg · Doppelklick · Timeout/Reconciliation · mehrfacher Webhook ·
+gespeicherte Refund-ID · Teil- und Vollerstattung · Außenwirkung erst nach Bestätigung ·
+External Sales unverändert · Bestand und Stornierung unverändert.
+
+**Offen, in dieser Reihenfolge**
+
+1. `0111` auf **Staging** anwenden (SQL Editor) und Postflight.
+2. `refund-payment` auf Staging deployen. Keine neuen Secrets nötig; die Sandbox-Webhook-Events
+   `charge.refunded`, `refund.created`, `refund.updated` sind bereits abonniert.
+3. Sandbox-Erstattung von Anfang bis Ende über die SkyIsles-Oberfläche prüfen.
+4. Erst danach, getrennt freizugeben: Production-Rollout und der echte Live-Refund über 0,76 €
+   auf `order_refunds#1` — über den neuen Pfad, nicht im Dashboard. **Bis dahin ist kein
+   Stripe-LIVE-Refund ausgelöst worden.**
+5. Additive Folgemigration für die Backups `0104`/`0105`, die die neun neuen Spalten nicht kennen.
 
 
 ## Zuletzt verifizierte Prüfungen

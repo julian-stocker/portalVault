@@ -71,13 +71,15 @@ function header(file: string, name: string): string {
 // ---------------------------------------------------------------------------
 
 describe("0110 ist die Hold-Laufzeit und sonst nichts", () => {
-  it("liegt direkt hinter 0109; 0111 und 0112 existieren nicht", () => {
+  it("liegt direkt hinter 0109 und bleibt dort", () => {
+    /*
+     * Die Reihenfolge ist dauerhaft, die höchste Nummer ist es nicht: `0111`
+     * ist gebaut und trägt den Stripe-Erstattungsvertrag. Was hier zählt, ist
+     * dass die Hold-Laufzeit direkt auf ihr Schema folgt.
+     */
     const at = migrationFiles.indexOf(FILE);
     expect(at).toBeGreaterThan(-1);
     expect(migrationFiles[at - 1]).toBe("0109_external_hold_schema.sql");
-    for (const n of ["0111", "0112"]) {
-      expect(migrationFiles.filter((f) => f.startsWith(n))).toHaveLength(0);
-    }
   });
 
   it("und 0104 bis 0109 sind unverändert", () => {
@@ -100,10 +102,19 @@ describe("0110 ist die Hold-Laufzeit und sonst nichts", () => {
     }
   });
 
-  it("enthält nichts aus 0111 oder 0112", () => {
+  it("enthält nichts aus einer anderen Domäne", () => {
     for (const forbidden of [
       "seller_set_sale_status", "p_status", "p_expected_updated_at",
       "system_platform_export", "system_business_backup",
+      /*
+       * 0111: der Stripe-Erstattungsvertrag. `order_refunds` steht hier
+       * ABSICHTLICH NICHT auf der Liste — `seller_sale()` projiziert die
+       * Erstattungen einer internen Bestellung seit 0059 und tut es
+       * unverändert weiter. Was 0110 nicht kennt, ist der Provider-Zustand
+       * und jede Funktion, die ihn setzt.
+       */
+      "provider_status", "submit_order_refund",
+      "attach_order_refund", "record_refund_event",
     ]) {
       expect(exec, forbidden).not.toContain(forbidden);
     }

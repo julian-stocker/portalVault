@@ -41,6 +41,45 @@ export const HANDLED_EVENTS = [
    * weiterhin nichts belasten und nichts erstatten können.
    */
   "charge.succeeded",
+  /*
+   * Seit 0111: DIE ERSTATTUNG, BESTÄTIGT VON DER QUELLE.
+   *
+   * SkyIsles löst Erstattungen jetzt selbst aus (`refund-payment`), und die
+   * Antwort auf diesen Aufruf ist bereits ein Beweis. Diese zwei Ereignisse
+   * sind der ZWEITE, unabhängige Weg — und für zwei Fälle der einzige:
+   *
+   *   `refund.updated`   eine Erstattung, die SPÄTER scheitert. Eine Bank kann
+   *                      eine Gutschrift zurückweisen, Tage danach. Ohne
+   *                      dieses Ereignis stünde bei uns für immer „erstattet".
+   *   `refund.created`   eine im Stripe-Dashboard erzeugte Erstattung. Sie
+   *                      trägt keine Metadaten von uns und würde sonst
+   *                      niemals in SkyIsles auftauchen.
+   *
+   * Beide tragen das Erstattungsobjekt SELBST — `id`, `status`, `amount`,
+   * `payment_intent`, `metadata` —, und genau das macht sie zum robusten
+   * Vertrag: nichts daran hängt an einer eingebetteten Unterliste.
+   *
+   * WARUM `charge.refunded` NICHT DABEI IST (ADR-0119). Es trug die einzelnen
+   * Erstattungen nur, solange Stripe `refunds` in das Charge-Objekt einbettete.
+   * Unter der API-Version dieses Kontos (`2026-08-26.dahlia`) ist darauf kein
+   * Verlass, und ohne die Liste gibt es keine `re_…` — also keinen Beweis, den
+   * man anheften könnte. Bliebe nur Zuordnung über den Betrag, und das ist
+   * Raten: zwei Positionen gleichen Preises ergeben zwei gleich hohe
+   * Erstattungen. Nachfragen kann diese Function nicht und soll es nicht: sie
+   * hält KEINEN API-Schlüssel, und das ist die Eigenschaft, die den einen
+   * öffentlich erreichbaren Endpunkt unschädlich macht.
+   *
+   * Verloren geht dadurch nichts. Jede Erstattung — unsere wie eine aus dem
+   * Dashboard — erzeugt `refund.created`, und jede Änderung daran
+   * `refund.updated`. Kommt `charge.refunded` trotzdem an, antwortet diese
+   * Function `200 not_a_handled_type` und schreibt nichts: eine Lieferung ohne
+   * Wirkung, keine Fehlermeldung bei Stripe.
+   *
+   * Diese Function hält weiterhin KEINEN API-Schlüssel. Sie bestätigt, sie
+   * erstattet nicht.
+   */
+  "refund.created",
+  "refund.updated",
 ] as const;
 
 export type HandledEvent = (typeof HANDLED_EVENTS)[number];
@@ -122,6 +161,17 @@ export type Decision =
       eventType: string;
       charge: ChargeShape;
     }
+  /*
+   * 0111: eine oder mehrere Erstattungen, bestätigt von Stripe. Eigene
+   * Handlung, weil sie weder einen Zahlungsversuch schließt noch eine Zahlung
+   * bestätigt — und weil ein Ereignis mehrere Erstattungen tragen kann.
+   */
+  | {
+      action: "refunds";
+      eventId: string;
+      eventType: string;
+      refunds: RefundShape[];
+    }
   | { action: "ignore"; reason: IgnoreReason };
 
 export type IgnoreReason =
@@ -171,6 +221,63 @@ export type ChargeShape = {
   cardLast4: string | null;
   walletType: string | null;
 };
+
+/**
+ * Was wir von einer Erstattung lesen dürfen — und nicht mehr.
+ *
+ * Kein Kundenobjekt, keine Zahlungsmethode, keine Quittungs-URL. Für die
+ * Zuordnung genügen die Kennung, der Betrag, der Zustand, die Zahlung und
+ * unsere eigene Metadaten-Kennung.
+ */
+export type RefundShape = {
+  id: string;
+  amountCents: number | null;
+  status: string | null;
+  /** `pi_…` wenn vorhanden, sonst `ch_…`. Beides reicht zur Zuordnung. */
+  paymentRef: string | null;
+  failureReason: string | null;
+  /** Unsere `order_refunds.id`, falls SkyIsles diese Erstattung erzeugt hat. */
+  ownRefundId: number | null;
+};
+
+export function asRefund(object: unknown): RefundShape | null {
+  if (typeof object !== "object" || object === null) return null;
+  const raw = object as Record<string, unknown>;
+  if (raw.object !== "refund" || typeof raw.id !== "string" || raw.id === "") return null;
+
+  const metadata = (typeof raw.metadata === "object" && raw.metadata !== null)
+    ? raw.metadata as Record<string, unknown>
+    : {};
+  const own = typeof metadata.order_refund_id === "string"
+      && /^\d+$/.test(metadata.order_refund_id)
+    ? Number(metadata.order_refund_id)
+    : null;
+
+  return {
+    id: raw.id,
+    amountCents: typeof raw.amount === "number" ? raw.amount : null,
+    status: typeof raw.status === "string" ? raw.status : null,
+    paymentRef: typeof raw.payment_intent === "string"
+      ? raw.payment_intent
+      : typeof raw.charge === "string" ? raw.charge : null,
+    failureReason: typeof raw.failure_reason === "string" ? raw.failure_reason : null,
+    ownRefundId: own,
+  };
+}
+
+/**
+ * Was ein Erstattungszustand für unsere Buchung bedeutet.
+ *
+ * `succeeded` ist Geld. `failed` und `canceled` sind ein ausdrückliches Nein.
+ * Alles andere — `pending`, `requires_action` — ist ein Zwischenstand und
+ * ändert nichts: eine unterwegs befindliche Erstattung darf weder als erstattet
+ * noch als gescheitert gelten.
+ */
+export function refundStatusMeaning(status: string | null): "succeeded" | "failed" | "pending" {
+  if (status === "succeeded") return "succeeded";
+  if (status === "failed" || status === "canceled") return "failed";
+  return "pending";
+}
 
 export function asCharge(object: unknown): ChargeShape | null {
   if (typeof object !== "object" || object === null) return null;
@@ -241,6 +348,17 @@ export function decide(event: StripeEventShape, expectLivemode: boolean): Decisi
       return { action: "ignore", reason: "malformed" };
     }
     return { action: "method", eventId: event.id, eventType: event.type, charge };
+  }
+
+  /*
+   * Erstattungsereignisse tragen keine Checkout-Session und dürfen deshalb
+   * nicht durch die Sessionprüfung darunter laufen (0111) — genauso wie
+   * `charge.succeeded` seit 0101.
+   */
+  if (event.type === "refund.created" || event.type === "refund.updated") {
+    const refund = asRefund(event.data?.object);
+    if (!refund) return { action: "ignore", reason: "malformed" };
+    return { action: "refunds", eventId: event.id, eventType: event.type, refunds: [refund] };
   }
 
   const session = asSession(event.data?.object);

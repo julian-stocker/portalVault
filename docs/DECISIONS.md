@@ -10148,3 +10148,215 @@ als `other`. Eine Signaturänderung an `seller_create_sale_with_details` samt Mi
 nur für den Refund-Parameter. Ein automatischer Wiederholungsversuch für die Rückerstattung.
 Ein optimistisch vorweggenommener Positionszustand. Ein Timer zum Bündeln des Refreshs. Das
 vollständige Verstecken des Lagerstatus.
+
+
+## ADR-0118 — SkyIsles löst Rückerstattungen selbst aus, und eine Buchung ohne Beweis ist keine Erstattung
+
+**Status:** angenommen, 2026-10-07 · Migration `0111` · Edge Function `refund-payment` ·
+auf Staging zu verifizieren, Production-Rollout getrennt freizugeben
+**Bezug:** ADR-0051 (privilegierte Schlüssel nur in Supabase-Function-Secrets),
+ADR-0054 (der Webhook entscheidet nichts selbst), ADR-0083 (Geld ist die Summe der Ereignisse),
+ADR-0086 (Widerruf und Erstattung), ADR-0089 (Orderbuch: Geld, Bestand und Versand sind drei
+Dimensionen), ADR-0100 (Hinweismails), ADR-0106 (Storno, Retoure, Fehlbestand)
+
+**Problem — und er ist eingetreten, nicht gedacht.** Bei der ersten echten Production-Bestellung
+`SI-2026-001009` hat Stripe 7,85 € belastet. Eine Position über 0,76 € wurde storniert und acht
+Sekunden später mit „Erstattung bestätigen" gebucht. Danach sagte SkyIsles „teilweise erstattet",
+die Kundenansicht zeigte „−0,76 €", der Nachrichtenkanal „Rückerstattung abgeschlossen" — und bei
+Stripe war nie etwas erstattet. Der Betrag steht der Kundschaft weiterhin zu.
+
+Das war **kein Programmierfehler.** ADR-0086 hatte den Ablauf ausdrücklich zweistufig angelegt:
+im Stripe-Dashboard erstatten, hier festhalten. Die Lücke lag im Vertrag — `provider_refund_id`
+war optional, nullable und von nichts geprüft, also gab es **einen Zustand für zwei Tatsachen**:
+„jemand hat es eingetragen" und „der Zahlungsdienst hat gezahlt". Verschärfend: der Betrag war
+nach einem Storno vorbelegt, der Knopf hieß „bestätigen", und seit 2026-09-29 löste dieselbe
+Buchung die Kundenmail „Wir haben deine Erstattung angewiesen" aus.
+
+**Entscheidung 1 — der Geldfluss ist ein eigener Zustand, und nur er zählt nach außen.**
+`order_refunds.provider_status` kennt `none` · `pending` · `succeeded` · `failed`. Die Buchung
+sagt, was erstattet werden soll; `succeeded` sagt, dass Geld zurückgegangen ist. Daran — und nur
+daran — hängen `orders.payment_status`, die Kundenansicht, die Nachrichtenzeile, die
+Erstattungsmail und die Geldaufstellung des Betriebs. Ein `succeeded` ohne Provider-Kennung ist
+per CHECK unmöglich, und ein Trigger macht Kennung und Idempotenzschlüssel write-once.
+
+**Keine Legacy-Sonderregel.** Bestehende Buchungen werden nach derselben Regel beurteilt wie neue.
+Für Production heißt das genau eine Zeile: `SI-2026-001009` geht mit der Migration von
+`partially_refunded` zurück auf `paid`, und die Kundenansicht zeigt die 0,76 € nicht mehr als
+erstattet. Das ist der Zweck der Migration und kein Nebeneffekt — nach der echten Stripe-Erstattung
+spiegelt `attach_order_refund()` die Bestellung von selbst zurück.
+
+**Entscheidung 2 — SkyIsles löst selbst aus, und zwar aus einer eigenen Edge Function.** Der
+Betreiber soll nicht zusätzlich ins Stripe-Dashboard. Der Aufruf liegt in `refund-payment` und
+nicht in einer Server Action, weil das Web-Deployment keinen Schlüssel halten darf, der Geld
+bewegt (ADR-0051, `docs/DEPLOYMENT.md`).
+
+**Derselbe Schlüssel wie die Zahlung**, `STRIPE_SECRET_KEY_SANDBOX` / `_LIVE`. Ein eigenes
+Restricted-Key-Paar war zunächst vorgesehen und wurde vor dem Rollout verworfen: es gibt genau
+einen Sandbox- und genau einen Live-Aufbau, und ein zweites Paar hätte eine zweite Rotation, eine
+zweite Ablaufstelle und eine zweite Art gebracht, eine Erstattung an fehlender Konfiguration
+scheitern zu lassen — für einen einzigen Betrieb mehr Verwaltung als Schutz.
+
+**Die Grenze trägt deshalb der Code, nicht das Recht.** Dieser Schlüssel darf bei Stripe mehr, als
+die Function tun soll; also ist die Liste der erreichbaren Endpunkte selbst die Zusicherung:
+`POST /v1/refunds`, `GET /v1/refunds` und `GET /v1/checkout/sessions/{id}` — keine Zahlung, keine
+Session-Erzeugung, kein Kundenobjekt, kein Payout. `refund-contract.test.ts` liest sie aus dem
+Quelltext und lässt keinen vierten zu. Das ist eine schwächere Garantie als ein eingeschränkter
+Schlüssel und wird hier als solche benannt; wird der Schlüssel später doch eingeschränkt, passt
+ein `rk_…` ohne Codeänderung (*Refunds: write* und *Checkout Sessions: read*, **nicht**
+PaymentIntents, **nicht** Charges).
+
+Unverändert bleibt die Weltentrennung: der Schlüssel wird nach `orders.commerce_mode` gewählt,
+**kein Rückfall** zwischen live und sandbox, und ein `sk_live_` im Sandbox-Fach wird abgelehnt.
+Staging hält nur den Sandbox-Schlüssel und verweigert Live-Erstattungen damit von selbst.
+
+**Entscheidung 3 — die Reihenfolge ist die Sicherheit.** Anspruch in der Datenbank → Schlüssel zur
+Welt der Bestellung → Zahlung auflösen → **lesender Abgleich** → erstatten → anheften. Der
+Abgleich vor dem POST ist nicht Vorsicht, sondern die einzige Schicht, die nach Ablauf eines
+Stripe-Idempotenzschlüssels noch hält.
+
+**Entscheidung 4 — vier Idempotenzschichten, jede gegen einen anderen Ausfall.**
+
+| Schicht | fängt |
+|---|---|
+| DB-Anspruch unter Zeilensperre (`submit_order_refund`) | Doppelklick, zwei Browser, zwei Operatoren |
+| Idempotenzschlüssel, abgeleitet aus Zeile **und Versuchsnummer** | verlorene Antwort innerhalb von Stripes Fenster (dokumentiert 24 h) |
+| lesender Abgleich über `metadata.order_refund_id` | derselbe Fall **nach** 24 h, und eine im Dashboard erstattete Summe |
+| `attach_order_refund()` — gleiche Kennung `already_attached`, andere abgelehnt | doppelte Antwort, Webhook und API-Antwort gleichzeitig |
+
+Die Versuchsnummer ist der feine Punkt: ein Wiederholungsaufruf **desselben** Versuchs muss
+denselben Schlüssel tragen, damit Stripe seine erste Antwort wiederholt; ein **neuer** Versuch
+nach einem bestätigten Fehlschlag braucht einen neuen, weil Stripe sonst den gespeicherten Fehler
+wiederholt.
+
+**Entscheidung 5 — ein Netzwerkabbruch ist kein Nein.** Nur eine ausdrückliche Ablehnung von
+Stripe macht eine Buchung `failed`. Alles Unklare — Timeout, 5xx, Rate Limit,
+Idempotenzkonflikt — lässt sie `pending`, und der Weg heraus heißt „Zustand prüfen", nicht
+„erneut auslösen". Wer eine verlorene Antwort als Fehlschlag verbucht, lädt zu einem zweiten
+Versuch ein, und wenn der erste doch durchkam, ist das Geld zweimal unterwegs.
+
+**Entscheidung 6 — der Webhook bestätigt, er erstattet nicht.** Abonniert werden
+`charge.refunded`, `refund.created` und `refund.updated`; `stripe-webhook` hält weiterhin keinen
+API-Schlüssel. `refund.updated` ist nicht optional: eine Bank kann eine Gutschrift Tage später
+zurückweisen, und ohne dieses Ereignis stünde bei uns für immer „erstattet". `refund.created`
+fängt Erstattungen aus dem Dashboard, die keine Metadaten von uns tragen. Eine Erstattung, die
+sich nicht zuordnen lässt, wird als `unmatched_refund` festgehalten statt verworfen.
+
+**Entscheidung 7 — ein Teilerfolg ist ein Ergebnis, kein Fehler.** Bucht Schritt 1 und scheitert
+Schritt 2, existiert die Buchung. Die Oberfläche meldet genau das, mit dem Knopf, es erneut zu
+versuchen; „fehlgeschlagen" zu melden würde zu einer zweiten Buchung führen. Dieselbe Regel wie in
+ADR-0117 für die Rückerstattung beim Anlegen eines externen Verkaufs.
+
+**Entscheidung 8 — zwei Ereignisarten, damit kein Text umgeschrieben werden muss.** Die Buchung
+schreibt `refund_booked`, die Bestätigung `refund_recorded`. `order_conversation()` (`0098`) und
+die Aufmerksamkeitszähler (`0099`) lesen `refund_recorded` und bleiben unverändert — der Satz
+„Rückerstattung über X abgeschlossen" wird wahr, statt neu formuliert zu werden.
+
+**Entscheidung 9 — das Orderbuch bleibt reine Buchhaltung.** `sale_refunds` und
+`seller_add_sale_refund()` sind unberührt. Bei einem externen Verkauf erstattet eBay oder
+Kleinanzeigen außerhalb von SkyIsles; dort **ist** die Buchung die Wahrheit, und es gibt keinen
+Zahlungsdienst, den SkyIsles fragen könnte. Die Trennung ist fachlich und nicht technisch.
+
+**Entscheidung 10 — die Berechtigung bleibt, wo sie war, und bekommt eine zweite Tür.** Die
+Buchung liegt wie bisher hinter `can_operate_active_seller()`. Die Edge Function prüft den
+Benutzertoken selbst und fragt `can_operate_seller_for(uuid)` — das uuid-Gegenstück aus `0041`,
+weil `auth.uid()` in einer Function mit Service-Role-Schlüssel NULL ist. Kein geteiltes
+Geheimnis: ein Geheimnis, das eine Erstattung auslösen kann, müsste im Web-Deployment liegen.
+Die Anfrage nennt **eine Erstattungs-ID und sonst nichts** — Betrag, Bestellung und Welt kommen
+aus der Datenbank, also kann ein manipulierter Aufruf nichts erfinden.
+
+**Konsequenzen.** Die eingefrorenen Backups `0104`/`0105` kennen die neun neuen Spalten nicht;
+eine additive Folgemigration ist vorgesehen (dieselbe Klasse wie
+`order_reservations.sale_item_id` in ADR-0116). Eine Erstattung, die der Betreiber außerhalb von
+SkyIsles vorgenommen hat, bleibt eintragbar und gilt dann als `operator`-bestätigt — eine
+Behauptung eines Menschen, als solche gekennzeichnet. `order_refunds#1` aus dem Vorfall wird
+**nicht gelöscht**: sie ist nach der Migration eine gewöhnliche `none`-Buchung und wird über den
+normalen Weg ausgelöst.
+
+**Verworfen.** Eine zweite Tabelle für Provider-Erstattungen (zweite Buchhaltung). Eine
+Übergangsregel, nach der alte Buchungen weiter als erstattet gelten (sie hätte die falsche
+Aussage konserviert). Ein eigenes Restricted-Key-Paar für die Erstattung (siehe Entscheidung 2:
+engeres Recht, aber doppelte Verwaltung bei genau einem Betrieb — die Endpunktliste der Function
+tritt an seine Stelle). Ein geteiltes Geheimnis im Web-Deployment. Ein automatischer Wiederholungsversuch nach unklarer Antwort. Ein Zeitfenster
+oder Timer als Idempotenzmechanismus. Das Löschen oder Neuanlegen von `order_refunds#1`.
+
+
+## ADR-0119 — Wer eine Bestellung bearbeiten darf, darf ihre Mail auslösen; und `charge.refunded` ist der fragile Weg
+
+**Status:** angenommen, 2026-10-07 · Anwendungs- und Edge-Function-Code, **keine Migration**
+**Bezug:** ADR-0051 (privilegierte Schlüssel nur in Function-Secrets), ADR-0054 (der Webhook
+entscheidet nichts selbst), ADR-0077 (Plattformadmin und Verkäuferbetrieb sind getrennte
+Autoritäten), ADR-0100 (Hinweismails, eine Stelle, ein Vertrag), ADR-0118 (SkyIsles löst
+Rückerstattungen selbst aus)
+
+### Teil 1 — Die Erstattungsmail ging nie hinaus
+
+**Problem, gefunden im ersten echten Sandbox-E2E-Test.** Der 4,04-€-Refund auf
+`SI-2026-001067` lief vollständig durch — Stripe erstattete, der Beweis wurde angeheftet, der
+Status gespiegelt. Die Mail „Wir haben deine Erstattung angewiesen" kam **nicht**. `order_mail`
+enthielt auf Staging **keine einzige** Zeile der vier betriebsgetriebenen Arten
+(`refund_confirmation`, `cancellation_notice`, `message_to_customer`, `message_to_seller`) — seit
+es sie gibt.
+
+**Ursache.** `send-order-mail.authorise()` verlangte `is_shop_admin_for()`. Ausgelöst hatte ein
+**Verkäufer-Operator**, und der ist seit ADR-0077 ausdrücklich **kein** Plattformadmin: auf
+Staging stehen drei Operatoren in `seller_operators` und ein einziger, anderer Account in
+`shop_admins`. `notify()` schluckt den Fehlschlag bewusst („eine Mail darf eine gelungene
+Handlung nicht scheitern lassen"), also gab es kein Symptom außer der fehlenden Mail.
+
+**Entscheidung.** `authorise()` fragt nach `is_shop_admin_for()` eine **zweite** Rolle:
+`can_operate_seller_for()` — dieselbe Mitgliedschaft, die den Operator Bestellungen bearbeiten
+und Erstattungen auslösen lässt. Wer eine Bestellung bearbeiten darf, darf die daraus folgende
+transaktionale Mail auslösen.
+
+**Keine Migration.** Die Rolle existiert seit `0041`, die uuid-Abfrage dazu seit `0111`.
+
+**Was ausdrücklich NICHT mitgewandert ist: `force`.** Nur ein Plattformadmin kommt an einer
+`unresolved`-Zustellung vorbei. Ein Operator darf eine unklare Zustellung nicht überstimmen —
+das ist der einzige Unterschied zwischen den beiden Rollen in dieser Function, und er bleibt.
+
+**Grenzen, die unverändert gelten.** Ein gewöhnliches angemeldetes Konto ist weder Admin noch
+Operator und fällt auf `null` → 401; es erreicht nur `authoriseParty()`, also die zwei
+Nachrichtenhinweise und nur für die **eigene** Bestellung, geprüft mit dem Service-Role-Client
+gegen `orders`. Die Rolle wird immer der **Datenbank** abgefragt, nie einem Claim geglaubt. Die
+Mail-Idempotenz ist unberührt: der Anspruch liegt weiter in `claim_order_mail()` mit dem
+Schlüssel (Bestellung, Art, `ref`), und Resend bekommt denselben Wert.
+
+**Die Verkäufergrenze liegt dort, wo sie liegen kann.** `orders` trägt kein `seller_id`
+(ADR-0021, ADR-0064, und von `platform-seller-schema.test.ts` bewacht), es gibt also keine
+feinere Grenze als „freigeschalteter Operator eines **aktiven** Verkäufers" — genau die wird
+geprüft. Der Tag, an dem ein zweiter realer Verkäufer existiert, ist der Tag, an dem diese Stelle
+mitwachsen muss; der Test benennt das.
+
+**Reihenfolge beim Rollout.** `can_operate_seller_for()` kommt aus `0111`. Eine Function, die vor
+dieser Migration deployt wird, bekommt einen RPC-Fehler, behandelt den Operator wie bisher als
+nicht berechtigt und verhält sich damit genau wie vorher — fail closed, aber eben auch
+wirkungslos. Also erst `0111`, dann die Function.
+
+### Teil 2 — `charge.refunded` wird nicht mehr behandelt
+
+**Problem.** `0111` hatte `charge.refunded` abonniert und die einzelnen Erstattungen aus
+`charge.refunds.data` gelesen. Unter der API-Version des Kontos (`2026-08-26.dahlia`) ist nicht
+verlässlich, dass Stripe diese Unterliste in das Charge-Objekt einbettet.
+
+**Entscheidung: `charge.refunded` verlässt `HANDLED_EVENTS`, und der Parser dazu wird entfernt.**
+Keine fragile Annahme bleibt stehen. Ohne die Liste gibt es keine `re_…` — also keinen Beweis,
+den `attach_order_refund()` anheften könnte. Bliebe nur Zuordnung über den Betrag, und das ist
+Raten: zwei Positionen gleichen Preises ergeben zwei gleich hohe Erstattungen. Nachfragen kann
+diese Function nicht und soll es nicht — sie hält **keinen** API-Schlüssel, und genau das macht
+den einen öffentlich erreichbaren Endpunkt unschädlich (ADR-0054). Ein Schlüssel dort wäre der
+falsche Preis für ein Ereignis, das nichts beiträgt.
+
+**Verloren geht nichts.** `refund.created` und `refund.updated` tragen das Erstattungsobjekt
+**selbst** — `id`, `status`, `amount`, `payment_intent`, `metadata` — und decken beide Lagen ab,
+für die der Webhook überhaupt gebraucht wird: eine verlorene Antwort unseres eigenen Aufrufs, und
+eine Erstattung, die eine Bank Tage später zurückweist. Auch eine im Dashboard erzeugte
+Erstattung feuert `refund.created`. Auf Staging ist beides real durchgelaufen, zweimal zugestellt,
+mit `outcome = already_confirmed` und ohne jede Wirkung auf die Daten.
+
+**Kommt `charge.refunded` trotzdem an** — etwa von einem Endpoint, der es noch abonniert hat —,
+antwortet die Function `200` mit `ignored: not_a_handled_type` und schreibt nichts. Eine Lieferung
+ohne Wirkung, kein Fehler bei Stripe, kein Wiederholungslauf.
+
+**Verworfen.** Das Beibehalten des Charge-Parsers „für den Fall, dass die Liste doch kommt" (eine
+Annahme, die nur manchmal stimmt, ist schlimmer als keine). Zuordnung einer Erstattung über den
+Betrag. Ein Stripe-API-Schlüssel in `stripe-webhook`, um die Erstattungsliste nachzuladen.
