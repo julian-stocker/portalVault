@@ -2908,8 +2908,9 @@ External Sales unverändert · Bestand und Stornierung unverändert.
 2. Production-Rollout: `0111` angewendet, drei Functions deployt, Stripe-Live-Endpunkt erweitert,
    Abschlussverifikation grün.
 3. **Der echte Live-Refund über 0,76 € auf `order_refunds#1` ist am 2026-10-07 ausgelöst worden**
-   — über den neuen Pfad, nicht im Dashboard. Stripe-Erstattung `re_3UJcYtLtUnl55BRl1HhCpYN4`,
-   Status gespiegelt, Erstattungsmail beim Kunden angekommen. Der Vorfall ist damit geschlossen.
+   — über den neuen Pfad, nicht im Dashboard. Stripe-Refund erfolgreich bestätigt
+   (0,76 €, `succeeded`), Status gespiegelt, Erstattungsmail beim Kunden angekommen. Der
+   Vorfall ist damit geschlossen.
 
 **Offen**
 
