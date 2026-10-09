@@ -493,6 +493,26 @@ export function saleItemActions(
 }
 
 /**
+ * Wie viele Positionen ohne Katalogfigur noch kein Ende haben (0112).
+ *
+ * DIE EINE FRAGE, DIE DIE VERSANDAKTION STELLT. `seller_ship_sale` schliesst
+ * genau diese Positionen; gibt es keine, hat der Knopf nichts zu tun und wird
+ * nicht angeboten.
+ *
+ * Gerechnet wird NICHT mit einer zweiten Abschlussregel, sondern mit
+ * `saleItemActions().status` — derselben Ableitung, die auch die Statusspalte
+ * bestimmt. Eine eigene „ist offen"-Logik hier wäre eine zweite Meinung
+ * darüber, was offen heisst.
+ */
+export function openFreeItemCount(
+  items: readonly SaleItemFacts[],
+  context: { frozen: boolean; cancelled: boolean; shipped: boolean; historical?: boolean },
+): number {
+  return items.filter((item) =>
+    (item.sky_id ?? null) === null && saleItemActions(item, context).status === "open").length;
+}
+
+/**
  * Which of the two pre-Ausbuchen corrections this line still allows (0065).
  *
  * THE SCREEN AND THE DATABASE SAY THE SAME THING, and the database decides.

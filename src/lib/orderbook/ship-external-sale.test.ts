@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { code, latestFunction, migrationFiles, migrationSource } from "@/test-support/migrations";
 import { de } from "../i18n/de";
+import { openFreeItemCount } from "./sales-view";
 
 /**
  * `0112` — EIN EXTERNER VERKAUF MIT FREIEN ARTIKELN LÄSST SICH ABSCHLIESSEN.
@@ -215,6 +216,58 @@ describe("shipSale — die eine Server Action", () => {
   });
 });
 
+/*
+ * DIE EINE ABLEITUNG, DIE ENTSCHEIDET, OB DER KNOPF ERSCHEINT.
+ *
+ * Ausgeführt, nicht gelesen. Sie beantwortet genau die Frage, die
+ * `seller_ship_sale` beantwortet bekommt: gibt es hier noch eine Position
+ * ohne Katalogfigur, die kein Ende hat?
+ */
+describe("openFreeItemCount", () => {
+  const ctx = { frozen: false, cancelled: false, shipped: false, historical: false };
+  const free = (over: Record<string, unknown> = {}) => ({
+    sky_id: null, movement_id: null, settled_at: null, not_shipped_at: null,
+    returned_at: null, return_movement_id: null, return_announced_at: null,
+    ...over,
+  }) as never;
+  const figure = (over: Record<string, unknown> = {}) => ({
+    sky_id: "SKY-0001", movement_id: null, settled_at: null, not_shipped_at: null,
+    returned_at: null, return_movement_id: null, return_announced_at: null,
+    ...over,
+  }) as never;
+
+  it("eine offene freie Position zählt", () => {
+    expect(openFreeItemCount([free()], ctx)).toBe(1);
+  });
+
+  it("eine erledigte freie Position zählt nicht", () => {
+    expect(openFreeItemCount([free({ settled_at: "2026-10-07T10:00:00Z" })], ctx)).toBe(0);
+  });
+
+  it("eine stornierte freie Position zählt nicht", () => {
+    expect(openFreeItemCount([free({ not_shipped_at: "2026-10-07T10:00:00Z" })], ctx)).toBe(0);
+  });
+
+  it("eine KATALOGPOSITION zählt nie — auch nicht offen", () => {
+    /* Das ist die ganze Sicherheit des Knopfes: er erscheint nicht wegen
+       einer Regalfigur, und er schliesst auch keine. */
+    expect(openFreeItemCount([figure()], ctx)).toBe(0);
+  });
+
+  it("bei einem gemischten Verkauf zählt nur die freie", () => {
+    expect(openFreeItemCount([free(), figure()], ctx)).toBe(1);
+  });
+
+  it("ein Verkauf ohne Positionen ergibt null", () => {
+    expect(openFreeItemCount([], ctx)).toBe(0);
+  });
+
+  it("ein ausgebuchter Verkauf hat keine offene freie Position mehr", () => {
+    expect(openFreeItemCount(
+      [free({ settled_at: "2026-10-07T10:00:00Z" }), figure({ movement_id: 5 })], ctx)).toBe(0);
+  });
+});
+
 describe("die Order-Aktion im Verkaufsfenster", () => {
   it("steht im Fenster und ruft genau eine Aktion", () => {
     expect(DETAILS).toContain("shipSale");
@@ -258,18 +311,75 @@ describe("die Order-Aktion im Verkaufsfenster", () => {
     expect(modal.markShippedStillOpen(2)).toMatch(/ausgebucht/);
   });
 
-  it("das Verkaufsbuch baut keinen zweiten Weg dafür", () => {
+  /*
+   * WAS DIE PRODUKTIONSABNAHME WIDERLEGT HAT.
+   *
+   * Hier stand `expect(LEDGER).not.toMatch(/shipSale\b/)` — die Zusicherung,
+   * dass das Verkaufsbuch diese Aktion NICHT anbietet, weil sie ins
+   * Verkaufsfenster gehöre. Live war die Folge: ein externer Verkauf aus
+   * lauter freien Artikeln zeigte eine offene Position ohne jede Aktion
+   * (`saleItemActions` nennt dafür `settle`, und das bietet die
+   * Positionsspalte bewusst nicht an), und die einzige Abhilfe lag hinter dem
+   * (i), das ein Stapelkontext unerreichbar machte. Der Verkauf liess sich
+   * nirgends abschliessen.
+   *
+   * Die Regel ist jetzt die umgekehrte, und sie ist eng gefasst: die Aktion
+   * gehört dorthin, wo gearbeitet wird — aber nur, wo sie etwas zu tun hat.
+   */
+  it("das Verkaufsbuch bietet die Verkaufsaktion — und nur, wo sie etwas tut", () => {
+    const footer = LEDGER.slice(LEDGER.indexOf("<LedgerExpansion"),
+                                LEDGER.indexOf("</LedgerExpansion>"));
+    expect(footer).toContain("copy.detailsModal.markShipped");
+    expect(footer).toContain("ship(sale.id)");
+    /* Die Einzelansicht bleibt daneben stehen. */
+    expect(footer).toContain("{copy.detail}");
+
+    /* Die fünf Bedingungen, jede einzeln. */
+    for (const guard of [
+      "sale.orderId === null",
+      "sale.shippedAt === null",
+      "sale.cancelledAt === null",
+      'sale.source === "excel_order_2026" && sale.stockReleasedAt === null',
+      "openFreeItemCount(",
+    ]) {
+      expect(footer, guard).toContain(guard);
+    }
+
+    /* Sie ruft die RPC aus 0112 über die bestehende Server Action. */
+    expect(LEDGER).toContain("shipSale(saleId)");
+    expect(ACTIONS).toContain('supabase.rpc("seller_ship_sale", { p_id: id })');
+  });
+
+  it("…und weiterhin keinen zweiten Weg je Position", () => {
     /*
-     * Die Positionsliste bietet weiterhin NUR die Aktionen, die Bestand
-     * bewegen oder eine Retoure weiterführen. `settle` je Position dort
-     * aufzunehmen wäre ein zweiter Weg zum selben Ergebnis — und der
-     * Kommentar in `sales-ledger.tsx` sagt seit 0072, warum nicht.
+     * `settle` je Position bleibt draussen. Die Verkaufsaktion schliesst
+     * ALLE freien Positionen in einer Transaktion; ein zweiter Weg daneben
+     * wäre einer zu viel, und D-3 hat sich ausdrücklich dafür entschieden.
      */
     const primary = LEDGER.slice(LEDGER.indexOf("const primary:"),
                                  LEDGER.indexOf("const run = can.primary"));
     expect(primary).not.toContain("settleSaleItem");
-    /* `\\b`, weil `shipSaleItem` das Präfix teilt und bleiben soll. */
-    expect(LEDGER).not.toMatch(/shipSale\b/);
+    expect(primary).not.toContain("shipSale(");
+    /* Das Verschicken EINER Regalposition bleibt, wo es war. */
     expect(LEDGER).toContain("shipSaleItem");
+  });
+
+  it("die Verkaufsaktion hat ihren eigenen Zustand, nicht den der Positionen", () => {
+    /*
+     * `busy` und `failed` sind nach `sale_items.id` geschlüsselt. Eine
+     * Verkaufs-ID dort hineinzulegen wäre eine Kollision, die niemand sieht:
+     * zwei Identitäten aus zwei Tabellen in einer Menge.
+     */
+    expect(LEDGER).toContain("const [shipping, setShipping]");
+    expect(LEDGER).toContain("const [shipFailed, setShipFailed]");
+    expect(LEDGER).toContain("shippingRef");
+    const ship = LEDGER.slice(LEDGER.indexOf("const ship = (saleId: number)"),
+                              LEDGER.indexOf("/* Details reuses"));
+    expect(ship).not.toContain("setBusy");
+    expect(ship).not.toContain("setFailed(");
+    /* Doppelklick fällt am Ref, nicht erst im Server. */
+    expect(ship).toContain("if (shippingRef.current.has(saleId)) return;");
+    /* Und die aufgeklappte Zeile wird danach nachgelesen. */
+    expect(ship).toContain("load(saleId, true)");
   });
 });

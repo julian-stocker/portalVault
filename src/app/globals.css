@@ -883,11 +883,35 @@
      0.75rem transparent stripe would sit between the scroll edge and the
      sticky cell, and the scrolled content would show through it.
    */
+  /*
+   * UND ES STEHT ÜBER DER ZEILEN-ÜBERLAGERUNG. 11 IST KEINE ZIERDE.
+   *
+   * Die Zeile legt einen durchsichtigen Knopf über ihre ganze Fläche
+   * (`LedgerRow`, `absolute inset-0 z-10`), damit ein Klick irgendwo die
+   * Positionen aufklappt. `position: sticky` mit einem eigenen `z-index`
+   * macht aus dieser Zelle aber einen STAPELKONTEXT — und damit ist jedes
+   * `z-20` an einem Knopf INNERHALB der Zelle wertlos: die Zelle als Ganzes
+   * lag bei 1, die Überlagerung bei 10, also fing die Überlagerung jeden
+   * Klick ab. Genau das machte das (i) vor dem Datum unerreichbar: die Zeile
+   * klappte auf, das Fenster öffnete nie, und kein `stopPropagation` kam je
+   * zum Zug, weil das Ereignis den Knopf nicht erreichte.
+   *
+   * 11 schlägt die 10. Erlaubt ist das, weil `LedgerRow` `isolate` trägt:
+   * der Wert kann die Zeile nicht verlassen und deshalb auch nicht den
+   * klebenden TABELLENKOPF überstimmen — die Sorge, die im Kommentar dort
+   * steht. Geprüft wird die Ungleichung in `sticky-first-cell.test.ts`;
+   * eine Zahl, auf die sich eine Bedienbarkeit stützt, darf nicht
+   * unbemerkt wandern.
+   *
+   * Der Preis, bewusst: ein Klick auf die Datumszelle klappt die Zeile nicht
+   * mehr auf. Aufgeklappt wird über den Rest der Zeile — Artikel, Serie,
+   * Beträge —, und das (i) tut jetzt, was es verspricht.
+   */
   .ob-row > :first-child,
   .ob-item > :first-child {
     position: sticky;
     left: 0;
-    z-index: 1;
+    z-index: 11;
     background: inherit;
     margin-left: -0.75rem;
     padding-left: 0.75rem;

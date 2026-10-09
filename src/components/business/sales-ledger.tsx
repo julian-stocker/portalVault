@@ -101,12 +101,13 @@ import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
   restockSaleItem, setSaleItemNotShipped, shipSaleItem,
-  type ItemResult } from "@/lib/orderbook/sales-actions";
+  shipSale, type ItemResult } from "@/lib/orderbook/sales-actions";
 import type { SaleRow, SalesSummary } from "@/lib/orderbook/sales-queries";
 import { commerceLineIndicator, commerceLineStatus } from "@/lib/orderbook/commerce-line-status";
 import {
   countryLabel, saleItemActions, saleStockIndicator, saleStockStatus, saleItemIndicator,
   legacyOutcome, type LegacyOutcome,
+  openFreeItemCount,
 } from "@/lib/orderbook/sales-view";
 
 /** Outcome → the sentence the status dot reads out (0087). */
@@ -284,6 +285,21 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
   const outstanding = useRef(0);
   const listStale = useRef(false);
 
+  /*
+   * DIE VERSANDAKTION EINES GANZEN VERKAUFS — EIGENER ZUSTAND, EIGENER
+   * SCHLÜSSEL.
+   *
+   * `busy` und `failed` sind nach `sale_items.id` geschlüsselt. Eine
+   * Verkaufs-ID in dieselbe Menge zu legen wäre eine Kollision, die niemand
+   * sieht: beide Folgen sind Identitäten aus verschiedenen Tabellen, und ein
+   * laufender Versand hätte irgendeine fremde Position gesperrt.
+   */
+  const [shipping, setShipping] = useState<ReadonlySet<number>>(() => new Set());
+  const [shipFailed, setShipFailed] = useState<ReadonlyMap<number, string>>(() => new Map());
+  const [shipDone, setShipDone] = useState<ReadonlyMap<number, { settled: number; open: number }>>(
+    () => new Map());
+  const shippingRef = useRef<Set<number>>(new Set());
+
   const load = useCallback((id: number, force = false) => {
     if (!force && loading.current.has(id)) return;
     const token = (reads.current.get(id) ?? 0) + 1;
@@ -305,6 +321,42 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
      * eine Sekunde lang nicht da ist.
      */
   }, []);
+
+  /**
+   * EIN EXTERNER VERKAUF WIRD VERSCHICKT — UND SEINE FREIEN POSITIONEN ENDEN.
+   *
+   * `seller_ship_sale` aus `0112`, unverändert: ein Aufruf, eine Transaktion.
+   * Hier wird nichts nachgerechnet; `settled` und `still_open` kommen aus der
+   * Datenbank, die sie gerade geschrieben hat.
+   *
+   * Danach wird die aufgeklappte Zeile nachgelesen. Die eingeklappte Zeile
+   * holt sich `revalidatePath` in der Server Action — Artikelzahl, Lagerpunkt
+   * und `is_open` kommen aus `seller_sales()` und werden nicht nachgeahmt.
+   */
+  const ship = (saleId: number) => {
+    if (shippingRef.current.has(saleId)) return;
+    shippingRef.current.add(saleId);
+    setShipping((current) => new Set(current).add(saleId));
+    setShipFailed((current) => {
+      if (!current.has(saleId)) return current;
+      const next = new Map(current); next.delete(saleId); return next;
+    });
+    void (async () => {
+      try {
+        const result = await shipSale(saleId);
+        if (!result.ok) {
+          setShipFailed((current) => new Map(current).set(saleId, result.message));
+          return;
+        }
+        setShipDone((current) => new Map(current)
+          .set(saleId, { settled: result.settled, open: result.stillOpen }));
+        load(saleId, true);
+      } finally {
+        shippingRef.current.delete(saleId);
+        setShipping((current) => { const next = new Set(current); next.delete(saleId); return next; });
+      }
+    })();
+  };
 
   /* Details reuses the same lazily-loaded payload the item list uses. */
   const onDetails = (id: number) => { setShowing(id); load(id); };
@@ -573,11 +625,58 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                       die eigene Seite des Verkaufs mit der vollen
                       Positionsliste.
                     */}
-                    <div className="px-3 pt-1.5">
+                    {/*
+                      DIE VERSANDAKTION STEHT DORT, WO GEARBEITET WIRD.
+
+                      Sie lag bis zur Produktionsabnahme nur im Verkaufsfenster
+                      — und damit hinter dem (i), das wegen eines
+                      Stapelkontexts nicht erreichbar war. Zusammen hiess das:
+                      ein externer Verkauf aus lauter freien Artikeln zeigte in
+                      der Liste eine offene Position OHNE jede Aktion
+                      (`saleItemActions` nennt dafür `settle`, und das bietet
+                      die Positionsspalte bewusst nicht an) und liess sich
+                      nirgends abschliessen.
+
+                      Angeboten nur, wenn es etwas zu tun gibt: ein externer,
+                      nicht verschickter, nicht stornierter, nicht gefrorener
+                      Verkauf mit mindestens einer OFFENEN FREIEN Position.
+                      Eine rein regalgebundene Position bekommt weiter ihr
+                      `Verschicken` je Zeile — zwei Wege zum selben Ergebnis
+                      wären einer zu viel.
+                    */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 pt-1.5">
                       <Link href={`/business/orderbuch/verkauf/${sale.id}?zurueck=${encodeURIComponent(backHref)}`}
                             className="text-xs text-muted underline underline-offset-2">
                         {copy.detail}
                       </Link>
+                      {detail !== undefined && detail !== "failed"
+                        && sale.orderId === null
+                        && sale.shippedAt === null
+                        && sale.cancelledAt === null
+                        && !(sale.source === "excel_order_2026" && sale.stockReleasedAt === null)
+                        && openFreeItemCount(
+                          (detail.items ?? []) as never[],
+                          { frozen: false, cancelled: false, shipped: false,
+                            historical: sale.source === "excel_order_2026" }) > 0 ? (
+                        <button type="button" disabled={shipping.has(sale.id)}
+                                onClick={() => ship(sale.id)}
+                                className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
+                          {shipping.has(sale.id) ? copy.itemRunning : copy.detailsModal.markShipped}
+                        </button>
+                      ) : null}
+                      {shipFailed.has(sale.id) ? (
+                        <span role="alert" className="text-xs text-danger">
+                          {shipFailed.get(sale.id)}
+                        </span>
+                      ) : null}
+                      {shipDone.has(sale.id) ? (
+                        <span role="status" className="text-xs text-muted">
+                          {copy.detailsModal.markShippedDone(shipDone.get(sale.id)!.settled)}
+                          {shipDone.get(sale.id)!.open > 0
+                            ? ` ${copy.detailsModal.markShippedStillOpen(shipDone.get(sale.id)!.open)}`
+                            : ""}
+                        </span>
+                      ) : null}
                     </div>
                   </LedgerExpansion>
                 ) : null}
