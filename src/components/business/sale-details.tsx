@@ -24,7 +24,7 @@ import { formatDeduction, formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
   addSaleFee, addSaleRefund, loadSaleAudit, removeSaleFee, removeSaleRefund,
-  updateSaleFee, updateSaleMeta,
+  shipSale, swapSaleDailyIndex, updateSaleFee, updateSaleMeta,
 } from "@/lib/orderbook/sales-actions";
 import {
   adjustmentsTotal, groupFees, refundsTotal,
@@ -174,6 +174,16 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
     note: sale.note ?? "",
     /* null = untouched, so the stored reference shows through until it is. */
   }));
+  /*
+   * Was das Verschicken getan hat, bis das Fenster neu lädt (0112).
+   *
+   * Nicht als Ersatz für den Zustand, sondern als Quittung: der Knopf
+   * schließt freie Positionen MIT, und wie viele es waren steht nirgends
+   * sonst. Bleibt etwas offen, sagt die zweite Zeile es ausdrücklich.
+   */
+  const [shipped, setShipped] = useState<{ settled: number; stillOpen: number } | null>(null);
+  /* Der getauschte Platz, bis das Fenster neu lädt (0113). */
+  const [swapped, setSwapped] = useState<number | null>(null);
   const [newFee, setNewFee] = useState({ kind: "payment", amount: "", settledBy: "channel", label: "" });
   const [newRefund, setNewRefund] = useState({ amount: "", reason: "", occurredAt: "" });
   const [audit, setAudit] = useState<Record<string, unknown>[]>([]);
@@ -190,10 +200,27 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
   const saleRow = (loaded?.sale ?? {}) as Record<string, unknown>;
   /* The stored reference shows through until the field is actually touched. */
   const historical = String(saleRow.source ?? sale.source) === "excel_order_2026";
+  /* Eine nicht freigegebene Werkbuchzeile wird nicht angefasst (0071). */
+  const frozen = historical && sale.stockReleasedAt === null;
   const fees = (loaded?.fees ?? []) as FeeRow[];
   const refunds = (loaded?.refunds ?? []) as RefundRow[];
   const adjustments = (loaded?.adjustments ?? []) as AdjustmentRow[];
   const { charges, labels } = groupFees(fees);
+
+  /*
+   * DER TAG, WIE DIE DATENBANK IHN SIEHT (0113).
+   *
+   * `day_order` nennt jeden belegten Platz des Tages mit der Verkaufs-ID
+   * dahinter. Hier wird nichts daraus erschlossen: eine Lücke — ein Verkauf,
+   * der seinen Tag gewechselt hat — soll sichtbar sein und nicht
+   * weggerechnet werden, und `1 … n` zu raten wäre genau das.
+   */
+  const dayOrder = (Array.isArray(loaded?.day_order) ? loaded.day_order : [])
+    .map((raw) => raw as Record<string, unknown>)
+    .map((row) => ({ id: Number(row.id), place: Number(row.daily_index) }))
+    .filter((row) => Number.isFinite(row.place));
+  const dayCount = loaded?.daily_index_count === undefined || loaded?.daily_index_count === null
+    ? dayOrder.length : Number(loaded.daily_index_count);
 
   // The database's number, never one computed here.
   const expected = loaded?.expected_payout === undefined || loaded?.expected_payout === null
@@ -213,6 +240,35 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
     if (!result.ok) { setError(result.message ?? null); return false; }
     onSaved();
     return true;
+  }
+
+  /*
+   * VERSCHICKT — UND DIE FREIEN POSITIONEN GLEICH MIT (0112).
+   *
+   * Ein eigener Pfad statt `run()`, weil die Antwort mehr als „ok" ist:
+   * `seller_ship_sale` sagt, wie viele Positionen es geschlossen hat und wie
+   * viele noch offen sind. Beides kommt aus der Datenbank und wird hier nicht
+   * nachgezählt.
+   */
+  async function markShipped() {
+    setSaving(true);
+    setError(null);
+    const result = await shipSale(sale.id);
+    setSaving(false);
+    if (!result.ok) { setError(result.message); return; }
+    setShipped({ settled: result.settled, stillOpen: result.stillOpen });
+    onSaved();
+  }
+
+  /* Tauschen heißt tauschen: der Verkauf auf dem Zielplatz bekommt diesen. */
+  async function swapPlace(place: number) {
+    setSaving(true);
+    setError(null);
+    const result = await swapSaleDailyIndex(sale.id, place);
+    setSaving(false);
+    if (!result.ok) { setError(result.message); return; }
+    setSwapped(result.dailyIndex);
+    onSaved();
   }
 
   const money = (raw: string): number | null => {
@@ -272,17 +328,95 @@ export function SaleDetails({ sale, detail, open, onClose, onSaved }: {
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Section title={modal.sale}>
           <Line label={copy.columns.date} value={formatDate(sale.soldAt)} />
+          {/*
+            DER PLATZ AM TAG (0113).
+
+            Immer sichtbar, sobald der Verkauf einen Tag hat — auch wenn er
+            der einzige ist. Eine Zahl, die nur bei mehreren erscheint, liest
+            sich als Fehler, wenn sie fehlt.
+          */}
+          <Line label={modal.dailyIndex}
+                value={sale.dailyIndex === null ? modal.dailyIndexNone
+                  : dayCount <= 1 ? modal.dailyIndexAlone
+                    : modal.dailyIndexOf(sale.dailyIndex, dayCount)} />
+          {/*
+            Getauscht wird nur, wo es einen Partner gibt. Die Liste kommt aus
+            der Datenbank; der eigene Platz steht nicht darin, weil ein
+            Tausch mit sich selbst nichts tut.
+          */}
+          {sale.dailyIndex !== null && dayOrder.length > 1 ? (
+            <>
+              <Field label={modal.swapPlace}>
+                <select value="" disabled={saving}
+                        onChange={(e) => {
+                          const place = Number(e.target.value);
+                          if (Number.isFinite(place) && place > 0) void swapPlace(place);
+                        }}
+                        className={`${INPUT} w-28`}>
+                  <option value="">—</option>
+                  {dayOrder.filter((row) => row.id !== sale.id).map((row) => (
+                    <option key={row.id} value={row.place}>{row.place}</option>
+                  ))}
+                </select>
+              </Field>
+              <p className="mt-1 text-xs text-muted">{modal.swapPlaceHint}</p>
+            </>
+          ) : null}
+          {swapped !== null ? (
+            <p role="status" className="mt-1 text-xs text-muted">
+              {modal.swapPlaceDone(swapped)}
+            </p>
+          ) : null}
           <Line label={modal.channel}
                 value={internal ? (sale.orderNumber ?? CHANNEL_LABELS.skyisles ?? "SkyIsles")
                                 : CHANNEL_LABELS[sale.channel] ?? sale.channel} />
           <Line label={copy.columns.country}
                 value={sale.country ? `${sale.country} · ${countryLabel(sale.country)}` : "—"} />
-          {sale.buyerRef ? <Line label={modal.buyer} value={sale.buyerRef} /> : null}
+          {/*
+            0113. `buyerLabel` statt `buyerRef`: extern die Referenz des
+            Marktplatzes, intern der Name aus der beim Kauf eingefrorenen
+            Lieferadresse (B-1). Die Zeile fehlte für Bestellungen ganz.
+          */}
+          {sale.buyerLabel ? (
+            <Line label={modal.buyer} value={sale.buyerLabel}
+                  hint={sale.buyerRepeat ? copy.repeatBuyer : null} />
+          ) : null}
           {sale.externalOrderRef
             ? <Line label={modal.reference} value={sale.externalOrderRef} /> : null}
           <Line label={modal.shippingState}
                 value={sale.shippedAt !== null || sale.fulfillmentStatus === "shipped"
                        || sale.fulfillmentStatus === "completed" ? copy.shipped : copy.notShipped} />
+          {/*
+            DIE EINE ORDER-AKTION, UND NUR WO SIE ETWAS BEWIRKEN KANN.
+
+            Nicht bei einer internen Bestellung — Commerce besitzt deren
+            Versandzustand (ADR-0089), und `seller_ship_sale` weist sie ab.
+            Nicht bei einer stornierten und nicht bei einer gefrorenen
+            Werkbuchzeile: beide würden ebenfalls abgelehnt, und ein Knopf,
+            der nur eine Regel vorlesen kann, ist kein Knopf.
+
+            Ein zweites Mal verschicken gibt es nicht. Das Datum steht dann,
+            und `seller_ship_sale` würde es auch nicht verschieben — aber
+            „Als verschickt markieren" neben einem datierten Versand wäre
+            eine Einladung, genau das zu erwarten. Zurücknehmen bleibt, wo es
+            war: `seller_set_sale_shipped(false)`.
+          */}
+          {!internal && sale.shippedAt === null && sale.cancelledAt === null && !frozen ? (
+            <div className="mt-2 border-t border-border/40 pt-2">
+              <button type="button" disabled={saving} onClick={() => void markShipped()}
+                      className={BUTTON}>
+                {modal.markShipped}
+              </button>
+              <p className="mt-1 text-xs text-muted">{modal.markShippedHint}</p>
+            </div>
+          ) : null}
+          {shipped !== null ? (
+            <p role="status" className="mt-1 text-xs text-muted">
+              {modal.markShippedDone(shipped.settled)}
+              {shipped.stillOpen > 0
+                ? ` ${modal.markShippedStillOpen(shipped.stillOpen)}` : ""}
+            </p>
+          ) : null}
           {/*
             Provenance survives a correction. An imported sale that has since
             been fixed is still an imported sale, and says so.

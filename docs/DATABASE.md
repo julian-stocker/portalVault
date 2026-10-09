@@ -3216,6 +3216,115 @@ Eine Erstattung war nie und ist nie eine Lagerbewegung.
 `order_refunds` einzeln auf und kennen die neun neuen nicht — dieselbe Klasse wie
 `order_reservations.sale_item_id` (3.3ak). Eine additive Folgemigration ist dafür vorgesehen.
 
+### 3.3am Ein Verkauf hat ein Ende, einen Platz am Tag und einen Käufer, den man wiedererkennt (`0112`, `0113`, ADR-0120)
+
+**Drei Probleme, die sich gegenseitig bedingten.**
+
+**1. Ein externer Verkauf aus lauter freien Artikeln hatte kein Ende.** Seit `0059` darf eine
+`sale_items`-Zeile ohne `sky_id` existieren — ein Portal, ein Spiel, ein Konvolut-Restposten, als
+`raw_name`. `sale_items_movement_needs_figure` macht eine Lagerbewegung für sie **unmöglich**, und
+genau das ist richtig. `sale_item_is_closed()` (`0075`) kennt für so eine Position deshalb nur ein
+Ende: `settled_at`. Geschrieben hat das bis `0112` ausschließlich
+`seller_settle_sale_item(p_item_id, true)` — eine Position pro Aufruf, nur auf der Detailseite. Ein
+Verkauf, der nur aus freien Artikeln besteht, stand im Verkaufsbuch für immer auf `Offen`. Dazu
+kam, dass `sales.shipped_at` sich **überhaupt nur** als Nebenwirkung von
+`seller_ship_sale_item()` datieren ließ, und das verlangt eine Regalposition.
+
+`0112` legt dafür **eine** Funktion an:
+
+```sql
+seller_ship_sale(p_id bigint) returns jsonb
+```
+
+Sie datiert `sales.shipped_at` (per `coalesce`, ein zweiter Aufruf verschiebt nichts) und ruft in
+derselben Transaktion `seller_settle_sale_item(id, true)` für jede Position mit `sky_id IS NULL`,
+die `sale_item_is_closed()` noch nicht als beendet sieht. **Sie baut keine Regel nach:** was
+„erledigt" heißt, entscheidet weiterhin `seller_settle_sale_item()` allein — idempotent, keine
+interne Bestellung, keine nicht freigegebene Arbeitsmappenzeile, keine Katalogfigur, Hold vorher
+freigeben. Die Auswahl `sky_id IS NULL` ist die ganze Sicherheit: eine Regalposition kommt nie in
+die Schleife, in keiner Richtung. Zurückgemeldet werden `settled` und `still_open`, damit ein
+gemischter Verkauf nicht als „abgeschlossen" gelesen wird, während seine Figuren noch auf dem
+Regal liegen.
+
+Abgewiesen werden: eine interne Bestellung (Commerce besitzt ihren Versandzustand, ADR-0089), eine
+stornierte und eine nicht freigegebene historische. `0112` erzeugt **keine** Spalte, keinen
+Trigger, keinen Index und keine Lagerbewegung.
+
+**2. Zwei Verkäufe am selben Tag hatten keine Reihenfolge, die der Betrieb bestimmt.** Das
+Verkaufsbuch sortierte `effective_date desc nulls last, id desc` — also nach der Reihenfolge, in
+der eine Zeile zufällig angelegt wurde. Ein nachgetragener Verkauf landete oben.
+
+`0113` materialisiert den Geschäftstag und den Platz darin:
+
+```sql
+sales.sale_day    date      -- extern sold_at, intern orders.paid_at::date
+sales.daily_index integer   -- 1…n innerhalb des Tages, höchster oben
+create unique index sales_daily_index_uniq on public.sales (sale_day, daily_index)
+  where sale_day is not null and daily_index is not null;
+```
+
+`NULL` heißt in beiden Spalten dasselbe: **dieser Verkauf hat keinen Tag.** Fünf historische
+Gruppen tragen einen Tippfehler, wo ihr Datum stehen sollte (`0058`), und eine interne Bestellung
+vor der Zahlung hat noch keinen. Sie bekommen keinen Platz in einem Tag, den sie nicht haben, und
+der Teilindex lässt sie aus.
+
+`sale_day_of(p_order_id, p_sold_at)` ist die **eine** Ableitung — genau der `case`, den
+`seller_sales()` seit `0059` im Rumpf trug. Trigger, Backfill und Nachbedingung rufen sie;
+`seller_sales()` liest nur noch die Spalte. Zwei Trigger halten sie wahr:
+`sales_set_day_and_index_trg` (BEFORE INSERT OR UPDATE auf `sales`) leitet den Tag immer selbst ab
+und vergibt `max+1` unter einer Vorratssperre je Tag; `orders_restate_sale_day_trg` (AFTER UPDATE
+OF `paid_at` auf `orders`) stößt den Verkauf an, wenn die Bestellung ihren Zahlungszeitpunkt
+bekommt oder ändert.
+
+**Der Trigger hat genau eine Tür**, und sie ist der Grund, warum eine Notiz oder eine
+Auszahlungskorrektur die Tagesreihenfolge nicht durcheinanderbringt: ein UPDATE, das den Tag
+unverändert lässt und selbst einen Platz nennt, behält ihn.
+
+```sql
+seller_swap_sale_daily_index(p_id bigint, p_with_index integer) returns jsonb
+```
+
+Ein **Tausch**, keine Verschiebung: die Menge der Plätze eines Tages bleibt dieselbe. Umgesetzt in
+drei Anweisungen, weil PostgreSQL eine Unique-Bedingung **je Zeile** prüft — ein einzelnes UPDATE
+über beide Zeilen scheitert an der ersten. Geparkt wird auf `-p_with_index`: negativ, kollidiert
+mit keinem echten Platz, und die Tagessperre lässt keinen zweiten Tausch gleichzeitig zu. Deshalb
+gibt es **keinen** CHECK `daily_index > 0` — er würde genau diese Transaktion verbieten.
+
+**Der Backfill steht vor den Triggern**, und das ist keine Stilfrage: liefe die Vergabe schon,
+bekäme jede Zeile ihren Platz in der Reihenfolge, in der PostgreSQL sie zufällig aktualisiert, und
+zwei Umgebungen hätten für dieselben Daten verschiedene Tagesreihenfolgen. Vergeben wird
+`row_number() over (partition by sale_day order by id)` — Tie-Breaker `id`, nicht `created_at`:
+zwei importierte Zeilen derselben Arbeitsmappe tragen denselben Zeitstempel. `updated_at` bleibt
+dabei stehen; ein Backfill ist keine Korrektur des Betreibers.
+
+**3. Niemand sah, wer schon einmal gekauft hatte.** `seller_sales()` liefert jetzt
+`buyer_repeat`. Der Schlüssel ist bewusst eng:
+
+| | Schlüssel | |
+|---|---|---|
+| intern | `'skyisles:' \|\| orders.user_id` | Die Konto-ID, sonst nichts. Ein Gastkauf hat keine und ist deshalb **nie** ein Wiederholungskauf und macht auch keinen anderen zu einem. |
+| extern | `channel \|\| ':' \|\| lower(btrim(buyer_ref))` | Quelle **und** Benutzername. `ebay:x` und `manual:x` sind zwei Käufer, bis jemand das Gegenteil weiß. |
+
+Kein Name, keine E-Mail-Adresse, keine Adresse, und zwei Quellen werden nie automatisch
+verknüpft. Stornierte und als Test klassifizierte Verkäufe fallen **vollständig** aus dem Fenster:
+sie markieren niemanden und werden selbst nicht markiert. Entschieden wird an
+`(sale_day, daily_index, id)` aufsteigend — also genau der Reihenfolge, die der Bildschirm zeigt,
+rückwärts gelesen — und über **alle** Verkäufe, nicht über die gefilterte Seite: der erste Kauf im
+Januar macht den im Oktober zum Wiederholungskauf, auch wenn nur Oktober angezeigt wird.
+
+**Daneben: `buyer_label`.** Die Spalte `Käufer` war für interne Verkäufe leer, weil `buyer_ref`
+dem externen Verkauf gehört und `orders_register_sale()` dort nichts hineinschreibt. `buyer_label`
+ist extern `buyer_ref` und intern der Name aus der beim Kauf eingefrorenen Lieferadresse.
+`buyer_ref` bleibt **unverändert** daneben — es ist die Referenz, mit der der Betrieb auf dem
+Marktplatz nachsieht, und kein Anzeigename. Der Name wird **nie** zum Abgleichen benutzt.
+
+**Was `0112` und `0113` nicht anfassen:** Bestand, Lagerbewegungen, Holds, Reservierungen,
+`order_refunds`, `payment_events`, Rechnungen, Beträge. Geschrieben wird an Daten genau zweimal,
+beides Backfill der zwei neuen Spalten. Die Zählungen, die Offen-Regel und die Summen von
+`seller_sales()` sind gegenüber `0075` **zeichenweise unverändert**, und ein Test vergleicht sie
+so.
+
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**

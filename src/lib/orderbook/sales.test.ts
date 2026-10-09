@@ -1298,26 +1298,39 @@ describe("the Excel financial row", () => {
     expect(DETAILS).toContain("copy.shipped");
   });
 
-  it("Details is reachable from the expanded row, and still a control of its own", () => {
+  it("Details ist das (i) in der Datumszelle — ohne Aufklappen, aus jeder Zeile", () => {
     /*
-     * KEINE EIGENE SPALTE MEHR, UND DESHALB AUCH KEIN `stopPropagation`.
+     * EIN WEG ZUM FENSTER, UND ER LIEGT IN DER ZEILE.
      *
-     * Der Knopf stand in einer 5,5rem-Spur jeder Zeile und musste die
-     * durchsichtige Überlagerung der Zeile überstimmen — daher `z-20` und
-     * das Stoppen des Ereignisses. Er steht jetzt in der aufgeklappten
-     * Zeile neben dem Link auf die Einzelansicht, wo keine Überlagerung
-     * darüber liegt: dasselbe Fenster, ein Klick mehr zum Aufklappen, und
-     * eine Spalte weniger in dreißig Zeilen.
+     * Zwei Releases lang stand der Knopf in der aufgeklappten Zeile: um die
+     * Beträge eines Verkaufs zu sehen, musste man erst die Positionsliste
+     * öffnen, die man dafür nicht braucht. Jetzt ist es das (i) vor dem
+     * Datum — in jeder Zeile, mit einem Klick.
+     *
+     * UND DESHALB BRAUCHT ER `stopPropagation` UND `z-20` WIEDER. Über der
+     * ganzen Zeile liegt der durchsichtige Aufklapp-Knopf (`absolute inset-0
+     * z-10`), und er steht später im DOM. Ein echter Knopf in einer Zelle
+     * muss darüber liegen und sein Ereignis anhalten, sonst klappt der Klick
+     * die Zeile auf, statt das Fenster zu öffnen.
      */
     const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));
-    expect(row).not.toContain("onDetails");
-    expect(row).not.toContain("stopPropagation");
+    expect(row).toContain("onDetails(sale.id)");
+    expect(row).toContain("event.stopPropagation()");
+    expect(row).toMatch(/relative z-20/);
+    /* Kein „i" als ganzer Name: der zugängliche Name nennt den Verkauf. */
+    expect(row).toContain("aria-label={copy.detailsFor(formatDate(sale.soldAt))}");
+    expect(de.business.sales.detailsFor("07.10.2026")).toContain("07.10.2026");
+
+    /*
+     * UND NICHT MEHR IN DER AUFGEKLAPPTEN ZEILE. Ein Fenster über zwei Wege,
+     * von denen einer versteckt ist, wären zwei Stellen zu pflegen.
+     */
     const expansion = LEDGER.slice(LEDGER.indexOf("<LedgerExpansion"),
                                    LEDGER.indexOf("</LedgerExpansion>"));
-    expect(expansion).toContain("onClick={() => onDetails(sale.id)}");
-    expect(expansion).toContain("{copy.columns.details}");
-    // Und die Einzelansicht bleibt daneben erreichbar — keine Information weg.
+    expect(expansion).not.toContain("onDetails");
+    // Die Einzelansicht bleibt — sie tut etwas anderes als das Fenster.
     expect(expansion).toContain("{copy.detail}");
+
     // Two separate pieces of state: one for items, one for the dialog.
     expect(LEDGER).toContain("const [showing, setShowing]");
     expect(LEDGER).toMatch(/const onDetails = \(id: number\) => \{ setShowing\(id\); load\(id\); \};/);

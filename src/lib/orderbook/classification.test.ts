@@ -212,7 +212,9 @@ describe("`Datum fehlt` became a real classification, not a new label", () => {
 describe("what Unvollständig means, separately for each of the three", () => {
   const EXTERNAL = SALES.slice(SALES.indexOf("else b.effective_date is null"),
                                SALES.indexOf("as is_incomplete"));
-  const INTERNAL = SALES.slice(SALES.indexOf("case when b.order_id is not null"),
+  /* Mit der öffnenden Klammer: seit 0113 steht `case when b.order_id is not
+     null` auch im Käuferschlüssel, und der kommt im Rumpf zuerst. */
+  const INTERNAL = SALES.slice(SALES.indexOf("(case when b.order_id is not null"),
                                SALES.indexOf("else b.effective_date is null"));
 
   it("Einkauf: no date, or a hand-made purchase with nothing in it", () => {

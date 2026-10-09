@@ -54,15 +54,22 @@
  *   `Lager`        war 7,5rem Text — mehr als Summe und Versand zusammen.
  *                  Dieselbe Aussage steht jetzt als Punkt in `Artikel`, mit
  *                  demselben Satz im Tooltip und im zugänglichen Namen.
- *   `Details`      keine eigene Spalte mehr. Der Knopf steht in der
- *                  aufgeklappten Zeile, neben dem Link auf die Einzelansicht.
+ *   `Details`      keine eigene Spalte mehr — und auch nicht mehr in der
+ *                  aufgeklappten Zeile. Ein (i) VOR dem Datum öffnet dasselbe
+ *                  Fenster, bei jeder Zeile, ohne Aufklappen. Es sitzt IN der
+ *                  Datumsspur und nicht in einer eigenen: `.ob-row >
+ *                  :first-child` klebt am linken Rand, und eine eigene erste
+ *                  Spur hätte das Icon klebend gemacht und das Datum
+ *                  wegscrollen lassen. Die Spur ist dafür 1,75rem breiter.
+ *                  Der Link auf die Einzelansicht bleibt in der Aufklappung —
+ *                  er führt woandershin.
  *
  * Die Geldspuren sind fest und schmal, nicht mehr `minmax(5rem, 1fr)`: acht
  * mitwachsende Geldspalten haben die Tabelle auf 71rem gehalten, obwohl
  * „12,34 €" in 4rem passt. Der gewonnene Platz geht an den Käufer.
  */
 const SALE_COLUMNS =
-  "5.5rem 2.25rem 5.5rem 5rem 4.25rem 4.25rem 4.25rem 4.25rem 4.5rem minmax(6rem, 1fr)";
+  "7.25rem 2.25rem 5.5rem 5rem 4.25rem 4.25rem 4.25rem 4.25rem 4.5rem minmax(6rem, 1fr)";
 
 /*
  * The item track list lives in `sale-indicator.tsx` and is shared with the
@@ -78,12 +85,13 @@ const SALE_COLUMNS =
  */
 
 /*
- * 17rem schmaler als vorher: zehn Spuren statt elf, und die acht Geldspuren
- * sind fest statt mitwachsend. Was die Spuren an ihren Untergrenzen brauchen,
- * plus die Lücken, plus den Innenabstand der Zeile — `sales.test.ts` rechnet
- * das nach, damit diese Zahl keine Schätzung bleibt.
+ * 15rem schmaler als vor der Verdichtung: zehn Spuren statt elf, und die acht
+ * Geldspuren sind fest statt mitwachsend. Die 1,75rem gegenüber den 54rem
+ * davor sind das (i) in der Datumsspur. Was die Spuren an ihren Untergrenzen
+ * brauchen, plus die Lücken, plus den Innenabstand der Zeile — `sales.test.ts`
+ * rechnet das nach, damit diese Zahl keine Schätzung bleibt.
  */
-const SALE_MIN_WIDTH = "54rem";
+const SALE_MIN_WIDTH = "56rem";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -434,10 +442,35 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                            label={<>
                              {expanded ? copy.collapse : copy.expand} — {formatDate(sale.soldAt)}, {formatPrice(gross)}
                            </>}>
-                  {/* Date, plus the row's classification marks — see `RowMarks`. */}
-                  <span className={sale.soldAt === null ? "font-medium text-muted" : "font-medium tabular-nums"}>
-                    {formatDate(sale.soldAt)}
-                    <RowMarks isTest={sale.isTest} isIncomplete={sale.isIncomplete} isOpen={sale.isOpen} />
+                  {/*
+                    DAS (i) UND DAS DATUM IN EINER ZELLE.
+                    
+                    Das Icon öffnet dasselbe Geldfenster, das vorher am Ende
+                    der aufgeklappten Zeile hing — jetzt bei JEDER Zeile und
+                    ohne Aufklappen. Es sitzt in der Datumsspur, weil
+                    `.ob-row > :first-child` am linken Rand klebt: eine eigene
+                    erste Spur hätte beim Seitwärtsscrollen ein Icon ohne
+                    Datum stehen lassen.
+                    
+                    `relative z-20` UND `stopPropagation`, und beides ist
+                    nötig. Die durchsichtige Überlagerung der Zeile trägt
+                    `z-10` und kommt SPÄTER im DOM — bei gleichem z-index
+                    gewinnt sie und schluckt den Klick. Genau das ist der
+                    Spalte „Details" schon einmal passiert.
+                  */}
+                  <span className="flex min-w-0 items-center gap-1">
+                    <button type="button"
+                            aria-label={copy.detailsFor(formatDate(sale.soldAt))}
+                            title={copy.columns.details}
+                            onClick={(event) => { event.stopPropagation(); onDetails(sale.id); }}
+                            className="relative z-20 flex size-11 shrink-0 items-center justify-center rounded-sky-md text-xs text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 sm:size-6">
+                      <span aria-hidden="true">i</span>
+                    </button>
+                    <span className={`min-w-0 truncate ${
+                      sale.soldAt === null ? "font-medium text-muted" : "font-medium tabular-nums"}`}>
+                      {formatDate(sale.soldAt)}
+                      <RowMarks isTest={sale.isTest} isIncomplete={sale.isIncomplete} isOpen={sale.isOpen} />
+                    </span>
                   </span>
                   {/* `EU` in the workbook, and what it holds is the code. */}
                   <span className="truncate text-xs text-muted" title={countryLabel(sale.country)}>
@@ -484,9 +517,30 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                     eBay-Benutzername ist mal sechs und mal dreißig Zeichen
                     lang, und abgeschnitten steht er immer noch im `title`.
                   */}
-                  <span className="truncate text-xs text-muted"
-                        title={sale.buyerRef ?? undefined}>
-                    {sale.buyerRef ?? "—"}
+                  {/*
+                    WIEDERHOLUNGSKÄUFER, GRÜN — UND NICHT NUR GRÜN (0113).
+
+                    `buyerRepeat` kommt aus `seller_sales()` und wird hier
+                    nicht nachgerechnet: die Antwort hängt an einem Fenster
+                    über ALLE Verkäufe, und die Zeile kennt nur ihre eigene.
+
+                    Das `↻` trägt die Aussage ohne Farbe — Graustufen,
+                    `forced-colors`, Farbenblindheit — und hat einen eigenen
+                    zugänglichen Namen. Dieselbe Regel wie beim Lagerpunkt.
+
+                    `buyerLabel` statt `buyerRef`: extern die Referenz des
+                    Marktplatzes, intern der Name aus der Lieferadresse
+                    (B-1). Die Spalte war für Bestellungen leer.
+                  */}
+                  <span className={`flex min-w-0 items-center gap-1 text-xs ${
+                    sale.buyerRepeat ? "font-medium text-success" : "text-muted"}`}
+                        title={sale.buyerRepeat
+                          ? `${sale.buyerLabel ?? ""} · ${copy.repeatBuyerHint}`.trim()
+                          : sale.buyerLabel ?? undefined}>
+                    {sale.buyerRepeat ? (
+                      <span aria-label={copy.repeatBuyer} className="shrink-0">↻</span>
+                    ) : null}
+                    <span className="truncate">{sale.buyerLabel ?? "—"}</span>
                   </span>
                 </LedgerRow>
 
@@ -507,21 +561,19 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                                   failed={failed} act={act} />
                     )}
                     {/*
-                      DETAILS UND EINZELANSICHT, BEIDE HIER UNTEN.
+                      NUR NOCH DIE EINZELANSICHT.
 
-                      `Details` hatte eine eigene 5,5rem-Spalte in jeder
-                      Zeile, für einen Knopf, der bei einem von dreißig
-                      Verkäufen gedrückt wird. Er steht jetzt in der
-                      aufgeklappten Zeile neben dem Link, der schon dort
-                      war — erreichbar bleibt also beides, nur kostet es
-                      keine Spalte mehr. Kein `stopPropagation` nötig: hier
-                      liegt keine Überlagerung der Zeile darüber.
+                      Der „Details"-Knopf stand hier zwei Releases lang und
+                      ist jetzt das (i) in der Datumszelle — bei jeder Zeile
+                      und ohne Aufklappen erreichbar. Er kommt hier nicht
+                      zurück: ein Fenster, zwei Wege, einer davon versteckt,
+                      wäre eine Einladung, beide zu pflegen.
+
+                      Der Link bleibt, weil er etwas ANDERES tut: er führt auf
+                      die eigene Seite des Verkaufs mit der vollen
+                      Positionsliste.
                     */}
-                    <div className="flex flex-wrap items-center gap-4 px-3 pt-1.5">
-                      <button type="button" onClick={() => onDetails(sale.id)}
-                              className="text-xs text-muted underline underline-offset-2 hover:text-fg">
-                        {copy.columns.details}
-                      </button>
+                    <div className="px-3 pt-1.5">
                       <Link href={`/business/orderbuch/verkauf/${sale.id}?zurueck=${encodeURIComponent(backHref)}`}
                             className="text-xs text-muted underline underline-offset-2">
                         {copy.detail}

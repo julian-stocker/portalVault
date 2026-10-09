@@ -89,6 +89,18 @@ function message(error: { code?: string; message?: string }): string {
    * without a sentence again.
    */
   if (text.includes("lines are owned by commerce")) return copy.errors.commerceOwned;
+  /* 0112. Nicht über `nothing left the shelf` mitgefangen: `seller_ship_sale`
+     formuliert die Ablehnung in seinen eigenen Worten. */
+  if (text.includes("cancelled sale is not shipped")) return copy.errors.saleCancelled;
+  /*
+   * 0113. Die drei Ablehnungen des Platztauschs. Keine ist ein Fehler des
+   * Betreibers — zwei bedeuten „der Bildschirm ist veraltet", eine „dieser
+   * Verkauf hat keinen Tag".
+   */
+  if (text.includes("without a day has no place")) return copy.errors.undatedHasNoPlace;
+  if (text.includes("no sale holds that place")
+      || text.includes("changed its day concurrently")) return copy.errors.placeGone;
+  if (text.includes("a place in a day starts at one")) return copy.errors.placeGone;
   if (text.includes("historical sale has not been released")) return copy.errors.notReleased;
   if (text.includes("leaves stock by being booked")) return copy.errors.mustBeBooked;
   if (text.includes("return has already arrived")) return copy.errors.returnArrived;
@@ -271,6 +283,59 @@ export async function updateSaleMeta(
 
 export async function setSaleShipped(id: number, shipped: boolean) {
   return run("seller_set_sale_shipped", { p_id: id, p_shipped: shipped }, id);
+}
+
+/** Was aus dem Tausch zurückkommt: der neue Platz, oder die Ablehnung. */
+export type SwappedPlace =
+  | { ok: true; moved: boolean; dailyIndex: number }
+  | { ok: false; message: string };
+
+/**
+ * ZWEI VERKÄUFE TAUSCHEN IHREN PLATZ AM TAG (0113).
+ *
+ * Ein Aufruf, eine Transaktion. Der Server tauscht; hier wird nichts
+ * umsortiert und nichts nachgerechnet — der Platz, der zurückkommt, IST der
+ * neue Platz.
+ */
+export async function swapSaleDailyIndex(id: number, withIndex: number): Promise<SwappedPlace> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_swap_sale_daily_index", {
+    p_id: id, p_with_index: withIndex,
+  });
+  if (error) return { ok: false, message: message(error) };
+  for (const p of paths(id)) revalidatePath(p);
+  const result = (data ?? {}) as { moved?: boolean; daily_index?: number };
+  return { ok: true, moved: result.moved === true, dailyIndex: Number(result.daily_index ?? withIndex) };
+}
+
+/** Was aus dem Verschicken zurückkommt: wie viel geschlossen wurde, und was bleibt. */
+export type ShippedSale =
+  | { ok: true; settled: number; stillOpen: number }
+  | { ok: false; message: string };
+
+/**
+ * EIN EXTERNER VERKAUF, IN EINEM KLICK FERTIG (0112).
+ *
+ * WARUM NICHT ZWEI BESTEHENDE AUFRUFE HINTEREINANDER. `seller_settle_sale_item`
+ * je freier Position und danach `seller_set_sale_shipped` wären N+1
+ * Transaktionen. Fällt eine davon aus, steht ein Verkauf da, dessen Positionen
+ * erledigt sind und dessen Versand nicht datiert ist — oder umgekehrt. Beides
+ * ist ein Zwischenzustand, den niemand sieht und den jemand von Hand
+ * aufräumen müsste. `seller_ship_sale` macht beides in einer Transaktion.
+ *
+ * Diese Funktion rechnet nichts aus. `settled` und `still_open` kommen aus
+ * der Datenbank, die sie gerade geschrieben hat; eine zweite Zählung hier
+ * wäre eine zweite Wahrheit über denselben Verkauf.
+ */
+export async function shipSale(id: number): Promise<ShippedSale> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_ship_sale", { p_id: id });
+  if (error) return { ok: false, message: message(error) };
+  for (const p of paths(id)) revalidatePath(p);
+  const result = (data ?? {}) as { settled?: number; still_open?: number };
+  return { ok: true, settled: Number(result.settled ?? 0), stillOpen: Number(result.still_open ?? 0) };
 }
 
 /**

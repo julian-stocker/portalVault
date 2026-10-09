@@ -440,6 +440,14 @@ describe("every refusal a sale action can hit has a sentence", () => {
   const FUNCTIONS = [
     "seller_book_sale_item", "seller_settle_sale_item",
     "seller_set_sale_item_not_shipped", "seller_announce_sale_item_return",
+    /*
+     * 0112. Die Order-Aktion „Als verschickt markieren" steht an einem Knopf
+     * im Verkaufsfenster, also gilt für ihre Ablehnungen dasselbe: eine ohne
+     * Satz ist eine, die der Betreiber als „Das hat nicht geklappt." liest.
+     * Die Regeln, die sie aus `seller_settle_sale_item` mitbringt, deckt
+     * dessen eigene Zeile oben ab.
+     */
+    "seller_ship_sale",
   ];
 
   /** Latest definition wins, as it does in the database. */
@@ -467,6 +475,14 @@ describe("every refusal a sale action can hit has a sentence", () => {
   const DELIBERATELY_GENERIC = [
     "seller operator role required",
     "no such sale item",
+    /*
+     * 0112. Ein Verkauf, der zwischen dem Rendern der Zeile und dem Klick
+     * verschwindet, ist keine Regel, nach der sich der Betreiber richten
+     * kann — und ein Muster `no such sale` würde `no such sale item`
+     * mitfangen und ihm den falschen Satz geben. Die allgemeine Meldung plus
+     * der Servereintrag ist hier die ehrlichere Antwort.
+     */
+    "no such sale",
   ];
 
   it("finds the functions to check", () => {

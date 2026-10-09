@@ -621,14 +621,40 @@ export function saleStockIndicator(status: SaleStockStatus): SaleItemIndicator {
   }
 }
 
-/** Newest first, undated last — the same rule the Einkauf ledger follows. */
-export function sortSales<T extends { soldAt: string | null; id: number }>(rows: readonly T[]): T[] {
+/**
+ * Newest first, undated last — the same rule the Einkauf ledger follows.
+ *
+ * SEIT 0113 ENTSCHEIDET DER TAG NICHT MEHR ALLEIN.
+ *
+ * Zwei Verkäufe am selben Tag standen vorher nach `id` — also nach der
+ * Reihenfolge, in der sie zufällig angelegt wurden. Jetzt entscheidet
+ * `dailyIndex`, den der Betrieb tauschen kann, höchster oben (D-1). `id`
+ * bleibt der letzte Ausweg: ein undatierter Verkauf hat keinen Platz in einem
+ * Tag, und zwei davon brauchen trotzdem eine feste Reihenfolge.
+ *
+ * DIESELBE ORDNUNG WIE `seller_sales()`. Nicht, weil der Server ihr nicht zu
+ * trauen wäre, sondern damit der Bildschirm nie eine zufällige Reihenfolge
+ * erbt — und damit „Wiederholungskäufer" (B) über derselben Reihenfolge
+ * entschieden wird, die man sieht.
+ */
+export function sortSales<T extends {
+  soldAt: string | null; id: number; dailyIndex?: number | null;
+}>(rows: readonly T[]): T[] {
+  const place = (row: T): number | null => row.dailyIndex ?? null;
   return [...rows].sort((a, b) => {
-    if (a.soldAt === null || b.soldAt === null) {
-      if (a.soldAt === b.soldAt) return b.id - a.id;
-      return a.soldAt === null ? 1 : -1;
+    if (a.soldAt !== b.soldAt) {
+      if (a.soldAt === null) return 1;
+      if (b.soldAt === null) return -1;
+      return a.soldAt < b.soldAt ? 1 : -1;
     }
-    return a.soldAt === b.soldAt ? b.id - a.id : (a.soldAt < b.soldAt ? 1 : -1);
+    const pa = place(a);
+    const pb = place(b);
+    if (pa !== pb) {
+      if (pa === null) return 1;
+      if (pb === null) return -1;
+      return pb - pa;
+    }
+    return b.id - a.id;
   });
 }
 

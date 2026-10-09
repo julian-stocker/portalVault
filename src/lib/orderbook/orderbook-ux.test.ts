@@ -484,7 +484,10 @@ describe("5. die Verkaufszeile zeigt Artikel und Käufer", () => {
   it("Artikelanzahl und Käufer stehen in der Zeile", () => {
     const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));
     expect(row).toContain("{copy.itemsCount(sale.itemCount)}");
-    expect(row).toContain("{sale.buyerRef ?? \"—\"}");
+    /* 0113: `buyerLabel` statt `buyerRef` — extern die Marktplatzreferenz,
+       intern der Name aus der Lieferadresse. Die Zelle war für Bestellungen
+       leer, und `buyerRef` steht daneben weiter im Lesemodell. */
+    expect(row).toContain("{sale.buyerLabel ?? \"—\"}");
     expect(de.business.sales.itemsCount(1)).toBe("1 Artikel");
     expect(de.business.sales.itemsCount(3)).toBe("3 Artikel");
     /*
@@ -494,6 +497,7 @@ describe("5. die Verkaufszeile zeigt Artikel und Käufer", () => {
     const queries = read("src/lib/orderbook/sales-queries.ts");
     expect(queries).toContain("itemCount: n(r.item_count),");
     expect(queries).toContain("buyerRef: (r.buyer_ref as string) ?? null,");
+    expect(queries).toContain("buyerLabel: (r.buyer_label as string) ?? null,");
   });
 
   it("der Lagerstatus bleibt sichtbar — als Punkt mit vollem Namen", () => {
@@ -544,10 +548,11 @@ describe("5. die Verkaufszeile zeigt Artikel und Käufer", () => {
     expect(DETAILS).toContain("copy.summary.expected");
     expect(DETAILS).toContain("loaded?.expected_payout");
     expect(de.business.sales.columns.payout).toBe("Auszahlung");
-    // Und der Weg dorthin steht in der aufgeklappten Zeile.
-    const expansion = LEDGER.slice(LEDGER.indexOf("<LedgerExpansion"),
-                                   LEDGER.indexOf("</LedgerExpansion>"));
-    expect(expansion).toContain("onDetails(sale.id)");
+    /* Und der Weg dorthin steht in der Zeile selbst — das (i) vor dem
+       Datum, ohne die Positionsliste aufzuklappen, die man dafür nicht
+       braucht. */
+    const row = LEDGER.slice(LEDGER.indexOf("<LedgerRow "), LEDGER.indexOf("</LedgerRow>"));
+    expect(row).toContain("onDetails(sale.id)");
   });
 
   it("die Geldspalten sind eng, EU ist sehr schmal, Käufer wächst mit", () => {

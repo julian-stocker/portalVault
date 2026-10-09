@@ -10360,3 +10360,117 @@ ohne Wirkung, kein Fehler bei Stripe, kein Wiederholungslauf.
 **Verworfen.** Das Beibehalten des Charge-Parsers „für den Fall, dass die Liste doch kommt" (eine
 Annahme, die nur manchmal stimmt, ist schlimmer als keine). Zuordnung einer Erstattung über den
 Betrag. Ein Stripe-API-Schlüssel in `stripe-webhook`, um die Erstattungsliste nachzuladen.
+
+
+## ADR-0120 — Ein Verkauf hat ein Ende, einen Platz am Tag und einen Käufer, den man wiedererkennt
+
+**Status:** angenommen, 2026-10-07 · Migrationen `0112`, `0113` · **nicht angewendet**
+**Bezug:** ADR-0089 (Orderbuch: `sales` ist die eine Tabelle, Commerce besitzt die Bestellung),
+ADR-0092 (ein Verkauf entsteht in einer Transaktion), ADR-0099 (vier Enden einer Position),
+ADR-0116 (External Holds), ADR-0117 (freie Positionen über `raw_name`)
+
+### Teil 1 — Ein externer Verkauf aus lauter freien Artikeln konnte nicht enden
+
+**Problem.** `0059` erlaubt eine `sale_items`-Zeile ohne `sky_id` — ein Portal, ein Spiel, ein
+Konvolut-Restposten, als `raw_name`. `sale_items_movement_needs_figure` macht eine Lagerbewegung
+für sie strukturell unmöglich, und das ist richtig: für das Lager existiert sie nicht.
+`sale_item_is_closed()` kennt für sie deshalb nur ein Ende, `settled_at` — und das schrieb bis
+`0112` ausschließlich `seller_settle_sale_item()`, eine Position pro Aufruf und nur auf der
+Detailseite. Ein Verkauf aus lauter freien Artikeln stand im Verkaufsbuch für immer auf `Offen`,
+obwohl das Paket längst weg war. Dazu kam, dass `sales.shipped_at` sich überhaupt nur als
+Nebenwirkung von `seller_ship_sale_item()` datieren ließ, und das verlangt eine Regalposition.
+
+**Entscheidung.** Eine **atomare serverseitige Order-Aktion**, `seller_ship_sale(p_id)`: sie
+datiert den Versand und schließt jede noch offene Position mit `sky_id IS NULL` in derselben
+Transaktion. Sie **delegiert** dabei an `seller_settle_sale_item()`, statt dessen Regeln zu
+kopieren.
+
+**Begründung.** Zwei bestehende RPCs clientseitig hintereinander sind N+1 Transaktionen. Fällt
+eine aus, steht ein Verkauf da, dessen Positionen erledigt sind und dessen Versand nicht datiert
+ist — oder umgekehrt. Beides ist ein Zwischenzustand, den niemand sieht und den jemand von Hand
+aufräumen müsste. Und die Delegation ist der zweite Teil der Entscheidung: was „erledigt" heißt,
+entscheidet eine Stelle. Eine Kopie wäre heute identisch und in sechs Monaten eine zweite Meinung.
+
+**Konsequenzen.** Die Auswahl `sky_id IS NULL` ist die ganze Sicherheit — eine katalogisierte
+Position kommt nie in die Schleife, in keiner Richtung, und `seller_settle_sale_item()` würde sie
+ohnehin mit `check_violation` abweisen. Keine Lagerbewegung, kein Hold (der Abschluss **gibt**
+einen frei), keine Bestandsänderung. Eine interne Bestellung wird abgewiesen: Commerce besitzt
+ihren Versandzustand. Die Antwort nennt `settled` und `still_open`, damit ein gemischter Verkauf
+nicht als „abgeschlossen" gelesen wird, während seine Figuren noch auf dem Regal liegen.
+
+**Verworfen.** `settle` als Positionsaktion in die Verkaufsbuchzeile aufzunehmen (zwei Wege zum
+selben Ergebnis, und einer davon Position für Position). Ein Trigger, der `shipped_at` aus dem
+Zustand der Positionen errät. Die Regeln aus `seller_settle_sale_item()` in `0112` nachzubauen.
+
+### Teil 2 — Zwei Verkäufe an einem Tag hatten keine Reihenfolge
+
+**Problem.** Das Verkaufsbuch sortierte `effective_date desc nulls last, id desc`. Für zwei
+Verkäufe am selben Tag heißt das: der mit der höheren `id` steht oben — also der, der zufällig
+später angelegt wurde. Ein nachgetragener Verkauf landete oben, obwohl er der erste des Tages war.
+Das ist keine Reihenfolge, die der Betrieb bestimmt, sondern eine, die aus der Eingabereihenfolge
+fällt.
+
+**Entscheidung.** `sales.sale_day` und `sales.daily_index` als Spalten, mit
+`UNIQUE (sale_day, daily_index)` als Teilindex. Höchster Platz oben. Getauscht wird über
+`seller_swap_sale_daily_index()` — ein **Tausch**, keine Verschiebung.
+
+**Begründung.** Der Geschäftstag war als Ableitung im Rumpf von `seller_sales()` vorhanden, aber
+nicht greifbar: man kann nicht nach etwas eindeutig indexieren, das nur in einem `case` existiert.
+`sale_day_of()` ist jetzt die eine Definition — Trigger, Backfill und Nachbedingung rufen sie, und
+`seller_sales()` liest nur noch die Spalte. Ein Tausch statt einer Verschiebung, weil die Menge der
+Plätze eines Tages dabei dieselbe bleibt und keine Lücke entsteht; eine Verschiebung müsste die
+ganze Liste durchnummerieren und jede Zeile anfassen.
+
+**Konsequenzen.**
+
+- `NULL` heißt in beiden Spalten **dieser Verkauf hat keinen Tag** — fünf historische Gruppen mit
+  Tippfehler statt Datum (`0058`), und eine interne Bestellung vor der Zahlung. Sie bekommen keinen
+  Platz in einem Tag, den sie nicht haben; der Teilindex lässt sie aus.
+- Der Tausch braucht **drei** Anweisungen, weil PostgreSQL eine Unique-Bedingung je Zeile prüft.
+  Geparkt wird auf `-p_with_index`. Deshalb gibt es **keinen** CHECK `daily_index > 0`: er würde
+  genau diese Transaktion verbieten. Der negative Wert verlässt sie nicht.
+- Eine Vorratssperre je Tag (`pg_advisory_xact_lock`) serialisiert Vergabe und Tausch. Sie wird im
+  Tausch **vor** dem ersten `for update` genommen, sonst wäre die Sperrordnung wieder offen.
+- Der Backfill läuft **vor** den Triggern und ist deterministisch: `row_number()` je Tag,
+  Tie-Breaker `id`. Nicht `created_at` — zwei importierte Zeilen derselben Arbeitsmappe tragen
+  denselben Zeitstempel, und dann wäre die Reihenfolge wieder offen. `updated_at` bleibt stehen.
+- Der Trigger hat genau eine Tür: ein UPDATE, das den Tag unverändert lässt und selbst einen Platz
+  nennt, behält ihn. Das ist der Weg des Tauschs **und** der Grund, warum eine Notiz oder eine
+  Auszahlungskorrektur die Tagesreihenfolge nicht durcheinanderbringt.
+
+**Verworfen.** Ein `numeric`-Sortierschlüssel mit Lücken (lesbar nur für Maschinen, und
+irgendwann voll). Eine `position`-Spalte über das ganze Verkaufsbuch statt je Tag (jeder neue
+Verkauf hätte jede Zeile verschoben). Eine aufschiebbare Unique-Bedingung (kann nicht partiell
+sein, und `sale_day IS NULL` braucht genau das).
+
+### Teil 3 — Wer derselbe Käufer ist, wird eng entschieden
+
+**Problem.** Ein Wiederholungskäufer war nicht zu erkennen. Die naheliegende Antwort — Name oder
+E-Mail-Adresse vergleichen — ist eine Vermutung mit Folgen: sie verknüpft zwei Menschen, die
+nichts miteinander zu tun haben, und sie tut es unsichtbar.
+
+**Entscheidung.** Der Schlüssel ist intern `'skyisles:' || orders.user_id` und extern
+`channel || ':' || lower(btrim(buyer_ref))`. Nichts sonst. Stornierte und als Test klassifizierte
+Verkäufe fallen vollständig aus dem Fenster. Entschieden wird an `(sale_day, daily_index, id)`
+über **alle** Verkäufe.
+
+**Begründung.** Die Konto-ID ist die einzige Identität, die SkyIsles wirklich besitzt. Ein
+Gastkauf hat keine — und ist deshalb nie ein Wiederholungskauf und macht auch keinen anderen zu
+einem. Das ist keine Lücke, sondern die Aussage „wir wissen es nicht", und sie ist die richtige.
+Extern gehört die Quelle in den Schlüssel: `ebay:sammler42` und `manual:sammler42` sind zwei
+Käufer, bis jemand das Gegenteil weiß. Eine stornierte Bestellung ist kein vorheriger Kauf — es
+ist nichts gekauft worden. Und das Fenster läuft über alle Verkäufe, weil ein Fenster über die
+gefilterte Seite „neu" behauptet hätte, sobald man den Monat wechselt.
+
+**Konsequenzen.** Die Reihenfolge des Fensters ist aufsteigend mit `NULLS FIRST`, weil das
+Verkaufsbuch absteigend mit `NULLS LAST` sortiert — eine Liste, zwei Richtungen. Wäre es anders,
+stünde ein grünes Häkchen über dem Kauf, der es erzeugt hat. Grün trägt die Aussage nicht allein:
+daneben steht `↻` mit eigenem zugänglichen Namen und der ganze Satz im `title`, dieselbe Regel wie
+beim Lagerpunkt. Daneben wird `buyer_label` sichtbar — extern die Marktplatzreferenz, intern der
+Name aus der beim Kauf eingefrorenen Lieferadresse. Er ist **reine Anzeige** und wird nie zum
+Abgleichen benutzt; `buyer_ref` bleibt unverändert daneben stehen.
+
+**Verworfen.** Abgleich über Name, E-Mail-Adresse oder Anschrift. Automatische Verknüpfung zweier
+Quellen. Eine `buyers`-Tabelle mit Identitäten (ein Datenmodell für eine Frage, die eine
+Fensterfunktion beantwortet — und personenbezogene Daten, die sonst nirgends liegen müssten).
+Zwei Bedeutungen in `buyer_ref`.

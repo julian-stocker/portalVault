@@ -1479,6 +1479,54 @@ export const de = {
         adjustments: "Auszahlungskorrekturen",
         payout: "Auszahlung",
         shippingState: "Versand",
+        /*
+         * DER PLATZ IM TAG (0113).
+         *
+         * Zwei Verkäufe an einem Tag hatten bisher keine Reihenfolge, die der
+         * Betrieb bestimmt — der später angelegte stand oben. Hier steht der
+         * Platz, und hier wird er getauscht: höchster oben, also ist `n` der
+         * jüngste Verkauf des Tages.
+         *
+         * „Tauschen" und nicht „verschieben", weil genau das passiert: der
+         * Verkauf auf dem Zielplatz übernimmt den bisherigen. Das Wort sagt
+         * es, damit niemand eine Verschiebung erwartet, die die ganze Liste
+         * durchnummeriert.
+         */
+        dailyIndex: "Platz am Tag",
+        dailyIndexOf: (place: number, total: number) => `${place} von ${total}`,
+        dailyIndexAlone: "einziger Verkauf an diesem Tag",
+        dailyIndexNone: "kein Tag, kein Platz",
+        swapPlace: "Platz tauschen mit",
+        swapPlaceHint:
+          "Höchster Platz steht oben. Der Verkauf auf dem gewählten Platz " +
+          "bekommt dafür den bisherigen — getauscht, nicht verschoben.",
+        swapPlaceDone: (place: number) => `Getauscht · jetzt Platz ${place}.`,
+        /*
+         * DIE EINE ORDER-AKTION FÜR EINEN EXTERNEN VERKAUF (0112).
+         *
+         * Ein Verkauf aus lauter freien Artikeln — ein Portal, ein Spiel,
+         * ein Restposten — hatte bisher kein Ende: eine Position ohne
+         * `sky_id` kann keine Lagerbewegung bekommen, also blieb der Verkauf
+         * im Verkaufsbuch für immer „Offen", obwohl das Paket weg war. Der
+         * Knopf datiert den Versand UND schließt diese Positionen, in einem
+         * Klick und in einer Transaktion.
+         *
+         * Der Hinweis sagt ausdrücklich, was der Knopf NICHT tut. Eine
+         * Aktion, die „alles abschließt" verspricht und Regalfiguren
+         * stehenlässt, wäre genau die Art Halbwahrheit, die später als
+         * Bestandsabweichung auftaucht.
+         */
+        markShipped: "Als verschickt markieren",
+        markShippedHint:
+          "Datiert den Versand und schließt freie Positionen ohne Katalogfigur ab. " +
+          "Regalgebundene Figuren bleiben offen und werden weiterhin ausgebucht.",
+        markShippedDone: (settled: number) =>
+          settled === 0 ? "Versand datiert."
+            : settled === 1 ? "Versand datiert · 1 freie Position abgeschlossen."
+              : `Versand datiert · ${settled} freie Positionen abgeschlossen.`,
+        markShippedStillOpen: (open: number) =>
+          open === 1 ? "1 Position ist noch offen und muss ausgebucht werden."
+            : `${open} Positionen sind noch offen und müssen ausgebucht werden.`,
         none: "keine",
         /* Pflege eines externen Verkaufs nach dem Verkaufstag. */
         edit: "Bearbeiten", done: "Fertig", save: "Speichern", cancel: "Abbrechen",
@@ -1672,6 +1720,24 @@ export const de = {
         openHint: "Noch nichts ausgebucht",
         partial: "Teilweise ausgebucht",
       },
+      /*
+       * DER ZUGÄNGLICHE NAME DES (i) IN DER DATUMSZELLE.
+       *
+       * Dreißig Knöpfe, die alle „Details" heißen, sind ohne Blick auf die
+       * Zeile nicht auseinanderzuhalten. Das Datum ist das, was die Zeile
+       * benennt — sichtbar steht nur das `i`, gesprochen der ganze Satz.
+       */
+      detailsFor: (date: string) => `Details zum Verkauf vom ${date}`,
+      /*
+       * WIEDERHOLUNGSKÄUFER (0113).
+       *
+       * Grün allein trägt die Aussage nicht — Graustufen, erzwungene Farben,
+       * Farbenblindheit. Deshalb steht neben dem Namen ein Zeichen mit
+       * eigenem zugänglichen Namen, und der ganze Satz liegt im `title`.
+       * Dieselbe Regel wie beim Lagerpunkt.
+       */
+      repeatBuyer: "Wiederholungskäufer",
+      repeatBuyerHint: "Dieser Käufer hat hier schon einmal gekauft.",
       /* Die Position läuft gerade. Keine Behauptung über das Ergebnis —
          siehe `act` in `sales-ledger.tsx`. */
       itemRunning: "läuft …",
@@ -1759,6 +1825,13 @@ export const de = {
         holdRace: "Die Reservierung hat sich gerade geändert. Bitte noch einmal versuchen.",
         holdMismatch: "Reservierung und Bestand stimmen nicht überein. Es wurde nichts geschrieben; bitte den Bestand prüfen.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und hat keinen Lagerplatz.",
+        /* 0113. Beides heißt „der Bildschirm ist veraltet", nicht „falsch
+           geklickt" — deshalb der Hinweis zum Neuladen statt einer Rüge. */
+        undatedHasNoPlace:
+          "Dieser Verkauf hat noch kein Datum und damit keinen Platz an einem Tag. " +
+          "Trage zuerst das Verkaufsdatum ein.",
+        placeGone:
+          "Dieser Platz ist inzwischen anders belegt. Bitte neu laden und noch einmal versuchen.",
         historical: "Historische Verkäufe verändern den Bestand nicht.",
         /* Der barrierefreie Name des Statuspunkts. Farbe allein trägt nie. */
         saleCancelled:

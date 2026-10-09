@@ -440,15 +440,84 @@ describe("no tool may create a sale that looks like real trade", () => {
    * Sale 15 and 19 exist because the scripts of the time did not set the
    * flag. This is the guard that keeps that from happening again.
    */
-  const tools = ["verify-sale-workflow.mts", "verify-sale-locks.mts"];
+  /*
+   * ZWEI WEGE, EINE ZUSICHERUNG — UND JEDES WERKZEUG NENNT SEINEN.
+   *
+   * Die Regel ist nicht „setze das Testflag". Die Regel ist: NACH dem Lauf
+   * darf im Verkaufsbuch kein Verkauf stehen, der wie echter Handel aussieht.
+   * Verkauf 15 und 19 stehen dort, weil die Skripte von damals das nicht
+   * sichergestellt haben.
+   *
+   * Dafür gibt es genau zwei zulässige Wege:
+   *
+   *   `flags-every-sale`    der Verkauf bleibt absichtlich stehen und ist als
+   *                         Testvorgang markiert — er zählt in keiner
+   *                         Geschäftssumme (0063).
+   *   `deletes-every-sale`  der Verkauf verschwindet wieder. Nur so darf ein
+   *                         Werkzeug einen NICHT markierten Verkauf anlegen —
+   *                         und genau das braucht `verify-ship-and-day`, weil
+   *                         `sale_is_test()` einen Testverkauf aus dem
+   *                         Wiederholungskäufer-Fenster entfernt und die
+   *                         Prüfung damit nichts mehr prüfen würde.
+   *
+   * Diese Fassung ist SCHÄRFER als die vorige: die verlangte nur IRGENDEIN
+   * `p_is_test: true` und hätte ein Werkzeug durchgelassen, das daneben
+   * unmarkierte Verkäufe anlegt und stehen lässt.
+   */
+  const tools: Record<string, "flags-every-sale" | "deletes-every-sale"> = {
+    "verify-sale-workflow.mts": "flags-every-sale",
+    "verify-sale-locks.mts": "flags-every-sale",
+    "verify-ship-and-day.mts": "deletes-every-sale",
+    /*
+     * Die UI-Fixtures bleiben ABSICHTLICH stehen — ein Mensch muss sie im
+     * Browser ansehen, bevor sie verschwinden. Deshalb derselbe Vertrag wie
+     * bei den beiden Verifiern, die ihren Verkauf stehen lassen: jeder ist
+     * als Testvorgang markiert und zählt in keiner Geschäftssumme.
+     */
+    "ui-fixtures-ship-day.mts": "flags-every-sale",
+  };
 
-  it("every sale-creating tool flags its sale as a test", () => {
-    for (const file of tools) {
-      const src = read(`tools/${file}`);
-      if (!/seller_create_sale/.test(src)) continue;
-      const flags = /p_is_test:\s*true/.test(src)
-        || /seller_set_sale_test[\s\S]{0,120}p_is_test:\s*true/.test(src);
-      expect(flags, `${file} must mark its sale as a test`).toBe(true);
+  /** Der Rumpf ohne Prosa: ein Kommentar ist keine Aktion. */
+  const code = (file: string): string =>
+    read(`tools/${file}`)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+
+  it("a tool that leaves its sale behind marks it as a test — every one of them", () => {
+    for (const [file, contract] of Object.entries(tools)) {
+      if (contract !== "flags-every-sale") continue;
+      const src = code(file);
+      expect(/p_is_test:\s*true/.test(src)
+        || /seller_set_sale_test[\s\S]{0,120}p_is_test:\s*true/.test(src),
+        `${file} must mark its sale as a test`).toBe(true);
+      /* Und kein einziger unmarkierter daneben. */
+      expect(/p_is_test:\s*false/.test(src),
+        `${file} leaves its sales behind, so none of them may be unflagged`).toBe(false);
+    }
+  });
+
+  it("a tool that creates an unflagged sale deletes every sale it creates", () => {
+    for (const [file, contract] of Object.entries(tools)) {
+      if (contract !== "deletes-every-sale") continue;
+      const src = code(file);
+
+      /*
+       * EINE EINZIGE ANLEGESTELLE. Damit kann keine Erzeugung die
+       * Aufräumliste umgehen — das ist die Eigenschaft, auf der die ganze
+       * Zusicherung ruht, und sie ist am Text prüfbar.
+       */
+      expect((src.match(/seller_create_sale_with_details/g) ?? []).length,
+        `${file} must funnel every creation through one helper`).toBe(1);
+      expect(src).toContain("mine.unshift(id)");
+
+      /* Gelöscht wird im `finally`, also auch nach einem Fehlschlag. */
+      expect(src).toContain("seller_delete_sale");
+      const tail = src.slice(src.indexOf("} finally {"));
+      expect(tail, `${file} must delete inside finally`).toContain("seller_delete_sale");
+
+      /* Und der Lauf muss beweisen, dass er die Datenbank zurückgegeben hat. */
+      expect(src).toContain("the same 303 sale ids");
+      expect(src).toContain("positions hash identical");
     }
   });
 
@@ -462,6 +531,6 @@ describe("no tool may create a sale that looks like real trade", () => {
       .filter((f) => f.endsWith(".mts"))
       .filter((f) => /seller_create_sale\b|seller_create_sale_with_details/
         .test(read(`tools/${f}`)));
-    expect(new Set(creators)).toEqual(new Set(tools));
+    expect(new Set(creators)).toEqual(new Set(Object.keys(tools)));
   });
 });

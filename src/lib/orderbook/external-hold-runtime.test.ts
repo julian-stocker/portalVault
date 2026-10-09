@@ -175,9 +175,29 @@ describe("die neun ersetzten Funktionen behalten ihren Vertrag", () => {
     });
   }
 
-  it("und 0110 ist für jede die geltende Fassung", () => {
+  /*
+   * NACHFOLGER, NAMENTLICH (0113).
+   *
+   * `seller_sale()` ist in `0113` erneut ersetzt worden — um `buyer_label`,
+   * `daily_index_count` und `day_order`. Das darf sein, aber nicht
+   * stillschweigend: wer hier nicht steht, muss `0110` als geltende Fassung
+   * haben. Und der Kopf des Nachfolgers wird genauso byte-identisch verlangt
+   * wie der von `0110`, also entsteht auch so keine zweite Overload.
+   */
+  const SUCCESSOR: Record<string, string> = {
+    seller_sale: "0113_sales_daily_index_and_repeat_buyers.sql",
+  };
+
+  it("und 0110 ist für jede die geltende Fassung — bis auf benannte Nachfolger", () => {
     for (const name of Object.keys(REPLACED)) {
-      expect(latestFunction(name).file, name).toBe(FILE);
+      expect(latestFunction(name).file, name).toBe(SUCCESSOR[name] ?? FILE);
+    }
+  });
+
+  it("und ein Nachfolger erbt den Kopf byte-identisch", () => {
+    for (const [name, file] of Object.entries(SUCCESSOR)) {
+      expect(REPLACED[name], name).toBeDefined();
+      expect(header(file, name), name).toBe(header(FILE, name));
     }
   });
 

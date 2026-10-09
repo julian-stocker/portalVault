@@ -19,6 +19,13 @@ export type SaleRow = {
   orderId: number | null;
   orderNumber: string | null;
   soldAt: string | null;
+  /**
+   * Der Platz dieses Verkaufs innerhalb seines Tages, 1 … n (0113).
+   *
+   * Höchster oben. NULL genau dann, wenn der Tag unbekannt ist — ein Verkauf
+   * ohne Tag hat keinen Platz in einem.
+   */
+  dailyIndex: number | null;
   shippedAt: string | null;
   paymentStatus: string | null;
   fulfillmentStatus: string | null;
@@ -34,6 +41,16 @@ export type SaleRow = {
   labelTotal: number;
   expectedPayout: number | null;
   buyerRef: string | null;
+  /**
+   * Wer gekauft hat, als Anzeige (0113).
+   *
+   * Extern die Referenz des Marktplatzes, intern der Name aus der beim Kauf
+   * eingefrorenen Lieferadresse. NIE zum Abgleichen benutzt — das tut
+   * `buyerRepeat`, und zwar über `orders.user_id` bzw. Quelle + Benutzername.
+   */
+  buyerLabel: string | null;
+  /** Dieser Käufer hat hier schon einmal gekauft (0113). */
+  buyerRepeat: boolean;
   externalOrderRef: string | null;
   source: string;
   note: string | null;
@@ -113,6 +130,7 @@ export const fetchSales = cache(async (
       orderId: r.order_id === null ? null : Number(r.order_id),
       orderNumber: (r.order_number as string) ?? null,
       soldAt: r.sold_at === null || r.sold_at === undefined ? null : String(r.sold_at),
+      dailyIndex: maybe(r.daily_index),
       shippedAt: (r.shipped_at as string) ?? null,
       paymentStatus: (r.payment_status as string) ?? null,
       fulfillmentStatus: (r.fulfillment_status as string) ?? null,
@@ -126,6 +144,8 @@ export const fetchSales = cache(async (
       labelTotal: n(r.label_total),
       expectedPayout: maybe(r.expected_payout),
       buyerRef: (r.buyer_ref as string) ?? null,
+      buyerLabel: (r.buyer_label as string) ?? null,
+      buyerRepeat: r.buyer_repeat === true,
       externalOrderRef: (r.external_order_ref as string) ?? null,
       source: String(r.source),
       updatedAt: r.updated_at === null || r.updated_at === undefined ? null : String(r.updated_at),

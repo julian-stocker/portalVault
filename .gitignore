@@ -107,3 +107,8 @@ skyisles-business-backup-*.json
 # src/lib/backup/platform-archive.ts; `platform-archive.test.ts` hält diese
 # Zeile fest.
 skyisles-platform-backup-*.zip
+
+# Local state of the staging UI fixtures (tools/ui-fixtures-ship-day.mts).
+# Which throwaway sales exist right now is a fact about one machine.
+.ui-fixtures-ship-day.json
+tools/.ui-fixtures-ship-day.json

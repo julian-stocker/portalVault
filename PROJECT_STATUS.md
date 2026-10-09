@@ -2863,10 +2863,11 @@ ohne Katalog-, Lager-, Hold- und Bewegungswirkung, vier Default-Kostenzeilen, Re
 
 ## Stripe-Erstattungen: SkyIsles löst selbst aus (Stand 2026-10-07)
 
-**Gebaut, NICHT angewendet und NICHT deployt.** Migration `0111` liegt im Repository, die Edge
-Function `refund-payment` ebenso; Staging-Anwendung, Secrets und Deploy stehen aus. Entscheidungen
-in **ADR-0118**, Datenmodell in `docs/DATABASE.md` 3.3al, Secrets und Key-Rechte in
-`docs/DEPLOYMENT.md`.
+**Abgeschlossen und im Betrieb.** Migration `0111` (`89cf433d…a592105b`) ist auf **Staging und
+Production angewendet**; `refund-payment`, `stripe-webhook` und `send-order-mail` sind auf beiden
+Projekten deployt, die Stripe-Endpunkte um `refund.created` / `refund.updated` erweitert
+(`charge.refunded` ausdrücklich nicht). Entscheidungen in **ADR-0118** und **ADR-0119**,
+Datenmodell in `docs/DATABASE.md` 3.3al, Secrets und Key-Rechte in `docs/DEPLOYMENT.md`.
 
 **Der Anlass.** Bei `SI-2026-001009` — der ersten echten Production-Bestellung — wurde eine
 Position über 0,76 € storniert und acht Sekunden später „Erstattung bestätigt" geklickt. SkyIsles
@@ -2899,16 +2900,82 @@ Stripe-Fehler nie als Erfolg · Doppelklick · Timeout/Reconciliation · mehrfac
 gespeicherte Refund-ID · Teil- und Vollerstattung · Außenwirkung erst nach Bestätigung ·
 External Sales unverändert · Bestand und Stornierung unverändert.
 
+**Durchgeführt**
+
+1. Zwei Sandbox-Erstattungen auf `SI-2026-001067` (4,04 € und 1,79 €), je genau einmal über die
+   SkyIsles-Oberfläche ausgelöst, mit Provider-Beweis, gespiegeltem Status, automatischer
+   Webhook-Bestätigung und genau einer Kundenmail.
+2. Production-Rollout: `0111` angewendet, drei Functions deployt, Stripe-Live-Endpunkt erweitert,
+   Abschlussverifikation grün.
+3. **Der echte Live-Refund über 0,76 € auf `order_refunds#1` ist am 2026-10-07 ausgelöst worden**
+   — über den neuen Pfad, nicht im Dashboard. Stripe-Erstattung `re_3UJcYtLtUnl55BRl1HhCpYN4`,
+   Status gespiegelt, Erstattungsmail beim Kunden angekommen. Der Vorfall ist damit geschlossen.
+
+**Offen**
+
+- `refund.updated` wurde auf Production nach dem Live-Refund **nicht beobachtet** (viermal
+  gepollt). Die Bestätigung kam über `refund.created`; ob Stripe kein `refund.updated` erzeugt hat
+  oder der Endpunkt es nicht zustellt, ist nicht entschieden.
+- Additive Folgemigration für die Backups `0104`/`0105`, die die neun neuen Spalten nicht kennen.
+
+
+## Orderbuch: Abschluss, Tagesreihenfolge, Wiederholungskäufer (Stand 2026-10-07)
+
+**Auf STAGING angewendet und abgenommen. Production steht aus.** Die Migrationen `0112` und
+`0113` sind auf Staging angewendet, katalog- und datenseitig verifiziert und funktional geprüft
+(73/73). **Production ist unverändert** — dort fehlen beide Migrationen noch, und der
+Anwendungscode ist nicht deployt. Begründung in **ADR-0120**, Datenmodell in
+`docs/DATABASE.md` 3.3am.
+
+**Ein Freigabepunkt ist offen:** die **visuelle UI-Abnahme A–D im Browser** hat nicht
+stattgefunden. Die fünf dafür angelegten Staging-Fixtures (#357–#361) stehen unberührt
+(`shipped_at` leer, Plätze 1/2/3 unverändert). Vor dem Production-Release ist das zu erledigen
+oder ausdrücklich zu übergehen.
+
+| Migration | SHA256 | Inhalt |
+|---|---|---|
+| `0112_ship_external_sale.sql` | `88c0e96e…5220455` | eine Funktion: `seller_ship_sale()` |
+| `0113_sales_daily_index_and_repeat_buyers.sql` | `b36a505c…f74294bc` | zwei Spalten, ein Teil-Unique-Index, ein Sortierindex, vier neue Funktionen, zwei Trigger, zwei ersetzte Leser, deterministischer Backfill |
+
+**Vier Verbesserungen, in der gebauten Reihenfolge**
+
+| | |
+|---|---|
+| **C — Details ohne Aufklappen** | Das `(i)` steht in der Datumszelle jeder Zeile und öffnet das bestehende Verkaufsfenster. Vorher lag der Knopf in der aufgeklappten Zeile: um die Beträge zu sehen, musste man erst die Positionsliste öffnen. Keine Migration. |
+| **A — ein externer Verkauf aus freien Artikeln lässt sich abschließen** | Eine Position ohne `sky_id` kann per CHECK niemals eine Lagerbewegung besitzen, also war `settled_at` ihr einziges mögliches Ende — und das schrieb nur die Positionsaktion, Stück für Stück. `seller_ship_sale()` datiert den Versand und schließt alle freien Positionen **in einer Transaktion**. Kein Hold, keine Bewegung, keine Bestandsänderung; eine Katalogfigur wird in keiner Richtung angefasst, und eine interne Bestellung wird abgewiesen. |
+| **D — der Platz am Tag** | `sales.sale_day` + `sales.daily_index`, `UNIQUE (sale_day, daily_index)` als Teilindex. Höchster Platz oben. Getauscht wird über `seller_swap_sale_daily_index()` — atomar, drei Anweisungen mit negativem Parkplatz, weil PostgreSQL eine Unique-Bedingung je Zeile prüft. Der Backfill ist deterministisch (`row_number()` je Tag, Tie-Breaker `id`) und läuft **vor** den Triggern. |
+| **B — Wiederholungskäufer grün** | Eng und ausdrücklich: intern `'skyisles:' \|\| orders.user_id`, extern `channel \|\| ':' \|\| lower(btrim(buyer_ref))`. Kein Name, keine E-Mail, keine Adresse, keine Verknüpfung zweier Quellen. Stornierte und Testverkäufe zählen in keiner Richtung. Entschieden wird an `(sale_day, daily_index, id)` über **alle** Verkäufe, nicht über die gefilterte Seite. Grün trägt die Aussage nicht allein: daneben steht `↻` mit eigenem zugänglichen Namen. |
+
+**Der Käufername einer Bestellung ist jetzt sichtbar.** `buyer_label` — extern die
+Marktplatzreferenz, intern der Name aus der beim Kauf eingefrorenen Lieferadresse. `buyer_ref`
+bleibt unverändert daneben; abgeglichen wird ausschließlich über `orders.user_id`.
+
+**Verifikation.** 225 Vitest-Dateien, 7 180 Unit-Tests, Lint/Typecheck/Build grün. Zwei neue
+Testdateien: `ship-external-sale.test.ts` (23 Tests) und
+`daily-index-and-repeat-buyers.test.ts` (56 Tests). Die Zählungen, die Offen-Regel und die
+Summen von `seller_sales()` werden gegen `0075` **zeichenweise** verglichen, damit der Umbau
+der Sortierung keine Geldableitung mitnimmt.
+
+**Auf Staging erledigt**
+
+1. `0112` angewendet · Postflight grün · `settle_md5` unverändert · nichts an Daten bewegt.
+2. `0113` angewendet · Backfill deterministisch (302 von 303 Zeilen, #129 bleibt undatiert) ·
+   jeder Tag lückenlos `1…n` · **0 Reihenfolge-Abweichungen** · Katalog `functions +4`,
+   `columns +2`, `indexes +2`, `triggers +2`, `constraints` unverändert.
+3. Funktionale Prüfung über `npm run verify:ship-day:staging` — **73/73 PASS**, und die
+   Datenbank kehrte zeichengleich in den Ausgangszustand zurück (vier Hashes identisch).
+
+**Was Staging-Daten nicht belegen konnten** (unit-test-gedeckt, funktionaler Test offen): der
+interne Wiederholungskäufer über `orders.user_id` — `payment_mode_for_user()` stempelt jede
+Staging-Bestellung auf `sandbox`, und Sandbox zählt als Test. Ebenso die `btrim`-Hälfte der
+Käufer-Normalisierung: `seller_create_sale` und `seller_update_sale` beschneiden `buyer_ref`
+schon beim Schreiben, es gibt also keinen Produktpfad, der Rand-Leerraum in die Spalte bringt.
+
 **Offen, in dieser Reihenfolge**
 
-1. `0111` auf **Staging** anwenden (SQL Editor) und Postflight.
-2. `refund-payment` auf Staging deployen. Keine neuen Secrets nötig; die Sandbox-Webhook-Events
-   `charge.refunded`, `refund.created`, `refund.updated` sind bereits abonniert.
-3. Sandbox-Erstattung von Anfang bis Ende über die SkyIsles-Oberfläche prüfen.
-4. Erst danach, getrennt freizugeben: Production-Rollout und der echte Live-Refund über 0,76 €
-   auf `order_refunds#1` — über den neuen Pfad, nicht im Dashboard. **Bis dahin ist kein
-   Stripe-LIVE-Refund ausgelöst worden.**
-5. Additive Folgemigration für die Backups `0104`/`0105`, die die neun neuen Spalten nicht kennen.
+1. **Visuelle UI-Abnahme A–D** auf Staging (`npm run dev:staging`, Fixtures #357–#361).
+2. Fixtures entfernen: `npm run ui-fixtures:ship-day:staging -- cleanup`.
+3. Erst danach, getrennt freizugeben: Production-Rollout `0112` → `0113` → Deploy.
 
 
 ## Zuletzt verifizierte Prüfungen
