@@ -51,6 +51,16 @@ export type SaleRow = {
   buyerLabel: string | null;
   /** Dieser Käufer hat hier schon einmal gekauft (0113). */
   buyerRepeat: boolean;
+  /**
+   * Wie viele Verkäufe dieser Käufer an DIESEM Tag hat (0114).
+   *
+   * 1 heisst: keiner sonst. Grösser als 1 heisst, dass sich die Pakete
+   * möglicherweise zusammenlegen lassen — eine Aussage über den Tag, die
+   * `buyerRepeat` nicht trifft. Gerechnet in `seller_sales()` über denselben
+   * Käuferschlüssel; ein undatierter Verkauf hat keinen Tagesnachbarn und
+   * trägt immer 1.
+   */
+  buyerDayCount: number;
   externalOrderRef: string | null;
   source: string;
   note: string | null;
@@ -146,6 +156,9 @@ export const fetchSales = cache(async (
       buyerRef: (r.buyer_ref as string) ?? null,
       buyerLabel: (r.buyer_label as string) ?? null,
       buyerRepeat: r.buyer_repeat === true,
+      /* Eine Datenbank ohne 0114 liefert das Feld nicht — dann ist es 1. */
+      buyerDayCount: r.buyer_day_count === null || r.buyer_day_count === undefined
+        ? 1 : Number(r.buyer_day_count),
       externalOrderRef: (r.external_order_ref as string) ?? null,
       source: String(r.source),
       updatedAt: r.updated_at === null || r.updated_at === undefined ? null : String(r.updated_at),

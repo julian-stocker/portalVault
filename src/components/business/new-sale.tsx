@@ -224,8 +224,8 @@ export function NewSale({ defaultTest = false, catalog = [] }: {
    * sale does not match.
    */
   const money = useMemo(
-    () => saleFormMoney({ subtotal, shipping, discount, fees, adjustment, adjustmentNote }),
-    [subtotal, shipping, discount, fees, adjustment, adjustmentNote],
+    () => saleFormMoney({ subtotal, shipping, discount, fees, refunds, adjustment, adjustmentNote }),
+    [subtotal, shipping, discount, fees, refunds, adjustment, adjustmentNote],
   );
 
   function submit(event: React.FormEvent) {

@@ -518,8 +518,33 @@ export function SalesLedger({ sales, summary, backHref, openSale }: {
                             className="relative z-20 flex size-11 shrink-0 items-center justify-center rounded-sky-md text-xs text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 sm:size-6">
                       <span aria-hidden="true">i</span>
                     </button>
+                    {/*
+                      GOLDORANGE HEISST: DIESER KÄUFER HAT HEUTE MEHR ALS EINES.
+
+                      Ein Hinweis, dass sich die Pakete zusammenlegen lassen —
+                      und nur ein Hinweis. Nichts wird zusammengelegt, nichts
+                      verschickt, keine Reihenfolge geändert.
+
+                      NUR DIE DATUMSSCHRIFT. Nicht die Zeile (sie trägt den
+                      Lagerpunkt und muss lesbar bleiben) und nicht das (i)
+                      daneben — ein eingefärbter Knopf sähe aus wie ein
+                      Zustand, den er nicht hat.
+
+                      `buyerDayCount` kommt aus `seller_sales()` (0114) und
+                      wird hier nicht nachgerechnet: die Antwort hängt an
+                      einem Fenster über alle Verkäufe, und diese Zeile kennt
+                      nur sich selbst. Die beiden Verkäufe müssen deshalb auch
+                      nicht untereinanderstehen.
+
+                      Farbe trägt die Aussage nicht allein: der ganze Satz
+                      steht im `title`, also auch im zugänglichen Namen.
+                    */}
                     <span className={`min-w-0 truncate ${
-                      sale.soldAt === null ? "font-medium text-muted" : "font-medium tabular-nums"}`}>
+                        sale.soldAt === null ? "font-medium text-muted"
+                          : sale.buyerDayCount > 1 ? "font-medium tabular-nums text-attention"
+                            : "font-medium tabular-nums"}`}
+                          title={sale.buyerDayCount > 1
+                            ? copy.sameDayBuyerHint(sale.buyerDayCount) : undefined}>
                       {formatDate(sale.soldAt)}
                       <RowMarks isTest={sale.isTest} isIncomplete={sale.isIncomplete} isOpen={sale.isOpen} />
                     </span>

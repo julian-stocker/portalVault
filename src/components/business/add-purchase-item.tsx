@@ -63,8 +63,16 @@ export function AddPurchaseItem({
       {uncategorized ? (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted">{copy.uncategorizedHint}</p>
+          {/*
+            Auch hier kein Wörterbuch: „Portal of Power" ist ein Produktname,
+            und der eingetippte Name wird roh gespeichert (Regel 4). Eine
+            Ersetzung wäre eine stillschweigende Korrektur genau dort, wo
+            keine stattfinden darf.
+          */}
           <input value={rawName} onChange={(e) => setRawName(e.target.value)}
                  placeholder="z. B. Portal of Power"
+                 autoCorrect="off" autoCapitalize="off" spellCheck={false}
+                 autoComplete="off"
                  className="min-h-11 rounded-sky-md bg-surface px-3 ring-1 ring-border/70" />
           <div className="flex gap-2">
             <button type="button" disabled={pending || rawName.trim().length < 2}

@@ -24,7 +24,7 @@
 
 import {
   parseMoney, parseSignedMoney, plannedPayout, roundMoney,
-  type AdjustmentPlan, type FeePlan,
+  type AdjustmentPlan, type FeePlan, type RefundPlan,
 } from "./sales-money";
 
 export type SaleTemplateId = "ebay" | "manual";
@@ -333,6 +333,13 @@ export type SaleDraftMoney = {
   shipping: number;
   discount: number;
   fees: readonly FeePlan[];
+  /**
+   * Erstattungen, die schon beim Anlegen eingetragen sind (ADR-0117).
+   *
+   * Seit die vier vorbelegten Kostenzeilen eine Rückerstattung enthalten,
+   * KANN ein neuer Verkauf eine haben — siehe `payoutView`.
+   */
+  refunds: readonly RefundPlan[];
   adjustments: readonly AdjustmentPlan[];
 };
 
@@ -349,12 +356,25 @@ export type SaleDraftMoney = {
  * identical expression in SQL for a sale that already exists. Nothing here
  * re-derives anything; it rounds once, at the boundary.
  *
- * A REFUND IS NOT PART OF THIS. A new sale has none; one that arrives later
- * is its own event, and from then on the database's figure is the one shown.
+ * EINE ERSTATTUNG GEHÖRT DAZU, UND DAS WAR EINMAL ANDERS.
+ *
+ * Hier stand `[]` an der Stelle der Erstattungen, mit der Begründung „ein
+ * neuer Verkauf hat keine". Das stimmte, bis ADR-0117 dem Anlegeformular die
+ * vierte vorbelegte Kostenzeile gab: eine Rückerstattung. Von da an konnte
+ * der Betreiber eine eintragen, und der Kasten rechnete sie nicht mit —
+ * 42,74 + 2,99 − 6,64 − 1,01 stand als 38,08 € da, während die Datenbank
+ * nach dem Speichern 35,09 € meldete. Die Zahl war nie falsch GESPEICHERT
+ * (`p_payout_amount` geht als `null` hinaus, und `sale_expected_payout()`
+ * zieht Erstattungen seit `0059` ab) — sie war vor dem Speichern falsch
+ * ANGEZEIGT, und das ist die Zahl, auf die hin der Betreiber tippt.
+ *
+ * Die Formel bleibt unangetastet: `plannedPayout` zog Erstattungen schon
+ * immer ab. Es wurde ihr nur nichts übergeben.
  */
 export function payoutView(money: SaleDraftMoney): number {
   return roundMoney(
-    plannedPayout(money.subtotal, money.shipping, money.discount, money.fees, [], money.adjustments),
+    plannedPayout(money.subtotal, money.shipping, money.discount,
+                  money.fees, money.refunds, money.adjustments),
   );
 }
 
@@ -363,6 +383,8 @@ export type SaleFormInput = {
   shipping: string;
   discount: string;
   fees: readonly FeeDraft[];
+  /** Die Erstattungszeilen des Formulars. Leer, wenn keine eingetragen ist. */
+  refunds: readonly RefundDraft[];
   /** Signed. Empty or `0` means there is no adjustment at all. */
   adjustment: string;
   adjustmentNote: string;
@@ -373,6 +395,7 @@ export type SaleFormMoney = {
   shipping: number;
   discount: number;
   fees: FeePlan[];
+  refunds: RefundPlan[];
   adjustments: AdjustmentPlan[];
   /** What the channel will pay out, by the workbook's own formula. */
   payout: number;
@@ -383,6 +406,15 @@ export function saleFormMoney(input: SaleFormInput): SaleFormMoney {
   const shipping = parseMoney(input.shipping) ?? 0;
   const discount = parseMoney(input.discount) ?? 0;
   const fees = feePlans(input.fees);
+  /*
+   * DIESELBE ABLEITUNG, DIE AUCH GESPEICHERT WIRD.
+   *
+   * `refundAmounts` lässt jede Zeile ohne Betrag fallen — und genau diese
+   * Liste schickt `new-sale.tsx` als `refunds` an die Server Action. Der
+   * Kasten rechnet damit mit demselben Satz Zahlen, der danach in
+   * `sale_refunds` landet; zwei Ableitungen wären zwei Antworten.
+   */
+  const refunds: RefundPlan[] = refundAmounts(input.refunds).map((amount) => ({ amount }));
 
   /*
    * A zero adjustment is NO adjustment, not a row worth zero:
@@ -395,7 +427,7 @@ export function saleFormMoney(input: SaleFormInput): SaleFormMoney {
     : [{ amount: signed, ...(input.adjustmentNote.trim() ? { note: input.adjustmentNote.trim() } : {}) }];
 
   return {
-    subtotal, shipping, discount, fees, adjustments,
-    payout: payoutView({ subtotal, shipping, discount, fees, adjustments }),
+    subtotal, shipping, discount, fees, refunds, adjustments,
+    payout: payoutView({ subtotal, shipping, discount, fees, refunds, adjustments }),
   };
 }

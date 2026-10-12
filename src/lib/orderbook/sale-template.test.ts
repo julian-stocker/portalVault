@@ -166,9 +166,18 @@ describe("the template is layout, not a data model", () => {
     expect(NEW_SALE).toContain("const [refunds, setRefunds] = useState<RefundDraft[]>");
     expect(NEW_SALE).toContain("refunds: refundAmounts(refunds),");
     expect(NEW_SALE).not.toContain("setFees((f) => [...f, refundDraft");
-    // Und die Auszahlung kennt Rückerstattungen weiterhin nicht.
-    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [], adjustments: [] }))
-      .toBe(20);
+    /*
+     * UND DIE AUSZAHLUNG ZIEHT SIE AB.
+     *
+     * Hier stand „kennt Rückerstattungen weiterhin nicht" und ein `payoutView`
+     * ohne Erstattung — die Zusicherung war wahr und der Satz daneben falsch.
+     * Seit diese Vorlage eine Erstattungszeile anbietet, KANN ein neuer
+     * Verkauf eine haben, und der Kasten hat sie unterschlagen.
+     */
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [],
+                        refunds: [], adjustments: [] })).toBe(20);
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [],
+                        refunds: [{ amount: 5 }], adjustments: [] })).toBe(15);
   });
 
   it("starts the plain template with none, so nothing has to be cleared away", () => {
@@ -238,8 +247,8 @@ describe("several fees, which is the ordinary case", () => {
 /* ===================================================================== */
 describe("shipping is two different things and the screen keeps them apart", () => {
   it("what the buyer paid RAISES the payout", () => {
-    const without = payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [], adjustments: [] });
-    const withShipping = payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees: [], adjustments: [] });
+    const without = payoutView({ subtotal: 20, shipping: 0, discount: 0, fees: [], refunds: [], adjustments: [] });
+    const withShipping = payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees: [], refunds: [], adjustments: [] });
     expect(withShipping - without).toBeCloseTo(4.99, 2);
   });
 
@@ -247,7 +256,7 @@ describe("shipping is two different things and the screen keeps them apart", () 
     const view = payoutView({
       subtotal: 20, shipping: 4.99, discount: 0,
       fees: [{ kind: "shipping_label", amount: 3.15, settled_by: "channel" }],
-      adjustments: [],
+      refunds: [], adjustments: [],
     });
     expect(view).toBe(21.84);
   });
@@ -256,7 +265,7 @@ describe("shipping is two different things and the screen keeps them apart", () 
     const view = payoutView({
       subtotal: 20, shipping: 4.99, discount: 0,
       fees: [{ kind: "shipping_label", amount: 3.15, settled_by: "external" }],
-      adjustments: [],
+      refunds: [], adjustments: [],
     });
     expect(view).toBe(24.99);
   });
@@ -264,9 +273,85 @@ describe("shipping is two different things and the screen keeps them apart", () 
   it("which is the whole of the difference between the workbook's two columns", () => {
     const channel = { kind: "shipping_label", amount: 2, settled_by: "channel" };
     const external = { ...channel, settled_by: "external" };
-    const base = { subtotal: 10, shipping: 0, discount: 0, adjustments: [] };
+    const base = { subtotal: 10, shipping: 0, discount: 0, refunds: [], adjustments: [] };
     expect(payoutView({ ...base, fees: [channel] })).toBe(8);
     expect(payoutView({ ...base, fees: [external] })).toBe(10);
+  });
+});
+
+/* ===================================================================== */
+/*
+ * DIE RÜCKERSTATTUNG IM ANLEGEFORMULAR, AM GEMELDETEN FALL.
+ *
+ * Gemeldet wurde: 42,74 + 2,99 − 6,64 − 1,01 stand als 38,08 € da, obwohl eine
+ * Rückerstattung über 2,99 € eingetragen war. Die Zahl war nie falsch
+ * GESPEICHERT — `p_payout_amount` geht als `null` hinaus und
+ * `sale_expected_payout()` zieht Erstattungen seit `0059` ab —, sie war vor
+ * dem Speichern falsch ANGEZEIGT.
+ */
+describe("die Auszahlungsvorschau zieht eine eingetragene Erstattung ab", () => {
+  const form = (over: Partial<Parameters<typeof saleFormMoney>[0]> = {}) => saleFormMoney({
+    subtotal: "42,74", shipping: "2,99", discount: "",
+    fees: [
+      { key: "a", type: "payment", amount: "6,64", settledBy: "channel", label: "" },
+      { key: "b", type: "listing", amount: "1,01", settledBy: "channel", label: "" },
+    ] as never,
+    refunds: [{ key: "r", amount: "2,99" }],
+    adjustment: "", adjustmentNote: "",
+    ...over,
+  });
+
+  it("DER GEMELDETE FALL: 42,74 + 2,99 − 6,64 − 1,01 − 2,99 = 35,09", () => {
+    expect(form().payout).toBe(35.09);
+  });
+
+  it("…und die alte Formel ergab genau die gemeldeten 38,08", () => {
+    /* Der Fehler, als Rechnung: dieselben Eingaben, Erstattungen weggelassen. */
+    const m = form();
+    const broken = plannedPayout(m.subtotal, m.shipping, m.discount, m.fees, [], m.adjustments);
+    expect(roundMoney(broken)).toBe(38.08);
+    expect(roundMoney(broken) - m.payout).toBeCloseTo(2.99, 2);
+  });
+
+  it("ohne Erstattung bleibt alles, wie es war", () => {
+    expect(form({ refunds: [] }).payout).toBe(38.08);
+  });
+
+  it("mehrere Erstattungszeilen zählen alle", () => {
+    /* 38,08 − 1,00 − 0,50 */
+    expect(form({ refunds: [{ key: "r1", amount: "1,00" }, { key: "r2", amount: "0,50" }] })
+      .payout).toBe(36.58);
+  });
+
+  it("eine leere oder nicht-positive Zeile zählt nicht — wie beim Speichern", () => {
+    /* `refundAmounts` lässt genau diese Zeilen fallen, und `refunds:` in der
+       Server Action bekommt dieselbe Liste. */
+    expect(form({ refunds: [{ key: "r", amount: "" }] }).payout).toBe(38.08);
+    expect(form({ refunds: [{ key: "r", amount: "0" }] }).payout).toBe(38.08);
+  });
+
+  it("die Vorschau rechnet mit derselben Liste, die gespeichert wird", () => {
+    expect(form().refunds).toEqual([{ amount: 2.99 }]);
+    expect(TEMPLATE_SRC).toContain("refundAmounts(input.refunds)");
+    expect(NEW_SALE).toContain("refunds: refundAmounts(refunds),");
+  });
+
+  it("nichts zieht doppelt ab", () => {
+    expect(payoutView({ subtotal: 10, shipping: 0, discount: 0, fees: [],
+                        refunds: [{ amount: 3 }], adjustments: [] })).toBe(7);
+    /* Und die Vorschauzahl wird nie gespeichert: der Server schickt `null`. */
+    expect(ACTIONS).toContain("p_payout_amount: null");
+  });
+
+  it("Gebühren, Versand, Rabatt und Korrekturen bleiben unberührt", () => {
+    expect(form({ shipping: "" }).payout).toBe(32.10);
+    expect(form({ discount: "1,00" }).payout).toBe(34.09);
+    expect(form({ adjustment: "0,50" }).payout).toBe(35.59);
+    /* Eine extern bezahlte Gebühr mindert die Auszahlung nicht: ohne jede
+       Kanalgebühr bleiben 42,74 + 2,99 − 2,99. */
+    expect(form({ fees: [
+      { key: "a", type: "payment", amount: "6,64", settledBy: "external", label: "" },
+    ] as never }).payout).toBe(42.74);
   });
 });
 
@@ -277,7 +362,7 @@ describe("the payout, by the workbook's own formula", () => {
       fee({ kind: "marketplace", label: "eBay-Gebühr", amount: "3,42" }),
       fee({ kind: "shipping_label", label: "Versandkosten (Label)", amount: "3,15" }),
     ]);
-    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, adjustments: [] }))
+    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, refunds: [], adjustments: [] }))
       .toBe(18.42);
   });
 
@@ -287,40 +372,40 @@ describe("the payout, by the workbook's own formula", () => {
       fee({ kind: "shipping_label", amount: "3,15" }),
       fee({ kind: "shipping_label", amount: "0,35", settledBy: "external" }),
     ]);
-    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, adjustments: [] })
+    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, refunds: [], adjustments: [] })
       ).toBe(18.42);
   });
 
   it("THERE IS NOTHING TO RECONCILE AGAINST — one number, derived", () => {
     // `payoutView` returns a plain number since ADR-0095: no reported figure,
     // no difference, no `matches`. The reconciliation workflow is gone.
-    const view = payoutView({ subtotal: 10, shipping: 0, discount: 0, fees: [], adjustments: [] });
+    const view = payoutView({ subtotal: 10, shipping: 0, discount: 0, fees: [], refunds: [], adjustments: [] });
     expect(typeof view).toBe("number");
     expect(view).toBe(10);
   });
 
   it("a discount lowers the payout", () => {
-    expect(payoutView({ subtotal: 20, shipping: 0, discount: 2.5, fees: [], adjustments: [] })
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 2.5, fees: [], refunds: [], adjustments: [] })
       ).toBe(17.5);
   });
 
   it("a signed adjustment moves it in both directions — the workbook ADDS `Fee S.`", () => {
     const base = { subtotal: 10, shipping: 0, discount: 0, fees: [] };
-    expect(payoutView({ ...base, adjustments: [{ amount: 1.5 }] })).toBe(11.5);
-    expect(payoutView({ ...base, adjustments: [{ amount: -1.5 }] })).toBe(8.5);
+    expect(payoutView({ ...base, refunds: [], adjustments: [{ amount: 1.5 }] })).toBe(11.5);
+    expect(payoutView({ ...base, refunds: [], adjustments: [{ amount: -1.5 }] })).toBe(8.5);
   });
 
   it("rounds once, so floating point never reaches the screen", () => {
     // 0.1 + 0.2 is 0.30000000000000004 in IEEE 754. `0,30 €` is what a
     // person is owed, and `payoutView` is the one place that decides so.
-    expect(payoutView({ subtotal: 0.1, shipping: 0.2, discount: 0, fees: [], adjustments: [] }))
+    expect(payoutView({ subtotal: 0.1, shipping: 0.2, discount: 0, fees: [], refunds: [], adjustments: [] }))
       .toBe(0.3);
   });
 
   it("IS THE IMPORTER'S FUNCTION, not a copy of it", () => {
     // Same inputs, same number: `payoutView` only rounds what plannedPayout says.
     const fees = [{ kind: "marketplace", amount: 3.42, settled_by: "channel" }];
-    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, adjustments: [] }))
+    expect(payoutView({ subtotal: 20, shipping: 4.99, discount: 0, fees, refunds: [], adjustments: [] }))
       .toBe(roundMoney(plannedPayout(20, 4.99, 0, fees, [], [])));
     // And the form reaches it through the shared module, never its own maths.
     expect(NEW_SALE).toContain("saleFormMoney");
@@ -371,7 +456,7 @@ describe("money as it is typed", () => {
 /* ===================================================================== */
 describe("the form's own fields, as they are typed", () => {
   const typed = (over: Partial<Parameters<typeof saleFormMoney>[0]> = {}) => saleFormMoney({
-    subtotal: "", shipping: "", discount: "", fees: [],
+    subtotal: "", shipping: "", discount: "", fees: [], refunds: [],
     adjustment: "", adjustmentNote: "", ...over,
   });
 
@@ -789,7 +874,7 @@ describe("fee types are a name on top of the kinds the database already has", ()
       { ...feeFromType(key(), "shipping_label"), amount: "5,19" },
     ]);
     expect(fees).toHaveLength(3);
-    expect(payoutView({ subtotal: 17.09, shipping: 5.99, discount: 0, fees, adjustments: [] }))
+    expect(payoutView({ subtotal: 17.09, shipping: 5.99, discount: 0, fees, refunds: [], adjustments: [] }))
       .toBe(13.5);
   });
 
@@ -801,7 +886,7 @@ describe("fee types are a name on top of the kinds the database already has", ()
       { ...feeFromType(key(), "payment"), amount: "1,00" },
       { ...feeFromType(key(), "shipping_label"), amount: "1,00", settledBy: "external" as const },
     ]);
-    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees, adjustments: [] })).toBe(16);
+    expect(payoutView({ subtotal: 20, shipping: 0, discount: 0, fees, refunds: [], adjustments: [] })).toBe(16);
   });
 
   it("leaves the historical rows alone: no label, summed by kind as before", () => {
@@ -817,7 +902,7 @@ describe("fee types are a name on top of the kinds the database already has", ()
     ];
     expect(historical.every((f) => !("label" in f))).toBe(true);
     expect(payoutView({ subtotal: 17.09, shipping: 5.99, discount: 0,
-                        fees: historical, adjustments: [] })).toBe(13.5);
+                        fees: historical, refunds: [], adjustments: [] })).toBe(13.5);
     expect(read("src/components/business/sale-details.tsx"))
       .toContain("return modal.feeKinds[fee.kind as keyof typeof modal.feeKinds] ?? fee.kind;");
   });

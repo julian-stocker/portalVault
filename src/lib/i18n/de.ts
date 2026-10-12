@@ -1738,6 +1738,16 @@ export const de = {
        */
       repeatBuyer: "Wiederholungskäufer",
       repeatBuyerHint: "Dieser Käufer hat hier schon einmal gekauft.",
+      /*
+       * MEHRERE VERKÄUFE EINES KÄUFERS AN EINEM TAG (0114).
+       *
+       * Der Satz sagt, was die Farbe bedeutet UND was sie nicht bedeutet:
+       * ein Hinweis auf eine Möglichkeit, keine Zusammenlegung. Er steht im
+       * `title` der Datumsschrift und trägt die Aussage, wo die Farbe nicht
+       * ankommt — Graustufen, erzwungene Farben, Farbenblindheit.
+       */
+      sameDayBuyerHint: (count: number) =>
+        `${count} Verkäufe dieses Käufers an diesem Tag — möglicherweise gemeinsam versendbar.`,
       /* Die Position läuft gerade. Keine Behauptung über das Ergebnis —
          siehe `act` in `sales-ledger.tsx`. */
       itemRunning: "läuft …",

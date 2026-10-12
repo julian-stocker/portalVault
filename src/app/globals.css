@@ -375,6 +375,13 @@
   /* --- Status ---------------------------------------------------------- */
   --success: #5ad18d;
   --danger: #ff9b93;
+  /*
+     Goldorange für „hier liegt mehr als eines" — mehrere Verkäufe eines
+     Käufers an einem Tag (0114). Weder Erfolg noch Fehler, sondern ein
+     Hinweis: deshalb ein eigener Ton und nicht `--success` oder `--danger`.
+     Auf dem dunklen Grund dieser Oberfläche trägt er genug Kontrast für
+     Fließtext; geprüft in `buyer-day-group.test.ts`. */
+  --attention: #f5b544;
 
   /* --- Depth ------------------------------------------------------------
      Named `elevation-*` because @theme maps them to `--shadow-*` below, and
@@ -532,6 +539,7 @@
 
   --color-success: var(--success);
   --color-danger: var(--danger);
+  --color-attention: var(--attention);
 
   --color-on-plate: var(--on-plate);
   --color-on-plate-muted: var(--on-plate-muted);

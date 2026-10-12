@@ -2979,6 +2979,44 @@ schon beim Schreiben, es gibt also keinen Produktpfad, der Rand-Leerraum in die 
 3. Erst danach, getrennt freizugeben: Production-Rollout `0112` → `0113` → Deploy.
 
 
+## Drei Befunde aus der Production-Abnahme (Stand 2026-10-12)
+
+**`0114` ist auf Production angewendet und verifiziert** (`all_ok = true`, 29 Einzelprüfungen,
+`sales_md5 13161c06…`; alle acht Datenintegritäts-Fingerabdrücke unverändert). Auf Staging
+**nicht** angewendet — dort fehlt die Spalte, und das Lesemodell fällt auf `1` zurück.
+Punkt 2 und 3 brauchen keine Migration.
+
+| | Ursache | Behebung |
+|---|---|---|
+| **Auszahlung ohne Rückerstattung** | `payoutView()` übergab `[]` an der Stelle der Erstattungen, mit der Begründung „ein neuer Verkauf hat keine". Das stimmte bis ADR-0117 dem Anlegeformular die vierte Kostenzeile gab: eine Rückerstattung. `plannedPayout` zog sie immer ab — es wurde ihr nichts übergeben. | `SaleDraftMoney.refunds` ist Pflichtfeld, `saleFormMoney` leitet sie über `refundAmounts()` ab — dieselbe Liste, die danach in `sale_refunds` landet. |
+| **Autokorrektur statt Katalogtreffer** | **Kein Event-Bubbling.** Zwischen `mousedown` und `click` verliert das Feld den Fokus, die Textersetzung macht aus „doom" ein „dem", die Trefferliste wird leer, und an derselben Stelle erscheint der Freitext-Knopf. Der Klick landet auf dem neuen Ziel. | Auswahl fällt auf `mousedown` mit `preventDefault()` — ohne Fokuswechsel keine Ersetzung. `onClick` bleibt für die Tastatur (`detail === 0`). Dazu `autoCorrect`/`autoCapitalize`/`spellCheck` aus. |
+| **Kein Hinweis auf gemeinsamen Versand** | Die Tatsache fehlte und war nicht herleitbar: `buyer_repeat` gilt auch über Monate, `buyer_key` verlässt die Funktion nicht (enthält `orders.user_id`), `buyer_label` ist ein Anzeigename. | `0114` ergänzt `buyer_day_count` in `seller_sales()` — dieselbe Identität wie `buyer_repeat`, anders gefenstert. Datumsschrift in `--attention` `#F5B544` (9,00:1 Kontrast). |
+
+**Die Auszahlung war nie falsch GESPEICHERT.** `p_payout_amount` geht als `null` hinaus, und
+`sale_expected_payout()` zieht Erstattungen seit `0059` ab. Falsch war die Zahl **vor** dem
+Speichern — und das ist die Zahl, auf die hin der Betreiber tippt. Am gemeldeten Fall:
+42,74 + 2,99 − 6,64 − 1,01 ergab **38,08 €**; mit der Erstattung über 2,99 € sind es **35,09 €**.
+
+**Was `0114` nicht anfasst:** kein Schema, kein Trigger, kein Index, keine Zeile. Eine ersetzte
+Lesefunktion; Rollback ist der `seller_sales()`-Block aus `0113`. `buyer_repeat`, die Reihenfolge,
+jede Zählung und jede Geldableitung sind zeichenweise gegen `0113` geprüft.
+
+| Migration | SHA256 | Zustand |
+|---|---|---|
+| `0114_buyer_sales_per_day.sql` | `169669d9…f77e0986f4` | **Production: angewendet** · Staging: offen |
+
+**Rückwärtskompatibel in beide Richtungen, gemessen:** der Reader benennt jedes Feld einzeln
+(0 strukturelle Übernahmen, 0 Schema-Prüfungen mit exakter Feldmenge), also ignoriert alter Code
+den neuen Schlüssel; und neuer Code ohne `0114` fällt auf `1` zurück, womit nur die Farbe
+ausbleibt. Die Reihenfolge Migration/Deploy war damit frei.
+
+**Beim Preflight gefunden, kein Befund:** Production war zwischen den Rollouts in Betrieb —
+8 neue Verkäufe, **9 getauschte Tagesplätze** und **2 Verkäufe über „Als verschickt markieren"**
+(je eine freie Position auf `settled_at`). Nach neun Tauschvorgängen trugen alle 172 Tage
+weiterhin lückenlos `1…n`, ohne Duplikat und ohne geparkten Negativwert. Die Funktionen aus
+`0112`/`0113` arbeiten auf echten Daten.
+
+
 ## Zuletzt verifizierte Prüfungen
 
 ### Tatsächlich ausgeführt

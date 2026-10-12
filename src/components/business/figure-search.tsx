@@ -176,6 +176,19 @@ export function FigureSearch({
           onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
+          /*
+           * KEINE AUTOKORREKTUR IN EINEM KATALOGFELD.
+           *
+           * Hier werden Eigennamen getippt — „Doom Stone", „Pop Fizz",
+           * „Hex" —, und für ein Wörterbuch sind das Tippfehler. iOS und
+           * macOS ersetzen „doom" dann beim Verlassen des Feldes still durch
+           * „dem", und die Trefferliste bricht unter dem Finger weg.
+           * `autoComplete` allein genügt dafür nicht: es schaltet den
+           * Browserverlauf ab, nicht die Textersetzung des Systems.
+           */
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           autoComplete="off"
           enterKeyHint="done"
           aria-controls={listId}
@@ -209,7 +222,17 @@ export function FigureSearch({
       */}
       {free !== null ? (
         <button type="button" disabled={disabled}
-                onClick={() => chooseFree(free)}
+                /*
+                 * DERSELBE WEG, UND AUS DEM GLEICHEN GRUND.
+                 *
+                 * Übergeben wird `free` aus dem Abschluss — der Name, den
+                 * dieser Knopf GERADE ANZEIGT. Nicht der Feldinhalt von
+                 * jetzt: hätte eine Ersetzung ihn zwischen Darstellung und
+                 * Klick geändert, würde sonst etwas anderes angelegt als das,
+                 * was dort stand.
+                 */
+                onMouseDown={(event) => { event.preventDefault(); chooseFree(free); }}
+                onClick={(event) => { if (event.detail === 0) chooseFree(free); }}
                 className="min-h-11 self-start rounded-sky-md px-3 text-left text-sm ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-60 sm:min-h-9">
           {copy.addFree(free)}
         </button>
@@ -222,7 +245,30 @@ export function FigureSearch({
             <button
               type="button"
               disabled={disabled}
-              onClick={() => choose(choice)}
+              /*
+               * DIE AUSWAHL FÄLLT HIER, AUF `mousedown`, UND NICHT AUF `click`.
+               *
+               * WAS SONST PASSIERT, UND ES IST KEIN BUBBLING-FEHLER. Zwischen
+               * `mousedown` und `click` verliert das Eingabefeld den Fokus.
+               * Genau dann greift die Textersetzung des Systems zu und
+               * schreibt aus „doom" ein „dem". Das löst ein `change` aus, die
+               * Suche findet nichts mehr, die Trefferliste wird LEER — und an
+               * derselben Stelle erscheint der Knopf „freien Artikel
+               * anlegen". Der Klick landet auf dem, was jetzt dort steht. So
+               * entstand aus einem angeklickten Katalogtreffer ein freier
+               * Artikel namens „dem".
+               *
+               * `preventDefault()` verhindert den Fokuswechsel überhaupt:
+               * ohne Blur keine verspätete Ersetzung, und die Auswahl ist
+               * geschrieben, bevor irgendetwas die Liste ändern könnte.
+               *
+               * `onClick` bleibt für die TASTATUR. Ein mit Enter oder
+               * Leertaste ausgelöster Klick trägt `detail === 0` und hat kein
+               * `mousedown` vor sich; alles darüber kommt vom Zeigegerät und
+               * ist hier schon erledigt.
+               */
+              onMouseDown={(event) => { event.preventDefault(); choose(choice); }}
+              onClick={(event) => { if (event.detail === 0) choose(choice); }}
               onMouseEnter={() => setHighlight(index)}
               className={`flex min-h-11 w-full items-center gap-2 rounded-sky-md px-3 text-left text-sm ring-1 disabled:opacity-60 ${
                 index === active ? "bg-surface ring-fg/40" : "ring-border/70 hover:ring-fg/30"
