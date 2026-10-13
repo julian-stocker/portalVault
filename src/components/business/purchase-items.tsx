@@ -46,7 +46,8 @@ import {
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import { FigureSearch } from "./figure-search";
 import {
-  QUICK_STATES, canBook, canRemapItem, canRemoveItem, canSettle, type ItemState,
+  canBook, canRemapItem, canRemoveItem, canSettle, creditsNoValue, quickStatesFor,
+  type ItemState,
 } from "@/lib/orderbook/purchase";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
 
@@ -77,6 +78,16 @@ export function PurchaseItems({
       current.map((i) => (i.id === update.id ? { ...i, state: update.state } : i)),
   );
   const [booking, setBooking] = useState<number | null>(null);
+  /*
+   * Die Position, deren Abschluss gerade korrigiert wird.
+   *
+   * Nur `damaged` und `missing` kommen hierher, und sie müssen es: ein
+   * Zustandsknopf neben den anderen wäre genau der „normale
+   * Statuswechsel", über den eine beschädigte Figur nicht in den
+   * Verkaufsbestand gelangen darf (Entscheidung D4). Ein Klick, ein Satz,
+   * dann der eine Knopf.
+   */
+  const [correcting, setCorrecting] = useState<number | null>(null);
 
   function quick(item: PurchaseItem, state: ItemState) {
     setError(null);
@@ -149,6 +160,9 @@ export function PurchaseItems({
            */
           const nonCatalog = item.skyId === null;
           const isSettled = item.state === "settled";
+          /* Beschädigt oder fehlt: zählt mit 0 EUR (D4) und wird nicht
+             nebenbei zurückgesetzt. */
+          const noValue = creditsNoValue(item.state as ItemState);
           const mayRemap = canRemapItem(item);
           const mayRemove = canRemoveItem(source, item);
           return (
@@ -183,19 +197,61 @@ export function PurchaseItems({
                 <p className="mt-1 text-xs text-muted">{copy.legacyRow}</p>
               ) : (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <div className="flex flex-wrap gap-1" role="group" aria-label={copy.columns.progress}>
-                    {QUICK_STATES.map((state) => (
-                      <button key={state} type="button"
-                              disabled={pending || isBooked}
-                              onClick={() => quick(item, state)}
-                              aria-pressed={item.state === state}
-                              className={`min-h-11 rounded-sky-md px-3 text-xs ring-1 disabled:opacity-50 ${
-                                item.state === state ? "bg-surface font-medium ring-fg/40" : "text-muted ring-border/70"
-                              }`}>
-                        {copy.states[state]}
-                      </button>
-                    ))}
-                  </div>
+                  {/*
+                    EIN BESCHÄDIGTES ODER FEHLENDES ENDE WIRD NICHT NEBENBEI
+                    ZURÜCKGENOMMEN (Entscheidung D4).
+
+                    Statt der Quickbox steht dort der Zustand als Text und ein
+                    leiser Knopf. Erst der öffnet den Satz, der sagt, was die
+                    Korrektur bedeutet, und darunter den einen Zustand, der
+                    erlaubt ist: `Angekommen`. „Vitrine" ist für diese
+                    Position bewusst nicht dabei — aus der Vitrine darf
+                    eingebucht werden, und das wäre der zweite Weg in den
+                    Verkaufsbestand. `seller_set_purchase_item_state` weist
+                    ihn auch serverseitig ab (0116).
+                  */}
+                  {noValue ? (
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium">{copy.states[item.state]}</span>
+                        <button type="button" disabled={pending}
+                                aria-expanded={correcting === item.id}
+                                onClick={() => setCorrecting(correcting === item.id ? null : item.id)}
+                                className={ROW_ACTION}>
+                          {copy.correctEnding}
+                        </button>
+                      </div>
+                      {correcting === item.id ? (
+                        <div className="flex flex-col gap-2 rounded-sky-md bg-surface p-2 ring-1 ring-border/70">
+                          <p className="text-xs text-muted">{copy.correctEndingHint}</p>
+                          <div className="flex flex-wrap gap-1"
+                               role="group" aria-label={copy.correctEnding}>
+                            {quickStatesFor(item).map((state) => (
+                              <button key={state} type="button" disabled={pending}
+                                      onClick={() => { setCorrecting(null); quick(item, state); }}
+                                      className={`${ACTION_NEUTRAL} min-h-11 w-auto disabled:opacity-60`}>
+                                {copy.states[state]}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1" role="group" aria-label={copy.columns.progress}>
+                      {quickStatesFor(item).map((state) => (
+                        <button key={state} type="button"
+                                disabled={pending || isBooked}
+                                onClick={() => quick(item, state)}
+                                aria-pressed={item.state === state}
+                                className={`min-h-11 rounded-sky-md px-3 text-xs ring-1 disabled:opacity-50 ${
+                                  item.state === state ? "bg-surface font-medium ring-fg/40" : "text-muted ring-border/70"
+                                }`}>
+                          {copy.states[state]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   {isBooked ? (
                     <div className="ml-auto flex items-center gap-2">
@@ -231,11 +287,23 @@ export function PurchaseItems({
                       </button>
                     )
                   ) : (
+                    /*
+                      DERSELBE KNOPF, EIN ANDERES WORT AUS DER VITRINE (D1).
+
+                      Technisch ist es dieselbe Handlung — eine
+                      Lagerbewegung mit Beleg —, aber sie bedeutet etwas
+                      anderes: der Inhaber gibt ein Ausstellungsstück an den
+                      Shop. „Einbuchen" an einer Vitrinenfigur sähe aus wie
+                      ein Arbeitsschritt; „In den Bestand übernehmen" ist
+                      eine Entscheidung.
+                    */
                     <button type="button"
                             disabled={pending || !canBook({ state: item.state, skyId: item.skyId })}
                             onClick={() => book(item)}
+                            title={item.state === "showcase" ? copy.showcaseToStockHint : undefined}
                             className={`${ACTION_PRIMARY} ml-auto min-h-11 w-auto disabled:opacity-40`}>
-                      {booking === item.id ? copy.booking : copy.book}
+                      {booking === item.id ? copy.booking
+                        : item.state === "showcase" ? copy.showcaseToStock : copy.book}
                     </button>
                   )}
                 </div>

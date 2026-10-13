@@ -387,10 +387,12 @@ describe("the creation forms at phone widths", () => {
                          "copy.submitPurchase"]);
   });
 
-  it("boxes the payout and nothing else", () => {
+  it("each form boxes its answer, and nothing else", () => {
     /*
-     * "Keine Karten-in-Karten": a group is a heading and a gap. The payout
-     * is the one panel, because it is the answer rather than a question.
+     * "Keine Karten-in-Karten": a group is a heading and a gap. One panel per
+     * form, and it holds the ANSWER rather than a question — the payout in
+     * Verkauf, and since 0115 the Gesamtkosten in Einkauf, which is now a sum
+     * of three parts instead of the single amount it used to be.
      */
     // The group itself: a heading, a hairline, a gap. The `ring-1` in this
     // file belongs to the INPUT constant, not to the wrapper.
@@ -398,10 +400,17 @@ describe("the creation forms at phone widths", () => {
                                 SECTION.indexOf("export function Field"));
     expect(code(group)).not.toContain("ring-1");
     expect(code(group)).not.toContain("rounded-sky");
-    const panels = code(NEW_SALE).match(/rounded-sky-lg[^"]*ring-1/g) ?? [];
-    expect(panels).toHaveLength(1);
-    expect(code(NEW_SALE)).toContain("create.sections.payout");
-    expect(code(NEW_PURCHASE).match(/rounded-sky-lg[^"]*ring-1/g) ?? []).toHaveLength(0);
+
+    for (const [name, source, answer] of [
+      ["Verkauf", NEW_SALE, "create.sections.payout"],
+      ["Einkauf", NEW_PURCHASE, "field.totalCost"],
+    ] as const) {
+      const panels = code(source).match(/rounded-sky-lg[^"]*ring-1/g) ?? [];
+      expect(panels, name).toHaveLength(1);
+      // And what is in the box is the answer, not one of the inputs.
+      const panel = code(source).slice(code(source).search(/rounded-sky-lg[^"]*ring-1/));
+      expect(panel.slice(0, panel.indexOf("</div>")), name).toContain(answer);
+    }
   });
 
   it("gives the submit button the full width of a phone", () => {

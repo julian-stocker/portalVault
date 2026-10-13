@@ -171,7 +171,12 @@ describe("ordering", () => {
      * under `desc`, which would put thirteen dateless purchases above the
      * newest real one and make them read as this week's parcels.
      */
-    expect(LEDGER_SQL).toContain("order by m.purchased_at desc nulls last, m.id desc");
+    /* 0116: der Tagesplatz steht jetzt zwischen Datum und `id` — höchster
+       Platz oben, wie im Verkaufsbuch seit 0113. `nulls last` und das
+       `id desc` am Ende sind unverändert. */
+    expect(LEDGER_SQL).toContain("order by m.purchased_at desc nulls last,");
+    expect(LEDGER_SQL).toContain("m.daily_index desc nulls last,");
+    expect(LEDGER_SQL).toContain("m.id desc), '[]'::jsonb) as page_rows");
   });
 
   it("the whole real month sorts to the expected sequence", () => {
@@ -436,11 +441,42 @@ describe("Einchecken", () => {
   it("and the row is redrawn from the server, never optimistically", () => {
     /*
      * A tick that appears before the database agreed is a claim about
-     * inventory that may be false. The component re-reads the purchase.
+     * inventory that may be false. Die Zusicherung gilt unverändert — nur
+     * der Weg ist seit `0116` ein anderer.
+     *
+     * VORHER: `if (result.ok) load(purchaseId)` — eine ZWEITE Serverrunde
+     * nach jeder Buchung, und davor ein `revalidatePath`, das die ganze
+     * Route neu rendern liess. Genau das war die Wartezeit zwischen zwei
+     * Figuren.
+     *
+     * JETZT: die Server Action liest den Einkauf in DERSELBEN Runde nach und
+     * gibt ihn zurück; die Komponente übernimmt, was sie bekommt. Ebenfalls
+     * nicht optimistisch — nur ohne die zweite Runde.
      */
-    expect(COMPONENT).toContain("if (result.ok) load(purchaseId);");
+    expect(COMPONENT).toContain("processBookPurchaseItem");
     expect(COMPONENT).not.toContain("useOptimistic");
-    expect(COMPONENT).toContain("bookPurchaseItem");
+    /* Der Zustand kommt aus der Antwort, nicht aus einer Annahme. */
+    expect(COMPONENT).toContain("setItems((current) => ({ ...current, [purchaseId]: result.items! }))");
+    /* Und „läuft …" ist alles, was die Zeile vor der Bestätigung behauptet. */
+    expect(COMPONENT).toContain("busy ? copy.itemRunning");
+    expect(COMPONENT).not.toMatch(/setItems[\s\S]{0,120}state:\s*["']booked["']/);
+
+    /* Die Nachlese-Funktion selbst: eine RPC, dann der frische Einkauf. */
+    const ACTIONS = readFileSync(join(process.cwd(), "src/lib/orderbook/actions.ts"), "utf8");
+    /*
+     * OHNE KOMMENTARE, und das ist hier nicht Kosmetik: der Rumpf ERKLÄRT,
+     * warum er kein `revalidatePath` ruft — eine Zusicherung über das Wort
+     * würde also an der Begründung scheitern statt am Code. Genau dieselbe
+     * Vorbehandlung wie in `orderbook-ux.test.ts`.
+     */
+    const code_ = ACTIONS.replace(/\/\*[\s\S]*?\*\//g, "")
+      .split("\n").filter((l) => !l.trimStart().startsWith("//")).join("\n");
+    const run = code_.slice(code_.indexOf("async function runPurchaseItem"));
+    const head = run.slice(0, run.indexOf("\n}"));
+    expect(head).toContain("await supabase.rpc(fn, args)");
+    expect(head).toContain("await fetchPurchase(purchaseId)");
+    /* Kein `revalidatePath` auf dem schnellen Pfad — das war der Server-Render. */
+    expect(head).not.toContain("revalidatePath");
   });
 });
 
@@ -863,7 +899,12 @@ describe("searching by game", () => {
      * under `desc`, which would put thirteen dateless purchases above the
      * newest real one and make them read as this week's parcels.
      */
-    expect(LEDGER_SQL).toContain("order by m.purchased_at desc nulls last, m.id desc");
+    /* 0116: der Tagesplatz steht jetzt zwischen Datum und `id` — höchster
+       Platz oben, wie im Verkaufsbuch seit 0113. `nulls last` und das
+       `id desc` am Ende sind unverändert. */
+    expect(LEDGER_SQL).toContain("order by m.purchased_at desc nulls last,");
+    expect(LEDGER_SQL).toContain("m.daily_index desc nulls last,");
+    expect(LEDGER_SQL).toContain("m.id desc), '[]'::jsonb) as page_rows");
     expect(LEDGER_SQL).toContain("sum(m.total_cost) / sum(m.known_value)");
     expect(LEDGER_SQL).not.toMatch(/avg\s*\(/i);
   });

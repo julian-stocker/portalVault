@@ -3325,6 +3325,144 @@ beides Backfill der zwei neuen Spalten. Die Zählungen, die Offen-Regel und die 
 so.
 
 
+### 3.3an Der Einkauf bekommt Kosten, Plattform, Tagesplatz und die Vitrine (`0115`, `0116`, ADR-0121)
+
+Das Einkaufsorderbuch war seit `0053` Datum, Betrag, Notiz und Figuren. `0115` ergänzt das Schema,
+`0116` die Logik — getrennt, weil die Schemaänderung für sich prüfbar ist und die Logik auf ihr
+aufsetzt. Die Trennung ist erzwungen, nicht nur dokumentiert: `0116` prüft drei Marker aus `0115`
+und bricht sonst an der ersten Zeile ab.
+
+**`0115` — sieben Spalten auf `purchases`, alle nullbar und ohne `default`:**
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `items_cost` | `numeric(10,2)` | Kaufpreis der Figuren |
+| `shipping_cost` | `numeric(10,2)` | Versand |
+| `buyer_protection_cost` | `numeric(10,2)` | Käuferschutz, Vorgabe des Formulars 0 € |
+| `platform` | `text` | `kleinanzeigen` · `willhaben` · `manual` — **wo** gekauft wurde |
+| `seller_name` | `text` | **bei wem**, roh gespeichert (Regel 4) |
+| `payment_method` | `text` | `card` · `paypal` · `transfer` · `cash` · `platform` — **wie** bezahlt |
+| `daily_index` | `integer` | der Platz am Tag |
+
+Kein `default` auf einer der sieben, und das ist die Entscheidung: ein `default 'card'` hätte
+jedem der bestehenden Einkäufe rückwirkend eine Zahlungsart zugeschrieben, die niemand erfasst
+hat. Für sie ist alles davon **unbekannt**, und unbekannt heißt NULL.
+
+**Sechs CHECKs auf den Kopfdaten, einer auf dem Tag:**
+
+```
+purchases_cost_split_adds_up     items_cost is null
+                                 or round(items + coalesce(shipping,0)
+                                          + coalesce(protection,0), 2) = round(total_cost, 2)
+purchases_cost_parts_sane        jeder Teil null oder 0 … 1 000 000
+purchases_cost_split_is_whole    items_cost is not null
+                                 or (shipping is null and protection is null)
+purchases_platform_known         null oder eine der drei Plattformen
+purchases_payment_method_known   null oder einer der fünf Wege
+purchases_seller_name_shape      null oder btrim-Länge 1 … 120
+purchases_day_and_index_agree    (purchased_at is null) = (daily_index is null)
+```
+
+`total_cost` bleibt dabei, was es seit `0053` ist: **was tatsächlich bezahlt wurde** (ADR-0121,
+D2). Die Aufteilung steht daneben und wird gegen die Summe geprüft, damit nie zwei Zahlen über
+dieselbe Ausgabe im Umlauf sind. Ein Formular, das die Teile erfasst, rechnet die Summe daraus —
+und rundet **erst die Teile, dann die Summe**, weil der CHECK genau so rechnet.
+
+**Warum `purchases_day_and_index_agree` am Ende der Datei steht.** Ein `add constraint` prüft die
+bestehenden Zeilen **sofort**, und vor dem Backfill trägt jeder datierte Einkauf noch
+`daily_index IS NULL`. Oben hätte dieser CHECK die Migration auf der ersten Zeile abgebrochen.
+
+**Der Platz, der Index und der Backfill.** Ein Teilindex, weil ein Einkauf ohne Tag keinen Platz
+hat:
+
+```sql
+create unique index purchases_daily_index_uniq
+  on public.purchases (purchased_at, daily_index)
+ where purchased_at is not null and daily_index is not null;
+
+create index purchases_day_order_idx
+  on public.purchases (purchased_at desc nulls last, daily_index desc nulls last, id desc);
+```
+
+**Kein CHECK `daily_index > 0`** — dieselbe Entscheidung wie in `0113`: der Sentinel-Tausch aus
+`0116` parkt einen Platz auf einem negativen Wert, und ein Positivitäts-CHECK würde genau diese
+Transaktion verbieten. Der Backfill ist deterministisch, `row_number() over (partition by
+purchased_at order by id)`, und läuft **vor** dem Trigger: liefe der schon, bekäme jede Zeile
+ihren Platz in der Reihenfolge, in der PostgreSQL sie zufällig aktualisiert, und zwei Umgebungen
+hätten für dieselben Daten verschiedene Tagesreihenfolgen. Tie-Breaker ist `id` und nicht
+`created_at`, weil zwei importierte Arbeitsmappengruppen denselben Zeitstempel tragen.
+`updated_at` bleibt stehen — ein Backfill ist keine Korrektur des Betreibers.
+
+**Es gibt keine Spalte `purchase_day`.** Beim Verkauf brauchte `0113` eine, weil `effective_date`
+ein `case` über zwei Tabellen ist und man auf einen Ausdruck nicht eindeutig indexieren kann.
+`purchases.purchased_at` **ist** der Tag, als `date`, seit `0053` — und seit `0058` nullbar für
+die undatierten Arbeitsmappengruppen. Eine zweite Spalte daneben wäre eine Kopie, die
+auseinanderlaufen kann.
+
+**Der Trigger hält den Platz in Ordnung**, `purchases_set_daily_index()` als `before insert or
+update`: kein Tag → kein Platz; ein **bestehender** Platz am **unveränderten** Tag bleibt stehen
+(das ist die Tür, durch die der Platztausch geht, und der Grund, warum eine Notiz- oder
+Kostenänderung die Tagesreihenfolge nicht durcheinanderbringt); sonst `max + 1` unter
+`pg_advisory_xact_lock` je Tag, damit zwei gleichzeitige Einkäufe am selben Tag nicht dieselbe
+Zahl lesen.
+
+**Und `showcase` kommt als Wort dazu** — `purchase_items_state_known` erlaubt ab `0115`
+`ordered`, `arrived`, `damaged`, `missing`, `booked`, `reconciled_legacy`, `settled`, `showcase`.
+Setzen kann es erst `0116`; das Wort existiert, niemand kann es schreiben. Ein zulässiger
+Zwischenzustand.
+
+**`0116` — neun Funktionen, kein DDL.** Keine Spalte, kein Index, kein Trigger, kein Constraint,
+keine Zeile geschrieben. Rollback ist die jeweils vorige Fassung aus `0053`/`0059`/`0064`/`0069`/
+`0070`.
+
+| Funktion | Änderung |
+|---|---|
+| `purchase_market_value` | `damaged`/`missing` tragen **0 €** bei und bleiben in `total_items`; die Klausel `state <> 'missing'` fällt weg |
+| `orderbook_global_factor` | **eine** Zeile mehr: `where not p.is_test` |
+| `seller_set_purchase_item_state` | `showcase` erlaubt; zwei neue Sperren (nicht für ein Nicht-Katalogartikel, nicht aus `damaged`/`missing`) |
+| `seller_book_purchase_item` | **codegleich mit `0053`** — nur Kommentare. Die Sperren gegen `damaged` und `missing` galten bereits |
+| `seller_swap_purchase_daily_index` | **neu**, wortgleich mit `seller_swap_sale_daily_index` aus `0113` |
+| `seller_create_purchase_with_items` | sieben neue Parameter (alte 5-Argument-Signatur wird gedropt) |
+| `seller_update_purchase` | acht neue Parameter inklusive `p_clear_cost_split` (alte 4-Argument-Signatur wird gedropt) |
+| `seller_purchase` | `daily_index_count` und `day_order` dazu |
+| `seller_orderbook_ledger` | drei Zustandszähler, `open_count` **gezählt** statt als Rest gerechnet, Kostenaufteilung und Kopffelder in der Projektion, Sortierung nach Tagesplatz |
+
+**Die Faktorregel, in SQL und in TypeScript dieselbe:**
+
+```sql
+case when i.state in ('damaged', 'missing') then 0
+     else coalesce(i.market_price_snapshot, s.market_price) end
+```
+
+Eine neu angelegte Position hat keinen Schnappschuss und zählt deshalb mit dem **aktuellen**
+Katalogpreis; eingefroren wird er erst beim Einbuchen (`market_price_source = 'booking'`). Die
+Division bleibt durch `sum > 0` geschützt — bei 0 € anrechenbarem Wert kommt NULL heraus und keine
+Ausnahme.
+
+**`open_count` war falsch und ist es nicht mehr.** Es stand als `total_items - booked - settled` in
+der Projektion und zählte damit eine beschädigte Position als offen, während `is_open` daneben sie
+korrekt ausschloss — Zahl und Wahrheitswert widersprachen sich. Beide fragen jetzt dasselbe:
+`movement_id is null and state in ('ordered', 'arrived')`.
+
+**Zwei Sperren, die den Umweg schließen (ADR-0121).** Aus `showcase` **darf** eingebucht werden —
+das ist die Überführung in den Shopbestand. Genau dadurch wäre `showcase` aber ein zweiter Weg in
+den Verkaufsbestand geworden: `damaged → showcase → booked`, zwei erlaubte Klicks, am Ende eine
+als beschädigt verzeichnete Figur im Shop. `seller_set_purchase_item_state()` weist den ersten
+Schritt ab; der eine nachvollziehbare Weg zurück ist `arrived`.
+
+**Was `0115` und `0116` nicht anfassen:** `shop_inventory`, `inventory_movements`,
+`order_reservations`, `orders`, `sales`, `sale_items`, `order_refunds`, `payment_events`,
+Rechnungen, Beträge. Geschrieben wird an Daten genau einmal — der Platz-Backfill —, und
+`total_cost` bleibt auf jeder Zeile unverändert. Die Verkaufsseite ist unberührt: `sale_buy_in()`
+rechnet weiter aus dem eingefrorenen `buy_in_factor_snapshot`, und die drei Einfrierstellen nutzen
+`coalesce(snapshot, orderbook_global_factor())` — ein bestehender Snapshot wird nie überschrieben.
+
+**Umgebungen.** Staging: beide angewendet, SQL- und PostgREST-Postflight bestanden, Funktionstest
+T4–T12 in einer Transaktion mit garantiertem Rollback nachgewiesen. Production: **offen**; dort
+gibt es 0 beschädigte, 0 fehlende und 0 Testeinkäufe, der Faktor bleibt also messbar bei
+0,376347, und 84 datierte Einkäufe erhalten ihre 84 Plätze.
+
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**

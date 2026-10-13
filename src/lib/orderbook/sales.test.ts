@@ -868,9 +868,9 @@ describe("the ledger renders as a table", () => {
   const PAGE = read("src/app/(business)/business/orderbuch/verkauf/page.tsx");
   const components = CSS.slice(CSS.indexOf("@layer components {"));
 
-  /** A `"a b c"` constant in the ledger → one entry per track. */
-  const constTracks = (name: string): string[] => {
-    const m = new RegExp(`const ${name} =([^;]*);`).exec(LEDGER);
+  /** A `"a b c"` constant in a ledger → one entry per track. */
+  const constTracks = (name: string, source: string = LEDGER): string[] => {
+    const m = new RegExp(`const ${name} =([^;]*);`).exec(source);
     if (!m) return [];
     const joined = [...m[1].matchAll(/"([^"]*)"/g)].map((q) => q[1]).join("");
     return joined.replace(/\s+/g, " ").trim().split(/ (?![^(]*\))/).filter(Boolean);
@@ -1023,16 +1023,33 @@ describe("the ledger renders as a table", () => {
       // Neither screen declares a list of its own.
       expect(source, name).not.toMatch(/const (SALE_)?ITEM_COLUMNS\s*=/);
     }
-    // And Einkauf overrides nothing, so its six tracks are untouched.
-    expect(EINKAUF).not.toContain("itemColumns=");
+    /*
+     * Einkauf has a list of its own now — six item tracks, one of them wide
+     * enough for `[Einbuchen] [+]`. That is a different screen with different
+     * cells, not a second copy of Verkauf\'s seven, so what must hold is the
+     * opposite of the rule above: it declares its own and borrows nothing.
+     */
+    expect(EINKAUF).toContain("itemColumns={PURCHASE_ITEM_COLUMNS}");
+    expect(EINKAUF).not.toContain("SALE_ITEM_COLUMNS");
+    expect(EINKAUF).not.toContain('from "./sale-indicator"');
   });
 
-  it("Einkauf keeps six item cells, so the shared rule still fits it", () => {
+  it("Einkauf's cells match the tracks Einkauf declares", () => {
+    const columns = constTracks("PURCHASE_COLUMNS", EINKAUF);
+    const items = constTracks("PURCHASE_ITEM_COLUMNS", EINKAUF);
+    expect(columns).toHaveLength(7);
+    expect(items).toHaveLength(6);
+    // The last purchase track carries the (i), so it may not be wider.
+    expect(columns[columns.length - 1]).toBe("1.5rem");
+
     const head = inside(EINKAUF, "<LedgerItemHead>", "</LedgerItemHead>");
-    expect(cells(head)).toBe(6);
-    expect(cells(inside(EINKAUF, "<LedgerItemRow>", "</LedgerItemRow>"))).toBe(6);
-    expect(cells(inside(EINKAUF, "<LedgerHead>", "</LedgerHead>"))).toBe(7);
-    expect(cells(inside(EINKAUF, "<LedgerRow ", "</LedgerRow>"))).toBe(7);
+    expect(cells(head)).toBe(items.length);
+    expect(cells(inside(EINKAUF, "<LedgerItemRow>", "</LedgerItemRow>")))
+      .toBe(items.length);
+    expect(cells(inside(EINKAUF, "<LedgerHead>", "</LedgerHead>")))
+      .toBe(columns.length);
+    expect(cells(inside(EINKAUF, "<LedgerRow ", "</LedgerRow>")))
+      .toBe(columns.length);
   });
 
   it("the column lists travel in the HTML, not in a stylesheet rule", () => {
@@ -1045,11 +1062,14 @@ describe("the ledger renders as a table", () => {
     expect(PRIMITIVES).toContain('"--ob-item-columns": itemColumns');
     expect(LEDGER).toContain("columns={SALE_COLUMNS}");
     expect(LEDGER).toContain("itemColumns={SALE_ITEM_COLUMNS}");
-    // Einkauf passes no column list and renders from the rule's own
-    // fallback — but it does pass a width, because a ledger without a floor
-    // is a ledger whose columns can be crushed.
-    expect(EINKAUF).toContain("<LedgerTable minWidth={PURCHASE_MIN_WIDTH}>");
-    expect(EINKAUF).not.toContain("columns={");
+    // Einkauf delivers its own two lists the same way, plus a floor —
+    // because a ledger without one is a ledger whose columns can be crushed.
+    expect(EINKAUF).toContain("columns={PURCHASE_COLUMNS}");
+    expect(EINKAUF).toContain("itemColumns={PURCHASE_ITEM_COLUMNS}");
+    expect(EINKAUF).toContain("minWidth={PURCHASE_MIN_WIDTH}");
+    // What stays forbidden is a second rule: no ledger carries its tracks in
+    // the stylesheet, so there is still exactly one declaration of each.
+    expect((components.match(/grid-template-columns/g) ?? []).length).toBe(2);
     expect(components).toMatch(/grid-template-columns: var\(--ob-columns,/);
     expect(components).toMatch(/grid-template-columns: var\(--ob-item-columns,/);
   });
@@ -1066,6 +1086,18 @@ describe("the ledger renders as a table", () => {
       + 0.75 * (tracks.length - 1) + 0.75 * 2;
     expect(needed).toBeGreaterThan(0);
     expect(Number(declared![1])).toBeGreaterThanOrEqual(needed);
+
+    // Einkauf has explicit tracks now, so its floor has to cover them too.
+    const buy = /const PURCHASE_MIN_WIDTH = "([\d.]+)rem"/.exec(EINKAUF);
+    expect(buy, "Einkauf declares a floor").not.toBeNull();
+    for (const name of ["PURCHASE_COLUMNS", "PURCHASE_ITEM_COLUMNS"]) {
+      const t = constTracks(name, EINKAUF);
+      expect(t.length, name).toBeGreaterThan(0);
+      const floor = t.reduce((sum, x) => sum + minRem(x), 0)
+        + 0.75 * (t.length - 1) + 0.75 * 2;
+      expect(Number(buy![1]), name).toBeGreaterThanOrEqual(floor);
+    }
+
     // Applied at EVERY width now, and it is the ledger that scrolls.
     expect(components.slice(0, components.indexOf("@media (min-width: 48rem)")))
       .toMatch(/\.ob-min \{ min-width: var\(--ob-min-width, 0\); \}/);

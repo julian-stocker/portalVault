@@ -961,10 +961,25 @@ export const de = {
        * gekostet hat, dann das Optionale.
        */
       newSections: {
-        purchase: "Einkauf", figures: "Figuren", amount: "Betrag", note: "Notiz",
+        /* „Kosten" und nicht mehr „Betrag": seit 0115 sind es drei Teile und
+           ihre Summe, und die Überschrift soll die Gruppe benennen, nicht
+           einen der Werte darin. */
+        purchase: "Einkauf", figures: "Figuren", amount: "Kosten", note: "Notiz",
       },
       purchasePrice: "Kaufpreis",
       submitPurchase: "Einkauf anlegen",
+      /*
+       * DIE VORLAGE (0115). Wortgleich mit dem Verkaufsformular, und aus
+       * demselben Grund: sie entscheidet, was das Formular zeigt und
+       * vorbelegt — gespeichert wird in `purchases.platform`.
+       */
+      newTemplate: "Vorlage",
+      /* Wo die Vorlage keinen Käuferschutz kennt, holt ihn dieser Knopf.
+         Nicht versteckt, nur nicht im Weg. */
+      newBuyerProtection: "Käuferschutz hinzufügen",
+      /* Welcher Betrag nicht gelesen werden konnte, sagt der Satz nicht —
+         welche Felder gemeint sind, schon. */
+      invalidCosts: "Kaufpreis, Versand und Käuferschutz müssen Beträge sein.",
       allYears: "Alle Jahre",
       allMonths: "Alle Monate",
       /* Ein Einkauf ohne Datum ist ein echter Einkauf — nur das Datum fehlt
@@ -1217,12 +1232,148 @@ export const de = {
        * Detailseite und in der Lager-Spalte des Buchs. Groß geschrieben,
        * weil sie dort Statusangaben sind und keine Satzfragmente.
        */
+      /*
+       * DAS EINKAUFSDETAILS-FENSTER (0115/0116).
+       *
+       * Dieselben Wörter wie im Verkaufsfenster, wo sie dasselbe bedeuten —
+       * `close`, `edit`, `done`, `save`. Was verschieden ist, ist verschieden
+       * benannt: ein Verkauf hat einen Käufer und einen Kanal, ein Einkauf
+       * einen Verkäufer und eine Plattform. Die beiden nicht zu vermischen
+       * war eine ausdrückliche Vorgabe.
+       */
+      detailsModal: {
+        title: "Einkaufsdetails",
+        close: "Schließen",
+        purchase: "Einkauf",
+        edit: "Bearbeiten", done: "Fertig", save: "Speichern",
+        /* WO gekauft wurde — nicht bei wem. */
+        platform: "Plattform",
+        platformNames: {
+          kleinanzeigen: "Kleinanzeigen",
+          willhaben: "Willhaben",
+          manual: "Manuell / Sonstige",
+        },
+        /* BEI WEM gekauft wurde. Frei getippt, roh gespeichert (Regel 4). */
+        seller: "Verkäufer",
+        sellerPlaceholder: "z. B. Benutzername des Anbieters",
+        reference: "Referenz",
+        referencePlaceholder: "Bestellnummer oder Anzeigen-ID",
+        note: "Notiz",
+        payment: "Zahlungsmethode",
+        paymentNames: {
+          card: "Kreditkarte",
+          paypal: "PayPal",
+          transfer: "Überweisung",
+          cash: "Bargeld",
+          platform: "Plattformzahlung",
+        },
+        /* Die drei Kostenteile und ihre Summe. */
+        costs: "Kosten",
+        itemsCost: "Kaufpreis",
+        shippingCost: "Versand",
+        buyerProtectionCost: "Käuferschutz",
+        totalCost: "Gesamtkosten",
+        /*
+         * Für jeden Einkauf von vor 0115 ist die Aufteilung unbekannt — und
+         * das ist keine Lücke, die gefüllt werden müsste: was bezahlt wurde,
+         * steht fest. Der Satz sagt beides.
+         */
+        noSplit: "Keine Kostenaufteilung erfasst — die Gesamtsumme steht.",
+        splitHint:
+          "Kaufpreis + Versand + Käuferschutz ergeben die Gesamtkosten. " +
+          "Die Gesamtsumme bleibt maßgeblich.",
+        clearSplit: "Aufteilung entfernen",
+        /*
+         * EIN VORHANDENES KAUFDATUM LÄSST SICH HIER NICHT ENTFERNEN.
+         *
+         * `seller_update_purchase` liest NULL als „unverändert lassen" — ein
+         * geleertes Feld würde also stillschweigend nichts tun und trotzdem
+         * Erfolg melden. Bis `p_clear_date` existiert (Vorschlag für 0117),
+         * sagt das Fenster es offen, statt einen Erfolg zu behaupten.
+         */
+        dateNotRemovable:
+          "Ein vorhandenes Kaufdatum kann hier nicht entfernt werden. " +
+          "Bitte ein Datum eintragen oder das Feld unverändert lassen.",
+        splitMismatch:
+          "Die Teile ergeben nicht die Gesamtsumme. Bitte die Beträge prüfen.",
+        /* Der Tagesplatz, wortgleich mit dem Verkaufsfenster. */
+        dailyIndex: "Platz am Tag",
+        dailyIndexOf: (place: number, total: number) => `${place} von ${total}`,
+        dailyIndexAlone: "einziger Einkauf an diesem Tag",
+        dailyIndexNone: "kein Datum, kein Platz",
+        swapPlace: "Platz tauschen mit",
+        swapPlaceHint:
+          "Höchster Platz steht oben. Der Einkauf auf dem gewählten Platz " +
+          "bekommt dafür den bisherigen — getauscht, nicht verschoben.",
+        swapPlaceDone: (place: number) => `Getauscht · jetzt Platz ${place}.`,
+        /* Die drei Enden, als Zahl in der Übersicht des Fensters. */
+        endings: "Abschlüsse",
+        endingsLine: (damaged: number, missing: number, showcase: number) =>
+          [damaged > 0 ? `${damaged} beschädigt` : null,
+           missing > 0 ? `${missing} fehlt` : null,
+           showcase > 0 ? `${showcase} Vitrine` : null]
+            .filter((x) => x !== null).join(" · ") || "keine",
+        /* Warum der Faktor so aussieht, wie er aussieht. */
+        factorHint: (damaged: number, missing: number) =>
+          damaged + missing === 0
+            ? "Alle Positionen zählen mit ihrem Marktwert."
+            : `${damaged + missing} Position(en) zählen mit 0 € — die Kosten bleiben vollständig enthalten.`,
+      },
+      detailsFor: (date: string) => `Details zum Einkauf vom ${date}`,
+
+      /*
+       * DAS PLUS-MENÜ EINER OFFENEN POSITION (0115/0116).
+       *
+       * „Weitere Enden" und nicht „Mehr": das Wort sagt, dass dahinter
+       * Abschlüsse liegen und keine weiteren Einbuchungswege. Es ist der
+       * zugängliche Name des Knopfes, also trägt es die Aussage allein.
+       */
+      moreEndings: "Weitere Abschlüsse: beschädigt, fehlt, Vitrine",
+      /*
+       * DASSELBE MENÜ AN EINER BESCHÄDIGTEN POSITION.
+       *
+       * Dort steht nur noch ein Punkt darin — „Angekommen" —, und das ist
+       * keine Auswahl weiterer Enden, sondern die Rücknahme eines
+       * bestehenden. Der zugängliche Name sagt deshalb etwas anderes.
+       */
+      correctEnding: "Abschluss korrigieren",
+      /*
+       * Der Satz, der an einer beschädigten oder fehlenden Position steht,
+       * bevor etwas daran geändert werden kann (Entscheidung D4).
+       *
+       * Er behauptet nichts über den Grund — er sagt, was der eine Weg
+       * zurück ist und was er bedeutet.
+       */
+      correctEndingHint:
+        "Beschädigte und fehlende Figuren kommen nicht in den Verkaufsbestand. "
+        + "Nur wenn die Einordnung falsch war: zurück auf „Angekommen“ setzen.",
+      /*
+       * DIE ÜBERFÜHRUNG AUS DER VITRINE (Entscheidung D1).
+       *
+       * Es ist dieselbe Handlung wie „Einbuchen" — eine Lagerbewegung mit
+       * Beleg —, aber sie bedeutet etwas anderes: der Inhaber gibt ein
+       * Ausstellungsstück an den Shop. Also ein eigenes Wort, damit niemand
+       * eine Vitrinenfigur aus Versehen verkäuflich macht.
+       */
+      showcaseToStock: "In den Bestand übernehmen",
+      showcaseToStockHint:
+        "Die Figur verlässt die Vitrine und wird im Shop verkäuflich. "
+        + "Mit Lagerbewegung, wie jede andere Einbuchung.",
+      /* Die Position läuft gerade. Keine Behauptung über das Ergebnis —
+         eine Lagerbuchung wird erst behauptet, wenn sie bestätigt ist. */
+      itemRunning: "läuft …",
       states: {
         ordered: "Bestellt",
         arrived: "Angekommen",
         damaged: "Beschädigt",
         missing: "Fehlt",
         booked: "Eingebucht",
+        /*
+         * DIE VITRINE (0115). „Vitrine" und nicht „Sammlung": das Wort sagt,
+         * wo die Figur steht, nicht wem sie gehört — und es verwechselt sich
+         * nicht mit der Sammlungsverwaltung der Plattform.
+         */
+        showcase: "Vitrine",
         reconciled_legacy: "Historisch",
         /* Das Ende für etwas, das keine Katalogfigur ist (0069). */
         settled: "Erledigt",
@@ -1248,6 +1399,47 @@ export const de = {
           "Diese Position stammt aus der Excel-Historie und wird nicht gelöscht. " +
           "Ihre Figurenzuordnung lässt sich weiterhin über „Zuordnung ändern“ korrigieren.",
         tooManyItems: "Zu viele Figuren auf einmal.",
+        /*
+         * DIE KOSTENAUFTEILUNG (0115/0116).
+         *
+         * Zwei verschiedene Ablehnungen, zwei verschiedene Sätze: der eine
+         * sagt, dass ein Teil FEHLT, der andere, dass die Teile nicht
+         * AUFGEHEN. Beide nennen die Handlung, nicht den Constraint — der
+         * Betreiber soll nicht „purchases_cost_split_adds_up" lesen.
+         */
+        splitNeedsItems:
+          "Eine Kostenaufteilung braucht den Kaufpreis der Figuren. " +
+          "Bitte alle drei Beträge zusammen speichern.",
+        costSplit:
+          "Kaufpreis, Versand und Käuferschutz ergeben nicht die Gesamtkosten. " +
+          "Bitte die drei Beträge prüfen — die Gesamtsumme bleibt maßgeblich.",
+        /* Die Vitrine ist eine Zusicherung über eine Katalogfigur (D1). */
+        showcaseNeedsFigure:
+          "Nur eine Katalogfigur kommt in die Vitrine. " +
+          "Ein Portal oder Zubehör wird stattdessen auf „Erledigt“ gesetzt.",
+        /*
+         * Und der Weg, den D4 verbietet: beschädigt → Vitrine → Bestand.
+         * Der Satz nennt den einen erlaubten Weg zurück.
+         */
+        showcaseFromDamaged:
+          "Eine beschädigte oder fehlende Figur kommt nicht in die Vitrine. " +
+          "Wenn sie doch in Ordnung ist: zuerst auf „Angekommen“ setzen.",
+        /*
+         * DER PLATZTAUSCH (0116). Wortgleich mit den Zwillingen auf der
+         * Verkaufsseite (`sales.errors.placeGone` / `undatedHasNoPlace`, seit
+         * 0113) — bis auf das eine Wort, das den Vorgang benennt. Eigene
+         * Schlüssel und kein Verweis über die Domänengrenze: beide
+         * `errors`-Blöcke führen ihre Sätze selbst, so wie schon bei
+         * `notAFigure` und `historical`.
+         *
+         * Keines der beiden ist eine Rüge: das eine heisst „der Bildschirm
+         * ist veraltet", das andere „diesem Einkauf fehlt das Datum".
+         */
+        placeGone:
+          "Dieser Platz ist inzwischen anders belegt. Bitte neu laden und noch einmal versuchen.",
+        undatedHasNoPlace:
+          "Dieser Einkauf hat noch kein Datum und damit keinen Platz an einem Tag. " +
+          "Trage zuerst das Kaufdatum ein.",
       },
     },
 

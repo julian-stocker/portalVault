@@ -60,12 +60,74 @@ describe("what a purchase is worth", () => {
     expect(v.percent).toBe(0);
   });
 
-  it("leaves a missing item out of the value entirely", () => {
-    // It never arrived, so it is not part of what the parcel is worth — but it
-    // stays on the purchase, because the money was still spent.
+  /*
+   * 0116 — NULL EURO STATT GAR NICHT GEZÄHLT (Entscheidung D4).
+   *
+   * Hier stand „leaves a missing item out of the value entirely": eine
+   * fehlende Position fiel aus `countedItems` heraus. Der Wert war damit
+   * richtig, die Übersicht aber nicht — aus ihr fiel der GRUND heraus, warum
+   * der Faktor gestiegen ist. Jetzt zählt sie mit und trägt 0 EUR bei.
+   */
+  it("zählt eine fehlende Position mit — zu 0 EUR", () => {
     const v = valuePurchase(100, [item("arrived", 50), item("missing", 999)]);
     expect(v.knownValue).toBe(50);
-    expect(v.countedItems).toBe(1);
+    expect(v.countedItems).toBe(2);
+    expect(v.worthlessItems).toBe(1);
+    /* Und sie gilt als BEKANNT: 0 EUR ist eine Antwort, keine Lücke. */
+    expect(v.knownItems).toBe(2);
+    expect(v.unknownItems).toBe(0);
+    expect(v.complete).toBe(true);
+  });
+
+  it("und eine beschädigte genauso — das ist die Änderung von 0116", () => {
+    /* Vorher trug `damaged` den VOLLEN Marktwert bei. SkyIsles verkauft nur
+       einwandfreie Figuren, also ist eine beschädigte für den Shop nichts
+       wert — und der Faktor sagt das jetzt. */
+    const v = valuePurchase(100, [item("arrived", 90), item("damaged", 30)]);
+    expect(v.knownValue).toBe(90);
+    expect(v.factor).toBeCloseTo(1.1111, 4);
+    expect(v.worthlessItems).toBe(1);
+  });
+
+  it("DAS BEISPIEL DES BETREIBERS: 100 EUR, 5 × 30 EUR, eine beschädigt, eine fehlt", () => {
+    const v = valuePurchase(100, [
+      item("arrived", 30), item("arrived", 30), item("arrived", 30),
+      item("damaged", 30), item("missing", 30),
+    ]);
+    expect(v.knownValue).toBe(90);
+    expect(v.factor).toBeCloseTo(1.1111, 4);
+    expect(v.countedItems).toBe(5);
+    expect(v.worthlessItems).toBe(2);
+  });
+
+  it("eine Vitrinenfigur zählt dagegen VOLL — sie ist da und ist etwas wert (D3)", () => {
+    const v = valuePurchase(100, [item("arrived", 50), item("showcase", 50)]);
+    expect(v.knownValue).toBe(100);
+    expect(v.factor).toBe(1);
+    expect(v.worthlessItems).toBe(0);
+  });
+
+  it("und die Kosten bleiben in jedem Fall unangetastet", () => {
+    /* Dieselben 100 EUR, drei Verteilungen: der Faktor ändert sich, der
+       Zähler nie. Das ist die ganze Zusicherung aus Punkt 8. */
+    const cost = 100;
+    const allFine = valuePurchase(cost, [item("arrived", 50), item("arrived", 50)]);
+    const oneDamaged = valuePurchase(cost, [item("arrived", 50), item("damaged", 50)]);
+    const oneShowcase = valuePurchase(cost, [item("arrived", 50), item("showcase", 50)]);
+    expect(allFine.factor).toBe(1);
+    expect(oneDamaged.factor).toBe(2);
+    expect(oneShowcase.factor).toBe(1);
+    /* Kein Pfad rechnet die Kosten klein. */
+    for (const v of [allFine, oneDamaged, oneShowcase]) {
+      expect(v.factor === null ? 0 : v.factor * v.knownValue).toBeCloseTo(cost, 6);
+    }
+  });
+
+  it("und ein Paket, von dem nichts verwertbar ist, ergibt NULL statt Unendlich", () => {
+    const v = valuePurchase(100, [item("damaged", 40), item("missing", 60)]);
+    expect(v.knownValue).toBe(0);
+    expect(v.factor).toBeNull();
+    expect(v.percent).toBeNull();
   });
 
   it("mixes frozen and live prices without caring which is which", () => {
@@ -98,9 +160,17 @@ describe("what may be booked", () => {
   });
 
   it("the Quickbox offers only states a person can observe", () => {
-    expect([...QUICK_STATES]).toEqual(["ordered", "arrived", "damaged", "missing"]);
+    /*
+     * 0115 ERGÄNZT DIE VITRINE. Auch sie ist beobachtbar: die Figur steht
+     * physisch in der Vitrine, das sieht man. `booked` bleibt draussen —
+     * Bestand entsteht durch Buchen und nicht durch Auswählen —, und eine
+     * Arbeitsmappenzeile ändert ihren Zustand gar nicht.
+     */
+    expect([...QUICK_STATES])
+      .toEqual(["ordered", "arrived", "damaged", "missing", "showcase"]);
     expect(QUICK_STATES).not.toContain("booked");
     expect(QUICK_STATES).not.toContain("reconciled_legacy");
+    expect(QUICK_STATES).not.toContain("settled");
   });
 
   it("separates what is booked from what is settled", () => {

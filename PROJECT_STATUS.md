@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-07 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-13 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -24,7 +24,12 @@ Die vollständige Änderungshistorie liegt in Git.
 > Offene Themen werden gesammelt auf Staging bearbeitet, aber **fachlich getrennt und in
 > kleinen, nachvollziehbaren Änderungen** — eine Sache, eine Migration, ein Commit.
 >
-> **Laufender Block (2026-09-28): Benachrichtigung, Zahlungsart und Wartezeit — `0099`–`0102`.**
+> **Laufender Block (2026-10-13): Einkaufsorderbuch — `0115`, `0116`, ADR-0121.** Auf Staging
+> angewendet, per SQL- und PostgREST-Postflight sowie einem Funktionstest mit garantiertem
+> Rollback nachgewiesen; der Production-Rollout ist vorbereitet und **noch nicht freigegeben**.
+> Der Abschnitt weiter unten hält Umfang, Befunde und Umgebungsstand fest.
+>
+> **Vorheriger Block (2026-09-28): Benachrichtigung, Zahlungsart und Wartezeit — `0099`–`0102`.**
 > Auf Staging abgeschlossen und an einer Verifikationsbestellung verifiziert; der
 > Production-Rollout ist vorbereitet und freigegeben, aber **noch nicht ausgeführt**. Der
 > Abschnitt weiter unten hält Umfang, Korrekturen und Umgebungsstand fest.
@@ -3015,6 +3020,66 @@ ausbleibt. Die Reihenfolge Migration/Deploy war damit frei.
 (je eine freie Position auf `settled_at`). Nach neun Tauschvorgängen trugen alle 172 Tage
 weiterhin lückenlos `1…n`, ohne Duplikat und ohne geparkten Negativwert. Die Funktionen aus
 `0112`/`0113` arbeiten auf echten Daten.
+
+
+## Das Einkaufsorderbuch als Gegenstück zum Verkauf (2026-10-13, `0115`, `0116`, ADR-0121) — auf Staging abgeschlossen, Production vorbereitet
+
+Der Einkauf war seit `0053` Datum, Betrag, Notiz, Figuren. Er hat jetzt, was der Verkauf seit
+ADR-0117/ADR-0120 hat: Kosten in ihren Teilen, Plattform und Verkäufer, Zahlungsweg, einen Platz
+am Tag mit Tausch, ein Detailfenster am (i) — und einen Zustand mehr.
+
+| | |
+|---|---|
+| **Kosten** | Kaufpreis + Versand + Käuferschutz = Gesamtkosten, als CHECK. `total_cost` bleibt die maßgebliche Spalte; für die 84 bestehenden Einkäufe ist die Aufteilung NULL und bleibt es |
+| **Kopfdaten** | Plattform (Kleinanzeigen · Willhaben · Manuell), Verkäufername (roh), Zahlungsweg (Kreditkarte · PayPal · Überweisung · Bargeld · Plattformzahlung), Referenz |
+| **Tagesplatz** | wortgleich mit dem Verkaufsbuch: Teilindex, Sortierung, Tausch über einen negativen Parkplatz, Trigger für die Vergabe |
+| **Vitrine** | `showcase` — physisch da, aber dem Inhaber, nicht dem Shop. Trägt **keine** Lagerbewegung, kann also nicht durch ein Listing-Flag verkaufbar werden |
+| **Faktor** | beschädigt und fehlend zählen 0 € in den Nenner, die Kosten bleiben vollständig im Zähler; Testeinkäufe fallen ganz heraus |
+| **Oberfläche** | neues Anlegeformular mit Vorlagen, Detailfenster mit Bearbeitung, Plus-Menü an der Position, „In den Bestand übernehmen" aus der Vitrine |
+
+**Zwei Befunde aus dem eigenen Review, beide vor dem Rollout geschlossen.** `damaged → showcase →
+booked` waren zwei einzeln erlaubte Schritte, die zusammen eine beschädigte Figur in den
+Verkaufsbestand gebracht hätten — die erste Kante ist jetzt gesperrt, in SQL und in TypeScript.
+Und `canCheckIn()` im Ledger führte eine eigene Zustandsliste ohne `showcase`: dieselbe Figur
+hätte auf der Detailseite einen Einbuchen-Knopf gehabt und im Einkaufsbuch keinen. Es delegiert
+jetzt an `canBook()`.
+
+**Zwei Oberflächenfehler, nach Freigabe behoben.** Ein geleertes Kaufdatum meldete Erfolg, obwohl
+`seller_update_purchase` NULL als „unverändert lassen" liest — das Fenster sagt es jetzt, statt
+einen Erfolg zu behaupten (`p_clear_date` bleibt Vorschlag). Und fünf Ablehnungen der Datenbank
+(Kostenaufteilung, Vitrine, Platztausch) fielen in die generische Meldung; sie haben jetzt
+deutsche Sätze, die Tauschmeldungen wortgleich mit der Verkaufsseite.
+
+| Migration | SHA256 | Zustand |
+|---|---|---|
+| `0115_purchase_costs_platform_and_day.sql` | `219984fe…9c4e4436` | **Staging: angewendet** · Production: offen |
+| `0116_purchase_factor_showcase_and_ledger.sql` | `521bd574…3bdaa3a8` | **Staging: angewendet** · Production: offen |
+
+**Staging-Nachweise.** SQL-Katalogpostflight bestanden (`nach_0115_ok` / `nach_0116_ok` = true,
+`other_functions_md5` unverändert, alle `watch`-Funktionen gleich). Unabhängiger
+PostgREST-Postflight 32/32 PASS, alle sechs Daten-Fingerabdrücke unverändert, 84 Tagesplätze
+genau wie vorhergesagt. Funktionstest T4–T12 als **ein** `do`-Block mit garantiertem Rollback —
+zwölf PASS-Zeilen, die drei Faktoren 0,376347 → 0,378710 → 0,378869 auf die sechste Stelle wie
+berechnet, danach alle Fingerabdrücke wieder auf dem Ausgangswert.
+
+**Production-Preflight (lesend) 19/19 PASS.** 84 Einkäufe, alle datiert, 0 Testeinkäufe, 2 114
+Positionen (8 gebucht, 101 bestellt, 2 005 historisch), 0 beschädigt, 0 fehlend. **Die fachliche
+Wirkung von `0116` auf Production ist null** — D4 und D5 greifen auf nichts, der Faktor bleibt
+0,376347. 84 Plätze für 84 datierte Einkäufe, 21 Mehrfachtage.
+
+**Rollout-Reihenfolge: Migrationen zuerst, Deployment danach.** Der neue Code schickt die
+12-Parameter-Form; ein Deployment davor würde das Einkaufsbuch mit `PGRST202` lahmlegen. Umgekehrt
+ist es sicher und nachgewiesen: der **aktuell deployte** Code schickt die alten 5 bzw. 4
+Argumentnamen, und die sind Teilmengen der neuen Listen, deren Zusätze Vorgabewerte haben. Alter
+Code auf neuem Schema verhält sich auf den heutigen Production-Daten identisch — ein
+Deployment-Rückbau ist deshalb eine vollständige Rücknahme, ohne Datenbankänderung.
+
+**Was offen bleibt:** der Trigger-Zweig „Datum gewechselt" (Neuvergabe des Platzes) ist nie
+ausgeführt worden; `seller_unbook_purchase_item`, `p_clear_cost_split`, `showcase → arrived`, eine
+nicht aufgehende Kostenaufteilung, die Ledger-Sortierung, `day_order` und gleichzeitige
+Tauschvorgänge sind ungetestet. Keiner dieser Pfade berührt bestehende Daten. Die
+Audit-Erweiterung für Einkaufspositionen (`orderbook_audit` kennt nur Verkaufsentitäten) liegt als
+Vorschlag vor und ist **nicht** gebaut.
 
 
 ## Zuletzt verifizierte Prüfungen

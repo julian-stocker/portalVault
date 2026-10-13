@@ -36,6 +36,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { de } from "@/lib/i18n/de";
+import { canCheckIn } from "./ledger";
 
 const SQL = readFileSync(
   join(process.cwd(), "supabase/migrations/0067_reopen_undelivered_legacy_items.sql"), "utf8");
@@ -228,7 +229,15 @@ describe("what the reopened items may do afterwards", () => {
     const ITEMS = readFileSync(
       join(process.cwd(), "src/components/business/purchase-items.tsx"), "utf8");
     expect(ITEMS).toContain('const legacy = item.state === "reconciled_legacy"');
-    expect(ITEMS).toContain("QUICK_STATES.map");
+    /*
+     * Die Zustandsknöpfe kommen aus der GETEILTEN Liste und nicht aus einem
+     * Array in der Komponente. Seit 0116 ist es `quickStatesFor(item)` statt
+     * `QUICK_STATES` direkt — dieselbe Quelle, nur nach Position gefiltert
+     * (eine beschädigte bekommt nur den einen Weg zurück). Was weiterhin
+     * nicht vorkommen darf, ist eine eigene Liste hier.
+     */
+    expect(ITEMS).toContain("quickStatesFor(item).map");
+    expect(ITEMS).not.toMatch(/\[\s*"ordered"\s*,\s*"arrived"/);
   });
 });
 
@@ -270,10 +279,20 @@ describe("0068 — outstanding is not the same as bookable", () => {
   });
 
   it("offers no button it cannot honour", () => {
-    // The screen-side rule is untouched: no `Einbuchen` without a figure,
-    // so nothing invites the fake movement this must not create.
-    const LEDGER_TS = readFileSync(join(process.cwd(), "src/lib/orderbook/ledger.ts"), "utf8");
-    expect(LEDGER_TS).toContain("if (item.skyId === null) return false;");
+    /*
+     * Die Regel, nicht ihr Wortlaut: kein `Einbuchen` ohne Figur, damit
+     * nichts die Bewegung einlädt, die diese Migration nicht erzeugen darf.
+     *
+     * Vorher stand hier eine Textsuche nach der Zeile in `ledger.ts`. Seit
+     * 0116 delegiert `canCheckIn` an `canBook` — eine Frage, eine Regel —,
+     * und damit ist die Zeile dort gar nicht mehr zu finden. Gefragt wird
+     * deshalb die Funktion selbst, was ohnehin die bessere Prüfung ist.
+     */
+    expect(canCheckIn({ state: "arrived", skyId: null })).toBe(false);
+    expect(canCheckIn({ state: "ordered", skyId: null })).toBe(false);
+    expect(canCheckIn({ state: "settled", skyId: null })).toBe(false);
+    // Und mit Figur steht der Knopf, sonst wäre das Paket nicht abzuarbeiten.
+    expect(canCheckIn({ state: "arrived", skyId: "SKY-0001" })).toBe(true);
   });
 
   it("changes one expression and nothing else", () => {
@@ -427,11 +446,22 @@ describe("0069 — `settled`, and the door it must not open", () => {
     });
 
     it("leaves a normal figure alone", () => {
-      // `QUICK_STATES` is untouched: settled is not something to pick from
-      // the row of four, it is an action with a precondition.
+      /*
+       * `settled` IST UND BLEIBT KEIN MENÜPUNKT — das ist die Zusicherung
+       * dieses Tests, und sie gilt weiter.
+       *
+       * Nur geprüft wird sie jetzt am INHALT der Liste statt an ihrer ganzen
+       * Zeile: `0115` hat `showcase` ergänzt, und ein Test, der die Liste
+       * wortwörtlich festnagelt, verbietet damit jede künftige Erweiterung —
+       * auch eine richtige. Verboten sein soll genau ein Eintrag.
+       */
       const PURCHASE = readFileSync(join(process.cwd(), "src/lib/orderbook/purchase.ts"), "utf8");
-      expect(PURCHASE).toContain(
-        'export const QUICK_STATES: readonly ItemState[] = ["ordered", "arrived", "damaged", "missing"];');
+      const list = /export const QUICK_STATES: readonly ItemState\[\] =\s*\[([^\]]*)\]/
+        .exec(PURCHASE);
+      expect(list, "QUICK_STATES nicht gefunden").not.toBeNull();
+      expect(list![1]).not.toContain("settled");
+      expect(list![1]).not.toContain("booked");
+      expect(list![1]).toContain("damaged");
       expect(ITEMS).toContain("canBook({ state: item.state, skyId: item.skyId })");
     });
   });

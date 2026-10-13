@@ -173,7 +173,12 @@ describe("sorting", () => {
      * dateless purchases would sit above the newest real one and read as this
      * week's parcels.
      */
-    expect(LEDGER).toContain("order by m.purchased_at desc nulls last, m.id desc");
+    /* 0116: der Tagesplatz steht jetzt zwischen Datum und `id` — höchster
+       Platz oben, wie im Verkaufsbuch seit 0113. `nulls last` und das
+       `id desc` am Ende sind unverändert. */
+    expect(LEDGER).toContain("order by m.purchased_at desc nulls last,");
+    expect(LEDGER).toContain("m.daily_index desc nulls last,");
+    expect(LEDGER).toContain("m.id desc), '[]'::jsonb) as page_rows");
   });
 });
 

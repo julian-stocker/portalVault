@@ -165,6 +165,42 @@ Cache-Header für die Figurenbilder.
 
 ---
 
+## Datensicherung und Wiederherstellung
+
+**Vor jeder Production-Migration gehören drei Nachweise ins Protokoll.** Die Reihenfolge ist
+nicht beliebig: der erste ist der einzige echte Rücksprung, die beiden anderen sind Kopien der
+Daten ohne Schema.
+
+| Weg | Was er leistet | Wo |
+|---|---|---|
+| **Supabase-Backup / PITR** | Punkt-in-der-Zeit-Rücksprung der **ganzen** Datenbank, Schema eingeschlossen. Der einzige Weg, der eine fehlgeschlagene Migration wirklich rückgängig macht | Supabase-Dashboard → *Database → Backups*. **Vor dem Rollout Zeitstempel des letzten Backups bzw. das PITR-Fenster notieren.** Ob tägliche Backups oder PITR verfügbar sind, hängt am Tarif und ist nur dort ablesbar |
+| **Plattform-Export** (`0105`–`0107`, ADR-0115) | vollständiger logischer Export der Plattformdaten als Archiv, mit Laufhistorie. **Daten, kein Schema** — eine Rückkehr wäre ein manueller Re-Import | `/admin`, Bereich Datensicherung |
+| **Betriebs-Backup** (`0104`, ADR-0114) | der Betriebsdatensatz als portables JSON: Einkäufe, Positionen, Verkäufe, Bestand, Faktor | `/business`, Backup herunterladen |
+
+**Was ein Backup nicht ist.** Die Fingerabdruck-Baselines aus den Rollout-Preflights (md5 über
+`purchases`, `purchase_items`, `shop_inventory`, `inventory_movements`) sind **Prüfmaterial**: sie
+beweisen, dass sich nichts geändert hat, und stellen nichts wieder her.
+
+**Warum der Rückbau meist nicht am Backup hängt.** Die Migrationen dieses Projekts sind additiv
+(`docs/DATABASE.md`, Abschnitt 6). Für eine additive Migration ist das Rückbau-SQL exakt
+bestimmbar — Spalten, Indizes, Trigger und Constraints löschen, Funktionen auf die vorige Fassung
+setzen —, und es ist der schnellere und genauere Weg als ein Rücksprung, der auch alles
+mitnimmt, was seitdem legitim passiert ist. Das Backup ist für den Fall, in dem **Daten**
+beschädigt wurden; das Rückbau-SQL für den Fall, in dem eine **Struktur** falsch war.
+
+**Und ein Deployment-Rückbau nimmt keine Migration zurück.** Vercel kann ein vorheriges
+Deployment in Sekunden wieder zur Produktion machen; die Datenbank bleibt dabei, wie sie ist. Das
+ist nur dann eine vollständige Rücknahme, wenn die neue Datenbankfassung **rückwärtskompatibel**
+zum alten Code ist — bei neuen Funktionsparametern mit Vorgabewerten etwa ist sie das, weil
+PostgREST die alten Aufrufe weiterhin auflöst. Diese Eigenschaft ist pro Release zu **prüfen**,
+nicht anzunehmen, und sie entscheidet über die Rollout-Reihenfolge:
+
+> **Migrationen zuerst, Code danach** — wenn der neue Code neue Signaturen braucht, der alte aber
+> mit den neuen auskommt. Umgekehrt stünde zwischen Deploy und Migration ein Fenster, in dem die
+> Oberfläche `PGRST202` wirft.
+
+---
+
 ## Was nicht ausgeliefert wird
 
 `designs/artwork/` und `designs/cards/` (Quellbilder und Card-Templates) sind in `.gitignore` und damit nicht im Repository —

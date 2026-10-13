@@ -30,12 +30,19 @@
  * ITEMS ARE FETCHED WHEN A ROW OPENS. A collapsed ledger renders no item rows;
  * 561 today and 2 193 after 2026 is not a thing to render in order to hide.
  */
-import { useCallback, useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
-import { bookPurchaseItem, loadPurchaseItems } from "@/lib/orderbook/actions";
+import {
+  loadPurchaseItems, loadPurchaseDay, processBookPurchaseItem, processPurchaseItemState,
+  type PurchaseItemResult,
+} from "@/lib/orderbook/actions";
+import {
+  canChangeEnding, creditsNoValue, endingsFor, type ItemState,
+} from "@/lib/orderbook/purchase";
 import {
   canCheckIn, itemStatus, rowStatus,
   type LedgerRow as LedgerRowData, type LedgerSummary, type RowStatus,
@@ -43,6 +50,7 @@ import {
 import {
   LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
 } from "./ledger-table";
+import { PurchaseDetails } from "./purchase-details";
 import { RowMarks } from "./orderbook-nav";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
 
@@ -61,7 +69,30 @@ const copy = de.business.orderbook;
  * uses, and it is chosen for the flexible column rather than for the sum:
  * a table wide enough to fit is not the same as a table wide enough to read.
  */
-const PURCHASE_MIN_WIDTH = "48rem";
+/*
+ * DIE SPUREN, JETZT AUSDRÜCKLICH — nicht mehr aus der CSS-Vorgabe.
+ *
+ * Einkauf hat sich bisher aus dem Fallback in `.ob-row` bedient, und das war
+ * richtig, solange die Datumszelle nur ein Datum trug. Mit dem (i) davor
+ * reichen 7rem nicht: dasselbe hat das Verkaufsbuch erlebt, als es seine
+ * erste Spur von 5,5 auf 7,25rem verbreitert hat.
+ *
+ * Übergeben wird die Liste als Eigenschaft am Element, nicht als zweite
+ * CSS-Regel — der Kommentar in `ledger-table.tsx` erklärt, warum: eine Regel,
+ * von der nur EIN Ledger abhängt, kann für genau dieses Ledger verschwinden.
+ *
+ * Die sechs übrigen Spuren sind Zeichen für Zeichen die des Fallbacks.
+ */
+const PURCHASE_COLUMNS =
+  "7.75rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 7.5rem 1.5rem";
+/*
+ * Und die Positionszeile: die Aktionsspur trägt jetzt [Einbuchen] UND [+].
+ * 6,5rem reichten für einen Knopf; zwei brauchen 7,5rem, sonst rutscht das
+ * Plus unter den Einbuchen-Knopf und die Zeile wird zweizeilig.
+ */
+const PURCHASE_ITEM_COLUMNS =
+  "2.5rem 9.5rem minmax(0, 1fr) 6rem 6rem 7.5rem";
+const PURCHASE_MIN_WIDTH = "50rem";
 
 const formatFactor = (factor: number | null): string =>
   factor === null ? "—" : factor.toLocaleString("de-AT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -144,11 +175,18 @@ function Summary({ summary }: { summary: LedgerSummary }) {
  * `Aktion` track exists whether or not a button is in it — so a historical row
  * and a bookable one line up instead of the columns shifting under each other.
  */
-function ItemRow({ item, onCheckIn, pending }: {
+function ItemRow({ item, onBook, onState, busy, failure }: {
   item: PurchaseItem;
-  onCheckIn: (item: PurchaseItem) => void;
-  pending: boolean;
+  /** Einbuchen — die eine Aktion, die Bestand erzeugt. */
+  onBook: () => void;
+  /** Die drei Enden aus dem Plus-Menü: beschädigt, fehlt, Vitrine. */
+  onState: (state: string) => void;
+  /** Diese Position läuft gerade. Keine Behauptung über das Ergebnis. */
+  busy: boolean;
+  /** Abgelehnt, mit dem Satz der Datenbank — je Position, nicht je Tabelle. */
+  failure: string | null;
 }) {
+  const [open, setOpen] = useState(false);
   /*
    * Asked of the movement, not of the state — `itemStatus` explains why.
    * An open unit prints its own state (`Bestellt`, `Angekommen`,
@@ -185,15 +223,66 @@ function ItemRow({ item, onCheckIn, pending }: {
       <span className="text-right tabular-nums">
         {item.marketPrice === null ? "—" : formatPrice(item.marketPrice)}
       </span>
-      <span className="text-center">
-        <Status status={status} text={text} title={title} />
+      {/*
+        DIESELBE ANTWORT WIE AUF DER DETAILSEITE — und bei einer Ablehnung
+        steht hier die Ablehnung, nicht der alte Status. Sonst sähe eine
+        abgelehnte Position aus wie eine, bei der nichts passiert ist.
+      */}
+      <span className={`truncate text-center text-xs ${
+        failure !== null ? "text-danger" : ""}`}
+            title={failure ?? title}>
+        {failure !== null ? failure
+          : busy ? copy.itemRunning
+            : <Status status={status} text={text} title={title} />}
       </span>
-      <span className="text-right">
+      <span className="flex items-center justify-end gap-1 text-right">
         {canCheckIn(item) ? (
-          <button type="button" disabled={pending} onClick={() => onCheckIn(item)}
+          <button type="button" disabled={busy} onClick={onBook}
                   className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
             {copy.book}
           </button>
+        ) : null}
+        {/*
+          DAS PLUS-MENÜ — die Enden, die kein Bestand sind.
+
+          Nur wo es etwas zu entscheiden gibt: `canChangeEnding` ist für jede
+          KATALOGFIGUR wahr, die weder im Lager liegt noch eine
+          Arbeitsmappenzeile ist. Für ein Portal, eine gebuchte oder eine
+          historische Position bleibt es aus — dort würde jeder Punkt in eine
+          Ablehnung führen, die der Bildschirm schon kennt.
+
+          WAS DARIN STEHT, ENTSCHEIDET `endingsFor` UND NICHT DIESE DATEI.
+          Eine offene Position bekommt die drei Enden; eine beschädigte oder
+          fehlende bekommt NUR „Angekommen" — den einen bewussten Weg zurück.
+          Kein Punkt „Vitrine" für sie, denn aus der Vitrine darf eingebucht
+          werden, und das wäre der zweite Weg einer beschädigten Figur in den
+          Verkaufsbestand (D4).
+
+          Ein `details`-Element und kein eigener Zustandsautomat: das Auf- und
+          Zuklappen ist Browsersache, und ein Klick darauf darf die Zeile
+          nicht aufklappen — deshalb `stopPropagation` und `relative z-20`
+          gegen die durchsichtige Zeilen-Überlagerung, dieselbe Lehre wie beim
+          (i) im Verkaufsbuch.
+        */}
+        {canChangeEnding(item as { state: ItemState; skyId: string | null }) ? (
+          <details open={open} className="relative z-20"
+                   onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
+            <summary onClick={(e) => e.stopPropagation()}
+                     aria-label={creditsNoValue(item.state as ItemState)
+                       ? copy.correctEnding : copy.moreEndings}
+                     className="flex size-9 cursor-pointer items-center justify-center rounded-sky-md text-xs text-muted ring-1 ring-border/70 marker:hidden hover:text-fg hover:ring-fg/30 [&::-webkit-details-marker]:hidden">
+              <span aria-hidden="true">+</span>
+            </summary>
+            <div className="absolute right-0 z-30 mt-1 flex w-40 flex-col gap-1 rounded-sky-md bg-surface p-1 ring-1 ring-border/70 shadow-elevation-raised">
+              {endingsFor(item.state as ItemState).map((state) => (
+                <button key={state} type="button" disabled={busy}
+                        onClick={(e) => { e.stopPropagation(); setOpen(false); onState(state); }}
+                        className="min-h-9 rounded-sky-sm px-2 text-left text-xs hover:bg-surface-raised disabled:opacity-50">
+                  {copy.states[state as keyof typeof copy.states]}
+                </button>
+              ))}
+            </div>
+          </details>
         ) : null}
       </span>
     </LedgerItemRow>
@@ -220,9 +309,72 @@ export function OrderbookLedger({
   const [open, setOpen] = useState<ReadonlySet<number>>(
     () => new Set(purchases.filter((p) => p.matchItems.length > 0).map((p) => p.id)));
   const [items, setItems] = useState<Record<number, PurchaseItem[] | "failed">>({});
-  const [pending, startTransition] = useTransition();
+  /*
+   * WELCHE POSITION GERADE LÄUFT, nicht „läuft irgendetwas".
+   *
+   * Hier stand ein `useTransition`, dessen `pending` an JEDEM Knopf JEDER
+   * Position JEDER aufgeklappten Zeile hing. Ein Klick sperrte das ganze
+   * Einkaufsbuch, bis Next die Route neu gerendert hatte — genau die
+   * Wartezeit, die das Verkaufsbuch seit dem UX-Umbau nicht mehr hat.
+   *
+   * Jetzt ist die Menge der beschäftigten Positionen der Zustand, und
+   * `purchase_items.id` ist über alle Einkäufe eindeutig: eine Menge genügt
+   * für die ganze Liste.
+   */
+  const [busy, setBusy] = useState<ReadonlySet<number>>(() => new Set());
+  /*
+   * FEHLER GEHÖREN DER POSITION, NICHT DER TABELLE.
+   *
+   * Bei schnellem Arbeiten wäre an einer gemeinsamen Meldung nicht zu sehen,
+   * WELCHE der fünf angeklickten Positionen abgelehnt wurde — und die nächste
+   * Meldung überschriebe die vorige. Jetzt steht sie in der Zeile, die sie
+   * betrifft, und nur diese Zeile fällt auf ihren alten Zustand zurück.
+   */
+  const [failed, setFailed] = useState<ReadonlyMap<number, string>>(() => new Map());
   /* Which ids are in flight. A ref, because it must not cause a render. */
   const loading = useRef<Set<number>>(new Set());
+  /*
+   * DIE SPERRE GEGEN DEN DOPPELKLICK — als Ref, nicht als State.
+   *
+   * `busy` ist die Darstellung; dies ist die Sperre. Zwei Klicks auf
+   * dieselbe Position innerhalb eines Renderdurchlaufs sehen beide noch das
+   * alte `busy` und kämen beide durch; ein Ref ist sofort aktuell.
+   *
+   * Die Datenbank wäre ohnehin sicher — `seller_book_purchase_item` nimmt
+   * `for update` und gibt bei `booked` die bestehende Bewegung zurück, statt
+   * eine zweite zu schreiben. Das hier erspart die zweite Runde, es ersetzt
+   * sie nicht.
+   */
+  const inflight = useRef<Set<number>>(new Set());
+  /*
+   * DAS BÜNDELN DES LISTEN-REFRESHS, OHNE TIMER.
+   *
+   * Die eingeklappte Zeile — Artikelzahl, Faktor, Fortschritt — kommt aus
+   * `seller_orderbook_ledger()` und nicht aus `seller_purchase()`. Sie hier
+   * nachzurechnen wäre eine zweite Wahrheit über denselben Einkauf.
+   *
+   * Also wird nachgeholt statt nachgeahmt — aber einmal für alle: solange
+   * noch eine Positionsaktion unterwegs ist, passiert nichts. Die letzte, die
+   * fertig wird, holt einmal für alle nach. Kein Timeout, keine künstliche
+   * Verzögerung; wer nur einmal klickt, bekommt den Refresh sofort.
+   */
+  const outstanding = useRef(0);
+  const listStale = useRef(false);
+  const router = useRouter();
+  /*
+   * WELCHER EINKAUF SEIN FENSTER OFFEN HAT.
+   *
+   * Getrennt von `open`, das die Positionsliste führt: das (i) und der
+   * Aufklapp-Knopf sind zwei Bedienelemente für zwei Dinge, und keines darf
+   * das andere bewegen. Dieselbe Trennung wie im Verkaufsbuch.
+   */
+  const [showing, setShowing] = useState<number | null>(null);
+  /*
+   * Die belegten Plätze des Tages, je Einkauf — für das Tausch-Auswahlfeld.
+   * `seller_orderbook_ledger()` liefert sie nicht (sie folgen aus den
+   * NACHBARN), also holt sie das Fenster beim Öffnen nach.
+   */
+  const [dayOrder, setDayOrder] = useState<Record<number, { id: number; dailyIndex: number }[]>>({});
 
   const load = useCallback((id: number) => {
     if (loading.current.has(id)) return;
@@ -234,6 +386,21 @@ export function OrderbookLedger({
       setItems((current) => ({ ...current, [id]: result.ok ? result.items : "failed" }));
     });
   }, []);
+
+  /**
+   * Das (i) öffnet das Fenster — und holt die Tagesnachbarn nach.
+   *
+   * Ohne sie fehlte nur das Tausch-Auswahlfeld, nicht das Fenster: es öffnet
+   * sofort und füllt sich, statt auf eine Runde zum Server zu warten.
+   */
+  const onDetails = (id: number) => {
+    setShowing(id);
+    if (dayOrder[id] === undefined) {
+      void loadPurchaseDay(id).then((rows) => {
+        if (rows !== null) setDayOrder((current) => ({ ...current, [id]: rows }));
+      });
+    }
+  };
 
   const toggle = (id: number) => {
     setOpen((current) => {
@@ -252,14 +419,66 @@ export function OrderbookLedger({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const checkIn = (item: PurchaseItem, purchaseId: number) => {
-    startTransition(async () => {
-      const result = await bookPurchaseItem(item.id, purchaseId);
-      // Reloaded from the server: a tick that appeared before the database
-      // agreed would be a claim about inventory that may be false.
-      if (result.ok) load(purchaseId);
+  /**
+   * EINE POSITION ANFASSEN, WÄHREND VIER ANDERE NOCH LAUFEN.
+   *
+   * `purchaseId` sagt, welcher Einkauf nachgelesen wird; `key` ist die
+   * Position, die währenddessen gesperrt ist. Zwei verschiedene Positionen —
+   * auch in zwei verschiedenen Einkäufen — behindern sich nicht.
+   *
+   * WAS „OPTIMISTISCH" HIER HEISST, UND WAS NICHT. Die angeklickte Zeile
+   * reagiert sofort: ihr Status sagt „läuft …" und ihr Knopf ist gesperrt,
+   * bevor der Server antwortet. Sie behauptet aber NICHT das Ergebnis. Ein
+   * vorweggenommenes „Eingebucht" wäre eine Aussage über den Lagerbestand,
+   * die noch niemand bestätigt hat — und bei einer Ablehnung hätte die Zeile
+   * eine Sekunde lang gelogen. Eine Lagerbuchung ist Geld.
+   *
+   * DEN ENDZUSTAND BRINGT DIE ANTWORT SELBST MIT: `runPurchaseItem` liest den
+   * Einkauf in derselben Server Action nach. Keine zweite Runde zum Server,
+   * kein Fenster, in dem die Liste veraltet ist.
+   */
+  const act = (purchaseId: number, key: number, run: () => Promise<PurchaseItemResult>) => {
+    /* Dieselbe Position zweimal: der zweite Klick fällt hier, nicht im Server. */
+    if (inflight.current.has(key)) return;
+    inflight.current.add(key);
+    outstanding.current += 1;
+    setBusy((current) => new Set(current).add(key));
+    setFailed((current) => {
+      if (!current.has(key)) return current;
+      const next = new Map(current); next.delete(key); return next;
     });
+    void (async () => {
+      try {
+        const result = await run();
+        if (!result.ok) {
+          /* Zurück auf den alten Zustand — und nur diese Zeile. */
+          setFailed((current) => new Map(current).set(key, result.message));
+          return;
+        }
+        if (result.items !== null) {
+          /* Die Antwort IST der neue Zustand dieses Einkaufs. */
+          loading.current.delete(purchaseId);
+          setItems((current) => ({ ...current, [purchaseId]: result.items! }));
+        } else {
+          /* Das Nachlesen in der Aktion ist fehlgeschlagen, die Aktion nicht. */
+          load(purchaseId);
+        }
+        listStale.current = true;
+      } finally {
+        inflight.current.delete(key);
+        setBusy((current) => { const next = new Set(current); next.delete(key); return next; });
+        outstanding.current -= 1;
+        if (outstanding.current === 0 && listStale.current) {
+          listStale.current = false;
+          router.refresh();
+        }
+      }
+    })();
   };
+
+  /* Die Zeile, deren Fenster offen ist — aus der Liste, nicht aus einer Kopie. */
+  const showingRow = showing === null
+    ? null : purchases.find((p) => p.id === showing) ?? null;
 
   if (purchases.length === 0) {
     return (
@@ -281,12 +500,21 @@ export function OrderbookLedger({
         not clip the last row.
       */}
       {/*
-        No `columns` prop: seven tracks are the ledger default, so Einkauf
-        renders from the rule's own fallback and has nothing of its own to
-        deliver. Verkauf passes ten. The width is not optional, though —
-        without it the columns have no floor to scroll against.
+        EINKAUF LIEFERT SEINE SPUREN JETZT SELBST.
+
+        Bis 0115 kam es ohne `columns` aus: sieben Spuren waren der
+        Vorgabewert der Regel, und die Vorgabe passte. Sie passt nicht mehr.
+        Die erste Spur trägt seit 0116 das (i) NEBEN dem Datum, und die
+        Aktionsspur der Position trägt `[Einbuchen] [+]` statt nur
+        `[Einbuchen]` — zwei Knöpfe in 6,5rem heissen zwei Zeilen.
+
+        Geliefert wird es wie bei Verkauf: als Inline-Eigenschaft mit dem
+        Markup (`--ob-columns` / `--ob-item-columns`), nicht als zweite
+        CSS-Regel, die veralten könnte. Die Breite ist dabei nicht optional —
+        ohne sie haben die Spalten keinen Boden, gegen den sie scrollen.
       */}
-      <LedgerTable minWidth={PURCHASE_MIN_WIDTH}>
+      <LedgerTable columns={PURCHASE_COLUMNS} itemColumns={PURCHASE_ITEM_COLUMNS}
+                   minWidth={PURCHASE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
           <span className="text-right">{copy.columns.items}</span>
@@ -333,13 +561,37 @@ export function OrderbookLedger({
                     eighth track for something almost every row lacks would
                     cost every row the width (0063).
                   */}
-                  <span className={purchase.purchasedAt === null
-                                     ? "font-medium text-muted"
-                                     : "font-medium tabular-nums"}
-                        title={purchase.purchasedAt === null ? copy.undatedHint : undefined}>
-                    {formatDate(purchase.purchasedAt)}
-                    <RowMarks isTest={purchase.isTest} isIncomplete={purchase.isIncomplete}
-                              isOpen={purchase.isOpen} />
+                  {/*
+                    DAS (i) STEHT IN DER DATUMSZELLE — wie im Verkaufsbuch.
+
+                    `relative z-20` UND `stopPropagation`, und beides aus einem
+                    Grund, der im Verkaufsbuch schon einmal Geld gekostet hat:
+                    über der ganzen Zeile liegt ein durchsichtiger Knopf
+                    (`LedgerRow`, `absolute inset-0 z-10`), der das Aufklappen
+                    auslöst, und er steht SPÄTER im DOM. Ein echter Knopf in
+                    einer Zelle muss darüber liegen und sein Ereignis anhalten.
+                    Dass die Zelle das überhaupt erlaubt, entscheidet
+                    `.ob-row > :first-child { z-index: 11 }` in `globals.css`
+                    — ohne diese Zahl wäre das `z-20` hier wertlos, weil
+                    `position: sticky` mit z-index einen Stapelkontext
+                    aufmacht. Festgehalten in `sticky-first-cell.test.ts`.
+                  */}
+                  <span className="flex min-w-0 items-center gap-1">
+                    <button type="button"
+                            aria-label={copy.detailsFor(formatDate(purchase.purchasedAt))}
+                            title={copy.detailsModal.title}
+                            onClick={(event) => { event.stopPropagation(); onDetails(purchase.id); }}
+                            className="relative z-20 flex size-11 shrink-0 items-center justify-center rounded-sky-md text-xs text-muted ring-1 ring-border/70 hover:text-fg hover:ring-fg/30 sm:size-6">
+                      <span aria-hidden="true">i</span>
+                    </button>
+                    <span className={`min-w-0 truncate ${purchase.purchasedAt === null
+                                       ? "font-medium text-muted"
+                                       : "font-medium tabular-nums"}`}
+                          title={purchase.purchasedAt === null ? copy.undatedHint : undefined}>
+                      {formatDate(purchase.purchasedAt)}
+                      <RowMarks isTest={purchase.isTest} isIncomplete={purchase.isIncomplete}
+                                isOpen={purchase.isOpen} />
+                    </span>
                   </span>
                   <span className="text-right tabular-nums text-muted">{purchase.itemCount}</span>
                   <span className="text-right tabular-nums">{formatPrice(purchase.totalCost)}</span>
@@ -382,8 +634,13 @@ export function OrderbookLedger({
                     ) : (
                       <ul className="divide-y divide-border/40">
                         {loaded.map((item) => (
-                          <ItemRow key={item.id} item={item} pending={pending}
-                                   onCheckIn={(i) => checkIn(i, purchase.id)} />
+                          <ItemRow key={item.id} item={item}
+                                   busy={busy.has(item.id)}
+                                   failure={failed.get(item.id) ?? null}
+                                   onBook={() => act(purchase.id, item.id,
+                                     () => processBookPurchaseItem(item.id, purchase.id))}
+                                   onState={(state) => act(purchase.id, item.id,
+                                     () => processPurchaseItemState(item.id, state, purchase.id))} />
                         ))}
                       </ul>
                     )}
@@ -400,6 +657,28 @@ export function OrderbookLedger({
           })}
         </ul>
       </LedgerTable>
+
+      {/*
+        EIN FENSTER FÜR DAS GANZE BUCH, nicht eines je Zeile: ein Modal pro
+        Einkauf würde 85 Portale einhängen, um keines davon zu zeigen.
+        Dieselbe Entscheidung wie im Verkaufsbuch.
+      */}
+      {showingRow ? (
+        <PurchaseDetails key={showingRow.id} purchase={showingRow}
+                         dayOrder={dayOrder[showingRow.id] ?? []}
+                         open onClose={() => setShowing(null)}
+                         onSaved={() => {
+                           /* Die Zeile gehört der Liste: Kosten, Faktor und
+                              Tagesplatz kommen aus `seller_orderbook_ledger()`
+                              und werden hier nicht nachgerechnet. */
+                           setDayOrder((current) => {
+                             const next = { ...current };
+                             delete next[showingRow.id];
+                             return next;
+                           });
+                           router.refresh();
+                         }} />
+      ) : null}
     </>
   );
 }

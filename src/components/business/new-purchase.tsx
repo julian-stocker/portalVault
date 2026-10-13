@@ -1,5 +1,5 @@
 /**
- * Creating a purchase, figures and all (ADR-0088, ADR-0091).
+ * Creating a purchase, figures and all (ADR-0088, ADR-0091, erweitert 0115/0116).
  *
  * WHAT CHANGED, AND WHY. Until 0064 this form took three facts — when money
  * left, how much, and a note — and the figures were entered afterwards on the
@@ -12,6 +12,26 @@
  * button is pressed: clicking a search result must not bring a half-made
  * purchase into being. One press, one transaction — see
  * `createPurchaseWithItems`.
+ *
+ * WAS 0115/0116 HINZUFÜGT: DER KOPF DES EINKAUFS.
+ *
+ * Bisher war ein Einkauf Datum, Betrag und Notiz. Erfasst wird jetzt auch,
+ * WO gekauft wurde (`platform`), BEI WEM (`seller_name`), WIE bezahlt wurde
+ * (`payment_method`), unter welcher Anzeigen- oder Bestellnummer
+ * (`external_ref`) — und die Kosten in ihren drei Teilen (Entscheidung D9):
+ *
+ *     Gesamtkosten = Kaufpreis + Versand + Käuferschutz
+ *
+ * DIE VORLAGE IST LAYOUT, NICHT SPEICHER — dieselbe Regel wie bei
+ * `sale-template.ts`. „Vorlage: Kleinanzeigen" entscheidet, ob das
+ * Käuferschutzfeld offen steht und welche Zahlungsart vorbelegt ist. Jeder
+ * Wert landet trotzdem in den Spalten aus `0115`; es gibt keine
+ * Kleinanzeigen-Tabelle und keine Kleinanzeigen-Spalte.
+ *
+ * UND DIE SUMME FOLGT DEN TEILEN, NICHT UMGEKEHRT. `purchaseCosts` rundet
+ * erst die Teile und addiert dann — genau wie `purchases_cost_split_adds_up`
+ * in der Datenbank rechnet. Eine andere Reihenfolge wäre einen Cent daneben,
+ * und der CHECK würde den ganzen Einkauf ablehnen.
  *
  * THE DATE MAY STILL BE UNKNOWN, and so may the figures. A parcel is often
  * entered before the invoice is found, and sometimes before it is unpacked.
@@ -36,11 +56,24 @@ import {
   draftPayload, draftUnitCount, draftValue, MAX_DRAFT_UNITS, type DraftLine,
 } from "@/lib/orderbook/draft";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
+import { purchaseCosts } from "@/lib/orderbook/purchase-money";
+import {
+  DEFAULT_PURCHASE_TEMPLATE, PAYMENT_METHODS, PURCHASE_TEMPLATES,
+  purchaseTemplate, type PaymentMethod,
+} from "@/lib/orderbook/purchase-template";
+import { parseMoney } from "@/lib/orderbook/sales-money";
 import { FigureDraft } from "./figure-draft";
-import { Field, FormSection, INPUT, MONEY } from "./form-section";
+import { Field, FieldRow, FormSection, INPUT, MONEY, QuietRow } from "./form-section";
 
 const copy = de.business.orderbook;
 const figures = copy.figures;
+/*
+ * Die Nomen des Einkaufskopfes stehen EINMAL — im Detailfenster, wo sie
+ * zuerst gebraucht wurden. „Plattform" im Formular und „Plattform" im
+ * Fenster sind dasselbe Wort über dieselbe Spalte; zwei Schlüssel dafür
+ * wären zwei Stellen, an denen es auseinanderlaufen kann.
+ */
+const field = copy.detailsModal;
 
 export function NewPurchase({ defaultTest = false, catalog = [] }: {
   /** Arrives as `?test=1` when the form was opened from the Test view. */
@@ -49,8 +82,31 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
   catalog?: readonly FigureChoice[];
 }) {
   const router = useRouter();
+
+  const [templateId, setTemplateId] = useState<string>(DEFAULT_PURCHASE_TEMPLATE);
+  const template = purchaseTemplate(templateId);
+
   const [date, setDate] = useState("");
-  const [cost, setCost] = useState("");
+  const [seller, setSeller] = useState("");
+  const [reference, setReference] = useState("");
+  const [payment, setPayment] = useState<PaymentMethod>(
+    purchaseTemplate(DEFAULT_PURCHASE_TEMPLATE).payment);
+  /*
+   * Hat der Betreiber die Zahlungsart selbst gewählt?
+   *
+   * Dann folgt sie der Vorlage nicht mehr. Eine getippte Angabe wird von
+   * einem Vorlagenwechsel nicht überschrieben — dieselbe Regel, nach der
+   * `chooseTemplate` im Verkaufsformular eingetragene Gebühren stehen lässt.
+   */
+  const [paymentChosen, setPaymentChosen] = useState(false);
+
+  const [itemsCost, setItemsCost] = useState("");
+  const [shipping, setShipping] = useState("");
+  const [buyerProtection, setBuyerProtection] = useState("");
+  /* Vom Betreiber geöffnet, obwohl die Vorlage keinen Käuferschutz kennt. */
+  const [protectionOpen, setProtectionOpen] = useState(false);
+  const showsProtection = template.opensBuyerProtection || protectionOpen;
+
   const [note, setNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
   const [lines, setLines] = useState<DraftLine[]>([]);
@@ -58,26 +114,50 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
   const [pending, startTransition] = useTransition();
 
   /*
-   * Live, and by the SAME arithmetic the database uses — `draftValue` calls
-   * `valuePurchase`, which is what `purchase_market_value()` mirrors. So the
-   * number on this screen is the number the purchase will show the moment it
-   * exists, rather than an estimate that turns out to differ.
+   * EIN Objekt, gelesen von der Anzeige UND vom Absenden.
    *
-   * A malformed amount values as 0 rather than NaN: the field is still being
-   * typed, and `Faktor NaN` is not a thing to show anybody.
+   * Zweimal gebaut wäre es die Einladung, einen Bildschirm zu zeigen, der
+   * nicht zu dem passt, was gespeichert wird — derselbe Fehler, den
+   * `saleFormMoney` im Verkaufsformular vermeidet.
+   *
+   * Ein unvollständig getippter Betrag zählt dabei als 0 statt als NaN: das
+   * Feld ist noch in Arbeit, und `Faktor NaN` ist nichts, was man jemandem
+   * zeigt. Abgewiesen wird er beim Absenden, mit einem Satz.
    */
-  const amount = Number(cost.replace(",", "."));
-  const value = useMemo(
-    () => draftValue(Number.isFinite(amount) && amount >= 0 ? amount : 0, lines),
-    [amount, lines],
+  const costs = useMemo(
+    () => purchaseCosts({ items: itemsCost, shipping,
+                          buyerProtection: showsProtection ? buyerProtection : "" }),
+    [itemsCost, shipping, buyerProtection, showsProtection],
   );
+
+  /*
+   * Live, und mit DERSELBEN Arithmetik, die die Datenbank verwendet —
+   * `draftValue` ruft `valuePurchase`, und das spiegelt
+   * `purchase_market_value()`. Die Zahl auf diesem Bildschirm ist die Zahl,
+   * die der Einkauf im selben Moment zeigt, in dem er existiert.
+   */
+  const value = useMemo(() => draftValue(costs.total, lines), [costs.total, lines]);
   const units = draftUnitCount(lines);
+
+  /** Die Vorlage wechseln: Layout und Vorbelegung, niemals Getipptes. */
+  function chooseTemplate(id: string) {
+    setTemplateId(id);
+    if (!paymentChosen) setPayment(purchaseTemplate(id).payment);
+  }
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
-    if (!Number.isFinite(amount) || amount < 0) {
-      setError(de.admin.writeFailed);
+    /*
+     * Jedes Feld für sich geprüft, nicht die Summe: der Betreiber muss
+     * erfahren, WELCHER Betrag nicht gelesen werden konnte. `purchaseCosts`
+     * macht aus einem kaputten Feld bewusst eine 0, damit die Anzeige beim
+     * Tippen nutzbar bleibt — richtig für eine Anzeige, falsch für ein
+     * Speichern.
+     */
+    if ([itemsCost, shipping, showsProtection ? buyerProtection : ""]
+          .some((raw) => parseMoney(raw) === null)) {
+      setError(copy.invalidCosts);
       return;
     }
     if (units > MAX_DRAFT_UNITS) {
@@ -86,7 +166,27 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
     }
     startTransition(async () => {
       const result = await createPurchaseWithItems(
-        date.trim() || null, amount, draftPayload(lines), note.trim() || undefined, isTest,
+        date.trim() || null,
+        /* Was bezahlt wurde — die Summe der drei Teile, auf den Cent. */
+        costs.total,
+        draftPayload(lines), note.trim() || undefined, isTest,
+        {
+          platform: template.platform,
+          sellerName: seller.trim() || null,
+          paymentMethod: payment,
+          externalRef: reference.trim() || null,
+          /*
+           * Die Aufteilung IMMER mitgeschrieben, und zwar vollständig:
+           * `purchases_cost_split_is_whole` verlangt den Kaufpreis, sobald
+           * ein Teil gesetzt ist, und ein leeres Versandfeld in einem
+           * ausgefüllten Formular heisst „kein Versand" und nicht
+           * „unbekannt". Unbekannt gibt es nur für die Einkäufe von vor
+           * 0115, und dort steht es als NULL in der Datenbank.
+           */
+          items: costs.items,
+          shipping: costs.shipping,
+          buyerProtection: costs.buyerProtection,
+        },
       );
       if (!result.ok) setError(result.message);
       else router.push(`/business/orderbuch/${result.id}`);
@@ -99,18 +199,58 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
         <p role="alert" className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">{error}</p>
       ) : null}
 
-      {/* 1. What the record is. One field, because a purchase has one fact
-             of its own that is not money and not figures. */}
+      {/*
+        1. WAS DER EINKAUF IST. Datum und Vorlage zuerst, weil die Vorlage
+        entscheidet, was der Rest des Formulars überhaupt zeigt. Verkäufer,
+        Zahlungsart und Referenz darunter, leiser, in einer Reihe — dieselbe
+        Ordnung wie im Verkaufsformular.
+      */}
       <FormSection title={copy.newSections.purchase}>
-        <div className="sm:max-w-xs">
+        <FieldRow>
           {/* Not `required`: empty is a real answer, and it means unknown.
               It used to say so in a sentence underneath; an empty optional
               date field does not need one. */}
           <Field label={copy.columns.date}>
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                   className={INPUT} />
+                   disabled={pending} className={INPUT} />
           </Field>
-        </div>
+          <Field label={copy.newTemplate}>
+            <select value={templateId} onChange={(e) => chooseTemplate(e.target.value)}
+                    disabled={pending} className={INPUT}>
+              {PURCHASE_TEMPLATES.map((t) => (
+                <option key={t.id} value={t.id}>{field.platformNames[t.id]}</option>
+              ))}
+            </select>
+          </Field>
+        </FieldRow>
+
+        <QuietRow>
+          {/* Roh gespeichert, ohne Normalisierung — Regel 4. */}
+          <Field label={field.seller}>
+            <input value={seller} placeholder={field.sellerPlaceholder}
+                   autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                   onChange={(e) => setSeller(e.target.value)}
+                   disabled={pending} className={INPUT} />
+          </Field>
+          <Field label={field.payment}>
+            <select value={payment} disabled={pending}
+                    onChange={(e) => {
+                      setPayment(e.target.value as PaymentMethod);
+                      setPaymentChosen(true);
+                    }}
+                    className={INPUT}>
+              {PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>{field.paymentNames[m]}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label={field.reference}>
+            <input value={reference} placeholder={field.referencePlaceholder}
+                   autoCapitalize="none" autoCorrect="off" spellCheck={false}
+                   onChange={(e) => setReference(e.target.value)}
+                   disabled={pending} className={INPUT} />
+          </Field>
+        </QuietRow>
       </FormSection>
 
       {/* 2. What was in the parcel. */}
@@ -119,44 +259,87 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
       </FormSection>
 
       {/*
-        3. What it cost, with the two numbers the parcel is judged by right
-        beside it — `Marktwert` and `Faktor` only mean anything next to the
-        price, and they move as it is typed.
+        3. WAS ES GEKOSTET HAT — in den drei Teilen aus Entscheidung D9.
+
+        Schmale Zahlen, also drei nebeneinander, sobald Platz dafür ist. Der
+        Käuferschutz steht nur dort, wo es einen gibt: Kleinanzeigen und
+        Willhaben erheben einen, beim Kauf per Überweisung gibt es keinen —
+        und wo er fehlt, holt ihn ein leiser Knopf, statt ihn zu verstecken.
       */}
       <FormSection title={copy.newSections.amount}>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr] sm:items-end sm:gap-2">
-          <Field label={copy.purchasePrice}>
-            <input type="text" inputMode="decimal" required value={cost} placeholder="0,00"
-                   onChange={(e) => setCost(e.target.value)} className={MONEY} />
+        <FieldRow columns={3}>
+          <Field label={field.itemsCost}>
+            <input type="text" inputMode="decimal" value={itemsCost} placeholder="0,00"
+                   onChange={(e) => setItemsCost(e.target.value)}
+                   disabled={pending} className={MONEY} />
           </Field>
-
-          {units > 0 ? (
-            <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 text-sm tabular-nums sm:pb-2.5">
-              <div className="flex items-baseline gap-1.5">
-                <dt className="text-xs text-muted">{figures.marketValue}</dt>
-                <dd>{value.knownItems === 0 ? figures.noMarketValue : formatPrice(value.knownValue)}</dd>
-              </div>
-              <div className="flex items-baseline gap-1.5">
-                <dt className="text-xs text-muted">{figures.factor}</dt>
-                <dd>
-                  {value.percent === null
-                    ? "—"
-                    : `${value.percent.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`}
-                </dd>
-              </div>
-              {value.unknownItems > 0 ? (
-                <p className="basis-full text-xs text-muted">{figures.missingPrices(value.unknownItems)}</p>
-              ) : null}
-            </dl>
+          <Field label={field.shippingCost}>
+            <input type="text" inputMode="decimal" value={shipping} placeholder="0,00"
+                   onChange={(e) => setShipping(e.target.value)}
+                   disabled={pending} className={MONEY} />
+          </Field>
+          {showsProtection ? (
+            <Field label={field.buyerProtectionCost}>
+              <input type="text" inputMode="decimal" value={buyerProtection} placeholder="0,00"
+                     onChange={(e) => setBuyerProtection(e.target.value)}
+                     disabled={pending} className={MONEY} />
+            </Field>
           ) : null}
-        </div>
+        </FieldRow>
+
+        {showsProtection ? null : (
+          <button type="button" disabled={pending}
+                  onClick={() => setProtectionOpen(true)}
+                  className="min-h-11 self-start text-xs text-muted underline underline-offset-2 sm:min-h-8">
+            {copy.newBuyerProtection}
+          </button>
+        )}
       </FormSection>
 
-      {/* 4. The optional tail. Set back, not hidden. */}
+      {/*
+        4. DIE GESAMTKOSTEN, und daneben die zwei Zahlen, nach denen das
+        Paket beurteilt wird.
+
+        Das eine Kästchen des Formulars — weil es die Antwort ist und nicht
+        eine Frage, genau wie die Auszahlung im Verkaufsformular. `Marktwert`
+        und `Faktor` bedeuten nur neben dem Preis etwas, und sie bewegen sich,
+        während er getippt wird.
+      */}
+      <div className="rounded-sky-lg bg-surface p-3 ring-1 ring-border-strong sm:px-4 sm:py-2.5">
+        <dl className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted">
+            {field.totalCost}
+          </dt>
+          <dd className="ob-money text-xl font-medium tabular-nums">{formatPrice(costs.total)}</dd>
+        </dl>
+
+        {units > 0 ? (
+          <dl className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-t border-border/60 pt-1.5 text-sm tabular-nums">
+            <div className="flex items-baseline gap-1.5">
+              <dt className="text-xs text-muted">{figures.marketValue}</dt>
+              <dd>{value.knownItems === 0 ? figures.noMarketValue : formatPrice(value.knownValue)}</dd>
+            </div>
+            <div className="flex items-baseline gap-1.5">
+              <dt className="text-xs text-muted">{figures.factor}</dt>
+              <dd>
+                {value.percent === null
+                  ? "—"
+                  : `${value.percent.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`}
+              </dd>
+            </div>
+            {value.unknownItems > 0 ? (
+              <p className="basis-full text-xs text-muted">{figures.missingPrices(value.unknownItems)}</p>
+            ) : null}
+          </dl>
+        ) : null}
+      </div>
+
+      {/* 5. The optional tail. Set back, not hidden. */}
       <FormSection title={copy.newSections.note}>
         {/* No second `Notiz` above the box — the heading already said it. */}
         <input type="text" value={note} aria-label={copy.newSections.note}
-               onChange={(e) => setNote(e.target.value)} className={INPUT} />
+               onChange={(e) => setNote(e.target.value)}
+               disabled={pending} className={INPUT} />
 
         {/*
           One checkbox, unticked. The normal case must not get slower because
@@ -165,7 +348,7 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
         */}
         <label className="flex items-center gap-2 pt-1" title={copy.testFlagHint}>
           <input type="checkbox" checked={isTest} onChange={(e) => setIsTest(e.target.checked)}
-                 className="size-4 shrink-0" />
+                 disabled={pending} className="size-4 shrink-0" />
           <span className="text-sm">{copy.testFlag}</span>
         </label>
       </FormSection>

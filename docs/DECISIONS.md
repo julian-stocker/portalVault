@@ -10474,3 +10474,165 @@ Abgleichen benutzt; `buyer_ref` bleibt unverändert daneben stehen.
 Quellen. Eine `buyers`-Tabelle mit Identitäten (ein Datenmodell für eine Frage, die eine
 Fensterfunktion beantwortet — und personenbezogene Daten, die sonst nirgends liegen müssten).
 Zwei Bedeutungen in `buyer_ref`.
+
+
+## ADR-0121 — Das Einkaufsorderbuch bekommt Kosten, Plattform, Tagesplatz und die Vitrine
+
+**Status:** angenommen, 2026-10-13 · Migrationen `0115`, `0116` · **auf Staging angewendet und
+funktional nachgewiesen, Production offen**
+**Bezug:** ADR-0088 (Orderbuch: Einkauf, `purchases`/`purchase_items`, ein Stück = eine Zeile),
+ADR-0091 (Figuren entstehen beim Anlegen, Buchen ist eine eigene Handlung), ADR-0103 (der
+Ankaufsfaktor ist kein öffentlicher Wert), ADR-0120 (Tagesplatz und Platztausch beim Verkauf),
+Regel 2 (SKY-IDs und Charakterzuordnungen sind kuratiert), Regel 4 (Namen werden roh gespeichert)
+
+Das Einkaufsorderbuch war seit ADR-0088 die kleinere Hälfte: Datum, Betrag, Notiz, Figuren. Der
+Verkauf hat seit ADR-0117/ADR-0120 Kanal, Gebühren, Tagesplatz und Käuferhinweise. Dieser Eintrag
+hält die neun fachlichen Entscheidungen fest, mit denen der Einkauf das Gegenstück wird — und die
+zwei, die sich erst beim Review ergeben haben.
+
+### D1 — Die Vitrine ist ein Zustand, keine Lagerzeile
+
+**Problem.** Eine Figur kann physisch da sein und trotzdem nicht dem Shop gehören: sie steht in
+der Vitrine des Inhabers. Zwei Wege waren denkbar — einbuchen und nicht listen, oder gar nicht
+einbuchen.
+
+**Entscheidung.** Gar nicht einbuchen. `purchase_items.state = 'showcase'` trägt **kein**
+`movement_id`, und `purchase_items_booked_has_movement` erzwingt, dass nur `booked` eines hat.
+
+**Begründung.** Damit kann eine Vitrinenfigur **nicht** durch das Umlegen eines Listing-Flags
+verkaufbar werden — es gibt keine Lagerzeile, an der ein Flag hinge. Die Zusicherung „keine
+Sonderaktion erzeugt verkaufbaren Bestand" ist strukturell erfüllt und nicht bloß zugesagt. Der
+Weg in den Shopbestand ist genau einer: `seller_book_purchase_item()`, mit Lagerbewegung als
+Beleg wie bei jeder anderen Figur.
+
+**Konsequenzen.** Die Vitrine ist keine Sackgasse — aus `showcase` darf eingebucht werden, und die
+Oberfläche nennt diesen Knopf „In den Bestand übernehmen" statt „Einbuchen": technisch dieselbe
+Handlung, fachlich eine Entscheidung des Inhabers. Nur eine **Katalogfigur** kommt in die Vitrine;
+für ein Portal wäre „Vitrine" eine Zusicherung ohne Inhalt, und `settled` sagt dasselbe ehrlicher.
+
+### D2 — `total_cost` bleibt, was es ist: was bezahlt wurde
+
+**Problem.** Die neuen Kostenfelder legten die Lesart nahe, `total_cost` künftig als „nur die
+Figuren" zu verstehen und Versand daneben zu stellen.
+
+**Entscheidung.** `purchases.total_cost` bleibt die Autorität. Die Aufteilung steht **daneben**:
+
+```
+items_cost + shipping_cost + buyer_protection_cost = total_cost
+```
+
+als CHECK, und nur **wenn** die Aufteilung gesetzt ist.
+
+**Begründung.** Die andere Lesart hätte eine Spalte mit zwei Bedeutungen ergeben — alte Zeilen
+„gesamt", neue „nur Artikel". Diese Fehlerklasse hat das Projekt bei
+`order_refunds.provider_refund_id` teuer gelernt: ein Zustand für zwei Tatsachen. Und jede
+bestehende Auswertung (`orderbook_global_factor()`, `seller_orderbook_ledger()`, der
+Arbeitsmappen-Import, der Backup-Export) hängt an dieser einen Spalte.
+
+**Konsequenzen.** Für die 84 bestehenden Einkäufe ist die Aufteilung **unbekannt**, und unbekannt
+heißt NULL — nicht 0 und erst recht nicht geraten. Das Formular erfasst die drei Teile und rechnet
+die Summe daraus; eine Richtung, keine zweite Wahrheit. Die Anwendung rundet dabei **erst die
+Teile und addiert dann**, weil `purchases_cost_split_adds_up` in der Datenbank genau so rechnet —
+die umgekehrte Reihenfolge ist einen Cent daneben und hätte den ganzen Einkauf abgelehnt.
+
+### D3 — Vitrinenfiguren zählen mit vollem Marktwert
+
+Sie sind physisch da und wert, was sie wert sind — sie werden nur nicht angeboten. Der
+Einkaufsfaktor beantwortet die Frage „zu welchem Bruchteil des Marktwerts kauft der Betrieb ein",
+und daran ändert sich nichts, wenn eine Figur im Regal des Inhabers landet statt im Shopregal.
+
+### D4 — Beschädigt und fehlend zählen mit 0 €, die Kosten bleiben vollständig
+
+**Problem.** Bis `0115` schloss `purchase_market_value()` `missing` ganz aus und zählte `damaged`
+mit **vollem** Marktwert. Beides war falsch: eine fehlende Position verschwand aus der Übersicht,
+eine beschädigte tat so, als wäre sie verkäuflich.
+
+**Entscheidung.** Beide tragen **0 €** zum anrechenbaren Wert bei und bleiben in `total_items`
+sichtbar. Die Kosten des Einkaufs bleiben unangetastet. Der Faktor steigt dadurch, und das ist
+gewollt:
+
+> 100 € bezahlt, 5 Figuren à 30 €, 3 einwandfrei, 1 beschädigt, 1 fehlt
+> → anrechenbarer Wert 90 €, Faktor 100/90 = 1,111…
+
+**Begründung.** SkyIsles bietet ausschließlich einwandfreie Figuren an. Eine beschädigte hat
+keinen Verkaufswert, eine fehlende ist nicht da — aber bezahlt wurde beides. Ein Faktor, der den
+Verlust aus dem Nenner nimmt, ohne ihn im Zähler zu lassen, würde den Einkauf besser aussehen
+lassen, als er war. Und sie bleiben in `total_items`, weil ein Paket, das seine Verluste
+versteckt, seinen eigenen Faktor nicht erklären kann.
+
+**Konsequenzen.** `known_items` zählt eine beschädigte oder fehlende Position als **bekannt**: ihr
+anrechenbarer Wert ist 0, und das ist eine Antwort, keine Lücke. Täte sie es nicht, stünde jeder
+Einkauf mit einer beschädigten Figur für immer auf `Unvollständig`.
+
+**Und beschädigt wird niemals verkaufbar.** `seller_book_purchase_item()` weist `damaged` und
+`missing` ab — nicht automatisch, nicht durch einen zweiten Klick. Wer sich bei der Einordnung
+geirrt hat, setzt die Position **bewusst** auf `arrived` zurück und bucht dann ein; der Umweg ist
+der nachvollziehbare Teil. Die Oberfläche stellt diesen einen Knopf hinter eine ausdrückliche
+Korrektur mit einem Satz, statt ihn neben die anderen Zustände zu legen.
+
+### D5 — Testeinkäufe fallen aus dem globalen Faktor
+
+`seller_orderbook_ledger()` filtert `is_test` seit `0063`; `orderbook_global_factor()` tat es
+nicht. Damit floss jeder Probeeinkauf in die Kennzahl, auf die sich **jeder neue Verkauf** als
+`buy_in_factor_snapshot` festschreibt. Eine Zeile `where not p.is_test` schließt das.
+
+**Gemessene Rückwirkung:** Production 0 Testeinkäufe → Faktor unverändert 0,376347. Staging 3
+Testeinkäufe über 37,50 € → 0,376338 → 0,376347. Bestehende Snapshots bleiben unberührt:
+`sale_buy_in()` rechnet aus dem eingefrorenen Wert, und die drei Einfrierstellen nutzen
+`coalesce(snapshot, …)`.
+
+### D6 — Der Tagesplatz ist derselbe wie beim Verkauf
+
+Index, Sortierung, Platztausch, Datumsdarstellung — wortgleich mit ADR-0120. Zwei Bücher, die
+dasselbe tun, dürfen nicht zwei Bedienmodelle haben. Ein Unterschied bleibt und ist kein
+Versehen: beim Verkauf brauchte `0113` eine eigene Tagesspalte, weil `effective_date` ein `case`
+über zwei Tabellen ist. `purchases.purchased_at` **ist** der Tag, seit `0053` — eine zweite Spalte
+daneben wäre eine Kopie, die auseinanderlaufen kann.
+
+### D7 — Zwei Migrationen, und `0110`–`0114` werden nicht angefasst
+
+`0115` ist Schema (Spalten, CHECKs, Indizes, Trigger, Backfill), `0116` ist Logik (neun
+Funktionen, kein DDL). Getrennt, weil die Schemaänderung sofort und für sich prüfbar ist und die
+Logik auf ihr aufsetzt — `0116` prüft drei Marker aus `0115` und bricht sonst ab.
+
+### D8 — Fünf Zahlungswege
+
+`card` (Kreditkarte, Vorbelegung), `paypal`, `transfer` (Überweisung), `cash` (Bargeld),
+`platform` (plattforminterner Bezahlvorgang). `platform` als **Zahlungsweg** ist nicht dasselbe
+wie `purchases.platform`: dort steht, **wo** gekauft wurde, hier, **wie** bezahlt wurde.
+
+Kreditkarte ist Vorbelegung des **Formulars**, nicht der Spalte: ein `default 'card'` in der
+Datenbank hätte jedem der 84 bestehenden Einkäufe rückwirkend eine Zahlungsart zugeschrieben, die
+niemand erfasst hat.
+
+### D9 — Drei Kostenfelder, fest
+
+Kaufpreis der Figuren, Versandkosten, Käuferschutz (optional, Vorgabe 0 €). Keine freien
+Kostenzeilen wie beim Verkauf: ein Verkauf trägt Gebühren, die der Kanal **einbehält** und die in
+Art und Zahl variieren; ein Einkauf trägt drei Kosten, die der Betrieb **zahlt**. Eine gemeinsame
+Abstraktion müsste beides „Kostenzeile" nennen und hätte damit die Unterscheidung verwischt, auf
+der die Auszahlungs- und die Faktorrechnung beruhen. Geteilt wird die **Form** der Vorlagen
+(`purchase-template.ts` neben `sale-template.ts`), nicht der Inhalt.
+
+### Zwei Entscheidungen, die erst der Review ergeben hat
+
+**`damaged → showcase` ist verboten.** Beide Schritte waren einzeln erlaubt — der erste als
+Korrektur einer Fehleinordnung, der zweite, weil D1 die Überführung aus der Vitrine ausdrücklich
+verlangt. Zusammen ergaben sie in zwei Klicks genau das, was D4 verbietet: eine als beschädigt
+verzeichnete Figur im Verkaufsbestand. Geschlossen an der ersten Kante, in SQL und in TypeScript.
+Der eine nachvollziehbare Weg zurück bleibt `arrived` — „sie ist in Ordnung" —, und von dort führt
+jeder weitere Schritt offen weiter. Ein Umweg über die Vitrine hätte dieselbe Aussage versteckt.
+
+**Eine Frage, eine Regel.** `canCheckIn()` im Ledger führte eine eigene Zustandsliste und kannte
+`showcase` nicht. Dieselbe Figur hätte auf der Detailseite einen Einbuchen-Knopf gehabt und im
+Einkaufsbuch keinen, und die Überführung aus der Vitrine wäre von dort unerreichbar gewesen. Es
+delegiert jetzt an `canBook()`.
+
+### Verworfen
+
+Eine Spalte `purchase_day` neben `purchased_at` (Kopie ohne Ableitung). Eine zweite Tabelle für
+Kostenarten (Datenmodell für drei feste Felder). `total_cost` als „nur Figuren" umdeuten (D2).
+Beschädigte Figuren extern weiterverkaufen — ausdrücklich außerhalb des Umfangs: sie werden nicht
+in den SkyIsles-Verkaufsbestand zurückgeführt, und ein zweiter Verkaufsweg für sie wäre ein
+eigenes Thema mit eigener Buchhaltung. Ein automatischer Weg von `damaged` nach `booked`. Ein
+`default` auf einer der sieben neuen Spalten.

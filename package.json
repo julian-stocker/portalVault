@@ -54,6 +54,8 @@
     "transfer:preview": "node --env-file=.env.staging tools/transfer-to-production.mts",
     "transfer:apply": "node --env-file=.env.staging tools/transfer-to-production.mts --apply",
     "verify:purchase-items:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-purchase-items.mts",
+    "preflight:0115:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/preflight-0115-staging.mts",
+    "preflight:0116:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/preflight-0116-staging.mts",
     "verify:sale-workflow:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sale-workflow.mts",
     "verify:ship-day:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-ship-and-day.mts",
     "ui-fixtures:ship-day:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/ui-fixtures-ship-day.mts",

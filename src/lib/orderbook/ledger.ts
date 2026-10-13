@@ -8,6 +8,7 @@
  */
 
 import type { OrderbookStatus } from "./classification";
+import { canBook, type ItemState } from "./purchase";
 
 export type LedgerMatch = { id: number; position: number; name: string };
 
@@ -35,6 +36,39 @@ export type LedgerRow = {
   isIncomplete: boolean;
   /** A physical booking is still owed — `Einbuchen` would accept it (0066). */
   isOpen: boolean;
+
+  /* ---- 0115/0116 ------------------------------------------------------ */
+  /**
+   * Der Platz dieses Einkaufs innerhalb seines Tages, 1 … n (0115).
+   *
+   * Höchster oben, wie bei Verkäufen seit `0113`. NULL genau dann, wenn
+   * `purchasedAt` NULL ist — ein Einkauf ohne Tag hat keinen Platz in einem.
+   */
+  dailyIndex: number | null;
+  /** Wo gekauft wurde: `kleinanzeigen`, `willhaben`, `manual`. NULL bei Altdaten. */
+  platform: string | null;
+  /** WER verkauft hat, roh wie eingegeben. NICHT die Plattform. */
+  sellerName: string | null;
+  /** Wie bezahlt wurde. NULL bei jedem Einkauf von vor `0115`. */
+  paymentMethod: string | null;
+  /** Bestellnummer oder Anzeigenreferenz. */
+  externalRef: string | null;
+  /**
+   * Die Kostenaufteilung — oder NULL, wenn sie nie erfasst wurde.
+   *
+   * `totalCost` bleibt in jedem Fall die Autorität darüber, was bezahlt
+   * wurde. Diese drei sagen nur, WIE es sich aufteilt.
+   */
+  itemsCost: number | null;
+  shippingCost: number | null;
+  buyerProtectionCost: number | null;
+  /** Positionen, die 0 EUR in den Faktor tragen (D4). */
+  damagedCount: number;
+  missingCount: number;
+  /** Physisch da, aber nicht im Shop (D1/D3). */
+  showcaseCount: number;
+  /** Der Nebenläufigkeitsschlüssel, den eine Bearbeitung zurückschickt. */
+  updatedAt: string | null;
 };
 
 export type LedgerSummary = {
@@ -223,11 +257,17 @@ export function itemStatus(item: { state: string; movementId: number | null }): 
  * A historical row never may: it is already accounted for, and `0053` refuses
  * it in the database anyway. Offering a button the server will reject is worse
  * than offering none.
+ *
+ * ---------------------------------------------------------------------------
+ * EINE REGEL, NICHT ZWEI. Dies ist die Ledger-Fassung derselben Frage, die
+ * `canBook` beantwortet, und sie DELEGIERT deshalb. Bis 0116 stand hier eine
+ * eigene Liste mit `ordered` und `arrived` — als `showcase` dazukam, hätte
+ * dieselbe Figur auf der Detailseite einen Einbuchen-Knopf gehabt und im
+ * Einkaufsbuch keinen, und die Überführung aus der Vitrine in den
+ * Shopbestand (D1) wäre von hier aus unerreichbar gewesen.
  */
 export function canCheckIn(item: { state: string; skyId: string | null }): boolean {
-  if (item.state === "reconciled_legacy" || item.state === "booked") return false;
-  if (item.skyId === null) return false;
-  return item.state === "ordered" || item.state === "arrived";
+  return canBook({ state: item.state as ItemState, skyId: item.skyId });
 }
 
 /**

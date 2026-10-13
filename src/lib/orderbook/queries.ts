@@ -76,6 +76,31 @@ export const fetchLedger = cache(
         isTest: r.is_test === true,
         isIncomplete: r.is_incomplete === true,
         isOpen: r.is_open === true,
+        /*
+         * 0115/0116. Defensiv gelesen: eine Datenbank ohne `0116` liefert
+         * diese Felder nicht, und dann ist die Antwort „unbekannt" (NULL)
+         * bzw. 0 — nicht NaN. Dieselbe Vorsicht wie bei `buyerDayCount` im
+         * Verkaufsbuch, und aus demselben Grund: der Anwendungscode kann vor
+         * der Migration live gehen.
+         */
+        dailyIndex: r.daily_index === null || r.daily_index === undefined
+          ? null : Number(r.daily_index),
+        platform: (r.platform as string) ?? null,
+        sellerName: (r.seller_name as string) ?? null,
+        paymentMethod: (r.payment_method as string) ?? null,
+        externalRef: (r.external_ref as string) ?? null,
+        itemsCost: r.items_cost === null || r.items_cost === undefined
+          ? null : Number(r.items_cost),
+        shippingCost: r.shipping_cost === null || r.shipping_cost === undefined
+          ? null : Number(r.shipping_cost),
+        buyerProtectionCost:
+          r.buyer_protection_cost === null || r.buyer_protection_cost === undefined
+            ? null : Number(r.buyer_protection_cost),
+        damagedCount: Number(r.damaged_count ?? 0),
+        missingCount: Number(r.missing_count ?? 0),
+        showcaseCount: Number(r.showcase_count ?? 0),
+        updatedAt: r.updated_at === null || r.updated_at === undefined
+          ? null : String(r.updated_at),
       };
     });
 
