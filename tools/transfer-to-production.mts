@@ -185,7 +185,20 @@ const SCHEMA_PROBES: [string, string, Row][] = [
   ["0061", "seller_historical_adjustments", {}],
   ["0062", "seller_sale_audit", { p_sale_id: -1 }],
   ["0063", "seller_set_purchase_test", { p_id: -1, p_is_test: false }],
-  ["0064", "seller_create_purchase_with_items", { p_purchased_at: null, p_total_cost: 0, p_note: null, p_is_test: true, p_items: [] }],
+  /*
+   * `0064` STEHT HIER NICHT MEHR — und das war ein Fehler, nicht nur eine
+   * Unschönheit.
+   *
+   * `seller_create_purchase_with_items` ist die einzige SCHREIBENDE Funktion,
+   * die je in dieser Liste stand. Die übrigen sechs Sonden rufen lesende
+   * Funktionen mit einer id, die es nicht gibt (`p_id: -1`): sie geben leer
+   * zurück und fassen nichts an. Diese eine legte bei JEDEM Lauf einen
+   * leeren Testeinkauf in PRODUCTION an — mit `p_total_cost: 0`,
+   * `p_items: []` und `is_test = true` —, nur um `PGRST202` auszuschliessen.
+   *
+   * Eine Existenzfrage braucht keinen Schreibzugriff. Sie wird unten aus dem
+   * OpenAPI-Dokument beantwortet, das PostgREST selbst veröffentlicht.
+   */
   ["0065", "seller_set_sale_item_sky", { p_item_id: -1, p_sky_id: "X" }],
 ];
 for (const [mig, fn, args] of SCHEMA_PROBES) {
@@ -199,6 +212,47 @@ for (const [t, c] of [["purchases", "is_test"], ["sales", "is_test"]] as const) 
   console.log(`  0063  ${`${t}.${c}`.padEnd(34)} ${r.error ? "FEHLT" : "vorhanden"}`);
   if (r.error) stop(`Spalte ${t}.${c} fehlt in Production.`);
 }
+/*
+ * DIE EXISTENZFRAGE, OHNE EINEN EINZIGEN SCHREIBZUGRIFF.
+ *
+ * PostgREST veröffentlicht unter `GET /rest/v1/` ein OpenAPI-Dokument, und
+ * darin steht ein Pfad `/rpc/<name>` für jede Funktion, die die anfragende
+ * Rolle aufrufen darf. Das Dokument IST der Schema-Cache in Textform. Ein
+ * `GET` darauf ist nachweislich lesend — es gibt nichts, was dabei entstehen
+ * könnte.
+ *
+ * Mit dem Service-Role-Key ist die Sicht ungefiltert, also beantwortet eine
+ * Mengenzugehörigkeit die Frage „gibt es diese Funktion" vollständig.
+ *
+ * WAS SIE NICHT BEANTWORTET: ob die Funktion AUFRUFBAR ist und ob ihre
+ * Signatur stimmt. Für eine schreibende Funktion ist das der richtige
+ * Kompromiss — der Aufruf wäre der Schaden, den die Prüfung vermeiden soll.
+ * Für die sechs lesenden Sonden oben bleibt es beim echten Aufruf.
+ */
+async function exposedFunctions(env: Record<string, string>): Promise<Set<string>> {
+  const key = env.SUPABASE_SERVICE_ROLE_KEY;
+  const r = await fetch(`${env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/`, {
+    headers: { apikey: key, Authorization: `Bearer ${key}`, Accept: "application/openapi+json" },
+  });
+  if (!r.ok) stop(`OpenAPI-Dokument des Ziels nicht lesbar (HTTP ${r.status}).`);
+  const doc = (await r.json()) as { paths?: Record<string, unknown> };
+  const prefix = "/rpc/";
+  return new Set(
+    Object.keys(doc.paths ?? {})
+      .filter((p) => p.startsWith(prefix))
+      .map((p) => p.slice(prefix.length)),
+  );
+}
+
+{
+  const rpcs = await exposedFunctions(target);
+  for (const [mig, fn] of [["0064", "seller_create_purchase_with_items"]] as const) {
+    const present = rpcs.has(fn);
+    console.log(`  ${mig}  ${fn.padEnd(34)} ${present ? "vorhanden (OpenAPI)" : "FEHLT"}`);
+    if (!present) stop(`Migration ${mig} fehlt in Production (${fn}).`);
+  }
+}
+
 {
   const r = await P.rpc("seller_orderbook_ledger",
     { p_year: null, p_month: null, p_search: null, p_undated: false, p_status: "open" });

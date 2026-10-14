@@ -12,8 +12,15 @@
  * Plattform ist ein Eintrag in `PURCHASE_TEMPLATES`, kein zweites Formular.
  */
 
-/** Was in `purchases.platform` landet. Der CHECK aus 0115 kennt genau diese. */
-export type PurchasePlatform = "kleinanzeigen" | "willhaben" | "manual";
+/**
+ * Was in `purchases.platform` landet. Der CHECK kennt genau diese (0115,
+ * `ebay` ergänzt in 0118).
+ *
+ * „Unbekannt" ist bewusst KEIN Wert, sondern NULL. `0115` hat das so
+ * entschieden und begründet: ein Standardwert hätte jedem bestehenden
+ * Einkauf rückwirkend eine Plattform zugeschrieben, die niemand erfasst hat.
+ */
+export type PurchasePlatform = "kleinanzeigen" | "ebay" | "willhaben" | "manual";
 
 /** Was in `purchases.payment_method` landet (Entscheidung D8). */
 export type PaymentMethod = "card" | "paypal" | "transfer" | "cash" | "platform";
@@ -55,6 +62,18 @@ export const PURCHASE_TEMPLATES: readonly PurchaseTemplate[] = [
    * Normalfall ist — als Feld, nicht als Betrag.
    */
   { id: "kleinanzeigen", platform: "kleinanzeigen", opensBuyerProtection: true, payment: "card" },
+  /*
+   * eBay (0118). KEIN Käuferschutzfeld, PayPal als Zahlungsart.
+   *
+   * Beides ist eine Vorbelegung des Formulars, keine Behauptung: eBays
+   * Käuferschutz ist für den Käufer kostenfrei und erscheint auf keiner
+   * Abrechnung als eigener Betrag — anders als bei Kleinanzeigen und
+   * Willhaben, wo genau dieser Posten bezahlt wird. Stünde das Feld
+   * vorbelegt da, läge die Versuchung nahe, eine Zahl hineinzuschreiben,
+   * die es nicht gibt. Wer sie doch braucht, holt das Feld über
+   * `newBuyerProtection`.
+   */
+  { id: "ebay", platform: "ebay", opensBuyerProtection: false, payment: "paypal" },
   { id: "willhaben", platform: "willhaben", opensBuyerProtection: true, payment: "card" },
   /*
    * „Manuell / Sonstige" ist die Vorlage für alles andere — ein Flohmarkt,

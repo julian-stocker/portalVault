@@ -88,6 +88,22 @@ export function PurchaseItems({
    * dann der eine Knopf.
    */
   const [correcting, setCorrecting] = useState<number | null>(null);
+  /*
+   * DIE POSITION, DEREN RÜCKNAHME GERADE BESTÄTIGT WERDEN MUSS.
+   *
+   * Eine Rücknahme schreibt eine Gegenbewegung ins Lagerjournal — eine Zeile,
+   * die bleibt. Bis hierher war es ein nackter Knopf, und ein Fehlklick kostete
+   * zwei Journalzeilen und einen Preis-Snapshot.
+   *
+   * NUR EIN ZUSTAND, KEIN DIALOG. Der erste Klick setzt diese Nummer und
+   * SONST NICHTS — kein Netzaufruf, keine Server Action, keine Datenänderung.
+   * Erst der bestätigte Klick ruft `unbookPurchaseItem`. Ein Modal wäre hier
+   * falsch: der Kommentar bei `remove` unten begründet das für dieselbe Stelle,
+   * und im (i)-Fenster wäre es ein Modal im Modal.
+   *
+   * Eine Position auf einmal — dieselbe Form wie `remapping` und `correcting`.
+   */
+  const [confirmingUnbook, setConfirmingUnbook] = useState<number | null>(null);
 
   function quick(item: PurchaseItem, state: ItemState) {
     setError(null);
@@ -119,6 +135,9 @@ export function PurchaseItems({
 
   function unbook(item: PurchaseItem) {
     setError(null);
+    /* Die Rückfrage ist beantwortet; sie darf nicht offen stehen bleiben,
+       wenn die Zeile danach ihren Zustand wechselt. */
+    setConfirmingUnbook(null);
     startTransition(async () => {
       const result = await unbookPurchaseItem(item.id, purchaseId);
       if (!result.ok) setError(result.message);
@@ -254,12 +273,44 @@ export function PurchaseItems({
                   )}
 
                   {isBooked ? (
-                    <div className="ml-auto flex items-center gap-2">
-                      <span className="text-xs font-medium">{copy.booked}</span>
-                      <button type="button" disabled={pending} onClick={() => unbook(item)}
-                              className={`${ACTION_NEUTRAL} min-h-11 w-auto disabled:opacity-60`}>
-                        {copy.unbook}
-                      </button>
+                    /*
+                     * ZWEI KLICKS, UND DER ERSTE SCHREIBT NICHTS.
+                     *
+                     * Der Knopf wird zur Frage, die Frage nennt ihre Folge, und
+                     * `Abbrechen` setzt nur den Zustand zurück. Erst
+                     * `Ja, zurücknehmen` ruft die Server Action.
+                     */
+                    <div className="ml-auto flex flex-col items-end gap-1">
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <span className="text-xs font-medium">{copy.booked}</span>
+                        {confirmingUnbook === item.id ? (
+                          <>
+                            <span className="text-xs font-medium">{copy.errors.unbookConfirm}</span>
+                            <button type="button" disabled={pending}
+                                    onClick={() => unbook(item)}
+                                    className={`${ACTION_NEUTRAL} min-h-11 w-auto disabled:opacity-60`}>
+                              {copy.errors.unbookYes}
+                            </button>
+                            <button type="button" disabled={pending}
+                                    onClick={() => setConfirmingUnbook(null)}
+                                    className={ROW_ACTION}>
+                              {copy.errors.unbookCancel}
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" disabled={pending}
+                                  aria-expanded={false}
+                                  onClick={() => setConfirmingUnbook(item.id)}
+                                  className={`${ACTION_NEUTRAL} min-h-11 w-auto disabled:opacity-60`}>
+                            {copy.unbook}
+                          </button>
+                        )}
+                      </div>
+                      {confirmingUnbook === item.id ? (
+                        <p role="alert" className="max-w-sm text-right text-xs text-muted">
+                          {copy.errors.unbookConfirmHint}
+                        </p>
+                      ) : null}
                     </div>
                   ) : nonCatalog ? (
                     /*

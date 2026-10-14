@@ -3463,6 +3463,82 @@ gibt es 0 beschädigte, 0 fehlende und 0 Testeinkäufe, der Faktor bleibt also m
 0,376347, und 84 datierte Einkäufe erhalten ihre 84 Plätze.
 
 
+### 3.3ao Absender, Inserat und der Eigenbeleg über einen Privatankauf (`0121`, `0122`, `0123`, ADR-0122)
+
+Rund 99 % der Einkäufe kommen von Privatpersonen. Eine Privatperson stellt
+keine Rechnung aus; für die EÜR dokumentiert der Käufer den Vorgang selbst.
+
+**`0121` — neun Spalten auf `purchases`, alle nullbar und ohne `default`:**
+
+```
+sender_name · sender_street · sender_postal_code · sender_city · sender_country
+listing_title · listing_url · listing_details
+agreement_note
+```
+
+`sender_name` ist **nicht** `seller_name`. Das eine ist der Name auf dem
+Paket und steht meist erst nach dem Wareneingang fest; das andere ist ein
+Marktplatz-Benutzername und eine Zuordnungshilfe. `platform` und
+`external_ref` (die Inserats-ID) gibt es seit `0115` und werden
+weiterverwendet. `agreement_note` ist **nicht** `note`: `note` ist die interne
+Notiz des Betreibers und gehört auf keinen Beleg.
+
+Geleert wird mit einem **Leerstring**, nicht mit NULL — die Hausregel dieser
+RPC lautet seit `0053` „NULL heisst unverändert", und `nullif(btrim(p_x), '')`
+macht aus einem Leerstring ein NULL in der Spalte. Je Feld, ohne Nebenwirkung.
+`seller_update_purchase` hat dafür 21 Parameter statt zwölf (drop + create,
+weil `create or replace` die Parameterliste nicht ändern kann).
+
+**`0122` — drei Tabellen:**
+
+| Tabelle | Inhalt |
+|---|---|
+| `purchase_receipts` | das Dokument, eingefroren: Käufer, Verkäufer, Herkunft, Beträge, `lines jsonb` |
+| `purchase_receipt_downloads` | eine Zeile je **bestätigt vollständig** abgerufenem PDF |
+| `purchase_receipt_counters` | eine Zeile je Jahr, lückenlose Nummernvergabe |
+
+Alles wird beim Ausstellen **kopiert**, nicht gejoint — derselbe Grund wie bei
+`invoices` seit `0047`. Ein geänderter Katalogname darf einen ausgestellten
+Beleg nicht umschreiben.
+
+Unveränderlichkeit ist dreifach: Tabellenrechte entzogen, RLS an, und
+`purchase_receipt_is_immutable()` als Trigger auf UPDATE **und** DELETE
+beider Belegtabellen. Der Lieferstatus liegt deshalb in einer zweiten Tabelle:
+so kennt die Belegtabelle wirklich nur INSERT.
+
+```
+receipt_number   ^SI-E-[0-9]{4}-[0-9]{6}$   unique
+counters         insert … on conflict … returning   -> transaktional, lueckenlos
+```
+
+Eine Sequenz wäre nicht transaktional; ein Rollback hinterliesse eine Lücke.
+
+**Vier RPCs**, alle `security definer` hinter `can_operate_active_seller()`:
+`seller_issue_purchase_receipt` (idempotent — ein zweiter Aufruf gibt den
+vorhandenen Beleg zurück), `seller_purchase_receipt`,
+`seller_purchase_receipt_document`, `seller_record_purchase_receipt_download`.
+Die Ausstellung verweigert bei Testvorgängen, fehlendem Kaufdatum, leerer
+Positionsliste und unvollständigen Geschäftsdaten des Shops.
+
+**Der Fingerabdruck.** `purchase_receipt_fingerprint(purchase_id)` hasht genau
+die Felder, die der Beleg zeigt — **nicht** `updated_at`, das sich auch bei
+einer internen Notiz bewegt, und **nicht** den Buchungszustand `state`, weil
+Einbuchen ein operativer Vorgang ist und den Ankauf nicht verändert. Dieselbe
+Funktion bildet den gespeicherten und den aktuellen Wert; `seller_purchase_
+receipt` gibt daraus `stale` zurück.
+
+**`0123` — `format_version integer not null default 1`.** Das PDF wird bei
+jedem Download neu aus dem Snapshot gezeichnet; eine Änderung am Renderer
+würde sonst jeden bereits ausgestellten Beleg mit ändern. Der Default ist die
+Aussage über bestehende Zeilen, das Literal im INSERT die über neue (heute 2).
+`alter table … add column … default …` ist DDL und feuert den
+Unveränderlichkeitstrigger nicht.
+
+**Keine Datei, kein Bucket.** Gerendert wird auf Abruf; die Route liegt unter
+`(business)` und prüft selbst, Antwort 404 statt 403 (ADR-0077).
+
+---
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**

@@ -14,6 +14,7 @@ import { PurchaseDate } from "@/components/business/purchase-date";
 import { PurchaseItems } from "@/components/business/purchase-items";
 import { TestFlag } from "@/components/business/test-flag";
 import { formatPrice } from "@/lib/format";
+import { rangedNumber } from "@/lib/format-number";
 import { de } from "@/lib/i18n/de";
 import { AddPurchaseItem } from "@/components/business/add-purchase-item";
 import { isHistorical } from "@/lib/orderbook/purchase";
@@ -90,7 +91,7 @@ export default async function PurchasePage({
           <dd className="tabular-nums">
             {purchase.factor === null
               ? "—"
-              : purchase.factor.toLocaleString("de-AT", { minimumFractionDigits: 2 })}
+              : rangedNumber(purchase.factor, 2, 3)}
           </dd>
         </div>
         <div>

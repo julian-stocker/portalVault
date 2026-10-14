@@ -58,6 +58,39 @@ const serviceClient = () =>
 
 const RUN = Date.now().toString(36);
 const NOTE = "UI Einkauf Figuren Smoke";
+
+/**
+ * Ein gültiger Kauftag: GESTERN.
+ *
+ * Seit `0120` verlangt `seller_create_purchase_with_items` ein Kaufdatum im
+ * Fenster `[2011-01-01, current_date]`. Vorher stand hier `null`, und das ist
+ * jetzt eine Ablehnung — jeder Aufruf unten hätte sofort abgebrochen.
+ *
+ * WARUM GESTERN UND NICHT HEUTE. Die Obergrenze ist `current_date` der
+ * DATENBANK. Stehen Laufzeit und Datenbank in verschiedenen Zeitzonen, kann
+ * „heute" hier der morgige Tag dort sein, und der Lauf bräche an einem
+ * Zeitzonenversatz statt an einer Sache. Gestern ist in jeder Zeitzone
+ * gültig.
+ *
+ * WARUM KEIN FESTES LITERAL. Ein `2026-01-15` wäre reproduzierbar und würde
+ * in einem Jahr immer noch funktionieren — aber es wäre auch ein Datum, das
+ * mit jedem Lauf weiter in der Vergangenheit liegt und irgendwann aussieht
+ * wie ein echter historischer Einkauf. Ein Testvorgang von gestern ist als
+ * solcher erkennbar.
+ */
+const PURCHASE_DATE = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * Die SQLSTATEs, die hier AUSEINANDERGEHALTEN werden müssen.
+ *
+ * Ohne sie bestünde eine Prüfung schon deshalb, weil irgendein Fehler kam —
+ * und seit `0120` gibt es einen neuen Fehler, der jedem anderen zuvorkommen
+ * kann. Ein Test, der grün wird, weil das Datum fehlte, prüft nichts.
+ */
+const DENIED = "42501";            // insufficient_privilege — das Betreibergate
+const MISSING_FUNCTION = "PGRST202"; // PostgREST kennt die Funktion für diese Rolle nicht
+const BAD_PARAMETER = "22023";     // invalid_parameter_value — u. a. der Datumsriegel aus 0120
+const FK_VIOLATION = "23503";      // foreign_key_violation — eine sky_id, die es nicht gibt
 const cents = (n: number) => Math.round(n * 100) / 100;
 
 /** Positions, quantity, reserved and movement count — the four §50 numbers. */
@@ -149,7 +182,7 @@ async function main(): Promise<void> {
     // would send it: one element per physical unit.
     const cost = 12.5;
     const createArgs = {
-      p_purchased_at: null as string | null,
+      p_purchased_at: PURCHASE_DATE,
       p_total_cost: cost,
       p_note: NOTE,
       p_is_test: true,
@@ -160,7 +193,7 @@ async function main(): Promise<void> {
           create.error?.message.slice(0, 90) ?? "");
     if (create.error) throw new Error("cannot continue without a purchase");
     purchaseId = Number(create.data);
-    console.log(`  purchase #${purchaseId}`);
+    console.log(`  purchase #${purchaseId} · Kaufdatum ${PURCHASE_DATE}`);
 
     const detail = async () => {
       const d = await op.rpc("seller_purchase", { p_id: purchaseId });
@@ -214,8 +247,16 @@ async function main(): Promise<void> {
       return r.count ?? -1;
     };
     const purchasesBefore = await countPurchases();
+    /*
+     * DAS DATUM IST HIER GÜLTIG, UND DAS IST DER PUNKT.
+     *
+     * Stünde hier weiter `null`, würde der Datumsriegel aus `0120` zuschlagen,
+     * BEVOR die ungültige Figur je erreicht wird — die Prüfung darunter wäre
+     * grün, und die Atomarität wäre nie geprüft worden. Deshalb ein gültiger
+     * Tag und darunter eine Prüfung auf den ERWARTETEN Fehlercode.
+     */
     const bad = await op.rpc("seller_create_purchase_with_items", {
-      p_purchased_at: null, p_total_cost: 5, p_note: `${NOTE} (rollback)`, p_is_test: true,
+      p_purchased_at: PURCHASE_DATE, p_total_cost: 5, p_note: `${NOTE} (rollback)`, p_is_test: true,
       /*
        * The third element names a figure that is not in the catalog. Built
        * from the run id rather than written as a literal: `SKY-99xx` is what
@@ -227,6 +268,25 @@ async function main(): Promise<void> {
     });
     check("an invalid figure is refused", bad.error !== null,
           bad.error?.code ?? "NO ERROR — it was accepted");
+    /*
+     * UND ZWAR WEGEN DER FIGUR. `23503` ist der Fremdschlüssel auf
+     * `skylanders`; `22023` wäre der Datumsriegel und hiesse, dass dieser
+     * Test die falsche Sache prüft.
+     */
+    check("AND FOR THE RIGHT REASON — the foreign key, not the date",
+          bad.error?.code === FK_VIOLATION,
+          `erwartet ${FK_VIOLATION}, bekommen ${bad.error?.code ?? "NO ERROR"}`);
+    check("the rejection does not mention the purchase date",
+          !(bad.error?.message ?? "").includes("needs its date"),
+          (bad.error?.message ?? "").slice(0, 70));
+    /*
+     * Und ausdrücklich NICHT der Datumsriegel. Der Fremdschlüsselvergleich
+     * oben schliesst das schon ein; diese Zeile benennt den Fehlermodus, um
+     * den es geht, statt ihn nur mitzuprüfen.
+     */
+    check("AND NOT the date guard from 0120",
+          bad.error?.code !== BAD_PARAMETER,
+          `${bad.error?.code ?? "NO ERROR"} (${BAD_PARAMETER} wäre der Datumsriegel)`);
     check("AND THE WHOLE PURCHASE ROLLED BACK", (await countPurchases()) === purchasesBefore,
           `${purchasesBefore} → ${await countPurchases()}`);
 
@@ -335,6 +395,19 @@ async function main(): Promise<void> {
     const anonCreate = await stranger.rpc("seller_create_purchase_with_items", createArgs);
     check("anon cannot create a purchase", anonCreate.error !== null,
           anonCreate.error?.code ?? "NO ERROR");
+    /*
+     * UND ZWAR WEGEN DER BERECHTIGUNG. `anon` hat kein `EXECUTE`, also
+     * antwortet PostgREST mit `42501` oder — weil der Schema-Cache je Rolle
+     * gefiltert ist — mit `PGRST202`. Beides ist eine Ablehnung.
+     *
+     * `22023` wäre es NICHT: das wäre der Datumsriegel, und dann hätte diese
+     * Prüfung über die Berechtigung nichts gesagt. Dass das Betreibergate im
+     * Funktionsrumpf VOR dem Datumsriegel steht, ist heute so und bleibt
+     * hoffentlich so — diese Zeile verlässt sich nicht darauf.
+     */
+    check("AND FOR THE RIGHT REASON — permission, not a parameter",
+          [DENIED, MISSING_FUNCTION].includes(anonCreate.error?.code ?? ""),
+          `erwartet ${DENIED}/${MISSING_FUNCTION}, bekommen ${anonCreate.error?.code ?? "NO ERROR"}`);
     const anonRemove = await stranger.rpc("seller_remove_purchase_item", { p_item_id: legacyId });
     check("anon cannot remove an item", anonRemove.error !== null,
           anonRemove.error?.code ?? "NO ERROR");
@@ -354,6 +427,18 @@ async function main(): Promise<void> {
     const outCreate = await outClient.rpc("seller_create_purchase_with_items", createArgs);
     check("a signed-in non-operator cannot create a purchase", outCreate.error !== null,
           outCreate.error?.code ?? "NO ERROR");
+    /*
+     * Dieses Konto DARF die Funktion ausführen (`authenticated` ist berechtigt)
+     * und erreicht damit den Rumpf. Abgelehnt wird es von
+     * `can_operate_active_seller()`, also mit `42501` — und nicht von einem
+     * Parameter.
+     */
+    check("AND FOR THE RIGHT REASON — the operator gate, not a parameter",
+          outCreate.error?.code === DENIED,
+          `erwartet ${DENIED}, bekommen ${outCreate.error?.code ?? "NO ERROR"}`);
+    check("the rejection does not mention the purchase date",
+          !(outCreate.error?.message ?? "").includes("needs its date"),
+          (outCreate.error?.message ?? "").slice(0, 70));
     await admin.auth.admin.deleteUser(madeOutsider.data.user.id);
 
     const finalStock = await inventorySnapshot(admin);

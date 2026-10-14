@@ -217,19 +217,31 @@ describe("formatting and the zero state", () => {
 
   it("renders money the way this product already does", () => {
     /*
-     * `€ 4.582,40`, not `4.582,40 €`: the project's locale is de-AT, which
-     * leads with the symbol (ADR-0019, `src/lib/format.ts`). Matching a
-     * mock-up instead would mean a second currency formatter, and then two
-     * places where money is printed differently.
+     * `€ 4.582,40`, not `4.582,40 €`: the symbol leads, with a no-break
+     * space, which is where both ICU and the legacy frontend put it. A
+     * mock-up with a trailing symbol would mean a second currency formatter,
+     * and then two places where money is printed differently.
+     *
+     * NOTE: exact strings now, with no `\s` normalisation. The normalisation
+     * was here because the separator was NOT fixed — it came from the
+     * runtime's CLDR data, so the test had to accept either a space or a
+     * no-break space. That tolerance is exactly what hid the defect this
+     * suite now guards against: the server wrote one character and the
+     * browser rebuilt another, and React reported a hydration mismatch in
+     * the Orderbuch. `src/lib/format-number.ts` has the measurements.
      */
-    expect(formatPrice(4582.4).replace(/\s/g, " ")).toBe("€ 4.582,40");
+    expect(formatPrice(4582.4)).toBe("\u20AC\u00A04.582,40");
     expect(formatNumber(127)).toBe("127");
     /*
-     * `1 270`, not `1.270`: de-AT groups with a narrow no-break space. The
-     * locale decides how this product writes numbers, and a KPI is not the
-     * place to start a second convention (ADR-0019).
+     * `1.270` — grouped with a period, pinned in code rather than taken from
+     * the locale data. The previous expectation was `1 270`, because that is
+     * what `de-AT` decimal grouping yields in current CLDR. It was not wrong
+     * at the time; it was unstable, and it also disagreed with the currency
+     * grouping two lines above, which CLDR gives as `.` for the very same
+     * locale. One separator now, everywhere.
      */
-    expect(formatNumber(1270).replace(/\s/g, " ")).toBe("1 270");
+    expect(formatNumber(1270)).toBe("1.270");
+    expect(formatNumber(1270)).not.toMatch(/[\u0020\u00A0\u202F]/);
   });
 
   it("shows zeroes rather than placeholders when there is nothing yet", () => {

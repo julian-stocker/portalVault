@@ -90,7 +90,27 @@ export function AddPurchaseItem({
           <FigureSearch
             catalog={catalog}
             disabled={pending}
-            onSelect={(choice) => add(choice.skyId, choice.name)}
+            /*
+             * KEIN `raw_name` FÜR EINE KATALOGFIGUR (verbindlich entschieden,
+             * 0120).
+             *
+             * Hier stand kurzzeitig der Rohname der gewählten Katalogzeile,
+             * um die Position darüber suchbar zu machen. Das war an zwei
+             * Stellen falsch. `purchase_items.raw_name` ist „what the source
+             * called it" (0053) — Provenienz. Für eine Figur, die gerade aus
+             * dem Katalog gewählt wurde, gibt es keine frühere Quelle, und ein
+             * Katalogname, der dort hineingeschrieben wird, ist ein erfundener
+             * Schnappschuss. Ausserdem hätte es zwei Pfade mit zwei
+             * Ergebnissen gegeben: ein neu angelegter Einkauf schreibt
+             * ebenfalls keinen Rohnamen.
+             *
+             * Suchbar ist die Position trotzdem: `0119` hat
+             * `display_name_override` in die Ledger-Suche aufgenommen, und der
+             * historische Rohname bleibt dort ebenfalls suchbar. Die
+             * Anzeigerangfolge löst den Namen live auf, statt ihn zu
+             * konservieren.
+             */
+            onSelect={(choice) => add(choice.skyId, null)}
           />
           {/* Said where `Einbuchen` is, not under the create form's submit
               button — the same place the Verkauf says it. */}

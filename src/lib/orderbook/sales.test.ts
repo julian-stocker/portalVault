@@ -15,7 +15,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { allMigrations, code, latestFunction, migrationSource } from "@/test-support/migrations";
+import {
+  allMigrations, code, latestFunction, migrationFiles, migrationSource,
+} from "@/test-support/migrations";
 import {
   BATTLECAST, OWNER_MAPPINGS, buildSelfUsage, buildTightNameIndex,
   canonicalSaleIdentity, classifySaleItem, moneyToRows, plannedPayout,
@@ -917,11 +919,24 @@ describe("the ledger renders as a table", () => {
      */
     for (const primitive of ["LedgerTable", "LedgerHead", "LedgerRow", "LedgerItemHead", "LedgerItemRow"]) {
       expect(LEDGER, primitive).toContain(`<${primitive}`);
+    }
+    /*
+     * Einkauf ebenso — seine Positionstabelle wohnt seit Schritt 1 des
+     * Umbaus in `purchase-item-table.tsx`, damit Kopfzeile und Zeile über
+     * zwei Anzeigeorte hinweg nicht auseinanderlaufen. Die Zusicherung ist
+     * dieselbe: beide gehen durch dieselben Primitive.
+     */
+    const EINKAUF_ITEMS = read("src/components/business/purchase-item-table.tsx");
+    for (const primitive of ["LedgerTable", "LedgerHead", "LedgerRow"]) {
       expect(EINKAUF, primitive).toContain(`<${primitive}`);
+    }
+    for (const primitive of ["LedgerItemHead", "LedgerItemRow"]) {
+      expect(EINKAUF_ITEMS, primitive).toContain(`<${primitive}`);
     }
     // And neither writes a row class of its own.
     expect(LEDGER).not.toMatch(/className="ob-(row|item)/);
     expect(EINKAUF).not.toMatch(/className="ob-(row|item)/);
+    expect(EINKAUF_ITEMS).not.toMatch(/className="ob-(row|item)/);
     expect(PRIMITIVES).toContain('className="ob-row relative');
   });
 
@@ -1037,14 +1052,22 @@ describe("the ledger renders as a table", () => {
   it("Einkauf's cells match the tracks Einkauf declares", () => {
     const columns = constTracks("PURCHASE_COLUMNS", EINKAUF);
     const items = constTracks("PURCHASE_ITEM_COLUMNS", EINKAUF);
-    expect(columns).toHaveLength(7);
+    /* Acht seit 0118: die Plattformspur kam zwischen Datum und Artikel. */
+    expect(columns).toHaveLength(8);
     expect(items).toHaveLength(6);
     // The last purchase track carries the (i), so it may not be wider.
     expect(columns[columns.length - 1]).toBe("1.5rem");
 
-    const head = inside(EINKAUF, "<LedgerItemHead>", "</LedgerItemHead>");
+    /*
+     * Die Spurenliste bleibt im Einkaufsbuch — es übergibt sie an
+     * `LedgerTable`. Gefüllt werden die Spuren in `purchase-item-table.tsx`,
+     * und genau DAS ist die Zusicherung dieses Tests: dieselbe Zahl in der
+     * Liste, in der Kopfzeile und in der Zeile, über die Dateigrenze hinweg.
+     */
+    const EINKAUF_ITEMS = read("src/components/business/purchase-item-table.tsx");
+    const head = inside(EINKAUF_ITEMS, "<LedgerItemHead>", "</LedgerItemHead>");
     expect(cells(head)).toBe(items.length);
-    expect(cells(inside(EINKAUF, "<LedgerItemRow>", "</LedgerItemRow>")))
+    expect(cells(inside(EINKAUF_ITEMS, "<LedgerItemRow>", "</LedgerItemRow>")))
       .toBe(items.length);
     expect(cells(inside(EINKAUF, "<LedgerHead>", "</LedgerHead>")))
       .toBe(columns.length);
@@ -2143,11 +2166,36 @@ describe("operational creation workflows", () => {
     expect(BOOK).toContain("this item is not a catalog figure and has no stock position");
   });
 
-  it("a purchase may be created without a date, and creating it stocks nothing", () => {
-    // 0058 made the column nullable; the form stopped defaulting to today.
+  it("a NEW purchase needs its date, invents none, and creating it stocks nothing", () => {
+    /*
+     * 0058 made the column nullable and the form stopped defaulting to today.
+     * 0120 keeps BOTH of those and adds the one thing they left open: a
+     * purchase being entered by hand must say when it was made. The column
+     * stays nullable — the import and the one real undated purchase depend on
+     * it — and the form still prefills nothing.
+     */
     expect(NEW_PURCHASE).toMatch(/useState\(""\)/);
-    expect(NEW_PURCHASE).toMatch(/date\.trim\(\) \|\| null/);
+    expect(NEW_PURCHASE).toMatch(/date\.trim\(\),/);
+    expect(NEW_PURCHASE).not.toMatch(/date\.trim\(\) \|\| null/);
     expect(NEW_PURCHASE).not.toContain("new Date().toISOString()");
+    /* Der Riegel sitzt im Anlegen, NICHT in der Spalte und NICHT im Import. */
+    const withItems = code(latestFunction("seller_create_purchase_with_items").body);
+    expect(withItems).toContain("a purchase needs its date");
+    expect(code(latestFunction("seller_create_purchase").body))
+      .not.toContain("a purchase needs its date");
+    /*
+     * UND SONST NIRGENDS. Genau EINE Migration kennt diesen Riegel — stünde
+     * er auch im Importpfad, wären die dreizehn undatierten `#REF!`-Gruppen
+     * der Arbeitsmappe nicht mehr importierbar. Die Prüfung über die
+     * Dateiliste ist unabhängig davon, mit welchem Schlüsselwort eine
+     * Funktion angelegt wurde — `latestFunction` findet nur
+     * `create or replace`, und der Importpfad benutzt es nicht durchgehend.
+     */
+    expect(migrationFiles.filter((f) => migrationSource(f).includes("a purchase needs its date")))
+      .toEqual(["0120_purchase_states_and_idempotency.sql"]);
+    const importPath = migrationSource("0053_orderbook_purchases.sql");
+    expect(importPath).toContain("create or replace function public.seller_import_purchase_group(");
+    expect(importPath).not.toContain("a purchase needs its date");
     const create = code(latestFunction("seller_create_purchase").body);
     for (const forbidden of ["record_inventory_movement", "shop_inventory"]) {
       expect(create, forbidden).not.toContain(forbidden);

@@ -1,32 +1,38 @@
 /**
- * Formatting of numbers, prices and percentages.
+ * Formatting of numbers, prices, percentages and dates.
  *
- * Deliberately in a single place and with an explicit locale: a second
- * language later becomes a parameter instead of a search through the codebase
- * (ADR-0012). The locale matches the legacy frontend (site/js/format.js).
+ * Deliberately in a single place: a second language later becomes a parameter
+ * instead of a search through the codebase (ADR-0012). The appearance follows
+ * the legacy frontend (`site/js/format.js`).
  *
- * Formatters are created once and reused — Intl instances are comparatively
- * expensive to construct.
+ * NUMBERS ARE NO LONGER FORMATTED BY `Intl`. The pattern is pinned in
+ * `format-number.ts`, because a locale's separators live in the runtime's ICU
+ * data and therefore differ between Node and the browser — which is a
+ * hydration mismatch. The reasoning and the measurements are in that file.
+ * Dates keep `Intl` and an explicit locale; the paragraph below `LOCALE`
+ * says why that is a different case and not an oversight.
  */
 import { de } from "@/lib/i18n/de";
+import { euroAmount, percentAmount, plainNumber } from "@/lib/format-number";
 
 const LOCALE = de.locale;
-const CURRENCY = "EUR";
 
-const moneyFormat = new Intl.NumberFormat(LOCALE, {
-  style: "currency",
-  currency: CURRENCY,
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-const numberFormat = new Intl.NumberFormat(LOCALE);
-
-const percentFormat = new Intl.NumberFormat(LOCALE, {
-  style: "percent",
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
+/*
+ * NUMBERS NO LONGER GO THROUGH `Intl` — DATES STILL DO.
+ *
+ * Three `Intl.NumberFormat` instances stood here, built from `de.locale`.
+ * They produced a hydration mismatch in the Orderbuch, because the separator
+ * they insert is not in this file: it is CLDR data inside the runtime's ICU,
+ * and Austrian German's group separator was revised between CLDR versions.
+ * The server wrote `2 118` and the browser rebuilt `2.118`. `format-number.ts`
+ * explains it in full, with the measurements.
+ *
+ * The date formatters below keep `Intl`, and that is not an inconsistency.
+ * A calendar is a calendar: `de-AT` and `de-DE` both write `14.10.2026`, the
+ * pattern has not been revised, and reimplementing month arithmetic and time
+ * zones by hand would trade a cosmetic risk for a real one. `TIME_ZONE` is
+ * pinned right below for the same family of reason.
+ */
 
 /**
  * Formats a price as currency. `null` means "no known market price" and is
@@ -37,7 +43,7 @@ export function formatPrice(value: number | null | undefined): string {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return "–";
   }
-  return moneyFormat.format(value);
+  return euroAmount(value);
 }
 
 /**
@@ -59,12 +65,12 @@ export function formatDeduction(value: number | null | undefined): string {
 }
 
 export function formatNumber(value: number | null | undefined): string {
-  return numberFormat.format(typeof value === "number" ? value : 0);
+  return plainNumber(typeof value === "number" ? value : 0);
 }
 
 /** Expects a fraction between 0 and 1, not 0 to 100. */
 export function formatPercent(value: number | null | undefined): string {
-  return percentFormat.format(typeof value === "number" ? value : 0);
+  return percentAmount(typeof value === "number" ? value : 0);
 }
 
 /**

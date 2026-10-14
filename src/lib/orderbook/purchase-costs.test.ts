@@ -251,15 +251,19 @@ describe("die Kostenrechnung, ausgeführt", () => {
 
 // ---------------------------------------------------------------------------
 describe("die Plattformvorlagen", () => {
-  it("drei Vorlagen, Kleinanzeigen als Standard", () => {
+  it("vier Vorlagen, Kleinanzeigen als Standard", () => {
+    /* eBay kam in 0118 dazu und steht an zweiter Stelle: es ist nach
+       Kleinanzeigen der Marktplatz, über den tatsächlich eingekauft wird. */
     expect(PURCHASE_TEMPLATES.map((t) => t.id))
-      .toEqual(["kleinanzeigen", "willhaben", "manual"]);
+      .toEqual(["kleinanzeigen", "ebay", "willhaben", "manual"]);
     expect(DEFAULT_PURCHASE_TEMPLATE).toBe("kleinanzeigen");
     expect(purchaseTemplate("kleinanzeigen").platform).toBe("kleinanzeigen");
   });
 
   it("eine unbekannte Kennung fällt auf den Standard zurück, statt zu brechen", () => {
-    expect(purchaseTemplate("ebay").id).toBe("kleinanzeigen");
+    /* Hier stand „ebay" — seit 0118 ist das eine bekannte Plattform. Der
+       Test braucht eine, die es wirklich nicht gibt. */
+    expect(purchaseTemplate("etsy").id).toBe("kleinanzeigen");
     expect(purchaseTemplate("").id).toBe("kleinanzeigen");
   });
 
@@ -274,12 +278,34 @@ describe("die Plattformvorlagen", () => {
     expect(purchaseTemplate("willhaben").opensBuyerProtection).toBe(true);
     /* Ein Flohmarktkauf hat keine Plattform, die einen Käuferschutz berechnet. */
     expect(purchaseTemplate("manual").opensBuyerProtection).toBe(false);
+    /* Und eBay erhebt keinen, der auf einer Abrechnung erscheint (0118) —
+       der Käuferschutz ist dort für den Käufer kostenfrei. */
+    expect(purchaseTemplate("ebay").opensBuyerProtection).toBe(false);
+    expect(purchaseTemplate("ebay").payment).toBe("paypal");
   });
 
-  it("und die Vorlagen deckten sich mit dem CHECK der Datenbank", () => {
+  it("und die Vorlagen decken sich mit dem CHECK, wie er zuletzt gilt", () => {
+    /*
+     * NICHT MEHR GEGEN 0115 ALLEIN. `0118` hat `purchases_platform_known`
+     * neu gesetzt, und ein Test gegen die erste Fassung hätte die Erweiterung
+     * nicht gesehen — er hätte sie nur verboten. Gefragt ist der CHECK, wie
+     * er GILT: die letzte Migration, die ihn definiert.
+     */
+    const platformCheck = (() => {
+      for (let i = migrationFiles.length - 1; i >= 0; i--) {
+        const sql = code(migrationSource(migrationFiles[i]));
+        const at = sql.lastIndexOf("add constraint purchases_platform_known");
+        if (at === -1) continue;
+        return sql.slice(at, sql.indexOf(";", at));
+      }
+      throw new Error("keine Migration definiert purchases_platform_known");
+    })();
     for (const t of PURCHASE_TEMPLATES) {
-      expect(exec, t.id).toContain(`'${t.platform}'`);
+      expect(platformCheck, t.id).toContain(`'${t.platform}'`);
     }
+    /* Und nichts darüber hinaus: der CHECK kennt genau die vier Vorlagen. */
+    expect(platformCheck.match(/'[a-z_]+'/g)?.sort())
+      .toEqual(["'ebay'", "'kleinanzeigen'", "'manual'", "'willhaben'"]);
     for (const m of PAYMENT_METHODS) {
       expect(exec, m).toContain(`'${m}'`);
     }
@@ -287,7 +313,9 @@ describe("die Plattformvorlagen", () => {
 
   it("die Wächter nehmen nur, was die Datenbank auch nimmt", () => {
     expect(isPurchasePlatform("kleinanzeigen")).toBe(true);
-    expect(isPurchasePlatform("ebay")).toBe(false);
+    expect(isPurchasePlatform("ebay")).toBe(true);        // seit 0118
+    expect(isPurchasePlatform("etsy")).toBe(false);
+    expect(isPurchasePlatform(null)).toBe(false);         // „Unbekannt" ist NULL
     expect(isPaymentMethod("card")).toBe(true);
     expect(isPaymentMethod("bitcoin")).toBe(false);
   });

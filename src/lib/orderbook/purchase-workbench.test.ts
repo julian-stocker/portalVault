@@ -34,6 +34,12 @@ const strip = (s: string) =>
 const FORM = read("src/components/business/new-purchase.tsx");
 const ITEMS = read("src/components/business/purchase-items.tsx");
 const LEDGER = read("src/components/business/orderbook-ledger.tsx");
+/*
+ * Seit Schritt 1 des Positionstabellen-Umbaus wohnen `Status`, `ItemRow` und
+ * die sechs Spaltenköpfe in ihrer eigenen Datei. Die Zusicherungen unten sind
+ * unverändert — sie lesen nur dort, wo der Code jetzt steht.
+ */
+const ITEM_TABLE = read("src/components/business/purchase-item-table.tsx");
 const DETAILS = read("src/components/business/purchase-details.tsx");
 const copy = de.business.orderbook;
 
@@ -125,8 +131,10 @@ describe("das Anlegeformular erfasst den ganzen Einkaufskopf", () => {
       expect(submit, field).toContain(field);
     }
     /* Die Figuren entstehen im selben Aufruf und damit in derselben
-       Transaktion — kein halb erfasster Einkauf. */
-    expect(submit).toContain("draftPayload(lines)");
+       Transaktion — kein halb erfasster Einkauf. Seit 0120 reist der Zustand
+       je Position mit, und der Entwurfstoken macht den Aufruf idempotent. */
+    expect(submit).toContain("purchaseDraftPayload(lines)");
+    expect(submit).toContain("clientToken: draftToken");
   });
 
   it("ein unlesbarer Betrag wird abgewiesen, bevor etwas entsteht", () => {
@@ -139,12 +147,30 @@ describe("das Anlegeformular erfasst den ganzen Einkaufskopf", () => {
     expect(copy.invalidCosts).toContain("Käuferschutz");
   });
 
-  it("das Datum bleibt freiwillig — ein Einkauf darf undatiert sein", () => {
-    /* Anders als beim Verkauf: `0058` lässt `purchased_at` bewusst null, und
-       ein Paket wird oft vor der Rechnung erfasst. */
+  it("das Datum ist beim ANLEGEN Pflicht — und wird sichtbar bemängelt", () => {
+    /*
+     * 0120 dreht diese Prüfung um. `0058` liess `purchased_at` bewusst null,
+     * weil dreizehn `#REF!`-Gruppen der Arbeitsmappe kein Datum tragen — und
+     * das gilt für den IMPORT weiter. Wer einen Einkauf neu erfasst, weiss
+     * dagegen, wann er ihn gemacht hat.
+     */
     const dateField = FORM.slice(FORM.indexOf("copy.columns.date"));
-    expect(dateField.slice(0, dateField.indexOf("</Field>"))).not.toContain("required");
-    expect(strip(FORM)).toContain("date.trim() || null");
+    const field = dateField.slice(0, dateField.indexOf("</Field>"));
+    expect(field).toContain("required");
+    expect(field).toContain("aria-invalid");
+    expect(field).toContain("aria-describedby");
+    /* Rot, barrierefrei angekündigt, und mit einem Satz statt eines Codes. */
+    expect(field).toContain("DATE_BAD");
+    expect(field).toContain('role="alert"');
+    expect(field).toContain("errors.dateRequired");
+    expect(field).toContain("errors.dateImplausible");
+    expect(strip(FORM)).toContain("date.trim(),");
+    expect(strip(FORM)).not.toContain("date.trim() || null");
+    /* Und der Fokus springt hin — ein roter Rahmen ausserhalb des Bildes ist
+       keine Meldung. */
+    const submit = strip(FORM.slice(FORM.indexOf("function submit")));
+    expect(submit).toContain("purchaseDateProblem(date)");
+    expect(submit).toContain("dateRef.current?.focus()");
   });
 });
 
@@ -252,14 +278,15 @@ describe("nachträgliche Korrektur einer Position", () => {
   });
 
   it("das Plus-Menü im Einkaufsbuch zeigt nur erreichbare Enden", () => {
-    expect(LEDGER).toContain("canChangeEnding(item");
-    expect(LEDGER).toContain("endingsFor(item.state as ItemState).map");
-    /* Keine zweite Liste in der Komponente. */
+    expect(ITEM_TABLE).toContain("canChangeEnding(item");
+    expect(ITEM_TABLE).toContain("endingsFor(item.state as ItemState).map");
+    /* Keine zweite Liste — in keiner der beiden Dateien. */
+    expect(strip(ITEM_TABLE)).not.toContain("EXTRA_ENDINGS");
     expect(strip(LEDGER)).not.toContain("EXTRA_ENDINGS");
     /* Und an einer beschädigten Position heisst der Knopf anders, weil er
        etwas anderes tut. */
-    expect(LEDGER).toContain("creditsNoValue(item.state as ItemState)");
-    expect(LEDGER).toContain("copy.correctEnding : copy.moreEndings");
+    expect(ITEM_TABLE).toContain("creditsNoValue(item.state as ItemState)");
+    expect(ITEM_TABLE).toContain("copy.correctEnding : copy.moreEndings");
   });
 
   it("offene Positionen lassen sich hinzufügen, umhängen und entfernen", () => {

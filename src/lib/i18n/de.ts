@@ -8,6 +8,8 @@
  * Convention (ADR-0019): keys are English, values are German.
  * Rule: no user-facing strings inline in JSX — always go through this object.
  */
+import { plainNumber, rangedNumber } from "@/lib/format-number";
+
 /**
  * „ab € 75,00 versandkostenfrei" — eine Formulierung, drei Fundstellen.
  *
@@ -967,7 +969,10 @@ export const de = {
         purchase: "Einkauf", figures: "Figuren", amount: "Kosten", note: "Notiz",
       },
       purchasePrice: "Kaufpreis",
-      submitPurchase: "Einkauf anlegen",
+      /* 0120: ein Knopf, und er speichert alles — Kopf, Positionen und
+         Zustände in einer Transaktion. „Anlegen" liess offen, ob die
+         Zustände mitkommen; „Speichern" tut das nicht. */
+      submitPurchase: "Einkauf speichern",
       /*
        * DIE VORLAGE (0115). Wortgleich mit dem Verkaufsformular, und aus
        * demselben Grund: sie entscheidet, was das Formular zeigt und
@@ -1039,7 +1044,7 @@ export const de = {
         hiddenHint: (n: number) =>
           n === 1
             ? "1 Testvorgang ist ausgeblendet. Er steht unter „Test“."
-            : `${n.toLocaleString("de-AT")} Testvorgänge sind ausgeblendet. Sie stehen unter „Test“.`,
+            : `${plainNumber(n)} Testvorgänge sind ausgeblendet. Sie stehen unter „Test“.`,
       },
 
       /* Beim Anlegen, und später korrigierbar. Standard: aus. */
@@ -1065,6 +1070,8 @@ export const de = {
            Spalte zeigt vier Zustände, also benennt sie das Thema. */
         progress: "Lager",
         source: "Quelle",
+        /* WO gekauft wurde (0118). Nicht bei wem — das ist der Verkäufer. */
+        platform: "Plattform",
       },
       sources: { manual: "manuell", excel_order_2026: "Order 2026" },
 
@@ -1072,7 +1079,7 @@ export const de = {
       summary: {
         count: "Anzahl",
         countHint: (items: number) =>
-          items === 1 ? "1 Artikel" : `${items.toLocaleString("de-AT")} Artikel`,
+          items === 1 ? "1 Artikel" : `${plainNumber(items)} Artikel`,
         expenses: "Ausgaben",
         marketValue: "Marktwert",
         factor: "Faktor",
@@ -1083,7 +1090,7 @@ export const de = {
       incompleteTitle: (n: number) =>
         n === 1
           ? "1 Artikel ohne bekannten Marktpreis — Marktwert und Faktor sind unvollständig."
-          : `${n.toLocaleString("de-AT")} Artikel ohne bekannten Marktpreis — Marktwert und Faktor sind unvollständig.`,
+          : `${plainNumber(n)} Artikel ohne bekannten Marktpreis — Marktwert und Faktor sind unvollständig.`,
       search: "Suche",
       searchHint: "Datum, Betrag, Faktor oder Figur",
       searchClear: "Suche zurücksetzen",
@@ -1134,7 +1141,7 @@ export const de = {
       /* Ein historischer Einkauf hat keine offene Arbeit — „0 von 14" würde
          das Gegenteil behaupten (Pilot 06.12.2025). */
       historical: "historisch",
-      percentOfMarket: (p: number) => `${p.toLocaleString("de-AT", { maximumFractionDigits: 1 })} % vom Marktpreis`,
+      percentOfMarket: (p: number) => `${rangedNumber(p, 0, 1)} % vom Marktpreis`,
       addItem: "+ Artikel hinzufügen",
       addUncategorized: "+ Sonstiger Artikel",
       uncategorizedHint: "Portal, Spiel oder Zubehör — bleibt Teil des Einkaufs, kommt aber nicht in den Figurenbestand.",
@@ -1181,7 +1188,7 @@ export const de = {
         selected: "Ausgewählte Figuren",
         none: "Noch keine Figur ausgewählt.",
         /* Ausgeschrieben, weil „3 × 2" auf einem Telefon niemand entziffert. */
-        units: (n: number) => (n === 1 ? "1 Figur" : `${n.toLocaleString("de-AT")} Figuren`),
+        units: (n: number) => (n === 1 ? "1 Figur" : `${plainNumber(n)} Figuren`),
         /* Menge einer Zeile. Das Minus bei 1 entfernt die Zeile — dasselbe
            Gemeinte wie das ×, nur die Geste, die die Finger schon machen. */
         more: (name: string) => `Eine Einheit ${name} mehr`,
@@ -1189,6 +1196,23 @@ export const de = {
         quantity: (name: string, n: number) => `${name}: ${n} Stück`,
         remove: "Entfernen",
         removeOne: (name: string) => `${name} entfernen`,
+        /*
+         * DIE KOMPAKTE POSITIONSLISTE DES EINKAUFS (0120).
+         *
+         * „Zustand" und nicht „Status": das Wort steht schon so an jeder
+         * Position eines bestehenden Einkaufs, und zwei Wörter für
+         * dieselbe Spalte wären zwei Stellen, an denen es auseinanderläuft.
+         */
+        stateOf: (name: string) => `Zustand von ${name}`,
+        splitOne: (name: string) => `Eine Einheit ${name} abtrennen`,
+        splitHint:
+          "Eine Einheit abtrennen, um ihr einen eigenen Zustand zu geben. "
+          + "Die Gesamtmenge bleibt gleich.",
+        /* Was gespeichert wird, in einem Satz über dem Knopf. Nur die
+           Zustände, die vorkommen — eine Liste aus fünf Nullen sagt
+           nichts. */
+        stateSummary: (parts: readonly string[]) => parts.join(" · "),
+        stateCount: (label: string, n: number) => `${plainNumber(n)} ${label}`,
         /* Zwei Beschriftungen für dieselbe Handlung, weil sie an zwei
            verschiedenen Stellen steht. In der Positionsliste eines Einkaufs
            steht sie neben „Zuordnung ändern" und muss sich davon
@@ -1205,7 +1229,7 @@ export const de = {
         missingPrices: (n: number) =>
           n === 1
             ? "1 Figur ohne Marktpreis — Marktwert und Faktor sind unvollständig."
-            : `${n.toLocaleString("de-AT")} Figuren ohne Marktpreis — Marktwert und Faktor sind unvollständig.`,
+            : `${plainNumber(n)} Figuren ohne Marktpreis — Marktwert und Faktor sind unvollständig.`,
         /* Ohne Figur speichern bleibt erlaubt (0063): der Einkauf ist dann
            „Unvollständig" und wird später ergänzt. */
         limit: (n: number) => `Mehr als ${n} Figuren auf einmal gehen nicht.`,
@@ -1223,7 +1247,7 @@ export const de = {
         freeHeading: "Ohne Katalogzuordnung",
         freeHint: "Kein Katalogartikel: keine SKY-ID, kein Lagerbezug, keine Reservierung.",
         freeUnits: (n: number) =>
-          n === 1 ? "1 Position" : `${n.toLocaleString("de-AT")} Positionen`,
+          n === 1 ? "1 Position" : `${plainNumber(n)} Positionen`,
         freeSelected: "Positionen ohne Katalogzuordnung",
       },
 
@@ -1241,24 +1265,157 @@ export const de = {
        * einen Verkäufer und eine Plattform. Die beiden nicht zu vermischen
        * war eine ausdrückliche Vorgabe.
        */
+      /*
+       * DER EIGENBELEG (0122).
+       *
+       * Zwei Zustände, die sauber getrennt bleiben müssen: AUSGESTELLT heisst,
+       * es gibt eine Nummer und einen eingefrorenen Snapshot. ABGERUFEN heisst,
+       * der Browser hat die vollständigen PDF-Bytes bekommen und das bestätigt.
+       * Der Haken hängt am zweiten — und behauptet ausdrücklich nicht, dass das
+       * Betriebssystem die Datei behalten hat.
+       */
+      receipt: {
+        section: "Eigenbeleg",
+        none: "Für diesen Einkauf ist noch kein Eigenbeleg ausgestellt.",
+        create: "Eigenbeleg erstellen & herunterladen",
+        download: "PDF herunterladen",
+        working: "Wird erstellt \u2026",
+        loading: "Wird geladen \u2026",
+        failed: "Der Eigenbeleg konnte nicht geladen werden.",
+        issuedOn: (date: string) => `ausgestellt am ${date}`,
+        deliveredOn: (date: string) => `PDF vollständig abgerufen am ${date}`,
+        notDelivered: "Noch nicht abgerufen.",
+        /* Was der Haken bedeutet — und was nicht. */
+        deliveredHint:
+          "Der Haken bedeutet, dass das PDF vollständig an den Browser ausgeliefert "
+          + "und das serverseitig bestätigt wurde. Ob die Datei auf diesem Gerät "
+          + "gespeichert blieb, kann eine Webanwendung nicht wissen.",
+        /*
+         * M5: der Beleg bleibt eingefroren, der Einkauf nicht. Verglichen wird
+         * ein Fingerabdruck über die belegrelevanten Felder — nicht
+         * `updated_at`, das sich auch bei einer internen Notiz bewegt.
+         */
+        stale:
+          "Belegrelevante Daten dieses Einkaufs haben sich seit der Ausstellung "
+          + "geändert. Der ausgestellte Beleg bleibt unverändert; eine Korrekturversion "
+          + "ist noch nicht möglich.",
+        editingBlocked:
+          "Während der Bearbeitung wird kein Beleg ausgestellt \u2014 erst speichern "
+          + "oder verwerfen.",
+        errors: {
+          unknown: "Diesen Beleg gibt es nicht.",
+          mismatch:
+            "Die empfangene Datei stimmt nicht mit dem archivierten Beleg überein. "
+            + "Der Abruf wurde deshalb nicht als erfolgreich vermerkt.",
+          testPurchase: "Für einen Testvorgang wird kein Eigenbeleg ausgestellt.",
+          noDate:
+            "Dieser Einkauf hat kein Kaufdatum. Ein Beleg braucht es \u2014 bitte zuerst "
+            + "nachtragen.",
+          noItems: "Dieser Einkauf hat keine Position, die auf einen Beleg gehört.",
+          noBusinessData:
+            "Die Geschäftsdaten des Shops sind unvollständig. Rechtlicher Name, Straße, "
+            + "PLZ und Ort müssen hinterlegt sein, bevor ein Beleg ausgestellt wird.",
+          immutable: "Ein ausgestellter Beleg kann nicht geändert werden.",
+          downloadFailed: "Das PDF konnte nicht abgerufen werden.",
+        },
+      },
       detailsModal: {
         title: "Einkaufsdetails",
         close: "Schließen",
         purchase: "Einkauf",
-        edit: "Bearbeiten", done: "Fertig", save: "Speichern",
+        /*
+         * DER ABSCHNITT UNTER DEN KOSTEN (Schritt 2 des Umbaus).
+         *
+         * „Gekaufte Figuren" und nicht „Positionen": im Fenster steht, was im
+         * Paket war, und das sind für den Betreiber Figuren. „Position" ist
+         * das Wort der Datenbank.
+         *
+         * Laden und Fehlschlag borgen sich die Sätze, die das Einkaufsbuch
+         * beim Aufklappen schon benutzt — zwei Formulierungen für dasselbe
+         * Warten wären zwei Stellen, an denen es auseinanderläuft.
+         */
+        figures: "Gekaufte Figuren",
+        noFigures: "Zu diesem Einkauf ist keine Figur erfasst.",
+        /*
+         * DIE KNÖPFE OBEN RECHTS.
+         *
+         * `done` stammt aus der Zeit, als „Bearbeiten" einen zweiten Block
+         * unter der Ansicht aufklappte und ein zweiter Druck ihn wieder
+         * zuklappte. Seit die Felder an ihrer Stelle stehen, heisst das
+         * Gegenstück zu `save` nicht mehr „Fertig", sondern `cancel` — es
+         * VERWIRFT, statt nur zuzuklappen. `done` bleibt stehen, weil die
+         * Verkaufsseite es weiter benutzt.
+         */
+        edit: "Bearbeiten", done: "Fertig", save: "Speichern", cancel: "Abbrechen",
+        saving: "Wird gespeichert …",
+        editHint: "Die Angaben stehen jetzt als Felder an ihrer Stelle.",
         /* WO gekauft wurde — nicht bei wem. */
         platform: "Plattform",
         platformNames: {
           kleinanzeigen: "Kleinanzeigen",
+          ebay: "eBay",
           willhaben: "Willhaben",
           manual: "Manuell / Sonstige",
         },
+        /* NULL heißt „nicht erfasst", und das ist bei jedem Einkauf von vor
+           0115 die ehrliche Antwort. Das Wort steht in der Auswahl UND in
+           der Übersichtsspalte, damit beide dasselbe sagen. */
+        platformUnknown: "Unbekannt",
         /* BEI WEM gekauft wurde. Frei getippt, roh gespeichert (Regel 4). */
         seller: "Verkäufer",
         sellerPlaceholder: "z. B. Benutzername des Anbieters",
         reference: "Referenz",
         referencePlaceholder: "Bestellnummer oder Anzeigen-ID",
         note: "Notiz",
+        /*
+         * ABSENDER, INSERAT UND VEREINBARUNG (0121).
+         *
+         * Der Absendername ist NICHT der Verkäufer darüber: dort steht ein
+         * Marktplatz-Benutzername, hier der Name auf dem Paket. Die
+         * Beschriftungen sagen das, weil zwei Felder mit ähnlichem Namen
+         * sonst verwechselt werden.
+         */
+        senderSection: "Absender und Inserat",
+        senderName: "Absendername",
+        senderNamePlaceholder: "Name auf dem Paket",
+        senderStreet: "Straße und Hausnummer",
+        senderPostalCode: "PLZ",
+        senderCity: "Ort",
+        senderCountry: "Land",
+        senderCountryPlaceholder: "z. B. Deutschland",
+        senderHint:
+          "Steht meist erst nach dem Wareneingang fest. Alle Felder sind freiwillig; " +
+          "der Absendername ist nicht der Plattform-Benutzername oben.",
+        listingTitle: "Inseratstitel",
+        listingUrl: "Inserats-URL",
+        /*
+         * KEIN LITERAL MIT SCHEMA UND HOST. `domain.test.ts` verbietet jede
+         * absolute http(s)-Adresse im Anwendungscode, damit kein SkyIsles-Host
+         * irgendwo festverdrahtet liegt — und ein Platzhalter „https://…" ist
+         * für diese Prüfung eine. Die Form steht in der Fehlermeldung
+         * darunter, wo sie ohnehin hingehört.
+         */
+        listingUrlPlaceholder: "Adresse des Inserats",
+        listingUrlInvalid:
+          "Die Inserats-URL muss mit http:// oder https:// beginnen und darf keine "
+          + "Leerzeichen enthalten.",
+        listingDetails: "Weitere Inseratsangaben",
+        listingHint:
+          "Angaben zum Inserat sind Referenz, nicht Kaufinhalt. Was tatsächlich gekauft " +
+          "wurde, steht unter \u201eFiguren\u201c \u2014 ein Inserat über vierzig Figuren " +
+          "bleibt ein Einkauf über fünf, wenn fünf gekauft wurden.",
+        listingOpen: "Inserat öffnen",
+        agreementNote: "Anmerkungen zur Kaufvereinbarung",
+        agreementHint:
+          "Besonderheiten der Vereinbarung — etwa, dass nur ein Teil des Inserats gekauft " +
+          "oder der Preis im Chat ausgehandelt wurde. Nicht dasselbe wie die interne Notiz.",
+        agreementPlaceholder:
+          "z. B.: Das ursprüngliche Inserat umfasste 40 Figuren. Gekauft wurden " +
+          "ausschließlich die 5 im Orderbuch aufgeführten Figuren.",
+        /* Noch nichts erfasst — und das ist kein Mangel, sondern der Normalfall. */
+        senderEmpty: "Noch nicht erfasst.",
+        recordLoading: "Wird geladen …",
+        recordFailed: "Absender- und Inseratsangaben konnten nicht geladen werden.",
         payment: "Zahlungsmethode",
         paymentNames: {
           card: "Kreditkarte",
@@ -1387,9 +1544,110 @@ export const de = {
         notAFigure: "Dieser Artikel ist keine Katalogfigur und kann nicht in den Figurenbestand.",
         damaged: "Ein beschädigter Artikel kommt nicht in den Verkaufsbestand. Setze ihn auf „angekommen“, wenn er doch in Ordnung ist.",
         missing: "Ein Artikel, der nie angekommen ist, lässt sich nicht einbuchen.",
+        /*
+         * DIE ZWEI ABLEHNUNGEN DER RÜCKNAHME (0093, hier übersetzt).
+         *
+         * `apply_inventory_movement` lehnt eine Bewegung ab, die den Bestand
+         * unter das Reservierte drücken würde, und nennt seit `0093` welchen
+         * der beiden Gründe es war. Im Verkaufsbuch sind beide Sätze seit je
+         * abgebildet (`sales-actions.ts`); auf der Einkaufsseite fehlten sie,
+         * und der Betreiber bekam für den wichtigsten Fall — die Figur ist
+         * schon verkauft oder für eine Bestellung gehalten — „konnte nicht
+         * gespeichert werden".
+         *
+         * WARUM DIE WORTE HIER ANDERE SIND. Im Verkauf heisst die Handlung
+         * „ausbuchen" und richtet sich nach vorn. Hier heisst sie
+         * „zurücknehmen" und richtet sich nach hinten — derselbe Riegel,
+         * eine andere Frage. Ein geteilter Satz müsste eines von beiden
+         * falsch nennen.
+         *
+         * In DIESEM Mapper können beide nur von der Rücknahme kommen: die
+         * Einbuchung ist eine `+1`, und eine Zunahme kann den Riegel
+         * `quantity + delta >= reserved` nicht verletzen.
+         */
+        unbookNoStock:
+          "Diese Figur liegt nicht mehr im Bestand, die Buchung lässt sich nicht " +
+          "zurücknehmen. Wahrscheinlich ist sie bereits verkauft und versandt — " +
+          "dann ist der Abgang die Korrektur, nicht die Rücknahme.",
+        unbookReserved:
+          "Diese Figur ist für eine offene SkyIsles-Bestellung reserviert. Die " +
+          "Buchung lässt sich erst zurücknehmen, wenn diese Bestellung " +
+          "abgeschlossen oder storniert ist.",
+        /* Die Inline-Rückfrage vor der Rücknahme. Sie nennt die FOLGE, nicht
+           nur die Frage: eine Gegenbewegung ist eine Zeile im Lagerjournal. */
+        unbookConfirm: "Buchung wirklich zurücknehmen?",
+        unbookConfirmHint:
+          "Das schreibt eine Gegenbewegung −1 ins Lager. Die ursprüngliche Buchung " +
+          "bleibt im Journal stehen. Danach ist die Figur wieder änderbar.",
+        /*
+         * DAS KURZE WORT FÜR DIE SCHMALE SPUR.
+         *
+         * Die Aktionsspur der Fenstertabelle ist 4,5rem. „Buchung
+         * zurücknehmen" braucht bei `text-xs` mit Innenrand etwa 6,6rem und
+         * würde die Spur sprengen — und die darf nicht wachsen. Also ein
+         * Zeichen mit `aria-label` und `title`, wie das Plus-Menü der grossen
+         * Tabelle es seit je macht. Ausgeschrieben steht die Handlung in der
+         * Rückfrage darunter, wo Platz dafür ist.
+         */
+        unbookIcon: "↩",
+        unbookYes: "Ja, zurücknehmen",
+        unbookCancel: "Abbrechen",
+        /*
+         * DIE INLINE-RÜCKFRAGE VOR DER EINBUCHUNG.
+         *
+         * Dieselbe Form wie bei der Rücknahme, und wie dort nennt sie die
+         * FOLGE und nicht nur die Frage. Beide Hälften des Hinweises sind im
+         * Code durchgesetzt und keine Behauptung: die Bewegung schreibt
+         * `record_inventory_movement` mit `+1`, und `canRemapItem` ist für
+         * eine gebuchte Position falsch — die Zuordnung ist dann wirklich
+         * gesperrt, bis die Buchung zurückgenommen ist.
+         */
+        bookConfirm: "Figur wirklich einbuchen?",
+        bookConfirmHint:
+          "Das schreibt eine Bewegung +1 ins Lager. Danach liegt die Figur im " +
+          "Bestand, und ihre Zuordnung lässt sich erst wieder ändern, wenn die " +
+          "Buchung zurückgenommen ist.",
+        bookYes: "Ja, einbuchen",
+        bookCancel: "Abbrechen",
+        /*
+         * ZWEI ZEICHEN, WEIL DIE SPUR ZWEI AKTIONEN HÄLT.
+         *
+         * `canBook` ist nur für `ordered`, `arrived` und `showcase` wahr —
+         * und für genau diese Zustände ist auch `canRemapItem` wahr, weil
+         * eine nicht gebuchte Position keine Lagerbewegung hat. Beide
+         * Aktionen treffen also dieselbe Zeile, und in 4,5rem passt nicht
+         * „Einbuchen" neben „Ändern" (zusammen über 7rem). Zwei Zeichen
+         * passen (3,45rem), und `aria-label` und `title` tragen die Handlung
+         * aus. Ausgeschrieben steht sie in der Rückfrage darunter.
+         *
+         * Wo „Ändern" ALLEIN steht — beschädigt, fehlt, historisch, ohne
+         * SKY-ID — bleibt das Wort stehen. Es passt dort, und ein Zeichen
+         * dafür einzutauschen wäre eine Änderung ohne Anlass.
+         */
+        bookIcon: "↓",
+        remapIcon: "✎",
         historical: "Historische Einkäufe sind bereits im Bestand berücksichtigt und werden nicht erneut eingebucht.",
         hasBookings: "Dieser Einkauf hat Artikel im Bestand. Nimm diese Buchungen zuerst zurück.",
         dateRange: "Dieses Kaufdatum liegt außerhalb des plausiblen Bereichs.",
+        /*
+         * DIE VIER ABLEHNUNGEN VON 0120.
+         *
+         * `dateRequired` und `dateImplausible` sind zwei verschiedene
+         * Fehler: „vergessen" und „kann kein Datum sein" werden
+         * verschieden behoben. `dateRange` oben gilt dem Korrigieren
+         * eines bestehenden Einkaufs und bleibt, wie es ist.
+         */
+        dateRequired: "Bitte ein Kaufdatum angeben. Ein neuer Einkauf braucht es.",
+        dateImplausible:
+          "Dieses Kaufdatum kann nicht stimmen. Erlaubt ist ein Tag zwischen dem "
+          + "01.01.2011 und heute.",
+        /* Der Entwurf wurde nach dem Speichern verändert und erneut
+           abgeschickt. Ihn zu bestätigen würde einen Einkauf zusichern,
+           den niemand angelegt hat. */
+        draftAlreadySaved:
+          "Dieser Entwurf wurde bereits gespeichert und danach verändert. "
+          + "Öffne das Formular neu für einen zweiten Einkauf.",
+        itemState: "Diesen Zustand kann eine neue Einkaufsposition nicht haben.",
         bookedRemap:
           "Dieser Artikel ist im Bestand. Die Bewegung benennt die Figur, die tatsächlich " +
           "eingebucht wurde — nimm die Buchung zurück, bevor du die Zuordnung änderst.",
@@ -1946,7 +2204,7 @@ export const de = {
       /* Die Artikelzahl in der Verkaufszeile. Ausgeschrieben, weil „3" allein
          in einer Spalte neben Geldbeträgen nach einem Betrag aussieht. */
       itemsCount: (n: number) =>
-        n === 1 ? "1 Artikel" : `${n.toLocaleString("de-AT")} Artikel`,
+        n === 1 ? "1 Artikel" : `${plainNumber(n)} Artikel`,
       unbook: "Ausbuchen zurücknehmen",
       returnItem: "Retoure eingegangen", returned: "Retoure",
       restock: "Wieder einlagern", restocked: "Wieder eingelagert",

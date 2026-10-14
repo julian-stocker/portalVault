@@ -268,6 +268,13 @@ bereits vorhandene Capability-Architektur. **Nicht** über den öffentlichen `ca
 unveränderlichen Daten erzeugt und gestreamt. Damit gibt es keine Datei, die versehentlich
 öffentlich werden könnte.
 
+**Die Kehrseite, benannt:** weil das PDF bei jedem Abruf neu entsteht, ändert eine Änderung am
+Renderer die **Darstellung** auch bereits ausgestellter Rechnungen — die Daten bleiben, das
+Dokument nicht. Die Rechnung wird deshalb **nicht** versioniert wie der Eigenbeleg, sondern
+festgenagelt: Byte-Zahl und SHA-256 stehen in `invoice-format-stability.test.ts`, und jede weitere
+Abweichung schlägt dort an (ADR-0123). Die steuerrechtliche Bewertung dieses Modells ist ein
+offener Punkt — siehe Abschnitt 9.
+
 ---
 
 ## 5. Versionierung der Rechtstexte
@@ -350,6 +357,9 @@ Farbsignal, Zielgrößen ≥ 44 px. Der Widerrufsablauf ist ohne Maus vollständ
 | **Telefonnummer in der Widerrufsbelehrung** | Gestaltungshinweis 2 nennt „Telefonnummer". Es gibt keine. Sie wird nicht erfunden. | anwaltliche Prüfung |
 | **Prozessorenregionen, AVV, Drittlandtransfers** | Nicht aus dem Repository ableitbar (Supabase, Vercel, Stripe, Resend) | Betreiber |
 | **Aufbewahrungsfristen** | Nirgends definiert; handels- und steuerrechtliche Fristen sind zu bestimmen | Betreiber / Steuerberater |
+| **Eigenbelege über Privatankäufe** | `0122`/`0123` erzeugen sie technisch. Ob die Form steuerlich anerkannt wird und welche Angaben das Finanzamt erwartet, ist nicht geprüft und wird nicht zugesichert. | Betreiber / Steuerberater |
+| **Erneut gerendertes Rechnungs-PDF** | Die Rechnung wird bei jedem Abruf aus der unveränderlichen Zeile neu erzeugt; eine Korrektur am Renderer verändert damit die **Darstellung** bereits ausgestellter Rechnungen, während Nummer, Datum, Beträge und Pflichtangaben gleich bleiben. Konkret eingetreten: die Absenderzeile zeigt künftig `·` statt `?`, und ab elf Positionen standen vorher Gesamtbetrag, § 19-Satz und Ausstellerfuss nicht im Dokument (auf Production nicht aufgetreten — eine Rechnung, zwei Positionen). Ob ein solcher Beleg als unveränderte Rechnungskopie im Sinne der Aufbewahrungs- und Nachweispflichten gilt, ob die Korrektur fehlender Pflichtangaben rückwirkend wirkt und ob stattdessen ein Ausdruck zum Ausstellungszeitpunkt aufzubewahren ist, ist **nicht geprüft und wird nicht zugesichert**. Technisch abgesichert ist nur, dass sich die Darstellung nicht mehr **still** ändert (ADR-0123). | Betreiber / Steuerberater |
+| **Absenderdaten privater Verkäufer** | Name und Anschrift einer Privatperson, die nie mit SkyIsles interagiert hat (`0121`). Die Datenschutzerklärung beschreibt Kunden und Bestellungen und erwähnt Ankäufe mit keinem Wort; Rechtsgrundlage, Informationspflicht und Löschfrist sind offen. | anwaltliche Prüfung / Betreiber |
 | **Kontolöschung** | Nicht implementiert; Zusammenspiel mit der Aufbewahrung der Bestellungen zu klären | Betreiber |
 | **BFSG-Ausnahme** | Beruht auf Beschäftigtenzahl und Umsatz zum Stichtag | anwaltliche Bestätigung |
 | **Einordnung der Performance-Telemetrie** | First-Party, personenbezogen, ohne festgelegte Löschfrist | anwaltliche Prüfung |

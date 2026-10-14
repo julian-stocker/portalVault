@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-13 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-15 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -17,16 +17,41 @@ Die vollständige Änderungshistorie liegt in Git.
 > | Neue Fixes und Überarbeitungen | **zuerst ausschließlich auf Staging** |
 > | Migrationen | **zuerst Staging**, danach getrennte Freigabe für Production |
 > | Runtime-, Browser- und E2E-Nachweise | **auf Staging** |
-> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow), `0077`–`0078`, `0079`–`0082` und `0083`–`0085` am **2026-09-21** (Zahlungswelt je Aufrufer, Legacy-Lagerhistorie, Testbewegungen strukturell getrennt) |
+> | Production-Migration | `0053`–`0066` am **2026-09-19** (Orderbuch-Release), `0067`–`0076` am **2026-09-20** (Einkauf-/Verkaufsworkflow), `0077`–`0078`, `0079`–`0082` und `0083`–`0085` am **2026-09-21** (Zahlungswelt je Aufrufer, Legacy-Lagerhistorie, Testbewegungen strukturell getrennt), `0117`–`0123` am **2026-10-14/15** (Anzeigenamen, ebay, Zustände und Doppelklick-Schutz, Absender- und Inseratsdaten, Eigenbelege mit Formatversion) |
 > | Push / Vercel-Deploy wegen neuer Änderungen | **nur mit ausdrücklicher Freigabe** |
 > | Production-Testbestellungen | **keine weiteren** |
 >
 > Offene Themen werden gesammelt auf Staging bearbeitet, aber **fachlich getrennt und in
 > kleinen, nachvollziehbaren Änderungen** — eine Sache, eine Migration, ein Commit.
 >
-> **Laufender Block (2026-10-13): Einkaufsorderbuch — `0115`, `0116`, ADR-0121.** Auf Staging
-> angewendet, per SQL- und PostgREST-Postflight sowie einem Funktionstest mit garantiertem
-> Rollback nachgewiesen; der Production-Rollout ist vorbereitet und **noch nicht freigegeben**.
+> **Production-Release (2026-10-14/15): `0117`–`0123` — Anzeigenamen, Einkaufsfelder und
+> Eigenbelege, ADR-0122 und ADR-0123.** Alle sieben Migrationen sind **manuell im
+> Supabase-SQL-Editor auf Production ausgeführt**, jede einzeln, in Reihenfolge und in
+> `begin`/`commit` geklammert. Der read-only-Preflight war vorher vollständig bestanden
+> (**56 von 56** blockierenden Prüfungen), der read-only-Postflight danach ebenso:
+> **Schlusszeile 9999 mit `befund = 0` und `ok = true`**, 61 technische Prüfungen bestanden,
+> 14 informative Bestandswerte — und **sämtliche Bestandszahlen unverändert** gegenüber dem
+> Preflight: 603 Katalogzeilen, 88 Einkäufe, 2 142 Einkaufspositionen, 240 Lagerbewegungen,
+> 296 Lagerzeilen, 1 Bestellung, 1 Rechnung, 330 Verkäufe.
+>
+> **Commit, Push und Vercel-Deployment stehen noch aus.** Der Anwendungscode liegt
+> unkommittiert lokal; in Production läuft weiter der Stand von `c24926e`. Er ist mit dem
+> neuen Schema **signaturkompatibel** — geprüft wurde jeder RPC-Aufruf Argumentname für
+> Argumentname —, weil PostgREST über Namen auflöst und die neuen Parameter Standardwerte
+> tragen. Der erste Eigenbeleg `SI-E-2026-000001` wurde auf **Staging** ausgestellt und
+> abgerufen; auf Production kann noch keiner entstehen, weil keine ausgelieferte Oberfläche
+> die Ausstellfunktion aufruft.
+>
+> Offen: Datenschutzerklärung für Absenderdaten privater Verkäufer, Aufbewahrungsfristen und
+> die steuerliche Anerkennung der Belegform (`docs/LEGAL.md`); die drei Belegtabellen in den
+> beiden Exporten (`docs/SECURITY.md`); und die Sichtprüfung von Belegformat 2 bei 50 und 120
+> Figuren sowie einer mehrseitigen Kundenrechnung im PDF-Leser.
+>
+> **Abgeschlossener Block (2026-10-13): Einkaufsorderbuch — `0115`, `0116`, ADR-0121.** Auf
+> Staging angewendet, per SQL- und PostgREST-Postflight sowie einem Funktionstest mit
+> garantiertem Rollback nachgewiesen; **auf Production angewendet** und durch den Preflight zu
+> `0117`–`0123` bestätigt (Prüfungen 101–103: `purchase_market_value()`,
+> `orderbook_global_factor()` und `seller_swap_purchase_daily_index()` vorhanden).
 > Der Abschnitt weiter unten hält Umfang, Befunde und Umgebungsstand fest.
 >
 > **Vorheriger Block (2026-09-28): Benachrichtigung, Zahlungsart und Wartezeit — `0099`–`0102`.**
@@ -3022,7 +3047,7 @@ weiterhin lückenlos `1…n`, ohne Duplikat und ohne geparkten Negativwert. Die 
 `0112`/`0113` arbeiten auf echten Daten.
 
 
-## Das Einkaufsorderbuch als Gegenstück zum Verkauf (2026-10-13, `0115`, `0116`, ADR-0121) — auf Staging abgeschlossen, Production vorbereitet
+## Das Einkaufsorderbuch als Gegenstück zum Verkauf (2026-10-13, `0115`, `0116`, ADR-0121) — auf Staging und Production angewendet
 
 Der Einkauf war seit `0053` Datum, Betrag, Notiz, Figuren. Er hat jetzt, was der Verkauf seit
 ADR-0117/ADR-0120 hat: Kosten in ihren Teilen, Plattform und Verkäufer, Zahlungsweg, einen Platz

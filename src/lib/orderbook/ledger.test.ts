@@ -27,6 +27,12 @@ import {
 const LEDGER_SQL = code(latestFunction("seller_orderbook_ledger").body);
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 const COMPONENT = read("src/components/business/orderbook-ledger.tsx");
+/*
+ * Seit Schritt 1 des Positionstabellen-Umbaus wohnen `Status`, `ItemRow` und
+ * die sechs Spaltenköpfe in ihrer eigenen Datei. Die Zusicherungen unten sind
+ * unverändert — sie lesen nur dort, wo der Code jetzt steht.
+ */
+const ITEM_TABLE = read("src/components/business/purchase-item-table.tsx");
 const PAGE = read("src/app/(business)/business/orderbuch/page.tsx");
 const DETAIL = read("src/app/(business)/business/orderbuch/[id]/page.tsx");
 const CSS = read("src/app/globals.css");
@@ -403,8 +409,8 @@ describe("status: a tick is a claim, so it had better be the right one", () => {
   });
 
   it("every status carries its long form where a reader can reach it", () => {
-    expect(COMPONENT).toContain("aria-label={title}");
-    expect(COMPONENT).toContain("title={title}");
+    expect(ITEM_TABLE).toContain("aria-label={title}");
+    expect(ITEM_TABLE).toContain("title={title}");
   });
 
   it("presentation only — the redesign changes no database semantics", () => {
@@ -458,7 +464,7 @@ describe("Einchecken", () => {
     /* Der Zustand kommt aus der Antwort, nicht aus einer Annahme. */
     expect(COMPONENT).toContain("setItems((current) => ({ ...current, [purchaseId]: result.items! }))");
     /* Und „läuft …" ist alles, was die Zeile vor der Bestätigung behauptet. */
-    expect(COMPONENT).toContain("busy ? copy.itemRunning");
+    expect(ITEM_TABLE).toContain("busy ? copy.itemRunning");
     expect(COMPONENT).not.toMatch(/setItems[\s\S]{0,120}state:\s*["']booked["']/);
 
     /* Die Nachlese-Funktion selbst: eine RPC, dann der frische Einkauf. */
@@ -664,8 +670,14 @@ describe("the ledger renders as a table, not as stacked lines", () => {
     expect(PRIMITIVES).toContain('className="ob-item grid');
     expect(PRIMITIVES).toContain('<li className="ob-item bg-canvas text-sm">');
     expect(COMPONENT_CODE).not.toMatch(/className="ob-(row|item)/);
-    for (const primitive of ["LedgerTable", "LedgerHead", "LedgerRow", "LedgerItemRow"]) {
+    /* Auch die herausgezogene Tabelle schreibt keine eigene Zeilenklasse. */
+    expect(ITEM_TABLE).not.toMatch(/className="ob-(row|item)/);
+    for (const primitive of ["LedgerTable", "LedgerHead", "LedgerRow"]) {
       expect(COMPONENT, primitive).toContain(`<${primitive}`);
+    }
+    /* Kopfzeile und Zeile stehen jetzt beieinander — genau darum ging es. */
+    for (const primitive of ["LedgerItemHead", "LedgerItemRow"]) {
+      expect(ITEM_TABLE, primitive).toContain(`<${primitive}`);
     }
   });
 
@@ -851,17 +863,17 @@ describe("Serie comes from the catalog and nowhere else", () => {
   });
 
   it("the screen renders a dash for it, and never a game", () => {
-    expect(COMPONENT).toContain('{item.seriesLabel ?? "—"}');
+    expect(ITEM_TABLE).toContain('{item.seriesLabel ?? "—"}');
   });
 
   it("the column sits between # and Figur, in the header and the rows", () => {
-    const header = COMPONENT.slice(COMPONENT.indexOf('<span>#</span>'));
+    const header = ITEM_TABLE.slice(ITEM_TABLE.indexOf('<span>#</span>'));
     const seriesAt = header.indexOf("copy.itemColumns.series");
     const figureAt = header.indexOf("copy.itemColumns.figure");
     expect(seriesAt).toBeGreaterThan(-1);
     expect(seriesAt).toBeLessThan(figureAt);
 
-    const row = COMPONENT.slice(COMPONENT.indexOf("<LedgerItemRow>"));
+    const row = ITEM_TABLE.slice(ITEM_TABLE.indexOf("<LedgerItemRow>"));
     expect(row.indexOf("item.seriesLabel")).toBeLessThan(row.indexOf("{item.name}"));
   });
 

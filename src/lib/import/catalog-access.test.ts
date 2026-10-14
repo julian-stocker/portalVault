@@ -25,7 +25,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { code, latestFunction, migrationSource } from "@/test-support/migrations";
+import { code, latestFunction, migrationFiles, migrationSource } from "@/test-support/migrations";
 
 const SQL = migrationSource("0052_seller_import_catalog.sql");
 const QUERIES = readFileSync(join(process.cwd(), "src/lib/admin/import-queries.ts"), "utf8");
@@ -59,8 +59,17 @@ describe("the importer no longer reads the table through the public policy", () 
 describe("the function is scoped to the one screen that needs it", () => {
   const fn = latestFunction("seller_import_catalog");
 
-  it("is defined by 0052", () => {
-    expect(fn.file).toBe("0052_seller_import_catalog.sql");
+  it("is defined by 0117 — one definition, and we know which migration owns it", () => {
+    /*
+     * Was 0052 until 0117 widened the return type by three columns. The point
+     * of the assertion is unchanged: exactly one migration defines this
+     * function, so there is one place to read the contract.
+     */
+    expect(fn.file).toBe("0117_catalog_display_names_and_picker.sql");
+    expect(migrationFiles.filter((f) =>
+      migrationSource(f).includes("create or replace function public.seller_import_catalog(")))
+      .toEqual(["0052_seller_import_catalog.sql",
+                "0117_catalog_display_names_and_picker.sql"]);
   });
 
   it("asks the canonical seller predicate and refuses everyone else", () => {
@@ -94,16 +103,28 @@ describe("the function is scoped to the one screen that needs it", () => {
     }
   });
 
-  it("returns only what a match needs", () => {
-    expect(fn.body).toContain("sky_id      text");
-    expect(fn.body).toContain("name        text");
-    expect(fn.body).toContain("series_code text");
-    expect(fn.body).toContain("category    text");
-    // Nothing else off the catalog row.
-    for (const column of ["market_price", "image_file", "image_override_path", "slug", "display_name_override", "admin_note"]) {
+  it("returns what a match needs, plus what a picker needs to filter and label", () => {
+    /*
+     * The four the importer matches on, and the three 0117 added so the
+     * add-item list can offer exactly what the catalog offers and call it
+     * what the catalog calls it.
+     */
+    for (const column of ["sky_id", "name", "display_name", "series_code",
+                          "category", "catalog_visible", "is_active"]) {
+      expect(fn.body, column).toContain(column);
+    }
+    /*
+     * And still nothing else off the catalog row. `display_name_override` is
+     * no longer on this list and that is deliberate: it is the SOURCE of
+     * `display_name`, resolved here exactly as the public catalog resolves
+     * it. What must stay out is everything the importer and the picker have
+     * no business seeing.
+     */
+    for (const column of ["market_price", "image_file", "image_override_path",
+                          "slug", "admin_note"]) {
       expect(code(fn.body), column).not.toContain(column);
     }
-    expect(code(SQL)).not.toContain("catalog_editorial");
+    expect(code(fn.body)).not.toContain("catalog_editorial");
   });
 
   it("is granted to authenticated and revoked from anon", () => {
@@ -111,11 +132,38 @@ describe("the function is scoped to the one screen that needs it", () => {
     expect(SQL).toContain("grant execute on function public.seller_import_catalog() to authenticated;");
   });
 
-  it("can see rows the public catalog hides — that is the point", () => {
-    // No catalog_visible filter, and deliberately no is_active filter either:
-    // a retired figure holding stock is exactly what must reconcile.
-    expect(code(fn.body)).not.toContain("catalog_visible");
-    expect(code(fn.body)).not.toContain("is_active");
+  it("can still see rows the public catalog hides — that is the point", () => {
+    /*
+     * THE RULE 0117 SHARPENED RATHER THAN CHANGED.
+     *
+     * Before, this asserted the two flags were absent from the function
+     * altogether. They are now RETURNED — but they must never be FILTERED
+     * on: a retired or hidden figure holding stock is exactly what the
+     * workbook importer has to reconcile, and a workbook from 2024 knows
+     * nothing about today's editorial decisions.
+     *
+     * So the assertion is about the absence of a WHERE, which is the thing
+     * that would actually hide a row. The function has none at all.
+     */
+    expect(code(fn.body).toLowerCase()).not.toContain("where");
+    // And it hands both flags out, so the CALLER can decide. 0117's whole idea.
+    expect(fn.body).toContain("s.catalog_visible");
+    expect(fn.body).toContain("s.is_active");
+  });
+
+  it("and the add-item picker is the one that filters", () => {
+    /*
+     * The other half of the same rule, and the reason Eon's Elite offered
+     * three entries per figure: the picker showed every catalog row,
+     * including the hidden ones. It filters now — and `!== false` rather
+     * than `!x`, so an older function version that does not send the flags
+     * changes nothing.
+     */
+    const ORDERBOOK = readFileSync(
+      join(process.cwd(), "src/lib/orderbook/queries.ts"), "utf8");
+    expect(ORDERBOOK).toContain(
+      ".filter((r) => r.catalog_visible !== false && r.is_active !== false)");
+    expect(ORDERBOOK).toContain("rawName: raw");
   });
 });
 

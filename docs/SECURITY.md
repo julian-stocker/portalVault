@@ -1310,6 +1310,101 @@ sperrt `skyisles-platform-backup-*.zip` neben `skyisles-business-backup-*.json`,
 Test hält beide Regeln fest. Die Seite sagt es auch dem Menschen: nicht ins Repository, nicht
 nach Git oder GitHub, in keinen geteilten Ordner, in keinen fremd lesbaren Cloud-Speicher.
 
+### Absenderdaten und Eigenbelege (`0121`–`0123`, ADR-0122, ADR-0123)
+
+Mit diesem Release kommt eine **neue Art** personenbezogener Daten in die Datenbank. Bisher
+waren das Kundendaten — Menschen, die bei SkyIsles bestellt haben. Jetzt kommt der **private
+Verkäufer** dazu: der Absender eines Pakets, eine Privatperson, die mit SkyIsles nie zu tun
+hatte und die von der Speicherung nichts weiß.
+
+**Neun neue Spalten auf `purchases` (`0121`).** Alle optional, alle `nullable`, alle ohne
+Default — und keine davon ist irgendwo Pflichtfeld.
+
+| Spalte | Inhalt |
+|---|---|
+| `sender_name` | der Name auf der Sendung. **Nicht** `seller_name`: das ist ein Marktplatz-Benutzername und eine Zuordnungshilfe, keine Identität |
+| `sender_street`, `sender_postal_code`, `sender_city`, `sender_country` | die Anschrift des Absenders |
+| `listing_title`, `listing_url`, `listing_details` | das Inserat als Referenz, nie als Beleggrundlage |
+| `agreement_note` | die Kaufvereinbarung in Worten. **Nicht** `note` — das ist die interne Notiz und gehört auf keinen Beleg |
+
+Gespeichert wird roh, nach Regel 4: nicht normalisiert, nicht korrigiert, nie zum Gruppieren
+oder Zuordnen benutzt.
+
+**Drei neue Tabellen (`0122`).** `purchase_receipts` ist das ausgestellte Dokument,
+`purchase_receipt_counters` hält eine Zeile je Jahr für die lückenlose Nummer,
+`purchase_receipt_downloads` protokolliert bestätigte Auslieferungen. Im Beleg stehen **beide
+Seiten**: die `buyer_*`-Spalten tragen die eigenen Geschäftsdaten dieses Shops — der Käufer ist
+der Betrieb —, die `sender_*`-Spalten die Anschrift der Privatperson. Beide beim Ausstellen
+**kopiert**, nicht gejoint, damit eine spätere Änderung ein ausgestelltes Dokument nicht
+umschreibt.
+
+**Die Grenze, vierfach — und jede Schicht trägt alleine:**
+
+1. **RLS auf allen drei Tabellen eingeschaltet, mit *keiner* Policy.** Nach der Grundregel aus
+   Abschnitt 3 ist eine Tabelle ohne Policy für Clients vollständig gesperrt. Das ist hier der
+   Endzustand, nicht der Ausgangszustand.
+2. **`revoke all on table … from public, anon, authenticated`** auf allen drei. Es gibt kein
+   Tabellenrecht, über das jemand vorbeigehen könnte.
+3. **Jeder Zugriff nur über `security definer`-Funktionen mit `set search_path = ''`**, und
+   jede fragt als erste Anweisung `can_operate_active_seller()`. Vier sind aufrufbar und haben
+   `grant execute … to authenticated`: `seller_purchase_receipt`,
+   `seller_issue_purchase_receipt`, `seller_purchase_receipt_document`,
+   `seller_record_purchase_receipt_download`. `purchase_receipt_fingerprint` bekommt
+   **ausdrücklich kein `grant`** und ist nur aus den anderen erreichbar;
+   `purchase_receipt_is_immutable` ist ein Triggerkörper. Die Regel aus `0103` gilt also
+   weiter: kein Sammel-`grant`, jede Funktion einzeln daraufhin angesehen, ob sie ihren
+   Wächter selbst trägt.
+4. **Unveränderlichkeit per Riegel.** `purchase_receipts_immutable_trg` und
+   `purchase_receipt_downloads_immutable_trg` sind Zeilentrigger `before update or delete` und
+   werfen bedingungslos. Beide Tabellen sind damit **nur mit INSERT** zu beschreiben, und der
+   Lieferstatus ist keine Spalte, sondern die Frage, ob eine Protokollzeile existiert.
+
+**Was der Beleg nicht trägt.** Keine Umsatzsteuer, keinen Marktwert, keinen Ankauffaktor und
+keinen Buchungszustand der Positionen. Was nicht kopiert wird, kann nicht gedruckt werden — und
+der Ankauffaktor steht aus demselben Grund auf der Verbotsliste in Abschnitt 2.
+
+**404 statt 403, wie überall hier.** `seller_purchase_receipt_document` gibt für einen
+unbekannten Beleg `NULL` zurück; die Route macht daraus 404. Unbekannt und nicht-deins
+antworten gleich.
+
+**Die Grenze der Unveränderlichkeit, ehrlich benannt.** Der Trigger schützt gegen die
+Anwendung und gegen Versehen. Die Rolle, mit der der Supabase-SQL-Editor arbeitet, könnte ihn
+abschalten und die Rechte neu vergeben. Die Zusicherung lautet deshalb **„kann sich nicht
+STILL ändern"**, nicht „kann sich nicht ändern" — abgesichert durch einen Test, der Byte-Zahl
+und SHA-256 eines ausgestellten Belegs festhält.
+
+**Die beiden Exporte sichern diese Daten noch nicht vollständig.** Geprüft: weder
+`seller_business_backup()` (`0104`, 25 Bereiche) noch `system_platform_export()` (`0105`, 53
+Bereiche) kennt eine der drei Belegtabellen — **null Fundstellen**. Und beide geben `purchases`
+mit der Spaltenliste ihrer Entstehungszeit aus, in der die neun Spalten aus `0121` ebenso
+fehlen wie `platform`, `seller_name`, `items_cost`, `shipping_cost`,
+`buyer_protection_cost`, `payment_method` und `daily_index` aus `0115` und `factor` aus `0116`.
+
+Ein Wiederaufbau aus diesen Dateien verlöre also die Herkunft eines Privatankaufs und seine
+Kostenaufteilung. **Das ist vor dem ersten echten Eigenbeleg auf Production zu schließen** —
+ein Dokument mit zehnjähriger Aufbewahrungsfrist, das in keiner Sicherung steht, ist der
+schlechteste Zustand von beiden. Unabhängig davon bleibt `restore_supported = false` (ADR-0114):
+beide Dateien sind Exporte zur Einsichtnahme, keine Wiederherstellungspunkte.
+
+**Vor produktiver Nutzung zu klären — nicht technisch gelöst und hier nicht zugesichert:**
+
+- Die Datenschutzerklärung beschreibt Kunden und Bestellungen und erwähnt **Ankäufe,
+  Lieferanten oder Absender mit keinem Wort**. Rechtsgrundlage, Informationspflicht gegenüber
+  dem Absender und Löschfrist sind offen.
+- Die Aufbewahrungsfristen sind nirgends definiert.
+- Ob die Form des Eigenbelegs steuerlich anerkannt wird, ist nicht geprüft.
+
+Alle drei stehen als offene Punkte in `docs/LEGAL.md`, Abschnitt 9. **Solange sie offen sind,
+gehören keine echten Absenderdaten nach Production**; für Tests auf Staging ausschließlich
+fiktive personenbezogene Daten.
+
+**Konsequenz für das Repository.** Ein heruntergeladenes Eigenbeleg-PDF trägt Name und
+Anschrift einer Privatperson. Es gehört auf die eigene Platte des Betreibers — nicht ins
+Repository, nicht nach Git oder GitHub, in keinen geteilten Ordner und in keinen fremd lesbaren
+Cloud-Speicher. Dieselbe Regel wie für die beiden Sicherungsdateien, und aus demselben Grund.
+
+---
+
 ## 7. Datenschutz (DSGVO)
 
 Sobald Benutzerkonten existieren, werden personenbezogene Daten verarbeitet:

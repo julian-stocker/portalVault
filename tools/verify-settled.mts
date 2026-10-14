@@ -49,6 +49,17 @@ const serviceClient = () =>
 
 const RUN = Date.now().toString(36);
 
+/**
+ * Ein gültiger Kauftag: GESTERN.
+ *
+ * Seit `0120` verlangt `seller_create_purchase_with_items` ein Kaufdatum im
+ * Fenster `[2011-01-01, current_date]`. Hier stand `null`, und der Lauf wäre
+ * an seinem ersten Schritt abgebrochen. Gestern statt heute, weil die
+ * Obergrenze `current_date` der DATENBANK ist und ein Zeitzonenversatz sonst
+ * ein gültiges Datum in ein ungültiges verwandeln könnte.
+ */
+const PURCHASE_DATE = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+
 /** The five orders 0067 reopened, by the fingerprint both projects share. */
 const REOPENED = [
   "b12a36227a55a52afdb8411bba28e26232a2af733b192bfc367eec735052b49e",
@@ -149,7 +160,7 @@ async function main(): Promise<void> {
     const skyId = String(figure.data.sky_id);
 
     const made = await operator.client.rpc("seller_create_purchase_with_items", {
-      p_purchased_at: null,
+      p_purchased_at: PURCHASE_DATE,
       p_total_cost: 1,
       p_note: `verify:settled ${RUN}`,
       p_is_test: true,
@@ -157,7 +168,7 @@ async function main(): Promise<void> {
     });
     if (made.error) throw new Error(`create purchase: ${made.error.message}`);
     purchaseId = Number(made.data);
-    console.log(`  Testeinkauf #${purchaseId} (is_test), eine Figur ${skyId}`);
+    console.log(`  Testeinkauf #${purchaseId} (is_test), Kaufdatum ${PURCHASE_DATE}, eine Figur ${skyId}`);
 
     const added = await operator.client.rpc("seller_add_purchase_item", {
       p_purchase_id: purchaseId, p_sky_id: null,

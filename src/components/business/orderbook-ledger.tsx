@@ -35,22 +35,28 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { formatPrice } from "@/lib/format";
+import { fixedNumber, plainNumber } from "@/lib/format-number";
 import { de } from "@/lib/i18n/de";
 import {
   loadPurchaseItems, loadPurchaseDay, processBookPurchaseItem, processPurchaseItemState,
   type PurchaseItemResult,
 } from "@/lib/orderbook/actions";
 import {
-  canChangeEnding, creditsNoValue, endingsFor, type ItemState,
-} from "@/lib/orderbook/purchase";
-import {
-  canCheckIn, itemStatus, rowStatus,
-  type LedgerRow as LedgerRowData, type LedgerSummary, type RowStatus,
+  rowStatus,
+  type LedgerRow as LedgerRowData, type LedgerSummary,
 } from "@/lib/orderbook/ledger";
+import { type PurchasePlatform } from "@/lib/orderbook/purchase-template";
 import {
-  LedgerExpansion, LedgerHead, LedgerItemHead, LedgerItemRow, LedgerRow, LedgerTable,
+  LedgerExpansion, LedgerHead, LedgerRow, LedgerTable,
 } from "./ledger-table";
 import { PurchaseDetails } from "./purchase-details";
+/*
+ * Die Positionstabelle wohnt seit Schritt 1 des Umbaus in ihrer eigenen
+ * Datei — Kopfzeile und Zeile zusammen, damit sie sich über zwei Orte hinweg
+ * nicht auseinanderentwickeln. `Status` kommt von dort, weil `ItemRow` ihn
+ * braucht und diese Datei ihn für ihre eigene Zeile ebenfalls benutzt.
+ */
+import { ItemRow, PurchaseItemHead, Status } from "./purchase-item-table";
 import { RowMarks } from "./orderbook-nav";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
 
@@ -84,7 +90,7 @@ const copy = de.business.orderbook;
  * Die sechs übrigen Spuren sind Zeichen für Zeichen die des Fallbacks.
  */
 const PURCHASE_COLUMNS =
-  "7.75rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 7.5rem 1.5rem";
+  "7.75rem 6.5rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 7.5rem 1.5rem";
 /*
  * Und die Positionszeile: die Aktionsspur trägt jetzt [Einbuchen] UND [+].
  * 6,5rem reichten für einen Knopf; zwei brauchen 7,5rem, sonst rutscht das
@@ -92,10 +98,26 @@ const PURCHASE_COLUMNS =
  */
 const PURCHASE_ITEM_COLUMNS =
   "2.5rem 9.5rem minmax(0, 1fr) 6rem 6rem 7.5rem";
-const PURCHASE_MIN_WIDTH = "50rem";
+/*
+ * DER BODEN, NEU GERECHNET FÜR DIE ACHTE SPUR (0118).
+ *
+ * Acht Spuren summieren 43,75rem, sieben Lücken à 0,75rem sind 5,25rem,
+ * dazu 0,75rem Zeilenrand je Seite: 50,5rem Bedarf. Der alte Boden lag
+ * 6,75rem über seinem Bedarf von 43,25rem, und dieser Spielraum ist nicht
+ * Zierde — er geht an die `minmax(0, 1fr)`-Spur der AUFGEKLAPPTEN
+ * Positionszeile, also an den Figurennamen. Derselbe Spielraum, derselbe
+ * Zweck: 50,5 + 6,75 = 57,25rem.
+ *
+ * 57,25rem sind 916px und damit weiter breiter als jedes Telefon, auf dem
+ * dieses Buch laufen muss — das ist die Entscheidung, die
+ * `mobile-layout.test.ts` als Zusicherung festhält: die Tabelle passt nicht
+ * auf ein Telefon und soll es nicht, sie behält ihre Spalten und der Kasten
+ * scrollt darunter.
+ */
+const PURCHASE_MIN_WIDTH = "57.25rem";
 
 const formatFactor = (factor: number | null): string =>
-  factor === null ? "—" : factor.toLocaleString("de-AT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  factor === null ? "—" : fixedNumber(factor, 2);
 
 /*
  * A purchase with no date says so, in words.
@@ -104,37 +126,23 @@ const formatFactor = (factor: number | null): string =>
  * is 01.01.1970, `new Date(undefined)` is `Invalid Date`, and an empty cell in
  * a tabular row reads as a rendering bug rather than as missing information.
  */
+/**
+ * Der Plattformname, oder das Wort für „nicht erfasst" (0118).
+ *
+ * Eine Stelle, die `platformNames` und `platformUnknown` zusammenbringt —
+ * dieselben zwei Wörter, die das Detailfenster benutzt. Ein unbekannter
+ * Wert fällt auf sich selbst zurück statt zu verschwinden: stünde eines
+ * Tages `ebay_kleinanzeigen` in der Spalte, soll man es SEHEN.
+ */
+const platformLabel = (platform: string | null): string =>
+  platform === null
+    ? copy.detailsModal.platformUnknown
+    : copy.detailsModal.platformNames[platform as PurchasePlatform] ?? platform;
+
 const formatDate = (iso: string | null): string =>
   iso === null
     ? copy.undated
     : new Date(iso).toLocaleDateString("de-AT", { day: "2-digit", month: "2-digit", year: "numeric" });
-
-/**
- * The status cell — and the ✓ is a claim now, not a decoration.
- *
- * ONE RULE: the tick appears if and only if a stock movement exists. A
- * historical row says `Historisch` in words and carries no tick at all,
- * because a ✓ in a column about inventory reads as "this is on the shelf
- * because I put it there" — which is false for 2 103 of the 2 114 imported
- * items and, since 0067, unanswered for the other eleven.
- *
- * `text` is what the cell shows, `title` the longer form behind it. They
- * differ only where the short form would not fit the track: a partly booked
- * purchase shows `3 von 14` and says `Teilweise eingebucht` on hover.
- */
-function Status({ status, text, title }: {
-  status: RowStatus; text: string; title: string;
-}) {
-  return (
-    <span
-      className={"truncate text-xs " + (status === "complete" ? "text-fg" : "text-muted")}
-      title={title}
-      aria-label={title}
-    >
-      {text}
-    </span>
-  );
-}
 
 /** Ausgaben · Marktwert · Faktor for a whole filtered set. */
 function Summary({ summary }: { summary: LedgerSummary }) {
@@ -148,7 +156,7 @@ function Summary({ summary }: { summary: LedgerSummary }) {
   return (
     <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
       {[
-        { key: "count", label: copy.summary.count, value: summary.purchaseCount.toLocaleString("de-AT"),
+        { key: "count", label: copy.summary.count, value: plainNumber(summary.purchaseCount),
           hint: copy.summary.countHint(summary.itemCount), mark: null },
         { key: "expenses", label: copy.summary.expenses, value: formatPrice(summary.totalCost),
           hint: null, mark: null },
@@ -165,127 +173,6 @@ function Summary({ summary }: { summary: LedgerSummary }) {
         </div>
       ))}
     </dl>
-  );
-}
-
-/**
- * One physical item, one line.
- *
- * `.ob-item` is the same five-track grid the expanded header uses, and the
- * `Aktion` track exists whether or not a button is in it — so a historical row
- * and a bookable one line up instead of the columns shifting under each other.
- */
-function ItemRow({ item, onBook, onState, busy, failure }: {
-  item: PurchaseItem;
-  /** Einbuchen — die eine Aktion, die Bestand erzeugt. */
-  onBook: () => void;
-  /** Die drei Enden aus dem Plus-Menü: beschädigt, fehlt, Vitrine. */
-  onState: (state: string) => void;
-  /** Diese Position läuft gerade. Keine Behauptung über das Ergebnis. */
-  busy: boolean;
-  /** Abgelehnt, mit dem Satz der Datenbank — je Position, nicht je Tabelle. */
-  failure: string | null;
-}) {
-  const [open, setOpen] = useState(false);
-  /*
-   * Asked of the movement, not of the state — `itemStatus` explains why.
-   * An open unit prints its own state (`Bestellt`, `Angekommen`,
-   * `Beschädigt`, `Fehlt`), which says more than "not booked" and is the
-   * vocabulary of the buttons that move it on.
-   */
-  const status = itemStatus(item);
-  const text = status === "historical" ? copy.historicalLabel
-    : status === "complete" ? copy.completeCell
-    : copy.states[item.state as keyof typeof copy.states] ?? item.state;
-  const title = status === "historical" ? copy.historicalHint
-    : status === "complete" ? copy.completeLabel
-    : status === "settled" ? copy.settleHint
-    : text;
-
-  return (
-    <LedgerItemRow>
-      <span className="tabular-nums text-xs text-muted">{item.position}</span>
-      {/*
-        Serie, from the canonical catalog. It replaced `· Excel: DRobot`, which
-        spent the width on how the owner once typed a name and still left
-        `Drobot` ambiguous between two games. The raw text stays in the
-        database and stays on the correction screen, where it is the evidence
-        being corrected — here it was only noise.
-
-        A dash for a non-figure: a portal has no Skylanders series and
-        inventing one would be worse than an empty cell.
-      */}
-      <span className="truncate text-xs text-muted">{item.seriesLabel ?? "—"}</span>
-      {/* `truncate` is a last resort, not a strategy — the floor above is
-          sized so it rarely fires. When it does, the full name is still
-          reachable rather than gone. */}
-      <span className="truncate" title={item.name}>{item.name}</span>
-      <span className="text-right tabular-nums">
-        {item.marketPrice === null ? "—" : formatPrice(item.marketPrice)}
-      </span>
-      {/*
-        DIESELBE ANTWORT WIE AUF DER DETAILSEITE — und bei einer Ablehnung
-        steht hier die Ablehnung, nicht der alte Status. Sonst sähe eine
-        abgelehnte Position aus wie eine, bei der nichts passiert ist.
-      */}
-      <span className={`truncate text-center text-xs ${
-        failure !== null ? "text-danger" : ""}`}
-            title={failure ?? title}>
-        {failure !== null ? failure
-          : busy ? copy.itemRunning
-            : <Status status={status} text={text} title={title} />}
-      </span>
-      <span className="flex items-center justify-end gap-1 text-right">
-        {canCheckIn(item) ? (
-          <button type="button" disabled={busy} onClick={onBook}
-                  className="min-h-9 rounded-sky-md px-2 text-xs ring-1 ring-border/70 disabled:opacity-50">
-            {copy.book}
-          </button>
-        ) : null}
-        {/*
-          DAS PLUS-MENÜ — die Enden, die kein Bestand sind.
-
-          Nur wo es etwas zu entscheiden gibt: `canChangeEnding` ist für jede
-          KATALOGFIGUR wahr, die weder im Lager liegt noch eine
-          Arbeitsmappenzeile ist. Für ein Portal, eine gebuchte oder eine
-          historische Position bleibt es aus — dort würde jeder Punkt in eine
-          Ablehnung führen, die der Bildschirm schon kennt.
-
-          WAS DARIN STEHT, ENTSCHEIDET `endingsFor` UND NICHT DIESE DATEI.
-          Eine offene Position bekommt die drei Enden; eine beschädigte oder
-          fehlende bekommt NUR „Angekommen" — den einen bewussten Weg zurück.
-          Kein Punkt „Vitrine" für sie, denn aus der Vitrine darf eingebucht
-          werden, und das wäre der zweite Weg einer beschädigten Figur in den
-          Verkaufsbestand (D4).
-
-          Ein `details`-Element und kein eigener Zustandsautomat: das Auf- und
-          Zuklappen ist Browsersache, und ein Klick darauf darf die Zeile
-          nicht aufklappen — deshalb `stopPropagation` und `relative z-20`
-          gegen die durchsichtige Zeilen-Überlagerung, dieselbe Lehre wie beim
-          (i) im Verkaufsbuch.
-        */}
-        {canChangeEnding(item as { state: ItemState; skyId: string | null }) ? (
-          <details open={open} className="relative z-20"
-                   onToggle={(e) => setOpen((e.currentTarget as HTMLDetailsElement).open)}>
-            <summary onClick={(e) => e.stopPropagation()}
-                     aria-label={creditsNoValue(item.state as ItemState)
-                       ? copy.correctEnding : copy.moreEndings}
-                     className="flex size-9 cursor-pointer items-center justify-center rounded-sky-md text-xs text-muted ring-1 ring-border/70 marker:hidden hover:text-fg hover:ring-fg/30 [&::-webkit-details-marker]:hidden">
-              <span aria-hidden="true">+</span>
-            </summary>
-            <div className="absolute right-0 z-30 mt-1 flex w-40 flex-col gap-1 rounded-sky-md bg-surface p-1 ring-1 ring-border/70 shadow-elevation-raised">
-              {endingsFor(item.state as ItemState).map((state) => (
-                <button key={state} type="button" disabled={busy}
-                        onClick={(e) => { e.stopPropagation(); setOpen(false); onState(state); }}
-                        className="min-h-9 rounded-sky-sm px-2 text-left text-xs hover:bg-surface-raised disabled:opacity-50">
-                  {copy.states[state as keyof typeof copy.states]}
-                </button>
-              ))}
-            </div>
-          </details>
-        ) : null}
-      </span>
-    </LedgerItemRow>
   );
 }
 
@@ -395,6 +282,13 @@ export function OrderbookLedger({
    */
   const onDetails = (id: number) => {
     setShowing(id);
+    /*
+     * Die Positionen für den Abschnitt „Gekaufte Figuren" — über denselben
+     * Weg, den der Aufklappbereich benutzt. War die Zeile schon offen, liegen
+     * sie bereits da und das Fenster öffnet ohne eine Runde zum Server;
+     * `load` ist gegen den doppelten Aufruf gesichert (`loading.current`).
+     */
+    if (items[id] === undefined) load(id);
     if (dayOrder[id] === undefined) {
       void loadPurchaseDay(id).then((rows) => {
         if (rows !== null) setDayOrder((current) => ({ ...current, [id]: rows }));
@@ -517,6 +411,7 @@ export function OrderbookLedger({
                    minWidth={PURCHASE_MIN_WIDTH}>
         <LedgerHead>
           <span>{copy.columns.date}</span>
+          <span>{copy.columns.platform}</span>
           <span className="text-right">{copy.columns.items}</span>
           <span className="text-right">{copy.columns.expenses}</span>
           <span className="text-right">{copy.columns.marketValue}</span>
@@ -593,6 +488,22 @@ export function OrderbookLedger({
                                 isOpen={purchase.isOpen} />
                     </span>
                   </span>
+                  {/*
+                    DIE PLATTFORMZELLE (0118).
+
+                    `truncate`, weil „Manuell / Sonstige" in 6,5rem nicht
+                    passt und ein Umbruch die Zeilenhöhe der ganzen Tabelle
+                    ändern würde; der vollständige Name steht im `title`.
+
+                    NULL heißt „nicht erfasst" und wird als Wort gesagt, nicht
+                    als leere Zelle: eine leere Zelle in einer tabellarischen
+                    Zeile liest sich wie ein Darstellungsfehler. Dasselbe
+                    Argument, das `formatDate` für ein fehlendes Datum macht.
+                  */}
+                  <span className={`min-w-0 truncate ${purchase.platform === null ? "text-muted" : ""}`}
+                        title={platformLabel(purchase.platform)}>
+                    {platformLabel(purchase.platform)}
+                  </span>
                   <span className="text-right tabular-nums text-muted">{purchase.itemCount}</span>
                   <span className="text-right tabular-nums">{formatPrice(purchase.totalCost)}</span>
                   <span className="text-right tabular-nums text-muted">
@@ -618,14 +529,7 @@ export function OrderbookLedger({
 
                 {expanded ? (
                   <LedgerExpansion id={`purchase-${purchase.id}`}>
-                    <LedgerItemHead>
-                      <span>#</span>
-                      <span>{copy.itemColumns.series}</span>
-                      <span>{copy.itemColumns.figure}</span>
-                      <span className="text-right">{copy.columns.marketValue}</span>
-                      <span className="text-center">{copy.itemColumns.status}</span>
-                      <span className="text-right">{copy.itemColumns.action}</span>
-                    </LedgerItemHead>
+                    <PurchaseItemHead />
 
                     {loaded === undefined ? (
                       <p className="px-3 py-2 text-xs text-muted">{copy.loadingItems}</p>
@@ -666,6 +570,19 @@ export function OrderbookLedger({
       {showingRow ? (
         <PurchaseDetails key={showingRow.id} purchase={showingRow}
                          dayOrder={dayOrder[showingRow.id] ?? []}
+                         items={items[showingRow.id]}
+                         /*
+                          * Dieselbe Maschinerie, die der Aufklappbereich
+                          * benutzt: Sperre je Position, `busy`, die Ablehnung
+                          * je Zeile, die frische Liste aus der Antwort — und
+                          * `router.refresh()`, sobald die letzte Aktion fertig
+                          * ist, das Marktwert und Faktor der Zeile neu holt.
+                          * Das Fenster bleibt dabei offen, weil `key` sich
+                          * nicht ändert.
+                          */
+                         onItemAction={(key, run) => act(showingRow.id, key, run)}
+                         busy={busy}
+                         failed={failed}
                          open onClose={() => setShowing(null)}
                          onSaved={() => {
                            /* Die Zeile gehört der Liste: Kosten, Faktor und

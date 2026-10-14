@@ -29,7 +29,23 @@
 /** One catalog row, as the screens receive it from `fetchOrderbookCatalog`. */
 export type FigureChoice = {
   skyId: string;
+  /**
+   * Was auf dem Schirm steht: der redaktionelle Anzeigename, sonst der
+   * Rohname (0117). Dieselbe Auflösung wie im öffentlichen Katalog seit
+   * `0004` — `display_name_override ?? name`.
+   */
   name: string;
+  /**
+   * Der ROHNAME aus dem Katalog, falls er sich vom Anzeigenamen
+   * unterscheidet (0117).
+   *
+   * Zwei Gründe, ihn mitzuführen. Erstens die Suche: wer „ohne OVP" tippt —
+   * weil er den Namen aus der Arbeitsmappe oder von einem früheren
+   * Bildschirm kennt — soll die Zeile trotzdem finden. Zweitens das
+   * Schreiben: `seller_add_purchase_item` legt ihn als `raw_name` ab, und
+   * das muss der Rohname bleiben und nicht die heutige Darstellung.
+   */
+  rawName?: string;
   /** The canonical `series_code`: `SA`, `G`, `SF`, `TT`, `SC`, `I`. */
   series: string;
   /** `null` is "no price known" and is never treated as zero. */
@@ -58,6 +74,13 @@ const NAME_PREFIX = 1;
 const WORD_PREFIX = 2;
 const NAME_CONTAINS = 3;
 const ID_MATCH = 4;
+/*
+ * Der Rohname trifft zuletzt (0117). Er ist eine Hilfe für den, der den
+ * alten Namen im Kopf hat, und soll den Anzeigenamen nie verdrängen: wer
+ * „Elite Spyro" tippt, will die Zeile oben, nicht eine andere, deren
+ * ROHname zufällig besser passt.
+ */
+const RAW_NAME_MATCH = 5;
 
 function normalise(text: string): string {
   return text.trim().toLowerCase();
@@ -81,6 +104,9 @@ export function rankFigure(choice: FigureChoice, query: string): number | null {
   if (name.split(/\s+/).some((word) => word.startsWith(q))) return WORD_PREFIX;
   if (name.includes(q)) return NAME_CONTAINS;
   if (normalise(choice.skyId).includes(q)) return ID_MATCH;
+  // Erst jetzt der Rohname, und nur wenn er ein anderer ist.
+  if (choice.rawName !== undefined && choice.rawName !== choice.name
+      && normalise(choice.rawName).includes(q)) return RAW_NAME_MATCH;
   return null;
 }
 

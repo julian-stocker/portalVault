@@ -146,6 +146,16 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
   page.rule(6);
 
   for (const line of invoice.lines) {
+    /*
+     * EINE POSITION IST EIN BLOCK. Die Bezeichnung, die drei Beträge und die
+     * SKY-ID darunter gehören zusammen; getrennt stünde auf einer Seite ein
+     * Preis ohne Artikel und auf der nächsten eine Nummer ohne alles.
+     *
+     * 15 + 10 sind genau die beiden `dy` der nächsten vier Zeilen — die
+     * Reservierung ist aus demselben Material gerechnet wie das Layout und
+     * nicht geschätzt. Passt sie, tut `reserve` nichts.
+     */
+    page.reserve(15 + 10);
     page.gap(15);
     // § 34a Nr. 4: quantity and the usual commercial description. The SKY-ID
     // is the shop's own reference and rides along on a second, quieter line.
@@ -155,6 +165,15 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
     page.textRight(EUR(line.line_total), totalRight, { size: 9.5 });
     page.text(line.sky_id, { size: 7.5, dy: 10 });
   }
+
+  /*
+   * DIE SUMMENSTAFFEL IST EIN BLOCK. Ein Gesamtbetrag allein am Kopf einer
+   * Folgeseite, ohne die Zwischensumme darüber, wäre ein Beleg, den man
+   * nachrechnen muss, um ihn zu lesen. 14 + 15 + 14 (+ 14) + 10 + 17 sind
+   * die `dy` der Zeilen bis einschliesslich „Gesamtbetrag".
+   */
+  const hasDiscount = Number(invoice.discount_amount) > 0;
+  page.reserve(14 + 15 + 14 + (hasDiscount ? 14 : 0) + 10 + 17);
 
   page.rule(14);
   page.gap(15);
@@ -167,7 +186,7 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
   });
   page.textRight(EUR(invoice.shipping_amount), totalRight, { size: 9.5 });
 
-  if (Number(invoice.discount_amount) > 0) {
+  if (hasDiscount) {
     page.gap(14);
     page.text("Rabatt", { size: 9.5 });
     page.textRight(`- ${EUR(invoice.discount_amount)}`, totalRight, { size: 9.5 });
@@ -179,8 +198,16 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
   page.text("Gesamtbetrag", { size: 11, font: "bold" });
   page.textRight(EUR(invoice.total_amount), totalRight, { size: 11, font: "bold" });
 
+  /*
+   * DER § 19-SATZ UND DIE ZAHLUNGSZEILE BLEIBEN BEISAMMEN. § 34a UStDV Nr. 5
+   * verlangt den Hinweis bei der Summe; eine Seite dazwischen ist kein
+   * Fehler im PDF, aber einer im Beleg.
+   */
+  const notes = wrap(SMALL_BUSINESS_NOTE, 92);
+  page.reserve(26 + 12 * notes.length + 6 + 12);
+
   page.gap(26);
-  for (const sentence of wrap(SMALL_BUSINESS_NOTE, 92)) {
+  for (const sentence of notes) {
     page.text(sentence, { size: 9 });
     page.gap(12);
   }
@@ -189,6 +216,15 @@ export function renderInvoicePdf(invoice: InvoiceDocument): Uint8Array {
   page.text("Der Rechnungsbetrag ist bezahlt. Diese Rechnung dient als Beleg.", { size: 9 });
 
   // ---- footer: who issued it ----------------------------------------------
+  /*
+   * DER AUSSTELLERFUSS IST EIN BLOCK — und der Grund, warum es diese Technik
+   * überhaupt gibt: ab zwölf Positionen stand er bisher unter dem unteren
+   * Rand und ab fünfzehn gar nicht mehr auf dem Blatt. 34 + 14 für Abstand
+   * und Linie, dann 11 je Folgezeile.
+   */
+  const footerLines = 1 + (seller.trade_name ? 1 : 0) + 1 + 1 + (seller.vat_id ? 1 : 0);
+  page.reserve(34 + 14 + 11 * (footerLines - 1));
+
   page.gap(34);
   page.rule(0);
   page.gap(14);

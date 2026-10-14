@@ -10636,3 +10636,197 @@ Beschädigte Figuren extern weiterverkaufen — ausdrücklich außerhalb des Umf
 in den SkyIsles-Verkaufsbestand zurückgeführt, und ein zweiter Verkaufsweg für sie wäre ein
 eigenes Thema mit eigener Buchhaltung. Ein automatischer Weg von `damaged` nach `booked`. Ein
 `default` auf einer der sieben neuen Spalten.
+
+
+## ADR-0122 — Der Eigenbeleg ist ein eingefrorenes Dokument mit versioniertem Format
+
+**Status:** angenommen · 2026-10-14 · Migrationen `0121`, `0122`, `0123`
+
+### Kontext
+
+Rund 99 % der Einkäufe kommen von Privatpersonen über Kleinanzeigen, Willhaben
+oder eBay. Eine Privatperson stellt keine Rechnung aus. Für die EÜR
+dokumentiert der Käufer den Vorgang deshalb selbst — mit einem Eigenbeleg.
+
+Das stellt drei Fragen, die zusammenhängen: woher die Daten kommen, wie das
+Dokument unveränderlich wird, und wie man weiß, dass es wirklich geliefert
+wurde.
+
+### Entscheidung
+
+**1. Erfasst wird am Einkauf, nicht in einer neuen Tabelle.** `0121` ergänzt
+`purchases` um neun optionale Spalten: Absendername und -anschrift,
+Inseratstitel, -URL und -details, und den Kommentar zur Kaufvereinbarung.
+`platform` und `external_ref` (die Inserats-ID) gibt es seit `0115` und
+bleiben. **`sender_name` ist nicht `seller_name`** — das eine ist der Name auf
+dem Paket, das andere ein Marktplatz-Benutzername und eine Zuordnungshilfe.
+
+**2. Der Beleg ist ein eingefrorener Snapshot.** `0122` legt
+`purchase_receipts` an. Käufer, Verkäufer, Herkunft, Beträge und die
+Positionsliste werden beim Ausstellen **kopiert**, nicht gejoint — derselbe
+Grund wie bei `invoices` seit `0047`: ein Dokument, das aus Livedaten neu
+entsteht, ist kein Dokument. Ein geänderter Katalogname darf einen
+ausgestellten Beleg nicht umschreiben.
+
+Unveränderlichkeit ist dreifach gesichert: Tabellenrechte entzogen, RLS an,
+und ein Trigger, der UPDATE und DELETE ablehnt. Der Lieferstatus liegt in
+einer **zweiten** Tabelle (`purchase_receipt_downloads`), damit die
+Belegtabelle wirklich nur INSERT kennt.
+
+**3. Die Nummer kommt aus einem Zähler, nicht aus einer Sequenz.** Sequenzen
+sind nicht transaktional; ein Rollback ließe eine Lücke. Für einen selbst
+ausgestellten Beleg wäre das erklärungsbedürftig.
+`purchase_receipt_counters` ist eine Zeile je Jahr, unter Zeilensperre
+hochgezählt — lückenlos, und bei einem Abbruch unverbraucht. Format
+`SI-E-JJJJ-NNNNNN`.
+
+**4. Keine Datei, kein Bucket.** Das PDF entsteht bei jedem Download neu aus
+dem Snapshot. Es gibt deshalb nichts, was in einem Ablageeimer liegen bleiben
+könnte — und der einzige Eimer dieses Projekts ist seit `0007` öffentlich.
+Die Route liegt unter `(business)` und prüft `canOperateSeller()` selbst; ein
+Route Handler geht nicht durch das Layout. Antwort bei fehlender Berechtigung
+ist **404**, wie überall (ADR-0077).
+
+**5. Geliefert heißt bestätigt.** HTTP kennt keine Empfangsbestätigung. Ein
+Handler, der beim Beginn des Schreibens „geliefert" vermerkt, behauptet einen
+Erfolg, den er nicht kennt. Also beweist der Browser den Empfang: er bildet
+den SHA-256 über die empfangenen Bytes, der Server rendert aus demselben
+Snapshot neu und vergleicht. Nur bei Übereinstimmung entsteht eine
+Protokollzeile. **Das belegt, dass die vollständigen Bytes im Browser waren —
+nicht, dass das Betriebssystem die Datei behalten hat**, und die Oberfläche
+behauptet auch nicht mehr.
+
+**6. Nur Kaufrelevantes.** Der Buchungszustand einer Position (`state`) steht
+weder auf dem Beleg noch im Fingerabdruck. Er ist der Lagerweg einer Figur,
+nicht Teil des Ankaufs; ein eingefrorenes Dokument darf keinen veränderlichen
+Zustand ausweisen, und sonst löste jedes Einbuchen nach der Ausstellung eine
+Änderungswarnung aus. Marktwerte, Faktoren und Einzelpreise je Figur werden
+gar nicht erst kopiert — was nicht im Snapshot steht, kann nicht gedruckt
+werden.
+
+**7. Die Änderungswarnung hängt an einem Fingerabdruck, nicht an
+`updated_at`.** `purchase_receipt_fingerprint()` hasht genau die Felder, die
+der Beleg zeigt. `updated_at` bewegt sich auch, wenn jemand die interne Notiz
+anfasst oder den Tagesplatz tauscht. Dieselbe Funktion bildet den
+gespeicherten und den aktuellen Wert, damit beide vergleichbar bleiben.
+
+**8. Das Belegformat ist versioniert (`0123`).** Weil das PDF bei jedem
+Download neu entsteht, würde eine Änderung am Renderer **jeden bereits
+ausgestellten Beleg** mit ändern. Jeder Beleg trägt deshalb
+`format_version`, und zu jeder Nummer gibt es einen Zeichner, der danach
+nicht mehr angefasst wird: `receipt-format-v1.ts` (eingefroren),
+`receipt-format-v2.ts` (kompakt, für Ankäufe mit 50–100+ Figuren). Die
+Zeichner tragen ihre Beschriftungen als Literale und hängen nicht an `de.ts`.
+
+### Konsequenzen
+
+Ein ausgestellter Beleg lässt sich nicht ändern — eine Korrektur wäre eine
+neue Zeile mit `supersedes_id`. Die Struktur dafür steht (zusammengesetzter
+Fremdschlüssel auf denselben Einkauf, Teilindizes gegen Gabelungen), **die
+Funktion dafür nicht**; es gibt heute keinen Korrekturworkflow.
+
+Die Formatzeichner teilen sich `PdfPage` mit der Kundenrechnung. Eine
+Änderung dort kann ein altes Dokument sehr wohl verschieben. Verhindern
+ließe sich das nur durch dreifaches Kopieren der Engine; aufgedeckt wird es
+durch einen Test, der Byte-Zahl und SHA-256 des echten Belegs
+`SI-E-2026-000001` festhält. **Die Zusicherung lautet nicht „kann sich nicht
+ändern", sondern „kann sich nicht still ändern".**
+
+Offen und ausdrücklich nicht zugesichert: die steuerliche Anerkennung der
+Form, die Datenschutzerklärung für Absenderdaten privater Verkäufer und die
+Aufbewahrungsfristen — siehe `docs/LEGAL.md`.
+
+---
+
+## ADR-0123 — Die Kundenrechnung wird nicht versioniert, sondern festgenagelt
+
+**Status:** angenommen · 2026-10-14 · keine Migration
+
+### Kontext
+
+Eine Rechnung wird in SkyIsles **nicht als Datei gespeichert**. Sie entsteht bei
+jedem Download neu aus der unveränderlichen Zeile in `public.invoices` —
+`renderInvoicePdf()` liest den Datensatz und setzt das Blatt. Geprüft, nicht
+vermutet: im Rechnungspfad (`src/lib/legal/invoice.ts`, `invoice-pdf.ts`,
+`/rechnung/[orderNumber]/pdf/route.ts`) gibt es keinen Storage-Aufruf, keinen
+signierten Link und kein `upload`, und `public.invoices` hat keine Spalte, die
+Bytes halten könnte. Die maßgebliche Aufzeichnung ist die Zeile; das PDF ist
+ihre Darstellung (ADR-0086).
+
+Das ist die richtige Bauform — es gibt keine Datei, die in einem Ablageeimer
+liegen bleiben kann, und der einzige Eimer dieses Projekts ist öffentlich. Es
+hat aber eine Folge, die bei der Mehrseitigkeit sichtbar wurde: **wer den
+Renderer ändert, ändert jede bereits ausgestellte Rechnung mit.**
+
+Die Mehrseitigkeit war genau so eine Änderung. Drei Unterschiede entstanden:
+
+- **`/Length`** war mit `TextEncoder` gemessen, die Datei wird aber Latin-1
+  geschrieben. Jedes Zeichen über U+007F zählte doppelt; eine Rechnung mit
+  „Füssen" deklarierte sechs Bytes zu viel. Rein strukturell, kein Pixel.
+- **Zwei Glyphen** wurden vorher durch `?` ersetzt: der Mittelpunkt (U+00B7) in
+  der Absenderzeile und die Ellipse (U+2026) in gekürzten Artikelnamen. **Das
+  ist die einzige sichtbare Änderung** an bestehenden Rechnungen.
+- **Der Seitenumbruch.** Ab etwa elf Positionen lief die alte Engine aus dem
+  Blatt. Bei zwanzig Positionen lag die tiefste Grundlinie bei y = −136,11 —
+  unter dem Papier: Gesamtbetrag, § 19-Satz und Ausstellerfuss **standen nicht
+  im PDF**. Das sind Pflichtangaben nach § 34a UStDV Nr. 4 und 5.
+
+Beim Eigenbeleg wurde dieselbe Lage mit einer Formatversion je Dokument gelöst
+(ADR-0122). Die naheliegende Frage war, ob die Rechnung das auch braucht.
+
+Die lesende Zählung auf Production beantwortet sie: **eine** Rechnung,
+höchstens **zwei** Positionen, **keine** mit elf oder mehr, ausgestellt
+2026-09-25. Der Umbruchfehler hat also kein ausgestelltes Dokument getroffen.
+Betroffen ist einzig die Absenderzeile dieser einen Rechnung, die künftig `·`
+statt `?` zeigt.
+
+### Entscheidung
+
+**Keine Versionierung der Rechnung. Stattdessen wird die Darstellung
+festgenagelt** — `src/lib/legal/invoice-format-stability.test.ts`.
+
+**1. Warum nicht versionieren.** Eine eingefrorene Fassung 1 würde den
+**Defekt** festschreiben: Rechnungen vor dem Schnitt behielten dauerhaft einen
+Renderer, dem ab elf Positionen Pflichtangaben fehlen. „Unverändert" ist dort
+die schlechtere Lage, nicht die sichere. Dazu käme eine Spalte, zwei
+Renderer-Dateien und eine Migration für ein Dokument, dessen einziger
+bestehender Fall zwei Positionen hat.
+
+**2. Die Korrektur bleibt.** `·` und `…` sind richtig, `?` war falsch. Eine
+nachträglich korrekt gesetzte Absenderzeile ändert keine Pflichtangabe, keinen
+Betrag und keine Nummer; § 34a UStDV nennt den Mittelpunkt zwischen Name und
+Anschrift nicht.
+
+**3. Ab jetzt ist jede weitere Änderung eine bewusste.** Byte-Zahl und SHA-256
+der Rechnung mit 1, 5 und 11 Positionen sind in Konstanten festgehalten
+(3198/4398/6258 Bytes), ebenso der zweiseitige Fall mit 20 Positionen (9365
+Bytes). Dieselbe Technik wie beim echten Beleg `SI-E-2026-000001`. Bewegt sich
+ein Byte — im Renderer, in einer Beschriftung oder in `PdfPage`, das die
+Rechnung sich mit den Eigenbelegen teilt —, schlägt der Test an.
+
+**4. Daneben stehen Zusicherungen, die kein Anker ist.** Die Pflichtangaben
+nach § 34a UStDV Nr. 1–5 werden einzeln im Text geprüft; bei 20 Positionen
+zusätzlich, dass das Dokument zwei Seiten hat, dass keine Grundlinie unter
+y = 56 liegt, dass Gesamtbetrag, § 19-Satz und Ausstellerfuss vorhanden sind
+und dass keine Position zwischen Bezeichnung und SKY-ID zerrissen wird. Die
+beiden Zeichenkorrekturen und die `/Length`-Rechnung sind auf Dokumentebene
+abgesichert; `invoice-pdf-pages.test.ts` prüft sie weiterhin auf Engine-Ebene.
+
+### Konsequenzen
+
+Die eine bestehende Production-Rechnung zeigt beim nächsten Download `·` statt
+`?` in der Absenderzeile — eine Verbesserung, und die einzige Abweichung.
+**Das ist eine fachliche Feststellung, keine steuerrechtliche Zusicherung**;
+der offene Prüfpunkt steht in `docs/LEGAL.md`.
+
+Die Anker hängen an ICU: `invoice.ts` formatiert sein Datum über
+`Intl.DateTimeFormat("de-DE")` und damit über CLDR-Daten — anders als der
+Beleg, der dafür eine eigene Zusammensetzung benutzt. Ändert eine künftige
+Node-Fassung das deutsche Datumsmuster, werden die Anker rot, ohne dass jemand
+etwas falsch gemacht hätte. Dann ist zu prüfen, ob sich die **Darstellung**
+geändert hat, und der Anker neu zu setzen — nicht zu entfernen.
+
+**Diese Entscheidung gilt, solange keine Rechnung als Datei abgelegt wird.**
+Sobald PDFs gespeichert würden, wäre das Dokument und nicht die Zeile die
+Aufzeichnung, und die Frage nach einer Formatversion stellte sich neu. Ein Test
+hält fest, dass im Rechnungspfad kein Storage-Aufruf steht.

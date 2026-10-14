@@ -97,6 +97,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import { formatDeduction, formatPrice } from "@/lib/format";
+import { plainNumber } from "@/lib/format-number";
 import { SALE_ITEM_COLUMNS, SaleIndicator } from "./sale-indicator";
 import { de } from "@/lib/i18n/de";
 import { announceSaleItemReturn, bookSaleItem, loadSale, receiveSaleItemReturn,
@@ -173,8 +174,8 @@ function StockDot({ sale }: { sale: SaleRow }) {
 
 function Summary({ summary }: { summary: SalesSummary }) {
   const cells = [
-    { key: "count", label: copy.summary.count, value: summary.saleCount.toLocaleString("de-AT"),
-      hint: `${summary.itemCount.toLocaleString("de-AT")} ${copy.summary.items}` },
+    { key: "count", label: copy.summary.count, value: plainNumber(summary.saleCount),
+      hint: `${plainNumber(summary.itemCount)} ${copy.summary.items}` },
     { key: "gross", label: copy.summary.gross, value: formatPrice(summary.gross), hint: null },
     { key: "expected", label: copy.summary.expected, value: formatPrice(summary.expectedPayout), hint: null },
   ];

@@ -25,7 +25,12 @@ import {
  * ONE ROUND TRIP, AND NO ITEMS. `seller_orderbook_ledger()` filters, searches
  * and aggregates in the database, so the browser receives fifteen rows instead
  * of five hundred and sixty-one items it would only need in order to count
- * them. Items arrive when a row is expanded — see `fetchPurchaseItems`.
+ * them. Items arrive when a row is expanded — `loadPurchaseItems()` in
+ * `orderbook/actions.ts`, which reads `fetchPurchase()` further down.
+ *
+ * This line used to name `fetchPurchaseItems`. No such function has ever
+ * existed; the reference was wrong from the start and is corrected here
+ * rather than appended to.
  */
 export const fetchLedger = cache(
   async (
@@ -260,6 +265,21 @@ export const fetchPurchaseYears = cache(async (): Promise<number[]> => {
  * seller operator — including rows hidden from the public catalog, which a
  * purchase may perfectly well contain. Reusing it means one authorization
  * story and one definition of "the catalog", not two.
+ *
+ * WAS 0117 GEÄNDERT HAT, UND WARUM DER FILTER HIER STEHT
+ *
+ * Die Funktion liefert weiter ALLE Zeilen — sie bedient auch den
+ * Arbeitsmappen-Import, und dessen Namens-Matching muss eine ausgeblendete
+ * Zeile finden können: eine Arbeitsmappe kennt die redaktionellen
+ * Entscheidungen von heute nicht. Gefiltert wird deshalb hier, wo die
+ * AUSWAHLLISTE entsteht — angeboten wird nur, was der Katalog auch anbietet.
+ *
+ * Beide Riegel, weil das ganze Projekt beide prüft: `is_active` ist
+ * technisch, `catalog_visible` redaktionell (`0004`), und `shop_offers()`
+ * verlangt seit `0006` ebenfalls beide. Vorher standen hier alle
+ * Katalogzeilen zur Wahl, auch die ausgeblendeten — bei Eon's Elite hiess
+ * das drei Einträge pro Figur, von denen zwei seit Langem nicht mehr
+ * angeboten werden.
  */
 export const fetchOrderbookCatalog = cache(
   async (): Promise<FigureChoice[]> => {
@@ -291,15 +311,31 @@ export const fetchOrderbookCatalog = cache(
         }];
       }),
     );
-    return (catalog.data as Record<string, unknown>[]).map((r) => {
-      const fact = facts.get(String(r.sky_id));
-      return {
-        skyId: String(r.sky_id),
-        name: String(r.name),
-        series: String(r.series_code),
-        marketPrice: fact?.marketPrice ?? null,
-        image: fact?.image ?? null,
-      };
-    });
+    return (catalog.data as Record<string, unknown>[])
+      /*
+       * Nur gültige, angebotene Katalogzeilen. `catalog_visible` und
+       * `is_active` kommen seit 0117 mit; `!== false` statt `!r.x` ist
+       * Absicht — fehlt die Spalte, weil noch die alte Funktionsfassung
+       * läuft (etwa zwischen Migration und Deployment), wird NICHTS
+       * ausgefiltert und alles bleibt wie bisher.
+       */
+      .filter((r) => r.catalog_visible !== false && r.is_active !== false)
+      .map((r) => {
+        const fact = facts.get(String(r.sky_id));
+        const raw = String(r.name);
+        /* Fehlt `display_name`, ist der Rohname der Anzeigename — genau das
+           Verhalten vor 0117. */
+        const shown = r.display_name === undefined || r.display_name === null
+          ? raw
+          : String(r.display_name);
+        return {
+          skyId: String(r.sky_id),
+          name: shown,
+          rawName: raw,
+          series: String(r.series_code),
+          marketPrice: fact?.marketPrice ?? null,
+          image: fact?.image ?? null,
+        };
+      });
   },
 );

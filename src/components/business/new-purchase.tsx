@@ -45,28 +45,48 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 
 import { ACTION_PRIMARY } from "@/components/ui/action";
 import { PendingButton } from "@/components/ui/pending";
 import { formatPrice } from "@/lib/format";
+import { rangedNumber } from "@/lib/format-number";
 import { de } from "@/lib/i18n/de";
 import { createPurchaseWithItems } from "@/lib/orderbook/actions";
-import {
-  draftPayload, draftUnitCount, draftValue, MAX_DRAFT_UNITS, type DraftLine,
-} from "@/lib/orderbook/draft";
+import { draftUnitCount, MAX_DRAFT_UNITS } from "@/lib/orderbook/draft";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
+import {
+  purchaseDateProblem, type PurchaseDateProblem,
+} from "@/lib/orderbook/purchase-date-rule";
+import {
+  PURCHASE_DRAFT_STATES, newDraftToken, purchaseDraftPayload, purchaseDraftStateCounts,
+  purchaseDraftValue, type PurchaseDraftLine,
+} from "@/lib/orderbook/purchase-draft";
 import { purchaseCosts } from "@/lib/orderbook/purchase-money";
 import {
   DEFAULT_PURCHASE_TEMPLATE, PAYMENT_METHODS, PURCHASE_TEMPLATES,
   purchaseTemplate, type PaymentMethod,
 } from "@/lib/orderbook/purchase-template";
 import { parseMoney } from "@/lib/orderbook/sales-money";
-import { FigureDraft } from "./figure-draft";
 import { Field, FieldRow, FormSection, INPUT, MONEY, QuietRow } from "./form-section";
+import { PurchaseDraftList } from "./purchase-draft-list";
 
 const copy = de.business.orderbook;
 const figures = copy.figures;
+const errors = copy.errors;
+
+/*
+ * DAS DATUMSFELD IN ZWEI FASSUNGEN, NICHT ALS ANGEHÄNGTE KLASSE.
+ *
+ * `INPUT` bringt `ring-1 ring-border/70` mit. Ein `ring-danger` dahinter zu
+ * hängen würde zwei Utilities für dieselbe CSS-Eigenschaft in einem Element
+ * stapeln, und wer von beiden gewinnt, entscheidet die Reihenfolge im
+ * erzeugten Stylesheet — nicht die im Attribut. Zwei vollständige Fassungen
+ * sind zwei Zeilen und haben kein „meistens".
+ */
+const DATE_BASE = "min-h-11 w-full rounded-sky-md bg-surface px-3 text-sm sm:min-h-9";
+const DATE_OK = `${DATE_BASE} ring-1 ring-border/70`;
+const DATE_BAD = `${DATE_BASE} ring-2 ring-danger`;
 /*
  * Die Nomen des Einkaufskopfes stehen EINMAL — im Detailfenster, wo sie
  * zuerst gebraucht wurden. „Plattform" im Formular und „Plattform" im
@@ -109,8 +129,24 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
 
   const [note, setNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
-  const [lines, setLines] = useState<DraftLine[]>([]);
+  const [lines, setLines] = useState<PurchaseDraftLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Die Ablehnung des Datums steht AM FELD und nicht oben bei `error`: der
+   * Betreiber soll nicht suchen müssen, welches der zehn Felder gemeint ist.
+   */
+  const [dateProblem, setDateProblem] = useState<PurchaseDateProblem | null>(null);
+  const dateRef = useRef<HTMLInputElement>(null);
+  /*
+   * EINMAL BEIM ÖFFNEN, NICHT JE ABSENDEN.
+   *
+   * `useState` mit einer Funktion ruft sie genau einmal pro Montage. Ein
+   * zweites Absenden desselben Formulars trägt damit denselben Token, und die
+   * Datenbank antwortet mit dem Einkauf, den sie schon angelegt hat, statt
+   * einen zweiten anzulegen. Der Wert wird nie gerendert — es gibt also auch
+   * nichts, was zwischen Server und Browser auseinanderlaufen könnte.
+   */
+  const [draftToken] = useState(newDraftToken);
   const [pending, startTransition] = useTransition();
 
   /*
@@ -136,8 +172,29 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
    * `purchase_market_value()`. Die Zahl auf diesem Bildschirm ist die Zahl,
    * die der Einkauf im selben Moment zeigt, in dem er existiert.
    */
-  const value = useMemo(() => draftValue(costs.total, lines), [costs.total, lines]);
+  /*
+   * Seit 0120 mit dem ZUSTAND jeder Einheit: eine beschädigte oder fehlende
+   * Position zählt 0 EUR (D4), und wer das hier unterschlägt, zeigt einen
+   * Marktwert, den der gespeicherte Einkauf nicht hat.
+   */
+  const value = useMemo(() => purchaseDraftValue(costs.total, lines), [costs.total, lines]);
   const units = draftUnitCount(lines);
+
+  /*
+   * WAS GESPEICHERT WIRD, IN EINEM SATZ.
+   *
+   * Nur die Zustände, die vorkommen, und `Bestellt` nur, wenn daneben noch
+   * etwas anderes steht: „7 Bestellt" allein sagt nichts, was die Stückzahl
+   * am Knopf nicht schon sagt.
+   */
+  const stateLine = useMemo(() => {
+    const counts = purchaseDraftStateCounts(lines);
+    const used = PURCHASE_DRAFT_STATES.filter((state) => counts[state] > 0);
+    if (used.length < 2) return null;
+    return figures.stateSummary(
+      used.map((state) => figures.stateCount(copy.states[state], counts[state])),
+    );
+  }, [lines]);
 
   /** Die Vorlage wechseln: Layout und Vorbelegung, niemals Getipptes. */
   function chooseTemplate(id: string) {
@@ -148,6 +205,22 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
   function submit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    /*
+     * DAS DATUM ZUERST, UND MIT FOKUS.
+     *
+     * Vor jeder anderen Prüfung, damit nicht erst ein Betrag beanstandet wird
+     * und das fehlende Datum danach. Der Fokus springt auf das Feld, weil ein
+     * roter Rahmen weiter unten auf einem Telefon ausserhalb des Bildes liegt.
+     *
+     * Dieselbe Funktion, die die Server Action und — als vierte Schicht —
+     * `seller_create_purchase_with_items` durchsetzen.
+     */
+    const problem = purchaseDateProblem(date);
+    setDateProblem(problem);
+    if (problem !== null) {
+      dateRef.current?.focus();
+      return;
+    }
     /*
      * Jedes Feld für sich geprüft, nicht die Summe: der Betreiber muss
      * erfahren, WELCHER Betrag nicht gelesen werden konnte. `purchaseCosts`
@@ -166,10 +239,10 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
     }
     startTransition(async () => {
       const result = await createPurchaseWithItems(
-        date.trim() || null,
+        date.trim(),
         /* Was bezahlt wurde — die Summe der drei Teile, auf den Cent. */
         costs.total,
-        draftPayload(lines), note.trim() || undefined, isTest,
+        purchaseDraftPayload(lines), note.trim() || undefined, isTest,
         {
           platform: template.platform,
           sellerName: seller.trim() || null,
@@ -186,6 +259,8 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
           items: costs.items,
           shipping: costs.shipping,
           buyerProtection: costs.buyerProtection,
+          /* Derselbe Entwurf, so oft er auch abgeschickt wird. */
+          clientToken: draftToken,
         },
       );
       if (!result.ok) setError(result.message);
@@ -207,12 +282,33 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
       */}
       <FormSection title={copy.newSections.purchase}>
         <FieldRow>
-          {/* Not `required`: empty is a real answer, and it means unknown.
-              It used to say so in a sentence underneath; an empty optional
-              date field does not need one. */}
+          {/*
+            PFLICHT, SEIT 0120 — und nur hier.
+
+            Bis dahin stand an dieser Stelle „empty is a real answer, and it
+            means unknown". Das galt dem Arbeitsmappen-Import, dessen dreizehn
+            `#REF!`-Gruppen kein Datum tragen, und es gilt dort weiter:
+            `purchases.purchased_at` bleibt nullable, der eine echte undatierte
+            Einkauf bleibt erhalten und über `?jahr=ohne` auffindbar, und
+            korrigieren lässt er sich wie zuvor. Wer einen Einkauf NEU erfasst,
+            weiss dagegen, wann er ihn gemacht hat.
+          */}
           <Field label={copy.columns.date}>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-                   disabled={pending} className={INPUT} />
+            <input ref={dateRef} type="date" required value={date}
+                   onChange={(e) => {
+                     setDate(e.target.value);
+                     /* Beim Tippen aufhören zu schimpfen. */
+                     if (dateProblem !== null) setDateProblem(null);
+                   }}
+                   disabled={pending}
+                   aria-invalid={dateProblem === null ? undefined : true}
+                   aria-describedby={dateProblem === null ? undefined : "new-purchase-date-error"}
+                   className={dateProblem === null ? DATE_OK : DATE_BAD} />
+            {dateProblem === null ? null : (
+              <p id="new-purchase-date-error" role="alert" className="text-xs text-danger">
+                {dateProblem === "required" ? errors.dateRequired : errors.dateImplausible}
+              </p>
+            )}
           </Field>
           <Field label={copy.newTemplate}>
             <select value={templateId} onChange={(e) => chooseTemplate(e.target.value)}
@@ -255,7 +351,7 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
 
       {/* 2. What was in the parcel. */}
       <FormSection title={copy.newSections.figures}>
-        <FigureDraft lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
+        <PurchaseDraftList lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
       </FormSection>
 
       {/*
@@ -324,7 +420,7 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
               <dd>
                 {value.percent === null
                   ? "—"
-                  : `${value.percent.toLocaleString("de-AT", { maximumFractionDigits: 1 })} %`}
+                  : `${rangedNumber(value.percent, 0, 1)} %`}
               </dd>
             </div>
             {value.unknownItems > 0 ? (
@@ -352,6 +448,10 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
           <span className="text-sm">{copy.testFlag}</span>
         </label>
       </FormSection>
+
+      {stateLine === null ? null : (
+        <p className="text-xs text-muted">{stateLine}</p>
+      )}
 
       <PendingButton type="submit" pending={pending} pendingLabel={de.pending.saving}
               className={`${ACTION_PRIMARY} min-h-11 w-full gap-2 disabled:opacity-60 sm:w-auto sm:self-start`}>

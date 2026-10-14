@@ -11,6 +11,7 @@ import { revalidatePath } from "next/cache";
 
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
+import { purchaseDateProblem } from "@/lib/orderbook/purchase-date-rule";
 import { createClient } from "@/lib/supabase/server";
 import { fetchPurchase, type PurchaseItem } from "./queries";
 
@@ -43,6 +44,27 @@ function orderbookMessage(error: { code?: string; message?: string }): string {
   if (text.includes("damaged item")) return de.business.orderbook.errors.damaged;
   if (text.includes("never arrived")) return de.business.orderbook.errors.missing;
   /*
+   * DIE ZWEI ABLEHNUNGEN DES LAGERS (0093).
+   *
+   * `apply_inventory_movement` weist eine Bewegung ab, die den Bestand unter
+   * das Reservierte drücken würde, und nennt seit `0093` welcher der beiden
+   * Gründe es war. Beide sind `check_violation`, beide tragen ihren Grund im
+   * Text, und beide erreichen diesen Mapper nur über die RÜCKNAHME einer
+   * Einbuchung: das Einbuchen ist eine `+1`, und eine Zunahme kann den
+   * Riegel `quantity + delta >= reserved` nicht verletzen.
+   *
+   * Die Reihenfolge ist geprüft: keines dieser zwei Textstücke kommt in einer
+   * der älteren Meldungen vor, und keine ältere Regel trifft diese zwei —
+   * sonst hätte die erste Übereinstimmung gewonnen und die genauere
+   * verdrängt (`unbook-confirm.test.ts` hält das fest).
+   */
+  if (text.includes("insufficient stock for")) {
+    return de.business.orderbook.errors.unbookNoStock;
+  }
+  if (text.includes("would consume reserved stock")) {
+    return de.business.orderbook.errors.unbookReserved;
+  }
+  /*
    * 0115/0116 — VIER ABLEHNUNGEN, DIE BISHER IN „konnte nicht gespeichert
    * werden" endeten.
    *
@@ -64,6 +86,32 @@ function orderbookMessage(error: { code?: string; message?: string }): string {
   }
   if (text.includes("a cost split needs the price of the figures")) {
     return de.business.orderbook.errors.splitNeedsItems;
+  }
+  /*
+   * 0120 — VIER ABLEHNUNGEN DES ANLEGENS.
+   *
+   * Die Reihenfolge ist geprüft: keines dieser Textstücke kommt in einer der
+   * älteren Meldungen vor, und keine ältere Regel trifft diese vier
+   * (`purchase-workbench.test.ts` hält das fest). `a purchase needs its date`
+   * steht vor `a purchase date outside` — beide fangen mit „a purchase" an,
+   * und nur der Rest unterscheidet sie.
+   */
+  if (text.includes("a purchase needs its date")) {
+    return de.business.orderbook.errors.dateRequired;
+  }
+  if (text.includes("a purchase date outside")) {
+    return de.business.orderbook.errors.dateImplausible;
+  }
+  if (text.includes("with different content")
+      || text.includes("purchases_client_token_uniq")) {
+    return de.business.orderbook.errors.draftAlreadySaved;
+  }
+  if (text.includes("is not a state a new purchase item may start in")
+      || text.includes("a state it may not create")) {
+    return de.business.orderbook.errors.itemState;
+  }
+  if (text.includes("must not move stock")) {
+    return de.business.orderbook.errors.notAFigure;
   }
   /*
    * Die drei CHECKs der Aufteilung melden sich mit ihrem Namen im Text
@@ -172,17 +220,75 @@ export type PurchaseHead = {
   buyerProtection?: number | null;
   paymentMethod?: string | null;
   externalRef?: string | null;
+  /*
+   * ABSENDER, INSERAT UND VEREINBARUNG (0121).
+   *
+   * `undefined` heisst „nicht anfassen", `""` heisst „leeren". Das ist keine
+   * neue Konvention, sondern die, mit der `note`, `platform` und
+   * `sellerName` seit `0116` arbeiten: die Server-Funktion schreibt
+   * `nullif(btrim(p_x), '')`, also wird ein Leerstring zu NULL in der
+   * Spalte — je Feld, ohne Nebenwirkung auf die anderen.
+   *
+   * `senderName` ist NICHT `sellerName`. Das eine ist der Name auf dem
+   * Paket, das andere ein Marktplatz-Benutzername.
+   */
+  senderName?: string | null;
+  senderStreet?: string | null;
+  senderPostalCode?: string | null;
+  senderCity?: string | null;
+  senderCountry?: string | null;
+  listingTitle?: string | null;
+  listingUrl?: string | null;
+  listingDetails?: string | null;
+  agreementNote?: string | null;
+  /*
+   * DER ENTWURF, AUS DEM DIESER EINKAUF KOMMT (0120).
+   *
+   * Eine UUID, die das Formular EINMAL beim Öffnen erzeugt — nicht je
+   * Absenden. Ein zweites Absenden desselben Entwurfs trägt denselben Token,
+   * und `seller_create_purchase_with_items` antwortet dann mit dem Einkauf,
+   * den es schon angelegt hat, statt einen zweiten anzulegen. Derselbe
+   * Mechanismus, den `import_fingerprint` seit `0055` für den
+   * Arbeitsmappen-Import hat, nur für die zweite Quelle.
+   *
+   * Weggelassen verhält sich die Funktion wie bisher: die Prüfwerkzeuge
+   * rufen sie ohne Token, und das bleibt gültig.
+   */
+  clientToken?: string | null;
 };
 
 export async function createPurchaseWithItems(
-  purchasedAt: string | null,
+  purchasedAt: string,
   totalCost: number,
-  items: readonly { sky_id?: string; raw_name?: string }[],
+  items: readonly { sky_id?: string; raw_name?: string; state?: string }[],
   note?: string,
   isTest = false,
   head: PurchaseHead = {},
 ) {
   if (!(await canOperateSeller())) return { ok: false as const, message: de.admin.notAllowed };
+  /*
+   * DAS KAUFDATUM, SERVERSEITIG GEPRÜFT (0120).
+   *
+   * Der Typ verbietet `null` schon beim Übersetzen, und das Formular markiert
+   * ein leeres Feld rot. Diese Prüfung ist die dritte Schicht und die, die
+   * bleibt, wenn jemand die Aktion ohne das Formular ruft: dieselbe Regel aus
+   * derselben Datei, die das Formular benutzt, und dieselbe, die
+   * `seller_create_purchase_with_items` ein viertes Mal durchsetzt.
+   *
+   * `purchases.purchased_at` bleibt dabei nullable. Der Riegel gilt dem
+   * ANLEGEN eines regulären Einkaufs — der Arbeitsmappen-Import und
+   * `updatePurchase` behalten ihre Datumsfreiheit, und der eine echte
+   * undatierte Einkauf im Bestand bleibt erhalten und korrigierbar.
+   */
+  const dateProblem = purchaseDateProblem(purchasedAt);
+  if (dateProblem !== null) {
+    return {
+      ok: false as const,
+      message: dateProblem === "required"
+        ? de.business.orderbook.errors.dateRequired
+        : de.business.orderbook.errors.dateImplausible,
+    };
+  }
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_create_purchase_with_items", {
     p_purchased_at: purchasedAt, p_total_cost: totalCost, p_note: note ?? null,
@@ -194,6 +300,7 @@ export async function createPurchaseWithItems(
     p_buyer_protection_cost: head.buyerProtection ?? null,
     p_payment_method: head.paymentMethod ?? null,
     p_external_ref: head.externalRef ?? null,
+    p_client_token: head.clientToken ?? null,
   });
   if (error || typeof data !== "number") {
     return { ok: false as const, message: orderbookMessage(error ?? {}) };
@@ -227,7 +334,72 @@ export async function updatePurchase(
     p_payment_method: head.paymentMethod ?? null,
     p_external_ref: head.externalRef ?? null,
     p_clear_cost_split: head.clearCostSplit ?? false,
+    p_sender_name: head.senderName ?? null,
+    p_sender_street: head.senderStreet ?? null,
+    p_sender_postal_code: head.senderPostalCode ?? null,
+    p_sender_city: head.senderCity ?? null,
+    p_sender_country: head.senderCountry ?? null,
+    p_listing_title: head.listingTitle ?? null,
+    p_listing_url: head.listingUrl ?? null,
+    p_listing_details: head.listingDetails ?? null,
+    p_agreement_note: head.agreementNote ?? null,
   }, id);
+}
+
+/**
+ * Absender, Inserat und Vereinbarung eines Einkaufs (0121).
+ *
+ * Alle neun optional, alle oft leer: der Absender steht meist erst nach dem
+ * Wareneingang fest.
+ */
+export type PurchaseRecord = {
+  senderName: string | null;
+  senderStreet: string | null;
+  senderPostalCode: string | null;
+  senderCity: string | null;
+  senderCountry: string | null;
+  listingTitle: string | null;
+  listingUrl: string | null;
+  listingDetails: string | null;
+  agreementNote: string | null;
+};
+
+/**
+ * DIESE NEUN FELDER EINES EINKAUFS, UND ERST AUF ZURUF.
+ *
+ * WARUM NICHT ÜBER DIE LEDGER-ZEILE. `seller_orderbook_ledger()` liefert
+ * JEDE Zeile der gefilterten Liste. Lägen Name und Anschrift des Absenders
+ * darin, reiste bei jedem Aufruf des Einkaufsbuchs die Privatanschrift jedes
+ * Verkäufers in den Browser — für eine Liste, die davon nichts anzeigt.
+ * Personenbezogene Daten eines Dritten gehören dorthin, wo sie gebraucht
+ * werden, und nur dann.
+ *
+ * `seller_purchase()` gibt ohnehin die ganze Zeile zurück; hier wird daraus
+ * genau das gelesen, was das Fenster braucht. Eine Positivliste, wie in
+ * `fetchPurchase` — kein Durchreichen der Datenbankzeile.
+ */
+export async function loadPurchaseRecord(id: number): Promise<PurchaseRecord | null> {
+  if (!(await canOperateSeller())) return null;
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_purchase", { p_id: id });
+  if (error || data === null || typeof data !== "object") return null;
+  const p = (data as Record<string, unknown>).purchase as Record<string, unknown> | null;
+  if (!p) return null;
+  const text = (key: string) => {
+    const value = p[key];
+    return typeof value === "string" && value !== "" ? value : null;
+  };
+  return {
+    senderName: text("sender_name"),
+    senderStreet: text("sender_street"),
+    senderPostalCode: text("sender_postal_code"),
+    senderCity: text("sender_city"),
+    senderCountry: text("sender_country"),
+    listingTitle: text("listing_title"),
+    listingUrl: text("listing_url"),
+    listingDetails: text("listing_details"),
+    agreementNote: text("agreement_note"),
+  };
 }
 
 /** Was aus dem Tauschen zurückkommt: der neue Platz, oder die Ablehnung. */
@@ -366,6 +538,58 @@ export async function processBookPurchaseItem(
   itemId: number, purchaseId: number,
 ): Promise<PurchaseItemResult> {
   return runPurchaseItem("seller_book_purchase_item", { p_item_id: itemId }, purchaseId);
+}
+
+/**
+ * Umhängen, schnell: für das (i)-Fenster des Einkaufsbuchs.
+ *
+ * DASSELBE RPC WIE `setPurchaseItemSky`, EIN ANDERER RÜCKWEG. Die Variante
+ * auf der Detailseite geht über `run` und stösst `revalidatePath` an — dort
+ * rendert die Seite danach ohnehin neu. Das Fenster im Einkaufsbuch braucht
+ * etwas anderes: die frische Positionsliste in derselben Antwort, damit sich
+ * die Tabelle unter der offenen Maske aktualisiert, ohne dass das Fenster
+ * zugeht. Genau dieselbe Teilung wie zwischen `setPurchaseItemState` und
+ * `processPurchaseItemState`.
+ *
+ * `p_remember` bleibt `false`: das Merken eines Arbeitsmappennamens ist eine
+ * zweite Entscheidung mit Folgen für künftige Importe, und das Fenster stellt
+ * sie nicht. Wer sie treffen will, tut es auf der Detailseite.
+ *
+ * `raw_name` WIRD NICHT ANGEFASST. Das RPC schreibt `sky_id`, und der
+ * historische Rohname bleibt, wo er ist — er ist das Beweisstück, nach dem
+ * die Korrektur überhaupt stattfindet.
+ */
+export async function processPurchaseItemSky(
+  itemId: number, skyId: string | null, purchaseId: number,
+): Promise<PurchaseItemResult> {
+  return runPurchaseItem("seller_set_purchase_item_sky",
+    { p_item_id: itemId, p_sky_id: skyId, p_remember: false }, purchaseId);
+}
+
+/**
+ * Rücknahme, schnell: für das (i)-Fenster des Einkaufsbuchs.
+ *
+ * DASSELBE RPC WIE `unbookPurchaseItem`, EIN ANDERER RÜCKWEG — dieselbe
+ * Teilung wie bei `processPurchaseItemSky`. Die Fassung der Detailseite gibt
+ * `{ ok, movementId }` zurück und stösst `revalidatePath` an, weil die Seite
+ * danach ohnehin neu rendert. Das Fenster braucht die frische Positionsliste
+ * in derselben Antwort, damit sich die Tabelle unter der offenen Rückfrage
+ * aktualisiert, ohne dass das Fenster zugeht.
+ *
+ * `seller_unbook_purchase_item` ist unverändert: dasselbe Betreibergate,
+ * dasselbe `for update`, dieselbe Gegenbewegung `-1 correction`, derselbe
+ * Riegel `quantity + delta >= reserved` eine Ebene tiefer. Hier entsteht
+ * KEINE neue Lagerlogik und kein zweiter Weg zur Rücknahme — nur eine zweite
+ * Art, das Ergebnis abzuholen.
+ *
+ * Nicht idempotent, und das bleibt so: ein zweiter Aufruf bricht mit
+ * `this item is not in inventory` ab. Eine stille zweite `-1` wäre ein
+ * Bestandsfehler.
+ */
+export async function processUnbookPurchaseItem(
+  itemId: number, purchaseId: number,
+): Promise<PurchaseItemResult> {
+  return runPurchaseItem("seller_unbook_purchase_item", { p_item_id: itemId }, purchaseId);
 }
 
 /** Beschädigt, Fehlt, Vitrine — die drei Enden aus dem Plus-Menü. */

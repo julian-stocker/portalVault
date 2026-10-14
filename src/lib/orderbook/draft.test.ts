@@ -58,6 +58,10 @@ const ITEMS_UI = read("src/components/business/purchase-items.tsx");
 const ADD_ITEM_UI = read("src/components/business/add-purchase-item.tsx");
 const PURCHASE_PAGE = read("src/app/(business)/business/orderbuch/[id]/page.tsx");
 const ACTIONS = read("src/lib/orderbook/actions.ts");
+/* 0120: der Einkauf hat seine eigene Entwurfsliste. Der Verkauf steht hier,
+   damit geprüft bleibt, dass die beiden NICHT zusammengelegt wurden. */
+const NEW_SALE = read("src/components/business/new-sale.tsx");
+const PURCHASE_LIST_UI = read("src/components/business/purchase-draft-list.tsx");
 
 /* --------------------------------------------------------------------- */
 /* Fixtures. Real Staging shapes: a priced figure, a variant of it, and a  */
@@ -416,7 +420,16 @@ describe("0064 — the migration", () => {
 
   it("IS ATOMIC BY DELEGATION: one function body, calling the canonical writers", () => {
     expect(CREATE_WITH_ITEMS).toContain("public.seller_create_purchase(");
-    expect(CREATE_WITH_ITEMS).toContain("perform public.seller_add_purchase_item(");
+    expect(CREATE_WITH_ITEMS).toContain("public.seller_add_purchase_item(");
+    /*
+     * 0120 braucht die zurückgegebene id, um den Zustand der Position zu
+     * setzen, und ruft deshalb zuweisend statt mit `perform`. Die Zusicherung
+     * dieses Tests ist die DELEGATION, nicht das Schlüsselwort — also wird
+     * sie hier direkt geprüft: diese Funktion schreibt niemals selbst in
+     * `purchase_items`, sonst umginge sie die Positionsvergabe, die
+     * Namensprüfung und den Fremdschlüssel des kanonischen Schreibers.
+     */
+    expect(CREATE_WITH_ITEMS).not.toContain("insert into public.purchase_items");
     // No separate transaction control — a plpgsql body IS the transaction here.
     expect(CREATE_WITH_ITEMS).not.toContain("commit");
     expect(CREATE_WITH_ITEMS).not.toContain("exception when");
@@ -424,7 +437,11 @@ describe("0064 — the migration", () => {
 
   it("creates one row per element and collapses nothing", () => {
     expect(CREATE_WITH_ITEMS).toContain("jsonb_array_elements");
-    expect(CREATE_WITH_ITEMS).not.toContain("distinct");
+    /* Die beiden Schreibweisen, die eine Zusammenfassung wären. Das blosse
+       Wort `distinct` trifft seit 0120 auch `is distinct from` im
+       Fingerabdruckvergleich, und das fasst nichts zusammen. */
+    expect(CREATE_WITH_ITEMS).not.toContain("select distinct");
+    expect(CREATE_WITH_ITEMS).not.toContain("distinct on");
     expect(CREATE_WITH_ITEMS).not.toContain("group by");
     expect(CREATE_WITH_ITEMS).not.toContain("quantity");
   });
@@ -522,7 +539,14 @@ describe("0064 — the migration", () => {
 /* ===================================================================== */
 describe("the create screen", () => {
   it("SEARCHES FOR FIGURES ON THE CREATE SCREEN ITSELF", () => {
-    expect(NEW_PURCHASE).toContain("FigureDraft");
+    /*
+     * 0120: der Einkauf hat eine eigene, kompakte Liste, weil seine
+     * Positionen einen Zustand tragen. Dieselbe SUCHE in beiden — das war der
+     * Punkt dieser Prüfung und bleibt es.
+     */
+    expect(NEW_PURCHASE).toContain("PurchaseDraftList");
+    expect(NEW_PURCHASE).not.toContain("FigureDraft");
+    expect(PURCHASE_LIST_UI).toContain("FigureSearch");
     expect(DRAFT_UI).toContain("FigureSearch");
   });
 
@@ -540,7 +564,13 @@ describe("the create screen", () => {
   });
 
   it("sends the expanded payload, never the draft lines", () => {
-    expect(NEW_PURCHASE).toContain("draftPayload(lines)");
+    /*
+     * 0120: der Einkauf benutzt `purchaseDraftPayload`, weil seine Positionen
+     * einen Zustand tragen. Der Verkauf benutzt weiter `draftPayload` — die
+     * Zeile darunter hält fest, dass die beiden nicht zusammengelegt wurden.
+     */
+    expect(NEW_PURCHASE).toContain("purchaseDraftPayload(lines)");
+    expect(NEW_SALE).toContain("draftPayload(lines)");
   });
 
   it("values the draft with the ledger's own arithmetic", () => {
@@ -560,9 +590,28 @@ describe("the create screen", () => {
       .toBeUndefined();
   });
 
-  it("keeps the nullable date and invents no default", () => {
-    expect(NEW_PURCHASE).toContain("date.trim() || null");
+  it("requires the date for a NEW purchase and still invents no default", () => {
+    /*
+     * 0120 hat die erste Hälfte dieser Prüfung umgedreht und die zweite
+     * verschärft.
+     *
+     * VORHER stand hier `date.trim() || null`: ein leeres Feld hiess
+     * „unbekannt". Für den Arbeitsmappen-Import gilt das weiter — `0058` hat
+     * `purchases.purchased_at` genau dafür nullable gemacht —, aber wer einen
+     * Einkauf neu erfasst, weiss sein Datum.
+     *
+     * UNVERÄNDERT WICHTIG: das Formular setzt kein Datum VOR. Ein
+     * vorbelegtes „heute" wäre eine erfundene Tatsache, die aussieht wie eine
+     * eingegebene, und sie wäre mit einem Klick gespeichert.
+     */
+    expect(NEW_PURCHASE).toContain("date.trim(),");
+    expect(NEW_PURCHASE).not.toContain("date.trim() || null");
     expect(NEW_PURCHASE).not.toContain("new Date()");
+    expect(NEW_PURCHASE).toContain('useState("")');
+    /* Und die Spalte bleibt nullable — der Bestand hängt daran. */
+    const sql = read("supabase/migrations/0120_purchase_states_and_idempotency.sql");
+    expect(sql).not.toMatch(/alter column purchased_at set not null/);
+    expect(sql).toContain("purchases.purchased_at ist NOT NULL geworden");
   });
 
   it("keeps the Testvorgang checkbox and its ?test=1 default (0063)", () => {
@@ -574,8 +623,12 @@ describe("the create screen", () => {
   it("adding figures cannot change the test classification", () => {
     expect(CREATE_WITH_ITEMS).toContain("p_is_test");
     // The item loop names no classification column.
-    const loop = CREATE_WITH_ITEMS.slice(CREATE_WITH_ITEMS.indexOf("for v_element"));
+    /* Die Positionsschleife ist seit 0120 die ZWEITE: davor steht die
+       Zustandsprüfung, die jedes Element vorab gegen die fünf erlaubten Werte
+       hält. `lastIndexOf` trifft die, die hier gemeint ist. */
+    const loop = CREATE_WITH_ITEMS.slice(CREATE_WITH_ITEMS.lastIndexOf("for v_element"));
     expect(loop).not.toContain("is_test");
+    expect(loop).toContain("public.seller_add_purchase_item(");
   });
 
   it("the stock sentence moved to the button it describes", () => {
