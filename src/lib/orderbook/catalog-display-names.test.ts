@@ -413,12 +413,17 @@ describe("0118: eBay, und die Plattform in der Übersicht", () => {
     expect(DETAILS).toContain('<option value="">{modal.platformUnknown}</option>');
   });
 
-  it("die achte Spur passt in den erklärten Boden", () => {
+  it("die Spuren passen in den erklärten Boden", () => {
+    /*
+     * Hieß „die achte Spur" und erwartete acht. `0124` hat zwei schmale
+     * Zustandsspuren vor `Lager` ergänzt; die RECHNUNG darunter ist
+     * unverändert und prüft die neue Breite genauso streng.
+     */
     const tracks = /const PURCHASE_COLUMNS =\s*\n?\s*"([^"]*)"/.exec(LEDGER)![1];
     const floor = Number(/const PURCHASE_MIN_WIDTH = "([\d.]+)rem"/.exec(LEDGER)![1]);
     const parts = tracks.replace(/minmax\(([^)]*)\)/g, (m) => m.replace(/,\s*/g, ","))
       .split(/\s+/).filter(Boolean);
-    expect(parts).toHaveLength(8);
+    expect(parts).toHaveLength(10);
     const sum = parts.reduce((t, p) => {
       const m = /minmax\(\s*([\d.]+)rem/.exec(p) ?? /([\d.]+)rem/.exec(p);
       return t + (/minmax\(\s*0/.test(p) ? 0 : Number(m?.[1] ?? 0));

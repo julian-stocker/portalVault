@@ -69,6 +69,35 @@ export type LedgerRow = {
   showcaseCount: number;
   /** Der Nebenläufigkeitsschlüssel, den eine Bearbeitung zurückschickt. */
   updatedAt: string | null;
+
+  /* ---- 0124: Eigenbeleg-Zustand ---------------------------------------- */
+  /**
+   * DIE ELF FELDER AUS `0124`, UND WARUM SIE WAHRHEITSWERTE SIND.
+   *
+   * Name und Anschrift einer Privatperson gehören nicht in die Nutzlast einer
+   * Liste über achtundachtzig Einkäufe. Die Übersicht braucht nur, OB etwas da
+   * ist; WAS da steht, zeigt der (i)-Dialog für einen Einkauf. `0124` prüft in
+   * seinen Nachbedingungen ausdrücklich nach, dass kein Absenderwert projiziert
+   * wird.
+   *
+   * `statusKnown` ist `false`, solange `0124` nicht angewendet ist — dann sind
+   * alle übrigen Felder ohne Aussage, und `receipt-status.ts` antwortet
+   * `unknown` statt „kein Beleg". Dieselbe Vorsicht wie bei `dailyIndex` seit
+   * `0116`: der Anwendungscode kann vor der Migration live gehen.
+   */
+  statusKnown: boolean;
+  hasSenderName: boolean;
+  hasSenderStreet: boolean;
+  hasSenderPostalCode: boolean;
+  hasSenderCity: boolean;
+  hasOrigin: boolean;
+  hasAgreement: boolean;
+  /** Die Nummer des Belegs am Ende der Korrekturkette, oder NULL. */
+  receiptNumber: string | null;
+  receiptIssuedAt: string | null;
+  receiptRevision: number | null;
+  /** `true` weicht ab, `false` stimmt, `null` kein Beleg oder kein Vergleich. */
+  receiptStale: boolean | null;
 };
 
 export type LedgerSummary = {

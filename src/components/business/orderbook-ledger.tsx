@@ -45,9 +45,12 @@ import {
   rowStatus,
   type LedgerRow as LedgerRowData, type LedgerSummary,
 } from "@/lib/orderbook/ledger";
+import {
+  dataStatus, dataTone, receiptStatus, receiptTone, type DataReason,
+} from "@/lib/orderbook/receipt-status";
 import { type PurchasePlatform } from "@/lib/orderbook/purchase-template";
 import {
-  LedgerExpansion, LedgerHead, LedgerRow, LedgerTable,
+  LedgerExpansion, LedgerHead, LedgerRow, LedgerTable, StatusDot,
 } from "./ledger-table";
 import { PurchaseDetails } from "./purchase-details";
 /*
@@ -89,8 +92,20 @@ const copy = de.business.orderbook;
  *
  * Die sechs übrigen Spuren sind Zeichen für Zeichen die des Fallbacks.
  */
+/*
+ * ZEHN SPUREN SEIT `0124`. Die beiden neuen stehen VOR `Lager`, damit die
+ * drei Zustandsspalten beieinanderliegen — „Daten", „Beleg", „Lager" sind
+ * drei Antworten auf dieselbe Art Frage, und zwei davon ans Ende hinter den
+ * Chevron zu schieben hätte sie voneinander getrennt.
+ *
+ * 3,5rem und nicht 2,25rem: bei 2,25rem passt der Glyph, aber die
+ * ÜBERSCHRIFT nicht. „Daten" bei 12px sind rund 2,1rem, und eine Spalte,
+ * deren Kopf abgeschnitten ist, ist auf einem seitwärts gescrollten Tisch
+ * nicht mehr zuzuordnen — genau der Grund, aus dem die Kopfzeile überhaupt
+ * auf jeder Breite sichtbar ist.
+ */
 const PURCHASE_COLUMNS =
-  "7.75rem 6.5rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 7.5rem 1.5rem";
+  "7.75rem 6.5rem 4rem minmax(6rem, 1fr) minmax(6rem, 1fr) 4.5rem 3.5rem 3.5rem 7.5rem 1.5rem";
 /*
  * Und die Positionszeile: die Aktionsspur trägt jetzt [Einbuchen] UND [+].
  * 6,5rem reichten für einen Knopf; zwei brauchen 7,5rem, sonst rutscht das
@@ -99,25 +114,87 @@ const PURCHASE_COLUMNS =
 const PURCHASE_ITEM_COLUMNS =
   "2.5rem 9.5rem minmax(0, 1fr) 6rem 6rem 7.5rem";
 /*
- * DER BODEN, NEU GERECHNET FÜR DIE ACHTE SPUR (0118).
+ * DER BODEN, NEU GERECHNET FÜR DIE NEUNTE UND ZEHNTE SPUR (0124).
  *
- * Acht Spuren summieren 43,75rem, sieben Lücken à 0,75rem sind 5,25rem,
- * dazu 0,75rem Zeilenrand je Seite: 50,5rem Bedarf. Der alte Boden lag
- * 6,75rem über seinem Bedarf von 43,25rem, und dieser Spielraum ist nicht
- * Zierde — er geht an die `minmax(0, 1fr)`-Spur der AUFGEKLAPPTEN
- * Positionszeile, also an den Figurennamen. Derselbe Spielraum, derselbe
- * Zweck: 50,5 + 6,75 = 57,25rem.
+ * Zehn Spuren summieren 50,75rem, neun Lücken à 0,75rem sind 6,75rem, dazu
+ * 0,75rem Zeilenrand je Seite: 59rem Bedarf. Der Boden lag seit `0118`
+ * 6,75rem über seinem Bedarf, und dieser Spielraum ist nicht Zierde — er
+ * geht an die `minmax(0, 1fr)`-Spur der AUFGEKLAPPTEN Positionszeile, also
+ * an den Figurennamen. Derselbe Spielraum, derselbe Zweck:
+ * 59 + 6,75 = 65,75rem.
  *
- * 57,25rem sind 916px und damit weiter breiter als jedes Telefon, auf dem
+ * 65,75rem sind 1052px und damit weiter breiter als jedes Telefon, auf dem
  * dieses Buch laufen muss — das ist die Entscheidung, die
  * `mobile-layout.test.ts` als Zusicherung festhält: die Tabelle passt nicht
  * auf ein Telefon und soll es nicht, sie behält ihre Spalten und der Kasten
- * scrollt darunter.
+ * scrollt darunter. Für schmale Bildschirme ist damit nichts zu tun: der
+ * Kasten scrollte vorher und scrollt jetzt 8,5rem weiter.
  */
-const PURCHASE_MIN_WIDTH = "57.25rem";
+const PURCHASE_MIN_WIDTH = "65.75rem";
 
 const formatFactor = (factor: number | null): string =>
   factor === null ? "—" : fixedNumber(factor, 2);
+
+/*
+ * DIE ZWEI TOOLTIPS (0124).
+ *
+ * Aufbau in beiden: ÜBERSCHRIFT, dann BEDEUTUNG, dann GRÜNDE. Bei orange in
+ * der Datenspalte ist diese Reihenfolge der ganze Punkt — „Eigenbeleg
+ * möglich" steht vorn, damit niemand eine Sperre liest, wo eine Empfehlung
+ * steht.
+ *
+ * Unter JEDEM Datenstatus steht derselbe Vorbehalt, auch unter grün: die
+ * Spalte sagt, dass Felder gefüllt sind, und nichts über steuerliche
+ * Anerkennung. Die Farbe könnte man sonst als Freigabe lesen.
+ */
+const rs = copy.receiptStatus;
+
+const DATA_REASON_TEXT: Record<DataReason, string> = {
+  test: rs.blockedTest,
+  noDate: rs.blockedNoDate,
+  noItems: rs.blockedNoItems,
+  noSenderName: rs.missingSenderName,
+  noAddress: rs.missingAddress,
+  addressPartial: rs.partialAddress,
+  noOrigin: rs.hintNoOrigin,
+  noAgreement: rs.hintNoAgreement,
+};
+
+function dataTitle(row: LedgerRowData): string {
+  const { status, reasons } = dataStatus(row);
+  const meaning = status === "blocked" ? rs.blocked
+    : status === "partial" ? rs.partial
+    : status === "complete" ? rs.complete
+    : rs.unknown;
+  const parts = [`${rs.dataHead}: ${meaning}`];
+  if (reasons.length > 0) parts.push(reasons.map((r) => DATA_REASON_TEXT[r]).join(" · "));
+  if (status === "unknown") parts.push(rs.unknownHint);
+  parts.push(rs.noLegalClaim);
+  return parts.join(" — ");
+}
+
+function receiptTitle(row: LedgerRowData): string {
+  const status = receiptStatus(row);
+  /* `string[]`, nicht der Literaltyp: `de` ist `as const`, und ein aus einem
+     Literal abgeleitetes Array nimmt danach keinen zweiten Satz an. */
+  const parts: string[] = [rs.receiptHead];
+  /*
+   * DIE NUMMER STEHT AUCH IM UNBEKANNT-FALL DA, wenn es eine gibt. Genau das
+   * ist der Zustand, den der Betreiber ausdrücklich nicht als „kein Beleg"
+   * sehen soll: es gibt einen, nur der Vergleich war nicht zu bilden.
+   */
+  if (row.receiptNumber !== null) {
+    parts.push(rs.issued(row.receiptNumber, formatDate(row.receiptIssuedAt)));
+    if ((row.receiptRevision ?? 1) > 1) parts.push(rs.revision(row.receiptRevision ?? 1));
+  }
+  parts.push(status === "none" ? rs.none
+    : status === "stale" ? rs.stale
+    : status === "match" ? rs.match
+    : rs.unknown);
+  if (status === "stale") parts.push(rs.staleKept);
+  if (status === "unknown") parts.push(rs.unknownHint);
+  return parts.join(" — ");
+}
 
 /*
  * A purchase with no date says so, in words.
@@ -416,6 +493,8 @@ export function OrderbookLedger({
           <span className="text-right">{copy.columns.expenses}</span>
           <span className="text-right">{copy.columns.marketValue}</span>
           <span className="text-right">{copy.columns.factor}</span>
+          <span className="text-center">{copy.columns.data}</span>
+          <span className="text-center">{copy.columns.receipt}</span>
           <span className="text-center">{copy.columns.progress}</span>
           <span />
         </LedgerHead>
@@ -515,6 +594,21 @@ export function OrderbookLedger({
                     ) : null}
                   </span>
                   <span className="text-right tabular-nums">{formatFactor(purchase.factor)}</span>
+                  {/*
+                    DIE ZWEI BELEGSPALTEN (0124).
+
+                    Beide tragen ihre ganze Aussage im `title` und im
+                    `aria-label` — der Glyph ist die Abkürzung, nicht die
+                    Information. `StatusDot` erklärt die drei Kanäle.
+                  */}
+                  <span className="flex justify-center">
+                    <StatusDot tone={dataTone(dataStatus(purchase).status)}
+                               label={dataTitle(purchase)} />
+                  </span>
+                  <span className="flex justify-center">
+                    <StatusDot tone={receiptTone(receiptStatus(purchase))}
+                               label={receiptTitle(purchase)} />
+                  </span>
                   <span className="text-center"><Status status={status} text={statusText} title={statusLabel} /></span>
                   <span aria-hidden="true" className="text-center text-muted">{expanded ? "▴" : "▾"}</span>
                 </LedgerRow>

@@ -166,3 +166,67 @@ export function LedgerItemHead({ children }: { children: ReactNode }) {
 export function LedgerItemRow({ children }: { children: ReactNode }) {
   return <li className="ob-item bg-canvas text-sm">{children}</li>;
 }
+
+/**
+ * Ein Zustandszeichen in einer schmalen Spalte (0124).
+ *
+ * DAS GESCHWISTER IST `SaleIndicator`, und diese Komponente folgt ihm
+ * absichtlich bis in die Klassen: `role="img"`, `aria-label`, `title`,
+ * `text-sm leading-none`, eine Zuordnung von Ton zu Klasse als ausgeschriebene
+ * Tabelle. Zwei Zustandsanzeiger im selben Buch, die verschieden gebaut sind,
+ * sind zwei Orte, an denen „teilweise" irgendwann verschieden aussieht.
+ *
+ * DREI KANÄLE FÜR EINE AUSSAGE, und das ist nicht Zierde: Farbe allein
+ * scheidet jeden aus, der sie nicht unterscheidet, und ein Glyph allein
+ * scheidet jeden aus, der die Legende nicht kennt.
+ *
+ *   Zeichen   ○ nichts · ◐ teilweise · ● vollständig · ? nicht ermittelbar
+ *   Farbe     muted · amber · emerald · muted
+ *   Wörter    `title` für die Maus, `aria-label` für den Screenreader
+ *
+ * KEIN `--accent`. Gold ist in diesem Produkt Besitz und Marke, nicht Zustand
+ * und nicht Handlung — `src/lib/design/roles.test.ts` hält das über jede
+ * Komponentendatei fest, und der erste Entwurf dieser Zelle ist genau daran
+ * gescheitert. Bernstein ist die Farbe, die das Verkaufsbuch für „teilweise"
+ * schon benutzt.
+ *
+ * WARUM ○ ◐ ● UND NICHT ○ ✓ WIE BEIM GESCHWISTER. Die Nachbarspalte `Lager`
+ * schreibt „Eingebucht ✓" aus; ein zweites ✓ unmittelbar daneben hiesse
+ * zweimal dasselbe für zwei verschiedene Dinge. Leer, halb, voll ist dagegen
+ * genau die Dreistufigkeit, die hier gemeint ist.
+ *
+ * `unknown` ist bewusst NICHT dasselbe wie `blocked`, obwohl beide gedämpft
+ * sind: grau heisst „beantwortet, und die Antwort ist nein", das Fragezeichen
+ * heisst „nicht beantwortet". Ein Beleg, der als nicht vorhanden dargestellt
+ * wird, wäre die irreführendste Antwort von allen.
+ */
+export type StatusDotTone = "blocked" | "partial" | "complete" | "unknown";
+
+/*
+ * Eine Klasse je Ton, ausgeschrieben statt zusammengesetzt — Tailwind findet
+ * Klassen durch Lesen des Quelltexts, und ein zur Laufzeit gebauter Name ist
+ * ein Name, der nie erzeugt wird. Dieselbe Begründung steht über `TONE` in
+ * `sale-indicator.tsx`.
+ */
+const DOT_TONE: Record<StatusDotTone, string> = {
+  blocked: "text-muted",
+  partial: "text-amber-400",
+  complete: "text-emerald-400",
+  unknown: "text-muted",
+};
+
+const DOT_GLYPH: Record<StatusDotTone, string> = {
+  blocked: "○",
+  partial: "◐",
+  complete: "●",
+  unknown: "?",
+};
+
+export function StatusDot({ tone, label }: { tone: StatusDotTone; label: string }) {
+  return (
+    <span role="img" aria-label={label} title={label}
+          className={`${DOT_TONE[tone]} text-sm leading-none`}>
+      {DOT_GLYPH[tone]}
+    </span>
+  );
+}

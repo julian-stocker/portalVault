@@ -106,6 +106,34 @@ export const fetchLedger = cache(
         showcaseCount: Number(r.showcase_count ?? 0),
         updatedAt: r.updated_at === null || r.updated_at === undefined
           ? null : String(r.updated_at),
+        /*
+         * 0124. `status_known` ist der Marker: fehlt er, hat diese Datenbank
+         * die Migration nicht, und dann sind die zehn Felder darunter OHNE
+         * AUSSAGE — `receipt-status.ts` antwortet darauf `unknown`, nicht
+         * „kein Beleg". Ein fehlendes Feld und ein beantwortetes Nein sind
+         * zwei verschiedene Dinge.
+         *
+         * Alles andere wird genauso defensiv gelesen wie `dailyIndex` seit
+         * `0116`: `=== true` statt `Boolean(...)`, damit ein fehlendes Feld
+         * `false` ergibt und nicht `undefined`, und `receiptStale` behält
+         * seine drei Zustände, weil `null` hier etwas bedeutet.
+         */
+        statusKnown: r.status_known === true,
+        hasSenderName: r.has_sender_name === true,
+        hasSenderStreet: r.has_sender_street === true,
+        hasSenderPostalCode: r.has_sender_postal_code === true,
+        hasSenderCity: r.has_sender_city === true,
+        hasOrigin: r.has_origin === true,
+        hasAgreement: r.has_agreement === true,
+        receiptNumber: r.receipt_number === null || r.receipt_number === undefined
+          ? null : String(r.receipt_number),
+        receiptIssuedAt: r.receipt_issued_at === null || r.receipt_issued_at === undefined
+          ? null : String(r.receipt_issued_at),
+        receiptRevision: r.receipt_revision === null || r.receipt_revision === undefined
+          ? null : Number(r.receipt_revision),
+        receiptStale: r.receipt_stale === true ? true
+          : r.receipt_stale === false ? false
+          : null,
       };
     });
 

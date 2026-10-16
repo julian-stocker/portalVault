@@ -290,9 +290,21 @@ describe("die Felder reisen über eine Positivliste, nicht über die Zeile", () 
   it("auch die Detailseiten-Projektion bleibt unverändert", () => {
     /* `fetchPurchase` liest weiter seine dreizehn benannten Felder. Die
        neuen Spalten reisen in `seller_purchase()` zwar mit, werden dort aber
-       nicht gelesen — die Positivliste ist genau dafür da. */
+       nicht gelesen — die Positivliste ist genau dafür da.
+     *
+     * GEPRÜFT WIRD DIE LESEFORM `r.<spalte>`, NICHT DAS WORT.
+     *
+     * Hier stand `not.toContain(column)`, und das war bis `0124` dasselbe.
+     * Seit `0124` liest `queries.ts` `r.has_sender_name` — einen
+     * WAHRHEITSWERT darüber, ob etwas da ist, und ausdrücklich nicht den
+     * Wert. Das Wort `sender_name` steckt als Teilzeichenkette darin, der
+     * Zugriff auf die Spalte aber nicht.
+     *
+     * Die Zusicherung wird dadurch GENAUER, nicht schwächer: `r.sender_name`
+     * irgendwo in dieser Datei lässt sie weiterhin fallen, und genau das ist
+     * der Datenfluss, den `docs/SECURITY.md` verbietet. */
     for (const column of COLUMNS) {
-      expect(QUERIES, column).not.toContain(column);
+      expect(QUERIES, column).not.toContain(`r.${column}`);
     }
   });
 

@@ -21,7 +21,9 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { allMigrations, code, latestFunction, migrationSource } from "@/test-support/migrations";
+import {
+  code, latestFunction, migrationFiles, migrationSource,
+} from "@/test-support/migrations";
 
 const SQL = migrationSource("0119_orderbook_display_names.sql");
 const PRIOR = migrationSource("0116_purchase_factor_showcase_and_ledger.sql");
@@ -48,7 +50,10 @@ describe("die Rangfolge des Anzeigenamens", () => {
 
   it("der Ledger löst sie vollständig auf", () => {
     const fn = latestFunction("seller_orderbook_ledger");
-    expect(fn.file).toBe("0119_orderbook_display_names.sql");
+    /* `0124` hat den Rumpf aus `0119` übernommen und um den Belegzustand
+       erweitert — die Namensauflösung darunter ist dieselbe, und genau das
+       prüfen die drei Zusicherungen unten. */
+    expect(fn.file).toBe("0124_orderbook_receipt_status.sql");
     expect(code(fn.body)).toContain("coalesce(s.display_name_override, s.name,");
     expect(code(fn.body)).toContain("i.raw_name, i.sky_id))");
     expect(fn.body).not.toContain("coalesce(s.name, i.raw_name, i.sky_id)");
@@ -204,13 +209,40 @@ describe("außer den drei Stellen ist nichts geändert", () => {
     }
   });
 
-  it("und 0119 ist die letzte Migration, die diese beiden anfasst", () => {
-    for (const name of ["seller_purchase", "seller_orderbook_ledger"]) {
-      expect(latestFunction(name).file, name).toBe("0119_orderbook_display_names.sql");
-    }
-    /* Keine spätere Datei legt sie erneut an. */
-    expect(allMigrations.lastIndexOf("create or replace function public.seller_orderbook_ledger("))
-      .toBeGreaterThan(-1);
+  it("seit 0119 hat nur 0124 den Ledger angefasst, und seller_purchase niemand", () => {
+    /*
+     * DIE ZUSICHERUNG BLEIBT, DIE ERWARTUNG WÄCHST.
+     *
+     * Hier stand „0119 ist die letzte Migration, die diese beiden anfasst",
+     * und das war der richtige Wächter: eine spätere Datei, die eine dieser
+     * Funktionen unbemerkt neu anlegt, hätte die Namensauflösung lautlos
+     * zurückdrehen können.
+     *
+     * `0124` fasst den Ledger an — mit Freigabe, für den Belegzustand, und
+     * unter Beibehaltung jeder Zeile darunter. `seller_purchase` ist
+     * unverändert bei `0119`. Jede WEITERE Fassung fällt hier wieder auf.
+     */
+    expect(latestFunction("seller_purchase").file)
+      .toBe("0119_orderbook_display_names.sql");
+    expect(latestFunction("seller_orderbook_ledger").file)
+      .toBe("0124_orderbook_receipt_status.sql");
+
+    /*
+     * UND DIE KETTE DER ANLAGEN ENDET AUF GENAU DIESEN ZWEI DATEIEN.
+     *
+     * Der Ledger ist seit `0056` zehnmal erweitert worden — eine Zählung über
+     * die ganze Historie sagt also nichts. Was etwas sagt, ist das ENDE der
+     * Kette: nach `0119` kommt genau eine Datei, und das ist `0124`. Eine
+     * elfte Fassung fällt hier auf, bevor sie unbemerkt die Namensauflösung
+     * zurückdreht.
+     */
+    const anlagen = migrationFiles.filter((file) =>
+      migrationSource(file).includes(
+        "create or replace function public.seller_orderbook_ledger("));
+    expect(anlagen.slice(-2)).toEqual([
+      "0119_orderbook_display_names.sql",
+      "0124_orderbook_receipt_status.sql",
+    ]);
   });
 });
 

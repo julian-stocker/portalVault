@@ -1035,6 +1035,43 @@ mit dem Auth-UI (V1.4) und brauchen dann eine eigene Verifikation.
 
 ---
 
+## 5b. Default-Privileges im Schema `public` (`0125`, ADR-0125)
+
+**Ein fehlendes `grant` ist auf Supabase kein fehlendes Recht.** Das Schema
+`public` trägt Default-Privileges, die jeder neu erzeugten Funktion EXECUTE für
+`anon`, `authenticated` und `service_role` mitgeben. Eine Funktion, die
+niemandem gehören soll, braucht deshalb ein ausdrückliches
+
+```sql
+revoke all on function public.<name>(<args>) from public, anon, authenticated;
+```
+
+**Alle drei Rollen nennen.** `revoke … from public, anon` allein gilt als
+Fehler — genau diese Zeile stand in `0122` und ließ `authenticated` EXECUTE auf
+`purchase_receipt_fingerprint(bigint)` behalten, einer `security
+definer`-Funktion ohne Berechtigungstor. `0125` hat das korrigiert. Das
+Vorbild ist `purchase_market_value(bigint)` (`0053`, `0116`).
+
+**`service_role` bleibt.** Die Rolle ist der serverseitige Schlüssel, nie aus
+einem Browser erreichbar, und umgeht RLS bauartbedingt. Die Nachbedingungen von
+`0124` und `0125` prüfen ausdrücklich, dass sie EXECUTE **behält**.
+
+**Zwei Fallen beim Prüfen von Rechten:**
+
+- `has_function_privilege('public', …)` bricht ab — `public` ist ein
+  Pseudo-Empfänger im ACL (`grantee = 0`), kein Eintrag in `pg_roles`. PUBLIC
+  wird über `aclexplode` geprüft.
+- **Ein NULL-`proacl` heißt nicht „keine Rechte", sondern „Standardrechte"** —
+  und der Standard für eine Funktion ist EXECUTE für PUBLIC. Erst ein `revoke`
+  materialisiert den ACL. Eine Prüfung, die nur `has_function_privilege`
+  befragt, sieht diesen Zustand nicht.
+
+**Was `0125` nicht geändert hat:** die Funktion selbst, `0122`, irgendwelche
+Daten, und die Erreichbarkeit der Belegfunktionen für den Betreiber. Zugänglich
+ist der Fingerabdruck seither nur noch über die `security definer`-Kette
+desselben Eigentümers (`postgres`) — derselbe Mechanismus, auf dem die
+Schutzhülle `purchase_receipt_stale` aus `0124` ruht.
+
 ## 6. Anwendungssicherheit
 
 - **Keine eigene Passwortspeicherung** (siehe `docs/AUTH.md`).

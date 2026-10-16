@@ -1072,6 +1072,53 @@ export const de = {
         source: "Quelle",
         /* WO gekauft wurde (0118). Nicht bei wem — das ist der Verkäufer. */
         platform: "Plattform",
+        /* Zwei Zustände für den Eigenbeleg (0124). Kurz, weil die Spuren
+           schmal sind — die Erklärung trägt der Tooltip. */
+        data: "Daten",
+        receipt: "Beleg",
+      },
+      /*
+       * DIE TOOLTIPS DER ZWEI BELEGSPALTEN (0124).
+       *
+       * Jeder sagt ZUERST, was der Zustand bedeutet, und danach, was zu tun
+       * ist. Bei orange in der Datenspalte ist die Reihenfolge entscheidend:
+       * „Beleg möglich" steht vorn, damit niemand eine Sperre liest, wo eine
+       * Empfehlung steht.
+       */
+      receiptStatus: {
+        dataHead: "Daten für den Eigenbeleg",
+        /* Grau. Die drei Gründe, aus denen die Ausstellung fehlschlägt. */
+        blocked: "Kein Eigenbeleg möglich",
+        blockedTest: "Testeinkauf — bekommt keinen Beleg",
+        blockedNoDate: "Kaufdatum fehlt",
+        blockedNoItems: "keine Position erfasst",
+        /* Orange. Ausstellbar, aber ohne Absender. */
+        partial: "Eigenbeleg möglich, dokumentiert aber den Absender nicht",
+        /* Grün. Und ausdrücklich keine rechtliche Aussage. */
+        complete: "Absenderdaten vollständig — für einen Eigenbeleg ausreichend",
+        missingSenderName: "Absendername fehlt",
+        missingAddress: "Absenderanschrift fehlt",
+        partialAddress: "Absenderanschrift unvollständig (Straße, PLZ, Ort)",
+        /* Hinweise, die die Farbe NICHT ändern. */
+        hintNoOrigin: "Hinweis: keine Plattform-, Inserats- oder Referenzangabe",
+        hintNoAgreement: "Hinweis: kein Kommentar zur Kaufvereinbarung",
+        /* Steht unter JEDEM Datenstatus, auch unter grün. */
+        noLegalClaim:
+          "Keine Aussage über steuerliche oder rechtliche Anerkennung der Belegform",
+
+        receiptHead: "Eigenbeleg",
+        none: "Kein Eigenbeleg ausgestellt",
+        /* Orange. Und der Satz, der das Missverständnis verhindert. */
+        stale: "Belegrelevante Daten haben sich seit der Ausstellung geändert",
+        staleKept: "Der ausgestellte Beleg bleibt unverändert — er wird nicht neu ausgestellt",
+        match: "Stimmt mit den aktuellen Einkaufsdaten überein",
+        /* Der neutrale Zustand: keine Antwort ist keine Antwort. */
+        unknown: "Zustand nicht ermittelbar",
+        unknownHint: "Diese Datenbank liefert den Belegzustand nicht",
+        /** „SI-E-2026-000001 vom 14.10.2026" */
+        issued: (number: string, date: string) => `${number} vom ${date}`,
+        /** Ab der zweiten Fassung, die es heute nicht gibt. */
+        revision: (n: number) => `Fassung ${n}`,
       },
       sources: { manual: "manuell", excel_order_2026: "Order 2026" },
 

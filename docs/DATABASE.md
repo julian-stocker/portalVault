@@ -3539,6 +3539,74 @@ Unveränderlichkeitstrigger nicht.
 
 ---
 
+### 3.3ap `0124` — der Belegzustand steht in der Übersichtszeile
+
+`seller_orderbook_ledger` beantwortet seit `0124` zwei Fragen je Zeile, die der
+Betreiber vorher nur beantworten konnte, indem er jeden Einkauf aufklappte:
+reichen die Daten für einen Eigenbeleg, und gibt es einen, der noch zu den
+aktuellen Daten passt?
+
+**Unveränderte Signatur.** `create or replace` auf
+`(integer, integer, text, boolean, text)` — kein `drop`, keine zweite
+Overload, keine neue Rechtevergabe. Der Rumpf stammt Zeile für Zeile aus
+`0119`; geändert sind drei Zeilen (ein Komma, das letzte Schlüsselpaar des
+Seitenobjekts, der Funktionskommentar). Die Nachbedingungen prüfen einzeln
+nach, dass Filter, Suche, die fünf Zustandszähler, `is_open`,
+`is_incomplete`, die Summenstaffel, die Klassifikation und die Sortierung
+unverändert dastehen.
+
+**Elf neue Felder je Zeile:**
+
+| Feld | Inhalt |
+|---|---|
+| `status_known` | immer `true`. Der Marker, an dem der Anwendungscode erkennt, dass `0124` angewendet ist |
+| `has_sender_name` | `sender_name` ist gesetzt |
+| `has_sender_street`, `has_sender_postal_code`, `has_sender_city` | die drei Adresszeilen, einzeln |
+| `has_origin` | eine von `listing_url`, `listing_title`, `external_ref`, `platform` |
+| `has_agreement` | `agreement_note` ist gesetzt |
+| `receipt_number`, `receipt_issued_at`, `receipt_revision` | der Beleg am **Ende der Korrekturkette**, oder NULL |
+| `receipt_stale` | `content_fingerprint` gegen `purchase_receipt_fingerprint(id)`. NULL, wenn kein Beleg existiert |
+
+**Wahrheitswerte, keine Texte — und das ist eine Sicherheitsentscheidung.**
+Name und Anschrift einer Privatperson gehören nicht in die Nutzlast einer
+Liste über achtundachtzig Einkäufe; der (i)-Dialog zeigt sie für **einen**
+Einkauf. Die Nachbedingungen von `0124` lehnen die Migration ab, wenn
+`'sender_name', m.` oder eines der sechs anderen Wertfelder im Seitenobjekt
+auftaucht — und ebenso, wenn der Fingerabdruck selbst projiziert würde.
+`receipt_id` und `content_fingerprint` reisen durch die CTEs und bleiben
+drinnen; sie dienen allein dem Vergleich.
+
+**Der Vergleich benutzt die bestehende Funktion.** `purchase_receipt_fingerprint`
+aus `0122` bildet beide Seiten — den gespeicherten und den aktuellen Wert —,
+damit sie vergleichbar bleiben. Eine zweite Implementierung desselben Hashes
+würde auseinanderlaufen und danach entweder falsch warnen oder falsch
+schweigen.
+
+**Wo er gerechnet wird, und was das kostet.** Der Vergleich steht im
+`page`-Block, also **nach** allen Filtern, und in einem `case`, das die
+Funktion nur für Zeilen **mit** Beleg ruft. Die Last wächst damit mit der Zahl
+ausgestellter Belege im gefilterten Zeitraum, nicht mit der Zahl der Einkäufe.
+`purchase_receipt_fingerprint` baut ein `jsonb` über den Einkauf und
+aggregiert seine Positionen — bei vielen Belegen ist das zu messen. Heute
+existiert auf Production keiner.
+
+**Das Urteil fällt nicht in SQL.** Grau, orange, grün und „unbekannt"
+entstehen in `src/lib/orderbook/receipt-status.ts` aus diesen Fakten. Eine
+Farbregel in SQL ist eine Farbregel ohne Test.
+
+**`status_known` und warum es nötig ist.** Gegen eine Datenbank auf `0123`
+liefert der Ledger diese Felder nicht. Ein fehlendes `receipt_number` darf
+dann nicht als „kein Beleg ausgestellt" gelesen werden — die Frage wurde nicht
+gestellt, nicht mit nein beantwortet. Ein vorhandener Beleg, der als nicht
+vorhanden dargestellt wird, wäre die irreführendste Antwort von allen; `0124`
+liefert deshalb einen ausdrücklichen Marker statt sich auf das Fehlen zu
+verlassen.
+
+`0124` schreibt **keine** Zeile, legt keine Tabelle und keine Spalte an und
+fasst keinen ausgestellten Beleg an. Das könnte sie auch nicht:
+`purchase_receipts` hat RLS an, keine Policy, keine Tabellenrechte und einen
+Trigger gegen UPDATE und DELETE.
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**
@@ -4207,3 +4275,4 @@ doppelter Tipp im Katalog keinen Zähler zurücksetzt.
   **wo sie nicht hingehört** (ADR-0032): nicht an eine E-Mail-Adresse, nicht auf `profiles`.
 - **OPEN:** Liefert das öffentliche Shop-Lesefenster später eine Stückzahl oder nur einen
   Zustand? Eine sichtbare Rabattstufe verrät bereits einen groben Bestand (ADR-0033).
+

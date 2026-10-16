@@ -10830,3 +10830,241 @@ geändert hat, und der Anker neu zu setzen — nicht zu entfernen.
 Sobald PDFs gespeichert würden, wäre das Dokument und nicht die Zeile die
 Aufzeichnung, und die Frage nach einer Formatversion stellte sich neu. Ein Test
 hält fest, dass im Rechnungspfad kein Storage-Aufruf steht.
+
+---
+
+## ADR-0124 — Die Übersicht sagt, ob ein Beleg möglich ist und ob er noch stimmt
+
+**Status:** angenommen · 2026-10-15 · Migration `0124`
+
+### Kontext
+
+Nach `0122`/`0123` kann der Betreiber zu jedem Privatankauf einen Eigenbeleg
+ausstellen. Was er nicht sehen konnte, war der Zustand: ob die Daten eines
+Einkaufs für einen Beleg reichen, und ob ein ausgestellter Beleg noch zu den
+aktuellen Daten passt. Beides stand nur im (i)-Dialog, also einen Klick und
+eine Rückfahrt pro Einkauf entfernt — bei achtundachtzig Einkäufen ist das
+keine Auskunft, sondern eine Suche.
+
+Der naheliegende Weg wäre `seller_purchase_receipt(id)` je Zeile gewesen.
+Achtundachtzig RPC-Fahrten für zwei Punkte in einer Zeile sind der Preis dafür,
+die Antwort an der falschen Stelle zu holen.
+
+### Entscheidung
+
+**1. Der Ledger projiziert den Zustand mit.** `0124` erweitert
+`seller_orderbook_ledger` um elf Felder je Zeile, bei unveränderter Signatur
+(`create or replace`, kein `drop`). Der Ledger ist die Stelle, an der diese
+Seite ihre abgeleiteten Zeilenfakten schon hält: `is_open`, `is_incomplete`
+und die fünf Zustandszähler entstehen seit `0066` genau dort. Eine zweite
+Funktion `seller_purchase_receipt_states(bigint[])` wäre ebenfalls eine
+Migration gewesen, hätte aber eine zweite Fahrt und eine zweite Wahrheit
+darüber gebraucht, welche Zeilen sichtbar sind.
+
+**2. Wahrheitswerte, keine Texte — und das ist keine Sparmaßnahme.** Die
+Übersicht bekommt `has_sender_name`, nicht `sender_name`. Eine Liste über
+achtundachtzig Einkäufe, die für jeden davon Name und Anschrift einer
+Privatperson an den Browser schickt, wäre eine deutlich breitere Offenlegung
+als der (i)-Dialog, der einen Einkauf zeigt — und das bei offenen
+Datenschutzfragen (`docs/LEGAL.md` Abschnitt 9). Die Nachbedingungen von
+`0124` lehnen die Migration ab, wenn ein Wertfeld im Seitenobjekt auftaucht.
+
+**3. Drei Farben, weil es zwei Fragen sind.**
+`seller_issue_purchase_receipt` verlangt nur: kein Testeinkauf, ein
+Kaufdatum, mindestens eine Position. **Absenderdaten verlangt sie nicht.** Ein
+Beleg ohne Absender entsteht anstandslos — er dokumentiert bloß nicht, von wem
+gekauft wurde. „Ausstellbar" und „aussagekräftig" fallen damit auseinander,
+und zwei Farben hätten das verschwiegen:
+
+| | |
+|---|---|
+| grau | ausstellen würde fehlschlagen |
+| orange | ausstellen geht, der Absender fehlt |
+| grün | ausstellen geht, Absendername und Anschrift sind vollständig |
+
+Orange sagt nie „geht nicht", und der Tooltip stellt „Eigenbeleg möglich"
+voran, damit niemand eine Sperre liest, wo eine Empfehlung steht.
+
+**4. Grün ist keine rechtliche Aussage.** Es heißt: die Felder, die der Beleg
+zeigt, sind gefüllt. Ob die Form steuerlich anerkannt wird, ist nicht geprüft.
+Jeder Tooltip der Datenspalte trägt diesen Vorbehalt, **auch der grüne** — eine
+Farbe könnte sonst als Freigabe gelesen werden.
+
+**5. `sender_country`, Inserat und Kaufvereinbarung sind nicht
+grün-relevant.** Bei einem deutschen Privatankauf ist das Land implizit, und
+der Zeichner druckt es nur, wenn es da ist; `has_sender_country` wird deshalb
+gar nicht projiziert. Ein Inserat ist Referenz und niemals Beleggrundlage — es
+grün-relevant zu machen hieße, eine Angabe zu verlangen, die der Beleg bewusst
+nur als Hinweis trägt. Beide erscheinen im Tooltip als Hinweis, nicht als
+Mangel.
+
+**6. Der Abweichungsvergleich benutzt die bestehende Funktion.**
+`purchase_receipt_fingerprint` aus `0122` bildet beide Seiten. Sie schließt
+`note`, `is_test`, `source`, `daily_index`, `updated_at`, `client_token` und
+den Buchungszustand `state` einer Position aus — eine interne Notiz oder ein
+Einbuchen nach der Ausstellung löst also keine Abweichung aus. Zwei
+Implementierungen desselben Hashes würden auseinanderlaufen und danach
+entweder falsch warnen oder falsch schweigen.
+
+**7. Ein vierter Zustand, und er ist der wichtigste.** „Unbekannt" ist nicht
+grau. Gegen eine Datenbank ohne `0124` liefert der Ledger diese Felder nicht;
+ein fehlendes `receipt_number` darf dann **nicht** als „kein Beleg
+ausgestellt" gelesen werden — die Frage wurde nicht gestellt, nicht mit nein
+beantwortet. Dasselbe gilt für einen vorhandenen Beleg, dessen Vergleich nicht
+zu bilden war: „stimmt überein" wäre eine Behauptung ohne Grundlage. `0124`
+liefert dafür `status_known` als ausdrücklichen Marker, und die Zelle zeigt ein
+Fragezeichen statt eines leeren Kreises.
+
+**8. Das Urteil fällt in TypeScript.** `src/lib/orderbook/receipt-status.ts`
+macht aus den Fakten die vier Zustände. Eine Farbregel in SQL ist eine
+Farbregel ohne Test; eine reine Funktion lässt sich über jede Kombination
+prüfen, einschließlich der Nullwerte, die in echten Daten selten
+zusammentreffen.
+
+**9. Nie Farbe allein.** Jeder Zustand hat sein eigenes Zeichen
+(`○ ◐ ● ?`) und seinen vollständigen Satz in `title` und `aria-label`. Die
+Spalte funktioniert damit in Graustufen, unter `forced-colors` und für einen
+Screenreader — dieselbe Regel, die `SaleIndicator` seit `0090` befolgt. **Kein
+`--accent`:** Gold ist in diesem Produkt Besitz und Marke, nicht Zustand;
+`src/lib/design/roles.test.ts` hält das über jede Komponentendatei fest, und
+der erste Entwurf dieser Zelle ist daran gescheitert.
+
+### Konsequenzen
+
+Die Einkaufstabelle hat zehn Spuren statt acht und braucht 65,75rem statt
+57,25rem. Für schmale Bildschirme ändert sich nichts: die Tabelle hatte seit
+`0088` einen Spurensatz für jede Breite, scrollte auf jedem Telefon seitwärts
+und scrollt jetzt 8,5rem weiter. Kein Media-Query, keine versteckte Spalte.
+
+Der Fingerabdruckvergleich ist zusätzliche Last. Er läuft nach allen Filtern
+und nur für Zeilen mit Beleg; heute existiert auf Production keiner. Mit der
+Zahl ausgestellter Belege im gefilterten Zeitraum wächst sie — und `0122` hat
+dafür eine nicht offensichtliche Quelle: der Positionsname im Fingerabdruck
+löst `display_name_override` auf, ein Rename im Katalog färbt also jeden Beleg
+orange, der diese Figur enthält. Fachlich richtig, der gedruckte Name wäre ein
+anderer; die Ursache liegt aber in `/admin` und nicht im Orderbuch.
+
+**Was diese Entscheidung nicht einführt:** keinen Korrekturweg für Belege, kein
+automatisches Neuausstellen, keine Änderung an einem ausgestellten Beleg und
+keine an der Fingerabdruck-Logik. Orange ist eine Mitteilung, keine
+Aufforderung — der Tooltip sagt ausdrücklich, dass der ausgestellte Beleg
+unverändert bleibt.
+
+---
+
+## ADR-0125 · Default-Privileges sind kein stillschweigendes Nein
+
+**Status:** akzeptiert · **Migration:** `0125_revoke_internal_fingerprint_execute.sql`
+
+### Kontext
+
+Der Staging-Preflight zu `0124` hat gezeigt, dass `authenticated` EXECUTE auf
+`public.purchase_receipt_fingerprint(bigint)` besitzt. Keine Migration hat
+dieses Recht vergeben. Es stammt aus den Default-Privileges, die Supabase im
+Schema `public` für `anon`, `authenticated` und `service_role` einrichtet:
+jede neu erzeugte Funktion bekommt EXECUTE, ohne dass ein `grant` im
+Quelltext steht.
+
+`0122` entzieht die Funktion nur `public` und `anon`. Dahinter steckt die
+Annahme **„kein `grant` = kein Recht"** — auf Supabase falsch. Die übrigen
+Funktionen in `0122` nennen `authenticated` ausdrücklich, aber mit einem
+`grant`, weil sie für den eingeloggten Betreiber gedacht sind. Der
+Fingerabdruck ist die einzige, die es nicht ist, und genau dort fehlte die
+Zeile.
+
+Die Hausregel stand längst fest: `purchase_market_value(bigint)` ist derselbe
+Typ interner Helfer und wird in `0053` und `0116` `from public, anon,
+authenticated` entzogen. Die ACL-Abfrage bestätigt für ihn den Zielzustand.
+
+### Entscheidung
+
+**Interne Helfer werden allen drei Anwendungsrollen ausdrücklich entzogen, nie
+durch Weglassen eines `grant`.** `0125` entzieht `authenticated` das EXECUTE
+auf den Fingerabdruck und lässt `service_role` unberührt. Zugänglich bleibt er
+ausschließlich über die `security definer`-Kette desselben Eigentümers.
+
+**`service_role` behält EXECUTE, und das ist eine Entscheidung.** Die Rolle ist
+der serverseitige Schlüssel, nie aus einem Browser erreichbar, und umgeht RLS
+bauartbedingt. Ein Entzug dort wäre kosmetisch und würde einen Unterschied
+behaupten, den es nicht gibt. Die Nachbedingungen von `0124` und `0125`
+prüfen deshalb ausdrücklich, dass `service_role` das Recht **behält** —
+andernfalls hätte `0124` an seiner eigenen Nachbedingung abgebrochen.
+
+**`0122` wird nicht umgeschrieben.** Eine angewendete Migration bleibt, wie sie
+ist; der Zustand wird vorwärts korrigiert.
+
+### Warum das Recht gefährlich war
+
+Die Funktion ist `security definer` mit leerem `search_path` und hat **kein
+Berechtigungstor im Rumpf**. Sie nimmt eine beliebige `purchase_id` und liest
+an jeder RLS vorbei. Zurück kommt nur ein SHA-256 — keine Namen, keine
+Beträge. Aber: ein nicht vorhandener Einkauf ergibt den Hash des leeren
+Strings, eine bekannte Konstante, womit Anzahl und ID-Bereich aller Einkäufe
+für jedes eingeloggte Konto abzählbar sind; `pg_proc.prosrc` ist weltlesbar,
+die Hash-Vorlage also öffentlich, was ein Bestätigungsorakel über
+Absenderdaten eröffnet; und wiederholte Aufrufe zeigen, *wann* sich ein Ankauf
+geändert hat. Betroffen war jedes eingeloggte Konto, auch ein frisch selbst
+registriertes Kundenkonto.
+
+### Anwendung — Staging war vor der Migration dran
+
+Am **2026-10-15** wurde auf Staging genau die eine Zeile von Hand ausgeführt:
+
+```sql
+revoke execute on function public.purchase_receipt_fingerprint(bigint) from authenticated;
+```
+
+Sonst nichts aus `0125`. Das ist festgehalten, weil es die Lage asymmetrisch
+macht und bleibt:
+
+| | Zustand vor `0125` | was `0125` dort tut |
+|---|---|---|
+| **Staging** | `authenticated = false` | Leerlauf — ihr Wert ist die **Nachprüfung** |
+| **Production** | `authenticated = true` | der tatsächliche Entzug |
+
+Die Migration bleibt trotzdem die versionierte Quelle der Wahrheit und wird
+auch auf Staging angewendet: ein `revoke` auf ein bereits entzogenes Recht ist
+ein Leerlauf, kein Fehler, und ihre Nachbedingungen prüfen den Zielzustand
+unabhängig davon, wer ihn hergestellt hat. Die Vorbedingung sagt den
+Unterschied ausdrücklich:
+
+```
+NOTICE:  0125: authenticated hat bereits kein EXECUTE — Leerlauf.
+```
+
+**Der Preflight musste dafür geändert werden.** Seine erste Fassung verlangte
+`authenticated = true` als *blockierende* Bedingung — der unsichere Zustand war
+Freigabevoraussetzung. Nach dem manuellen `revoke` meldete sie einen Mangel,
+wo keiner war. Jetzt benennt eine Zeile den gefundenen Zustand
+(`UNSICHER_VOR_0125` / `SICHER_NACH_REVOKE`) und eine zweite verlangt, dass er
+*einer der beiden bekannten* ist; alles andere (`UNERWARTET_KEIN_ACL`,
+`UNERWARTET_PUBLIC_DARF`, …) blockiert. Der **Postflight** lässt dagegen genau
+einen Wert zu. Vorher einordnen, nachher fordern.
+
+### Konsequenzen
+
+Jede künftige interne Helferfunktion in `public` nennt alle drei Rollen im
+`revoke`. Ein `revoke … from public, anon` allein gilt als Fehler.
+
+**Ein Preflight darf einen bereits sicheren Zustand nicht rot färben.** Eine
+Prüfung, deren grüner Zustand den Mangel bestätigt, erzieht dazu, rote Zeilen
+zu übergehen — und das ist teurer als die Information, die sie liefert.
+Zustände werden klassifiziert, nicht erwartet.
+
+Drei Prüfannahmen sind mit demselben Preflight gefallen, und sie haben
+dieselbe Form — ein Vergleich gegen eine Zeichenkette, deren Gestalt nicht
+gemessen war. Zwei davon standen in den Nachbedingungen von `0124` und hätten
+die Migration abgebrochen:
+
+1. `pg_get_function_identity_arguments` druckt die **Parameternamen** mit.
+   Signaturen werden über `to_regprocedure` aufgelöst oder als
+   `proargtypes::regtype[]` verglichen.
+2. PostgreSQL speichert den leeren `search_path` **zitiert**: `search_path=""`.
+   Geprüft wird mit Präfix (Existenz) **und** Wert (Leerheit) — ein
+   Präfixvergleich allein ließe `search_path=public` durch.
+3. Ein Rumpfmarker darf nicht an der Position eines Gliedes in einer
+   Oder-Kette hängen. `'or i.raw_name ilike'` stand nie im Rumpf; `0119`
+   prüfte dieselbe Stelle korrekt als Disjunktion.
+
+`src/lib/business/fingerprint-rights.test.ts` hält alle drei über **jede**
+Migrationsdatei fest.

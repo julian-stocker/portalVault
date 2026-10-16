@@ -381,13 +381,21 @@ describe("0122 legt an, was der Beleg braucht", () => {
   it("sie liegt in der lückenlosen Folge, und 0123 folgt ihr", () => {
     /*
      * „die höchste Migration" stand hier, bis `0123` die Formatversion
-     * nachtrug. Die Zusicherung, die bleibt, ist die über die FOLGE — die
-     * drei Tests in `src/lib/commerce/` verlangen sie lückenlos.
+     * nachtrug — danach, bis `0124` den Belegzustand in die Übersicht
+     * brachte, und jetzt bis `0125` dem internen Fingerabdruck das EXECUTE
+     * für `authenticated` entzog. Die Zusicherung, die bleibt, ist die über
+     * die FOLGE: die drei Tests in `src/lib/commerce/` verlangen sie
+     * lückenlos.
+     *
+     * Dass hier eine Dateiname steht, der sich mit jeder Migration ändert,
+     * ist Absicht und kein Mangel: er stellt sicher, dass jemand, der eine
+     * Migration anlegt, genau diesen Test liest.
      */
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    expect(files[files.length - 1]).toBe("0123_purchase_receipt_format_version.sql");
+    expect(files[files.length - 1]).toBe("0125_revoke_internal_fingerprint_execute.sql");
+    expect(files[files.length - 2]).toBe("0124_orderbook_receipt_status.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

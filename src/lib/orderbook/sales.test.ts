@@ -1052,8 +1052,9 @@ describe("the ledger renders as a table", () => {
   it("Einkauf's cells match the tracks Einkauf declares", () => {
     const columns = constTracks("PURCHASE_COLUMNS", EINKAUF);
     const items = constTracks("PURCHASE_ITEM_COLUMNS", EINKAUF);
-    /* Acht seit 0118: die Plattformspur kam zwischen Datum und Artikel. */
-    expect(columns).toHaveLength(8);
+    /* Acht seit 0118 (die Plattformspur zwischen Datum und Artikel), zehn
+       seit 0124 (`Daten` und `Beleg` vor `Lager`). */
+    expect(columns).toHaveLength(10);
     expect(items).toHaveLength(6);
     // The last purchase track carries the (i), so it may not be wider.
     expect(columns[columns.length - 1]).toBe("1.5rem");
