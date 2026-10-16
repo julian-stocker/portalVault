@@ -17,7 +17,8 @@ import { readdirSync, readFileSync } from "node:fs";
 
 import { BACKUP_SECTIONS } from "./manifest";
 import {
-  auditBackup, buildFieldPlan, fieldsFromBackupSql, report, STAGING_BASELINE,
+  auditBackup, baselineForDocument, BASELINE_JE_PROJEKT, buildFieldPlan,
+  fieldsFromBackupSql, PRODUCTION_BASELINE, report, STAGING_BASELINE,
   type ExportBaseline, type FieldPlanEntry,
 } from "./export-audit";
 
@@ -646,5 +647,171 @@ describe("leere Bereiche beweisen keine Vollständigkeit", () => {
       "          'kind', t.kind,\n", "");
     const { conflicts } = buildFieldPlan(BACKUP_SECTIONS, kaputt);
     expect(conflicts.join(" ")).toContain("sale_fees: SQL ohne kind");
+  });
+});
+
+/* ==========================================================================
+ * Jede Umgebung gegen ihre eigene Baseline
+ * ======================================================================== */
+
+/**
+ * DER FEHLALARM, DEN DIESER BLOCK VERHINDERT.
+ *
+ * Die erste Prüfung der Production-Sicherung lief gegen die Staging-Baseline
+ * und meldete **zwölf** Abweichungen: 6 152 Datensätze statt 5 508, 88
+ * Einkäufe statt 90, 2 142 Positionen statt 2 128, und fünf belegbezogene
+ * Zeilen, weil Production **keinen** Eigenbeleg hat und Staging zwei. Jede
+ * Zahl war richtig gerechnet, und keine war ein Mangel der Datei.
+ *
+ * Eine Baseline ist die Messung EINER Umgebung zu EINEM Zeitpunkt. Sie auf
+ * eine andere anzuwenden erzeugt Befunde, die man wegerklären muss — und das
+ * ist die schlechteste Art von Prüfung: eine, die man zu ignorieren lernt.
+ */
+describe("zwei Umgebungen, zwei Baselines", () => {
+  const LEER = md5("");
+
+  it("die Production-Baseline nennt ihre Quelle und 0 Belege", () => {
+    expect(PRODUCTION_BASELINE.source).toContain("zmiwxswrpkmizvqsgype");
+    expect(PRODUCTION_BASELINE.source).toContain("0 Eigenbelege");
+    expect(PRODUCTION_BASELINE.receipts).toEqual([]);
+    expect(PRODUCTION_BASELINE.areas).toBe(28);
+    expect(PRODUCTION_BASELINE.totalRecords).toBe(6152);
+    expect(PRODUCTION_BASELINE.counts).toEqual({
+      purchases: 88, purchase_items: 2142, purchase_receipts: 0,
+      purchase_receipt_downloads: 0, purchase_receipt_counters: 0,
+    });
+  });
+
+  it("und beide Umgebungen führen dieselben 28 Bereiche", () => {
+    /* Der Umfang des Exports ist eine Eigenschaft der FUNKTION, nicht der
+       Umgebung. Unterschiedlich sind nur die Zahlen. */
+    expect(PRODUCTION_BASELINE.areaKeys).toEqual(STAGING_BASELINE.areaKeys);
+    expect([...PRODUCTION_BASELINE.areaKeys].sort())
+      .toEqual(BACKUP_SECTIONS.map((s) => s.key).sort());
+  });
+
+  it("die Belegabdrücke der leeren Menge sind md5 über nichts", () => {
+    /* Kein Fingerabdruck von Daten, sondern die Abwesenheit von Daten. */
+    expect(PRODUCTION_BASELINE.fingerprintDigest).toBe(LEER);
+    expect(PRODUCTION_BASELINE.chainDigest).toBe(LEER);
+    expect(PRODUCTION_BASELINE.linesDigest).toBe(LEER);
+    expect(PRODUCTION_BASELINE.canonicalLinesDigest).toBe(LEER);
+  });
+
+  it("die Zahlen der beiden Umgebungen sind verschieden — darum zwei", () => {
+    expect(PRODUCTION_BASELINE.totalRecords)
+      .not.toBe(STAGING_BASELINE.totalRecords);
+    expect(PRODUCTION_BASELINE.counts.purchases)
+      .not.toBe(STAGING_BASELINE.counts.purchases);
+    expect(STAGING_BASELINE.receipts.length).toBe(2);
+  });
+
+  /* ------------------------------------------------- Zuordnung aus der Datei */
+
+  it("die Baseline kommt aus `source_project` der Datei", () => {
+    const stag = { ...dokument(), source_project: "qqxcpesbwfxzgytkdsac" };
+    const prod = { ...dokument(), source_project: "zmiwxswrpkmizvqsgype" };
+    expect(baselineForDocument(stag)).toBe(STAGING_BASELINE);
+    expect(baselineForDocument(prod)).toBe(PRODUCTION_BASELINE);
+    expect(Object.keys(BASELINE_JE_PROJEKT).sort())
+      .toEqual(["qqxcpesbwfxzgytkdsac", "zmiwxswrpkmizvqsgype"]);
+  });
+
+  it("und wird NICHT geraten, wenn das Projekt unbekannt ist", () => {
+    /* Eine geratene Baseline sagt nichts über die Datei und alles über die
+       Erwartung. Lieber keine Prüfung als eine falsche. */
+    expect(baselineForDocument({ ...dokument(), source_project: "fremd" })).toBeNull();
+    /* `dokument()` trägt die Staging-Referenz — ohne sie gibt es keine
+       Zuordnung und damit keine Prüfung. */
+    const ohneProjekt: Record<string, unknown> = { ...dokument() };
+    delete ohneProjekt.source_project;
+    expect(baselineForDocument(ohneProjekt)).toBeNull();
+    expect(baselineForDocument(null)).toBeNull();
+    expect(baselineForDocument({ source_project: 42 })).toBeNull();
+  });
+
+  it("das Werkzeug ordnet selbst zu und bricht sonst ab", () => {
+    expect(TOOL).toContain("baselineForDocument(doc)");
+    expect(TOOL).toContain('arg("baseline")');
+    expect(TOOL).toContain("Die Datei wurde NICHT geprüft");
+    expect(TOOL).toContain("BASELINE:");
+  });
+});
+
+/* ==========================================================================
+ * „Genau eine aktuelle Fassung" — oder gar keine
+ * ======================================================================== */
+
+/**
+ * Die Prüfung verlangt die Spitze der Korrekturkette. In einer Umgebung ohne
+ * Eigenbeleg gibt es keine Kette und keine Spitze; `=== 1` wäre dort
+ * unerfüllbar. Ein unerfüllbares Soll ist kein Befund, sondern ein
+ * Konstruktionsfehler der Prüfung — Production lief am 2026-10-17 genau in
+ * diesen Fall.
+ *
+ * Abgeschwächt wird dabei nichts: die Ausnahme greift nur, wenn die Baseline
+ * **keinen** Beleg erwartet UND die Datei keinen führt.
+ */
+describe("die Kettenspitze bei null Belegen", () => {
+  const fassung = (findings: { label: string; ok: boolean; detail: string }[]) =>
+    findings.find((f) => f.label === "genau eine aktuelle Fassung")!;
+
+  const leeresDokument = {
+    ...dokument({ receipts: [], downloads: [] }),
+    source_project: "zmiwxswrpkmizvqsgype",
+  };
+
+  it("ohne Beleg und ohne Erwartung: bestanden, als nicht anwendbar", () => {
+    const basis = { ...PRODUCTION_BASELINE, fieldPlan: PLAN.plan,
+                    totalRecords: Object.values(
+                      leeresDokument.data as Record<string, unknown[]>)
+                      .reduce((n, l) => n + l.length, 0),
+                    counts: {} };
+    const f = fassung(auditBackup(leeresDokument, basis).findings);
+    expect(f.ok).toBe(true);
+    expect(f.detail).toBe("nicht anwendbar (keine Belege)");
+  });
+
+  it("ohne Beleg, aber MIT Erwartung: weiter ein Fehler", () => {
+    /* Die Ausnahme darf nicht zur Hintertür werden. Erwartet die Baseline
+       Belege und die Datei hat keine, ist das ein Befund. */
+    const basis = { ...STAGING_BASELINE, fieldPlan: PLAN.plan,
+                    totalRecords: Object.values(
+                      leeresDokument.data as Record<string, unknown[]>)
+                      .reduce((n, l) => n + l.length, 0),
+                    counts: {} };
+    const f = fassung(auditBackup(leeresDokument, basis).findings);
+    expect(f.ok).toBe(false);
+    expect(f.detail).toBe("0");
+  });
+
+  it("mit Kette: genau eine Spitze besteht", () => {
+    const doc = dokument();
+    const f = fassung(auditBackup(doc, baselineFuer(doc)).findings);
+    expect(f.ok).toBe(true);
+    expect(f.detail).toBe("1");
+  });
+
+  it("mit ZWEI Spitzen: fällt — die Prüfung ist nicht aufgeweicht", () => {
+    /* Zwei Ursprungsbelege zum selben Einkauf, keiner ersetzt: zwei gültige
+       Fassungen. Genau das soll die Prüfung finden. */
+    const doc = dokument({
+      receipts: [
+        beleg(),
+        beleg({ id: 2, receipt_number: "SI-E-2026-000002",
+                content_fingerprint: "b".repeat(64) }),
+      ],
+      downloads: [],
+    });
+    const f = fassung(auditBackup(doc, baselineFuer(doc)).findings);
+    expect(f.ok).toBe(false);
+    expect(f.detail).toBe("2");
+  });
+
+  it("die echte Production-Datei würde damit durchlaufen", () => {
+    /* Keine Datei im Test — nur die Rechnung: 0 Belege, 0 Abrufe, 0 Zähler,
+       6 152 Datensätze, und die Baseline erwartet genau das. */
+    expect(PRODUCTION_BASELINE.counts.purchase_receipts).toBe(0);
+    expect(PRODUCTION_BASELINE.receipts).toHaveLength(0);
   });
 });

@@ -79,6 +79,12 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
 | `backup_architecture_two_tier.md` | die zweistufige Backup-Architektur: Geschäftsbackup und geschütztes Notfall-Backup, Abhängigkeitsmatrix, Implementierungsplan |
 | `0131_function_body_check.sql` | der Anker gegen den Zirkel: `md5(prosrc)` der lebenden `seller_business_backup()` gegen die Fassung im Repository — rein lesend |
 | `0131_restore_plan.md` | der Plan für den isolierten Wiederherstellungstest: Reihenfolge, Trigger, Identitäten, Lücken, Verifikation — **nichts davon ausführen** |
+| `dr/*.sql` | die sechs rein lesenden Abfragen des Wiederherstellungstests — laufen unverändert auf Quelle und Ziel, verglichen wird hinterher |
+| `disaster_recovery_pg_dump.md` | Plan für die logische Gesamtsicherung mit `pg_dump` und den isolierten Restore-Test — Werkzeuge, Verbindung, Lücken, Prüfungen, Abbruchkriterien |
+| `production_inventory.md` | rein lesende Bestandsaufnahme des Production-Migrationsstands und der Supabase-Backuplage |
+| `backup_evidence_check.sql` | sind die beiden Production-Sicherungen wirklich entstanden? Historie der Plattformsicherung, Gegenzahlen für das Business-Backup — ohne personenbezogene Daten |
+| `receipt_lock_check.sql` | hält die Sperre der Belegausstellung? Jede API-Rolle einzeln, PUBLIC über den ACL — rein lesend |
+| `release_0126_0131.md` | **die geltende Freigabeprüfung** für den Production-Rollout: gemessene Wirkung je Migration, Reihenfolge, Rücknahmefenster, Backuplücken, zwei getrennte Freigaben |
 | `production_rollout_0126_0131.md` | die Bereitschaftsprüfung für Production: Messung zuerst, Backuplage, Reihenfolge, Abbruchkriterien, Rücknahme je Migration |
 | `0132_platform_export_receipts_proposal.md` | **Vorschlag, nicht umgesetzt**: die Eigenbelege im Plattformarchiv |
 
@@ -212,6 +218,14 @@ Wichtig an der Abgrenzung: die **anderen** `foreach v_key`-Schleifen derselben
 Dateien suchen nackte Feldnamen mit `like`-Mustern oder Verbotsmarker mit
 `position(v_key in v_code)`. Deren Einträge haben zu Recht kein `|`. Ein Test,
 der dort eines verlangte, würde das Falsche prüfen — er zählt sie getrennt.
+
+## Betriebliche Schalter liegen nicht hier
+
+`supabase/operations/` enthält zwei Dateien, die Production **ändern** —
+die Sperre der Belegausstellung und ihre Rücknahme. Sie sind keine
+Migrationen und keine Prüfungen; `supabase/operations/README.md` erklärt sie.
+Der zugehörige **lesende** Nachweis ist `receipt_lock_check.sql` in diesem
+Ordner.
 
 ## Prüfsummen
 

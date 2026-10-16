@@ -125,13 +125,22 @@ heutigen Datei nachgerechnet wird (`supabase/checks/0130_amendment.md`).
 | | |
 |---|---|
 | **Staging** `qqxcpesbwfxzgytkdsac` | `0126`–`0131` angewendet, alle Postflights `9999 = 0`, Export-Download verifiziert. |
-| **Production** `zmiwxswrpkmizvqsgype` | **nicht angewendet.** Checkliste: `supabase/checks/production_rollout_0126_0131.md`. Erster Schritt dort ist eine **Messung**, keine Migration — unter anderem ist unbelegt, ob `0124`/`0125` auf Production stehen. |
-| **Anwendung** | lokal gebaut und grün (9 600+ Tests, Typecheck, Build, Lint), **nicht committet, nicht deployt**. In Production läuft weiter `c24926e`, signaturkompatibel. |
+| **Production** `zmiwxswrpkmizvqsgype` | **angewendet am 2026-10-17** (Freigabe A). Alle sechs einzeln in `begin`/`commit`, zwölf Pre-/Postflights je `9999 = 0`, `0131_function_body_check` = `STAND_0131_ZEICHENGLEICH`. **Nach `0128` ist die Eigenbeleg-Ausstellung auf Datenbankebene gesperrt** (`operations/lock-receipt-issuance.sql`), bestätigt vor und nach `0129`–`0131`. Protokoll: `docs/history/2026-10-17-production-0126-0131.md`. |
+| **Anwendung** | lokal gebaut und grün, **nicht committet, nicht deployt**. In Production läuft weiter `c24926e`, signaturkompatibel. Die Oberfläche bietet seit dem 2026-10-17 **keinen Ausstellweg** mehr an (`RECEIPT_ISSUANCE_RELEASED = false`); der Abruf bestehender Belege bleibt erhalten. |
+
+**Gemessen nach dem Rollout.** Zwei Business-Exporte derselben Datenbank, 23
+Minuten auseinander — einer vor, einer nach den Migrationen: alle **25**
+vorbestehenden Bereiche mit **identischen** Zeilenzahlen, Gesamtsumme
+**6 152** unverändert, die drei Belegbereiche neu und **leer**. Damit ist
+belegt, was vorher nur ausgezählt war: die sechs Migrationen fassen keine
+Daten an. **0 Eigenbelege, 0 Abrufe, 0 Zählerzeilen.**
 
 **Die unangenehme Wahrheit zum Rollout.** Production läuft nach dem Stand vom
 2026-10-01 auf **Supabase Free: keine nativen Backups, kein PITR** — und
-`0105`–`0107` (Plattformsicherung) sind dort nicht angewendet. Ein
-Punkt-in-der-Zeit-Rücksprung existiert also nicht. Entlastend ist nur, dass
+Ein Punkt-in-der-Zeit-Rücksprung existiert also nicht. Die
+Plattformsicherung (`0105`–`0107`) **ist** auf Production angewendet
+(bestätigt 2026-10-17) und liefert Daten samt Konten-Inventar und
+Storage-Dateien — aber kein Schema. Entlastend ist nur, dass
 diese sechs Migrationen **nachgewiesen keine Datenanweisung** enthalten (über
 den Syntaxbaum ausgezählt: kein `insert`, `update`, `delete`, `truncate`) und
 rein additiv sind. Die Tarif- und Backupfrage gehört trotzdem **vor** den
@@ -177,7 +186,7 @@ Probelauf, Integritätsprüfung und getrennt freigegebenem Schreibpfad; `restore
 bis dahin `false`) und das **Excel-Backup**, das ausschließlich aus demselben JSON-Datenmodell
 erzeugt wird — kein zweiter Datenpfad.
 
-## Datensicherung der Plattform (2026-10-01, `0105`–`0107`, ADR-0115) — auf Staging validiert, nicht committet
+## Datensicherung der Plattform (2026-10-01, `0105`–`0107`, ADR-0115) — auf Staging validiert und auf Production angewendet, nicht committet
 
 **Zwei getrennte Konzepte, nicht zwei Ansichten desselben.** Der **Business-Export** (`0104`,
 oben) gehört dem Betrieb: seine eigenen Geschäftsdaten, 25 Bereiche, eine JSON-Datei. Das
@@ -223,7 +232,7 @@ beweisen. Nur `received` zählt für die Fälligkeit.
 | | |
 |---|---|
 | **Staging** `qqxcpesbwfxzgytkdsac` | `0105`–`0107` angewendet und **vollständig validiert**. Realer End-to-End-Durchlauf im Browser: Archiv 2 156 313 Bytes, **53/53 Bereiche**, 36/36 Storage-Dateien, `storage_missing_count = 0`, Auth-Inventar 16 Konten, `source_project` und `commerce_mode` korrekt, ZIP/CRC gültig, lokaler SHA256 = Historienwert. Die Kette `generated → received` hat gegriffen. |
-| **Production** `zmiwxswrpkmizvqsgype` | **nicht angewendet.** `0105`–`0107` sind dort noch offen. |
+| **Production** `zmiwxswrpkmizvqsgype` | **angewendet.** Am 2026-10-17 rein lesend bestätigt: `system_platform_export()`, `system_auth_inventory()` und `platform_export_runs` sind vorhanden. Bis dahin stand hier „nicht angewendet" — das war veraltet. |
 | **Anwendung** | Route, Oberfläche, Bestätigung und Fälligkeitsanzeige **lokal gebaut**, nicht committet, nicht deployt. |
 
 **Zwei `received`-Läufe auf Staging** (ids 22 und 23) stammen aus einem **manuell doppelt
@@ -238,7 +247,9 @@ Lagerinvarianten (Σ quantity 808, Σ reserved 0, Σ delta −8), 20 Max-IDs, `a
 2 055 123 Bytes). Die einzige persistente Änderung waren die beiden Historienzeilen. Der Export
 ist damit nachweislich read-only.
 
-**Noch offen:** der **Production-Rollout** von `0105`–`0107` und das Deployment der Anwendung.
+**Noch offen:** das **Deployment der Anwendung**. Der Production-Rollout von
+`0105`–`0107` ist erfolgt (siehe Tabelle) — der frühere Vermerk „noch offen"
+war veraltet und ist am 2026-10-17 durch eine lesende Prüfung berichtigt.
 
 **Ausdrücklich später:** ein **Restore** — `restore_supported` bleibt in beiden Formaten
 `false`, und es gibt bewusst keinen Schreibpfad zurück. Ebenso das **Excel-Backup**, das

@@ -43,12 +43,32 @@ describe("supabase/SHA256SUMS.txt deckt alles ab und stimmt", () => {
     expect(readFileSync(LIST, "utf8")).toBe(render());
   });
 
-  it("deckt beide Ordner ab — Migrationen und Prüfdateien", () => {
+  it("deckt alles ab, was gegen unbemerkte Änderung zu schützen ist", () => {
+    /*
+     * Drei Gruppen, drei Gründe:
+     *   * `migrations` — angewendet, darf sich nicht ändern,
+     *   * `checks` (samt `checks/dr`) — läuft lesend gegen Production,
+     *   * `operations` — ÄNDERT Production, erst recht.
+     * Die Summe muss aufgehen: keine abgedeckte Datei darf in keiner Gruppe
+     * liegen, sonst wüchse die Liste an einer Stelle, die niemand prüft.
+     */
     const migrationen = dateien.filter((p) => p.startsWith("supabase/migrations/"));
     const pruefdateien = dateien.filter((p) => p.startsWith("supabase/checks/"));
+    const schalter = dateien.filter((p) => p.startsWith("supabase/operations/"));
     expect(migrationen.length).toBeGreaterThanOrEqual(131);
     expect(pruefdateien.length).toBeGreaterThanOrEqual(35);
-    expect(dateien.length).toBe(migrationen.length + pruefdateien.length);
+    expect(schalter.length).toBeGreaterThanOrEqual(2);
+    expect(dateien.length)
+      .toBe(migrationen.length + pruefdateien.length + schalter.length);
+  });
+
+  it("die Sperrdateien sind in der Liste — sie ändern Rechte auf Production", () => {
+    const liste2 = parse(readFileSync(LIST, "utf8"));
+    for (const p of ["supabase/operations/lock-receipt-issuance.sql",
+                     "supabase/operations/unlock-receipt-issuance.sql",
+                     "supabase/checks/receipt_lock_check.sql"]) {
+      expect(liste2.has(p), p).toBe(true);
+    }
   });
 
   it("jede abgedeckte Datei steht drin, mit der richtigen Prüfsumme", () => {
@@ -90,9 +110,25 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const text = readFileSync(AKTE, "utf8");
 
   type Zeile = { datei: string; digest: string; heute: string };
-  const zeilen: Zeile[] = [...text.matchAll(
-    /^\| `(\d{4}_[a-z0-9_]+\.sql)` \| `([0-9a-f]{64})` \| ([^|]+?) \|/gm)]
-    .map((m) => ({ datei: m[1], digest: m[2], heute: m[3].trim() }));
+
+  /**
+   * Die Akte führt ZWEI Tabellen — eine je Umgebung. Sie werden getrennt
+   * gelesen: `0130` lief auf Staging in einer anderen Fassung als auf
+   * Production (dort erstmalig, in der heutigen), und das darf nicht
+   * verschmelzen.
+   */
+  function tabelle(ueberschrift: string): Zeile[] {
+    const von = text.indexOf(`## ${ueberschrift}`);
+    expect(von, `Abschnitt ## ${ueberschrift} fehlt`).toBeGreaterThan(-1);
+    const bis = text.indexOf("\n## ", von + 1);
+    const block = text.slice(von, bis === -1 ? undefined : bis);
+    return [...block.matchAll(
+      /^\| `(\d{4}_[a-z0-9_]+\.sql)` \| `([0-9a-f]{64})` \| ([^|]+?) \|/gm)]
+      .map((m) => ({ datei: m[1], digest: m[2], heute: m[3].trim() }));
+  }
+
+  const zeilen: Zeile[] = tabelle("Staging");
+  const production: Zeile[] = tabelle("Production");
 
   it("die Tabelle ist lesbar und vollständig ab 0122", () => {
     expect(zeilen.length).toBe(10);
@@ -146,6 +182,42 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(datei.split(NACHTRAG).length - 1).toBe(1);
     const z = zeilen.find((x) => x.datei === "0130_business_backup_fields.sql")!;
     expect(sha(datei.replace(NACHTRAG, ""))).toBe(z.digest);
+  });
+
+  it("die Production-Tabelle führt die sechs Migrationen dieses Rollouts", () => {
+    expect(production.map((z) => z.datei)).toEqual([
+      "0126_purchase_item_edit.sql",
+      "0127_purchase_item_swap.sql",
+      "0128_purchase_receipt_corrections.sql",
+      "0129_business_backup_receipts.sql",
+      "0130_business_backup_fields.sql",
+      "0131_business_backup_seller_fields.sql",
+    ]);
+  });
+
+  it("und jede davon ist bitgenau die Datei im Repository", () => {
+    /*
+     * Auf Production lief `0130` ERSTMALIG, also in der heutigen Fassung —
+     * anders als auf Staging. Genau deshalb stehen die Umgebungen in zwei
+     * Tabellen und nicht in einer.
+     */
+    for (const z of production) {
+      expect(z.heute).toBe("gleich");
+      expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
+    }
+  });
+
+  it("die Production-Zeile zu 0130 trägt die HEUTIGE Prüfsumme, nicht die von Staging", () => {
+    const prod = production.find((z) => z.datei === "0130_business_backup_fields.sql")!;
+    const stag = zeilen.find((z) => z.datei === "0130_business_backup_fields.sql")!;
+    expect(prod.digest).not.toBe(stag.digest);
+    expect(prod.digest).toBe(digestOf("supabase/migrations/0130_business_backup_fields.sql"));
+  });
+
+  it("die Akte nennt die Belegsperre und ihre Folge für den Postflight", () => {
+    expect(text).toContain("lock-receipt-issuance.sql");
+    expect(text).toContain("Prüfung 223");
+    expect(text).toContain("Freigabe B");
   });
 
   it("die Regel gegen den nächsten Fall steht in der Akte", () => {

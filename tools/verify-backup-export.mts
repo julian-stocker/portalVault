@@ -1,7 +1,15 @@
 /**
- * Eine heruntergeladene Betriebssicherung gegen die Staging-Baseline halten.
+ * Eine heruntergeladene Betriebssicherung gegen die Baseline IHRER Umgebung
+ * halten.
  *
  *   npm run verify:backup -- --file ~/Downloads/skyisles-business-backup-….json
+ *
+ * Welche Baseline gilt, entscheidet die Datei: sie trägt `source_project`.
+ * Das ist nicht Bequemlichkeit, sondern die Lehre aus einem Fehlalarm — die
+ * Production-Sicherung lief gegen die Staging-Baseline und meldete zwölf
+ * Abweichungen, jede richtig gerechnet und keine ein Mangel der Datei.
+ * `--baseline staging|production` überschreibt die Zuordnung, wenn man sie
+ * ausdrücklich will; geraten wird nie.
  *
  * NUR LESEN, UND ZWAR EINE DATEI. Keine Datenbank, kein Netz, kein Schlüssel,
  * keine Umgebungsvariable. Dieses Werkzeug öffnet genau den Pfad, den es
@@ -28,7 +36,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 import {
-  auditBackup, buildFieldPlan, report, STAGING_BASELINE,
+  auditBackup, baselineForDocument, buildFieldPlan, report,
+  PRODUCTION_BASELINE, STAGING_BASELINE,
 } from "../src/lib/backup/export-audit.ts";
 /*
  * DAS MANIFEST DIREKT — es hat selbst keine Abhängigkeiten, läuft also unter
@@ -103,7 +112,47 @@ if (conflicts.length > 0) {
   process.exit(2);
 }
 
-const baseline = { ...STAGING_BASELINE, fieldPlan: plan };
+/*
+ * DIE BASELINE KOMMT AUS DER DATEI, NICHT AUS DER GEWOHNHEIT.
+ *
+ * `--baseline` überschreibt; ohne Angabe entscheidet `source_project`. Kennt
+ * die Datei kein bekanntes Projekt, wird NICHT geprüft: eine geratene
+ * Baseline erzeugt Befunde über die falsche Erwartung, und das ist die Art
+ * Prüfung, die man zu ignorieren lernt.
+ */
+const gewaehlt = arg("baseline");
+const nachName: Record<string, typeof STAGING_BASELINE> = {
+  staging: STAGING_BASELINE,
+  production: PRODUCTION_BASELINE,
+};
+let gewaehlteBaseline: typeof STAGING_BASELINE | null;
+if (gewaehlt !== null) {
+  gewaehlteBaseline = nachName[gewaehlt] ?? null;
+  if (gewaehlteBaseline === null) {
+    console.error(`ABBRUCH: --baseline ${gewaehlt} kenne ich nicht.`);
+    console.error("Erlaubt: staging, production — oder weglassen, dann "
+      + "entscheidet source_project in der Datei.");
+    process.exit(2);
+  }
+} else {
+  gewaehlteBaseline = baselineForDocument(doc);
+  if (gewaehlteBaseline === null) {
+    const p = (doc as { source_project?: unknown }).source_project;
+    console.error("ABBRUCH: zu dieser Datei gibt es keine Baseline.");
+    console.error(`source_project = ${typeof p === "string" ? p : "(fehlt)"}`);
+    console.error("Entweder --baseline staging|production angeben oder eine "
+      + "Baseline für dieses Projekt in export-audit.ts aufnehmen.\n"
+      + "Die Datei wurde NICHT geprüft — eine geratene Baseline sagt nichts.");
+    process.exit(2);
+  }
+}
+
+const baseline = { ...gewaehlteBaseline, fieldPlan: plan };
+console.log(`BASELINE: ${baseline.source}`);
+console.log(gewaehlt !== null
+  ? `  gewählt über --baseline ${gewaehlt}`
+  : "  zugeordnet über source_project der Datei");
+console.log("");
 const ergebnis = auditBackup(doc, baseline);
 console.log(report(ergebnis, baseline).join("\n"));
 process.exit(ergebnis.failed === 0 ? 0 : 1);

@@ -129,6 +129,81 @@ export const STAGING_BASELINE: ExportBaseline = {
   linesDigest: "51038e7a609451f1278cdc1c08ff8324",
 };
 
+/**
+ * `md5` über die leere Zeichenkette.
+ *
+ * Eine Umgebung ohne Eigenbeleg bildet jeden der drei Belegabdrücke über
+ * nichts — `string_agg` über keine Zeile ergibt die leere Menge. Der Wert ist
+ * deshalb kein Fingerabdruck von Daten, sondern die Abwesenheit von Daten,
+ * und der Bericht sagt das auch so.
+ */
+const DIGEST_DER_LEEREN_MENGE = "d41d8cd98f00b204e9800998ecf8427e";
+
+/**
+ * Production, gemessen am 2026-10-17 nach dem Rollout von `0126`–`0131`.
+ *
+ * WARUM ES EINE ZWEITE BASELINE BRAUCHT, UND ZWAR GENAU SO
+ *
+ * Die erste Prüfung der Production-Sicherung lief gegen die Staging-Baseline
+ * und meldete zwölf Abweichungen — jede davon richtig gerechnet und keine
+ * davon ein Mangel der Datei: Production hat 88 Einkäufe statt 90, 2 142
+ * Positionen statt 2 128 und **keinen** Eigenbeleg statt zwei. Eine Baseline
+ * ist die Messung EINER Umgebung zu EINEM Zeitpunkt; sie auf eine andere
+ * anzuwenden erzeugt Fehlalarme, die man dann wegerklären muss. Das ist die
+ * schlechteste Art von Prüfung: eine, die man zu ignorieren lernt.
+ *
+ * Die Zahlen stammen aus zwei voneinander unabhängigen Quellen: der lesenden
+ * Zielbestätigung vor dem Rollout (88 / 2 142 / 296 / 284 / 333 / 1 / 1 / 0)
+ * und dem Vergleich der beiden Exporte von 23:12Z und 23:35Z, deren 25
+ * gemeinsame Bereiche zeilengleich sind — Gesamtsumme 6 152 vor und nach den
+ * Migrationen.
+ *
+ * `receipts: []` ist keine Lücke, sondern der Zustand: die Ausstellung ist auf
+ * Datenbankebene gesperrt, Freigabe B ist nicht erteilt, und es gibt auf
+ * Production keinen Eigenbeleg.
+ */
+export const PRODUCTION_BASELINE: ExportBaseline = {
+  source: "Production zmiwxswrpkmizvqsgype, 2026-10-17 nach 0126-0131: "
+    + "lesende Zielbestaetigung und der Vergleich der Exporte 23:12Z/23:35Z, "
+    + "0 Eigenbelege",
+  areaKeys: STAGING_BASELINE.areaKeys,
+  areas: 28,
+  totalRecords: 6152,
+  counts: {
+    purchases: 88,
+    purchase_items: 2142,
+    purchase_receipts: 0,
+    purchase_receipt_downloads: 0,
+    purchase_receipt_counters: 0,
+  },
+  receipts: [],
+  fingerprintDigest: DIGEST_DER_LEEREN_MENGE,
+  chainDigest: DIGEST_DER_LEEREN_MENGE,
+  linesDigest: DIGEST_DER_LEEREN_MENGE,
+  canonicalLinesDigest: DIGEST_DER_LEEREN_MENGE,
+};
+
+/** Die Projektreferenzen, wie sie in `source_project` der Datei stehen. */
+export const BASELINE_JE_PROJEKT: Readonly<Record<string, ExportBaseline>> = {
+  qqxcpesbwfxzgytkdsac: STAGING_BASELINE,
+  zmiwxswrpkmizvqsgype: PRODUCTION_BASELINE,
+};
+
+/**
+ * Welche Baseline zu dieser Datei gehört — entschieden aus der Datei selbst.
+ *
+ * Die Sicherung trägt `source_project`. Danach zu greifen ist besser als ein
+ * Schalter, den man vergessen kann: der Fehlalarm, der diese Funktion
+ * veranlasst hat, war genau ein vergessener Schalter. Kennt die Datei kein
+ * bekanntes Projekt, gibt es **keine** Vermutung — `null`, und der Aufrufer
+ * bricht ab. Eine geratene Baseline ist schlimmer als keine.
+ */
+export function baselineForDocument(doc: unknown): ExportBaseline | null {
+  const projekt = (doc as { source_project?: unknown } | null)?.source_project;
+  if (typeof projekt !== "string") return null;
+  return BASELINE_JE_PROJEKT[projekt] ?? null;
+}
+
 /* -------------------------------------------------------------------------
  * Der Feldplan: was JEDER Bereich führen soll
  * ---------------------------------------------------------------------- */
@@ -527,8 +602,25 @@ export function auditBackup(
   }
   add(gabel.size === 0, "kein Beleg wird zweimal ersetzt",
       gabel.size === 0 ? "keiner" : `${gabel.size}`);
-  add(chain.filter((c) => c.isCurrent).length === 1, "genau eine aktuelle Fassung",
-      `${chain.filter((c) => c.isCurrent).length}`);
+  /*
+   * GENAU EINE AKTUELLE FASSUNG — ODER GAR KEINE.
+   *
+   * Die Prüfung verlangt die Spitze der Korrekturkette: von mehreren
+   * Fassungen eines Belegs ist genau eine die gültige. In einer Umgebung
+   * OHNE Eigenbeleg gibt es keine Kette und damit keine Spitze; `=== 1`
+   * wäre dort unerfüllbar, und ein unerfüllbares Soll ist kein Befund,
+   * sondern ein Konstruktionsfehler der Prüfung. Production lief am
+   * 2026-10-17 genau in diesen Fall.
+   *
+   * Nicht anwendbar heißt: die Baseline erwartet keinen Beleg UND die Datei
+   * führt keinen. Erwartet die Baseline Belege und die Datei hat keine,
+   * bleibt es ein Fehler — das fängt die Prüfung „Anzahl Belege" weiter
+   * oben, und diese hier zählt dann 0 gegen 1.
+   */
+  const aktuelle = chain.filter((c) => c.isCurrent).length;
+  const keineBelege = baseline.receipts.length === 0 && chain.length === 0;
+  add(keineBelege || aktuelle === 1, "genau eine aktuelle Fassung",
+      keineBelege ? "nicht anwendbar (keine Belege)" : `${aktuelle}`);
 
   const ohneFingerprint = sortiert.filter(
     (r) => !/^[0-9a-f]{64}$/.test(text(r.content_fingerprint)));

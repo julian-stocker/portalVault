@@ -1326,6 +1326,14 @@ export const de = {
         none: "Für diesen Einkauf ist noch kein Eigenbeleg ausgestellt.",
         create: "Eigenbeleg erstellen & herunterladen",
         download: "PDF herunterladen",
+        /*
+         * Solange die Ausstellung nicht freigegeben ist, steht hier ein Satz
+         * statt eines Knopfes. Die Sperre selbst liegt in der Datenbank —
+         * dieser Text erspart den Klick, der ohnehin abgelehnt würde.
+         */
+        issuanceLocked:
+          "Eigenbelege sind noch nicht freigegeben. Bestehende Belege lassen "
+          + "sich weiterhin herunterladen.",
         working: "Wird erstellt \u2026",
         loading: "Wird geladen \u2026",
         failed: "Der Eigenbeleg konnte nicht geladen werden.",

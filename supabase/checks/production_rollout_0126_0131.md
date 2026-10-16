@@ -6,6 +6,14 @@ Vollzug. Jeder Schritt auf Production braucht eine eigene Freigabe.
 Stand: 2026-10-16. Staging trägt `0126`–`0131` vollständig, Postflights je
 `9999 = 0`, `0131_function_body_check.sql` zeichengleich.
 
+> **Nachtrag 2026-10-17:** Der Production-Stand ist inzwischen **gemessen** —
+> `0121`–`0125` vorhanden, `0126`–`0131` fehlen, 0 Eigenbelege. Die offene
+> Frage nach `0124`/`0125` aus Abschnitt 1 ist damit beantwortet, und der Weg
+> über `pg_dump` ist zurückgestellt: es liegen ein Admin- und ein
+> Business-Backup vor. Die geltende, kompakte Freigabeprüfung steht in
+> **`release_0126_0131.md`**. Dieses Dokument bleibt als Hintergrund
+> (Backuplage, Trigger, Rücknahmen, Abbruchkriterien).
+
 ---
 
 ## 1. Wo Production heute steht — messen, nicht annehmen
@@ -14,9 +22,9 @@ Aus `PROJECT_STATUS.md` (Stand 2026-10-15) ist belegt:
 
 | | |
 |---|---|
-| angewendet | `0053`–`0085`, `0086`–`0089`, `0104`, `0115`, `0116`, **`0117`–`0123`** (2026-10-14/15) |
-| **nicht** angewendet | `0099`–`0102` (freigegeben, nicht ausgeführt), `0103`, `0105`–`0107` |
-| **nicht belegt** | **`0124`, `0125`** — in der Rollout-Zeile nicht genannt |
+| angewendet | `0053`–`0085`, `0086`–`0089`, `0104`, **`0105`–`0107`**, `0115`, `0116`, **`0117`–`0125`** |
+| **nicht** angewendet | `0099`–`0102` (freigegeben, nicht ausgeführt), `0103` |
+| ~~nicht belegt~~ | `0124`/`0125` sind am 2026-10-16 **gemessen vorhanden** — die Frage ist beantwortet |
 | ausgelieferter Anwendungsstand | `c24926e`; alles ab `0117` liegt unkommittiert lokal |
 
 **Erster Schritt ist daher eine Messung, keine Migration.** Die vorhandenen
@@ -44,9 +52,12 @@ Supabase Free: keine nativen Backups, kein PITR."* Daraus folgt nüchtern:
 
 * **Es gibt keinen Punkt-in-der-Zeit-Rücksprung.** Eine Migration, die auf
   Production Schaden anrichtet, ist nicht per Dashboard zurückzuholen.
-* **Das Platform-Backup (`0105`–`0107`) ist auf Production nicht angewendet.**
-  Es gibt dort also kein Konten-Inventar, kein Storage-Manifest und keinen
-  53-Bereiche-Export.
+* **Berichtigt am 2026-10-17:** das Platform-Backup (`0105`–`0107`) **ist**
+  auf Production angewendet — rein lesend bestätigt (`system_platform_export()`,
+  `system_auth_inventory()`, `platform_export_runs` alle vorhanden). Es gibt
+  dort also ein Konten-Inventar, ein Storage-Manifest und den
+  53-Bereiche-Export. Was es weiterhin **nicht** gibt: Schema, Funktionen,
+  Policies, Rechte, Sequenzstände und Passwörter.
 * **Die einzige anwendungsseitige Absicherung ist `0104`** — der
   Geschäftsexport in der Fassung **vor** `0129`–`0131`, also 25 Bereiche. Er
   enthält kein Schema, keine Funktionen, keine Policies, keine

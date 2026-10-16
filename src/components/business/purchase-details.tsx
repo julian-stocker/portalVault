@@ -46,6 +46,7 @@ import {
   loadPurchaseReceipt, loadPurchaseReceiptHistory,
   type ReceiptState, type ReceiptVersion,
 } from "@/lib/business/receipt-actions";
+import { RECEIPT_ISSUANCE_RELEASED } from "@/lib/business/receipt-release";
 import { canBook, canRemapItem } from "@/lib/orderbook/purchase";
 import { dispatchItemAction } from "@/lib/orderbook/dispatch-lock";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
@@ -1851,20 +1852,37 @@ export function PurchaseDetails({
                 <p role="alert" className="mt-1 text-xs text-danger">{receiptError}</p>
               )}
 
+              {/*
+                FREIGABE B STEHT AUS (`RECEIPT_ISSUANCE_RELEASED`).
+
+                Derselbe Knopf tut zwei Dinge: ohne Beleg STELLT er aus, mit
+                Beleg lädt er herunter. Ohne Freigabe darf nur das Zweite
+                übrig bleiben — also steht hier ein Satz statt des Knopfes,
+                solange es nichts herunterzuladen gibt.
+
+                Die Sperre ist das nicht: die liegt als `revoke execute` in
+                der Datenbank. Dies erspart den Klick, der ohnehin mit
+                „Dafür fehlt die Berechtigung" endete.
+              */}
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <button type="button" disabled={receiptBusy || editing}
-                        onClick={() => void fetchReceipt()}
-                        className={BUTTON}>
-                  {receiptBusy ? receiptCopy.working
-                    : receipt === null ? receiptCopy.create : receiptCopy.download}
-                </button>
+                {!RECEIPT_ISSUANCE_RELEASED && receipt === null ? (
+                  <p className="text-xs text-muted">{receiptCopy.issuanceLocked}</p>
+                ) : (
+                  <button type="button" disabled={receiptBusy || editing}
+                          onClick={() => void fetchReceipt()}
+                          className={BUTTON}>
+                    {receiptBusy ? receiptCopy.working
+                      : receipt === null ? receiptCopy.create : receiptCopy.download}
+                  </button>
+                )}
                 {/*
                   DER KORREKTURBELEG (0128) — nur, wenn es etwas zu korrigieren
                   gibt. `correctable` kommt aus derselben Bedingung wie das Tor
                   im Server: eine Handlung, die immer abgelehnt wuerde, ist
                   schlimmer als eine fehlende.
                 */}
-                {receipt !== null && correctable && !correctPrompt ? (
+                {RECEIPT_ISSUANCE_RELEASED
+                 && receipt !== null && correctable && !correctPrompt ? (
                   <button type="button" disabled={receiptBusy || editing}
                           onClick={() => { setReceiptError(null); setCorrectPrompt(true); }}
                           className={BUTTON}>

@@ -26,6 +26,12 @@ export const LIST = "supabase/SHA256SUMS.txt";
 const COVERED: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["supabase/migrations", [".sql", ".md"]],
   ["supabase/checks", [".sql", ".md"]],
+  /* Die rein lesenden Abfragen des Wiederherstellungstests laufen gegen
+     Production — sie gehören genauso gegen unbemerkte Änderung geschützt. */
+  ["supabase/checks/dr", [".sql"]],
+  /* Betriebliche Schalter: keine Migrationen, aber sie ÄNDERN Production.
+     Erst recht gegen unbemerkte Änderung zu schützen. */
+  ["supabase/operations", [".sql", ".md"]],
 ];
 
 export function coveredFiles(): string[] {
