@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-15 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-16 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -81,6 +81,71 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Einkaufsdialog, Korrekturbelege und die Sicherung, die wiederherstellbar sein soll (2026-10-16, `0126`–`0131`) — auf Staging abgeschlossen, Production vorbereitet
+
+**Was gebaut wurde.** Sechs Migrationen, alle auf Staging angewendet und je mit
+`9999 = 0` abgenommen:
+
+| | |
+|---|---|
+| `0126`, `0127` | **ein** Speichern für den ganzen Bearbeitungsdialog eines Einkaufs, dazu der direkte Figurenwechsel. `seller_save_purchase_edit` bekam einen sechsten Parameter `p_swap` mit Standardwert — der ausgelieferte Client speichert unverändert weiter. |
+| `0128` | **Korrekturbelege**: ein Eigenbeleg wird nie geändert, eine Korrektur ist eine neue Revision mit neuem unveränderlichem Snapshot, Verweis auf den Vorgänger (Nummer und Datum) und derselben Nummernfolge. Mehrere Korrekturen hintereinander sind möglich, die Kette kann sich nicht gabeln, und ohne tatsächliche Abweichung entsteht kein zweiter Beleg. |
+| `0129`, `0130`, `0131` | die Betriebssicherung führt jetzt **28 Bereiche und 352 Felder**: die drei Belegtabellen samt Korrekturkette und Abrufnachweisen, die Kostenaufteilung, die Katalogordnung und die Rechtsangaben des Verkäufers. `BACKUP_FORMAT_VERSION` bleibt 1, `restore_supported` bleibt `false`. |
+
+**Nachgewiesen auf Staging.** Realer Export-Download verifiziert: **28/28
+Bereiche, 5 508 Datensätze, 0 Abweichungen**, beide Eigenbelege einschließlich
+Korrekturkette, Fingerabdruck- und Kettenprüfsummen stimmen, 7 Abrufe,
+1 Zählerzeile. `0131_function_body_check.sql` bestätigt den lebenden
+Funktionsrumpf als **zeichengleich** zur Repository-Fassung
+(`md5 = 24c3810288bb20929fe995554a267adf`, 21 458 Zeichen).
+
+**Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
+ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen
+ein `array[...]`-Literal (einsbasiert) verglich. Ein Bereichsparser kollabierte
+auf Staging zu einem Bereich, weil PostgreSQL die Gierigkeit für den **ganzen
+Zweig** bestimmt und nicht je Quantor — seitdem ist die Bereichserkennung
+überall zeilenweise und trägt einen Selbsttest. `0131` brach ab, weil elf von
+dreizehn Prüfeinträgen ihr Bereichspräfix verloren hatten. Alle drei haben
+Regressionstests mit Positivkontrolle; keiner wurde durch Abschwächen einer
+Prüfung grün gemacht.
+
+**Revisionssicherheit, neu.** `0130` wurde nach ihrer Ausführung um vier Zeilen
+in der Nachbedingung ergänzt — unbemerkt, weil `0126`–`0131` nicht committet
+waren und die Prüfsummenliste nur `supabase/checks/` abdeckte. Seitdem gilt:
+`supabase/migrations/APPLIED.md` nennt für jede Migration ab `0122` die SHA-256
+der **ausgeführten** Fassung, `supabase/SHA256SUMS.txt` deckt 170 Dateien in
+beiden Ordnern ab (`npm run verify:sums`), und
+`src/lib/admin/migration-integrity.test.ts` rechnet beides bei jedem Testlauf
+nach — einschließlich des Rezepts, mit dem die ausgeführte `0130` aus der
+heutigen Datei nachgerechnet wird (`supabase/checks/0130_amendment.md`).
+
+**Stand der Umgebungen.**
+
+| | |
+|---|---|
+| **Staging** `qqxcpesbwfxzgytkdsac` | `0126`–`0131` angewendet, alle Postflights `9999 = 0`, Export-Download verifiziert. |
+| **Production** `zmiwxswrpkmizvqsgype` | **nicht angewendet.** Checkliste: `supabase/checks/production_rollout_0126_0131.md`. Erster Schritt dort ist eine **Messung**, keine Migration — unter anderem ist unbelegt, ob `0124`/`0125` auf Production stehen. |
+| **Anwendung** | lokal gebaut und grün (9 600+ Tests, Typecheck, Build, Lint), **nicht committet, nicht deployt**. In Production läuft weiter `c24926e`, signaturkompatibel. |
+
+**Die unangenehme Wahrheit zum Rollout.** Production läuft nach dem Stand vom
+2026-10-01 auf **Supabase Free: keine nativen Backups, kein PITR** — und
+`0105`–`0107` (Plattformsicherung) sind dort nicht angewendet. Ein
+Punkt-in-der-Zeit-Rücksprung existiert also nicht. Entlastend ist nur, dass
+diese sechs Migrationen **nachgewiesen keine Datenanweisung** enthalten (über
+den Syntaxbaum ausgezählt: kein `insert`, `update`, `delete`, `truncate`) und
+rein additiv sind. Die Tarif- und Backupfrage gehört trotzdem **vor** den
+Rollout entschieden.
+
+**Ausdrücklich offen.** Die neun personenbezogenen Einkaufsfelder (A2) bleiben
+aus der Sicherung ausgeschlossen. Ein Restore-Importer existiert nicht.
+`withdrawal_requests` ist in keiner Sicherung. Der Bestellzweig ist aus dem
+Geschäftsexport allein nicht wiederherstellbar — `orders.customer_email` und
+`orders.request_id` sind `not null` und nicht exportiert
+(`backup_architecture_two_tier.md`, `0131_restore_plan.md`). Und die vier
+rechtlichen Punkte aus dem `0117`–`0123`-Block sind weiter **ungeklärt**:
+Datenschutzerklärung für Absenderdaten, Aufbewahrungsfristen, steuerliche
+Anerkennung der Belegform, nachgewiesene Wiederherstellbarkeit.
 
 ## Datensicherung für den Betrieb (2026-09-30, `0104`, ADR-0114) — fertig, nicht committet
 

@@ -3607,6 +3607,285 @@ fasst keinen ausgestellten Beleg an. Das könnte sie auch nicht:
 `purchase_receipts` hat RLS an, keine Policy, keine Tabellenrechte und einen
 Trigger gegen UPDATE und DELETE.
 
+### 3.3aq Ein Speichern für den ganzen Bearbeitungsdialog (`0126`, `0127`)
+
+**Stand: auf Staging angewendet (`0126`), `0127` vorbereitet und noch nicht
+angewendet. Nicht auf Production.**
+
+Der Bearbeitungsdialog eines Einkaufs konnte Kosten und Felder ändern, aber
+Figuren nur über einzelne Aufrufe hinzufügen, entfernen oder umhängen — jeder
+davon eine eigene Transaktion. Scheiterte der dritte, blieben die ersten zwei
+stehen. `0126` und `0127` fassen alles in **einen** Aufruf:
+
+```
+seller_save_purchase_edit(
+  p_id                  bigint,
+  p_fields              jsonb       default '{}',    -- Einkaufsfelder
+  p_add                 jsonb       default '[]',    -- neue Positionen
+  p_remove              bigint[]    default '{}',    -- zu entfernende IDs
+  p_expected_updated_at timestamptz default null,    -- gelesene Version
+  p_swap                jsonb       default '[]')    -- [{item_id, sky_id}] (0127)
+returns jsonb   -- {updated_at, added, removed, swapped, unchanged}
+```
+
+`security definer`, `set search_path = ''`, `revoke all … from public, anon`,
+`grant execute … to authenticated`.
+
+**Sie schreibt nichts selbst.** Reihenfolge im Rumpf: Betreibertor →
+`select … for update` auf `purchases` → Versionsvergleich →
+`seller_update_purchase` (`0121`) → `seller_set_purchase_item_sky` (`0054`) →
+`seller_remove_purchase_item` (`0064`) → `seller_add_purchase_item` (`0053`).
+Jede dieser Funktionen trägt ihre Schutzregeln selbst; keine wird ersetzt,
+keine wird umgangen, und die Nachbedingungen beider Migrationen lehnen die
+Anwendung ab, wenn eine der Regeln aus dem Rumpf verschwunden ist. Entfernen
+kommt vor Hinzufügen, damit `max(position) + 1` stimmt; Wechseln kommt vor
+beidem, weil es auf Zeilen arbeitet, die sicher noch existieren.
+
+**`purchases.updated_at` ist seit `0126` die Version des ganzen Aggregats.**
+Vorher bewegte keine Positionsoperation den Zeitstempel — er war als Version
+unbrauchbar. Jetzt tut es ein Trigger:
+
+```
+purchase_items_touch_purchase()   -- security definer, search_path = ''
+purchase_items_touch_purchase_trg -- after insert or update or delete, for each row
+```
+
+Er setzt `purchases.updated_at = now()` für `coalesce(new.purchase_id,
+old.purchase_id)` und gibt `null` zurück. Die Funktion ist für `anon` und
+`authenticated` **nicht** ausführbar. Ein row-level AFTER-UPDATE feuert auch,
+wenn das UPDATE nichts geändert hat — für einen Versionsstempel die sichere
+Richtung, deshalb hängt bewusst keine `when`-Bedingung daran.
+
+Weicht `p_expected_updated_at` von der gelesenen Zeile ab, scheitert der Aufruf
+mit **`PT409`** — nicht mit `serialization_failure`: ein veralteter Stand wird
+nicht durch Wiederholen richtig, der Betreiber muss den neuen Stand sehen.
+PostgREST bildet die `PT`-Klasse auf HTTP 409 ab.
+
+**Was `0127` anders macht als eine Erweiterung.** `create or replace` kann die
+Parameterzahl nicht ändern; ein zusätzlicher Parameter mit Default erzeugt eine
+zweite Funktion, und dann wäre ein Aufruf mit fünf benannten Argumenten
+`function … is not unique`. `0127` löscht deshalb die fünfparametrige Fassung
+(**ohne `cascade`** — nichts hängt an ihr, und eine auftauchende Abhängigkeit
+soll das `drop` scheitern lassen) und legt die sechsparametrige an. **Das `drop`
+nimmt ACL und Kommentar mit**, beide werden danach ausdrücklich neu gesetzt —
+ohne das wäre die Funktion über die Default-Privileges von Supabase für `anon`
+erreichbar (ADR-0125). Rückwärtskompatibel bleibt sie, weil PostgREST über
+Argument**namen** auflöst und `p_swap` einen Default hat.
+
+**Der Figurenwechsel ändert eine Zuordnung, keine Geschichte.**
+`seller_set_purchase_item_sky` lässt `id`, `position`, `condition`, `state`,
+`raw_name`, `source_row` und die Legacy-Marker unberührt; eine eingebuchte
+Position (`movement_id is not null`) lehnt sie ab — erst zurückbuchen, dann
+ändern, **keine automatische Lagerkorrektur**. `p_remember` wird immer `false`
+übergeben: hier wird eine Zeile korrigiert, keine Namensregel für künftige
+Importe gelernt. Eine Arbeitsmappenzeile darf gewechselt und **nicht** entfernt
+werden — `canRemapItem` prüft die Herkunft absichtlich nicht, `canRemoveItem`
+schon.
+
+Ein Wechsel auf dieselbe SKY-ID schreibt nicht: er würde über den Trigger die
+Version des ganzen Einkaufs bewegen und jede andere offene Bearbeitung mit
+`PT409` scheitern lassen. Wechseln und Entfernen derselben Position in einem
+Speichern wird mit `check_violation` abgelehnt, nicht in eine Reihenfolge
+gebracht.
+
+**Zum Eigenbeleg.** Der Fingerabdruck aus `0122` hasht die Positionsliste mit
+`position`, `sky_id`, `name` und `condition` — Hinzufügen, Entfernen und
+Wechseln machen einen ausgestellten Beleg also veraltet, und `0124` zeigt das
+in der Übersichtszeile. Der Beleg selbst bleibt unveränderlich
+(`purchase_receipts_immutable_trg` lehnt jedes UPDATE und DELETE ab); veraltet
+heißt „er beschreibt einen früheren Stand", nicht „er wird geheilt". Der Dialog
+fragt vor einem solchen Speichern zurück. `updated_at` steht **nicht** im Hash,
+der Versionstrigger veraltet also keinen Beleg.
+
+Keine der beiden Migrationen legt eine Tabelle oder Spalte an, und keine
+schreibt eine Zeile. Prüf-SQL: `supabase/checks/0126_*.sql` und
+`supabase/checks/0127_*.sql`.
+
+### 3.3ar Korrekturbelege und die Belege in der Sicherung (`0128`, `0129`)
+
+**Stand: lokal vorbereitet, auf KEINER Umgebung angewendet.**
+
+`0122` hat die Korrekturkette angelegt und im Kopf vermerkt, dass sie
+„vorbereitet, aber nicht gebaut" ist. `0128` baut sie.
+
+**Was schon da war und unangetastet bleibt:** `revision`, `supersedes_id`, der
+zusammengesetzte Fremdschlüssel auf `(id, purchase_id)` (eine Korrektur gehört
+zum selben Einkauf, deklarativ), `receipts_revision_matches_chain`
+(`revision = 1` genau dann, wenn kein Vorgänger), `purchase_receipts_origin_uniq`
+(je Einkauf **ein** Ursprungsbeleg), `purchase_receipts_supersedes_uniq` (jeder
+Beleg höchstens **einmal** ersetzt — die Kette gabelt nicht) und
+`purchase_receipts_immutable_trg` (jedes UPDATE und DELETE wird abgelehnt).
+
+**`0128` ergänzt zwei Spalten** auf `purchase_receipts`:
+
+```
+supersedes_number    text         -- Nummer des ersetzten Belegs, KOPIERT
+supersedes_issued_at timestamptz  -- dessen Ausstellungsdatum, KOPIERT
+```
+
+mit `receipts_supersedes_ref_complete` (alle drei Verweisfelder gemeinsam NULL
+oder gemeinsam gesetzt) und `receipts_supersedes_number_shape`. Kopiert und
+nicht über `supersedes_id` nachgeschlagen, weil ein Belegdokument genau **eine**
+Zeile ist: `seller_purchase_receipt_document` liefert `to_jsonb(r)`, und daran
+hängen das Zeichnen, der SHA-256-Abgleich beim Abruf und der Export. `add
+column` ohne Default schreibt die Tabelle nicht neu und feuert keinen
+Zeilentrigger — dasselbe Argument wie in `0123`.
+
+**Und zwei Funktionen:**
+
+```
+seller_issue_purchase_receipt_correction(bigint) returns jsonb  -- volatile
+seller_purchase_receipt_history(bigint)          returns jsonb  -- stable
+```
+
+beide `security definer`, `set search_path = ''`, `revoke all … from public,
+anon`, `grant execute … to authenticated`.
+
+Die Korrektur arbeitet in dieser Reihenfolge: Betreibertor → `select … for
+update` auf `purchases` → Testvorgang/Kaufdatum prüfen → Kettenspitze lesen
+(der Beleg, den niemand ersetzt) → **Fingerabdruckvergleich** → Geschäftsdaten
+→ Positionsliste frisch bilden → Nummer ziehen → einfügen mit
+`revision = vorige + 1`, `supersedes_id`, `supersedes_number`,
+`supersedes_issued_at`, `format_version = 2`.
+
+**Das Tor ist der Fingerabdruckvergleich.** Stimmt `content_fingerprint` der
+Spitze mit `purchase_receipt_fingerprint(p_id)` überein, wird mit `nothing
+changed since the last receipt` abgelehnt. „Kein zusätzlicher Beleg bei
+unverändertem Einkauf" ist damit **serverseitig** erzwungen; die Oberfläche
+zeigt die Aktion zusätzlich nicht an (`correctable` aus derselben Bedingung).
+Der Vergleich steht **vor** der Nummernvergabe, damit eine abgelehnte Korrektur
+keine Nummer verbraucht.
+
+**Nebenläufigkeit:** die Sperre auf `purchases` reiht zwei gleichzeitige
+Korrekturen hintereinander; die zweite liest danach die neue Spitze, findet den
+Fingerabdruck gleich und wird abgelehnt. `purchase_receipts_supersedes_uniq`
+ist der Riegel darunter.
+
+**Nummernkreis:** derselbe Zähler wie die Erstausstellung
+(`purchase_receipt_counters`, `on conflict … do update … returning` unter der
+Zeilensperre). Eine Korrektur im Folgejahr trägt die Jahreszahl ihrer
+**Ausstellung** — die Nummer benennt den Ausstellungsvorgang, nicht den Einkauf.
+
+**Das PDF.** `isCorrection(doc)` entscheidet am **Verweis**, nicht an der
+Revision: ohne `supersedes_number` und `supersedes_issued_at` wird kein
+Korrekturvermerk gezeichnet. Ein Ursprungsbeleg läuft deshalb durch keinen
+neuen Zweig und bleibt **byteidentisch** — daran hängt der Hash-Abgleich beim
+Abruf (`confirmPurchaseReceiptDownload` rendert neu und vergleicht) und der
+festgehaltene SHA-256 von `SI-E-2026-000001` in `receipt-format.test.ts`. Eine
+Korrektur trägt in **beiden** Formaten Titel „Eigenbeleg – Korrektur", die
+Zeile „Ersetzt Beleg … vom …", die Revision und einen Satz, der sagt, dass der
+ersetzte Beleg unverändert aufbewahrt bleibt. Über steuerliche Gültigkeit sagt
+kein Dokument etwas.
+
+**`0129` nimmt die drei Belegtabellen in `seller_business_backup()`.** Befund,
+der dazu geführt hat: die Funktion ist von `0104` und damit älter als `0122` —
+`purchase_receipts`, `purchase_receipt_downloads` und
+`purchase_receipt_counters` fehlten **ganz**. Eine Wiederherstellung aus der
+Betriebssicherung hätte jeden Eigenbeleg verloren, samt Nummernkreis und
+Abrufnachweis. `0129` wiederholt den Rumpf aus `0104` unverändert und ergänzt
+drei Bereiche: 28 statt 25, in **einer** Anweisung, damit alle Bereiche aus
+derselben MVCC-Momentaufnahme stammen. `lines` kommt als ganzes `jsonb` mit —
+es **ist** der Snapshot. Draußen bleiben `issued_by` und `delivered_by`
+(Kontoidentität, wie `created_by` seit `0104`). `BACKUP_FORMAT_VERSION` bleibt
+1: erhöht wird sie, wenn sich die Bedeutung eines Feldes ändert oder ein Bereich
+verschwindet, nicht wenn Bereiche dazukommen.
+
+**Zur Wiederherstellung** siehe `supabase/checks/0129_restore_test.md`:
+Einspielreihenfolge nach den Fremdschlüsseln (`purchases` → `purchase_items` →
+`purchase_receipt_counters` → `purchase_receipts` **aufsteigend nach `id`** →
+`purchase_receipt_downloads`), die vier Identity-Sequenzen, die nachgezogen
+werden müssen, und was der Export **nicht** trägt. `restore_supported` bleibt
+`false` — es gibt keine Importfunktion, und die Wiederherstellbarkeit ist
+beschrieben, nicht geprüft.
+
+Keine der beiden Migrationen stellt einen Beleg aus, bewegt Bestand oder ändert
+eine Position. Prüf-SQL: `supabase/checks/0128_*` und `supabase/checks/0129_*`.
+
+### 3.3as Die Betriebssicherung führt jede Spalte, die eine Wiederherstellung braucht (`0130`, `0131`)
+
+**Stand: lokal vorbereitet, auf KEINER Umgebung angewendet.**
+
+Beim Nachzählen nach `0129` fiel auf: `src/lib/backup/manifest.ts` ist von
+`0104`, und das Schema war seither gewachsen. **57 Spalten in 10 Bereichen**
+waren weder exportiert noch begründet ausgelassen — sie fehlten nicht aus einer
+Entscheidung, sondern weil niemand sie nachgezogen hat.
+
+**`0130` schließt den fachlich eindeutigen Teil** — 18 Feldzeilen mehr:
+`purchases` bekommt die Kostenaufteilung (`items_cost`, `shipping_cost`,
+`buyer_protection_cost`, als Text wie jeder Betrag) sowie `payment_method`,
+`platform` und `seller_name`; `sales` den Geschäftstag `sale_day`;
+`order_reservations` die Brücke `sale_item_id`; `order_refunds` Zeitpunkt und
+Ergebnis (`requested_at`, `settled_at`, `provider_status`, `failure_code`);
+`figures` `category_id`, `is_active`, `source`; `series` und `categories` ihre
+kuratierte `position`; `shop_settings` ihren Primärschlüssel. Dazu **21
+Spalten, die ab jetzt begründet draußen stehen** statt vergessen zu sein:
+Idempotenzschlüssel, Tagesplätze, Zeitstempel, Stripe-Interna.
+
+**`0131` ergänzt die Händlerstammdaten** — 13 Felder auf `sellers`:
+`register_court`, `register_number`, `w_id`, `phone`, `direct_contact`, die drei
+weiteren Kontaktadressen, `dispute_participation`, `dispute_body`,
+`dispatch_statement`, `return_postage_borne_by` und **`is_active`**. Das letzte
+ist das wichtigste: `0122` stellt den Eigenbeleg mit `from public.sellers where
+is_active limit 1` aus — ohne dieses Feld ist nach einer Wiederherstellung
+nicht entscheidbar, welche Zeile der Betrieb ist. Es sind die eigenen,
+veröffentlichten Geschäftsangaben (Impressumspflicht), keine Daten Dritter.
+
+**Was ausdrücklich nicht mitkommt.** Absender, Inserat und Kaufvereinbarung
+eines Einkaufs — `sender_name`, `sender_street`, `sender_postal_code`,
+`sender_city`, `sender_country`, `listing_title`, `listing_url`,
+`listing_details`, `agreement_note`. Das ist Name und Anschrift einer
+**Privatperson** und Freitext, der Kontaktdaten tragen kann. Beide Migrationen
+prüfen in ihren Nachbedingungen, dass diese neun Felder **nicht** im Rumpf
+stehen: eine Migration, die prüft, was sie nicht getan hat. Für Einkäufe mit
+Eigenbeleg trägt der Snapshot aus `0122` sie ohnehin; für die ohne ist es eine
+offene Lücke, die an der Datenschutzerklärung und der Aufbewahrungsfrist hängt
+(`docs/LEGAL.md`, offen seit `0122`).
+
+Beide Migrationen wiederholen den vollen Funktionsrumpf — `create or replace`
+ersetzt ihn als Ganzes, und anhängen dürfte man auch nicht: die Sicherung ist
+mit Absicht **eine** Anweisung, damit alle 28 Bereiche aus derselben
+MVCC-Momentaufnahme stammen. `BACKUP_FORMAT_VERSION` bleibt 1 (es kommen nur
+Felder dazu), `restore_supported` bleibt `false`.
+
+`src/lib/backup/manifest-gap.test.ts` prüft für alle 28 Bereiche, dass **keine
+Spalte unentschieden** ist, und hält fest, dass die neun privaten Felder als
+`excluded` mit Begründung dastehen. Prüf-SQL: `supabase/checks/0130_*` und
+`0131_*`. Der Plattformexport führt die Belegtabellen weiterhin nicht —
+Vorschlag `supabase/checks/0132_platform_export_receipts_proposal.md`.
+
+### 3.3at Welche Fassung einer Migration wirklich gelaufen ist
+
+`0130` wurde auf Staging ausgeführt und **danach** um vier Zeilen in ihrem
+Nachbedingungsblock ergänzt. Es fiel nichts auf, weil `0126`–`0131` nicht
+committet waren und die einzige Prüfsummenliste nur `supabase/checks/` abdeckte.
+Eine angewendete und dann geänderte Migration sieht hinterher aus wie die, die
+gelaufen ist — und ist es nicht.
+
+Drei Dinge halten das seitdem auseinander:
+
+* **`supabase/migrations/APPLIED.md`** nennt für jede Migration ab `0122` die
+  SHA-256 der **ausgeführten** Fassung, ob die Datei heute noch bitgenau
+  dieselbe ist, und woran die Ausführung belegt ist.
+* **`supabase/SHA256SUMS.txt`** deckt jede Migration **und** jede Prüfdatei ab
+  — eine Liste, zwei Ordner. `npm run verify:sums` prüft sie,
+  `npm run sums:write` erneuert sie nach einer absichtlichen Änderung.
+* **`src/lib/admin/migration-integrity.test.ts`** rechnet beides bei jedem
+  Testlauf nach: die Liste muss vollständig und richtig sein, und jede Zeile in
+  `APPLIED.md` muss zur Datei passen. Für den einen abweichenden Fall (`0130`)
+  prüft der Test, dass die Abweichung als solche dasteht **und** dass das Rezept
+  aus `supabase/checks/0130_amendment.md` genau die ausgeführte Prüfsumme
+  wiederherstellt.
+
+Die Regel, die daraus folgt: **eine angewendete Migration wird nicht mehr
+geändert, auch nicht ihre Nachbedingung.** Ein neuer Wächter gehört in
+`supabase/checks/` und in die Testsuite — dort wirkt er auch nach der
+Ausführung.
+
+Den Zirkel „ein Export prüft sich mit derselben Funktion selbst" schließt
+`supabase/checks/0131_function_body_check.sql`: rein lesend, vergleicht
+`md5(prosrc)` der lebenden `seller_business_backup()` mit der Fassung im
+Repository (Stand `0131`: `24c3810288bb20929fe995554a267adf`, 21 458 Zeichen).
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**

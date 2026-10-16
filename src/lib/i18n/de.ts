@@ -1344,8 +1344,54 @@ export const de = {
          */
         stale:
           "Belegrelevante Daten dieses Einkaufs haben sich seit der Ausstellung "
-          + "geändert. Der ausgestellte Beleg bleibt unverändert; eine Korrekturversion "
-          + "ist noch nicht möglich.",
+          + "geändert. Der ausgestellte Beleg bleibt unverändert \u2014 für den neuen "
+          + "Stand kann ein Korrekturbeleg ausgestellt werden.",
+        /* ---- Der eingefrorene Stand (Regel 10) -------------------------- */
+        /*
+         * WARUM DIESER SATZ NÖTIG WURDE. Auf Staging wurde ein Beleg nach
+         * einem Figurenwechsel erneut heruntergeladen — und zeigte die alten
+         * Figuren. Das ist richtig und war nicht erwartbar: direkt unter der
+         * Abweichungsmeldung stand ein Knopf „PDF herunterladen", und niemand
+         * sagte, welchen Stand die Datei trägt.
+         */
+        frozenHint:
+          "Jedes PDF enthält den eingefrorenen Stand seines Ausstellungstags. "
+          + "Späteren Änderungen am Einkauf folgt es nicht \u2014 das ist der Zweck "
+          + "eines Belegs.",
+        /* ---- Die Beleghistorie (0128) ----------------------------------- */
+        historyHeading: "Beleghistorie",
+        historyLoading: "Beleghistorie wird geladen \u2026",
+        historyFailed: "Die Beleghistorie konnte nicht geladen werden.",
+        current: "Aktuelle Fassung",
+        superseded: "Ersetzt",
+        revisionLabel: (n: number) => `Revision ${n}`,
+        supersedesLabel: (number: string, datum: string) =>
+          `ersetzt ${number} vom ${datum}`,
+        supersededByHint:
+          "Diese Fassung wurde durch eine Korrektur ersetzt. Sie bleibt unverändert "
+          + "aufbewahrt und abrufbar.",
+        lineCount: (n: number) => (n === 1 ? "1 Position" : `${plainNumber(n)} Positionen`),
+        downloadVersion: (number: string) => `${number} herunterladen`,
+        /* ---- Korrekturbeleg ausstellen ---------------------------------- */
+        correct: "Korrekturbeleg erstellen",
+        correcting: "Wird erstellt \u2026",
+        /*
+         * DIE RÜCKFRAGE. Ein Beleg ist ein Dokument; ihn auszustellen ist
+         * nichts, was ein Klick nebenbei tun sollte. Der Satz nennt, was
+         * entsteht und was bleibt.
+         */
+        correctConfirmHeading: "Korrekturbeleg ausstellen?",
+        correctConfirmBody:
+          "Es entsteht ein NEUER Eigenbeleg mit eigener Nummer aus dem laufenden "
+          + "Nummernkreis, der den bisherigen ersetzt und sichtbar auf ihn verweist. "
+          + "Der bisherige Beleg bleibt unverändert gespeichert und abrufbar; sein "
+          + "Abrufnachweis bleibt ebenfalls erhalten. Rückgängig machen lässt sich "
+          + "das nicht \u2014 ein ausgestellter Beleg wird nie gelöscht.",
+        correctConfirmYes: "Ja, Korrekturbeleg ausstellen",
+        correctConfirmNo: "Abbrechen",
+        correctBlockedUnchanged:
+          "Ein Korrekturbeleg ist nur möglich, wenn sich belegrelevante Daten "
+          + "geändert haben.",
         editingBlocked:
           "Während der Bearbeitung wird kein Beleg ausgestellt \u2014 erst speichern "
           + "oder verwerfen.",
@@ -1363,6 +1409,15 @@ export const de = {
             "Die Geschäftsdaten des Shops sind unvollständig. Rechtlicher Name, Straße, "
             + "PLZ und Ort müssen hinterlegt sein, bevor ein Beleg ausgestellt wird.",
           immutable: "Ein ausgestellter Beleg kann nicht geändert werden.",
+          /* Die zwei Ablehnungen der Korrektur (0128). Beide sagen, was gilt,
+             und nicht, dass etwas schiefgegangen sei. */
+          noChange:
+            "Seit dem letzten Beleg hat sich an den belegrelevanten Daten nichts "
+            + "geändert. Ein Korrekturbeleg wird nur ausgestellt, wenn es etwas zu "
+            + "korrigieren gibt.",
+          noOriginal:
+            "Für diesen Einkauf ist noch kein Eigenbeleg ausgestellt. Eine Korrektur "
+            + "setzt einen Ursprungsbeleg voraus.",
           downloadFailed: "Das PDF konnte nicht abgerufen werden.",
         },
       },
@@ -1383,6 +1438,119 @@ export const de = {
          */
         figures: "Gekaufte Figuren",
         noFigures: "Zu diesem Einkauf ist keine Figur erfasst.",
+
+        /* ---- Figuren hinzufügen und entfernen (0126) ------------------- */
+        /*
+         * BIS ZUM SPEICHERN IST NICHTS PASSIERT. Die Texte sagen das
+         * ausdrücklich, weil eine ausgegraute Zeile sonst wie eine gelöschte
+         * aussieht — und `Abbrechen` sie unerklärlich zurückbrächte.
+         */
+        addFigure: "+ Figur hinzufügen",
+        addFigureHint: "Wird erst mit „Speichern“ übernommen.",
+        markedNew: "Neu",
+        markedRemoved: "Wird entfernt",
+        removeFigure: "Figur entfernen",
+        /* ---- Figur austauschen (0127) ---------------------------------- */
+        swapFigure: "Figur ändern",
+        swapFigureOne: (name: string) => `${name} gegen eine andere Figur tauschen`,
+        markedSwapped: "Geändert",
+        undoSwap: "Änderung zurücknehmen",
+        /*
+         * WARUM HIER KEIN TAUSCHKNOPF STEHT. Die Lagerbewegung nennt das
+         * Stück, das wirklich im Regal liegt. Eine andere Figur darauf zu
+         * zeigen hieße, den Bestand von der Buchung zu trennen —
+         * `seller_set_purchase_item_sky` lehnt es ab.
+         */
+        swapBlockedBooked: "Eingebucht — erst zurückbuchen, dann ändern",
+        undoRemove: "Entfernen zurücknehmen",
+        dropNewFigure: "Figur verwerfen",
+        /*
+         * WARUM HIER KEIN PAPIERKORB STEHT. Eine eingebuchte Figur besitzt
+         * eine Lagerbewegung, und die Bewegung nennt das Stück, das wirklich
+         * im Regal liegt. Erst zurückbuchen, dann entfernen —
+         * `seller_remove_purchase_item` lehnt die Reihenfolge andernfalls ab.
+         */
+        removeBlockedBooked: "Eingebucht — erst zurückbuchen, dann entfernen",
+        /*
+         * ZWEI VERSCHIEDENE REGELN, UND DAS IST ABSICHT. Eine
+         * Arbeitsmappenzeile darf eine andere Figur bekommen — dafür gibt es
+         * `0054` — und nur nicht verschwinden: ihre Herkunft stellt kein
+         * Importer wieder her.
+         */
+        removeBlockedLegacy: "Aus der Arbeitsmappe — änderbar, aber nicht entfernbar",
+        /* Zusammenfassung über dem Speichern-Knopf, damit die Zahl stimmt,
+           bevor sie verbindlich wird. */
+        pendingSummary: (add: number, remove: number, swap = 0) =>
+          [add > 0 ? `${plainNumber(add)} neu` : null,
+           swap > 0 ? `${plainNumber(swap)} geändert` : null,
+           remove > 0 ? `${plainNumber(remove)} wird entfernt` : null]
+            .filter(Boolean).join(" · "),
+        stagedCount: (n: number) =>
+          n === 1 ? "danach 1 Figur" : `danach ${plainNumber(n)} Figuren`,
+        /*
+         * DIE RÜCKFRAGE BEI VORHANDENEM BELEG.
+         *
+         * Der Fingerabdruck aus `0122` hasht die Positionsliste. Eine Figur
+         * mehr oder weniger macht den ausgestellten Beleg also veraltet — und
+         * der Beleg selbst bleibt unveränderlich, es gibt kein Zurück.
+         */
+        /*
+         * KEINE AUSSAGE ÜBER GÜLTIGKEIT.
+         *
+         * Hier stand „bleibt unverändert gültig für den Stand seiner
+         * Ausstellung". Das ist eine rechtliche Behauptung, und dieses
+         * Fenster hat keine zu treffen — es weiß, was gespeichert ist, und
+         * sonst nichts. Gesagt wird deshalb nur das Nachprüfbare: der Beleg
+         * ist ausgestellt, die Liste stimmt danach möglicherweise nicht mehr
+         * mit ihm überein, und das Gespeicherte bleibt unverändert.
+         */
+        receiptWarnHeading: "Für diesen Einkauf wurde bereits ein Eigenbeleg ausgestellt",
+        /*
+         * ALLE DREI HANDLUNGEN WERDEN GENANNT.
+         *
+         * Vorher stand hier nur „hinzufügst oder entfernst". Seit `0127` macht
+         * auch ein AUSTAUSCH den Beleg veraltet — der Fingerabdruck aus `0122`
+         * hasht `sky_id` UND `name` —, und eine Warnung, die die Handlung nicht
+         * nennt, die man gerade vorhat, liest man als „betrifft mich nicht".
+         *
+         * Und was danach passiert, steht ausdrücklich da: der Beleg wird nicht
+         * angefasst und nicht neu ausgestellt, sondern gekennzeichnet. Das ist
+         * nachprüfbar (`purchase_receipts_immutable_trg` lehnt jedes UPDATE
+         * und DELETE ab, `stale` kommt aus dem Fingerabdruckvergleich) — eine
+         * Aussage über Gültigkeit wäre es nicht.
+         */
+        receiptWarnBody: (number: string) =>
+          `Wenn du hier eine Figur austauschst, hinzufügst oder entfernst, `
+          + `stimmt die Figurenliste dieses Einkaufs möglicherweise nicht mehr `
+          + `mit dem ausgestellten Beleg ${number} überein. Der Beleg selbst `
+          + `wird dabei nicht geändert und nicht neu ausgestellt: er bleibt `
+          + `unverändert gespeichert, so wie er ausgestellt wurde, und wird `
+          + "danach hier als abweichend gekennzeichnet.",
+        receiptWarnConfirm: "Trotzdem speichern",
+        /*
+         * DER WEG ZURÜCK, DER NICHTS VERWIRFT. „Abbrechen" oben wirft den
+         * ganzen Bearbeitungsstand weg; wer die Rückfrage nur wieder
+         * zumachen will, braucht ein zweites Wort dafür.
+         */
+        receiptWarnBack: "Zurück zum Bearbeiten",
+        /*
+         * GESPEICHERT IST GESPEICHERT — AUCH WENN DAS NACHLESEN SCHEITERT.
+         *
+         * Zwei verschiedene Dinge, und vorher hingen sie an einem Faden: der
+         * Schreibvorgang und das Nachlesen danach. Scheitert das zweite, ist
+         * die ANZEIGE veraltet und nicht die Speicherung fehlgeschlagen. Der
+         * Satz sagt genau das, und daneben steht ein Knopf.
+         */
+        saveRefreshFailed:
+          "Gespeichert. Die Anzeige konnte danach nicht aktualisiert werden "
+          + "und zeigt möglicherweise noch den Stand von vorher — auch beim "
+          + "Eigenbeleg.",
+        saveRefreshRetry: "Erneut laden",
+        saveRefreshRetrying: "Lädt …",
+        /* Nebenläufigkeit. Kein „Fehler", sondern eine Tatsache über die Welt. */
+        stalePurchase:
+          "Dieser Einkauf wurde inzwischen an anderer Stelle geändert. "
+          + "Bitte neu laden — die Eingaben hier wurden nicht gespeichert.",
         /*
          * DIE KNÖPFE OBEN RECHTS.
          *
@@ -1673,6 +1841,11 @@ export const de = {
          */
         bookIcon: "↓",
         remapIcon: "✎",
+        /* Papierkorb. Kein Bild, kein Paket: dieselbe Schrift wie die
+           anderen drei Zeichen, damit die Spur gleich breit bleibt. */
+        trashIcon: "🗑",
+        /* Austauschen. Zwei Pfeile, ein Zeichen — die Spur bleibt gleich breit. */
+        swapIcon: "⇄",
         historical: "Historische Einkäufe sind bereits im Bestand berücksichtigt und werden nicht erneut eingebucht.",
         hasBookings: "Dieser Einkauf hat Artikel im Bestand. Nimm diese Buchungen zuerst zurück.",
         dateRange: "Dieses Kaufdatum liegt außerhalb des plausiblen Bereichs.",

@@ -687,6 +687,29 @@ export function OrderbookLedger({
                              delete next[showingRow.id];
                              return next;
                            });
+                           /*
+                            * UND DIE FIGURENLISTE, DENN SEIT `0126` ÄNDERT EIN
+                            * SPEICHERN SIE.
+                            *
+                            * DAS WAR DER FEHLER. `items[id]` ist der
+                            * Zwischenspeicher dieses Buches; `router.refresh()`
+                            * erneuert die Ledger-Zeile, aber nicht ihn. Ein
+                            * Figurenwechsel wurde also geschrieben und danach
+                            * aus dem ALTEN Zwischenspeicher gezeichnet — die
+                            * Änderung sah aus, als wäre sie verworfen worden.
+                            *
+                            * Der Eintrag wird WEGGENOMMEN und nicht
+                            * überschrieben: kein Wert heisst „wird geladen",
+                            * und eine Liste, von der wir wissen, dass sie
+                            * falsch ist, soll nicht noch eine Sekunde stehen.
+                            */
+                           setItems((current) => {
+                             const next = { ...current };
+                             delete next[showingRow.id];
+                             return next;
+                           });
+                           loading.current.delete(showingRow.id);
+                           load(showingRow.id);
                            router.refresh();
                          }} />
       ) : null}

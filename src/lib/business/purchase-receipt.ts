@@ -81,6 +81,18 @@ export type ReceiptDocument = {
   issued_at: string;
   revision: number;
   supersedes_id: number | null;
+  /**
+   * Nummer und Ausstellungsdatum des ersetzten Belegs (0128).
+   *
+   * Beim Ausstellen KOPIERT, nicht nachgeschlagen: ein Belegdokument ist
+   * genau eine Zeile. `null` bei einem Ursprungsbeleg — und nur daran
+   * entscheidet sich, ob ein Dokument als Korrektur gezeichnet wird.
+   *
+   * Optional im Typ, weil ein Dokument aus einer Datenbank vor `0128` die
+   * Felder nicht hat; `isCorrection()` liest beides als „kein Verweis".
+   */
+  supersedes_number?: string | null;
+  supersedes_issued_at?: string | null;
   /** Fehlt, solange `0123` nicht angewendet ist — siehe `formatOf()`. */
   format_version?: number | null;
 
@@ -139,6 +151,28 @@ export const RECEIPT_FORMATS = [1, 2] as const;
  * Form, und ein Test hält fest, dass jede ausgestellte Nummer einen Zeichner
  * hat.
  */
+/**
+ * Ist dies ein Korrekturbeleg?
+ *
+ * ENTSCHEIDEND IST DER VERWEIS, NICHT DIE REVISION. Beide sagen dasselbe —
+ * `receipts_revision_matches_chain` erzwingt `revision = 1` genau dann, wenn
+ * `supersedes_id is null` —, aber gezeichnet werden kann nur, was im Dokument
+ * steht: Nummer und Datum des Vorgängers. Fehlen sie, wird kein
+ * Korrekturvermerk gedruckt, auch wenn die Revision größer als 1 wäre.
+ *
+ * UND DARAN HÄNGT DIE BYTE-IDENTITÄT DER ALTBELEGE. Ein Ursprungsbeleg hat
+ * keinen Verweis, läuft also durch keinen neuen Zweig und wird Byte für Byte
+ * gezeichnet wie vorher. `receipt-format.test.ts` hält Länge und SHA-256 von
+ * `SI-E-2026-000001` fest, und `confirmPurchaseReceiptDownload` vergleicht den
+ * Hash der ausgelieferten Bytes gegen ein neu gerendertes Dokument: eine
+ * Verschiebung um ein Byte ließe jeden erneuten Abruf scheitern.
+ */
+export function isCorrection(doc: ReceiptDocument): boolean {
+  const number = doc.supersedes_number ?? null;
+  const issued = doc.supersedes_issued_at ?? null;
+  return number !== null && number.trim() !== "" && issued !== null;
+}
+
 export function formatOf(doc: ReceiptDocument): number {
   const version = Number(doc.format_version ?? 1);
   return RECEIPT_FORMATS.includes(version as 1 | 2) ? version : 1;

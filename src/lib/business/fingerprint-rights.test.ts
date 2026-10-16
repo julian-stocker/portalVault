@@ -415,6 +415,99 @@ describe("keine Prüfdatei vergleicht identity_arguments als Text", () => {
   }
 });
 
+/*
+ * DER WÄCHTER, DEN DER ERSTE 0127-VERSUCH GEKOSTET HAT.
+ *
+ * `0127` brach auf Staging ab mit „die Argumenttypen sind nicht die
+ * erwarteten" — bei einer Funktion, deren Signatur vollkommen richtig war.
+ * Dort stand
+ *
+ *     proargtypes::oid[]  is distinct from  array[...]::regtype[]::oid[]
+ *
+ * und das kann NIE bestehen: `proargtypes` ist ein nullbasierter `oidvector`,
+ * der Cast nach `oid[]` behält die untere Grenze 0, ein `array[...]`-Literal
+ * beginnt bei 1 — und die Array-Gleichheit in PostgreSQL vergleicht
+ * Dimensionen UND Grenzen. Gleiche Elemente, verschiedene Grenzen, Ergebnis
+ * `false`.
+ *
+ * Es war der dritte Anlauf desselben Fehlers: `0124` Prüfung 102 verglich
+ * `identity_arguments` als Text, `0125` Postflight 202 bekam `[0:0]={bigint}`
+ * zurück. Beide Lehren standen als KOMMENTAR in vier Prüfdateien — ein
+ * Kommentar hält nichts auf. Dieser Wächter tut es, und zwar in BEIDEN
+ * Verzeichnissen.
+ *
+ * ERLAUBT BLEIBT GENAU EINE DATEI: die Diagnose, die den Fehlgriff absichtlich
+ * nachstellt. Sie steht namentlich da, damit das Zulassen eine Entscheidung
+ * bleibt und kein stilles Durchrutschen.
+ */
+const VEKTOR_AUSNAHMEN = ["0127_signature_diagnosis.sql"];
+
+describe("niemand vergleicht proargtypes als GANZEN Vektor", () => {
+  /** Die Stellen, an denen der ganze Vektor gecastet wird. */
+  const stellen = (sql: string) =>
+    ohneKommentare(sql).split("\n")
+      .map((l, i) => ({ nr: i + 1, text: l.trim() }))
+      /* Mit Index ist es richtig: `proargtypes[0]::regtype`. Ohne Index wird
+         der ganze Vektor gecastet — und genau das ging schief. */
+      .filter(({ text }) => /proargtypes\s*::/.test(text));
+
+  it("die Wächter sehen überhaupt Dateien", () => {
+    expect(migrationFiles.length).toBeGreaterThan(100);
+    expect(checkSql.length).toBeGreaterThanOrEqual(9);
+  });
+
+  for (const file of migrationFiles) {
+    it(`Migration ${file}`, () => {
+      expect(stellen(migrationSource(file))).toEqual([]);
+    });
+  }
+
+  for (const { file, sql } of checkSql) {
+    it(`Prüfdatei ${file}`, () => {
+      if (VEKTOR_AUSNAHMEN.includes(file)) {
+        /* Die Ausnahme muss den Fehlgriff auch wirklich NACHSTELLEN — sonst
+           ist sie keine Diagnose, sondern nur ein Loch im Wächter. */
+        expect(stellen(sql).length).toBeGreaterThan(0);
+        expect(sql).toContain("array_lower");
+        return;
+      }
+      expect(stellen(sql)).toEqual([]);
+    });
+  }
+
+  it("POSITIVKONTROLLE: er erkennt genau den Fehlgriff aus dem ersten 0127", () => {
+    /*
+     * Ein Wächter, der nie etwas findet, beweist nichts. Links die Form, an
+     * der `0127` abgebrochen ist, rechts die richtige — über zwei Zeilen
+     * verteilt, denn so stand sie in der Datei: der Vergleichsoperator war
+     * nicht einmal auf derselben Zeile wie der Cast.
+     */
+    const kaputt = [
+      "  if (select p.proargtypes::oid[] from pg_proc p where p.oid = v_oid)",
+      "     is distinct from array['bigint']::regtype[]::oid[] then",
+    ].join("\n");
+    expect(stellen(kaputt)).toHaveLength(1);
+
+    const richtig = [
+      "  and p.proargtypes[0]::regtype = 'bigint'::regtype",
+      "  and p.proargtypes[5]::regtype = 'jsonb'::regtype",
+    ].join("\n");
+    expect(stellen(richtig)).toEqual([]);
+  });
+
+  it("und wer Typen festnagelt, tut es positionsweise", () => {
+    /* Positive Kontrolle: die vier Dateien, die eine Signatur prüfen, nennen
+       `proargtypes[0]` — der Wächter verbietet also nicht das Prüfen, sondern
+       nur die eine falsche Form. */
+    for (const file of ["0124_postflight.sql", "0125_postflight.sql",
+                        "0126_postflight.sql", "0127_postflight.sql"]) {
+      const eintrag = checkSql.find((c) => c.file === file);
+      expect(eintrag, file).toBeDefined();
+      expect(eintrag!.sql, file).toContain("proargtypes[0]::regtype");
+    }
+  });
+});
+
 describe("und keine vergleicht proargtypes oder proconfig als Text", () => {
   for (const { file, sql } of checkSql) {
     it(file, () => {

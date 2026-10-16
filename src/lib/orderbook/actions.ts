@@ -39,6 +39,16 @@ async function run(fn: string, args: Record<string, unknown>, id?: number): Prom
 function orderbookMessage(error: { code?: string; message?: string }): string {
   const text = error.message ?? "";
   if (error.code === "42501") return de.admin.notAllowed;
+  /*
+   * PT409 — DIE VERALTETE BEARBEITUNG (0126).
+   *
+   * `seller_save_purchase_edit` prueft `purchases.updated_at` als Version des
+   * ganzen Aggregats; seit `0126` bewegt ein Trigger sie auch bei einer
+   * Positionsaenderung. Wer den Dialog offen hatte, waehrend jemand anders
+   * eingebucht hat, bekommt hier einen Satz statt „konnte nicht gespeichert
+   * werden" — und die Aufforderung, die wirklich hilft: neu laden.
+   */
+  if (error.code === "PT409") return de.business.orderbook.detailsModal.stalePurchase;
   if (text.includes("already in inventory")) return de.business.orderbook.errors.alreadyBooked;
   if (text.includes("not a catalog figure")) return de.business.orderbook.errors.notAFigure;
   if (text.includes("damaged item")) return de.business.orderbook.errors.damaged;
@@ -428,6 +438,89 @@ export async function swapPurchaseDailyIndex(
     ok: true,
     moved: result.moved === true,
     dailyIndex: Number(result.daily_index ?? withIndex),
+  };
+}
+
+/**
+ * EIN Speichern des Bearbeitungsdialogs: Felder und Figurenliste (0126).
+ *
+ * Warum nicht zwei Aufrufe: `seller_update_purchase` und dann die
+ * Positionsaenderungen waeren zwei bis N Transaktionen, und ein Fehler in der
+ * Mitte liesse einen halb geaenderten Einkauf zurueck. Dieselbe Lehre hatte
+ * die Verkaufsseite in `0091` — dort wurden zwei Aufrufe zu einem, weil der
+ * zweite gegen das `updated_at` des ersten prueefte und der Betreiber mit sich
+ * selbst kollidierte.
+ *
+ * Die Antwort traegt die NEUE Version. Der Dialog bleibt offen, und ohne sie
+ * wuerde sein naechstes Speichern gegen den alten Zeitstempel pruefen.
+ */
+export async function savePurchaseEdit(
+  id: number,
+  purchasedAt: string | undefined,
+  totalCost: number | undefined,
+  note: string | undefined,
+  head: PurchaseHead & { clearCostSplit?: boolean },
+  items: { add: { sky_id: string | null; raw_name: string | null; condition: string }[];
+           remove: number[];
+           swap?: { item_id: number; sky_id: string }[] },
+  expectedUpdatedAt: string | null,
+): Promise<Result & { updatedAt?: string | null; added?: number[] }> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+
+  /*
+   * WEGGELASSEN HEISST „NICHT ANFASSEN" — auch hier.
+   *
+   * `seller_update_purchase` liest NULL so, und `p_fields ->> 'x'` auf einem
+   * fehlenden Schluessel IST NULL. Ein Feld, das der Dialog nicht gesetzt hat,
+   * darf deshalb nicht als `null` mitfahren, sondern gar nicht: sonst waere
+   * „nicht angefasst" von „geleert" nicht zu unterscheiden.
+   */
+  const fields: Record<string, unknown> = {};
+  const put = (key: string, value: unknown) => {
+    if (value !== undefined) fields[key] = value;
+  };
+  put("purchased_at", purchasedAt);
+  put("total_cost", totalCost);
+  put("note", note);
+  put("platform", head.platform);
+  put("seller_name", head.sellerName);
+  put("items_cost", head.items);
+  put("shipping_cost", head.shipping);
+  put("buyer_protection_cost", head.buyerProtection);
+  put("payment_method", head.paymentMethod);
+  put("external_ref", head.externalRef);
+  if (head.clearCostSplit === true) fields.clear_cost_split = true;
+  put("sender_name", head.senderName);
+  put("sender_street", head.senderStreet);
+  put("sender_postal_code", head.senderPostalCode);
+  put("sender_city", head.senderCity);
+  put("sender_country", head.senderCountry);
+  put("listing_title", head.listingTitle);
+  put("listing_url", head.listingUrl);
+  put("listing_details", head.listingDetails);
+  put("agreement_note", head.agreementNote);
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_save_purchase_edit", {
+    p_id: id,
+    p_fields: fields,
+    p_add: items.add,
+    p_remove: items.remove,
+    /*
+     * DER FIGURENWECHSEL (0127). `p_swap` hat in der Funktion einen
+     * Vorgabewert, deshalb bleibt ein Aufruf ohne diesen Schluessel gueltig —
+     * genau das macht die bisherige fuenfparametrige Signatur abwaertskompatibel.
+     */
+    p_swap: items.swap ?? [],
+    p_expected_updated_at: expectedUpdatedAt,
+  });
+  if (error) return { ok: false, message: orderbookMessage(error) };
+  for (const path of paths(id)) revalidatePath(path);
+  const result = (data ?? {}) as { updated_at?: string | null; added?: unknown };
+  return {
+    ok: true,
+    updatedAt: result.updated_at ?? null,
+    added: Array.isArray(result.added) ? result.added.map(Number) : [],
   };
 }
 

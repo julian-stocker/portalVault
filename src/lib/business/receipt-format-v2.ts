@@ -39,6 +39,7 @@
  * darf von nichts abhängen, was sich ändern darf.
  */
 import { PdfPage } from "@/lib/legal/invoice-pdf";
+import { isCorrection } from "@/lib/business/purchase-receipt";
 import type { ReceiptDocument, ReceiptLine } from "@/lib/business/purchase-receipt";
 
 const PLATFORMS: Record<string, string> = {
@@ -60,6 +61,19 @@ const NOTE_V2 =
   "Ankauf von einer Privatperson. Der Verkäufer hat keine Rechnung ausgestellt "
   + "und weist keine Umsatzsteuer aus; ein Vorsteuerabzug ist daraus nicht "
   + "möglich. Dieser Beleg wurde vom Käufer selbst erstellt (Eigenbeleg).";
+
+/**
+ * Der Satz, der eine Korrektur erklärt (0128).
+ *
+ * Er nennt nur Nachprüfbares: welcher Beleg ersetzt wird, dass der ersetzte
+ * aufbewahrt bleibt (ein Trigger lehnt jedes UPDATE und DELETE ab) und welcher
+ * von beiden für den Ankauf gilt.
+ */
+const KORREKTUR_SATZ = (number: string, datum: string): string =>
+  `Dieser Beleg ersetzt den Eigenbeleg ${number} vom ${datum}. Der ersetzte `
+  + "Beleg bleibt unverändert aufbewahrt und wird nicht neu ausgestellt; er "
+  + "beschreibt den Stand seines Ausstellungstags. Für diesen Ankauf gilt der "
+  + "vorliegende Beleg.";
 
 /** „13" → „13,00 EUR". `U+20AC` ist in WinAnsi nicht darstellbar. */
 function money(value: string | number | null | undefined): string {
@@ -176,12 +190,43 @@ export function renderReceiptV2(doc: ReceiptDocument): Uint8Array {
   const pieces = doc.lines.length;
 
   /* ---- Kopf --------------------------------------------------------------- */
-  page.text("Eigenbeleg über einen Privatankauf", { size: 15, font: "bold" });
+  /*
+   * DER TITEL SAGT, WELCHE ART DOKUMENT DAS IST (0128).
+   *
+   * Ein Korrekturbeleg, der wie ein Original aussieht, wäre das
+   * dokumentarisch gefährlichste Ergebnis dieser Funktion — er träte neben
+   * den ersetzten Beleg und niemand sähe, dass er ihn ersetzt. Deshalb
+   * steht der Vermerk im TITEL und nicht in einer Fußnote.
+   *
+   * Ein Ursprungsbeleg nimmt diesen Zweig nicht: `isCorrection()` ist für
+   * ihn falsch, und er wird gezeichnet wie vorher. Das ist die Zusicherung,
+   * an der die festgehaltenen Hashes hängen.
+   */
+  const korrektur = isCorrection(doc);
+  page.text(korrektur ? "Eigenbeleg – Korrektur" : "Eigenbeleg über einen Privatankauf",
+            { size: 15, font: "bold" });
   page.rule(8);
 
   page.text(`Belegnummer   ${doc.receipt_number}`, { size: 9, dy: 16 });
   page.text(`Belegdatum    ${germanDate(doc.issued_at)}`, { size: 9, dy: 11 });
   page.text(`Kaufdatum     ${germanDate(doc.purchased_at)}`, { size: 9, dy: 11 });
+
+  /*
+   * DER VERWEIS AUF DEN ERSETZTEN BELEG (0128).
+   *
+   * Nummer UND Ausstellungsdatum, beide aus dem eigenen Snapshot — nicht aus
+   * einer zweiten Zeile nachgeschlagen. Wer dieses Dokument in zehn Jahren in
+   * der Hand hält, soll ohne Datenbank sagen können, welchen Beleg es ersetzt.
+   *
+   * Ein Ursprungsbeleg nimmt diesen Zweig nicht und wird gezeichnet wie
+   * vorher — daran hängen die festgehaltenen Hashes der ausgestellten Belege.
+   */
+  if (korrektur) {
+    page.text(`Ersetzt Beleg ${doc.supersedes_number} vom `
+              + `${germanDate(doc.supersedes_issued_at ?? "")}`,
+              { size: 9, dy: 11 });
+    page.text(`Revision      ${doc.revision}`, { size: 9, dy: 11 });
+  }
 
   /* ---- die zwei Parteien -------------------------------------------------- */
   const column = page.left + 265;
@@ -302,10 +347,17 @@ export function renderReceiptV2(doc: ReceiptDocument): Uint8Array {
 
   /* ---- Hinweis und Unterschrift: zusammen, oder zusammen auf der nächsten -- */
   const note = wrap(NOTE_V2, 100);
-  page.reserve(18 + 4 + 11 * note.length + 30 + 11);
+  /* Nur auf einer Korrektur. Ein Ursprungsbeleg wird Zeile für Zeile wie
+     vorher gezeichnet — daran hängen die festgehaltenen Hashes. */
+  const korrekturNote = korrektur
+    ? wrap(KORREKTUR_SATZ(doc.supersedes_number ?? "",
+                          germanDate(doc.supersedes_issued_at ?? "")), 100)
+    : [];
+  page.reserve(18 + 4 + 11 * (note.length + korrekturNote.length) + 30 + 11);
   page.text("Hinweis", { size: 8.5, font: "bold", dy: 18 });
   page.rule(4);
   note.forEach((line, index) => page.text(line, { size: 8.5, dy: index === 0 ? 12 : 11 }));
+  korrekturNote.forEach((line) => page.text(line, { size: 8.5, dy: 11 }));
 
   page.gap(30);
   page.text("_______________________________", { size: 8.5 });

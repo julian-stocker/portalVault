@@ -667,6 +667,26 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
  * ---------------------------------------------------------------------- */
 
 export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
+  /*
+   * NOCH NICHT DRIN — UND DAS IST EIN OFFENER PUNKT, KEINE ENTSCHEIDUNG GEGEN
+   * SIE.
+   *
+   * Die drei Belegtabellen kamen mit `0122`, dieses Manifest ist älter. Der
+   * BETRIEBSEXPORT führt sie seit `0129`; dieses Archiv zu erweitern ist eine
+   * eigene Entscheidung über ein Admin-Werkzeug mit eigener Archivdatei und
+   * eigenen Prüfsummen — sie läuft hier nicht nebenbei mit. Solange sie offen
+   * ist, steht die Lücke hier, in `platform-manifest.test.ts` als geprüfte
+   * Ausnahme und im Bericht. Vorschlag: `0130`.
+   */
+  purchase_receipts:
+    "Eigenbelege über Privatankäufe. Im Betriebsexport seit 0129 enthalten; die " +
+    "Aufnahme in das Plattformarchiv ist ein offener Punkt (Vorschlag 0130) und " +
+    "braucht eine eigene Freigabe.",
+  purchase_receipt_downloads:
+    "Abrufnachweis der Eigenbelege. Dieselbe offene Entscheidung wie purchase_receipts.",
+  purchase_receipt_counters:
+    "Nummernkreis der Eigenbelege. Dieselbe offene Entscheidung wie purchase_receipts.",
+
   legacy_stock_events:
     "Legacy-Lagerhistorie aus der Arbeitsmappe. Ein Backup, das sie enthält, lädt zur " +
     "verbotenen Rückspielung ein — dauerhaft untersagt.",

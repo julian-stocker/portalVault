@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
 
+import { allMigrations, code, latestFunction } from "@/test-support/migrations";
 import {
   BACKUP_FORMAT, BACKUP_FORMAT_VERSION, BACKUP_METADATA_FIELDS, BACKUP_METADATA_SOURCE,
   BACKUP_SECTIONS, EXCLUDED_TABLES, FORBIDDEN_FIELDS,
@@ -15,8 +15,30 @@ import {
  * in der SQL, ein gestrichenes im Manifest —, schlägt sie an, statt dass
  * ein Backup entsteht, dessen Inhalt niemand mehr beschreiben kann.
  */
-const FILE = "supabase/migrations/0104_business_backup_export.sql";
-const SQL = readFileSync(FILE, "utf8");
+/*
+ * DIE LETZTE FASSUNG, NICHT DIE ERSTE DATEI.
+ *
+ * Hier stand `0104` fest verdrahtet. Das war richtig, solange `0104` die
+ * einzige Definition war — `0129` ergänzt die Funktion um die drei
+ * Belegbereiche, und ein Test, der weiter nur `0104` liest, prüft eine
+ * Fassung, die die Datenbank nicht mehr ausführt. Genau der Fehler, für den
+ * `latestFunction()` existiert: die Migrationshistorie ist eine Faltung,
+ * keine Liste.
+ */
+const QUELLE = latestFunction("seller_business_backup");
+/* `latestFunction` schneidet vor dem `$$;`. Der Abschluss gehört dazu: an ihm
+   hängt die Prüfung „genau ein Anweisungstrenner". */
+const SQL = `${QUELLE.body}\n$$;`;
+/**
+ * Die ganze Historie, ohne Prosa — für Zusicherungen, die außerhalb des
+ * Rumpfs stehen.
+ *
+ * `code()` ist hier nicht Bequemlichkeit: `0104` nennt im Kopf unter
+ * „RÜCKBAU" den Befehl `drop function public.seller_business_backup();` als
+ * Anleitung. Ein Wächter gegen genau dieses `drop` fand ihn und schlug an —
+ * an einem Kommentar. Dieselbe Lehre wie zweimal in `0124`.
+ */
+const HISTORIE = code(allMigrations);
 
 /** Ohne Kommentare: die Kopfzeilen nennen Tabellen, die gerade NICHT vorkommen. */
 const CODE = SQL.split("\n").filter((l) => !l.trimStart().startsWith("--")).join("\n");
@@ -66,10 +88,18 @@ describe("die Funktion ist read-only und richtig eingehängt", () => {
   });
 
   it("vergibt die Rechte wie ihre Geschwister", () => {
-    expect(CODE).toContain(
+    /*
+     * DIE RECHTE STEHEN NICHT IM RUMPF, SONDERN NEBEN IHM — und sie wurden in
+     * `0104` gesetzt. `create or replace` behält den ACL, ein `drop` nähme ihn
+     * mit (die Lehre aus `0127`). Geprüft wird deshalb beides: dass die Rechte
+     * irgendwo in der Historie gesetzt sind, und dass niemand die Funktion
+     * gelöscht hat.
+     */
+    expect(HISTORIE).toContain(
       "revoke all on function public.seller_business_backup() from public, anon;");
-    expect(CODE).toContain(
+    expect(HISTORIE).toContain(
       "grant execute on function public.seller_business_backup() to authenticated;");
+    expect(HISTORIE).not.toMatch(/drop function[^;]*seller_business_backup/);
   });
 
   it("ist genau eine Anweisung — daher eine Momentaufnahme", () => {
@@ -137,11 +167,24 @@ describe("Format und Metadaten", () => {
   });
 });
 
-describe("die 25 Bereiche stimmen mit dem Manifest überein", () => {
-  it("es sind genau die des Manifests, nicht mehr und nicht weniger", () => {
+describe("die Bereiche stimmen mit dem Manifest überein", () => {
+  it("es sind genau die des Manifests, in derselben Reihenfolge", () => {
     const imSql = [...CODE.matchAll(/^\s{6}'([a-z_]+)', coalesce\(\(/gm)].map((m) => m[1]);
     expect(imSql).toEqual(BACKUP_SECTIONS.map((s) => s.key));
-    expect(imSql).toHaveLength(25);
+    /* Die Zahl steht im Manifest, nicht hier: sie ist das Ergebnis der
+       Auswahl und nicht ihre Zusicherung. Dass beide Seiten gleich sind,
+       prüft die Zeile darüber. */
+    expect(imSql.length).toBe(BACKUP_SECTIONS.length);
+    expect(imSql.length).toBeGreaterThanOrEqual(28);
+  });
+
+  it("die drei Belegbereiche sind dabei — sie fehlten bis 0129 ganz", () => {
+    for (const key of ["purchase_receipts", "purchase_receipt_downloads",
+                       "purchase_receipt_counters"]) {
+      expect(CODE, `${key} fehlt im Export`).toContain(`'${key}', coalesce((`);
+    }
+    /* Und der eingefrorene Snapshot kommt als Ganzes mit, nicht neu gebildet. */
+    expect(CODE).toContain("'lines', t.lines");
   });
 
   for (const section of BACKUP_SECTIONS) {

@@ -382,8 +382,13 @@ describe("0122 legt an, was der Beleg braucht", () => {
     /*
      * „die höchste Migration" stand hier, bis `0123` die Formatversion
      * nachtrug — danach, bis `0124` den Belegzustand in die Übersicht
-     * brachte, und jetzt bis `0125` dem internen Fingerabdruck das EXECUTE
-     * für `authenticated` entzog. Die Zusicherung, die bleibt, ist die über
+     * brachte, bis `0125` dem internen Fingerabdruck das EXECUTE für
+     * `authenticated` entzog, bis `0126` — Figuren hinzufügen und entfernen in
+     * einem Speichern —, bis `0127`, dem direkten Figurenwechsel im selben
+     * Speichern, und jetzt bis `0129`: Korrekturbelege (`0128`) und die
+     * Eigenbelege in der Betriebssicherung (`0129`) — und jetzt bis `0131`:
+     * die Sicherung führt seit `0130`/`0131` jede Spalte, die eine
+     * Wiederherstellung braucht. Die Zusicherung, die bleibt, ist die über
      * die FOLGE: die drei Tests in `src/lib/commerce/` verlangen sie
      * lückenlos.
      *
@@ -394,8 +399,8 @@ describe("0122 legt an, was der Beleg braucht", () => {
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    expect(files[files.length - 1]).toBe("0125_revoke_internal_fingerprint_execute.sql");
-    expect(files[files.length - 2]).toBe("0124_orderbook_receipt_status.sql");
+    expect(files[files.length - 1]).toBe("0131_business_backup_seller_fields.sql");
+    expect(files[files.length - 2]).toBe("0130_business_backup_fields.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });
@@ -646,7 +651,18 @@ describe("ausgestellt und abgerufen sind zwei Dinge", () => {
      * „PDF herunterladen" und nicht wieder „erstellen".
      */
     expect(DETAILS).toContain("receipt === null ? receiptCopy.create : receiptCopy.download");
-    expect(DETAILS).toContain("setReceipt(current);");
+    /*
+     * DER ZUSTAND WIRD GESETZT, BEVOR DER ABRUF BEGINNT. Vorher hieß die
+     * Variable `current`; seit `0128` kann auch eine ERSETZTE Fassung
+     * abgerufen werden, und dann darf der Zustand der Kettenspitze nicht
+     * überschrieben werden — daher die Trennung in `ziel` und `receipt`.
+     * Die Zusicherung ist dieselbe.
+     */
+    const fn = DETAILS.slice(DETAILS.indexOf("async function fetchReceipt("));
+    const rumpf = fn.slice(0, fn.indexOf("\n  }"));
+    expect(rumpf).toContain("setReceipt(issued.receipt);");
+    expect(rumpf.indexOf("setReceipt(issued.receipt);"))
+      .toBeLessThan(rumpf.indexOf("await fetch("));
   });
 
   it("während der Bearbeitung wird nichts ausgestellt", () => {
@@ -661,7 +677,34 @@ describe("ausgestellt und abgerufen sind zwei Dinge", () => {
     expect(code(latestFunction("seller_purchase_receipt").body).replace(/\s+/g, " "))
       .toContain("'stale', v_receipt.content_fingerprint is distinct from "
                  + "public.purchase_receipt_fingerprint(p_purchase_id)");
-    expect(DETAILS).not.toContain("updatedAt");
+    /*
+     * UND DIE WARNUNG VERGLEICHT NICHT SELBST.
+     *
+     * Hier stand `not.toContain("updatedAt")` — ein Verbot des Wortes. Seit
+     * `0126` benutzt der Dialog `purchase.updatedAt` als
+     * NEBENLÄUFIGKEITS-TOKEN: er schickt ihn mit, und die Datenbank lehnt eine
+     * veraltete Bearbeitung mit `PT409` ab. Das ist ein anderer Zweck als
+     * „ist der Beleg veraltet", und ein Wortverbot kann die zwei nicht
+     * unterscheiden.
+     *
+     * Verboten bleibt, was M5 verboten hat: `updated_at` als MASSSTAB für die
+     * Veraltung. Kein Vergleich, kein `issuedAt <` und kein `>` daneben — die
+     * Antwort kommt aus dem Fingerabdruck und nirgends sonst.
+     */
+    const vergleiche = DETAILS.split("\n")
+      .filter((line) => line.includes("updatedAt"))
+      .filter((line) => /[<>]|!==|===|is distinct/.test(line));
+    expect(vergleiche).toEqual([]);
+    /*
+     * Und der einzige Gebrauch im CODE ist das Token im Speichern-Aufruf.
+     * Kommentarzeilen zählen nicht mit — der Kommentar, der erklärt, warum
+     * `purchase.updatedAt` das Token ist, darf dastehen.
+     */
+    const stellen = DETAILS.split("\n")
+      .filter((l) => !/^\s*(\*|\/\*|\/\/)/.test(l))
+      .filter((l) => l.includes("purchase.updatedAt"));
+    expect(stellen).toHaveLength(1);
+    expect(stellen[0].trim()).toBe("purchase.updatedAt,");
   });
 });
 
@@ -698,7 +741,9 @@ describe("der Zugriffsschutz", () => {
     const exported = [...ACTIONS.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
     expect(exported.sort()).toEqual([
       "confirmPurchaseReceiptDownload", "issuePurchaseReceipt",
-      "loadPurchaseReceipt", "loadReceiptDocument",
+      /* Seit `0128`: Korrektur ausstellen und die Kette lesen. */
+      "issuePurchaseReceiptCorrection",
+      "loadPurchaseReceipt", "loadPurchaseReceiptHistory", "loadReceiptDocument",
     ]);
     expect(ACTIONS.split("await canOperateSeller()")).toHaveLength(exported.length + 1);
   });

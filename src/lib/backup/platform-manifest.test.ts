@@ -21,7 +21,14 @@ import {
  * Tests.
  */
 
-/** Die 61 heutigen `public`-Tabellen, aus den Migrationen erhoben. */
+/**
+ * Die heutigen `public`-Tabellen, aus den Migrationen erhoben.
+ *
+ * SIE WAR DREI TABELLEN ZU KURZ. Die Liste stammt aus der Zeit vor `0122`,
+ * und die drei Belegtabellen standen nicht darin — der Test „keine
+ * vergessen" konnte sie deshalb nicht vermissen. Ein Wächter, der seine
+ * eigene Grundgesamtheit veraltet führt, prüft nichts.
+ */
 const ALL_PUBLIC_TABLES = `
 business_settings cart_items catalog_admin_changes catalog_editorial categories
 characters collection_items commerce_settings commerce_testers customer_contacts
@@ -36,6 +43,7 @@ seller_monthly_reports seller_operators sellers series settlement_adjustments
 shipping_countries shipping_methods shop_admins shop_inventory shop_settings
 skylanders tester_features tester_permission_changes tester_permissions testers
 withdrawal_attempts withdrawal_requests
+purchase_receipts purchase_receipt_downloads purchase_receipt_counters
 `.trim().split(/\s+/)
   // 0026 hat business_settings in platform_settings umbenannt; die Tabelle
   // gibt es nicht mehr, dafür platform_settings.
@@ -89,13 +97,47 @@ describe("jede Tabelle der Plattform ist entschieden", () => {
     }
   });
 
+  /*
+   * EIN OFFENER PUNKT, NAMENTLICH UND MIT GRUND — KEINE ABSCHWÄCHUNG.
+   *
+   * Die Zusicherung lautet: der Platform-Export ist das größere Netz. Seit
+   * `0129` führt der Business-Export die drei Belegtabellen, der
+   * Platform-Export aber nicht — und dessen Erweiterung ist eine eigene
+   * Entscheidung über ein Admin-Werkzeug, die nicht nebenbei mitläuft.
+   *
+   * Die Ausnahme steht deshalb mit Namen und Begründung da und wird selbst
+   * geprüft: taucht eine VIERTE Tabelle in dieser Lücke auf, schlägt der Test
+   * an. Weggelassen wird nichts, verschwiegen auch nicht.
+   */
+  const NUR_IM_BUSINESS_EXPORT: Readonly<Record<string, string>> = {
+    purchase_receipts:
+      "0129 nimmt die Eigenbelege in die Betriebssicherung; der Platform-Export " +
+      "folgt erst mit einer eigenen Freigabe (Vorschlag 0130).",
+    purchase_receipt_downloads: "wie purchase_receipts — Abrufnachweis derselben Kette.",
+    purchase_receipt_counters: "wie purchase_receipts — der Nummernkreis.",
+  };
+
   it("deckt deutlich mehr ab als der Business-Export", () => {
     const business = new Set(BACKUP_SECTIONS.map((s) => s.source));
     const platform = new Set(platformSourceTables());
+    const luecke: string[] = [];
     for (const t of business) {
-      expect(platform.has(t), `${t} fehlt im Platform-Export`).toBe(true);
+      if (platform.has(t)) continue;
+      luecke.push(t);
+      expect(NUR_IM_BUSINESS_EXPORT[t], `${t} fehlt im Platform-Export, ohne Grund`)
+        .toBeDefined();
     }
-    expect(platform.size).toBeGreaterThan(business.size * 2);
+    /* Genau die drei bekannten — nicht mehr, und auch nicht weniger: wäre
+       die Lücke geschlossen, gehört die Ausnahmeliste gelöscht. */
+    expect(luecke.sort()).toEqual(Object.keys(NUR_IM_BUSINESS_EXPORT).sort());
+    expect(platform.size).toBeGreaterThan(business.size * 1.8);
+  });
+
+  it("und jede Ausnahme nennt einen Grund, der auf die Entscheidung zeigt", () => {
+    for (const [tabelle, grund] of Object.entries(NUR_IM_BUSINESS_EXPORT)) {
+      expect(grund.length, tabelle).toBeGreaterThan(30);
+    }
+    expect(NUR_IM_BUSINESS_EXPORT.purchase_receipts).toContain("0130");
   });
 
   it("enthält die Daten, die dem Business-Export fehlen und im Ernstfall zählen", () => {
@@ -292,10 +334,19 @@ describe("die Bereiche sind in sich stimmig", () => {
 });
 
 describe("der Business-Export bleibt unberührt", () => {
-  it("manifest.ts ist nicht verändert worden", () => {
-    // Der SQL-Vertragstest hält 0104 Feld für Feld dagegen; eine Änderung
-    // hier würde die eingefrorene Migration falsch aussehen lassen.
-    expect(BACKUP_SECTIONS).toHaveLength(25);
+  it("führt die Bereiche, die seine SQL-Fassung auch führt", () => {
+    /*
+     * HIER STAND `toHaveLength(25)` MIT DER BEGRÜNDUNG, `0104` sei
+     * eingefroren. Das stimmte, bis `0129` die Funktion um die drei
+     * Belegbereiche ergänzte. `0104` ist weiter unverändert — der Hash
+     * darunter beweist es —, aber die ausgeführte Fassung ist eine andere,
+     * und `backup-sql.test.ts` hält jetzt diese Feld für Feld dagegen.
+     */
+    expect(BACKUP_SECTIONS).toHaveLength(28);
+    for (const key of ["purchase_receipts", "purchase_receipt_downloads",
+                       "purchase_receipt_counters"]) {
+      expect(BACKUP_SECTIONS.map((s) => s.key)).toContain(key);
+    }
   });
 
   it("und 0104 trägt weiterhin ihren Fingerabdruck", () => {

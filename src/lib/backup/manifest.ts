@@ -85,6 +85,8 @@ export const FORBIDDEN_FIELDS: Readonly<Record<string, string>> = {
   updated_by: "Kontoidentität",
   finalized_by: "Kontoidentität",
   handled_by: "Kontoidentität",
+  issued_by: "Kontoidentität — wer den Eigenbeleg ausgestellt hat",
+  delivered_by: "Kontoidentität — wer den Beleg abgerufen hat",
   sandbox_archived_by: "Kontoidentität",
   avatar_url: "Profildatum der Plattform",
 
@@ -238,12 +240,46 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
   {
     key: "purchases",
     source: "purchases",
-    purpose: "Externe Einkäufe — die Kostenseite des Buy-in-Faktors.",
-    fields: ["id", "purchased_at", "total_cost", "currency", "source", "external_ref",
+    purpose:
+      "Externe Einkäufe — die Kostenseite des Buy-in-Faktors, mit ihrer " +
+      "Aufteilung in Ware, Versand und Käuferschutz.",
+    /*
+     * DIE KOSTENTEILE KAMEN MIT `0130` DAZU (Vorschlag A1).
+     *
+     * Ohne sie steht `total_cost` als eine Zahl in der Datei, und wie sie
+     * zustande kommt, ist nicht nachvollziehbar — bei einem Bereich, dessen
+     * erklärter Zweck „die Kostenseite des Buy-in-Faktors" ist, fehlte damit
+     * die Hälfte. `platform` ist ein Marktplatz, `seller_name` ein
+     * Anzeigenname; keine Anschrift, keine Person.
+     *
+     * ABSENDER, INSERAT UND KAUFVEREINBARUNG BLEIBEN DRAUSSEN.
+     * Das ist Vorschlag A2 und NICHT freigegeben: Name und Anschrift einer
+     * Privatperson gehören erst dann in eine Exportdatei, wenn die
+     * Datenschutzerklärung Ankäufe überhaupt erwähnt und eine
+     * Aufbewahrungsfrist geschrieben ist (`docs/LEGAL.md`, offen seit `0122`).
+     * Für Einkäufe MIT Eigenbeleg trägt der Belegsnapshot sie ohnehin.
+     * `manifest-gap.test.ts` hält fest, dass sie draußen bleiben, und nennt
+     * den Grund — ein Ausschluss ohne Grund wäre ein Vergessen mit Kommentar.
+     */
+    fields: ["id", "purchased_at", "total_cost", "items_cost", "shipping_cost",
+             "buyer_protection_cost", "currency", "payment_method", "platform",
+             "seller_name", "source", "external_ref",
              "note", "is_test", "created_at", "updated_at"],
     excluded: {
       created_by: "Kontoidentität", updated_by: "Kontoidentität",
       import_fingerprint: "Wiedereinspiel-Schutz des Legacy-Imports",
+      client_token: "Doppelklick-Sicherung des Dialogs (0120), kein Geschäftsdatum",
+      client_request_fingerprint: "Idempotenzschlüssel (0120) — wie request_id",
+      daily_index: "Platz des Einkaufs an seinem Tag; folgt aus der Reihenfolge",
+      sender_name: "A2, nicht freigegeben: Name einer Privatperson",
+      sender_street: "A2, nicht freigegeben: Anschrift einer Privatperson",
+      sender_postal_code: "A2, nicht freigegeben: Anschrift einer Privatperson",
+      sender_city: "A2, nicht freigegeben: Anschrift einer Privatperson",
+      sender_country: "A2, nicht freigegeben: Anschrift einer Privatperson",
+      listing_title: "A2, nicht freigegeben: Freitext aus einer Anzeige",
+      listing_url: "A2, nicht freigegeben: kann Kontaktdaten tragen",
+      listing_details: "A2, nicht freigegeben: Freitext aus einer Anzeige",
+      agreement_note: "A2, nicht freigegeben: Freitext zur Kaufvereinbarung",
     },
     restoreRelevant: true,
   },
@@ -263,6 +299,63 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     restoreRelevant: true,
   },
 
+  /* --------------------------------------------------- Eigenbelege */
+  /*
+   * WARUM DIE BELEGE HIER ERST SEIT `0129` STEHEN. Dieses Manifest ist von
+   * `0104`, die Belege sind von `0122`. Niemand hat die Sicherung nachgezogen,
+   * und bis das auffiel, hätte eine Wiederherstellung jeden Eigenbeleg
+   * verloren — Nummernkreis, Snapshot, Abrufnachweis und seit `0128` die
+   * Revisionskette.
+   *
+   * DIE ZWEITE KOPIE IST HIER DER ZWECK, nicht der Fehler. Beim Einkauf gilt
+   * die Regel „personenbezogene Daten nur dort, wo sie hingehören" — und ein
+   * Eigenbeleg GEHÖRT dorthin: er ist das Dokument über den Ankauf, dieselbe
+   * Begründung, mit der die Rechnung die Käuferanschrift trägt (§ 147 AO).
+   * Deshalb `personalData`.
+   */
+  {
+    key: "purchase_receipts",
+    source: "purchase_receipts",
+    purpose:
+      "Die ausgestellten Eigenbelege über Privatankäufe: Nummer, Revisionskette und " +
+      "der eingefrorene Snapshot, aus dem das PDF bei jedem Abruf neu entsteht.",
+    fields: ["id", "purchase_id", "receipt_number", "issued_at", "revision",
+             "supersedes_id", "supersedes_number", "supersedes_issued_at",
+             "format_version", "content_fingerprint",
+             "buyer_legal_name", "buyer_trade_name", "buyer_street", "buyer_postal_code",
+             "buyer_city", "buyer_country", "buyer_email", "buyer_vat_id",
+             "seller_platform", "seller_handle",
+             "sender_name", "sender_street", "sender_postal_code", "sender_city",
+             "sender_country",
+             "listing_ref", "listing_title", "listing_url", "listing_details",
+             "purchased_at", "items_cost", "shipping_cost", "buyer_protection_cost",
+             "total_cost", "currency", "payment_method", "agreement_note", "lines"],
+    excluded: {
+      issued_by: "Kontoidentität — das Belegdokument selbst nennt sie auch nicht",
+    },
+    personalData: true,
+    restoreRelevant: true,
+  },
+  {
+    key: "purchase_receipt_downloads",
+    source: "purchase_receipt_downloads",
+    purpose:
+      "Der Nachweis, dass ein Beleg-PDF vollständig ausgeliefert wurde — daran hängt " +
+      "der bestätigte Abruf in der Oberfläche.",
+    fields: ["id", "receipt_id", "delivered_at", "byte_count"],
+    excluded: { delivered_by: "Kontoidentität" },
+    restoreRelevant: true,
+  },
+  {
+    key: "purchase_receipt_counters",
+    source: "purchase_receipt_counters",
+    purpose:
+      "Der fortlaufende Nummernkreis je Jahr. Ohne ihn vergäbe eine wiederhergestellte " +
+      "Datenbank Nummern, die es schon gibt.",
+    fields: ["year", "next_number"],
+    restoreRelevant: true,
+  },
+
   /* ------------------------------------------------------- Verkauf */
   {
     key: "sales",
@@ -272,10 +365,14 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
              "currency", "items_subtotal", "shipping_charged", "discount_amount",
              "reported_payout_amount", "reported_payout_ref", "reported_payout_at",
              "buy_in_factor_snapshot", "external_order_ref", "buyer_ref", "note", "source",
-             "is_test", "cancelled_at", "stock_released_at", "created_at", "updated_at"],
+             "is_test", "cancelled_at", "stock_released_at", "sale_day",
+             "created_at", "updated_at"],
     excluded: {
       created_by: "Kontoidentität", updated_by: "Kontoidentität",
       import_fingerprint: "Wiedereinspiel-Schutz des Legacy-Imports",
+      /* `sale_day` IST der Geschäftstag und kommt mit (0130); der Platz
+         darin ist Anzeigeordnung und folgt aus der Reihenfolge. */
+      daily_index: "Platz des Verkaufs an seinem Tag; folgt aus der Reihenfolge",
     },
     personalData: true,
     restoreRelevant: true,
@@ -381,9 +478,11 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     key: "order_reservations",
     source: "order_reservations",
     purpose: "Die Brücke zwischen einer Bestellung und den Lagerbewegungen.",
+    /* `sale_item_id` (0130): die Brücke von der Reservierung zur
+       Verkaufsposition. Ohne sie ist der Weg einer Figur unterbrochen. */
     fields: ["id", "order_id", "inventory_id", "quantity", "state", "reserved_at",
              "expires_at", "released_at", "converted_at", "movement_id",
-             "reverted_movement_id"],
+             "reverted_movement_id", "sale_item_id"],
     denormalised: [
       { field: "sky_id", from: "shop_inventory.sky_id über inventory_id",
         why: "Wie bei den Bewegungen: eine Zeilennummer allein trägt nichts." },
@@ -396,10 +495,24 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     key: "order_refunds",
     source: "order_refunds",
     purpose: "Erstattungen an Shop-Kunden.",
+    /*
+     * ZEITPUNKTE UND ERGEBNIS JA, ZAHLUNGSDIENSTLEISTER NEIN (0130).
+     *
+     * Wann eine Erstattung angefordert und wann sie bestätigt wurde, ist der
+     * Geschäftsvorfall; `provider_payment_ref` und die Zählerstände sind
+     * Stripe-Interna, und `FORBIDDEN_FIELDS` führt `provider_refund_id` aus
+     * genau diesem Grund schon.
+     */
     fields: ["id", "order_id", "amount", "currency", "occurred_at", "reason",
-             "withdrawal_request_id", "created_at"],
+             "withdrawal_request_id", "requested_at", "settled_at",
+             "provider_status", "failure_code", "created_at"],
     excluded: {
       provider_refund_id: "Stripe-Interna", created_by: "Kontoidentität",
+      provider: "Stripe-Interna — welcher Dienst, nicht welcher Vorfall",
+      provider_payment_ref: "Stripe-Referenz",
+      provider_attempts: "Zählerstand der Zustellversuche, technisch",
+      provider_confirmed_by: "Kontoidentität",
+      idempotency_key: "Idempotenzschlüssel — wie request_id",
     },
     restoreRelevant: true,
   },
@@ -460,8 +573,18 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
       "Stammdatenschnappschuss aller im Backup vorkommenden SKY-IDs, damit die Datei " +
       "lesbar bleibt, wenn der Katalog sich ändert. Die historisch richtigen Werte " +
       "stecken ohnehin in den *_snapshot-Spalten.",
-    fields: ["sky_id", "name", "slug", "series_code", "card_type", "market_price"],
+    /*
+     * DREI SPALTEN MEHR (0130): `category_id` ordnet die Figur ihrer Kategorie
+     * zu, `is_active` und `source` sagen, ob und woher sie im Katalog steht.
+     * Die drei Zeitstempel bleiben draußen — ein Stammdatenschnappschuss soll
+     * die Datei lesbar halten, nicht ihre Historie tragen.
+     */
+    fields: ["sky_id", "name", "slug", "series_code", "card_type", "market_price",
+             "category_id", "is_active", "source"],
     excluded: {
+      created_at: "Zeitstempel des Katalogsatzes; ohne Bedeutung für den Bestand",
+      updated_at: "wie created_at",
+      price_updated_at: "wann der Marktpreis zuletzt lief — Werkzeugspur",
       catalog_visible: "redaktionelle Spalte der Plattform",
       display_name_override: "redaktionelle Spalte der Plattform",
       image_file: "Dateiname; außerhalb der Anwendung ohne Nutzen",
@@ -474,31 +597,58 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     key: "series",
     source: "series",
     purpose: "Die Serienbezeichner, damit `series_code` lesbar bleibt.",
-    fields: ["code", "label", "release_year"],
+    /* `position` ist kuratiert und aus nichts wiederherstellbar (0130). */
+    fields: ["code", "label", "release_year", "position"],
+    excluded: { created_at: "Zeitstempel der Serienzeile" },
     restoreRelevant: false,
   },
   {
     key: "categories",
     source: "categories",
     purpose: "Die Kategoriebezeichner des Katalogs.",
-    fields: ["id", "series_code", "name", "catalog_group"],
+    /* `position` wie bei den Serien: kuratierte Reihenfolge (0130). */
+    fields: ["id", "series_code", "name", "catalog_group", "position"],
+    excluded: { created_at: "Zeitstempel der Kategoriezeile" },
     restoreRelevant: false,
   },
   {
     key: "seller",
     source: "sellers",
     purpose: "Die rechtliche Identität des Betriebs zum Exportzeitpunkt.",
+    /*
+     * DIE RECHTSANGABEN KAMEN MIT `0131` DAZU (Vorschlag B).
+     *
+     * Sie stehen auf jeder Rechnung, im Impressum und in den Rechtsseiten —
+     * `src/lib/admin/shop-profile-model.ts` liest genau diese Felder. Ohne sie
+     * ist eine wiederhergestellte Rechnung nicht reproduzierbar, und
+     * `is_active` entscheidet, WELCHE Verkäuferzeile gilt: `sellers where
+     * is_active` steht in der Belegausstellung aus `0122`.
+     *
+     * KEINE DATEN DRITTER. Das sind die eigenen, veröffentlichten
+     * Geschäftsangaben — Impressumspflicht, nicht Datenschutz. `created_at`
+     * und `updated_at` bleiben draußen: Zeitstempel einer Stammdatenzeile.
+     */
     fields: ["id", "display_name", "legal_name", "trading_name", "legal_form", "street",
-             "postal_code", "city", "country_code", "vat_id", "small_business_19",
-             "contact_email", "free_shipping_threshold"],
-    excluded: { updated_by: "Kontoidentität" },
+             "postal_code", "city", "country_code", "phone", "direct_contact",
+             "register_court", "register_number", "vat_id", "w_id",
+             "small_business_19", "contact_email", "transactional_reply_to",
+             "withdrawal_contact_email", "complaints_contact_email",
+             "dispute_participation", "dispute_body", "dispatch_statement",
+             "return_postage_borne_by", "is_active", "free_shipping_threshold"],
+    excluded: {
+      updated_by: "Kontoidentität",
+      created_at: "Zeitstempel der Stammdatenzeile",
+      updated_at: "wie created_at",
+    },
     restoreRelevant: false,
   },
   {
     key: "shop_settings",
     source: "shop_settings",
     purpose: "Die Preisregel des Shops zum Exportzeitpunkt.",
-    fields: ["price_percentage", "free_shipping_threshold", "updated_at"],
+    /* `id` ist der Primärschlüssel — ohne ihn ist die Zeile nicht
+       einspielbar (0130). */
+    fields: ["id", "price_percentage", "free_shipping_threshold", "updated_at"],
     excluded: { updated_by: "Kontoidentität" },
     restoreRelevant: false,
   },
@@ -507,7 +657,10 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     source: "shipping_methods",
     purpose: "Versandarten und Preise, damit Bestellbeträge nachvollziehbar sind.",
     fields: ["code", "name", "base_price", "is_enabled", "sort_order"],
-    excluded: { updated_by: "Kontoidentität" },
+    excluded: {
+      updated_by: "Kontoidentität",
+      updated_at: "Zeitstempel einer Konfigurationszeile",
+    },
     restoreRelevant: false,
   },
 ] as const;

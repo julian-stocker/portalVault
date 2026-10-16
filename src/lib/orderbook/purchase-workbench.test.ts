@@ -325,16 +325,19 @@ describe("die Oberfläche verkauft kein geleertes Datum als Erfolg", () => {
      * schliesst mit dem alten Datum darin — eine stille Nichtänderung, die
      * sich wie eine Änderung anfühlt.
      */
-    const save = DETAILS.slice(DETAILS.indexOf("async function save()"));
+    /* `save(` und nicht `save()`: die Funktion nimmt seit der Korrektur
+       der Belegrückfrage ein Argument — die Zusicherung hier ist davon
+       unberührt, der Schnitt war es nicht. */
+    const save = DETAILS.slice(DETAILS.indexOf("async function save("));
     const body = save.slice(0, save.indexOf("\n  }"));
     expect(body).toContain("wantedDate === undefined && purchase.purchasedAt !== null");
     expect(body).toContain("modal.dateNotRemovable");
     /* Und die Sperre steht VOR dem Schreibvorgang, nicht danach. */
     expect(body.indexOf("modal.dateNotRemovable"))
-      .toBeLessThan(body.indexOf("updatePurchase("));
+      .toBeLessThan(body.indexOf("savePurchaseEdit("));
     /* Sie greift NUR beim Leeren: ein geändertes Datum geht weiter durch. */
     expect(body).toContain("draft.purchasedAt.trim() === \"\" ? undefined");
-    expect((body.match(/updatePurchase\(/g) ?? [])).toHaveLength(1);
+    expect((body.match(/savePurchaseEdit\(/g) ?? [])).toHaveLength(1);
   });
 
   it("der Satz sagt, was nicht geht — und was stattdessen", () => {

@@ -35,6 +35,7 @@
  * `SI-E-2026-000001` fest und schlägt an, sobald sich ein Byte bewegt.
  */
 import { PdfPage } from "@/lib/legal/invoice-pdf";
+import { isCorrection } from "@/lib/business/purchase-receipt";
 import type { ReceiptDocument } from "@/lib/business/purchase-receipt";
 
 /*
@@ -65,6 +66,20 @@ const NOTE_V1 =
   + "hat keine Rechnung ausgestellt und weist keine Umsatzsteuer aus; ein "
   + "Vorsteuerabzug ist daraus nicht möglich. Der Beleg wurde vom Käufer selbst "
   + "erstellt (Eigenbeleg).";
+
+/**
+ * Der Satz, der eine Korrektur erklärt (0128).
+ *
+ * Er nennt nur Nachprüfbares: welcher Beleg ersetzt wird, dass der ersetzte
+ * aufbewahrt bleibt (ein Trigger lehnt jedes UPDATE und DELETE ab) und welcher
+ * von beiden für den Ankauf gilt. Keine Aussage über steuerliche Gültigkeit —
+ * die trifft dieses Dokument nicht.
+ */
+const KORREKTUR_SATZ = (number: string, datum: string): string =>
+  `Dieser Beleg ersetzt den Eigenbeleg ${number} vom ${datum}. Der ersetzte `
+  + "Beleg bleibt unverändert aufbewahrt und wird nicht neu ausgestellt; er "
+  + "beschreibt den Stand seines Ausstellungstags. Für diesen Ankauf gilt der "
+  + "vorliegende Beleg.";
 
 /** „13" → „13,00 EUR". Zum Eurozeichen siehe den Dateikopf. */
 function money(value: string | number | null | undefined): string {
@@ -128,12 +143,46 @@ export function renderReceiptV1(doc: ReceiptDocument): Uint8Array {
   const right = page.right;
   const missing = "nicht erfasst";
 
-  page.text("Eigenbeleg über einen Privatankauf", { size: 16, font: "bold" });
+  /*
+   * DER TITEL SAGT, WELCHE ART DOKUMENT DAS IST (0128).
+   *
+   * Ein Korrekturbeleg, der wie ein Original aussieht, wäre das
+   * dokumentarisch gefährlichste Ergebnis dieser Funktion — er träte neben
+   * den ersetzten Beleg und niemand sähe, dass er ihn ersetzt. Deshalb
+   * steht der Vermerk im TITEL und nicht in einer Fußnote.
+   *
+   * Ein Ursprungsbeleg nimmt diesen Zweig nicht: `isCorrection()` ist für
+   * ihn falsch, und er wird gezeichnet wie vorher. Das ist die Zusicherung,
+   * an der die festgehaltenen Hashes hängen.
+   */
+  const korrektur = isCorrection(doc);
+  page.text(korrektur ? "Eigenbeleg – Korrektur" : "Eigenbeleg über einen Privatankauf",
+            { size: 16, font: "bold" });
   page.rule(10);
 
   page.text(`Belegnummer       ${doc.receipt_number}`, { size: 9.5, dy: 20 });
   page.text(`Belegdatum        ${germanDate(doc.issued_at)}`, { size: 9.5, dy: 13 });
   page.text(`Kaufdatum         ${germanDate(doc.purchased_at)}`, { size: 9.5, dy: 13 });
+
+  /*
+   * DER VERWEIS AUF DEN ERSETZTEN BELEG (0128).
+   *
+   * Nummer UND Ausstellungsdatum, beide aus dem eigenen Snapshot — nicht aus
+   * einer zweiten Zeile nachgeschlagen. Wer dieses Dokument in zehn Jahren in
+   * der Hand hält, soll ohne Datenbank sagen können, welchen Beleg es ersetzt.
+   *
+   * Der Satz darunter sagt, was mit dem ersetzten Beleg geschehen ist: er ist
+   * nicht verschwunden und nicht geändert. Beides ist nachprüfbar — ein
+   * Trigger lehnt jedes UPDATE und DELETE ab — und deshalb darf es dastehen.
+   * Eine Aussage über steuerliche Gültigkeit steht NICHT da; die trifft dieses
+   * Dokument nicht.
+   */
+  if (korrektur) {
+    page.text(`Ersetzt Beleg     ${doc.supersedes_number} vom `
+              + `${germanDate(doc.supersedes_issued_at ?? "")}`,
+              { size: 9.5, dy: 13 });
+    page.text(`Revision          ${doc.revision}`, { size: 9.5, dy: 13 });
+  }
 
   /* ---- die zwei Parteien, nebeneinander ---------------------------------- */
   const column = page.left + 275;
@@ -256,10 +305,17 @@ export function renderReceiptV1(doc: ReceiptDocument): Uint8Array {
 
   /* ---- der Hinweis -------------------------------------------------------- */
   const note = wrap(NOTE_V1, 95);
-  page.reserve(26 + 5 + 13 * note.length);
+  /* Der Korrekturabsatz steht NUR auf einer Korrektur — ein Ursprungsbeleg
+     bekommt keine Zeile mehr und keine weniger als vorher. */
+  const korrekturNote = korrektur
+    ? wrap(KORREKTUR_SATZ(doc.supersedes_number ?? "",
+                          germanDate(doc.supersedes_issued_at ?? "")), 95)
+    : [];
+  page.reserve(26 + 5 + 13 * (note.length + korrekturNote.length));
   page.text("Hinweis", { size: 9, font: "bold", dy: 26 });
   page.rule(5);
   for (const line of note) page.text(line, { size: 9, dy: 13 });
+  for (const line of korrekturNote) page.text(line, { size: 9, dy: 13 });
 
   /* ---- die Unterschriftszeile (M4) ---------------------------------------- */
   page.reserve(34 + 18 + 12);

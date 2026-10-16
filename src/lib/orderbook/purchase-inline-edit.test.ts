@@ -237,8 +237,19 @@ describe("Eintritt und Verwerfen bauen denselben Stand", () => {
   });
 
   it("nach erfolgreichem Speichern steht wieder die Ansicht da", () => {
-    expect(DETAILS).toContain("const saved = await run(() => updatePurchase(");
-    expect(DETAILS).toContain("if (saved) setEditing(false);");
+    /* Seit `0126` ein Aufruf für Felder UND Figuren — siehe dort, warum. */
+    expect(DETAILS).toContain("const saved = await run(() => savePurchaseEdit(");
+    /*
+     * UND SEIT DER TRENNUNG VON SPEICHERN UND NACHLESEN IST ES EIN FRÜHER
+     * AUSSTIEG. `if (saved) setEditing(false)` stand am Ende; jetzt steht
+     * `if (!saved) return;` am Anfang, und alles darunter gilt nur für den
+     * Erfolg. Dieselbe Zusicherung, eine andere Form.
+     */
+    const save = DETAILS.slice(DETAILS.indexOf("async function save("));
+    const body = save.slice(0, save.indexOf("\n  }"));
+    expect(body).toContain("if (!saved) return;");
+    expect(body.indexOf("if (!saved) return;"))
+      .toBeLessThan(body.indexOf("setEditing(false);"));
   });
 
   it("bei einem Fehler bleiben die Eingaben stehen", () => {
@@ -284,7 +295,14 @@ describe("die Sicherungen und die Figurentabelle", () => {
   });
 
   it("keine RPC und keine Signatur wurde angefasst", () => {
-    expect(DETAILS.split("updatePurchase(")).toHaveLength(3);
+    /*
+     * `updatePurchase(` kommt nur noch EINMAL vor: der Knopf, der die
+     * Kostenaufteilung wegräumt, schreibt weiter sofort — er ist eine
+     * einzelne Handlung und kein Teil des gestapelten Speicherns.
+     * Das Speichern selbst geht seit `0126` über `savePurchaseEdit`.
+     */
+    expect(DETAILS.split("updatePurchase(")).toHaveLength(2);
+    expect(DETAILS.split("savePurchaseEdit(")).toHaveLength(2);
     expect(DETAILS).toContain("processBookPurchaseItem(item.id, purchase.id)");
     expect(DETAILS).toContain("processUnbookPurchaseItem(item.id, purchase.id)");
     expect(DETAILS).toContain("processPurchaseItemSky(item.id, choice.skyId, purchase.id)");

@@ -40,6 +40,7 @@ export function FigureSearch({
   disabled = false,
   onCancel,
   limit = MAX_RESULTS,
+  initialQuery = "",
   showImage = false,
   loading = false,
   onFree,
@@ -55,6 +56,15 @@ export function FigureSearch({
   /** Rendered as a quiet `Abbrechen` when the search is a mode, not a field. */
   onCancel?: () => void;
   limit?: number;
+  /**
+   * Vorbelegung des Suchfelds (0127).
+   *
+   * Fuer den Figurenwechsel: der heutige Name steht schon da, die Treffer
+   * stehen sofort, und „Spyro aus Giants" ist ein Klick entfernt statt sechs
+   * Tastendruecke. Leer ist der Normalfall — Einkaufs- und Verkaufsanlage
+   * uebergeben ihn nicht und verhalten sich unveraendert.
+   */
+  initialQuery?: string;
   /*
    * Das Bild vor dem Namen. AUS, wo dieser Kasten schon steht: Einkauf,
    * Verkauf und Remap zeigen seit `0064` Serie, Name, SKY-ID und Preis, und
@@ -105,7 +115,13 @@ export function FigureSearch({
    */
   inputRef?: RefObject<HTMLInputElement | null>;
 }) {
-  const [query, setQuery] = useState("");
+  /*
+   * Der Startwert gilt beim MOUNTEN. Die Suchflaeche wird je Zeile neu
+   * gemountet (sie steht unter der Zeile, die gerade offen ist), also traegt
+   * jede ihren eigenen Ausgangspunkt — kein Effekt, der nachtraeglich
+   * hineinschreibt.
+   */
+  const [query, setQuery] = useState(initialQuery);
   const [highlight, setHighlight] = useState(0);
   const own = useRef<HTMLInputElement>(null);
   const input = inputRef ?? own;

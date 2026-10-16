@@ -61,6 +61,35 @@ export type ReceiptResult =
   | { ok: true; receipt: ReceiptState | null }
   | { ok: false; message: string };
 
+/**
+ * Eine Fassung der Belegkette (0128).
+ *
+ * `isCurrent` wird NICHT aus `revision` geraten: die Server-Funktion bestimmt
+ * sie danach, ob jemand diesen Beleg ersetzt — dieselbe Bedingung, mit der
+ * `0122` bis `0124` die Spitze suchen. `stale` gilt nur für die aktuelle
+ * Fassung; eine ersetzte ist nicht „veraltet", sondern ersetzt.
+ */
+export type ReceiptVersion = {
+  id: number;
+  receiptNumber: string;
+  issuedAt: string;
+  revision: number;
+  formatVersion: number;
+  supersedesId: number | null;
+  supersedesNumber: string | null;
+  supersedesIssuedAt: string | null;
+  lineCount: number;
+  totalCost: string;
+  downloadCount: number;
+  firstDeliveredAt: string | null;
+  isCurrent: boolean;
+  stale: boolean;
+};
+
+export type ReceiptHistoryResult =
+  | { ok: true; versions: ReceiptVersion[]; correctable: boolean }
+  | { ok: false; message: string };
+
 function read(raw: unknown): ReceiptState | null {
   const root = raw as Record<string, unknown> | null;
   const r = root?.receipt as Record<string, unknown> | null | undefined;
@@ -99,6 +128,78 @@ export async function issuePurchaseReceipt(purchaseId: number): Promise<ReceiptR
   if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_issue_purchase_receipt", {
+    p_purchase_id: purchaseId,
+  });
+  if (error) return { ok: false, message: receiptMessage(error) };
+  return { ok: true, receipt: read(data) };
+}
+
+function readVersion(raw: unknown): ReceiptVersion {
+  const r = raw as Record<string, unknown>;
+  return {
+    id: Number(r.id),
+    receiptNumber: String(r.receipt_number),
+    issuedAt: String(r.issued_at),
+    revision: Number(r.revision),
+    formatVersion: Number(r.format_version ?? 1),
+    supersedesId: r.supersedes_id === null || r.supersedes_id === undefined
+      ? null : Number(r.supersedes_id),
+    supersedesNumber: r.supersedes_number === null || r.supersedes_number === undefined
+      ? null : String(r.supersedes_number),
+    supersedesIssuedAt: r.supersedes_issued_at === null
+      || r.supersedes_issued_at === undefined ? null : String(r.supersedes_issued_at),
+    lineCount: Number(r.line_count ?? 0),
+    totalCost: String(r.total_cost ?? "0"),
+    downloadCount: Number(r.download_count ?? 0),
+    firstDeliveredAt: r.first_delivered_at === null || r.first_delivered_at === undefined
+      ? null : String(r.first_delivered_at),
+    isCurrent: r.is_current === true,
+    stale: r.stale === true,
+  };
+}
+
+/**
+ * Die ganze Belegkette eines Einkaufs (0128). Liest nur.
+ *
+ * `correctable` kommt aus derselben Bedingung wie das Tor in der
+ * Ausstellungsfunktion — die Oberfläche soll nichts anbieten, was der Server
+ * ablehnen würde, und nichts verschweigen, was er annähme.
+ */
+export async function loadPurchaseReceiptHistory(
+  purchaseId: number,
+): Promise<ReceiptHistoryResult> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_purchase_receipt_history", {
+    p_purchase_id: purchaseId,
+  });
+  if (error) return { ok: false, message: receiptMessage(error) };
+  const root = (data ?? {}) as { receipts?: unknown; correctable?: unknown };
+  const liste = Array.isArray(root.receipts) ? root.receipts : [];
+  return {
+    ok: true,
+    versions: liste.map(readVersion),
+    correctable: root.correctable === true,
+  };
+}
+
+/**
+ * Einen KORREKTURBELEG ausstellen (0128).
+ *
+ * Sie ist mit Absicht NICHT idempotent: der Server verlangt eine tatsächliche
+ * Abweichung vom letzten Beleg und lehnt sonst ab. Ein zweiter Klick legt
+ * damit keinen zweiten Beleg über denselben Inhalt an — und das ist die
+ * verbindliche Zusicherung, nicht die ausgegraute Schaltfläche.
+ *
+ * Der ersetzte Beleg wird nicht angefasst: sein Snapshot, seine Nummer und
+ * seine Abrufnachweise bleiben, wo sie sind.
+ */
+export async function issuePurchaseReceiptCorrection(
+  purchaseId: number,
+): Promise<ReceiptResult> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_issue_purchase_receipt_correction", {
     p_purchase_id: purchaseId,
   });
   if (error) return { ok: false, message: receiptMessage(error) };
@@ -173,6 +274,9 @@ function receiptMessage(error: { code?: string; message?: string } | null): stri
   if (text.includes("a test purchase gets no receipt")) return copy.errors.testPurchase;
   if (text.includes("a receipt needs the purchase date")) return copy.errors.noDate;
   if (text.includes("has no item to put on a receipt")) return copy.errors.noItems;
+  /* Die zwei Ablehnungen der Korrektur (0128). */
+  if (text.includes("nothing changed since the last receipt")) return copy.errors.noChange;
+  if (text.includes("there is no receipt to correct")) return copy.errors.noOriginal;
   if (text.includes("no complete business address")) return copy.errors.noBusinessData;
   if (text.includes("cannot be changed or removed")) return copy.errors.immutable;
   if (text.includes("this purchase does not exist")

@@ -26,6 +26,11 @@ import {
 } from "./purchase-item-table";
 import { FigureSearch } from "./figure-search";
 import {
+  addFigure, dropNew, dropSwap, emptyEdit, isDirty, needsReceiptConfirm,
+  savePayload, stageRows, stagedCount, swapFigure, toggleRemove,
+  type PendingEdit, type StagedRow,
+} from "@/lib/orderbook/purchase-item-edit";
+import {
   processBookPurchaseItem, processPurchaseItemSky, processUnbookPurchaseItem,
   type PurchaseItemResult,
 } from "@/lib/orderbook/actions";
@@ -37,8 +42,9 @@ import {
  */
 import { loadOrderbookFigures } from "@/lib/orderbook/sales-actions";
 import {
-  confirmPurchaseReceiptDownload, issuePurchaseReceipt, loadPurchaseReceipt,
-  type ReceiptState,
+  confirmPurchaseReceiptDownload, issuePurchaseReceipt, issuePurchaseReceiptCorrection,
+  loadPurchaseReceipt, loadPurchaseReceiptHistory,
+  type ReceiptState, type ReceiptVersion,
 } from "@/lib/business/receipt-actions";
 import { canBook, canRemapItem } from "@/lib/orderbook/purchase";
 import { dispatchItemAction } from "@/lib/orderbook/dispatch-lock";
@@ -48,7 +54,7 @@ import { formatPrice } from "@/lib/format";
 import { fixedNumber } from "@/lib/format-number";
 import { de } from "@/lib/i18n/de";
 import {
-  loadPurchaseRecord, swapPurchaseDailyIndex, updatePurchase,
+  loadPurchaseRecord, savePurchaseEdit, swapPurchaseDailyIndex, updatePurchase,
   type PurchaseRecord,
 } from "@/lib/orderbook/actions";
 import type { LedgerRow } from "@/lib/orderbook/ledger";
@@ -129,6 +135,163 @@ const BUTTON = "min-h-9 rounded-sky-md px-3 text-xs ring-1 ring-border/70 disabl
 const ACTION =
   "min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 "
   + "hover:text-fg disabled:opacity-50";
+
+
+/**
+ * Die Figurenliste im BEARBEITEN-Modus (0126).
+ *
+ * Eine Aktion je Zeile, und die Zeile bleibt stehen. Was der Betreiber hier
+ * tut, ist noch nicht passiert: eine vorgemerkte Zeile wird durchgestrichen
+ * und blass, eine neue bekommt die Marke „Neu". Erst `Speichern` schickt den
+ * Unterschied, `Abbrechen` wirft ihn weg.
+ *
+ * WARUM NICHT VERSCHWINDEN LASSEN. Eine Zeile zu entfernen, die noch da ist,
+ * wäre eine Behauptung über einen Zustand, den der Server nicht kennt — und
+ * nach einem Abbrechen wäre sie unerklärlich wieder da.
+ *
+ * WO KEIN PAPIERKORB STEHT, STEHT DER GRUND. Eine eingebuchte Figur besitzt
+ * eine Lagerbewegung; eine Arbeitsmappenzeile trägt Herkunft, die kein
+ * Importer wiederherstellt. `canRemoveItem` entscheidet, und
+ * `seller_remove_purchase_item` entscheidet es noch einmal.
+ */
+function PurchaseItemEditList({
+  rows, busy, catalog, swapping,
+  onToggleRemove, onDropNew, onDropSwap, onOpenSwap, onSwap,
+}: {
+  rows: StagedRow[];
+  busy: boolean;
+  catalog: FigureChoice[] | null;
+  swapping: number | null;
+  onToggleRemove: (itemId: number) => void;
+  onDropNew: (tempId: string) => void;
+  onDropSwap: (itemId: number) => void;
+  onOpenSwap: (itemId: number) => void;
+  onSwap: (itemId: number, current: string | null, choice: FigureChoice) => void;
+}) {
+  return (
+    <ul className="-mx-4 divide-y divide-border/40">
+      {rows.map((row) => {
+        if (row.kind === "new") {
+          return (
+            <li key={row.figure.tempId}
+                className="flex items-baseline gap-2 px-4 py-2">
+              <span className="flex-1 truncate text-sm">{row.figure.label}</span>
+              {/* Die Marke, nicht die Farbe: sie trägt auch in Graustufen. */}
+              <span className="rounded-sky-md px-1.5 text-xs text-emerald-400 ring-1 ring-emerald-400/40">
+                {modal.markedNew}
+              </span>
+              <button type="button" disabled={busy}
+                      aria-label={modal.dropNewFigure}
+                      title={modal.dropNewFigure}
+                      onClick={() => onDropNew(row.figure.tempId)}
+                      className={ACTION}>
+                <span aria-hidden="true">{copy.errors.trashIcon}</span>
+              </button>
+            </li>
+          );
+        }
+        const { item, removed, mayRemove, maySwap, swap } = row;
+        /*
+         * EINGEBUCHT ODER ARBEITSMAPPE — ZWEI VERSCHIEDENE SÄTZE.
+         *
+         * Eingebucht sperrt BEIDES: `canRemapItem` und `canRemoveItem` sind
+         * dann falsch. Die Arbeitsmappe sperrt nur das Entfernen — ändern
+         * darf man sie, das ist der Zweck von `0054`.
+         */
+        const isBooked = item.movementId !== null || item.state === "booked";
+        const blocked = isBooked ? modal.swapBlockedBooked : modal.removeBlockedLegacy;
+        const offen = swapping === item.id;
+        return (
+          <li key={item.id}
+              className={`px-4 py-2${removed ? " opacity-50" : ""}`}>
+            <div className="flex items-baseline gap-2">
+              <span className={`flex-1 truncate text-sm${
+                removed ? " line-through" : ""}`}>
+                {/* Der neue Name steht da, sobald ein Wechsel vorgemerkt ist. */}
+                {swap === null ? item.name : swap.label}
+              </span>
+              {removed ? (
+                <>
+                  <span className="text-xs text-muted">{modal.markedRemoved}</span>
+                  <button type="button" disabled={busy}
+                          aria-label={modal.undoRemove}
+                          title={modal.undoRemove}
+                          onClick={() => onToggleRemove(item.id)}
+                          className={ACTION}>
+                    <span aria-hidden="true">{copy.errors.unbookIcon}</span>
+                  </button>
+                </>
+              ) : swap !== null ? (
+                <>
+                  <span className="rounded-sky-md px-1.5 text-xs text-amber-400 ring-1 ring-amber-400/40">
+                    {modal.markedSwapped}
+                  </span>
+                  <button type="button" disabled={busy}
+                          aria-label={modal.undoSwap}
+                          title={modal.undoSwap}
+                          onClick={() => onDropSwap(item.id)}
+                          className={ACTION}>
+                    <span aria-hidden="true">{copy.errors.unbookIcon}</span>
+                  </button>
+                </>
+              ) : maySwap || mayRemove ? (
+                <>
+                  {maySwap ? (
+                    <button type="button" disabled={busy}
+                            aria-expanded={offen}
+                            aria-label={modal.swapFigureOne(item.name)}
+                            title={modal.swapFigure}
+                            onClick={() => onOpenSwap(item.id)}
+                            className={ACTION}>
+                      <span aria-hidden="true">{copy.errors.swapIcon}</span>
+                    </button>
+                  ) : null}
+                  {mayRemove ? (
+                    <button type="button" disabled={busy}
+                            aria-label={modal.removeFigure}
+                            title={modal.removeFigure}
+                            onClick={() => onToggleRemove(item.id)}
+                            className={ACTION}>
+                      <span aria-hidden="true">{copy.errors.trashIcon}</span>
+                    </button>
+                  ) : (
+                    /* Änderbar, aber nicht entfernbar — der Satz sagt, warum. */
+                    <span className="text-xs text-muted">{modal.removeBlockedLegacy}</span>
+                  )}
+                </>
+              ) : (
+                /*
+                 * KEIN KNOPF, SONDERN EIN SATZ. Eine Handlung, die immer
+                 * abgelehnt würde, ist schlimmer als eine fehlende — und der
+                 * Grund ist das, was der Betreiber als nächstes braucht.
+                 */
+                <span className="text-xs text-muted">{blocked}</span>
+              )}
+            </div>
+            {/*
+              DIE TAUSCHSUCHE UNTER DER ZEILE, mit dem heutigen Namen als
+              Ausgangspunkt — dieselbe Komponente, die „Ändern" im Lesemodus
+              und „+ Figur hinzufügen" benutzen.
+            */}
+            {offen && !removed ? (
+              <div className="mt-2">
+                <FigureSearch
+                  catalog={catalog ?? []}
+                  autoFocus
+                  disabled={busy}
+                  loading={catalog === null}
+                  initialQuery={item.name}
+                  label={modal.swapFigureOne(item.name)}
+                  onCancel={() => onOpenSwap(item.id)}
+                  onSelect={(choice) => onSwap(item.id, item.skyId, choice)} />
+              </div>
+            ) : null}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 /**
  * Der Entwurf, aus der Zeile gebaut.
@@ -223,6 +386,41 @@ export function PurchaseDetails({
    * dass er etwas korrigiert. Dieselbe Entscheidung wie im Verkaufsfenster.
    */
   const [editing, setEditing] = useState(false);
+  /*
+   * DER FIGURENUNTERSCHIED, BIS ZUM SPEICHERN NUR HIER (0126).
+   *
+   * Hinzufuegen und Entfernen schreiben nicht. `Speichern` schickt den
+   * Unterschied in EINEM Aufruf an `seller_save_purchase_edit`, `Abbrechen`
+   * setzt ihn auf `emptyEdit` zurueck. Das ist nicht nur der Wunsch, es ist
+   * auch die einzige Form, in der ein Speichern atomar sein kann.
+   */
+  const [pending, setPending] = useState<PendingEdit>(emptyEdit);
+  const [adding, setAdding] = useState(false);
+  /* Welche Zeile gerade ihre Tauschsuche offen hat — eine, nie zwei (0127). */
+  const [swapping, setSwapping] = useState<number | null>(null);
+  /*
+   * STEHT DIE RUECKFRAGE ZUM EIGENBELEG GERADE DA? (0126, korrigiert fuer 0127)
+   *
+   * NUR DAS — kein „bestaetigt". Vorher hiess diese Zahl `receiptAck` und
+   * bedeutete beides: „die Warnung steht" UND „der Betreiber hat zugestimmt".
+   * Zugestimmt hatte er aber nie, denn der Satz „Trotzdem speichern" war ein
+   * `<p>` und kein Knopf; durchkam man nur, indem man oben ein zweites Mal
+   * `Speichern` drueckte — und das sah dann aus wie ein Verwerfen. Die
+   * Zustimmung ist jetzt ein ausdruecklicher Klick und wird als Argument an
+   * `save` uebergeben, nicht aus einem Zustand erraten.
+   */
+  const [receiptPrompt, setReceiptPrompt] = useState(false);
+  /*
+   * GESPEICHERT, ABER NICHT NACHGELESEN.
+   *
+   * Zwei Dinge, die vorher an einem Faden hingen. `error` heisst „es wurde
+   * NICHT gespeichert"; dieser Zustand heisst „es wurde gespeichert, und die
+   * Anzeige daneben ist moeglicherweise alt". Das zu verwechseln hiesse, dem
+   * Betreiber einen Schreibvorgang abzusprechen, den der Server bestaetigt
+   * hat — und ihn ein zweites Mal ausloesen zu lassen.
+   */
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [swapped, setSwapped] = useState<number | null>(null);
   /*
    * DIE POSITION, DEREN ZUORDNUNG GERADE KORRIGIERT WIRD — eine auf einmal.
@@ -316,12 +514,22 @@ export function PurchaseDetails({
   const [recordFailed, setRecordFailed] = useState(false);
   const [contact, setContact] = useState(() => contactOf(null));
 
-  const readRecord = useCallback(async () => {
+  /*
+   * SIE GIBT JETZT ZURUECK, OB ES GEKLAPPT HAT.
+   *
+   * Vorher verschluckte sie das Ergebnis und setzte nur `recordFailed`. Der
+   * Aufrufer konnte deshalb nicht zwischen „gespeichert und nachgelesen" und
+   * „gespeichert, aber nicht nachgelesen" unterscheiden — und genau diese
+   * Unterscheidung ist der Unterschied zwischen einer Fehlermeldung und einer
+   * Aktualisierungswarnung.
+   */
+  const readRecord = useCallback(async (): Promise<boolean> => {
     const loaded = await loadPurchaseRecord(purchase.id);
-    if (loaded === null) { setRecordFailed(true); return; }
+    if (loaded === null) { setRecordFailed(true); return false; }
     setRecordFailed(false);
     setRecord(loaded);
     setContact(contactOf(loaded));
+    return true;
   }, [purchase.id]);
 
   /*
@@ -354,6 +562,52 @@ export function PurchaseDetails({
   const [receiptFailed, setReceiptFailed] = useState(false);
   const [receiptBusy, setReceiptBusy] = useState(false);
   const [receiptError, setReceiptError] = useState<string | null>(null);
+  /*
+   * DIE GANZE KETTE (0128), damit aktuelle und ersetzte Fassungen
+   * unterscheidbar sind. `null` heisst „noch nicht nachgesehen".
+   */
+  const [history, setHistory] = useState<ReceiptVersion[] | null>(null);
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [correctable, setCorrectable] = useState(false);
+  /* Steht die Rueckfrage zum Korrekturbeleg gerade da? Nur Anzeige. */
+  const [correctPrompt, setCorrectPrompt] = useState(false);
+
+  /**
+   * Den Belegzustand NEU nachlesen — nach jedem erfolgreichen Speichern.
+   *
+   * WARUM DAS FEHLTE UND WAS ES GEKOSTET HAT. Der Effekt unten liest den Beleg
+   * genau einmal, beim Oeffnen. Ein Figurenwechsel macht den ausgestellten
+   * Beleg aber veraltet (`stale`), und ohne dieses Nachlesen zeigte das
+   * Fenster nach dem Speichern weiter „gueltig" — eine Aussage ueber einen
+   * Stand, den es nicht mehr gab. `stale` kommt aus einem Fingerabdruck ueber
+   * die Belegfelder, nicht aus `updated_at`; es kann sich also nur so
+   * aktualisieren.
+   */
+  /**
+   * Die Belegkette nachlesen (0128).
+   *
+   * Sie steht neben `readReceipt` und nicht darin: der Belegzustand ist eine
+   * Zeile, die Historie eine Liste, und nach einem Abruf aendert sich nur die
+   * zweite. Gibt zurueck, ob es geklappt hat — dieselbe Regel wie bei den
+   * anderen Lesern.
+   */
+  const readHistory = useCallback(async (): Promise<boolean> => {
+    const result = await loadPurchaseReceiptHistory(purchase.id);
+    if (!result.ok) { setHistoryFailed(true); return false; }
+    setHistoryFailed(false);
+    setHistory(result.versions);
+    setCorrectable(result.correctable);
+    return true;
+  }, [purchase.id]);
+
+  const readReceipt = useCallback(async (): Promise<boolean> => {
+    const result = await loadPurchaseReceipt(purchase.id);
+    if (!result.ok) { setReceiptFailed(true); setReceiptLoaded(true); return false; }
+    setReceiptFailed(false);
+    setReceipt(result.receipt);
+    setReceiptLoaded(true);
+    return true;
+  }, [purchase.id]);
 
   useEffect(() => {
     let alive = true;
@@ -362,6 +616,12 @@ export function PurchaseDetails({
       if (!result.ok) { setReceiptFailed(true); setReceiptLoaded(true); return; }
       setReceipt(result.receipt);
       setReceiptLoaded(true);
+    });
+    void loadPurchaseReceiptHistory(purchase.id).then((result) => {
+      if (!alive) return;
+      if (!result.ok) { setHistoryFailed(true); return; }
+      setHistory(result.versions);
+      setCorrectable(result.correctable);
     });
     return () => { alive = false; };
   }, [purchase.id]);
@@ -406,11 +666,21 @@ export function PurchaseDetails({
     setContact(contactOf(record));
     setError(null);
     setEditing(false);
+    /*
+     * UND DER FIGURENUNTERSCHIED MIT. `emptyEdit` ist eingefroren, es gibt
+     * keinen Teilzustand, der ein Abbrechen ueberlebt.
+     */
+    setPending(emptyEdit);
+    setAdding(false);
+    setSwapping(null);
+    setReceiptPrompt(false);
   }
 
   async function run(action: () => Promise<{ ok: boolean; message?: string }>) {
     setSaving(true);
     setError(null);
+    /* Ein neuer Versuch beginnt ohne die Warnung des vorigen. */
+    setRefreshFailed(false);
     const result = await action();
     setSaving(false);
     if (!result.ok) { setError(result.message ?? null); return false; }
@@ -430,7 +700,7 @@ export function PurchaseDetails({
    * nicht neben ihrer eigenen Aufteilung landen, und der CHECK in der
    * Datenbank hat nichts abzulehnen.
    */
-  async function save() {
+  async function save(receiptConfirmed = false) {
     const wantedDate = draft.purchasedAt.trim() === "" ? undefined : draft.purchasedAt.trim();
     /*
      * EIN GELEERTES DATUMSFELD IST KEIN ERFOLG.
@@ -463,7 +733,45 @@ export function PurchaseDetails({
       setError(modal.listingUrlInvalid);
       return;
     }
-    const saved = await run(() => updatePurchase(
+    /*
+     * DIE RUECKFRAGE BEI VORHANDENEM BELEG (0126).
+     *
+     * Der Fingerabdruck aus `0122` hasht die Positionsliste. Eine Figur mehr
+     * oder weniger macht den ausgestellten Beleg veraltet — und er bleibt
+     * unveraenderlich, es gibt kein Zurueck. Also wird gefragt, BEVOR
+     * geschrieben wird, und nur bei einer Positionsaenderung: Kosten und
+     * Notiz stehen nicht im Hash.
+     */
+    /*
+     * DIE ZUSTIMMUNG KOMMT ALS ARGUMENT, NICHT AUS DEM ZUSTAND.
+     *
+     * `save()` ohne Argument fragt — immer, solange ein Beleg existiert und
+     * die Figurenliste sich aendert. Erst `save(true)` aus dem Knopf in der
+     * Warnung schreibt. Damit verwirft ein zweiter Klick auf `Speichern`
+     * nichts und speichert auch nichts versehentlich: er zeigt dieselbe Frage
+     * noch einmal.
+     */
+    if (needsReceiptConfirm(receipt !== null, pending) && !receiptConfirmed) {
+      setReceiptPrompt(true);
+      setError(null);
+      return;
+    }
+
+    /*
+     * EIN AUFRUF FUER FELDER UND FIGUREN (0126).
+     *
+     * Vorher stand hier `updatePurchase`. Zwei Aufrufe — Felder, dann
+     * Positionen — waeren zwei bis N Transaktionen, und ein Fehler in der
+     * Mitte liesse einen halb geaenderten Einkauf zurueck. Dieselbe Lehre
+     * hatte die Verkaufsseite in `0091`.
+     *
+     * `purchase.updatedAt` ist seit `0126` die Version des GANZEN Aggregats:
+     * ein Trigger bewegt sie auch bei einer Positionsaenderung. Vorher tat
+     * das keine einzige Positionsoperation, und die Pruefung haette eine
+     * Nebenlaeufigkeit nicht gesehen.
+     */
+    const payload = savePayload(pending);
+    const saved = await run(() => savePurchaseEdit(
       purchase.id,
       wantedDate,
       hasSplit ? typed.total : undefined,
@@ -494,16 +802,69 @@ export function PurchaseDetails({
           agreementNote: contact.agreementNote.trim(),
         }),
       },
+      payload,
+      purchase.updatedAt,
     ));
-    /* Die Anzeige liest denselben Stand wie das Formular. */
-    await readRecord();
     /*
-     * NUR BEI ERFOLG ZURÜCK IN DIE ANSICHT. Scheitert das Speichern, bleiben
-     * die Felder stehen und tragen weiter, was getippt wurde — die Meldung
-     * oben sagt, warum. Ein Fenster, das bei einem Fehler in die Ansicht
-     * zurückfällt, hätte die Eingabe verschluckt.
+     * ======================================================================
+     * HIER TRENNEN SICH ZWEI FRAGEN, UND SIE HINGEN VORHER AN EINEM FADEN.
+     *
+     *   1. Hat der Server geschrieben?   → `saved`, aus `run`.
+     *   2. Konnten wir danach nachlesen? → `frisch`, weiter unten.
+     *
+     * NICHT GESPEICHERT: alles bleibt stehen — die Felder, die vorgemerkten
+     * Figuren, der Bearbeitungsmodus. Die Meldung oben sagt, warum. Und es
+     * wird NICHTS nachgelesen: `readRecord` setzt die Absender- und
+     * Inseratsfelder aus dem Server neu, und das haette nach einer Ablehnung
+     * die Eingabe ueberschrieben, die gerade gerettet werden soll.
+     * ======================================================================
      */
-    if (saved) setEditing(false);
+    if (!saved) return;
+
+    /* Uebernommen — der Unterschied ist jetzt Geschichte. */
+    setPending(emptyEdit);
+    setAdding(false);
+    setSwapping(null);
+    setReceiptPrompt(false);
+    /* Und zurueck in die Ansicht: der Server hat bestaetigt. */
+    setEditing(false);
+
+    /*
+     * AB HIER IST GESPEICHERT, UND NICHTS KANN DAS NOCH UMSTOSSEN.
+     *
+     * Was jetzt noch schiefgeht, ist eine Sache der Anzeige: der Einkauf ist
+     * geaendert, der ausgestellte Beleg dadurch veraltet — beides steht in der
+     * Datenbank, unabhaengig davon, ob wir es gleich zu sehen bekommen.
+     *
+     * Beide Leser laufen, auch wenn der erste scheitert: `&&` wuerde den
+     * Belegzustand ueberspringen, und dann waere ausgerechnet die
+     * Veralterungsmarkierung die, die fehlt.
+     */
+    const satzFrisch = await readRecord();
+    const belegFrisch = await readReceipt();
+    /* Und die Kette: ob eine Korrektur jetzt moeglich ist, haengt am
+       Fingerabdruck — und der hat sich gerade bewegt. */
+    const ketteFrisch = await readHistory();
+    setRefreshFailed(!(satzFrisch && belegFrisch && ketteFrisch));
+  }
+
+  /**
+   * NOCH EINMAL NACHLESEN — nach einem Speichern, dem die Aktualisierung
+   * fehlgeschlagen ist.
+   *
+   * Sie schreibt nichts. `onSaved()` steht mit dabei, weil der veraltete
+   * Stand nicht nur in diesem Fenster liegt: die Figurenliste gehoert dem
+   * Zwischenspeicher des Einkaufsbuchs, und die Zeile dem Server.
+   */
+  async function reloadNow() {
+    setReloading(true);
+    const satzFrisch = await readRecord();
+    const belegFrisch = await readReceipt();
+    const ketteFrisch = await readHistory();
+    const frisch = satzFrisch && belegFrisch && ketteFrisch;
+    setRefreshFailed(!frisch);
+    setReloading(false);
+    if (frisch) onSaved();
   }
 
   /**
@@ -518,21 +879,46 @@ export function PurchaseDetails({
    * das PDF; scheitert danach die Bestätigung, hat er es trotzdem — nur der
    * Haken bleibt aus, und das ist die ehrliche Anzeige.
    */
-  async function fetchReceipt() {
+  async function fetchReceipt(
+    /*
+     * EINE BESTIMMTE FASSUNG, ODER DIE AKTUELLE (0128).
+     *
+     * Eine ersetzte Fassung bleibt abrufbar — sie ist das Dokument, das
+     * jemand vielleicht schon weitergegeben hat. Die Route prueft die
+     * Zugehoerigkeit zum Einkauf selbst; hier wird nur die Id durchgereicht.
+     * Ohne Angabe gilt wie bisher: die aktuelle Fassung, und wenn es noch
+     * keine gibt, wird sie ausgestellt.
+     */
+    fassung: { id: number; receiptNumber: string } | null = null,
+  ) {
     if (editing || receiptBusy) return;
     setReceiptBusy(true);
     setReceiptError(null);
     try {
-      let current = receipt;
-      if (current === null) {
-        const issued = await issuePurchaseReceipt(purchase.id);
-        if (!issued.ok) { setReceiptError(issued.message); return; }
-        current = issued.receipt;
-        setReceipt(current);
-        if (current === null) { setReceiptError(receiptCopy.errors.unknown); return; }
+      /*
+       * ZWEI VERSCHIEDENE DINGE, GETRENNT GEHALTEN: welche Fassung abgerufen
+       * wird (`ziel`) und was der Dialog ueber die aktuelle Fassung weiss
+       * (`receipt`). Ein Abruf einer ERSETZTEN Fassung darf den Zustand der
+       * Spitze nicht ueberschreiben.
+       */
+      let ziel: { id: number; receiptNumber: string } | null = fassung;
+      if (ziel === null) {
+        if (receipt === null) {
+          const issued = await issuePurchaseReceipt(purchase.id);
+          if (!issued.ok) { setReceiptError(issued.message); return; }
+          if (issued.receipt === null) {
+            setReceiptError(receiptCopy.errors.unknown);
+            return;
+          }
+          setReceipt(issued.receipt);
+          ziel = issued.receipt;
+          await readHistory();
+        } else {
+          ziel = receipt;
+        }
       }
 
-      const response = await fetch(`/business/orderbuch/${purchase.id}/beleg/${current.id}`);
+      const response = await fetch(`/business/orderbuch/${purchase.id}/beleg/${ziel.id}`);
       if (!response.ok) { setReceiptError(receiptCopy.errors.downloadFailed); return; }
       const bytes = await response.arrayBuffer();
 
@@ -544,14 +930,46 @@ export function PurchaseDetails({
       const url = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${current.receiptNumber}.pdf`;
+      link.download = `${ziel.receiptNumber}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
 
       const confirmed = await confirmPurchaseReceiptDownload(
-        current.id, hex, bytes.byteLength);
+        ziel.id, hex, bytes.byteLength);
       if (!confirmed.ok) { setReceiptError(confirmed.message); return; }
+      /*
+       * `seller_record_purchase_receipt_download` antwortet immer mit der
+       * KETTENSPITZE — auch wenn eine aeltere Fassung abgerufen wurde. Der
+       * Abrufstand der aelteren steht in der Historie, und die wird neu
+       * gelesen statt geraten.
+       */
       setReceipt(confirmed.receipt);
+      await readHistory();
+    } finally {
+      setReceiptBusy(false);
+    }
+  }
+
+  /**
+   * EINEN KORREKTURBELEG AUSSTELLEN (0128).
+   *
+   * Der erste Klick setzt nur die Rueckfrage; erst `correctNow` ruft den
+   * Server. Danach stehen zwei Dinge neu zur Verfuegung: der Belegzustand
+   * (die neue Spitze) und die Historie (die ersetzte Fassung). `onSaved()`
+   * gehoert dazu, weil der Belegzustand in der Ledger-Zeile steht — `0124`
+   * zeigt ihn dort.
+   */
+  async function correctNow() {
+    if (editing || receiptBusy) return;
+    setReceiptBusy(true);
+    setReceiptError(null);
+    try {
+      const issued = await issuePurchaseReceiptCorrection(purchase.id);
+      if (!issued.ok) { setReceiptError(issued.message); return; }
+      setReceipt(issued.receipt);
+      setCorrectPrompt(false);
+      await readHistory();
+      onSaved();
     } finally {
       setReceiptBusy(false);
     }
@@ -633,6 +1051,25 @@ export function PurchaseDetails({
         <p role="alert" className="mx-4 mb-1 rounded-sky-md bg-surface px-3 py-2 text-xs text-danger ring-1 ring-border/70">
           {error}
         </p>
+      ) : null}
+
+      {/*
+        GESPEICHERT, ANZEIGE ALT — UND DAS IST KEINE FEHLERMELDUNG.
+        Deshalb `role="status"` und nicht `role="alert"`, deshalb die ruhige
+        Farbe, und deshalb ein Knopf statt einer Entschuldigung. Sie steht
+        getrennt von `error`: beide zugleich kann es nicht geben, denn ohne
+        erfolgreiches Speichern wird nicht nachgelesen.
+      */}
+      {refreshFailed ? (
+        <div role="status"
+             className="mx-4 mb-1 flex flex-wrap items-center gap-2 rounded-sky-md bg-surface px-3 py-2 text-xs ring-1 ring-attention/50">
+          <span className="flex-1 text-muted">{modal.saveRefreshFailed}</span>
+          <button type="button" disabled={reloading} aria-busy={reloading}
+                  onClick={() => void reloadNow()}
+                  className="min-h-9 rounded-sky-md px-2 text-xs font-medium ring-1 ring-fg/40 hover:ring-fg/60 disabled:opacity-50">
+            {reloading ? modal.saveRefreshRetrying : modal.saveRefreshRetry}
+          </button>
+        </div>
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -1007,6 +1444,37 @@ export function PurchaseDetails({
             <p className="text-xs text-muted">{modal.noFigures}</p>
           ) : (
             <>
+              {/*
+                IM BEARBEITEN-MODUS IST DIE LISTE EINE LISTE, KEINE WERKBANK.
+                
+                `Einbuchen`, `Ändern` und `Zurücknehmen` sind operative
+                Handlungen und schreiben sofort — sie gehören zum Lesemodus.
+                Wer bearbeitet, stellt die Figurenliste zusammen; dafür reicht
+                EINE Aktion je Zeile, und die 4,5rem-Spur bleibt, wie sie ist.
+                Ein dritter Knopf daneben hätte sie gesprengt.
+              */}
+              {editing ? (
+                <PurchaseItemEditList
+                  rows={stageRows(items, pending, purchase.source)}
+                  busy={saving}
+                  catalog={figures}
+                  swapping={swapping}
+                  onToggleRemove={(id) => setPending((p) => toggleRemove(p, id))}
+                  onDropNew={(tempId) => setPending((p) => dropNew(p, tempId))}
+                  onDropSwap={(id) => setPending((p) => dropSwap(p, id))}
+                  onOpenSwap={(id) => {
+                    setAdding(false);
+                    setSwapping(swapping === id ? null : id);
+                    if (swapping !== id) ensureFigures();
+                  }}
+                  onSwap={(id, current, choice) => {
+                    setPending((p) => swapFigure(p, id, current, {
+                      itemId: id, skyId: choice.skyId, label: choice.name,
+                    }));
+                    setSwapping(null);
+                  }} />
+              ) : (
+                <>
               <PurchaseItemReadHead />
               {/*
                 Das Fenster scrollt als Ganzes — `min-h-0 flex-1
@@ -1239,6 +1707,101 @@ export function PurchaseDetails({
                   );
                 })}
               </ul>
+                </>
+              )}
+
+              {/*
+                HINZUFÜGEN — mit derselben Suche, die `Ändern` schon öffnet.
+                `ensureFigures()` lädt den Katalog einmal; ein zweiter
+                Suchkasten mit eigener Ladelogik wäre eine zweite Wahrheit.
+              */}
+              {editing ? (
+                <div className="mt-3 border-t border-border/40 pt-3">
+                  {adding ? (
+                    <FigureSearch
+                      catalog={figures ?? []}
+                      autoFocus
+                      disabled={saving}
+                      loading={figures === null}
+                      label={modal.addFigure}
+                      onCancel={() => setAdding(false)}
+                      onSelect={(choice) => {
+                        setPending((p) => addFigure(p, {
+                          tempId: `t${Date.now()}-${p.add.length}`,
+                          skyId: choice.skyId,
+                          rawName: null,
+                          label: choice.name,
+                          condition: "loose",
+                        }));
+                        setAdding(false);
+                      }} />
+                  ) : (
+                    <button type="button" disabled={saving}
+                            onClick={() => {
+                              setSwapping(null); setAdding(true); ensureFigures();
+                            }}
+                            className={BUTTON}>
+                      {modal.addFigure}
+                    </button>
+                  )}
+                  {/*
+                    DIE ZAHL, BEVOR SIE VERBINDLICH WIRD. Sie steht hier und
+                    nicht in der Kopfzeile: wer gerade eine Figur vorgemerkt
+                    hat, schaut hierhin.
+                  */}
+                  {isDirty(pending) ? (
+                    <p className="mt-2 text-xs text-muted">
+                      {modal.pendingSummary(pending.add.length, pending.remove.length,
+                                            pending.swap.length)}
+                      {" — "}
+                      {modal.stagedCount(stagedCount(items, pending))}
+                      {". "}
+                      {modal.addFigureHint}
+                    </p>
+                  ) : null}
+                  {/*
+                    UND DIE RÜCKFRAGE, WENN EIN BELEG EXISTIERT. Sie erscheint
+                    beim ersten `Speichern` und bleibt stehen, bis es ein
+                    zweites Mal gedrückt wird — kein Modal über dem Modal.
+                  */}
+                  {/*
+                    UND SIE VERSCHWINDET, WENN SIE NICHT MEHR ZUTRIFFT.
+                    Nimmt der Betreiber den Wechsel zurueck (↩), gibt es
+                    nichts mehr zu bestaetigen — eine stehende Warnung waere
+                    dann eine Behauptung ueber einen Zustand, den es nicht
+                    gibt. Dieselbe Bedingung wie im Tor von `save`.
+                  */}
+                  {receiptPrompt && receipt !== null
+                   && needsReceiptConfirm(receipt !== null, pending) ? (
+                    <div role="alert"
+                         className="mt-2 rounded-sky-md bg-surface p-2 text-xs ring-1 ring-danger/40">
+                      <p className="font-medium">{modal.receiptWarnHeading}</p>
+                      <p className="mt-1 text-muted">
+                        {modal.receiptWarnBody(receipt.receiptNumber)}
+                      </p>
+                      {/*
+                        ZWEI KNOEPFE, UND EINER DAVON SCHREIBT.
+                        Hier stand „Trotzdem speichern" als Satz — eine
+                        Handlung, die aussah wie ein Knopf und keiner war.
+                        `save(true)` ist der einzige Weg zum Schreiben;
+                        `Zurueck` schliesst nur die Frage und verwirft NICHTS.
+                      */}
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button type="button" disabled={saving} aria-busy={saving}
+                                onClick={() => void save(true)}
+                                className="min-h-9 rounded-sky-md bg-surface px-2 text-xs font-medium text-danger ring-1 ring-danger/50 hover:ring-danger disabled:opacity-50">
+                          {saving ? modal.saving : modal.receiptWarnConfirm}
+                        </button>
+                        <button type="button" disabled={saving}
+                                onClick={() => setReceiptPrompt(false)}
+                                className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg disabled:opacity-50">
+                          {modal.receiptWarnBack}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </>
           )}
         </Section>
@@ -1295,14 +1858,131 @@ export function PurchaseDetails({
                   {receiptBusy ? receiptCopy.working
                     : receipt === null ? receiptCopy.create : receiptCopy.download}
                 </button>
+                {/*
+                  DER KORREKTURBELEG (0128) — nur, wenn es etwas zu korrigieren
+                  gibt. `correctable` kommt aus derselben Bedingung wie das Tor
+                  im Server: eine Handlung, die immer abgelehnt wuerde, ist
+                  schlimmer als eine fehlende.
+                */}
+                {receipt !== null && correctable && !correctPrompt ? (
+                  <button type="button" disabled={receiptBusy || editing}
+                          onClick={() => { setReceiptError(null); setCorrectPrompt(true); }}
+                          className={BUTTON}>
+                    {receiptCopy.correct}
+                  </button>
+                ) : null}
               </div>
+
+              {/*
+                DIE RUECKFRAGE. Ein Beleg ist ein Dokument; ihn auszustellen ist
+                nichts, was ein Klick nebenbei tun sollte. Erst `correctNow`
+                ruft den Server — der erste Klick setzt nur diese Anzeige.
+              */}
+              {correctPrompt && receipt !== null ? (
+                <div role="alert"
+                     className="mt-2 rounded-sky-md bg-surface p-2 text-xs ring-1 ring-attention/50">
+                  <p className="font-medium">{receiptCopy.correctConfirmHeading}</p>
+                  <p className="mt-1 text-muted">{receiptCopy.correctConfirmBody}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button type="button" disabled={receiptBusy} aria-busy={receiptBusy}
+                            onClick={() => void correctNow()}
+                            className="min-h-9 rounded-sky-md bg-surface px-2 text-xs font-medium ring-1 ring-fg/40 hover:ring-fg/60 disabled:opacity-50">
+                      {receiptBusy ? receiptCopy.correcting : receiptCopy.correctConfirmYes}
+                    </button>
+                    <button type="button" disabled={receiptBusy}
+                            onClick={() => setCorrectPrompt(false)}
+                            className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg disabled:opacity-50">
+                      {receiptCopy.correctConfirmNo}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Während der Bearbeitung würde ein Beleg den ALTEN Stand
                   einfrieren — deshalb gesperrt, und mit einem Satz dazu. */}
               {editing ? (
                 <p className="mt-1 text-xs text-muted">{receiptCopy.editingBlocked}</p>
               ) : null}
+
+              {/*
+                WELCHEN STAND EINE DATEI TRAEGT (Regel 10).
+                Der Satz stand nicht da, und auf Staging hat genau das einen
+                Fehlalarm ausgeloest: ein erneuter Abruf zeigte die alten
+                Figuren — richtig, aber nicht erwartbar.
+              */}
+              <p className="mt-1 text-xs text-muted">{receiptCopy.frozenHint}</p>
               <p className="mt-1 text-xs text-muted">{receiptCopy.deliveredHint}</p>
+
+              {/* ---- die Beleghistorie (0128) ------------------------------ */}
+              {historyFailed ? (
+                <p role="alert" className="mt-2 text-xs text-danger">
+                  {receiptCopy.historyFailed}
+                </p>
+              ) : history === null ? (
+                receipt === null ? null : (
+                  <p className="mt-2 text-xs text-muted">{receiptCopy.historyLoading}</p>
+                )
+              ) : history.length <= 1 ? null : (
+                <div className="mt-3">
+                  <p className="text-xs font-medium">{receiptCopy.historyHeading}</p>
+                  <ul className="mt-1 divide-y divide-border/40">
+                    {/*
+                      NEUESTE ZUERST. Die Serverfunktion liefert aufsteigend
+                      nach Revision — fuer eine Liste, in der die aktuelle
+                      Fassung oben steht, wird hier umgedreht und nicht dort:
+                      die aufsteigende Reihenfolge ist die der Kette.
+                    */}
+                    {[...history].reverse().map((fassung) => (
+                      <li key={fassung.id} className="flex flex-wrap items-baseline gap-x-2 py-1">
+                        <span className="text-xs font-medium tabular-nums">
+                          {fassung.receiptNumber}
+                        </span>
+                        <span className={`rounded-sky-md px-1.5 text-xs ring-1 ${
+                          fassung.isCurrent
+                            ? "text-success ring-success/40"
+                            : "text-muted ring-border/70"}`}>
+                          {fassung.isCurrent ? receiptCopy.current : receiptCopy.superseded}
+                        </span>
+                        <span className="text-xs text-muted">
+                          {receiptCopy.revisionLabel(fassung.revision)}
+                          {" · "}
+                          {formatDate(fassung.issuedAt)}
+                          {" · "}
+                          {receiptCopy.lineCount(fassung.lineCount)}
+                        </span>
+                        {fassung.supersedesNumber === null ? null : (
+                          <span className="text-xs text-muted">
+                            {receiptCopy.supersedesLabel(
+                              fassung.supersedesNumber,
+                              formatDate(fassung.supersedesIssuedAt ?? ""))}
+                          </span>
+                        )}
+                        {fassung.firstDeliveredAt === null ? (
+                          <span className="text-xs text-muted">{receiptCopy.notDelivered}</span>
+                        ) : (
+                          <span className="text-xs text-success">
+                            <span aria-hidden="true">✓ </span>
+                            {receiptCopy.deliveredOn(formatDate(fassung.firstDeliveredAt))}
+                          </span>
+                        )}
+                        <span className="flex-1" />
+                        <button type="button" disabled={receiptBusy || editing}
+                                aria-label={receiptCopy.downloadVersion(fassung.receiptNumber)}
+                                onClick={() => void fetchReceipt({
+                                  id: fassung.id, receiptNumber: fassung.receiptNumber,
+                                })}
+                                className="min-h-9 rounded-sky-md px-2 text-xs text-muted ring-1 ring-border/70 hover:text-fg disabled:opacity-50">
+                          {receiptCopy.download}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  {/* Was eine ersetzte Fassung ist — und was sie bleibt. */}
+                  {history.some((f) => !f.isCurrent) ? (
+                    <p className="mt-1 text-xs text-muted">{receiptCopy.supersededByHint}</p>
+                  ) : null}
+                </div>
+              )}
             </>
           )}
         </Section>
