@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "check": "npm run lint && npm run typecheck && npm run build",
+    "check": "npm run lint && npm run typecheck && npm run build && npm run verify:check-sql",
     "test": "vitest run",
     "verify:backup": "node tools/verify-backup-export.mts",
     "verify:sums": "node tools/checksums.mts --check",
@@ -69,7 +69,8 @@
     "verify:sandbox-e2e:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/verify-sandbox-e2e.mts",
     "sync:orderbook:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/sync-legacy-orderbook.mts",
     "sync:orderbook:prod": "node --env-file=.env.local tools/sync-legacy-orderbook.mts",
-    "fix:legacy-raw-name:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/fix-legacy-raw-name.mts"
+    "fix:legacy-raw-name:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/fix-legacy-raw-name.mts",
+    "verify:check-sql": "node tools/validate-check-sql.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
@@ -79,6 +80,7 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26.4.1",
     "@types/react": "^19",

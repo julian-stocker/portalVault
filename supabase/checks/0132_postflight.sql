@@ -47,12 +47,18 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- OHNE SOLLWERT, mit Absicht: dieselbe Datei laeuft spaeter auf Staging.
   -- Sie sagt nur, aus welcher Datenbank das Blatt kommt — die Lehre aus dem
   -- 2026-10-18, als zwei Migrationen in der falschen Umgebung liefen.
-  -- Supabase fuehrt die Projektkennung nicht in der Datenbank; entschieden
-  -- wird am einzigen Merkmal, das nur Staging hat: die beiden synthetischen
-  -- Testfiguren der RLS- und Zahlungsproben. 2 = Staging, 0 = Production.
-  (1, 'Umgebung', 'Info: Testfiguren SKY-9101/SKY-9998 (Staging 2, Production 0)',
-        ((select count(*) from public.skylanders
-           where sky_id in ('SKY-9101', 'SKY-9998')))::text, null),
+  -- Supabase fuehrt die Projektkennung nicht in der Datenbank, und es gibt
+  -- KEIN Merkmal, das die Umgebung entscheidet: der Lauf vom 2026-10-19 hat
+  -- auf Production eine Testfigur gefunden. `verify:rls` legt `SKY-9998` als
+  -- DAUERHAFTE Shop-Fixture an, deren Fremdschluessel ON DELETE RESTRICT
+  -- tragen — der Teardown konnte sie nie entfernen
+  -- (`tools/verify-rls.mts`), und vor dem 2026-09-09 gab es nur ein Projekt.
+  -- Diese Zeile NENNT daher die gefundenen Figuren, statt eine Umgebung zu
+  -- behaupten. Entschieden wird an der Projektkennung in der Adresszeile.
+  (1, 'Umgebung', 'Info: vorhandene Testfiguren (SKY-9000 und hoeher)',
+        (coalesce((select string_agg(s.sky_id, ', ' order by s.sky_id)
+                     from public.skylanders s
+                    where s.sky_id >= 'SKY-9000'), '(keine)')), null),
   (2, 'Umgebung', 'Info: Einkaeufe insgesamt / davon importiert',
         ((select count(*)::text from public.purchases) || ' / '
          || (select count(*)::text from public.purchases where source <> 'manual')), null),

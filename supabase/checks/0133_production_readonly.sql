@@ -61,9 +61,10 @@ heikel as (
 pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------------- Umgebung
-  (1, 'Umgebung', 'Info: Testfiguren SKY-9101/SKY-9998 (Staging 2, Production 0)',
-        ((select count(*) from public.skylanders
-           where sky_id in ('SKY-9101', 'SKY-9998')))::text, null),
+  (1, 'Umgebung', 'Info: vorhandene Testfiguren (SKY-9000 und hoeher)',
+        (coalesce((select string_agg(s.sky_id, ', ' order by s.sky_id)
+                     from public.skylanders s
+                    where s.sky_id >= 'SKY-9000'), '(keine)')), null),
 
   -- ----------------------------------------------------------------- Trigger
   (101, 'Trigger', 'purchases_paid_total_immutable_trg ist da',
@@ -91,25 +92,32 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                   or position('listing_url' in prosrc) > 0
                   or position('note' in prosrc) > 0)
             from riegel))::text, 'false'),
+  -- GECASTET, UND ZWAR BEIDE. `tgname` ist `name`, `tgenabled` ist `"char"` —
+  -- und `text || "char"` ist in PostgreSQL MEHRDEUTIG: der Lauf vom
+  -- 2026-10-19 brach mit `42725 operator is not unique: text || "char"` ab,
+  -- bevor eine einzige Zeile entstand. Ein Katalogtyp wird vor der
+  -- Verkettung immer ausdruecklich nach text gebracht.
   (108, 'Trigger', 'Info: alle nicht-internen Trigger auf purchases',
-        ((select string_agg(tgname || ' (' || tgenabled || ')', ', ' order by tgname)
-            from trg)), null),
+        ((select string_agg(t.tgname::text || ' (' || t.tgenabled::text || ')',
+                            ', ' order by t.tgname::text)
+            from trg t)), null),
 
   -- -------------------------------------------------- Vertraeglichkeit
   (201, 'Ablaeufe', 'Info: Funktionen, die public.purchases schreiben',
-        ((select string_agg(proname, ', ' order by proname) from schreiber)), null),
+        ((select string_agg(proname::text, ', ' order by proname::text)
+            from schreiber)), null),
   (202, 'Ablaeufe', 'Info: davon mit total_cost/currency/source auf der linken Seite',
-        ((select coalesce(string_agg(proname, ', ' order by proname), '(keine)')
+        ((select coalesce(string_agg(proname::text, ', ' order by proname::text), '(keine)')
             from heikel)), null),
   -- Nur diese beiden duerfen es sein: `seller_update_purchase` traegt seit
   -- `0132` den Riegel selbst, und `purchases_paid_total_is_final` IST der
   -- Riegel. Jede dritte Funktion hiesse, dass ein Ablauf die Summe schreibt
   -- und seit `0133` scheitern wuerde.
   (203, 'Ablaeufe', 'genau die erwarteten Schreiber, kein dritter',
-        ((select coalesce(string_agg(proname, ',' order by proname), '')
+        ((select coalesce(string_agg(proname::text, ',' order by proname::text), '')
             from heikel
-           where proname not in ('seller_update_purchase',
-                                 'purchases_paid_total_is_final'))), ''),
+           where proname::text not in ('seller_update_purchase',
+                                       'purchases_paid_total_is_final'))), ''),
   (204, 'Ablaeufe', 'der Riegel in seller_update_purchase steht (0132)',
         ((select (position('the paid total of an imported purchase is final' in p.prosrc) > 0)
             from pg_proc p
@@ -136,13 +144,58 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- -------------------------------------------------------------- Unberuehrt
   (301, 'Unberuehrt', 'Info: Eigenbelege (0133 fasst sie nicht an)',
         ((select count(*) from public.purchase_receipts))::text, null),
-  (302, 'Unberuehrt', 'die Belegausstellung bleibt fuer jede API-Rolle gesperrt',
-        ((select count(*) from pg_proc p, aclexplode(p.proacl) a
+  /*
+   * DREI FEHLERQUELLEN, DIE EINE NAIVE ZAEHLUNG NICHT SIEHT (ADR-0125, 0124):
+   *
+   *   1. `proacl is null` heisst NICHT „keine Rechte", sondern
+   *      „Standardrechte" — und der Standard einer Funktion ist EXECUTE fuer
+   *      PUBLIC. Eine Zaehlung ueber `aclexplode(NULL)` liefert null Zeilen
+   *      und meldet damit genau im gefaehrlichsten Fall „alles in Ordnung".
+   *   2. PUBLIC steht im ACL als `grantee = 0` und hat keinen Rollennamen.
+   *      Wer nur `anon`/`authenticated`/`service_role` vergleicht, sieht ein
+   *      `grant execute ... to public` nicht.
+   *   3. `service_role` gehoert dazu: die Supabase-Defaultrechte im Schema
+   *      `public` nennen alle drei, nicht nur `authenticated`.
+   *
+   * Darum zaehlt diese Zeile die VERLETZUNGEN inklusive beider Sonderfaelle
+   * und muss 0 sein; Zeile 304 zeigt den ACL im Volltext dazu.
+   */
+  (302, 'Unberuehrt', 'Belegausstellung: PUBLIC/anon/authenticated/service_role oder NULL-ACL',
+        ((select count(*) from pg_proc p
            where p.oid = to_regprocedure('public.seller_issue_purchase_receipt(bigint)')
-             and a.privilege_type = 'EXECUTE'
-             and a.grantee::regrole::text in ('anon', 'authenticated', 'service_role')))::text,
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.privilege_type = 'EXECUTE'
+                                and (a.grantee = 0
+                                     or a.grantee::regrole::text
+                                        in ('anon', 'authenticated', 'service_role'))))))::text,
         '0'),
-  (303, 'Unberuehrt', 'Info: Lagerzeilen / Bewegungen (0133 fasst beides nicht an)',
+  (303, 'Unberuehrt', 'Belegkorrektur: dieselbe Pruefung',
+        ((select count(*) from pg_proc p
+           where p.oid = to_regprocedure(
+             'public.seller_issue_purchase_receipt_correction(bigint)')
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.privilege_type = 'EXECUTE'
+                                and (a.grantee = 0
+                                     or a.grantee::regrole::text
+                                        in ('anon', 'authenticated', 'service_role'))))))::text,
+        '0'),
+  (304, 'Unberuehrt', 'Info: ACL beider Ausstellungsfunktionen im Volltext',
+        ((select string_agg(p.proname::text || ' = '
+                            || coalesce(array_to_string(p.proacl::text[], ' '), '(NULL!)'),
+                            ' | ' order by p.proname::text)
+            from pg_proc p
+           where p.oid in (
+                   to_regprocedure('public.seller_issue_purchase_receipt(bigint)'),
+                   to_regprocedure(
+                     'public.seller_issue_purchase_receipt_correction(bigint)')))), null),
+  (305, 'Unberuehrt', 'Abruf bestehender Belege bleibt fuer authenticated erlaubt',
+        ((select count(*) from pg_proc p, aclexplode(p.proacl) a
+           where p.oid = to_regprocedure('public.seller_purchase_receipt_history(bigint)')
+             and a.privilege_type = 'EXECUTE'
+             and a.grantee::regrole::text = 'authenticated'))::text, '1'),
+  (306, 'Unberuehrt', 'Info: Lagerzeilen / Bewegungen (0133 fasst beides nicht an)',
         ((select count(*)::text from public.shop_inventory) || ' / '
          || (select count(*)::text from public.inventory_movements)), null)
 ),

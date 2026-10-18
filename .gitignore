@@ -112,3 +112,6 @@ skyisles-platform-backup-*.zip
 # Which throwaway sales exist right now is a fact about one machine.
 .ui-fixtures-ship-day.json
 tools/.ui-fixtures-ship-day.json
+
+# Erzeugtes Stub-Schema der SQL-Planprüfung (npm run verify:check-sql)
+.pglite-stub-schema.sql

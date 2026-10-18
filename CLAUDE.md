@@ -72,8 +72,11 @@ npm run dev:staging   # Entwicklungsserver gegen Staging
 npm run lint          # ESLint
 npm run typecheck     # tsc --noEmit
 npm run build         # Production Build
-npm run check         # lint + typecheck + build  ← nach jeder relevanten Änderung
+npm run check         # lint + typecheck + build + SQL-Planprüfung  ← nach jeder relevanten Änderung
 npm test              # Unit-Tests
+npm run verify:check-sql # jede Datei in supabase/checks/ gegen echtes PostgreSQL planen
+                         # (PGlite, Stub-Schema aus den Migrationen, keine Daten)
+                         # braucht einmalig: python3 -m pip install -r requirements.txt
 
 npm run verify:rls:staging       # funktionale RLS-Prüfung (SCHREIBT: Auth-Nutzer, Fixtures)
 npm run verify:shop:staging      # öffentliche Angebotsprojektion prüfen (schreibfrei)

@@ -59,15 +59,50 @@ bilanz as (
 befund (nr, bereich, frage, messung, erwartet) as (values
 
   -- ------------------------------------------------------- 0 Welche Datenbank
-  -- Supabase fuehrt die Projektkennung nicht in der Datenbank. Entschieden
-  -- wird daher an einem Merkmal, das nur Staging hat: die beiden synthetischen
-  -- Testfiguren der RLS- und Zahlungsproben (`tools/seed-shop-fixtures.mts`).
-  -- Beweiskraft in EINE Richtung — sind sie da, ist es Staging. Sind sie es
-  -- nicht, spricht alles fuer Production; sicher sagt es die Projektkennung in
-  -- der Adresszeile des SQL-Editors, und die gehoert ins Protokoll.
-  (0, 'Umgebung', 'Testfiguren SKY-9101/SKY-9998 (Staging hat 2, Production 0)',
-      (select count(*)::text from public.skylanders
-        where sky_id in ('SKY-9101', 'SKY-9998')), '0'),
+  --
+  -- BERICHTIGT AM 2026-10-19. Hier stand ein Sollwert `0` mit der Begruendung,
+  -- nur Staging trage die synthetischen Testfiguren. **Diese Annahme war
+  -- falsch**, und der Lauf hat sie widerlegt: Production traegt eine davon.
+  --
+  -- Der Grund steht im Werkzeug selbst. `verify:rls` legt `SKY-9998` als
+  -- DAUERHAFTE Shop-Fixture an; auf sie zeigen Bestellungen, Reservierungen
+  -- und Journalzeilen mit ON DELETE RESTRICT, und der Teardown „has never
+  -- been able to remove them" (`tools/verify-rls.mts`). Ein separates
+  -- Staging-Projekt gab es erst ab dem 2026-09-09 — die RLS-Probe davor lief
+  -- gegen das einzige Projekt, das es gab.
+  --
+  -- Die Zeile NENNT jetzt, was sie findet, statt eine Umgebung zu behaupten.
+  -- Entschieden wird an der Projektkennung in der Adresszeile; eine
+  -- Datenbank, die ihren eigenen Namen nicht kennt, kann das nicht leisten.
+  (0, 'Umgebung', 'Info: vorhandene Testfiguren (SKY-9000 und hoeher)',
+      coalesce((select string_agg(s.sky_id, ', ' order by s.sky_id)
+                  from public.skylanders s
+                 where s.sky_id >= 'SKY-9000'), '(keine)'), null),
+  --
+  -- UND DIE PRUEFUNG, DIE STATTDESSEN BLOCKIERT.
+  --
+  -- Dass eine Testfigur im Katalog steht, ist ein Altlastbefund. Dass sie im
+  -- oeffentlichen Shop ANGEBOTEN wird, waere ein Fehler mit Aussenwirkung:
+  -- `shop_offers()` ist die Ladenfront, und dort hat kein Testartikel etwas
+  -- zu suchen. Das ist pruefbar, entscheidbar und unabhaengig von der
+  -- Umgebung — in beiden Projekten muss es 0 sein.
+  (3, 'Umgebung', 'Testfiguren im oeffentlichen Angebot (muss 0 sein)',
+      (select count(*)::text from public.shop_offers() ofr
+        where ofr.sky_id >= 'SKY-9000'), '0'),
+  (4, 'Umgebung', 'Info: Zustand der Testfiguren (aktiv/sichtbar/gelistet/Menge)',
+      coalesce((select string_agg(
+                 s.sky_id || ':' || case when s.is_active then 'aktiv' else 'inaktiv' end
+                 || '/' || case when s.catalog_visible then 'sichtbar' else 'verborgen' end
+                 || '/' || coalesce((select case when i.is_listed then 'gelistet'
+                                                 else 'nicht gelistet' end
+                                       || ' q=' || i.quantity::text
+                                       || ' r=' || i.reserved::text
+                                      from public.shop_inventory i
+                                     where i.sky_id = s.sky_id
+                                     order by i.id limit 1), 'keine Lagerzeile'),
+                 ' | ' order by s.sky_id)
+                 from public.skylanders s
+                where s.sky_id >= 'SKY-9000'), '(keine)'), null),
   -- Die Funktion muss DA sein und die Herkunftsbedingung des Einkaufs
   -- NICHT mehr tragen. Fehlt die Funktion, ist die Messung NULL und die
   -- Zeile faellt durch — nicht „true, weil nichts gefunden".

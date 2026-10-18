@@ -1,0 +1,13 @@
+# Python-Abhängigkeiten der SQL-Planprüfung (`npm run verify:check-sql`).
+#
+# Nur EIN Werkzeug im Repository ist in Python geschrieben:
+# `tools/lib/stub-schema.py` erzeugt aus den Migrationen das Stub-Schema, gegen
+# das PGlite die Prüfdateien plant. Es braucht einen echten PostgreSQL-Parser,
+# und pglast ist libpg_query — dieselbe Grammatik, die der Server benutzt.
+#
+#   python3 -m pip install -r requirements.txt
+#
+# Ohne dieses Paket schlägt `npm run verify:check-sql` fehl, und damit auch
+# `npm run check`. Das ist Absicht: eine Prüfung, die sich bei fehlendem
+# Werkzeug stillschweigend überspringt, hält man für gelaufen.
+pglast==5.2

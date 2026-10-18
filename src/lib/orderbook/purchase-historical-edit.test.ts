@@ -895,13 +895,33 @@ describe("0132 und 0133 stehen auf Production, nicht auf Staging", () => {
     expect(L.trim().endsWith("order by nr;")).toBe(true);
   });
 
-  it("der Umgebungsstempel steht in jeder Datei dieser Reihe", () => {
+  it("der Umgebungsstempel nennt die Figuren, statt eine Umgebung zu behaupten", () => {
+    /*
+     * BERICHTIGT AM 2026-10-19. Der Stempel verglich die Anzahl von
+     * `SKY-9101`/`SKY-9998` und leitete daraus die Umgebung ab — „2 = Staging,
+     * 0 = Production". Der Production-Lauf hat das widerlegt: dort steht eine
+     * davon, weil `verify:rls` sie als DAUERHAFTE Fixture anlegt und ihr
+     * Teardown sie wegen ON DELETE RESTRICT nie entfernen konnte.
+     *
+     * Jetzt zählt der Stempel den ganzen Fixture-Bereich auf und behauptet
+     * nichts. Entscheidbar ist dafür etwas anderes, und das ist jetzt die
+     * blockierende Prüfung: im öffentlichen Angebot hat kein Testartikel
+     * etwas zu suchen.
+     */
     for (const f of ["0132_preflight.sql", "0132_postflight.sql",
-                     "0132_diagnose_production.sql", "0133_production_readonly.sql"]) {
+                     "0132_diagnose_production.sql", "0133_production_readonly.sql",
+                     "state_audit_readonly.sql"]) {
       const q = readFileSync(`supabase/checks/${f}`, "utf8");
-      expect(q, f).toContain("SKY-9101");
-      expect(q, f).toContain("SKY-9998");
+      expect(q, f).toContain("sky_id >= 'SKY-9000'");
+      /* Ohne Kommentarzeilen: die widerlegte Formel darf als ZITAT in der
+         Berichtigung stehen bleiben — nur nicht mehr als Prüfungstext. */
+      const ohneKommentar = q.split("\n")
+        .filter((z) => !z.trim().startsWith("--")).join("\n");
+      expect(ohneKommentar, f).not.toContain("Staging 2, Production 0");
     }
+    const d = readFileSync("supabase/checks/0132_diagnose_production.sql", "utf8");
+    expect(d).toContain("Testfiguren im oeffentlichen Angebot (muss 0 sein)");
+    expect(d).toContain("public.shop_offers()");
   });
 
   it("die eingefrorenen Kopfzeilen werden festgehalten, nicht korrigiert", () => {

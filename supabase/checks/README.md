@@ -92,7 +92,49 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
 | `0133_production_readonly.sql` | lesende Nachprüfung zu `0133` auf Production: Form und Zustand des Triggers, und ob eine der sieben Funktionen, die `purchases` schreiben, die bezahlte Summe anfasst |
 | `0132_staging_plan.md` | der Plan, Staging nachzuziehen — `0132`, der Schreibnachweis H1–H12, dann `0133`. Nichts davon ausgeführt |
 | `state_audit_readonly.sql` | **für beide Projekte**: welche Migrationen sind in dieser Datenbank wirklich angewendet? Vergleicht `md5(prosrc)` jeder von `0126`–`0134` berührten Funktion gegen die Abdrücke aller bekannten Fassungen und nennt die Migrationsnummer. Dazu Trigger, Belegsperre, Lagerbild, Katalog und Zubehör |
-| `open_verifications.md` | die Nachweise, die **fehlen** — Gegenstück zu `APPLIED.md`. Production P1–P5, Staging S1–S6, und was gar keinen Nachweis hat |
+| `open_verifications.md` | die Nachweise, die **fehlen** — Gegenstück zu `APPLIED.md`. Production P1–P7, Staging S1–S6, was gar keinen Nachweis hat, und in Abschnitt 0 die am 2026-10-19 bestätigten Production-Ergebnisse |
+| `fixture_audit_readonly.sql` | die Testfigur auf Production: Identität, Serie, Anlagedatum und **jede** Verknüpfung (Lager, Bewegungen, Bestellungen, Reservierungen, Warenkorb, Sammlung, Ein- und Verkauf, Zuordnungen) — und drei blockierende Zeilen zur Außenwirkung |
+## Drei Stufen der Prüfung — und was jede beweist
+
+Am 2026-10-19 sind vier Prüfdateien im Production-Editor abgebrochen, nachdem
+sie als „geprüft" gemeldet worden waren. Daraus folgt eine Unterscheidung, die
+in jedem Bericht stehen muss:
+
+| Stufe | Werkzeug | findet | findet NICHT |
+|---|---|---|---|
+| **Syntax** | `pglast` (libpg_query) | Syntaxfehler, Anweisungstypen | jeden Namens- und Typfehler — beide Abbrüche vom 2026-10-19 waren syntaktisch einwandfrei |
+| **Statische Referenzprüfung** | `src/lib/admin/check-sql-references.test.ts`, `check-sql-hazards.test.ts` | erfundene Tabellen und Funktionen · Spalten hinter eindeutig gebundenen Aliassen · **nirgends gebundene Aliasse (42P01)** · **ungecastete Katalogspalten an einer Verkettung (42725)** | einen Alias, der in der falschen Unterabfrage steht · Spalten ohne eindeutige Aliasbindung |
+| **Planprüfung** | `npm run verify:check-sql` — echtes PostgreSQL (PGlite) mit Stub-Schema aus den Migrationen | **alles davon**, plus jeden Typkonflikt und jede Signatur, über alle Geltungsbereiche | Laufzeitfehler an echten Daten · ob die Prüfung fachlich das Richtige misst · **Versionsunterschiede**: PGlite fährt 18.6, der Syntaxprüfer die Grammatik von 15, und Production ist hier nicht festgehalten |
+
+**Keine dieser Stufen ist „erfolgreich ausgeführt".** Das ist erst der Lauf im
+SQL-Editor, und nur er zählt als Nachweis.
+
+**Verbindliche Reihenfolge, seit dem 2026-10-19:**
+
+1. `npm run verify:check-sql` — **vor jedem** Lauf im SQL-Editor, und bei
+   jeder Änderung an einer Datei unter `supabase/checks/`. Stufe 3 läuft
+   außerdem in `npm run check` mit.
+2. Erst danach die Datei in den SQL-Editor, mit der Projektkennung im
+   Protokoll.
+3. Ergebnis nach `open_verifications.md`.
+
+`@electric-sql/pglite` ist seit dem 2026-10-19 eine feste `devDependency`.
+Fehlt sie, **schlägt die Prüfung fehl** — sie überspringt sich nicht mehr
+still. Zwei Dateien lassen sich begründet nicht planen; sie stehen mit ihrem
+Grund in `NICHT_PLANBAR` in `tools/validate-check-sql.mts`, und wenn eine von
+ihnen eines Tages doch plant, bricht der Lauf ab und verlangt das Kürzen der
+Liste.
+
+## Zwei Dateien schreiben — niemals auf Production
+
+| Datei | was sie tut |
+|---|---|
+| `0124_fingerprint_failure_isolated.sql` | legt eine Temporärtabelle und eine Funktion an, schreibt eine Zeile, rollt zurück — Fehlerfalltest, **nur Staging** |
+| `0125_function_test.sql` | Funktionstest mit garantiertem Rollback, setzt Sitzungsparameter — **nur Staging** |
+
+Alle übrigen Dateien unter `supabase/checks/` sind reine SELECTs.
+
+| `accessory_audit_readonly.sql` | Bestandsaufnahme für die Zubehörplanung: die 206 Einkaufspositionen ohne `sky_id` nach Zustand, Herkunft und Rohnamen, und was an den Spiele-Katalogzeilen operativ hängt |
 | `0132_test_plan.md` | die Schreibfälle H1–H12 zu `0132`, über die Oberfläche gegen Staging — was die lesenden Prüfdateien nicht zeigen können. **Noch nicht durchgeführt:** `0132` ist auf Staging nicht angewendet, und auf Production werden keine Testzeilen angelegt |
 | `0133_preflight.sql` | Eingangszustand vor `0133`; Grundlage aus `0115`/`0132`, Trigger fehlt noch |
 | `0133_postflight.sql` | der Trigger steht, hat die Form BEFORE UPDATE FOR EACH ROW, hält drei Felder und kein viertes |

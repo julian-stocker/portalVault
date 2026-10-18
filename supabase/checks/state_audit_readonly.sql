@@ -82,9 +82,15 @@ funktionsstand as (
 zeilen (nr, bereich, gegenstand, befund) as (
 
   -- ------------------------------------------------------------- Umgebung
-  select 1, 'Umgebung', 'Testfiguren SKY-9101/SKY-9998 (Staging 2, Production 0)',
-         (select count(*)::text from public.skylanders
-           where sky_id in ('SKY-9101', 'SKY-9998'))
+  -- BERICHTIGT AM 2026-10-19: hier stand „Staging 2, Production 0". Falsch —
+  -- `verify:rls` legt `SKY-9998` als DAUERHAFTE Fixture an, deren
+  -- Fremdschluessel ON DELETE RESTRICT tragen, und vor dem 2026-09-09 gab es
+  -- nur ein Projekt. Diese Zeile nennt die Figuren, statt eine Umgebung zu
+  -- behaupten.
+  select 1, 'Umgebung', 'vorhandene Testfiguren (SKY-9000 und hoeher)',
+         coalesce((select string_agg(s.sky_id, ', ' order by s.sky_id)
+                     from public.skylanders s
+                    where s.sky_id >= 'SKY-9000'), '(keine)')
   union all
   select 2, 'Umgebung', 'Einkaeufe insgesamt / davon importiert',
          (select count(*)::text from public.purchases) || ' / '
@@ -151,18 +157,49 @@ zeilen (nr, bereich, gegenstand, befund) as (
 
   -- ----------------------------------------------------------- Belegsperre
   union all
-  select 30, 'Belege', 'Ausstellung: API-Rollen mit EXECUTE (muss 0 sein)',
-         (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
+  /*
+   * BERICHTIGT AM 2026-10-19. Die bisherige Zaehlung war in zwei Faellen
+   * blind, und beide sind die gefaehrlichen:
+   *   * `proacl is null` heisst „Standardrechte" — fuer eine Funktion also
+   *     EXECUTE fuer PUBLIC. `aclexplode(NULL)` liefert null Zeilen, die
+   *     Zaehlung meldete also genau dann 0, wenn alles offen steht.
+   *   * PUBLIC steht als `grantee = 0` ohne Rollennamen und fiel durch den
+   *     Vergleich mit den drei Rollennamen hindurch (ADR-0125, 0124).
+   * Jetzt zaehlt die Zeile die VERLETZUNGEN inklusive beider Faelle.
+   */
+  select 30, 'Belege', 'Ausstellung offen fuer PUBLIC/anon/authenticated/service_role oder NULL-ACL',
+         (select count(*)::text from pg_proc p
            where p.oid = to_regprocedure('public.seller_issue_purchase_receipt(bigint)')
-             and a.privilege_type = 'EXECUTE'
-             and a.grantee::regrole::text in ('anon', 'authenticated', 'service_role'))
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.privilege_type = 'EXECUTE'
+                                and (a.grantee = 0
+                                     or a.grantee::regrole::text
+                                        in ('anon', 'authenticated', 'service_role')))))
   union all
-  select 31, 'Belege', 'Korrektur: API-Rollen mit EXECUTE (muss 0 sein)',
-         (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
+  select 31, 'Belege', 'Korrektur offen fuer dieselben (muss 0 sein)',
+         (select count(*)::text from pg_proc p
            where p.oid = to_regprocedure(
              'public.seller_issue_purchase_receipt_correction(bigint)')
-             and a.privilege_type = 'EXECUTE'
-             and a.grantee::regrole::text in ('anon', 'authenticated', 'service_role'))
+             and (p.proacl is null
+                  or exists (select 1 from aclexplode(p.proacl) a
+                              where a.privilege_type = 'EXECUTE'
+                                and (a.grantee = 0
+                                     or a.grantee::regrole::text
+                                        in ('anon', 'authenticated', 'service_role')))))
+  union all
+  select 33, 'Belege', 'ACL beider Ausstellungsfunktionen im Volltext',
+         coalesce((select string_agg(p.proname::text || ' = '
+                            || coalesce(array_to_string(p.proacl::text[], ' '), '(NULL!)'),
+                            ' | ' order by p.proname::text)
+            from pg_proc p
+           where p.oid in (
+                   to_regprocedure('public.seller_issue_purchase_receipt(bigint)'),
+                   to_regprocedure(
+                     'public.seller_issue_purchase_receipt_correction(bigint)'))), '(keine)')
+  union all
+  select 34, 'Belege', 'Testfiguren im oeffentlichen Angebot (muss 0 sein)',
+         (select count(*)::text from public.shop_offers() ofr where ofr.sky_id >= 'SKY-9000')
   union all
   select 32, 'Belege', 'Abruf bestehender Belege bleibt erlaubt (erwartet >= 1)',
          (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
