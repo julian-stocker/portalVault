@@ -282,8 +282,23 @@ begin
     raise exception 'R0127 Abbruch: die Argumenttypen sind nicht die erwarteten';
   end if;
 
-  if has_function_privilege('public', v_oid, 'execute')
-     or has_function_privilege('anon', v_oid, 'execute') then
+  /*
+   * PUBLIC UEBER DEN ACL, NICHT UEBER has_function_privilege.
+   *
+   * `has_function_privilege('public', ...)` bricht mit `role "public" does
+   * not exist` ab — `public` ist ein Pseudo-Empfaenger im ACL (grantee = 0),
+   * kein Eintrag in `pg_roles`. Dieselbe Lehre steht in `0124` und `0125`.
+   *
+   * Und ein NULL-ACL heisst nicht „keine Rechte", sondern „Standardrechte" —
+   * fuer eine Funktion also EXECUTE fuer PUBLIC. Ein fehlender ACL ist hier
+   * genau der Zustand, den die Pruefung verhindern soll.
+   */
+  if (select p.proacl from pg_proc p where p.oid = v_oid) is null then
+    raise exception 'R0127 Abbruch: die Funktion hat keinen ACL — der Standard waere EXECUTE fuer PUBLIC';
+  end if;
+  if exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+              where p.oid = v_oid and a.privilege_type = 'EXECUTE'
+                and (a.grantee = 0 or a.grantee::regrole::text = 'anon')) then
     raise exception 'R0127 Abbruch: PUBLIC oder anon hat EXECUTE';
   end if;
   if not has_function_privilege('authenticated', v_oid, 'execute') then

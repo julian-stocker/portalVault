@@ -115,11 +115,18 @@ export default async function PurchasePage({
         <p className="mt-1 text-xs text-muted">{copy.incomplete(incomplete)}</p>
       ) : null}
 
-      <PurchaseItems purchaseId={purchase.id} source={purchase.source}
+      <PurchaseItems purchaseId={purchase.id}
                      items={purchase.items} catalog={catalog} />
-      {purchase.source === "manual" ? (
-        <AddPurchaseItem purchaseId={purchase.id} catalog={catalog} />
-      ) : null}
+      {/*
+        HINZUFÜGEN AUCH BEI EINEM HISTORISCHEN EINKAUF (ADR-0126).
+
+        `seller_add_purchase_item` kennt die Herkunft des Einkaufs nicht und
+        hat sie nie geprüft — das Tor stand nur hier. In der Arbeitsmappe
+        fehlen Figuren, und genau die sollen nachgetragen werden können. Eine
+        nachgetragene Zeile trägt keine Arbeitsmappen-Merkmale, ist also
+        unbuchbar wie jede neue und wieder entfernbar (`0132`).
+      */}
+      <AddPurchaseItem purchaseId={purchase.id} catalog={catalog} />
     </main>
   );
 }

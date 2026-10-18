@@ -154,6 +154,10 @@ function orderbookMessage(error: { code?: string; message?: string }): string {
   // 0064. Distinct from `historical` above, which is about booking a whole
   // imported purchase; this one is about deleting a single workbook line.
   if (text.includes("legacy workbook")) return de.business.orderbook.errors.historicalItem;
+  /* 0132: die Zahlung eines importierten Einkaufs ist abgeschlossen. */
+  if (text.includes("the paid total of an imported purchase is final")) {
+    return de.business.orderbook.errors.paidTotalFinal;
+  }
   if (text.includes("at most 200 items")) return de.business.orderbook.errors.tooManyItems;
   if (text.includes("plausible range")) return de.business.orderbook.errors.dateRange;
   return de.admin.writeFailed;

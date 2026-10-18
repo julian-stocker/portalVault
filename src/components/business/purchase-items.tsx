@@ -58,13 +58,10 @@ const ROW_ACTION = "min-h-11 text-xs text-muted underline underline-offset-2 sm:
 
 export function PurchaseItems({
   purchaseId,
-  source,
   items,
   catalog,
 }: {
   purchaseId: number;
-  /** `manual` or `excel_order_2026` — decides whether removal is offered. */
-  source: string;
   items: PurchaseItem[];
   catalog: readonly FigureChoice[];
 }) {
@@ -183,7 +180,7 @@ export function PurchaseItems({
              nebenbei zurückgesetzt. */
           const noValue = creditsNoValue(item.state as ItemState);
           const mayRemap = canRemapItem(item);
-          const mayRemove = canRemoveItem(source, item);
+          const mayRemove = canRemoveItem(item);
           return (
             <li key={item.id} className="bg-surface/60 px-3 py-2">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">

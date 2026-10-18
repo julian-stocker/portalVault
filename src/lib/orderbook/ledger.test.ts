@@ -846,10 +846,22 @@ describe("Serie comes from the catalog and nowhere else", () => {
 
   it("is keyed by the CATALOG row's series_code, never by anything guessable", () => {
     expect(QUERIES).toContain("series.get(String(i.series_code))");
-    // Not parsed out of the raw Excel text, the sky_id or the sheet name.
-    expect(QUERIES).not.toMatch(/seriesLabel[^;]*raw_name/);
-    expect(QUERIES).not.toMatch(/seriesLabel[^;]*sky_id\.slice/);
-    expect(QUERIES).not.toMatch(/seriesLabel[^;]*source/);
+    /*
+     * Not parsed out of the raw Excel text, the sky_id or the sheet name.
+     *
+     * The span is the ASSIGNMENT, not "anything up to the next semicolon":
+     * the item literal holds no semicolon at all, so the old `[^;]*` reached
+     * every field below it — and since 0134 one of them is `sourceRow`, which
+     * has nothing to do with how the label is found.
+     */
+    const label = QUERIES.slice(
+      QUERIES.indexOf("seriesLabel: i.series_code"),
+      QUERIES.indexOf("condition: String(i.condition)"),
+    );
+    expect(label.length).toBeGreaterThan(0);
+    expect(label).not.toMatch(/raw_name/);
+    expect(label).not.toMatch(/sky_id\.slice/);
+    expect(label).not.toMatch(/source/);
   });
 
   it("falls back to the code rather than inventing a label", () => {

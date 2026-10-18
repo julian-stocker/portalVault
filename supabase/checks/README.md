@@ -86,6 +86,16 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
 | `receipt_lock_check.sql` | hält die Sperre der Belegausstellung? Jede API-Rolle einzeln, PUBLIC über den ACL — rein lesend |
 | `release_0126_0131.md` | **die geltende Freigabeprüfung** für den Production-Rollout: gemessene Wirkung je Migration, Reihenfolge, Rücknahmefenster, Backuplücken, zwei getrennte Freigaben |
 | `production_rollout_0126_0131.md` | die Bereitschaftsprüfung für Production: Messung zuerst, Backuplage, Reihenfolge, Abbruchkriterien, Rücknahme je Migration |
+| `0132_preflight.sql` | Eingangszustand vor `0132`; die Fassung aus `0064`, und die Annahme: jede importierte Zeile trägt mindestens ein Herkunftsmerkmal und immer eine `source_row`. **Am 2026-10-18 berichtigt** — die Prüfungen 202 und 303 verlangten `reconciled_legacy` je Zeile und `quantity = sum(delta)`; beides war falsch (ADR-0127). Die Fassung hier ist nicht die gelaufene, ihr Kopf sagt das |
+| `0132_postflight.sql` | die Herkunftsbedingung ist weg, die vier Zeilenbedingungen stehen, Bestand und Rechte unverändert |
+| `0132_diagnose_production.sql` | rein lesende Diagnose der beiden Abweichungen aus dem **Production**-Lauf vom 2026-10-18: die 109 Zeilen aus `0067` samt ihrem Schutz, und der Eröffnungsbestand aus dem Cutover vom 2026-09-21. Beginnt mit einem Umgebungsstempel |
+| `0133_production_readonly.sql` | lesende Nachprüfung zu `0133` auf Production: Form und Zustand des Triggers, und ob eine der sieben Funktionen, die `purchases` schreiben, die bezahlte Summe anfasst |
+| `0132_staging_plan.md` | der Plan, Staging nachzuziehen — `0132`, der Schreibnachweis H1–H12, dann `0133`. Nichts davon ausgeführt |
+| `state_audit_readonly.sql` | **für beide Projekte**: welche Migrationen sind in dieser Datenbank wirklich angewendet? Vergleicht `md5(prosrc)` jeder von `0126`–`0134` berührten Funktion gegen die Abdrücke aller bekannten Fassungen und nennt die Migrationsnummer. Dazu Trigger, Belegsperre, Lagerbild, Katalog und Zubehör |
+| `open_verifications.md` | die Nachweise, die **fehlen** — Gegenstück zu `APPLIED.md`. Production P1–P5, Staging S1–S6, und was gar keinen Nachweis hat |
+| `0132_test_plan.md` | die Schreibfälle H1–H12 zu `0132`, über die Oberfläche gegen Staging — was die lesenden Prüfdateien nicht zeigen können. **Noch nicht durchgeführt:** `0132` ist auf Staging nicht angewendet, und auf Production werden keine Testzeilen angelegt |
+| `0133_preflight.sql` | Eingangszustand vor `0133`; Grundlage aus `0115`/`0132`, Trigger fehlt noch |
+| `0133_postflight.sql` | der Trigger steht, hat die Form BEFORE UPDATE FOR EACH ROW, hält drei Felder und kein viertes |
 | `0132_platform_export_receipts_proposal.md` | **Vorschlag, nicht umgesetzt**: die Eigenbelege im Plattformarchiv |
 
 ## Bereichserkennung: zeilenweise, niemals mit einem mehrzeiligen Regex

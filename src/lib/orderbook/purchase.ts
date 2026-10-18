@@ -349,31 +349,55 @@ export type CorrectableItem = {
   movementId: number | null;
   legacyConditionFlag: string | null;
   legacyBookedFlag: string | null;
+  /** The workbook line, NULL for a line entered here (0134). */
+  sourceRow: number | null;
 };
 
 /**
  * May this item be removed from its purchase?
  *
- * Four refusals, each for its own reason:
+ * Four refusals, each for its own reason — the same four the database has:
  *
  *   in stock        the movement names this unit; removing the row would
  *                   orphan it, and the foreign key says so too.
- *   imported parent an imported purchase owns imported lines. Nobody can add
- *                   one here, so nobody may take one away either.
  *   reconciled      the workbook's own state for a line already accounted
  *                   for in stock.
+ *   source row      the line number the item was imported from. The only
+ *                   marker the 109 items 0067 reopened still carry: the
+ *                   workbook had them as reconciled, they were never
+ *                   delivered, and `0067` set them back to `ordered`. The
+ *                   database has refused them since 0064 on this ground
+ *                   alone; the screen could not see it until 0134, so it
+ *                   offered a removal that always failed.
  *   legacy markers  what the old spreadsheet believed about this line.
  *                   Provenance, and no importer will regenerate it — this
  *                   project does not re-import.
+ *
+ * ---------------------------------------------------------------------------
+ * WAS HIER NICHT MEHR STEHT: DIE HERKUNFT DES EINKAUFS (ADR-0126)
+ *
+ * Bis 2026-10-17 war jede Zeile eines importierten Einkaufs unentfernbar,
+ * auch eine, die der Betreiber selbst gerade hinzugefügt hatte. Die Regel
+ * sollte die Arbeitsmappe schützen und traf dabei auch den eigenen Nachtrag:
+ * wer eine Figur versehentlich an einen historischen Einkauf hängte, bekam
+ * sie nie wieder weg.
+ *
+ * Die drei übrigen Regeln schützen die Arbeitsmappe vollständig, und das ist
+ * nicht geraten: der Import (`0053`, und `0088` für Nachträge) setzt jeder
+ * Zeile `state = 'reconciled_legacy'` UND eine `source_row` — zwei
+ * unabhängige Merkmale, von denen jedes allein hier schon ablehnt. Eine
+ * nachträglich von Hand angelegte Zeile trägt keines von beiden und darf
+ * deshalb auch wieder gehen. `0132` sagt in der Datenbank dasselbe.
+ * ---------------------------------------------------------------------------
  *
  * NOT a judgement about whether the figure is right. Correcting THAT stays
  * possible for every unbooked item including a historical one — see
  * `canRemapItem` and 0054.
  */
-export function canRemoveItem(purchaseSource: string, item: CorrectableItem): boolean {
+export function canRemoveItem(item: CorrectableItem): boolean {
   if (item.movementId !== null || item.state === "booked") return false;
-  if (isHistorical(purchaseSource)) return false;
   if (item.state === "reconciled_legacy") return false;
+  if (item.sourceRow !== null) return false;
   return item.legacyConditionFlag === null && item.legacyBookedFlag === null;
 }
 

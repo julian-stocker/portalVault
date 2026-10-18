@@ -124,9 +124,23 @@ heutigen Datei nachgerechnet wird (`supabase/checks/0130_amendment.md`).
 
 | | |
 |---|---|
-| **Staging** `qqxcpesbwfxzgytkdsac` | `0126`–`0131` angewendet, alle Postflights `9999 = 0`, Export-Download verifiziert. |
+| **Staging** `qqxcpesbwfxzgytkdsac` | `0126`–`0131` angewendet, alle Postflights `9999 = 0`, Export-Download verifiziert. **`0132` und `0133` fehlen hier** — sie liefen am 2026-10-18 versehentlich auf Production. Plan: `supabase/checks/0132_staging_plan.md`. |
 | **Production** `zmiwxswrpkmizvqsgype` | **angewendet am 2026-10-17** (Freigabe A). Alle sechs einzeln in `begin`/`commit`, zwölf Pre-/Postflights je `9999 = 0`, `0131_function_body_check` = `STAND_0131_ZEICHENGLEICH`. **Nach `0128` ist die Eigenbeleg-Ausstellung auf Datenbankebene gesperrt** (`operations/lock-receipt-issuance.sql`), bestätigt vor und nach `0129`–`0131`. Protokoll: `docs/history/2026-10-17-production-0126-0131.md`. |
-| **Anwendung** | lokal gebaut und grün, **nicht committet, nicht deployt**. In Production läuft weiter `c24926e`, signaturkompatibel. Die Oberfläche bietet seit dem 2026-10-17 **keinen Ausstellweg** mehr an (`RECEIPT_ISSUANCE_RELEASED = false`); der Abruf bestehender Belege bleibt erhalten. |
+| **Anwendung** | lokal gebaut und grün, **nicht committet, nicht deployt**. In Production läuft `c24926e` oder der am 2026-10-17 gepushte `81386e6` — welcher, hält dieses Repository nicht fest (**offener Punkt**); beide sind signaturkompatibel, auch mit `0132`/`0133`. Die Oberfläche bietet seit dem 2026-10-17 **keinen Ausstellweg** mehr an (`RECEIPT_ISSUANCE_RELEASED = false`); der Abruf bestehender Belege bleibt erhalten. |
+
+**`0132` und `0133` stehen seit dem 2026-10-18 auf Production — unbeabsichtigt.**
+Freigegeben war Staging; ausgeführt wurden sie, samt Pre- und Postflight, im
+Production-Projekt. Der Betreiber hat es am selben Tag festgestellt und
+gemeldet. **Nichts wird zurückgenommen:** beide sind inhaltlich für Production
+bestimmt, es ist keine Datenzeile entstanden, und die veröffentlichte
+Oberfläche ist verträglich (sie bietet von `0132` nichts an). Der Trigger aus
+`0133` kann keinen regulären Ablauf blockieren — von den sieben Funktionen, die
+`purchases` schreiben, fasst genau eine die bezahlte Summe an, und die trägt
+den Riegel seit `0132` selbst. Was fehlt, ist der Schreibnachweis H1–H12; er
+gehört auf Staging und ist dort erst nach `0132` möglich. Hergang, Bewertung
+und Folgen: `docs/history/2026-10-18-production-0132-0133.md`. **Was noch nicht
+geprüft ist, steht vollständig in `supabase/checks/open_verifications.md`** — der
+Zustand beider Datenbanken ist bis dahin gemeldet, nicht gemessen.
 
 **Gemessen nach dem Rollout.** Zwei Business-Exporte derselben Datenbank, 23
 Minuten auseinander — einer vor, einer nach den Migrationen: alle **25**

@@ -35,7 +35,7 @@ const open = (over: Partial<PurchaseItem> = {}): PurchaseItem => ({
   id: 1, position: 1, skyId: "SKY-0001", name: "Spyro", rawName: null,
   seriesCode: null, seriesLabel: null, condition: "loose", state: "ordered",
   marketPrice: 12, priceIsFrozen: false, movementId: null,
-  legacyConditionFlag: null, legacyBookedFlag: null, ...over,
+  legacyConditionFlag: null, legacyBookedFlag: null, sourceRow: null, ...over,
 });
 const neu = (over: Partial<NewFigure> = {}): NewFigure => ({
   tempId: "t1", skyId: "SKY-0002", rawName: null, label: "Gill Grunt",
@@ -109,7 +109,7 @@ describe("die Liste zeigt den Stand von nachher, ohne etwas zu verstecken", () =
      * Behauptung über einen Zustand, den der Server nicht kennt — und nach
      * einem Abbrechen wäre sie unerklärlich wieder da.
      */
-    const rows = stageRows(items, toggleRemove(emptyEdit, 1), "manual");
+    const rows = stageRows(items, toggleRemove(emptyEdit, 1));
     expect(rows).toHaveLength(2);
     expect(rows[0]).toMatchObject({ kind: "existing", removed: true });
     expect(rows[1]).toMatchObject({ kind: "existing", removed: false });
@@ -117,7 +117,7 @@ describe("die Liste zeigt den Stand von nachher, ohne etwas zu verstecken", () =
 
   it("neue Figuren hängen unten, in der Reihenfolge der Auswahl", () => {
     const pending = addFigure(addFigure(emptyEdit, neu()), neu({ tempId: "t2" }));
-    const rows = stageRows(items, pending, "manual");
+    const rows = stageRows(items, pending);
     expect(rows.map((r) => r.kind)).toEqual(["existing", "existing", "new", "new"]);
     expect(rows[2]).toMatchObject({ kind: "new", figure: { tempId: "t1" } });
   });
@@ -140,8 +140,13 @@ describe("der Papierkorb erscheint nur, wo er etwas tun kann", () => {
    * immer abgelehnt würde, ist schlimmer als eine fehlende — angeboten wird
    * sie deshalb nicht, und der Grund steht als Text daneben.
    */
-  const darf = (item: Partial<PurchaseItem>, source = "manual") => {
-    const rows = stageRows([open(item)], emptyEdit, source);
+  /*
+   * Die Herkunft des EINKAUFS steht hier nicht mehr: seit ADR-0126
+   * entscheidet die Zeile. Was die Arbeitsmappe schützt, sind ihre eigenen
+   * Merkmale — `reconciled_legacy` und die beiden Legacy-Flaggen.
+   */
+  const darf = (item: Partial<PurchaseItem>) => {
+    const rows = stageRows([open(item)], emptyEdit);
     return rows[0].kind === "existing" ? rows[0].mayRemove : null;
   };
 
@@ -161,8 +166,18 @@ describe("der Papierkorb erscheint nur, wo er etwas tun kann", () => {
     expect(darf({ state: "booked" })).toBe(false);
   });
 
-  it("eine Arbeitsmappenzeile nicht", () => {
-    expect(darf({}, "excel_order_2026")).toBe(false);
+  it("eine Arbeitsmappenzeile nicht — erkannt an ihrem Zustand", () => {
+    /* ADR-0126: nicht mehr am Einkauf, sondern an der Zeile. Der Import gibt
+       jeder Zeile `reconciled_legacy` (0053, 0088). */
+    expect(darf({ state: "reconciled_legacy" })).toBe(false);
+    expect(darf({ legacyBookedFlag: "x" })).toBe(false);
+    expect(darf({ legacyConditionFlag: "lose" })).toBe(false);
+  });
+
+  it("eine NACHGETRAGENE Zeile an einem importierten Einkauf schon", () => {
+    /* Sie trägt keines der Arbeitsmappen-Merkmale — und genau deshalb darf
+       der Betreiber einen Fehlgriff wieder zurücknehmen. */
+    expect(darf({ state: "ordered" })).toBe(true);
   });
 
   it("und die Erklärungen dafür stehen in de.ts", () => {

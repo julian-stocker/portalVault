@@ -130,13 +130,43 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Tabelle ist lesbar und vollständig ab 0122", () => {
+  it("die Staging-Tabelle führt die zehn angewendeten", () => {
     expect(zeilen.length).toBe(10);
-    const erfasst = new Set(zeilen.map((z) => z.datei));
+  });
+
+  it("und die Akte ist ab 0122 lückenlos — angewendet ODER ausdrücklich nicht", () => {
+    /*
+     * `0134` liegt vor und ist nirgends ausgeführt. Eine Akte, die nur
+     * Angewendetes kennt, würde eine solche Datei stillschweigend übergehen —
+     * und genau das Übergehen war der Anlass für diese Akte. Deshalb drei
+     * Quellen: BEIDE Umgebungstabellen und die Liste „Nicht angewendet".
+     *
+     * Beide, nicht nur Staging: `0132` und `0133` wurden am 2026-10-18
+     * versehentlich auf Production ausgeführt und stehen auf Staging noch aus.
+     * Eine Vollständigkeitsprüfung, die Staging als die weiter fortgeschrittene
+     * Umgebung voraussetzt, hätte genau diesen Fall als Lücke gemeldet — und
+     * die Akte ist dafür da, ihn zu FÜHREN.
+     */
+    const erfasst = new Set([
+      ...zeilen.map((z) => z.datei),
+      ...production.map((z) => z.datei),
+      ...[...text.matchAll(/^\| `(\d{4}_[a-z0-9_]+\.sql)` \| lokal vorbereitet/gm)]
+        .map((m) => m[1]),
+    ]);
     const abGrenze = readdirSync("supabase/migrations")
       .filter((n) => n.endsWith(".sql") && n >= "0122").sort();
-    expect(abGrenze.length).toBe(10);
-    for (const n of abGrenze) expect(erfasst, n).toContain(n);
+    for (const n of abGrenze) expect(erfasst, `${n} fehlt in APPLIED.md`).toContain(n);
+    expect(erfasst.size).toBe(abGrenze.length);
+  });
+
+  it("die nicht angewendeten stehen in KEINER Umgebungstabelle", () => {
+    const offen = [...text.matchAll(/^\| `(\d{4}_[a-z0-9_]+\.sql)` \| lokal vorbereitet/gm)]
+      .map((m) => m[1]);
+    expect(offen).toContain("0134_purchase_item_source_row_visible.sql");
+    for (const n of offen) {
+      expect(zeilen.map((z) => z.datei), n).not.toContain(n);
+      expect(production.map((z) => z.datei), n).not.toContain(n);
+    }
   });
 
   it("jede Datei existiert und jede Prüfsumme ist eine", () => {
@@ -184,7 +214,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(sha(datei.replace(NACHTRAG, ""))).toBe(z.digest);
   });
 
-  it("die Production-Tabelle führt die sechs Migrationen dieses Rollouts", () => {
+  it("die Production-Tabelle führt die sechs des Rollouts und die zwei vom 2026-10-18", () => {
     expect(production.map((z) => z.datei)).toEqual([
       "0126_purchase_item_edit.sql",
       "0127_purchase_item_swap.sql",
@@ -192,7 +222,23 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
       "0129_business_backup_receipts.sql",
       "0130_business_backup_fields.sql",
       "0131_business_backup_seller_fields.sql",
+      "0132_purchase_item_remove_by_line.sql",
+      "0133_paid_total_immutable.sql",
     ]);
+  });
+
+  it("und die Akte sagt, dass die beiden letzten unbeabsichtigt dort liefen", () => {
+    /* Ein Vorfall, der nur im Chatverlauf steht, ist nicht dokumentiert. */
+    expect(text).toContain("unbeabsichtigt");
+    expect(text).toContain("Auf Staging sind");
+    expect(text).toContain("docs/history/2026-10-18-production-0132-0133.md");
+  });
+
+  it("die beiden stehen NICHT in der Staging-Tabelle", () => {
+    for (const n of ["0132_purchase_item_remove_by_line.sql",
+                     "0133_paid_total_immutable.sql"]) {
+      expect(zeilen.map((z) => z.datei), n).not.toContain(n);
+    }
   });
 
   it("und jede davon ist bitgenau die Datei im Repository", () => {

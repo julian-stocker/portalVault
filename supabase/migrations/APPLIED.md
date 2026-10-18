@@ -35,6 +35,21 @@ Am **2026-10-17** wurden `0126`–`0131` auf Production
 Reihenfolge, jede mit Pre- und Postflight. Sämtliche Prüfungen `9999 = 0`,
 `0131_function_body_check` = `STAND_0131_ZEICHENGLEICH`.
 
+Am **2026-10-18** kamen `0132` und `0133` hinzu — **unbeabsichtigt**. Sie waren
+für Staging freigegeben und wurden im Production-Projekt ausgeführt; der
+Betreiber hat das am selben Tag festgestellt und gemeldet. **Auf Staging sind
+beide weiterhin nicht angewendet.** Sämtliche Prüfzahlen, die zuvor als
+Staging-Ergebnisse geführt wurden, sind Production-Ergebnisse. Hergang,
+Bewertung und Folgen: `docs/history/2026-10-18-production-0132-0133.md`.
+
+**Der Zustand beider Datenbanken ist bis auf Weiteres GEMELDET, nicht
+GEMESSEN.** Diese Akte hält fest, was der Betreiber ausgeführt und mit
+Postflight-Ergebnissen bestätigt hat; aus diesem Repository heraus ist keine
+Datenbank angefasst worden. Was ein Lauf noch belegen muss, steht vollständig
+in `supabase/checks/open_verifications.md` — Production P1–P5, Staging S1–S6.
+Den Zustand selbst liest `supabase/checks/state_audit_readonly.sql` aus dem
+Katalog statt aus dieser Datei.
+
 | Migration | SHA-256 der ausgeführten Fassung | Datei heute |
 |---|---|---|
 | `0126_purchase_item_edit.sql` | `536239adcc3b97d5d7a1438c7615f1b6060d2c42b33ba9544b31c5c0afd8248d` | gleich |
@@ -43,6 +58,8 @@ Reihenfolge, jede mit Pre- und Postflight. Sämtliche Prüfungen `9999 = 0`,
 | `0129_business_backup_receipts.sql` | `d4b0f17b24bca90ac0844b7e35b10e64e55da04ceef4e97a0daf89703b2c16f8` | gleich |
 | `0130_business_backup_fields.sql` | `bad193a334b5eb727dac49cccb5ae88340a0693acad2479364c6f867c6269e77` | gleich |
 | `0131_business_backup_seller_fields.sql` | `644cc0bbd15073426f54af6fa542281c95b8e4d4dc5abb8ce2d63a3b4c35f218` | gleich |
+| `0132_purchase_item_remove_by_line.sql` | `382aa64749cb035e9a6402fe36fc16f9e1ae663228c7806cc34e29331b7ec6b3` | gleich |
+| `0133_paid_total_immutable.sql` | `65832d746ce26d3fe5a7c1cb7feaec3a7793917b31d965c7c911215b347e0ef4` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -57,6 +74,40 @@ das in Prüfung 223 (1 statt 2). Rücknahme nur mit Freigabe B über
 `unlock-receipt-issuance.sql`.
 
 Protokoll: `docs/history/2026-10-17-production-0126-0131.md`.
+
+## Nicht angewendet
+
+Diese Migrationen liegen vor und sind **nirgends** ausgeführt — weder auf
+Staging noch auf Production. Sie stehen hier, damit die Akte lückenlos bleibt:
+jede Migration ab `0122` ist entweder oben mit ihrer Prüfsumme erfasst oder in
+dieser Liste.
+
+| Migration | Stand |
+|---|---|
+| `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `ad6812ac1d977464d3626308161a2a0ab4a7745a63dff335e74558395c79eeb2` |
+
+**`0132` und `0133` stehen seit dem 2026-10-18 auf Production** und damit oben
+in der Production-Tabelle. **Auf Staging sind sie nicht angewendet** — die
+Staging-Tabelle endet bei `0131`. Das ist die umgekehrte Reihenfolge der
+gewollten, und sie wird nicht nachträglich geradegezogen, indem auf Production
+etwas zurückgenommen wird; nachgezogen wird Staging. Plan:
+`supabase/checks/0132_staging_plan.md`.
+
+## Zwei eingefrorene Kopfzeilen, die nicht mehr stimmen
+
+`0132` und `0133` sind angewendet und werden deshalb **nicht mehr geändert** —
+auch nicht ihr Kommentarkopf. Beide behaupten dort etwas, das seit dem
+2026-10-18 falsch ist:
+
+| Datei | Zeile im Kopf | tatsächlich |
+|---|---|---|
+| `0132_purchase_item_remove_by_line.sql` | „NUR LOKAL VORBEREITET. Nicht auf Staging und nicht auf Production ausgefuehrt." | **auf Production angewendet**, auf Staging nicht |
+| `0133_paid_total_immutable.sql` | „NICHT FREIGEGEBEN. Vorbereitet, nirgends angewendet." | **auf Production angewendet**, auf Staging nicht |
+
+Eine Korrektur im Dateikopf wäre genau der Fehler, den diese Akte verhindern
+soll: die Prüfsumme der ausgeführten Fassung würde nicht mehr passen, und
+niemand könnte später beweisen, was gelaufen ist. **Der Stand steht hier, in
+der Tabelle oben, und im Protokoll** — nicht in der Datei.
 
 ## Der eine abweichende Fall
 

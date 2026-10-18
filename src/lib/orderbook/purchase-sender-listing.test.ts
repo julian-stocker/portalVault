@@ -183,7 +183,17 @@ describe("seller_update_purchase lernt neun Felder", () => {
     for (const column of COLUMNS) {
       expect(signature, column).toContain(`p_${column}`);
     }
-    expect(fn.file).toBe(FILE);
+    /*
+     * SEIT 0132 IST DIE JÜNGSTE FASSUNG NICHT MEHR DIE AUS 0121.
+     *
+     * `0132` ersetzt dieselbe Signatur noch einmal und setzt einen Riegel auf
+     * `total_cost` für importierte Einkäufe (ADR-0126) — die neun Felder
+     * aus `0121` bleiben dabei unverändert, und genau das prüft die Schleife
+     * darüber gegen die jüngste Fassung. Dass `0121` ihre Signatur eingeführt
+     * hat, hält die Zusicherung über `SQL` in diesem Block fest.
+     */
+    expect(fn.file).toBe("0132_purchase_item_remove_by_line.sql");
+    expect(SQL).toContain("create or replace function public.seller_update_purchase(");
   });
 
   it("jedes Feld leert sich einzeln — Leerstring zu NULL", () => {

@@ -118,3 +118,36 @@ die Entscheidung „Spalten bleiben" eine Entscheidung ist.
   `parse_plpgsql_json`) und dem CTE-Baumlauf: alle sechs fehlerfrei.
 * Keine der sechs ist **ausgeführt** — auch nicht auf Staging. Eine Rücknahme,
   die niemand laufen ließ, ist eine Absicht und kein Nachweis.
+
+## `R0134` — `source_row` verschwindet wieder aus der Positionsliste
+
+`R0134_purchase_item_source_row_visible.sql` stellt `seller_purchase(bigint)`
+auf den Stand aus `0119` zurück. Der Körper darunter ist Zeichen für Zeichen
+der aus `0119`; geprüft wird das in
+`src/lib/orderbook/purchase-historical-edit.test.ts`.
+
+**Folge:** `canRemoveItem()` sieht `source_row` nicht mehr und bietet
+„Position entfernen" wieder für die 109 wiedereröffneten Importzeilen an
+(`0067`). Die Datenbank lehnt sie weiter ab — die Aktion scheitert also mit
+einer Meldung statt zu verschwinden. Kein Datenverlust, nur die alte
+Unstimmigkeit. Deshalb wird diese Datei nur zusammen mit einer Rücknahme des
+Oberflächenstands angewendet.
+
+## `R0132` — und was eine Rücknahme hier bedeutet
+
+`R0132_back_to_0064_and_0121.sql` stellt **beide** Funktionen aus `0132`
+zurück: `seller_remove_purchase_item` auf die Fassung aus `0064`,
+`seller_update_purchase` auf die aus `0121`. Beide Rümpfe sind unverändert aus
+den Quellen übernommen — nachgeprüft, nicht abgeschrieben.
+
+**Zwei Folgen, die man wollen muss, bevor man sie ausführt:**
+
+1. Eine **selbst nachgetragene** Zeile an einem historischen Einkauf ist
+   danach nicht mehr entfernbar (`0064` lehnt wieder über den Eltern-Einkauf
+   ab).
+2. Die **bezahlte Summe** eines importierten Einkaufs ist danach wieder
+   änderbar — der Riegel aus `0132` ist weg.
+
+**Was sie nicht tut:** Daten anfassen. Zeilen, die unter `0132` hinzugefügt
+oder entfernt wurden, bleiben wie sie sind. Eine Rücknahme der Funktion ist
+keine Rücknahme der Arbeit.

@@ -47,7 +47,7 @@ import {
   type ReceiptState, type ReceiptVersion,
 } from "@/lib/business/receipt-actions";
 import { RECEIPT_ISSUANCE_RELEASED } from "@/lib/business/receipt-release";
-import { canBook, canRemapItem } from "@/lib/orderbook/purchase";
+import { canBook, canRemapItem, isHistorical } from "@/lib/orderbook/purchase";
 import { dispatchItemAction } from "@/lib/orderbook/dispatch-lock";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
@@ -639,6 +639,14 @@ export function PurchaseDetails({
   const hasRecord = record !== null
     && Object.values(record).some((value) => value !== null);
   const split = purchase.itemsCost !== null;
+  /*
+   * DIE ZAHLUNG EINES IMPORTIERTEN EINKAUFS IST ABGESCHLOSSEN (ADR-0126).
+   *
+   * Nicht der Einkauf ist gesperrt — nur die bezahlte Summe. Alles andere
+   * wird hier bearbeitet wie bei einem neuen Einkauf. `0132` sagt in der
+   * Datenbank dasselbe; dies hier erspart die Ablehnung.
+   */
+  const zahlungAbgeschlossen = isHistorical(purchase.source);
   const endings = purchase.damagedCount + purchase.missingCount;
 
   /*
@@ -735,6 +743,20 @@ export function PurchaseDetails({
       return;
     }
     /*
+     * DIE AUFTEILUNG MUSS DIE BEZAHLTE SUMME ERGEBEN (ADR-0126).
+     *
+     * Bei einem importierten Einkauf bleibt `total_cost` stehen. Eine
+     * Aufteilung, die etwas anderes ergibt, würde am CHECK
+     * `purchases_cost_split_adds_up` scheitern — mit einer Meldung über
+     * einen CHECK statt über die Sache. Deshalb hier, mit beiden Zahlen.
+     */
+    if (zahlungAbgeschlossen && hasSplit
+        && Math.abs(typed.total - purchase.totalCost) > 0.004) {
+      setError(modal.splitMustMatchPaid(
+        formatPrice(typed.total), formatPrice(purchase.totalCost)));
+      return;
+    }
+    /*
      * DIE RUECKFRAGE BEI VORHANDENEM BELEG (0126).
      *
      * Der Fingerabdruck aus `0122` hasht die Positionsliste. Eine Figur mehr
@@ -775,7 +797,15 @@ export function PurchaseDetails({
     const saved = await run(() => savePurchaseEdit(
       purchase.id,
       wantedDate,
-      hasSplit ? typed.total : undefined,
+      /*
+       * BEI EINEM IMPORTIERTEN EINKAUF WIRD DIE SUMME NICHT MITGESCHICKT.
+       *
+       * Sonst zöge jede Änderung der Aufteilung die bezahlte Summe mit —
+       * `typed.total` ist die Summe der getippten Teile. Genau das ist bei
+       * einem abgeschlossenen Einkauf verboten (`0132`), und `undefined`
+       * heisst für `seller_update_purchase` „unverändert lassen".
+       */
+      hasSplit && !zahlungAbgeschlossen ? typed.total : undefined,
       draft.note,
       {
         platform: draft.platform.trim() === "" ? undefined : draft.platform.trim(),
@@ -1000,13 +1030,25 @@ export function PurchaseDetails({
         <h2 id={headingId} className="text-base font-semibold">{modal.title}</h2>
         <div className="flex items-center gap-2">
           {/*
-            Eine Arbeitsmappenzeile wird nicht bearbeitet. `seller_update_purchase`
-            würde es annehmen, aber ihre Zahlen sind die der Excel-Historie —
-            ein Knopf, der sie überschreibbar aussehen lässt, ist eine
-            Einladung. Dieselbe Zurückhaltung wie bei `isHistorical` auf der
-            Detailseite.
+            AUCH EIN HISTORISCHER EINKAUF WIRD BEARBEITET (ADR-0126).
+
+            Hier stand bis 2026-10-17 ein Tor: für `excel_order_2026` gab es
+            keinen Bearbeiten-Knopf, mit der Begründung, die Zahlen seien die
+            der Excel-Historie und ein Knopf wäre eine Einladung. Die
+            Erfahrung war die umgekehrte: in der Arbeitsmappe FEHLEN Figuren,
+            Absender und Inserate, und ohne Knopf gab es keinen Weg, das
+            nachzutragen — die Historie blieb lückenhaft, statt genauer zu
+            werden.
+
+            Was die Zahlen schützt, sind nicht fehlende Knöpfe, sondern die
+            Regeln darunter: eine importierte Zeile lässt sich nicht
+            entfernen (`canRemoveItem`, `0132`), eine eingebuchte nicht
+            tauschen (`canRemapItem`), `reconciled_legacy` wird nie erneut
+            eingebucht (`0053`), und gespeichert wird in EINER Transaktion
+            (`seller_save_purchase_edit`, `0126`/`0127`). Der Beleg bleibt
+            unberührt; ausgestellt wird ohnehin nichts (Freigabe B offen).
           */}
-          {purchase.source === "excel_order_2026" ? null : editing ? (
+          {editing ? (
             /*
              * IM BEARBEITEN: SPEICHERN UND ABBRECHEN, OBEN RECHTS.
              *
@@ -1205,7 +1247,9 @@ export function PurchaseDetails({
                 also kann der CHECK in der Datenbank nichts ablehnen, was
                 hier nicht schon zu sehen war.
               */}
-              <p className="mb-1 text-xs text-muted">{modal.splitHint}</p>
+              <p className="mb-1 text-xs text-muted">
+                {zahlungAbgeschlossen ? modal.paidFixedHint : modal.splitHint}
+              </p>
               <Field label={modal.itemsCost}>
                 <input type="text" inputMode="decimal" value={draft.items} disabled={saving}
                        placeholder="0,00"
@@ -1224,7 +1268,25 @@ export function PurchaseDetails({
                        onChange={(e) => setDraft({ ...draft, protection: e.target.value })}
                        className={`${INPUT} w-28 text-right`} />
               </Field>
-              {hasSplit ? (
+              {/*
+                BEI EINEM IMPORTIERTEN EINKAUF IST DIE BEZAHLTE SUMME DIE
+                AUTORITÄT, nicht die Summe der getippten Teile. Sie steht
+                deshalb als eigene Zeile da — sichtbar, aber ohne Eingabefeld —
+                und die getippte Summe nur dann, wenn sie abweicht: dann ist
+                sie ein Hinweis auf einen Tippfehler, nicht ein neuer Betrag.
+              */}
+              {zahlungAbgeschlossen ? (
+                <>
+                  <Line label={modal.paidFixedLabel}
+                        value={formatPrice(purchase.totalCost)} strong />
+                  {hasSplit && Math.abs(typed.total - purchase.totalCost) > 0.004 ? (
+                    <p role="alert" className="mt-1 text-xs text-danger">
+                      {modal.splitMustMatchPaid(
+                        formatPrice(typed.total), formatPrice(purchase.totalCost))}
+                    </p>
+                  ) : null}
+                </>
+              ) : hasSplit ? (
                 <Line label={modal.totalCost} value={formatPrice(typed.total)} strong />
               ) : (
                 <p className="mt-1 text-xs text-muted">{modal.noSplit}</p>
@@ -1456,7 +1518,7 @@ export function PurchaseDetails({
               */}
               {editing ? (
                 <PurchaseItemEditList
-                  rows={stageRows(items, pending, purchase.source)}
+                  rows={stageRows(items, pending)}
                   busy={saving}
                   catalog={figures}
                   swapping={swapping}

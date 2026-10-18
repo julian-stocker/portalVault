@@ -11068,3 +11068,166 @@ die Migration abgebrochen:
 
 `src/lib/business/fingerprint-rights.test.ts` hält alle drei über **jede**
 Migrationsdatei fest.
+
+## ADR-0126 · Historische Einkäufe werden bearbeitet, und die Zeile entscheidet
+
+**Status:** akzeptiert · **Migration:** `0132_purchase_item_remove_by_line.sql`
+(**am 2026-10-18 auf Production angewendet** — unbeabsichtigt, vorgesehen war
+Staging; dort ist sie noch nicht angewendet.
+`docs/history/2026-10-18-production-0132-0133.md`)
+
+### Kontext
+
+Ein aus der Arbeitsmappe importierter Einkauf (`purchases.source =
+'excel_order_2026'`) war im Dialog „Einkaufsdetails" nicht bearbeitbar. Der
+Grund stand als Kommentar im Code: *„Eine Arbeitsmappenzeile wird nicht
+bearbeitet. `seller_update_purchase` würde es annehmen, aber ihre Zahlen sind
+die der Excel-Historie — ein Knopf, der sie überschreibbar aussehen lässt, ist
+eine Einladung."* Dieselbe Zurückhaltung sperrte auf der Detailseite das
+Hinzufügen von Figuren.
+
+Die Erfahrung im Betrieb war die umgekehrte. In der Arbeitsmappe **fehlen**
+Figuren, Absenderdaten und Inseratsangaben; ohne Bearbeitungsweg blieb die
+Historie lückenhaft, statt genauer zu werden. Der Schutz verhinderte keine
+Verfälschung, sondern eine Berichtigung.
+
+**Bemerkenswert dabei:** die Datenbank hat die Bearbeitung nie verboten.
+`seller_update_purchase` (`0121`), `seller_add_purchase_item` (`0053`) und
+`seller_set_purchase_item_sky` (`0054`) prüfen die Herkunft des Einkaufs
+nicht — `0054` existiert ausdrücklich dafür, eine falsch zugeordnete
+Arbeitsmappenzeile zu korrigieren. Das Tor stand allein in der Oberfläche.
+
+### Entscheidung
+
+1. **Der Bearbeitungsmodus gilt für jeden Einkauf**, auch für einen
+   importierten: Felder, Absender, Inserat, Kosten, Positionen hinzufügen und
+   Figuren tauschen. Gespeichert wird weiterhin in **einer** Transaktion über
+   `seller_save_purchase_edit` (`0126`/`0127`).
+2. **Das Entfernen entscheidet die ZEILE, nicht ihr Elternteil.** Bisher
+   lehnte `seller_remove_purchase_item` auch ab, weil der Einkauf importiert
+   war — und traf damit die selbst nachgetragene Zeile mit: ein Fehlgriff war
+   dauerhaft. `0132` streicht diese eine Bedingung. Es bleiben vier, jede für
+   sich hinreichend: eine Lagerbewegung, der Zustand `reconciled_legacy`, eine
+   `source_row`, eine der beiden Legacy-Flaggen.
+3. **Die Arbeitsmappe bleibt vollständig geschützt.** Das ist nicht gehofft:
+   der Import (`0053`, und `0088` für Nachträge) setzt **jeder** importierten
+   Zeile `reconciled_legacy` **und** eine `source_row`. Zwei unabhängige
+   Merkmale, von denen jedes allein ablehnt. Die Vorbedingung von `0132`
+   bricht ab, falls sich doch eine Zeile ohne jedes Merkmal an einem
+   importierten Einkauf findet.
+4. **Was weiterhin verboten bleibt:** eine eingebuchte Zeile tauschen oder
+   entfernen (die Bewegung benennt das Stück im Regal), eine
+   `reconciled_legacy`-Zeile erneut einbuchen oder ihren Zustand ändern
+   (`0053`), eine importierte Zeile löschen. Jede Ablehnung hat einen
+   deutschen Satz, der sagt, was zu tun ist.
+
+### Konsequenzen
+
+**Der Bestand kann durch eine Bearbeitung nicht inkonsistent werden**, und das
+ist eine Eigenschaft der Wege, nicht eine Zusicherung: Feldänderung,
+Hinzufügen, Tauschen und Entfernen fassen `inventory_movements` **nicht** an.
+Bestand ändert sich ausschließlich über das Einbuchen, und dieser Weg ist
+unverändert — eine nachgetragene Zeile landet unbebucht und wird nur dann
+Bestand, wenn der Betreiber sie ausdrücklich einbucht.
+
+**Die eine Entscheidung, die der Betreiber treffen muss**, bleibt bei ihm: war
+die nachgetragene Figur im Altbestand schon enthalten, darf sie **nicht**
+eingebucht werden, sonst zählt sie doppelt. Die Software entscheidet das
+nicht und soll es nicht; `reconciled_legacy` lässt sich über
+`seller_set_purchase_item_state` ohnehin nicht setzen (`0053`).
+
+**Belege bleiben unberührt.** Ein bestehender Eigenbeleg ist unveränderlich;
+weicht der Einkauf danach ab, meldet der Dialog das über den Fingerabdruck
+(`0122`), und eine Korrektur wäre ein neuer Beleg — ausgestellt wird derzeit
+nichts, Freigabe B ist nicht erteilt und die Ausstellung ist in der Datenbank
+gesperrt.
+
+**Was aufgegeben wird:** die Annahme, ein fehlender Knopf sei ein Schutz. Was
+schützt, sind die vier Zeilenregeln, die Transaktionsklammer und die
+Unveränderlichkeit der Belege — alles drei prüfbar, anders als eine
+Zurückhaltung in der Oberfläche.
+
+## ADR-0127 · Der Eröffnungsbestand ist kein Bilanzfehler
+
+**Status:** akzeptiert · **Betrifft:** `supabase/checks/0132_preflight.sql`,
+`0132_postflight.sql`, `supabase/checks/dr/baseline-business.sql`,
+`docs/DATABASE.md`; offen: `tools/verify-rls.mts` Abschnitt 9.9
+
+### Kontext
+
+Der Lauf von `0132` am 2026-10-18 meldete zwei blockierende Abweichungen — vor
+und nach der Migration dieselben, also von ihr unabhängig. Er fand auf
+**Production** statt; vorgesehen war Staging, und ich habe die Ergebnisse
+zunächst irrtümlich als Staging-Ergebnisse geführt
+(`docs/history/2026-10-18-production-0132-0133.md`). An den beiden Ursachen
+ändert das nichts — der Cutover und `0067` liefen in beiden Umgebungen:
+
+* **109 importierte Einkaufspositionen ohne `reconciled_legacy`.** Ursache ist
+  `0067_reopen_undelivered_legacy_items.sql`: `0053` hatte jede Zeile von
+  `Order 2026` als abgerechnet importiert, was für die 2 001 ins Lager
+  gehakten Zeilen stimmt und für fünf Pakete falsch war, die der Betreiber
+  Ende August bestellt und nie erhalten hat. `0067` hat genau diese 109
+  Positionen auf `ordered` zurückgesetzt — mit
+  `v_expected_items constant integer := 109`, also abgezählt.
+* **Die Mehrzahl der Lagerpositionen mit `quantity <> SUM(delta)`.** Ursache
+  ist der Pre-Go-Live-Reset vom 2026-09-21: er hat `inventory_movements`
+  vollständig geleert und `shop_inventory.quantity` ausdrücklich stehen
+  gelassen — „die losen Stück sind ab jetzt die operative Ausgangsbasis".
+  Strukturzahlen wie die Anzahl betroffener Positionen stehen auch an anderer
+  Stelle im Repository (`PROJECT_STATUS.md`, `docs/DATABASE.md`); was draußen
+  bleibt, sind die Bestände je Figur — die stehen nur im Ergebnisblatt des
+  Laufs (CLAUDE.md, Regel 3).
+
+Beide Zahlen waren richtig gemessen. Falsch waren die Erwartungen, die ich in
+die Prüfdateien geschrieben hatte.
+
+### Entscheidung
+
+**Der Zustand einer Importzeile ist kein Herkunftsmerkmal.** Eine importierte
+Zeile läuft nach ihrer Lieferung regulär über `arrived` nach `booked`; wer
+`reconciled_legacy` als Beweis der Herkunft nimmt, verwechselt einen
+Lebenslauf mit einer Identität. Was die Herkunft trägt, ist die `source_row`
+(und, wo die Arbeitsmappe etwas dazu sagte, die beiden Legacy-Flaggen). Genau
+darauf prüfen `seller_remove_purchase_item` seit `0064` und die Prüfungen 201
+und 203 — beide waren in jedem Lauf grün. Prüfung 202 wird zur Messung ohne
+Sollwert: sie zeigt die Zustände, behauptet nichts.
+
+**Die Differenz `quantity - SUM(delta)` ist der Eröffnungsbestand, nicht ein
+Fehler.** Sie ist seit dem Cutover eine feste Eigenschaft jeder Position, die
+damals Bestand hatte. Prüfbar ist stattdessen:
+
+1. **Die Richtung.** `drift >= 0` überall. `quantity` bewegt sich seit dem
+   Cutover ausschließlich über `apply_inventory_movement`, und das schreibt
+   Menge und Journalzeile in einer Transaktion. Negativ kann die Differenz
+   also nur werden, wenn genau das umgangen wurde.
+2. **Die Konstanz.** Eine Migration, die den Bestand nicht anfasst, hinterlässt
+   denselben Eröffnungsbestand. Deshalb führen Pre- und Postflight ihn als
+   Zahl mit (Zeile 307) — der Vergleich der beiden Läufe ist der Nachweis.
+
+**Keine Daten wurden angefasst.** Weder eine historische Position noch ein
+Lagerbestand noch ein Trigger. Eine „korrigierende" Bewegung, die den Bestand
+dem leeren Journal anpasst, wäre eine Erfindung: die 701 Einheiten liegen im
+Regal, und ADR-0103 hält ohnehin fest, dass ein Bestandsfehler mit einer
+Korrekturbewegung beantwortet wird und nicht mit einem leeren Ledger.
+
+### Konsequenzen
+
+* Die beiden `0132`-Prüfdateien im Repository sind **nicht** die Fassung, die
+  gelaufen ist. Ihr Kopf sagt das, und `APPLIED.md` sagt es auch.
+* Beide tragen seit der Korrektur einen **Umgebungsstempel** als erste Zeile
+  ohne Sollwert: die zwei synthetischen Testfiguren der Staging-Proben. 2
+  bedeutet Staging, 0 bedeutet Production. Supabase führt die Projektkennung
+  nicht in der Datenbank, und ein Ergebnisblatt, das seine Herkunft nicht
+  nennt, lässt sich verwechseln — genau das ist am 2026-10-18 passiert.
+* `tools/verify-rls.mts` (9.9) prüft weiter auf `drift <> 0` und schlägt damit
+  auf beiden Umgebungen fehl. Die Prüfung trägt dieselbe veraltete Annahme und
+  ist auf Richtung und Konstanz umzustellen — **noch offen**, bewusst nicht
+  zusammen mit dieser Korrektur erledigt, weil `verify:rls` auf Staging
+  schreibt und ein eigener Lauf dazugehört.
+* Der Schutz der Arbeitsmappe ist von der Korrektur unberührt: die vier
+  Bedingungen in `seller_remove_purchase_item` stehen unverändert, und die 109
+  wiedereröffneten Zeilen behalten ihre `source_row`.
+* Die Oberfläche kannte nur drei der vier Bedingungen und bot für diese 109
+  Zeilen ein Entfernen an, das die Datenbank immer ablehnte.
+  `0134_purchase_item_source_row_visible.sql` gibt `source_row` mit aus und
+  schließt die Lücke.

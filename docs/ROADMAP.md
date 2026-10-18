@@ -465,7 +465,25 @@ Stripe Connect, keine Provision, kein Payout, kein privater Verkäufer und keine
 Fan-out-Logik. Was stattdessen entsteht, sind zwei Namen und eine Identitätstabelle mit genau
 einer Zeile — weil beides später unmöglich oder unverhältnismäßig teuer wäre.
 
-**Diese Richtung wird erst dann erneut bewertet, wenn PortalVault nachweislich echte Nutzer
+**Zielbild des Betreibers, festgehalten am 2026-10-19.** SkyIsles **soll langfristig ein
+Marktplatz für private und gewerbliche Verkäufer werden.** Das ist ab jetzt die dokumentierte
+Richtung — und **kein Implementierungsauftrag**: ADR-0021 und die Single-Seller-Regel aus
+ADR-0064 gelten unverändert weiter, und bis zu einer ausdrücklichen neuen Entscheidung wird an
+Marketplace-Funktionen nicht gearbeitet.
+
+Festgehalten wird es trotzdem, weil es die Bewertung späterer Entscheidungen verändert: Wenn
+zwei Verkäufertypen das Ziel sind, ist früh zu wissen, **was dann neu entschieden werden muss**
+— nicht, um es vorzubauen, sondern um es nicht versehentlich zu verbauen.
+
+| Dann zu entscheiden | Warum es heute noch offen bleiben kann |
+|---|---|
+| `seller_id` an Bestand, Angebot, Bestellung, Beleg | heute hat jede dieser Tabellen genau einen wirtschaftlich Verantwortlichen; die Spalte nachzuziehen ist eine Migration, das Rückbauen einer falsch geratenen Struktur wäre teurer |
+| Rechtsstellung privater Verkäufer | Widerrufsrecht, Gewährleistung, Impressumspflicht und Steuerpflicht unterscheiden sich fundamental zwischen privat und gewerblich. Das ist eine **rechtliche** Frage, keine Softwarefrage, und sie entscheidet die halbe Oberfläche |
+| Zahlungsfluss zwischen Parteien | Treuhand, Stripe Connect, Provision, Auszahlung, Rückabwicklung — heute zahlt der Kunde direkt an ein Einzelunternehmen |
+| Wer haftet für die Beschreibung | heute ist jede Artikelangabe kuratierte Katalogdatenlage; bei fremden Verkäufern tritt eine zweite Quelle daneben |
+| Identität der Sammelobjekte | **bleibt wie sie ist.** Die SKY-ID ist bereits die gemeinsame Sprache; ein Marktplatz braucht dafür keine Änderung (CLAUDE.md Regel 2) |
+
+**Diese Richtung wird erst dann umgesetzt, wenn PortalVault nachweislich echte Nutzer
 gewinnt und die Sammlungsplattform angenommen wird.** Das ist bewusst eine Bedingung und kein
 Datum: „später" lädt dazu ein, doch schon mal etwas vorzubereiten. Vor diesem Nachweis wird an
 Marketplace-Funktionen **nicht** gearbeitet — auch nicht konzeptionell, auch nicht „nur das

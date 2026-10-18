@@ -294,7 +294,7 @@ describe("nachträgliche Korrektur einer Position", () => {
        Datenbank ihn auch erlaubt. */
     expect(read("src/components/business/add-purchase-item.tsx")).toContain("FigureSearch");
     expect(ITEMS).toContain("canRemapItem(item)");
-    expect(ITEMS).toContain("canRemoveItem(source, item)");
+    expect(ITEMS).toContain("canRemoveItem(item)");
     expect(ITEMS).toContain("copy.figures.remove");
     expect(ITEMS).toContain("copy.remapNotAFigure");
   });

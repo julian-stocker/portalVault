@@ -42,7 +42,10 @@ function bodyIn(sql: string, name: string): string {
 describe("die Rangfolge des Anzeigenamens", () => {
   it("die Detailseite löst sie vollständig auf", () => {
     const fn = latestFunction("seller_purchase");
-    expect(fn.file).toBe("0119_orderbook_display_names.sql");
+    /* `0134` hat den Rumpf aus `0119` übernommen und genau einen Schlüssel
+       ergänzt (`source_row`, damit der Dialog dieselben vier Ablehnungsgründe
+       prüft wie die Datenbank). Die Namensauflösung darunter ist dieselbe. */
+    expect(fn.file).toBe("0134_purchase_item_source_row_visible.sql");
     expect(fn.body).toContain(`'name', ${CHAIN}`);
     /* Und die alte Kette ist weg, nicht daneben. */
     expect(fn.body).not.toContain("coalesce(s.name, i.raw_name)");
@@ -219,11 +222,12 @@ describe("außer den drei Stellen ist nichts geändert", () => {
      * zurückdrehen können.
      *
      * `0124` fasst den Ledger an — mit Freigabe, für den Belegzustand, und
-     * unter Beibehaltung jeder Zeile darunter. `seller_purchase` ist
-     * unverändert bei `0119`. Jede WEITERE Fassung fällt hier wieder auf.
+     * unter Beibehaltung jeder Zeile darunter. `seller_purchase` liegt seit
+     * `0134` dort: derselbe Rumpf wie in `0119`, ein Schlüssel mehr. Jede
+     * WEITERE Fassung fällt hier wieder auf.
      */
     expect(latestFunction("seller_purchase").file)
-      .toBe("0119_orderbook_display_names.sql");
+      .toBe("0134_purchase_item_source_row_visible.sql");
     expect(latestFunction("seller_orderbook_ledger").file)
       .toBe("0124_orderbook_receipt_status.sql");
 

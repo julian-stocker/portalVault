@@ -191,6 +191,13 @@ export type PurchaseItem = {
   movementId: number | null;
   legacyConditionFlag: string | null;
   legacyBookedFlag: string | null;
+  /**
+   * The workbook line this item came from, NULL for a line the operator
+   * entered here. Never shown — it decides whether removal may be offered
+   * at all, which is the fourth refusal the database has always had (0064)
+   * and the screen could not see until 0134.
+   */
+  sourceRow: number | null;
 };
 
 export type PurchaseDetail = {
@@ -265,6 +272,8 @@ export const fetchPurchase = cache(async (id: number): Promise<PurchaseDetail | 
         movementId: i.movement_id === null || i.movement_id === undefined ? null : Number(i.movement_id),
         legacyConditionFlag: (i.legacy_condition_flag as string) ?? null,
         legacyBookedFlag: (i.legacy_booked_flag as string) ?? null,
+        sourceRow:
+          i.source_row === null || i.source_row === undefined ? null : Number(i.source_row),
       };
     }),
   };

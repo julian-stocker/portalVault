@@ -154,13 +154,13 @@ export type StagedRow =
  * sie unerklärlich wieder da.
  */
 export function stageRows(
-  items: PurchaseItem[], pending: PendingEdit, purchaseSource: string,
+  items: PurchaseItem[], pending: PendingEdit,
 ): StagedRow[] {
   const existing: StagedRow[] = items.map((item) => ({
     kind: "existing" as const,
     item,
     removed: pending.remove.includes(item.id),
-    mayRemove: canRemoveItem(purchaseSource, item),
+    mayRemove: canRemoveItem(item),
     /*
      * `canRemapItem` prüft die Herkunft ABSICHTLICH NICHT: eine
      * Arbeitsmappenzeile darf eine andere Figur bekommen — das ist der Zweck

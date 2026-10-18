@@ -52,11 +52,18 @@ select 10, 'Zaehler kleiner als die hoechste vergebene Nummer (muss 0 sein)',
                    from public.purchase_receipts r
                   where r.receipt_number like '%-' || c.year::text || '-%'), 0))
 union all
-select 11, 'Lagerbilanz: quantity <> sum(delta) (muss 0 sein)',
+-- KORRIGIERT. Die Differenz `quantity - sum(delta)` ist in diesen Datenbanken
+-- kein Fehler, sondern der Eroeffnungsbestand: der Pre-Go-Live-Reset vom
+-- 2026-09-21 hat `inventory_movements` geleert und `shop_inventory.quantity`
+-- bewusst stehen lassen (docs/history/2026-09-21-pre-go-live-reset.md).
+-- Geprueft wird deshalb die Richtung — negativ kann sie nicht werden — und
+-- die Groesse selbst wandert als Abdruck in 11a, wo der Vergleich Quelle
+-- gegen Wiederherstellung sie Zeichen fuer Zeichen erfasst.
+select 11, 'Lagerbilanz: Positionen mit negativem Eroeffnungsbestand (muss 0 sein)',
        (select count(*)::text from public.shop_inventory i
-         where i.quantity <> coalesce((select sum(m.delta)
-                                         from public.inventory_movements m
-                                        where m.inventory_id = i.id), 0))
+         where i.quantity < coalesce((select sum(m.delta)
+                                        from public.inventory_movements m
+                                       where m.inventory_id = i.id), 0))
 union all
 select 12, 'Lagersumme (quantity / reserved / available)',
        (select coalesce(sum(i.quantity), 0)::text || ' / '
@@ -100,4 +107,12 @@ select 20, 'Verkaufssummen (Anzahl / Positionen)',
 union all
 select 21, 'Ankaufsfaktor (abgeleitet, muss gleich bleiben)',
        coalesce(public.orderbook_global_factor()::text, '(null)')
+union all
+select 22, 'Eroeffnungsbestand aus dem Cutover (Positionen / Summe)',
+       (select (count(*) filter (where d.diff <> 0))::text || ' / '
+               || coalesce(sum(d.diff), 0)::text
+          from (select i.quantity - coalesce((select sum(m.delta)
+                                                from public.inventory_movements m
+                                               where m.inventory_id = i.id), 0) as diff
+                  from public.shop_inventory i) d)
  order by nr;

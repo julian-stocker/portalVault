@@ -3886,6 +3886,48 @@ Den Zirkel „ein Export prüft sich mit derselben Funktion selbst" schließt
 `md5(prosrc)` der lebenden `seller_business_backup()` mit der Fassung im
 Repository (Stand `0131`: `24c3810288bb20929fe995554a267adf`, 21 458 Zeichen).
 
+### 3.3au Ein historischer Einkauf wird nachgetragen (`0132`, ADR-0126)
+
+Ein aus der Arbeitsmappe importierter Einkauf (`purchases.source =
+'excel_order_2026'`) war im Dialog nicht bearbeitbar — **nicht wegen einer
+Regel in der Datenbank.** `seller_update_purchase` (`0121`),
+`seller_add_purchase_item` (`0053`) und `seller_set_purchase_item_sky` (`0054`)
+prüfen die Herkunft des Einkaufs nicht, und `0054` existiert ausdrücklich
+dafür, eine falsch zugeordnete Arbeitsmappenzeile zu berichtigen. Das Tor stand
+allein in der Oberfläche.
+
+Seit ADR-0126 ist es offen: Felder, Absender, Inserat, Kosten, Positionen
+hinzufügen und Figuren tauschen — gespeichert in **einer** Transaktion über
+`seller_save_purchase_edit`.
+
+**`0132` ändert genau eine Bedingung.** `seller_remove_purchase_item` lehnte
+auch ab, weil der Eltern-Einkauf importiert ist, und traf damit die selbst
+nachgetragene Zeile mit: ein Fehlgriff war dauerhaft. Es bleiben vier
+Bedingungen, jede für sich hinreichend — eine Lagerbewegung, der Zustand
+`reconciled_legacy`, eine `source_row`, eine der beiden Legacy-Flaggen.
+
+**Die Arbeitsmappe bleibt vollständig geschützt**, und das ist nachprüfbar,
+nicht gehofft: der Import (`0053`, Nachträge über `0088`) setzt **jeder**
+importierten Zeile `reconciled_legacy` **und** eine `source_row`. Die
+Vorbedingung von `0132` bricht ab, falls sich doch eine Zeile ohne jedes
+Merkmal an einem importierten Einkauf findet.
+
+**Der Bestand kann dabei nicht inkonsistent werden**, weil kein
+Bearbeitungsweg ihn anfasst: `seller_update_purchase`,
+`seller_add_purchase_item`, `seller_set_purchase_item_sky` und
+`seller_remove_purchase_item` schreiben weder `inventory_movements` noch
+`shop_inventory` — ein Test rechnet das über die Funktionsrümpfe nach. Bestand
+entsteht ausschließlich beim Einbuchen, und dieser Weg ist unverändert. Eine
+nachgetragene Zeile landet unbebucht; ob sie eingebucht wird, entscheidet der
+Betreiber — war die Figur im Altbestand schon enthalten, zählte ein Einbuchen
+sie doppelt, und `reconciled_legacy` lässt sich über
+`seller_set_purchase_item_state` ohnehin nicht setzen (`0053`).
+
+Prüf-SQL: `supabase/checks/0132_preflight.sql` und `0132_postflight.sql`.
+Tests: `src/lib/orderbook/purchase-historical-edit.test.ts`. **`0132` ist
+lokal vorbereitet und nirgends angewendet** (`supabase/migrations/APPLIED.md`,
+Abschnitt „Nicht angewendet").
+
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
 Festgehalten nach ADR-0032 und ADR-0033. **Keine Migration, keine Tabelle, keine Rolle.**
@@ -4469,8 +4511,31 @@ in V1 nicht geben.
 `shop_inventory_reconciliation` (View, `security_invoker = true`, keine Client-Rechte) stellt je
 Position `quantity`, `SUM(delta)` und `drift` gegenüber. Ein Constraint ist nicht möglich —
 PostgreSQL kennt keine tabellenübergreifende Aggregatbedingung —, und ein Trigger wäre
-schlechter als nichts: Er schriebe denselben Fehler ein zweites Mal. `npm run verify:rls`
-schlägt fehl, sobald irgendwo `drift <> 0` steht.
+schlechter als nichts: Er schriebe denselben Fehler ein zweites Mal.
+
+**`drift = 0` gilt seit dem Cutover nicht mehr, und das ist kein Fehler.** Der
+Pre-Go-Live-Reset vom 2026-09-21 hat `inventory_movements` vollständig geleert und
+`shop_inventory.quantity` ausdrücklich stehen gelassen — „die losen Stück sind ab jetzt die
+operative Ausgangsbasis" (`docs/history/2026-09-21-pre-go-live-reset.md`). Der operative Ledger
+beginnt damit bei null, während der Bestand weiterlief. **`drift` je Position IST seitdem der
+Eröffnungsbestand**, der nie journalisiert wurde; er betrifft die Mehrzahl der Positionen —
+gemessen am 2026-10-18 auf Production durch den `0132`-Postflight. Die Bestände je Figur bleiben
+aus dem Repository heraus (CLAUDE.md, Regel 3); sie stehen nur im Ergebnisblatt des Laufs.
+
+Prüfbar bleibt deshalb nicht die Gleichheit, sondern:
+
+1. **`drift >= 0` überall.** `quantity` bewegt sich seit dem Cutover ausschließlich über
+   `apply_inventory_movement` (0003, verschärft in 0093), und das schreibt Menge und Journalzeile
+   in einer Transaktion. Ein negativer `drift` hieße, dass `quantity` ohne Bewegung gesunken ist
+   oder eine Bewegung ohne Menge entstand — ein echter Fehler.
+2. **`drift` ändert sich nicht.** Jede Mengenänderung geht durch beide Seiten. Eine Migration,
+   die den Bestand nicht anfasst, muss denselben `drift` hinterlassen; genau so prüfen es die
+   Pre-/Postflight-Paare (`supabase/checks/0132_*.sql`, Zeilen 303 und 307).
+
+**Offen:** `tools/verify-rls.mts` (Abschnitt 9.9) und damit `npm run verify:rls:staging` prüfen
+weiterhin `drift <> 0` als Fehler und schlagen folgerichtig fehl. Die Prüfung trägt dieselbe
+veraltete Annahme wie die ursprüngliche Fassung von `0132_postflight.sql` und ist auf die beiden
+Bedingungen oben umzustellen; das ist noch nicht geschehen.
 
 #### Noch nicht gebaut
 

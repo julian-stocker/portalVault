@@ -88,11 +88,13 @@ const CATALOG = [FREE_RANGER, LEGENDARY, IGNITOR, STEALTH, WASH, DARK_WASH, UNPR
 const item = (over: Partial<{
   state: ItemState; movementId: number | null;
   legacyConditionFlag: string | null; legacyBookedFlag: string | null;
+  sourceRow: number | null;
 }> = {}) => ({
   state: "ordered" as ItemState,
   movementId: null as number | null,
   legacyConditionFlag: null as string | null,
   legacyBookedFlag: null as string | null,
+  sourceRow: null as number | null,
   ...over,
 });
 
@@ -357,33 +359,46 @@ describe("figure search — variants have to be distinguishable", () => {
 /* ===================================================================== */
 describe("what may be corrected on an existing purchase", () => {
   it("an unbooked hand-made item may be removed and remapped", () => {
-    expect(canRemoveItem("manual", item())).toBe(true);
+    expect(canRemoveItem(item())).toBe(true);
     expect(canRemapItem(item())).toBe(true);
   });
 
   it("A BOOKED ITEM MAY BE NEITHER", () => {
     const booked = item({ state: "booked", movementId: 552 });
-    expect(canRemoveItem("manual", booked)).toBe(false);
+    expect(canRemoveItem(booked)).toBe(false);
     expect(canRemapItem(booked)).toBe(false);
   });
 
   it("an item owning a movement is refused even if its state says otherwise", () => {
     const odd = item({ state: "arrived", movementId: 552 });
-    expect(canRemoveItem("manual", odd)).toBe(false);
+    expect(canRemoveItem(odd)).toBe(false);
     expect(canRemapItem(odd)).toBe(false);
   });
 
-  it("A HISTORICAL ITEM MAY NOT BE REMOVED — its provenance is not regenerable", () => {
-    expect(canRemoveItem("excel_order_2026", item({ state: "reconciled_legacy" }))).toBe(false);
+  it("A WORKBOOK LINE MAY NOT BE REMOVED — its provenance is not regenerable", () => {
+    expect(canRemoveItem(item({ state: "reconciled_legacy" }))).toBe(false);
   });
 
-  it("nor may one on an imported purchase whose state looks ordinary", () => {
-    expect(canRemoveItem("excel_order_2026", item({ state: "ordered" }))).toBe(false);
+  /*
+   * ÄNDERUNG VOM 2026-10-17 (ADR-0126), UND SIE IST ABSICHT.
+   *
+   * Hier stand: „nor may one on an imported purchase whose state looks
+   * ordinary" — jede Zeile eines importierten Einkaufs war unentfernbar,
+   * auch eine gerade selbst hinzugefügte. Die Regel schützte die
+   * Arbeitsmappe und traf den eigenen Nachtrag mit.
+   *
+   * Jetzt entscheidet die Zeile, nicht ihr Elternteil. Die Arbeitsmappe
+   * bleibt vollständig geschützt, weil der Import JEDER Zeile
+   * `reconciled_legacy` gibt (`0053`, `0088`) — der Test darüber hält genau
+   * das fest. Was durchkommt, ist die von Hand nachgetragene Zeile.
+   */
+  it("eine NACHGETRAGENE Zeile an einem importierten Einkauf darf wieder gehen", () => {
+    expect(canRemoveItem(item({ state: "ordered" }))).toBe(true);
   });
 
   it("nor may one carrying either legacy marker", () => {
-    expect(canRemoveItem("manual", item({ legacyBookedFlag: "x" }))).toBe(false);
-    expect(canRemoveItem("manual", item({ legacyConditionFlag: "lose" }))).toBe(false);
+    expect(canRemoveItem(item({ legacyBookedFlag: "x" }))).toBe(false);
+    expect(canRemoveItem(item({ legacyConditionFlag: "lose" }))).toBe(false);
   });
 
   it("BUT A HISTORICAL ITEM'S FIGURE MAY STILL BE CORRECTED — that is what 0054 is for", () => {
@@ -393,12 +408,12 @@ describe("what may be corrected on an existing purchase", () => {
   it("remapping and removing are therefore not the same permission", () => {
     const legacy = item({ state: "reconciled_legacy" });
     expect(canRemapItem(legacy)).toBe(true);
-    expect(canRemoveItem("excel_order_2026", legacy)).toBe(false);
+    expect(canRemoveItem(legacy)).toBe(false);
   });
 
   it("damaged and missing hand-made items stay correctable", () => {
-    expect(canRemoveItem("manual", item({ state: "damaged" }))).toBe(true);
-    expect(canRemoveItem("manual", item({ state: "missing" }))).toBe(true);
+    expect(canRemoveItem(item({ state: "damaged" }))).toBe(true);
+    expect(canRemoveItem(item({ state: "missing" }))).toBe(true);
   });
 });
 
@@ -461,12 +476,22 @@ describe("0064 — the migration", () => {
     expect(CREATE_WITH_ITEMS).toContain("> 200");
   });
 
-  it("REMOVAL NOW REFUSES THE WORKBOOK, three ways over", () => {
+  it("REMOVAL NOW REFUSES THE WORKBOOK, four ways over", () => {
+    /*
+     * 0132 hat die FÜNFTE Bedingung gestrichen — `is distinct from 'manual'`,
+     * die auf den Eltern-Einkauf sah und damit auch die selbst nachgetragene
+     * Zeile traf (ADR-0126). Die vier hier bleiben, und jede allein lehnt
+     * jede importierte Zeile ab: der Import setzt `reconciled_legacy` UND
+     * eine `source_row`.
+     *
+     * `REMOVE_ITEM` ist die JÜNGSTE Fassung (`latestFunction`), also die aus
+     * 0132 — deshalb fiel diese Prüfung, als 0132 dazukam, und deshalb steht
+     * die gestrichene Bedingung hier nicht mehr.
+     */
     expect(REMOVE_ITEM).toContain("reconciled_legacy");
     expect(REMOVE_ITEM).toContain("source_row is not null");
     expect(REMOVE_ITEM).toContain("legacy_booked_flag is not null");
     expect(REMOVE_ITEM).toContain("legacy_condition_flag is not null");
-    expect(REMOVE_ITEM).toContain("is distinct from 'manual'");
   });
 
   it("and still refuses a booked item first", () => {
@@ -524,9 +549,15 @@ describe("0064 — the migration", () => {
     expect(body).not.toMatch(/grant[^;]*on table/);
   });
 
-  it("is the last word on removal, so the hardening is what actually runs", () => {
+  it("war das letzte Wort beim Entfernen — bis 0132", () => {
+    /*
+     * 0132 ersetzt die Funktion ein letztes Mal und streicht genau eine
+     * Bedingung (ADR-0126). Dass die vier übrigen stehen, prüft
+     * `purchase-historical-edit.test.ts`; hier zählt nur, dass niemand
+     * unbemerkt eine weitere Fassung dazwischenschiebt.
+     */
     expect(latestFunction("seller_remove_purchase_item").file)
-      .toBe("0064_purchase_create_with_items.sql");
+      .toBe("0132_purchase_item_remove_by_line.sql");
   });
 
   it("the older signature is still the one 0063 left — no accidental overload", () => {
@@ -673,9 +704,16 @@ describe("the detail screen", () => {
   });
 
   it("offers neither correction where the database would refuse it", () => {
-    expect(ITEMS_UI).toContain("canRemoveItem(source, item)");
+    expect(ITEMS_UI).toContain("canRemoveItem(item)");
     expect(ITEMS_UI).toContain("canRemapItem(item)");
-    expect(PURCHASE_PAGE).toContain("source={purchase.source}");
+    /*
+     * ADR-0126: die Prop `source` ist weg. Die Entfernen-Regel hing am
+     * Einkauf und hängt jetzt an der Zeile — die Seite muss die Herkunft
+     * dafür nicht mehr durchreichen. Was bleibt: beide Regeln kommen aus
+     * `purchase.ts` und nicht aus der Komponente.
+     */
+    expect(PURCHASE_PAGE).not.toContain("source={purchase.source}");
+    expect(ITEMS_UI).toContain('from "@/lib/orderbook/purchase"');
   });
 
   it("a booked row shows its state instead of a destructive control", () => {

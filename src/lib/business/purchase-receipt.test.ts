@@ -388,8 +388,15 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * Speichern, und jetzt bis `0129`: Korrekturbelege (`0128`) und die
      * Eigenbelege in der Betriebssicherung (`0129`) — und jetzt bis `0131`:
      * die Sicherung führt seit `0130`/`0131` jede Spalte, die eine
-     * Wiederherstellung braucht. Die Zusicherung, die bleibt, ist die über
-     * die FOLGE: die drei Tests in `src/lib/commerce/` verlangen sie
+     * Wiederherstellung braucht — und jetzt bis `0132`: das Entfernen einer
+     * Einkaufsposition entscheidet die ZEILE und nicht mehr ihr Eltern-Einkauf,
+     * damit ein historischer Einkauf nachgetragen und ein Fehlgriff
+     * zurückgenommen werden kann (ADR-0126) — und bis `0133`, die die
+     * bezahlte Summe eines importierten Einkaufs auch gegen ein direktes
+     * `update` festhaelt — und jetzt bis `0134`, die `source_row` in die
+     * Positionsliste gibt, damit der Dialog dieselben vier Ablehnungsgründe
+     * prüft wie die Datenbank (ADR-0127). Die Zusicherung, die bleibt, ist die über die
+     * FOLGE: die drei Tests in `src/lib/commerce/` verlangen sie
      * lückenlos.
      *
      * Dass hier eine Dateiname steht, der sich mit jeder Migration ändert,
@@ -399,8 +406,9 @@ describe("0122 legt an, was der Beleg braucht", () => {
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    expect(files[files.length - 1]).toBe("0131_business_backup_seller_fields.sql");
-    expect(files[files.length - 2]).toBe("0130_business_backup_fields.sql");
+    expect(files[files.length - 1])
+      .toBe("0134_purchase_item_source_row_visible.sql");
+    expect(files[files.length - 2]).toBe("0133_paid_total_immutable.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

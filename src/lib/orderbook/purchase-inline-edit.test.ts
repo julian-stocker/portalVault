@@ -125,7 +125,7 @@ describe("die Felder stehen dort, wo vorher die Werte standen", () => {
     const costs = section("modal.costs");
     for (const needle of ["value={draft.items}", "value={draft.shipping}",
                           "value={draft.protection}", "{modal.clearSplit}",
-                          "{modal.splitHint}"]) {
+                          "modal.splitHint"]) {
       expect(costs, needle).toContain(needle);
     }
     /* Die Summe rechnet beim Tippen mit. */
@@ -197,7 +197,13 @@ describe("Speichern, Abbrechen und Schliessen", () => {
 
   it("und in der Ansicht steht nur Bearbeiten", () => {
     expect(head).toContain("onClick={startEditing}");
-    expect(head).toContain('purchase.source === "excel_order_2026" ? null : editing ? (');
+    expect(head).toContain("{editing ? (");
+    /*
+     * ADR-0126: das Tor für `excel_order_2026` ist weg — auch ein
+     * historischer Einkauf wird bearbeitet. Was ihn schützt, sind die Regeln
+     * darunter, nicht ein fehlender Knopf.
+     */
+    expect(head).not.toContain('purchase.source === "excel_order_2026" ? null');
   });
 });
 

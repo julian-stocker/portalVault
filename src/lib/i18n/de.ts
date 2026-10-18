@@ -1486,6 +1486,20 @@ export const de = {
          * Importer wieder her.
          */
         removeBlockedLegacy: "Aus der Arbeitsmappe — änderbar, aber nicht entfernbar",
+        /*
+         * DIE BEZAHLTE SUMME EINES HISTORISCHEN EINKAUFS (ADR-0126).
+         *
+         * Sie steht fest. Die Aufteilung darf nachgetragen werden, muss die
+         * Summe aber ergeben — `purchases_cost_split_adds_up` verlangt das
+         * ohnehin, und `0132` verbietet zusätzlich, die Summe mitzuziehen.
+         */
+        paidFixedHint:
+          "Die bezahlte Summe steht fest. Die Aufteilung lässt sich nachtragen, "
+          + "muss diese Summe aber ergeben.",
+        paidFixedLabel: "Bezahlt (unveränderlich)",
+        splitMustMatchPaid: (getippt: string, bezahlt: string) =>
+          `Die Aufteilung ergibt ${getippt}, bezahlt wurden ${bezahlt}. `
+          + "Bitte die Teilbeträge so eintragen, dass sie die bezahlte Summe ergeben.",
         /* Zusammenfassung über dem Speichern-Knopf, damit die Zahl stimmt,
            bevor sie verbindlich wird. */
         pendingSummary: (add: number, remove: number, swap = 0) =>
@@ -1884,6 +1898,10 @@ export const de = {
         historicalItem:
           "Diese Position stammt aus der Excel-Historie und wird nicht gelöscht. " +
           "Ihre Figurenzuordnung lässt sich weiterhin über „Zuordnung ändern“ korrigieren.",
+        /* 0132: die bezahlte Summe eines importierten Einkaufs ist abgeschlossen. */
+        paidTotalFinal:
+          "Die bezahlte Summe dieses Einkaufs ist abgeschlossen und lässt sich nicht " +
+          "ändern. Die Aufteilung kannst du nachtragen, solange sie diese Summe ergibt.",
         tooManyItems: "Zu viele Figuren auf einmal.",
         /*
          * DIE KOSTENAUFTEILUNG (0115/0116).

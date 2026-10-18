@@ -37,7 +37,7 @@ const open = (over: Partial<PurchaseItem> = {}): PurchaseItem => ({
   id: 1, position: 1, skyId: "SKY-0001", name: "Spyro", rawName: null,
   seriesCode: null, seriesLabel: null, condition: "loose", state: "ordered",
   marketPrice: 12, priceIsFrozen: false, movementId: null,
-  legacyConditionFlag: null, legacyBookedFlag: null, ...over,
+  legacyConditionFlag: null, legacyBookedFlag: null, sourceRow: null, ...over,
 });
 /** Dieselbe Figur in Giants — das Beispiel des Betreibers. */
 const giants: SwapFigure = { itemId: 1, skyId: "SKY-0210", label: "Spyro (Giants)" };
@@ -127,8 +127,8 @@ describe("Wechseln und Entfernen schließen einander aus", () => {
  * ======================================================================== */
 
 describe("der Tauschknopf erscheint nur, wo er etwas tun kann", () => {
-  const row = (item: PurchaseItem, source = "manual") => {
-    const r = stageRows([item], emptyEdit, source)[0];
+  const row = (item: PurchaseItem) => {
+    const r = stageRows([item], emptyEdit)[0];
     if (r.kind !== "existing") throw new Error("keine bestehende Zeile");
     return r;
   };
@@ -143,14 +143,14 @@ describe("der Tauschknopf erscheint nur, wo er etwas tun kann", () => {
   });
 
   it("eine ARBEITSMAPPENZEILE darf gewechselt und NICHT entfernt werden", () => {
-    const r = row(open({ state: "reconciled_legacy" }), "excel_order_2026");
+    const r = row(open({ state: "reconciled_legacy" }));
     expect(r.maySwap).toBe(true);
     expect(r.mayRemove).toBe(false);
   });
 
   it("der vorgemerkte Wechsel hängt an der Zeile, die ihn betrifft", () => {
     const rows = stageRows([open(), open({ id: 2, skyId: "SKY-0002", name: "Gill Grunt" })],
-                           { add: [], remove: [], swap: [giants] }, "manual");
+                           { add: [], remove: [], swap: [giants] });
     expect(rows[0].kind === "existing" && rows[0].swap?.skyId).toBe("SKY-0210");
     expect(rows[1].kind === "existing" && rows[1].swap).toBe(null);
   });

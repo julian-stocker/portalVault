@@ -55,7 +55,7 @@ const bookArea = (() => {
 describe("Anforderung 1 — die kompakte Aktion hängt an canBook", () => {
   it("dieselbe Regel wie in der grossen Tabelle, nicht nachgebaut", () => {
     expect(section).toContain("const mayBook = canBook(item);");
-    expect(DETAILS).toContain('import { canBook, canRemapItem } from "@/lib/orderbook/purchase";');
+    expect(DETAILS).toContain('import { canBook, canRemapItem, isHistorical } from "@/lib/orderbook/purchase";');
     /* Und die Ledger-Fassung delegiert seit 0116 an dieselbe Funktion, damit
        nicht zwei Zustandslisten auseinanderlaufen. */
     expect(read("src/lib/orderbook/ledger.ts"))

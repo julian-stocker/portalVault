@@ -542,7 +542,7 @@ describe("wer umhängen darf, und wer nicht", () => {
     expect(section).toContain("const mayRemap = canRemapItem(item);");
     expect(section).toContain(") : mayRemap ? (");
     /* Beide Regeln kommen aus derselben Datei, keine wird hier nachgebaut. */
-    expect(DETAILS).toContain('import { canBook, canRemapItem } from "@/lib/orderbook/purchase";');
+    expect(DETAILS).toContain('import { canBook, canRemapItem, isHistorical } from "@/lib/orderbook/purchase";');
   });
 
   it("und die Regel selbst ist unverändert", () => {
