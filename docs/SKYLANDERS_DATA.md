@@ -937,6 +937,77 @@ Collator setzt „Dino Roar" zwischen beide. Gemessen am echten Katalog erzeugt 
 `Elite Voodood- ohne OVP` ohne Leerzeichen vor dem Strich, und die Elite-Zeilen schreiben
 „Dino Rang" statt „Dino-Rang". Beide werden von der Ableitung gelesen, keine wird umgeschrieben.
 
+## 11j. Was ohne Katalogbezug gekauft wurde (read-only Befund, 2026-10-20)
+
+**Gemessen auf Production**, rein lesend, mit
+`supabase/checks/accessory_audit_readonly.sql`. Keine Zeile wurde angefasst.
+
+| Messung | Wert |
+|---|---|
+| Einkaufspositionen ohne `sky_id` | **206** |
+| davon aus dem Arbeitsmappen-Import | **alle** — jede trägt `source_row` **und** einen Rohnamen |
+| verschiedene Rohnamen | **121**, verteilt auf **38** Einkäufe |
+| erkennbarer Inhalt | **ein erheblicher Teil** sind Disney-Infinity-Artikel; dazu rein numerische Artikelkennungen, deren Natur **nicht** geklärt ist |
+
+### Was belegt ist, und was nicht
+
+**Belegt:** alle 206 Positionen stammen aus dem Arbeitsmappen-Import — jede
+trägt eine `source_row` **und** einen Rohnamen. Keine ist eine von Hand
+erfasste Zeile, keine ist eingebucht, und die Zustandsverteilung zeigt sie als
+abgeschlossen statt als offene Arbeit.
+
+**Beobachtet, nicht abgezählt:** unter den 121 verschiedenen Rohnamen sind
+viele als Disney-Infinity-Artikel erkennbar, und einige sind reine Zahlen.
+
+**NICHT belegt:** dass *alle* 206 Positionen Disney Infinity sind. Eine
+vollständige Klassifikation der 121 Namen liegt **nicht** vor — sie bräuchte
+einen namensweisen Abgleich gegen die Arbeitsmappe, und der ist nicht
+durchgeführt. Es ist deshalb offen, ob darunter auch Skylanders-Artikel sind,
+die lediglich keine Zuordnung bekommen haben, oder Zubehör wie Portale und
+Karten.
+
+**Die Richtung ist trotzdem plausibel und war vorhersehbar:** Abschnitt 1
+dieser Datei führt `DI A` (Disney Infinity) als Blatt mit eigenen SKY-IDs, das
+**nicht** nach PortalVault importiert wurde, und Abschnitt 8 nennt Disney
+Infinity ausdrücklich als „nicht öffentlich". Für solche Zeilen ist eine
+Position ohne Katalogbezug das richtige Ergebnis, und `0069` hat ihnen mit
+`settled` ein Ende gegeben, das keine Lagerbewegung erzeugt.
+
+**Wer die Klassifikation braucht, führt sie als eigenen Schritt** — lesend
+gegen die Arbeitsmappe, Name für Name, mit dem Ergebnis als kuratierte Liste
+wie bei den Charakterdaten. Geraten wird nichts.
+
+**Was daraus NICHT folgt.** Keine automatische Zuordnung, keine Namensheuristik,
+keine Änderung an historischen Importdaten. Ob Disney Infinity jemals eine
+Identität im Katalog bekommt, ist eine **Produktentscheidung** des Betreibers
+und keine Datenbereinigung — und sie wäre ein eigener Schritt mit eigener
+Freigabe. Die 121 Rohnamen bleiben bis dahin das, was sie sind: der
+Herkunftsnachweis am Einkauf.
+
+### Spiele: im Katalog, im Lager, im Verkauf — und nicht im Shop
+
+Dieselbe Messung, dieselbe Datenbank:
+
+| Messung | Wert |
+|---|---|
+| Katalogzeilen in der Kategorie `Spiele` | **40** — davon **39** echte, aktive und sichtbare Spiele |
+| die vierzigste | `SKY-9998`, die Verifizierer-Fixture; sie steht in `SA`/`Spiele`, weil `verify:rls` eine vorhandene Kategorie als Wirt nimmt |
+| Lagerpositionen auf Spiele | **13** mit **19 Einheiten**, alle `is_listed = true` |
+| Verkaufspositionen auf Spiele | **18** |
+| Einkaufspositionen auf Spiele | **30** |
+| Spiele in `shop_offers()` | **0** |
+| Katalogzeilen, deren Name auf ein Portal hindeutet | **0** |
+
+**Spiele sind damit operativ längst in Gebrauch** — gekauft, eingelagert,
+verkauft — und gleichzeitig aus dem öffentlichen Shop ausgeschlossen. Dass sie
+im Lager `is_listed` tragen, ist **kein Fehler**, siehe
+`docs/DATABASE.md`, Abschnitt „Freigabe ist nicht das Tor".
+
+**Portale fehlen vollständig.** Null Katalogzeilen; sie existieren
+ausschließlich als Einkaufspositionen ohne `sky_id`. Das deckt sich mit
+Abschnitt 9: die acht unzugeordneten Legacy-Einträge sind „Portale (5×) und
+Elite-Karten (3×) — Artikel, die es im PortalVault-Katalog so nicht gibt".
+
 ## 12. Migrationsregeln für PortalVault
 
 **Grundsatz: PortalVault liest niemals `skylanders.xlsx` direkt.**

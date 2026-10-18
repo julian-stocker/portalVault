@@ -462,6 +462,33 @@ Shop": aktiv, `catalog_visible`, sammelbar. Aufgerufen von `shop_offers()` **und
 einmaligen Freigabe in `0008` — dieselbe Regel, nicht zwei Kopien. Sie sagt nichts über Bestand
 oder Preis.
 
+#### Freigabe ist nicht das Tor — und deshalb ist `is_listed` bei Software richtig
+
+**Gemessen auf Production am 2026-10-20:** 13 Lagerpositionen hängen an Spiele-Katalogzeilen, 19
+Einheiten, **alle 13 mit `is_listed = true`** — und **0** davon in `shop_offers()`. Das ist der
+vorgesehene Zustand, kein Widerspruch, und `0008` hat ihn beim Umstellen des Vorgabewerts
+wörtlich vorhergesagt:
+
+> *„Safe because the default is not the gate. A movement may be booked against software or an
+> inactive figure — the import's excluded rows would have been exactly that — and `shop_offers()`
+> still refuses to offer it, because `is_shop_eligible()` is asked there and not here."*
+
+Die Kette ist also bewusst zweistufig: **`is_listed`** ist die Entscheidung des Betreibers je
+Position und entsteht per Vorgabewert, **`is_shop_eligible()`** ist die Eignung der Figur und
+wird in `shop_offers()` zusätzlich verlangt. Software (`non_collectible_categories() =
+['Spiele']`, ADR-0029/0048) fällt dort heraus, unabhängig davon, was an der Lagerzeile steht.
+Dasselbe gilt für die inaktiven Verifizierer-Fixtures.
+
+Dass beide Zustände auseinanderlaufen können, ist ausdrücklich modelliert:
+`admin_shop_listing_audit()` (`0041`) liefert je Position `is_listed`, `eligible` **und den
+Grund**, wenn die Eignung fehlt. Eine Position „freigegeben, aber nicht geeignet" ist damit
+sichtbar und benannt, statt als Fehler zu erscheinen.
+
+**Was daraus folgt:** `is_listed` bei einem Spiel ist **kein** Befund und wird nicht
+„korrigiert". Wer Zubehör irgendwann öffentlich verkaufen will, ändert nicht diese Flags, sondern
+revidiert ADR-0029/0048 — und dann auch `0108` (nur lose Figuren), weil bei einem Spiel die
+Verpackung den Artikel ausmacht.
+
 `set_shop_listing()` verlangt für eine Freigabe **keinen** Preis mehr (die Prüfung aus `0007`
 entfällt dort und bleibt in `shop_offers()`). Kaufbar ist eine Position weiterhin nur mit
 effektivem Preis, verfügbarem Bestand und erfüllten Katalogregeln.
