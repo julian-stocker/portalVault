@@ -48,7 +48,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- Sie sagt nur, aus welcher Datenbank das Blatt kommt — die Lehre aus dem
   -- 2026-10-18, als zwei Migrationen in der falschen Umgebung liefen.
   -- Supabase fuehrt die Projektkennung nicht in der Datenbank, und es gibt
-  -- KEIN Merkmal, das die Umgebung entscheidet: der Lauf vom 2026-10-19 hat
+  -- KEIN Merkmal, das die Umgebung entscheidet: der Lauf vom 2026-10-18 hat
   -- auf Production eine Testfigur gefunden. `verify:rls` legt `SKY-9998` als
   -- DAUERHAFTE Shop-Fixture an, deren Fremdschluessel ON DELETE RESTRICT
   -- tragen — der Teardown konnte sie nie entfernen

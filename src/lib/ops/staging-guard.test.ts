@@ -261,6 +261,29 @@ describe("every staging-only writer is actually guarded", () => {
     for (const [name, command] of staging) {
       // dev:staging carries its own interlock and passes no service-role key.
       if (name === "dev:staging") continue;
+      /*
+       * `db:check:staging` IS THE ONE EXCEPTION, AND ITS GUARD IS STRONGER.
+       *
+       * It opens a PostgreSQL session, not a Supabase client, so there is no
+       * service-role key to point at an env file. Its credential lives OUTSIDE
+       * the repository (`~/.skyisles/staging-db.env`) and is checked three
+       * ways before a statement runs: the connection string must carry the
+       * staging ref and must not mention the production ref anywhere, the
+       * session must answer with the staging stamp, and the role is read-only
+       * by its own configuration. Asserting `--env-file=.env.staging` here
+       * would demand the weaker mechanism.
+       *
+       * The replacement assertion is below, and `staging-access.test.ts`
+       * covers every refusal path.
+       */
+      if (name === "db:check:staging") {
+        expect(command, name).toBe("node tools/db-check-staging.mts");
+        expect(command, name).not.toContain("--env-file");
+        const quelle = readFileSync("tools/db-check-staging.mts", "utf8");
+        expect(quelle).toContain("verbindeStaging");
+        expect(quelle).not.toMatch(/\.env\.local/);
+        continue;
+      }
       expect(command, name).toContain("--env-file=.env.staging");
     }
   });

@@ -13,6 +13,11 @@ Grundlage: Exportstand `0131` — 28 Bereiche, 352 Feldzeilen, Formatversion 1,
 verifizierter Staging-Download mit 5 508 Datensätzen und 0 Abweichungen,
 2 unveränderliche Belege mit Korrekturkette, 7 Abrufe, 1 Zählerzeile.
 
+> **Stand 2026-10-19:** `0136` ist vorbereitet und nimmt `item_type` in den
+> Bereich `figures` auf — dann **353 Feldzeilen** und Abdruck
+> `f6d08440707ba72a8040a8d1e666c092` (21 494 Zeichen). Angewendet ist sie
+> nirgends; `0131_function_body_check.sql` kennt beide Stände.
+
 ---
 
 ## 1. Was der Export für einen Restore hergibt — und was nicht

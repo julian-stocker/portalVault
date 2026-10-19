@@ -27,6 +27,9 @@ jede Zeile bei jedem Testlauf. Die Spalte `Datei heute` ist der Vertrag:
 | `0129_business_backup_receipts.sql` | `d4b0f17b24bca90ac0844b7e35b10e64e55da04ceef4e97a0daf89703b2c16f8` | gleich | Betreiber: Postflight `9999 = 0`; `0129_export_baseline.sql` ergab 28 Bereiche und 5 508 Datensätze |
 | `0130_business_backup_fields.sql` | `37417c454704fb94dd448813caeb41eaad4a58e188713488c30f5b4967e76abe` | abweichend — siehe `supabase/checks/0130_amendment.md` | Betreiber: erfolgreich; gemessen durch den `0131`-Preflight mit 339 Feldzeilen (Stand nach `0130`) |
 | `0131_business_backup_seller_fields.sql` | `644cc0bbd15073426f54af6fa542281c95b8e4d4dc5abb8ce2d63a3b4c35f218` | gleich | Betreiber: Postflight `9999 = 0`; erster Versuch mit einer früheren Fassung brach ab und rollte zurück |
+| `0132_purchase_item_remove_by_line.sql` | `382aa64749cb035e9a6402fe36fc16f9e1ae663228c7806cc34e29331b7ec6b3` | gleich | **2026-10-18**, Betreiber: manuell im SQL-Editor in `BEGIN`/`COMMIT`, beide `NOTICE`-Zeilen erschienen. **Zwei** Postflights bestanden: `0132_postflight.sql` `9999 = 0` (Herkunftssperre weg, die vier Zeilenbedingungen stehen, der Riegel auf `total_cost` ist da) und `receipt_lock_check.sql` `9999 = 0` (die Belegsperre hat die Migration unverändert überstanden). Bezugswerte unverändert: 84 importierte Einkäufe, 2 114 Positionen, 285 Lagerzeilen, 812 Einheiten, 26 Bewegungen, Importsumme 4476.39, 2 Eigenbelege. Dieselbe Prüfsumme wie der Production-Lauf |
+| `0135_catalog_item_type.sql` | `08a75cf0ade1ae10f21f76038df6a8407746bf1db76e1c8b02ebeb3d0c637a04` | gleich | **2026-10-19**, Betreiber: manuell im SQL-Editor, **über das Einmal-Skript** `supabase/operations/staging-0135-0136.sql` (SHA-256 `60294b8cc2794eada94f3e4c7a2c41b29487743f02ba8c58477a85ffc5d598a9`), dessen eingebettete Abschnitte zeichengleich zu dieser Datei sind — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. Ein Durchgang, eine Transaktion. Abschlussraster: **19 Bezugswerte unverändert**, einzige Änderung `sicherung_md5` (siehe `0136`). Der erste Versuch brach in Abschnitt A7 ab (Z0-Vertrag: „overrides ist 53, erwartet 39“) und rollte vollständig zurück — **falsch abgeleiteter Sollwert**, kein Datenbefund; berichtigt, Begründung in `open_verifications.md` Abschnitt 0g |
+| `0136_business_backup_item_type.sql` | `fde41c50ad0656c4354aea876b0248a73cdaf129e12def5319f7747ecc136a43` | gleich | **2026-10-19**, im selben Durchgang wie `0135`. Belegt durch das Abschlussraster: `sicherung_md5` `24c3810288bb20929fe995554a267adf` → `f6d08440707ba72a8040a8d1e666c092`, und die Nachbedingung D3 des Skripts verlangt genau diesen Wert. Damit führt die Betriebssicherung 28 Bereiche und **353** Feldzeilen |
 
 ## Production
 
@@ -82,16 +85,75 @@ Staging noch auf Production. Sie stehen hier, damit die Akte lückenlos bleibt:
 jede Migration ab `0122` ist entweder oben mit ihrer Prüfsumme erfasst oder in
 dieser Liste.
 
+**`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet** und
+stehen deshalb in der Tabelle oben, nicht mehr hier. Auf Production fehlen
+sie — wie `0134`.
+
 | Migration | Stand |
 |---|---|
-| `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `ad6812ac1d977464d3626308161a2a0ab4a7745a63dff335e74558395c79eeb2` |
+| `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `b2a745e34e0349640f3a4b10efe9da45bb633c854efd703fc8e6c146514e9b49` |
 
-**`0132` und `0133` stehen seit dem 2026-10-18 auf Production** und damit oben
-in der Production-Tabelle. **Auf Staging sind sie nicht angewendet** — die
-Staging-Tabelle endet bei `0131`. Das ist die umgekehrte Reihenfolge der
-gewollten, und sie wird nicht nachträglich geradegezogen, indem auf Production
-etwas zurückgenommen wird; nachgezogen wird Staging. Plan:
-`supabase/checks/0132_staging_plan.md`.
+**Beide zusammen in einem Durchgang:** `supabase/operations/staging-0135-0136.sql` (SHA-256 `654d20fbdb08cb319c0d95005a403fa5cffe13ca77c41d44aafedaf9dc50bb17`) bettet `0135` und `0136` **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und legt eine Transaktion samt blockierender Vor- und Nachpruefungen darum. Wird der Lauf darueber gefahren, gehoert in die Tabelle oben die SHA-256 des **Skripts** mit dem Hinweis, dass die eingebetteten Abschnitte den beiden Migrationsdateien entsprechen.
+
+**`0132` und `0133` kamen am 2026-10-18 zuerst auf Production** — unbeabsichtigt,
+vorgesehen war Staging. Nachgezogen wird seitdem Staging, nicht auf Production
+zurückgenommen.
+
+**Stand:** `0132` ist inzwischen **auch auf Staging** angewendet und dort mit
+zwei Postflights belegt (Zeile oben). **`0133` fehlt auf Staging weiterhin**;
+dazu sind am 2026-10-19 `0135` und `0136` auf Staging gelaufen. Die
+Staging-Tabelle hat damit eine **Lücke bei `0133`/`0134`** — gewollt, und im
+Abschnitt „Die Nummer ist eine Reihenfolge, keine Kette" begründet. Reihenfolge und Freigaben:
+`supabase/checks/0132_staging_plan.md`; der Nachweis je Lauf steht in
+`supabase/checks/open_verifications.md`.
+
+## Die Nummer ist eine Reihenfolge, keine Kette
+
+Eine Migrationsnummer sagt, in welcher Reihenfolge die Dateien **entstanden**
+sind. Sie sagt **nicht**, dass jede Zahl davor in einer Umgebung stehen muss.
+Was tatsächlich steht, sagt allein diese Akte — und seit dem 2026-10-18 stehen
+Staging und Production ausdrücklich **nicht** auf demselben Stand.
+
+Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
+
+| Umgebung | angewendet | offen |
+|---|---|---|
+| Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133` | `0134` |
+
+**`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
+keine Abschätzung, sondern an den berührten Objekten ablesbar:
+
+| Migration | ersetzt / ändert | liest |
+|---|---|---|
+| `0133` | Trigger `purchases_paid_total_immutable_trg`, Funktion `purchases_paid_total_is_final()` | `purchases` |
+| `0134` | Funktion `seller_purchase(bigint)` | `purchases`, `purchase_items`, `skylanders` |
+| `0135` | Tabelle `skylanders` (+ Spalte `item_type`, + CHECK), Funktion `is_shop_eligible(text)` | `categories`, `shop_offers()`, `non_collectible_categories()` |
+| `0136` | Funktion `seller_business_backup()` | alle 28 Exportbereiche, darunter `skylanders` |
+
+Die Schnittmenge der GEÄNDERTEN Objekte ist **leer**. `0134` und `0136` lesen
+beide `skylanders`, aber Lesen begründet keine Reihenfolge: `0135` fügt eine
+Spalte hinzu und nimmt keine weg, und `seller_purchase()` nennt seine Spalten
+einzeln — eine zusätzliche Spalte ist für sie unsichtbar. Umgekehrt braucht
+`0136` die Spalte aus `0135`, und **nur** diese eine Abhängigkeit besteht:
+
+```
+0135  →  0136        zwingend (der Rumpf liest t.item_type)
+0133  ⊥  0135, 0136  unabhängig
+0134  ⊥  0135, 0136  unabhängig
+```
+
+Nachgefahren wird das nicht nur behauptet: `npm run verify:check-sql` fährt
+`0135` und `0136` in einer Wegwerf-Instanz (PostgreSQL 18.6 als WebAssembly,
+erfundene Zeilen) und prüft unter anderem, dass `0136` **vor** `0135`
+abbricht — und dass die Rücknahmen nur in der Reihenfolge `R0136`, `R0135`
+durchgehen.
+
+**Was beim Nachziehen zu tun ist:** wird `0133` später auf Staging angewendet,
+während `0135`/`0136` schon stehen, ändert das an beiden nichts — `0133`
+hängt an `purchases` und `0132`, nicht am Katalog. Die Tabelle oben wird dann
+in der Reihenfolge der **Ausführung** ergänzt, nicht in der der Nummern; die
+Spalte „Datum" hält die Wahrheit, die Nummer nur die Herkunft.
 
 ## Zwei eingefrorene Kopfzeilen, die nicht mehr stimmen
 

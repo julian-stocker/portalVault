@@ -14,12 +14,26 @@ deshalb über die Oberfläche, wie die Schreibfälle zu `0128` auch.
 **Wie.** Lokal gegen Staging: `npm run dev:staging`, anmelden als Betrieb. Die
 neue Oberfläche muss dafür **nicht** deployt sein. **Nur Staging.**
 
-> **Stand 2026-10-18: noch nicht durchführbar.** `0132` wurde versehentlich auf
-> Production angewendet und ist auf Staging **nicht** vorhanden — ohne sie lehnt
-> `seller_remove_purchase_item` jede Zeile eines importierten Einkaufs ab, und
-> die Fälle H1–H3 prüfen genau das Gegenteil. Reihenfolge und Freigaben:
-> `supabase/checks/0132_staging_plan.md`. **Auf Production dürfen diese Fälle
-> nicht laufen** — H4 und H5 legen Positionen an und buchen sie ein.
+> **Stand 2026-10-18: `0132` fehlt auf Staging** — sie wurde am 2026-10-18
+> versehentlich auf Production angewendet. **Drei der zwölf Fälle hängen
+> daran** und sind vorher nicht aussagekräftig:
+>
+> * **H6** (die nachgetragene Figur wieder entfernen) ist ohne `0132`
+>   unmöglich — die Fassung aus `0064` lehnt **jede** Zeile eines importierten
+>   Einkaufs ab, auch die gerade selbst angelegte.
+> * **H7** (eine Excel-Position bleibt geschützt) würde zwar ablehnen, aber aus
+>   dem falschen Grund: über die Herkunft des Eltern-Einkaufs statt über die
+>   vier Bedingungen an der Zeile. Der Fall soll die Zeilenregel beweisen.
+> * **H10** (die bezahlte Summe ist unveränderlich) braucht den Riegel, den
+>   `0132` in `seller_update_purchase` einzieht.
+>
+> Die übrigen neun Fälle wären schon heute fahrbar; gefahren wird trotzdem
+> erst nach `0132`, damit alle zwölf denselben Stand messen. Reihenfolge und
+> Freigaben: `supabase/checks/0132_staging_plan.md`. Eignung des
+> Datenbestands: `supabase/checks/0132_staging_readiness.sql`.
+>
+> **Auf Production dürfen diese Fälle nicht laufen** — H4 und H5 legen
+> Positionen an und buchen sie ein.
 
 
 ## Vorbedingung
@@ -156,6 +170,19 @@ Im (i)-Fenster den Belegabschnitt ansehen.
 
 **Erwartet:** **kein** Ausstellknopf, stattdessen „Eigenbelege sind noch nicht
 freigegeben…". Danach `receipt_lock_check.sql` — `9999 = 0`.
+
+**Seit der Staging-Belegsperre prüft H12 zwei Schranken statt einer.** Bis
+dahin war die Oberfläche die einzige: `RECEIPT_ISSUANCE_RELEASED = false`
+blendete den Knopf aus, die Datenbank hätte einen Beleg aber angenommen. Der
+Betriebsvorgang `operations/lock-receipt-issuance.sql` wurde auf Staging
+manuell angewendet und per Postflight bestätigt — `anon`, `authenticated`,
+`service_role` und PUBLIC haben auf Ausstellung und Korrektur **kein** EXECUTE
+mehr, nur `postgres`. H12 beweist damit auf Staging dasselbe wie auf
+Production: **nicht nur, dass kein Knopf da ist, sondern dass die Datenbank
+verweigert.** Der Nachweis steht in `open_verifications.md`, Abschnitt 0d.
+
+Die zwei bereits vorhandenen Eigenbelege bleiben davon unberührt und
+abrufbar — die Beleghistorie ist weiter für `authenticated` lesbar.
 
 ---
 

@@ -521,6 +521,34 @@ describe("no tool may create a sale that looks like real trade", () => {
     }
   });
 
+  /**
+   * NENNT DEN NAMEN, RUFT IHN ABER NIE AUF — und das ist prüfbar.
+   *
+   * `validate-check-sql.mts` führt `seller_create_sale` in der Liste der 21
+   * Funktionen, von denen Probelauf P17 beweist, dass der lesende
+   * Staging-Prüfzugang sie NICHT ausführen darf. Es erzeugt damit keinen
+   * Verkauf, sondern den Nachweis des Gegenteils — und es spricht
+   * ausschließlich mit PGlite, einer Wegwerf-Instanz ohne Netz und ohne
+   * Zugangsdaten.
+   *
+   * Statt einer Ausnahme in der Liste steht hier die Bedingung, die den
+   * Unterschied ausmacht: kein Supabase-Client, keine Umgebungsdatei, kein
+   * `.rpc(`.
+   */
+  const NENNT_NUR = "validate-check-sql.mts";
+
+  it(`${NENNT_NUR} nennt den Namen nur als Gegenprobe und erzeugt nichts`, () => {
+    const src = code(NENNT_NUR);
+    expect(src).toContain("PGlite");
+    expect(src).toContain("abgewiesen");
+    /* Kein Weg in eine echte Datenbank. */
+    expect(src).not.toContain("@supabase/supabase-js");
+    expect(src).not.toContain(".rpc(");
+    expect(src).not.toMatch(/\.env\.(local|staging)/);
+    /* Und der Aufruf steht in einer Schleife über die VERBOTENE Liste. */
+    expect(src).toContain("select * from public.${f}(${args})");
+  });
+
   it("and the list of such tools is complete", () => {
     /*
      * A new tool that creates sales must be added here, or this fails —
@@ -530,7 +558,8 @@ describe("no tool may create a sale that looks like real trade", () => {
     const creators = readdirSync(join(process.cwd(), "tools"))
       .filter((f) => f.endsWith(".mts"))
       .filter((f) => /seller_create_sale\b|seller_create_sale_with_details/
-        .test(read(`tools/${f}`)));
+        .test(read(`tools/${f}`)))
+      .filter((f) => f !== NENNT_NUR);
     expect(new Set(creators)).toEqual(new Set(Object.keys(tools)));
   });
 });

@@ -11231,3 +11231,233 @@ Korrekturbewegung beantwortet wird und nicht mit einem leeren Ledger.
   Zeilen ein Entfernen an, das die Datenbank immer ablehnte.
   `0134_purchase_item_source_row_visible.sql` gibt `source_row` mit aus und
   schließt die Lücke.
+
+## ADR-0128 · Portale und Spiele werden Katalogartikel — abgeleiteter Name, additive Felder
+
+**Status:** akzeptiert (Produktentscheidungen des Betreibers, 2026-10-19) ·
+**Umsetzung:** noch nicht begonnen · **Daten:** `docs/SKYLANDERS_DATA.md` 11k ·
+**Bestandsaufnahme:** `supabase/checks/Z0_catalog_accessories_readonly.sql`
+
+### Kontext
+
+Die Artikelsuche des Orderbuchs fand kein Portal. Die Analyse hat zwei
+unabhängige Ursachen gezeigt: die Suche kennt nur Name, SKY-ID und Rohname —
+nicht die Kategorie —, und **Portale gibt es im Katalog gar nicht**. Das Blatt
+`ZB` der Arbeitsmappe wurde nie importiert, und `order-2026.ts` hält fest, dass
+ein `ZB`-Verweis kein Skylander ist. Die 39 Spiele dagegen liegen vollständig
+im Katalog, nur ohne strukturierte Plattform.
+
+### Entschieden
+
+**1. Hauptname, kurz und abgeleitet.** `Portal – <Serie>` und
+`Spiel – <Serie>`, berechnet aus `item_type` und `series_code`. **Nicht
+gespeichert**: `skylanders.name` bleibt der Rohname aus der Quelle (Regel 4),
+und `display_name_override` behält Vorrang — eine redaktionelle Entscheidung
+aus `0117` wird nie überschrieben. Dieselbe Rangfolge wie im öffentlichen
+Katalog seit `0004`.
+
+**2. Varianten sind eigene Artikel.** Jede physisch unterschiedliche Ausführung
+bleibt eine eigene Katalogzeile mit eigener SKY-ID, eigenem Marktwert und
+eigenem Lagerbezug. Die Variante wird **angezeigt**, nicht zusammengeführt:
+Plattform, Modellnummer, Sprache. Die beiden Giants-Portale für Xbox 360
+(`84392790`, `84392080`) bleiben zwei Artikel; `83973080A Wireless` bleibt vom
+`83973080` getrennt.
+
+**3. Keine SKY-ID wird erfunden.** Die 21 Portale erhalten die IDs, die die
+Arbeitsmappe ihnen gegeben hat (`SKY-0615`–`SKY-0637`, ohne die beiden
+Disney-Infinity-Zeilen). Der Katalog endet bei `SKY-0614`, der Bereich ist
+frei. Bestehende IDs werden nicht angefasst.
+
+**4. Mehrfachzuordnung additiv, nicht strukturell.** `SKY-0637` ist in der
+Mappe `SF, T, SC`. `series_code` ist einwertig und trägt einen zusammengesetzten
+Fremdschlüssel `(category_id, series_code)` — eine n:m-Tabelle würde zehn
+Fremdschlüssel, jede RPC und die halbe Oberfläche berühren. Stattdessen:
+`series_code` bleibt die **Einordnung**, eine neue nullable Spalte
+`series_scope text[]` trägt die **vollständige dokumentierte Zuordnung**.
+Bestehende Abfragen bleiben unverändert gültig, weil `series_code` seine
+Bedeutung behält. Welche Serie die primäre ist, ist **offen**.
+
+**5. Dokumentierte Zuordnung ≠ nachgewiesene Kompatibilität.** Die
+Plattformangaben stammen aus Kopfzeilen der Mappe und gelten nur bis
+`SKY-0637`; darunter stehen eine URL, zwei Bundles und zwei Taschen unter der
+falschen Überschrift. Die Felder heißen deshalb `platforms` (dokumentiert) —
+eine Kompatibilitätsaussage entsteht erst, wenn sie geprüft ist.
+
+**6. Unbekannt bleibt unbekannt.** Die Sprache ist bei genau einem Spiel belegt
+(`SKY-0307`, `EN`). Die anderen 38 werden **nicht** als Deutsch geführt.
+
+**7. Der Fortschritt der Figuren ändert sich nicht.** `collection/stats.ts`
+rechnet den Nenner über sammelbare Katalogzeilen und zählt Spiele schon heute
+getrennt (`nonCollectibleOwned`). Portale in einer neuen Kategorie wären
+dagegen automatisch sammelbar — der Nenner je Serie würde wachsen, und eine
+Zahl, die Nutzer kennen, änderte sich ohne Zutun. Deshalb wird die Sammelbarkeit
+an `item_type` gehängt, und der Fortschritt **je Artikeltyp** getrennt
+ausgewiesen. Gespeichert wird nichts (ADR-0010), bestehende Sammlungsdaten
+bleiben unberührt.
+
+**8. Die Shop-Eignung wird am Artikeltyp entschieden.** `is_shop_eligible()`
+schließt heute allein die **Kategorie** `'Spiele'` aus. Eine neue Kategorie
+„Portale" wäre damit **automatisch shopfähig** — Portale erschienen in
+`shop_offers()`. Das ist der Fehler, der nicht passieren darf. Die Funktion
+bekommt deshalb `item_type = 'figure'` als zusätzliche Bedingung.
+
+**Die Ergebnismenge bleibt dabei nachweislich identisch:** Figuren sind
+`figure`, Spiele sind über die Kategorie schon ausgeschlossen. `Z0` nimmt
+vorher den Abdruck (Zahl der shopfähigen Zeilen, Zahl der Angebote und ein
+`md5` über die Angebotsliste), und der Postflight muss denselben Abdruck
+zeigen. **Keine neue öffentliche Sichtbarkeit**, keine Änderung der
+Spiele-Regel, kein bestehendes Angebot verändert. Ob Spiele oder Portale je
+öffentlich verkauft werden dürfen, ist eine **getrennte Produktentscheidung**,
+die ADR-0029/0048 revidiert und `0108` berührt — mit Alterskennzeichnung und
+steuerlicher Prüfung bei Software.
+
+**9. Was jetzt nicht kommt.** Die beiden **Disney-Infinity-Portale** bleiben
+außerhalb des Skylanders-Katalogs. **Starter Packs** und **Taschen** werden
+später als echte Artikel integrierbar, in einem eigenen Schritt. Die **URL** in
+`SKY-0638` ist kein Artikel und wird nicht importiert.
+
+**10. Historische Einkaufspositionen werden nicht automatisch zugeordnet.** Die
+206 Positionen ohne `sky_id` behalten ihren Rohnamen als Herkunftsnachweis. Ein
+Abgleich auf die neuen Portalartikel wäre eine namensweise Entscheidung des
+Betreibers, nie eine Heuristik. Die Freitextfunktion „Sonstiger Artikel" bleibt.
+
+### Konsequenzen
+
+* Additiv geplant sind fünf nullable Spalten auf `skylanders` —
+  `item_type` (mit Default `figure`), `platforms`, `series_scope`, `model_no`,
+  `language`. **Keine neue Tabelle, kein Fremdschlüssel, keine Änderung an
+  `series_code`.** `card_type` bleibt der Figurenvariantentyp (ADR-0030) und
+  wird nicht zweckentfremdet.
+* Eine Kategorie „Portale" braucht es **je Serie** — `categories` ist über
+  `(series_code, name)` eindeutig, und `skylanders` verweist zusammengesetzt.
+* Der abgeleitete Slug muss die Variante enthalten, sonst kollidieren die zwei
+  Giants-Portale; `slug` ist `unique`.
+* Alles bleibt rückwärtskompatibel: ohne die neuen Felder verhält sich jede
+  bestehende Abfrage wie heute.
+
+### Nachtrag nach Z0 (2026-10-19): zwei Dinge, die der Lauf geändert hat
+
+**Der ZB-Bereich ist eine Lücke, kein Anhang.** Z0 meldet `SKY-0822` als
+höchste SKY-ID, nicht `SKY-0614` — letzteres war der Stand eines Abzugs vom
+2026-09-04. `SKY-0615`–`SKY-0642` ist nachweislich frei, liegt aber **innerhalb**
+des historischen Bereichs `SKY-0001`–`SKY-0820`. Eine Vergabe nach „Maximum
+plus eins" wäre falsch. Z3 setzt die 21 IDs der Arbeitsmappe und prüft ihre
+Freiheit in derselben Transaktion.
+
+**`item_type` kommt in den Backup-Export — Entscheidung des Betreibers vom
+2026-10-19.** Die neue Spalte muss im Export entschieden sein, sonst fällt
+`manifest-gap.test.ts` (und das ist seine Aufgabe). Mein Entwurf hatte
+**Ausschluss mit Begründung** vorgeschlagen: der Wert ist aus der ebenfalls
+exportierten `category_id` nach der Regel von `0135` ableitbar, und die
+Gegenentscheidung verlangte eine neue Fassung von `seller_business_backup()`
+samt neuem Abdruck. Der Betreiber hat anders entschieden, mit dieser
+Begründung: „Der Artikeltyp ist langfristig eine eigenständige fachliche
+Eigenschaft und soll bei einer Wiederherstellung nicht aus Kategorien
+rekonstruiert werden müssen."
+
+Das ist die tragfähigere Entscheidung. „Ableitbar" heißt: eine
+Wiederherstellung muss die Regel erneut anwenden — und eine Regel, die
+nirgends ausgeführt wird, verfällt. Der Preis ist bekannt und begrenzt: eine
+neue Fassung der Exportfunktion, ein neuer Abdruck, eine Rücknahme mehr.
+
+**Umgesetzt als eigene Migration `0136_business_backup_item_type.sql`, nicht
+als Abschnitt in `0135`.** Drei Gründe, in dieser Reihenfolge:
+
+1. `0135` beweist sich selbst dadurch, dass sich **nichts** ändert —
+   Angebotsliste, Fortschrittsnenner, Overrides. Ein zweiter, 600 Zeilen
+   langer Funktionsrumpf in derselben Datei macht diesen Beweis unlesbar, ohne
+   ihn zu verbessern.
+2. Die Sicherungsfunktion hat eine **eigene Abdruckkette**: `0129` → `0130` →
+   `0131`, jede Fassung mit `md5` von Rumpf und Kommentar, jede mit einer
+   Rücknahme. `0136` ist das nächste Glied. In einer Spaltenmigration
+   verschwunden, wäre es keines.
+3. Die **Rücknahmen bleiben unabhängig**: `R0136` stellt den Rumpf aus `0131`
+   wieder her, `R0135` nimmt die Spalte zurück.
+
+**Der Rumpf aus `0136` ist der aus `0131` mit genau einer eingefügten Zeile**
+(`'item_type', t.item_type,`, unmittelbar nach `card_type` — die beiden
+Typspalten nebeneinander). Abdrücke: `24c3810288bb20929fe995554a267adf` →
+`f6d08440707ba72a8040a8d1e666c092`, 21 458 → 21 494 Zeichen, 352 → 353
+Feldzeilen, 28 Bereiche unverändert. `BACKUP_FORMAT_VERSION` bleibt **1**: die
+Version steigt, wenn sich die Bedeutung eines Feldes ändert oder ein Bereich
+verschwindet, nicht wenn ein Feld dazukommt. Eine ältere Sicherung bleibt
+lesbar; ihr fehlt im Bereich `figures` ein Schlüssel.
+
+**Zwei Stände sind ab jetzt zulässig.** `0131_function_body_check.sql` trug
+einen einzelnen Abdruck als Sollwert — damit hätte dieselbe Datei auf einer
+Umgebung vor und auf einer nach `0136` je eine Abweichung gemeldet, und beide
+Male wäre die Funktion in Ordnung gewesen. Eine Prüferwartung, die den
+Fortschritt als Fehler liest, wird abgeschaltet statt gelesen. Die Datei kennt
+jetzt eine Tabelle bekannter Stände und verlangt: zeichengleich **einem**
+bekannten Stand, und dieser Stand ist **freigegeben** (`0131` oder `0136`;
+`0130` ist bekannt, aber überholt).
+
+**Berechtigungen und Verträge bleiben, wie sie sind.** `0104` hat PUBLIC und
+`anon` das EXECUTE entzogen und es `authenticated` erteilt; `create or replace
+function` behält den bestehenden ACL, und `0136` enthält deshalb **kein**
+`grant` und **kein** `revoke`. Die Nachbedingung prüft beides nach: kein
+EXECUTE für PUBLIC oder `anon`, und der ACL ist materialisiert (ein NULL-ACL
+bedeutete PUBLIC). `stable`, `security definer` und der leere `search_path`
+bleiben unverändert.
+
+**Eine Folge für ältere Sicherungsdateien, benannt statt übersehen.**
+`npm run verify:backup` vergleicht einen heruntergeladenen Export mit dem
+Feldplan aus `manifest.ts`. Eine Datei, die **vor** `0136` gezogen wurde,
+meldet danach genau einen Befund: `figures: item_type` unter „kein
+vorgesehenes Feld fehlt". Das ist richtig und kein Fehler — die Datei ist
+älter als das Manifest. `BACKUP_FORMAT_VERSION` bleibt dennoch `1`: die Version
+beschreibt die **Bedeutung** der Felder, und kein bestehendes Feld hat seine
+geändert. Wer eine alte Datei prüft, prüft sie gegen den Stand, zu dem sie
+entstand.
+
+**Reihenfolge der Rücknahme ist zwingend: erst `R0136`, dann `R0135`.**
+PostgreSQL vermerkt für einen `language sql`-Rumpf **keine Abhängigkeit** auf
+die gelesenen Spalten. `alter table … drop column item_type` gelingt also,
+während die Sicherung die Spalte noch liest, und die Funktion scheitert erst
+beim **Aufruf** mit `42703` — eine Datensicherung, die erst im Ernstfall nicht
+mehr läuft. In PostgreSQL 18.6 nachgestellt und bestätigt; `R0135` bricht
+deshalb ab, solange der Rumpf `item_type` nennt.
+
+### Nachtrag: wie eine NEUE Zeile ihren Artikeltyp bekommt (2026-10-19)
+
+Der Backfill in `0135` trifft die 605 Zeilen von heute. Eine Zeile, die morgen
+entsteht, trifft er nicht — und der Katalogimport nennt `item_type` nicht: er
+schreibt genau neun Spalten, und das ist richtig. Ein neu importiertes Spiel
+bekäme damit `figure` aus dem Vorgabewert.
+
+**Nicht im Importer gelöst.** Wer `item_type` in den Payload nimmt, schreibt
+ihn bei jedem Lauf und überschreibt irgendwann eine Entscheidung, die jemand
+von Hand getroffen hat. Genau diese Begründung steht bei `card_type` schon
+schriftlich im Repository: „a heuristic that runs on every import is a
+heuristic that eventually overwrites a decision somebody made."
+
+**Gelöst mit einer Regel und einem Trigger**, beides in `0135`:
+
+```sql
+catalog_item_type_for_category('Spiele')  ->  'game'
+catalog_item_type_for_category(alles andere) -> 'figure'
+```
+
+* **Eine Positivliste, keine Heuristik.** Ein unbekannter Kategoriename wird
+  **nie** zum Spiel. Z3 erweitert genau diese eine Funktion um
+  `'Portale' -> 'portal'` — zusammen mit den Zeilen, die dann entstehen.
+* **Der Trigger greift auf jedem Schreibweg** (`before insert or update of
+  category_id`), nicht nur auf dem, an den jemand gedacht hat.
+* **Er überschreibt keine Entscheidung:** gesetzt wird nur, wenn die Zeile den
+  Vorgabewert `figure` trägt. Ein ausdrückliches `portal`, `bundle` oder
+  `other` bleibt stehen.
+* **Kein Widerspruch zur Sammelbarkeit:** eine Kategorie, die `game` ergibt,
+  muss in `non_collectible_categories()` stehen — die Nachbedingung von `0135`
+  bricht sonst ab.
+
+Nachgefahren in PostgreSQL 18.6 (`verify:check-sql`, P20), fünf Schreibfälle:
+neue Spiele-Zeile → `game` · neue Zeile in unbekannter Kategorie → `figure` ·
+ausdrückliches `portal` in `Spiele` → bleibt `portal` · Figur nach `Spiele`
+umgehängt → `game` · `bundle` nach dem Umhängen → bleibt `bundle`. Angebotszahl
+unverändert, und keine der neuen Zeilen wird fälschlich shopfähig.
+
+### Offen
+
+Die zehn Punkte aus `docs/SKYLANDERS_DATA.md` 11k, insbesondere die primäre
+Serie für `SKY-0637`, die Herkunft der zweiten Giants-Modellnummer und die
+Frage, ob Bundles und Taschen Katalogartikel werden.

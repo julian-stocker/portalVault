@@ -25,7 +25,11 @@ export const LIST = "supabase/SHA256SUMS.txt";
 /** Folder → which extensions belong in the list. */
 const COVERED: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["supabase/migrations", [".sql", ".md"]],
-  ["supabase/checks", [".sql", ".md"]],
+  /* `.json` seit 2026-10-19: `staging-suite.json` entscheidet, welche
+     Prüfdateien automatisch gegen Staging laufen, und daraus leitet sich die
+     Rechteliste des Prüfzugangs ab. Eine unbemerkte Änderung daran wäre
+     folgenreicher als an mancher Prüfdatei. */
+  ["supabase/checks", [".sql", ".md", ".json"]],
   /* Die rein lesenden Abfragen des Wiederherstellungstests laufen gegen
      Production — sie gehören genauso gegen unbemerkte Änderung geschützt. */
   ["supabase/checks/dr", [".sql"]],

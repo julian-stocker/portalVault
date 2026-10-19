@@ -60,7 +60,7 @@ befund (nr, bereich, frage, messung, erwartet) as (values
 
   -- ------------------------------------------------------- 0 Welche Datenbank
   --
-  -- BERICHTIGT AM 2026-10-19. Hier stand ein Sollwert `0` mit der Begruendung,
+  -- BERICHTIGT AM 2026-10-18. Hier stand ein Sollwert `0` mit der Begruendung,
   -- nur Staging trage die synthetischen Testfiguren. **Diese Annahme war
   -- falsch**, und der Lauf hat sie widerlegt: Production traegt eine davon.
   --

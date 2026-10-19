@@ -1,7 +1,7 @@
 -- ===========================================================================
 -- DIE TESTFIGUR AUF PRODUCTION — Identitaet, Herkunft, Verknuepfungen
 --
--- ANLASS. Der Zustandsaudit vom 2026-10-19 hat auf Production
+-- ANLASS. Der Zustandsaudit vom 2026-10-18 hat auf Production
 -- (`zmiwxswrpkmizvqsgype`) EINE Figur aus dem Fixture-Bereich gefunden, wo die
 -- Diagnose keine erwartete. Die Erwartung war falsch — `verify:rls` legt
 -- `SKY-9998` ausdruecklich als DAUERHAFTE Shop-Fixture an, deren
@@ -56,7 +56,7 @@ zeilen (nr, bereich, gegenstand, befund, erwartet) as (values
 
   -- ------------------------------------------------------- Welche Serie ist das
   --
-  -- BERICHTIGT AM 2026-10-20. Hier stand: „echte Katalogzeilen in denselben
+  -- BERICHTIGT AM 2026-10-18. Hier stand: „echte Katalogzeilen in denselben
   -- Serien (muss 0 sein)", mit dem Sollwert 0 und der Annahme, eine Serie mit
   -- Fixtures duerfe keine echten Artikel enthalten. **Diese Annahme war
   -- falsch**, und der Lauf hat sie widerlegt: beide Fixtures stehen in `SA`,

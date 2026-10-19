@@ -92,24 +92,26 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
 | `0133_production_readonly.sql` | lesende Nachprüfung zu `0133` auf Production: Form und Zustand des Triggers, und ob eine der sieben Funktionen, die `purchases` schreiben, die bezahlte Summe anfasst |
 | `0132_staging_plan.md` | der Plan, Staging nachzuziehen — `0132`, der Schreibnachweis H1–H12, dann `0133`. Nichts davon ausgeführt |
 | `state_audit_readonly.sql` | **für beide Projekte**: welche Migrationen sind in dieser Datenbank wirklich angewendet? Vergleicht `md5(prosrc)` jeder von `0126`–`0134` berührten Funktion gegen die Abdrücke aller bekannten Fassungen und nennt die Migrationsnummer. Dazu Trigger, Belegsperre, Lagerbild, Katalog und Zubehör |
-| `open_verifications.md` | die Nachweise, die **fehlen** — Gegenstück zu `APPLIED.md`. Production P1–P7, Staging S1–S6, was gar keinen Nachweis hat, und in Abschnitt 0 die am 2026-10-19 bestätigten Production-Ergebnisse |
+| `open_verifications.md` | die Nachweise, die **fehlen** — Gegenstück zu `APPLIED.md`. Production P1–P7, Staging S1–S6, was gar keinen Nachweis hat, und in Abschnitt 0 die am 2026-10-18 bestätigten Production-Ergebnisse |
 | `fixture_audit_readonly.sql` | die Testfigur auf Production: Identität, Serie, Anlagedatum und **jede** Verknüpfung (Lager, Bewegungen, Bestellungen, Reservierungen, Warenkorb, Sammlung, Ein- und Verkauf, Zuordnungen) — und drei blockierende Zeilen zur Außenwirkung |
-## Drei Stufen der Prüfung — und was jede beweist
+## Vier Stufen der Prüfung — und was jede beweist
 
-Am 2026-10-19 sind vier Prüfdateien im Production-Editor abgebrochen, nachdem
+Am 2026-10-18 sind vier Prüfdateien im Production-Editor abgebrochen, nachdem
 sie als „geprüft" gemeldet worden waren. Daraus folgt eine Unterscheidung, die
 in jedem Bericht stehen muss:
 
 | Stufe | Werkzeug | findet | findet NICHT |
 |---|---|---|---|
-| **Syntax** | `pglast` (libpg_query) | Syntaxfehler, Anweisungstypen | jeden Namens- und Typfehler — beide Abbrüche vom 2026-10-19 waren syntaktisch einwandfrei |
+| **Syntax** | `pglast` (libpg_query) | Syntaxfehler, Anweisungstypen | jeden Namens- und Typfehler — beide Abbrüche vom 2026-10-18 waren syntaktisch einwandfrei |
 | **Statische Referenzprüfung** | `src/lib/admin/check-sql-references.test.ts`, `check-sql-hazards.test.ts` | erfundene Tabellen und Funktionen · Spalten hinter eindeutig gebundenen Aliassen · **nirgends gebundene Aliasse (42P01)** · **ungecastete Katalogspalten an einer Verkettung (42725)** | einen Alias, der in der falschen Unterabfrage steht · Spalten ohne eindeutige Aliasbindung |
-| **Planprüfung** | `npm run verify:check-sql` — echtes PostgreSQL (PGlite) mit Stub-Schema aus den Migrationen | **alles davon**, plus jeden Typkonflikt und jede Signatur, über alle Geltungsbereiche | Laufzeitfehler an echten Daten · ob die Prüfung fachlich das Richtige misst · **Versionsunterschiede**: PGlite fährt 18.6, der Syntaxprüfer die Grammatik von 15, und Production ist hier nicht festgehalten |
+| **Planprüfung** | `npm run verify:check-sql`, Stufe 2 — echtes PostgreSQL (PGlite) mit Stub-Schema aus den Migrationen | **alles davon**, plus jeden Typkonflikt und jede Signatur, über alle Geltungsbereiche | Laufzeitfehler an echten Daten · ob die Prüfung fachlich das Richtige misst · **Versionsunterschiede**: PGlite fährt 18.6, der Syntaxprüfer die Grammatik von 15, und Production ist hier nicht festgehalten |
+| **Definitionslauf** | `npm run verify:check-sql`, Stufe 3 — jeder gefaltete Funktionsrumpf wird in PostgreSQL **erzeugt** | bei `language sql` jede Spalte, jeden Typ und jede Signatur IM RUMPF (`42703`, `42883`, `42P01`) — dort, wo die Planprüfung nicht hinsieht | bei `language plpgsql` nur die Syntax: Namen darin sieht erst der Aufruf · ob die Funktion das Richtige TUT |
+| **Probelauf** | `npm run verify:check-sql`, Stufe 4 — die noch nicht angewendeten Migrationen gegen **erfundene** Zeilen, mit Gegenproben | dass eine Migration in EINER Transaktion durchläuft, ohne Klammer abbricht, bei verändertem Zustand abbricht und nach einem Abbruch nichts zurücklässt; dass Rücknahmen nur in ihrer Reihenfolge gehen | alles Mengenmäßige: die Zeilen sind erfunden und sagen über die echten Bestände nichts |
 
 **Keine dieser Stufen ist „erfolgreich ausgeführt".** Das ist erst der Lauf im
 SQL-Editor, und nur er zählt als Nachweis.
 
-**Verbindliche Reihenfolge, seit dem 2026-10-19:**
+**Verbindliche Reihenfolge, seit dem 2026-10-18:**
 
 1. `npm run verify:check-sql` — **vor jedem** Lauf im SQL-Editor, und bei
    jeder Änderung an einer Datei unter `supabase/checks/`. Stufe 3 läuft
@@ -118,12 +120,40 @@ SQL-Editor, und nur er zählt als Nachweis.
    Protokoll.
 3. Ergebnis nach `open_verifications.md`.
 
-`@electric-sql/pglite` ist seit dem 2026-10-19 eine feste `devDependency`.
+`@electric-sql/pglite` ist seit dem 2026-10-18 eine feste `devDependency`.
 Fehlt sie, **schlägt die Prüfung fehl** — sie überspringt sich nicht mehr
-still. Zwei Dateien lassen sich begründet nicht planen; sie stehen mit ihrem
-Grund in `NICHT_PLANBAR` in `tools/validate-check-sql.mts`, und wenn eine von
-ihnen eines Tages doch plant, bricht der Lauf ab und verlangt das Kürzen der
-Liste.
+still. **Eine** Datei lässt sich begründet nicht planen und **ein**
+Funktionsrumpf nicht erzeugen (`system_auth_inventory()` liest `auth.users`,
+eine Tabelle, die keine Migration beschreibt); beide stehen mit ihrem Grund in
+`NICHT_PLANBAR` bzw. `NICHT_ERZEUGBAR` in `tools/validate-check-sql.mts`, und
+wenn eine von ihnen eines Tages doch durchgeht, bricht der Lauf ab und
+verlangt das Kürzen der Liste.
+
+### Drei Löcher, die der Definitionslauf aufgedeckt hat (2026-10-19)
+
+Der Definitionslauf war nicht als Prüfung des Prüfwerkzeugs gedacht und ist es
+geworden. Alle drei gingen in die **falsche** Richtung — stiller Erfolg statt
+Fehlalarm:
+
+* **Der Kopfkommentar blieb am Statement hängen.** Das Abschneiden verlangte,
+  dass Kommentarzeilen aneinanderstoßen; eine Leerzeile im Kopf — in diesen
+  Dateien die Regel — ließ den Rest stehen. Folge: die Anweisung wurde nicht
+  als planbar **erkannt**, nie geplant, und die Datei meldete „OK".
+  `0125_function_test.sql` hatte sein erstes SELECT nie geplant bekommen.
+* **Der Stub-Schema-Generator folgte keiner Tabellenumbenennung.** `0026`
+  benennt `business_settings` in `platform_settings` um — einmal in der ganzen
+  Historie. Im Stub lebten danach beide: `platform_settings` mit nur den
+  danach ergänzten Spalten, `business_settings` als Geisttabelle. Eine
+  Prüfdatei auf `platform_settings.contact_email` hätte falschen Alarm
+  gegeben, eine auf `business_settings` falschen Erfolg.
+* **Temporärtabellen landeten im Stub-Schema.** `0135` legt ihren Abdruck in
+  einer Temporärtabelle ab; ohne Schema-Angabe sah der Generator eine Tabelle
+  in `public`. Eine Prüfdatei, die sie außerhalb ihrer Sitzung abfragt, hätte
+  grün geplant.
+
+Dazu kennt der Generator jetzt `create sequence` und `drop table`. Gefunden
+wurden alle drei, weil eine neue Stufe dieselben Dateien mit **anderen Augen**
+las — nicht durch genaueres Hinsehen auf dieselbe Weise.
 
 ## Zwei Dateien schreiben — niemals auf Production
 
@@ -134,6 +164,17 @@ Liste.
 
 Alle übrigen Dateien unter `supabase/checks/` sind reine SELECTs.
 
+| `Z0_catalog_accessories_readonly.sql` | **Bestandsaufnahme vor der Portal- und Spielintegration** (ADR-0128): die `display_name_override` der 39 Spiele im Wortlaut, der Nachweis dass `SKY-0615`–`SKY-0642` frei sind, Serien und Kategorien, Slug-Kollisionen, der Fortschritts-Nenner von heute, und der **Abdruck der Shop-Eignung** (Zeile 601–603), gegen den später bewiesen wird, dass kein Angebot sich geändert hat |
+| `0135_preflight.sql` | Eingangszustand vor `0135`: `item_type` fehlt noch, die Kategorie `Spiele` steht, und die sechs Abdrücke (shopfähig, Angebote, Angebotsliste, Nenner, Nenner je Serie, Overrides). Trägt den **Z0-Vertrag** (Zeilen 901–915) |
+| `0135_postflight.sql` | derselbe Satz Zeilen mit umgekehrten Erwartungen an den Zustand und **unveränderten** an alles andere — plus den Z0-Vertrag |
+| `0136_preflight.sql` | Eingangszustand vor `0136`: die Sicherung ist der Stand `0131` (Abdruck, Länge, Kommentar, 28/352, Bereich `figures` mit neun Feldern), `0135` steht, Rechte und Ausschlüsse intakt |
+| `0136_postflight.sql` | gegenläufig: Stand `0136`, 28/353, `figures` mit zehn Feldern, `item_type` direkt nach `card_type` — Rechte, Formatvertrag und die neun privaten Felder unverändert |
+| `staging_pending_migrations.sql` | **nur Staging**: `0132` steht, `0133` und `0134` stehen **nicht** (Funktion, Trigger, Abdruck von `seller_purchase`), dazu ein Umgebungsstempel, der den Lauf im falschen Projekt abfängt |
+| `0135_0136_staging_run.md` | **der Laufzettel** für die manuelle Ausführung von `0135`/`0136` auf Staging: Dateinamen, Reihenfolge S0–S11, Transaktionsrahmen, der Z0-Vertrag, Erwartungen und Abbruchkriterien je Schritt, Umgang mit `25P02`, Rücknahme in der Reihenfolge `R0136`→`R0135` |
+| `staging-suite.json` | **die eine Quelle**, welche Prüfdateien `npm run db:check:staging` fährt, in welchem Modus, mit welchem Vertrag und unter welcher lesenden Vorbedingung. Daraus leitet `tools/lib/grant-plan.py` auch die Rechteliste des Prüfzugangs ab |
+| `staging_agent_access_plan.md` | der Plan für den automatisierten Staging-Zugang in drei Phasen: lesende Prüfungen, Schreibtests über die bestehenden APIs, Migrationen über einen gesondert abgesicherten Weg |
+| `staging_agent_role_diagnosis.sql` | **nur Staging, rein lesend**: der Abbruch von `staging-agent-setup.sql` vom 2026-10-19 — Rollenmitgliedschaften **in beiden Richtungen** mit allen Optionen, wie weit das Setup gekommen ist (Stempel, Grants, Policies), und ob die Belegsperre unverändert dicht ist. Zeile 9999 zählt nur die Sicherheitsfragen: ein vollständiges Zurückrollen ist ein gültiger Ausgang |
+| `z0_overrides_diagnosis.sql` | **rein lesend**: warum der Z0-Vertrag „53 statt 39 Overrides" meldete. Unterscheidet über das Änderungsprotokoll aus `0004` zwischen falschem Sollwert (Z0 zählte die 39 **Spiele**) und echter Datenänderung. Blockierend sind nur die Zeilen, die eine Änderung bedeuten würden |
 | `accessory_audit_readonly.sql` | Bestandsaufnahme für die Zubehörplanung: die 206 Einkaufspositionen ohne `sky_id` nach Zustand, Herkunft und Rohnamen, und was an den Spiele-Katalogzeilen operativ hängt |
 | `0132_test_plan.md` | die Schreibfälle H1–H12 zu `0132`, über die Oberfläche gegen Staging — was die lesenden Prüfdateien nicht zeigen können. **Noch nicht durchgeführt:** `0132` ist auf Staging nicht angewendet, und auf Production werden keine Testzeilen angelegt |
 | `0133_preflight.sql` | Eingangszustand vor `0133`; Grundlage aus `0115`/`0132`, Trigger fehlt noch |

@@ -18,7 +18,7 @@
 -- WAS SIE NICHT BEWEISEN KANN. Statischer Text, kein Lauf. Dass ein UPDATE
 -- ohne `total_cost` wirklich durchlaeuft, zeigt erst ein Schreibvorgang. Der
 -- gehoert auf Staging und in die Oberflaeche, nicht in den Production-
--- SQL-Editor: `supabase/checks/0132_test_plan.md`, Faelle H7 bis H9.
+-- SQL-Editor: `supabase/checks/0132_test_plan.md`, Faelle H10 und H11.
 --
 -- Was sie dafuer leistet: 201-205 zeigen, dass von den Funktionen, die
 -- `purchases` ueberhaupt schreiben, genau eine die bezahlte Summe anfasst —
@@ -94,7 +94,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
             from riegel))::text, 'false'),
   -- GECASTET, UND ZWAR BEIDE. `tgname` ist `name`, `tgenabled` ist `"char"` —
   -- und `text || "char"` ist in PostgreSQL MEHRDEUTIG: der Lauf vom
-  -- 2026-10-19 brach mit `42725 operator is not unique: text || "char"` ab,
+  -- 2026-10-18 brach mit `42725 operator is not unique: text || "char"` ab,
   -- bevor eine einzige Zeile entstand. Ein Katalogtyp wird vor der
   -- Verkettung immer ausdruecklich nach text gebracht.
   (108, 'Trigger', 'Info: alle nicht-internen Trigger auf purchases',

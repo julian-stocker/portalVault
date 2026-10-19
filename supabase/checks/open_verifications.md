@@ -1,13 +1,13 @@
 # Offene Prüfungen — was nachweislich noch NICHT geprüft ist
 
-**Stand 2026-10-19.** Diese Datei führt die Nachweise, die **fehlen**. Sie ist das
+**Stand 2026-10-18.** Diese Datei führt die Nachweise, die **fehlen**. Sie ist das
 Gegenstück zu `APPLIED.md`: dort steht, was gelaufen ist, hier, was aussteht.
 Ein Punkt wird erst gestrichen, wenn ein Lauf ihn belegt — nicht, wenn er
 plausibel erscheint.
 
 **Nichts davon ist ausgeführt.** Jeder Punkt braucht eine eigene Freigabe.
 
-## 0. Lauf vom 2026-10-19 — was damit BESTÄTIGT ist
+## 0. Lauf vom 2026-10-18 — was damit BESTÄTIGT ist
 
 Der Betreiber hat die vier lesenden Prüfungen auf Production
 (`zmiwxswrpkmizvqsgype`) ausgeführt. Bestätigt ist damit:
@@ -21,13 +21,13 @@ Der Betreiber hat die vier lesenden Prüfungen auf Production
 | `0132`-Postflight | **`9999 = 0`** — die am 2026-10-18 korrigierten Prüfungen bestehen |
 | Eröffnungsbestand aus dem Cutover | **245 Positionen / 806 Einheiten**, und **806 stimmt exakt mit `legacy_stock_events` überein** |
 | Historische Einkaufssumme | **4 476,39 €**, unverändert |
-| Lager am 2026-10-19 | 306 Positionen / 779 Einheiten / 362 Bewegungen |
+| Lager am 2026-10-18 | 306 Positionen / 779 Einheiten / 362 Bewegungen |
 | Die 109 wiedereröffneten Importpositionen | **vollständig geschützt** — alle tragen `source_row`, keine würde `seller_remove_purchase_item` durchlassen |
 | Bestandsintegrität | keine negativen Bestände, keine unzulässige Reservierung, keine Position mit negativem Eröffnungsbestand |
 
 **Der wichtigste Nebenbefund: die Invariante aus ADR-0127 hat sich bewährt.**
-Zwischen dem 2026-10-18 und dem 2026-10-19 sind Bestand und Journal um je
-**+78** gewachsen (701 → 779 Einheiten, 284 → 362 Bewegungen) — und der
+Zwischen dem ersten und dem zweiten Lauf sind Bestand und Journal um je **+78**
+gewachsen (701 → 779 Einheiten, 284 → 362 Bewegungen) — und der
 Eröffnungsbestand ist mit 245 / 806 **unverändert** geblieben. Genau das sagt
 Invariante 2 voraus: jede Mengenänderung geht durch beide Seiten, die Differenz
 aus dem Cutover bewegt sich nicht.
@@ -41,7 +41,7 @@ aus dem Cutover bewegt sich nicht.
 | 0069: „ein Trophy und zwei Portale" ohne Katalogbezug | **206** Einkaufspositionen ohne `sky_id` | Zahl deutlich höher als geplant. Aufklärung: `accessory_audit_readonly.sql` |
 | Spiele sind im Orderbuch nicht wählbar | **40** Spiele-Katalogzeilen, **39 aktiv und sichtbar** — und damit in der Einkaufsauswahl wählbar; **13 Lagerzeilen und 18 Verkaufspositionen** hängen schon daran | Spiele sind operativ längst in Gebrauch, nur nicht modelliert und nicht als Bereich sichtbar |
 
-## 0b. Lauf vom 2026-10-19, zweiter Teil — vier Abbrüche und was daraus folgt
+## 0b. Lauf vom 2026-10-18, zweiter Teil — vier Abbrüche und was daraus folgt
 
 | Datei | Ergebnis |
 |---|---|
@@ -62,7 +62,7 @@ Prüfdatei gegen ein echtes PostgreSQL (PGlite) mit einem Stub-Schema aus den
 Migrationen, und zwei dependency-freie Wächter in der Testsuite fangen genau
 die beiden Klassen ab, die hier durchgekommen sind.
 
-## 0c. Lauf vom 2026-10-20 — die vier letzten lesenden Prüfungen
+## 0c. Lauf vom 2026-10-18 — die vier letzten lesenden Prüfungen
 
 Alle vier ausgeführt. **Drei ohne blockierende Abweichung, eine mit einer
 widerlegten Annahme meinerseits.**
@@ -116,19 +116,346 @@ Serienzugehörigkeit ist jetzt eine Messung ohne Sollwert.
 gäbe keine Außenwirkung zurück, die nicht schon 0 ist, und PROJECT_STATUS führt
 sie seit dem 2026-09-19 bewusst.
 
+## 0d. Staging-Betriebsvorgänge — manuell angewendet, nicht Migrationen
+
+Dieser Abschnitt führt **betriebliche Schalter**, keine Migrationen. Sie stehen
+nicht in `APPLIED.md` und nicht in der Migrationskette; sie sind rücknehmbar und
+werden hier protokolliert, weil ein Rechtestand, der nur im Chatverlauf steht,
+nicht dokumentiert ist.
+
+### Belegsperre auf Staging (`qqxcpesbwfxzgytkdsac`)
+
+| | |
+|---|---|
+| Vorgang | `supabase/operations/lock-receipt-issuance.sql` |
+| SHA-256 der ausgeführten Fassung | `9812867cd95b1a546ebaf8743e8823d49ddfdc255929974710f346d82fa8d8d7` — bitgenau die Fassung, die am 2026-10-17 auf Production lief (Commit `81386e6`) |
+| Art | **Betriebsvorgang, keine Migration.** Drei `DO`-Blöcke, einziger ausgeführter Befehl `revoke execute on function` |
+| Ausführung | **manuell im Supabase-SQL-Editor durch den Betreiber**, in `BEGIN` / `COMMIT` geklammert. Nicht aus diesem Repository heraus — es gibt dafür keinen Zugang |
+| Zeitpunkt | **vom Betreiber nicht mitgeteilt und hier deshalb nicht eingetragen.** Gemeldet im Arbeitsschritt nach der Freigabe vom 2026-10-18 |
+| Rücknahme | `supabase/operations/unlock-receipt-issuance.sql` — stellt den Stand her, den `0122`/`0128` erklären |
+
+**Rechtestand vor der Sperre** (gemessen mit `receipt_grants_diagnosis.sql`,
+Zustand **A MIGRATIONSSTAND**):
+
+| Funktion | ACL |
+|---|---|
+| `seller_issue_purchase_receipt(bigint)` | `postgres=X/postgres`, `authenticated=X/postgres`, `service_role=X/postgres` |
+| `seller_issue_purchase_receipt_correction(bigint)` | dieselben drei |
+| PUBLIC, `anon` | kein EXECUTE · beide ACLs materialisiert |
+
+**Rechtestand nach der Sperre** (beide Postflights bestanden):
+
+| Prüfung | Befund |
+|---|---|
+| `receipt_lock_check.sql` | **`9999 = 0`** |
+| `anon`, `authenticated`, `service_role`, PUBLIC | je **`false`**, für Ausstellung **und** Korrektur |
+| `postgres` | je **`true`** — die Sperre bleibt rücknehmbar |
+| 300 (Schreibtrigger auf `purchase_receipts`) | `0` |
+| 304 (Unveränderlichkeits-Trigger) | `2` |
+| `receipt_grants_diagnosis.sql` | **`9999 = 0`**, Zeile **401 = „B GESPERRT (keine API-Rolle, nur postgres)"** |
+| 201, 202 (ACL im Volltext) | **ausschließlich `postgres=X/postgres`** |
+| 203 (Beleghistorie) | weiter ausführbar für `postgres`, `authenticated`, `service_role` — **der Abruf bleibt offen** |
+
+**Bestehende Belege unverändert:**
+
+| Größe | vorher | nachher |
+|---|---|---|
+| Eigenbelege (301 / 402) | 2 | **2** |
+| Revisionen (403) | 1 und 2 | **`1=1, 2=1`** |
+| Zählerzeilen (302) | — | 1 |
+| Abrufnachweise (303) | — | 7 |
+| unbekannte Schreibtrigger (404) | — | 0 |
+
+**Folgen, die ins Gedächtnis gehören:**
+
+* Auf Staging lässt sich kein Eigenbeleg mehr ausstellen **oder korrigieren**.
+  Ein künftiger Belegtest braucht vorher `unlock-receipt-issuance.sql`.
+* **Ein erneuter `0128`-Postflight auf Staging wird anschlagen**: der
+  Rechtestand weicht nun von dem ab, den `0122`/`0128` herstellen. Das ist
+  gewollt — dieselbe Lage wie auf Production.
+* Die Sperre steht in **keiner** Migration. Ein neu aufgebautes Staging hätte
+  sie nicht; `receipt_lock_check.sql` ist der Weg, das zu merken.
+* `RECEIPT_ISSUANCE_RELEASED = false` ist unverändert. **Freigabe B bleibt
+  verweigert** — die Sperre ersetzt sie nicht, sie trägt sie.
+
+## 0e. Migration `0132` auf Staging — angewendet und zweifach belegt
+
+| | |
+|---|---|
+| Projekt | `qqxcpesbwfxzgytkdsac` |
+| Datei | `supabase/migrations/0132_purchase_item_remove_by_line.sql` |
+| SHA-256 | `382aa64749cb035e9a6402fe36fc16f9e1ae663228c7806cc34e29331b7ec6b3` — **dieselbe Fassung, die auf Production lief**; gegengeprüft gegen Datei, `SHA256SUMS.txt`, Git-Blob und `APPLIED.md` |
+| Ausführung | **manuell im Supabase-SQL-Editor durch den Betreiber**, in `BEGIN` / `COMMIT`. Nicht aus diesem Repository heraus |
+| Zeitpunkt | 2026-10-18 |
+
+**Postflight 1 — `0132_postflight.sql`: `9999 = 0`.** Die alte Herkunftssperre
+ist entfernt, die **vier** Schutzbedingungen für Importpositionen stehen, der
+Riegel auf `total_cost` ist da.
+
+**Postflight 2 — `receipt_lock_check.sql`: `9999 = 0`.** `anon`,
+`authenticated`, `service_role` und PUBLIC dürfen weder ausstellen noch
+korrigieren, `postgres` behält EXECUTE, 0 schreibende Belegtrigger, 2
+Unveränderlichkeits-Trigger. **Die Migration hat die Belegsperre nicht
+angetastet.**
+
+**Bezugswerte vor und nach der Migration identisch** — 0132 bewegt keine Daten,
+und das ist jetzt gemessen, nicht nur aus dem Dateitext geschlossen:
+
+| Größe | Wert |
+|---|---|
+| importierte Einkäufe / Positionen | 84 / 2 114 |
+| Lagerzeilen / Einheiten / Bewegungen | 285 / 812 / 26 |
+| Importsumme `total_cost` | 4476.39 |
+| Eigenbelege / Zählerzeilen / Abrufnachweise | 2 / 1 / 7 |
+
+**Damit sind Staging und Production in `seller_remove_purchase_item` und
+`seller_update_purchase` auf demselben Stand.** Offen bleibt auf Staging
+`0133`; auf Production ist es umgekehrt angewendet. Der vollständige Abgleich
+ist S6.
+
+## 0f. Z0 — Bestandsaufnahme vor der Portal- und Spielintegration (Staging)
+
+Beide Prüfungen `9999 = 0`, alle Stopp-Kriterien erfüllt.
+`Z0_catalog_accessories_readonly.sql` und `orderbook_catalog_scope.sql`,
+ausgeführt vom Betreiber auf `qqxcpesbwfxzgytkdsac`.
+
+| Größe | Wert |
+|---|---|
+| Katalogzeilen | **605** |
+| Spiele | **39, alle mit `display_name_override`** |
+| belegte IDs im ZB-Bereich `SKY-0615`–`SKY-0642` | **0** |
+| Portal-Kategorien / Portal-Slugs | **0 / 0** |
+| Slugs eindeutig | **605 von 605** |
+| **sammelbare Artikel (Fortschritts-Nenner)** | **534** |
+| **shopfähige Artikel** | **534** |
+| **öffentliche Angebote** | **256** |
+| Spiele im öffentlichen Angebot | **0** |
+| Nicht-Figuren unter den shopfähigen | **0** |
+| **Shop-Abdruck `md5`** | **`4d1d6c30fe0ae886ca2689bcb1fe9634`** |
+| historische Positionen ohne `sky_id` | 206 |
+| `item_type` und die vier weiteren Spalten | **existieren nicht** |
+
+**Diese drei Werte sind der Vertrag für Z1:** nach `0135` müssen
+**534 / 256 / `4d1d6c30fe0ae886ca2689bcb1fe9634`** unverändert sein — Zahl der
+shopfähigen Zeilen, Zahl der Angebote und der Abdruck über die vollständige
+Angebotsliste (`sky_id|condition|price`). Die Migration prüft das in ihrer
+eigenen Transaktion und bricht sonst ab; der Postflight macht es von außen
+nachvollziehbar. Dass 534 = 534 gilt, ist kein Zufall: `is_shop_eligible()`
+und der Fortschritts-Nenner stellen heute dieselbe Frage.
+
+### Wie die sechs Z0-Werte nach Z1 geprüft werden
+
+Sechs Größen, drei Prüfwege. Die Migration vergleicht **alle sechs** gegen
+ihren eigenen Abdruck aus derselben Transaktion — exakt und umgebungsneutral,
+weil sie den Vorzustand selbst gemessen hat. Pre- und Postflight messen
+dieselben sechs, damit ein Mensch sie nebeneinander legen kann. Und fünf davon
+prüfen sie **gegen die hier dokumentierten Zahlen**, sobald der Vertragsmodus
+gewählt ist:
+
+```sql
+select set_config('skyisles.z0', 'staging', true);
+
+-- hier 0135_preflight.sql bzw. 0135_postflight.sql einfügen
+```
+
+**Die Zahlen stehen in den Prüfdateien selbst** — versioniert, prüfsummiert,
+nachlesbar. Eingetippt wird nur der Modus. Ein Sollwert, den der Bediener bei
+jedem Lauf mitliefert, wäre bei jedem Lauf eine neue Gelegenheit für einen
+Tippfehler, und ein Tippfehler in der **Erwartung** lässt die Prüfung bestehen.
+
+**Fehlt die Zeile, ist die Prüfdatei blockierend** (Zeile 902). Es gibt damit
+keinen Lauf, der die fünf Werte still übergeht: entweder sie werden geprüft,
+oder der Verzicht steht als `keine` ausdrücklich im Protokoll. **Warum nicht
+bedingungslos:** Production führt andere Zahlen, und dieselbe Datei muss dort
+ohne fünf Fehlalarme laufen. Eine umgebungsblinde Erwartung war in diesem
+Projekt schon zweimal die Ursache eines falschen Befundes (`0132`-Readiness
+Zeile 602, `0124`-Preflight Zeile 106).
+
+| Z0-Größe | Wert (Staging) | Migration | Flight | Vertrag |
+|---|---|---|---|---|
+| shopfähige Zeilen | 534 | `shopfaehig` | 601 | **911** |
+| öffentliche Angebote | 256 | `angebote` | 602 | **912** |
+| Abdruck der Angebotsliste | `4d1d6c30…9634` | `angebote_md5` | 603 | **913** |
+| sammelbare Artikel | 534 | `sammelbar` | 701 | **914** |
+| Nenner je Serie | (Zeichenkette) | `sammelbar_je_serie` | 702 | — |
+| **Spiele** mit `display_name_override` | **39** | `override_md5` | 203 / 204 | **915** |
+| `display_name_override` **katalogweit** | **53** (am 2026-10-19 gemessen, **kein Z0-Wert**) | `override_md5` | 916 | — |
+
+### Berichtigt am 2026-10-19: die 39 Overrides waren spielebezogen
+
+Der erste Lauf von `supabase/operations/staging-0135-0136.sql` brach ab:
+
+```
+ABBRUCH A7: der Z0-Vertrag stimmt nicht mehr — overrides ist 53, erwartet 39.
+```
+
+**Ursache: ein falsch abgeleiteter Sollwert, keine Datenänderung.** Z0 zählt
+die Overrides in `Z0_catalog_accessories_readonly.sql` Zeile 102 **innerhalb
+der CTE `spiel`** — also nur in der Kategorie `Spiele`. Die Aussage „39, alle
+mit `display_name_override`" heißt: *jede der 39 Spiele-Zeilen trägt einen*.
+Eine **katalogweite** Gesamtzahl hat Z0 nie festgehalten; der Vertrag hatte
+sie als solche gelesen. Katalogweit tragen auch Figuren einen redaktionellen
+Anzeigenamen (ADR-0030, ADR-0039) — 53 insgesamt, also 14 Figuren neben den
+39 Spielen.
+
+**Die vier anderen Vertragswerte haben bestanden** — `shopfaehig`, `angebote`,
+der Abdruck der Angebotsliste und der Nenner. Der Katalog ist also in jeder
+Dimension unverändert, die Z0 wirklich gemessen hat.
+
+**Korrigiert, ohne die Prüfung abzuschwächen:**
+
+* Der Vertragswert ist jetzt die belegte Aussage: **39 Spiele-Zeilen mit
+  Override** (Zeile 915). Das ist die *strengere* Form — sie fällt auch, wenn
+  ein einzelner Spielname überschrieben würde.
+* Die katalogweite Zahl bleibt als **Messung** (Zeile 916) und als Wert, der
+  sich **während** des Laufs nicht bewegen darf — zusammen mit dem `md5` über
+  alle Overrides (Abschnitt D2 des Skripts).
+* Neu im Ergebnisraster: `aenderungen_heute` aus `catalog_admin_changes` —
+  eine redaktionelle Namensänderung ist erlaubt und soll sichtbar sein, nicht
+  blockieren.
+
+**Bestätigung aus den Daten:** `supabase/checks/z0_overrides_diagnosis.sql`
+(rein lesend) unterscheidet die zwei Erklärungen über den Änderungsprotokoll-
+Trigger aus `0004`: null Änderungen an `display_name_override` heute heißt
+falscher Sollwert, nicht bewegter Katalog.
+
+Der **Nenner je Serie** und der **`md5` der Overrides** sind in Z0 nicht als
+Zahl festgehalten; für sie gibt es keinen Vertragswert, nur den Vergleich
+Preflight ↔ Postflight und die Prüfung innerhalb der Migration. Das ist kein
+Verzicht: der Abdruck in der Transaktion ist die strengere der beiden
+Prüfungen.
+
+Nachgefahren wird auch das: `npm run verify:check-sql` prüft in drei
+Durchgängen, dass der Vertrag wirklich vergleicht statt abzulesen — ohne Modus
+blockierend (P9), mit `keine` grün (P10), mit `staging` gegen erfundene Zahlen
+**fünf** Abweichungen (P11).
+
+### Z1 liegt vollständig vor, einschließlich der Backup-Entscheidung
+
+| Datei | Zweck | Stand |
+|---|---|---|
+| `supabase/migrations/0135_catalog_item_type.sql` | `item_type`, Backfill aus der Kategorie, `is_shop_eligible` am Artikeltyp | **nicht angewendet**, 11 Anweisungen |
+| `supabase/migrations/0136_business_backup_item_type.sql` | `item_type` in den Bereich `figures` der Betriebssicherung | **nicht angewendet**, 5 Anweisungen, setzt `0135` voraus |
+| `supabase/checks/0135_preflight.sql` / `0135_postflight.sql` | Zustand davor / danach, beide mit den sechs Abdrücken und dem Z0-Vertrag | plangeprüft |
+| `supabase/checks/0136_preflight.sql` / `0136_postflight.sql` | Stand der Sicherung davor / danach: Abdruck, Länge, Kommentar, 28/352 gegen 28/353, Bereich `figures` mit neun gegen zehn Feldern, Rechte, Formatvertrag, die neun privaten Felder | plangeprüft, in PGlite gegen **beide** Stände gefahren (P12/P13) |
+| `supabase/checks/staging_pending_migrations.sql` | **nur Staging**: `0132` steht, `0133`/`0134` nicht — samt Umgebungsstempel | plangeprüft, mit Gegenprobe (P14) |
+| `supabase/checks/0135_0136_staging_run.md` | **der Laufzettel**: Dateien, Reihenfolge S0–S11, Transaktionsrahmen, Vertrag, Abbruchkriterien, `25P02`, Rücknahme | — |
+| `supabase/checks/0131_function_body_check.sql` | kennt jetzt **beide** Stände der Sicherung (`0131`, `0136`) | plangeprüft, in PGlite gegen beide Stände gefahren |
+| `supabase/rollback/R0135_drop_item_type.sql` | Spalte zurück; **verweigert**, solange die Sicherung `item_type` liest | — |
+| `supabase/rollback/R0136_back_to_0131.sql` | Rumpf zurück auf `0131`, zeichengleich | — |
+
+**Die Entscheidung des Betreibers vom 2026-10-19:** `item_type` kommt in den
+Business-Backup. Begründung wortgleich: „Der Artikeltyp ist langfristig eine
+eigenständige fachliche Eigenschaft und soll bei einer Wiederherstellung nicht
+aus Kategorien rekonstruiert werden müssen." Umgesetzt in `0136`, nicht in
+`0135` — Begründung in ADR-0128 (Nachtrag).
+
+**Was lokal nachgewiesen ist, und was nicht.** `npm run verify:check-sql` fährt
+seit dem 2026-10-19 vier Stufen: Stub-Schema, Planprüfung der 44 Prüfdateien,
+**Definitionslauf** (jeder gefaltete Funktionsrumpf wird in PostgreSQL 18.6
+erzeugt — für `language sql` eine vollständige Namens- und Typauflösung) und
+**Probelauf** von `0135`/`0136` gegen **erfundene** Zeilen, mit acht
+Durchgängen. Fünf davon müssen scheitern: ohne Klammer, bei verändertem
+Angebot, `0136` vor `0135`, `R0135` vor `R0136`. Das beweist das **Verhalten**
+der Migrationen — nicht, dass sie auf Staging oder Production laufen. Nachweis
+dafür bleibt allein das Ergebnisblatt aus dem SQL-Editor.
+
+### Eine berichtigte Annahme: der ZB-Bereich ist ein LOCH, kein Anhang
+
+Z0 meldet als höchste SKY-ID **`SKY-0822`**, nicht `SKY-0614`. Meine frühere
+Aussage, der Katalog ende bei `SKY-0614` und die ZB-Nummern setzten ihn fort,
+war in ihrer zweiten Hälfte falsch. `SKY-0614` war der Höchstwert in
+`data/catalog/products.json` — einem Abzug vom 2026-09-04, nicht dem heutigen
+Katalog.
+
+Die Bereiche sind in `docs/SKYLANDERS_DATA.md` längst festgelegt:
+`SKY-0001`–`SKY-0820` historisch, `SKY-0821`–`SKY-8999` produktiver
+Allokationsbereich, ab `SKY-9000` Fixtures. `SKY-0821` ist eine
+Charakterimport-Fixture auf Staging, `SKY-0822` wurde nie nach Production
+übernommen (`PROJECT_STATUS.md`).
+
+**Was unverändert gilt und was daraus folgt:** `SKY-0615`–`SKY-0642` ist
+**nachweislich frei** (Z0, Zeile 201 = 0) — aber als **Lücke innerhalb** des
+historischen Bereichs. Eine Vergabe nach „höchste ID plus eins" wäre damit
+falsch und würde im produktiven Allokationsbereich landen. **Z3 setzt genau die
+21 IDs aus der Arbeitsmappe**, prüft ihre Freiheit unmittelbar vor dem Insert
+in derselben Transaktion und leitet keine ID ab. Der Preflight von `0135`
+führt die Bereichsverteilung deshalb mit (Zeilen 301–304).
+
+## 0g. `0135` und `0136` auf Staging — angewendet und belegt (2026-10-19)
+
+| | |
+|---|---|
+| Projekt | `qqxcpesbwfxzgytkdsac` |
+| Weg | **ein Durchgang**: `supabase/operations/staging-0135-0136.sql`, manuell im SQL-Editor, `begin` … `commit` in der Datei |
+| Eingebettet | `0135_catalog_item_type.sql` und `0136_business_backup_item_type.sql`, **zeichengleich** — geprüft von `src/lib/catalog/staging-oneshot.test.ts` |
+| Ergebnis | Abschlussraster: **19 Bezugswerte unverändert**, einzige Änderung `sicherung_md5` |
+| Betriebssicherung | `24c3810288bb20929fe995554a267adf` → `f6d08440707ba72a8040a8d1e666c092` — Stand `0131` → Stand `0136`, 28 Bereiche, **353** Feldzeilen |
+
+**Was damit auf Staging gilt:** `skylanders.item_type` steht (Vorgabewert
+`figure`, CHECK über fünf Werte), die 39 Spiele sind `game` — **aus der
+Kategorie**, aus keinem Namen —, `is_shop_eligible()` verlangt zusätzlich
+`item_type = 'figure'`, die Ableitungsregel
+`catalog_item_type_for_category()` und ihr Trigger stehen, und die
+Betriebssicherung führt `item_type` im Bereich `figures`.
+
+**Was sich nicht bewegt hat**, gemessen vor und nach dem Lauf in derselben
+Transaktion: shopfähige Zeilen, Angebote, Abdruck der Angebotsliste,
+Fortschritts-Nenner gesamt und je Serie, Overrides und ihr Abdruck,
+Katalogzeilen, Spiele-Zeilen, importierte Einkäufe, Positionen, Lagerzeilen,
+Einheiten, Bewegungen, Importsumme, Eigenbelege, Zählerzeilen, Abrufnachweise.
+Zusätzlich blockierend geprüft: `0133` und `0134` fehlen weiterhin, und die
+Belegsperre ist unverändert dicht.
+
+### Der erste Versuch brach ab — und das war richtig
+
+```
+ABBRUCH A7: der Z0-Vertrag stimmt nicht mehr — overrides ist 53, erwartet 39.
+```
+
+**Falsch abgeleiteter Sollwert, kein Datenbefund.** Z0 zählt die
+`display_name_override` in `Z0_catalog_accessories_readonly.sql` Zeile 102
+**innerhalb der CTE `spiel`** — also nur in der Kategorie `Spiele`. Die
+Aussage „39, alle mit `display_name_override`" heißt: *jede der 39
+Spiele-Zeilen trägt einen*. Eine **katalogweite** Zahl hat Z0 nie
+festgehalten; der Vertrag hatte sie als solche gelesen. Katalogweit sind es
+**53** — 39 Spiele plus 14 Figuren mit redaktionellem Anzeigenamen
+(ADR-0030, ADR-0039).
+
+Die vier anderen Vertragswerte haben **bestanden** (A7 bricht beim ersten
+Treffer ab): `shopfaehig = 534`, `angebote = 256`, der Abdruck der
+Angebotsliste und `sammelbar = 534`. Der Katalog war also in jeder Dimension
+unverändert, die Z0 wirklich gemessen hat — und der Abbruch hat alles
+zurückgerollt, wie vorgesehen.
+
+**Berichtigt, ohne Abschwächung:** der Vertragswert ist jetzt die belegte
+Aussage (**39 Spiele-Zeilen mit Override**, Zeile 915) — das ist strenger, denn
+es fällt auch, wenn ein einzelner Spielname überschrieben würde. Die
+katalogweite Zahl bleibt als Messung (916) und als Wert, der sich **während**
+des Laufs nicht bewegen darf, zusammen mit ihrem `md5`. Neu im Raster:
+`aenderungen_heute` aus `catalog_admin_changes` — eine redaktionelle
+Namensänderung ist erlaubt und soll sichtbar sein, nicht blockieren.
+Ursachenanalyse: `supabase/checks/z0_overrides_diagnosis.sql`.
+
+### Offen bleibt
+
+`0133` und `0134` auf Staging · `0134`, `0135` und `0136` auf Production ·
+Z3 (Portale und Spiele als Katalogartikel) · Freigabe B (Belegausstellung
+bleibt gesperrt).
+
 ## 1. Production — nur lesend, keine Freigabe über das Ausführen hinaus nötig
 
 | # | Prüfung | Datei | Erwartung |
 |---|---|---|---|
-| P1 | Welche Migrationen sind wirklich angewendet? | `state_audit_readonly.sql` | **am 2026-10-20 bestanden**, mit der verschärften Belegrechte-Prüfung (Abschnitt 0c) |
-| P2 | Nachlauf zu `0132` mit den korrigierten Prüfungen | `0132_postflight.sql` | **am 2026-10-19 bestanden, `9999 = 0`.** Erneut auszuführen nur wegen des berichtigten Stempels (Infozeile) |
-| P3 | Ursachen der beiden Abweichungen mit Daten | `0132_diagnose_production.sql` | **am 2026-10-20 bestanden, `9999 = 0`** — einschließlich der neuen Zeile 3 (Testfiguren im öffentlichen Angebot = 0) |
-| P4 | `0133`: Form, Zustand und Verträglichkeit des Triggers | `0133_production_readonly.sql` | **am 2026-10-19 bestanden, `9999 = 0`** — Trigger aktiv, Zahlungsschutz korrekt, ACL je `postgres=X/postgres` ohne NULL-ACL |
+| P1 | Welche Migrationen sind wirklich angewendet? | `state_audit_readonly.sql` | **am 2026-10-18 bestanden**, mit der verschärften Belegrechte-Prüfung (Abschnitt 0c) |
+| P2 | Nachlauf zu `0132` mit den korrigierten Prüfungen | `0132_postflight.sql` | **am 2026-10-18 bestanden, `9999 = 0`.** Erneut auszuführen nur wegen des berichtigten Stempels (Infozeile) |
+| P3 | Ursachen der beiden Abweichungen mit Daten | `0132_diagnose_production.sql` | **am 2026-10-18 bestanden, `9999 = 0`** — einschließlich der neuen Zeile 3 (Testfiguren im öffentlichen Angebot = 0) |
+| P4 | `0133`: Form, Zustand und Verträglichkeit des Triggers | `0133_production_readonly.sql` | **am 2026-10-18 bestanden, `9999 = 0`** — Trigger aktiv, Zahlungsschutz korrekt, ACL je `postgres=X/postgres` ohne NULL-ACL |
 | P5 | Welcher Anwendungsstand ist ausgeliefert? | Vercel-Dashboard | **OFFEN** — `c24926e` oder `81386e6` |
-| **P6** | Welche Testfigur, woran hängt sie, wirkt sie nach außen? | `fixture_audit_readonly.sql` | **am 2026-10-20 gelaufen.** 301 = 0, 305 = 0, keine Verknüpfung. `9999 = 1` **wegen einer falschen Annahme meiner Prüfung 112**, nicht wegen eines Befundes — berichtigt, Abschnitt 0c. Ein erneuter Lauf ist **nicht** nötig: die drei neuen Schutzzeilen messen, was der Lauf schon gezeigt hat (inaktiv, nicht shopfähig, kein Angebot) |
-| **P7** | Was sind die 206 Positionen ohne `sky_id`, und was hängt an Spielen? | `accessory_audit_readonly.sql` | **am 2026-10-20 gelaufen**, Befunde in `docs/SKYLANDERS_DATA.md` (Abschnitt 11j) |
+| **P6** | Welche Testfigur, woran hängt sie, wirkt sie nach außen? | `fixture_audit_readonly.sql` | **am 2026-10-18 gelaufen.** 301 = 0, 305 = 0, keine Verknüpfung. `9999 = 1` **wegen einer falschen Annahme meiner Prüfung 112**, nicht wegen eines Befundes — berichtigt, Abschnitt 0c. Ein erneuter Lauf ist **nicht** nötig: die drei neuen Schutzzeilen messen, was der Lauf schon gezeigt hat (inaktiv, nicht shopfähig, kein Angebot) |
+| **P7** | Was sind die 206 Positionen ohne `sky_id`, und was hängt an Spielen? | `accessory_audit_readonly.sql` | **am 2026-10-18 gelaufen**, Befunde in `docs/SKYLANDERS_DATA.md` (Abschnitt 11j) |
 
-**Stand 2026-10-20: P1 bis P4, P6 und P7 sind geprüft.** Offen bleibt allein
+**Stand 2026-10-18: P1 bis P4, P6 und P7 sind geprüft.** Offen bleibt allein
 **P5** (welcher Anwendungsstand ausgeliefert ist — nur im Vercel-Dashboard
 ablesbar) — der
 Production-Zustand ist damit nicht mehr nur gemeldet. **Offen bleiben P4
@@ -140,16 +467,18 @@ angefasst worden.
 
 | # | Prüfung | Voraussetzung | Erwartung |
 |---|---|---|---|
-| S1 | Eingangszustand | `0132_preflight.sql` | Umgebungsstempel **2**; Zeile 102 `true` (die Herkunftsbedingung steht noch drin); 201 und 203 **0** |
-| S2 | `0132` anwenden, Nachlauf | Freigabe | `9999 = 0` |
-| S3 | **Schreibnachweis H1–H12** | S2 + `npm run dev:staging` | zwölf Fälle über die Oberfläche; `0132_test_plan.md` |
-| S4 | `0133` anwenden, Nachlauf | S3 | `9999 = 0` in Pre- und Postflight |
-| S5 | `0133_production_readonly.sql` auch auf Staging | S4 | `9999 = 0`, Umgebungsstempel **2** |
-| S6 | Zustandsabgleich beider Umgebungen | S4 | `state_audit_readonly.sql` liefert in beiden Projekten dieselben Fassungen |
+| S0 | Belegsperre als Betriebsvorgang | — | **erledigt** — Abschnitt 0d |
+| S1 | Eingangszustand und Eignung | `0132_preflight.sql`, `0132_staging_readiness.sql` | **erledigt**: je `9999 = 0`, 102 `true`, 402 `true`, 602 `0`, 603 `false`, 901 `true`, 902 `false`, 903 `true` |
+| S2 | `0132` anwenden, Nachlauf | S1 | **erledigt** — Abschnitt 0e |
+| S3 | **Schreibnachweis H1–H12** | S2 + `npm run dev:staging` | **OFFEN** — zwölf Fälle über die Oberfläche; `0132_test_plan.md` |
+| S4 | `0133` anwenden, Nachlauf | S3 | **OFFEN** — `9999 = 0` in Pre- und Postflight |
+| S5 | `0133_production_readonly.sql` auch auf Staging | S4 | **OFFEN** — `9999 = 0` |
+| S6 | Zustandsabgleich beider Umgebungen | S4 | **OFFEN** — `state_audit_readonly.sql` liefert in beiden Projekten dieselben Fassungen |
 
-**Nach dem 2026-10-20 ist S3 der EINZIGE große offene Nachweis.** Production ist
-gemessen; was fehlt, ist der Beweis, dass die Schreibwege tun, was sie sollen —
-und der ist auf Production nicht zu führen.
+**Nach dem Staging-Lauf von `0132` ist S3 der EINZIGE große offene Nachweis.**
+Production ist gemessen, Staging trägt `0132`; was fehlt, ist der Beweis, dass
+die Schreibwege tun, was sie sollen — und der ist auf Production nicht zu
+führen.
 
 **S3 ist der wichtigste offene Nachweis des ganzen Vorgangs.** Entfernen,
 Nachtragen, Einbuchen und die Zahlungssperre sind bisher **nur lesend** belegt:
@@ -165,16 +494,23 @@ die Oberfläche mit `npm run dev:staging` — **nicht** im SQL-Editor, weil
 
 | Fall | was er beweisen muss |
 |---|---|
-| H1–H3 | eine ursprüngliche Arbeitsmappenzeile bleibt geschützt: Entfernen wird abgelehnt, mit dem erklärenden Satz |
-| H4 | eine Figur lässt sich einem historischen Einkauf **hinzufügen** |
-| H5 | die hinzugefügte Figur wird regulär **eingebucht** — Bestand steigt **genau einmal** |
-| H6 | dieselbe Figur lässt sich **wieder entfernen**, solange sie nicht eingebucht ist |
-| H7 | die bezahlte Summe lässt sich **nicht** ändern — Meldung statt Änderung |
-| H8 | die **Aufteilung** lässt sich nachtragen, solange sie die Summe ergibt |
-| H9 | Absender, Inserat, Vereinbarung, Datum, Plattform sind **nachtragbar** |
-| H10 | eine **eingebuchte** Zeile ist in Entfernen und Wechsel gesperrt |
-| H11 | kein Bearbeitungsweg erzeugt oder verändert einen **Eigenbeleg** |
-| H12 | nach dem Durchlauf stimmen Lagerbilanz, Belegzahl und bezahlte Summen |
+| H1 | ein historischer Einkauf lässt sich **öffnen und bearbeiten** |
+| H2 | **Verkäufer- und Absenderanschrift** nachtragen |
+| H3 | **Inserat und Vereinbarung** ergänzen |
+| H4 | eine **fehlende Figur hinzufügen** |
+| H5 | die neue Figur **einbuchen, genau einmal** — Bestand steigt um 1 |
+| H6 | die nachgetragene Figur **wieder entfernen** |
+| H7 | eine **ursprüngliche Excel-Position bleibt geschützt** — Entfernen wird mit dem erklärenden Satz abgelehnt |
+| H8 | **ihre Figur darf trotzdem korrigiert werden** (Figurenwechsel) |
+| H9 | eine importierte Position wird **nicht erneut eingebucht** |
+| H10 | die **bezahlte Summe ist unveränderlich** |
+| H11 | die **Aufteilung lässt sich ergänzen**, ohne die Summe zu ändern |
+| H12 | die **Belegausstellung bleibt zu** |
+
+**Diese Zuordnung ist verbindlich und hat genau eine Quelle:**
+`supabase/checks/0132_test_plan.md`. Eine frühere Fassung dieser Tabelle trug
+eine andere Nummerierung — sie ist am 2026-10-18 an den Testplan angeglichen
+worden. Wer H-Nummern nennt, nennt diese.
 
 Vollständige Anleitung: `supabase/checks/0132_test_plan.md`. Reihenfolge und
 Freigaben: `supabase/checks/0132_staging_plan.md`.

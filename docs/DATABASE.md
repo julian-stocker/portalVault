@@ -464,7 +464,7 @@ oder Preis.
 
 #### Freigabe ist nicht das Tor — und deshalb ist `is_listed` bei Software richtig
 
-**Gemessen auf Production am 2026-10-20:** 13 Lagerpositionen hängen an Spiele-Katalogzeilen, 19
+**Gemessen auf Production am 2026-10-18:** 13 Lagerpositionen hängen an Spiele-Katalogzeilen, 19
 Einheiten, **alle 13 mit `is_listed = true`** — und **0** davon in `shop_offers()`. Das ist der
 vorgesehene Zustand, kein Widerspruch, und `0008` hat ihn beim Umstellen des Vorgabewerts
 wörtlich vorhergesagt:
@@ -3876,7 +3876,10 @@ Felder dazu), `restore_supported` bleibt `false`.
 
 `src/lib/backup/manifest-gap.test.ts` prüft für alle 28 Bereiche, dass **keine
 Spalte unentschieden** ist, und hält fest, dass die neun privaten Felder als
-`excluded` mit Begründung dastehen. Prüf-SQL: `supabase/checks/0130_*` und
+`excluded` mit Begründung dastehen. `src/lib/backup/backup-sql.test.ts`
+vergleicht jeden Bereich **Feld für Feld und in dieser Folge** mit dem Rumpf
+der jeweils letzten Migration, die die Funktion definiert — Manifest und SQL
+können deshalb nicht auseinanderlaufen. Prüf-SQL: `supabase/checks/0130_*` und
 `0131_*`. Der Plattformexport führt die Belegtabellen weiterhin nicht —
 Vorschlag `supabase/checks/0132_platform_export_receipts_proposal.md`.
 
@@ -3910,8 +3913,85 @@ Ausführung.
 
 Den Zirkel „ein Export prüft sich mit derselben Funktion selbst" schließt
 `supabase/checks/0131_function_body_check.sql`: rein lesend, vergleicht
-`md5(prosrc)` der lebenden `seller_business_backup()` mit der Fassung im
-Repository (Stand `0131`: `24c3810288bb20929fe995554a267adf`, 21 458 Zeichen).
+`md5(prosrc)` der lebenden `seller_business_backup()` mit den Fassungen im
+Repository. **Zwei Stände sind freigegeben**, und die Datei sagt, welcher
+steht:
+
+| Stand | `md5(prosrc)` | Zeichen | Bereiche / Feldzeilen |
+|---|---|---|---|
+| `0131` | `24c3810288bb20929fe995554a267adf` | 21 458 | 28 / 352 |
+| `0136` | `f6d08440707ba72a8040a8d1e666c092` | 21 494 | 28 / 353 |
+
+Ein einzelner Abdruck als Sollwert ging nicht mehr: dieselbe Datei hätte auf
+einer Umgebung vor und auf einer nach `0136` je eine Abweichung gemeldet, und
+beide Male wäre die Funktion in Ordnung gewesen. Gefordert ist deshalb
+„zeichengleich **einem** bekannten Stand, und dieser Stand ist freigegeben".
+`0130` steht als bekannt, aber **nicht** freigegeben in der Tabelle — ein Rumpf
+aus `0130` wäre eine stille Rücknahme.
+
+### 3.3at1 Wie eine neue Katalogzeile ihren Artikeltyp bekommt (`0135`)
+
+Der Backfill in `0135` setzt `item_type` für die Zeilen von heute. Für alles,
+was später entsteht, gibt es **eine Regel und einen Trigger**:
+
+| Objekt | Was es tut |
+|---|---|
+| `catalog_item_type_for_category(text)` | die **einzige** Zuordnung Kategorie → Artikeltyp. `'Spiele' → 'game'`, alles andere → `'figure'`. `immutable`, liest keine Tabelle, für niemanden ausführbar (`revoke … from public, anon, authenticated, service_role`) |
+| `skylanders_set_item_type()` | Triggerfunktion, `security definer` (liest `categories`, die RLS führt) |
+| `skylanders_item_type_from_category` | `before insert or update of category_id on skylanders`, `for each row` |
+
+**Eine Positivliste, keine Heuristik.** Ein unbekannter Kategoriename wird
+**nie** zum Spiel — er bleibt `figure`. Z3 erweitert genau diese eine Funktion
+um `'Portale' → 'portal'`, zusammen mit den Zeilen, die dann entstehen.
+
+**Der Trigger überschreibt keine Entscheidung:** er setzt nur, wenn die Zeile
+den Vorgabewert `figure` trägt. Ein ausdrückliches `portal`, `bundle` oder
+`other` bleibt stehen. Das `update of category_id` ist Absicht — eine Figur,
+die nach `Spiele` umgehängt wird, **ist** ein Spiel; der Backfill selbst
+schreibt `item_type` und löst den Trigger deshalb nicht aus.
+
+**Warum nicht im Importer.** `tools/import-catalog.mts` schreibt genau neun
+Spalten, und `item_type` gehört nicht dazu — aus demselben Grund wie
+`card_type` und `source`: ein Wert, den der Import bei jedem Lauf schreibt,
+überschreibt irgendwann eine Entscheidung. `src/lib/catalog/import-payload.test.ts`
+hält die Liste und die Begründung fest.
+
+**Kein Widerspruch zum Fortschritt:** die Nachbedingung von `0135` bricht ab,
+wenn eine Kategorie `game` ergibt, aber nicht in `non_collectible_categories()`
+steht.
+
+### 3.3at2 `item_type` im Export (`0136`)
+
+Der Bereich `figures` führt seit `0136` **zehn** Felder statt neun: `item_type`
+steht unmittelbar neben `card_type`. Entscheidung des Betreibers vom
+2026-10-19 — der Artikeltyp ist eine eigenständige fachliche Eigenschaft und
+wird bei einer Wiederherstellung abgelesen, nicht aus der Kategorie
+rekonstruiert (ADR-0128).
+
+`0136` ist bewusst **eine eigene Migration** und kein Abschnitt in `0135`: die
+Sicherungsfunktion hat ihre eigene Abdruckkette (`0129` → `0130` → `0131` →
+`0136`), und beide Rücknahmen bleiben unabhängig. Der Rumpf ist der aus `0131`
+mit **genau einer eingefügten Zeile**; `src/lib/backup/backup-item-type.test.ts`
+rechnet das nach — Zeile heraus, und der Rumpf ist zeichengleich dem aus
+`0131`.
+
+**Sie setzt `0135` voraus.** Ein `language sql`-Rumpf wird bei der Erzeugung
+aufgelöst: ohne die Spalte scheitert `create or replace function` mit `42703`.
+Umgekehrt vermerkt PostgreSQL dafür **keine** Abhängigkeit — `drop column`
+gelingt, während die Sicherung die Spalte liest, und die Funktion scheitert
+erst beim Aufruf. Deshalb gilt für die Rücknahme die Reihenfolge **`R0136`,
+dann `R0135`**, und `R0135` bricht ab, solange der Rumpf `item_type` nennt.
+`BACKUP_FORMAT_VERSION` bleibt `1`: ein zusätzliches Feld ändert die Bedeutung
+keines bestehenden.
+
+**Rechte:** `0136` enthält kein `grant` und kein `revoke` — `create or replace
+function` behält den ACL aus `0104` (kein EXECUTE für PUBLIC und `anon`,
+EXECUTE für `authenticated`). Die Nachbedingung prüft das nach.
+
+**Ältere Sicherungsdateien:** `npm run verify:backup` vergleicht einen Export
+mit dem Feldplan aus `manifest.ts`. Ein Export, der **vor** `0136` gezogen
+wurde, meldet danach genau einen Befund — `figures: item_type` fehlt. Das ist
+richtig: die Datei ist älter als das Manifest.
 
 ### 3.3au Ein historischer Einkauf wird nachgetragen (`0132`, ADR-0126)
 

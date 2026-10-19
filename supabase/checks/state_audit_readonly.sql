@@ -4,7 +4,7 @@
 -- Dieselbe Datei fuer BEIDE Projekte. Sie liest ausschliesslich den Katalog
 -- (`pg_proc`, `pg_trigger`, `pg_class`) und beantwortet die Frage nicht aus
 -- einer Akte, sondern aus dem lebenden Zustand: fuer jede Funktion, die
--- `0126`-`0134` anfassen, wird `md5(prosrc)` gegen die Abdruecke der
+-- `0126`-`0136` anfassen, wird `md5(prosrc)` gegen die Abdruecke der
 -- bekannten Fassungen verglichen.
 --
 -- DIE ABDRUECKE SIND NACHGERECHNET, NICHT GERATEN. Sie stammen aus den
@@ -66,6 +66,10 @@ bekannt (abdruck, fassung) as (values
   ('5a0de6bec562779d5f945c096e1f77d6', '0129'),
   ('a27b61db988df7627a4992b1770ac626', '0130'),
   ('24c3810288bb20929fe995554a267adf', '0131'),
+  -- `0136` nimmt `item_type` in den Bereich figures auf. Ohne diese Zeile
+  -- meldete Pruefung 13 nach der Migration `UNBEKANNT` — ein Fehlalarm an
+  -- einer Datei, die feststellt und nicht bewertet, waere besonders teuer.
+  ('f6d08440707ba72a8040a8d1e666c092', '0136'),
   ('b52230267bc03a9dcf76cc8395660222', '0126'),
   ('2986635747adf5371977718a2bd8d806', '0128'),
   ('2ec43969fb6ea7adb0b1a4616e6889f4', '0133')
@@ -82,7 +86,7 @@ funktionsstand as (
 zeilen (nr, bereich, gegenstand, befund) as (
 
   -- ------------------------------------------------------------- Umgebung
-  -- BERICHTIGT AM 2026-10-19: hier stand „Staging 2, Production 0". Falsch —
+  -- BERICHTIGT AM 2026-10-18: hier stand „Staging 2, Production 0". Falsch —
   -- `verify:rls` legt `SKY-9998` als DAUERHAFTE Fixture an, deren
   -- Fremdschluessel ON DELETE RESTRICT tragen, und vor dem 2026-09-09 gab es
   -- nur ein Projekt. Diese Zeile nennt die Figuren, statt eine Umgebung zu
@@ -114,7 +118,7 @@ zeilen (nr, bereich, gegenstand, befund) as (
          (select befund from funktionsstand
            where funktion = 'seller_issue_purchase_receipt_correction')
   union all
-  select 13, 'Fassung', 'seller_business_backup  (0104 -> 0129 -> 0130 -> 0131)',
+  select 13, 'Fassung', 'seller_business_backup  (0104 -> 0129 -> 0130 -> 0131 -> 0136)',
          (select befund || '   md5 ' || abdruck from funktionsstand
            where funktion = 'seller_business_backup')
   union all
@@ -158,7 +162,7 @@ zeilen (nr, bereich, gegenstand, befund) as (
   -- ----------------------------------------------------------- Belegsperre
   union all
   /*
-   * BERICHTIGT AM 2026-10-19. Die bisherige Zaehlung war in zwei Faellen
+   * BERICHTIGT AM 2026-10-18. Die bisherige Zaehlung war in zwei Faellen
    * blind, und beide sind die gefaehrlichen:
    *   * `proacl is null` heisst „Standardrechte" — fuer eine Funktion also
    *     EXECUTE fuer PUBLIC. `aclexplode(NULL)` liefert null Zeilen, die

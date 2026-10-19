@@ -44,11 +44,18 @@ import { fieldsFromBackupSql } from "./export-audit";
 const koerper = (datei: string): string =>
   readFileSync(`supabase/migrations/${datei}.sql`, "utf8");
 
-/** Die drei Stände: wie Staging heute ist, und die zwei geplanten. */
+/**
+ * Die Stände: `0131` steht auf beiden Umgebungen, `0136` liegt vor.
+ *
+ * `0136` KOMMT HIER DAZU, WEIL DIESE DATEI DIE ZAHLEN FESTNAGELT. Sie fügt
+ * genau eine Feldzeile ein (`figures.item_type`) — ohne einen Eintrag hier
+ * wäre die einzige Aussage über die neue Form ein Kommentar.
+ */
 const STAENDE = {
   "0129": "0129_business_backup_receipts",
   "0130": "0130_business_backup_fields",
   "0131": "0131_business_backup_seller_fields",
+  "0136": "0136_business_backup_item_type",
 } as const;
 
 /** Die erwarteten Feldzahlen je Bereich — erhoben, nicht geschätzt. */
@@ -89,6 +96,19 @@ const ERWARTET: Record<keyof typeof STAENDE, { gesamt: number; je: Record<string
       order_line_events: 12, order_reservations: 14, order_refunds: 12,
       order_refund_allocations: 6, order_legal_snapshots: 12, invoices: 26,
       monthly_reports: 15, figures: 9, series: 4, categories: 5, seller: 26,
+      shop_settings: 4, shipping_methods: 5,
+    },
+  },
+  "0136": {
+    gesamt: 353,
+    je: {
+      shop_inventory: 11, inventory_movements: 10, purchases: 16, purchase_items: 14,
+      purchase_receipts: 38, purchase_receipt_downloads: 4, purchase_receipt_counters: 2,
+      sales: 24, sale_items: 17, sale_fees: 8, sale_refunds: 8,
+      settlement_adjustments: 10, name_mappings: 7, orders: 21, order_lines: 12,
+      order_line_events: 12, order_reservations: 14, order_refunds: 12,
+      order_refund_allocations: 6, order_legal_snapshots: 12, invoices: 26,
+      monthly_reports: 15, figures: 10, series: 4, categories: 5, seller: 26,
       shop_settings: 4, shipping_methods: 5,
     },
   },

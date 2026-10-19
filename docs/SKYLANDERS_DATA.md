@@ -937,7 +937,7 @@ Collator setzt „Dino Roar" zwischen beide. Gemessen am echten Katalog erzeugt 
 `Elite Voodood- ohne OVP` ohne Leerzeichen vor dem Strich, und die Elite-Zeilen schreiben
 „Dino Rang" statt „Dino-Rang". Beide werden von der Ableitung gelesen, keine wird umgeschrieben.
 
-## 11j. Was ohne Katalogbezug gekauft wurde (read-only Befund, 2026-10-20)
+## 11j. Was ohne Katalogbezug gekauft wurde (read-only Befund, 2026-10-18)
 
 **Gemessen auf Production**, rein lesend, mit
 `supabase/checks/accessory_audit_readonly.sql`. Keine Zeile wurde angefasst.
@@ -1007,6 +1007,115 @@ im Lager `is_listed` tragen, ist **kein Fehler**, siehe
 ausschließlich als Einkaufspositionen ohne `sky_id`. Das deckt sich mit
 Abschnitt 9: die acht unzugeordneten Legacy-Einträge sind „Portale (5×) und
 Elite-Karten (3×) — Artikel, die es im PortalVault-Katalog so nicht gibt".
+
+## 11k. Portale und Spiele: was in der Arbeitsmappe steht (read-only Befund, 2026-10-19)
+
+**Gelesen aus `../webpage/skylanders.xlsx`**, Blatt `ZB` und die sechs
+Serienblätter. Rein lesend, mit `zipfile`; die Blätter `Order *` und `EÜR *`
+wurden **nicht geöffnet** (Käuferdaten). Die Bestandsspalten `D/E/F` des
+`ZB`-Blatts und der private Block `P–X` stehen hier bewusst nicht.
+
+### Das Blatt `ZB` — 50 belegte Zeilen, 28 vergebene SKY-IDs
+
+Aufbau: **Plattform-Kopfzeilen** in Spalte B ohne SKY-ID (`PC`,
+`Wii | Wii U | PS3`, `Wii | Wii U | PS3 | PS4`, `Xbox 360`, `Xbox One`,
+`Nintendo 3DS`), darunter Artikelzeilen mit Spalte A = SKY-ID und Spalte B =
+**Modell-/Artikelnummer** plus Serie in Klammern.
+
+| Art | Anzahl | SKY-IDs |
+|---|---|---|
+| Skylanders-Portale | **21** | `SKY-0615`–`0622`, `0624`–`0630`, `0632`–`0637` |
+| Disney-Infinity-Portale | 2 | `SKY-0623`, `SKY-0631` |
+| Starter Packs (Bundles) | 2 | `SKY-0639`, `SKY-0640` |
+| Taschen | 2 | `SKY-0641`, `SKY-0642` |
+| **kein Artikel** — eine Beleg-URL | 1 | `SKY-0638` |
+
+**Der Katalog endet bei `SKY-0614`; `SKY-0615`–`SKY-0642` sind frei.** Die
+Arbeitsmappe setzt die Nummerierung also genau dort fort, wo die Figuren
+aufhören. Eine Integration **erfindet keine SKY-ID** — sie übernimmt die
+Zuordnung des Betreibers (Regel 2 bleibt gewahrt). Nachzuweisen ist das je
+Umgebung: `supabase/checks/Z0_catalog_accessories_readonly.sql`, Zeile 201.
+
+### Vier Nummernarten, die nicht verwechselt werden dürfen
+
+| Begriff | in der Mappe | was es ist |
+|---|---|---|
+| **SKY-ID** | Spalte A | die dauerhafte SkyIsles-Identität |
+| **Modell-/Artikelnummer** | Spalte B | Herstellerkennung des Artikel**typs**: `84157790`, `0000502`, `INF-8032386` |
+| **Seriennummer** | **nicht vorhanden** | identifiziert ein *einzelnes Gerät*. Steht nirgends und kann aus diesen Daten nicht entstehen |
+| Händler-Artikelnummer | nicht vorhanden | — |
+
+Wo in Anforderungen „SN" steht, ist die **Modellnummer** gemeint.
+
+### Die 21 Portale
+
+| SKY-ID | Spalte B | Plattformkopf (dokumentiert) | Serie | Modellnr. |
+|---|---|---|---|---|
+| SKY-0615 | `84157790 (SA)` | PC | SA | 84157790 |
+| SKY-0616 | `83973080 (SA)` | Wii \| Wii U \| PS3 | SA | 83973080 |
+| SKY-0617 | `83973080A Wireless (SA)` | Wii \| Wii U \| PS3 | SA | 83973080A |
+| SKY-0618 | `0000502 (G)` | Wii \| Wii U \| PS3 | G | 0000502 |
+| SKY-0619 | `0000547 (SF)` | Wii \| Wii U \| PS3 \| PS4 | SF | 0000547 |
+| SKY-0620 | `0000586 (T)` | " | T | 0000586 |
+| SKY-0621 | `0000655 (SC)` | " | SC | 0000655 |
+| SKY-0622 | `0000726 (I)` | " | I | 0000726 |
+| SKY-0624 | `84151790 (SA)` | Xbox 360 | SA | 84151790 |
+| SKY-0625 | `84392790 (G)` | Xbox 360 | G | 84392790 |
+| SKY-0626 | `84392080 (G)` | Xbox 360 | G | 84392080 |
+| SKY-0627 | `84704790 (SF)` | Xbox 360 | SF | 84704790 |
+| SKY-0628 | `87031790 (T)` | Xbox 360 | T | 87031790 |
+| SKY-0629 | `87504790 (SC)` | Xbox 360 | SC | 87504790 |
+| SKY-0630 | `84704791 (I)` | Xbox 360 | I | 84704791 |
+| SKY-0632 | `84709790 (SF)` | Xbox One | SF | 84709790 |
+| SKY-0633 | `87036790 (T)` | Xbox One | T | 87036790 |
+| SKY-0634 | `87506790 (SC)` | Xbox One | SC | 87506790 |
+| SKY-0635 | `84154080 (SA)` | Nintendo 3DS | SA | 84154080 |
+| SKY-0636 | `84394790 (G)` | Nintendo 3DS | G | 84394790 |
+| **SKY-0637** | `84721790 (SF, T, SC)` | Nintendo 3DS | **SF, T, SC** | 84721790 |
+
+**Der Plattformkopf gilt nur bis `SKY-0637`.** `SKY-0638` bis `SKY-0642` stehen
+*unter* der Überschrift „Nintendo 3DS", gehören aber ersichtlich nicht dazu —
+eine URL, zwei Starter Packs, zwei Taschen. Die Kopfzuordnung ist damit eine
+**Lesehilfe, keine Regel**, und sie ist eine **dokumentierte Zuordnung des
+Betreibers**, nicht eine nachgewiesene technische Kompatibilität. Dass
+`SKY-0638` auf einen fremden Kompatibilitäts-Blogbeitrag zeigt, belegt die
+Recherche — es ist kein Nachweis.
+
+### Die 39 Spiele — vollständig im Katalog, Namen zeichengleich
+
+Alle 39 Spiele liegen mit ihren SKY-IDs im Katalog, und ihre Namen sind
+**bitgenau** die der Arbeitsmappe. Nichts zu importieren; zu strukturieren.
+
+**Die Plattform steht im Artikelnamen selbst** — Quelldaten, nicht aus einer
+Überschrift abgeleitet: `Game (PC)` · `Game (Xbox 360)` · `Spiel für Xbox One` ·
+`Spiel für Sony Playstation 3 PS3` · `Spiel für Sony Playstation 4 PS4` ·
+`Wii Spiel` · `Wii U Spiel` · `Game (Nintendo 3DS)` · `Game (Nintendo Switch)`.
+
+Verteilung: PC 1 · Xbox 360 6 · Xbox One 5 · PS3 6 · PS4 4 · Wii 5 · Wii U 6 ·
+3DS 5 · Switch 1.
+
+**Die Sprache ist genau einmal belegt:** `SKY-0307 Spiel für Xbox One (EN)`
+(Trap Team). Für die anderen 38 ist sie **unbekannt** — und unbekannt heißt
+nicht „Deutsch". `SKY-0306`/`SKY-0307` sind der Musterfall: gleiche Serie,
+gleiche Plattform, zwei physische Artikel, unterschieden allein durch die
+Sprache.
+
+### Offene Punkte — aus den Quelldaten nicht beantwortbar
+
+1. Warum **zwei** Giants-Portale für Xbox 360 (`84392790`, `84392080`)?
+2. Ist `83973080A Wireless` eine Revision von `83973080` oder ein eigenes Produkt?
+3. Welche Serie führt `SKY-0637` (SF, T, SC) als primäre?
+4. Serie der beiden **Starter Packs** — im Namen steht nur die Plattform.
+5. Serie der beiden **Taschen** (aus dem Namen lesbar, nicht als Feld belegt).
+6. **Sprache** von 38 der 39 Spiele.
+7. **Technische Kompatibilität** der Portale: nur als Zuordnung dokumentiert.
+8. Welche `display_name_override` die 39 Spiele heute tragen — `0117` hat dort
+   Entscheidungen hinterlegt. **Vor jeder Umbenennung zu lesen**
+   (`Z0_catalog_accessories_readonly.sql`, Zeile 103).
+9. **Bilder**: Portale und Spiele haben keine aus der Legacy-Bildpipeline.
+10. Ob und welche der **206 historischen Positionen ohne `sky_id`** auf die
+    neuen Portalartikel zeigen. Das sagt nur ein namensweiser Abgleich, und er
+    wird **nie automatisch** vorgenommen.
 
 ## 12. Migrationsregeln für PortalVault
 

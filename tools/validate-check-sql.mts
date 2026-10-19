@@ -46,14 +46,29 @@
  *     auf Production nicht. Wer es genau wissen will, liest `select version()`
  *     im SQL-Editor.
  *
- * OPTIONALE ABHÄNGIGKEIT. Ohne PGlite endet das Werkzeug mit einem Hinweis
- * und Exitcode 0 — es ist eine Zusatzprüfung, kein Tor.
+ * VIER STUFEN, UND JEDE SAGT ETWAS ANDERES
+ *
+ *   1. STUB-SCHEMA aus den Migrationen — Tabellen, Spalten, Typen, Sequenzen,
+ *      Funktionssignaturen, Views. Keine Daten, und das wird geprüft.
+ *   2. PLANPRÜFUNG der Dateien in `supabase/checks` — `explain` über jede
+ *      lesende Anweisung.
+ *   3. DEFINITIONSLAUF: jeder Funktionsrumpf, den die Migrationshistorie in
+ *      ihrer Faltung übrig lässt, wird in PostgreSQL ERZEUGT. Für
+ *      `language sql` ist das eine vollständige Namens- und Typauflösung des
+ *      Rumpfs — genau das, was `0136` braucht, bevor jemand sie anwendet.
+ *   4. PROBELAUF der noch nicht angewendeten Migrationen gegen erfundene
+ *      Zeilen, mit Gegenproben: drei der vier Durchgänge MÜSSEN scheitern.
+ *
+ * KEINE OPTIONALE ABHÄNGIGKEIT. Fehlt PGlite, schlägt der Lauf fehl (Exitcode
+ * 1). Eine Prüfung, die bei fehlendem Werkzeug schweigend durchwinkt, ist
+ * keine.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 
 const CHECK_DIR = "supabase/checks";
+const MIG_DIR = "supabase/migrations";
 const STUB = ".pglite-stub-schema.sql";
 
 /**
@@ -66,9 +81,19 @@ const STUB = ".pglite-stub-schema.sql";
 const NICHT_PLANBAR: Record<string, string> = {
   "0124_fingerprint_failure_isolated.sql":
     "schreibt absichtlich (Temporaertabelle, Funktion, eine Zeile) und rollt zurueck — Fehlerfalltest, nur Staging",
-  "0124_baseline.sql":
-    "liest einen Sitzungsparameter, den sie sich selbst transaktionslokal mit set_config(…, true) setzt; ein Plan setzt nichts",
 };
+
+/*
+ * `0124_baseline.sql` STAND HIER UND IST FORT.
+ *
+ * Grund war: „liest einen Sitzungsparameter, den sie sich selbst
+ * transaktionslokal mit set_config(…, true) setzt; ein Plan setzt nichts."
+ * Das war nie die Ursache. Die Datei liess sich nicht planen, weil der
+ * Kopfkommentar am Statement hing (siehe `ohneKopf`) — ihre Anweisungen
+ * wurden gar nicht als planbar ERKANNT, und die eine, die es war, lief in die
+ * Klammer. Seit der Kopf richtig abgeschnitten wird, plant sie. Die
+ * Selbstkorrektur der Liste hat das gemeldet, statt es durchzulassen.
+ */
 
 /** Anweisungen an den Grenzen trennen, die Zeichenketten und $$-Blöcke kennt. */
 function anweisungen(sql: string): string[] {
@@ -91,12 +116,75 @@ function anweisungen(sql: string): string[] {
   return out.filter((s) => s.length > 0);
 }
 
+/**
+ * Ein Statement ohne seinen Kopfkommentar — jede dieser Dateien erklärt sich.
+ *
+ * DIE FASSUNG VORHER HAT STILL ÜBERSPRUNGEN.
+ * Sie verlangte, dass jede Kommentarzeile direkt an die nächste
+ * stößt: die Zeilenalternative endete am Zeilenumbruch, und eine LEERZEILE danach passte
+ * auf keine Alternative. Ein Kopf mit Leerzeile — in diesen Dateien die Regel —
+ * blieb damit am Statement hängen. Folge: `planbar()` sagte `false`, die
+ * Anweisung wurde nicht geplant, und die Datei meldete trotzdem „OK". Genau die
+ * eine Richtung, die dieses Werkzeug nie nehmen darf. Gefunden am 2026-10-19
+ * beim Bau des Definitionslaufs: `0125_function_test.sql` hatte sein erstes
+ * SELECT nie geplant bekommen.
+ *
+ * Jetzt wird jede Folge aus Weißraum und Kommentaren am Anfang verschluckt,
+ * in beliebiger Reihenfolge.
+ */
+const ohneKopf = (s: string): string =>
+  s.replace(/^(?:\s|--[^\n]*|\/\*[\s\S]*?\*\/)*/, "").trim();
+
 /** Nur das lässt sich planen, ohne etwas zu tun. */
-const planbar = (s: string): boolean => /^(with|select|table|values)\b/i.test(s.replace(/^[\s]*(--[^\n]*\n|\/\*[\s\S]*?\*\/)*/, "").trim());
+const planbar = (s: string): boolean => /^(with|select|table|values)\b/i.test(ohneKopf(s));
 /** Und das schreibt — eine solche Datei gehört nie in den Production-Editor. */
 const schreibt = (s: string): boolean =>
   /^(insert|update|delete|truncate|alter|drop|create|grant|revoke|comment|do|call|copy|security)\b/i
-    .test(s.replace(/^[\s]*(--[^\n]*\n|\/\*[\s\S]*?\*\/)*/, "").trim());
+    .test(ohneKopf(s));
+
+/**
+ * Die FALTUNG der Funktionsdefinitionen über die ganze Migrationshistorie.
+ *
+ * Die Historie ist keine Liste, sondern eine Faltung: `0104` definiert
+ * `seller_business_backup()`, `0129`, `0130` und `0131` ersetzen sie. Was in
+ * der Datenbank LEBT, ist die letzte Fassung — und nur die wird hier geprüft.
+ * `drop function` nimmt einen Eintrag wieder heraus, sonst stünde eine
+ * Funktion zur Prüfung, die es nicht mehr gibt (`business_settings_public()`
+ * aus `0019`, von `0026` entfernt).
+ */
+function funktionsfaltung(ausser: readonly string[] = []):
+  Map<string, { datei: string; sql: string }> {
+  const fold = new Map<string, { datei: string; sql: string }>();
+  const dateien = readdirSync(MIG_DIR)
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && !ausser.includes(f)).sort();
+  for (const datei of dateien) {
+    for (const roh of anweisungen(readFileSync(join(MIG_DIR, datei), "utf8"))) {
+      const s = ohneKopf(roh);
+      const weg = /^drop\s+function\s+(if\s+exists\s+)?(public\.)?([a-z_0-9]+)\s*\(([^)]*)\)/i.exec(s);
+      if (weg) { fold.delete(`${weg[3]}(${weg[4].replace(/\s+/g, " ").trim()})`); continue; }
+      const neu = /^create\s+(or\s+replace\s+)?function\s+(public\.)?([a-z_0-9]+)\s*\(/i.exec(s);
+      if (!neu) continue;
+      const args = s.slice(s.indexOf("(") + 1, s.indexOf(")")).replace(/\s+/g, " ").trim();
+      fold.set(`${neu[3]}(${args})`, { datei, sql: s });
+    }
+  }
+  return fold;
+}
+
+/**
+ * Ein Rumpf, der sich im Stub-Schema NICHT erzeugen lässt — mit Grund.
+ *
+ * Dieselbe Bauart wie `NICHT_PLANBAR`: eng, begründet, selbstkorrigierend.
+ * Lässt sich ein Eintrag plötzlich doch erzeugen, bricht der Lauf ab und
+ * verlangt, dass die Zeile verschwindet.
+ */
+const NICHT_ERZEUGBAR: Record<string, string> = {
+  "system_auth_inventory()":
+    "liest auth.users — eine Tabelle, die Supabase mitbringt und keine Migration beschreibt. "
+    + "Das Stub-Schema beschreibt `public`; Spalten eines fremden Schemas zu erfinden waere "
+    + "geraten, und ein geratenes Schema ist genau der stille Fehlgrund, den dieses Werkzeug "
+    + "verhindern soll.",
+};
 
 async function main(): Promise<void> {
   /*
@@ -140,11 +228,20 @@ async function main(): Promise<void> {
   }
   console.log("  keine Datenanweisung im Stub-Schema — reine Struktur");
 
-  const db = new PGlite();
-  let angewendet = 0, abgelehnt = 0;
-  for (const s of anweisungen(readFileSync(STUB, "utf8"))) {
-    try { await db.exec(s + ";"); angewendet++; } catch { abgelehnt++; }
+  /** Das Stub-Schema in eine frische Instanz spielen — Stufe 2, 3 und 4 brauchen es. */
+  const stubAnweisungen = anweisungen(readFileSync(STUB, "utf8"));
+  async function stubAnwenden(
+    ziel: InstanceType<typeof PGlite>,
+  ): Promise<{ angewendet: number; abgelehnt: number }> {
+    let angewendet = 0, abgelehnt = 0;
+    for (const s of stubAnweisungen) {
+      try { await ziel.exec(s + ";"); angewendet++; } catch { abgelehnt++; }
+    }
+    return { angewendet, abgelehnt };
   }
+
+  const db = new PGlite();
+  const { angewendet, abgelehnt } = await stubAnwenden(db);
   console.log(`  ${angewendet} Anweisungen angewendet, ${abgelehnt} abgelehnt`);
   console.log("  (abgelehnte sind unerheblich, solange keine Prüfdatei den Namen braucht —");
   console.log("   sonst scheitert ihr Plan unten mit 42P01 oder 42883)");
@@ -171,7 +268,7 @@ async function main(): Promise<void> {
      * nichts.
      */
     for (const t of teile) {
-      const kopf = t.trim();
+      const kopf = ohneKopf(t);
       // Ausführen statt planen: Klammer, Einstellung, und das SELECT, dessen
       // einziger Zweck eine Einstellung ist.
       if (/^(begin|commit|rollback|savepoint|release|set)\b/i.test(kopf)
@@ -212,14 +309,854 @@ async function main(): Promise<void> {
     console.log(`\n  SCHREIBENDE PRÜFDATEIEN (niemals auf Production): ${mitSchreiben.join(", ")}`);
   }
 
+
+  /* =======================================================================
+   * STUFE 3 — DER DEFINITIONSLAUF
+   *
+   * Die Planprüfung oben prüft LESENDE Anweisungen gegen ein Stub-Schema. Was
+   * sie nicht anfasst, ist der Inhalt der Funktionen selbst — und genau dort
+   * liegt der Rumpf, den `0136` austauscht: 21 494 Zeichen, die 28 Tabellen
+   * lesen. Ein `language sql`-Rumpf wird bei der ERZEUGUNG vollständig
+   * aufgelöst: jeder Tabellenname, jede Spalte, jeder Typ. Diese Stufe
+   * erzeugt deshalb jeden gefalteten Rumpf in PostgreSQL und meldet jeden,
+   * der nicht entsteht.
+   *
+   * WAS SIE FÜR `language plpgsql` NICHT LEISTET. Dort prüft PostgreSQL bei
+   * der Erzeugung nur die SYNTAX des Rumpfs, keine Namen und keine Typen —
+   * `check_function_bodies` kann nicht mehr. Für die 23 SQL-Funktionen der
+   * Historie ist diese Stufe eine echte Auflösungsprüfung, für die übrigen
+   * eine Syntaxprüfung mit dem richtigen Parser.
+   * ==================================================================== */
+  console.log("\nDEFINITIONSLAUF — jeder gefaltete Funktionsrumpf wird in PostgreSQL erzeugt");
+  console.log("-".repeat(76));
+  const fold = funktionsfaltung();
+  const dbDef = new PGlite();
+  await stubAnwenden(dbDef);
+  let erzeugt = 0, sprachSql = 0;
+  const nichtErzeugt: string[] = [];
+  const unnoetigeAusnahme: string[] = [];
+  for (const [sig, { datei, sql }] of fold) {
+    if (/^\s*create[\s\S]{0,400}?language\s+sql\b/i.test(sql)) sprachSql++;
+    try {
+      await dbDef.exec(sql + ";");
+      erzeugt++;
+      if (NICHT_ERZEUGBAR[sig]) unnoetigeAusnahme.push(sig);
+    } catch (e) {
+      const err = e as { message?: string; code?: string };
+      const zeile = `${sig}  (${datei})  [${err.code ?? "?"}] ${(err.message ?? "").split("\n")[0]}`;
+      if (NICHT_ERZEUGBAR[sig]) {
+        console.log(`  AUSNAHME ${zeile}`);
+        console.log(`           Grund: ${NICHT_ERZEUGBAR[sig]}`);
+      } else {
+        console.log(`  FEHLER   ${zeile}`);
+        nichtErzeugt.push(sig);
+      }
+    }
+  }
+  console.log("-".repeat(76));
+  console.log(`  ${erzeugt} von ${fold.size} Rümpfen erzeugt, davon ${sprachSql} mit `
+    + `language sql (vollständig aufgelöst), ${nichtErzeugt.length} Fehler, `
+    + `${Object.keys(NICHT_ERZEUGBAR).length} begründete Ausnahme(n)`);
+
+  /* =======================================================================
+   * STUFE 4 — DER PROBELAUF DER NOCH NICHT ANGEWENDETEN MIGRATIONEN
+   *
+   * Eine Migration lässt sich nicht „planen": sie ändert das Schema. Was sich
+   * prüfen lässt, ist ihr LAUF — gegen das Stub-Schema, mit erfundenen Zeilen,
+   * in einer Wegwerf-Instanz. Vier Durchgänge, und drei davon müssen
+   * SCHEITERN: eine Sicherung ist nur dann eine, wenn sie auch anschlägt.
+   *
+   * DIE ZEILEN SIND ERFUNDEN. Fünf Katalogzeilen, zwei Lagerzeilen, eine
+   * Einstellung — kein Export, kein Backup, keine echte SKY-ID, keine
+   * Verbindung zu Staging oder Production. Die Zahlen, die dabei
+   * herauskommen, sagen über die echten Datenbestände NICHTS; was sie zeigen,
+   * ist das VERHALTEN der Migration: dass sie prüft, bevor sie ändert, dass
+   * sie bei Abweichung abbricht, und dass nach einem Abbruch nichts
+   * zurückbleibt.
+   * ==================================================================== */
+  console.log("\nPROBELAUF — die zwei noch nicht angewendeten Migrationen, gegen erfundene Zeilen");
+  console.log("-".repeat(76));
+
+  /** Die Dateien, die noch in keiner Umgebung stehen (`supabase/migrations/APPLIED.md`). */
+  const PROBELAUF = ["0135_catalog_item_type.sql",
+                     "0136_business_backup_item_type.sql"] as const;
+  const M135 = join(MIG_DIR, PROBELAUF[0]);
+  const M136 = join(MIG_DIR, PROBELAUF[1]);
+  const R135 = "supabase/rollback/R0135_drop_item_type.sql";
+  const R136 = "supabase/rollback/R0136_back_to_0131.sql";
+
+  /** Fünf Katalogzeilen, zwei davon mit Angebot, zwei in der Kategorie Spiele. */
+  const ZEILEN = `
+    insert into public.shop_settings (price_percentage) values (100);
+    insert into public.categories (id, name, series_code)
+         values (1, 'Figuren', 'PROBE'), (2, 'Spiele', 'PROBE');
+    insert into public.skylanders
+           (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+            market_price, card_type, source, display_name_override)
+         values ('PROBE-1', 'Eins', 'eins', 'PROBE', 1, true, true, 10.00, 'core', 'probe', null),
+                ('PROBE-2', 'Zwei', 'zwei', 'PROBE', 1, true, true, 20.00, 'core', 'probe', 'Zwei!'),
+                ('PROBE-3', 'Drei', 'drei', 'PROBE', 1, true, false, 30.00, 'core', 'probe', null),
+                /* EIN SPIEL MIT ANZEIGENAME, EINE FIGUR MIT ANZEIGENAME.
+                   So unterscheiden sich „Overrides der Spiele" (1) und
+                   „Overrides katalogweit" (2) — ein Vertrag, der wieder
+                   katalogweit zaehlte, fiele in P21 auf. */
+                ('PROBE-4', 'Spiel A', 'spiel-a', 'PROBE', 2, true, true, 40.00, 'game', 'probe', 'Spiel A!'),
+                ('PROBE-5', 'Spiel B', 'spiel-b', 'PROBE', 2, true, true, 50.00, 'game', 'probe', null),
+                -- Genau die zwei IDs, nach denen der Staging-Stempel in
+                -- staging_pending_migrations.sql fragt. Erfundene Zeilen, wie
+                -- alle hier — sie tragen nur den Namen.
+                ('SKY-0821', 'Stempel A', 'stempel-a', 'PROBE', 1, true, true, 1.00, 'core', 'probe', null),
+                ('SKY-0822', 'Stempel B', 'stempel-b', 'PROBE', 1, true, true, 1.00, 'core', 'probe', null);
+    insert into public.shop_inventory (sky_id, condition, is_listed, available_quantity, sale_price)
+         values ('PROBE-1', 'loose', true, 1, null),
+                ('PROBE-2', 'loose', true, 2, 17.50);`;
+
+  /** Der Ausgangszustand der Sicherungsfunktion: der Rumpf aus `0131`, mit ACL. */
+  const STAND_0131 = `
+    revoke all on function public.seller_business_backup() from public, anon;
+    grant execute on function public.seller_business_backup() to authenticated;`;
+
+  /*
+   * DER AUSGANGSZUSTAND IST DER DER UMGEBUNGEN, NICHT DER DES REPOSITORIES.
+   *
+   * Das Stub-Schema entsteht aus ALLEN Migrationen — die noch nicht
+   * angewendeten eingeschlossen. Es trägt `skylanders.item_type` also schon,
+   * und die Faltung oben liefert `is_shop_eligible` in der Fassung aus `0135`
+   * und `seller_business_backup` in der aus `0136`. Gegen diesen Zustand
+   * gefahren, meldete jede der beiden Migrationen zu Recht „steht schon".
+   *
+   * Der Probelauf setzt deshalb zurück: die Faltung OHNE die beiden Dateien
+   * (das ist der Stand `0134`, den Staging und Production führen), und die
+   * Spalten, die sie anlegen, wieder weg. Welche das sind, liest er aus den
+   * Dateien selbst — eine Liste, die niemand pflegen muss.
+   */
+  const vorstand = funktionsfaltung(PROBELAUF);
+  const zurueck: string[] = [];
+  for (const datei of PROBELAUF) {
+    const sql = readFileSync(join(MIG_DIR, datei), "utf8");
+    for (const m of sql.matchAll(
+      /alter\s+table\s+(?:public\.)?([a-z_0-9]+)\s+add\s+column\s+([a-z_0-9]+)\b/gi)) {
+      zurueck.push(`alter table public.${m[1]} drop column if exists ${m[2]};`);
+    }
+  }
+
+  /*
+   * Die Kommentare gehören dazu. `0131_function_body_check.sql` liest den
+   * Funktionskommentar mit — ohne ihn wäre sein Abdruck leer und die Prüfung
+   * meldete eine Abweichung, die nur dem Probelauf gehört.
+   */
+  const kommentare: string[] = [];
+  for (const datei of readdirSync(MIG_DIR)
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && !PROBELAUF.includes(f as never)).sort()) {
+    for (const roh of anweisungen(readFileSync(join(MIG_DIR, datei), "utf8"))) {
+      const s = ohneKopf(roh);
+      if (/^comment\s+on\s+function\b/i.test(s)) kommentare.push(s);
+    }
+  }
+
+  async function frisch(): Promise<InstanceType<typeof PGlite>> {
+    const db = new PGlite();
+    await stubAnwenden(db);
+    for (const [, { sql }] of vorstand) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+    for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
+    for (const s of zurueck) await db.exec(s);
+    for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
+    for (const s of anweisungen(STAND_0131)) await db.exec(s + ";");
+    return db;
+  }
+
+  /**
+   * Eine Prüfdatei fahren und die Zeilen 401, 902 und 9999 zurückgeben.
+   *
+   * `vorher` läuft in DERSELBEN Klammer — nur so wirkt ein
+   * `set_config(…, true)` auf das folgende SELECT. Genau diese Zuordnung
+   * verlangt der Z0-Vertrag, und genau sie wird hier nachgefahren.
+   */
+  async function pruefdatei(db: InstanceType<typeof PGlite>, datei: string,
+                            opt: { vorher?: string } = {},
+  ): Promise<{ abweichungen: string; befund: string; modus: string }> {
+    const sql = anweisungen(readFileSync(join(CHECK_DIR, datei), "utf8"))
+      .filter((s) => planbar(s));
+    await db.exec("begin;");
+    if (opt.vorher) await db.exec(opt.vorher);
+    const r = (await db.query(`select nr, befund from (${ohneKopf(sql[0])}) x
+                                where nr in (401, 902, 9999)`)) as
+      { rows: { nr: number; befund: string }[] };
+    await db.exec("rollback;");
+    return {
+      abweichungen: r.rows.find((z) => z.nr === 9999)?.befund ?? "(keine Zeile 9999)",
+      befund: r.rows.find((z) => z.nr === 401)?.befund ?? "(keine Zeile 401)",
+      modus: r.rows.find((z) => z.nr === 902)?.befund ?? "(keine Zeile 902)",
+    };
+  }
+
+  /** Die Anweisungen einer Migration, ohne die reinen Kommentarblöcke. */
+  const teileVon = (pfad: string): string[] =>
+    anweisungen(readFileSync(pfad, "utf8")).filter((s) => ohneKopf(s).length > 0);
+
+  /**
+   * Eine Migration Anweisung für Anweisung, mit oder ohne Klammer.
+   *
+   * `zwischen` schiebt eine fremde Anweisung VOR die Anweisung mit dem
+   * genannten Index ein — so wird aus einer Nachbedingung eine Prüfung: ändert
+   * sich zwischen Abdruck und Vergleich etwas, muss sie anschlagen.
+   */
+  async function fahre(db: InstanceType<typeof PGlite>, pfad: string,
+                      opt: {
+                        klammer: boolean;
+                        zwischen?: { vor: number; sql: string };
+                        /** Textersetzung vor dem Lauf — fuer den Passwortplatzhalter. */
+                        ersetze?: readonly [string, string];
+                      } = { klammer: true },
+  ): Promise<string | null> {
+    const teile = opt.ersetze === undefined
+      ? teileVon(pfad)
+      : teileVon(pfad).map((s) => s.split(opt.ersetze![0]).join(opt.ersetze![1]));
+    try {
+      if (opt.klammer) await db.exec("begin;");
+      for (const [i, s] of teile.entries()) {
+        if (opt.zwischen && opt.zwischen.vor === i) await db.exec(opt.zwischen.sql);
+        await db.exec(s + ";");
+      }
+      if (opt.klammer) await db.exec("commit;");
+      return null;
+    } catch (e) {
+      const err = e as { message?: string; code?: string };
+      /* IMMER zuruecknehmen, nicht nur bei eigener Klammer: eine Datei, die
+         ihr `begin` selbst mitbringt (das Staging-Skript), laesst sonst eine
+         abgebrochene Transaktion offen — und jede folgende Anweisung dieser
+         Instanz scheitert mit `25P02`. Ohne offene Klammer ist `rollback`
+         eine Warnung, kein Fehler. */
+      try { await db.exec("rollback;"); } catch { /* keine offene Klammer */ }
+      return `[${err.code ?? "?"}] ${(err.message ?? "").split("\n")[0]}`;
+    }
+  }
+
+  const spalte = async (db: InstanceType<typeof PGlite>): Promise<boolean> =>
+    ((await db.query(`select count(*)::int as n from information_schema.columns
+                       where table_schema = 'public' and table_name = 'skylanders'
+                         and column_name = 'item_type'`)) as { rows: { n: number }[] })
+      .rows[0].n > 0;
+  const abdruck = async (db: InstanceType<typeof PGlite>): Promise<string> =>
+    ((await db.query(`select md5(prosrc) as m from pg_proc
+                       where proname = 'seller_business_backup'`)) as { rows: { m: string }[] })
+      .rows[0].m;
+
+  const probe: { name: string; ok: boolean; sagt: string }[] = [];
+
+  /* P1 — der gute Fall: 0135, dann 0136, beide geklammert. */
+  {
+    const db = await frisch();
+    const f1 = await fahre(db, M135);
+    const f2 = f1 ? "nicht gefahren" : await fahre(db, M136);
+    const spiele = ((await db.query(
+      `select count(*)::int as n from public.skylanders where item_type = 'game'`,
+    )) as { rows: { n: number }[] }).rows[0].n;
+    const angebote = ((await db.query(
+      `select count(*)::int as n from public.shop_offers()`,
+    )) as { rows: { n: number }[] }).rows[0].n;
+    const ok = f1 === null && f2 === null && spiele === 2 && angebote === 2
+      && await abdruck(db) === "f6d08440707ba72a8040a8d1e666c092";
+    probe.push({ name: "P1  0135 und 0136 laufen durch", ok,
+      sagt: f1 ?? f2 ?? `${spiele} Spiele markiert, ${angebote} Angebote unverändert, `
+        + `Sicherung md5 ${(await abdruck(db)).slice(0, 8)}…` });
+  }
+
+  /* P2 — ohne Klammer: 0135 muss abbrechen, BEVOR die Spalte entsteht. */
+  {
+    const db = await frisch();
+    const fehler = await fahre(db, M135, { klammer: false });
+    const ok = fehler !== null && fehler.includes("nicht in einer Transaktion")
+      && !(await spalte(db));
+    probe.push({ name: "P2  0135 ohne begin/commit bricht ab", ok,
+      sagt: fehler ?? "LIEF DURCH — das wäre ein Befund" });
+  }
+
+  /* P3 — die Angebotsliste wird zwischen Abdruck und Nachbedingung verändert. */
+  {
+    const db = await frisch();
+    const teile = teileVon(M135);
+    /* Unmittelbar VOR die Nachbedingung — das ist der letzte DO-Block. */
+    const nachbedingung = teile.reduce(
+      (letzter, s, i) => (/^do\s+\$\$/i.test(ohneKopf(s)) ? i : letzter), -1);
+    const fehler = await fahre(db, M135, {
+      klammer: true,
+      zwischen: { vor: nachbedingung,
+        sql: "update public.shop_inventory set is_listed = false where sky_id = 'PROBE-1';" },
+    });
+    const ok = fehler !== null && fehler.includes("Angebotsliste hat sich geaendert")
+      && !(await spalte(db));
+    probe.push({ name: "P3  verändertes Angebot bricht 0135 ab und rollt zurück", ok,
+      sagt: fehler ?? "LIEF DURCH — das wäre ein Befund" });
+  }
+
+  /* P4 — 0136 ohne 0135: die harte Reihenfolge. */
+  {
+    const db = await frisch();
+    const fehler = await fahre(db, M136);
+    const ok = fehler !== null && fehler.includes("setzt 0135 voraus")
+      && await abdruck(db) === "24c3810288bb20929fe995554a267adf";
+    probe.push({ name: "P4  0136 vor 0135 bricht ab, die Sicherung bleibt die aus 0131", ok,
+      sagt: fehler ?? "LIEF DURCH — das wäre ein Befund" });
+  }
+
+  /* P5/P6 — die Prüfdatei zur Sicherungsfunktion muss BEIDE Stände als in
+     Ordnung lesen: den aus `0131` und den aus `0136`. Genau daran war die
+     einzelne Abdruckerwartung gescheitert, die bis zum 2026-10-19 dort stand. */
+  {
+    const db = await frisch();
+    const vor = await pruefdatei(db, "0131_function_body_check.sql");
+    probe.push({ name: "P5  0131_function_body_check liest den Stand 0131 als in Ordnung",
+      ok: vor.abweichungen === "0" && vor.befund === "STAND_0131_ZEICHENGLEICH",
+      sagt: `9999 = ${vor.abweichungen}, Befund ${vor.befund}` });
+
+    const f1 = await fahre(db, M135);
+    const f2 = await fahre(db, M136);
+    const nach = await pruefdatei(db, "0131_function_body_check.sql");
+    probe.push({ name: "P6  und nach 0136 den Stand 0136 — dieselbe Datei, kein Fehlalarm",
+      ok: f1 === null && f2 === null && nach.abweichungen === "0"
+        && nach.befund === "STAND_0136_ZEICHENGLEICH",
+      sagt: f1 ?? f2 ?? `9999 = ${nach.abweichungen}, Befund ${nach.befund}` });
+  }
+
+  /* P7/P8 — die Ruecknahmen, und ihre Reihenfolge. `R0135` darf die Spalte
+     nicht wegnehmen, solange die Sicherung sie liest: PostgreSQL vermerkt fuer
+     einen `language sql`-Rumpf keine Abhaengigkeit, der `drop column` wuerde
+     also gelingen und die Sicherung erst beim naechsten Aufruf scheitern. */
+  {
+    const db = await frisch();
+    await fahre(db, M135);
+    await fahre(db, M136);
+    const zuFrueh = await fahre(db, R135);
+    const spalteDa = await spalte(db);
+    probe.push({ name: "P7  R0135 verweigert, solange die Sicherung item_type liest",
+      ok: zuFrueh !== null && zuFrueh.includes("liest item_type noch")
+        && spalteDa && await abdruck(db) === "f6d08440707ba72a8040a8d1e666c092",
+      sagt: zuFrueh ?? "LIEF DURCH — das wäre ein Befund" });
+
+    const r136 = await fahre(db, R136);
+    const r135 = r136 ? "nicht gefahren" : await fahre(db, R135);
+    probe.push({ name: "P8  in der Reihenfolge R0136, R0135 nimmt sich beides zurück",
+      ok: r136 === null && r135 === null && !(await spalte(db))
+        && await abdruck(db) === "24c3810288bb20929fe995554a267adf",
+      sagt: r136 ?? r135
+        ?? `Sicherung wieder md5 ${(await abdruck(db)).slice(0, 8)}…, Spalte weg` });
+  }
+
+  /* P9–P11 — der Z0-Vertrag. Drei Durchgänge, und der entscheidende ist der
+     dritte: im Modus `staging` muss der Postflight an den erfundenen Zeilen
+     SCHEITERN. Täte er das nicht, läse er die Werte nur aus. */
+  {
+    const db = await frisch();
+    await fahre(db, M135);
+    const SETZE = (m: string) => `select set_config('skyisles.z0', '${m}', true);`;
+
+    const ohne = await pruefdatei(db, "0135_postflight.sql");
+    probe.push({ name: "P9  ohne Vertragsmodus ist der Postflight blockierend",
+      ok: ohne.abweichungen !== "0" && ohne.modus.startsWith("nein"),
+      sagt: `9999 = ${ohne.abweichungen}, Zeile 902: ${ohne.modus}` });
+
+    const verzicht = await pruefdatei(db, "0135_postflight.sql",
+      { vorher: SETZE("keine") });
+    probe.push({ name: "P10 mit ausdrücklichem Verzicht läuft er durch",
+      ok: verzicht.abweichungen === "0" && verzicht.modus === "ja",
+      sagt: `9999 = ${verzicht.abweichungen}, Zeile 902: ${verzicht.modus}` });
+
+    const vertrag = await pruefdatei(db, "0135_postflight.sql",
+      { vorher: SETZE("staging") });
+    probe.push({ name: "P11 im Modus staging schlägt er an erfundenen Zeilen FEHL",
+      ok: vertrag.abweichungen !== "0" && vertrag.modus === "ja",
+      sagt: `9999 = ${vertrag.abweichungen} (erwartet > 0: 5 Zeilen gegen 534/256/…), `
+        + `Zeile 902: ${vertrag.modus}` });
+  }
+
+  /* P12/P13 — die zwei Flüge zu `0136` messen gegenläufige Zustände. Eine
+     Prüfdatei, die vor UND nach der Migration grün meldet, prüft nichts. */
+  {
+    const db = await frisch();
+    await fahre(db, M135);
+    const KEINE = "select set_config('skyisles.z0', 'keine', true);";
+
+    const vorPre  = await pruefdatei(db, "0136_preflight.sql",  { vorher: KEINE });
+    const vorPost = await pruefdatei(db, "0136_postflight.sql", { vorher: KEINE });
+    probe.push({ name: "P12 vor 0136: Preflight grün, Postflight blockierend",
+      ok: vorPre.abweichungen === "0" && vorPost.abweichungen !== "0"
+        && vorPre.befund === "STAND_0131",
+      sagt: `Preflight 9999 = ${vorPre.abweichungen} (${vorPre.befund}), `
+        + `Postflight 9999 = ${vorPost.abweichungen}` });
+
+    await fahre(db, M136);
+    const nachPre  = await pruefdatei(db, "0136_preflight.sql",  { vorher: KEINE });
+    const nachPost = await pruefdatei(db, "0136_postflight.sql", { vorher: KEINE });
+    probe.push({ name: "P13 nach 0136: Postflight grün, Preflight blockierend",
+      ok: nachPost.abweichungen === "0" && nachPre.abweichungen !== "0"
+        && nachPost.befund === "STAND_0136",
+      sagt: `Postflight 9999 = ${nachPost.abweichungen} (${nachPost.befund}), `
+        + `Preflight 9999 = ${nachPre.abweichungen}` });
+  }
+
+  /* P14 — der Staging-Wächter. Er behauptet, dass `0133` und `0134` NICHT
+     stehen; also wird er gegen einen Stand gefahren, in dem sie fehlen — und
+     danach gegen einen, in dem `0133` steht. Nur wenn der zweite Lauf
+     anschlägt, prüft der erste etwas. */
+  {
+    const ohne0133 = funktionsfaltung([...PROBELAUF,
+      "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
+    const db = new PGlite();
+    await stubAnwenden(db);
+    for (const [, { sql }] of ohne0133) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+    for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
+    for (const s of zurueck) await db.exec(s);
+    for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
+
+    const vorher = await pruefdatei(db, "staging_pending_migrations.sql");
+    /* Jetzt 0133 nachziehen — die Funktion allein genügt für den Gegenbeweis. */
+    for (const roh of anweisungen(readFileSync(
+      join(MIG_DIR, "0133_paid_total_immutable.sql"), "utf8"))) {
+      const s = ohneKopf(roh);
+      if (/^create or replace function/i.test(s)) await db.exec(s + ";");
+    }
+    const nachher = await pruefdatei(db, "staging_pending_migrations.sql");
+    probe.push({ name: "P14 der Staging-Wächter erkennt 0133 — grün ohne, blockierend mit",
+      ok: vorher.abweichungen === "0" && nachher.abweichungen !== "0",
+      sagt: `ohne 0133: 9999 = ${vorher.abweichungen}, mit 0133: 9999 = ${nachher.abweichungen}` });
+  }
+
+  /* P15/P16 — der Einrichtungsschritt fuer den lesenden Staging-Zugang.
+     Er verteilt Rechte, und Rechte lassen sich nicht durch Lesen pruefen:
+     also wird er gefahren. Der Aufbau bildet nach, was in der echten
+     Datenbank gilt — RLS auf den zwoelf Tabellen, die bestehenden Policies
+     `to anon, authenticated`, und die Rechte der sensiblen Funktionen. */
+  const AGENT_SETUP = "supabase/operations/staging-agent-setup.sql";
+  /* Der Einrichtungsschritt bricht beim Platzhalter ab — zu Recht. Fuer den
+     Probelauf tritt ein Wegwerf-Passwort an seine Stelle; es verlaesst diese
+     Instanz nie. */
+  const SETUP_PW: readonly [string, string] =
+    ["HIER-EIN-NEUES-LANGES-PASSWORT-EINSETZEN", "ProbelaufOhneBedeutung0123456789"];
+  const DIE_12 = ["categories", "collection_items", "inventory_movements",
+    "purchase_items", "purchase_receipt_counters", "purchase_receipt_downloads",
+    "purchase_receipts", "purchases", "sale_items", "series",
+    "shop_inventory", "skylanders"] as const;
+  const SENSIBEL = ["public.seller_issue_purchase_receipt(bigint)",
+    "public.seller_issue_purchase_receipt_correction(bigint)",
+    "public.seller_business_backup()", "public.system_platform_export()",
+    "public.purchase_receipt_fingerprint(bigint)",
+    "public.is_shop_eligible(text)", "public.non_collectible_categories()",
+    "public.shop_offers()"] as const;
+
+  async function wieEchteDatenbank(): Promise<InstanceType<typeof PGlite>> {
+    const db = new PGlite();
+    await stubAnwenden(db);
+    for (const t of DIE_12) {
+      await db.exec(`alter table public.${t} enable row level security;`);
+    }
+    /* Die bestehenden Policies: alle `to anon, authenticated` gebunden. */
+    for (const t of ["skylanders", "categories", "series"]) {
+      await db.exec(`create policy ${t}_select_public on public.${t} `
+        + "for select to anon, authenticated using (true);");
+      await db.exec(`grant select on table public.${t} to anon, authenticated;`);
+    }
+    for (const sig of SENSIBEL) {
+      try {
+        await db.exec(`revoke all on function ${sig} from public, anon, authenticated, service_role;`);
+      } catch { /* im Stub fehlt vielleicht eine Signatur */ }
+    }
+    await db.exec("insert into public.skylanders (sky_id) values ('SKY-0821'), ('SKY-0822');");
+    await db.exec("insert into public.purchases (id) values (1), (2), (3);");
+    return db;
+  }
+
+  {
+    const db = await wieEchteDatenbank();
+    const fehler = await fahre(db, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+    let liest = -1, schreibt = "offen", backup = "offen";
+    if (fehler === null) {
+      await db.exec("set role skyisles_agent");
+      liest = ((await db.query("select count(*)::int as n from public.purchases")) as
+        { rows: { n: number }[] }).rows[0].n;
+      for (const [sql, name] of [["insert into public.purchases (id) values (99)", "schreibt"],
+                                 ["select public.seller_business_backup()", "backup"]] as const) {
+        try { await db.exec(sql); }
+        catch (e) {
+          const c = (e as { code?: string }).code ?? "?";
+          if (name === "schreibt") schreibt = c; else backup = c;
+        }
+      }
+      await db.exec("reset role");
+    }
+    probe.push({
+      name: "P15 der Staging-Einrichtungsschritt läuft durch, und die Rolle liest ohne bypassrls",
+      ok: fehler === null && liest === 3 && schreibt === "42501" && backup === "42501",
+      sagt: fehler ?? `liest ${liest} von 3 Zeilen, Schreibversuch ${schreibt}, `
+        + `seller_business_backup ${backup}`,
+    });
+  }
+
+  {
+    /* Gegenprobe: ohne die Policy liest die Rolle null Zeilen — das ist der
+       Grund, warum es sie gibt, und der Beweis, dass `bypassrls` dafuer nicht
+       noetig ist. */
+    const db = await wieEchteDatenbank();
+    await fahre(db, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+    await db.exec("drop policy agent_read_purchases on public.purchases;");
+    await db.exec("set role skyisles_agent");
+    const ohne = ((await db.query("select count(*)::int as n from public.purchases")) as
+      { rows: { n: number }[] }).rows[0].n;
+    await db.exec("reset role");
+
+    /* Und: der Einrichtungsschritt bricht ab, wenn die Belegsperre nicht
+       dicht ist. */
+    const db2 = await wieEchteDatenbank();
+    await db2.exec("grant execute on function public.seller_issue_purchase_receipt(bigint) to anon;");
+    const abbruch = await fahre(db2, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+
+    probe.push({
+      name: "P16 ohne Policy liest sie 0 Zeilen, und bei offener Belegsperre bricht sie ab",
+      ok: ohne === 0 && abbruch !== null && abbruch.includes("Belegsperre ist nicht dicht"),
+      sagt: `ohne Policy: ${ohne} Zeilen (erwartet 0); `
+        + `offene Belegsperre: ${abbruch ?? "LIEF DURCH — das wäre ein Befund"}`,
+    });
+  }
+
+  /* P17 — WAS DARF DIE ROLLE WIRKLICH AUSFUEHREN?
+   *
+   * Der statische Bericht (`npm run db:acl:audit`) sagt: 19 schreibende und 2
+   * lesende `security definer`-Funktionen sind von PUBLIC aufrufbar, und jede
+   * traegt `can_operate_active_seller()` VOR dem ersten Schreibvorgang. Das
+   * ist eine Aussage ueber den Text. Hier wird sie AUSGEFUEHRT: die echten
+   * Ruempfe, die Rolle `skyisles_agent`, `auth.uid()` NULL — und dann jede
+   * der 21 Funktionen aufgerufen. Keine darf durchlaufen, und keine
+   * Zeilenzahl darf sich bewegen. */
+  {
+    const GEPRUEFT = [
+      "seller_add_sale_fee", "seller_add_sale_item", "seller_add_sale_refund",
+      "seller_add_settlement_adjustment", "seller_create_sale", "seller_delete_sale",
+      "seller_import_sale_group", "seller_remove_sale_fee", "seller_remove_sale_refund",
+      "seller_restock_sale_item", "seller_return_sale_item", "seller_set_purchase_test",
+      "seller_set_sale_date", "seller_set_sale_payout", "seller_set_sale_shipped",
+      "seller_set_sale_test", "seller_unbook_sale_item", "seller_update_sale_fee",
+      "seller_update_sale_refund", "seller_sale_audit", "seller_sale_fingerprints",
+    ] as const;
+    const GEZAEHLT = ["sales", "sale_items", "sale_fees", "sale_refunds",
+                      "settlement_adjustments", "purchases", "purchase_items",
+                      "inventory_movements", "shop_inventory"] as const;
+
+    /* Die Argumenttypen stehen im Stub-Schema — dort ist die Signatur auf
+       Typen reduziert, und genau die braucht ein Aufruf mit NULL-Werten. */
+    const signatur = new Map<string, string>();
+    for (const m of readFileSync(STUB, "utf8").matchAll(
+      /create or replace function public\.([a-z_0-9]+)\(([^)]*)\)\s+returns/g)) {
+      signatur.set(m[1], m[2].trim());
+    }
+
+    const db = await wieEchteDatenbank();
+    /* Die ECHTEN Ruempfe ueber die Stubs legen — sonst wuerde eine Huelle
+       geprueft, die ohnehin null zurueckgibt. */
+    for (const [, { sql }] of fold) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+    const setupFehler = await fahre(db, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+
+    const vorher = new Map<string, number>();
+    for (const tab of GEZAEHLT) {
+      vorher.set(tab, ((await db.query(`select count(*)::int as n from public.${tab}`)) as
+        { rows: { n: number }[] }).rows[0].n);
+    }
+
+    await db.exec("set role skyisles_agent");
+    let abgewiesen = 0;
+    const auffaellig: string[] = [];
+    for (const f of GEPRUEFT) {
+      const args = (signatur.get(f) ?? "").split(",").map((s) => s.trim())
+        .filter((s) => s !== "").map((ty) => `null::${ty}`).join(", ");
+      try {
+        await db.query(`select * from public.${f}(${args})`);
+        auffaellig.push(`${f}: DURCHGELAUFEN`);
+      } catch (e) {
+        const m = (e as { message?: string }).message ?? "";
+        if (m.includes("seller operator role required")) abgewiesen++;
+        else auffaellig.push(`${f}: ${m.split("\n")[0].slice(0, 60)}`);
+      }
+    }
+    await db.exec("reset role");
+
+    const bewegt: string[] = [];
+    for (const tab of GEZAEHLT) {
+      const jetzt = ((await db.query(`select count(*)::int as n from public.${tab}`)) as
+        { rows: { n: number }[] }).rows[0].n;
+      if (jetzt !== vorher.get(tab)) bewegt.push(`${tab} ${vorher.get(tab)}→${jetzt}`);
+    }
+
+    probe.push({
+      name: "P17 die Rolle kann keine der 21 von PUBLIC erreichbaren Schreib-/Definer-Funktionen ausführen",
+      ok: setupFehler === null && abgewiesen === GEPRUEFT.length
+        && auffaellig.length === 0 && bewegt.length === 0,
+      sagt: setupFehler ?? `${abgewiesen} von ${GEPRUEFT.length} abgewiesen ("seller operator `
+        + `role required"), Zeilenzahlen unverändert`
+        + (auffaellig.length > 0 ? ` — AUFFÄLLIG: ${auffaellig.join("; ")}` : "")
+        + (bewegt.length > 0 ? ` — BEWEGT: ${bewegt.join(", ")}` : ""),
+    });
+  }
+
+  /* P18 — DIE MITGLIEDSCHAFTSPRUEFUNG, IN BEIDEN RICHTUNGEN.
+   *
+   * Der Lauf vom 2026-10-19 ist an dieser Stelle abgebrochen: die
+   * Nachbedingung verbot JEDE Mitgliedschaft an der Rolle, und PostgreSQL
+   * erzeugt selbst eine, sobald ein CREATEROLE-Nutzer ohne Superuser-Recht
+   * die Rolle anlegt (`admin` ja, `inherit`/`set` nein). Hier werden die drei
+   * Faelle gefahren, die der Unterschied ausmacht. */
+  {
+    const nachbedingung = (): string => {
+      const teile = teileVon(AGENT_SETUP);
+      return teile[teile.length - 1];     // der letzte DO-Block
+    };
+    const db = await wieEchteDatenbank();
+    await fahre(db, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+
+    const nach = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); } catch (e) {
+        return `Aufbau: ${(e as { message?: string }).message ?? ""}`;
+      }
+      try { await db.exec(nachbedingung() + ";"); return null; }
+      catch (e) { return ((e as { message?: string }).message ?? "").split("\n")[0]; }
+    };
+
+    /* 1. Die Mitgliedschaft, die PostgreSQL selbst anlegt: Ersteller, mit
+          admin, ohne inherit, ohne set. Muss DURCHLAUFEN. */
+    const erlaubt = await nach(
+      "grant skyisles_agent to postgres with admin option, inherit false, set false;");
+
+    /* 2. Dieselbe Rolle, aber MIT set/inherit — das gibt Rechte weiter. */
+    await db.exec("revoke skyisles_agent from postgres;");
+    const mitSet = await nach("grant skyisles_agent to postgres with inherit true;");
+
+    /* 3. Eine FREMDE Rolle als Mitglied. */
+    await db.exec("revoke skyisles_agent from postgres;");
+    await db.exec("create role fremder_gast login;");
+    const fremd = await nach("grant skyisles_agent to fremder_gast;");
+
+    probe.push({
+      name: "P18 Mitgliedschaft: Ersteller erlaubt, inherit/set und fremde Rollen nicht",
+      ok: erlaubt === null
+        && mitSet !== null && mitSet.includes("inherit")
+        && fremd !== null && fremd.includes("fremde Rolle"),
+      sagt: `Ersteller (admin, ohne inherit/set): ${erlaubt ?? "durchgelaufen"} · `
+        + `mit inherit: ${mitSet ?? "DURCHGELAUFEN — Befund"} · `
+        + `fremde Rolle: ${fremd ?? "DURCHGELAUFEN — Befund"}`,
+    });
+  }
+
+  /* P19 — die Diagnosedatei zum Abbruch. Sie muss BEIDE Ausgaenge richtig
+     benennen: „nichts angewendet" und „teilweise angewendet". */
+  {
+    const DIAG = "staging_agent_role_diagnosis.sql";
+    const db = await wieEchteDatenbank();
+
+    const lies = async (): Promise<{ abweichungen: string; deutung: string }> => {
+      const sql = anweisungen(readFileSync(join(CHECK_DIR, DIAG), "utf8"))
+        .filter((s) => planbar(s));
+      const r = (await db.query(`select nr, befund from (${ohneKopf(sql[0])}) x
+                                  where nr in (306, 9999)`)) as
+        { rows: { nr: number; befund: string }[] };
+      return {
+        abweichungen: r.rows.find((z) => z.nr === 9999)?.befund ?? "(keine)",
+        deutung: r.rows.find((z) => z.nr === 306)?.befund ?? "(keine)",
+      };
+    };
+
+    const vorher = await lies();
+    await fahre(db, AGENT_SETUP, { klammer: false, ersetze: SETUP_PW });
+    const nachher = await lies();
+    /* Und eine Mitgliedschaft, die Rechte weitergibt, muss sie als
+       blockierende Abweichung melden. */
+    await db.exec("grant skyisles_agent to postgres with inherit true;");
+    const mitSet = await lies();
+
+    probe.push({
+      name: "P19 die Diagnose benennt beide Ausgänge und schlägt bei inherit/set an",
+      ok: vorher.abweichungen === "0" && vorher.deutung.includes("ZURUECKGEROLLT")
+        && nachher.abweichungen === "0" && nachher.deutung.includes("TEILWEISE")
+        && mitSet.abweichungen !== "0",
+      sagt: `ohne Rolle: 9999 = ${vorher.abweichungen}, "${vorher.deutung}" · `
+        + `nach dem Setup: 9999 = ${nachher.abweichungen}, "${nachher.deutung}" · `
+        + `mit inherit: 9999 = ${mitSet.abweichungen}`,
+    });
+  }
+
+  /* P20 — DIE ABLEITUNG FUER NEUE ZEILEN.
+   *
+   * Der Backfill in `0135` trifft nur die Zeilen von heute. Hier wird
+   * geprueft, was MORGEN passiert: sechs Schreibfaelle gegen die echten
+   * Ruempfe, nach angewendeter `0135`. Besonders der vierte — ein
+   * unbekannter Kategoriename darf NIE zum Spiel werden. */
+  {
+    const db = await frisch();
+    const fehler = await fahre(db, M135);
+    const zahl = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const angeboteVor = await zahl("select count(*)::text as w from public.shop_offers()");
+    await db.exec("insert into public.categories (id, name, series_code) "
+      + "values (3, 'Taschen', 'PROBE');");
+    await db.exec(`
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source)
+      values ('NEU-SPIEL', 'Neues Spiel', 'neues-spiel', 'PROBE', 2, true, true, 9, 'game', 'probe'),
+             ('NEU-FIGUR', 'Neue Figur', 'neue-figur', 'PROBE', 1, true, true, 9, 'core', 'probe'),
+             ('NEU-TASCHE', 'Neue Tasche', 'neue-tasche', 'PROBE', 3, true, true, 9, 'core', 'probe');
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, item_type)
+      values ('NEU-PORTAL', 'Neues Portal', 'neues-portal', 'PROBE', 2, true, true, 9,
+              'core', 'probe', 'portal');
+      update public.skylanders set category_id = 2 where sky_id = 'NEU-FIGUR';
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, item_type)
+      values ('NEU-BUNDLE', 'Neues Bundle', 'neues-bundle', 'PROBE', 1, true, true, 9,
+              'core', 'probe', 'bundle');
+      update public.skylanders set category_id = 3 where sky_id = 'NEU-BUNDLE';`);
+
+    const typ = async (id: string): Promise<string> =>
+      zahl(`select item_type as w from public.skylanders where sky_id = '${id}'`);
+    const faelle: [string, string, string][] = [
+      ["Spiele-Zeile ohne Angabe", await typ("NEU-SPIEL"), "game"],
+      ["Figurenzeile ohne Angabe", await typ("NEU-TASCHE"), "figure"],
+      ["ausdrueckliches portal in Spiele", await typ("NEU-PORTAL"), "portal"],
+      ["Figur nach Spiele umgehaengt", await typ("NEU-FIGUR"), "game"],
+      ["bundle bleibt bundle nach Umhaengen", await typ("NEU-BUNDLE"), "bundle"],
+    ];
+    const falsch = faelle.filter(([, ist, soll]) => ist !== soll);
+
+    /* Und keine der neuen Zeilen wird shopfaehig, ausser der echten Figur —
+       die hat kein Lager, also auch kein Angebot. */
+    const shopfaehig = await zahl(
+      "select string_agg(sky_id || '=' || public.is_shop_eligible(sky_id)::text, ' ' "
+      + "order by sky_id) as w from public.skylanders where sky_id like 'NEU-%'");
+    const angeboteNach = await zahl("select count(*)::text as w from public.shop_offers()");
+
+    probe.push({
+      name: "P20 eine neue Zeile bekommt den richtigen Artikeltyp — und Unbekanntes wird nie zum Spiel",
+      ok: fehler === null && falsch.length === 0 && angeboteNach === angeboteVor
+        && shopfaehig === "NEU-BUNDLE=false NEU-FIGUR=false NEU-PORTAL=false "
+          + "NEU-SPIEL=false NEU-TASCHE=true",
+      sagt: fehler ?? (falsch.length > 0
+        ? falsch.map(([n, ist, soll]) => `${n}: ${ist} statt ${soll}`).join("; ")
+        : `5 von 5 Faellen richtig, Angebote ${angeboteVor} → ${angeboteNach}, `
+          + `shopfaehig: ${shopfaehig}`),
+    });
+  }
+
+  /* P21 — DAS STAGING-SKRIPT IN EINEM DURCHGANG.
+   *
+   * Es bringt `begin`/`commit` selbst mit, bettet beide Migrationen ein und
+   * prueft 18 Bezugswerte vorher und nachher. Gefahren wird es zweimal:
+   * einmal mit dem Z0-Vertrag auf die Zahlen dieser Wegwerf-Instanz
+   * umgestellt (dann muss es DURCHLAUFEN), und einmal unveraendert (dann muss
+   * der Vertrag ANSCHLAGEN — er ist auf die echten Staging-Zahlen geschrieben). */
+  {
+    const SKRIPT = "supabase/operations/staging-0135-0136.sql";
+    const ORIGINAL = readFileSync(SKRIPT, "utf8");
+
+    /** Stand 0132: die Faltung ohne 0133, 0134, 0135, 0136. */
+    const bauen = async (): Promise<InstanceType<typeof PGlite>> => {
+      const fold0132 = funktionsfaltung([...PROBELAUF,
+        "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
+      const db = new PGlite();
+      await stubAnwenden(db);
+      for (const [, { sql }] of fold0132) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+      for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
+      for (const s of zurueck) await db.exec(s);
+      for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
+      for (const s of anweisungen(STAND_0131)) await db.exec(s + ";");
+      for (const sig of SENSIBEL) {
+        try {
+          await db.exec(`revoke all on function ${sig} from public, anon, authenticated, service_role;`);
+        } catch { /* im Stub fehlt vielleicht eine Signatur */ }
+      }
+      await db.exec("insert into public.purchases (id, source, total_cost) "
+        + "values (1, 'excel_order_2026', 10.50), (2, 'excel_order_2026', 5.25);");
+      return db;
+    };
+
+    /* Der Vertrag, auf die Zahlen dieser Instanz umgestellt. */
+    const messen = async (db: InstanceType<typeof PGlite>): Promise<string> => {
+      const w = async (sql: string): Promise<string> =>
+        String(((await db.query(sql)) as { rows: { w: unknown }[] }).rows[0].w);
+      const shopfaehig = await w("select count(*)::text as w from public.skylanders s "
+        + "where public.is_shop_eligible(s.sky_id)");
+      const angebote = await w("select count(*)::text as w from public.shop_offers()");
+      const md5 = await w("select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|' "
+        + "|| coalesce(o.price::text, ''), ';' order by o.sky_id, o.condition), '')) as w "
+        + "from public.shop_offers() o");
+      const sammelbar = await w("select count(*)::text as w from public.skylanders s "
+        + "join public.categories c on c.id = s.category_id where s.is_active and s.catalog_visible "
+        + "and not (c.name = any (public.non_collectible_categories()))");
+      const overrides = await w("select count(*)::text as w from public.skylanders s "
+        + "join public.categories c on c.id = s.category_id "
+        + "where c.name = 'Spiele' and s.display_name_override is not null");
+      return `array['shopfaehig=${shopfaehig}', 'angebote=${angebote}',\n`
+        + `                                'angebote_md5=${md5}',\n`
+        + `                                'sammelbar=${sammelbar}', 'spiele_overrides=${overrides}']`;
+    };
+
+    /* Lauf 1: angepasster Vertrag, muss durchlaufen. */
+    const db1 = await bauen();
+    const vertragAlt = ORIGINAL.slice(
+      ORIGINAL.indexOf("array['shopfaehig=534'"),
+      ORIGINAL.indexOf("] loop", ORIGINAL.indexOf("array['shopfaehig=534'")) + 1);
+    const angepasst = join(process.cwd(), ".pglite-oneshot.sql");
+    writeFileSync(angepasst, ORIGINAL.replace(vertragAlt, await messen(db1)));
+    const lauf1 = await fahre(db1, angepasst, { klammer: false });
+
+    const w1 = async (sql: string): Promise<string> =>
+      String(((await db1.query(sql)) as { rows: { w: unknown }[] }).rows[0]?.w ?? "?");
+    const spalte1 = await w1("select (count(*) = 1)::text as w from information_schema.columns "
+      + "where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type'");
+    const sicherung1 = await w1("select md5(prosrc) as w from pg_proc "
+      + "where proname = 'seller_business_backup'");
+
+    /* Lauf 2: unveraendert, der Vertrag muss anschlagen. */
+    const db2 = await bauen();
+    const lauf2 = await fahre(db2, SKRIPT, { klammer: false });
+    const spalte2 = await w1.call(null, "select 1 as w") === "1"
+      ? String((((await db2.query("select (count(*) = 1)::text as w from information_schema.columns "
+          + "where table_schema = 'public' and table_name = 'skylanders' "
+          + "and column_name = 'item_type'")) as { rows: { w: unknown }[] }).rows[0].w))
+      : "?";
+
+    probe.push({
+      name: "P21 das Staging-Skript läuft in einem Durchgang durch — und der Z0-Vertrag greift",
+      ok: lauf1 === null && spalte1 === "true"
+        && sicherung1 === "f6d08440707ba72a8040a8d1e666c092"
+        && lauf2 !== null && lauf2.includes("Z0-Vertrag stimmt nicht mehr")
+        && spalte2 === "false",
+      sagt: lauf1 !== null ? `Lauf 1: ${lauf1}` : `Lauf 1 durch (item_type ${spalte1}, `
+        + `Sicherung ${sicherung1.slice(0, 8)}…) · Lauf 2 ohne Anpassung: `
+        + `${lauf2 ?? "DURCHGELAUFEN — Befund"} (item_type ${spalte2})`,
+    });
+  }
+
+  for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
+  console.log("-".repeat(76));
+  const probeFehler = probe.filter((p) => !p.ok);
+  console.log(`  ${probe.length - probeFehler.length} von ${probe.length} Durchgängen wie erwartet`);
+
   console.log("\nWAS DIESER LAUF BEWEIST — UND WAS NICHT");
-  console.log("  bewiesen:     jede geplante Anweisung ist syntaktisch gültig, jeder Name");
-  console.log("                löst auf, jeder Typ passt, jede Signatur existiert.");
-  console.log("  NICHT bewiesen: dass eine Datei auf Production LÄUFT. Laufzeitfehler an");
-  console.log("                echten Daten sieht ein Plan nicht, und ob eine Prüfung");
-  console.log("                fachlich das Richtige misst, sagt kein Planer.");
-  console.log("  Eine erfolgreiche Planprüfung ist KEIN erfolgreicher Lauf gegen");
-  console.log("  Production. Nachweis bleibt allein das Ergebnisblatt aus dem");
+  console.log("  bewiesen (Stufe 2): jede geplante Anweisung ist syntaktisch gültig, jeder");
+  console.log("                Name löst auf, jeder Typ passt, jede Signatur existiert.");
+  console.log("  bewiesen (Stufe 3): jeder gefaltete Funktionsrumpf lässt sich erzeugen. Für");
+  console.log("                `language sql` ist darin jede Spalte und jeder Typ aufgelöst;");
+  console.log("                für `language plpgsql` prüft PostgreSQL bei der Erzeugung nur");
+  console.log("                die Syntax — Namen darin sieht erst der Aufruf.");
+  console.log("  bewiesen (Stufe 4): die Migrationen laufen in EINER Transaktion durch, sie");
+  console.log("                brechen ohne Klammer ab, sie brechen bei verändertem Angebot");
+  console.log("                ab, und sie lassen nach einem Abbruch nichts zurück.");
+  console.log("  NICHT bewiesen: dass eine Datei auf Production LÄUFT. Die Zeilen in Stufe 4");
+  console.log("                sind ERFUNDEN — fünf Katalogzeilen, zwei Lagerzeilen. Über die");
+  console.log("                echten Bestände, über Laufzeitfehler an echten Daten und über");
+  console.log("                die fachliche Richtigkeit einer Prüfung sagt dieser Lauf nichts.");
+  console.log("  Eine erfolgreiche Plan-, Definitions- und Probeprüfung ist KEIN erfolgreicher");
+  console.log("  Lauf gegen Production. Nachweis bleibt allein das Ergebnisblatt aus dem");
   console.log("  SQL-Editor (supabase/checks/open_verifications.md).\n");
 
   if (ueberholt.length > 0) {
@@ -227,6 +1164,19 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   }
   if (fehler.length > 0) process.exitCode = 1;
+  if (nichtErzeugt.length > 0) {
+    console.error(`  ABBRUCH: ${nichtErzeugt.length} Funktionsrumpf/-rümpfe lassen sich nicht erzeugen.`);
+    process.exitCode = 1;
+  }
+  if (unnoetigeAusnahme.length > 0) {
+    console.error(`  ABBRUCH: ${unnoetigeAusnahme.length} Ausnahme(n) in NICHT_ERZEUGBAR sind `
+      + `überholt — Liste kürzen: ${unnoetigeAusnahme.join(", ")}`);
+    process.exitCode = 1;
+  }
+  if (probeFehler.length > 0) {
+    console.error(`  ABBRUCH: ${probeFehler.length} Probelauf/-läufe weichen ab.`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((e: unknown) => {

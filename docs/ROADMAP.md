@@ -465,7 +465,7 @@ Stripe Connect, keine Provision, kein Payout, kein privater Verkäufer und keine
 Fan-out-Logik. Was stattdessen entsteht, sind zwei Namen und eine Identitätstabelle mit genau
 einer Zeile — weil beides später unmöglich oder unverhältnismäßig teuer wäre.
 
-**Zielbild des Betreibers, festgehalten am 2026-10-19.** SkyIsles **soll langfristig ein
+**Zielbild des Betreibers, festgehalten am 2026-10-18.** SkyIsles **soll langfristig ein
 Marktplatz für private und gewerbliche Verkäufer werden.** Das ist ab jetzt die dokumentierte
 Richtung — und **kein Implementierungsauftrag**: ADR-0021 und die Single-Seller-Regel aus
 ADR-0064 gelten unverändert weiter, und bis zu einer ausdrücklichen neuen Entscheidung wird an

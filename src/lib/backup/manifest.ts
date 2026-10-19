@@ -578,9 +578,27 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
      * zu, `is_active` und `source` sagen, ob und woher sie im Katalog steht.
      * Die drei Zeitstempel bleiben draußen — ein Stammdatenschnappschuss soll
      * die Datei lesbar halten, nicht ihre Historie tragen.
+     *
+     * UND EINE MEHR (0136): `item_type`, unmittelbar neben `card_type`.
+     *
+     * Der erste Entwurf zu `0135` hatte sie begründet AUSGESCHLOSSEN: der Typ
+     * ist aus der exportierten `category_id` nach einer Regel ableitbar, also
+     * verzichtbar. Der Betreiber hat am 2026-10-19 anders entschieden — „der
+     * Artikeltyp ist langfristig eine eigenständige fachliche Eigenschaft und
+     * soll bei einer Wiederherstellung nicht aus Kategorien rekonstruiert
+     * werden müssen". Das ist die stärkere Entscheidung: eine Regel, die eine
+     * Wiederherstellung erneut anwenden muss, ist eine Regel, die irgendwann
+     * nicht mehr angewendet wird. Der Wert steht jetzt in der Datei.
+     *
+     * Die Reihenfolge ist nicht beliebig: `backup-sql.test.ts` vergleicht
+     * diese Liste FELD FÜR FELD und in dieser Folge mit dem Rumpf der letzten
+     * Migration, die `seller_business_backup()` definiert. `item_type` steht
+     * dort direkt nach `card_type` — die beiden Typspalten nebeneinander —,
+     * und `0136` ist deshalb eine reine Einfügung einer Zeile in den Rumpf aus
+     * `0131`.
      */
-    fields: ["sky_id", "name", "slug", "series_code", "card_type", "market_price",
-             "category_id", "is_active", "source"],
+    fields: ["sky_id", "name", "slug", "series_code", "card_type", "item_type",
+             "market_price", "category_id", "is_active", "source"],
     excluded: {
       created_at: "Zeitstempel des Katalogsatzes; ohne Bedeutung für den Bestand",
       updated_at: "wie created_at",

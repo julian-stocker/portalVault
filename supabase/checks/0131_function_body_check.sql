@@ -6,16 +6,33 @@
 -- Zirkel wird hier geschlossen: `prosrc` ist der Rumpf, den PostgreSQL
 -- gespeichert hat, und er wird gegen die Fassung im Repository gehalten.
 --
--- ERWARTET fuer Stand 0131:
---   md5(prosrc)     = 24c3810288bb20929fe995554a267adf
---   length(prosrc)  = 21458 Zeichen
---   md5(Kommentar)  = 6b980ac961d1d6ac704587ecc6e9524f  (674 Zeichen)
+-- ZWEI STAENDE SIND FREIGEGEBEN, NICHT EINER MEHR
 --
--- Beide Werte stammen aus
--- `supabase/migrations/0131_business_backup_seller_fields.sql`, gerechnet
--- ueber genau den Text zwischen den Dollarzeichen — das ist, was `prosrc`
--- enthaelt. `src/lib/admin/migration-integrity.test.ts` rechnet sie bei jedem
--- Testlauf nach, damit Datei und Erwartung nicht auseinanderlaufen.
+--   0131   md5(prosrc) = 24c3810288bb20929fe995554a267adf   21458 Zeichen
+--          md5(Kommentar) = 6b980ac961d1d6ac704587ecc6e9524f   (674 Zeichen)
+--          28 Bereiche, 352 Feldzeilen
+--   0136   md5(prosrc) = f6d08440707ba72a8040a8d1e666c092   21494 Zeichen
+--          md5(Kommentar) = c12618f312b413571eeabe912ca03651   (890 Zeichen)
+--          28 Bereiche, 353 Feldzeilen  (0131 plus `item_type` im Bereich
+--          figures — `0136_business_backup_item_type.sql`)
+--
+-- WARUM ZWEI UND NICHT EINER. Diese Datei hielt bis zum 2026-10-19 einen
+-- EINZELNEN Abdruck als Sollwert. Das war richtig, solange es einen gab; mit
+-- `0136` haette dieselbe Datei auf einer Umgebung VOR und auf einer NACH der
+-- Migration je eine Abweichung gemeldet — und beide Male waere die Funktion
+-- in Ordnung gewesen. Eine Prueferwartung, die den Fortschritt als Fehler
+-- liest, wird abgeschaltet statt gelesen. Gefordert wird deshalb: der
+-- gespeicherte Rumpf ist ZEICHENGLEICH EINEM bekannten Stand aus dem
+-- Repository, und dieser Stand ist freigegeben. Welcher es ist, sagt die
+-- Datei als Befund.
+--
+-- `0130` steht in der Tabelle, ist aber NICHT freigegeben: beide Umgebungen
+-- fuehren `0131`: ein Rumpf aus `0130` waere eine stille Ruecknahme.
+--
+-- Alle Werte stammen aus den Migrationsdateien selbst, gerechnet ueber genau
+-- den Text zwischen den Dollarzeichen — das ist, was `prosrc` enthaelt.
+-- `src/lib/admin/migration-integrity.test.ts` rechnet sie bei jedem Testlauf
+-- nach, damit Datei und Erwartung nicht auseinanderlaufen.
 --
 -- NUR LESEN. Ein einziges SELECT. Kein DO-Block, kein DDL, kein DML, keine
 -- Rollenumschaltung, keine Rechteaenderung. Die Funktion wird NICHT
@@ -86,6 +103,27 @@ zahl as (
     from zeilen
 ),
 
+/*
+ * ---------------------------------------------------------------------------
+ * DIE BEKANNTEN STAENDE
+ *
+ * Eine Zeile je Fassung, die das Repository belegen kann. `freigegeben` sagt,
+ * ob dieser Stand in einer Umgebung STEHEN darf — `0130` ist bekannt, aber
+ * ueberholt.
+ * ---------------------------------------------------------------------------
+ */
+stand (md5, laenge, komm_md5, komm_laenge, felder, bezeichnung, freigegeben) as (values
+  ('24c3810288bb20929fe995554a267adf', 21458,
+   '6b980ac961d1d6ac704587ecc6e9524f',   674, 352, 'STAND_0131_ZEICHENGLEICH', true),
+  ('f6d08440707ba72a8040a8d1e666c092', 21494,
+   'c12618f312b413571eeabe912ca03651',   890, 353, 'STAND_0136_ZEICHENGLEICH', true),
+  ('a27b61db988df7627a4992b1770ac626', 20814,
+   '3c0054303767590cfc8b7e3d980ab9b1',   651, 339, 'STAND_0130',               false)
+),
+erkannt as (
+  select s.* from fn f join stand s on s.md5 = md5(f.prosrc)
+),
+
 pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- --- Selbsttest -------------------------------------------------------
   (1, 'Selbsttest', 'die Probe hat 2 Bereiche (gierig waere 1)',
@@ -96,22 +134,35 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       ((select count(*) from fn))::text, '1'),
 
   -- --- Der Anker --------------------------------------------------------
-  (101, 'Anker', 'md5 des gespeicherten Rumpfs',
-       (coalesce((select md5(f.prosrc) from fn f), '(keine Funktion)')),
-       '24c3810288bb20929fe995554a267adf'),
-  (102, 'Anker', 'Laenge des gespeicherten Rumpfs in Zeichen',
-       (coalesce((select length(f.prosrc) from fn f), -1))::text, '21458'),
-  (103, 'Anker', 'md5 des Funktionskommentars',
-       (coalesce((select md5(obj_description(f.oid, 'pg_proc')) from fn f),
-                 '(kein Kommentar)')),
-       '6b980ac961d1d6ac704587ecc6e9524f'),
-  (104, 'Anker', 'Laenge des Funktionskommentars',
-       (coalesce((select length(obj_description(f.oid, 'pg_proc')) from fn f),
-                 -1))::text, '674'),
+  (101, 'Anker', 'der gespeicherte Rumpf ist zeichengleich EINEM bekannten Stand',
+       ((select count(*) from erkannt))::text, '1'),
+  (102, 'Anker', 'md5 des gespeicherten Rumpfs (Messung ohne Sollwert)',
+       (coalesce((select md5(f.prosrc) from fn f), '(keine Funktion)')), null),
+  (103, 'Anker', 'die Laenge passt zum erkannten Stand',
+       (select case when e.laenge = (select length(f.prosrc) from fn f)
+                      then 'ja' else 'nein: ' || (select length(f.prosrc) from fn f)::text
+                        || ' statt ' || e.laenge::text end
+          from erkannt e), 'ja'),
+  (104, 'Anker', 'der Funktionskommentar passt zum erkannten Stand',
+       (select case when e.komm_md5
+                       = md5(coalesce((select obj_description(f.oid, 'pg_proc') from fn f), ''))
+                     and e.komm_laenge
+                       = coalesce((select length(obj_description(f.oid, 'pg_proc')) from fn f), -1)
+                      then 'ja' else 'nein' end
+          from erkannt e), 'ja'),
+  (105, 'Anker', 'und dieser Stand ist freigegeben (0131 oder 0136)',
+       (select case when e.freigegeben then 'ja' else 'nein: ' || e.bezeichnung end
+          from erkannt e), 'ja'),
 
   -- --- Die Form, unabhaengig von md5 ------------------------------------
   (201, 'Form', 'Bereiche im Rumpf',   ((select bereiche from zahl))::text, '28'),
-  (202, 'Form', 'Feldzeilen im Rumpf', ((select felder   from zahl))::text, '352'),
+  (202, 'Form', 'Feldzeilen im Rumpf passen zum erkannten Stand',
+       (select case when e.felder = (select felder from zahl)
+                      then 'ja' else 'nein: ' || (select felder from zahl)::text
+                        || ' statt ' || e.felder::text end
+          from erkannt e), 'ja'),
+  (211, 'Form', 'Feldzeilen im Rumpf (Messung ohne Sollwert; 352 in 0131, 353 ab 0136)',
+       ((select felder from zahl))::text, null),
   (203, 'Form', 'Sprache ist sql (nicht plpgsql)',
        (select l.lanname from fn f join pg_language l on l.oid = f.prolang),
        'sql'),
@@ -170,15 +221,17 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
           where f.prosrc like '%''format_version'',  1%'))::text, '1'),
 
   -- --- Befund -----------------------------------------------------------
-  (401, 'Befund', 'Stand der lebenden Funktion',
-       (select case
-                 when md5(f.prosrc) = '24c3810288bb20929fe995554a267adf'
-                   then 'STAND_0131_ZEICHENGLEICH'
-                 when md5(f.prosrc) = 'a27b61db988df7627a4992b1770ac626'
-                   then 'STAND_0130'
-                 else 'UNBEKANNT' end
-          from fn f),
-       'STAND_0131_ZEICHENGLEICH')
+  /*
+   * DER BEFUND IST EINE MESSUNG, DIE SPERRE SITZT IN 101 UND 105.
+   *
+   * Hier stand ein Sollwert `STAND_0131_ZEICHENGLEICH`. Der Reiz, den Befund
+   * gegen sich selbst zu halten, ist gross und der Fehler dabei leicht: ein
+   * Vergleich, dessen Erwartung aus demselben Ausdruck kommt, bestaetigt auch
+   * `UNBEKANNT`. Deshalb nennt 401 nur, was steht; dass es EINER und ein
+   * FREIGEGEBENER Stand ist, verlangen 101 und 105.
+   */
+  (401, 'Befund', 'Stand der lebenden Funktion (Messung ohne Sollwert)',
+       (coalesce((select e.bezeichnung from erkannt e), 'UNBEKANNT')), null)
 ),
 
 ergebnis as (

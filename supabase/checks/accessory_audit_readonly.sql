@@ -1,7 +1,7 @@
 -- ===========================================================================
 -- ZUBEHOER — was ohne Katalogbezug gekauft wurde, und was an Spielen haengt
 --
--- ANLASS. Der Zustandsaudit vom 2026-10-19 hat auf Production drei Zahlen
+-- ANLASS. Der Zustandsaudit vom 2026-10-18 hat auf Production drei Zahlen
 -- gezeigt, die die Zubehoerplanung tragen oder umwerfen:
 --
 --     206  Einkaufspositionen ohne `sky_id`

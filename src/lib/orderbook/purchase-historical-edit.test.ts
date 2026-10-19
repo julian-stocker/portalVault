@@ -799,10 +799,19 @@ describe("0132 und 0133 stehen auf Production, nicht auf Staging", () => {
     expect(prod).toContain("0133_paid_total_immutable.sql");
   });
 
-  it("und in KEINER Staging-Zeile", () => {
+  it("0132 ist inzwischen auch auf Staging nachgezogen, 0133 noch nicht", () => {
+    /*
+     * BERICHTIGT AM 2026-10-18. Hier stand, keine der beiden stehe in der
+     * Staging-Tabelle — richtig zum Zeitpunkt des Vorfalls, überholt seit dem
+     * Staging-Lauf von `0132`. Die Akte muss die beiden auseinanderhalten:
+     * `0132` ist nachgezogen und mit zwei Postflights belegt, `0133` steht
+     * dort weiter aus.
+     */
     const stag = AKTE.slice(AKTE.indexOf("## Staging"), AKTE.indexOf("## Production"));
-    expect(stag).not.toContain("0132_purchase_item_remove_by_line.sql");
+    expect(stag).toContain("0132_purchase_item_remove_by_line.sql");
     expect(stag).not.toContain("0133_paid_total_immutable.sql");
+    /* Und der Nachweis gehört dazu, nicht nur die Zeile. */
+    expect(stag).toContain("receipt_lock_check.sql");
   });
 
   it("der Vorfall ist protokolliert und nicht geglättet", () => {
@@ -897,7 +906,7 @@ describe("0132 und 0133 stehen auf Production, nicht auf Staging", () => {
 
   it("der Umgebungsstempel nennt die Figuren, statt eine Umgebung zu behaupten", () => {
     /*
-     * BERICHTIGT AM 2026-10-19. Der Stempel verglich die Anzahl von
+     * BERICHTIGT AM 2026-10-18. Der Stempel verglich die Anzahl von
      * `SKY-9101`/`SKY-9998` und leitete daraus die Umgebung ab — „2 = Staging,
      * 0 = Production". Der Production-Lauf hat das widerlegt: dort steht eine
      * davon, weil `verify:rls` sie als DAUERHAFTE Fixture anlegt und ihr

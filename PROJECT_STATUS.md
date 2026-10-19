@@ -100,6 +100,18 @@ Korrekturkette, Fingerabdruck- und Kettenprüfsummen stimmen, 7 Abrufe,
 Funktionsrumpf als **zeichengleich** zur Repository-Fassung
 (`md5 = 24c3810288bb20929fe995554a267adf`, 21 458 Zeichen).
 
+**Auf Staging angewendet am 2026-10-19:** `0135` und `0136` in **einem
+Durchgang** über `supabase/operations/staging-0135-0136.sql`. Der Katalog
+führt jetzt `skylanders.item_type` (Vorgabewert `figure`, CHECK über fünf
+Werte, die 39 Spiele als `game` **aus der Kategorie**), die Shop-Eignung hängt
+am Artikeltyp, eine Ableitungsregel samt Trigger gibt neuen Zeilen den
+richtigen Typ (Positivliste — eine unbekannte Kategorie wird **nie** zum
+Spiel), und die Betriebssicherung führt `item_type` im Bereich `figures`:
+**353 Felder**, Abdruck `f6d08440707ba72a8040a8d1e666c092`. Abschlussraster:
+19 Bezugswerte unverändert, einzige Änderung der Sicherungsabdruck. Nachweis
+und der berichtigte Z0-Vertrag: `supabase/checks/open_verifications.md`,
+Abschnitt 0g. **Auf Production fehlen `0134`, `0135` und `0136`.**
+
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen
 ein `array[...]`-Literal (einsbasiert) verglich. Ein Bereichsparser kollabierte
@@ -3551,6 +3563,32 @@ Drei Hinweise ohne Handlungsbedarf:
 | **0043** | **Öffentliches Angebot als Projektion (`shop_offers()`, vier Werte, `available` boolesch); Warenkorb lokal im Browser, ohne Reservierung** — Code fertig, Migration `0006` **nicht ausgeführt** |
 | **0044** | **Legacy-Anfangsbestand als `initial_import`-Bewegungen, alles `loose`, ohne Kosten, ohne Preis, ohne Listung; wiederholbar und fortsetzbar, bestehende Handbestände sind Konflikte statt Additionen** — **real ausgeführt: 218 Positionen, 762 Stück**, zweiter Lauf 0 Änderungen |
 | **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — **umgesetzt in `0003`** |
+
+## Portale und Spiele im Katalog — vorbereitet, nicht umgesetzt (2026-10-19)
+
+Die Artikelsuche des Orderbuchs fand kein Portal. Ursache ist **nicht** eine
+Einschränkung auf Figuren — die gibt es nicht —, sondern zwei andere Dinge: die
+Suche kennt nur Name, SKY-ID und Rohname, und **Portale gibt es im Katalog
+nicht**. Die 39 Spiele liegen dagegen vollständig und zeichengleich im Katalog.
+
+Die Arbeitsmappe hat für Zubehör bereits **28 SKY-IDs vergeben**
+(`SKY-0615`–`SKY-0642`), und der Katalog endet bei `SKY-0614` — der Bereich ist
+frei. Darunter **21 Skylanders-Portale**, zwei Disney-Infinity-Portale, zwei
+Starter Packs, zwei Taschen und eine Zeile, die gar kein Artikel ist, sondern
+eine Beleg-URL.
+
+Entscheidungen und Begründung: **ADR-0128**. Datenbefund:
+`docs/SKYLANDERS_DATA.md` 11k, mit zehn ausdrücklich offenen Punkten.
+Bestandsaufnahme: `supabase/checks/Z0_catalog_accessories_readonly.sql`
+(rein lesend, noch nicht ausgeführt).
+
+**Der wichtigste Fallstrick ist festgehalten:** `is_shop_eligible()` schließt
+heute allein die Kategorie `'Spiele'` aus. Eine neue Kategorie „Portale" wäre
+damit automatisch shopfähig. Die Eignung wird deshalb an `item_type` gehängt,
+und `Z0` nimmt vorher den Abdruck der Angebotsliste, gegen den bewiesen wird,
+dass sich kein Angebot geändert hat.
+
+---
 
 ## Offene Entscheidungen
 

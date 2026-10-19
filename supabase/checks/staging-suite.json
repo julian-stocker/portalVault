@@ -1,0 +1,72 @@
+{
+  "zweck": "Die rein lesenden Pruefdateien, die `npm run db:check:staging` auf Staging faehrt. EINE Quelle fuer das Werkzeug und fuer die Rechteliste (tools/lib/grant-plan.py).",
+  "umgebung": "qqxcpesbwfxzgytkdsac",
+  "hinweis": "modus 9999 = Zeile 9999 muss 0 sein. modus messung = die Datei hat keinen Sollwert und wird nur protokolliert. vertrag staging = das Werkzeug setzt skyisles.z0 = staging in derselben Transaktion. wenn = eine lesende Bedingung; ist sie falsch, wird die Datei mit Grund uebersprungen statt zu scheitern.",
+  "dateien": [
+    {
+      "datei": "staging_pending_migrations.sql",
+      "zweck": "0132 steht, 0133 und 0134 stehen nicht, Umgebungsstempel",
+      "modus": "9999"
+    },
+    {
+      "datei": "receipt_lock_check.sql",
+      "zweck": "die Belegsperre haelt fuer jede API-Rolle und fuer PUBLIC",
+      "modus": "9999"
+    },
+    {
+      "datei": "0131_function_body_check.sql",
+      "zweck": "der Rumpf der Betriebssicherung ist zeichengleich einem freigegebenen Stand",
+      "modus": "9999"
+    },
+    {
+      "datei": "0132_postflight.sql",
+      "zweck": "Dateninvarianten: Einkaeufe, Lager, Bewegungen, Belege, bezahlte Summen",
+      "modus": "9999"
+    },
+    {
+      "datei": "0135_preflight.sql",
+      "zweck": "Eingangszustand vor 0135, mit dem Z0-Vertrag",
+      "modus": "9999",
+      "vertrag": "staging",
+      "wenn": {
+        "beschreibung": "nur solange skylanders.item_type fehlt (0135 nicht angewendet)",
+        "sql": "select not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type') as erfuellt"
+      }
+    },
+    {
+      "datei": "0135_postflight.sql",
+      "zweck": "Zustand nach 0135, mit dem Z0-Vertrag",
+      "modus": "9999",
+      "vertrag": "staging",
+      "wenn": {
+        "beschreibung": "nur wenn skylanders.item_type steht (0135 angewendet)",
+        "sql": "select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type') as erfuellt"
+      }
+    },
+    {
+      "datei": "0136_preflight.sql",
+      "zweck": "Eingangszustand vor 0136: Sicherung ist Stand 0131, 0135 steht",
+      "modus": "9999",
+      "vertrag": "staging",
+      "wenn": {
+        "beschreibung": "nur wenn 0135 steht und die Sicherung noch der Stand 0131 ist",
+        "sql": "select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type') and exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'seller_business_backup' and md5(p.prosrc) = '24c3810288bb20929fe995554a267adf') as erfuellt"
+      }
+    },
+    {
+      "datei": "0136_postflight.sql",
+      "zweck": "Zustand nach 0136: Sicherung ist Stand 0136, 28 Bereiche, 353 Feldzeilen",
+      "modus": "9999",
+      "vertrag": "staging",
+      "wenn": {
+        "beschreibung": "nur wenn die Sicherung der Stand 0136 ist",
+        "sql": "select exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'seller_business_backup' and md5(p.prosrc) = 'f6d08440707ba72a8040a8d1e666c092') as erfuellt"
+      }
+    },
+    {
+      "datei": "state_audit_readonly.sql",
+      "zweck": "Bestandsaufnahme: welche Migrationen leben hier wirklich",
+      "modus": "messung"
+    }
+  ]
+}

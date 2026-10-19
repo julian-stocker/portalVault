@@ -406,6 +406,77 @@ Regeln:
 - Gerät ein Key doch in einen Commit: **Key in Supabase rotieren**. Der Verlauf lässt sich
   praktisch nicht zuverlässig bereinigen — Rotation ist die richtige Antwort.
 
+### 4a. Zwei Umgebungen, zwei Aufbewahrungsorte (ab 2026-10-19, Phase A)
+
+Mit dem automatisierten **lesenden** Staging-Zugang ändert sich, **wo**
+Zugangsdaten liegen — und das ist hier die Sicherheitsgrenze, nicht eine
+Konvention:
+
+| Zugangsdatum | Wo | Warum dort |
+|---|---|---|
+| Staging: URL, Anon-, Service-Role-Key | `.env.staging` (nicht committet) | Kanal A, abgesichert durch `tools/lib/staging-guard.mts` |
+| Staging: Datenbankverbindung des Prüfzugangs | `~/.skyisles/staging-db.env`, `chmod 600` — **außerhalb des Repositorys** | kein `git add -f` kann sie erfassen, kein `--env-file` im Projekt zeigt versehentlich darauf. Form: `postgresql://skyisles_agent.<ref>:<pw>@<host>.pooler.supabase.com:5432/postgres?sslmode=require` — **`sslmode` ist Pflicht**, weil `pg` ohne ihn unverschlüsselt verbindet |
+| **Production: jedes Zugangsdatum** | **unverändert** `.env.local`; Absicherung ist ein eigenes Vorhaben | im selben Benutzerkontext ist **keine** Dateirechte- oder Schlüsselbund-Maßnahme eine Grenze: ein Eintrag, dessen ACL das aufrufende Programm kennt oder dem „Always Allow" erteilt wurde, wird ohne Rückfrage ausgelesen. Die Werkzeuge der Phase A kennen deshalb **kein** Production-Zugangsdatum und brauchen keines |
+| Stripe, Resend | Supabase Function Secrets | wie bisher; nie im Repository, nie bei Vercel |
+
+**Die Production-Kennung steht als Literal im Code** (`PRODUCTION_REF` in
+`tools/lib/staging-db.mts`). Bis dahin leitete `staging-guard.mts` „was ist
+Production" aus `.env.local` ab — eine Verweigerung, die vom Vorhandensein
+einer Datei abhängt, verschwindet mit der Datei.
+
+**Prüfbar statt behauptet:** `npm run env:audit` zählt auf, was ein Prozess in
+diesem Verzeichnis erreichen könnte — vorhandene Dateien, ihre Rechte,
+Skripte, die auf sie zeigen, und Variablen, deren Wert eine Projektkennung
+enthält. Es liest **keinen** Wert und öffnet **keine** Zugangsdatendatei.
+
+### 4b. Der lesende Staging-Prüfzugang `skyisles_agent`
+
+| Eigenschaft | Wert |
+|---|---|
+| Rechte | SELECT auf **12** Tabellen, EXECUTE auf **3** lesende Funktionen — ausgezählt aus den Prüfdateien mit `npm run db:grants:plan` |
+| nicht erteilt | `pg_read_all_data`, CREATE, INSERT/UPDATE/DELETE, jede Belegfunktion |
+| Rollenattribute | `noinherit`, `nosuperuser`, `nocreatedb`, `nocreaterole`, `noreplication`, Verbindungslimit 5 |
+| `bypassrls` | **nein** — nachgemessen, dass es nicht erforderlich ist. Alle 12 Tabellen führen RLS, und jede vorhandene Policy ist `to anon, authenticated` gebunden; eine neue Rolle sähe ohne Policy **0 Zeilen**. Sie bekommt deshalb je Tabelle eine eigene SELECT-Policy `agent_read_<tabelle>`, auf diese Rolle und auf `select` begrenzt — ohne Wirkung auf bestehende Rollen und Policies |
+| Mitgliedschaften | **keine**, in keiner Richtung (`pg_auth_members`) |
+| geprüft wird | mit `has_table_privilege`/`has_function_privilege`, also über die **effektiven** Rechte einschließlich PUBLIC und Mitgliedschaften: kein Schreibrecht auf **irgendeiner** Relation in `public`, kein EXECUTE auf `seller_issue_purchase_receipt`, `…_correction`, `seller_business_backup`, `system_platform_export`, `purchase_receipt_fingerprint` |
+| Sitzung | `default_transaction_read_only = on`, an der Rolle gesetzt: jeder Schreibversuch endet mit `25006`, unabhängig von Rechten und Werkzeug |
+| Umgebungsstempel | die Sitzung muss als Erstes den Datenbankkommentar `skyisles-staging qqxcpesbwfxzgytkdsac` liefern. **Production trägt keinen** |
+
+Angelegt von `supabase/operations/staging-agent-setup.sql`; diese Datei
+**ändert die Belegsperre nicht** und **keine bestehende Rolle, Policy oder
+Berechtigung** — sie prüft rein lesend. `npm run verify:check-sql` fährt sie in
+PostgreSQL 18.6 durch (P15) und prüft die Gegenprobe: ohne Policy liest die
+Rolle 0 Zeilen, und bei offener Belegsperre bricht die Datei ab (P16). Plan und
+Phasen: `supabase/checks/staging_agent_access_plan.md`.
+
+**Was PUBLIC ausführen darf, ist vollständig aufgezählt** —
+`npm run db:acl:audit`, über alle **337** lebenden Funktionen:
+
+| Gruppe | Zahl |
+|---|---|
+| PUBLIC ausdrücklich entzogen | 287 |
+| Triggerfunktionen (direkt nicht aufrufbar, `0A000`) | 30 |
+| schreibend, Berechtigungstor **vor** dem ersten Schreibvorgang | 19 |
+| lesend und harmlos (zwei `immutable` ohne Tabellenzugriff, zwei `security definer` **mit** Tor) | 4 |
+| **schreibend ohne Tor** | **0** |
+
+Das Tor wird positionsgenau verlangt (`tor_pos < schreib_pos`): ein
+`can_operate_active_seller()` hinter dem ersten `insert` zählt nicht. **Und es
+wird ausgeführt, nicht nur gelesen:** `verify:check-sql`, Probelauf **P17**
+ruft mit den echten Rümpfen, der Rolle `skyisles_agent` und `auth.uid()` NULL
+alle **21** erreichbaren Schreib- und Definer-Funktionen auf — **21 von 21**
+werden mit „seller operator role required" abgewiesen, und über neun Tabellen
+gemessen bewegt sich **keine** Zeilenzahl.
+
+Diese Rechte sind bestehend; **die Einrichtung ändert daran nichts**, und
+Änderungen an bestehenden PUBLIC-Berechtigungen sind dafür nicht nötig.
+
+**Protokolle enthalten keine Geheimnisse und keine personenbezogenen Daten.**
+Jede Ausgabe läuft durch `redigiere()` — Verbindungszeichenketten, JWTs,
+Supabase-Schlüssel und Passwortzuweisungen werden ersetzt, auch in
+Treiberfehlern. Die Prüfdateien selbst geben Zählstände, Prüfsummen und
+Prüfzeilen aus, keine Namen und keine Adressen.
+
 ---
 
 ### Adminberechtigung und redaktionelle Schreibwege (Migration `0004`, ADR-0039)

@@ -34,16 +34,35 @@ nicht aufeinander angewiesen, nur geordnet.
 **Keine der sechs Dateien enthält eine Datenanweisung** — kein `insert`,
 `update`, `delete` oder `truncate`. Ausgezählt, nicht behauptet.
 
-Die drei Rumpf-Rücknahmen (`R0129`–`R0131`) tragen den Rumpf der
+Die vier Rumpf-Rücknahmen (`R0129`–`R0131`, `R0136`) tragen den Rumpf der
 Vorgängerfassung **unverändert aus der Migration übernommen**; jede prüft
 vorher `md5(prosrc)` der lebenden Funktion und nachher den Rumpf samt
 Bereichs- und Feldzahl:
 
 | Datei | Zustand davor (md5) | Zustand danach | Bereiche/Felder danach |
 |---|---|---|---|
+| `R0136` | `f6d08440707ba72a8040a8d1e666c092` | `24c3810288bb20929fe995554a267adf` | 28 / 352 |
 | `R0131` | `24c3810288bb20929fe995554a267adf` | `a27b61db988df7627a4992b1770ac626` | 28 / 339 |
 | `R0130` | `a27b61db988df7627a4992b1770ac626` | `5a0de6bec562779d5f945c096e1f77d6` | 28 / 321 |
 | `R0129` | `5a0de6bec562779d5f945c096e1f77d6` | `a3c922657e1c6410858b7c4b2bb7aae5` | 25 / 277 |
+
+`R0136` prüft zusätzlich den **Funktionskommentar** (`md5` =
+`6b980ac961d1d6ac704587ecc6e9524f`, 674 Zeichen): `0136` hat ihn mitgeändert,
+und ein Rumpf aus `0131` mit dem Kommentar aus `0136` wäre ein halber Stand.
+
+## Zwei Rücknahmen, die nur in einer Reihenfolge gehen
+
+**`R0136` vor `R0135`.** Seit `0136` liest `seller_business_backup()` die
+Spalte `skylanders.item_type`. PostgreSQL vermerkt für einen `language
+sql`-Rumpf **keine Abhängigkeit** auf die gelesenen Spalten: `drop column`
+gelingt, und die Sicherung scheitert erst beim **Aufruf** mit `42703` — eine
+Datensicherung, die erst im Ernstfall nicht mehr läuft. In PostgreSQL 18.6
+nachgestellt und bestätigt.
+
+`R0135` bricht deshalb ab, solange der lebende Rumpf `item_type` nennt, und
+sagt, welche Datei zuerst gehört. `npm run verify:check-sql` fährt beide
+Reihenfolgen in einer Wegwerf-Instanz: die falsche muss scheitern (Probelauf
+P7), die richtige durchlaufen (P8).
 
 ## Die eine Rücknahme, die meistens unzulässig ist
 

@@ -2,7 +2,7 @@
  * Zwei Fehlerklassen, die zweimal erst im Production-SQL-Editor aufgefallen
  * sind — und die kein Parser findet, weil beide syntaktisch einwandfrei sind.
  *
- * WAS PASSIERT IST, am 2026-10-19:
+ * WAS PASSIERT IST, am 2026-10-18:
  *
  *   42725  `t.tgname || ' (' || t.tgenabled || ')'`. `tgenabled` ist vom Typ
  *          `"char"`, und `text || "char"` ist in PostgreSQL MEHRDEUTIG — es
@@ -153,7 +153,7 @@ describe("kein Alias ohne Bindung in einer Prüfdatei (42P01)", () => {
     });
   }
 
-  it("POSITIVKONTROLLE: der echte Fehler vom 2026-10-19 fällt auf", () => {
+  it("POSITIVKONTROLLE: der echte Fehler vom 2026-10-18 fällt auf", () => {
     const kaputt = "select (select count(*) from public.shop_offers() ofrfr"
       + " where ofr.sky_id >= 'SKY-9000')";
     const code = nurSql(kaputt);
@@ -189,7 +189,7 @@ const KATALOG_NICHT_TEXT: Record<string, string> = {
  * `aclexplode(p.proacl)` in der Naehe einer Verkettung — ein Argument, keine
  * Verkettung. `string_agg(proname, ', ')` ist dagegen KEIN Fehler: `name` hat
  * eine implizite Umwandlung nach text und loest sich auf. `"char"` hat keine,
- * und genau daran brach der Lauf vom 2026-10-19 ab.
+ * und genau daran brach der Lauf vom 2026-10-18 ab.
  */
 function anVerkettung(code: string, index: number, laenge: number): boolean {
   const vor = code.slice(0, index).trimEnd();
@@ -220,7 +220,7 @@ describe("keine ungecastete Katalogspalte an einer Verkettung (42725)", () => {
     });
   }
 
-  it("POSITIVKONTROLLE: der echte Fehler vom 2026-10-19 faellt auf", () => {
+  it("POSITIVKONTROLLE: der echte Fehler vom 2026-10-18 faellt auf", () => {
     const kaputt =
       "select string_agg(t.tgname || ' (' || t.tgenabled || ')', ', ') from pg_trigger t";
     expect(typGefahren(nurSql(kaputt))).toEqual(['tgenabled ("char")', "tgname (name)"]);

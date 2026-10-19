@@ -5,7 +5,7 @@
 -- ##  NICHT ANGEWENDET — WEDER AUF STAGING NOCH AUF PRODUCTION.            ##
 -- ##  GESPERRT durch Entscheidung des Betreibers vom 2026-10-18.           ##
 -- ##                                                                       ##
--- ##  Stand der Umgebungen am 2026-10-19:                                  ##
+-- ##  Stand der Umgebungen am 2026-10-18:                                  ##
 -- ##    Staging    qqxcpesbwfxzgytkdsac   0126-0131                        ##
 -- ##    Production zmiwxswrpkmizvqsgype   0126-0133                        ##
 -- ##                                                                       ##

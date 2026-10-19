@@ -8,6 +8,13 @@
 -- ERGAENZT AM 2026-10-18 um den Umgebungsstempel in Zeile 1. Die Fassung, die
 -- auf Production gelaufen ist, hatte ihn noch nicht — sie ist im Uebrigen
 -- unveraendert, und die Pruefnummern 101 und hoeher sind dieselben.
+--
+-- BERICHTIGT AM 2026-10-18: der Umgebungsstempel in Zeile 1 verglich die Zahl
+-- von `SKY-9101`/`SKY-9998` und leitete daraus die Umgebung ab. Das war eine
+-- falsche Annahme — Production traegt eine dieser Figuren dauerhaft. Die Zeile
+-- zaehlt jetzt den Fixture-Bereich auf und behauptet nichts. Die Fassung, die
+-- am 2026-10-18 auf Production lief, hatte noch die alte Beschriftung; an
+-- allen Pruefnummern 101 und hoeher hat sich nichts geaendert.
 -- NUR LESEN. Ein einziges SELECT. Zeile 9999 muss 0 zeigen.
 -- ===========================================================================
 with pruef (nr, bereich, pruefung, befund, erwartet) as (values
@@ -15,12 +22,15 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- OHNE SOLLWERT: dieselbe Datei laeuft auf Production und auf Staging. Sie
   -- sagt nur, aus welcher Datenbank das Blatt kommt — die Lehre aus dem
   -- 2026-10-18, als 0132 und 0133 in der falschen Umgebung liefen. Supabase
-  -- fuehrt die Projektkennung nicht in der Datenbank; entschieden wird am
-  -- einzigen Merkmal, das nur Staging hat: die beiden synthetischen
-  -- Testfiguren der RLS- und Zahlungsproben. 2 = Staging, 0 = Production.
-  (1, 'Umgebung', 'Info: Testfiguren SKY-9101/SKY-9998 (Staging 2, Production 0)',
-        ((select count(*) from public.skylanders
-           where sky_id in ('SKY-9101', 'SKY-9998')))::text, null),
+  -- fuehrt die Projektkennung nicht in der Datenbank, und es gibt KEIN
+  -- Merkmal, das die Umgebung entscheidet: `verify:rls` legt `SKY-9998` als
+  -- DAUERHAFTE Fixture an, und Production traegt sie deshalb ebenfalls.
+  -- Diese Zeile NENNT daher die gefundenen Figuren, statt eine Umgebung zu
+  -- behaupten. Entschieden wird an der Projektkennung in der Adresszeile.
+  (1, 'Umgebung', 'Info: vorhandene Testfiguren (SKY-9000 und hoeher)',
+        (coalesce((select string_agg(s.sky_id, ', ' order by s.sky_id)
+                     from public.skylanders s
+                    where s.sky_id >= 'SKY-9000'), '(keine)')), null),
   (101, 'Grundlage', 'purchases ist da',
         (to_regclass('public.purchases') is not null)::text, 'true'),
   (102, 'Grundlage', 'CHECK purchases_cost_split_adds_up (0115)',

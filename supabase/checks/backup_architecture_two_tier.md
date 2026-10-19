@@ -36,7 +36,7 @@ getrennten Zugriffsrechten.
 |---|---|
 | **Zweck** | Nachweis und Portabilität der Geschäftsdaten: Einkauf, Lager, Verkauf, Belege, Rechnungen, Stammdaten |
 | **Technik** | `seller_business_backup()` → eine JSON-Datei, eine MVCC-Momentaufnahme, Formatversion 1 |
-| **Umfang** | 28 Bereiche, 352 Feldzeilen, 5 508 Datensätze (Staging) |
+| **Umfang** | 28 Bereiche, 352 Feldzeilen, 5 508 Datensätze (Staging) | — `0136` macht daraus 353 (vorbereitet, nicht angewendet)
 | **Lesbarkeit** | für Menschen lesbar, ohne Datenbank interpretierbar, formatversioniert |
 | **Enthält bewusst keine** | Kontoidentitäten, Geheimnisse, Zahlungsdienstleister-Interna, Rollen, A2-Felder |
 | **Enthält personenbezogene Daten** | **ja** — `contains_personal_data: true`: Belegsnapshots (Absender, Inserat) und **alle Rechnungsempfänger** (`invoices.customer_*`) |

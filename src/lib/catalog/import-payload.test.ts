@@ -84,6 +84,27 @@ const EDITORIAL = [
    * warning forever.
    */
   "source",
+  /*
+   * Was der Artikel IST (`0135`, ADR-0128).
+   *
+   * Dieselbe Begründung wie bei `card_type` und `source`: `item_type`
+   * hat den Vorgabewert `'figure'`, und der Export kennt die Spalte nicht.
+   * Eine neue Zeile bekommt den Wert also ohne dass der Payload ihn nennt —
+   * und genau deshalb darf er ihn nicht nennen.
+   *
+   * ES BLEIBT EINE OFFENE FOLGE, UND SIE IST BENANNT. Ein Import, der nach
+   * `0135` eine NEUE Zeile in der Kategorie `Spiele` anlegt, bekommt
+   * `item_type = 'figure'` — fachlich falsch, in der Wirkung heute
+   * harmlos: `is_shop_eligible()` schließt die Kategorie `Spiele` weiter
+   * aus, ein solches Spiel wäre also trotzdem nicht shopfähig. Erkennen tun
+   * das die Prüfungen 206 bis 208 von `supabase/checks/0135_postflight.sql`
+   * („game-Zeilen = Zeilen der Kategorie Spiele"); nachziehen würde eine
+   * einzelne `update`-Anweisung nach derselben Regel wie der Backfill.
+   *
+   * Keine Heuristik im Import — aus demselben Grund, der bei `card_type`
+   * steht: was bei jedem Lauf rät, überschreibt irgendwann eine Entscheidung.
+   */
+  "item_type",
 ];
 
 function figurePayloadKeys(): string[] {

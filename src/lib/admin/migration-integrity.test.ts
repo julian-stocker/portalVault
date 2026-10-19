@@ -130,8 +130,19 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die zehn angewendeten", () => {
-    expect(zeilen.length).toBe(10);
+  it("die Staging-Tabelle führt die dreizehn angewendeten", () => {
+    /*
+     * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
+     * `0135` und `0136` dazu — in EINEM Durchgang über
+     * `supabase/operations/staging-0135-0136.sql`. `0133` und `0134` fehlen
+     * weiter: die Tabelle hat damit eine Lücke, und die ist gewollt (die
+     * Nummer ist eine Reihenfolge, keine Kette).
+     */
+    expect(zeilen.length).toBe(13);
+    expect(zeilen.map((z) => z.datei)).toContain("0135_catalog_item_type.sql");
+    expect(zeilen.map((z) => z.datei)).toContain("0136_business_backup_item_type.sql");
+    expect(zeilen.map((z) => z.datei)).not.toContain("0133_paid_total_immutable.sql");
+    expect(zeilen.map((z) => z.datei)).not.toContain("0134_purchase_item_source_row_visible.sql");
   });
 
   it("und die Akte ist ab 0122 lückenlos — angewendet ODER ausdrücklich nicht", () => {
@@ -180,7 +191,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
 
   it("wo `gleich` steht, ist die Datei bitgenau die ausgeführte Fassung", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
-    expect(gleiche.length).toBe(9);
+    /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`. Nur `0130` weicht ab
+       und zeigt auf ihren Nachtrag. */
+    expect(gleiche.length).toBe(12);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
@@ -234,11 +247,18 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(text).toContain("docs/history/2026-10-18-production-0132-0133.md");
   });
 
-  it("die beiden stehen NICHT in der Staging-Tabelle", () => {
-    for (const n of ["0132_purchase_item_remove_by_line.sql",
-                     "0133_paid_total_immutable.sql"]) {
-      expect(zeilen.map((z) => z.datei), n).not.toContain(n);
-    }
+  it("0132 steht inzwischen AUCH auf Staging, 0133 noch nicht", () => {
+    /*
+     * Der Vorfall vom 2026-10-18 ist damit zur Hälfte nachgezogen: `0132`
+     * wurde auf Staging angewendet und mit zwei Postflights belegt, `0133`
+     * steht dort weiter aus. Beides muss die Akte auseinanderhalten können.
+     */
+    expect(zeilen.map((z) => z.datei))
+      .toContain("0132_purchase_item_remove_by_line.sql");
+    expect(zeilen.map((z) => z.datei))
+      .not.toContain("0133_paid_total_immutable.sql");
+    expect(production.map((z) => z.datei))
+      .toContain("0133_paid_total_immutable.sql");
   });
 
   it("und jede davon ist bitgenau die Datei im Repository", () => {
@@ -310,14 +330,24 @@ describe("0131_function_body_check.sql erwartet, was die Migration enthält", ()
 
   it("und die erwartete Länge", () => {
     expect(rumpf.length).toBe(21458);
-    expect(pruefung).toContain("'21458'");
+    /*
+     * DIE ERWARTUNG IST KEIN EINZELWERT MEHR.
+     *
+     * Hier stand `toContain("'21458'")` — ein quotiertes Literal, weil die
+     * Prüfdatei die Länge als Sollwert einer Zeile trug. Seit `0136` kennt sie
+     * eine TABELLE bekannter Stände, und Länge, Kommentar und Feldzahl stehen
+     * dort als Zahlen in der Zeile ihres Abdrucks. Geprüft wird deshalb der
+     * Eintrag, nicht das Literal — vollständig in
+     * `src/lib/backup/backup-item-type.test.ts`, das jede Standzeile gegen
+     * ihre Migrationsdatei rechnet.
+     */
+    expect(pruefung).toContain("'24c3810288bb20929fe995554a267adf', 21458");
   });
 
   it("der erwartete md5 des Kommentars stimmt ebenfalls", () => {
     expect(md5(kommentar)).toBe("6b980ac961d1d6ac704587ecc6e9524f");
     expect(kommentar.length).toBe(674);
-    expect(pruefung).toContain("6b980ac961d1d6ac704587ecc6e9524f");
-    expect(pruefung).toContain("'674'");
+    expect(pruefung).toContain("'6b980ac961d1d6ac704587ecc6e9524f',   674");
   });
 
   it("der Vergleichswert für Stand 0130 stimmt mit 0130 überein", () => {
@@ -336,8 +366,21 @@ describe("0131_function_body_check.sql erwartet, was die Migration enthält", ()
     const felder = zeilen.filter((z) => /^ {10}'[a-z_0-9]+',/.test(z)).length;
     expect(bereiche).toBe(28);
     expect(felder).toBe(352);
+    /* 28 Bereiche sind in jedem Stand gleich und bleiben ein harter Sollwert. */
     expect(pruefung).toContain("'28'");
-    expect(pruefung).toContain("'352'");
+    /* Die Feldzahl gehört zum Stand: 352 in `0131`, 353 ab `0136`. */
+    expect(pruefung).toContain("674, 352, 'STAND_0131_ZEICHENGLEICH'");
+  });
+
+  it("und die Prüfdatei kennt den Stand aus 0136 als zweiten freigegebenen", () => {
+    const r0136 = rumpfVon(
+      readFileSync("supabase/migrations/0136_business_backup_item_type.sql", "utf8"));
+    expect(md5(r0136)).toBe("f6d08440707ba72a8040a8d1e666c092");
+    expect(r0136.length).toBe(21494);
+    expect(pruefung).toContain("'f6d08440707ba72a8040a8d1e666c092', 21494");
+    expect(pruefung).toContain("890, 353, 'STAND_0136_ZEICHENGLEICH'");
+    /* Und `0130` steht als bekannt, aber nicht freigegeben. */
+    expect(pruefung).toContain("'STAND_0130',               false");
   });
 
   it("die Prüfung schreibt nichts", () => {

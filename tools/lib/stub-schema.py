@@ -20,6 +20,7 @@ MIG = sorted(pathlib.Path(MIG_DIR).glob("*.sql"))
 tabellen = {}
 views = {}
 funktionen = {}
+sequenzen = set()
 fehler = []    # nicht unterstuetzte Anweisungen; fuehren zum Abbruch
 
 def name_von(rv):
@@ -34,6 +35,17 @@ for f in MIG:
         n = raw.stmt
         t = type(n).__name__
         if t == "CreateStmt" and n.relation.schemaname in (None, "public"):
+            # TEMPORAERE TABELLEN GEHOEREN NICHT INS STUB-SCHEMA.
+            #
+            # `0135` und `0136` legen ihre Abdruecke in einer Temporaertabelle
+            # ab (`on commit drop`). Die hat `schemaname = None` wie eine
+            # ungequalifizierte Tabelle — ohne diese Zeile stuende sie als
+            # `public.<name>` im Stub, und eine Pruefdatei, die sie ausserhalb
+            # ihrer Sitzung abfragt, wuerde gruen planen statt mit 42P01 zu
+            # scheitern. Ein falscher Erfolg ist die eine Richtung, die dieses
+            # Werkzeug niemals nehmen darf.
+            if getattr(n.relation, "relpersistence", "p") != "p":
+                continue
             cols = []
             for el in (n.tableElts or ()):
                 if type(el).__name__ == "ColumnDef" and el.typeName is not None:
@@ -66,6 +78,35 @@ for f in MIG:
                         f"{f.name}: alter table public.{rel} alter column {spalte} type …")
                 elif "RenameColumn" in art:
                     fehler.append(f"{f.name}: alter table public.{rel} rename column …")
+        elif t == "DropStmt" and getattr(n.removeType, "name", "") == "OBJECT_TABLE":
+            # `drop table` faltet mit: eine geloeschte Tabelle, die im Stub
+            # stehen bleibt, laesst eine Pruefdatei gruen planen, die auf
+            # Production mit 42P01 abbricht.
+            for obj in (n.objects or ()):
+                teile = [x.sval for x in obj] if not isinstance(obj, str) else [obj]
+                if teile and teile[0] in (None, "public") and len(teile) > 1:
+                    tabellen.pop(teile[1], None)
+                elif teile:
+                    tabellen.pop(teile[-1], None)
+        elif t == "RenameStmt" and getattr(n.renameType, "name", "") == "OBJECT_TABLE":
+            # `alter table … rename to` — EINMAL in der Historie (`0026`:
+            # `business_settings` wird `platform_settings`), und bis zum
+            # 2026-10-19 uebersehen. Die Folge war ein Stub-Schema, in dem
+            # `platform_settings` nur die NACH der Umbenennung ergaenzten
+            # Spalten trug und `business_settings` als Geisttabelle weiterlebte:
+            # eine Pruefdatei auf `platform_settings.contact_email` haette
+            # falschen Alarm gegeben, eine auf `business_settings` falschen
+            # Erfolg. Gefunden hat es der Definitionslauf — `platform_settings_public()`
+            # liess sich nicht erzeugen.
+            alt_name = n.relation.relname if n.relation is not None else None
+            if alt_name is not None and n.newname:
+                tabellen[n.newname] = tabellen.pop(alt_name, tabellen.get(n.newname, []))
+        elif t == "RenameStmt" and getattr(n.renameType, "name", "") in (
+                "OBJECT_VIEW", "OBJECT_SEQUENCE", "OBJECT_MATVIEW"):
+            fehler.append(f"{f.name}: rename von "
+                          f"{getattr(n.renameType, 'name', '?')} — nicht unterstuetzt")
+        elif t == "CreateSeqStmt":
+            sequenzen.add(n.sequence.relname)
         elif t == "RenameStmt" and getattr(n.renameType, "name", "") == "OBJECT_COLUMN":
             rel = n.relation.relname if n.relation is not None else "(unbekannt)"
             fehler.append(f"{f.name}: alter table public.{rel} rename column "
@@ -125,6 +166,10 @@ aus.append("create or replace function auth.role() returns text language sql as 
 for rolle in ("anon", "authenticated", "service_role"):
     aus.append(f"do $$ begin if not exists (select 1 from pg_roles where rolname = '{rolle}') "
                f"then create role {rolle}; end if; end $$;")
+for s in sorted(sequenzen):
+    # Ohne sie loest `nextval('public.order_number_seq')` nicht auf, und der
+    # Definitionslauf koennte `next_order_number()` nicht erzeugen.
+    aus.append(f"create sequence if not exists public.{s};")
 for t, cols in sorted(tabellen.items()):
     if not cols: continue
     spalten = ",\n  ".join(f'"{c}" {ty}' for c, ty in cols)
@@ -134,4 +179,5 @@ for sig, ddl in sorted(funktionen.items()):
 for v, ddl in views.items():
     aus.append(ddl)
 pathlib.Path(sys.argv[1]).write_text("\n".join(aus) + "\n")
-print(f"Stub-Schema: {len(tabellen)} Tabellen, {len(funktionen)} Funktionen, {len(views)} Views")
+print(f"Stub-Schema: {len(tabellen)} Tabellen, {len(funktionen)} Funktionen, "
+      f"{len(views)} Views, {len(sequenzen)} Sequenzen")

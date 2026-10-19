@@ -70,7 +70,11 @@
     "sync:orderbook:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/sync-legacy-orderbook.mts",
     "sync:orderbook:prod": "node --env-file=.env.local tools/sync-legacy-orderbook.mts",
     "fix:legacy-raw-name:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/fix-legacy-raw-name.mts",
-    "verify:check-sql": "node tools/validate-check-sql.mts"
+    "verify:check-sql": "node tools/validate-check-sql.mts",
+    "db:check:staging": "node tools/db-check-staging.mts",
+    "db:grants:plan": "python3 tools/lib/grant-plan.py",
+    "db:acl:audit": "python3 tools/lib/function-acl-audit.py",
+    "env:audit": "node tools/env-audit.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
@@ -83,10 +87,12 @@
     "@electric-sql/pglite": "^0.5.10",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^26.4.1",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "pg": "^8.23.1",
     "sharp": "^0.35.4",
     "tailwindcss": "^4",
     "typescript": "^5",
