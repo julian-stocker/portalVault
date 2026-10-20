@@ -123,16 +123,31 @@ again"). Nach der Zuordnung stehen also weiterhin **0 Lagerzeilen auf
 Portalen**, und das ist richtig: ob tatsächlich noch Portale im Regal
 liegen, sagt eine Zählung, kein Import.
 
-### Vorgeschlagene Reihenfolge
+### Der Ablauf ist vorbereitet
 
-1. `accessory_assignment_readonly.sql` auf Staging fahren und die Zeilen
-   201 bis 204 mit der Tabelle oben vergleichen. Weicht etwas ab, erst klären.
-2. **Einen** Fall zuordnen — Vorschlag `SKY-0622` mit genau einer Position
-   (Einkauf #74) — und im Einkaufsdialog nachsehen, dass Rohname, Zustand
-   und Lage unverändert sind.
-3. Erst danach die übrigen, nach SKY-ID geordnet.
-4. Danach `accessory_assignment_readonly.sql` erneut: Zeile 103 muss auf 0
-   stehen, Zeile 402 auf 35, Zeile 502 weiterhin auf **0**.
+**`supabase/checks/portal_assignment_run.md`** — Klickfolge, Vorher/Nachher-Zahlen
+und Rücknahmeweg. Kurz:
+
+1. `accessory_assignment_readonly.sql` lesen (erwartet: 103 = 35, 203 = 0).
+2. **Eine** Stichprobe von Hand über den Figurenwechsel (`SKY-0622`,
+   Einkauf #74) — damit Sie einmal selbst sehen, dass Rohname und Zustand
+   stehenbleiben.
+3. `supabase/operations/staging-portal-assignment.sql` — ein Einfügen, eine
+   Transaktion, mit blockierender Vor- und Nachprüfung und Ergebnisraster.
+4. Dasselbe Leseblatt noch einmal (erwartet: 102 = 171, 402 = 35, 502 = 0).
+
+Rücknahme: `supabase/rollback/R_portal_assignment.sql`.
+
+**Warum nicht über `seller_set_purchase_item_sky()`:** die Funktion ist aus
+dem SQL-Editor nicht erreichbar — sie fragt `can_operate_active_seller()`,
+und das verlangt ein `auth.uid()`, das eine Editor-Sitzung nicht hat. Das
+Skript bildet nach, was sie tut, und übernimmt ihre Bedingungen; über die
+Oberfläche (Schritt 2) läuft sie unverändert.
+
+**Nachgefahren gegen echtes PostgreSQL:** `npm run verify:check-sql`,
+Durchgänge **P31** (0 → 35, Rohnamen unverändert, Rücknahme stellt wieder
+her) und **P32** (bricht ab bei einer Position zuviel oder einer
+Lagerbewegung, mit 0 zugeordneten Zeilen).
 
 **Freigabe erforderlich.** 35 Schreibvorgänge an historischen Einkäufen sind
 keine Nebensache, auch wenn jeder einzelne umkehrbar ist und keinen Bestand

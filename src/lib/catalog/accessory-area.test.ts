@@ -26,6 +26,7 @@ import { isCollectible } from "./collectible.ts";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { de } from "@/lib/i18n/de";
+import { code as codeOf, latestFunction } from "@/test-support/migrations";
 
 const read = (p: string) => readFileSync(p, "utf8");
 const code = (p: string) =>
@@ -176,6 +177,86 @@ describe("der Zubehörbereich zeigt nur, was freigegeben ist", () => {
     /* Die hat drei Ziele und soll sie behalten (ADR-0036). */
     expect(code(CATALOG_VIEW)).toContain('href="/zubehoer"');
     expect(code("src/components/layout/site-nav.tsx")).not.toContain("/zubehoer");
+  });
+});
+
+/* =====================================================================
+ * EIN FREIGEGEBENES PORTAL (geprüft, bevor eines freigegeben wird)
+ *
+ * `admin_set_catalog_visible(sky_id, true)` ist eine schlichte Zuweisung
+ * ohne Figurenbeschränkung — sie wirkt auf ein Portal wie auf eine Figur.
+ * Die Frage ist deshalb nicht, OB die Funktion reicht, sondern was danach
+ * passiert. Hier steht die Antwort, und zwar an einem Portal, das die
+ * Freigabe schon trägt.
+ * ================================================================== */
+describe("ein freigegebenes Portal", () => {
+  const FREI = artikel({
+    skyId: "SKY-0632", displayName: "84709790 (SF)", name: "84709790 (SF)",
+    seriesCode: "SF", seriesLabel: "Swap Force", categoryName: "Portale",
+    itemType: "portal", marketPrice: null,
+    /* DER EINE UNTERSCHIED zum Portal von heute. */
+    catalogVisible: true,
+  });
+
+  it("erscheint im Zubehörbereich", () => {
+    /* Die Abfrage liefert es — `is_active AND catalog_visible` —, und der
+       Filter lässt es durch. */
+    expect(FREI.catalogVisible).toBe(true);
+    expect(visibleAccessories([FREI], NO_ACCESSORY_FILTERS).map((i) => i.skyId))
+      .toEqual(["SKY-0632"]);
+  });
+
+  it("und wird dadurch NICHT sammelbar", () => {
+    /*
+     * Die verbindliche Zusicherung. `isCollectible()` fragt den Artikeltyp
+     * und den Kategorienamen — `catalog_visible` kommt darin gar nicht vor.
+     */
+    expect(isCollectible(FREI)).toBe(false);
+    expect(code("src/lib/catalog/collectible.ts")).not.toContain("catalogVisible");
+  });
+
+  it("und kommt nicht in den Figurenkatalog, aus dem der Fortschritt rechnet", () => {
+    /* `fetchCatalog()` legt `collectibleOnly()` über jedes Ergebnis — der
+       Nenner der 534 bleibt davon unberührt, freigegeben oder nicht. */
+    expect(code(QUERIES)).toContain("const figures = collectibleOnly(");
+  });
+
+  it("und wird NICHT shopfähig", () => {
+    /*
+     * `is_shop_eligible()` verlangt seit `0135` `item_type = 'figure'` —
+     * unabhängig von der Sichtbarkeit. Und `shop_offers()` fragt die
+     * Funktion, statt die Bedingung zu wiederholen.
+     */
+    /* Der Riegel sitzt in `is_shop_eligible()` selbst — seit `0135` am
+       Artikeltyp, nicht an der Sichtbarkeit. */
+    expect(codeOf(latestFunction("is_shop_eligible").body)).toContain("s.item_type = 'figure'");
+    /* Und `shop_offers()` FRAGT die Funktion, statt die Bedingung zu
+       wiederholen: eine Regel, ein Ort, drei Türen. */
+    expect(codeOf(latestFunction("shop_offers").body))
+      .toContain("public.is_shop_eligible(i.sky_id)");
+  });
+
+  it("und bekommt keine Detailseite", () => {
+    /*
+     * `/skylanders/[slug]` verlangt `isCollectible(figure)` UND
+     * `catalogVisible`. Die Freigabe erfüllt das zweite, das erste bleibt
+     * nein — die Seite antwortet weiter mit 404. Deshalb sind die Zeilen im
+     * Zubehörbereich auch keine Verweise.
+     */
+    const detail = code("src/app/(public)/skylanders/[slug]/page.tsx");
+    expect(detail).toContain("!isCollectible(figure)");
+    expect(code(VIEW)).not.toContain("/skylanders/");
+  });
+
+  it("die Freigabefunktion selbst kennt keine Figurenbeschränkung", () => {
+    /* Eine Zuweisung auf einer Zeile, mehr nicht — sie wirkt auf ein Portal
+       wie auf eine Figur, und das ist der Grund, warum nichts Neues nötig
+       ist. */
+    const fn = latestFunction("admin_set_catalog_visible");
+    expect(codeOf(fn.body)).toContain("update public.skylanders set catalog_visible");
+    expect(codeOf(fn.body)).toContain("public.is_platform_admin()");
+    expect(codeOf(fn.body)).not.toContain("item_type");
+    expect(codeOf(fn.body)).not.toContain("non_collectible");
   });
 });
 

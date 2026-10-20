@@ -586,6 +586,11 @@ async function main(): Promise<void> {
                        where proname = 'seller_business_backup'`)) as { rows: { m: string }[] })
       .rows[0].m;
 
+  /** Ein SQL-Literal aus einer Zeichenkette — Hochkomma verdoppelt. */
+  function quote(text: string): string {
+    return `'${text.split("'").join("''")}'`;
+  }
+
   const probe: { name: string; ok: boolean; sagt: string }[] = [];
 
   /* P1 — der gute Fall: 0135, dann 0136, beide geklammert. */
@@ -1614,6 +1619,164 @@ async function main(): Promise<void> {
         + `Anlegefunktion ${anlegen}) · Lauf 2 ohne Anpassung: `
         + `${lauf2 ?? "DURCHGELAUFEN — Befund"} (${portale2} Portale)`,
     });
+  }
+
+  /* =======================================================================
+   * P31/P32 — DIE PORTALZUORDNUNG UND IHRE RUECKNAHME
+   *
+   * `supabase/operations/staging-portal-assignment.sql` setzt auf 35
+   * Einkaufspositionen eine `sky_id`. Es ist das einzige Stueck dieser
+   * Arbeit, das GESCHAEFTSDATEN aendert — also faehrt es hier gegen echtes
+   * PostgreSQL, zusammen mit seiner Ruecknahme.
+   *
+   * DIE ZEILEN SIND ERFUNDEN, die Formen die echten: elf Portalartikel mit
+   * den Rohnamen der Arbeitsmappe, dazu Freitextpositionen in der
+   * Verteilung von Staging (1/2/5/7/11/2/3/1/1/1/1 = 35) und zwei
+   * Positionen, die NICHT getroffen werden duerfen.
+   * ==================================================================== */
+  {
+    const SKRIPT = "supabase/operations/staging-portal-assignment.sql";
+    const RUECK = "supabase/rollback/R_portal_assignment.sql";
+
+    /** Die elf Paare, wie sie im Skript stehen. */
+    const PAARE: [string, string, number][] = [
+      ["SKY-0615", "84157790 (SA)", 1],
+      ["SKY-0616", "83973080 (SA)", 2],
+      ["SKY-0617", "83973080A Wireless (SA)", 5],
+      ["SKY-0618", "0000502 (G)", 7],
+      ["SKY-0619", "0000547 (SF)", 11],
+      ["SKY-0620", "0000586 (T)", 2],
+      ["SKY-0621", "0000655 (SC)", 3],
+      ["SKY-0622", "0000726 (I)", 1],
+      ["SKY-0624", "84151790 (SA)", 1],
+      ["SKY-0627", "84704790 (SF)", 1],
+      ["SKY-0637", "84721790 (SF, T, SC)", 1],
+    ];
+
+    const bauen = async (): Promise<InstanceType<typeof PGlite>> => {
+      const db = await frischNach0136();
+      /* DIE BELEGSPERRE, wie Staging sie fuehrt. Das Skript prueft sie in C8,
+         und in einer Wegwerf-Instanz traegt eine neue Funktion sonst die
+         Vorgaberechte — ein Befund des Stubs, keiner des Skripts. */
+      for (const sig of SENSIBEL) {
+        try {
+          await db.exec(`revoke all on function ${sig} from public, anon, authenticated, service_role;`);
+        } catch { /* im Stub fehlt vielleicht eine Signatur */ }
+      }
+      const f137 = await fahre(db, M137);
+      if (f137 !== null) throw new Error(`P31 Aufbau: 0137 scheiterte — ${f137}`);
+      await serienUndIdentitaet(db);
+      const f138 = await fahre(db, M138);
+      if (f138 !== null) throw new Error(`P31 Aufbau: 0138 scheiterte — ${f138}`);
+
+      /* Ein Einkauf, und die 35 Freitextpositionen in der Verteilung von
+         Staging. `source_row` gesetzt, Zustand `reconciled_legacy`, keine
+         Bewegung — genau die Vorbedingungen, die das Skript verlangt. */
+      await db.exec("insert into public.purchases (id, source, total_cost) "
+        + "values (9001, 'excel_order_2026', 100.00);");
+      let id = 500000;
+      const zeilen: string[] = [];
+      for (const [, name, n] of PAARE) {
+        for (let i = 0; i < n; i++) {
+          id += 1;
+          zeilen.push(`(${id}, 9001, null, ${quote(name)}, 'reconciled_legacy', 'loose', ${id})`);
+        }
+      }
+      /* UND ZWEI, DIE NICHT GETROFFEN WERDEN DUERFEN: ein fremder Rohname,
+         und einer der elf Namen mit einer LAGERBEWEGUNG daran. */
+      zeilen.push(`(${++id}, 9001, null, '1.0 - Sulley', 'reconciled_legacy', 'loose', ${id})`);
+      await db.exec(
+        "insert into public.purchase_items "
+        + "(id, purchase_id, sky_id, raw_name, state, condition, source_row) values "
+        + zeilen.join(", ") + ";");
+      return db;
+    };
+
+    const w = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const AUF_PORTALEN = "select count(*)::text as w from public.purchase_items pi "
+      + "join public.skylanders s on s.sky_id = pi.sky_id where s.item_type = 'portal'";
+    const FREITEXT = "select count(*)::text as w from public.purchase_items where sky_id is null";
+    const FREMD = "select coalesce(max(sky_id), '(null)') as w from public.purchase_items "
+      + "where raw_name = '1.0 - Sulley'";
+
+    /* P31 — der gute Fall, und danach die Ruecknahme. */
+    {
+      const db = await bauen();
+      const vorPortale = await w(db, AUF_PORTALEN);
+      const vorFrei = await w(db, FREITEXT);
+      const vorBeweg = await w(db, "select count(*)::text as w from public.inventory_movements");
+
+      const lauf = await fahre(db, SKRIPT, { klammer: false });
+
+      const nachPortale = await w(db, AUF_PORTALEN);
+      const nachFrei = await w(db, FREITEXT);
+      const nachBeweg = await w(db, "select count(*)::text as w from public.inventory_movements");
+      const fremd = await w(db, FREMD);
+      /* Der Rohname MUSS stehengeblieben sein — er ist der Herkunftsnachweis. */
+      const rohnamen = await w(db,
+        "select count(*)::text as w from public.purchase_items pi "
+        + "join public.skylanders s on s.sky_id = pi.sky_id "
+        + "where s.item_type = 'portal' and pi.raw_name = s.name");
+      /* Und je Artikel die erwartete Zahl. */
+      const verteilung = await w(db,
+        "select string_agg(sky_id || '=' || n::text, ',' order by sky_id) as w from ("
+        + "select pi.sky_id, count(*) as n from public.purchase_items pi "
+        + "join public.skylanders s on s.sky_id = pi.sky_id "
+        + "where s.item_type = 'portal' group by pi.sky_id) x");
+      const erwartet = PAARE.map(([sky, , n]) => `${sky}=${n}`).join(",");
+
+      const zurueck = lauf === null ? await fahre(db, RUECK, { klammer: false }) : "nicht gefahren";
+      const endPortale = await w(db, AUF_PORTALEN);
+      const endFrei = await w(db, FREITEXT);
+
+      probe.push({
+        name: "P31 die Portalzuordnung setzt genau 35 SKY-IDs, laesst alles andere stehen — und nimmt sich zurueck",
+        ok: lauf === null && vorPortale === "0" && nachPortale === "35"
+          && vorFrei === "36" && nachFrei === "1"
+          && nachBeweg === vorBeweg && fremd === "(null)" && rohnamen === "35"
+          && verteilung === erwartet
+          && zurueck === null && endPortale === "0" && endFrei === "36",
+        sagt: lauf ?? `Portale ${vorPortale} → ${nachPortale}, Freitext ${vorFrei} → ${nachFrei}, `
+          + `Bewegungen ${vorBeweg} → ${nachBeweg}, fremde Zeile ${fremd}, `
+          + `${rohnamen}/35 Rohnamen unveraendert · Ruecknahme ${zurueck ?? "durch"}: `
+          + `Portale ${endPortale}, Freitext ${endFrei}`,
+      });
+    }
+
+    /* P32 — und sie bricht ab, wenn die Datenlage nicht stimmt.
+     *
+     * Eine Freitextposition mehr mit einem der elf Rohnamen: dann sind es 36
+     * statt 35, und das Skript darf NICHT raten, welche gemeint ist. */
+    {
+      const db = await bauen();
+      await db.exec("insert into public.purchase_items "
+        + "(id, purchase_id, sky_id, raw_name, state, condition, source_row) "
+        + "values (599999, 9001, null, '0000547 (SF)', 'reconciled_legacy', 'loose', 599999);");
+      const lauf = await fahre(db, SKRIPT, { klammer: false });
+      const portale = await w(db, AUF_PORTALEN);
+
+      /* Und der Fall mit einer Lagerbewegung: dieselbe Bedingung, mit der
+         `seller_set_purchase_item_sky` sich schuetzt. */
+      const db2 = await bauen();
+      await db2.exec("insert into public.shop_inventory (id, sky_id, condition, quantity) "
+        + "values (9500, 'PROBE-1', 'loose', 1);");
+      await db2.exec("insert into public.inventory_movements (id, inventory_id, delta, reason) "
+        + "values (9500, 9500, 1, 'purchase');");
+      await db2.exec("update public.purchase_items set movement_id = 9500 "
+        + "where raw_name = '0000726 (I)';");
+      const lauf2 = await fahre(db2, SKRIPT, { klammer: false });
+      const portale2 = await w(db2, AUF_PORTALEN);
+
+      probe.push({
+        name: "P32 sie bricht ab, wenn eine Position zuviel da ist oder eine Lagerbewegung haengt",
+        ok: lauf !== null && lauf.includes("ABBRUCH A5") && portale === "0"
+          && lauf2 !== null && lauf2.includes("ABBRUCH A6") && portale2 === "0",
+        sagt: `zu viele: ${lauf ?? "DURCHGELAUFEN — Befund"} (${portale} zugeordnet) · `
+          + `mit Bewegung: ${lauf2 ?? "DURCHGELAUFEN — Befund"} (${portale2} zugeordnet)`,
+      });
+    }
   }
 
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
