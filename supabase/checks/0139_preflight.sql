@@ -41,14 +41,37 @@ soll as (
          case when (select v.modus from vertrag v) = 'staging' then z.wert end as wert
     from z0 z
 ),
+/*
+ * KEINE SPALTE, DIE ES VOR `0139` NICHT GIBT.
+ *
+ * Diese Datei lief am 2026-10-20 auf Staging in einen Fehler:
+ * `column s.usk_rating does not exist`. Sie stand hier in der Auswahl —
+ * eine Spalte, die `0139` erst ANLEGT. Ein Preflight, der den Zustand NACH
+ * der Migration voraussetzt, kann den Zustand davor nicht messen.
+ *
+ * Gelesen werden deshalb nur Spalten, die es seit `0003` beziehungsweise
+ * `0135` gibt: `item_type` und der Marktpreis.
+ */
 zubehoer as (
-  select i.*, s.item_type, s.usk_rating
+  select i.*, s.item_type, s.market_price
     from public.shop_inventory i
     join public.skylanders s on s.sky_id = i.sky_id
    where s.item_type <> 'figure'
 ),
 
 pruef (nr, bereich, pruefung, befund, erwartet) as (values
+
+  -- ------------------------------------------------ 0. Bin ich auf Staging?
+  --
+  -- Derselbe Stempel, den `staging-0139.sql` vor dem Schreiben prueft:
+  -- `SKY-0821` und `SKY-0822` gibt es auf Staging und auf Production
+  -- bewusst NICHT. Hier steht er als MESSUNG, damit vor S2 sichtbar ist,
+  -- dass der Riegel greifen wird — dort ist er dann blockierend.
+  (1, 'Umgebung', 'Staging-Stempel: SKY-0821 UND SKY-0822 vorhanden',
+      (select (count(*) = 2)::text from public.skylanders
+        where sky_id in ('SKY-0821', 'SKY-0822')), 'true'),
+  (2, 'Umgebung', 'Info: Katalogzeilen',
+      (select count(*)::text from public.skylanders), null),
 
   -- ------------------------------------------------ 1. Die Voraussetzungen
   (101, 'Grundlage', 'skylanders.item_type steht (0135)',
@@ -94,27 +117,58 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select count(*)::text from zubehoer), null),
   (302, 'Altlast', 'davon is_listed = true — DIE MENGE, UM DIE ES GEHT',
       (select count(*)::text from zubehoer where is_listed), null),
-  (303, 'Altlast', 'davon mit eigenem Verkaufspreis (der CHECK aus 0003 erzwingt ihn)',
+  /*
+   * WOHER DER PREIS KAEME. Nicht aus einem gesetzten `sale_price` — `0007`
+   * hat den CHECK `shop_inventory_listed_needs_price` ABGESCHAFFT, weil
+   * eine gelistete Position seitdem auch ohne Uebersteuerung einen Preis
+   * haben kann: Marktpreis mal Prozentsatz. Die Regel lebt seither in
+   * `set_shop_listing()` und `shop_offers()`.
+   *
+   * Gemessen auf Staging am 2026-10-20: 13 gelistet, davon 0 mit eigenem
+   * Preis, 11 mit einem Preis AUS DEM MARKTPREIS — und genau die 11 waeren
+   * bei einer Lockerung ohne Freigabespalte sofort im Schaufenster.
+   */
+  (303, 'Altlast', 'davon mit eigenem Verkaufspreis (sale_price)',
       (select count(*)::text from zubehoer where is_listed and sale_price is not null), null),
-  (304, 'Altlast', 'die betroffenen SKY-IDs',
-      coalesce((select string_agg(sky_id || ' (' || item_type || ', ' || sale_price::text || ')',
-                                  '  |  ' order by sky_id)
+  (304, 'Altlast', 'davon mit WIRKSAMEM Preis — die Menge, die sofort Angebot waere',
+      (select count(*)::text from zubehoer z
+        cross join public.shop_settings st
+        where z.is_listed
+          and public.shop_price(z.sale_price, z.market_price, st.price_percentage)
+              is not null), null),
+  (305, 'Altlast', 'die betroffenen SKY-IDs',
+      coalesce((select string_agg(sky_id || ' (' || item_type || ')', '  |  ' order by sky_id)
                   from zubehoer where is_listed), '(keine)'), null),
-  (305, 'Altlast', 'Zubehoerzeilen im oeffentlichen Angebot — HEUTE',
+  (306, 'Altlast', 'Zubehoerzeilen im oeffentlichen Angebot — HEUTE',
       (select count(*)::text from public.shop_offers() o
          join public.skylanders s on s.sky_id = o.sky_id
         where s.item_type <> 'figure'), '0'),
-  (306, 'Altlast', 'Spiele mit erfasster USK-Kennzeichnung (die Spalte gibt es noch nicht)',
-      '0 (Spalte fehlt)', null),
+  (307, 'Altlast', 'Zubehoerartikel mit Marktpreis — die Quelle des Preises',
+      (select count(*)::text from public.skylanders
+        where item_type <> 'figure' and market_price is not null), null),
 
   -- ---------------------------------------------------- 4. Die Abdruecke
   (401, 'Abdruck', 'oeffentliche Angebote',
       (select count(*)::text from public.shop_offers()),
       (select wert from soll where schluessel = 'angebote')),
-  (402, 'Abdruck', 'Abdruck ueber die Angebotsliste',
-      (select coalesce(md5(string_agg(o.sky_id || '|' || o.condition || '|' ||
-                                      o.price::text || '|' || o.available::text,
-                                      E'\n' order by o.sky_id, o.condition)), '(leer)')
+  /*
+   * DIE Z0-FORMEL, ZEICHEN FUER ZEICHEN AUS `0135_preflight.sql` (Zeile 913).
+   *
+   * Eine frueher hier stehende, selbst erfundene Fassung nahm vier Felder
+   * mit `E'\n'` als Trenner und lieferte auf Staging
+   * `faabf8ef0d124c3dc75ed08b4eb4f398` — verglichen mit einer Konstante,
+   * die aus einer ANDEREN Formel stammt. Das sah nach einer
+   * Datenaenderung aus und war keine.
+   *
+   * Drei Felder, Trenner `;`, OHNE `available`: und das ist kein Zufall.
+   * Ein Abdruck, der die Verfuegbarkeit mitnimmt, aendert sich bei jedem
+   * Verkauf — ein Vertrag, der bei normalem Betrieb Alarm schlaegt, ist
+   * kein Vertrag.
+   */
+  (402, 'Abdruck', 'Abdruck ueber die Angebotsliste (sky_id|condition|price)',
+      (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                      || coalesce(o.price::text, ''),
+                                      ';' order by o.sky_id, o.condition), ''))
          from public.shop_offers() o),
       (select wert from soll where schluessel = 'angebote_md5')),
   (403, 'Abdruck', 'shopfaehige Katalogzeilen',

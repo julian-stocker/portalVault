@@ -81,10 +81,13 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (301, 'Figuren', 'oeffentliche Angebote',
       (select count(*)::text from public.shop_offers()),
       (select wert from soll where schluessel = 'angebote')),
+  /* Die Z0-Formel aus `0135_preflight.sql`, Zeile 913: drei Felder, Trenner
+     `;`, OHNE `available`. Ein Abdruck, der die Verfuegbarkeit mitnaehme,
+     aenderte sich bei jedem Verkauf. */
   (302, 'Figuren', 'Abdruck ueber die Angebotsliste — Zeichen fuer Zeichen',
-      (select coalesce(md5(string_agg(o.sky_id || '|' || o.condition || '|' ||
-                                      o.price::text || '|' || o.available::text,
-                                      E'\n' order by o.sky_id, o.condition)), '(leer)')
+      (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                      || coalesce(o.price::text, ''),
+                                      ';' order by o.sky_id, o.condition), ''))
          from public.shop_offers() o),
       (select wert from soll where schluessel = 'angebote_md5')),
   (303, 'Figuren', 'shopfaehige Katalogzeilen — is_shop_eligible ist unberuehrt',

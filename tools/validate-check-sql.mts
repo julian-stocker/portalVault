@@ -2362,6 +2362,61 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P40 — DIE PREFLIGHTS GEGEN DEN ZUSTAND, DEN SIE WIRKLICH VORFINDEN.
+   *
+   * DER FEHLER, DEN ES NIE WIEDER GEBEN SOLL. `0139_preflight.sql` lief am
+   * 2026-10-20 auf Staging in `column s.usk_rating does not exist` — eine
+   * Spalte, die `0139` erst ANLEGT. Die Planpruefung in Stufe 2 hatte das
+   * nicht gesehen, und sie KONNTE es nicht: ihr Stub-Schema entsteht aus
+   * ALLEN Migrationen, die noch nicht angewendeten eingeschlossen. Dort gibt
+   * es `usk_rating`, also loest der Name auf.
+   *
+   * Ein Preflight misst aber den Zustand VOR seiner Migration. Er muss
+   * deshalb gegen genau diesen Zustand laufen — und das ist der Instanz, die
+   * Stufe 4 ohnehin baut: `frisch()` nimmt die Spalten der PROBELAUF-Dateien
+   * wieder heraus.
+   *
+   * Gefahren wird mit `skyisles.z0 = 'keine'`: die Z0-Bezugszahlen gelten
+   * fuer Staging, nicht fuer sieben erfundene Zeilen. Blockierend bleibt
+   * alles Strukturelle — welche Spalte es gibt, welche nicht, welche
+   * Funktion steht.
+   */
+  {
+    const VOR_0139 = [
+      ["0139_preflight.sql", "misst den Zustand vor 0139"],
+      ["accessory_offer_readonly.sql", "misst, was eine Lockerung freigaebe"],
+    ] as const;
+
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P40 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    const f138 = await fahre(db, M138);
+    if (f138 !== null) throw new Error(`P40 Aufbau: 0138 scheiterte — ${f138}`);
+
+    const befunde: string[] = [];
+    let alleOk = true;
+    for (const [datei, zweck] of VOR_0139) {
+      try {
+        const r = await pruefdatei(db, datei,
+          { vorher: "select set_config('skyisles.z0', 'keine', true);" });
+        const ok = r.abweichungen === "0" && r.modus === "ja";
+        alleOk &&= ok;
+        befunde.push(`${datei}: ${ok ? "ok" : `Abweichungen ${r.abweichungen}, `
+          + `Modus ${r.modus}`} (${zweck})`);
+      } catch (e) {
+        alleOk = false;
+        befunde.push(`${datei}: ${(e as Error).message.split("\n")[0]}`);
+      }
+    }
+
+    probe.push({
+      name: "P40 die Preflights laufen gegen den Zustand VOR ihrer Migration",
+      ok: alleOk,
+      sagt: befunde.join(" · "),
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

@@ -29,51 +29,50 @@ Jeder Schritt wird **vollständig markiert** und in den SQL-Editor des
 Staging-Projekts eingefügt. Schritt 2 und 4 brauchen eine
 `begin`/`commit`-Klammer; die Prüfdateien laufen in `begin … rollback`.
 
-### S1 — Eingangszustand lesen (rein lesend)
+### S1 — Eingangszustand lesen · rein lesend
+
+**Eine Datei, ein Einfügen.** Klammer, Z0-Vertrag und `rollback` stehen
+darin:
 
 ```
-begin;
-select set_config('skyisles.z0', 'staging', true);
-```
-dann den Inhalt von
-```
-supabase/checks/0139_preflight.sql
-```
-und danach
-```
-rollback;
+supabase/operations/staging-s1-preflight-0139.sql
 ```
 
 **Erwartet:** Zeile **9999 = 0**. Besonders zu lesen:
 
-* **302/303** — wie viele Zubehörpositionen heute `is_listed` und bepreist
-  sind. Erwartet 13/13. **Das ist die Menge, die nicht veröffentlicht
-  werden darf.**
-* **401–403** — `256` Angebote, Abdruck `4d1d6c30fe0ae886ca2689bcb1fe9634`,
-  `534` shopfähig.
+| Zeile | was dort steht |
+|---|---|
+| **1** | der Staging-Stempel — muss `true` sein, sonst bricht S2 später ab |
+| **302–305** | die Altlast: gelistete Zubehörpositionen, davon mit eigenem Preis, davon mit **wirksamem** Preis, und welche |
+| **307** | Zubehörartikel mit Marktpreis — die Quelle dieses Preises |
+| **401–403** | `256` Angebote, Abdruck `4d1d6c30fe0ae886ca2689bcb1fe9634`, `534` shopfähig |
 
 > **Abweichung bei 401–403 heißt: nicht weitermachen.** Der Z0-Vertrag
-> beschreibt den Stand vom 2026-10-20; hat sich etwas bewegt, ist das ein
+> beschreibt den Stand vom 2026-10-19/20; hat sich etwas bewegt, ist das ein
 > Befund und keine Panne.
 
-### S1a — und die eine Zahl, die noch fehlt (rein lesend)
+> **Zum Abdruck in 402.** Die Formel ist die aus `0135_preflight.sql`,
+> Zeile 913: `sky_id|condition|price`, Trenner `;`, **ohne**
+> `available`. Eine frühere Fassung dieser Datei rechnete vier Felder mit
+> `\n` und lieferte auf Staging `faabf8ef0d124c3dc75ed08b4eb4f398` —
+> verglichen mit einer Konstante aus einer anderen Formel. Das sah nach
+> einer Datenänderung aus und war keine. Dass `available` **nicht**
+> mitzählt, ist Absicht: sonst schlüge der Vertrag bei jedem Verkauf an.
+
+### S1a — was eine Lockerung sofort freigäbe · rein lesend
 
 ```
-begin;
-select set_config('skyisles.z0', 'staging', true);
-```
-dann
-```
-supabase/checks/accessory_offer_readonly.sql
-```
-```
-rollback;
+supabase/operations/staging-s1a-accessory-offer.sql
 ```
 
-**Zu lesen: Zeile 402** — wie viele Zubehörartikel einen **Marktpreis**
-tragen. Steht dort eine Zahl größer null, bekäme eine solche Position bei
-der Freigabe **automatisch** einen Preis aus `market_price × Prozentsatz`
-(ADR-0130). Das ist kein Hindernis, aber es muss vorher bekannt sein.
+**Zu lesen: Zeile 305** — wie viele Zubehörpositionen **sofort** ein Angebot
+würden, wenn das Tor ohne Freigabespalte gelockert würde. Gemessen am
+2026-10-20: **11**. Und **402** — wie viele Zubehörartikel einen Marktpreis
+tragen (**34**); daher kommt der Preis dieser 11, nicht aus einem gesetzten
+`sale_price` (davon gibt es **0**).
+
+Das ist kein Hindernis für S2 — `0139` gibt nichts frei. Es ist die Zahl,
+die zeigt, **warum** es die Freigabespalte braucht.
 
 ### S2 — `0139` anwenden
 
@@ -102,18 +101,10 @@ eingebettete Migration ist Zeichen für Zeichen die aus
 **Jede Abweichung bricht ab** und rollt alles zurück — Spalten, Funktionen,
 Rechte. Es gibt keinen halben Zustand.
 
-### S3 — Endzustand lesen (rein lesend)
+### S3 — Endzustand lesen · rein lesend
 
 ```
-begin;
-select set_config('skyisles.z0', 'staging', true);
-```
-dann
-```
-supabase/checks/0139_postflight.sql
-```
-```
-rollback;
+supabase/operations/staging-s3-postflight-0139.sql
 ```
 
 **Erwartet: Zeile 9999 = 0.** Die vier Zeilen, auf die es ankommt:
@@ -196,6 +187,7 @@ PostgreSQL (PGlite 18.6):
 | **P37** | die Freigabe lehnt Figur, Spiel ohne USK, USK 18, fehlenden Lieferumfang, fehlenden Preis und unbekannte Position ab — **Abschalten geht immer** |
 | **P38** | `0140` braucht `0139`, nimmt dann genau drei Felder auf, und nimmt sie zurück |
 | **P39** | **die zwei Einzelläufe oben** gehen nacheinander durch — und brechen auf einer Datenbank **ohne** den Staging-Stempel ab, ohne eine Spalte zurückzulassen |
+| **P40** | die **Preflights** laufen gegen den Zustand, den sie wirklich vorfinden — also OHNE die Spalten, die `0139` erst anlegt. Genau daran ist S1 am 2026-10-20 gescheitert |
 
 **Das ist kein Lauf gegen Staging** (`open_verifications.md`, Abschnitt 3a).
 Nachweis bleibt allein das Ergebnisblatt aus dem SQL-Editor.
@@ -206,9 +198,12 @@ Nachweis bleibt allein das Ergebnisblatt aus dem SQL-Editor.
 
 | Datei | SHA-256 |
 |---|---|
+| `supabase/operations/staging-s1-preflight-0139.sql` | `9bc02d38435e79811a24055c249f764dc1e531dae72f82b75c2f9c2df352aab1` |
+| `supabase/operations/staging-s1a-accessory-offer.sql` | `3ede25acae8239d71d36ae1a5d0f73c570e16a0e1691a00f303ae41444bed3e9` |
+| `supabase/operations/staging-s3-postflight-0139.sql` | `4e0a150f77872752b5a52046ba8d6a1ec5fb10e356482c8e44d3b386ea9b057c` |
 | `supabase/migrations/0139_accessory_sale_release.sql` | siehe `supabase/migrations/APPLIED.md` |
 | `supabase/migrations/0140_business_backup_sale_release.sql` | siehe `supabase/migrations/APPLIED.md` |
-| `supabase/operations/staging-0139.sql` | `2c23a7f26ff56ec0ae981228bf11755d8d8b0ab812f27b4818a754203dc54345` |
+| `supabase/operations/staging-0139.sql` | `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8` |
 | `supabase/operations/staging-0140.sql` | `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d` |
 
 `npm run verify:sums` vergleicht sie mit `supabase/SHA256SUMS.txt`.

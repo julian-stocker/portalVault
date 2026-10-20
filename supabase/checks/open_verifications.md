@@ -243,6 +243,54 @@ eigenen Transaktion und bricht sonst ab; der Postflight macht es von außen
 nachvollziehbar. Dass 534 = 534 gilt, ist kein Zufall: `is_shop_eligible()`
 und der Fortschritts-Nenner stellen heute dieselbe Frage.
 
+### Nachtrag 2026-10-20: S1 scheiterte, S1a maß — zwei Befunde
+
+**S1 (`0139_preflight.sql`) brach ab:** `column s.usk_rating does not exist`.
+Die Datei las eine Spalte, die `0139` erst **anlegt**. Ein Preflight misst
+den Zustand **vor** seiner Migration und darf das nicht. Behoben; und damit
+es nicht wiederkommt, fährt **Probelauf P40** jeden Preflight gegen genau
+diesen Vorzustand — die Planprüfung in Stufe 2 konnte es nicht sehen, weil
+ihr Stub-Schema aus **allen** Migrationen entsteht.
+
+**S1a lieferte einen abweichenden Abdruck** —
+`faabf8ef0d124c3dc75ed08b4eb4f398` statt
+`4d1d6c30fe0ae886ca2689bcb1fe9634`, bei **gleicher** Angebotszahl (256).
+
+> **Keine Datenänderung.** Die Prüfdatei rechnete eine **andere Formel**:
+> vier Felder (`sky_id|condition|price|available`), Trenner `\n`. Der
+> Z0-Vertrag rechnet drei (`sky_id|condition|price`), Trenner `;`, **ohne**
+> `available` — so, wie es oben in diesem Abschnitt steht. Zwei Formeln,
+> zwei Zahlen, kein Befund. Alle Dateien rechnen jetzt die Z0-Formel.
+>
+> Dass `available` **nicht** mitzählt, ist der Grund, warum der Vertrag
+> überhaupt taugt: ein Abdruck mit Verfügbarkeit änderte sich bei jedem
+> Verkauf.
+
+**Und S1a maß, worauf es ankommt** (rein lesend, `qqxcpesbwfxzgytkdsac`):
+
+| Größe | Wert |
+|---|---|
+| öffentliche Angebote | **256** |
+| shopfähige Katalogzeilen | **534** |
+| Zubehör-Lagerpositionen, alle `is_listed = true` | **13** |
+| davon mit eigenem `sale_price` | **0** |
+| davon mit **wirksamem** Preis — sofort Angebot bei einer Lockerung | **11** |
+| Zubehörartikel mit `market_price` | **34** |
+| Zubehör-Lagerpositionen ohne Preisquelle | **2** |
+| Portale im Katalog / Portal-Lagerpositionen | **21 / 0** |
+
+**Das korrigiert eine Begründung, nicht einen Schluss.** Frühere Fassungen
+von ADR-0129, `PROJECT_STATUS.md` und `accessory_offer_proposal.md`
+schrieben, die 13 Zeilen trügen „zwingend einen Preis, weil
+`shop_inventory_listed_needs_price` das eine ohne das andere verbietet".
+**Diesen CHECK gibt es seit `0007` nicht mehr** — er wurde abgeschafft,
+weil eine gelistete Position seitdem auch ohne Übersteuerung einen Preis
+haben kann; die Regel lebt in `set_shop_listing()` und `shop_offers()`. Der
+Preis der 11 kommt aus dem **Marktpreis**. Die Gefahr ist damit dieselbe,
+der Beleg dafür jetzt eine Messung.
+
+**S2, S3 und S4 wurden nicht ausgeführt.**
+
 ### Wie die sechs Z0-Werte nach Z1 geprüft werden
 
 Sechs Größen, drei Prüfwege. Die Migration vergleicht **alle sechs** gegen

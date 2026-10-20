@@ -3821,12 +3821,18 @@ bestimmt:**
    `sky_id + condition`, er lädt den Katalog nie und kennt den Artikeltyp
    nicht. Checkout, Zahlung, Bestellung, Lagerabgang, Storno und Erstattung
    hängen an `order_lines.inventory_id` — alles typneutral.
-3. **Die Altlast ist schärfer als gedacht.** Die 13 Lagerzeilen auf Spielen
-   tragen `is_listed = true` — und **zwingend auch einen Preis**, weil
-   `shop_inventory_listed_needs_price` (`0003`) das eine ohne das andere
-   verbietet. Ihnen fehlt zur Veröffentlichung ausschließlich das Tor. Eine
-   Lockerung am Artikeltyp wäre **keine Vorbereitung, sondern eine
-   Veröffentlichung**.
+3. **Die Altlast ist schärfer als gedacht — und das ist jetzt gemessen.**
+   Auf Staging (2026-10-20): 13 Lagerzeilen auf Spielen mit
+   `is_listed = true`, davon **0 mit eigenem `sale_price`** — aber **11 mit
+   einem wirksamen Preis**, weil **34 Zubehörartikel einen `market_price`**
+   tragen und `shop_price()` daraus rechnet. Diesen 11 fehlt zur
+   Veröffentlichung ausschließlich das Tor. Eine Lockerung am Artikeltyp
+   wäre **keine Vorbereitung, sondern eine Veröffentlichung**.
+
+   > **Korrektur:** die erste Fassung berief sich auf den CHECK
+   > `shop_inventory_listed_needs_price`. Den gibt es seit `0007` nicht
+   > mehr. Die Schlussfolgerung stimmt unverändert, die Begründung ist
+   > jetzt eine Messung statt einer Behauptung.
 
 **Deshalb hängt die Freigabe an der LAGERPOSITION**, nicht am
 Katalogartikel: `shop_inventory.sale_released`, `not null default false`.

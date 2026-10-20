@@ -436,3 +436,84 @@ describe("die Einzellaeufe fuer 0139 und 0140", () => {
     }
   });
 });
+
+
+/* ==========================================================================
+ * Die zwei LESENDEN Laeufe — S1 und S1a
+ *
+ * Sie betten eine Pruefdatei ein, nicht eine Migration, und sie schreiben
+ * nichts: `begin`, der Z0-Vertrag, das SELECT, `rollback`. Der Grund, warum
+ * es sie gibt, ist eine Panne vom 2026-10-20: der Betreiber fuehrte die
+ * Pruefdatei ohne `set_config` aus, und Zeile 902 meldete zu Recht „der
+ * Modus fehlt". Wer nichts zusammensetzen muss, kann nichts vergessen.
+ * ======================================================================== */
+
+const LESELAEUFE = [
+  ["supabase/operations/staging-s1-preflight-0139.sql", "0139_preflight.sql"],
+  ["supabase/operations/staging-s1a-accessory-offer.sql", "accessory_offer_readonly.sql"],
+  ["supabase/operations/staging-s3-postflight-0139.sql", "0139_postflight.sql"],
+] as const;
+
+describe("die zwei lesenden Staging-Laeufe", () => {
+  for (const [skript, pruefdatei] of LESELAEUFE) {
+    const text = readFileSync(skript, "utf8");
+
+    it(`${pruefdatei} ist Zeichen für Zeichen eingebettet`, () => {
+      const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+      const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
+      const a = text.indexOf(anfang);
+      const b = text.indexOf(ende);
+      expect(a, "Marke fehlt").toBeGreaterThan(-1);
+      expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+      expect(text.slice(a + anfang.length, b))
+        .toBe(readFileSync(`supabase/checks/${pruefdatei}`, "utf8"));
+    });
+
+    it(`${skript} bringt den Z0-Vertrag mit — und zwar VOR dem SELECT`, () => {
+      const config = text.indexOf("select set_config('skyisles.z0', 'staging', true);");
+      expect(config, "set_config fehlt").toBeGreaterThan(-1);
+      expect(text.indexOf("begin;")).toBeLessThan(config);
+      expect(config).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
+    });
+
+    it(`${skript} endet mit rollback und schreibt nichts`, () => {
+      const zeilen = text.split("\n").map((l) => l.trim());
+      expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+      expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+      expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+      /* Und im ausführbaren Teil steht keine Schreiboperation — weder im
+         Rahmen noch in der eingebetteten Prüfdatei. */
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      for (const verboten of ["insert into", "update public.", "delete from",
+        "alter table", "create ", "grant ", "revoke "]) {
+        expect(code.toLowerCase(), verboten).not.toContain(verboten);
+      }
+    });
+  }
+
+  it("und der Preflight setzt keine Spalte voraus, die 0139 erst anlegt", () => {
+    /*
+     * DER FEHLER VOM 2026-10-20: `column s.usk_rating does not exist`.
+     * Ein Preflight misst den Zustand VOR seiner Migration und darf
+     * deshalb keine ihrer Spalten lesen. Dass die Datei gegen genau
+     * diesen Zustand auch LÄUFT, fährt Probelauf P40 nach.
+     */
+    const pre = readFileSync("supabase/checks/0139_preflight.sql", "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*--.*$/gm, "")
+      /* UND DIE STRINGLITERALE. Die Prüfzeile heißt
+         `'skylanders.usk_rating fehlt noch'` — darin steckt
+         `s.usk_rating` als Teilwort, und eine naive Suche fand genau das
+         statt eines echten Lesezugriffs. */
+      .replace(/'(?:[^']|'')*'/g, "''");
+    for (const spalte of ["s.usk_rating", "i.sale_released", "i.delivery_scope",
+      "z.usk_rating", "z.delivery_scope", "z.sale_released"]) {
+      expect(pre, spalte).not.toContain(spalte);
+    }
+    /* Über `information_schema` darf er nach ihnen fragen — das ist die
+       Frage „gibt es sie schon?", nicht ein Lesen. Gegen die ROHFASSUNG,
+       weil der Name dort in einem Stringliteral steht. */
+    expect(readFileSync("supabase/checks/0139_preflight.sql", "utf8"))
+      .toContain("column_name = 'sale_released'");
+  });
+});

@@ -116,11 +116,19 @@ $lauf_a$;
 -- ---------------------------------------------------------------------------
 -- WARUM DIE FREIGABE AN DER POSITION HAENGT UND NICHT AM ARTIKEL
 --
--- Weil die Gefahr dort wohnt. 13 Lagerzeilen auf Spielen tragen heute
--- `is_listed = true` — und sie tragen zwingend auch einen Preis, denn
--- `shop_inventory_listed_needs_price` (0003) verbietet das eine ohne das
--- andere. Zur Veroeffentlichung fehlt ihnen ausschliesslich das Tor. Ein
--- Schalter am KATALOGARTIKEL haette alle Positionen dieses Artikels auf
+-- Weil die Gefahr dort wohnt, und sie ist gemessen. Auf Staging (2026-10-20,
+-- `0139_preflight.sql`): 13 Lagerzeilen auf Spielen mit `is_listed = true`,
+-- davon 0 mit eigenem `sale_price` — aber 11 mit einem WIRKSAMEN Preis, weil
+-- 34 Zubehoerartikel einen `market_price` tragen und `shop_price()` daraus
+-- rechnet. Zur Veroeffentlichung fehlt diesen 11 ausschliesslich das Tor.
+--
+-- (Ein frueherer Entwurf berief sich hier auf den CHECK
+-- `shop_inventory_listed_needs_price`. Den gibt es seit `0007` nicht mehr:
+-- er wurde abgeschafft, weil eine gelistete Position seitdem auch ohne
+-- Uebersteuerung einen Preis haben kann. Die Aussage stimmt trotzdem — nur
+-- aus einem anderen Grund, und der ist gemessen statt behauptet.)
+--
+-- Ein Schalter am KATALOGARTIKEL haette alle Positionen dieses Artikels auf
 -- einmal freigegeben; ein Schalter an der POSITION gibt genau eine frei.
 --
 -- Und weil `shop_inventory` die Zeile ist, die eine spaetere
@@ -248,10 +256,16 @@ begin
        (select count(*)::text from public.skylanders s
          where public.is_shop_eligible(s.sky_id))),
     ('angebote', (select count(*)::text from public.shop_offers())),
+    /*
+     * DIE Z0-FORMEL, ZEICHEN FUER ZEICHEN AUS `0135_preflight.sql`
+     * (Zeile 913): drei Felder, Trenner `;`, OHNE `available`. Nur so
+     * laesst sich der Wert mit dem Z0-Vertrag vergleichen — und nur so
+     * schlaegt er nicht bei jedem Verkauf an.
+     */
     ('angebote_md5',
-       (select coalesce(md5(string_agg(o.sky_id || '|' || o.condition || '|'
-                                       || o.price::text || '|' || o.available::text,
-                                       E'\n' order by o.sky_id, o.condition)), '(leer)')
+       (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                       || coalesce(o.price::text, ''),
+                                       ';' order by o.sky_id, o.condition), ''))
           from public.shop_offers() o)),
     -- Die Zahl der Lagerpositionen, die HEUTE verkaeuflich sind. Abschnitt 8
     -- vergleicht sie mit derselben Zahl, gemessen am NEUEN Tor.
@@ -1430,9 +1444,9 @@ begin
   end if;
 
   v_soll := (select wert from z4_abdruck where schluessel = 'angebote_md5');
-  select coalesce(md5(string_agg(o.sky_id || '|' || o.condition || '|'
-                                 || o.price::text || '|' || o.available::text,
-                                 E'\n' order by o.sky_id, o.condition)), '(leer)')
+  select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                 || coalesce(o.price::text, ''),
+                                 ';' order by o.sky_id, o.condition), ''))
     into v_ist from public.shop_offers() o;
   if v_ist <> v_soll then
     raise exception '0139 Abbruch: der Angebotsabdruck hat sich geaendert (% statt %)',

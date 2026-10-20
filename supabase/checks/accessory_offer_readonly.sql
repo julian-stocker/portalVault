@@ -45,7 +45,8 @@ z0 (schluessel, wert) as (values
   -- Z0-Vertrag, Stand 2026-10-19/20 (`supabase/checks/0135_preflight.sql`).
   ('angebote',      '256'),
   ('angebote_md5',  '4d1d6c30fe0ae886ca2689bcb1fe9634'),
-  ('shopfaehig',    '534')
+  ('shopfaehig',    '534'),
+  ('portale_sichtbar', '21')
 ),
 soll as (
   select z.schluessel,
@@ -102,10 +103,11 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (201, 'Heute', 'oeffentliche Angebote insgesamt',
       (select count(*)::text from public.shop_offers()),
       (select wert from soll where schluessel = 'angebote')),
-  (202, 'Heute', 'Abdruck ueber die Angebotsliste',
-      (select coalesce(md5(string_agg(o.sky_id || '|' || o.condition || '|' ||
-                                      o.price::text || '|' || o.available::text,
-                                      E'\n' order by o.sky_id, o.condition)), '(leer)')
+  /* Die Z0-Formel aus `0135_preflight.sql`, Zeile 913 — nicht eine eigene. */
+  (202, 'Heute', 'Abdruck ueber die Angebotsliste (sky_id|condition|price)',
+      (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                      || coalesce(o.price::text, ''),
+                                      ';' order by o.sky_id, o.condition), ''))
          from public.shop_offers() o),
       (select wert from soll where schluessel = 'angebote_md5')),
   (203, 'Heute', 'shopfaehige Katalogzeilen',
@@ -154,9 +156,13 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- --------------------------------- Die Portale, ausdruecklich getrennt
   (501, 'Portale', 'Portal-Katalogzeilen',
       (select count(*)::text from public.skylanders where item_type = 'portal'), '21'),
+  /* Z0-gebunden: dass alle 21 sichtbar sind, ist eine Tatsache ueber
+     STAGING seit der Freigabe vom 2026-10-20 — keine Struktureigenschaft.
+     Ohne Z0-Vertrag bleibt die Zeile eine Messung. */
   (502, 'Portale', 'davon oeffentlich sichtbar (seit der Freigabe)',
       (select count(*)::text from public.skylanders
-        where item_type = 'portal' and catalog_visible and is_active), '21'),
+        where item_type = 'portal' and catalog_visible and is_active),
+      (select wert from soll where schluessel = 'portale_sichtbar')),
   (503, 'Portale', 'Lagerzeilen auf Portalen — ohne Bestand kein Angebot',
       (select count(*)::text from zubehoer where art = 'portal'), '0'),
 

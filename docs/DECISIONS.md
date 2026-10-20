@@ -11837,12 +11837,20 @@ Zeilensperre. Es braucht deshalb keine zweite Angebotsverwaltung und keinen
 zweiten Warenkorb; der Warenkorb kennt den Artikeltyp ohnehin nicht (seine
 Identität ist `sky_id + condition`, und er lädt den Katalog nie).
 
-**Und es macht eine unvorsichtige Lockerung gefährlich.** 13 Lagerpositionen
-auf Spielen tragen `is_listed = true` — und tragen zwingend auch einen
-Preis, weil `shop_inventory_listed_needs_price` (`0003`) das eine ohne das
-andere verbietet. Ihnen fehlt zur Veröffentlichung ausschließlich das Tor.
-Eine Lockerung am Artikeltyp wäre also **keine Vorbereitung, sondern eine
-Veröffentlichung**.
+**Und es macht eine unvorsichtige Lockerung gefährlich — gemessen, nicht
+vermutet.** Auf Staging (2026-10-20): 13 Lagerpositionen auf Spielen mit
+`is_listed = true`, davon **0 mit eigenem `sale_price`** — aber **11 mit
+einem wirksamen Preis**, weil 34 Zubehörartikel einen `market_price` tragen
+und `shop_price()` daraus rechnet. Diesen 11 fehlt zur Veröffentlichung
+ausschließlich das Tor. Eine Lockerung am Artikeltyp wäre also **keine
+Vorbereitung, sondern eine Veröffentlichung**.
+
+> **Korrektur vom 2026-10-20.** Die erste Fassung dieses Absatzes berief
+> sich auf den CHECK `shop_inventory_listed_needs_price`. Den gibt es seit
+> `0007` nicht mehr — er wurde abgeschafft, weil eine gelistete Position
+> seitdem auch ohne Übersteuerung einen Preis haben kann; die Regel lebt
+> seither in `set_shop_listing()` und `shop_offers()`. Die Schlussfolgerung
+> stimmt unverändert, die Begründung ist jetzt eine Messung.
 
 ### Die Freigabe hängt an der LAGERPOSITION
 

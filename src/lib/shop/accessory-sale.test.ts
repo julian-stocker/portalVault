@@ -247,15 +247,32 @@ describe("2. das neue Tor", () => {
 describe("3. die Altlast wird nicht veröffentlicht", () => {
   it("die Freigabe steht auf `not null default false`", () => {
     /*
-     * DER SATZ, AN DEM ALLES HÄNGT. 13 Lagerzeilen auf Spielen tragen
-     * `is_listed = true` — und sie tragen zwingend auch einen Preis, denn
-     * `shop_inventory_listed_needs_price` (0003) verbietet das eine ohne
-     * das andere. Ihnen fehlt zur Veröffentlichung ausschließlich das Tor.
+     * DER SATZ, AN DEM ALLES HÄNGT. Gemessen auf Staging am 2026-10-20:
+     * 13 Lagerzeilen auf Spielen mit `is_listed = true`, davon 0 mit
+     * eigenem `sale_price` — aber 11 mit einem WIRKSAMEN Preis, weil 34
+     * Zubehörartikel einen `market_price` tragen und `shop_price()`
+     * daraus rechnet. Diesen 11 fehlt zur Veröffentlichung ausschließlich
+     * das Tor.
      */
     expect(code(M139)).toContain(
       "add column sale_released boolean not null default false");
-    /* Und der CHECK aus 0003, auf den sich das Argument stützt, steht wirklich. */
-    expect(allMigrations).toContain("constraint shop_inventory_listed_needs_price");
+  });
+
+  it("und der Preis käme aus dem MARKTPREIS, nicht aus einer Übersteuerung", () => {
+    /*
+     * Eine frühere Fassung dieses Tests berief sich auf den CHECK
+     * `shop_inventory_listed_needs_price` („gelistet ⇒ `sale_price`"). Den
+     * gibt es seit `0007` nicht mehr — und der Test hätte ihn weiter grün
+     * bestätigt, weil `allMigrations` auch `0003` enthält, wo er ANGELEGT
+     * wird. Ein Fold über die ganze Historie beantwortet nicht die Frage
+     * „gilt das heute?".
+     */
+    expect(allMigrations).toContain("drop constraint if exists shop_inventory_listed_needs_price");
+    /* Die Regel lebt seitdem in den zwei Funktionen, die Marktpreis und
+       Prozentsatz sehen können. */
+    expect(code(latestFunction("set_shop_listing").body)).toBeTruthy();
+    expect(code(latestFunction("shop_offers").body))
+      .toContain("public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null");
   });
 
   it("die Migration schreibt KEINE Freigabe und KEINE USK-Angabe", () => {

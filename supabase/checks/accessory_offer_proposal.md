@@ -77,25 +77,36 @@ war `0137` ausdrücklich so gebaut.
 **Es gibt also keine Zubehör-Warenkorbarchitektur zu bauen.** Es gibt gar
 keine zu bauen — die bestehende ist bereits typneutral.
 
-### A4. Die Altlast ist schärfer als gedacht
+### A4. Die Altlast ist schärfer als gedacht — gemessen am 2026-10-20
 
-Die 13 Lagerpositionen auf Spielen tragen `is_listed = true`. Bisher war
-offen, ob sie auch einen Preis haben. **Sie haben einen — zwingend:**
+Die 13 Lagerpositionen auf Spielen tragen `is_listed = true`. Offen war,
+ob sie auch einen Preis haben. **Gemessen auf Staging:**
 
-```sql
-constraint shop_inventory_listed_needs_price
-  check (not is_listed or sale_price is not null)   -- 0003
-```
+| | |
+|---|---|
+| Zubehör-Lagerpositionen, gelistet | **13** |
+| davon mit eigenem `sale_price` | **0** |
+| davon mit **wirksamem** Preis | **11** |
+| Zubehörartikel mit `market_price` | **34** |
+| Positionen ganz ohne Preisquelle | **2** |
 
-`is_listed` ohne `sale_price` ist durch die Tabelle **verboten**. Die 13
-Positionen sind damit gelistet **und** bepreist; es fehlt ihnen zur
-Veröffentlichung ausschließlich das Tor.
+Der Preis kommt also **nicht** aus einem gesetzten `sale_price`, sondern
+aus dem **Marktpreis**: `shop_price()` rechnet `market_price ×
+Prozentsatz`, wenn keine Übersteuerung da ist (ADR-0045).
 
 > **Daraus folgt unmittelbar:** eine Lockerung am Artikeltyp wäre keine
-> Vorbereitung, sondern die sofortige Veröffentlichung von 13 Spielen mit
-> 19 Stück zu Preisen, die niemand für den öffentlichen Shop geprüft hat.
-> Genau das darf nicht passieren — und genau deshalb reicht ein Schalter am
-> **Katalogartikel** nicht.
+> Vorbereitung, sondern die sofortige Veröffentlichung von **11 Spielen**
+> zu Preisen, die niemand für den öffentlichen Shop entschieden hat — sie
+> sind aus dem Sammlermarktpreis abgeleitet. Genau das darf nicht
+> passieren, und genau deshalb reicht ein Schalter am **Katalogartikel**
+> nicht.
+
+> **Eine frühere Fassung dieses Abschnitts** berief sich auf den CHECK
+> `shop_inventory_listed_needs_price` („gelistet ⇒ `sale_price`"). Den gibt
+> es seit `0007` nicht mehr: er wurde abgeschafft, weil eine gelistete
+> Position seitdem auch ohne Übersteuerung einen Preis haben kann. Die
+> Regel lebt in `set_shop_listing()` und `shop_offers()`. Die
+> Schlussfolgerung war richtig, die Begründung war es nicht.
 
 ---
 
