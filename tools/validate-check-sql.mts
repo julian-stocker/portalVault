@@ -1779,6 +1779,63 @@ async function main(): Promise<void> {
     }
   }
 
+  /* P33 — DIE FREIGABE DER 21 PORTALE, und ihre Ruecknahme.
+   *
+   * Die Zusicherung, die zaehlt: sichtbar heisst NICHT sammelbar und NICHT
+   * verkaeuflich. Hier steht daneben eine ausgeblendete FIGUR, die
+   * ausgeblendet bleiben muss — eine pauschale Freigabe faellt damit auf.
+   */
+  {
+    const SKRIPT = "supabase/operations/staging-portal-release.sql";
+    const RUECK = "supabase/rollback/R_portal_release.sql";
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P33 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    const f138 = await fahre(db, M138);
+    if (f138 !== null) throw new Error(`P33 Aufbau: 0138 scheiterte — ${f138}`);
+    /* Eine ausgeblendete FIGUR — sie darf die Freigabe nicht mitnehmen. */
+    await db.exec("update public.skylanders set catalog_visible = false "
+      + "where sky_id = 'PROBE-1';");
+
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const SICHTBAR = "select count(*)::text as w from public.skylanders "
+      + "where item_type = 'portal' and catalog_visible";
+    const SAMMELBAR = "select count(*)::text as w from public.skylanders s "
+      + "join public.categories c on c.id = s.category_id where s.is_active and s.catalog_visible "
+      + "and not (c.name = any (public.non_collectible_categories()))";
+
+    const vorSicht = await w(SICHTBAR);
+    const vorSammel = await w(SAMMELBAR);
+    const vorAngebote = await w("select count(*)::text as w from public.shop_offers()");
+
+    const lauf = await fahre(db, SKRIPT, { klammer: false });
+
+    const nachSicht = await w(SICHTBAR);
+    const nachSammel = await w(SAMMELBAR);
+    const nachAngebote = await w("select count(*)::text as w from public.shop_offers()");
+    const figurVersteckt = await w(
+      "select catalog_visible::text as w from public.skylanders where sky_id = 'PROBE-1'");
+    const shopfaehig = await w("select count(*)::text as w from public.skylanders s "
+      + "where s.item_type = 'portal' and public.is_shop_eligible(s.sky_id)");
+
+    const zurueck = lauf === null ? await fahre(db, RUECK, { klammer: false }) : "nicht gefahren";
+    const endSicht = await w(SICHTBAR);
+
+    probe.push({
+      name: "P33 die Freigabe macht 21 Portale sichtbar — und weder sammelbar noch verkaeuflich",
+      ok: lauf === null && vorSicht === "0" && nachSicht === "21"
+        && nachSammel === vorSammel && nachAngebote === vorAngebote
+        && figurVersteckt === "false" && shopfaehig === "0"
+        && zurueck === null && endSicht === "0",
+      sagt: lauf ?? `sichtbar ${vorSicht} → ${nachSicht}, sammelbar ${vorSammel} → `
+        + `${nachSammel}, Angebote ${vorAngebote} → ${nachAngebote}, shopfaehige Portale `
+        + `${shopfaehig}, die ausgeblendete Figur bleibt ausgeblendet (${figurVersteckt}) · `
+        + `Ruecknahme ${zurueck ?? "durch"}: sichtbar ${endSicht}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

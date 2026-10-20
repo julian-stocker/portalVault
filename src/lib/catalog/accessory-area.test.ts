@@ -174,8 +174,15 @@ describe("der Zubehörbereich zeigt nur, was freigegeben ist", () => {
   });
 
   it("der Weg dorthin steht im Katalog, nicht in der Hauptnavigation", () => {
-    /* Die hat drei Ziele und soll sie behalten (ADR-0036). */
-    expect(code(CATALOG_VIEW)).toContain('href="/zubehoer"');
+    /*
+     * Die hat drei Ziele und soll sie behalten (ADR-0036). Seit der
+     * Tab-Leiste steht der Weg nicht mehr als einzelner Link im Kopf,
+     * sondern als oberste Navigationsebene — `CatalogAreaTabs`, und die
+     * kennt beide Adressen. Die Leiste selbst prüft
+     * `accessory-tab.test.ts`.
+     */
+    expect(code(CATALOG_VIEW)).toContain('<CatalogAreaTabs active="figures" />');
+    expect(code("src/components/catalog/area-tabs.tsx")).toContain('href: "/zubehoer"');
     expect(code("src/components/layout/site-nav.tsx")).not.toContain("/zubehoer");
   });
 });

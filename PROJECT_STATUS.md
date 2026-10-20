@@ -3756,7 +3756,29 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
-### Der Zubehörbereich im Katalog (2026-10-20)
+### Der Zubehörbereich im Katalog — jetzt ein Tab (2026-10-20)
+
+**Oberste Katalognavigation:** `Figuren` · `Zubehör`, als Pillenleiste über
+der Serienleiste, auf beiden Seiten an derselben Stelle. Verweise auf `/` und
+`/zubehoer`, `aria-current="page"` für den aktiven, 44 px Tippfläche. Die
+Hauptnavigation behält ihre drei Ziele (ADR-0036).
+
+**Die Zeile zeigt jetzt vier Angaben:** Art (Einzahl — „Spiel", nicht
+„Spiele"), Name, dann **Plattform oder Modellnummer**, Serie und SKY-ID.
+Beides abgeleitet aus dem **Rohnamen**, nichts gespeichert, nichts geraten:
+ohne Treffer bleibt das Feld leer. Alle 39 Spiele ergeben genau eine
+Plattform; die 21 Portale ergeben ihre Modellnummer. **Keine Bilder und kein
+Platzhalter, der wie ein Produktfoto aussieht.**
+
+**Dritter Filter: Plattform**, erscheint ab zwei. Dazu Art und Serie, jeder
+nach derselben Regel. Die Suche findet auch die Plattform — „PS3" trifft,
+obwohl der Rohname `Spiel für Sony Playstation 3 PS3` lautet.
+
+**Am laufenden Staging gemessen:** `/zubehoer` 39 Zeilen mit je einer
+Plattform- oder Modellangabe, ein aktiver Tab; `/` unverändert 41
+Figurenkarten.
+
+### Der Zubehörbereich — Grundlagen (2026-10-20)
 
 `/zubehoer` — ein eigener Bereich, erreichbar aus dem Katalogkopf. Die
 Hauptnavigation behält ihre drei Ziele (ADR-0036).
@@ -3783,6 +3805,27 @@ Lageransicht und die Artikelsuche schöpfen.
 `/zubehoer` 39 Zubehörzeilen und 0 Figurenkarten · `/shop` unverändert 225
 Verweise vor und nach der Änderung · die Portal-Detailseiten
 (`/skylanders/84709790-sf` und zwei weitere) antworten weiter mit **404**.
+
+### Die Freigabe der 21 Portale — vorbereitet, nicht ausgeführt
+
+Damit der Zubehörkatalog alle **60** Artikel zeigt, müssen die 21 Portale
+`catalog_visible = true` bekommen. Vorbereitet als **ein** Schritt:
+`supabase/operations/staging-portal-release.sql` — 21 ausgeschriebene
+SKY-IDs, eine Spalte, eine Transaktion.
+
+**Gezielt, nicht pauschal:** ein Abdruck über die Sichtbarkeit *jeder
+anderen* Katalogzeile bricht die Transaktion ab, wenn sich daran etwas
+bewegt. Die 30 redaktionell ausgeblendeten Figuren bleiben ausgeblendet.
+
+**Sichtbar heißt nicht sammelbar und nicht verkäuflich:** A4/A5 prüfen es
+vorher, C vergleicht danach `sammelbar` (534), `shopfaehig` (534),
+`angebote` (256) und deren `md5`.
+
+Probelauf **P33** gegen echtes PostgreSQL: sichtbar 0 → 21, sammelbar und
+Angebote unverändert, eine danebengestellte ausgeblendete Figur bleibt
+ausgeblendet, Rücknahme stellt 0 wieder her. Ablauf und Abnahmeraster:
+`supabase/checks/portal_release_run.md`. Rücknahme:
+`supabase/rollback/R_portal_release.sql`.
 
 ### Die Sammlung wird strenger (2026-10-20)
 

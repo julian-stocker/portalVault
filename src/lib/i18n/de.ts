@@ -168,6 +168,13 @@ export const de = {
   },
 
   catalog: {
+    /*
+     * Die oberste Navigationsebene des Katalogs (ADR-0128): Figuren oder
+     * Zubehör. Zwei Wörter, keine Erklärung — die steht auf der Seite.
+     */
+    areaNav: "Katalogbereich",
+    areaFigures: "Figuren",
+    areaAccessories: "Zubehör",
     title: "Katalog",
     searchLabel: "Figur suchen",
     searchPlaceholder: "Name eingeben …",
@@ -3815,6 +3822,9 @@ export const de = {
     searchPlaceholder: "Name, Modellnummer oder SKY-ID",
     typeAll: "Alle Arten",
     seriesAll: "Alle Serien",
+    /* Nur Spiele tragen eine Plattform; das Feld erscheint erst, wenn es
+       mehr als eine gibt. */
+    platformAll: "Alle Plattformen",
     count: (n: number) => (n === 1 ? "1 Artikel" : `${plainNumber(n)} Artikel`),
     empty: "Kein Zubehör gefunden.",
     emptyHint: "Andere Art oder andere Serie wählen, oder die Suche leeren.",

@@ -11690,6 +11690,59 @@ Zeile wird in `fetchCollection()` verworfen, erscheint nirgends und bewegt
 keine Zahl. Ein Riegel in der Datenbank wäre der sauberere Ort; er ist
 **nicht** gebaut, weil er eine Migration braucht und die Wirkung null ist.
 
+### Nachtrag (2026-10-20): Zubehör wird ein Tab, und die Freigabe wird gezielt
+
+**1. Die oberste Katalognavigation hat zwei Bereiche.** `Figuren` und
+`Zubehör`, als Pillenleiste über der Serienleiste — erst WAS, dann welches
+Spiel, dann welche Gruppe. Verweise auf `/` und `/zubehoer`, keine Knöpfe:
+ein Bereich gehört in die Adresszeile, ist teilbar und der Zurück-Knopf tut,
+was er soll. `aria-current="page"` sagt es auch dem, dem die Farbe nichts
+sagt. **Die Hauptnavigation bleibt bei drei Zielen** (ADR-0036).
+
+Beide Seiten tragen dieselbe Leiste an derselben Stelle und denselben Kopf —
+gleiche Schriftgrößen, gleiche Schatten über derselben WorldZone. Wer
+wechselt, soll denselben Ort sehen, nur mit anderem Inhalt.
+
+**2. Plattform und Modell werden ABGELEITET, nicht gespeichert.** ADR-0128
+hatte `platforms` und `model_no` vorgesehen und nicht gebaut, weil beides in
+Spalte B und damit im Namen steht. `accessory-facts.ts` ist der Leser: die
+Plattform eines Spiels aus dem **Rohnamen** (nicht aus dem Anzeigenamen — der
+gehört dem Adminbereich und darf sich ändern, der Rohname nie), die
+Modellnummer eines Portals als der Teil vor der Serienklammer.
+
+Eine Positivliste, längste zuerst, damit `Wii U Spiel` kein Wii-Spiel wird.
+**Kein Treffer heißt keine Angabe** — lieber eine Zeile ohne Plattform als
+eine mit der falschen. Ein Portal bekommt nie eine: die Plattformköpfe der
+Arbeitsmappe sind eine Lesehilfe und keine nachgewiesene Kompatibilität
+(ADR-0128, Punkt 5), und was nirgends steht, wird nicht angezeigt.
+
+Daraus entsteht ein dritter Filter — **Plattform** —, und er erscheint erst
+ab zwei. Wer ihn setzt, blendet die Portale aus, und das ist gewollt: wer
+„PS3" wählt, sucht ein Spiel.
+
+**3. Keine Bilder, und kein Platzhalter, der wie eines aussieht.** Für
+Portale gibt es keine Produktfotos. Eine leere Bildfläche wäre eine
+Behauptung über fehlende Daten; stattdessen trägt die Zeile ihre Angaben in
+zwei Lagen — oben Art und Name, unten Plattform oder Modell, Serie und
+SKY-ID.
+
+**4. Die Freigabe der 21 Portale ist gezielt, nicht pauschal.**
+`supabase/operations/staging-portal-release.sql` nennt **21 ausgeschriebene
+SKY-IDs** und setzt eine Spalte. Der Beweis der Gezieltheit ist ein Abdruck
+über die Sichtbarkeit **jeder anderen** Katalogzeile: bewegt sich daran
+etwas, bricht die Transaktion ab. Die 30 redaktionell ausgeblendeten Figuren
+bleiben damit nachweislich ausgeblendet.
+
+Und die Abschnitte A4/A5 prüfen **vor** dem Schreiben, dass eine Freigabe
+nichts anderes nach sich zieht: kein Portal steht in einer sammelbaren
+Kategorie, keines ist shopfähig. C vergleicht danach `sammelbar`,
+`sammelbar_je_serie`, `shopfaehig`, `angebote` und deren `md5` — **534 bleibt
+534**, und die Angebotsliste bleibt Zeichen für Zeichen dieselbe.
+
+**Sichtbarkeit ist die vierte Eigenschaft und bleibt die vierte.** Dass ein
+Artikel im Katalog steht, sagt nichts darüber, ob er sammelbar, auf Lager
+oder verkäuflich ist.
+
 ### Offen
 
 Die Punkte aus `docs/SKYLANDERS_DATA.md` 11k — **ohne** die primäre Serie für

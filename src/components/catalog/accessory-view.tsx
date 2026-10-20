@@ -29,24 +29,38 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 
 import {
   accessorySeriesPresent, visibleAccessories,
   type AccessoryFilters, type AccessoryTypeFilter,
 } from "@/lib/catalog/accessory-filter";
+import { accessoryDetail, platformsPresent } from "@/lib/catalog/accessory-facts";
+import { CatalogAreaTabs } from "@/components/catalog/area-tabs";
 import { itemTypeOf, itemTypesPresent } from "@/lib/catalog/item-type";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import { de } from "@/lib/i18n/de";
 
 const copy = de.accessories;
-const typeLabels = de.inventory.kinds;
+/*
+ * ZWEI SÄTZE WÖRTER, UND SIE SIND NICHT DASSELBE.
+ *
+ *   `itemTypes`  EINZAHL — die Marke auf EINER Zeile: „Spiel", „Portal".
+ *   `kinds`      MEHRZAHL — die Filterauswahl, die eine MENGE wählt:
+ *                „Spiele", „Portale".
+ *
+ * Eine Zeile, die „Spiele" sagt, behauptet, sie sei mehrere.
+ */
+const markLabels = de.inventory.itemTypes;
+const filterLabels = de.inventory.kinds;
+
+/** Plattform oder Modellnummer — die eine Angabe unter dem Namen. */
+const detailVon = accessoryDetail;
 
 /** Eine Marke: die Art des Artikels, als kurzes Etikett. */
 function TypeMark({ type }: { type: string }) {
   return (
     <span className="shrink-0 rounded-sky-sm bg-deep/40 px-1.5 py-0.5 text-[0.6875rem] uppercase tracking-wide text-muted ring-1 ring-border/60">
-      {typeLabels[type] ?? type}
+      {markLabels[type] ?? type}
     </span>
   );
 }
@@ -71,16 +85,18 @@ export function AccessoryView({
   const [query, setQuery] = useState("");
   const [seriesCode, setSeriesCode] = useState("");
   const [type, setType] = useState<AccessoryTypeFilter>("all");
+  const [platform, setPlatform] = useState("");
 
   const filters: AccessoryFilters = useMemo(
-    () => ({ query, seriesCode, type }),
-    [query, seriesCode, type],
+    () => ({ query, seriesCode, type, platform }),
+    [query, seriesCode, type, platform],
   );
   const shown = useMemo(() => visibleAccessories(items, filters), [items, filters]);
 
   /* Nur anbieten, was es gibt — eine Art ohne Artikel ist eine Sackgasse. */
   const types = useMemo(() => itemTypesPresent(items).filter((t) => t !== "figure"), [items]);
   const seriesOptions = useMemo(() => accessorySeriesPresent(items, series), [items, series]);
+  const platforms = useMemo(() => platformsPresent(items), [items]);
   const hidden = useMemo(
     () => (admin ? items.filter((i) => !i.catalogVisible).length : 0),
     [admin, items],
@@ -88,13 +104,30 @@ export function AccessoryView({
 
   return (
     <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">{copy.heading}</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted">{copy.intro}</p>
-        <Link href="/" className="mt-2 inline-block text-sm text-muted underline underline-offset-2">
-          {copy.toCatalog}
-        </Link>
+      {/*
+        DERSELBE KOPF WIE IM FIGURENKATALOG, und zwar bewusst: beide Seiten
+        liegen über derselben WorldZone des öffentlichen Layouts, also tragen
+        Titel und Zeile dieselben Schatten und dieselbe Farbe. Wer zwischen
+        den Tabs wechselt, soll denselben Ort sehen, nur mit anderem Inhalt.
+      */}
+      <div className="md:max-w-[52%]">
+        <h1
+          className="text-3xl leading-tight font-semibold tracking-tight md:text-5xl"
+          style={{ textShadow: "0 2px 20px rgb(10 9 24 / 0.85), 0 1px 3px rgb(10 9 24 / 0.95)" }}
+        >
+          {copy.heading}
+        </h1>
+        <p
+          className="mt-2 text-sm text-on-deep-muted md:text-base"
+          style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
+        >
+          {copy.intro}
+        </p>
       </div>
+
+      {/* Die oberste Ebene. Dieselbe Leiste wie im Figurenkatalog, an
+          derselben Stelle — nur mit dem anderen Eintrag aktiv. */}
+      <CatalogAreaTabs active="accessories" />
 
       {items.length === 0 ? (
         /* Der Bereich ist leer, weil nichts freigegeben ist — nicht, weil
@@ -129,7 +162,7 @@ export function AccessoryView({
                 >
                   <option value="all">{copy.typeAll}</option>
                   {types.map((value) => (
-                    <option key={value} value={value}>{typeLabels[value] ?? value}</option>
+                    <option key={value} value={value}>{filterLabels[value] ?? value}</option>
                   ))}
                 </select>
               ) : null}
@@ -144,6 +177,23 @@ export function AccessoryView({
                   <option value="">{copy.seriesAll}</option>
                   {seriesOptions.map((option) => (
                     <option key={option.code} value={option.code}>{option.label}</option>
+                  ))}
+                </select>
+              ) : null}
+
+              {/* Die Plattform — nur Spiele tragen eine, also erscheint das
+                  Feld erst, wenn welche da sind. Wer hier wählt, blendet
+                  damit die Portale aus, und das ist gewollt. */}
+              {platforms.length > 1 ? (
+                <select
+                  aria-label={copy.platformAll}
+                  value={platform}
+                  onChange={(event) => setPlatform(event.target.value)}
+                  className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
+                >
+                  <option value="">{copy.platformAll}</option>
+                  {platforms.map((value) => (
+                    <option key={value} value={value}>{value}</option>
                   ))}
                 </select>
               ) : null}
@@ -165,24 +215,46 @@ export function AccessoryView({
               {shown.map((item) => (
                 <li
                   key={item.skyId}
-                  className="flex flex-col gap-1 rounded-sky-md bg-surface/80 px-3 py-2.5 ring-1 ring-border/70 sm:flex-row sm:items-center sm:gap-3"
+                  /*
+                    ZWEI ZEILEN, KEIN BILD. Für Portale gibt es keine
+                    Produktfotos, und ein Platzhalter, der wie eines
+                    aussieht, wäre eine Behauptung. Statt einer leeren
+                    Bildfläche trägt die Zeile ihre Angaben: oben die Art
+                    und der Name, unten das, was den Artikel genau bestimmt.
+                  */
+                  className="flex flex-col gap-1.5 rounded-sky-md bg-surface/80 px-3.5 py-3 ring-1 ring-border/70 transition-colors hover:ring-border-strong"
                 >
-                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
                     <TypeMark type={itemTypeOf(item)} />
                     {/* Der Anzeigename: ein redaktioneller Name, wenn es
                         einen gibt, sonst der Rohname — dieselbe Rangfolge
-                        wie überall (0117). Bei einem Portal ist das die
-                        Modellnummer, und die unterscheidet die Varianten. */}
-                    <span className="min-w-0 flex-1 truncate text-sm">{item.displayName}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
-                    <span className="uppercase tabular-nums">{item.seriesLabel}</span>
-                    <span className="font-mono">{item.skyId}</span>
+                        wie überall (0117). */}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                      {item.displayName}
+                    </span>
                     {admin && !item.catalogVisible ? (
-                      <span className="rounded-sky-sm px-1.5 py-0.5 ring-1 ring-border/60">
+                      <span className="shrink-0 rounded-sky-sm px-1.5 py-0.5 text-[0.6875rem] text-muted ring-1 ring-border/60">
                         {copy.hiddenMark}
                       </span>
                     ) : null}
+                  </div>
+
+                  {/*
+                    Die zweite Zeile beantwortet „welches genau?" — für ein
+                    Spiel die Plattform, für ein Portal die Modellnummer.
+                    Beides abgeleitet aus dem Rohnamen, nichts gespeichert,
+                    nichts geraten: ohne Treffer steht hier nichts.
+                  */}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    {detailVon(item) !== null ? (
+                      <>
+                        <span className="font-medium text-foreground">{detailVon(item)}</span>
+                        <span aria-hidden="true">·</span>
+                      </>
+                    ) : null}
+                    <span>{item.seriesLabel}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono">{item.skyId}</span>
                   </div>
                 </li>
               ))}
