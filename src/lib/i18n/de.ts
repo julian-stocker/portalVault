@@ -3822,6 +3822,7 @@ export const de = {
     searchPlaceholder: "Name, Modellnummer oder SKY-ID",
     typeAll: "Alle Arten",
     seriesAll: "Alle Serien",
+    seriesNav: "Serie wählen",
     /* Nur Spiele tragen eine Plattform; das Feld erscheint erst, wenn es
        mehr als eine gibt. */
     platformAll: "Alle Plattformen",
@@ -3836,6 +3837,22 @@ export const de = {
     none: "Hier ist noch kein Zubehör freigegeben.",
     noneHint: "Ein Artikel erscheint, sobald er im Katalogbereich sichtbar "
       + "geschaltet wurde. Die Artikel selbst gibt es bereits.",
+    /* Die weiteren Serien eines mehrfach zugeordneten Portals. */
+    alsoFor: (serien: string) => `auch ${serien}`,
+    /*
+     * Das Angebot, oder sein Fehlen. Heute immer das Fehlen: Zubehör ist
+     * nicht shopfähig. Der Satz sagt es ruhig und verspricht nichts —
+     * „noch nicht" wäre eine Zusage, die niemand gegeben hat.
+     */
+    noOffer: "Aktuell kein Angebot",
+    soldOut: "ausverkauft",
+    sortLabel: "Sortierung",
+    sorts: {
+      name: "Name",
+      series: "Serie",
+      platform: "Plattform",
+      kind: "Art",
+    } as Record<string, string>,
     /* Nur für den Adminblick: was hier steht, sieht sonst niemand. */
     hiddenMark: "ausgeblendet",
     hiddenNote: (n: number) =>

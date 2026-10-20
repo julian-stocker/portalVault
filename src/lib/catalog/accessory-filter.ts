@@ -11,7 +11,7 @@
  * (`fetchAccessoryCatalog`), nicht ein Filter im Browser. Ein Filter, der
  * Sichtbarkeit herstellt, wäre ein Filter, den man abschalten kann.
  */
-import { platformOf } from "@/lib/catalog/accessory-facts";
+import { inSeries, platformOf, seriesScopeOf } from "@/lib/catalog/accessory-facts";
 import { itemTypeOf, type ItemType } from "@/lib/catalog/item-type";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -65,8 +65,18 @@ function matchesSearch(item: CatalogFigure, query: string): boolean {
 export function matchesAccessoryFilters(
   item: CatalogFigure,
   filters: AccessoryFilters,
+  /**
+   * Die bekannten Seriencodes, für die Mehrfachzuordnung.
+   *
+   * Fehlen sie, gilt allein `series_code` — das Verhalten von vorher. Damit
+   * bleibt jeder Aufrufer gültig, der sie nicht kennt, und `SKY-0637`
+   * erscheint dann nur unter `SF` statt unter allen dreien.
+   */
+  knownSeries: ReadonlySet<string> = new Set(),
 ): boolean {
-  if (filters.seriesCode !== "" && item.seriesCode !== filters.seriesCode) return false;
+  if (filters.seriesCode !== "" && !inSeries(item, filters.seriesCode, knownSeries)) {
+    return false;
+  }
   if (filters.type !== "all" && itemTypeOf(item) !== filters.type) return false;
   if (filters.platform !== "" && platformOf(item) !== filters.platform) return false;
   return matchesSearch(item, filters.query);
@@ -76,8 +86,9 @@ export function matchesAccessoryFilters(
 export function visibleAccessories(
   items: readonly CatalogFigure[],
   filters: AccessoryFilters,
+  knownSeries: ReadonlySet<string> = new Set(),
 ): CatalogFigure[] {
-  return items.filter((item) => matchesAccessoryFilters(item, filters));
+  return items.filter((item) => matchesAccessoryFilters(item, filters, knownSeries));
 }
 
 /**
@@ -91,6 +102,10 @@ export function accessorySeriesPresent<T extends { code: string }>(
   items: readonly CatalogFigure[],
   series: readonly T[],
 ): T[] {
-  const seen = new Set(items.map((item) => item.seriesCode));
+  const bekannt = new Set(series.map((option) => option.code));
+  /* Über den ganzen Geltungsbereich, nicht nur über die Einordnung: ein
+     Portal, das für Trap Team gilt, macht „Trap Team" zu einer sinnvollen
+     Wahl, auch wenn es unter `SF` eingeordnet ist. */
+  const seen = new Set(items.flatMap((item) => seriesScopeOf(item, bekannt)));
   return series.filter((option) => seen.has(option.code));
 }

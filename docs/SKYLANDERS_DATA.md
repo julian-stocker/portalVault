@@ -1118,6 +1118,32 @@ von `SKY-0637` ebenso; die Sprache ist bei Portalen nirgends belegt. Eine
 Spalte ohne Leser veraltet. Von den fünf geplanten Spalten ist `item_type` die
 einzige, die jemand liest.
 
+**Seit dem 2026-10-20 liest der Zubehörkatalog diese drei Angaben aus dem
+Rohnamen — mit einer Funktion, nicht mit einer Spalte.**
+`src/lib/catalog/accessory-facts.ts`:
+
+| Funktion | liest | gilt für |
+|---|---|---|
+| `platformOf()` | das erste bekannte Plattformwort im Rohnamen, **längste Schreibweise zuerst** (`Wii U` vor `Wii`), nur als ganzes Wort (`PC` trifft nicht in `PCX`) | nur **Spiele** |
+| `modelOf()` | den Rohnamen **ohne** die letzte Klammer: `84709790 (SF)` → `84709790` | nur **Portale** |
+| `seriesScopeOf()` | die Seriencodes in der letzten Klammer: `84721790 (SF, T, SC)` → `SF, T, SC` | nur **Portale** |
+
+**Aus dem Rohnamen, nicht aus dem Anzeigenamen.** Die 39 Spiele tragen alle
+einen redaktionellen Anzeigenamen der Form `Skylanders Giants – PS3`, aus dem
+sich die Plattform bequemer lesen liesse. Ein Anzeigename gehört aber dem
+Adminbereich und darf sich ändern (ADR-0039); der Rohname ist Quelldatum und
+ändert sich nie.
+
+**Drei Riegel gegen das Raten bei `seriesScopeOf()`:** nur Portale (die
+Klammer eines Spiels trägt die Plattform, nicht die Serie) · jeder Eintrag
+muss ein **bekannter** Seriencode aus `fetchSeries()` sein · **alles oder
+nichts** — passt ein Eintrag nicht, gilt allein `series_code`. Die
+eingeordnete Serie steht immer vorn. Gleiches Prinzip bei `platformOf()`:
+kein Treffer heisst **keine Angabe**, nie eine geratene. Lieber eine Kachel
+ohne Plattform als eine mit der falschen — und bei einem **Portal** steht
+grundsätzlich keine, weil der Plattformkopf der Arbeitsmappe eine Lesehilfe
+ist und keine nachgewiesene Kompatibilität (offener Punkt 7).
+
 ### Offene Punkte — aus den Quelldaten nicht beantwortbar
 
 1. Warum **zwei** Giants-Portale für Xbox 360 (`84392790`, `84392080`)?

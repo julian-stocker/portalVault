@@ -133,3 +133,60 @@ export function platformsPresent(
   const seen = new Set(items.map(platformOf).filter((p): p is string => p !== null));
   return PLATFORM_LABELS.filter((label) => seen.has(label));
 }
+
+/**
+ * ALLE Serien, denen ein Artikel zugeordnet ist — nicht nur die eine.
+ *
+ * DER FALL, UM DEN ES GEHT: `SKY-0637` heisst `84721790 (SF, T, SC)`. Die
+ * Arbeitsmappe ordnet dieses Portal drei Serien zu; `skylanders.series_code`
+ * ist aber einwertig und trägt einen Fremdschlüssel, also steht dort `SF`
+ * (Entscheidung des Betreibers, ADR-0128). Die vollständige Zuordnung blieb
+ * bewusst im ROHNAMEN — `series_scope` wurde nicht gebaut, weil es dort
+ * schon steht.
+ *
+ * Diese Funktion liest sie von dort. Wer im Zubehörkatalog „Trap Team"
+ * wählt, bekommt das Portal zu sehen, das für Trap Team gilt — auch wenn es
+ * unter `SF` eingeordnet ist. Das ist die fachlich richtige Behandlung einer
+ * Mehrfachzuordnung, und sie kostet keine Spalte.
+ *
+ * ---------------------------------------------------------------------------
+ * GERATEN WIRD NICHTS. Drei Riegel:
+ *
+ *   1. Nur PORTALE. Ein Spiel heisst `Game (PC)`, und `PC` ist keine Serie —
+ *      die Klammer eines Spiels trägt die Plattform, nicht die Zuordnung.
+ *   2. Jeder Eintrag der Klammer muss ein BEKANNTER Seriencode sein. Die
+ *      Liste kommt vom Aufrufer aus `fetchSeries()`, nicht aus dieser Datei.
+ *   3. ALLES ODER NICHTS. Passt auch nur ein Eintrag nicht, gilt allein
+ *      `series_code`. Eine halb verstandene Klammer ist keine Zuordnung.
+ *
+ * Die eingeordnete Serie ist immer dabei, auch wenn die Klammer sie nicht
+ * nennt: sie ist die gespeicherte Wahrheit, und die wird nicht überstimmt.
+ * ---------------------------------------------------------------------------
+ */
+export function seriesScopeOf(
+  item: { itemType?: string | null; canonicalName: string; seriesCode: string },
+  knownCodes: ReadonlySet<string>,
+): string[] {
+  const eigen = [item.seriesCode];
+  if (itemTypeOf(item) !== "portal") return eigen;
+
+  const klammer = /\(([^()]*)\)\s*$/.exec(item.canonicalName)?.[1];
+  if (klammer === undefined) return eigen;
+
+  const codes = klammer.split(",").map((t) => t.trim()).filter((t) => t !== "");
+  if (codes.length === 0) return eigen;
+  if (!codes.every((c) => knownCodes.has(c))) return eigen;
+
+  /* Reihenfolge: die eingeordnete Serie zuerst, dann die übrigen der
+     Klammer. Doppelte fallen weg. */
+  return [...new Set([item.seriesCode, ...codes])];
+}
+
+/** Gehört der Artikel zu dieser Serie — als Einordnung oder laut Klammer? */
+export function inSeries(
+  item: { itemType?: string | null; canonicalName: string; seriesCode: string },
+  code: string,
+  knownCodes: ReadonlySet<string>,
+): boolean {
+  return seriesScopeOf(item, knownCodes).includes(code);
+}

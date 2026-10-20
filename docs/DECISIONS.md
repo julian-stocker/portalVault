@@ -11313,6 +11313,30 @@ Spiele-Regel, kein bestehendes Angebot verändert. Ob Spiele oder Portale je
 die ADR-0029/0048 revidiert und `0108` berührt — mit Alterskennzeichnung und
 steuerlicher Prüfung bei Software.
 
+> **Untersucht am 2026-10-20, Ergebnis als Vorschlag niedergelegt:**
+> `supabase/checks/accessory_offer_proposal.md`. Die Angebotsarchitektur hat
+> **ein** Tor — `is_shop_eligible()` —, und jede Tür fragt es:
+> `shop_offers()`, `shop_quantity_available()`, die Warenkorbprüfung,
+> **`create_order()`** und die Betriebsansicht. Eine zweite
+> Angebotsverwaltung ist damit weder nötig noch erlaubt.
+>
+> **Eine Lockerung am Artikeltyp wäre deshalb keine Vorbereitung, sondern
+> eine Veröffentlichung.** Die 13 Lagerzeilen auf Spielen tragen alle
+> `is_listed = true`, die 39 Spiele sind aktiv und sichtbar, die 21 Portale
+> seit demselben Tag ebenfalls — es fehlt allein der Preis, und
+> `shop_price()` nimmt ihn aus `sale_price` **oder** aus `market_price ×
+> Prozentsatz`. Vorgeschlagen ist stattdessen eine Freigabe **je Artikel**
+> (`shop_released boolean not null default false`) mit dem Prädikatszweig
+> `item_type = 'figure' or shop_released` — Figuren unverändert, 534 bleibt
+> 534, der Angebotsabdruck `4d1d6c30…` bleibt stehen.
+>
+> **Nichts davon ist umgesetzt.** Der Vorschlag nennt vier Entscheidungen,
+> die vor jeder Migration stehen: der **Marketplace-Stopp** (ADR-0021) für
+> den Wunsch „private und gewerbliche Verkäufer", die
+> **Alterskennzeichnung** bei Spielen, die **steuerliche Bestätigung** durch
+> den Betreiber, und was **„lose"** bei einem Spiel heisst
+> (`v1_sale_condition()`, `0108`).
+
 **9. Was jetzt nicht kommt.** Die beiden **Disney-Infinity-Portale** bleiben
 außerhalb des Skylanders-Katalogs. **Starter Packs** und **Taschen** werden
 später als echte Artikel integrierbar, in einem eigenen Schritt. Die **URL** in
@@ -11488,6 +11512,19 @@ Spalte ohne Leser veraltet; keine der vier hat einen. **Gebaut ist von den fünf
 geplanten Spalten also genau eine: `item_type`.** Kommt später ein Leser — eine
 Plattformfilterung im Katalog etwa —, ist der Weg dahin additiv und unverändert
 offen.
+
+> **Der Leser kam am 2026-10-20 — und blieb eine Funktion, keine Spalte.**
+> Der Zubehörkatalog filtert nach Serie, und `SKY-0637` muss unter **allen
+> drei** erscheinen, nicht nur unter `SF`. `seriesScopeOf()`
+> (`src/lib/catalog/accessory-facts.ts`) liest die Klammer des Rohnamens;
+> `platformOf()` und `modelOf()` lesen Plattform und Modellnummer von dort.
+> Damit haben drei der vier verworfenen Spalten einen Leser — und keine von
+> ihnen wird gebaut. **Geraten wird nichts:** nur Portale, jeder Eintrag der
+> Klammer muss ein **bekannter** Seriencode aus `fetchSeries()` sein, und es
+> gilt **alles oder nichts** — passt ein Eintrag nicht, gilt allein
+> `series_code`. Die eingeordnete Serie steht immer vorn; die gespeicherte
+> Wahrheit wird ergänzt, nie überstimmt. Die Klammer eines **Spiels** trägt
+> die Plattform und wird nie als Serie gelesen.
 
 **2. `catalog_visible` filtert die Einkaufsauswahl nur noch bei FIGUREN.** Das
 ist der Fehler, den die Umsetzung gefunden hat, und er wäre teuer gewesen.

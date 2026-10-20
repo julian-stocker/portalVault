@@ -180,6 +180,13 @@ Alle übrigen Dateien unter `supabase/checks/` sind reine SELECTs.
 | `0133_preflight.sql` | Eingangszustand vor `0133`; Grundlage aus `0115`/`0132`, Trigger fehlt noch |
 | `0133_postflight.sql` | der Trigger steht, hat die Form BEFORE UPDATE FOR EACH ROW, hält drei Felder und kein viertes |
 | `0132_platform_export_receipts_proposal.md` | **Vorschlag, nicht umgesetzt**: die Eigenbelege im Plattformarchiv |
+| `inventory_accessories_readonly.sql` | **nur Staging, rein lesend**: was die Lagerübersicht nach der Zubehörerweiterung zeigt — Zeilen und Stück je Artikeltyp, welche davon einen Namen bekommen, und dass keine Zubehörzeile shopfähig, angeboten oder sammelbar ist. **Nicht in der Suite** (ruft `is_shop_eligible()`), gehört in den SQL-Editor |
+| `accessory_assignment_readonly.sql` | **rein lesend**: die 206 Einkaufspositionen ohne `sky_id` gegen die 21 Portalartikel, auf **Zeichengleichheit**, nie auf Ähnlichkeit. Grundlage des Zuordnungsvorschlags |
+| `accessory_assignment_proposal.md` | **Vorschlag, ausgeführt am 2026-10-20**: die 35 zeichengleichen Einkaufspositionen auf 11 Portalartikel, als ausgeschriebene Paare statt als Regel |
+| `portal_assignment_run.md` | **der Laufzettel** zur Zuordnung der 35 Positionen, mit Vorher/Nachher-Raster, Abdruck über 15 Spalten und Rücknahme. **Ausgeführt am 2026-10-20** |
+| `portal_release_run.md` | **der Laufzettel** zur öffentlichen Freigabe der 21 Portale, mit dem Abdruck über die Sichtbarkeit **jeder anderen** Zeile als Beweis der Zielgenauigkeit. **Ausgeführt am 2026-10-20** |
+| `accessory_offer_readonly.sql` | **nur Staging, rein lesend**: was eine Lockerung von `is_shop_eligible()` **sofort** veröffentlichen würde. Bildet die vier Bedingungen von `shop_offers()` nach und ersetzt nur die Katalogeignung durch die hypothetische Regel. Zeile 305 ist die Zahl, auf die es ankommt. **Nicht in der Suite**, gehört in den SQL-Editor. Noch nicht gefahren |
+| `accessory_offer_proposal.md` | **Vorschlag, nicht umgesetzt**: Zubehör anbieten und verkaufen. Die Angebotsarchitektur hat **ein** Tor (`is_shop_eligible()`), das jede Tür fragt; vorgeschlagen wird eine Freigabe **je Artikel** (`shop_released`) statt einer Lockerung am Artikeltyp. Nennt die Entscheidungen, die vor jeder Migration stehen — Marketplace-Stopp, USK, Steuer, was „lose" bei einem Spiel heißt |
 
 ## Bereichserkennung: zeilenweise, niemals mit einem mehrzeiligen Regex
 

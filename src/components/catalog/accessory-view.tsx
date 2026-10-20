@@ -1,29 +1,36 @@
 /**
  * Der Zubehörbereich des Katalogs (ADR-0128).
  *
- * WARUM EINE EIGENE ANSICHT UND KEINE ERWEITERUNG DER FIGURENSICHT.
+ * SO WIE DER FIGURENKATALOG, UND DOCH NICHT DIESELBE KARTE.
  *
- * Eine Figurenkarte beantwortet Fragen, die ein Portal nicht hat: Element,
- * Charakter, Variante, Besitz, Fortschritt, Preis, „In den Warenkorb". Für
- * ein Portal ist jede dieser Antworten leer oder falsch, und eine Karte, die
- * zur Hälfte leer bleibt, sieht aus wie fehlende Daten. Die Figurenkarte
- * bleibt deshalb unangetastet (ADR-0038) und das Zubehör bekommt die
- * schlichtere Form, die zu ihm passt: eine Zeile.
+ * Aufbau, Reihenfolge und Bedienung sind die des Figurenkatalogs: oben die
+ * Bereichsleiste, darunter die Serienleiste, dann Suche und Filter, dann ein
+ * Kachelraster. Wer von Figuren herüberwechselt, muss nichts neu lernen.
+ *
+ * Was anders ist, ist die KACHEL. Eine Figurenkarte ist eine Sammelkarte mit
+ * Artwork-Vorlage, Element, Charakter, Variante, Besitzsiegel und Marktpreis
+ * (ADR-0038) — für ein Portal ist davon nichts wahr. `AccessoryCard` nimmt
+ * die Formensprache und lässt die Vorlage weg. **An `FigureCard` ändert sich
+ * nichts.**
  *
  * ---------------------------------------------------------------------------
- * WAS HIER ÜBERHAUPT STEHT, UND WAS NICHT
+ * WAS HIER ÜBERHAUPT STEHT
  *
- * Gezeigt wird, was `fetchAccessoryCatalog()` liefert — und das ist seit
- * ADR-0128 genau dieselbe Freigaberegel wie beim Figurenkatalog:
- * `is_active AND catalog_visible`. Ein Portal steht heute auf
- * `catalog_visible = false` und erscheint hier erst, wenn ein Administrator
- * es einzeln freigibt. Diese Ansicht kann daran nichts ändern; sie filtert
- * nur, was sie bekommt.
+ * Was `fetchAccessoryCatalog()` liefert, und das ist dieselbe Freigaberegel
+ * wie beim Figurenkatalog: `is_active AND catalog_visible`, für einen
+ * Administrator zusätzlich das Ausgeblendete. Diese Ansicht kann daran
+ * nichts ändern; sie filtert nur, was sie bekommt.
  *
- * KEIN SAMMELSTATUS, KEIN PREIS, KEIN WARENKORB. Nicht weil es hier nicht
- * hinpasst, sondern weil beides nein ist: Zubehör ist nicht sammelbar
- * (`isCollectible()`) und nicht shopfähig (`is_shop_eligible()`). Ein
- * Häkchen oder ein Preisfeld wäre ein Angebot, das die Datenbank ablehnt.
+ * KEIN SAMMELN, KEIN SIEGEL, KEIN FORTSCHRITT. Zubehör ist nicht sammelbar
+ * (`isCollectible()`), und keine Kachel bietet etwas an, das die Sammlung
+ * ablehnen würde.
+ *
+ * DAS ANGEBOT WIRD DURCHGEREICHT, OBWOHL ES HEUTE IMMER LEER IST.
+ * `shop_offers()` schliesst Zubehör am Artikeltyp aus (`0135`), also sagt
+ * jede Kachel „Aktuell kein Angebot". Die Stelle ist trotzdem schon da und
+ * liest aus derselben Projektion wie der Shop — es gibt keine zweite
+ * Angebotsverwaltung, und wenn die Produktentscheidung fällt, füllt sie sich
+ * von selbst.
  * ---------------------------------------------------------------------------
  */
 "use client";
@@ -34,66 +41,78 @@ import {
   accessorySeriesPresent, visibleAccessories,
   type AccessoryFilters, type AccessoryTypeFilter,
 } from "@/lib/catalog/accessory-filter";
-import { accessoryDetail, platformsPresent } from "@/lib/catalog/accessory-facts";
+import { platformsPresent, seriesScopeOf } from "@/lib/catalog/accessory-facts";
+import { sortAccessories, type AccessorySort } from "@/lib/catalog/accessory-sort";
+import { AccessoryCard } from "@/components/catalog/accessory-card";
 import { CatalogAreaTabs } from "@/components/catalog/area-tabs";
-import { itemTypeOf, itemTypesPresent } from "@/lib/catalog/item-type";
+import { FilterBar } from "@/components/ui/filter-bar";
+import { itemTypesPresent } from "@/lib/catalog/item-type";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
+import type { Offer } from "@/lib/shop/offer";
+import { offerIndex, offersFor } from "@/lib/shop/offer";
 import { de } from "@/lib/i18n/de";
 
 const copy = de.accessories;
 /*
  * ZWEI SÄTZE WÖRTER, UND SIE SIND NICHT DASSELBE.
  *
- *   `itemTypes`  EINZAHL — die Marke auf EINER Zeile: „Spiel", „Portal".
- *   `kinds`      MEHRZAHL — die Filterauswahl, die eine MENGE wählt:
- *                „Spiele", „Portale".
+ *   `itemTypes`  EINZAHL — die Marke auf EINER Kachel: „Spiel", „Portal".
+ *   `kinds`      MEHRZAHL — die Filterauswahl, die eine MENGE wählt.
  *
- * Eine Zeile, die „Spiele" sagt, behauptet, sie sei mehrere.
+ * Eine Kachel, die „Spiele" sagt, behauptet, sie sei mehrere.
  */
-const markLabels = de.inventory.itemTypes;
 const filterLabels = de.inventory.kinds;
 
-/** Plattform oder Modellnummer — die eine Angabe unter dem Namen. */
-const detailVon = accessoryDetail;
-
-/** Eine Marke: die Art des Artikels, als kurzes Etikett. */
-function TypeMark({ type }: { type: string }) {
-  return (
-    <span className="shrink-0 rounded-sky-sm bg-deep/40 px-1.5 py-0.5 text-[0.6875rem] uppercase tracking-wide text-muted ring-1 ring-border/60">
-      {markLabels[type] ?? type}
-    </span>
-  );
-}
+/** „Alle Serien" ist hier ein echter Zustand — anders als im Figurenkatalog. */
+const ALLE = "";
 
 export function AccessoryView({
   items,
   series,
   admin,
+  offers = {},
 }: {
   /** Schon gefiltert durch die Abfrage: nur Freigegebenes, für Admins alles. */
   items: readonly CatalogFigure[];
   series: readonly SeriesOption[];
   /**
-   * Nur für die Kennzeichnung ausgeblendeter Zeilen.
+   * Nur für die Kennzeichnung ausgeblendeter Kacheln.
    *
    * Entscheidet NICHTS über die Sichtbarkeit — die hat die Abfrage schon
-   * entschieden. Ein `admin={true}` in einer Nutzersitzung zeigte deshalb
-   * nur ein Etikett, nie eine Zeile mehr.
+   * entschieden.
    */
   admin: boolean;
+  /**
+   * Die öffentliche Angebotsprojektion, je SKY-ID. Heute ohne Zubehör.
+   *
+   * Ein einfaches Objekt, keine `Map`: eine `Map` überlebt die Grenze
+   * Server → Client nicht und käme leer an. Dieselbe Übergabe wie im
+   * Figurenkatalog.
+   */
+  offers?: Record<string, readonly Offer[]>;
 }) {
   const [query, setQuery] = useState("");
-  const [seriesCode, setSeriesCode] = useState("");
+  const [seriesCode, setSeriesCode] = useState(ALLE);
   const [type, setType] = useState<AccessoryTypeFilter>("all");
   const [platform, setPlatform] = useState("");
+  const [sort, setSort] = useState<AccessorySort>("series");
+
+  /* Die bekannten Seriencodes — die Grundlage der Mehrfachzuordnung. Sie
+     kommen aus `fetchSeries()`, nicht aus einer Liste in dieser Datei. */
+  const knownSeries = useMemo(() => new Set(series.map((s) => s.code)), [series]);
+  const offerIdx = useMemo(() => offerIndex(offers), [offers]);
 
   const filters: AccessoryFilters = useMemo(
     () => ({ query, seriesCode, type, platform }),
     [query, seriesCode, type, platform],
   );
-  const shown = useMemo(() => visibleAccessories(items, filters), [items, filters]);
+  const shown = useMemo(
+    () => sortAccessories(visibleAccessories(items, filters, knownSeries), sort),
+    [items, filters, knownSeries, sort],
+  );
 
-  /* Nur anbieten, was es gibt — eine Art ohne Artikel ist eine Sackgasse. */
+  /* Jede Auswahl bietet nur an, was es gibt — ein Knopf ohne Treffer ist
+     eine Sackgasse. */
   const types = useMemo(() => itemTypesPresent(items).filter((t) => t !== "figure"), [items]);
   const seriesOptions = useMemo(() => accessorySeriesPresent(items, series), [items, series]);
   const platforms = useMemo(() => platformsPresent(items), [items]);
@@ -104,12 +123,8 @@ export function AccessoryView({
 
   return (
     <div className="flex flex-col gap-5">
-      {/*
-        DERSELBE KOPF WIE IM FIGURENKATALOG, und zwar bewusst: beide Seiten
-        liegen über derselben WorldZone des öffentlichen Layouts, also tragen
-        Titel und Zeile dieselben Schatten und dieselbe Farbe. Wer zwischen
-        den Tabs wechselt, soll denselben Ort sehen, nur mit anderem Inhalt.
-      */}
+      {/* Derselbe Kopf wie im Figurenkatalog: beide Seiten liegen über
+          derselben WorldZone, also dieselben Grössen und Schatten. */}
       <div className="md:max-w-[52%]">
         <h1
           className="text-3xl leading-tight font-semibold tracking-tight md:text-5xl"
@@ -125,8 +140,6 @@ export function AccessoryView({
         </p>
       </div>
 
-      {/* Die oberste Ebene. Dieselbe Leiste wie im Figurenkatalog, an
-          derselben Stelle — nur mit dem anderen Eintrag aktiv. */}
       <CatalogAreaTabs active="accessories" />
 
       {items.length === 0 ? (
@@ -138,6 +151,29 @@ export function AccessoryView({
         </div>
       ) : (
         <>
+          {/*
+            DIE SERIENLEISTE, dieselbe Komponente wie im Figurenkatalog
+            (`FilterBar variant="nav"`) — waagrecht scrollbar, 44 px auf dem
+            Telefon, nie umbrechend.
+
+            MIT „Alle Serien", und das ist der eine Unterschied zum
+            Figurenkatalog: dort ist immer ein Spiel gewählt, weil 561
+            Figuren auf einmal eine Wand sind (ADR-0038). 60 Zubehörartikel
+            sind keine Wand — hier ist „alles" die sinnvolle Startansicht.
+          */}
+          {seriesOptions.length > 1 ? (
+            <FilterBar
+              variant="nav"
+              label={copy.seriesNav}
+              active={seriesCode}
+              onSelect={setSeriesCode}
+              options={[
+                { value: ALLE, label: copy.seriesAll },
+                ...seriesOptions.map((o) => ({ value: o.code, label: o.label })),
+              ]}
+            />
+          ) : null}
+
           <div className="flex flex-col gap-3">
             <label className="sr-only" htmlFor="accessory-search">{copy.searchLabel}</label>
             <input
@@ -150,8 +186,11 @@ export function AccessoryView({
               className="min-h-12 w-full rounded-sky-md bg-surface/80 px-4 text-base ring-1 ring-border/70 focus:ring-border-strong"
             />
 
-            {/* Zwei Auswahlfelder, und jedes erscheint nur, wenn es mehr als
-                eine Wahl gibt. Sie brechen auf dem Telefon um. */}
+            {/*
+              Drei Auswahlfelder und die Sortierung, in einer umbrechenden
+              Reihe. Jedes erscheint nur, wenn es mehr als eine Wahl hat —
+              auf dem Telefon sind das heute zwei Felder statt vier.
+            */}
             <div className="flex flex-wrap gap-2">
               {types.length > 1 ? (
                 <select
@@ -167,23 +206,6 @@ export function AccessoryView({
                 </select>
               ) : null}
 
-              {seriesOptions.length > 1 ? (
-                <select
-                  aria-label={copy.seriesAll}
-                  value={seriesCode}
-                  onChange={(event) => setSeriesCode(event.target.value)}
-                  className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
-                >
-                  <option value="">{copy.seriesAll}</option>
-                  {seriesOptions.map((option) => (
-                    <option key={option.code} value={option.code}>{option.label}</option>
-                  ))}
-                </select>
-              ) : null}
-
-              {/* Die Plattform — nur Spiele tragen eine, also erscheint das
-                  Feld erst, wenn welche da sind. Wer hier wählt, blendet
-                  damit die Portale aus, und das ist gewollt. */}
               {platforms.length > 1 ? (
                 <select
                   aria-label={copy.platformAll}
@@ -197,6 +219,19 @@ export function AccessoryView({
                   ))}
                 </select>
               ) : null}
+
+              <select
+                aria-label={copy.sortLabel}
+                value={sort}
+                onChange={(event) => setSort(event.target.value as AccessorySort)}
+                className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
+              >
+                {(["series", "name", "platform", "kind"] as const).map((value) => (
+                  <option key={value} value={value}>
+                    {copy.sortLabel}: {copy.sorts[value]}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <p className="text-sm text-muted" aria-live="polite">
@@ -211,54 +246,20 @@ export function AccessoryView({
               <p className="text-sm text-muted">{copy.emptyHint}</p>
             </div>
           ) : (
-            <ul className="grid gap-2 lg:grid-cols-2">
+            /* Dasselbe Raster wie der Figurenkatalog: zwei Kacheln auf dem
+               Telefon, drei ab `sm:`, vier ab `md:`. */
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4">
               {shown.map((item) => (
-                <li
+                <AccessoryCard
                   key={item.skyId}
-                  /*
-                    ZWEI ZEILEN, KEIN BILD. Für Portale gibt es keine
-                    Produktfotos, und ein Platzhalter, der wie eines
-                    aussieht, wäre eine Behauptung. Statt einer leeren
-                    Bildfläche trägt die Zeile ihre Angaben: oben die Art
-                    und der Name, unten das, was den Artikel genau bestimmt.
-                  */
-                  className="flex flex-col gap-1.5 rounded-sky-md bg-surface/80 px-3.5 py-3 ring-1 ring-border/70 transition-colors hover:ring-border-strong"
-                >
-                  <div className="flex min-w-0 items-center gap-2">
-                    <TypeMark type={itemTypeOf(item)} />
-                    {/* Der Anzeigename: ein redaktioneller Name, wenn es
-                        einen gibt, sonst der Rohname — dieselbe Rangfolge
-                        wie überall (0117). */}
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {item.displayName}
-                    </span>
-                    {admin && !item.catalogVisible ? (
-                      <span className="shrink-0 rounded-sky-sm px-1.5 py-0.5 text-[0.6875rem] text-muted ring-1 ring-border/60">
-                        {copy.hiddenMark}
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {/*
-                    Die zweite Zeile beantwortet „welches genau?" — für ein
-                    Spiel die Plattform, für ein Portal die Modellnummer.
-                    Beides abgeleitet aus dem Rohnamen, nichts gespeichert,
-                    nichts geraten: ohne Treffer steht hier nichts.
-                  */}
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
-                    {detailVon(item) !== null ? (
-                      <>
-                        <span className="font-medium text-foreground">{detailVon(item)}</span>
-                        <span aria-hidden="true">·</span>
-                      </>
-                    ) : null}
-                    <span>{item.seriesLabel}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="font-mono">{item.skyId}</span>
-                  </div>
-                </li>
+                  item={item}
+                  seriesScope={seriesScopeOf(item, knownSeries).map(
+                    (code) => series.find((s) => s.code === code)?.label ?? code)}
+                  offers={offersFor(offerIdx, item.skyId)}
+                  admin={admin}
+                />
               ))}
-            </ul>
+            </div>
           )}
         </>
       )}

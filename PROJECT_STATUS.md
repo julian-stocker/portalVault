@@ -3756,6 +3756,84 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
+### Der Zubehörkatalog ist ein Kachelkatalog (2026-10-20)
+
+**Aus der Liste wird ein Raster** — dasselbe wie im Figurenkatalog: zwei
+Kacheln auf dem Telefon, drei ab `sm:`, vier ab `md:`, Klasse für Klasse
+dieselben Zeichen wie in `figure-grid.tsx`, damit die beiden Bereiche nicht
+auseinanderlaufen.
+
+**Eine eigene Kachel, und `FigureCard` bleibt unberührt.** Die Figurenkarte
+ist eine Sammelkarte mit Artwork-Vorlage, Element, Charakter, Variante,
+Besitzsiegel und Marktpreis (ADR-0038) — für ein Portal ist davon nichts
+wahr, und eine halb leere Sammelkarte sieht aus wie ein Fehler.
+`AccessoryCard` nimmt die Formensprache der Seite (dieselbe Bühne, dieselben
+Ecken, dieselben Ringe) und lässt die Vorlage weg.
+
+| | |
+|---|---|
+| **Bildbühne** | `aspect-[4/3]` auf `bg-plate` — dieselbe Bühne, auf der die Figurenfotos stehen. Steht eines Tages ein Produktfoto in `image_file`, fällt es genau hierhin, ohne dass sich am Raster etwas verschiebt |
+| **solange keines da ist** | die **Art in grossen gesperrten Lettern** — `SPIEL`, `PORTAL`. Schrift, kein Platzhalter: niemand hält es für eine Aufnahme. **Kein `<img>`, kein `next/image`, kein Kamerasymbol** |
+| **Kachelinhalt** | Name (zwei Zeilen, dann Auslassung), Plattform **oder** Modellnummer, Serie, SKY-ID in Mono — und die Angebotsstelle |
+| **kein Sammeln** | kein Knopf, kein Besitzsiegel, kein Fortschritt. Zubehör gehört nicht in die Sammlung, und ein Steuerelement, das es trotzdem anböte, wäre eine Falle |
+
+**Serienleiste wie im Figurenkatalog** — dieselbe Komponente
+(`FilterBar variant="nav"`), waagrecht scrollbar, 44 px, nie umbrechend. Mit
+einem echten Eintrag **„Alle Serien"**, und das ist der eine Unterschied:
+im Figurenkatalog ist immer ein Spiel gewählt, weil 561 Figuren auf einmal
+eine Wand sind — 60 Zubehörartikel sind keine.
+
+**Ein Portal kann für mehrere Serien gelten.** `SKY-0637` heisst
+`84721790 (SF, T, SC)`; `series_code` ist einwertig und trägt einen
+Fremdschlüssel, also steht dort `SF`. Die vollständige Zuordnung bleibt im
+**Rohnamen** und wird von dort gelesen (`seriesScopeOf`) — wer „Trap Team"
+wählt, bekommt das Portal zu sehen, und die Kachel schreibt
+*auch Trap Team, SuperChargers* daneben. **Geraten wird nichts:** nur
+Portale, jeder Eintrag muss ein **bekannter** Seriencode aus `fetchSeries()`
+sein, und es gilt **alles oder nichts** — passt ein Eintrag nicht, gilt
+allein `series_code`. Keine neue Spalte.
+
+**Suche, drei Filter, vier Sortierungen**, alle kombinierbar: Suche über
+Name, Rohname, Modellnummer, SKY-ID und Plattform; Filter nach Art, Serie
+und Plattform; Sortierung nach Serie (Vorgabe), Name, Plattform oder Art.
+Jede Sortierung ist **stabil und vollständig** — hinter dem gewählten
+Schlüssel immer Serie, Name, SKY-ID —, und keine verändert ihre Eingabe.
+Ein Auswahlfeld erscheint nur, wenn es mehr als eine Wahl hat.
+
+**Keine erfundene Plattformkompatibilität.** Ein Portal zeigt seine
+Modellnummer, nie eine Plattform: die Arbeitsmappe führt zwar
+Plattformköpfe über den Portalzeilen, aber die sind eine Lesehilfe und
+keine nachgewiesene Kompatibilität (ADR-0128), und gespeichert ist davon
+nichts.
+
+**Die Angebotsstelle ist da, obwohl sie heute immer leer ist.** `/zubehoer`
+liest `fetchOffers()` — **dieselbe Projektion**, die Shop und
+Figurenkatalog lesen, ein Aufruf für die Seite, keine zweite
+Angebotsverwaltung. `shop_offers()` schliesst Zubehör am Artikeltyp aus
+(`0135`), also sagt jede der 60 Kacheln **„Aktuell kein Angebot"**. Einen
+Kaufknopf gibt es nicht; dass es keinen gibt, hält ein Test fest.
+
+**Am laufenden Staging gemessen:** `/zubehoer` **60 `<article>`-Kacheln**,
+**60 × „Aktuell kein Angebot"**, 39 × Marke „Spiel" und 21 × „Portal", die
+Zählzeile „60 Artikel", Serienleiste mit „Alle Serien" aktiv, drei
+Auswahlfelder. `/` unverändert, **0 Zubehörmarken** im Figurenkatalog;
+`/shop` antwortet 200.
+
+**Noch offen, als Vorschlag niedergelegt:** ob Zubehör je **angeboten und
+verkauft** werden darf — `supabase/checks/accessory_offer_proposal.md`.
+Kurzfassung: die Angebotsarchitektur hat **ein** Tor
+(`is_shop_eligible()`), und jede Tür fragt es — Projektion, Verfügbarkeit,
+Warenkorb, **`create_order()`**, Betriebsansicht. Eine Lockerung am
+Artikeltyp wäre deshalb **keine Vorbereitung, sondern eine
+Veröffentlichung**: die 13 Lagerzeilen auf Spielen tragen alle schon
+`is_listed = true`, es fehlt nur der Preis. Vorgeschlagen ist stattdessen
+eine Freigabe **je Artikel** (`shop_released`, Vorgabe `false`) nach dem
+Muster von `catalog_visible`. **Nichts davon ist umgesetzt** — keine
+Migration geschrieben, keine Funktion geändert. Vorher zu entscheiden:
+Marketplace-Stopp (ADR-0021) für „private und gewerbliche Verkäufer",
+Alterskennzeichnung bei Spielen, steuerliche Bestätigung, und was „lose"
+bei einem Spiel heisst.
+
 ### Der Zubehörbereich im Katalog — jetzt ein Tab (2026-10-20)
 
 **Oberste Katalognavigation:** `Figuren` · `Zubehör`, als Pillenleiste über
@@ -3763,8 +3841,9 @@ der Serienleiste, auf beiden Seiten an derselben Stelle. Verweise auf `/` und
 `/zubehoer`, `aria-current="page"` für den aktiven, 44 px Tippfläche. Die
 Hauptnavigation behält ihre drei Ziele (ADR-0036).
 
-**Die Zeile zeigt jetzt vier Angaben:** Art (Einzahl — „Spiel", nicht
-„Spiele"), Name, dann **Plattform oder Modellnummer**, Serie und SKY-ID.
+**Die Kachel zeigt vier Angaben** (damals die Zeile): Art (Einzahl —
+„Spiel", nicht „Spiele"), Name, dann **Plattform oder Modellnummer**, Serie
+und SKY-ID.
 Beides abgeleitet aus dem **Rohnamen**, nichts gespeichert, nichts geraten:
 ohne Treffer bleibt das Feld leer. Alle 39 Spiele ergeben genau eine
 Plattform; die 21 Portale ergeben ihre Modellnummer. **Keine Bilder und kein
@@ -3785,8 +3864,8 @@ Hauptnavigation behält ihre drei Ziele (ADR-0036).
 
 | | |
 |---|---|
-| **Darstellung** | Zeilen mit Art, Name, Serie und SKY-ID. **Nicht** die Figurenkarte: Element, Charakter, Variante, Besitz und Preis hat ein Portal nicht, und eine halb leere Karte sieht aus wie fehlende Daten |
-| **Filter** | Art und Serie, jeder nur, wenn er mehr als eine Wahl hat |
+| **Darstellung** | **seit dem Kachelkatalog** ein Raster eigener Kacheln (Abschnitt oben); anfangs Zeilen. **Nicht** die Figurenkarte: Element, Charakter, Variante, Besitz und Preis hat ein Portal nicht, und eine halb leere Karte sieht aus wie fehlende Daten |
+| **Filter** | Art, Serie und Plattform, jeder nur, wenn er mehr als eine Wahl hat; dazu vier Sortierungen |
 | **Suche** | Anzeigename, Rohname und SKY-ID — bei einem Portal also die Modellnummer |
 | **Sichtbarkeit** | dieselbe Regel wie im Figurenkatalog: `is_active AND catalog_visible`, für Administratoren alles (`includeHidden`) |
 

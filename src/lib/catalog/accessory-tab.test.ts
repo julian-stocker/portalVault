@@ -32,6 +32,7 @@ const code = (p: string) =>
 
 const TABS = "src/components/catalog/area-tabs.tsx";
 const VIEW = "src/components/catalog/accessory-view.tsx";
+const CARD = "src/components/catalog/accessory-card.tsx";
 const CATALOG_VIEW = "src/components/catalog/catalog-view.tsx";
 const RELEASE = "supabase/operations/staging-portal-release.sql";
 const RELEASE_BACK = "supabase/rollback/R_portal_release.sql";
@@ -225,38 +226,49 @@ describe("2b. der Plattformfilter", () => {
 });
 
 /* ===================================================================== */
-describe("3. die Darstellung kommt ohne Bilder aus", () => {
+describe("3. die Darstellung kommt ohne Produktfotos aus", () => {
+  /*
+   * SEIT DER KACHELANSICHT steht die Darstellung einer EINZELNEN Zeile in
+   * `accessory-card.tsx`; `accessory-view.tsx` ist nur noch Leiste, Filter
+   * und Raster. Geprüft wird deshalb die Kachel — das Raster selbst und
+   * seine Bedienung stehen in `accessory-grid.test.ts`.
+   */
   it("keine Bildfläche, kein Platzhalter, der wie ein Produktfoto aussieht", () => {
-    const view = code(VIEW);
-    for (const bauteil of ["FigureImage", "AdminThumb", "<img", "next/image", "imageSrc"]) {
-      expect(view, bauteil).not.toContain(bauteil);
+    for (const datei of [VIEW, CARD]) {
+      const quelle = code(datei);
+      for (const bauteil of ["FigureImage", "AdminThumb", "<img", "next/image", "imageSrc"]) {
+        expect(quelle, `${datei} / ${bauteil}`).not.toContain(bauteil);
+      }
     }
   });
 
-  it("die Marke auf einer Zeile steht in der EINZAHL", () => {
-    /* „Spiele" auf einer einzelnen Zeile behauptet, sie sei mehrere. Die
+  it("die Marke auf EINER Kachel steht in der EINZAHL", () => {
+    /* „Spiele" auf einer einzelnen Kachel behauptet, sie sei mehrere. Die
        Mehrzahl gehört in den Filter, der eine Menge wählt. */
-    const view = code(VIEW);
-    expect(view).toContain("const markLabels = de.inventory.itemTypes;");
-    expect(view).toContain("const filterLabels = de.inventory.kinds;");
+    expect(code(CARD)).toContain("const markLabels = de.inventory.itemTypes;");
+    expect(code(VIEW)).toContain("const filterLabels = de.inventory.kinds;");
     expect(de.inventory.itemTypes.game).toBe("Spiel");
     expect(de.inventory.kinds.game).toBe("Spiele");
   });
 
-  it("stattdessen trägt die Zeile ihre Angaben", () => {
-    const view = code(VIEW);
-    expect(view).toContain("<TypeMark");          // Art
-    expect(view).toContain("item.displayName");   // Name
-    expect(view).toContain("item.seriesLabel");   // Serie
-    expect(view).toContain("detailVon(item)");    // Plattform oder Modell
-    expect(view).toContain("item.skyId");
+  it("stattdessen trägt die Kachel ihre Angaben", () => {
+    const card = code(CARD);
+    expect(card).toContain("markLabels[art]");    // Art
+    expect(card).toContain("item.displayName");   // Name
+    expect(card).toContain("item.seriesLabel");   // Serie
+    expect(card).toContain("accessoryDetail");    // Plattform oder Modell
+    expect(card).toContain("item.skyId");
   });
 
-  it("zwei Zeilen, und auf dem Telefon bricht nichts waagrecht aus", () => {
-    const view = code(VIEW);
-    expect(view).toContain("flex-wrap");
-    expect(view).toContain("truncate");
-    expect(view).toContain("lg:grid-cols-2");
+  it("auf dem Telefon bricht nichts waagrecht aus", () => {
+    /* Der Name bricht auf zwei Zeilen um und wird dann abgekürzt; jede
+       einzeilige Angabe darunter schneidet ab, statt die Kachel zu
+       dehnen. Die Filterreihe bricht um. */
+    const card = code(CARD);
+    expect(card).toContain("line-clamp-2");
+    expect(card).toContain("truncate");
+    expect(card).toContain("min-w-0");
+    expect(code(VIEW)).toContain("flex-wrap");
   });
 });
 

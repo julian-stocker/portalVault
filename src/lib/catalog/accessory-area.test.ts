@@ -35,6 +35,7 @@ const code = (p: string) =>
 const QUERIES = "src/lib/catalog/queries.ts";
 const COLLECTION = "src/lib/collection/queries.ts";
 const VIEW = "src/components/catalog/accessory-view.tsx";
+const CARD = "src/components/catalog/accessory-card.tsx";
 const PAGE = "src/app/(public)/zubehoer/page.tsx";
 const CATALOG_VIEW = "src/components/catalog/catalog-view.tsx";
 
@@ -152,16 +153,48 @@ describe("der Zubehörbereich zeigt nur, was freigegeben ist", () => {
     expect(page).toContain("const admin = await isAdmin();");
   });
 
-  it("sie fragt weder Sammlung noch Angebote", () => {
-    /* Beide Antworten lauten für Zubehör nein; eine Anzeige davon wäre ein
-       Versprechen, das die Datenbank ablehnt. */
+  it("sie fragt KEINE Sammlung — und das ist der bindende Teil", () => {
+    /*
+     * Für Zubehör lautet die Antwort auf „besitzt du das?" nicht nein,
+     * sondern: die Frage gibt es nicht (ADR-0128). Ein Besitzsiegel wäre
+     * ein Versprechen, das `isCollectible()` ablehnt, und ein Sammelknopf
+     * eine Falle — er sähe aus, als täte er etwas.
+     */
+    expect(code(PAGE)).not.toContain("fetchOwnedSkyIds");
+    for (const datei of [VIEW, CARD]) {
+      const quelle = code(datei);
+      for (const bauteil of ["fetchOwnedSkyIds", "setCollected", "owned", "CollectChip"]) {
+        expect(quelle, `${datei} / ${bauteil}`).not.toContain(bauteil);
+      }
+    }
+  });
+
+  it("das Angebot DAGEGEN wird gefragt — aus derselben Projektion wie der Shop", () => {
+    /*
+     * Es ist heute leer, jedes Mal: `shop_offers()` ruft
+     * `is_shop_eligible()`, und das verlangt `item_type = 'figure'`
+     * (`0135`). Gefragt wird trotzdem, und zwar `fetchOffers()` — DIE
+     * Projektion, die auch Shop und Figurenkatalog lesen. Eine zweite
+     * Angebotsverwaltung für Zubehör gibt es nicht und soll es nicht
+     * geben; fällt die Produktentscheidung, füllt sich dieselbe Stelle.
+     */
     const page = code(PAGE);
-    expect(page).not.toContain("fetchOwnedSkyIds");
-    expect(page).not.toContain("fetchOffers");
-    const view = code(VIEW);
-    expect(view).not.toContain("setCollected");
-    expect(view).not.toContain("addToCart");
-    expect(view).not.toContain("formatPrice");
+    expect(page).toContain("fetchOffers()");
+    expect(page).toContain("offerRecord(offers)");
+    expect(page).not.toContain("shop_offers");        // keine eigene Abfrage
+    /* Und die Kachel sagt das Fehlen, statt eine Lücke zu lassen. */
+    expect(de.accessories.noOffer).toBe("Aktuell kein Angebot");
+    expect(code(CARD)).toContain("copy.noOffer");
+  });
+
+  it("aber kein Weg vom Zubehör in den Warenkorb", () => {
+    /* Sichtbar heisst nicht käuflich. Solange `is_shop_eligible()` Zubehör
+       ablehnt, darf keine Kachel einen Kaufknopf tragen. */
+    for (const datei of [VIEW, CARD]) {
+      for (const bauteil of ["addToCart", "AddToCart", "/warenkorb", "CartButton"]) {
+        expect(code(datei), `${datei} / ${bauteil}`).not.toContain(bauteil);
+      }
+    }
   });
 
   it("und benutzt die Figurenkarte NICHT", () => {
