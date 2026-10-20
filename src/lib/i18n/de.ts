@@ -3508,7 +3508,10 @@ export const de = {
          Vergangenheit, also steht hier ein Strich. */
       lineSeriesUnknown: "—",
       lineNoImage: "Kein Bild",
-      conditionLoose: "Lose",
+      /* Der EINE SkyIsles-Zustand (ADR-0130). `loose` bleibt der
+         gespeicherte Altwert; auf dem Schirm heisst er „Gebraucht". */
+      conditionLoose: "Gebraucht",
+      /* Nur noch historisch: Bestellzeilen von vor 0028/0108. */
       conditionBoxed: "OVP",
 
       /**
@@ -3953,7 +3956,9 @@ export const de = {
       "Spiele, Portale und Zubehör werden nicht öffentlich angeboten. Bestand und "
       + "Historie werden geführt wie bei jeder Figur; Preis und Shopfreigabe gibt es nicht.",
     condition: "Zustand",
-    conditionLoose: "Lose",
+    /* Der EINE SkyIsles-Zustand (ADR-0130) — siehe `shop.conditionStandard`. */
+    conditionLoose: "Gebraucht",
+    /* Nur noch historisch: Lagerzeilen von vor `0108`. */
     conditionBoxed: "OVP",
     quantity: "Bestand",
     reserved: "Reserviert",
@@ -4098,8 +4103,32 @@ export const de = {
     offersFromLabel: "Angebote ab",
     offersFor: (name: string) => `Angebote für ${name} ansehen`,
     offerFrom: (price: string) => `ab ${price}`,
-    conditionLoose: "Lose",
+    /*
+     * DER EINE ZUSTAND (ADR-0130).
+     *
+     * SkyIsles handelt ausschliesslich mit gebrauchter, vollständig
+     * funktionsfähiger Ware in mindestens gutem Zustand. Es gibt keine
+     * Zustandsklassen, keine Auswahl und kein „Wie neu" — ein besser
+     * erhaltener Artikel erfüllt denselben Standard.
+     *
+     * Der gespeicherte Wert bleibt `loose`; das ist ein interner Altwert,
+     * der keine Datenmigration rechtfertigt. Auf dem Schirm hieß er
+     * bis 2026-10-20 „Lose", was zwei falsche Dinge nahelegte: dass es
+     * andere Zustände gäbe, und dass „lose" etwas über die Verpackung
+     * sagt. Beides ist nicht so — was geliefert wird, sagt allein der
+     * Lieferumfang.
+     */
+    conditionLoose: "Gebraucht",
+    /* Nur noch historisch: Bestellzeilen und Lagerzeilen von vor `0108`. */
     conditionBoxed: "OVP",
+    /** Der Standard in einem Satz — die Überschrift. */
+    conditionStandard: "Gebraucht · mindestens guter Zustand · voll funktionsfähig",
+    /** Und ausgeschrieben, für die Stelle, an der jemand nachliest. */
+    conditionStandardHint:
+      "SkyIsles verkauft ausschließlich gebrauchte Artikel in mindestens gutem Zustand, "
+      + "vollständig funktionsfähig. Normale leichte Gebrauchsspuren sind möglich. "
+      + "Defekte, beschädigte oder stark abgenutzte Artikel werden nicht angeboten. "
+      + "Es gibt keine Zustandsklassen — was geliefert wird, steht beim Lieferumfang.",
     /*
      * WAS IM PAKET LIEGT — eine eigene Angabe neben dem Zustand (0139).
      *
@@ -4113,9 +4142,12 @@ export const de = {
     deliveryScopes: {
       disc_only:   "Nur Spielmedium",
       disc_manual: "Spielmedium mit Anleitung",
-      disc_case:   "Mit Originalhülle",
+      disc_case:   "Spielmedium mit Originalhülle",
       portal_only: "Nur Portal",
-      portal_cable: "Portal mit USB-Kabel",
+      /* „mit Kabel", nicht „mit USB-Kabel": nicht jedes Portal ist ein
+         USB-Portal, und eine Angabe, die für einen Teil des Bestands falsch
+         wäre, ist schlechter als eine, die für alle stimmt. */
+      portal_cable: "Portal mit Kabel",
     } as Record<string, string>,
     /** Die Überschrift, unter der die Angabe am Angebot steht. */
     deliveryScopeLabel: "Lieferumfang",

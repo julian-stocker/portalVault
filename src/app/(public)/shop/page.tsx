@@ -106,6 +106,21 @@ export default async function ShopPage({
         </p>
       </div>
 
+      {/*
+        DER EINE ZUSTANDSSTANDARD, einmal auf der Seite (ADR-0130).
+
+        SkyIsles handelt ausschliesslich mit gebrauchter, voll
+        funktionsfaehiger Ware in mindestens gutem Zustand. Es gibt keine
+        Zustandsklassen und keine Auswahl — deshalb steht der Satz EINMAL
+        hier oben und nicht als Etikett an jedem Angebot. An der einzelnen
+        Zeile steht nur noch das Wort „Gebraucht", und das ist dann keine
+        Klasse unter mehreren, sondern der Standard.
+      */}
+      <div className="mt-5 rounded-sky-lg bg-surface/70 px-4 py-3 ring-1 ring-border/70">
+        <p className="text-sm font-medium">{de.shop.conditionStandard}</p>
+        <p className="mt-1 text-sm text-muted">{de.shop.conditionStandardHint}</p>
+      </div>
+
       <div className="mt-7">
         <ShopView
           entries={entries}

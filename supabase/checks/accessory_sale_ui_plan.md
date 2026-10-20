@@ -47,7 +47,7 @@ bei Figuren nicht gibt.
 |---|---|---|
 | Kopf | Name, Artikeltyp, SKY-ID, Plattform/Modell | wie heute |
 | Bestand | Menge, verfügbar, Bewegungen, Einkaufshistorie | **unverändert** |
-| **Lieferumfang** | Auswahl aus `scopesFor(itemType)` — drei Werte für Spiele, zwei für Portale | `seller_set_delivery_scope()` |
+| **Lieferumfang** | Auswahl aus `scopesFor(itemType)` — drei Werte für Spiele, zwei für Portale, **keine** für Figuren | `seller_set_delivery_scope()` |
 | **Verkaufspreis** | wie bei Figuren | `set_shop_listing()` |
 | **Im Shop** | `is_listed`, wie bei Figuren | `set_shop_listing()` |
 | **Zum Verkauf freigegeben** | der neue Schalter | `seller_set_sale_release()` |
@@ -57,9 +57,13 @@ bei Figuren nicht gibt.
 getrennt: wer sie in einen Aufruf legt, gibt irgendwann beim Preispflegen
 versehentlich frei.
 
-**`Mit Originalhülle` erscheint an einer losen Position nicht** —
-`scopeFitsCondition()` filtert sie aus der Auswahl, bevor der CHECK es tut.
-Ein Wert, von dem schon bekannt ist, dass er abgelehnt wird, ist keine Wahl.
+**Alle fünf Werte stehen zur Wahl** — `Spielmedium mit Originalhülle`
+eingeschlossen. Die frühere Kopplung an `condition` ist aufgehoben
+(ADR-0130): ein Spiel mit Hülle ist genauso verkäuflich wie eines ohne.
+
+**Keine Zustandsauswahl.** Es gibt einen Zustand, und eine Auswahl mit einem
+Wert ist keine Auswahl. Die Karte nennt ihn als Wort („Gebraucht"); den
+Standard im Klartext trägt `/shop` einmal für die ganze Seite.
 
 ### 1c. Der Satz „warum noch nicht"
 
@@ -78,6 +82,10 @@ werden einmal übersetzt (`de.ts`), nicht an der Karte zusammengebaut:
 | `delivery scope missing` | Es ist nicht angegeben, was geliefert wird. |
 | `not released for sale` | Diese Position ist nicht zum Verkauf freigegeben. |
 
+Dazu ein Fall, den die Diagnose **nicht** meldet, weil er die Eignung nicht
+berührt: **kein Preis**. `seller_set_sale_release()` lehnt ihn ab, und die
+Karte zeigt ihn an derselben Stelle — aus dem Preisfeld, das ohnehin da ist.
+
 **Der Grund wird gelesen, nicht nachgerechnet.** Eine zweite Herleitung in
 TypeScript wäre eine zweite Wahrheit.
 
@@ -94,7 +102,7 @@ TypeScript wäre eine zweite Wahrheit.
 
 Dieselben neun Fälle wie bisher, dazu: ein Schalter erscheint nur, wenn er
 wirkt · eine Figur zeigt keinen Freigabeschalter und keine
-Lieferumfangsauswahl · `Mit Originalhülle` fehlt an einer losen Position ·
+Lieferumfangsauswahl · **alle fünf** Lieferumfänge sind wählbar ·
 jeder Grund hat genau einen Satz und kein Satz steht ohne Grund da.
 
 ---
@@ -124,7 +132,7 @@ Marktpreis.
 | Abschnitt | Inhalt |
 |---|---|
 | Kopf | Name, Artikeltyp, Serie(n), Plattform **oder** Modellnummer, SKY-ID |
-| Produktangaben | **USK-Kennzeichnung** (bei Spielen, Pflicht), Zustand, **Lieferumfang** |
+| Produktangaben | **USK-Kennzeichnung** (bei Spielen, Pflicht), der Zustandsstandard im Klartext, **Lieferumfang** |
 | Angebot | `OfferPanel` — **dieselbe Komponente** wie bei Figuren, mit `AddToCartButton` |
 | Versandhinweis | `ShippingNote`, wie bei Figuren |
 | ohne Angebot | ein ruhiger Satz, kein deaktivierter Knopf (V7) |

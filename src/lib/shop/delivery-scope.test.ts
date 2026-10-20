@@ -8,10 +8,11 @@
  * im TypeScript-Vokabular und im CHECK der Tabelle.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   DELIVERY_SCOPES, GAME_SCOPES, PORTAL_SCOPES,
-  deliveryScopeLabel, isDeliveryScope, scopeFitsCondition, scopesFor,
+  deliveryScopeLabel, isDeliveryScope, scopesFor,
 } from "./delivery-scope.ts";
 import { code, latestFunction, migrationSource } from "@/test-support/migrations";
 import { de } from "@/lib/i18n/de";
@@ -54,8 +55,13 @@ describe("1. dasselbe Vokabular in SQL und in TypeScript", () => {
       expect(deliveryScopeLabel(s)).toBe(de.shop.deliveryScopes[s]);
     }
     expect(de.shop.deliveryScopes.disc_only).toBe("Nur Spielmedium");
-    expect(de.shop.deliveryScopes.disc_case).toBe("Mit Originalhülle");
-    expect(de.shop.deliveryScopes.portal_cable).toBe("Portal mit USB-Kabel");
+    expect(de.shop.deliveryScopes.disc_manual).toBe("Spielmedium mit Anleitung");
+    expect(de.shop.deliveryScopes.disc_case).toBe("Spielmedium mit Originalhülle");
+    expect(de.shop.deliveryScopes.portal_only).toBe("Nur Portal");
+    /* „mit Kabel", nicht „mit USB-Kabel": nicht jedes Portal ist ein
+       USB-Portal, und eine für einen Teil des Bestands falsche Angabe ist
+       schlechter als eine, die für alle stimmt. */
+    expect(de.shop.deliveryScopes.portal_cable).toBe("Portal mit Kabel");
     /* Kein Wort steht ohne Wert da. */
     expect(Object.keys(de.shop.deliveryScopes).sort()).toEqual([...DELIVERY_SCOPES].sort());
   });
@@ -71,40 +77,127 @@ describe("1. dasselbe Vokabular in SQL und in TypeScript", () => {
 });
 
 /* ===================================================================== */
-describe("2. „mit Originalhülle“ und „lose“ widersprechen einander", () => {
-  it("die Anwendung bietet es an einer losen Position nicht an", () => {
-    expect(scopeFitsCondition("disc_case", "loose")).toBe(false);
-    expect(scopeFitsCondition("disc_case", "boxed")).toBe(true);
-    /* Alles andere ist mit beidem verträglich. */
-    for (const s of DELIVERY_SCOPES) {
-      if (s === "disc_case") continue;
-      expect(scopeFitsCondition(s, "loose"), s).toBe(true);
-    }
+describe("2. ein Spiel MIT Originalhülle ist genauso verkäuflich (ADR-0130)", () => {
+  it("es gibt KEINE Kopplung an den Zustand — in der Tabelle nicht", () => {
+    /*
+     * Die wichtigste Zusicherung dieser Datei. Ein früherer Entwurf hatte
+     * `disc_case` an `condition <> 'loose'` gehängt; das hätte ein Spiel
+     * mit Hülle unverkäuflich gemacht. Der Betreiber hat entschieden, dass
+     * „Gebraucht" nie heißen darf, dass die Hülle fehlt.
+     */
+    const text = code(M139);
+    expect(text).not.toContain("add constraint shop_inventory_case_is_not_loose");
+    expect(text).not.toContain("delivery_scope is distinct from 'disc_case'");
+    /* Der Name kommt nur noch einmal vor — im Wächter, der das
+       Wiedereinführen abfängt. */
+    expect(text.match(/shop_inventory_case_is_not_loose/g)).toHaveLength(1);
+    /* Genau EIN CHECK auf der Spalte, und der sichert nur die Wertemenge. */
+    expect(text.match(/add constraint shop_inventory_delivery_scope\w*/g))
+      .toEqual(["add constraint shop_inventory_delivery_scope_known"]);
   });
 
-  it("und die TABELLE lässt es gar nicht erst zu", () => {
-    /* Der CHECK ist die Wahrheit; die Funktion oben erspart nur die
-       unverständliche Fehlermeldung. */
-    expect(code(M139)).toContain("add constraint shop_inventory_case_is_not_loose");
-    expect(code(M139)).toContain(
-      "check (delivery_scope is distinct from 'disc_case' or condition <> 'loose')");
-  });
-
-  it("die Setzfunktion sagt vorher, was der CHECK sonst hinterher sagt", () => {
+  it("und in der Setzfunktion nicht", () => {
     const fn = code(latestFunction("seller_set_delivery_scope").body);
-    expect(fn).toContain("p_scope = 'disc_case'");
-    expect(fn).toContain("public.v1_sale_condition()");
+    expect(fn).not.toContain("v1_sale_condition");
+    expect(fn).not.toContain("p_scope = 'disc_case'");
+    /* Sie liest `condition` überhaupt nur, um die Position zu finden. */
+    expect(fn).toContain("i.condition = p_condition");
   });
 
-  it("der ZUSTAND bleibt unverändert — nichts wird umgedeutet", () => {
-    /* `condition` behält sein Vokabular und seinen CHECK. `0139` fasst
-       weder `v1_sale_condition()` noch `shop_inventory_condition_known`
-       an. Für ein Spiel heißt `loose` weiterhin, was es heißt. */
+  it("die Migration prüft sogar nach, dass die Kopplung fort ist", () => {
+    /* Ein Wächter gegen das Wiedereinführen: stünde der CHECK irgendwann
+       wieder da, bräche `0139` ab. */
+    expect(M139).toContain("die aufgehobene Kopplung disc_case/loose steht noch");
+  });
+
+  it("der ZUSTAND selbst bleibt unangetastet", () => {
+    /* `condition` behält Vokabular und CHECK. `0139` fasst weder
+       `v1_sale_condition()` noch `shop_inventory_condition_known` an —
+       keine riskante Datenmigration wegen einer Bezeichnung. */
     const text = code(M139);
     expect(text).not.toContain("create or replace function public.v1_sale_condition");
     expect(text).not.toContain("shop_inventory_condition_known");
-    expect(text).not.toContain("drop constraint");
     expect(text).not.toContain("set condition =");
+    expect(text).not.toContain("alter column condition");
+  });
+});
+
+/* ===================================================================== */
+describe("2b. EIN Zustand für ganz SkyIsles (ADR-0130)", () => {
+  it("der gespeicherte Wert bleibt `loose`, das Wort heißt „Gebraucht“", () => {
+    /*
+     * Keine Datenmigration wegen einer Bezeichnung: `loose` steht in
+     * Bestellungen, Lagerzeilen, Belegen und Orderbuchzeilen. Umbenannt
+     * wird allein die Anzeige.
+     */
+    expect(de.shop.conditionLoose).toBe("Gebraucht");
+    expect(de.inventory.conditionLoose).toBe("Gebraucht");
+    expect(de.admin.orders.conditionLoose).toBe("Gebraucht");
+  });
+
+  it("„OVP“ bleibt für historische Zeilen lesbar", () => {
+    /* Eine alte Bestellposition dokumentiert weiter, dass sie OVP war —
+       sie wird nicht umgeschrieben (`0108`). */
+    expect(de.shop.conditionBoxed).toBe("OVP");
+    expect(de.inventory.conditionBoxed).toBe("OVP");
+  });
+
+  it("der Standard steht als Satz da, nicht als Zustandsklasse", () => {
+    expect(de.shop.conditionStandard)
+      .toBe("Gebraucht · mindestens guter Zustand · voll funktionsfähig");
+    for (const wort of ["gebrauchte", "mindestens gutem Zustand",
+      "vollständig funktionsfähig", "keine Zustandsklassen"]) {
+      expect(de.shop.conditionStandardHint.toLowerCase(), wort)
+        .toContain(wort.toLowerCase());
+    }
+  });
+
+  it("und es gibt keine zweite Zustandsklasse im Wortschatz", () => {
+    /* „Akzeptabel", „Sehr gut", „Wie neu" — keines davon ist ein Zustand
+       bei SkyIsles, und keines steht in der Oberfläche. */
+    const alleWoerter = JSON.stringify(de);
+    for (const klasse of ["Akzeptabel", "Sehr gut", "Wie neu", "Neuwertig"]) {
+      expect(alleWoerter, klasse).not.toContain(`"${klasse}"`);
+    }
+  });
+});
+
+/* ===================================================================== */
+describe("2c. der Marktpreismaßstab ist festgelegt und bleibt lesbar", () => {
+  const adr = readFileSync("docs/DECISIONS.md", "utf8");
+  const teil = adr.slice(adr.indexOf("## ADR-0130"));
+
+  it("ein Referenzpreis je Artikel, auf denselben Zustand bezogen", () => {
+    /*
+     * Eine Festlegung, die nur in Prosa lebt, verschwindet beim nächsten
+     * Umbau. Diese hier entscheidet, was ein Marktpreis BEDEUTET — und
+     * damit, ob ein abgeleiteter Angebotspreis stimmt.
+     */
+    expect(teil).toContain("Referenzpreis je Katalogartikel");
+    expect(teil).toContain("Keine Preise nach Zustandsklassen");
+  });
+
+  it("und nennt den Referenzlieferumfang je Artikelart", () => {
+    for (const bezug of ["die einzelne Figur", "`disc_case`", "`portal_cable`"]) {
+      expect(teil, bezug).toContain(bezug);
+    }
+  });
+
+  it("die Preisregel selbst bleibt unangetastet", () => {
+    /* `shop_price()` wird von `0139` nicht neu geschrieben — ein
+       Preisstandard ist eine Aussage über die Bedeutung einer Zahl, keine
+       neue Rechnung. */
+    expect(code(M139)).not.toContain("create or replace function public.shop_price");
+    expect(latestFunction("shop_price").file).toBe("0007_shop_pricing_and_images.sql");
+  });
+
+  it("aber die Freigabe verlangt, dass eine Zahl herauskommt", () => {
+    const fn = code(latestFunction("seller_set_sale_release").body);
+    expect(fn).toContain("public.shop_price(i.sale_price, s.market_price, st.price_percentage)");
+    expect(fn).toContain("has no price");
+    /* KEIN Bestand: „freigegeben, aber ausverkauft" ist gewollt. */
+    expect(fn).not.toContain("available_quantity");
+    expect(fn).not.toContain("i.quantity");
   });
 });
 

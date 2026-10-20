@@ -1410,7 +1410,8 @@ fragen dann `is_position_sellable(inventory_id)`; für eine Figur ruft es
 `is_shop_eligible()` auf und ändert nichts. **Katalogsichtbarkeit bewirkt
 auch dann keine Verkaufsfreigabe** — sie ist eine von sechs notwendigen
 Bedingungen (Artikeltyp · aktiv · katalogsichtbar · USK bei Spielen ·
-Lieferumfang angegeben · freigegeben). Die 13 Lagerzeilen auf Spielen, die seit jeher `is_listed =
+Lieferumfang angegeben · freigegeben), und die Freigabe selbst verlangt
+zusätzlich einen gültigen Preis. Die 13 Lagerzeilen auf Spielen, die seit jeher `is_listed =
 true` und einen Preis tragen, bleiben durch den Vorgabewert draußen
 (ADR-0129).
 

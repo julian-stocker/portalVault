@@ -2118,10 +2118,19 @@ async function main(): Promise<void> {
       /* Und eine erfundene Einstufung laesst der CHECK nicht zu. */
       const unsinn = await fehlschlag(db,
         "update public.skylanders set usk_rating = 7 where sky_id = 'PROBE-4';");
-      /* UND „mit Originalhuelle" vertraegt sich nicht mit `loose`. */
+      /*
+       * UND „mit Originalhuelle" IST ZULAESSIG — auch an einer Position
+       * mit dem einen SkyIsles-Zustand (ADR-0130). Ein Spiel mit Huelle
+       * ist genauso verkaeuflich wie eines ohne; die frueher hier
+       * gepruefte Kopplung ist aufgehoben.
+       */
       const huelleLose = await fehlschlag(db,
         "update public.shop_inventory set delivery_scope = 'disc_case' "
         + "where sky_id = 'PROBE-4';");
+      const mitHuelleAngebot = await wert(db, ZUBEHOERANGEBOTE);
+      const huelleImAngebot = await wert(db,
+        "select coalesce(delivery_scope, '(null)') as w from public.shop_offers() "
+        + "where sky_id = 'PROBE-4'");
       /* Ein Portalvokabular an einem Spiel laesst der Tabellen-CHECK zwar zu
          (er kennt den Artikeltyp nicht) — die Setzfunktion nicht, siehe P37. */
       const unbekannterUmfang = await fehlschlag(db,
@@ -2129,13 +2138,15 @@ async function main(): Promise<void> {
         + "where sky_id = 'PROBE-4';");
 
       probe.push({
-        name: "P36 ein freigegebenes Spiel OHNE USK-Kennzeichnung bleibt draussen",
+        name: "P36 ohne USK bleibt ein Spiel draussen — mit Originalhuelle ist es verkaeuflich",
         ok: ohneUsk === "0" && mitUsk === "1" && unsinn !== null
-          && huelleLose !== null && unbekannterUmfang !== null,
+          && huelleLose === null && mitHuelleAngebot === "1"
+          && huelleImAngebot === "disc_case" && unbekannterUmfang !== null,
         sagt: `ohne USK ${ohneUsk} Angebote (Grund: ${grundOhne}), mit USK 6 ${mitUsk}; `
           + `USK 7 abgelehnt (${unsinn === null ? "NEIN — der CHECK fehlt" : "ja"}), `
-          + `disc_case an loser Position abgelehnt `
-          + `(${huelleLose === null ? "NEIN" : "ja"}), unbekannter Lieferumfang abgelehnt `
+          + `mit Originalhuelle ${huelleLose === null ? "zulaessig" : `ABGELEHNT: ${huelleLose}`} `
+          + `→ ${mitHuelleAngebot} Angebot mit Lieferumfang ${huelleImAngebot}, `
+          + `unbekannter Lieferumfang abgelehnt `
           + `(${unbekannterUmfang === null ? "NEIN" : "ja"})`,
       });
     }
@@ -2171,6 +2182,7 @@ async function main(): Promise<void> {
         "select public.seller_set_delivery_scope('PROBE-2', 'loose', 'disc_only');");
       const umfangFalsch = await fehlschlag(db,
         "select public.seller_set_delivery_scope('SKY-0615', 'loose', 'disc_only');");
+      /* „Mit Originalhuelle" ist zulaessig und fuehrt zu einem Angebot. */
       const umfangHuelle = await fehlschlag(db,
         "select public.seller_set_delivery_scope('PROBE-4', 'loose', 'disc_case');");
       const portalOhneUmfang = await fehlschlag(db,
@@ -2182,10 +2194,25 @@ async function main(): Promise<void> {
         "select public.seller_set_sale_release('SKY-0615', 'loose', true);");
       const angebote = await wert(db, ZUBEHOERANGEBOTE);
 
+      /* ---- ein Spiel MIT Originalhuelle ist verkaeuflich (ADR-0130) ---- */
+      await db.exec("update public.skylanders set usk_rating = 6 where sky_id = 'PROBE-4';");
+      const spielMitHuelle = await fehlschlag(db,
+        "select public.seller_set_sale_release('PROBE-4', 'loose', true);");
+      const angeboteMitHuelle = await wert(db, ZUBEHOERANGEBOTE);
+      await db.exec("select public.seller_set_sale_release('PROBE-4', 'loose', false);");
+
+      /* ---- ohne Preis keine Freigabe ---- */
+      await db.exec("update public.shop_inventory set sale_price = null, is_listed = false "
+        + "where sky_id = 'SKY-0615';");
+      await db.exec("select public.seller_set_sale_release('SKY-0615', 'loose', false);");
+      const ohnePreis = await fehlschlag(db,
+        "select public.seller_set_sale_release('SKY-0615', 'loose', true);");
+      await db.exec("update public.shop_inventory set sale_price = 24.90, is_listed = true "
+        + "where sky_id = 'SKY-0615';");
+      await db.exec("select public.seller_set_sale_release('SKY-0615', 'loose', true);");
+
       /* ---- und ein Spiel ab 18 wird gar nicht erst freigegeben ---- */
       await db.exec("update public.skylanders set usk_rating = 18 where sky_id = 'PROBE-4';");
-      await db.exec("update public.shop_inventory set delivery_scope = 'disc_only' "
-        + "where sky_id = 'PROBE-4';");
       const ab18 = await fehlschlag(db,
         "select public.seller_set_sale_release('PROBE-4', 'loose', true);");
       /* Das Zuruecknehmen eines Spiels geht AUCH ohne USK — ein Riegel, der
@@ -2197,17 +2224,21 @@ async function main(): Promise<void> {
     probe.push({
         name: "P37 die Freigabe- und Lieferumfangsfunktion lehnen ab, was sie ablehnen muessen",
         ok: figur !== null && spielOhneUsk !== null && unbekannt !== null
-          && umfangFigur !== null && umfangFalsch !== null && umfangHuelle !== null
+          && umfangFigur !== null && umfangFalsch !== null && umfangHuelle === null
           && portalOhneUmfang !== null && umfangOk === null
-          && portal === null && angebote === "1" && ab18 !== null && abschalten === null,
+          && portal === null && angebote === "1"
+          && spielMitHuelle === null && angeboteMitHuelle === "2"
+          && ohnePreis !== null && ab18 !== null && abschalten === null,
         sagt: `Freigabe: Figur ${sagtNein(figur)}, Spiel ohne USK ${sagtNein(spielOhneUsk)}, `
           + `unbekannte Position ${sagtNein(unbekannt)}, Portal ohne Lieferumfang `
           + `${sagtNein(portalOhneUmfang)}, Spiel ab USK 18 ${sagtNein(ab18)} · `
-          + `Lieferumfang: Figur ${sagtNein(umfangFigur)}, Spielvokabular am Portal `
-          + `${sagtNein(umfangFalsch)}, disc_case an loser Position ${sagtNein(umfangHuelle)}, `
+          + `ohne Preis ${sagtNein(ohnePreis)} · Lieferumfang: Figur ${sagtNein(umfangFigur)}, `
+          + `Spielvokabular am Portal ${sagtNein(umfangFalsch)}, Originalhuelle `
+          + `${umfangHuelle === null ? "zulaessig" : `ABGELEHNT: ${umfangHuelle}`}, `
           + `portal_cable ${umfangOk === null ? "gesetzt" : `ABGELEHNT: ${umfangOk}`} · `
           + `danach Portal ${portal === null ? "freigegeben" : `ABGELEHNT: ${portal}`} → `
-          + `${angebote} Angebot; Abschalten ohne USK ${abschalten === null ? "geht" : "GESPERRT"}`,
+          + `${angebote} Angebot, mit dem Spiel MIT Huelle ${angeboteMitHuelle}; `
+          + `Abschalten ohne USK ${abschalten === null ? "geht" : "GESPERRT"}`,
       });
     }
   }

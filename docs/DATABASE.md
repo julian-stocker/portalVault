@@ -457,6 +457,13 @@ Vorgabewert für **jeden** Erzeugungsweg.
 | `is_listed = true` | für den Shop freigegeben. **Nicht** „auf Lager". |
 | `is_listed = false` | bewusster Ausschluss: Bestand behalten, hier nicht verkaufen. |
 
+**`condition` ist seit ADR-0130 keine Klasse, sondern ein Standard.** SkyIsles handelt
+ausschließlich mit gebrauchter, voll funktionsfähiger Ware in mindestens gutem Zustand; es
+gibt keine Zustandsklassen und keine Auswahl. Der gespeicherte Wert bleibt `loose` — ein
+interner Altwert, der in Bestellungen, Belegen und Orderbuchzeilen steht und **keine**
+Datenmigration rechtfertigt —, auf dem Schirm heißt er **„Gebraucht"**. `boxed` bleibt
+ausschließlich historisch lesbar.
+
 `public.is_shop_eligible(sky_id)` (`stable`) beantwortet „gehört diese Figur überhaupt in den
 Shop": aktiv, `catalog_visible`, sammelbar. Aufgerufen von `shop_offers()` **und** von der
 einmaligen Freigabe in `0008` — dieselbe Regel, nicht zwei Kopien. Sie sagt nichts über Bestand
@@ -527,11 +534,14 @@ gar nicht erst freigegeben** — ohne Altersverifikation gibt es keinen zulässi
 | `portal_only` | Portal | Nur Portal |
 | `portal_cable` | Portal | Portal mit USB-Kabel |
 
-Zwei CHECKs: `shop_inventory_delivery_scope_known` sichert die Wertemenge,
-`shop_inventory_case_is_not_loose` verbietet `disc_case` an einer `loose`-Position — die
-beiden Aussagen dürfen einander nicht widersprechen. Welcher Wert zu welcher **Artikelart**
-passt, steht in `seller_set_delivery_scope()`, weil `item_type` auf einer anderen Tabelle
-liegt.
+**EIN** CHECK: `shop_inventory_delivery_scope_known` sichert die Wertemenge. Eine Kopplung an
+`condition` gibt es **nicht** — der Zustand sagt bei SkyIsles nur, dass der Artikel gebraucht,
+mindestens gut erhalten und voll funktionsfähig ist (ADR-0130), über Verpackung sagt er
+nichts. **Ein Spiel mit Originalhülle ist deshalb genauso verkäuflich wie eines ohne.**
+`0139` bricht sogar ab, wenn ein CHECK `shop_inventory_case_is_not_loose` wieder dasteht.
+
+Welcher Wert zu welcher **Artikelart** passt, steht in `seller_set_delivery_scope()`, weil
+`item_type` auf einer anderen Tabelle liegt.
 
 **Die Angabe ist öffentlich:** `shop_offers()` liefert sie seit `0139` als **fünfte Spalte**
 (NULL für jede Figur). `shop_inventory.note` bleibt intern und wird nicht angefasst.

@@ -81,7 +81,10 @@ describe("die Loose-only-Regel hat eine Quelle", () => {
 
   it("und die Übersetzung für OVP bleibt auch", () => {
     expect(de.inventory.conditionBoxed).toBe("OVP");
-    expect(de.inventory.conditionLoose).toBe("Lose");
+    /* Das WORT hat sich geändert, der WERT nicht (ADR-0130): `loose` bleibt
+       gespeichert, auf dem Schirm heißt der eine SkyIsles-Zustand
+       „Gebraucht". */
+    expect(de.inventory.conditionLoose).toBe("Gebraucht");
   });
 });
 

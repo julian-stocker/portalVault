@@ -3756,6 +3756,53 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
+### Ein Zustandsstandard für ganz SkyIsles (2026-10-20, ADR-0130)
+
+**Die verbindliche Produktentscheidung:** SkyIsles handelt ausschließlich
+mit **gebrauchter, vollständig funktionsfähiger Ware in mindestens gutem
+Zustand** — Figuren, Spiele, Portale, späteres Zubehör, jeder spätere
+Verkäufer. **Keine Zustandsklassen, keine Zustandsauswahl.** „Wie neu" ist
+keine Klasse, sondern übererfüllt den Standard.
+
+**„Lose" heißt jetzt „Gebraucht" — und zwar nur auf dem Schirm.**
+
+| | |
+|---|---|
+| geändert | drei i18n-Wörter (`shop`, `inventory`, `admin.orders`) |
+| **nicht** geändert | `condition = 'loose'` in Bestellungen, Lagerzeilen, Belegen, Orderbuchzeilen, `v1_sale_condition()`, `shop_offers()`, `create_order()` |
+| Begründung | der Wert ist ein Schlüssel, kein Text. Eine Umbenennung auf `used` wäre eine Datenmigration über historische, teils unveränderliche Zeilen — **für nichts** |
+| `boxed` | bleibt „OVP", ausschließlich historisch |
+| Rechnung und Eigenbeleg | sagen weiter „lose" (eigene Funktion). **Bewusst nicht geändert:** sie werden bei jedem Abruf neu gezeichnet, eine Änderung veränderte die Darstellung bereits ausgestellter Rechnungen (ADR-0123). Offen in `docs/LEGAL.md` 8b |
+
+**Der Standard wird kommuniziert, nicht nur eingehalten:** `/shop` trägt ihn
+als eigenen Absatz über dem Raster — „Gebraucht · mindestens guter Zustand ·
+voll funktionsfähig" plus einen Satz, was das heißt. Am einzelnen Angebot
+steht nur noch das Wort; dort ist es dann kein Etikett unter mehreren.
+
+**Der Marktpreismaßstab** ist derselbe Standard — ein Referenzpreis je
+Katalogartikel, keine Preise nach Klassen. Der **Referenzlieferumfang** ist
+je Artikelart festgelegt: Figur = die einzelne Figur · Spiel = `disc_case`
+(mit Originalhülle) · Portal = `portal_cable` (mit Kabel). Abweichender
+Umfang wirkt über den **individuellen** `sale_price`, nie über eine neue
+Klasse. `shop_price()` bleibt unangetastet.
+
+**Und eine frühere Festlegung ist aufgehoben.** ADR-0129 hatte `loose` als
+„Medium ohne Originalhülle" gedeutet und daraus einen CHECK gemacht, der
+ein Spiel mit Hülle unverkäuflich gemacht hätte. **Der CHECK ist entfernt**,
+und `0139` bricht ab, wenn er wieder dasteht. Ein Spiel mit Originalhülle
+ist genauso verkäuflich wie eines ohne — bewiesen in den Durchgängen P36
+und P37.
+
+**Zusätzlich verlangt die Freigabe jetzt einen gültigen Preis**
+(`shop_price()` darf nicht NULL sein). **Bestand wird bewusst nicht
+verlangt:** „freigegeben, aber ausverkauft" ist ein gewollter Zustand, und
+eine Freigabe, die beim letzten verkauften Stück verfiele, wäre eine Falle.
+
+**Der Laufzettel für Staging steht:**
+`supabase/checks/0139_0140_staging_run.md` — fünf Schritte, welche Datei
+wann, welche `NOTICE`-Zeile erwartet wird, und die Rücknahme in der
+Reihenfolge `R0140`→`R0139`. **Noch nicht ausgeführt.**
+
 ### Spiele und Portale verkaufen — vorbereitet, nicht angewendet (2026-10-20)
 
 **Die Entscheidung des Betreibers:** Spiele und Portale werden über den

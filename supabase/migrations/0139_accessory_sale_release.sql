@@ -19,7 +19,7 @@
 --   1. `shop_inventory.sale_released` — eine Freigabe JE LAGERPOSITION,
 --      `not null default false`.
 --   2. `shop_inventory.delivery_scope` — WAS geliefert wird, als eigene
---      Eigenschaft neben `condition` und nicht aus ihm abgeleitet.
+--      Eigenschaft neben `condition` und voellig unabhaengig davon.
 --   3. `skylanders.usk_rating` — die Alterskennzeichnung eines Spiels,
 --      nullable, mit gesicherter Wertemenge. NULL heisst „nicht erfasst",
 --      und nicht erfasst heisst „nicht verkaeuflich".
@@ -33,19 +33,20 @@
 --      davon sind neu.
 --
 -- ---------------------------------------------------------------------------
--- ZUSTAND UND LIEFERUMFANG SIND ZWEI EIGENSCHAFTEN (Betreiber, 2026-10-20)
+-- ZUSTAND UND LIEFERUMFANG SIND ZWEI EIGENSCHAFTEN (ADR-0130)
 --
--- `condition` wird NICHT umgedeutet. Fuer ein Spiel heisst `loose`
--- ausdruecklich: Spielmedium OHNE Originalhuelle. Was ausserdem im Paket
--- liegt — Anleitung, USB-Kabel — sagt `delivery_scope`, und das laesst sich
--- aus dem Zustand nicht ableiten.
+-- SKYISLES KENNT GENAU EINEN ZUSTAND: gebraucht, mindestens guter Zustand,
+-- vollstaendig funktionsfaehig. Keine Zustandsklassen, keine Auswahl. Der
+-- gespeicherte Wert dafuer bleibt `loose` — als interner Altwert, der keine
+-- Datenmigration rechtfertigt —, und auf dem Schirm heisst er „Gebraucht".
 --
--- Daraus folgt eine Konsequenz, die hier benannt und nicht versteckt wird:
--- ein Spiel MIT Originalhuelle ist nach dieser Festlegung nicht `loose`, und
--- V1 verkauft nur `loose` (`0028`/`0029`/`0108`). `disc_case` ist deshalb
--- modelliert, waehlbar und durch einen CHECK gegen `loose` gesichert — aber
--- nicht verkaeuflich. Das zu aendern waere eine eigene Produktentscheidung
--- und steht NICHT in dieser Datei.
+-- `condition` sagt damit NICHTS ueber Verpackung. Was im Paket liegt, sagt
+-- allein `delivery_scope`. Die beiden sind unabhaengig, und deshalb ist ein
+-- Spiel MIT Originalhuelle genauso verkaeuflich wie eines ohne.
+--
+-- (Ein frueherer Entwurf dieser Datei koppelte `disc_case` an
+-- `condition <> 'loose'`. Diese Kopplung ist entfernt; sie beruhte auf der
+-- inzwischen aufgehobenen Deutung „loose = ohne Huelle".)
 --
 -- ---------------------------------------------------------------------------
 -- WARUM DIE FREIGABE AN DER POSITION HAENGT UND NICHT AM ARTIKEL
@@ -252,18 +253,18 @@ alter table public.shop_inventory
  * Kabel dabei ist.
  *
  * NULL HEISST „NICHT ANGEGEBEN", und fuer eine Figur bleibt es dabei: dort
- * ist die Frage durch `condition` beantwortet und die Spalte bedeutungslos.
- * Fuer Zubehoer ist NULL ein VERKAUFSHINDERNIS — ein Angebot fuer ein
- * gebrauchtes Spiel muss sagen, was geliefert wird.
+ * gibt es nur einen Lieferumfang — die Figur — und die Spalte ist
+ * bedeutungslos. Fuer Zubehoer ist NULL ein VERKAUFSHINDERNIS: ein Angebot
+ * fuer gebrauchte Ware muss sagen, was geliefert wird.
  *
- * ZWEI CHECKS, UND DER ZWEITE IST DER WICHTIGE. `disc_case` („mit
- * Originalhuelle") und `condition = 'loose'` widersprechen sich nach der
- * Festlegung oben. Die Tabelle laesst die Kombination deshalb nicht zu,
- * statt sich auf eine Funktion zu verlassen. Folge, und sie ist
- * beabsichtigt: ein Spiel MIT Huelle ist nicht `loose`, und V1 verkauft
- * nur `loose` (`0028`/`0029`/`0108`) — es ist damit modelliert und
- * waehlbar, aber nicht verkaeuflich. Das zu aendern waere eine eigene
- * Produktentscheidung.
+ * EIN SPIEL MIT ORIGINALHUELLE IST GENAUSO VERKAEUFLICH WIE EINES OHNE
+ * (ADR-0130). Ein frueherer Entwurf dieser Datei hatte `disc_case` an
+ * `condition <> 'loose'` gekoppelt — damals hiess `loose` „Medium ohne
+ * Huelle", und die Kopplung haette ein Spiel mit Huelle unverkaeuflich
+ * gemacht. Diese Deutung ist aufgehoben: `condition` bezeichnet den EINEN
+ * SkyIsles-Zustandsstandard (gebraucht, mindestens gut, vollstaendig
+ * funktionsfaehig) und sagt ueber Verpackung NICHTS. Es gibt deshalb nur
+ * EINEN CHECK, und der sichert allein die Wertemenge.
  */
 alter table public.shop_inventory
   add column delivery_scope text;
@@ -273,12 +274,8 @@ alter table public.shop_inventory
     check (delivery_scope is null or delivery_scope in
            ('disc_only', 'disc_manual', 'disc_case', 'portal_only', 'portal_cable'));
 
-alter table public.shop_inventory
-  add constraint shop_inventory_case_is_not_loose
-    check (delivery_scope is distinct from 'disc_case' or condition <> 'loose');
-
 comment on column public.shop_inventory.delivery_scope is
-  'Was bei DIESER Position wirklich geliefert wird (0139) — eine eigene Eigenschaft neben condition, nicht aus ihm ableitbar. disc_only | disc_manual | disc_case fuer Spiele, portal_only | portal_cable fuer Portale. NULL heisst NICHT ANGEGEBEN: fuer eine Figur bleibt es dabei (dort beantwortet condition die Frage), fuer Zubehoer ist es ein Verkaufshindernis — is_position_sellable() verlangt eine Angabe. condition wird dadurch NICHT umgedeutet: fuer ein Spiel heisst loose weiterhin "Spielmedium ohne Originalhuelle", und der CHECK shop_inventory_case_is_not_loose haelt die beiden Aussagen widerspruchsfrei.';
+  'Was bei DIESER Position wirklich geliefert wird (0139, ADR-0130) — eine eigene Eigenschaft neben condition und voellig unabhaengig davon. disc_only | disc_manual | disc_case fuer Spiele, portal_only | portal_cable fuer Portale. NULL heisst NICHT ANGEGEBEN: fuer eine Figur bleibt es dabei (dort gibt es nur einen Lieferumfang), fuer Zubehoer ist es ein Verkaufshindernis — is_position_sellable() verlangt eine Angabe. KEINE KOPPLUNG AN condition: ein Spiel mit Originalhuelle ist genauso verkaeuflich wie eines ohne, und condition bezeichnet allein den einen SkyIsles-Zustandsstandard (gebraucht, mindestens gut, vollstaendig funktionsfaehig).';
 
 comment on column public.shop_inventory.sale_released is
   'Freigabe DIESER Lagerposition fuer den oeffentlichen Verkauf (0139). Gilt nur fuer Zubehoer (game, portal) — fuer eine Figur fragt is_position_sellable() die Spalte nicht, dort entscheidet is_shop_eligible() wie seit 0008. Vorgabe false: eine vorhandene Position wird durch diese Migration nicht kaufbar, auch nicht die 13 Spielezeilen mit is_listed = true. Sie sitzt an der POSITION und nicht am Katalogartikel, weil Preis, Menge und Listung dort sitzen und weil diese Zeile in einer spaeteren Marketplace-Architektur je Verkaeufer gefuehrt wuerde. Das ist Vorsorge, keine Multi-Seller-Implementierung (ADR-0021).';
@@ -962,6 +959,7 @@ declare
   v_art    text;
   v_usk    smallint;
   v_umfang text;
+  v_preis  numeric;
 begin
   if not public.can_operate_active_seller() then
     raise exception 'seller operator role required'
@@ -1059,6 +1057,37 @@ begin
       using errcode = 'check_violation';
   end if;
 
+  /*
+   * UND OHNE GUELTIGEN PREIS AUCH NICHT.
+   *
+   * Gefragt wird `shop_price()` — dieselbe Funktion, die das Angebot
+   * berechnet, nicht eine Nachbildung ihrer Regel. Sie liefert den
+   * manuellen Preis, sonst Marktpreis mal Prozentsatz, sonst NULL. Ist sie
+   * NULL, koennte die Position nie ein Angebot werden; eine Freigabe waere
+   * dann ein Schalter, der nichts bewirkt.
+   *
+   * KEINE BESTANDSPRUEFUNG. „Freigegeben, aber ausverkauft" ist ein
+   * gewollter Zustand — `shop_inventory` trennt `is_listed` und Menge seit
+   * `0003` genau dafuer, und `shop_offers()` traegt `available` als
+   * eigenes Feld. Eine Freigabe an Bestand zu binden hiesse, sie beim
+   * letzten verkauften Stueck stillschweigend zu verlieren.
+   */
+  if p_released then
+    select public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+      into v_preis
+      from public.shop_inventory i
+      join public.skylanders s on s.sky_id = i.sky_id
+      cross join public.shop_settings st
+     where i.id = v_id;
+
+    if v_preis is null then
+      raise exception
+        'position % / % has no price; set one before releasing it for sale',
+        p_sky_id, p_condition
+        using errcode = 'check_violation';
+    end if;
+  end if;
+
   -- Nur die lose Beschaffenheit wird verkauft (0028/0029/0108).
   if p_condition is distinct from public.v1_sale_condition() then
     raise exception 'SkyIsles sells % only; % is not an operative position',
@@ -1075,7 +1104,7 @@ end;
 $$;
 
 comment on function public.seller_set_sale_release(text, text, boolean) is
-  'Releases ONE accessory stock position for public sale, or takes the release back (0139). Refuses a figure (there the release is implicit and the switch would do nothing), an item type SkyIsles does not sell, a position that does not exist, a condition other than the one V1 sells, and a GAME without a recorded usk_rating. The USK check guards releasing only, never un-releasing. Touches neither price nor is_listed nor quantity.';
+  'Releases ONE accessory stock position for public sale, or takes the release back (0139, ADR-0129/0130). Refuses a figure (there the release is implicit and the switch would do nothing), an item type SkyIsles does not sell, a position that does not exist, and a condition other than the one SkyIsles sells. For a RELEASE it additionally requires: a recorded usk_rating when the article is a game, a rating other than 18 (no age verification at checkout or delivery), a stated delivery_scope, and a price shop_price() can compute. It does NOT require stock - "released but sold out" is a deliberate state. Every one of those five guards applies to releasing only, never to un-releasing. Touches neither price nor is_listed nor delivery_scope nor quantity.';
 
 revoke all on function public.seller_set_sale_release(text, text, boolean)
   from public, anon;
@@ -1116,13 +1145,12 @@ begin
   end if;
 
   /*
-   * EINE FIGUR HAT KEINEN LIEFERUMFANG ZU WAEHLEN. Dort beantwortet
-   * `condition` die Frage vollstaendig, und das Tor fragt die Spalte nicht
-   * — ein Feld ohne Wirkung ist dieselbe Falle wie ein Schalter ohne
-   * Wirkung.
+   * EINE FIGUR HAT KEINEN LIEFERUMFANG ZU WAEHLEN. Es gibt dort nur einen:
+   * die Figur. Das Tor fragt die Spalte fuer Figuren nicht — und ein Feld
+   * ohne Wirkung ist dieselbe Falle wie ein Schalter ohne Wirkung.
    */
   if v_art = 'figure' then
-    raise exception 'a figure has no delivery scope; condition already says it'
+    raise exception 'a figure has only one delivery scope - the figure itself'
       using errcode = 'check_violation';
   end if;
 
@@ -1152,20 +1180,12 @@ begin
   end if;
 
   /*
-   * `disc_case` an einer losen Position lehnt der CHECK
-   * `shop_inventory_case_is_not_loose` ab — und zwar mit einer Meldung,
-   * die niemand versteht. Deshalb hier zuerst, im Klartext.
+   * KEINE PRUEFUNG GEGEN `condition`. Der Zustand sagt bei SkyIsles nur,
+   * dass der Artikel gebraucht, mindestens gut erhalten und vollstaendig
+   * funktionsfaehig ist (ADR-0130) — ueber die Verpackung sagt er nichts.
+   * `disc_case` ist deshalb an jeder Position zulaessig, und ein Spiel mit
+   * Originalhuelle ist genauso verkaeuflich wie eines ohne.
    */
-  if p_scope = 'disc_case'
-     and (select condition from public.shop_inventory where id = v_id)
-         = public.v1_sale_condition() then
-    raise exception
-      'a game with its original case is not %; the original-case scope belongs to a '
-      'position in another condition, and V1 sells % only',
-      public.v1_sale_condition(), public.v1_sale_condition()
-      using errcode = 'check_violation';
-  end if;
-
   update public.shop_inventory
      set delivery_scope = p_scope
    where id = v_id;
@@ -1175,7 +1195,7 @@ end;
 $$;
 
 comment on function public.seller_set_delivery_scope(text, text, text) is
-  'Sets what is delivered with ONE accessory stock position (0139): disc_only | disc_manual | disc_case for a game, portal_only | portal_cable for a portal, or NULL to take the statement back. Refuses a figure (condition already answers it there), a vocabulary that does not fit the item type, and disc_case on a loose position — for a game loose means "medium without its original case", and the two statements may not contradict each other. Touches neither price, nor is_listed, nor sale_released, nor quantity.';
+  'Sets what is delivered with ONE accessory stock position (0139, ADR-0130): disc_only | disc_manual | disc_case for a game, portal_only | portal_cable for a portal, or NULL to take the statement back. Refuses a figure (there is only one delivery scope there - the figure) and a vocabulary that does not fit the item type. It does NOT look at condition: at SkyIsles condition says only that the article is used, at least in good shape and fully working, never anything about packaging - so a game WITH its case is as sellable as one without. Touches neither price, nor is_listed, nor sale_released, nor quantity.';
 
 revoke all on function public.seller_set_delivery_scope(text, text, text)
   from public, anon;
@@ -1262,12 +1282,17 @@ begin
                     and column_name = 'delivery_scope' and is_nullable = 'YES') then
     raise exception '0139 Abbruch: delivery_scope fehlt oder ist not null';
   end if;
-  for v_soll in select unnest(array['shop_inventory_delivery_scope_known',
-                                    'shop_inventory_case_is_not_loose']) loop
-    if not exists (select 1 from pg_constraint where conname = v_soll) then
-      raise exception '0139 Abbruch: der CHECK % fehlt', v_soll;
-    end if;
-  end loop;
+  if not exists (select 1 from pg_constraint
+                  where conname = 'shop_inventory_delivery_scope_known') then
+    raise exception '0139 Abbruch: der CHECK auf delivery_scope fehlt';
+  end if;
+  -- UND KEINE KOPPLUNG AN `condition`. Ein CHECK dieses Namens stammt aus
+  -- einem frueheren Entwurf und wuerde ein Spiel mit Originalhuelle
+  -- unverkaeuflich machen (ADR-0130).
+  if exists (select 1 from pg_constraint
+              where conname = 'shop_inventory_case_is_not_loose') then
+    raise exception '0139 Abbruch: die aufgehobene Kopplung disc_case/loose steht noch';
+  end if;
 
   -- 8a2. Kein Lieferumfang wurde gesetzt. Wie bei der Freigabe: die
   --      Migration baut das Feld, sie fuellt es nicht.

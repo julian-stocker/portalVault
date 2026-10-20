@@ -284,12 +284,13 @@ ausdrücklich *Spielmedium ohne Originalhülle*. Der Lieferumfang ist
 `shop_offers()` bekommt dafür eine **fünfte Spalte**; `shop_inventory.note`
 bleibt intern und wird nicht angefasst.
 
-> **Eine Konsequenz, benannt statt versteckt:** nach dieser Festlegung ist
-> ein Spiel **mit** Originalhülle nicht `loose`, und V1 verkauft nur `loose`
-> (`0028`/`0029`/`0108`). `disc_case` ist deshalb modelliert, wählbar und
-> durch `shop_inventory_case_is_not_loose` gegen `loose` gesichert — aber
-> **nicht verkäuflich**. Ob SkyIsles auch Spiele mit Hülle verkauft, ist
-> eine eigene Produktentscheidung und steht nicht in `0139`.
+> **Nachtrag vom selben Tag (ADR-0130): die Kopplung ist aufgehoben.** Eine
+> frühere Fassung hatte `disc_case` an `condition <> 'loose'` gehängt. Der
+> Betreiber hat festgelegt, dass SkyIsles **einen** Zustand kennt —
+> gebraucht, mindestens gut, voll funktionsfähig —, der über Verpackung
+> nichts sagt. **Ein Spiel mit Originalhülle ist genauso verkäuflich wie
+> eines ohne**, der CHECK `shop_inventory_case_is_not_loose` ist entfernt,
+> und `0139` bricht ab, wenn er wieder dasteht.
 
 **Für Portale** ist die sinnvolle Angabe das **USB-Kabel** — ohne das ein
 kabelgebundenes Portal nicht benutzbar ist. Batterien werden bewusst **nicht**

@@ -11960,3 +11960,133 @@ intern — sie **muss** im Angebot erkennbar sein.
   ist, damit es nicht aus Versehen passiert.
 * Die Oberfläche ist geplant, nicht gebaut:
   `supabase/checks/accessory_sale_ui_plan.md`.
+
+---
+
+## ADR-0130 · Ein Zustandsstandard für ganz SkyIsles, ein Marktpreismaßstab
+
+**Status:** akzeptiert (verbindliche Produktentscheidung des Betreibers,
+2026-10-20) · **Umsetzung:** Anzeige und Vokabular sofort; die
+Datenbankseite in `0139`/`0140`, **nirgends angewendet**.
+
+**Diese Entscheidung hebt eine frühere Festlegung desselben Tages auf** —
+siehe „Was sich gegenüber ADR-0129 ändert" unten.
+
+### Der Standard
+
+SkyIsles handelt ausschließlich mit
+
+> **gebrauchter, vollständig funktionsfähiger Ware in mindestens gutem
+> Zustand.**
+
+Das gilt für Figuren, Spiele, Portale, späteres Zubehör und für jeden
+späteren Verkäufer. Normale leichte Gebrauchsspuren sind zulässig; besser
+erhaltene Ware erfüllt denselben Standard. Defekte, beschädigte, stark
+abgenutzte oder in der Funktion eingeschränkte Artikel werden nicht
+angeboten.
+
+**Es gibt keine Zustandsklassen.** Kein „Akzeptabel", kein „Sehr gut", kein
+„Wie neu" — „wie neu" ist keine eigene Klasse, sondern übererfüllt den
+Mindeststandard. **Es gibt keine Zustandsauswahl**, weder für Verkäufer noch
+für Käufer: eine Auswahl mit einem Wert ist keine Auswahl.
+
+### `loose` bleibt der gespeicherte Wert, „Gebraucht" wird das Wort
+
+Der Begriff „Lose" bezeichnete in der Oberfläche den Verkaufszustand. Er
+war zweifach irreführend: er legte nahe, dass es andere Zustände gäbe, und
+dass „lose" etwas über die **Verpackung** sagt. Beides ist nicht so.
+
+**Umbenannt wird allein die Anzeige.** `condition = 'loose'` bleibt der
+gespeicherte Wert — in Bestellungen, Lagerzeilen, Belegen, Orderbuchzeilen
+und in `v1_sale_condition()`. Eine Umbenennung auf `used` wäre eine
+Datenmigration über historische, teils unveränderliche Zeilen, und sie
+brächte fachlich **nichts**: der Wert ist ein Schlüssel, kein Text.
+
+> **Geprüft, bevor entschieden:** `condition` steht in `shop_inventory`,
+> `order_lines`, `sale_items`, den Belegsnapshots und in drei Funktionen
+> (`v1_sale_condition`, `shop_offers`, `create_order`). Die Anzeige hängt an
+> **einer** Stelle — `conditionLabel()` über `de.*.conditionLoose`, drei
+> Einträge. Drei Wörter zu ändern ist die sichere Lösung; eine Migration
+> wäre das Gegenteil.
+
+`'boxed'` bleibt als **historischer** Wert lesbar und heißt weiter „OVP".
+Eine alte Bestellposition dokumentiert damit, was sie war; sie wird nicht
+umgeschrieben (`0108`).
+
+**Der Standard wird kommuniziert**, nicht nur eingehalten: `/shop` trägt
+ihn als eigenen Absatz über dem Angebotsraster. Am einzelnen Angebot steht
+nur noch das Wort — dort ist es dann kein Etikett unter mehreren, sondern
+der Standard.
+
+### Der Marktpreismaßstab
+
+`skylanders.market_price` ist ein **Referenzpreis je Katalogartikel** und
+bezieht sich auf denselben Standard: gebraucht, voll funktionsfähig,
+mindestens gut. **Keine Preise nach Zustandsklassen** — es gibt keine.
+
+Der **Lieferumfang** ist davon getrennt und wird je Artikelart als
+Referenzannahme festgelegt:
+
+| Artikelart | Referenzlieferumfang des Marktpreises |
+|---|---|
+| **Figur** | die einzelne Figur, ohne Zubehör, ohne Karte, ohne Verpackung |
+| **Spiel** | `disc_case` — **Spielmedium mit Originalhülle**. Das ist der Umfang, auf den sich Gebrauchtpreise für Konsolenspiele üblicherweise beziehen |
+| **Portal** | `portal_cable` — **Portal mit Kabel**. Ein Portal ohne sein Kabel ist nicht benutzbar; der brauchbare Zustand ist der Maßstab |
+
+Ein abweichender Lieferumfang darf den **individuellen Angebotspreis**
+beeinflussen — über `shop_inventory.sale_price`, der jeden abgeleiteten
+Preis schlägt (`shop_price()`, ADR-0045). Er führt **keine** neue
+Zustandsklasse ein und ändert den Referenzpreis nicht.
+
+**Es wird kein Marktpreis erfunden und keine Preisberechnung umgebaut.**
+`shop_price()` bleibt Zeichen für Zeichen, wie sie ist.
+
+> **Ein Hinweis, der zur Vorsicht mahnt:** trägt ein Spiel oder Portal einen
+> `market_price`, so berechnet `shop_price()` daraus einen Preis, sobald die
+> Position freigegeben wird — auch ohne gesetzten `sale_price`. Wie viele
+> Zubehörartikel heute einen Marktpreis tragen, misst
+> `supabase/checks/accessory_offer_readonly.sql`, Zeile 402. Die Zahl ist
+> **vor** der ersten Freigabe zu lesen.
+
+### Was sich gegenüber ADR-0129 ändert
+
+ADR-0129 hielt fest — auf der damaligen Festlegung des Betreibers, `loose`
+heiße bei einem Spiel *Medium ohne Originalhülle* —, dass ein Spiel **mit**
+Hülle nicht `loose` sei und damit nicht verkäuflich. Daraus war im Entwurf
+von `0139` ein CHECK `shop_inventory_case_is_not_loose` geworden.
+
+**Beides ist aufgehoben.** Der Zustand sagt über Verpackung nichts; was
+geliefert wird, sagt allein `delivery_scope`. **Ein Spiel mit
+Originalhülle ist genauso verkäuflich wie eines ohne**, und „Gebraucht"
+darf nie heißen, dass die Hülle fehlt.
+
+| | ADR-0129 (aufgehoben) | ADR-0130 (gilt) |
+|---|---|---|
+| Bedeutung von `loose` | Medium ohne Originalhülle | der eine SkyIsles-Zustand; sagt nichts über Verpackung |
+| `disc_case` | modelliert, aber nicht verkäuflich | **verkäuflich wie jeder andere Umfang** |
+| CHECK `…_case_is_not_loose` | eingeführt | **entfernt** — `0139` bricht sogar ab, wenn er wieder dasteht |
+| Anzeige des Zustands | „Lose" | „Gebraucht" |
+
+Der Rest von ADR-0129 gilt unverändert: die Freigabe je Lagerposition, das
+eine Tor `is_position_sellable()`, `is_shop_eligible()` unangetastet, der
+Marketplace-Stopp aus ADR-0021.
+
+### Konsequenzen
+
+* Der Lieferumfang deckt die geforderten Varianten ab: `disc_only` ·
+  `disc_manual` · `disc_case` für Spiele, `portal_only` · `portal_cable`
+  für Portale. **Für Figuren gibt es keine Auswahl** — es gibt dort nur
+  einen Umfang, und `seller_set_delivery_scope()` lehnt eine Figur ab.
+* Eine Freigabe verlangt jetzt zusätzlich einen **gültigen Preis**
+  (`shop_price()` darf nicht NULL sein). **Kein** Bestand wird verlangt:
+  „freigegeben, aber ausverkauft" ist ein gewollter Zustand, und eine
+  Freigabe, die beim letzten verkauften Stück stillschweigend verfiele,
+  wäre eine Falle.
+* **Keine Datenmigration wegen einer Bezeichnung.** Keine Zeile in
+  `order_lines`, `sale_items`, `shop_inventory` oder einem Beleg wird
+  angefasst.
+* **Rechnungen und Eigenbelege behalten ihr eigenes Wort** („lose",
+  kleingeschrieben, aus `src/lib/legal/invoice.ts`). Sie werden bei jedem
+  Abruf neu gezeichnet; eine Änderung dort veränderte die Darstellung
+  bereits ausgestellter Rechnungen (ADR-0123). Ob sie künftig „gebraucht"
+  sagen sollen, ist eine eigene Entscheidung — `docs/LEGAL.md`, 8b.

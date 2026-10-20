@@ -63,11 +63,16 @@ describe("der Zustand steht an jedem kaufbaren Angebot", () => {
   it("aus der einen vorhandenen Übersetzung, nicht aus einer zweiten", () => {
     for (const [name, path] of BUY_SURFACES) {
       expect(code(path), name).toContain('from "@/lib/shop/condition"');
-      for (const literal of ['"Lose"', '"OVP"', "'Lose'", "'OVP'"]) {
+      for (const literal of ['"Gebraucht"', '"OVP"', "'Gebraucht'", "'OVP'"]) {
         expect(code(path), `${name}: ${literal}`).not.toContain(literal);
       }
     }
-    expect(de.shop.conditionLoose).toBe("Lose");
+    /*
+     * SEIT ADR-0130 heißt der eine SkyIsles-Zustand „Gebraucht". Der
+     * gespeicherte Wert bleibt `loose` — ein interner Altwert, für den
+     * keine Datenmigration lohnt. „OVP" bleibt für historische Zeilen.
+     */
+    expect(de.shop.conditionLoose).toBe("Gebraucht");
     expect(de.shop.conditionBoxed).toBe("OVP");
   });
 

@@ -550,7 +550,6 @@ grant execute on function public.admin_shop_listing_audit() to authenticated;
 -- ---------------------------------------------------------------------------
 drop function if exists public.is_position_sellable(bigint);
 
-alter table public.shop_inventory drop constraint if exists shop_inventory_case_is_not_loose;
 alter table public.shop_inventory drop constraint if exists shop_inventory_delivery_scope_known;
 alter table public.shop_inventory drop column if exists delivery_scope;
 alter table public.shop_inventory drop column if exists sale_released;
