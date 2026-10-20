@@ -2300,6 +2300,68 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P39 — DIE ZWEI EINZELLAEUFE, und der Umgebungsstempel.
+   *
+   * `staging-0139.sql` und `staging-0140.sql` betten die Migrationen
+   * zeichengleich ein (geprueft in `staging-oneshot.test.ts`) und fuegen
+   * EINE Pruefung hinzu: laeuft das hier auf Staging? Dass sie anschlaegt,
+   * laesst sich nur fahren, nicht lesen — hier wird sie gefahren.
+   */
+  {
+    const OP139 = "supabase/operations/staging-0139.sql";
+    const OP140 = "supabase/operations/staging-0140.sql";
+
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    /* Der gute Fall: beide nacheinander, wie der Betreiber sie faehrt. */
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P39 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    const f138 = await fahre(db, M138);
+    if (f138 !== null) throw new Error(`P39 Aufbau: 0138 scheiterte — ${f138}`);
+    await db.exec(`
+      create sequence if not exists public.z_inv_id_seq start 1000;
+      alter table public.shop_inventory
+        alter column id set default nextval('public.z_inv_id_seq');
+      update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+       where id is null;`);
+
+    const lauf139 = await fahre(db, OP139, { klammer: false });
+    const lauf140 = lauf139 === null ? await fahre(db, OP140, { klammer: false }) : "nicht gefahren";
+    const freigegeben = lauf140 === null ? await wert(db,
+      "select count(*)::text as w from public.shop_inventory where sale_released") : "-";
+    const felder = lauf140 === null ? await wert(db,
+      "select (position('delivery_scope' in prosrc) > 0)::text as w from pg_proc "
+      + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
+
+    /* Der schlechte Fall: dieselbe Datei ohne den Stempel. */
+    const db2 = await frischNach0136();
+    const g137 = await fahre(db2, M137);
+    if (g137 !== null) throw new Error(`P39 Aufbau: 0137 scheiterte — ${g137}`);
+    await serienUndIdentitaet(db2);
+    const g138 = await fahre(db2, M138);
+    if (g138 !== null) throw new Error(`P39 Aufbau: 0138 scheiterte — ${g138}`);
+    await db2.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    const falschesProjekt = await fahre(db2, OP139, { klammer: false });
+    const nichtsDa = await wert(db2,
+      "select (count(*) = 0)::text as w from information_schema.columns "
+      + "where table_schema = 'public' and table_name = 'shop_inventory' "
+      + "and column_name = 'sale_released'");
+
+    probe.push({
+      name: "P39 die zwei Einzellaeufe gehen durch — und brechen im falschen Projekt ab",
+      ok: lauf139 === null && lauf140 === null && freigegeben === "0" && felder === "true"
+        && falschesProjekt !== null && falschesProjekt.includes("ABBRUCH A1")
+        && nichtsDa === "true",
+      sagt: `0139 ${lauf139 ?? "durch"}, 0140 ${lauf140 ?? "durch"}, freigegebene `
+        + `Positionen ${freigegeben}, Sicherung kennt den Lieferumfang (${felder}) · `
+        + `ohne Stempel: ${falschesProjekt === null ? "DURCHGELAUFEN — Befund"
+            : "abgebrochen"}, und keine Spalte zurueckgelassen (${nichtsDa})`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

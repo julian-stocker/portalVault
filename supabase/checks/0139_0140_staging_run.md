@@ -77,17 +77,18 @@ der Freigabe **automatisch** einen Preis aus `market_price × Prozentsatz`
 
 ### S2 — `0139` anwenden
 
+**Eine Datei, ein Einfügen.** Sie bringt `begin`, `commit` und den
+Umgebungsstempel selbst mit:
+
 ```
-begin;
+supabase/operations/staging-0139.sql
 ```
-dann vollständig
-```
-supabase/migrations/0139_accessory_sale_release.sql
-```
-dann
-```
-commit;
-```
+
+Der Stempel steht **innerhalb** der Klammer: landet die Datei im falschen
+Fenster, bricht sie mit `ABBRUCH A1` ab, bevor sie irgendetwas anfasst. Die
+eingebettete Migration ist Zeichen für Zeichen die aus
+`supabase/migrations/0139_accessory_sale_release.sql` —
+`staging-oneshot.test.ts` vergleicht beides bei jedem Testlauf.
 
 **Erwartet: zwei `NOTICE`-Zeilen.**
 
@@ -126,15 +127,10 @@ rollback;
 
 ### S4 — `0140` anwenden (Betriebssicherung)
 
+Ebenso eine Datei:
+
 ```
-begin;
-```
-dann vollständig
-```
-supabase/migrations/0140_business_backup_sale_release.sql
-```
-```
-commit;
+supabase/operations/staging-0140.sql
 ```
 
 **Erwartet:**
@@ -199,6 +195,7 @@ PostgreSQL (PGlite 18.6):
 | **P36** | ein Spiel ohne USK bleibt draußen; mit USK 6 erscheint es; **mit Originalhülle ist es verkäuflich** |
 | **P37** | die Freigabe lehnt Figur, Spiel ohne USK, USK 18, fehlenden Lieferumfang, fehlenden Preis und unbekannte Position ab — **Abschalten geht immer** |
 | **P38** | `0140` braucht `0139`, nimmt dann genau drei Felder auf, und nimmt sie zurück |
+| **P39** | **die zwei Einzelläufe oben** gehen nacheinander durch — und brechen auf einer Datenbank **ohne** den Staging-Stempel ab, ohne eine Spalte zurückzulassen |
 
 **Das ist kein Lauf gegen Staging** (`open_verifications.md`, Abschnitt 3a).
 Nachweis bleibt allein das Ergebnisblatt aus dem SQL-Editor.
@@ -211,5 +208,7 @@ Nachweis bleibt allein das Ergebnisblatt aus dem SQL-Editor.
 |---|---|
 | `supabase/migrations/0139_accessory_sale_release.sql` | siehe `supabase/migrations/APPLIED.md` |
 | `supabase/migrations/0140_business_backup_sale_release.sql` | siehe `supabase/migrations/APPLIED.md` |
+| `supabase/operations/staging-0139.sql` | `2c23a7f26ff56ec0ae981228bf11755d8d8b0ab812f27b4818a754203dc54345` |
+| `supabase/operations/staging-0140.sql` | `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d` |
 
 `npm run verify:sums` vergleicht sie mit `supabase/SHA256SUMS.txt`.

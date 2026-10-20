@@ -360,3 +360,79 @@ describe("staging-0137-0138.sql", () => {
     expect(code).toContain("search\\_path=%");
   });
 });
+
+/* ==========================================================================
+ * `staging-0139.sql` und `staging-0140.sql` — je ein Lauf, je eine Migration
+ *
+ * ANDERS ALS DIE BEIDEN OBEN betten diese zwei nichts Eigenes ein: keine
+ * Vor- und keine Nachpruefung, weil `0139` und `0140` beide selbst
+ * mitbringen. Hinzu kommt genau EINE Zeile Pruefung — der Umgebungsstempel,
+ * den eine Migration nicht kennen kann.
+ *
+ * Und sie sind GETRENNT, nicht zusammen: `0140` setzt `0139` voraus und
+ * laeuft als eigene Transaktion danach, damit der Beweis von `0139`
+ * („nichts hat sich geaendert") lesbar bleibt.
+ * ======================================================================== */
+
+const LAEUFE = [
+  ["supabase/operations/staging-0139.sql", "0139_accessory_sale_release.sql"],
+  ["supabase/operations/staging-0140.sql", "0140_business_backup_sale_release.sql"],
+] as const;
+
+describe("die Einzellaeufe fuer 0139 und 0140", () => {
+  for (const [skript, migration] of LAEUFE) {
+    const text = readFileSync(skript, "utf8");
+
+    it(`${migration} ist Zeichen für Zeichen eingebettet`, () => {
+      /* Dieselbe Zusicherung wie oben, und aus demselben Grund: eingebetteter
+         Code ist eine Kopie, und eine Kopie läuft auseinander. */
+      const anfang = `-- >>> EINGEBETTET: supabase/migrations/${migration}\n`;
+      const ende = `-- <<< ENDE: supabase/migrations/${migration}\n`;
+      const a = text.indexOf(anfang);
+      const b = text.indexOf(ende);
+      expect(a, "Marke fehlt").toBeGreaterThan(-1);
+      expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+      expect(text.slice(a + anfang.length, b))
+        .toBe(readFileSync(`supabase/migrations/${migration}`, "utf8"));
+    });
+
+    it(`${skript} ist auf Staging festgelegt`, () => {
+      expect(text).toContain("'SKY-0821', 'SKY-0822'");
+      expect(text).toContain("qqxcpesbwfxzgytkdsac");
+      /* Die Production-Referenz darf hier nirgends stehen. */
+      expect(text).not.toContain("zmiwxswrpkmizvqsgype");
+      expect(text).toContain("ABBRUCH A1: Umgebungsstempel nicht gefunden");
+    });
+
+    it(`${skript} bringt genau eine Klammer mit`, () => {
+      const zeilen = text.split("\n");
+      expect(zeilen.filter((l) => l.trim() === "begin;")).toHaveLength(1);
+      expect(zeilen.filter((l) => l.trim() === "commit;")).toHaveLength(1);
+      expect(zeilen.indexOf("begin;")).toBeLessThan(zeilen.indexOf("commit;"));
+      /* Und der Stempel steht INNERHALB der Klammer — sonst bräche er ab,
+         ohne die Migration zu verhindern. */
+      expect(text.indexOf("ABBRUCH A1")).toBeGreaterThan(text.indexOf("begin;"));
+    });
+
+    it(`${skript} fügt der Migration nichts Fachliches hinzu`, () => {
+      /* Der einzige ausführbare Teil außerhalb der Einbettung ist der
+         Stempel. Alles andere wäre eine zweite, ungeprüfte Logik. */
+      const anfang = text.indexOf(`-- >>> EINGEBETTET`);
+      const ende = text.indexOf(`-- <<< ENDE`);
+      const rahmen = (text.slice(0, anfang) + text.slice(ende))
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      for (const verboten of ["insert into", "update public.", "delete from",
+        "alter table", "create or replace function", "grant ", "revoke "]) {
+        expect(rahmen.toLowerCase(), verboten).not.toContain(verboten);
+      }
+    });
+  }
+
+  it("und sonst ist keine Migration eingebettet", () => {
+    for (const [skript] of LAEUFE) {
+      const treffer = [...readFileSync(skript, "utf8")
+        .matchAll(/-- >>> EINGEBETTET: supabase\/migrations\/(\S+)/g)].map((m) => m[1]);
+      expect(treffer).toHaveLength(1);
+    }
+  });
+});
