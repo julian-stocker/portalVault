@@ -37,7 +37,8 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
 }
 
 function offer(over: Partial<Offer> = {}): Offer {
-  return { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true, ...over };
+  return { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true,
+           deliveryScope: null, ...over };
 }
 
 describe("the quick view shows the figure that was asked for", () => {
@@ -214,7 +215,8 @@ describe("loose offers are ordered by price, cheapest first", () => {
   it("sorts ascending", () => {
     const model = quickViewModel(figure(), [
       offer({ condition: "loose", price: 9.99 }),
-      { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true },
+      { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true,
+        deliveryScope: null },
     ]);
     expect(model?.offers.map((o) => o.price)).toEqual([4.49, 9.99]);
   });
@@ -222,7 +224,8 @@ describe("loose offers are ordered by price, cheapest first", () => {
   it("keeps every loose offer rather than collapsing them to the cheapest", () => {
     const model = quickViewModel(figure(), [
       offer({ condition: "loose", price: 9.99 }),
-      { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true },
+      { skyId: "SKY-0096", condition: "loose", price: 4.49, available: true,
+        deliveryScope: null },
     ]);
     expect(model?.offers).toHaveLength(2);
   });

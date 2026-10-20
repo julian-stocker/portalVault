@@ -1,10 +1,11 @@
 /**
  * What SkyIsles sells, as the public sees it.
  *
- * An offer is four values and no more: which figure, in what condition, for
- * how much, and whether it can be bought right now. The stock level behind it
- * is internal and never leaves the database — `available` is a boolean, not a
- * count (docs/SECURITY.md, migration 0006).
+ * An offer is five values and no more: which article, in what condition, for
+ * how much, whether it can be bought right now — and, since `0139`, what is
+ * in the parcel (`deliveryScope`, null for every figure). The stock level
+ * behind it is internal and never leaves the database — `available` is a
+ * boolean, not a count (docs/SECURITY.md, migration 0006).
  *
  * Two prices exist in this product and they are not the same thing (ADR-0033):
  *
@@ -34,6 +35,20 @@ export type Offer = {
   price: number;
   /** Can it be bought right now? Deliberately not "how many are left". */
   available: boolean;
+  /**
+   * WAS IM PAKET LIEGT — die fünfte Spalte seit `0139`.
+   *
+   * `null` für jede Figur: dort beantwortet `condition` die Frage, und eine
+   * zweite Angabe daneben wäre eine Wiederholung. Für ein Spiel oder ein
+   * Portal ist sie Pflicht — `is_position_sellable()` lässt eine Position
+   * ohne Angabe gar nicht ins Angebot —, und sie ist eine zugesicherte
+   * Produkteigenschaft: `disc_only`, `disc_manual`, `disc_case`,
+   * `portal_only`, `portal_cable` (`@/lib/shop/delivery-scope`).
+   *
+   * KEIN ZUSTAND. „Lose" sagt bei einem Spiel, dass keine Originalhülle
+   * dabei ist; dieser Wert sagt, was stattdessen dabei ist.
+   */
+  deliveryScope: string | null;
 };
 
 /** Every offer, grouped by figure. Figures without one are simply absent. */

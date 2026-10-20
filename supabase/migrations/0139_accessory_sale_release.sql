@@ -18,14 +18,34 @@
 --
 --   1. `shop_inventory.sale_released` — eine Freigabe JE LAGERPOSITION,
 --      `not null default false`.
---   2. `skylanders.usk_rating` — die Alterskennzeichnung eines Spiels,
+--   2. `shop_inventory.delivery_scope` — WAS geliefert wird, als eigene
+--      Eigenschaft neben `condition` und nicht aus ihm abgeleitet.
+--   3. `skylanders.usk_rating` — die Alterskennzeichnung eines Spiels,
 --      nullable, mit gesicherter Wertemenge. NULL heisst „nicht erfasst",
 --      und nicht erfasst heisst „nicht verkaeuflich".
---   3. `is_position_sellable(bigint)` — das neue, EINZIGE Tor der vier
+--   4. `is_position_sellable(bigint)` — das neue, EINZIGE Tor der vier
 --      Verkaufstueren.
---   4. Die vier Tueren tauschen je eine Zeile.
---   5. Zwei Betriebsfunktionen: Freigabe setzen, USK erfassen.
---   6. Die Betriebsdiagnose nennt kuenftig den richtigen Grund.
+--   5. Die vier Tueren tauschen je eine Zeile — `shop_offers()` bekommt
+--      zusaetzlich eine fuenfte Spalte, `delivery_scope`.
+--   6. Drei Betriebsfunktionen: Freigabe setzen, Lieferumfang setzen,
+--      USK erfassen.
+--   7. Die Betriebsdiagnose nennt kuenftig den richtigen Grund — fuenf
+--      davon sind neu.
+--
+-- ---------------------------------------------------------------------------
+-- ZUSTAND UND LIEFERUMFANG SIND ZWEI EIGENSCHAFTEN (Betreiber, 2026-10-20)
+--
+-- `condition` wird NICHT umgedeutet. Fuer ein Spiel heisst `loose`
+-- ausdruecklich: Spielmedium OHNE Originalhuelle. Was ausserdem im Paket
+-- liegt — Anleitung, USB-Kabel — sagt `delivery_scope`, und das laesst sich
+-- aus dem Zustand nicht ableiten.
+--
+-- Daraus folgt eine Konsequenz, die hier benannt und nicht versteckt wird:
+-- ein Spiel MIT Originalhuelle ist nach dieser Festlegung nicht `loose`, und
+-- V1 verkauft nur `loose` (`0028`/`0029`/`0108`). `disc_case` ist deshalb
+-- modelliert, waehlbar und durch einen CHECK gegen `loose` gesichert — aber
+-- nicht verkaeuflich. Das zu aendern waere eine eigene Produktentscheidung
+-- und steht NICHT in dieser Datei.
 --
 -- ---------------------------------------------------------------------------
 -- WARUM DIE FREIGABE AN DER POSITION HAENGT UND NICHT AM ARTIKEL
@@ -214,6 +234,52 @@ end $$;
 alter table public.shop_inventory
   add column sale_released boolean not null default false;
 
+/*
+ * DER LIEFERUMFANG — eine EIGENE Eigenschaft, nicht der Zustand.
+ *
+ * ZWEI FRAGEN, DIE NICHT DIESELBE SIND (Betreiber, 2026-10-20):
+ *
+ *   condition        in welchem Zustand ist der Artikel? Das vorhandene
+ *                    Vokabular `loose` / `boxed`, und es wird hier NICHT
+ *                    umgedeutet. Fuer ein Spiel heisst `loose`
+ *                    ausdruecklich: Spielmedium OHNE Originalhuelle.
+ *   delivery_scope   was liegt im Paket? Disc allein, Disc mit Anleitung,
+ *                    Portal allein, Portal mit USB-Kabel.
+ *
+ * Der Lieferumfang laesst sich aus dem Zustand NICHT ableiten — genau
+ * deshalb steht er daneben und nicht darin. „Lose" sagt, dass keine
+ * Originalhuelle dabei ist; es sagt nicht, ob eine Anleitung oder ein
+ * Kabel dabei ist.
+ *
+ * NULL HEISST „NICHT ANGEGEBEN", und fuer eine Figur bleibt es dabei: dort
+ * ist die Frage durch `condition` beantwortet und die Spalte bedeutungslos.
+ * Fuer Zubehoer ist NULL ein VERKAUFSHINDERNIS — ein Angebot fuer ein
+ * gebrauchtes Spiel muss sagen, was geliefert wird.
+ *
+ * ZWEI CHECKS, UND DER ZWEITE IST DER WICHTIGE. `disc_case` („mit
+ * Originalhuelle") und `condition = 'loose'` widersprechen sich nach der
+ * Festlegung oben. Die Tabelle laesst die Kombination deshalb nicht zu,
+ * statt sich auf eine Funktion zu verlassen. Folge, und sie ist
+ * beabsichtigt: ein Spiel MIT Huelle ist nicht `loose`, und V1 verkauft
+ * nur `loose` (`0028`/`0029`/`0108`) — es ist damit modelliert und
+ * waehlbar, aber nicht verkaeuflich. Das zu aendern waere eine eigene
+ * Produktentscheidung.
+ */
+alter table public.shop_inventory
+  add column delivery_scope text;
+
+alter table public.shop_inventory
+  add constraint shop_inventory_delivery_scope_known
+    check (delivery_scope is null or delivery_scope in
+           ('disc_only', 'disc_manual', 'disc_case', 'portal_only', 'portal_cable'));
+
+alter table public.shop_inventory
+  add constraint shop_inventory_case_is_not_loose
+    check (delivery_scope is distinct from 'disc_case' or condition <> 'loose');
+
+comment on column public.shop_inventory.delivery_scope is
+  'Was bei DIESER Position wirklich geliefert wird (0139) — eine eigene Eigenschaft neben condition, nicht aus ihm ableitbar. disc_only | disc_manual | disc_case fuer Spiele, portal_only | portal_cable fuer Portale. NULL heisst NICHT ANGEGEBEN: fuer eine Figur bleibt es dabei (dort beantwortet condition die Frage), fuer Zubehoer ist es ein Verkaufshindernis — is_position_sellable() verlangt eine Angabe. condition wird dadurch NICHT umgedeutet: fuer ein Spiel heisst loose weiterhin "Spielmedium ohne Originalhuelle", und der CHECK shop_inventory_case_is_not_loose haelt die beiden Aussagen widerspruchsfrei.';
+
 comment on column public.shop_inventory.sale_released is
   'Freigabe DIESER Lagerposition fuer den oeffentlichen Verkauf (0139). Gilt nur fuer Zubehoer (game, portal) — fuer eine Figur fragt is_position_sellable() die Spalte nicht, dort entscheidet is_shop_eligible() wie seit 0008. Vorgabe false: eine vorhandene Position wird durch diese Migration nicht kaufbar, auch nicht die 13 Spielezeilen mit is_listed = true. Sie sitzt an der POSITION und nicht am Katalogartikel, weil Preis, Menge und Listung dort sitzen und weil diese Zeile in einer spaeteren Marketplace-Architektur je Verkaeufer gefuehrt wuerde. Das ist Vorsorge, keine Multi-Seller-Implementierung (ADR-0021).';
 
@@ -270,6 +336,8 @@ comment on column public.skylanders.usk_rating is
 --                                   aber KEINE Freigabe — die Umkehrung gilt
 --                                   nicht, und das ist Punkt 1 des Auftrags.
 --   usk_rating is not null          nur bei Spielen. Abschnitt 3.
+--   delivery_scope is not null      ein Angebot fuer gebrauchte Ware muss
+--                                   sagen, was im Paket liegt. Abschnitt 2.
 --   sale_released                   die ausdrueckliche Freigabe. Ohne sie
 --                                   nichts, egal wie vollstaendig der Rest.
 --
@@ -297,6 +365,8 @@ as $$
            and s.is_active
            and s.catalog_visible
            and (s.item_type <> 'game' or s.usk_rating is not null)
+           -- Ein Angebot muss sagen, WAS geliefert wird.
+           and i.delivery_scope is not null
            and i.sale_released
          )
        )
@@ -333,12 +403,30 @@ grant execute on function public.is_position_sellable(bigint) to anon, authentic
 -- ---------------------------------------------------------------------------
 
 -- 5a. shop_offers() — die oeffentliche Projektion (zuletzt 0029)
-create or replace function public.shop_offers()
+--
+-- DIE EINZIGE DER VIER TUEREN, DIE MEHR ALS EINE ZEILE AENDERT: sie bekommt
+-- eine FUENFTE Spalte, `delivery_scope`. Ein Angebot fuer gebrauchte Ware
+-- muss sagen, was geliefert wird, und die Projektion ist der einzige Weg,
+-- auf dem eine oeffentliche Seite das erfaehrt. Eine zweite Abfrage daneben
+-- waere eine zweite Angebotsverwaltung.
+--
+-- FUER FIGUREN IST SIE IMMER NULL. Dort beantwortet `condition` die Frage,
+-- und `0139` setzt die Spalte bei keiner Figurenzeile. Abschnitt 8 prueft
+-- das nach.
+--
+-- `drop` STATT `create or replace`: PostgreSQL laesst den Rueckgabetyp einer
+-- Funktion nicht ersetzen. Die Rechte werden deshalb unten neu gesetzt — bei
+-- einem `drop` gehen sie mit, und ein Recht, das niemand in der Migration
+-- sieht, ist ein Recht, das niemand prueft.
+drop function if exists public.shop_offers();
+
+create function public.shop_offers()
 returns table (
-  sky_id    text,
-  condition text,
-  price     numeric,
-  available boolean
+  sky_id         text,
+  condition      text,
+  price          numeric,
+  available      boolean,
+  delivery_scope text
 )
 language sql
 stable
@@ -349,7 +437,9 @@ as $$
     i.sky_id,
     i.condition,
     public.shop_price(i.sale_price, s.market_price, st.price_percentage) as price,
-    (i.available_quantity > 0) as available
+    (i.available_quantity > 0) as available,
+    -- Was im Paket liegt. NULL fuer jede Figur — siehe Kopf.
+    i.delivery_scope
   from public.shop_inventory i
   join public.skylanders s on s.sky_id = i.sky_id
   cross join public.shop_settings st
@@ -369,6 +459,9 @@ as $$
     and public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null
   order by i.sky_id, i.condition;
 $$;
+
+comment on function public.shop_offers() is
+  'The public V1 storefront projection. Every position that is released (is_listed), sellable at this position (is_position_sellable, 0139) and priced - and, since 0029, in the one condition V1 currently sells (v1_sale_condition()). FIVE values per offer since 0139: sky_id, condition, price, available, delivery_scope. No stock level, no cost, no note, no inventory id, no seller. delivery_scope says what is in the parcel and is NULL for every figure, where condition already answers it; for an accessory it is required, because an offer for used goods must say what is delivered. Other conditions are NOT removed from the product - boxed stock, boxed order lines and the admin views keep them; they are simply not offered to the public while V1 sells one condition.';
 
 revoke all on function public.shop_offers() from public;
 grant execute on function public.shop_offers() to anon, authenticated;
@@ -826,6 +919,10 @@ begin
                                          then 'item type not sold'
         when s.item_type = 'game' and s.usk_rating is null
                                          then 'usk rating missing'
+        when s.item_type = 'game' and s.usk_rating = 18
+                                         then 'usk 18 needs age verification'
+        when s.item_type <> 'figure' and i.delivery_scope is null
+                                         then 'delivery scope missing'
         when s.item_type <> 'figure' and not i.sale_released
                                          then 'not released for sale'
         else null
@@ -861,9 +958,10 @@ security definer
 set search_path = ''
 as $$
 declare
-  v_id   bigint;
-  v_art  text;
-  v_usk  smallint;
+  v_id     bigint;
+  v_art    text;
+  v_usk    smallint;
+  v_umfang text;
 begin
   if not public.can_operate_active_seller() then
     raise exception 'seller operator role required'
@@ -881,8 +979,8 @@ begin
    * ist. Eine Freigabe fuer eine Position, die es nicht gibt, ist dagegen
    * eine Freigabe fuer nichts.
    */
-  select i.id, s.item_type, s.usk_rating
-    into v_id, v_art, v_usk
+  select i.id, s.item_type, s.usk_rating, i.delivery_scope
+    into v_id, v_art, v_usk, v_umfang
     from public.shop_inventory i
     join public.skylanders s on s.sky_id = i.sky_id
    where i.sky_id = p_sky_id
@@ -925,6 +1023,42 @@ begin
       using errcode = 'check_violation';
   end if;
 
+  /*
+   * UND EIN SPIEL AB 18 WIRD GAR NICHT FREIGEGEBEN.
+   *
+   * § 12 JuSchG: ein Bildtraeger mit „Keine Jugendfreigabe" darf im
+   * Versandhandel nur abgegeben werden, wenn sichergestellt ist, dass kein
+   * Minderjaehriger ihn erhaelt — Altersverifikation bei Bestellung UND
+   * eine Zustellung nur an Erwachsene. SkyIsles hat beides nicht: der
+   * Checkout kennt kein Geburtsdatum und der Versand kein Ident-Verfahren.
+   *
+   * Der Riegel ist deshalb technisch und nicht redaktionell: solange die
+   * Verifikation fehlt, gibt es keinen zulaessigen Weg, so einen Artikel
+   * zu verkaufen. Kommt sie, faellt dieser Block — eine Zeile, eine eigene
+   * Entscheidung. Fuer die Skylanders-Titel ist er heute ohne praktische
+   * Wirkung (USK 0 und 6), und genau deshalb kostet er nichts.
+   */
+  if p_released and v_art = 'game' and v_usk = 18 then
+    raise exception
+      'game % is rated USK 18; SkyIsles has no age verification at checkout '
+      'or delivery, so it cannot be released for sale', p_sky_id
+      using errcode = 'check_violation';
+  end if;
+
+  /*
+   * UND OHNE ANGABE ZUM LIEFERUMFANG AUCH NICHT.
+   *
+   * Dieselbe Bauart wie der USK-Riegel: nur beim Freigeben geprueft, nie
+   * beim Zuruecknehmen. Ein Angebot fuer gebrauchte Ware, das nicht sagt,
+   * was im Paket liegt, ist eine unvollstaendige Produktangabe.
+   */
+  if p_released and v_umfang is null then
+    raise exception
+      'position % / % has no delivery scope; set it before releasing it for sale',
+      p_sky_id, p_condition
+      using errcode = 'check_violation';
+  end if;
+
   -- Nur die lose Beschaffenheit wird verkauft (0028/0029/0108).
   if p_condition is distinct from public.v1_sale_condition() then
     raise exception 'SkyIsles sells % only; % is not an operative position',
@@ -946,6 +1080,106 @@ comment on function public.seller_set_sale_release(text, text, boolean) is
 revoke all on function public.seller_set_sale_release(text, text, boolean)
   from public, anon;
 grant execute on function public.seller_set_sale_release(text, text, boolean)
+  to authenticated;
+
+
+create or replace function public.seller_set_delivery_scope(
+  p_sky_id    text,
+  p_condition text,
+  p_scope     text
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_id  bigint;
+  v_art text;
+begin
+  if not public.can_operate_active_seller() then
+    raise exception 'seller operator role required'
+      using errcode = 'insufficient_privilege';
+  end if;
+
+  select i.id, s.item_type
+    into v_id, v_art
+    from public.shop_inventory i
+    join public.skylanders s on s.sky_id = i.sky_id
+   where i.sky_id = p_sky_id
+     and i.condition = p_condition;
+
+  if v_id is null then
+    raise exception 'no stock position for % / %', p_sky_id,
+      coalesce(p_condition, '(null)')
+      using errcode = 'no_data_found';
+  end if;
+
+  /*
+   * EINE FIGUR HAT KEINEN LIEFERUMFANG ZU WAEHLEN. Dort beantwortet
+   * `condition` die Frage vollstaendig, und das Tor fragt die Spalte nicht
+   * — ein Feld ohne Wirkung ist dieselbe Falle wie ein Schalter ohne
+   * Wirkung.
+   */
+  if v_art = 'figure' then
+    raise exception 'a figure has no delivery scope; condition already says it'
+      using errcode = 'check_violation';
+  end if;
+
+  /*
+   * DAS VOKABULAR GEHOERT ZUR ARTIKELART. `disc_case` an einem Portal
+   * waere Unsinn, `portal_cable` an einem Spiel auch. Der CHECK der
+   * Tabelle kennt nur die Wertemenge; welcher Wert zu welcher Art passt,
+   * steht hier, weil `item_type` auf einer anderen Tabelle liegt.
+   *
+   * NULL ist erlaubt und heisst „wieder ohne Angabe" — damit laesst sich
+   * eine falsche Angabe zuruecknehmen. Eine Position ohne Angabe ist nicht
+   * freigebbar, also ist das Zuruecknehmen sicher.
+   */
+  if p_scope is not null then
+    if v_art = 'game' and p_scope not in ('disc_only', 'disc_manual', 'disc_case') then
+      raise exception 'delivery scope % is not one a game can have', p_scope
+        using errcode = 'check_violation';
+    end if;
+    if v_art = 'portal' and p_scope not in ('portal_only', 'portal_cable') then
+      raise exception 'delivery scope % is not one a portal can have', p_scope
+        using errcode = 'check_violation';
+    end if;
+    if v_art not in ('game', 'portal') then
+      raise exception 'item type % has no delivery scope vocabulary', v_art
+        using errcode = 'check_violation';
+    end if;
+  end if;
+
+  /*
+   * `disc_case` an einer losen Position lehnt der CHECK
+   * `shop_inventory_case_is_not_loose` ab — und zwar mit einer Meldung,
+   * die niemand versteht. Deshalb hier zuerst, im Klartext.
+   */
+  if p_scope = 'disc_case'
+     and (select condition from public.shop_inventory where id = v_id)
+         = public.v1_sale_condition() then
+    raise exception
+      'a game with its original case is not %; the original-case scope belongs to a '
+      'position in another condition, and V1 sells % only',
+      public.v1_sale_condition(), public.v1_sale_condition()
+      using errcode = 'check_violation';
+  end if;
+
+  update public.shop_inventory
+     set delivery_scope = p_scope
+   where id = v_id;
+
+  return v_id;
+end;
+$$;
+
+comment on function public.seller_set_delivery_scope(text, text, text) is
+  'Sets what is delivered with ONE accessory stock position (0139): disc_only | disc_manual | disc_case for a game, portal_only | portal_cable for a portal, or NULL to take the statement back. Refuses a figure (condition already answers it there), a vocabulary that does not fit the item type, and disc_case on a loose position — for a game loose means "medium without its original case", and the two statements may not contradict each other. Touches neither price, nor is_listed, nor sale_released, nor quantity.';
+
+revoke all on function public.seller_set_delivery_scope(text, text, text)
+  from public, anon;
+grant execute on function public.seller_set_delivery_scope(text, text, text)
   to authenticated;
 
 
@@ -1022,6 +1256,49 @@ begin
   end if;
   if not exists (select 1 from pg_constraint where conname = 'skylanders_usk_rating_known') then
     raise exception '0139 Abbruch: der CHECK auf usk_rating fehlt';
+  end if;
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'shop_inventory'
+                    and column_name = 'delivery_scope' and is_nullable = 'YES') then
+    raise exception '0139 Abbruch: delivery_scope fehlt oder ist not null';
+  end if;
+  for v_soll in select unnest(array['shop_inventory_delivery_scope_known',
+                                    'shop_inventory_case_is_not_loose']) loop
+    if not exists (select 1 from pg_constraint where conname = v_soll) then
+      raise exception '0139 Abbruch: der CHECK % fehlt', v_soll;
+    end if;
+  end loop;
+
+  -- 8a2. Kein Lieferumfang wurde gesetzt. Wie bei der Freigabe: die
+  --      Migration baut das Feld, sie fuellt es nicht.
+  select count(*) into v_n from public.shop_inventory where delivery_scope is not null;
+  if v_n <> 0 then
+    raise exception '0139 Abbruch: % Positionen tragen einen Lieferumfang, erwartet 0', v_n;
+  end if;
+
+  -- 8a3. Die oeffentliche Projektion hat jetzt fuenf Spalten.
+  --      Gefragt wird `pg_proc`, nicht `information_schema.columns`:
+  --      `shop_offers` ist eine Funktion und keine Sicht, und die Sicht
+  --      haette stillschweigend 0 Zeilen geliefert — eine Pruefung, die
+  --      immer zustimmt.
+  select count(*) into v_n
+    from pg_proc p, unnest(p.proargnames, p.proargmodes) as a(nm, md)
+   where p.oid = to_regprocedure('public.shop_offers()') and a.md = 't';
+  if v_n <> 5 then
+    raise exception '0139 Abbruch: shop_offers liefert % Spalten statt fuenf', v_n;
+  end if;
+  if not exists (
+    select 1 from pg_proc p, unnest(p.proargnames, p.proargmodes) as a(nm, md)
+     where p.oid = to_regprocedure('public.shop_offers()')
+       and a.md = 't' and a.nm = 'delivery_scope') then
+    raise exception '0139 Abbruch: shop_offers nennt delivery_scope nicht';
+  end if;
+
+  -- 8a4. Und sie ist fuer jedes Figurenangebot leer.
+  select count(*) into v_n from public.shop_offers() o
+   where o.delivery_scope is not null;
+  if v_n <> 0 then
+    raise exception '0139 Abbruch: % Angebote tragen einen Lieferumfang, erwartet 0', v_n;
   end if;
 
   -- 8b. KEINE EINZIGE POSITION IST FREIGEGEBEN. Der wichtigste Satz dieser Datei.
@@ -1111,11 +1388,23 @@ begin
     end if;
   end loop;
 
-  -- 8i. Die vier Tueren und die zwei neuen Funktionen stehen.
+  -- 8h2. Die Betriebsdiagnose kennt die vier neuen Gruende.
+  for v_soll in select unnest(array['item type not sold', 'usk rating missing',
+                                    'usk 18 needs age verification',
+                                    'delivery scope missing', 'not released for sale']) loop
+    if position(v_soll in (select prosrc from pg_proc
+                            where oid = to_regprocedure('public.admin_shop_listing_audit()')))
+       = 0 then
+      raise exception '0139 Abbruch: die Betriebsdiagnose kennt den Grund "%" nicht', v_soll;
+    end if;
+  end loop;
+
+  -- 8i. Die vier Tueren und die drei neuen Funktionen stehen.
   if to_regprocedure('public.is_position_sellable(bigint)') is null
      or to_regprocedure('public.seller_set_sale_release(text, text, boolean)') is null
+     or to_regprocedure('public.seller_set_delivery_scope(text, text, text)') is null
      or to_regprocedure('public.admin_set_usk_rating(text, smallint)') is null then
-    raise exception '0139 Abbruch: eine der drei neuen Funktionen fehlt';
+    raise exception '0139 Abbruch: eine der vier neuen Funktionen fehlt';
   end if;
   if exists (
     select 1 from pg_proc p

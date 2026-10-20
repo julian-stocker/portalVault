@@ -33,6 +33,13 @@ begin
       'die Ruecknahme dieser Migration loescht die Spalte und damit die Freigabe', v_n;
   end if;
 
+  select count(*) into v_n from public.shop_inventory where delivery_scope is not null;
+  if v_n > 0 then
+    raise exception 'R0139 Abbruch: % Positionen tragen einen Lieferumfang. Er geht mit '
+      'der Spalte verloren — erst ueber seller_set_delivery_scope(..., null) '
+      'zuruecknehmen', v_n;
+  end if;
+
   select count(*) into v_n from public.skylanders where usk_rating is not null;
   if v_n > 0 then
     raise exception 'R0139 Abbruch: % Spiele tragen eine USK-Angabe. Sie geht mit der '
@@ -45,14 +52,20 @@ end $$;
 -- 1. Die drei neuen Funktionen fallen weg
 -- ---------------------------------------------------------------------------
 drop function if exists public.seller_set_sale_release(text, text, boolean);
+drop function if exists public.seller_set_delivery_scope(text, text, text);
 drop function if exists public.admin_set_usk_rating(text, smallint);
 
 
 -- ---------------------------------------------------------------------------
 -- 2. Die Tueren, Zeichen fuer Zeichen wie vor 0139
 -- ---------------------------------------------------------------------------
--- 2a. shop_offers() — wie 0029
-create or replace function public.shop_offers()
+-- 2a. shop_offers() — wie 0029, wieder mit VIER Spalten
+--
+-- `drop` statt `create or replace`: `0139` hat den Rueckgabetyp um
+-- `delivery_scope` erweitert, und PostgreSQL laesst ihn nicht ersetzen.
+drop function if exists public.shop_offers();
+
+create function public.shop_offers()
 returns table (
   sky_id    text,
   condition text,
@@ -537,6 +550,9 @@ grant execute on function public.admin_shop_listing_audit() to authenticated;
 -- ---------------------------------------------------------------------------
 drop function if exists public.is_position_sellable(bigint);
 
+alter table public.shop_inventory drop constraint if exists shop_inventory_case_is_not_loose;
+alter table public.shop_inventory drop constraint if exists shop_inventory_delivery_scope_known;
+alter table public.shop_inventory drop column if exists delivery_scope;
 alter table public.shop_inventory drop column if exists sale_released;
 alter table public.skylanders     drop constraint if exists skylanders_usk_rating_known;
 alter table public.skylanders     drop column if exists usk_rating;
@@ -556,6 +572,15 @@ begin
               where table_schema = 'public' and table_name = 'shop_inventory'
                 and column_name = 'sale_released') then
     raise exception 'R0139 Abbruch: sale_released steht noch';
+  end if;
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'public' and table_name = 'shop_inventory'
+                and column_name = 'delivery_scope') then
+    raise exception 'R0139 Abbruch: delivery_scope steht noch';
+  end if;
+  if (select count(*) from pg_proc p, unnest(p.proargnames, p.proargmodes) as a(nm, md)
+       where p.oid = to_regprocedure('public.shop_offers()') and a.md = 't') <> 4 then
+    raise exception 'R0139 Abbruch: shop_offers liefert nicht wieder vier Spalten';
   end if;
   if exists (select 1 from information_schema.columns
               where table_schema = 'public' and table_name = 'skylanders'

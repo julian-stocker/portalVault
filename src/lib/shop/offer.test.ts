@@ -28,6 +28,8 @@ function offer(overrides: Partial<Offer> = {}): Offer {
     condition: "loose",
     price: 9.9,
     available: true,
+    /* Eine Figur trägt keine Lieferumfangsangabe (0139). */
+    deliveryScope: null,
     ...overrides,
   };
 }

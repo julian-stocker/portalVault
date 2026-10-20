@@ -39,22 +39,36 @@ function vorherigeFassung(name: string, datei: string): string {
 
 /** Dieselbe Funktion, wie sie in 0139 steht. */
 function neueFassung(name: string): string {
-  const start = M139.lastIndexOf(`create or replace function public.${name}(`);
-  expect(start, `${name} in 0139`).toBeGreaterThan(-1);
+  /* Beide Schreibweisen: `shop_offers()` wird gedroppt und neu angelegt,
+     weil PostgreSQL den Rückgabetyp nicht ersetzen lässt. */
+  const start = Math.max(
+    M139.lastIndexOf(`create or replace function public.${name}(`),
+    M139.lastIndexOf(`\ncreate function public.${name}(`) + 1,
+  );
+  expect(start, `${name} in 0139`).toBeGreaterThan(0);
   const end = M139.indexOf("\n$$;", start);
   return M139.slice(start, end + 4);
 }
 
-/** Die vier Verkaufstüren und die Datei, die sie zuletzt definiert hat. */
+/**
+ * DREI der vier Verkaufstüren, und die Datei, die sie zuletzt definiert hat.
+ *
+ * `shop_offers()` fehlt hier mit Absicht: sie ist die einzige, die mehr als
+ * eine Zeile ändert — sie bekommt eine fünfte Spalte. Sie hat deshalb einen
+ * eigenen Block weiter unten, der jede Abweichung einzeln aufzählt, statt
+ * sie in einer lockereren Regel für alle vier verschwinden zu lassen.
+ */
 const TUEREN = [
-  ["shop_offers", "0029_v1_loose_only_offers.sql"],
   ["shop_quantity_available", "0028_v1_loose_only_commerce.sql"],
   ["create_order", "0040_shop_platform_responsibilities.sql"],
   ["reserve_for_order", "0010_commerce_core.sql"],
 ] as const;
 
+/** Die vierte. */
+const OFFERS_VORHER = "0029_v1_loose_only_offers.sql";
+
 /* ===================================================================== */
-describe("1. die vier Türen — eine getauschte Zeile, und sonst nichts", () => {
+describe("1. drei Türen — eine getauschte Zeile, und sonst nichts", () => {
   it.each(TUEREN)("%s unterscheidet sich von %s in GENAU einer Zeile", (name, datei) => {
     /*
      * DIE SCHÄRFSTE PRÜFUNG DIESER DATEI. `0139` muss jede der vier
@@ -82,6 +96,99 @@ describe("1. die vier Türen — eine getauschte Zeile, und sonst nichts", () =>
       const end = ROLLBACK.indexOf("\n$$;", start);
       expect(ROLLBACK.slice(start, end + 4), name).toBe(alt);
     }
+  });
+});
+
+/* ===================================================================== */
+describe("1b. shop_offers — die eine Tür, die eine Spalte dazubekommt", () => {
+  const alt = vorherigeFassung("shop_offers", OFFERS_VORHER);
+  const neu = neueFassung("shop_offers");
+
+  /** Zeilen, die in `b` stehen und in `a` nicht — ohne Einrückung. */
+  const dazu = (a: string, b: string): string[] => {
+    const vorhanden = new Set(a.split("\n").map((l) => l.trim()));
+    return b.split("\n").map((l) => l.trim())
+      .filter((l) => l !== "" && !vorhanden.has(l));
+  };
+
+  it("sie wird GEDROPPT und neu angelegt, nicht ersetzt", () => {
+    /*
+     * PostgreSQL lässt den Rückgabetyp einer Funktion nicht ersetzen. Eine
+     * fünfte Spalte heißt deshalb: `drop`, dann `create`. Das ist kein
+     * Stilwechsel, sondern die einzige Form, die läuft — und weil ein
+     * `drop` die Rechte mitnimmt, müssen sie danach wieder dastehen.
+     */
+    expect(code(M139)).toContain("drop function if exists public.shop_offers();");
+    expect(neu.startsWith("create function public.shop_offers()")).toBe(true);
+    const nachDrop = M139.indexOf("drop function if exists public.shop_offers();");
+    expect(M139.indexOf("create function public.shop_offers()")).toBeGreaterThan(nachDrop);
+    expect(M139.indexOf("grant execute on function public.shop_offers()"))
+      .toBeGreaterThan(nachDrop);
+  });
+
+  it("und bringt GENAU diese Zeilen mit — keine weitere", () => {
+    /*
+     * Dieselbe Rechnung wie für die drei anderen Türen, nur mit mehr als
+     * einer erlaubten Änderung. Verglichen werden Zeilen ohne Einrückung:
+     * die Spaltenliste wird neu ausgerichtet, wenn ein längerer Name
+     * dazukommt, und eine Einrückung ist keine Aussage.
+     *
+     * Was hier nicht aufgezählt ist, ist beim Neuschreiben hineingeraten.
+     */
+    expect(dazu(alt, neu).sort()).toEqual([
+      "-- Was im Paket liegt. NULL fuer jede Figur — siehe Kopf.",
+      "(i.available_quantity > 0) as available,",
+      "and public.is_position_sellable(i.id)",
+      "available      boolean,",
+      "condition      text,",
+      "create function public.shop_offers()",
+      "delivery_scope text",
+      "i.delivery_scope",
+      "price          numeric,",
+      "sky_id         text,",
+    ].sort());
+  });
+
+  it("und verliert GENAU diese — keine weitere", () => {
+    expect(dazu(neu, alt).sort()).toEqual([
+      "(i.available_quantity > 0) as available",
+      "and public.is_shop_eligible(i.sky_id)",
+      "available boolean",
+      "condition text,",
+      "create or replace function public.shop_offers()",
+      "price     numeric,",
+      "sky_id    text,",
+    ].sort());
+  });
+
+  it("die Projektion liefert GENAU fünf Spalten, und das sind diese", () => {
+    /*
+     * Gelesen wird die `returns table (...)`-Liste, nicht der Rumpf: dort
+     * steht, was nach draußen geht. `sale_price` etwa kommt im Rumpf vor —
+     * als Argument von `shop_price()` —, verlässt die Funktion aber nicht.
+     */
+    const kopf = neu.slice(neu.indexOf("returns table ("), neu.indexOf(")\nlanguage"));
+    const spalten = kopf.split("\n").slice(1)
+      .map((l) => l.trim().replace(/,$/, "").split(/\s+/)[0])
+      .filter((n) => n !== "");
+    expect(spalten).toEqual(["sky_id", "condition", "price", "available", "delivery_scope"]);
+    /* Und keine davon ist eine Menge oder ein interner Wert. */
+    for (const verboten of ["quantity", "reserved", "note", "inventory_id",
+      "sale_price", "seller"]) {
+      expect(spalten, verboten).not.toContain(verboten);
+    }
+  });
+
+  it("und die Rücknahme gibt ihr die vier Spalten zurück", () => {
+    expect(ROLLBACK).toContain("drop function if exists public.shop_offers();");
+    const start = ROLLBACK.lastIndexOf("create function public.shop_offers()");
+    expect(start).toBeGreaterThan(-1);
+    const end = ROLLBACK.indexOf("\n$$;", start);
+    const zurueck = ROLLBACK.slice(start, end + 4);
+    /* Zeichen für Zeichen die Fassung aus 0029 — bis auf das `or replace`,
+       das nach dem `drop` nichts mehr zu ersetzen hätte. */
+    expect(zurueck).toBe(alt.replace("create or replace function public.shop_offers()",
+                                     "create function public.shop_offers()"));
   });
 });
 

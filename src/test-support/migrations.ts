@@ -34,8 +34,20 @@ export function migrationSource(file: string): string {
 export const allMigrations: string = migrationFiles.map(migrationSource).join("\n");
 
 /**
- * The body of the LAST `create or replace function public.<name>(` in the
- * history, up to its closing `$$;`.
+ * The body of the LAST definition of `public.<name>(` in the history, up to
+ * its closing `$$;`.
+ *
+ * BOTH SPELLINGS COUNT — `create or replace function` and a plain `create
+ * function`. The second one is rare and always deliberate: PostgreSQL will
+ * not let `create or replace` change a function's RETURN TYPE, so a
+ * migration that widens one has to `drop` it first and then `create` it.
+ * `0139` does exactly that with `shop_offers()`.
+ *
+ * Until that case appeared, this helper looked only for the replace form —
+ * and silently returned the version from `0029`, a definition the database
+ * would no longer be running. A test asserting against the wrong text keeps
+ * passing while the live behaviour drifts away from it, which is the one
+ * defect this module exists to prevent.
  *
  * Throws rather than returning empty when there is no such function: a test
  * asserting against "" would pass every `not.toContain` it made.
@@ -44,8 +56,13 @@ export function latestFunction(name: string): { file: string; body: string } {
   for (let i = migrationFiles.length - 1; i >= 0; i--) {
     const file = migrationFiles[i];
     const sql = migrationSource(file);
-    const start = sql.lastIndexOf(`create or replace function public.${name}(`);
-    if (start === -1) continue;
+    /* Die spätere der beiden Schreibweisen gewinnt — innerhalb einer Datei
+       wie über die Historie. */
+    const start = Math.max(
+      sql.lastIndexOf(`create or replace function public.${name}(`),
+      sql.lastIndexOf(`\ncreate function public.${name}(`) + 1,
+    );
+    if (start <= 0) continue;
     const end = sql.indexOf("\n$$;", start);
     if (end === -1) continue;
     return { file, body: sql.slice(start, end) };

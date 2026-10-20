@@ -45,7 +45,7 @@ function index(offers: readonly Offer[]): OfferIndex {
 }
 
 function offer(overrides: Partial<Offer> = {}): Offer {
-  return { skyId: "SKY-0001", condition: "loose", price: 9.9, available: true, ...overrides };
+  return { skyId: "SKY-0001", condition: "loose", price: 9.9, available: true, deliveryScope: null, ...overrides };
 }
 
 /** The file without its comments — what the code does, not what it says. */
@@ -125,7 +125,7 @@ describe("what cannot be bought", () => {
     const cart = addLine(addLine([], BASH, 2), BASH_BOXED, 1);
     const entries = resolveCart(
       cart,
-      index([offer({ available: false }), offer({ condition: "boxed", price: 19 })]),
+      index([offer({ available: false, deliveryScope: null }), offer({ condition: "boxed", price: 19 })]),
     );
 
     expect(entries).toHaveLength(2);

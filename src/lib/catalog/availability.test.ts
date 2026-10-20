@@ -26,6 +26,8 @@ const offer = (over: Partial<Offer> = {}): Offer => ({
   condition: "loose",
   price: 4.49,
   available: true,
+  /* Eine Figur trägt keine Lieferumfangsangabe (0139). */
+  deliveryScope: null,
   ...over,
 });
 
@@ -38,7 +40,7 @@ function code(path: string): string {
 describe("what counts as an offer", () => {
   it("is not merely a listed position", () => {
     // The card shows nothing for this figure; the filter must agree.
-    expect(hasBuyableOffer([offer({ available: false })])).toBe(false);
+    expect(hasBuyableOffer([offer({ available: false, deliveryScope: null })])).toBe(false);
   });
 
   it("is one that can actually be bought", () => {
@@ -47,12 +49,12 @@ describe("what counts as an offer", () => {
 
   it("counts a buyable loose one among unbuyable ones", () => {
     expect(
-      hasBuyableOffer([offer({ available: false }), offer({ condition: "loose", available: true })]),
+      hasBuyableOffer([offer({ available: false, deliveryScope: null }), offer({ condition: "loose", available: true, deliveryScope: null })]),
     ).toBe(true);
   });
 
   it("does not count a boxed one — V1 does not sell OVP (V3.3)", () => {
-    expect(hasBuyableOffer([offer({ condition: "boxed", available: true })])).toBe(false);
+    expect(hasBuyableOffer([offer({ condition: "boxed", available: true, deliveryScope: null })])).toBe(false);
   });
 
   it("treats nothing and an empty list alike", () => {
@@ -80,13 +82,13 @@ describe("the mode", () => {
   it("lets everything through by default", () => {
     expect(DEFAULT_AVAILABILITY).toBe("all");
     expect(matchesAvailability(undefined, "all")).toBe(true);
-    expect(matchesAvailability([offer({ available: false })], "all")).toBe(true);
+    expect(matchesAvailability([offer({ available: false, deliveryScope: null })], "all")).toBe(true);
     expect(isAvailabilityActive("all")).toBe(false);
   });
 
   it("narrows to buyable when asked", () => {
     expect(matchesAvailability([offer()], "available")).toBe(true);
-    expect(matchesAvailability([offer({ available: false })], "available")).toBe(false);
+    expect(matchesAvailability([offer({ available: false, deliveryScope: null })], "available")).toBe(false);
     expect(matchesAvailability(undefined, "available")).toBe(false);
     expect(isAvailabilityActive("available")).toBe(true);
   });

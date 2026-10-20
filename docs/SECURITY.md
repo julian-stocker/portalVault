@@ -1359,7 +1359,10 @@ Ankauffaktor bleiben, wo sie sind; die Verbotsliste in Abschnitt 2 ist unberühr
 > im Angebot erkennbar sein, sonst darf das Angebot nicht stehen. Sie liegt
 > deshalb auf `skylanders` und nicht in `catalog_editorial`. Geschrieben wird
 > sie allein über `admin_set_usk_rating()` — Plattformadmin, nur für
-> `item_type = 'game'`, Wertemenge per CHECK, **nie abgeleitet**.
+> `item_type = 'game'`, Wertemenge per CHECK, **nie abgeleitet**. Dasselbe
+> gilt für `shop_inventory.delivery_scope`: eine öffentliche Produktangabe,
+> die `shop_offers()` seit `0139` mit ausliefert. `shop_inventory.note`
+> bleibt davon unberührt — sie ist intern und wird es bleiben.
 
 **Der Journaleintrag.** Jede Entstehung schreibt eine Zeile in `catalog_admin_changes`
 (`field = 'created'`, `changed_by = auth.uid()`) — dieselbe Zeile, die `admin_create_figure`
@@ -1405,8 +1408,9 @@ einer ausdrücklichen Freigabe **je Lagerposition**
 (`shop_inventory.sale_released`, Vorgabe `false`). Die vier Verkaufstüren
 fragen dann `is_position_sellable(inventory_id)`; für eine Figur ruft es
 `is_shop_eligible()` auf und ändert nichts. **Katalogsichtbarkeit bewirkt
-auch dann keine Verkaufsfreigabe** — sie ist eine von fünf notwendigen
-Bedingungen. Die 13 Lagerzeilen auf Spielen, die seit jeher `is_listed =
+auch dann keine Verkaufsfreigabe** — sie ist eine von sechs notwendigen
+Bedingungen (Artikeltyp · aktiv · katalogsichtbar · USK bei Spielen ·
+Lieferumfang angegeben · freigegeben). Die 13 Lagerzeilen auf Spielen, die seit jeher `is_listed =
 true` und einen Preis tragen, bleiben durch den Vorgabewert draußen
 (ADR-0129).
 

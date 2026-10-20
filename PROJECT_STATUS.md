@@ -3827,12 +3827,43 @@ verrutscht, fällt damit auf.
 > auf Staging — eine Seite, die eine Spalte liest, die es nicht gibt, bringt
 > `/business/inventory` zum Absturz. Die Belegausstellung bleibt gesperrt.
 
-**Vier Fragen stehen vor der ersten Freigabe offen** (Teil D des
-Vorschlags): die **USK-Quelle** — die Arbeitsmappe führt keine, also ist
-heute **kein Spiel freigebbar**, die 21 Portale dagegen sofort —, ein
-**öffentliches Feld für Zustand und Lieferumfang** (`shop_inventory.note`
-ist intern und bleibt es), die **steuerliche Bestätigung**, und was
-**„lose"** bei einem Spiel heißen soll.
+**Nachtrag vom selben Tag — die fachlichen Anforderungen sind festgelegt,
+und `0139`/`0140` tragen sie jetzt vollständig.**
+
+| Anforderung | wie sie umgesetzt ist |
+|---|---|
+| USK: `0, 6, 12, 16, 18` oder **nicht erfasst**, nie geraten | `skylanders.usk_rating`, nullable, CHECK. `admin_set_usk_rating()` nur für Spiele, **ohne Ableitung aus irgendeinem Namen** |
+| ohne bestätigte Kennzeichnung keine Freigabe | `seller_set_sale_release()` lehnt ein Spiel ohne Eintrag ab — und **ebenso eines mit USK 18**: § 12 Abs. 3 JuSchG verlangt dafür eine Altersprüfung, die SkyIsles nicht hat. Für USK 0 und 6 ohne praktische Wirkung |
+| **Zustand und Lieferumfang getrennt**, „lose" bei Spielen = Medium ohne Originalhülle, Zustandslogik **nicht umgedeutet** | `condition` bleibt unangetastet (kein `drop constraint`, kein `set condition`, `v1_sale_condition()` unverändert). Daneben die neue Spalte `shop_inventory.delivery_scope` |
+| Lieferumfang **strukturiert**, mindestens mit/ohne Originalhülle | feste Liste: `disc_only` · `disc_manual` · `disc_case` für Spiele, `portal_only` · `portal_cable` für Portale. Freitext wäre versehentlich eine Zusicherung |
+| sinnvolle Angaben für **Portale** | das **USB-Kabel** — ohne das ein kabelgebundenes Portal nicht benutzbar ist. Batterien bewusst **nicht**, siehe `docs/LEGAL.md` 8b |
+| Steuerlogik unverändert | `0139` fasst weder Preis- noch Steuerregel an. Was der Betreiber bestätigen muss, steht vollständig in `docs/LEGAL.md`, **Abschnitt 8b** |
+
+**Die scharfe Kante, benannt statt versteckt:** nach der Festlegung ist ein
+Spiel **mit** Originalhülle nicht `loose` — und V1 verkauft nur `loose`.
+`disc_case` ist deshalb modelliert, wählbar und per CHECK gegen `loose`
+gesichert, aber **nicht verkäuflich**. Ob SkyIsles auch Spiele mit Hülle
+verkauft, ist eine eigene Produktentscheidung.
+
+**Dazu kam:** `shop_offers()` liefert den Lieferumfang als **fünfte Spalte**
+(NULL für jede Figur) — gedroppt und neu angelegt, weil PostgreSQL den
+Rückgabetyp nicht ersetzen lässt. `Offer.deliveryScope` reicht ihn durch,
+`src/lib/shop/delivery-scope.ts` trägt das Vokabular, und
+`delivery-scope.test.ts` vergleicht es Zeichen für Zeichen mit dem CHECK.
+
+**Die Oberfläche ist geplant, nicht gebaut:**
+`supabase/checks/accessory_sale_ui_plan.md` — Lagerverwaltung mit
+Freigabeschalter, Lieferumfangsauswahl und dem Satz „warum noch nicht",
+Zubehör-Detailseite `/zubehoer/[slug]` mit `OfferPanel`, `/shop`. **Checkout
+und Warenkorb bleiben unberührt**; sie sind bereits typneutral.
+
+**Offen und vor der ersten Freigabe vom Betreiber zu bestätigen**
+(`docs/LEGAL.md`, 8b): die **USK-Quelle** — die Arbeitsmappe führt keine,
+also ist heute **kein Spiel freigebbar**, die 21 Portale dagegen sofort —,
+die Darstellung des Kennzeichens, die **steuerliche Bestätigung**, der
+Erschöpfungsgrundsatz, **BattG** und **ElektroG** bei Portalen, der
+Widerruf (bestätigen, nicht ändern) und die Versandkostenregel für ein
+Portal.
 
 ### Der Zubehörkatalog ist ein Kachelkatalog (2026-10-20)
 

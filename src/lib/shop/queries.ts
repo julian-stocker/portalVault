@@ -34,6 +34,12 @@ type OfferRow = {
    */
   price: string | number | null;
   available: boolean;
+  /**
+   * Was im Paket liegt (`0139`). `null` für jede Figur, und für eine
+   * Umgebung, in der `0139` noch nicht angewendet ist, fehlt das Feld ganz
+   * — deshalb `undefined` als dritter Fall und `?? null` unten.
+   */
+  delivery_scope?: string | null;
 };
 
 /** PostgREST's code for "no function by that name". See `fetchOffers`. */
@@ -74,6 +80,10 @@ export const fetchOffers = cache(async (): Promise<OfferIndex> => {
       condition: row.condition,
       price,
       available: row.available === true,
+      /* Roh weitergereicht, nicht gedeutet: das Vokabular steht in
+         `@/lib/shop/delivery-scope`, und ein unbekannter Wert soll als
+         solcher sichtbar bleiben statt still zu verschwinden. */
+      deliveryScope: row.delivery_scope ?? null,
     };
 
     const existing = index.get(offer.skyId);

@@ -26,6 +26,9 @@ const offer = (over: Partial<Offer> = {}): Offer => ({
   condition: "loose",
   price: 4.49,
   available: true,
+  /* Eine Figur trägt keine Lieferumfangsangabe (0139): dort beantwortet
+     `condition` die Frage. */
+  deliveryScope: null,
   ...over,
 });
 

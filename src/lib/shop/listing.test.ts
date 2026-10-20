@@ -37,7 +37,9 @@ const FOUNDATION = "supabase/migrations/0003_shop_foundation.sql";
 const PRICING = "supabase/migrations/0007_shop_pricing_and_images.sql";
 
 function offer(overrides: Partial<Offer> = {}): Offer {
-  return { skyId: "SKY-0007", condition: "loose", price: 4.49, available: true, ...overrides };
+  return { skyId: "SKY-0007", condition: "loose", price: 4.49, available: true,
+           /* Eine Figur trägt keine Lieferumfangsangabe (0139). */
+           deliveryScope: null, ...overrides };
 }
 function index(offers: readonly Offer[]): OfferIndex {
   const map = new Map<string, Offer[]>();

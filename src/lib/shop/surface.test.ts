@@ -39,6 +39,8 @@ function offers(entries: Record<string, readonly Offer[]>): OfferIndex {
 const offer = (skyId: string, price: number, available = true): Offer => ({
   skyId,
   condition: "loose",
+  /* Eine Figur trägt keine Lieferumfangsangabe (0139). */
+  deliveryScope: null,
   price,
   available,
 });
@@ -94,8 +96,8 @@ describe("shopEntries", () => {
     const catalog = [figure({ skyId: "SKY-0001" })];
     const index = offers({
       "SKY-0001": [
-        { skyId: "SKY-0001", condition: "boxed", price: 22, available: true },
-        { skyId: "SKY-0001", condition: "loose", price: 8, available: true },
+        { skyId: "SKY-0001", condition: "boxed", price: 22, available: true, deliveryScope: null },
+        { skyId: "SKY-0001", condition: "loose", price: 8, available: true, deliveryScope: null },
       ],
     });
 
@@ -115,8 +117,8 @@ describe("shopEntries", () => {
     const catalog = [figure({ skyId: "SKY-0001" })];
     const index = offers({
       "SKY-0001": [
-        { skyId: "SKY-0001", condition: "loose", price: 3, available: false },
-        { skyId: "SKY-0001", condition: "boxed", price: 22, available: true },
+        { skyId: "SKY-0001", condition: "loose", price: 3, available: false, deliveryScope: null },
+        { skyId: "SKY-0001", condition: "boxed", price: 22, available: true, deliveryScope: null },
       ],
     });
 
@@ -145,8 +147,16 @@ describe("shopEntries", () => {
     const index = offers({ "SKY-0001": [offer("SKY-0001", 9)] });
     const [entry] = shopEntries(catalog, index);
 
+    /*
+     * FÜNF SCHLÜSSEL SEIT `0139`, und keiner davon ist eine Menge.
+     * `deliveryScope` sagt, WAS im Paket liegt — eine Produktangabe, kein
+     * Bestand. Die Zusicherung dieses Tests bleibt dieselbe: hier steht
+     * nirgends, wie viele Stück da sind.
+     */
     const keys = new Set(Object.keys(entry.offers[0]));
-    expect(keys).toEqual(new Set(["skyId", "condition", "price", "available"]));
+    expect(keys).toEqual(
+      new Set(["skyId", "condition", "price", "available", "deliveryScope"]));
+    for (const k of keys) expect(k.toLowerCase(), k).not.toContain("quantity");
     expect(Object.keys(entry)).toEqual(["figure", "offers", "fromPrice"]);
   });
 });

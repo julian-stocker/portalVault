@@ -226,12 +226,20 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
      * Zustände nicht mehr auseinanderhalten und stünde vor der Wahl,
      * entweder alles freizugeben oder nichts.
      *
-     * Sie steht direkt hinter `is_listed`: die beiden Freigabespalten
-     * nebeneinander. `backup-sql.test.ts` vergleicht die Reihenfolge Feld
-     * für Feld mit dem Rumpf der letzten Migration.
+     * UND EINE ZWEITE (0140): `delivery_scope` — was bei dieser Position
+     * wirklich geliefert wird. Ebenfalls aus nichts ableitbar: `condition`
+     * sagt den Zustand, nicht den Inhalt des Pakets. Sie ist eine
+     * öffentliche Produktangabe und steht auf jedem Angebot; ginge sie
+     * verloren, stünde nach einer Wiederherstellung bei jedem Zubehörteil
+     * nichts mehr darüber, was der Käufer bekommt — und es wäre nach
+     * `0139` auch nicht mehr freigebbar.
+     *
+     * Beide stehen direkt hinter `is_listed`: Freigabe und Lieferumfang
+     * neben der Listung. `backup-sql.test.ts` vergleicht die Reihenfolge
+     * Feld für Feld mit dem Rumpf der letzten Migration.
      */
     fields: ["id", "sky_id", "condition", "quantity", "reserved", "available_quantity",
-             "sale_price", "is_listed", "sale_released", "note",
+             "sale_price", "is_listed", "sale_released", "delivery_scope", "note",
              "created_at", "updated_at"],
     restoreRelevant: true,
   },

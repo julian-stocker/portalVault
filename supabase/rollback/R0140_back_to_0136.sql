@@ -622,8 +622,10 @@ declare
 begin
   select prosrc into v_src from pg_proc
    where oid = to_regprocedure('public.seller_business_backup()');
-  if position('sale_released' in v_src) > 0 or position('usk_rating' in v_src) > 0 then
-    raise exception 'R0140 Abbruch: der Rumpf nennt die zwei Felder noch';
+  if position('sale_released' in v_src) > 0
+     or position('delivery_scope' in v_src) > 0
+     or position('usk_rating' in v_src) > 0 then
+    raise exception 'R0140 Abbruch: der Rumpf nennt die drei Felder noch';
   end if;
   raise notice 'R0140 ok: die Sicherung ist wieder die aus 0136';
 end $$;

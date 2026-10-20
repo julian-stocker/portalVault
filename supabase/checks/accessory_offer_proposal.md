@@ -157,6 +157,8 @@ eine Regel an einem Ort.
 ```sql
 alter table public.shop_inventory
   add column sale_released boolean not null default false;
+alter table public.shop_inventory
+  add column delivery_scope text;                   -- null = nicht angegeben
 
 alter table public.skylanders
   add column usk_rating smallint;                   -- null = nicht erfasst
@@ -172,10 +174,11 @@ kein einziges Angebot.
 public.is_position_sellable(p_inventory_id bigint)
   -- FIGUR: unverändert, durch Aufruf statt durch Kopie
   is_shop_eligible(i.sky_id)
-  -- ZUBEHÖR: fünf Bedingungen, alle neu
+  -- ZUBEHÖR: sechs Bedingungen, alle neu
   or (s.item_type in ('game','portal')
       and s.is_active and s.catalog_visible
       and (s.item_type <> 'game' or s.usk_rating is not null)
+      and i.delivery_scope is not null
       and i.sale_released)
 ```
 
@@ -199,8 +202,13 @@ Bedingung, die beim Neuschreiben verrutscht, fällt damit auf.
 
 | Funktion | tut | lehnt ab |
 |---|---|---|
-| `seller_set_sale_release(p_sky_id, p_condition, p_released)` | setzt `sale_released` an **einer** Position | eine **Figur** (dort ist der Schalter ohne Wirkung — und ein wirkungsloser Schalter ist eine Falle) · eine unbekannte Position · ein **Spiel ohne USK-Erfassung** |
-| `admin_set_usk_rating(p_sky_id, p_rating)` | erfasst die Alterskennzeichnung | alles außer `0, 6, 12, 16, 18` · alles außer `item_type = 'game'` |
+| `seller_set_sale_release(sky_id, condition, released)` | setzt `sale_released` an **einer** Position | eine **Figur** (dort ist der Schalter ohne Wirkung — und ein wirkungsloser Schalter ist eine Falle) · eine unbekannte Position · eine andere Beschaffenheit als die verkaufte · ein **Spiel ohne USK-Erfassung** · ein Spiel mit **USK 18** · eine Position **ohne Lieferumfang** |
+| `seller_set_delivery_scope(sky_id, condition, scope)` | setzt, was geliefert wird | eine **Figur** · ein Vokabular, das nicht zur Artikelart passt · `disc_case` an einer losen Position |
+| `admin_set_usk_rating(sky_id, rating)` | erfasst die Alterskennzeichnung | alles außer `0, 6, 12, 16, 18` · alles außer `item_type = 'game'` |
+
+Die drei letzten Riegel von `seller_set_sale_release()` hängen an
+`p_released`: das **Zurücknehmen** einer Freigabe bleibt immer möglich. Ein
+Riegel, der das Abschalten verhindert, zeigt in die falsche Richtung.
 
 **`admin_shop_listing_audit()` zieht mit:** der Grund wird heute unabhängig
 vom Prädikat berechnet und sagte für ein freigegebenes Spiel weiterhin
@@ -242,24 +250,50 @@ die 39 Werte muss jemand erfassen.
 USK-Titeldatenbank ist die amtliche Quelle. Beides ist Handarbeit des
 Betreibers, keine Ableitung.
 
+**Und ein zweiter Riegel kam dazu: USK 18 wird gar nicht freigegeben.**
+§ 12 Abs. 3 JuSchG verlangt beim Versandhandel von Bildträgern „Keine
+Jugendfreigabe" eine Altersprüfung bei der Bestellung **und** eine
+Zustellung nur an Erwachsene. SkyIsles hat beides nicht. Für die
+Skylanders-Titel (USK 0 und 6) ist die Sperre ohne praktische Wirkung —
+genau deshalb kostet sie nichts und verhindert den einen Fall, der teuer
+wäre. Kommt eine Altersverifikation, fällt der Block; eine Zeile, eine
+eigene Entscheidung.
+
 > **Folge, und sie ist beabsichtigt:** solange kein Spiel eine USK-Angabe
 > trägt, ist **kein Spiel freigebbar**. Die **21 Portale sind es sofort** —
 > ein Portal ist Hardware und trägt keine Alterskennzeichnung.
 
-### D2. Zustand und Lieferumfang — ein öffentliches Feld fehlt
+### D2. Zustand und Lieferumfang — ENTSCHIEDEN und gebaut (2026-10-20)
 
-`shop_inventory.note` ist **intern und niemals öffentlich**
-(`docs/SECURITY.md`). Ein Angebot für ein gebrauchtes Spiel muss aber sagen,
-**was geliefert wird** — Disc mit oder ohne Originalhülle, mit oder ohne
-Anleitung.
+Der Betreiber hat festgelegt: **zwei getrennte Eigenschaften**, und
+`condition` wird nicht umgedeutet. Für ein Spiel heißt `loose`
+ausdrücklich *Spielmedium ohne Originalhülle*. Der Lieferumfang ist
+**strukturiert**, aus einer festen Liste:
 
-`shop_offers()` liefert heute vier Felder und sonst nichts; das ist eine
-bewusste Enge (`0006`). Ein öffentliches Zustandsfeld erweitert diesen
-Vertrag und wird deshalb **nicht nebenbei** gebaut.
+| Wert | Wort | für |
+|---|---|---|
+| `disc_only` | Nur Spielmedium | Spiel |
+| `disc_manual` | Spielmedium mit Anleitung | Spiel |
+| `disc_case` | Mit Originalhülle | Spiel |
+| `portal_only` | Nur Portal | Portal |
+| `portal_cable` | Portal mit USB-Kabel | Portal |
 
-**Zu entscheiden:** ob der Lieferumfang je Position frei getextet wird oder
-aus einer kleinen festen Liste gewählt (empfohlen: feste Liste — sie ist
-übersetzbar, filterbar und nicht versehentlich eine Zusicherung).
+`shop_inventory.delivery_scope`, nullable, mit zwei CHECKs. `NULL` heißt
+*nicht angegeben* — für eine Figur bleibt es dabei (dort beantwortet
+`condition` die Frage), für Zubehör ist es ein **Verkaufshindernis**.
+`shop_offers()` bekommt dafür eine **fünfte Spalte**; `shop_inventory.note`
+bleibt intern und wird nicht angefasst.
+
+> **Eine Konsequenz, benannt statt versteckt:** nach dieser Festlegung ist
+> ein Spiel **mit** Originalhülle nicht `loose`, und V1 verkauft nur `loose`
+> (`0028`/`0029`/`0108`). `disc_case` ist deshalb modelliert, wählbar und
+> durch `shop_inventory_case_is_not_loose` gegen `loose` gesichert — aber
+> **nicht verkäuflich**. Ob SkyIsles auch Spiele mit Hülle verkauft, ist
+> eine eigene Produktentscheidung und steht nicht in `0139`.
+
+**Für Portale** ist die sinnvolle Angabe das **USB-Kabel** — ohne das ein
+kabelgebundenes Portal nicht benutzbar ist. Batterien werden bewusst **nicht**
+genannt (siehe `docs/LEGAL.md`, 8b).
 
 ### D3. Steuer
 

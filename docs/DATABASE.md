@@ -494,6 +494,7 @@ dürfen künftig verkauft werden (ADR-0129) — aber **Stück für Stück**:
 | `is_listed` | Position | im Schaufenster. Entsteht per Vorgabewert |
 | `is_shop_eligible(sky_id)` | Artikel | die Figurenregel aus `0135`, **unverändert** |
 | **`sale_released`** | **Position** | diese Zubehörposition ist ausdrücklich zum Verkauf freigegeben. `not null default false` |
+| **`delivery_scope`** | **Position** | was im Paket liegt. Nullable; für Zubehör Pflicht, für eine Figur bedeutungslos |
 
 Die vier Verkaufstüren — `shop_offers()`, `shop_quantity_available()`, `create_order()` und
 `reserve_for_order()` — fragen ab `0139` **ein** Tor: `is_position_sellable(inventory_id)`. Für
@@ -508,9 +509,36 @@ Marketplace-Architektur je Verkäufer führen würde. Vorsorge, keine Implementi
 
 `skylanders.usk_rating smallint` (nullable, CHECK `0, 6, 12, 16, 18`) trägt die
 Alterskennzeichnung eines **Spiels**. NULL heißt **nicht erfasst**, nie „ohne Kennzeichnung";
-sie wird von Hand über `admin_set_usk_rating()` gepflegt und nie abgeleitet.
-`admin_shop_listing_audit()` kennt dafür die Gründe `usk rating missing`,
-`not released for sale` und `item type not sold`.
+sie wird von Hand über `admin_set_usk_rating()` gepflegt und nie abgeleitet. **USK 18 wird
+gar nicht erst freigegeben** — ohne Altersverifikation gibt es keinen zulässigen Versandweg
+(§ 12 Abs. 3 JuSchG, `docs/LEGAL.md` 8b).
+
+#### Zustand und Lieferumfang sind zwei Spalten, und das ist der Punkt
+
+`condition` wird durch `0139` **nicht umgedeutet**. Für ein Spiel heißt `loose` ausdrücklich
+*Spielmedium ohne Originalhülle*. Was sonst im Paket liegt, sagt
+`shop_inventory.delivery_scope`:
+
+| Wert | für | Wort |
+|---|---|---|
+| `disc_only` | Spiel | Nur Spielmedium |
+| `disc_manual` | Spiel | Spielmedium mit Anleitung |
+| `disc_case` | Spiel | Mit Originalhülle |
+| `portal_only` | Portal | Nur Portal |
+| `portal_cable` | Portal | Portal mit USB-Kabel |
+
+Zwei CHECKs: `shop_inventory_delivery_scope_known` sichert die Wertemenge,
+`shop_inventory_case_is_not_loose` verbietet `disc_case` an einer `loose`-Position — die
+beiden Aussagen dürfen einander nicht widersprechen. Welcher Wert zu welcher **Artikelart**
+passt, steht in `seller_set_delivery_scope()`, weil `item_type` auf einer anderen Tabelle
+liegt.
+
+**Die Angabe ist öffentlich:** `shop_offers()` liefert sie seit `0139` als **fünfte Spalte**
+(NULL für jede Figur). `shop_inventory.note` bleibt intern und wird nicht angefasst.
+
+`admin_shop_listing_audit()` kennt dafür die Gründe `item type not sold`,
+`usk rating missing`, `usk 18 needs age verification`, `delivery scope missing` und
+`not released for sale`.
 
 **Was daraus folgt:** `is_listed` bei einem Spiel ist **kein** Befund und wird nicht
 „korrigiert". Wer Zubehör irgendwann öffentlich verkaufen will, ändert nicht diese Flags, sondern

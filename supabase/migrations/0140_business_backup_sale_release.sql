@@ -13,6 +13,10 @@
 --   shop_inventory.sale_released   welche Position zum Verkauf freigegeben
 --                                  war. Nicht aus `is_listed` ableitbar —
 --                                  genau deshalb gibt es sie.
+--   shop_inventory.delivery_scope  was im Paket lag. Nicht aus `condition`
+--                                  ableitbar — genau deshalb gibt es sie.
+--                                  Sie ist eine oeffentliche Produktangabe
+--                                  und steht auf jedem Angebot.
 --   skylanders.usk_rating          welche Alterskennzeichnung ein Spiel
 --                                  traegt. Von Hand erfasst, aus keiner
 --                                  Quelle im System ableitbar.
@@ -27,8 +31,8 @@
 -- Transaktion: der Beweis von `0139` („nichts hat sich geaendert") soll
 -- lesbar bleiben, und beide Ruecknahmen sollen unabhaengig sein.
 --
--- WAS SIE TUT: sie schreibt `seller_business_backup()` neu, mit genau zwei
--- zusaetzlichen Feldzeilen. 353 Feldzeilen werden 355. Kein Bereich kommt
+-- WAS SIE TUT: sie schreibt `seller_business_backup()` neu, mit genau drei
+-- zusaetzlichen Feldzeilen. 353 Feldzeilen werden 356. Kein Bereich kommt
 -- dazu, keiner faellt weg, kein anderes Feld aendert sich — Abschnitt 3
 -- nimmt dafuer VOR der Aenderung einen Abdruck ueber die 26 uebrigen
 -- Bereiche und vergleicht ihn danach.
@@ -69,6 +73,11 @@ begin
                   where table_schema = 'public' and table_name = 'skylanders'
                     and column_name = 'usk_rating') then
     raise exception '0140 setzt 0139 voraus: skylanders.usk_rating fehlt';
+  end if;
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'shop_inventory'
+                    and column_name = 'delivery_scope') then
+    raise exception '0140 setzt 0139 voraus: shop_inventory.delivery_scope fehlt';
   end if;
 
   v_def := pg_get_functiondef(to_regprocedure('public.seller_business_backup()'));
@@ -130,8 +139,9 @@ end $$;
 -- ---------------------------------------------------------------------------
 -- 2. Die Sicherung, mit genau zwei zusaetzlichen Feldzeilen
 --
---     shop_inventory  'sale_released', t.sale_released   (hinter is_listed)
---     figures         'usk_rating',    t.usk_rating      (hinter item_type)
+--     shop_inventory  'sale_released',  t.sale_released   (hinter is_listed)
+--     shop_inventory  'delivery_scope', t.delivery_scope  (dahinter)
+--     figures         'usk_rating',     t.usk_rating      (hinter item_type)
 --
 -- Alles andere ist Zeichen fuer Zeichen die Fassung aus `0136`.
 -- ---------------------------------------------------------------------------
@@ -181,6 +191,7 @@ as $$
           'sale_price', t.sale_price::text,
           'is_listed', t.is_listed,
           'sale_released', t.sale_released,
+          'delivery_scope', t.delivery_scope,
           'note', t.note,
           'created_at', t.created_at,
           'updated_at', t.updated_at
@@ -788,8 +799,8 @@ begin
   if v_bereiche <> 28 then
     raise exception '%: % Bereiche statt 28', v_wer, v_bereiche;
   end if;
-  if v_felder <> 355 then
-    raise exception '%: % Feldzeilen statt 355 (353 aus 0136 plus sale_released und usk_rating)',
+  if v_felder <> 356 then
+    raise exception '%: % Feldzeilen statt 356 (353 aus 0136 plus sale_released, delivery_scope und usk_rating)',
       v_wer, v_felder;
   end if;
   if v_rest_n::text <> (select wert from z5_abdruck where schluessel = 'rest_anzahl') then
@@ -805,7 +816,8 @@ begin
             || '''quantity'', t.quantity;''reserved'', t.reserved;'
             || '''available_quantity'', t.available_quantity;'
             || '''sale_price'', t.sale_price::text;''is_listed'', t.is_listed;'
-            || '''sale_released'', t.sale_released;''note'', t.note;'
+            || '''sale_released'', t.sale_released;'
+            || '''delivery_scope'', t.delivery_scope;''note'', t.note;'
             || '''created_at'', t.created_at;''updated_at'', t.updated_at' then
     raise exception '%: der Bereich shop_inventory ist nicht der erwartete (%)', v_wer, v_inv;
   end if;
@@ -871,5 +883,5 @@ begin
     raise exception '%: restore_supported ist nicht mehr false', v_wer;
   end if;
 
-  raise notice '0140 ok: 28 Bereiche, 355 Feldzeilen, die 26 uebrigen unveraendert';
+  raise notice '0140 ok: 28 Bereiche, 356 Feldzeilen, die 26 uebrigen unveraendert';
 end $$;

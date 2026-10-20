@@ -11875,6 +11875,39 @@ Der Zubehörzweig verlangt fünf Dinge: Artikeltyp `game` oder `portal` ·
 **USK-Kennzeichnung** · und `sale_released`. **Katalogsichtbarkeit allein
 bewirkt keine Verkaufsfreigabe** — sie ist notwendig, nie hinreichend.
 
+### Zustand und Lieferumfang sind zwei Eigenschaften
+
+**Festlegung des Betreibers, 2026-10-20.** `condition` wird **nicht
+umgedeutet**: für ein Spiel heißt `loose` ausdrücklich *Spielmedium ohne
+Originalhülle*. Was sonst im Paket liegt, sagt eine eigene Spalte —
+`shop_inventory.delivery_scope`, nullable, aus einer festen Liste:
+`disc_only` · `disc_manual` · `disc_case` für Spiele, `portal_only` ·
+`portal_cable` für Portale.
+
+Eine feste Liste statt Freitext, weil jede Angabe im Angebot eine
+**zugesicherte Eigenschaft** ist: fünf Werte sind übersetzbar, prüfbar und
+versprechen nichts, was niemand gemeint hat.
+
+**NULL heißt „nicht angegeben".** Für eine Figur bleibt es dabei — dort
+beantwortet `condition` die Frage, und `seller_set_delivery_scope()` lehnt
+eine Figur ab. Für Zubehör ist NULL ein **Verkaufshindernis**: ein Angebot
+für gebrauchte Ware, das nicht sagt, was geliefert wird, ist eine
+unvollständige Produktangabe.
+
+**Die Angabe geht nach draußen.** `shop_offers()` bekommt dafür eine
+**fünfte Spalte** — gedroppt und neu angelegt, weil PostgreSQL den
+Rückgabetyp nicht ersetzen lässt. Sie ist für jede Figur NULL. Eine zweite
+Abfrage daneben wäre eine zweite Angebotsverwaltung; `shop_inventory.note`
+bleibt intern und wird nicht angefasst.
+
+> **Eine Konsequenz, benannt statt versteckt:** nach dieser Festlegung ist
+> ein Spiel **mit** Originalhülle nicht `loose` — und V1 verkauft nur
+> `loose` (ADR-0029/0048, `0108`). `disc_case` ist deshalb modelliert,
+> wählbar und durch den CHECK `shop_inventory_case_is_not_loose` gegen
+> `loose` gesichert, aber **nicht verkäuflich**. Ob SkyIsles auch Spiele mit
+> Hülle verkauft, ist eine eigene Produktentscheidung; sie würde `0108`,
+> `0028` und `0029` berühren und steht nicht in `0139`.
+
 ### Die Alterskennzeichnung ist eine Sperre, kein Feld
 
 `skylanders.usk_rating smallint`, nullable, CHECK auf `0, 6, 12, 16, 18`.
@@ -11883,6 +11916,15 @@ Arbeitsmappe führt keine USK-Angabe, und sie wird **nicht geraten**
 (`CLAUDE.md` Regel 4). `seller_set_sale_release()` lehnt ein Spiel ohne
 Eintrag ab; die Prüfung hängt an `p_released`, damit das **Zurücknehmen**
 einer Freigabe immer möglich bleibt.
+
+**Und USK 18 wird gar nicht freigegeben.** § 12 Abs. 3 JuSchG verlangt beim
+Versandhandel von Bildträgern „Keine Jugendfreigabe" eine Altersprüfung bei
+der Bestellung **und** eine Zustellung nur an Erwachsene; SkyIsles hat
+beides nicht. Der Riegel ist technisch und nicht redaktionell: solange die
+Verifikation fehlt, gibt es keinen zulässigen Weg. Für die Skylanders-Titel
+(USK 0 und 6) ist er ohne praktische Wirkung — genau deshalb kostet er
+nichts. Kommt eine Altersverifikation, fällt er; eine Zeile, eine eigene
+Entscheidung.
 
 **Folge, und sie ist beabsichtigt:** solange keine USK-Werte erfasst sind,
 ist **kein Spiel freigebbar**. Die **21 Portale sind es** — Hardware trägt
@@ -11895,13 +11937,14 @@ intern — sie **muss** im Angebot erkennbar sein.
 
 ### Konsequenzen
 
-* Zwei Spalten, drei neue Funktionen (`is_position_sellable`,
-  `seller_set_sale_release`, `admin_set_usk_rating`), vier getauschte Zeilen
-  in den vier Türen, ein erweiterter Grundkatalog in
+* Drei Spalten, vier neue Funktionen (`is_position_sellable`,
+  `seller_set_sale_release`, `seller_set_delivery_scope`,
+  `admin_set_usk_rating`), je eine getauschte Zeile in drei Türen, eine
+  fünfte Spalte in `shop_offers()`, ein erweiterter Grundkatalog in
   `admin_shop_listing_audit()`. Mehr nicht.
-* **Die Betriebssicherung zieht nach** (`0140`): beide Spalten tragen eine
-  Entscheidung, die sich aus nichts rekonstruieren lässt. 353 Feldzeilen
-  werden 355.
+* **Die Betriebssicherung zieht nach** (`0140`): alle drei Spalten tragen
+  eine Entscheidung, die sich aus nichts rekonstruieren lässt. 353
+  Feldzeilen werden 356.
 * **Storno, Retoure, Erstattung und Lagerabgang bleiben unberührt.** Sie
   hängen an `order_lines.inventory_id`, nicht am Artikeltyp, und
   funktionieren für Zubehör unverändert.
@@ -11909,8 +11952,11 @@ intern — sie **muss** im Angebot erkennbar sein.
   nicht angefasst, die 534 sammelbaren Figuren bleiben 534, Zubehör bleibt
   aus jeder Sammlung heraus (ADR-0128).
 * **Die Belegausstellung bleibt gesperrt.** `0139` prüft das sogar nach.
-* Noch **offen und vor der ersten Freigabe zu entscheiden**: die USK-Quelle,
-  ein öffentliches Feld für Zustand und Lieferumfang (`shop_inventory.note`
-  ist intern und bleibt es), die steuerliche Bestätigung und die Bedeutung
-  von „lose" bei einem Spiel. Vollständig:
-  `supabase/checks/accessory_offer_proposal.md`, Teil D.
+* Noch **offen und vor der ersten Freigabe zu entscheiden**: die USK-Quelle
+  und ihre Darstellung, die steuerliche Bestätigung, Erschöpfungsgrundsatz,
+  BattG und ElektroG bei Portalen, der Widerruf (bestätigen, nicht ändern)
+  und die Versandkostenregel für ein Portal. Vollständig in `docs/LEGAL.md`,
+  Abschnitt 8b — mit der Liste dessen, was bereits **technisch gesperrt**
+  ist, damit es nicht aus Versehen passiert.
+* Die Oberfläche ist geplant, nicht gebaut:
+  `supabase/checks/accessory_sale_ui_plan.md`.

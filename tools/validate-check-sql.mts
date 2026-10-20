@@ -172,6 +172,19 @@ function funktionsfaltung(ausser: readonly string[] = []):
 }
 
 /**
+ * Dieselbe Signatur, ohne die `default`-Ausdrücke.
+ *
+ * Der Schlüssel der Faltung trägt die Parameterliste so, wie sie in der
+ * Migration steht — `p_limit integer default 20` eingeschlossen. `drop
+ * function` nimmt das nicht an; es will die Typen, nicht die Vorgaben.
+ */
+function signaturOhneVorgaben(sig: string): string {
+  return sig.replace(/\(([\s\S]*)\)$/, (_m, args: string) =>
+    `(${args.split(",").map((a) => a.replace(/\s+default\s+[\s\S]*$/i, "").trim())
+            .filter((a) => a !== "").join(", ")})`);
+}
+
+/**
  * Ein Rumpf, der sich im Stub-Schema NICHT erzeugen lässt — mit Grund.
  *
  * Dieselbe Bauart wie `NICHT_PLANBAR`: eng, begründet, selbstkorrigierend.
@@ -341,8 +354,33 @@ async function main(): Promise<void> {
       await dbDef.exec(sql + ";");
       erzeugt++;
       if (NICHT_ERZEUGBAR[sig]) unnoetigeAusnahme.push(sig);
-    } catch (e) {
-      const err = e as { message?: string; code?: string };
+    } catch (e0) {
+      /*
+       * ERST WEG, DANN NOCH EINMAL — und nur in diesen zwei Fällen.
+       *
+       * Das Stub-Schema legt jede Signatur als Hülle an. Eine Migration, die
+       * den RÜCKGABETYP ändert, kann die Hülle deshalb weder mit `create`
+       * überschreiben (42723, schon da) noch mit `create or replace`
+       * (42P13, Rückgabetyp lässt sich nicht ersetzen). `0139` tut genau das
+       * mit `shop_offers()`.
+       *
+       * Vorsorglich zu droppen wäre falsch: der Schlüssel der Faltung trägt
+       * die Parameterliste MIT `default`-Ausdrücken, und die nimmt
+       * `drop function` nicht an. Deshalb nur im Fehlerfall, und mit einer
+       * Signatur, aus der die Vorgaben entfernt sind.
+       */
+      const code0 = (e0 as { code?: string }).code;
+      if (code0 === "42723" || code0 === "42P13") {
+        try {
+          await dbDef.exec(
+            `drop function if exists public.${signaturOhneVorgaben(sig)} cascade;`);
+          await dbDef.exec(sql + ";");
+          erzeugt++;
+          if (NICHT_ERZEUGBAR[sig]) unnoetigeAusnahme.push(sig);
+          continue;
+        } catch { /* faellt unten durch, mit der ZWEITEN Meldung */ }
+      }
+      const err = e0 as { message?: string; code?: string };
       const zeile = `${sig}  (${datei})  [${err.code ?? "?"}] ${(err.message ?? "").split("\n")[0]}`;
       if (NICHT_ERZEUGBAR[sig]) {
         console.log(`  AUSNAHME ${zeile}`);
@@ -507,7 +545,28 @@ async function main(): Promise<void> {
   async function frisch(): Promise<InstanceType<typeof PGlite>> {
     const db = new PGlite();
     await stubAnwenden(db);
-    for (const [, { sql }] of vorstand) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+    /*
+     * DIE HUELLE DARF DEN VORSTAND NICHT BLOCKIEREN.
+     *
+     * Das Stub-Schema legt jede Signatur aus ALLEN Migrationen an — auch aus
+     * denen, die hier gerade NICHT gelten sollen. Aendert eine davon den
+     * Rueckgabetyp (`0139` tut das mit `shop_offers()`), scheitert die
+     * aeltere Fassung aus dem Vorstand an der neueren Huelle. Frueher fiel
+     * das in den stillen `catch`, und der Probelauf lief mit einer leeren
+     * Huelle weiter — eine Funktion, die 0 Zeilen liefert, statt der
+     * richtigen. Genau diese Art Fehler soll dieses Werkzeug finden, nicht
+     * erzeugen.
+     */
+    for (const [sig, { sql }] of vorstand) {
+      try { await db.exec(sql + ";"); } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code !== "42723" && code !== "42P13") continue;   /* s. Stufe 3 */
+        try {
+          await db.exec(`drop function if exists public.${signaturOhneVorgaben(sig)} cascade;`);
+          await db.exec(sql + ";");
+        } catch { /* s. Stufe 3 */ }
+      }
+    }
     for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
     for (const s of zurueck) await db.exec(s);
     for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
@@ -1118,7 +1177,18 @@ async function main(): Promise<void> {
         "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
       const db = new PGlite();
       await stubAnwenden(db);
-      for (const [, { sql }] of fold0132) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+      /* Wie in `frisch()`: eine Huelle mit anderem Rueckgabetyp darf die
+         gueltige Fassung nicht still verdraengen. */
+      for (const [sig, { sql }] of fold0132) {
+        try { await db.exec(sql + ";"); } catch (e) {
+          const code = (e as { code?: string }).code;
+          if (code !== "42723" && code !== "42P13") continue;   /* s. Stufe 3 */
+          try {
+            await db.exec(`drop function if exists public.${signaturOhneVorgaben(sig)} cascade;`);
+            await db.exec(sql + ";");
+          } catch { /* s. Stufe 3 */ }
+        }
+      }
       for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
       for (const s of zurueck) await db.exec(s);
       for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
@@ -1541,7 +1611,18 @@ async function main(): Promise<void> {
         "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
       const db = new PGlite();
       await stubAnwenden(db);
-      for (const [, { sql }] of fold0132) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+      /* Wie in `frisch()`: eine Huelle mit anderem Rueckgabetyp darf die
+         gueltige Fassung nicht still verdraengen. */
+      for (const [sig, { sql }] of fold0132) {
+        try { await db.exec(sql + ";"); } catch (e) {
+          const code = (e as { code?: string }).code;
+          if (code !== "42723" && code !== "42P13") continue;   /* s. Stufe 3 */
+          try {
+            await db.exec(`drop function if exists public.${signaturOhneVorgaben(sig)} cascade;`);
+            await db.exec(sql + ";");
+          } catch { /* s. Stufe 3 */ }
+        }
+      }
       for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
       for (const s of zurueck) await db.exec(s);
       for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
@@ -1967,7 +2048,20 @@ async function main(): Promise<void> {
       const ohneFreigabe = await wert(db, ZUBEHOERANGEBOTE);
       await db.exec("update public.shop_inventory set sale_released = true "
         + "where sky_id = 'SKY-0615';");
+      /* UND FREIGEGEBEN ALLEIN AUCH NICHT: ohne Angabe zum Lieferumfang
+         bleibt das Angebot aus. */
+      const ohneUmfang = await wert(db, ZUBEHOERANGEBOTE);
+      await db.exec("update public.shop_inventory set delivery_scope = 'portal_cable' "
+        + "where sky_id = 'SKY-0615';");
       const mitFreigabe = await wert(db, ZUBEHOERANGEBOTE);
+      /* Und der Lieferumfang steht im Angebot, damit ihn jemand lesen kann. */
+      const umfangImAngebot = await wert(db,
+        "select coalesce(delivery_scope, '(null)') as w from public.shop_offers() "
+        + "where sky_id = 'SKY-0615'");
+      const umfangFigur = await wert(db,
+        "select count(*)::text as w from public.shop_offers() o "
+        + "join public.skylanders s on s.sky_id = o.sky_id "
+        + "where s.item_type = 'figure' and o.delivery_scope is not null");
       /* Und umgekehrt: freigegeben, aber aus dem Katalog genommen. */
       await db.exec("update public.skylanders set catalog_visible = false "
         + "where sky_id = 'SKY-0615';");
@@ -1989,14 +2083,18 @@ async function main(): Promise<void> {
 
       probe.push({
         name: "P35 eine freigegebene Portalposition wird zum Angebot — und die Ruecknahme nimmt es fort",
-        ok: versteckt === "0" && ohneFreigabe === "0" && mitFreigabe === "1"
+        ok: versteckt === "0" && ohneFreigabe === "0" && ohneUmfang === "0"
+          && mitFreigabe === "1" && umfangImAngebot === "portal_cable"
+          && umfangFigur === "0"
           && wiederVersteckt === "0" && preis === "24.90"
           && kaufbar === "true" && zurueck === "0" && kaufbarDanach === "false"
           && sammelbar === await wert(db, SAMMELBAR),
         sagt: `versteckt+ungefreigegeben ${versteckt}, nur sichtbar ${ohneFreigabe}, `
-          + `sichtbar+freigegeben ${mitFreigabe} (Preis ${preis}), freigegeben aber `
-          + `versteckt ${wiederVersteckt}, shop_quantity_available ${kaufbar} → `
-          + `${kaufbarDanach}, nach Ruecknahme ${zurueck}, sammelbar ${sammelbar} unveraendert`,
+          + `freigegeben ohne Lieferumfang ${ohneUmfang}, vollstaendig ${mitFreigabe} `
+          + `(Preis ${preis}, Lieferumfang ${umfangImAngebot}, Figurenangebote mit `
+          + `Lieferumfang ${umfangFigur}), freigegeben aber versteckt ${wiederVersteckt}, `
+          + `shop_quantity_available ${kaufbar} → ${kaufbarDanach}, nach Ruecknahme `
+          + `${zurueck}, sammelbar ${sammelbar} unveraendert`,
       });
     }
 
@@ -2008,8 +2106,8 @@ async function main(): Promise<void> {
       await db.exec(ALTLAST);
       /* Alles erfuellt — gelistet, bepreist, Bestand, FREIGEGEBEN. Es fehlt
          allein die USK-Angabe. */
-      await db.exec("update public.shop_inventory set sale_released = true "
-        + "where sky_id = 'PROBE-4';");
+      await db.exec("update public.shop_inventory set sale_released = true, "
+        + "delivery_scope = 'disc_only' where sky_id = 'PROBE-4';");
 
       const ohneUsk = await wert(db, ZUBEHOERANGEBOTE);
       const grundOhne = await wert(db,
@@ -2020,12 +2118,25 @@ async function main(): Promise<void> {
       /* Und eine erfundene Einstufung laesst der CHECK nicht zu. */
       const unsinn = await fehlschlag(db,
         "update public.skylanders set usk_rating = 7 where sky_id = 'PROBE-4';");
+      /* UND „mit Originalhuelle" vertraegt sich nicht mit `loose`. */
+      const huelleLose = await fehlschlag(db,
+        "update public.shop_inventory set delivery_scope = 'disc_case' "
+        + "where sky_id = 'PROBE-4';");
+      /* Ein Portalvokabular an einem Spiel laesst der Tabellen-CHECK zwar zu
+         (er kennt den Artikeltyp nicht) — die Setzfunktion nicht, siehe P37. */
+      const unbekannterUmfang = await fehlschlag(db,
+        "update public.shop_inventory set delivery_scope = 'disc_box' "
+        + "where sky_id = 'PROBE-4';");
 
       probe.push({
         name: "P36 ein freigegebenes Spiel OHNE USK-Kennzeichnung bleibt draussen",
-        ok: ohneUsk === "0" && mitUsk === "1" && unsinn !== null,
+        ok: ohneUsk === "0" && mitUsk === "1" && unsinn !== null
+          && huelleLose !== null && unbekannterUmfang !== null,
         sagt: `ohne USK ${ohneUsk} Angebote (Grund: ${grundOhne}), mit USK 6 ${mitUsk}; `
-          + `USK 7 abgelehnt (${unsinn === null ? "NEIN — der CHECK fehlt" : "ja"})`,
+          + `USK 7 abgelehnt (${unsinn === null ? "NEIN — der CHECK fehlt" : "ja"}), `
+          + `disc_case an loser Position abgelehnt `
+          + `(${huelleLose === null ? "NEIN" : "ja"}), unbekannter Lieferumfang abgelehnt `
+          + `(${unbekannterUmfang === null ? "NEIN" : "ja"})`,
       });
     }
 
@@ -2054,23 +2165,49 @@ async function main(): Promise<void> {
         "select public.seller_set_sale_release('PROBE-4', 'loose', true);");
       const unbekannt = await fehlschlag(db,
         "select public.seller_set_sale_release('SKY-0616', 'loose', true);");
+
+      /* ---- der Lieferumfang, bevor das Portal freigegeben werden kann ---- */
+      const umfangFigur = await fehlschlag(db,
+        "select public.seller_set_delivery_scope('PROBE-2', 'loose', 'disc_only');");
+      const umfangFalsch = await fehlschlag(db,
+        "select public.seller_set_delivery_scope('SKY-0615', 'loose', 'disc_only');");
+      const umfangHuelle = await fehlschlag(db,
+        "select public.seller_set_delivery_scope('PROBE-4', 'loose', 'disc_case');");
+      const portalOhneUmfang = await fehlschlag(db,
+        "select public.seller_set_sale_release('SKY-0615', 'loose', true);");
+      const umfangOk = await fehlschlag(db,
+        "select public.seller_set_delivery_scope('SKY-0615', 'loose', 'portal_cable');");
+
       const portal = await fehlschlag(db,
         "select public.seller_set_sale_release('SKY-0615', 'loose', true);");
       const angebote = await wert(db, ZUBEHOERANGEBOTE);
+
+      /* ---- und ein Spiel ab 18 wird gar nicht erst freigegeben ---- */
+      await db.exec("update public.skylanders set usk_rating = 18 where sky_id = 'PROBE-4';");
+      await db.exec("update public.shop_inventory set delivery_scope = 'disc_only' "
+        + "where sky_id = 'PROBE-4';");
+      const ab18 = await fehlschlag(db,
+        "select public.seller_set_sale_release('PROBE-4', 'loose', true);");
       /* Das Zuruecknehmen eines Spiels geht AUCH ohne USK — ein Riegel, der
          das Abschalten verhindert, zeigt in die falsche Richtung. */
       const abschalten = await fehlschlag(db,
         "select public.seller_set_sale_release('PROBE-4', 'loose', false);");
 
-      probe.push({
-        name: "P37 die Freigabefunktion lehnt Figur, Spiel ohne USK und unbekannte Position ab",
+    const sagtNein = (x: string | null) => (x === null ? "DURCHGELASSEN" : "abgelehnt");
+    probe.push({
+        name: "P37 die Freigabe- und Lieferumfangsfunktion lehnen ab, was sie ablehnen muessen",
         ok: figur !== null && spielOhneUsk !== null && unbekannt !== null
-          && portal === null && angebote === "1" && abschalten === null,
-        sagt: `Figur ${figur === null ? "DURCHGELASSEN" : "abgelehnt"}, Spiel ohne USK `
-          + `${spielOhneUsk === null ? "DURCHGELASSEN" : "abgelehnt"}, unbekannte Position `
-          + `${unbekannt === null ? "DURCHGELASSEN" : "abgelehnt"}, Portal `
-          + `${portal === null ? "freigegeben" : `ABGELEHNT: ${portal}`} → ${angebote} Angebot; `
-          + `Abschalten ohne USK ${abschalten === null ? "geht" : "GESPERRT"}`,
+          && umfangFigur !== null && umfangFalsch !== null && umfangHuelle !== null
+          && portalOhneUmfang !== null && umfangOk === null
+          && portal === null && angebote === "1" && ab18 !== null && abschalten === null,
+        sagt: `Freigabe: Figur ${sagtNein(figur)}, Spiel ohne USK ${sagtNein(spielOhneUsk)}, `
+          + `unbekannte Position ${sagtNein(unbekannt)}, Portal ohne Lieferumfang `
+          + `${sagtNein(portalOhneUmfang)}, Spiel ab USK 18 ${sagtNein(ab18)} · `
+          + `Lieferumfang: Figur ${sagtNein(umfangFigur)}, Spielvokabular am Portal `
+          + `${sagtNein(umfangFalsch)}, disc_case an loser Position ${sagtNein(umfangHuelle)}, `
+          + `portal_cable ${umfangOk === null ? "gesetzt" : `ABGELEHNT: ${umfangOk}`} · `
+          + `danach Portal ${portal === null ? "freigegeben" : `ABGELEHNT: ${portal}`} → `
+          + `${angebote} Angebot; Abschalten ohne USK ${abschalten === null ? "geht" : "GESPERRT"}`,
       });
     }
   }
@@ -2109,6 +2246,7 @@ async function main(): Promise<void> {
     const mit0139 = await fahre(db, M140);
     const kennt = mit0139 === null ? await w(
       "select (position('sale_released' in prosrc) > 0 "
+      + "and position('delivery_scope' in prosrc) > 0 "
       + "and position('usk_rating' in prosrc) > 0)::text as w from pg_proc "
       + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
     const zeilenNach = mit0139 === null ? await w(FELDER) : "-";
@@ -2119,10 +2257,10 @@ async function main(): Promise<void> {
       + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
 
     probe.push({
-      name: "P38 0140 braucht 0139, nimmt dann genau zwei Felder auf — und nimmt sie zurueck",
+      name: "P38 0140 braucht 0139, nimmt dann genau drei Felder auf — und nimmt sie zurueck",
       ok: ohne0139 !== null && ohne0139.includes("setzt 0139 voraus")
         && mit0139 === null && kennt === "true"
-        && Number(zeilenNach) === Number(zeilenVor) + 2
+        && Number(zeilenNach) === Number(zeilenVor) + 3
         && zurueck === null && wiederOhne === "true",
       sagt: `ohne 0139: ${ohne0139 === null ? "DURCHGELAUFEN" : "abgebrochen"}; `
         + `mit 0139: ${mit0139 ?? "durch"}, beide Felder da (${kennt}), Rumpfzeilen `

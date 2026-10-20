@@ -4100,6 +4100,25 @@ export const de = {
     offerFrom: (price: string) => `ab ${price}`,
     conditionLoose: "Lose",
     conditionBoxed: "OVP",
+    /*
+     * WAS IM PAKET LIEGT — eine eigene Angabe neben dem Zustand (0139).
+     *
+     * „Lose" sagt bei einem Spiel: Spielmedium ohne Originalhülle. Es sagt
+     * nicht, ob eine Anleitung dabei ist, und bei einem Portal nicht, ob
+     * das USB-Kabel dabei ist. Genau dafür stehen diese Wörter.
+     *
+     * Sie sind Produktangaben und damit zusicherungsrelevant: jedes Wort
+     * nennt, was WIRKLICH mitkommt, und keines verspricht mehr.
+     */
+    deliveryScopes: {
+      disc_only:   "Nur Spielmedium",
+      disc_manual: "Spielmedium mit Anleitung",
+      disc_case:   "Mit Originalhülle",
+      portal_only: "Nur Portal",
+      portal_cable: "Portal mit USB-Kabel",
+    } as Record<string, string>,
+    /** Die Überschrift, unter der die Angabe am Angebot steht. */
+    deliveryScopeLabel: "Lieferumfang",
     addToCart: "In den Warenkorb",
     addToCartFor: (name: string, price: string) =>
       `${name} für ${price} in den Warenkorb legen`,

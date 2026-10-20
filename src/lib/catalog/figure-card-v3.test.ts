@@ -55,6 +55,8 @@ const offer = (o: Partial<Offer> = {}): Offer => ({
   condition: "loose",
   price: 4.49,
   available: true,
+  /* Eine Figur trägt keine Lieferumfangsangabe (0139). */
+  deliveryScope: null,
   ...o,
 });
 
@@ -861,7 +863,7 @@ describe("the trade zone", () => {
 
   it("says so quietly when there is nothing on offer", () => {
     expect(summarizeOffers([])).toEqual({ kind: "none" });
-    expect(summarizeOffers([offer({ available: false })])).toEqual({ kind: "none" });
+    expect(summarizeOffers([offer({ available: false, deliveryScope: null })])).toEqual({ kind: "none" });
     const link = code(LINK);
     expect(link).toContain("de.shop.noOffer");
     // Quiet by weight and size, never by contrast: it still reads 5.4:1.
@@ -881,10 +883,10 @@ describe("the trade zone", () => {
 
     // A sold-out loose line beside a buyable boxed one leaves nothing to say.
     expect(
-      summarizeOffers([offer({ price: 1, available: false }), offer({ condition: "boxed", price: 8 })]),
+      summarizeOffers([offer({ price: 1, available: false, deliveryScope: null }), offer({ condition: "boxed", price: 8 })]),
     ).toEqual({ kind: "none" });
 
-    expect(v1BuyableOffers([offer({ available: false })])).toEqual([]);
+    expect(v1BuyableOffers([offer({ available: false, deliveryScope: null })])).toEqual([]);
   });
 
   it("is a sibling of the body, so it is its own target", () => {

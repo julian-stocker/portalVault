@@ -349,6 +349,49 @@ Farbsignal, Zielgrößen ≥ 44 px. Der Widerrufsablauf ist ohne Maus vollständ
 
 ---
 
+## 8b. Spiele und Portale verkaufen — was vor dem ersten Verkauf zu klären ist
+
+**Stand 2026-10-20.** Die Entscheidung, Spiele und Portale über den eigenen
+Shop zu verkaufen, ist gefallen (ADR-0129); die Technik dafür ist vorbereitet
+und **nirgends angewendet**. Dieser Abschnitt sagt, was **rechtlich** noch
+offen ist — und was davon bereits technisch gesperrt wurde, damit es nicht
+aus Versehen passiert.
+
+### Was schon gesperrt ist, und zwar in der Datenbank
+
+| Sperre | wo | Wirkung |
+|---|---|---|
+| **Keine Freigabe ohne USK-Angabe** | `seller_set_sale_release()` (`0139`) | ein Spiel ohne erfasste Alterskennzeichnung lässt sich nicht zum Verkauf freigeben. Heute trägt **keines** eine — also ist heute **kein Spiel** verkäuflich |
+| **Keine Freigabe bei USK 18** | dieselbe Funktion | § 12 Abs. 3 JuSchG verlangt beim Versandhandel von Bildträgern „Keine Jugendfreigabe" die Sicherstellung, dass kein Minderjähriger sie erhält — Altersprüfung bei der Bestellung **und** eine Zustellung nur an Erwachsene. SkyIsles hat beides nicht. Für die Skylanders-Titel (USK 0 und 6) ist die Sperre ohne praktische Wirkung; sie kostet nichts und verhindert den einen Fall, der teuer wäre |
+| **Keine Freigabe ohne Lieferumfang** | dieselbe Funktion | ein Angebot für gebrauchte Ware, das nicht sagt, was im Paket liegt, ist eine unvollständige Produktangabe |
+| **Kein Widerspruch zwischen Zustand und Lieferumfang** | CHECK `shop_inventory_case_is_not_loose` | „mit Originalhülle" an einer als `lose` geführten Position ist ausgeschlossen |
+
+### Was der Betreiber bestätigen muss
+
+| Punkt | Warum offen | Wer entscheidet |
+|---|---|---|
+| **USK-Quelle und Erfassung** | Die Arbeitsmappe führt keine Alterskennzeichnung, und sie wird **nicht geraten**. Die amtliche Quelle ist die USK-Titeldatenbank; auf der Hülle steht sie ebenfalls. Beides ist Handarbeit. **Ohne Erfassung bleibt jedes Spiel gesperrt** | Betreiber |
+| **Darstellung der USK-Kennzeichnung im Angebot** | § 12 Abs. 2 JuSchG verlangt die deutlich sichtbare Kennzeichnung auf Bildträger **und** Hülle; für den Fernabsatz muss die Einstufung im Angebot erkennbar sein. Ob das Kennzeichen als **Bild** (geschützte Zeichen der USK) oder als Text genügt, und ob eine Nutzungserlaubnis für die Zeichen nötig ist, ist **nicht geprüft** | anwaltliche Prüfung |
+| **Steuerliche Behandlung gebrauchter Software** | Gleicher Verkäufer, gleiche Rechtsform, gebrauchte Ware — nach erstem Augenschein ändert sich gegenüber Figuren **nichts**. Das ist **keine steuerliche Beratung**. Insbesondere zu bestätigen: ob die bisherige Besteuerungsart unverändert gilt und ob Software daran etwas ändert | Betreiber / Steuerberater |
+| **Erschöpfungsgrundsatz beim Weiterverkauf** | Der Weiterverkauf eines rechtmäßig in Verkehr gebrachten physischen Datenträgers ist nach § 17 Abs. 2 UrhG zulässig. Ob die Lizenzbedingungen des Herstellers daran etwas ändern und ob Online-Komponenten (Konten, Codes) mitverkauft werden dürfen, ist **nicht geprüft** und wird nicht zugesichert | anwaltliche Prüfung |
+| **Beschreibung von Zustand und Lieferumfang** | Jede Angabe im Angebot ist eine **zugesicherte Eigenschaft**. Die fünf Werte (`Nur Spielmedium`, `Spielmedium mit Anleitung`, `Mit Originalhülle`, `Nur Portal`, `Portal mit USB-Kabel`) sind bewusst eng gefasst; ob sie für den eigenen Bestand ausreichen, weiß nur der Betreiber | Betreiber |
+| **Plattformangabe bei Spielen** | Sie wird aus dem **Rohnamen** abgeleitet (`platformOf()`), nicht aus einem gepflegten Feld. Für ein Angebot ist sie eine Zusicherung. Vor dem ersten Verkauf ist je Titel zu bestätigen, dass die abgeleitete Plattform stimmt | Betreiber |
+| **Keine Plattformangabe bei Portalen** | Die Arbeitsmappe führt Plattformköpfe über den Portalzeilen, aber das ist eine Lesehilfe und **keine nachgewiesene Kompatibilität** (ADR-0128). Es wird deshalb **keine** angezeigt. Soll eine erscheinen, muss sie erst gepflegt werden | Betreiber |
+| **Widerruf** | Die Ausnahme für **versiegelte** Datenträger (§ 312g Abs. 2 Nr. 6 BGB) greift bei gebrauchter, geöffneter Ware **nicht**. Es bleibt beim gewohnten 14-tägigen Widerruf — also unverändert zur Figur. Zu **bestätigen**, nicht zu ändern | Betreiber / anwaltliche Prüfung |
+| **Batterien bei Portalen** | Die kabellosen Portale werden mit Batterien betrieben. Ob beim Verkauf gebrauchter Geräte **ohne** Batterien Hinweispflichten nach BattG bestehen und ob eine Registrierung nötig ist, ist **nicht geprüft**. Der Lieferumfang nennt Batterien bewusst **nicht** | Betreiber / anwaltliche Prüfung |
+| **Elektro­geräte (ElektroG)** | Ein Portal ist ein Elektrogerät. Für den Verkauf **gebrauchter** Geräte als Wiederverkäufer bestehen andere Pflichten als für Hersteller/Importeure; ob eine Registrierung oder ein Rücknahmehinweis nötig ist, ist **nicht geprüft** | Betreiber / anwaltliche Prüfung |
+
+> **Keiner dieser Punkte ist technisch gelöst oder technisch lösbar.** Die
+> Datenbank verhindert, dass ohne USK-Angabe, ohne Lieferumfang oder mit
+> USK 18 freigegeben wird. Alles Übrige entscheidet der Betreiber, bevor er
+> das erste Mal `seller_set_sale_release(..., true)` aufruft.
+>
+> **Der einfachste erste Schritt sind die Portale:** sie tragen keine
+> Alterskennzeichnung, und D1 entfällt damit. Offen bleiben für sie 5b
+> (Lieferumfang), BattG und ElektroG.
+
+---
+
 ## 9. Offene Punkte
 
 | Punkt | Warum offen | Wer entscheidet |
