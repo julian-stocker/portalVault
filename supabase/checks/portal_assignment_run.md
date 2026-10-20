@@ -57,20 +57,42 @@ Erwartet, Stand 2026-10-20:
 **Weicht 103 oder 203 ab, nicht weitermachen.** Das Skript bricht dann
 ohnehin ab (A5 bzw. A6), aber dann wissen Sie den Grund schon vorher.
 
-### 2. Eine Stichprobe von Hand (empfohlen)
+#### Unabhängig gemessen am 2026-10-20, vor dem Lauf
 
-Im Einkaufsbuch Einkauf **#74** öffnen, die Position `0000726 (I)` über den
-**Figurenwechsel** auf `SKY-0622` setzen. Dann hinsehen:
+Nicht aus dem Skript heraus, sondern mit einem eigenen lesenden Zugriff —
+damit es nachher eine Vergleichsbasis gibt, die das Skript nicht selbst
+erzeugt hat:
 
-* der Rohname `0000726 (I)` steht noch da,
-* der Zustand ist unverändert,
-* es ist **keine** Lagerbewegung entstanden.
+| | |
+|---|---|
+| die 11 Artikel mit genau diesem Namen und `item_type = portal` | **11 / 11** |
+| davon `catalog_visible` | **0** — es wird nichts veröffentlicht |
+| mehrdeutige Rohnamen | **0** |
+| Zielpositionen | **35**, Verteilung je Artikel stimmt |
+| davon mit Lagerbewegung | **0**, alle `reconciled_legacy` |
+| **Abdruck der 35 Zeilen über 15 Spalten** (alles außer `sky_id` und `updated_at`: `id, purchase_id, position, condition, raw_name, state, market_price_snapshot, market_price_snapshot_at, market_price_source, movement_id, legacy_condition_flag, legacy_booked_flag, source_row, note, created_at`) | `45340984792692b0cdfae951dd1ced48` |
+| betroffene Einkäufe | **24**, Abdruck `3d5367dda6e6b0e836eb34934daa8e88`, bezahlte Summe **995,77 €** |
 
-Das ist dieselbe Operation, die das Skript 35-mal macht — nur dass Sie sie
-hier mit eigenen Augen sehen. Das Skript läuft danach unverändert: es findet
-dann 34 offene und 1 fertige und kommt auf dieselben 35.
+Bezugswerte: 2 128 Einkaufspositionen · 206 ohne `sky_id` · 285 Lagerzeilen
+mit 812 Einheiten · 26 Lagerbewegungen · 1 284 Verkaufspositionen · 1
+Sammlungseintrag · 626 Katalogzeilen · 90 Einkäufe.
 
-### 3. Der Rest in einem Durchgang
+**Der Abdruck über 15 Spalten ist die eigentliche Zusicherung für Preise und
+Mengen:** `market_price_snapshot` und `market_price_source` stehen darin, und
+sie müssen danach denselben Wert ergeben.
+
+### 2. Der ganze Satz in einem Durchgang
+
+**Die Handprobe entfällt** (Entscheidung des Betreibers, 2026-10-20). Sie
+hätte zeigen sollen, dass Rohname und Zustand stehenbleiben — und genau das
+beweist Abschnitt C3 des Skripts für **alle 35** Zeilen auf einmal, über
+einen Abdruck von `id|raw_name|state|condition`, der vor dem Schreiben
+genommen und danach verglichen wird. Eine einzelne Zeile von Hand hätte
+derselben Zusicherung nichts hinzugefügt und eine zweite Schreibart
+eingeführt.
+
+Das Skript bleibt davon unberührt wiederholbar: es findet jede Zielposition,
+ob schon zugeordnet oder nicht.
 
 ```
 supabase/operations/staging-portal-assignment.sql
@@ -87,7 +109,7 @@ Vollständig markieren, in den SQL-Editor des **Staging**-Projekts
 | **C** | je Artikel die erwartete Zahl, Abdruck über `id\|raw_name\|state\|condition` unverändert, keine Lagerbewegung entstanden, bezahlte Summen unverändert, 14 Bezugswerte gleich, Belegsperre dicht |
 | **D** | Ergebnisraster zum Übernehmen ins Protokoll |
 
-### 4. Nachher messen
+### 3. Nachher messen
 
 Dasselbe Blatt wie in Schritt 1. Erwartet:
 
