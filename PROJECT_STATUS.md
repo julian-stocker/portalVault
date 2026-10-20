@@ -3790,10 +3790,12 @@ Hauptnavigation behält ihre drei Ziele (ADR-0036).
 | **Suche** | Anzeigename, Rohname und SKY-ID — bei einem Portal also die Modellnummer |
 | **Sichtbarkeit** | dieselbe Regel wie im Figurenkatalog: `is_active AND catalog_visible`, für Administratoren alles (`includeHidden`) |
 
-**Heute zeigt der Bereich 39 Artikel: die Spiele.** Die 21 Portale stehen auf
-`catalog_visible = false` und erscheinen erst, wenn ein Administrator sie
-unter `/admin/catalog` **einzeln** freigibt. Es gibt keine Sammelfreigabe,
-und die Freigabe entscheidet die Abfrage — nicht ein Filter im Browser.
+**Seit dem 2026-10-20 zeigt der Bereich alle 60 Artikel** — 39 Spiele und
+21 Portale. Die Portale wurden in einem gezielten Schritt freigegeben
+(Abschnitt oben); die Regel selbst ist unverändert die des Figurenkatalogs:
+sichtbar ist, was `is_active AND catalog_visible` erfüllt, und das
+entscheidet die Abfrage, nicht ein Filter im Browser. Eine Sammelfreigabe
+gibt es weiterhin nicht.
 
 **Vier Eigenschaften, vier Entscheidungen:** `item_type` (was es ist),
 `isCollectible()` (Sammlung), `catalog_visible` (öffentlicher Katalog),
@@ -3806,25 +3808,36 @@ Lageransicht und die Artikelsuche schöpfen.
 Verweise vor und nach der Änderung · die Portal-Detailseiten
 (`/skylanders/84709790-sf` und zwei weitere) antworten weiter mit **404**.
 
-### Die Freigabe der 21 Portale — vorbereitet, nicht ausgeführt
+### Die 21 Portale sind öffentlich sichtbar (2026-10-20)
 
-Damit der Zubehörkatalog alle **60** Artikel zeigt, müssen die 21 Portale
-`catalog_visible = true` bekommen. Vorbereitet als **ein** Schritt:
-`supabase/operations/staging-portal-release.sql` — 21 ausgeschriebene
-SKY-IDs, eine Spalte, eine Transaktion.
+**Ausgeführt am 2026-10-20**, nach Freigabe: ein Schritt, eine Transaktion,
+über `supabase/operations/staging-portal-release.sql` — 21 ausgeschriebene
+SKY-IDs, eine Spalte. **Der Zubehörkatalog zeigt jetzt alle 60 Artikel:
+39 Spiele und 21 Portale.**
 
-**Gezielt, nicht pauschal:** ein Abdruck über die Sichtbarkeit *jeder
-anderen* Katalogzeile bricht die Transaktion ab, wenn sich daran etwas
-bewegt. Die 30 redaktionell ausgeblendeten Figuren bleiben ausgeblendet.
+| | vorher | nachher |
+|---|---|---|
+| sichtbare Portale | 0 | **21** |
+| als **anonymer Besucher** lesbare Katalogzeilen | 573 | **594** (534 Figuren + 39 Spiele + 21 Portale) |
+| `/zubehoer` | 39 Zeilen | **60 Zeilen** |
+| ausgeblendete Figuren | 30 | **30** |
+| sammelbare Katalogzeilen | 534 | **534** |
+| Angebote (`md5` unverändert) | 256 | **256**, davon Portale **0** |
+| Sammlung · Lagerzeilen · Bewegungen | 1 · 285 · 26 | **unverändert** |
 
-**Sichtbar heißt nicht sammelbar und nicht verkäuflich:** A4/A5 prüfen es
-vorher, C vergleicht danach `sammelbar` (534), `shopfaehig` (534),
-`angebote` (256) und deren `md5`.
+**Gezielt, nicht pauschal — und das war beweisbar:** ein Abdruck über die
+Sichtbarkeit *jeder anderen* Katalogzeile hätte die Transaktion abgebrochen,
+wenn sich daran etwas bewegt hätte. Die 30 redaktionell ausgeblendeten
+Figuren und die 2 inaktiven Zeilen stehen unverändert.
 
-Probelauf **P33** gegen echtes PostgreSQL: sichtbar 0 → 21, sammelbar und
-Angebote unverändert, eine danebengestellte ausgeblendete Figur bleibt
-ausgeblendet, Rücknahme stellt 0 wieder her. Ablauf und Abnahmeraster:
-`supabase/checks/portal_release_run.md`. Rücknahme:
+**Sichtbar heißt nicht sammelbar und nicht verkäuflich.** Beides wurde vor
+dem Schreiben geprüft (A4/A5) und danach verglichen — die 534 sammelbaren
+Figuren und die 256 Angebote haben sich nicht bewegt, und kein Portal ist im
+Angebot.
+
+Probelauf **P33** hatte dasselbe vorher gegen echtes PostgreSQL gefahren,
+mit einer danebengestellten ausgeblendeten Figur, die ausgeblendet blieb.
+Nachweis: `supabase/checks/portal_release_run.md`. Rücknahme verfügbar:
 `supabase/rollback/R_portal_release.sql`.
 
 ### Die Sammlung wird strenger (2026-10-20)

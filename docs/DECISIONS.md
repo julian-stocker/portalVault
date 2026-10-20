@@ -11743,6 +11743,13 @@ Kategorie, keines ist shopfähig. C vergleicht danach `sammelbar`,
 Artikel im Katalog steht, sagt nichts darüber, ob er sammelbar, auf Lager
 oder verkäuflich ist.
 
+> **Ausgeführt am 2026-10-20.** Die 21 Portale sind öffentlich sichtbar; der
+> Zubehörkatalog zeigt alle 60 Artikel. Unabhängig nachgeprüft: 30
+> ausgeblendete Figuren unverändert, 534 sammelbar, 256 Angebote ohne ein
+> einziges Portal — und als **anonymer Besucher** sind 594 Katalogzeilen
+> lesbar statt 573, also genau 21 mehr. Nachweis:
+> `supabase/checks/portal_release_run.md`.
+
 ### Offen
 
 Die Punkte aus `docs/SKYLANDERS_DATA.md` 11k — **ohne** die primäre Serie für

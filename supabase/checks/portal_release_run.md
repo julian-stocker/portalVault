@@ -1,6 +1,41 @@
 # Ablauf: die 21 Portale werden öffentlich sichtbar
 
-**Stand: vorbereitet, NICHT ausgeführt. Braucht eine Freigabe.**
+> ## AUSGEFÜHRT auf Staging am 2026-10-20
+>
+> Betreiber, manuell im SQL-Editor über
+> `supabase/operations/staging-portal-release.sql`. Das Abschlussraster
+> meldete **0 → 21** sichtbare Portale und jeden anderen Wert samt Abdruck
+> unverändert.
+>
+> ### Unabhängig nachgeprüft, rein lesend, am selben Tag
+>
+> | Prüfung | Ergebnis |
+> |---|---|
+> | sichtbare Portale | **21 / 21**, und zwar genau die 21 der Liste |
+> | ausgeblendete Figuren | **30** — unverändert, die Freigabe war gezielt |
+> | inaktive Zeilen | **2** — unverändert |
+> | sammelbare Katalogzeilen | **534** |
+> | Angebote | **256**, davon Portale **0** |
+> | Katalogzeilen | **626** |
+> | Sammlung | **1** Eintrag, davon auf Portalen **0** |
+> | Lagerzeilen · Bewegungen | **285** · **26** |
+> | Einkaufspositionen auf Portalen | **35** — die Zuordnung vom selben Tag steht |
+>
+> **Der eigentliche Beweis für „öffentlich sichtbar": als ANONYMER Besucher
+> sind jetzt 594 Katalogzeilen lesbar — 534 Figuren, 39 Spiele, 21 Portale.**
+> Vorher waren es 573. Die Zeilenpolicy aus `0004` lässt die 21 jetzt durch,
+> und nur die 21.
+>
+> **Auf der laufenden Oberfläche:** `/zubehoer` zeigt **60** Zeilen, davon
+> 21 mit der Marke „Portal" und 39 mit „Spiel"; alle drei Filter (Art,
+> Serie, Plattform) erscheinen jetzt. Der Figurenkatalog steht unverändert
+> bei 41 Karten und enthält kein Portal.
+>
+> **Die Rücknahme bleibt verfügbar:** `supabase/rollback/R_portal_release.sql`.
+
+---
+
+**Der Ablauf, wie er vorbereitet und gefahren wurde:**
 
 Nach dem Lauf zeigt der Zubehörkatalog `/zubehoer` **60 statt 39** Artikel.
 
