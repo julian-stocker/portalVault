@@ -57,6 +57,25 @@ export type FigureChoice = {
    * bestehende Aufrufer unverändert gültig.
    */
   image?: string | null;
+  /**
+   * Was für ein Artikel das ist: `figure`, `game`, `portal`, `bundle`,
+   * `other` (0135, mitgeliefert seit 0137).
+   *
+   * OPTIONAL, und das ist kein Zögern: läuft noch die siebenspaltige Fassung
+   * von `seller_import_catalog()` — etwa zwischen Migration und Deployment —,
+   * fehlt das Feld, und dann verhält sich alles hier wie vorher. `undefined`
+   * heißt deshalb „keine Auskunft", nicht „keine Figur".
+   */
+  itemType?: string;
+  /**
+   * Der Kategoriename, roh aus dem Katalog (`Spiele`, `Portale`, `Senseis`).
+   *
+   * Die RPC liefert ihn seit `0117` auf Position 4; bis `0137` hat die
+   * Anwendung ihn verworfen. Er macht die Suche brauchbar — „portal" findet
+   * Portale, auch wenn der Artikel `84709790` heißt — und er ist DATEN, kein
+   * abgeleitetes Etikett: interpretiert wird er nirgends, nur verglichen.
+   */
+  categoryName?: string;
 };
 
 /** Below this, a query matches too much to be worth showing. */
@@ -81,6 +100,22 @@ const ID_MATCH = 4;
  * ROHname zufällig besser passt.
  */
 const RAW_NAME_MATCH = 5;
+/*
+ * ZULETZT DIE ART DES ARTIKELS (0137).
+ *
+ * „portal" trifft jedes Portal, „spiel" jedes Spiel — über den
+ * Kategorienamen, der mit der Katalogzeile kommt, und über den Artikeltyp
+ * selbst. Gebraucht wird das, weil ein Portal `84709790 (SF)` heißt: der
+ * Betreiber hat es in der Hand und kennt seinen Namen nicht.
+ *
+ * UNTEN, UND ZWAR GANZ. Wer „Spyro" tippt, will Figuren und nicht die
+ * Kategorie; wer „Portale" tippt, hat nichts anderes gemeint. Ein Treffer
+ * auf den Namen schlägt deshalb immer einen Treffer auf die Art.
+ *
+ * NUR AM WORTANFANG. `includes` hätte „or" aus „Portale" geholt und mit zwei
+ * Zeichen den halben Katalog geliefert.
+ */
+const TYPE_MATCH = 6;
 
 function normalise(text: string): string {
   return text.trim().toLowerCase();
@@ -107,6 +142,16 @@ export function rankFigure(choice: FigureChoice, query: string): number | null {
   // Erst jetzt der Rohname, und nur wenn er ein anderer ist.
   if (choice.rawName !== undefined && choice.rawName !== choice.name
       && normalise(choice.rawName).includes(q)) return RAW_NAME_MATCH;
+  /*
+   * Und zuletzt die Art. Eine Figur bleibt davon unberührt: `figure` und
+   * die Figurenkategorien tragen keinen Namen, den jemand als Art tippt —
+   * und wer doch „figur" eingibt, bekommt die Kategorie `Figuren`, was genau
+   * das ist, was er gemeint hat.
+   */
+  if (choice.categoryName !== undefined
+      && normalise(choice.categoryName).startsWith(q)) return TYPE_MATCH;
+  if (choice.itemType !== undefined
+      && choice.itemType !== "figure" && choice.itemType.startsWith(q)) return TYPE_MATCH;
   return null;
 }
 
@@ -131,6 +176,68 @@ export function searchFigures(
   ranked.sort((a, b) =>
     a.rank !== b.rank ? a.rank - b.rank : a.choice.name.localeCompare(b.choice.name, "de-AT"));
   return ranked.slice(0, Math.max(0, limit)).map((r) => r.choice);
+}
+
+/**
+ * Ist dieser Artikel KEINE Figur? (0137)
+ *
+ * Die eine Stelle, an der die Oberfläche das fragt — damit „fehlt das Feld"
+ * genau einmal entschieden wird und nicht an fünf Stellen verschieden.
+ * Fehlt `itemType`, ist die Antwort NEIN: ohne Auskunft wird kein Artikel
+ * zum Zubehör erklärt.
+ */
+export function isAccessory(choice: FigureChoice): boolean {
+  return choice.itemType !== undefined && choice.itemType !== "figure";
+}
+
+/**
+ * Eine Katalogzeile, wie `seller_import_catalog()` sie liefert — nur die drei
+ * Felder, die über die Aufnahme in die Auswahlliste entscheiden.
+ *
+ * `unknown`, nicht `boolean | string`: die Werte kommen aus einer RPC, und
+ * eine ältere Funktionsfassung liefert sie gar nicht. Die Prüfung unten
+ * entscheidet das ausdrücklich, statt sich auf einen Typ zu verlassen, den
+ * niemand garantiert.
+ */
+export type CatalogRow = {
+  is_active?: unknown;
+  catalog_visible?: unknown;
+  item_type?: unknown;
+};
+
+/**
+ * Darf diese Katalogzeile im Einkauf zur Wahl stehen? (0117, geschärft in 0137)
+ *
+ * ZWEI MASSSTÄBE, UND SIE MESSEN VERSCHIEDENE DINGE.
+ *
+ *   `is_active`       — TECHNISCH, und er gilt jeder Zeile ohne Ausnahme. Das
+ *                       ist der Weg, eine falsch angelegte Zeile aus der
+ *                       Auswahl zu nehmen, auch die eines Zubehörartikels.
+ *   `catalog_visible` — REDAKTIONELL, und redaktionell heißt: im ÖFFENTLICHEN
+ *                       Katalog (ADR-0039). Er gilt deshalb nur FIGUREN.
+ *
+ * WARUM DIE AUSNAHME NÖTIG IST. `seller_create_catalog_item` schreibt jeden
+ * neuen Zubehörartikel mit `catalog_visible = false` — dort gehört er nicht
+ * hin. Mit dem Riegel von `0117` auf allen Zeilen wäre genau dieser Artikel
+ * unmittelbar nach seiner Entstehung wieder unauffindbar: einmal hinzugefügt,
+ * weil die SKY-ID aus der Anlegefunktion direkt in die Position geht — und
+ * danach nie wieder, nicht für ein zweites Exemplar und nicht für den
+ * nächsten Einkauf. Der Bestand wäre da, die Historie auch, nur der Weg
+ * dorthin nicht.
+ *
+ * FÜR FIGUREN ÄNDERT SICH NICHTS. Der Grund von `0117` war Eon's Elite — drei
+ * Katalogzeilen je Figur, von denen zwei nicht mehr angeboten werden —, und
+ * der betrifft ausschließlich Figuren.
+ *
+ * FEHLT `item_type`, bleibt es beim Verhalten von `0117`. Läuft noch die
+ * siebenspaltige Fassung der RPC, ist die Zeile „ohne Auskunft", und ohne
+ * Auskunft wird keine ausgeblendete Zeile zur Wahl gestellt — die Liste
+ * öffnet sich also nicht, sie bleibt wie vorher.
+ */
+export function isPickableCatalogRow(row: CatalogRow): boolean {
+  if (row.is_active === false) return false;
+  const accessory = typeof row.item_type === "string" && row.item_type !== "figure";
+  return accessory || row.catalog_visible !== false;
 }
 
 /** What the search box should say right now. One state, decided in one place. */

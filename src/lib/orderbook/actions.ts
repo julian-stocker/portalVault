@@ -50,6 +50,25 @@ function orderbookMessage(error: { code?: string; message?: string }): string {
    */
   if (error.code === "PT409") return de.business.orderbook.detailsModal.stalePurchase;
   if (text.includes("already in inventory")) return de.business.orderbook.errors.alreadyBooked;
+  /*
+   * DIE FUENF ABLEHNUNGEN VON `seller_create_catalog_item` (0137), UND SIE
+   * STEHEN VOR `not a catalog figure`.
+   *
+   * Nicht aus Vorliebe: der Satz „a figure is created in the catalog
+   * administration" enthaelt das Wort `figure`, nicht aber die Wendung „not a
+   * catalog figure" — die Reihenfolge ist hier also unkritisch. Trotzdem
+   * stehen sie zusammen und oben, damit beim naechsten Zusatz sichtbar ist,
+   * dass dieser Mapper nach dem ERSTEN Treffer entscheidet.
+   */
+  if (text.includes("a figure is created in the catalog administration")) {
+    return de.business.orderbook.errors.createNotAFigure;
+  }
+  if (text.includes("unknown item type")) return de.business.orderbook.errors.createUnknownType;
+  if (text.includes("unknown series")) return de.business.orderbook.errors.createUnknownSeries;
+  if (text.includes("an article needs a name")) return de.business.orderbook.errors.createNeedsName;
+  if (text.includes("SKY-ID allocation range exhausted")) {
+    return de.business.orderbook.errors.createRangeExhausted;
+  }
   if (text.includes("not a catalog figure")) return de.business.orderbook.errors.notAFigure;
   if (text.includes("damaged item")) return de.business.orderbook.errors.damaged;
   if (text.includes("never arrived")) return de.business.orderbook.errors.missing;
@@ -534,6 +553,56 @@ export async function addPurchaseItem(
   return run("seller_add_purchase_item", {
     p_purchase_id: purchaseId, p_sky_id: skyId, p_raw_name: rawName, p_condition: condition,
   }, purchaseId);
+}
+
+/**
+ * Einen Katalogartikel anlegen und ihn gleich auf den Einkauf setzen (0137).
+ *
+ * WARUM BEIDES IN EINER AKTION. Der Betreiber hat ein Portal in der Hand. Es
+ * steht in keinem Katalog, also muss es erst entstehen — aber er wollte es
+ * auf den EINKAUF setzen, und „angelegt, bitte jetzt noch suchen" wäre genau
+ * der zweite Schritt, den diese Aufgabe abschaffen soll. Die SKY-ID aus der
+ * Datenbankfunktion geht deshalb direkt in `seller_add_purchase_item`.
+ *
+ * WAS PASSIERT, WENN DER ZWEITE SCHRITT SCHEITERT. Der Artikel bleibt
+ * angelegt, und die Meldung sagt es: die zurückgegebene SKY-ID steht im
+ * Ergebnis. Das ist Absicht und kein Versäumnis — ein Katalogartikel ist
+ * keine Position, und ihn wieder zu löschen, weil ein Einkauf gerade nicht
+ * erreichbar war, hiesse eine Identität zu vergeben und wieder einzuziehen
+ * (CLAUDE.md Regel 2). Der Artikel ist dann über die Suche erreichbar.
+ *
+ * KEINE EIGENE BERECHTIGUNGSPRÜFUNG. `can_operate_active_seller()` in der
+ * Funktion entscheidet; `canOperateSeller()` hier ist nur die Höflichkeit,
+ * die einen abgelehnten Klick zu einem Satz macht.
+ */
+export type CreateItemResult =
+  | { ok: true; skyId: string }
+  | { ok: false; message: string; skyId?: string };
+
+export async function createCatalogItem(
+  purchaseId: number, name: string, seriesCode: string, itemType: string,
+): Promise<CreateItemResult> {
+  if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
+  const supabase = await createClient();
+
+  const created = await supabase.rpc("seller_create_catalog_item", {
+    p_name: name, p_series_code: seriesCode, p_item_type: itemType,
+  });
+  if (created.error) return { ok: false, message: orderbookMessage(created.error) };
+  const skyId = typeof created.data === "string" ? created.data : null;
+  if (skyId === null) return { ok: false, message: de.business.orderbook.errors.createFailed };
+
+  const added = await supabase.rpc("seller_add_purchase_item", {
+    p_purchase_id: purchaseId, p_sky_id: skyId, p_raw_name: null, p_condition: "loose",
+  });
+  if (added.error) {
+    /* Der Artikel ist da, die Position nicht. Die SKY-ID reist mit, damit die
+       Oberfläche sagen kann, was entstanden ist. */
+    return { ok: false, message: orderbookMessage(added.error), skyId };
+  }
+
+  for (const path of paths(purchaseId)) revalidatePath(path);
+  return { ok: true, skyId };
 }
 
 /**

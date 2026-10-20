@@ -123,8 +123,24 @@ describe("die Lagerübersicht bietet nur noch die operative Position an", () => 
 
 describe("die Karte einer historischen OVP-Position", () => {
   it("berechnet, ob die Position operativ ist", () => {
-    expect(card).toContain('import { isOperativeCondition, type InventoryPosition }');
+    expect(card).toContain("isOperativeCondition, isShopGoods, type InventoryPosition,");
     expect(card).toContain("const operative = isOperativeCondition(position.condition);");
+  });
+
+  it("und `sellable` schwächt 0108 nicht ab, sondern verschärft es", () => {
+    /*
+     * Seit ADR-0128 hängen zwei der drei Steuerungen an `sellable` statt an
+     * `operative`. Das darf die Zusicherung von 0108 nicht lockern — also
+     * ist `sellable` ausdrücklich `operative UND shopGoods`, und damit
+     * verlangt jede dieser Steuerungen weiterhin `operative`.
+     *
+     * Die Richtung ist wichtig: `operative && shopGoods` ist strenger als
+     * `operative`, ein `operative || shopGoods` wäre schwächer. Genau diese
+     * eine Zeile wird deshalb wörtlich geprüft.
+     */
+    expect(card).toContain("const shopGoods = isShopGoods(position);");
+    expect(card).toContain("const sellable = operative && shopGoods;");
+    expect(card).not.toContain("operative || shopGoods");
   });
 
   it("zeigt das Etikett weiterhin — auch OVP", () => {
@@ -134,7 +150,8 @@ describe("die Karte einer historischen OVP-Position", () => {
   });
 
   it("bietet den Listungsknopf nur operativ an", () => {
-    const at = card.indexOf("{operative ? (");
+    /* Über `sellable`, das `operative` enthält — siehe oben. */
+    const at = card.indexOf("{sellable ? (");
     expect(at).toBeGreaterThan(-1);
     // Der Knopf hängt an `save({ isListed: … })`, und das führt zu
     // set_shop_listing — seit 0108 für OVP abgelehnt.
@@ -144,6 +161,9 @@ describe("die Karte einer historischen OVP-Position", () => {
     expect(listingBlock).toContain("</button>");
     // Im historischen Fall bleibt derselbe Zustand als Text stehen.
     expect(listingBlock).toContain("{position.isListed ? copy.listed : copy.notListed}");
+    /* Bei ZUBEHÖR steht stattdessen die Art da (ADR-0128): „Nicht im Shop"
+       wäre ein Zustand, den man ändern könnte, und das kann man nicht. */
+    expect(listingBlock).toContain("copy.itemTypes[figure?.itemType ?? \"\"]");
   });
 
   it("bietet die Bestandsschritte nur operativ an", () => {
@@ -153,7 +173,7 @@ describe("die Karte einer historischen OVP-Position", () => {
   });
 
   it("bietet den Preiseditor nur operativ an", () => {
-    expect(card).toMatch(/\{operative \? \(\s*<PriceEditor/);
+    expect(card).toMatch(/\{sellable \? \(\s*<PriceEditor/);
     // Der Wert bleibt sichtbar.
     expect(card).toContain('position.effectivePrice === null ? "–" : formatPrice(position.effectivePrice)');
   });
@@ -205,9 +225,20 @@ describe("keine Aktion, die 0108 ablehnen würde", () => {
     expect(block).toContain("condition={condition}");
   });
 
-  it("die drei Steuerungen der Karte hängen alle an `operative`", () => {
-    // Drei `{operative ? (` plus der erklärende `{!operative ? (`.
-    expect((card.match(/\{operative \? \(/g) ?? []).length).toBe(3);
+  it("die drei Steuerungen der Karte verlangen alle `operative`", () => {
+    /*
+     * ZWEI VON DREI HÄNGEN SEIT ADR-0128 AN `sellable`. Die Zusicherung ist
+     * dieselbe, weil `sellable` `operative` enthält (oben wörtlich geprüft):
+     *
+     *   Bestandsschritte  `{operative ? (`   — ein Portal wird gebucht wie
+     *                                          jede Figur
+     *   Shopfreigabe      `{sellable ? (`    — ein Portal ist keine Shopware
+     *   Preis             `{sellable ? (`    — dasselbe
+     *
+     * Dazu der erklärende Zweig `{!operative ? (` für die OVP-Position.
+     */
+    expect((card.match(/\{operative \? \(/g) ?? []).length).toBe(1);
+    expect((card.match(/\{sellable \? \(/g) ?? []).length).toBe(2);
     expect((card.match(/\{!operative \? \(/g) ?? []).length).toBe(1);
   });
 });

@@ -261,9 +261,16 @@ describe("Regression gegen Phase A+B und die Sammlungslogik", () => {
                         "0118_purchase_platform_ebay.sql"]) {
       expect(migrationSource(file).length, file).toBeGreaterThan(0);
     }
-    /* Die Funktion aus 0117 wird von 0119/0120 nicht neu angelegt. */
+    /*
+     * Die Funktion aus 0117 wird von 0119/0120 nicht neu angelegt — das ist
+     * die Aussage dieses Tests, und sie gilt unverändert. Neu angelegt wird
+     * sie von `0137`, die ihr `item_type` als achte Spalte anhängt; geprüft
+     * wird deshalb, dass 0119 und 0120 sie NICHT nennen, und nicht mehr,
+     * welche Datei die jüngste Fassung hält (das prüft
+     * `src/lib/import/catalog-access.test.ts`).
+     */
     expect(latestFunction("seller_import_catalog").file)
-      .toBe("0117_catalog_display_names_and_picker.sql");
+      .toBe("0137_catalog_accessories.sql");
     expect(SQL).not.toContain("seller_import_catalog");
     expect(migrationSource("0120_purchase_states_and_idempotency.sql"))
       .not.toContain("seller_import_catalog");

@@ -395,8 +395,11 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * bezahlte Summe eines importierten Einkaufs auch gegen ein direktes
      * `update` festhaelt — bis `0134`, die `source_row` in die Positionsliste
      * gibt, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die
-     * Datenbank (ADR-0127) — und jetzt bis `0135`, die dem Katalog einen
-     * Artikeltyp gibt und die Shop-Eignung daran hängt (ADR-0128). Die
+     * Datenbank (ADR-0127) — dann bis `0135`, die dem Katalog einen
+     * Artikeltyp gibt und die Shop-Eignung daran hängt (ADR-0128) — und
+     * jetzt bis `0138`: `0137` legt den Weg für Zubehör (Kategorieregel,
+     * Anlegefunktion, Artikeltyp in der Artikelsuche), `0138` legt die 21
+     * Portale der Arbeitsmappe an. Die
      * Zusicherung, die bleibt, ist die über die
      * FOLGE: die drei Tests in `src/lib/commerce/` verlangen sie
      * lückenlos.
@@ -408,8 +411,8 @@ describe("0122 legt an, was der Beleg braucht", () => {
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    expect(files[files.length - 1]).toBe("0136_business_backup_item_type.sql");
-    expect(files[files.length - 2]).toBe("0135_catalog_item_type.sql");
+    expect(files[files.length - 1]).toBe("0138_catalog_portals.sql");
+    expect(files[files.length - 2]).toBe("0137_catalog_accessories.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

@@ -199,6 +199,26 @@ nicht anzunehmen, und sie entscheidet über die Rollout-Reihenfolge:
 > mit den neuen auskommt. Umgekehrt stünde zwischen Deploy und Migration ein Fenster, in dem die
 > Oberfläche `PGRST202` wirft.
 
+**Und seit `0135` ist diese Reihenfolge für den Katalog nicht mehr nur eine Vorsichtsmaßnahme
+(2026-10-20).** `FIGURE_COLUMNS` in `src/lib/catalog/queries.ts` fordert die Spalte
+`skylanders.item_type` jetzt **ausdrücklich** an. Eine fehlende Spalte in einer
+PostgREST-Auswahlliste beantwortet nicht die eine Spalte mit NULL — sie lässt die **ganze
+Abfrage** fehlschlagen. Ein Deployment des Anwendungscodes **vor** `0135` träfe damit jede
+Katalogabfrage: öffentlicher Katalog, Detailseite, Sammlung, Adminkatalog, Lagerübersicht.
+
+Auf Production fehlen am 2026-10-20 die Migrationen **`0134`–`0138`**. Für dieses Release gilt
+deshalb ohne Ausnahme:
+
+| | |
+|---|---|
+| 1. | `0135` und `0136` auf Production anwenden (Preflight, Migration, Postflight) |
+| 2. | `0137` und `0138` anwenden, in dieser Reihenfolge — `supabase/checks/0137_0138_staging_run.md` |
+| 3. | **erst danach** den Anwendungscode ausliefern |
+
+Die RPC-Seite wäre für sich genommen verträglich: `seller_import_catalog()` liefert nach `0137`
+eine achte Spalte, und ein älterer Client liest über Feldnamen und ignoriert sie. Die
+**Tabellenabfrage** ist es nicht, und sie entscheidet hier.
+
 ---
 
 ## Was nicht ausgeliefert wird

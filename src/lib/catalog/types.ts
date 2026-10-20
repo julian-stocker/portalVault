@@ -26,6 +26,19 @@ export type CatalogFigure = {
   /** Numeric category id. Only the admin area needs it. */
   categoryId: number;
   /**
+   * Was für ein Artikel das ist (0135): `figure`, `game`, `portal`, `bundle`,
+   * `other`.
+   *
+   * OPTIONAL, weil nicht jeder Leser die Spalte holt. `undefined` heisst
+   * „keine Auskunft", nicht „keine Figur" — `isCollectible()` fällt dann auf
+   * die Kategorieregel zurück, also auf das Verhalten von vor `0137`.
+   *
+   * Sagt nichts über Sichtbarkeit und nichts über Sammelbarkeit; es ist die
+   * fachliche Eigenschaft der Zeile, und die Sammelbarkeit wird daraus
+   * abgeleitet, nicht umgekehrt.
+   */
+  itemType?: string | null;
+  /**
    * What kind of collectible this is (ADR-0041), from its category.
    *
    * `null` means the category has not been classified — a state, not a

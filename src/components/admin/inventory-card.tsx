@@ -35,7 +35,9 @@ import { PriceEditor } from "@/components/admin/price-editor";
 import { StockLedger } from "@/components/admin/stock-ledger";
 import { StockStepper } from "@/components/admin/stock-stepper";
 import { setListing } from "@/lib/admin/actions";
-import { isOperativeCondition, type InventoryPosition } from "@/lib/admin/inventory-model";
+import {
+  isOperativeCondition, isShopGoods, type InventoryPosition,
+} from "@/lib/admin/inventory-model";
 import { loadCardHistory } from "@/lib/admin/legacy-actions";
 import {
   mergeHistory, tradeCounters,
@@ -107,6 +109,24 @@ export function InventoryCard({
    */
   const operative = isOperativeCondition(position.condition);
 
+  /*
+   * IST DAS ÜBERHAUPT SHOPWARE? (ADR-0128)
+   *
+   * Für ein Spiel oder ein Portal: nein. `set_shop_listing()` würde es
+   * durchaus auf `is_listed = true` setzen — aber `shop_offers()` filtert es
+   * über `is_shop_eligible()` am Artikeltyp wieder heraus (`0135`). Der
+   * Schalter sagte dann „Im Shop", und im Shop stünde nichts.
+   *
+   * Dieselbe Entscheidung wie bei `operative`, aus demselben Grund und mit
+   * demselben Muster: die beiden Steuerungen, die ins Leere führen, werden
+   * nicht angeboten — Shopfreigabe und Preis. BESTAND UND HISTORIE BLEIBEN,
+   * und das ist der Punkt: `record_inventory_movement()` fragt nur den
+   * Zustand, also wird ein Portal gebucht wie jede Figur.
+   */
+  const shopGoods = isShopGoods(position);
+  /** Beides zusammen: nur dann gibt es Preis und Freigabe zu bedienen. */
+  const sellable = operative && shopGoods;
+
   /**
    * BOTH sources are fetched on first open, not with the page.
    *
@@ -177,7 +197,7 @@ export function InventoryCard({
         {/* The shop release, and the control that changes it (ADR-0048).
             "Im Shop" means released, never "in stock": the two are separate
             questions and both states of each are real. */}
-        {operative ? (
+        {sellable ? (
           <button
             type="button"
             onClick={() => save({ isListed: !position.isListed })}
@@ -192,6 +212,13 @@ export function InventoryCard({
           >
             {position.isListed ? copy.listed : copy.notListed}
           </button>
+        ) : !shopGoods ? (
+          /* Zubehör: kein Schalter und auch kein „Nicht im Shop" — das wäre
+             ein Zustand, den man ändern könnte. Die Art steht da, weil sie
+             die Antwort IST. */
+          <span className="min-h-7 shrink-0 rounded-full bg-surface px-2.5 text-[11px] font-medium whitespace-nowrap text-muted ring-1 ring-border/70">
+            {copy.itemTypes[figure?.itemType ?? ""] ?? copy.accessoryNotShop}
+          </span>
         ) : (
           /* Kein Knopf, nur der Zustand: 0108 würde das Umschalten ablehnen. */
           <span className="min-h-7 shrink-0 rounded-full bg-surface px-2.5 text-[11px] font-medium whitespace-nowrap text-muted ring-1 ring-border/70">
@@ -207,11 +234,19 @@ export function InventoryCard({
           <span className="font-medium">{copy.historicalCondition}</span>{" "}
           {copy.historicalConditionHint}
         </p>
+      ) : !shopGoods ? (
+        /* Ein Satz, kein Dialog — und er nennt den Grund, nicht nur die
+           Tatsache. Kein Warnton: hier ist nichts kaputt, das ist die
+           Sortimentsgrenze (ADR-0128, Punkt 8). */
+        <p className="text-[11px] leading-tight text-muted">
+          {copy.accessoryNotShopHint}
+        </p>
       ) : null}
 
       {/* The two reasons a released position is nevertheless not on sale.
           Their own line, so they never widen the header. */}
-      {position.isListed && (position.available <= 0 || position.effectivePrice === null) ? (
+      {sellable && position.isListed
+        && (position.available <= 0 || position.effectivePrice === null) ? (
         <p className="text-[11px] leading-tight text-muted">
           {position.effectivePrice === null ? (
             <span className="text-danger">{copy.noPriceHint}</span>
@@ -265,27 +300,36 @@ export function InventoryCard({
               : formatPrice(figure.marketPrice)}
           </span>
         </span>
-        <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="text-[11px] text-muted">{copy.salePrice}</span>
-          {/* What the shop charges, and whether it follows the rule
-              (ADR-0045). The automatic figure is the database's. */}
-          {operative ? (
-            <PriceEditor
-              position={position}
-              automaticPrice={
-                position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
-              }
-              percentage={percentage}
-              onFailed={setFailed}
-            />
-          ) : (
-            /* Nur der Wert: `set_shop_listing` schreibt Preis und Listung
-               gemeinsam und weist diese Position seit 0108 ab. */
-            <span className="text-sm tabular-nums">
-              {position.effectivePrice === null ? "–" : formatPrice(position.effectivePrice)}
-            </span>
-          )}
-        </span>
+        {/*
+          DEN SHOP-PREIS GIBT ES NUR FÜR SHOPWARE (ADR-0128). Bei einem
+          Portal stünde hier „Shop-Preis —", und das ist keine Auskunft,
+          sondern eine leere Zeile: es gibt keinen Shop-Preis, nicht bloß
+          keinen eingetragenen. Der Marktpreis links bleibt — ein Spiel hat
+          einen, und er ist der Einkaufsmaßstab.
+        */}
+        {shopGoods ? (
+          <span className="flex min-w-0 items-baseline gap-1.5">
+            <span className="text-[11px] text-muted">{copy.salePrice}</span>
+            {/* What the shop charges, and whether it follows the rule
+                (ADR-0045). The automatic figure is the database's. */}
+            {sellable ? (
+              <PriceEditor
+                position={position}
+                automaticPrice={
+                  position.priceSource === "automatic" ? position.effectivePrice : automaticPrice
+                }
+                percentage={percentage}
+                onFailed={setFailed}
+              />
+            ) : (
+              /* Nur der Wert: `set_shop_listing` schreibt Preis und Listung
+                 gemeinsam und weist diese Position seit 0108 ab. */
+              <span className="text-sm tabular-nums">
+                {position.effectivePrice === null ? "–" : formatPrice(position.effectivePrice)}
+              </span>
+            )}
+          </span>
+        ) : null}
       </div>
 
       {failed ? (

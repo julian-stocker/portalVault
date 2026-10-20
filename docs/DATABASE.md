@@ -3993,6 +3993,100 @@ mit dem Feldplan aus `manifest.ts`. Ein Export, der **vor** `0136` gezogen
 wurde, meldet danach genau einen Befund — `figures: item_type` fehlt. Das ist
 richtig: die Datei ist älter als das Manifest.
 
+### 3.3at3 Zubehör wird ein Katalogartikel (`0137`, `0138`, ADR-0128 Z2/Z3)
+
+**Stand: lokal vorbereitet, nirgends angewendet** (`supabase/migrations/APPLIED.md`).
+
+#### Was `0137` ändert — der Weg
+
+| Objekt | Änderung |
+|---|---|
+| `catalog_item_type_for_category(text)` | lernt vier Namen: `Portale → portal`, `Bundles → bundle`, `Taschen → other`, `Zubehör → other`. Bleibt eine **Positivliste** — ein unbekannter Kategoriename ist weiter `figure`, NULL eingeschlossen |
+| `non_collectible_categories()` | nennt dieselben vier Namen zusätzlich zu `Spiele`. Spiegelbild in `src/lib/catalog/collectible.ts`, verglichen von `npm run verify:shop` |
+| `seller_create_catalog_item(text, text, text)` | **neu**. Der Betrieb legt einen Zubehörartikel an und bekommt seine SKY-ID zurück |
+| `seller_import_catalog()` | liefert `item_type` als **achte** Spalte — angehängt, nicht eingeschoben; die sieben aus `0117` behalten ihre Ordnungszahlen |
+
+`is_shop_eligible()` bleibt unberührt: `0135` hat die Eignung an `item_type`
+gehängt, mehr braucht es nicht. **Die Ergebnismenge ändert sich nicht, und die
+Migration beweist das selbst** — sieben Abdrücke vor der Änderung, verglichen
+danach, einschließlich eines `md5` über die vollständige Angebotsliste. Dass
+das gelingen *kann*, liegt daran, dass die vier neuen Kategorienamen heute
+keine Zeile tragen; Abschnitt 1 bricht ab, wenn doch.
+
+**Zwei unabhängige Riegel.** Ein Zubehörartikel ist nicht sammelbar, weil seine
+**Kategorie** in der Liste steht, UND nicht shopfähig, weil sein **Artikeltyp**
+nicht `figure` ist. Keiner hängt daran, dass der andere gesetzt wurde.
+
+#### `seller_create_catalog_item` im Einzelnen
+
+Nimmt Name, Serie und einen von vier Typen (`game`, `portal`, `bundle`,
+`other`). Lehnt `figure` **ausdrücklich und mit eigener Meldung** ab: eine
+Figur ist kuratierte Katalogidentität und entsteht im Adminbereich
+(ADR-0034, `admin_create_figure` verlangt `is_shop_admin()`).
+
+| | |
+|---|---|
+| Tor | `can_operate_active_seller()`, wie jede `seller_*`-Funktion seit `0053` |
+| Rechte | `revoke all … from public, anon`, `grant execute … to authenticated` |
+| Name | roh, nur außen beschnitten — kein `strip()` im Inneren, keine Normalisierung (CLAUDE.md Regel 4) |
+| Kategorie | folgt aus dem Typ, genau einmal; fehlt sie in der Serie, entsteht sie am Ende der Reihenfolge, `catalog_group` NULL |
+| SKY-ID | aus `sky_id_seq`, wie `admin_create_figure`; über `SKY-8999` bricht sie ab (ADR-0070). **Nie** aus Name, Zeilennummer oder höchster ID |
+| schreibt | `item_type` ausdrücklich, `catalog_visible = false`, `source = 'admin'`, `card_type = 'standard'`, `is_active = true` |
+| schreibt **nicht** | Preis, Bild, `display_name_override`, `character_id` — alles Adminbereich |
+| Journal | ein Eintrag `catalog_admin_changes.field = 'created'`, wie bei `admin_create_figure` |
+
+`source = 'admin'` ist nicht Geschmack: es ist die Bedingung dafür, dass
+`tools/import-catalog.mts` die Zeile nicht als „im Export verschwunden"
+meldet (ADR-0070).
+
+#### Was `0138` anlegt — die 21 Portale
+
+Die **21 Portale der Arbeitsmappe** mit den SKY-IDs des Betreibers:
+`SKY-0615`–`0622`, `0624`–`0630`, `0632`–`0637`. Die beiden Lücken gehören den
+Disney-Infinity-Portalen (`SKY-0623`, `SKY-0631`) und sind Absicht.
+Dazu je Serie eine Kategorie `Portale` am Ende der Reihenfolge — sechs
+Kategorien für sechs Serien.
+
+| | |
+|---|---|
+| `name` | Spalte B der Arbeitsmappe, **zeichengleich**: `84157790 (SA)`, `83973080A Wireless (SA)`, `84721790 (SF, T, SC)` |
+| `series_code` | die Serie der Akte. `SKY-0637` trägt `SF` (Entscheidung des Betreibers, 2026-10-20); die vollständige Zuordnung bleibt im Rohnamen lesbar |
+| alles weitere | `item_type = 'portal'`, `catalog_visible = false`, `source = 'admin'`, `card_type = 'standard'`, kein Preis, kein Bild, kein Charakter, kein Override |
+| Slug | `next_figure_slug()`, **zeilenweise** aufgerufen: in einer einzigen Anweisung sähen alle 21 Aufrufe denselben Schnappschuss, und zwei gleiche Grundslugs kollidierten an `skylanders_slug_uniq` |
+| `sky_id_seq` | **unberührt**. Die Nummern sind vergeben, nicht zu vergeben; die Migration enthält kein `nextval` und vergleicht den Sequenzstand vorher/nachher |
+
+**Sie setzt `0137` voraus und fragt es nach seiner WIRKUNG, nicht nach seiner
+Nummer:** nennt `non_collectible_categories()` die Kategorie `Portale`, und
+leitet `catalog_item_type_for_category('Portale')` auf `portal` ab. Fehlt
+eines davon, wären die 21 Zeilen in dem Augenblick sammelbare, shopfähige
+Figuren — die Migration bricht deshalb ab.
+
+**Und die Zahlen, die Nutzer kennen, bewegen sich nicht.** `0138` nimmt acht
+Abdrücke und vergleicht sie: Angebotszahl und `md5` der Angebotsliste,
+shopfähige Zeilen, Fortschrittsnenner insgesamt **und je Serie**,
+Artikeltypverteilung (als Differenz: genau 21 `portal` mehr), `md5` der
+`display_name_override`, Sequenzstand. Eine Abweichung rollt alles zurück.
+
+Der freie Bereich wird vorher **ganz** geprüft — `SKY-0615`–`SKY-0642`, nicht
+nur die 21 Nummern: steht dort irgendeine Zeile, hat jemand den Bereich anders
+benutzt als die Mappe ihn führt, und dann ist `0138` der falsche Schritt.
+
+#### Rücknahme
+
+**Zwingende Reihenfolge: `R0138`, dann `R0137`.** `R0137` bricht von sich aus
+ab, solange eine Zeile in einer Zubehörkategorie steht. `R0138` fragt vorher
+**zehn** Tabellen mit Fremdschlüssel auf `skylanders.sky_id`; zwei davon —
+`orderbook_name_mappings` und `inventory_import_mappings` — hängen mit
+`on delete cascade` und gingen sonst **still** mit. Die Journaleinträge bleiben:
+`catalog_admin_changes` ist append-only durch einen Trigger (`0004`, 6.1).
+
+Nachweis: `supabase/checks/0137_preflight.sql` / `0137_postflight.sql`,
+`0138_preflight.sql` / `0138_postflight.sql`, Reihenfolge in
+`supabase/checks/0137_0138_staging_run.md`. Der lokale Probelauf fährt beide
+samt Rücknahmen gegen echtes PostgreSQL (`npm run verify:check-sql`, P22–P27)
+— was das **nicht** beweist, steht in
+`supabase/checks/open_verifications.md`, Abschnitt 3a.
+
 ### 3.3au Ein historischer Einkauf wird nachgetragen (`0132`, ADR-0126)
 
 Ein aus der Arbeitsmappe importierter Einkauf (`purchases.source =

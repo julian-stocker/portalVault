@@ -17,11 +17,30 @@
  * `shop_inventory` IS THE CURRENT TRUTH. Nothing here replays
  * `inventory_movements`, reads `legacy_stock_events` or consults a workbook
  * figure: those describe how the shelf got here, not what is on it.
+ *
+ * ---------------------------------------------------------------------------
+ * UND SEIT ADR-0128 LIEGT ZUBEHÖR MIT AUF DEM REGAL
+ *
+ * Spiele hatten immer schon Lagerzeilen — 13 davon —, nur hat sie keine
+ * Ansicht gezeigt. Jetzt zeigt sie sie, und damit stellt sich die Frage,
+ * was die fünf Zahlen zählen.
+ *
+ * DIE ANTWORT: die fünf sind FIGURENZAHLEN und bleiben es. Ein Spiel ist
+ * nicht sammelbar und nicht shopfähig, es hat keinen Sammlerwert, und
+ * `Marktwert` ist der Wert der Sammelobjekte. Zubehör bekommt zwei eigene
+ * Angaben daneben — `accessoryPositions` und `accessoryPieces` —, und das
+ * ist die Trennung, die das ganze Produkt führt, nur eben lesbar.
+ *
+ * Hätte man es addiert, wäre eine Zahl, die der Betreiber seit Monaten
+ * kennt, ohne Zutun gesprungen, und niemand hätte gesehen, warum.
+ * ---------------------------------------------------------------------------
  */
-import type { InventoryPosition } from "@/lib/admin/inventory-model";
+import {
+  isAccessoryPosition, isShopGoods, type InventoryPosition,
+} from "@/lib/admin/inventory-model";
 
 /**
- * THE FIVE, AND WHICH PIECES EACH ONE COUNTS.
+ * THE FIVE FIGURE NUMBERS, AND WHICH PIECES EACH ONE COUNTS.
  *
  * Reserved stock is the reason this needs saying out loud. A piece held for
  * an open order is STILL ON THE SHELF and still owned, so it counts in
@@ -43,6 +62,22 @@ export type InventoryOverview = {
   shopValue: number;
   /** Positions carrying stock whose figure has no market price (ADR-0010). */
   withoutMarketPrice: number;
+  /**
+   * ZUBEHÖR, GETRENNT GEZÄHLT — Positionen und Stück (ADR-0128).
+   *
+   * Die fünf Zahlen oben sind FIGURENZAHLEN und bleiben es. Das ist keine
+   * Nachlässigkeit, sondern die Trennung, die das ganze Produkt führt: ein
+   * Spiel ist nicht sammelbar und nicht shopfähig, es hat keinen
+   * Sammlerwert, und `Marktwert` ist der Wert der Sammelobjekte. Hätte man
+   * die 13 Spiele-Lagerzeilen in `stockPieces` addiert, wäre eine Zahl, die
+   * der Betreiber seit Monaten kennt, ohne Zutun gesprungen — und niemand
+   * hätte gesehen, warum.
+   *
+   * Sichtbar werden sie trotzdem, und zwar hier: als eigene Angabe neben den
+   * fünf, nicht in ihnen.
+   */
+  accessoryPositions: number;
+  accessoryPieces: number;
 };
 
 export const NO_INVENTORY_OVERVIEW: InventoryOverview = {
@@ -52,6 +87,8 @@ export const NO_INVENTORY_OVERVIEW: InventoryOverview = {
   marketValue: 0,
   shopValue: 0,
   withoutMarketPrice: 0,
+  accessoryPositions: 0,
+  accessoryPieces: 0,
 };
 
 /**
@@ -65,8 +102,9 @@ export const NO_INVENTORY_OVERVIEW: InventoryOverview = {
  *   shop_price(...) is not null   → `effectivePrice !== null`, the very same
  *                                   function, computed by the database and
  *                                   handed over in the row
- *   is_shop_eligible(sky_id)      → the figure is a collectible one (only
- *                                   those become `positions`), and it is
+ *   is_shop_eligible(sky_id)      → the figure is a collectible one — since
+ *                                   ADR-0128 asked explicitly rather than
+ *                                   implied by `positions` — and it is
  *                                   active and catalog-visible
  *
  * Plus the one thing `shop_offers()` reports rather than filters on:
@@ -87,6 +125,15 @@ export function isOffered(position: InventoryPosition): boolean {
     && position.figure !== null
     && position.figure.isActive
     && position.figure.catalogVisible
+    /*
+     * UND ES MUSS EINE FIGUR SEIN (ADR-0128). Bis die Lagerübersicht Zubehör
+     * zeigte, war das durch die Auswahl der Zeilen erledigt: `positions`
+     * enthielt nur Sammelbares. Jetzt steht es da, wo es hingehört — als
+     * eigene Bedingung, die `is_shop_eligible()` Satz für Satz spiegelt.
+     * Ein gelistetes Portal mit Preis ist KEIN Angebot, weil `shop_offers()`
+     * es am Artikeltyp herausfiltert.
+     */
+    && isShopGoods(position)
   );
 }
 
@@ -113,7 +160,23 @@ export function inventoryOverview(
   let shopCents = 0;
   let withoutMarketPrice = 0;
 
+  let accessoryPositions = 0;
+  let accessoryPieces = 0;
+
   for (const position of positions) {
+    /*
+     * ZUBEHÖR ZÄHLT FÜR SICH UND SONST NIRGENDS (ADR-0128). Zwei Angaben,
+     * dann weiter zur nächsten Zeile: kein Stück in `stockPieces`, kein Cent
+     * in `marketValue`, keine Zeile in `withoutMarketPrice`. Die fünf Zahlen
+     * oben sind Figurenzahlen und bleiben Zeichen für Zeichen die, die der
+     * Betreiber kennt.
+     */
+    if (isAccessoryPosition(position)) {
+      accessoryPositions += 1;
+      accessoryPieces += position.quantity;
+      continue;
+    }
+
     /*
      * The shelf, and the part of it that is spoken for. `quantity` is what
      * is physically there; `reserved` is how much of that an open order
@@ -145,5 +208,7 @@ export function inventoryOverview(
     marketValue: marketCents / 100,
     shopValue: shopCents / 100,
     withoutMarketPrice,
+    accessoryPositions,
+    accessoryPieces,
   };
 }

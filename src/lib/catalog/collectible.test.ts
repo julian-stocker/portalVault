@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 
 import {
   NON_COLLECTIBLE_CATEGORIES,
@@ -118,11 +119,46 @@ describe("collectibleOnly", () => {
   });
 });
 
-describe("the rule stays a category rule", () => {
-  it("excludes exactly one category name", () => {
+describe("the rule is a category rule — and since 0137 also an item-type rule", () => {
+  it("excludes exactly these five category names, in this order", () => {
     // Growing this set is a deliberate act, not something that should happen
     // by accident. The coupling to the legacy category names is documented in
     // collectible.ts and docs/SKYLANDERS_DATA.md.
-    expect([...NON_COLLECTIBLE_CATEGORIES]).toEqual(["Spiele"]);
+    //
+    // `Spiele` kommt aus der Legacy-Quelle; die vier anderen entstehen erst
+    // mit `0137` und tragen heute keine Zeile — genau das ist die Bedingung,
+    // unter der die Migration laufen darf.
+    expect([...NON_COLLECTIBLE_CATEGORIES]).toEqual([
+      "Spiele", "Portale", "Bundles", "Taschen", "Zubehör",
+    ]);
+  });
+
+  it("die SQL-Fassung nennt genau dieselben Namen (0137)", () => {
+    /* `verify:shop` vergleicht beide zur Laufzeit gegen die Datenbank. Hier
+       wird der TEXT verglichen, damit eine Abweichung schon im Testlauf
+       auffällt und nicht erst gegen eine Umgebung. */
+    const sql = readFileSync("supabase/migrations/0137_catalog_accessories.sql", "utf8");
+    const liste = [...NON_COLLECTIBLE_CATEGORIES].map((n) => `'${n}'`).join(", ");
+    expect(sql).toContain(`select array[${liste}]::text[];`);
+  });
+
+  it("ein Artikeltyp ausser figure ist nicht sammelbar, egal in welcher Kategorie", () => {
+    /* Der zweite Riegel. Er greift auch dann, wenn jemand eine Kategorie
+       anders benennt als die fünf Namen oben. */
+    expect(isCollectible({ categoryName: "Figuren", itemType: "portal" })).toBe(false);
+    expect(isCollectible({ categoryName: "Senseis", itemType: "game" })).toBe(false);
+    expect(isCollectible({ categoryName: "Traps", itemType: "bundle" })).toBe(false);
+    expect(isCollectible({ categoryName: "Traps", itemType: "other" })).toBe(false);
+  });
+
+  it("figure bleibt sammelbar, und eine fehlende Auskunft ändert nichts", () => {
+    expect(isCollectible({ categoryName: "Figuren", itemType: "figure" })).toBe(true);
+    /* `undefined` heisst „keine Auskunft", nicht „keine Figur": ein Aufrufer,
+       der die Spalte nicht gelesen hat, bekommt das Verhalten von vor 0137. */
+    expect(isCollectible({ categoryName: "Figuren" })).toBe(true);
+    expect(isCollectible({ categoryName: "Figuren", itemType: null })).toBe(true);
+    /* Und die Kategorie behält das letzte Wort, wenn der Typ figure sagt —
+       `SKY-9998` steht als Fixture in `SA`/`Spiele`. */
+    expect(isCollectible({ categoryName: "Spiele", itemType: "figure" })).toBe(false);
   });
 });

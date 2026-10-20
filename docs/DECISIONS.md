@@ -11235,7 +11235,9 @@ Korrekturbewegung beantwortet wird und nicht mit einem leeren Ledger.
 ## ADR-0128 · Portale und Spiele werden Katalogartikel — abgeleiteter Name, additive Felder
 
 **Status:** akzeptiert (Produktentscheidungen des Betreibers, 2026-10-19) ·
-**Umsetzung:** noch nicht begonnen · **Daten:** `docs/SKYLANDERS_DATA.md` 11k ·
+**Umsetzung:** Z1 (`0135`/`0136`) auf Staging angewendet, Z2 (`0137`) und Z3
+(`0138`) lokal vorbereitet und nirgends angewendet ·
+**Daten:** `docs/SKYLANDERS_DATA.md` 11k ·
 **Bestandsaufnahme:** `supabase/checks/Z0_catalog_accessories_readonly.sql`
 
 ### Kontext
@@ -11456,8 +11458,169 @@ ausdrückliches `portal` in `Spiele` → bleibt `portal` · Figur nach `Spiele`
 umgehängt → `game` · `bundle` nach dem Umhängen → bleibt `bundle`. Angebotszahl
 unverändert, und keine der neuen Zeilen wird fälschlich shopfähig.
 
+### Nachtrag Z2 und Z3 (2026-10-20): vier Entscheidungen, die die Umsetzung verlangt hat
+
+Z1 war die Spalte (`0135`), Z2 ist der **Weg** (`0137`), Z3 sind die
+**Artikel** (`0138`). Vier Fragen hat erst die Umsetzung gestellt.
+
+**1. `SKY-0637` trägt die Serie `SF` — Entscheidung des Betreibers.** Die
+Arbeitsmappe nennt dort drei Serien (`SF, T, SC`), `series_code` ist aber
+einwertig und trägt einen zusammengesetzten Fremdschlüssel. Gewählt ist `SF`,
+die erste und älteste der drei.
+
+**Und `series_scope` wird deshalb NICHT gebaut.** Punkt 4 dieses ADR hatte eine
+nullable Spalte `series_scope text[]` für die vollständige dokumentierte
+Zuordnung vorgesehen. Sie ist nicht nötig: die Zuordnung steht im **Rohnamen**
+— `84721790 (SF, T, SC)` —, also in den Quelldaten selbst, und dort ist sie
+besser aufgehoben als in einer abgeleiteten Spalte. Dasselbe gilt für
+`platforms`, `model_no` und `language`: Plattform und Modellnummer stehen in
+Spalte B und damit im Namen, die Sprache ist bei Portalen nirgends belegt. Eine
+Spalte ohne Leser veraltet; keine der vier hat einen. **Gebaut ist von den fünf
+geplanten Spalten also genau eine: `item_type`.** Kommt später ein Leser — eine
+Plattformfilterung im Katalog etwa —, ist der Weg dahin additiv und unverändert
+offen.
+
+**2. `catalog_visible` filtert die Einkaufsauswahl nur noch bei FIGUREN.** Das
+ist der Fehler, den die Umsetzung gefunden hat, und er wäre teuer gewesen.
+`seller_create_catalog_item` schreibt jeden Zubehörartikel mit
+`catalog_visible = false` — im öffentlichen Katalog hat er nichts zu suchen.
+`fetchOrderbookCatalog` filtert aber seit `0117` **jede** Zeile an beiden
+Riegeln. Ein neu angelegtes Portal wäre damit unmittelbar nach seiner
+Entstehung wieder unauffindbar gewesen: einmal hinzugefügt, weil die SKY-ID aus
+der Anlegefunktion direkt in die Position geht — und danach nie wieder, nicht
+für ein zweites Exemplar und nicht für den nächsten Einkauf. Bestand und
+Historie hätte es gehabt, nur den Weg dorthin nicht.
+
+Entschieden sind deshalb zwei Maßstäbe, und sie messen verschiedene Dinge:
+
+| | |
+|---|---|
+| `is_active` | **technisch**, gilt jeder Zeile ohne Ausnahme. Das ist der Weg, eine falsch angelegte Zubehörzeile wieder aus der Auswahl zu nehmen. |
+| `catalog_visible` | **redaktionell**, und redaktionell heißt: im **öffentlichen** Katalog (ADR-0039). Gilt deshalb nur Figuren. |
+
+Für Figuren ändert sich nichts — der Grund von `0117` war Eon's Elite, drei
+Katalogzeilen je Figur, von denen zwei nicht mehr angeboten werden, und der
+betrifft ausschließlich Figuren. Die Regel hat **einen** Ort
+(`isPickableCatalogRow` in `src/lib/orderbook/figure-search.ts`); fehlt
+`item_type`, bleibt es beim Verhalten von `0117`.
+
+**3. Die 21 Portale kommen jetzt, mit den IDs der Arbeitsmappe.** Punkt 10 bleibt
+unberührt — historische Einkaufspositionen werden **nicht** automatisch
+zugeordnet. Aber der Weg allein hätte eine Falle aufgestellt:
+`seller_create_catalog_item` zieht eine **neue** SKY-ID aus `sky_id_seq`
+(`SKY-0823` und weiter). Legte der Betreiber ein Portal von Hand an, das die
+Mappe schon unter `SKY-0632` führt, bekäme dieselbe physische Ware zwei
+Identitäten — und eine SKY-ID wird nie zurückgenommen (Regel 2). Z3 läuft
+deshalb unmittelbar nach Z2, und `0138` setzt die 21 Nummern des Betreibers.
+Was der Betrieb von Hand anlegt, ist damit das, was die Mappe **nicht** kennt.
+
+Die zwei Disney-Infinity-Portale, die Beleg-URL `SKY-0638`, die zwei Starter
+Packs und die zwei Taschen bleiben außen vor (Punkt 9, unverändert).
+
+**4. Kein Einmal-Skript für `0137`/`0138`.** `0135` und `0136` brauchten eines,
+weil sie zusammen laufen **mussten**: die Betriebssicherung aus `0136` liest die
+Spalte aus `0135`, und ein halber Stand wäre eine Datensicherung, die erst im
+Ernstfall nicht mehr läuft. Hier ist es anders: nach `0137` ist der Weg da und
+niemand muss ihn gehen, nach `0138` stehen die Artikel. **Zwei Transaktionen,
+zwei Freigaben, zwei Ergebnisblätter** — und beide Zustände sind für sich
+vertretbar. Reihenfolge und Klickfolge: `supabase/checks/0137_0138_staging_run.md`.
+
+**Die Rücknahme ist dafür in der Reihenfolge zwingend: erst `R0138`, dann
+`R0137`.** `R0137` bricht von sich aus ab, solange eine Zeile in einer
+Zubehörkategorie steht — ohne die erweiterte Kategorieliste würde ein Portal
+**sammelbar**. Und `R0138` bricht ab, sobald an einem Portal ein Einkauf, ein
+Bestand, eine Bewegung, eine Sammlung, ein Warenkorb oder eine Zuordnung hängt:
+zwei dieser zehn Tabellen hängen mit `ON DELETE CASCADE` an `skylanders` und
+gingen sonst **still** mit. Die Journaleinträge bleiben in jedem Fall stehen —
+`catalog_admin_changes` ist append-only durch einen Trigger, und ein Journal,
+das sich mitlöschen lässt, ist keines.
+
+### Nachtrag (2026-10-20): Zubehör in der Lagerübersicht
+
+Der offene Punkt von oben, entschieden und gebaut. Das Lager führte seit dem
+ersten Tag Zeilen auf Spielen — **13 Lagerzeilen und 18 Verkaufspositionen** —,
+und keine Ansicht zeigte sie: `fetchInventory()` sortierte jede nicht
+sammelbare Zeile in einen `outsideScope`-Topf, und an die Oberfläche ging
+davon nur die **Anzahl**.
+
+**1. Der Umfang ist die Entscheidung des Aufrufers.** In `fetchInventory()`
+stand `catalog.filter(isCollectible)` — eine zweite, stille Bereichsregel an
+einer Stelle, die schon eine hatte, nämlich den übergebenen Katalog. Sie ist
+weg. `/business/inventory` übergibt jetzt Figuren **und** Zubehör; was
+weiterhin herausfällt, fällt aus einem Grund heraus, den der Katalog selbst
+nennt: nicht aktiv, oder im reservierten Fixture-Bereich `SKY-9000`–`9999`
+(ADR-0070). Die Prüffigur `SKY-9998` bleibt damit, wo sie ist.
+
+**2. Eine zweite Abfrage, kein Schalter an `fetchCatalog()`.**
+`fetchAccessoryCatalog()` liefert die nicht sammelbaren Zeilen derselben
+Tabelle. Ein `includeAccessories`-Flag an `fetchCatalog()` wäre ein Weg, auf
+dem ein Portal in den Sammlungsfortschritt gerät, sobald jemand es an der
+falschen Stelle setzt — und der Fortschritt ist eine Zahl, die Nutzer kennen
+(Punkt 7). Zwei Funktionen, zwei Mengen, kein Schalter. Eine zweite
+**Bestandsverwaltung** entsteht dabei nicht: dieselbe
+`admin_shop_inventory()`, dieselbe Tabelle, dieselbe Karte.
+
+**3. Der Anzeigename ist der Rohname, nicht der Kurzname aus Punkt 1.** Für
+eine Lagerliste wäre `Portal – <Serie>` unbrauchbar: 21 Portale verteilen
+sich auf sechs Serien, vier davon hießen dann gleich. Der Rohname trägt die
+Modellnummer, und die unterscheidet die Varianten — `84392790 (G)` gegen
+`84392080 (G)`. Punkt 1 bleibt für den **öffentlichen** Katalog richtig; er
+ist dort noch nicht umgesetzt und wird es, wenn ein Portal dort je erscheint.
+
+**4. Die fünf Kennzahlen bleiben Figurenzahlen.** `Lagerbestand`,
+`Reserviert`, `Im Shop`, `Marktwert`, `Shopwert` — ein Spiel ist nicht
+sammelbar, hat keinen Sammlerwert, und `Marktwert` ist der Wert der
+Sammelobjekte. Hätte man die 13 Spiele-Zeilen addiert, wäre eine Zahl, die
+der Betreiber seit Monaten kennt, ohne Zutun gesprungen, und niemand hätte
+gesehen, warum. Zubehör bekommt **zwei eigene Angaben daneben** —
+Positionen und Stück — mit dem Satz, dass es in den fünf nicht enthalten ist.
+Das ist die Trennung, nur lesbar.
+
+**5. Für Zubehör gibt es keine Shopfreigabe und keinen Preis.**
+`set_shop_listing()` würde ein Portal durchaus auf `is_listed = true` setzen
+— aber `shop_offers()` filtert es über `is_shop_eligible()` am Artikeltyp
+wieder heraus (`0135`). Der Schalter sagte dann „Im Shop", und im Shop stünde
+nichts. Dieselbe Entscheidung wie bei der historischen OVP-Position seit
+`0108`, aus demselben Grund: „ein Knopf, von dem schon bekannt ist, dass er
+nicht wirkt, ist keine Auswahl, sondern eine Falle." **Bestand und Historie
+bleiben** — `record_inventory_movement()` fragt nur den Zustand, also wird
+ein Portal gebucht wie jede Figur.
+
+Ob Spiele oder Portale je öffentlich verkauft werden, bleibt die getrennte
+Produktentscheidung aus Punkt 8.
+
+**6. Ein vierter Filter, und er erscheint nur, wenn er etwas zu wählen hat.**
+„Art" neben Serie, Bestand und Shop. Liegen ausschließlich Figuren im Lager,
+verschwindet das Feld — ein Auswahlfeld mit einer Auswahl ist keine Auswahl.
+Die Filterregel liegt dafür in `src/lib/admin/inventory-filter.ts` statt in
+einem `useMemo`: fünf Bedingungen, die zusammenwirken, soll man einzeln
+nachfahren können.
+
+**Was damit NICHT entschieden ist:** die Kartenoptik des öffentlichen
+Katalogs und der Sammlung ist unberührt. Die Lagerkarte hat nichts
+dazubekommen — sie zeigt für Zubehör **weniger**: keine Freigabe, keinen
+Preis, kein leeres „Shop-Preis —".
+
 ### Offen
 
-Die zehn Punkte aus `docs/SKYLANDERS_DATA.md` 11k, insbesondere die primäre
-Serie für `SKY-0637`, die Herkunft der zweiten Giants-Modellnummer und die
-Frage, ob Bundles und Taschen Katalogartikel werden.
+Die Punkte aus `docs/SKYLANDERS_DATA.md` 11k — **ohne** die primäre Serie für
+`SKY-0637`, die der Nachtrag Z2/Z3 entschieden hat. Offen bleiben insbesondere
+die Herkunft der zweiten Giants-Modellnummer (`84392080`) und die Frage, ob
+Bundles und Taschen Katalogartikel werden.
+
+Dazu, aus der Umsetzung:
+
+* ~~Die Lagerübersicht zeigt ein eingebuchtes Portal nicht.~~ **Erledigt am
+  2026-10-20**, siehe den Nachtrag „Zubehör in der Lagerübersicht" unten.
+* **Der Katalogimport und die Kategorie `Portale`.** `tools/import-catalog.mts`
+  will je Serie die Positionen `0..n-1` für die Kategorien aus
+  `data/catalog/products.json`; `Portale` liegt mit `n` darüber und ist dem
+  Importer gleichgültig. Kommt der Mappe aber **eine weitere** Kategorie hinzu,
+  will er Position `n` und stößt auf `categories_series_position_uniq`. Ein
+  lauter Fehlschlag, kein stiller Schaden — die Kategorie wird dann verschoben.
+* **Die Reihenfolge Deployment / Migration ist für `item_type` nicht mehr
+  beliebig.** `FIGURE_COLUMNS` in `src/lib/catalog/queries.ts` fordert
+  `item_type` jetzt ausdrücklich an. Auf Production fehlen `0135`–`0138`; ein
+  Deployment des Anwendungscodes **vor** diesen Migrationen ließe jede
+  Katalogabfrage auf eine fehlende Spalte laufen. Die Migrationen gehen also
+  zuerst, das Deployment danach — festgehalten in `docs/DEPLOYMENT.md`.

@@ -196,11 +196,139 @@ describe("the five figures", () => {
     expect(inventoryOverview(rows).shopValue).toBe(30);
   });
 
-  it("an empty shelf is five zeroes, not a crash", () => {
+  it("an empty shelf is zeroes, not a crash", () => {
     expect(inventoryOverview([])).toEqual({
       stockPieces: 0, reservedPieces: 0, offeredPieces: 0,
       marketValue: 0, shopValue: 0, withoutMarketPrice: 0,
+      accessoryPositions: 0, accessoryPieces: 0,
     });
+  });
+});
+
+/* =====================================================================
+ * GEMISCHTER BESTAND: FIGUREN, SPIELE, PORTALE (ADR-0128)
+ *
+ * Der Fall, den die Lagerübersicht seit dem ersten Tag hatte, ohne ihn zu
+ * zeigen: 13 Lagerzeilen hängen an Spielen. Jetzt zeigt sie sie — und genau
+ * hier wird geprüft, dass dabei keine der fünf Figurenzahlen gewandert ist.
+ * ================================================================== */
+describe("gemischter Bestand", () => {
+  /** Eine Figur mit Bestand, Preis und Freigabe — der Normalfall. */
+  const FIGUR = position({
+    inventoryId: 1, skyId: "SKY-0001", quantity: 3, effectivePrice: 9,
+    figure: figure({ skyId: "SKY-0001", marketPrice: 10 }),
+  });
+  /** Ein Spiel: Katalogzeile, Marktpreis, Bestand — und nicht shopfähig. */
+  const SPIEL = position({
+    inventoryId: 2, skyId: "SKY-0307", quantity: 2, effectivePrice: 20,
+    figure: figure({
+      skyId: "SKY-0307", displayName: "Spiel für Xbox One (EN)", categoryName: "Spiele",
+      itemType: "game", marketPrice: 25, catalogVisible: true,
+    }),
+  });
+  /** Ein Portal, wie `0138` es anlegt: unsichtbar, ohne Marktpreis. */
+  const PORTAL = position({
+    inventoryId: 3, skyId: "SKY-0632", quantity: 1, effectivePrice: null,
+    isListed: false,
+    figure: figure({
+      skyId: "SKY-0632", displayName: "84709790 (SF)", categoryName: "Portale",
+      itemType: "portal", marketPrice: null, catalogVisible: false,
+    }),
+  });
+
+  const GEMISCHT = [FIGUR, SPIEL, PORTAL];
+
+  it("die fünf Figurenzahlen sind dieselben wie ohne das Zubehör", () => {
+    /*
+     * DIE ZUSICHERUNG DIESER ARBEIT, als ein Vergleich. Links der gemischte
+     * Bestand, rechts derselbe ohne Spiel und Portal — die fünf Zahlen
+     * müssen übereinstimmen. Hätte jemand das Zubehör in `stockPieces`
+     * addiert, stünde es hier.
+     */
+    const gemischt = inventoryOverview(GEMISCHT);
+    const nurFiguren = inventoryOverview([FIGUR]);
+    for (const key of ["stockPieces", "reservedPieces", "offeredPieces",
+      "marketValue", "shopValue", "withoutMarketPrice"] as const) {
+      expect(gemischt[key], key).toBe(nurFiguren[key]);
+    }
+  });
+
+  it("und das Zubehör wird daneben gezählt, Positionen und Stück", () => {
+    const overview = inventoryOverview(GEMISCHT);
+    expect(overview.accessoryPositions).toBe(2);
+    expect(overview.accessoryPieces).toBe(3);        // 2 Spiel + 1 Portal
+  });
+
+  it("der Marktwert des Spiels zählt NICHT mit — es ist kein Sammelobjekt", () => {
+    /* 3 × 10 € = 30 €, und nicht 30 + 2 × 25 = 80 €. */
+    expect(inventoryOverview(GEMISCHT).marketValue).toBe(30);
+  });
+
+  it("ein Portal ohne Marktpreis landet nicht in `withoutMarketPrice`", () => {
+    /*
+     * Die Zahl erklärt eine LÜCKE IM MARKTWERT — „diese Positionen fehlen in
+     * der Summe". Ein Portal fehlt dort nicht, es gehört gar nicht hinein.
+     * Stünde es da, suchte der Betreiber nach einem Preis, den es nie
+     * bekommen soll.
+     */
+    expect(inventoryOverview(GEMISCHT).withoutMarketPrice).toBe(0);
+    /* Eine FIGUR ohne Marktpreis zählt dagegen weiter. */
+    const ohnePreis = position({
+      inventoryId: 4, skyId: "SKY-0002", quantity: 1,
+      figure: figure({ skyId: "SKY-0002", marketPrice: null }),
+    });
+    expect(inventoryOverview([ohnePreis]).withoutMarketPrice).toBe(1);
+  });
+
+  it("ein gelistetes Spiel mit Preis ist KEIN Angebot", () => {
+    /*
+     * Der Riegel, der am meisten wert ist. `set_shop_listing()` würde ein
+     * Spiel auf `is_listed = true` setzen — `shop_offers()` filtert es über
+     * `is_shop_eligible()` am Artikeltyp wieder heraus (0135). Die Übersicht
+     * muss dasselbe sagen, sonst behauptet sie ein Angebot, das es nicht
+     * gibt.
+     */
+    const gelistet = position({
+      inventoryId: 5, skyId: "SKY-0307", quantity: 2, isListed: true, effectivePrice: 20,
+      figure: figure({
+        skyId: "SKY-0307", categoryName: "Spiele", itemType: "game",
+        marketPrice: 25, catalogVisible: true, isActive: true,
+      }),
+    });
+    expect(isOffered(gelistet)).toBe(false);
+    const overview = inventoryOverview([gelistet]);
+    expect(overview.offeredPieces).toBe(0);
+    expect(overview.shopValue).toBe(0);
+  });
+
+  it("eine Figur ohne Auskunft über den Artikeltyp bleibt eine Figur", () => {
+    /*
+     * Die Zeile aus der Zeit vor `0135`: kein `item_type`. Sie muss sich
+     * verhalten wie vorher — mitzählen, bewertet werden, angeboten werden
+     * können. „Keine Auskunft" heißt nie „Zubehör".
+     */
+    const alt = position({
+      inventoryId: 6, skyId: "SKY-0003", quantity: 2,
+      figure: figure({ skyId: "SKY-0003", marketPrice: 5, itemType: undefined }),
+    });
+    const overview = inventoryOverview([alt]);
+    expect(overview.stockPieces).toBe(2);
+    expect(overview.marketValue).toBe(10);
+    expect(overview.accessoryPositions).toBe(0);
+    expect(isOffered(alt)).toBe(true);
+  });
+
+  it("und eine Position ohne Katalogzeile ebenso — sie ist kein Zubehör", () => {
+    /*
+     * `figure: null` heißt „außerhalb des Sortiments" (die Prüffigur, eine
+     * historische Zeile). Sie zählt wie bisher in den Bestand und NICHT als
+     * Zubehör: eine Position, über die nichts bekannt ist, wird nicht
+     * umetikettiert.
+     */
+    const fremd = position({ inventoryId: 7, skyId: "SKY-9998", quantity: 1, figure: null });
+    const overview = inventoryOverview([fremd]);
+    expect(overview.accessoryPositions).toBe(0);
+    expect(overview.stockPieces).toBe(1);
   });
 });
 

@@ -84,6 +84,24 @@ export function InventoryOverviewPanel({ overview }: { overview: InventoryOvervi
           {copy.withoutPrice(overview.withoutMarketPrice)}
         </p>
       ) : null}
+
+      {/*
+        ZUBEHÖR, NEBEN DEN FÜNF UND NICHT IN IHNEN (ADR-0128).
+
+        Keine sechste Kennzahl: die fünf sind Figurenzahlen, gleich gewichtet
+        und gleich breit, und eine sechste Zelle mit anderer Bedeutung würde
+        genau das kaputtmachen. Ein Satz darunter sagt dasselbe und sagt
+        zugleich, dass es NICHT mitgezählt ist — was die eigentliche Auskunft
+        ist.
+
+        Nur wenn etwas da ist. Solange kein Spiel und kein Portal im Lager
+        liegt, steht hier nichts.
+      */}
+      {overview.accessoryPositions > 0 ? (
+        <p className="mt-3 text-xs text-muted">
+          {copy.accessories(overview.accessoryPositions, overview.accessoryPieces)}
+        </p>
+      ) : null}
     </section>
   );
 }

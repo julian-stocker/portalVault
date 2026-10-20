@@ -726,8 +726,13 @@ describe("the detail screen", () => {
     expect(ACTIONS).toContain("revalidatePath");
   });
 
-  it("keeps the uncategorised path for a portal or a game", () => {
+  it("keeps the uncategorised path as a fallback — but it is no longer the portal path", () => {
+    /* Bis 0136 war der Freitext der EINZIGE Weg fuer ein Portal. Seit 0137
+       entsteht ein Portal als Katalogartikel (`NewCatalogItem`), und der
+       Freitext bleibt fuer das, was nie eine Identitaet bekommen soll:
+       Konvolut-Restposten, Beigaben, Disney Infinity. */
     expect(ADD_ITEM_UI).toContain("addUncategorized");
+    expect(ADD_ITEM_UI).toContain("NewCatalogItem");
   });
 });
 
@@ -778,8 +783,51 @@ describe("the German copy", () => {
       "factor", "noMarketValue"] as const) {
       expect(typeof f[key]).toBe("string");
     }
-    expect(f.units(1)).toBe("1 Figur");
-    expect(f.units(3)).toBe("3 Figuren");
+    /*
+     * „ARTIKEL", NICHT „FIGUREN" (0137). Im Entwurf eines Einkaufs können
+     * Spiele und Portale stehen, und „3 Figuren" wäre dann einfach falsch.
+     * Die Einheit ist ausgeschrieben, weil „3 × 2" auf einem Telefon
+     * niemand entziffert — das war schon vorher so.
+     */
+    expect(f.units(1)).toBe("1 Artikel");
+    expect(f.units(3)).toBe("3 Artikel");
+  });
+
+  it("und die Art eines Zubehörartikels hat für jeden CHECK-Wert ein Wort", () => {
+    /*
+     * Die Schlüssel sind die vier Zubehörwerte des CHECK aus `0135`.
+     * `figure` steht ABSICHTLICH nicht darin: eine Figur ist der Normalfall
+     * und bekommt in der Trefferliste kein Etikett.
+     */
+    const t = de.business.orderbook.figures.itemTypes;
+    expect(Object.keys(t).sort()).toEqual(["bundle", "game", "other", "portal"]);
+    for (const wort of Object.values(t)) expect(wort.length).toBeGreaterThan(2);
+    expect(t.figure).toBeUndefined();
+  });
+
+  it("der Kasten zum Anlegen hat jede Beschriftung, die er braucht", () => {
+    const n = de.business.orderbook.newItem;
+    for (const key of ["open", "heading", "hint", "nameLabel", "namePlaceholder",
+      "typeLabel", "seriesLabel", "submit", "cancel", "pending",
+      "needsType", "needsSeries"] as const) {
+      expect(typeof n[key], key).toBe("string");
+    }
+    expect(n.created("SKY-0823")).toContain("SKY-0823");
+    /* Auch der halbe Erfolg nennt die SKY-ID — sonst legt jemand denselben
+       Artikel ein zweites Mal an. */
+    expect(n.createdNotAdded("SKY-0823")).toContain("SKY-0823");
+    expect(n.createdNotAdded("SKY-0823")).toContain("Suche");
+  });
+
+  it("und jede Ablehnung der Anlegefunktion ist ein deutscher Satz", () => {
+    const e = de.business.orderbook.errors;
+    for (const key of ["createFailed", "createNeedsName", "createUnknownType",
+      "createUnknownSeries", "createNotAFigure", "createRangeExhausted"] as const) {
+      expect(typeof e[key], key).toBe("string");
+      expect(e[key].length, key).toBeGreaterThan(10);
+      expect(e[key], key).not.toContain("errcode");
+      expect(e[key], key).not.toContain("item_type");
+    }
   });
 
   it("explains a refused removal without blaming the operator", () => {

@@ -20,6 +20,10 @@ import { AdminThumb } from "@/components/admin/admin-thumb";
 import {
   OPERATIVE_CONDITION, type Condition, type InventoryPosition,
 } from "@/lib/admin/inventory-model";
+import {
+  kindsInStock, visiblePositions,
+  type InventoryFilters, type KindFilter, type ListingFilter, type StockFilter,
+} from "@/lib/admin/inventory-filter";
 import { positionKey } from "@/lib/admin/position-key";
 import type { TradeTotals } from "@/lib/admin/stock-history";
 import { InventoryOverviewPanel } from "@/components/admin/inventory-overview";
@@ -30,14 +34,12 @@ import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
 import { useRouter } from "next/navigation";
 
-type Stock = "all" | "in" | "out";
-type Listing = "all" | "listed" | "unlisted";
-
 export function InventoryView({
   positions,
   legacyTotals,
   tradeTotals,
   catalog,
+  accessories,
   series,
   outsideScope,
   percentage,
@@ -54,6 +56,18 @@ export function InventoryView({
   tradeTotals: Readonly<Record<number, TradeTotals>>;
   /** The operational range: active collectible figures (ADR-0029, ADR-0039). */
   catalog: readonly CatalogFigure[];
+  /**
+   * Die nicht sammelbaren Zeilen derselben Tabelle (ADR-0128) — Spiele,
+   * Portale, Bundles, Zubehör.
+   *
+   * GETRENNT ÜBERGEBEN UND NICHT EINGEMISCHT. `catalog` ist der
+   * Sammlerkatalog und bleibt es; was aus ihm folgt — der Fortschritt, die
+   * Variantenregel, der öffentliche Katalog — darf von dieser Liste nichts
+   * mitbekommen. Gebraucht wird sie an genau zwei Stellen: um eine
+   * Lagerposition benennen zu können, und um für ein Zubehörteil ohne
+   * Position eine anlegen zu können.
+   */
+  accessories: readonly CatalogFigure[];
   series: readonly SeriesOption[];
   /** Historical positions on something outside that range. Counted, not listed. */
   outsideScope: number;
@@ -63,8 +77,9 @@ export function InventoryView({
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [seriesCode, setSeriesCode] = useState("");
-  const [stock, setStock] = useState<Stock>("all");
-  const [listing, setListing] = useState<Listing>("all");
+  const [stock, setStock] = useState<StockFilter>("all");
+  const [listing, setListing] = useState<ListingFilter>("all");
+  const [kind, setKind] = useState<KindFilter>("all");
   const [opening, setOpening] = useState<{ figure: CatalogFigure; condition: Condition } | null>(
     null,
   );
@@ -72,25 +87,27 @@ export function InventoryView({
   const normalized = normalizeForSearch(query);
   const searching = query.trim() !== "";
 
-  const visible = useMemo(
-    () =>
-      positions.filter((position) => {
-        const figure = position.figure;
-        if (seriesCode && figure?.seriesCode !== seriesCode) return false;
-        if (stock === "in" && position.available <= 0) return false;
-        if (stock === "out" && position.available > 0) return false;
-        if (listing === "listed" && !position.isListed) return false;
-        if (listing === "unlisted" && position.isListed) return false;
-        if (!searching) return true;
-        // The figure's own search index covers every spelling of the name,
-        // the canonical one included; the SKY-ID is matched directly.
-        return (
-          (figure !== null && matchesQuery(figure, normalized)) ||
-          position.skyId.toLowerCase().includes(query.trim().toLowerCase())
-        );
-      }),
-    [positions, seriesCode, stock, listing, searching, normalized, query],
+  /*
+   * DIE REGEL STEHT IN `inventory-filter.ts`, nicht hier.
+   *
+   * Fünf Bedingungen, die zusammenwirken, sind genau die Art Logik, die man
+   * einzeln nachfahren will — „ein Portal mit Bestand, Serie SF, nicht im
+   * Shop" ist eine Frage mit einer Antwort. In diesem `useMemo` ließe sie
+   * sich nur über den Quelltext behaupten; dort lässt sie sich prüfen, ohne
+   * Browser und ohne Datenbank (`inventory-filter.test.ts`).
+   */
+  const filters: InventoryFilters = useMemo(
+    () => ({ query, seriesCode, stock, listing, kind }),
+    [query, seriesCode, stock, listing, kind],
   );
+  const visible = useMemo(() => visiblePositions(positions, filters), [positions, filters]);
+
+  /*
+   * Nur die Arten anbieten, die wirklich im Lager liegen (ADR-0128). Ein
+   * Auswahlfeld mit „Bundle", hinter dem keine einzige Zeile steht, ist eine
+   * Sackgasse — und solange es nur Figuren gibt, verschwindet das Feld ganz.
+   */
+  const kinds = useMemo(() => kindsInStock(positions), [positions]);
 
   /**
    * Figures the search found that have no position for a condition yet.
@@ -101,7 +118,13 @@ export function InventoryView({
   const openable = useMemo(() => {
     if (!searching) return [];
     const held = new Set(positions.map((position) => `${position.skyId}:${position.condition}`));
-    return catalog
+    /*
+     * FIGUREN UND ZUBEHÖR, beide suchbar (ADR-0128). Ein Portal, das nicht
+     * über das Einkaufsbuch kam, braucht denselben Weg ins Lager wie eine
+     * Figur: suchen, Position anlegen, buchen. `record_inventory_movement()`
+     * fragt nur den Zustand, und `lose` ist er.
+     */
+    return [...catalog, ...accessories]
       .filter(
         (figure) =>
           matchesQuery(figure, normalized) ||
@@ -120,7 +143,7 @@ export function InventoryView({
       .filter((figure) => !held.has(`${figure.skyId}:${OPERATIVE_CONDITION}`))
       .map((figure) => ({ figure, condition: OPERATIVE_CONDITION as Condition }))
       .slice(0, 12);
-  }, [searching, positions, catalog, normalized, query]);
+  }, [searching, positions, catalog, accessories, normalized, query]);
 
   /*
    * Die Kennzahlen über der Suche (V4.9).
@@ -173,7 +196,7 @@ export function InventoryView({
           <select
             aria-label={de.inventory.stockFilter}
             value={stock}
-            onChange={(event) => setStock(event.target.value as Stock)}
+            onChange={(event) => setStock(event.target.value as StockFilter)}
             className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
           >
             <option value="all">{de.inventory.stockAll}</option>
@@ -184,17 +207,50 @@ export function InventoryView({
           <select
             aria-label={de.inventory.listingFilter}
             value={listing}
-            onChange={(event) => setListing(event.target.value as Listing)}
+            onChange={(event) => setListing(event.target.value as ListingFilter)}
             className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
           >
             <option value="all">{de.inventory.listingAll}</option>
             <option value="listed">{de.inventory.listingOn}</option>
             <option value="unlisted">{de.inventory.listingOff}</option>
           </select>
+
+          {/*
+            DIE ART — nur wenn es mehr als eine gibt (ADR-0128).
+            Liegen ausschliesslich Figuren im Lager, waere dieses Feld ein
+            Auswahlfeld mit einer Auswahl. Es erscheint also mit dem ersten
+            Spiel und verschwindet mit dem letzten; es steht am Ende der
+            Reihe, weil Serie und Bestand die haeufigeren Fragen sind, und es
+            bricht auf dem Telefon mit den anderen drei um.
+          */}
+          {kinds.length > 1 ? (
+            <select
+              aria-label={de.inventory.kindFilter}
+              value={kind}
+              onChange={(event) => setKind(event.target.value as KindFilter)}
+              className="min-h-10 rounded-sky-md bg-surface/80 px-3 text-sm ring-1 ring-border/70"
+            >
+              <option value="all">{de.inventory.kindAll}</option>
+              {kinds.map((value) => (
+                <option key={value} value={value}>
+                  {de.inventory.kinds[value]}
+                </option>
+              ))}
+            </select>
+          ) : null}
         </div>
 
         <p className="text-sm text-muted" aria-live="polite">
           {de.inventory.positions(visible.length)}
+          {/*
+            Zubehör getrennt ausgewiesen, und zwar aus der UNGEFILTERTEN
+            Liste: der Satz beschreibt das Lager, nicht die gerade sichtbare
+            Auswahl — wie die Kennzahlen darüber. Nur wenn es welches gibt.
+          */}
+          {overview.accessoryPositions > 0
+            ? ` · ${de.inventory.accessoryStock(
+                overview.accessoryPositions, overview.accessoryPieces)}`
+            : ""}
           {outsideScope > 0 ? ` · ${de.inventory.outsideScope(outsideScope)}` : ""}
         </p>
       </div>

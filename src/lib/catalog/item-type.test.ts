@@ -72,10 +72,13 @@ describe("der Backfill kommt aus der Kategorie, nicht aus einem Namen", () => {
     expect(code).not.toMatch(/s\.name|ilike|display_name/);
   });
 
-  it("die Kategorie, auf der er ruht, ist dieselbe wie in der Anwendung", () => {
+  it("die Kategorie, auf der er ruht, nennt auch die Anwendung", () => {
     /* `non_collectible_categories()` nennt sie, `collectible.ts` nennt sie,
-       und der Backfill nennt sie. Drei Stellen, ein Wort. */
-    expect([...NON_COLLECTIBLE_CATEGORIES]).toEqual(["Spiele"]);
+       und der Backfill nennt sie.
+       SEIT 0137 ist die Liste laenger — `Spiele` steht aber unveraendert
+       darin, und das ist die Aussage, auf der `0135` ruht. Auf die LAENGE
+       der Liste prueft `collectible.test.ts`. */
+    expect([...NON_COLLECTIBLE_CATEGORIES]).toContain("Spiele");
     expect(MIG).toContain("'Spiele'");
   });
 

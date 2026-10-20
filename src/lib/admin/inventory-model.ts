@@ -160,3 +160,80 @@ export type Movement = {
   note: string | null;
   createdAt: string;
 };
+
+/* ---------------------------------------------------------------------------
+ * DIE ART EINER LAGERPOSITION (0135/0137, ADR-0128)
+ *
+ * Das Lager hat immer schon Zubehör geführt: 13 Lagerzeilen und 18
+ * Verkaufspositionen hängen an Spielen, seit dem ersten Tag. Nur sichtbar
+ * waren sie nicht — `fetchInventory()` hat jede nicht sammelbare Zeile in
+ * einen `outsideScope`-Topf sortiert, und an die Oberfläche ging davon nur
+ * die ANZAHL.
+ *
+ * DIE TRENNUNG BLEIBT, SIE WIRD NUR LESBAR. Ein Spiel ist weiterhin nicht
+ * sammelbar und nicht shopfähig — das entscheiden `non_collectible_categories()`
+ * und `is_shop_eligible()` in der Datenbank, und daran ändert eine Ansicht
+ * nichts. Was hier entsteht, ist die dritte Frage neben „welche Serie" und
+ * „welcher Zustand": WAS ist das für ein Artikel.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Die Arten, in der Reihenfolge, in der die Übersicht sie anbietet.
+ *
+ * Dieselben fünf Werte wie der CHECK auf `skylanders.item_type` (`0135`) —
+ * `figure` zuerst, weil es der Normalfall ist, dann die vier Zubehörarten in
+ * der Häufigkeit, in der sie im Lager vorkommen.
+ */
+export const INVENTORY_KINDS = ["figure", "game", "portal", "bundle", "other"] as const;
+export type InventoryKind = (typeof INVENTORY_KINDS)[number];
+
+export function isInventoryKind(value: unknown): value is InventoryKind {
+  return typeof value === "string" && (INVENTORY_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * Was für ein Artikel liegt auf dieser Position?
+ *
+ * `figure`, WENN NICHTS ANDERES BEKANNT IST — und das ist kein Zögern,
+ * sondern dieselbe Regel wie überall sonst in dieser Arbeit: fehlt
+ * `item_type`, weil die Zeile aus einer Abfrage ohne die Spalte kommt oder
+ * weil noch kein `0135` gelaufen ist, dann verhält sich die Ansicht wie
+ * vorher. „Keine Auskunft" heißt nie „Zubehör".
+ *
+ * Ein Wert, den diese Fassung nicht kennt, ist ebenfalls `figure`: eine
+ * unbekannte Art darf keine Position aus der Figurenliste verschwinden
+ * lassen.
+ */
+export function inventoryKind(position: InventoryPosition): InventoryKind {
+  const type = position.figure?.itemType;
+  return isInventoryKind(type) ? type : "figure";
+}
+
+/** Ist das Zubehör — also alles außer einer Figur? */
+export function isAccessoryPosition(position: InventoryPosition): boolean {
+  return inventoryKind(position) !== "figure";
+}
+
+/**
+ * Darf diese Position im Shop angeboten und bepreist werden?
+ *
+ * NEIN FÜR ZUBEHÖR, und zwar bevor jemand es versucht. `set_shop_listing()`
+ * würde ein Portal durchaus auf `is_listed = true` setzen — aber
+ * `shop_offers()` filtert es über `is_shop_eligible()` am Artikeltyp wieder
+ * heraus (`0135`). Der Schalter sagte dann „Im Shop", und im Shop stünde
+ * nichts. Genau diese Art Knopf nimmt diese Oberfläche seit `0108` heraus:
+ * „ein Knopf, von dem schon bekannt ist, dass er nicht wirkt, ist keine
+ * Auswahl, sondern eine Falle."
+ *
+ * Ob Spiele oder Portale je öffentlich verkauft werden, ist eine getrennte
+ * Produktentscheidung (ADR-0128, Punkt 8) — sie würde ADR-0029/0048
+ * revidieren und braucht Alterskennzeichnung und steuerliche Prüfung. Bis
+ * dahin ist die Antwort hier nein.
+ *
+ * DER BESTAND BLEIBT DAVON UNBERÜHRT. Buchen, zählen und die Historie lesen
+ * geht für ein Portal wie für jede Figur — `record_inventory_movement()`
+ * fragt nur den Zustand, und `lose` ist er.
+ */
+export function isShopGoods(position: InventoryPosition): boolean {
+  return !isAccessoryPosition(position);
+}

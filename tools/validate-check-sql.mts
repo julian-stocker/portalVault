@@ -374,16 +374,33 @@ async function main(): Promise<void> {
    * sie bei Abweichung abbricht, und dass nach einem Abbruch nichts
    * zurückbleibt.
    * ==================================================================== */
-  console.log("\nPROBELAUF — die zwei noch nicht angewendeten Migrationen, gegen erfundene Zeilen");
+  console.log("\nPROBELAUF — die vier auf Production fehlenden Migrationen, gegen erfundene Zeilen");
   console.log("-".repeat(76));
 
-  /** Die Dateien, die noch in keiner Umgebung stehen (`supabase/migrations/APPLIED.md`). */
+  /**
+   * Die Dateien, die auf PRODUCTION fehlen (`supabase/migrations/APPLIED.md`).
+   *
+   * WARUM PRODUCTION UND NICHT STAGING DER AUSGANGSPUNKT IST. Der Vorstand
+   * unten entsteht als Faltung OHNE diese Dateien, und das ist genau der
+   * Stand `0134`, den Production fuehrt. Staging ist seit dem 2026-10-19
+   * weiter — dort stehen `0135` und `0136` schon —, und die Durchgaenge zu
+   * `0137` und `0138` stellen diesen Stand deshalb ausdruecklich her, indem
+   * sie die beiden zuerst fahren (`frischNach0136()`). So wird jede Datei
+   * gegen den Zustand gefahren, den sie in der Wirklichkeit vorfindet, und
+   * die Reihenfolge selbst wird mitgeprueft.
+   */
   const PROBELAUF = ["0135_catalog_item_type.sql",
-                     "0136_business_backup_item_type.sql"] as const;
+                     "0136_business_backup_item_type.sql",
+                     "0137_catalog_accessories.sql",
+                     "0138_catalog_portals.sql"] as const;
   const M135 = join(MIG_DIR, PROBELAUF[0]);
   const M136 = join(MIG_DIR, PROBELAUF[1]);
+  const M137 = join(MIG_DIR, PROBELAUF[2]);
+  const M138 = join(MIG_DIR, PROBELAUF[3]);
   const R135 = "supabase/rollback/R0135_drop_item_type.sql";
   const R136 = "supabase/rollback/R0136_back_to_0131.sql";
+  const R137 = "supabase/rollback/R0137_back_to_0135.sql";
+  const R138 = "supabase/rollback/R0138_drop_portals.sql";
 
   /** Fünf Katalogzeilen, zwei davon mit Angebot, zwei in der Kategorie Spiele. */
   const ZEILEN = `
@@ -421,14 +438,16 @@ async function main(): Promise<void> {
    *
    * Das Stub-Schema entsteht aus ALLEN Migrationen — die noch nicht
    * angewendeten eingeschlossen. Es trägt `skylanders.item_type` also schon,
-   * und die Faltung oben liefert `is_shop_eligible` in der Fassung aus `0135`
-   * und `seller_business_backup` in der aus `0136`. Gegen diesen Zustand
-   * gefahren, meldete jede der beiden Migrationen zu Recht „steht schon".
+   * und die Faltung oben liefert `is_shop_eligible` in der Fassung aus
+   * `0135`, `seller_business_backup` in der aus `0136` und
+   * `non_collectible_categories` samt `seller_import_catalog` in der aus
+   * `0137`. Gegen diesen Zustand gefahren, meldete jede der vier
+   * Migrationen zu Recht „steht schon".
    *
-   * Der Probelauf setzt deshalb zurück: die Faltung OHNE die beiden Dateien
-   * (das ist der Stand `0134`, den Staging und Production führen), und die
-   * Spalten, die sie anlegen, wieder weg. Welche das sind, liest er aus den
-   * Dateien selbst — eine Liste, die niemand pflegen muss.
+   * Der Probelauf setzt deshalb zurück: die Faltung OHNE die vier Dateien
+   * (das ist der Stand `0134`, den Production führt), und die Spalten, die
+   * sie anlegen, wieder weg. Welche das sind, liest er aus den Dateien
+   * selbst — eine Liste, die niemand pflegen muss.
    */
   const vorstand = funktionsfaltung(PROBELAUF);
   const zurueck: string[] = [];
@@ -438,6 +457,31 @@ async function main(): Promise<void> {
       /alter\s+table\s+(?:public\.)?([a-z_0-9]+)\s+add\s+column\s+([a-z_0-9]+)\b/gi)) {
       zurueck.push(`alter table public.${m[1]} drop column if exists ${m[2]};`);
     }
+  }
+
+  /*
+   * UND DIE FUNKTIONEN, DIE ES VOR DIESEN DATEIEN NOCH NICHT GAB.
+   *
+   * Das Stub-Schema beschreibt nicht nur Tabellen: es legt fuer JEDE Funktion
+   * aller Migrationen eine SIGNATUR an, damit die Planprüfung in Stufe 2 jeden
+   * Aufruf auflösen kann. Für `seller_create_catalog_item` — die `0137`
+   * einführt — heisst das: sie steht schon, bevor `0137` läuft. Und `0137`
+   * bricht genau dann zu Recht mit „steht schon" ab. Das wäre ein Befund des
+   * Stubs und keiner der Migration.
+   *
+   * Zurückgenommen wird deshalb jede Signatur, die diese Dateien NEU
+   * einführen — also jede, die die Faltung OHNE sie nicht kennt. Eine
+   * Funktion, die eine frühere Migration schon definiert hat
+   * (`is_shop_eligible`, `non_collectible_categories`, `seller_import_catalog`,
+   * `seller_business_backup`), bleibt stehen: sie SOLL vorhanden sein, und die
+   * Migration ersetzt sie.
+   *
+   * Die Liste pflegt niemand — sie entsteht aus den Dateien selbst, wie die
+   * Spaltenliste darüber.
+   */
+  for (const [sig] of funktionsfaltung().entries()) {
+    if (vorstand.has(sig)) continue;
+    zurueck.push(`drop function if exists public.${sig} cascade;`);
   }
 
   /*
@@ -1133,6 +1177,442 @@ async function main(): Promise<void> {
       sagt: lauf1 !== null ? `Lauf 1: ${lauf1}` : `Lauf 1 durch (item_type ${spalte1}, `
         + `Sicherung ${sicherung1.slice(0, 8)}…) · Lauf 2 ohne Anpassung: `
         + `${lauf2 ?? "DURCHGELAUFEN — Befund"} (item_type ${spalte2})`,
+    });
+  }
+
+  /* =======================================================================
+   * P22-P27 — ZUBEHOER WIRD EIN KATALOGARTIKEL (`0137`) UND DIE 21 PORTALE
+   *           DER ARBEITSMAPPE (`0138`), ADR-0128 Schritt Z2 und Z3.
+   *
+   * ALLE SECHS FAHREN VOM STAND VOR DEM LAUF AUS. `frischNach0136()` stellt
+   * ihn her: der Stand `0134` aus der Faltung, dann `0135` und `0136`. Das
+   * war der Zustand, den `0137` am 2026-10-20 auf Staging vorgefunden hat —
+   * und dass er dafuer gebraucht wird, zeigt P23. Staging steht seitdem auf
+   * `0138`; dieser Probelauf baut den Ausgangszustand jedes Mal neu auf und
+   * bleibt davon unberuehrt.
+   *
+   * DREI VON SECHS MUESSEN SCHEITERN. Eine Sicherung ist nur dann eine,
+   * wenn sie auch anschlaegt.
+   * ==================================================================== */
+
+  /** Der Staging-Stand: 0134 aus der Faltung, dann 0135 und 0136. */
+  async function frischNach0136(): Promise<InstanceType<typeof PGlite>> {
+    const db = await frisch();
+    const f1 = await fahre(db, M135);
+    if (f1 !== null) throw new Error(`Aufbau: 0135 scheiterte — ${f1}`);
+    const f2 = await fahre(db, M136);
+    if (f2 !== null) throw new Error(`Aufbau: 0136 scheiterte — ${f2}`);
+    return db;
+  }
+
+  /**
+   * Was das Stub-Schema nicht hat und `0138` braucht: sechs Serien und eine
+   * Identitaet auf `categories.id`.
+   *
+   * DAS STUB-SCHEMA TRAEGT KEINE DEFAULTS UND KEINE SCHLUESSEL — es ist aus
+   * den Migrationen abgeleitete reine Struktur. In der Wirklichkeit ist
+   * `categories.id` `generated always as identity`; hier muss die Sequenz
+   * nachgereicht werden, sonst bekaeme die Kategorie `Portale` die id NULL
+   * und `0138` fiele mit „die Kategorie fehlt in Serie" ab — ein Befund des
+   * Stubs und keiner der Migration. Dasselbe gilt fuer die sechs Serien: die
+   * erfundenen Zeilen oben kennen nur `PROBE`.
+   */
+  async function serienUndIdentitaet(db: InstanceType<typeof PGlite>): Promise<void> {
+    await db.exec(`
+      create sequence if not exists public.z_kat_id_seq start 1000;
+      alter table public.categories
+        alter column id set default nextval('public.z_kat_id_seq');
+      insert into public.series (code, label, release_year, position) values
+        ('SA', 'Spyro''s Adventure', 2011, 0),
+        ('G',  'Giants',             2012, 1),
+        ('SF', 'Swap Force',         2013, 2),
+        ('T',  'Trap Team',          2014, 3),
+        ('SC', 'SuperChargers',      2015, 4),
+        ('I',  'Imaginators',        2016, 5);`);
+  }
+
+  /* P22 — der gute Fall: 0137 auf dem Staging-Stand. */
+  {
+    const db = await frischNach0136();
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const angeboteVor = await w("select count(*)::text as w from public.shop_offers()");
+    const sammelbarVor = await w(
+      `select count(*)::text as w from public.skylanders s
+         join public.categories c on c.id = s.category_id
+        where s.is_active and s.catalog_visible
+          and not (c.name = any (public.non_collectible_categories()))`);
+
+    const lauf = await fahre(db, M137);
+
+    const liste = await w("select array_to_string(public.non_collectible_categories(), ',') as w");
+    const spalten = await w(
+      `select string_agg(a.name, ',' order by a.ord) as w
+         from (select unnest(p.proargnames) as name,
+                      generate_subscripts(p.proargnames, 1) as ord
+                 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                where n.nspname = 'public' and p.proname = 'seller_import_catalog') a`);
+    const anlegen = await w(
+      `select (to_regprocedure('public.seller_create_catalog_item(text, text, text)')
+                is not null)::text as w`);
+    const angeboteNach = await w("select count(*)::text as w from public.shop_offers()");
+    const sammelbarNach = await w(
+      `select count(*)::text as w from public.skylanders s
+         join public.categories c on c.id = s.category_id
+        where s.is_active and s.catalog_visible
+          and not (c.name = any (public.non_collectible_categories()))`);
+
+    probe.push({
+      name: "P22 0137 laeuft durch: fuenf Kategorienamen, acht Spalten, und kein Angebot bewegt sich",
+      ok: lauf === null && liste === "Spiele,Portale,Bundles,Taschen,Zubehör"
+        && spalten === "sky_id,name,series_code,category,display_name,"
+          + "catalog_visible,is_active,item_type"
+        && anlegen === "true" && angeboteNach === angeboteVor
+        && sammelbarNach === sammelbarVor,
+      sagt: lauf ?? `Liste "${liste}", Spalten "${spalten}", Anlegefunktion ${anlegen}, `
+        + `Angebote ${angeboteVor} → ${angeboteNach}, sammelbar ${sammelbarVor} → ${sammelbarNach}`,
+    });
+  }
+
+  /* P23 — 0137 OHNE 0135: die harte Reihenfolge, und nichts bleibt zurueck. */
+  {
+    const db = await frisch();
+    const lauf = await fahre(db, M137);
+    const anlegen = String((((await db.query(
+      `select (to_regprocedure('public.seller_create_catalog_item(text, text, text)')
+                is not null)::text as w`)) as { rows: { w: unknown }[] }).rows[0].w));
+    const liste = String((((await db.query(
+      "select array_to_string(public.non_collectible_categories(), ',') as w",
+    )) as { rows: { w: unknown }[] }).rows[0].w));
+
+    probe.push({
+      name: "P23 0137 vor 0135 bricht ab, und weder Funktion noch Kategorieliste bleiben zurueck",
+      ok: lauf !== null && lauf.includes("setzt 0135 voraus")
+        && anlegen === "false" && liste === "Spiele",
+      sagt: lauf === null
+        ? "DURCHGELAUFEN — Befund"
+        : `${lauf} · Anlegefunktion ${anlegen}, Liste "${liste}"`,
+    });
+  }
+
+  /* P24 — 0137 bei BESETZTER Zubehoerkategorie: die Erweiterung waere eine
+   * stillschweigende Entfernung aus Sammlung und Shop, also bricht sie ab. */
+  {
+    const db = await frischNach0136();
+    await db.exec(`
+      insert into public.categories (id, name, series_code) values (9, 'Portale', 'PROBE');
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, item_type)
+      values ('PROBE-P', 'Ein Portal', 'ein-portal', 'PROBE', 9, true, true, 9,
+              'standard', 'probe', 'figure');`);
+    const lauf = await fahre(db, M137);
+
+    probe.push({
+      name: "P24 0137 bricht ab, wenn in einer Zubehoerkategorie schon eine Zeile steht",
+      ok: lauf !== null && lauf.includes("stehen schon in einer der vier neuen"),
+      sagt: lauf ?? "DURCHGELAUFEN — Befund",
+    });
+  }
+
+  /* P25 — der gute Fall fuer 0138: 21 Portale, und keine Zahl bewegt sich. */
+  {
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    await serienUndIdentitaet(db);
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const angeboteVor = await w("select count(*)::text as w from public.shop_offers()");
+    const sammelbarVor = await w(
+      `select count(*)::text as w from public.skylanders s
+         join public.categories c on c.id = s.category_id
+        where s.is_active and s.catalog_visible
+          and not (c.name = any (public.non_collectible_categories()))`);
+    const seqVor = await w(
+      `select coalesce((select last_value::text from pg_sequences
+                         where schemaname = 'public' and sequencename = 'sky_id_seq'),
+                       '(unbekannt)') as w`);
+
+    const lauf = f137 ? "0137 scheiterte" : await fahre(db, M138);
+
+    const portale = await w(
+      `select count(*)::text as w from public.skylanders
+        where sky_id between 'SKY-0615' and 'SKY-0642'`);
+    const typen = await w(
+      `select count(*)::text as w from public.skylanders
+        where sky_id between 'SKY-0615' and 'SKY-0642' and item_type = 'portal'`);
+    const kategorien = await w(
+      "select count(*)::text as w from public.categories where name = 'Portale'");
+    const shopfaehig = await w(
+      `select count(*)::text as w from public.skylanders s
+        where s.sky_id between 'SKY-0615' and 'SKY-0642'
+          and public.is_shop_eligible(s.sky_id)`);
+    const journal = await w(
+      `select count(*)::text as w from public.catalog_admin_changes
+        where entity = 'skylander' and field = 'created'
+          and entity_id between 'SKY-0615' and 'SKY-0642'`);
+    const angeboteNach = await w("select count(*)::text as w from public.shop_offers()");
+    const sammelbarNach = await w(
+      `select count(*)::text as w from public.skylanders s
+         join public.categories c on c.id = s.category_id
+        where s.is_active and s.catalog_visible
+          and not (c.name = any (public.non_collectible_categories()))`);
+    const seqNach = await w(
+      `select coalesce((select last_value::text from pg_sequences
+                         where schemaname = 'public' and sequencename = 'sky_id_seq'),
+                       '(unbekannt)') as w`);
+
+    probe.push({
+      name: "P25 0138 legt 21 Portale an — kein Angebot, kein Nenner und keine Sequenz bewegt sich",
+      ok: lauf === null && portale === "21" && typen === "21" && kategorien === "6"
+        && shopfaehig === "0" && journal === "21"
+        && angeboteNach === angeboteVor && sammelbarNach === sammelbarVor
+        && seqNach === seqVor,
+      sagt: lauf ?? `${portale} Portale (${typen} als portal), ${kategorien} Kategorien, `
+        + `${shopfaehig} shopfaehig, ${journal} Journaleintraege, `
+        + `Angebote ${angeboteVor} → ${angeboteNach}, sammelbar ${sammelbarVor} → `
+        + `${sammelbarNach}, Sequenz ${seqVor} → ${seqNach}`,
+    });
+  }
+
+  /* P26 — 0138 VOR 0137: ohne die erweiterte Kategorieliste waere das erste
+   * Portal eine sammelbare, shopfaehige Figur. Also bricht es ab. */
+  {
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const lauf = await fahre(db, M138);
+    const portale = String((((await db.query(
+      `select count(*)::text as w from public.skylanders
+        where sky_id between 'SKY-0615' and 'SKY-0642'`,
+    )) as { rows: { w: unknown }[] }).rows[0].w));
+
+    probe.push({
+      name: "P26 0138 vor 0137 bricht ab, und keine Portalzeile bleibt zurueck",
+      ok: lauf !== null && lauf.includes("setzt 0137 voraus") && portale === "0",
+      sagt: lauf === null ? "DURCHGELAUFEN — Befund" : `${lauf} · ${portale} Portalzeilen`,
+    });
+  }
+
+  /* P27 — DIE RUECKNAHMEN, UND IHRE REIHENFOLGE. `R0137` darf nicht
+   * gelingen, solange ein Portal steht: ohne die erweiterte Kategorieliste
+   * wuerde es sammelbar. Erst `R0138`, dann `R0137`. */
+  {
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    await serienUndIdentitaet(db);
+    const f138 = f137 ? "0137 scheiterte" : await fahre(db, M138);
+
+    const zuFrueh = await fahre(db, R137);
+    const zurueck138 = await fahre(db, R138);
+    const dann137 = await fahre(db, R137);
+
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const portale = await w(
+      `select count(*)::text as w from public.skylanders
+        where sky_id between 'SKY-0615' and 'SKY-0642'`);
+    const liste = await w("select array_to_string(public.non_collectible_categories(), ',') as w");
+    /* Das Journal bleibt — append-only, und das ist Absicht. */
+    const journal = await w(
+      `select count(*)::text as w from public.catalog_admin_changes
+        where entity = 'skylander' and field = 'created'
+          and entity_id between 'SKY-0615' and 'SKY-0642'`);
+
+    probe.push({
+      name: "P27 R0137 verweigert, solange ein Portal steht; in der Reihenfolge R0138, R0137 geht beides",
+      ok: f138 === null && zuFrueh !== null
+        && zuFrueh.includes("stehen in einer Zubehoerkategorie")
+        && zurueck138 === null && dann137 === null
+        && portale === "0" && liste === "Spiele" && journal === "21",
+      sagt: f138 !== null ? `Aufbau: ${f138}` : `R0137 zu frueh: `
+        + `${zuFrueh ?? "DURCHGELAUFEN — Befund"} · R0138 ${zurueck138 ?? "durch"} · `
+        + `R0137 ${dann137 ?? "durch"} · ${portale} Portale, Liste "${liste}", `
+        + `${journal} Journaleintraege bleiben`,
+    });
+  }
+
+  /* P28 — DIE LAGERZEILE AUF EINEM SPIEL WIRD SICHTBAR, OHNE SHOPWARE ZU
+   *        WERDEN (ADR-0128).
+   *
+   * Der Fall, den die Aufgabe ausdruecklich nennt: auf Staging haengen 13
+   * Lagerzeilen an Spielen. Hier haengt eine an einem erfundenen Spiel, und
+   * zwar die unangenehme Variante — `is_listed = true`, eine Altlast. Die
+   * Pruefdatei muss sie als BENANNT melden (sie bekommt kuenftig einen Namen
+   * in der Uebersicht) und gleichzeitig als NICHT shopfaehig und NICHT im
+   * Angebot.
+   *
+   * Im Modus `keine`: die Zahl 13 ist der Staging-Wert, und die Zeilen hier
+   * sind erfunden. Geprueft wird die STRUKTUR, nicht die Menge.
+   */
+  {
+    const db = await frischNach0136();
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    /* Eine Lagerzeile auf PROBE-4 — einem Spiel, das `0135` als `game`
+       markiert hat —, gelistet und mit Bestand. */
+    await db.exec(`
+      insert into public.shop_inventory
+             (sky_id, condition, is_listed, quantity, available_quantity, sale_price)
+           values ('PROBE-4', 'loose', true, 3, 3, 19.90);`);
+
+    const spiele = await w(
+      "select count(*)::text as w from public.skylanders where item_type = 'game'");
+    const eligible = await w(
+      "select public.is_shop_eligible('PROBE-4')::text as w");
+    const imAngebot = await w(
+      "select count(*)::text as w from public.shop_offers() where sky_id = 'PROBE-4'");
+
+    const flug = await pruefdatei(db, "inventory_accessories_readonly.sql",
+      { vorher: "select set_config('skyisles.z0', 'keine', true);" });
+
+    probe.push({
+      name: "P28 eine gelistete Lagerzeile auf einem Spiel wird benannt — und ist trotzdem kein Angebot",
+      ok: spiele === "2" && eligible === "false" && imAngebot === "0"
+        && flug.abweichungen === "0",
+      sagt: `${spiele} Spiele im Katalog, is_shop_eligible(PROBE-4) = ${eligible}, `
+        + `${imAngebot} Angebote darauf, Pruefdatei 9999 = ${flug.abweichungen}`,
+    });
+  }
+
+  /* P29 — UND DIE PRUEFDATEI SCHLAEGT AN, wenn die Trennung bricht.
+   *
+   * Eine Sicherung, die nur gruen werden kann, ist keine. Hier bekommt
+   * dieselbe Zeile einen Artikeltyp, den `0135` shopfaehig machen wuerde —
+   * `figure` in der Kategorie `Spiele` —, und damit muss Pruefung 305
+   * („alle stehen in einer Kategorie Spiele" greift nicht mehr, weil die
+   * Zeile als Figur zaehlt) beziehungsweise der Vertrag anschlagen.
+   */
+  {
+    const db = await frischNach0136();
+    await db.exec(`
+      insert into public.shop_inventory
+             (sky_id, condition, is_listed, quantity, available_quantity, sale_price)
+           values ('PROBE-4', 'loose', true, 3, 3, 19.90);
+      /* Eine KATEGORIE, die kein Spiel ist, mit einem Artikel, der als
+         game markiert bleibt: damit widersprechen Kategorie und Artikeltyp
+         einander, und Pruefung 305 muss das sehen. */
+      insert into public.categories (id, name, series_code) values (7, 'Figuren 2', 'PROBE');
+      update public.skylanders set category_id = 7 where sky_id = 'PROBE-4';
+      update public.skylanders set item_type = 'game' where sky_id = 'PROBE-4';`);
+
+    const flug = await pruefdatei(db, "inventory_accessories_readonly.sql",
+      { vorher: "select set_config('skyisles.z0', 'keine', true);" });
+
+    probe.push({
+      name: "P29 und sie schlaegt an, wenn Kategorie und Artikeltyp einer Lagerzeile auseinanderlaufen",
+      ok: flug.abweichungen !== "0" && flug.abweichungen !== "(keine Zeile 9999)",
+      sagt: `Pruefdatei 9999 = ${flug.abweichungen} (erwartet > 0)`,
+    });
+  }
+
+  /* P30 — DER MANUELLE STAGING-ABLAUF, IN EINEM DURCHGANG.
+   *
+   * `supabase/operations/staging-0137-0138.sql` ist das, was der Betreiber
+   * wirklich einfuegt: eine Datei, eine Transaktion, beide Migrationen. Hier
+   * laeuft sie gegen echtes PostgreSQL — zweimal, wie bei P21:
+   *
+   *   Lauf 1  mit dem Z0-Vertrag auf die Zahlen dieser Wegwerf-Instanz
+   *           umgestellt: er muss DURCHLAUFEN, 21 Portale anlegen und sechs
+   *           Kategorien, ohne ein Angebot zu bewegen.
+   *   Lauf 2  unveraendert: der Vertrag ist auf die echten Staging-Zahlen
+   *           geschrieben und muss ANSCHLAGEN, bevor irgendetwas entsteht.
+   */
+  {
+    const SKRIPT = "supabase/operations/staging-0137-0138.sql";
+    const ORIGINAL = readFileSync(SKRIPT, "utf8");
+
+    /** Der Stand, den Staging fuehrt: 0132, dann 0135 und 0136. */
+    const bauen = async (): Promise<InstanceType<typeof PGlite>> => {
+      const fold0132 = funktionsfaltung([...PROBELAUF,
+        "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
+      const db = new PGlite();
+      await stubAnwenden(db);
+      for (const [, { sql }] of fold0132) { try { await db.exec(sql + ";"); } catch { /* s. Stufe 3 */ } }
+      for (const s of kommentare) { try { await db.exec(s + ";"); } catch { /* s. Stufe 3 */ } }
+      for (const s of zurueck) await db.exec(s);
+      for (const s of anweisungen(ZEILEN)) await db.exec(s + ";");
+      for (const s of anweisungen(STAND_0131)) await db.exec(s + ";");
+      for (const sig of SENSIBEL) {
+        try {
+          await db.exec(`revoke all on function ${sig} from public, anon, authenticated, service_role;`);
+        } catch { /* im Stub fehlt vielleicht eine Signatur */ }
+      }
+      /* Die sechs Serien und die Identitaet auf `categories.id` — was das
+         Stub-Schema nicht mitbringt und `0138` braucht. */
+      await serienUndIdentitaet(db);
+      /* Und der Stand 0136, den der Lauf in A3 verlangt. */
+      const f1 = await fahre(db, M135);
+      if (f1 !== null) throw new Error(`P30 Aufbau: 0135 scheiterte — ${f1}`);
+      const f2 = await fahre(db, M136);
+      if (f2 !== null) throw new Error(`P30 Aufbau: 0136 scheiterte — ${f2}`);
+      return db;
+    };
+
+    /** Der Vertragsblock, auf die Zahlen dieser Instanz umgestellt. */
+    const messen = async (db: InstanceType<typeof PGlite>): Promise<string> => {
+      const w = async (sql: string): Promise<string> =>
+        String(((await db.query(sql)) as { rows: { w: unknown }[] }).rows[0].w);
+      const shopfaehig = await w("select count(*)::text as w from public.skylanders s "
+        + "where public.is_shop_eligible(s.sky_id)");
+      const angebote = await w("select count(*)::text as w from public.shop_offers()");
+      const md5 = await w("select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|' "
+        + "|| coalesce(o.price::text, ''), ';' order by o.sky_id, o.condition), '')) as w "
+        + "from public.shop_offers() o");
+      const sammelbar = await w("select count(*)::text as w from public.skylanders s "
+        + "join public.categories c on c.id = s.category_id where s.is_active and s.catalog_visible "
+        + "and not (c.name = any (public.non_collectible_categories()))");
+      const overrides = await w("select count(*)::text as w from public.skylanders s "
+        + "join public.categories c on c.id = s.category_id "
+        + "where c.name = 'Spiele' and s.display_name_override is not null");
+      return `array['shopfaehig=${shopfaehig}', 'angebote=${angebote}',\n`
+        + `                                'angebote_md5=${md5}',\n`
+        + `                                'sammelbar=${sammelbar}', `
+        + `'spiele_overrides=${overrides}']`;
+    };
+
+    const db1 = await bauen();
+    const vertragAlt = ORIGINAL.slice(
+      ORIGINAL.indexOf("array['shopfaehig=534'"),
+      ORIGINAL.indexOf("] loop", ORIGINAL.indexOf("array['shopfaehig=534'")) + 1);
+    const angepasst = join(process.cwd(), ".pglite-oneshot-0137-0138.sql");
+    writeFileSync(angepasst, ORIGINAL.replace(vertragAlt, await messen(db1)));
+    const lauf1 = await fahre(db1, angepasst, { klammer: false });
+
+    const w1 = async (sql: string): Promise<string> =>
+      String(((await db1.query(sql)) as { rows: { w: unknown }[] }).rows[0]?.w ?? "?");
+    const portale = await w1("select count(*)::text as w from public.skylanders "
+      + "where sky_id between 'SKY-0615' and 'SKY-0642'");
+    const kategorien = await w1(
+      "select count(*)::text as w from public.categories where name = 'Portale'");
+    const angebote1 = await w1("select count(*)::text as w from public.shop_offers()");
+    const serie0637 = await w1(
+      "select coalesce(max(series_code), '(keine)') as w from public.skylanders "
+      + "where sky_id = 'SKY-0637'");
+    const anlegen = await w1("select (to_regprocedure("
+      + "'public.seller_create_catalog_item(text, text, text)') is not null)::text as w");
+
+    /* Lauf 2: unveraendert, der Vertrag muss anschlagen — und VOR der
+       ersten Zeile, die entstehen wuerde. */
+    const db2 = await bauen();
+    const lauf2 = await fahre(db2, SKRIPT, { klammer: false });
+    const portale2 = String((((await db2.query(
+      "select count(*)::text as w from public.skylanders "
+      + "where sky_id between 'SKY-0615' and 'SKY-0642'")) as { rows: { w: unknown }[] })
+      .rows[0].w));
+
+    probe.push({
+      name: "P30 der Staging-Ablauf fuer 0137+0138 laeuft in einem Durchgang — und der Z0-Vertrag greift",
+      ok: lauf1 === null && portale === "21" && kategorien === "6" && angebote1 === "2"
+        && serie0637 === "SF" && anlegen === "true"
+        && lauf2 !== null && lauf2.includes("Z0-Vertrag stimmt nicht mehr")
+        && portale2 === "0",
+      sagt: lauf1 !== null ? `Lauf 1: ${lauf1}` : `Lauf 1 durch (${portale} Portale, `
+        + `${kategorien} Kategorien, SKY-0637 = ${serie0637}, Angebote ${angebote1}, `
+        + `Anlegefunktion ${anlegen}) · Lauf 2 ohne Anpassung: `
+        + `${lauf2 ?? "DURCHGELAUFEN — Befund"} (${portale2} Portale)`,
     });
   }
 

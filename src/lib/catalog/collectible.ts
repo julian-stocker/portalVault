@@ -27,23 +27,59 @@
  * back into the catalog. The test in collectible.test.ts and the note in
  * docs/SKYLANDERS_DATA.md exist so that coupling is visible rather than
  * discovered later.
+ *
+ * ---------------------------------------------------------------------------
+ * ZWEI REGELN SEIT 0137, UND ZWAR ABSICHTLICH
+ *
+ * Mit dem Zubehör kommen vier weitere Kategorien — `Portale`, `Bundles`,
+ * `Taschen`, `Zubehör` —, und mit `0135` kommt eine Eigenschaft der ZEILE:
+ * `item_type`. Hier wird beides gefragt, und das ist keine Doppelung:
+ *
+ *   * Der ARTIKELTYP ist die fachliche Eigenschaft. Er entscheidet zuerst,
+ *     weil er auch dann gilt, wenn jemand eine Kategorie anders benennt.
+ *   * Der KATEGORIENAME ist die Struktur, die der Betreiber gewählt hat. Er
+ *     entscheidet weiter, weil nicht jeder Aufrufer den Artikeltyp kennt —
+ *     der Fallback ist das Verhalten von vor `0137`, Zeichen für Zeichen.
+ *
+ * Eine Figur ist von beidem unberührt: `item_type = 'figure'` und keine der
+ * fünf Kategorien. Die Zahlen von heute ändern sich dadurch nicht, und genau
+ * das beweist Migration `0137` in ihrer eigenen Transaktion.
+ * ---------------------------------------------------------------------------
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
 
-/** Category names whose entries are not collectible items. */
-export const NON_COLLECTIBLE_CATEGORIES: ReadonlySet<string> = new Set(["Spiele"]);
+/**
+ * Category names whose entries are not collectible items.
+ *
+ * MUSS ZEICHENGLEICH ZU `public.non_collectible_categories()` SEIN — `0006`,
+ * erweitert in `0137`. `npm run verify:shop` vergleicht beide Fassungen und
+ * meldet jede Abweichung; die SQL-Seite ist die, an der Shop und Fortschritt
+ * hängen.
+ */
+export const NON_COLLECTIBLE_CATEGORIES: ReadonlySet<string> = new Set([
+  "Spiele", "Portale", "Bundles", "Taschen", "Zubehör",
+]);
 
 export function isCollectibleCategory(categoryName: string): boolean {
   return !NON_COLLECTIBLE_CATEGORIES.has(categoryName);
 }
 
-export function isCollectible(figure: Pick<CatalogFigure, "categoryName">): boolean {
+/**
+ * Der Artikeltyp, soweit er bekannt ist.
+ *
+ * `undefined` heisst „keine Auskunft" und NICHT „keine Figur": ein Aufrufer,
+ * der die Spalte nicht gelesen hat, soll das Verhalten von vor `0137`
+ * bekommen und nicht den halben Katalog verlieren.
+ */
+type MitTyp = Pick<CatalogFigure, "categoryName"> & { itemType?: string | null };
+
+export function isCollectible(figure: MitTyp): boolean {
+  if (figure.itemType !== undefined && figure.itemType !== null
+      && figure.itemType !== "figure") return false;
   return isCollectibleCategory(figure.categoryName);
 }
 
 /** Keeps only the collectible entries, order untouched. */
-export function collectibleOnly<T extends Pick<CatalogFigure, "categoryName">>(
-  figures: readonly T[],
-): T[] {
+export function collectibleOnly<T extends MitTyp>(figures: readonly T[]): T[] {
   return figures.filter(isCollectible);
 }

@@ -25,7 +25,6 @@
  * The arithmetic itself is in the database (`public.shop_price`), in one
  * place, and this module only reads the result. Money is not computed twice.
  */
-import { isCollectible } from "@/lib/catalog/collectible";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { createClient } from "@/lib/supabase/server";
 
@@ -86,6 +85,27 @@ function toRow(raw: RawRow): InventoryRow {
  * historical position on something outside the collector scope are separated
  * out rather than deleted — their movements are append-only history
  * (ADR-0037), and history is not tidied away.
+ *
+ * ---------------------------------------------------------------------------
+ * DER UMFANG IST DIE ENTSCHEIDUNG DES AUFRUFERS (ADR-0128)
+ *
+ * Hier stand `catalog.filter(isCollectible)`. Das war eine zweite, stille
+ * Bereichsregel an einer Stelle, die schon eine hatte: der Aufrufer übergibt
+ * den Katalog, den er zeigen will. Die Folge war, dass die 13 Lagerzeilen
+ * auf Spiele seit dem ersten Tag im `outsideScope`-Topf landeten und an die
+ * Oberfläche nur als ANZAHL gingen — Bestand, Bewegungen und Historie waren
+ * da und richtig, nur unsichtbar.
+ *
+ * `/business/inventory` übergibt deshalb Figuren UND Zubehör
+ * (`fetchCatalog({ includeHidden: true })` plus `fetchAccessoryCatalog()`).
+ * Was weiterhin herausfällt, fällt aus einem Grund heraus, den der Katalog
+ * selbst nennt: nicht aktiv, oder im reservierten Fixture-Bereich.
+ *
+ * Die TRENNUNG verschwindet dabei nicht — sie zieht nur um. Dass ein Spiel
+ * nicht sammelbar und nicht shopfähig ist, entscheiden
+ * `non_collectible_categories()` und `is_shop_eligible()` in der Datenbank;
+ * in der Anwendung tragen es `inventoryKind()` und `isShopGoods()`.
+ * ---------------------------------------------------------------------------
  */
 export async function fetchInventory(
   catalog: readonly CatalogFigure[],
@@ -94,7 +114,7 @@ export async function fetchInventory(
   const { data, error } = await supabase.rpc("admin_shop_inventory");
   if (error) throw new Error(`inventory: ${error.message}`);
 
-  const byId = new Map(catalog.filter(isCollectible).map((figure) => [figure.skyId, figure]));
+  const byId = new Map(catalog.map((figure) => [figure.skyId, figure]));
   const positions: InventoryPosition[] = [];
   const outsideScope: InventoryPosition[] = [];
 

@@ -26,7 +26,8 @@ import { useId, useMemo, useRef, useState, type RefObject } from "react";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
-  MAX_RESULTS, moveHighlight, searchFigures, searchState, type FigureChoice,
+  isAccessory, MAX_RESULTS, moveHighlight, searchFigures, searchState,
+  type FigureChoice,
 } from "@/lib/orderbook/figure-search";
 
 const copy = de.business.orderbook.figures;
@@ -307,6 +308,18 @@ export function FigureSearch({
               <span className="w-10 shrink-0 text-xs uppercase tabular-nums text-muted">
                 {choice.series}
               </span>
+              {/*
+                DIE ART, UND ZWAR NUR WENN SIE EINE IST (0137).
+                Eine Figur bekommt keine Marke: sie ist der Normalfall, und
+                820 gleiche Etiketten wären nur Rauschen. Ein Artikeltyp, den
+                diese Fassung nicht kennt, erscheint ebenfalls nicht — dann
+                steht die Zeile da wie vorher.
+              */}
+              {isAccessory(choice) && copy.itemTypes[choice.itemType ?? ""] ? (
+                <span className="shrink-0 rounded-sky-sm bg-deep/40 px-1.5 py-0.5 text-[0.6875rem] uppercase tracking-wide text-muted ring-1 ring-border/60">
+                  {copy.itemTypes[choice.itemType ?? ""]}
+                </span>
+              ) : null}
               <span className="min-w-0 flex-1 truncate">{choice.name}</span>
               <span className="shrink-0 text-xs tabular-nums text-muted">{choice.skyId}</span>
               <span className="w-16 shrink-0 text-right tabular-nums">

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
+import { code as executableSql, latestFunction } from "@/test-support/migrations";
+
 import {
   v1BuyableOffers,
   findOffer,
@@ -212,17 +214,51 @@ describe("what the public projection may return", () => {
 });
 
 describe("the category rule the projection mirrors", () => {
+  /** The names as `src/lib/catalog/collectible.ts` lists them, in order. */
+  function application(): string[] {
+    const source = readFileSync("src/lib/catalog/collectible.ts", "utf8");
+    const names = /new Set\(\[([^\]]*)\]\)/.exec(source)?.[1] ?? "";
+    return [...names.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  }
+
+  /** The names a `non_collectible_categories()` body lists, in order. */
+  function fromSql(body: string): string[] {
+    const array = /select array\[([^\]]*)\]::text\[\]/.exec(executableSql(body))?.[1] ?? "";
+    return [...array.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  }
+
   it("names the same categories the application excludes", () => {
     // src/lib/catalog/collectible.ts is where the rule is explained; this is
     // the SQL copy of it. If one is changed the other has to be.
-    const application = readFileSync("src/lib/catalog/collectible.ts", "utf8");
-    const names = /new Set\(\[([^\]]*)\]\)/.exec(application)?.[1] ?? "";
-    const parsed = [...names.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
-    expect(parsed).toEqual(["Spiele"]);
+    //
+    // AGAINST THE LATEST DEFINITION, not against 0006. The rule was widened
+    // in 0137 — Portale, Bundles, Taschen, Zubehör — and 0006 is applied
+    // everywhere, so its text is frozen (supabase/migrations/APPLIED.md,
+    // rule 1). Reading `latestFunction` is what keeps this test a parity
+    // test instead of a test of one historical version.
+    expect(fromSql(latestFunction("non_collectible_categories").body))
+      .toEqual(application());
+  });
 
-    const sql = code(OFFERS_SQL);
-    const array = /select array\[([^\]]*)\]::text\[\]/.exec(sql)?.[1] ?? "";
-    expect([...array.matchAll(/'([^']+)'/g)].map((match) => match[1])).toEqual(parsed);
+  it("and the 0137 version is the one that answers", () => {
+    /* Named explicitly, so a sixth category cannot arrive in the
+       application alone and be mirrored by a migration nobody wrote. */
+    expect(latestFunction("non_collectible_categories").file)
+      .toBe("0137_catalog_accessories.sql");
+    expect(application()).toEqual(["Spiele", "Portale", "Bundles", "Taschen", "Zubehör"]);
+  });
+
+  it("0006 keeps the one name it was applied with", () => {
+    /* The frozen original. It is not wrong — it is older, and it is the
+       version every environment ran. 0137 widens it in place. */
+    expect(fromSql(code(OFFERS_SQL))).toEqual(["Spiele"]);
+  });
+
+  it("the projection still asks the function rather than a name", () => {
+    /* The reason the widening needs no change in 0006: `shop_offers()`
+       calls the function, so a new category reaches the projection without
+       the projection being touched. */
+    expect(code(OFFERS_SQL)).toContain("public.non_collectible_categories()");
   });
 });
 

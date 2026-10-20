@@ -130,17 +130,23 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die dreizehn angewendeten", () => {
+  it("die Staging-Tabelle führt die fünfzehn angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
-     * `supabase/operations/staging-0135-0136.sql`. `0133` und `0134` fehlen
+     * `supabase/operations/staging-0135-0136.sql` —, am 2026-10-20 `0137`
+     * und `0138`, ebenso in einem Durchgang über
+     * `supabase/operations/staging-0137-0138.sql`. `0133` und `0134` fehlen
      * weiter: die Tabelle hat damit eine Lücke, und die ist gewollt (die
      * Nummer ist eine Reihenfolge, keine Kette).
      */
-    expect(zeilen.length).toBe(13);
-    expect(zeilen.map((z) => z.datei)).toContain("0135_catalog_item_type.sql");
-    expect(zeilen.map((z) => z.datei)).toContain("0136_business_backup_item_type.sql");
+    expect(zeilen.length).toBe(15);
+    for (const datei of ["0135_catalog_item_type.sql",
+                         "0136_business_backup_item_type.sql",
+                         "0137_catalog_accessories.sql",
+                         "0138_catalog_portals.sql"]) {
+      expect(zeilen.map((z) => z.datei), datei).toContain(datei);
+    }
     expect(zeilen.map((z) => z.datei)).not.toContain("0133_paid_total_immutable.sql");
     expect(zeilen.map((z) => z.datei)).not.toContain("0134_purchase_item_source_row_visible.sql");
   });
@@ -191,9 +197,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
 
   it("wo `gleich` steht, ist die Datei bitgenau die ausgeführte Fassung", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
-    /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`. Nur `0130` weicht ab
-       und zeigt auf ihren Nachtrag. */
-    expect(gleiche.length).toBe(12);
+    /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
+       `0137`/`0138`. Nur `0130` weicht ab und zeigt auf ihren Nachtrag. */
+    expect(gleiche.length).toBe(14);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
@@ -460,9 +466,23 @@ describe("search_path: die quotierte Darstellung von PostgreSQL", () => {
     return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--.*$/gm, "");
   }
 
-  const dateien = readdirSync("supabase/checks")
+  /*
+   * PRUEFDATEIEN UND BETRIEBLICHE SKRIPTE.
+   *
+   * `supabase/operations/` kam am 2026-10-20 dazu, und zwar aus Anlass:
+   * `staging-0137.sql` trug denselben naiven Vergleich und haette den
+   * Staging-Lauf in Abschnitt C abgebrochen, obwohl die Funktion in Ordnung
+   * ist. Eine Regel, die nur den einen Ordner kennt, faengt den Fehlgriff im
+   * anderen nicht — und ein Einmal-Skript ist die Datei, die am Ende
+   * wirklich laeuft.
+   */
+  const dateien = [...readdirSync("supabase/checks")
     .filter((n) => n.endsWith(".sql"))
-    .map((n) => [n, ohneProsa(readFileSync(`supabase/checks/${n}`, "utf8"))] as const);
+    .map((n) => [n, ohneProsa(readFileSync(`supabase/checks/${n}`, "utf8"))] as const),
+  ...readdirSync("supabase/operations")
+    .filter((n) => n.endsWith(".sql"))
+    .map((n) => [`operations/${n}`,
+                 ohneProsa(readFileSync(`supabase/operations/${n}`, "utf8"))] as const)];
 
   /*
    * Die naive Form ist genau das Literal `'search_path='` — mit dem

@@ -1100,11 +1100,32 @@ nicht „Deutsch". `SKY-0306`/`SKY-0307` sind der Musterfall: gleiche Serie,
 gleiche Plattform, zwei physische Artikel, unterschieden allein durch die
 Sprache.
 
+### Was aus diesem Befund geworden ist (2026-10-20)
+
+Die 21 Portale sind in **Migration `0138`** gefasst — mit genau diesen SKY-IDs,
+mit Spalte B als Rohnamen, Kategorie `Portale` je Serie,
+`item_type = 'portal'`, unsichtbar im öffentlichen Katalog, ohne Preis.
+**Lokal vorbereitet, nirgends angewendet** (`supabase/migrations/APPLIED.md`).
+
+`src/lib/catalog/accessories.test.ts` vergleicht die Tabelle oben **Zeichen
+für Zeichen** mit der Artikelliste in der Migration: weicht ein Name ab, hat
+jemand ihn „korrigiert", und das fällt auf, bevor er eine Identität bekommt.
+
+**Vier Felder, die ADR-0128 vorgesehen hatte, werden NICHT gebaut** —
+`platforms`, `series_scope`, `model_no`, `language`. Plattform und
+Modellnummer stehen in Spalte B und damit im Namen; die Serienmehrfachnennung
+von `SKY-0637` ebenso; die Sprache ist bei Portalen nirgends belegt. Eine
+Spalte ohne Leser veraltet. Von den fünf geplanten Spalten ist `item_type` die
+einzige, die jemand liest.
+
 ### Offene Punkte — aus den Quelldaten nicht beantwortbar
 
 1. Warum **zwei** Giants-Portale für Xbox 360 (`84392790`, `84392080`)?
 2. Ist `83973080A Wireless` eine Revision von `83973080` oder ein eigenes Produkt?
-3. Welche Serie führt `SKY-0637` (SF, T, SC) als primäre?
+3. ~~Welche Serie führt `SKY-0637` (SF, T, SC) als primäre?~~ **entschieden
+   (Betreiber, 2026-10-20): `SF`**, die erste und älteste der drei. Die
+   vollständige Zuordnung bleibt im Rohnamen `84721790 (SF, T, SC)` lesbar —
+   in den Quelldaten, nicht in einer abgeleiteten Spalte.
 4. Serie der beiden **Starter Packs** — im Namen steht nur die Plattform.
 5. Serie der beiden **Taschen** (aus dem Namen lesbar, nicht als Feld belegt).
 6. **Sprache** von 38 der 39 Spiele.
@@ -1115,7 +1136,10 @@ Sprache.
 9. **Bilder**: Portale und Spiele haben keine aus der Legacy-Bildpipeline.
 10. Ob und welche der **206 historischen Positionen ohne `sky_id`** auf die
     neuen Portalartikel zeigen. Das sagt nur ein namensweiser Abgleich, und er
-    wird **nie automatisch** vorgenommen.
+    wird **nie automatisch** vorgenommen. Mit `0138` ist der Abgleich jetzt
+    *möglich* — die Artikel existieren —, und er bleibt eine Entscheidung je
+    Zeile über den bestehenden Figurenwechsel (`0054`/`0127`), der `raw_name`
+    als Herkunftsnachweis stehen lässt.
 
 ## 12. Migrationsregeln für PortalVault
 

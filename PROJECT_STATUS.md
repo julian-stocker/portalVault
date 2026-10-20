@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-16 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-20 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -3564,29 +3564,204 @@ Drei Hinweise ohne Handlungsbedarf:
 | **0044** | **Legacy-Anfangsbestand als `initial_import`-Bewegungen, alles `loose`, ohne Kosten, ohne Preis, ohne Listung; wiederholbar und fortsetzbar, bestehende Handbestände sind Konflikte statt Additionen** — **real ausgeführt: 218 Positionen, 762 Stück**, zweiter Lauf 0 Änderungen |
 | **0037** | **Shop-Fundament: `shop_admins` statt `profiles.role`, Bestand ohne `user_id`, Menge + Bewegungsjournal, `condition` (`loose`/`boxed`) statt zweiter SKY-ID, öffentlich kein Stückzahl-Ausweis** — **umgesetzt in `0003`** |
 
-## Portale und Spiele im Katalog — vorbereitet, nicht umgesetzt (2026-10-19)
+## Zubehör im Einkaufsorderbuch — auf Staging angewendet (2026-10-20)
 
-Die Artikelsuche des Orderbuchs fand kein Portal. Ursache ist **nicht** eine
-Einschränkung auf Figuren — die gibt es nicht —, sondern zwei andere Dinge: die
-Suche kennt nur Name, SKY-ID und Rohname, und **Portale gibt es im Katalog
-nicht**. Die 39 Spiele liegen dagegen vollständig und zeichengleich im Katalog.
+**Ausgangspunkt.** Die Artikelsuche des Orderbuchs fand kein Portal. Ursache war
+**nicht** eine Einschränkung auf Figuren — die gibt es nicht —, sondern zwei
+andere Dinge: die Suche kannte nur Name, SKY-ID und Rohname, und **Portale gab
+es im Katalog nicht**. Die 39 Spiele lagen dagegen vollständig und
+zeichengleich im Katalog, aktiv und sichtbar, mit 13 Lagerzeilen und 18
+Verkaufspositionen an ihnen — operativ längst in Gebrauch, nur nicht
+modelliert.
 
-Die Arbeitsmappe hat für Zubehör bereits **28 SKY-IDs vergeben**
-(`SKY-0615`–`SKY-0642`), und der Katalog endet bei `SKY-0614` — der Bereich ist
-frei. Darunter **21 Skylanders-Portale**, zwei Disney-Infinity-Portale, zwei
-Starter Packs, zwei Taschen und eine Zeile, die gar kein Artikel ist, sondern
-eine Beleg-URL.
+**Entscheidungen:** ADR-0128 samt Nachtrag Z2/Z3 (2026-10-20).
+**Daten:** `docs/SKYLANDERS_DATA.md` 11k. **Ablauf:** eine Datei, ein Einfügen —
+`supabase/operations/staging-0137-0138.sql`, Klickfolge und Abnahmeraster in
+`supabase/checks/0137_0138_staging_run.md`.
 
-Entscheidungen und Begründung: **ADR-0128**. Datenbefund:
-`docs/SKYLANDERS_DATA.md` 11k, mit zehn ausdrücklich offenen Punkten.
-Bestandsaufnahme: `supabase/checks/Z0_catalog_accessories_readonly.sql`
-(rein lesend, noch nicht ausgeführt).
+### Was jetzt vorliegt
 
-**Der wichtigste Fallstrick ist festgehalten:** `is_shop_eligible()` schließt
-heute allein die Kategorie `'Spiele'` aus. Eine neue Kategorie „Portale" wäre
-damit automatisch shopfähig. Die Eignung wird deshalb an `item_type` gehängt,
-und `Z0` nimmt vorher den Abdruck der Angebotsliste, gegen den bewiesen wird,
-dass sich kein Angebot geändert hat.
+| Schritt | Gegenstand | Stand |
+|---|---|---|
+| **Z0** | Bestandsaufnahme, rein lesend | gelaufen (2026-10-19) |
+| **Z1** | `0135` Artikeltyp, `0136` im Export | **auf Staging angewendet** (2026-10-19) |
+| **Z2** | `0137` — Kategorieregel, Anlegefunktion, Artikeltyp in der Artikelsuche | **auf Staging angewendet** (2026-10-20) |
+| **Z3** | `0138` — die 21 Portale der Arbeitsmappe | **auf Staging angewendet** (2026-10-20) |
+| Anwendung | Suche, Anlegen, Mischung, Lagerübersicht | **Code fertig, committet, nicht ausgeliefert** |
+
+### Der Lauf vom 2026-10-20 und was er nachweislich bewirkt hat
+
+Ein Durchgang, eine Transaktion, über
+`supabase/operations/staging-0137-0138.sql`. Abschlussraster: **17
+Bezugswerte unverändert**, drei erwartete Differenzen.
+
+| | vorher | nachher |
+|---|---|---|
+| Katalogzeilen | 605 | **626** |
+| Kategorien | 32 | **38** |
+| `item_type` | `figure=566, game=39` | **`figure=566, game=39, portal=21`** |
+| sammelbare Figuren | 534 | **534** |
+| Shop-Angebote | 256 | **256**, `md5` unverändert |
+| Lager, Einkaufshistorie, Betriebssicherung | | **unverändert** |
+
+**Unabhängig nachgemessen** am selben Tag, rein lesend gegen Staging:
+
+* die **21 Portalzeilen** stehen mit den Rohnamen der Arbeitsmappe —
+  `84157790 (SA)` bis `84721790 (SF, T, SC)` —, alle `portal` · unsichtbar ·
+  aktiv · ohne Preis · ohne Override · ohne Bild · ohne Charakter ·
+  `source = admin`; **21 verschiedene Slugs**, **21** Journaleinträge
+  `created`. `SKY-0623` und `SKY-0631` fehlen wie vorgesehen.
+* sechs Kategorien `Portale`, je eine in `SA, G, SF, T, SC, I`.
+* **Der öffentliche Katalog hat sich nicht bewegt:** als `anon` sind weiter
+  **573** Zeilen sichtbar — 534 Figuren und 39 Spiele. Die Portale sind
+  `catalog_visible = false` und damit für Kundschaft nicht da.
+* **256 Angebote, keines davon ein Portal.**
+* `npm run verify:shop:staging`: **16 von 17** Prüfungen bestanden, darunter
+  die Parität, die vor dem Lauf nicht halten konnte — `db: [Bundles, Portale,
+  Spiele, Taschen, Zubehör]` stimmt jetzt mit `collectible.ts` überein. Der
+  eine Fehlschlag („15 eligible positions not released") ist **vorbestehend
+  und unberührt**: es sind Figuren, die bewusst nicht gelistet sind, und das
+  Werkzeug kann „bewusst abgewählt" nicht von „noch nicht freigegeben"
+  unterscheiden.
+
+**`0137` legt den Weg.** `catalog_item_type_for_category()` lernt vier
+Kategorien (`Portale`, `Bundles`, `Taschen`, `Zubehör`),
+`non_collectible_categories()` nennt dieselben vier zusätzlich zu `Spiele`,
+`seller_create_catalog_item()` lässt den **Betrieb** einen Zubehörartikel
+anlegen — niemals eine Figur —, und `seller_import_catalog()` liefert
+`item_type` als achte Spalte. Sie legt **keinen** Artikel an.
+
+**`0138` legt die Artikel.** 21 Portale mit den SKY-IDs des Betreibers
+(`SKY-0615`–`0622`, `0624`–`0630`, `0632`–`0637`), Rohname aus Spalte B,
+Kategorie `Portale` je Serie, unsichtbar, ohne Preis. `SKY-0637` trägt die
+Serie `SF` — die eine fachliche Entscheidung, die die Umsetzung gebraucht hat.
+Die zwei Disney-Infinity-Portale, die Beleg-URL `SKY-0638`, die zwei Starter
+Packs und die zwei Taschen bleiben außen vor.
+
+### Was im Orderbuch jetzt geht
+
+Suchen **über die Art** — „portal" findet jedes Portal, auch wenn der Artikel
+`84709790 (SF)` heißt; der Kategoriename kommt mit der Katalogzeile und wird
+nur verglichen, nie gedeutet. Die Trefferliste markiert Zubehör mit einem
+kurzen Etikett; eine Figur bekommt keines, sie ist der Normalfall.
+**Neu anlegen aus dem Einkauf heraus**, in einem Schritt: Name, Art, Serie —
+die zurückgegebene SKY-ID geht direkt in die Position, ohne zweite Suche.
+Der **Freitextweg bleibt** für das, was nie eine Identität bekommen soll:
+Konvolut-Restposten, Beigaben, Disney Infinity.
+
+Mengen, Einkaufspreise, Buchung in den Bestand und die Einkaufshistorie
+funktionieren für Zubehör unverändert wie für Figuren — `seller_book_purchase_item`
+verlangt eine `sky_id` und sonst nichts, und die hat ein Portal jetzt.
+
+### Zwei Befunde aus der Umsetzung
+
+**Ein echter Fehler, gefunden und behoben:** `fetchOrderbookCatalog` filterte
+**jede** Katalogzeile an `catalog_visible`. Ein neu angelegtes Portal entsteht
+aber unsichtbar — es wäre unmittelbar nach seiner Entstehung wieder
+unauffindbar gewesen: einmal hinzugefügt, danach nie wieder, nicht für ein
+zweites Exemplar und nicht für den nächsten Einkauf. Seit `isPickableCatalogRow`
+gilt `catalog_visible` nur **Figuren**, `is_active` weiter jeder Zeile.
+
+**Ein Fehler in einer Nachbedingung, von der eigenen Prüfung gefunden:** die
+Artikeltypverteilung verglich nach Abzug der 21 Portale `portal=0` gegen einen
+Abdruck, der den Schlüssel gar nicht hatte. Aufgefallen im Probelauf P25,
+bevor die Migration eine Umgebung gesehen hat.
+
+### Was nachweislich unverändert bleibt
+
+Beide Migrationen beweisen sich selbst: Abdrücke **vor** der Änderung,
+Vergleich danach, Abbruch und vollständiger Rollback bei jeder Abweichung.
+Geprüft werden Angebotszahl und `md5` der **vollständigen Angebotsliste**,
+shopfähige Zeilen, Fortschrittsnenner insgesamt **und je Serie**,
+`display_name_override`, Artikeltypverteilung und der Stand von `sky_id_seq`.
+Der Z0-Vertrag ist in Pre- und Postflight beider Migrationen derselbe:
+**534 shopfähig, 256 Angebote, `4d1d6c30…9634`, 534 sammelbar, 39
+Spiele-Overrides.**
+
+**Zwei unabhängige Riegel** halten ein Portal aus Sammlung und Shop: die
+Kategorie steht in `non_collectible_categories()`, und der Artikeltyp ist
+nicht `figure`. Keiner hängt daran, dass der andere gesetzt wurde.
+
+### Nachweis und was er nicht ist
+
+`npm run check` grün; `npm test` 272 Dateien, 10 500+ Tests.
+`npm run verify:check-sql` fährt beide Migrationen, beide Rücknahmen und das
+Einmal-Skript gegen echtes PostgreSQL — **30 von 30** Durchgängen, darunter
+die drei, die scheitern **müssen**: `0137` vor `0135`, `0138` vor `0137`, und
+`R0137`, solange ein Portal steht.
+
+**Das ist kein Lauf gegen Staging.** Die Zeilen des Probelaufs sind erfunden;
+über die echten Bestände sagt er nichts
+(`supabase/checks/open_verifications.md`, Abschnitt 3a). **Offen:** der Lauf von
+`inventory_accessories_readonly.sql` im SQL-Editor, die Bedienprobe am
+Telefon, Push und Deployment. Der lokale Commit ist erfolgt.
+
+**Und die Reihenfolge beim Ausliefern ist nicht mehr beliebig.**
+`FIGURE_COLUMNS` fordert `skylanders.item_type` ausdrücklich an; eine fehlende
+Spalte lässt eine PostgREST-Auswahl **ganz** fehlschlagen. Auf Production
+fehlen `0134`–`0138` — die Migrationen gehen zuerst, der Code danach
+(`docs/DEPLOYMENT.md`).
+
+### Die Lagerübersicht zeigt sie jetzt (2026-10-20)
+
+Der Punkt, der im ersten Durchgang offen blieb. Das Lager führte seit dem
+ersten Tag **13 Lagerzeilen und 18 Verkaufspositionen auf Spielen** — und
+keine Ansicht zeigte sie: `fetchInventory()` sortierte jede nicht sammelbare
+Zeile in einen `outsideScope`-Topf, und an die Oberfläche ging davon nur die
+Anzahl.
+
+| | |
+|---|---|
+| **Namen** | `fetchAccessoryCatalog()` liefert die nicht sammelbaren Zeilen derselben Tabelle. **Kein Schalter an `fetchCatalog()`** — das bedient den öffentlichen Katalog und die Sammlung, und ein Flag dort wäre ein Weg, auf dem ein Portal in den Fortschritt gerät |
+| **Umfang** | `fetchInventory()` nimmt den Katalog, den der Aufrufer übergibt. Die zweite, stille Bereichsregel (`catalog.filter(isCollectible)`) ist weg |
+| **Filter** | ein vierter: **Art**. Er erscheint nur, wenn mehr als eine Art im Lager liegt, und bietet nur an, was es gibt |
+| **Kennzahlen** | die fünf bleiben **Figurenzahlen**. Zubehör steht daneben — Positionen und Stück — mit dem Satz, dass es in den fünf nicht enthalten ist |
+| **Karte** | für Zubehör **weniger**, nicht mehr: keine Shopfreigabe, kein Preis, kein leeres „Shop-Preis —". Bestand, Mengen und Historie unverändert |
+
+**Eine Bestandsverwaltung, nicht zwei:** dieselbe `admin_shop_inventory()`,
+dieselbe Tabelle, dieselbe Karte. **Die Trennung bleibt:** ein Spiel ist
+nicht sammelbar und nicht shopfähig — das entscheiden
+`non_collectible_categories()` und `is_shop_eligible()` in der Datenbank, und
+daran ändert eine Ansicht nichts.
+
+Die Kartenoptik des öffentlichen Katalogs und der Sammlung ist **unberührt**.
+
+**Nachweis.** 24 Filtertests an gemischtem Bestand
+(`inventory-filter.test.ts`), die Kennzahlen gegen denselben Bestand ohne das
+Zubehör gerechnet (`inventory-overview.test.ts`), die Vokabular- und
+Verdrahtungsregeln in `inventory-accessories.test.ts`. Dazu Probelauf **P28**
+gegen echtes PostgreSQL: eine **gelistete** Lagerzeile auf einem Spiel wird
+benannt und ist trotzdem kein Angebot — und **P29**, der zeigt, dass die
+Prüfung anschlägt, wenn Kategorie und Artikeltyp auseinanderlaufen.
+
+**Am Lager gemessen (2026-10-20, rein lesend gegen Staging):** 285
+Lagerzeilen — **272 auf Figuren** (793 Stück) und **13 auf Spielen** (19
+Stück). Alle 13 sind aktiv und im produktiven Bereich, **keine fällt durch
+die Namensregel**: die Übersicht benennt künftig alle dreizehn, und der Topf
+„außerhalb des Sortiments" wird dabei **leer** (vorher: 13). Kein Portal hat
+bisher eine Lagerzeile, und keine Lagerzeile steht auf einer SKY-ID ohne
+Katalogeintrag.
+
+Dieselbe Zahl bestätigt `verify:shop:staging` von der anderen Seite:
+„held back: not a collectible **13**".
+
+**Eine Altlast, benannt statt versteckt:** alle 13 Spiele-Lagerzeilen tragen
+`is_listed = true`. Die Flagge ist wirkungslos — `shop_offers()` filtert sie
+am Artikeltyp heraus —, und genau deshalb zeigt die Karte für sie **keinen**
+Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
+`inventory_accessories_readonly.sql` weist sie in Zeile 504 aus.
+
+**Was noch ein Ergebnisblatt braucht:**
+`supabase/checks/inventory_accessories_readonly.sql` im SQL-Editor. Die
+Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
+Blatt ist die Fassung fürs Protokoll.
+
+### Was weiter offen ist
+
+**Bundles und Taschen** (`SKY-0639`–`0642`) sind ein eigener Schritt mit
+eigener Freigabe. Die Felder `platforms`, `series_scope`, `model_no` und
+`language` aus ADR-0128 werden **nicht** gebaut — Plattform und Modellnummer
+stehen im Rohnamen, und eine Spalte ohne Leser veraltet.
 
 ---
 

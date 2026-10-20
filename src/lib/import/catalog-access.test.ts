@@ -59,17 +59,19 @@ describe("the importer no longer reads the table through the public policy", () 
 describe("the function is scoped to the one screen that needs it", () => {
   const fn = latestFunction("seller_import_catalog");
 
-  it("is defined by 0117 — one definition, and we know which migration owns it", () => {
+  it("is defined by 0137 — one definition, and we know which migration owns it", () => {
     /*
-     * Was 0052 until 0117 widened the return type by three columns. The point
-     * of the assertion is unchanged: exactly one migration defines this
-     * function, so there is one place to read the contract.
+     * Was 0052, then 0117 widened the return type by three columns, and 0137
+     * appended `item_type` as the eighth (ADR-0128). The point of the
+     * assertion is unchanged: the LATEST definition is the contract, and
+     * there is one place to read it.
      */
-    expect(fn.file).toBe("0117_catalog_display_names_and_picker.sql");
+    expect(fn.file).toBe("0137_catalog_accessories.sql");
     expect(migrationFiles.filter((f) =>
       migrationSource(f).includes("create or replace function public.seller_import_catalog(")))
       .toEqual(["0052_seller_import_catalog.sql",
-                "0117_catalog_display_names_and_picker.sql"]);
+                "0117_catalog_display_names_and_picker.sql",
+                "0137_catalog_accessories.sql"]);
   });
 
   it("asks the canonical seller predicate and refuses everyone else", () => {
@@ -158,11 +160,18 @@ describe("the function is scoped to the one screen that needs it", () => {
      * including the hidden ones. It filters now — and `!== false` rather
      * than `!x`, so an older function version that does not send the flags
      * changes nothing.
+     *
+     * SINCE 0137 THE EDITORIAL FLAG FILTERS FIGURES ONLY. An accessory is
+     * created with `catalog_visible = false` by `seller_create_catalog_item`
+     * — the public catalog is not where it belongs — so the flag says
+     * nothing a purchase picker could act on, while `is_active` still
+     * applies to every row. The reasoning is written out in
+     * `src/lib/orderbook/queries.ts`; the Eon's Elite case is unchanged,
+     * because those rows are figures.
      */
     const ORDERBOOK = readFileSync(
       join(process.cwd(), "src/lib/orderbook/queries.ts"), "utf8");
-    expect(ORDERBOOK).toContain(
-      ".filter((r) => r.catalog_visible !== false && r.is_active !== false)");
+    expect(ORDERBOOK).toContain(".filter(isPickableCatalogRow)");
     expect(ORDERBOOK).toContain("rawName: raw");
   });
 });

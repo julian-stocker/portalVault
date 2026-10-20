@@ -9,7 +9,7 @@ import { cache } from "react";
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 import { imageSrc } from "@/lib/catalog/image";
-import type { FigureChoice } from "./figure-search";
+import { isPickableCatalogRow, type FigureChoice } from "./figure-search";
 import {
   EMPTY_COUNTS, readCounts, type ClassificationCounts, type StatusScope,
 } from "./classification";
@@ -350,13 +350,15 @@ export const fetchOrderbookCatalog = cache(
     );
     return (catalog.data as Record<string, unknown>[])
       /*
-       * Nur gültige, angebotene Katalogzeilen. `catalog_visible` und
-       * `is_active` kommen seit 0117 mit; `!== false` statt `!r.x` ist
-       * Absicht — fehlt die Spalte, weil noch die alte Funktionsfassung
-       * läuft (etwa zwischen Migration und Deployment), wird NICHTS
-       * ausgefiltert und alles bleibt wie bisher.
+       * Nur gültige, wählbare Katalogzeilen — und die Regel dafür steht in
+       * `isPickableCatalogRow` und nicht hier: `is_active` gilt jeder Zeile,
+       * `catalog_visible` nur einer FIGUR. Die Begründung samt dem Grund,
+       * warum die Ausnahme seit 0137 nötig ist (ein neuer Zubehörartikel
+       * entsteht unsichtbar und wäre sonst sofort wieder unauffindbar),
+       * steht dort — und ihre Fälle stehen in `accessory-search.test.ts`,
+       * wo sie ohne Datenbank nachgefahren werden können.
        */
-      .filter((r) => r.catalog_visible !== false && r.is_active !== false)
+      .filter(isPickableCatalogRow)
       .map((r) => {
         const fact = facts.get(String(r.sky_id));
         const raw = String(r.name);
@@ -372,6 +374,26 @@ export const fetchOrderbookCatalog = cache(
           series: String(r.series_code),
           marketPrice: fact?.marketPrice ?? null,
           image: fact?.image ?? null,
+          /*
+           * ARTIKELTYP UND KATEGORIE, SEIT 0137.
+           *
+           * Beide kommen mit der RPC — `item_type` ist die achte Spalte
+           * (0137), `category` die vierte (0117). Die Kategorie wurde hier
+           * bisher verworfen; damit konnte die Suche ein Portal nur über
+           * seinen Namen finden, und ein Portal heisst `84709790 (SF)`.
+           *
+           * `undefined` statt `null`, wenn die Spalte fehlt: läuft noch die
+           * alte Funktionsfassung — zwischen Migration und Deployment —, ist
+           * das „keine Auskunft", und `isAccessory()` erklärt dann keinen
+           * Artikel zum Zubehör. Dieselbe Vorsicht wie bei
+           * `catalog_visible` ein paar Zeilen höher.
+           */
+          itemType: r.item_type === undefined || r.item_type === null
+            ? undefined
+            : String(r.item_type),
+          categoryName: r.category === undefined || r.category === null
+            ? undefined
+            : String(r.category),
         };
       });
   },

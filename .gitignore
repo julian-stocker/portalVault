@@ -116,6 +116,7 @@ tools/.ui-fixtures-ship-day.json
 # Erzeugtes Stub-Schema der SQL-Planprüfung (npm run verify:check-sql)
 .pglite-stub-schema.sql
 .pglite-oneshot.sql
+.pglite-oneshot-0137-0138.sql
 
 # Python-Bytecode der Pruefwerkzeuge
 __pycache__/

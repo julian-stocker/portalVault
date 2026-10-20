@@ -39,8 +39,8 @@
       "modus": "9999",
       "vertrag": "staging",
       "wenn": {
-        "beschreibung": "nur wenn skylanders.item_type steht (0135 angewendet)",
-        "sql": "select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type') as erfuellt"
+        "beschreibung": "nur wenn skylanders.item_type steht (0135 angewendet) UND 0137 noch nicht — 0137 erweitert non_collectible_categories(), und Zeile 103 dieser Datei erwartet die Fassung von 0135",
+        "sql": "select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'skylanders' and column_name = 'item_type') and array_to_string(public.non_collectible_categories(), ',') = 'Spiele' as erfuellt"
       }
     },
     {

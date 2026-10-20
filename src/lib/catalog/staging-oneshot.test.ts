@@ -12,6 +12,11 @@
  * Dass das Skript auch LÄUFT, prüft `npm run verify:check-sql` (Probelauf
  * P21, PostgreSQL 18.6): einmal durch, und einmal mit dem unveränderten
  * Z0-Vertrag, der dann anschlagen muss.
+ *
+ * SEIT ADR-0128 GIBT ES EIN ZWEITES: `staging-0137-0138.sql` bettet `0137`
+ * und `0138` ein — den Weg für Zubehör und die 21 Portale der Arbeitsmappe.
+ * Es steht am Ende dieser Datei und wird genauso geprüft; sein Lauf ist
+ * Probelauf P30.
  */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -243,5 +248,115 @@ describe("die Diagnose zum Override-Abbruch", () => {
     const code = DIAG.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
     expect(code).not.toMatch(/\bdo\s+\$\$/i);
     expect(code).not.toMatch(/^\s*(insert|update|delete|truncate|grant|revoke|alter|create|drop)\b/im);
+  });
+});
+
+/* =====================================================================
+ * `staging-0137-0138.sql` — derselbe Bau, zwei Migrationen (ADR-0128)
+ *
+ * Der manuelle Ablauf, den der Betreiber wirklich einfügt: eine Datei, eine
+ * Transaktion, ein Einfügen. Dieselbe Gefahr wie oben — eingebetteter Code
+ * ist Kopie —, also dieselbe Prüfung, Zeichen für Zeichen.
+ * ================================================================== */
+describe("staging-0137-0138.sql", () => {
+  const ZWEI = readFileSync("supabase/operations/staging-0137-0138.sql", "utf8");
+
+  function eingebettet2(datei: string): string {
+    const anfang = `-- >>> EINGEBETTET: supabase/migrations/${datei}\n`;
+    const ende = `-- <<< ENDE: supabase/migrations/${datei}`;
+    const a = ZWEI.indexOf(anfang);
+    const b = ZWEI.indexOf(ende);
+    expect(a, `Marke fehlt: ${datei}`).toBeGreaterThan(-1);
+    expect(b, `Endmarke fehlt: ${datei}`).toBeGreaterThan(a);
+    return ZWEI.slice(a + anfang.length, b);
+  }
+
+  for (const datei of ["0137_catalog_accessories.sql", "0138_catalog_portals.sql"]) {
+    it(`${datei} ist zeichengleich eingebettet`, () => {
+      expect(eingebettet2(datei).trimEnd())
+        .toBe(readFileSync(`supabase/migrations/${datei}`, "utf8").trimEnd());
+    });
+  }
+
+  it("und sonst ist keine Migration eingebettet", () => {
+    expect([...ZWEI.matchAll(/^-- >>> EINGEBETTET: (\S+)$/gm)].map((m) => m[1])).toEqual([
+      "supabase/migrations/0137_catalog_accessories.sql",
+      "supabase/migrations/0138_catalog_portals.sql",
+    ]);
+  });
+
+  it("die Reihenfolge steht fest: 0137 vor 0138", () => {
+    /* Ohne die erweiterte Kategorieliste wäre das erste Portal in dem
+       Augenblick, in dem es entsteht, eine sammelbare, shopfähige Figur. */
+    expect(ZWEI.indexOf("0137_catalog_accessories.sql\n-- ====")) 
+      .toBeLessThan(ZWEI.indexOf("0138_catalog_portals.sql\n-- ===="));
+  });
+
+  it("eine Klammer, ein Ausgang, kein rollback im Lauf", () => {
+    const code = ZWEI.split("\n").filter((l) => /^[a-z]/.test(l)).map((l) => l.trim());
+    expect(code[0]).toBe("begin;");
+    expect(code[code.length - 1]).toBe("commit;");
+    expect(code.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(code.filter((l) => l === "commit;")).toHaveLength(1);
+    expect(code.filter((l) => l.startsWith("rollback"))).toEqual([]);
+  });
+
+  it("prüft vorher, dass der ZB-Bereich frei ist", () => {
+    /* Eine SKY-ID wird nie neu vergeben. Steht dort etwas, bricht der Lauf
+       ab, bevor irgendetwas entsteht. */
+    expect(ZWEI).toContain("ABBRUCH A9:");
+    expect(ZWEI).toContain("SKY-0615' and 'SKY-0642");
+  });
+
+  it("und nennt die drei erwarteten Differenzen, statt sie auszunehmen", () => {
+    /*
+     * Eine Ausnahme ohne Zahl wäre ein Loch: „dieser Wert darf sich ändern"
+     * hätte auch 22 Portale durchgelassen. Jede der drei ist beziffert.
+     */
+    expect(ZWEI).toContain("erwartet % + 21 (die Portale)");
+    expect(ZWEI).toContain("erwartet % + 6 (eine Kategorie ");
+    expect(ZWEI).toContain("die Artikeltypverteilung ist ohne die 21 Portale");
+  });
+
+  it("prüft die 21 Portale einzeln nach — und dass keines Ware ist", () => {
+    expect(ZWEI).toContain("ABBRUCH C10:");
+    expect(ZWEI).toContain("ABBRUCH C11: ein Portal ist shopfaehig");
+    expect(ZWEI).toContain("ABBRUCH C11: ein Portal steht im oeffentlichen Angebot");
+    /* Die eine fachliche Entscheidung, wörtlich. */
+    expect(ZWEI).toContain("SKY-0637 traegt die Serie");
+    expect(ZWEI).toContain("erwartet SF");
+  });
+
+  it("und dass keine SKY-ID gezogen wurde", () => {
+    expect(ZWEI).toContain("ABBRUCH C12:");
+    expect(ZWEI).toContain("die hoechste SKY-ID unter SKY-9000 hat sich bewegt");
+  });
+
+  it("fasst 0133, 0134 und die Belegsperre nicht an", () => {
+    expect(ZWEI).toContain("ABBRUCH A4: 0133 ist hier angewendet");
+    expect(ZWEI).toContain("ABBRUCH C8: 0133 oder 0134 ist angewendet worden");
+    expect(ZWEI).toContain("ABBRUCH A5: die Belegsperre ist nicht dicht");
+    expect(ZWEI).toContain("ABBRUCH C9: die Belegsperre ist nicht mehr dicht");
+    const code = ZWEI.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    expect(code).not.toMatch(/revoke[^;]*seller_issue/i);
+    expect(code).not.toMatch(/grant[^;]*seller_issue/i);
+  });
+
+  it("ist auf Staging festgelegt", () => {
+    expect(ZWEI).toContain("'SKY-0821', 'SKY-0822'");
+    expect(ZWEI).toContain("qqxcpesbwfxzgytkdsac");
+    expect(ZWEI).not.toContain("zmiwxswrpkmizvqsgype");
+  });
+
+  it("und packt den search_path aus, statt ihn zu vergleichen", () => {
+    /* `set search_path = ''` landet als `search_path=""` in `proconfig`. Ein
+       `@> array['search_path=']` findet das nie — und hätte den Lauf in
+       Abschnitt C abgebrochen, obwohl alles in Ordnung ist.
+
+       Gegen den AUSFÜHRBAREN Teil: der Kommentar darüber nennt die falsche
+       Form absichtlich, damit sie niemand wieder einbaut. */
+    const code = ZWEI.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    expect(code).not.toContain("array['search_path=']");
+    expect(code).toContain("search\\_path=%");
   });
 });

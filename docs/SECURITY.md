@@ -1319,6 +1319,50 @@ für ein Recht in der Datenbank. Sie schützt ihren eigenen Weg; ein direkter RP
 daran vorbei. Beides zusammen ist die Absicht — die Datenbank entscheidet, die Anwendung erspart
 die Runde.
 
+### Der Betrieb darf einen Zubehörartikel anlegen — und niemals eine Figur (`0137`, ADR-0128)
+
+**Stand: lokal vorbereitet, nirgends angewendet.**
+
+`seller_create_catalog_item(text, text, text)` ist eine neue Schreibtür in den **Katalog** —
+die weltlesbare Tabelle. Das ist eine Berechtigung, also steht sie hier.
+
+**Wer darf.** Ausschließlich `can_operate_active_seller()`, gefragt als erste Anweisung im
+Rumpf. `canOperateSeller()` in der Server Action ist Bequemlichkeit, nicht die Grenze — die
+Regel aus `0103` gilt unverändert.
+
+**Rechte.** `revoke all … from public, anon`, `grant execute … to authenticated`. Kein
+Sammel-`grant`: die Funktion steht einzeln in der Migration und trägt ihren Wächter selbst.
+Ein Plattformadministrator ist **nicht** zugelassen — `/business` und `/admin` sind getrennt
+(ADR-0077), und `0042` hält die beiden Kontenarten auseinander.
+
+**Was die Funktion NICHT darf, und warum das die eigentliche Grenze ist.** Sie nimmt genau vier
+Artikeltypen — `game`, `portal`, `bundle`, `other` — und lehnt `figure` **ausdrücklich** ab,
+mit eigener Meldung und eigenem Fehlercode. Eine Figur ist kuratierte Katalogidentität:
+SKY-ID aus der Arbeitsmappe, Charakterzuordnung, Bild, Marktpreis (ADR-0034, CLAUDE.md Regel 2).
+Sie entsteht im Adminbereich, `admin_create_figure` verlangt `is_shop_admin()`, und das bleibt
+so. Der Betrieb bekommt also **keinen** Weg in die Figurenidentität, nur einen in das Zubehör,
+das beim Einkauf in seiner Hand liegt.
+
+**Und sie entscheidet nichts Redaktionelles.** `catalog_visible = false`, immer: ein so
+entstandener Artikel ist im öffentlichen Katalog unsichtbar, bis ein Administrator entscheidet
+(ADR-0039). Kein Preis, kein Bild, kein `display_name_override`, keine Charakterzuordnung — die
+Spaltenliste des `insert` nennt sie nicht einmal. Redaktionelle Spalten gehören dem Admin und
+dürfen nie in einen fremden Schreibweg geraten.
+
+**Keine interne Zahl kommt dabei auf `skylanders`.** Die Tabelle ist weltlesbar, und ein
+Tabellen-Grant kennt keine Spalten. Was hier geschrieben wird, ist Produktname, Serie,
+Kategorie, Artikeltyp, Slug — alles öffentlich unbedenklich. Lagerzahl, Einkaufspreis und
+Ankauffaktor bleiben, wo sie sind; die Verbotsliste in Abschnitt 2 ist unberührt.
+
+**Der Journaleintrag.** Jede Entstehung schreibt eine Zeile in `catalog_admin_changes`
+(`field = 'created'`, `changed_by = auth.uid()`) — dieselbe Zeile, die `admin_create_figure`
+schreibt. Das Journal sagt damit auch, **dass** die Zeile nicht aus dem Adminbereich kam.
+
+**Was `0138` daran ändert: nichts.** Die Migration legt 21 Portalzeilen an und fasst keine
+Rolle, kein Recht und keine Funktion an. Ihre Journaleinträge tragen `changed_by = NULL` —
+die dokumentierte Bedeutung von NULL dort: über die Service-Rolle, ein Import, ein Skript
+(`0004`).
+
 ### Die Datensicherung des Betriebs (`0104`, ADR-0114)
 
 Ein Betriebskonto kann seine Geschäftsdaten als eine JSON-Datei herunterladen. Das ist der

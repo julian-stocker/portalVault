@@ -27,6 +27,26 @@ const shippingSentence = (amount: string | null) =>
     ? "Versand innerhalb Deutschlands."
     : `Versand innerhalb Deutschlands, ${freeFrom(amount)}.`;
 
+/**
+ * Die Art eines Artikels — EIN Wort je Wert des CHECK aus `0135`.
+ *
+ * ZWEI FUNDSTELLEN, EINE QUELLE. Die Artikelsuche im Einkaufsbuch zeigt die
+ * Art als Etikett, die Lagerübersicht filtert danach — und beide müssen
+ * dasselbe Wort benutzen. Zwei Kopien derselben vier Wörter wären zwei
+ * Wahrheiten, von denen eine irgendwann veraltet.
+ *
+ * `figure` steht ABSICHTLICH nicht darin, wo es um ein Etikett geht: eine
+ * Figur ist der Normalfall und bekommt in einer Trefferliste keine Marke.
+ * Die Lagerübersicht braucht das Wort trotzdem für ihren Filter, und das ist
+ * `inventoryKinds` unten.
+ */
+const accessoryTypeLabels = {
+  game: "Spiel",
+  portal: "Portal",
+  bundle: "Bundle",
+  other: "Zubehör",
+} as const;
+
 export const de = {
   locale: "de-AT",
 
@@ -1190,9 +1210,9 @@ export const de = {
       historical: "historisch",
       percentOfMarket: (p: number) => `${rangedNumber(p, 0, 1)} % vom Marktpreis`,
       addItem: "+ Artikel hinzufügen",
-      addUncategorized: "+ Sonstiger Artikel",
-      uncategorizedHint: "Portal, Spiel oder Zubehör — bleibt Teil des Einkaufs, kommt aber nicht in den Figurenbestand.",
-      searchPlaceholder: "Figur suchen",
+      addUncategorized: "+ Ohne Katalog",
+      uncategorizedHint: "Bleibt Teil des Einkaufs, ohne Katalogzuordnung — also ohne Bestand und ohne Historie. Für einen Artikel, der keinen eigenen Katalogeintrag bekommen soll.",
+      searchPlaceholder: "Artikel suchen",
       book: "Einbuchen",
       booking: "Wird eingebucht …",
       booked: "Im Bestand",
@@ -1221,21 +1241,23 @@ export const de = {
        * und die andere Variante getrennt hinzugefügt.
        */
       figures: {
-        heading: "Figuren",
+        heading: "Artikel",
         hint: "Suchen und auswählen. Gespeichert wird erst beim Anlegen.",
-        search: "Figur suchen …",
-        searchLabel: "Figur suchen",
+        search: "Artikel suchen …",
+        searchLabel: "Artikel suchen",
         tooShort: "Mindestens zwei Zeichen eingeben.",
-        empty: "Keine Figur gefunden.",
+        empty: "Kein Artikel gefunden.",
         noCatalog: "Der Katalog konnte nicht geladen werden.",
         /* Der Katalog ist unterwegs. Unterscheidet sich von `noCatalog`:
            „noch nicht da" ist kein Fehlschlag. */
         loadingCatalog: "Katalog wird geladen …",
         results: "Suchergebnisse",
-        selected: "Ausgewählte Figuren",
-        none: "Noch keine Figur ausgewählt.",
-        /* Ausgeschrieben, weil „3 × 2" auf einem Telefon niemand entziffert. */
-        units: (n: number) => (n === 1 ? "1 Figur" : `${plainNumber(n)} Figuren`),
+        selected: "Ausgewählte Artikel",
+        none: "Noch kein Artikel ausgewählt.",
+        /* Ausgeschrieben, weil „3 × 2" auf einem Telefon niemand entziffert.
+           „Artikel" statt „Figuren" seit 0137: im Entwurf können Spiele und
+           Portale stehen, und „3 Figuren" wäre dann einfach falsch. */
+        units: (n: number) => (n === 1 ? "1 Artikel" : `${plainNumber(n)} Artikel`),
         /* Menge einer Zeile. Das Minus bei 1 entfernt die Zeile — dasselbe
            Gemeinte wie das ×, nur die Geste, die die Finger schon machen. */
         more: (name: string) => `Eine Einheit ${name} mehr`,
@@ -1296,6 +1318,51 @@ export const de = {
         freeUnits: (n: number) =>
           n === 1 ? "1 Position" : `${plainNumber(n)} Positionen`,
         freeSelected: "Positionen ohne Katalogzuordnung",
+        /**
+         * Die Art eines Artikels als kurzes Etikett in der Trefferliste
+         * (0137).
+         *
+         * NUR FÜR ZUBEHÖR. Eine Figur bekommt kein Etikett — sie ist der
+         * Normalfall, und 820 gleich aussehende Marken wären nur Rauschen.
+         * Die Schlüssel sind die Werte des CHECK aus `0135`; ein Wert, den
+         * diese Fassung nicht kennt, erscheint gar nicht.
+         */
+        itemTypes: accessoryTypeLabels as Record<string, string>,
+      },
+
+      /**
+       * Einen Katalogartikel direkt aus dem Einkauf anlegen (0137).
+       *
+       * WOFÜR. Ein Portal liegt im Karton, steht aber in keinem Katalog —
+       * bisher wurde es als Freitext erfasst und hatte damit keinen Bestand,
+       * keinen Einkaufspreis je Artikel und keine Historie. Der Kasten legt
+       * den Artikel an und setzt ihn in einem Schritt auf den Einkauf.
+       *
+       * KEINE FIGUR. Figuren sind kuratierte Katalogidentität und entstehen
+       * im Adminbereich (ADR-0034); die Datenbankfunktion lehnt `figure`
+       * ausdrücklich ab. Deshalb steht „Figur" hier auch nicht zur Wahl.
+       */
+      newItem: {
+        open: "+ Neuer Katalogartikel",
+        heading: "Neuer Katalogartikel",
+        hint: "Spiel, Portal oder Zubehör. Kommt in den Katalog, bleibt dort aber unsichtbar, bis der Adminbereich entscheidet.",
+        nameLabel: "Name",
+        namePlaceholder: "z. B. 84709790 Portal (SF)",
+        typeLabel: "Art",
+        seriesLabel: "Serie",
+        submit: "Anlegen und hinzufügen",
+        cancel: "Abbrechen",
+        pending: "Wird angelegt …",
+        created: (skyId: string) => `${skyId} angelegt und hinzugefügt.`,
+        /* Der halbe Erfolg, und er wird gesagt statt verschwiegen: der
+           Artikel ist angelegt, die Position nicht entstanden. Wer das nicht
+           erfährt, legt ihn ein zweites Mal an — und zwei Identitäten für
+           eine Sache sind schlimmer als eine Fehlermeldung. */
+        createdNotAdded: (skyId: string) =>
+          `${skyId} ist angelegt, aber nicht auf dem Einkauf gelandet. `
+          + `Der Artikel ist jetzt über die Suche erreichbar — bitte dort auswählen.`,
+        needsType: "Art wählen.",
+        needsSeries: "Serie wählen.",
       },
 
       /*
@@ -1779,6 +1846,20 @@ export const de = {
       errors: {
         alreadyBooked: "Dieser Artikel ist bereits im Bestand. Nimm die Buchung zurück, bevor du ihn änderst.",
         notAFigure: "Dieser Artikel ist keine Katalogfigur und kann nicht in den Figurenbestand.",
+        /* Die Ablehnungen von `seller_create_catalog_item` (0137). */
+        /* Der Fall, den die Datenbank nicht erklärt: der Aufruf ging durch,
+           aber ohne SKY-ID zurück. Dann ist nichts Bekanntes schiefgegangen,
+           und ein erfundener Grund wäre schlimmer als keiner. */
+        createFailed: "Der Artikel konnte nicht angelegt werden. Bitte versuch es noch einmal.",
+        createNeedsName: "Ein Artikel braucht einen Namen.",
+        createUnknownType: "Diese Art kenne ich nicht. Wählbar sind Spiel, Portal, Bundle und Zubehör.",
+        createUnknownSeries: "Diese Serie gibt es nicht.",
+        createNotAFigure:
+          "Eine Figur wird im Katalogbereich angelegt, nicht hier. "
+          + "Hier entstehen Spiele, Portale und Zubehör.",
+        createRangeExhausted:
+          "Es gibt keine freie SKY-ID mehr im produktiven Bereich. "
+          + "Das ist ein Fall für den Katalogbereich.",
         damaged: "Ein beschädigter Artikel kommt nicht in den Verkaufsbestand. Setze ihn auf „angekommen“, wenn er doch in Ordnung ist.",
         missing: "Ein Artikel, der nie angekommen ist, lässt sich nicht einbuchen.",
         /*
@@ -3743,9 +3824,67 @@ export const de = {
         n === 1
           ? "1 Position ohne Marktpreis ist nicht im Marktwert enthalten."
           : `${n} Positionen ohne Marktpreis sind nicht im Marktwert enthalten.`,
+      /*
+       * Zubehör unter den fünf Kennzahlen (ADR-0128).
+       *
+       * Der Satz sagt beides: WAS da liegt, und dass es in den fünf Zahlen
+       * darüber NICHT mitgezählt ist. Das Zweite ist die eigentliche
+       * Auskunft — ein Spiel hat keinen Sammlerwert, und „Marktwert" ist der
+       * Wert der Sammelobjekte.
+       */
+      accessories: (positions: number, pieces: number) =>
+        `Dazu ${positions === 1 ? "1 Zubehörposition" : `${positions} Zubehörpositionen`}`
+        + ` mit ${pieces === 1 ? "1 Stück" : `${plainNumber(pieces)} Stück`}`
+        + " — Spiele und Portale, in den Zahlen oben nicht enthalten.",
     },
-    searchLabel: "Figur oder SKY-ID suchen",
+    /* „Artikel" seit ADR-0128: im Lager liegen Figuren, Spiele und Portale,
+       und „Figur suchen" wäre über einer Liste mit Portalen darin falsch. */
+    searchLabel: "Artikel oder SKY-ID suchen",
     positions: (n: number) => (n === 1 ? "1 Position" : `${n} Positionen`),
+
+    /*
+     * Der Filter nach der Art (ADR-0128).
+     *
+     * Die Wörter für das Zubehör kommen aus `accessoryTypeLabels` — derselben
+     * Quelle, aus der die Artikelsuche im Einkaufsbuch ihre Etiketten nimmt.
+     * `figure` kommt dazu, weil ein Filter das Übliche benennen muss: man
+     * wählt „Figuren", um das Zubehör auszublenden.
+     *
+     * PLURAL, weil hier Mengen gewählt werden und keine einzelne Zeile
+     * beschriftet wird: „Portale", nicht „Portal".
+     */
+    kindFilter: "Art",
+    kindAll: "Alle Arten",
+    /*
+     * EINZAHL, für die Marke auf EINER Karte — „Portal", nicht „Portale".
+     * Dieselbe Quelle wie die Etiketten der Artikelsuche; `kinds` unten ist
+     * die Mehrzahl, weil ein Filter Mengen wählt.
+     */
+    itemTypes: accessoryTypeLabels as Record<string, string>,
+    kinds: {
+      figure: "Figuren",
+      game: "Spiele",
+      portal: "Portale",
+      bundle: "Bundles",
+      other: "Zubehör",
+    } as Record<string, string>,
+    /*
+     * Zubehör im Bestand, getrennt ausgewiesen.
+     *
+     * Die fünf Kennzahlen darüber sind FIGURENZAHLEN und bleiben es — ein
+     * Spiel hat keinen Sammlerwert, und eine Zahl, die der Betreiber kennt,
+     * springt nicht ohne Zutun. Dieser Satz ist die andere Hälfte: er sagt,
+     * dass da noch etwas liegt, und wie viel.
+     */
+    accessoryStock: (positions: number, pieces: number) =>
+      `${positions === 1 ? "1 Zubehörposition" : `${positions} Zubehörpositionen`}`
+      + ` (${pieces === 1 ? "1 Stück" : `${plainNumber(pieces)} Stück`})`,
+    /* Auf der Karte: warum hier kein Shop-Schalter steht. Ein Satz, kein
+       Dialog — und er nennt den Grund, nicht nur die Tatsache. */
+    accessoryNotShop: "Zubehör — nicht im Shop",
+    accessoryNotShopHint:
+      "Spiele, Portale und Zubehör werden nicht öffentlich angeboten. Bestand und "
+      + "Historie werden geführt wie bei jeder Figur; Preis und Shopfreigabe gibt es nicht.",
     condition: "Zustand",
     conditionLoose: "Lose",
     conditionBoxed: "OVP",

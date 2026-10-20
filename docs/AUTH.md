@@ -286,6 +286,27 @@ Geprüft wird serverseitig: `(admin)/layout.tsx` antwortet Nicht-Admins mit **40
 redaktionelle Schreiboperation fragt in der Datenbank noch einmal (Migration `0004`). Ein
 ausgeblendeter Link ist weiterhin keine Berechtigung.
 
+**Nachtrag 2026-10-20 (ADR-0128): der Verkäuferbetrieb bekommt eine Schreibtür in den
+Katalog — eine enge.** `seller_create_catalog_item` (Migration `0137`, lokal vorbereitet,
+nirgends angewendet) lässt ein Betriebskonto einen **Zubehörartikel** anlegen: Spiel, Portal,
+Bundle, sonstiges Zubehör. Das ist die erste Katalogschreiboperation, die nicht
+`is_shop_admin()` verlangt, und sie ist deshalb an drei Stellen begrenzt:
+
+1. **Das Tor ist `can_operate_active_seller()`**, nicht `is_shop_admin()`. Die beiden Rollen
+   bleiben getrennt (ADR-0077) und schließen sich aus (`0042`); ein Plattformadministrator kann
+   die Funktion also nicht aufrufen, und das ist beabsichtigt.
+2. **`figure` wird ausdrücklich abgelehnt.** Eine Figur ist kuratierte Katalogidentität
+   (ADR-0034) und entsteht weiter im Adminbereich über `admin_create_figure`, das
+   `is_shop_admin()` verlangt. Der Betrieb hat keinen Weg dorthin.
+3. **Nichts Redaktionelles.** `catalog_visible = false`, immer; kein Preis, kein Bild, kein
+   `display_name_override`. Die redaktionelle Entscheidung bleibt beim Administrator
+   (ADR-0039).
+
+Warum die Tür überhaupt existiert: ein Portal entsteht beim **Einkauf**. Es liegt im Karton, es
+hat Geld gekostet, es muss in die Position — und dafür zweimal das Konto zu wechseln ist der
+Grund, warum es vorher als Freitext ohne Bestand und ohne Historie landete. Die Begründung
+und die Grenzen stehen vollständig in `docs/SECURITY.md`.
+
 ---
 
 ## 7. E-Mail-Versand

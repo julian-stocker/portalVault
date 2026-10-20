@@ -17,7 +17,7 @@ import { cache } from "react";
 
 import type { Character, Element } from "@/lib/catalog/character";
 import { asElement } from "@/lib/catalog/element";
-import { collectibleOnly, isCollectibleCategory } from "@/lib/catalog/collectible";
+import { collectibleOnly, isCollectible, isCollectibleCategory } from "@/lib/catalog/collectible";
 import { asCardType } from "@/lib/catalog/card-type";
 import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { buildSearchIndex } from "@/lib/catalog/search";
@@ -48,12 +48,15 @@ type FigureRow = {
   display_name_override: string | null;
   character_id: number | null;
   card_type: string;
+  /* Seit 0135. Optional, damit ein Leser, der die Spalte nicht anfordert,
+     dieselbe Zeilenform behält. */
+  item_type?: string | null;
 };
 
 // One string literal, not a concatenation: PostgREST's typing reads the
 // select list at the type level, and a computed string loses the row type.
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override, card_type";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override, card_type, item_type";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
@@ -136,6 +139,9 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
        this keeps a value a later migration adds — read by an older build —
        out of the artwork lookup instead of into an undefined one. */
     cardType: asCardType(row.card_type),
+    /* Roh weitergegeben, nicht gedeutet: `isCollectible()` ist die eine
+       Stelle, die daraus eine Folge zieht (0137). */
+    itemType: row.item_type ?? null,
     // Filled in by withVariants() once the series context is known — unless
     // an administrator has chosen the public name, which wins over the
     // derivation (ADR-0039).
@@ -403,6 +409,62 @@ export async function fetchCatalog(
   // curated answer overriding the derived one, and only for sortBaseName.
   const withFamily = withCharacterFamily(withSearch, names);
   return sortFigures(withCharacterElement(withFamily, characterElements(index)));
+}
+
+/**
+ * Die NICHT sammelbaren Katalogzeilen — Spiele, Portale, Bundles, Zubehör.
+ *
+ * WOFÜR ES DAS GIBT. Das Lager führt seit dem ersten Tag Zeilen auf Spiele:
+ * 13 Lagerzeilen und 18 Verkaufspositionen. Die Lagerübersicht konnte sie
+ * nicht benennen, weil sie ihre Namen nicht hatte — `fetchCatalog()` legt
+ * `collectibleOnly()` über jedes Ergebnis, und das ist richtig: der
+ * öffentliche Katalog und die Sammlung zeigen Sammelobjekte. Diese Funktion
+ * ist die andere Hälfte derselben Tabelle, für die eine Ansicht, die sie
+ * braucht.
+ *
+ * WARUM NICHT EIN SCHALTER AN `fetchCatalog()`. Weil `fetchCatalog()` den
+ * öffentlichen Katalog, die Sammlung, die Detailseite und den Adminkatalog
+ * bedient. Ein `includeAccessories`-Flag dort wäre ein Weg, auf dem ein
+ * Portal in den Sammlungsfortschritt gerät, sobald jemand es an der falschen
+ * Stelle setzt — und der Fortschritt ist eine Zahl, die Nutzer kennen
+ * (ADR-0128, Punkt 7). Zwei Funktionen, zwei Mengen, kein Schalter.
+ *
+ * KEINE VARIANTEN, KEINE CHARAKTERE, KEIN SORTIERDURCHGANG. Ein Portal hat
+ * keinen Charakter (ADR-0034) und keine Variantenschwester; die Pipeline von
+ * `fetchCatalog()` hätte hier nichts zu tun. Der Anzeigename ist
+ * `display_name_override ?? name` — dieselbe Rangfolge, die
+ * `seller_import_catalog()` liefert und der Adminkatalog zeigt.
+ *
+ * UND ABSICHTLICH DER ROHNAME, NICHT DER KURZNAME. ADR-0128 Punkt 1 sieht
+ * `Portal – <Serie>` als abgeleiteten Hauptnamen vor. Für eine LAGERLISTE
+ * wäre das unbrauchbar: 21 Portale verteilen sich auf sechs Serien, vier
+ * davon hießen dann gleich. Der Rohname trägt die Modellnummer, und die
+ * unterscheidet die Varianten — `84392790 (G)` gegen `84392080 (G)`.
+ *
+ * `is_active` IST DIE EINE GRENZE, die auch `fetchCatalog()` zieht, plus
+ * der reservierte Bereich: `SKY-9000`–`9999` gehört Fixtures (ADR-0070), und
+ * die Prüffigur `SKY-9998` steht in einer Spiele-Kategorie. Sie bleibt damit
+ * dort, wo sie heute ist — in der Zeile „außerhalb des Sortiments".
+ */
+export async function fetchAccessoryCatalog(): Promise<CatalogFigure[]> {
+  const supabase = await createClient();
+  const [lookups, result] = await Promise.all([
+    loadLookups(),
+    supabase
+      .from("skylanders")
+      .select(FIGURE_COLUMNS)
+      .eq("is_active", true)
+      .lt("sky_id", "SKY-9000")
+      .order("sky_id"),
+  ]);
+
+  if (result.error) throw new Error(`accessory catalog: ${result.error.message}`);
+  return ((result.data ?? []) as FigureRow[])
+    .map((row) => toFigure(row, lookups))
+    /* Das Gegenstück zu `collectibleOnly()`, und über dieselbe eine Regel:
+       `isCollectible()` fragt Artikeltyp UND Kategoriename. Eine zweite
+       Fassung der Regel hier wäre eine zweite Wahrheit. */
+    .filter((figure) => !isCollectible(figure));
 }
 
 /** One figure by its slug. Navigation only — the identity is the SKY-ID. */

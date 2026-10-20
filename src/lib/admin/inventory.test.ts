@@ -163,11 +163,39 @@ describe("price and listing", () => {
 });
 
 describe("what the operational list contains", () => {
-  it("scopes positions by the catalog, never by matching names", () => {
-    expect(source(QUERIES)).toContain("catalog.filter(isCollectible)");
+  it("scopes positions by the catalog it is GIVEN, never by matching names", () => {
+    /*
+     * WAS SICH MIT ADR-0128 GEÄNDERT HAT. Hier stand die Erwartung
+     * `catalog.filter(isCollectible)` — eine zweite, stille Bereichsregel an
+     * einer Stelle, die schon eine hatte. Ihre Folge: die 13 Lagerzeilen auf
+     * Spiele landeten seit dem ersten Tag im `outsideScope`-Topf.
+     *
+     * Jetzt entscheidet der AUFRUFER den Umfang und übergibt den Katalog,
+     * den er zeigen will. Die Zusicherung dieses Tests ist unverändert und
+     * sogar strenger zu prüfen: der Umfang ist DATENGETRIEBEN, kein Name und
+     * keine SKY-ID wird verglichen.
+     *
+     * Gegen `code()` und nicht gegen `source()`: ein Kommentar, der den alten
+     * Ausdruck zitiert — und der steht jetzt in `inventory.ts` —, hätte die
+     * alte Fassung dieses Tests bestehen lassen, ohne dass eine Zeile Code
+     * ihn erfüllt.
+     */
+    expect(code(QUERIES)).toContain("catalog.map((figure) => [figure.skyId, figure])");
+    expect(code(QUERIES)).not.toContain("filter(isCollectible)");
     // No SKY-ID and no category name in the code; the comment names the
     // fixture only to explain why the scope is data-driven.
     expect(code(QUERIES)).not.toMatch(/SKY-9998|"Spiele"|Fixture/);
+  });
+
+  it("und der Aufrufer übergibt Figuren UND Zubehör", () => {
+    /*
+     * Die andere Hälfte derselben Regel, und sie steht auf der Seite: ohne
+     * `fetchAccessoryCatalog()` wäre der Umfang wieder nur der
+     * Sammlerkatalog, und Spiele und Portale fielen erneut aus der Liste.
+     */
+    const page = code("src/app/(business)/business/inventory/page.tsx");
+    expect(page).toContain("fetchAccessoryCatalog()");
+    expect(page).toContain("fetchInventory([...catalog, ...accessories])");
   });
 
   it("separates historical positions instead of deleting them", () => {

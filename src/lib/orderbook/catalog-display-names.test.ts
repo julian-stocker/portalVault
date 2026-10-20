@@ -273,13 +273,17 @@ describe("die Funktion liefert, die Auswahl filtert", () => {
       ["display_name", "text"],
       ["catalog_visible", "boolean"],
       ["is_active", "boolean"],
+      /* DIE ACHTE, UND ZWAR HINTEN (0137). Dieselbe Regel, die 0117 sich
+         selbst gegeben hat: angehängt, nicht eingeschoben — die sieben
+         Ordnungszahlen von vorher bleiben, wo sie waren. */
+      ["item_type", "text"],
     ]);
     /* Und die SELECT-Liste führt dieselbe Reihenfolge — sonst landete der
        Anzeigename in der Kategoriespalte, und zwar lautlos. */
     const query = code(fn.body).slice(code(fn.body).indexOf("return query"));
     const order = ["s.sky_id", "s.name", "s.series_code", "coalesce(c.name, '')",
                    "coalesce(s.display_name_override, s.name)",
-                   "s.catalog_visible", "s.is_active"];
+                   "s.catalog_visible", "s.is_active", "s.item_type"];
     let at = -1;
     for (const expr of order) {
       const next = query.indexOf(expr, at + 1);
@@ -298,9 +302,21 @@ describe("die Funktion liefert, die Auswahl filtert", () => {
       "|| 'display_name text, catalog_visible boolean, is_active boolean)'");
   });
 
-  it("die Auswahlliste filtert beide Riegel", () => {
-    expect(QUERIES).toContain(
-      ".filter((r) => r.catalog_visible !== false && r.is_active !== false)");
+  it("die Auswahlliste filtert, und die Regel hat EINEN Ort", () => {
+    /*
+     * `is_active` gilt jeder Zeile, `catalog_visible` nur einer FIGUR. Seit
+     * 0137 ist das ein Unterschied und keine Nachlässigkeit: ein
+     * Zubehörartikel entsteht mit `catalog_visible = false`, und mit dem
+     * Riegel auf allen Zeilen wäre er unmittelbar nach seiner Entstehung
+     * wieder unauffindbar.
+     *
+     * Die Regel selbst steht in `isPickableCatalogRow`, nicht hier — ihre
+     * FÄLLE prüft `accessory-search.test.ts` ohne Datenbank. Dieser Test
+     * hält nur fest, dass die Abfrage sie benutzt und keine zweite
+     * Fassung daneben baut.
+     */
+    expect(QUERIES).toContain(".filter(isPickableCatalogRow)");
+    expect(QUERIES).not.toContain("r.catalog_visible !== false &&");
   });
 
   it("und verhält sich bei alter Funktionsfassung wie vorher", () => {
