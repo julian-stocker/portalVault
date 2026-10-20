@@ -59,7 +59,12 @@ describe("what counts as offered", () => {
     // Jede Klausel der Projektion hat hier ihre Entsprechung.
     expect(sql).toContain("where i.is_listed");
     expect(sql).toContain("i.condition = public.v1_sale_condition()");
-    expect(sql).toContain("public.is_shop_eligible(i.sky_id)");
+    /* Seit `0139` fragt die Projektion das POSITIONS-Tor statt des
+       Artikel-Tors: `is_position_sellable()` ruft `is_shop_eligible()` fuer
+       den Figurenfall selbst auf, verlangt fuer Zubehoer aber zusaetzlich
+       die ausdrueckliche Freigabe dieser Lagerposition. Fuer eine Figur ist
+       die Aussage damit per Konstruktion dieselbe. */
+    expect(sql).toContain("public.is_position_sellable(i.id)");
     expect(sql).toContain("public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null");
     expect(sql).toContain("(i.available_quantity > 0) as available");
 

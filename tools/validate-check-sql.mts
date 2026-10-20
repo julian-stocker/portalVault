@@ -374,7 +374,7 @@ async function main(): Promise<void> {
    * sie bei Abweichung abbricht, und dass nach einem Abbruch nichts
    * zurückbleibt.
    * ==================================================================== */
-  console.log("\nPROBELAUF — die vier auf Production fehlenden Migrationen, gegen erfundene Zeilen");
+  console.log("\nPROBELAUF — die fuenf auf Production fehlenden Migrationen, gegen erfundene Zeilen");
   console.log("-".repeat(76));
 
   /**
@@ -392,11 +392,17 @@ async function main(): Promise<void> {
   const PROBELAUF = ["0135_catalog_item_type.sql",
                      "0136_business_backup_item_type.sql",
                      "0137_catalog_accessories.sql",
-                     "0138_catalog_portals.sql"] as const;
+                     "0138_catalog_portals.sql",
+                     "0139_accessory_sale_release.sql",
+                     "0140_business_backup_sale_release.sql"] as const;
   const M135 = join(MIG_DIR, PROBELAUF[0]);
   const M136 = join(MIG_DIR, PROBELAUF[1]);
   const M137 = join(MIG_DIR, PROBELAUF[2]);
   const M138 = join(MIG_DIR, PROBELAUF[3]);
+  const M139 = join(MIG_DIR, PROBELAUF[4]);
+  const R139 = "supabase/rollback/R0139_drop_sale_release.sql";
+  const M140 = join(MIG_DIR, PROBELAUF[5]);
+  const R140 = "supabase/rollback/R0140_back_to_0136.sql";
   const R135 = "supabase/rollback/R0135_drop_item_type.sql";
   const R136 = "supabase/rollback/R0136_back_to_0131.sql";
   const R137 = "supabase/rollback/R0137_back_to_0135.sql";
@@ -1833,6 +1839,295 @@ async function main(): Promise<void> {
         + `${nachSammel}, Angebote ${vorAngebote} → ${nachAngebote}, shopfaehige Portale `
         + `${shopfaehig}, die ausgeblendete Figur bleibt ausgeblendet (${figurVersteckt}) · `
         + `Ruecknahme ${zurueck ?? "durch"}: sichtbar ${endSicht}`,
+    });
+  }
+
+  /* ====================================================================
+   * P34–P37 — 0139: ZUBEHOER DARF VERKAUFT WERDEN, ABER NUR STUECK FUER STUECK
+   *
+   * Vier Durchgaenge, und jeder prueft eine andere Zusicherung:
+   *
+   *   P34  die Migration veroeffentlicht NICHTS — auch nicht die Altlast
+   *        aus `is_listed = true` mit Preis. Und sie nimmt sich zurueck.
+   *   P35  eine freigegebene Portalposition wird wirklich zum Angebot,
+   *        und das Zuruecknehmen nimmt es wieder fort.
+   *   P36  ein Spiel OHNE USK-Kennzeichnung bleibt draussen, auch
+   *        freigegeben, auch bepreist, auch mit Bestand.
+   *   P37  die Betriebsfunktion lehnt ab, was sie ablehnen muss.
+   * ==================================================================== */
+  {
+    /** Der Stand nach 0138 — der Ausgangspunkt jedes der vier Durchgaenge. */
+    async function frischNach0138(): Promise<InstanceType<typeof PGlite>> {
+      const db = await frischNach0136();
+      const f137 = await fahre(db, M137);
+      if (f137 !== null) throw new Error(`Aufbau: 0137 scheiterte — ${f137}`);
+      await serienUndIdentitaet(db);
+      const f138 = await fahre(db, M138);
+      if (f138 !== null) throw new Error(`Aufbau: 0138 scheiterte — ${f138}`);
+      /*
+       * EINE IDENTITAET AUF `shop_inventory.id`, aus demselben Grund wie bei
+       * `categories.id` (siehe `serienUndIdentitaet`): das Stub-Schema ist
+       * reine Struktur und traegt keine Defaults. In der Wirklichkeit ist
+       * `id` `generated always as identity`; hier bliebe sie NULL — und
+       * `is_position_sellable(NULL)` waere fuer jede Zeile `false`. Das waere
+       * ein Befund des Stubs und keiner der Migration.
+       */
+      await db.exec(`
+        create sequence if not exists public.z_inv_id_seq start 1000;
+        alter table public.shop_inventory
+          alter column id set default nextval('public.z_inv_id_seq');
+        update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+         where id is null;`);
+      return db;
+    }
+
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    /** Eine Anweisung fahren und die Fehlermeldung zurueckgeben — oder null. */
+    const fehlschlag = async (db: InstanceType<typeof PGlite>, sql: string):
+      Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) { return e instanceof Error ? e.message : String(e); }
+    };
+
+    const ANGEBOTE = "select count(*)::text as w from public.shop_offers()";
+    const ZUBEHOERANGEBOTE = "select count(*)::text as w from public.shop_offers() o "
+      + "join public.skylanders s on s.sky_id = o.sky_id where s.item_type <> 'figure'";
+    const SAMMELBAR = "select count(*)::text as w from public.skylanders s "
+      + "join public.categories c on c.id = s.category_id where s.is_active "
+      + "and not (c.name = any (public.non_collectible_categories()))";
+    /* Die Altlast, in der Form, die `0003` erzwingt: `is_listed` ohne Preis
+       ist durch den CHECK verboten, also hat jede gelistete Zeile einen. */
+    const ALTLAST = "insert into public.shop_inventory "
+      + "(sky_id, condition, is_listed, quantity, available_quantity, sale_price) "
+      + "values ('PROBE-4', 'loose', true, 3, 3, 9.99);";
+    const PORTALBESTAND = "insert into public.shop_inventory "
+      + "(sky_id, condition, is_listed, quantity, available_quantity, sale_price) "
+      + "values ('SKY-0615', 'loose', true, 2, 2, 24.90);";
+
+    /* P34 — die Migration selbst. */
+    {
+      const db = await frischNach0138();
+      await db.exec(ALTLAST);
+      const vorAngebote = await wert(db, ANGEBOTE);
+      const vorSammel = await wert(db, SAMMELBAR);
+      const vorShopfaehig = await wert(db,
+        "select count(*)::text as w from public.skylanders s "
+        + "where public.is_shop_eligible(s.sky_id)");
+
+      const lauf = await fahre(db, M139);
+
+      const nachAngebote = lauf === null ? await wert(db, ANGEBOTE) : "-";
+      const zubehoer = lauf === null ? await wert(db, ZUBEHOERANGEBOTE) : "-";
+      const nachSammel = lauf === null ? await wert(db, SAMMELBAR) : "-";
+      const nachShopfaehig = lauf === null ? await wert(db,
+        "select count(*)::text as w from public.skylanders s "
+        + "where public.is_shop_eligible(s.sky_id)") : "-";
+      const freigegeben = lauf === null ? await wert(db,
+        "select count(*)::text as w from public.shop_inventory where sale_released") : "-";
+      /* Die Altlastzeile behaelt ihre Listung — 0139 fasst sie nicht an. */
+      const altlastGelistet = lauf === null ? await wert(db,
+        "select is_listed::text as w from public.shop_inventory where sky_id = 'PROBE-4'") : "-";
+
+      const zurueck = lauf === null ? await fahre(db, R139) : "nicht gefahren";
+      const spalteFort = zurueck === null ? await wert(db,
+        "select (count(*) = 0)::text as w from information_schema.columns "
+        + "where table_schema = 'public' and table_name = 'shop_inventory' "
+        + "and column_name = 'sale_released'") : "-";
+      const endAngebote = zurueck === null ? await wert(db, ANGEBOTE) : "-";
+
+      probe.push({
+        name: "P34 0139 veroeffentlicht nichts — auch nicht die gelistete, bepreiste Altlast",
+        ok: lauf === null && nachAngebote === vorAngebote && zubehoer === "0"
+          && nachSammel === vorSammel && nachShopfaehig === vorShopfaehig
+          && freigegeben === "0" && altlastGelistet === "true"
+          && zurueck === null && spalteFort === "true" && endAngebote === vorAngebote,
+        sagt: lauf ?? `Angebote ${vorAngebote} → ${nachAngebote}, davon Zubehoer ${zubehoer}, `
+          + `freigegebene Positionen ${freigegeben}, shopfaehig ${vorShopfaehig} → `
+          + `${nachShopfaehig}, sammelbar ${vorSammel} → ${nachSammel}, die Altlast bleibt `
+          + `gelistet (${altlastGelistet}) · Ruecknahme ${zurueck ?? "durch"}: Spalte fort `
+          + `${spalteFort}, Angebote ${endAngebote}`,
+      });
+    }
+
+    /* P35 — eine Portalposition, freigegeben und wieder zurueckgenommen. */
+    {
+      const db = await frischNach0138();
+      const f = await fahre(db, M139);
+      if (f !== null) throw new Error(`P35 Aufbau: 0139 scheiterte — ${f}`);
+      await db.exec(PORTALBESTAND);
+
+      /* 0138 legt die Portale mit `catalog_visible = false` an — die
+         oeffentliche Freigabe war ein eigener Schritt. Damit prueft dieser
+         Durchgang beide Richtungen auf einmal. */
+      const versteckt = await wert(db, ZUBEHOERANGEBOTE);
+      await db.exec("update public.skylanders set catalog_visible = true "
+        + "where sky_id = 'SKY-0615';");
+      /* SICHTBAR ALLEIN BEWIRKT KEINE FREIGABE — Punkt 1 des Auftrags. */
+      const ohneFreigabe = await wert(db, ZUBEHOERANGEBOTE);
+      await db.exec("update public.shop_inventory set sale_released = true "
+        + "where sky_id = 'SKY-0615';");
+      const mitFreigabe = await wert(db, ZUBEHOERANGEBOTE);
+      /* Und umgekehrt: freigegeben, aber aus dem Katalog genommen. */
+      await db.exec("update public.skylanders set catalog_visible = false "
+        + "where sky_id = 'SKY-0615';");
+      const wiederVersteckt = await wert(db, ZUBEHOERANGEBOTE);
+      await db.exec("update public.skylanders set catalog_visible = true "
+        + "where sky_id = 'SKY-0615';");
+      const preis = await wert(db, "select price::text as w from public.shop_offers() "
+        + "where sky_id = 'SKY-0615'");
+      const sammelbar = await wert(db, SAMMELBAR);
+      /* Und die Verfuegbarkeitsfrage sagt jetzt ja — dieselbe Tuer, die der
+         Warenkorb fragt. */
+      const kaufbar = await wert(db,
+        "select public.shop_quantity_available('SKY-0615', 'loose', 1)::text as w");
+      await db.exec("update public.shop_inventory set sale_released = false "
+        + "where sky_id = 'SKY-0615';");
+      const zurueck = await wert(db, ZUBEHOERANGEBOTE);
+      const kaufbarDanach = await wert(db,
+        "select public.shop_quantity_available('SKY-0615', 'loose', 1)::text as w");
+
+      probe.push({
+        name: "P35 eine freigegebene Portalposition wird zum Angebot — und die Ruecknahme nimmt es fort",
+        ok: versteckt === "0" && ohneFreigabe === "0" && mitFreigabe === "1"
+          && wiederVersteckt === "0" && preis === "24.90"
+          && kaufbar === "true" && zurueck === "0" && kaufbarDanach === "false"
+          && sammelbar === await wert(db, SAMMELBAR),
+        sagt: `versteckt+ungefreigegeben ${versteckt}, nur sichtbar ${ohneFreigabe}, `
+          + `sichtbar+freigegeben ${mitFreigabe} (Preis ${preis}), freigegeben aber `
+          + `versteckt ${wiederVersteckt}, shop_quantity_available ${kaufbar} → `
+          + `${kaufbarDanach}, nach Ruecknahme ${zurueck}, sammelbar ${sammelbar} unveraendert`,
+      });
+    }
+
+    /* P36 — ein Spiel ohne Alterskennzeichnung bleibt draussen. */
+    {
+      const db = await frischNach0138();
+      const f = await fahre(db, M139);
+      if (f !== null) throw new Error(`P36 Aufbau: 0139 scheiterte — ${f}`);
+      await db.exec(ALTLAST);
+      /* Alles erfuellt — gelistet, bepreist, Bestand, FREIGEGEBEN. Es fehlt
+         allein die USK-Angabe. */
+      await db.exec("update public.shop_inventory set sale_released = true "
+        + "where sky_id = 'PROBE-4';");
+
+      const ohneUsk = await wert(db, ZUBEHOERANGEBOTE);
+      const grundOhne = await wert(db,
+        "select coalesce(reason, '(kein Grund)') as w from public.admin_shop_listing_audit() "
+        + "where sky_id = 'PROBE-4'").catch(() => "(nicht lesbar)");
+      await db.exec("update public.skylanders set usk_rating = 6 where sky_id = 'PROBE-4';");
+      const mitUsk = await wert(db, ZUBEHOERANGEBOTE);
+      /* Und eine erfundene Einstufung laesst der CHECK nicht zu. */
+      const unsinn = await fehlschlag(db,
+        "update public.skylanders set usk_rating = 7 where sky_id = 'PROBE-4';");
+
+      probe.push({
+        name: "P36 ein freigegebenes Spiel OHNE USK-Kennzeichnung bleibt draussen",
+        ok: ohneUsk === "0" && mitUsk === "1" && unsinn !== null,
+        sagt: `ohne USK ${ohneUsk} Angebote (Grund: ${grundOhne}), mit USK 6 ${mitUsk}; `
+          + `USK 7 abgelehnt (${unsinn === null ? "NEIN — der CHECK fehlt" : "ja"})`,
+      });
+    }
+
+    /* P37 — die Betriebsfunktion lehnt ab, was sie ablehnen muss.
+     *
+     * `can_operate_active_seller()` liest `auth.uid()`, und das gibt es in
+     * einer Wegwerfinstanz nicht. Sie wird deshalb fuer diesen Durchgang
+     * durch eine Fassung ersetzt, die `true` sagt — so wird geprueft, was
+     * HINTER der Rechteschranke steht. Dass die Schranke selbst da ist,
+     * prueft der Textvergleich in `accessory-sale.test.ts`.
+     */
+    {
+      const db = await frischNach0138();
+      const f = await fahre(db, M139);
+      if (f !== null) throw new Error(`P37 Aufbau: 0139 scheiterte — ${f}`);
+      await db.exec(ALTLAST);
+      await db.exec(PORTALBESTAND);
+      await db.exec("update public.skylanders set catalog_visible = true "
+        + "where sky_id = 'SKY-0615';");
+      await db.exec("create or replace function public.can_operate_active_seller() "
+        + "returns boolean language sql stable as $fn$ select true $fn$;");
+
+      const figur = await fehlschlag(db,
+        "select public.seller_set_sale_release('PROBE-2', 'loose', true);");
+      const spielOhneUsk = await fehlschlag(db,
+        "select public.seller_set_sale_release('PROBE-4', 'loose', true);");
+      const unbekannt = await fehlschlag(db,
+        "select public.seller_set_sale_release('SKY-0616', 'loose', true);");
+      const portal = await fehlschlag(db,
+        "select public.seller_set_sale_release('SKY-0615', 'loose', true);");
+      const angebote = await wert(db, ZUBEHOERANGEBOTE);
+      /* Das Zuruecknehmen eines Spiels geht AUCH ohne USK — ein Riegel, der
+         das Abschalten verhindert, zeigt in die falsche Richtung. */
+      const abschalten = await fehlschlag(db,
+        "select public.seller_set_sale_release('PROBE-4', 'loose', false);");
+
+      probe.push({
+        name: "P37 die Freigabefunktion lehnt Figur, Spiel ohne USK und unbekannte Position ab",
+        ok: figur !== null && spielOhneUsk !== null && unbekannt !== null
+          && portal === null && angebote === "1" && abschalten === null,
+        sagt: `Figur ${figur === null ? "DURCHGELASSEN" : "abgelehnt"}, Spiel ohne USK `
+          + `${spielOhneUsk === null ? "DURCHGELASSEN" : "abgelehnt"}, unbekannte Position `
+          + `${unbekannt === null ? "DURCHGELASSEN" : "abgelehnt"}, Portal `
+          + `${portal === null ? "freigegeben" : `ABGELEHNT: ${portal}`} → ${angebote} Angebot; `
+          + `Abschalten ohne USK ${abschalten === null ? "geht" : "GESPERRT"}`,
+      });
+    }
+  }
+
+  /* P38 — 0140: die Sicherung lernt zwei Felder, und sonst nichts.
+   *
+   * Sie SETZT 0139 VORAUS, und das wird hier mitgeprueft: erst der Lauf
+   * ohne 0139 (muss scheitern), dann der mit.
+   */
+  {
+    const db = await frisch();
+    const f135 = await fahre(db, M135);
+    if (f135 !== null) throw new Error(`P38 Aufbau: 0135 scheiterte — ${f135}`);
+    const f136 = await fahre(db, M136);
+    if (f136 !== null) throw new Error(`P38 Aufbau: 0136 scheiterte — ${f136}`);
+    /* Die Identitaet auf `shop_inventory.id`, aus demselben Grund wie in
+       `frischNach0138()`: das Stub-Schema traegt keine Defaults. */
+    await db.exec(`
+      create sequence if not exists public.z_inv_id_seq start 1000;
+      alter table public.shop_inventory
+        alter column id set default nextval('public.z_inv_id_seq');
+      update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+       where id is null;`);
+
+    const w = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const FELDER = "select (length(prosrc) - length(replace(prosrc, E'\\n', '')))::text as w "
+      + "from pg_proc where oid = to_regprocedure('public.seller_business_backup()')";
+
+    /* OHNE 0139 muss sie abbrechen — und zwar mit einem Satz, der sagt was fehlt. */
+    const ohne0139 = await fahre(db, M140);
+
+    const f139 = await fahre(db, M139);
+    if (f139 !== null) throw new Error(`P38 Aufbau: 0139 scheiterte — ${f139}`);
+    const zeilenVor = await w(FELDER);
+    const mit0139 = await fahre(db, M140);
+    const kennt = mit0139 === null ? await w(
+      "select (position('sale_released' in prosrc) > 0 "
+      + "and position('usk_rating' in prosrc) > 0)::text as w from pg_proc "
+      + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
+    const zeilenNach = mit0139 === null ? await w(FELDER) : "-";
+
+    const zurueck = mit0139 === null ? await fahre(db, R140) : "nicht gefahren";
+    const wiederOhne = zurueck === null ? await w(
+      "select (position('sale_released' in prosrc) = 0)::text as w from pg_proc "
+      + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
+
+    probe.push({
+      name: "P38 0140 braucht 0139, nimmt dann genau zwei Felder auf — und nimmt sie zurueck",
+      ok: ohne0139 !== null && ohne0139.includes("setzt 0139 voraus")
+        && mit0139 === null && kennt === "true"
+        && Number(zeilenNach) === Number(zeilenVor) + 2
+        && zurueck === null && wiederOhne === "true",
+      sagt: `ohne 0139: ${ohne0139 === null ? "DURCHGELAUFEN" : "abgebrochen"}; `
+        + `mit 0139: ${mit0139 ?? "durch"}, beide Felder da (${kennt}), Rumpfzeilen `
+        + `${zeilenVor} → ${zeilenNach} · Ruecknahme ${zurueck ?? "durch"}: `
+        + `wieder ohne (${wiederOhne})`,
     });
   }
 

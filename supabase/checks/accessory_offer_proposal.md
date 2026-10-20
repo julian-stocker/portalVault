@@ -1,251 +1,293 @@
-# Zubehör anbieten und verkaufen — Architektur, Auswirkungen, Vorschlag
+# Spiele und Portale im eigenen Shop verkaufen — Bestandsaufnahme und Umsetzungsvorschlag
 
-**Status:** Vorschlag, **nichts davon ist umgesetzt.** Keine Migration
-geschrieben, keine Funktion geändert, kein Angebot entstanden. Diese Datei
-beantwortet die Frage „kann Zubehör künftig wie eine Figur angeboten
-werden?" — mit dem, was im Code steht, und mit dem, was vorher entschieden
-werden muss.
+**Stand 2026-10-20.** Diese Datei ersetzt die erste Fassung vom selben Tag:
+dort war die Frage „darf Zubehör überhaupt verkauft werden?" offen, hier ist
+sie vom Betreiber **entschieden** — ja, über den eigenen SkyIsles-Shop, mit
+gezielter Freigabe je Angebot.
 
-**Vorarbeit:** `supabase/checks/accessory_offer_readonly.sql` (rein lesend,
-plangeprüft, **noch nicht gefahren**). Sie misst die eine Zahl, auf die es
-ankommt — siehe Abschnitt 3.
+**Umgesetzt ist noch nichts an der Datenbank.** Die Migration `0139` ist
+geschrieben und **nicht angewendet**; Production ist unberührt; die
+Belegausstellung bleibt gesperrt.
+
+**Geprüft ist sie trotzdem.** `npm run verify:check-sql` fährt sie gegen
+echtes PostgreSQL, Durchgänge **P34–P37**: sie veröffentlicht nichts — auch
+nicht die gelistete, bepreiste Altlast —, eine freigegebene Portalposition
+wird wirklich zum Angebot, ein freigegebenes Spiel **ohne** USK-Kennzeichnung
+bleibt draußen, und die Freigabefunktion lehnt Figur, Spiel ohne USK und
+unbekannte Position ab. Dazu `0139_preflight.sql` und `0139_postflight.sql`
+sowie `supabase/rollback/R0139_drop_sale_release.sql`.
 
 ---
 
-## 1. Die Angebotsarchitektur, wie sie heute ist
+## Teil A — Bestandsaufnahme
 
-Die gute Nachricht zuerst: **es gibt genau EINE Stelle, an der entschieden
-wird, ob ein Artikel verkauft werden darf.**
+### A1. Es gibt genau ein Tor, und vier Türen fragen es
 
 ```
-public.is_shop_eligible(sky_id)   -- 0008, zuletzt 0135
-   aktiv  ∧  catalog_visible  ∧  item_type = 'figure'
-          ∧  Kategorie nicht in non_collectible_categories()
+public.is_shop_eligible(p_sky_id text)        -- 0008, zuletzt 0135
+   is_active ∧ catalog_visible ∧ item_type = 'figure'
+            ∧ Kategorie ∉ non_collectible_categories()
 ```
 
-Und jede Tür fragt sie:
-
-| Tür | Funktion | Migration |
+| Tür | Funktion | zuletzt definiert in |
 |---|---|---|
 | öffentliche Angebotsprojektion | `shop_offers()` | `0029` |
-| Verfügbarkeitsprüfung | `shop_quantity_available()` | `0028`, `0040` |
-| Warenkorbprüfung | `cart_*` | `0010`, `0011` |
-| **Bestellung anlegen** | `create_order()` | `0010` → `0040` |
-| Betriebsansicht „verkäuflich" | `seller_inventory_listing()` | `0041` |
+| Verfügbarkeit / Warenkorbmenge | `shop_quantity_available()` | `0028` |
+| Bestellung anlegen | `create_order()` | `0040` |
+| **letzte Prüfung unter Zeilensperre** | `reserve_for_order()` | `0010` |
+| Betriebsdiagnose „verkäuflich" | `admin_shop_listing_audit()` | `0041` |
 
-Das heißt für den Auftrag „die bestehende Angebotsarchitektur
-wiederverwenden, keine zweite Angebotsverwaltung": **sie ist schon so
-gebaut.** Es braucht keine Zubehör-Angebotstabelle, keine zweite
-Projektion und keine zweite Preisregel. Zubehör anzubieten heißt, **ein
-Prädikat zu ändern** — und sonst nichts.
-
-Das ist zugleich die schlechte Nachricht.
-
-### Was NICHT fragt: `set_shop_listing()`
-
-`set_shop_listing()` (`0108`) prüft nur, dass die SKY-ID existiert und die
-Beschaffenheit `loose` ist. **Es prüft die Shop-Eignung nicht.** Der Betrieb
-kann für ein Spiel also schon heute einen Verkaufspreis setzen und
-`is_listed = true` schreiben; es erscheint nur nirgends. Das ist bewusst so
-(`docs/DATABASE.md`, „Freigabe ist nicht das Tor") — und es ist der Grund für
-den nächsten Abschnitt.
-
----
-
-## 2. Warum eine Lockerung am Artikeltyp der falsche Griff wäre
-
-Der naheliegende Eingriff ist eine Zeile:
+Alle vier Türen tragen **dieselbe Form**:
 
 ```sql
--- NICHT VORGESCHLAGEN
-and s.item_type in ('figure', 'game', 'portal')
+and i.is_listed
+and i.condition = public.v1_sale_condition()
+and public.is_shop_eligible(i.sky_id)
+and public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null
 ```
 
-Was dabei passierte, steht schon in der Datenbank:
+**Das ist die gute Nachricht:** es braucht keine zweite Angebotsverwaltung,
+keine Zubehörtabelle, keine zweite Preisregel und keinen zweiten Warenkorb.
+Wer das Tor ändert, ändert alle Türen zugleich — **auch `create_order()`**.
 
-* **13 Lagerzeilen hängen an Spielen, mit 19 Stück — und alle tragen
-  `is_listed = true`** (`docs/SKYLANDERS_DATA.md`, Abschnitt „Spiele: im
-  Katalog, im Lager, im Verkauf — und nicht im Shop").
-* Alle 39 Spiele sind `is_active` und `catalog_visible`.
-* Die 21 Portale sind seit dem 2026-10-20 ebenfalls öffentlich sichtbar.
+### A2. Was Zubehör heute ausschließt — vollständig
 
-Es fehlt also **nur noch der Preis**, und den liefert `shop_price()` aus
-zwei Quellen: einem gesetzten `sale_price` **oder** `market_price ×
-Prozentsatz`. Wo eine der beiden steht, entstünde das Angebot **im selben
-Augenblick** — ohne Knopfdruck, ohne Freigabeschritt, ohne dass jemand
-„verkaufen" gesagt hätte.
+| Ort | Ausschluss | Art |
+|---|---|---|
+| `is_shop_eligible()` (`0135`) | `item_type = 'figure'` | **Datenbank, hart** |
+| `is_shop_eligible()` (`0006`/`0137`) | Kategorie in `non_collectible_categories()` — die fünf Zubehörkategorien stehen darin | **Datenbank, hart** |
+| `shopEntries()` (`src/lib/shop/surface.ts`) | `isCollectible()` | Anwendung |
+| `/shop` | liest `fetchCatalog()`, und das ist `collectibleOnly()` | Anwendung |
+| `/skylanders/[slug]` | `isCollectible()` → **404** für jedes Zubehörteil | Anwendung |
+| `isShopGoods()` (`src/lib/admin/inventory-model.ts`) | jede Zubehörposition ist „keine Shopware" — kein Preisfeld, kein Schalter | Anwendung |
 
-**Das ist genau das, was der Betreiber bei der Katalogfreigabe ausdrücklich
-nicht wollte:** keine pauschale Freigabe, sondern ein gezielter,
-nachprüfbarer Schritt je Artikel. Dieselbe Haltung gehört an diese Tür.
+**Zwei unabhängige Riegel in der Datenbank**, und beide müssen fallen; das
+war `0137` ausdrücklich so gebaut.
 
-> **Zweiter Grund gegen den Typ als Schalter:** er ist nicht umkehrbar ohne
-> Kollateralschaden. Ein Artikeltyp beschreibt, *was etwas ist*. Ihn zur
-> Verkaufserlaubnis zu machen, legt zwei unabhängige Eigenschaften wieder
-> zusammen, die ADR-0128 gerade getrennt hat.
+### A3. Was Zubehör NICHT ausschließt — und das ist die Überraschung
 
----
-
-## 3. Die eine Messung, die vor jeder Entscheidung steht
-
-`supabase/checks/accessory_offer_readonly.sql`, ein einziges `SELECT`,
-in `begin … rollback`. Sie bildet die vier Bedingungen von `shop_offers()`
-nach und ersetzt nur die Katalogeignung durch die hypothetische Regel:
-
-| Zeile | Frage |
+| Ort | Verhalten |
 |---|---|
-| 201–205 | der heutige Zustand: **256** Angebote, Abdruck `4d1d6c30…`, **0** davon Zubehör |
-| 302–304 | wie viele Zubehör-Lagerzeilen gelistet, in `loose`, auf sichtbarem Artikel sind |
-| **305** | **wie viele davon SOFORT Angebot würden — mit Preis, ohne weiteren Schritt** |
-| 306 | und zwar welche SKY-IDs, mit Art und Preis |
-| 401–403 | woher der Preis käme: eigener `sale_price`, Marktpreis, oder gar nicht |
-| 501–503 | die Portale getrennt — **0** Lagerzeilen, also ohnehin kein Angebot |
-| 601–602 | was außerhalb des Shops längst gehandelt wird (Orderbuch) |
+| `set_shop_listing()` (`0108`) | prüft **nur**, dass die SKY-ID existiert und `condition = 'loose'` ist. **Fragt die Shop-Eignung nicht.** Der Betrieb kann für ein Spiel also schon heute Preis und `is_listed` setzen |
+| `record_inventory_movement()` (`0108`) | bucht Zugang und Abgang für Zubehör wie für Figuren |
+| `create_order()` Namens-/Bildschnappschuss | liest `skylanders` direkt — funktioniert für Zubehör unverändert |
+| **Warenkorb** (`src/lib/cart/cart.ts`) | Identität ist `sky_id + condition` plus ein Anzeige-Schnappschuss. **Lädt den Katalog nie.** Er funktioniert für Zubehör, ohne dass eine Zeile geändert wird |
+| Checkout, Zahlung, Bestellung, Lagerabgang, Storno, Erstattung | hängen alle an `order_lines.inventory_id`, nicht am Artikeltyp |
 
-**Ist 305 größer als null, ist jede Lockerung ohne zusätzlichen Riegel eine
-Veröffentlichung.** Ist sie null, ist sie es morgen trotzdem, sobald der
-Betrieb einem Spiel einen Preis gibt.
+**Es gibt also keine Zubehör-Warenkorbarchitektur zu bauen.** Es gibt gar
+keine zu bauen — die bestehende ist bereits typneutral.
 
-Der Lauf gehört in den SQL-Editor des Staging-Projekts; die Datei ist
-plangeprüft (`npm run verify:check-sql`), aber **noch nicht gefahren**.
+### A4. Die Altlast ist schärfer als gedacht
+
+Die 13 Lagerpositionen auf Spielen tragen `is_listed = true`. Bisher war
+offen, ob sie auch einen Preis haben. **Sie haben einen — zwingend:**
+
+```sql
+constraint shop_inventory_listed_needs_price
+  check (not is_listed or sale_price is not null)   -- 0003
+```
+
+`is_listed` ohne `sale_price` ist durch die Tabelle **verboten**. Die 13
+Positionen sind damit gelistet **und** bepreist; es fehlt ihnen zur
+Veröffentlichung ausschließlich das Tor.
+
+> **Daraus folgt unmittelbar:** eine Lockerung am Artikeltyp wäre keine
+> Vorbereitung, sondern die sofortige Veröffentlichung von 13 Spielen mit
+> 19 Stück zu Preisen, die niemand für den öffentlichen Shop geprüft hat.
+> Genau das darf nicht passieren — und genau deshalb reicht ein Schalter am
+> **Katalogartikel** nicht.
 
 ---
 
-## 4. Der Vorschlag: eine Freigabe je Artikel, wie bei der Sichtbarkeit
+## Teil B — Wo die Freigabe gespeichert wird
 
-Genau die Form, die sich bei `catalog_visible` bewährt hat — eine
-redaktionelle Spalte, Vorgabe „nein", geschrieben durch eine Adminfunktion
-mit Protokolleintrag.
+Die Frage aus Punkt 9, und sie hat eine klare Antwort: **an der
+Lagerposition, nicht am Katalogartikel.** Die erste Fassung dieses Vorschlags
+hatte `skylanders.shop_released` vorgeschlagen; das ist verworfen.
 
-### 4a. Eine Spalte
+### B1. Warum nicht am Katalogartikel
+
+* **Es wäre das falsche Korn.** Die 13 Altlastzeilen zeigen, dass die Gefahr
+  an der Position wohnt: Preis, Menge, Listung und Beschaffenheit stehen
+  dort. Ein Schalter am Artikel gäbe alle Positionen dieses Artikels auf
+  einmal frei — heute eine, später beliebig viele.
+* **Es wäre beim zweiten Händler im Weg.** `shop_inventory` ist genau die
+  Zeile, die in einer späteren Marketplace-Architektur ein `seller_id`
+  bekäme. Eine Freigabe dort ist **von Natur aus je Verkäufer**; eine
+  Freigabe am Artikel müsste beim ersten fremden Händler migriert werden —
+  zum denkbar schlechtesten Zeitpunkt.
+* **Es widerspräche der eigenen Praxis.** `catalog_visible` gehört dem
+  Katalog, `is_listed` und `sale_price` gehören der Position. Eine
+  Verkaufsfreigabe ist eine Aussage über ein **Angebot**, nicht über einen
+  Artikel.
+
+> **Das ist Vorsorge, keine Marketplace-Implementierung.** Es entsteht kein
+> `seller_id`, keine Seller-RLS, kein Onboarding, kein Stripe Connect, keine
+> Provision (ADR-0021, `CLAUDE.md`). Die Freigabe sitzt lediglich auf der
+> Zeile, die eine spätere Entscheidung ohnehin je Verkäufer führen würde.
+
+### B2. Warum trotzdem zwei Ebenen
+
+Eine Sache gehört **nicht** an die Position: ob der Artikel überhaupt diese
+Art Ware ist und ob seine **Produktinformationen** vollständig sind. Eine
+USK-Kennzeichnung ist eine Eigenschaft des Spiels, nicht einer Kiste im
+Regal. Deshalb zwei Tore auf zwei Ebenen, jedes dort, wo seine Wahrheit
+wohnt:
+
+| Ebene | Tor | sagt |
+|---|---|---|
+| **Artikel** | `is_shop_eligible(sky_id)` | **unverändert** — die Figurenregel aus `0135`, Zeichen für Zeichen |
+| **Position** | `is_position_sellable(inventory_id)` | **ruft** das obere für Figuren auf; für Zubehör verlangt es zusätzlich Art, Aktivität, Katalogsichtbarkeit, **USK bei Spielen** und die **ausdrückliche Freigabe dieser Position** |
+
+**`is_shop_eligible()` wird nicht angefasst, und das ist der Kern des
+Sicherheitsarguments.** Das neue Tor RUFT sie für den Figurenfall auf, statt
+ihre Regel abzuschreiben. „Für Figuren ändert sich nichts" ist damit keine
+Zusage, die jemand pflegen müsste, sondern eine Eigenschaft des Textes — und
+534 bleibt 534, auch auf Artikelebene.
+
+Die vier Türen fragen künftig **nur noch die Position**. Ein Tausch je Tür,
+eine Regel an einem Ort.
+
+---
+
+## Teil C — Die Umsetzung
+
+### C1. Migration `0139` — geschrieben, NICHT angewendet
 
 ```sql
+alter table public.shop_inventory
+  add column sale_released boolean not null default false;
+
 alter table public.skylanders
-  add column shop_released boolean not null default false;
+  add column usk_rating smallint;                   -- null = nicht erfasst
 ```
 
-`not null default false` heißt: **alle 626 Zeilen stehen am Tag danach auf
-„nicht freigegeben", und nichts ändert sich.** Für Figuren ist die Spalte
-ohne Wirkung (siehe 4b).
+`not null default false` heißt: **alle 285 Lagerzeilen stehen am Tag danach
+auf „nicht freigegeben"**, die 13 Altlastzeilen eingeschlossen. Es entsteht
+kein einziges Angebot.
 
-### 4b. Das Prädikat bekommt einen ODER-Zweig, keinen neuen Typ
+**Das Tor an der Position** ist das einzige neue Prädikat:
 
 ```sql
-and (s.item_type = 'figure' or s.shop_released)
+public.is_position_sellable(p_inventory_id bigint)
+  -- FIGUR: unverändert, durch Aufruf statt durch Kopie
+  is_shop_eligible(i.sky_id)
+  -- ZUBEHÖR: fünf Bedingungen, alle neu
+  or (s.item_type in ('game','portal')
+      and s.is_active and s.catalog_visible
+      and (s.item_type <> 'game' or s.usk_rating is not null)
+      and i.sale_released)
 ```
 
-* **Für Figuren ändert sich nichts** — der linke Zweig trifft wie bisher,
-  die 534 shopfähigen Zeilen bleiben 534, der Abdruck `4d1d6c30…` bleibt
-  stehen. Das ist im Postflight beweisbar, genau wie bei `0135`.
-* **Für Zubehör ändert sich nichts**, bis jemand `shop_released` setzt.
-* Die Kategorieregel (`non_collectible_categories()`) bleibt unberührt.
-  Sammelbarkeit und Verkäuflichkeit bleiben getrennt — ein freigegebenes
-  Spiel wird dadurch **nicht** sammelbar.
+**Vier Türen tauschen eine Zeile:** `is_shop_eligible(i.sky_id)` →
+`is_position_sellable(i.id)`. Für Figuren ist das beweisbar dieselbe
+Aussage — der Zweig `item_type = 'figure'` fordert nichts Neues.
 
-### 4c. Eine Adminfunktion, nach dem Muster von `admin_set_catalog_visible()`
+**Der Beweis im Postflight:** `534` shopfähige Zeilen bleiben `534`, `256`
+Angebote bleiben `256`, der Abdruck `4d1d6c30…` bleibt Zeichen für Zeichen
+stehen, und **kein Zubehörteil** steht im Angebot. Dazu die schärfere
+Prüfung: **Zeile für Zeile** antwortet jede der 285 Lagerpositionen am neuen
+Tor genau so wie am alten — eine Figur, die herausfiele, und ein Zubehörteil,
+das dazukäme, heben sich in einer Summe auf, hier nicht.
 
-```sql
-admin_set_shop_released(p_sky_id text, p_released boolean)
-```
+**Und ein Textvergleich im Test:** `accessory-sale.test.ts` nimmt jede der
+vier Türen aus ihrer alten Migration, wendet die eine erlaubte Ersetzung an
+und verlangt, dass das Zeichen für Zeichen die Fassung in `0139` ist. Eine
+Bedingung, die beim Neuschreiben verrutscht, fällt damit auf.
 
-Prüft `is_admin()` in der Datenbank, schreibt die Spalte, schreibt einen
-Eintrag in `catalog_admin_changes`. **Lehnt `item_type = 'figure'` ab** — für
-Figuren ist die Spalte bedeutungslos, und eine Wahl ohne Wirkung ist eine
-Falle.
+**Zwei neue Betriebsfunktionen:**
 
-### 4d. Die Betriebsansicht muss mitziehen
+| Funktion | tut | lehnt ab |
+|---|---|---|
+| `seller_set_sale_release(p_sky_id, p_condition, p_released)` | setzt `sale_released` an **einer** Position | eine **Figur** (dort ist der Schalter ohne Wirkung — und ein wirkungsloser Schalter ist eine Falle) · eine unbekannte Position · ein **Spiel ohne USK-Erfassung** |
+| `admin_set_usk_rating(p_sky_id, p_rating)` | erfasst die Alterskennzeichnung | alles außer `0, 6, 12, 16, 18` · alles außer `item_type = 'game'` |
 
-`seller_inventory_listing()` (`0041`) liefert neben der Eignung einen Grund,
-und der Grund wird **unabhängig** vom Prädikat berechnet. Nach der Änderung
-sagte er für ein freigegebenes Spiel weiterhin `'not a collectible'`,
-während die Eignung `true` meldet. **Dieser Widerspruch gehört in dieselbe
-Migration**: der Grund bekommt einen Zweig `'not released for sale'` und
-hört auf, „nicht sammelbar" als Verkaufshindernis zu nennen.
+**`admin_shop_listing_audit()` zieht mit:** der Grund wird heute unabhängig
+vom Prädikat berechnet und sagte für ein freigegebenes Spiel weiterhin
+„not a collectible". Er bekommt die Zweige `'usk rating missing'` und
+`'not released for sale'`, und „nicht sammelbar" hört auf, ein
+Verkaufshindernis zu sein.
 
-### 4e. Was die Oberfläche dann schon kann
+### C2. Anwendungsseite
 
-Nichts davon braucht neuen Anwendungscode:
+| Ort | Änderung |
+|---|---|
+| `/business/inventory` | für Zubehör: Preisfeld, Mengen, **Freigabeschalter** und ein Satz, **warum** eine Position noch nicht verkäuflich ist. Dieselbe Bedienung wie bei Figuren |
+| `isShopGoods()` | aus „jede Zubehörposition ist keine Shopware" wird „Figur, oder freigegebene Zubehörposition" |
+| `AccessoryCard` | nutzt die echte Angebotslogik — Preis bei Angebot, sonst unverändert „Aktuell kein Angebot" |
+| **`/zubehoer/[slug]`** | **neu**: die Detailseite eines Zubehörteils, mit `OfferPanel` und „In den Warenkorb". Die Kachel verlinkt dorthin, wie die Figurenkarte auf `/skylanders/<slug>#angebote` |
+| `/shop` | nimmt freigegebene Zubehörangebote auf — dieselbe Seite, dieselbe `shopEntries()`-Regel, erweitert um Zubehör |
+| Warenkorb, Checkout, Zahlung, Bestellung, Storno, Erstattung | **keine Änderung.** Sie sind bereits typneutral (A3) |
 
-* `/zubehoer` liest seit heute `fetchOffers()` — **dieselbe Projektion** wie
-  Shop und Figurenkatalog. Jede Kachel hat ihre Angebotsstelle und sagt
-  heute „Aktuell kein Angebot". Wird ein Artikel freigegeben und bepreist,
-  füllt sie sich von selbst.
-* Was die Kachel **nicht** hat, ist ein Kaufknopf. Der ist ein eigener,
-  bewusster Schritt und steht nicht in diesem Vorschlag
-  (`accessory-area.test.ts` hält das fest).
-* Lager, Bewegungen und Einkaufshistorie sind für Zubehör seit `0137` /
-  `0138` vollständig — es fehlt nichts auf der Bestandsseite.
+**Warum eine Detailseite und kein Kaufknopf auf der Kachel:** ein Angebot für
+ein gebrauchtes Spiel muss Zustand, Lieferumfang, Plattform und
+Alterskennzeichnung zeigen. Auf einer Kachel ist dafür kein Platz, und ein
+Kauf ohne diese Angaben wäre genau der Fehler, den Punkt 5 ausschließt.
 
 ---
 
-## 5. Was NICHT technisch ist — und vor der Migration entschieden gehört
+## Teil D — Rechtlich offen, vor jeder Freigabe zu entscheiden
 
-### 5a. Privat- und gewerbliche Verkäufer: das ist der Marketplace-Stopp
+Diese vier Punkte sind **nicht** technisch lösbar und werden deshalb
+vorgelegt statt beantwortet.
 
-Der Wunsch nennt „später private und gewerbliche Verkäufer". Das ist
-**ADR-0021** und die Single-Seller-Regel aus `CLAUDE.md`: kein `seller_id`,
-keine sellerbezogenen Bestandsstrukturen, keine Multi-Seller-Bestellungen,
-kein Seller-Onboarding — **auch nicht konzeptionell, auch nicht „nur das
-Datenmodell".**
+### D1. USK — es gibt keine Datenquelle im Projekt
 
-Der Vorschlag oben ist deshalb bewusst **einverkäuferisch**: `shop_released`
-ist eine Eigenschaft des Artikels, keine Beziehung zu einem Verkäufer.
-Mehrere Verkäufer sind eine eigene, große Entscheidung und werden hier nicht
-vorbereitet. **Das ist eine Einschränkung des Vorschlags, keine Lücke.**
+Die Arbeitsmappe führt **keine** Alterskennzeichnung, und sie wird **nicht
+geraten** (`CLAUDE.md` Regel 4 und Punkt 5 des Auftrags). `0139` legt die
+Spalte an und **verweigert die Freigabe jedes Spiels ohne Eintrag** — aber
+die 39 Werte muss jemand erfassen.
 
-### 5b. Alterskennzeichnung bei Spielen
+**Zu entscheiden:** woher. Die Kennzeichnung steht auf jeder Hülle; die
+USK-Titeldatenbank ist die amtliche Quelle. Beides ist Handarbeit des
+Betreibers, keine Ableitung.
 
-Skylanders-Titel tragen eine USK-Kennzeichnung. Beim Fernabsatz von
-Bildträgern muss die Kennzeichnung **in der Artikelbeschreibung erkennbar**
-sein. Im Katalog steht sie heute nirgends — es gibt keine Spalte dafür und
-keine Quelle in der Arbeitsmappe. **Vor dem ersten Spieleverkauf braucht es
-also entweder eine gepflegte Angabe je Titel oder die Entscheidung, zunächst
-nur Portale freizugeben** (die sind Zubehör ohne Inhalt und tragen keine
-Kennzeichnung).
+> **Folge, und sie ist beabsichtigt:** solange kein Spiel eine USK-Angabe
+> trägt, ist **kein Spiel freigebbar**. Die **21 Portale sind es sofort** —
+> ein Portal ist Hardware und trägt keine Alterskennzeichnung.
 
-> Portale sind damit der **einfachere erste Schritt** — und sie haben heute
-> ohnehin keinen Bestand, also ist nichts eilig.
+### D2. Zustand und Lieferumfang — ein öffentliches Feld fehlt
 
-### 5c. Steuer und Widerruf
+`shop_inventory.note` ist **intern und niemals öffentlich**
+(`docs/SECURITY.md`). Ein Angebot für ein gebrauchtes Spiel muss aber sagen,
+**was geliefert wird** — Disc mit oder ohne Originalhülle, mit oder ohne
+Anleitung.
 
-Beides ist nach erstem Augenschein **dasselbe wie bei Figuren** — derselbe
-Verkäufer, dieselbe Rechtsform, gebrauchte Ware, 14 Tage Widerruf (die
-Ausnahme für versiegelte Software greift bei loser Ware nicht). Trotzdem
-gilt: **das ist keine steuerliche Beratung.** Ob die bestehende
-Besteuerungsart unverändert auf Software anwendbar ist, bestätigt der
-Betreiber oder sein Steuerberater, bevor etwas freigegeben wird.
-`docs/LEGAL.md` ist dann entsprechend zu ergänzen.
+`shop_offers()` liefert heute vier Felder und sonst nichts; das ist eine
+bewusste Enge (`0006`). Ein öffentliches Zustandsfeld erweitert diesen
+Vertrag und wird deshalb **nicht nebenbei** gebaut.
 
-### 5d. Was „loose" bei einem Spiel heißt
+**Zu entscheiden:** ob der Lieferumfang je Position frei getextet wird oder
+aus einer kleinen festen Liste gewählt (empfohlen: feste Liste — sie ist
+übersetzbar, filterbar und nicht versehentlich eine Zusicherung).
 
-`v1_sale_condition()` liefert konstant `'loose'`, und `0108` erzwingt eine
-Lagerzeile je Artikel in dieser Beschaffenheit. Für eine Figur ist „lose"
-eindeutig. Für ein Spiel ist es das nicht — Disc ohne Hülle? mit Hülle, ohne
-Anleitung? Entweder bekommt das Wort für Zubehör eine schriftliche
-Bedeutung, oder die Beschaffenheiten werden erweitert — und **Letzteres
-berührt `0108`, `0028`, `0029` und `create_order()`** und ist deutlich
-teurer. **Empfehlung: das Wort festlegen, die Vokabel nicht anfassen.**
+### D3. Steuer
 
-### 5e. Keine erfundene Plattformkompatibilität
+Gleicher Verkäufer, gleiche Rechtsform, gebrauchte Ware. Nach erstem
+Augenschein ändert sich nichts gegenüber Figuren. **Das ist keine
+steuerliche Beratung** — die Bestätigung gehört dem Betreiber oder seinem
+Steuerberater, und `docs/LEGAL.md` wird danach fortgeschrieben.
 
-Bei Portalen wird die Plattform **nicht** angezeigt, weil sie nirgends
-gespeichert ist (ADR-0128). Wird ein Portal verkauft, ist eine
-Kompatibilitätsangabe eine **zugesicherte Eigenschaft**. Sie darf erst
-entstehen, wenn sie gepflegt ist — nicht abgeleitet, nicht geraten.
+### D4. Widerruf
+
+Die Ausnahme für **versiegelte** Datenträger (§ 312g Abs. 2 Nr. 6 BGB)
+greift bei gebrauchter, offener Ware **nicht**. Es bleibt beim gewohnten
+14-tägigen Widerruf — also unverändert zur Figur. Zu bestätigen, nicht zu
+ändern.
 
 ---
 
-## 6. Der vorgeschlagene Weg, in der Reihenfolge
+## Teil E — Die Reihenfolge
 
-| # | Schritt | Art | Wer |
+| # | Schritt | Art | wer |
 |---|---|---|---|
 | 1 | `accessory_offer_readonly.sql` auf Staging fahren | rein lesend | Betreiber, SQL-Editor |
-| 2 | 5a–5e entscheiden; `docs/LEGAL.md` und ADR-0128 fortschreiben | Entscheidung | Betreiber |
-| 3 | `0139` schreiben: Spalte, Prädikat, Adminfunktion, Grundzweig — mit Preflight, Postflight, Rollback | Migration, **unangewendet** | später |
-| 4 | Probelauf gegen echtes PostgreSQL (`verify:check-sql`), Beweis: **534 bleibt 534, `4d1d6c30…` bleibt stehen** | lesend | später |
-| 5 | auf Staging anwenden, einen Artikel freigeben, bepreisen, im Katalog ansehen | Staging | Betreiber |
-| 6 | Kaufknopf auf der Zubehörkachel | eigene Aufgabe | später |
+| 2 | `0139_preflight.sql` → `0139` → `0139_postflight.sql` auf **Staging** | Migration | Betreiber, SQL-Editor |
+| 3 | Oberfläche: Lagerverwaltung, Kachel, Detailseite, `/shop` | Code | folgt nach Schritt 2 |
+| 4 | **ein Portal** freigeben, bepreisen, kaufen, stornieren — der Durchstich | Staging | Betreiber |
+| 5 | D1 entscheiden, USK erfassen, dann Spiele | Entscheidung | Betreiber |
+| 6 | Production | Freigabe | Betreiber |
 
-**Schritt 3 beginnt nicht, bevor Schritt 2 entschieden ist.** Der
-Unterschied zwischen „darf im Schaufenster stehen" und „darf verkauft
-werden" ist keine Frage des Datenmodells.
+**Schritt 3 beginnt erst nach Schritt 2:** eine Oberfläche, die eine Spalte
+liest, die es in der Datenbank nicht gibt, bringt `/business/inventory` zum
+Absturz. Die Reihenfolge ist nicht Vorsicht, sondern Notwendigkeit.

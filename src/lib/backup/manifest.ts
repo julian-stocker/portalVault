@@ -214,8 +214,25 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     key: "shop_inventory",
     source: "shop_inventory",
     purpose: "Der aktuelle Bestand je Figur und Zustand.",
+    /*
+     * EINE SPALTE MEHR (0140): `sale_released` — die Freigabe DIESER
+     * Position für den öffentlichen Verkauf (0139).
+     *
+     * Sie ist aus keinem anderen Feld ableitbar, und genau deshalb gibt es
+     * sie: `is_listed` sagt „im Schaufenster", `sale_released` sagt „darf
+     * überhaupt verkauft werden". Die 13 Lagerzeilen auf Spielen tragen
+     * seit jeher `is_listed = true` und waren nie verkäuflich — eine
+     * Wiederherstellung, die die zweite Spalte verlöre, könnte die beiden
+     * Zustände nicht mehr auseinanderhalten und stünde vor der Wahl,
+     * entweder alles freizugeben oder nichts.
+     *
+     * Sie steht direkt hinter `is_listed`: die beiden Freigabespalten
+     * nebeneinander. `backup-sql.test.ts` vergleicht die Reihenfolge Feld
+     * für Feld mit dem Rumpf der letzten Migration.
+     */
     fields: ["id", "sky_id", "condition", "quantity", "reserved", "available_quantity",
-             "sale_price", "is_listed", "note", "created_at", "updated_at"],
+             "sale_price", "is_listed", "sale_released", "note",
+             "created_at", "updated_at"],
     restoreRelevant: true,
   },
   {
@@ -596,9 +613,17 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
      * dort direkt nach `card_type` — die beiden Typspalten nebeneinander —,
      * und `0136` ist deshalb eine reine Einfügung einer Zeile in den Rumpf aus
      * `0131`.
+     *
+     * UND EINE WEITERE (0140): `usk_rating`, direkt hinter `item_type`.
+     *
+     * Die USK-Alterskennzeichnung eines Spiels wird von Hand erfasst — aus
+     * der Hülle oder der USK-Titeldatenbank — und ist aus nichts im System
+     * ableitbar. Ginge sie verloren, müsste jemand 39 Hüllen wieder in die
+     * Hand nehmen, und bis dahin wäre kein Spiel freigebbar (`0139`). Sie
+     * ist öffentliche Produktinformation, keine interne Angabe.
      */
     fields: ["sky_id", "name", "slug", "series_code", "card_type", "item_type",
-             "market_price", "category_id", "is_active", "source"],
+             "usk_rating", "market_price", "category_id", "is_active", "source"],
     excluded: {
       created_at: "Zeitstempel des Katalogsatzes; ohne Bedeutung für den Bestand",
       updated_at: "wie created_at",

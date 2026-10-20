@@ -484,6 +484,34 @@ Dass beide Zustände auseinanderlaufen können, ist ausdrücklich modelliert:
 Grund**, wenn die Eignung fehlt. Eine Position „freigegeben, aber nicht geeignet" ist damit
 sichtbar und benannt, statt als Fehler zu erscheinen.
 
+#### Seit `0139`: eine dritte Stufe, und sie sitzt an der Position
+
+**Vorbereitet, nirgends angewendet** (`supabase/migrations/APPLIED.md`). Spiele und Portale
+dürfen künftig verkauft werden (ADR-0129) — aber **Stück für Stück**:
+
+| Stufe | wo | sagt |
+|---|---|---|
+| `is_listed` | Position | im Schaufenster. Entsteht per Vorgabewert |
+| `is_shop_eligible(sky_id)` | Artikel | die Figurenregel aus `0135`, **unverändert** |
+| **`sale_released`** | **Position** | diese Zubehörposition ist ausdrücklich zum Verkauf freigegeben. `not null default false` |
+
+Die vier Verkaufstüren — `shop_offers()`, `shop_quantity_available()`, `create_order()` und
+`reserve_for_order()` — fragen ab `0139` **ein** Tor: `is_position_sellable(inventory_id)`. Für
+eine Figur ruft es `is_shop_eligible()` auf und ist damit per Konstruktion dieselbe Aussage wie
+vorher; für Zubehör verlangt es zusätzlich Artikeltyp `game`/`portal`, Aktivität,
+Katalogsichtbarkeit, bei Spielen eine erfasste `usk_rating` — und `sale_released`.
+
+**Warum an der Position und nicht am Artikel:** weil die 13 gelisteten Spielezeilen zeigen, wo
+die Gefahr wohnt, und weil `shop_inventory` die Zeile ist, die eine spätere
+Marketplace-Architektur je Verkäufer führen würde. Vorsorge, keine Implementierung — kein
+`seller_id` (ADR-0021).
+
+`skylanders.usk_rating smallint` (nullable, CHECK `0, 6, 12, 16, 18`) trägt die
+Alterskennzeichnung eines **Spiels**. NULL heißt **nicht erfasst**, nie „ohne Kennzeichnung";
+sie wird von Hand über `admin_set_usk_rating()` gepflegt und nie abgeleitet.
+`admin_shop_listing_audit()` kennt dafür die Gründe `usk rating missing`,
+`not released for sale` und `item type not sold`.
+
 **Was daraus folgt:** `is_listed` bei einem Spiel ist **kein** Befund und wird nicht
 „korrigiert". Wer Zubehör irgendwann öffentlich verkaufen will, ändert nicht diese Flags, sondern
 revidiert ADR-0029/0048 — und dann auch `0108` (nur lose Figuren), weil bei einem Spiel die

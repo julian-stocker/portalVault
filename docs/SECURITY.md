@@ -1354,6 +1354,13 @@ Tabellen-Grant kennt keine Spalten. Was hier geschrieben wird, ist Produktname, 
 Kategorie, Artikeltyp, Slug — alles öffentlich unbedenklich. Lagerzahl, Einkaufspreis und
 Ankauffaktor bleiben, wo sie sind; die Verbotsliste in Abschnitt 2 ist unberührt.
 
+> **`usk_rating` (`0139`) gehört ausdrücklich in diese Aufzählung.** Eine
+> Alterskennzeichnung ist das Gegenteil einer internen Angabe: sie **muss**
+> im Angebot erkennbar sein, sonst darf das Angebot nicht stehen. Sie liegt
+> deshalb auf `skylanders` und nicht in `catalog_editorial`. Geschrieben wird
+> sie allein über `admin_set_usk_rating()` — Plattformadmin, nur für
+> `item_type = 'game'`, Wertemenge per CHECK, **nie abgeleitet**.
+
 **Der Journaleintrag.** Jede Entstehung schreibt eine Zeile in `catalog_admin_changes`
 (`field = 'created'`, `changed_by = auth.uid()`) — dieselbe Zeile, die `admin_create_figure`
 schreibt. Das Journal sagt damit auch, **dass** die Zeile nicht aus dem Adminbereich kam.
@@ -1380,12 +1387,28 @@ Sichtbarkeit herstellt, wäre ein Filter, den man abschalten kann. Ein Portal
 steht auf `false` und erscheint öffentlich erst, wenn ein Administrator es
 unter `/admin/catalog` einzeln freigibt; eine Sammelfreigabe gibt es nicht.
 
-**Und Sichtbarkeit ist nicht Verkäuflichkeit.** Die Seite fragt weder
-`fetchOffers()` noch `fetchOwnedSkyIds()`, zeigt keinen Preis und keinen
-Warenkorbknopf. Beide Antworten lauten für Zubehör nein —
-`is_shop_eligible()` am Artikeltyp seit `0135`, `isCollectible()` am Typ und
-am Kategorienamen seit `0137` —, und eine Anzeige davon wäre ein Versprechen,
-das die Datenbank ablehnt.
+**Und Sichtbarkeit ist nicht Verkäuflichkeit.** Die Seite fragt
+`fetchOwnedSkyIds()` nicht und zeigt kein Besitzsiegel: Zubehör ist nicht
+sammelbar (`isCollectible()` am Typ und am Kategorienamen seit `0137`), und
+eine Anzeige davon wäre ein Versprechen, das die Datenbank ablehnt.
+
+Die **Angebotsprojektion** fragt sie dagegen — `fetchOffers()`, dieselbe
+Projektion wie Shop und Figurenkatalog, keine zweite Angebotsverwaltung. Sie
+ist für Zubehör heute leer (`shop_offers()` schließt es über
+`is_shop_eligible()` am Artikeltyp aus, `0135`), und jede Kachel sagt
+deshalb „Aktuell kein Angebot". **Einen Kaufknopf gibt es nicht**, und dass
+es keinen gibt, hält `accessory-area.test.ts` fest.
+
+**Ab `0139` (vorbereitet, nicht angewendet) verschiebt sich die Grenze — und
+wird enger, nicht weiter.** Zubehör darf dann verkauft werden, aber nur mit
+einer ausdrücklichen Freigabe **je Lagerposition**
+(`shop_inventory.sale_released`, Vorgabe `false`). Die vier Verkaufstüren
+fragen dann `is_position_sellable(inventory_id)`; für eine Figur ruft es
+`is_shop_eligible()` auf und ändert nichts. **Katalogsichtbarkeit bewirkt
+auch dann keine Verkaufsfreigabe** — sie ist eine von fünf notwendigen
+Bedingungen. Die 13 Lagerzeilen auf Spielen, die seit jeher `is_listed =
+true` und einen Preis tragen, bleiben durch den Vorgabewert draußen
+(ADR-0129).
 
 **Die Sammlung bleibt davon unberührt, in drei Schichten.**
 `fetchCollection()` verwirft nicht sammelbare Zeilen an der Quelle,

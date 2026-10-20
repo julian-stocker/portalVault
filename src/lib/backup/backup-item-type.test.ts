@@ -144,9 +144,20 @@ describe("die Form des Exports ändert sich an genau einer Stelle", () => {
     }
   });
 
-  it("und die Reihenfolge in figures ist die des Manifests", () => {
+  it("und die Reihenfolge in figures ist die des Manifests — ohne das, was NACH 0136 kam", () => {
+    /*
+     * `0136` ist eine abgeschlossene Datei und bleibt es. Das Manifest
+     * dagegen folgt dem JEWEILS LETZTEN Stand, und seit `0140` trägt es
+     * zusätzlich `usk_rating` (ADR-0128 / `0139`). Verglichen wird deshalb
+     * die Liste von `0136` mit dem Manifest OHNE die später gekommenen
+     * Felder — die Reihenfolge der zehn aus `0136` muss unverändert sein.
+     *
+     * Dass das Manifest zum heutigen Rumpf passt, prüft `backup-sql.test.ts`
+     * gegen die letzte Migration, die die Funktion definiert.
+     */
     const manifest = BACKUP_SECTIONS.find((s) => s.key === "figures")!;
-    expect(neu.figures).toEqual(manifest.fields);
+    const NACH_0136 = ["usk_rating"];
+    expect(neu.figures).toEqual(manifest.fields.filter((f) => !NACH_0136.includes(f)));
   });
 
   it("353 Feldzeilen insgesamt, eine mehr als die 352 aus 0131", () => {

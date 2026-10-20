@@ -307,6 +307,30 @@ hat Geld gekostet, es muss in die Position — und dafür zweimal das Konto zu w
 Grund, warum es vorher als Freitext ohne Bestand und ohne Historie landete. Die Begründung
 und die Grenzen stehen vollständig in `docs/SECURITY.md`.
 
+**Nachtrag 2026-10-20 (ADR-0129): zwei weitere Türen, und sie liegen bewusst auseinander.**
+`0139` (vorbereitet, nirgends angewendet) macht Spiele und Portale verkäuflich — Stück für
+Stück. Die beiden Schreiboperationen dazu gehören **verschiedenen Rollen**, weil sie
+verschiedene Fragen beantworten:
+
+| Funktion | Rolle | entscheidet |
+|---|---|---|
+| `seller_set_sale_release(sky_id, condition, released)` | `can_operate_active_seller()` | **Verkaufe ich diese Lagerposition?** Eine Betriebsentscheidung über eine Zeile im eigenen Regal |
+| `admin_set_usk_rating(sky_id, rating)` | `is_platform_admin()` | **Welche Alterskennzeichnung trägt dieses Spiel?** Katalogdatum wie `display_name_override` oder `catalog_visible` (ADR-0039, ADR-0077) |
+
+Die Trennung ist nicht Formalismus: eine USK-Einstufung beschreibt das Produkt und gilt für
+jedes Exemplar und jeden künftigen Händler; eine Verkaufsfreigabe beschreibt ein Angebot und
+gilt für genau eine Position.
+
+`seller_set_sale_release()` lehnt ab: eine **Figur** (dort entscheidet `is_shop_eligible()`
+wie seit `0008`, und ein wirkungsloser Schalter wäre eine Falle), einen Artikeltyp außer
+`game`/`portal`, eine Position, die es nicht gibt, eine andere Beschaffenheit als
+`v1_sale_condition()` — und ein **Spiel ohne erfasste USK-Kennzeichnung**. Die letzte Prüfung
+hängt an `p_released`: das **Zurücknehmen** einer Freigabe bleibt immer möglich, auch wenn die
+Angaben unvollständig sind.
+
+`set_shop_listing()` wird dabei **nicht** erweitert. Preis und Freigabe bleiben zwei Aufrufe —
+wer beides in einen legt, gibt irgendwann beim Preispflegen versehentlich frei.
+
 ---
 
 ## 7. E-Mail-Versand

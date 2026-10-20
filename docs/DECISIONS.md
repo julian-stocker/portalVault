@@ -11810,3 +11810,107 @@ Dazu, aus der Umsetzung:
   Deployment des Anwendungscodes **vor** diesen Migrationen ließe jede
   Katalogabfrage auf eine fehlende Spalte laufen. Die Migrationen gehen also
   zuerst, das Deployment danach — festgehalten in `docs/DEPLOYMENT.md`.
+
+---
+
+## ADR-0129 · Spiele und Portale werden verkauft — freigegeben je Lagerposition
+
+**Status:** akzeptiert (Produktentscheidung des Betreibers, 2026-10-20) ·
+**Umsetzung:** `0139` und `0140` geschrieben, **nirgends angewendet**;
+Oberfläche folgt nach der Anwendung auf Staging.
+
+### Die Entscheidung
+
+Spiele und Portale werden über den **eigenen SkyIsles-Shop** verkauft — mit
+derselben Angebots-, Warenkorb-, Checkout- und Bestellarchitektur wie
+Figuren, und weiterhin **vollständig außerhalb der Sammlung**. Das revidiert
+ADR-0029/0048 für genau zwei Artikeltypen (`game`, `portal`) und berührt
+`0108` nicht: verkauft wird weiterhin nur die eine Beschaffenheit, die
+`v1_sale_condition()` nennt.
+
+### Der Befund, der die Form bestimmt hat
+
+Die Angebotsarchitektur hat **ein** Tor, und jede Tür fragt es:
+`shop_offers()`, `shop_quantity_available()`, die Warenkorbprüfung,
+**`create_order()`** und `reserve_for_order()` — die letzte Prüfung unter
+Zeilensperre. Es braucht deshalb keine zweite Angebotsverwaltung und keinen
+zweiten Warenkorb; der Warenkorb kennt den Artikeltyp ohnehin nicht (seine
+Identität ist `sky_id + condition`, und er lädt den Katalog nie).
+
+**Und es macht eine unvorsichtige Lockerung gefährlich.** 13 Lagerpositionen
+auf Spielen tragen `is_listed = true` — und tragen zwingend auch einen
+Preis, weil `shop_inventory_listed_needs_price` (`0003`) das eine ohne das
+andere verbietet. Ihnen fehlt zur Veröffentlichung ausschließlich das Tor.
+Eine Lockerung am Artikeltyp wäre also **keine Vorbereitung, sondern eine
+Veröffentlichung**.
+
+### Die Freigabe hängt an der LAGERPOSITION
+
+`shop_inventory.sale_released boolean not null default false`. Ein erster
+Entwurf hatte `skylanders.shop_released` vorgeschlagen; das ist verworfen:
+
+1. **Das Korn stimmt.** Preis, Menge, Listung und Beschaffenheit sitzen an
+   der Position; eine Verkaufsfreigabe ist eine Aussage über ein **Angebot**,
+   nicht über einen Artikel. Ein Schalter am Artikel gäbe alle Positionen
+   dieses Artikels auf einmal frei.
+2. **Es ist der richtige Ort für später.** `shop_inventory` ist die Zeile,
+   die eine Marketplace-Architektur je Verkäufer führen würde — eine Freigabe
+   dort ist von Natur aus händlereigen. **Das ist Vorsorge, keine
+   Implementierung:** kein `seller_id`, keine Seller-RLS, kein Onboarding,
+   kein Stripe Connect, keine Provision. **Der Stopp aus ADR-0021 gilt
+   unverändert.**
+3. **Die Vorgabe `false` trifft auch die Altlast.** Nach `0139` ist genau so
+   viel kaufbar wie vorher: nichts Neues.
+
+### `is_shop_eligible()` wird nicht angefasst
+
+Das ist der Kern des Sicherheitsarguments. Die Figurenregel aus `0135` bleibt
+Zeichen für Zeichen stehen; das neue Tor
+`is_position_sellable(inventory_id)` **ruft** sie für den Figurenfall auf,
+statt sie abzuschreiben. „Für Figuren ändert sich nichts" ist damit keine
+Zusage, die jemand pflegen müsste, sondern eine Eigenschaft des Textes.
+
+Der Zubehörzweig verlangt fünf Dinge: Artikeltyp `game` oder `portal` ·
+`is_active` · `catalog_visible` · bei Spielen eine erfasste
+**USK-Kennzeichnung** · und `sale_released`. **Katalogsichtbarkeit allein
+bewirkt keine Verkaufsfreigabe** — sie ist notwendig, nie hinreichend.
+
+### Die Alterskennzeichnung ist eine Sperre, kein Feld
+
+`skylanders.usk_rating smallint`, nullable, CHECK auf `0, 6, 12, 16, 18`.
+**NULL heißt „nicht erfasst"** — nie „ohne Kennzeichnung" und nie „0". Die
+Arbeitsmappe führt keine USK-Angabe, und sie wird **nicht geraten**
+(`CLAUDE.md` Regel 4). `seller_set_sale_release()` lehnt ein Spiel ohne
+Eintrag ab; die Prüfung hängt an `p_released`, damit das **Zurücknehmen**
+einer Freigabe immer möglich bleibt.
+
+**Folge, und sie ist beabsichtigt:** solange keine USK-Werte erfasst sind,
+ist **kein Spiel freigebbar**. Die **21 Portale sind es** — Hardware trägt
+keine Alterskennzeichnung.
+
+Die Spalte liegt auf `skylanders`, obwohl die Tabelle weltlesbar ist. Das ist
+kein Widerspruch zu `docs/SECURITY.md`: die Regel dort verbietet **interne**
+Daten an dieser Stelle, und eine Alterskennzeichnung ist das Gegenteil von
+intern — sie **muss** im Angebot erkennbar sein.
+
+### Konsequenzen
+
+* Zwei Spalten, drei neue Funktionen (`is_position_sellable`,
+  `seller_set_sale_release`, `admin_set_usk_rating`), vier getauschte Zeilen
+  in den vier Türen, ein erweiterter Grundkatalog in
+  `admin_shop_listing_audit()`. Mehr nicht.
+* **Die Betriebssicherung zieht nach** (`0140`): beide Spalten tragen eine
+  Entscheidung, die sich aus nichts rekonstruieren lässt. 353 Feldzeilen
+  werden 355.
+* **Storno, Retoure, Erstattung und Lagerabgang bleiben unberührt.** Sie
+  hängen an `order_lines.inventory_id`, nicht am Artikeltyp, und
+  funktionieren für Zubehör unverändert.
+* **Die Sammlung bleibt unberührt.** `non_collectible_categories()` wird
+  nicht angefasst, die 534 sammelbaren Figuren bleiben 534, Zubehör bleibt
+  aus jeder Sammlung heraus (ADR-0128).
+* **Die Belegausstellung bleibt gesperrt.** `0139` prüft das sogar nach.
+* Noch **offen und vor der ersten Freigabe zu entscheiden**: die USK-Quelle,
+  ein öffentliches Feld für Zustand und Lieferumfang (`shop_inventory.note`
+  ist intern und bleibt es), die steuerliche Bestätigung und die Bedeutung
+  von „lose" bei einem Spiel. Vollständig:
+  `supabase/checks/accessory_offer_proposal.md`, Teil D.

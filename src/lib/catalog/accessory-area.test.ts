@@ -261,19 +261,33 @@ describe("ein freigegebenes Portal", () => {
     expect(code(QUERIES)).toContain("const figures = collectibleOnly(");
   });
 
-  it("und wird NICHT shopfähig", () => {
+  it("und wird NICHT allein dadurch verkäuflich", () => {
     /*
-     * `is_shop_eligible()` verlangt seit `0135` `item_type = 'figure'` —
-     * unabhängig von der Sichtbarkeit. Und `shop_offers()` fragt die
-     * Funktion, statt die Bedingung zu wiederholen.
+     * SICHTBAR UND VERKÄUFLICH SIND ZWEI ENTSCHEIDUNGEN, und das gilt vor
+     * wie nach `0139`. Was sich geändert hat, ist die Stelle:
+     *
+     *   bis 0139   `is_shop_eligible()` lehnte jedes Zubehörteil am
+     *              ARTIKELTYP ab — verkäuflich war es nie.
+     *   ab  0139   verkäuflich ist es erst mit einer ausdrücklichen
+     *              Freigabe AN DER LAGERPOSITION (`sale_released`,
+     *              Vorgabe `false`). Die Katalogsichtbarkeit ist dafür
+     *              notwendig, nie hinreichend.
+     *
+     * Beide Male gilt dieselbe Zusicherung: eine Freigabe im Katalog
+     * bewirkt keine im Shop.
      */
-    /* Der Riegel sitzt in `is_shop_eligible()` selbst — seit `0135` am
-       Artikeltyp, nicht an der Sichtbarkeit. */
     expect(codeOf(latestFunction("is_shop_eligible").body)).toContain("s.item_type = 'figure'");
-    /* Und `shop_offers()` FRAGT die Funktion, statt die Bedingung zu
-       wiederholen: eine Regel, ein Ort, drei Türen. */
+
+    const tor = codeOf(latestFunction("is_position_sellable").body);
+    /* Der Zubehörzweig verlangt die Sichtbarkeit UND die Freigabe. */
+    expect(tor).toContain("s.catalog_visible");
+    expect(tor).toContain("and i.sale_released");
+    expect(tor).not.toContain("or i.sale_released");
+
+    /* Und `shop_offers()` FRAGT das Tor, statt die Bedingung zu
+       wiederholen: eine Regel, ein Ort, vier Türen. */
     expect(codeOf(latestFunction("shop_offers").body))
-      .toContain("public.is_shop_eligible(i.sky_id)");
+      .toContain("public.is_position_sellable(i.id)");
   });
 
   it("und bekommt keine Detailseite", () => {

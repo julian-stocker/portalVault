@@ -3756,6 +3756,84 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
+### Spiele und Portale verkaufen — vorbereitet, nicht angewendet (2026-10-20)
+
+**Die Entscheidung des Betreibers:** Spiele und Portale werden über den
+eigenen SkyIsles-Shop verkauft, mit **derselben** Angebots-, Warenkorb-,
+Checkout- und Bestellarchitektur wie Figuren — und weiterhin vollständig
+außerhalb der Sammlung (ADR-0129).
+
+**Die Bestandsaufnahme ergab drei Dinge, und alle drei haben die Form
+bestimmt:**
+
+1. **Es gibt genau ein Tor.** `is_shop_eligible()`, und jede Tür fragt es:
+   `shop_offers()`, `shop_quantity_available()`, die Warenkorbprüfung,
+   **`create_order()`** und `reserve_for_order()` — die letzte Prüfung unter
+   Zeilensperre. Eine zweite Angebotsverwaltung braucht es deshalb nicht.
+2. **Der Warenkorb braucht gar keine Änderung.** Seine Identität ist
+   `sky_id + condition`, er lädt den Katalog nie und kennt den Artikeltyp
+   nicht. Checkout, Zahlung, Bestellung, Lagerabgang, Storno und Erstattung
+   hängen an `order_lines.inventory_id` — alles typneutral.
+3. **Die Altlast ist schärfer als gedacht.** Die 13 Lagerzeilen auf Spielen
+   tragen `is_listed = true` — und **zwingend auch einen Preis**, weil
+   `shop_inventory_listed_needs_price` (`0003`) das eine ohne das andere
+   verbietet. Ihnen fehlt zur Veröffentlichung ausschließlich das Tor. Eine
+   Lockerung am Artikeltyp wäre **keine Vorbereitung, sondern eine
+   Veröffentlichung**.
+
+**Deshalb hängt die Freigabe an der LAGERPOSITION**, nicht am
+Katalogartikel: `shop_inventory.sale_released`, `not null default false`.
+Preis, Menge, Listung und Beschaffenheit sitzen dort — und `shop_inventory`
+ist die Zeile, die eine spätere Marketplace-Architektur je Verkäufer führen
+würde. **Vorsorge, keine Implementierung:** kein `seller_id`, keine
+Seller-RLS, kein Onboarding, kein Stripe Connect. Der Stopp aus ADR-0021
+gilt unverändert.
+
+**`is_shop_eligible()` wird nicht angefasst** — das ist der Kern des
+Sicherheitsarguments. Das neue Tor `is_position_sellable(inventory_id)`
+**ruft** die Figurenregel auf, statt sie abzuschreiben; „für Figuren ändert
+sich nichts" ist damit eine Eigenschaft des Textes und keine Zusage, die
+jemand pflegen müsste.
+
+| geschrieben | Inhalt |
+|---|---|
+| `0139_accessory_sale_release.sql` | zwei Spalten, das neue Tor, vier getauschte Zeilen, zwei Betriebsfunktionen, erweiterte Betriebsdiagnose |
+| `0140_business_backup_sale_release.sql` | die Betriebssicherung lernt beide Spalten: 353 Feldzeilen → **355** |
+| `R0139` · `R0140` | Rücknahmen, `R0140` zuerst |
+| `0139_preflight.sql` · `0139_postflight.sql` | Eingangs- und Endzustand, rein lesend |
+| `accessory_offer_readonly.sql` | was eine unvorsichtige Lockerung **sofort** veröffentlichen würde |
+| `accessory_offer_proposal.md` | Bestandsaufnahme, Begründung, die offenen Rechtsfragen |
+
+**Geprüft gegen echtes PostgreSQL** (`npm run verify:check-sql`, **38 von 38
+Durchgängen**):
+
+| | |
+|---|---|
+| **P34** | `0139` veröffentlicht **nichts** — auch nicht die gelistete, bepreiste Altlast. Und nimmt sich zurück |
+| **P35** | eine freigegebene Portalposition wird wirklich zum Angebot; **nur sichtbar reicht nicht**, **nur freigegeben reicht nicht** |
+| **P36** | ein freigegebenes Spiel **ohne** USK-Kennzeichnung bleibt draußen; mit `usk_rating = 6` erscheint es |
+| **P37** | die Freigabefunktion lehnt Figur, Spiel ohne USK und unbekannte Position ab — das **Abschalten** geht immer |
+| **P38** | `0140` braucht `0139`, nimmt dann genau zwei Felder auf, und nimmt sie zurück |
+
+Dazu `src/lib/shop/accessory-sale.test.ts` (36 Tests). Die schärfste davon:
+jede der vier Türen wird aus ihrer **alten** Migration geholt, die eine
+erlaubte Ersetzung angewendet — und das Ergebnis muss Zeichen für Zeichen
+die Fassung in `0139` sein. Eine Bedingung, die beim Neuschreiben
+verrutscht, fällt damit auf.
+
+> **Angewendet ist nichts.** Weder auf Staging noch auf Production. Die
+> Oberfläche (Lagerverwaltung mit Freigabeschalter und Grund,
+> Zubehör-Detailseite mit Warenkorb, `/shop`) folgt **nach** der Anwendung
+> auf Staging — eine Seite, die eine Spalte liest, die es nicht gibt, bringt
+> `/business/inventory` zum Absturz. Die Belegausstellung bleibt gesperrt.
+
+**Vier Fragen stehen vor der ersten Freigabe offen** (Teil D des
+Vorschlags): die **USK-Quelle** — die Arbeitsmappe führt keine, also ist
+heute **kein Spiel freigebbar**, die 21 Portale dagegen sofort —, ein
+**öffentliches Feld für Zustand und Lieferumfang** (`shop_inventory.note`
+ist intern und bleibt es), die **steuerliche Bestätigung**, und was
+**„lose"** bei einem Spiel heißen soll.
+
 ### Der Zubehörkatalog ist ein Kachelkatalog (2026-10-20)
 
 **Aus der Liste wird ein Raster** — dasselbe wie im Figurenkatalog: zwei
