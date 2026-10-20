@@ -162,7 +162,14 @@ describe("woher die Namen kommen", () => {
      * und der Fortschritt ist eine Zahl, die Nutzer kennen (ADR-0128, 7).
      */
     const catalog = code(CATALOG);
-    expect(catalog).toContain("export async function fetchAccessoryCatalog()");
+    expect(catalog).toContain("export async function fetchAccessoryCatalog(");
+    /*
+     * `includeHidden` ist dagegen genau dasselbe Wort und dieselbe Bedeutung
+     * wie bei `fetchCatalog()`: ohne das Flag nur Freigegebenes. Die
+     * Lagerübersicht setzt es, weil sie eine VORHANDENE Lagerzeile benennen
+     * muss — nicht, um etwas zu veröffentlichen.
+     */
+    expect(catalog).toContain('if (!options.includeHidden) rows = rows.eq("catalog_visible", true);');
     expect(catalog).not.toContain("includeAccessories");
     /* `fetchCatalog()` legt weiter `collectibleOnly()` über sein Ergebnis. */
     expect(catalog).toContain("const figures = collectibleOnly(");

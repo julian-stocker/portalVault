@@ -3795,6 +3795,46 @@ export const de = {
   },
 
   /** Lagerverwaltung des Betreibers (ADR-0037). Nur für Admins. */
+  /*
+   * DER ZUBEHÖRBEREICH DES KATALOGS (ADR-0128).
+   *
+   * Eigener Bereich, eigene Sprache: hier geht es um Spiele und Portale, und
+   * kein Wort darf nahelegen, dass man sie sammeln oder kaufen kann. Beides
+   * ist nein, und beides ist eine andere Entscheidung als die Sichtbarkeit.
+   */
+  accessories: {
+    title: "Zubehör",
+    heading: "Zubehör",
+    /* Sagt, was der Bereich IST, und gleich dazu, was er nicht ist. */
+    intro: "Spiele, Portale und weiteres Zubehör aus dem SkyIsles-Katalog. "
+      + "Zubehör gehört nicht in die Sammlung und wird im Shop nicht angeboten.",
+    /* Der leise Weg hin und zurück — der Katalog bleibt die Startseite. */
+    fromCatalog: "Zubehör: Spiele und Portale",
+    toCatalog: "Zurück zu den Figuren",
+    searchLabel: "Zubehör suchen",
+    searchPlaceholder: "Name, Modellnummer oder SKY-ID",
+    typeAll: "Alle Arten",
+    seriesAll: "Alle Serien",
+    count: (n: number) => (n === 1 ? "1 Artikel" : `${plainNumber(n)} Artikel`),
+    empty: "Kein Zubehör gefunden.",
+    emptyHint: "Andere Art oder andere Serie wählen, oder die Suche leeren.",
+    /*
+     * Wenn der Bereich GANZ leer ist. Das ist kein Fehler, sondern die
+     * Freigaberegel: ein Artikel erscheint hier erst, wenn er im
+     * Adminbereich sichtbar geschaltet wurde.
+     */
+    none: "Hier ist noch kein Zubehör freigegeben.",
+    noneHint: "Ein Artikel erscheint, sobald er im Katalogbereich sichtbar "
+      + "geschaltet wurde. Die Artikel selbst gibt es bereits.",
+    /* Nur für den Adminblick: was hier steht, sieht sonst niemand. */
+    hiddenMark: "ausgeblendet",
+    hiddenNote: (n: number) =>
+      n === 1
+        ? "1 Artikel ist nur für dich sichtbar und öffentlich noch nicht freigegeben."
+        : `${plainNumber(n)} Artikel sind nur für dich sichtbar und öffentlich noch `
+          + "nicht freigegeben.",
+  },
+
   inventory: {
     title: "Lager",
     subline: "Bestand, Preise und Angebote von SkyIsles.",

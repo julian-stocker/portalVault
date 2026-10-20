@@ -445,18 +445,41 @@ export async function fetchCatalog(
  * der reservierte Bereich: `SKY-9000`–`9999` gehört Fixtures (ADR-0070), und
  * die Prüffigur `SKY-9998` steht in einer Spiele-Kategorie. Sie bleibt damit
  * dort, wo sie heute ist — in der Zeile „außerhalb des Sortiments".
+ *
+ * ---------------------------------------------------------------------------
+ * UND `catalog_visible` ENTSCHEIDET GENAU WIE BEI FIGUREN
+ *
+ * `includeHidden` ist dasselbe Wort und dieselbe Bedeutung wie bei
+ * `fetchCatalog()`: ohne das Flag liefert diese Funktion nur, was
+ * redaktionell freigegeben ist. Der öffentliche Zubehörbereich ruft sie
+ * deshalb ohne Argument, die LAGERÜBERSICHT mit `includeHidden: true` — dort
+ * geht es nicht um Veröffentlichung, sondern darum, eine vorhandene
+ * Lagerzeile benennen zu können.
+ *
+ * DAS IST DIE GANZE SICHTBARKEITSREGEL, und sie ist bewusst keine eigene:
+ * ein Portal steht heute auf `catalog_visible = false` (so hat `0138` es
+ * angelegt) und erscheint öffentlich erst, wenn ein Administrator es
+ * einzeln freigibt. Es gibt keinen Weg, der daran vorbeiführt, und keine
+ * Sammelfreigabe.
+ *
+ * VIER EIGENSCHAFTEN, VIER ENTSCHEIDUNGEN. Sichtbar zu sein heißt nicht
+ * sammelbar (`isCollectible()` bleibt nein) und nicht verkäuflich
+ * (`is_shop_eligible()` bleibt nein). Siehe `@/lib/catalog/item-type`.
+ * ---------------------------------------------------------------------------
  */
-export async function fetchAccessoryCatalog(): Promise<CatalogFigure[]> {
+export async function fetchAccessoryCatalog(
+  options: { includeHidden?: boolean } = {},
+): Promise<CatalogFigure[]> {
   const supabase = await createClient();
-  const [lookups, result] = await Promise.all([
-    loadLookups(),
-    supabase
-      .from("skylanders")
-      .select(FIGURE_COLUMNS)
-      .eq("is_active", true)
-      .lt("sky_id", "SKY-9000")
-      .order("sky_id"),
-  ]);
+  let rows = supabase
+    .from("skylanders")
+    .select(FIGURE_COLUMNS)
+    .eq("is_active", true)
+    .lt("sky_id", "SKY-9000")
+    .order("sky_id");
+  if (!options.includeHidden) rows = rows.eq("catalog_visible", true);
+
+  const [lookups, result] = await Promise.all([loadLookups(), rows]);
 
   if (result.error) throw new Error(`accessory catalog: ${result.error.message}`);
   return ((result.data ?? []) as FigureRow[])

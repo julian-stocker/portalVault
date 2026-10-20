@@ -440,6 +440,25 @@ export function CatalogView({
         </p>
 
         {/*
+          DER WEG INS ZUBEHÖR (ADR-0128).
+          
+          Eine Zeile, kein vierter Punkt in der Hauptnavigation: die hat drei
+          Ziele und soll sie behalten (ADR-0036). Zubehör ist ein Teil des
+          KATALOGS, also steht der Weg dorthin im Katalog — und der Weg
+          zurück steht drüben.
+
+          Nichts an den Karten darunter ändert sich. Was hinter dem Link
+          liegt, folgt derselben Freigaberegel wie diese Seite.
+        */}
+        <Link
+          href="/zubehoer"
+          className="mt-3 inline-block text-sm text-on-deep-muted underline underline-offset-2"
+          style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
+        >
+          {de.accessories.fromCatalog} →
+        </Link>
+
+        {/*
          * Two actions, and only for a visitor without an account.
          *
          * Nothing here is a marketing device: no countdown, no popup, no

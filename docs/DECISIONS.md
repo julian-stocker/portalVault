@@ -11601,6 +11601,86 @@ Katalogs und der Sammlung ist unberührt. Die Lagerkarte hat nichts
 dazubekommen — sie zeigt für Zubehör **weniger**: keine Freigabe, keinen
 Preis, kein leeres „Shop-Preis —".
 
+### Nachtrag (2026-10-20): der Zubehörbereich im Katalog, und die vier Eigenschaften
+
+Nach der Anwendung von `0137`/`0138` auf Staging fehlte das Letzte: Zubehör
+war im Katalog nirgends zu sehen. Entschieden und gebaut:
+
+**1. Ein eigener Bereich `/zubehoer`, keine Erweiterung der Figurensicht.**
+Eine Figurenkarte beantwortet Fragen, die ein Portal nicht hat — Element,
+Charakter, Variante, Besitz, Fortschritt, Preis, Warenkorb. Für ein Portal
+ist jede dieser Antworten leer oder falsch, und eine halb leere Karte sieht
+aus wie fehlende Daten. Die Figurenkarte bleibt deshalb unangetastet
+(ADR-0038); Zubehör bekommt die Form, die zu ihm passt: eine Zeile mit Art,
+Name, Serie und SKY-ID. Filter nach **Art** und **Serie**, und jeder
+erscheint nur, wenn er mehr als eine Wahl hat.
+
+**Der Weg dorthin steht im Katalog, nicht in der Hauptnavigation.** Die hat
+drei Ziele und soll sie behalten (ADR-0036); Zubehör ist ein Teil des
+Katalogs, also steht der Link in dessen Kopf und der Rückweg drüben.
+
+**2. Die Sichtbarkeitsregel ist die des Figurenkatalogs — keine eigene.**
+`fetchAccessoryCatalog()` bekommt dasselbe `includeHidden` wie
+`fetchCatalog()`: ohne Flag nur `is_active AND catalog_visible`, für einen
+Administrator alles. Die Seite ruft es mit `{ includeHidden: admin }`, Zeile
+für Zeile wie die Startseite (ADR-0042).
+
+Heute heißt das: **39 Spiele sichtbar, 0 Portale.** Die Portale stehen auf
+`catalog_visible = false`, so hat `0138` sie angelegt, und sie erscheinen
+öffentlich erst, wenn ein Administrator sie unter `/admin/catalog` **einzeln**
+freigibt. Es gibt keine Sammelfreigabe und keinen Weg daran vorbei.
+
+**Die Freigabe entscheidet die ABFRAGE, nicht ein Filter im Browser.** Ein
+Filter, der Sichtbarkeit herstellt, ist ein Filter, den man abschalten kann;
+`accessory-filter.ts` kennt `catalogVisible` deshalb nicht einmal.
+
+**Entscheidung des Betreibers (2026-10-20):** dass die 39 Spiele damit beim
+nächsten Deployment öffentlich sichtbar werden, ist gewollt. Festgehalten ist
+auch, was das NICHT ist: `catalog_visible = true` trägt bei ihnen keinen
+Beschluss, sondern den Vorgabewert der Spalte aus `0004` — unsichtbar waren
+sie bisher nur, weil `collectibleOnly()` sie aus `fetchCatalog()` filtert.
+
+**3. Vier Eigenschaften, vier Entscheidungen, ein Ort.**
+
+| | |
+|---|---|
+| `item_type` | was das Ding **ist** — `@/lib/catalog/item-type` |
+| `isCollectible()` | gehört es in eine **Sammlung**? |
+| `catalog_visible` | zeigt der **öffentliche Katalog** es? |
+| `is_shop_eligible()` | darf es **verkauft** werden? |
+
+Keine folgt aus einer anderen. Ein Spiel ist sichtbar, nicht sammelbar, nicht
+verkäuflich. Ein Portal ist zusätzlich unsichtbar. Eine ausgeblendete Figur
+ist sammelbar und bleibt es. Das Vokabular dazu liegt jetzt **im Katalog** —
+`item_type` ist eine Katalogspalte —, und die Lageransicht nimmt es von dort
+statt eine zweite Fassung zu führen.
+
+**4. Die Sammlung wird strenger: Zubehör erscheint gar nicht mehr.**
+
+Bisher galt: eine besessene Zubehörzeile wurde **nicht** als Karte gezeigt und
+zählte **nicht** in den Fortschritt — aber die Zusammenfassung erwähnte sie
+(„N davon sind Spiele und zählen nicht"). Das war einmal die freundlichere
+Antwort.
+
+Jetzt gilt: sie erscheint **gar nicht**, auch nicht als Hinweis. Die Grenze
+steht an der **Quelle** — `fetchCollection()` verwirft nicht sammelbare
+Zeilen, bevor irgendetwas sie zählt —, und die Prüfungen in
+`buildCollectionRows()` und `collectionStats()` bleiben als zweite und dritte
+Schicht stehen. Jede trägt allein.
+
+**Der Preis ist benannt:** besäße jemand ein Spiel, wäre diese Zeile für ihn
+unsichtbar und unerklärt. Auf Staging ist das niemand — ein einziger
+Sammlungseintrag insgesamt, keiner auf Zubehör.
+
+**Was offen bleibt:** `collection_items` hat nur einen Fremdschlüssel auf
+`skylanders`, und die Policies aus `0042` prüfen **wer** schreibt, nie **was**.
+Ein von Hand gebauter PostgREST-Aufruf könnte also ein Portal in die eigene
+Sammlung legen. Über die Oberfläche geht das nicht — der Katalog führt kein
+Zubehör, und nur dort gibt es den Schalter —, und die Folge wäre keine: die
+Zeile wird in `fetchCollection()` verworfen, erscheint nirgends und bewegt
+keine Zahl. Ein Riegel in der Datenbank wäre der sauberere Ort; er ist
+**nicht** gebaut, weil er eine Migration braucht und die Wirkung null ist.
+
 ### Offen
 
 Die Punkte aus `docs/SKYLANDERS_DATA.md` 11k — **ohne** die primäre Serie für

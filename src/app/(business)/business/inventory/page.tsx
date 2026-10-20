@@ -55,7 +55,11 @@ export default async function InventoryPage() {
      * Bestandsverwaltung entsteht dabei nicht: es ist dieselbe
      * `admin_shop_inventory()`, dieselbe Tabelle, dieselbe Karte.
      */
-    fetchAccessoryCatalog(),
+    /* `includeHidden`, und zwar aus einem anderen Grund als beim Katalog:
+       hier geht es nicht um Veröffentlichung, sondern darum, eine VORHANDENE
+       Lagerzeile benennen zu können. Ein Portal steht auf
+       `catalog_visible = false` — es liegt trotzdem im Regal. */
+    fetchAccessoryCatalog({ includeHidden: true }),
     fetchSeries(),
     // The shop-wide percentage, so every card can say what "automatic" means
     // instead of showing a number with no explanation (ADR-0045).

@@ -12,6 +12,9 @@
  *   tooling no client role can execute
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
+import {
+  ITEM_TYPES, isItemType, itemTypeOf, type ItemType,
+} from "@/lib/catalog/item-type";
 import { V1_CONDITION } from "@/lib/shop/offer";
 
 /**
@@ -180,33 +183,33 @@ export type Movement = {
 /**
  * Die Arten, in der Reihenfolge, in der die Übersicht sie anbietet.
  *
- * Dieselben fünf Werte wie der CHECK auf `skylanders.item_type` (`0135`) —
- * `figure` zuerst, weil es der Normalfall ist, dann die vier Zubehörarten in
- * der Häufigkeit, in der sie im Lager vorkommen.
+ * DAS VOKABULAR LIEGT IM KATALOG, nicht hier: `item_type` ist eine Spalte
+ * von `skylanders`, und derselbe Satz Werte beschreibt den Zubehörbereich
+ * des Katalogs, die Artikelsuche im Orderbuch und diese Liste. Eine zweite
+ * Fassung davon wäre eine zweite Wahrheit, die beim sechsten Artikeltyp
+ * auseinanderläuft. Die Namen hier bleiben, weil die Lageransicht sie so
+ * nennt; die Werte kommen aus `@/lib/catalog/item-type`.
  */
-export const INVENTORY_KINDS = ["figure", "game", "portal", "bundle", "other"] as const;
-export type InventoryKind = (typeof INVENTORY_KINDS)[number];
+export const INVENTORY_KINDS = ITEM_TYPES;
+export type InventoryKind = ItemType;
 
 export function isInventoryKind(value: unknown): value is InventoryKind {
-  return typeof value === "string" && (INVENTORY_KINDS as readonly string[]).includes(value);
+  return isItemType(value);
 }
 
 /**
  * Was für ein Artikel liegt auf dieser Position?
  *
- * `figure`, WENN NICHTS ANDERES BEKANNT IST — und das ist kein Zögern,
- * sondern dieselbe Regel wie überall sonst in dieser Arbeit: fehlt
- * `item_type`, weil die Zeile aus einer Abfrage ohne die Spalte kommt oder
- * weil noch kein `0135` gelaufen ist, dann verhält sich die Ansicht wie
- * vorher. „Keine Auskunft" heißt nie „Zubehör".
+ * `figure`, WENN NICHTS ANDERES BEKANNT IST — die Regel steht in
+ * `itemTypeOf()`: fehlt `item_type`, weil die Zeile aus einer Abfrage ohne
+ * die Spalte kommt oder weil sie älter ist als `0135`, dann verhält sich die
+ * Ansicht wie vorher.
  *
- * Ein Wert, den diese Fassung nicht kennt, ist ebenfalls `figure`: eine
- * unbekannte Art darf keine Position aus der Figurenliste verschwinden
- * lassen.
+ * Eine Position OHNE Katalogzeile ist ebenfalls `figure` — über sie ist
+ * nichts bekannt, und eine unbekannte Zeile wird nicht zu Zubehör erklärt.
  */
 export function inventoryKind(position: InventoryPosition): InventoryKind {
-  const type = position.figure?.itemType;
-  return isInventoryKind(type) ? type : "figure";
+  return itemTypeOf(position.figure ?? {});
 }
 
 /** Ist das Zubehör — also alles außer einer Figur? */

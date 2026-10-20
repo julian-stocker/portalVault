@@ -1363,6 +1363,45 @@ Rolle, kein Recht und keine Funktion an. Ihre Journaleinträge tragen `changed_b
 die dokumentierte Bedeutung von NULL dort: über die Service-Rolle, ein Import, ein Skript
 (`0004`).
 
+### Der Zubehörbereich und die Freigabe (ADR-0128, 2026-10-20)
+
+`/zubehoer` zeigt Spiele, Portale und sonstiges Zubehör aus dem Katalog. Es ist
+eine **öffentliche** Seite, also gehört ihre Grenze hierher.
+
+**Es gibt keine eigene Sichtbarkeitsregel.** `fetchAccessoryCatalog()` trägt
+dasselbe `includeHidden` wie `fetchCatalog()`: ohne das Flag
+`is_active AND catalog_visible`, mit ihm alles. Die Seite ruft es mit
+`{ includeHidden: admin }` — dieselbe Zeile wie die Startseite (ADR-0042), und
+`isAdmin()` wird serverseitig aus der Datenbank gefragt, nie aus einem Claim.
+
+**Die Freigabe entscheidet die Abfrage, nicht die Anzeige.** `catalog_visible`
+kommt in `src/lib/catalog/accessory-filter.ts` nicht vor — ein Filter, der
+Sichtbarkeit herstellt, wäre ein Filter, den man abschalten kann. Ein Portal
+steht auf `false` und erscheint öffentlich erst, wenn ein Administrator es
+unter `/admin/catalog` einzeln freigibt; eine Sammelfreigabe gibt es nicht.
+
+**Und Sichtbarkeit ist nicht Verkäuflichkeit.** Die Seite fragt weder
+`fetchOffers()` noch `fetchOwnedSkyIds()`, zeigt keinen Preis und keinen
+Warenkorbknopf. Beide Antworten lauten für Zubehör nein —
+`is_shop_eligible()` am Artikeltyp seit `0135`, `isCollectible()` am Typ und
+am Kategorienamen seit `0137` —, und eine Anzeige davon wäre ein Versprechen,
+das die Datenbank ablehnt.
+
+**Die Sammlung bleibt davon unberührt, in drei Schichten.**
+`fetchCollection()` verwirft nicht sammelbare Zeilen an der Quelle,
+`buildCollectionRows()` und `collectionStats()` je noch einmal. Eine Grenze,
+die nur in der Anzeige steht, ist keine.
+
+**Eine Grenze, die hier NICHT steht, benannt statt übersehen.**
+`collection_items` hat einen Fremdschlüssel auf `skylanders` und sonst keine
+Bedingung; die Policies aus `0042` prüfen **wer** schreibt, nie **was**. Ein
+von Hand gebauter PostgREST-Aufruf eines angemeldeten Sammlers könnte damit
+ein Portal in die **eigene** Sammlung legen. Fremde Sammlungen bleiben
+unerreichbar, und die Folge wäre keine: die Zeile wird beim Lesen verworfen,
+erscheint nirgends und bewegt keine Zahl. Der saubere Ort wäre ein Trigger
+auf der Tabelle; er ist nicht gebaut, weil er eine Migration braucht und die
+Wirkung null ist.
+
 ### Die Datensicherung des Betriebs (`0104`, ADR-0114)
 
 Ein Betriebskonto kann seine Geschäftsdaten als eine JSON-Datei herunterladen. Das ist der

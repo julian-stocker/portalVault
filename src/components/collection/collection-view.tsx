@@ -24,7 +24,6 @@ import { CollectionAction } from "@/components/collection/collection-action";
 import { CollectionOverview } from "@/components/collection/collection-overview";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { FilterBar, type FilterOption } from "@/components/ui/filter-bar";
-import { isCollectible } from "@/lib/catalog/collectible";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import type { CollectionEntry, SeriesOption } from "@/lib/catalog/types";
 import { collectionStats } from "@/lib/collection/stats";
@@ -132,16 +131,20 @@ export function CollectionView({
   /**
    * What the statistics count.
    *
-   * The rows, plus the owned entries that never became rows. `buildCollectionRows`
-   * drops software (ADR-0029), so feeding it straight into `collectionStats`
-   * hid the very entries the "these are games" note exists to explain — the
-   * note could never fire. Adding them back here keeps the showcase free of
-   * game cards while the summary still accounts for every owned row.
+   * NUR SAMMELBARES, UND ZWAR VOLLSTÄNDIG (ADR-0128).
+   *
+   * Hier stand einmal `[...ownedEntries(rows), ...owned.filter(nicht
+   * sammelbar)]`: die Zubehörzeilen wurden ABSICHTLICH wieder zugefügt,
+   * damit die Zusammenfassung sie erwähnen konnte („diese N sind Spiele und
+   * zählen nicht"). Das war einmal die freundlichere Antwort.
+   *
+   * Seit ADR-0128 ist die Regel strenger und einfacher: Zubehör erscheint in
+   * der Sammlung NICHT — nicht als Karte, nicht im Filter, nicht in einer
+   * Zahl und auch nicht als Hinweis. Die Zeilen kommen seit `0128` ohnehin
+   * nicht mehr aus `fetchCollection()` heraus; diese Stelle hätte sie als
+   * einzige wieder hereingeholt.
    */
-  const counted = useMemo(
-    () => [...ownedEntries(rows), ...owned.filter((entry) => !isCollectible(entry.figure))],
-    [rows, owned],
-  );
+  const counted = useMemo(() => ownedEntries(rows), [rows]);
 
   // Statistics and series progress still see every catalog row: 448 of 561 is
   // only meaningful if both halves count the same set.

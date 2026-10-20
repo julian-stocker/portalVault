@@ -55,8 +55,16 @@ export function CollectionOverview({
   /** Name of the active scope: "Alle" or a game. */
   segmentLabel: string;
 }) {
-  const caveats =
-    stats.withoutPrice > 0 || stats.inactiveOwned > 0 || stats.nonCollectibleOwned > 0;
+  /*
+   * `nonCollectibleOwned` STEHT HIER NICHT MEHR (ADR-0128).
+   *
+   * Es gab einen Hinweis „N davon sind Spiele und zählen nicht". Seit
+   * ADR-0128 erscheint Zubehör in der Sammlung gar nicht — und ein Hinweis
+   * auf etwas, das nicht erscheint, ist selbst ein Erscheinen. Die Zahl wird
+   * in `collectionStats()` weiter gebildet: dort ist sie die Zusicherung der
+   * Funktion über ihre eigene Eingabe, und die bleibt prüfbar.
+   */
+  const caveats = stats.withoutPrice > 0 || stats.inactiveOwned > 0;
 
   return (
     <section
@@ -176,9 +184,6 @@ export function CollectionOverview({
         <div className="relative mt-3.5 flex flex-col gap-0.5 border-t border-on-deep/10 pt-2.5 text-[11px] text-on-deep-muted">
           {stats.withoutPrice > 0 ? <p>{de.collection.withoutPrice(stats.withoutPrice)}</p> : null}
           {stats.inactiveOwned > 0 ? <p>{de.collection.inactiveOwned(stats.inactiveOwned)}</p> : null}
-          {stats.nonCollectibleOwned > 0 ? (
-            <p>{de.collection.nonCollectibleOwned(stats.nonCollectibleOwned)}</p>
-          ) : null}
         </div>
       ) : null}
     </section>

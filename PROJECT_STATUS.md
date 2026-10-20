@@ -3756,6 +3756,72 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
+### Der Zubehörbereich im Katalog (2026-10-20)
+
+`/zubehoer` — ein eigener Bereich, erreichbar aus dem Katalogkopf. Die
+Hauptnavigation behält ihre drei Ziele (ADR-0036).
+
+| | |
+|---|---|
+| **Darstellung** | Zeilen mit Art, Name, Serie und SKY-ID. **Nicht** die Figurenkarte: Element, Charakter, Variante, Besitz und Preis hat ein Portal nicht, und eine halb leere Karte sieht aus wie fehlende Daten |
+| **Filter** | Art und Serie, jeder nur, wenn er mehr als eine Wahl hat |
+| **Suche** | Anzeigename, Rohname und SKY-ID — bei einem Portal also die Modellnummer |
+| **Sichtbarkeit** | dieselbe Regel wie im Figurenkatalog: `is_active AND catalog_visible`, für Administratoren alles (`includeHidden`) |
+
+**Heute zeigt der Bereich 39 Artikel: die Spiele.** Die 21 Portale stehen auf
+`catalog_visible = false` und erscheinen erst, wenn ein Administrator sie
+unter `/admin/catalog` **einzeln** freigibt. Es gibt keine Sammelfreigabe,
+und die Freigabe entscheidet die Abfrage — nicht ein Filter im Browser.
+
+**Vier Eigenschaften, vier Entscheidungen:** `item_type` (was es ist),
+`isCollectible()` (Sammlung), `catalog_visible` (öffentlicher Katalog),
+`is_shop_eligible()` (Shop). Keine folgt aus einer anderen. Das Vokabular
+liegt jetzt in `src/lib/catalog/item-type.ts` — einem Ort, aus dem auch die
+Lageransicht und die Artikelsuche schöpfen.
+
+**Am laufenden Staging gemessen:** `/` 41 Figurenkarten und 0 Zubehörzeilen ·
+`/zubehoer` 39 Zubehörzeilen und 0 Figurenkarten · `/shop` unverändert 225
+Verweise vor und nach der Änderung · die Portal-Detailseiten
+(`/skylanders/84709790-sf` und zwei weitere) antworten weiter mit **404**.
+
+### Die Sammlung wird strenger (2026-10-20)
+
+Bisher wurde eine besessene Zubehörzeile nicht als Karte gezeigt und zählte
+nicht in den Fortschritt — aber die Zusammenfassung erwähnte sie („N davon
+sind Spiele"). **Jetzt erscheint sie gar nicht**, auch nicht als Hinweis.
+
+Die Grenze steht an der **Quelle**: `fetchCollection()` verwirft nicht
+sammelbare Zeilen, bevor irgendetwas sie zählt. Die Prüfungen in
+`buildCollectionRows()` und `collectionStats()` bleiben als zweite und dritte
+Schicht stehen; jede trägt allein. **534 sammelbare Figuren und ihr
+Fortschritt sind unberührt** — der Nenner kommt aus `fetchCatalog()`, und das
+legt weiter `collectibleOnly()` über jedes Ergebnis.
+
+### 35 Freitextpositionen sind Portale — Befund, keine Korrektur
+
+Die offene Frage aus `accessory_audit_readonly.sql` ist beantwortet. Von den
+**206** Einkaufspositionen ohne `sky_id` tragen **35** einen Rohnamen, der
+**zeichengleich** einem Katalogartikel entspricht — und alle 35 sind Portale,
+verteilt auf **11 der 21** Artikel und **24 importierte Einkäufe**.
+
+Das ist keine Vermutung: beide Seiten stammen aus Spalte B derselben
+Arbeitsmappe. Verglichen wird ohne `trim`, ohne `ilike`, ohne Normalisierung
+— deshalb trifft auch kein Disney-Infinity-Name versehentlich einen
+Skylanders-Artikel.
+
+**Es gibt keinen Datenfehler zu beheben.** Nichts ist falsch zugeordnet,
+keine Zubehörzeile steht in einer sammelbaren Kategorie, kein Artikel wird
+von einem Filter verschluckt. Was es gibt, ist eine Zuordnung, die seit
+`0138` möglich wurde — über den bestehenden Figurenwechsel
+(`seller_set_purchase_item_sky`, `0054`), eine Position je Griff, ohne
+Bestandsbewegung, mit erhaltenem `raw_name`.
+
+Fälle, Begründung und die vorgeschlagene Reihenfolge:
+`supabase/checks/accessory_assignment_proposal.md`. Reproduzierbar mit
+`supabase/checks/accessory_assignment_readonly.sql` (rein lesend).
+**Nicht ausgeführt — 35 Schreibvorgänge an historischen Einkäufen brauchen
+eine Freigabe.**
+
 ### Was weiter offen ist
 
 **Bundles und Taschen** (`SKY-0639`–`0642`) sind ein eigener Schritt mit

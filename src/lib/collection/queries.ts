@@ -18,6 +18,7 @@ import {
   withCharacterFamily,
   withVariants,
 } from "@/lib/catalog/queries";
+import { isCollectible } from "@/lib/catalog/collectible";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CollectionEntry } from "@/lib/catalog/types";
 import { currentUser } from "@/lib/auth/user";
@@ -67,7 +68,25 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
   const entries: CollectionEntry[] = [];
   for (const row of (result.data ?? []) as unknown as CollectionRow[]) {
     if (!row.skylanders) continue;
-    entries.push({ quantity: row.quantity, figure: toFigure(row.skylanders, lookups) });
+    const figure = toFigure(row.skylanders, lookups);
+    /*
+     * DIE SAMMLUNG IST AUSSCHLIESSLICH SAMMELBAR (ADR-0128).
+     *
+     * Die Grenze steht hier, an der QUELLE, und nicht erst in der Anzeige:
+     * was gar nicht erst in die Liste kommt, kann in keiner Statistik, in
+     * keinem Filter und in keiner Suche wieder auftauchen. Die Prüfungen in
+     * `buildCollectionRows()` und `collectionStats()` bleiben trotzdem
+     * stehen — sie sind die zweite und dritte Schicht, und jede trägt für
+     * sich allein.
+     *
+     * `collection_items` hat nur einen Fremdschlüssel auf `skylanders`, also
+     * KÖNNTE dort eine Zubehörzeile stehen; über die Oberfläche entsteht sie
+     * nicht, weil der Katalog kein Zubehör führt und der Schalter nur dort
+     * existiert. Entstünde sie doch, bliebe sie folgenlos: sie wird hier
+     * verworfen, bevor irgendetwas sie zählt.
+     */
+    if (!isCollectible(figure)) continue;
+    entries.push({ quantity: row.quantity, figure });
   }
 
   // Same derived display name and the same element as the catalog, from the

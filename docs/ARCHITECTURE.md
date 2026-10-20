@@ -37,6 +37,34 @@ unverändert.
 
 ---
 
+## 0a. Drei Mengen, die nicht dasselbe sind (ADR-0128)
+
+Seit es Zubehör im Katalog gibt, muss diese Trennung ausgesprochen werden —
+sie entscheidet, welche Abfrage welche Zeilen liefert:
+
+| | enthält | Quelle |
+|---|---|---|
+| **Katalog** | Figuren **und** Zubehör — Spiele, Portale, Bundles —, soweit freigegeben | `fetchCatalog()` für Figuren, `fetchAccessoryCatalog()` für Zubehör |
+| **Lager** | alle tatsächlich vorhandenen Bestände, unabhängig von der Art | `admin_shop_inventory()`, **eine** Tabelle |
+| **Sammlung** | ausschließlich sammelbare Figuren | `fetchCollection()`, verwirft alles andere an der Quelle |
+
+Dazu **vier Eigenschaften, die keine aus der anderen folgt** — das Vokabular
+liegt in `src/lib/catalog/item-type.ts`:
+
+| | Frage | Ort |
+|---|---|---|
+| `item_type` | was ist das Ding? | Spalte auf `skylanders` (`0135`) |
+| `isCollectible()` | gehört es in eine Sammlung? | Artikeltyp **und** Kategoriename (`0137`) |
+| `catalog_visible` | zeigt der öffentliche Katalog es? | redaktionell, je Artikel (ADR-0039) |
+| `is_shop_eligible()` | darf es verkauft werden? | Artikeltyp (`0135`) |
+
+Ein Spiel ist sichtbar, nicht sammelbar, nicht verkäuflich. Ein Portal ist
+zusätzlich unsichtbar, bis ein Administrator entscheidet. Eine ausgeblendete
+Figur ist sammelbar und bleibt es. Wer eine der vier aus einer anderen
+ableitet, baut genau den Fehler, den `0135` und `0137` verhindern.
+
+---
+
 ## 1. Überblick
 
 PortalVault ist eine Webanwendung mit drei Verantwortungsbereichen:

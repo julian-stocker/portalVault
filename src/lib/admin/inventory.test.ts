@@ -194,7 +194,7 @@ describe("what the operational list contains", () => {
      * Sammlerkatalog, und Spiele und Portale fielen erneut aus der Liste.
      */
     const page = code("src/app/(business)/business/inventory/page.tsx");
-    expect(page).toContain("fetchAccessoryCatalog()");
+    expect(page).toContain("fetchAccessoryCatalog({ includeHidden: true })");
     expect(page).toContain("fetchInventory([...catalog, ...accessories])");
   });
 
