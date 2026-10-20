@@ -1,6 +1,44 @@
 # Ablauf: die 35 Portalpositionen bekommen ihre SKY-ID
 
-**Stand: vorbereitet, NICHT ausgeführt. Braucht eine Freigabe.**
+> ## AUSGEFÜHRT auf Staging am 2026-10-20
+>
+> Betreiber, manuell im SQL-Editor über
+> `supabase/operations/staging-portal-assignment.sql`. Ein Durchgang, eine
+> Transaktion. Das Abschlussraster meldete **35 zugeordnete Positionen**,
+> `ohne_sky_id` **206 → 171** und jeden anderen Bezugswert unverändert.
+>
+> ### Unabhängig nachgeprüft, rein lesend, am selben Tag
+>
+> Nicht aus dem Skript heraus, sondern gegen die Basis, die **vor** dem Lauf
+> mit einem eigenen Zugriff genommen wurde:
+>
+> | Prüfung | Ergebnis |
+> |---|---|
+> | Positionen auf Portalen | **35** |
+> | und zwar **genau dieselben 35 Zeilen** wie in der Basis (Id-Mengenvergleich) | ✓ |
+> | jede trägt die SKY-ID ihres **eigenen** Rohnamens | 0 Abweichungen |
+> | Verteilung je Artikel | `0615=1, 0616=2, 0617=5, 0618=7, 0619=11, 0620=2, 0621=3, 0622=1, 0624=1, 0627=1, 0637=1` |
+> | **Abdruck über 15 Spalten** (alles außer `sky_id`/`updated_at`) | `45340984792692b0cdfae951dd1ced48` — **identisch zur Basis** |
+> | 24 Einkäufe, Abdruck und bezahlte Summe | `3d5367dda6e6b0e836eb34934daa8e88`, **995,77 €** — identisch |
+> | Lagerzeilen auf Portalen · Lagerbewegungen an den 35 | **0** · **0** |
+> | Positionen 2 128 · ohne `sky_id` **171** · Lagerzeilen 285 · Einheiten 812 · Bewegungen 26 · Verkaufspositionen 1 284 · Sammlung 1 · Katalogzeilen 626 · Einkäufe 90 · auf Spielen 37 | alle wie erwartet |
+> | Portale mit `catalog_visible` · Sammlungseinträge auf Portalen | **0** · **0** |
+> | Angebote | **256**, davon Portale **0** |
+>
+> **Der 15-Spalten-Abdruck ist der eigentliche Nachweis:** er umfasst
+> `market_price_snapshot`, `market_price_source`, `position`, `condition`,
+> `raw_name`, `state`, `source_row`, die Legacy-Flaggen, `note` und
+> `created_at`. Dass er sich nicht bewegt hat, heißt: Preise, Mengen,
+> Rohnamen und Einkaufsdaten sind unberührt.
+>
+> **Die Rücknahme bleibt verfügbar** —
+> `supabase/rollback/R_portal_assignment.sql` findet die 35 Zeilen
+> unverändert über SKY-ID, Rohname, `reconciled_legacy`, fehlende
+> Lagerbewegung und gesetztes `source_row`.
+
+---
+
+**Der Ablauf, wie er vorbereitet und gefahren wurde:**
 
 Befund und Begründung: `accessory_assignment_proposal.md`.
 Gegenstand: 35 Einkaufspositionen, 11 Portalartikel, 24 importierte Einkäufe.

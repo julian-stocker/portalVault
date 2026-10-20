@@ -1,7 +1,12 @@
 # 35 Freitextpositionen sind Portale — Befund und Vorschlag
 
-**Stand 2026-10-20. Nichts davon ist ausgeführt.** Dieses Blatt legt die
-Fälle vor; die Entscheidung gehört dem Betreiber (ADR-0128, Punkt 10).
+> **AUSGEFÜHRT am 2026-10-20.** Alle 35 Positionen tragen ihre SKY-ID.
+> Nachweis und unabhängige Nachprüfung: `portal_assignment_run.md`.
+> Dieses Blatt bleibt als Befund und Begründung stehen.
+
+**Stand des Befunds: 2026-10-20, vor dem Lauf.** Dieses Blatt hat die Fälle
+vorgelegt; die Entscheidung gehörte dem Betreiber (ADR-0128, Punkt 10), und
+er hat sie getroffen.
 
 Reproduzieren: `supabase/checks/accessory_assignment_readonly.sql`, rein
 lesend, ein einziges SELECT.

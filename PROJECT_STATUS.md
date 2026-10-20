@@ -3797,7 +3797,7 @@ Schicht stehen; jede trägt allein. **534 sammelbare Figuren und ihr
 Fortschritt sind unberührt** — der Nenner kommt aus `fetchCatalog()`, und das
 legt weiter `collectibleOnly()` über jedes Ergebnis.
 
-### 35 Freitextpositionen sind Portale — Befund, keine Korrektur
+### 35 Freitextpositionen sind Portale — zugeordnet am 2026-10-20
 
 Die offene Frage aus `accessory_audit_readonly.sql` ist beantwortet. Von den
 **206** Einkaufspositionen ohne `sky_id` tragen **35** einen Rohnamen, der
@@ -3805,22 +3805,60 @@ Die offene Frage aus `accessory_audit_readonly.sql` ist beantwortet. Von den
 verteilt auf **11 der 21** Artikel und **24 importierte Einkäufe**.
 
 Das ist keine Vermutung: beide Seiten stammen aus Spalte B derselben
-Arbeitsmappe. Verglichen wird ohne `trim`, ohne `ilike`, ohne Normalisierung
-— deshalb trifft auch kein Disney-Infinity-Name versehentlich einen
-Skylanders-Artikel.
+Arbeitsmappe. Verglichen wurde ohne `trim`, ohne `ilike`, ohne Normalisierung
+— deshalb traf auch kein Disney-Infinity-Name versehentlich einen
+Skylanders-Artikel. Die **171** übrigen Freitextpositionen bleiben, was sie
+sind: Disney Infinity, Amiibo, Figurenteile, Taschen (ADR-0128, Punkt 9).
 
-**Es gibt keinen Datenfehler zu beheben.** Nichts ist falsch zugeordnet,
-keine Zubehörzeile steht in einer sammelbaren Kategorie, kein Artikel wird
-von einem Filter verschluckt. Was es gibt, ist eine Zuordnung, die seit
-`0138` möglich wurde — über den bestehenden Figurenwechsel
-(`seller_set_purchase_item_sky`, `0054`), eine Position je Griff, ohne
-Bestandsbewegung, mit erhaltenem `raw_name`.
+**Es gab keinen Datenfehler zu beheben.** Nichts war falsch zugeordnet, keine
+Zubehörzeile stand in einer sammelbaren Kategorie, kein Artikel wurde von
+einem Filter verschluckt. Was es gab, war eine Zuordnung, die seit `0138`
+möglich wurde.
 
-Fälle, Begründung und die vorgeschlagene Reihenfolge:
-`supabase/checks/accessory_assignment_proposal.md`. Reproduzierbar mit
-`supabase/checks/accessory_assignment_readonly.sql` (rein lesend).
-**Nicht ausgeführt — 35 Schreibvorgänge an historischen Einkäufen brauchen
-eine Freigabe.**
+**Ausgeführt am 2026-10-20**, nach Freigabe: ein Durchgang, eine Transaktion,
+über `supabase/operations/staging-portal-assignment.sql`. Geschrieben wurde
+genau eine Spalte — `sky_id`, plus `updated_at`.
+
+| | vorher | nachher |
+|---|---|---|
+| Einkaufspositionen auf Portalen | 0 | **35** |
+| Positionen ohne `sky_id` | 206 | **171** |
+| Einkaufspositionen insgesamt | 2 128 | **2 128** |
+| Lagerzeilen · Einheiten · Bewegungen | 285 · 812 · 26 | **unverändert** |
+| Verkaufspositionen · Sammlung · Katalogzeilen | 1 284 · 1 · 626 | **unverändert** |
+
+**Unabhängig nachgeprüft**, rein lesend, gegen eine Basis, die **vor** dem
+Lauf mit einem eigenen Zugriff genommen wurde — nicht aus dem Skript heraus:
+
+* es sind **genau dieselben 35 Zeilen** (Vergleich der Id-Mengen), keine 36.
+  Position wurde angefasst;
+* jede trägt die SKY-ID ihres **eigenen** Rohnamens, die Verteilung je
+  Artikel stimmt (`0619` elfmal, `0618` siebenmal, …);
+* der **Abdruck über 15 Spalten** — alles außer `sky_id` und `updated_at`,
+  einschließlich `market_price_snapshot`, `market_price_source`, `position`,
+  `condition`, `raw_name`, `state`, `source_row`, den Legacy-Flaggen, `note`
+  und `created_at` — ist **identisch**: `45340984792692b0cdfae951dd1ced48`.
+  Preise, Mengen, Rohnamen und Einkaufsdaten sind damit nachweislich
+  unberührt;
+* die 24 Einkäufe und ihre bezahlte Summe von **995,77 €** ebenso
+  (`3d5367dda6e6b0e836eb34934daa8e88`);
+* **0 Lagerzeilen und 0 Lagerbewegungen** auf Portalen — es ist kein Bestand
+  entstanden, und das ist richtig: die 35 sind `reconciled_legacy`, ihr
+  Bestand wurde getrennt abgeglichen;
+* **0 Portale sichtbar, 0 in einer Sammlung, 256 Angebote ohne ein einziges
+  Portal.**
+
+**Die Rücknahme bleibt verfügbar:** `supabase/rollback/R_portal_assignment.sql`
+findet die 35 Zeilen unverändert über SKY-ID, Rohname, `reconciled_legacy`,
+fehlende Lagerbewegung und gesetztes `source_row`.
+
+Befund und Begründung: `supabase/checks/accessory_assignment_proposal.md`.
+Ablauf und Nachweis: `supabase/checks/portal_assignment_run.md`.
+Reproduzierbar mit `supabase/checks/accessory_assignment_readonly.sql`.
+
+**Was dadurch lesbar wird:** die Einkaufshistorie eines Portals. `SKY-0619`
+wurde elfmal eingekauft, `SKY-0618` siebenmal — vorher stand das als
+Freitext da und ließ sich nur von Hand zusammensuchen.
 
 ### Was weiter offen ist
 

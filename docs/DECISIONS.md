@@ -11323,6 +11323,15 @@ später als echte Artikel integrierbar, in einem eigenen Schritt. Die **URL** in
 Abgleich auf die neuen Portalartikel wäre eine namensweise Entscheidung des
 Betreibers, nie eine Heuristik. Die Freitextfunktion „Sonstiger Artikel" bleibt.
 
+> **Ausgeführt am 2026-10-20, als genau diese Entscheidung.** 35 der 206
+> Positionen trugen einen Rohnamen, der **zeichengleich** einem der 11
+> Portalartikel entspricht — beide Seiten aus Spalte B derselben
+> Arbeitsmappe. Der Betreiber hat die elf Paare freigegeben; sie stehen als
+> ausgeschriebene Daten in `supabase/operations/staging-portal-assignment.sql`,
+> nicht als Regel, die etwas ableitet. Geschrieben wurde eine Spalte;
+> `raw_name` ist unberührt, es entstand kein Bestand. Die übrigen 171
+> bleiben Freitext. Nachweis: `supabase/checks/portal_assignment_run.md`.
+
 ### Konsequenzen
 
 * Additiv geplant sind fünf nullable Spalten auf `skylanders` —
