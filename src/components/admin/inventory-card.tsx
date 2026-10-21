@@ -392,7 +392,7 @@ export function InventoryCard({
                 value={saleState.deliveryScope ?? ""}
                 disabled={pending}
                 onChange={(e) => saveScope(e.target.value === "" ? null : e.target.value)}
-                className="min-h-9 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40"
+                className="min-h-11 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40 sm:min-h-9"
               >
                 <option value="">{copy.deliveryScopeNone}</option>
                 {scopesFor(saleState.itemType).map((wert) => (
@@ -411,7 +411,7 @@ export function InventoryCard({
                   value={saleState.uskRating === null ? "" : String(saleState.uskRating)}
                   disabled={pending}
                   onChange={(e) => saveUsk(e.target.value === "" ? null : Number(e.target.value))}
-                  className="min-h-9 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40"
+                  className="min-h-11 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40 sm:min-h-9"
                 >
                   <option value="">{copy.uskNone}</option>
                   {USK_RATINGS.map((stufe) => (
@@ -431,7 +431,11 @@ export function InventoryCard({
               aria-busy={pending || undefined}
               disabled={pending}
               className={
-                "min-h-9 shrink-0 rounded-full px-3 text-[11px] font-medium whitespace-nowrap ring-1 disabled:opacity-40 "
+                /* 44 px auf dem Telefon, 36 ab `sm:` — derselbe Griff wie
+                   `INPUT` in `form-section.tsx`. Dieser Schalter stellt
+                   einen Artikel öffentlich zum Verkauf; ihn knapp zu
+                   treffen ist der falsche Fehler. */
+                "min-h-11 shrink-0 rounded-full px-3 text-[11px] font-medium whitespace-nowrap ring-1 disabled:opacity-40 sm:min-h-9 "
                 + (saleState.saleReleased
                   ? "bg-status-ground text-status-ink ring-status-line"
                   : "bg-surface text-muted ring-border/70")

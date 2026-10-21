@@ -355,6 +355,67 @@ Zählung ohne `catalog_visible`.
 
 ---
 
+## 0h. `0141` auf Staging, und die Oberfläche am laufenden System (2026-10-21)
+
+`0141` ist angewendet. **Belegt, nicht angenommen:** ein anonymer Aufruf
+von `seller_sale_state()` antwortet mit **`42501`** (keine Berechtigung) und
+nicht mit `PGRST202` (gibt es nicht) — damit ist beides auf einmal gezeigt,
+die Funktion steht und der Riegel hält (`npm run verify:seller:staging`,
+Abschnitt 11).
+
+### Was am laufenden System gegen Staging geprüft ist
+
+| Fläche | Ergebnis |
+|---|---|
+| `/zubehoer` | **60 Kacheln**, alle als Verweis auf `/zubehoer/<slug>`, **60 ×** „Aktuell kein Angebot", **kein** Kaufknopf, **kein** Sammelknopf, Zählzeile „60 Artikel" |
+| `/zubehoer/0000502-g` (Portal) | Art **Portal** · Modellnummer **0000502** · Serie **Giants** · Zustand **„Gebraucht · mindestens guter Zustand · voll funktionsfähig"** · `SKY-0618` · „Aktuell kein Angebot" |
+| `/zubehoer/wii-u-spiel-trap-team` (Spiel) | Art **Spiel** · Plattform **Wii U** · Serie **Trap Team** · **USK „Nicht erfasst"** · Zustandsstandard · `SKY-0312` |
+| `/shop` | **225 Artikel im Angebot** (unverändert), Zustandsstandard im Kopf, **0** Zubehörkacheln — richtig, es ist nichts freigegeben |
+| `/` | **unverändert**, 0 Zubehörmarken, ein Tab-Verweis |
+| `/zubehoer/bash` · `/skylanders/0000502-g` | beide **404** — zwei Adressräume, keine Vermischung |
+| `/collection` | **307** auf die Anmeldung, wie vorher |
+| `npm run verify:shop:staging` | **16/17**, und der eine Fehlschlag ist der vorbestehende („15 eligible positions not released", Figuren mit bewusstem Opt-out) |
+| `npm run verify:seller:staging` | **19/19** |
+| `npm run verify:commerce:staging` | **30/30** |
+
+### Drei echte Fehler, gefunden und behoben
+
+1. **`verify:seller` pinnte vier Spalten in `shop_offers()`.** `0139` hat eine
+   fünfte hinzugefügt (`delivery_scope`), und die Prüfung meldete das als
+   Verstoß gegen einen Vertrag, den der Betreiber selbst geändert hat. Jetzt
+   fünf, namentlich — und zusätzlich geprüft, dass keine Menge dabei ist.
+2. **`verify:commerce` suchte einen Bewegungsgrund, den `0025` umbenannt
+   hat.** `sale_skyisles` wurde zu `sale`, der alte Wert blieb als Historie.
+   Die Prüfung meldete seitdem jede Umwandlung als Abweichung — neun, und
+   alle neun richtig. Jetzt gelten beide Namen, dasselbe Paar wie in `0086`.
+   **Vorbestehend seit `0025`**, nicht durch diese Arbeit entstanden.
+3. **Der Shop zählte „Figuren".** Seit er auch Zubehör zeigt, wäre das falsch,
+   sobald ein Portal im Angebot steht. Vier Wörter sind jetzt artneutral
+   („225 Artikel im Angebot").
+
+Dazu ein Mobil-Befund in eigener Sache: die drei neuen Bedienelemente der
+Lagerkarte waren 36 px hoch. Der Projektstandard für Telefone sind 44
+(`INPUT` in `form-section.tsx`), und ein Schalter, der einen Artikel
+öffentlich zum Verkauf stellt, ist der falsche Ort fürs Knappe. Jetzt
+`min-h-11 sm:min-h-9`.
+
+### Was NICHT geprüft ist, und warum nicht
+
+| | |
+|---|---|
+| die **Lagerkarte** selbst | `/business/inventory` antwortet einem anonymen Aufruf mit **404**, und `can_operate_active_seller()` liest `auth.uid()`. Ohne angemeldetes Betriebskonto im Browser ist die Karte nicht erreichbar — auch nicht mit dem Service-Role-Key |
+| **Freigabe, Preis, Lieferumfang** an einer echten Position | dieselben drei Funktionen verlangen dasselbe Konto |
+| **Warenkorb und Checkout** mit Zubehör | braucht ein freigegebenes Zubehörangebot, und das braucht die Freigabe |
+
+**Und ein praktischer Befund für den Durchstich:** auf Staging gibt es
+**keine Portal-Lagerposition** (21 Portale im Katalog, 0 Positionen). Die 13
+Zubehörpositionen sind alle **Spiele** — und die sind ohne erfasste
+USK-Kennzeichnung nicht freigebbar. Der Weg zu einem sichtbaren Portalangebot
+führt deshalb über `/business/inventory`: das Portal **suchen**, Position
+anlegen, Bestand buchen, Preis setzen, Lieferumfang wählen, freigeben.
+
+---
+
 ### Wie die sechs Z0-Werte nach Z1 geprüft werden
 
 Sechs Größen, drei Prüfwege. Die Migration vergleicht **alle sechs** gegen

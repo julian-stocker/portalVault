@@ -96,21 +96,62 @@ async function main(): Promise<void> {
   const table = await anon.from("sellers").select("display_name").limit(1);
   check("anon cannot select from sellers", table.error !== null, table.error?.code ?? "NO ERROR");
 
-  heading("10. shop_offers() was not touched");
+  heading("10. shop_offers() carries no seller, and nothing else new");
   const offers = await anon.rpc("shop_offers");
   check("shop_offers() still answers", offers.error === null, offers.error?.code ?? "");
   const offerRow = ((offers.data ?? []) as Record<string, unknown>[])[0];
   if (offerRow) {
     const offerKeys = Object.keys(offerRow).sort();
+    /*
+     * FIVE COLUMNS SINCE 0139, not four.
+     *
+     * `delivery_scope` says what is in the parcel and is NULL for every
+     * figure; an offer for used goods has to state it (ADR-0129/0130). The
+     * list is pinned so a sixth column has to be a deliberate addition,
+     * named here — exactly as the fourth was.
+     */
     check(
-      "shop_offers() still returns its four columns",
-      JSON.stringify(offerKeys) === JSON.stringify(["available", "condition", "price", "sky_id"]),
+      "shop_offers() returns its five columns",
+      JSON.stringify(offerKeys)
+        === JSON.stringify(["available", "condition", "delivery_scope", "price", "sky_id"]),
       offerKeys.join(", "),
     );
     check("shop_offers() carries no seller field", !offerKeys.some((k) => k.includes("seller")));
+    /* And still no stock level: `available` is a boolean, never a count. */
+    check(
+      "shop_offers() carries no quantity",
+      !offerKeys.some((k) => k.includes("quantity") || k === "reserved"),
+      offerKeys.join(", "),
+    );
   } else {
     check("shop_offers() has a row to inspect", false, "no offers listed");
   }
+
+  heading("11. seller_sale_state() is there, and closed to visitors");
+  /*
+   * ZWEI FRAGEN IN EINER ANTWORT (0141).
+   *
+   * Die Lagerkarte liest `sale_released`, `delivery_scope` und `usk_rating`
+   * ueber diese Funktion. Sie verhaelt sich unterschiedlich, je nachdem
+   * WARUM sie nicht antwortet, und die Anwendung verlaesst sich darauf:
+   *
+   *   PGRST202  „gibt es nicht" — `0141` ist nicht angewendet. Dann zeigt
+   *             die Karte die drei Steuerungen schlicht nicht.
+   *   42501     „darf nicht" — die Funktion steht und der Riegel haelt.
+   *
+   * Ein `42501` beweist hier also beides auf einmal: angewendet UND dicht.
+   */
+  const saleState = await anon.rpc("seller_sale_state");
+  check(
+    "seller_sale_state() exists (0141 applied)",
+    saleState.error?.code !== "PGRST202",
+    saleState.error?.code ?? "it answered",
+  );
+  check(
+    "anon cannot execute seller_sale_state()",
+    saleState.error !== null,
+    saleState.error?.code ?? "NO ERROR — it answered",
+  );
 
   const failed = results.filter((r) => !r.passed);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);

@@ -3787,6 +3787,40 @@ steht, und `APPLIED.md` ist das Register. Eine
 
 #### Phase C — die Verkaufsoberfläche
 
+**Am laufenden System gegen Staging geprüft** (2026-10-21,
+`supabase/checks/open_verifications.md`, Abschnitt 0h): `/zubehoer` zeigt
+60 Kacheln, alle als Verweis, 60 × „Aktuell kein Angebot", keinen Kaufknopf
+und keinen Sammelknopf; die Detailseiten zeigen Art, Plattform oder Modell,
+Serie, **USK** bei Spielen, den Zustandsstandard im Klartext und die
+SKY-ID; `/shop` steht unverändert bei 225 Angeboten mit **0**
+Zubehörkacheln — richtig, es ist nichts freigegeben; der Figurenkatalog ist
+unberührt; `/zubehoer/bash` und `/skylanders/0000502-g` antworten beide mit
+**404**. `verify:shop` **16/17** (der eine Fehlschlag ist der
+vorbestehende), `verify:seller` **19/19**, `verify:commerce` **30/30**.
+
+**Drei echte Fehler dabei gefunden und behoben:** `verify:seller` pinnte
+noch vier Spalten in `shop_offers()` (seit `0139` sind es fünf);
+`verify:commerce` suchte den Bewegungsgrund `sale_skyisles`, den `0025`
+umbenannt hat — **seit `0025` ein Fehlalarm**, nicht durch diese Arbeit
+entstanden; und der Shop zählte „Figuren", obwohl er jetzt Zubehör zeigen
+kann. Dazu in eigener Sache: die drei neuen Bedienelemente der Lagerkarte
+waren 36 px hoch statt der 44, die der Projektstandard für Telefone
+vorsieht.
+
+**Nicht geprüft, weil nicht erreichbar:** die Lagerkarte selbst, die
+Freigabe an einer echten Position und der Warenkorb mit Zubehör. Alle drei
+verlangen ein **angemeldetes Betriebskonto im Browser** —
+`can_operate_active_seller()` liest `auth.uid()`, und der Service-Role-Key
+hilft dabei nicht.
+
+> **Für den Durchstich:** auf Staging gibt es **keine
+> Portal-Lagerposition** (21 Portale im Katalog, 0 Positionen), und die 13
+> Zubehörpositionen sind alle Spiele — ohne USK nicht freigebbar. Der Weg
+> zu einem sichtbaren Portalangebot führt über `/business/inventory`:
+> Portal suchen, Position anlegen, Bestand buchen, Preis setzen,
+> Lieferumfang wählen, freigeben.
+
+
 | Fläche | was sie jetzt kann |
 |---|---|
 | **Lager** `/business/inventory` | Preis, Mengen, **Lieferumfang**, **USK** (nur bei Spielen), **Freigabeschalter** — und der **Grund**, warum eine Position noch nicht verkäuflich ist. Drei getrennte Aufrufe, damit niemand beim Preispflegen versehentlich freigibt |
@@ -3801,8 +3835,12 @@ steht, und `APPLIED.md` ist das Register. Eine
 nur. Ein Test verbietet, dass `usk_rating`, `sale_released` oder
 `is_position_sellable` im Browsercode auftauchen.
 
-> **`0141` fehlt noch — und ohne sie zeigt die Lagerkarte die drei
-> Steuerungen nicht.** Sie ist **rein additiv**: eine neue Lesefunktion
+> **`0141` ist seit dem 2026-10-21 angewendet** — belegt durch einen
+> anonymen Aufruf, der mit `42501` („keine Berechtigung") und nicht mit
+> `PGRST202` („gibt es nicht") antwortet: die Funktion steht und der
+> Riegel hält.
+>
+> **Vorher galt:** Sie ist **rein additiv**: eine neue Lesefunktion
 > `seller_sale_state()`, weil `admin_shop_inventory()` die drei Spalten
 > nicht liefert und ihren Rückgabetyp zu erweitern hiesse, eine Funktion zu
 > droppen, an der die ganze Lagerseite hängt. Die Oberfläche stürzt ohne

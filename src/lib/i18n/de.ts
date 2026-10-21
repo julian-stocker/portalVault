@@ -4266,16 +4266,24 @@ export const de = {
        * als „75 €" im Text; er kommt jetzt aus derselben Quelle wie der
        * Hinweis am Angebot und wie `/versand`.
        */
+      /*
+       * „ARTIKEL", NICHT „FIGUREN" (ADR-0129).
+       *
+       * Seit der Shop auch freigegebene Spiele und Portale zeigt, wäre
+       * „Figuren" an diesen vier Stellen falsch — und zwar genau dann, wenn
+       * ein Portal im Angebot steht. Ein Wort, das bei einem Teil des
+       * Sortiments lügt, ist schlechter als eines, das für alles stimmt.
+       */
       intro: (name: string, amount: string | null) =>
-        `Diese Figuren verkauft ${name} über SkyIsles — kein Marktplatz, ein Verkäufer. ` +
+        `Das verkauft ${name} über SkyIsles — kein Marktplatz, ein Verkäufer. ` +
         shippingSentence(amount),
       introFallback: (amount: string | null) =>
-        "Diese Figuren verkauft der Verkäufer dieses Shops über SkyIsles — kein Marktplatz, " +
+        "Das verkauft der Verkäufer dieses Shops über SkyIsles — kein Marktplatz, " +
         `ein Verkäufer. ${shippingSentence(amount)}`,
-      count: (n: number) => (n === 1 ? "1 Figur im Angebot" : `${n} Figuren im Angebot`),
+      count: (n: number) => (n === 1 ? "1 Artikel im Angebot" : `${n} Artikel im Angebot`),
       searchLabel: "Im Angebot suchen",
       /** Kein Treffer, obwohl es Angebote gibt. */
-      noHits: "Keine Figur im Angebot passt dazu.",
+      noHits: "Kein Artikel im Angebot passt dazu.",
       noHitsHint: "Versuche einen anderen Namen oder setze die Suche zurück.",
       resetSearch: "Suche zurücksetzen",
       /** Gar nichts gelistet oder alles ausverkauft — für Besucher dasselbe. */

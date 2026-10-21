@@ -169,12 +169,29 @@ async function main(): Promise<void> {
     .select("id, delta, reason")
     .in("id", movementIds.length > 0 ? movementIds : [-1]);
   const byId = new Map((sold.data ?? []).map((m) => [m.id, m]));
+  /*
+   * BOTH NAMES COUNT — and that is not leniency, it is `0025`.
+   *
+   * `inventory_movements.reason` carried `sale_skyisles` from `0003`; `0025`
+   * renamed the forward-looking value to `sale` and kept the old one as
+   * HISTORY, because a movement is append-only and is never rewritten. This
+   * check still asked for the old name alone, so every conversion since
+   * `0025` counted as a mismatch — nine of them, and all nine correct. A
+   * verification that cries wolf during normal trading is worse than none.
+   *
+   * The same pair `0086` uses for the business totals; `sale_external` is
+   * NOT in it — that is a sale somewhere else and never came from a
+   * reservation here.
+   */
+  const VERKAUF = ["sale", "sale_skyisles"];
   const mismatched = rows.filter((r) => {
     const movement = byId.get(r.movement_id as number);
-    return !movement || movement.reason !== "sale_skyisles" || movement.delta !== -r.quantity;
+    return !movement
+      || !VERKAUF.includes(movement.reason as string)
+      || movement.delta !== -r.quantity;
   });
   check(
-    "every converted reservation booked exactly its own quantity as sale_skyisles",
+    "every converted reservation booked exactly its own quantity as a sale",
     rows.length === 0 || (!sold.error && mismatched.length === 0),
     sold.error ? sold.error.message : `${rows.length} conversion(s), ${mismatched.length} mismatched`,
   );
