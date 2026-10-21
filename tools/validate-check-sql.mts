@@ -2539,6 +2539,80 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P42 — DIE LESENDE NACHKONTROLLE ZU 0136, GEFAHREN.
+   *
+   * `prod-s-postflight-0136.sql` ist die Datei, die der Bediener nach
+   * `prod-0136.sql` auf Production ausfuehrt — weil der SQL-Editor
+   * `NOTICE`-Meldungen nicht anzeigt und „Success" allein kein Befund ist.
+   *
+   * Zwei Faelle, und dann die Zahlen:
+   *
+   *   1. Mit Staging-Markerpaar muss sie abbrechen (A1). Ein LESENDER Lauf
+   *      in der falschen Datenbank richtet keinen Schaden an, aber er
+   *      liefert einen falschen Befund — und das ist genau die Panne vom
+   *      2026-10-20.
+   *   2. In einem Stand, der Production nachbildet (0135 und 0136
+   *      angewendet, kein Marker, Katalog gross genug), muss sie durchlaufen.
+   *
+   * UND DANN DAS EIGENTLICHE: die vier Zeilen, auf die es ankommt, muessen
+   * die erwarteten Werte zeigen. Das prueft nicht nur die DATEI, sondern die
+   * ERWARTUNG: `f6d08440…`, 28 Bereiche, 353 Feldzeilen, `item_type` genau
+   * einmal — gegen einen Rumpf, der nachweislich aus der Migration dieses
+   * Repositories stammt.
+   */
+  {
+    const LESEND = "supabase/operations/prod-s-postflight-0136.sql";
+    const PRUEFDATEI = "supabase/checks/0136_postflight.sql";
+    /* 120 Zeilen, damit A3 nicht greift — derselbe Grund wie in P41. */
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    /* 1. Fixture-Katalog MIT Markerpaar. */
+    const dbA = await frischNach0136();
+    const aufStaging = await fahre(dbA, LESEND, { klammer: false });
+
+    /* 2. Production nachgebildet. */
+    const dbB = await frischNach0136();
+    await dbB.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await dbB.exec(FUELLEN);
+    const alsProduction = await fahre(dbB, LESEND, { klammer: false });
+
+    /*
+     * 3. Die Zeilen selbst. Das `rollback` der Datei nimmt ihr Ergebnis mit,
+     *    also wird die eingebettete Pruefung einmal als ABFRAGE gefahren —
+     *    derselbe Text, nur dass die Zeilen diesmal lesbar sind. Der Modus
+     *    gilt hier fuer die Sitzung (`false`), weil keine Klammer drumherum
+     *    liegt.
+     */
+    await dbB.exec("select set_config('skyisles.z0', 'keine', false);");
+    const blatt = await dbB.query(readFileSync(PRUEFDATEI, "utf8")) as {
+      rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const zeile = (nr: number): string =>
+      blatt.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const abweichungen = blatt.rows.filter((r) => r.ok === false)
+      .map((r) => r.nr).join(", ");
+
+    probe.push({
+      name: "P42 die lesende Nachkontrolle zu 0136: weist Staging ab, laeuft auf Production, "
+        + "und ihre vier Zahlen stimmen",
+      ok: aufStaging !== null && aufStaging.includes("ABBRUCH A1")
+        && alsProduction === null
+        && zeile(102) === "f6d08440707ba72a8040a8d1e666c092"
+        && zeile(105) === "28" && zeile(106) === "353" && zeile(108) === "1"
+        && abweichungen === "",
+      sagt: `Markerpaar: ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
+        + ` · als Production: ${alsProduction ?? "durch"}`
+        + ` · Abdruck ${zeile(102).slice(0, 8)}… · ${zeile(105)} Bereiche`
+        + ` · ${zeile(106)} Feldzeilen · item_type ${zeile(108)}×`
+        + ` · blockierende Abweichungen: ${abweichungen === "" ? "keine" : abweichungen}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

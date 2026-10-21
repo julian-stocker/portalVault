@@ -73,6 +73,49 @@ supabase/operations/prod-0136.sql
 
 **Erwartung:** `0136 ok: 28 Bereiche, 353 Feldzeilen …`
 
+> **Der Supabase-SQL-Editor zeigt `NOTICE`-Meldungen nicht an.** „Success"
+> ohne Meldungen ist deshalb **kein** Befund — weder ein guter noch ein
+> schlechter. Dass die Datei durchlief, heißt immerhin: ihre eigenen
+> Nachbedingungen haben gehalten, denn eine Abweichung hätte in derselben
+> Transaktion **alles** zurückgerollt. Nur sehen kann man das nicht.
+
+## Schritt 4a — die Nachkontrolle zu `0136` · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0136.sql
+```
+
+Fragt denselben Zustand von außen und **sichtbar**. Klammer, Riegel,
+Z0-Modus und `rollback` stehen schon darin; es ist nichts zusammenzusetzen.
+Sie ruft `seller_business_backup()` **nicht** auf — gelesen wird die
+gespeicherte Definition, nicht ihr Ergebnis, also keine Geschäftsdaten.
+
+**Erwartung: Zeile `9999` zeigt `0`.** Die fünf Zeilen, auf die es ankommt:
+
+| Zeile | Frage | muss |
+|---|---|---|
+| 108 | führt der Bereich `figures` jetzt `item_type`? | `1` |
+| 107 | und an der richtigen Stelle, Feld für Feld? | die zehn Felder in Folge |
+| 105 | weiterhin genau 28 Bereiche? | `28` |
+| 106 | Feldzeilen von 352 auf 353 gestiegen? | `353` |
+| 102 | die übrigen 27 Bereiche unverändert? | `f6d08440707ba72a8040a8d1e666c092` |
+
+Zeile 102 ist der eigentliche Beweis: ein zeichengleicher Rumpf **kann**
+keinen abweichenden Bereich enthalten. Zeilen 131 und 132 sind die Antwort
+auf „Auswirkungen auf Angebote, Lager, Bestellungen": im Rumpf steht kein
+`insert`, `update`, `delete`, `truncate`, `nextval`, `setval` — die Funktion
+kann nichts ändern.
+
+**Zeilen 911–915 sind hier Messungen ohne Sollwert** (`ok` leer), weil der
+Z0-Vertrag Staging-Zahlen führt. Erwartet werden auf Production **531**
+shopfähige Zeilen, **287** Angebote, **531** sammelbare Artikel, **59**
+Overrides; der Abdruck in 913 ist der Bezug für den **nächsten** Lauf und
+gehört notiert. Weicht eine davon ab, ist das ein Befund — `0136` kann
+keine davon verändern.
+
+Dass die Datei Staging abweist, auf einem Production-Stand durchläuft und
+genau diese vier Zahlen zeigt, fährt Probelauf **P42** nach.
+
 ## Schritt 5 — `0137` · **schreibt**
 
 ```
