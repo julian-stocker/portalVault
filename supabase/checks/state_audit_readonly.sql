@@ -4,7 +4,7 @@
 -- Dieselbe Datei fuer BEIDE Projekte. Sie liest ausschliesslich den Katalog
 -- (`pg_proc`, `pg_trigger`, `pg_class`) und beantwortet die Frage nicht aus
 -- einer Akte, sondern aus dem lebenden Zustand: fuer jede Funktion, die
--- `0126`-`0136` anfassen, wird `md5(prosrc)` gegen die Abdruecke der
+-- `0126`-`0141` anfassen, wird `md5(prosrc)` gegen die Abdruecke der
 -- bekannten Fassungen verglichen.
 --
 -- DIE ABDRUECKE SIND NACHGERECHNET, NICHT GERATEN. Sie stammen aus den
@@ -38,7 +38,24 @@ with fp (funktion, signatur) as (values
   ('purchase_items_touch_purchase', 'public.purchase_items_touch_purchase()'),
   ('seller_issue_purchase_receipt_correction',
    'public.seller_issue_purchase_receipt_correction(bigint)'),
-  ('purchases_paid_total_is_final', 'public.purchases_paid_total_is_final()')
+  ('purchases_paid_total_is_final', 'public.purchases_paid_total_is_final()'),
+  -- ----------------------------------------------- 0135-0141 (Zubehoer)
+  --
+  -- Die SIGNATUREN aendern sich dabei nicht, die RUEMPFE schon. Deshalb
+  -- stehen sie hier: `to_regprocedure` sagt nur, DASS es sie gibt, und der
+  -- Abdruck sagt, WELCHE Fassung lebt. Genau das ist der Unterschied
+  -- zwischen „Nummer in einer Akte" und „Zustand dieser Datenbank".
+  ('non_collectible_categories', 'public.non_collectible_categories()'),
+  ('catalog_item_type_for_category',
+   'public.catalog_item_type_for_category(text)'),
+  ('is_shop_eligible', 'public.is_shop_eligible(text)'),
+  ('shop_offers', 'public.shop_offers()'),
+  ('shop_quantity_available',
+   'public.shop_quantity_available(text, text, integer)'),
+  ('create_order',
+   'public.create_order(text, text, jsonb, jsonb, text, text)'),
+  ('reserve_for_order', 'public.reserve_for_order(bigint)'),
+  ('admin_shop_listing_audit', 'public.admin_shop_listing_audit()')
 ),
 lebend as (
   select fp.funktion,
@@ -49,6 +66,26 @@ lebend as (
 ),
 -- Die bekannten Fassungen. Jede Zeile: Abdruck -> welche Migration.
 bekannt (abdruck, fassung) as (values
+  -- --------------------------------------------- 0135-0141 (Zubehoer)
+  -- Nachgerechnet aus den Migrationsdateien, mit demselben Verfahren wie
+  -- die uebrigen: der Text zwischen `as $$` und `$$;`.
+  ('f3bbdf2fe67d7df22c8f1886fbf7fce7', '0006'),   -- non_collectible_categories
+  ('a7bc3dcee5e49103b6ea8a0d9c915f14', '0137'),   -- dieselbe, fuenf Kategorien
+  ('158d60d57aeda4cf799e86ccb25edadd', '0135'),   -- catalog_item_type_for_category
+  ('3c2f7ef30ace699335d1d49782b3112e', '0137'),   -- dieselbe, mit Portale
+  ('52964f1bef2a41221256e83e867e46da', '0008'),   -- is_shop_eligible
+  ('e6a305dfa7ac840382a13bb4c47ef201', '0135'),   -- dieselbe, mit item_type
+  ('a3fa6b7fb22757396970de0d35875747', '0029'),   -- shop_offers, vier Spalten
+  ('bae40c227756c5a89f82f4678190131a', '0139'),   -- dieselbe, fuenf Spalten
+  ('0ed58c0de13e340db0aaef72576147e7', '0028'),   -- shop_quantity_available
+  ('fed0d4c91fc1b9c8467f7e3074b05560', '0139'),   -- dieselbe, neues Tor
+  ('a2290da73fa5c521c65bb9cff7e813f6', '0040'),   -- create_order
+  ('c233337c0ca0555756f21e1abe173593', '0139'),   -- dieselbe, neues Tor
+  ('53670151bda6f8238410597fbb0381d7', '0010'),   -- reserve_for_order
+  ('8b1034cc3712e82a79c1a1fd5aeeb868', '0139'),   -- dieselbe, neues Tor
+  ('1011312ffdb5ec38014a777f3d6858a9', '0041'),   -- admin_shop_listing_audit
+  ('f36137c40155375b92bae76b5dd63740', '0139'),   -- dieselbe, fuenf Gruende
+  ('a32b148cebe00ee0d0d469f96fd2028e', '0140'),   -- seller_business_backup
   ('6264cb2985c3f8d3b00a4e5f3145d814', '0053'),
   ('e5d81ce3a368bfeb21f54caf73739cb0', '0064'),
   ('616cedcc5198b7da3d4b6594f7df8ebd', '0132'),
@@ -287,5 +324,86 @@ zeilen (nr, bereich, gegenstand, befund) as (
             join public.skylanders s on s.sky_id = si.sky_id
             join public.categories c on c.id = s.category_id
            where c.name = 'Spiele')
+
+  -- ------------------------------------- Der Schemastand 0135 bis 0141
+  --
+  -- NUR UEBER `information_schema` UND `to_regprocedure`, niemals durch
+  -- Lesen der Spalten selbst. Eine Abfrage, die `item_type` AUSWAEHLT,
+  -- scheitert auf einer Datenbank, die sie nicht hat — und genau diese
+  -- Datei soll auf beiden laufen. (Derselbe Fehler hat am 2026-10-20 den
+  -- Preflight von `0139` auf Staging abgebrochen.)
+  --
+  -- Deshalb steht hier, WAS es gibt, und nicht, was darin steht. Die
+  -- Werte messen die Pre- und Postflights der jeweiligen Migration, die
+  -- ohnehin nur dort laufen, wo die Spalte existiert.
+  union all
+  select 60, 'Schema', 'skylanders.item_type (0135)',
+         (select case when count(*) = 1 then 'steht' else 'FEHLT' end
+            from information_schema.columns
+           where table_schema = 'public' and table_name = 'skylanders'
+             and column_name = 'item_type')
+  union all
+  select 61, 'Schema', 'Trigger skylanders_item_type_trg (0135)',
+         (select case when count(*) = 1 then 'steht' else 'FEHLT' end
+            from pg_trigger t
+           where not t.tgisinternal
+             and t.tgrelid = 'public.skylanders'::regclass
+             and t.tgname = 'skylanders_item_type_trg')
+  union all
+  select 62, 'Schema', 'Kategorien mit dem Namen Portale (0138)',
+         (select count(*)::text from public.categories where name = 'Portale')
+  union all
+  select 63, 'Schema', 'shop_inventory.sale_released (0139)',
+         (select case when count(*) = 1 then 'steht' else 'FEHLT' end
+            from information_schema.columns
+           where table_schema = 'public' and table_name = 'shop_inventory'
+             and column_name = 'sale_released')
+  union all
+  select 64, 'Schema', 'shop_inventory.delivery_scope (0139)',
+         (select case when count(*) = 1 then 'steht' else 'FEHLT' end
+            from information_schema.columns
+           where table_schema = 'public' and table_name = 'shop_inventory'
+             and column_name = 'delivery_scope')
+  union all
+  select 65, 'Schema', 'skylanders.usk_rating (0139)',
+         (select case when count(*) = 1 then 'steht' else 'FEHLT' end
+            from information_schema.columns
+           where table_schema = 'public' and table_name = 'skylanders'
+             and column_name = 'usk_rating')
+  union all
+  select 66, 'Schema', 'die drei CHECKs aus 0135/0139',
+         (select coalesce(string_agg(c.conname::text, ', ' order by c.conname::text),
+                          '(keine)')
+            from pg_constraint c
+           where c.conname in ('skylanders_item_type_known',
+                               'skylanders_usk_rating_known',
+                               'shop_inventory_delivery_scope_known'))
+  union all
+  select 67, 'Schema', 'die aufgehobene Kopplung disc_case/loose (muss FEHLT sein)',
+         (select case when count(*) = 0 then 'FEHLT (richtig)' else 'STEHT — Befund' end
+            from pg_constraint where conname = 'shop_inventory_case_is_not_loose')
+  union all
+  select 68, 'Schema', 'Spalten, die shop_offers() liefert (0029 = 4, 0139 = 5)',
+         (select count(*)::text
+            from pg_proc p, unnest(p.proargnames, p.proargmodes) as a(nm, md)
+           where p.oid = to_regprocedure('public.shop_offers()') and a.md = 't')
+  union all
+  select 69, 'Schema', 'die Funktionen aus 0137 bis 0141',
+         (select string_agg(x.name || '=' || x.stand, ', ' order by x.name)
+            from (values
+                   ('seller_create_catalog_item',
+                    'public.seller_create_catalog_item(text, text, text)'),
+                   ('is_position_sellable', 'public.is_position_sellable(bigint)'),
+                   ('seller_set_sale_release',
+                    'public.seller_set_sale_release(text, text, boolean)'),
+                   ('seller_set_delivery_scope',
+                    'public.seller_set_delivery_scope(text, text, text)'),
+                   ('admin_set_usk_rating',
+                    'public.admin_set_usk_rating(text, smallint)'),
+                   ('seller_sale_state', 'public.seller_sale_state()')
+                 ) as f(name, sig)
+            cross join lateral (select f.name as name,
+                                       case when to_regprocedure(f.sig) is null
+                                            then 'FEHLT' else 'steht' end as stand) x)
 )
 select nr, bereich, gegenstand, befund from zeilen order by nr;
