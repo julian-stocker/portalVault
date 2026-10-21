@@ -131,13 +131,32 @@ supabase/operations/prod-0137.sql
 
 ---
 
+## Schritt 5a — die Nachkontrolle zu `0137` · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0137.sql
+```
+
+**Erwartung: Zeile `9999` zeigt `0`.** Die Zeilen der fünf Fragen: **201**
+(alle fünf Kategorien) · **202–210** (jede Kategorie auf ihren Typ, ein
+unbekannter Name bleibt `figure`) · **204** und **401–410** (die
+Anlegefunktion, eine Overload, `security definer`, leerer `search_path`,
+dicht für `anon` und PUBLIC) · **205** (`seller_import_catalog` liefert acht
+Spalten, `item_type` hinten) · **301** (`0137` hat **keine** Zeile angelegt) ·
+**604** (keine shopfähige Zeile in den fünf Kategorien).
+
+Die Abdruckzeilen **601–603, 701–704, 801–803** tragen keinen Sollwert; auf
+Production erwartet werden 601 = 531, 602 = 287, 701 = 531. Zeile **603**
+(md5 der Angebotsliste) bitte **notieren** — sie ist der Bezug für `0139`.
+Probelauf **P43** fährt die Datei nach.
+
 ## Schritt 6 — Jetzt der Code · **Push und Deployment**
 
 **Erst ab hier ist der Push freigegeben.**
 
 | ☐ | Was |
 |---|---|
-| ☐ | `git push` (20 Commits, `origin/main`) |
+| ☐ | `git push` — alle lokalen Commits auf `main` (Stand 2026-10-21: **27**; `git log --oneline origin/main..HEAD` zählt sie) |
 | ☐ | Vercel baut `main` → auf **grün** warten |
 | ☐ | `https://skyisles.app/` öffnen: Figurenkatalog lädt, Karten sichtbar |
 | ☐ | `https://skyisles.app/zubehoer`: **39 Artikel** (noch keine Portale — richtig) |

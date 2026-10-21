@@ -353,10 +353,27 @@ async function main(): Promise<void> {
           categories: { name: string } | { name: string }[];
         };
         const zeilen = (alle.data ?? []) as unknown as Zeile[];
+        /*
+         * „ALLES" HEISST HIER: ALLES, WAS OEFFENTLICH IST.
+         *
+         * Die Richtlinie auf `skylanders` gibt `anon` nur Zeilen mit
+         * `is_active AND catalog_visible`. Redaktionell ausgeblendete
+         * Zeilen — auf Production zum Beispiel `SKY-0821` — sieht dieses
+         * Werkzeug nicht, und ueber ihren Artikeltyp sagt es deshalb
+         * nichts. Was es sagt, gilt fuer den sichtbaren Katalog, und das
+         * ist die Menge, um die es im Shop und im Fortschritt geht. Die
+         * ganze Tabelle prueft `supabase/checks/0137_postflight.sql` im
+         * SQL-Editor.
+         *
+         * Der Vergleich gegen die exakte Zeilenzahl faengt das andere: eine
+         * gedeckelte PostgREST-Antwort, die als „keine Abweichung gefunden"
+         * gelesen wuerde, weil die Abweichung hinter dem Schnitt lag.
+         */
         check(
-          "the whole catalog was read, not a capped page",
+          "the whole PUBLIC catalog was read, not a capped page",
           alle.count !== null && zeilen.length === alle.count,
-          `${zeilen.length} of ${alle.count ?? "?"} rows`,
+          `${zeilen.length} of ${alle.count ?? "?"} publicly visible rows`
+            + " (hidden rows are not visible to anon)",
         );
         const kategorie = (z: Zeile) =>
           Array.isArray(z.categories) ? z.categories[0]?.name : z.categories?.name;

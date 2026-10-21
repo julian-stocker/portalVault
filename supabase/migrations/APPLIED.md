@@ -72,6 +72,38 @@ fährt Probelauf **P41** nach — einschließlich des Falls, dass nur `SKY-0821`
 da ist: Production trägt diese Zeile rechtmäßig, und erst das vollständige
 Paar `SKY-0821` **und** `SKY-0822` bedeutet Staging.
 
+Am **2026-10-21** folgten `0136` und `0137`, einzeln, über
+`supabase/operations/prod-0136.sql` (SHA-256
+`bef6821b4f44c756cf68fe0f15942e3ef4c75c8b02f928f52d49625903042925`) und
+`supabase/operations/prod-0137.sql` (SHA-256
+`e717b1ba0b7210f15f6bf927415b4a96d9cf46b061aa15376eebc554f790278e`). **Der
+SQL-Editor zeigt `NOTICE`-Meldungen nicht an** — „Success" ist deshalb kein
+sichtbarer Befund. Dass eine Datei durchlief, heißt immerhin: ihre eigenen
+Nachbedingungen haben in derselben Transaktion gehalten, denn eine Abweichung
+hätte alles zurückgerollt. Für den sichtbaren Nachweis gibt es seitdem zwei
+rein lesende Dateien, `supabase/operations/prod-s-postflight-0136.sql` und
+`-0137.sql` (Probeläufe **P42**/**P43**).
+
+**Zu `0136` liegt der sichtbare Nachweis noch nicht vor** — die Nachkontrolle
+wurde bisher nicht gefahren. Belegt ist `0136` damit nur durch die
+Nachbedingungen der Migration selbst. Die Datei ist jederzeit nachholbar.
+
+**Zu `0137` lesend gemessen (2026-10-21):** `non_collectible_categories()`
+liefert `[Spiele, Portale, Bundles, Taschen, Zubehör]` und stimmt damit mit
+der Liste der Anwendung überein (`verify:shop:prod`, Abschnitt 5 — vorher der
+einzige dortige Widerspruch) · `seller_create_catalog_item(p_name,
+p_series_code, p_item_type)` antwortet `42501`, steht also und ist für `anon`
+gesperrt; mit falschem Parameternamen `PGRST202`, womit die Probe die
+Signatur trifft und nicht nur den Namen · `seller_import_catalog` `42501` ·
+287 Angebote, 306 Lagerpositionen, 293 verkäuflich, 6 Opt-outs, 13 nicht
+sammelbar · 570 öffentlich sichtbare Katalogzeilen, 531 sammelbar, 39 Spiele,
+nur die Typen `figure` und `game`. **`0137` schreibt auf Anweisungsebene
+keine Geschäftstabelle** — vier `create or replace function`, vier `comment`,
+drei `revoke`, zwei `grant`, ein `drop function`, zwei `do`-Blöcke, eine
+temporäre Tabelle; die drei `insert` der Datei stehen im Rumpf von
+`seller_create_catalog_item`. Das rechnet
+`src/lib/catalog/staging-oneshot.test.ts` nach.
+
 Nachher gemessen, lesend, aus diesem Repository (`npm run verify:shop:prod`):
 `skylanders.item_type` steht · **39** Zeilen `item_type = 'game'`, **39** in
 der Kategorie `Spiele`, **0** außerhalb, **0** ohne Typ, alle 39 aktiv und
@@ -105,6 +137,8 @@ Katalog statt aus dieser Datei.
 | `0132_purchase_item_remove_by_line.sql` | `382aa64749cb035e9a6402fe36fc16f9e1ae663228c7806cc34e29331b7ec6b3` | gleich |
 | `0133_paid_total_immutable.sql` | `65832d746ce26d3fe5a7c1cb7feaec3a7793917b31d965c7c911215b347e0ef4` | gleich |
 | `0135_catalog_item_type.sql` | `08a75cf0ade1ae10f21f76038df6a8407746bf1db76e1c8b02ebeb3d0c637a04` | gleich |
+| `0136_business_backup_item_type.sql` | `fde41c50ad0656c4354aea876b0248a73cdaf129e12def5319f7747ecc136a43` | gleich |
+| `0137_catalog_accessories.sql` | `220cdfb66c377643ff2870853a254f39107a4defceea88309fcde8cb6de6e15b` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -129,8 +163,10 @@ dieser Liste.
 
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
-oben, nicht mehr hier. **Auf Production ist seit dem 2026-10-21 `0135`
-angewendet** (Abschnitt „Production"); `0136`–`0141` fehlen dort, wie `0134`.
+oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`,
+`0136` und `0137` angewendet** (Abschnitt „Production"); `0138`–`0141` fehlen
+dort, wie `0134`. **`0138` gehört ausdrücklich hinter das Deployment** —
+sonst wandern 21 Portale in den Fortschrittsnenner.
 
 | Migration | Stand |
 |---|---|
@@ -165,7 +201,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135` | `0134`, `0136`–`0141` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0137` | `0134`, `0138`–`0141` |
 
 **`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
 keine Abschätzung, sondern an den berührten Objekten ablesbar:

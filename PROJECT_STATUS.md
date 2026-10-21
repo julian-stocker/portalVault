@@ -112,16 +112,36 @@ Spiel), und die Betriebssicherung führt `item_type` im Bereich `figures`:
 und der berichtigte Z0-Vertrag: `supabase/checks/open_verifications.md`,
 Abschnitt 0g.
 
-**Auf Production angewendet am 2026-10-21: `0135`** — der erste Schritt des
-Releases, gefahren über `supabase/operations/prod-0135.sql` (umgekehrter
-Umgebungsstempel: die Datei bricht auf Staging ab). Danach **lesend gemessen**
-mit `npm run verify:shop:prod`: `item_type` steht, **39** Zeilen `game` und
-**39** in der Kategorie `Spiele` — 0 außerhalb, 0 ohne Typ, alle 39 aktiv und
-sichtbar —, nur die Typen `figure` und `game`, und **287** Angebote · **306**
-Lagerpositionen · **293** verkäuflich · **13** nicht sammelbar · **6**
-Opt-outs, Ziffer für Ziffer wie vorher. **Auf Production fehlen weiterhin
-`0134` und `0136`–`0141`.** Der Backup-Nachweis aus Stufe 1 ist **nicht**
-geführt.
+**Auf Production angewendet am 2026-10-21: `0135`, `0136` und `0137`** — die
+Schritte 3 bis 5 des Releases, einzeln gefahren über
+`supabase/operations/prod-0135.sql`, `prod-0136.sql` und `prod-0137.sql`
+(umgekehrter Umgebungsstempel: jede Datei bricht auf Staging ab).
+
+Danach **lesend gemessen** (`npm run verify:shop:prod`, `verify:seller:prod`,
+`verify:commerce:prod`): `item_type` steht · **39** Zeilen `game` und **39**
+in der Kategorie `Spiele`, 0 außerhalb, 0 ohne Typ · nur die Typen `figure`
+und `game` · `non_collectible_categories()` nennt jetzt **alle fünf**
+Kategorien und stimmt damit mit der Liste der Anwendung überein — das war
+vorher der einzige Widerspruch der Prüfung · `seller_create_catalog_item`
+steht mit der richtigen Signatur und ist für `anon` gesperrt (`42501`;
+falscher Parametername `PGRST202`) · **287** Angebote (235 davon verfügbar) ·
+**306** Lagerpositionen · **293** verkäuflich · **13** nicht sammelbar ·
+**6** Opt-outs · **570** öffentlich sichtbare Katalogzeilen, **531**
+sammelbar. Ziffer für Ziffer wie vor dem Release.
+
+**Die Kompatibilität des neuen Codes ist gegen das echte Production-Schema
+gemessen**, nicht nur begründet: ein Entwicklungsserver gegen
+`.env.local` lieferte `/`, `/zubehoer` (39 Artikel, keine Portale),
+`/shop` (235 Artikel im Angebot, Zustandszeile „Gebraucht · mindestens guter
+Zustand · voll funktionsfähig"), eine Zubehör-Detailseite („Aktuell kein
+Angebot", USK- und Lieferumfangstexte) und eine Figuren-Detailseite je mit
+HTTP 200 und ohne eine einzige Fehler- oder Warnzeile im Serverprotokoll.
+Damit ist auch die Nachsicht gegen die fehlende Spalte `usk_rating` (`42703`)
+im Lauf belegt, nicht nur im Test.
+
+**Auf Production fehlen weiterhin `0134` und `0138`–`0141`.** `0138` gehört
+hinter das Deployment. Der Backup-Nachweis aus Stufe 1 ist **nicht** geführt,
+und die sichtbare Nachkontrolle zu `0136` wurde nicht gefahren.
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

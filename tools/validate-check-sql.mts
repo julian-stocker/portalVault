@@ -2613,6 +2613,78 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P43 — DIE LESENDE NACHKONTROLLE ZU 0137, GEFAHREN.
+   *
+   * Derselbe Gedanke wie P42, eine Migration weiter: die Datei, die der
+   * Bediener nach `prod-0137.sql` auf Production ausfuehrt, muss Staging
+   * abweisen, auf einem Production-Stand durchlaufen — und die Zeilen
+   * zeigen, auf die es ankommt.
+   *
+   * Dieser Durchgang prueft die ERWARTUNG mit: dass `0137` fuenf Kategorien
+   * fuehrt, `seller_create_catalog_item` mit genau einer Overload steht,
+   * `seller_import_catalog` acht Spalten liefert und KEINE Zeile angelegt
+   * wurde — gegen Objekte, die aus den Migrationen dieses Repositories
+   * entstanden sind.
+   */
+  {
+    const LESEND = "supabase/operations/prod-s-postflight-0137.sql";
+    const PRUEFDATEI = "supabase/checks/0137_postflight.sql";
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    /** Der Stand, den Production nach Schritt 5 hat: 0135, 0136, 0137. */
+    async function frischNach0137(): Promise<InstanceType<typeof PGlite>> {
+      const db = await frischNach0136();
+      const f = await fahre(db, M137);
+      if (f !== null) throw new Error(`P43 Aufbau: 0137 scheiterte — ${f}`);
+      return db;
+    }
+
+    /* 1. Fixture-Katalog MIT Markerpaar — muss abbrechen. */
+    const dbA = await frischNach0137();
+    const aufStaging = await fahre(dbA, LESEND, { klammer: false });
+
+    /* 2. Production nachgebildet — muss durchlaufen. */
+    const dbB = await frischNach0137();
+    await dbB.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await dbB.exec(FUELLEN);
+    const alsProduction = await fahre(dbB, LESEND, { klammer: false });
+
+    /* 3. Und die Zeilen selbst, als Abfrage — das `rollback` der Datei nimmt
+     *    ihr Ergebnis mit. */
+    await dbB.exec("select set_config('skyisles.z0', 'keine', false);");
+    const blatt = await dbB.query(readFileSync(PRUEFDATEI, "utf8")) as {
+      rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const zeile = (nr: number): string =>
+      blatt.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const abweichungen = blatt.rows.filter((r) => r.ok === false)
+      .map((r) => r.nr).join(", ");
+
+    probe.push({
+      name: "P43 die lesende Nachkontrolle zu 0137: weist Staging ab, laeuft auf Production, "
+        + "und die fuenf Fragen sind beantwortet",
+      ok: aufStaging !== null && aufStaging.includes("ABBRUCH A1")
+        && alsProduction === null
+        && zeile(201) === "Spiele,Portale,Bundles,Taschen,Zubehör"
+        && zeile(204) === "true"
+        && zeile(205) === "sky_id,name,series_code,category,display_name,"
+          + "catalog_visible,is_active,item_type"
+        && zeile(301) === "0" && zeile(604) === "0"
+        && abweichungen === "",
+      sagt: `Markerpaar: ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
+        + ` · als Production: ${alsProduction ?? "durch"}`
+        + ` · fuenf Kategorien ${zeile(201)} · Anlegefunktion ${zeile(204)}`
+        + ` · import_catalog ${zeile(205)} · angelegte Zeilen ${zeile(301)}`
+        + ` · shopfaehig in den fuenf ${zeile(604)}`
+        + ` · blockierende Abweichungen: ${abweichungen === "" ? "keine" : abweichungen}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

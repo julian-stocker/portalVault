@@ -535,26 +535,30 @@ describe("die zwei lesenden Staging-Laeufe", () => {
  * Ergebnisse als Production-Befunde gelesen wurden.
  * ======================================================================== */
 
-describe("der lesende Production-Lauf zu 0136", () => {
-  const DATEI = "supabase/operations/prod-s-postflight-0136.sql";
-  const text = readFileSync(DATEI, "utf8");
+const PROD_LESELAEUFE = [
+  ["supabase/operations/prod-s-postflight-0136.sql", "0136_postflight.sql"],
+  ["supabase/operations/prod-s-postflight-0137.sql", "0137_postflight.sql"],
+] as const;
 
-  it("bettet 0136_postflight.sql Zeichen für Zeichen ein", () => {
-    const anfang = "-- >>> EINGEBETTET: supabase/checks/0136_postflight.sql\n";
-    const ende = "-- <<< ENDE: supabase/checks/0136_postflight.sql\n";
+describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
+  const text = readFileSync(datei, "utf8");
+
+  it(`bettet ${pruefdatei} Zeichen für Zeichen ein`, () => {
+    const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+    const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
     const a = text.indexOf(anfang);
     const b = text.indexOf(ende);
     expect(a, "Marke fehlt").toBeGreaterThan(-1);
     expect(b, "Endmarke fehlt").toBeGreaterThan(a);
     expect(text.slice(a + anfang.length, b))
-      .toBe(readFileSync("supabase/checks/0136_postflight.sql", "utf8"));
+      .toBe(readFileSync(`supabase/checks/${pruefdatei}`, "utf8"));
   });
 
   it("trägt den Riegel der sieben — zeichengleich in allen drei Bedingungen", () => {
     /*
-     * Nicht „einen ähnlichen Riegel": denselben. Die drei Bedingungen
-     * werden aus `prod-0136.sql` ausgeschnitten und verglichen, damit eine
-     * Korrektur dort nicht an dieser Datei vorbeigeht.
+     * Nicht „einen ähnlichen Riegel": denselben. Die drei Bedingungen werden
+     * aus `prod-0136.sql` ausgeschnitten und verglichen, damit eine Korrektur
+     * dort nicht an diesen Dateien vorbeigeht.
      */
     const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
     for (const bedingung of [
@@ -565,7 +569,6 @@ describe("der lesende Production-Lauf zu 0136", () => {
       expect(schreibend, bedingung).toContain(bedingung);
       expect(text, bedingung).toContain(bedingung);
     }
-    /* Und die drei Kennungen, damit eine Fehlermeldung zuordenbar bleibt. */
     for (const kennung of ["ABBRUCH A1", "ABBRUCH A2", "ABBRUCH A3"]) {
       expect(text).toContain(kennung);
     }
@@ -575,22 +578,19 @@ describe("der lesende Production-Lauf zu 0136", () => {
     /*
      * Die fünf Bezugszahlen des Vertrags sind STAGING-Werte. Auf Production
      * wären sie fünf Fehlalarme; `keine` ist der ausdrückliche Verzicht, den
-     * Zeile 902 verlangt. Ein vergessenes `set_config` meldet sie
-     * blockierend — es gibt also keinen Lauf, der die fünf still übergeht.
+     * Zeile 902 verlangt. Ein vergessenes `set_config` meldet sie blockierend
+     * — es gibt also keinen Lauf, der die fünf still übergeht.
      */
     const config = text.indexOf("select set_config('skyisles.z0', 'keine', true);");
     expect(config, "set_config fehlt").toBeGreaterThan(-1);
-    /*
-     * Gegen den AUSFUEHRBAREN Teil, nicht gegen die Datei: die eingebettete
-     * Pruefdatei nennt die Staging-Fassung in ihrem Kopfkommentar als
-     * Gebrauchsanweisung. Ein Kommentar setzt nichts.
-     */
+    /* Gegen den AUSFÜHRBAREN Teil, nicht gegen die Datei: die eingebettete
+       Prüfdatei nennt die Staging-Fassung in ihrem Kopf als
+       Gebrauchsanweisung. Ein Kommentar setzt nichts. */
     const ohneKommentar = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
     expect(ohneKommentar).not.toContain("'skyisles.z0', 'staging'");
     expect(text.indexOf("begin;")).toBeLessThan(config);
     expect(config).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
-    /* Der Riegel steht VOR dem Modus — erst die Umgebung, dann alles
-       andere. */
+    /* Der Riegel steht VOR dem Modus — erst die Umgebung, dann alles andere. */
     expect(text.indexOf("do $lauf_a$")).toBeLessThan(config);
   });
 
@@ -606,38 +606,89 @@ describe("der lesende Production-Lauf zu 0136", () => {
     }
   });
 
+  it("sagt, warum Success ohne NOTICE kein Befund ist", () => {
+    /* Die Frage des Bedieners vom 2026-10-21 gehört in die Datei, nicht nur
+       in den Chatverlauf. */
+    expect(text).toContain("zeigt `NOTICE`-Meldungen nicht");
+  });
+
+  it("nennt die Production-Erwartung der unbewerteten Zeilen", () => {
+    /* „Messung ohne Sollwert" darf nicht heißen „niemand weiß, was
+       rauskommen soll". */
+    expect(text).toContain("287");
+    expect(text).toContain("531");
+    expect(text).toMatch(/NOTIEREN|nicht vorhersagbar/);
+  });
+});
+
+describe("der lesende Production-Lauf zu 0136 — seine eigenen vier Zahlen", () => {
+  const text = readFileSync("supabase/operations/prod-s-postflight-0136.sql", "utf8");
+
   it("ruft die Sicherung nicht auf, sondern liest ihre Definition", () => {
     /* Ein Aufruf würde Geschäftsdaten lesen — Einkäufe, Belege, Lager.
        Gelesen wird `pg_proc.prosrc`, und das ist Text über Struktur. */
     const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
-    /*
-     * Der NAME darf vorkommen — Zeile 143 fragt ein Recht ab und nennt ihn
-     * dafür als Zeichenkette. Was nicht vorkommen darf, ist der AUFRUF.
-     */
     expect(code).not.toMatch(/(?:select|from|join|call)\s+public\.seller_business_backup\s*\(/);
     expect(code).toContain("p.proname = 'seller_business_backup'");
   });
 
-  it("nennt im Kopf die Production-Erwartung der fünf unbewerteten Zeilen", () => {
-    /*
-     * „Messung ohne Sollwert" darf nicht heißen „niemand weiß, was
-     * rauskommen soll". Die vier vorhersagbaren Werte stehen im Kopf, der
-     * fünfte (der Abdruck) ist ausdrücklich als Bezug für den nächsten Lauf
-     * gekennzeichnet.
-     */
-    for (const zeile of ["911", "912", "913", "914", "915"]) {
+  it("nennt die vier Zeilen, auf die es ankommt", () => {
+    for (const zeile of ["108", "107", "105", "106", "102"]) {
       expect(text).toContain(zeile);
     }
-    expect(text).toContain("531");
-    expect(text).toContain("287");
-    expect(text).toContain("nicht vorhersagbar");
+    expect(text).toContain("f6d08440707ba72a8040a8d1e666c092");
+    expect(text).toContain("353");
+  });
+});
+
+describe("der lesende Production-Lauf zu 0137 — was er beweist und was nicht", () => {
+  const text = readFileSync("supabase/operations/prod-s-postflight-0137.sql", "utf8");
+
+  it("nennt die Zeilen der fünf Fragen", () => {
+    for (const zeile of ["201", "204", "205", "301", "604", "305"]) {
+      expect(text).toContain(zeile);
+    }
   });
 
-  it("sagt, warum Success ohne NOTICE kein Befund ist", () => {
-    /* Die Frage des Bedieners vom 2026-10-21, und sie gehört in die Datei,
-       nicht nur in den Chatverlauf. */
-    expect(text).toContain("zeigt `NOTICE`-Meldungen nicht");
+  it("sagt, dass ein Abdruck von NACHHER keine Unverändertheit beweist", () => {
+    /*
+     * Der Bediener fragt „sind die Geschäftsdaten unverändert?". Eine
+     * Messung danach kann das nicht beantworten — es gibt kein Vorher.
+     * Was es beantwortet, ist die Anweisungsebene der Migration, und das
+     * muss die Datei sagen, statt einen Abdruck als Beweis auszugeben.
+     */
+    expect(text).toContain("es gibt kein Vorher zum Vergleichen");
+    expect(text).toContain("KEIN `insert`, `update`, `delete` oder `truncate`");
   });
+
+  it("erklärt, dass anon weniger sieht als dieses SELECT", () => {
+    /*
+     * Die Richtlinie auf `skylanders` gibt `anon` nur sichtbare Zeilen. Eine
+     * Vorhersage aus dem Repository ist für 703/704 deshalb eine
+     * UNTERGRENZE, und das darf nicht als Abweichung gelesen werden.
+     */
+    expect(text).toContain("is_active AND catalog_visible");
+    expect(text).toContain("PLUS die");
+  });
+});
+
+it("0137 schreibt auf Anweisungsebene keine Geschäftstabelle", () => {
+  /*
+   * Die Behauptung aus dem Kopf der Nachkontrolle, hier nachgerechnet: die
+   * drei `insert` der Datei stehen im RUMPF von `seller_create_catalog_item`
+   * (zwischen `as $$` und `$$;`), nicht auf Anweisungsebene.
+   */
+  const migration = readFileSync("supabase/migrations/0137_catalog_accessories.sql", "utf8");
+  const ohneRumpf = migration.replace(/as \$\$[\s\S]*?\$\$;/g, "as $$ … $$;");
+  const anweisungen = ohneRumpf
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*--.*$/gm, "");
+  for (const dml of [/^\s*insert\s+into\s+public\./im, /^\s*update\s+public\./im,
+    /^\s*delete\s+from\s+public\./im, /^\s*truncate/im]) {
+    expect(anweisungen, String(dml)).not.toMatch(dml);
+  }
+  /* Und die drei stehen wirklich in der Datei — sonst prüfte der Test nichts. */
+  expect(migration).toMatch(/insert into public\.skylanders/);
 });
 
 

@@ -164,6 +164,43 @@ async function main(): Promise<void> {
     saleState.error?.code ?? "NO ERROR — it answered",
   );
 
+  heading("12. The business functions from 0137 — present, and closed?");
+  /*
+   * ZWEI ZUSTAENDE, UND EIN FEHLERCODE SAGT SIE AUSEINANDER.
+   *
+   *   PGRST202  „gibt es nicht" — `0137` ist hier nicht angewendet.
+   *   42501     „darf nicht"    — die Funktion steht, und der Riegel haelt.
+   *
+   * Dass das wirklich die SIGNATUR trifft und nicht nur den Namen, zeigt die
+   * Gegenprobe: mit einem falschen Parameternamen MUSS `PGRST202` kommen.
+   * Ohne sie waere `42501` auch von einer anderen Overload zu haben.
+   */
+  const anlegen = await anon.rpc("seller_create_catalog_item",
+    { p_name: "", p_series_code: "", p_item_type: "" });
+  const steht = anlegen.error?.code !== "PGRST202";
+  console.log(`  INFO  seller_create_catalog_item(text, text, text): `
+    + `${steht ? "0137 applied" : "0137 NOT applied"}  — ${anlegen.error?.code ?? "it answered"}`);
+  check(
+    "anon cannot execute seller_create_catalog_item()",
+    anlegen.error !== null,
+    anlegen.error?.code ?? "NO ERROR — it answered",
+  );
+  if (steht) {
+    const falsch = await anon.rpc("seller_create_catalog_item", { p_falsch: "x" });
+    check(
+      "and the probe hits the signature, not just the name",
+      falsch.error?.code === "PGRST202",
+      falsch.error?.code ?? "NO ERROR — it answered",
+    );
+  }
+
+  const importieren = await anon.rpc("seller_import_catalog");
+  check(
+    "anon cannot execute seller_import_catalog()",
+    importieren.error !== null,
+    importieren.error?.code ?? "NO ERROR — it answered",
+  );
+
   const failed = results.filter((r) => !r.passed);
   console.log(`\n${results.length - failed.length}/${results.length} passed`);
   process.exit(failed.length === 0 ? 0 : 1);
