@@ -237,6 +237,22 @@ keinen Fall, in dem 3c die Antwort auf diesen Release ist.
 | Der Code erwartet fünf nicht sammelbare Kategorien | gelöst durch `0137` vor dem Deployment |
 | Der alte Code zeigte Portale als Figuren | gelöst durch `0138` nach dem Deployment |
 
+### Vorbestehende Production-Befunde — gemessen, und kein Blocker
+
+Beide am 2026-10-21 rein lesend gemessen. Keine der sieben Migrationen
+fasst die betroffenen Tabellen an; sie blockieren diesen Release **nicht**,
+und sie sind nicht durch diese Arbeit entstanden.
+
+| Befund | Messung | Einordnung |
+|---|---|---|
+| **6 shopfähige Positionen nicht gelistet** | `verify:shop:prod`, Abschnitt 4 | bewusste Opt-outs des Betreibers. Auf Staging dasselbe Bild mit 15 |
+| **101 von 103 umgewandelten Reservierungen zeigen auf eine `sale_external`-Bewegung** | `verify:commerce:prod`, Abschnitt 2 | `seller_book_sale_item()` lehnt eine bestellgebundene Position ab (`0090`) — eine Reservierung sollte also nie auf eine solche Bewegung zeigen. Gehört zur Familie der **„61 verwaisten `sale_external`-Bewegungen"**, die `PROJECT_STATUS.md` seit dem 2026-09-19 als *„offen, bewusst liegen gelassen"* führt |
+
+> **Die zweite Zeile ist eine offene Frage, keine beantwortete.** Die
+> Prüfung bleibt dort deshalb **rot** und nennt die Ursache, statt
+> aufgeweicht zu werden, bis sie grün ist — eine aufgeweichte Prüfung
+> löscht die Frage. Sie gehört angesehen, aber nicht in diesem Release.
+
 ### Nicht geprüft, und ausdrücklich nicht als bestanden dargestellt
 
 * Die **Lagerkarte** mit angemeldetem Betriebskonto — nie geöffnet.

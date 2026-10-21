@@ -179,9 +179,18 @@ async function main(): Promise<void> {
    * `0025` counted as a mismatch — nine of them, and all nine correct. A
    * verification that cries wolf during normal trading is worse than none.
    *
-   * The same pair `0086` uses for the business totals; `sale_external` is
-   * NOT in it — that is a sale somewhere else and never came from a
-   * reservation here.
+   * The same pair `0086` uses for the business totals. `sale_external` is
+   * deliberately NOT in it: `seller_book_sale_item()` refuses a sale that
+   * belongs to an order (`0090`), so a reservation should never point at
+   * one.
+   *
+   * ON PRODUCTION, 101 OF 103 DO — measured 2026-10-21. That is not a
+   * rename and not leniency to be granted here; it belongs to the family
+   * of findings `PROJECT_STATUS.md` has carried since 2026-09-19 as
+   * „offen, bewusst liegen gelassen" (the orphaned `sale_external`
+   * movements). The check therefore stays RED there and names the cause,
+   * rather than being widened until it goes green. Widening it would
+   * delete the question.
    */
   const VERKAUF = ["sale", "sale_skyisles"];
   const mismatched = rows.filter((r) => {
@@ -190,10 +199,35 @@ async function main(): Promise<void> {
       || !VERKAUF.includes(movement.reason as string)
       || movement.delta !== -r.quantity;
   });
+  /*
+   * UND WENN ES NICHT STIMMT, SAGT DER BEFUND WARUM.
+   *
+   * „101 mismatched" ist keine Auskunft, sondern der Anfang einer Suche.
+   * Gruppiert wird deshalb nach der URSACHE: fehlt die Bewegung ganz,
+   * traegt sie einen anderen Grund, oder stimmt die Menge nicht? Nur
+   * Betriebswerte — Grund, Menge, Anzahl —, keine personenbezogenen Daten.
+   */
+  const warum = new Map<string, number>();
+  for (const r of mismatched) {
+    const m = byId.get(r.movement_id as number);
+    const schluessel = m === undefined
+      ? "Bewegung nicht gefunden"
+      : !VERKAUF.includes(m.reason as string)
+        ? `anderer Grund: ${String(m.reason)}`
+        : `Menge weicht ab (${String(m.delta)} statt ${-(r.quantity as number)})`;
+    warum.set(schluessel, (warum.get(schluessel) ?? 0) + 1);
+  }
+  const befund = [...warum.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([k, n]) => `${n}x ${k}`)
+    .join(" · ");
   check(
     "every converted reservation booked exactly its own quantity as a sale",
     rows.length === 0 || (!sold.error && mismatched.length === 0),
-    sold.error ? sold.error.message : `${rows.length} conversion(s), ${mismatched.length} mismatched`,
+    sold.error
+      ? sold.error.message
+      : `${rows.length} conversion(s), ${mismatched.length} mismatched — ${befund}`,
   );
 
   // --- 3. an order's money adds up -----------------------------------------

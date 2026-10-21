@@ -289,6 +289,37 @@ async function main(): Promise<void> {
     }
   }
 
+  heading("6. Does the schema carry what the application selects?");
+  {
+    /*
+     * DIE EINE FRAGE, DIE EINE AKTE NICHT BEANTWORTEN KANN.
+     *
+     * `FIGURE_COLUMNS` nennt `item_type` seit `0135`, und die Spaltenliste
+     * laeuft auf JEDER Umgebung. Fehlt die Spalte, scheitert jede
+     * Katalogabfrage mit `42703` — Startseite, Sammlung, Shop,
+     * Detailseiten. Das ist der eine harte Blocker des
+     * Production-Releases, und er gehoert gemessen, nicht geschlossen.
+     *
+     * Gefragt wird mit EINER Zeile, nicht mit dem Katalog: `limit(1)`
+     * genuegt, um zu erfahren, ob der Name aufloest.
+     *
+     * KEIN SOLLWERT. Dieselbe Datei laeuft gegen beide Projekte, und vor
+     * dem Release ist `FEHLT` auf Production die richtige Antwort. Was sie
+     * sagt, ist: welcher der beiden Zustaende hier lebt.
+     */
+    const probe = await anon.from("skylanders").select("sky_id, item_type").limit(1);
+    const fehlt = probe.error?.code === "42703";
+    check(
+      "skylanders.item_type resolves, or says cleanly that it does not",
+      probe.error === null || fehlt,
+      probe.error === null
+        ? "steht — 0135 applied, the application's FIGURE_COLUMNS works here"
+        : fehlt
+          ? "FEHLT — 0135 NOT applied; the current application code would fail here"
+          : `unexpected: ${probe.error.code} ${probe.error.message}`,
+    );
+  }
+
   report();
 }
 
