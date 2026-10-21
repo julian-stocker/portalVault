@@ -154,3 +154,48 @@ describe("3. 0138 gehört hinter das Deployment", () => {
     expect(plan).not.toContain("prod-0134.sql");
   });
 });
+
+/* ===================================================================== */
+describe("4. Die Zuordnung der Spiele ist eine Invariante, keine Momentaufnahme", () => {
+  /*
+   * `0135` setzt `item_type = 'game'` genau auf den Zeilen der Kategorie
+   * `Spiele` und hält das mit einem Trigger. „39 Spiele korrekt zugeordnet"
+   * ist deshalb nichts, was man einmal nach der Migration abhakt, sondern
+   * eine Aussage, die dauerhaft prüfbar sein muss — sonst merkt niemand,
+   * wenn sie später auseinanderläuft.
+   */
+  const verifier = code("tools/verify-shop.mts");
+
+  it("prüft aus der Kategorie, nicht aus dem Namen", () => {
+    expect(verifier).toContain('kategorie(z) === "Spiele"');
+    /* Kein Namensraten — das ist die Regel aus ADR-0034. */
+    expect(verifier).not.toMatch(/name.*includes\("Spiel/);
+  });
+
+  it("prüft in beide Richtungen, weil eine Richtung blind wäre", () => {
+    expect(verifier).toContain("gameAusserhalb");
+    expect(verifier).toContain("spieleNichtGame");
+    expect(verifier).toContain("gameAusserhalb.length === 0 && spieleNichtGame.length === 0");
+  });
+
+  it("nennt die Zahl, die der Betrieb kennt — aktiv UND sichtbar", () => {
+    expect(verifier).toContain("z.is_active && z.catalog_visible");
+  });
+
+  it("meldet eine gedeckelte Antwort als Fehler, nicht als Unauffälligkeit", () => {
+    expect(verifier).toContain('count: "exact"');
+    expect(verifier).toContain("zeilen.length === alle.count");
+  });
+
+  it("läuft nur, wenn item_type überhaupt da ist", () => {
+    /* Dieselbe Datei läuft gegen eine Datenbank ohne `0135`. Dort darf die
+       Prüfung schweigen, nicht scheitern. */
+    expect(verifier).toContain("if (probe.error === null) {");
+  });
+
+  it("verlangt keinen Typ, den noch keine Migration erzeugt hat", () => {
+    /* Ohne `0137`/`0138` gibt es weder Portale noch Bundles — die Liste ist
+       eine Obergrenze, keine Erwartung. */
+    expect(verifier).toContain('["figure", "game", "portal", "bundle", "other"]');
+  });
+});

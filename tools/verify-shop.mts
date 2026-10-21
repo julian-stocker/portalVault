@@ -318,6 +318,80 @@ async function main(): Promise<void> {
           ? "FEHLT — 0135 NOT applied; the current application code would fail here"
           : `unexpected: ${probe.error.code} ${probe.error.message}`,
     );
+
+    /*
+     * UND WENN SIE DA IST: STIMMT SIE MIT DER KATEGORIE ZUSAMMEN?
+     *
+     * `0135` setzt `item_type = 'game'` genau auf den Zeilen der Kategorie
+     * `Spiele` — aus der KATEGORIE, aus keinem Namen —, und ein Trigger
+     * haelt das fuer jede neue Zeile. Das ist eine DAUERHAFTE Invariante,
+     * nicht ein einmaliges Backfill-Ergebnis: laeuft sie auseinander, ist
+     * entweder der Trigger umgangen oder eine Kategorie umbenannt worden.
+     *
+     * Gepruefft wird in beide Richtungen, denn nur eine Richtung waere
+     * blind: keine `game`-Zeile ausserhalb der Kategorie, und keine Zeile
+     * der Kategorie, die nicht `game` ist.
+     */
+    if (probe.error === null) {
+      const alle = await anon
+        .from("skylanders")
+        .select(
+          "sky_id, item_type, is_active, catalog_visible, categories!inner(name)",
+          { count: "exact" },
+        );
+      /*
+       * ZUERST: HABEN WIR ALLES? PostgREST kann eine Antwort deckeln, und
+       * ein gedeckeltes Blatt hiesse „keine Abweichung gefunden", weil die
+       * Abweichung hinter dem Schnitt lag. Der Vergleich gegen die exakte
+       * Zeilenzahl macht aus dem stillen Teilbefund einen lauten.
+       */
+      if (alle.error) {
+        check("item_type agrees with the category", false, alle.error.message);
+      } else {
+        type Zeile = {
+          sky_id: string; item_type: string; is_active: boolean; catalog_visible: boolean;
+          categories: { name: string } | { name: string }[];
+        };
+        const zeilen = (alle.data ?? []) as unknown as Zeile[];
+        check(
+          "the whole catalog was read, not a capped page",
+          alle.count !== null && zeilen.length === alle.count,
+          `${zeilen.length} of ${alle.count ?? "?"} rows`,
+        );
+        const kategorie = (z: Zeile) =>
+          Array.isArray(z.categories) ? z.categories[0]?.name : z.categories?.name;
+
+        const spiele = zeilen.filter((z) => kategorie(z) === "Spiele");
+        const alsGame = zeilen.filter((z) => z.item_type === "game");
+        const gameAusserhalb = alsGame.filter((z) => kategorie(z) !== "Spiele");
+        const spieleNichtGame = spiele.filter((z) => z.item_type !== "game");
+
+        check(
+          "every game row sits in a Spiele category, and every Spiele row is a game",
+          gameAusserhalb.length === 0 && spieleNichtGame.length === 0,
+          `${alsGame.length} game, ${spiele.length} in Spiele`
+            + ` — ${gameAusserhalb.length} outside, ${spieleNichtGame.length} untyped`,
+        );
+
+        /* Die Zahl, die der Betreiber kennt: wie viele davon im Katalog
+           waehlbar sind — aktiv UND redaktionell sichtbar. */
+        const sichtbar = spiele.filter((z) => z.is_active && z.catalog_visible);
+        check(
+          "the games are counted, active and visible",
+          sichtbar.length > 0,
+          `${sichtbar.length} active and visible of ${spiele.length}`,
+        );
+
+        /* Und nichts anderes wurde mitgetypt: ohne 0137/0138 gibt es weder
+           Portale noch Bundles. */
+        const andere = [...new Set(zeilen.map((z) => z.item_type))].sort();
+        check(
+          "no item type appeared that no migration created",
+          andere.every((t) => ["figure", "game", "portal", "bundle", "other"].includes(t)),
+          `types seen: ${andere.join(", ")}`,
+        );
+      }
+    }
   }
 
   report();
