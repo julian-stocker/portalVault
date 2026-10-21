@@ -180,10 +180,32 @@ Spalte** im Z0-Vertrag von `0139_preflight.sql` und `0139_postflight.sql`
 (Modus `production`), damit diese sechs Zahlen auf Production **blockierend**
 geprüft werden statt nur gemessen.
 
-**Auf Production fehlen weiterhin `0134` und `0139`–`0141`.** Der
-Backup-Nachweis aus Stufe 1 ist **nicht** geführt — für `0139` ist er auch
-nicht das Netz: sie legt keine Zeile an, und `R0139_drop_sale_release.sql`
-nimmt Spalten und Funktionen zurück.
+**Am 2026-10-21 lief auch `0139`** — das Verkaufstor, mit lesendem Preflight
+und Nachkontrolle im Z0-Modus `production`, also mit **blockierenden**
+Bezugszahlen statt bloßer Messungen. **Postflight `9999 = 0`:** 287 Angebote
+und Abdruck `9b8341058bbfa0f7809eddc300ab0e9e` **unverändert**, 531
+sammelbare Figuren, 306 Lagerpositionen, 624 Katalogeinträge, **0**
+Unterschiede zwischen alter und neuer Verkaufslogik, **0** freigegebene
+Zubehörpositionen, **0** öffentliche Zubehörangebote, **4** Verkaufsfunktionen
+am neuen Tor, Belegsperre unverändert. Nachgemessen: `shop_offers()` hat jetzt
+fünf Spalten, `delivery_scope` überall `null`, `seller_sale_state()` weiter
+`PGRST202`.
+
+**Damit ist das Verkaufstor gebaut und zu.** Eine Zubehörposition wird erst
+kaufbar, wenn jemand sie einzeln freigibt — und das kann die Oberfläche noch
+nicht anbieten, weil die Steuerungen `seller_sale_state()` aus `0141`
+brauchen.
+
+**Auf Production fehlen weiterhin `0134`, `0140` und `0141`.** Der
+Backup-Nachweis aus Stufe 1 ist **nicht** geführt — für `0140` ist er auch
+nicht das Netz: sie schreibt einen Funktionsrumpf, keine Tabellenzeile, und
+`R0140_back_to_0136.sql` nimmt ihn zurück. **Offener Punkt mit `0140`
+verbunden:** zwischen `0139` und `0140` beschreibt `src/lib/backup/manifest.ts`
+drei Felder, die `seller_business_backup()` auf Production noch nicht
+liefert. Die Anwendung stört das nicht (die Sicherungsseite lädt und zählt
+Bereiche, sie prüft keine Felder), aber `npm run verify:backup` auf eine
+**heute** gezogene Datei würde die drei als fehlend melden. `0140` schließt
+genau diese Lücke.
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

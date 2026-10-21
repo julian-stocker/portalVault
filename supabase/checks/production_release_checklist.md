@@ -354,13 +354,78 @@ für `anon` **nicht** · **604 die Belegsperre hält unverändert**.
 **P45** fährt den ganzen Schritt 8 am Stück, **P34–P37** die vier
 Zusicherungen von `0139` einzeln.
 
-## Schritt 9 — `0140`, die Betriebssicherung · **schreibt**
+## Schritt 9 — `0140`, die Betriebssicherung · **drei Dateien**
+
+`0140` schreibt **nur einen Funktionsrumpf**: `seller_business_backup()`,
+353 Feldzeilen werden 356. Keine Tabellenzeile, keine Spalte, kein Recht.
+Trotzdem erst messen, dann schreiben, dann vergleichen — aus demselben
+Grund wie bei `0136`: der SQL-Editor zeigt keine `NOTICE`-Zeilen.
+
+### 9a — das Vorher · **rein lesend**
+
+```
+supabase/operations/prod-s-preflight-0140.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Modus `production`.
+
+| Zeile | | Sollwert |
+|---|---|---|
+| 102 | Abdruck des Rumpfs — **Stand `0136`** | `f6d08440707ba72a8040a8d1e666c092` |
+| 103 | Länge | `21494` |
+| 104 / 105 | Bereiche / Feldzeilen | `28` / **`353`** |
+| 106 / 107 | `figures` ohne `usk_rating`, `shop_inventory` ohne die zwei | die Feldfolgen |
+| 108 | `usk_rating` im Rumpf | **`0`** — `0140` lief hier noch nicht |
+| 111–114 | `0139` steht: drei Spalten + `is_position_sellable` | `true` |
+| 201–204 | nichts freigegeben: Freigaben / USK / Lieferumfänge / Zubehörangebote | **`0` / `0` / `0` / `0`** |
+| 301–306 | Angebote **287** · Abdruck **9b834105…** · shopfähig **531** · sammelbar **531** · Lagerzeilen **306** · Katalogzeilen **624** | |
+| 307 | Abdruck über Listung, Preis und Freigabe jeder Lagerzeile | **notieren** |
+| 401 / 402 | Belegsperre: keine Grants, keine API-Rolle darf ausstellen | `0` / `0` |
+
+### 9b — `0140` · **schreibt**
 
 ```
 supabase/operations/prod-0140.sql
 ```
 
 **Erwartung:** `0140 ok: 28 Bereiche, 356 Feldzeilen, die 26 uebrigen unveraendert`
+
+### 9c — das Nachher · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0140.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.**
+
+| Zeile | | Sollwert |
+|---|---|---|
+| 102 | Abdruck des Rumpfs — **Stand `0140`** | `a32b148cebe00ee0d0d469f96fd2028e` |
+| 103 | Länge | `21622` |
+| 104 / 105 | Bereiche / Feldzeilen | `28` / **`356`** |
+| 106 | `figures` mit `usk_rating` an siebter Stelle | die Feldfolge |
+| 107 | `shop_inventory` mit `sale_released` und `delivery_scope` | die Feldfolge |
+| 108 | genau drei neue Felder | **`3`** |
+| 110 | Kommentarabdruck | `ffc66ad2060e89b7cf982c3f95012ffa` |
+| 201–204 | unverändert nichts freigegeben | `0` / `0` / `0` / `0` |
+| 301–306 | dieselben sechs Zahlen wie in 9a | |
+| 307 | **gegen 9a halten — muss gleich sein** | |
+| 401 / 402 | Belegsperre unverändert | `0` / `0` |
+
+**Zeile 102 ist der Beweis.** Stimmt dieser eine Wert, können die 26
+unberührten Bereiche nicht abweichen — es gibt kein anderes Zeichen, das
+abweichen könnte. Woher er kommt: aus der Migrationsdatei gerechnet, die
+Rechnung an `0136` geprüft (`src/lib/backup/backup-sale-release.test.ts`),
+und an echtem PostgreSQL nachgefahren (Probelauf **P46**).
+
+### 9d — und danach, wenn du magst
+
+| ☐ | |
+|---|---|
+| ☐ | `/business/datensicherung` herunterladen, `npm run verify:backup -- --file …` — **jetzt** stimmen Manifest und Rumpf wieder überein (zwischen `0139` und `0140` fehlen der Datei drei Felder, die das Manifest schon beschreibt) |
+
+**Rücknahme:** `supabase/rollback/R0140_back_to_0136.sql` — sie stellt den
+Rumpf aus `0136` wieder her.
 
 ## Schritt 10 — `0141`, die Lesefunktion · **schreibt**
 

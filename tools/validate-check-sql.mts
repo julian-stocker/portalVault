@@ -2910,6 +2910,114 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P46 — SCHRITT 9 AM STUECK: VORHER, 0140, NACHHER.
+   *
+   * `0140` ist die zweite Migration dieses Releases, die nur einen
+   * Funktionsrumpf schreibt — und die erste, deren Pruefdateien ERST JETZT
+   * entstanden sind. Die drei Abdruecke darin (Rumpf, Laenge, Kommentar)
+   * sind aus der Migrationsdatei GERECHNET; dieser Durchgang fuehrt sie an
+   * echtem PostgreSQL nach. Eine gerechnete Konstante, die niemand gegen
+   * eine laufende Datenbank gehalten hat, ist eine Vermutung.
+   *
+   * Vier Faelle:
+   *
+   *   1. Der Preflight laeuft VOR `0140` und verlangt dort den Stand `0136`.
+   *   2. `0140` laeuft auf dem Stand `0135`-`0139` durch.
+   *   3. Der Postflight ist danach STRUKTURELL gruen — 356 Feldzeilen, 28
+   *      Bereiche, die drei neuen Felder, nichts freigegeben, Belegsperre.
+   *   4. Und `0140` BRICHT AB, wenn `0139` fehlt. Das ist ihre einzige
+   *      harte Vorbedingung, und ohne sie waere der Rumpf nicht lauffaehig.
+   */
+  {
+    const VORHER = "supabase/operations/prod-s-preflight-0140.sql";
+    const NACHHER = "supabase/operations/prod-s-postflight-0140.sql";
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    type Blatt = { rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const feld = (b: Blatt, nr: number): string =>
+      b.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const rot = (b: Blatt): string =>
+      b.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+    const lies = async (db: InstanceType<typeof PGlite>, pfad: string): Promise<Blatt> => {
+      await db.exec("select set_config('skyisles.z0', 'production', false);");
+      return await db.query(readFileSync(pfad, "utf8")) as Blatt;
+    };
+
+    /** Der Stand von Production nach Schritt 8: 0135-0139. */
+    async function frischNach0139(): Promise<InstanceType<typeof PGlite>> {
+      const db = await frischNach0136();
+      const f137 = await fahre(db, M137);
+      if (f137 !== null) throw new Error(`P46 Aufbau: 0137 scheiterte — ${f137}`);
+      await serienUndIdentitaet(db);
+      const f138 = await fahre(db, M138);
+      if (f138 !== null) throw new Error(`P46 Aufbau: 0138 scheiterte — ${f138}`);
+      await db.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+      await db.exec(FUELLEN);
+      /* Identitaet auf `shop_inventory.id` — siehe P45. */
+      await db.exec(`
+        create sequence if not exists public.z_inv_id_seq start 1000;
+        alter table public.shop_inventory
+          alter column id set default nextval('public.z_inv_id_seq');
+        update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+         where id is null;`);
+      const f139 = await fahre(db, M139);
+      if (f139 !== null) throw new Error(`P46 Aufbau: 0139 scheiterte — ${f139}`);
+      return db;
+    }
+
+    const db = await frischNach0139();
+    const vorherLauf = await fahre(db, VORHER, { klammer: false });
+    const vorher = await lies(db, "supabase/checks/0140_preflight.sql");
+    const lauf = await fahre(db, M140);
+    const nachherLauf = lauf === null
+      ? await fahre(db, NACHHER, { klammer: false }) : "0140 scheiterte";
+    const nachher: Blatt = lauf === null
+      ? await lies(db, "supabase/checks/0140_postflight.sql") : { rows: [] };
+
+    /* 4. Ohne 0139 muss sie abbrechen. */
+    const dbOhne = await frischNach0136();
+    const ohne0139 = await fahre(dbOhne, M140);
+
+    /*
+     * Die erwartete Rotmenge: nur die sechs Bezugszahlen, die ein Fixture
+     * nicht haben kann (287 Angebote, 531, 306, 624 …) — und 9999. Jede
+     * andere rote Zeile laesst diesen Durchgang scheitern. Im Postflight
+     * sind es dieselben sechs.
+     */
+    const ROT = "301, 302, 303, 304, 305, 306, 9999";
+
+    probe.push({
+      name: "P46 Schritt 9 am Stueck: Preflight, 0140, Postflight — 356 Feldzeilen, "
+        + "Abdruck wie gerechnet, und ohne 0139 ein Abbruch",
+      ok: vorherLauf === null && lauf === null && nachherLauf === null
+        && rot(vorher) === ROT && rot(nachher) === ROT
+        && feld(vorher, 102) === "f6d08440707ba72a8040a8d1e666c092"
+        && feld(vorher, 105) === "353"
+        && feld(nachher, 102) === "a32b148cebe00ee0d0d469f96fd2028e"
+        && feld(nachher, 103) === "21622" && feld(nachher, 104) === "28"
+        && feld(nachher, 105) === "356" && feld(nachher, 108) === "3"
+        && feld(nachher, 110) === "ffc66ad2060e89b7cf982c3f95012ffa"
+        && feld(nachher, 201) === "0" && feld(nachher, 204) === "0"
+        && feld(nachher, 401) === "0" && feld(nachher, 402) === "0"
+        && ohne0139 !== null && ohne0139.includes("0140 setzt 0139 voraus"),
+      sagt: `Vorher: ${vorherLauf ?? "durch"} (rot: ${rot(vorher)}, Stand `
+        + `${feld(vorher, 102).slice(0, 8)}…, ${feld(vorher, 105)} Felder)`
+        + ` · 0140: ${lauf ?? "durch"} · Nachher: ${nachherLauf ?? "durch"}`
+        + ` (rot: ${rot(nachher)}) · Abdruck ${feld(nachher, 102).slice(0, 8)}…`
+        + ` · ${feld(nachher, 104)} Bereiche · ${feld(nachher, 105)} Feldzeilen`
+        + ` · ${feld(nachher, 108)} neue Felder · Kommentar `
+        + `${feld(nachher, 110).slice(0, 8)}… · freigegeben ${feld(nachher, 201)}`
+        + ` · Belegsperre ${feld(nachher, 401)}/${feld(nachher, 402)}`
+        + ` · ohne 0139: ${ohne0139 === null ? "DURCHGELAUFEN — Befund" : "Abbruch"}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

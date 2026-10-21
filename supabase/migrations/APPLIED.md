@@ -112,6 +112,27 @@ Staging-Zahl ist (dort sind die Portale freigegeben); das ist berichtigt.
 **Zu `0136` liegt der sichtbare Nachweis seit dem 2026-10-21 vor:**
 Nachkontrolle gefahren, **`9999 = 0`**.
 
+**Am 2026-10-21 folgte `0139`** — das Verkaufstor für Zubehör, gefahren über
+`supabase/operations/prod-0139.sql` (SHA-256
+`6f3aad33e96457ac35a29e8764308cce1df7aa07fac5c1bf8bf8f5a800cf0c97`), mit
+lesendem Preflight davor und Nachkontrolle danach, beide im Z0-Modus
+**`production`** — die sechs Bezugszahlen sind dort **blockierend** geprüft,
+nicht nur gemessen. Probelauf **P45**.
+
+**Postflight `9999 = 0`**, vom Betreiber bestätigt: **287** Angebote, Abdruck
+**unverändert** `9b8341058bbfa0f7809eddc300ab0e9e` · **531** sammelbare
+Figuren · **306** Lagerpositionen · **624** Katalogeinträge · **0**
+Unterschiede zwischen alter und neuer Verkaufslogik für bestehende
+Figurenpositionen · **0** freigegebene Zubehörpositionen · **0** öffentliche
+Zubehörangebote · **4** Verkaufsfunktionen fragen `is_position_sellable()` ·
+Belegsperre unverändert.
+
+Unabhängig nachgemessen (lesend, aus dem Repository): `shop_offers()` liefert
+jetzt **fünf** Spalten (`available, condition, delivery_scope, price,
+sky_id`), `delivery_scope` ist bei allen 287 Figurenangeboten `null`, und
+`seller_sale_state()` antwortet weiter `PGRST202` — `0141` ist richtig noch
+nicht angewendet.
+
 **Zu `0137` lesend gemessen (2026-10-21):** `non_collectible_categories()`
 liefert `[Spiele, Portale, Bundles, Taschen, Zubehör]` und stimmt damit mit
 der Liste der Anwendung überein (`verify:shop:prod`, Abschnitt 5 — vorher der
@@ -165,6 +186,7 @@ Katalog statt aus dieser Datei.
 | `0136_business_backup_item_type.sql` | `fde41c50ad0656c4354aea876b0248a73cdaf129e12def5319f7747ecc136a43` | gleich |
 | `0137_catalog_accessories.sql` | `220cdfb66c377643ff2870853a254f39107a4defceea88309fcde8cb6de6e15b` | gleich |
 | `0138_catalog_portals.sql` | `2c948264e3d6b0cb3a605deda4027945e3d12b9ab026de3505cd74614598b791` | gleich |
+| `0139_accessory_sale_release.sql` | `55f0fcf9279d6484891e48d209371bbf229464849488b8d20ad02909ad3a5a04` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -190,7 +212,7 @@ dieser Liste.
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
 oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`
-bis `0138` angewendet** (Abschnitt „Production"); `0139`–`0141` fehlen
+bis `0139` angewendet** (Abschnitt „Production"); `0140` und `0141` fehlen
 dort, wie `0134`. **`0138` gehörte ausdrücklich hinter das Deployment** —
 sonst wären 21 Portale in den Fortschrittsnenner gewandert. Das Deployment
 ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
@@ -228,7 +250,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0138` | `0134`, `0139`–`0141` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0139` | `0134`, `0140`, `0141` |
 
 **`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
 keine Abschätzung, sondern an den berührten Objekten ablesbar:

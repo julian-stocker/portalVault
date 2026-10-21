@@ -238,7 +238,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(sha(datei.replace(NACHTRAG, ""))).toBe(z.digest);
   });
 
-  it("die Production-Tabelle führt die sechs des Rollouts, die zwei vom 2026-10-18 und 0135–0138", () => {
+  it("die Production-Tabelle führt die sechs des Rollouts, die zwei vom 2026-10-18 und 0135–0139", () => {
     expect(production.map((z) => z.datei)).toEqual([
       "0126_purchase_item_edit.sql",
       "0127_purchase_item_swap.sql",
@@ -254,6 +254,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
       "0136_business_backup_item_type.sql",
       "0137_catalog_accessories.sql",
       "0138_catalog_portals.sql",
+      "0139_accessory_sale_release.sql",
     ]);
   });
 

@@ -555,6 +555,8 @@ const PROD_LESELAEUFE = [
 const PROD_LESELAEUFE_PRODUKTIONSMODUS = [
   ["supabase/operations/prod-s-preflight-0139.sql", "0139_preflight.sql"],
   ["supabase/operations/prod-s-postflight-0139.sql", "0139_postflight.sql"],
+  ["supabase/operations/prod-s-preflight-0140.sql", "0140_preflight.sql"],
+  ["supabase/operations/prod-s-postflight-0140.sql", "0140_postflight.sql"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -685,8 +687,14 @@ describe.each(PROD_LESELAEUFE_PRODUKTIONSMODUS)(
     expect(ohneKommentar).not.toContain("'skyisles.z0', 'keine'");
     expect(text.indexOf("do $lauf_a$")).toBeLessThan(config);
     expect(config).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
-    /* Der Unterschied zu den drei Nachkontrollen davor gehört in die Datei. */
-    expect(fliesstext).toContain("BLOCKIERENDE Erwartungen");
+    /*
+     * Der Unterschied zu den drei Nachkontrollen davor gehört in die Datei:
+     * dort war `keine` ein Verzicht, hier sind die Zahlen gemessen. Geprüft
+     * wird die AUSSAGE, nicht eine Formulierung — „blockierend" in beliebiger
+     * Beugung, zusammen mit dem Wort, das sie begründet.
+     */
+    expect(fliesstext).toMatch(/BLOCKIEREND/);
+    expect(fliesstext).toMatch(/gemessen/);
   });
 
   it("nennt die sechs Bezugszahlen, die blockierend werden", () => {
