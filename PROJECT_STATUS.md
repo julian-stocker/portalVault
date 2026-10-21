@@ -214,6 +214,39 @@ unverändert, 531 sammelbar, 306 Lagerpositionen, 624 Katalogzeilen,
 Lagerabdruck `01e50b9d727a0486ff1ea0eb6ba2dd56` unverändert, **0**
 Zubehörfreigaben, **0** öffentliche Zubehörangebote, Belegsperre unverändert.
 
+### Veröffentlicht am 2026-10-21: `002ad8b`
+
+Der zweite Push dieses Tages, nach ausdrücklicher Freigabe:
+`21353e4..002ad8b` — **sechs Commits**, 31 Dateien, +5 791/−99 Zeilen,
+**reiner Fast-Forward** (kein Force, kein fremder Commit überschrieben).
+
+**Was darin ist — und was nicht.** Dokumentation (`APPLIED.md`,
+`PROJECT_STATUS.md`, Release-Plan und Checkliste, drei neue Anleitungen),
+zehn neue Production-Prüfdateien, vier neue `supabase/checks/`-Dateien
+(`0140`/`0141` Pre- und Postflight), die Probeläufe **P42**–**P47** und fünf
+Testdateien. **Keine Zeile Anwendungscode** — geprüft über
+`git diff --name-only | grep ^src/ | grep -v test`: leer. **Keine Migration
+verändert** (Regel 1), nur `APPLIED.md`. Die einzige Änderung an einer
+`operations/`-Datei ist ein Kopfkommentar in `prod-0138.sql`. Kein Secret,
+keine Sicherungsdatei, keine personenbezogene Zeile — der Diff ist auf
+`eyJ…`, `sk_live`, `whsec_`, Service-Role-Schlüssel, Anschriften und
+E-Mail-Adressen durchsucht worden.
+
+**Das Deployment:** Vercel baute `main` neu; die Build-Kennung der Seite
+wechselte von `zLPNd4eqyQMkize-4LpHI` auf `2yp9MSZweXpfyupsdoEOl`. Da dieser
+Push keinen Anwendungscode ändert, war die Kennung der einzige belastbare
+Marker — eine neue Route gab es nicht.
+
+**Danach lesend geprüft:** `/`, `/zubehoer` (**39 Artikel**), `/shop`
+(**235 Artikel im Angebot**), `/skylanders/blue-bash` (Marktwert, „Zur
+Sammlung"), `/zubehoer/game-nintendo-3ds-spyros-adventure` (Nintendo 3DS,
+USK, „Aktuell kein Angebot") — je HTTP 200, **kein** Fehlermarker, `noindex`
+steht. Gemessen: **287** Angebote, davon **0** auf Zubehör,
+`delivery_scope` überall `null` · **531** sammelbare Figuren · **39**
+sichtbare Spiele · **0** sichtbare Portale · 570 sichtbare Katalogzeilen ·
+306 Positionen · 293 verkäuflich · 287 freigegeben · 6 Opt-outs · 13 nicht
+sammelbar. **Nichts ist versehentlich veröffentlicht worden.**
+
 ### Das Release `0135`–`0141` ist auf Production vollständig
 
 Abschließend lesend gemessen am 2026-10-21, nach `0141`:
