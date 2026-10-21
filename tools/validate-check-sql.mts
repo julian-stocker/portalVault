@@ -2795,6 +2795,121 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P45 — SCHRITT 8 AM STUECK, IM MODUS `production`.
+   *
+   * Die drei Dateien fuer `0139`, hintereinander auf einem Stand, der
+   * Production nachbildet (`0135`-`0138`). Was dieser Durchgang zeigt und
+   * kein anderer:
+   *
+   *   1. Der Preflight laeuft VOR `0139` und liest keine Spalte, die erst
+   *      `0139` anlegt — der Fehler vom 2026-10-20, hier fuer die
+   *      Production-Huelle nachgefahren.
+   *   2. `0139` laeuft auf diesem Stand durch.
+   *   3. Der Postflight ist danach STRUKTURELL vollstaendig gruen: nichts
+   *      freigegeben, nichts mit USK, kein Zubehoerangebot, vier Tueren am
+   *      neuen Tor, null Tueren am alten, die Riegel dicht, die Belegsperre
+   *      unveraendert.
+   *   4. Und der MODUS WIRKT: die sechs Bezugszahlen sind blockierend. Im
+   *      Fixture koennen sie nicht stimmen — 287 Angebote hat eine
+   *      Wegwerf-Instanz nicht —, also MUESSEN genau sie rot sein und sonst
+   *      nichts. Waere der Modus nicht gewaehlt, waeren sie still.
+   *
+   * Punkt 4 ist der Grund, warum hier eine ERWARTETE Rotmenge steht statt
+   * „alles gruen": eine Pruefung, die im Probelauf gruen ist, weil sie
+   * nichts prueft, ist das, was dieses Werkzeug finden soll.
+   */
+  {
+    const VORHER = "supabase/operations/prod-s-preflight-0139.sql";
+    const NACHHER = "supabase/operations/prod-s-postflight-0139.sql";
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    type Blatt = { rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const feld = (b: Blatt, nr: number): string =>
+      b.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const rot = (b: Blatt): string =>
+      b.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+    const lies = async (db: InstanceType<typeof PGlite>, pfad: string): Promise<Blatt> => {
+      await db.exec("select set_config('skyisles.z0', 'production', false);");
+      return await db.query(readFileSync(pfad, "utf8")) as Blatt;
+    };
+
+    /* Der Stand von Production nach Schritt 7: 0135-0138. */
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P45 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    const f138 = await fahre(db, M138);
+    if (f138 !== null) throw new Error(`P45 Aufbau: 0138 scheiterte — ${f138}`);
+    await db.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db.exec(FUELLEN);
+    /*
+     * EINE IDENTITAET AUF `shop_inventory.id` — dieselbe Vorkehrung wie in
+     * `frischNach0138()` (P34-P37). Das Stub-Schema ist reine Struktur und
+     * traegt keine Defaults; in der Wirklichkeit ist `id`
+     * `generated always as identity`. Hier blieb sie NULL, und
+     * `is_position_sellable(NULL)` ist fuer jede Zeile `false` — `0139`
+     * brach deshalb mit „2 Positionen antworten am neuen Tor anders als am
+     * alten" ab. Das war ein Befund des STUBS und keiner der Migration; die
+     * Abbruchbedingung selbst hat genau richtig gegriffen.
+     */
+    await db.exec(`
+      create sequence if not exists public.z_inv_id_seq start 1000;
+      alter table public.shop_inventory
+        alter column id set default nextval('public.z_inv_id_seq');
+      update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+       where id is null;`);
+
+    const vorherLauf = await fahre(db, VORHER, { klammer: false });
+    const vorher = await lies(db, "supabase/checks/0139_preflight.sql");
+    const lauf = await fahre(db, M139);
+    /* Scheitert 0139, kann der Postflight nicht laufen — er liest Spalten,
+       die dann fehlen. Dann ist der Befund der Abbruch selbst. */
+    const nachherLauf = lauf === null
+      ? await fahre(db, NACHHER, { klammer: false }) : "0139 scheiterte";
+    const nachher: Blatt = lauf === null
+      ? await lies(db, "supabase/checks/0139_postflight.sql") : { rows: [] };
+
+    /*
+     * DIE ERWARTETE ROTMENGE. Nur Bezugszahlen, die ein Fixture nicht haben
+     * kann — und 9999, das sie zaehlt. Jede ANDERE rote Zeile laesst diesen
+     * Durchgang scheitern.
+     *
+     * Preflight: 401 Angebote, 402 Abdruck, 403 shopfaehig, 405 sammelbar,
+     * 406 Lagerzeilen, 407 Katalogzeilen. Postflight: 301, 302, 303 und
+     * 501, 502, 503 — dieselben sechs, nur anders numeriert.
+     */
+    const ROT_VORHER = "401, 402, 403, 405, 406, 407, 9999";
+    const ROT_NACHHER = "301, 302, 303, 501, 502, 503, 9999";
+
+    probe.push({
+      name: "P45 Schritt 8 am Stueck: Preflight, 0139, Postflight — nichts freigegeben, "
+        + "und der Modus production wirkt",
+      ok: vorherLauf === null && lauf === null && nachherLauf === null
+        && rot(vorher) === ROT_VORHER && rot(nachher) === ROT_NACHHER
+        /* Der Stempel: auf einer Nicht-Staging-Instanz muss Zeile 1 false sein. */
+        && feld(vorher, 1) === "false"
+        /* Und die Aussage, auf die es ankommt. */
+        && feld(nachher, 201) === "0" && feld(nachher, 202) === "0"
+        && feld(nachher, 203) === "0" && feld(nachher, 204) === "0"
+        && feld(nachher, 304) === "0"
+        && feld(nachher, 401) === "4" && feld(nachher, 402) === "0",
+      sagt: `Vorher: ${vorherLauf ?? "durch"} (rot: ${rot(vorher)})`
+        + ` · Stempel ${feld(vorher, 1)} · 0139: ${lauf ?? "durch"}`
+        + ` · Nachher: ${nachherLauf ?? "durch"} (rot: ${rot(nachher)})`
+        + ` · freigegeben ${feld(nachher, 201)} · USK ${feld(nachher, 202)}`
+        + ` · Zubehoerangebote ${feld(nachher, 203)} · durchs neue Tor `
+        + `${feld(nachher, 204)} · anders als am alten Tor ${feld(nachher, 304)}`
+        + ` · Tueren am neuen Tor ${feld(nachher, 401)}, am alten `
+        + `${feld(nachher, 402)}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

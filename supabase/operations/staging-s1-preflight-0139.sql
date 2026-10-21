@@ -67,18 +67,44 @@ select set_config('skyisles.z0', 'staging', true);
 with vertrag as (
   select nullif(btrim(coalesce(current_setting('skyisles.z0', true), '')), '') as modus
 ),
-z0 (schluessel, wert) as (values
-  -- Z0-Vertrag, Stand 2026-10-20.
-  ('angebote',      '256'),
-  ('angebote_md5',  '4d1d6c30fe0ae886ca2689bcb1fe9634'),
-  ('shopfaehig',    '534'),
-  ('sammelbar',     '534'),
-  ('lagerzeilen',   '285'),
-  ('katalogzeilen', '626')
+z0 (schluessel, staging, production) as (values
+  /*
+   * ZWEI UMGEBUNGEN, ZWEI SPALTEN — UND KEINE DRITTE WAHRHEIT.
+   *
+   * Links der Z0-Vertrag von Staging (Stand 2026-10-20), rechts der
+   * gemessene Production-Stand nach `0138` (2026-10-21):
+   *
+   *   angebote/md5   287 und `9b834105…` — vom Betreiber im Postflight zu
+   *                  `0137` und `0138` bestaetigt, beide Male gleich
+   *   shopfaehig     531 — lesend gemessen (`verify:shop:prod`)
+   *   sammelbar      531 — der Fortschrittsnenner, vom Betreiber bestaetigt
+   *   lagerzeilen    306 — lesend gemessen
+   *   katalogzeilen  624 — vom Betreiber nach `0138` bestaetigt (603 + 21)
+   *
+   * WARUM DIE WERTE IM CODE STEHEN: ein Sollwert, den der Bediener bei jedem
+   * Lauf mittippt, ist bei jedem Lauf eine neue Gelegenheit fuer einen
+   * Tippfehler — und ein Tippfehler in der ERWARTUNG laesst die Pruefung
+   * bestehen. Gewaehlt wird nur die Umgebung.
+   *
+   * WARUM SIE UMGEBUNGSWEISE GETRENNT SIND: eine umgebungsblinde Erwartung
+   * war in diesem Projekt schon zweimal die Ursache eines falschen Befundes.
+   * Im Modus `keine` gilt keine der beiden Spalten, und die Zeilen sind
+   * Messungen ohne Bewertung — das ist der ausdrueckliche Verzicht.
+   */
+  ('angebote',      '256', '287'),
+  ('angebote_md5',  '4d1d6c30fe0ae886ca2689bcb1fe9634',
+                    '9b8341058bbfa0f7809eddc300ab0e9e'),
+  ('shopfaehig',    '534', '531'),
+  ('sammelbar',     '534', '531'),
+  ('lagerzeilen',   '285', '306'),
+  ('katalogzeilen', '626', '624')
 ),
 soll as (
   select z.schluessel,
-         case when (select v.modus from vertrag v) = 'staging' then z.wert end as wert
+         case (select v.modus from vertrag v)
+           when 'staging'    then z.staging
+           when 'production' then z.production
+         end as wert
     from z0 z
 ),
 /*
@@ -107,9 +133,24 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- `SKY-0821` und `SKY-0822` gibt es auf Staging und auf Production
   -- bewusst NICHT. Hier steht er als MESSUNG, damit vor S2 sichtbar ist,
   -- dass der Riegel greifen wird — dort ist er dann blockierend.
-  (1, 'Umgebung', 'Staging-Stempel: SKY-0821 UND SKY-0822 vorhanden',
+  /*
+   * BERICHTIGT AM 2026-10-21: DIESE ZEILE HATTE EINE STAGING-ERWARTUNG.
+   *
+   * Sie verlangte `true` — und auf Production ist das Markerpaar
+   * rechtmaessig NICHT da (`SKY-0821` liegt dort als echter Artikel, `0822`
+   * gar nicht). Dieselbe Datei auf Production hätte also eine rote Zeile
+   * und `9999 = 1` gemeldet, ohne dass irgendetwas falsch waere — genau die
+   * Art Fehlalarm, die einen echten Befund untergehen laesst.
+   *
+   * Jetzt ist die Erwartung die der gewaehlten Umgebung: auf Staging muss
+   * das Paar DA sein, auf Production muss es FEHLEN. Beides ist damit
+   * blockierend geprueft, statt nur eines.
+   */
+  (1, 'Umgebung', 'Staging-Markerpaar SKY-0821 UND SKY-0822 (Staging: da, Production: fort)',
       (select (count(*) = 2)::text from public.skylanders
-        where sky_id in ('SKY-0821', 'SKY-0822')), 'true'),
+        where sky_id in ('SKY-0821', 'SKY-0822')),
+      (select case v.modus when 'staging' then 'true'
+                           when 'production' then 'false' end from vertrag v)),
   (2, 'Umgebung', 'Info: Katalogzeilen',
       (select count(*)::text from public.skylanders), null),
 
@@ -262,8 +303,8 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- ------------------------------------------------------ Der Z0-Vertrag
   (901, 'Z0-Vertrag', 'gewaehlter Modus (Messung ohne Sollwert)',
       (select coalesce(v.modus, 'FEHLT') from vertrag v), null),
-  (902, 'Z0-Vertrag', 'der Modus ist gewaehlt — staging oder ausdruecklich keine',
-      (select case when v.modus in ('staging', 'keine') then 'ja'
+  (902, 'Z0-Vertrag', 'der Modus ist gewaehlt — staging, production oder ausdruecklich keine',
+      (select case when v.modus in ('staging', 'production', 'keine') then 'ja'
                    else 'nein: set_config(''skyisles.z0'', ''staging'', true) fehlt'
               end from vertrag v), 'ja')
 ),

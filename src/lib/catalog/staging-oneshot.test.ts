@@ -535,6 +535,14 @@ describe("die zwei lesenden Staging-Laeufe", () => {
  * Ergebnisse als Production-Befunde gelesen wurden.
  * ======================================================================== */
 
+/*
+ * ZWEI FAMILIEN, EIN UNTERSCHIED: DER Z0-MODUS.
+ *
+ * `0136`-`0138` hatten keine Production-Bezugszahlen — dort ist `keine` der
+ * ausdrückliche Verzicht. Für `0139` sind sie gemessen, also wird daraus
+ * `production`, und sechs Messungen werden zu sechs blockierenden
+ * Erwartungen. Beide Familien tragen denselben Riegel und schreiben nichts.
+ */
 const PROD_LESELAEUFE = [
   ["supabase/operations/prod-s-postflight-0136.sql", "0136_postflight.sql"],
   ["supabase/operations/prod-s-postflight-0137.sql", "0137_postflight.sql"],
@@ -542,6 +550,11 @@ const PROD_LESELAEUFE = [
      nichts zu vergleichen. */
   ["supabase/operations/prod-s-preflight-0138.sql", "0138_preflight.sql"],
   ["supabase/operations/prod-s-postflight-0138.sql", "0138_postflight.sql"],
+] as const;
+
+const PROD_LESELAEUFE_PRODUKTIONSMODUS = [
+  ["supabase/operations/prod-s-preflight-0139.sql", "0139_preflight.sql"],
+  ["supabase/operations/prod-s-postflight-0139.sql", "0139_postflight.sql"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -633,6 +646,110 @@ describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefda
     expect(fliesstext).toContain("287");
     expect(fliesstext).toContain("531");
     expect(fliesstext).toMatch(/Messungen? ohne Sollwert|NOTIEREN|nicht vorhersagbar/);
+  });
+});
+
+describe.each(PROD_LESELAEUFE_PRODUKTIONSMODUS)(
+  "der lesende Production-Lauf %s (Modus production)", (datei, pruefdatei) => {
+  const text = readFileSync(datei, "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it(`bettet ${pruefdatei} Zeichen für Zeichen ein`, () => {
+    const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+    const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    expect(a, "Marke fehlt").toBeGreaterThan(-1);
+    expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+    expect(text.slice(a + anfang.length, b))
+      .toBe(readFileSync(`supabase/checks/${pruefdatei}`, "utf8"));
+  });
+
+  it("trägt den Riegel der sieben — zeichengleich in allen drei Bedingungen", () => {
+    const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
+    for (const bedingung of [
+      "if (select count(*) from public.skylanders\n       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then",
+      "if to_regprocedure('public.purchases_paid_total_is_final()') is null then",
+      "if (select count(*) from public.skylanders) < 100 then",
+    ]) {
+      expect(schreibend, bedingung).toContain(bedingung);
+      expect(text, bedingung).toContain(bedingung);
+    }
+  });
+
+  it("wählt den Modus production — und begründet, warum nicht keine", () => {
+    const config = text.indexOf("select set_config('skyisles.z0', 'production', true);");
+    expect(config, "set_config fehlt").toBeGreaterThan(-1);
+    const ohneKommentar = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    expect(ohneKommentar).not.toContain("'skyisles.z0', 'staging'");
+    expect(ohneKommentar).not.toContain("'skyisles.z0', 'keine'");
+    expect(text.indexOf("do $lauf_a$")).toBeLessThan(config);
+    expect(config).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
+    /* Der Unterschied zu den drei Nachkontrollen davor gehört in die Datei. */
+    expect(fliesstext).toContain("BLOCKIERENDE Erwartungen");
+  });
+
+  it("nennt die sechs Bezugszahlen, die blockierend werden", () => {
+    for (const wert of ["287", "9b8341058bbfa0f7809eddc300ab0e9e", "531", "306", "624"]) {
+      expect(fliesstext, wert).toContain(wert);
+    }
+  });
+
+  it("endet mit rollback und schreibt nichts", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create ", "grant ", "revoke "]) {
+      expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+});
+
+describe("die beiden Prüfdateien zu 0139 kennen zwei Umgebungen", () => {
+  /*
+   * Vorher stand dort EIN Sollwertsatz — der von Staging. Auf Production
+   * hätte Zeile 1 (das Markerpaar) `true` verlangt und wäre rot gewesen,
+   * obwohl nichts falsch ist; die sechs Bezugszahlen wären im Modus `keine`
+   * stumm geblieben, gerade die, auf die es bei `0139` ankommt.
+   */
+  for (const datei of ["supabase/checks/0139_preflight.sql",
+    "supabase/checks/0139_postflight.sql"]) {
+    const text = readFileSync(datei, "utf8");
+
+    it(`${datei} führt beide Spalten`, () => {
+      expect(text).toContain("z0 (schluessel, staging, production)");
+      expect(text).toContain("when 'production' then z.production");
+      /* Staging bleibt unverändert — das ist die Probe, dass hier nichts
+         umgeschrieben, sondern etwas ergänzt wurde. */
+      expect(text).toContain("('angebote',      '256', '287')");
+      expect(text).toContain("4d1d6c30fe0ae886ca2689bcb1fe9634");
+      expect(text).toContain("9b8341058bbfa0f7809eddc300ab0e9e");
+    });
+
+    it(`${datei} lässt den Modus production als gewählt gelten`, () => {
+      expect(text).toContain("v.modus in ('staging', 'production', 'keine')");
+    });
+  }
+
+  it("und der Preflight erwartet das Markerpaar umgebungsabhängig", () => {
+    const text = readFileSync("supabase/checks/0139_preflight.sql", "utf8");
+    expect(text).toContain("when 'staging' then 'true'");
+    expect(text).toContain("when 'production' then 'false'");
+  });
+
+  it("die Staging-Hüllen betten die berichtigten Fassungen ein", () => {
+    /* Sonst liefe auf Staging eine andere Datei als die, die hier steht. */
+    for (const [huelle, pruef] of [
+      ["supabase/operations/staging-s1-preflight-0139.sql", "0139_preflight.sql"],
+      ["supabase/operations/staging-s3-postflight-0139.sql", "0139_postflight.sql"],
+    ]) {
+      const h = readFileSync(huelle, "utf8");
+      expect(h, huelle).toContain("z0 (schluessel, staging, production)");
+      expect(h, huelle).toContain(readFileSync(`supabase/checks/${pruef}`, "utf8"));
+    }
   });
 });
 

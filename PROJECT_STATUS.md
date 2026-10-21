@@ -157,10 +157,33 @@ Zustand · voll funktionsfähig") · `/zubehoer/game-nintendo-3ds-spyros-adventu
 Nach dem Deployment nochmals gemessen: 287 Angebote, 306 Lagerpositionen,
 alle Riegel dicht, Datenbank unberührt. **Rollback-Ziel bleibt `81386e6`.**
 
-**Auf Production fehlen weiterhin `0134` und `0138`–`0141`.** `0138` ist
-seit dem Deployment nicht mehr blockiert, aber **nicht freigegeben** — sie
-braucht eine eigene Freigabe. Der Backup-Nachweis aus Stufe 1 ist **nicht**
-geführt, und die sichtbare Nachkontrolle zu `0136` wurde nicht gefahren.
+**Am 2026-10-21 lief auch `0138`** — die erste Migration dieses Releases, die
+Zeilen anlegt, nach dem Deployment und mit lesendem Preflight davor und
+Nachkontrolle danach (`prod-s-preflight-0138.sql`,
+`prod-s-postflight-0138.sql`, Probelauf **P44**). **Postflight `9999 = 0`:**
+alle **21 Portale** angelegt, **624** Katalogzeilen (603 + 21), **531**
+sammelbare Figuren **unverändert**, **287** Angebote, **306**
+Lagerpositionen, Angebotsabdruck **unverändert**
+`9b8341058bbfa0f7809eddc300ab0e9e`.
+
+Die Portale entstehen `catalog_visible = false`: `skyisles.app/zubehoer`
+zeigt weiter **39 Artikel** — nachgemessen am laufenden System — und
+`verify:shop:prod` meldet `publicly visible accessories  Spiele=39`.
+Öffentlich sichtbar werden sie erst durch eine eigene redaktionelle
+Freigabe. Die sichtbare Nachkontrolle zu `0136` ist ebenfalls gefahren
+(`9999 = 0`).
+
+**Der Production-Bezugsstand für `0139`** (gemessen, nicht geraten): 287
+Angebote · Abdruck `9b8341058bbfa0f7809eddc300ab0e9e` · 531 shopfähig · 531
+sammelbar · 306 Lagerzeilen · 624 Katalogzeilen. Er steht als **zweite
+Spalte** im Z0-Vertrag von `0139_preflight.sql` und `0139_postflight.sql`
+(Modus `production`), damit diese sechs Zahlen auf Production **blockierend**
+geprüft werden statt nur gemessen.
+
+**Auf Production fehlen weiterhin `0134` und `0139`–`0141`.** Der
+Backup-Nachweis aus Stufe 1 ist **nicht** geführt — für `0139` ist er auch
+nicht das Netz: sie legt keine Zeile an, und `R0139_drop_sale_release.sql`
+nimmt Spalten und Funktionen zurück.
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

@@ -94,9 +94,23 @@ rein lesende Dateien, `supabase/operations/prod-s-postflight-0136.sql` und
 Datenbank ist dabei unberührt geblieben (nachgemessen: 287 Angebote, 306
 Lagerpositionen). Rollback-Ziel bleibt `81386e6`.
 
-**Zu `0136` liegt der sichtbare Nachweis noch nicht vor** — die Nachkontrolle
-wurde bisher nicht gefahren. Belegt ist `0136` damit nur durch die
-Nachbedingungen der Migration selbst. Die Datei ist jederzeit nachholbar.
+**Am 2026-10-21 folgte `0138`** — die erste Migration dieses Releases, die
+Zeilen anlegt, gefahren über `supabase/operations/prod-0138.sql` (SHA-256
+`ca68b7ec425d28576d4ff03dc8be7c4a31ba986ce78754253a84ccdb172c6b57`). Davor
+der lesende Preflight, danach die lesende Nachkontrolle (beide neu:
+`prod-s-preflight-0138.sql`, `prod-s-postflight-0138.sql`, Probelauf
+**P44**). **Postflight `9999 = 0`**, vom Betreiber bestätigt: alle **21
+Portale** angelegt · **624** Katalogzeilen (603 + 21) · **531** sammelbare
+Figuren **unverändert** · **287** Angebote · **306** Lagerpositionen ·
+Angebotsabdruck **unverändert** `9b8341058bbfa0f7809eddc300ab0e9e`.
+
+Die 21 Portale sind `catalog_visible = false`; `skyisles.app/zubehoer` zeigt
+deshalb weiter **39 Artikel** — nachgemessen am laufenden System. Die
+Checkliste hatte an dieser Stelle „60 Artikel" versprochen, was die
+Staging-Zahl ist (dort sind die Portale freigegeben); das ist berichtigt.
+
+**Zu `0136` liegt der sichtbare Nachweis seit dem 2026-10-21 vor:**
+Nachkontrolle gefahren, **`9999 = 0`**.
 
 **Zu `0137` lesend gemessen (2026-10-21):** `non_collectible_categories()`
 liefert `[Spiele, Portale, Bundles, Taschen, Zubehör]` und stimmt damit mit
@@ -117,8 +131,9 @@ temporäre Tabelle; die drei `insert` der Datei stehen im Rumpf von
 Nachher gemessen, lesend, aus diesem Repository (`npm run verify:shop:prod`):
 `skylanders.item_type` steht · **39** Zeilen `item_type = 'game'`, **39** in
 der Kategorie `Spiele`, **0** außerhalb, **0** ohne Typ, alle 39 aktiv und
-sichtbar · nur die Typen `figure` und `game` — `0137`/`0138` sind richtig
-**nicht** angewendet · **287** Angebote, **306** Lagerpositionen, **293**
+sichtbar · nur die Typen `figure` und `game` — `0137`/`0138` waren **in
+diesem Augenblick** richtig noch nicht angewendet (beide liefen am selben Tag
+später) · **287** Angebote, **306** Lagerpositionen, **293**
 verkäuflich, **13** nicht sammelbar, **6** bewusste Opt-outs: Ziffer für
 Ziffer die Werte von vor dem Lauf. Die Kategorieregel ist unverändert die
 Fassung aus `0006` (`[Spiele]`). Noch offen aus Stufe 1: der
@@ -149,6 +164,7 @@ Katalog statt aus dieser Datei.
 | `0135_catalog_item_type.sql` | `08a75cf0ade1ae10f21f76038df6a8407746bf1db76e1c8b02ebeb3d0c637a04` | gleich |
 | `0136_business_backup_item_type.sql` | `fde41c50ad0656c4354aea876b0248a73cdaf129e12def5319f7747ecc136a43` | gleich |
 | `0137_catalog_accessories.sql` | `220cdfb66c377643ff2870853a254f39107a4defceea88309fcde8cb6de6e15b` | gleich |
+| `0138_catalog_portals.sql` | `2c948264e3d6b0cb3a605deda4027945e3d12b9ab026de3505cd74614598b791` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -173,13 +189,11 @@ dieser Liste.
 
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
-oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`,
-`0136` und `0137` angewendet** (Abschnitt „Production"); `0138`–`0141` fehlen
+oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`
+bis `0138` angewendet** (Abschnitt „Production"); `0139`–`0141` fehlen
 dort, wie `0134`. **`0138` gehörte ausdrücklich hinter das Deployment** —
-sonst wären 21 Portale in den Fortschrittsnenner gewandert. **Das Deployment
-ist am 2026-10-21 erfolgt** (`21353e4`, siehe Abschnitt „Production"); die
-Sperre gegen `0138` ist damit aufgehoben, eine Freigabe dafür liegt aber
-nicht vor.
+sonst wären 21 Portale in den Fortschrittsnenner gewandert. Das Deployment
+ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 
 | Migration | Stand |
 |---|---|
@@ -214,7 +228,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0137` | `0134`, `0138`–`0141` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0138` | `0134`, `0139`–`0141` |
 
 **`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
 keine Abschätzung, sondern an den berührten Objekten ablesbar:

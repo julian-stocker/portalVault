@@ -216,3 +216,78 @@ describe("4. Die Zuordnung der Spiele ist eine Invariante, keine Momentaufnahme"
     expect(verifier).toContain('["figure", "game", "portal", "bundle", "other"]');
   });
 });
+
+/* ===================================================================== */
+describe("5. der DEPLOYTE Code (21353e4) verträgt 0139 ohne 0140 und 0141", () => {
+  /*
+   * DER NÄCHSTE ZWISCHENSTAND, UND ER DAUERT LÄNGER ALS EINE SITZUNG.
+   *
+   * Nach `0139` stehen drei neue Spalten und vier neue Funktionen in der
+   * Datenbank, während `seller_sale_state()` (`0141`) noch fehlt. Dieser
+   * Zustand ist kein Augenblick: zwischen den Freigaben liegen Tage. Der
+   * Code, der auf `skyisles.app` läuft, muss ihn also AUSHALTEN — und zwar
+   * der, der dort wirklich läuft, nicht der im Arbeitsbaum.
+   */
+  const DEPLOYT = "21353e4";
+  const live = (pfad: string): string =>
+    execFileSync("git", ["show", `${DEPLOYT}:${pfad}`], { encoding: "utf8" });
+
+  it("die fünfte Spalte von shop_offers() ist optional, nicht erwartet", () => {
+    /* `0139` tauscht den Rückgabetyp: vier Spalten werden fünf. Ein Code,
+       der vier ERWARTET, bricht; dieser nimmt die fünfte, wenn sie da ist. */
+    const q = live("src/lib/shop/queries.ts");
+    expect(q).toContain("delivery_scope?: string | null");
+    expect(q).toContain("row.delivery_scope ?? null");
+  });
+
+  it("und fehlt sie, ist das kein Fehler, sondern null", () => {
+    const o = live("src/lib/shop/offer.ts");
+    expect(o).toContain("deliveryScope: string | null");
+  });
+
+  it("usk_rating darf da sein und leer — beides", () => {
+    /*
+     * Vor `0139` fängt der Code `42703` („Spalte gibt es nicht") ab. NACH
+     * `0139` gibt es die Spalte, und sie ist überall `null` — die Migration
+     * erfindet keine Alterskennzeichnung. Beide Wege müssen tragen.
+     */
+    const q = live("src/lib/catalog/queries.ts");
+    expect(q).toContain('const COLUMN_MISSING = "42703"');
+    expect(q).toMatch(/usk_rating/);
+  });
+
+  it("seller_sale_state() fehlt noch, und die Lagerkarte verträgt das", () => {
+    const inv = live("src/lib/admin/inventory.ts");
+    expect(inv).toContain('const FUNCTION_MISSING = "PGRST202"');
+    /* Ohne Zustand keine Steuerung — nicht eine Steuerung ohne Zustand. */
+    const modell = live("src/lib/admin/inventory-model.ts");
+    expect(modell).toContain("saleState?.saleReleased === true");
+  });
+
+  it("und kein freigegebenes Zubehör kann es geben, solange niemand freigibt", () => {
+    /*
+     * Das ist die Zusicherung, die über den Code hinausgeht: `0139` setzt
+     * `sale_released` auf `false` bei JEDER Zeile, und das Tor fragt es.
+     * Die Oberfläche kann es nach `0139` nicht einmal umschalten — die
+     * Steuerungen erscheinen erst mit `0141`.
+     */
+    const migration = readFileSync(
+      "supabase/migrations/0139_accessory_sale_release.sql", "utf8");
+    expect(migration).toContain("add column sale_released boolean not null default false");
+    /*
+     * OHNE DIE FUNKTIONSRÜMPFE. `seller_set_sale_release()` schreibt
+     * natürlich `update public.shop_inventory` — das ist ihre Aufgabe, und
+     * sie tut es erst, wenn der Betrieb sie aufruft. Was hier nicht stehen
+     * darf, ist ein `update` auf ANWEISUNGSEBENE: das liefe mit der
+     * Migration und gäbe etwas frei.
+     */
+    const anweisungen = migration
+      .replace(/as \$\$[\s\S]*?\$\$;/g, "as $$ … $$;")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*--.*$/gm, "");
+    for (const dml of [/^\s*update public\.shop_inventory/m,
+      /^\s*update public\.skylanders/m, /^\s*insert into public\./m]) {
+      expect(anweisungen, String(dml)).not.toMatch(dml);
+    }
+  });
+});

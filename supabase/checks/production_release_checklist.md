@@ -256,7 +256,45 @@ einer Zuordnung hängt; dann ist die Rücknahme nicht mehr das richtige
 Mittel. Probelauf **P27** fährt die Reihenfolge nach, **P44** den ganzen
 Schritt 7 am Stück.
 
-## Schritt 8 — `0139`, das Verkaufstor · **schreibt**
+## Schritt 8 — `0139`, das Verkaufstor · **drei Dateien, in dieser Folge**
+
+`0139` legt keine Zeile an, berührt aber **vier Türen**, durch die heute
+jedes Figurenangebot geht. Deshalb auch hier: erst messen, dann schreiben,
+dann vergleichen.
+
+### 8a — das Vorher · **rein lesend**
+
+```
+supabase/operations/prod-s-preflight-0139.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Die Datei wählt den Z0-Modus
+**`production`** — anders als die Nachkontrollen zu `0136`–`0138`, denn für
+`0139` sind die Bezugszahlen gemessen. Sechs Zeilen sind damit
+**blockierend**:
+
+| Zeile | | Sollwert |
+|---|---|---|
+| 1 | Staging-Markerpaar fehlt | `false` |
+| 401 | öffentliche Angebote | **287** |
+| 402 | Abdruck der Angebotsliste | **9b8341058bbfa0f7809eddc300ab0e9e** |
+| 403 | shopfähige Katalogzeilen | **531** |
+| 405 | sammelbare Katalogzeilen (Nenner) | **531** |
+| 406 | Lagerzeilen | **306** |
+| 407 | Katalogzeilen | **624** |
+| 501 | Grants auf die Belegtabellen für `anon`/`authenticated` | **0** |
+
+Dazu **201–203**: `sale_released`, `usk_rating` und `is_position_sellable`
+müssen **noch fehlen** — daran fällt ein zweiter Lauf von `0139` auf.
+
+**Zeilen 301–307 sind die Altlast**, um die es geht: die Lagerpositionen auf
+Spiele mit `is_listed = true`. Von außen gemessen sind es **13**
+Zubehörpositionen, die heute vom Angebot zurückgehalten werden, weil ihr
+Artikel nicht sammelbar ist. Zeile 302 bestätigt oder berichtigt die Zahl,
+304 nennt die Teilmenge mit wirksamem Preis. **Ergebnis aufbewahren** —
+404 und 408 werden in 8c verglichen.
+
+### 8b — `0139` · **schreibt**
 
 ```
 supabase/operations/prod-0139.sql
@@ -270,7 +308,51 @@ supabase/operations/prod-0139.sql
 ```
 
 **`0 Positionen freigegeben` ist der wichtigste Wert des ganzen Releases.**
-Steht dort etwas anderes: stopp.
+Steht dort etwas anderes: stopp. Der SQL-Editor zeigt die Zeile nicht —
+deshalb 8c.
+
+### 8c — das Nachher · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0139.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Auch hier Modus `production`.
+
+**Es ist nichts kaufbar geworden:** 201 freigegebene Positionen **0** · 202
+Zeilen mit USK **0** · 203 Zubehörzeilen im Angebot **0** · 204
+Zubehörpositionen, die das neue Tor durchließe **0** · 205 die Altlast
+unverändert gelistet und unverkäuflich.
+
+**Die Figuren sind unberührt:** 301 Angebote **287** · 302 Abdruck
+**9b834105…** · 303 shopfähig **531** · **304 Positionen, die am neuen Tor
+anders antworten als am alten: 0** · 501 sammelbar **531** · 502 Lagerzeilen
+**306** · 503 Katalogzeilen **624** · 505 Sammlungseinträge auf Zubehör
+**0**. Zeile 504 gegen Preflight 408 halten.
+
+**Die vier Türen fragen ein Tor:** 401 Türen am neuen Tor **4** · 402 Türen,
+die `is_shop_eligible` noch direkt fragen **0** · 403/404 die
+Betriebsdiagnose kennt die Gründe „not released for sale" und „usk rating
+missing".
+
+**Die Riegel:** 601 `is_position_sellable` für `anon` und `authenticated`
+ausführbar (das muss sie sein, sonst antwortet der Shop nicht mehr) · 602
+`seller_set_sale_release` für `anon` **nicht** · 603 `admin_set_usk_rating`
+für `anon` **nicht** · **604 die Belegsperre hält unverändert**.
+
+### 8d — und am laufenden System
+
+| ☐ | Danach prüfen |
+|---|---|
+| ☐ | `npm run verify:shop:prod`: 287 Angebote, `shop_offers()` jetzt mit **fünf** Spalten, `publicly visible accessories  Spiele=39` |
+| ☐ | `npm run verify:seller:prod`: `shop_offers() returns a known column set … 0139 applied`, `seller_sale_state(): 0141 NOT applied` |
+| ☐ | `skyisles.app/shop`: 235 Artikel im Angebot, unverändert |
+| ☐ | `skyisles.app/zubehoer/<ein Spiel>`: weiter „Aktuell kein Angebot" |
+| ☐ | `/business/inventory`: **keine** Verkaufssteuerung sichtbar — die kommt erst mit `0141` |
+
+**Rücknahme:** `supabase/rollback/R0139_drop_sale_release.sql`. Probelauf
+**P45** fährt den ganzen Schritt 8 am Stück, **P34–P37** die vier
+Zusicherungen von `0139` einzeln.
 
 ## Schritt 9 — `0140`, die Betriebssicherung · **schreibt**
 

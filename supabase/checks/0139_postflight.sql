@@ -18,17 +18,44 @@
 with vertrag as (
   select nullif(btrim(coalesce(current_setting('skyisles.z0', true), '')), '') as modus
 ),
-z0 (schluessel, wert) as (values
-  ('angebote',      '256'),
-  ('angebote_md5',  '4d1d6c30fe0ae886ca2689bcb1fe9634'),
-  ('shopfaehig',    '534'),
-  ('sammelbar',     '534'),
-  ('lagerzeilen',   '285'),
-  ('katalogzeilen', '626')
+z0 (schluessel, staging, production) as (values
+  /*
+   * ZWEI UMGEBUNGEN, ZWEI SPALTEN — UND KEINE DRITTE WAHRHEIT.
+   *
+   * Links der Z0-Vertrag von Staging (Stand 2026-10-20), rechts der
+   * gemessene Production-Stand nach `0138` (2026-10-21):
+   *
+   *   angebote/md5   287 und `9b834105…` — vom Betreiber im Postflight zu
+   *                  `0137` und `0138` bestaetigt, beide Male gleich
+   *   shopfaehig     531 — lesend gemessen (`verify:shop:prod`)
+   *   sammelbar      531 — der Fortschrittsnenner, vom Betreiber bestaetigt
+   *   lagerzeilen    306 — lesend gemessen
+   *   katalogzeilen  624 — vom Betreiber nach `0138` bestaetigt (603 + 21)
+   *
+   * WARUM DIE WERTE IM CODE STEHEN: ein Sollwert, den der Bediener bei jedem
+   * Lauf mittippt, ist bei jedem Lauf eine neue Gelegenheit fuer einen
+   * Tippfehler — und ein Tippfehler in der ERWARTUNG laesst die Pruefung
+   * bestehen. Gewaehlt wird nur die Umgebung.
+   *
+   * WARUM SIE UMGEBUNGSWEISE GETRENNT SIND: eine umgebungsblinde Erwartung
+   * war in diesem Projekt schon zweimal die Ursache eines falschen Befundes.
+   * Im Modus `keine` gilt keine der beiden Spalten, und die Zeilen sind
+   * Messungen ohne Bewertung — das ist der ausdrueckliche Verzicht.
+   */
+  ('angebote',      '256', '287'),
+  ('angebote_md5',  '4d1d6c30fe0ae886ca2689bcb1fe9634',
+                    '9b8341058bbfa0f7809eddc300ab0e9e'),
+  ('shopfaehig',    '534', '531'),
+  ('sammelbar',     '534', '531'),
+  ('lagerzeilen',   '285', '306'),
+  ('katalogzeilen', '626', '624')
 ),
 soll as (
   select z.schluessel,
-         case when (select v.modus from vertrag v) = 'staging' then z.wert end as wert
+         case (select v.modus from vertrag v)
+           when 'staging'    then z.staging
+           when 'production' then z.production
+         end as wert
     from z0 z
 ),
 zubehoer as (
@@ -182,8 +209,8 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- ------------------------------------------------------ Der Z0-Vertrag
   (901, 'Z0-Vertrag', 'gewaehlter Modus (Messung ohne Sollwert)',
       (select coalesce(v.modus, 'FEHLT') from vertrag v), null),
-  (902, 'Z0-Vertrag', 'der Modus ist gewaehlt — staging oder ausdruecklich keine',
-      (select case when v.modus in ('staging', 'keine') then 'ja'
+  (902, 'Z0-Vertrag', 'der Modus ist gewaehlt — staging, production oder ausdruecklich keine',
+      (select case when v.modus in ('staging', 'production', 'keine') then 'ja'
                    else 'nein: set_config(''skyisles.z0'', ''staging'', true) fehlt'
               end from vertrag v), 'ja')
 ),
