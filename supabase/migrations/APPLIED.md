@@ -207,19 +207,34 @@ genau diese Prüfsumme wiederherstellt.
 (`non_collectible_categories()` = Fassung `0006`, `shop_offers()` vier
 Spalten, `seller_sale_state()` fehlt). Sieben Migrationen fehlen dort, und
 fuer jede liegt eine eigene Einmal-Datei bereit — **nicht** die
-Staging-Fassung ohne Riegel, sondern mit dem UMGEKEHRTEN Stempel: der
-Staging-Stempel muss fehlen, `0133` muss da sein, und der Katalog muss
-Zeilen haben. Probelauf **P41** faehrt alle drei Richtungen nach.
+Staging-Fassung ohne Riegel, sondern mit dem UMGEKEHRTEN Riegel: das
+vollstaendige **Markerpaar** `SKY-0821`+`SKY-0822` muss fehlen, `0133` muss
+da sein, und der Katalog muss Zeilen haben.
+
+> **Das PAAR, nicht eine einzelne ID — und das ist gemessen.** Eine erste
+> Fassung brach bei irgendeiner der beiden ab und hat die Datei damit auf
+> Production abgewiesen: dort liegt `SKY-0821` als **echter Artikel**
+> („Winterfest Lob-Star", `source = admin`, angelegt 2026-09-16, aktiv und
+> redaktionell ausgeblendet), und die ID gehoert in den produktiven
+> Allokationsbereich `SKY-0821`-`SKY-8999`. `SKY-0822` gibt es dort nicht.
+> Auf Staging sind beide Charakterimport-Fixtures.
+>
+> **Der Schutz wird dadurch nicht schwaecher:** Staging faellt zweifach —
+> an A1 (beide Marker) und an A2 (`0133` fehlt dort). Probelauf **P41**
+> fuehrt fuenf Faelle vor, darunter „nur `SKY-0821`" (laesst durch, Artikel
+> unberuehrt) und „ohne `0133`" (weist ab, A1 allein haette durchgelassen).
+> Ein Test haelt ausserdem fest, dass alle sieben Dateien **denselben**
+> Riegel tragen, Zeichen fuer Zeichen.
 
 | Migration | Lauf | SHA-256 des Laufs |
 |---|---|---|
-| `0135` | `supabase/operations/prod-0135.sql` | `7b3c470e67a1c641318079b53a2fc0c74046128b9fa680f12205627a43a75b7e` |
-| `0136` | `supabase/operations/prod-0136.sql` | `c050c600a152eab31cd87e95100b20933dd5cfbbe99f317f69bd9744552bcd1a` |
-| `0137` | `supabase/operations/prod-0137.sql` | `7cdb46b85c0e860af8260b01765fafe58a0cca451d3cacb2e880adf544b0550c` |
-| `0138` | `supabase/operations/prod-0138.sql` | `d7db14faa2d4cb1402e4a318e7cd538ddf4e38b0a550ad2a567af17cd76f7a89` |
-| `0139` | `supabase/operations/prod-0139.sql` | `23e24df824079e25bba2571a86612355d703806dd955db0125a0c7f32a38adc2` |
-| `0140` | `supabase/operations/prod-0140.sql` | `386a4bec05a29b262c180098648f43532470337dc20d1460e7b50c39002e0d3c` |
-| `0141` | `supabase/operations/prod-0141.sql` | `2aa004372bee9629ae934d123b84235ea4a0921d202751df53a54814fb37635d` |
+| `0135` | `supabase/operations/prod-0135.sql` | `6adea7e58f24853a85624249506fe796c5082adb0bf7ad03541a2ba1b1f8e793` |
+| `0136` | `supabase/operations/prod-0136.sql` | `bef6821b4f44c756cf68fe0f15942e3ef4c75c8b02f928f52d49625903042925` |
+| `0137` | `supabase/operations/prod-0137.sql` | `e717b1ba0b7210f15f6bf927415b4a96d9cf46b061aa15376eebc554f790278e` |
+| `0138` | `supabase/operations/prod-0138.sql` | `17f897fbe05835be7dfce68df815fc9d297599bc23ea122bd3a014b7da060663` |
+| `0139` | `supabase/operations/prod-0139.sql` | `6f3aad33e96457ac35a29e8764308cce1df7aa07fac5c1bf8bf8f5a800cf0c97` |
+| `0140` | `supabase/operations/prod-0140.sql` | `cc4a88ad3bd9804605c00c67d60926b8cb19a43e21820db9f6ace12a111f6d88` |
+| `0141` | `supabase/operations/prod-0141.sql` | `60a046ea13a61fe8dc3904e28d1fdfb4ee214b6d8b99624ca6d4081e1768c0e4` |
 
 **Die Reihenfolge ist nicht beliebig:** `0135`→`0136`→`0137`→
 **Vercel-Deployment**→`0138`→`0139`→`0140`→`0141`. Begruendung und Beweis

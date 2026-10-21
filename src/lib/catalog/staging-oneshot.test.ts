@@ -558,11 +558,20 @@ describe("die sieben Production-Laeufe", () => {
         .toBe(readFileSync(`supabase/migrations/${migration}`, "utf8"));
     });
 
-    it(`${skript} trägt den UMGEKEHRTEN Stempel`, () => {
-      /* Der Staging-Stempel muss FEHLEN … */
-      expect(text).toContain("'SKY-0821', 'SKY-0822'")
-      expect(text).toContain("ABBRUCH A1: der STAGING-Stempel ist da");
-      /* … und `0133` muss DA sein — der positive Teil. */
+    it(`${skript} trägt den UMGEKEHRTEN Riegel`, () => {
+      /*
+       * DAS PAAR, NICHT EINE EINZELNE ID. Production trägt `SKY-0821` als
+       * ECHTEN Artikel („Winterfest Lob-Star", `source = admin`, angelegt
+       * 2026-09-16) — die ID liegt im produktiven Allokationsbereich und
+       * gehört dort hin. Eine Prüfung auf „irgendeine der beiden" hätte
+       * jede dieser Dateien auf Production abgewiesen; gemessen am
+       * 2026-10-21.
+       */
+      expect(text).toContain("'SKY-0821', 'SKY-0822')) = 2 then");
+      expect(text).toContain("ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da");
+      /* Und NICHT die zu scharfe Fassung. */
+      expect(text).not.toContain("'SKY-0821', 'SKY-0822')) <> 0 then");
+      /* `0133` muss DA sein — der positive, unabhängige Teil. */
       expect(text).toContain("to_regprocedure('public.purchases_paid_total_is_final()') is null");
       expect(text).toContain("ABBRUCH A2");
       /* Und es ist kein leeres Projekt. */
@@ -595,6 +604,28 @@ describe("die sieben Production-Laeufe", () => {
     });
   }
 
+  it("alle sieben tragen DENSELBEN Riegel, Zeichen für Zeichen", () => {
+    /*
+     * Sieben Dateien, ein Schutz. Sie unterscheiden sich nur darin, welche
+     * Staging-Datei die Fehlermeldung als Alternative nennt — das wird
+     * herausnormalisiert, alles andere muss gleich sein. Ein Riegel, der
+     * in einer von sieben Dateien abweicht, ist in dieser einen Datei
+     * kein Riegel.
+     */
+    const riegel = (skript: string): string => {
+      const t = readFileSync(skript, "utf8");
+      const a = t.indexOf("do $lauf_a$");
+      const b = t.indexOf("$lauf_a$;", a) + "$lauf_a$;".length;
+      expect(a, `${skript}: kein Riegel`).toBeGreaterThan(-1);
+      return t.slice(a, b).replace(/staging-0\d{3}\.sql/g, "staging-NNNN.sql");
+    };
+    const alle = new Set(PRODUKTIONSLAEUFE.map(([s]) => riegel(s)));
+    expect(alle.size, `${alle.size} verschiedene Riegel`).toBe(1);
+    /* Und er enthält genau die drei Bedingungen, keine vierte. */
+    const [einer] = [...alle];
+    expect(einer.match(/raise exception/g)).toHaveLength(3);
+  });
+
   it("und sie sind NICHT die Staging-Dateien ohne Riegel", () => {
     /*
      * Die Versuchung bei so einer Aufgabe ist, den Stempel zu entfernen.
@@ -604,9 +635,10 @@ describe("die sieben Production-Laeufe", () => {
     for (const [skript] of PRODUKTIONSLAEUFE) {
       const text = readFileSync(skript, "utf8");
       const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
-      /* Es GIBT eine Umgebungspruefung, und sie ist die umgekehrte. */
+      /* Es GIBT eine Umgebungspruefung, und sie ist die umgekehrte: das
+         PAAR erkennt Staging, nicht sein Fehlen. */
       expect(code).toContain("raise exception 'ABBRUCH A1");
-      expect(code).toContain("<> 0 then");
+      expect(code).toContain(")) = 2 then");
     }
   });
 

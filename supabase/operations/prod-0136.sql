@@ -54,24 +54,45 @@ begin;
 -- ---------------------------------------------------------------------------
 -- A. Bin ich wirklich auf Production?
 --
--- ZWEI BEDINGUNGEN, UND BEIDE MUESSEN GELTEN. Eine negative allein waere
+-- DREI BEDINGUNGEN, UND ALLE DREI MUESSEN GELTEN. Eine negative allein waere
 -- schwach: „kein Staging" stimmt auch fuer eine leere Datenbank.
 --
---   A1  Der STAGING-Stempel fehlt. `SKY-0821` und `SKY-0822` gibt es auf
---       Staging und auf Production bewusst NICHT
---       (`supabase/checks/staging_pending_migrations.sql`, Zeile 101).
+--   A1  Das vollstaendige STAGING-MARKERPAAR fehlt. Der Marker ist das PAAR
+--       `SKY-0821` UND `SKY-0822` — so ist er definiert
+--       (`supabase/checks/staging_pending_migrations.sql`, Zeile 101:
+--       „`SKY-0821` **und** `SKY-0822` vorhanden").
 --   A2  `0133` ist angewendet. Sie liegt seit dem 2026-10-18 auf Production
---       und fehlt auf Staging — dieselbe Akte, dieselbe Zeile 211. Das ist
---       der POSITIVE Teil: er unterscheidet Production von einer beliebigen
---       anderen Datenbank, die nur den Staging-Stempel nicht hat.
+--       und fehlt auf Staging — dieselbe Akte, Zeile 211. Das ist der
+--       POSITIVE Teil: er unterscheidet Production von einer beliebigen
+--       anderen Datenbank, die nur das Markerpaar nicht hat.
 --   A3  Und es ist kein leeres Projekt: der Katalog traegt Zeilen.
+--
+-- WARUM DAS PAAR UND NICHT EINE EINZELNE ID
+--
+-- Eine frueher hier stehende Fassung brach bei IRGENDEINER der beiden ab.
+-- Das war strenger als die Definition des Markers — und falsch: Production
+-- traegt `SKY-0821` als ECHTEN Artikel. Gemessen am 2026-10-21:
+--
+--   SKY-0821  „Winterfest Lob-Star", slug `winterfest-lob-star-trap-team`,
+--             `source = admin`, angelegt 2026-09-16, aktiv und redaktionell
+--             ausgeblendet. SKY-0822 gibt es dort nicht.
+--
+-- Die ID liegt im produktiven Allokationsbereich `SKY-0821`-`SKY-8999`
+-- (`docs/SKYLANDERS_DATA.md`) — sie GEHOERT dort hin. Auf Staging sind
+-- beide IDs Charakterimport-Fixtures; dort liegen also beide.
+--
+-- DER SCHUTZ WIRD DADURCH NICHT SCHWAECHER. Staging faellt zweifach: an A1
+-- (beide Marker da) UND an A2 (`0133` fehlt dort). Eine Datenbank, die nur
+-- einen Marker traegt und `0133` nicht hat, faellt an A2. Probelauf P41
+-- fuehrt alle vier Faelle vor.
 -- ---------------------------------------------------------------------------
 do $lauf_a$
 begin
   if (select count(*) from public.skylanders
-       where sky_id in ('SKY-0821', 'SKY-0822')) <> 0 then
-    raise exception 'ABBRUCH A1: der STAGING-Stempel ist da. Diese Datei ist fuer '
-      'Production (zmiwxswrpkmizvqsgype) — auf Staging gehoert die Datei '
+       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then
+    raise exception 'ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da '
+      '(SKY-0821 UND SKY-0822). Diese Datei ist fuer Production '
+      '(zmiwxswrpkmizvqsgype) — auf Staging gehoert '
       'supabase/operations/staging-0136.sql.';
   end if;
 

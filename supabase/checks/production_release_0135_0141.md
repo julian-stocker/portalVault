@@ -282,10 +282,29 @@ und sie sind nicht durch diese Arbeit entstanden.
 | 11 | `supabase/checks/state_audit_readonly.sql` erneut | nein |
 | 11 | `supabase/checks/receipt_lock_check.sql` erneut | nein |
 
-Jede `prod-*.sql` bringt `begin`, `commit` und den **Production-Stempel**
-selbst mit: der Staging-Stempel muss **fehlen**, `0133` muss **da** sein,
-und der Katalog muss Zeilen haben. Probelauf **P41** fährt alle drei
-Richtungen nach.
+Jede `prod-*.sql` bringt `begin`, `commit` und den **Production-Riegel**
+selbst mit, und alle sieben tragen ihn Zeichen für Zeichen gleich (ein Test
+rechnet das nach):
+
+| | Bedingung | fällt wo |
+|---|---|---|
+| **A1** | das vollständige Markerpaar `SKY-0821`+`SKY-0822` **fehlt** | Staging trägt beide |
+| **A2** | `0133` ist **angewendet** | auf Staging nicht |
+| **A3** | der Katalog trägt ≥ 100 Zeilen | kein leeres Projekt |
+
+> **A1 prüft das PAAR, nicht eine einzelne ID — gemessen am 2026-10-21.**
+> Production trägt `SKY-0821` als **echten Artikel**: „Winterfest
+> Lob-Star", `source = admin`, angelegt 2026-09-16, aktiv und redaktionell
+> ausgeblendet. Die ID liegt im produktiven Allokationsbereich
+> `SKY-0821`–`SKY-8999` und gehört dort hin; `SKY-0822` existiert dort
+> nicht. Eine erste Fassung des Riegels brach bei *irgendeiner* der beiden
+> ab und hätte damit jede der sieben Dateien auf Production abgewiesen.
+>
+> **Schwächer wird der Schutz dadurch nicht.** Staging fällt zweifach: an
+> A1 **und** an A2. Probelauf **P41** führt fünf Fälle vor — Markerpaar
+> (A1), winziger Katalog (A3), ohne Marker (durch), **nur `SKY-0821`**
+> (durch, und der Artikel bleibt unberührt) und **ohne `0133`** (A2, wo A1
+> allein durchgelassen hätte).
 
 Die Pre- und Postflights der einzelnen Migrationen sind **nicht** in dieser
 Liste: sie tragen Z0-Bezugszahlen von **Staging** und würden auf Production

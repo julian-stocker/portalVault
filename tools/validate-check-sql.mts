@@ -2473,28 +2473,69 @@ async function main(): Promise<void> {
     await db2.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
     const zuKlein = await fahre(db2, PROD135, { klammer: false });
 
-    /* 3. Stempel fort, Katalog gross genug: jetzt muss sie durchlaufen. */
-    const db3 = await frisch();
-    await db3.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
-    await db3.exec(`
+    /* 120 Zeilen, damit A3 nicht greift — ein Fixture-Katalog ist kein
+       Production-Katalog. */
+    const FUELLEN = `
       insert into public.skylanders
              (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
               market_price, card_type, source, display_name_override)
       select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
              true, true, 1.00, 'core', 'probe', null
-        from generate_series(1, 120) g;`);
+        from generate_series(1, 120) g;`;
+
+    /* 3. Beide Marker fort, Katalog gross genug: jetzt muss sie durchlaufen. */
+    const db3 = await frisch();
+    await db3.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db3.exec(FUELLEN);
     const alsProduction = await fahre(db3, PROD135, { klammer: false });
     const spalte3 = alsProduction === null ? await wert(db3, HAT_SPALTE) : "-";
 
+    /*
+     * 4. DER WIRKLICHE PRODUCTION-FALL: `SKY-0821` liegt da, `SKY-0822`
+     *    nicht.
+     *
+     * Gemessen am 2026-10-21: `SKY-0821` ist auf Production ein ECHTER
+     * Artikel — „Winterfest Lob-Star", `source = admin`, angelegt
+     * 2026-09-16 —, und die ID gehoert in den produktiven
+     * Allokationsbereich `SKY-0821`-`SKY-8999`. Eine Pruefung auf
+     * „irgendeine der beiden" hat die Datei deshalb auf Production
+     * abgewiesen. Dieser Durchgang ist der Grund, warum der Riegel das
+     * PAAR prueft.
+     */
+    const db4 = await frisch();
+    await db4.exec("delete from public.skylanders where sky_id = 'SKY-0822';");
+    await db4.exec(FUELLEN);
+    const nurEiner = await fahre(db4, PROD135, { klammer: false });
+    const spalte4 = nurEiner === null ? await wert(db4, HAT_SPALTE) : "-";
+    const artikelBleibt = await wert(db4,
+      "select (count(*) = 1)::text as w from public.skylanders where sky_id = 'SKY-0821'");
+
+    /*
+     * 5. UND DER ZWEITE RIEGEL TRAEGT ALLEIN.
+     *
+     * Das ist, was die Lockerung von A1 vertretbar macht: ohne `0133` ist
+     * es nicht Production, auch wenn kein Markerpaar da ist. Staging faellt
+     * damit zweifach — an A1 (beide Marker) UND an A2.
+     */
+    const db5 = await frisch();
+    await db5.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db5.exec(FUELLEN);
+    await db5.exec("drop function if exists public.purchases_paid_total_is_final() cascade;");
+    const ohne0133 = await fahre(db5, PROD135, { klammer: false });
+
     probe.push({
-      name: "P41 der Production-Stempel haelt auf Staging, bei leerem Katalog — und laesst Production durch",
+      name: "P41 der Production-Riegel: Paar weist ab, nur SKY-0821 laesst durch, ohne 0133 weist ab",
       ok: aufStaging !== null && aufStaging.includes("ABBRUCH A1") && spalte1 === "false"
         && zuKlein !== null && zuKlein.includes("ABBRUCH A3")
-        && alsProduction === null && spalte3 === "true",
-      sagt: `mit Staging-Stempel: ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
+        && alsProduction === null && spalte3 === "true"
+        && nurEiner === null && spalte4 === "true" && artikelBleibt === "true"
+        && ohne0133 !== null && ohne0133.includes("ABBRUCH A2"),
+      sagt: `Markerpaar (Staging): ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
         + ` (Spalte danach ${spalte1}) · winziger Katalog: `
-        + `${zuKlein === null ? "DURCHGELAUFEN — Befund" : "A3"} · als Production: `
-        + `${alsProduction ?? "durch"}, item_type steht (${spalte3})`,
+        + `${zuKlein === null ? "DURCHGELAUFEN — Befund" : "A3"} · ohne Marker: `
+        + `${alsProduction ?? "durch"} (item_type ${spalte3}) · NUR SKY-0821 (Production): `
+        + `${nurEiner ?? "durch"} (item_type ${spalte4}, Artikel unberuehrt ${artikelBleibt})`
+        + ` · ohne 0133: ${ohne0133 === null ? "DURCHGELAUFEN — Befund" : "A2"}`,
     });
   }
 
