@@ -201,6 +201,36 @@ genau diese Prüfsumme wiederherstellt.
 
 **`0130` wird nicht erneut angewendet.**
 
+## Der vorbereitete Production-Release (`0135`–`0141`)
+
+**Nichts davon ist ausgefuehrt.** Production steht **gemessen** auf `0133`
+(`non_collectible_categories()` = Fassung `0006`, `shop_offers()` vier
+Spalten, `seller_sale_state()` fehlt). Sieben Migrationen fehlen dort, und
+fuer jede liegt eine eigene Einmal-Datei bereit — **nicht** die
+Staging-Fassung ohne Riegel, sondern mit dem UMGEKEHRTEN Stempel: der
+Staging-Stempel muss fehlen, `0133` muss da sein, und der Katalog muss
+Zeilen haben. Probelauf **P41** faehrt alle drei Richtungen nach.
+
+| Migration | Lauf | SHA-256 des Laufs |
+|---|---|---|
+| `0135` | `supabase/operations/prod-0135.sql` | `7b3c470e67a1c641318079b53a2fc0c74046128b9fa680f12205627a43a75b7e` |
+| `0136` | `supabase/operations/prod-0136.sql` | `c050c600a152eab31cd87e95100b20933dd5cfbbe99f317f69bd9744552bcd1a` |
+| `0137` | `supabase/operations/prod-0137.sql` | `7cdb46b85c0e860af8260b01765fafe58a0cca451d3cacb2e880adf544b0550c` |
+| `0138` | `supabase/operations/prod-0138.sql` | `d7db14faa2d4cb1402e4a318e7cd538ddf4e38b0a550ad2a567af17cd76f7a89` |
+| `0139` | `supabase/operations/prod-0139.sql` | `23e24df824079e25bba2571a86612355d703806dd955db0125a0c7f32a38adc2` |
+| `0140` | `supabase/operations/prod-0140.sql` | `386a4bec05a29b262c180098648f43532470337dc20d1460e7b50c39002e0d3c` |
+| `0141` | `supabase/operations/prod-0141.sql` | `2aa004372bee9629ae934d123b84235ea4a0921d202751df53a54814fb37635d` |
+
+**Die Reihenfolge ist nicht beliebig:** `0135`→`0136`→`0137`→
+**Vercel-Deployment**→`0138`→`0139`→`0140`→`0141`. Begruendung und Beweis
+je Schritt: `supabase/checks/production_release_0135_0141.md`; die
+Bedienanleitung: `supabase/checks/production_release_checklist.md`.
+
+**`0134` ist nicht Teil des Releases** — nirgends angewendet, und der
+Anwendungscode arbeitet ohne sie.
+
+---
+
 ## Wie ein zweiter Lauf verhindert wird — drei Schichten
 
 Dieses Projekt führt **keine** `supabase_migrations.schema_migrations`.

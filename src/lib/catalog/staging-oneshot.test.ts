@@ -518,3 +518,106 @@ describe("die zwei lesenden Staging-Laeufe", () => {
       .toContain("column_name = 'sale_released'");
   });
 });
+
+
+/* ==========================================================================
+ * DIE SIEBEN PRODUCTION-LAEUFE
+ *
+ * Eigene Dateien, nicht die Staging-Dateien ohne Riegel. Der Unterschied
+ * ist der STEMPEL, und er ist umgekehrt: hier muss der Staging-Stempel
+ * FEHLEN und `0133` DA sein — `0133` liegt seit dem 2026-10-18 auf
+ * Production und fehlt auf Staging, ist also der positive Teil.
+ *
+ * Dass es sie gibt, hat einen Anlass: am 2026-10-18 sind `0132` und `0133`
+ * unbeabsichtigt auf Production gelandet. Eine Datei ohne
+ * Umgebungspruefung ist genau der Fehler, der schon passiert ist.
+ * ======================================================================== */
+
+const PRODUKTIONSLAEUFE = [
+  ["supabase/operations/prod-0135.sql", "0135_catalog_item_type.sql"],
+  ["supabase/operations/prod-0136.sql", "0136_business_backup_item_type.sql"],
+  ["supabase/operations/prod-0137.sql", "0137_catalog_accessories.sql"],
+  ["supabase/operations/prod-0138.sql", "0138_catalog_portals.sql"],
+  ["supabase/operations/prod-0139.sql", "0139_accessory_sale_release.sql"],
+  ["supabase/operations/prod-0140.sql", "0140_business_backup_sale_release.sql"],
+  ["supabase/operations/prod-0141.sql", "0141_seller_sale_state.sql"],
+] as const;
+
+describe("die sieben Production-Laeufe", () => {
+  for (const [skript, migration] of PRODUKTIONSLAEUFE) {
+    const text = readFileSync(skript, "utf8");
+
+    it(`${migration} ist Zeichen für Zeichen eingebettet`, () => {
+      const anfang = `-- >>> EINGEBETTET: supabase/migrations/${migration}\n`;
+      const ende = `-- <<< ENDE: supabase/migrations/${migration}\n`;
+      const a = text.indexOf(anfang);
+      const b = text.indexOf(ende);
+      expect(a, "Marke fehlt").toBeGreaterThan(-1);
+      expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+      expect(text.slice(a + anfang.length, b))
+        .toBe(readFileSync(`supabase/migrations/${migration}`, "utf8"));
+    });
+
+    it(`${skript} trägt den UMGEKEHRTEN Stempel`, () => {
+      /* Der Staging-Stempel muss FEHLEN … */
+      expect(text).toContain("'SKY-0821', 'SKY-0822'")
+      expect(text).toContain("ABBRUCH A1: der STAGING-Stempel ist da");
+      /* … und `0133` muss DA sein — der positive Teil. */
+      expect(text).toContain("to_regprocedure('public.purchases_paid_total_is_final()') is null");
+      expect(text).toContain("ABBRUCH A2");
+      /* Und es ist kein leeres Projekt. */
+      expect(text).toContain("ABBRUCH A3");
+      /* Die Production-Kennung steht drin, die Staging-Kennung nicht. */
+      expect(text).toContain("zmiwxswrpkmizvqsgype");
+      expect(text).not.toContain("ABBRUCH A1: Umgebungsstempel nicht gefunden");
+    });
+
+    it(`${skript} bringt genau eine Klammer mit, und der Stempel steht darin`, () => {
+      const zeilen = text.split("\n").map((l) => l.trim());
+      expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+      expect(zeilen.filter((l) => l === "commit;")).toHaveLength(1);
+      /* Der AUSFÜHRBARE Riegel, nicht seine Erwähnung im Kopfkommentar —
+         den gibt es auch, und er steht vor `begin;`. */
+      const riegel = text.indexOf("raise exception 'ABBRUCH A1");
+      expect(riegel).toBeGreaterThan(text.indexOf("begin;"));
+      expect(riegel).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
+    });
+
+    it(`${skript} fügt der Migration nichts Fachliches hinzu`, () => {
+      const anfang = text.indexOf("-- >>> EINGEBETTET");
+      const ende = text.indexOf("-- <<< ENDE");
+      const rahmen = (text.slice(0, anfang) + text.slice(ende))
+        .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      for (const verboten of ["insert into", "update public.", "delete from",
+        "alter table", "create or replace function", "grant ", "revoke "]) {
+        expect(rahmen.toLowerCase(), verboten).not.toContain(verboten);
+      }
+    });
+  }
+
+  it("und sie sind NICHT die Staging-Dateien ohne Riegel", () => {
+    /*
+     * Die Versuchung bei so einer Aufgabe ist, den Stempel zu entfernen.
+     * Dann liefe eine Datei ohne jede Umgebungspruefung — und genau das
+     * ist am 2026-10-18 schiefgegangen.
+     */
+    for (const [skript] of PRODUKTIONSLAEUFE) {
+      const text = readFileSync(skript, "utf8");
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      /* Es GIBT eine Umgebungspruefung, und sie ist die umgekehrte. */
+      expect(code).toContain("raise exception 'ABBRUCH A1");
+      expect(code).toContain("<> 0 then");
+    }
+  });
+
+  it("0138 warnt im Kopf, dass sie nach dem Deployment gehört", () => {
+    /*
+     * Der eine Schritt, dessen Reihenfolge nicht beliebig ist: der heute
+     * deployte Code (81386e6) kennt nur `Spiele` als nicht sammelbar und
+     * zeigte 21 Portale als Figuren.
+     */
+    const text = readFileSync("supabase/operations/prod-0138.sql", "utf8");
+    expect(text).toContain("ERST NACH DEM VERCEL-DEPLOYMENT");
+    expect(text).toContain("81386e6");
+  });
+});

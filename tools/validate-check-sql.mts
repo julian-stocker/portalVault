@@ -2446,6 +2446,58 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P41 — DER PRODUCTION-STEMPEL, in beide Richtungen.
+   *
+   * `prod-0135.sql` bettet dieselbe Migration ein wie der Staging-Lauf
+   * (zeichengleich, geprueft in `staging-oneshot.test.ts`); der einzige
+   * Unterschied ist der Stempel. Dass er greift, laesst sich nur fahren.
+   *
+   * Drei Faelle: mit Staging-Stempel (A1), ohne Stempel aber mit winzigem
+   * Katalog (A3), und richtig — Stempel fort, Katalog gross genug.
+   */
+  {
+    const PROD135 = "supabase/operations/prod-0135.sql";
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const HAT_SPALTE = "select (count(*) = 1)::text as w from information_schema.columns "
+      + "where table_schema = 'public' and table_name = 'skylanders' "
+      + "and column_name = 'item_type'";
+
+    /* 1. Der Fixture-Katalog TRAEGT den Staging-Stempel (SKY-0821/0822). */
+    const db1 = await frisch();
+    const aufStaging = await fahre(db1, PROD135, { klammer: false });
+    const spalte1 = await wert(db1, HAT_SPALTE);
+
+    /* 2. Stempel fort — aber sieben Katalogzeilen sind kein Production. */
+    const db2 = await frisch();
+    await db2.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    const zuKlein = await fahre(db2, PROD135, { klammer: false });
+
+    /* 3. Stempel fort, Katalog gross genug: jetzt muss sie durchlaufen. */
+    const db3 = await frisch();
+    await db3.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db3.exec(`
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`);
+    const alsProduction = await fahre(db3, PROD135, { klammer: false });
+    const spalte3 = alsProduction === null ? await wert(db3, HAT_SPALTE) : "-";
+
+    probe.push({
+      name: "P41 der Production-Stempel haelt auf Staging, bei leerem Katalog — und laesst Production durch",
+      ok: aufStaging !== null && aufStaging.includes("ABBRUCH A1") && spalte1 === "false"
+        && zuKlein !== null && zuKlein.includes("ABBRUCH A3")
+        && alsProduction === null && spalte3 === "true",
+      sagt: `mit Staging-Stempel: ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
+        + ` (Spalte danach ${spalte1}) · winziger Katalog: `
+        + `${zuKlein === null ? "DURCHGELAUFEN — Befund" : "A3"} · als Production: `
+        + `${alsProduction ?? "durch"}, item_type steht (${spalte3})`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);
