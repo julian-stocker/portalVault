@@ -110,7 +110,18 @@ Spiel), und die Betriebssicherung führt `item_type` im Bereich `figures`:
 **353 Felder**, Abdruck `f6d08440707ba72a8040a8d1e666c092`. Abschlussraster:
 19 Bezugswerte unverändert, einzige Änderung der Sicherungsabdruck. Nachweis
 und der berichtigte Z0-Vertrag: `supabase/checks/open_verifications.md`,
-Abschnitt 0g. **Auf Production fehlen `0134`, `0135` und `0136`.**
+Abschnitt 0g.
+
+**Auf Production angewendet am 2026-10-21: `0135`** — der erste Schritt des
+Releases, gefahren über `supabase/operations/prod-0135.sql` (umgekehrter
+Umgebungsstempel: die Datei bricht auf Staging ab). Danach **lesend gemessen**
+mit `npm run verify:shop:prod`: `item_type` steht, **39** Zeilen `game` und
+**39** in der Kategorie `Spiele` — 0 außerhalb, 0 ohne Typ, alle 39 aktiv und
+sichtbar —, nur die Typen `figure` und `game`, und **287** Angebote · **306**
+Lagerpositionen · **293** verkäuflich · **13** nicht sammelbar · **6**
+Opt-outs, Ziffer für Ziffer wie vorher. **Auf Production fehlen weiterhin
+`0134` und `0136`–`0141`.** Der Backup-Nachweis aus Stufe 1 ist **nicht**
+geführt.
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

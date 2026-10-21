@@ -238,7 +238,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(sha(datei.replace(NACHTRAG, ""))).toBe(z.digest);
   });
 
-  it("die Production-Tabelle führt die sechs des Rollouts und die zwei vom 2026-10-18", () => {
+  it("die Production-Tabelle führt die sechs des Rollouts, die zwei vom 2026-10-18 und 0135", () => {
     expect(production.map((z) => z.datei)).toEqual([
       "0126_purchase_item_edit.sql",
       "0127_purchase_item_swap.sql",
@@ -248,7 +248,21 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
       "0131_business_backup_seller_fields.sql",
       "0132_purchase_item_remove_by_line.sql",
       "0133_paid_total_immutable.sql",
+      /* Erster Schritt des Releases 0135–0141, am 2026-10-21 angewendet —
+         und der erste Production-Lauf, der danach GEMESSEN wurde. */
+      "0135_catalog_item_type.sql",
     ]);
+  });
+
+  it("und sie nennt zu 0135 die gemessene Nachkontrolle, nicht nur das Datum", () => {
+    /*
+     * „Angewendet" ist eine Meldung. Was die Akte tragfähig macht, sind die
+     * Zahlen, die danach lesend gemessen wurden — und der Hinweis, was
+     * dabei NICHT geführt wurde.
+     */
+    expect(text).toContain("verify:shop:prod");
+    expect(text).toContain("prod-0135.sql");
+    expect(text).toContain("Backup-Nachweis");
   });
 
   it("und die Akte sagt, dass die beiden letzten unbeabsichtigt dort liefen", () => {

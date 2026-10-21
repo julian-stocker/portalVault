@@ -61,8 +61,33 @@ beide weiterhin nicht angewendet.** Sämtliche Prüfzahlen, die zuvor als
 Staging-Ergebnisse geführt wurden, sind Production-Ergebnisse. Hergang,
 Bewertung und Folgen: `docs/history/2026-10-18-production-0132-0133.md`.
 
+Am **2026-10-21** kam `0135` hinzu — der erste Schritt des Releases
+`0135`–`0141`, und der erste Production-Lauf dieses Projekts, der **vorher**
+geplant und **danach gemessen** wurde. Gefahren über
+`supabase/operations/prod-0135.sql` (SHA-256
+`6adea7e58f24853a85624249506fe796c5082adb0bf7ad03541a2ba1b1f8e793`), die
+`0135` zeichengleich einbettet und genau eine Prüfung hinzufügt: den
+**umgekehrten** Umgebungsstempel, der auf Staging abbricht. Dass er das tut,
+fährt Probelauf **P41** nach — einschließlich des Falls, dass nur `SKY-0821`
+da ist: Production trägt diese Zeile rechtmäßig, und erst das vollständige
+Paar `SKY-0821` **und** `SKY-0822` bedeutet Staging.
+
+Nachher gemessen, lesend, aus diesem Repository (`npm run verify:shop:prod`):
+`skylanders.item_type` steht · **39** Zeilen `item_type = 'game'`, **39** in
+der Kategorie `Spiele`, **0** außerhalb, **0** ohne Typ, alle 39 aktiv und
+sichtbar · nur die Typen `figure` und `game` — `0137`/`0138` sind richtig
+**nicht** angewendet · **287** Angebote, **306** Lagerpositionen, **293**
+verkäuflich, **13** nicht sammelbar, **6** bewusste Opt-outs: Ziffer für
+Ziffer die Werte von vor dem Lauf. Die Kategorieregel ist unverändert die
+Fassung aus `0006` (`[Spiele]`). Noch offen aus Stufe 1: der
+**Backup-Nachweis** (`supabase/checks/production_release_checklist.md`,
+Schritt 2) wurde nicht geführt.
+
 **Der Zustand beider Datenbanken ist bis auf Weiteres GEMELDET, nicht
-GEMESSEN.** Diese Akte hält fest, was der Betreiber ausgeführt und mit
+GEMESSEN** — mit einer Ausnahme, die seit dem 2026-10-21 wächst: was
+`verify:shop:prod`, `verify:seller:prod` und `verify:commerce:prod` lesen,
+ist **gemessen**, denn diese Werkzeuge verbinden sich selbst. Für alles
+andere gilt weiter: Diese Akte hält fest, was der Betreiber ausgeführt und mit
 Postflight-Ergebnissen bestätigt hat; aus diesem Repository heraus ist keine
 Datenbank angefasst worden. Was ein Lauf noch belegen muss, steht vollständig
 in `supabase/checks/open_verifications.md` — Production P1–P5, Staging S1–S6.
@@ -79,6 +104,7 @@ Katalog statt aus dieser Datei.
 | `0131_business_backup_seller_fields.sql` | `644cc0bbd15073426f54af6fa542281c95b8e4d4dc5abb8ce2d63a3b4c35f218` | gleich |
 | `0132_purchase_item_remove_by_line.sql` | `382aa64749cb035e9a6402fe36fc16f9e1ae663228c7806cc34e29331b7ec6b3` | gleich |
 | `0133_paid_total_immutable.sql` | `65832d746ce26d3fe5a7c1cb7feaec3a7793917b31d965c7c911215b347e0ef4` | gleich |
+| `0135_catalog_item_type.sql` | `08a75cf0ade1ae10f21f76038df6a8407746bf1db76e1c8b02ebeb3d0c637a04` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -103,7 +129,8 @@ dieser Liste.
 
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
-oben, nicht mehr hier. Auf Production fehlen sie alle, wie `0134`.
+oben, nicht mehr hier. **Auf Production ist seit dem 2026-10-21 `0135`
+angewendet** (Abschnitt „Production"); `0136`–`0141` fehlen dort, wie `0134`.
 
 | Migration | Stand |
 |---|---|
@@ -138,7 +165,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133` | `0134` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135` | `0134`, `0136`–`0141` |
 
 **`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
 keine Abschätzung, sondern an den berührten Objekten ablesbar:
