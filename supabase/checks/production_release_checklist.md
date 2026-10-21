@@ -53,6 +53,12 @@ supabase/checks/receipt_lock_check.sql
 
 ---
 
+> **Stand 2026-10-21.** Die Schritte 3 bis 6 sind gefahren: `0135`, `0136`
+> und `0137` liegen auf Production, `21353e4` ist deployt und live geprüft.
+> **Offen:** Schritt 2 (Backup-Nachweis) und Schritt 4a (die sichtbare
+> Nachkontrolle zu `0136`). Als nächstes kommt Schritt 7 (`0138`) — und der
+> braucht eine eigene Freigabe.
+
 ## Schritt 3 — `0135` · **schreibt**
 
 ```
@@ -156,11 +162,13 @@ Probelauf **P43** fährt die Datei nach.
 
 | ☐ | Was |
 |---|---|
-| ☐ | `git push` — alle lokalen Commits auf `main` (Stand 2026-10-21: **27**; `git log --oneline origin/main..HEAD` zählt sie) |
-| ☐ | Vercel baut `main` → auf **grün** warten |
-| ☐ | `https://skyisles.app/` öffnen: Figurenkatalog lädt, Karten sichtbar |
-| ☐ | `https://skyisles.app/zubehoer`: **39 Artikel** (noch keine Portale — richtig) |
-| ☐ | `https://skyisles.app/shop`: Angebote wie vorher, Zustandszeile „Gebraucht · mindestens guter Zustand · voll funktionsfähig" |
+| ☑ | `git push` — am **2026-10-21** gefahren: `81386e6..21353e4`, **27 Commits**, 222 Dateien |
+| ☑ | Vercel baute `main` → **nach 64 Sekunden live** (Marker: `/zubehoer` von 404 auf 200) |
+| ☑ | `https://skyisles.app/` — HTTP 200, Katalog lädt, Nenner der Startserie **74** |
+| ☑ | `https://skyisles.app/zubehoer` — HTTP 200, **39 Artikel**, keine Portale |
+| ☑ | `https://skyisles.app/shop` — HTTP 200, **235 Artikel im Angebot**, Zustandszeile steht |
+| ☑ | Detailseiten: `/zubehoer/game-nintendo-3ds-spyros-adventure` (USK, Lieferumfang, „Aktuell kein Angebot") und `/skylanders/blue-bash` (Marktwert, „Zur Sammlung", „Anmelden") je HTTP 200 |
+| ☑ | kein Fehlermarker in einer der sechs Seiten, `/login` eingeschlossen |
 
 **Schlägt der Build fehl oder zeigt die Seite einen Fehler:** Deployment in
 Vercel auf `81386e6` zurücksetzen („Promote to Production") und **nicht**

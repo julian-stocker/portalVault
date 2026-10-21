@@ -15,7 +15,7 @@ Die kurze Bedienanleitung für den Betreiber steht getrennt:
 |---|---|---|
 | **Staging** `qqxcpesbwfxzgytkdsac` | `0141` | **gemessen**: `shop_offers()` liefert 5 Spalten, `seller_sale_state()` antwortet `42501` (`npm run verify:seller:staging`) |
 | **Production** `zmiwxswrpkmizvqsgype` | `0133` | **gemessen**: `non_collectible_categories()` = `[Spiele]` (Fassung `0006`), `shop_offers()` 4 Spalten, `seller_sale_state()` = `PGRST202` (`verify:shop:prod`, `verify:seller:prod`) |
-| **Deployt** auf `skyisles.app` | `81386e6` | **gemessen** aus Git: `origin/main`, „feat: 0126-0131 on Production…"; 20 Commits liegen davor |
+| **Deployt** auf `skyisles.app` | **seit 2026-10-21: `21353e4`** | gepusht am 2026-10-21 (`81386e6..21353e4`, 27 Commits), Vercel-Build nach **64 Sekunden** live. Vorher `81386e6` — das ist weiterhin das **Rollback-Ziel** |
 
 > **Eine Tatsache fehlt noch, und sie ist Schritt 1 des Ablaufs:** ob
 > `skylanders.item_type` auf Production existiert. Indirekt stark belegt —
@@ -40,7 +40,14 @@ aus 0119").
 
 Drei Behauptungen tragen diesen Schnitt. Jede ist unten belegt.
 
-### 2a. Der DEPLOYTE Code (`81386e6`) verträgt `0135`, `0136` und `0137`
+### 2a. Der bis zum 2026-10-21 deployte Code (`81386e6`) verträgt `0135`, `0136` und `0137`
+
+> **Erledigt.** Die drei Migrationen liefen am 2026-10-21 unter diesem Code,
+> ohne Störung; danach wurde `21353e4` deployt. Der Abschnitt bleibt als
+> Begründung der Reihenfolge stehen — und `81386e6` bleibt das Rollback-Ziel.
+> `src/lib/shop/production-compatibility.test.ts` prüft ihn seitdem gegen den
+> **festen** Commit, nicht mehr gegen `origin/main`: sonst wäre die Aussage
+> mit dem Push zur Tautologie geworden.
 
 **Belegt am deployten Quelltext**, gelesen mit `git show origin/main:…`:
 

@@ -139,9 +139,28 @@ HTTP 200 und ohne eine einzige Fehler- oder Warnzeile im Serverprotokoll.
 Damit ist auch die Nachsicht gegen die fehlende Spalte `usk_rating` (`42703`)
 im Lauf belegt, nicht nur im Test.
 
-**Auf Production fehlen weiterhin `0134` und `0138`–`0141`.** `0138` gehört
-hinter das Deployment. Der Backup-Nachweis aus Stufe 1 ist **nicht** geführt,
-und die sichtbare Nachkontrolle zu `0136` wurde nicht gefahren.
+**Die Nachkontrolle zu `0137` ist gefahren und bestanden** (`9999 = 0`,
+`supabase/operations/prod-s-postflight-0137.sql`). Der **Abdruck der
+Production-Angebotsliste** lautet seitdem
+`9b8341058bbfa0f7809eddc300ab0e9e` bei 287 Angeboten — das ist der Bezugswert
+für `0139`.
+
+**Deployt am 2026-10-21: `21353e4`.** `git push origin main` fuhr
+`81386e6..21353e4` — 27 Commits, 222 Dateien —, der Vercel-Build war nach
+**64 Sekunden** live (Marker: `/zubehoer` wechselte von 404 auf 200). Live
+geprüft, lesend, ohne einen einzigen Fehlermarker: `/` (HTTP 200, Nenner der
+Startserie 74) · `/zubehoer` (**39 Artikel**, keine Portale) · `/shop`
+(**235 Artikel im Angebot**, Zustandszeile „Gebraucht · mindestens guter
+Zustand · voll funktionsfähig") · `/zubehoer/game-nintendo-3ds-spyros-adventure`
+(Nintendo 3DS, USK, Lieferumfang, „Aktuell kein Angebot") ·
+`/skylanders/blue-bash` (Marktwert, „Zur Sammlung", „Anmelden") · `/login`.
+Nach dem Deployment nochmals gemessen: 287 Angebote, 306 Lagerpositionen,
+alle Riegel dicht, Datenbank unberührt. **Rollback-Ziel bleibt `81386e6`.**
+
+**Auf Production fehlen weiterhin `0134` und `0138`–`0141`.** `0138` ist
+seit dem Deployment nicht mehr blockiert, aber **nicht freigegeben** — sie
+braucht eine eigene Freigabe. Der Backup-Nachweis aus Stufe 1 ist **nicht**
+geführt, und die sichtbare Nachkontrolle zu `0136` wurde nicht gefahren.
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

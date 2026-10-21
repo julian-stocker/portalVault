@@ -18,9 +18,26 @@ import { describe, expect, it } from "vitest";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-/** Eine Datei, wie sie auf `origin/main` steht — also wie sie deployt ist. */
+/**
+ * Der Stand, der bis zum 2026-10-21 auf `skyisles.app` lief.
+ *
+ * WARUM HIER EINE FESTE PRUEFSUMME STEHT UND NICHT `origin/main`.
+ *
+ * Bis zum Deployment war `origin/main` genau dieser Code, und die Abfrage
+ * war dieselbe. Seit dem Push vom 2026-10-21 ist `origin/main` der NEUE
+ * Code — die Aussage dieses Abschnitts waere damit still zur Tautologie
+ * geworden („der neue Code ist der neue Code"), und die drei Zeilen hier
+ * haetten genau das Gegenteil von dem gemeldet, was sie behaupten.
+ *
+ * Die Aussage ist historisch und bleibt pruefbar: `81386e6` ist der Stand,
+ * gegen den die Reihenfolge `0135`-`0137` VOR dem Deployment begruendet
+ * wurde, und `81386e6` ist das Ziel, auf das ein Rollback zuruecksetzt.
+ * Deshalb steht der Commit jetzt als Literal da.
+ */
+const VORIGES_DEPLOYMENT = "81386e6";
+
 function deployt(pfad: string): string {
-  return execFileSync("git", ["show", `origin/main:${pfad}`], { encoding: "utf8" });
+  return execFileSync("git", ["show", `${VORIGES_DEPLOYMENT}:${pfad}`], { encoding: "utf8" });
 }
 
 const read = (p: string) => readFileSync(p, "utf8");
@@ -28,7 +45,7 @@ const code = (p: string) =>
   read(p).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*(?:\/\/|\*).*$/gm, "");
 
 /* ===================================================================== */
-describe("1. der DEPLOYTE Code verträgt 0135 bis 0137", () => {
+describe("1. der bis zum 2026-10-21 deployte Code (81386e6) verträgt 0135 bis 0137", () => {
   it("er liest `item_type` nicht — 0135 ist für ihn unsichtbar", () => {
     /*
      * DER ENTSCHEIDENDE PUNKT DER REIHENFOLGE, von der anderen Seite. Der

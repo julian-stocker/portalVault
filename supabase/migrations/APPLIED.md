@@ -84,6 +84,16 @@ hätte alles zurückgerollt. Für den sichtbaren Nachweis gibt es seitdem zwei
 rein lesende Dateien, `supabase/operations/prod-s-postflight-0136.sql` und
 `-0137.sql` (Probeläufe **P42**/**P43**).
 
+**Zu `0137` ist die Nachkontrolle gefahren und bestanden (2026-10-21):**
+`9999 = 0`, 287 Angebote, Abdruck der Angebotsliste
+`9b8341058bbfa0f7809eddc300ab0e9e` — der Bezugswert für `0139`.
+
+**Danach wurde der neue Code deployt:** `git push origin main` am 2026-10-21,
+`81386e6..21353e4`, 27 Commits; Vercel-Build nach 64 Sekunden live. Die sechs
+öffentlichen Seiten antworten mit HTTP 200 und ohne Fehlermarker, die
+Datenbank ist dabei unberührt geblieben (nachgemessen: 287 Angebote, 306
+Lagerpositionen). Rollback-Ziel bleibt `81386e6`.
+
 **Zu `0136` liegt der sichtbare Nachweis noch nicht vor** — die Nachkontrolle
 wurde bisher nicht gefahren. Belegt ist `0136` damit nur durch die
 Nachbedingungen der Migration selbst. Die Datei ist jederzeit nachholbar.
@@ -165,8 +175,11 @@ dieser Liste.
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
 oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`,
 `0136` und `0137` angewendet** (Abschnitt „Production"); `0138`–`0141` fehlen
-dort, wie `0134`. **`0138` gehört ausdrücklich hinter das Deployment** —
-sonst wandern 21 Portale in den Fortschrittsnenner.
+dort, wie `0134`. **`0138` gehörte ausdrücklich hinter das Deployment** —
+sonst wären 21 Portale in den Fortschrittsnenner gewandert. **Das Deployment
+ist am 2026-10-21 erfolgt** (`21353e4`, siehe Abschnitt „Production"); die
+Sperre gegen `0138` ist damit aufgehoben, eine Freigabe dafür liegt aber
+nicht vor.
 
 | Migration | Stand |
 |---|---|
