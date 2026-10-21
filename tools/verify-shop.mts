@@ -378,6 +378,55 @@ async function main(): Promise<void> {
         const kategorie = (z: Zeile) =>
           Array.isArray(z.categories) ? z.categories[0]?.name : z.categories?.name;
 
+        /*
+         * DIE ABLEITUNGSREGEL AUS `0137`, VON AUSSEN GEGENGERECHNET.
+         *
+         * `catalog_item_type_for_category()` ist eine Positivliste: fuenf
+         * Namen, und alles andere bleibt `figure`. Ein Trigger haelt das
+         * fuer jede neue Zeile. Hier wird jede oeffentliche Zeile gegen
+         * dieselbe Tabelle gestellt — nicht gegen ihren NAMEN (ADR-0034),
+         * sondern gegen ihre Kategorie.
+         */
+        const ABLEITUNG: Record<string, string> = {
+          Spiele: "game", Portale: "portal", Bundles: "bundle",
+          Taschen: "other", "Zubehör": "other",
+        };
+        const erwartet = (z: Zeile) => ABLEITUNG[kategorie(z) ?? ""] ?? "figure";
+        const falschGetypt = zeilen.filter((z) => z.item_type !== erwartet(z));
+        check(
+          "every public row carries the item type its category derives",
+          falschGetypt.length === 0,
+          falschGetypt.length === 0
+            ? `${zeilen.length} rows agree with catalog_item_type_for_category`
+            : falschGetypt.slice(0, 5)
+                .map((z) => `${z.sky_id}: ${kategorie(z)}→${erwartet(z)}, is ${z.item_type}`)
+                .join(" · "),
+        );
+
+        /*
+         * WELCHES ZUBEHOER IST OEFFENTLICH? EINE MESSUNG, KEINE ERWARTUNG.
+         *
+         * `0138` legt die 21 Portale mit `catalog_visible = false` an — auf
+         * Production bleiben sie damit unsichtbar. Auf STAGING sind sie
+         * ausdruecklich freigegeben worden (`staging-portal-release.sql`,
+         * Phase C), und dort ist das richtig.
+         *
+         * Eine harte Erwartung waere deshalb in genau einer der beiden
+         * Umgebungen ein Fehlalarm — dieselbe Falle, in die dieses Projekt
+         * mit umgebungsblinden Sollwerten schon zweimal gelaufen ist. Die
+         * Zeile MISST also und bewertet nicht. Dass die 21 auf Production
+         * unsichtbar bleiben, prueft `0138_postflight.sql` Zeile 109 im
+         * SQL-Editor, wo auch die ausgeblendeten Zeilen sichtbar sind.
+         */
+        const ZUBEHOER = ["Spiele", "Portale", "Bundles", "Taschen", "Zubehör"];
+        const jeZubehoer = new Map<string, number>();
+        for (const z of zeilen) {
+          const k = kategorie(z) ?? "";
+          if (ZUBEHOER.includes(k)) jeZubehoer.set(k, (jeZubehoer.get(k) ?? 0) + 1);
+        }
+        console.log("      publicly visible accessories  "
+          + ([...jeZubehoer].sort().map(([k, n]) => `${k}=${n}`).join(", ") || "(none)"));
+
         const spiele = zeilen.filter((z) => kategorie(z) === "Spiele");
         const alsGame = zeilen.filter((z) => z.item_type === "game");
         const gameAusserhalb = alsGame.filter((z) => kategorie(z) !== "Spiele");

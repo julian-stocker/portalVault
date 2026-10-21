@@ -176,23 +176,85 @@ mit Schritt 7 weitermachen. Der Datenbankstand ist dann haltbar.
 
 ---
 
-## Schritt 7 — `0138`, die 21 Portale · **schreibt**
+## Schritt 7 — `0138`, die 21 Portale · **drei Dateien, in dieser Folge**
 
-**Nur wenn Schritt 6 grün ist.**
+**Nur wenn Schritt 6 grün ist** — er ist es seit dem 2026-10-21.
+
+`0138` ist die **erste** Migration dieses Releases, die Zeilen anlegt.
+Deshalb gehört hier ein Vorher dazu: „nichts anderes hat sich bewegt" ist
+ein Vergleich, und ein Vergleich braucht zwei Messungen.
+
+### 7a — das Vorher · **rein lesend**
+
+```
+supabase/operations/prod-s-preflight-0138.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Die Vorbedingungen (101–104, 201–205,
+301, 302, 304) müssen grün sein; besonders **301** („der ZB-Bereich
+SKY-0615..SKY-0642 ist frei", muss `true`) und **104** (der CHECK
+`catalog_admin_changes_field_known` kennt `created`). Die Abdrücke
+**401–409, 501–503** tragen keinen Sollwert — **bitte das ganze Ergebnis
+aufbewahren**, Schritt 7c vergleicht dagegen.
+
+Vorhergesagt für Production (lesend gemessen am 2026-10-21): 402 = **531**,
+403 = **287**, 404 = **9b8341058bbfa0f7809eddc300ab0e9e**, 405 = **531**,
+406 = **G=81,I=77,SA=74,SC=69,SF=89,T=141**. 401 und 407 zählen auch die
+redaktionell ausgeblendeten Zeilen und liegen deshalb über 570 bzw. über
+`figure=531,game=39`.
+
+### 7b — `0138` · **schreibt**
 
 ```
 supabase/operations/prod-0138.sql
 ```
 
-**Erwartung:** das Abschlussraster von `0138`. **Katalogzeilen + 21**,
-**Kategorien + 6**, alles andere gleich — insbesondere **sammelbare Zeilen
-unverändert** und **Angebote unverändert**.
+**Erwartung:** die `NOTICE`-Zeilen von `0138` und `commit`. Der SQL-Editor
+zeigt sie nicht an — „Success" heißt hier: die Migration hat ihre acht
+eigenen Abdrücke in derselben Transaktion verglichen und keine Abweichung
+gefunden. Jede Abweichung hätte **alles** zurückgerollt, die 21 Zeilen
+eingeschlossen.
+
+### 7c — das Nachher · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0138.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Dann die elf Vergleichszeilen gegen 7a:
+
+| Zeile | gegen | muss |
+|---|---|---|
+| 501 | Preflight 401 | **+ 21** |
+| 507 | Preflight 407 | **+ `portal=21`** |
+| 502 | Preflight 402 | gleich (531) |
+| 503 | Preflight 403 | gleich (287) |
+| 504 | Preflight 404 | gleich (`9b834105…`) |
+| 505 | Preflight 405 | gleich (531) |
+| 506 | Preflight 406 | gleich (`G=81,…`) |
+| 508 | Preflight 408 | gleich |
+| 509 | Preflight 409 | gleich — `0138` zieht keine SKY-ID |
+| 510 | Preflight 501 | gleich |
+| 511 | Preflight 503 | gleich |
+
+Weicht eine **gleich**-Zeile ab, ist Stopp-Kriterium **S5** erfüllt.
+
+### 7d — und am laufenden System
 
 | ☐ | Danach prüfen |
 |---|---|
-| ☐ | `skyisles.app/zubehoer`: **60 Artikel** |
-| ☐ | `skyisles.app/`: Figurenkarten **unverändert**, keine Portalkachel |
-| ☐ | Sammlung: Fortschrittszahl **unverändert** |
+| ☐ | `skyisles.app/zubehoer`: weiter **39 Artikel** — **nicht 60**. Die 21 Portale entstehen mit `catalog_visible = false`; öffentlich sichtbar werden sie erst durch eine eigene redaktionelle Freigabe. Auf Staging sind sie freigegeben, deshalb stehen dort 60 |
+| ☐ | `skyisles.app/`: Figurenkarten unverändert, keine Portalkachel |
+| ☐ | Sammlung: Fortschrittszahl **unverändert** (Nenner 531) |
+| ☐ | `npm run verify:shop:prod`: `publicly visible accessories  Spiele=39`, 287 Angebote, Ableitungsregel grün |
+| ☐ | `/admin` → Katalog: die 21 Portale stehen da, als ausgeblendet gekennzeichnet |
+
+**Rücknahme, wenn nötig:** `supabase/rollback/R0138_drop_portals.sql` —
+erst diese, dann `R0137`. Sie bricht ab, falls ein Portal inzwischen an
+einem Einkauf, Bestand, einer Bewegung, Sammlung, einem Warenkorb oder
+einer Zuordnung hängt; dann ist die Rücknahme nicht mehr das richtige
+Mittel. Probelauf **P27** fährt die Reihenfolge nach, **P44** den ganzen
+Schritt 7 am Stück.
 
 ## Schritt 8 — `0139`, das Verkaufstor · **schreibt**
 

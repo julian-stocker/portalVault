@@ -538,6 +538,10 @@ describe("die zwei lesenden Staging-Laeufe", () => {
 const PROD_LESELAEUFE = [
   ["supabase/operations/prod-s-postflight-0136.sql", "0136_postflight.sql"],
   ["supabase/operations/prod-s-postflight-0137.sql", "0137_postflight.sql"],
+  /* `0138` legt ZEILEN an — hier gehört auch das Vorher dazu, sonst gibt es
+     nichts zu vergleichen. */
+  ["supabase/operations/prod-s-preflight-0138.sql", "0138_preflight.sql"],
+  ["supabase/operations/prod-s-postflight-0138.sql", "0138_postflight.sql"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -606,18 +610,29 @@ describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefda
     }
   });
 
+  /*
+   * GEGEN DEN FLIESSTEXT, NICHT GEGEN DEN ZEILENUMBRUCH.
+   *
+   * Die Kopfkommentare sind auf 76 Zeichen gebrochen, und ein Satz kann
+   * mitten im Begriff umbrechen. Eine Suche im Rohtext fand deshalb
+   * „zeigt `NOTICE`-Meldungen nicht" in einer Datei und in der nächsten
+   * nicht — ein Befund über die Formatierung, nicht über den Inhalt.
+   */
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
   it("sagt, warum Success ohne NOTICE kein Befund ist", () => {
     /* Die Frage des Bedieners vom 2026-10-21 gehört in die Datei, nicht nur
        in den Chatverlauf. */
-    expect(text).toContain("zeigt `NOTICE`-Meldungen nicht");
+    expect(fliesstext).toContain("zeigt `NOTICE`-Meldungen nicht");
   });
 
   it("nennt die Production-Erwartung der unbewerteten Zeilen", () => {
     /* „Messung ohne Sollwert" darf nicht heißen „niemand weiß, was
-       rauskommen soll". */
-    expect(text).toContain("287");
-    expect(text).toContain("531");
-    expect(text).toMatch(/NOTIEREN|nicht vorhersagbar/);
+       rauskommen soll": die vorhersagbaren Werte stehen im Kopf, und die
+       Datei sagt, welche Zeilen ohne Sollwert bleiben. */
+    expect(fliesstext).toContain("287");
+    expect(fliesstext).toContain("531");
+    expect(fliesstext).toMatch(/Messungen? ohne Sollwert|NOTIEREN|nicht vorhersagbar/);
   });
 });
 
@@ -638,6 +653,50 @@ describe("der lesende Production-Lauf zu 0136 — seine eigenen vier Zahlen", ()
     }
     expect(text).toContain("f6d08440707ba72a8040a8d1e666c092");
     expect(text).toContain("353");
+  });
+});
+
+describe("die zwei lesenden Production-Läufe zu 0138 — Vorher und Nachher", () => {
+  const vorher = readFileSync("supabase/operations/prod-s-preflight-0138.sql", "utf8");
+  const nachher = readFileSync("supabase/operations/prod-s-postflight-0138.sql", "utf8");
+
+  it("der Preflight sagt, warum er nicht optional ist", () => {
+    /*
+     * `0138` ist die erste Migration dieses Releases, die Zeilen anlegt.
+     * „Nichts anderes hat sich bewegt" ist ein VERGLEICH — ohne Vorher ist
+     * der Postflight nur eine Messung.
+     */
+    expect(vorher).toContain("ein VERGLEICH, und ein Vergleich braucht ein");
+    expect(vorher).toContain("401-409");
+  });
+
+  it("beide nennen dieselben Bezugswerte, und der Postflight die eine Änderung", () => {
+    for (const text of [vorher, nachher]) {
+      expect(text).toContain("9b8341058bbfa0f7809eddc300ab0e9e");
+      expect(text).toContain("G=81,I=77,SA=74,SC=69,SF=89,T=141");
+      expect(text).toContain("531");
+      expect(text).toContain("287");
+    }
+    /* Genau eine Veränderung ist erwartet, und sie steht da: + 21. */
+    expect(nachher).toContain("**+ 21**");
+    expect(nachher).toContain("**+ `portal=21`**");
+  });
+
+  it("der Postflight nennt beide Riegel getrennt", () => {
+    /*
+     * Ein Portal ist nicht sammelbar, weil seine KATEGORIE in der Liste
+     * steht, UND weil sein ARTIKELTYP nicht `figure` ist. Keiner der beiden
+     * hängt am anderen — also werden beide gefragt.
+     */
+    expect(nachher).toContain("RIEGEL 1");
+    expect(nachher).toContain("RIEGEL 2");
+  });
+
+  it("und er sagt, was eine Abweichung in den GLEICH-Zeilen bedeutet", () => {
+    /* Nicht „dann ist 0138 schuld": die Migration hätte abgebrochen. Dann
+       hat sich zwischen den Läufen etwas anderes bewegt. */
+    expect(nachher).toContain("S5");
+    expect(nachher).toContain("zwischen den beiden Laeufen etwas anderes bewegt");
   });
 });
 

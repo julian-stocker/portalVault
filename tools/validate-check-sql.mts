@@ -2685,6 +2685,116 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P44 — DER GANZE SCHRITT 7: VORHER, 0138, NACHHER.
+   *
+   * Die drei Dateien, die der Bediener auf Production hintereinander fahren
+   * soll, einmal wirklich hintereinander gefahren — und zwar auf dem Stand,
+   * den Production heute hat (`0135`, `0136`, `0137`).
+   *
+   * Was dieser Durchgang prueft, prueft keiner der anderen:
+   *
+   *   1. Der Preflight laeuft VOR `0138` — er darf nichts lesen, was erst
+   *      `0138` anlegt (die Lehre vom 2026-10-20, siehe P40).
+   *   2. `0138` laeuft auf diesem Stand ueberhaupt durch.
+   *   3. Der Postflight ist danach gruen, ZEILE FUER ZEILE.
+   *   4. Und die eine erwartete Aenderung ist wirklich die eine: 21
+   *      Katalogzeilen mehr, `portal=21` neu — und Angebote, Abdruck,
+   *      sammelbare Zeilen, Nenner je Serie, Overrides und `sky_id_seq`
+   *      Zeichen fuer Zeichen gleich.
+   *
+   * Punkt 4 ist die Zusicherung, auf die es dem Bediener ankommt, und sie
+   * wird hier nicht behauptet, sondern gerechnet: die Abdruckzeilen des
+   * Preflights werden mit den gleichnamigen Zeilen des Postflights
+   * verglichen, so wie er es auf Production von Hand tun wird.
+   */
+  {
+    const VORHER = "supabase/operations/prod-s-preflight-0138.sql";
+    const NACHHER = "supabase/operations/prod-s-postflight-0138.sql";
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    type Blatt = { rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const lies = async (db: InstanceType<typeof PGlite>, pfad: string): Promise<Blatt> => {
+      await db.exec("select set_config('skyisles.z0', 'keine', false);");
+      return await db.query(readFileSync(pfad, "utf8")) as Blatt;
+    };
+    const feld = (b: Blatt, nr: number): string =>
+      b.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const rot = (b: Blatt): string =>
+      b.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+
+    /* Der Stand von Production: 0135, 0136, 0137 — und die sechs Serien,
+       die `0138` braucht (das Stub-Schema traegt keine). */
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P44 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    await db.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db.exec(FUELLEN);
+
+    /* 1. VORHER — die ganze Datei, mit Riegel und Klammer. */
+    const vorherLauf = await fahre(db, VORHER, { klammer: false });
+    const vorher = await lies(db, "supabase/checks/0138_preflight.sql");
+
+    /* 2. Und auf Staging muss dieselbe Datei abbrechen. */
+    const dbS = await frischNach0136();
+    const f137s = await fahre(dbS, M137);
+    if (f137s !== null) throw new Error(`P44 Aufbau: 0137 scheiterte — ${f137s}`);
+    const aufStaging = await fahre(dbS, VORHER, { klammer: false });
+
+    /* 3. 0138 selbst. */
+    const lauf = await fahre(db, M138);
+
+    /* 4. NACHHER. */
+    const nachherLauf = await fahre(db, NACHHER, { klammer: false });
+    const nachher = await lies(db, "supabase/checks/0138_postflight.sql");
+
+    /* 5. Der Vergleich, den der Bediener von Hand macht. */
+    const zeilenMehr = Number(feld(nachher, 501)) - Number(feld(vorher, 401));
+    const gleich = ([
+      [502, 402], [503, 403], [504, 404], [505, 405], [506, 406], [508, 408], [509, 409],
+      [510, 501], [511, 503],
+    ] as const).filter(([n, v]) => feld(nachher, n) !== feld(vorher, v))
+      .map(([n, v]) => `${n}≠${v}`).join(", ");
+    const typen = feld(nachher, 507);
+
+    /*
+     * EINE ZEILE DARF HIER ROT SEIN, UND ZWAR GENAU EINE.
+     *
+     * Preflight 104 fragt, ob der CHECK `catalog_admin_changes_field_known`
+     * den Wert `created` kennt. Das STUB-SCHEMA traegt ueberhaupt keinen
+     * CHECK (0 Stueck, nachgezaehlt) — die Zeile kann hier also nicht gruen
+     * werden. Das ist eine Grenze der Wegwerf-Instanz und kein Befund.
+     *
+     * Sie wird deshalb NAMENTLICH zugelassen und nicht weggelassen: jede
+     * ANDERE rote Zeile laesst diesen Durchgang weiter scheitern. Auf
+     * Production muss 104 `true` zeigen — `0004`/`0033` liegen dort seit
+     * Langem, und der Release-Plan nennt die Zeile als Vorbedingung.
+     */
+    const STUB_ARTEFAKT = "104, 9999";
+
+    probe.push({
+      name: "P44 Schritt 7 am Stueck: Preflight, 0138, Postflight — und nur die 21 Zeilen aendern sich",
+      ok: vorherLauf === null && nachherLauf === null && lauf === null
+        && aufStaging !== null && aufStaging.includes("ABBRUCH A1")
+        && rot(vorher) === STUB_ARTEFAKT && rot(nachher) === ""
+        && zeilenMehr === 21 && gleich === ""
+        && typen.includes("portal=21"),
+      sagt: `Vorher: ${vorherLauf ?? "durch"} (rot: ${rot(vorher) || "keine"}`
+        + `${rot(vorher) === STUB_ARTEFAKT ? " — nur das Stub-Artefakt 104" : ""})`
+        + ` · auf Staging: ${aufStaging === null ? "DURCHGELAUFEN — Befund" : "A1"}`
+        + ` · 0138: ${lauf ?? "durch"}`
+        + ` · Nachher: ${nachherLauf ?? "durch"} (rot: ${rot(nachher) || "keine"})`
+        + ` · Katalogzeilen +${zeilenMehr} · Typen ${typen}`
+        + ` · GLEICH-Zeilen: ${gleich === "" ? "alle gleich" : gleich}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

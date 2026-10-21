@@ -165,6 +165,30 @@ keinen Fall, in dem 3c die Antwort auf diesen Release ist.
 
 ### 3d. Was vor dem Release vorliegen muss, und wie es nachgewiesen wird
 
+> **BERICHTIGUNG vom 2026-10-21 — Punkt 1 und 2 sind auf Production nicht
+> erreichbar.** Production läuft auf **Supabase Free: keine nativen Backups,
+> kein PITR** (`PROJECT_STATUS.md`, Stand 2026-10-01 und Abschnitt zur
+> Plattformsicherung). Die Tabelle unten verlangt damit zwei Nachweise, die
+> es in diesem Tarif nicht gibt. Das ist beim Schreiben dieses Plans
+> übersehen worden.
+>
+> **Was an ihre Stelle tritt — und was nicht:**
+>
+> | statt | tritt | und was es nicht kann |
+> |---|---|---|
+> | Automatikbackup | **Plattformsicherung** `/admin/datensicherung` (53 Bereiche, Konten-Inventar, Storage) — auf Production angewendet, Historie in `platform_export_runs`, nur `received` zählt (`backup_evidence_check.sql`) | kein Schema, keine Funktionen, keine Policies, keine Sequenzstände, keine Passwörter |
+> | PITR | **die Rücknahmedatei der jeweiligen Migration** — für `0138` ist das `R0138_drop_portals.sql`, die genau die 21 Zeilen und die danach leeren Kategorien entfernt und abbricht, falls etwas daran hängt | keinen Punkt-in-der-Zeit-Rücksprung; wer die Zeilen behalten UND den alten Stand will, hat beides nicht |
+>
+> **Für `0138` ist damit kein neuer Nachweis nötig.** Die Begründung steht
+> in einem Satz: der Inhalt der 21 Zeilen steht zeichengleich in der
+> Migrationsdatei selbst, die Rücknahme ist präzise und geprüft (**P27**,
+> **P44**), und `0138` fasst keine Geschäftszeile an. Ein Backup ist das
+> Netz für verlorene Daten — hier gibt es keine, die verloren gehen könnten.
+> Offen bleibt der **schemaseitige** Nachweis (`pg_dump`,
+> `backup_architecture_two_tier.md`, Punkt 9); der ist älter als dieser
+> Release und gehört nicht in seine Entscheidung.
+
+
 | # | Was | Wie der Nachweis aussieht |
 |---|---|---|
 | 1 | **Supabase-Automatikbackup** steht und ist jung | Supabase-Dashboard → Database → Backups: Datum und Uhrzeit des letzten Backups ins Protokoll. **Älter als 24 h: stopp** |

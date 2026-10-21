@@ -48,9 +48,16 @@
 --
 -- ########################################################################
 -- ##  REIHENFOLGE: DIESE DATEI ERST NACH DEM VERCEL-DEPLOYMENT.          ##
--- ##  Der heute deployte Code (81386e6) kennt nur `Spiele` als nicht     ##
--- ##  sammelbar und wuerde 21 Portale als Figuren in Katalog und         ##
--- ##  Fortschrittsnenner zeigen. Siehe den Release-Plan, Schritt 5.      ##
+-- ##  Der bis zum 2026-10-21 deployte Code (81386e6) kannte nur          ##
+-- ##  `Spiele` als nicht sammelbar und haette 21 Portale als Figuren in  ##
+-- ##  Katalog und Fortschrittsnenner gezeigt.                            ##
+-- ##                                                                     ##
+-- ##  DIESE BEDINGUNG IST ERFUELLT: am 2026-10-21 ist `21353e4` deployt  ##
+-- ##  und live geprueft (PROJECT_STATUS.md). Dessen                       ##
+-- ##  NON_COLLECTIBLE_CATEGORIES nennt alle fuenf Kategorien, und         ##
+-- ##  `verify:shop:prod` hat die Uebereinstimmung mit der Datenbank       ##
+-- ##  gemessen. Die Sperre gegen diese Datei ist damit aufgehoben — eine  ##
+-- ##  FREIGABE ist sie nicht.                                            ##
 -- ########################################################################
 --
 -- ERWARTETES ERGEBNIS: die `NOTICE`-Zeilen der Migration, und `commit`.
