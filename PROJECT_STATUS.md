@@ -196,16 +196,54 @@ kaufbar, wenn jemand sie einzeln freigibt — und das kann die Oberfläche noch
 nicht anbieten, weil die Steuerungen `seller_sale_state()` aus `0141`
 brauchen.
 
-**Auf Production fehlen weiterhin `0134`, `0140` und `0141`.** Der
-Backup-Nachweis aus Stufe 1 ist **nicht** geführt — für `0140` ist er auch
-nicht das Netz: sie schreibt einen Funktionsrumpf, keine Tabellenzeile, und
-`R0140_back_to_0136.sql` nimmt ihn zurück. **Offener Punkt mit `0140`
-verbunden:** zwischen `0139` und `0140` beschreibt `src/lib/backup/manifest.ts`
-drei Felder, die `seller_business_backup()` auf Production noch nicht
-liefert. Die Anwendung stört das nicht (die Sicherungsseite lädt und zählt
-Bereiche, sie prüft keine Felder), aber `npm run verify:backup` auf eine
-**heute** gezogene Datei würde die drei als fehlend melden. `0140` schließt
-genau diese Lücke.
+**Am 2026-10-21 lief auch `0140`** — die Betriebssicherung kennt jetzt
+Freigabe, Lieferumfang und USK. **Postflight `9999 = 0`:**
+`seller_business_backup()` trägt den Abdruck
+`a32b148cebe00ee0d0d469f96fd2028e`, **28** Bereiche, **356** Feldzeilen; 287
+Angebote und Abdruck `9b8341058bbfa0f7809eddc300ab0e9e` unverändert, 531
+sammelbar, 306 Lagerpositionen, 624 Katalogzeilen, **0**
+Zubehör-Verkaufsfreigaben, Lagerabdruck
+`01e50b9d727a0486ff1ea0eb6ba2dd56`, Belegsperre unverändert. Damit stimmen
+`src/lib/backup/manifest.ts` und der Funktionsrumpf wieder überein.
+
+**Auf Production fehlt nur noch `0141`** (und `0134`, die nicht zum Release
+gehört).
+
+### Noch nicht nachgewiesen: eine echte Sicherung MIT den neuen Feldern
+
+**Kein Export mit `item_type`, `usk_rating`, `sale_released` oder
+`delivery_scope` ist bisher geprüft.** Der letzte belegte Lauf von
+`npm run verify:backup` gegen eine Production-Datei ist vom **2026-10-17**
+(`docs/history/2026-10-17-production-0126-0131.md`): 28 von 28 Bereichen
+strukturell grün, kein fehlendes und kein unbekanntes Feld — aber das war
+vier Migrationen vor `0140`. Dass die Sicherung die drei neuen Felder
+**liefert**, ist damit noch nicht gezeigt; `0140` zeigt nur, dass ihre
+Definition sie nennt.
+
+**Der kürzeste Weg (rein lesend, nichts wird geschrieben):**
+`/business/datensicherung` öffnen, Sicherung herunterladen, dann
+`npm run verify:backup -- --file ~/Downloads/skyisles-business-backup-….json`.
+Die Baseline wählt das Werkzeug aus `source_project` der Datei selbst.
+**Erwartet:** 28 Bereiche, kein fehlendes und kein unbekanntes Feld, die
+drei neuen Felder im Plan — und **Abweichungen in den Zeilenzahlen**
+(`purchases`, `purchase_items`, Gesamtsumme), weil die
+`PRODUCTION_BASELINE` die Bestände vom 2026-10-17 festhält und der Betrieb
+seitdem weiterläuft. Das ist kein Mangel der Datei; struktureller Teil grün
+ist das Kriterium. Die Datei darf **nicht** ins Repository — sie trägt
+Käufernamen und Einkaufskosten, und das Werkzeug bricht ab, wenn der Pfad
+im Arbeitsverzeichnis liegt.
+
+**Und ein getrennter, älterer Befund:** die **Plattformsicherung**
+(`/admin/datensicherung`, `system_platform_export()` aus `0105`) führt
+**keines** der vier neuen Felder — `platform-manifest.ts` nennt im
+Katalogbereich weder `item_type` (seit `0135`) noch `usk_rating`, und im
+Bereich `shop_inventory` weder `sale_released` noch `delivery_scope`.
+`platform-manifest.test.ts` prüft nur, dass jede **Tabelle** entschieden
+ist, nicht jede Spalte — deshalb ist das nie aufgefallen. Für einen
+Wiederaufbau nach Totalverlust fehlten diese vier Angaben. **Kein Blocker
+für `0141`**, aber ein offener Punkt, der eine eigene Entscheidung braucht
+(Spalten aufnehmen heißt: `system_platform_export()` ändern, also eine neue
+Migration).
 
 **Drei Fehlschläge, die etwas gelehrt haben.** `0127` brach beim ersten Versuch
 ab, weil die Nachbedingung den ganzen `proargtypes`-Vektor (nullbasiert) gegen

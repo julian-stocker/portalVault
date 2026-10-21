@@ -557,6 +557,8 @@ const PROD_LESELAEUFE_PRODUKTIONSMODUS = [
   ["supabase/operations/prod-s-postflight-0139.sql", "0139_postflight.sql"],
   ["supabase/operations/prod-s-preflight-0140.sql", "0140_preflight.sql"],
   ["supabase/operations/prod-s-postflight-0140.sql", "0140_postflight.sql"],
+  ["supabase/operations/prod-s-preflight-0141.sql", "0141_preflight.sql"],
+  ["supabase/operations/prod-s-postflight-0141.sql", "0141_postflight.sql"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {

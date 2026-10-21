@@ -3018,6 +3018,109 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P47 — SCHRITT 10 AM STUECK: VORHER, 0141, NACHHER.
+   *
+   * Der letzte Schritt des Releases, und der erste, dessen Pruefdateien
+   * ABDRUECKE VON NACHBARFUNKTIONEN verlangen: `admin_shop_inventory`
+   * (Stand `0041`), `admin_shop_listing_audit` (Stand `0139`) und die
+   * Betriebssicherung (Stand `0140`). Das ist die Pruefung der Aussage
+   * „`0141` ist rein additiv" — und sie ist nur so gut wie die drei
+   * Konstanten. Die sind gerechnet; dieser Durchgang faehrt sie an echtem
+   * PostgreSQL nach.
+   *
+   * Vier Faelle: Preflight VOR `0141` (die Funktion fehlt noch), `0141`
+   * laeuft, Postflight danach vollstaendig gruen, und ein ZWEITER Lauf von
+   * `0141` prallt ab.
+   */
+  {
+    const VORHER = "supabase/operations/prod-s-preflight-0141.sql";
+    const NACHHER = "supabase/operations/prod-s-postflight-0141.sql";
+    const FUELLEN = `
+      insert into public.skylanders
+             (sky_id, name, slug, series_code, category_id, is_active, catalog_visible,
+              market_price, card_type, source, display_name_override)
+      select 'FILL-' || g::text, 'Fill ' || g::text, 'fill-' || g::text, 'PROBE', 1,
+             true, true, 1.00, 'core', 'probe', null
+        from generate_series(1, 120) g;`;
+
+    type Blatt = { rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const feld = (b: Blatt, nr: number): string =>
+      b.rows.find((r) => r.nr === nr)?.befund ?? "(fehlt)";
+    const rot = (b: Blatt): string =>
+      b.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+    const lies = async (db: InstanceType<typeof PGlite>, pfad: string): Promise<Blatt> => {
+      await db.exec("select set_config('skyisles.z0', 'production', false);");
+      return await db.query(readFileSync(pfad, "utf8")) as Blatt;
+    };
+
+    /** Der Stand von Production nach Schritt 9: 0135-0140. */
+    const db = await frischNach0136();
+    const f137 = await fahre(db, M137);
+    if (f137 !== null) throw new Error(`P47 Aufbau: 0137 scheiterte — ${f137}`);
+    await serienUndIdentitaet(db);
+    const f138 = await fahre(db, M138);
+    if (f138 !== null) throw new Error(`P47 Aufbau: 0138 scheiterte — ${f138}`);
+    await db.exec("delete from public.skylanders where sky_id in ('SKY-0821', 'SKY-0822');");
+    await db.exec(FUELLEN);
+    await db.exec(`
+      create sequence if not exists public.z_inv_id_seq start 1000;
+      alter table public.shop_inventory
+        alter column id set default nextval('public.z_inv_id_seq');
+      update public.shop_inventory set id = nextval('public.z_inv_id_seq')
+       where id is null;`);
+    const f139 = await fahre(db, M139);
+    if (f139 !== null) throw new Error(`P47 Aufbau: 0139 scheiterte — ${f139}`);
+    const f140 = await fahre(db, M140);
+    if (f140 !== null) throw new Error(`P47 Aufbau: 0140 scheiterte — ${f140}`);
+
+    const vorherLauf = await fahre(db, VORHER, { klammer: false });
+    const vorher = await lies(db, "supabase/checks/0141_preflight.sql");
+    const lauf = await fahre(db, M141);
+    const nachherLauf = lauf === null
+      ? await fahre(db, NACHHER, { klammer: false }) : "0141 scheiterte";
+    const nachher: Blatt = lauf === null
+      ? await lies(db, "supabase/checks/0141_postflight.sql") : { rows: [] };
+    /* Und ein zweiter Lauf muss abprallen. */
+    const zweimal = lauf === null ? await fahre(db, M141) : "-";
+
+    /*
+     * Die erwartete Rotmenge: die sechs Z0-Zahlen, die ein Fixture nicht
+     * haben kann, PLUS 307 (der Lagerabdruck aus Production) — und 9999.
+     * Jede andere rote Zeile laesst diesen Durchgang scheitern; dazu
+     * gehoeren ausdruecklich 107, 108 und 109 (die drei Nachbarabdruecke)
+     * und im Postflight 111-114 und 131-133.
+     */
+    const ROT = "301, 302, 303, 304, 305, 306, 307, 9999";
+
+    probe.push({
+      name: "P47 Schritt 10 am Stueck: Preflight, 0141, Postflight — acht Spalten, "
+        + "drei Nachbarn unveraendert, zweiter Lauf prallt ab",
+      ok: vorherLauf === null && lauf === null && nachherLauf === null
+        && rot(vorher) === ROT && rot(nachher) === ROT
+        && feld(vorher, 110) === "true"
+        && feld(nachher, 111) === "7befc95e690d91b239e4368b41644871"
+        && feld(nachher, 112) === "e979fee9e458bedc3b52609e936e7922"
+        && feld(nachher, 113) === "sky_id,condition,item_type,sale_released,"
+          + "delivery_scope,usk_rating,sellable,reason"
+        && feld(nachher, 114) === "text,text,text,boolean,text,smallint,boolean,text"
+        && feld(nachher, 131) === "857b767d4ad5ea9bfc2e333fd6605b1f"
+        && feld(nachher, 132) === "f36137c40155375b92bae76b5dd63740"
+        && feld(nachher, 133) === "a32b148cebe00ee0d0d469f96fd2028e"
+        && feld(nachher, 201) === "0" && feld(nachher, 205) === "0"
+        && feld(nachher, 401) === "0" && feld(nachher, 402) === "0"
+        && typeof zweimal === "string" && zweimal.includes("steht schon"),
+      sagt: `Vorher: ${vorherLauf ?? "durch"} (rot: ${rot(vorher)}, Funktion fehlt `
+        + `${feld(vorher, 110)}) · 0141: ${lauf ?? "durch"} · Nachher: `
+        + `${nachherLauf ?? "durch"} (rot: ${rot(nachher)}) · Rumpf `
+        + `${feld(nachher, 111).slice(0, 8)}… · Spalten ${feld(nachher, 113)}`
+        + ` · Nachbarn ${feld(nachher, 131).slice(0, 8)}…/`
+        + `${feld(nachher, 132).slice(0, 8)}…/${feld(nachher, 133).slice(0, 8)}…`
+        + ` · freigegeben ${feld(nachher, 201)} · Belegsperre `
+        + `${feld(nachher, 401)}/${feld(nachher, 402)} · zweiter Lauf: `
+        + `${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

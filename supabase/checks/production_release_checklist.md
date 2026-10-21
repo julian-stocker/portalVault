@@ -427,13 +427,77 @@ und an echtem PostgreSQL nachgefahren (Probelauf **P46**).
 **Rücknahme:** `supabase/rollback/R0140_back_to_0136.sql` — sie stellt den
 Rumpf aus `0136` wieder her.
 
-## Schritt 10 — `0141`, die Lesefunktion · **schreibt**
+## Schritt 10 — `0141`, die Lesefunktion · **drei Dateien**
+
+`0141` legt **eine** neue Lesefunktion an: `seller_sale_state()`. Rein
+additiv — keine Spalte, keine Zeile, kein bestehender Rumpf, kein
+bestehendes Recht.
+
+### 10a — das Vorher · **rein lesend**
+
+```
+supabase/operations/prod-s-preflight-0141.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.** Modus `production`.
+
+| Zeile | | Sollwert |
+|---|---|---|
+| 101–106 | die Grundlagen aus `0139`/`0041` | `true` |
+| 107 | Betriebssicherung auf Stand `0140` | `a32b148cebe00ee0d0d469f96fd2028e` |
+| 108 | `admin_shop_inventory` (Stand `0041`) | `857b767d4ad5ea9bfc2e333fd6605b1f` |
+| 109 | `admin_shop_listing_audit` (Stand `0139`) | `f36137c40155375b92bae76b5dd63740` |
+| 110 | `seller_sale_state()` **fehlt noch** | `true` |
+| 201–205 | nichts freigegeben | `0` fünfmal |
+| 301–307 | 287 · `9b834105…` · 531 · 531 · 306 · 624 · `01e50b9d727a0486ff1ea0eb6ba2dd56` | |
+| 401/402 | Belegsperre | `0` / `0` |
+
+**Weicht 108 oder 109 ab, nicht weitermachen:** dann steht in der Datenbank
+ein anderer Funktionsrumpf als im Repository, und „ist `0141` additiv?"
+wäre danach nicht beantwortbar. **Weicht 307 ab**, ist das meist eine
+Lageränderung (neuer Preis, Listung, Verkauf) — dann den neuen Wert notieren
+und 10a gegen 10c vergleichen statt gegen die Konstante.
+
+### 10b — `0141` · **schreibt**
 
 ```
 supabase/operations/prod-0141.sql
 ```
 
 **Erwartung:** `0141 ok: seller_sale_state steht, acht Spalten, nur fuer das Betriebskonto`
+
+### 10c — das Nachher · **rein lesend**
+
+```
+supabase/operations/prod-s-postflight-0141.sql
+```
+
+**Erwartung: Zeile `9999` = `0`.**
+
+| Zeile | | Sollwert |
+|---|---|---|
+| 110–112 | einmal definiert, Rumpf- und Kommentarabdruck | `7befc95e690d91b239e4368b41644871` · `e979fee9e458bedc3b52609e936e7922` |
+| 113 | acht Ausgabespalten, in dieser Folge | `sky_id,condition,item_type,sale_released,delivery_scope,usk_rating,sellable,reason` |
+| 114 | und mit diesen Typen | `text,text,text,boolean,text,smallint,boolean,text` |
+| 115–120 | keine Parameter · `security definer` · leerer `search_path` · fragt die Betriebsrolle · **JOINT** `admin_shop_listing_audit()` · schreibt nichts | |
+| 121–123 | ACL materialisiert · **kein** EXECUTE für PUBLIC/`anon` · `authenticated` darf | |
+| **131–133** | **die Additiv-Prüfung:** `admin_shop_inventory`, `admin_shop_listing_audit` und die Betriebssicherung tragen dieselben Abdrücke wie in 10a | |
+| 201–205 | unverändert nichts freigegeben | `0` fünfmal |
+| 301–307 | dieselben sieben Zahlen wie in 10a | |
+| 401/402 | Belegsperre unverändert | `0` / `0` |
+
+### 10d — und am laufenden System
+
+| ☐ | Danach prüfen |
+|---|---|
+| ☐ | `npm run verify:seller:prod`: `seller_sale_state(): 0141 applied` und `anon cannot execute seller_sale_state()` |
+| ☐ | `/business/inventory`: bei **Zubehör** erscheinen jetzt Lieferumfang-Auswahl, USK-Auswahl (nur Spiele) und der Freigabeknopf — bei **Figuren nicht** |
+| ☐ | **Nichts anklicken, was freigibt.** Eine Position wird erst kaufbar, wenn jemand den Knopf drückt; davor fehlen USK, Lieferumfang und Preis, und die Funktion lehnt ab |
+| ☐ | `skyisles.app/shop`: 235 Artikel im Angebot, unverändert |
+
+**Rücknahme:** `supabase/rollback/R0141_drop_sale_state.sql`. Probelauf
+**P47** fährt den ganzen Schritt 10 am Stück — einschließlich der Probe,
+dass ein **zweiter** Lauf von `0141` abprallt.
 
 ---
 
