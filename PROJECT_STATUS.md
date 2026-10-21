@@ -206,8 +206,31 @@ Zubehör-Verkaufsfreigaben, Lagerabdruck
 `01e50b9d727a0486ff1ea0eb6ba2dd56`, Belegsperre unverändert. Damit stimmen
 `src/lib/backup/manifest.ts` und der Funktionsrumpf wieder überein.
 
-**Auf Production fehlt nur noch `0141`** (und `0134`, die nicht zum Release
-gehört).
+**Am 2026-10-21 lief auch `0141`** — `seller_sale_state()`, die Lesefunktion
+des Betriebs. **Postflight `9999 = 0`:** Rumpfabdruck
+`7befc95e690d91b239e4368b41644871`, alle acht Rückgabespalten und Rechte
+korrekt, **drei Nachbarfunktionen unverändert**, 287 Angebote und Abdruck
+unverändert, 531 sammelbar, 306 Lagerpositionen, 624 Katalogzeilen,
+Lagerabdruck `01e50b9d727a0486ff1ea0eb6ba2dd56` unverändert, **0**
+Zubehörfreigaben, **0** öffentliche Zubehörangebote, Belegsperre unverändert.
+
+### Das Release `0135`–`0141` ist auf Production vollständig
+
+Abschließend lesend gemessen am 2026-10-21, nach `0141`:
+
+| | |
+|---|---|
+| öffentliche Seiten | `/`, `/zubehoer` (**39 Artikel**), `/shop` (**235 Artikel im Angebot**), eine Zubehör- und eine Figuren-Detailseite, `/login` — je HTTP 200, **kein** Fehlermarker, `noindex` steht |
+| geschützte Bereiche | `/business/inventory` und `/admin` antworten einem Gast mit **404** — sie leiten nicht um, sie existieren für ihn nicht |
+| Angebote | **287**, fünf Spalten, alle `loose`, `delivery_scope` überall `null`, jedes Angebot das, was die Regeln vorhersagen |
+| Lager | 306 Positionen · 293 verkäuflich · 287 freigegeben · 6 Opt-outs · 13 nicht sammelbar |
+| Katalog | 570 öffentlich sichtbar · 531 sammelbar · 39 Spiele · Ableitungsregel für jede Zeile erfüllt · die 21 Portale **unsichtbar** |
+| Riegel | `seller_sale_state()`, `seller_set_sale_release()`, `admin_set_usk_rating()`, `seller_create_catalog_item()`, `seller_import_catalog()`, `active_seller()`, `sellers`, `shop_inventory`, `inventory_movements` — für `anon` je `42501`; Belegtabellen nicht einmal auflösend |
+| Werkzeuge | `verify:shop:prod` 22/23 · `verify:seller:prod` 21/21 · `verify:commerce:prod` 29/30 |
+
+Die zwei verbleibenden `FAIL` sind die beiden **vorbestehenden** Befunde: die
+6 bewussten Opt-outs und die 101 `sale_external`-Umwandlungen (seit
+2026-09-19 geführt). Beide sind älter als dieses Release.
 
 ### Noch nicht nachgewiesen: eine echte Sicherung MIT den neuen Feldern
 
@@ -233,7 +256,12 @@ ist das Kriterium. Die Datei darf **nicht** ins Repository — sie trägt
 Käufernamen und Einkaufskosten, und das Werkzeug bricht ab, wenn der Pfad
 im Arbeitsverzeichnis liegt.
 
-**Und ein getrennter, älterer Befund:** die **Plattformsicherung**
+**Erfasst als Folgeaufgabe:** `supabase/checks/platform_export_gap.md` —
+der Befund, warum er nicht aufgefallen ist, was er praktisch bedeutet und in
+welcher Reihenfolge er zu beheben wäre (erst die fehlende Prüfung, dann die
+Entscheidung, dann die Migration). **Nicht Teil dieses Releases.**
+
+**Der Befund selbst:** die **Plattformsicherung**
 (`/admin/datensicherung`, `system_platform_export()` aus `0105`) führt
 **keines** der vier neuen Felder — `platform-manifest.ts` nennt im
 Katalogbereich weder `item_type` (seit `0135`) noch `usk_rating`, und im

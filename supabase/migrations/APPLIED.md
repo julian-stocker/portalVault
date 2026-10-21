@@ -152,6 +152,22 @@ geprüft und wird von `src/lib/backup/backup-sale-release.test.ts` bei jedem
 Testlauf wiederholt. Probelauf **P46** fährt sie zusätzlich an echtem
 PostgreSQL nach.
 
+**Am 2026-10-21 folgte `0141`** — `seller_sale_state()`, die Lesefunktion des
+Betriebs. Rein additiv. **Postflight `9999 = 0`**, bestätigt: Rumpfabdruck
+**7befc95e690d91b239e4368b41644871**, alle acht Rückgabespalten und die
+Rechte korrekt, **drei bestehende Nachbarfunktionen unverändert**
+(`admin_shop_inventory` `857b767d…`, `admin_shop_listing_audit` `f36137c4…`,
+die Betriebssicherung `a32b148c…`) · 287 Angebote und Abdruck
+`9b8341058bbfa0f7809eddc300ab0e9e` · 531 sammelbar · 306 Lagerpositionen ·
+624 Katalogzeilen · Lagerabdruck `01e50b9d727a0486ff1ea0eb6ba2dd56`
+unverändert · **0** Zubehörfreigaben, **0** öffentliche Zubehörangebote ·
+Belegsperre unverändert. Probelauf **P47** fährt den Schritt am Stück,
+einschließlich der Probe, dass ein zweiter Lauf abprallt.
+
+**Damit ist das Release `0135`–`0141` auf Production vollständig.**
+Nachgemessen, lesend: `seller_sale_state()` antwortet `anon` mit `42501` —
+sie steht und ist dicht.
+
 **Zu `0137` lesend gemessen (2026-10-21):** `non_collectible_categories()`
 liefert `[Spiele, Portale, Bundles, Taschen, Zubehör]` und stimmt damit mit
 der Liste der Anwendung überein (`verify:shop:prod`, Abschnitt 5 — vorher der
@@ -207,6 +223,7 @@ Katalog statt aus dieser Datei.
 | `0138_catalog_portals.sql` | `2c948264e3d6b0cb3a605deda4027945e3d12b9ab026de3505cd74614598b791` | gleich |
 | `0139_accessory_sale_release.sql` | `55f0fcf9279d6484891e48d209371bbf229464849488b8d20ad02909ad3a5a04` | gleich |
 | `0140_business_backup_sale_release.sql` | `ae74e4006ce0dfef07af87021aec2331e1d13009115255ea5c7b3cbd59499fc5` | gleich |
+| `0141_seller_sale_state.sql` | `54c79e5ae7ca1de3ac6742dbf64bc5cf0c8b002ae39eb2f196659ae5426d13aa` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -229,11 +246,14 @@ Staging noch auf Production. Sie stehen hier, damit die Akte lückenlos bleibt:
 jede Migration ab `0122` ist entweder oben mit ihrer Prüfsumme erfasst oder in
 dieser Liste.
 
+**`0141` stand hier bis zum 2026-10-21** — seit dem Lauf auf Production steht
+sie in der Tabelle oben, und damit ist die Liste der nicht angewendeten
+Migrationen des Releases leer. Übrig bleibt `0134`, die nie dazugehörte.
+
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
 oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`
-bis `0140` angewendet** (Abschnitt „Production"); `0141` fehlt
-dort, wie `0134`. **`0138` gehörte ausdrücklich hinter das Deployment** —
+bis `0141` angewendet** (Abschnitt „Production"); Dort fehlt nur noch `0134`, die nicht zum Release gehört. **`0138` gehörte ausdrücklich hinter das Deployment** —
 sonst wären 21 Portale in den Fortschrittsnenner gewandert. Das Deployment
 ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 
@@ -241,7 +261,6 @@ ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 |---|---|
 **Gefahren wurde je ein Einmal-Durchgang:** `supabase/operations/staging-0139.sql` (SHA-256 `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8`) und `supabase/operations/staging-0140.sql` (SHA-256 `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d`). Beide betten ihre Migration **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und fuegen genau eine Pruefung hinzu: den Umgebungsstempel (`SKY-0821`/`SKY-0822`), den eine Migration nicht kennen kann. Dass er anschlaegt, faehrt Probelauf **P39** nach. Reihenfolge, Erwartungen und Ruecknahme: `supabase/checks/0139_0140_staging_run.md`. **Beide sind seit dem 2026-10-20 angewendet und damit nach Regel 1 eingefroren** — auch ihre Nachbedingungen. Was an ihren Pruefdateien zu berichtigen war, wurde in `supabase/checks/` berichtigt, nicht in der Migration.
 
-| `0141_seller_sale_state.sql` | lokal vorbereitet, **noch nicht freigegeben**. **Rein additiv:** eine neue Lesefunktion `seller_sale_state()` — je Lagerposition Artikeltyp, `sale_released`, `delivery_scope`, `usk_rating`, verkaeuflich ja/nein und der Grund. Der Grund wird aus `admin_shop_listing_audit()` GEJOINT, nicht nachgerechnet. Keine Spalte, keine Zeile, kein bestehender Rumpf, kein bestehendes Recht — insbesondere wird `admin_shop_inventory()` nicht erweitert. Setzt `0139` voraus. Lauf: `supabase/operations/staging-0141.sql`; Ruecknahme `supabase/rollback/R0141_drop_sale_state.sql`. SHA-256: `54c79e5ae7ca1de3ac6742dbf64bc5cf0c8b002ae39eb2f196659ae5426d13aa` |
 | `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `b2a745e34e0349640f3a4b10efe9da45bb633c854efd703fc8e6c146514e9b49` |
 
 **Beide zusammen in einem Durchgang:** `supabase/operations/staging-0135-0136.sql` (SHA-256 `654d20fbdb08cb319c0d95005a403fa5cffe13ca77c41d44aafedaf9dc50bb17`) bettet `0135` und `0136` **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und legt eine Transaktion samt blockierender Vor- und Nachpruefungen darum. Wird der Lauf darueber gefahren, gehoert in die Tabelle oben die SHA-256 des **Skripts** mit dem Hinweis, dass die eingebetteten Abschnitte den beiden Migrationsdateien entsprechen.
@@ -270,7 +289,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132` | `0133`, `0134` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0140` | `0134`, `0141` |
+| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0141` | `0134` |
 
 **`0135` und `0136` dürfen auf Staging vor `0133` und `0134` laufen.** Das ist
 keine Abschätzung, sondern an den berührten Objekten ablesbar:
