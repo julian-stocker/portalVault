@@ -18,8 +18,9 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
 import {
-  INVENTORY_KINDS, inventoryKind, isAccessoryPosition, isInventoryKind, isShopGoods,
-  type InventoryPosition,
+  INVENTORY_KINDS, hasSaleControls, inventoryKind, isAccessoryPosition,
+  isInventoryKind, isShopGoods,
+  type InventoryPosition, type SaleState,
 } from "./inventory-model.ts";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { isCollectible } from "@/lib/catalog/collectible";
@@ -101,47 +102,109 @@ describe("die Art einer Lagerposition", () => {
 });
 
 /* ===================================================================== */
-describe("Zubehör ist keine Shopware", () => {
-  it("ein Spiel und ein Portal nicht, eine Figur schon", () => {
+describe("Zubehör ist Shopware — Stück für Stück (ADR-0129/0130)", () => {
+  /** Eine Zubehörposition mit Verkaufszustand, wie `0141` ihn liefert. */
+  const mitZustand = (art: string, over: Partial<SaleState> = {}) =>
+    position({
+      figure: figure({ itemType: art }),
+      saleState: {
+        itemType: art, saleReleased: false, deliveryScope: null, uskRating: null,
+        sellable: false, reason: "not released for sale", ...over,
+      },
+    });
+
+  it("eine Figur immer, ein Zubehörteil erst nach der Freigabe", () => {
     expect(isShopGoods(position())).toBe(true);
-    expect(isShopGoods(position({ figure: figure({ itemType: "game" }) }))).toBe(false);
-    expect(isShopGoods(position({ figure: figure({ itemType: "portal" }) }))).toBe(false);
+    expect(isShopGoods(mitZustand("game"))).toBe(false);
+    expect(isShopGoods(mitZustand("portal"))).toBe(false);
+    expect(isShopGoods(mitZustand("game", { saleReleased: true }))).toBe(true);
+    expect(isShopGoods(mitZustand("portal", { saleReleased: true }))).toBe(true);
   });
 
-  it("und das ist dieselbe Grenze, die is_shop_eligible() zieht", () => {
+  it("OHNE AUSKUNFT: nein — nie geraten", () => {
     /*
-     * `0135` hat die Shop-Eignung an den Artikeltyp gehängt. Die Oberfläche
-     * spiegelt das, statt einen Schalter anzubieten, der durchgeht und
-     * nichts bewirkt: `set_shop_listing()` würde ein Portal listen, aber
-     * `shop_offers()` filtert es wieder heraus.
+     * Fehlt der Verkaufszustand, ist `0141` in dieser Umgebung nicht
+     * angewendet. Dann wird keine Steuerung angeboten, statt eine
+     * anzubieten, die beim Speichern scheiterte.
      */
-    const mig = readFileSync("supabase/migrations/0135_catalog_item_type.sql", "utf8");
-    expect(mig).toContain("s.item_type = 'figure'");
+    expect(isShopGoods(position({ figure: figure({ itemType: "game" }) }))).toBe(false);
+    expect(hasSaleControls(position({ figure: figure({ itemType: "game" }) }))).toBe(false);
+    expect(hasSaleControls(mitZustand("game"))).toBe(true);
+    /* Und für eine Figur gibt es nichts einzustellen. */
+    expect(hasSaleControls(position())).toBe(false);
   });
 
-  it("die Karte bietet deshalb Freigabe und Preis nicht an, Bestand aber doch", () => {
+  it("und das ist dieselbe Grenze, die is_position_sellable() zieht", () => {
+    /*
+     * `0139` hat die Verkäuflichkeit an die POSITION gehängt: Artikeltyp,
+     * aktiv, katalogsichtbar, USK bei Spielen, Lieferumfang — und die
+     * ausdrückliche Freigabe. Die Oberfläche spiegelt das, statt einen
+     * Schalter anzubieten, der durchgeht und nichts bewirkt.
+     */
+    const mig = readFileSync("supabase/migrations/0139_accessory_sale_release.sql", "utf8");
+    expect(mig).toContain("and i.sale_released");
+    expect(mig).toContain("public.is_shop_eligible(i.sky_id)");
+  });
+
+  it("die Karte bietet Freigabe und Preis erst nach der Freigabe an, Bestand immer", () => {
     const card = code(CARD);
     expect(card).toContain("const shopGoods = isShopGoods(position);");
     expect(card).toContain("const sellable = operative && shopGoods;");
-    /* Freigabe und Preis an `sellable` … */
     expect(card).toMatch(/\{sellable \? \(\s*<PriceEditor/);
     expect(card).toContain("{sellable ? (");
-    /* … der Bestandsschritt weiter an `operative`: ein Portal wird gebucht
+    /* Der Bestandsschritt weiter an `operative`: ein Portal wird gebucht
        wie jede Figur, `record_inventory_movement()` fragt nur den Zustand. */
     expect(card).toMatch(/\{operative \? \(\s*<StockStepper/);
   });
 
-  it("und sagt einmal, warum — ohne Warnton", () => {
+  it("der Verkaufsblock bietet die drei Angaben — und nur bei Zubehör", () => {
+    const card = code(CARD);
+    expect(card).toContain("const saleState = hasSaleControls(position)");
+    expect(card).toContain("{saleState !== null ? (");
+    /* Drei Aufrufe, nicht einer: wer Preis und Freigabe zusammenlegt, gibt
+       irgendwann beim Preispflegen versehentlich frei. */
+    for (const aufruf of ["saveRelease", "saveScope", "saveUsk"]) {
+      expect(card, aufruf).toContain(aufruf);
+    }
+    /* Die USK nur bei Spielen — ein Portal trägt keine. */
+    expect(card).toContain('saleState.itemType === "game"');
+  });
+
+  it("der GRUND kommt aus der Datenbank, nicht aus dem Browser", () => {
+    /*
+     * Die Gründeleiter steht in `admin_shop_listing_audit()`, und zwar
+     * genau einmal. Hier wird sie übersetzt, nicht nachgerechnet — sonst
+     * gäbe es zwei Wahrheiten, und sie liefen auseinander.
+     */
+    const card = code(CARD);
+    expect(card).toContain("copy.saleReasons[saleState.reason]");
+    /* Kein Nachbau der Bedingungen im Browser. */
+    for (const regel of ["usk_rating", "catalog_visible", "item_type ===",
+      "deliveryScope === null &&"]) {
+      expect(card, regel).not.toContain(regel);
+    }
+    /* Jeder Grund der Leiter hat einen deutschen Satz. */
+    const mig = readFileSync("supabase/migrations/0139_accessory_sale_release.sql", "utf8");
+    for (const grund of ["no catalog row", "inactive figure", "editorially hidden",
+      "not a collectible", "item type not sold", "usk rating missing",
+      "usk 18 needs age verification", "delivery scope missing",
+      "not released for sale"]) {
+      expect(mig, `${grund} fehlt in der Leiter`).toContain(`'${grund}'`);
+      expect(de.inventory.saleReasons[grund], `${grund} ohne Satz`).toBeTruthy();
+    }
+  });
+
+  it("und sagt es, wenn die Datenbank gar nichts liefert", () => {
     expect(code(CARD)).toContain("copy.accessoryNotShopHint");
-    expect(de.inventory.accessoryNotShopHint).toContain("nicht öffentlich angeboten");
+    expect(de.inventory.accessoryNotShopHint).toContain("kein Verkaufszustand");
     expect(de.inventory.accessoryNotShopHint).toContain("Historie");
-    /* Kein Fehler und keine Gefahr: das ist die Sortimentsgrenze. */
+    /* Kein Fehler und keine Gefahr. */
     expect(code(CARD)).not.toMatch(/accessoryNotShopHint[\s\S]{0,200}text-danger/);
   });
 
-  it("ohne Shop-Preis-Zelle, statt einer leeren", () => {
-    /* „Shop-Preis —" wäre keine Auskunft: es gibt keinen, nicht bloß keinen
-       eingetragenen. */
+  it("ohne Shop-Preis-Zelle, solange es keinen Shop-Preis gibt", () => {
+    /* „Shop-Preis —" wäre keine Auskunft: bei einer nicht freigegebenen
+       Position gibt es keinen, nicht bloß keinen eingetragenen. */
     const card = code(CARD);
     const preis = card.slice(card.indexOf("copy.salePrice") - 400,
                              card.indexOf("copy.salePrice"));

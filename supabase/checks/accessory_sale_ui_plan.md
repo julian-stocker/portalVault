@@ -1,9 +1,21 @@
 # Oberfläche: Lager, Zubehörangebot, Checkout — der Plan
 
-**Status:** Plan. **Kein Anwendungscode dieser Art ist geschrieben.** Er wird
-es erst, wenn `0139` auf Staging angewendet ist — eine Seite, die
-`sale_released` liest, bringt `/business/inventory` zum Absturz, solange die
-Spalte nicht existiert. Das ist keine Vorsicht, sondern die Reihenfolge.
+**Status: umgesetzt am 2026-10-21**, nachdem `0139`/`0140` auf Staging
+angewendet waren. Was hier als Plan steht, ist gebaut — mit **einer**
+Ergänzung, die der Plan nicht vorhergesehen hatte:
+
+> **`0141` kam dazu und ist noch nicht angewendet.** Die Lagerkarte muss
+> `sale_released`, `delivery_scope` und `usk_rating` **lesen** können, und
+> keine vorhandene Funktion liefert sie: `admin_shop_inventory()` (`0041`)
+> kennt sie nicht, und ihren Rückgabetyp zu erweitern hiesse, eine
+> Funktion zu droppen und neu anzulegen, an der die ganze Lagerseite
+> hängt. `0141` fügt stattdessen **eine** neue Lesefunktion hinzu,
+> `seller_sale_state()` — rein additiv, ändert nichts Bestehendes.
+>
+> **Bis `0141` angewendet ist, zeigt die Lagerkarte die drei Steuerungen
+> nicht.** Sie stürzt nicht ab: `fetchSaleState()` fängt genau den einen
+> Fehler „Funktion gibt es nicht" ab und liefert „keine Auskunft", und
+> ohne Auskunft wird nichts angeboten. Jeder andere Fehler wird geworfen.
 
 Grundlage: ADR-0129, `supabase/checks/accessory_offer_proposal.md`.
 

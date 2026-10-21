@@ -117,6 +117,12 @@ stand (md5, laenge, komm_md5, komm_laenge, felder, bezeichnung, freigegeben) as 
    '6b980ac961d1d6ac704587ecc6e9524f',   674, 352, 'STAND_0131_ZEICHENGLEICH', true),
   ('f6d08440707ba72a8040a8d1e666c092', 21494,
    'c12618f312b413571eeabe912ca03651',   890, 353, 'STAND_0136_ZEICHENGLEICH', true),
+  -- Seit dem 2026-10-20 auf Staging: `0140` nimmt `sale_released`,
+  -- `delivery_scope` und `usk_rating` in die Sicherung auf (ADR-0129/0130).
+  -- 353 Feldzeilen werden 356. Nachgerechnet aus der Migrationsdatei, wie
+  -- die beiden darueber.
+  ('a32b148cebe00ee0d0d469f96fd2028e', 21622,
+   'ffc66ad2060e89b7cf982c3f95012ffa',  1245, 356, 'STAND_0140_ZEICHENGLEICH', true),
   ('a27b61db988df7627a4992b1770ac626', 20814,
    '3c0054303767590cfc8b7e3d980ab9b1',   651, 339, 'STAND_0130',               false)
 ),
@@ -150,7 +156,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                        = coalesce((select length(obj_description(f.oid, 'pg_proc')) from fn f), -1)
                       then 'ja' else 'nein' end
           from erkannt e), 'ja'),
-  (105, 'Anker', 'und dieser Stand ist freigegeben (0131 oder 0136)',
+  (105, 'Anker', 'und dieser Stand ist freigegeben (0131, 0136 oder 0140)',
        (select case when e.freigegeben then 'ja' else 'nein: ' || e.bezeichnung end
           from erkannt e), 'ja'),
 

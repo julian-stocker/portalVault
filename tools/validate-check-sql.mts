@@ -432,7 +432,8 @@ async function main(): Promise<void> {
                      "0137_catalog_accessories.sql",
                      "0138_catalog_portals.sql",
                      "0139_accessory_sale_release.sql",
-                     "0140_business_backup_sale_release.sql"] as const;
+                     "0140_business_backup_sale_release.sql",
+                     "0141_seller_sale_state.sql"] as const;
   const M135 = join(MIG_DIR, PROBELAUF[0]);
   const M136 = join(MIG_DIR, PROBELAUF[1]);
   const M137 = join(MIG_DIR, PROBELAUF[2]);
@@ -441,6 +442,8 @@ async function main(): Promise<void> {
   const R139 = "supabase/rollback/R0139_drop_sale_release.sql";
   const M140 = join(MIG_DIR, PROBELAUF[5]);
   const R140 = "supabase/rollback/R0140_back_to_0136.sql";
+  const M141 = join(MIG_DIR, PROBELAUF[6]);
+  const R141 = "supabase/rollback/R0141_drop_sale_state.sql";
   const R135 = "supabase/rollback/R0135_drop_item_type.sql";
   const R136 = "supabase/rollback/R0136_back_to_0131.sql";
   const R137 = "supabase/rollback/R0137_back_to_0135.sql";
@@ -2300,7 +2303,7 @@ async function main(): Promise<void> {
     });
   }
 
-  /* P39 — DIE ZWEI EINZELLAEUFE, und der Umgebungsstempel.
+  /* P39 — DIE DREI EINZELLAEUFE, und der Umgebungsstempel.
    *
    * `staging-0139.sql` und `staging-0140.sql` betten die Migrationen
    * zeichengleich ein (geprueft in `staging-oneshot.test.ts`) und fuegen
@@ -2336,6 +2339,25 @@ async function main(): Promise<void> {
       "select (position('delivery_scope' in prosrc) > 0)::text as w from pg_proc "
       + "where oid = to_regprocedure('public.seller_business_backup()')") : "-";
 
+    /*
+     * UND DER ZWEITE LAUF MUSS ABPRALLEN. Das ist der eigentliche Schutz
+     * davor, dass `0139` versehentlich erneut angewendet wird: kein
+     * Register, sondern die Migration selbst. Ihre Vorbedingung 1b fragt,
+     * ob die Spalten schon stehen.
+     */
+    /* 0141 hinterher: rein additiv, liest nur. */
+    const OP141 = "supabase/operations/staging-0141.sql";
+    const lauf141 = lauf140 === null ? await fahre(db, OP141, { klammer: false }) : "nicht gefahren";
+    const spalten141 = lauf141 === null ? await wert(db,
+      "select count(*)::text as w from pg_proc p, "
+      + "unnest(p.proargnames, p.proargmodes) as a(nm, md) "
+      + "where p.oid = to_regprocedure('public.seller_sale_state()') and a.md = 't'") : "-";
+
+    const zweimal139 = lauf140 === null ? await fahre(db, OP139, { klammer: false }) : "-";
+    const zweimal140 = lauf140 === null ? await fahre(db, OP140, { klammer: false }) : "-";
+    const nachZweitlauf = lauf140 === null ? await wert(db,
+      "select count(*)::text as w from public.shop_inventory where sale_released") : "-";
+
     /* Der schlechte Fall: dieselbe Datei ohne den Stempel. */
     const db2 = await frischNach0136();
     const g137 = await fahre(db2, M137);
@@ -2351,12 +2373,19 @@ async function main(): Promise<void> {
       + "and column_name = 'sale_released'");
 
     probe.push({
-      name: "P39 die zwei Einzellaeufe gehen durch — und brechen im falschen Projekt ab",
-      ok: lauf139 === null && lauf140 === null && freigegeben === "0" && felder === "true"
+      name: "P39 die drei Einzellaeufe gehen EINMAL durch — nicht zweimal, nicht im falschen Projekt",
+      ok: lauf139 === null && lauf140 === null && lauf141 === null
+        && spalten141 === "8" && freigegeben === "0" && felder === "true"
+        && zweimal139 !== null && zweimal139.includes("steht schon")
+        && zweimal140 !== null && nachZweitlauf === "0"
         && falschesProjekt !== null && falschesProjekt.includes("ABBRUCH A1")
         && nichtsDa === "true",
       sagt: `0139 ${lauf139 ?? "durch"}, 0140 ${lauf140 ?? "durch"}, freigegebene `
-        + `Positionen ${freigegeben}, Sicherung kennt den Lieferumfang (${felder}) · `
+        + `Positionen ${freigegeben}, Sicherung kennt den Lieferumfang (${felder}), `
+        + `0141 ${lauf141 ?? "durch"} mit ${spalten141} Spalten · `
+        + `zweiter Lauf: 0139 ${zweimal139 === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}, `
+        + `0140 ${zweimal140 === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}, `
+        + `freigegeben danach ${nachZweitlauf} · `
         + `ohne Stempel: ${falschesProjekt === null ? "DURCHGELAUFEN — Befund"
             : "abgebrochen"}, und keine Spalte zurueckgelassen (${nichtsDa})`,
     });

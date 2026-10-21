@@ -33,6 +33,7 @@ import {
   isMovementReason,
   isValidPercentage,
 } from "@/lib/admin/inventory-model";
+import { USK_RATINGS, isDeliveryScope } from "@/lib/shop/delivery-scope";
 import { isOverridePath } from "@/lib/catalog/image";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
@@ -255,6 +256,104 @@ export async function setListing(input: {
     // card, and the card is cached with the page.
     ["/business/inventory", "/", "/cart"],
     "seller",
+  );
+}
+
+/**
+ * Die Verkaufsfreigabe EINER Zubehörposition (`0139`, ADR-0129/0130).
+ *
+ * EIN EIGENER AUFRUF, nicht ein Feld in `setListing()`. Preis und Freigabe
+ * zusammenzulegen hieße, irgendwann beim Preispflegen versehentlich
+ * freizugeben — und eine Freigabe ist die Entscheidung, etwas öffentlich
+ * zum Verkauf zu stellen.
+ *
+ * DIE BEDINGUNGEN PRÜFT DIE DATENBANK, nicht diese Funktion.
+ * `seller_set_sale_release()` lehnt ab: eine Figur, eine unbekannte
+ * Position, eine andere Beschaffenheit, ein Spiel ohne USK-Angabe, ein
+ * Spiel mit USK 18, eine Position ohne Lieferumfang und eine ohne gültigen
+ * Preis. Sie hier zu wiederholen hieße, dieselbe Regel zweimal zu pflegen;
+ * die Oberfläche zeigt stattdessen den GRUND, den `seller_sale_state()`
+ * liefert.
+ *
+ * Das Zurücknehmen geht immer — auch wenn Angaben fehlen.
+ */
+export async function setSaleRelease(input: {
+  skyId: string;
+  condition: string;
+  released: boolean;
+}): Promise<AdminResult> {
+  if (!SKY_ID.test(input.skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCondition(input.condition)) return { ok: false, message: de.inventory.unknownCondition };
+  return call(
+    "seller_set_sale_release",
+    {
+      p_sky_id: input.skyId,
+      p_condition: input.condition,
+      p_released: input.released,
+    },
+    /* Dieselben Flächen wie bei `setListing()`: eine Freigabe lässt ein
+       Angebot erscheinen oder verschwinden, und die Kacheln sind mit der
+       Seite zwischengespeichert. Dazu der Zubehörkatalog. */
+    ["/business/inventory", "/", "/zubehoer", "/shop", "/cart"],
+    "seller",
+  );
+}
+
+/**
+ * Was bei einer Zubehörposition geliefert wird (`0139`, ADR-0130).
+ *
+ * `null` nimmt die Angabe zurück. Welcher Wert zu welcher Artikelart passt,
+ * entscheidet die Datenbank — `disc_*` für Spiele, `portal_*` für Portale,
+ * eine Figur wird abgelehnt. **Keine Kopplung an den Zustand:** ein Spiel
+ * mit Originalhülle ist genauso verkäuflich wie eines ohne.
+ */
+export async function setDeliveryScope(input: {
+  skyId: string;
+  condition: string;
+  scope: string | null;
+}): Promise<AdminResult> {
+  if (!SKY_ID.test(input.skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCondition(input.condition)) return { ok: false, message: de.inventory.unknownCondition };
+  if (input.scope !== null && !isDeliveryScope(input.scope)) {
+    return { ok: false, message: de.inventory.unknownDeliveryScope };
+  }
+  return call(
+    "seller_set_delivery_scope",
+    {
+      p_sky_id: input.skyId,
+      p_condition: input.condition,
+      p_scope: input.scope,
+    },
+    ["/business/inventory", "/zubehoer", "/shop"],
+    "seller",
+  );
+}
+
+/**
+ * Die USK-Alterskennzeichnung eines SPIELS (`0139`).
+ *
+ * PLATTFORMADMIN, nicht Betrieb: eine Altersfreigabe beschreibt das Produkt
+ * und gilt für jedes Exemplar — sie ist Katalogdatum wie
+ * `display_name_override` (ADR-0039, ADR-0077). `null` führt den Titel
+ * wieder als „nicht erfasst".
+ *
+ * **Nie geraten.** Die Quelle ist die Hülle oder die USK-Titeldatenbank;
+ * die Datenbank lehnt jeden Wert außer 0, 6, 12, 16, 18 ab und jede
+ * Artikelart außer `game`.
+ */
+export async function setUskRating(input: {
+  skyId: string;
+  rating: number | null;
+}): Promise<AdminResult> {
+  if (!SKY_ID.test(input.skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (input.rating !== null && !USK_RATINGS.includes(input.rating)) {
+    return { ok: false, message: de.inventory.unknownUskRating };
+  }
+  return call(
+    "admin_set_usk_rating",
+    { p_sky_id: input.skyId, p_rating: input.rating },
+    ["/business/inventory", "/zubehoer", "/shop"],
+    "platform",
   );
 }
 

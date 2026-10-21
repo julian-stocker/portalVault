@@ -34,6 +34,7 @@ import {
   isPriceSource,
   type InventoryPosition,
   type InventoryRow,
+  type SaleState,
   type Movement,
   type ShopSettings,
 } from "@/lib/admin/inventory-model";
@@ -114,6 +115,8 @@ export async function fetchInventory(
   const { data, error } = await supabase.rpc("admin_shop_inventory");
   if (error) throw new Error(`inventory: ${error.message}`);
 
+  const saleState = await fetchSaleState();
+
   const byId = new Map(catalog.map((figure) => [figure.skyId, figure]));
   const positions: InventoryPosition[] = [];
   const outsideScope: InventoryPosition[] = [];
@@ -121,10 +124,65 @@ export async function fetchInventory(
   for (const raw of (data ?? []) as RawRow[]) {
     const row = toRow(raw);
     const figure = byId.get(row.skyId) ?? null;
-    (figure ? positions : outsideScope).push({ ...row, figure });
+    const zustand = saleState?.get(`${row.skyId}:${row.condition}`) ?? null;
+    (figure ? positions : outsideScope).push({ ...row, figure, saleState: zustand });
   }
 
   return { positions, outsideScope };
+}
+
+type RawSaleState = {
+  sky_id: string;
+  condition: string;
+  item_type: string;
+  sale_released: boolean;
+  delivery_scope: string | null;
+  usk_rating: number | null;
+  sellable: boolean | null;
+  reason: string | null;
+};
+
+/** PostgREST meldet so, dass es die Funktion nicht gibt. */
+const FUNCTION_MISSING = "PGRST202";
+
+/**
+ * Was der Betrieb je Zubehörposition pflegt — und was noch fehlt (`0141`).
+ *
+ * EIN ZWEITER AUFRUF, UND ZWAR ABSICHTLICH. `admin_shop_inventory()`
+ * (`0041`) liefert die drei Spalten nicht, und ihren Rückgabetyp zu
+ * erweitern hieße, eine Funktion zu droppen und neu anzulegen, an der die
+ * ganze Lagerseite hängt — für drei Felder. Ein zusätzlicher Aufruf je
+ * Seitenaufbau kostet weniger.
+ *
+ * `null` ZURÜCK HEISST „KEINE AUSKUNFT". Ist `0141` in dieser Umgebung
+ * nicht angewendet, antwortet PostgREST mit `PGRST202`; dann zeigt die
+ * Karte die Zubehörsteuerungen schlicht nicht an, statt sie anzubieten und
+ * beim Speichern zu scheitern. Jeder andere Fehler wird geworfen — eine
+ * stumme Oberfläche aus einem unbekannten Grund wäre schlimmer als ein
+ * Fehler.
+ */
+async function fetchSaleState(): Promise<Map<string, SaleState> | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("seller_sale_state");
+  if (error) {
+    if (error.code === FUNCTION_MISSING) return null;
+    throw new Error(`sale state: ${error.message}`);
+  }
+
+  const index = new Map<string, SaleState>();
+  for (const raw of (data ?? []) as RawSaleState[]) {
+    index.set(`${raw.sky_id}:${raw.condition}`, {
+      itemType: raw.item_type,
+      saleReleased: raw.sale_released === true,
+      deliveryScope: raw.delivery_scope,
+      uskRating: raw.usk_rating,
+      /* `sellable` kommt aus einem `left join`; NULL heißt „die
+         Gründeleiter kennt die Zeile nicht" und damit: nein. */
+      sellable: raw.sellable === true,
+      reason: raw.reason,
+    });
+  }
+  return index;
 }
 
 /**

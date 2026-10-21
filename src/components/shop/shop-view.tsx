@@ -20,7 +20,9 @@
 import Link from "next/link";
 import { useDeferredValue, useMemo, useState } from "react";
 
+import { AccessoryCard } from "@/components/catalog/accessory-card";
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { isAccessory } from "@/lib/catalog/item-type";
 import { QuickView } from "@/components/catalog/quick-view";
 import { FigureGrid } from "@/components/catalog/figure-grid";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
@@ -134,6 +136,29 @@ export function ShopView({
       ) : (
         <FigureGrid>
           {visible.map((entry) => (
+            /*
+             * ZWEI KACHELN, EIN RASTER (ADR-0129/0130).
+             *
+             * Ein Spiel oder Portal bekommt NICHT die Figurenkarte: die ist
+             * eine Sammelkarte mit Element, Charakter, Variante,
+             * Besitzsiegel und Marktwert, und davon ist für ein Portal
+             * nichts wahr. Sie trüge ausserdem einen Sammelknopf, und
+             * Zubehör gehört nicht in eine Sammlung.
+             *
+             * An `CatalogCard` ändert sich dafür nichts — die Entscheidung
+             * fällt hier, vor der Karte.
+             */
+            isAccessory(entry.figure) ? (
+              <AccessoryCard
+                key={entry.figure.skyId}
+                item={entry.figure}
+                /* Im Shop steht nur die eingeordnete Serie: der
+                   Geltungsbereich eines Portals gehört in den Katalog, wo
+                   nach Serie gefiltert wird. */
+                seriesScope={[entry.figure.seriesLabel]}
+                offers={entry.offers}
+              />
+            ) : (
             <CatalogCard
               key={entry.figure.skyId}
               figure={entry.figure}
@@ -153,6 +178,7 @@ export function ShopView({
               // series is worth naming on every card.
               showSeries
             />
+            )
           ))}
         </FigureGrid>
       )}

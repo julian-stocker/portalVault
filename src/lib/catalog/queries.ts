@@ -508,6 +508,65 @@ export async function fetchFigureBySlug(slug: string): Promise<CatalogFigure | n
   return withCharacterFamily(withVariants([figure], nameIndex), characterNames(index))[0];
 }
 
+/**
+ * Ein ZUBEHÖRARTIKEL über seinen Slug — oder null.
+ *
+ * Dieselbe Abfrage wie `fetchFigureBySlug()`, mit zwei Unterschieden, und
+ * beide sind der Grund, warum es sie gibt:
+ *
+ *   * keine Variantenbildung und keine Charakterfamilie. Ein Portal hat
+ *     keine Geschwister (ADR-0034), und `withVariants()` über eine einzelne
+ *     Zeile wäre eine Behauptung über eine Menge, die es nicht gibt.
+ *   * die Sichtbarkeit entscheidet der AUFRUFER, nicht diese Funktion —
+ *     genau wie bei `fetchFigureBySlug()`. Die Seite prüft
+ *     `catalogVisible` und antwortet sonst mit 404 (ADR-0039).
+ */
+export async function fetchAccessoryBySlug(slug: string): Promise<CatalogFigure | null> {
+  const supabase = await createClient();
+  const [lookups, result] = await Promise.all([
+    loadLookups(),
+    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("slug", slug).maybeSingle(),
+  ]);
+
+  if (result.error) throw new Error(`accessory: ${result.error.message}`);
+  if (!result.data) return null;
+
+  const figure = toFigure(result.data as FigureRow, lookups);
+  /* Eine Figur ist hier falsch: sie hat ihre eigene Seite mit Charakter,
+     Variante und Sammeln. Zwei Adressräume, keine Vermischung. */
+  return isCollectible(figure) ? null : figure;
+}
+
+/** PostgREST meldet so, dass es die Spalte nicht gibt. */
+const COLUMN_MISSING = "42703";
+
+/**
+ * Die USK-Alterskennzeichnung eines Spiels (`0139`) — oder null.
+ *
+ * EIGENE ABFRAGE, NICHT IN `FIGURE_COLUMNS`. Die Spaltenliste des Katalogs
+ * wird auf JEDER Umgebung ausgeführt, und `usk_rating` gibt es auf
+ * Production noch nicht: eine Spalte dort hineinzunehmen, legte den
+ * gesamten öffentlichen Katalog lahm, sobald jemand ihn aufruft.
+ *
+ * `null` heißt deshalb zweierlei, und beides führt zum selben Verhalten:
+ * nicht erfasst, oder diese Umgebung kennt die Spalte noch nicht. In
+ * beiden Fällen steht im Angebot keine Kennzeichnung — und ohne erfasste
+ * Kennzeichnung gibt es ohnehin kein Angebot für ein Spiel
+ * (`seller_set_sale_release()`), die beiden Fälle treffen also nie auf ein
+ * kaufbares Spiel.
+ */
+export async function fetchUskRating(skyId: string): Promise<number | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("skylanders").select("usk_rating").eq("sky_id", skyId).maybeSingle();
+  if (error) {
+    if (error.code === COLUMN_MISSING) return null;
+    throw new Error(`usk rating: ${error.message}`);
+  }
+  const wert = (data as { usk_rating?: number | null } | null)?.usk_rating;
+  return typeof wert === "number" ? wert : null;
+}
+
 type CharacterRow = {
   id: number;
   canonical_name: string;

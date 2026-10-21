@@ -5,7 +5,7 @@ import { isAdmin } from "@/lib/auth/admin";
 import { currentUser } from "@/lib/auth/user";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
-import { fetchCatalog } from "@/lib/catalog/queries";
+import { fetchAccessoryCatalog, fetchCatalog } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchOffers } from "@/lib/shop/queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
@@ -52,12 +52,19 @@ export default async function ShopPage({
   const params = await searchParams;
   const admin = await isAdmin();
 
-  const [user, catalog, offers, owned, seller, marketBoost, freeShippingFrom] = await Promise.all([
+  const [user, figuren, zubehoer, offers, owned, seller, marketBoost, freeShippingFrom] =
+    await Promise.all([
     currentUser(),
     // Hidden figures are filtered by `shopEntries()`, but asking for them here
     // would put them in the browser's payload on the way. The public slice is
     // the honest request.
     fetchCatalog({ includeHidden: false }),
+    /*
+     * UND DAS ZUBEHÖR (ADR-0129). Dieselbe Seite, dasselbe Raster, dieselbe
+     * Angebotsprojektion — ein freigegebenes Portal steht hier, sobald es
+     * Preis und Bestand hat, und sonst nicht. Kein zweites Schaufenster.
+     */
+    fetchAccessoryCatalog(),
     fetchOffers(),
     admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
     // Who sells here (ADR-0064, migration 0027). One call for the page.
@@ -80,7 +87,7 @@ export default async function ShopPage({
     ? de.shop.page.intro(seller.displayName, shippingFrom)
     : de.shop.page.introFallback(shippingFrom);
 
-  const entries = shopEntries(catalog, offers);
+  const entries = shopEntries([...figuren, ...zubehoer], offers);
 
   // Only outlines a card after coming back from sign-in. Nothing is written
   // from a URL parameter (ADR-0027).

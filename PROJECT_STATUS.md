@@ -3756,6 +3756,62 @@ Shop-Schalter: er sagte „Im Shop", und im Shop steht nichts.
 Zahlen oben stammen aus einer direkten Lesung, nicht aus diesem Flug; das
 Blatt ist die Fassung fürs Protokoll.
 
+### `0139`/`0140` auf Staging — und die Verkaufsoberfläche (2026-10-21)
+
+**Beide Migrationen sind angewendet.** S1–S4 gefahren, S2 und S4
+erfolgreich; alle Sicherheitszeilen erfüllt: **256** Angebote mit Abdruck
+`4d1d6c30…`, **534** shopfähig, **0** freigegebene Zubehörpositionen,
+**0** Zubehörangebote, **285** Lagerzeilen, **626** Katalogzeilen,
+Belegausstellung gesperrt. Die Migration hat getan, was sie sollte: ein Tor
+gebaut und es nicht geöffnet.
+
+**Ein Befund, und er lag an der Prüfung:** S1 und S3 meldeten **564 statt
+534** sammelbare Zeilen — die Differenz ist genau die Zahl der
+redaktionell ausgeblendeten Figuren. Z0 definiert „sammelbar" mit
+`catalog_visible`; meine Zählung liess es weg. **Die Sammlungslogik ist
+richtig** (`collectionStats()` zählt `isActive && catalogVisible`, die
+Nennerabfrage filtert auf beides), die Prüfdatei war es nicht. Berichtigt
+wurde die Prüfdatei — `0139` ist angewendet und nach Regel 1 eingefroren.
+
+**Der Riegel dagegen:** `src/lib/shop/z0-parity.test.ts`. Jede Prüfdatei,
+die einen Z0-Wert als Erwartung führt, muss ihn mit **demselben Ausdruck**
+messen wie Z0 — verglichen wird der Ausdruck, nicht die Zahl. Der Test
+fängt beide Pannen dieser Tage: die erfundene `md5`-Formel und die Zählung
+ohne `catalog_visible`.
+
+**Ein zweites Anwenden ist ausgeschlossen, in drei Schichten:** die
+Migration selbst bricht mit „steht schon" ab (Probelauf **P39** fährt das
+nach), `staging_pending_migrations.sql` lässt die Datenbank sagen, was
+steht, und `APPLIED.md` ist das Register. Eine
+`supabase_migrations.schema_migrations` führt dieses Projekt nicht.
+
+#### Phase C — die Verkaufsoberfläche
+
+| Fläche | was sie jetzt kann |
+|---|---|
+| **Lager** `/business/inventory` | Preis, Mengen, **Lieferumfang**, **USK** (nur bei Spielen), **Freigabeschalter** — und der **Grund**, warum eine Position noch nicht verkäuflich ist. Drei getrennte Aufrufe, damit niemand beim Preispflegen versehentlich freigibt |
+| **Kachel** `/zubehoer` | Preis und Lieferumfang, sobald es ein Angebot gibt; sonst „Aktuell kein Angebot". Die ganze Kachel führt auf die Detailseite — **kein Kaufknopf** |
+| **Detailseite** `/zubehoer/[slug]` | **neu**: Art, Plattform oder Modell, Serie(n), **USK**, Zustandsstandard im Klartext, **Lieferumfang** — und `OfferPanel`, **dieselbe Komponente** wie auf der Figurenseite |
+| **Shop** `/shop` | freigegebenes Zubehör im selben Raster, über dieselbe Projektion. Mit der **eigenen Kachel**, nicht der Figurenkarte |
+| **Warenkorb, Checkout, Bestellung** | **unverändert** — sie waren schon typneutral |
+| **Sammlung** | **unberührt**. Kein Sammelknopf, kein Besitzsiegel, kein Fortschritt auf keiner der vier Flächen |
+
+**Der Grund wird gelesen, nicht nachgerechnet.** Die Gründeleiter steht in
+`admin_shop_listing_audit()`, und zwar einmal; die Oberfläche übersetzt sie
+nur. Ein Test verbietet, dass `usk_rating`, `sale_released` oder
+`is_position_sellable` im Browsercode auftauchen.
+
+> **`0141` fehlt noch — und ohne sie zeigt die Lagerkarte die drei
+> Steuerungen nicht.** Sie ist **rein additiv**: eine neue Lesefunktion
+> `seller_sale_state()`, weil `admin_shop_inventory()` die drei Spalten
+> nicht liefert und ihren Rückgabetyp zu erweitern hiesse, eine Funktion zu
+> droppen, an der die ganze Lagerseite hängt. Die Oberfläche stürzt ohne
+> sie nicht ab: `fetchSaleState()` fängt genau den einen Fehler
+> „Funktion gibt es nicht" ab, und ohne Auskunft wird nichts angeboten.
+>
+> Lauf: `supabase/operations/staging-0141.sql`. Danach ist der Durchstich
+> möglich: **ein Portal** freigeben, bepreisen, kaufen.
+
 ### Ein Zustandsstandard für ganz SkyIsles (2026-10-20, ADR-0130)
 
 **Die verbindliche Produktentscheidung:** SkyIsles handelt ausschließlich

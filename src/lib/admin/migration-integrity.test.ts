@@ -130,21 +130,25 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die fünfzehn angewendeten", () => {
+  it("die Staging-Tabelle führt die siebzehn angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
      * `supabase/operations/staging-0135-0136.sql` —, am 2026-10-20 `0137`
-     * und `0138`, ebenso in einem Durchgang über
-     * `supabase/operations/staging-0137-0138.sql`. `0133` und `0134` fehlen
+     * und `0138` ebenso, und am selben Tag `0139` und `0140` in zwei
+     * getrennten Durchgängen (`staging-0139.sql`, `staging-0140.sql`):
+     * `0140` setzt `0139` voraus und läuft als eigene Transaktion danach,
+     * damit der Beweis von `0139` lesbar bleibt. `0133` und `0134` fehlen
      * weiter: die Tabelle hat damit eine Lücke, und die ist gewollt (die
      * Nummer ist eine Reihenfolge, keine Kette).
      */
-    expect(zeilen.length).toBe(15);
+    expect(zeilen.length).toBe(17);
     for (const datei of ["0135_catalog_item_type.sql",
                          "0136_business_backup_item_type.sql",
                          "0137_catalog_accessories.sql",
-                         "0138_catalog_portals.sql"]) {
+                         "0138_catalog_portals.sql",
+                         "0139_accessory_sale_release.sql",
+                         "0140_business_backup_sale_release.sql"]) {
       expect(zeilen.map((z) => z.datei), datei).toContain(datei);
     }
     expect(zeilen.map((z) => z.datei)).not.toContain("0133_paid_total_immutable.sql");
@@ -198,8 +202,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   it("wo `gleich` steht, ist die Datei bitgenau die ausgeführte Fassung", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
-       `0137`/`0138`. Nur `0130` weicht ab und zeigt auf ihren Nachtrag. */
-    expect(gleiche.length).toBe(14);
+       `0137`/`0138`, sechzehn seit `0139`/`0140`. Nur `0130` weicht ab und
+       zeigt auf ihren Nachtrag. */
+    expect(gleiche.length).toBe(16);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
@@ -376,6 +381,18 @@ describe("0131_function_body_check.sql erwartet, was die Migration enthält", ()
     expect(pruefung).toContain("'28'");
     /* Die Feldzahl gehört zum Stand: 352 in `0131`, 353 ab `0136`. */
     expect(pruefung).toContain("674, 352, 'STAND_0131_ZEICHENGLEICH'");
+  });
+
+  it("und den Stand aus 0140 als dritten — seit dem Lauf vom 2026-10-20", () => {
+    /* Ohne diese Zeile meldete die Prüfdatei auf Staging „UNBEKANNT" für
+       einen Rumpf, der genau so freigegeben wurde. Nachgerechnet aus der
+       Migrationsdatei, nicht abgeschrieben. */
+    const r0140 = rumpfVon(
+      readFileSync("supabase/migrations/0140_business_backup_sale_release.sql", "utf8"));
+    expect(md5(r0140)).toBe("a32b148cebe00ee0d0d469f96fd2028e");
+    expect(r0140.length).toBe(21622);
+    expect(pruefung).toContain("'a32b148cebe00ee0d0d469f96fd2028e', 21622");
+    expect(pruefung).toContain("1245, 356, 'STAND_0140_ZEICHENGLEICH', true");
   });
 
   it("und die Prüfdatei kennt den Stand aus 0136 als zweiten freigegebenen", () => {

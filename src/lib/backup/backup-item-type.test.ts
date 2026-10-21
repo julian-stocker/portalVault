@@ -315,10 +315,15 @@ describe("0131_function_body_check kennt 0131 UND 0136", () => {
     felder: Number(m[5]), name: m[6], freigegeben: m[7] === "true",
   }));
 
-  it("drei Stände: 0130 bekannt aber überholt, 0131 und 0136 freigegeben", () => {
-    expect(staende).toHaveLength(3);
+  it("vier Stände: 0130 bekannt aber überholt, 0131, 0136 und 0140 freigegeben", () => {
+    /* `0140` kam am 2026-10-20 dazu: die Sicherung trägt seitdem
+       `sale_released`, `delivery_scope` und `usk_rating`. Ohne diesen
+       Eintrag meldete die Prüfdatei auf Staging „UNBEKANNT" für einen
+       Rumpf, der genau so freigegeben wurde. */
+    expect(staende).toHaveLength(4);
     expect(staende.filter((s) => s.freigegeben).map((s) => s.name))
-      .toEqual(["STAND_0131_ZEICHENGLEICH", "STAND_0136_ZEICHENGLEICH"]);
+      .toEqual(["STAND_0131_ZEICHENGLEICH", "STAND_0136_ZEICHENGLEICH",
+                "STAND_0140_ZEICHENGLEICH"]);
     expect(staende.find((s) => s.name === "STAND_0130")?.freigegeben).toBe(false);
   });
 
@@ -329,6 +334,8 @@ describe("0131_function_body_check kennt 0131 UND 0136", () => {
         "supabase/migrations/0131_business_backup_seller_fields.sql",
       STAND_0136_ZEICHENGLEICH:
         "supabase/migrations/0136_business_backup_item_type.sql",
+      STAND_0140_ZEICHENGLEICH:
+        "supabase/migrations/0140_business_backup_sale_release.sql",
     };
     for (const s of staende) {
       const sql = datei(quelle[s.name]);

@@ -178,10 +178,27 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (404, 'Abdruck', 'verkaufbare Lagerpositionen (am alten Tor gemessen)',
       (select count(*)::text from public.shop_inventory i
         where public.is_shop_eligible(i.sky_id)), null),
+  /*
+   * DIE Z0-DEFINITION, ZEICHEN FUER ZEICHEN AUS `0135_preflight.sql`
+   * (Zeilen 16-21) — EINSCHLIESSLICH `s.catalog_visible`.
+   *
+   * Eine frueher hier stehende Fassung liess die Sichtbarkeit weg und zaehlte
+   * damit die 30 redaktionell ausgeblendeten Figuren mit: 564 statt 534. Das
+   * war der einzige Befund von S1 und S3 am 2026-10-20, und er lag an DIESER
+   * Zeile, nicht an den Daten.
+   *
+   * Die Sichtbarkeit gehoert dazu, weil der Fortschritts-Nenner zaehlt, was
+   * der oeffentliche Katalog HEUTE anbietet: `collectionStats()` zaehlt
+   * `entry.figure.isActive && entry.figure.catalogVisible`, und die
+   * Nennerabfrage in `fetchCatalog()` filtert auf beides. Eine ausgeblendete
+   * Figur ist in keiner Haelfte — und genau das macht „besessen > gesamt"
+   * unmoeglich (ADR-0040).
+   */
   (405, 'Abdruck', 'sammelbare Katalogzeilen',
       (select count(*)::text from public.skylanders s
          join public.categories c on c.id = s.category_id
-        where s.is_active and not (c.name = any (public.non_collectible_categories()))),
+        where s.is_active and s.catalog_visible
+          and not (c.name = any (public.non_collectible_categories()))),
       (select wert from soll where schluessel = 'sammelbar')),
   (406, 'Abdruck', 'Lagerzeilen',
       (select count(*)::text from public.shop_inventory),

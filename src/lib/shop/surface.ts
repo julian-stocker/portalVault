@@ -17,6 +17,7 @@
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { isCollectible } from "@/lib/catalog/collectible";
+import { isAccessory } from "@/lib/catalog/item-type";
 import { v1BuyableOffers, offersFor, type Offer, type OfferIndex } from "@/lib/shop/offer";
 import { compareFigures } from "@/lib/catalog/sort";
 
@@ -38,8 +39,10 @@ export type ShopEntry = {
  *   not visible       `catalogVisible` — an editorially hidden figure has no
  *                     public detail page either (ADR-0039), so it must not
  *                     appear on a public shop page
- *   not a collectible `isCollectible()` — console games are canonical rows,
- *                     not part of the collector catalog (ADR-0029)
+ *   weder sammelbar    `isCollectible()` ODER `isAccessory()` — eine Figur
+ *   noch Zubehör       gehört dem Sammlerkatalog, ein Spiel oder Portal
+ *                      dem Zubehörkatalog; alles andere gehört in kein
+ *                      Schaufenster (ADR-0129)
  *
  * Sorted by price rather than by name: a shop page is read as a price list,
  * and the cheapest thing is the one most people are looking for. Ties fall
@@ -53,7 +56,18 @@ export function shopEntries(
 
   for (const figure of catalog) {
     if (!figure.catalogVisible) continue;
-    if (!isCollectible(figure)) continue;
+    /*
+     * SEIT ADR-0129 AUCH ZUBEHÖR. Bis dahin stand hier `isCollectible()`
+     * allein, und das war richtig, solange Spiele und Portale gar nicht
+     * verkauft werden konnten.
+     *
+     * Was hier NICHT entschieden wird, ist die Verkäuflichkeit: die hat
+     * `is_position_sellable()` in der Datenbank entschieden, bevor
+     * `shop_offers()` eine Zeile lieferte. Diese Bedingung sortiert nur
+     * aus, was im Schaufenster nichts zu suchen hat, auch wenn es ein
+     * Angebot hätte — ein Bundle etwa, oder eine Fixture-Zeile.
+     */
+    if (!isCollectible(figure) && !isAccessory(figure)) continue;
 
     const buyable = v1BuyableOffers(offersFor(offers, figure.skyId));
     if (buyable.length === 0) continue;

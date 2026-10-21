@@ -62,6 +62,10 @@ bekannt (abdruck, fassung) as (values
   ('a4d1420cd705f0e7bf015b8722afb72a', '0134'),
   ('24c3810288bb20929fe995554a267adf', '0131'),
   ('f6d08440707ba72a8040a8d1e666c092', '0136'),
+  -- Nachgerechnet wie die uebrigen: der Text zwischen `as $$` und `$$;` aus
+  -- `0140_business_backup_sale_release.sql`. Das Verfahren ist an `0136`
+  -- verifiziert, dessen Marke oben unabhaengig belegt ist.
+  ('a32b148cebe00ee0d0d469f96fd2028e', '0140'),
   ('2ec43969fb6ea7adb0b1a4616e6889f4', '0133')
 ),
 stand as (
@@ -125,8 +129,61 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (232, 'Z1', 'Info: Stand der Betriebssicherung (0131 vor 0136, 0136 danach)',
       (select fassung from stand where funktion = 'seller_business_backup'), null),
   (233, 'Z1', 'der Stand der Betriebssicherung ist bekannt, nicht UNBEKANNT',
-      (select case when fassung in ('0131', '0136') then 'ja' else 'nein: ' || fassung end
-         from stand where funktion = 'seller_business_backup'), 'ja')
+      (select case when fassung in ('0131', '0136', '0140') then 'ja'
+                   else 'nein: ' || fassung end
+         from stand where funktion = 'seller_business_backup'), 'ja'),
+
+  -- --------------------------- 0139 und 0140: welcher Stand steht gerade?
+  --
+  -- WOFUER DIESE VIER ZEILEN DA SIND. Dieses Projekt fuehrt keine
+  -- `supabase_migrations.schema_migrations` — Migrationen werden von Hand
+  -- angewendet, und das Register ist `supabase/migrations/APPLIED.md`
+  -- (`disaster_recovery_pg_dump.md`, Abschnitt 4). Damit niemand raten
+  -- muss, ob `0139`/`0140` schon gelaufen sind, beantwortet die DATENBANK
+  -- die Frage selbst. Ohne Sollwert: dieselbe Datei laeuft vor und nach
+  -- dem Lauf, und was sich aendern DARF, steht hier ohne Erwartung.
+  --
+  -- Der eigentliche Schutz vor einem zweiten Lauf ist das aber nicht — der
+  -- steht in den Migrationen: `0139` bricht mit „steht schon" ab, `0140`
+  -- mit „% Feldzeilen statt 353". Probelauf P39 faehrt beides nach.
+  (241, '0139', 'Info: Spalte shop_inventory.sale_released',
+      (select case when count(*) = 1 then 'steht' else 'fehlt' end
+         from information_schema.columns
+        where table_schema = 'public' and table_name = 'shop_inventory'
+          and column_name = 'sale_released'), null),
+  (242, '0139', 'Info: Spalte shop_inventory.delivery_scope',
+      (select case when count(*) = 1 then 'steht' else 'fehlt' end
+         from information_schema.columns
+        where table_schema = 'public' and table_name = 'shop_inventory'
+          and column_name = 'delivery_scope'), null),
+  (243, '0139', 'Info: Spalte skylanders.usk_rating',
+      (select case when count(*) = 1 then 'steht' else 'fehlt' end
+         from information_schema.columns
+        where table_schema = 'public' and table_name = 'skylanders'
+          and column_name = 'usk_rating'), null),
+  (244, '0139', 'die drei Spalten stehen ENTWEDER alle ODER keine',
+      (select case when count(*) in (0, 3) then 'ja' else 'nein: ' || count(*)::text end
+         from information_schema.columns
+        where table_schema = 'public'
+          and ((table_name = 'shop_inventory'
+                and column_name in ('sale_released', 'delivery_scope'))
+            or (table_name = 'skylanders' and column_name = 'usk_rating'))), 'ja'),
+  (245, '0140', 'Info: die Sicherung kennt die drei Felder (0140 steht)',
+      (select case when position('sale_released' in prosrc) > 0
+                     and position('delivery_scope' in prosrc) > 0
+                     and position('usk_rating' in prosrc) > 0
+                   then 'ja' else 'nein' end
+         from pg_proc where oid = to_regprocedure('public.seller_business_backup()')), null),
+  (246, '0140', 'und sie passt zu den Spalten: ohne 0139 kein 0140',
+      (select case
+                when position('sale_released' in p.prosrc) = 0 then 'ja'
+                when exists (select 1 from information_schema.columns
+                              where table_schema = 'public'
+                                and table_name = 'shop_inventory'
+                                and column_name = 'sale_released') then 'ja'
+                else 'nein: 0140 steht, 0139 fehlt' end
+         from pg_proc p
+        where p.oid = to_regprocedure('public.seller_business_backup()')), 'ja')
 ),
 ergebnis as (
   select nr, bereich, pruefung, befund, erwartet,

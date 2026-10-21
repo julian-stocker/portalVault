@@ -28,9 +28,17 @@
  * keinen Knopf, der eine Sammlung ändert, und kein Besitzsiegel — Zubehör
  * gehört nicht in eine Sammlung, und ein Steuerelement, das es trotzdem
  * anbietet, wäre eine Falle.
+ *
+ * UND KEIN KAUFKNOPF. Die Kachel führt auf `/zubehoer/<slug>`, wo Zustand,
+ * Lieferumfang, Plattform und Alterskennzeichnung stehen — ein Kauf ohne
+ * diese Angaben wäre genau der Fehler, den ADR-0130 ausschliesst.
+ * Dieselbe Entscheidung wie bei der Figurenkarte.
  * ---------------------------------------------------------------------------
  */
+import Link from "next/link";
+
 import { accessoryDetail } from "@/lib/catalog/accessory-facts";
+import { deliveryScopeLabel } from "@/lib/shop/delivery-scope";
 import { itemTypeOf } from "@/lib/catalog/item-type";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { formatPrice } from "@/lib/format";
@@ -53,13 +61,13 @@ export function AccessoryCard({
    */
   seriesScope: readonly string[];
   /**
-   * Was SkyIsles für diesen Artikel anbietet — heute immer nichts.
+   * Was SkyIsles für diesen Artikel anbietet.
    *
-   * `shop_offers()` schliesst Zubehör am Artikeltyp aus (`0135`), also ist
-   * diese Liste leer und die Kachel sagt „Aktuell kein Angebot". Sie wird
-   * trotzdem schon durchgereicht: wenn Zubehör eines Tages angeboten werden
-   * darf, füllt sich dieselbe Stelle, ohne dass eine Kachel umgebaut wird.
-   * Die Entscheidung darüber ist eine eigene (ADR-0128, Punkt 8).
+   * Aus derselben Projektion wie Shop und Figurenkatalog
+   * (`shop_offers()`) — es gibt keine zweite Angebotsverwaltung. Leer,
+   * solange die Lagerposition nicht ausdrücklich freigegeben ist
+   * (`sale_released`, `0139`); dann sagt die Kachel „Aktuell kein
+   * Angebot". Das ist der Normalfall und kein Mangel.
    */
   offers?: readonly Offer[];
   /** Nur für die Kennzeichnung einer ausgeblendeten Zeile. */
@@ -71,9 +79,25 @@ export function AccessoryCard({
     (beste, o) => (beste === null || o.price < beste.price ? o : beste), null);
   /* Weitere Serien, für die dieses Portal laut Arbeitsmappe gilt. */
   const weitere = seriesScope.slice(1);
+  /* Der Lieferumfang des günstigsten Angebots. Er steht am ANGEBOT, nicht
+     am Artikel: zwei Exemplare können verschieden vollständig sein. */
+  const umfang = deliveryScopeLabel(guenstigstes?.deliveryScope ?? null);
 
   return (
-    <article className="flex min-w-0 flex-col overflow-hidden rounded-sky-lg bg-surface/80 ring-1 ring-border/70 transition-colors hover:ring-border-strong">
+    /*
+     * DIE GANZE KACHEL IST EIN WEG, kein Kaufknopf.
+     *
+     * Was man vor einem Kauf wissen muss — Zustand, Lieferumfang,
+     * Plattform, Alterskennzeichnung — passt nicht auf eine Kachel, und
+     * ein Kauf ohne diese Angaben wäre genau der Fehler, den ADR-0130
+     * ausschliesst. Dieselbe Entscheidung wie bei der Figurenkarte: sie
+     * führt auf `/skylanders/<slug>#angebote`, nicht in den Warenkorb.
+     */
+    <Link
+      href={`/zubehoer/${item.slug}`}
+      aria-label={copy.openOffers(item.displayName)}
+      className="flex min-w-0 flex-col overflow-hidden rounded-sky-lg bg-surface/80 ring-1 ring-border/70 transition-colors hover:ring-border-strong"
+    >
       {/*
         DIE BÜHNE. Festes Seitenverhältnis, damit das Raster ruhig bleibt —
         mit Bild wie ohne. `aspect-[4/3]` statt des hochkanten Figurenformats:
@@ -126,9 +150,10 @@ export function AccessoryCard({
         <p className="truncate font-mono text-[0.6875rem] text-muted">{item.skyId}</p>
 
         {/*
-          DAS ANGEBOT, oder sein Fehlen. Heute immer das Fehlen: Zubehör ist
-          nicht shopfähig (`is_shop_eligible()` seit `0135`). Der Satz sagt
-          das ruhig, statt eine Leerstelle zu lassen.
+          DAS ANGEBOT, oder sein Fehlen. Ohne ausdrückliche Freigabe der
+          Lagerposition gibt es keines (ADR-0129) — der Satz sagt das
+          ruhig, statt eine Leerstelle zu lassen. Mit Freigabe stehen hier
+          Preis und Lieferumfang.
         */}
         <p className="mt-auto pt-1.5 text-xs">
           {guenstigstes === null ? (
@@ -137,10 +162,15 @@ export function AccessoryCard({
             <span className="font-semibold text-foreground">
               {formatPrice(guenstigstes.price)}
               {guenstigstes.available ? "" : ` · ${copy.soldOut}`}
+              {/* Was im Paket liegt — die zweite Hälfte der Auskunft, und
+                  bei gebrauchter Ware die wichtigere. */}
+              {umfang !== null ? (
+                <span className="block font-normal text-muted">{umfang}</span>
+              ) : null}
             </span>
           )}
         </p>
       </div>
-    </article>
+    </Link>
   );
 }

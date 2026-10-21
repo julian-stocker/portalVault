@@ -3849,6 +3849,13 @@ export const de = {
      */
     noOffer: "Aktuell kein Angebot",
     soldOut: "ausverkauft",
+    /* Die Detailseite eines Zubehörartikels. */
+    backToList: "Zurück zum Zubehör",
+    detailType: "Art",
+    detailPlatform: "Plattform",
+    detailModel: "Modellnummer",
+    detailSeries: "Serie",
+    openOffers: (name: string) => `${name} ansehen`,
     sortLabel: "Sortierung",
     sorts: {
       name: "Name",
@@ -3953,10 +3960,47 @@ export const de = {
        Dialog — und er nennt den Grund, nicht nur die Tatsache. */
     accessoryNotShop: "Zubehör — nicht im Shop",
     accessoryNotShopHint:
-      "Spiele, Portale und Zubehör werden nicht öffentlich angeboten. Bestand und "
-      + "Historie werden geführt wie bei jeder Figur; Preis und Shopfreigabe gibt es nicht.",
+      "Für diese Position liegt kein Verkaufszustand vor. Bestand und Historie werden "
+      + "geführt wie bei jeder Figur; Lieferumfang und Freigabe erscheinen, sobald die "
+      + "Datenbank sie führt.",
     condition: "Zustand",
-    /* Der EINE SkyIsles-Zustand (ADR-0130) — siehe `shop.conditionStandard`. */
+    /* ---------------------------------------------------------------
+     * ZUBEHÖR VERKAUFEN (0139/0141, ADR-0129/0130)
+     * --------------------------------------------------------------- */
+    unknownDeliveryScope: "Diesen Lieferumfang gibt es nicht.",
+    unknownUskRating: "Diese USK-Einstufung gibt es nicht.",
+    /** Die Überschrift über den drei Zubehörangaben. */
+    saleSection: "Verkauf",
+    deliveryScope: "Lieferumfang",
+    deliveryScopeNone: "Nicht angegeben",
+    uskRating: "USK",
+    uskNone: "Nicht erfasst",
+    uskValue: (stufe: number) => `USK ${stufe}`,
+    released: "Zum Verkauf freigegeben",
+    notReleased: "Nicht freigegeben",
+    /** Was passiert, wenn man freigibt — einmal gesagt, nicht geraten. */
+    releaseHint:
+      "Erst mit der Freigabe erscheint diese Position im Shop. "
+      + "Zurücknehmen geht jederzeit.",
+    /*
+     * WARUM NOCH NICHT — die Gründe kommen aus `admin_shop_listing_audit()`
+     * und werden hier ÜBERSETZT, nicht nachgerechnet. Ein Grund ohne Satz
+     * erscheint roh; das ist besser als ein erfundener.
+     */
+    saleReasons: {
+      "no catalog row": "Zu dieser Position gibt es keinen Katalogartikel.",
+      "inactive figure": "Der Artikel ist nicht aktiv.",
+      "editorially hidden": "Der Artikel ist im Katalog nicht sichtbar.",
+      "not a collectible": "Der Artikel ist nicht sammelbar.",
+      "item type not sold": "Diese Artikelart wird nicht verkauft.",
+      "usk rating missing": "Für dieses Spiel ist keine USK-Einstufung erfasst.",
+      "usk 18 needs age verification":
+        "USK 18 lässt sich ohne Altersprüfung nicht verkaufen.",
+      "delivery scope missing": "Es ist nicht angegeben, was geliefert wird.",
+      "not released for sale": "Diese Position ist nicht zum Verkauf freigegeben.",
+    } as Record<string, string>,
+    /** Der Fall, den die Gründeleiter nicht kennt, weil er den Preis betrifft. */
+    saleNeedsPrice: "Ohne Verkaufspreis ist keine Freigabe möglich.",
     conditionLoose: "Gebraucht",
     /* Nur noch historisch: Lagerzeilen von vor `0108`. */
     conditionBoxed: "OVP",

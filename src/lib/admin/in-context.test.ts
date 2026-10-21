@@ -204,6 +204,11 @@ describe("the same mutations as /admin, not new ones", () => {
         "admin_set_catalog_group",
         "admin_set_shop_percentage",
         "admin_set_image_override",
+        // Die USK-Alterskennzeichnung eines Spiels (0139, ADR-0129).
+        // Katalogdatum wie `display_name_override`, deshalb Plattformadmin
+        // und nicht Betrieb — und von der Katalogkarte wird sie nicht
+        // aufgerufen, sondern aus der Lagerkarte.
+        "admin_set_usk_rating",
         // ADR-0060 — the commerce mode, its testers, the account search and
         // the sandbox stock reversal. All on /admin, none in the catalog.
         "admin_set_commerce_mode",

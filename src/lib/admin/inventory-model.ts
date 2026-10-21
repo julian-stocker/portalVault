@@ -149,9 +149,40 @@ export function isValidPercentage(value: number): boolean {
 }
 
 /** A position together with the figure it holds. */
+/**
+ * Was der Betrieb an einer ZUBEHÖRPOSITION pflegt — und was noch fehlt.
+ *
+ * Kommt aus `seller_sale_state()` (`0141`), einem reinen Lesezugriff. Der
+ * **Grund** wird dort aus `admin_shop_listing_audit()` gejoint, nicht
+ * nachgerechnet: eine zweite Herleitung im Browser wäre eine zweite
+ * Wahrheit, und sie liefe auseinander, sobald jemand eine Regel ändert.
+ *
+ * `null` heißt **unbekannt**, nie „verkäuflich": liefert die Datenbank zu
+ * einer Position keinen Satz — weil `0141` noch nicht angewendet ist oder
+ * die Zeile ihr unbekannt ist —, zeigt die Oberfläche keine Steuerung an.
+ */
+export type SaleState = {
+  itemType: string;
+  saleReleased: boolean;
+  /** `disc_only` … `portal_cable`, oder null = nicht angegeben. */
+  deliveryScope: string | null;
+  /** 0, 6, 12, 16, 18 — oder null = nicht erfasst. Nur bei Spielen. */
+  uskRating: number | null;
+  /** Darf diese Position öffentlich verkauft werden? */
+  sellable: boolean;
+  /** Warum nicht — der eine Grund aus der einen Leiter, oder null. */
+  reason: string | null;
+};
+
 export type InventoryPosition = InventoryRow & {
   /** null when the position belongs to something outside the collector catalog. */
   figure: CatalogFigure | null;
+  /**
+   * Der Verkaufszustand dieser Position, oder `null`, wenn die Datenbank
+   * ihn nicht liefert (`0141` nicht angewendet). **Nicht raten:** ohne
+   * Auskunft zeigt die Karte die Zubehörsteuerungen nicht an.
+   */
+  saleState?: SaleState | null;
 };
 
 export type Movement = {
@@ -220,23 +251,47 @@ export function isAccessoryPosition(position: InventoryPosition): boolean {
 /**
  * Darf diese Position im Shop angeboten und bepreist werden?
  *
- * NEIN FÜR ZUBEHÖR, und zwar bevor jemand es versucht. `set_shop_listing()`
- * würde ein Portal durchaus auf `is_listed = true` setzen — aber
- * `shop_offers()` filtert es über `is_shop_eligible()` am Artikeltyp wieder
- * heraus (`0135`). Der Schalter sagte dann „Im Shop", und im Shop stünde
- * nichts. Genau diese Art Knopf nimmt diese Oberfläche seit `0108` heraus:
- * „ein Knopf, von dem schon bekannt ist, dass er nicht wirkt, ist keine
- * Auswahl, sondern eine Falle."
+ * FÜR EINE FIGUR IMMER JA. Für Zubehör: nur mit ausdrücklicher Freigabe
+ * dieser Position (ADR-0129/0130). Bis `0139` war die Antwort pauschal
+ * nein, weil `shop_offers()` jedes Zubehörteil am Artikeltyp herausfilterte
+ * und der Schalter „Im Shop" damit ins Leere gezeigt hätte — „ein Knopf,
+ * von dem schon bekannt ist, dass er nicht wirkt, ist keine Auswahl,
+ * sondern eine Falle."
  *
- * Ob Spiele oder Portale je öffentlich verkauft werden, ist eine getrennte
- * Produktentscheidung (ADR-0128, Punkt 8) — sie würde ADR-0029/0048
- * revidieren und braucht Alterskennzeichnung und steuerliche Prüfung. Bis
- * dahin ist die Antwort hier nein.
+ * Jetzt wirkt er, sobald die Position freigegeben ist. Die Freigabe selbst
+ * ist ein eigener Schalter (`hasSaleControls()`), und sie verlangt von der
+ * Datenbank Lieferumfang, Preis und — bei Spielen — eine erfasste
+ * USK-Kennzeichnung.
  *
  * DER BESTAND BLEIBT DAVON UNBERÜHRT. Buchen, zählen und die Historie lesen
  * geht für ein Portal wie für jede Figur — `record_inventory_movement()`
  * fragt nur den Zustand, und `lose` ist er.
  */
 export function isShopGoods(position: InventoryPosition): boolean {
-  return !isAccessoryPosition(position);
+  if (!isAccessoryPosition(position)) return true;
+  /*
+   * SEIT ADR-0129/0130 IST DAS KEIN NEIN MEHR, SONDERN EIN VIELLEICHT.
+   *
+   * Zubehör darf verkauft werden — aber Stück für Stück, und erst nach
+   * einer ausdrücklichen Freigabe an DIESER Position
+   * (`shop_inventory.sale_released`, `0139`). Ob sie da ist, weiß nur die
+   * Datenbank: `seller_sale_state()` liefert sie.
+   *
+   * OHNE AUSKUNFT: NEIN. Ein `undefined` heißt „die Datenbank hat nichts
+   * gesagt" — etwa weil `0141` noch nicht angewendet ist. Dann wird keine
+   * Steuerung angeboten, statt eine anzubieten, die ins Leere liefe.
+   */
+  return position.saleState?.saleReleased === true;
+}
+
+/**
+ * Darf der Betrieb an dieser Zubehörposition überhaupt etwas einstellen?
+ *
+ * Anders als `isShopGoods()`: Preis, Lieferumfang und der Freigabeschalter
+ * gehören zu JEDER Zubehörposition, auch zu einer noch nicht freigegebenen
+ * — sonst käme man nie zur Freigabe. Gebraucht wird nur die Auskunft, dass
+ * es sie gibt.
+ */
+export function hasSaleControls(position: InventoryPosition): boolean {
+  return isAccessoryPosition(position) && (position.saleState ?? null) !== null;
 }

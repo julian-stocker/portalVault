@@ -34,9 +34,11 @@ import { AdminThumb } from "@/components/admin/admin-thumb";
 import { PriceEditor } from "@/components/admin/price-editor";
 import { StockLedger } from "@/components/admin/stock-ledger";
 import { StockStepper } from "@/components/admin/stock-stepper";
-import { setListing } from "@/lib/admin/actions";
 import {
-  isOperativeCondition, isShopGoods, type InventoryPosition,
+  setDeliveryScope, setListing, setSaleRelease, setUskRating,
+} from "@/lib/admin/actions";
+import {
+  hasSaleControls, isOperativeCondition, isShopGoods, type InventoryPosition,
 } from "@/lib/admin/inventory-model";
 import { loadCardHistory } from "@/lib/admin/legacy-actions";
 import {
@@ -44,6 +46,9 @@ import {
   type CardHistory, type LedgerEntry, type TradeTotals,
 } from "@/lib/admin/stock-history";
 import { automaticShopPrice } from "@/lib/shop/offer";
+import {
+  USK_RATINGS, deliveryScopeLabel, scopesFor,
+} from "@/lib/shop/delivery-scope";
 import { formatNumber, formatPrice } from "@/lib/format";
 import { imageSrc } from "@/lib/catalog/image";
 import { de } from "@/lib/i18n/de";
@@ -156,6 +161,32 @@ export function InventoryCard({
    * Price and listing travel together, because `set_shop_listing` writes
    * both. Whichever one is being changed, the other is sent as it stands.
    */
+  /** Der Verkaufszustand dieser Position, oder null = keine Auskunft. */
+  const saleState = hasSaleControls(position) ? (position.saleState ?? null) : null;
+
+  /** Ein Aufruf, ein Ergebnis, ein Neuladen — dreimal dasselbe Muster. */
+  function fuehreAus(tun: () => Promise<{ ok: boolean; message?: string }>) {
+    setFailed(null);
+    startTransition(async () => {
+      const result = await tun();
+      if (!result.ok) { setFailed(result.message ?? ""); return; }
+      router.refresh();
+    });
+  }
+
+  const saveRelease = (released: boolean) =>
+    fuehreAus(() => setSaleRelease({
+      skyId: position.skyId, condition: position.condition, released,
+    }));
+
+  const saveScope = (scope: string | null) =>
+    fuehreAus(() => setDeliveryScope({
+      skyId: position.skyId, condition: position.condition, scope,
+    }));
+
+  const saveUsk = (rating: number | null) =>
+    fuehreAus(() => setUskRating({ skyId: position.skyId, rating }));
+
   function save(next: { salePrice?: number | null; isListed?: boolean }) {
     setFailed(null);
     startTransition(async () => {
@@ -213,9 +244,9 @@ export function InventoryCard({
             {position.isListed ? copy.listed : copy.notListed}
           </button>
         ) : !shopGoods ? (
-          /* Zubehör: kein Schalter und auch kein „Nicht im Shop" — das wäre
-             ein Zustand, den man ändern könnte. Die Art steht da, weil sie
-             die Antwort IST. */
+          /* Zubehör ohne Freigabe: hier steht die ART, kein Schalter. „Im
+             Shop" wäre erst nach der Freigabe eine Frage, und die hat ihren
+             eigenen Schalter weiter unten (ADR-0129). */
           <span className="min-h-7 shrink-0 rounded-full bg-surface px-2.5 text-[11px] font-medium whitespace-nowrap text-muted ring-1 ring-border/70">
             {copy.itemTypes[figure?.itemType ?? ""] ?? copy.accessoryNotShop}
           </span>
@@ -234,10 +265,16 @@ export function InventoryCard({
           <span className="font-medium">{copy.historicalCondition}</span>{" "}
           {copy.historicalConditionHint}
         </p>
-      ) : !shopGoods ? (
-        /* Ein Satz, kein Dialog — und er nennt den Grund, nicht nur die
-           Tatsache. Kein Warnton: hier ist nichts kaputt, das ist die
-           Sortimentsgrenze (ADR-0128, Punkt 8). */
+      ) : !shopGoods && saleState === null ? (
+        /*
+         * Zubehör, zu dem die Datenbank nichts sagt — `0141` ist in dieser
+         * Umgebung nicht angewendet. Dann gibt es hier auch nichts zu
+         * bedienen, und der Satz sagt das, statt eine Steuerung
+         * anzubieten, die beim Speichern scheiterte.
+         *
+         * Ist `0141` da, erklärt der Verkaufsblock weiter unten den Stand
+         * — mit dem Grund aus der Datenbank statt mit einem Satz von hier.
+         */
         <p className="text-[11px] leading-tight text-muted">
           {copy.accessoryNotShopHint}
         </p>
@@ -331,6 +368,103 @@ export function InventoryCard({
           </span>
         ) : null}
       </div>
+
+      {/*
+        5. VERKAUF — nur für Zubehör, und nur wenn die Datenbank Auskunft
+           gibt (`seller_sale_state()`, 0141).
+
+        DREI ANGABEN, DREI AUFRUFE. Lieferumfang, USK und Freigabe bleiben
+        getrennt: wer sie zusammenlegt, gibt irgendwann beim Pflegen einer
+        Angabe versehentlich frei. Für eine FIGUR erscheint der Block nicht
+        — dort gibt es nur einen Lieferumfang (die Figur), und die Freigabe
+        ist implizit.
+      */}
+      {saleState !== null ? (
+        <div className="flex flex-col gap-1.5 border-t border-border/30 pt-1.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="text-[11px] font-medium text-muted">{copy.saleSection}</span>
+
+            {/* Was im Paket liegt. Alle Werte der Artikelart stehen zur
+                Wahl — es gibt keine Kopplung an den Zustand (ADR-0130). */}
+            <label className="flex items-center gap-1.5">
+              <span className="sr-only">{copy.deliveryScope}</span>
+              <select
+                value={saleState.deliveryScope ?? ""}
+                disabled={pending}
+                onChange={(e) => saveScope(e.target.value === "" ? null : e.target.value)}
+                className="min-h-9 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40"
+              >
+                <option value="">{copy.deliveryScopeNone}</option>
+                {scopesFor(saleState.itemType).map((wert) => (
+                  <option key={wert} value={wert}>{deliveryScopeLabel(wert)}</option>
+                ))}
+              </select>
+            </label>
+
+            {/* Die Alterskennzeichnung — nur bei Spielen, und nie geraten.
+                Sie gehört dem Katalog, nicht dem Regal: geschrieben wird
+                sie über eine Adminfunktion (ADR-0077). */}
+            {saleState.itemType === "game" ? (
+              <label className="flex items-center gap-1.5">
+                <span className="sr-only">{copy.uskRating}</span>
+                <select
+                  value={saleState.uskRating === null ? "" : String(saleState.uskRating)}
+                  disabled={pending}
+                  onChange={(e) => saveUsk(e.target.value === "" ? null : Number(e.target.value))}
+                  className="min-h-9 rounded-sky-md bg-surface px-2 text-xs ring-1 ring-border/70 disabled:opacity-40"
+                >
+                  <option value="">{copy.uskNone}</option>
+                  {USK_RATINGS.map((stufe) => (
+                    <option key={stufe} value={stufe}>{copy.uskValue(stufe)}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
+            {/* Der Schalter. Zurücknehmen geht immer; freigeben nur, wenn
+                die Datenbank alle Bedingungen erfüllt sieht — sie lehnt
+                sonst ab, und der Grund steht darunter. */}
+            <button
+              type="button"
+              onClick={() => saveRelease(!saleState.saleReleased)}
+              aria-pressed={saleState.saleReleased}
+              aria-busy={pending || undefined}
+              disabled={pending}
+              className={
+                "min-h-9 shrink-0 rounded-full px-3 text-[11px] font-medium whitespace-nowrap ring-1 disabled:opacity-40 "
+                + (saleState.saleReleased
+                  ? "bg-status-ground text-status-ink ring-status-line"
+                  : "bg-surface text-muted ring-border/70")
+              }
+            >
+              {saleState.saleReleased ? copy.released : copy.notReleased}
+            </button>
+          </div>
+
+          {/*
+            WARUM NOCH NICHT. Der Grund kommt aus der einen Gründeleiter
+            (`admin_shop_listing_audit()`) und wird hier nur übersetzt —
+            nachgerechnet wird er nicht, sonst gäbe es zwei Wahrheiten.
+
+            Der Preis ist der eine Fall, den die Leiter nicht kennt: er
+            betrifft nicht die Eignung, sondern das Angebot. Er steht
+            deshalb daneben, aus derselben Zeile, die ohnehin da ist.
+          */}
+          {!saleState.sellable && saleState.reason !== null ? (
+            <p className="text-[11px] leading-tight text-muted">
+              {copy.saleReasons[saleState.reason] ?? saleState.reason}
+            </p>
+          ) : null}
+          {!saleState.saleReleased && position.effectivePrice === null ? (
+            <p className="text-[11px] leading-tight text-muted">{copy.saleNeedsPrice}</p>
+          ) : null}
+          {!saleState.saleReleased && saleState.sellable === false
+            && saleState.reason === "not released for sale"
+            && position.effectivePrice !== null ? (
+            <p className="text-[11px] leading-tight text-muted">{copy.releaseHint}</p>
+          ) : null}
+        </div>
+      ) : null}
 
       {failed ? (
         <p role="alert" className="text-sm text-danger">

@@ -33,6 +33,9 @@ jede Zeile bei jedem Testlauf. Die Spalte `Datei heute` ist der Vertrag:
 | `0137_catalog_accessories.sql` | `220cdfb66c377643ff2870853a254f39107a4defceea88309fcde8cb6de6e15b` | gleich | **2026-10-20**, Betreiber: manuell im SQL-Editor, **über das Einmal-Skript** `supabase/operations/staging-0137-0138.sql` (SHA-256 `83af5cebdcb9130a3b5cb0df17162bde94505aee5d8d83d3c454675fa48b9344`), dessen eingebettete Abschnitte zeichengleich zu dieser Datei sind — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. Ein Durchgang, eine Transaktion, zusammen mit `0138`. Dass die Nachbedingungen des Abschnitts C gehalten haben, folgt aus dem `commit`: eine Abweichung hätte die ganze Transaktion zurückgerollt. Nachgemessen am 2026-10-20 über `npm run verify:shop:staging`: `non_collectible_categories()` liefert `[Bundles, Portale, Spiele, Taschen, Zubehör]` und stimmt mit `src/lib/catalog/collectible.ts` überein (Abschnitt 5, PASS) |
 | `0138_catalog_portals.sql` | `2c948264e3d6b0cb3a605deda4027945e3d12b9ab026de3505cd74614598b791` | gleich | **2026-10-20**, im selben Durchgang wie `0137`. Abschlussraster: **17 Bezugswerte unverändert**, drei erwartete Differenzen — `katalogzeilen` 605 → **626**, `kategorien` 32 → **38**, `typen` → `figure=566, game=39, portal=21`. Unabhängig nachgelesen am 2026-10-20 (rein lesend): die **21** Zeilen `SKY-0615`–`0622`, `0624`–`0630`, `0632`–`0637` stehen mit den Rohnamen der Arbeitsmappe, alle `portal` · unsichtbar · aktiv · ohne Preis · ohne Override · ohne Bild · ohne Charakter · `source = admin` · `card_type = standard`, **21 verschiedene Slugs**, **21** Journaleinträge `created`, sechs Kategorien `Portale` in `SA, G, SF, T, SC, I`, `SKY-0637` trägt `SF`. `SKY-0623` und `SKY-0631` fehlen wie vorgesehen (ADR-0128, Punkt 9) |
 
+| `0139_accessory_sale_release.sql` | `55f0fcf9279d6484891e48d209371bbf229464849488b8d20ad02909ad3a5a04` | gleich | **2026-10-20**, Betreiber: manuell im SQL-Editor, **ueber das Einmal-Skript** `supabase/operations/staging-0139.sql` (SHA-256 `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8`), dessen eingebetteter Abschnitt zeichengleich zu dieser Datei ist — geprueft von `src/lib/catalog/staging-oneshot.test.ts`. Eine Transaktion, Umgebungsstempel davor. Postflight `0139_postflight.sql`: **eine** Abweichung, und die lag an der Pruefdatei (Zeile 501 zaehlte ohne `catalog_visible` — 564 statt 534, die 30 ausgeblendeten Figuren; `supabase/checks/open_verifications.md`, Abschnitt 0g). Alle Sicherheitszeilen erfuellt: **0** freigegebene Positionen, **0** Zubehoerangebote, **256** Angebote mit Abdruck `4d1d6c30…`, **534** shopfaehig, **285** Lagerzeilen, **626** Katalogzeilen, Belegsperre dicht |
+| `0140_business_backup_sale_release.sql` | `ae74e4006ce0dfef07af87021aec2331e1d13009115255ea5c7b3cbd59499fc5` | gleich | **2026-10-20**, als eigene Transaktion nach `0139`, ueber `supabase/operations/staging-0140.sql` (SHA-256 `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d`). Die Betriebssicherung traegt jetzt `sale_released`, `delivery_scope` und `usk_rating`: 353 Feldzeilen → **356**, 28 Bereiche unveraendert |
+
 **Gelaufen ist der Einmal-Durchgang:** `supabase/operations/staging-0137-0138.sql`
 (SHA-256 `83af5cebdcb9130a3b5cb0df17162bde94505aee5d8d83d3c454675fa48b9344`) bettet `0137` und `0138` **zeichengleich** ein — geprüft von
 `src/lib/catalog/staging-oneshot.test.ts` — und legt eine Transaktion samt
@@ -99,15 +102,14 @@ jede Migration ab `0122` ist entweder oben mit ihrer Prüfsumme erfasst oder in
 dieser Liste.
 
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
-und `0138` seit dem 2026-10-20** — alle vier stehen deshalb in der Tabelle
+und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
 oben, nicht mehr hier. Auf Production fehlen sie alle, wie `0134`.
 
 | Migration | Stand |
 |---|---|
-**Gefahren wird je ein Einmal-Durchgang:** `supabase/operations/staging-0139.sql` (SHA-256 `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8`) und `supabase/operations/staging-0140.sql` (SHA-256 `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d`). Beide betten ihre Migration **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und fuegen genau eine Pruefung hinzu: den Umgebungsstempel (`SKY-0821`/`SKY-0822`), den eine Migration nicht kennen kann. Dass er anschlaegt, faehrt Probelauf **P39** nach. Reihenfolge, Erwartungen und Ruecknahme: `supabase/checks/0139_0140_staging_run.md`.
+**Gefahren wurde je ein Einmal-Durchgang:** `supabase/operations/staging-0139.sql` (SHA-256 `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8`) und `supabase/operations/staging-0140.sql` (SHA-256 `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d`). Beide betten ihre Migration **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und fuegen genau eine Pruefung hinzu: den Umgebungsstempel (`SKY-0821`/`SKY-0822`), den eine Migration nicht kennen kann. Dass er anschlaegt, faehrt Probelauf **P39** nach. Reihenfolge, Erwartungen und Ruecknahme: `supabase/checks/0139_0140_staging_run.md`. **Beide sind seit dem 2026-10-20 angewendet und damit nach Regel 1 eingefroren** — auch ihre Nachbedingungen. Was an ihren Pruefdateien zu berichtigen war, wurde in `supabase/checks/` berichtigt, nicht in der Migration.
 
-| `0139_accessory_sale_release.sql` | lokal vorbereitet, **noch nicht freigegeben**. Macht Spiele und Portale verkaeuflich — aber **Stueck fuer Stueck**: eine Freigabe je LAGERPOSITION (`shop_inventory.sale_released`, Vorgabe `false`), der **Lieferumfang** als eigene Eigenschaft neben `condition` (`shop_inventory.delivery_scope`, **ohne** Kopplung an den Zustand — ein Spiel mit Originalhuelle ist genauso verkaeuflich, ADR-0130), die Alterskennzeichnung am Artikel (`skylanders.usk_rating`, nullable), ein neues Tor `is_position_sellable(bigint)`, das die vier Verkaufstueren kuenftig fragen — `shop_offers()` wird dafuer gedroppt und mit einer **fuenften Spalte** neu angelegt —, und drei Betriebsfunktionen. Kein Spiel ist freigebbar ohne USK-Angabe, keines mit USK 18 (keine Altersverifikation), keine Position ohne Lieferumfang und keine ohne gueltigen Preis. Bestand wird bewusst NICHT verlangt. **`is_shop_eligible()` bleibt unberuehrt** — das neue Tor ruft sie fuer den Figurenfall auf. Sie veroeffentlicht nichts: `default false` trifft auch die 13 gelisteten und bepreisten Spielezeilen. Probelauf gegen echtes PostgreSQL: Durchgaenge **P34–P37**. Pre-/Postflight: `supabase/checks/0139_pre`/`postflight.sql`; Ruecknahme `supabase/rollback/R0139_drop_sale_release.sql`. Begruendung und die offenen Rechtsfragen: `supabase/checks/accessory_offer_proposal.md`. SHA-256 der vorliegenden Fassung: `55f0fcf9279d6484891e48d209371bbf229464849488b8d20ad02909ad3a5a04` |
-| `0140_business_backup_sale_release.sql` | lokal vorbereitet, **noch nicht freigegeben**. **Setzt `0139` voraus** und laeuft als eigene Transaktion danach. Nimmt `shop_inventory.sale_released`, `shop_inventory.delivery_scope` und `skylanders.usk_rating` in die Betriebssicherung auf — 353 Feldzeilen werden **356**, 28 Bereiche bleiben 28, die 26 uebrigen Bereiche sind durch einen Abdruck vor und nach der Aenderung gesichert. Beide Spalten tragen eine Entscheidung, die sich aus nichts rekonstruieren laesst. Ruecknahme `supabase/rollback/R0140_back_to_0136.sql`, und zwar VOR `R0139`. SHA-256 der vorliegenden Fassung: `ae74e4006ce0dfef07af87021aec2331e1d13009115255ea5c7b3cbd59499fc5` |
+| `0141_seller_sale_state.sql` | lokal vorbereitet, **noch nicht freigegeben**. **Rein additiv:** eine neue Lesefunktion `seller_sale_state()` — je Lagerposition Artikeltyp, `sale_released`, `delivery_scope`, `usk_rating`, verkaeuflich ja/nein und der Grund. Der Grund wird aus `admin_shop_listing_audit()` GEJOINT, nicht nachgerechnet. Keine Spalte, keine Zeile, kein bestehender Rumpf, kein bestehendes Recht — insbesondere wird `admin_shop_inventory()` nicht erweitert. Setzt `0139` voraus. Lauf: `supabase/operations/staging-0141.sql`; Ruecknahme `supabase/rollback/R0141_drop_sale_state.sql`. SHA-256: `54c79e5ae7ca1de3ac6742dbf64bc5cf0c8b002ae39eb2f196659ae5426d13aa` |
 | `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `b2a745e34e0349640f3a4b10efe9da45bb633c854efd703fc8e6c146514e9b49` |
 
 **Beide zusammen in einem Durchgang:** `supabase/operations/staging-0135-0136.sql` (SHA-256 `654d20fbdb08cb319c0d95005a403fa5cffe13ca77c41d44aafedaf9dc50bb17`) bettet `0135` und `0136` **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und legt eine Transaktion samt blockierender Vor- und Nachpruefungen darum. Wird der Lauf darueber gefahren, gehoert in die Tabelle oben die SHA-256 des **Skripts** mit dem Hinweis, dass die eingebetteten Abschnitte den beiden Migrationsdateien entsprechen.
@@ -198,6 +200,34 @@ heute **nicht** mehr der ausgeführten Fassung entspricht, und dass das Rezept
 genau diese Prüfsumme wiederherstellt.
 
 **`0130` wird nicht erneut angewendet.**
+
+## Wie ein zweiter Lauf verhindert wird — drei Schichten
+
+Dieses Projekt führt **keine** `supabase_migrations.schema_migrations`.
+Migrationen werden von Hand im SQL-Editor angewendet, und das Register ist
+diese Datei (`supabase/checks/disaster_recovery_pg_dump.md`, Abschnitt 4).
+Die Frage „kann `0139` versehentlich noch einmal laufen?" beantworten
+deshalb drei Schichten, von innen nach außen:
+
+| # | Schicht | greift wann |
+|---|---|---|
+| **1** | **Die Migration selbst.** Abschnitt 1b von `0139` bricht mit `shop_inventory.sale_released steht schon` ab; `0140` mit `% Feldzeilen statt 353`. Beide **vor** der ersten Änderung, in derselben Transaktion | immer, auch ohne Register und ohne Mensch |
+| **2** | **Die Datenbank sagt, was steht.** `supabase/checks/staging_pending_migrations.sql`, Zeilen 241–246: stehen die drei Spalten? kennt die Sicherung die drei Felder? passt beides zusammen? Rein lesend, vor jedem Lauf | wer nachsieht, muss nicht raten |
+| **3** | **Diese Akte.** Jede angewendete Datei mit SHA-256 und Nachweis; `src/lib/admin/migration-integrity.test.ts` prüft, dass die Tabelle vollständig ist und die Prüfsummen stimmen | bei jedem Testlauf |
+
+**Schicht 1 ist die eigentliche Sicherung** — sie braucht niemanden, der
+etwas gepflegt hat. Probelauf **P39** fährt sie nach: beide Einmal-Skripte
+laufen einmal durch, prallen beim zweiten Mal ab, und danach steht immer
+noch keine Position auf `sale_released`.
+
+**Wenn die Supabase-CLI jemals dazukommt** (`supabase db push`), bringt sie
+ihr eigenes Register mit. Das Zusammenführen von 140 handangewendeten
+Migrationen mit einer leeren `schema_migrations` ist ein **eigenes
+Vorhaben** und keine Nebenwirkung — `supabase/checks/staging_agent_access_plan.md`,
+Abschnitt B, hält das fest. Bis dahin gilt: die CLI wird nicht benutzt, und
+Schicht 1 trägt.
+
+---
 
 ## Regeln
 

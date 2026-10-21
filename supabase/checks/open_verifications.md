@@ -291,6 +291,70 @@ der Beleg dafür jetzt eine Messung.
 
 **S2, S3 und S4 wurden nicht ausgeführt.**
 
+## 0g. `0139` und `0140` auf Staging — angewendet am 2026-10-20
+
+Alle fünf Schritte gefahren (`0139_0140_staging_run.md`). **S2 und S4
+erfolgreich**, S1a `9999 = 0`. S1 und S3 meldeten **je genau eine**
+Abweichung, und die lag an der Prüfdatei.
+
+### Was gemessen wurde — alle Sicherheitszeilen erfüllt
+
+| Größe | Wert |
+|---|---|
+| öffentliche Angebote | **256** |
+| Abdruck der Angebotsliste | **`4d1d6c30fe0ae886ca2689bcb1fe9634`** |
+| shopfähige Katalogzeilen | **534** |
+| **freigegebene Zubehörpositionen** | **0** |
+| **Zubehörangebote** | **0** |
+| Lagerpositionen | **285** |
+| Katalogzeilen | **626** |
+| Belegausstellung | **weiterhin gesperrt** |
+
+**Die Migration hat getan, was sie sollte: ein Tor gebaut und es nicht
+geöffnet.**
+
+### Der eine Befund: 564 statt 534 sammelbare Zeilen
+
+S1 Zeile 405 und S3 Zeile 501. **Die Differenz ist genau 30 — die Zahl der
+redaktionell ausgeblendeten Figuren auf Staging.**
+
+Die Sammlungslogik ist richtig; die Prüfung war es nicht. Z0 definiert
+„sammelbar" in `0135_preflight.sql` (Zeilen 16–21) als
+
+```sql
+where s.is_active and s.catalog_visible
+  and not (c.name = any (public.non_collectible_categories()))
+```
+
+Meine Zählung liess `s.catalog_visible` weg und nahm die 30 mit. Dass die
+Sichtbarkeit dazugehört, bestätigt die Anwendung an zwei Stellen:
+`collectionStats()` zählt `entry.figure.isActive && entry.figure.catalogVisible`,
+und die Nennerabfrage in `fetchCatalog()` filtert auf beides. Eine
+ausgeblendete Figur ist in keiner Hälfte — und genau das macht
+„besessen > gesamt" unmöglich (ADR-0040).
+
+**Berichtigt wurde die Prüfdatei, nicht die Migration.** `0139` ist
+angewendet und damit nach Regel 1 eingefroren. Ihr interner
+`sammelbar`-Abdruck verwendet dieselbe Formel ohne `catalog_visible` — das
+bleibt so und ist unschädlich: sie vergleicht **vorher gegen nachher in
+derselben Transaktion**, und eine Formel, die auf beiden Seiten dieselbe
+ist, beweist „unverändert" unabhängig davon, was sie zählt. Für den
+Vergleich mit dem **Z0-Vertrag** taugt sie nicht, und dafür ist der
+Preflight da.
+
+**Keine Daten wurden geändert, keine Migration erneut angewendet, kein
+Rollback gefahren.**
+
+### Der Riegel dagegen
+
+`src/lib/shop/z0-parity.test.ts`: jede Prüfdatei, die einen Z0-Wert als
+Erwartung führt, muss ihn mit **demselben Ausdruck** messen, mit dem Z0 ihn
+gemessen hat — verglichen wird der Ausdruck, nicht die Zahl. Der Test
+fängt beide Pannen dieses Tages: die erfundene `md5`-Formel und die
+Zählung ohne `catalog_visible`.
+
+---
+
 ### Wie die sechs Z0-Werte nach Z1 geprüft werden
 
 Sechs Größen, drei Prüfwege. Die Migration vergleicht **alle sechs** gegen

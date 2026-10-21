@@ -31,8 +31,12 @@ describe("it is a view, not a second shop", () => {
     expect(page).toContain("fetchOffers()");
   });
 
-  it("joins them with the one rule", () => {
-    expect(page).toContain("shopEntries(catalog, offers)");
+  it("joins them with the one rule — Figuren UND Zubehör", () => {
+    /* Seit ADR-0129 liest die Seite beide Kataloge und übergibt sie
+       derselben Regel. Kein zweites Schaufenster, keine zweite
+       Angebotsprojektion. */
+    expect(page).toContain("shopEntries([...figuren, ...zubehoer], offers)");
+    expect(page).toContain("fetchAccessoryCatalog()");
   });
 
   it("introduces no query, table or RPC of its own", () => {
@@ -41,9 +45,16 @@ describe("it is a view, not a second shop", () => {
     expect(view).not.toContain("supabase");
   });
 
-  it("renders the catalog's own card", () => {
+  it("renders the catalog's own card — und für Zubehör die Zubehörkachel", () => {
     expect(view).toContain("<CatalogCard");
     expect(view).toContain("FigureGrid");
+    /*
+     * Ein Portal bekommt NICHT die Figurenkarte: sie trägt Element,
+     * Charakter, Variante, Besitzsiegel und Marktwert — und einen
+     * Sammelknopf. Nichts davon gehört zu einem Portal (ADR-0129/0130).
+     */
+    expect(view).toContain("<AccessoryCard");
+    expect(view).toContain("isAccessory(entry.figure) ? (");
   });
 
   it("names the game on each card, because this grid mixes all six", () => {

@@ -58,6 +58,28 @@ export function scopesFor(itemType: string): readonly DeliveryScope[] {
   return [];
 }
 
+/**
+ * Die fünf Stufen der USK — und `null` für „nicht erfasst".
+ *
+ * Spiegelt den CHECK `skylanders_usk_rating_known` aus `0139`. Keine
+ * sechste Stufe, keine Schätzung: die Quelle ist die Hülle oder die
+ * USK-Titeldatenbank.
+ */
+export const USK_RATINGS: readonly number[] = [0, 6, 12, 16, 18];
+
+/**
+ * Lässt sich diese Einstufung bei SkyIsles verkaufen?
+ *
+ * `18` nicht: § 12 Abs. 3 JuSchG verlangt im Versandhandel eine
+ * Altersprüfung bei der Bestellung **und** eine Zustellung nur an
+ * Erwachsene, und SkyIsles hat beides nicht. Die Datenbank lehnt die
+ * Freigabe ohnehin ab (`seller_set_sale_release()`); hier steht es, damit
+ * die Oberfläche es sagen kann, bevor jemand den Schalter sucht.
+ */
+export function uskSellable(rating: number | null): boolean {
+  return rating !== null && rating !== 18;
+}
+
 /** Das deutsche Wort. Für einen unbekannten Wert der Wert selbst, nie geraten. */
 export function deliveryScopeLabel(scope: string | null): string | null {
   if (scope === null) return null;
