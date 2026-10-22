@@ -118,13 +118,46 @@ describe("2. Zurücksetzen trifft den Arbeitsstand, nicht die Sammlung der Kalku
     expect(modal).toContain("onClick={() => (unsaved ? setConfirmClear(true) : resetDraft())}");
   });
 
-  it("der Knopf ist sichtbar und nicht ein unterstrichener Text", () => {
-    /* Der Auftrag nennt ihn „gut sichtbar“. In V1 war er ein kleiner Link
-       im Fuß. */
+  it("der Knopf ist sichtbar, trägt ein Zeichen und hat dieselbe Höhe wie die anderen", () => {
+    /*
+     * In V1 war er ein kleiner Link im Fuß, in V2 ein Knopf in einer eigenen
+     * Werkzeugleiste — und die kostete so viel Höhe, dass die Figurenliste
+     * zusammenschrumpfte (Befund aus dem Praxistest). Seit V2.1 stehen alle
+     * drei in der KOPFREIHE, mit einer Höhe aus einer Konstante: 44 px am
+     * Finger, 36 px an der Maus.
+     */
     const leiste = modal.slice(modal.indexOf("{copy.save}"), modal.indexOf("{copy.clear}") + 40);
     expect(leiste).toContain("ACTION_NEUTRAL");
-    expect(leiste).toContain("min-h-11");
+    expect(leiste).toContain("TOOL_BUTTON");
     expect(de.calculator.clear).toBe("Zurücksetzen");
+
+    /* Eine Höhe für alle drei, und zwar aus EINER Quelle. */
+    expect(modal).toContain(
+      'const TOOL_BUTTON = "h-11 min-h-11 sm:h-9 sm:min-h-9 w-auto gap-1.5 px-2.5 text-xs sm:px-3"');
+    expect(modal.match(/\$\{TOOL_BUTTON\}/g)!.length).toBeGreaterThanOrEqual(3);
+    /* Keiner nimmt die ganze Breite. */
+    expect(leiste).not.toContain("w-full");
+    /* Und jeder trägt ein Zeichen im Hausstil neben seinem Wort. */
+    for (const glyph of ["<SaveGlyph />", "<SavedGlyph />", "<ResetGlyph />"]) {
+      expect(modal, glyph).toContain(glyph);
+    }
+    expect(modal).toContain('strokeWidth: "1.8"');
+  });
+
+  it("die drei Aktionen stehen in der Kopfreihe, nicht in einem eigenen Streifen", () => {
+    /*
+     * DAS IST DIE HÖHE, DIE DIE LISTE ZURÜCKBEKOMMEN HAT. Kopf und
+     * Werkzeugleiste waren zwei Streifen à etwa 60 px; jetzt ist es einer,
+     * der auf dem Telefon umbricht.
+     */
+    const kopf = modal.slice(modal.indexOf("<header"), modal.indexOf("</header>"));
+    for (const teil of ["{copy.save}", "{copy.clear}", "copy.savedListOpen(saved.length)"]) {
+      expect(kopf, teil).toContain(teil);
+    }
+    expect(kopf).toContain("flex-wrap");
+    /* Und der Fuß trägt keine Aktion mehr, nur noch Zahlen. */
+    const fuss = modal.slice(modal.indexOf("<footer"));
+    expect(fuss).not.toContain("copy.clear");
   });
 });
 
@@ -352,6 +385,138 @@ describe("7. die Datenbank hält dieselben Regeln", () => {
     expect(migration).toContain("NICHT ANGEWENDET");
     const register = roh("supabase/migrations/APPLIED.md");
     expect(register).not.toContain("0142_purchase_calculations.sql |");
+  });
+});
+
+/* ===================================================================== */
+describe("8. die Höhe gehört der Figurenliste (V2.1)", () => {
+  /*
+   * DER BEFUND AUS DEM ERSTEN PRAXISTEST, und er war berechtigt: Kopf und
+   * Werkzeugleiste waren zwei Streifen, dazu eine Bestätigungszeile, eine
+   * Hinweiszeile im Fuß und eine Suche, die bis `45dvh` wachsen durfte. Übrig
+   * blieb für die Positionsliste zu wenig.
+   *
+   * Diese Prüfungen halten die vier Stellen fest, an denen die Höhe
+   * zurückgeholt wurde. Was sie NICHT können: Pixel messen — dafür gibt es
+   * keinen Layoutmotor in dieser Suite. Sie halten die ENTSCHEIDUNGEN fest,
+   * nicht das Ergebnis; das Ergebnis sieht man im Browser.
+   */
+  it("die Höhenkette ist geschlossen — und zwar genau einmal", () => {
+    expect(modal).toContain('className="flex min-h-0 flex-1 flex-col"');
+    /* Der wachsende Teil ist die Liste, und sie trägt beide Klassen, die ein
+       innerer Rollbereich braucht. */
+    expect(modal).toContain('className="min-h-0 flex-1 overflow-y-auto');
+    /* Genau EIN wachsender Bereich in der Kalkulationsansicht: zwei würden
+       sich den Platz teilen, und keiner hätte genug. */
+    expect(modal.match(/flex-1 overflow-y-auto/g)).toHaveLength(1);
+  });
+
+  it("über der Liste steht nur noch Festes, und es ist klein", () => {
+    /* Kopf: eine Reihe. Suche: gedeckelt. Der vergängliche Streifen: nur da,
+       wenn er gebraucht wird. */
+    expect(modal).toContain("max-h-[28dvh] shrink-0 overflow-y-auto border-b");
+    expect(modal).toContain("{saveOpen || pending !== null || confirmClear || saveError ? (");
+    /* Und der Fuß hat keine eigene Hinweisreihe mehr. */
+    expect(modal).not.toContain('className="mt-2 flex flex-wrap items-center justify-between gap-2"');
+  });
+
+  it("keine verschachtelten Rollbereiche — die zwei sind Geschwister", () => {
+    /*
+     * Suche und Liste rollen beide, stehen aber nebeneinander im selben
+     * Flex-Behälter. Verschachtelt wäre, wenn die Liste IN der Suche läge:
+     * dann würde ein Rad am Rand den falschen Bereich bewegen.
+     */
+    const suche = modal.indexOf("max-h-[28dvh]");
+    const liste = modal.indexOf('className="min-h-0 flex-1 overflow-y-auto');
+    expect(suche).toBeGreaterThan(-1);
+    expect(liste).toBeGreaterThan(suche);
+    /* Zwischen beiden endet der Kasten der Suche. */
+    expect(modal.slice(suche, liste)).toContain("</div>");
+  });
+
+  it("und die Zahl, wegen der jemand das Fenster öffnet, bleibt im Fuß", () => {
+    const fuss = modal.slice(modal.indexOf("<footer"));
+    expect(fuss).toContain("copy.maxPurchase");
+    expect(fuss).toContain("text-2xl");
+    expect(fuss).toContain("COMMERCE_INK");
+  });
+});
+
+/* ===================================================================== */
+describe("9. Rückmeldungen kosten keine dauerhafte Höhe (V2.1)", () => {
+  it("die Erfolgsmeldung steht im Kopf und geht von selbst", () => {
+    const kopf = modal.slice(modal.indexOf("<header"), modal.indexOf("</header>"));
+    expect(kopf).toContain("{copy.savedShort}");
+    expect(kopf).toContain('role="status"');
+    /* Ein Zeitgeber räumt sie weg — und der Abbau bestellt ihn ab. */
+    expect(modal).toContain("noteTimer.current = setTimeout(() => setSavedNote(null), 2500)");
+    expect(modal).toContain("clearTimeout(noteTimer.current)");
+    expect(de.calculator.savedShort.length).toBeLessThan(20);
+  });
+
+  it("der Fehler dagegen bleibt stehen, bis man ihn wegklickt", () => {
+    /* Die eine Rückmeldung, die man nicht verpassen darf. */
+    expect(modal).toContain("{copy.saveFailed}");
+    expect(modal).toContain('role="alert"');
+    expect(modal).not.toMatch(/setSaveError\(false\),\s*\d+\)/);
+  });
+
+  it("Geöffnet und ungespeicherte Änderungen bleiben, in einer Zeile", () => {
+    const kopf = modal.slice(modal.indexOf("<header"), modal.indexOf("</header>"));
+    expect(kopf).toContain("copy.loadedName(loadedName)");
+    expect(kopf).toContain("{copy.unsaved}");
+    /* Eine Zeile, `text-[11px]`, umbrechend — keine zweite Reihe. */
+    expect(kopf).toContain("text-[11px] leading-tight");
+  });
+});
+
+/* ===================================================================== */
+describe("10. keine Sackgasse zwischen den zwei Ansichten (V2.1)", () => {
+  it("der Umschalter steht im Kopf und gilt in beide Richtungen", () => {
+    const kopf = modal.slice(modal.indexOf("<header"), modal.indexOf("</header>"));
+    expect(kopf).toContain('onClick={() => setView(view === "saved" ? "calc" : "saved")}');
+    expect(kopf).toContain('aria-pressed={view === "saved"}');
+    /* Und seine Beschriftung sagt, wohin er führt. */
+    expect(kopf).toContain("copy.backToCalc");
+    expect(de.calculator.backToCalc).not.toBe(de.calculator.savedListOpen(0));
+  });
+
+  it("die Liste hat zusätzlich einen eigenen, sichtbaren Rückweg", () => {
+    expect(panel).toContain("{copy.savedListBack}");
+    expect(panel).toContain("ACTION_NEUTRAL");
+    /* Kein unterstrichener Text mehr für die einzige Stelle, an der man
+       diese Ansicht verlässt. */
+    const rueck = panel.slice(panel.indexOf("{copy.savedListTitle}"),
+                              panel.indexOf("{copy.savedListBack}"));
+    expect(rueck).not.toContain("underline");
+    expect(rueck).toContain("min-h-11");
+  });
+
+  it("und eine eigene Überschrift", () => {
+    expect(panel).toContain("{copy.savedListTitle}");
+    expect(panel).toContain("<h3");
+  });
+
+  it("der Ansichtswechsel rührt die Kalkulation nicht an", () => {
+    /*
+     * `setView` ist das Einzige, was der Umschalter tut. Würde er `setLines`
+     * oder `setLoadedId` anfassen, wäre ein Blick in die Liste ein
+     * Datenverlust.
+     */
+    const kopf = modal.slice(modal.indexOf("<header"), modal.indexOf("</header>"));
+    const umschalter = kopf.slice(kopf.indexOf('onClick={() => setView(view === "saved"'));
+    const bisEnde = umschalter.slice(0, umschalter.indexOf("</button>"));
+    for (const verboten of ["setLines", "setFactor", "setLoadedId", "clearDraft"]) {
+      expect(bisEnde, verboten).not.toContain(verboten);
+    }
+  });
+
+  it("Kopf und Fuß bleiben in der Listenansicht stehen", () => {
+    /* Der Umschalter tauscht nur die Mitte: das SELECT steht zwischen Kopf
+       und Fuß, und beide liegen außerhalb der Bedingung. */
+    const schalter = modal.indexOf('{view === "saved" ? (');
+    expect(modal.indexOf("<header")).toBeLessThan(schalter);
+    expect(modal.indexOf("<Summary")).toBeGreaterThan(schalter);
   });
 });
 

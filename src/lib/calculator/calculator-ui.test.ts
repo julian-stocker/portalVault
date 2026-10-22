@@ -449,7 +449,13 @@ describe("die Geometrie hält eine lange Liste aus", () => {
   });
 
   it("lässt die Treffer den Dialog nicht auffressen", () => {
-    expect(modal).toContain("max-h-[45dvh]");
+    /*
+     * ENGER SEIT V2.1. `45dvh` war die halbe Fläche: standen sechs Treffer,
+     * blieb für die Positionsliste fast nichts — der Befund aus dem ersten
+     * Praxistest. `28dvh` trägt das Feld und drei bis vier Treffer.
+     */
+    expect(modal).toContain("max-h-[28dvh]");
+    expect(modal).not.toContain("max-h-[45dvh]");
     expect(modal).toContain("limit={CALC_RESULTS}");
     expect(modal).toContain("const CALC_RESULTS = 6;");
   });

@@ -12245,3 +12245,60 @@ an", „ein Neuladen darf sie verlieren". Alle drei waren richtig, solange der
 Kalkulator flüchtig war. Sie sind **ersetzt, nicht gelöscht** — an ihrer
 Stelle steht jeweils die neue Zusicherung, und der Kommentar sagt, was
 vorher dort stand und warum es nicht mehr gilt.
+
+### Nachtrag 2026-10-22: die Oberfläche, nach dem ersten Praxistest (V2.1)
+
+Der erste Blick auf das fertige Fenster brachte einen berechtigten Befund:
+**die neue Werkzeugleiste nahm der Figurenliste den Platz.** Gerechnet auf
+ein 900-px-Fenster (Panel-Deckel `sm:max-h-[74dvh]` = 666 px):
+
+| | feste Teile | Liste |
+|---|---:|---:|
+| vorher | 376 px | 290 px ≈ 5 Zeilen |
+| **nachher** | **246 px** | **420 px ≈ 7 Zeilen** |
+
+Und im schlimmen Fall — sechs Treffer in der Suche — war die Liste vorher
+**ganz fort** (`45dvh` Suche + 376 px Festes > Panel); jetzt bleiben 230 px.
+
+**Vier Stellen, an denen die Höhe zurückkam:**
+
+1. **Kopf und Aktionen in EINER Reihe.** Titel und Zustand wachsen links,
+   die drei Knöpfe stehen rechts, `flex-wrap` bricht sie auf dem Telefon
+   um. Eine Höhe aus einer Konstante (`TOOL_BUTTON`: 44 px am Finger, 36 px
+   an der Maus), je ein Zeichen im Hausstil neben dem Wort, keiner nimmt die
+   Breite.
+2. **Die Suche auf `28dvh` gedeckelt** statt `45dvh`. Sie trägt das Feld und
+   drei bis vier Treffer; wer eintippt, was er in der Hand hält, nimmt
+   ohnehin den ersten.
+3. **Ein vergänglicher Streifen statt drei Blöcke.** Speicherfeld,
+   Rückfragen und Fehler teilen eine Zeile und existieren nur, solange sie
+   gebraucht werden.
+4. **Die Erfolgsmeldung in die Zustandszeile des Kopfes**, mit Zeitgeber:
+   „gespeichert ✓" für zweieinhalb Sekunden statt einer dauerhaften Reihe.
+   Ein **Fehler** bleibt dagegen stehen, bis er weggeklickt wird — er ist
+   die eine Rückmeldung, die man nicht verpassen darf.
+
+**Was ausdrücklich nicht geändert wurde:** die Rechnung, das
+Speicherverhalten, die Datenbank, die Richtlinien, die Umsortierung nach
+oben, die Trennung von Entwurf und gespeicherter Kalkulation und alle drei
+Schutzrückfragen.
+
+**Eine Untergrenze für die Liste war der falsche Weg.** `min-h-[7.5rem]`
+stand einen Augenblick dort und ist wieder fort: es widerspricht dem
+`min-h-0`, das ein Flex-Kind erst unter seine Inhaltsgröße schrumpfen lässt
+— und ohne dieses Schrumpfen gibt es keinen inneren Rollbereich, sondern
+einen abgeschnittenen Kasten. Zwei widersprüchliche Klassen entscheidet am
+Ende die Reihenfolge im erzeugten CSS, also niemand, der die Absicht kennt.
+Der Platz entsteht von der anderen Seite: durch kleine feste Teile.
+
+**Kein Weg ohne Rückweg.** Der Umschalter steht in der Kopfreihe und gilt in
+beide Richtungen („Gespeichert (n)" ↔ „Kalkulation"); die Liste hat
+zusätzlich eine eigene Überschrift und einen eigenen Rückweg als Knopf mit
+Pfeil. Dass es ihn zweimal gibt, ist Absicht: einmal dort, wo man immer
+hinsieht, einmal dort, wo der Blick gerade ist. **Der Ansichtswechsel rührt
+die Kalkulation nicht an** — `setView` setzt eine Ansicht und sonst nichts.
+
+**Was die Tests dazu nicht können:** Pixel messen. Sie halten die
+Entscheidungen fest (eine Höhenkette, ein wachsender Bereich, der Deckel der
+Suche, keine Aktion im Fuß); die Zahlen oben sind aus dem CSS **gerechnet**,
+nicht im Browser gemessen. Das Ergebnis sieht man nur dort.

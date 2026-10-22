@@ -144,9 +144,10 @@ gleichen Netz über die Netzwerk-Adresse, die `dev:staging` ausgibt).
 
 | ☐ | |
 |---|---|
-| ☐ | Die drei Knöpfe der Werkzeugleiste brechen um statt zu schrumpfen, jeder gut mit dem Daumen treffbar |
+| ☐ | Die drei Knöpfe im **Kopf** brechen auf dem Telefon in eine zweite Zeile um statt zu schrumpfen, jeder 44 px hoch (V2.1) |
 | ☐ | **Der maximale Einkaufspreis ist sichtbar, ohne zu scrollen** — auch mit zehn Positionen in der Liste |
-| ☐ | „Gespeichert" öffnen: die Liste nimmt die Mitte, **Fuß mit der Zahl bleibt stehen** |
+| ☐ | „Gespeichert" öffnen: die Liste nimmt die Mitte, **Fuß mit der Zahl bleibt stehen**, und oben steht der Rückweg als Knopf mit Pfeil (V2.1) |
+| ☐ | Auf dem Schreibtisch: **mindestens fünf Figurenzeilen** gleichzeitig sichtbar, auch während die Suche Treffer zeigt (V2.1) |
 | ☐ | In der Liste sind „Öffnen", „Umbenennen", „Löschen" einzeln treffbar (40 px) |
 | ☐ | Das Namensfeld beim Speichern füllt die Breite, die Tastatur verdeckt die Knöpfe nicht dauerhaft |
 

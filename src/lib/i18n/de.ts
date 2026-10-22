@@ -4544,6 +4544,15 @@ export const de = {
 
     /* Speichern */
     save: "Speichern",
+    /*
+     * Die Erklärung gehört an den Knopf, nicht in eine Zeile darunter: ein
+     * `title` kostet keine Höhe und steht da, wenn jemand ihn braucht.
+     */
+    saveTitle: "Diese Kalkulation dauerhaft speichern",
+    clearTitle: "Den aktuellen Arbeitsstand leeren — gespeicherte Kalkulationen bleiben",
+    /* Kurz, weil es im Kopf steht und von selbst wieder verschwindet. */
+    savedShort: "gespeichert ✓",
+    backToCalc: "Kalkulation",
     saveNew: "Als neue Kalkulation speichern",
     saveUpdate: "Bestehende aktualisieren",
     saveNameLabel: "Name der Kalkulation",

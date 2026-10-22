@@ -78,6 +78,78 @@ const copy = de.calculator;
 /** Die Stufen, die ein Händler tatsächlich benutzt. Tippen geht daneben weiter. */
 const FACTOR_PRESETS = [40, 50, 60, 70] as const;
 
+/*
+ * DREI ZEICHEN FÜR DIE DREI AKTIONEN — im Hausstil, nicht aus einem Satz.
+ *
+ * Dieselben Attribute wie `nav-glyphs.tsx` und `cart-glyph.tsx`: 24×24, kein
+ * Füllen, `currentColor`, Strichstärke 1.8, runde Enden. Ein installiertes
+ * Icon-Set brächte sein eigenes Raster und seine eigene Strichstärke mit, und
+ * die Zeichen, die dieses Produkt schon hat, wären die Fremden.
+ *
+ * Sie stehen NEBEN einer Beschriftung, nicht an deren Stelle: ein Knopf, der
+ * nur ein Zeichen trägt, ist auf einem Telefon ein Rätsel. Deshalb
+ * `aria-hidden` — der Name kommt aus dem Text daneben.
+ */
+const GLYPH = {
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: "1.8",
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+/** Speichern: in eine Ablage hinein. */
+function SaveGlyph() {
+  return (
+    <svg aria-hidden="true" {...GLYPH} className="h-4 w-4 shrink-0">
+      <path d="M12 4.5v9" />
+      <path d="M8.5 10.5 12 14l3.5-3.5" />
+      <path d="M5 16.5v1.25A1.75 1.75 0 0 0 6.75 19.5h10.5A1.75 1.75 0 0 0 19 17.75V16.5" />
+    </svg>
+  );
+}
+
+/** Gespeicherte Kalkulationen: eine Liste mit Lesezeichen. */
+function SavedGlyph() {
+  return (
+    <svg aria-hidden="true" {...GLYPH} className="h-4 w-4 shrink-0">
+      <path d="M4.75 6.5h9.5M4.75 11h9.5M4.75 15.5h6" />
+      <path d="M17.5 4.75h3.75v8l-1.875-1.5L17.5 12.75z" />
+    </svg>
+  );
+}
+
+/** Zurücksetzen: ein Pfeil, der zum Anfang zurückgeht. */
+function ResetGlyph() {
+  return (
+    <svg aria-hidden="true" {...GLYPH} className="h-4 w-4 shrink-0">
+      <path d="M4.75 6v4.5h4.5" />
+      <path d="M5.5 10.5A7 7 0 1 1 12 19a7 7 0 0 1-5.8-3.1" />
+    </svg>
+  );
+}
+
+/** Zurück zur Kalkulation: ein Pfeil nach links. */
+function BackGlyph() {
+  return (
+    <svg aria-hidden="true" {...GLYPH} className="h-4 w-4 shrink-0">
+      <path d="M19 12H5.5" />
+      <path d="M10.5 6.5 5 12l5.5 5.5" />
+    </svg>
+  );
+}
+
+/*
+ * EINE HÖHE FÜR ALLE DREI KNÖPFE.
+ *
+ * 44 px auf dem Telefon, 36 px am Schreibtisch: die Zahl, die dieses Projekt
+ * für eine Fingerfläche benutzt, und darüber die ruhigere für die Maus. Hier
+ * als Konstante, damit die drei nicht auseinanderlaufen — genau das war der
+ * Befund aus dem ersten Praxistest.
+ */
+const TOOL_BUTTON = "h-11 min-h-11 sm:h-9 sm:min-h-9 w-auto gap-1.5 px-2.5 text-xs sm:px-3";
+
 /**
  * Wie viele Treffer die Suche zeigt.
  *
@@ -155,6 +227,8 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
     useState<number>(draftHadState ? restored.factor : FALLBACK_FACTOR);
   const [confirmClear, setConfirmClear] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
+  /** Der Zeitgeber, der die Erfolgsmeldung wieder wegnimmt. */
+  const noteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /*
    * Einmal je Seitenaufruf, und erst beim ersten Öffnen. Der Katalog ist
@@ -188,6 +262,15 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
       .catch(() => { if (alive) { setCatalog([]); setFailed(true); } });
     return () => { alive = false; };
   }, [open, catalog, draftHadState]);
+
+  /*
+   * Ein Zeitgeber, der nach dem Abbau feuert, setzt Zustand auf ein Bauteil,
+   * das es nicht mehr gibt. Dieser Effekt hat deshalb NUR eine Aufräumung —
+   * er setzt selbst keinen Zustand, die Regel bleibt gewahrt.
+   */
+  useEffect(() => () => {
+    if (noteTimer.current !== null) clearTimeout(noteTimer.current);
+  }, []);
 
   /*
    * JEDE ÄNDERUNG ZURÜCK IN DEN BROWSER.
@@ -388,7 +471,18 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
     /* Ab jetzt ist DAS der gespeicherte Stand. */
     setLoadedFingerprint(draftFingerprint(result.calculation.lines, result.calculation.factorPercent));
     setSaveOpen(false);
+    /*
+     * KURZ, UND DANN VON SELBST FORT.
+     *
+     * Die Bestätigung stand früher als eigene Zeile im Fenster und kostete
+     * dauerhaft Höhe für eine Auskunft, die nach zwei Sekunden erledigt ist.
+     * Jetzt steht sie in der Zustandszeile des Kopfes, und ein Zeitgeber
+     * räumt sie weg. Er liegt in einem Ref, damit der Abbau ihn abbestellen
+     * kann.
+     */
     setSavedNote(result.calculation.name);
+    if (noteTimer.current !== null) clearTimeout(noteTimer.current);
+    noteTimer.current = setTimeout(() => setSavedNote(null), 2500);
     void refreshList();
   }, [saveName, lines, factor, loadedId, refreshList]);
 
@@ -428,187 +522,219 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
         innere Rollbereich bekäme nie eine Grenze.
       */}
       <div className="flex min-h-0 flex-1 flex-col">
-        <header className="flex items-start justify-between gap-4 border-b border-gold-line px-4 py-3 sm:px-5">
-          <div className="min-w-0">
-            <h2 id={headingId} className="text-base font-semibold text-on-deep">{copy.title}</h2>
+        {/*
+          KOPF UND AKTIONEN IN EINER REIHE (V2.1).
+
+          Vorher waren es zwei Streifen: Titel oben, drei Knöpfe darunter.
+          Zusammen kosteten sie rund 120 px von einer Fläche, die bei
+          `max-h-[74dvh]` auf einem 900-px-Fenster 666 px hat — und die
+          Figurenliste bekam, was übrig blieb. Das war der Befund aus dem
+          ersten Praxistest, und er war richtig.
+
+          Jetzt: eine Reihe. Titel und Zustand wachsen links, die drei
+          Aktionen und das Schließen stehen rechts. `flex-wrap` statt einer
+          zweiten Anordnung für Telefone — bei wenig Platz rutschen die
+          Aktionen in die zweite Zeile und bleiben 44 px hoch. Gespart: etwa
+          60 px, die jetzt die Liste hat.
+        */}
+        <header className="shrink-0 border-b border-gold-line px-3 py-2 sm:px-5 sm:py-2.5">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <div className="min-w-0 flex-1 basis-44">
+              <h2 id={headingId} className="truncate text-sm font-semibold text-on-deep sm:text-base">
+                {copy.title}
+              </h2>
+              {/*
+                EINE ZEILE ZUSTAND, und sie beantwortet immer genau eine
+                Frage: woran arbeite ich, ist es gesichert, und hat das
+                Speichern geklappt? Die Erfolgsmeldung stand früher als
+                eigene Zeile darunter und kostete dauerhaft Platz für eine
+                Auskunft, die nach zwei Sekunden erledigt ist.
+              */}
+              <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-[11px] leading-tight text-on-deep-muted">
+                {loadedName === null ? (
+                  <span className="truncate">{copy.draftHint}</span>
+                ) : (
+                  <span className="truncate font-medium text-on-deep">
+                    {copy.loadedName(loadedName)}
+                  </span>
+                )}
+                {unsaved && lines.length > 0 ? (
+                  <span className="shrink-0 rounded-sky-sm bg-deep/50 px-1.5">{copy.unsaved}</span>
+                ) : null}
+                {savedNote === null ? null : (
+                  /* Kurz, dezent, und von selbst wieder fort (`save()` setzt
+                     einen Zeitgeber). `role="status"` meldet es einem
+                     Screenreader, ohne den Fokus zu nehmen. */
+                  <span role="status" className="shrink-0 rounded-sky-sm bg-surface px-1.5 text-on-deep">
+                    {copy.savedShort}
+                  </span>
+                )}
+              </p>
+            </div>
+
             {/*
-              WAS HIER STEHT, BEANTWORTET EINE FRAGE: woran arbeite ich
-              gerade, und ist es gesichert? Ohne geladene Kalkulation bleibt
-              es der Satz über den Arbeitsstand — eine Zeile, die beides
-              erklärt, ist besser als zwei, die sich abwechseln.
+              DIE DREI AKTIONEN — eine Höhe, ein Abstand, je ein Zeichen und
+              ein Wort. Keiner nimmt die Breite: `w-auto` und `px-2.5`.
             */}
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-on-deep-muted">
-              {loadedName === null ? (
-                <span>{copy.draftHint}</span>
-              ) : (
-                <span className="truncate font-medium text-on-deep">
-                  {copy.loadedName(loadedName)}
-                </span>
-              )}
-              {unsaved && lines.length > 0 ? (
-                <span className="rounded-sky-sm bg-deep/50 px-1.5 py-0.5">{copy.unsaved}</span>
-              ) : null}
-            </p>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <button
+                type="button"
+                onClick={openSave}
+                disabled={lines.length === 0}
+                title={copy.saveTitle}
+                className={`${ACTION_PRIMARY} ${TOOL_BUTTON} disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <SaveGlyph />
+                {copy.save}
+              </button>
+
+              {/*
+                DER UMSCHALTER, UND ZWAR IN BEIDE RICHTUNGEN.
+                Er steht in der Kopfreihe und ist damit in jeder Ansicht
+                sichtbar — es gibt keine Sackgasse und keinen Grund, das
+                Fenster zu schließen (ADR-0131). Seine Beschriftung sagt,
+                wohin er führt, nicht wo man ist.
+              */}
+              <button
+                type="button"
+                onClick={() => setView(view === "saved" ? "calc" : "saved")}
+                aria-pressed={view === "saved"}
+                className={`${ACTION_NEUTRAL} ${TOOL_BUTTON}`}
+              >
+                {view === "saved" ? <BackGlyph /> : <SavedGlyph />}
+                {view === "saved" ? copy.backToCalc : copy.savedListOpen(saved.length)}
+              </button>
+
+              <button
+                type="button"
+                /*
+                 * EINE RÜCKFRAGE NUR, WENN ES ETWAS ZU VERLIEREN GIBT.
+                 * Ein leerer oder gespeicherter Stand wird ohne Nachfrage
+                 * geleert — eine Bestätigung für nichts bringt bei, sie
+                 * wegzuklicken.
+                 */
+                onClick={() => (unsaved ? setConfirmClear(true) : resetDraft())}
+                disabled={lines.length === 0}
+                title={copy.clearTitle}
+                className={`${ACTION_NEUTRAL} ${TOOL_BUTTON} disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                <ResetGlyph />
+                {copy.clear}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={close}
+              aria-label={copy.close}
+              className="focus-ring flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-deep-muted hover:text-on-deep sm:h-9 sm:w-9"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none"
+                   stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={close}
-            aria-label={copy.close}
-            className="focus-ring -mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-on-deep-muted hover:text-on-deep"
-          >
-            <svg aria-hidden="true" viewBox="0 0 24 24" className="h-5 w-5" fill="none"
-                 stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
         </header>
 
         {/*
-          DIE WERKZEUGLEISTE — drei Knöpfe, und zwar sichtbar.
-          „Zurücksetzen" war in V1 ein unterstrichener Text im Fuß. Jetzt ist
-          es ein Knopf neben „Speichern", weil beide dieselbe Frage
-          beantworten: was passiert mit dem, was hier steht?
-          `flex-wrap` statt einer zweiten Anordnung für Telefone — bei wenig
-          Platz rutschen die Knöpfe in die nächste Zeile und bleiben 44 px
-          hoch.
+          DER VERGÄNGLICHE STREIFEN — Speicherfeld, Rückfragen, Fehler.
+
+          Er existiert nur, solange eine dieser drei Sachen ansteht, und er
+          ist dann EINE Zeile. Vorher waren es drei Blöcke, die
+          untereinander standen und jeder für sich Höhe nahm, auch wenn nur
+          einer gebraucht wurde.
         */}
-        <div className="shrink-0 border-b border-gold-line px-4 py-2 sm:px-5">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={openSave}
-              disabled={lines.length === 0}
-              className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-40`}
-            >
-              {copy.save}
-            </button>
-            <button
-              type="button"
-              onClick={() => setView(view === "saved" ? "calc" : "saved")}
-              aria-pressed={view === "saved"}
-              className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm`}
-            >
-              {copy.savedListOpen(saved.length)}
-            </button>
-
-            <span className="ml-auto flex items-center gap-2">
-              {confirmClear ? (
-                <>
-                  <span role="alert" className="text-xs text-on-deep">
-                    {copy.clearConfirm(sums.positions)}
-                  </span>
-                  <button type="button" onClick={resetDraft}
-                          className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-xs`}>
-                    {copy.discardYes}
-                  </button>
-                  <button type="button" onClick={() => setConfirmClear(false)}
-                          className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
-                    {copy.cancel}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  /*
-                   * EINE RÜCKFRAGE NUR, WENN ES ETWAS ZU VERLIEREN GIBT.
-                   * Ein leerer oder gespeicherter Stand wird ohne Nachfrage
-                   * geleert — eine Bestätigung für nichts bringt bei, sie
-                   * wegzuklicken.
-                   */
-                  onClick={() => (unsaved ? setConfirmClear(true) : resetDraft())}
-                  disabled={lines.length === 0}
-                  className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-40`}
-                >
-                  {copy.clear}
+        {saveOpen || pending !== null || confirmClear || saveError ? (
+          <div className="shrink-0 border-b border-gold-line bg-deep/30 px-3 py-2 sm:px-5">
+            {confirmClear ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span role="alert" className="text-xs text-on-deep">
+                  {copy.clearConfirm(sums.positions)}
+                </span>
+                <button type="button" onClick={resetDraft}
+                        className={`${ACTION_NEUTRAL} ${TOOL_BUTTON}`}>
+                  {copy.discardYes}
                 </button>
-              )}
-            </span>
-          </div>
-
-          {/* Das Speicherfeld. Kein zweiter Dialog über dem Dialog: eine
-              Zeile, die aufklappt, und der Fokus liegt im Namensfeld. */}
-          {saveOpen ? (
-            <form
-              className="mt-2 flex flex-wrap items-end gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void save(loadedId === null ? "new" : "update");
-              }}
-            >
-              <label className="flex min-w-0 flex-1 basis-60 flex-col gap-1">
-                <span className="text-xs text-on-deep-muted">{copy.saveNameLabel}</span>
+                <button type="button" onClick={() => setConfirmClear(false)}
+                        className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2 sm:h-9">
+                  {copy.cancel}
+                </button>
+              </div>
+            ) : pending?.kind === "open" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span role="alert" className="text-xs text-on-deep">
+                  {copy.discardOpen(pending.calculation.name)}
+                </span>
+                <button type="button" onClick={() => loadCalculation(pending.calculation)}
+                        className={`${ACTION_NEUTRAL} ${TOOL_BUTTON}`}>
+                  {copy.discardYes}
+                </button>
+                <button type="button" onClick={() => { setPending(null); openSave(); }}
+                        className={`${ACTION_PRIMARY} ${TOOL_BUTTON}`}>
+                  {copy.discardSaveFirst}
+                </button>
+                <button type="button" onClick={() => setPending(null)}
+                        className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2 sm:h-9">
+                  {copy.cancel}
+                </button>
+              </div>
+            ) : (
+              <form
+                className="flex flex-wrap items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void save(loadedId === null ? "new" : "update");
+                }}
+              >
                 <input
                   autoFocus
                   type="text"
                   value={saveName}
                   onChange={(e) => setSaveName(e.target.value)}
                   placeholder={copy.saveNamePlaceholder}
-                  className="h-11 w-full rounded-sky-sm bg-surface px-2 text-sm ring-1 ring-border-strong focus-ring"
+                  aria-label={copy.saveNameLabel}
+                  className="h-11 min-w-0 flex-1 basis-52 rounded-sky-sm bg-surface px-2 text-sm ring-1 ring-border-strong focus-ring sm:h-9"
                 />
-              </label>
 
-              {/*
-                ZWEI WEGE, WENN EINE KALKULATION GELADEN IST (ADR-0131).
-                „Aktualisieren" überschreibt die geladene, „als neue" legt
-                eine zweite an — so lassen sich Varianten eines Inserats
-                rechnen, ohne das Original zu verlieren.
-              */}
-              {loadedId === null ? (
-                <button type="submit" disabled={saving || !normalizeName(saveName)}
-                        className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
-                  {saving ? copy.saving : copy.saveSubmit}
-                </button>
-              ) : (
-                <>
+                {/*
+                  ZWEI WEGE, WENN EINE KALKULATION GELADEN IST (ADR-0131).
+                  „Aktualisieren" überschreibt die geladene, „als neue" legt
+                  eine zweite an — so lassen sich Varianten eines Inserats
+                  rechnen, ohne das Original zu verlieren.
+                */}
+                {loadedId === null ? (
                   <button type="submit" disabled={saving || !normalizeName(saveName)}
-                          className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
-                    {saving ? copy.saving : copy.saveUpdate}
+                          className={`${ACTION_PRIMARY} ${TOOL_BUTTON} disabled:opacity-40`}>
+                    {saving ? copy.saving : copy.saveSubmit}
                   </button>
-                  <button type="button" disabled={saving || !normalizeName(saveName)}
-                          onClick={() => void save("new")}
-                          className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
-                    {copy.saveNew}
-                  </button>
-                </>
-              )}
-              <button type="button" onClick={() => setSaveOpen(false)}
-                      className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
-                {copy.cancel}
-              </button>
+                ) : (
+                  <>
+                    <button type="submit" disabled={saving || !normalizeName(saveName)}
+                            className={`${ACTION_PRIMARY} ${TOOL_BUTTON} disabled:opacity-40`}>
+                      {saving ? copy.saving : copy.saveUpdate}
+                    </button>
+                    <button type="button" disabled={saving || !normalizeName(saveName)}
+                            onClick={() => void save("new")}
+                            className={`${ACTION_NEUTRAL} ${TOOL_BUTTON} disabled:opacity-40`}>
+                      {copy.saveNew}
+                    </button>
+                  </>
+                )}
+                <button type="button" onClick={() => { setSaveOpen(false); setSaveError(false); }}
+                        className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2 sm:h-9">
+                  {copy.cancel}
+                </button>
 
-              {saveError ? (
-                <p role="alert" className="basis-full text-xs text-danger">{copy.saveFailed}</p>
-              ) : null}
-            </form>
-          ) : null}
-
-          {/* Die Rückfrage vor dem Öffnen über einen ungespeicherten Stand. */}
-          {pending?.kind === "open" ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span role="alert" className="text-xs text-on-deep">
-                {copy.discardOpen(pending.calculation.name)}
-              </span>
-              <button type="button" onClick={() => loadCalculation(pending.calculation)}
-                      className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-xs`}>
-                {copy.discardYes}
-              </button>
-              <button type="button" onClick={() => { setPending(null); openSave(); }}
-                      className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-xs`}>
-                {copy.discardSaveFirst}
-              </button>
-              <button type="button" onClick={() => setPending(null)}
-                      className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
-                {copy.cancel}
-              </button>
-            </div>
-          ) : null}
-
-          {savedNote === null ? null : (
-            <p role="status" className="mt-2 text-xs text-on-deep-muted">
-              {copy.saved(savedNote)}
-            </p>
-          )}
-        </div>
+                {saveError ? (
+                  /* Ein Fehler bleibt stehen, bis er weggeklickt wird — er
+                     ist die eine Rückmeldung, die man nicht verpassen darf. */
+                  <p role="alert" className="basis-full text-xs text-danger">{copy.saveFailed}</p>
+                ) : null}
+              </form>
+            )}
+          </div>
+        ) : null}
 
         {/* Die Suche bleibt stehen, die Liste darunter rollt. Bei dreißig
             Positionen ist das der Unterschied zwischen Tippen und Suchen. */}
@@ -638,7 +764,20 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
           />
         ) : (
         <>
-        <div className="max-h-[45dvh] shrink-0 overflow-y-auto border-b border-gold-line px-4 py-3 sm:px-5">
+        {/*
+          DIE SUCHE, GEDECKELT — UND ZWAR ENGER ALS VORHER (V2.1).
+
+          `45dvh` war die halbe Fläche: sobald sechs Treffer standen, blieb
+          für die Positionsliste fast nichts. Das war der zweite Teil des
+          Befunds aus dem Praxistest. `28dvh` trägt das Feld und drei bis
+          vier Treffer — und wer eintippt, was er in der Hand hält, nimmt
+          ohnehin den ersten.
+
+          Zwei Rollbereiche, aber keine verschachtelten: dieser und die Liste
+          darunter sind Geschwister. `FigureSearch` bringt keinen eigenen
+          mit, deshalb rollt hier der Kasten.
+        */}
+        <div className="max-h-[28dvh] shrink-0 overflow-y-auto border-b border-gold-line px-3 py-2 sm:px-5 sm:py-2.5">
           {catalog === null ? (
             <p className="text-sm text-on-deep-muted">{copy.loading}</p>
           ) : failed ? (
@@ -656,7 +795,25 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
           )}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5">
+        {/*
+          DIE LISTE IST DER WACHSENDE TEIL.
+
+          `flex-1 min-h-0` — und zwar GENAU DIESE ZWEI, nicht mehr. Ein
+          `min-h-[7.5rem]` als Untergrenze stand hier einen Augenblick lang
+          und ist wieder fort: es widerspricht dem `min-h-0`, das ein
+          Flex-Kind erst unter seine Inhaltsgröße schrumpfen lässt, und ohne
+          dieses Schrumpfen gibt es keinen inneren Rollbereich, sondern einen
+          abgeschnittenen Kasten (das Panel ist `overflow-hidden`).
+          Zwei widersprüchliche Klassen entscheidet am Ende die Reihenfolge
+          im erzeugten CSS — also niemand, der die Absicht kennt.
+
+          Der Platz entsteht deshalb von der anderen Seite: die festen Teile
+          über ihr sind klein (Kopf in EINER Reihe) und die Suche ist auf
+          `28dvh` gedeckelt. Was übrig bleibt, gehört der Liste — bei
+          `max-h-[74dvh]` auf einem 900-px-Fenster sind das rund 300 px und
+          damit fünf bis sechs Zeilen.
+        */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-5 sm:py-3">
           {lines.length === 0 ? (
             <div className="py-8 text-center">
               <p className="text-sm text-on-deep">{copy.empty}</p>
@@ -858,8 +1015,8 @@ function Summary({
   const [draft, setDraft] = useState<string | null>(null);
 
   return (
-    <footer className="shrink-0 border-t border-gold-line bg-deep/40 px-4 py-3 sm:px-5">
-      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+    <footer className="shrink-0 border-t border-gold-line bg-deep/40 px-3 py-2 sm:px-5 sm:py-2.5">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm">
           <div className="flex items-baseline gap-1.5">
             <dt className="text-xs text-on-deep-muted">{copy.positionsLabel}</dt>
@@ -945,16 +1102,24 @@ function Summary({
         </div>
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-on-deep-muted">
-          {copy.maxPurchaseHint}
-          {withoutValue > 0 ? ` · ${copy.withoutValue(withoutValue)}` : ""}
-        </p>
-        {/* `positions` bleibt im Vertrag dieser Komponente, auch ohne den
-            Knopf: der Fuß nennt die Zahl oben, und ein Parameter, der nur
-            für einen entfernten Knopf da war, wäre jetzt ein toter. */}
-        <p className="sr-only">{positions}</p>
-      </div>
+      {/*
+        DER HINWEIS, ENGER GESETZT (V2.1).
+
+        Er stand als eigene Reihe mit `mt-2` darunter und kostete rund 24 px.
+        Jetzt ist er eine Zeile direkt unter den Zahlen, mit `mt-1` — der
+        Satz bleibt, die Höhe nicht. Zusammen mit dem Kopf in einer Reihe und
+        der engeren Suche sind das die drei Stellen, an denen die Liste
+        wieder Platz bekommt.
+
+        `positions` bleibt im Vertrag dieser Komponente, auch ohne den
+        entfernten Knopf: der Fuß nennt die Zahl oben, und ein Parameter, der
+        nur für einen Knopf da war, wäre jetzt ein toter.
+      */}
+      <p className="mt-1 text-[11px] leading-tight text-on-deep-muted">
+        {copy.maxPurchaseHint}
+        {withoutValue > 0 ? ` · ${copy.withoutValue(withoutValue)}` : ""}
+        <span className="sr-only"> {positions}</span>
+      </p>
     </footer>
   );
 }

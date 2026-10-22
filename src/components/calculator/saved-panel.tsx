@@ -50,11 +50,32 @@ export function SavedPanel({
   onRetry: () => void;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 sm:px-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-5 sm:py-3">
+      {/*
+        ÜBERSCHRIFT UND RÜCKWEG, BEIDE DEUTLICH (V2.1).
+
+        Der Rückweg war ein unterstrichener Text in der Ecke — zu leise für
+        die einzige Stelle, an der man diese Ansicht verlässt. Jetzt ist er
+        ein Knopf mit Pfeil, in derselben Höhe wie die Knöpfe im Kopf.
+        **Es gibt ihn zweimal, und das ist Absicht:** oben in der Kopfreihe
+        steht der Umschalter, der in jeder Ansicht sichtbar ist, und hier
+        steht der Rückweg dort, wo der Blick gerade ist. Eine Sackgasse kann
+        so nicht entstehen (ADR-0131).
+
+        Der Ansichtswechsel rührt die Kalkulation nicht an: `setView` setzt
+        eine Ansicht und sonst nichts — die Positionen, der Faktor und die
+        Zuordnung bleiben, wo sie sind.
+      */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-on-deep">{copy.savedListTitle}</h3>
         <button type="button" onClick={onBack}
-                className="focus-ring h-9 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
+                className={`${ACTION_NEUTRAL} h-11 min-h-11 w-auto gap-1.5 px-2.5 text-xs sm:h-9 sm:min-h-9 sm:px-3`}>
+          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+               className="h-4 w-4 shrink-0">
+            <path d="M19 12H5.5" />
+            <path d="M10.5 6.5 5 12l5.5 5.5" />
+          </svg>
           {copy.savedListBack}
         </button>
       </div>
