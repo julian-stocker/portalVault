@@ -535,9 +535,21 @@ describe("8. der Weg nach Staging ist vorbereitet, nicht gegangen", () => {
     const post = roh("supabase/checks/0142_postflight.sql");
     for (const zeile of ["zwoelf Spalten", "vier Richtlinien",
       "keine Richtlinie gilt fuer anon", "anon hat KEIN Tabellenrecht",
-      "kein truncate", "PARTIELLE Unique-Index", "die Tabelle ist LEER"]) {
+      "kein truncate", "PARTIELLE Unique-Index"]) {
       expect(post, zeile).toContain(zeile);
     }
+    /*
+     * „die Tabelle ist LEER" stand hier und ist fort (2026-10-22). Die Zeile
+     * verlangte null Zeilen — richtig in der Minute nach der Migration und
+     * falsch, sobald jemand eine Kalkulation gespeichert hat. Genau das ist
+     * auf Staging passiert. Dass die MIGRATION keine Zeile anlegt, prüft sie
+     * in ihrer eigenen Transaktion, und dort ist es beweisbar; in der
+     * Nachkontrolle ist es seitdem eine Messung.
+     */
+    expect(post).not.toContain("die Tabelle ist LEER");
+    expect(post).toContain("Info: gespeicherte Kalkulationen");
+    /* Beweisbar ist die Aussage dort, wo sie gilt: in der Migration selbst. */
+    expect(roh(MIGRATION)).toContain("die Migration hat % Zeile(n) angelegt");
     /* Und sie sagt, was sie NICHT beantwortet. */
     expect(post).toContain("ob die Richtlinien WIRKEN");
   });

@@ -262,3 +262,60 @@ zwei Kalkulationen nebeneinander, unabhängig
 ein Einkauf, höchstens eine Kalkulation     23505
 aufgeräumt: 0 Probezeilen, beide Testkonten entfernt
 ```
+
+
+---
+
+## 0143 — die Übernahme ins Orderbuch (Calculator V3, ADR-0132)
+
+**Vorgeprüft am 2026-10-22, rein lesend.** `0142` steht auf Staging (Tabelle
+mit allen zwölf Spalten lesbar, `anon` abgewiesen mit `42501`, eine
+gespeicherte Kalkulation aus der Browserprobe), `0143` ist dort **noch nicht
+angewendet** (`PGRST202`), und `seller_create_purchase_with_items` steht
+unberührt und für `anon` gesperrt (`42501`).
+
+### Die Reihenfolge im SQL-Editor
+
+| # | Datei | schreibt? | Erwartung |
+|---|---|---|---|
+| 1 | `supabase/operations/staging-s-postflight-0142.sql` | nein | `9999 = 0` · Zeile 104 nennt jetzt die Zahl der gespeicherten Kalkulationen (keine Erwartung mehr) · Zeile 505 nennt die fünf Richtlinien von `collection_items` |
+| 2 | `supabase/operations/staging-0143.sql` | **ja** | `0143 ok: …` und `commit` |
+| 3 | `supabase/operations/staging-s-postflight-0143.sql` | nein | `9999 = 0` |
+
+Danach, von außen:
+
+```bash
+npm run verify:calculations:staging     # 27/27, unverändert
+```
+
+### Was Schritt 3 prüft
+
+| Zeilen | |
+|---|---|
+| 101–106 | die Funktion steht einmal, **vierzehn** Argumente in der richtigen Folge und mit den richtigen Typen, Rückgabe `bigint`, `security definer`, leerer `search_path` |
+| **201–204** | **sie ruft `seller_create_purchase_with_items` auf** und fügt selbst nichts in `purchases` oder `purchase_items` ein, und sie bucht nichts ein |
+| 301–305 | die drei Riegel: Betriebsrolle · Besitz (`c.user_id = (select auth.uid())`) · `for update`; dazu „already handed over" und „calculation not found" |
+| 401–402 | aus der Kalkulation wird **nur `purchase_id`** gelesen — kein Betrag, kein Faktor, keine Positionen |
+| 501–503 | ACL materialisiert · **kein** EXECUTE für PUBLIC/`anon` · `authenticated` darf |
+| 601–605 | ringsherum unverändert: `seller_create_purchase_with_items` und `seller_create_purchase` je **genau einmal**, `purchase_calculations` weiter vier Richtlinien ohne `anon`, der partielle Unique-Index steht |
+| **701–703** | **die Belegsperre**: keine Grants, keine API-Rolle darf ausstellen, und `0143` nennt die Belegausstellung nirgends |
+| 901–902 | Infos: Einkäufe insgesamt, Kalkulationen und davon verknüpfte |
+
+**Zeile 601/602 sind die interessantesten.** Zeigen sie mehr als `1`, ist eine
+alte Signatur von `seller_create_purchase_with_items` stehengeblieben — dann
+gäbe es wirklich zwei Wege, einen Einkauf anzulegen. Die Migrationen räumen
+auf (`0116` droppt die Fassung mit fünf Parametern, `0120` die mit zwölf),
+aber geprüft ist es erst, wenn es dort steht. **Im Probelauf sind diese zwei
+Zeilen rot**, weil das Stub-Schema alle Signaturen anlegt und keine
+`drop`-Anweisung ausführt — in einer echten Datenbank müssen sie grün sein.
+
+### Danach im Browser (braucht `0143`)
+
+| ☐ | |
+|---|---|
+| ☐ | Kalkulation speichern → „Einkauf erstellen" → das **normale** Formular mit den Figuren drin |
+| ☐ | Kaufdaten eintippen, speichern → Einkauf entsteht, in der Liste steht jetzt **„Einkauf ansehen"** und führt auf genau diesen Einkauf |
+| ☐ | Dieselbe Adresse `?kalkulation=<id>` noch einmal aufrufen und speichern → die Datenbank lehnt ab (`already handed over`), **und es entsteht kein zweiter Einkauf** |
+| ☐ | Abbrechen statt speichern → **kein** Einkauf, Kalkulation zeigt weiter „Einkauf erstellen" |
+| ☐ | „+ Neu" ohne Kalkulation → leeres Formular wie immer |
+| ☐ | Die vier Geldfelder sind leer, auch bei einer Kalkulation über 300 € |

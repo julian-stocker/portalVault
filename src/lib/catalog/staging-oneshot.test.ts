@@ -469,6 +469,7 @@ const LESELAEUFE = [
  */
 const LESELAEUFE_OHNE_Z0 = [
   ["supabase/operations/staging-s-postflight-0142.sql", "0142_postflight.sql"],
+  ["supabase/operations/staging-s-postflight-0143.sql", "0143_postflight.sql"],
 ] as const;
 
 describe.each(LESELAEUFE_OHNE_Z0)("der lesende Staging-Lauf %s", (skript, pruefdatei) => {

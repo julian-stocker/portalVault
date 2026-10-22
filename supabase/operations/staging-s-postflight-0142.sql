@@ -74,8 +74,23 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
                    and column_name in ('id', 'user_id', 'lines', 'factor_percent',
                                        'purchase_id')), '(keine)'),
       'factor_percent:smallint,id:uuid,lines:jsonb,purchase_id:bigint,user_id:uuid'),
-  (104, 'Tabelle', 'die Tabelle ist LEER — die Migration legt keine Zeile an',
-      (select count(*)::text from public.purchase_calculations), '0'),
+  /*
+   * BERICHTIGT AM 2026-10-22: AUCH HIER STAND EINE ZAHL, DIE VERFAELLT.
+   *
+   * Die Zeile verlangte `0` — richtig in der Minute nach der Migration und
+   * falsch, sobald jemand eine Kalkulation gespeichert hat. Genau das ist
+   * auf Staging passiert: eine Browserprobe hat eine Zeile angelegt, und
+   * ein zweiter Lauf dieser Datei haette sie als Abweichung gemeldet.
+   *
+   * „Die Migration legt keine Zeile an" ist ohnehin keine Frage an die
+   * Nachkontrolle, sondern an die Migration: `0142` prueft es in ihrer
+   * EIGENEN Transaktion (`die Migration hat % Zeile(n) angelegt`), und dort
+   * ist es beweisbar. Hier bleibt eine Messung — die Zahl, die der Betrieb
+   * gerade fuehrt.
+   */
+  (104, 'Tabelle', 'Info: gespeicherte Kalkulationen (nach der Migration 0, '
+        'danach alles, was gespeichert wurde)',
+      (select count(*)::text from public.purchase_calculations), null),
 
   -- -------------------------------------------------------------- Die CHECKs
   (111, 'Form', 'die fuenf CHECK-Bedingungen stehen',

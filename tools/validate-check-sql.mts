@@ -3218,12 +3218,20 @@ async function main(): Promise<void> {
      */
     let nachRot = "-";
     let nachZeilen = "-";
+    let nachLeer = "-";
     if (lauf === null) {
       const blatt = await db.query(
         readFileSync("supabase/checks/0142_postflight.sql", "utf8")) as {
           rows: { nr: number; befund: string; ok: boolean | null }[] };
       nachRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
       nachZeilen = blatt.rows.find((r) => r.nr === 102)?.befund ?? "(fehlt)";
+      /*
+       * Zeile 104 ist seit dem 2026-10-22 eine MESSUNG und keine Erwartung
+       * mehr (eine Kalkulation, die jemand speichert, ist keine
+       * Abweichung). Dass die Migration selbst keine Zeile anlegt, wird
+       * deshalb hier gelesen — unmittelbar nach ihr, wo die Aussage gilt.
+       */
+      nachLeer = blatt.rows.find((r) => r.nr === 104)?.befund ?? "(fehlt)";
     }
 
 
@@ -3294,7 +3302,7 @@ async function main(): Promise<void> {
         && spalten === "id,user_id,name,status,lines,factor_percent,total_cents,"
           + "positions,units,purchase_id,created_at,updated_at"
         /* Die Nachkontrolle: nur die eine Stub-Zeile darf rot sein. */
-        && nachRot === "502, 9999" && nachZeilen === spalten
+        && nachRot === "502, 9999" && nachZeilen === spalten && nachLeer === "0"
         && policies === "4" && rls === "true"
         && typeof zweimal === "string" && zweimal.includes("steht schon")
         && zweiNull === "zwei ohne Einkauf: ok" && doppelt === "abgewiesen"
@@ -3302,7 +3310,7 @@ async function main(): Promise<void> {
         && typeof mitZeilen === "string" && mitZeilen.includes("Zeile(n) stehen in der Tabelle")
         && ohneZeilen === null && fort === "true",
       sagt: `0142: ${lauf ?? "durch"} · ${policies} Policies · RLS ${rls}`
-        + ` · Nachkontrolle rot: ${nachRot}`
+        + ` · Nachkontrolle rot: ${nachRot} (Zeilen nach der Migration ${nachLeer})`
         + `${nachRot === "502, 9999" ? " (nur die Stub-Zeile 502)" : ""}`
         + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
         + ` · ${zweiNull} · derselbe Einkauf zweimal: ${doppelt}`
@@ -3459,6 +3467,36 @@ async function main(): Promise<void> {
       anzahlZuletzt = await wert(db, "select count(*)::text as w from public.purchases");
     }
 
+    /*
+     * 5b. UND DIE NACHKONTROLLE, GEFAHREN — vor der Ruecknahme, denn danach
+     *     gibt es die Funktion nicht mehr.
+     *
+     * Ihre Erwartungen sind damit geprueft und nicht behauptet — bis auf
+     * ZWEI Zeilen, die ein Stub nicht erfuellen kann, und das ist eine
+     * lehrreiche Stelle:
+     *
+     *   601/602 verlangen, dass `seller_create_purchase_with_items` und
+     *   `seller_create_purchase` GENAU EINMAL existieren. Im Stub gibt es
+     *   drei bzw. zwei Signaturen, weil das Stub-Schema die Signaturen ALLER
+     *   Migrationen anlegt und deren `drop function` nicht ausfuehrt. In
+     *   einer echten Datenbank ist es genau eine: `0116` droppt die
+     *   Fassung mit fuenf Parametern, bevor sie die mit zwoelf anlegt, und
+     *   `0120` droppt die mit zwoelf, bevor sie die mit dreizehn anlegt.
+     *
+     * Die Pruefung ist deshalb RICHTIG und bleibt blockierend: zeigt sie auf
+     * Staging oder Production mehr als eins, ist eine alte Overload
+     * stehengeblieben — und dann gaebe es tatsaechlich zwei Wege, einen
+     * Einkauf anzulegen. Hier werden die zwei Zeilen namentlich zugelassen;
+     * jede andere rote laesst den Durchgang scheitern.
+     */
+    let postRot = "-";
+    if (lauf === null) {
+      const blatt = await db.query(
+        readFileSync("supabase/checks/0143_postflight.sql", "utf8")) as {
+          rows: { nr: number; befund: string; ok: boolean | null }[] };
+      postRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+    }
+
     /* Und die Ruecknahme laesst die Verknuepfung stehen. */
     const zurueck = lauf === null ? await fahre(db, R143) : "-";
     const bleibt = zurueck === null
@@ -3474,12 +3512,16 @@ async function main(): Promise<void> {
         && einkauf !== "-" && verknuepft === "true" && positionen === "2"
         && nochmal === einkauf && anzahlDanach === "1"
         && zweiterVersuch === "abgewiesen" && anzahlZuletzt === "1"
+        && postRot === "601, 602, 9999"
         && zurueck === null && bleibt === "true",
       sagt: `0143: ${lauf ?? "durch"} · ohne Rolle: ${ohneRolle}`
         + ` · fremde Kalkulation: ${fremd} · Einkauf ${einkauf} mit ${positionen} Positionen,`
         + ` verknuepft ${verknuepft} · zweiter Lauf desselben Entwurfs: ${nochmal}`
         + ` (Einkaeufe ${anzahlDanach}) · neuer Entwurf: ${zweiterVersuch}`
-        + ` (Einkaeufe ${anzahlZuletzt}) · Ruecknahme ${zurueck ?? "durch"},`
+        + ` (Einkaeufe ${anzahlZuletzt}) · Nachkontrolle rot: ${postRot}`
+        + `${postRot === "601, 602, 9999" ? " (nur 601/602: der Stub traegt alle "
+          + "Signaturen, die echten Migrationen droppen die alten)" : ""}`
+        + ` · Ruecknahme ${zurueck ?? "durch"},`
         + ` Verknuepfung bleibt ${bleibt}`,
     });
   }
