@@ -310,6 +310,23 @@ export function canHandOver(calculation: SavedCalculation): boolean {
 }
 
 /**
+ * Die Positionen als Figur-und-Menge-Paare, in ihrer Reihenfolge.
+ *
+ * Das ist alles, was die Übernahme ins Orderbuch braucht (ADR-0132): SKY-ID
+ * und Stückzahl. **Kein Preis, kein Faktor, kein Gesamtwert** — der
+ * Kalkulator bewertet ein Inserat, und eine Bewertung ist keine Ausgabe.
+ * Was der Einkauf gekostet hat, tippt der Betreiber im bestehenden Formular.
+ *
+ * Daraus baut `purchaseDraftFromUnits` (im Orderbuch) die Entwurfszeilen —
+ * über denselben Weg, den ein Klick nimmt.
+ */
+export function handOverUnits(
+  calculation: SavedCalculation,
+): { skyId: string; quantity: number }[] {
+  return calculation.lines.map((line) => ({ skyId: line.skyId, quantity: line.quantity }));
+}
+
+/**
  * Die Positionen als Einkaufspositionen — eine je STÜCK.
  *
  * `seller_create_purchase_with_items` (0064) erwartet ein Element je

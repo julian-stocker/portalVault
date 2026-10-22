@@ -12302,3 +12302,98 @@ die Kalkulation nicht an** — `setView` setzt eine Ansicht und sonst nichts.
 Entscheidungen fest (eine Höhenkette, ein wachsender Bereich, der Deckel der
 Suche, keine Aktion im Fuß); die Zahlen oben sind aus dem CSS **gerechnet**,
 nicht im Browser gemessen. Das Ergebnis sieht man nur dort.
+
+---
+
+## ADR-0132 · Eine Kalkulation wird ein Einkauf — im bestehenden Formular
+
+**Status:** akzeptiert (Auftrag des Betreibers, 2026-10-22) ·
+**Umsetzung:** Oberfläche und Navigation fertig; die Datenbankseite in
+`0143`, **nirgends angewendet**.
+
+### Die Entscheidung in einem Satz
+
+Der Kalkulator liefert **nur SKY-IDs und Stückzahlen**. Alles danach ist das
+unveränderte „+ Neu" des Orderbuchs.
+
+### Wie der Weg aussieht
+
+`/business/orderbuch/neu?kalkulation=<uuid>` — dieselbe Route, dieselbe
+Serverkomponente, dieselbe Formularkomponente wie beim normalen „+ Neu".
+Der Parameter ist eine **Kennung und nichts weiter**; die Artikel liest
+`fetchOwnCalculation` serverseitig unter den Richtlinien aus `0142`.
+
+Dass ein Suchparameter eine Vorbelegung setzt, ist hier kein neues Muster:
+`?test=1` tut es seit der Testansicht.
+
+**Eine fremde, unbekannte oder krumme Kennung ergibt `null`**, und dann
+verhält sich die Seite wie ein Aufruf ohne Parameter: leeres Formular, kein
+Hinweis, kein Fehler. Wer nichts sehen darf, soll nicht erfahren, dass es
+existiert.
+
+### Warum die Zeilen über `addPurchaseFigure` entstehen
+
+`purchaseDraftFromUnits` faltet **Stück für Stück durch dieselbe Funktion,
+die ein Klick nimmt**. Damit sind die Zeilen nicht „gleich aussehend",
+sondern dasselbe: dieselben Schlüssel, derselbe Anfangszustand, dasselbe
+Zusammenfassen gleicher Figuren, dieselbe Decke. Eine zweite Bauanleitung
+wäre genau die Sorte Unterschied, die später niemand findet.
+
+**Name, Serie und Marktwert kommen aus dem Katalog**, nicht aus dem
+Schnappschuss der Kalkulation. Der Schnappschuss ist die Erinnerung daran,
+womit gerechnet wurde (ADR-0131); für den Einkauf gilt der Katalog von
+heute. Was der Katalog nicht mehr führt, wird weggelassen und **gezählt** —
+ein Satz im Formular, kein Dialog.
+
+### Keine Zahl aus der Kalkulation
+
+Marktwerte, Kalkulationsfaktor und maximaler Einkaufspreis sind eine
+**Bewertung**, keine Ausgabe. Kaufpreis, Versand, Käuferschutz und Summe
+tippt der Betreiber wie bei „+ Neu". Die Übergabe trägt kein Geldfeld, und
+`0143` liest aus der Kalkulation **genau eine Spalte**: `purchase_id`.
+
+### Die Verknüpfung: eine Transaktion, kein zweiter Knopf
+
+`0143` legt eine Funktion an, die den Einkauf **nicht selbst anlegt**:
+`seller_create_purchase_from_calculation` ruft
+`seller_create_purchase_with_items` mit allen dreizehn Parametern
+unverändert auf und schreibt in derselben Transaktion `purchase_id`.
+
+> **Warum nicht zwei Aufrufe:** scheitert der zweite (Netz, Timeout), steht
+> ein Einkauf da, von dem niemand weiß, woraus er kam, und die Kalkulation
+> bietet weiter „Einkauf erstellen" an. Beim nächsten Druck entstünde ein
+> zweiter Einkauf. Genau dieser Teilzustand ist der Grund für die Funktion.
+
+**Es bleibt bei einem Weg, einen Einkauf anzulegen.** Die Datums­prüfung, die
+Mengendecke, die Zustandsliste, die Kostenaufteilung und die Idempotenz aus
+`0120` gelten weiter genau einmal und an einer Stelle. Dazu kommen drei
+Zeilen: sperren, prüfen, verknüpfen. Auch in der Anwendung bleibt es bei
+**einer** Serveraktion (`createPurchaseWithItems`), die ihre Argumentliste
+einmal baut und nur den Funktionsnamen wechselt.
+
+### Drei Riegel
+
+1. **`can_operate_active_seller()`** — ein Einkauf ist ein Geschäftsvorfall.
+2. **`user_id = auth.uid()`, ausdrücklich** — die Funktion ist
+   `security definer`, RLS greift also nicht. Dieselbe Antwort für „gibt es
+   nicht" und „gehört jemand anderem": `calculation not found`.
+3. **`purchase_id is null`**, mit `for update` gesperrt. Die einzige Ausnahme
+   ist die wortgleiche Wiederholung desselben Browser-Entwurfs: dann trägt
+   der verknüpfte Einkauf genau diesen `client_token`, und es entsteht
+   nichts Neues. Ein abgewiesener zweiter Versuch **lässt keinen Einkauf
+   zurück** — die Prüfung steht vor dem Anlegen, und beides ist eine
+   Transaktion.
+
+In der Liste zeigt eine übernommene Kalkulation **„Einkauf ansehen"** statt
+„Einkauf erstellen". Das ist die Oberflächenhälfte der Sperre; die andere
+gilt auch, wenn jemand die Adresse von Hand eintippt.
+
+### Was ausdrücklich nicht entstanden ist
+
+Kein zweites Einkaufsformular, kein Importdialog, keine Vorschau, kein
+zusätzlicher Bestätigungsschritt, keine Meldung „Figuren wurden übernommen",
+kein zweiter Speichern-Knopf, kein neues Bedienelement im Orderbuch. Die
+sichtbaren Figuren im normalen Formular sind die Bestätigung.
+
+**Ein Seitenaufruf legt nichts an** — auch nicht beim Neuladen oder
+Zurücknavigieren. Wer abbricht, hinterlässt keinen Einkauf.

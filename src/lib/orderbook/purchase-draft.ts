@@ -124,6 +124,69 @@ export function addPurchaseFigure(
   );
 }
 
+/**
+ * Einen Entwurf aus Figur-und-Menge-Paaren bauen (Calculator V3, ADR-0132).
+ *
+ * WOFUER. Eine gespeicherte Kalkulation liefert SKY-IDs und Stückzahlen. Das
+ * bestehende Formular soll sie vorfinden, als wären sie dort eingetippt
+ * worden — und „als wären" ist hier wörtlich zu nehmen.
+ *
+ * DESHALB FALTET DIESE FUNKTION ÜBER `addPurchaseFigure`, Stück für Stück,
+ * statt Zeilen selbst zu bauen. Damit entstehen genau die Zeilen, die ein
+ * Mensch durch Klicken erzeugt hätte: dieselben Schlüssel, derselbe
+ * Anfangszustand, dasselbe Zusammenfassen gleicher Figuren, dieselbe Decke
+ * (`MAX_DRAFT_UNITS`). Eine zweite Bauanleitung für dasselbe wäre genau die
+ * Sorte Unterschied, die später niemand findet.
+ *
+ * DIE ANZEIGEDATEN KOMMEN AUS DEM KATALOG, NICHT AUS DER KALKULATION. Name,
+ * Serie und Marktwert nimmt `lineFrom` aus dem `FigureChoice` — also aus
+ * derselben Quelle wie beim Tippen. Der Schnappschuss der Kalkulation ist
+ * eine Erinnerung daran, womit gerechnet wurde (ADR-0131), und nicht die
+ * Wahrheit über den Artikel von heute.
+ *
+ * WAS SIE NICHT FINDET, LÄSST SIE WEG. Eine SKY-ID, die der Katalog nicht
+ * führt — deaktiviert, umgezogen —, erzeugt keine Zeile und keinen Fehler.
+ * Das Formular zeigt dann weniger Positionen als die Kalkulation, und das
+ * ist die ehrliche Auskunft: diese Figur kann das Orderbuch heute nicht
+ * zuordnen. Die Zahl der weggelassenen gibt `purchaseDraftGap` zurück.
+ */
+export function purchaseDraftFromUnits(
+  catalog: readonly FigureChoice[],
+  units: readonly { skyId: string; quantity: number }[],
+): PurchaseDraftLine[] {
+  const index = new Map(catalog.map((choice) => [choice.skyId, choice]));
+  let lines: PurchaseDraftLine[] = [];
+  for (const unit of units) {
+    const choice = index.get(unit.skyId);
+    if (choice === undefined) continue;
+    /* Stück für Stück durch denselben Weg wie ein Klick. */
+    for (let i = 0; i < unit.quantity; i += 1) {
+      lines = addPurchaseFigure(lines, choice);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Wie viele Stück die Vorbelegung NICHT übernehmen konnte.
+ *
+ * Gezählt, nicht verschwiegen: wer dreißig Figuren kalkuliert hat und
+ * achtundzwanzig im Formular sieht, muss erfahren können, warum. Die
+ * Oberfläche nennt die Zahl; der Grund ist immer derselbe — der Katalog
+ * führt die SKY-ID nicht mehr.
+ */
+export function purchaseDraftGap(
+  catalog: readonly FigureChoice[],
+  units: readonly { skyId: string; quantity: number }[],
+): number {
+  const known = new Set(catalog.map((choice) => choice.skyId));
+  let fehlt = 0;
+  for (const unit of units) {
+    if (!known.has(unit.skyId)) fehlt += unit.quantity;
+  }
+  return fehlt;
+}
+
 /** Drop one line and every unit in it. */
 export function removePurchaseLine(
   lines: readonly PurchaseDraftLine[],

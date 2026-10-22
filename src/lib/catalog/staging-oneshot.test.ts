@@ -381,9 +381,11 @@ const LAEUFE = [
   /* Und `0142` — dieselbe Form, eine andere Sache: die gespeicherten
      Einkaufskalkulationen (ADR-0131). */
   ["supabase/operations/staging-0142.sql", "0142_purchase_calculations.sql"],
+  /* Und `0143` — die Uebernahme ins Orderbuch (ADR-0132). */
+  ["supabase/operations/staging-0143.sql", "0143_purchase_from_calculation.sql"],
 ] as const;
 
-describe("die Einzellaeufe fuer 0139 bis 0142", () => {
+describe("die Einzellaeufe fuer 0139 bis 0143", () => {
   for (const [skript, migration] of LAEUFE) {
     const text = readFileSync(skript, "utf8");
 

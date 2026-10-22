@@ -214,6 +214,26 @@ unverändert, 531 sammelbar, 306 Lagerpositionen, 624 Katalogzeilen,
 Lagerabdruck `01e50b9d727a0486ff1ea0eb6ba2dd56` unverändert, **0**
 Zubehörfreigaben, **0** öffentliche Zubehörangebote, Belegsperre unverändert.
 
+### Calculator V3 — die Übernahme ins Orderbuch, vorbereitet am 2026-10-22
+
+Eine gespeicherte Kalkulation wird ein Einkauf, und zwar **im bestehenden
+Formular** (ADR-0132). Der Kalkulator liefert nur SKY-IDs und Stückzahlen.
+
+| | |
+|---|---|
+| Weg | „Einkauf erstellen" in der Liste → `/business/orderbuch/neu?kalkulation=<uuid>` — dieselbe Route, dieselbe Formularkomponente, dieselbe Speicherlogik |
+| Vorbelegung | `purchaseDraftFromUnits` faltet Stück für Stück durch `addPurchaseFigure` — dieselbe Funktion, die ein Klick nimmt. Die Zeilen sind damit nicht unterscheidbar von getippten |
+| Anzeigedaten | aus dem **Katalog**, nicht aus dem Schnappschuss; was er nicht mehr führt, wird weggelassen und in einem Satz gezählt |
+| Geld | **keines** aus der Kalkulation — Bewertung ist keine Ausgabe |
+| Verknüpfung | `0143`: `seller_create_purchase_from_calculation` ruft `seller_create_purchase_with_items` unverändert auf und schreibt `purchase_id` in **derselben Transaktion** |
+| Riegel | Betriebsrolle · Besitz (ausdrücklich, weil `security definer`) · `purchase_id is null` mit `for update`; Ausnahme nur für die wortgleiche Wiederholung desselben Entwurfs |
+| Migration | `0143_purchase_from_calculation.sql` — **nirgends angewendet**; Rücknahme `R0143` lässt bestehende Verknüpfungen stehen; Staging-Lauf `staging-0143.sql` bereit |
+| Probelauf | **P49**: ohne Rolle abgewiesen · fremde Kalkulation „not found" · guter Fall ein Einkauf mit zwei Positionen, verknüpft · derselbe Entwurf nochmal: derselbe Einkauf, **kein zweiter** · neuer Entwurf: abgewiesen und **kein Einkauf zurückgelassen** · Rücknahme lässt die Verknüpfung stehen |
+
+**Nicht entstanden:** kein zweites Einkaufsformular, kein Importdialog, keine
+Vorschau, kein zusätzlicher Bestätigungsschritt, kein zweiter
+Speichern-Knopf, kein neues Bedienelement im Orderbuch.
+
 ### Calculator V2 — vorbereitet am 2026-10-22, nicht angewendet, nicht deployt
 
 Der Kalkulator behält jetzt zwei Dinge auseinander (ADR-0131): den

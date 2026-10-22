@@ -95,11 +95,45 @@ const DATE_BAD = `${DATE_BASE} ring-2 ring-danger`;
  */
 const field = copy.detailsModal;
 
-export function NewPurchase({ defaultTest = false, catalog = [] }: {
+export function NewPurchase({
+  defaultTest = false, catalog = [], initialLines = [], calculationId = null,
+  missingUnits = 0,
+}: {
   /** Arrives as `?test=1` when the form was opened from the Test view. */
   defaultTest?: boolean;
   /** The canonical catalog, shipped once with the page. */
   catalog?: readonly FigureChoice[];
+  /**
+   * Die Figuren einer gespeicherten Kalkulation, schon als Entwurfszeilen
+   * (Calculator V3, ADR-0132).
+   *
+   * Gebaut hat sie `purchaseDraftFromUnits` — über denselben
+   * `addPurchaseFigure`, den ein Klick nimmt. Sie sind damit keine zweite
+   * Sorte Position: dasselbe `key`-Schema, derselbe Anfangszustand,
+   * dieselbe Decke. Alles, was das Formular mit getippten Positionen kann
+   * — hinzufügen, entfernen, Menge ändern, Zustand setzen —, kann es
+   * deshalb mit diesen genauso.
+   *
+   * Leer beim normalen „+ Neu". Dann ist dieses Formular, was es immer war.
+   */
+  initialLines?: readonly PurchaseDraftLine[];
+  /**
+   * Die Kalkulation, aus der die Zeilen kommen — oder `null`.
+   *
+   * Sie entscheidet nur EINS: ob beim Speichern zusätzlich die Verknüpfung
+   * geschrieben wird (`0143`, eine Transaktion). Am Formular, an den
+   * Pflichtfeldern, an der Rechnung und am Speichern-Knopf ändert sie
+   * nichts.
+   */
+  calculationId?: string | null;
+  /**
+   * Wie viele Stück der Katalog heute nicht zuordnen kann.
+   *
+   * Nicht verschwiegen: wer dreißig kalkuliert hat und achtundzwanzig sieht,
+   * muss erfahren, warum. Es ist ein Satz, kein Dialog — bestätigen muss
+   * niemand etwas (Auftrag Punkt 5).
+   */
+  missingUnits?: number;
 }) {
   const router = useRouter();
 
@@ -129,7 +163,16 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
 
   const [note, setNote] = useState("");
   const [isTest, setIsTest] = useState(defaultTest);
-  const [lines, setLines] = useState<PurchaseDraftLine[]>([]);
+  /*
+   * DER ENTWURF BEGINNT MIT DEM, WAS DIE SEITE MITGEBRACHT HAT.
+   *
+   * Als Anfangszustand, nicht in einem Effekt: ein Effekt, der synchron
+   * Zustand setzt, löst eine zweite Renderrunde aus (die Regel dieses
+   * Projekts), und er würde beim Zurücknavigieren erneut laufen und
+   * Änderungen des Betreibers überschreiben. Hier ist es eine Vorbelegung,
+   * die ab dem ersten Bild ganz normaler Formularzustand ist.
+   */
+  const [lines, setLines] = useState<PurchaseDraftLine[]>([...initialLines]);
   const [error, setError] = useState<string | null>(null);
   /*
    * Die Ablehnung des Datums steht AM FELD und nicht oben bei `error`: der
@@ -261,6 +304,14 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
           buyerProtection: costs.buyerProtection,
           /* Derselbe Entwurf, so oft er auch abgeschickt wird. */
           clientToken: draftToken,
+          /*
+           * Die Kalkulation, falls dieses Formular aus einer kam. Dieselbe
+           * Aktion, dasselbe Absenden, derselbe Knopf — die Aktion wählt
+           * daraufhin die Datenbankfunktion, die den Einkauf anlegt UND
+           * verknüpft, statt nach dem Anlegen ein zweites Mal zu schreiben
+           * (ADR-0132). `null` heißt: ganz normaler Einkauf.
+           */
+          calculationId,
         },
       );
       if (!result.ok) setError(result.message);
@@ -272,6 +323,17 @@ export function NewPurchase({ defaultTest = false, catalog = [] }: {
     <form onSubmit={submit} className="mt-6 flex flex-col gap-5 sm:gap-4">
       {error ? (
         <p role="alert" className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">{error}</p>
+      ) : null}
+
+      {/*
+        EIN SATZ, WENN DER KATALOG ETWAS NICHT ZUORDNEN KONNTE.
+        Kein Dialog, keine Bestätigung, kein zweiter Schritt (Auftrag Punkt
+        5) — und er steht nur da, wenn es etwas zu sagen gibt.
+      */}
+      {missingUnits > 0 ? (
+        <p className="rounded-sky-md bg-surface px-3 py-2 text-xs text-muted ring-1 ring-border/70">
+          {copy.calculationMissing(missingUnits)}
+        </p>
       ) : null}
 
       {/*

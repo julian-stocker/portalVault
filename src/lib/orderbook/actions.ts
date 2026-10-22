@@ -288,6 +288,24 @@ export type PurchaseHead = {
    * rufen sie ohne Token, und das bleibt gültig.
    */
   clientToken?: string | null;
+  /*
+   * DIE KALKULATION, AUS DER DIESER EINKAUF ENTSTEHT (0143, ADR-0132).
+   *
+   * `null` oder weggelassen heisst: ein ganz normaler Einkauf, und die
+   * Aktion ruft `seller_create_purchase_with_items` wie immer.
+   *
+   * Steht eine Kennung darin, ruft sie statt dessen
+   * `seller_create_purchase_from_calculation` — eine Funktion, die den
+   * Einkauf NICHT selbst anlegt, sondern dieselbe bestehende aufruft und in
+   * DERSELBEN Transaktion die Verknuepfung schreibt. Es gibt also keinen
+   * zweiten Weg, einen Einkauf anzulegen; es gibt einen Weg, ihn zusaetzlich
+   * zu verknuepfen.
+   *
+   * Warum nicht zwei Aufrufe hintereinander: scheitert der zweite, stuende
+   * ein Einkauf da, von dem niemand weiss, woraus er kam — und die
+   * Kalkulation boete weiter „Einkauf erstellen" an (Auftrag Punkt 14).
+   */
+  calculationId?: string | null;
 };
 
 export async function createPurchaseWithItems(
@@ -323,7 +341,17 @@ export async function createPurchaseWithItems(
     };
   }
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("seller_create_purchase_with_items", {
+  /*
+   * DIESELBEN DREIZEHN ARGUMENTE, EIN FUNKTIONSNAME MEHR ODER WENIGER.
+   *
+   * Kommt der Einkauf aus einer Kalkulation, wird
+   * `seller_create_purchase_from_calculation` gerufen — sie nimmt die
+   * Kennung davor und gibt alles andere unveraendert an
+   * `seller_create_purchase_with_items` weiter. Die Argumente werden hier
+   * deshalb EINMAL gebaut: zwei Listen waeren zwei Gelegenheiten, dass eine
+   * davon ein Feld vergisst.
+   */
+  const args = {
     p_purchased_at: purchasedAt, p_total_cost: totalCost, p_note: note ?? null,
     p_is_test: isTest, p_items: items,
     p_platform: head.platform ?? null,
@@ -334,7 +362,12 @@ export async function createPurchaseWithItems(
     p_payment_method: head.paymentMethod ?? null,
     p_external_ref: head.externalRef ?? null,
     p_client_token: head.clientToken ?? null,
-  });
+  };
+  const ausKalkulation = typeof head.calculationId === "string" && head.calculationId !== "";
+  const { data, error } = ausKalkulation
+    ? await supabase.rpc("seller_create_purchase_from_calculation",
+                         { p_calculation_id: head.calculationId, ...args })
+    : await supabase.rpc("seller_create_purchase_with_items", args);
   if (error || typeof data !== "number") {
     return { ok: false as const, message: orderbookMessage(error ?? {}) };
   }

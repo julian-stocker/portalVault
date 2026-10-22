@@ -19,6 +19,7 @@
  */
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 
 import { ACTION_NEUTRAL } from "@/components/ui/action";
@@ -211,6 +212,36 @@ function SavedRow({
                     className={`${ACTION_NEUTRAL} h-10 w-auto min-h-10 px-3 text-xs`}>
               {copy.savedOpen}
             </button>
+            {/*
+              DER WEG INS ORDERBUCH (Calculator V3, ADR-0132).
+
+              Ein Verweis, kein Knopf mit Serveraktion: er führt auf das
+              BESTEHENDE Formular „+ Neu", das dann die Figuren schon
+              enthält. Hier passiert nichts weiter — kein Einkauf, keine
+              Vorschau, keine Bestätigung. Entstehen soll ein Einkauf erst
+              durch den Speichern-Knopf dort.
+
+              Ist die Kalkulation schon übernommen, führt derselbe Platz auf
+              den Einkauf. Dass es nur eines von beiden gibt, ist die
+              Oberflächenhälfte der Sperre gegen eine zweite Übernahme — die
+              andere steht in `0143` und gilt auch, wenn jemand die Adresse
+              von Hand eintippt.
+            */}
+            {calculation.purchaseId === null ? (
+              <Link
+                href={`/business/orderbuch/neu?kalkulation=${calculation.id}`}
+                className={`${ACTION_NEUTRAL} h-10 w-auto min-h-10 px-3 text-xs`}
+              >
+                {copy.createPurchase}
+              </Link>
+            ) : (
+              <Link
+                href={`/business/orderbuch/${calculation.purchaseId}`}
+                className={`${ACTION_NEUTRAL} h-10 w-auto min-h-10 px-3 text-xs`}
+              >
+                {copy.viewPurchase}
+              </Link>
+            )}
             <button type="button" onClick={() => { setDraft(calculation.name); setRenaming(true); }}
                     aria-label={copy.savedRenameLabel(calculation.name)}
                     className="focus-ring h-10 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">

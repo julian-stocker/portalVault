@@ -3312,6 +3312,178 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P49 — `0143`: EIN EINKAUF AUS EINER KALKULATION, UND NUR EINER.
+   *
+   * Die Funktion legt den Einkauf nicht selbst an — sie ruft die bestehende
+   * und schreibt in DERSELBEN Transaktion die Verknuepfung. Was ein Probelauf
+   * daran zeigt und kein Test im Arbeitsbaum:
+   *
+   *   1. Ohne Betriebsrolle weist sie ab (Riegel 1).
+   *   2. Mit Rolle, aber fremder oder unbekannter Kalkulation: „not found"
+   *      (Riegel 2) — und zwar derselbe Satz fuer beide Faelle.
+   *   3. Der gute Fall: ein Einkauf entsteht, die Kalkulation zeigt darauf,
+   *      und die Positionen sind die uebergebenen.
+   *   4. Dasselbe noch einmal mit demselben Token: KEIN zweiter Einkauf,
+   *      dieselbe Antwort (die Idempotenz aus `0120` traegt durch).
+   *   5. Und mit einem NEUEN Token: abgewiesen (Riegel 3) — **und kein
+   *      Einkauf zurueckgelassen.** Das ist der Teilzustand, um den es geht.
+   *
+   * WAS DAFUER GESTELLT WIRD. `auth.uid()` ist im Stub `null`, und
+   * `can_operate_active_seller()` liest Tabellen, die hier leer sind. Beide
+   * werden deshalb fuer diesen Durchgang ERSETZT — sichtbar und begrenzt:
+   * `auth.uid()` gibt eine feste Kennung, die Rolle gibt `true`. Geprueft
+   * wird damit `0143`, nicht die Rollenlogik; dass die Rolle ueberhaupt
+   * gefragt wird, ist Fall 1.
+   */
+  {
+    const M143 = join(MIG_DIR, "0143_purchase_from_calculation.sql");
+    const R143 = "supabase/rollback/R0143_drop_purchase_from_calculation.sql";
+    const KONTO = "22222222-2222-2222-2222-222222222222";
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const db = await frisch();
+    /*
+     * Der Stand, auf dem `0143` aufsetzt: `0142` angewendet, `0143` nicht.
+     *
+     * Das Stub-Schema entsteht aus ALLEN Migrationen und traegt die Tabelle
+     * und die Funktion deshalb schon. Beide fallen, damit die zwei
+     * Migrationen hier wirklich LAUFEN und nicht an ihrer eigenen
+     * „steht schon"-Pruefung abprallen — dass sie das tun, prueft P48
+     * (Tabelle) und Fall 1 unten nicht, sondern die Migration selbst.
+     */
+    await db.exec("drop table if exists public.purchase_calculations cascade;");
+    await db.exec(`
+      drop function if exists public.seller_create_purchase_from_calculation(
+        uuid, date, numeric, text, boolean, jsonb, text, text, numeric, numeric,
+        numeric, text, text, text);`);
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('${KONTO}') on conflict do nothing;
+      alter table public.purchases add constraint z_purchases_pk primary key (id);
+      -- IDENTITAETEN AUF purchases.id UND purchase_items.id.
+      --
+      -- Das Stub-Schema ist reine Struktur: id bigint, kein
+      -- "generated always as identity" und kein Default. 0053 legt beide als
+      -- Identitaet an; ohne sie scheitert schon seller_create_purchase mit
+      -- "null value in column id", und das waere eine Auskunft ueber den
+      -- Stub, nicht ueber 0143. Dieselbe Vorkehrung wie bei
+      -- shop_inventory.id in P45.
+      --
+      -- (Als SQL-Kommentar, nicht als Blockkommentar: dieser Text steht in
+      -- einem Template-Literal, und ein Gravis darin wuerde es beenden.)
+      create sequence if not exists public.z_purchase_id_seq start 1;
+      alter table public.purchases
+        alter column id set default nextval('public.z_purchase_id_seq');
+      create sequence if not exists public.z_purchase_item_id_seq start 1;
+      alter table public.purchase_items
+        alter column id set default nextval('public.z_purchase_item_id_seq');`);
+    const f142 = await fahre(db, join(MIG_DIR, "0142_purchase_calculations.sql"));
+    if (f142 !== null) throw new Error(`P49 Aufbau: 0142 scheiterte — ${f142}`);
+
+    const lauf = await fahre(db, M143);
+
+    /* 1. Ohne Betriebsrolle. `can_operate_active_seller()` liest im Stub
+     *    leere Tabellen und antwortet `false` — genau der Fall. */
+    const eineKalkulation = async (name: string): Promise<string> => wert(db, `
+      insert into public.purchase_calculations (user_id, name, factor_percent, lines)
+      values ('${KONTO}', '${name}', 55,
+              '{"version": 1, "lines": [{"sky_id": "SKY-0001", "quantity": 2}]}'::jsonb)
+      returning id::text as w`);
+    const idA = lauf === null ? await eineKalkulation("A") : "-";
+    const RUF = (id: string, token: string) => `
+      select public.seller_create_purchase_from_calculation(
+        '${id}'::uuid, '2026-10-22'::date, 10.00, null, false,
+        '[{"sky_id": "SKY-0001"}, {"sky_id": "SKY-0001"}]'::jsonb,
+        null, null, null, null, null, null, null, '${token}') as w`;
+
+    let ohneRolle = "-";
+    if (lauf === null) {
+      try { await db.query(RUF(idA, "00000000-0000-4000-8000-000000000001"));
+            ohneRolle = "DURCHGELAUFEN — Befund"; }
+      catch (f) { ohneRolle = (f as Error).message.includes("seller operator role required")
+        ? "abgewiesen" : `anderer Fehler: ${(f as Error).message}`; }
+    }
+
+    /* Ab hier mit Rolle und Kennung — beide ersetzt, siehe Kopf. */
+    if (lauf === null) {
+      await db.exec(`
+        create or replace function public.can_operate_active_seller() returns boolean
+          language sql stable as $stub$ select true $stub$;
+        create or replace function auth.uid() returns uuid
+          language sql stable as $stub$ select '${KONTO}'::uuid $stub$;`);
+    }
+
+    /* 2. Fremde oder unbekannte Kalkulation. */
+    let fremd = "-";
+    if (lauf === null) {
+      try { await db.query(RUF("33333333-3333-3333-3333-333333333333",
+                               "00000000-0000-4000-8000-000000000002"));
+            fremd = "DURCHGELAUFEN — Befund"; }
+      catch (f) { fremd = (f as Error).message.includes("calculation not found")
+        ? "not found" : `anderer Fehler: ${(f as Error).message}`; }
+    }
+
+    /* 3. Der gute Fall. */
+    let einkauf = "-";
+    let verknuepft = "-";
+    let positionen = "-";
+    const TOKEN = "00000000-0000-4000-8000-000000000003";
+    if (lauf === null) {
+      einkauf = await wert(db, RUF(idA, TOKEN));
+      verknuepft = await wert(db,
+        `select (purchase_id = ${einkauf})::text as w from public.purchase_calculations
+          where id = '${idA}'`);
+      positionen = await wert(db,
+        `select count(*)::text as w from public.purchase_items
+          where purchase_id = ${einkauf}`);
+    }
+
+    /* 4. Dasselbe noch einmal, derselbe Token. */
+    let nochmal = "-";
+    let anzahlDanach = "-";
+    if (lauf === null) {
+      nochmal = await wert(db, RUF(idA, TOKEN));
+      anzahlDanach = await wert(db, "select count(*)::text as w from public.purchases");
+    }
+
+    /* 5. Neuer Token auf dieselbe Kalkulation — und kein Einkauf dazu. */
+    let zweiterVersuch = "-";
+    let anzahlZuletzt = "-";
+    if (lauf === null) {
+      try { await db.query(RUF(idA, "00000000-0000-4000-8000-000000000004"));
+            zweiterVersuch = "DURCHGELAUFEN — Befund"; }
+      catch (f) { zweiterVersuch = (f as Error).message.includes("already handed over")
+        ? "abgewiesen" : `anderer Fehler: ${(f as Error).message}`; }
+      anzahlZuletzt = await wert(db, "select count(*)::text as w from public.purchases");
+    }
+
+    /* Und die Ruecknahme laesst die Verknuepfung stehen. */
+    const zurueck = lauf === null ? await fahre(db, R143) : "-";
+    const bleibt = zurueck === null
+      ? await wert(db, `select (purchase_id is not null)::text as w
+                          from public.purchase_calculations where id = '${idA}'`)
+      : "-";
+
+    probe.push({
+      name: "P49 0143 legt einen Einkauf aus einer Kalkulation an, verknuepft ihn in derselben "
+        + "Transaktion und laesst keinen zweiten zu",
+      ok: lauf === null
+        && ohneRolle === "abgewiesen" && fremd === "not found"
+        && einkauf !== "-" && verknuepft === "true" && positionen === "2"
+        && nochmal === einkauf && anzahlDanach === "1"
+        && zweiterVersuch === "abgewiesen" && anzahlZuletzt === "1"
+        && zurueck === null && bleibt === "true",
+      sagt: `0143: ${lauf ?? "durch"} · ohne Rolle: ${ohneRolle}`
+        + ` · fremde Kalkulation: ${fremd} · Einkauf ${einkauf} mit ${positionen} Positionen,`
+        + ` verknuepft ${verknuepft} · zweiter Lauf desselben Entwurfs: ${nochmal}`
+        + ` (Einkaeufe ${anzahlDanach}) · neuer Entwurf: ${zweiterVersuch}`
+        + ` (Einkaeufe ${anzahlZuletzt}) · Ruecknahme ${zurueck ?? "durch"},`
+        + ` Verknuepfung bleibt ${bleibt}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

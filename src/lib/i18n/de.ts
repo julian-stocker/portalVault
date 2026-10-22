@@ -984,6 +984,16 @@ export const de = {
        */
       newCompact: "+ Neu",
       newPurchase: "Neuen Einkauf anlegen",
+    /*
+     * Calculator V3 (ADR-0132): was die Vorbelegung nicht übernehmen konnte.
+     * Ein Satz im Formular, kein Dialog — und nur, wenn es etwas zu sagen
+     * gibt. Der Grund ist immer derselbe: der Katalog führt die SKY-ID
+     * nicht mehr.
+     */
+    calculationMissing: (n: number) =>
+      n === 1
+        ? "1 Stück aus der Kalkulation konnte nicht übernommen werden — der Katalog führt die Figur nicht mehr."
+        : `${n} Stück aus der Kalkulation konnten nicht übernommen werden — der Katalog führt diese Figuren nicht mehr.`,
       /*
        * Die vier Gruppen des Anlegen-Formulars. Dieselbe Ordnung wie im
        * Verkauf: erst was der Vorgang ist, dann was drin war, dann was er
@@ -4604,8 +4614,9 @@ export const de = {
     discardYes: "Verwerfen",
     discardSaveFirst: "Vorher speichern",
 
-    /* Übernahme ins Orderbuch — noch nicht gebaut, und das steht auch so da. */
-    handOverPending: "Übernahme ins Orderbuch folgt",
+    /* Übernahme ins Orderbuch (Calculator V3, ADR-0132) */
+    createPurchase: "Einkauf erstellen",
+    viewPurchase: "Einkauf ansehen",
     handOverDone: "Als Einkauf übernommen",
   },
 
