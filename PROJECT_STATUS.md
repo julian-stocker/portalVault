@@ -214,6 +214,31 @@ unverändert, 531 sammelbar, 306 Lagerpositionen, 624 Katalogzeilen,
 Lagerabdruck `01e50b9d727a0486ff1ea0eb6ba2dd56` unverändert, **0**
 Zubehörfreigaben, **0** öffentliche Zubehörangebote, Belegsperre unverändert.
 
+### Calculator V2 — vorbereitet am 2026-10-22, nicht angewendet, nicht deployt
+
+Der Kalkulator behält jetzt zwei Dinge auseinander (ADR-0131): den
+**Arbeitsstand** im Browser, der von selbst entsteht und ein Neuladen
+überlebt, und **gespeicherte Kalkulationen** in `purchase_calculations`
+(`0142`), die ausschließlich durch einen Druck auf „Speichern" entstehen.
+
+| | |
+|---|---|
+| Migration | `0142_purchase_calculations.sql` — **nirgends angewendet**; Rücknahme `R0142`, Probelauf **P48** |
+| Staging-Lauf | `supabase/operations/staging-0142.sql` liegt bereit (ein Einfügen, Stempel auf Staging) — **braucht eine Freigabe** |
+| neu | `src/lib/calculator/draft.ts`, `saved.ts`, `saved-actions.ts`, `src/components/calculator/saved-panel.tsx` |
+| geändert | `calculation.ts` (zuletzt hinzugefügt steht oben), `calculator-modal.tsx`, `src/lib/i18n/de.ts` |
+| Tests | 183 im Kalkulator (+83), davon 19 zum Arbeitsstand, 21 zur gespeicherten Form, 37 zu Trennung und Datenverlust |
+
+**Was es ausdrücklich nicht tut:** keine Bestellung, kein Einkauf, keine
+Bewegung, kein Beleg, keine Verkaufsfreigabe, keine zweite Preislogik. Die
+Übernahme ins Orderbuch ist **vorbereitet** (`purchase_id` + partieller
+Unique-Index + `handOverItems()`), aber **nicht gebaut**.
+
+**Offen:** der Staging-Lauf und damit die Prüfung am laufenden System
+(Arbeitsstand nach echtem Neuladen, Richtlinie mit zwei Konten, Bedienung
+auf dem Telefon). Was die statischen Tests nicht zeigen können, steht am
+Ende von `src/lib/calculator/calculator-save-ui.test.ts`.
+
 ### Veröffentlicht am 2026-10-21: `002ad8b`
 
 Der zweite Push dieses Tages, nach ausdrücklicher Freigabe:

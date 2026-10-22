@@ -165,15 +165,37 @@ export function clampFactor(value: number): number {
  * die Figur ein zweites Mal hinzufügt, bekommt zwei Stück zu 10,00 € — nicht
  * den Katalogvorschlag zurück.
  *
- * Neu ist die Position **vorne**: der Händler sieht, was er gerade getippt
- * hat, ohne zu scrollen.
+ * WAS HINZUGEFÜGT WIRD, STEHT OBEN — AUCH WENN ES SCHON DA WAR (ADR-0131).
+ *
+ * Vorher sprang nur eine NEUE Position nach vorn; eine bereits erfasste
+ * Figur bekam still eine Menge mehr und blieb, wo sie war. Bei dreißig
+ * Positionen heißt „still" aber: unbemerkt. Wer eine Figur versehentlich
+ * zweimal tippt, muss sie sofort sehen können, um die Menge zu korrigieren
+ * — und wer sie absichtlich zweimal tippt, will die Bestätigung, dass es
+ * angekommen ist.
+ *
+ * Deshalb: dieselbe Zeile, eine Menge mehr, **an die erste Stelle gehoben**.
+ * Keine zweite Zeile, keine neue Identität, kein neuer Schlüssel für React
+ * — es ist dasselbe Objekt an einer anderen Stelle des Arrays.
+ *
+ * NUR DAS HINZUFÜGEN SORTIERT UM. `changeQuantity` (Plus/Minus an der
+ * Zeile) lässt die Reihenfolge, wie sie ist: wer an einer Zeile schraubt,
+ * schaut sie an — sie unter dem Finger wegzuziehen wäre das Gegenteil von
+ * hilfreich.
  */
 export function addFigure(
   lines: readonly CalculationLine[],
   choice: CalculatorChoice,
 ): CalculationLine[] {
   const existing = lines.findIndex((l) => l.skyId === choice.skyId);
-  if (existing >= 0) return changeQuantity(lines, choice.skyId, 1);
+  if (existing >= 0) {
+    const line = lines[existing];
+    return [
+      { ...line, quantity: clampQuantity(line.quantity + 1) },
+      ...lines.slice(0, existing),
+      ...lines.slice(existing + 1),
+    ];
+  }
 
   const suggested = euroToCents(choice.marketPrice);
   return [

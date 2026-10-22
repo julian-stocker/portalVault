@@ -43,6 +43,7 @@ SQL-Editor angewandt (ADR-0051).
 | `perf_interactions` | wächst je Messlauf | Interaktionszeiten (Quick View) von Testkonten | kein Clientrecht, Admin liest aggregiert |
 | `shipping_countries` | 1 (`DE`) | wohin der Shop liefert | öffentlich lesbar, nur Admin schreibt |
 | `shipping_methods` | 2 | Versandarten und Preise | kein Clientrecht, öffentlich über `shipping_quote()` |
+| `purchase_calculations` (`0142`) | wächst | bewusst gespeicherte Einkaufskalkulationen | nur der Eigentümer |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -4887,3 +4888,58 @@ doppelter Tipp im Katalog keinen Zähler zurücksetzt.
 - **OPEN:** Liefert das öffentliche Shop-Lesefenster später eine Stückzahl oder nur einen
   Zustand? Eine sichtbare Rabattstufe verrät bereits einen groben Bestand (ADR-0033).
 
+
+
+---
+
+## `purchase_calculations` — gespeicherte Einkaufskalkulationen (Migration 0142)
+
+**Noch nicht angewendet.** Vorbereitet, lokal geprüft, nicht freigegeben.
+
+Der Kalkulator bewertet Inserate. Die meisten sind uninteressant und sollen nichts
+hinterlassen; die wenigen interessanten begleiten eine Verhandlung über Tage. Diese Tabelle
+hält **nur die zweiten** — eine Zeile entsteht ausschließlich durch einen Druck auf
+„Speichern" (ADR-0131).
+
+**Der Arbeitsstand steht NICHT hier.** Er liegt im Browser (`localStorage`,
+`src/lib/calculator/draft.ts`) und erreicht die Datenbank nie. Automatisch merken ist nicht
+automatisch anlegen — und diese Trennung ist der Grund, warum die Tabelle überhaupt so klein
+bleiben kann.
+
+| Spalte | Typ | Bedeutung |
+|---|---|---|
+| `id` | `uuid` | Identität, `gen_random_uuid()` |
+| `user_id` | `uuid` | der Eigentümer; `on delete cascade` (DSGVO) |
+| `name` | `text` | frei vergeben, 1–120 Zeichen, roh (CLAUDE.md Regel 4) |
+| `status` | `text` | `review` · `negotiating` · `bought` · `rejected` |
+| `lines` | `jsonb` | **Schnappschuss** der Positionen, `{version, lines[]}` |
+| `factor_percent` | `smallint` | Kalkulationsfaktor dieser Kalkulation, 0–100 |
+| `total_cents`, `positions`, `units` | `integer` | abgeleitet, für die Liste mitgeschrieben |
+| `purchase_id` | `bigint` | der Einkauf, zu dem sie geworden ist — `null` heißt „noch nicht übernommen" |
+| `created_at`, `updated_at` | `timestamptz` | `updated_at` setzt der Trigger aus `0001` |
+
+**Warum die Positionen `jsonb` sind und keine Kindtabelle.** Sie sind ein Schnappschuss, kein
+Verweis: eine Kalkulation vom Vormonat muss zeigen, womit damals gerechnet wurde, auch wenn
+der Katalogpreis sich bewegt hat. Ein Fremdschlüssel auf `skylanders` würde zusätzlich einen
+Katalogeintrag festhalten, den der Import deaktivieren können muss. Dazu ist die
+**Reihenfolge** fachlich (zuletzt hinzugefügt oben) — ein Array hat sie, eine Kindtabelle
+bräuchte eine Spalte dafür. Und Speichern ist ein Vorgang: ein `update` ist atomar,
+„löschen und neu einfügen" nur mit Sorgfalt.
+
+Der Preis dafür: die Datenbank prüft nur die **äußere** Form (Objekt, Array, höchstens 200
+Elemente — dieselbe Decke wie `seller_create_purchase_with_items`). Jedes Element prüft
+`decodeLines()` beim Lesen, wie der Warenkorb es seit ADR-0043 tut und aus demselben Grund:
+eine Zeile, die eine ältere Programmfassung geschrieben hat, muss heute noch lesbar sein.
+
+**RLS:** vier Policies, genau das Muster von `collection_items` —
+`(select auth.uid()) = user_id`, bei `update` mit `using` **und** `with check`. Kein `anon`,
+kein Tabellenrecht für `anon`, keine Betriebsrolle: eine gespeicherte Kalkulation ist eine
+private Notiz, kein Geschäftsvorfall.
+
+**Vorbereitet, nicht gebaut:** `purchase_id` mit einem **partiellen Unique-Index** (`where
+purchase_id is not null`). Damit kann kein Einkauf zweimal beansprucht werden, und „schon
+übernommen" ist einfach `purchase_id is not null`. Der Übernahmeweg selbst existiert nicht;
+geschrieben wird die Spalte später ausschließlich serverseitig, niemals vom Client.
+
+**Rücknahme:** `supabase/rollback/R0142_drop_purchase_calculations.sql` — sie bricht ab,
+solange Zeilen in der Tabelle stehen, und verlangt einen Schalter in der Datei.

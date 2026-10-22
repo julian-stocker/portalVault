@@ -317,7 +317,40 @@ create policy collection_items_update_own on public.collection_items
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy collection_items_delete_own on public.collection_items
   for delete to authenticated using ((select auth.uid()) = user_id);
+
+-- Gespeicherte Einkaufskalkulationen: dasselbe Muster (0142, ADR-0131)
+-- NOCH NICHT ANGEWENDET.
+create policy purchase_calculations_select_own on public.purchase_calculations
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy purchase_calculations_insert_own on public.purchase_calculations
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy purchase_calculations_update_own on public.purchase_calculations
+  for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy purchase_calculations_delete_own on public.purchase_calculations
+  for delete to authenticated using ((select auth.uid()) = user_id);
 ```
+
+**`purchase_calculations` (`0142`, noch nicht angewendet)** folgt genau dem Muster von
+`collection_items`, und zwar in allen drei Schichten:
+
+* vier Policies auf `(select auth.uid()) = user_id`, bei `update` mit `using` **und**
+  `with check`;
+* `revoke all … from anon` — die Tabelle entsteht in `public`, und Supabase gibt `anon` dort
+  per Standardrecht `ALL`; **ein `grant` an `authenticated` entzieht davon nichts**;
+* `grant select, insert, update, delete … to authenticated` **ohne `truncate`** (RLS gilt
+  dafür nicht), ohne `references`, ohne `trigger`.
+
+**Keine Betriebsrolle davor.** Eine gespeicherte Kalkulation ist eine private Notiz, kein
+Geschäftsvorfall; `canOperateSeller()` steht ausdrücklich nicht in
+`src/lib/calculator/saved-actions.ts`. Dass der Kalkulator nur einem Betrieb gezeigt wird,
+ist Bequemlichkeit (ADR-0039) — wer die Aktionen von Hand aufriefe, bekäme seine eigene,
+leere Liste.
+
+**Was dort nicht hineingehört:** die Tabelle führt SKY-IDs, Mengen, selbst gesetzte Werte und
+einen Namen, den der Betreiber vergibt. **Keine Käuferdaten, keine Lagerzahlen, keine
+Einkaufskosten** — und der Arbeitsstand des Kalkulators kommt gar nicht erst in die Datenbank
+(`localStorage`, ADR-0131).
 
 **Zweite Schicht: explizite Tabellenrechte — und zwar durch ENTZIEHEN.**
 

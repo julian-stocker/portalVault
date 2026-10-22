@@ -18,6 +18,12 @@ import {
 const SPYRO: CalculatorChoice = { skyId: "SKY-0001", name: "Spyro", series: "SA", marketPrice: 12.5 };
 const LEGENDARY: CalculatorChoice =
   { skyId: "SKY-0002", name: "Legendary Spyro", series: "SA", marketPrice: 24.9 };
+/* Zwei weitere, für die Reihenfolge: drei verschiedene Zeilen reichen, um
+   „oben", „in der Mitte" und „unten" zu unterscheiden. */
+const GILL: CalculatorChoice =
+  { skyId: "SKY-0003", name: "Gill Grunt", series: "SA", marketPrice: 8 };
+const TRIGGER: CalculatorChoice =
+  { skyId: "SKY-0004", name: "Trigger Happy", series: "SA", marketPrice: 9.9 };
 const NO_PRICE: CalculatorChoice =
   { skyId: "SKY-0777", name: "Kein Preis bekannt", series: "TT", marketPrice: null };
 
@@ -119,6 +125,78 @@ describe("Figuren aufnehmen", () => {
     expect(lines[0].quantity).toBe(2);
     expect(lines[0].unitCents).toBe(1000);
     expect(lines[0].manual).toBe(true);
+  });
+});
+
+/**
+ * Was hinzugefügt wird, steht oben (ADR-0131, Punkt 4).
+ *
+ * Vorher sprang nur eine NEUE Position nach vorn. Eine bereits erfasste
+ * Figur bekam still eine Menge mehr und blieb, wo sie war — bei dreißig
+ * Positionen heißt „still" aber „unbemerkt", und wer sich vertippt hat,
+ * findet die Zeile nicht.
+ */
+describe("die zuletzt hinzugefügte Figur steht oben", () => {
+  it("eine neue Figur erscheint an erster Stelle", () => {
+    const lines = build(SPYRO, GILL, TRIGGER);
+    expect(lines.map((l) => l.skyId)).toEqual(["SKY-0004", "SKY-0003", "SKY-0001"]);
+  });
+
+  it("eine vorhandene Figur springt nach oben, und die Menge steigt", () => {
+    /* Beispiel B des Auftrags: Trigger Happy liegt mit Menge 2 unten. */
+    let lines = build(TRIGGER, SPYRO, GILL);
+    lines = setQuantity(lines, "SKY-0004", 2);
+    expect(lines.map((l) => l.skyId)).toEqual(["SKY-0003", "SKY-0001", "SKY-0004"]);
+
+    lines = addFigure(lines, TRIGGER);
+
+    expect(lines[0].skyId).toBe("SKY-0004");
+    expect(lines[0].quantity).toBe(3);
+    /* Keine zweite Zeile — und damit kein zweiter React-Schlüssel. */
+    expect(lines).toHaveLength(3);
+    expect(new Set(lines.map((l) => l.skyId)).size).toBe(3);
+  });
+
+  it("die übrigen behalten ihre Reihenfolge untereinander", () => {
+    let lines = build(TRIGGER, SPYRO, GILL);
+    expect(lines.map((l) => l.skyId)).toEqual(["SKY-0003", "SKY-0001", "SKY-0004"]);
+    lines = addFigure(lines, SPYRO);
+    expect(lines.map((l) => l.skyId)).toEqual(["SKY-0001", "SKY-0003", "SKY-0004"]);
+  });
+
+  it("Plus und Minus sortieren NICHT um — wer an einer Zeile schraubt, schaut sie an", () => {
+    let lines = build(TRIGGER, SPYRO, GILL);
+    const vorher = lines.map((l) => l.skyId);
+    lines = changeQuantity(lines, "SKY-0004", 1);
+    expect(lines.map((l) => l.skyId)).toEqual(vorher);
+    lines = setQuantity(lines, "SKY-0004", 7);
+    expect(lines.map((l) => l.skyId)).toEqual(vorher);
+  });
+
+  it("ein manuell gesetzter Wert bleibt beim Hochheben erhalten", () => {
+    let lines = build(TRIGGER, SPYRO);
+    lines = setUnitCents(lines, "SKY-0004", 1000);
+    lines = addFigure(lines, TRIGGER);
+    expect(lines[0].skyId).toBe("SKY-0004");
+    expect(lines[0].unitCents).toBe(1000);
+    expect(lines[0].manual).toBe(true);
+  });
+
+  it("die Rechnung ändert sich durch die Reihenfolge nicht", () => {
+    /* Die Summe ist eine Summe. Wäre sie von der Reihenfolge abhängig, wäre
+       das ein Rundungsfehler — und Geld ist hier ganzzahlig. */
+    const a = build(SPYRO, GILL, TRIGGER);
+    const b = addFigure(a, SPYRO);
+    expect(totals(b).totalCents).toBe(totals(a).totalCents + a.find(
+      (l) => l.skyId === "SKY-0001")!.unitCents);
+    expect(totals(b).positions).toBe(totals(a).positions);
+  });
+
+  it("und die Mengengrenze gilt auch beim Hochheben", () => {
+    let lines = build(SPYRO);
+    lines = setQuantity(lines, "SKY-0001", MAX_QUANTITY);
+    lines = addFigure(lines, SPYRO);
+    expect(lines[0].quantity).toBe(MAX_QUANTITY);
   });
 });
 

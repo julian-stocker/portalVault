@@ -206,8 +206,20 @@ describe("die Zahlen auf dem Schirm", () => {
     expect(de.calculator.maxPurchaseHint).toContain("Rechnerischer Wert");
   });
 
-  it("sagt, dass nichts gespeichert wird", () => {
-    expect(de.calculator.hint).toContain("nichts gespeichert");
+  it("sagt, dass der Arbeitsstand gemerkt und nur auf Knopfdruck gespeichert wird", () => {
+    /*
+     * V1 SAGTE HIER „es wird nichts gespeichert", UND DAS STIMMT NICHT MEHR.
+     *
+     * Der Satz war richtig, solange ein Neuladen die Kalkulation verwarf.
+     * Mit V2 (ADR-0131) merkt sich der Kalkulator den Arbeitsstand, und
+     * genau deshalb muss der Satz die TRENNUNG nennen: gemerkt wird von
+     * selbst, gespeichert wird auf Knopfdruck. Ein Hinweis, der das
+     * Gegenteil behauptet, wäre schlimmer als keiner — er würde jemanden
+     * dazu bringen, ein Fenster zu schließen, das er nicht schließen wollte.
+     */
+    expect(de.calculator.hint).toContain("gemerkt");
+    expect(de.calculator.hint).not.toContain("nichts gespeichert");
+    expect(de.calculator.draftHint).toContain("Knopfdruck");
   });
 
   it("meldet den Stand, weil der Ablauf reine Tastatur ist", () => {
@@ -225,7 +237,17 @@ describe("die Zahlen auf dem Schirm", () => {
      */
     expect(modal).toContain("inputRef={searchInput}");
     expect(modal).toContain("searchInput.current?.focus();");
-    expect(modal).not.toContain("autoFocus");
+    /*
+     * Die Zusicherung gilt dem SUCHFELD, nicht dem Attribut: `Modal` holt
+     * den Fokus in seinem eigenen Effekt auf das Panel, und ein `autoFocus`
+     * am Suchfeld verlöre dieses Rennen. Felder, die später auf Klick
+     * erscheinen (Name beim Speichern, Umbenennen in der Liste), haben
+     * kein Rennen zu verlieren und dürfen `autoFocus` tragen — dort ist es
+     * die einfachste richtige Lösung.
+     */
+    const suchfeld = modal.slice(modal.indexOf("<FigureSearch"),
+                                 modal.indexOf("<FigureSearch") + 400);
+    expect(suchfeld).not.toContain("autoFocus");
   });
 });
 
@@ -264,10 +286,24 @@ describe("der Kalkulator schreibt nirgends hin", () => {
     expect(rpcs).toEqual(['.rpc("seller_buy_in_factor"']);
   });
 
-  it("legt keine Tabelle an — V1 lebt im Browser", () => {
-    // Keine Migration gehört zu diesem Feature.
-    const migrations = readFileSync("docs/DATABASE.md", "utf8");
-    expect(migrations).not.toContain("calculator");
+  it("V2 hat eine Tabelle, und zwar genau eine — der Arbeitsstand bleibt im Browser", () => {
+    /*
+     * V1 HATTE KEINE, UND DER TEST HIELT DAS FEST. Mit `0142` gibt es eine:
+     * `purchase_calculations`, für die bewusst gespeicherten Kalkulationen.
+     * Was NICHT dazugekommen ist, ist eine Tabelle für den Arbeitsstand —
+     * das ist die Entscheidung von ADR-0131, und sie ist hier prüfbar.
+     */
+    const datenbank = readFileSync("docs/DATABASE.md", "utf8");
+    expect(datenbank).toContain("purchase_calculations");
+
+    const migration = readFileSync(
+      "supabase/migrations/0142_purchase_calculations.sql", "utf8");
+    /* Eine Tabelle, nicht zwei. */
+    expect(migration.match(/^create table public\./gm)).toHaveLength(1);
+    /* Und kein Ort für einen Arbeitsstand. */
+    for (const verboten of ["calculator_draft", "draft", "working_state"]) {
+      expect(migration.toLowerCase().includes(`create table public.${verboten}`)).toBe(false);
+    }
   });
 });
 
@@ -315,7 +351,9 @@ describe("der historische Faktor wird gelesen und nicht berührt", () => {
       expect(actions.includes(write), `actions.ts darf ${write} nicht enthalten`).toBe(false);
     }
     // Der Faktor ist reiner Browserzustand.
-    expect(modal).toContain("useState<number>(FALLBACK_FACTOR)");
+    /* Ohne Arbeitsstand bleibt der Rückfall der Startwert — mit einem
+       gewinnt der gemerkte Faktor (V2, ADR-0131). */
+    expect(modal).toContain("draftHadState ? restored.factor : FALLBACK_FACTOR");
   });
 });
 
@@ -335,24 +373,51 @@ describe("eine Kalkulation überlebt das Schließen", () => {
   });
 
   it("die Positionen liegen im Fenster, nicht im Knopf", () => {
-    expect(modal).toContain("useState<CalculationLine[]>([])");
+    /* Und sie beginnen beim gemerkten Arbeitsstand, nicht leer (V2). */
+    expect(modal).toContain("useState<CalculationLine[]>(restored.lines)");
+    expect(modal).toContain("const [restored] = useState(readDraft);");
     expect(launcher).not.toContain("CalculationLine");
   });
 
-  it("nur das bewusste Leeren entfernt sie, und erst nach Rückfrage", () => {
-    expect(modal).toContain("onClearConfirm={() => { setLines([]); setConfirmClear(false); }}");
-    expect(modal).toContain("copy.clearConfirm(positions)");
+  it("nur das bewusste Zurücksetzen entfernt sie, und erst nach Rückfrage", () => {
+    /*
+     * In V1 saß der Knopf im Fuß und leerte `lines`. In V2 heißt er
+     * „Zurücksetzen", steht in der Werkzeugleiste und wirft AUCH den
+     * gemerkten Arbeitsstand fort — gespeicherte Kalkulationen bleiben
+     * (ADR-0131). Die Rückfrage kommt nur, wenn es etwas zu verlieren gibt.
+     */
+    expect(modal).toContain("const resetDraft = useCallback(() => {");
+    expect(modal).toContain("clearDraft();");
+    expect(modal).toContain("onClick={() => (unsaved ? setConfirmClear(true) : resetDraft())}");
+    expect(modal).toContain("copy.clearConfirm(sums.positions)");
     // Das Schließen selbst räumt nur die begonnene Rückfrage weg.
     expect(modal).toContain("setConfirmClear(false);\n    onClose();");
   });
 
-  it("ein Neuladen darf sie verlieren — V1 speichert bewusst nicht", () => {
+  it("ein Neuladen bringt sie zurück — und der Browserspeicher liegt in EINEM Modul", () => {
+    /*
+     * V1 VERWARF SIE BEIM NEULADEN, und dieser Test hielt das fest. V2
+     * merkt sie (ADR-0131) — die Zusicherung ist jetzt eine andere, aber
+     * nicht weniger: `localStorage` wird an genau einer Stelle angefasst,
+     * nämlich in `draft.ts`. Das Fenster ruft `readDraft`/`writeDraft` und
+     * weiß nicht, wo das landet; die Rechnung weiß nicht einmal davon.
+     *
+     * Der Grund ist nicht Ordnungsliebe: ein zweiter Ort, der denselben
+     * Schlüssel schreibt, wäre genau die Sorte Fehler, die einen
+     * Arbeitsstand still verliert.
+     */
     for (const file of [modal, launcher, code("src/lib/calculator/calculation.ts"),
-                        code("src/lib/calculator/actions.ts")]) {
+                        code("src/lib/calculator/actions.ts"),
+                        code("src/lib/calculator/saved.ts"),
+                        code("src/lib/calculator/saved-actions.ts")]) {
       expect(file).not.toContain("localStorage");
       expect(file).not.toContain("sessionStorage");
       expect(file).not.toContain("indexedDB");
     }
+    const draft = code("src/lib/calculator/draft.ts");
+    expect(draft).toContain("window.localStorage");
+    expect(modal).toContain("readDraft");
+    expect(modal).toContain("writeDraft");
   });
 });
 

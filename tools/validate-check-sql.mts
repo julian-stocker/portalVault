@@ -3121,6 +3121,161 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P48 — `0142`: DIE GESPEICHERTEN KALKULATIONEN (Calculator V2).
+   *
+   * Eine neue Tabelle mit vier Richtlinien. Was ein Probelauf daran prueft
+   * und kein Test im Arbeitsbaum:
+   *
+   *   1. Sie laeuft in einer Transaktion durch, und ihre Nachbedingungen
+   *      halten — zwoelf Spalten, RLS an, vier Policies, zwei Indizes, der
+   *      `updated_at`-Trigger, kein Recht fuer `anon`, keine Zeile.
+   *   2. Ein ZWEITER Lauf prallt ab. Eine Migration, die sich zweimal
+   *      anwenden laesst, ist eine Falle.
+   *   3. Der partielle Unique-Index laesst `null` beliebig oft zu und einen
+   *      Einkauf genau einmal — das ist die halbe Sperre gegen eine zweite
+   *      Uebernahme ins Orderbuch, und sie wird hier gefahren.
+   *   4. Der CHECK auf `lines` weist etwas ab, das kein Array ist.
+   *   5. Die Ruecknahme laeuft, solange keine Zeile steht — und bricht ab,
+   *      sobald eine steht.
+   *
+   * Das STUB-SCHEMA traegt die Tabelle schon (es entsteht aus allen
+   * Migrationen), deshalb faellt sie vorher. Dass `0142` auf eine bereits
+   * stehende Tabelle mit einem Abbruch antwortet, ist genau Fall 2.
+   */
+  {
+    const M142 = join(MIG_DIR, "0142_purchase_calculations.sql");
+    const R142 = "supabase/rollback/R0142_drop_purchase_calculations.sql";
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const db = await frisch();
+    await db.exec("drop table if exists public.purchase_calculations cascade;");
+    /*
+     * EINE HUELLE FUER `auth.users`.
+     *
+     * Das Stub-Schema beschreibt `public`; `auth.users` bringt Supabase mit,
+     * und keine Migration beschreibt sie (dieselbe Grenze, an der
+     * `system_auth_inventory()` in Stufe 3 als begruendete Ausnahme steht).
+     * Hier steht deshalb eine Huelle mit genau der Spalte, auf die der
+     * Fremdschluessel zeigt — damit der Lauf etwas zu referenzieren hat.
+     * Ueber die echte Tabelle sagt das nichts, und es soll auch nichts
+     * sagen: gepruefft wird `0142`, nicht Supabase.
+     */
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('11111111-1111-1111-1111-111111111111')
+        on conflict do nothing;`);
+
+    /*
+     * UND EIN SCHLUESSEL AUF `purchases.id`.
+     *
+     * Das Stub-Schema ist reine Struktur: es uebernimmt Spalten und Typen,
+     * aber keine Schluessel (`id bigint`, kein `primary key`). Ein
+     * Fremdschluessel braucht aber einen eindeutigen Schluessel auf der
+     * Gegenseite, sonst antwortet PostgreSQL mit `42830` — was hier
+     * passierte und eine Auskunft ueber den Stub war, nicht ueber `0142`.
+     * In der Wirklichkeit ist `purchases.id`
+     * `generated always as identity primary key` (0053).
+     */
+    await db.exec(
+      "alter table public.purchases add constraint z_purchases_pk primary key (id);");
+
+    /* 1. Der Lauf. */
+    const lauf = await fahre(db, M142);
+
+    const spalten = lauf === null ? await wert(db,
+      "select string_agg(column_name, ',' order by ordinal_position) as w "
+      + "from information_schema.columns where table_schema = 'public' "
+      + "and table_name = 'purchase_calculations'") : "-";
+    const policies = lauf === null ? await wert(db,
+      "select count(*)::text as w from pg_policies where schemaname = 'public' "
+      + "and tablename = 'purchase_calculations'") : "-";
+    const rls = lauf === null ? await wert(db,
+      "select relrowsecurity::text as w from pg_class "
+      + "where oid = 'public.purchase_calculations'::regclass") : "-";
+
+    /* 2. Noch einmal — muss abbrechen. */
+    const zweimal = lauf === null ? await fahre(db, M142) : "-";
+
+    /*
+     * 3. Der partielle Unique-Index, gefahren. Zwei Zeilen ohne Einkauf
+     *    muessen gehen, zwei mit demselben nicht. `auth.users` ist im Stub
+     *    eine Huelle ohne Zeilen, deshalb faellt der Fremdschluessel vorher
+     *    — gepruefft wird der INDEX, nicht die Fremdschluessel.
+     */
+    let zweiNull = "-";
+    let doppelt = "-";
+    if (lauf === null) {
+      /* Ein echter Einkauf, damit `purchase_id` auf etwas zeigt: so prueft
+         dieser Durchgang den Index UND den Fremdschluessel, statt einen
+         davon wegzunehmen. */
+      await db.exec(
+        "insert into public.purchases (id, purchased_at, total_cost) "
+        + "values (7, '2026-10-22', 10.00) on conflict do nothing;");
+      try {
+        await db.exec(`
+          insert into public.purchase_calculations (user_id, name, factor_percent)
+          values ('11111111-1111-1111-1111-111111111111', 'A', 50),
+                 ('11111111-1111-1111-1111-111111111111', 'B', 50);`);
+        zweiNull = "zwei ohne Einkauf: ok";
+      } catch (fehler) {
+        zweiNull = `BEFUND: ${(fehler as Error).message}`;
+      }
+      try {
+        await db.exec(`
+          insert into public.purchase_calculations (user_id, name, factor_percent, purchase_id)
+          values ('11111111-1111-1111-1111-111111111111', 'C', 50, 7),
+                 ('11111111-1111-1111-1111-111111111111', 'D', 50, 7);`);
+        doppelt = "DURCHGELAUFEN — Befund";
+      } catch {
+        doppelt = "abgewiesen";
+      }
+    }
+
+    /* 4. Der CHECK auf `lines`. */
+    let keinArray = "-";
+    if (lauf === null) {
+      try {
+        await db.exec(`
+          insert into public.purchase_calculations (user_id, name, factor_percent, lines)
+          values ('11111111-1111-1111-1111-111111111111', 'E', 50,
+                 '{"version": 1, "lines": "nein"}'::jsonb);`);
+        keinArray = "DURCHGELAUFEN — Befund";
+      } catch {
+        keinArray = "abgewiesen";
+      }
+    }
+
+    /* 5. Die Ruecknahme: mit Zeilen abbrechen, ohne Zeilen durchlaufen. */
+    const mitZeilen = lauf === null ? await fahre(db, R142) : "-";
+    if (lauf === null) await db.exec("delete from public.purchase_calculations;");
+    const ohneZeilen = lauf === null ? await fahre(db, R142) : "-";
+    const fort = lauf === null && ohneZeilen === null
+      ? await wert(db, "select (to_regclass('public.purchase_calculations') is null)::text as w")
+      : "-";
+
+    probe.push({
+      name: "P48 0142 legt die Kalkulationstabelle an: vier Policies, RLS, der partielle "
+        + "Unique-Index greift, zweiter Lauf prallt ab, Ruecknahme schuetzt Zeilen",
+      ok: lauf === null
+        && spalten === "id,user_id,name,status,lines,factor_percent,total_cents,"
+          + "positions,units,purchase_id,created_at,updated_at"
+        && policies === "4" && rls === "true"
+        && typeof zweimal === "string" && zweimal.includes("steht schon")
+        && zweiNull === "zwei ohne Einkauf: ok" && doppelt === "abgewiesen"
+        && keinArray === "abgewiesen"
+        && typeof mitZeilen === "string" && mitZeilen.includes("Zeile(n) stehen in der Tabelle")
+        && ohneZeilen === null && fort === "true",
+      sagt: `0142: ${lauf ?? "durch"} · ${policies} Policies · RLS ${rls}`
+        + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
+        + ` · ${zweiNull} · derselbe Einkauf zweimal: ${doppelt}`
+        + ` · lines ohne Array: ${keinArray}`
+        + ` · Ruecknahme mit Zeilen: ${mitZeilen === null ? "DURCHGELAUFEN — Befund" : "bricht ab"}`
+        + ` · ohne Zeilen: ${ohneZeilen ?? "durch"} (Tabelle fort ${fort})`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

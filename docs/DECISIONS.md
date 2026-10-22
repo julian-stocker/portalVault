@@ -12098,3 +12098,150 @@ Marketplace-Stopp aus ADR-0021.
   Abruf neu gezeichnet; eine Änderung dort veränderte die Darstellung
   bereits ausgestellter Rechnungen (ADR-0123). Ob sie künftig „gebraucht"
   sagen sollen, ist eine eigene Entscheidung — `docs/LEGAL.md`, 8b.
+
+---
+
+## ADR-0131 · Der Kalkulator bekommt zwei Gedächtnisse, und sie werden nie verwechselt
+
+**Status:** akzeptiert (Auftrag des Betreibers, 2026-10-22) ·
+**Umsetzung:** Oberfläche und Browserspeicher fertig; die Datenbankseite in
+`0142`, **nirgends angewendet**.
+
+### Das Problem, in einem Satz
+
+Der Kalkulator bewertet Inserate. **Die meisten Inserate sind
+uninteressant** — die Bewertung soll nichts hinterlassen und keinen Namen
+verlangen. **Die wenigen interessanten** begleiten eine Verhandlung über
+Tage und müssen wiederauffindbar sein, während daneben weitergerechnet wird.
+
+Eine Lösung für beides zugleich gibt es nicht: ein Werkzeug, das jede
+Preisprüfung in eine Liste legt, hat nach einer Woche vierzig Einträge, von
+denen acht etwas bedeuten. Ein Werkzeug, das nur auf Knopfdruck etwas
+behält, verliert den Stand beim ersten versehentlichen Neuladen.
+
+### Die Entscheidung
+
+**Zwei Gedächtnisse mit zwei verschiedenen Versprechen.**
+
+| | Arbeitsstand | Gespeicherte Kalkulation |
+|---|---|---|
+| wo | Browser, `localStorage` | `purchase_calculations` (`0142`) |
+| entsteht | von selbst, bei jeder Änderung | **nur** durch „Speichern" |
+| gilt | dieses Gerät | das Konto, dauerhaft |
+| wie viele | genau einer | beliebig viele, nebeneinander |
+| Zurücksetzen | wirft ihn fort | lässt sie unberührt |
+
+> **Automatisch merken ist nicht automatisch anlegen.** Das ist der Kern
+> dieser Entscheidung, und jede Einzelheit unten folgt daraus.
+
+### Warum der Arbeitsstand nicht in die Datenbank gehört
+
+Er ändert sich bei jedem Tastendruck. Serverseitig hieße das: eine
+Schreiboperation je Tastendruck, oder eine Debounce-Mechanik, die bei einem
+Verbindungsabbruch genau das verliert, was sie schützen soll. Dazu eine
+Zeile je Gerät oder ein Streit darüber, welches Gerät gewinnt — und am Ende
+eine Tabelle, die aussieht wie die Liste der gespeicherten Kalkulationen,
+aber anders gemeint ist. Genau diese Verwechslung ist das Risiko.
+
+`localStorage` hat die richtigen Eigenschaften: synchron, je Gerät, ohne
+Konto, ohne Netz. Was es nicht kann — über Geräte hinweg gelten — braucht
+ein Arbeitsstand nicht. Dafür gibt es das Speichern.
+
+**Es gab nichts zu übernehmen.** Der Kalkulator V1 schrieb ausdrücklich
+nichts in den Browser; `skyisles.calculator.draft.v1` ist ein neuer
+Schlüssel. Kein Altstand kann bei der Umstellung verloren gehen, und
+`draft.test.ts` rechnet diese Behauptung nach, statt sie zu behaupten.
+
+### Was eine gespeicherte Kalkulation festhält — und warum als Schnappschuss
+
+Positionen mit SKY-ID, Menge, angesetztem Wert, dem Katalogvorschlag von
+damals und der Kennzeichnung, ob ein Mensch den Wert gesetzt hat; dazu Name,
+Status, Faktor und die drei abgeleiteten Zahlen für die Liste.
+
+**Beim Öffnen wird nicht neu bepreist.** Eine Kalkulation, die sich beim
+Aufschlagen ändert, ist keine Grundlage für eine Verhandlung, die man am
+Vortag geführt hat. Die SKY-ID bleibt die Identität (ADR-0034); wer heutige
+Preise will, nimmt die Figur neu auf. Dieselbe Entscheidung wie beim
+Warenkorb (ADR-0043): der gespeicherte Preis ist Auskunft, nie Grundlage
+einer Zahlung.
+
+**Eine Tabelle, die Positionen als `jsonb`.** Begründung in
+`docs/DATABASE.md` — Schnappschuss statt Verweis, Reihenfolge ist fachlich,
+Speichern ist ein Vorgang. Der Preis dafür: die Datenbank prüft nur die
+äußere Form, jedes Element prüft `decodeLines()` beim Lesen.
+
+### Wie Datenverlust verhindert wird — ohne Versionsverwaltung
+
+Ein **Abdruck** des Stands beim Öffnen, verglichen mit dem Stand jetzt. Kein
+`dirty`-Schalter: wer eine Menge erhöht und wieder senkt, hat nichts
+geändert, und eine Rückfrage für nichts bringt bei, Rückfragen
+wegzuklicken.
+
+Daran hängen drei Stellen und nur diese drei:
+
+1. **Zurücksetzen** fragt, wenn es ungespeicherte Änderungen gibt.
+2. **Eine andere Kalkulation öffnen** fragt — und bietet „vorher speichern"
+   an, nicht nur „verwerfen".
+3. **Speichern** fragt bei einer geladenen Kalkulation, ob sie aktualisiert
+   oder eine zweite angelegt wird. **Ein stilles Überschreiben gibt es
+   nicht.**
+
+Ein fehlgeschlagenes Speichern verliert nichts: der Arbeitsstand liegt im
+Browser und wird auf dem Fehlerweg nicht angefasst. Die Meldung sagt genau
+das.
+
+### Was hinzugefügt wird, steht oben
+
+Bisher sprang nur eine **neue** Position nach vorn; eine bereits erfasste
+Figur bekam still eine Menge mehr und blieb, wo sie war. Bei dreißig
+Positionen heißt „still" aber „unbemerkt". Ab jetzt hebt jedes Hinzufügen
+die Zeile an die erste Stelle — dieselbe Zeile, eine Menge mehr, kein
+zweiter Eintrag.
+
+**Plus und Minus sortieren nicht um.** Wer an einer Zeile schraubt, schaut
+sie an; sie unter dem Finger wegzuziehen wäre das Gegenteil von hilfreich.
+
+### Die Übernahme ins Orderbuch: vorbereitet, nicht gebaut
+
+`purchase_calculations.purchase_id` bleibt `null`, bis eine Kalkulation zu
+einem Einkauf wird, und ein **partieller Unique-Index** verhindert, dass zwei
+Kalkulationen denselben Einkauf beanspruchen. „Schon übernommen" ist damit
+einfach `purchase_id is not null`.
+
+Die Positionen liegen in der Form vor, die
+`seller_create_purchase_with_items` (`0064`) erwartet: **ein Element je
+Stück**, Dubletten nicht zusammengefasst. `handOverItems()` macht genau diese
+Übersetzung und wird heute nur von Tests benutzt — damit der spätere Weg
+keine neue Annahme über die Form braucht.
+
+**Geschrieben wird `purchase_id` ausschließlich serverseitig**, später, von
+einer `security definer`-Funktion. Eine Spalte, die der Client setzen darf,
+wäre genau die Sperre, die sie werden soll. Keine der heutigen Aktionen
+berührt sie, und `saved.test.ts` hält das fest.
+
+### Wem die Daten gehören
+
+Vier Policies, das Muster von `collection_items` (ADR-0016):
+`(select auth.uid()) = user_id`, bei `update` mit `using` **und**
+`with check`. Kein `anon`, kein Tabellenrecht für `anon`, **keine
+Betriebsrolle**: eine gespeicherte Kalkulation ist eine private Notiz, kein
+Geschäftsvorfall. Dass der Kalkulator nur dem Betrieb gezeigt wird, bleibt
+Bequemlichkeit (ADR-0039).
+
+### Was diese Entscheidung ausdrücklich nicht tut
+
+Keine Bestellung, kein Einkauf, keine Bewegung, kein Beleg, keine Zahlung,
+keine Verkaufsfreigabe. Keine zweite Preislogik: gerechnet wird weiter in
+`lib/calculator/calculation.ts`, und der Marktwert bleibt
+`skylanders.market_price` (nicht der Shoppreis, nicht der Katalogaufschlag
+aus `0094`). Keine Änderung an einer bestehenden Tabelle, Funktion,
+Richtlinie oder Berechtigung.
+
+### Was V1 festhielt und hier aufgehoben wird
+
+`calculator-ui.test.ts` pinnte drei Aussagen, die diese Entscheidung
+umdreht: „es wird nichts gespeichert" im Hinweistext, „legt keine Tabelle
+an", „ein Neuladen darf sie verlieren". Alle drei waren richtig, solange der
+Kalkulator flüchtig war. Sie sind **ersetzt, nicht gelöscht** — an ihrer
+Stelle steht jeweils die neue Zusicherung, und der Kommentar sagt, was
+vorher dort stand und warum es nicht mehr gilt.

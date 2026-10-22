@@ -15,10 +15,35 @@
  * ist. Die Rechnung selbst steht in `lib/calculator/calculation.ts`, in Cent
  * und ohne React.
  *
- * WAS ER NICHT TUT. Er schreibt nichts — kein Lager, keine Bewegung, keine
- * Bestellung, kein Warenkorb, kein Katalogpreis. Ein von Hand gesetzter
- * Einzelwert gilt für diese eine Sitzung. Ein Neuladen verwirft die
- * Kalkulation, und das ist für V1 die Entscheidung, nicht ein Versäumnis.
+ * WAS ER NICHT TUT. Er schreibt nichts in den Geschäftsbetrieb — kein
+ * Lager, keine Bewegung, keine Bestellung, keinen Warenkorb, keinen
+ * Katalogpreis. Ein von Hand gesetzter Einzelwert gilt für diese Kalkulation
+ * und überschreibt keinen `market_price`.
+ *
+ * ---------------------------------------------------------------------------
+ * ZWEI GEDÄCHTNISSE, UND SIE WERDEN NIE VERWECHSELT (V2, ADR-0131)
+ *
+ * **Der Arbeitsstand** liegt im Browser (`localStorage`, `draft.ts`). Er
+ * entsteht von selbst, kommt nach einem Neuladen zurück und ist keine
+ * gespeicherte Kalkulation. Wer nur schnell ein Inserat prüft, muss nichts
+ * anlegen und hinterlässt nichts.
+ *
+ * **Eine gespeicherte Kalkulation** liegt in `purchase_calculations` (0142)
+ * und entsteht ausschließlich durch einen Druck auf „Speichern". Sie
+ * überlebt ein Zurücksetzen, ein anderes Gerät und ein Jahr.
+ *
+ * Automatisch merken ist also NICHT automatisch anlegen — und das ist keine
+ * Feinheit: eine Liste, in die jede flüchtige Preisprüfung rutscht, ist nach
+ * einer Woche unbenutzbar.
+ *
+ * WAS DAVOR SCHÜTZT, DASS ETWAS UNBEMERKT VERLOREN GEHT. Ein Abdruck des
+ * Stands beim Öffnen (`loadedFingerprint`), verglichen mit dem Stand jetzt.
+ * Daran hängen die drei Rückfragen: vor dem Zurücksetzen, vor dem Öffnen
+ * einer anderen Kalkulation, und beim Speichern die Wahl zwischen
+ * „aktualisieren" und „als neue". Kein Versionsverlauf, keine Sperren —
+ * die Frage „habe ich hier etwas, das noch nicht gespeichert ist?" hat eine
+ * Antwort, und die genügt.
+ * ---------------------------------------------------------------------------
  */
 "use client";
 
@@ -26,16 +51,27 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FigureSearch } from "@/components/business/figure-search";
 import { Modal } from "@/components/ui/modal";
-import { ACTION_NEUTRAL, COMMERCE_INK } from "@/components/ui/action";
+import { ACTION_NEUTRAL, ACTION_PRIMARY, COMMERCE_INK } from "@/components/ui/action";
+import { SavedPanel } from "@/components/calculator/saved-panel";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { loadCalculatorContext } from "@/lib/calculator/actions";
+import {
+  createCalculation, deleteCalculation, listCalculations, renameCalculation,
+  updateCalculation,
+} from "@/lib/calculator/saved-actions";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import {
   addFigure, centsToEuro, changeQuantity, clampFactor, FALLBACK_FACTOR, initialFactor,
   lineTotalCents, maxPurchaseCents, parseAmountToCents, parseFactor, removeLine,
   resetUnitCents, setQuantity, setUnitCents, totals, type CalculationLine,
 } from "@/lib/calculator/calculation";
+import {
+  clearDraft, draftFingerprint, readDraft, writeDraft,
+} from "@/lib/calculator/draft";
+import {
+  normalizeName, suggestName, type SavedCalculation,
+} from "@/lib/calculator/saved";
 
 const copy = de.calculator;
 
@@ -51,18 +87,72 @@ const FACTOR_PRESETS = [40, 50, 60, 70] as const;
  */
 const CALC_RESULTS = 6;
 
+/** Was das Fenster gerade zeigt: die Kalkulation oder die Liste. */
+type View = "calc" | "saved";
+
+/** Eine Rückfrage, die noch aussteht. `null` heißt: keine. */
+type Pending =
+  | { kind: "reset" }
+  | { kind: "open"; calculation: SavedCalculation };
+
 export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const headingId = "calculator-title";
   const [catalog, setCatalog] = useState<readonly FigureChoice[] | null>(null);
   const [failed, setFailed] = useState(false);
-  const [lines, setLines] = useState<CalculationLine[]>([]);
+
+  /*
+   * DER LETZTE ARBEITSSTAND, EINMAL UND ALS ANFANGSZUSTAND (V2, ADR-0131).
+   *
+   * Nicht in einem Effekt: ein Effekt, der synchron Zustand setzt, löst eine
+   * zweite Renderrunde aus, und die Regel dagegen gilt in diesem Projekt
+   * (dieselbe Begründung steht unten am Schließen). Ein verzögerter
+   * `useState`-Initialisierer läuft genau einmal, vor dem ersten Bild.
+   *
+   * Und er darf `localStorage` lesen, ohne eine Hydration zu gefährden:
+   * `calculator-launcher.tsx` hängt dieses Fenster erst nach einem Klick
+   * ein, der Server rendert es also nie. Für Bauteile, die der Server mit
+   * rendert, ist `useSyncExternalStore` der Weg (`view-mode.ts`) — hier
+   * wäre er Aufwand ohne Grund.
+   */
+  const [restored] = useState(readDraft);
+  /** Hatte der wiederhergestellte Stand etwas zu sagen? Siehe Katalog-Effekt. */
+  const draftHadState = restored.lines.length > 0 || restored.loadedId !== null;
+
+  const [lines, setLines] = useState<CalculationLine[]>(restored.lines);
+
+  /* ------------------------------------------------- V2: Arbeitsstand und Liste */
+
+  /**
+   * Das Band zur gespeicherten Kalkulation.
+   *
+   * `loadedId === null` heißt „diese Rechnung gehört noch keiner". Steht eine
+   * ID darin, hat „Speichern" zwei Bedeutungen, und der Betreiber wählt.
+   */
+  const [loadedId, setLoadedId] = useState<string | null>(restored.loadedId);
+  const [loadedName, setLoadedName] = useState<string | null>(restored.loadedName);
+  /** Der Abdruck beim Öffnen — die einzige Quelle für „ungespeichert". */
+  const [loadedFingerprint, setLoadedFingerprint] =
+    useState<string | null>(restored.loadedFingerprint);
+
+  const [view, setView] = useState<View>("calc");
+  const [saved, setSaved] = useState<readonly SavedCalculation[]>([]);
+  const [listState, setListState] = useState<"loading" | "ready" | "failed">("loading");
+
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+
   /*
    * Der historische Schnitt aus dem Orderbuch, nur als Referenz. `null`
    * heißt: es gibt keinen belastbaren — dann wird unten der Rückfall
    * gezeigt, und zwar als das, was er ist.
    */
   const [historicFactor, setHistoricFactor] = useState<number | null>(null);
-  const [factor, setFactor] = useState<number>(FALLBACK_FACTOR);
+  const [factor, setFactor] =
+    useState<number>(draftHadState ? restored.factor : FALLBACK_FACTOR);
   const [confirmClear, setConfirmClear] = useState(false);
   const searchInput = useRef<HTMLInputElement>(null);
 
@@ -86,12 +176,79 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
          * Nur beim ersten Laden. Wer den Faktor danach verstellt, soll ihn
          * beim nächsten Öffnen so vorfinden, wie er ihn gelassen hat — und
          * ein zweites Laden gibt es ohnehin nicht.
+         *
+         * UND NUR, WENN KEIN ARBEITSSTAND DA WAR (V2). Der Katalog kommt
+         * asynchron, also NACH der Wiederherstellung — ohne diese Bedingung
+         * überschriebe er den Faktor, mit dem der Händler gestern aufgehört
+         * hat. Ein wiederhergestellter Stand gewinnt; das ist der Sinn des
+         * Wiederherstellens.
          */
-        setFactor(initialFactor(context.historicFactor));
+        if (!draftHadState) setFactor(initialFactor(context.historicFactor));
       })
       .catch(() => { if (alive) { setCatalog([]); setFailed(true); } });
     return () => { alive = false; };
-  }, [open, catalog]);
+  }, [open, catalog, draftHadState]);
+
+  /*
+   * JEDE ÄNDERUNG ZURÜCK IN DEN BROWSER.
+   *
+   * Ein Schreibvorgang je Tastendruck ist hier richtig: `localStorage` ist
+   * synchron und die Nutzlast sind dreißig kleine Objekte. Eine Debounce
+   * würde genau das verlieren, was sie schützen soll — den letzten
+   * Tastendruck vor dem Schließen des Tabs.
+   *
+   * **Das legt keine Kalkulation an.** Diese Zeile schreibt in den Browser
+   * und sonst nirgendwohin (ADR-0131).
+   */
+  useEffect(() => {
+    writeDraft({ lines, factor, loadedId, loadedName, loadedFingerprint });
+  }, [lines, factor, loadedId, loadedName, loadedFingerprint]);
+
+  /*
+   * DIE LISTE, WENN SIE GEBRAUCHT WIRD.
+   *
+   * Beim ersten Öffnen des Fensters geholt, damit die Zahl am Knopf
+   * („Gespeichert (3)") stimmt, ohne dass jemand erst hineinsehen muss. Ein
+   * Fehlschlag ist ein eigener Zustand: „keine gespeicherten" und „konnte
+   * nicht nachsehen" sind zwei verschiedene Auskünfte.
+   */
+  const refreshList = useCallback(async () => {
+    /*
+     * KEIN `setListState("loading")` HIER. Der Anfangszustand ist schon
+     * `loading`, und ein synchrones setState in einem Effekt löst eine
+     * zweite Renderrunde aus — die Regel, an der dieses Projekt sich hält.
+     * Der Wiederholungsknopf setzt den Zustand selbst; er ist eine
+     * Handlung, kein Effekt.
+     */
+    const result = await listCalculations();
+    if (result.ok) {
+      setSaved(result.calculations);
+      setListState("ready");
+    } else {
+      setListState("failed");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    /*
+     * In der Zusage und nicht im Effektkörper — dieselbe Form wie der
+     * Katalog darüber. Ein synchrones setState in einem Effekt löst eine
+     * zweite Renderrunde aus; was nach einem `await` passiert, ist eine
+     * Antwort auf ein Ereignis und keine zweite Runde.
+     */
+    void listCalculations().then((result) => {
+      if (!alive) return;
+      if (result.ok) {
+        setSaved(result.calculations);
+        setListState("ready");
+      } else {
+        setListState("failed");
+      }
+    }).catch(() => { if (alive) setListState("failed"); });
+    return () => { alive = false; };
+  }, [open]);
 
   /*
    * SOFORT TIPPEN KÖNNEN — der ganze Zweck dieses Fensters.
@@ -126,6 +283,137 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
   const sums = useMemo(() => totals(lines), [lines]);
   const maxCents = maxPurchaseCents(sums.totalCents, factor);
 
+  /* ------------------------------------------------------- V2: die Handlungen */
+
+  /**
+   * Gibt es ungespeicherte Änderungen?
+   *
+   * Ein Vergleich, kein Schalter. Wer eine Menge erhöht und wieder senkt,
+   * hat nichts geändert — ein `dirty`-Schalter hätte hier „ja" gesagt und
+   * eine Rückfrage für nichts erzeugt.
+   */
+  const unsaved = useMemo(() => {
+    const jetzt = draftFingerprint(lines, factor);
+    if (loadedFingerprint === null) return lines.length > 0;
+    return jetzt !== loadedFingerprint;
+  }, [lines, factor, loadedFingerprint]);
+
+  /** Den Arbeitsstand leeren — und NUR ihn (ADR-0131). */
+  const resetDraft = useCallback(() => {
+    setLines([]);
+    setLoadedId(null);
+    setLoadedName(null);
+    setLoadedFingerprint(null);
+    /*
+     * Auch aus dem Browser fort. Sonst stünde beim nächsten Öffnen wieder
+     * da, was der Betreiber gerade weggeräumt hat. Gespeicherte
+     * Kalkulationen sind davon nicht berührt — sie liegen in der Datenbank.
+     */
+    clearDraft();
+    setConfirmClear(false);
+    setPending(null);
+    setSavedNote(null);
+    setView("calc");
+  }, []);
+
+  /** Eine gespeicherte Kalkulation in den Kalkulator laden. */
+  const loadCalculation = useCallback((calculation: SavedCalculation) => {
+    setLines(calculation.lines);
+    setFactor(calculation.factorPercent);
+    setLoadedId(calculation.id);
+    setLoadedName(calculation.name);
+    /*
+     * Der Abdruck des geladenen Stands. Ab hier heißt „ungespeichert":
+     * abweichend von genau diesem. Deshalb wird er aus denselben Werten
+     * gebildet, die gerade gesetzt wurden — nicht aus dem Zustand, der in
+     * dieser Runde noch der alte ist.
+     */
+    setLoadedFingerprint(draftFingerprint(calculation.lines, calculation.factorPercent));
+    setPending(null);
+    setSavedNote(null);
+    setView("calc");
+  }, []);
+
+  /**
+   * Öffnen, aber nicht über etwas Ungespeichertes hinweg.
+   *
+   * Das ist der Fall, der im Alltag passiert: man rechnet an einem Inserat,
+   * will kurz in ein älteres sehen und wäre die halbe Arbeit los.
+   */
+  const requestOpen = useCallback((calculation: SavedCalculation) => {
+    if (unsaved) {
+      setPending({ kind: "open", calculation });
+      return;
+    }
+    loadCalculation(calculation);
+  }, [unsaved, loadCalculation]);
+
+  /** Das Speicherfeld aufmachen — mit einem Namensvorschlag, der etwas sagt. */
+  const openSave = useCallback(() => {
+    setSaveError(false);
+    setSavedNote(null);
+    setSaveName(loadedName ?? suggestName(lines, new Date()));
+    setSaveOpen(true);
+  }, [loadedName, lines]);
+
+  /**
+   * Speichern — als neue Kalkulation oder über die geladene.
+   *
+   * `mode` entscheidet, und die Oberfläche fragt danach, sobald eine
+   * geladen ist. Ein stilles Überschreiben gibt es nicht (ADR-0131).
+   *
+   * EIN FEHLSCHLAG VERLIERT NICHTS. Der Arbeitsstand liegt im Browser und
+   * wird hier nicht angefasst; die Meldung sagt genau das und bietet einen
+   * zweiten Versuch an. Das ist die Antwort auf den Netzabbruch.
+   */
+  const save = useCallback(async (mode: "new" | "update") => {
+    const name = normalizeName(saveName);
+    if (name === "" || lines.length === 0) return;
+
+    setSaving(true);
+    setSaveError(false);
+    const payload = { name, lines, factorPercent: factor };
+    const result = mode === "update" && loadedId !== null
+      ? await updateCalculation(loadedId, payload)
+      : await createCalculation(payload);
+    setSaving(false);
+
+    if (!result.ok) {
+      setSaveError(true);
+      return;
+    }
+
+    setLoadedId(result.calculation.id);
+    setLoadedName(result.calculation.name);
+    /* Ab jetzt ist DAS der gespeicherte Stand. */
+    setLoadedFingerprint(draftFingerprint(result.calculation.lines, result.calculation.factorPercent));
+    setSaveOpen(false);
+    setSavedNote(result.calculation.name);
+    void refreshList();
+  }, [saveName, lines, factor, loadedId, refreshList]);
+
+  const rename = useCallback(async (id: string, name: string) => {
+    const result = await renameCalculation(id, name);
+    if (result.ok && id === loadedId) setLoadedName(normalizeName(name));
+    void refreshList();
+  }, [loadedId, refreshList]);
+
+  const remove = useCallback(async (id: string) => {
+    await deleteCalculation(id);
+    /*
+     * War es die geladene, ist der Rechenstand jetzt niemandes mehr — die
+     * Positionen bleiben aber stehen. Sie fortzuwerfen, weil jemand einen
+     * Listeneintrag gelöscht hat, wäre ein Datenverlust, den niemand
+     * verlangt hat.
+     */
+    if (id === loadedId) {
+      setLoadedId(null);
+      setLoadedName(null);
+      setLoadedFingerprint(null);
+    }
+    void refreshList();
+  }, [loadedId, refreshList]);
+
   return (
     <Modal open={open} onClose={close} labelledBy={headingId} size="xl">
       {/*
@@ -143,7 +431,24 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
         <header className="flex items-start justify-between gap-4 border-b border-gold-line px-4 py-3 sm:px-5">
           <div className="min-w-0">
             <h2 id={headingId} className="text-base font-semibold text-on-deep">{copy.title}</h2>
-            <p className="mt-0.5 text-xs text-on-deep-muted">{copy.hint}</p>
+            {/*
+              WAS HIER STEHT, BEANTWORTET EINE FRAGE: woran arbeite ich
+              gerade, und ist es gesichert? Ohne geladene Kalkulation bleibt
+              es der Satz über den Arbeitsstand — eine Zeile, die beides
+              erklärt, ist besser als zwei, die sich abwechseln.
+            */}
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-on-deep-muted">
+              {loadedName === null ? (
+                <span>{copy.draftHint}</span>
+              ) : (
+                <span className="truncate font-medium text-on-deep">
+                  {copy.loadedName(loadedName)}
+                </span>
+              )}
+              {unsaved && lines.length > 0 ? (
+                <span className="rounded-sky-sm bg-deep/50 px-1.5 py-0.5">{copy.unsaved}</span>
+              ) : null}
+            </p>
           </div>
           <button
             type="button"
@@ -158,6 +463,153 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
           </button>
         </header>
 
+        {/*
+          DIE WERKZEUGLEISTE — drei Knöpfe, und zwar sichtbar.
+          „Zurücksetzen" war in V1 ein unterstrichener Text im Fuß. Jetzt ist
+          es ein Knopf neben „Speichern", weil beide dieselbe Frage
+          beantworten: was passiert mit dem, was hier steht?
+          `flex-wrap` statt einer zweiten Anordnung für Telefone — bei wenig
+          Platz rutschen die Knöpfe in die nächste Zeile und bleiben 44 px
+          hoch.
+        */}
+        <div className="shrink-0 border-b border-gold-line px-4 py-2 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={openSave}
+              disabled={lines.length === 0}
+              className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              {copy.save}
+            </button>
+            <button
+              type="button"
+              onClick={() => setView(view === "saved" ? "calc" : "saved")}
+              aria-pressed={view === "saved"}
+              className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm`}
+            >
+              {copy.savedListOpen(saved.length)}
+            </button>
+
+            <span className="ml-auto flex items-center gap-2">
+              {confirmClear ? (
+                <>
+                  <span role="alert" className="text-xs text-on-deep">
+                    {copy.clearConfirm(sums.positions)}
+                  </span>
+                  <button type="button" onClick={resetDraft}
+                          className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-xs`}>
+                    {copy.discardYes}
+                  </button>
+                  <button type="button" onClick={() => setConfirmClear(false)}
+                          className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
+                    {copy.cancel}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  /*
+                   * EINE RÜCKFRAGE NUR, WENN ES ETWAS ZU VERLIEREN GIBT.
+                   * Ein leerer oder gespeicherter Stand wird ohne Nachfrage
+                   * geleert — eine Bestätigung für nichts bringt bei, sie
+                   * wegzuklicken.
+                   */
+                  onClick={() => (unsaved ? setConfirmClear(true) : resetDraft())}
+                  disabled={lines.length === 0}
+                  className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-40`}
+                >
+                  {copy.clear}
+                </button>
+              )}
+            </span>
+          </div>
+
+          {/* Das Speicherfeld. Kein zweiter Dialog über dem Dialog: eine
+              Zeile, die aufklappt, und der Fokus liegt im Namensfeld. */}
+          {saveOpen ? (
+            <form
+              className="mt-2 flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void save(loadedId === null ? "new" : "update");
+              }}
+            >
+              <label className="flex min-w-0 flex-1 basis-60 flex-col gap-1">
+                <span className="text-xs text-on-deep-muted">{copy.saveNameLabel}</span>
+                <input
+                  autoFocus
+                  type="text"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  placeholder={copy.saveNamePlaceholder}
+                  className="h-11 w-full rounded-sky-sm bg-surface px-2 text-sm ring-1 ring-border-strong focus-ring"
+                />
+              </label>
+
+              {/*
+                ZWEI WEGE, WENN EINE KALKULATION GELADEN IST (ADR-0131).
+                „Aktualisieren" überschreibt die geladene, „als neue" legt
+                eine zweite an — so lassen sich Varianten eines Inserats
+                rechnen, ohne das Original zu verlieren.
+              */}
+              {loadedId === null ? (
+                <button type="submit" disabled={saving || !normalizeName(saveName)}
+                        className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
+                  {saving ? copy.saving : copy.saveSubmit}
+                </button>
+              ) : (
+                <>
+                  <button type="submit" disabled={saving || !normalizeName(saveName)}
+                          className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
+                    {saving ? copy.saving : copy.saveUpdate}
+                  </button>
+                  <button type="button" disabled={saving || !normalizeName(saveName)}
+                          onClick={() => void save("new")}
+                          className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-sm disabled:opacity-40`}>
+                    {copy.saveNew}
+                  </button>
+                </>
+              )}
+              <button type="button" onClick={() => setSaveOpen(false)}
+                      className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
+                {copy.cancel}
+              </button>
+
+              {saveError ? (
+                <p role="alert" className="basis-full text-xs text-danger">{copy.saveFailed}</p>
+              ) : null}
+            </form>
+          ) : null}
+
+          {/* Die Rückfrage vor dem Öffnen über einen ungespeicherten Stand. */}
+          {pending?.kind === "open" ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span role="alert" className="text-xs text-on-deep">
+                {copy.discardOpen(pending.calculation.name)}
+              </span>
+              <button type="button" onClick={() => loadCalculation(pending.calculation)}
+                      className={`${ACTION_NEUTRAL} h-11 w-auto min-h-11 px-3 text-xs`}>
+                {copy.discardYes}
+              </button>
+              <button type="button" onClick={() => { setPending(null); openSave(); }}
+                      className={`${ACTION_PRIMARY} h-11 w-auto min-h-11 px-3 text-xs`}>
+                {copy.discardSaveFirst}
+              </button>
+              <button type="button" onClick={() => setPending(null)}
+                      className="focus-ring h-11 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
+                {copy.cancel}
+              </button>
+            </div>
+          ) : null}
+
+          {savedNote === null ? null : (
+            <p role="status" className="mt-2 text-xs text-on-deep-muted">
+              {copy.saved(savedNote)}
+            </p>
+          )}
+        </div>
+
         {/* Die Suche bleibt stehen, die Liste darunter rollt. Bei dreißig
             Positionen ist das der Unterschied zwischen Tippen und Suchen. */}
         {/*
@@ -166,6 +618,26 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
           Treffer reichen für den Ablauf hier — wer eintippt, was er in der
           Hand hält, nimmt ohnehin den ersten.
         */}
+        {/*
+          ZWEI ANSICHTEN, EINE FLÄCHE (ADR-0131).
+
+          Kopf, Werkzeugleiste und Fuß bleiben stehen; getauscht wird nur die
+          Mitte. Die Summen unten bleiben dadurch sichtbar, während man in der
+          Liste blättert — und auf einem Telefon ist es die einzige Anordnung,
+          die beides zeigen kann, ohne zu scrollen.
+        */}
+        {view === "saved" ? (
+          <SavedPanel
+            state={listState}
+            calculations={saved}
+            onOpen={requestOpen}
+            onRename={(id, name) => void rename(id, name)}
+            onDelete={(id) => void remove(id)}
+            onBack={() => setView("calc")}
+            onRetry={() => { setListState("loading"); void refreshList(); }}
+          />
+        ) : (
+        <>
         <div className="max-h-[45dvh] shrink-0 overflow-y-auto border-b border-gold-line px-4 py-3 sm:px-5">
           {catalog === null ? (
             <p className="text-sm text-on-deep-muted">{copy.loading}</p>
@@ -206,6 +678,8 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
             </ul>
           )}
         </div>
+        </>
+        )}
 
         {/*
           WAS EIN SCREENREADER SONST NICHT MITBEKÄME.
@@ -221,6 +695,14 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
             : `${sums.positions} ${copy.positionsLabel}, ${sums.units} ${copy.unitsLabel}`}
         </p>
 
+        {/*
+          DER FUSS TRÄGT NUR NOCH ZAHLEN.
+
+          „Zurücksetzen" stand hier als unterstrichener Text und ist in die
+          Werkzeugleiste gewandert — neben „Speichern", weil beide dieselbe
+          Frage beantworten. Der Fuß ist dadurch, was er sein soll: die
+          Herleitung der einen Zahl, wegen der jemand das Fenster öffnet.
+        */}
         <Summary
           historicFactor={historicFactor}
           positions={sums.positions}
@@ -230,10 +712,6 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
           factor={factor}
           onFactor={setFactor}
           maxCents={maxCents}
-          confirmClear={confirmClear}
-          onClearRequest={() => setConfirmClear(true)}
-          onClearConfirm={() => { setLines([]); setConfirmClear(false); }}
-          onClearCancel={() => setConfirmClear(false)}
         />
       </div>
     </Modal>
@@ -372,13 +850,10 @@ function PositionRow({
 
 function Summary({
   historicFactor, positions, units, totalCents, withoutValue, factor, onFactor, maxCents,
-  confirmClear, onClearRequest, onClearConfirm, onClearCancel,
 }: {
   historicFactor: number | null;
   positions: number; units: number; totalCents: number; withoutValue: number;
   factor: number; onFactor: (value: number) => void; maxCents: number;
-  confirmClear: boolean;
-  onClearRequest: () => void; onClearConfirm: () => void; onClearCancel: () => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
 
@@ -475,25 +950,10 @@ function Summary({
           {copy.maxPurchaseHint}
           {withoutValue > 0 ? ` · ${copy.withoutValue(withoutValue)}` : ""}
         </p>
-
-        {positions === 0 ? null : confirmClear ? (
-          <span className="flex items-center gap-2">
-            <span role="alert" className="text-xs text-on-deep">{copy.clearConfirm(positions)}</span>
-            <button type="button" onClick={onClearConfirm}
-                    className={`${ACTION_NEUTRAL} h-9 w-auto min-h-9 px-3 text-xs`}>
-              {copy.clear}
-            </button>
-            <button type="button" onClick={onClearCancel}
-                    className="focus-ring h-9 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
-              {copy.cancel}
-            </button>
-          </span>
-        ) : (
-          <button type="button" onClick={onClearRequest}
-                  className="focus-ring h-9 rounded-sky-sm px-2 text-xs text-on-deep-muted underline underline-offset-2">
-            {copy.clear}
-          </button>
-        )}
+        {/* `positions` bleibt im Vertrag dieser Komponente, auch ohne den
+            Knopf: der Fuß nennt die Zahl oben, und ein Parameter, der nur
+            für einen entfernten Knopf da war, wäre jetzt ein toter. */}
+        <p className="sr-only">{positions}</p>
       </div>
     </footer>
   );

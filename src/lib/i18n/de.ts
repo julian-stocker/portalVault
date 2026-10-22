@@ -4470,8 +4470,14 @@ export const de = {
     open: "Kalkulator",
     openLabel: "Figuren-Kalkulator öffnen",
     title: "Figuren-Kalkulator",
-    /* Der Satz, der die Zahlen einordnet: Marktwert, nicht Shoppreis. */
-    hint: "Marktwert aus dem Katalog. Nur eine Überschlagsrechnung — es wird nichts gespeichert.",
+    /*
+     * Der Satz, der die Zahlen einordnet — und seit V2 auch die beiden
+     * Gedächtnisse (ADR-0131). „Es wird nichts gespeichert" stand hier,
+     * solange ein Neuladen die Kalkulation verwarf; jetzt wäre es falsch,
+     * und ein falscher Hinweis ist schlimmer als keiner.
+     */
+    hint: "Marktwert aus dem Katalog. Der Arbeitsstand wird gemerkt, "
+      + "gespeichert wird auf Knopfdruck.",
     close: "Schließen",
 
     searchLabel: "Figur suchen",
@@ -4516,11 +4522,82 @@ export const de = {
     maxPurchaseHint: "Gesamtwert × Ankaufsfaktor. Rechnerischer Wert, kein Angebot.",
 
     cancel: "Abbrechen",
-    clear: "Kalkulation leeren",
+    clear: "Zurücksetzen",
     clearConfirm: (n: number) =>
       n === 1
         ? "Die eine Position wird entfernt. Fortfahren?"
         : `Alle ${n} Positionen werden entfernt. Fortfahren?`,
+
+    /* ------------------------------------------------- Calculator V2 */
+
+    /*
+     * DER SATZ, DER DIE TRENNUNG ERKLÄRT — und der einzige, der sie
+     * erklären muss. Der Arbeitsstand kommt von selbst zurück; in der Liste
+     * steht nur, was jemand ausdrücklich gespeichert hat (ADR-0131).
+     */
+    draftRestored: "Letzter Arbeitsstand",
+    draftHint: "Wird automatisch gemerkt. Gespeichert wird erst auf Knopfdruck.",
+
+    /* Der Name der geladenen Kalkulation im Kopf des Fensters. */
+    loadedName: (name: string) => `Geöffnet: ${name}`,
+    unsaved: "ungespeicherte Änderungen",
+
+    /* Speichern */
+    save: "Speichern",
+    saveNew: "Als neue Kalkulation speichern",
+    saveUpdate: "Bestehende aktualisieren",
+    saveNameLabel: "Name der Kalkulation",
+    saveNamePlaceholder: "z. B. Willhaben – Sammlung 35 Figuren",
+    saveSubmit: "Speichern",
+    saving: "Wird gespeichert …",
+    saveFailed: "Nicht gespeichert. Der Arbeitsstand bleibt erhalten — nochmal versuchen?",
+    saveRetry: "Nochmal versuchen",
+    saveNameMissing: "Bitte einen Namen eingeben.",
+    saveEmpty: "Es gibt noch keine Position zu speichern.",
+    saved: (name: string) => `„${name}" ist gespeichert.`,
+
+    /* Die Liste */
+    savedListTitle: "Gespeicherte Kalkulationen",
+    savedListOpen: (n: number) =>
+      n === 1 ? "Gespeichert (1)" : `Gespeichert (${n})`,
+    savedListEmpty: "Noch keine Kalkulation gespeichert.",
+    savedListEmptyHint:
+      "Kalkuliere ein Inserat und drücke „Speichern“, um es wiederzufinden.",
+    savedListFailed: "Die gespeicherten Kalkulationen konnten nicht geladen werden.",
+    savedListLoading: "Wird geladen …",
+    savedListBack: "Zurück zur Kalkulation",
+    savedListCount: (positions: number, units: number) =>
+      `${positions} ${positions === 1 ? "Position" : "Positionen"} · ${units} Stück`,
+    savedListUpdated: (datum: string) => `Zuletzt gespeichert: ${datum}`,
+    savedOpen: "Öffnen",
+    savedOpenLabel: (name: string) => `${name} öffnen`,
+    savedRename: "Umbenennen",
+    savedRenameLabel: (name: string) => `${name} umbenennen`,
+    savedDelete: "Löschen",
+    savedDeleteLabel: (name: string) => `${name} löschen`,
+    savedDeleteConfirm: (name: string) => `„${name}" endgültig löschen?`,
+    savedDeleteYes: "Endgültig löschen",
+
+    /* Der Status — vier Werte, kurz gehalten. */
+    statusLabel: "Status",
+    status: {
+      review: "In Prüfung",
+      negotiating: "In Verhandlung",
+      bought: "Gekauft",
+      rejected: "Nicht gekauft",
+    } as const,
+
+    /* Die Nachfragen, die Datenverlust verhindern */
+    discardTitle: "Ungespeicherte Änderungen",
+    discardOpen: (name: string) =>
+      `„${name}" öffnen und die ungespeicherten Änderungen verwerfen?`,
+    discardReset: "Zurücksetzen und die ungespeicherten Änderungen verwerfen?",
+    discardYes: "Verwerfen",
+    discardSaveFirst: "Vorher speichern",
+
+    /* Übernahme ins Orderbuch — noch nicht gebaut, und das steht auch so da. */
+    handOverPending: "Übernahme ins Orderbuch folgt",
+    handOverDone: "Als Einkauf übernommen",
   },
 
   /**
