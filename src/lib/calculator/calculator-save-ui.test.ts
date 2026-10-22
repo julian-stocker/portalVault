@@ -377,6 +377,31 @@ describe("8. der Weg nach Staging ist vorbereitet, nicht gegangen", () => {
     expect(post).toContain("ob die Richtlinien WIRKEN");
   });
 
+  it("und sie prüft die Nachbartabelle als EIGENSCHAFT, nicht als Zahl", () => {
+    /*
+     * DER BEFUND VOM 2026-10-22. Die Zeile verlangte „genau vier
+     * Richtlinien" auf `collection_items`; auf Staging sind es fünf, weil
+     * `staging-agent-setup.sql` je Tabelle eine Lesepolicy für die
+     * Prüfrolle anlegt (`docs/SECURITY.md`, 4b). Die fünfte stand dort lange
+     * vor `0142` — falsch war die Zahl, nicht die Datenbank.
+     *
+     * Eine Zahl bricht, sobald jemand eine berechtigte Policy hinzufügt,
+     * und sagt nichts darüber, ob die vier, auf die es ankommt, noch da
+     * sind. Geprüft wird deshalb: die vier EIGENEN stehen, für
+     * `authenticated`, und keine gibt `anon` etwas.
+     */
+    const post = roh("supabase/checks/0142_postflight.sql");
+    expect(post).toContain("collection_items_select_own");
+    expect(post).toContain("collection_items_delete_own");
+    expect(post).toContain("'authenticated' = any (roles)");
+    expect(post).toContain("und keine davon gibt anon etwas");
+    /* Und sie nennt die Richtlinien beim Namen, damit die nächste
+       Abweichung eine Auskunft ist und keine Zahl. */
+    expect(post).toContain("alle Richtlinien von collection_items, mit Befehl und Rollen");
+    /* Die alte Formulierung ist fort. */
+    expect(post).not.toContain("hat weiter genau vier Richtlinien");
+  });
+
   it("und ein Lauf mit zwei echten Sitzungen, der die Dienstrolle nicht für Behauptungen benutzt", () => {
     /*
      * Der Unterschied, auf den es ankommt: eine Richtlinie, die richtig

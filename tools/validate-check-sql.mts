@@ -3201,9 +3201,15 @@ async function main(): Promise<void> {
      * `0142_postflight.sql` ist das Blatt, das der Bediener nach der
      * Migration liest. Seine Erwartungen sind damit geprueft, nicht
      * behauptet — bis auf EINE Zeile, die ein Stub nicht erfuellen kann:
-     * 502 zaehlt die Richtlinien von `collection_items`, und das Stub-Schema
-     * ist reine Struktur ohne Richtlinien. Sie wird namentlich zugelassen;
-     * jede andere rote Zeile laesst diesen Durchgang scheitern.
+     * 502 verlangt die vier eigenen Richtlinien von `collection_items`, und
+     * das Stub-Schema ist reine Struktur OHNE Richtlinien. Sie wird
+     * namentlich zugelassen; jede andere rote Zeile laesst diesen Durchgang
+     * scheitern.
+     *
+     * (Bis zum 2026-10-22 zaehlte diese Zeile Richtlinien und verlangte
+     * „genau vier". Auf Staging sind es fuenf — `staging-agent-setup.sql`
+     * legt eine Lesepolicy fuer die Pruefrolle an —, und eine Zahl war
+     * damit die falsche Formulierung. Siehe den Kommentar im Postflight.)
      *
      * SIE LAEUFT HIER UND NICHT WEITER UNTEN: Zeile 104 verlangt eine LEERE
      * Tabelle, und die Einfuegeproben unten legen Zeilen an. Eine

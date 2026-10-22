@@ -257,6 +257,31 @@ Probelauf **P48** fährt Migration, Nachkontrolle, den partiellen Index, den
 `lines`-CHECK, einen zweiten Lauf und die Rücknahme gegen echtes
 PostgreSQL.
 
+**Gelaufen am 2026-10-22:** `0142` ist auf **Staging** angewendet. Die
+Nachkontrolle war grün bis auf eine Zeile — und die Zeile hatte recht,
+meine Erwartung war falsch: `collection_items` trägt auf Staging **fünf**
+Richtlinien, weil `staging-agent-setup.sql` für den lesenden Prüfzugang je
+Tabelle eine Lesepolicy `agent_read_<tabelle>` anlegt (`docs/SECURITY.md`,
+4b). Sie stand lange vor `0142`, ist auf `select` und die Rolle
+`skyisles_agent` begrenzt und existiert auf Production nicht. **Keine
+Richtlinie wurde angefasst**; korrigiert wurde die Prüfung: Zeile 502 fragt
+jetzt die vier eigenen Richtlinien beim Namen statt eine Zahl, 505 nennt
+alle mit Befehl und Rollen, 506 prüft, dass keine `anon` etwas gibt.
+Hergang: `supabase/checks/0142_staging_run.md`, Nachtrag.
+
+**Die Richtlinien wirken — funktional nachgewiesen:**
+`npm run verify:calculations:staging`, **27/27**. Zwei echte Konten, zwei
+echte JWT, nie die Dienstrolle für eine Behauptung: B sieht die Kalkulation
+von A nicht (auch nicht gezielt über die ID), kann sie nicht ändern, nicht
+löschen und keine Zeile für A anlegen; ein Gast sieht gar nichts; die vier
+CHECKs weisen ab; zwei Kalkulationen stehen unabhängig nebeneinander; ein
+Einkauf kann nicht zweimal beansprucht werden. Aufgeräumt: 0 Probezeilen,
+beide Testkonten entfernt.
+
+**Offen bleibt nur die Handprobe im Browser** (`0142_staging_run.md`,
+Schritt 4): Neuladen, Trennung, Wechsel, **Zuordnung nach Neuladen** und
+Telefon.
+
 ### Veröffentlicht am 2026-10-21: `002ad8b`
 
 Der zweite Push dieses Tages, nach ausdrücklicher Freigabe:

@@ -162,3 +162,102 @@ Sie **bricht ab**, solange Zeilen in der Tabelle stehen, und verlangt einen
 Schalter in der Datei (`v_auch_mit_daten := true`). Der Arbeitsstand im
 Browser ist davon nicht betroffen: nach der Rücknahme rechnet der Kalkulator
 weiter, er kann nur nicht mehr speichern.
+
+---
+
+## Nachtrag 2026-10-22: der Lauf, und ein Befund in meiner eigenen Prüfung
+
+### Was gelaufen ist
+
+`0142` ist auf Staging angewendet. Die Nachkontrolle meldete **`9999 = 1`**,
+und die einzige rote Zeile war **502**: *„collection_items hat weiter genau
+vier Richtlinien"* — gefunden wurden **fünf**.
+
+### Die Erklärung, vollständig und rein lesend
+
+Die fünfte Richtlinie heißt `agent_read_collection_items` und kommt nicht von
+`0142`, sondern von `supabase/operations/staging-agent-setup.sql`. Diese Datei
+legt für den **lesenden Staging-Prüfzugang** je Tabelle eine eigene
+Lesepolicy an:
+
+```sql
+create policy agent_read_<tabelle> on public.<tabelle>
+  for select to skyisles_agent using (true)
+```
+
+für **zwölf** Tabellen, `collection_items` darunter. `docs/SECURITY.md`,
+Abschnitt 4b, nennt genau das — und auch den Grund: die Rolle hat
+**kein `bypassrls`**, also sähe sie ohne eigene Policy null Zeilen.
+
+**Sie stand lange vor `0142`.** Belege, alle im Repository:
+
+| | |
+|---|---|
+| Keine Migration legt sie an | `0001` und `0042` definieren **vier** Richtlinien auf `collection_items`, `0042` ersetzt die vier aus `0001`. Keine fünfte, nirgends |
+| `0142` kann sie nicht angelegt haben | die Datei enthält genau vier `create policy`, alle auf `purchase_calculations`; der Testlauf zählt sie, und die Plan­prüfung nennt sie |
+| Der Prüfzugang ist älter | er trägt den Datenbankkommentar, an dem `tools/lib/staging-db.mts` die Sitzung erkennt, und seine Rechte sind in `docs/SECURITY.md` ausgezählt |
+
+### Ist sie sicherheitstechnisch relevant?
+
+**Sie ist bewusst, begrenzt und nur auf Staging — und sie ist kein Nichts.**
+Was sie tut: sie gibt der Rolle `skyisles_agent` Leserecht auf
+`collection_items`. Was sie nicht tut:
+
+* **nicht `anon`, nicht `authenticated`** — die Rolle ist weder; Zeile 506
+  prüft seitdem ausdrücklich, dass keine Richtlinie dieser Tabelle `anon`
+  etwas gibt;
+* **kein Schreiben** — `for select`, und die Rolle ist zusätzlich an
+  `default_transaction_read_only` gebunden: ein Schreibversuch endet mit
+  `25006`, unabhängig von Rechten;
+* **nicht auf Production** — `staging-agent-setup.sql` bricht ohne das
+  Markerpaar `SKY-0821` + `SKY-0822` ab, und Production trägt es nicht;
+* **keine bestehende Richtlinie geändert** — sie kommt hinzu, die vier
+  eigenen gelten unverändert für `authenticated`.
+
+Die ehrliche Einordnung: auf Staging kann ein Diagnosezugang die
+Sammlungszeilen der Testkonten lesen. Das ist sein Zweck, es ist
+dokumentiert, und es betrifft keine echten Kundendaten. **Auf Production
+darf diese Policy nicht existieren** — dort gibt es den Zugang nicht.
+
+### Was korrigiert wurde — und was nicht
+
+**Keine Richtlinie angefasst.** Korrigiert wurde allein die veraltete
+Erwartung:
+
+* Zeile **502** verlangt jetzt die EIGENSCHAFT statt einer Zahl: die vier
+  Richtlinien `collection_items_*_own` stehen und gelten für
+  `authenticated`.
+* Zeile **505** nennt neu **alle** Richtlinien der Tabelle mit Befehl und
+  Rollen — damit eine künftige Abweichung eine Auskunft ist und keine Zahl.
+* Zeile **506** prüft neu, dass keine davon `anon` etwas gibt.
+
+> **Warum eine Zahl die falsche Formulierung war:** sie bricht, sobald
+> jemand eine berechtigte Policy hinzufügt, und sie sagt nichts darüber, ob
+> die vier, auf die es ankommt, noch da sind. Genau das ist hier passiert —
+> die Prüfung hat etwas gemeldet, das richtig war.
+
+**Beim nächsten Lauf der Nachkontrolle muss `9999 = 0` stehen**, und Zeile
+505 nennt die fünf Namen. Bitte diese Zeile mitschicken: sie bestätigt die
+Erklärung aus der Datenbank selbst, statt sie aus dem Repository zu
+schließen — das ist der eine Teil, den ich von hier aus nicht lesen kann
+(PostgREST gibt kein `pg_policies` her).
+
+### Der RLS-Lauf mit zwei Konten
+
+`npm run verify:calculations:staging` — **27 von 27 bestanden.** Zwei echte
+Konten, zwei echte JWT, niemals die Dienstrolle für eine Behauptung:
+
+```
+A legt an · die Zeile gehört A · 2 Positionen, 3 Stück, 3580 Cent
+B kann KEINE Zeile für A anlegen            42501
+B sieht die von A NICHT                     0 Zeilen
+auch nicht gezielt über die ID              0 Zeilen
+ein Gast sieht gar nichts                   42501
+B kann nicht ändern, nicht löschen          0 Zeilen getroffen
+die Zeile von A ist unverändert
+updated_at bewegt sich (Trigger aus 0001)
+lines ohne Array / leerer Name / unbekannter Status / Faktor 140   23514
+zwei Kalkulationen nebeneinander, unabhängig
+ein Einkauf, höchstens eine Kalkulation     23505
+aufgeräumt: 0 Probezeilen, beide Testkonten entfernt
+```

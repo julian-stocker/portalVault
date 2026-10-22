@@ -108,9 +108,42 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select count(*)::text from information_schema.tables
         where table_schema = 'public'
           and (table_name like '%calculator%' or table_name like '%draft%')), '0'),
-  (502, 'Unberuehrt', 'collection_items hat weiter genau vier Richtlinien',
+  /*
+   * BERICHTIGT AM 2026-10-22: HIER STAND EINE ZAHL, UND DIE WAR FALSCH.
+   *
+   * Die Zeile verlangte „genau vier Richtlinien" auf `collection_items`.
+   * Auf Staging sind es FUENF, und das ist richtig: `staging-agent-setup.sql`
+   * legt je Tabelle eine eigene Lesepolicy `agent_read_<tabelle>` fuer die
+   * Rolle `skyisles_agent` an — fuer zwoelf Tabellen, `collection_items`
+   * darunter (`docs/SECURITY.md`, 4b). Sie ist auf diese Rolle und auf
+   * `select` begrenzt und stand dort lange vor `0142`.
+   *
+   * Eine ZAHL war also die falsche Formulierung: sie bricht, sobald jemand
+   * eine berechtigte Diagnosepolicy anlegt, und sie sagt nichts darueber,
+   * ob die vier, auf die es ankommt, noch da sind. Gepruefft wird deshalb
+   * die EIGENSCHAFT: die vier eigenen Richtlinien stehen, sie gelten fuer
+   * `authenticated`, und keine Richtlinie dieser Tabelle gibt `anon` etwas.
+   *
+   * Zeile 505 nennt zusaetzlich alle Richtlinien beim Namen — damit eine
+   * kuenftige Abweichung nicht als Zahl erscheint, sondern als Auskunft.
+   */
+  (502, 'Unberuehrt', 'die vier eigenen Richtlinien von collection_items stehen, fuer authenticated',
       (select count(*)::text from pg_policies
-        where schemaname = 'public' and tablename = 'collection_items'), '4'),
+        where schemaname = 'public' and tablename = 'collection_items'
+          and policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own')
+          and 'authenticated' = any (roles)), '4'),
+  (505, 'Unberuehrt', 'Info: alle Richtlinien von collection_items, mit Befehl und Rollen',
+      coalesce((select string_agg(policyname || ' (' || cmd || ', '
+                                  || array_to_string(roles, '+') || ')', '; '
+                                  order by policyname)
+                  from pg_policies
+                 where schemaname = 'public' and tablename = 'collection_items'),
+               '(keine)'), null),
+  (506, 'Unberuehrt', 'und keine davon gibt anon etwas',
+      (select count(*)::text from pg_policies
+        where schemaname = 'public' and tablename = 'collection_items'
+          and 'anon' = any (roles)), '0'),
   (503, 'Unberuehrt', 'die Belegsperre haelt unveraendert',
       (select count(*)::text from information_schema.role_table_grants
         where table_schema = 'public'
