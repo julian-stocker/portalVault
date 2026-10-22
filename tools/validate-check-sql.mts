@@ -3195,6 +3195,32 @@ async function main(): Promise<void> {
       "select relrowsecurity::text as w from pg_class "
       + "where oid = 'public.purchase_calculations'::regclass") : "-";
 
+    /*
+     * 1b. UND DIE NACHKONTROLLE, GEFAHREN — SOLANGE DIE TABELLE LEER IST.
+     *
+     * `0142_postflight.sql` ist das Blatt, das der Bediener nach der
+     * Migration liest. Seine Erwartungen sind damit geprueft, nicht
+     * behauptet — bis auf EINE Zeile, die ein Stub nicht erfuellen kann:
+     * 502 zaehlt die Richtlinien von `collection_items`, und das Stub-Schema
+     * ist reine Struktur ohne Richtlinien. Sie wird namentlich zugelassen;
+     * jede andere rote Zeile laesst diesen Durchgang scheitern.
+     *
+     * SIE LAEUFT HIER UND NICHT WEITER UNTEN: Zeile 104 verlangt eine LEERE
+     * Tabelle, und die Einfuegeproben unten legen Zeilen an. Eine
+     * Nachkontrolle nach ihnen haette 104 rot gemeldet — eine Auskunft ueber
+     * die Reihenfolge dieses Durchgangs, nicht ueber die Migration.
+     */
+    let nachRot = "-";
+    let nachZeilen = "-";
+    if (lauf === null) {
+      const blatt = await db.query(
+        readFileSync("supabase/checks/0142_postflight.sql", "utf8")) as {
+          rows: { nr: number; befund: string; ok: boolean | null }[] };
+      nachRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+      nachZeilen = blatt.rows.find((r) => r.nr === 102)?.befund ?? "(fehlt)";
+    }
+
+
     /* 2. Noch einmal — muss abbrechen. */
     const zweimal = lauf === null ? await fahre(db, M142) : "-";
 
@@ -3261,6 +3287,8 @@ async function main(): Promise<void> {
       ok: lauf === null
         && spalten === "id,user_id,name,status,lines,factor_percent,total_cents,"
           + "positions,units,purchase_id,created_at,updated_at"
+        /* Die Nachkontrolle: nur die eine Stub-Zeile darf rot sein. */
+        && nachRot === "502, 9999" && nachZeilen === spalten
         && policies === "4" && rls === "true"
         && typeof zweimal === "string" && zweimal.includes("steht schon")
         && zweiNull === "zwei ohne Einkauf: ok" && doppelt === "abgewiesen"
@@ -3268,6 +3296,8 @@ async function main(): Promise<void> {
         && typeof mitZeilen === "string" && mitZeilen.includes("Zeile(n) stehen in der Tabelle")
         && ohneZeilen === null && fort === "true",
       sagt: `0142: ${lauf ?? "durch"} · ${policies} Policies · RLS ${rls}`
+        + ` · Nachkontrolle rot: ${nachRot}`
+        + `${nachRot === "502, 9999" ? " (nur die Stub-Zeile 502)" : ""}`
         + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
         + ` · ${zweiNull} · derselbe Einkauf zweimal: ${doppelt}`
         + ` · lines ohne Array: ${keinArray}`

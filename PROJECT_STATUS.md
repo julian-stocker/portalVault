@@ -234,10 +234,28 @@ Bewegung, kein Beleg, keine Verkaufsfreigabe, keine zweite Preislogik. Die
 Übernahme ins Orderbuch ist **vorbereitet** (`purchase_id` + partieller
 Unique-Index + `handOverItems()`), aber **nicht gebaut**.
 
-**Offen:** der Staging-Lauf und damit die Prüfung am laufenden System
-(Arbeitsstand nach echtem Neuladen, Richtlinie mit zwei Konten, Bedienung
-auf dem Telefon). Was die statischen Tests nicht zeigen können, steht am
-Ende von `src/lib/calculator/calculator-save-ui.test.ts`.
+**Staging-Phase, Stand 2026-10-22:** vorbereitet, **noch nicht gefahren**.
+Gemessen ist nur die Ausgangslage — Projekt `qqxcpesbwfxzgytkdsac`,
+Markerpaar `SKY-0821` + `SKY-0822` vorhanden, `purchase_calculations`
+existiert dort **nicht** (`PGRST205`, für `anon` und für die Dienstrolle).
+
+**Die Migration kann dieses Repository nicht ausführen**, und das ist
+Absicht: `tools/lib/staging-db.mts` hat keinen schreibenden Modus und keine
+DDL, der Riegel sitzt an der Rolle (`default_transaction_read_only` auf
+`skyisles_agent`), und in dieser Arbeitsumgebung ist die Verbindung nicht
+einmal konfiguriert. Über PostgREST geht DDL grundsätzlich nicht. Die zwei
+schreibenden Schritte fährt der Betreiber.
+
+| bereit | |
+|---|---|
+| `supabase/operations/staging-0142.sql` | die Migration, ein Einfügen, Stempel auf Staging |
+| `supabase/operations/staging-s-postflight-0142.sql` | lesende Nachkontrolle: 12 Spalten, 4 Richtlinien, Rechte, leer |
+| `npm run verify:calculations:staging` | die Richtlinien mit **zwei echten Sitzungen** — bricht mit Hinweis ab, solange `0142` fehlt |
+| `supabase/checks/0142_staging_run.md` | die Schritte und die Handproben (Neuladen, Trennung, Wechsel, Zuordnung, Telefon) |
+
+Probelauf **P48** fährt Migration, Nachkontrolle, den partiellen Index, den
+`lines`-CHECK, einen zweiten Lauf und die Rücknahme gegen echtes
+PostgreSQL.
 
 ### Veröffentlicht am 2026-10-21: `002ad8b`
 

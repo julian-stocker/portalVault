@@ -356,6 +356,58 @@ describe("7. die Datenbank hält dieselben Regeln", () => {
 });
 
 /* ===================================================================== */
+describe("8. der Weg nach Staging ist vorbereitet, nicht gegangen", () => {
+  it("es gibt einen Einmal-Lauf, und er trägt den Staging-Stempel", () => {
+    const lauf = roh("supabase/operations/staging-0142.sql");
+    expect(lauf).toContain("SKY-0821");
+    expect(lauf).toContain("SKY-0822");
+    expect(lauf).toContain("ABBRUCH A1");
+    /* Zeichengleich eingebettet — `staging-oneshot.test.ts` prüft das. */
+    expect(lauf).toContain("-- >>> EINGEBETTET: supabase/migrations/0142_purchase_calculations.sql");
+  });
+
+  it("eine lesende Nachkontrolle prüft Tabelle, Richtlinien und Rechte", () => {
+    const post = roh("supabase/checks/0142_postflight.sql");
+    for (const zeile of ["zwoelf Spalten", "vier Richtlinien",
+      "keine Richtlinie gilt fuer anon", "anon hat KEIN Tabellenrecht",
+      "kein truncate", "PARTIELLE Unique-Index", "die Tabelle ist LEER"]) {
+      expect(post, zeile).toContain(zeile);
+    }
+    /* Und sie sagt, was sie NICHT beantwortet. */
+    expect(post).toContain("ob die Richtlinien WIRKEN");
+  });
+
+  it("und ein Lauf mit zwei echten Sitzungen, der die Dienstrolle nicht für Behauptungen benutzt", () => {
+    /*
+     * Der Unterschied, auf den es ankommt: eine Richtlinie, die richtig
+     * KONFIGURIERT ist, und eine, die WIRKT, sind zwei Aussagen. Die zweite
+     * braucht zwei echte JWT — die Dienstrolle umgeht RLS und würde nichts
+     * beweisen (dieselbe Trennung wie in `verify-rls.mts`).
+     */
+    const tool = code("tools/verify-calculations.mts");
+    expect(tool).toContain("requireStagingIfRequested");
+    expect(tool).toContain("createSignedInUser");
+    expect(tool).toContain("B sieht die von A NICHT");
+    expect(tool).toContain("B kann KEINE Zeile für A anlegen");
+    expect(tool).toContain("eine zweite auf denselben Einkauf NICHT");
+    /* Es räumt auf, und zwar beides. */
+    expect(tool).toContain("admin.auth.admin.deleteUser");
+    expect(tool).toContain("keine Probezeile bleibt zurück");
+  });
+
+  it("die Anleitung für die Handproben nennt den Fall, der schiefgehen könnte", () => {
+    const anleitung = roh("supabase/checks/0142_staging_run.md");
+    /* Punkt 7 des Auftrags: die Zuordnung nach einem Neuladen. */
+    expect(anleitung).toContain("Zuordnung nach Neuladen");
+    expect(anleitung).toContain("Bestehende aktualisieren");
+    expect(anleitung).toContain("wäre die Zuordnung verloren");
+    /* Und sie sagt, warum die schreibenden Schritte nicht von hier kommen. */
+    expect(anleitung).toContain("keinen schreibenden Zugang zur Staging-Datenbank");
+    expect(anleitung).toContain("default_transaction_read_only");
+  });
+});
+
+/* ===================================================================== */
 describe("was diese Datei NICHT prüft", () => {
   it("nennt es, statt es offen zu lassen", () => {
     /*
