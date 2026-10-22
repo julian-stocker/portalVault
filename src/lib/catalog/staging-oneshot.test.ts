@@ -458,6 +458,50 @@ const LESELAEUFE = [
   ["supabase/operations/staging-s3-postflight-0139.sql", "0139_postflight.sql"],
 ] as const;
 
+/*
+ * Die Nachkontrolle zu `0142` ist dieselbe Bauform mit einem Unterschied:
+ * sie braucht keinen Z0-Vertrag. Ihre Erwartungen sind strukturell —
+ * Spalten, Richtlinien, Rechte, Indizes —, und die sind in beiden
+ * Umgebungen gleich. Deshalb steht sie in einer eigenen Liste und wird nur
+ * auf Einbettung und Schreibfreiheit geprüft.
+ */
+const LESELAEUFE_OHNE_Z0 = [
+  ["supabase/operations/staging-s-postflight-0142.sql", "0142_postflight.sql"],
+] as const;
+
+describe.each(LESELAEUFE_OHNE_Z0)("der lesende Staging-Lauf %s", (skript, pruefdatei) => {
+  const text = readFileSync(skript, "utf8");
+
+  it(`bettet ${pruefdatei} Zeichen für Zeichen ein`, () => {
+    const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+    const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    expect(a, "Marke fehlt").toBeGreaterThan(-1);
+    expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+    expect(text.slice(a + anfang.length, b))
+      .toBe(readFileSync(`supabase/checks/${pruefdatei}`, "utf8"));
+  });
+
+  it("trägt den Staging-Stempel und endet mit rollback", () => {
+    expect(text).toContain("SKY-0821");
+    expect(text).toContain("SKY-0822");
+    expect(text).toContain("ABBRUCH A1");
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+  });
+
+  it("und schreibt nichts", () => {
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create table", "create policy", "grant ", "revoke "]) {
+      expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+});
+
 describe("die zwei lesenden Staging-Laeufe", () => {
   for (const [skript, pruefdatei] of LESELAEUFE) {
     const text = readFileSync(skript, "utf8");
