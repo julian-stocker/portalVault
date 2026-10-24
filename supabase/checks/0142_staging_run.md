@@ -1,6 +1,36 @@
 # `0142` auf Staging — die Schritte, und was danach von Hand zu prüfen ist
 
-**Stand 2026-10-22.** Vorbereitet, lokal geprüft, **nicht angewendet**.
+**Stand 2026-10-25.** `0142` und `0143` liegen auf Staging, beide
+Nachkontrollen `9999 = 0`. Die Browserprüfungen laufen seit dem 2026-10-24.
+
+---
+
+## Wie die Häkchen in dieser Datei zu lesen sind
+
+Drei verschiedene Aussagen, und sie werden hier nicht vermischt:
+
+| | bedeutet |
+|---|---|
+| **☑** | **Der Betreiber hat es im Browser gesehen.** Mit Datum. Nichts steht hier, was er nicht berichtet hat |
+| **⚙** | **Automatisiert nachgewiesen** — Testsuite, PGlite-Probelauf oder ein Lauf gegen die echte Staging-Datenbank. Eine Maschine hat es geprüft, ein Mensch nicht |
+| **☐** | **Nicht manuell geprüft.** Auch dann nicht, wenn ⚙ danebensteht: eine grüne Testzeile ist keine Sichtprüfung |
+
+**☑ und ⚙ sind keine Alternativen, sondern zwei Blickrichtungen.** Die
+Doppelsperre zum Beispiel ist ⚙ und ☐ zugleich: auf Staging mit echten
+Konten bewiesen, im Browser nie ausgelöst. Beides stimmt, und beides gehört
+dahin.
+
+### Stand am 2026-10-25
+
+| | |
+|---|---|
+| **☑ im Browser bestätigt** | Navigation Kalkulator → Orderbuch-Formular · der Kalkulator schließt sich dabei · Figuren **und Mengen** richtig übernommen · aus einer gespeicherten Kalkulation ein **Testeinkauf angelegt**, Einkauf und Darstellung korrekt · eine geöffnete Kalkulation bleibt **nach einem Neuladen zugeordnet und geöffnet** |
+| **⚙ nur automatisiert** | die serverseitige **Doppelsperre** (`verify:purchase-from-calculation:staging` 27/27, Probelauf P49) · die Trennung der Konten (`verify:calculations:staging` 27/27) · Reihenfolge, Entwurfsspeicherung, Geldfelder, leeres „+ Neu" (Unit-Tests) · das Schließen des Dialogs beim Navigieren (`calculator-navigation.test.tsx`, 15 Prüfungen mit echtem DOM) |
+| **☐ offen** | 4a · 4b · 4c · 4e · 4f · „Einkauf ansehen" führt auf genau diesen Einkauf · die Doppelsperre im Browser · Abbrechen legt nichts an · „+ Neu" ohne Kalkulation |
+
+> **Der Betreiber hat die Doppelsperre ausdrücklich NICHT geprüft** und das
+> auch so gesagt. Sie steht deshalb als ⚙ ☐ und nicht als ☑ — was eine
+> Maschine bewiesen hat, hat kein Mensch gesehen.
 
 ---
 
@@ -119,9 +149,9 @@ das Symbol im Kopf öffnen.
 
 | ☐ | |
 |---|---|
-| ☐ | Eine gespeicherte Kalkulation öffnen, **nichts ändern**, Seite neu laden |
-| ☐ | Im Kopf steht weiter „Geöffnet: ‹derselbe Name›", **keine** Marke „ungespeicherte Änderungen" |
-| ☐ | „Speichern" bietet **„Bestehende aktualisieren"** an — die Zuordnung hat das Neuladen überlebt |
+| ☑ | Eine gespeicherte Kalkulation öffnen, **nichts ändern**, Seite neu laden — *2026-10-25 vom Betreiber bestätigt* |
+| ☑ | Die Kalkulation ist nach dem Neuladen weiter **zugeordnet und geöffnet** — *2026-10-25 vom Betreiber bestätigt* |
+| ☐ | „Speichern" bietet **„Bestehende aktualisieren"** an — die sichtbare Folge der Zuordnung. **Nicht gesondert berichtet**, also offen; ein Druck auf „Speichern" beantwortet es in zehn Sekunden |
 | ☐ | Jetzt eine Figur hinzufügen, neu laden → Positionen **und** Marke „ungespeicherte Änderungen" sind beide wieder da |
 
 > **Was hier schiefgehen könnte:** die Zuordnung liegt im Browser
@@ -313,12 +343,14 @@ Zeilen rot**, weil das Stub-Schema alle Signaturen anlegt und keine
 
 | ☐ | |
 |---|---|
-| ☑ | **Kalkulation speichern → „Einkauf erstellen" → das normale Formular mit den Figuren drin** — *am 2026-10-24 vom Betreiber im Browser bestätigt* |
-| ☐ | Kaufdaten eintippen, speichern → Einkauf entsteht, in der Liste steht jetzt **„Einkauf ansehen"** und führt auf genau diesen Einkauf |
-| ☐ | Dieselbe Adresse `?kalkulation=<id>` noch einmal aufrufen und speichern → die Datenbank lehnt ab (`already handed over`), **und es entsteht kein zweiter Einkauf** |
-| ☐ | Abbrechen statt speichern → **kein** Einkauf, Kalkulation zeigt weiter „Einkauf erstellen" |
-| ☐ | „+ Neu" ohne Kalkulation → leeres Formular wie immer |
-| ☐ | Die vier Geldfelder sind leer, auch bei einer Kalkulation über 300 € |
+| ☑ | **Kalkulation speichern → „Einkauf erstellen" → das normale Formular mit den Figuren drin** — *2026-10-24 bestätigt* |
+| ☑ | **Die Figuren UND die Mengen sind richtig übernommen** — *2026-10-25 bestätigt* |
+| ☑ | **Kaufdaten eintippen, speichern → der Einkauf entsteht.** Einkauf und Darstellung sehen korrekt aus — *2026-10-25 bestätigt* |
+| ☐ | In der Liste steht danach **„Einkauf ansehen"** und führt auf **genau diesen** Einkauf. **Nicht gesondert berichtet** — der Einkauf ist bestätigt, der Rückweg dorthin nicht |
+| ⚙ ☐ | Dieselbe Adresse `?kalkulation=<id>` noch einmal aufrufen und speichern → `already handed over`, **und es entsteht kein zweiter Einkauf**. **Vom Betreiber ausdrücklich NICHT geprüft.** Automatisiert nachgewiesen: `verify:purchase-from-calculation:staging` (27/27, darunter „ein abgewiesener zweiter Versuch lässt keinen Einkauf zurück") und Probelauf **P49** |
+| ⚙ ☐ | Abbrechen statt speichern → **kein** Einkauf, Kalkulation zeigt weiter „Einkauf erstellen". Automatisiert: `purchase-from-calculation.test.ts` („ein Aufruf der Seite legt nichts an") |
+| ⚙ ☐ | „+ Neu" ohne Kalkulation → leeres Formular wie immer. Automatisiert: `purchase-draft.test.ts` und `calculator-navigation.test.tsx` |
+| ⚙ ☐ | Die vier Geldfelder sind leer, auch bei einer Kalkulation über 300 €. Automatisiert auf Staging: die Kosten des Einkaufs waren die übergebenen 10,00 € und **nicht** der Kalkulationswert 35,80 € |
 | ☑ | **Beim Klick schließt sich der Kalkulator und das Formular steht frei da** — *am 2026-10-24 vom Betreiber im Browser bestätigt* (siehe Nachtrag) |
 
 ### Nachtrag 2026-10-24 — hier ist der erste Durchlauf hängengeblieben
@@ -432,3 +464,50 @@ führt · in B8 Figuren vorbelegt sind · in B9 ein Einkauf entstanden ist.
 > **andere Hälfte**: dass die Oberfläche den Fall sauber anzeigt, statt
 > stumm zu scheitern. Deshalb reicht hier das bloße Hinsehen — es muss nicht
 > dieselbe Kennung zweimal durch alle Formularfelder gejagt werden.
+
+---
+
+## Durchgeführt am 2026-10-25 — was der Betreiber berichtet hat
+
+Wörtlich, und nur das:
+
+> Die Navigation vom Calculator ins normale Orderbuch-Formular funktioniert.
+> Der Calculator schließt sich bei der Navigation korrekt. Die Figuren und
+> Mengen werden richtig übernommen. Ich habe über eine gespeicherte
+> Kalkulation erfolgreich einen Testeinkauf im Orderbuch angelegt. Der
+> Einkauf und die Darstellung sehen korrekt aus. Eine gespeicherte
+> Kalkulation bleibt nach einem Neuladen der Seite korrekt zugeordnet und
+> geöffnet.
+
+### Aus Block A (Zuordnung nach Neuladen)
+
+**Bestätigt:** A1–A4 im Kern — eine geöffnete gespeicherte Kalkulation ist
+nach einem Neuladen weiter zugeordnet und geöffnet.
+
+**Offen geblieben:** A5 („Speichern" zeigt **„Bestehende aktualisieren"**),
+A6 (die Marke „ungespeicherte Änderungen" kommt nach einer Änderung und
+einem Neuladen zurück), A7 (**genau ein** Eintrag in der Liste). Das sind
+die drei *Folgen* der Zuordnung; berichtet wurde die Zuordnung selbst.
+
+### Aus Block B (Einkauf, Rückweg, Doppelsperre)
+
+**Bestätigt:** B1 (das normale Formular mit den Figuren), B4 (Kaufdaten
+eintippen, speichern → der Einkauf entsteht; Einkauf und Darstellung
+korrekt).
+
+**Offen geblieben:** B3 (die vier Geldfelder leer), B5 („Einkauf ansehen"
+führt auf genau diesen Einkauf), **B6 (die Doppelsperre — ausdrücklich nicht
+geprüft)**, B7, B8 (leeres „+ Neu"), B9 (Abbrechen legt nichts an).
+
+### Und was das für die Freigabe heißt
+
+Die Sperre gegen eine zweite Übernahme ist **der einzige offene Punkt mit
+Gewicht** — und sie ist dort bewiesen, wo sie sitzt: in der Datenbank, mit
+echten Konten, 27/27, einschließlich „ein abgewiesener zweiter Versuch lässt
+keinen Einkauf zurück". Was im Browser fehlt, ist nicht der Riegel, sondern
+der **Anblick** des Riegels: dass die Oberfläche den abgewiesenen Fall
+sauber anzeigt, statt stumm zu scheitern.
+
+Das ist eine Frage der Darstellung, keine der Datensicherheit. Es bleibt
+deshalb hier stehen als das, was es ist: **nicht geprüft, und bewusst nicht
+geprüft.**

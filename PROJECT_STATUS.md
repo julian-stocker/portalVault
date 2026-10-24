@@ -314,15 +314,25 @@ ist **begründet ausgeschlossen** — sichtbar statt still. Die eigentliche
 Antwort (die Liste aus den Migrationen erheben) steht als Folgeaufgabe in
 `supabase/checks/platform_export_gap.md`.
 
-**Vom Betreiber bestätigt (2026-10-24):** der Klick-Fix aus V3.1 ist im
-echten Browser nachgetestet — die Navigation führt ins Orderbuch, das
-Formular steht frei da, die Figuren sind drin. Zwei Häkchen in
-`0142_staging_run.md` stehen dafür, **und nur diese zwei**.
+**Vom Betreiber im Browser bestätigt (2026-10-24 und 2026-10-25):** die
+Navigation Kalkulator → Orderbuch-Formular · der Kalkulator schließt sich
+dabei · Figuren **und Mengen** richtig übernommen · aus einer gespeicherten
+Kalkulation ein **Testeinkauf angelegt**, Einkauf und Darstellung korrekt ·
+eine geöffnete Kalkulation bleibt **nach einem Neuladen zugeordnet und
+geöffnet**. `0142_staging_run.md` trägt dafür sieben Häkchen mit Datum —
+**und nur diese sieben**.
 
-**Weiterhin offen:** 4a–4f und der Rest des V3-Abschnitts. Die zwei, auf
-die es vor Production ankommt — die Zuordnung nach einem Neuladen und
-„Einkauf ansehen" samt Doppelsperre —, haben seit dem 2026-10-24 eine
-eigene Schritt-für-Schritt-Anleitung am Ende derselben Datei.
+**Ausdrücklich NICHT geprüft:** die erneute Übernahme über dieselbe Adresse,
+also die **Doppelsperre im Browser**. Sie ist dort bewiesen, wo sie sitzt —
+in der Datenbank, mit zwei echten Konten, 27/27, einschließlich „ein
+abgewiesener zweiter Versuch lässt keinen Einkauf zurück". Was fehlt, ist
+nicht der Riegel, sondern der **Anblick** des Riegels.
+
+**Weiterhin offen:** 4a · 4b · 4c · 4e · 4f · „Einkauf ansehen" führt auf
+genau diesen Einkauf · Abbrechen legt nichts an · „+ Neu" ohne Kalkulation.
+Die Datei unterscheidet seit dem 2026-10-25 drei Zustände statt zwei: **☑**
+im Browser gesehen, **⚙** automatisiert nachgewiesen, **☐** nicht manuell
+geprüft — und ⚙ hebt ☐ ausdrücklich nicht auf.
 
 **Die Sicherungslücke, untersucht statt vertagt.** Auf Wunsch des
 Betreibers geprüft, ob `purchase_calculations` in die Plattformsicherung
