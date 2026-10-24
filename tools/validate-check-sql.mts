@@ -63,6 +63,7 @@
  * 1). Eine Prüfung, die bei fehlendem Werkzeug schweigend durchwinkt, ist
  * keine.
  */
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -1280,6 +1281,48 @@ async function main(): Promise<void> {
    * ==================================================================== */
 
   /** Der Staging-Stand: 0134 aus der Faltung, dann 0135 und 0136. */
+  /**
+   * DREI ATTRAPPEN, DAMIT DIE BASELINE UEBERHAUPT MESSBAR IST (2026-10-25).
+   *
+   * Seit dem 2026-10-25 messen die Preflights zu `0142`/`0143` sieben
+   * Geschaeftszahlen und uebergeben sie als eine Zeile an ihre
+   * Nachkontrollen. Die Messung liest `shop_inventory.sale_released`
+   * (`0139`), `skylanders.item_type` (`0135`) und `shop_offers().price`
+   * (ebenfalls `0139` — davor hiess die Spalte `sale_price`). `frisch()`
+   * setzt das Stub-Schema aber auf den Stand `0134` zurueck, und dort gibt
+   * es keines von dreien.
+   *
+   * DIE SIEBEN MIGRATIONEN HIER ZU FAHREN GEHT NICHT: `0138` legt 21
+   * Katalogzeilen an und bricht ohne die Serien `G, I, SA, SC, SF, T` ab,
+   * die das Stub-Schema nicht mit Daten fuellt, und `0139` braucht eine
+   * Identitaet auf `shop_inventory.id`. Beides sind Grenzen der erfundenen
+   * Zeilen, keine der Migrationen — `P45`/`P46` bauen diese Fixtures eigens
+   * auf und pruefen dort die ECHTE Projektion.
+   *
+   * HIER STEHT ETWAS ANDERES ZUR PRUEFUNG: die UEBERGABE der Baseline —
+   * fehlt sie, ist sie abgeschnitten, vertauscht, manipuliert? Dafuer muss
+   * die Messung LAUFEN, nicht richtig rechnen. Zwei Spalten und eine
+   * Projektion in der FORM von `0135`/`0139`, ausdruecklich als Attrappe
+   * benannt und ausdruecklich KEIN Nachweis ueber `shop_offers()`,
+   * `item_type` oder `sale_released`.
+   */
+  async function attrappenFuerBaseline(db: InstanceType<typeof PGlite>): Promise<void> {
+    await db.exec(`
+      alter table public.shop_inventory
+        add column if not exists sale_released boolean not null default false;
+      alter table public.skylanders
+        add column if not exists item_type text not null default 'figure';
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $attrappe$
+        select i.sky_id, i.condition, i.sale_price, true, null::text
+          from public.shop_inventory i
+         where i.is_listed;
+      $attrappe$;`);
+  }
+
   async function frischNach0136(): Promise<InstanceType<typeof PGlite>> {
     const db = await frisch();
     const f1 = await fahre(db, M135);
@@ -3181,6 +3224,24 @@ async function main(): Promise<void> {
     await db.exec(
       "alter table public.purchases add constraint z_purchases_pk primary key (id);");
 
+    /* Die drei Attrappen, die die Baseline messbar machen — s. Helfer. */
+    await attrappenFuerBaseline(db);
+
+    /*
+     * 0. DIE BASELINE, SO WIE DER BEDIENER SIE BEKOMMT.
+     *
+     * Seit dem 2026-10-25 vergleicht die Nachkontrolle die sieben
+     * Geschaeftszahlen nicht gegen Konstanten, sondern gegen den Stand VOR
+     * der Migration — uebergeben als eine Zeile aus Zeile 900 des
+     * Preflights. Hier wird genau dieser Weg gefahren: erst den Preflight
+     * lesen, dann die Migration, dann die Nachkontrolle MIT der Zeile.
+     * Damit ist die Uebergabe selbst geprueft und nicht nur beschrieben.
+     */
+    const basisBlatt = (await db.query(
+      readFileSync("supabase/checks/0142_preflight.sql", "utf8"))) as {
+        rows: { nr: number; befund: string }[] };
+    const basis142 = basisBlatt.rows.find((r) => r.nr === 900)?.befund ?? "(keine)";
+
     /* 1. Der Lauf. */
     const lauf = await fahre(db, M142);
 
@@ -3220,9 +3281,13 @@ async function main(): Promise<void> {
     let nachZeilen = "-";
     let nachLeer = "-";
     if (lauf === null) {
+      await db.exec("begin;");
+      await db.exec(`select set_config('skyisles.base', `
+        + `'${basis142.split("'").join("''")}', true);`);
       const blatt = await db.query(
         readFileSync("supabase/checks/0142_postflight.sql", "utf8")) as {
           rows: { nr: number; befund: string; ok: boolean | null }[] };
+      await db.exec("rollback;");
       nachRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
       nachZeilen = blatt.rows.find((r) => r.nr === 102)?.befund ?? "(fehlt)";
       /*
@@ -3390,6 +3455,19 @@ async function main(): Promise<void> {
     const f142 = await fahre(db, join(MIG_DIR, "0142_purchase_calculations.sql"));
     if (f142 !== null) throw new Error(`P49 Aufbau: 0142 scheiterte — ${f142}`);
 
+    /* Die drei Attrappen, die die Baseline messbar machen — s. Helfer. */
+    await attrappenFuerBaseline(db);
+
+    /*
+     * Und die Baseline, wie der Bediener sie bekommt: Zeile 900 des
+     * Preflights zu `0143`. Sie wird unten in derselben Klammer wie die
+     * Nachkontrolle gesetzt — `set_config(…, true)` gilt nur dort.
+     */
+    const basisBlatt143 = (await db.query(
+      readFileSync("supabase/checks/0143_preflight.sql", "utf8"))) as {
+        rows: { nr: number; befund: string }[] };
+    const basis143 = basisBlatt143.rows.find((r) => r.nr === 900)?.befund ?? "(keine)";
+
     const lauf = await fahre(db, M143);
 
     /* 1. Ohne Betriebsrolle. `can_operate_active_seller()` liest im Stub
@@ -3491,9 +3569,13 @@ async function main(): Promise<void> {
      */
     let postRot = "-";
     if (lauf === null) {
+      await db.exec("begin;");
+      await db.exec(`select set_config('skyisles.base', `
+        + `'${basis143.split("'").join("''")}', true);`);
       const blatt = await db.query(
         readFileSync("supabase/checks/0143_postflight.sql", "utf8")) as {
           rows: { nr: number; befund: string; ok: boolean | null }[] };
+      await db.exec("rollback;");
       postRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
     }
 
@@ -3523,6 +3605,130 @@ async function main(): Promise<void> {
           + "Signaturen, die echten Migrationen droppen die alten)" : ""}`
         + ` · Ruecknahme ${zurueck ?? "durch"},`
         + ` Verknuepfung bleibt ${bleibt}`,
+    });
+  }
+
+  /* P50 — DIE BASELINE-UEBERGABE, und was eine falsche Basis anrichtet.
+   *
+   * ANLASS. Bis zum 2026-10-25 standen sieben Geschaeftszahlen als feste
+   * Sollwerte im Preflight und blockierten dort. Am 2026-10-25 hielt genau
+   * das den Production-Lauf an, weil der Betrieb Ware eingebucht hatte.
+   * Seitdem messen sie im Preflight und werden in der Nachkontrolle gegen
+   * das tatsaechliche Vorher verglichen — uebergeben als EINE Zeile.
+   *
+   * EINE UEBERGABE PER HAND IST EINE FEHLERQUELLE, also wird sie gefahren
+   * und nicht beschrieben. Acht Faelle, und jeder muss anders ausgehen:
+   *
+   *   1. die richtige Zeile          → nur die Stub-Zeile 502 ist rot
+   *   2. keine Zeile                 → 801 blockiert
+   *   3. der Platzhalter steht noch  → 801 blockiert (er ist KEINE Basis)
+   *   4. abgeschnitten (8 Felder)    → 803 blockiert
+   *   5. ein Feld zuviel (10)        → 803 blockiert
+   *   6. falsche Marke               → 802 blockiert
+   *   7. zwei Felder vertauscht      → 804 blockiert (die Schutzsumme)
+   *   8. ein Wert geaendert, Summe
+   *      NICHT nachgerechnet         → 804 blockiert
+   *   9. ein Wert geaendert UND die
+   *      Summe nachgerechnet         → 811 blockiert — der VERGLEICH faengt
+   *                                    es, nicht die Schutzsumme
+   *
+   * FALL 9 IST DER WICHTIGSTE. Er zeigt, dass die Schutzsumme nicht die
+   * Sicherung ist, sondern nur die Bequemlichkeit: sie faengt Kopierfehler.
+   * Was wirklich traegt, ist der Vergleich Wert gegen Wert.
+   *
+   * UND ER STEHT FUER DEN FALL, DEN EIN STUB NICHT BAUEN KANN: dass sich
+   * zwischen Preflight und Nachkontrolle der SHOP bewegt. Aus Sicht der
+   * Datei ist das dasselbe Ereignis — ein Wert, der nicht zur Basis passt —
+   * und es landet auf derselben Zeile. Ein echter Wareneingang im Stub
+   * braeuchte eine Katalogzeile, eine Lagerzeile und die Fremdschluessel
+   * dazu; das waere eine Auskunft ueber das Stub-Schema und nicht ueber den
+   * Vergleich.
+   */
+  {
+    const M142 = join(MIG_DIR, "0142_purchase_calculations.sql");
+    const POST = readFileSync("supabase/checks/0142_postflight.sql", "utf8");
+    const PRE = readFileSync("supabase/checks/0142_preflight.sql", "utf8");
+
+    const db = await frisch();
+    await db.exec("drop table if exists public.purchase_calculations cascade;");
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);`);
+    await db.exec(
+      "alter table public.purchases add constraint z_purchases_pk primary key (id);");
+
+    /* Die drei Attrappen, die die Baseline messbar machen — s. Helfer. */
+    await attrappenFuerBaseline(db);
+
+    /* Die Basis, wie der Bediener sie bekommt: Zeile 900 des Preflights. */
+    const vorBlatt = (await db.query(PRE)) as { rows: { nr: number; befund: string }[] };
+    const echt = vorBlatt.rows.find((r) => r.nr === 900)?.befund ?? "(keine)";
+
+    const aufbau = await fahre(db, M142);
+
+    /** Die Nachkontrolle mit einer gegebenen Basis fahren; rote Zeilen zurueck. */
+    const rot = async (basis: string | null): Promise<string> => {
+      await db.exec("begin;");
+      if (basis !== null) {
+        await db.exec(`select set_config('skyisles.base', `
+          + `'${basis.split("'").join("''")}', true);`);
+      }
+      const blatt = (await db.query(POST)) as {
+        rows: { nr: number; ok: boolean | null }[] };
+      await db.exec("rollback;");
+      return blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+    };
+
+    const teile = echt.split("|");
+    const summe = (kern: string): string =>
+      createHash("md5").update(kern).digest("hex").slice(0, 12);
+    /* Fall 7: die beiden Abdruecke tauschen. */
+    const vertauscht = [...teile];
+    [vertauscht[3], vertauscht[8]] = [vertauscht[8], vertauscht[3]];
+    /* Fall 8/9: eine Zahl veraendern — einmal ohne, einmal mit neuer Summe. */
+    const geaendert = [...teile];
+    geaendert[1] = String(Number(teile[1]) + 1);
+    const ohneSumme = geaendert.join("|");
+    const mitSumme = [...geaendert.slice(0, 8),
+      summe(geaendert.slice(1, 8).join("|"))].join("|");
+
+    const f1 = aufbau === null ? await rot(echt) : "-";
+    const f2 = aufbau === null ? await rot(null) : "-";
+    const f3 = aufbau === null ? await rot("BASIS-HIER-EINSETZEN") : "-";
+    const f4 = aufbau === null ? await rot(teile.slice(0, 8).join("|")) : "-";
+    const f5 = aufbau === null ? await rot(echt + "|zuviel") : "-";
+    const f6 = aufbau === null
+      ? await rot(["skyisles-base-9", ...teile.slice(1)].join("|")) : "-";
+    const f7 = aufbau === null ? await rot(vertauscht.join("|")) : "-";
+    const f8 = aufbau === null ? await rot(ohneSumme) : "-";
+    const f9 = aufbau === null ? await rot(mitSumme) : "-";
+
+    /* Die Erwartungen. 502 ist im Stub immer rot (keine Richtlinien). */
+    const ALLE_SIEBEN = "811, 812, 813, 814, 815, 816, 817";
+    const e1 = "502, 9999";
+    const e2 = `502, 801, 802, 803, 804, ${ALLE_SIEBEN}, 9999`;
+    const e4 = `502, 803, 804, ${ALLE_SIEBEN}, 9999`;
+    const e6 = `502, 802, ${ALLE_SIEBEN}, 9999`;
+    const e7 = `502, 804, ${ALLE_SIEBEN}, 9999`;
+    const e9 = "502, 811, 9999";
+
+    probe.push({
+      name: "P50 die Baseline-Uebergabe: die richtige Zeile laeuft durch, und eine "
+        + "fehlende, abgeschnittene, vertauschte oder manipulierte blockiert",
+      ok: aufbau === null
+        && echt.startsWith("skyisles-base-1|") && teile.length === 9
+        && f1 === e1 && f2 === e2 && f3 === e2 && f4 === e4 && f5 === e4
+        && f6 === e6 && f7 === e7 && f8 === e7 && f9 === e9,
+      sagt: `Basis aus Zeile 900: ${teile.length} Felder, Marke ${teile[0]}`
+        + ` · richtig: ${f1}${f1 === e1 ? " (nur die Stub-Zeile)" : " BEFUND"}`
+        + ` · fehlt: ${f2 === e2 ? "801 blockiert" : `BEFUND ${f2}`}`
+        + ` · Platzhalter: ${f3 === e2 ? "801 blockiert" : `BEFUND ${f3}`}`
+        + ` · 8 Felder: ${f4 === e4 ? "803 blockiert" : `BEFUND ${f4}`}`
+        + ` · 10 Felder: ${f5 === e4 ? "803 blockiert" : `BEFUND ${f5}`}`
+        + ` · falsche Marke: ${f6 === e6 ? "802 blockiert" : `BEFUND ${f6}`}`
+        + ` · vertauscht: ${f7 === e7 ? "804 blockiert" : `BEFUND ${f7}`}`
+        + ` · Wert ohne neue Summe: ${f8 === e7 ? "804 blockiert" : `BEFUND ${f8}`}`
+        + ` · Wert MIT neuer Summe: ${f9 === e9 ? "811 blockiert (der Vergleich)" : `BEFUND ${f9}`}`,
     });
   }
 

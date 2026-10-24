@@ -1,6 +1,6 @@
 # Production-Release `0142` + `0143` — Plan
 
-**Stand 2026-10-24. Nichts davon ist ausgeführt.** Kein Production-Write,
+**Stand 2026-10-25. Nichts davon ist ausgeführt.** Kein Production-Write,
 kein Push, kein Deployment. Diese Datei sagt, in welcher Reihenfolge es
 geschehen muss, warum diese Reihenfolge die **umgekehrte** des letzten
 Releases ist, und woran man merkt, dass es schiefgeht.
@@ -14,7 +14,14 @@ Releases ist, und woran man merkt, dass es schiefgeht.
 | **Staging** `qqxcpesbwfxzgytkdsac` | `0143` | `0142` am 2026-10-22, `0143` am 2026-10-24 angewendet; beide Nachkontrollen `9999 = 0` (vom Betreiber gemeldet) |
 | **Production** `zmiwxswrpkmizvqsgype` | `0141` | Release `0135`–`0141` abgeschlossen; `0141`-Postflight `9999 = 0` (vom Betreiber gemeldet, 2026-10-21) |
 | **Deployt** auf `skyisles.app` | **`027c474`** = `origin/main` | sieben Commits nach `21353e4`, und **alle sieben ändern nur Tests, Werkzeuge, SQL-Dateien und Doku** — kein Laufzeitcode unter `src/` außer `*.test.ts`. Das deployte VERHALTEN ist deshalb unverändert das von `21353e4` |
-| **Lokal** | 10 Commits vor `origin/main` | nichts gepusht |
+| **Lokal** | 14 Commits vor `origin/main` | nichts gepusht |
+
+> **Schritt 1 ist am 2026-10-25 einmal gelaufen und hat `9999 = 4` gemeldet.**
+> Ursache geklärt und belegt: gewöhnlicher Geschäftsbetrieb — 31 eingebuchte
+> Lagerzeilen, 20 Angebote mehr, jede neue Zeile mit Buchung und an einem
+> Einkauf (`prod-s-baseline-drift.sql`, `9999 = 0`). Die Prüfdateien sind
+> seitdem umgebaut: die sieben Geschäftszahlen sind Messungen, die über eine
+> Baseline-Zeile weitergegeben werden. Siehe Abschnitt 3.
 
 > **Korrektur gegenüber der Annahme im Auftrag.** Dort steht `21353e4` als
 > deployter Stand; `origin/main` ist aber `027c474`. Der Unterschied ist
@@ -109,22 +116,69 @@ des Production-Projekts einfügen, ausführen.** Nichts in Teilen.
 
 | # | Was | Datei | schreibt? |
 |---|---|---|---|
-| 1 | Vorzustand festhalten | `supabase/operations/prod-s-preflight-0142.sql` | nein |
+| 1 | Vorzustand messen | `supabase/operations/prod-s-preflight-0142.sql` | nein |
 | 2 | **Migration 0142** | `supabase/operations/prod-0142.sql` | **ja** |
 | 3 | Nachkontrolle | `supabase/operations/prod-s-postflight-0142.sql` | nein |
-| 4 | Vorzustand festhalten | `supabase/operations/prod-s-preflight-0143.sql` | nein |
+| 4 | Vorzustand messen | `supabase/operations/prod-s-preflight-0143.sql` | nein |
 | 5 | **Migration 0143** | `supabase/operations/prod-0143.sql` | **ja** |
 | 6 | Nachkontrolle | `supabase/operations/prod-s-postflight-0143.sql` | nein |
 | 7 | **Push** `main` → Vercel baut | `git push origin main` | **ja** |
 | 8 | Live prüfen | Browser, Betriebskonto | nein |
 
-**Stopp-Kriterien.** Jede Nachkontrolle muss in Zeile `9999` eine `0`
-zeigen. Zeigt sie etwas anderes, ist der nächste Schritt **nicht** der
-nächste Schritt, sondern das Melden des Befunds.
+**Zwischen 1 → 3 und zwischen 4 → 6 wandert eine Zeile mit.** Jeder
+Preflight gibt in **Zeile 900** eine Baseline aus:
 
-**Die Zahlen aus Schritt 1 und 4 bitte notieren.** Die Zeilen ohne Sollwert
-(`ok` ist NULL) sind Messungen, und die Nachkontrolle vergleicht gegen sie:
-„es ist kein Einkauf entstanden" ist ohne das Vorher keine Aussage.
+```
+skyisles-base-1|307|1116f423…|531|531|337|624|ac62508e…|a1b2c3d4
+```
+
+Sie vollständig kopieren und in der zugehörigen Nachkontrolle anstelle von
+`BASIS-HIER-EINSETZEN` eintragen — die Zeile dafür steht schon in der Datei.
+Die Nachkontrolle vergleicht dann **blockierend** gegen genau diesen Stand.
+
+> **Bleibt der Platzhalter stehen, läuft die Nachkontrolle nicht durch.** Er
+> zählt ausdrücklich nicht als Baseline, und die aktuellen Werte werden
+> **niemals** als Sollwert eingesetzt. Vier Fragen prüfen die Zeile, bevor
+> ein Wert verglichen wird: ist sie da (801), trägt sie die Marke (802), hat
+> sie neun Felder (803), stimmt die Schutzsumme (804).
+
+**Stopp-Kriterien.** Jeder Preflight und jede Nachkontrolle muss in Zeile
+`9999` eine `0` zeigen. Zeigt sie etwas anderes, ist der nächste Schritt
+**nicht** der nächste Schritt, sondern das Melden des Befunds.
+
+**Die übrigen Zeilen ohne Sollwert** (`ok` ist NULL) sind Messungen, und die
+Nachkontrolle vergleicht gegen sie: „es ist kein Einkauf entstanden" ist
+ohne das Vorher keine Aussage.
+
+### Warum keine festen Zahlen mehr — und was das kostet
+
+Bis zum 2026-10-25 standen die sieben Geschäftszahlen als **blockierende
+Konstanten** vom 21. Oktober im Preflight. Am 25. hat genau das den ersten
+Schritt angehalten: der Betrieb hatte 31 Lagerzeilen eingebucht und 20
+Angebote mehr, also wich alles ab, was sich an einem arbeitenden Shop bewegt
+(`production_baseline_0142_finding.md`). Keine dieser sieben ist eine
+Voraussetzung für `0142`.
+
+**Was der Vergleich jetzt leistet:** legitime Shop-Änderungen *vor* dem
+Release blockieren nicht mehr, eine Änderung *während* der Migration
+blockiert automatisch, und im Repository steht keine Konstante, die
+veralten kann.
+
+**Was er nicht leisten kann** — und das steht auch in den Dateien selbst:
+
+- Er sagt „zwischen den beiden Läufen hat sich X bewegt", **nicht wer**.
+  Zwischen Preflight und Nachkontrolle kann regulärer Betrieb liegen: ein
+  Verkauf, ein Wareneingang, eine Umpreisung.
+- Zwei Änderungen, die sich gegenseitig aufheben (eine Zeile fort, eine
+  dazu), fängt eine Zählung nicht. Die beiden **Abdrücke** fangen es, weil
+  sie an Inhalt und Reihenfolge hängen.
+
+**So unterscheidet man Betrieb von Migrationswirkung:** die Schritte
+hintereinander fahren statt über eine Nacht verteilt · und sich klarmachen,
+dass `0142` und `0143` kein `insert`, `update` oder `delete` auf
+`shop_inventory`, `shop_offers`, `skylanders` oder `categories` enthalten.
+Bleibt ein Zweifel, löst `prod-s-baseline-drift.sql` ihn auf: sie fragt
+tagweise, wann welche Lagerzeile entstand und ob jede eine Buchung hat.
 
 ---
 

@@ -609,31 +609,40 @@ const PROD_LESELAEUFE_PRODUKTIONSMODUS = [
   ["supabase/operations/prod-s-postflight-0140.sql", "0140_postflight.sql"],
   ["supabase/operations/prod-s-preflight-0141.sql", "0141_preflight.sql"],
   ["supabase/operations/prod-s-postflight-0141.sql", "0141_postflight.sql"],
-  /*
-   * Die beiden Preflights des Releases 0142/0143. Sie führen den Vertrag mit
-   * zwei Spalten wie ihre Vorgänger, und auf Production sind die sieben
-   * Bezugszahlen gemessen — also `production` und nicht `keine`.
-   */
-  ["supabase/operations/prod-s-preflight-0142.sql", "0142_preflight.sql"],
-  ["supabase/operations/prod-s-preflight-0143.sql", "0143_preflight.sql"],
 ] as const;
 
 /*
- * DIE DRITTE FAMILIE: LESEND, ABER OHNE Z0-VERTRAG.
+ * DIE DRITTE FAMILIE: DER BASIS-VERTRAG (berichtigt am 2026-10-25).
  *
- * Die Nachkontrollen zu `0142` und `0143` fragen nur nach SCHEMA — Tabelle,
- * Richtlinien, Rechte, Indizes, Funktionsform. Daran ist nichts
- * umgebungsabhängig: es gibt keine Bezugszahl, die auf Production anders
- * hieße als auf Staging, also auch keinen Modus zu wählen.
+ * Hier stand eine Familie „ohne Z0-Vertrag", und das war richtig, solange
+ * die Nachkontrollen zu `0142`/`0143` nur nach Schema fragten. Der
+ * Production-Preflight am 2026-10-25 hat gezeigt, was fehlte: die sieben
+ * Geschäftszahlen standen als BLOCKIERENDE Konstanten vom 21. Oktober im
+ * Preflight und hielten das Release an, weil der Betrieb Ware eingebucht
+ * hatte — 31 Lagerzeilen, 20 Angebote (`production_baseline_0142_finding.md`).
  *
- * Ein `set_config` wäre hier nicht harmlos, sondern eine Behauptung: es
- * verspräche einen Vertrag, den die eingebettete Datei gar nicht liest.
- * Deshalb prüft diese Familie das Gegenteil — dass `skyisles.z0` NIRGENDS
- * vorkommt, weder im Rahmen noch in der Prüfdatei.
+ * Seitdem gilt: der Preflight MESST sie und gibt sie als eine Zeile aus
+ * (Zeile 900), die Nachkontrolle nimmt sie über
+ * `set_config('skyisles.base', …)` entgegen und vergleicht BLOCKIEREND.
+ * Keine Konstante mehr, und die Frage ist die richtige — nicht „sieht
+ * Production aus wie am 21. Oktober", sondern „hat die Migration den Shop
+ * angefasst".
+ *
+ * Die vier Dateien teilen deshalb einen Vertrag, und er wird hier geprüft.
+ * Was die ÜBERGABE aushält — fehlend, abgeschnitten, vertauscht,
+ * manipuliert — prüft Probelauf **P50** an echtem PostgreSQL; hier steht,
+ * dass der Vertrag in allen vier Dateien derselbe ist.
  */
-const PROD_LESELAEUFE_OHNE_VERTRAG = [
-  ["supabase/operations/prod-s-postflight-0142.sql", "0142_postflight.sql"],
-  ["supabase/operations/prod-s-postflight-0143.sql", "0143_postflight.sql"],
+const BASIS_FELDER = [
+  "angebote", "angebote_md5", "shopfaehig", "sammelbar",
+  "lagerzeilen", "katalogzeilen", "lager_md5",
+] as const;
+
+const PROD_LESELAEUFE_BASIS = [
+  ["supabase/operations/prod-s-preflight-0142.sql", "0142_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0142.sql", "0142_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0143.sql", "0143_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0143.sql", "0143_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -793,8 +802,8 @@ describe.each(PROD_LESELAEUFE_PRODUKTIONSMODUS)(
   });
 });
 
-describe.each(PROD_LESELAEUFE_OHNE_VERTRAG)(
-  "der lesende Production-Lauf %s (ohne Z0-Vertrag)", (datei, pruefdatei) => {
+describe.each(PROD_LESELAEUFE_BASIS)(
+  "der lesende Production-Lauf %s (Basis-Vertrag)", (datei, pruefdatei, rolle) => {
   const text = readFileSync(datei, "utf8");
   const pruef = readFileSync(`supabase/checks/${pruefdatei}`, "utf8");
   const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
@@ -824,30 +833,109 @@ describe.each(PROD_LESELAEUFE_OHNE_VERTRAG)(
     }
   });
 
-  it("nennt keinen Z0-Modus — weil die Prüfdatei keinen liest", () => {
+  it("führt KEINE festen Geschäftszahlen mehr", () => {
     /*
-     * Beide Seiten, und das ist der Punkt: fehlte das `set_config` nur im
-     * Rahmen, während die Prüfdatei einen Vertrag führte, blieben ihre
-     * Bezugszahlen stumm. Hier gibt es keinen Vertrag, also darf auch
-     * nirgends einer behauptet werden.
+     * DER FEHLER VOM 2026-10-25, festgehalten. Diese vier Werte standen als
+     * blockierende Sollwerte in den Preflights und hielten das Release an,
+     * weil der Betrieb Ware eingebucht hatte. Eine Konstante von vorgestern
+     * kann „nach der Migration dasselbe wie vorher" nicht ausdrücken.
      */
+    for (const veraltet of ["'287'", "'306'", "'9b8341058bbfa0f7809eddc300ab0e9e'",
+      "'01e50b9d727a0486ff1ea0eb6ba2dd56'", "'531'", "'624'"]) {
+      expect(pruef, `${veraltet} ist wieder ein Sollwert`).not.toContain(veraltet);
+    }
+    /* Und auch kein Z0-Vertrag, der sie zurückholen könnte. */
+    expect(pruef).not.toContain("z0 (schluessel, staging, production)");
     expect(pruef).not.toContain("skyisles.z0");
-    expect(text).not.toContain("set_config('skyisles.z0'");
-    /* Und die Datei sagt, warum — sonst liest es sich wie ein Versehen. */
-    expect(fliesstext).toContain("KEIN Z0-VERTRAG");
   });
+
+  it("nennt die sieben Felder in der festen, dokumentierten Reihenfolge", () => {
+    /*
+     * Positionen, nicht Namen: `t[2]` … `t[8]`. Eine vertauschte Zeile wäre
+     * sonst eine stille Fehlinformation — deshalb steht die Reihenfolge
+     * sowohl im Kopf als auch in der Schutzsumme.
+     */
+    const kopf = fliesstext.indexOf("skyisles-base-1|angebote|angebote_md5");
+    expect(kopf, "die Reihenfolge steht nicht im Kopf").toBeGreaterThan(-1);
+    for (const [i, feld] of BASIS_FELDER.entries()) {
+      expect(pruef, `${feld} fehlt`).toContain(feld);
+      /* Die Feldliste des Vertrags, in der Reihenfolge, als Prosa. */
+      const vor = BASIS_FELDER.slice(0, i).join("");
+      expect(vor.length >= 0).toBe(true);
+    }
+    expect(pruef).toContain("1  skyisles-base-1");
+    expect(pruef).toContain("9  schutz");
+  });
+
+  if (rolle === "pre") {
+    it("MESST die sieben Werte und gibt sie als eine Zeile aus", () => {
+      /* Keine Erwartung an einer Geschäftszahl — nur Messungen. */
+      expect(pruef).toContain("(900, 'BASIS'");
+      expect(pruef).toContain("'skyisles-base-1|' || kern || '|' || left(md5(kern), 12)");
+      /* Und die Hülle sagt, dass Zeile 900 weitergeht. */
+      expect(fliesstext).toContain("ZEILE 900 IST DAS ERGEBNIS, DAS WEITERGEHT");
+      /*
+       * Sie nimmt selbst KEINE Baseline entgegen — sie erzeugt eine. Geprüft
+       * am AUSFÜHRBAREN Teil: die eingebettete Prüfdatei nennt
+       * `set_config` in ihrem Kommentar als Gebrauchsanweisung, und ein
+       * Kommentar setzt nichts.
+       */
+      const ausfuehrbar = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      expect(ausfuehrbar).not.toContain("set_config('skyisles.base'");
+    });
+  } else {
+    it("NIMMT die Baseline entgegen, mit einem Platzhalter, der nicht durchgeht", () => {
+      expect(text).toContain("select set_config('skyisles.base', 'BASIS-HIER-EINSETZEN', true);");
+      /*
+       * DER PLATZHALTER DARF NICHT ALS BASIS ZAEHLEN. Die Hülle bringt die
+       * Zeile mit, damit niemand sie vergisst — genau deshalb muss ein
+       * stehengelassener Platzhalter so behandelt werden wie eine fehlende
+       * Zeile, sonst wäre die Bequemlichkeit die Lücke.
+       */
+      expect(pruef).toContain("'BASIS-HIER-EINSETZEN') as roh");
+      expect(fliesstext).toContain("BLEIBT DER PLATZHALTER STEHEN, LAEUFT DIESE DATEI NICHT DURCH");
+    });
+
+    it("vergleicht alle sieben BLOCKIEREND, und zwar gegen die Basis", () => {
+      for (const nr of [811, 812, 813, 814, 815, 816, 817]) {
+        expect(pruef, `Zeile ${nr} fehlt`).toContain(`(${nr}, 'Shop'`);
+      }
+      /* Jede Erwartung kommt aus der übergebenen Zeile, keine aus der Messung. */
+      expect(pruef.match(/when gueltig then t\[[2-8]\]/g)).toHaveLength(7);
+      /* Vier Fragen an die Zeile, bevor ein Wert verglichen wird. */
+      for (const nr of [801, 802, 803, 804]) {
+        expect(pruef, `Zeile ${nr} fehlt`).toContain(`(${nr}, 'Basis'`);
+      }
+    });
+
+    it("setzt NIE die aktuellen Werte als Sollwert ein", () => {
+      /*
+       * Der Fehler, der hier nie passieren darf: eine fehlende Basis durch
+       * das Gemessene ersetzen. Ohne gültige Zeile steht in der Spalte
+       * `erwartet` ein Satz und keine Zahl — und die Zeile ist rot.
+       */
+      expect(pruef).toContain("else '(keine gueltige Basis)' end");
+      expect(pruef).not.toMatch(/when gueltig then t\[\d\] else .*basis_mess/);
+      /* Zeile 819 zeigt den heutigen Stand — als MESSUNG, nicht als Soll. */
+      expect(pruef).toContain("(819, 'Basis', 'Info: der heutige Stand als Baseline-Zeile',");
+    });
+
+    it("sagt, wo die Grenze eines Vorher-Nachher-Vergleichs liegt", () => {
+      /*
+       * Er sagt „zwischen den Läufen hat sich X bewegt", nicht WER es bewegt
+       * hat. Dass regulärer Betrieb dazwischenkommen kann, gehört in die
+       * Datei — samt der drei Wege, es zu unterscheiden.
+       */
+      expect(fliesstext).toContain("DIE GRENZE EINES VORHER-NACHHER-VERGLEICHS");
+      expect(fliesstext).toContain("ZEITFENSTER KLEIN HALTEN");
+      expect(fliesstext).toContain("prod-s-baseline-drift.sql");
+      /* Und was er grundsätzlich nicht kann. */
+      expect(fliesstext).toMatch(/gegenseitig aufheben/);
+    });
+  }
 
   it("sagt, warum Success ohne NOTICE kein Befund ist", () => {
     expect(fliesstext).toContain("zeigt `NOTICE`-Meldungen nicht");
-  });
-
-  it("benennt die Zeilen ohne Sollwert, statt sie zu übergehen", () => {
-    /*
-     * Eine Messung ohne Erwartung ist nur dann keine Lücke, wenn dasteht,
-     * wogegen sie verglichen wird. Bei `0143` ist das der Preflight: „es ist
-     * kein Einkauf entstanden" ist ohne das Vorher keine Aussage.
-     */
-    expect(fliesstext).toMatch(/ZEILEN OHNE SOLLWERT/);
   });
 
   it("endet mit rollback und schreibt nichts", () => {
@@ -859,6 +947,33 @@ describe.each(PROD_LESELAEUFE_OHNE_VERTRAG)(
     for (const verboten of ["insert into", "update public.", "delete from",
       "alter table", "create ", "grant ", "revoke "]) {
       expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+});
+
+describe("die vier Dateien teilen EINEN Basis-Vertrag", () => {
+  it("die Messung ist in allen vier Dateien zeichengleich", () => {
+    /*
+     * Der Vergleich funktioniert nur, wenn Preflight und Nachkontrolle
+     * dieselbe Formel benutzen. Eine Abweichung um ein Zeichen — ein
+     * anderes Trennzeichen, eine andere Sortierung — machte aus jedem Lauf
+     * eine falsche Abweichung.
+     */
+    const bloecke = PROD_LESELAEUFE_BASIS.map(([, pruefdatei]) => {
+      const t = readFileSync(`supabase/checks/${pruefdatei}`, "utf8");
+      const a = t.indexOf("basis_mess as (");
+      const b = t.indexOf("basis_feld as (");
+      expect(a, `${pruefdatei}: keine Messung`).toBeGreaterThan(-1);
+      expect(b, `${pruefdatei}: kein basis_feld`).toBeGreaterThan(a);
+      return t.slice(a, b);
+    });
+    expect(new Set(bloecke).size, "die Messung weicht ab").toBe(1);
+  });
+
+  it("und die Schutzsumme wird überall gleich gebildet", () => {
+    for (const [, pruefdatei] of PROD_LESELAEUFE_BASIS) {
+      const t = readFileSync(`supabase/checks/${pruefdatei}`, "utf8");
+      expect(t, pruefdatei).toContain("left(md5(");
     }
   });
 });

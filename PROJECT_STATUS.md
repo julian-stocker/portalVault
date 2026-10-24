@@ -274,10 +274,45 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
-### Preflight 0142 auf Production: vier Abweichungen (2026-10-25) — 0142 gesperrt
+### Der Basis-Vertrag: Geschäftszahlen werden gemessen, nicht geraten (2026-10-25)
 
-Der erste Schritt des Releases ist gefahren und **nicht bestanden**:
-`9999 = 4`. Angebote 287 → **307**, Lagerzeilen 306 → **337**, beide
+**Ursache bestätigt.** `prod-s-baseline-drift.sql` lief auf Production mit
+`9999 = 0`: 306 alte Lagerzeilen stehen noch alle da, 31 neue dazu, 287
+Angebote auf alten Zeilen, 20 auf neuen, **0** neue Zeilen ohne Buchung, und
+**alle 31** hängen an einem Einkauf. 306+31 = 337, 287+20 = 307. Es ist
+nichts verschwunden — es ist Ware über den Wareneingang dazugekommen.
+
+**Umgebaut (vier Prüfdateien, sechs Hüllen, ein Probelauf):**
+
+| | |
+|---|---|
+| Preflight | die sieben Geschäftszahlen sind **Messungen** (`ok` ist NULL) und blockieren nichts. Keine Konstante aus dem Repository geht mehr ein |
+| Zeile 900 | gibt die Baseline aus: `skyisles-base-1\|…\|schutz` — neun Felder, feste Reihenfolge, Schutzsumme |
+| Nachkontrolle | nimmt sie über `set_config('skyisles.base', …)` entgegen; 801–804 prüfen die Zeile, **811–817 vergleichen blockierend** |
+| ohne Baseline | läuft **nichts** durch. In `erwartet` steht dann ein Satz, keine Zahl — die aktuellen Werte werden **niemals** Sollwert |
+| Platzhalter | `BASIS-HIER-EINSETZEN` zählt ausdrücklich **nicht** als Baseline; die Hülle bringt die Zeile mit, damit sie nicht vergessen wird, und genau deshalb darf sie nicht durchgehen |
+
+**Probelauf P50**, neun Fälle gegen echtes PostgreSQL: richtige Zeile →
+durch · fehlend → 801 · Platzhalter → 801 · 8 Felder → 803 · 10 Felder →
+803 · falsche Marke → 802 · vertauscht → 804 · Wert geändert ohne neue Summe
+→ 804 · **Wert geändert MIT neuer Summe → 811**. Der letzte ist der
+wichtigste: die Schutzsumme fängt Kopierfehler, **tragen** tut der Vergleich
+Wert gegen Wert.
+
+**Die Grenze steht in den Dateien selbst:** ein Vorher-Nachher-Vergleich
+sagt „zwischen den Läufen hat sich X bewegt", nicht **wer**. Dagegen hilft,
+die Schritte hintereinander zu fahren, und dass `0142`/`0143` kein `insert`,
+`update` oder `delete` auf `shop_inventory`, `shop_offers`, `skylanders`
+oder `categories` enthalten. Zwei Änderungen, die sich aufheben, fängt keine
+Zählung — die beiden Abdrücke fangen sie.
+
+**Unberührt:** Struktur-, Rechte-, RLS-, Freigabe- und Belegprüfungen, beide
+Migrationen, der Anwendungscode, die Production-Daten.
+
+### Preflight 0142 auf Production: vier Abweichungen (2026-10-25) — Ursache geklärt
+
+Der erste Schritt des Releases meldete `9999 = 4` — und die Ursache ist
+seitdem belegt (siehe Abschnitt darüber). Angebote 287 → **307**, Lagerzeilen 306 → **337**, beide
 Abdrücke entsprechend anders. Katalog (624), shopfähig (531), sammelbar
 (531), Sicherungsabdruck und Belegsperre **unverändert**.
 

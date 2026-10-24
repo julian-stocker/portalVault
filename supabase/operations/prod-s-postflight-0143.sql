@@ -6,39 +6,46 @@
 -- ##  Sie bricht auf Staging ab, und zwar bevor sie etwas liest.           ##
 -- ###########################################################################
 --
--- NACH `prod-0143.sql` fahren. Der Supabase-SQL-Editor zeigt
--- `NOTICE`-Meldungen nicht an — „Success" allein ist kein sichtbarer Befund.
+-- NACH `prod-0143.sql` fahren.
+--
+-- ###########################################################################
+-- ##  VOR DEM AUSFUEHREN: die Zeile 900 des Preflights unten anstelle von ##
+-- ##  BASIS-HIER-EINSETZEN eintragen. Sie sieht so aus:                   ##
+-- ##                                                                      ##
+-- ##    skyisles-base-1|307|1116f423…|531|531|337|624|ac62508e…|a1b2c3d4  ##
+-- ##                                                                      ##
+-- ##  BLEIBT DER PLATZHALTER STEHEN, LAEUFT DIESE DATEI NICHT DURCH.      ##
+-- ##  Der Platzhalter zaehlt ausdruecklich NICHT als Baseline, und die     ##
+-- ##  aktuellen Werte werden NIEMALS als Sollwert eingesetzt.              ##
+-- ###########################################################################
+--
+-- Der Supabase-SQL-Editor zeigt `NOTICE`-Meldungen nicht an — „Success"
+-- allein ist kein sichtbarer Befund, und die Migration prueft ihre
+-- Nachbedingungen in ihrer EIGENEN Transaktion. Diese Datei fragt denselben
+-- Zustand von aussen nochmal, und zwar sichtbar.
 --
 -- ERFOLGSKRITERIEN — Zeile `9999` muss `0` zeigen
 --
---   101-106  die Funktion steht **genau einmal**, mit vierzehn Argumenten
---            in dieser Folge, Rueckgabetyp `bigint`, `security definer`,
---            und einer **leeren** `search_path`-Festlegung
---   201-204  EIN WEG: sie ruft `seller_create_purchase_with_items` auf,
---            fuegt selbst **nichts** in `purchases` oder `purchase_items`
---            ein und bucht **nichts** ein
---   301-305  die drei Riegel: Betriebsrolle, ausdruecklicher Besitz,
---            `for update` auf die Kalkulationszeile, Abweisung einer
---            zweiten Uebernahme, und dieselbe Antwort fuer „gibt es nicht"
---            wie fuer „gehoert jemand anderem"
---   401-402  KEIN GELD: sie liest aus der Kalkulation nur `purchase_id`
---   501-503  Rechte: materialisierter ACL, **kein** EXECUTE fuer PUBLIC
---            oder `anon`, `authenticated` darf
---   601-605  unberuehrt: `seller_create_purchase_with_items` und
---            `seller_create_purchase` stehen **je genau einmal**,
---            `purchase_calculations` hat weiter vier Richtlinien und gibt
---            `anon` nichts, der partielle Unique-Index steht
---   701-703  die Belegsperre, und `0143` nennt die Belegausstellung nirgends
+--   101-106  die Funktion steht **genau einmal**, vierzehn Argumente,
+--            `bigint`, `security definer`, **leere** `search_path`
+--   201-204  EIN WEG: sie ruft die bestehende Erstellung, fuegt selbst
+--            nichts ein und bucht nichts ein
+--   301-305  die drei Riegel und dieselbe Antwort fuer „gibt es nicht"
+--   401-402  KEIN GELD: nur `purchase_id` wird gelesen
+--   501-503  kein EXECUTE fuer PUBLIC oder `anon`
+--   601-605  `seller_create_purchase_with_items` und
+--            `seller_create_purchase` je genau einmal, Richtlinien und
+--            Unique-Index unberuehrt
+--   701-703  die Belegsperre, und `0143` nennt die Ausstellung nirgends
+--   801-804  die Baseline ist da, traegt die Marke, hat neun Felder und
+--            ihre Schutzsumme stimmt
+--   811-817  die sieben Geschaeftszahlen sind **dieselben wie vor der
+--            Migration** — Angebote, Angebots-Abdruck, shopfaehig,
+--            sammelbar, Lagerzeilen, Katalogzeilen, Lager-Abdruck
 --
--- ZEILEN OHNE SOLLWERT (`ok` ist NULL): 901 und 902 — Einkaeufe insgesamt
--- und gespeicherte Kalkulationen (davon verknuepft). Beide muessen GLEICH
--- den Werten aus `prod-s-preflight-0143.sql` sein: eine Migration, die eine
--- Funktion anlegt, legt keinen Einkauf an und verknuepft nichts. Weicht hier
--- etwas ab, ist das ein BEFUND.
---
--- KEIN Z0-VERTRAG. Diese Nachkontrolle fragt nach der FUNKTION und ihren
--- Rechten; daran ist nichts umgebungsabhaengig. Die Bezugszahlen des
--- Betriebs stehen im Preflight, der sie als Vorher festhaelt.
+-- ZEILEN OHNE SOLLWERT (`ok` ist NULL): 818 und 819 — die uebergebene
+-- Baseline, wie sie gelesen wurde, und der heutige Stand als Baseline-Zeile.
+-- Beide dienen dem Nachvollziehen, wenn ein Vergleich rot ist.
 --
 -- RUECKGAENGIG MACHT SIE NICHTS, WEIL SIE NICHTS TUT: ein einziges SELECT in
 -- `begin … rollback`.
@@ -64,7 +71,7 @@ begin
     raise exception 'ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da '
       '(SKY-0821 UND SKY-0822). Diese Datei ist fuer Production '
       '(zmiwxswrpkmizvqsgype) — auf Staging gehoert '
-      'supabase/checks/0143_postflight.sql..';
+      'supabase/checks/0143_postflight.sql mit einer eigenen Baseline..';
   end if;
 
   if to_regprocedure('public.purchases_paid_total_is_final()') is null then
@@ -78,6 +85,14 @@ begin
   end if;
 end
 $lauf_a$;
+
+-- ---------------------------------------------------------------------------
+-- B  DIE BASELINE AUS DEM PREFLIGHT
+--
+-- Transaktionslokal (`true`), mit dem `rollback` unten fort. Sie wird NICHT
+-- in Production gespeichert — sie lebt genau so lange wie dieser Lauf.
+-- ---------------------------------------------------------------------------
+select set_config('skyisles.base', 'BASIS-HIER-EINSETZEN', true);
 
 -- >>> EINGEBETTET: supabase/checks/0143_postflight.sql
 -- ===========================================================================
@@ -107,10 +122,149 @@ $lauf_a$;
 -- noch einmal ohne zweiten Einkauf, neuer Entwurf abgewiesen ohne Waise) —
 -- und am laufenden System der Lauf durch das Formular.
 --
+--
+-- UND SIE VERGLEICHT DEN SHOP MIT DEM VORHER (neu am 2026-10-25).
+--
+-- Die sieben Geschaeftszahlen standen bis hierher als feste Sollwerte im
+-- PREFLIGHT und blockierten dort — am 2026-10-25 hat genau das den Lauf
+-- angehalten, weil der Betrieb Ware eingebucht hatte
+-- (`production_baseline_0142_finding.md`). Jetzt messen sie im Preflight und
+-- werden HIER verglichen: nicht gegen eine Konstante, sondern gegen den
+-- Stand unmittelbar vor der Migration.
+--
+-- SO UEBERGIBST DU SIE. Zeile 900 des Preflights gibt eine Zeile aus. Sie
+-- vollstaendig kopieren und VOR diesem SELECT ausfuehren:
+--
+--   select set_config('skyisles.base', 'skyisles-base-1|…', true);
+--
+-- Beides zusammen markieren und ausfuehren — `set_config(…, true)` gilt nur
+-- in DERSELBEN Transaktion. Die Huelle
+-- `supabase/operations/prod-s-postflight-0142.sql` hat die Zeile schon drin,
+-- dort ist nur die Baseline einzusetzen.
+--
+-- OHNE BASELINE LAEUFT HIER NICHTS DURCH. Zeile 801 ist dann rot, und die
+-- sieben Vergleiche sind es ebenfalls — ein stillschweigendes Durchlaufen
+-- ohne Vorher gibt es nicht, und die aktuellen Werte werden NIEMALS als
+-- Sollwert eingesetzt.
+--
+-- DER BASIS-VERTRAG — sieben Geschaeftszahlen, eine Zeile, feste Reihenfolge
+--
+--   skyisles-base-1|angebote|angebote_md5|shopfaehig|sammelbar|lagerzeilen|
+--   katalogzeilen|lager_md5|schutz
+--
+-- Neun Felder, getrennt durch `|`, in GENAU dieser Folge:
+--
+--   1  skyisles-base-1   die Marke. Eine fremde Zeile faellt daran auf
+--   2  angebote          count(*) ueber shop_offers()
+--   3  angebote_md5      md5 ueber sky_id|condition|price, sortiert
+--   4  shopfaehig        count(*) mit is_shop_eligible()
+--   5  sammelbar         der Fortschrittsnenner
+--   6  lagerzeilen       count(*) ueber shop_inventory
+--   7  katalogzeilen     count(*) ueber skylanders
+--   8  lager_md5         md5 ueber id|is_listed|sale_price|sale_released
+--   9  schutz            left(md5(Felder 2-8, mit | verbunden), 12)
+--
+-- WOFUER DAS NEUNTE FELD. Es faengt ab, was ein Mensch beim Kopieren
+-- anrichtet: eine abgeschnittene Zeile, zwei vertauschte Felder, eine
+-- verlorene Stelle in einer Zahl. Es ist KEIN Schutz gegen Absicht — wer die
+-- Werte von Hand neu setzen und die Summe neu rechnen will, kann das. Dagegen
+-- schuetzt kein SQL, sondern nur die Reihenfolge der Schritte: die Basis
+-- entsteht VOR der Migration und wird danach nicht mehr erhoben.
+--
+-- DIE GRENZE EINES VORHER-NACHHER-VERGLEICHS, ausdruecklich.
+--
+-- Er sagt „zwischen den beiden Laeufen hat sich X bewegt". Er sagt NICHT,
+-- WER es bewegt hat. Zwischen Preflight und Nachkontrolle kann regulaerer
+-- Betrieb stattgefunden haben: ein Verkauf im Shop, ein eingebuchter
+-- Wareneingang, eine Umpreisung in `/business/inventory`.
+--
+-- SO UNTERSCHEIDET MAN BEIDES:
+--
+--   1. ZEITFENSTER KLEIN HALTEN. Preflight, Migration und Nachkontrolle
+--      hintereinander fahren, nicht ueber eine Nacht verteilt. Dann bleibt
+--      fuer Betrieb kaum Raum, und jede Abweichung ist erklaerungsbeduerftig.
+--   2. DIE MIGRATION KANN ES NICHT GEWESEN SEIN. `0142` legt eine Tabelle
+--      an, `0143` eine Funktion. Keine der beiden enthaelt ein `update`,
+--      `insert` oder `delete` auf `shop_inventory`, `shop_offers`,
+--      `skylanders` oder `categories` — und beide laufen in EINER
+--      Transaktion, die bei jeder Abweichung ihrer eigenen Nachbedingungen
+--      abbricht. Eine Abweichung hier ist deshalb fast immer Betrieb.
+--   3. UND WENN DOCH GEZWEIFELT WIRD: `prod-s-baseline-drift.sql` loest es
+--      auf. Sie fragt tagweise, welche Lagerzeilen und Bewegungen wann
+--      entstanden sind, und ob jede neue Zeile eine Buchung hat. Ein
+--      Wareneingang sieht dort anders aus als ein Schemaeingriff.
+--
+-- Was ein reiner Vergleich NICHT leisten kann: zwei Aenderungen, die sich
+-- gegenseitig aufheben (eine Zeile fort, eine dazu). Die Abdruecke fangen
+-- das ab — sie haengen an Inhalt und Reihenfolge, nicht nur an der Anzahl.
+--
 -- NUR LESEN. Ein einziges SELECT. Sie ruft die Funktion NICHT auf.
 -- ===========================================================================
 
-with fn as (
+with sammelbar as (
+  select s.sky_id
+    from public.skylanders s
+    join public.categories c on c.id = s.category_id
+   where s.is_active and s.catalog_visible
+     and not (c.name = any (public.non_collectible_categories()))
+),
+basis_mess as (
+  -- Die sieben Zahlen, einmal gerechnet, hier und in Zeile 900 benutzt.
+  select
+    (select count(*)::text from public.shop_offers())                      as angebote,
+    (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                    || coalesce(o.price::text, ''),
+                                    ';' order by o.sky_id, o.condition), ''))
+       from public.shop_offers() o)                                        as angebote_md5,
+    (select count(*)::text from public.skylanders s
+      where public.is_shop_eligible(s.sky_id))                             as shopfaehig,
+    (select count(*)::text from sammelbar)                                 as sammelbar,
+    (select count(*)::text from public.shop_inventory)                     as lagerzeilen,
+    (select count(*)::text from public.skylanders)                         as katalogzeilen,
+    (select coalesce(md5(string_agg(i.id::text || '|' || i.is_listed::text || '|'
+                                    || coalesce(i.sale_price::text, '-') || '|'
+                                    || i.sale_released::text,
+                                    E'\n' order by i.id)), '(leer)')
+       from public.shop_inventory i)                                       as lager_md5
+),
+basis_feld as (
+  select angebote || '|' || angebote_md5 || '|' || shopfaehig || '|' || sammelbar
+         || '|' || lagerzeilen || '|' || katalogzeilen || '|' || lager_md5 as kern,
+         m.*
+    from basis_mess m
+),
+basis_zeile as (
+  select 'skyisles-base-1|' || kern || '|' || left(md5(kern), 12) as zeile, f.*
+    from basis_feld f
+),basis_roh as (
+  /*
+   * DER PLATZHALTER ZAEHLT NICHT ALS BASELINE. Die Huelle bringt die
+   * `set_config`-Zeile schon mit, damit niemand sie vergisst — und genau
+   * deshalb muss ein NICHT ersetzter Platzhalter so behandelt werden wie
+   * eine fehlende Zeile. Sonst waere die Bequemlichkeit der Huelle die
+   * Luecke im Riegel.
+   */
+  select nullif(nullif(btrim(coalesce(current_setting('skyisles.base', true), '')), ''),
+                'BASIS-HIER-EINSETZEN') as roh
+),
+basis_teil as (
+  select roh,
+         case when roh is null then null else string_to_array(roh, '|') end as t
+    from basis_roh
+),
+basis as (
+  select roh, t,
+         (t is not null and array_length(t, 1) = 9)                 as neun,
+         (t is not null and t[1] = 'skyisles-base-1')               as marke,
+         case when t is not null and array_length(t, 1) = 9
+              then t[9] = left(md5(array_to_string(t[2:8], '|')), 12)
+         end                                                        as schutz_ok,
+         (t is not null and array_length(t, 1) = 9
+          and t[1] = 'skyisles-base-1'
+          and t[9] = left(md5(array_to_string(t[2:8], '|')), 12))   as gueltig
+    from basis_teil
+),
+fn as (
   select p.oid, p.prosrc, p.prosecdef, p.proconfig, p.proacl, p.pronargs,
          p.proargnames, p.proargtypes
     from pg_proc p
@@ -261,7 +415,64 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (902, 'Info', 'gespeicherte Kalkulationen, davon verknuepft',
       (select count(*)::text from public.purchase_calculations) || ' / ' ||
       (select count(*)::text from public.purchase_calculations
-        where purchase_id is not null), null)
+        where purchase_id is not null), null),
+
+  -- ================================== Die Baseline aus dem Preflight
+  /*
+   * VIER FRAGEN AN DIE UEBERGEBENE ZEILE, bevor eine einzige Zahl
+   * verglichen wird. Sie fangen ab, was beim Kopieren passiert: vergessen,
+   * abgeschnitten, vertauscht, eine Stelle verloren.
+   *
+   * Sie fangen NICHT ab, dass jemand die Werte absichtlich neu setzt und
+   * die Schutzsumme neu rechnet. Dagegen schuetzt kein SELECT, sondern die
+   * Reihenfolge der Schritte — die Basis entsteht VOR der Migration.
+   */
+  (801, 'Basis', 'eine Baseline ist uebergeben worden',
+      (select case when roh is null
+                   then 'FEHLT (oder der Platzhalter steht noch drin): Zeile 900 des '
+                        || 'Preflights in set_config(''skyisles.base'', ''…'', true) '
+                        || 'einsetzen und MIT diesem SELECT zusammen ausfuehren'
+                   else 'ja' end from basis), 'ja'),
+  (802, 'Basis', 'sie traegt die Marke skyisles-base-1',
+      (select coalesce(marke::text, 'keine Baseline') from basis), 'true'),
+  (803, 'Basis', 'sie hat neun Felder',
+      (select case when t is null then 'keine Baseline'
+                   else array_length(t, 1)::text end from basis), '9'),
+  (804, 'Basis', 'die Schutzsumme stimmt — kein Feld vertauscht, keine Stelle fort',
+      (select coalesce(schutz_ok::text, 'nicht pruefbar') from basis), 'true'),
+
+  -- --------------- Die sieben Werte: heute gegen das Vorher, BLOCKIEREND
+  /*
+   * Eine Abweichung hier heisst: zwischen Preflight und Nachkontrolle hat
+   * sich am Shop etwas bewegt. Das muss diese Migration nicht gewesen sein —
+   * sie fasst Angebote und Lager nicht an. Was es sonst sein kann und wie
+   * man es unterscheidet, steht im Kopf dieser Datei unter DIE GRENZE.
+   */
+  (811, 'Shop', 'oeffentliche Angebote wie vor der Migration',
+      (select angebote from basis_mess),
+      (select case when gueltig then t[2] else '(keine gueltige Basis)' end from basis)),
+  (812, 'Shop', 'Angebots-Abdruck wie vor der Migration',
+      (select angebote_md5 from basis_mess),
+      (select case when gueltig then t[3] else '(keine gueltige Basis)' end from basis)),
+  (813, 'Shop', 'shopfaehige Katalogzeilen wie vor der Migration',
+      (select shopfaehig from basis_mess),
+      (select case when gueltig then t[4] else '(keine gueltige Basis)' end from basis)),
+  (814, 'Shop', 'sammelbare Katalogzeilen wie vor der Migration',
+      (select sammelbar from basis_mess),
+      (select case when gueltig then t[5] else '(keine gueltige Basis)' end from basis)),
+  (815, 'Shop', 'Lagerzeilen wie vor der Migration',
+      (select lagerzeilen from basis_mess),
+      (select case when gueltig then t[6] else '(keine gueltige Basis)' end from basis)),
+  (816, 'Shop', 'Katalogzeilen wie vor der Migration',
+      (select katalogzeilen from basis_mess),
+      (select case when gueltig then t[7] else '(keine gueltige Basis)' end from basis)),
+  (817, 'Shop', 'Lager-Abdruck wie vor der Migration',
+      (select lager_md5 from basis_mess),
+      (select case when gueltig then t[8] else '(keine gueltige Basis)' end from basis)),
+  (818, 'Basis', 'Info: die uebergebene Baseline, wie sie gelesen wurde',
+      (select coalesce(roh, '(keine)') from basis), null),
+  (819, 'Basis', 'Info: der heutige Stand als Baseline-Zeile',
+      (select zeile from basis_zeile), null)
 ),
 ergebnis as (
   select nr, bereich, pruefung, befund, erwartet,

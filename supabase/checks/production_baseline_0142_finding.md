@@ -247,3 +247,48 @@ berührt **keine** Migration, **keinen** Anwendungscode und **keine** Daten.
 
 **Ist eine der drei Zeilen rot, ist `0142` nicht die nächste Frage.** Dann
 ist der Shop die nächste Frage, und das Release wartet.
+
+---
+
+## 8. Nachtrag 2026-10-25: Ursache bestätigt, Umbau umgesetzt
+
+**Der Betreiber hat `prod-s-baseline-drift.sql` auf Production gefahren:
+`9999 = 0`.** Die drei blockierenden Zeilen sind grün, und die Arithmetik
+schließt:
+
+| | |
+|---|---|
+| 101 | **306** alte Lagerzeilen stehen noch alle da |
+| 102 | **31** neue |
+| 111 | **287** Angebote auf alten Lagerzeilen |
+| 112 | **20** auf neuen |
+| 201 | **0** neue Lagerzeilen ohne Buchungsbewegung |
+| 204 | **alle 31** neuen Zeilen hängen an einem Einkauf |
+
+306 + 31 = 337 · 287 + 20 = 307. Katalog 624, shopfähig und sammelbar je
+531, Beleg- und Verkaufsfreigaben unverändert. **Es ist nichts verschwunden
+und nichts umgedeutet worden: es ist Ware dazugekommen** — und zwar über den
+Wareneingang, nachgewiesen bis zum Einkauf.
+
+### Was daraufhin gebaut wurde
+
+Der Vorschlag aus Abschnitt 7, unverändert umgesetzt:
+
+- **Die Preflights messen.** Die sieben Geschäftszahlen tragen keinen
+  Sollwert mehr (`ok` ist NULL) und blockieren nichts. Keine Konstante aus
+  dem Repository geht mehr in sie ein.
+- **Zeile 900 gibt die Baseline aus**, neun Felder in fester Reihenfolge mit
+  einer Schutzsumme.
+- **Die Nachkontrollen vergleichen blockierend** — Zeilen 801–804 prüfen die
+  Zeile selbst, 811–817 die sieben Werte gegen sie.
+- **Ohne gültige Baseline läuft keine Nachkontrolle durch.** In der Spalte
+  `erwartet` steht dann ein Satz und keine Zahl: die aktuellen Werte werden
+  **niemals** als Sollwert eingesetzt.
+- **Probelauf P50** fährt neun Fälle gegen echtes PostgreSQL: die richtige
+  Zeile läuft durch, eine fehlende, ein stehengelassener Platzhalter, eine
+  abgeschnittene, eine zu lange, eine falsch markierte, eine vertauschte und
+  eine manipulierte blockieren — jede an der Zeile, die zu ihr gehört.
+
+**Nicht angeglichen wurde nichts.** Die vier Werte, die rot waren, stehen in
+keiner Datei mehr als Erwartung; der Preflight besteht jetzt, weil die
+richtige Frage gestellt wird, nicht weil jemand die Antwort nachgezogen hat.

@@ -6,44 +6,42 @@
 -- ##  Sie bricht auf Staging ab, und zwar bevor sie etwas liest.           ##
 -- ###########################################################################
 --
--- VOR `prod-0143.sql` und NACH `prod-0142.sql` fahren. `0143` legt EINE
--- neue Funktion an und sonst nichts.
+-- VOR `prod-0143.sql` und NACH `prod-0142.sql` fahren. `0143` legt EINE neue Funktion an.
+--
+-- ###########################################################################
+-- ##  ZEILE 900 IST DAS ERGEBNIS, DAS WEITERGEHT.                         ##
+-- ##  Sie vollstaendig kopieren und in prod-s-postflight-0143.sql an die  ##
+-- ##  Stelle BASIS-HIER-EINSETZEN setzen. Ohne sie laeuft die             ##
+-- ##  Nachkontrolle nicht durch.                                          ##
+-- ###########################################################################
 --
 -- ERFOLGSKRITERIEN — Zeile `9999` muss `0` zeigen
 --
 --   101-105  `0142` steht vollstaendig: Tabelle, RLS, vier Richtlinien,
---            `anon` ohne Tabellenrecht, der PARTIELLE Unique-Index auf
---            `purchase_id`
---   111-115  der EINE bestehende Weg in einen Einkauf:
---            `seller_create_purchase_with_items` **genau einmal** und mit
---            den dreizehn Parametern, `seller_create_purchase` **genau
---            einmal**, `can_operate_active_seller()`, `purchases.client_token`
---   120-121  `seller_create_purchase_from_calculation` **fehlt noch**, auch
---            unter keiner anderen Signatur
---   301-307  **287** Angebote · Abdruck **9b8341058bbfa0f7809eddc300ab0e9e**
---            · **531** shopfaehig · **531** sammelbar · **306** Lagerzeilen
---            · **624** Katalogzeilen · Lagerabdruck
---            **01e50b9d727a0486ff1ea0eb6ba2dd56**
+--            `anon` ohne Tabellenrecht, der PARTIELLE Unique-Index
+--   111-115  der EINE bestehende Weg in einen Einkauf, je genau einmal
+--   120-121  `seller_create_purchase_from_calculation` **fehlt noch**
 --   311-312  **nichts freigegeben**: 0 Freigaben, 0 Zubehoerangebote
 --   401-402  die Belegsperre
 --
--- ZEILEN OHNE SOLLWERT (`ok` ist NULL): 1, 321, 322, 323, 324, 901. Diese
--- vier Zahlen — Einkaeufe, Positionen, Kalkulationen (davon verknuepft) und
--- Lagerbewegungen — bitte NOTIEREN: die Nachkontrolle zu `0143` vergleicht
--- gegen sie, und „es ist kein Einkauf entstanden" ist ohne das Vorher keine
--- Aussage.
+-- KEINE FESTEN GESCHAEFTSZAHLEN MEHR (berichtigt am 2026-10-25). Hier standen
+-- sieben Sollwerte aus der Nachkontrolle zu `0141` vom 2026-10-21, und sie
+-- blockierten. Am 2026-10-25 hat genau das den Lauf angehalten: der Betrieb
+-- hatte 31 Lagerzeilen eingebucht und 20 Angebote mehr — nachgewiesen
+-- gewoehnlicher Geschaeftsbetrieb
+-- (`supabase/checks/production_baseline_0142_finding.md`).
 --
--- WARUM 111 UND 113 BLOCKIEREND SIND. `0143` ruft die bestehende
--- Einkaufserstellung AUF, statt sie nachzubauen. Stuende dort eine zweite
--- Ueberladung aus einer frueheren Fassung, waere nicht mehr entscheidbar,
--- welche die neue Funktion erwischt.
+-- Der Fehler war nicht die Zahl, sondern die ART der Erwartung: keine der
+-- sieben ist eine Voraussetzung dieser Migration. Sie sind jetzt MESSUNGEN
+-- und wandern als EINE ZEILE zur Nachkontrolle, die sie BLOCKIEREND gegen
+-- das tatsaechliche Vorher vergleicht.
 --
--- WENN ZEILE 101 ROT IST, ist `0142` hier nicht angewendet. Dann NICHT
--- `prod-0143.sql` fahren: die Migration braeche mit
--- „0143 setzt 0142 voraus" ab.
+-- ZEILEN OHNE SOLLWERT (`ok` ist NULL): 1, 301-307, 321-324, 900. Das sind Messungen —
+-- nichts davon blockiert, und nichts davon muss abgeschrieben werden: Zeile
+-- 900 traegt sie alle.
 --
--- Der SQL-Editor zeigt `NOTICE`-Meldungen nicht an; diese Datei gibt
--- deshalb eine Tabelle aus und keine Meldungen.
+-- Der SQL-Editor zeigt `NOTICE`-Meldungen nicht an; diese Datei gibt deshalb
+-- eine Tabelle aus und keine Meldungen.
 --
 -- EINGEBETTET: `supabase/checks/0143_preflight.sql`, Zeichen fuer Zeichen.
 -- ===========================================================================
@@ -66,7 +64,7 @@ begin
     raise exception 'ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da '
       '(SKY-0821 UND SKY-0822). Diese Datei ist fuer Production '
       '(zmiwxswrpkmizvqsgype) — auf Staging gehoert '
-      'supabase/checks/0143_preflight.sql mit dem Modus staging..';
+      'supabase/checks/0143_preflight.sql mit einer eigenen Baseline..';
   end if;
 
   if to_regprocedure('public.purchases_paid_total_is_final()') is null then
@@ -80,10 +78,6 @@ begin
   end if;
 end
 $lauf_a$;
-
--- DER Z0-MODUS: `production`. Die Bezugszahlen sind gemessen, also
--- BLOCKIEREND. Transaktionslokal, mit dem `rollback` unten fort.
-select set_config('skyisles.z0', 'production', true);
 
 -- >>> EINGEBETTET: supabase/checks/0143_preflight.sql
 -- ===========================================================================
@@ -103,12 +97,51 @@ select set_config('skyisles.z0', 'production', true);
 -- SIE SETZT 0142 VORAUS. Zeile 101 ist der Grund, warum die Reihenfolge
 -- nicht beliebig ist.
 --
--- DER MODUS WAEHLT DIE UMGEBUNG, nicht die Zahlen: `staging`, `production`
--- oder `keine`. Ohne Modus ist Zeile 902 blockierend.
+-- KEINE FESTEN GESCHAEFTSZAHLEN MEHR (berichtigt am 2026-10-25).
 --
---   select set_config('skyisles.z0', 'production', true);
+-- Hier standen sieben Sollwerte aus der Nachkontrolle zu `0141` vom
+-- 2026-10-21, und sie waren BLOCKIEREND. Am 2026-10-25 hat genau das den
+-- Lauf angehalten: der Betrieb hatte 31 Lagerzeilen eingebucht und 20
+-- Angebote mehr, also wich alles ab, was sich an einem arbeitenden Shop
+-- bewegt — nachgewiesen gewoehnlicher Geschaeftsbetrieb
+-- (`production_baseline_0142_finding.md`).
 --
--- NUR LESEN. Ein einziges SELECT. Zeile 9999 muss 0 zeigen.
+-- DER FEHLER WAR NICHT DIE ZAHL, SONDERN DIE ART DER ERWARTUNG. Keine der
+-- sieben ist eine Voraussetzung dieser Migration; sie stehen hier, damit die
+-- NACHKONTROLLE ein Vorher hat. Die Invariante heisst also nicht „gleich
+-- 287", sondern „nach der Migration dasselbe wie vorher" — und das kann eine
+-- Konstante vom 21. Oktober nicht ausdruecken.
+--
+-- Deshalb sind sie jetzt MESSUNGEN (`ok` ist NULL) und wandern als EINE
+-- ZEILE zur Nachkontrolle. Was blockiert, ist unveraendert: Struktur,
+-- Rechte, Richtlinien, Freigaben, Belegsperre.
+--
+-- DER BASIS-VERTRAG — sieben Geschaeftszahlen, eine Zeile, feste Reihenfolge
+--
+--   skyisles-base-1|angebote|angebote_md5|shopfaehig|sammelbar|lagerzeilen|
+--   katalogzeilen|lager_md5|schutz
+--
+-- Neun Felder, getrennt durch `|`, in GENAU dieser Folge:
+--
+--   1  skyisles-base-1   die Marke. Eine fremde Zeile faellt daran auf
+--   2  angebote          count(*) ueber shop_offers()
+--   3  angebote_md5      md5 ueber sky_id|condition|price, sortiert
+--   4  shopfaehig        count(*) mit is_shop_eligible()
+--   5  sammelbar         der Fortschrittsnenner
+--   6  lagerzeilen       count(*) ueber shop_inventory
+--   7  katalogzeilen     count(*) ueber skylanders
+--   8  lager_md5         md5 ueber id|is_listed|sale_price|sale_released
+--   9  schutz            left(md5(Felder 2-8, mit | verbunden), 12)
+--
+-- WOFUER DAS NEUNTE FELD. Es faengt ab, was ein Mensch beim Kopieren
+-- anrichtet: eine abgeschnittene Zeile, zwei vertauschte Felder, eine
+-- verlorene Stelle in einer Zahl. Es ist KEIN Schutz gegen Absicht — wer die
+-- Werte von Hand neu setzen und die Summe neu rechnen will, kann das. Dagegen
+-- schuetzt kein SQL, sondern nur die Reihenfolge der Schritte: die Basis
+-- entsteht VOR der Migration und wird danach nicht mehr erhoben.
+--
+-- NUR LESEN. Ein einziges SELECT. Zeile 9999 muss 0 zeigen. ZEILE 900 IST
+-- DAS ERGEBNIS, DAS WEITERGEHT — sie gehoert in die Nachkontrolle.
 -- ===========================================================================
 
 with sammelbar as (
@@ -118,33 +151,35 @@ with sammelbar as (
    where s.is_active and s.catalog_visible
      and not (c.name = any (public.non_collectible_categories()))
 ),
-vertrag as (
-  select nullif(btrim(coalesce(current_setting('skyisles.z0', true), '')), '') as modus
+basis_mess as (
+  -- Die sieben Zahlen, einmal gerechnet, hier und in Zeile 900 benutzt.
+  select
+    (select count(*)::text from public.shop_offers())                      as angebote,
+    (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
+                                    || coalesce(o.price::text, ''),
+                                    ';' order by o.sky_id, o.condition), ''))
+       from public.shop_offers() o)                                        as angebote_md5,
+    (select count(*)::text from public.skylanders s
+      where public.is_shop_eligible(s.sky_id))                             as shopfaehig,
+    (select count(*)::text from sammelbar)                                 as sammelbar,
+    (select count(*)::text from public.shop_inventory)                     as lagerzeilen,
+    (select count(*)::text from public.skylanders)                         as katalogzeilen,
+    (select coalesce(md5(string_agg(i.id::text || '|' || i.is_listed::text || '|'
+                                    || coalesce(i.sale_price::text, '-') || '|'
+                                    || i.sale_released::text,
+                                    E'\n' order by i.id)), '(leer)')
+       from public.shop_inventory i)                                       as lager_md5
 ),
-z0 (schluessel, staging, production) as (values
-  /*
-   * Dieselbe Form und derselbe Grund wie in `0142_preflight.sql`: die
-   * Staging-Spalte ist `null`, weil `0143` dort seit dem 2026-10-24 liegt
-   * und ein Preflight zu spaet kaeme. Rechts der Production-Stand nach
-   * `0141`, vom Betreiber bestaetigt.
-   */
-  ('angebote',      null, '287'),
-  ('angebote_md5',  null, '9b8341058bbfa0f7809eddc300ab0e9e'),
-  ('shopfaehig',    null, '531'),
-  ('sammelbar',     null, '531'),
-  ('lagerzeilen',   null, '306'),
-  ('katalogzeilen', null, '624'),
-  ('lager_md5',     null, '01e50b9d727a0486ff1ea0eb6ba2dd56')
+basis_feld as (
+  select angebote || '|' || angebote_md5 || '|' || shopfaehig || '|' || sammelbar
+         || '|' || lagerzeilen || '|' || katalogzeilen || '|' || lager_md5 as kern,
+         m.*
+    from basis_mess m
 ),
-soll as (
-  select z.schluessel,
-         case (select v.modus from vertrag v)
-           when 'staging'    then z.staging
-           when 'production' then z.production
-         end as wert
-    from z0 z
+basis_zeile as (
+  select 'skyisles-base-1|' || kern || '|' || left(md5(kern), 12) as zeile, f.*
+    from basis_feld f
 ),
-
 pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   (1, 'Umgebung', 'Info: Katalogzeilen',
@@ -211,33 +246,33 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- --------------------------- Die Zahlen, die Nutzer kennen (Z0-Vertrag)
   (301, 'Unberuehrt', 'oeffentliche Angebote',
       (select count(*)::text from public.shop_offers()),
-      (select wert from soll where schluessel = 'angebote')),
+      null),
   (302, 'Unberuehrt', 'Abdruck ueber die Angebotsliste (sky_id|condition|price)',
       (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
                                       || coalesce(o.price::text, ''),
                                       ';' order by o.sky_id, o.condition), ''))
          from public.shop_offers() o),
-      (select wert from soll where schluessel = 'angebote_md5')),
+      null),
   (303, 'Unberuehrt', 'shopfaehige Katalogzeilen',
       (select count(*)::text from public.skylanders s
         where public.is_shop_eligible(s.sky_id)),
-      (select wert from soll where schluessel = 'shopfaehig')),
+      null),
   (304, 'Unberuehrt', 'sammelbare Katalogzeilen (Fortschrittsnenner)',
       (select count(*)::text from sammelbar),
-      (select wert from soll where schluessel = 'sammelbar')),
+      null),
   (305, 'Unberuehrt', 'Lagerzeilen',
       (select count(*)::text from public.shop_inventory),
-      (select wert from soll where schluessel = 'lagerzeilen')),
+      null),
   (306, 'Unberuehrt', 'Katalogzeilen',
       (select count(*)::text from public.skylanders),
-      (select wert from soll where schluessel = 'katalogzeilen')),
+      null),
   (307, 'Unberuehrt', 'Abdruck ueber Listung, Preis und Freigabe jeder Lagerzeile',
       (select coalesce(md5(string_agg(i.id::text || '|' || i.is_listed::text || '|'
                                       || coalesce(i.sale_price::text, '-') || '|'
                                       || i.sale_released::text,
                                       E'\n' order by i.id)), '(leer)')
          from public.shop_inventory i),
-      (select wert from soll where schluessel = 'lager_md5')),
+      null),
 
   -- ------------------------------- Nichts ist freigegeben, und bleibt es
   (311, 'Nichts offen', 'freigegebene Lagerpositionen (0143 ruehrt das nicht an)',
@@ -274,13 +309,20 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                or a.grantee::regrole::text in ('anon', 'authenticated', 'service_role'))),
       '0'),
 
-  -- ------------------------------------------------------- Der Z0-Vertrag
-  (901, 'Z0-Vertrag', 'gewaehlter Modus (Messung ohne Sollwert)',
-      (select coalesce(v.modus, 'FEHLT') from vertrag v), null),
-  (902, 'Z0-Vertrag', 'der Modus ist gewaehlt — staging, production oder ausdruecklich keine',
-      (select case when v.modus in ('staging', 'production', 'keine') then 'ja'
-                   else 'nein: set_config(''skyisles.z0'', ''production'', true) fehlt'
-              end from vertrag v), 'ja')
+  -- ===================== Die Basis, die weitergeht
+  /*
+   * EINE ZEILE, SIEBEN WERTE, UND EINE SCHUTZSUMME.
+   *
+   * Sie vollstaendig kopieren und in der Nachkontrolle oben einsetzen:
+   *
+   *   select set_config('skyisles.base', '<diese Zeile>', true);
+   *
+   * Die Nachkontrolle vergleicht dann BLOCKIEREND gegen genau diesen Stand.
+   * Fehlt die Zeile dort, ist das eine blockierende Abweichung — ein
+   * stillschweigendes Durchlaufen ohne Vorher gibt es nicht.
+   */
+  (900, 'BASIS', 'die Baseline fuer die Nachkontrolle — vollstaendig kopieren',
+      (select zeile from basis_zeile), null)
 ),
 ergebnis as (
   select nr, bereich, pruefung, befund, erwartet,
