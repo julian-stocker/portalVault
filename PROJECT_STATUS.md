@@ -274,6 +274,51 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### Production-Release 0142 + 0143 — vorbereitet am 2026-10-24, nicht ausgeführt
+
+Vollständig vorbereitet, **nichts angewendet**: kein Push, kein Deployment,
+keine Production-Migration. Der Plan steht in
+`supabase/checks/production_release_0142_0143.md`.
+
+**Die Reihenfolge ist diesmal umgekehrt: Datenbank zuerst, Code danach.**
+Nicht aus Gewohnheit, sondern weil die beiden Zwischenzustände verschieden
+sind. Migrationen vor dem Code sind **wirkungslos** — der deployte Stand
+(`027c474`) kennt weder die Tabelle noch die Funktion, `system_platform_export()`
+führt eine feste Tabellenliste, und `0143` ist `create function` statt
+`create or replace`. Code vor den Migrationen wäre dagegen **sichtbar
+kaputt**: `listCalculations()` bekäme `42P01` und der Kalkulator meldete
+„konnten nicht geladen werden" — nur für den Betriebsaccount, aber genau an
+der Stelle, die das Release liefern soll. Beim Release `0135`–`0141` war es
+andersherum, weil `0138` Zeilen anlegte, die der alte Code mitzählte.
+
+**Was neu entstanden ist** (sechs Dateien, alle ungefahren):
+
+| | |
+|---|---|
+| `supabase/checks/0142_preflight.sql`, `0143_preflight.sql` | es gab nur Postflights; beide führen den Z0-Vertrag mit zwei Spalten |
+| `supabase/operations/prod-0142.sql`, `prod-0143.sql` | der **umgekehrte** Riegel (A1/A2/A3), zeichengleich mit den sieben Läufen des letzten Releases |
+| `supabase/operations/prod-s-{pre,post}flight-014{2,3}.sql` | lesend, `begin … rollback`, weil der SQL-Editor `NOTICE` nicht zeigt |
+
+Die beiden Migrationen sind seit ihrem jeweiligen Commit **unverändert** —
+dieselbe Datei, die auf Staging lief, geht nach Production; die Testsuite
+vergleicht die Einbettung Zeichen für Zeichen.
+
+**Ein Befund beim Prüfen, und er war echt.** `0142` legt
+`purchase_calculations` an, und die Tabelle fehlte in der Grundgesamtheit des
+Wächters `platform-manifest.test.ts` — sie wäre lautlos aus der einzigen
+Katastrophensicherung gefallen. **Zweimal derselbe Fehlgrund:** dieselbe
+Datei trägt schon den Kommentar „Ein Wächter, der seine eigene
+Grundgesamtheit veraltet führt, prüft nichts" (damals fehlten drei
+Belegtabellen). Sofort erledigt: die Tabelle steht in der Grundgesamtheit und
+ist **begründet ausgeschlossen** — sichtbar statt still. Die eigentliche
+Antwort (die Liste aus den Migrationen erheben) steht als Folgeaufgabe in
+`supabase/checks/platform_export_gap.md`.
+
+**Offen und nicht dokumentiert:** sämtliche Häkchen in
+`supabase/checks/0142_staging_run.md` (4a–4f und der V3-Abschnitt) stehen
+noch auf `☐`. Der Betreiber hat die Oberfläche praktisch geprüft und
+freigegeben; als bestandener Test ist davon **nichts** festgehalten.
+
 ### Calculator V3.1 — der Klick kam nicht an (2026-10-24, behoben)
 
 Der Browser-Test fand es sofort: „Einkauf erstellen" trug die richtige

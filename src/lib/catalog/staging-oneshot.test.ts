@@ -609,6 +609,31 @@ const PROD_LESELAEUFE_PRODUKTIONSMODUS = [
   ["supabase/operations/prod-s-postflight-0140.sql", "0140_postflight.sql"],
   ["supabase/operations/prod-s-preflight-0141.sql", "0141_preflight.sql"],
   ["supabase/operations/prod-s-postflight-0141.sql", "0141_postflight.sql"],
+  /*
+   * Die beiden Preflights des Releases 0142/0143. Sie führen den Vertrag mit
+   * zwei Spalten wie ihre Vorgänger, und auf Production sind die sieben
+   * Bezugszahlen gemessen — also `production` und nicht `keine`.
+   */
+  ["supabase/operations/prod-s-preflight-0142.sql", "0142_preflight.sql"],
+  ["supabase/operations/prod-s-preflight-0143.sql", "0143_preflight.sql"],
+] as const;
+
+/*
+ * DIE DRITTE FAMILIE: LESEND, ABER OHNE Z0-VERTRAG.
+ *
+ * Die Nachkontrollen zu `0142` und `0143` fragen nur nach SCHEMA — Tabelle,
+ * Richtlinien, Rechte, Indizes, Funktionsform. Daran ist nichts
+ * umgebungsabhängig: es gibt keine Bezugszahl, die auf Production anders
+ * hieße als auf Staging, also auch keinen Modus zu wählen.
+ *
+ * Ein `set_config` wäre hier nicht harmlos, sondern eine Behauptung: es
+ * verspräche einen Vertrag, den die eingebettete Datei gar nicht liest.
+ * Deshalb prüft diese Familie das Gegenteil — dass `skyisles.z0` NIRGENDS
+ * vorkommt, weder im Rahmen noch in der Prüfdatei.
+ */
+const PROD_LESELAEUFE_OHNE_VERTRAG = [
+  ["supabase/operations/prod-s-postflight-0142.sql", "0142_postflight.sql"],
+  ["supabase/operations/prod-s-postflight-0143.sql", "0143_postflight.sql"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -753,6 +778,76 @@ describe.each(PROD_LESELAEUFE_PRODUKTIONSMODUS)(
     for (const wert of ["287", "9b8341058bbfa0f7809eddc300ab0e9e", "531", "306", "624"]) {
       expect(fliesstext, wert).toContain(wert);
     }
+  });
+
+  it("endet mit rollback und schreibt nichts", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create ", "grant ", "revoke "]) {
+      expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+});
+
+describe.each(PROD_LESELAEUFE_OHNE_VERTRAG)(
+  "der lesende Production-Lauf %s (ohne Z0-Vertrag)", (datei, pruefdatei) => {
+  const text = readFileSync(datei, "utf8");
+  const pruef = readFileSync(`supabase/checks/${pruefdatei}`, "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it(`bettet ${pruefdatei} Zeichen für Zeichen ein`, () => {
+    const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+    const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    expect(a, "Marke fehlt").toBeGreaterThan(-1);
+    expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+    expect(text.slice(a + anfang.length, b)).toBe(pruef);
+  });
+
+  it("trägt den Riegel der neun — zeichengleich in allen drei Bedingungen", () => {
+    const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
+    for (const bedingung of [
+      "if (select count(*) from public.skylanders\n       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then",
+      "if to_regprocedure('public.purchases_paid_total_is_final()') is null then",
+      "if (select count(*) from public.skylanders) < 100 then",
+    ]) {
+      expect(schreibend, bedingung).toContain(bedingung);
+      expect(text, bedingung).toContain(bedingung);
+    }
+    for (const kennung of ["ABBRUCH A1", "ABBRUCH A2", "ABBRUCH A3"]) {
+      expect(text).toContain(kennung);
+    }
+  });
+
+  it("nennt keinen Z0-Modus — weil die Prüfdatei keinen liest", () => {
+    /*
+     * Beide Seiten, und das ist der Punkt: fehlte das `set_config` nur im
+     * Rahmen, während die Prüfdatei einen Vertrag führte, blieben ihre
+     * Bezugszahlen stumm. Hier gibt es keinen Vertrag, also darf auch
+     * nirgends einer behauptet werden.
+     */
+    expect(pruef).not.toContain("skyisles.z0");
+    expect(text).not.toContain("set_config('skyisles.z0'");
+    /* Und die Datei sagt, warum — sonst liest es sich wie ein Versehen. */
+    expect(fliesstext).toContain("KEIN Z0-VERTRAG");
+  });
+
+  it("sagt, warum Success ohne NOTICE kein Befund ist", () => {
+    expect(fliesstext).toContain("zeigt `NOTICE`-Meldungen nicht");
+  });
+
+  it("benennt die Zeilen ohne Sollwert, statt sie zu übergehen", () => {
+    /*
+     * Eine Messung ohne Erwartung ist nur dann keine Lücke, wenn dasteht,
+     * wogegen sie verglichen wird. Bei `0143` ist das der Preflight: „es ist
+     * kein Einkauf entstanden" ist ohne das Vorher keine Aussage.
+     */
+    expect(fliesstext).toMatch(/ZEILEN OHNE SOLLWERT/);
   });
 
   it("endet mit rollback und schreibt nichts", () => {
@@ -949,9 +1044,16 @@ const PRODUKTIONSLAEUFE = [
   ["supabase/operations/prod-0139.sql", "0139_accessory_sale_release.sql"],
   ["supabase/operations/prod-0140.sql", "0140_business_backup_sale_release.sql"],
   ["supabase/operations/prod-0141.sql", "0141_seller_sale_state.sql"],
+  /*
+   * Das Release 0142/0143 (Calculator V2.1 und V3). Dieselbe Form, derselbe
+   * Riegel — und derselbe Grund: eine Datei ohne Umgebungspruefung ist der
+   * Fehler, der am 2026-10-18 schon passiert ist.
+   */
+  ["supabase/operations/prod-0142.sql", "0142_purchase_calculations.sql"],
+  ["supabase/operations/prod-0143.sql", "0143_purchase_from_calculation.sql"],
 ] as const;
 
-describe("die sieben Production-Laeufe", () => {
+describe("die neun Production-Laeufe", () => {
   for (const [skript, migration] of PRODUKTIONSLAEUFE) {
     const text = readFileSync(skript, "utf8");
 
@@ -1012,9 +1114,9 @@ describe("die sieben Production-Laeufe", () => {
     });
   }
 
-  it("alle sieben tragen DENSELBEN Riegel, Zeichen für Zeichen", () => {
+  it("alle neun tragen DENSELBEN Riegel, Zeichen für Zeichen", () => {
     /*
-     * Sieben Dateien, ein Schutz. Sie unterscheiden sich nur darin, welche
+     * Neun Dateien, ein Schutz. Sie unterscheiden sich nur darin, welche
      * Staging-Datei die Fehlermeldung als Alternative nennt — das wird
      * herausnormalisiert, alles andere muss gleich sein. Ein Riegel, der
      * in einer von sieben Dateien abweicht, ist in dieser einen Datei

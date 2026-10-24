@@ -28,6 +28,17 @@ import {
  * und die drei Belegtabellen standen nicht darin — der Test „keine
  * vergessen" konnte sie deshalb nicht vermissen. Ein Wächter, der seine
  * eigene Grundgesamtheit veraltet führt, prüft nichts.
+ *
+ * UND ES IST WIEDER PASSIERT (2026-10-24). `0142` legt
+ * `purchase_calculations` an; die Liste kannte sie nicht, also konnte der
+ * Test sie nicht vermissen — eine Tabelle wäre lautlos aus der einzigen
+ * Katastrophensicherung gefallen, die es unter Supabase Free gibt. Gefunden
+ * beim Release-Check zu `0142`/`0143`, nicht von einem Test.
+ *
+ * Das ist zweimal derselbe Fehlgrund: eine HANDGEPFLEGTE Grundgesamtheit.
+ * Sie aus den Migrationen zu erheben, ist die eigentliche Antwort und ein
+ * eigener Schritt — `supabase/checks/platform_export_gap.md` führt ihn als
+ * Folgeaufgabe.
  */
 const ALL_PUBLIC_TABLES = `
 business_settings cart_items catalog_admin_changes catalog_editorial categories
@@ -44,6 +55,7 @@ shipping_countries shipping_methods shop_admins shop_inventory shop_settings
 skylanders tester_features tester_permission_changes tester_permissions testers
 withdrawal_attempts withdrawal_requests
 purchase_receipts purchase_receipt_downloads purchase_receipt_counters
+purchase_calculations
 `.trim().split(/\s+/)
   // 0026 hat business_settings in platform_settings umbenannt; die Tabelle
   // gibt es nicht mehr, dafür platform_settings.

@@ -687,6 +687,33 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   purchase_receipt_counters:
     "Nummernkreis der Eigenbelege. Dieselbe offene Entscheidung wie purchase_receipts.",
 
+  /*
+   * EBENFALLS NOCH NICHT DRIN — UND AUSDRUECKLICH EINE OFFENE ENTSCHEIDUNG.
+   *
+   * `0142` legt diese Tabelle an (Calculator V2, ADR-0131). Sie hier
+   * auszulassen ist KEIN Urteil, dass die Daten wertlos wären: es sind
+   * Arbeitsstände eines Betreibers, die er beim Verlust vermissen würde.
+   *
+   * Sie steht trotzdem erst einmal draußen, und zwar aus demselben Grund
+   * wie die drei Belegtabellen: ein Bereich im Plattformarchiv ist eine
+   * eigene Archivdatei mit eigener Prüfsumme, eigener Feldliste und einer
+   * Erweiterung von `system_platform_export()` — also eine MIGRATION. Die
+   * lief im Release 0142/0143 nicht nebenbei mit, und eine Sicherung
+   * stillschweigend mitzuziehen wäre genau die Art Änderung, die niemand
+   * geprüft hat.
+   *
+   * Solange sie offen ist, steht die Lücke hier, in
+   * `platform-manifest.test.ts` als Teil der Grundgesamtheit und in
+   * `supabase/checks/platform_export_gap.md` als Folgeaufgabe. Was sie
+   * NICHT ist: unbemerkt.
+   */
+  purchase_calculations:
+    "Gespeicherte Einkaufskalkulationen des Betriebs (0142). Bewertungen eines " +
+    "Inserats, keine Geschäftsvorfälle — ein verlorener Einkauf steht in purchases, " +
+    "eine verlorene Kalkulation ist neu zu rechnen. Die Aufnahme in das " +
+    "Plattformarchiv ist ein offener Punkt (platform_export_gap.md) und braucht " +
+    "eine eigene Migration und eine eigene Freigabe.",
+
   legacy_stock_events:
     "Legacy-Lagerhistorie aus der Arbeitsmappe. Ein Backup, das sie enthält, lädt zur " +
     "verbotenen Rückspielung ein — dauerhaft untersagt.",

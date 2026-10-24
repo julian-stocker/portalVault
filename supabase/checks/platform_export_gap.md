@@ -85,3 +85,47 @@ eine Entscheidung über eine unvollständige Liste wäre wieder eine halbe.
   leere und eine abgeleitete Angabe nicht mit.
 * **Keine Sicherheitslücke.** Es fehlt etwas in einer Sicherung, es ist
   nichts zugänglich, was es nicht sein soll.
+
+---
+
+## Nachtrag 2026-10-24: eine ganze TABELLE, und derselbe Fehlgrund
+
+Beim Release-Check zu `0142`/`0143` gefunden, nicht von einem Test.
+
+`0142` legt `purchase_calculations` an. `platform-manifest.test.ts` hat einen
+Test, der genau das verhindern soll — „jede Tabelle der Plattform ist
+entschieden: entweder ein Bereich oder ausdrücklich ausgeschlossen". Er lief
+grün, **weil die neue Tabelle in seiner Grundgesamtheit fehlte.**
+
+Diese Grundgesamtheit (`ALL_PUBLIC_TABLES`) ist eine **handgepflegte Liste**
+im Test. Genau dieser Fehlgrund steht schon einmal in derselben Datei: vor
+`0122` fehlten die drei Belegtabellen, und der Kommentar dazu lautet „Ein
+Wächter, der seine eigene Grundgesamtheit veraltet führt, prüft nichts."
+Zweimal derselbe Satz ist kein Zufall mehr.
+
+**Sofort erledigt (im Release enthalten):**
+
+- `purchase_calculations` steht in `ALL_PUBLIC_TABLES` — der Wächter sieht
+  die Tabelle jetzt.
+- Sie ist in `PLATFORM_EXCLUDED_TABLES` **begründet ausgeschlossen**, nach
+  demselben Muster wie `purchase_receipts`: ausgelassen, aber nicht
+  unbemerkt, mit Verweis auf diese Datei.
+- Damit ist die Lücke **sichtbar statt still**. Behoben ist sie nicht.
+
+**Offen, und die eigentliche Antwort:**
+
+1. **Die Grundgesamtheit aus den Migrationen erheben** statt sie zu tippen.
+   Das Werkzeug dafür steht schon: `tools/validate-check-sql.mts` baut aus
+   allen Migrationen ein Stub-Schema. Eine Liste, die sich selbst aktuell
+   hält, kann nicht zum dritten Mal veralten. **Das zuerst** — es ist der
+   Test, der die beiden anderen Punkte danach überhaupt erst erzwingt.
+2. **Entscheiden, ob `purchase_calculations` in die Sicherung gehört.** Für
+   eine Aufnahme spricht: es sind Arbeitsstände, die der Betreiber beim
+   Verlust vermisst. Dagegen: eine Kalkulation ist eine Bewertung, kein
+   Geschäftsvorfall — ein verlorener Einkauf steht in `purchases`, eine
+   verlorene Kalkulation ist neu zu rechnen.
+3. **Erst danach die Migration**, die `system_platform_export()` um die vier
+   Spalten oben und gegebenenfalls um diesen Bereich erweitert.
+
+**Nicht Teil des Releases 0142/0143.** Die Sicherung stillschweigend
+mitzuziehen wäre genau die Art Änderung, die niemand geprüft hat.
