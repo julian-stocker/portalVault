@@ -238,7 +238,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     expect(sha(datei.replace(NACHTRAG, ""))).toBe(z.digest);
   });
 
-  it("die Production-Tabelle führt die sechs des Rollouts, die zwei vom 2026-10-18 und 0135–0141", () => {
+  it("die Production-Tabelle führt die sechs des Rollouts, die zwei vom 2026-10-18 und 0135–0143", () => {
     expect(production.map((z) => z.datei)).toEqual([
       "0126_purchase_item_edit.sql",
       "0127_purchase_item_swap.sql",
@@ -257,6 +257,10 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
       "0139_accessory_sale_release.sql",
       "0140_business_backup_sale_release.sql",
       "0141_seller_sale_state.sql",
+      /* Angewendet am 2026-10-25, beide Postflights `9999 = 0`. Ab hier
+         gilt Regel 1 fuer sie: eingefroren, auch die Nachbedingungen. */
+      "0142_purchase_calculations.sql",
+      "0143_purchase_from_calculation.sql",
     ]);
   });
 

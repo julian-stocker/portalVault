@@ -274,6 +274,30 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### 0142 und 0143 liegen auf Production (2026-10-25) — der Code wartet
+
+**Beide Migrationen sind angewendet, beide Postflights `9999 = 0`**, vom
+Betreiber bestätigt: alle Baseline-Prüfungen bestanden, alle Shop- und
+Lagerwerte unverändert, RLS, Berechtigungen und Belegsperre unverändert.
+Damit ist das Release `0135`–`0143` auf Production vollständig.
+
+**Die Datenbank ist dem Code jetzt voraus, und das war der Plan.** Der
+deployte Stand (`027c474`) kennt weder `purchase_calculations` noch
+`seller_create_purchase_from_calculation` — dieser Zwischenzustand ist
+nachweislich **wirkungslos**: eine Tabelle, die niemand liest, und eine
+Funktion, die niemand ruft. Für Besucher, Sammler und Kundschaft ändert sich
+nichts, bis gepusht wird.
+
+**Was noch aussteht:** ein Push von 14 Commits und das Vercel-Deployment, das
+er auslöst. Erst danach gibt es den Kalkulator mit gespeicherten
+Kalkulationen und die Übernahme ins Orderbuch.
+
+**Die Migrationen dürfen NICHT erneut gefahren werden** — und sie können es
+auch nicht: `0142` bricht mit „public.purchase_calculations steht schon" ab,
+`0143` mit „seller_create_purchase_from_calculation steht schon". Ein
+Deployment führt ohnehin keine Migration aus; es gibt keine `vercel.json`,
+kein CI und keinen Build-Schritt, der eine Datenbank anfasst.
+
 ### Der Basis-Vertrag: Geschäftszahlen werden gemessen, nicht geraten (2026-10-25)
 
 **Ursache bestätigt.** `prod-s-baseline-drift.sql` lief auf Production mit

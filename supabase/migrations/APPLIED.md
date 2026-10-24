@@ -164,7 +164,39 @@ unverändert · **0** Zubehörfreigaben, **0** öffentliche Zubehörangebote ·
 Belegsperre unverändert. Probelauf **P47** fährt den Schritt am Stück,
 einschließlich der Probe, dass ein zweiter Lauf abprallt.
 
-**Damit ist das Release `0135`–`0141` auf Production vollständig.**
+**Am 2026-10-25 folgten `0142` und `0143`** — der Kalkulator (ADR-0131) und
+die Übernahme ins Orderbuch (ADR-0132). **Beide Postflights `9999 = 0`**,
+vom Betreiber bestätigt: alle Baseline-Prüfungen bestanden, alle Shop- und
+Lagerwerte unverändert, RLS, Berechtigungen und Belegsperre unverändert.
+
+Die Reihenfolge war diesmal **umgekehrt** — Datenbank zuerst, Code danach —
+und zwar begründet: der deployte Stand kennt weder `purchase_calculations`
+noch `seller_create_purchase_from_calculation`, der Zwischenzustand ist also
+wirkungslos. Umgekehrt hätte `listCalculations()` ein `42P01` bekommen und
+der Kalkulator „konnten nicht geladen werden" gemeldet — sichtbar kaputt,
+genau an der Stelle, die das Release liefert. Begründung vollständig in
+`supabase/checks/production_release_0142_0143.md`, Abschnitt 2.
+
+**Ein Befund auf dem Weg dorthin, und er war meiner.** Der erste
+Production-Preflight meldete `9999 = 4`: Angebote 287 → 307, Lagerzeilen
+306 → 337, beide Abdrücke entsprechend. Ursache war nicht die Datenbank,
+sondern die Art der Erwartung — sieben Geschäftszahlen standen als
+blockierende Konstanten vom 2026-10-21 in einer Prüfdatei, und keine von
+ihnen ist eine Voraussetzung für `0142`. Nachgewiesen gewöhnlicher
+Geschäftsbetrieb: 306 alte Lagerzeilen stehen noch alle da, 31 neue dazu,
+jede mit Buchung und an einem Einkauf (`prod-s-baseline-drift.sql`,
+`9999 = 0`). Seitdem **messen** die Preflights diese Zahlen und übergeben
+sie als eine Baseline-Zeile; die Nachkontrolle vergleicht blockierend gegen
+das tatsächliche Vorher. Hergang:
+`supabase/checks/production_baseline_0142_finding.md`.
+
+**ACHTUNG, REGEL 1 GILT AB JETZT FÜR BEIDE.** `0142` und `0143` sind
+angewendet und damit eingefroren — auch ihre Nachbedingungen. Ein zweiter
+Lauf prallt ohnehin ab: `0142` bricht mit „public.purchase_calculations
+steht schon", `0143` mit „seller_create_purchase_from_calculation steht
+schon". Probelauf **P48** fährt genau das nach.
+
+**Damit ist das Release `0135`–`0143` auf Production vollständig.**
 Nachgemessen, lesend: `seller_sale_state()` antwortet `anon` mit `42501` —
 sie steht und ist dicht.
 
@@ -224,6 +256,8 @@ Katalog statt aus dieser Datei.
 | `0139_accessory_sale_release.sql` | `55f0fcf9279d6484891e48d209371bbf229464849488b8d20ad02909ad3a5a04` | gleich |
 | `0140_business_backup_sale_release.sql` | `ae74e4006ce0dfef07af87021aec2331e1d13009115255ea5c7b3cbd59499fc5` | gleich |
 | `0141_seller_sale_state.sql` | `54c79e5ae7ca1de3ac6742dbf64bc5cf0c8b002ae39eb2f196659ae5426d13aa` | gleich |
+| `0142_purchase_calculations.sql` | `2ff5d3f7dcf2b84a66ad36cee95ec8d9f2f1622dd56d544430b5ad28509a55a3` | gleich |
+| `0143_purchase_from_calculation.sql` | `b030ef94c3827c8f2367358e0e837b6b658582f9b8fe2cff4a81019b4b5e7eb5` | gleich |
 
 **`0130` lief auf Production in der heutigen Repository-Fassung** — dort war
 sie erstmalig. Der Nachtrag aus `supabase/checks/0130_amendment.md` betrifft
@@ -246,14 +280,18 @@ Staging noch auf Production. Sie stehen hier, damit die Akte lückenlos bleibt:
 jede Migration ab `0122` ist entweder oben mit ihrer Prüfsumme erfasst oder in
 dieser Liste.
 
-**`0141` stand hier bis zum 2026-10-21** — seit dem Lauf auf Production steht
-sie in der Tabelle oben, und damit ist die Liste der nicht angewendeten
-Migrationen des Releases leer. Übrig bleibt `0134`, die nie dazugehörte.
+**`0141` stand hier bis zum 2026-10-21, `0142` und `0143` bis zum
+2026-10-25** — seit ihren Läufen auf Production stehen alle drei in der
+Tabelle oben, und damit ist die Liste der nicht angewendeten Migrationen
+leer. Übrig bleibt `0134`, die nie dazugehörte.
 
 **`0135` und `0136` sind seit dem 2026-10-19 auf Staging angewendet, `0137`
 und `0138` seit dem 2026-10-20, `0139` und `0140` ebenfalls seit dem 2026-10-20** — alle sechs stehen deshalb in der Tabelle
-oben, nicht mehr hier. **Auf Production sind seit dem 2026-10-21 `0135`
-bis `0141` angewendet** (Abschnitt „Production"); Dort fehlt nur noch `0134`, die nicht zum Release gehört. **`0138` gehörte ausdrücklich hinter das Deployment** —
+oben, nicht mehr hier. **`0142` ist seit dem 2026-10-22 auf Staging angewendet, `0143` seit dem
+2026-10-24** — beide stehen deshalb ebenfalls oben. **Auf Production sind
+seit dem 2026-10-21 `0135` bis `0141` und seit dem 2026-10-25 `0142` und
+`0143` angewendet** (Abschnitt „Production"); dort fehlt nur noch `0134`,
+die nicht zum Release gehört. **`0138` gehörte ausdrücklich hinter das Deployment** —
 sonst wären 21 Portale in den Fortschrittsnenner gewandert. Das Deployment
 ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 
@@ -261,8 +299,6 @@ ist am 2026-10-21 erfolgt (`21353e4`), und `0138` lief danach am selben Tag.
 |---|---|
 **Gefahren wurde je ein Einmal-Durchgang:** `supabase/operations/staging-0139.sql` (SHA-256 `19134017c5694c274e3b239ed2295bb3b5a7a3a0777cdd2a85fec09042ab4bd8`) und `supabase/operations/staging-0140.sql` (SHA-256 `5e578594fcc776d2962b053e712c38bba2e5221df7532f3f64d52d753727502d`). Beide betten ihre Migration **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und fuegen genau eine Pruefung hinzu: den Umgebungsstempel (`SKY-0821`/`SKY-0822`), den eine Migration nicht kennen kann. Dass er anschlaegt, faehrt Probelauf **P39** nach. Reihenfolge, Erwartungen und Ruecknahme: `supabase/checks/0139_0140_staging_run.md`. **Beide sind seit dem 2026-10-20 angewendet und damit nach Regel 1 eingefroren** — auch ihre Nachbedingungen. Was an ihren Pruefdateien zu berichtigen war, wurde in `supabase/checks/` berichtigt, nicht in der Migration.
 
-| `0143_purchase_from_calculation.sql` | lokal vorbereitet, **noch nicht freigegeben**. **Rein additiv:** eine Funktion `seller_create_purchase_from_calculation`, die einen Einkauf aus einer gespeicherten Kalkulation anlegt UND beide in derselben Transaktion verknüpft (ADR-0132). Sie legt den Einkauf **nicht selbst** an, sondern ruft `seller_create_purchase_with_items` mit allen dreizehn Parametern unverändert auf — es gibt also keinen zweiten Weg, einen Einkauf anzulegen. Drei Riegel: Betriebsrolle, Besitz der Kalkulation (ausdrücklich, weil `security definer` RLS umgeht) und `purchase_id is null`, mit der wortgleichen Wiederholung desselben Entwurfs als einziger Ausnahme. Keine Zahl aus der Kalkulation wird übernommen. Setzt `0142` und `0120` voraus. Probelauf **P49**. Rücknahme: `supabase/rollback/R0143_drop_purchase_from_calculation.sql` (lässt bestehende Verknüpfungen stehen). SHA-256: `b030ef94c3827c8f2367358e0e837b6b658582f9b8fe2cff4a81019b4b5e7eb5` |
-| `0142_purchase_calculations.sql` | lokal vorbereitet, **noch nicht freigegeben**. **Rein additiv:** eine neue Tabelle `purchase_calculations` für die bewusst gespeicherten Einkaufskalkulationen des Kalkulators (ADR-0131) — vier RLS-Policies nach dem Muster von `collection_items`, `revoke all … from anon`, kein `truncate` für `authenticated`, zwei Indizes, der `updated_at`-Trigger aus `0001`. Keine bestehende Tabelle, Funktion, Richtlinie oder Berechtigung wird berührt; sie legt keine Zeile an und prüft das selbst nach. Der Arbeitsstand des Kalkulators kommt **nicht** in die Datenbank — er bleibt im Browser. `purchase_id` ist für die spätere Übernahme ins Orderbuch vorbereitet und bleibt `null`. Probelauf **P48** fährt Migration und Rücknahme gegen echtes PostgreSQL. Rücknahme: `supabase/rollback/R0142_drop_purchase_calculations.sql` (bricht ab, solange Zeilen stehen). SHA-256: `2ff5d3f7dcf2b84a66ad36cee95ec8d9f2f1622dd56d544430b5ad28509a55a3` |
 | `0134_purchase_item_source_row_visible.sql` | lokal vorbereitet, **noch nicht freigegeben**. Gibt `source_row` in der Positionsliste von `seller_purchase()` mit aus, damit der Dialog dieselben vier Ablehnungsgründe prüft wie die Datenbank. Der Funktionskörper ist der aus `0119` mit genau einem zusätzlichen Schlüssel; Rücknahme `supabase/rollback/R0134_purchase_item_source_row_visible.sql`. SHA-256 der vorliegenden Fassung: `b2a745e34e0349640f3a4b10efe9da45bb633c854efd703fc8e6c146514e9b49` |
 
 **Beide zusammen in einem Durchgang:** `supabase/operations/staging-0135-0136.sql` (SHA-256 `654d20fbdb08cb319c0d95005a403fa5cffe13ca77c41d44aafedaf9dc50bb17`) bettet `0135` und `0136` **zeichengleich** ein — geprueft von `src/lib/catalog/staging-oneshot.test.ts` — und legt eine Transaktion samt blockierender Vor- und Nachpruefungen darum. Wird der Lauf darueber gefahren, gehoert in die Tabelle oben die SHA-256 des **Skripts** mit dem Hinweis, dass die eingebetteten Abschnitte den beiden Migrationsdateien entsprechen.

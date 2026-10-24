@@ -413,7 +413,7 @@ async function main(): Promise<void> {
    * sie bei Abweichung abbricht, und dass nach einem Abbruch nichts
    * zurückbleibt.
    * ==================================================================== */
-  console.log("\nPROBELAUF — die fuenf auf Production fehlenden Migrationen, gegen erfundene Zeilen");
+  console.log("\nPROBELAUF — die Migrationen des Releases 0135-0143, gegen erfundene Zeilen");
   console.log("-".repeat(76));
 
   /**
@@ -493,8 +493,14 @@ async function main(): Promise<void> {
    * Migrationen zu Recht „steht schon".
    *
    * Der Probelauf setzt deshalb zurück: die Faltung OHNE die vier Dateien
-   * (das ist der Stand `0134`, den Production führt), und die Spalten, die
-   * sie anlegen, wieder weg. Welche das sind, liest er aus den Dateien
+   * (das ist der Stand `0134`) und die Spalten, die sie anlegen, wieder weg.
+   *
+   * BIS ZUM 2026-10-25 STAND HIER „den Production führt". Das stimmt nicht
+   * mehr: seit dem 2026-10-21 liegen `0135`–`0141` auf Production, seit dem
+   * 2026-10-25 auch `0142` und `0143`. Der Rückstand ist jetzt ein
+   * AUSGANGSPUNKT FÜR DEN PROBELAUF und nicht mehr das Abbild einer
+   * Umgebung — die Probeläufe fahren damit weiter, was eine Migration an
+   * echtem PostgreSQL tut, und das bleibt ihr Zweck. Welche das sind, liest er aus den Dateien
    * selbst — eine Liste, die niemand pflegen muss.
    */
   const vorstand = funktionsfaltung(PROBELAUF);
