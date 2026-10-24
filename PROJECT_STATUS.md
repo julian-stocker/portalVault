@@ -274,6 +274,58 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### Preflight 0142 auf Production: vier Abweichungen (2026-10-25) — 0142 gesperrt
+
+Der erste Schritt des Releases ist gefahren und **nicht bestanden**:
+`9999 = 4`. Angebote 287 → **307**, Lagerzeilen 306 → **337**, beide
+Abdrücke entsprechend anders. Katalog (624), shopfähig (531), sammelbar
+(531), Sicherungsabdruck und Belegsperre **unverändert**.
+
+**Die Lesart, und sie ist noch nicht bewiesen:** gewöhnlicher Betrieb. Der
+Katalog steht still, nur Lager und Angebote sind gewachsen, und das
+Verhältnis passt zur Mechanik — seit `0139` gibt `shop_offers()` **eine
+Zeile je Lagerzeile** zurück (gelistet · lose · verkäuflich · mit Preis),
+von 31 neuen Lagerzeilen erfüllen 20 alle vier Bedingungen. Ware gekauft,
+eingebucht, ein Teil gelistet.
+
+**Woher die Sollwerte stammen:** aus der Nachkontrolle zu `0141` vom
+**2026-10-21**, von dort nach `0142_preflight.sql` übernommen. Vier Tage
+alt — und die Datei hat den Fall vorhergesagt („weicht hier etwas ab, hat
+sich der BETRIEB bewegt und nicht das Schema").
+
+**Der eigentliche Fehler ist meiner:** keiner der sieben Werte ist eine
+Voraussetzung für `0142` — die Migration legt eine Tabelle an, die mit
+Angeboten nichts zu tun hat. Sie stehen dort, damit die Nachkontrolle ein
+Vorher hat. Für `0139`–`0141` war die blockierende Konstante richtig, diese
+Migrationen *haben* Angebote und Lager angefasst; für `0142` habe ich das
+Muster übernommen, ohne zu prüfen, ob es noch passt. **Die Invariante heißt
+nicht „gleich 287", sondern „nach der Migration dasselbe wie vorher".**
+
+**Die beiden Abdrücke zeigen hier kein Problem** und können es nicht: ein
+md5 über die ganze Liste ändert sich bei jeder zusätzlichen Zeile, trägt also
+keine Information über die Zahlen hinaus. Informativ wäre der umgekehrte
+Fall — Zahl gleich, Abdruck anders.
+
+**Vorbereitet, ungefahren:** `supabase/operations/prod-s-baseline-drift.sql`
+(+ `supabase/checks/production_baseline_drift.sql`). Rein lesend, mit dem
+Production-Riegel, gegen echtes PostgreSQL probegeplant. **Drei Zeilen
+blockieren:** 306 alte Lagerzeilen stehen noch (sonst Datenverlust) · 287
+alte Angebote sind noch Angebote (sonst still abgemeldet) · jede neue
+Lagerzeile hat eine Bewegung (sonst ohne Buchung entstanden). Dazu die
+Zeitachse tagweise, die Herkunftskette über `purchase_items.movement_id`,
+die Umpreismenge über `updated_at` — und Zeile 900: der heutige Zustand als
+eine Zeichenkette.
+
+**Der Vorschlag** (`production_baseline_0142_finding.md`): die sieben
+Geschäftszahlen werden im Preflight zu **Messungen** und als eine Zeile
+ausgegeben; die Nachkontrolle nimmt sie über
+`set_config('skyisles.base', …)` entgegen und vergleicht **blockierend**
+gegen das tatsächliche Vorher. Keine veralteten Konstanten mehr, legitime
+Shop-Änderungen blockieren nie, eine Änderung *während* der Migration
+blockiert immer. Nicht eingebaut — erst die Ursache.
+
+**Nicht getan:** keine Sollwerte angeglichen, damit `9999` wieder 0 ergibt.
+
 ### Production-Release 0142 + 0143 — vorbereitet am 2026-10-24, nicht ausgeführt
 
 Vollständig vorbereitet, **nichts angewendet**: kein Push, kein Deployment,

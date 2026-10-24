@@ -863,6 +863,111 @@ describe.each(PROD_LESELAEUFE_OHNE_VERTRAG)(
   });
 });
 
+describe("die Ursachenprüfung zum Ausgangszustand (2026-10-25)", () => {
+  /*
+   * ANLASS. Der Preflight zu `0142` meldete vier Abweichungen — Angebote,
+   * Lagerzeilen und die beiden Abdrücke. Diese Datei fragt nicht „sind die
+   * Zahlen anders" (das ist bekannt), sondern ob die Differenz VOLLSTÄNDIG
+   * erklärt ist. Sie gehört damit zu keiner der drei Familien oben: sie ist
+   * weder Vor- noch Nachkontrolle einer Migration, sondern eine Diagnose.
+   */
+  const PRUEF = "supabase/checks/production_baseline_drift.sql";
+  const HUELLE = "supabase/operations/prod-s-baseline-drift.sql";
+  const pruef = readFileSync(PRUEF, "utf8");
+  const text = readFileSync(HUELLE, "utf8");
+
+  it("die Hülle bettet die Prüfung Zeichen für Zeichen ein", () => {
+    const anfang = `-- >>> EINGEBETTET: ${PRUEF}\n`;
+    const ende = `-- <<< ENDE: ${PRUEF}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    expect(a, "Marke fehlt").toBeGreaterThan(-1);
+    expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+    expect(text.slice(a + anfang.length, b)).toBe(pruef);
+  });
+
+  it("und trägt den Riegel der neun, zeichengleich", () => {
+    const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
+    for (const bedingung of [
+      "if (select count(*) from public.skylanders\n       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then",
+      "if to_regprocedure('public.purchases_paid_total_is_final()') is null then",
+      "if (select count(*) from public.skylanders) < 100 then",
+    ]) {
+      expect(schreibend, bedingung).toContain(bedingung);
+      expect(text, bedingung).toContain(bedingung);
+    }
+  });
+
+  it("die drei Zeilen, die wirklich blockieren, sind 101, 111 und 201", () => {
+    /*
+     * DAS IST DER GANZE PUNKT DIESER DATEI. Eine Zahl, die sich in einem
+     * laufenden Betrieb bewegt, ist kein Fehler; eine Zeile, die
+     * verschwindet, schon. Also blockiert nicht „307 statt 287", sondern:
+     * stehen die 306 alten Lagerzeilen noch, sind die 287 alten Angebote
+     * noch Angebote, und hat jede neue Zeile eine Buchung.
+     */
+    expect(pruef).toContain("(select count(*)::text from lager where not ist_neu), '306')");
+    expect(pruef).toContain("(select count(*)::text from angebot where not ist_neu), '287')");
+    expect(pruef).toContain("where m.inventory_id = l.id)), '0')");
+  });
+
+  it("die gewanderten Zahlen selbst sind MESSUNGEN, keine Erwartungen", () => {
+    /*
+     * Die vier Werte, die rot waren, dürfen hier keinen Sollwert haben —
+     * sonst stünde dieselbe veraltete Konstante ein zweites Mal da, nur in
+     * einer Datei, die sie aufklären soll.
+     */
+    for (const alt of ["287", "9b8341058bbfa0f7809eddc300ab0e9e",
+      "01e50b9d727a0486ff1ea0eb6ba2dd56"]) {
+      const stellen = [...pruef.matchAll(new RegExp(`'${alt}'`, "g"))];
+      /* `287` darf genau einmal vorkommen: als Erwartung an Zeile 111
+         („die alten Angebote sind noch Angebote"), nicht als Erwartung an
+         die heutige Gesamtzahl. */
+      expect(stellen.length, `${alt} als Sollwert`).toBeLessThanOrEqual(1);
+    }
+    /* Die heutigen Zahlen stehen ohne Sollwert da. */
+    expect(pruef).toContain("(select count(*)::text from lager), null)");
+    expect(pruef).toContain("(select count(*)::text from angebot), null)");
+  });
+
+  it("macht die Grenze sichtbar, statt sie zu behaupten", () => {
+    /* Zwei Zeitachsen-Zeilen, damit am Grenztag nichts untergeht. */
+    expect(pruef).toContain("Lagerzeilen je Anlagetag, letzte 21 Tage");
+    expect(pruef).toContain("Bewegungen je Tag und Grund, letzte 21 Tage");
+    expect(pruef).toContain("Europe/Berlin");
+  });
+
+  it("nennt die Grenze dieser Auskunft, statt sie zu verschweigen", () => {
+    /*
+     * Ein md5 lässt sich nicht aufschlüsseln, und für Preise führt dieses
+     * Projekt kein Journal. Was die Datei NICHT beantworten kann, steht in
+     * ihr drin — sonst liest sich eine Lücke wie ein Freispruch.
+     */
+    expect(pruef).toContain("laesst sich nicht aufschluesseln");
+    expect(pruef).toMatch(/Journal fuer Preise fuehrt dieses\n\s*--\s*\* Projekt NICHT|Journal fuer Preise/);
+  });
+
+  it("gibt den neuen Ausgangszustand als eine Zeile aus — mit Vorbehalt", () => {
+    expect(pruef).toContain("(900, 'NEUE BASIS'");
+    expect(pruef).toContain("erst uebernehmen");
+    /* Die sieben Werte in der Reihenfolge des Z0-Vertrags. */
+    expect(pruef).toContain("angebote | angebote_md5 | shopfaehig | sammelbar");
+  });
+
+  it("schreibt nichts und wendet 0142 nicht an", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create ", "grant ", "revoke "]) {
+      expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+    expect(code).not.toContain("purchase_calculations");
+  });
+});
+
 describe("die beiden Prüfdateien zu 0139 kennen zwei Umgebungen", () => {
   /*
    * Vorher stand dort EIN Sollwertsatz — der von Staging. Auf Production
