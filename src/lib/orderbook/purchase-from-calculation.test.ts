@@ -298,3 +298,70 @@ describe("6. der Weg dorthin trägt nur eine Kennung", () => {
     }
   });
 });
+
+/* ===================================================================== */
+describe("7. die funktionale Prüfung auf Staging", () => {
+  const tool = readFileSync("tools/verify-purchase-from-calculation.mts", "utf8");
+
+  it("fährt nur gegen Staging, und der Riegel steht vor jedem Client", () => {
+    expect(tool).toContain('requireStaging("verify:purchase-from-calculation")');
+    const riegel = tool.indexOf("requireStaging(");
+    expect(riegel).toBeLessThan(tool.indexOf("serviceClient()"));
+  });
+
+  it("behauptet Rechte nur mit echten Benutzer-JWT", () => {
+    /* Die Dienstrolle legt Konten an, liest Gegenwerte und räumt auf. Jede
+       Aussage über „darf nicht" fällt mit einer angemeldeten Sitzung. */
+    expect(tool).toContain("signInWithPassword");
+    expect(tool).toContain("ruf(fremd.client");
+    expect(tool).toContain("ruf(betrieb.client");
+  });
+
+  it("räumt alles wieder weg und zählt es nach", () => {
+    expect(tool).toContain("} finally {");
+    expect(tool).toContain('from("purchases").delete().eq("id", id)');
+    expect(tool).toContain('from("purchase_calculations").delete().eq("id", id)');
+    expect(tool).toContain("deleteUser");
+    expect(tool).toContain("die Bestaende sind wieder die von vorher");
+  });
+
+  it("löscht ausschließlich eigene Kennungen", () => {
+    /* Kein `delete` ohne `eq`, kein `ilike`, kein Löschen nach Datum: was
+       dieser Lauf nicht angelegt hat, fasst er nicht an. */
+    const loeschen = [...tool.matchAll(/\.delete\(\)([^;]*);/g)].map((m) => m[1]);
+    expect(loeschen.length).toBeGreaterThan(0);
+    for (const l of loeschen) expect(l, l).toContain(".eq(");
+  });
+
+  it("ein Abfragefehler kann nicht als „0 Zeilen“ durchgehen", () => {
+    /*
+     * DER FEHLER AUS DEM ERSTEN LAUF. Die Datei fragte nach `booked_at` —
+     * eine Spalte, die es nicht gibt. PostgREST antwortete `42703`, `data`
+     * war `undefined`, zwei Prüfungen lasen das als „0 Positionen", und
+     * eine dritte meldete „Zeile für Zeile dieselben", weil beide Abfragen
+     * gleich leer waren. Ein grüner Haken, der nichts geprüft hat.
+     */
+    expect(tool).toContain("const wirftNicht =");
+    expect(tool).toContain("die Abfrage selbst");
+    /* Im CODE nicht mehr — im Kommentar steht der Hergang, und der soll
+       dort stehen bleiben. */
+    const code = tool.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*(?:\/\/|\*).*$/gm, "");
+    expect(code).not.toContain("booked_at");
+    expect(code).toContain("movement_id");
+    /* Und die Gleichheit zählt nur mit Inhalt. */
+    expect(tool).toContain("positionen.length === 3 && handPositionen.length === 3");
+  });
+
+  it("vergleicht den Einkauf aus der Kalkulation mit einem von Hand", () => {
+    expect(tool).toContain('rpc("seller_create_purchase_with_items"');
+    expect(tool).toContain("DIE POSITIONEN SIND ZEILE FUER ZEILE DIESELBEN");
+    /* Und prüft, dass der von Hand angelegte mit keiner Kalkulation
+       verknüpft ist — die Verknüpfung entsteht nur auf dem einen Weg. */
+    expect(tool).toContain("ist mit keiner Kalkulation verknuepft");
+  });
+
+  it("prüft die Belegsperre und dass nichts eingebucht wird", () => {
+    expect(tool).toContain('rpc("issue_platform_receipt"');
+    expect(tool).toContain("Kaufen ist nicht Einlagern");
+  });
+});

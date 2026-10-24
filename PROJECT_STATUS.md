@@ -234,6 +234,46 @@ Formular** (ADR-0132). Der Kalkulator liefert nur SKY-IDs und Stückzahlen.
 Vorschau, kein zusätzlicher Bestätigungsschritt, kein zweiter
 Speichern-Knopf, kein neues Bedienelement im Orderbuch.
 
+**Auf Staging angewendet und funktional geprüft (2026-10-24).** `0142` und
+`0143` liegen auf Staging; die Nachkontrollen gaben je `9999 = 0`, und die
+beiden interessantesten Zeilen stimmen: `seller_create_purchase_with_items`
+und `seller_create_purchase` existieren **je genau einmal** — keine alte
+Signatur ist stehengeblieben, es gibt also wirklich nur einen Weg, einen
+Einkauf anzulegen.
+
+| Lauf | |
+|---|---|
+| `npm run verify:calculations:staging` | **27/27** — die Richtlinien aus `0142` mit zwei echten Konten |
+| `npm run verify:purchase-from-calculation:staging` | **27/27** — die Übernahme am laufenden System |
+
+Der zweite Lauf ist neu und zeigt, was kein Quelltexttest zeigen kann: ohne
+Betriebsrolle `42501` · fremde und erfundene Kalkulation je
+`calculation not found`, **und dabei entsteht kein Einkauf** · der gute Fall
+legt einen Einkauf mit **drei** Positionen an (2 × Figur A, 1 × Figur B,
+alle `ordered`, `movement_id` NULL), die Kalkulation zeigt darauf, **und es
+wird nichts eingebucht** · die Kosten sind die übergebenen (10,00 € = 8 + 2
++ 0) und **nicht** der Kalkulationswert (35,80 €) · derselbe Entwurf noch
+einmal gibt denselben Einkauf, die Zahl bleibt gleich · ein **neuer**
+Entwurf auf dieselbe Kalkulation wird mit `already handed over` abgewiesen
+**und lässt keinen Einkauf zurück** · ein von Hand angelegter Einkauf hat
+**Zeile für Zeile dieselben Positionen** und ist mit keiner Kalkulation
+verknüpft · die Belegsperre hält auch für den Betrieb.
+
+**Vollständig aufgeräumt:** zwei Testeinkäufe, zwei Kalkulationen, zwei
+Konten und die Mitgliedschaft entfernt; Bestände vor und nach dem Lauf
+gleich (90 Einkäufe · 2 128 Positionen · 1 Kalkulation · 26 Bewegungen).
+Bestehende Daten wurden nicht angefasst — gelöscht wurde nur nach eigener
+Kennung.
+
+**Ein Befund in meiner eigenen Prüfung.** Die erste Fassung fragte nach
+einer Spalte `booked_at`, die es nicht gibt. PostgREST antwortete `42703`,
+`data` war `undefined`, zwei Prüfungen lasen das als „0 Positionen" — und
+eine dritte meldete „Zeile für Zeile dieselben", weil **beide** Abfragen
+gleich leer waren. Ein grüner Haken, der nichts geprüft hat. Seitdem ist ein
+Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
+Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
+Bewegung existiert.
+
 ### Calculator V2 — vorbereitet am 2026-10-22, nicht angewendet, nicht deployt
 
 Der Kalkulator behält jetzt zwei Dinge auseinander (ADR-0131): den
