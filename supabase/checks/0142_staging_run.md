@@ -313,13 +313,13 @@ Zeilen rot**, weil das Stub-Schema alle Signaturen anlegt und keine
 
 | ☐ | |
 |---|---|
-| ☐ | Kalkulation speichern → „Einkauf erstellen" → das **normale** Formular mit den Figuren drin |
+| ☑ | **Kalkulation speichern → „Einkauf erstellen" → das normale Formular mit den Figuren drin** — *am 2026-10-24 vom Betreiber im Browser bestätigt* |
 | ☐ | Kaufdaten eintippen, speichern → Einkauf entsteht, in der Liste steht jetzt **„Einkauf ansehen"** und führt auf genau diesen Einkauf |
 | ☐ | Dieselbe Adresse `?kalkulation=<id>` noch einmal aufrufen und speichern → die Datenbank lehnt ab (`already handed over`), **und es entsteht kein zweiter Einkauf** |
 | ☐ | Abbrechen statt speichern → **kein** Einkauf, Kalkulation zeigt weiter „Einkauf erstellen" |
 | ☐ | „+ Neu" ohne Kalkulation → leeres Formular wie immer |
 | ☐ | Die vier Geldfelder sind leer, auch bei einer Kalkulation über 300 € |
-| ☐ | Beim Klick **schließt sich der Kalkulator** und das Formular steht frei da (siehe Nachtrag) |
+| ☑ | **Beim Klick schließt sich der Kalkulator und das Formular steht frei da** — *am 2026-10-24 vom Betreiber im Browser bestätigt* (siehe Nachtrag) |
 
 ### Nachtrag 2026-10-24 — hier ist der erste Durchlauf hängengeblieben
 
@@ -339,3 +339,96 @@ wird es jetzt mit echtem Klick in `calculator-navigation.test.tsx`.
 
 Beim Nachtesten also eine Zeile mehr: nach dem Klick muss das Formular
 **frei** stehen, und die Seite muss rollen.
+
+#### Nachgetestet und bestätigt — 2026-10-24
+
+**Der Betreiber hat den Fehler nach der Korrektur im echten Browser erneut
+geprüft.** Wörtlich: „Die Navigation funktioniert jetzt, das
+Orderbuch-Formular öffnet sich korrekt und die Oberfläche gefällt mir."
+
+Damit sind die zwei Zeilen oben abgehakt, **und nur diese zwei**: der Klick
+führt ins Orderbuch, und der Kalkulator steht nicht mehr darüber. Die
+übrigen Zeilen dieser Datei bleiben offen — eine bestätigte Navigation sagt
+nichts über das Speichern, die Doppelsperre oder das Verhalten nach einem
+Neuladen.
+
+Was damit auf drei Wegen belegt ist: **gefunden** im Browser, **behoben**
+mit `onNavigate` (ADR-0133), **abgesichert** mit einem echten Klick in
+`src/components/calculator/calculator-navigation.test.tsx` (15 Prüfungen,
+jsdom) — und jetzt **nachgetestet** im Browser, dort, wo er aufgefallen ist.
+
+---
+
+# Die zwei offenen Punkte — Schritt für Schritt (2026-10-24)
+
+Nach der bestätigten Navigation bleiben zwei Prüfungen, die vor einem
+Production-Release wirklich zählen. Beides zusammen dauert etwa zehn
+Minuten.
+
+**Vorbereitung.** Entwicklungsserver gegen Staging starten
+(`npm run dev:staging`), die genannte Adresse öffnen, mit dem
+**Geschäftskonto** anmelden. Der Kalkulator ist das Taschenrechner-Symbol
+oben rechts im Kopf.
+
+> **Zwei Hinweise zu den Spuren, die das hinterlässt.** Die Einkäufe, die du
+> dabei anlegst, **bleiben stehen** — es gibt im Orderbuch keinen
+> Löschknopf. Setze deshalb im Formular das Häkchen **„Testdatensatz"**:
+> dann zählt der Einkauf in keiner Geschäftssumme (`0063`). Die
+> Kalkulationen kannst du in der Liste des Kalkulators selbst löschen.
+
+---
+
+## A — Die Zuordnung übersteht ein Neuladen
+
+**Warum das zählt.** Nach einem Neuladen muss der Kalkulator noch wissen, an
+*welcher* gespeicherten Kalkulation du arbeitest. Weiß er es nicht, bietet
+„Speichern" statt „Bestehende aktualisieren" nur „Als neue" an — und beim
+nächsten Druck steht dieselbe Rechnung zweimal in der Liste, ohne dass
+jemand das wollte.
+
+| Schritt | | Was dastehen muss |
+|---|---|---|
+| A1 | Kalkulator öffnen, **drei Figuren** aufnehmen, bei einer die Menge auf 3 stellen | drei Zeilen, die zuletzt getippte oben |
+| A2 | **„Speichern"** → Name übernehmen → speichern | im Kopf steht **„Geöffnet: ‹Name›"**, die Marke „ungespeicherte Änderungen" ist **fort** |
+| A3 | **Seite neu laden** (F5 / Cmd-R), Kalkulator wieder öffnen | dieselben drei Zeilen, dieselbe Reihenfolge, derselbe Faktor |
+| A4 | **Auf die Kopfzeile sehen** | dort steht weiter **„Geöffnet: ‹derselbe Name›"** und **keine** Marke „ungespeicherte Änderungen" |
+| A5 | **„Speichern"** drücken | es erscheinen **zwei** Knöpfe: **„Bestehende aktualisieren"** und „Als neue Kalkulation speichern" |
+| A6 | Mit „Abbrechen" wieder zu, **eine Figur hinzufügen**, erneut neu laden | Positionen **und** die Marke „ungespeicherte Änderungen" sind **beide** wieder da |
+| A7 | „Gespeichert" öffnen | es steht **genau ein** Eintrag da, nicht zwei |
+
+**Fehlgeschlagen, wenn:** in A4 „Wird automatisch gemerkt" statt „Geöffnet:
+…" steht · in A5 nur ein einzelner Speichern-Knopf erscheint · in A7 zwei
+Einträge stehen.
+
+---
+
+## B — Einkauf speichern, „Einkauf ansehen", und die Doppelsperre
+
+**Warum das zählt.** Das ist die Stelle, an der aus einer Bewertung ein
+Geschäftsvorfall wird. Zweimal übernehmen würde zwei Einkäufe für dieselbe
+Ware erzeugen — und das fällt erst in der Buchhaltung auf.
+
+| Schritt | | Was dastehen muss |
+|---|---|---|
+| B1 | Kalkulator → „Gespeichert" → bei der Kalkulation aus A auf **„Einkauf erstellen"** | das **normale** „+ Neu"-Formular, die Figuren und Mengen stehen drin, der Kalkulator ist zu |
+| B2 | **Die Adresse aus der Adresszeile kopieren** und beiseitelegen | sie endet auf `?kalkulation=<lange Kennung>` — die brauchst du in B6 |
+| B3 | **Nachsehen, was NICHT ausgefüllt ist** | Kaufpreis, Versand, Käuferschutz und Summe sind **leer** — auch wenn die Kalkulation über 300 € liegt |
+| B4 | Kaufdatum und Kaufpreis eintippen, **Häkchen „Testdatensatz" setzen**, speichern | der Einkauf entsteht, die Positionen stehen als normale Zeilen da |
+| B5 | Kalkulator → „Gespeichert" | an der Kalkulation steht jetzt **„Einkauf ansehen"** statt „Einkauf erstellen", dazu die Marke **„Als Einkauf übernommen"**. Draufklicken führt auf **genau diesen** Einkauf |
+| B6 | Die Adresse aus B2 **noch einmal** aufrufen, Daten eintippen, speichern | **Fehlermeldung**, und **es entsteht kein zweiter Einkauf** |
+| B7 | Orderbuch öffnen und zählen | **genau ein** Einkauf aus dieser Kalkulation |
+| B8 | Ein zweites Mal „+ Neu" — diesmal **ohne** Kalkulation, über den normalen Knopf im Orderbuch | **leeres** Formular wie immer, keine Figur vorbelegt |
+| B9 | Noch einmal eine Kalkulation übernehmen, im Formular aber **abbrechen** statt zu speichern | **kein** Einkauf entstanden, die Kalkulation zeigt weiter „Einkauf erstellen" |
+
+**Fehlgeschlagen, wenn:** in B3 ein Geldfeld vorbelegt ist · in B6 ein
+zweiter Einkauf entsteht · in B5 „Einkauf ansehen" auf den falschen Einkauf
+führt · in B8 Figuren vorbelegt sind · in B9 ein Einkauf entstanden ist.
+
+> **Was B6 prüft, und was nicht.** Die Sperre sitzt in der **Datenbank**
+> (`0143`: `purchase_id is null` mit `for update`), und dass sie hält, ist
+> auf Staging mit echten Konten bewiesen —
+> `npm run verify:purchase-from-calculation:staging`, 27/27, inklusive „ein
+> abgewiesener zweiter Versuch lässt keinen Einkauf zurück". B6 prüft die
+> **andere Hälfte**: dass die Oberfläche den Fall sauber anzeigt, statt
+> stumm zu scheitern. Deshalb reicht hier das bloße Hinsehen — es muss nicht
+> dieselbe Kennung zweimal durch alle Formularfelder gejagt werden.

@@ -129,3 +129,12 @@ Zweimal derselbe Satz ist kein Zufall mehr.
 
 **Nicht Teil des Releases 0142/0143.** Die Sicherung stillschweigend
 mitzuziehen wäre genau die Art Änderung, die niemand geprüft hat.
+
+**Nachtrag 2026-10-24, zweiter Teil.** Der Betreiber will die Tabelle nicht
+unnötig draußen haben. Die Untersuchung dazu — kann sie sicher aufgenommen
+werden, was müsste sich ändern, welche Risiken — steht in
+`supabase/checks/platform_backup_purchase_calculations.md`. Ergebnis in
+einem Satz: **ja, und zwar als eigenes kleines Release nach `0142`/`0143`**,
+weil die Erweiterung die eine Funktion ersetzt, die unsere Absicherung ist.
+Punkt 1 oben (die Grundgesamtheit aus den Migrationen erheben) ist dort
+Schritt 1.

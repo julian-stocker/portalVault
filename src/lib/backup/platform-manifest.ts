@@ -706,6 +706,15 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * `platform-manifest.test.ts` als Teil der Grundgesamtheit und in
    * `supabase/checks/platform_export_gap.md` als Folgeaufgabe. Was sie
    * NICHT ist: unbemerkt.
+   *
+   * UNTERSUCHT AM 2026-10-24, auf Wunsch des Betreibers:
+   * `supabase/checks/platform_backup_purchase_calculations.md`. Es spricht
+   * inhaltlich NICHTS gegen die Aufnahme — kein gesperrtes Feld, dieselbe
+   * Klasse wie `collection_items`, und die Argumentgrenze ist weit weg.
+   * Was gegen den Zeitpunkt spricht: die Erweiterung ersetzt
+   * `system_platform_export()`, also genau die Funktion, die unter
+   * Supabase Free unsere einzige Absicherung ist. Das gehört in ein
+   * eigenes Release, nicht in 0142/0143.
    */
   purchase_calculations:
     "Gespeicherte Einkaufskalkulationen des Betriebs (0142). Bewertungen eines " +

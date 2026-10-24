@@ -314,10 +314,32 @@ ist **begründet ausgeschlossen** — sichtbar statt still. Die eigentliche
 Antwort (die Liste aus den Migrationen erheben) steht als Folgeaufgabe in
 `supabase/checks/platform_export_gap.md`.
 
-**Offen und nicht dokumentiert:** sämtliche Häkchen in
-`supabase/checks/0142_staging_run.md` (4a–4f und der V3-Abschnitt) stehen
-noch auf `☐`. Der Betreiber hat die Oberfläche praktisch geprüft und
-freigegeben; als bestandener Test ist davon **nichts** festgehalten.
+**Vom Betreiber bestätigt (2026-10-24):** der Klick-Fix aus V3.1 ist im
+echten Browser nachgetestet — die Navigation führt ins Orderbuch, das
+Formular steht frei da, die Figuren sind drin. Zwei Häkchen in
+`0142_staging_run.md` stehen dafür, **und nur diese zwei**.
+
+**Weiterhin offen:** 4a–4f und der Rest des V3-Abschnitts. Die zwei, auf
+die es vor Production ankommt — die Zuordnung nach einem Neuladen und
+„Einkauf ansehen" samt Doppelsperre —, haben seit dem 2026-10-24 eine
+eigene Schritt-für-Schritt-Anleitung am Ende derselben Datei.
+
+**Die Sicherungslücke, untersucht statt vertagt.** Auf Wunsch des
+Betreibers geprüft, ob `purchase_calculations` in die Plattformsicherung
+aufgenommen werden kann:
+`supabase/checks/platform_backup_purchase_calculations.md`. **Inhaltlich
+spricht nichts dagegen** — kein gesperrtes Feld, dieselbe Klasse wie
+`collection_items`, die Argumentgrenze weit weg, und der Anwendungscode
+filtert gar nicht (das Archiv nimmt das Dokument unverändert). Gegen den
+*Zeitpunkt* spricht, dass die Erweiterung `system_platform_export()`
+ersetzt — die eine Funktion, die unter Supabase Free unsere Absicherung
+ist. Empfehlung: eigenes kleines Release nach `0142`/`0143`, und davor den
+Wächter aus den Migrationen speisen, damit der Fehlgrund nicht ein drittes
+Mal greift. **Und eine Unterscheidung, die dabei hart wurde:** eine
+Plattform-*Wiederherstellung* gibt es nicht — `restore_supported` ist
+`false`, es existiert keine Importfunktion, und für das Plattformarchiv
+gibt es auch kein Prüfwerkzeug (`verify:backup` prüft die
+Betriebssicherung).
 
 ### Calculator V3.1 — der Klick kam nicht an (2026-10-24, behoben)
 
