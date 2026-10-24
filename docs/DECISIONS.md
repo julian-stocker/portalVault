@@ -12397,3 +12397,76 @@ sichtbaren Figuren im normalen Formular sind die Bestätigung.
 
 **Ein Seitenaufruf legt nichts an** — auch nicht beim Neuladen oder
 Zurücknavigieren. Wer abbricht, hinterlässt keinen Einkauf.
+
+---
+
+## ADR-0133 · Ein Dialog, der im Layout hängt, schließt sich beim Navigieren selbst — und Abläufe werden geklickt, nicht gelesen
+
+**Status:** akzeptiert (Befund aus dem Browser-Test, 2026-10-24) ·
+**Umsetzung:** `saved-panel.tsx`, `calculator-modal.tsx`,
+`vitest.config.mts`, `calculator-navigation.test.tsx`
+
+### Der Befund
+
+„Einkauf erstellen" trug die richtige Adresse, navigierte auch — und
+sichtbar passierte nichts. Der Kalkulator blieb über der Zielseite stehen.
+
+Die Ursache ist die Baumstruktur, nicht der Router. `CalculatorLauncher`
+steht in `site-nav.tsx`, und `site-nav` steht in `(business)/layout.tsx`.
+Ein Weg von `/business/orderbuch` nach `/business/orderbuch/neu` tauscht nur
+die Seite aus; das Layout bleibt stehen, und mit ihm der Zustand `open`.
+`Modal` portaliert sich nach `document.body` und liegt dort als
+`fixed inset-0 z-50` — die Seite wechselte also **unter einem deckenden
+Vorhang**, und `body.style.overflow` blieb auf `hidden`.
+
+### Die Entscheidung
+
+**Ein Dialog, der eine Navigation auslösen kann, schließt sich dabei
+selbst.** Niemand nimmt ihm das ab: der Vorhang ist kein Kind der Seite, und
+die Seite weiß nichts von ihm.
+
+Umgesetzt mit `onNavigate` am Verweis, nicht mit `onClick`. Der Rückruf läuft
+nur bei einer echten clientseitigen Navigation; bei Cmd- oder Strg-Klick
+öffnet der Browser einen neuen Tab, und wer den Einkauf daneben aufmacht,
+will seine Kalkulation behalten. `next/link`s eigene Dokumentation nennt
+genau diesen Zweck.
+
+**Kein globaler Beobachter auf den Pfad.** Solange der Dialog offen ist, sind
+die Verweise in ihm die **einzigen** erreichbaren Navigationen — der Vorhang
+fängt jeden Zeiger ab, und Tab läuft im Panel im Kreis. Ein zweiter Ort, der
+`open` verändert, wäre eine zweite Wahrheit für dieselbe Frage.
+
+**Der Arbeitsstand ist dabei nicht in Gefahr.** Er liegt im Browser
+(`draft.ts`, ADR-0131) und wird vom Schließen nicht angefasst. Wer nach dem
+Einkauf zurückkommt, findet seine Positionen vor.
+
+### Und die zweite Hälfte: Abläufe werden geklickt
+
+Oberflächen wurden in diesem Projekt als **Quelltext** geprüft — ein
+`readFileSync` plus `toContain`. `purchase-from-calculation.test.ts` enthielt
+wörtlich die Erwartung, dass die Adresse im Panel steht. Diese Erwartung war
+richtig, ist richtig geblieben und hat den Fehler nicht gesehen: geprüft war
+die Adresse, nicht der Weg.
+
+Ab hier gilt: **ein Ablauf, der über mehr als ein Bauteil geht, wird
+gerendert und gedrückt.** `vitest.config.mts` sammelt dafür zusätzlich
+`*.test.tsx`; solche Dateien nennen ihre Umgebung selbst
+(`// @vitest-environment jsdom`), damit die übrigen Testdateien weiterhin
+ohne DOM und ohne dessen Kosten laufen. `jsdom` ist eine
+**Entwicklungsabhängigkeit** und kommt in kein Bündel.
+
+> **Was damit nicht behauptet ist.** Es läuft kein Browser und kein
+> Next-Server. `next/link` steht als Doppelgänger darin, der sich an den
+> dokumentierten Vertrag hält, und die Zielseite ist ein Platzhalter. Was
+> eine echte Seite aus der Kennung macht, prüfen `purchase-draft.test.ts`
+> und `tools/verify-purchase-from-calculation.mts` gegen die echte
+> Staging-Datenbank. Geprüft wird hier der Weg dazwischen — und genau der
+> war kaputt.
+
+### Konsequenzen
+
+- Jeder künftige Verweis in einem Dialog braucht `onNavigate`. Zwei Tests
+  halten das fest: einer zählt die Verdrahtung, einer klickt sie.
+- `0142`, `0143`, die Einkaufserstellung und die Richtlinien sind
+  **unberührt** — die Ursache lag nicht dort, und es wurde dort nichts
+  angefasst.

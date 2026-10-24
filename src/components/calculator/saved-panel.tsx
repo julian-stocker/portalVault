@@ -40,7 +40,7 @@ function kurzesDatum(iso: string): string {
 }
 
 export function SavedPanel({
-  state, calculations, onOpen, onRename, onDelete, onBack, onRetry,
+  state, calculations, onOpen, onRename, onDelete, onBack, onRetry, onLeave,
 }: {
   state: "loading" | "ready" | "failed";
   calculations: readonly SavedCalculation[];
@@ -49,6 +49,14 @@ export function SavedPanel({
   onDelete: (id: string) => void;
   onBack: () => void;
   onRetry: () => void;
+  /**
+   * Die Seite wird verlassen — das Fenster muss zu (V3.1).
+   *
+   * `onBack` wechselt die ANSICHT, dieser Rückruf verlässt den Kalkulator.
+   * Zwei verschiedene Dinge, deshalb zwei Rückrufe: der eine bleibt im
+   * Fenster, der andere gibt die Seite frei.
+   */
+  onLeave: () => void;
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2 sm:px-5 sm:py-3">
@@ -105,6 +113,7 @@ export function SavedPanel({
               onOpen={() => onOpen(calculation)}
               onRename={(name) => onRename(calculation.id, name)}
               onDelete={() => onDelete(calculation.id)}
+              onLeave={onLeave}
             />
           ))}
         </ul>
@@ -116,12 +125,13 @@ export function SavedPanel({
 /* --------------------------------------------------------------- Ein Eintrag */
 
 function SavedRow({
-  calculation, onOpen, onRename, onDelete,
+  calculation, onOpen, onRename, onDelete, onLeave,
 }: {
   calculation: SavedCalculation;
   onOpen: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
+  onLeave: () => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(calculation.name);
@@ -227,9 +237,36 @@ function SavedRow({
               andere steht in `0143` und gilt auch, wenn jemand die Adresse
               von Hand eintippt.
             */}
+            {/*
+              UND BEIM NAVIGIEREN GEHT DAS FENSTER ZU (V3.1).
+
+              DER FEHLER, DEN DAS BEHEBT. Der Verweis trug die richtige
+              Adresse und navigierte auch — sichtbar passierte trotzdem
+              nichts. `CalculatorLauncher` hängt in `site-nav.tsx` und die
+              steht in `(business)/layout.tsx`: ein Weg von
+              `/business/orderbuch` nach `/business/orderbuch/neu` tauscht
+              nur die Seite, das Layout bleibt stehen — und mit ihm der
+              Zustand `open`. `Modal` portaliert sich nach `document.body`
+              und liegt dort als `fixed inset-0 z-50`, also wechselte die
+              Seite UNTER einem deckenden Vorhang, und `body.style.overflow`
+              blieb auf `hidden`. Niemand nimmt dem Dialog das Schließen ab;
+              er muss es selbst tun.
+
+              `onNavigate` UND NICHT `onClick`, und das ist der Unterschied,
+              auf den es ankommt: der Rückruf läuft nur bei einer echten
+              clientseitigen Navigation. Bei Cmd- oder Strg-Klick läuft er
+              NICHT — dann öffnet der Browser einen neuen Tab, und wer den
+              Einkauf daneben aufmacht, will seine Kalkulation behalten.
+              So steht es in `next/link`s eigener Dokumentation, und sie
+              nennt genau diesen Zweck.
+
+              Der Arbeitsstand ist dabei nicht in Gefahr: er liegt im
+              Browser (`draft.ts`) und wird vom Schließen nicht angefasst.
+            */}
             {calculation.purchaseId === null ? (
               <Link
                 href={`/business/orderbuch/neu?kalkulation=${calculation.id}`}
+                onNavigate={onLeave}
                 className={`${ACTION_NEUTRAL} h-10 w-auto min-h-10 px-3 text-xs`}
               >
                 {copy.createPurchase}
@@ -237,6 +274,7 @@ function SavedRow({
             ) : (
               <Link
                 href={`/business/orderbuch/${calculation.purchaseId}`}
+                onNavigate={onLeave}
                 className={`${ACTION_NEUTRAL} h-10 w-auto min-h-10 px-3 text-xs`}
               >
                 {copy.viewPurchase}

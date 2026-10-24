@@ -274,6 +274,44 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### Calculator V3.1 — der Klick kam nicht an (2026-10-24, behoben)
+
+Der Browser-Test fand es sofort: „Einkauf erstellen" trug die richtige
+Adresse, navigierte auch — und **sichtbar passierte nichts.** Der Kalkulator
+blieb über der Zielseite stehen.
+
+**Die Ursache war die Baumstruktur, nicht der Router** (ADR-0133).
+`CalculatorLauncher` steht in `site-nav.tsx`, und `site-nav` steht in
+`(business)/layout.tsx`. Der Weg von `/business/orderbuch` nach
+`/business/orderbuch/neu` tauscht nur die Seite aus; das Layout bleibt
+stehen, und mit ihm der Zustand `open`. `Modal` portaliert sich nach
+`document.body` und liegt dort als `fixed inset-0 z-50` — die Seite
+wechselte also **unter einem deckenden Vorhang**, und `body.style.overflow`
+blieb auf `hidden`, die Zielseite hätte nicht einmal gerollt.
+
+**Behoben mit `onNavigate` an den beiden Verweisen**, nicht mit `onClick`:
+der Rückruf läuft nur bei einer echten clientseitigen Navigation, bei
+Cmd-Klick also nicht — wer den Einkauf in einem neuen Tab aufmacht, behält
+seine Kalkulation. Drei Zeilen Verdrahtung, sonst nichts: `0142`, `0143`,
+die Einkaufserstellung und die Richtlinien sind unberührt.
+
+**Warum kein Test das gefunden hat, und was sich daran geändert hat.**
+Oberflächen wurden hier als **Quelltext** geprüft — `toContain` auf die
+Adresse. Diese Erwartung war richtig und ist richtig geblieben; geprüft war
+die Adresse, nicht der Weg. Seit V3.1 sammelt `vitest.config.mts` auch
+`*.test.tsx`, und `calculator-navigation.test.tsx` **rendert und klickt
+wirklich** (jsdom, 15 Prüfungen): das Fenster geht auf, der Verweis wird
+gedrückt, und danach ist der Dialog **fort**, der Vorhang weg, das Rollen
+zurück und der Arbeitsstand noch da. Ein Cmd-Klick lässt ihn ausdrücklich
+offen; zweimal drücken erzeugt keinen Vorgang.
+
+| | |
+|---|---|
+| Geändert | `saved-panel.tsx` (zwei `onNavigate`, ein `onLeave`), `calculator-modal.tsx` (`onLeave={close}`), `vitest.config.mts` |
+| Neu | `calculator-navigation.test.tsx` — 15 Prüfungen mit echtem DOM; `jsdom` als Entwicklungsabhängigkeit (kommt in kein Bündel) |
+| Unberührt | Rechnung, Speichern, Entwurf/gespeichert, Reihenfolge, Rückfragen, Datenbank, RLS, `0142`, `0143` |
+| Stand | 287 Testdateien, **11 211 Tests** grün; `npm run check` ohne Fehler (49/49 Probeläufe, 64 SQL-Dateien geplant) |
+
 ### Calculator V2 — vorbereitet am 2026-10-22, nicht angewendet, nicht deployt
 
 Der Kalkulator behält jetzt zwei Dinge auseinander (ADR-0131): den

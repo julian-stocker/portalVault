@@ -251,6 +251,15 @@ describe("6. der Weg dorthin trägt nur eine Kennung", () => {
   const seite = readFileSync("src/app/(business)/business/orderbuch/neu/page.tsx", "utf8");
 
   it("die Liste verweist auf das bestehende Formular, mit der ID als Parameter", () => {
+    /*
+     * DIESE ZEILE WAR RICHTIG UND HAT NICHT GEREICHT (V3.1).
+     *
+     * Die Adresse stand im Quelltext, der Klick kam im Browser trotzdem
+     * nicht an: der Dialog blieb offen und verdeckte die Zielseite. Ein
+     * Quelltextvergleich kann das nicht sehen. Was es sieht, steht seit V3.1
+     * in `components/calculator/calculator-navigation.test.tsx` — dort wird
+     * wirklich gerendert und wirklich geklickt.
+     */
     expect(panel).toContain("/business/orderbuch/neu?kalkulation=${calculation.id}");
     /* Keine Artikelliste in der Adresse. */
     expect(panel).not.toContain("lines=");
@@ -287,6 +296,21 @@ describe("6. der Weg dorthin trägt nur eine Kennung", () => {
     expect(panel).toContain("{copy.viewPurchase}");
     expect(de.calculator.createPurchase).toBe("Einkauf erstellen");
     expect(de.calculator.viewPurchase).toBe("Einkauf ansehen");
+  });
+
+  it("und beide Wege schließen das Fenster, wenn sie navigieren", () => {
+    /*
+     * Zwei `onNavigate`, eines je Verweis. `onNavigate` und NICHT `onClick`:
+     * bei Cmd- oder Strg-Klick öffnet der Browser einen neuen Tab, und der
+     * Rückruf läuft dann laut `next/link`s Dokumentation nicht — die
+     * Kalkulation bleibt stehen. Der Ablauf selbst ist in
+     * `calculator-navigation.test.tsx` geklickt; hier steht, dass die
+     * Verdrahtung nicht wieder verschwindet.
+     */
+    expect(panel.match(/onNavigate=\{onLeave\}/g)).toHaveLength(2);
+    expect(panel).not.toContain("onClick={onLeave}");
+    const modal = readFileSync("src/components/calculator/calculator-modal.tsx", "utf8");
+    expect(modal).toContain("onLeave={close}");
   });
 
   it("und im Orderbuch entsteht kein neues Bedienelement für die Übernahme", () => {

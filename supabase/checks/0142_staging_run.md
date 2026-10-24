@@ -319,3 +319,23 @@ Zeilen rot**, weil das Stub-Schema alle Signaturen anlegt und keine
 | ☐ | Abbrechen statt speichern → **kein** Einkauf, Kalkulation zeigt weiter „Einkauf erstellen" |
 | ☐ | „+ Neu" ohne Kalkulation → leeres Formular wie immer |
 | ☐ | Die vier Geldfelder sind leer, auch bei einer Kalkulation über 300 € |
+| ☐ | Beim Klick **schließt sich der Kalkulator** und das Formular steht frei da (siehe Nachtrag) |
+
+### Nachtrag 2026-10-24 — hier ist der erste Durchlauf hängengeblieben
+
+„Einkauf erstellen" trug die richtige Adresse, navigierte auch, und **es
+passierte sichtbar nichts**: der Kalkulator blieb über der Zielseite stehen.
+
+Der Grund: `CalculatorLauncher` hängt in `site-nav.tsx` und die in
+`(business)/layout.tsx`. Innerhalb von `/business/*` tauscht eine Navigation
+nur die Seite aus, das Layout bleibt — und `Modal` liegt als
+`fixed inset-0 z-50` über allem. Die Seite wechselte unter einem deckenden
+Vorhang; `body.style.overflow` blieb auf `hidden`.
+
+Behoben (ADR-0133, V3.1): die beiden Verweise schließen das Fenster über
+`onNavigate`. **An `0142`, `0143`, der Einkaufserstellung und den
+Richtlinien wurde nichts geändert** — die Ursache lag nicht dort. Geprüft
+wird es jetzt mit echtem Klick in `calculator-navigation.test.tsx`.
+
+Beim Nachtesten also eine Zeile mehr: nach dem Klick muss das Formular
+**frei** stehen, und die Seite muss rollen.

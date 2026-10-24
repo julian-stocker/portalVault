@@ -761,6 +761,13 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
             onDelete={(id) => void remove(id)}
             onBack={() => setView("calc")}
             onRetry={() => { setListState("loading"); void refreshList(); }}
+            /*
+             * Die Verweise ins Orderbuch verlassen diese Seite — dann muss
+             * das Fenster zu, sonst liegt es über der Zielseite (V3.1).
+             * `close` und nicht `onClose`: eine begonnene Rückfrage gilt
+             * nicht für das nächste Öffnen.
+             */
+            onLeave={close}
           />
         ) : (
         <>
