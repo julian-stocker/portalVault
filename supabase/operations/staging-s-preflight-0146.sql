@@ -183,7 +183,11 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (107, 'Grundlage', 'reservation_ttl() steht (0010) — daraus leitet S2 die Karenzzeit ab',
       (to_regprocedure('public.reservation_ttl()') is not null)::text, 'true'),
   (108, 'Grundlage', 'Info: und sie ist',
-      (select public.reservation_ttl()::text), null),
+      case when has_function_privilege('public.reservation_ttl()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+                  'select public.reservation_ttl()::text as c',
+                  false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
   (109, 'Grundlage', 'available_quantity ist weiterhin eine GENERIERTE Spalte',
       (select is_generated from information_schema.columns
         where table_schema = 'public' and table_name = 'shop_inventory'
@@ -242,16 +246,30 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
    * Nachkontrolle davon ab, hat sich der Shop zwischen den Blaettern bewegt.
    */
   (131, 'Spiegel', 'Info: Figuren mit mindestens einem kaufbaren Angebot',
-      (select count(distinct o.sky_id)::text from public.shop_offers() o
-        where o.available and o.condition = public.v1_sale_condition()), null),
+      case when has_function_privilege('public.v1_sale_condition()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+                  'select count(distinct o.sky_id) as c from public.shop_offers() o '
+                  'where o.available and o.condition = public.v1_sale_condition()',
+                  false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
   (132, 'Spiegel', 'Info: Zeilen in shop_offers() insgesamt',
       (select count(*)::text from public.shop_offers()), null),
   (133, 'Spiegel', 'Info: davon ausverkauft (available = false)',
       (select count(*)::text from public.shop_offers() o where not o.available), null),
+  /*
+   * `coalesce` BLEIBT AUSSEN. Mit `nulls = false` laesst `query_to_xml` eine
+   * NULL-Spalte weg, `xpath` liefert dann ein leeres Array und `[1]` ist
+   * NULL — also genau der Fall „kein kaufbares Angebot", und er heisst
+   * weiterhin `(keiner)` und nicht `KEIN-RECHT`. Zwei verschiedene Dinge
+   * duerfen nicht denselben Namen bekommen.
+   */
   (134, 'Spiegel', 'Info: guenstigster kaufbarer Preis in Cent, ueber alle Figuren',
-      coalesce((select min(round(o.price * 100))::text from public.shop_offers() o
-                 where o.available and o.condition = public.v1_sale_condition()),
-               '(keiner)'), null),
+      case when has_function_privilege('public.v1_sale_condition()', 'execute')
+           then coalesce((xpath('/row/c/text()', query_to_xml(
+                  'select min(round(o.price * 100)) as c from public.shop_offers() o '
+                  'where o.available and o.condition = public.v1_sale_condition()',
+                  false, true, '')))[1]::text, '(keiner)')
+           else 'KEIN-RECHT' end, null),
 
   -- --------------------------- Die Zahlen des Betriebs (Basis-Vertrag)
   (301, 'Shop', 'oeffentliche Angebote',
@@ -317,12 +335,28 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select zeile from coll_zeile), null)
 ),
 ergebnis as (
+  /*
+   * DREI ZUSTAENDE, NICHT ZWEI (ADR-0139).
+   *
+   *   ok = true   die Pruefung stimmt
+   *   ok = false  sie weicht ab           → zaehlt in 9999, blockiert
+   *   ok = null   Auskunft ODER OFFEN     → zaehlt nicht in 9999
+   *
+   * `KEIN-RECHT` heisst: diese Zeile greift auf ein Objekt zu, auf das die
+   * aufrufende Rolle kein Recht hat. Das ist KEINE Abweichung, sondern eine
+   * nicht durchgefuehrte Pruefung — Zeile 9998 zaehlt sie.
+   */
   select nr, bereich, pruefung, befund, erwartet,
-         case when erwartet is null then null
+         case when befund = 'KEIN-RECHT' then null
+              when erwartet is null then null
               else befund is not distinct from erwartet end as ok
     from pruef
 )
 select nr, bereich, pruefung, befund, erwartet, ok from ergebnis
+union all
+select 9998, 'GESAMT', 'Zeilen, die diese Rolle nicht lesen durfte '
+       '(0 = vollstaendig geprueft)',
+       (select count(*) from ergebnis where befund = 'KEIN-RECHT')::text, null, null
 union all
 select 9999, 'GESAMT', 'blockierende Abweichungen (muss 0 sein)',
        (select count(*) from ergebnis where ok is false)::text, '0',

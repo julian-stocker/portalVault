@@ -985,7 +985,7 @@ describe("offene Zeilen sind weder bestanden noch abgewichen", () => {
 describe("die Pruefdatei von 0146 traegt das Rechtevorzeichen", () => {
   const datei = readFileSync("supabase/checks/0146_postflight.sql", "utf8");
 
-  it("beide Datenzeilen stehen hinter has_table_privilege", () => {
+  it("die beiden Datenzeilen stehen hinter has_table_privilege", () => {
     for (const objekt of ["offer_state", "offer_state_live"]) {
       expect(datei).toContain(`has_table_privilege('public.${objekt}', 'select')`);
     }
@@ -993,15 +993,44 @@ describe("die Pruefdatei von 0146 traegt das Rechtevorzeichen", () => {
     expect(datei).not.toMatch(/\(select count\(\*\)::text from public\.offer_state\b/);
   });
 
-  it("sie lesen ueber query_to_xml — sonst bricht der Plan trotzdem ab", () => {
+  it("und der Funktionsaufruf hinter has_function_privilege (Zeile 142)", () => {
+    /*
+     * DER FALL, DER NACH DEN TABELLEN UEBRIG BLIEB. Zeile 142 ruft
+     * `offer_state_window()` auf; `0146` entzieht PUBLIC das
+     * Ausfuehrungsrecht, und der Pruefzugang hat es nicht erteilt bekommen.
+     */
+    expect(datei).toContain(
+      "has_function_privilege('public.offer_state_window()', 'execute')");
+    expect(datei).not.toMatch(/\(select public\.offer_state_window\(\)::text\)/);
+  });
+
+  it("alles drei liest ueber query_to_xml — sonst bricht der Plan trotzdem ab", () => {
     /*
      * NACHGEMESSEN, und das ist der ganze Trick: PostgreSQL prueft die
-     * Rechte ALLER Relationen des Plans beim Ausfuehrungsstart, auch im
-     * nicht genommenen `case`-Zweig. Ein blosses `case` bricht also
-     * trotzdem ab. `query_to_xml` haelt die Relation aus dem Plan heraus.
+     * Rechte ALLER Relationen UND aller Funktionen eines Plans beim
+     * Ausfuehrungsstart, auch im nicht genommenen `case`-Zweig — bei
+     * Funktionen genauso wie bei Tabellen, und selbst wenn der Aufruf nur im
+     * `where` einer Unterabfrage steht. Ein blosses `case` bricht also
+     * trotzdem ab. `query_to_xml` haelt den Zugriff aus dem Plan heraus.
      */
     expect(datei).toContain("query_to_xml(");
-    expect(datei).toContain("ALLER Relationen des Plans");
+    expect(datei).toContain("ALLER Relationen UND aller Funktionen");
+    /* Drei geschuetzte Stellen, also drei Rueckfallwerte. */
+    expect(datei.match(/else 'KEIN-RECHT' end/g)).toHaveLength(3);
+  });
+
+  it("und der Preflight genauso — er waere als Naechstes gescheitert", () => {
+    /*
+     * `reservation_ttl()` (0010) und `v1_sale_condition()` (0028) sind
+     * PUBLIC ebenfalls entzogen. Der Preflight von `0146` ruft beide auf;
+     * ohne diesen Schutz haette die naechste Wiederaufnahme dort
+     * angeschlagen.
+     */
+    const pre = readFileSync("supabase/checks/0146_preflight.sql", "utf8");
+    expect(pre).toContain("has_function_privilege('public.reservation_ttl()', 'execute')");
+    expect(pre).toContain("has_function_privilege('public.v1_sale_condition()', 'execute')");
+    expect(pre).toContain("select 9998, 'GESAMT'");
+    expect(pre).toContain("case when befund = 'KEIN-RECHT' then null");
   });
 
   it("KEIN-RECHT zaehlt in 9998 und NICHT in 9999", () => {
@@ -1023,96 +1052,167 @@ describe("die Pruefdatei von 0146 traegt das Rechtevorzeichen", () => {
 
 describe("der Waechter: eine neue Migration faellt beim Schreiben auf", () => {
   /**
-   * Die zwoelf Tabellen, auf die der lesende Pruefzugang `select` hat —
-   * aus `staging-agent-setup.sql`, nicht aus einer zweiten Liste.
+   * Was der lesende Pruefzugang DARF — aus `staging-agent-setup.sql`
+   * gelesen, nicht abgeschrieben. Eine zweite Liste waere eine zweite
+   * Wahrheit.
    */
-  const erteilt = (): Set<string> => {
-    const setup = readFileSync("supabase/operations/staging-agent-setup.sql", "utf8");
-    return new Set([...setup.matchAll(
-      /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]));
-  };
+  const setup = readFileSync("supabase/operations/staging-agent-setup.sql", "utf8");
+  const tabellen = new Set([...setup.matchAll(
+    /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]));
+  const funktionen = new Set([...setup.matchAll(
+    /grant execute on function public\.(\w+)\s*\([^)]*\)\s+to skyisles_agent/g)]
+    .map((m) => m[1]));
 
-  /** Alle Tabellen und Sichten, die die Migrationen anlegen. */
-  const objekte = (): Set<string> => {
-    const namen = new Set<string>();
+  /** Alles, was die Migrationen anlegen: Tabellen, Sichten, Funktionen. */
+  const angelegt = (() => {
+    const tab = new Set<string>();
+    const fn = new Set<string>();
     for (const f of readdirSync("supabase/migrations").filter((x) => x.endsWith(".sql"))) {
       const t = readFileSync(join("supabase/migrations", f), "utf8");
       for (const m of t.matchAll(
         /create\s+(?:or replace\s+)?(?:table|view|materialized view)\s+(?:if not exists\s+)?public\.(\w+)/gi)) {
-        namen.add(m[1]);
+        tab.add(m[1]);
       }
+      for (const m of t.matchAll(
+        /create\s+(?:or replace\s+)?function\s+public\.(\w+)\s*\(/gi)) fn.add(m[1]);
     }
-    return namen;
+    return { tab, fn };
+  })();
+
+  /**
+   * Die direkten Zugriffe einer Pruefdatei — und nur die direkten.
+   *
+   * ZUERST FLIEGEN ALLE ZEICHENKETTEN HERAUS, und das ist der ganze Kniff.
+   * Was in Anfuehrungszeichen steht, ist kein Zugriff im Plan: weder
+   * `to_regprocedure('public.v1_sale_condition()')` (eine Katalogabfrage)
+   * noch die geschuetzte Form `query_to_xml('select … from public.x')`. Was
+   * danach uebrig bleibt, referenziert PostgreSQL wirklich beim Planen — und
+   * genau darauf prueft es die Rechte beim Ausfuehrungsstart.
+   *
+   * Die erste Fassung dieses Waechters sah nur `from`/`join`. Ein
+   * FUNKTIONSAUFRUF passt auf kein solches Muster, und deshalb fiel
+   * `offer_state_window()` in Zeile 142 durch — der naechste Fehlschlag bei
+   * der naechsten Wiederaufnahme.
+   */
+  const direkt = (sql: string): { tabellen: string[]; funktionen: string[] } => {
+    const text = sql
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/^\s*--.*$/gm, " ")
+      .replace(/\$(\w*)\$[\s\S]*?\$\1\$/g, " ")
+      .replace(/'(?:[^']|'')*'/g, "''");
+    return {
+      tabellen: [...text.matchAll(/(?:from|join)\s+public\.(\w+)/gi)].map((m) => m[1]),
+      funktionen: [...text.matchAll(/public\.(\w+)\s*\(/g)].map((m) => m[1]),
+    };
   };
 
-  it("der Pruefzugang hat select auf genau zwoelf Tabellen", () => {
-    expect(erteilt().size).toBe(12);
-    expect(erteilt().has("offer_state")).toBe(false);
-    expect(erteilt().has("favorites")).toBe(false);
+  it("der Pruefzugang hat select auf zwoelf Tabellen und execute auf drei Funktionen", () => {
+    expect(tabellen.size).toBe(12);
+    expect(funktionen.size).toBe(3);
+    expect(tabellen.has("offer_state")).toBe(false);
+    expect(tabellen.has("favorites")).toBe(false);
+    expect(funktionen.has("offer_state_window")).toBe(false);
   });
 
-  it("jede Datei aus migration-plans.json liest nur Erlaubtes — oder geschuetzt", () => {
+  it("jede Datei aus migration-plans.json greift nur auf Erlaubtes direkt zu", () => {
     /*
      * DER STRUKTURELLE TEIL DER BEHEBUNG.
      *
      * Dieser Test faellt um, sobald eine Pruefdatei, die der Runner fahrt,
-     * ein ungeteiltes Objekt UNGESCHUETZT liest. Dann ist zur Wahl: die
-     * Zeile hinter `has_table_privilege` + `query_to_xml` setzen (so wie
-     * `0146`), oder sie gar nicht aus Daten beantworten. Was NICHT zur Wahl
+     * ein ungeteiltes Objekt UNGESCHUETZT liest ODER eine ungeteilte
+     * Funktion UNGESCHUETZT aufruft. Dann ist zur Wahl: die Zeile hinter
+     * `has_table_privilege` / `has_function_privilege` + `query_to_xml`
+     * setzen, oder sie gar nicht aus Daten beantworten. Was NICHT zur Wahl
      * steht, ist dem Pruefzugang ein Recht mehr zu geben — sonst ist er in
      * zwanzig Migrationen ein Vollleser.
      *
-     * Erkannt wird „ungeschuetzt" so: alle `query_to_xml('…')`-Zeichenketten
-     * herausnehmen, dann nach `from public.<objekt>` suchen. Was in einer
-     * dynamischen Abfrage steht, ist aus dem Plan heraus und damit
-     * geschuetzt.
+     * WARUM AUCH `v1_sale_condition()` UND `reservation_ttl()` DAZU ZAEHLEN,
+     * obwohl sie nicht zu `0146` gehoeren: die Migrationen entziehen PUBLIC
+     * ausdruecklich das Ausfuehrungsrecht (`0028` bzw. `0010`), und der
+     * Pruefzugang hat es nicht erteilt bekommen. Gezaehlt wird, was ihm
+     * AUSDRUECKLICH erteilt ist — sich auf ein Standardrecht zu verlassen,
+     * waere ein Zufall, der bei der naechsten Haertung endet.
      */
-    const frei = erteilt();
-    const alle = objekte();
-    const plaene = ladePlaene();
     const funde: string[] = [];
-
-    for (const [nummer, plan] of Object.entries(plaene)) {
+    for (const [nummer, plan] of Object.entries(ladePlaene())) {
       for (const datei of [plan.preflight, plan.postflight]) {
-        const roh = readFileSync(join("supabase/checks", datei), "utf8");
-        /* Kommentare und dynamische Abfragen heraus. */
-        const text = roh
-          .replace(/\/\*[\s\S]*?\*\//g, " ")
-          .replace(/^\s*--.*$/gm, " ")
-          .replace(/query_to_xml\(\s*'(?:[^']|'')*'/g, "query_to_xml(''");
-        for (const m of text.matchAll(/(?:from|join)\s+public\.(\w+)/gi)) {
-          const o = m[1];
-          if (alle.has(o) && !frei.has(o)) funde.push(`${nummer} ${datei}: public.${o}`);
+        const z = direkt(readFileSync(join("supabase/checks", datei), "utf8"));
+        for (const t of new Set(z.tabellen)) {
+          if (angelegt.tab.has(t) && !tabellen.has(t)) {
+            funde.push(`${nummer} ${datei}: Tabelle public.${t}`);
+          }
+        }
+        for (const f of new Set(z.funktionen)) {
+          if (angelegt.fn.has(f) && !funktionen.has(f)) {
+            funde.push(`${nummer} ${datei}: Funktion public.${f}()`);
+          }
         }
       }
     }
-    expect(funde, "ungeschuetzter Lesezugriff auf ein ungeteiltes Objekt")
+    expect(funde, "ungeschuetzter direkter Zugriff auf ein ungeteiltes Objekt")
       .toEqual([]);
   });
 
-  it("und der Waechter erkennt einen ungeschuetzten Zugriff wirklich", () => {
-    /*
-     * Ein Waechter, der nie etwas findet, ist kein Waechter. Gegenprobe an
-     * einem erfundenen Text: ohne Schutz gefunden, mit Schutz nicht.
-     */
-    const frei = erteilt();
-    const pruefe = (sql: string): string[] => {
-      const text = sql
-        .replace(/\/\*[\s\S]*?\*\//g, " ")
-        .replace(/^\s*--.*$/gm, " ")
-        .replace(/query_to_xml\(\s*'(?:[^']|'')*'/g, "query_to_xml(''");
-      return [...text.matchAll(/(?:from|join)\s+public\.(\w+)/gi)]
-        .map((m) => m[1]).filter((o) => !frei.has(o));
+  describe("und er erkennt die Faelle wirklich — Gegenproben", () => {
+    const fund = (sql: string) => {
+      const z = direkt(sql);
+      return [
+        ...new Set(z.tabellen.filter((t) => angelegt.tab.has(t) && !tabellen.has(t))),
+        ...new Set(z.funktionen.filter((f) => angelegt.fn.has(f) && !funktionen.has(f))),
+      ];
     };
-    expect(pruefe("select count(*) from public.offer_state")).toEqual(["offer_state"]);
-    expect(pruefe(
-      "select case when has_table_privilege('public.offer_state','select')\n"
-      + " then (xpath('/row/c/text()', query_to_xml(\n"
-      + "   'select count(*) as c from public.offer_state', false, true, '')))[1]::text\n"
-      + " else 'KEIN-RECHT' end")).toEqual([]);
-    /* Ein Kommentar darueber taeuscht ihn nicht. */
-    expect(pruefe("-- from public.offer_state\nselect 1")).toEqual([]);
-    /* Eine erlaubte Tabelle ist kein Fund. */
-    expect(pruefe("select count(*) from public.skylanders")).toEqual([]);
+
+    it("ungeschuetzter Tabellenzugriff → gefunden", () => {
+      expect(fund("select count(*) from public.offer_state")).toEqual(["offer_state"]);
+    });
+
+    it("ungeschuetzter SICHTzugriff → gefunden", () => {
+      expect(fund("select count(*) from public.offer_state_live"))
+        .toEqual(["offer_state_live"]);
+    });
+
+    it("ungeschuetzter FUNKTIONSAUFRUF → gefunden (der Fall von Zeile 142)", () => {
+      expect(fund("select public.offer_state_window()::text"))
+        .toEqual(["offer_state_window"]);
+    });
+
+    it("ein Aufruf im `where` einer Unterabfrage → auch gefunden", () => {
+      /* Dort stand `v1_sale_condition()` im Preflight — und auch so bricht
+         die Anweisung ab, nachgemessen. */
+      expect(fund("select count(*) from public.shop_offers() o "
+        + "where o.condition = public.v1_sale_condition()"))
+        .toEqual(["v1_sale_condition"]);
+    });
+
+    it("geschuetzt ueber query_to_xml → NICHT gefunden", () => {
+      expect(fund(
+        "select case when has_function_privilege('public.offer_state_window()', 'execute')\n"
+        + " then (xpath('/row/c/text()', query_to_xml(\n"
+        + "   'select public.offer_state_window()::text as c', false, true, '')))[1]::text\n"
+        + " else 'KEIN-RECHT' end")).toEqual([]);
+    });
+
+    it("eine Katalogabfrage in Anfuehrungszeichen → NICHT gefunden", () => {
+      expect(fund("select to_regprocedure('public.offer_state_window()') is not null"))
+        .toEqual([]);
+      expect(fund("select prosrc like '%public.offer_state_window()%' from pg_proc"))
+        .toEqual([]);
+    });
+
+    it("was erteilt ist → NICHT gefunden", () => {
+      expect(fund("select count(*) from public.skylanders")).toEqual([]);
+      expect(fund("select count(*) from public.shop_offers()")).toEqual([]);
+      expect(fund("select public.is_shop_eligible('SKY-0001')")).toEqual([]);
+    });
+
+    it("ein Kommentar taeuscht ihn nicht", () => {
+      expect(fund("-- select public.offer_state_window()\nselect 1")).toEqual([]);
+      expect(fund("/* from public.offer_state */ select 1")).toEqual([]);
+    });
+
+    it("und etwas, das die Migrationen gar nicht anlegen, ist kein Fund", () => {
+      expect(fund("select count(*) from public.gibt_es_nicht")).toEqual([]);
+      expect(fund("select now(), count(*) from pg_proc")).toEqual([]);
+    });
   });
 });

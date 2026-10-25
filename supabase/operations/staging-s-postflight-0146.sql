@@ -111,23 +111,33 @@ select set_config('skyisles.coll', 'SAMMLUNG-HIER-EINSETZEN', true);
 -- und genau deshalb zaehlt ein nicht ersetzter Platzhalter wie eine fehlende
 -- Zeile. Sonst waere die Bequemlichkeit die Luecke im Riegel.
 --
--- ZWEI ZEILEN BRAUCHEN MEHR RECHTE ALS DER PRUEFZUGANG HAT — 124 und 161.
--- Sie lesen `offer_state` bzw. `offer_state_live`, und darauf hat `0146`
--- bewusst KEIN Clientrecht erteilt; der lesende Pruefzugang
--- `skyisles_agent` hat es auch nicht. Damit ein fehlendes Recht nicht
--- hundert gute Pruefungen mitnimmt, stehen beide hinter
--- `has_table_privilege(...)` und lesen ueber `query_to_xml(...)`:
+-- DREI ZEILEN BRAUCHEN MEHR RECHTE ALS DER PRUEFZUGANG HAT — 124, 142, 161.
+--
+--   124, 161   lesen `offer_state_live` bzw. `offer_state`
+--   142        RUFT `offer_state_window()` AUF
+--
+-- Auf keines davon hat `0146` ein Clientrecht erteilt, und der lesende
+-- Pruefzugang `skyisles_agent` hat es auch nicht (er hat `select` auf zwoelf
+-- Tabellen und `execute` auf drei Funktionen). Damit ein fehlendes Recht
+-- nicht hundert gute Pruefungen mitnimmt, stehen alle drei hinter einer
+-- Rechteabfrage und lesen ueber `query_to_xml(...)`:
 --
 --   * Ohne Recht liefern sie `KEIN-RECHT`. Das ist KEINE Abweichung, sondern
 --     eine nicht durchgefuehrte Pruefung — **Zeile 9998 zaehlt sie**.
 --   * Im SQL-Editor (als `postgres`) liefern sie den echten Wert, und 9998
 --     ist 0.
 --
+-- TABELLE ODER FUNKTION — DASSELBE MUSTER. `has_table_privilege(...)` bzw.
+-- `has_function_privilege(...)` als Vorbedingung, der Zugriff im
+-- `query_to_xml`.
+--
 -- Warum `query_to_xml` und nicht nur `case`: PostgreSQL prueft die Rechte
--- ALLER Relationen des Plans beim Ausfuehrungsstart, auch im nicht genommenen
--- Zweig. Nachgemessen — ein blosses `case` bricht trotzdem ab. `query_to_xml`
--- haelt die Relation aus dem Plan heraus. Ein Tippfehler darin faellt beim
--- berechtigten Lauf auf, also in `verify:check-sql` (P53).
+-- ALLER Relationen UND aller Funktionen eines Plans beim Ausfuehrungsstart,
+-- auch im nicht genommenen Zweig. Nachgemessen — ein blosses `case` bricht
+-- trotzdem ab, und zwar bei Funktionen genauso wie bei Tabellen, selbst wenn
+-- der Aufruf nur im `where` einer Unterabfrage steht. `query_to_xml` haelt
+-- den Zugriff aus dem Plan heraus. Ein Tippfehler darin faellt beim
+-- berechtigten Lauf auf, also in `verify:check-sql` (P54).
 --
 -- Der SQL-Editor zeigt `NOTICE`-Meldungen nicht an; diese Datei gibt deshalb
 -- eine Tabelle aus und keine Meldungen.
@@ -445,7 +455,11 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
         where p.oid = to_regprocedure('public.offer_state_window()')),
         '(keine Funktion)'), '0'),
   (142, 'Funktion', 'Info: und das Drosselfenster ist',
-      (select public.offer_state_window()::text), null),
+      case when has_function_privilege('public.offer_state_window()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+                  'select public.offer_state_window()::text as c',
+                  false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
 
   -- -------------------------------- Die Migration hat nichts geschrieben
   (161, 'Leer', 'die Migration hat KEINE Zeile angelegt — die Erstbefuellung '

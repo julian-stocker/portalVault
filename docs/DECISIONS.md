@@ -13331,3 +13331,54 @@ Nachkontrolle) · die Datenzeilen aus der Nachkontrolle **streichen** (das ist
 die stille Ignorierung, gegen die hier alles gebaut ist) · die Nachkontrolle
 in zwei Dateien teilen (zwei Ergebnisblätter, und das zweite wird vergessen) ·
 `reltuples` statt `count(*)` (eine Schätzung ist kein Nachweis).
+
+### Nachtrag 2026-10-25 · Funktionen auch, und der Wächter sah sie nicht
+
+Die nächste Wiederaufnahme scheiterte mit `permission denied for function
+offer_state_window`. **Dieselbe Ursache, eine zu enge Umsetzung:** die
+Nachkontrolle liest nicht nur, sie **ruft** auch auf — Zeile 142
+`select public.offer_state_window()`. Der Schutz deckte Tabellen und Sichten,
+nicht Funktionen, und der Wächter suchte nach `from`/`join`. **Ein
+Funktionsaufruf passt auf kein solches Muster.**
+
+Dass es zwei Anläufe brauchte, lag am Wächter, nicht am Mechanismus. Also ist
+nicht der Mechanismus geändert worden, sondern seine Reichweite:
+
+**1. Dasselbe Muster, beide Objektarten.** `has_table_privilege(…)` bzw.
+`has_function_privilege(…)` als Vorbedingung, der Zugriff im `query_to_xml`.
+Nachgemessen: bei Funktionen hilft ein bloßes `case` **genauso wenig** wie bei
+Tabellen — die Rechte werden beim Ausführungsstart für alle Funktionen des
+Plans geprüft, selbst wenn der Aufruf nur im `where` einer Unterabfrage steht.
+
+**2. Der Wächter streicht jetzt zuerst alle Zeichenketten.** Was in
+Anführungszeichen steht, ist kein Zugriff im Plan — weder
+`to_regprocedure('public.v1_sale_condition()')` (eine Katalogabfrage) noch die
+geschützte Form `query_to_xml('select … from public.x')`. Was danach übrig
+bleibt, referenziert PostgreSQL wirklich. Das ist einfacher **und** weiter als
+die erste Fassung, und es erkennt Tabellen, Sichten und Funktionsaufrufe mit
+derselben Regel. Neun Gegenproben halten fest, dass er jeden Fall findet und
+keinen erfindet.
+
+**3. Der Preflight von `0146` war als Nächstes fällig.** Er ruft
+`reservation_ttl()` (0010) und `v1_sale_condition()` (0028) auf, und beiden ist
+PUBLIC das Ausführungsrecht **ausdrücklich entzogen**. Gezählt wird, was dem
+Prüfzugang **ausdrücklich erteilt** ist — sich auf ein Standardrecht zu
+verlassen, wäre ein Zufall, der bei der nächsten Härtung endet. Auch der
+Preflight hat jetzt die drei Zustände und Zeile 9998.
+
+**4. P54 bildet den echten Rechtezustand nach — das war die eigentliche
+Lücke.** PostgreSQL erteilt auf eine neue Funktion automatisch `EXECUTE TO
+PUBLIC`; die Migrationen entziehen das, das Stub-Schema nicht. Der Probelauf
+hatte deshalb grün gemeldet für einen Zustand, den es auf Staging nicht gibt —
+**so ist der Aufruf durch alle Netze gefallen.** Jetzt wendet P54 die Entzüge
+**aller** Migrationen an (314 Funktionen), erteilt der Prüfrolle genau die
+zwölf Tabellen und drei Funktionen, und fährt **jede** in
+`migration-plans.json` genannte Datei: läuft sie durch, und stimmt ihre eigene
+Zählung in 9998 mit der Zahl der `KEIN-RECHT`-Zeilen? Dazu zwei Gegenproben,
+die ohne Schutz wörtlich `permission denied for view offer_state_live` und
+`permission denied for function offer_state_window` reproduzieren.
+
+**Die Lehre, und sie ist keine über SQL:** ein Probelauf, der eine *mildere*
+Welt nachbildet als die echte, meldet grün und beweist nichts. Beide
+Fehlschläge wären in einem Lauf gefunden worden, hätte P54 von Anfang an die
+Entzüge mit angewendet.
