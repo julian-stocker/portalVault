@@ -32,12 +32,21 @@ const quelle = (p: string): string => readFileSync(p, "utf8");
 
 /* ------------------------------------------------- die Maße aus dem Bauteil */
 
-/** Eine Tailwind-Spur wie `h-11` oder `h-[22px]` in Pixel. */
-function px(klasse: string, text: string): number {
+/**
+ * Eine Tailwind-Spur wie `h-11` oder `h-[22px]` in Pixel.
+ *
+ * `fehlt` ist der Wert fuer eine Klasse, die es nicht gibt. Ohne ihn warf
+ * diese Funktion, als das Polster am Knopf auf 0 fiel — und „keine Klasse
+ * `p-…`" heisst hier genau „kein Polster", nicht „Fehler".
+ */
+function px(klasse: string, text: string, fehlt?: number): number {
   const eckig = new RegExp(`${klasse}-\\[(\\d+)px\\]`).exec(text);
   if (eckig) return Number(eckig[1]);
   const spur = new RegExp(`${klasse}-(\\d+(?:\\.\\d+)?)\\b`).exec(text);
-  if (!spur) throw new Error(`keine Klasse ${klasse}-… gefunden`);
+  if (!spur) {
+    if (fehlt !== undefined) return fehlt;
+    throw new Error(`keine Klasse ${klasse}-… gefunden`);
+  }
   /* Tailwinds Skala: 1 = 0.25rem = 4 px. */
   return Number(spur[1]) * 4;
 }
@@ -51,10 +60,14 @@ const SYMBOL = herz.slice(herz.indexOf("const SYMBOL ="), herz.indexOf("export f
 const GLYPH = px("h", SYMBOL);
 /** Die Trage-/Klickfläche. */
 const FLAECHE = px("h", KNOPF);
-/** Der Abstand des Glyphs zur Fensterecke: Knopfpolster plus Grundpolster. */
-const POLSTER_KNOPF = px("p", KNOPF);
+/**
+ * Der Versatz des Glyphs gegen die Ecke der Flaeche: Knopfpolster plus
+ * Grundpolster. Seit dem dritten Durchgang sind das 0 + 6 px, und
+ * `figure-card.tsx` zieht genau diese Summe von der gemessenen Lage ab —
+ * verschoben wird der KNOPF, landen soll der GLYPH.
+ */
+const POLSTER_KNOPF = px("p", KNOPF, 0);
 const POLSTER_GRUND = px("p", GRUND);
-const ECKABSTAND = POLSTER_KNOPF + POLSTER_GRUND;
 
 /* ---------------------------------------------------- die Karte, gerechnet */
 
@@ -179,45 +192,152 @@ describe("sichtbar genug — auch auf der groessten Karte", () => {
 });
 
 
-describe("es landet nicht auf dem Rahmen", () => {
-  it("der Slot ist genau das Fenster — derselbe Einzug wie das Bild", () => {
-    const karteQuelle = quelle(CARD);
-    const block = karteQuelle.slice(karteQuelle.indexOf("{favoriteSlot ? ("));
-    const slot = block.slice(0, block.indexOf("</Slot>"));
-    expect(slot).toContain("paddingInline: INSET.image");
-    /* Und kein zusaetzliches Polster von oben: hier stand `paddingTop: "4%"`,
-       das auf einer 402-px-Karte 16 px waren. */
-    expect(slot).not.toContain("paddingTop");
+describe("es landet nicht auf dem Rahmen — gemessen, nicht geschaetzt", () => {
+  /*
+   * DIE LAGE STAMMT AUS EINER MESSUNG AM ALPHAKANAL DER ARTWORKS.
+   *
+   * `INSET.image` (10,8 %) ist das Polster des BILDES, nicht die
+   * Fensteroeffnung: in den Artworks liegt die Oeffnung weiter aussen, und
+   * das Herz sass deshalb 16 bis 18 px innerhalb der Rahmenkante.
+   *
+   * Gemessen wurde in allen SIEBEN Vorlagen, die der Katalog wirklich
+   * benutzt — `standard`, `special`, `chase`, `elite`, `dark`, `legendary`
+   * und `prestige` —, gegen den echten Umriss des Herzens (nicht gegen
+   * seinen Huellkasten: der traegt rechts 3,25 px und oben 5,8 px Luft) plus
+   * 2 px Halo, bei sechs Kartenbreiten.
+   *
+   * ERGEBNIS: der Glyphkasten darf bis `rechts 9,8 %` und `oben 11,0 %` der
+   * Karte, dann bleibt die Tinte auf jeder Vorlage frei. Die Schranke ist
+   * `prestige` — es hat die tiefste Rahmenkante, und dort sind es nur noch
+   * rund 1 px Spielraum. Die uebrigen sechs Vorlagen haetten `rechts 8,1 %`
+   * erlaubt.
+   *
+   * Abstand der Tinte zur rechten Rahmenkante an dieser Stelle:
+   *
+   *   standard / special / legendary   5,7 … 6,7 px
+   *   chase / elite                    5,4 … 6,3 px
+   *   dark                             5,9 … 7,1 px
+   *   prestige                         3,4 … 3,6 px
+   *
+   * WAS DIESE DATEI PRUEFEN KANN: dass die Zahlen im Code die gemessenen
+   * sind und dass die Rechnung, die sie in Pixel umsetzt, aufgeht. Die
+   * Messung selbst wiederholt sie NICHT — dafuer muesste sie sieben WebP
+   * dekodieren, und ein Testlauf ist nicht der Ort dafuer. Die Messung steht
+   * im Kommentar oben und in ADR-0136; was hier steht, ist der Riegel gegen
+   * ein unbemerktes Verschieben.
+   */
+
+  /** Die gemessene Lage des Glyphkastens, in Prozent der Karte. */
+  const LAGE = { rechts: 9.8, oben: 11.0 };
+  /** Wie weit der Knopf verschoben wird, damit der GLYPH dort landet. */
+  const VERSATZ = 6;
+
+  const karteQuelle = quelle(CARD);
+  const block = karteQuelle.slice(karteQuelle.indexOf('data-slot="favorite"'));
+  const stil = block.slice(0, block.indexOf("}}"));
+
+  it("die Lage steht als `top`/`right` im Code, mit den gemessenen Zahlen", () => {
+    expect(stil).toContain(`top: "calc(${LAGE.oben}% - ${VERSATZ}px)"`);
+    expect(stil).toContain(`right: "calc(${LAGE.rechts}% - ${VERSATZ}px)"`);
   });
 
-  it("der Eckabstand ist fest, also auf jeder Breite derselbe", () => {
-    /* 4 px Knopf + 5 px Grund = 9 px. Als Prozentwert waere er auf einer
-       173-px-Karte halb so gross wie auf einer 268er. */
-    expect(ECKABSTAND).toBeGreaterThanOrEqual(6);
-    expect(ECKABSTAND).toBeLessThanOrEqual(12);
-  });
-
-  it("der Glyph sitzt in der ECKE der Flaeche, nicht in ihrer Mitte", () => {
+  it("und NICHT als Prozent-Padding — das rechnet senkrecht gegen die Breite", () => {
     /*
-     * DER TEIL, DER OHNE NACHRECHNEN FALSCH WIRD. Zentriert waere das Herz
-     * (44 − 22) / 2 = 11 px weiter innen — also vom Fensterrand weg
-     * gewandert, sobald die Flaeche groesser wurde. Die zusaetzliche Flaeche
-     * soll nach unten links ins Bild wachsen, nicht das Herz verschieben.
+     * DIE FALLE. `padding-top: 11%` sind 11 % der BREITE des Containers,
+     * auch senkrecht — so sagt es CSS. Bei 1007:1562 waere das gut ein
+     * Drittel zu wenig. Ein absolut gesetztes `top` rechnet gegen die Hoehe.
      */
+    expect(stil).not.toContain("paddingTop");
+    expect(stil).not.toContain("paddingInline");
+    expect(block.slice(0, block.indexOf(">"))).toContain("absolute");
+  });
+
+  it("der Versatz ist genau das Polster des Kreises", () => {
+    /*
+     * Verschoben wird der KNOPF, landen soll der GLYPH. Stimmen die beiden
+     * nicht zusammen, sitzt das Herz um die Differenz daneben — und das
+     * faellt an einer Karte kaum auf und an sieben Vorlagen sehr wohl.
+     */
+    expect(POLSTER_KNOPF).toBe(0);
+    expect(POLSTER_GRUND).toBe(VERSATZ);
+    expect(POLSTER_KNOPF + POLSTER_GRUND).toBe(VERSATZ);
+  });
+
+  it("die Lage ist naeher an der Ecke als die alte — um 10 bis 12 px", () => {
+    /*
+     * Der Befund in einer Zahl. Alt: `INSET.image` 10,8 % plus 9 px Polster.
+     * Neu: 9,8 % plus 0 px, also die Tinte 10 bis 12 px weiter aussen.
+     */
+    const altProzent = Number.parseFloat(INSET.image);
+    for (const r of RASTER) {
+      const k = karte(r);
+      const alt = (altProzent / 100) * k.breite + 9;
+      const neu = (LAGE.rechts / 100) * k.breite;
+      const gewinn = alt - neu;
+      expect(gewinn, `${r.name}: ${gewinn.toFixed(1)} px`).toBeGreaterThan(9);
+      expect(gewinn, `${r.name}: ${gewinn.toFixed(1)} px`).toBeLessThan(14);
+    }
+  });
+
+  it("der Glyph bleibt auf JEDER Breite im Fenster, auch auf der kleinsten", () => {
+    /*
+     * Der Riegel gegen eine Breite, die es heute nicht gibt. Die Messung
+     * galt fuer 173 bis 268 px; diese Zeile prueft die REGEL, die daraus
+     * folgt: der Glyph liegt rechts weiter innen als die Oeffnung, und zwar
+     * auf jeder Breite, weil die Lage prozentual ist.
+     *
+     * Die Oeffnung liegt bei rund 8,3 % vom rechten Rand (`x 83…923` von
+     * 1007, `card-template.ts`). Der Glyphkasten bei 9,8 % liegt dahinter —
+     * UNABHAENGIG von der Kartenbreite, weil beide Prozentwerte sind.
+     */
+    const OEFFNUNG = ((1007 - 923) / 1007) * 100;
+    expect(OEFFNUNG).toBeCloseTo(8.34, 1);
+    expect(LAGE.rechts).toBeGreaterThan(OEFFNUNG);
+    /* Und die Tinte sitzt noch weiter innen: der Huellkasten traegt rechts
+       3,25 px Luft. */
+    for (const r of RASTER) {
+      const k = karte(r);
+      const glyphAussen = (LAGE.rechts / 100) * k.breite;
+      const oeffnungAussen = (OEFFNUNG / 100) * k.breite;
+      expect(glyphAussen, r.name).toBeGreaterThan(oeffnungAussen);
+    }
+  });
+
+  it("senkrecht liegt der Kasten unter der tiefsten Rahmenkante", () => {
+    /*
+     * `card-template.ts` nennt die obersten Lochpunkte je Artwork:
+     * card 99, chase 99, special 103, dark 103, legendary 103, prestige 141
+     * — von 1562. Die tiefste ist `prestige` mit 9,03 %, und sie gilt in der
+     * MITTE der Karte; in der Ecke zieht sich das Fenster weiter zurueck.
+     * Die gemessenen 11,0 % liegen darunter.
+     */
+    const PRESTIGE_OBEN = (141 / 1562) * 100;
+    expect(PRESTIGE_OBEN).toBeCloseTo(9.03, 1);
+    expect(LAGE.oben).toBeGreaterThan(PRESTIGE_OBEN);
+  });
+
+  it("und die Flaeche waechst nach unten links, nicht zur Ecke", () => {
     expect(KNOPF).toContain("items-start");
     expect(KNOPF).toContain("justify-end");
-    expect(KNOPF).not.toContain("place-items-center");
-
-    const zentriert = (FLAECHE - GLYPH) / 2;
-    expect(ECKABSTAND, "so weit innen wie zentriert").toBeLessThan(zentriert);
+    /* Von 44 px liegen 44 − 22 − 6 = 16 px unterhalb und links des Glyphs. */
+    const ueberhang = FLAECHE - GLYPH - VERSATZ;
+    expect(ueberhang).toBeGreaterThan(12);
   });
 
-  it("und die Flaeche bleibt ganz im Fenster, auch auf der kleinsten Karte", () => {
-    const kleinste = RASTER.map(karte).reduce((a, b) => (a.breite < b.breite ? a : b));
-    /* Der Kasten sitzt in der Ecke des Fensters, also braucht er nur seine
-       eigene Kantenlaenge. */
-    expect(FLAECHE).toBeLessThanOrEqual(kleinste.fenster);
-    expect(FLAECHE).toBeLessThanOrEqual(kleinste.bildzeile);
+  it("die Position ist bei jeder Kartenvorlage dieselbe", () => {
+    /*
+     * Eine Lage je Artwork waere sieben Lagen, die gleich aussehen sollen.
+     * Die gemessene ist die engste, die ALLE sieben frei laesst — deshalb
+     * darf `figure-card.tsx` die Vorlage an dieser Stelle nicht lesen.
+     */
+    const umgebung = karteQuelle.slice(
+      karteQuelle.indexOf('data-slot="favorite"') - 200,
+      karteQuelle.indexOf('data-slot="favorite"') + 400);
+    expect(umgebung).not.toContain("cardType");
+    expect(umgebung).not.toContain("artwork");
+    expect(umgebung).not.toContain("ARTWORK_TONE");
+    /* Und es gibt genau EINE Lage im Bauteil. */
+    expect((karteQuelle.match(/data-slot="favorite"/g) ?? []).length).toBe(1);
   });
 });
 

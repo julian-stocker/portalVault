@@ -115,12 +115,19 @@ function HeartGlyph({ filled }: { filled: boolean }) {
  * zusaetzliche Flaeche waechst nach unten links INS BILD — dorther kommt der
  * Daumen, und dort ist kein Rahmen.
  *
+ * DER ABSTAND ZUR ECKE IST 6 PX und steckt im Polster des Hover-Kreises, nicht
+ * mehr zusaetzlich am Knopf. Vorher waren es 4 + 5 = 9 px, und zusammen mit
+ * einem Slot, der beim Bildpolster statt an der Fensteroeffnung lag, sass das
+ * Herz 16 bis 18 px innerhalb der Rahmenkante. `figure-card.tsx` setzt die
+ * Flaeche jetzt absolut auf eine GEMESSENE Stelle und zieht genau diese 6 px
+ * ab, damit der GLYPH dort landet und nicht der Kasten.
+ *
  * Sichtbar wird sie erst, wenn jemand sie sucht: bei Hover und bei Fokus, und
  * dann als kleiner Kreis hinter dem GLYPH, nicht als 44-px-Scheibe. Im
  * Ruhezustand ist nur das Herz da, und die Karte bleibt eine Karte.
  */
 const KNOPF =
-  "group/fav pointer-events-auto flex h-11 w-11 items-start justify-end p-1 "
+  "group/fav pointer-events-auto flex h-11 w-11 items-start justify-end "
   + "focus-visible:outline-none";
 
 /**
@@ -132,7 +139,7 @@ const KNOPF =
  * Flaeche umschliesst nichts, was man sieht.
  */
 const GRUND =
-  "grid place-items-center rounded-full p-[5px] transition-colors duration-150 "
+  "grid place-items-center rounded-full p-1.5 transition-colors duration-150 "
   + "group-hover/fav:bg-white/16 group-focus-visible/fav:bg-white/16 "
   + "group-focus-visible/fav:outline group-focus-visible/fav:outline-2 "
   + "group-focus-visible/fav:outline-offset-1 group-focus-visible/fav:outline-white/90";
