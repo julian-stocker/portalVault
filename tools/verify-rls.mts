@@ -1417,6 +1417,254 @@ async function main(): Promise<void> {
       );
       }
     }
+
+    /* ======================================================================
+     * 10. FAVORITEN (0145, ADR-0136)
+     *
+     * Die Richtlinien STEHEN — das prüft `0145_postflight.sql`. Was hier
+     * geprüft wird, ist, ob sie GREIFEN: zwei echte Konten, zwei echte
+     * Sitzungen, und keines kommt an die Wunschliste des anderen.
+     *
+     * `favorites` hat KEINEN Surrogatschlüssel: der Primärschlüssel ist
+     * `(user_id, sky_id)`. Jede Prüfung adressiert deshalb über beide
+     * Spalten, nicht über eine `id` — und „die Zeile des anderen" ist hier
+     * dieselbe `sky_id` unter einer fremden `user_id`.
+     *
+     * Läuft nach Abschnitt 9, weil `SKY-9998` dort entsteht: zwei
+     * verschiedene SKY-IDs sind nötig, um „Varianten sind getrennte
+     * Favoriten" überhaupt fahren zu können.
+     * ================================================================== */
+    if (idA && idB) {
+      console.log("\n10. Favorites: two collectors, two wishlists");
+
+      const VAR_SKY_ID = SHOP_FIXTURE_SKY_ID;
+
+      /* Aus einem früheren Lauf übrige Zeilen fort, damit die Zählungen
+         unten über DIESEN Lauf sprechen. Mit dem Dienstschlüssel, weil RLS
+         für ihn nicht gilt — das ist Aufräumen, keine Prüfung. */
+      await admin.from("favorites").delete().in("user_id", [idA, idB]);
+
+      const tabelleDa = await admin.from("favorites").select("user_id").limit(1);
+      if (tabelleDa.error) {
+        check(
+          "favorites exists (migration 0145 applied)",
+          false,
+          `${tabelleDa.error.code}: ${tabelleDa.error.message} — 0145 ist hier nicht angewendet`,
+        );
+      } else {
+        // ------------------------------------------------- 10.1 eigene Zeilen
+        const favA = await a
+          .from("favorites").insert({ user_id: idA, sky_id: TEST_SKY_ID }).select();
+        check(
+          "user A can mark a figure on their own wishlist",
+          !favA.error && favA.data?.length === 1,
+          favA.error ? `${favA.error.code}: ${favA.error.message}` : "1 row",
+        );
+
+        const favB = await b
+          .from("favorites").insert({ user_id: idB, sky_id: TEST_SKY_ID }).select();
+        check(
+          "user B can mark the SAME figure on theirs",
+          !favB.error && favB.data?.length === 1,
+          favB.error ? `${favB.error.code}: ${favB.error.message}` : "1 row",
+        );
+
+        /* Varianten: zweite SKY-ID, dasselbe Konto. Der Primärschlüssel
+           trennt sie, ohne zu wissen, dass es Varianten sind. */
+        const favVariante = await a
+          .from("favorites").insert({ user_id: idA, sky_id: VAR_SKY_ID }).select();
+        check(
+          "a variant is its own favorite (second sky_id, same account)",
+          !favVariante.error && favVariante.data?.length === 1,
+          favVariante.error ? `${favVariante.error.code}: ${favVariante.error.message}` : "1 row",
+        );
+
+        /* Und derselbe Favorit zweimal geht nicht — das ist der
+           Primärschlüssel, nicht eine Anwendungsregel. */
+        const doppelt = await a
+          .from("favorites").insert({ user_id: idA, sky_id: TEST_SKY_ID }).select();
+        check(
+          "the same favorite twice is rejected by the primary key",
+          !!doppelt.error && doppelt.error.code === "23505",
+          doppelt.error ? `rejected: ${doppelt.error.code}` : "ACCEPTED — finding",
+        );
+
+        // -------------------------------------------- 10.2 nur die eigenen
+        const listeA = await a.from("favorites").select("user_id, sky_id");
+        check(
+          "user A sees ONLY their own favorites",
+          !listeA.error
+            && (listeA.data ?? []).length === 2
+            && (listeA.data ?? []).every((r) => r.user_id === idA),
+          listeA.error
+            ? listeA.error.message
+            : `${listeA.data?.length ?? 0} row(s), foreign: `
+              + `${(listeA.data ?? []).filter((r) => r.user_id !== idA).length}`,
+        );
+
+        const listeB = await b.from("favorites").select("user_id, sky_id");
+        check(
+          "user B sees ONLY their own favorites",
+          !listeB.error
+            && (listeB.data ?? []).length === 1
+            && (listeB.data ?? []).every((r) => r.user_id === idB),
+          listeB.error
+            ? listeB.error.message
+            : `${listeB.data?.length ?? 0} row(s), foreign: `
+              + `${(listeB.data ?? []).filter((r) => r.user_id !== idB).length}`,
+        );
+
+        /* Gezielt nach der fremden Zeile fragen — die Richtlinie filtert,
+           sie wirft nicht. Null Zeilen IST die Abweisung. */
+        const fremdLesen = await a
+          .from("favorites").select("sky_id").eq("user_id", idB);
+        check(
+          "user A cannot read user B's favorites",
+          !fremdLesen.error && (fremdLesen.data ?? []).length === 0,
+          fremdLesen.error
+            ? `rejected: ${fremdLesen.error.code}`
+            : `${fremdLesen.data?.length ?? 0} row(s)`,
+        );
+
+        // ------------------------------------- 10.3 nichts Fremdes anlegen
+        const fuerFremd = await a
+          .from("favorites").insert({ user_id: idB, sky_id: VAR_SKY_ID }).select();
+        check(
+          "user A cannot create a favorite FOR user B",
+          !!fuerFremd.error,
+          fuerFremd.error ? `rejected: ${fuerFremd.error.code}` : "ACCEPTED — finding",
+        );
+
+        // ------------------------------------- 10.4 nichts Fremdes löschen
+        const fremdLoeschen = await a
+          .from("favorites").delete().eq("user_id", idB).select();
+        check(
+          "user A cannot delete user B's favorite",
+          !fremdLoeschen.error && (fremdLoeschen.data ?? []).length === 0,
+          fremdLoeschen.error
+            ? `rejected: ${fremdLoeschen.error.code}`
+            : `${fremdLoeschen.data?.length ?? 0} row(s) deleted`,
+        );
+
+        /* Und die Zeile ist danach WIRKLICH noch da — gefragt von ihrem
+           Eigentümer, nicht vom Dienstschlüssel. */
+        const bIntakt = await b.from("favorites").select("sky_id").eq("user_id", idB);
+        check(
+          "user B's favorite is intact after every attempt",
+          !bIntakt.error && (bIntakt.data ?? []).length === 1,
+          bIntakt.error ? bIntakt.error.message : `${bIntakt.data?.length ?? 0} row(s)`,
+        );
+
+        // ------------------------------- 10.5 kein update, auch kein Recht
+        /*
+         * `0145` legt KEINE update-Richtlinie an und entzieht das Recht.
+         * Beides zusammen heisst: ein Umhängen auf ein fremdes Konto ist
+         * nicht „verboten", es ist nicht vorhanden.
+         */
+        const umhaengen = await a
+          .from("favorites").update({ user_id: idB })
+          .eq("user_id", idA).eq("sky_id", TEST_SKY_ID).select();
+        check(
+          "nobody can move a favorite to another account (no UPDATE at all)",
+          !!umhaengen.error || (umhaengen.data ?? []).length === 0,
+          umhaengen.error
+            ? `rejected: ${umhaengen.error.code}`
+            : `${umhaengen.data?.length ?? 0} row(s) updated`,
+        );
+
+        // ----------------------------------------- 10.6 eigene löschen geht
+        const eigenesLoeschen = await a
+          .from("favorites").delete()
+          .eq("user_id", idA).eq("sky_id", VAR_SKY_ID).select();
+        check(
+          "user A can remove their own favorite",
+          !eigenesLoeschen.error && (eigenesLoeschen.data ?? []).length === 1,
+          eigenesLoeschen.error
+            ? eigenesLoeschen.error.message
+            : `${eigenesLoeschen.data?.length ?? 0} row(s) deleted`,
+        );
+
+        // --------------------------------------------- 10.7 anonym: nichts
+        const anonFav = await anon.from("favorites").select("sky_id").limit(1);
+        check(
+          "an anonymous visitor reads no favorites",
+          !!anonFav.error || (anonFav.data ?? []).length === 0,
+          anonFav.error
+            ? `rejected: ${anonFav.error.code}`
+            : `${anonFav.data?.length ?? 0} row(s)`,
+        );
+
+        const anonSchreiben = await anon
+          .from("favorites").insert({ user_id: idA, sky_id: VAR_SKY_ID }).select();
+        check(
+          "an anonymous visitor cannot create one",
+          !!anonSchreiben.error,
+          anonSchreiben.error ? `rejected: ${anonSchreiben.error.code}` : "ACCEPTED — finding",
+        );
+
+        // ------------------------- 10.8 favorite_demand(): das Tor greift
+        /*
+         * DIE FUNKTION IST DER EINZIGE WEG ZU EINER ZAHL, und sie steht
+         * hinter `can_operate_active_seller()`. Ein Sammlerkonto ist kein
+         * Betrieb — es muss abgewiesen werden, mit `insufficient_privilege`.
+         */
+        const demandA = await a.rpc("favorite_demand", { p_sky_ids: null });
+        check(
+          "a collector cannot call favorite_demand()",
+          !!demandA.error,
+          demandA.error
+            ? `rejected: ${demandA.error.code ?? ""} ${demandA.error.message}`.trim()
+            : `ACCEPTED — finding, ${JSON.stringify(demandA.data).slice(0, 80)}`,
+        );
+
+        const demandAnon = await anon.rpc("favorite_demand", { p_sky_ids: null });
+        check(
+          "an anonymous visitor cannot call favorite_demand()",
+          !!demandAnon.error,
+          demandAnon.error
+            ? `rejected: ${demandAnon.error.code ?? ""} ${demandAnon.error.message}`.trim()
+            : "ACCEPTED — finding",
+        );
+
+        /*
+         * UND AUCH DER DIENSTSCHLUESSEL KOMMT NICHT DURCH — gemessen, nicht
+         * erwartet.
+         *
+         * Hier stand zuerst eine Pruefung der ANTWORTSIGNATUR, gefahren mit
+         * dem Dienstschluessel, weil dieser Lauf keinen Betriebsbenutzer
+         * hat. Sie schlug fehl, und das war richtig: der Dienstschluessel
+         * umgeht RLS, aber NICHT das Tor im Rumpf einer `definer`-Funktion.
+         * `can_operate_active_seller()` fragt `auth.uid()`, und das ist fuer
+         * ihn `null`.
+         *
+         * Also wird jetzt genau das geprueft, was gilt — und es ist die
+         * stärkere Aussage: die Zahl ist an eine ROLLE gebunden, nicht an
+         * eine Verbindung. Wer den Dienstschluessel hat, kann `favorites`
+         * direkt lesen (RLS gilt fuer ihn nicht) — aber er bekommt die
+         * Aggregatfunktion nicht geschenkt.
+         *
+         * Dass die Antwort NUR `(sky_id, users)` fuehrt, ist deshalb
+         * anderswo bewiesen: `src/lib/favorites/schema.test.ts` liest die
+         * Signatur im SQL, und Probelauf **P52** ruft die Funktion an echtem
+         * PostgreSQL mit gestelltem Tor auf und liest die Spaltennamen der
+         * Antwort. Beides faehrt bei jedem `npm run check`.
+         */
+        const demandAdmin = await admin.rpc("favorite_demand", { p_sky_ids: null });
+        check(
+          "not even the service role gets past favorite_demand()'s own gate",
+          !!demandAdmin.error
+            && String(demandAdmin.error.message).includes("seller operator role required"),
+          demandAdmin.error
+            ? `rejected: ${demandAdmin.error.message}`
+            : "ACCEPTED — finding, the gate does not hold for the service role",
+        );
+
+        /* Aufräumen: die Favoriten dieses Laufs fort. Die Konten selbst
+           nimmt der Teardown, und `on delete cascade` würde sie ohnehin
+           mitnehmen — hier wird nur nicht darauf gewartet. */
+        await admin.from("favorites").delete().in("user_id", [idA, idB]);
+      }
+    }
   } finally {
     // ------------------------------------------------------------- teardown
     console.log("\nTeardown");

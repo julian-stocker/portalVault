@@ -201,6 +201,32 @@ describe("wer die Seite sieht", () => {
     expect(() => quelle("src/app/(app)/favoriten/loading.tsx")).not.toThrow();
   });
 
+  it("ein ausgeloggter Besucher kommt in die Anmeldung, nicht auf 404", () => {
+    /*
+     * DER FEHLER VOM 2026-10-25, festgehalten.
+     *
+     * `PROTECTED_PREFIXES` in `src/lib/supabase/middleware.ts` führte
+     * `/collection`, `/account`, `/settings`, `/onboarding` — und
+     * `/favoriten` nicht. Die Navigationsleiste bietet „Favoriten" aber
+     * einem ausgeloggten Besucher an, genau wie „Sammlung": `viewer.collector`
+     * ist für eine Sitzung ohne Konto wahr, weil ein Besucher kein
+     * privilegiertes Konto ist.
+     *
+     * Ohne den Eintrag lief der Klick in die Seite, dort antwortete
+     * `isCollector()` mit `false`, und der Besucher bekam **404** auf einen
+     * Punkt, den die Leiste ihm gerade gezeigt hatte. Gefunden ohne Browser,
+     * beim Durchgehen dessen, was eine ausgeloggte Sitzung erreicht.
+     */
+    const mw = code("src/lib/supabase/middleware.ts");
+    const liste = mw.slice(mw.indexOf("const PROTECTED_PREFIXES"));
+    const bis = liste.indexOf("];");
+    expect(liste.slice(0, bis), "/favoriten ist nicht geschützt")
+      .toContain('"/favoriten"');
+    /* Und zwar in derselben Liste wie die Sammlung — nicht in einer zweiten. */
+    expect(liste.slice(0, bis)).toContain('"/collection"');
+    expect((mw.match(/const PROTECTED_PREFIXES/g) ?? []).length).toBe(1);
+  });
+
   it("und einen leeren Zustand, der einen Weg nennt", () => {
     expect(page).toContain("de.favorites.emptyTitle");
     expect(page).toContain("de.favorites.emptyAction");
