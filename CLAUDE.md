@@ -83,6 +83,8 @@ npm run verify:shop:staging      # öffentliche Angebotsprojektion prüfen (schr
 npm run catalog:import:staging   # Katalogimport nach Staging
 
 npm run db:check:staging         # Prüfdateien gegen Staging fahren (rein lesend)
+npm run db:privileges:staging    # was der Prüfzugang WIRKLICH darf (rein lesend) —
+                                 # nach jeder rechtserheblichen Migration (ADR-0140)
 npm run db:migrate:staging -- 0146           # eine Migration auf Staging: Stand prüfen,
                                  # Preflight, Baselines unveränderbar einfrieren, anhalten
 npm run db:migrate:staging -- 0146 --resume  # danach die Nachkontrolle, mit genau

@@ -151,11 +151,29 @@ with sammelbar as (
 basis_mess as (
   -- Die sieben Zahlen, einmal gerechnet, hier und in Zeile 900 benutzt.
   select
-    (select count(*)::text from public.shop_offers())                      as angebote,
-    (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
-                                    || coalesce(o.price::text, ''),
-                                    ';' order by o.sky_id, o.condition), ''))
-       from public.shop_offers() o)                                        as angebote_md5,
+    /*
+     * DIE ZWEI FELDER, DIE `shop_offers()` BRAUCHEN — und das ist die einzige
+     * Stelle des Basis-Vertrags, an der ein Recht fehlen kann.
+     *
+     * Fehlt `execute`, steht hier `KEIN-RECHT`: die Zeilen 811 und 812 sind
+     * dann OFFEN (Zeile 9998 zaehlt sie), die uebrigen fuenf Felder werden
+     * weiter gemessen und verglichen. Ein fehlendes Recht nimmt also nicht
+     * die ganze Baseline mit — aber es wird auch nicht stillschweigend
+     * uebergangen.
+     */
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select count(*) as c from public.shop_offers()',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote,
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select md5(coalesce(string_agg(o.sky_id || ''|'' || o.condition || ''|'' '
+             '|| coalesce(o.price::text, ''''), '
+             ''';'' order by o.sky_id, o.condition), '''')) as c '
+             'from public.shop_offers() o',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote_md5,
     (select count(*)::text from public.skylanders s
       where public.is_shop_eligible(s.sky_id))                             as shopfaehig,
     (select count(*)::text from sammelbar)                                 as sammelbar,
@@ -310,12 +328,28 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select zeile from basis_zeile), null)
 ),
 ergebnis as (
+  /*
+   * DREI ZUSTAENDE, NICHT ZWEI (ADR-0139).
+   *
+   *   ok = true   die Pruefung stimmt
+   *   ok = false  sie weicht ab           → zaehlt in 9999, blockiert
+   *   ok = null   Auskunft ODER OFFEN     → zaehlt nicht in 9999
+   *
+   * `KEIN-RECHT` heisst: diese Zeile greift auf ein Objekt zu, auf das die
+   * aufrufende Rolle kein Recht hat. Das ist KEINE Abweichung, sondern eine
+   * nicht durchgefuehrte Pruefung — Zeile 9998 zaehlt sie.
+   */
   select nr, bereich, pruefung, befund, erwartet,
-         case when erwartet is null then null
+         case when befund = 'KEIN-RECHT' then null
+              when erwartet is null then null
               else befund is not distinct from erwartet end as ok
     from pruef
 )
 select nr, bereich, pruefung, befund, erwartet, ok from ergebnis
+union all
+select 9998, 'GESAMT', 'Zeilen, die diese Rolle nicht lesen durfte '
+       '(0 = vollstaendig geprueft)',
+       (select count(*) from ergebnis where befund = 'KEIN-RECHT')::text, null, null
 union all
 select 9999, 'GESAMT', 'blockierende Abweichungen (muss 0 sein)',
        (select count(*) from ergebnis where ok is false)::text, '0',

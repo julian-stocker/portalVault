@@ -532,7 +532,7 @@ enthält. Es liest **keinen** Wert und öffnet **keine** Zugangsdatendatei.
 | nicht erteilt | `pg_read_all_data`, CREATE, INSERT/UPDATE/DELETE, jede Belegfunktion |
 | Rollenattribute | `noinherit`, `nosuperuser`, `nocreatedb`, `nocreaterole`, `noreplication`, Verbindungslimit 5 |
 | `bypassrls` | **nein** — nachgemessen, dass es nicht erforderlich ist. Alle 12 Tabellen führen RLS, und jede vorhandene Policy ist `to anon, authenticated` gebunden; eine neue Rolle sähe ohne Policy **0 Zeilen**. Sie bekommt deshalb je Tabelle eine eigene SELECT-Policy `agent_read_<tabelle>`, auf diese Rolle und auf `select` begrenzt — ohne Wirkung auf bestehende Rollen und Policies |
-| Mitgliedschaften | **keine**, in keiner Richtung (`pg_auth_members`) |
+| Mitgliedschaften | **`skyisles_agent` ist Mitglied von nichts.** Umgekehrt ist **`postgres` Mitglied von `skyisles_agent`** — gemessen am 2026-10-25 (`pg_auth_members`). Ein Artefakt von PostgreSQL 16+, wo `CREATE ROLE` den Erzeuger als Mitglied mit `ADMIN OPTION` einträgt, und **ohne Wirkung auf die Rechte des Prüfzugangs**: die Richtung ist nicht umkehrbar, und `postgres` ist Superuser und könnte die Rolle ohnehin annehmen. Eine frühere Fassung dieser Zeile behauptete „keine, in keiner Richtung“ — das war falsch |
 | geprüft wird | mit `has_table_privilege`/`has_function_privilege`, also über die **effektiven** Rechte einschließlich PUBLIC und Mitgliedschaften: kein Schreibrecht auf **irgendeiner** Relation in `public`, kein EXECUTE auf `seller_issue_purchase_receipt`, `…_correction`, `seller_business_backup`, `system_platform_export`, `purchase_receipt_fingerprint` |
 | Sitzung | `default_transaction_read_only = on`, an der Rolle gesetzt: jeder Schreibversuch endet mit `25006`, unabhängig von Rechten und Werkzeug |
 | Umgebungsstempel | die Sitzung muss als Erstes den Datenbankkommentar `skyisles-staging qqxcpesbwfxzgytkdsac` liefern. **Production trägt keinen** |
@@ -615,6 +615,17 @@ nicht durchgeführt, gezählt in **Zeile 9998** und in jeder Ausgabe
 namentlich genannt. Der vollständige Nachweis läuft als `postgres` über die
 Datei, die der Runner dafür schreibt (`supabase/log/staging/`, Baselines
 schon eingesetzt).
+
+**Was er darf, sagt die Datenbank — nicht die Einrichtungsdatei (ADR-0140).**
+`npm run db:privileges:staging` erhebt es rein lesend und schreibt die Messung
+nach `supabase/privileges/staging-agent.json`; die Probeläufe bauen ihre Welt
+daraus. Der Anlass: `0139` hat `shop_offers()` mit `drop function` neu
+angelegt, und **`DROP`+`CREATE` verwirft die ACL** (`CREATE OR REPLACE` behält
+sie) — die Erteilung war fort, die Datei sagte weiter „erteilt". Eine
+**veraltete** Aufnahme gilt als fehlend: sie trägt einen Abdruck über die
+Einrichtungsdatei und jede rechtserhebliche Migration. Ein Wächter verlangt,
+dass eine Migration, die ein erteiltes Objekt verwirft, es in derselben
+Migration neu erteilt.
 
 **Dem Prüfzugang wird dafür kein Recht hinzugefügt** — nicht pro Migration,
 nicht über eine Definer-Funktion als Umweg. Nicht weil diese Tabellen

@@ -177,7 +177,12 @@ jede **Rollenmitgliedschaft** zusammen. Geprüft wird, rein lesend:
   **irgendeiner** Relation in `public` — nicht nur auf den zwölf, denn eine
   Standardberechtigung könnte Schreibrecht auf einer ganz anderen Tabelle
   geben;
-* **keine Rollenmitgliedschaft**, in keiner Richtung (`pg_auth_members`);
+* **keine Rollenmitgliedschaft nach oben**: `skyisles_agent` ist Mitglied von
+  nichts. Umgekehrt ist **`postgres` Mitglied von `skyisles_agent`** — gemessen
+  am 2026-10-25, ein Artefakt von PostgreSQL 16+ (`CREATE ROLE` trägt den
+  Erzeuger als Mitglied mit `ADMIN OPTION` ein). Ohne Wirkung auf die Rechte
+  des Zugangs: die Richtung ist nicht umkehrbar, und `postgres` ist Superuser.
+  Die frühere Aussage „keine, in keiner Richtung“ war falsch;
 * **kein EXECUTE** auf `seller_issue_purchase_receipt`,
   `…_correction`, `seller_business_backup`, `system_platform_export`,
   `purchase_receipt_fingerprint` — alle fünf haben PUBLIC ausdrücklich

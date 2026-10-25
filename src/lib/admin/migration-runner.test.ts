@@ -1015,8 +1015,29 @@ describe("die Pruefdatei von 0146 traegt das Rechtevorzeichen", () => {
      */
     expect(datei).toContain("query_to_xml(");
     expect(datei).toContain("ALLER Relationen UND aller Funktionen");
-    /* Drei geschuetzte Stellen, also drei Rueckfallwerte. */
-    expect(datei.match(/else 'KEIN-RECHT' end/g)).toHaveLength(3);
+    /*
+     * KEINE ZAHL. Wie viele Stellen geschuetzt sind, waechst mit dem Wissen
+     * — am 2026-10-25 kamen `shop_offers()` im Basis-Vertrag und Zeile 312
+     * dazu, nachdem der dritte Lauf `permission denied for function
+     * shop_offers` meldete. Eine festgeschriebene Zahl haette diesen Test
+     * jedes Mal rot gemacht, ohne etwas zu sagen.
+     *
+     * Gefragt wird stattdessen: zu JEDEM `query_to_xml` gehoert eine
+     * Rechteabfrage und ein Rueckfallwert. Kein ungeschuetztes
+     * `query_to_xml`, kein `KEIN-RECHT` ohne Vorbedingung.
+     */
+    /* Gezaehlt wird im CODE: der Dateikopf erklaert den Mechanismus und
+       nennt `query_to_xml` dabei in Prosa. */
+    const sqlCode = datei
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .split("\n").filter((z) => !z.trimStart().startsWith("--")).join("\n");
+    const xml = (sqlCode.match(/query_to_xml\(/g) ?? []).length;
+    const rueckfall = (sqlCode.match(/else 'KEIN-RECHT' end/g) ?? []).length;
+    const vorbedingung = (sqlCode.match(/has_(?:table|function)_privilege\(/g) ?? []).length;
+    expect(xml).toBeGreaterThanOrEqual(3);
+    expect(rueckfall, "jedes query_to_xml braucht einen Rueckfallwert").toBe(xml);
+    expect(vorbedingung, "jeder Rueckfall braucht mindestens eine Rechteabfrage")
+      .toBeGreaterThanOrEqual(rueckfall);
   });
 
   it("und der Preflight genauso — er waere als Naechstes gescheitert", () => {

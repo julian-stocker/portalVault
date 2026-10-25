@@ -17,7 +17,28 @@ Die Nachkontrolle ist **offen** — siehe „Stand" gleich unten.
 | Migration | **angewendet**, eine Transaktion, `commit` |
 | Nachkontrolle | **9999 = 18** — und zwar ausschließlich die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833) |
 | Zu tun | die Nachkontrolle **einmal wiederholen**, mit den eingefrorenen Baselines |
-| Drei weitere Hürden, alle behoben | TLS (die private CA des Poolers fehlte, ADR-0138) · die Leserechte der zwei Datenzeilen · der Funktionsaufruf in Zeile 142 (beides ADR-0139) |
+| Vier weitere Hürden, alle behoben | TLS (die private CA des Poolers fehlte, ADR-0138) · die Leserechte der zwei Datenzeilen · der Funktionsaufruf in Zeile 142 (beides ADR-0139) · die verlorene Erteilung auf `shop_offers()` (ADR-0140) |
+
+### Eine Voraussetzung, einmalig
+
+`0139` hat `shop_offers()` am 2026-10-20 mit `drop function` neu angelegt, und
+**`DROP`+`CREATE` verwirft die ACL.** Die Erteilung an den Prüfzugang ist
+dadurch verloren gegangen. Im Staging-SQL-Editor wiederherstellen:
+
+```sql
+grant execute on function public.shop_offers() to skyisles_agent;
+```
+
+Danach einmal messen — das aktualisiert die versionierte Aufnahme, auf der die
+Probeläufe stehen:
+
+```bash
+npm run db:privileges:staging      # erwartet: keine Abweichung
+```
+
+**Ohne diesen Schritt läuft die Nachkontrolle trotzdem durch** (nichts bricht
+ab), aber die Baselinezeilen 811/812 bleiben **offen** — der Vergleich „der
+Shop hat sich nicht verändert" findet dann erst im berechtigten Lauf statt.
 
 ### Warum achtzehn
 
@@ -66,7 +87,10 @@ in der Akte selbst (`herkunft: "bediener"`, Feld `bemerkung`).
 npm run db:migrate:staging -- 0146 --resume
 ```
 
-**Erwartet: Zeile 9999 = `0`** und **drei offene Zeilen** (124, 142, 161).
+**Erwartet: Zeile 9999 = `0`** und **drei offene Zeilen** (124, 142, 161) —
+sofern `execute` auf `shop_offers()` wiederhergestellt ist. Fehlt es, kommen
+811, 812 und 312 dazu (sechs), und der Basis-Vertrag wird dann nicht
+automatisch verglichen.
 
 > **Drei Zeilen laufen nicht über diesen Zugang (ADR-0139).** 124 und 161
 > lesen `offer_state_live` bzw. `offer_state`, 142 **ruft**

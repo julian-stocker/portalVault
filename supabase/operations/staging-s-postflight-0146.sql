@@ -201,11 +201,29 @@ with sammelbar as (
 basis_mess as (
   -- Die sieben Zahlen, einmal gerechnet, hier und in Zeile 900 benutzt.
   select
-    (select count(*)::text from public.shop_offers())                      as angebote,
-    (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
-                                    || coalesce(o.price::text, ''),
-                                    ';' order by o.sky_id, o.condition), ''))
-       from public.shop_offers() o)                                        as angebote_md5,
+    /*
+     * DIE ZWEI FELDER, DIE `shop_offers()` BRAUCHEN — und das ist die einzige
+     * Stelle des Basis-Vertrags, an der ein Recht fehlen kann.
+     *
+     * Fehlt `execute`, steht hier `KEIN-RECHT`: die Zeilen 811 und 812 sind
+     * dann OFFEN (Zeile 9998 zaehlt sie), die uebrigen fuenf Felder werden
+     * weiter gemessen und verglichen. Ein fehlendes Recht nimmt also nicht
+     * die ganze Baseline mit — aber es wird auch nicht stillschweigend
+     * uebergangen.
+     */
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select count(*) as c from public.shop_offers()',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote,
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select md5(coalesce(string_agg(o.sky_id || ''|'' || o.condition || ''|'' '
+             '|| coalesce(o.price::text, ''''), '
+             ''';'' order by o.sky_id, o.condition), '''')) as c '
+             'from public.shop_offers() o',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote_md5,
     (select count(*)::text from public.skylanders s
       where public.is_shop_eligible(s.sky_id))                             as shopfaehig,
     (select count(*)::text from sammelbar)                                 as sammelbar,
@@ -492,9 +510,13 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (311, 'Nichts offen', 'freigegebene Lagerpositionen (0146 ruehrt das nicht an)',
       (select count(*)::text from public.shop_inventory i where i.sale_released), '0'),
   (312, 'Nichts offen', 'Zubehoerzeilen im oeffentlichen Angebot',
-      (select count(*)::text from public.shop_offers() o
-         join public.skylanders s on s.sky_id = o.sky_id
-        where s.item_type <> 'figure'), '0'),
+      case when has_function_privilege('public.shop_offers()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+               'select count(*) as c from public.shop_offers() o '
+               'join public.skylanders s on s.sky_id = o.sky_id '
+               'where s.item_type <> ''figure''',
+               false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, '0'),
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
