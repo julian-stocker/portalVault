@@ -320,10 +320,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
-      (select count(*)::text from information_schema.role_table_grants g
-        where g.table_schema = 'public'
-          and g.table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and g.grantee in ('anon', 'authenticated')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and (a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
   (402, 'Belege', 'keine API-Rolle darf ausstellen oder korrigieren',
       (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
         where p.oid in (to_regprocedure('public.issue_platform_receipt(bigint)'),

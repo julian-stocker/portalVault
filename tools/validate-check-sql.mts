@@ -4910,6 +4910,93 @@ async function main(): Promise<void> {
     }
     befund.push(`alle Runner-Dateien → ${durchlauf.join(" | ")}`);
 
+    /*
+     * ============================================================
+     * DER STRENGSTE DURCHGANG: ZWEIMAL FAHREN UND JEDE ABWEICHUNG
+     * ERKLAEREN MUESSEN.
+     * ============================================================
+     *
+     * Die vorigen Pruefungen finden, was ABBRICHT. Sie finden nicht, was
+     * STILL FALSCH ist — und genau das war der letzte Befund:
+     * `information_schema` ist rechtegefiltert, und
+     * `information_schema.role_table_grants` lieferte dem Pruefzugang 0
+     * Erteilungen auf `public.skylanders`, wo `aclexplode(relacl)` 4 zaehlt.
+     * Eine Zeile „keine Grants fuer anon — erwartet 0" war damit gruen, OHNE
+     * HINGESEHEN ZU HABEN. Ein Abbruch faellt auf; das hier nicht.
+     *
+     * DIE REGEL, DIE DAS ERSCHLAEGT: dieselbe Datei, als Eigner und als
+     * Pruefzugang gefahren, muss Zeile fuer Zeile DASSELBE liefern — mit
+     * genau einer erlaubten Ausnahme: eine Zeile, die beim Pruefzugang
+     * `KEIN-RECHT` sagt. Jeder andere Unterschied heisst, dass eine Abfrage
+     * je nach Rolle etwas anderes sieht, und das ist eine Pruefung, die
+     * nicht prueft.
+     */
+    const abweichend: string[] = [];
+    for (const [nummer, plan] of Object.entries(plaene.migrationen)) {
+      for (const datei of [plan.preflight, plan.postflight]) {
+        const anw = anweisungen(readFileSync(join(CHECK_DIR, datei), "utf8"))
+          .filter((x) => planbar(x));
+        const fahre = async (rolle: string | null) => {
+          await db.exec("begin;");
+          if (rolle) await db.exec(`set local role ${rolle};`);
+          try {
+            const r = (await db.query(`select nr, befund from (${ohneKopf(anw[0])}) x`)) as
+              { rows: { nr: number; befund: string }[] };
+            return new Map(r.rows.map((z) => [Number(z.nr), String(z.befund)]));
+          } finally { await db.exec("rollback;"); }
+        };
+        const alsEigner = await fahre(null);
+        const alsAgent = await fahre("pruefrolle");
+        for (const [nr, wert] of alsEigner) {
+          /* Die Summenzeilen haengen naturgemaess an den offenen Zeilen. */
+          if (nr >= 9998) continue;
+          const dort = alsAgent.get(nr);
+          if (dort === wert) continue;
+          if (dort === "KEIN-RECHT") continue;
+          abweichend.push(`${nummer}/${datei} Zeile ${nr}: Eigner ${JSON.stringify(wert)}`
+            + ` ≠ Pruefzugang ${JSON.stringify(dort)}`);
+        }
+      }
+    }
+    ok = ok && sag("rollenunabhaengig", abweichend.length === 0,
+      abweichend.length === 0
+        ? "jede Zeile liefert fuer Eigner und Pruefzugang dasselbe (ausser KEIN-RECHT)"
+        : `${abweichend.length} ROLLENABHAENGIGE ZEILE(N): ${abweichend.slice(0, 4).join(" | ")}`);
+
+    /*
+     * UND DIE GEGENPROBE: mit `information_schema` statt `pg_catalog` MUSS
+     * dieser Durchgang anschlagen. Ohne sie wuesste er nicht, ob er etwas
+     * prueft.
+     */
+    {
+      const anw = anweisungen(readFileSync(join(CHECK_DIR, "0146_postflight.sql"), "utf8"))
+        .filter((x) => planbar(x));
+      const zurueck = ohneKopf(anw[0]).replace(
+        /\(select count\(\*\)::text from pg_class c, aclexplode\(c\.relacl\) a\s*where c\.oid = to_regclass\('public\.offer_state'\)[\s\S]*?\)\), '0'\)/,
+        "(select count(*)::text from information_schema.role_table_grants "
+        + "where table_schema = 'public' and table_name = 'offer_state' "
+        + "and grantee in ('anon', 'authenticated', 'PUBLIC')), '0')");
+      const hole = async (rolle: string | null) => {
+        await db.exec("begin;");
+        if (rolle) await db.exec(`set local role ${rolle};`);
+        try {
+          const r = (await db.query(
+            `select befund from (${zurueck}) x where nr = 113`)) as
+            { rows: { befund: string }[] };
+          return String(r.rows[0]?.befund);
+        } finally { await db.exec("rollback;"); }
+      };
+      /* Im Stub hat `offer_state` keine Clientrechte, also liefern beide 0 —
+         die Gegenprobe braucht eine Tabelle MIT Rechten. */
+      await db.exec("grant select on table public.offer_state to anon;");
+      const e = await hole(null);
+      const a2 = await hole("pruefrolle");
+      await db.exec("revoke select on table public.offer_state from anon;");
+      ok = ok && sag("Gegenprobe information_schema", e !== a2,
+        `Eigner ${e}, Pruefzugang ${a2}`
+        + (e !== a2 ? " — rollenabhaengig, wie erwartet" : " — NICHT erkannt!"));
+    }
+
     /* Zahlen sind auch dann noch Zahlen, wenn Zeilen dastehen. */
     await db.exec(`insert into public.offer_state (sky_id, buyable, cheapest_cents)
                    values ('SKY-0001', true, 1200), ('SKY-0002', false, null);`);

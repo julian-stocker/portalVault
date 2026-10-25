@@ -59,6 +59,24 @@ Als `postgres` im SQL-Editor ist `9998 = 0` und jede Zeile gemessen. Der
 Migrations-Runner schreibt dafür eine einfügefertige Datei mit schon
 eingesetzten Baselines nach `supabase/log/staging/`.
 
+### Und: `pg_catalog`, nicht `information_schema` (ADR-0141)
+
+`information_schema` zeigt nur Objekte, auf die die aufrufende Rolle irgendein
+Recht hat. Für den Prüfzugang hat das zwei Folgen, und die zweite ist die
+schlimmere:
+
+* **laut** — `information_schema.columns` lieferte für `offer_state` keine
+  Zeile, Prüfung 102 meldete „(keine Tabelle)". Ein Fehlalarm, der auffällt.
+* **still** — `information_schema.role_table_grants` zeigt nur Erteilungen,
+  bei denen die Rolle Erteiler oder Empfänger ist. Auf `public.skylanders`
+  zählt es **0**, `aclexplode(relacl)` zählt **4**. Eine Zeile „keine Grants
+  — erwartet 0" war grün, ohne hingesehen zu haben.
+
+Strukturen und Rechte kommen deshalb aus `pg_catalog`: `pg_attribute`
+(`attnum > 0 and not attisdropped` — beide Filter tragend), `format_type`,
+`aclexplode(pg_class.relacl)`, `to_regclass`. `pg_policies` und `pg_views`
+sind nicht gefiltert und bleiben.
+
 ## Was hier liegt
 
 | Datei | Zweck |

@@ -214,9 +214,9 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select count(*)::text from pg_policies
         where schemaname = 'public' and tablename = 'purchase_calculations'), '4'),
   (104, 'Grundlage', 'anon hat dort KEIN Tabellenrecht',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public' and table_name = 'purchase_calculations'
-          and grantee = 'anon'), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.purchase_calculations'))
+          and (a.grantee::regrole::text in ('anon'))), '0'),
   (105, 'Grundlage', 'der PARTIELLE Unique-Index auf purchase_id steht — '
         'die zweite Haelfte der Doppelsperre',
       (select count(*)::text from pg_indexes
@@ -246,9 +246,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (114, 'Ein Weg', 'can_operate_active_seller() steht (0041) — der erste Riegel',
       (to_regprocedure('public.can_operate_active_seller()') is not null)::text, 'true'),
   (115, 'Ein Weg', 'purchases.client_token steht (0120) — die Idempotenz',
-      (select (count(*) = 1)::text from information_schema.columns
-        where table_schema = 'public' and table_name = 'purchases'
-          and column_name = 'client_token'), 'true'),
+      (select (count(*) = 1)::text from pg_attribute a
+        where a.attrelid = to_regclass('public.purchases')
+          and a.attname = 'client_token'
+          and a.attnum > 0 and not a.attisdropped), 'true'),
 
   -- ------------------------------------------- Und 0143 ist noch nicht da
   (120, 'Neu', 'seller_create_purchase_from_calculation fehlt NOCH — '
@@ -314,10 +315,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
-      (select count(*)::text from information_schema.role_table_grants g
-        where g.table_schema = 'public'
-          and g.table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and g.grantee in ('anon', 'authenticated')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and (a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
   (402, 'Belege', 'keine API-Rolle darf ausstellen oder korrigieren',
       (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
         where p.oid in (to_regprocedure('public.issue_platform_receipt(bigint)'),

@@ -1,6 +1,6 @@
 {
   "projekt": "qqxcpesbwfxzgytkdsac",
-  "erhoben": "2026-10-25T21:54:02.763Z",
+  "erhoben": "2026-10-25T22:37:46.751Z",
   "abdruck": "13f9f823c5e6ee8f643d6514d1955e5a3ea379c7f3b502f9d6fa43605c339d23",
   "rolle": "skyisles_agent",
   "schema": {
@@ -56,7 +56,7 @@
       "definer": false
     },
     "public.shop_offers()": {
-      "execute": false,
+      "execute": true,
       "definer": true
     },
     "public.shop_price(numeric,numeric,numeric)": {
@@ -68,7 +68,5 @@
       "definer": false
     }
   },
-  "abweichungen": [
-    "public.shop_offers(): execute ERTEILT laut Einrichtungsdatei, aber die Rolle darf NICHT ausfuehren — wurde die Funktion mit `drop function` neu angelegt? `DROP`+`CREATE` verwirft die ACL."
-  ]
+  "abweichungen": []
 }

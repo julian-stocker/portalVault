@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -391,5 +391,299 @@ describe("die Dokumentation sagt die Wahrheit ueber die Mitgliedschaft", () => {
   it("und `docs/SECURITY.md` nennt die Richtung", () => {
     const sec = readFileSync("docs/SECURITY.md", "utf8");
     expect(sec).toMatch(/postgres[^\n]*Mitglied/);
+  });
+});
+
+
+/* ==========================================================================
+ * INFORMATION_SCHEMA IST RECHTEGEFILTERT — pg_catalog NICHT
+ * ==========================================================================
+ *
+ * DER VIERTE FEHLSCHLAG bei `0146`: Pruefung 102 meldete „(keine Tabelle)"
+ * statt der acht Spalten, obwohl die Tabelle mit allen acht dasteht.
+ * `information_schema` zeigt nur Objekte, auf die die aufrufende Rolle
+ * irgendein Recht hat.
+ *
+ * DAS LAUTE WAR NICHT DAS SCHLIMME. An Staging nachgemessen:
+ *
+ *   public.skylanders, Erteilungen an anon/authenticated
+ *     information_schema.role_table_grants  →  0      (fuer den Pruefzugang)
+ *     aclexplode(pg_class.relacl)           →  4
+ *
+ * Eine Zeile „keine Grants fuer anon — erwartet 0" war damit GRUEN, ohne
+ * hingesehen zu haben. Ein falsches Gruen auf einer Sicherheitsfrage, und
+ * zwar lautlos.
+ */
+
+describe("die Rechtefilterung von information_schema, an echtem PostgreSQL", () => {
+  /**
+   * EINE PGlite-Instanz fuer alle Pruefungen dieses Blocks.
+   *
+   * Je Pruefung eine eigene aufzubauen hat im vollen Lauf die Zeitgrenze
+   * gerissen (ueber fuenf Sekunden pro Instanz, wenn alle Dateien parallel
+   * laufen). Stattdessen: ein Aufbau, und jede Pruefung arbeitet in einer
+   * Transaktion, die zurueckgerollt wird — DDL ist in PostgreSQL
+   * transaktional, also bleibt auch ein `drop column` nicht zurueck.
+   *
+   * Die Lage ist die von Staging im Kleinen: eine Tabelle, auf die der
+   * Pruefzugang kein Recht hat, auf der aber eine Clientrolle zwei Rechte
+   * hat. `anon` gibt es in PGlite nicht von sich aus — die Rolle wird
+   * angelegt und spielt sie.
+   */
+  let db: Awaited<ReturnType<typeof neuePglite>>;
+
+  const neuePglite = async () => {
+    const { PGlite } = await import("@electric-sql/pglite");
+    return new PGlite();
+  };
+
+  beforeAll(async () => {
+    db = await neuePglite();
+    await db.exec(`
+      create table public.geschuetzt (sky_id text, buyable boolean, cents integer);
+      create table public.offen (a int);
+      create role pruefer nologin;
+      create role anon nologin;
+      grant usage on schema public to pruefer;
+      grant select on table public.offen to pruefer;
+      grant select, insert on table public.geschuetzt to anon;
+    `);
+  }, 30_000);
+
+  /** Eine Abfrage als Pruefzugang, in einer Transaktion, die zurueckgerollt wird. */
+  const alsPruefer = async (sql: string, vorher = ""): Promise<string> => {
+    await db.exec("begin;");
+    try {
+      if (vorher) await db.exec(vorher);
+      await db.exec("set local role pruefer;");
+      const r = await db.query<{ x: string | null }>(sql);
+      return String(r.rows[0]?.x);
+    } finally { await db.exec("rollback;"); }
+  };
+
+  /** Dasselbe als Eigner. */
+  const alsEigner = async (sql: string, vorher = ""): Promise<string> => {
+    await db.exec("begin;");
+    try {
+      if (vorher) await db.exec(vorher);
+      const r = await db.query<{ x: string | null }>(sql);
+      return String(r.rows[0]?.x);
+    } finally { await db.exec("rollback;"); }
+  };
+
+  const SPALTEN = (tabelle: string) =>
+    `select coalesce((select string_agg(a.attname, ',' order by a.attnum)
+                        from pg_attribute a
+                       where a.attrelid = to_regclass('public.${tabelle}')
+                         and a.attnum > 0 and not a.attisdropped),
+                     '(keine Tabelle)') as x`;
+
+  it("information_schema VERSTECKT die Spalten — der gemeldete Fehler", async () => {
+    const sql = `select coalesce((select string_agg(column_name, ',' order by ordinal_position)
+                                    from information_schema.columns
+                                   where table_schema = 'public'
+                                     and table_name = 'geschuetzt'),
+                                 '(keine Tabelle)') as x`;
+    expect(await alsEigner(sql)).toBe("sky_id,buyable,cents");
+    expect(await alsPruefer(sql)).toBe("(keine Tabelle)");
+  });
+
+  it("pg_attribute zeigt sie — auch ohne jedes Recht", async () => {
+    expect(await alsEigner(SPALTEN("geschuetzt"))).toBe("sky_id,buyable,cents");
+    expect(await alsPruefer(SPALTEN("geschuetzt"))).toBe("sky_id,buyable,cents");
+  });
+
+  it("und eine ECHTE Strukturabweichung wird weiter erkannt", async () => {
+    /*
+     * DER PUNKT, AN DEM EINE BEHEBUNG KIPPEN KANN: eine Pruefung, die
+     * fehlende Rechte ueberlebt, aber auch eine fehlende Tabelle oder eine
+     * fehlende Spalte durchlaesst, waere wertlos.
+     */
+    expect(await alsPruefer(SPALTEN("gibt_es_nicht"))).toBe("(keine Tabelle)");
+    expect(await alsPruefer(SPALTEN("geschuetzt"),
+      "alter table public.geschuetzt drop column cents;")).toBe("sky_id,buyable");
+    expect(await alsPruefer(SPALTEN("geschuetzt"),
+      "alter table public.geschuetzt add column spaeter text;"))
+      .toBe("sky_id,buyable,cents,spaeter");
+    /* Und nach dem Zurueckrollen ist alles wie vorher. */
+    expect(await alsPruefer(SPALTEN("geschuetzt"))).toBe("sky_id,buyable,cents");
+  });
+
+  const GRANTS = (tabelle: string, quelle: "is" | "acl") => quelle === "is"
+    ? `select (select count(*)::text from information_schema.role_table_grants
+                where table_schema = 'public' and table_name = '${tabelle}'
+                  and grantee = 'anon') as x`
+    : `select (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+                where c.oid = to_regclass('public.${tabelle}')
+                  and a.grantee::regrole::text = 'anon') as x`;
+
+  it("role_table_grants liefert 0, wo wirklich Rechte stehen — DAS STILLE GRUEN",
+     async () => {
+    /* `anon` hat zwei Rechte — der Eigner sieht sie, der Pruefzugang nicht. */
+    expect(await alsEigner(GRANTS("geschuetzt", "is"))).toBe("2");
+    expect(await alsPruefer(GRANTS("geschuetzt", "is"))).toBe("0");
+  });
+
+  it("aclexplode(relacl) sieht sie — fuer jede Rolle gleich", async () => {
+    expect(await alsEigner(GRANTS("geschuetzt", "acl"))).toBe("2");
+    expect(await alsPruefer(GRANTS("geschuetzt", "acl"))).toBe("2");
+  });
+
+  it("und ein neu erteiltes Recht faellt dem Pruefzugang auf", async () => {
+    /* Die Sicherheitsfrage muss BEANTWORTBAR bleiben, nicht nur ungefaehrlich. */
+    expect(await alsPruefer(GRANTS("offen", "acl"))).toBe("0");
+    expect(await alsPruefer(GRANTS("offen", "acl"),
+      "grant select on table public.offen to anon;")).toBe("1");
+  });
+
+  it("beide Filter sind tragend: attnum > 0 UND not attisdropped", async () => {
+    /*
+     * EINE MUTATIONSPROBE HAT GEZEIGT, DASS DIESE PRUEFUNG FEHLTE: `attnum >
+     * 0` aus der Pruefdatei zu entfernen liess alle Tests gruen, weil keiner
+     * die Form AUS DER DATEI fuhr. Hier steht jetzt, was ohne die Filter
+     * passiert.
+     */
+    const ohne = (filter: string) =>
+      `select string_agg(a.attname, ',' order by a.attnum) as x from pg_attribute a
+        where a.attrelid = to_regclass('public.mitLuecke') ${filter}`;
+    const vorher = "create table public.mitLuecke (a int, weg int, b int);"
+      + " alter table public.mitLuecke drop column weg;";
+
+    expect(await alsPruefer(ohne("and a.attnum > 0 and not a.attisdropped"), vorher))
+      .toBe("a,b");
+    /* Ohne `attisdropped`: die verworfene Spalte erscheint als Platzhalter. */
+    expect(await alsPruefer(ohne("and a.attnum > 0"), vorher))
+      .toContain("pg.dropped");
+    /* Ohne `attnum > 0`: die Systemspalten erscheinen. */
+    expect(await alsPruefer(ohne("and not a.attisdropped"), vorher))
+      .toContain("tableoid");
+  });
+
+  it("und jede Spaltenabfrage der zehn Dateien traegt beide Filter", () => {
+    /* Der statische Teil derselben Zusage — damit die Mutation auffaellt. */
+    const funde: string[] = [];
+    for (const nr of ["0142", "0143", "0144", "0145", "0146"]) {
+      for (const art of ["preflight", "postflight"]) {
+        const datei = `${nr}_${art}.sql`;
+        const text = readFileSync(join("supabase/checks", datei), "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, " ")
+          .replace(/^\s*--.*$/gm, " ");
+        /*
+         * Ein FENSTER nach jeder `from pg_attribute`-Stelle, keine Klammer:
+         * `format_type(a.atttypid, a.atttypmod)` enthaelt selbst Klammern,
+         * und die erste schnitt das Fragment vor den Filtern ab — die erste
+         * Fassung dieses Tests meldete deshalb zwoelf Fehlalarme.
+         */
+        for (const m of text.matchAll(/from pg_attribute a/g)) {
+          const fragment = text.slice(m.index, m.index + 400);
+          if (!/attnum\s*>\s*0/.test(fragment)) funde.push(`${datei}: attnum-Filter fehlt`);
+          if (!/not\s+a\.attisdropped/.test(fragment)) {
+            funde.push(`${datei}: attisdropped-Filter fehlt`);
+          }
+        }
+      }
+    }
+    expect(funde).toEqual([]);
+  });
+
+  it("ein leeres relacl heisst bei TABELLEN wirklich `kein Recht`", async () => {
+    /*
+     * Anders als bei Funktionen, wo NULL `EXECUTE TO PUBLIC` bedeutet (die
+     * Falle in den Zeilen 136/141). Bei einer Tabelle ist der Standard: nur
+     * der Eigner. `aclexplode(NULL)` liefert 0 Zeilen, und das ist hier die
+     * richtige Antwort.
+     */
+    const acl = await alsEigner(
+      "select coalesce(relacl::text, 'NULL') as x from pg_class "
+      + "where oid = to_regclass('public.frisch')",
+      "create table public.frisch (a int);");
+    expect(acl).toBe("NULL");
+    expect(await alsPruefer(
+      `select (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+                where c.oid = to_regclass('public.frisch')) as x`,
+      "create table public.frisch (a int);")).toBe("0");
+  });
+});
+
+
+describe("keine Runner-Pruefdatei benutzt information_schema", () => {
+  /** Code ohne Kommentare — der Hinweis darauf darf dastehen. */
+  const ohneKommentare = (sql: string): string => sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/^\s*--.*$/gm, " ");
+
+  it("die Dateien aus migration-plans.json sind frei davon", () => {
+    /*
+     * DER STRUKTURELLE RIEGEL. `information_schema` ist rechtegefiltert;
+     * unter dem Pruefzugang liefert es entweder einen lauten Fehlalarm oder
+     * — schlimmer — ein stilles Gruen. Wer eine neue Migration schreibt,
+     * soll das hier erfahren und nicht im Lauf.
+     *
+     * `pg_policies` und `pg_views` sind davon NICHT betroffen (an Staging
+     * nachgemessen: 3 Richtlinien bzw. die Sichtdefinition sichtbar) und
+     * bleiben erlaubt.
+     */
+    const plaene = JSON.parse(readFileSync(
+      "supabase/checks/migration-plans.json", "utf8")) as
+      { migrationen: Record<string, { preflight: string; postflight: string }> };
+    const funde: string[] = [];
+    for (const [nummer, plan] of Object.entries(plaene.migrationen)) {
+      for (const datei of [plan.preflight, plan.postflight]) {
+        const code = ohneKommentare(
+          readFileSync(join("supabase/checks", datei), "utf8"));
+        for (const m of code.matchAll(/information_schema\.(\w+)/g)) {
+          funde.push(`${nummer} ${datei}: information_schema.${m[1]}`);
+        }
+      }
+    }
+    expect(funde, "rechtegefilterte Sicht in einer Runner-Pruefdatei").toEqual([]);
+  });
+
+  it("und die ganze Basis-Vertrags-Familie 0142–0146 auch", () => {
+    /* Sie sind die naechsten Kandidaten fuer den Runner und teilen einen
+       Vertrag — also dieselbe Regel. */
+    const funde: string[] = [];
+    for (const nr of ["0142", "0143", "0144", "0145", "0146"]) {
+      for (const art of ["preflight", "postflight"]) {
+        const datei = `${nr}_${art}.sql`;
+        const code = ohneKommentare(
+          readFileSync(join("supabase/checks", datei), "utf8"));
+        for (const m of code.matchAll(/information_schema\.(\w+)/g)) {
+          funde.push(`${datei}: information_schema.${m[1]}`);
+        }
+      }
+    }
+    expect(funde).toEqual([]);
+  });
+
+  it("der Riegel erkennt einen Rueckfall wirklich", () => {
+    /* Ein Waechter, der nie etwas findet, ist kein Waechter. */
+    const finde = (sql: string) =>
+      [...ohneKommentare(sql).matchAll(/information_schema\.(\w+)/g)].map((m) => m[1]);
+    expect(finde("select * from information_schema.columns")).toEqual(["columns"]);
+    expect(finde("select * from information_schema.role_table_grants"))
+      .toEqual(["role_table_grants"]);
+    /* Im Kommentar erklaert — das ist erlaubt und soll dastehen. */
+    expect(finde("-- information_schema.columns ist rechtegefiltert\nselect 1")).toEqual([]);
+    expect(finde("/* nicht information_schema.tables benutzen */ select 1")).toEqual([]);
+    /* Und die erlaubten Katalogsichten sind kein Fund. */
+    expect(finde("select * from pg_policies, pg_views, pg_attribute")).toEqual([]);
+  });
+
+  it("die aelteren Dateien sind bekannt und nicht im Runner", () => {
+    /*
+     * `0139`–`0141` und `production_baseline_drift.sql` benutzen
+     * `role_table_grants` weiterhin. Sie laufen im SQL-Editor als
+     * `postgres`, wo nicht gefiltert wird — dort ist die Aussage richtig.
+     * Kommt eine davon je in `migration-plans.json`, schlaegt der Riegel
+     * oben an, und dann ist sie umzustellen. Hier steht nur, dass sie es
+     * heute NICHT sind.
+     */
+    const plaene = JSON.parse(readFileSync(
+      "supabase/checks/migration-plans.json", "utf8")) as
+      { migrationen: Record<string, unknown> };
+    for (const nr of ["0139", "0140", "0141"]) {
+      expect(Object.keys(plaene.migrationen)).not.toContain(nr);
+    }
   });
 });

@@ -175,9 +175,24 @@ einen Vertrag, und dass der Abdruck derselbe bleibt, ist an echtem PostgreSQL na
 gemessen ist `postgres` Mitglied von `skyisles_agent` (Artefakt von PostgreSQL 16+, ohne
 Wirkung auf die Rechte) — korrigiert.
 
+**Und `information_schema` ist rechtegefiltert (2026-10-26, ADR-0141).** Prüfung 102 meldete
+`(keine Tabelle)` statt der acht Spalten — die Tabelle steht, aber `information_schema` zeigt
+nur, worauf die Rolle ein Recht hat. **Der Nebenbefund ist der eigentliche:**
+`information_schema.role_table_grants` meldete dem Prüfzugang **0** Erteilungen auf
+`public.skylanders`, wo `aclexplode(relacl)` **4** zählt — eine Zeile „keine Grants für anon,
+erwartet 0" war damit grün, **ohne hingesehen zu haben.** Ein falsches Grün auf einer
+Sicherheitsfrage, lautlos. Betroffen: sechs Stellen in `0146` (laut 102, 109; still 113, 114,
+401, Preflight 401) und elf weitere in `0142`–`0145`, alle umgestellt auf `pg_attribute`,
+`format_type`, `aclexplode(pg_class.relacl)` und `to_regclass`. `pg_policies` und `pg_views`
+sind nicht gefiltert (nachgemessen) und bleiben. Zwei Riegel: ein statischer verbietet
+`information_schema` in Runner-Dateien, und **P54** fährt jede Datei als Eigner *und* als
+Prüfzugang und verlangt Zeile für Zeile dasselbe — außer `KEIN-RECHT`. Eine Mutationsprobe
+deckte dabei auf, dass die Filter `attnum > 0` und `not attisdropped` **ungeprüft** waren;
+beide sind tragend (Systemspalten bzw. `........pg.dropped.2........`) und jetzt geprüft.
+
 **Noch nicht vollständig gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist
-vorbereitet; TLS, Anmeldung und Baseline-Übernahme stehen. Offen: die Erteilung auf
-`shop_offers()` von Hand wiederherstellen, dann der Lauf, dann die drei offenen Zeilen
+vorbereitet; TLS, Anmeldung, Baseline-Übernahme und die wiederhergestellte Erteilung auf
+`shop_offers()` stehen (gemessen am 2026-10-25). Offen: der Lauf, dann die drei offenen Zeilen
 (124, 142, 161) als `postgres`. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
 Migration stammen und **nicht** nachträglich gemessen wurden.
