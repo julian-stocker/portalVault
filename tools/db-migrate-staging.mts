@@ -52,8 +52,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
-  bericht, fahreEintrag, protokoll, type Befund, type SuiteEintrag,
+  bericht, fahreEintrag, offeneZeilen, protokoll,
+  type Befund, type SuiteEintrag,
 } from "./db-check-staging.mts";
+import type { Zeile } from "./lib/staging-db.mts";
 import { pruefeBaseline, VERTRAEGE, type VertragsName } from "./lib/baseline.mts";
 import {
   ERWARTETER_STEMPEL, STAGING_REF, ladeUmgebung, redigiere, verbindeStaging,
@@ -198,6 +200,10 @@ export type Werkzeuge = {
   fahre(eintrag: SuiteEintrag, vertraege: ReadonlyMap<string, string>): Promise<Befund>;
   plaene: Record<string, Plan>;
   akteDir: string;
+  /** Wo die Pruefdateien liegen — gebraucht fuer die erzeugte Huelle. */
+  checkDir: string;
+  /** Wohin die erzeugte Huelle geschrieben wird. */
+  logDir: string;
   jetzt(): Date;
   melde(text: string): void;
 };
@@ -211,8 +217,16 @@ export type Ablauf =
   /** Preflight bestanden, Baselines eingefroren — jetzt die eine Handarbeit. */
   | { ende: "handarbeit"; befunde: Befund[]; akte: string;
       vertraege: ReadonlyMap<string, string>; neu: boolean }
-  /** Nachkontrolle bestanden, 9999 = 0. */
-  | { ende: "bestanden"; befunde: Befund[]; vertraege: ReadonlyMap<string, string> }
+  /**
+   * Nachkontrolle bestanden, 9999 = 0.
+   *
+   * `offen` sind Zeilen, die der lesende Pruefzugang nicht lesen DURFTE —
+   * nicht bestanden, nicht abgewichen, sondern nicht durchgefuehrt. Sie
+   * gehoeren in den berechtigten Weg, und `huelle` ist die dafuer
+   * erzeugte, einfuegefertige Datei.
+   */
+  | { ende: "bestanden"; befunde: Befund[]; vertraege: ReadonlyMap<string, string>;
+      offen: Zeile[]; huelle: string | null }
   /** Sicher abgebrochen. `befunde` ist alles, was bis dahin gemessen wurde. */
   | { ende: "abbruch"; stufe: Stufe; grund: string; befunde: Befund[] };
 
@@ -370,7 +384,20 @@ export async function fahreAblauf(
         + "  und ein zweiter Lauf wuerde an ihrer eigenen Vorbedingung abprallen.\n"
         + "  Oben steht, welche Zeilen abweichen." };
     }
-    return { ende: "bestanden", befunde, vertraege };
+    /*
+     * OFFENE ZEILEN: DIE EINE DATEI, DIE DEN REST ERLEDIGT.
+     *
+     * Der Runner hat die eingefrorenen Baselines — also schreibt er sie
+     * gleich mit hinein, statt den Bediener wieder Platzhalter ersetzen zu
+     * lassen. Das ist dieselbe Lehre wie bei den achtzehn Abweichungen: ein
+     * Handgriff, den ein Werkzeug tun kann, gehoert nicht auf den
+     * Laufzettel.
+     */
+    const offen = offeneZeilen(b);
+    const huelle = offen.length === 0
+      ? null
+      : schreibeBerechtigteHuelle(w, nummer, plan.postflight, vertraege);
+    return { ende: "bestanden", befunde, vertraege, offen, huelle };
   } catch (e) {
     /*
      * VERBINDUNGSABBRUCH UND ALLES ANDERE UNERWARTETE.
@@ -438,6 +465,8 @@ async function main(): Promise<void> {
       fahre: (eintrag, vertraege) => fahreEintrag(db, eintrag, CHECK_DIR, vertraege),
       plaene,
       akteDir: AKTE_DIR,
+      checkDir: CHECK_DIR,
+      logDir: LOG_DIR,
       jetzt: () => new Date(),
       melde: (text) => console.log(text),
     }, nummer!, resume);
@@ -470,8 +499,92 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("  BESTANDEN. 9999 = 0, Baselines unveraendert uebernommen.");
+  if (ergebnis.offen.length === 0) {
+    console.log("  BESTANDEN. 9999 = 0, Baselines unveraendert uebernommen,");
+    console.log("  jede Zeile geprueft (9998 = 0).");
+    console.log("");
+    return;
+  }
+
+  /*
+   * NICHT ALS BESTANDEN AUSGEBEN. `9999 = 0` heisst hier: null Abweichungen
+   * UNTER DEN DURCHGEFUEHRTEN Pruefungen. Was offen ist, wird benannt — und
+   * der Weg dazu steht gleich darunter.
+   */
+  console.log("  9999 = 0 — keine Abweichung unter den durchgefuehrten Pruefungen.");
+  console.log("  Baselines unveraendert uebernommen.");
   console.log("");
+  console.log(`  OFFEN: ${ergebnis.offen.length} Zeile(n) darf dieser Zugang nicht lesen.`);
+  for (const o of ergebnis.offen) {
+    console.log(`         ${o.nr} ${String(o.pruefung)}`);
+  }
+  console.log("");
+  console.log("  ========================================================");
+  console.log("  DIESE EINE DATEI SCHLIESST SIE AB — im SQL-Editor von");
+  console.log(`  ${STAGING_REF}, als \`postgres\`:`);
+  console.log("");
+  console.log(`      ${ergebnis.huelle}`);
+  console.log("");
+  console.log("  Die Baselines sind darin schon eingesetzt. Erwartet:");
+  console.log("  Zeile 9998 = 0 UND Zeile 9999 = 0.");
+  console.log("  ========================================================");
+  console.log("");
+}
+
+/**
+ * Die einfuegefertige Datei fuer den berechtigten Weg.
+ *
+ * Inhalt: `begin`, die beiden Vertragszeilen als `set_config`, die
+ * Pruefdatei Zeichen fuer Zeichen, `rollback`. Dieselbe Datei wie der
+ * Runner fahrt — nur als `postgres` ausgefuehrt, und dann liefern die
+ * rechtegeschuetzten Zeilen ihren echten Wert statt `KEIN-RECHT`.
+ *
+ * Sie landet in `LOG_DIR` (ungetrackt): sie enthaelt die Zaehlstaende der
+ * Baselines, und sie ist Laufausgabe, kein Quelltext.
+ */
+function schreibeBerechtigteHuelle(
+  w: Werkzeuge, nummer: string, postflight: string,
+  vertraege: ReadonlyMap<string, string>,
+): string {
+  const pruefdatei = readFileSync(join(w.checkDir, postflight), "utf8");
+  const zeilen = [
+    "-- =====================================================================",
+    `-- ${nummer} — DIE OFFENEN ZEILEN DER NACHKONTROLLE, REIN LESEND`,
+    "--",
+    "-- Vom Runner erzeugt. Vollstaendig markieren, in den SQL-Editor von",
+    `-- ${STAGING_REF} einfuegen, ausfuehren. NICHTS daran aendern.`,
+    "--",
+    "-- WOZU. Einige Zeilen lesen Objekte, auf die der lesende Pruefzugang",
+    "-- kein `select` hat; bei ihm liefern sie `KEIN-RECHT` und zaehlen in",
+    "-- Zeile 9998. Hier laeuft dieselbe Datei als `postgres`: 9998 muss 0",
+    "-- sein und 9999 ebenfalls.",
+    "--",
+    "-- Die Baselines sind EINGESETZT — aus der eingefrorenen Akte, nicht",
+    "-- neu erhoben. Kein Platzhalter, kein Kopieren.",
+    "--",
+    "-- `begin … rollback`: diese Datei schreibt nichts.",
+    "-- =====================================================================",
+    "",
+    "begin;",
+    "",
+  ];
+  for (const [name, wert] of vertraege) {
+    /* Einfache Anfuehrungszeichen verdoppeln — dieselbe Regel wie in
+       `fahreEintrag`. */
+    zeilen.push(`select set_config('${name}', '${wert.replace(/'/g, "''")}', true);`);
+  }
+  zeilen.push("");
+  zeilen.push(`-- >>> EINGEBETTET: ${join(w.checkDir, postflight)}`);
+  zeilen.push(pruefdatei.replace(/\n$/, ""));
+  zeilen.push(`-- <<< ENDE: ${join(w.checkDir, postflight)}`);
+  zeilen.push("");
+  zeilen.push("rollback;");
+  zeilen.push("");
+
+  mkdirSync(w.logDir, { recursive: true });
+  const pfad = join(w.logDir, `${nummer}-postflight-berechtigt.sql`);
+  writeFileSync(pfad, zeilen.join("\n"), "utf8");
+  return pfad;
 }
 
 function schreibeProtokoll(nummer: string, befunde: Befund[]): void {

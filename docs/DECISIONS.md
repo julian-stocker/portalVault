@@ -13205,3 +13205,129 @@ Vertrauen auf den ganzen Prozess aus, statt es auf eine Wurzel zu verengen) ·
 gelesen — eine Einstellung, die nichts tut) · den Fingerabdruck als harten
 Riegel (bricht bei jeder Rotation, schützt gegen die eine realistische
 Bedrohung nicht).
+
+---
+
+## ADR-0139 · Was der Prüfzugang nicht lesen darf, bleibt offen — und wird gezählt, nicht übersprungen
+
+**Datum:** 2026-10-25
+**Status:** angenommen
+**Betrifft:** `supabase/checks/*_postflight.sql`, `tools/db-check-staging.mts`,
+`tools/db-migrate-staging.mts`
+
+### Der Anlass
+
+`npm run db:migrate:staging -- 0146 --resume` scheiterte mit
+`permission denied for view offer_state_live`.
+
+**Der Riegel hat richtig gehandelt.** `0146` erteilt auf `offer_state` und
+`offer_state_live` bewusst **kein** Clientrecht, und der lesende Prüfzugang
+`skyisles_agent` hat `select` auf genau zwölf Tabellen — diese zwei nicht.
+
+Falsch war die **Folge**: PostgreSQL prüft die Rechte **aller** Relationen
+eines Plans beim Ausführungsstart. Ein fehlendes Recht nahm deshalb die ganze
+Einreichung mit — rund hundert gute Katalogprüfungen inbegriffen. Eine Datei,
+die bei einem fehlenden Leserecht gar nichts mehr sagt, ist schlechter als
+eine, die sagt was sie konnte und was nicht.
+
+**Und es ist die Regel, nicht die Ausnahme.** Gemessen: **32 von 74**
+Prüfdateien lesen Objekte, auf die der Zugang kein `select` hat — `sellers`,
+`orders`, `invoices`, `purchase_calculations`, `favorites`, `offer_state`.
+Jede künftige Migration mit einer Datenzeile in der Nachkontrolle läuft in
+dasselbe.
+
+### Die Entscheidung
+
+**1. Drei Zustände je Prüfzeile, nicht zwei.**
+
+| `ok` | Bedeutung |
+|---|---|
+| `true` | die Prüfung stimmt |
+| `false` | sie weicht ab → zählt in **9999**, blockiert |
+| `null` | Auskunft **oder offen** → zählt nicht in 9999 |
+
+Eine Zeile, deren Objekt die aufrufende Rolle nicht lesen darf, liefert
+`KEIN-RECHT` und ist **offen**: weder bestanden noch abgewichen, sondern
+**nicht durchgeführt**.
+
+**2. Zeile 9998 zählt die offenen Zeilen.** Sie werden in jedem Bericht und
+jedem Protokoll **namentlich** genannt, auch bei Status `ok`. Sonst wäre
+`9999 = 0` eine Auskunft, die mehr behauptet als sie weiß: null Abweichungen
+**unter den durchgeführten** Prüfungen. Der Runner gibt einen Lauf mit offenen
+Zeilen **nicht** als `BESTANDEN` aus.
+
+**3. Die technische Form: `has_table_privilege` **und** `query_to_xml`.**
+
+```sql
+case when has_table_privilege('public.offer_state', 'select')
+     then (xpath('/row/c/text()', query_to_xml(
+            'select count(*) as c from public.offer_state', false, true, '')))[1]::text
+     else 'KEIN-RECHT' end
+```
+
+**Ein `case` allein genügt nicht** — nachgemessen: die Rechteprüfung trifft
+alle Relationen des Plans, auch im nicht genommenen Zweig, und die Anweisung
+bricht trotzdem ab. `query_to_xml` hält die Relation aus dem Plan heraus.
+Ein Tippfehler in der dynamischen Abfrage fällt beim berechtigten Lauf auf,
+also in `verify:check-sql` (**P54**).
+
+**4. Der berechtigte Weg ist eine Datei, die der Runner schreibt.** Sind
+Zeilen offen, erzeugt er `supabase/log/staging/<nr>-postflight-berechtigt.sql`:
+`begin`, die eingefrorenen Baselines als `set_config`, die Prüfdatei Zeichen
+für Zeichen, `rollback`. Im SQL-Editor als `postgres` ausgeführt ist dort
+**9998 = 0 und 9999 = 0** — dieselbe Datei, mehr Deckung. Die Baselines sind
+schon eingesetzt: dieselbe Lehre wie bei ADR-0137, ein Handgriff, den ein
+Werkzeug tun kann, gehört nicht auf den Laufzettel.
+
+**5. Dem Prüfzugang wird KEIN Recht hinzugefügt.** Nicht `offer_state`, nicht
+`favorites`, keine Policy, keine Definer-Funktion als Umweg. Der Grund ist
+nicht die Empfindlichkeit dieser Tabellen — `offer_state` spiegelt den
+öffentlichen Shop —, sondern die Richtung: ein Recht je Migration, und in
+zwanzig Migrationen ist der Prüfzugang ein Vollleser. **Die Grenze muss da
+halten, wo sie unbequem wird**, sonst ist sie keine.
+
+**6. Ein Wächter beim Schreiben, nicht beim Fahren.**
+`migration-runner.test.ts` prüft für jede in `migration-plans.json` genannte
+Datei, dass sie kein ungeteiltes Objekt **ungeschützt** liest — die
+Erteilungen liest er aus `staging-agent-setup.sql`, nicht aus einer zweiten
+Liste. Damit fällt das Problem auf, wenn eine Migration geschrieben wird, und
+nicht wenn sie läuft. Der Wächter prüft sich selbst an einem erfundenen Text
+mit und ohne Schutz.
+
+### Nebenbefund, mitbehoben: ein falsches Grün
+
+Zeile 141 benutzte `aclexplode(coalesce(p.proacl, '{}'))`. Zwei Fehler in
+einem Ausdruck:
+
+- `'{}'` ist ein **nulldimensionales** Array, `aclexplode` verlangt
+  eindimensional — die Zeile **brach ab**, sobald `proacl` NULL war.
+- Ohne das `coalesce` hätte sie `0` gezählt und „kein Clientrecht" gemeldet.
+  Ein NULL-ACL heißt aber **Standardrecht**, und das ist für Funktionen
+  `EXECUTE TO PUBLIC`. Grün für genau den Zustand, in dem jeder ausführen
+  darf.
+
+Beide Zeilen (136 und 141) benennen den NULL-Fall jetzt ausdrücklich als
+`STANDARDRECHT: PUBLIC darf ausfuehren` — und weichen damit ab.
+
+### Konsequenzen
+
+- Eine Nachkontrolle läuft über den Prüfzugang **durch**, auch wenn sie
+  Datenzeilen enthält. Was offen bleibt, steht in der Ausgabe, im Protokoll
+  und in Zeile 9998.
+- Der vollständige Nachweis braucht einen Lauf als `postgres` — eine Datei,
+  ein Einfügen, Baselines schon drin.
+- Künftige Migrationen: Datenzeilen in die geschützte Form setzen. Der
+  Wächter erinnert daran.
+- **P54** fährt die Lage an echtem PostgreSQL: eine Rolle mit genau den zwölf
+  Erteilungen, die Nachkontrolle läuft durch, die zwei Zeilen melden
+  `KEIN-RECHT`, 9998 = 2 — und die Gegenprobe ohne Schutz reproduziert
+  `permission denied for view offer_state_live`.
+
+**Verworfen:** `grant select on offer_state to skyisles_agent` samt
+`agent_read_offer_state`-Policy (ein Recht je Migration, und der Prüfzugang
+wird zum Vollleser) · eine `security definer`-Zählfunktion je geschütztem
+Objekt (dauerhafte Angriffsfläche für eine Zahl, und eine Migration pro
+Nachkontrolle) · die Datenzeilen aus der Nachkontrolle **streichen** (das ist
+die stille Ignorierung, gegen die hier alles gebaut ist) · die Nachkontrolle
+in zwei Dateien teilen (zwei Ergebnisblätter, und das zweite wird vergessen) ·
+`reltuples` statt `count(*)` (eine Schätzung ist kein Nachweis).

@@ -4676,6 +4676,134 @@ async function main(): Promise<void> {
     });
   }
 
+  /* P54 — DIE NACHKONTROLLE VON `0146` UNTER DEM LESENDEN PRUEFZUGANG.
+   *
+   * DER ANLASS. `npm run db:migrate:staging -- 0146 --resume` scheiterte mit
+   * `permission denied for view offer_state_live`. Richtig so: `0146`
+   * erteilt auf `offer_state` und `offer_state_live` bewusst KEIN
+   * Clientrecht, und der Pruefzugang hat `select` auf genau zwoelf Tabellen
+   * — diese zwei nicht.
+   *
+   * Falsch war nur die FOLGE: PostgreSQL prueft die Rechte ALLER Relationen
+   * eines Plans beim Ausfuehrungsstart, also nahm EIN fehlendes Recht die
+   * ganze Einreichung mit — rund hundert gute Katalogpruefungen inbegriffen.
+   *
+   * DIESER PROBELAUF FAEHRT GENAU DIESE LAGE. Eine Rolle bekommt exakt die
+   * zwoelf Erteilungen aus `staging-agent-setup.sql` — mehr nicht — und
+   * dann laeuft die Nachkontrolle. Erwartet: sie laeuft DURCH, die beiden
+   * Datenzeilen melden `KEIN-RECHT`, und Zeile 9998 zaehlt sie. Als Eigner
+   * stehen dort Zahlen und 9998 ist 0.
+   */
+  {
+    const db = await frisch();
+    const befund: string[] = [];
+    let ok = true;
+    const sag = (was: string, gut: boolean, text: string): boolean => {
+      befund.push(`${was}: ${text}`);
+      return gut;
+    };
+
+    /*
+     * DIE ATTRAPPEN, DAMIT DIE BASELINE-MESSUNG UEBERHAUPT LAEUFT — und die
+     * Sicht danach neu, weil `attrappenFuerBaseline` `shop_offers()`
+     * ersetzt und die Sicht davon abhaengt.
+     *
+     * Die Sicht entsteht hier in der FORM der Migration, ausdruecklich als
+     * Attrappe: dass ihre Definition stimmt, pruefen die Zeilen 121–123 und
+     * `P53`. HIER steht etwas anderes zur Pruefung — ob ein fehlendes
+     * Leserecht die Einreichung mitnimmt.
+     */
+    await db.exec("drop view if exists public.offer_state_live;");
+    await attrappenFuerBaseline(db);
+    await db.exec(`create view public.offer_state_live as
+      select o.sky_id, min(round(o.price * 100))::integer as cheapest_cents
+        from public.shop_offers() o
+       where o.available and o.condition = public.v1_sale_condition()
+       group by o.sky_id;`);
+
+    /* Die zwoelf Erteilungen — aus der Einrichtungsdatei gelesen, nicht
+       abgeschrieben. Eine zweite Liste waere eine zweite Wahrheit. */
+    const setup = readFileSync("supabase/operations/staging-agent-setup.sql", "utf8");
+    const erteilt = [...setup.matchAll(
+      /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]);
+    ok = sag("Erteilungen", erteilt.length === 12, `${erteilt.length} Tabellen`);
+
+    await db.exec("create role pruefrolle nologin;");
+    await db.exec("grant usage on schema public to pruefrolle;");
+    for (const t of erteilt) {
+      await db.exec(`grant select on table public.${t} to pruefrolle;`);
+    }
+
+    /* Die Nachkontrolle, nur die interessanten Zeilen. Ohne Baselines
+       weichen die Vertragszeilen ab — das ist hier nicht die Frage. */
+    const sql = anweisungen(readFileSync(join(CHECK_DIR, "0146_postflight.sql"), "utf8"))
+      .filter((x) => planbar(x));
+    const hol = async (rolle: string | null) => {
+      await db.exec("begin;");
+      if (rolle) await db.exec(`set local role ${rolle};`);
+      try {
+        const r = (await db.query(`select nr, befund from (${ohneKopf(sql[0])}) x
+                                    where nr in (124, 161, 9998, 9999)`)) as
+          { rows: { nr: number; befund: string }[] };
+        return new Map(r.rows.map((z) => [Number(z.nr), String(z.befund)]));
+      } catch (e) {
+        return (e as Error).message.split("\n")[0];
+      } finally {
+        await db.exec("rollback;");
+      }
+    };
+
+    /*
+     * Als Eigner stehen in 124 und 161 ZAHLEN — welche, haengt an den
+     * erfundenen Zeilen des Stub-Schemas und ist hier nicht die Frage.
+     * Entscheidend: keine davon sagt `KEIN-RECHT`, und 9998 ist 0.
+     */
+    const eigner = await hol(null);
+    const zahl = (x: string | undefined) => x !== undefined && /^\d+$/.test(x);
+    ok = ok && sag("als Eigner", typeof eigner !== "string"
+      && zahl(eigner.get(124)) && eigner.get(161) === "0" && eigner.get(9998) === "0",
+      typeof eigner === "string" ? `FEHLER ${eigner}`
+        : `124=${eigner.get(124)} 161=${eigner.get(161)} 9998=${eigner.get(9998)}`);
+
+    const pruefer = await hol("pruefrolle");
+    ok = ok && sag("als Pruefzugang", typeof pruefer !== "string"
+      && pruefer.get(124) === "KEIN-RECHT" && pruefer.get(161) === "KEIN-RECHT"
+      && pruefer.get(9998) === "2",
+      typeof pruefer === "string" ? `BRICHT AB: ${pruefer}`
+        : `124=${pruefer.get(124)} 161=${pruefer.get(161)} 9998=${pruefer.get(9998)}`);
+
+    /*
+     * UND DIE GEGENPROBE: ohne den Schutz bricht dieselbe Datei ab. Ohne
+     * sie wuesste dieser Probelauf nicht, ob er etwas prueft — es koennte
+     * ja sein, dass die Rolle das Recht doch hat.
+     */
+    const roh = ohneKopf(sql[0]).replace(
+      /case when has_table_privilege\('public\.offer_state_live', 'select'\)[\s\S]*?else 'KEIN-RECHT' end/,
+      "(select count(*)::text from public.offer_state_live)");
+    await db.exec("begin; set local role pruefrolle;");
+    let abgebrochen = "(nicht abgebrochen)";
+    try {
+      await db.query(`select nr from (${roh}) x where nr = 124`);
+    } catch (e) { abgebrochen = (e as Error).message.split("\n")[0]; }
+    await db.exec("rollback;");
+    ok = ok && sag("ohne Schutz", abgebrochen.includes("permission denied"), abgebrochen);
+
+    /* Zahlen sind auch dann noch Zahlen, wenn Zeilen dastehen. */
+    await db.exec(`insert into public.offer_state (sky_id, buyable, cheapest_cents)
+                   values ('SKY-0001', true, 1200), ('SKY-0002', false, null);`);
+    const mitZeilen = await hol(null);
+    ok = ok && sag("mit zwei Zeilen", typeof mitZeilen !== "string"
+      && mitZeilen.get(161) === "2",
+      typeof mitZeilen === "string" ? mitZeilen : `161=${mitZeilen.get(161)}`);
+
+    probe.push({
+      name: "P54 0146 Nachkontrolle laeuft unter dem lesenden Pruefzugang DURCH: die zwei "
+        + "rechtegeschuetzten Zeilen melden KEIN-RECHT statt die Einreichung mitzunehmen",
+      ok,
+      sagt: befund.join(" · "),
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);
