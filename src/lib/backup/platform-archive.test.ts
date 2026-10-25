@@ -804,3 +804,83 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
     })).toThrow(PlatformArchiveError);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Das Prüfwerkzeug für ein heruntergeladenes Archiv
+// ---------------------------------------------------------------------------
+
+describe("verify:platform-archive hält sich an seine eigenen Regeln", () => {
+  /**
+   * Für die Betriebssicherung gibt es `verify:backup`; für das
+   * Plattformarchiv gab es **nichts**, und „sieht gut aus" war die Prüfung.
+   * Das Werkzeug ist rein lokal und rein lesend — geprüft wird hier, dass es
+   * das auch bleibt, und vor allem: dass es keine Zeileninhalte ausgibt.
+   */
+  const quelle = readFileSync("tools/verify-platform-archive.mts", "utf8");
+
+  it("schreibt nichts und öffnet keine Datenbank", () => {
+    /*
+     * Gegen Importe und Aufrufe, nicht gegen das Wort „supabase": die letzte
+     * Zeile des Werkzeugs nennt `supabase/checks/0144_restore_limits.md` als
+     * Pfad. Eine zu grobe Liste hätte diesen Hinweis verboten — und das war
+     * der erste rote Test hier.
+     */
+    for (const verboten of ["writeFileSync", "appendFileSync", "createClient",
+                            "@supabase", "supabase-js", "SERVICE_ROLE",
+                            "fetch(", ".rpc("]) {
+      expect(quelle.includes(verboten), `${verboten} gehört nicht hinein`).toBe(false);
+    }
+  });
+
+  it("weist eine Datei im Arbeitsverzeichnis ab", () => {
+    /* Dasselbe wie `verify:backup`, hier mit mehr Grund: dieses Archiv
+       trägt Käuferadressen, Bestellungen und fremde Sammlungen. */
+    expect(quelle).toContain("die Datei liegt im Arbeitsverzeichnis des Projekts");
+    expect(quelle).toContain("docs/SECURITY.md");
+  });
+
+  it("gibt keine Zeileninhalte aus — nur Zahlen, Namen von Bereichen und Abdrücke", () => {
+    /*
+     * DIE REGEL, DIE AM MEISTEN WERT HAT. Ein Prüfbericht, der aus dem
+     * Archiv zitiert, trägt personenbezogene Daten in ein Terminal, eine
+     * Logdatei und womöglich einen Chat. Wo ein Inhalt belegt werden muss,
+     * tut es ein kurzer Abdruck oder eine Länge.
+     */
+    for (const verboten of ["z.name", "zeile.name", ".customer_", ".email",
+                            "JSON.stringify(zeilen)", "console.log(zeile"]) {
+      expect(quelle.includes(verboten), `${verboten} würde Inhalte ausgeben`).toBe(false);
+    }
+    /* Die eine Stelle, die eine Zeile anfasst, hasht sie. */
+    expect(quelle).toContain('createHash("sha256").update(JSON.stringify(z)).digest("hex").slice(0, 12)');
+  });
+
+  it("liest die erwartete Projektkennung aus .env.staging, nicht aus einem Literal", () => {
+    expect(quelle).toContain("projectRef(readEnvFile(STAGING_ENV_FILE)");
+    expect(quelle).not.toContain("qqxcpesbwfxzgytkdsac");
+    expect(quelle).not.toContain("zmiwxswrpkmizvqsgype");
+  });
+
+  it("prüft die Bereiche gegen das Manifest, getrennt nach alt und neu", () => {
+    /* Sonst fiele ein verschwundener alter Bereich nicht auf, wenn die
+       Gesamtzahl stimmt, weil ein anderer dazugekommen ist. */
+    expect(quelle).toContain('const NEU = "purchase_calculations"');
+    expect(quelle).toContain("alle ${alte.length} bisherigen Bereiche sind da");
+    expect(quelle).toContain("SECTIONS_BY_FORMAT_VERSION[ERWARTETE_VERSION]");
+  });
+
+  it("nennt die Grenze: eine Wiederherstellung prüft es nicht", () => {
+    expect(quelle).toContain("WIEDERHERSTELLEN laesst");
+    expect(quelle).toContain("0144_restore_limits.md");
+  });
+
+  it("und endet mit 1, wenn etwas abweicht", () => {
+    expect(quelle).toContain("process.exit(gesamt === 0 ? 0 : 1)");
+  });
+
+  it("ist als npm-Skript erreichbar", () => {
+    const pkg = JSON.parse(readFileSync("package.json", "utf8")) as
+      { scripts: Record<string, string> };
+    expect(pkg.scripts["verify:platform-archive"])
+      .toBe("node tools/verify-platform-archive.mts");
+  });
+});
