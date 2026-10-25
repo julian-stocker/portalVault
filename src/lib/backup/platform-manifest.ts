@@ -859,10 +859,42 @@ export const PLATFORM_ARCHIVE_LAYOUT = {
   storagePrefix: "storage/",
 } as const;
 
+/**
+ * Die Felder des Deckblatts.
+ *
+ * `files` IST EINE PFADLISTE — hier stand bis zum 2026-10-25 „je Archivdatei
+ * Größe und SHA256", und das war falsch. Implementiert ist
+ * `files: string[]`: jeder Pfad, der wirklich im Archiv liegt, in
+ * Schreibreihenfolge und das Deckblatt selbst eingeschlossen. Keine Größe,
+ * keine Prüfsumme je Datei.
+ *
+ * Gefunden beim Bau von `verify:platform-archive`, das gegen diesen
+ * Kommentar prüfen wollte und nichts zu prüfen fand. Ein falscher Kommentar
+ * an einer Sicherung ist schlimmer als keiner: er lässt eine Zusicherung
+ * vermuten, auf die sich jemand verlässt.
+ *
+ * WAS DIE INTEGRITÄT WIRKLICH TRÄGT, und es trägt sie vollständig:
+ *
+ *   * JE EINTRAG die **CRC-32** des ZIP-Formats. Jeder Eintrag führt sie im
+ *     lokalen Kopf und im zentralen Verzeichnis; `unzip -t` prüft alle auf
+ *     einmal, und ein beschädigtes Byte fällt damit auf, ohne dass dieses
+ *     Deckblatt etwas darüber sagen müsste.
+ *   * FÜR DAS GANZE der **SHA-256 über das fertige Archiv**. Er steht nicht
+ *     hier drin — er kann es nicht, denn dieses Deckblatt liegt IM Archiv
+ *     und müsste seinen eigenen Hash vor sich selbst kennen. Er geht nach
+ *     `platform_export_runs.sha256` (`0105`/`0106`), berechnet über den
+ *     fertigen ZIP-Strom.
+ *   * DIE VOLLSTÄNDIGKEIT aus dem Vergleich: jeder Pfad in `files` liegt im
+ *     Archiv, und jede Datei im Archiv steht in `files`. Genau das prüft
+ *     `verify:platform-archive`.
+ *
+ * Am Archivformat ändert dieser Kommentar nichts — er beschreibt, was seit
+ * `0105` ausgeliefert wird.
+ */
 export const PLATFORM_METADATA_FIELDS = [
   "format", "format_version", "created_at", "source_project", "commerce_mode",
   "counts", "auth_user_count", "storage_object_count", "storage_missing_count",
-  "files",              // je Archivdatei Größe und SHA256
+  "files",               // die Pfade im Archiv — siehe oben, keine Prüfsummen
   "contains_personal_data",
   "auth_inventory_only", // immer true — siehe AUTH_INVENTORY_DISCLAIMER
   "restore_supported",   // immer false

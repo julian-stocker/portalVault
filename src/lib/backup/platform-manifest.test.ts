@@ -417,3 +417,37 @@ describe("der Business-Export bleibt unberührt", () => {
     }
   });
 });
+
+describe("das Deckblatt beschreibt, was es wirklich führt", () => {
+  /**
+   * Der Kommentar an `files` sagte bis zum 2026-10-25 „je Archivdatei Größe
+   * und SHA256". Implementiert ist `files: string[]` — eine Pfadliste.
+   * Gefunden beim Bau von `verify:platform-archive`, das gegen diese Zusage
+   * prüfen wollte und nichts zu prüfen fand.
+   *
+   * Ein falscher Kommentar an einer Sicherung ist schlimmer als keiner: er
+   * lässt eine Zusicherung vermuten, auf die sich jemand verlässt. Diese
+   * Gruppe hält die berichtigte Fassung fest, damit die alte nicht
+   * zurückkommt.
+   */
+  const quelle = readFileSync("src/lib/backup/platform-manifest.ts", "utf8");
+
+  it("nennt files nicht mehr als Liste mit Größe und Prüfsumme", () => {
+    expect(quelle).not.toContain("je Archivdatei Größe und SHA256");
+    expect(quelle).toContain("`files` IST EINE PFADLISTE");
+  });
+
+  it("und sagt stattdessen, was die Integrität wirklich trägt", () => {
+    /* Drei Aussagen, und jede ist nachprüfbar: CRC je Eintrag, SHA-256 des
+       Ganzen in der Historie, Vollständigkeit aus dem Vergleich. */
+    expect(quelle).toContain("CRC-32");
+    expect(quelle).toContain("platform_export_runs.sha256");
+    expect(quelle).toContain("jeder Pfad in `files` liegt im");
+  });
+
+  it("das Feld selbst steht unverändert im Vertrag", () => {
+    /* Berichtigt wurde der Kommentar, nicht das Format. */
+    expect(PLATFORM_METADATA_FIELDS).toContain("files");
+    expect(PLATFORM_METADATA_SOURCE.files).toBe("route");
+  });
+});
