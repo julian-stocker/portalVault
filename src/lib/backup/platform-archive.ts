@@ -569,12 +569,30 @@ export type PlatformExportMeasurements = {
 /**
  * Was über den fertigen Lauf in die Historie geht.
  *
- * `section_count` wird am Dokument GEZÄHLT, nicht aus dem Manifest der
- * Codebasis übernommen: weicht es von der Zahl ab, die die Formatversion des
- * Dokuments verspricht, ist etwas verloren gegangen. Seit `0144` bricht
- * `platformManifestDocument()` in diesem Fall ab, statt die Zahl nur zu
- * zeigen — ein Deckblatt, das 54 behauptet und 53 trägt, darf nicht
- * entstehen.
+ * ALLES AUS DEM FERTIGEN ARCHIV, NICHTS AUS DIESER CODEBASIS.
+ *
+ * `section_count` wird am Dokument GEZÄHLT. Und `format_version` kommt seit
+ * dem 2026-10-25 aus **demselben Deckblatt**, das als `manifest.json` im
+ * Archiv liegt — nicht aus `PLATFORM_FORMAT_VERSION`.
+ *
+ * WARUM DAS EIN BEFUND WAR. Hier stand die Codekonstante, während das
+ * Deckblatt die Version des Dokuments liest. Zwei Quellen für eine Aussage:
+ * stünde der neue Code ohne die Migration (oder umgekehrt), behauptete die
+ * HISTORIE `2`, während die ausgelieferte Datei `1` sagt. Dieselbe
+ * Überclaim-Sorte, die `formatVersionOf()` am Deckblatt beseitigt hat — nur
+ * eine Ebene tiefer, und dort, wo niemand hinsieht, weil die Datei ja
+ * stimmt.
+ *
+ * `null` KANN HIER NICHT STEHEN, und wenn doch, ist es ein Abbruch:
+ * `platformArchive()` lässt kein Archiv ohne Version entstehen. Ein
+ * stillschweigendes `?? 1` wäre genau die Lüge, gegen die der ganze
+ * Vertrag gebaut ist.
+ *
+ * Die Prüfung, dass Bereichszahl und Version zueinander passen, sitzt in
+ * `platformArchive()` — dort wird Vollständigkeit bescheinigt, und dort
+ * wird sie verweigert. NICHT in `platformManifestDocument()`: das ist eine
+ * reine Formfunktion, und ihre Einheitstests sollen kein Dokument mit 54
+ * Bereichen bauen müssen, nur um ein Deckblatt zu prüfen.
  */
 export function exportMeasurements(input: {
   outcome: ArchiveOutcome;
@@ -582,8 +600,15 @@ export function exportMeasurements(input: {
   sizeBytes: number;
   sha256: string;
 }): PlatformExportMeasurements {
+  const version = input.outcome.manifest.format_version;
+  if (version === null) {
+    throw new PlatformArchiveError(
+      "das fertige Archiv nennt keine format_version — ohne sie darf kein "
+      + "Historieneintrag entstehen, der eine behauptet",
+    );
+  }
   return {
-    format_version: PLATFORM_FORMAT_VERSION,
+    format_version: version,
     source_project: input.sourceProject,
     size_bytes: input.sizeBytes,
     sha256: input.sha256,

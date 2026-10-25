@@ -14,6 +14,7 @@
     "check": "npm run lint && npm run typecheck && npm run build && npm run verify:check-sql",
     "test": "vitest run",
     "verify:backup": "node tools/verify-backup-export.mts",
+    "verify:platform-archive": "node tools/verify-platform-archive.mts",
     "verify:sums": "node tools/checksums.mts --check",
     "sums:write": "node tools/checksums.mts --write",
     "orderbook:sales-import:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/import-sales.mts --env staging",

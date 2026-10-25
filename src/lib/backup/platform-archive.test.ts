@@ -14,6 +14,7 @@ import {
   storageEntryPath,
   storageManifestDocument,
   type PlatformExportDocument,
+  type PlatformManifestDocument,
   type StorageObject,
 } from "./platform-archive";
 import {
@@ -27,6 +28,7 @@ import {
   PLATFORM_METADATA_FIELDS,
   PLATFORM_METADATA_SOURCE,
   PLATFORM_SECTIONS,
+  SECTIONS_BY_FORMAT_VERSION,
   STORAGE_BUCKETS_INCLUDED,
 } from "./platform-manifest";
 import { isSafeZipPath } from "../zip/zip-path";
@@ -687,5 +689,118 @@ describe("der Dateiname", () => {
     expect(platformArchiveFileName(new Date()).startsWith("skyisles-platform-backup-")).toBe(true);
     // Wenn dieser Test rot wird, könnte eine echte Sicherung im Repo landen.
     expect(readFileSync(".gitignore", "utf8")).toContain("skyisles-platform-backup-");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Code und Datenbank in verschiedenen Fassungen
+// ---------------------------------------------------------------------------
+
+describe("die Historie behauptet nie eine andere Version als das Archiv", () => {
+  /**
+   * DER BEFUND, DEN DIESE GRUPPE FESTNAGELT.
+   *
+   * `exportMeasurements()` setzte die Codekonstante, während das Deckblatt
+   * die Version des DOKUMENTS liest. Zwei Quellen für eine Aussage — und
+   * zwischen Deployment und Migration liegen sie auseinander: der Code sagt
+   * `2`, die Datenbank liefert `1`. Die ausgelieferte Datei hätte dann
+   * gestimmt und die Historie gelogen, also genau dort, wo niemand
+   * nachsieht, weil die Datei ja stimmt.
+   *
+   * Geprüft werden beide Zwischenzustände, die wirklich vorkommen können:
+   * Datenbank auf `0105` (Version 1, 53 Bereiche) und Datenbank auf `0144`
+   * (Version 2, 54). In beiden muss die Historie sagen, was im Archiv steht.
+   */
+  const dokument = (version: number, bereiche: readonly string[]): PlatformExportDocument => ({
+    format: PLATFORM_FORMAT,
+    format_version: version,
+    created_at: "2026-10-25T09:00:00.000Z",
+    commerce_mode: "sandbox",
+    data: Object.fromEntries(bereiche.map((k) => [k, []])),
+  });
+
+  const ALLE = PLATFORM_SECTIONS.map((x) => x.key);
+  const OHNE_NEU = ALLE.filter((k) => k !== "purchase_calculations");
+
+  const lauf = async (document: PlatformExportDocument) => {
+    const archive = platformArchive({
+      document,
+      auth: authInventoryDocument([]),
+      listed: [], expected: [], bytes: async () => new Uint8Array(0),
+      sourceProject: "qqxcpesbwfxzgytkdsac",
+    });
+    await collect(archive);
+    const outcome = archive.outcome();
+    return {
+      outcome,
+      messwerte: exportMeasurements({
+        outcome,
+        sourceProject: "qqxcpesbwfxzgytkdsac",
+        sizeBytes: 4096,
+        sha256: "a".repeat(64),
+      }),
+    };
+  };
+
+  it("Datenbank auf 0105: Version 1, 53 Bereiche — und die Historie sagt 1", async () => {
+    expect(OHNE_NEU).toHaveLength(53);
+    const { outcome, messwerte } = await lauf(dokument(1, OHNE_NEU));
+    expect(outcome.manifest.format_version).toBe(1);
+    expect(outcome.sectionCount).toBe(53);
+    expect(messwerte.format_version).toBe(1);
+    expect(messwerte.section_count).toBe(53);
+    /* Und zwar auch, wenn diese Codebasis längst 2 führt. */
+    expect(PLATFORM_FORMAT_VERSION).toBe(2);
+    expect(messwerte.format_version).not.toBe(PLATFORM_FORMAT_VERSION);
+  });
+
+  it("Datenbank auf 0144: Version 2, 54 Bereiche — und die Historie sagt 2", async () => {
+    expect(ALLE).toHaveLength(54);
+    const { outcome, messwerte } = await lauf(dokument(2, ALLE));
+    expect(outcome.manifest.format_version).toBe(2);
+    expect(outcome.sectionCount).toBe(54);
+    expect(messwerte.format_version).toBe(2);
+    expect(messwerte.section_count).toBe(54);
+  });
+
+  it("in JEDEM Fall ist die Version der Historie die des Deckblatts", async () => {
+    /*
+     * Die Invariante selbst, nicht zwei Beispiele davon: was in
+     * `manifest.json` steht, steht in der Historie. Eine künftige Version 3
+     * ist damit automatisch mitgeprüft, sobald sie in
+     * `SECTIONS_BY_FORMAT_VERSION` steht.
+     */
+    for (const [version, bereiche] of [[1, OHNE_NEU], [2, ALLE]] as const) {
+      const { outcome, messwerte } = await lauf(dokument(version, bereiche));
+      expect(messwerte.format_version, `Version ${version}`)
+        .toBe(outcome.manifest.format_version);
+      expect(messwerte.section_count, `Version ${version}`)
+        .toBe(Object.keys(outcome.manifest.counts).length);
+    }
+  });
+
+  it("und für jede Version, die der Vertrag kennt, passt die Bereichszahl", () => {
+    /* Der Vertrag und das Manifest dürfen nicht auseinanderlaufen. */
+    expect(SECTIONS_BY_FORMAT_VERSION[PLATFORM_FORMAT_VERSION])
+      .toBe(PLATFORM_SECTIONS.length);
+    for (const [version, zahl] of Object.entries(SECTIONS_BY_FORMAT_VERSION)) {
+      expect(zahl, `Version ${version}`).toBeGreaterThan(0);
+    }
+  });
+
+  it("ohne Version entsteht kein Archiv — und erst recht kein Historieneintrag", () => {
+    /*
+     * Die Kehrseite: `exportMeasurements()` erfindet keine `1`. Ein
+     * stillschweigendes `?? 1` wäre genau die Lüge, gegen die der Vertrag
+     * gebaut ist.
+     */
+    const outcome = {
+      files: [], storage: storageManifestDocument({ listed: [], expected: [] }),
+      manifest: { format_version: null } as unknown as PlatformManifestDocument,
+      sectionCount: 54,
+    };
+    expect(() => exportMeasurements({
+      outcome, sourceProject: "qqxcpesbwfxzgytkdsac", sizeBytes: 1, sha256: "b".repeat(64),
+    })).toThrow(PlatformArchiveError);
   });
 });

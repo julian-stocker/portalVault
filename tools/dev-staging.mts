@@ -19,6 +19,27 @@
  * Only `NEXT_PUBLIC_*` names are forwarded, and the anon key among them is
  * not a secret (ADR-0017).
  *
+ * AND UNTIL 2026-10-25 THAT SENTENCE WAS HALF TRUE.
+ *
+ * This file passed no key of its own — but `next dev` loads `.env.local`
+ * ITSELF, and that file carries the PRODUCTION service-role key. So the web
+ * process did receive it, by the back door, every single time. No code read
+ * it (`grep SERVICE_ROLE src/` finds nothing outside tests), so nothing
+ * happened; the point is that nothing had to.
+ *
+ * Two measures, both in the child environment this file builds:
+ *
+ *   1. `SUPABASE_SERVICE_ROLE_KEY` is overwritten with a SENTINEL — not
+ *      emptied. An empty value risks being treated as "unset" by the env
+ *      loader, and `.env.local` would win again. A non-empty, obviously
+ *      invalid value is definitely set, can authenticate nowhere, and says
+ *      in any error message where it came from.
+ *   2. Every value the child inherits is scanned for the PRODUCTION project
+ *      reference. Finds one, no server starts. That is the part which
+ *      covers the clients this file does not know about: whatever a future
+ *      server-side Supabase client reads, it cannot read production out of
+ *      this environment.
+ *
  * THE INTERLOCK
  *
  * This file used to carry its own copy of the check. It now calls the shared
@@ -34,6 +55,7 @@ import { spawn } from "node:child_process";
 
 import {
   checkStagingTarget,
+  projectRef,
   readEnvFile,
   referenceFromDisk,
   STAGING_ENV_FILE,
@@ -71,16 +93,61 @@ if (!verdict.ok) {
 }
 
 console.log(`next dev against ${new URL(url).host}`);
-console.log("service-role key: not passed to the web process");
+
+/**
+ * Der Platzhalter, der an die Stelle eines Production-Geheimnisses tritt.
+ *
+ * Nicht leer: ein leerer Wert gilt manchen Ladern als „nicht gesetzt", und
+ * dann gewinnt `.env.local` wieder. Dieser Wert ist gesetzt, authentifiziert
+ * nirgends und nennt in jeder Fehlermeldung seinen Grund.
+ */
+const ENTZOGEN = "disabled-by-dev-staging";
+
+/** Namen, die der Webprozess unter keinen Umständen echt bekommen soll. */
+const NIEMALS_WEITERGEBEN = ["SUPABASE_SERVICE_ROLE_KEY"] as const;
+
+const kindUmgebung: NodeJS.ProcessEnv = {
+  ...process.env,
+  NEXT_PUBLIC_SUPABASE_URL: url,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
+};
+for (const name of NIEMALS_WEITERGEBEN) kindUmgebung[name] = ENTZOGEN;
+
+/*
+ * DIE ZWEITE SPERRE, und sie gilt für alles, was dieses Skript nicht kennt.
+ *
+ * Geprüft wird die Umgebung, die der Server WIRKLICH bekommt — nicht die
+ * Datei, aus der sie stammt, und nicht die Liste oben. Trägt irgendein Wert
+ * noch die Production-Projektkennung, startet nichts. Ein serverseitiger
+ * Client, den es heute nicht gibt, kann daraus kein Production lesen.
+ */
+const produktionsKennung = projectRef(referenceFromDisk().production.NEXT_PUBLIC_SUPABASE_URL);
+if (produktionsKennung) {
+  const belastet = Object.entries(kindUmgebung)
+    .filter(([, wert]) => typeof wert === "string" && wert.includes(produktionsKennung))
+    .map(([name]) => name);
+  if (belastet.length > 0) {
+    console.error("");
+    console.error("  PRODUCTION GUARD — refusing to start.");
+    console.error("");
+    console.error(`  Diese Variablen tragen die Production-Kennung ${produktionsKennung}:`);
+    for (const name of belastet) console.error(`    ${name}`);
+    console.error("");
+    console.error("  Der Webprozess bekommt sie nicht. Namen oben in");
+    console.error("  NIEMALS_WEITERGEBEN aufnehmen oder aus der Umgebung entfernen.");
+    console.error("");
+    console.error("  No server was started.");
+    console.error("");
+    process.exit(1);
+  }
+}
+
+console.log(`service-role key: withheld (${ENTZOGEN})`);
 console.log("");
 
 const child = spawn("npx", ["next", "dev"], {
   stdio: "inherit",
-  env: {
-    ...process.env,
-    NEXT_PUBLIC_SUPABASE_URL: url,
-    NEXT_PUBLIC_SUPABASE_ANON_KEY: anon,
-  },
+  env: kindUmgebung,
 });
 
 child.on("exit", (code) => process.exit(code ?? 0));

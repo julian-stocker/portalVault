@@ -470,3 +470,68 @@ describe("the sales importer keeps both guards and every data gate", () => {
     expect(TOOL).toContain('client.rpc("seller_import_settlement_adjustment"');
   });
 });
+
+describe("dev:staging gibt dem Webprozess keine Production-Zugangsdaten", () => {
+  /**
+   * DIE LÜCKE, DIE AM 2026-10-25 AUFFIEL.
+   *
+   * `tools/dev-staging.mts` übergab selbst keinen Service-Role-Key — und der
+   * Kopfkommentar sagte das auch. Nur lädt `next dev` `.env.local` SELBST,
+   * und dort steht der **Production**-Service-Role-Key. Der Webprozess bekam
+   * ihn also jedes Mal, durch die Hintertür. Gelesen hat ihn nichts
+   * (`grep SERVICE_ROLE src/` findet außerhalb von Tests keinen Treffer) —
+   * der Punkt ist, dass nichts es hätte müssen.
+   */
+  const quelle = readFileSync("tools/dev-staging.mts", "utf8");
+
+  it("überschreibt den Service-Role-Key mit einem Platzhalter", () => {
+    expect(quelle).toContain('const NIEMALS_WEITERGEBEN = ["SUPABASE_SERVICE_ROLE_KEY"]');
+    expect(quelle).toContain("for (const name of NIEMALS_WEITERGEBEN) kindUmgebung[name] = ENTZOGEN;");
+  });
+
+  it("und der Platzhalter ist NICHT leer", () => {
+    /*
+     * Ein leerer Wert gilt manchen Env-Ladern als „nicht gesetzt" — dann
+     * gewinnt `.env.local` wieder, und die Härtung wäre eine Illusion. Der
+     * Platzhalter muss gesetzt, nicht-leer und offensichtlich ungültig sein.
+     */
+    const m = quelle.match(/const ENTZOGEN = "([^"]+)";/);
+    expect(m, "kein Platzhalter gesetzt").not.toBeNull();
+    expect(m![1].length).toBeGreaterThan(8);
+    expect(m![1]).toContain("disabled");
+    expect(quelle).not.toMatch(/kindUmgebung\[name\] = "";/);
+  });
+
+  it("prüft JEDEN Wert der Kindumgebung auf die Production-Kennung", () => {
+    /*
+     * Die Sperre, die auch für Clients gilt, die dieses Skript nicht kennt:
+     * geprüft wird die Umgebung, die der Server wirklich bekommt — nicht die
+     * Datei, aus der sie stammt, und nicht die Namensliste. Trägt irgendein
+     * Wert die Production-Kennung, startet nichts.
+     */
+    expect(quelle).toContain("Object.entries(kindUmgebung)");
+    expect(quelle).toContain("wert.includes(produktionsKennung)");
+    expect(quelle).toContain("No server was started.");
+    /* Die Kennung kommt aus `.env.local`, nicht aus einem Literal im Code. */
+    expect(quelle).toContain("referenceFromDisk().production.NEXT_PUBLIC_SUPABASE_URL");
+    expect(quelle).not.toContain("zmiwxswrpkmizvqsgype");
+  });
+
+  it("der Kindprozess erbt nicht einfach process.env", () => {
+    /* `env: kindUmgebung`, nicht `env: { ...process.env, … }` am Aufruf. */
+    const spawnStelle = quelle.slice(quelle.indexOf('spawn("npx"'));
+    expect(spawnStelle).toContain("env: kindUmgebung,");
+    expect(spawnStelle).not.toContain("...process.env");
+  });
+
+  it("und die Annahme hinter alldem gilt noch: kein Anwendungscode liest den Key", () => {
+    /*
+     * Die Härtung ersetzt diese Zusicherung nicht, sie stützt sie. Liest
+     * eines Tages doch ein serverseitiger Client den Schlüssel, bekommt er
+     * den Platzhalter — und scheitert laut, statt Production zu erreichen.
+     */
+    const treffer = readFileSync("src/lib/supabase/server.ts", "utf8")
+      + readFileSync("src/lib/supabase/client.ts", "utf8");
+    expect(treffer).not.toContain("SERVICE_ROLE");
+  });
+});
