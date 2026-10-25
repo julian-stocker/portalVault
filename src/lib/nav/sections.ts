@@ -14,6 +14,7 @@
 export type NavSection =
   | "catalog"
   | "collection"
+  | "favorites"
   | "account"
   | "admin"
   | "business"
@@ -37,6 +38,17 @@ export function activeSection(pathname: string): NavSection | null {
   // /dashboard redirects to /collection; both belong to the same section, so
   // the highlight does not flicker during the redirect.
   if (path === "/collection" || path === "/dashboard") return "collection";
+
+  /*
+   * Die Wunschliste ist ihr EIGENER Abschnitt, nicht ein Teil der Sammlung
+   * (0145, ADR-0136).
+   *
+   * „Was ich habe" und „was mir fehlt" sind zwei Fragen und zwei Ziele in
+   * der Leiste. Sie unter `collection` zu fuehren hiesse, dass die Sammlung
+   * leuchtet, waehrend man die Favoriten ansieht — eine Auskunft, die nicht
+   * stimmt.
+   */
+  if (path === "/favoriten") return "favorites";
 
   // Beide Posteingänge gehören zu „Nachrichten" (0098) — der des Betriebs
   // und der der Kundschaft. Der Käufer erreicht seinen über das Kontosymbol,

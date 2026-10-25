@@ -12653,7 +12653,7 @@ niemand geprüft hat, an der Funktion, die unsere Absicherung ist.
 
 **Status:** akzeptiert (Entscheidung des Betreibers, 2026-10-25) ·
 **Umsetzung:** `0145`, `favorite_demand()`, Katalogkarte, `/favoriten` —
-Migration **nirgends angewendet**
+Migration **nirgends angewendet**, Oberfläche lokal fertig
 
 ### Die Entscheidung in einem Satz
 

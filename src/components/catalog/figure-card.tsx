@@ -119,6 +119,7 @@ export function FigureCard({
   toggleLabel,
   nameSlot,
   statusBadge,
+  favoriteSlot,
   notice,
   interactive = true,
   muted = false,
@@ -146,6 +147,19 @@ export function FigureCard({
   nameSlot?: ReactNode;
   /** A chip over the window: "Verborgen". */
   statusBadge?: ReactNode;
+  /**
+   * The heart, over the top right of the window (0145, ADR-0136).
+   *
+   * IT GOES INTO THE SIBLING LAYER, not into the card body — the same layer
+   * the trade row lives in. Since ADR-0038 the whole card body IS the
+   * collect toggle, so a heart inside it would collect the figure when
+   * tapped. Rendered as a sibling it is its own target, and no event
+   * handling is needed to keep the two apart.
+   *
+   * Passed in rather than built here, like `trade`: `FigureCard` draws a
+   * figure and knows nothing about collections, wishlists or sessions.
+   */
+  favoriteSlot?: ReactNode;
   /** Something that went wrong and has to be said on this card. */
   notice?: ReactNode;
   /** Whether the body is interactive at all. An admin card is not (ADR-0042). */
@@ -605,6 +619,31 @@ export function FigureCard({
          * `rounded-sky-sm` and the hairline so it reads as a struck plate
          * rather than a grey rectangle, which is what the painted one did.
          */}
+        {/*
+         * DAS HERZ, oben rechts ueber dem Fenster (0145, ADR-0136).
+         *
+         * In DIESER Ebene und nicht im Kartenkoerper — der Koerper ist seit
+         * ADR-0038 der Sammeln-Toggle, ein Kind darin wuerde beim Antippen
+         * sammeln. Hier ist es ein eigenes Ziel, und es braucht kein
+         * `stopPropagation`: die Ebene ist `pointer-events-none`, der Slot
+         * holt sich die Klicks zurueck.
+         *
+         * `justify-end items-start`, also obere rechte Ecke. Unten links
+         * sitzt das Variantensiegel, unten links auch der Mengen-Chip —
+         * oben rechts ist die eine freie Ecke des Fensters.
+         *
+         * `pointer-events-none` BLEIBT AM SLOT und wird nur am Knopf
+         * zurueckgenommen (`FavoriteHeart` traegt `pointer-events-auto`).
+         * Sonst waere der ganze obere Rand des Fensters ein Loch, durch das
+         * kein Tippen mehr zum Sammeln durchkommt.
+         */}
+        {favoriteSlot ? (
+          <Slot area="image" className="flex items-start justify-end"
+                style={{ paddingInline: INSET.image, paddingTop: "4%" }}>
+            {favoriteSlot}
+          </Slot>
+        ) : null}
+
         <Slot area="trade" className="pointer-events-auto" style={{ paddingInline: INSET.trade }}>
           {/*
            * Layout only — no paint (fix round 2).

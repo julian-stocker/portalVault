@@ -165,7 +165,21 @@ describe("the catalog's ownership filter", () => {
   });
 
   it("leaves an administrator's pool untouched", () => {
-    expect(source(CATALOG)).toMatch(/const owning = admin\s*\n?\s*\? figures/);
+    /*
+     * ZWEI ZEILEN STATT EINER, seit `0145` die Wunschliste dazwischenschiebt.
+     *
+     * Hier stand `const owning = admin ? figures`. Die Aussage ist
+     * unverändert — ein Administrator überspringt den Besitzschritt —, nur
+     * heißt der Pool davor jetzt `gewuenscht`, weil `/favoriten` ihn
+     * zuerst auf die vorgemerkten Figuren verengt. Beide Hälften werden
+     * deshalb einzeln gelesen: dass `gewuenscht` OHNE `favoritesOnly`
+     * genau `figures` ist, und dass der Administrator von dort direkt
+     * weitergeht.
+     */
+    const catalog = source(CATALOG);
+    expect(catalog).toMatch(/const gewuenscht = favoritesOnly\s*\n?\s*\? figures\.filter/);
+    expect(catalog).toMatch(/:\s*figures;/);
+    expect(catalog).toMatch(/const owning = admin\s*\n?\s*\? gewuenscht/);
   });
 
   it("has no Specials toggle, because nothing in the data says what a special is", () => {

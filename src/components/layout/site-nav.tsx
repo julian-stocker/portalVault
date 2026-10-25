@@ -30,6 +30,7 @@ import {
   AdminGlyph,
   CatalogGlyph,
   CollectionGlyph,
+  FavoritesGlyph,
   InventoryGlyph,
   MessagesGlyph,
 } from "@/components/layout/nav-glyphs";
@@ -135,6 +136,33 @@ const DESTINATIONS: readonly {
     // answers with a redirect to /login, so fetching it ahead of time would
     // cost a request and a session check for a page they cannot see (V4.4).
     // `undefined` leaves Next's own default in place.
+    prefetch: (viewer) => (viewer.signedIn ? undefined : false),
+  },
+
+  {
+    href: "/favoriten",
+    label: de.nav.favorites,
+    section: "favorites",
+    icon: FavoritesGlyph,
+    /*
+     * Die Wunschliste eines Sammlers (0145, ADR-0136).
+     *
+     * Eigener Punkt neben der Sammlung und nicht eine Ansicht darin: „was
+     * ich habe" und „was mir fehlt" sind zwei Fragen, und ADR-0027 hat sie
+     * schon einmal auseinandergehalten. Wer die eine beantworten will, soll
+     * nicht durch die andere.
+     *
+     * `collector`, aus demselben Grund wie bei der Sammlung: seit 0042 ist
+     * ein Konto genau eines von drei Dingen (ADR-0078), und nur das erste
+     * hat eine Wunschliste. Die Richtlinien weisen die anderen zwei über
+     * `is_collector_account()` ab — den Punkt anzubieten wäre eine
+     * Einladung an eine Wand.
+     */
+    applies: (viewer) => viewer.collector,
+    /* Nur für jemanden mit Wunschliste vorgeladen. Ausgeloggt antwortet die
+       Route mit 404 bzw. einer Weiterleitung, und ein Prefetch kostete dann
+       eine Anfrage samt Sitzungsprüfung für eine Seite, die niemand sieht —
+       dieselbe Rechnung wie bei `/collection` (V4.4). */
     prefetch: (viewer) => (viewer.signedIn ? undefined : false),
   },
 

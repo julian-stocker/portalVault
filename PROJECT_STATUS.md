@@ -82,6 +82,45 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Favoriten und Wunschliste (2026-10-25, `0145`, ADR-0136) — lokal fertig, nirgends angewendet
+
+**Ein Sammler kann Figuren vormerken.** Das Herz sitzt an jeder Katalogkarte, `/favoriten`
+zeigt die vorgemerkten Figuren, und der Betrieb sieht von fremden Wunschlisten
+ausschließlich eine **Zahl**.
+
+| | |
+|---|---|
+| Migration | `0145_favorites.sql` — **nirgends angewendet**, weder Staging noch Production |
+| Tabelle | `favorites (user_id, sky_id, created_at)`, `primary key (user_id, sky_id)` — die Eindeutigkeit **ist** der Schlüssel |
+| Richtlinien | **drei**, nicht vier: kein `update`, weil es nichts zu ändern gibt. Jede fragt `auth.uid() = user_id` **und** `is_collector_account()` |
+| Rechte | `authenticated`: `SELECT`, `INSERT`, `DELETE`. `anon`: nichts. `update` und `truncate` ausdrücklich entzogen |
+| Nachfragezahl | `favorite_demand(text[])` → `(sky_id, users)`, `definer`+`stable` hinter `can_operate_active_seller()`. Nie eine Zeile, nie eine Kennung |
+| Oberfläche | Herz an der Karte · `/favoriten` über `CatalogView` · Navigationspunkt (Desktop und Mobil) · Ladegrenze · leerer Zustand |
+| Nachweise | 11 573 Tests · Probelauf **P52** an echtem PostgreSQL · 20 DOM-Tests mit echten Klicks · Build grün |
+
+**Was noch nicht geschehen ist, und zwar ausdrücklich:**
+
+* `0145` ist **nirgends ausgeführt**. Preflight, Migration und Nachkontrolle liegen als
+  einfügefertige Hüllen für Staging und Production bereit
+  (`supabase/operations/staging-0145.sql` und die vier Prüfhüllen).
+* **`favorites` steht noch in `PLATFORM_EXCLUDED_TABLES`** — vorübergehend, weil ein Bereich
+  im Archiv `system_platform_export()` ersetzen würde und `0144` noch nicht auf Production
+  liegt. **Die Folgemigration muss das vor dem Production-Rollout aufheben** (ADR-0136,
+  `supabase/checks/platform_export_gap.md`).
+* **Benachrichtigungen sind nicht gebaut.** Sie hängen an der Veröffentlichungslage und
+  müssen das Reservierungsflattern von `available_quantity` aushalten; das braucht eine
+  eigene Entscheidung und einen eigenen Schritt.
+* `npm run verify:rls:staging` für `favorites` steht aus — dass eine Richtlinie **dasteht**,
+  prüft die Nachkontrolle; dass sie **greift**, nur ein Lauf mit zwei echten Konten.
+
+**Der Fehler, den die DOM-Tests gefunden haben, bevor ein Browser ihn sah:** zwei Tipps auf
+das Herz im **selben React-Takt** lasen beide denselben Zustand und schickten beide
+„vorgemerkt" — aus „an, wieder aus" wurde „an, an". Der gewünschte Zustand kommt seitdem aus
+einer Referenz statt aus dem State. Dieselbe Stelle hat `collect-button.tsx` auch; dort wurde
+sie **nicht** angefasst, weil die Sammlung nicht Teil dieses Auftrags war.
+
+---
+
 ## Einkaufsdialog, Korrekturbelege und die Sicherung, die wiederherstellbar sein soll (2026-10-16, `0126`–`0131`) — auf Staging abgeschlossen, Production vorbereitet
 
 **Was gebaut wurde.** Sechs Migrationen, alle auf Staging angewendet und je mit

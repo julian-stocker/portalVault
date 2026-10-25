@@ -6,6 +6,7 @@ import { fetchFigureFormOptions } from "@/lib/admin/queries";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchCatalog, fetchSeries } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
+import { fetchFavoritedSkyIds } from "@/lib/favorites/queries";
 import { offerRecord } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
 import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
@@ -42,7 +43,7 @@ export default async function CatalogPage({
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
 
-  const [user, figures, series, owned, offers, seller, formOptions, marketBoost,
+  const [user, figures, series, owned, favorited, offers, seller, formOptions, marketBoost,
          freeShippingFrom] = await Promise.all([
     currentUser(),
     fetchCatalog({ includeHidden: admin }),
@@ -50,6 +51,18 @@ export default async function CatalogPage({
     // An administrator manages the shop's catalog, not a personal collection
     // (ADR-0042). Their own collection is simply not part of this page.
     admin ? Promise.resolve(new Set<string>()) : fetchOwnedSkyIds(),
+    /*
+     * Die Wunschliste, EINMAL fuer das ganze Raster (0145, ADR-0136).
+     *
+     * In derselben Runde wie alles andere, und aus demselben Grund wie der
+     * Besitz: der Katalog zeichnet bis zu 561 Karten, und ein „ist das
+     * vorgemerkt" je Karte waeren 561 Anfragen.
+     *
+     * Nicht fuer einen Administrator — dieselbe Grenze wie bei der Sammlung
+     * (ADR-0042), und `0145` wuerde ihn ueber `is_collector_account()`
+     * ohnehin abweisen.
+     */
+    admin ? Promise.resolve(new Set<string>()) : fetchFavoritedSkyIds(),
     // Not for an administrator: their card carries editorial actions, and
     // the price they can actually change is in /admin/inventory (ADR-0042).
     admin ? Promise.resolve(new Map()) : fetchOffers(),
@@ -87,6 +100,10 @@ export default async function CatalogPage({
         figures={figures}
         series={series}
         ownedSkyIds={[...owned]}
+        favoritedSkyIds={[...favorited]}
+        /* Das Herz an jeder Karte — ausser fuer den Administrator, dessen
+           Karte editorielle Aktionen traegt (ADR-0042). */
+        favorites={!admin}
         signedIn={Boolean(user)}
         admin={admin}
         highlightSkyId={highlight}

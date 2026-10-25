@@ -83,6 +83,27 @@ export function CollectionGlyph({ className = "h-[18px] w-[18px]" }: { className
 }
 
 /**
+ * Die Favoriten: ein Herz, und zwar derselbe Pfad wie am Kartenherz.
+ *
+ * Nicht ein Stern und nicht ein Lesezeichen: was im Katalog getippt wird,
+ * ist ein Herz, und der Navigationspunkt muss dasselbe Ding zeigen, sonst
+ * sind es zwei Sachen. Umrissen, wie jedes Glyph in dieser Leiste —
+ * gefüllt ist es an der Karte, wo es einen Zustand ausdrückt.
+ */
+export function FavoritesGlyph({ className = "h-[18px] w-[18px]" }: { className?: string }) {
+  return (
+    <Glyph className={className}>
+      <path
+        d={
+          "M12 20.5s-7.5-4.6-7.5-10.1a4.4 4.4 0 0 1 7.5-3.1 4.4 4.4 0 0 1 7.5 3.1" +
+          "C19.5 15.9 12 20.5 12 20.5Z"
+        }
+      />
+    </Glyph>
+  );
+}
+
+/**
  * The operator's stock: a box, seen from the front with its seam.
  *
  * The bar is one bar and cannot be half-illustrated: an administrator sees

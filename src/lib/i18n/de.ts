@@ -169,6 +169,26 @@ export const de = {
 
   catalog: {
     /*
+     * DAS HERZ AN DER KARTE (0145, ADR-0136).
+     *
+     * Vier Texte, und keiner davon ist sichtbar: das Herz ist ein Symbol,
+     * sein Zustand steht in `aria-pressed`, und diese Zeilen sind das, was
+     * ein Screenreader und ein Tooltip hören bzw. zeigen. Die Beschriftung
+     * nennt die AKTION („vormerken"), nicht den Zustand — der Zustand ist
+     * das gefüllte Herz.
+     *
+     * „Vormerken", nicht „Wunschliste": auf der Karte ist der Platz knapp,
+     * und was der Klick tut, ist vormerken. Die Seite heißt dann Favoriten,
+     * weil das der Name ist, unter dem man sie wiederfindet.
+     */
+    favorite: "Vormerken",
+    favorited: "Vorgemerkt",
+    favoriteHint: "Zu den Favoriten hinzufügen",
+    unfavoriteHint: "Aus den Favoriten entfernen",
+    /** Was am Herz steht, solange niemand angemeldet ist (ADR-0027). */
+    favoriteSignedOut: "Zum Vormerken anmelden",
+    favoriteFailed: "Nicht gespeichert",
+    /*
      * Die oberste Navigationsebene des Katalogs (ADR-0128): Figuren oder
      * Zubehör. Zwei Wörter, keine Erklärung — die steht auf der Seite.
      */
@@ -300,6 +320,37 @@ export const de = {
       mini: "Mini",
       sidekick: "Sidekick",
     } as Record<string, string>,
+  },
+
+  /**
+   * Die Wunschliste (0145, ADR-0136).
+   *
+   * Ein eigener Block und nicht ein Anhängsel an `collection`: Favorit und
+   * Besitz sind zwei Aussagen, und zwei Aussagen bekommen zwei Wortfelder.
+   * Was die Seite zeigt, sind Katalogkarten — die Texte dafür stehen
+   * deshalb weiter in `catalog`.
+   */
+  favorites: {
+    title: "Favoriten",
+    subline: "Die Figuren, die dir noch fehlen.",
+    /**
+     * Was die Seite ist, in einem Satz — und zwar auch die Abgrenzung.
+     * „Nur für dich sichtbar" ist keine Beruhigung, sondern die Wahrheit
+     * über die Richtlinien: niemand sonst kann diese Liste lesen.
+     */
+    intro:
+      "Deine vorgemerkten Skylanders — nur für dich sichtbar. " +
+      "Das Herz an jeder Katalogkarte legt eine Figur hierher.",
+    count: (n: number) => (n === 1 ? "1 Figur vorgemerkt" : `${n} Figuren vorgemerkt`),
+    /** Leerer Zustand: ein Satz und ein Weg, kein Bild und kein Ausrufezeichen. */
+    emptyTitle: "Noch nichts vorgemerkt",
+    emptyBody:
+      "Tippe im Katalog auf das Herz an einer Figur, dann steht sie hier.",
+    emptyAction: "Zum Katalog",
+    /** Entfernen geschieht hier mit demselben Herz wie im Katalog. */
+    removeHint: "Mit dem Herz an der Karte wieder entfernen",
+    /** Was die Ladegrenze ansagt, solange das Raster noch Gerüst ist. */
+    loading: "Favoriten werden geladen …",
   },
 
   collection: {
@@ -5040,6 +5091,7 @@ export const de = {
     primary: "Hauptnavigation",
     catalog: "Katalog",
     collection: "Sammlung",
+    favorites: "Favoriten",
     /**
      * Die beiden Kopfzeilen-Aktionen (V3.4.2).
      *

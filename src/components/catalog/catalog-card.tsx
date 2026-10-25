@@ -33,6 +33,7 @@
 import { useState, useTransition } from "react";
 
 import { AdminEditAction, HiddenBadge } from "@/components/admin/card-actions";
+import { FavoriteHeart } from "@/components/catalog/favorite-heart";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
@@ -46,6 +47,9 @@ export function CatalogCard({
   figure,
   initialCollected,
   onCollectedChange,
+  initialFavorited = false,
+  onFavoritedChange,
+  favorites = false,
   signInHref,
   highlighted = false,
   admin = false,
@@ -65,6 +69,29 @@ export function CatalogCard({
    * it in the same frame rather than after a round trip (V4.3).
    */
   onCollectedChange?: (skyId: string, collected: boolean) => void;
+  /**
+   * Whether this figure is on the viewer's wishlist (0145, ADR-0136).
+   *
+   * Handed down from the page like `initialCollected`: one query answers for
+   * the whole catalog, and a per-card lookup would be 561 requests.
+   */
+  initialFavorited?: boolean;
+  /**
+   * Tells the grid's owner what the heart just did, so a wishlist can lose
+   * the card in the same frame — and get it back when the server refuses.
+   */
+  onFavoritedChange?: (skyId: string, favorited: boolean) => void;
+  /**
+   * Whether this surface shows the heart at all.
+   *
+   * OFF BY DEFAULT, so a surface that cannot answer "does he want this" does
+   * not offer the action by accident. The catalog and the wishlist turn it
+   * on; the collection's showcase and every other grid stay as they were.
+   *
+   * An administrator never gets it, whatever this says — see the admin
+   * branch below (ADR-0042).
+   */
+  favorites?: boolean;
   /** null when somebody is signed in; otherwise where the card leads instead. */
   signInHref: string | null;
   /** A deep link landed on this card. Passed straight through. */
@@ -193,6 +220,29 @@ export function CatalogCard({
    */
   const quickBuy = hasQuickViewOffer(offers);
 
+  /**
+   * Das Herz — oder nichts.
+   *
+   * KEIN HERZ FUER DEN ADMINISTRATOR, und das steht nicht hier: der
+   * Admin-Zweig oben kehrt schon zurueck, bevor diese Zeile laeuft. Ein
+   * Betriebs- oder Adminkonto sammelt nicht im eigenen Katalog (ADR-0042),
+   * und `0145` weist es ueber `is_collector_account()` ohnehin ab — ein Herz
+   * dort waere ein Knopf, der nur scheitern kann.
+   *
+   * `favorites` AUS heisst wirklich nichts: eine Flaeche, die den
+   * Favoritenstand nicht kennt, zeigt kein Herz, statt ein leeres zu zeigen.
+   * Ein leeres Herz ist eine Aussage („nicht vorgemerkt"), und sie waere
+   * dort falsch.
+   */
+  const favorite = favorites ? (
+    <FavoriteHeart
+      skyId={figure.skyId}
+      initialFavorited={initialFavorited}
+      signInHref={signInHref}
+      onFavoritedChange={onFavoritedChange}
+    />
+  ) : null;
+
   const trade = (
     <OfferLink
       offers={offers}
@@ -229,6 +279,7 @@ export function CatalogCard({
         highlighted={highlighted}
         showSeries={showSeries}
         trade={trade}
+        favoriteSlot={favorite}
         notice={notice}
       />
     );
@@ -259,6 +310,7 @@ export function CatalogCard({
       highlighted={highlighted}
       showSeries={showSeries}
       trade={trade}
+      favoriteSlot={favorite}
       notice={notice}
     />
   );

@@ -259,9 +259,19 @@ describe("the collector's catalog is untouched", () => {
     // it lives in one function rather than in a JSX ternary (ADR-0042).
     expect(view).toContain("offersOwnershipFilter({ signedIn, admin })");
     expect(view).toContain("<OwnershipFilter");
-    // An administrator's pool skips the narrowing entirely rather than being
-    // given a third value meaning "not applicable".
-    expect(view).toMatch(/const owning = admin\s*\n?\s*\? figures/);
+    /*
+     * An administrator's pool skips the narrowing entirely rather than being
+     * given a third value meaning "not applicable".
+     *
+     * ZWEI ZEILEN STATT EINER, seit `0145` die Wunschliste davorschiebt.
+     * Hier stand `const owning = admin ? figures`; die Aussage ist
+     * unverändert, nur heißt der Pool davor jetzt `gewuenscht` — und der
+     * ist ohne `favoritesOnly` genau `figures`. Beide Hälften werden
+     * deshalb einzeln gelesen.
+     */
+    expect(view).toMatch(/const gewuenscht = favoritesOnly\s*\n?\s*\? figures\.filter/);
+    expect(view).toMatch(/:\s*figures;/);
+    expect(view).toMatch(/const owning = admin\s*\n?\s*\? gewuenscht/);
   });
 
   it("keeps collect and remove on a collector's card", () => {

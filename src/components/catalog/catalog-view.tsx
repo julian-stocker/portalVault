@@ -55,6 +55,9 @@ export function CatalogView({
   figures,
   series,
   ownedSkyIds,
+  favoritedSkyIds = [],
+  favorites = false,
+  favoritesOnly = false,
   signedIn,
   admin = false,
   highlightSkyId,
@@ -70,6 +73,24 @@ export function CatalogView({
   figures: readonly CatalogFigure[];
   series: readonly SeriesOption[];
   ownedSkyIds: readonly string[];
+  /**
+   * Die vorgemerkten SKY-IDs (0145, ADR-0136).
+   *
+   * Gesammelt geladen wie `ownedSkyIds` — ein Aufruf fuer das ganze Raster.
+   * Leer fuer Ausgeloggte und fuer jede Flaeche, die keine Favoriten kennt.
+   */
+  favoritedSkyIds?: readonly string[];
+  /** Ob die Karten ein Herz tragen. Aus heisst: gar keins, nicht ein leeres. */
+  favorites?: boolean;
+  /**
+   * DIE WUNSCHLISTE: nur vorgemerkte Figuren zeigen.
+   *
+   * Gefiltert wird gegen die LEBENDE Menge unten, nicht gegen die Prop —
+   * deshalb verschwindet eine Karte im selben Bild, in dem ihr Herz
+   * ausgeht, und kommt zurueck, wenn der Server den Aufruf ablehnt. Genau
+   * das Muster, das `ownership` seit V4.3 benutzt.
+   */
+  favoritesOnly?: boolean;
   signedIn: boolean;
   /**
    * Administrator mode (ADR-0042): the same catalog, with editorial actions
@@ -177,6 +198,34 @@ export function CatalogView({
     setChanged((current) => new Map(current).set(skyId, collected));
   }
 
+  /*
+   * Dasselbe fuer die Favoriten (0145, ADR-0136).
+   *
+   * Zwei getrennte Mengen und nicht eine: Favorit und Besitz sind zwei
+   * Aussagen, und eine Figur kann in jeder Kombination stehen. Eine
+   * gemeinsame Map muesste beides in einen Wert pressen.
+   *
+   * WOFUER DIESE MENGE DA IST: auf `/favoriten` entscheidet sie, welche
+   * Karten ueberhaupt in der Liste stehen. Ein Herz, das ausgeht, nimmt
+   * seine Karte im SELBEN Bild mit — und ein Serverfehler bringt sie
+   * zurueck, weil `FavoriteHeart` dann mit dem alten Wert noch einmal
+   * meldet.
+   */
+  const [favChanged, setFavChanged] = useState<Map<string, boolean>>(() => new Map());
+
+  const favorited = useMemo(() => {
+    const set = new Set(favoritedSkyIds);
+    for (const [skyId, isFav] of favChanged) {
+      if (isFav) set.add(skyId);
+      else set.delete(skyId);
+    }
+    return set;
+  }, [favoritedSkyIds, favChanged]);
+
+  function onFavoritedChange(skyId: string, isFavorited: boolean) {
+    setFavChanged((current) => new Map(current).set(skyId, isFavorited));
+  }
+
   /**
    * "Alle · Besitz · Fehlen": display only, `all` by default (V7).
    *
@@ -271,9 +320,23 @@ export function CatalogView({
     // An administrator has no ownership state to narrow by (ADR-0042), so
     // their pool skips the step rather than being given a third value that
     // means "not applicable".
+    /*
+     * DIE WUNSCHLISTE NARROWT ZUERST, und sie narrowt gegen die LEBENDE
+     * Menge (0145, ADR-0136).
+     *
+     * Hier und nicht in der Seite: dann gelten Serie, Art, Besitz,
+     * Verfuegbarkeit und die Suche auf der Wunschliste genauso wie im
+     * Katalog, ohne dass eine davon etwas von Favoriten wissen muss. Und
+     * weil `favorited` die optimistische Menge ist, verliert `/favoriten`
+     * eine Karte im SELBEN Bild, in dem ihr Herz ausgeht — und bekommt sie
+     * zurueck, wenn der Server ablehnt.
+     */
+    const gewuenscht = favoritesOnly
+      ? figures.filter((figure) => favorited.has(figure.skyId))
+      : figures;
     const owning = admin
-      ? figures
-      : figures.filter((figure) => matchesOwnership(figure, owned, ownership));
+      ? gewuenscht
+      : gewuenscht.filter((figure) => matchesOwnership(figure, owned, ownership));
     const grouped = group === null ? owning : owning.filter((figure) => matchesGroup(figure, group));
     /*
      * The third narrowing, applied last and in the same pool as the other
@@ -286,7 +349,8 @@ export function CatalogView({
     return availability === DEFAULT_AVAILABILITY
       ? grouped
       : grouped.filter((figure) => matchesAvailability(offers[figure.skyId], availability));
-  }, [admin, ownership, figures, owned, group, availability, offers]);
+  }, [admin, ownership, figures, owned, group, availability, offers,
+      favoritesOnly, favorited]);
 
   /**
    * The second level's tabs, for the chosen game.
@@ -375,6 +439,9 @@ export function CatalogView({
         figure={figure}
         initialCollected={owned.has(figure.skyId)}
         onCollectedChange={onCollectedChange}
+        initialFavorited={favorited.has(figure.skyId)}
+        onFavoritedChange={onFavoritedChange}
+        favorites={favorites}
         signInHref={signedIn ? null : signInHref(figure.skyId)}
         highlighted={highlightSkyId === figure.skyId}
         admin={admin}
