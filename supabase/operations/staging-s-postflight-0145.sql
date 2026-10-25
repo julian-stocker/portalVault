@@ -5,15 +5,41 @@
 -- des Staging-Projekts qqxcpesbwfxzgytkdsac einfuegen, ausfuehren.
 --
 -- ###########################################################################
--- ##  VORHER ZWEI STELLEN ERSETZEN:                                        ##
--- ##    BASIS-HIER-EINSETZEN      <- Zeile 900 des Preflights              ##
--- ##    SAMMLUNG-HIER-EINSETZEN   <- Zeile 901 des Preflights              ##
+-- ##  NICHTS ZU ERSETZEN. Beide Basiszeilen stehen unten eingetragen —     ##
+-- ##  gemessen vom bestandenen Staging-Preflight am 2026-10-25.            ##
 -- ###########################################################################
 --
--- BLEIBT DER PLATZHALTER STEHEN, LAEUFT DIESE DATEI NICHT DURCH. Die Huelle
--- bringt beide `set_config`-Zeilen schon mit, damit niemand sie vergisst —
--- und genau deshalb zaehlt ein nicht ersetzter Platzhalter wie eine fehlende
--- Zeile (Zeile 801 bzw. 821). Sonst waere die Bequemlichkeit die Luecke.
+-- WARUM HIER WERTE STEHEN UND KEINE PLATZHALTER. Der erste Lauf dieser Datei
+-- endete mit `9999 = 18`: achtzehn rote Zeilen, und zwar GENAU die achtzehn
+-- der Baseline-Uebergabe (801-804, 811-817, 821-824, 831-833). Alles andere
+-- war gruen — Tabelle, Primaerschluessel, RLS, die drei Richtlinien, die
+-- Rechte, `favorite_demand()`. Die Platzhalter waren nicht ersetzt, und das
+-- ist genau das Verhalten, das der Riegel verspricht: ein stehengelassener
+-- Platzhalter zaehlt wie eine FEHLENDE Baseline und blockiert.
+--
+-- Der Riegel bleibt unveraendert. Was sich geaendert hat, ist, dass die
+-- gemessenen Werte jetzt in der Datei stehen, damit der Wiederholungslauf
+-- ohne Handarbeit durchlaeuft.
+--
+-- ###########################################################################
+-- ##  DIESE ZWEI ZEILEN GEHOEREN AUSSCHLIESSLICH ZUM STAGING-ROLLOUT VON   ##
+-- ##  0145 AM 2026-10-25. Sie sind KEIN Sollwert fuer irgendetwas sonst:   ##
+-- ##                                                                       ##
+-- ##    * nicht fuer Production — dort werden sie frisch gemessen          ##
+-- ##      (`prod-s-preflight-0145.sql`, Zeilen 900 und 901), und            ##
+-- ##      `prod-s-postflight-0145.sql` traegt deshalb weiter Platzhalter;  ##
+-- ##    * nicht fuer eine spaetere Migration — jede Migration misst ihre   ##
+-- ##      eigene Basis VOR ihrem eigenen Lauf;                             ##
+-- ##    * nicht fuer einen zweiten Lauf auf Staging zu einem anderen       ##
+-- ##      Zeitpunkt — sobald der Betrieb eine Figur einbucht oder ein      ##
+-- ##      Sammler eine Figur hinzufuegt, sind sie veraltet und MUESSEN     ##
+-- ##      blockieren.                                                      ##
+-- ##                                                                       ##
+-- ##  Genau das ist der Zweck des Vergleichs: nicht „sieht Staging aus wie ##
+-- ##  am 25. Oktober", sondern „hat die Migration den Shop und die         ##
+-- ##  Sammlung angefasst". Die Begruendung dieser Unterscheidung steht in  ##
+-- ##  `supabase/checks/production_baseline_0142_finding.md`.               ##
+-- ###########################################################################
 --
 -- ERGEBNIS LESEN: Zeile `9999` muss `0` zeigen.
 --
@@ -46,13 +72,26 @@ end
 $lauf_a$;
 
 -- ---------------------------------------------------------------------------
--- B  DIE BEIDEN BASISZEILEN AUS DEM PREFLIGHT
+-- B  DIE BEIDEN BASISZEILEN AUS DEM PREFLIGHT VOM 2026-10-25
 --
 -- Transaktionslokal (`true`), mit dem `rollback` unten fort. Sie werden NICHT
--- gespeichert — sie leben genau so lange wie dieser Lauf.
+-- gespeichert — sie leben genau so lange wie dieser Lauf, und die Datenbank
+-- behaelt nach dem `rollback` keine Spur davon. Deshalb muessen sie IN
+-- DERSELBEN Klammer stehen wie die Abfrage: der SQL-Editor fuehrt jeden
+-- Lauf getrennt aus, und `set_config(…, true)` ueberlebt das nicht.
+--
+-- Die Schutzsummen `95ca138932c1` und `c8a5542794f2` sind nachgerechnet,
+-- bevor diese Werte hier eingetragen wurden: `left(md5(Felder 2-8), 12)`
+-- bzw. `left(md5(Felder 2-4), 12)`. Ein Tippfehler auf dem Weg aus dem
+-- SQL-Editor haette die Nachkontrolle in Zeile 804 bzw. 824 blockiert, nicht
+-- stillschweigend eine falsche Zahl verglichen.
+--
+-- NUR FUER DIESEN EINEN LAUF — siehe den Kasten im Kopf.
 -- ---------------------------------------------------------------------------
-select set_config('skyisles.base', 'BASIS-HIER-EINSETZEN', true);
-select set_config('skyisles.coll', 'SAMMLUNG-HIER-EINSETZEN', true);
+select set_config('skyisles.base',
+  'skyisles-base-1|256|4d1d6c30fe0ae886ca2689bcb1fe9634|534|534|285|626|54fdbf243d672038128875e9a707e3dd|95ca138932c1', true);
+select set_config('skyisles.coll',
+  'skyisles-coll-1|1|1|a8c965923be52b4d6fee837ae35fd22e|c8a5542794f2', true);
 
 -- >>> EINGEBETTET: supabase/checks/0145_postflight.sql
 -- ===========================================================================

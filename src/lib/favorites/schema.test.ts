@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 
 import { code, columnsOf, tablesOf } from "@/test-support/migrations";
 import { EXCLUDED_TABLES } from "@/lib/backup/manifest";
@@ -414,6 +415,148 @@ describe("die beiden Prüfdateien", () => {
     for (const text of [PRETEXT, POSTTEXT]) {
       expect(text).toContain("blockierende Abweichungen (muss 0 sein)");
     }
+  });
+});
+
+
+describe("die Staging-Nachkontrolle traegt ihre gemessenen Baselines", () => {
+  /*
+   * WAS HIER GEPRUEFT WIRD UND WARUM ES NICHT TRIVIAL IST.
+   *
+   * `staging-s-postflight-0145.sql` trug Platzhalter, der erste Lauf endete
+   * mit `9999 = 18` — genau die achtzehn Zeilen der Baseline-Uebergabe, alles
+   * andere grün. Die gemessenen Werte stehen jetzt in der Datei, damit der
+   * Wiederholungslauf ohne Handarbeit durchläuft.
+   *
+   * Zwei Dinge dürfen dabei nicht schiefgehen, und beide stehen unten:
+   *
+   *   1. Die Werte müssen UNBESCHÄDIGT sein. Sie sind durch einen
+   *      SQL-Editor, einen Chat und eine Datei gereist. Dafür trägt jede
+   *      Zeile ihre Schutzsumme — und dieser Test rechnet sie nach, statt
+   *      sie anzusehen.
+   *   2. Sie dürfen NICHT nach Production wandern. Dort werden sie frisch
+   *      gemessen; eine eingebaute Staging-Zahl wäre dort ein Sollwert, den
+   *      niemand gemessen hat, und würde entweder blockieren oder — schlimmer
+   *      — zufällig passen.
+   */
+  const STAGING_POST = "supabase/operations/staging-s-postflight-0145.sql";
+  const PROD_POST = "supabase/operations/prod-s-postflight-0145.sql";
+  const STAGING_PRE = "supabase/operations/staging-s-preflight-0145.sql";
+  const PROD_PRE = "supabase/operations/prod-s-preflight-0145.sql";
+
+  /** Die Werte, die eine Hülle wirklich setzt — aus dem ausführbaren Teil. */
+  function gesetzt(pfad: string): Record<string, string> {
+    const text = datei(pfad);
+    const out: Record<string, string> = {};
+    for (const m of text.matchAll(
+      /^select set_config\('(skyisles\.[a-z]+)',\s*\n?\s*'([^']*)', true\);/gm)) {
+      out[m[1]] = m[2];
+    }
+    return out;
+  }
+
+  /** `left(md5(<die Felder ohne Marke und ohne Summe>), 12)`, wie im SQL. */
+  function schutz(zeile: string): { ok: boolean; felder: number; marke: string } {
+    const t = zeile.split("|");
+    const kern = t.slice(1, t.length - 1).join("|");
+    return {
+      ok: createHash("md5").update(kern).digest("hex").slice(0, 12) === t[t.length - 1],
+      felder: t.length,
+      marke: t[0],
+    };
+  }
+
+  it("setzt beide Werte, und zwar echte statt Platzhalter", () => {
+    const werte = gesetzt(STAGING_POST);
+    expect(Object.keys(werte).sort()).toEqual(["skyisles.base", "skyisles.coll"]);
+    expect(werte["skyisles.base"]).not.toContain("HIER-EINSETZEN");
+    expect(werte["skyisles.coll"]).not.toContain("HIER-EINSETZEN");
+  });
+
+  it("und beide sind unbeschaedigt — die Schutzsumme nachgerechnet, nicht angesehen", () => {
+    /*
+     * DER TEST, DER EINEN TIPPFEHLER FINDET. Eine verlorene Stelle in einer
+     * Zahl, zwei vertauschte Felder, eine abgeschnittene Zeile: alles davon
+     * ändert die Summe. Ohne diese Prüfung fiele es erst auf Staging auf —
+     * als rote Zeile 804 oder 824, und dann rätselt jemand, ob sich der Shop
+     * bewegt hat oder ob eine Ziffer fehlt.
+     */
+    const werte = gesetzt(STAGING_POST);
+    const base = schutz(werte["skyisles.base"]);
+    expect(base.marke).toBe("skyisles-base-1");
+    expect(base.felder).toBe(9);
+    expect(base.ok, "die Schutzsumme der Shop-Baseline stimmt nicht").toBe(true);
+
+    const coll = schutz(werte["skyisles.coll"]);
+    expect(coll.marke).toBe("skyisles-coll-1");
+    expect(coll.felder).toBe(5);
+    expect(coll.ok, "die Schutzsumme der Sammlungs-Baseline stimmt nicht").toBe(true);
+  });
+
+  it("beide stehen in DERSELBEN Klammer wie die Abfrage", () => {
+    /*
+     * `set_config(…, true)` gilt nur in seiner Transaktion, und der
+     * SQL-Editor führt jeden Lauf getrennt aus. Stünden die Zeilen außerhalb
+     * der Klammer, käme die Nachkontrolle ohne Baseline an — und blockierte
+     * zu Recht.
+     */
+    const text = datei(STAGING_POST);
+    const beginn = text.indexOf("\nbegin;");
+    const konfig = text.indexOf("select set_config('skyisles.base'");
+    const abfrage = text.indexOf(">>> EINGEBETTET: supabase/checks/0145_postflight.sql");
+    const ende = text.indexOf("\nrollback;");
+    expect(beginn).toBeGreaterThan(-1);
+    expect(konfig).toBeGreaterThan(beginn);
+    expect(abfrage).toBeGreaterThan(konfig);
+    expect(ende).toBeGreaterThan(abfrage);
+    /* Und genau eine Klammer, die mit `rollback` endet. */
+    const zeilen = text.split("\n").map((z) => z.trim());
+    expect(zeilen.filter((z) => z === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((z) => z === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((z) => z === "commit;")).toHaveLength(0);
+  });
+
+  it("PRODUCTION traegt weiter Platzhalter — und KEINEN Staging-Wert", () => {
+    /*
+     * Die wichtigste Zeile dieser Gruppe. Eine Staging-Zahl in der
+     * Production-Hülle wäre ein Sollwert, den auf Production niemand gemessen
+     * hat. Er würde dort entweder blockieren (und jemand sucht den Fehler am
+     * falschen Ende) oder zufällig passen (und der Vergleich sagt nichts).
+     */
+    const werte = gesetzt(PROD_POST);
+    expect(werte["skyisles.base"]).toBe("BASIS-HIER-EINSETZEN");
+    expect(werte["skyisles.coll"]).toBe("SAMMLUNG-HIER-EINSETZEN");
+
+    const staging = gesetzt(STAGING_POST);
+    const prod = datei(PROD_POST);
+    for (const wert of Object.values(staging)) {
+      expect(prod, "ein Staging-Wert steht in der Production-Huelle")
+        .not.toContain(wert);
+      /* Auch kein Einzelfeld daraus — etwa der Angebots-Abdruck. */
+      for (const feld of wert.split("|").slice(1, -1)) {
+        if (feld.length >= 8) expect(prod, feld).not.toContain(feld);
+      }
+    }
+  });
+
+  it("und die beiden Preflights setzen ueberhaupt nichts — sie MESSEN", () => {
+    for (const p of [STAGING_PRE, PROD_PRE]) {
+      expect(Object.keys(gesetzt(p)), p).toEqual([]);
+    }
+  });
+
+  it("die Werte gelten erklaert NUR fuer diesen einen Lauf", () => {
+    /*
+     * Eine eingebaute Zahl ohne diesen Satz wird beim naechsten Mal kopiert.
+     * Der Kasten im Kopf sagt, wofuer sie NICHT gilt — Production, eine
+     * spaetere Migration, ein zweiter Lauf zu einem anderen Zeitpunkt.
+     */
+    const kopf = datei(STAGING_POST).slice(0, datei(STAGING_POST).indexOf("\nbegin;"));
+    expect(kopf).toContain("AUSSCHLIESSLICH ZUM STAGING-ROLLOUT VON");
+    expect(kopf).toContain("2026-10-25");
+    expect(kopf).toContain("KEIN Sollwert");
+    expect(kopf).toContain("nicht fuer Production");
+    expect(kopf).toContain("nicht fuer eine spaetere Migration");
   });
 });
 
