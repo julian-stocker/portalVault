@@ -184,6 +184,30 @@
   /* The fine inner line of the frame. Was a literal in card.ts. */
   --own-line-strong: rgb(240 192 115 / 0.75);
 
+  /* --- CORAL · wanting --------------------------------------------------
+     THE SECOND STATE A CARD CAN CARRY, and it must not be gold.
+
+     Gold means POSSESSION — the frame, the crown, the "In deiner Sammlung"
+     line, and since V4.6 even the scale of the card itself. A favourite is
+     the opposite statement: not having it, and wanting it. Painting both in
+     the same hue would make the one glance a collector takes at a grid say
+     two different things in one colour.
+
+     Coral and not red: `--danger` (#ff9b93) is an alarm and is reserved for
+     one. This is warm, a little pink, and sits beside the gold without
+     competing with it — the two never touch, because a filled heart and a
+     gold frame answer different questions.
+
+     Measured on the dusk canvas: 8.1:1. On the ivory card ground it is a
+     FILL, not ink, so the contrast that matters is against the artwork
+     behind it — which is why the glyph carries a dark halo in both states
+     rather than a plate (see `favorite-heart.tsx`). */
+  --favorite-ink: #ff8a7a;
+  /* The glow, and it is deliberately faint: the heart is 14 px on a 211 px
+     card, repeated up to 561 times. A halo that reads as an effect at one
+     card reads as noise at fifty. */
+  --favorite-glow: rgb(255 138 122 / 0.55);
+
   /* --- AMBER · the act of buying (V3.2) ---------------------------------
      A fourth role, and it exists because the other three could not carry it.
      Gold is what somebody OWNS. Silver is what somebody OFFERS. Neither is
@@ -431,6 +455,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    /* A shade brighter against the deeper night, and the glow a shade
+       stronger — the ground it sits on absorbs more. */
+    --favorite-ink: #ff9385;
+    --favorite-glow: rgb(255 147 133 / 0.62);
+
     /* Night rather than dusk: the same world, a few hours later. Cooler,
        deeper, with the horizon burned down to an ember. */
     --sky-high: #0e0d24;
@@ -492,6 +521,10 @@
   --color-own-subtle: var(--own-subtle);
   --color-own-line: var(--own-line);
   --color-own-line-strong: var(--own-line-strong);
+
+  /* Coral · wanting. See the block in :root. */
+  --color-favorite-ink: var(--favorite-ink);
+  --color-favorite-glow: var(--favorite-glow);
 
   --color-commerce: var(--commerce);
   --color-commerce-hover: var(--commerce-hover);
@@ -665,6 +698,29 @@
     from {
       opacity: 0;
       transform: translateY(0.5rem) scale(0.985);
+    }
+  }
+
+  /* -----------------------------------------------------------------------
+     THE THIRD MOTION: a heart being set.
+
+     Declared here and not in the component for the reason stated above — the
+     reduced-motion rule below neutralises whatever lives in this block, and
+     a keyframe hidden in a component would escape it.
+
+     220 ms, one overshoot and back. Short enough to read as the press
+     landing rather than as an animation; it runs only when a favourite is
+     ADDED, because taking one back needs no celebration.
+     --------------------------------------------------------------------- */
+  @keyframes favorite-pop {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.28);
+    }
+    100% {
+      transform: scale(1);
     }
   }
 

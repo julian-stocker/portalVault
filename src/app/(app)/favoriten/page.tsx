@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { CatalogView } from "@/components/catalog/catalog-view";
+import { FavoritesHeading } from "@/components/catalog/favorites-heading";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { isCollector } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
@@ -11,7 +12,7 @@ import { fetchSeries } from "@/lib/catalog/queries";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchFavorites } from "@/lib/favorites/queries";
-import { offerRecord } from "@/lib/shop/offer";
+import { hasV1BuyableOffer, offerRecord, offersFor } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
 import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
@@ -74,32 +75,78 @@ export default async function FavoritesPage() {
 
   const favorited = figures.map((f) => f.skyId);
 
+  /*
+   * DIE KENNZAHL „MIT ANGEBOT", und sie erfindet keine Regel.
+   *
+   * `hasV1BuyableOffer()` ist dieselbe Funktion, die die Angebotszeile jeder
+   * Karte und die Schnellansicht fragen: veröffentlicht, loser Zustand,
+   * bepreist und auf Lager. Hier wird nur gezählt, wie oft sie `true` sagt —
+   * keine zweite Definition von „kaufbar", und an der Angebotslogik ändert
+   * sich nichts (Auftrag Punkt 3).
+   *
+   * Aus denselben Angeboten, die unten als Props weitergehen. Kein zweiter
+   * Aufruf, und die Zahl im Kopf kann dem Angebot auf der Karte nicht
+   * widersprechen.
+   */
+  const withOffer = figures.filter((f) => hasV1BuyableOffer(offersFor(offers, f.skyId))).length;
+
   return (
     <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold md:text-3xl">{de.favorites.title}</h1>
-        <p className="mt-1 text-sm text-muted">{de.favorites.subline}</p>
-        <p className="mt-3 max-w-prose text-sm text-muted">{de.favorites.intro}</p>
-        {figures.length > 0 ? (
-          <p className="mt-2 text-sm font-medium tabular-nums">
-            {de.favorites.count(figures.length)}
-          </p>
-        ) : null}
-      </header>
-
       {figures.length === 0 ? (
-        /*
-         * Der leere Zustand: ein Satz, der sagt, was zu tun ist, und ein
-         * Weg dorthin. Kein Bild, kein Ausrufezeichen — eine leere
-         * Wunschliste ist kein Fehler, sondern der Anfang.
-         */
-        <section className="rounded-sky-lg border border-line bg-panel px-5 py-8 text-center">
-          <h2 className="text-base font-semibold">{de.favorites.emptyTitle}</h2>
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">{de.favorites.emptyBody}</p>
-          <Link href="/" className={`${ACTION_NEUTRAL} mt-5 w-auto px-4`}>
-            {de.favorites.emptyAction}
-          </Link>
-        </section>
+        <>
+          {/* Leer braucht keinen Kennzahlenblock aus drei Nullen — nur den
+              Titel und den einen Weg nach vorn. */}
+          <header className="mb-6">
+            <h1
+              className="text-3xl leading-tight font-semibold tracking-tight md:text-5xl"
+              style={{ textShadow: "0 2px 20px rgb(10 9 24 / 0.85), 0 1px 3px rgb(10 9 24 / 0.95)" }}
+            >
+              {de.favorites.pageTitle}
+            </h1>
+            <p
+              className="mt-2 text-sm text-on-deep-muted md:text-base"
+              style={{ textShadow: "0 1px 14px rgb(10 9 24 / 0.9)" }}
+            >
+              {de.favorites.pageSubline}
+            </p>
+          </header>
+
+          {/*
+           * DER LEERE ZUSTAND, und er ist kein Fehler.
+           *
+           * Ein umrissenes Herz als Bild, ein Satz, der sagt was zu tun ist,
+           * und ein Weg dorthin. Kein Ausrufezeichen, keine Illustration,
+           * kein zweiter Knopf — eine leere Wunschliste ist der Anfang.
+           */}
+          <section
+            className={
+              "rounded-sky-lg bg-deep/70 px-5 py-10 text-center "
+              + "ring-1 ring-border-strong/60 backdrop-blur-sm"
+            }
+          >
+            <svg
+              aria-hidden="true"
+              viewBox="0 0 24 24"
+              className="mx-auto h-10 w-10 text-on-deep-muted/70"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 20.5s-7.5-4.6-7.5-10.1a4.4 4.4 0 0 1 7.5-3.1 4.4 4.4 0 0 1 7.5 3.1C19.5 15.9 12 20.5 12 20.5Z" />
+            </svg>
+            <h2 className="mt-4 text-base font-semibold text-on-deep">
+              {de.favorites.emptyTitle}
+            </h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-on-deep-muted">
+              {de.favorites.emptyBody}
+            </p>
+            <Link href="/" className={`${ACTION_NEUTRAL} mt-5 w-auto px-4`}>
+              {de.favorites.emptyAction}
+            </Link>
+          </section>
+        </>
       ) : (
         <CatalogView
           figures={figures}
@@ -108,6 +155,9 @@ export default async function FavoritesPage() {
           favoritedSkyIds={favorited}
           favorites
           favoritesOnly
+          /* Der eigene Kopf, INNERHALB der Weltkulisse — siehe
+             `favorites-heading.tsx`. */
+          heading={<FavoritesHeading total={figures.length} withOffer={withOffer} />}
           signedIn
           highlightSkyId={null}
           offers={offerRecord(offers)}

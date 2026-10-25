@@ -8,7 +8,7 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
 import { AddFigureModal } from "@/components/admin/add-figure-modal";
@@ -58,6 +58,7 @@ export function CatalogView({
   favoritedSkyIds = [],
   favorites = false,
   favoritesOnly = false,
+  heading,
   signedIn,
   admin = false,
   highlightSkyId,
@@ -91,6 +92,22 @@ export function CatalogView({
    * das Muster, das `ownership` seit V4.3 benutzt.
    */
   favoritesOnly?: boolean;
+  /**
+   * Der Kopf der Seite — Titel, Unterzeile und, falls vorhanden, die
+   * Aktionen darunter.
+   *
+   * EIN SLOT UND KEINE ZWEITE ANSICHT. `/favoriten` brauchte eine eigene
+   * Identität: dort stand bis zum 2026-10-25 „Skylanders Katalog" über der
+   * Wunschliste, weil diese Komponente ihren Kopf selbst mitbrachte. Eine
+   * zweite Ansicht dafür zu bauen hätte Suche, Serien-Tabs, Filter,
+   * Sortierung und das Raster verdoppelt.
+   *
+   * Übergeben wird deshalb nur der Kopf. Alles darunter — das Suchfeld
+   * eingeschlossen — bleibt, wo es ist, und bleibt dasselbe.
+   *
+   * Ohne Angabe steht der Katalogkopf da, also genau das, was `/` zeigt.
+   */
+  heading?: ReactNode;
   signedIn: boolean;
   /**
    * Administrator mode (ADR-0042): the same catalog, with editorial actions
@@ -484,6 +501,8 @@ export function CatalogView({
        * reaches the portal on the right.
        */}
       <div className="md:max-w-[52%]">
+        {heading ?? (
+          <>
         <h1
           className="text-3xl leading-tight font-semibold tracking-tight md:text-5xl"
           style={{ textShadow: "0 2px 20px rgb(10 9 24 / 0.85), 0 1px 3px rgb(10 9 24 / 0.95)" }}
@@ -539,6 +558,8 @@ export function CatalogView({
               {de.catalog.ctaShop}
             </Link>
           </div>
+        )}
+          </>
         )}
 
         <label className="sr-only" htmlFor="catalog-search">
