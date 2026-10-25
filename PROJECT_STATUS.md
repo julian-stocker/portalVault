@@ -137,9 +137,22 @@ bricht bei NULL ab, und ohne das `coalesce` hätte es `0` gezählt und „kein C
 gemeldet, obwohl ein NULL-ACL für Funktionen `EXECUTE TO PUBLIC` bedeutet. Ein falsches Grün.
 Probelauf **P54** fährt die ganze Lage an echtem PostgreSQL, samt Gegenprobe ohne Schutz.
 
+**Und Funktionen auch (Nachtrag ADR-0139).** Der nächste Lauf scheiterte mit
+`permission denied for function offer_state_window` — dieselbe Ursache, eine zu enge Umsetzung:
+Zeile 142 **ruft** auf, statt zu lesen, und der Wächter suchte nach `from`/`join`. Jetzt gilt
+dasselbe Muster für beide Objektarten (`has_function_privilege` + `query_to_xml`; ein bloßes
+`case` hilft bei Funktionen genauso wenig, nachgemessen), und der Wächter streicht zuerst alle
+Zeichenketten — was übrig bleibt, referenziert PostgreSQL wirklich. **Der Preflight war als
+Nächstes fällig:** er ruft `reservation_ttl()` (0010) und `v1_sale_condition()` (0028) auf,
+beiden ist PUBLIC entzogen. Die eigentliche Lücke lag im Probelauf: PostgreSQL erteilt auf eine
+neue Funktion automatisch `EXECUTE TO PUBLIC`, die Migrationen entziehen das, das Stub-Schema
+nicht — **P54 bildete eine mildere Welt nach als die echte und meldete grün.** Jetzt wendet er
+die Entzüge aller Migrationen an (314 Funktionen) und fährt **jede** Runner-Prüfdatei unter
+einer Rolle mit genau den zwölf Tabellen- und drei Funktionsrechten.
+
 **Noch nicht vollständig gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist
-vorbereitet; TLS und Anmeldung stehen, die beiden offenen Zeilen brauchen den Lauf als
-`postgres`. Die Akte `supabase/baselines/baseline-0146.json`
+vorbereitet; TLS und Anmeldung stehen, die drei offenen Zeilen (124, 142, 161) brauchen den
+Lauf als `postgres`. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
 Migration stammen und **nicht** nachträglich gemessen wurden.
 

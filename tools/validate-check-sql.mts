@@ -4728,10 +4728,52 @@ async function main(): Promise<void> {
       /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]);
     ok = sag("Erteilungen", erteilt.length === 12, `${erteilt.length} Tabellen`);
 
+    /* Und die drei Funktionen mit `execute` — ebenfalls aus der Datei. */
+    const erteiltFn = [...setup.matchAll(
+      /grant execute on function public\.(\w+)\s*\(([^)]*)\)\s+to skyisles_agent/g)]
+      .map((m) => `public.${m[1]}(${m[2]})`);
+    ok = ok && sag("Funktionsrechte", erteiltFn.length === 3, `${erteiltFn.length} Funktionen`);
+
     await db.exec("create role pruefrolle nologin;");
     await db.exec("grant usage on schema public to pruefrolle;");
     for (const t of erteilt) {
       await db.exec(`grant select on table public.${t} to pruefrolle;`);
+    }
+    for (const f of erteiltFn) {
+      await db.exec(`grant execute on function ${f} to pruefrolle;`);
+    }
+
+    /*
+     * DAS STANDARDRECHT MUSS WEG — SONST PRUEFT DIESER LAUF DIE FALSCHE WELT.
+     *
+     * PostgreSQL erteilt auf eine neue Funktion automatisch `EXECUTE TO
+     * PUBLIC`. Die Migrationen entziehen es (`revoke all on function … from
+     * public`), das Stub-Schema aber nicht. Ohne diese Entzuege haette
+     * `pruefrolle` die Rechte ueber PUBLIC, und der Probelauf meldete gruen
+     * fuer einen Zustand, den es auf Staging nicht gibt — genau so ist der
+     * Aufruf in Zeile 142 durch alle Netze gefallen.
+     *
+     * Entzogen wird, was die MIGRATIONEN entziehen — aus ihrem Text gelesen,
+     * nicht abgeschrieben, und ueber alle, nicht nur `0146`: `0146` entzieht
+     * `offer_state_window()`, aber `reservation_ttl()` kommt aus `0010` und
+     * `v1_sale_condition()` aus `0028`, und auch die ruft die Nachkontrolle
+     * bzw. der Preflight auf.
+     */
+    const entzogen = new Set<string>();
+    for (const f of readdirSync(MIG_DIR).filter((x) => x.endsWith(".sql")).sort()) {
+      const t = readFileSync(join(MIG_DIR, f), "utf8");
+      for (const m of t.matchAll(
+        /revoke\s+all\s+on\s+function\s+public\.(\w+)\s*\(([^)]*)\)\s+from\s+([^;]+);/gi)) {
+        if (/\bpublic\b/i.test(m[3])) entzogen.add(`public.${m[1]}(${m[2]})`);
+      }
+    }
+    ok = ok && sag("Entzuege aus den Migrationen", entzogen.size >= 3,
+      `${entzogen.size} Funktionen`);
+    for (const f of entzogen) {
+      /* Was der Pruefzugang ausdruecklich erteilt bekommt, behaelt er. */
+      if (erteiltFn.includes(f)) continue;
+      try { await db.exec(`revoke all on function ${f} from public;`); }
+      catch { /* im Stub nicht vorhanden — dann gibt es auch nichts zu entziehen */ }
     }
 
     /* Die Nachkontrolle, nur die interessanten Zeilen. Ohne Baselines
@@ -4743,7 +4785,7 @@ async function main(): Promise<void> {
       if (rolle) await db.exec(`set local role ${rolle};`);
       try {
         const r = (await db.query(`select nr, befund from (${ohneKopf(sql[0])}) x
-                                    where nr in (124, 161, 9998, 9999)`)) as
+                                    where nr in (124, 142, 161, 9998, 9999)`)) as
           { rows: { nr: number; befund: string }[] };
         return new Map(r.rows.map((z) => [Number(z.nr), String(z.befund)]));
       } catch (e) {
@@ -4761,16 +4803,19 @@ async function main(): Promise<void> {
     const eigner = await hol(null);
     const zahl = (x: string | undefined) => x !== undefined && /^\d+$/.test(x);
     ok = ok && sag("als Eigner", typeof eigner !== "string"
-      && zahl(eigner.get(124)) && eigner.get(161) === "0" && eigner.get(9998) === "0",
+      && zahl(eigner.get(124)) && eigner.get(142) !== "KEIN-RECHT"
+      && eigner.get(161) === "0" && eigner.get(9998) === "0",
       typeof eigner === "string" ? `FEHLER ${eigner}`
-        : `124=${eigner.get(124)} 161=${eigner.get(161)} 9998=${eigner.get(9998)}`);
+        : `124=${eigner.get(124)} 142=${eigner.get(142)} `
+          + `161=${eigner.get(161)} 9998=${eigner.get(9998)}`);
 
     const pruefer = await hol("pruefrolle");
     ok = ok && sag("als Pruefzugang", typeof pruefer !== "string"
-      && pruefer.get(124) === "KEIN-RECHT" && pruefer.get(161) === "KEIN-RECHT"
-      && pruefer.get(9998) === "2",
+      && pruefer.get(124) === "KEIN-RECHT" && pruefer.get(142) === "KEIN-RECHT"
+      && pruefer.get(161) === "KEIN-RECHT" && pruefer.get(9998) === "3",
       typeof pruefer === "string" ? `BRICHT AB: ${pruefer}`
-        : `124=${pruefer.get(124)} 161=${pruefer.get(161)} 9998=${pruefer.get(9998)}`);
+        : `124=${pruefer.get(124)} 142=${pruefer.get(142)} `
+          + `161=${pruefer.get(161)} 9998=${pruefer.get(9998)}`);
 
     /*
      * UND DIE GEGENPROBE: ohne den Schutz bricht dieselbe Datei ab. Ohne
@@ -4788,6 +4833,62 @@ async function main(): Promise<void> {
     await db.exec("rollback;");
     ok = ok && sag("ohne Schutz", abgebrochen.includes("permission denied"), abgebrochen);
 
+    /*
+     * GEGENPROBE FUER DEN FUNKTIONSAUFRUF — der Fehler, der nach den
+     * Tabellen uebrig blieb. Ohne den Schutz bricht dieselbe Datei mit
+     * `permission denied for function offer_state_window` ab.
+     */
+    const rohFn = ohneKopf(sql[0]).replace(
+      /case when has_function_privilege\('public\.offer_state_window\(\)', 'execute'\)[\s\S]*?else 'KEIN-RECHT' end/,
+      "(select public.offer_state_window()::text)");
+    await db.exec("begin; set local role pruefrolle;");
+    let fnAb = "(nicht abgebrochen)";
+    try {
+      await db.query(`select nr from (${rohFn}) x where nr = 142`);
+    } catch (e) { fnAb = (e as Error).message.split("\n")[0]; }
+    await db.exec("rollback;");
+    ok = ok && sag("Funktion ohne Schutz",
+      fnAb.includes("permission denied for function"), fnAb);
+
+    /*
+     * UND DAS GANZE NETZ: JEDE DATEI, DIE DER RUNNER FAEHRT.
+     *
+     * Erst der Tabellenfehler, dann der Funktionsfehler — zweimal fiel
+     * derselbe Mangel bei einem erneuten Versuch auf. Dieser Durchgang
+     * fragt deshalb nicht einzelne Zeilen, sondern: laeuft die Datei unter
+     * dem Pruefzugang UEBERHAUPT durch, und stimmt ihre eigene Zaehlung in
+     * 9998 mit der Zahl der `KEIN-RECHT`-Zeilen?
+     */
+    const plaene = JSON.parse(readFileSync(
+      join(CHECK_DIR, "migration-plans.json"), "utf8")) as
+      { migrationen: Record<string, { preflight: string; postflight: string }> };
+    const durchlauf: string[] = [];
+    for (const [nummer, plan] of Object.entries(plaene.migrationen)) {
+      for (const datei of [plan.preflight, plan.postflight]) {
+        const anw = anweisungen(readFileSync(join(CHECK_DIR, datei), "utf8"))
+          .filter((x) => planbar(x));
+        await db.exec("begin; set local role pruefrolle;");
+        try {
+          const r = (await db.query(`select nr, befund from (${ohneKopf(anw[0])}) x`)) as
+            { rows: { nr: number; befund: string }[] };
+          const keinRecht = r.rows.filter(
+            (z) => String(z.befund) === "KEIN-RECHT").length;
+          const gezaehlt = r.rows.find((z) => Number(z.nr) === 9998)?.befund;
+          const stimmt = String(gezaehlt) === String(keinRecht);
+          ok = ok && stimmt;
+          durchlauf.push(`${datei}: durch, ${keinRecht} offen (9998=${gezaehlt})`
+            + (stimmt ? "" : " ZAEHLUNG FALSCH"));
+        } catch (e) {
+          ok = false;
+          durchlauf.push(`${datei} (${nummer}): BRICHT AB — `
+            + (e as Error).message.split("\n")[0]);
+        } finally {
+          await db.exec("rollback;");
+        }
+      }
+    }
+    befund.push(`alle Runner-Dateien → ${durchlauf.join(" | ")}`);
+
     /* Zahlen sind auch dann noch Zahlen, wenn Zeilen dastehen. */
     await db.exec(`insert into public.offer_state (sky_id, buyable, cheapest_cents)
                    values ('SKY-0001', true, 1200), ('SKY-0002', false, null);`);
@@ -4797,8 +4898,9 @@ async function main(): Promise<void> {
       typeof mitZeilen === "string" ? mitZeilen : `161=${mitZeilen.get(161)}`);
 
     probe.push({
-      name: "P54 0146 Nachkontrolle laeuft unter dem lesenden Pruefzugang DURCH: die zwei "
-        + "rechtegeschuetzten Zeilen melden KEIN-RECHT statt die Einreichung mitzunehmen",
+      name: "P54 jede Runner-Pruefdatei laeuft unter dem lesenden Pruefzugang DURCH: "
+        + "geschuetzte Tabellen, Sichten UND Funktionsaufrufe melden KEIN-RECHT statt die "
+        + "Einreichung mitzunehmen, und 9998 zaehlt sie richtig",
       ok,
       sagt: befund.join(" · "),
     });

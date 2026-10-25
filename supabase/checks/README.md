@@ -41,12 +41,14 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
 
 ### Zeile 9998 — was die aufrufende Rolle nicht lesen durfte (ADR-0139)
 
-Der lesende Prüfzugang `skyisles_agent` hat `select` auf **zwölf** Tabellen;
-viele Prüfdateien lesen mehr. Eine Zeile, deren Objekt er nicht lesen darf,
-liefert **`KEIN-RECHT`** statt die ganze Einreichung mitzunehmen — sie steht
-dafür hinter `has_table_privilege(…)` **und** `query_to_xml(…)`, weil
-PostgreSQL die Rechte **aller** Relationen eines Plans beim Ausführungsstart
-prüft und ein bloßes `case` deshalb nicht hilft.
+Der lesende Prüfzugang `skyisles_agent` hat `select` auf **zwölf** Tabellen und
+`execute` auf **drei** Funktionen; viele Prüfdateien brauchen mehr. Eine Zeile,
+deren Objekt er nicht lesen **oder nicht aufrufen** darf, liefert
+**`KEIN-RECHT`** statt die ganze Einreichung mitzunehmen — sie steht dafür
+hinter `has_table_privilege(…)` bzw. `has_function_privilege(…)` **und**
+greift über `query_to_xml(…)` zu, weil PostgreSQL die Rechte **aller**
+Relationen und **aller Funktionen** eines Plans beim Ausführungsstart prüft
+und ein bloßes `case` deshalb nicht hilft.
 
 Solche Zeilen sind **offen**: weder bestanden noch abgewichen, sondern nicht
 durchgeführt. Sie zählen **nicht** in 9999, sondern in **9998** — und werden

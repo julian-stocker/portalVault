@@ -17,7 +17,7 @@ Die Nachkontrolle ist **offen** — siehe „Stand" gleich unten.
 | Migration | **angewendet**, eine Transaktion, `commit` |
 | Nachkontrolle | **9999 = 18** — und zwar ausschließlich die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833) |
 | Zu tun | die Nachkontrolle **einmal wiederholen**, mit den eingefrorenen Baselines |
-| Zwei weitere Hürden, beide behoben | TLS (die private CA des Poolers fehlte, ADR-0138) und die Leserechte der zwei Datenzeilen (ADR-0139) |
+| Drei weitere Hürden, alle behoben | TLS (die private CA des Poolers fehlte, ADR-0138) · die Leserechte der zwei Datenzeilen · der Funktionsaufruf in Zeile 142 (beides ADR-0139) |
 
 ### Warum achtzehn
 
@@ -66,11 +66,12 @@ in der Akte selbst (`herkunft: "bediener"`, Feld `bemerkung`).
 npm run db:migrate:staging -- 0146 --resume
 ```
 
-**Erwartet: Zeile 9999 = `0`** und **zwei offene Zeilen** (124 und 161).
+**Erwartet: Zeile 9999 = `0`** und **drei offene Zeilen** (124, 142, 161).
 
-> **Zwei Zeilen laufen nicht über diesen Zugang (ADR-0139).** Sie lesen
-> `offer_state` und `offer_state_live`, und darauf erteilt `0146` bewusst kein
-> Clientrecht — der lesende Prüfzugang hat es auch nicht. Sie melden deshalb
+> **Drei Zeilen laufen nicht über diesen Zugang (ADR-0139).** 124 und 161
+> lesen `offer_state_live` bzw. `offer_state`, 142 **ruft**
+> `offer_state_window()` auf. Auf keines davon erteilt `0146` ein Clientrecht
+> — der lesende Prüfzugang hat es auch nicht. Sie melden deshalb
 > `KEIN-RECHT`, zählen in **Zeile 9998** und sind damit **offen**: nicht
 > bestanden, nicht abgewichen, sondern nicht durchgeführt. Der erste Lauf
 > scheiterte daran noch vollständig (`permission denied for view

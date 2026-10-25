@@ -597,14 +597,20 @@ tragen **keine** `--env-file` und **keinen** Dienstschlüssel; der Wächter in
 ein drittes Werkzeug auf diesem Weg ist eine Sicherheitsentscheidung und muss
 dort eingetragen werden.
 
-**Was der Prüfzugang nicht lesen darf, bleibt offen (ADR-0139).** Er hat
-`select` auf zwölf Tabellen; **32 von 74** Prüfdateien lesen Objekte, auf die
-er kein Recht hat (`sellers`, `orders`, `invoices`, `favorites`,
-`offer_state` …). Solche Zeilen stehen hinter
-`has_table_privilege(…)` + `query_to_xml(…)` und liefern `KEIN-RECHT` statt
-die ganze Einreichung mitzunehmen — PostgreSQL prüft die Rechte **aller**
-Relationen eines Plans beim Ausführungsstart, ein bloßes `case` hilft also
-nicht. Sie gelten als **offen**: nicht bestanden, nicht abgewichen, sondern
+**Was der Prüfzugang nicht darf, bleibt offen (ADR-0139).** Er hat `select`
+auf zwölf Tabellen und `execute` auf **drei** Funktionen; **32 von 74**
+Prüfdateien lesen Objekte, auf die er kein Recht hat (`sellers`, `orders`,
+`invoices`, `favorites`, `offer_state` …), und manche **rufen** geschützte
+Funktionen auf (`offer_state_window()`, `v1_sale_condition()`,
+`reservation_ttl()` — allen ist PUBLIC das Ausführungsrecht entzogen).
+
+Solche Zeilen stehen hinter `has_table_privilege(…)` bzw.
+`has_function_privilege(…)` und greifen über `query_to_xml(…)` zu; sie liefern
+`KEIN-RECHT` statt die ganze Einreichung mitzunehmen. PostgreSQL prüft die
+Rechte **aller** Relationen **und aller Funktionen** eines Plans beim
+Ausführungsstart — ein bloßes `case` hilft also nicht, bei Funktionen so wenig
+wie bei Tabellen, und auch dann nicht, wenn der Aufruf nur im `where` einer
+Unterabfrage steht. Beides nachgemessen. Sie gelten als **offen**: nicht bestanden, nicht abgewichen, sondern
 nicht durchgeführt, gezählt in **Zeile 9998** und in jeder Ausgabe
 namentlich genannt. Der vollständige Nachweis läuft als `postgres` über die
 Datei, die der Runner dafür schreibt (`supabase/log/staging/`, Baselines
@@ -616,7 +622,12 @@ empfindlich wären (`offer_state` spiegelt den öffentlichen Shop), sondern
 wegen der Richtung: ein Recht je Migration, und in zwanzig Migrationen ist
 der Zugang ein Vollleser. Ein Wächter in `migration-runner.test.ts` prüft
 beim **Schreiben** einer Migration, dass keine vom Runner gefahrene Datei
-ungeschützt auf ein ungeteiltes Objekt zugreift.
+ungeschützt auf ein ungeteiltes Objekt zugreift — Tabellen, Sichten **und**
+Funktionsaufrufe, erkannt über eine Regel: alle Zeichenketten streichen, und
+was übrig bleibt, referenziert PostgreSQL wirklich. Probelauf **P54** fährt
+jede Runner-Datei an echtem PostgreSQL unter einer Rolle mit genau diesen
+Rechten und **mit den Entzügen aller Migrationen** — ein Probelauf, der eine
+mildere Welt nachbildet als die echte, meldet grün und beweist nichts.
 
 **Der Migrations-Runner wendet keine Migration an**, und das ist die Folge
 dieses Zugangs, keine Lücke: `default_transaction_read_only` gilt an der
