@@ -50,7 +50,12 @@ describe("der Formatvertrag", () => {
   it("hat einen eigenen Namen und eine eigene Version", () => {
     // Zwei Formate, zwei Verantwortungen — kein gemeinsamer Namensraum.
     expect(PLATFORM_FORMAT).toBe("skyisles-platform-backup");
-    expect(PLATFORM_FORMAT_VERSION).toBe(1);
+    /*
+     * 2 seit `0144`. Erhöht, obwohl ein Bereich additiv ist: `counts` nennt
+     * nur die Bereiche DIESES Archivs, und ohne die Version könnte ein Leser
+     * „älteres Archiv" nicht von „Bereich abhandengekommen" unterscheiden.
+     */
+    expect(PLATFORM_FORMAT_VERSION).toBe(2);
     expect(PLATFORM_FORMAT).not.toBe("skyisles-business-backup");
   });
 

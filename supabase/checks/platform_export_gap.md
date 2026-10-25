@@ -169,3 +169,30 @@ Vollständig: **ADR-0134**.
 in `system_platform_export()`, und `purchase_calculations` ist weiter nur
 begründet ausgeschlossen statt gesichert. Beides ist Phase 2 (`0144`) und
 braucht eine eigene Freigabe. **Die Lücke ist sichtbar, nicht geschlossen.**
+
+---
+
+## Phase 2 vorbereitet (2026-10-25) — die Tabelle ist drin, die vier Spalten nicht
+
+`0144` nimmt `purchase_calculations` in die Plattformsicherung auf (ADR-0135):
+54 Bereiche, alle zwölf Spalten, `format_version` 2, Version-1-Archive
+bleiben gültig. **Nirgends angewendet** — lokal fertig und geprüft.
+
+**Die vier Spaltenlücken dieser Datei bleiben offen**, und das ist eine
+Entscheidung: `0144` fasst `system_platform_export()` an, also genau die
+Funktion, die unsere Absicherung ist. Vier Spalten mitzunehmen, die niemand
+in diesem Zug geprüft hat, wäre dieselbe Sorte Nebenbei-Änderung, gegen die
+der ganze Aufwand gerichtet ist.
+
+| Spalte | seit | Bereich |
+|---|---|---|
+| `skylanders.item_type` | `0135` | Katalog |
+| `skylanders.usk_rating` | `0139` | Katalog |
+| `shop_inventory.sale_released` | `0139` | `shop_inventory` |
+| `shop_inventory.delivery_scope` | `0139` | `shop_inventory` |
+
+**Der Weg dorthin ist jetzt gebahnt:** `platform-sql.test.ts` folgt der
+neuesten Funktionsdefinition, der Spaltenwächter prüft jede Spalte eines
+bekannten Bereichs, und das Verfahren aus `0144` — Rumpf kopieren, Abdruck
+vorher und nachher, Umkehrprobe, P-Lauf — lässt sich für eine `0145`
+wiederholen. Was fehlt, ist die Entscheidung und eine eigene Freigabe.

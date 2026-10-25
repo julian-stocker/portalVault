@@ -64,7 +64,7 @@ describe("guard 1 — no table carries a seller", () => {
      * commerce table.
      *
      * `0105` joins it because the platform export COPIES the membership row
-     * out. Leaving the column out of the backup would lose which shop an
+     * out, and `0144` because it replaces that function with the same body. Leaving the column out of the backup would lose which shop an
      * operator belongs to — a hole in a backup, to satisfy a guard about
      * something else. `seller-schema.test.ts` holds it to exactly one
      * mention, `t.seller_id`, in that one projection.
@@ -82,6 +82,11 @@ describe("guard 1 — no table carries a seller", () => {
       "0051_admin_predicate_and_business_usernames.sql",
       "0105_platform_export.sql",
       "0111_stripe_refund_contract.sql",
+      /* `0144` ersetzt die Exportfunktion aus `0105` mit demselben Rumpf
+         plus einem Bereich — die Nennung ist eine Kopie, keine neue
+         Verwendung. `seller-schema.test.ts` vergleicht beide Dateien
+         zeichengleich an der Stelle. */
+      "0144_platform_export_calculations.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")

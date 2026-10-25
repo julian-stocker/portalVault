@@ -127,7 +127,7 @@ describe("die Archivschicht rechnet und holt nichts", () => {
     expect(imports).toEqual(["../zip/zip-writer", "./document", "./platform-manifest"]);
   });
 
-  it("definiert die 53 Bereiche nicht neu", () => {
+  it("definiert die Bereiche nicht neu — heute 54", () => {
     // Kanonisch bleibt platform-manifest.ts. Ein zweiter Bereichsname hier
     // wäre der Anfang einer zweiten Wahrheit.
     for (const section of PLATFORM_SECTIONS) {
@@ -334,7 +334,10 @@ describe("manifest.json trägt genau die Felder des Vertrags", () => {
 
   it("nimmt created_at und commerce_mode aus der Datenbank", () => {
     const ausDb = PLATFORM_METADATA_FIELDS.filter((f) => PLATFORM_METADATA_SOURCE[f] === "database");
-    expect(ausDb).toEqual(["created_at", "commerce_mode"]);
+    /* Seit `0144` sind es drei: die Formatversion kommt nicht mehr aus
+       dieser Codebasis, sondern aus dem Dokument — sonst könnte das
+       Deckblatt Version 2 über 53 Bereichen behaupten. */
+    expect(ausDb).toEqual(["format_version", "created_at", "commerce_mode"]);
     expect(manifest.created_at).toBe("2026-09-30T12:00:00.000Z");
     expect(manifest.commerce_mode).toBe("sandbox");
   });
@@ -350,7 +353,8 @@ describe("manifest.json trägt genau die Felder des Vertrags", () => {
 
   it("zählt die Bereiche aus dem fertigen Dokument", () => {
     expect(Object.keys(manifest.counts)).toHaveLength(EXPECTED_SECTION_COUNT);
-    expect(EXPECTED_SECTION_COUNT).toBe(53);
+    /* 54 seit `0144`: `purchase_calculations` ist dazugekommen. */
+    expect(EXPECTED_SECTION_COUNT).toBe(54);
     expect(manifest.counts.skylanders).toBe(4);
     expect(manifest.counts.orders).toBe(1);
   });
@@ -594,7 +598,24 @@ describe("die Messwerte für admin_record_platform_export()", () => {
   });
 
   it("zählt die Bereiche am Dokument, nicht am Manifest der Codebasis", async () => {
-    const document: PlatformExportDocument = { data: { skylanders: [], orders: [] } };
+    /*
+     * DIESELBE AUSSAGE, SEIT `0144` SCHÄRFER. Vorher stand hier ein Dokument
+     * mit zwei Bereichen — das genügte, um „gezählt, nicht angenommen" zu
+     * zeigen, ist aber seit der Zertifizierung gar kein erlaubtes Archiv
+     * mehr (siehe den Test darunter).
+     *
+     * Jetzt ist es ein VOLLSTÄNDIGES Archiv der Version 1: 53 Bereiche,
+     * während das Manifest dieser Codebasis 54 führt. Die Messung muss 53
+     * sagen — damit ist bewiesen, dass sie am Dokument hängt und nicht an
+     * der Konstante, und zugleich, dass ein altes Archiv weiter entsteht.
+     */
+    const alteBereiche = PLATFORM_SECTIONS
+      .map((x) => x.key).filter((k) => k !== "purchase_calculations");
+    expect(alteBereiche).toHaveLength(53);
+    const document: PlatformExportDocument = {
+      format_version: 1,
+      data: Object.fromEntries(alteBereiche.map((k) => [k, []])),
+    };
     const archive = platformArchive({
       document,
       auth: authInventoryDocument([]),
@@ -602,7 +623,42 @@ describe("die Messwerte für admin_record_platform_export()", () => {
       sourceProject: "x".repeat(20),
     });
     await collect(archive);
-    expect(archive.outcome().sectionCount).toBe(2);
+    expect(archive.outcome().sectionCount).toBe(53);
+  });
+
+  it("und verweigert ein Archiv, das Vollständigkeit nur behauptet", () => {
+    /*
+     * DER FALL, DEN `0144` ABFANGEN MUSSTE. Ein Dokument, das Version 2
+     * nennt und 53 Bereiche trägt, wäre unvollständig und sähe vollständig
+     * aus — `purchase_calculations` fehlte, und der Datei wäre es nicht
+     * anzusehen. Genau diese Sorte stiller Lücke ist der Grund, aus dem
+     * `0142` überhaupt aus der Sicherung fiel.
+     *
+     * Verweigert wird SYNCHRON, bevor ein Byte entsteht: lieber kein Archiv
+     * als ein Archiv, das etwas behauptet.
+     */
+    const zuWenig = PLATFORM_SECTIONS
+      .map((x) => x.key).filter((k) => k !== "purchase_calculations");
+    const bauen = (document: PlatformExportDocument) => () => platformArchive({
+      document,
+      auth: authInventoryDocument([]),
+      listed: [], expected: [], bytes: async () => new Uint8Array(0),
+      sourceProject: "x".repeat(20),
+    });
+
+    /* Version 2, aber nur 53 Bereiche. */
+    expect(bauen({ format_version: 2, data: Object.fromEntries(zuWenig.map((k) => [k, []])) }))
+      .toThrow(/54/);
+    /* Version 1, aber 54 Bereiche — die Gegenrichtung zählt auch. */
+    expect(bauen({
+      format_version: 1,
+      data: Object.fromEntries(PLATFORM_SECTIONS.map((x) => [x.key, []])),
+    })).toThrow(/53/);
+    /* Gar keine Version: nicht bescheinigbar. */
+    expect(bauen({ data: { skylanders: [] } })).toThrow(/format_version/);
+    /* Eine Version, die diese Codebasis nicht kennt. */
+    expect(bauen({ format_version: 99, data: { skylanders: [] } }))
+      .toThrow(/unbekannt/);
   });
 
   it("gibt Hash und Projektreferenz in der Form aus, die 0105 als CHECK verlangt", async () => {

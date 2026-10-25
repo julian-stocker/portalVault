@@ -23,8 +23,8 @@
  *
  * KEINE ZWEITE EXPORTLOGIK. `database.json` geht durch, wie die Datenbank es
  * geliefert hat. Diese Datei filtert dort nichts, ergänzt nichts und sortiert
- * nichts um — die 53 Bereiche sind auf Staging so validiert worden, wie sie
- * aus dem einen Statement kommen.
+ * nichts um — die Bereiche sind auf Staging so validiert worden, wie sie aus
+ * dem einen Statement kommen (53 bis `0105`, 54 seit `0144`).
  *
  * WARUM EIN FEHLENDES BYTE DEN EXPORT ABBRICHT. `storage_missing_count` zählt
  * Objekte, die laut Datenbank erwartet werden und im Bucket NICHT liegen — ein
@@ -44,6 +44,7 @@ import {
   PLATFORM_FORMAT,
   PLATFORM_FORMAT_VERSION,
   PLATFORM_SECTIONS,
+  SECTIONS_BY_FORMAT_VERSION,
   STORAGE_BUCKETS_INCLUDED,
 } from "./platform-manifest";
 import { sectionCounts } from "./document";
@@ -276,7 +277,12 @@ export function storageManifestDocument(input: {
 
 export type PlatformManifestDocument = {
   format: string;
-  format_version: number;
+  /**
+   * `null`, wenn das Datenbankdokument keine nennt — dieses Deckblatt
+   * erfindet nichts. Ein Archiv entsteht in diesem Fall ohnehin nicht:
+   * `platformArchive()` verweigert es (`zertifiziereVollstaendigkeit`).
+   */
+  format_version: number | null;
   created_at: string | null;
   source_project: string | null;
   commerce_mode: string | null;
@@ -291,11 +297,79 @@ export type PlatformManifestDocument = {
 };
 
 /**
+ * Die Formatversion, aus dem DOKUMENT und nicht aus dieser Codebasis.
+ *
+ * WARUM DIE QUELLE GEWECHSELT HAT (2026-10-25, mit `0144`). Bis hierher
+ * schrieb die Route `PLATFORM_FORMAT_VERSION` aus dem Code in das Deckblatt,
+ * während die Bereiche aus der Datenbank kamen. Zwei Quellen für eine
+ * Aussage — und mit `0144` wird daraus ein Problem: steht der neue Code
+ * schon, die Migration aber noch nicht, behauptete das Deckblatt Version 2,
+ * während `database.json` 53 Bereiche trägt. Ein Archiv, das Vollständigkeit
+ * behauptet und sie nicht hat, ist schlimmer als kein Archiv (siehe Kopf).
+ *
+ * Die Datenbank ist die einzige Instanz, die weiß, was sie geliefert hat.
+ * Deshalb liest das Deckblatt die Version von ihr — und kann nicht mehr
+ * überclaimen. `PLATFORM_METADATA_SOURCE` nennt `format_version` seitdem
+ * „database".
+ *
+ * `null`, WENN DAS DOKUMENT KEINE NENNT. Diese Funktion erfindet nichts —
+ * dieselbe Regel wie bei `created_at` und `commerce_mode`. Dass ein Archiv
+ * ohne Version nicht entstehen darf, entscheidet nicht das Deckblatt,
+ * sondern `platformArchive()`: dort wird Vollständigkeit bescheinigt, und
+ * dort wird sie verweigert.
+ */
+export function formatVersionOf(document: PlatformExportDocument): number | null {
+  const roh = (document as { format_version?: unknown }).format_version;
+  return typeof roh === "number" && Number.isInteger(roh) ? roh : null;
+}
+
+/**
+ * Trägt das Dokument so viele Bereiche, wie seine Version verspricht?
+ *
+ * DER FALL, DEN DAS ABFÄNGT. Ein Archiv der Version 2 mit 53 Bereichen wäre
+ * unvollständig und sähe vollständig aus — der Bereich
+ * `purchase_calculations` fehlte, und niemand könnte es der Datei ansehen.
+ * Genau diese Sorte stiller Lücke ist der Grund, aus dem `0142` überhaupt
+ * aus der Sicherung fiel (ADR-0134).
+ *
+ * EINE UNBEKANNTE VERSION IST AUCH EIN ABBRUCH. Wer nicht weiß, wie viele
+ * Bereiche eine Version führt, kann nicht bescheinigen, dass alle da sind.
+ * Schweigend durchlassen wäre die falsche Antwort: dann hätte ein künftiges
+ * `0145` eine Lücke, die kein Test sieht.
+ */
+function zertifiziereVollstaendigkeit(document: PlatformExportDocument): void {
+  const version = formatVersionOf(document);
+  if (version === null) {
+    throw new PlatformArchiveError(
+      "das Datenbankdokument nennt keine ganzzahlige format_version — ohne sie "
+      + "lässt sich Vollständigkeit nicht bescheinigen",
+    );
+  }
+  const erwartet = SECTIONS_BY_FORMAT_VERSION[version];
+  if (erwartet === undefined) {
+    throw new PlatformArchiveError(
+      `Formatversion ${version} ist dieser Codebasis unbekannt — wie viele Bereiche `
+      + "sie führen muss, steht in SECTIONS_BY_FORMAT_VERSION, und ohne diese Zahl "
+      + "lässt sich Vollständigkeit nicht bescheinigen",
+    );
+  }
+  const da = Object.keys(sectionCounts(document)).length;
+  if (da !== erwartet) {
+    throw new PlatformArchiveError(
+      `das Datenbankdokument nennt Formatversion ${version}, führt aber ${da} `
+      + `Bereiche statt ${erwartet}. Ein Archiv, das Vollständigkeit behauptet und `
+      + "sie nicht hat, ist schlimmer als kein Archiv",
+    );
+  }
+}
+
+/**
  * Das Deckblatt.
  *
- * `created_at` und `commerce_mode` kommen aus dem Datenbankdokument — laut
- * `PLATFORM_METADATA_SOURCE` sind genau diese zwei „database", alles andere
- * „route". `source_project` liefert der Aufrufer aus
+ * `created_at`, `commerce_mode` und seit `0144` auch `format_version` kommen
+ * aus dem Datenbankdokument — laut `PLATFORM_METADATA_SOURCE` sind genau
+ * diese drei „database", alles andere „route". Warum die Version dazugekommen
+ * ist, steht an `formatVersionOf()`. `source_project` liefert der Aufrufer aus
  * `NEXT_PUBLIC_SUPABASE_URL`; ein Postgres kennt seine Projektreferenz nicht,
  * und der Host der eingehenden Anfrage wäre vom Aufrufer bestimmbar.
  *
@@ -314,7 +388,7 @@ export function platformManifestDocument(input: {
   const { document, auth, storage } = input;
   return {
     format: PLATFORM_FORMAT,
-    format_version: PLATFORM_FORMAT_VERSION,
+    format_version: formatVersionOf(document),
     created_at: typeof document.created_at === "string" ? document.created_at : null,
     source_project: input.sourceProject,
     commerce_mode: typeof document.commerce_mode === "string" ? document.commerce_mode : null,
@@ -385,6 +459,16 @@ export function platformArchive(input: {
   sourceProject: string | null;
   bucket?: string;
 }): { entries: () => AsyncGenerator<ZipEntry, void, undefined>; outcome: () => ArchiveOutcome } {
+  /*
+   * ZUERST, UND SYNCHRON: ist das überhaupt eine vollständige Sicherung?
+   *
+   * Hier wird Vollständigkeit bescheinigt — in `manifest.json`, mit `counts`
+   * und `files`. Also wird sie auch hier verweigert, bevor das erste Byte
+   * entsteht. Dasselbe Prinzip wie beim unlesbaren Storage-Objekt weiter
+   * unten: lieber kein Archiv als ein Archiv, das etwas behauptet.
+   */
+  zertifiziereVollstaendigkeit(input.document);
+
   const bucket = input.bucket ?? STORAGE_BUCKETS_INCLUDED[0];
   const layout = PLATFORM_ARCHIVE_LAYOUT;
   let result: ArchiveOutcome | null = null;
@@ -486,8 +570,11 @@ export type PlatformExportMeasurements = {
  * Was über den fertigen Lauf in die Historie geht.
  *
  * `section_count` wird am Dokument GEZÄHLT, nicht aus dem Manifest der
- * Codebasis übernommen: weicht es von 53 ab, ist etwas verloren gegangen, und
- * genau das soll die Zahl zeigen können.
+ * Codebasis übernommen: weicht es von der Zahl ab, die die Formatversion des
+ * Dokuments verspricht, ist etwas verloren gegangen. Seit `0144` bricht
+ * `platformManifestDocument()` in diesem Fall ab, statt die Zahl nur zu
+ * zeigen — ein Deckblatt, das 54 behauptet und 53 trägt, darf nicht
+ * entstehen.
  */
 export function exportMeasurements(input: {
   outcome: ArchiveOutcome;

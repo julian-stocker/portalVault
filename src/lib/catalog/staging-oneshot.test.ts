@@ -383,6 +383,7 @@ const LAEUFE = [
   ["supabase/operations/staging-0142.sql", "0142_purchase_calculations.sql"],
   /* Und `0143` — die Uebernahme ins Orderbuch (ADR-0132). */
   ["supabase/operations/staging-0143.sql", "0143_purchase_from_calculation.sql"],
+  ["supabase/operations/staging-0144.sql", "0144_platform_export_calculations.sql"],
 ] as const;
 
 describe("die Einzellaeufe fuer 0139 bis 0143", () => {
@@ -643,6 +644,8 @@ const PROD_LESELAEUFE_BASIS = [
   ["supabase/operations/prod-s-postflight-0142.sql", "0142_postflight.sql", "post"],
   ["supabase/operations/prod-s-preflight-0143.sql", "0143_preflight.sql", "pre"],
   ["supabase/operations/prod-s-postflight-0143.sql", "0143_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0144.sql", "0144_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0144.sql", "0144_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -818,7 +821,7 @@ describe.each(PROD_LESELAEUFE_BASIS)(
     expect(text.slice(a + anfang.length, b)).toBe(pruef);
   });
 
-  it("trägt den Riegel der neun — zeichengleich in allen drei Bedingungen", () => {
+  it("trägt den Riegel der zehn — zeichengleich in allen drei Bedingungen", () => {
     const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
     for (const bedingung of [
       "if (select count(*) from public.skylanders\n       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then",
@@ -1271,9 +1274,11 @@ const PRODUKTIONSLAEUFE = [
    */
   ["supabase/operations/prod-0142.sql", "0142_purchase_calculations.sql"],
   ["supabase/operations/prod-0143.sql", "0143_purchase_from_calculation.sql"],
+  /* `0144`: die Sicherungsfunktion bekommt einen Bereich mehr. */
+  ["supabase/operations/prod-0144.sql", "0144_platform_export_calculations.sql"],
 ] as const;
 
-describe("die neun Production-Laeufe", () => {
+describe("die zehn Production-Laeufe", () => {
   for (const [skript, migration] of PRODUKTIONSLAEUFE) {
     const text = readFileSync(skript, "utf8");
 
@@ -1334,9 +1339,9 @@ describe("die neun Production-Laeufe", () => {
     });
   }
 
-  it("alle neun tragen DENSELBEN Riegel, Zeichen für Zeichen", () => {
+  it("alle zehn tragen DENSELBEN Riegel, Zeichen für Zeichen", () => {
     /*
-     * Neun Dateien, ein Schutz. Sie unterscheiden sich nur darin, welche
+     * Zehn Dateien, ein Schutz. Sie unterscheiden sich nur darin, welche
      * Staging-Datei die Fehlermeldung als Alternative nennt — das wird
      * herausnormalisiert, alles andere muss gleich sein. Ein Riegel, der
      * in einer von sieben Dateien abweicht, ist in dieser einen Datei

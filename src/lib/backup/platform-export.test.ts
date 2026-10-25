@@ -607,7 +607,7 @@ describe("die Historie läuft ausschließlich über 0106", () => {
     source_project: "qqxcpesbwfxzgytkdsac",
     size_bytes: 2240705,
     sha256: "a".repeat(64),
-    section_count: 53,
+    section_count: 54,
     storage_file_count: 36,
     storage_missing_count: 0,
   };
@@ -622,7 +622,7 @@ describe("die Historie läuft ausschließlich über 0106", () => {
       p_source_project: "qqxcpesbwfxzgytkdsac",
       p_size_bytes: 2240705,
       p_sha256: "a".repeat(64),
-      p_section_count: 53,
+      p_section_count: 54,
       p_storage_file_count: 36,
       p_storage_missing_count: 0,
     });

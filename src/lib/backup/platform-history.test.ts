@@ -37,7 +37,7 @@ function run(over: Partial<PlatformExportRun> = {}): PlatformExportRun {
     source_project: "qqxcpesbwfxzgytkdsac",
     size_bytes: 2240705,
     sha256: "a".repeat(64),
-    section_count: 53,
+    section_count: 54,
     storage_file_count: 36,
     storage_missing_count: 0,
     failure_stage: null,

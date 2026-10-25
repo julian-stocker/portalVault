@@ -14,7 +14,7 @@ import {
   PLATFORM_SECTIONS,
   allPlatformFields,
 } from "./platform-manifest";
-import { latestFunction } from "@/test-support/migrations";
+import { allMigrations, latestFunction } from "@/test-support/migrations";
 
 /**
  * Der Export gegen das Plattform-Manifest (Schritt 3).
@@ -150,7 +150,13 @@ describe("woher diese Datei liest", () => {
      * sich DIESE Zeile — an einer Stelle, die jemand liest, statt dass ein
      * Vergleich stillschweigend die falsche Fassung prüft.
      */
-    expect(DEFINITION.file).toBe("0105_platform_export.sql");
+    /*
+     * SEIT DEM 2026-10-25 IST ES `0144`. Genau dafür stand diese Zeile hier:
+     * die Umstellung auf `latestFunction()` zeigt sich an einer Stelle, die
+     * jemand liest, statt dass ein Feldvergleich stillschweigend die
+     * Fassung aus `0105` prüft, während die Datenbank eine andere ausführt.
+     */
+    expect(DEFINITION.file).toBe("0144_platform_export_calculations.sql");
   });
 
   it("historische Prüfungen bleiben historisch", () => {
@@ -372,7 +378,8 @@ describe("Format und Metadaten des Datenbankdokuments", () => {
 
   it("gibt genau die Metadaten aus, die laut Manifest aus der Datenbank kommen", () => {
     const ausDb = PLATFORM_METADATA_FIELDS.filter((f) => PLATFORM_METADATA_SOURCE[f] === "database");
-    expect(ausDb).toEqual(["created_at", "commerce_mode"]);
+    /* Drei seit `0144` — siehe `formatVersionOf()` in platform-archive.ts. */
+    expect(ausDb).toEqual(["format_version", "created_at", "commerce_mode"]);
     for (const f of ausDb) {
       expect(BODY, `Metadatum ${f} fehlt in 0105`).toContain(`'${f}',`);
     }
@@ -401,7 +408,12 @@ describe("Format und Metadaten des Datenbankdokuments", () => {
      * wiederholt beides — die Route schreibt es, das Manifest sagt es.
      */
     expect(PLATFORM_METADATA_SOURCE.format).toBe("route");
-    expect(PLATFORM_METADATA_SOURCE.format_version).toBe("route");
+    /*
+     * „database" seit `0144`. Die Datenbank ist die einzige Instanz, die
+     * weiß, wie viele Bereiche sie geliefert hat; eine Konstante aus dem
+     * Code könnte überclaimen.
+     */
+    expect(PLATFORM_METADATA_SOURCE.format_version).toBe("database");
     expect(BODY).toContain("'format',");
     expect(BODY).toContain("'format_version',");
   });
@@ -501,7 +513,7 @@ describe("kein jsonb_build_object überschreitet die Argumentgrenze", () => {
     const verkettet = proGruppe.flat();
     expect(verkettet).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
     expect(new Set(verkettet).size, "ein Bereich kommt doppelt vor").toBe(verkettet.length);
-    expect(verkettet).toHaveLength(53);
+    expect(verkettet).toHaveLength(54);
   });
 
   it("die Gruppierung bleibt ein Ausdruck in einer Anweisung", () => {
@@ -540,7 +552,7 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
   it("es sind genau die des Manifests, nicht mehr und nicht weniger", () => {
     const imSql = [...BODY.matchAll(/^\s{8}'([a-z_0-9]+)', coalesce\(\(/gm)].map((m) => m[1]);
     expect(imSql).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
-    expect(imSql).toHaveLength(53);
+    expect(imSql).toHaveLength(54);
   });
 
   for (const section of PLATFORM_SECTIONS) {
@@ -558,7 +570,8 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
     const gesamt = PLATFORM_SECTIONS.reduce((n, s) => n + sqlFields(s.key).length, 0);
     const gebildet = PLATFORM_SECTIONS.reduce((n, s) => n + (s.denormalised?.length ?? 0), 0);
     expect(gesamt).toBe(allPlatformFields().length);
-    expect(gesamt).toBe(486);
+    /* 486 bis `0105`, 498 seit `0144` (zwölf Spalten dazu). */
+    expect(gesamt).toBe(498);
     expect(gebildet).toBe(4);
   });
 
@@ -719,6 +732,24 @@ describe("Geld verliert nichts", () => {
     expect(roh).toEqual([]);
   });
 
+  /**
+   * Felder, die die Namensheuristik fängt und die trotzdem KEIN `::text`
+   * brauchen — weil sie ganzzahlig sind.
+   *
+   * Die Geldregel aus `0105` schützt `numeric` vor Gleitkommazahlen: aus
+   * 7.85 würde sonst irgendwo 7.849999999999999. Eine ganze Zahl hat dieses
+   * Problem nicht, und sie als Text auszugeben wäre Rauschen in einer Datei,
+   * die ohnehin groß ist.
+   *
+   * Die Ausnahme ist an die TATSACHE gebunden, nicht an Geschmack: der Test
+   * darunter liest den deklarierten Typ aus den Migrationen. Wird
+   * `factor_percent` später `numeric`, fällt die Ausnahme, und das Feld muss
+   * `::text` werden.
+   */
+  const GANZZAHLIG: Readonly<Record<string, string>> = {
+    factor_percent: "smallint",
+  };
+
   it("die Liste deckt jedes Geldfeld des Manifests ab", () => {
     /*
      * Die Gegenrichtung: ein neues Betragsfeld im Manifest, das hier fehlte,
@@ -727,8 +758,27 @@ describe("Geld verliert nichts", () => {
      */
     const verdaechtig = allPlatformFields().filter((f) =>
       /(^|_)(price|amount|cost|total|subtotal|payout|factor|percent|threshold)$/.test(f));
-    const fehlend = [...new Set(verdaechtig)].filter((f) => !MONEY.includes(f));
+    const fehlend = [...new Set(verdaechtig)]
+      .filter((f) => !MONEY.includes(f) && GANZZAHLIG[f] === undefined);
     expect(fehlend).toEqual([]);
+  });
+
+  it("und jede Ausnahme ist wirklich ganzzahlig — laut Migration", () => {
+    /*
+     * Eine Ausnahmeliste, die niemand nachprüft, ist eine Hintertür. Hier
+     * steht der Beleg: der Typ, wie die Migration ihn deklariert. Die drei
+     * anderen Prozentfelder des Manifests sind `numeric` und tragen
+     * deshalb `::text` — `price_percentage`, `catalog_market_boost_percent`
+     * und `buy_in_factor_snapshot`.
+     */
+    for (const [feld, typ] of Object.entries(GANZZAHLIG)) {
+      expect(["smallint", "integer", "bigint"], `${feld}: ${typ}`).toContain(typ);
+      const muster = new RegExp(`^\\s+${feld}\\s+${typ}\\b`, "m");
+      expect(allMigrations, `${feld} ist laut Migration nicht ${typ}`).toMatch(muster);
+    }
+    /* Und die Gegenprobe: ein `numeric`-Prozentfeld steht NICHT drin. */
+    expect(GANZZAHLIG.price_percentage).toBeUndefined();
+    expect(MONEY).toContain("price_percentage");
   });
 });
 

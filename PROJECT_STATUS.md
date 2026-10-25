@@ -274,6 +274,43 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### Phase 2: `0144` nimmt die Kalkulationen in die Plattformsicherung (2026-10-25, vorbereitet)
+
+**Lokal fertig, nirgends angewendet.** Keine Datenbank angefasst, kein Push.
+
+| | |
+|---|---|
+| Migration | `0144_platform_export_calculations.sql` — ersetzt `system_platform_export()` |
+| Am Rumpf | **genau drei Änderungen**: `format_version` 1 → 2 · Gruppenkopf „Lager und Orderbuch" 12 → 13 Bereiche · ein Bereich mit allen **zwölf** Spalten. 30 405 Zeichen gehen unverändert durch, 18 Zeilen kommen dazu |
+| Bewiesen durch **Umkehrung** | der neue Rumpf, um die drei Änderungen zurückgedreht, ist **Zeichen für Zeichen** der alte. Eine vierte Änderung fällt auf, ohne dass jemand 53 Bereiche auflisten muss |
+| Riegel | `md5(prosrc)` **vor** dem Ersetzen: steht dort nicht `2e2da90e…` aus `0105`, bricht sie ab statt eine fremde Fassung zu überschreiben. Danach `4c4d2e7c…` |
+| Abdrücke | **an echtem PostgreSQL gemessen**, nicht gerechnet und gehofft — `prosrc` beginnt mit dem Zeilenumbruch nach `as $$`, und das war nicht zu erraten |
+| Rücknahme | `R0144` stellt nur den Rumpf wieder her, ist idempotent, weist eine dritte Fassung ab und **fasst keine Nutzerdaten an** |
+| Archivformat | **Version 2**; Version-1-Archive bleiben gültig mit 53 Bereichen. Die Zahl zu Version 1 ist nicht getippt, sondern das Manifest minus dem neuen Bereich |
+
+**Ein Befund beim Bauen:** `format_version` schrieb die **Route** aus der
+Codekonstante, während die Bereiche aus der Datenbank kamen — zwei Quellen
+für eine Aussage. Stünde der Code schon und die Migration noch nicht,
+behauptete das Deckblatt Version 2 über 53 Bereichen. Jetzt liest es die
+Version vom Dokument, und `platformArchive()` **verweigert** synchron ein
+Archiv, dessen Bereichszahl nicht zu seiner Version passt. Auch eine
+unbekannte Version wird verweigert.
+
+**Probelauf P51** fährt alles an echtem PostgreSQL: Abdruck gemessen · ohne
+`0142` abgewiesen · gegen eine **fremde** Fassung abgewiesen · guter Lauf mit
+54 Bereichen, Attributen und Rechten unverändert · zweiter Lauf prallt ab ·
+Rücknahme stellt 53 wieder her und **verschont die gespeicherte
+Kalkulation** · zweite Rücknahme ändert nichts · dritte Fassung abgewiesen.
+
+**P51 hat zwei eigene Fehler gefunden**, bevor sie Production erreichen
+konnten: eine Erwartung `search_path=` (PostgreSQL legt `search_path=""` ab,
+mit Anführungszeichen) und — über den vorhandenen Wächter — dass ein
+`proconfig`-Vergleich **ausgepackt** gehört, nicht als Text verglichen.
+
+**Nicht mitgenommen:** die vier Spaltenlücken (`item_type`, `usk_rating`,
+`sale_released`, `delivery_scope`) bleiben dokumentiert und draußen. Keine
+Wiederherstellung — die Grenzen stehen in `0144_restore_limits.md`.
+
 ### Sicherungswächter: die Grundgesamtheit kommt jetzt aus dem Schema (2026-10-25)
 
 **Phase 1 der Sicherungslücke, einzeln freigegeben und umgesetzt.** Keine

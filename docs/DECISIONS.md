@@ -12555,3 +12555,94 @@ Riegel, dessen Anschlagen nie geprüft wurde, ist eine Behauptung.
   `latestFunction("system_platform_export")`. Historische Aussagen über die
   **Datei** `0105` bleiben bei `0105` — sie ist angewendet und nach Regel 1
   eingefroren.
+
+---
+
+## ADR-0135 · Die gespeicherten Kalkulationen gehören in die Plattformsicherung, und das Archiv bekommt Version 2
+
+**Status:** akzeptiert (Entscheidung des Betreibers, 2026-10-25) ·
+**Umsetzung:** `0144`, Manifest, Archivschicht — **nirgends angewendet**
+
+### Die Entscheidung in einem Satz
+
+`purchase_calculations` wird ein Bereich der **Plattform**sicherung, bleibt
+aus der **Betriebs**sicherung begründet ausgeschlossen, und das Archivformat
+steigt auf **2**.
+
+### Warum die Plattformsicherung und nicht die Betriebssicherung
+
+Dieselbe Klasse wie `collection_items`: rein nutzergeneriert, aus nichts
+ableitbar, von keinem anderen Export erfasst. Eine verlorene Kalkulation
+heißt, alle Positionen eines Inserats neu einzutippen.
+
+Der Betriebsexport **kann** sie nicht führen: sie hängt an `user_id`, und
+genau dieses Feld steht dort in `FORBIDDEN_FIELDS` („Kontoidentität"). Ohne
+`user_id` wäre die Zuordnung fort, mit ihr die Regel gebrochen. Also ein
+Ausschluss mit Grund — und der Grund nennt den Platz, an den sie gehört.
+
+### Drei Änderungen am Funktionsrumpf, und keine vierte
+
+`0144` ersetzt `system_platform_export()`. Der Rumpf ist aus `0105`
+**kopiert**, nicht neu getippt: `format_version` 1 → 2, der Gruppenkopf
+„Lager und Orderbuch" 12 → 13 Bereiche, und ein Bereich mit allen zwölf
+Spalten am Ende derselben Gruppe. 30 405 Zeichen gehen unverändert durch, 18
+Zeilen kommen dazu.
+
+**Bewiesen wird das durch Umkehrung**: `platform-export-0144.test.ts` dreht
+die drei Änderungen zurück und verlangt, dass dabei Zeichen für Zeichen der
+alte Rumpf entsteht. Eine vierte Änderung irgendwo in 30 405 Zeichen fällt
+damit auf, auch wenn niemand sie sucht. Das ist stärker als jede Liste von
+„diese 53 Bereiche müssen noch da sein" — und niemand muss sie pflegen.
+
+> **Der Riegel, der diese Migration von einem Blindflug unterscheidet:** sie
+> prüft `md5(prosrc)` **vor** dem Ersetzen. Steht dort nicht der Rumpf aus
+> `0105` (`2e2da90e…`), bricht sie ab, statt eine fremde Fassung zu
+> überschreiben. Beide Abdrücke sind an echtem PostgreSQL gemessen, nicht
+> gerechnet und gehofft — Probelauf **P51**.
+
+### Formatversion 2, obwohl ein Bereich additiv ist
+
+`counts` in `manifest.json` nennt nur die Bereiche, die **dieses** Archiv
+hatte. Fehlt `purchase_calculations` darin, könnte ein Leser „älteres
+Archiv" nicht von „Bereich abhandengekommen" unterscheiden. Die Version sagt
+es ihm.
+
+**Archive der Version 1 bleiben gültig** und tragen 53 Bereiche.
+`SECTIONS_BY_FORMAT_VERSION` kennt beide, und die Zahl zu Version 1 ist nicht
+getippt, sondern das heutige Manifest minus dem einen neuen Bereich.
+
+### Und die Version kommt jetzt aus der Datenbank
+
+Das war ein Befund beim Bauen: `format_version` schrieb die **Route** aus der
+Codekonstante, während die Bereiche aus der Datenbank kamen — zwei Quellen
+für eine Aussage. Mit `0144` wird daraus ein Problem: stünde der neue Code
+schon und die Migration noch nicht, behauptete das Deckblatt Version 2 über
+einem Dokument mit 53 Bereichen.
+
+Seitdem liest das Deckblatt die Version vom Dokument und kann nicht mehr
+überclaimen (`PLATFORM_METADATA_SOURCE` nennt sie „database"). Und
+`platformArchive()` **verweigert** ein Archiv, dessen Bereichszahl nicht zu
+seiner Version passt — synchron, bevor ein Byte entsteht. Eine unbekannte
+Version wird ebenfalls verweigert: wer nicht weiß, wie viele Bereiche eine
+Version führt, kann Vollständigkeit nicht bescheinigen.
+
+> **Dasselbe Prinzip wie beim unlesbaren Storage-Objekt:** ein Archiv, das
+> Vollständigkeit behauptet und sie nicht hat, ist schlimmer als kein Archiv.
+
+### Keine Wiederherstellung, und die Grenzen stehen geschrieben
+
+`0144` baut **keinen** Restore. `restore_supported` bleibt `false`. Was eine
+Wiederherstellung verlangen würde — und wo sie nicht kann — steht vollständig
+in `supabase/checks/0144_restore_limits.md`: die harte Grenze bei
+`auth.users` (das Archiv führt ein Inventar, kein Auth-Backup), die Falle bei
+`purchases.id` (eine Identity; ohne die Original-IDs zeigt jede
+`purchase_id` auf den falschen Einkauf), die Reihenfolge, die möglichen
+Konflikte, und was von sich aus schützt (uuid-Schlüssel, partieller
+Unique-Index, fünf CHECKs, ein selbsttragender `lines`-Schnappschuss).
+
+### Was ausdrücklich NICHT mitkommt
+
+Die vier bekannten **Spalten**lücken — `item_type`, `usk_rating`,
+`sale_released`, `delivery_scope` — bleiben draußen
+(`platform_export_gap.md`). Sie in `0144` mitzunehmen wäre eine Änderung, die
+niemand geprüft hat, an der Funktion, die unsere Absicherung ist.

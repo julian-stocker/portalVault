@@ -4619,7 +4619,7 @@ verschiedene Feldregeln, verschiedene Wächter; `0104` wurde dafür nicht angefa
 
 | Funktion | Migration | Liefert |
 |---|---|---|
-| `system_platform_export()` | `0105` | `database.json` — **53** Bereiche in einem Statement |
+| `system_platform_export()` | `0105`, erweitert in `0144` (**nirgends angewendet**) | `database.json` — **53** Bereiche in einem Statement, **54 ab `0144`** (`purchase_calculations` kommt dazu, `format_version` steigt auf 2) |
 | `system_auth_inventory()` | `0107` | `auth-users.json` — sieben Felder je Konto |
 | `admin_platform_export_runs()` | `0106` | die Historie, neueste zuerst (`order by id desc`) |
 | `admin_record_platform_export()` | `0106` | ein Lauf, immer als `generated`, gibt die `id` zurück |
@@ -4940,6 +4940,23 @@ private Notiz, kein Geschäftsvorfall.
 purchase_id is not null`). Damit kann kein Einkauf zweimal beansprucht werden, und „schon
 übernommen" ist einfach `purchase_id is not null`. Der Übernahmeweg selbst existiert nicht;
 geschrieben wird die Spalte später ausschließlich serverseitig, niemals vom Client.
+
+### In der Plattformsicherung ab `0144` (vorbereitet, nirgends angewendet)
+
+Die Tabelle fiel zunächst aus der Sicherung — nicht aus einer Entscheidung,
+sondern weil der Vollständigkeitswächter seine Tabellenliste von Hand
+pflegte und die neue nicht kannte (ADR-0134). `0144` nimmt sie auf: alle
+zwölf Spalten, `personalData`, `restoreRelevant`, und die Formatversion des
+Archivs steigt auf **2** (ADR-0135).
+
+Im **Betriebs**export bleibt sie begründet draußen: sie hängt an `user_id`,
+und das sperrt dieser Export als Kontoidentität.
+
+**Was eine Wiederherstellung verlangt** — `auth.users` mit derselben UUID,
+`purchases` mit den Original-IDs (Identity!), die Reihenfolge, die
+Konfliktfälle — steht vollständig in
+`supabase/checks/0144_restore_limits.md`. Eine automatische
+Wiederherstellung gibt es nicht und `0144` baut keine.
 
 **Rücknahme:** `supabase/rollback/R0142_drop_purchase_calculations.sql` — sie bricht ab,
 solange Zeilen in der Tabelle stehen, und verlangt einen Schalter in der Datei.

@@ -413,7 +413,7 @@ async function main(): Promise<void> {
    * sie bei Abweichung abbricht, und dass nach einem Abbruch nichts
    * zurückbleibt.
    * ==================================================================== */
-  console.log("\nPROBELAUF — die Migrationen des Releases 0135-0143, gegen erfundene Zeilen");
+  console.log("\nPROBELAUF — die Migrationen 0135-0144, gegen erfundene Zeilen");
   console.log("-".repeat(76));
 
   /**
@@ -3735,6 +3735,186 @@ async function main(): Promise<void> {
         + ` · vertauscht: ${f7 === e7 ? "804 blockiert" : `BEFUND ${f7}`}`
         + ` · Wert ohne neue Summe: ${f8 === e7 ? "804 blockiert" : `BEFUND ${f8}`}`
         + ` · Wert MIT neuer Summe: ${f9 === e9 ? "811 blockiert (der Vergleich)" : `BEFUND ${f9}`}`,
+    });
+  }
+
+  /* P51 — `0144`: DIE SICHERUNGSFUNKTION WIRD ERSETZT.
+   *
+   * Das ist der heikelste Lauf dieses Projekts: `system_platform_export()`
+   * IST unsere Absicherung, und ein Fehler darin faellt erst auf, wenn man
+   * sie braucht. Was ein Probelauf daran zeigt und kein Test im Arbeitsbaum:
+   *
+   *   1. Der Abdruck, auf dem die Migration besteht, ist der, den
+   *      PostgreSQL wirklich speichert. Lokal gerechnet und hier gemessen —
+   *      das Verfahren selbst wird geprueft, nicht nur sein Ergebnis.
+   *   2. Ohne `0142` bricht sie ab.
+   *   3. Gegen eine FREMDE Fassung bricht sie ab, statt sie zu
+   *      ueberschreiben. Das ist der Riegel, der sie von einem Blindflug
+   *      unterscheidet.
+   *   4. Der gute Lauf: 54 Bereiche, Attribute und Rechte unveraendert.
+   *   5. Ein zweiter Lauf prallt ab.
+   *   6. Die Ruecknahme stellt den alten Rumpf zeichengleich wieder her —
+   *      und laesst die gespeicherten Kalkulationen stehen.
+   *   7. Auch die Ruecknahme ist idempotent und weist eine dritte Fassung ab.
+   *
+   * DER STUB TRAEGT SCHON DEN NEUEN RUMPF, weil das Stub-Schema aus ALLEN
+   * Migrationen entsteht — `0144` eingeschlossen. Production steht aber auf
+   * `0143`. Deshalb wird hier zuerst der Rumpf aus `0105` eingesetzt: das
+   * ist die Lage, in der die Migration wirklich laeuft.
+   */
+  {
+    const M142 = join(MIG_DIR, "0142_purchase_calculations.sql");
+    const M144 = join(MIG_DIR, "0144_platform_export_calculations.sql");
+    const R144 = "supabase/rollback/R0144_platform_export_back_to_0105.sql";
+    const ALT = "2e2da90e976a1e73ca00aba7cd830fae";
+    const NEU = "4c4d2e7c81e4efa8e18cdffa06bba40a";
+
+    /** Die Funktionsanweisung einer Datei, von `create` bis `$$;`. */
+    const anweisungVon = (datei: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf("create or replace function public.system_platform_export()");
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+    const abdruck = async (db: InstanceType<typeof PGlite>): Promise<string> => {
+      const r = (await db.query(
+        "select md5(prosrc) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+        + " where n.nspname = 'public' and p.proname = 'system_platform_export'")) as {
+          rows: { w: string }[] };
+      return r.rows[0]?.w ?? "(keine Funktion)";
+    };
+    const zahl = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> => {
+      const r = (await db.query(sql)) as { rows: Record<string, unknown>[] };
+      return String(r.rows[0]?.w ?? "?");
+    };
+
+    const db = await frisch();
+    await db.exec("drop table if exists public.purchase_calculations cascade;");
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('11111111-1111-1111-1111-111111111111')
+        on conflict do nothing;`);
+    await db.exec(
+      "alter table public.purchases add constraint z_purchases_pk primary key (id);");
+
+    /* Der Stand, auf dem Production steht: der Rumpf aus `0105`. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon(join(MIG_DIR, "0105_platform_export.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const vorher = await abdruck(db);
+
+    /* 2. Ohne `0142` muss `0144` abbrechen. */
+    const ohne0142 = await fahre(db, M144);
+
+    /* Jetzt `0142`, damit die Vorbedingung erfuellt ist. */
+    const f142 = await fahre(db, M142);
+    if (f142 !== null) throw new Error(`P51 Aufbau: 0142 scheiterte — ${f142}`);
+
+    /* Eine echte Kalkulation, damit die Ruecknahme etwas zu verschonen hat. */
+    await db.exec(`
+      insert into public.purchase_calculations
+        (user_id, name, factor_percent, lines, total_cents, positions, units)
+      values ('11111111-1111-1111-1111-111111111111', 'P51', 50,
+              '{"version": 1, "lines": []}'::jsonb, 0, 0, 0);`);
+
+    /* 3. Eine FREMDE Fassung darf nicht ueberschrieben werden. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(`create or replace function public.system_platform_export()
+      returns jsonb language sql stable security definer set search_path = ''
+      as $fremd$ select null::jsonb; $fremd$;`);
+    await db.exec("set check_function_bodies = on;");
+    const fremd = await fahre(db, M144);
+
+    /* Zurueck auf den Stand aus `0105` und dann der gute Lauf. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon(join(MIG_DIR, "0105_platform_export.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const lauf = await fahre(db, M144);
+
+    const nachher = lauf === null ? await abdruck(db) : "-";
+    const bereiche = lauf === null ? await zahl(db,
+      "select ((length(prosrc) - length(replace(prosrc, 'coalesce((', '')))"
+      + " / length('coalesce(('))::text as w from pg_proc p"
+      + " join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'") : "-";
+    const attribute = lauf === null ? await zahl(db,
+      "select (prosecdef::text || '/' || provolatile::text || '/'"
+      /*
+       * `search_path=""` UND NICHT `search_path=`. Gemessen, nicht geraten:
+       * PostgreSQL legt `set search_path = ''` als `search_path=""` ab —
+       * mit zwei echten Anfuehrungszeichen. Die erste Fassung dieses
+       * Probelaufs verlangte `search_path=` und war deshalb rot; dieselbe
+       * falsche Erwartung stand auch in der Nachkontrolle zu `0144` und
+       * waere auf Production aufgefallen. Genau dafuer ist P51 da.
+       */
+      + " || (coalesce(array_to_string(proconfig, ','), '') = 'search_path=\"\"')::text) as w"
+      + " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'") : "-";
+    const offen = lauf === null ? await zahl(db,
+      "select count(*)::text as w from pg_proc p, aclexplode(p.proacl) a"
+      + " where p.oid = to_regprocedure('public.system_platform_export()')"
+      + " and a.privilege_type = 'EXECUTE'"
+      + " and (a.grantee = 0 or a.grantee::regrole::text in ('anon', 'public'))") : "-";
+    const fuerAuth = lauf === null ? await zahl(db,
+      "select count(*)::text as w from pg_proc p, aclexplode(p.proacl) a"
+      + " where p.oid = to_regprocedure('public.system_platform_export()')"
+      + " and a.privilege_type = 'EXECUTE'"
+      + " and a.grantee::regrole::text = 'authenticated'") : "-";
+
+    /* 5. Ein zweiter Lauf prallt ab. */
+    const zweimal = lauf === null ? await fahre(db, M144) : "-";
+
+    /* 6. Die Ruecknahme — und was sie verschont. */
+    const zurueck = lauf === null ? await fahre(db, R144) : "-";
+    const danach = zurueck === null ? await abdruck(db) : "-";
+    const bereicheDanach = zurueck === null ? await zahl(db,
+      "select ((length(prosrc) - length(replace(prosrc, 'coalesce((', '')))"
+      + " / length('coalesce(('))::text as w from pg_proc p"
+      + " join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'") : "-";
+    const zeilenDanach = zurueck === null
+      ? await zahl(db, "select count(*)::text as w from public.purchase_calculations") : "-";
+
+    /* 7. Noch einmal zuruecknehmen: aendert nichts. Und eine dritte Fassung. */
+    const nochmalZurueck = zurueck === null ? await fahre(db, R144) : "-";
+    let dritteFassung = "-";
+    if (nochmalZurueck === null) {
+      await db.exec("set check_function_bodies = off;");
+      await db.exec(`create or replace function public.system_platform_export()
+        returns jsonb language sql stable security definer set search_path = ''
+        as $dritt$ select '{}'::jsonb; $dritt$;`);
+      await db.exec("set check_function_bodies = on;");
+      const r = await fahre(db, R144);
+      dritteFassung = r === null ? "DURCHGELAUFEN — Befund" : "abgewiesen";
+    }
+
+    probe.push({
+      name: "P51 0144 ersetzt die Sicherungsfunktion: Abdruck gemessen, ohne 0142 und gegen "
+        + "eine fremde Fassung abgewiesen, 54 Bereiche, Rechte gleich, Ruecknahme verschont "
+        + "die Kalkulationen",
+      ok: vorher === ALT
+        && typeof ohne0142 === "string" && ohne0142.includes("setzt 0142 voraus")
+        && typeof fremd === "string" && fremd.includes("nicht blind ueberschrieben")
+        && lauf === null && nachher === NEU && bereiche === "54"
+        && attribute === "true/s/true" && offen === "0" && fuerAuth === "1"
+        && typeof zweimal === "string" && zweimal.includes("bereits angewendet")
+        && zurueck === null && danach === ALT && bereicheDanach === "53"
+        && zeilenDanach === "1"
+        && nochmalZurueck === null && dritteFassung === "abgewiesen",
+      sagt: `Abdruck vorher ${vorher === ALT ? "wie gerechnet" : `ABWEICHUNG ${vorher}`}`
+        + ` · ohne 0142: ${ohne0142 === null ? "DURCHGELAUFEN — Befund" : "abgewiesen"}`
+        + ` · fremde Fassung: ${fremd === null ? "UEBERSCHRIEBEN — Befund" : "abgewiesen"}`
+        + ` · Lauf: ${lauf ?? "durch"} · ${bereiche} Bereiche · Abdruck`
+        + ` ${nachher === NEU ? "wie gerechnet" : `ABWEICHUNG ${nachher}`}`
+        + ` · definer/volatility/search_path ${attribute}`
+        + ` · offene EXECUTE ${offen}, authenticated ${fuerAuth}`
+        + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
+        + ` · Ruecknahme ${zurueck ?? "durch"} → ${bereicheDanach} Bereiche,`
+        + ` Abdruck ${danach === ALT ? "wieder 0105" : `ABWEICHUNG ${danach}`},`
+        + ` Kalkulationen ${zeilenDanach} (unberuehrt)`
+        + ` · zweite Ruecknahme: ${nochmalZurueck === null ? "aendert nichts" : "BEFUND"}`
+        + ` · dritte Fassung: ${dritteFassung}`,
     });
   }
 

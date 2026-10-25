@@ -42,7 +42,32 @@ export const PLATFORM_FORMAT = "skyisles-platform-backup";
  * oder ein zusätzlicher Bereich erhöht sie **nicht** — dieselbe Regel wie
  * beim Business-Export.
  */
-export const PLATFORM_FORMAT_VERSION = 1;
+/**
+ * Die Formatversion des Archivs.
+ *
+ * **2 seit `0144`** (2026-10-25): der Export fuehrt einen Bereich mehr,
+ * `purchase_calculations`. Erhoeht wurde sie, obwohl ein zusaetzlicher
+ * Bereich rein additiv ist — und zwar aus einem Grund, der ohne sie nicht
+ * entscheidbar waere:
+ *
+ * `manifest.json` nennt in `counts` nur die Bereiche, die DIESES Archiv
+ * hatte. Fehlt `purchase_calculations` darin, kann ein Leser nicht
+ * unterscheiden, ob er ein aelteres Archiv in der Hand hat oder ein neues,
+ * dem der Bereich abhandengekommen ist. Die Version sagt es ihm.
+ *
+ * **Archive der Version 1 bleiben gueltig** und tragen 53 Bereiche. Ein
+ * Leser, der 2 erwartet und 1 findet, liest ein vollstaendiges aelteres
+ * Archiv — keinen Fehler. Umgekehrt ist ein Archiv, das 2 sagt und den
+ * Bereich nicht fuehrt, unvollstaendig: `platform-archive.ts` prueft genau
+ * das und bricht ab (`PlatformArchiveError`).
+ */
+export const PLATFORM_FORMAT_VERSION = 2;
+
+/** Welche Bereichszahl zu welcher Formatversion gehoert. */
+export const SECTIONS_BY_FORMAT_VERSION: Readonly<Record<number, number>> = {
+  1: 53,
+  2: 54,
+};
 
 /* -------------------------------------------------------------------------
  * Auth — ein Inventar, ausdrücklich kein Backup
@@ -427,6 +452,54 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
     excluded: { finalized_by: "Kontoidentität" },
     restoreRelevant: true,
   },
+  {
+    /*
+     * DIE GESPEICHERTEN EINKAUFSKALKULATIONEN (0142, ADR-0131).
+     *
+     * SIE STAND BIS ZUM 2026-10-25 IN `PLATFORM_EXCLUDED_TABLES`, und das
+     * war kein Urteil ueber ihren Wert: der Vollstaendigkeitswaechter hatte
+     * sie nicht einmal gesehen (ADR-0134), und bis die Aufnahme entschieden
+     * war, stand sie begruendet draussen statt still zu fehlen.
+     *
+     * WARUM SIE HIERHER GEHOERT. Dieselbe Klasse wie `collection_items`:
+     * rein nutzergeneriert, aus nichts ableitbar, von keinem anderen Export
+     * erfasst. Der Betriebsexport kann sie nicht fuehren — sie haengt an
+     * `user_id`, und das sperrt er als Kontoidentitaet (`manifest.ts`,
+     * `EXCLUDED_TABLES`).
+     *
+     * `lines` IST EIN SCHNAPPSCHUSS UND BRAUCHT DEN KATALOG NICHT. Darin
+     * stehen `sky_id`, Name, Serie, Bild, vorgeschlagener und gesetzter
+     * Einzelwert, Menge und das `manual`-Kennzeichen — die Kalkulation ist
+     * also auch lesbar, wenn eine Figur spaeter nicht mehr im Katalog
+     * steht. Ein zweiter Bereich fuer die Positionen ist deshalb nicht
+     * noetig, und `jsonb` geht als `jsonb` durch.
+     *
+     * KEIN `::text` BEI DEN ZAHLEN, und das ist gegen die Geldregel nur
+     * scheinbar: `total_cents` ist `integer` (Cent, ADR-0131),
+     * `factor_percent` `smallint`. Ganze Zahlen traegt jeder JSON-Leser
+     * verlustfrei; `::text` ist fuer `numeric` da, damit aus 7.85 keine
+     * Gleitkommazahl wird.
+     *
+     * `purchase_id` IST DIE EMPFINDLICHE SPALTE. Sie zeigt auf
+     * `purchases.id`, und das ist eine Identity. Was eine
+     * Wiederherstellung deshalb beachten muss, steht in
+     * `supabase/checks/0144_restore_limits.md` — zusammen mit der haerteren
+     * Grenze, dass `user_id` ein Konto braucht, das dieses Archiv nicht
+     * wiederherstellen kann.
+     */
+    key: "purchase_calculations",
+    source: "purchase_calculations",
+    purpose:
+      "DIE GESPEICHERTEN EINKAUFSKALKULATIONEN DES BETRIEBS. Rein " +
+      "nutzergeneriert und aus nichts ableitbar: eine verlorene Kalkulation " +
+      "heisst, alle Positionen eines Inserats neu einzutippen. Im " +
+      "Betriebsexport nicht enthalten, weil sie an user_id haengt.",
+    fields: ["id", "user_id", "name", "status", "lines", "factor_percent",
+             "total_cents", "positions", "units", "purchase_id",
+             "created_at", "updated_at"],
+    personalData: true,
+    restoreRelevant: true,
+  },
 
   /* ------------------------------------------------------ Bestellungen */
   {
@@ -687,41 +760,6 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   purchase_receipt_counters:
     "Nummernkreis der Eigenbelege. Dieselbe offene Entscheidung wie purchase_receipts.",
 
-  /*
-   * EBENFALLS NOCH NICHT DRIN — UND AUSDRUECKLICH EINE OFFENE ENTSCHEIDUNG.
-   *
-   * `0142` legt diese Tabelle an (Calculator V2, ADR-0131). Sie hier
-   * auszulassen ist KEIN Urteil, dass die Daten wertlos wären: es sind
-   * Arbeitsstände eines Betreibers, die er beim Verlust vermissen würde.
-   *
-   * Sie steht trotzdem erst einmal draußen, und zwar aus demselben Grund
-   * wie die drei Belegtabellen: ein Bereich im Plattformarchiv ist eine
-   * eigene Archivdatei mit eigener Prüfsumme, eigener Feldliste und einer
-   * Erweiterung von `system_platform_export()` — also eine MIGRATION. Die
-   * lief im Release 0142/0143 nicht nebenbei mit, und eine Sicherung
-   * stillschweigend mitzuziehen wäre genau die Art Änderung, die niemand
-   * geprüft hat.
-   *
-   * Solange sie offen ist, steht die Lücke hier, in
-   * `platform-manifest.test.ts` als Teil der Grundgesamtheit und in
-   * `supabase/checks/platform_export_gap.md` als Folgeaufgabe. Was sie
-   * NICHT ist: unbemerkt.
-   *
-   * UNTERSUCHT AM 2026-10-24, auf Wunsch des Betreibers:
-   * `supabase/checks/platform_backup_purchase_calculations.md`. Es spricht
-   * inhaltlich NICHTS gegen die Aufnahme — kein gesperrtes Feld, dieselbe
-   * Klasse wie `collection_items`, und die Argumentgrenze ist weit weg.
-   * Was gegen den Zeitpunkt spricht: die Erweiterung ersetzt
-   * `system_platform_export()`, also genau die Funktion, die unter
-   * Supabase Free unsere einzige Absicherung ist. Das gehört in ein
-   * eigenes Release, nicht in 0142/0143.
-   */
-  purchase_calculations:
-    "Gespeicherte Einkaufskalkulationen des Betriebs (0142). Bewertungen eines " +
-    "Inserats, keine Geschäftsvorfälle — ein verlorener Einkauf steht in purchases, " +
-    "eine verlorene Kalkulation ist neu zu rechnen. Die Aufnahme in das " +
-    "Plattformarchiv ist ein offener Punkt (platform_export_gap.md) und braucht " +
-    "eine eigene Migration und eine eigene Freigabe.",
 
   legacy_stock_events:
     "Legacy-Lagerhistorie aus der Arbeitsmappe. Ein Backup, das sie enthält, lädt zur " +
@@ -830,9 +868,20 @@ export const PLATFORM_METADATA_FIELDS = [
   "restore_supported",   // immer false
 ] as const;
 
+/**
+ * Woher jedes Metadatum kommt.
+ *
+ * `format_version` stand hier bis zum 2026-10-25 auf „route" — die Route
+ * schrieb die Konstante dieser Codebasis in das Deckblatt, während die
+ * Bereiche aus der Datenbank kamen. Mit `0144` wurde daraus ein Problem:
+ * stünde der neue Code schon und die Migration noch nicht, behauptete das
+ * Deckblatt Version 2 über einem Dokument mit 53 Bereichen. Jetzt liest es
+ * die Version von der Datenbank und kann nicht mehr überclaimen
+ * (`platform-archive.ts`, `formatVersionOf()`).
+ */
 export const PLATFORM_METADATA_SOURCE: Readonly<Record<string, "database" | "route">> = {
   format: "route",
-  format_version: "route",
+  format_version: "database",
   created_at: "database",
   source_project: "route",
   commerce_mode: "database",
