@@ -22,8 +22,22 @@ import { ONBOARDING_PATH, signInUrlFor } from "@/lib/auth/redirect";
  * letting it through first means an anonymous visitor ends up at
  * /login?next=/collection rather than being sent back to a path that no
  * longer exists.
+ *
+ * `/favoriten` KAM AM 2026-10-25 DAZU, und es fehlte vorher — ein Fehler.
+ * Die Navigationsleiste bietet „Favoriten" einem ausgeloggten Besucher an,
+ * genau wie „Sammlung" (`site-nav.tsx`: `viewer.collector` ist fuer eine
+ * Sitzung ohne Konto wahr, weil ein Besucher kein privilegiertes Konto ist).
+ * Ohne Eintrag hier lief der Klick in die Seite, dort antwortete
+ * `isCollector()` mit `false` — und der Besucher bekam **404** auf einen
+ * Punkt, den die Leiste ihm gerade gezeigt hatte.
+ *
+ * Jetzt bekommt er `/login?next=/favoriten` und kommt danach dorthin
+ * zurueck, also dasselbe Verhalten wie bei der Sammlung. Gefunden ohne
+ * Browser, beim Durchgehen dessen, was eine ausgeloggte Sitzung erreicht.
  */
-const PROTECTED_PREFIXES = ["/collection", "/account", "/settings", "/onboarding"];
+const PROTECTED_PREFIXES = [
+  "/collection", "/favoriten", "/account", "/settings", "/onboarding",
+];
 
 /** Routes a signed-in user has no reason to see. */
 const SIGNED_OUT_ONLY_PREFIXES = ["/login", "/register", "/forgot-password"];

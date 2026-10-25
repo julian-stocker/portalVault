@@ -112,13 +112,132 @@ nicht stillschweigend eine falsche Zahl verglichen.
 
 ---
 
-## 5. Was noch aussteht
+## 5. Postflight bestanden — `9999 = 0` (2026-10-25)
 
-1. **Wiederholter Postflight** mit `supabase/operations/staging-s-postflight-0145.sql`
-   — die Werte stehen jetzt darin, nichts ist zu ersetzen. Ziel: `9999 = 0`.
-2. **`npm run verify:rls:staging`** — dass eine Richtlinie *dasteht*, prüft
-   die Nachkontrolle; dass sie *greift*, nur ein Lauf mit zwei echten Konten.
-3. **Browser-Durchlauf** der Favoriten gegen Staging (`npm run dev:staging`).
-4. **Vor jedem Production-Rollout:** die Folgemigration muss `favorites` in
+Der Wiederholungslauf mit den eingetragenen Baselines ist **vollständig
+bestanden**. Betreiber: *„Alle Struktur-, Rechte-, RLS-, Shop- und
+Sammlungsprüfungen sind erfolgreich. Die Baselines stimmen vollständig
+überein."*
+
+Damit ist belegt: die Tabelle steht mit drei Spalten und dem
+zusammengesetzten Primärschlüssel, RLS ist an, die drei Richtlinien stehen
+und fragen Konto **und** Rolle, `anon` hat nichts, `authenticated` hat genau
+`SELECT`/`INSERT`/`DELETE`, `favorite_demand()` ist `definer`+`stable` hinter
+dem Betriebstor und für `PUBLIC` nicht ausführbar, die Migration hat keine
+Zeile angelegt — und **Shop und Sammlung sind unverändert**, gemessen gegen
+den Stand von vor dem Lauf.
+
+**Migration 0145 ist auf Staging strukturell abgenommen.**
+
+---
+
+## 6. RLS funktional geprüft — 17 von 17 (2026-10-25)
+
+`npm run verify:rls:staging`, Abschnitt **10**, mit zwei echten Konten und
+zwei echten Sitzungen. Der Abschnitt ist für diesen Lauf **neu
+hinzugekommen** — der Prüfer kannte `favorites` nicht.
+
+| Prüfung | Ergebnis |
+|---|---|
+| A merkt eine Figur auf der eigenen Liste vor | PASS, 1 Zeile |
+| B merkt **dieselbe** Figur auf seiner vor | PASS, 1 Zeile |
+| eine Variante ist ein eigener Favorit (zweite SKY-ID, dasselbe Konto) | PASS |
+| derselbe Favorit zweimal | abgewiesen, `23505` |
+| A sieht **nur** die eigenen | PASS, 2 Zeilen, 0 fremde |
+| B sieht **nur** die eigenen | PASS, 1 Zeile, 0 fremde |
+| A liest die Favoriten von B | 0 Zeilen |
+| A legt einen Favoriten **für** B an | abgewiesen, `42501` |
+| A löscht den Favoriten von B | 0 Zeilen gelöscht |
+| die Zeile von B ist danach intakt | PASS, von B selbst gelesen |
+| einen Favoriten auf ein fremdes Konto umhängen | abgewiesen, `42501` — **es gibt kein `update`** |
+| A entfernt den eigenen | PASS, 1 Zeile |
+| anonym lesen | abgewiesen, `42501` |
+| anonym anlegen | abgewiesen, `42501` |
+| ein **Sammler** ruft `favorite_demand()` | abgewiesen, *„seller operator role required"* |
+| **anonym** ruft `favorite_demand()` | abgewiesen, *„permission denied for function"* |
+| der **Dienstschlüssel** ruft `favorite_demand()` | abgewiesen, *„seller operator role required"* |
+
+Die letzte Zeile war zuerst eine andere Prüfung und **schlug fehl** — sie
+wollte die Antwortsignatur lesen und ging davon aus, dass der
+Dienstschlüssel durchkommt. Er kommt nicht durch: er umgeht RLS, aber nicht
+das Tor im Rumpf einer `definer`-Funktion, denn `auth.uid()` ist für ihn
+`null`. Die Prüfung sagt jetzt, was gilt — und das ist die stärkere Aussage:
+**die Zahl hängt an einer Rolle, nicht an einer Verbindung.**
+
+> **Was dieser Lauf NICHT zeigt:** dass `favorite_demand()` ausschließlich
+> `(sky_id, users)` zurückgibt. Dieser Lauf hat kein Betriebskonto, also
+> antwortet die Funktion ihm nie. Belegt ist es zweifach anderswo:
+> `src/lib/favorites/schema.test.ts` liest die Signatur im SQL, und Probelauf
+> **P52** ruft die Funktion an echtem PostgreSQL mit gestelltem Tor auf und
+> liest die Spaltennamen der Antwort.
+
+**29 weitere Prüfungen des Laufs schlagen fehl, und keine davon betrifft die
+Favoriten.** Sie liegen alle in Abschnitt 9 (Shop, Lager, Journal) und sind
+veraltete Erwartungen des Prüfers: er verschafft sich `shop_admins` und will
+damit buchen, aber Buchen braucht seit `0041`/`0077` einen
+**Verkäuferbetrieb** (ADR-0077). Der letzte fachliche Stand von
+`tools/verify-rls.mts` ist `c443f7c`, also vor dieser Umstellung. Eigene
+Baustelle, eigene Freigabe.
+
+---
+
+## 7. Browser gegen Staging — was geprüft ist und was nicht
+
+`npm run dev:staging` lief gegen `qqxcpesbwfxzgytkdsac`, mit
+`service-role key: withheld (disabled-by-dev-staging)`.
+
+### Geprüft, am laufenden Server
+
+| | |
+|---|---|
+| `/favoriten` ausgeloggt | `307` → `/login?next=%2Ffavoriten` — **identisch zu `/collection`** |
+| Katalog ausgeloggt | 74 Karten, **74 Herzen**, alle als Anmeldeverweis |
+| und mit Kontext | z. B. `/login?next=%2F%3Fseries%3DSA%26figure%3DSKY-0007` (ADR-0027) |
+| kein Herz im Setz-Zustand für einen Ausgeloggten | 0 von 74 |
+| `favoritedSkyIds` im ausgelieferten Markup | `[]` — nichts ausgeliefert, was es nicht geben darf |
+| `/shop` | 225 Karten, **0 Herzen** — eine Fläche ohne Favoritenwissen zeigt keins |
+| Navigationspunkt | vorhanden, mit dem 18-px-Herz und `md:hidden` für die Telefonleiste |
+| Herz-Pfad im Markup | 75 × = 1 Leiste + 74 Karten; derselbe Pfad in Leiste und Karte |
+| kein Leck | `favorite_demand`, `skyisles_agent`, `service_role` kommen im Markup nicht vor |
+
+### DABEI EIN FEHLER GEFUNDEN UND BEHOBEN
+
+`PROTECTED_PREFIXES` in `src/lib/supabase/middleware.ts` führte
+`/collection`, `/account`, `/settings`, `/onboarding` — **`/favoriten`
+nicht**. Die Leiste bietet „Favoriten" einem ausgeloggten Besucher an (genau
+wie „Sammlung"), der Klick lief in die Seite, dort antwortete
+`isCollector()` mit `false`, und der Besucher bekam **404 auf einen Punkt,
+den die Leiste ihm gerade gezeigt hatte**.
+
+Behoben, mit Regressionstest in `src/lib/favorites/ui.test.ts` — und der
+Wächter wurde gegen die alte Fassung gefahren, um zu sehen, dass er
+anschlägt. Am laufenden Server bestätigt: `307` statt `404`.
+
+### NICHT geprüft — braucht eine interaktive Anmeldung
+
+Ich habe keine Sitzung eines Sammlerkontos und kann keine herstellen. Diese
+Punkte bleiben **manuell**:
+
+1. Herz im Katalog setzen und wieder ausmachen, **angemeldet**
+2. **Daneben tippen** und prüfen, dass gesammelt wird statt vorgemerkt
+   (DOM-Test deckt es ab, ein Finger auf Glas ist etwas anderes)
+3. Basisfigur und Legendary getrennt vormerken, **sichtbar** am gefüllten Herz
+4. `/favoriten` öffnen, Reihenfolge und Zählung
+5. Dort entfernen — die Karte muss **sofort** gehen
+6. Suche, Serien-Tabs und die Filter „Alle · Besitz · Fehlen" auf `/favoriten`
+7. Leere Wunschliste
+8. **Telefonbreite: drei Punkte in der Leiste** statt zwei — die einzige
+   Stelle, an der eine Rechnung („Favoriten passt auf 360 px") einen Blick
+   braucht
+9. Mit einem **Betriebskonto**: `/favoriten` muss 404 sein, im Katalog kein Herz
+
+---
+
+## 8. Was noch aussteht
+
+1. Die neun manuellen Browser-Punkte aus Abschnitt 7.
+2. **Vor jedem Production-Rollout:** die Folgemigration muss `favorites` in
    die Plattformsicherung aufnehmen (ADR-0136,
    `supabase/checks/platform_export_gap.md`).
+3. Unabhängig davon: Abschnitt 9 von `tools/verify-rls.mts` ist seit
+   `0041`/`0077` veraltet (29 Prüfungen). Eigene Baustelle.
