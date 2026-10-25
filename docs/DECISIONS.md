@@ -12816,6 +12816,43 @@ auf einer 416-px-Karte 17 px ohne Grund.
 Prüfung, die nur „steht `h-[22px]` in der Datei“ fragt, hätte den Befund
 nicht verhindert — deshalb prüft sie die Karte und nicht den Quelltext.
 
+#### Die Lage, am Alphakanal gemessen (2026-10-25, dritter Durchgang)
+
+Das Herz sass danach noch **16 bis 18 px innerhalb der Rahmenkante**, und
+der Grund war eine falsche Bezugskante: der Slot lag bei `INSET.image`
+(10,8 %), und das ist das Polster des **Bildes**. In den Artworks liegt die
+**Fensteröffnung weiter aussen** — `card-template.ts` nennt sie mit
+`x 83…923` von 1007, also 8,34 % vom rechten Rand. Zwischen beiden liegen
+rund 26 Quellpixel, auf einer 268-px-Karte knapp 7 px; die restlichen 9 px
+waren das Polster von Knopf und Kreis.
+
+**Gemessen wurde daher an den Artworks selbst**, nicht an `INSET`: am
+Alphakanal aller **sieben** Vorlagen, die der Katalog wirklich benutzt
+(`standard` 392 Figuren, `special` 53, `chase` 28, `legendary` 25,
+`dark` 21, `elite` 14, `prestige` 1), gegen den **echten Umriss** des
+Herzens plus 2 px Halo, bei sechs Kartenbreiten. Der Hüllkasten des Glyphs
+trägt rechts 3,25 px und oben 5,8 px Luft — wer gegen ihn prüft, misst zu
+streng.
+
+| | Wert |
+|---|---|
+| Glyphkasten, rechts | **9,8 %** der Kartenbreite |
+| Glyphkasten, oben | **11,0 %** der Kartenhöhe |
+| Versatz des 44-px-Knopfes | **−6 px** auf beiden Achsen (das Polster des Hover-Kreises), damit der GLYPH dort landet und nicht der Kasten |
+| Abstand der Tinte zur rechten Rahmenkante | **5,4–7,1 px** auf sechs Vorlagen, **3,4–3,6 px** auf `prestige` |
+| Spielraum bis zum Rahmen | 0,5 % waagrecht (0,9–1,3 px), 0,7 % senkrecht (1,9–2,9 px) |
+
+**`prestige` ist die Schranke** — es hat die tiefste Rahmenkante, und ohne
+diese eine Vorlage wären `rechts 8,1 %` möglich. Eine Lage je Artwork wäre
+sieben Lagen, die gleich aussehen sollen; deshalb gilt die engste, die alle
+sieben frei lässt, und `figure-card.tsx` liest die Vorlage an dieser Stelle
+nicht.
+
+**`top`/`right` absolut, nicht `padding` in Prozent.** Ein Prozent-Padding
+rechnet in CSS **immer gegen die Breite** des Containers, auch senkrecht:
+bei 1007:1562 wäre `paddingTop: "11%"` gut ein Drittel zu wenig. Ein
+absolut gesetztes `top` rechnet gegen die Höhe.
+
 **`CatalogView` bekommt einen `heading`-Slot.** Auf `/favoriten` stand bis zu
 diesem Nachtrag „Skylanders Katalog", weil die Ansicht ihren Kopf selbst
 mitbrachte. Eine zweite Ansicht dafür hätte Suche, Serien-Tabs, Filter,

@@ -620,41 +620,50 @@ export function FigureCard({
          * rather than a grey rectangle, which is what the painted one did.
          */}
         {/*
-         * DAS HERZ, oben rechts ueber dem Fenster (0145, ADR-0136).
+         * DAS HERZ, in der inneren Ecke des Bildfensters (0145, ADR-0136).
          *
          * In DIESER Ebene und nicht im Kartenkoerper — der Koerper ist seit
          * ADR-0038 der Sammeln-Toggle, ein Kind darin wuerde beim Antippen
          * sammeln. Hier ist es ein eigenes Ziel, und es braucht kein
-         * `stopPropagation`: die Ebene ist `pointer-events-none`, der Slot
+         * `stopPropagation`: die Ebene ist `pointer-events-none`, der Knopf
          * holt sich die Klicks zurueck.
          *
-         * `justify-end items-start`, also obere rechte Ecke. Unten links
-         * sitzt das Variantensiegel, unten links auch der Mengen-Chip —
-         * oben rechts ist die eine freie Ecke des Fensters.
+         * ABSOLUT GESETZT UND NICHT MEHR IM RASTER-SLOT, und das ist der
+         * Grund fuer diese Fassung. Der Slot lag bei `INSET.image` (10,8 %),
+         * und das ist das Polster des BILDES — in den Artworks liegt die
+         * Fensteroeffnung weiter aussen. Das Herz sass damit rund 16 bis
+         * 18 px innerhalb der Rahmenkante, also sichtbar zu weit im Bild.
          *
-         * DERSELBE `INSET.image` WIE DAS BILD, und kein zusaetzliches
-         * Polster von oben. Der Slot ist damit genau das Fenster: die
-         * Zeile `image` beginnt nach `frame-top`, und die Seiten sind um
-         * dieselben 10,8 % eingezogen wie das Bild selbst. Das Herz kann
-         * also nicht auf dem gemalten Rahmen landen, auf keiner Breite.
+         * `top` und `right` in Prozent sind hier richtig und `padding` waere
+         * falsch: ein Prozent-Padding rechnet IMMER gegen die BREITE des
+         * Containers, auch senkrecht. Bei einem Kartenverhaeltnis von
+         * 1007:1562 waere `paddingTop: "11%"` also 11 % der Breite und damit
+         * gut ein Drittel zu wenig. Ein absolut gesetztes `top` rechnet gegen
+         * die HOEHE.
          *
-         * Hier stand bis zum 2026-10-25 `paddingTop: "4%"` — auf einer
-         * 402-px-Karte 16 px, die das Herz ohne Grund ins Bild schoben.
-         * Den Abstand zum Rahmen setzt jetzt der Knopf selbst, in festen
-         * Pixeln (`FavoriteHeart`: 4 px Knopf + 5 px Grund = 9 px), damit er
-         * auf einer 173-px-Karte derselbe ist wie auf einer 268er.
+         * DIE ZAHLEN SIND GEMESSEN, nicht geschaetzt: in den sieben
+         * Artworks, die der Katalog wirklich benutzt, am Alphakanal, gegen
+         * den echten Umriss des Herzens plus 2 px Halo, bei sechs
+         * Kartenbreiten. Der Glyphkasten landet bei **rechts 9,8 %** und
+         * **oben 11,0 %** der Karte; enger geht nicht, weil `prestige` die
+         * tiefste Rahmenkante hat und dort nur noch rund 1 px Spielraum
+         * bleibt. `src/lib/favorites/geometry.test.ts` haelt beides fest.
          *
-         * `pointer-events-none` BLEIBT AM SLOT und wird nur am Knopf
-         * zurueckgenommen (`FavoriteHeart` traegt `pointer-events-auto`).
-         * Sonst waere der ganze obere Rand des Fensters ein Loch, durch das
-         * kein Tippen mehr zum Sammeln durchkommt — und der Knopf ist jetzt
-         * 44 px, also 2,9 % der Flaeche einer 211-px-Karte.
+         * `- 6px` an beiden Achsen: der Knopf ist 44 px und traegt den Glyph
+         * in seiner Ecke, 6 px innen (das Polster des Hover-Kreises). Die
+         * Verschiebung setzt also den GLYPH auf die gemessene Stelle, nicht
+         * den Kasten. Die restlichen 38 px der Flaeche wachsen nach unten
+         * links ins Bild — dorther kommt der Daumen, und dort ist kein
+         * Rahmen.
          */}
         {favoriteSlot ? (
-          <Slot area="image" className="flex items-start justify-end"
-                style={{ paddingInline: INSET.image }}>
+          <div
+            data-slot="favorite"
+            className="pointer-events-none absolute"
+            style={{ top: "calc(11% - 6px)", right: "calc(9.8% - 6px)" }}
+          >
             {favoriteSlot}
-          </Slot>
+          </div>
         ) : null}
 
         <Slot area="trade" className="pointer-events-auto" style={{ paddingInline: INSET.trade }}>
