@@ -150,9 +150,35 @@ nicht — **P54 bildete eine mildere Welt nach als die echte und meldete grün.*
 die Entzüge aller Migrationen an (314 Funktionen) und fährt **jede** Runner-Prüfdatei unter
 einer Rolle mit genau den zwölf Tabellen- und drei Funktionsrechten.
 
+**Und die Quelle war falsch (2026-10-25, ADR-0140).** Der dritte Lauf scheiterte mit
+`permission denied for function shop_offers` — und diesmal lag der Fehler nicht in der
+Umsetzung, sondern in der **Quelle**: die Prüfungen leiteten die Rechte des Zugangs aus
+`staging-agent-setup.sql` ab, also aus der Absicht. An Staging gemessen: von den drei
+dokumentierten Erteilungen stehen zwei, genau die auf `shop_offers()` fehlt. Ursache belegt —
+`0139` hat die Funktion am 2026-10-20 mit `drop function` neu angelegt (der Rückgabetyp
+änderte sich), und **`DROP`+`CREATE` verwirft die ACL**, während `CREATE OR REPLACE` sie
+behält. Die Erteilung war fort, die Datei sagte weiter „erteilt".
+
+Jetzt: **`npm run db:privileges:staging`** erhebt rein lesend, was die Rolle wirklich darf,
+vergleicht mit der Erwartung und schreibt die Messung versioniert nach
+`supabase/privileges/`. Die Probeläufe bauen ihre Welt daraus und entziehen PUBLIC, was als
+`false` gemessen wurde — ohne das bildet ein Probelauf eine mildere Welt nach als die echte,
+und genau so sind zwei Fehlschläge durch alle Netze gefallen. Eine **veraltete** Aufnahme gilt
+als fehlend (Abdruck über Einrichtungsdatei und jede rechtserhebliche Migration; eine
+gewöhnliche Migration macht sie nicht veraltet). Ein Wächter verlangt, dass eine Migration, die
+ein erteiltes Objekt verwirft, es in derselben Migration neu erteilt — zwei bekannte Stellen
+mit Grund, eine dritte fällt auf. Der Basis-Vertrag bleibt **automatisch** prüfbar: die zwei
+`shop_offers()`-Felder sind geschützt, und bei vorhandener Erteilung werden sie gemessen und
+verglichen. Die Messung ist zeichengleich zu `0142`–`0145` geblieben — alle zehn Dateien teilen
+einen Vertrag, und dass der Abdruck derselbe bleibt, ist an echtem PostgreSQL nachgerechnet.
+**Nebenbefund:** die Doku behauptete „keine Rollenmitgliedschaften, in keiner Richtung";
+gemessen ist `postgres` Mitglied von `skyisles_agent` (Artefakt von PostgreSQL 16+, ohne
+Wirkung auf die Rechte) — korrigiert.
+
 **Noch nicht vollständig gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist
-vorbereitet; TLS und Anmeldung stehen, die drei offenen Zeilen (124, 142, 161) brauchen den
-Lauf als `postgres`. Die Akte `supabase/baselines/baseline-0146.json`
+vorbereitet; TLS, Anmeldung und Baseline-Übernahme stehen. Offen: die Erteilung auf
+`shop_offers()` von Hand wiederherstellen, dann der Lauf, dann die drei offenen Zeilen
+(124, 142, 161) als `postgres`. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
 Migration stammen und **nicht** nachträglich gemessen wurden.
 

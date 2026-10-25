@@ -59,11 +59,29 @@ with sammelbar as (
 basis_mess as (
   -- Die sieben Zahlen, einmal gerechnet, hier und in Zeile 900 benutzt.
   select
-    (select count(*)::text from public.shop_offers())                      as angebote,
-    (select md5(coalesce(string_agg(o.sky_id || '|' || o.condition || '|'
-                                    || coalesce(o.price::text, ''),
-                                    ';' order by o.sky_id, o.condition), ''))
-       from public.shop_offers() o)                                        as angebote_md5,
+    /*
+     * DIE ZWEI FELDER, DIE `shop_offers()` BRAUCHEN — und das ist die einzige
+     * Stelle des Basis-Vertrags, an der ein Recht fehlen kann.
+     *
+     * Fehlt `execute`, steht hier `KEIN-RECHT`: die Zeilen 811 und 812 sind
+     * dann OFFEN (Zeile 9998 zaehlt sie), die uebrigen fuenf Felder werden
+     * weiter gemessen und verglichen. Ein fehlendes Recht nimmt also nicht
+     * die ganze Baseline mit — aber es wird auch nicht stillschweigend
+     * uebergangen.
+     */
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select count(*) as c from public.shop_offers()',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote,
+    case when has_function_privilege('public.shop_offers()', 'execute')
+         then (xpath('/row/c/text()', query_to_xml(
+             'select md5(coalesce(string_agg(o.sky_id || ''|'' || o.condition || ''|'' '
+             '|| coalesce(o.price::text, ''''), '
+             ''';'' order by o.sky_id, o.condition), '''')) as c '
+             'from public.shop_offers() o',
+             false, true, '')))[1]::text
+         else 'KEIN-RECHT' end as angebote_md5,
     (select count(*)::text from public.skylanders s
       where public.is_shop_eligible(s.sky_id))                             as shopfaehig,
     (select count(*)::text from sammelbar)                                 as sammelbar,
@@ -199,16 +217,28 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
    * Nachkontrolle davon ab, hat sich der Shop zwischen den Blaettern bewegt.
    */
   (131, 'Spiegel', 'Info: Figuren mit mindestens einem kaufbaren Angebot',
+      /* ZWEI Rechte, zwei Vorbedingungen: die Abfrage ruft `shop_offers()`
+         UND `v1_sale_condition()` auf. Eine Vorbedingung, die nur eine von
+         beiden prueft, laesst die Anweisung an der anderen abbrechen. */
       case when has_function_privilege('public.v1_sale_condition()', 'execute')
+            and has_function_privilege('public.shop_offers()', 'execute')
            then (xpath('/row/c/text()', query_to_xml(
                   'select count(distinct o.sky_id) as c from public.shop_offers() o '
                   'where o.available and o.condition = public.v1_sale_condition()',
                   false, true, '')))[1]::text
            else 'KEIN-RECHT' end, null),
   (132, 'Spiegel', 'Info: Zeilen in shop_offers() insgesamt',
-      (select count(*)::text from public.shop_offers()), null),
+      case when has_function_privilege('public.shop_offers()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+               'select count(*) as c from public.shop_offers()',
+               false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
   (133, 'Spiegel', 'Info: davon ausverkauft (available = false)',
-      (select count(*)::text from public.shop_offers() o where not o.available), null),
+      case when has_function_privilege('public.shop_offers()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+               'select count(*) as c from public.shop_offers() o where not o.available',
+               false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
   /*
    * `coalesce` BLEIBT AUSSEN. Mit `nulls = false` laesst `query_to_xml` eine
    * NULL-Spalte weg, `xpath` liefert dann ein leeres Array und `[1]` ist
@@ -218,6 +248,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
    */
   (134, 'Spiegel', 'Info: guenstigster kaufbarer Preis in Cent, ueber alle Figuren',
       case when has_function_privilege('public.v1_sale_condition()', 'execute')
+            and has_function_privilege('public.shop_offers()', 'execute')
            then coalesce((xpath('/row/c/text()', query_to_xml(
                   'select min(round(o.price * 100)) as c from public.shop_offers() o '
                   'where o.available and o.condition = public.v1_sale_condition()',
@@ -252,9 +283,13 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (311, 'Nichts offen', 'freigegebene Lagerpositionen (0146 ruehrt das nicht an)',
       (select count(*)::text from public.shop_inventory i where i.sale_released), '0'),
   (312, 'Nichts offen', 'Zubehoerzeilen im oeffentlichen Angebot',
-      (select count(*)::text from public.shop_offers() o
-         join public.skylanders s on s.sky_id = o.sky_id
-        where s.item_type <> 'figure'), '0'),
+      case when has_function_privilege('public.shop_offers()', 'execute')
+           then (xpath('/row/c/text()', query_to_xml(
+               'select count(*) as c from public.shop_offers() o '
+               'join public.skylanders s on s.sky_id = o.sky_id '
+               'where s.item_type <> ''figure''',
+               false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, '0'),
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',

@@ -1,0 +1,74 @@
+{
+  "projekt": "qqxcpesbwfxzgytkdsac",
+  "erhoben": "2026-10-25T21:54:02.763Z",
+  "abdruck": "13f9f823c5e6ee8f643d6514d1955e5a3ea379c7f3b502f9d6fa43605c339d23",
+  "rolle": "skyisles_agent",
+  "schema": {
+    "usage": true,
+    "create": false
+  },
+  "mitgliedschaften": {
+    "istMitgliedVon": [],
+    "hatAlsMitglied": [
+      "postgres"
+    ]
+  },
+  "tabellen": {
+    "categories": true,
+    "collection_items": true,
+    "favorites": false,
+    "inventory_movements": true,
+    "offer_state": false,
+    "offer_state_live": false,
+    "purchase_items": true,
+    "purchase_receipt_counters": true,
+    "purchase_receipt_downloads": true,
+    "purchase_receipts": true,
+    "purchases": true,
+    "sale_items": true,
+    "series": true,
+    "shop_inventory": true,
+    "skylanders": true
+  },
+  "funktionen": {
+    "public.is_position_sellable(bigint)": {
+      "execute": false,
+      "definer": false
+    },
+    "public.is_shop_eligible(text)": {
+      "execute": true,
+      "definer": false
+    },
+    "public.non_collectible_categories()": {
+      "execute": true,
+      "definer": false
+    },
+    "public.offer_state_window()": {
+      "execute": false,
+      "definer": false
+    },
+    "public.refresh_offer_state()": {
+      "execute": false,
+      "definer": true
+    },
+    "public.reservation_ttl()": {
+      "execute": false,
+      "definer": false
+    },
+    "public.shop_offers()": {
+      "execute": false,
+      "definer": true
+    },
+    "public.shop_price(numeric,numeric,numeric)": {
+      "execute": false,
+      "definer": false
+    },
+    "public.v1_sale_condition()": {
+      "execute": false,
+      "definer": false
+    }
+  },
+  "abweichungen": [
+    "public.shop_offers(): execute ERTEILT laut Einrichtungsdatei, aber die Rolle darf NICHT ausfuehren — wurde die Funktion mit `drop function` neu angelegt? `DROP`+`CREATE` verwirft die ACL."
+  ]
+}

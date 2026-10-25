@@ -13382,3 +13382,116 @@ die ohne Schutz wörtlich `permission denied for view offer_state_live` und
 Welt nachbildet als die echte, meldet grün und beweist nichts. Beide
 Fehlschläge wären in einem Lauf gefunden worden, hätte P54 von Anfang an die
 Entzüge mit angewendet.
+
+---
+
+## ADR-0140 · Die Datenbank sagt, was der Prüfzugang darf — nicht die Einrichtungsdatei
+
+**Datum:** 2026-10-25
+**Status:** angenommen
+**Betrifft:** `tools/db-privileges-staging.mts`, `tools/lib/privileges.mts`,
+`supabase/privileges/`, Probelauf **P54**, alle `0142`–`0146`-Prüfdateien
+
+### Drei Fehlschläge, und der dritte war ein anderer
+
+```
+1. permission denied for view offer_state_live
+2. permission denied for function offer_state_window
+3. permission denied for function shop_offers
+```
+
+Die ersten beiden gehörten zu ADR-0139: der Schutz deckte Tabellen, dann auch
+Funktionen. Der dritte war keine zu enge Umsetzung, sondern eine **falsche
+Quelle.** Die Prüfungen leiteten die Rechte des Zugangs aus
+`staging-agent-setup.sql` ab — aus der **Absicht**.
+
+**Der Nachweis**, an Staging gemessen (lesend, als `skyisles_agent`):
+
+| Funktion | ACL | `execute` |
+|---|---|---|
+| `shop_offers()` | `{postgres, anon, authenticated, service_role}` | **nein** |
+| `is_shop_eligible(text)` | `{…, skyisles_agent}` | ja |
+| `non_collectible_categories()` | `{…, skyisles_agent}` | ja |
+
+Zwei von drei dokumentierten Erteilungen stehen. Genau die der Funktion, die
+`0139` am 2026-10-20 mit `drop function` **neu angelegt** hat, fehlt — die
+beiden anderen entstanden mit `create or replace`.
+
+**`DROP` + `CREATE` verwirft die ACL. `CREATE OR REPLACE` behält sie.** `0139`
+musste verwerfen, weil sich der Rückgabetyp änderte (fünf Spalten mit
+`delivery_scope`). Die Erteilung war fort, die Datei sagte weiter „erteilt",
+und niemandem fiel es auf, weil keine Datei der laufenden Suite
+`shop_offers()` als Agent aufruft.
+
+### Die Entscheidung
+
+**1. Gemessen wird an der Datenbank.** `npm run db:privileges:staging` fragt
+`has_table_privilege`, `has_function_privilege`, `pg_auth_members` und das
+Schema, vergleicht mit der Erwartung aus der Einrichtungsdatei und schreibt
+die Messung nach `supabase/privileges/staging-agent.json`. Rein lesend; es
+erteilt nichts und entzieht nichts. Bei Abweichung Exit-Code ≠ 0 — die
+Aufnahme wird aber **geschrieben**, denn sie ist eine Messung, kein Urteil.
+
+**2. Die Probeläufe bauen ihre Welt aus der Aufnahme.** **P54** erteilt der
+Prüfrolle genau, was gemessen wurde, und **entzieht PUBLIC**, was als `false`
+gemessen wurde — denn PostgreSQL erteilt auf eine neue Funktion automatisch
+`EXECUTE TO PUBLIC`, und ohne diesen Entzug bildet der Probelauf eine mildere
+Welt nach als die echte. Genau so sind zwei Fehlschläge durch alle Netze
+gefallen.
+
+**3. Eine veraltete Aufnahme gilt als fehlend.** Sie trägt einen `abdruck`
+über die Einrichtungsdatei und jede **rechtserhebliche** Migration — das ist
+genau eine, die `skyisles_agent` nennt, oder die ein ihm erteiltes Objekt
+verwirft. Ein `grant` an Clientrollen zählt nicht, ein `revoke … from public`
+auch nicht. Damit macht eine gewöhnliche neue Migration die Aufnahme **nicht**
+veraltet; wäre es anders, würde der Riegel abgeschaltet. Stimmt der Abdruck
+nicht, scheitert P54 mit dem Hinweis, neu zu erheben.
+
+**4. Ein Wächter gegen den Mechanismus selbst.** Eine Migration, die ein dem
+Prüfzugang erteiltes Objekt verwirft, **muss** es in derselben Migration neu
+erteilen. Zwei Stellen sind als bekannt eingetragen, mit Grund: `0007` (vor
+der Einrichtung) und `0139` (**der Vorfall**). Eine dritte fällt auf. Fünf
+Gegenproben halten den Wächter dazu an, den Fall zu finden und keinen zu
+erfinden — `drop`+`create` ohne Neuerteilung wird gefunden, mit Neuerteilung
+nicht, `create or replace` nicht, ein nicht erteiltes Objekt nicht.
+
+**5. Der Basis-Vertrag bleibt automatisch prüfbar (Variante C).** Die zwei
+Felder, die `shop_offers()` brauchen, stehen hinter
+`has_function_privilege` + `query_to_xml`: fehlt das Recht, sind die Zeilen
+811/812 **offen** (Zeile 9998) und die anderen fünf Felder werden weiter
+verglichen. Ist die Erteilung wiederhergestellt, messt der Runner den
+Vertrag **vollständig** — das ist der Sinn von C: Robustheit **und** Deckung,
+nicht eines statt des anderen.
+
+Die Messung ist dabei **zeichengleich** zu `0142`–`0145` geblieben: alle zehn
+Dateien teilen einen Basis-Vertrag, damit Baselines austauschbar sind, und
+`staging-oneshot.test.ts` prüft das. Deshalb hat die neue Form alle zehn
+Dateien bekommen, samt Dreizustands-Auswertung und Zeile 9998. Dass der
+Abdruck dabei **derselbe** bleibt, ist an echtem PostgreSQL nachgerechnet —
+für drei Angebote und für null.
+
+### Nebenbefund: die Dokumentation war falsch
+
+`docs/SECURITY.md` 4b und der Zugangsplan behaupteten „Mitgliedschaften:
+**keine**, in keiner Richtung". Gemessen: **`postgres` ist Mitglied von
+`skyisles_agent`.** Ein Artefakt von PostgreSQL 16+, wo `CREATE ROLE` den
+Erzeuger als Mitglied mit `ADMIN OPTION` einträgt; ohne Wirkung auf die
+Rechte des Zugangs, weil die Richtung nicht umkehrbar ist und `postgres`
+Superuser ist. Die Aussage war trotzdem falsch und ist korrigiert.
+
+### Konsequenzen
+
+- Nach einer rechtserheblichen Migration gehört `db:privileges:staging` zum
+  Ablauf. Vergisst man es, sagt es P54.
+- Die Aufnahme ist versioniert. Sie ist der Beweis, auf dem die Probeläufe
+  stehen.
+- Die wiederhergestellte Erteilung auf `shop_offers()` wird **von Hand**
+  gesetzt und danach **gemessen** — nicht behauptet.
+
+**Verworfen:** die Einrichtungsdatei weiter als Quelle nehmen (sie ist ein
+historischer Beleg und wird mit jeder Migration unzuverlässiger) · die
+Erteilung automatisch nachziehen (ein Werkzeug, das Rechte erteilt, ist ein
+Werkzeug, das Rechte erteilen *kann*) · jede Migration als rechtserheblich
+zählen (ein Riegel, der nach jeder Migration eine Staging-Messung verlangt,
+wird abgeschaltet) · den Abdruck am Datum statt am Inhalt festmachen (ein
+Alter sagt nichts darüber, ob sich etwas geändert hat).

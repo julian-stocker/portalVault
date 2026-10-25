@@ -238,6 +238,9 @@ const DIREKTE_SITZUNG: Record<string, string> = {
   /* Der Migrations-Runner. Er fuehrt die Migration NICHT aus; er prueft,
      friert die Baselines ein und fahrt die Nachkontrolle (0146). */
   "db:migrate:staging": "tools/db-migrate-staging.mts",
+  /* Die Rechteerhebung (ADR-0139). Sie erteilt und entzieht nichts — sie
+     fragt `has_table_privilege`, `has_function_privilege` und den Katalog. */
+  "db:privileges:staging": "tools/db-privileges-staging.mts",
 };
 
 describe("every staging-only writer is actually guarded", () => {

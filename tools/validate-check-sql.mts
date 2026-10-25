@@ -66,6 +66,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+import { ladeAufnahme } from "./lib/privileges.mts";
 import { execFileSync } from "node:child_process";
 
 const CHECK_DIR = "supabase/checks";
@@ -4721,60 +4723,60 @@ async function main(): Promise<void> {
        where o.available and o.condition = public.v1_sale_condition()
        group by o.sky_id;`);
 
-    /* Die zwoelf Erteilungen — aus der Einrichtungsdatei gelesen, nicht
-       abgeschrieben. Eine zweite Liste waere eine zweite Wahrheit. */
-    const setup = readFileSync("supabase/operations/staging-agent-setup.sql", "utf8");
-    const erteilt = [...setup.matchAll(
-      /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]);
-    ok = sag("Erteilungen", erteilt.length === 12, `${erteilt.length} Tabellen`);
-
-    /* Und die drei Funktionen mit `execute` — ebenfalls aus der Datei. */
-    const erteiltFn = [...setup.matchAll(
-      /grant execute on function public\.(\w+)\s*\(([^)]*)\)\s+to skyisles_agent/g)]
-      .map((m) => `public.${m[1]}(${m[2]})`);
-    ok = ok && sag("Funktionsrechte", erteiltFn.length === 3, `${erteiltFn.length} Funktionen`);
-
-    await db.exec("create role pruefrolle nologin;");
-    await db.exec("grant usage on schema public to pruefrolle;");
-    for (const t of erteilt) {
-      await db.exec(`grant select on table public.${t} to pruefrolle;`);
-    }
-    for (const f of erteiltFn) {
-      await db.exec(`grant execute on function ${f} to pruefrolle;`);
-    }
-
     /*
-     * DAS STANDARDRECHT MUSS WEG — SONST PRUEFT DIESER LAUF DIE FALSCHE WELT.
+     * DIE WELT DIESES PROBELAUFS KOMMT AUS DER MESSUNG, NICHT AUS DER
+     * ABSICHTSDATEI — und das ist die Lehre aus dem dritten Fehlschlag.
      *
-     * PostgreSQL erteilt auf eine neue Funktion automatisch `EXECUTE TO
-     * PUBLIC`. Die Migrationen entziehen es (`revoke all on function … from
-     * public`), das Stub-Schema aber nicht. Ohne diese Entzuege haette
-     * `pruefrolle` die Rechte ueber PUBLIC, und der Probelauf meldete gruen
-     * fuer einen Zustand, den es auf Staging nicht gibt — genau so ist der
-     * Aufruf in Zeile 142 durch alle Netze gefallen.
+     * Vorher las dieser Abschnitt `staging-agent-setup.sql`. Diese Datei ist
+     * aber ein historischer Beleg dessen, was am 2026-10-19/20 erteilt
+     * wurde: am 2026-10-20 hat `0139` `shop_offers()` mit `drop function`
+     * neu angelegt, `DROP`+`CREATE` verwirft die ACL, und die Erteilung war
+     * fort. Der Probelauf erteilte sie trotzdem und bildete eine Welt nach,
+     * die es nicht mehr gab — dreimal hintereinander fiel der naechste
+     * fehlende Zugriff erst im echten Lauf auf.
      *
-     * Entzogen wird, was die MIGRATIONEN entziehen — aus ihrem Text gelesen,
-     * nicht abgeschrieben, und ueber alle, nicht nur `0146`: `0146` entzieht
-     * `offer_state_window()`, aber `reservation_ttl()` kommt aus `0010` und
-     * `v1_sale_condition()` aus `0028`, und auch die ruft die Nachkontrolle
-     * bzw. der Preflight auf.
+     * Jetzt gilt `supabase/privileges/staging-agent.json`, erhoben mit
+     * `npm run db:privileges:staging`. Fehlt sie oder ist sie VERALTET,
+     * scheitert dieser Durchgang — eine Messung von vor der letzten
+     * rechtserheblichen Migration sagt nichts ueber heute.
      */
-    const entzogen = new Set<string>();
-    for (const f of readdirSync(MIG_DIR).filter((x) => x.endsWith(".sql")).sort()) {
-      const t = readFileSync(join(MIG_DIR, f), "utf8");
-      for (const m of t.matchAll(
-        /revoke\s+all\s+on\s+function\s+public\.(\w+)\s*\(([^)]*)\)\s+from\s+([^;]+);/gi)) {
-        if (/\bpublic\b/i.test(m[3])) entzogen.add(`public.${m[1]}(${m[2]})`);
+    const urteil = ladeAufnahme();
+    if (!urteil.ok) {
+      probe.push({
+        name: "P54 jede Runner-Pruefdatei laeuft unter dem lesenden Pruefzugang DURCH",
+        ok: false,
+        sagt: `keine gueltige Rechteaufnahme: ${urteil.grund.split("\n")[0]}`,
+      });
+    } else {
+      const a = urteil.aufnahme;
+      const erteilt = Object.entries(a.tabellen).filter(([, d]) => d).map(([t]) => t);
+      const erteiltFn = Object.entries(a.funktionen)
+        .filter(([, w]) => w.execute).map(([sig]) => sig);
+      ok = sag("Aufnahme", true, `${erteilt.length} Tabellen, ${erteiltFn.length} Funktionen`
+        + ` (erhoben ${a.erhoben.slice(0, 10)})`);
+
+      await db.exec("create role pruefrolle nologin;");
+      await db.exec("grant usage on schema public to pruefrolle;");
+      for (const t of erteilt) {
+        try { await db.exec(`grant select on table public.${t} to pruefrolle;`); }
+        catch { /* im Stub nicht vorhanden */ }
       }
-    }
-    ok = ok && sag("Entzuege aus den Migrationen", entzogen.size >= 3,
-      `${entzogen.size} Funktionen`);
-    for (const f of entzogen) {
-      /* Was der Pruefzugang ausdruecklich erteilt bekommt, behaelt er. */
-      if (erteiltFn.includes(f)) continue;
-      try { await db.exec(`revoke all on function ${f} from public;`); }
-      catch { /* im Stub nicht vorhanden — dann gibt es auch nichts zu entziehen */ }
-    }
+      for (const f of erteiltFn) {
+        try { await db.exec(`grant execute on function ${f} to pruefrolle;`); }
+        catch { /* im Stub nicht vorhanden */ }
+      }
+      /*
+       * UND WAS DIE MESSUNG ALS `false` AUSWEIST, MUSS AUCH HIER FEHLEN.
+       * PostgreSQL erteilt auf eine neue Funktion automatisch `EXECUTE TO
+       * PUBLIC`; ohne diesen Entzug haette `pruefrolle` das Recht ueber
+       * PUBLIC, und genau so sind `offer_state_window()` und `shop_offers()`
+       * durch alle Netze gefallen.
+       */
+      for (const [sig, w] of Object.entries(a.funktionen)) {
+        if (w.execute) continue;
+        try { await db.exec(`revoke all on function ${sig} from public;`); }
+        catch { /* im Stub nicht vorhanden */ }
+      }
 
     /* Die Nachkontrolle, nur die interessanten Zeilen. Ohne Baselines
        weichen die Vertragszeilen ab — das ist hier nicht die Frage. */
@@ -4785,7 +4787,7 @@ async function main(): Promise<void> {
       if (rolle) await db.exec(`set local role ${rolle};`);
       try {
         const r = (await db.query(`select nr, befund from (${ohneKopf(sql[0])}) x
-                                    where nr in (124, 142, 161, 9998, 9999)`)) as
+                                    where nr in (124, 142, 161, 811, 812, 9998, 9999)`)) as
           { rows: { nr: number; befund: string }[] };
         return new Map(r.rows.map((z) => [Number(z.nr), String(z.befund)]));
       } catch (e) {
@@ -4810,12 +4812,31 @@ async function main(): Promise<void> {
           + `161=${eigner.get(161)} 9998=${eigner.get(9998)}`);
 
     const pruefer = await hol("pruefrolle");
+    /*
+     * KEINE GERATENE GESAMTZAHL. Wie viele Zeilen offen sind, haengt an der
+     * Messung — und eine festgeschriebene Zahl waere genau die Sorte
+     * Konstante, die am 2026-10-25 schon ein Release angehalten hat. Dass
+     * `9998` mit der Zahl der `KEIN-RECHT`-Zeilen uebereinstimmt, prueft der
+     * Durchgang ueber alle Dateien weiter unten.
+     *
+     * HIER STEHT DIE FACHLICHE AUSSAGE: die drei Zeilen zu `offer_state` und
+     * `offer_state_window()` sind immer offen (darauf hat der Zugang nie ein
+     * Recht), und die zwei Baselinezeilen 811/812 GENAU DANN, wenn `execute`
+     * auf `shop_offers()` fehlt. Ist die Erteilung wiederhergestellt, werden
+     * sie wieder gemessen und verglichen — das ist der Sinn von Variante C.
+     */
+    const darfOffers = Object.entries(urteil.aufnahme.funktionen).some(
+      ([sig, w]) => sig.startsWith("public.shop_offers(") && w.execute);
+    const basisOffen = !darfOffers;
     ok = ok && sag("als Pruefzugang", typeof pruefer !== "string"
       && pruefer.get(124) === "KEIN-RECHT" && pruefer.get(142) === "KEIN-RECHT"
-      && pruefer.get(161) === "KEIN-RECHT" && pruefer.get(9998) === "3",
+      && pruefer.get(161) === "KEIN-RECHT"
+      && (pruefer.get(811) === "KEIN-RECHT") === basisOffen
+      && (pruefer.get(812) === "KEIN-RECHT") === basisOffen,
       typeof pruefer === "string" ? `BRICHT AB: ${pruefer}`
         : `124=${pruefer.get(124)} 142=${pruefer.get(142)} `
-          + `161=${pruefer.get(161)} 9998=${pruefer.get(9998)}`);
+          + `161=${pruefer.get(161)} 811=${pruefer.get(811)} `
+          + `9998=${pruefer.get(9998)} (shop_offers=${darfOffers})`);
 
     /*
      * UND DIE GEGENPROBE: ohne den Schutz bricht dieselbe Datei ab. Ohne
@@ -4904,6 +4925,7 @@ async function main(): Promise<void> {
       ok,
       sagt: befund.join(" · "),
     });
+    } /* Ende: gueltige Rechteaufnahme */
   }
 
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
