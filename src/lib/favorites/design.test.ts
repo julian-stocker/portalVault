@@ -55,16 +55,30 @@ describe("das Herz trägt keine Scheibe mehr", () => {
   });
 
   it("aber bei Hover UND bei Fokus erscheint eine Fläche", () => {
-    const klassen = herz.slice(herz.indexOf("const KNOPF"), herz.indexOf("const SYMBOL"));
-    expect(klassen).toContain("hover:bg-");
-    expect(klassen).toContain("focus-visible:bg-");
+    /*
+     * SEIT DEM 2026-10-25 AM GLYPH, nicht am Knopf. Die Fläche ist jetzt
+     * 44 px; ein Grund darüber wäre die graue Scheibe zurück, nur größer.
+     * Erscheint deshalb als kleiner Kreis hinter dem 22-px-Herz.
+     */
+    const grund = herz.slice(herz.indexOf("const GRUND"), herz.indexOf("const SYMBOL"));
+    expect(grund).toContain("group-hover/fav:bg-");
+    expect(grund).toContain("group-focus-visible/fav:bg-");
   });
 
-  it("die Trageflaeche bleibt 36 px, das Symbol 14 px", () => {
-    /* Die unsichtbare Fläche ist der Unterschied zwischen „getroffen“ und
-       „die Karte hat gesammelt, weil ich daneben kam“. */
-    expect(herz).toContain("h-9 w-9");
-    expect(herz).toContain('const SYMBOL = "h-[14px] w-[14px]"');
+  it("die Trageflaeche ist 44 px, das Symbol 22 px", () => {
+    /*
+     * BERICHTIGT AM 2026-10-25. Hier stand 36 px und 14 px, und 14 px waren
+     * auf einem Laptop zu klein: eine Karte ist dort 268 px breit, also
+     * 5,2 % — an den drei Bash-Karten kaum als Bedienelement erkennbar.
+     *
+     * Die Maße werden hier nur GELESEN. Ob sie passen, rechnet
+     * `geometry.test.ts` aus `CARD_ASPECT`, `ROWS` und `INSET` nach, für
+     * jeden Rasterpunkt — eine Prüfung, die nur den Text liest, hätte den
+     * Befund nicht verhindert.
+     */
+    expect(herz).toContain("h-11 w-11");
+    expect(herz).toContain('const SYMBOL = "block h-[22px] w-[22px]"');
+    expect(herz).not.toContain("h-[14px]");
   });
 
   it("der Kontrast kommt aus einem Halo am Glyph, nicht aus einer Platte", () => {
@@ -209,9 +223,11 @@ describe("die Barrierefreiheit des Herzens", () => {
   });
 
   it("der Fokus ist sichtbar, und zwar mit Fläche UND Ring", () => {
-    const klassen = herz.slice(herz.indexOf("const KNOPF"), herz.indexOf("const SYMBOL"));
-    expect(klassen).toContain("focus-visible:bg-");
-    expect(klassen).toContain("focus-visible:outline");
+    /* Beides am Kreis hinter dem Glyph: ein Ring um die unsichtbare
+       44-px-Fläche umschlösse nichts, was man sieht. */
+    const grund = herz.slice(herz.indexOf("const GRUND"), herz.indexOf("const SYMBOL"));
+    expect(grund).toContain("group-focus-visible/fav:bg-");
+    expect(grund).toContain("group-focus-visible/fav:outline");
   });
 });
 
