@@ -17,6 +17,7 @@ Die Nachkontrolle ist **offen** — siehe „Stand" gleich unten.
 | Migration | **angewendet**, eine Transaktion, `commit` |
 | Nachkontrolle | **9999 = 18** — und zwar ausschließlich die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833) |
 | Zu tun | die Nachkontrolle **einmal wiederholen**, mit den eingefrorenen Baselines |
+| Zwei weitere Hürden, beide behoben | TLS (die private CA des Poolers fehlte, ADR-0138) und die Leserechte der zwei Datenzeilen (ADR-0139) |
 
 ### Warum achtzehn
 
@@ -65,7 +66,22 @@ in der Akte selbst (`herkunft: "bediener"`, Feld `bemerkung`).
 npm run db:migrate:staging -- 0146 --resume
 ```
 
-**Erwartet: Zeile 9999 = `0`.**
+**Erwartet: Zeile 9999 = `0`** und **zwei offene Zeilen** (124 und 161).
+
+> **Zwei Zeilen laufen nicht über diesen Zugang (ADR-0139).** Sie lesen
+> `offer_state` und `offer_state_live`, und darauf erteilt `0146` bewusst kein
+> Clientrecht — der lesende Prüfzugang hat es auch nicht. Sie melden deshalb
+> `KEIN-RECHT`, zählen in **Zeile 9998** und sind damit **offen**: nicht
+> bestanden, nicht abgewichen, sondern nicht durchgeführt. Der erste Lauf
+> scheiterte daran noch vollständig (`permission denied for view
+> offer_state_live`), weil PostgreSQL die Rechte aller Relationen eines Plans
+> beim Ausführungsstart prüft.
+>
+> **So schließen Sie sie ab:** der Runner schreibt
+> `supabase/log/staging/0146-postflight-berechtigt.sql` — dieselbe Prüfdatei,
+> Baselines schon eingesetzt, `begin … rollback`. Vollständig markieren, in
+> den SQL-Editor von `qqxcpesbwfxzgytkdsac` einfügen, ausführen. Dort ist
+> **9998 = 0 und 9999 = 0**.
 
 > **Voraussetzung, einmal je Rechner (ADR-0138):** die CA des Poolers muss
 > unter `~/.skyisles/supabase-ca.crt` liegen, und die Zugangsdatei muss

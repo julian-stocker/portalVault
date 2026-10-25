@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -145,7 +147,7 @@ describe("das Einsammeln aus dem Preflight", () => {
   /** Ein Preflight-Befund, wie `fahreEintrag` ihn zurückgibt. */
   const befund = (zeilen: { nr: number; befund: string }[]) => ({
     datei: "0146_preflight.sql", zweck: "Preflight", status: "ok" as const,
-    abweichungen: "0", zeilen: zeilen as never[], auffaellig: [],
+    abweichungen: "0", offen: "0", zeilen: zeilen as never[], auffaellig: [],
     dauerMs: 1, sha256: "a".repeat(64),
   });
   const LIEFERT = { "skyisles.base": 900, "skyisles.coll": 901 } as const;
@@ -444,7 +446,7 @@ const PLAN: Plan = {
   zweck: "Testmigration",
   preflight: "x_preflight.sql",
   lauf: "staging-x.sql",
-  postflight: "x_postflight.sql",
+  postflight: "0146_postflight.sql",
   angewendet: { beschreibung: "Tabelle x vorhanden", sql: "select false as erfuellt" },
   liefert: { "skyisles.base": 900, "skyisles.coll": 901 },
   braucht: ["skyisles.base", "skyisles.coll"],
@@ -455,7 +457,8 @@ const preflightBefund = (status: "ok" | "abweichung", zeilen = [
   { nr: 900, befund: BASE }, { nr: 901, befund: COLL },
 ]) => ({
   datei: "x_preflight.sql", zweck: "Preflight", status,
-  abweichungen: status === "ok" ? "0" : "18", zeilen: zeilen as never[],
+  abweichungen: status === "ok" ? "0" : "18", offen: "0",
+  zeilen: zeilen as never[],
   auffaellig: [], dauerMs: 1, sha256: "b".repeat(64),
 });
 
@@ -479,6 +482,9 @@ const werkzeuge = (o: {
   liegtSchon?: boolean | "unklar" | "leer" | "zwei";
   preflight?: ReturnType<typeof preflightBefund>;
   postflight?: "ok" | "abweichung";
+  /** Zeilennummern, die die Pruefdatei als `KEIN-RECHT` zurueckgibt. */
+  offen?: number[];
+  checkDir?: string;
   bruch?: "stand" | "preflight" | "postflight";
   plan?: Plan;
 }): Lauf => {
@@ -504,14 +510,23 @@ const werkzeuge = (o: {
       }
       if (o.bruch === "postflight") throw new Error("Connection terminated unexpectedly");
       const status = o.postflight ?? "ok";
+      /* `offen`: Zeilen mit `KEIN-RECHT`, wie die Pruefdatei sie liefert. */
+      const offeneZ = (o.offen ?? []).map((nummer) => ({
+        nr: nummer, pruefung: `Zeile ${nummer}`, befund: "KEIN-RECHT",
+      }));
       return {
         datei: eintrag.datei, zweck: "Nachkontrolle", status,
-        abweichungen: status === "ok" ? "0" : "18", zeilen: [] as never[],
+        abweichungen: status === "ok" ? "0" : "18",
+        offen: String(offeneZ.length),
+        zeilen: offeneZ as never[],
         auffaellig: [], dauerMs: 1, sha256: "c".repeat(64),
       };
     },
     plaene: { "0199": o.plan ?? PLAN },
     akteDir: o.akteDir,
+    /* Die echten Pruefdateien — die Huelle soll die wirkliche einbetten. */
+    checkDir: o.checkDir ?? "supabase/checks",
+    logDir: o.akteDir,
     jetzt: () => new Date("2026-10-25T10:00:00.000Z"),
     melde: () => {},
   };
@@ -548,7 +563,7 @@ describe("der erfolgreiche vollstaendige Ablauf", () => {
     const a = await fahreAblauf(l.w, "0199", true);
 
     expect(a.ende).toBe("bestanden");
-    expect(l.gefahren.map((g) => g.datei)).toEqual(["x_postflight.sql"]);
+    expect(l.gefahren.map((g) => g.datei)).toEqual(["0146_postflight.sql"]);
   });
 
   it("die Nachkontrolle bekommt die Baselines in DERSELBEN Einreichung", async () => {
@@ -609,7 +624,7 @@ describe("eine fehlgeschlagene Nachkontrolle", () => {
     expect(a.stufe).toBe("nachkontrolle");
     expect(a.grund).toContain("NICHT erneut angewendet");
     /* Gefahren wurde genau die Nachkontrolle, einmal. */
-    expect(l.gefahren.map((g) => g.datei)).toEqual(["x_postflight.sql"]);
+    expect(l.gefahren.map((g) => g.datei)).toEqual(["0146_postflight.sql"]);
   });
 
   it("und ruehrt die eingefrorene Akte nicht an", async () => {
@@ -859,5 +874,245 @@ describe("keine Aenderung an Shop-, Lager- oder Sammlungsdaten", () => {
       await fahreAblauf(l.w, "0199", false);
       expect(l.sql.length).toBeLessThanOrEqual(1);
     }
+  });
+});
+
+
+/* ==========================================================================
+ * RECHTE: WAS DER PRUEFZUGANG NICHT LESEN DARF
+ * ==========================================================================
+ *
+ * DER ANLASS. `--resume` fuer `0146` scheiterte mit `permission denied for
+ * view offer_state_live`. Richtig so: `0146` erteilt auf `offer_state` und
+ * `offer_state_live` bewusst KEIN Clientrecht, und der lesende Pruefzugang
+ * hat `select` auf genau zwoelf Tabellen — diese zwei nicht.
+ *
+ * Falsch war nur die FOLGE: PostgreSQL prueft die Rechte aller Relationen
+ * eines Plans beim Ausfuehrungsstart, also nahm EIN fehlendes Recht die
+ * ganze Einreichung mit — rund hundert gute Katalogpruefungen inbegriffen.
+ *
+ * Gemessen: 32 von 74 Pruefdateien lesen Objekte, auf die der Zugang kein
+ * `select` hat. Das ist keine Eigenheit von `0146`, sondern die Regel.
+ */
+
+describe("offene Zeilen sind weder bestanden noch abgewichen", () => {
+  it("der Lauf heisst nicht BESTANDEN, wenn Zeilen offen sind", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const l = werkzeuge({ akteDir: d, liegtSchon: true, offen: [124, 161] });
+    const a = await fahreAblauf(l.w, "0199", true);
+
+    expect(a.ende).toBe("bestanden");
+    if (a.ende !== "bestanden") return;
+    /* 9999 = 0 heisst: keine Abweichung UNTER DEN DURCHGEFUEHRTEN. */
+    expect(a.offen.map((o) => o.nr)).toEqual([124, 161]);
+  });
+
+  it("und ohne offene Zeilen ist er vollstaendig", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const a = await fahreAblauf(werkzeuge({ akteDir: d, liegtSchon: true }).w, "0199", true);
+    expect(a.ende).toBe("bestanden");
+    if (a.ende !== "bestanden") return;
+    expect(a.offen).toEqual([]);
+    expect(a.huelle).toBeNull();
+  });
+
+  it("die Huelle fuer den berechtigten Weg hat die Baselines SCHON drin", async () => {
+    /*
+     * Dieselbe Lehre wie bei den achtzehn Abweichungen: ein Handgriff, den
+     * ein Werkzeug tun kann, gehoert nicht auf den Laufzettel. Der Runner
+     * hat die eingefrorenen Zeilen — also setzt er sie ein.
+     */
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const l = werkzeuge({ akteDir: d, liegtSchon: true, offen: [161] });
+    const a = await fahreAblauf(l.w, "0199", true);
+
+    expect(a.ende).toBe("bestanden");
+    if (a.ende !== "bestanden" || a.huelle === null) throw new Error("keine Huelle");
+    const text = readFileSync(a.huelle, "utf8");
+    expect(text).toContain(`set_config('skyisles.base', '${BASE}', true)`);
+    expect(text).toContain(`set_config('skyisles.coll', '${COLL}', true)`);
+    /*
+     * Gefragt werden die `set_config`-ZEILEN, nicht die ganze Datei. Die
+     * Pruefdatei nennt die Platzhalter selbst — als Werte, die sie
+     * zurueckweist. Sie dort zu verbieten hiesse, den Riegel mit dem
+     * Versaeumnis zu verwechseln.
+     */
+    const uebergabe = text.split("\n").filter((z) => z.startsWith("select set_config("));
+    expect(uebergabe).toHaveLength(2);
+    for (const pl of PLATZHALTER) {
+      expect(uebergabe.join("\n"), pl).not.toContain(pl);
+    }
+    /* Lesend durch Bauart: begin … rollback, kein commit. */
+    const zeilen = text.split("\n").map((z) => z.trim());
+    expect(zeilen.filter((z) => z === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((z) => z === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((z) => z === "commit;")).toHaveLength(0);
+    /* Und sie bettet die Pruefdatei Zeichen fuer Zeichen ein. */
+    expect(text).toContain(readFileSync("supabase/checks/0146_postflight.sql", "utf8").trimEnd());
+  });
+
+  it("sie liegt in der ungetrackten Laufausgabe, nicht im Quelltext", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const a = await fahreAblauf(
+      werkzeuge({ akteDir: d, liegtSchon: true, offen: [161] }).w, "0199", true);
+    if (a.ende !== "bestanden" || a.huelle === null) throw new Error("keine Huelle");
+    /* In der Anwendung ist es `supabase/log/staging` (ungetrackt); hier
+         zeigt `logDir` in das Wegwerfverzeichnis des Tests. */
+      expect(a.huelle.endsWith("0199-postflight-berechtigt.sql")).toBe(true);
+    const regeln = readFileSync(".gitignore", "utf8").split("\n")
+      .map((z) => z.trim()).filter((z) => z !== "" && !z.startsWith("#"));
+    expect(regeln).toContain("supabase/log/");
+  });
+
+  it("eine Abweichung bleibt eine Abweichung, auch mit offenen Zeilen", async () => {
+    /* Offen entschuldigt nichts. */
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const a = await fahreAblauf(werkzeuge({
+      akteDir: d, liegtSchon: true, postflight: "abweichung", offen: [161],
+    }).w, "0199", true);
+    expect(a.ende).toBe("abbruch");
+    if (a.ende !== "abbruch") return;
+    expect(a.stufe).toBe("nachkontrolle");
+  });
+});
+
+
+describe("die Pruefdatei von 0146 traegt das Rechtevorzeichen", () => {
+  const datei = readFileSync("supabase/checks/0146_postflight.sql", "utf8");
+
+  it("beide Datenzeilen stehen hinter has_table_privilege", () => {
+    for (const objekt of ["offer_state", "offer_state_live"]) {
+      expect(datei).toContain(`has_table_privilege('public.${objekt}', 'select')`);
+    }
+    /* Und keine davon liest mehr unmittelbar. */
+    expect(datei).not.toMatch(/\(select count\(\*\)::text from public\.offer_state\b/);
+  });
+
+  it("sie lesen ueber query_to_xml — sonst bricht der Plan trotzdem ab", () => {
+    /*
+     * NACHGEMESSEN, und das ist der ganze Trick: PostgreSQL prueft die
+     * Rechte ALLER Relationen des Plans beim Ausfuehrungsstart, auch im
+     * nicht genommenen `case`-Zweig. Ein blosses `case` bricht also
+     * trotzdem ab. `query_to_xml` haelt die Relation aus dem Plan heraus.
+     */
+    expect(datei).toContain("query_to_xml(");
+    expect(datei).toContain("ALLER Relationen des Plans");
+  });
+
+  it("KEIN-RECHT zaehlt in 9998 und NICHT in 9999", () => {
+    expect(datei).toContain("where befund = 'KEIN-RECHT'");
+    expect(datei).toContain("select 9998, 'GESAMT'");
+    /* Und es wird ausdruecklich nicht als falsch gebucht. */
+    expect(datei).toContain("case when befund = 'KEIN-RECHT' then null");
+  });
+
+  it("und die Datei erteilt kein einziges Recht", () => {
+    /* Eine Pruefdatei ist lesend. Der Weg ueber Rechte waere gewesen, dem
+       Zugang `select` zu geben — ausdruecklich nicht getan. */
+    for (const wort of ["grant ", "revoke ", "alter role", "create policy"]) {
+      expect(datei.toLowerCase()).not.toContain(wort);
+    }
+  });
+});
+
+
+describe("der Waechter: eine neue Migration faellt beim Schreiben auf", () => {
+  /**
+   * Die zwoelf Tabellen, auf die der lesende Pruefzugang `select` hat —
+   * aus `staging-agent-setup.sql`, nicht aus einer zweiten Liste.
+   */
+  const erteilt = (): Set<string> => {
+    const setup = readFileSync("supabase/operations/staging-agent-setup.sql", "utf8");
+    return new Set([...setup.matchAll(
+      /grant select on table public\.(\w+)\s+to skyisles_agent/g)].map((m) => m[1]));
+  };
+
+  /** Alle Tabellen und Sichten, die die Migrationen anlegen. */
+  const objekte = (): Set<string> => {
+    const namen = new Set<string>();
+    for (const f of readdirSync("supabase/migrations").filter((x) => x.endsWith(".sql"))) {
+      const t = readFileSync(join("supabase/migrations", f), "utf8");
+      for (const m of t.matchAll(
+        /create\s+(?:or replace\s+)?(?:table|view|materialized view)\s+(?:if not exists\s+)?public\.(\w+)/gi)) {
+        namen.add(m[1]);
+      }
+    }
+    return namen;
+  };
+
+  it("der Pruefzugang hat select auf genau zwoelf Tabellen", () => {
+    expect(erteilt().size).toBe(12);
+    expect(erteilt().has("offer_state")).toBe(false);
+    expect(erteilt().has("favorites")).toBe(false);
+  });
+
+  it("jede Datei aus migration-plans.json liest nur Erlaubtes — oder geschuetzt", () => {
+    /*
+     * DER STRUKTURELLE TEIL DER BEHEBUNG.
+     *
+     * Dieser Test faellt um, sobald eine Pruefdatei, die der Runner fahrt,
+     * ein ungeteiltes Objekt UNGESCHUETZT liest. Dann ist zur Wahl: die
+     * Zeile hinter `has_table_privilege` + `query_to_xml` setzen (so wie
+     * `0146`), oder sie gar nicht aus Daten beantworten. Was NICHT zur Wahl
+     * steht, ist dem Pruefzugang ein Recht mehr zu geben — sonst ist er in
+     * zwanzig Migrationen ein Vollleser.
+     *
+     * Erkannt wird „ungeschuetzt" so: alle `query_to_xml('…')`-Zeichenketten
+     * herausnehmen, dann nach `from public.<objekt>` suchen. Was in einer
+     * dynamischen Abfrage steht, ist aus dem Plan heraus und damit
+     * geschuetzt.
+     */
+    const frei = erteilt();
+    const alle = objekte();
+    const plaene = ladePlaene();
+    const funde: string[] = [];
+
+    for (const [nummer, plan] of Object.entries(plaene)) {
+      for (const datei of [plan.preflight, plan.postflight]) {
+        const roh = readFileSync(join("supabase/checks", datei), "utf8");
+        /* Kommentare und dynamische Abfragen heraus. */
+        const text = roh
+          .replace(/\/\*[\s\S]*?\*\//g, " ")
+          .replace(/^\s*--.*$/gm, " ")
+          .replace(/query_to_xml\(\s*'(?:[^']|'')*'/g, "query_to_xml(''");
+        for (const m of text.matchAll(/(?:from|join)\s+public\.(\w+)/gi)) {
+          const o = m[1];
+          if (alle.has(o) && !frei.has(o)) funde.push(`${nummer} ${datei}: public.${o}`);
+        }
+      }
+    }
+    expect(funde, "ungeschuetzter Lesezugriff auf ein ungeteiltes Objekt")
+      .toEqual([]);
+  });
+
+  it("und der Waechter erkennt einen ungeschuetzten Zugriff wirklich", () => {
+    /*
+     * Ein Waechter, der nie etwas findet, ist kein Waechter. Gegenprobe an
+     * einem erfundenen Text: ohne Schutz gefunden, mit Schutz nicht.
+     */
+    const frei = erteilt();
+    const pruefe = (sql: string): string[] => {
+      const text = sql
+        .replace(/\/\*[\s\S]*?\*\//g, " ")
+        .replace(/^\s*--.*$/gm, " ")
+        .replace(/query_to_xml\(\s*'(?:[^']|'')*'/g, "query_to_xml(''");
+      return [...text.matchAll(/(?:from|join)\s+public\.(\w+)/gi)]
+        .map((m) => m[1]).filter((o) => !frei.has(o));
+    };
+    expect(pruefe("select count(*) from public.offer_state")).toEqual(["offer_state"]);
+    expect(pruefe(
+      "select case when has_table_privilege('public.offer_state','select')\n"
+      + " then (xpath('/row/c/text()', query_to_xml(\n"
+      + "   'select count(*) as c from public.offer_state', false, true, '')))[1]::text\n"
+      + " else 'KEIN-RECHT' end")).toEqual([]);
+    /* Ein Kommentar darueber taeuscht ihn nicht. */
+    expect(pruefe("-- from public.offer_state\nselect 1")).toEqual([]);
+    /* Eine erlaubte Tabelle ist kein Fund. */
+    expect(pruefe("select count(*) from public.skylanders")).toEqual([]);
   });
 });

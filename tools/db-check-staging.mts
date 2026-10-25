@@ -54,6 +54,17 @@ export type Befund = {
   zweck: string;
   status: "ok" | "abweichung" | "uebersprungen" | "fehler";
   abweichungen: string | null;
+  /*
+   * ZEILE 9998 — WAS DIE ROLLE NICHT LESEN DURFTE.
+   *
+   * Eine Pruefdatei darf Zeilen enthalten, die mehr Rechte brauchen als der
+   * lesende Pruefzugang hat (`offer_state` etwa ist bewusst ungeteilt). Die
+   * Datei liefert dann `KEIN-RECHT` statt abzubrechen und zaehlt diese
+   * Zeilen in 9998. Sie sind NICHT bestanden und NICHT abgewichen, sondern
+   * offen — und werden als solche gemeldet. `null`: die Datei kennt die
+   * Zeile nicht (alle aelteren).
+   */
+  offen: string | null;
   zeilen: Zeile[];
   auffaellig: Zeile[];
   grund?: string;
@@ -87,7 +98,7 @@ export async function fahreEintrag(
   const sql = readFileSync(pfad, "utf8");
   const sha256 = createHash("sha256").update(sql).digest("hex");
   const grund = (status: Befund["status"], text: string): Befund => ({
-    datei: eintrag.datei, zweck: eintrag.zweck, status, abweichungen: null,
+    datei: eintrag.datei, zweck: eintrag.zweck, status, abweichungen: null, offen: null,
     zeilen: [], auffaellig: [], grund: text, dauerMs: Date.now() - start, sha256,
   });
 
@@ -140,6 +151,8 @@ export async function fahreEintrag(
     }
 
     const gesamt = zeilen.find((z) => nr(z) === 9999);
+    const offenZeile = zeilen.find((z) => nr(z) === 9998);
+    const offen = offenZeile === undefined ? null : befund(offenZeile);
     /*
      * ZEILE 9999 GEHOERT NICHT ZU DEN AUFFAELLIGEN.
      *
@@ -152,7 +165,7 @@ export async function fahreEintrag(
     if (eintrag.modus === "messung") {
       return {
         datei: eintrag.datei, zweck: eintrag.zweck, status: "ok",
-        abweichungen: null, zeilen, auffaellig: [],
+        abweichungen: null, offen, zeilen, auffaellig: [],
         dauerMs: Date.now() - start, sha256,
       };
     }
@@ -162,7 +175,7 @@ export async function fahreEintrag(
     return {
       datei: eintrag.datei, zweck: eintrag.zweck,
       status: befund(gesamt) === "0" ? "ok" : "abweichung",
-      abweichungen: befund(gesamt), zeilen, auffaellig,
+      abweichungen: befund(gesamt), offen, zeilen, auffaellig,
       dauerMs: Date.now() - start, sha256,
     };
   } catch (e) {
@@ -195,6 +208,19 @@ export async function fahreSuite(
  * Bericht und Protokoll
  * ---------------------------------------------------------------------- */
 
+/**
+ * Die Zeilen, die die aufrufende Rolle nicht lesen durfte.
+ *
+ * Sie tragen `KEIN-RECHT` als Befund; Zeile 9998 zaehlt sie. Beides kommt
+ * aus der Pruefdatei — dieses Werkzeug erkennt es, es entscheidet es nicht.
+ */
+export const KEIN_RECHT = "KEIN-RECHT";
+
+export function offeneZeilen(b: Befund): Zeile[] {
+  if (b.offen === null || b.offen === "0") return [];
+  return b.zeilen.filter((z) => z.befund === KEIN_RECHT && nr(z) < 9000);
+}
+
 const ZEICHEN: Record<Befund["status"], string> = {
   ok: "OK        ", abweichung: "ABWEICHUNG", uebersprungen: "uebersprungen",
   fehler: "FEHLER    ",
@@ -216,6 +242,16 @@ export function bericht(befunde: Befund[]): string {
       z.push(`             ${b.zeilen.length} Zeilen, ${b.dauerMs} ms` +
         (b.abweichungen === null ? " (Messung)" : ", 9999 = 0"));
     }
+    /*
+     * OFFENE ZEILEN WERDEN IMMER GENANNT — auch bei `ok`.
+     *
+     * Sonst waere `9999 = 0` eine Auskunft, die mehr behauptet als sie weiss:
+     * null Abweichungen UNTER DEN DURCHGEFUEHRTEN Pruefungen.
+     */
+    for (const zeile of offeneZeilen(b)) {
+      z.push(`             OFFEN ${nr(zeile)} ${String(zeile.pruefung)} — `
+        + "diese Rolle darf das Objekt nicht lesen");
+    }
   }
   return redigiere(z.join("\n"));
 }
@@ -228,18 +264,33 @@ export function protokoll(befunde: Befund[], zeitpunkt: Date): string {
   z.push(`**Zugang:** lesender Pruefzugang, Sitzung schreibgeschuetzt, ` +
     `jede Datei in \`begin … rollback\``);
   z.push("");
-  z.push("| Datei | Status | 9999 | Zeilen | ms | SHA-256 |");
-  z.push("|---|---|---|---|---|---|");
+  z.push("| Datei | Status | 9999 | offen | Zeilen | ms | SHA-256 |");
+  z.push("|---|---|---|---|---|---|---|");
   for (const b of befunde) {
     z.push(`| \`${b.datei}\` | ${b.status} | ${b.abweichungen ?? "—"} | ` +
-      `${b.zeilen.length} | ${b.dauerMs} | \`${b.sha256.slice(0, 16)}…\` |`);
+      `${b.offen ?? "—"} | ${b.zeilen.length} | ${b.dauerMs} | ` +
+      `\`${b.sha256.slice(0, 16)}…\` |`);
   }
   for (const b of befunde) {
-    if (b.status === "ok" && b.auffaellig.length === 0 && b.abweichungen === "0") continue;
+    /* Offene Zeilen sind ein Grund fuer einen eigenen Abschnitt: ein
+       Protokoll, das sie nicht nennt, behauptet Vollstaendigkeit. */
+    if (b.status === "ok" && b.auffaellig.length === 0 && b.abweichungen === "0"
+        && offeneZeilen(b).length === 0) continue;
     z.push("");
     z.push(`## ${b.datei} — ${b.zweck}`);
     if (b.grund !== undefined) z.push("");
     if (b.grund !== undefined) z.push(`**${b.status}:** ${b.grund}`);
+    const offene = offeneZeilen(b);
+    if (offene.length > 0) {
+      z.push("");
+      z.push(`**Nicht geprueft (${offene.length}):** diese Zeilen lesen Objekte, `
+        + "auf die der lesende Pruefzugang kein `select` hat. Sie sind weder "
+        + "bestanden noch abgewichen — sie laufen nur im SQL-Editor.");
+      z.push("");
+      z.push("| Nr | Pruefung |");
+      z.push("|---|---|");
+      for (const o of offene) z.push(`| ${nr(o)} | ${String(o.pruefung)} |`);
+    }
     if (b.auffaellig.length > 0) {
       z.push("");
       z.push("| nr | Bereich | Pruefung | Befund | erwartet |");

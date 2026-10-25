@@ -39,6 +39,24 @@ ausgeführt**, nie automatisch, und sind kein Teil des Migrationsablaufs.
    letzte Zeile `9999` mit der Zahl blockierender Abweichungen. `9999 = 0`
    heißt bestanden.
 
+### Zeile 9998 — was die aufrufende Rolle nicht lesen durfte (ADR-0139)
+
+Der lesende Prüfzugang `skyisles_agent` hat `select` auf **zwölf** Tabellen;
+viele Prüfdateien lesen mehr. Eine Zeile, deren Objekt er nicht lesen darf,
+liefert **`KEIN-RECHT`** statt die ganze Einreichung mitzunehmen — sie steht
+dafür hinter `has_table_privilege(…)` **und** `query_to_xml(…)`, weil
+PostgreSQL die Rechte **aller** Relationen eines Plans beim Ausführungsstart
+prüft und ein bloßes `case` deshalb nicht hilft.
+
+Solche Zeilen sind **offen**: weder bestanden noch abgewichen, sondern nicht
+durchgeführt. Sie zählen **nicht** in 9999, sondern in **9998** — und werden
+in jeder Ausgabe namentlich genannt. `9999 = 0` heißt dann genauer: keine
+Abweichung **unter den durchgeführten** Prüfungen.
+
+Als `postgres` im SQL-Editor ist `9998 = 0` und jede Zeile gemessen. Der
+Migrations-Runner schreibt dafür eine einfügefertige Datei mit schon
+eingesetzten Baselines nach `supabase/log/staging/`.
+
 ## Was hier liegt
 
 | Datei | Zweck |

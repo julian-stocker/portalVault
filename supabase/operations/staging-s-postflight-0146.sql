@@ -111,6 +111,24 @@ select set_config('skyisles.coll', 'SAMMLUNG-HIER-EINSETZEN', true);
 -- und genau deshalb zaehlt ein nicht ersetzter Platzhalter wie eine fehlende
 -- Zeile. Sonst waere die Bequemlichkeit die Luecke im Riegel.
 --
+-- ZWEI ZEILEN BRAUCHEN MEHR RECHTE ALS DER PRUEFZUGANG HAT — 124 und 161.
+-- Sie lesen `offer_state` bzw. `offer_state_live`, und darauf hat `0146`
+-- bewusst KEIN Clientrecht erteilt; der lesende Pruefzugang
+-- `skyisles_agent` hat es auch nicht. Damit ein fehlendes Recht nicht
+-- hundert gute Pruefungen mitnimmt, stehen beide hinter
+-- `has_table_privilege(...)` und lesen ueber `query_to_xml(...)`:
+--
+--   * Ohne Recht liefern sie `KEIN-RECHT`. Das ist KEINE Abweichung, sondern
+--     eine nicht durchgefuehrte Pruefung — **Zeile 9998 zaehlt sie**.
+--   * Im SQL-Editor (als `postgres`) liefern sie den echten Wert, und 9998
+--     ist 0.
+--
+-- Warum `query_to_xml` und nicht nur `case`: PostgreSQL prueft die Rechte
+-- ALLER Relationen des Plans beim Ausfuehrungsstart, auch im nicht genommenen
+-- Zweig. Nachgemessen — ein blosses `case` bricht trotzdem ab. `query_to_xml`
+-- haelt die Relation aus dem Plan heraus. Ein Tippfehler darin faellt beim
+-- berechtigten Lauf auf, also in `verify:check-sql` (P53).
+--
 -- Der SQL-Editor zeigt `NOTICE`-Meldungen nicht an; diese Datei gibt deshalb
 -- eine Tabelle aus und keine Meldungen.
 --
@@ -363,7 +381,11 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
          from pg_views where schemaname = 'public' and viewname = 'offer_state_live'),
       'true'),
   (124, 'Sicht', 'Info: wie viele Figuren sie JETZT als kaufbar sieht',
-      (select count(*)::text from public.offer_state_live), null),
+      case when has_table_privilege('public.offer_state_live', 'select')
+           then (xpath('/row/c/text()', query_to_xml(
+                  'select count(*) as c from public.offer_state_live',
+                  false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, null),
 
   -- ----------------------------------------------------- Die Funktionen
   (131, 'Funktion', 'refresh_offer_state() steht, genau einmal',
@@ -376,10 +398,27 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       coalesce((select pfadanzahl::text from fn), '(keine)'), '1'),
   (135, 'Funktion', 'und ihr Wert ist LEER (ausgepackt, nicht verglichen)',
       coalesce((select pfadwert from fn), '(keine)'), '""'),
+  /*
+   * EIN LEERES ACL IST NICHT „KEIN RECHT" — ES IST DAS STANDARDRECHT.
+   *
+   * Ist `proacl` NULL, hat niemand die Rechte dieser Funktion angefasst,
+   * und fuer Funktionen heisst der Standard `EXECUTE TO PUBLIC`. Ein
+   * blosses `count(*)` ueber `aclexplode(NULL)` liefert dann `0` und meldete
+   * „kein Clientrecht" — also GRUEN fuer genau den Zustand, in dem jeder
+   * ausfuehren darf. Deshalb wird der NULL-Fall ausdruecklich benannt.
+   *
+   * (`aclexplode(coalesce(proacl, '{}'))` ist auch keine Loesung: `'{}'` ist
+   * nulldimensional, und `aclexplode` verlangt eindimensional — die Zeile
+   * BRACH AB, sobald `proacl` NULL war. Nachgemessen in P54.)
+   */
   (136, 'Funktion', 'kein EXECUTE fuer PUBLIC oder anon',
-      (select count(*)::text from fn, aclexplode(fn.proacl) a
-        where a.privilege_type = 'EXECUTE'
-          and (a.grantee = 0 or a.grantee::regrole::text in ('anon', 'public'))), '0'),
+      coalesce((select case when fn.proacl is null
+                 then 'STANDARDRECHT: PUBLIC darf ausfuehren'
+                 else (select count(*)::text from aclexplode(fn.proacl) a
+                        where a.privilege_type = 'EXECUTE'
+                          and (a.grantee = 0
+                               or a.grantee::regrole::text in ('anon', 'public')))
+               end from fn), '(keine Funktion)'), '0'),
   (137, 'Funktion', 'authenticated darf ausfuehren',
       (select count(*)::text from fn, aclexplode(fn.proacl) a
         where a.privilege_type = 'EXECUTE'
@@ -395,18 +434,27 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       coalesce((select (prosrc like '%pg_try_advisory_xact_lock%')::text from fn),
                '(keine)'), 'true'),
   (141, 'Funktion', 'offer_state_window() steht, ohne Clientrecht',
-      (select count(*)::text from pg_proc p, aclexplode(coalesce(p.proacl, '{}'))  a
-        where p.oid = to_regprocedure('public.offer_state_window()')
-          and a.privilege_type = 'EXECUTE'
-          and (a.grantee = 0 or a.grantee::regrole::text
-               in ('anon', 'public', 'authenticated'))), '0'),
+      coalesce((select case when p.proacl is null
+                 then 'STANDARDRECHT: PUBLIC darf ausfuehren'
+                 else (select count(*)::text from aclexplode(p.proacl) a
+                        where a.privilege_type = 'EXECUTE'
+                          and (a.grantee = 0 or a.grantee::regrole::text
+                               in ('anon', 'public', 'authenticated')))
+               end
+         from pg_proc p
+        where p.oid = to_regprocedure('public.offer_state_window()')),
+        '(keine Funktion)'), '0'),
   (142, 'Funktion', 'Info: und das Drosselfenster ist',
       (select public.offer_state_window()::text), null),
 
   -- -------------------------------- Die Migration hat nichts geschrieben
   (161, 'Leer', 'die Migration hat KEINE Zeile angelegt — die Erstbefuellung '
         'gehoert in den ersten Aufruf',
-      (select count(*)::text from public.offer_state), '0'),
+      case when has_table_privilege('public.offer_state', 'select')
+           then (xpath('/row/c/text()', query_to_xml(
+                  'select count(*) as c from public.offer_state',
+                  false, true, '')))[1]::text
+           else 'KEIN-RECHT' end, '0'),
 
   -- ------------------------- Und kein Trigger an den drei Quellen
   /*
@@ -535,12 +583,42 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select zeile from coll_zeile), null)
 ),
 ergebnis as (
+  /*
+   * DREI ZUSTAENDE, NICHT ZWEI.
+   *
+   *   ok = true   die Pruefung stimmt
+   *   ok = false  sie weicht ab           → zaehlt in 9999, blockiert
+   *   ok = null   Auskunft ODER OFFEN     → zaehlt nicht in 9999
+   *
+   * `KEIN-RECHT` heisst: diese Zeile liest ein Objekt, auf das die
+   * aufrufende Rolle kein `select` hat. Das ist KEINE Abweichung — es ist
+   * eine nicht durchgefuehrte Pruefung, und als solche wird sie in Zeile
+   * 9998 GEZAEHLT UND GEMELDET. Sie als bestanden zu buchen waere die
+   * stille Ignorierung, die es hier nicht gibt.
+   */
   select nr, bereich, pruefung, befund, erwartet,
-         case when erwartet is null then null
+         case when befund = 'KEIN-RECHT' then null
+              when erwartet is null then null
               else befund is not distinct from erwartet end as ok
     from pruef
 )
 select nr, bereich, pruefung, befund, erwartet, ok from ergebnis
+union all
+/*
+ * ZEILE 9998 — WAS DIESE ROLLE NICHT PRUEFEN KONNTE.
+ *
+ * Der lesende Pruefzugang `skyisles_agent` hat `select` auf zwoelf Tabellen;
+ * `offer_state` und `offer_state_live` gehoeren bewusst nicht dazu (0146
+ * erteilt gar kein Clientrecht darauf). Fuer ihn bleiben die beiden
+ * Datenzeilen offen — die ~100 Katalogzeilen laufen trotzdem durch, und das
+ * ist der Punkt: EIN fehlendes Recht darf nicht hundert gute Pruefungen
+ * mitnehmen.
+ *
+ * Im SQL-Editor (als `postgres`) ist die Zahl 0 und jede Zeile gemessen.
+ */
+select 9998, 'GESAMT', 'Zeilen, die diese Rolle nicht lesen durfte '
+       '(0 = vollstaendig geprueft)',
+       (select count(*) from ergebnis where befund = 'KEIN-RECHT')::text, null, null
 union all
 select 9999, 'GESAMT', 'blockierende Abweichungen (muss 0 sein)',
        (select count(*) from ergebnis where ok is false)::text, '0',

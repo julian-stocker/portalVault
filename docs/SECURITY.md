@@ -597,6 +597,27 @@ tragen **keine** `--env-file` und **keinen** Dienstschlüssel; der Wächter in
 ein drittes Werkzeug auf diesem Weg ist eine Sicherheitsentscheidung und muss
 dort eingetragen werden.
 
+**Was der Prüfzugang nicht lesen darf, bleibt offen (ADR-0139).** Er hat
+`select` auf zwölf Tabellen; **32 von 74** Prüfdateien lesen Objekte, auf die
+er kein Recht hat (`sellers`, `orders`, `invoices`, `favorites`,
+`offer_state` …). Solche Zeilen stehen hinter
+`has_table_privilege(…)` + `query_to_xml(…)` und liefern `KEIN-RECHT` statt
+die ganze Einreichung mitzunehmen — PostgreSQL prüft die Rechte **aller**
+Relationen eines Plans beim Ausführungsstart, ein bloßes `case` hilft also
+nicht. Sie gelten als **offen**: nicht bestanden, nicht abgewichen, sondern
+nicht durchgeführt, gezählt in **Zeile 9998** und in jeder Ausgabe
+namentlich genannt. Der vollständige Nachweis läuft als `postgres` über die
+Datei, die der Runner dafür schreibt (`supabase/log/staging/`, Baselines
+schon eingesetzt).
+
+**Dem Prüfzugang wird dafür kein Recht hinzugefügt** — nicht pro Migration,
+nicht über eine Definer-Funktion als Umweg. Nicht weil diese Tabellen
+empfindlich wären (`offer_state` spiegelt den öffentlichen Shop), sondern
+wegen der Richtung: ein Recht je Migration, und in zwanzig Migrationen ist
+der Zugang ein Vollleser. Ein Wächter in `migration-runner.test.ts` prüft
+beim **Schreiben** einer Migration, dass keine vom Runner gefahrene Datei
+ungeschützt auf ein ungeteiltes Objekt zugreift.
+
 **Der Migrations-Runner wendet keine Migration an**, und das ist die Folge
 dieses Zugangs, keine Lücke: `default_transaction_read_only` gilt an der
 Rolle, der Dienstschlüssel läuft über PostgREST und kann kein DDL, und eine

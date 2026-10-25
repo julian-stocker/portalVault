@@ -121,8 +121,25 @@ genau eine Wurzel vertraut wird statt ~150. `NODE_TLS_REJECT_UNAUTHORIZED=0` und
 **Einmalige Einrichtung je Rechner:** CA aus dem Dashboard holen und ein Wort in der
 Zugangsdatei ändern — `staging_agent_access_plan.md`, Schritt 3 und 3b.
 
-**Noch nicht gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist vorbereitet und
-ausdrücklich nicht eigenmächtig ausgeführt. Die Akte `supabase/baselines/baseline-0146.json`
+**Leserechte geklärt (2026-10-25, ADR-0139).** Der nächste Lauf scheiterte an
+`permission denied for view offer_state_live` — richtig, denn `0146` erteilt auf `offer_state`
+und `offer_state_live` bewusst kein Clientrecht, und der Prüfzugang hat `select` auf genau
+zwölf Tabellen. Falsch war die Folge: PostgreSQL prüft die Rechte **aller** Relationen eines
+Plans beim Ausführungsstart, also nahm ein fehlendes Recht rund hundert gute Katalogprüfungen
+mit. **Gemessen: 32 von 74 Prüfdateien** lesen ungeteilte Objekte — das ist die Regel, nicht
+0146. Jetzt gilt: solche Zeilen stehen hinter `has_table_privilege` **und** `query_to_xml` (ein
+bloßes `case` hilft nicht, nachgemessen), melden `KEIN-RECHT`, zählen in **Zeile 9998** und
+sind **offen** — nicht bestanden, nicht abgewichen, sondern nicht durchgeführt; jede Ausgabe
+nennt sie. Dem Prüfzugang wurde **kein** Recht hinzugefügt. Für den vollständigen Nachweis
+schreibt der Runner eine einfügefertige Datei mit schon eingesetzten Baselines.
+**Nebenbefund mitbehoben:** Zeile 141 benutzte `aclexplode(coalesce(proacl, '{}'))` — das
+bricht bei NULL ab, und ohne das `coalesce` hätte es `0` gezählt und „kein Clientrecht"
+gemeldet, obwohl ein NULL-ACL für Funktionen `EXECUTE TO PUBLIC` bedeutet. Ein falsches Grün.
+Probelauf **P54** fährt die ganze Lage an echtem PostgreSQL, samt Gegenprobe ohne Schutz.
+
+**Noch nicht vollständig gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist
+vorbereitet; TLS und Anmeldung stehen, die beiden offenen Zeilen brauchen den Lauf als
+`postgres`. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
 Migration stammen und **nicht** nachträglich gemessen wurden.
 
