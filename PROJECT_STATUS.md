@@ -120,7 +120,7 @@ statt aus einer Platte, gefüllt in `--favorite-ink` (Korall, ausdrücklich nich
 Besitzes), 220 ms Bewegung nur beim Setzen, Fläche erst bei Hover und Fokus. `/favoriten` hat
 einen eigenen Kopf („Meine Favoriten") mit drei Kennzahlen aus `hasV1BuyableOffer()` —
 `CatalogView` nimmt dafür einen `heading`-Slot, statt dass eine zweite Ansicht entsteht.
-Vorher stand dort „Skylanders Katalog". Der Plan für Benachrichtigungen:
+Vorher stand dort „Skylanders Katalog". **Zweiter Durchgang am selben Tag:** 14 px auf 36 px Fläche waren auf einem Laptop zu klein — 5,2 % einer 268-px-Karte. Jetzt **22 px Glyph auf 44 × 44 px Fläche**, 9 px fester Abstand zur Fensterecke, der Glyph in der Ecke der Fläche statt in ihrer Mitte. `src/lib/favorites/geometry.test.ts` rechnet die Maße aus `CARD_ASPECT`, `ROWS` und `INSET` für sieben Rasterpunkte nach. Der Plan für Benachrichtigungen:
 `docs/FAVORITE_NOTIFICATIONS.md`, **nichts davon gebaut**.
 
 **Ein Fehler aus dem Staging-Durchlauf, behoben:** `/favoriten` fehlte in den geschützten

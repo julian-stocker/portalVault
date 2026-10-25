@@ -12781,9 +12781,40 @@ Entscheidung, nicht Geschmack:
 |---|---|
 | **Zwei Zustände, zwei Farben** | Gold bedeutet in diesem Produkt **Besitz** — Rahmen, Krone, „In deiner Sammlung", seit V4.6 sogar der Maßstab der Karte. Ein Favorit ist die Gegenaussage: *nicht* haben und wollen. Dieselbe Farbe für beides machte den einen Blick, den jemand auf ein Raster wirft, zweideutig. Deshalb `--favorite-ink`, ein warmes Korall — und ausdrücklich **nicht** `--danger`, das für einen Alarm reserviert ist |
 | **Die Karte selbst ändert sich nicht** | Heller, größer, gerahmt — diese Mittel gehören dem Sammlungsstatus. Das Herz geht als `favoriteSlot` in `FigureCard`, also als Inhalt und nicht als Zustand; die Kartenvorlage kennt das Wort „favorite" nicht |
-| **Kontrast aus einem Halo, nicht aus einer Platte** | Das Artwork hinter dem Herz ist nicht eine Farbe: `standard` ist elfenbeinhell, `dark` und `legendary` sind dunkel. Ein enger dunkler Schatten am Umriss trennt den Glyph auf beidem — und kostet keine Fläche. Die Trägerfläche bleibt 36 px, aber **unsichtbar**, bis jemand sie sucht (Hover, Fokus) |
+| **Kontrast aus einem Halo, nicht aus einer Platte** | Das Artwork hinter dem Herz ist nicht eine Farbe: `standard` und `special` sind elfenbeinhell, `dark` und `legendary` sind dunkel. Ein enger dunkler Schatten am Umriss trennt den Glyph auf beidem — und kostet keine Fläche. Die Trägerfläche ist **unsichtbar**, bis jemand sie sucht (Hover, Fokus) |
 | **Die Bewegung steht in `globals.css`** | `@keyframes favorite-pop`, 220 ms, nur beim *Setzen*. Dort und nicht in der Komponente, weil die Reduced-Motion-Regel genau diesen Block neutralisiert — ein Keyframe in einer Komponente entkäme ihr |
 | **Kein Schleier während des Fluges** | `opacity-70` am laufenden Aufruf ist gestrichen. Ein optimistisches Update, das anschließend „lade noch" signalisiert, nimmt sich seinen eigenen Zweck; `aria-busy` bleibt, weil es Auskunft ist und kein Effekt |
+
+#### Die Maße, nachgemessen (2026-10-25, zweiter Durchgang)
+
+Die erste Fassung der Überarbeitung zeichnete **14 px** auf einer
+**36-px**-Fläche. Das war zu klein, und zwar nachweisbar: eine Karte ist auf
+einem Laptop **268 px** breit (vier Spalten in `max-w-6xl`), und 14 px sind
+davon **5,2 %**. Entworfen war sie an einer 211-px-Karte, wo es 6,6 % sind —
+derselbe Wert, zwei Eindrücke. Der Betreiber hat es an „Bash“, „Blue Bash“
+und „Legendary Bash“ gesehen, also an genau den beiden Tonwert-Extremen
+(`standard`/`special` sind `light`, `legendary` ist `dark`).
+
+| | Wert | Warum |
+|---|---|---|
+| Sichtbares Herz | **22 px, fest** | 8,2 % auf der breitesten Karte, 12,7 % auf dem Telefon. **Fest** und nicht in `cqw`: alles andere auf der Karte skaliert mit der Breite, weil es Text ist — ein Bedienelement folgt dem Finger, nicht der Typografie, und ein mitschrumpfendes Herz wäre genau dort am kleinsten, wo der Finger am gröbsten ist |
+| Klickfläche | **44 × 44 px** | Apples Empfehlung; die vorige Fassung lag mit 36 px darunter. Passt in jedes Fenster — das kleinste misst 136 × 116 px |
+| Abstand zur Fensterecke | **9 px, fest** (4 px Knopf + 5 px Kreis) | Als Prozentwert wäre er auf einer 173-px-Karte halb so groß wie auf einer 268er |
+| Anteil der Kartenfläche | **1,7 %** | Der Rest bleibt der Sammeln-Toggle, und der ist die Hauptaktion (ADR-0038) |
+
+**Der Glyph sitzt in der ECKE der Fläche, nicht in ihrer Mitte** — und das
+ist der Teil, der ohne Nachrechnen falsch wird. Zentriert wäre er
+(44 − 22) / 2 = **11 px** weiter innen, also vom Fensterrand weg gewandert,
+sobald die Fläche wächst. So bleibt er, wo er hingehört, und die zusätzliche
+Fläche wächst nach unten links **ins Bild** — dorther kommt der Daumen, und
+dort ist kein Rahmen. Der Slot trägt denselben `INSET.image` wie das Bild und
+**kein** zusätzliches Polster von oben; das frühere `paddingTop: "4%"` waren
+auf einer 416-px-Karte 17 px ohne Grund.
+
+`src/lib/favorites/geometry.test.ts` rechnet das aus `CARD_ASPECT`
+(`1007 / 1562`), `ROWS` und `INSET` für sieben Rasterpunkte nach. Eine
+Prüfung, die nur „steht `h-[22px]` in der Datei“ fragt, hätte den Befund
+nicht verhindert — deshalb prüft sie die Karte und nicht den Quelltext.
 
 **`CatalogView` bekommt einen `heading`-Slot.** Auf `/favoriten` stand bis zu
 diesem Nachtrag „Skylanders Katalog", weil die Ansicht ihren Kopf selbst
