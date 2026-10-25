@@ -332,7 +332,25 @@ export const de = {
    */
   favorites: {
     title: "Favoriten",
+    /** Der Kopf der eigenen Seite — „Meine", weil die Liste privat ist. */
+    pageTitle: "Meine Favoriten",
     subline: "Die Figuren, die dir noch fehlen.",
+    /** Die Unterzeile auf der Seite. Sagt, wofür die Liste da ist. */
+    pageSubline:
+      "Behalte deine gesuchten Skylanders im Blick und verpasse keine neuen Angebote.",
+    /*
+     * DIE DREI KENNZAHLEN.
+     *
+     * Beschriftungen, nicht Sätze: sie stehen unter einer Zahl, und eine
+     * Zahl mit einem Satz darunter liest sich als Meldung statt als Kennzahl.
+     * „Mit Angebot" heißt ausdrücklich das, was `hasV1BuyableOffer()`
+     * beantwortet — veröffentlicht, lose, bepreist und auf Lager.
+     */
+    statTotal: "Vorgemerkt",
+    statWithOffer: "Mit Angebot",
+    statWithoutOffer: "Ohne Angebot",
+    /** Was die Kennzahlen zusammen sind, für eine Hilfstechnik. */
+    statsLabel: "Überblick über deine Favoriten",
     /**
      * Was die Seite ist, in einem Satz — und zwar auch die Abgrenzung.
      * „Nur für dich sichtbar" ist keine Beruhigung, sondern die Wahrheit

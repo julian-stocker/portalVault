@@ -33,13 +33,39 @@ import { useRef, useState, useTransition } from "react";
 import { setFavorite } from "@/lib/favorites/actions";
 import { de } from "@/lib/i18n/de";
 
+/** Der eine Pfad. Derselbe in der Navigationsleiste (`nav-glyphs.tsx`). */
+const HERZ =
+  "M12 20.5s-7.5-4.6-7.5-10.1a4.4 4.4 0 0 1 7.5-3.1 4.4 4.4 0 0 1 7.5 3.1"
+  + "C19.5 15.9 12 20.5 12 20.5Z";
+
 /**
- * Das Symbol. Gefuellt oder nur umrissen — derselbe Pfad, zwei Fuellungen.
+ * KEINE PLATTE, SONDERN EIN HALO — die eine Entscheidung dieser Komponente.
+ *
+ * Das Herz liegt ueber dem Artwork im Kartenfenster, und das Artwork ist
+ * nicht eine Farbe: `standard` ist elfenbeinhell, `dark` und `legendary`
+ * sind dunkel, `chase` und `prestige` sind Ornament. Ein weisser Umriss
+ * verschwindet auf dem hellen, ein dunkler auf dem dunklen.
+ *
+ * Die erste Fassung loeste das mit einer dauerhaft sichtbaren grauen Scheibe
+ * (`bg-black/45`) — lesbar, aber ein 36-px-Knopf auf jeder von bis zu 561
+ * Karten, und damit das Erste, was man im Raster sieht. Fuer ein Herz, das
+ * leise sein soll, war das die falsche Loesung.
+ *
+ * Stattdessen traegt der GLYPH selbst seinen Kontrast: ein enger dunkler
+ * Schatten direkt am Umriss trennt ihn vom Hintergrund, auf hellem Grund
+ * wie auf dunklem, und er kostet keine Flaeche. Dieselbe Technik, mit der
+ * die Ueberschrift des Katalogs in der Welt steht, nur in klein.
  *
  * Eine Form fuer beide Zustaende ist Absicht: ein gefuelltes und ein leeres
  * Herz liest man am selben Ort als denselben Gegenstand in zwei Zustaenden.
  * Zwei verschiedene Umrisse waeren zwei Gegenstaende.
  */
+const HALO_LEER = "drop-shadow(0 0 1.5px rgb(10 9 24 / 0.95)) "
+  + "drop-shadow(0 1px 2px rgb(10 9 24 / 0.6))";
+/* Gefuellt kommt das Leuchten dazu — dezent, siehe `--favorite-glow`. */
+const HALO_VOLL = "drop-shadow(0 0 1px rgb(10 9 24 / 0.75)) "
+  + "drop-shadow(0 0 6px var(--favorite-glow))";
+
 function HeartGlyph({ filled }: { filled: boolean }) {
   return (
     <svg
@@ -48,38 +74,48 @@ function HeartGlyph({ filled }: { filled: boolean }) {
       className="h-full w-full"
       fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
-      strokeWidth={filled ? 1.5 : 2}
+      strokeWidth={filled ? 1.4 : 2.1}
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={{ filter: filled ? HALO_VOLL : HALO_LEER }}
     >
-      <path
-        d={
-          "M12 20.5s-7.5-4.6-7.5-10.1a4.4 4.4 0 0 1 7.5-3.1 4.4 4.4 0 0 1 7.5 3.1" +
-          "C19.5 15.9 12 20.5 12 20.5Z"
-        }
-      />
+      <path d={HERZ} />
     </svg>
   );
 }
 
 /*
- * DIE TRAGFLAECHE, und sie ist groesser als das Symbol.
+ * DIE TRAGFLAECHE, und sie ist groesser als das Symbol — aber UNSICHTBAR.
  *
- * Das Herz zeichnet 14 px, der Knopf misst 36 px. Auf einem Telefon ist das
+ * Das Herz zeichnet 14 px, die Flaeche misst 36 px. Auf einem Telefon ist das
  * der Unterschied zwischen „getroffen" und „die Karte hat gesammelt, weil
  * ich daneben kam" — und daneben liegt hier wirklich der Sammeln-Toggle.
- * 36 px ist unter den 44 px, die Apple empfiehlt, und so gross, wie es neben
- * dem Variantensiegel auf einer 211-px-Karte sein kann; der Abstand zum
- * Kartenrand kommt dazu.
+ * 36 px ist so gross, wie es neben dem Variantensiegel auf einer 211-px-Karte
+ * sein kann; der Abstand zum Kartenrand kommt dazu.
+ *
+ * Sichtbar wird sie erst, wenn jemand sie sucht: bei Hover und bei Fokus. Im
+ * Ruhezustand ist nur der Glyph da, und die Karte bleibt eine Karte.
  */
 const KNOPF =
-  "pointer-events-auto grid h-9 w-9 place-items-center rounded-full " +
-  "bg-black/45 backdrop-blur-[2px] transition " +
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 " +
-  "focus-visible:outline-white";
+  "pointer-events-auto grid h-9 w-9 place-items-center rounded-full "
+  + "transition-colors duration-150 "
+  + "hover:bg-white/14 focus-visible:bg-white/14 "
+  + "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 "
+  + "focus-visible:outline-white/90";
 
 /** Das Symbol darin — klein, damit die Flaeche nicht wie ein Knopf aussieht. */
 const SYMBOL = "h-[14px] w-[14px]";
+
+/*
+ * DIE ZWEI ZUSTAENDE, als Farbe.
+ *
+ * Leer: fast weiss, nicht ganz — reines Weiss auf einem hellen Artwork ist
+ * eine Kante ohne Flaeche. Der Halo im Glyph traegt den Kontrast.
+ * Gefuellt: `--favorite-ink`, das Korall des Wunsches. Nicht Gold: Gold
+ * heisst Besitz, und das sagt die Karte selbst (V4.6).
+ */
+const LEER = "text-white/80 hover:text-white";
+const VOLL = "text-favorite-ink";
 
 export function FavoriteHeart({
   skyId,
@@ -108,6 +144,12 @@ export function FavoriteHeart({
   const [favorited, setLocal] = useState(initialFavorited);
   const [failed, setFailed] = useState(false);
   const [pending, startTransition] = useTransition();
+  /*
+   * Zaehlt jedes SETZEN, und sonst nichts. `0` heisst „noch nie in dieser
+   * Sitzung gesetzt" — eine schon vorgemerkte Figur soll beim Laden der
+   * Seite nicht aufpoppen, sondern einfach vorgemerkt sein.
+   */
+  const [animationKey, setAnimationKey] = useState(0);
 
   /**
    * DER ZULETZT GEAEUSSERTE WUNSCH, und warum er nicht im State steht.
@@ -143,7 +185,7 @@ export function FavoriteHeart({
     return (
       <Link href={signInHref} aria-label={de.catalog.favoriteSignedOut}
             title={de.catalog.favoriteSignedOut}
-            className={`${KNOPF} text-white/70 hover:bg-black/60 hover:text-white`}>
+            className={`${KNOPF} ${LEER}`}>
         <span className={SYMBOL}><HeartGlyph filled={false} /></span>
       </Link>
     );
@@ -153,6 +195,7 @@ export function FavoriteHeart({
     const desired = !wunsch.current;
     wunsch.current = desired;
     setLocal(desired);                     // optimistisch
+    if (desired) setAnimationKey((n) => n + 1);
     onFavoritedChange?.(skyId, desired);
     setFailed(false);
 
@@ -188,18 +231,38 @@ export function FavoriteHeart({
        * Nicht `disabled` waehrend des Fluges, mit Absicht: ein Knopf, der
        * unter dem Finger abschaltet, verliert den zweiten Tipp. Der
        * Endzustand oben haelt beide aus.
+       *
+       * UND AUCH NICHT ABGEDUNKELT. Hier stand `opacity-70`, solange der
+       * Aufruf lief — und genau das machte die Bedienung traege: die Anzeige
+       * stimmte sofort, aber das Herz wurde blass und wartete sichtbar auf
+       * den Server. Ein optimistisches Update, das anschliessend „lade noch"
+       * signalisiert, nimmt sich seinen eigenen Zweck. `aria-busy` bleibt —
+       * es ist die Auskunft fuer eine Hilfstechnik, kein Effekt.
        */
       aria-busy={pending || undefined}
-      className={
-        `${KNOPF} ${pending ? "opacity-70" : ""} ` +
-        (failed
-          ? "text-danger ring-1 ring-danger"
-          : favorited
-            ? "text-[#ff7b8a] hover:bg-black/60"
-            : "text-white/70 hover:bg-black/60 hover:text-white")
-      }
+      className={`${KNOPF} ${failed ? "text-danger" : favorited ? VOLL : LEER}`}
     >
-      <span className={SYMBOL}><HeartGlyph filled={favorited} /></span>
+      <span
+        className={SYMBOL}
+        /*
+         * DIE BEWEGUNG LAEUFT NUR BEIM SETZEN, und nur einmal.
+         *
+         * `animationKey` wechselt mit jedem Setzen, damit React das Element
+         * neu einhaengt — sonst spielte die Animation beim zweiten Mal nicht
+         * wieder. Beim ENTFERNEN wird sie bewusst nicht gestartet:
+         * zuruecknehmen braucht keine Feier.
+         *
+         * Reduced Motion ist nicht hier geregelt, sondern einmal in
+         * `globals.css` — die Regel dort setzt jede Animationsdauer auf
+         * 0.01 ms, und zwar fuer alles, was Komponenten mitbringen.
+         */
+        key={animationKey}
+        style={favorited && animationKey > 0
+          ? { animation: "favorite-pop 220ms cubic-bezier(0.34, 1.56, 0.64, 1)" }
+          : undefined}
+      >
+        <HeartGlyph filled={favorited} />
+      </span>
       {/* Der Zustand steht in `aria-pressed`; dies ist der Satz, der ihn
           ausspricht, falls eine Hilfstechnik ihn nicht vorliest. */}
       <span className="sr-only">

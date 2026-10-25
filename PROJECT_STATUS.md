@@ -113,6 +113,20 @@ ausschließlich eine **Zahl**.
 * `npm run verify:rls:staging` für `favorites` steht aus — dass eine Richtlinie **dasteht**,
   prüft die Nachkontrolle; dass sie **greift**, nur ein Lauf mit zwei echten Konten.
 
+**Überarbeitung vom 2026-10-25 (Gestaltung und Bedienung).** Das Herz trug eine dauerhaft
+sichtbare graue Scheibe auf jeder von bis zu 561 Karten und dunkelte während des Serveraufrufs
+ab — beides gestrichen. Jetzt: unsichtbare 36-px-Fläche, Kontrast aus einem Halo am Glyph
+statt aus einer Platte, gefüllt in `--favorite-ink` (Korall, ausdrücklich nicht das Gold des
+Besitzes), 220 ms Bewegung nur beim Setzen, Fläche erst bei Hover und Fokus. `/favoriten` hat
+einen eigenen Kopf („Meine Favoriten") mit drei Kennzahlen aus `hasV1BuyableOffer()` —
+`CatalogView` nimmt dafür einen `heading`-Slot, statt dass eine zweite Ansicht entsteht.
+Vorher stand dort „Skylanders Katalog". Der Plan für Benachrichtigungen:
+`docs/FAVORITE_NOTIFICATIONS.md`, **nichts davon gebaut**.
+
+**Ein Fehler aus dem Staging-Durchlauf, behoben:** `/favoriten` fehlte in den geschützten
+Präfixen der Middleware — die Leiste bot den Punkt einem Ausgeloggten an, und der bekam 404
+statt `/login?next=/favoriten`.
+
 **Der Fehler, den die DOM-Tests gefunden haben, bevor ein Browser ihn sah:** zwei Tipps auf
 das Herz im **selben React-Takt** lasen beide denselben Zustand und schickten beide
 „vorgemerkt" — aus „an, wieder aus" wurde „an, an". Der gewünschte Zustand kommt seitdem aus

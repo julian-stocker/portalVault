@@ -12771,6 +12771,32 @@ das ist kein Zwischenstand: fremde Wunschlisten in einem Händlerexport wären
 nicht eine Lücke, sondern ein Leck — sie gäben genau das heraus, was
 `favorite_demand()` dem Betrieb bewusst nur als Zahl zeigt.
 
+### Nachtrag (2026-10-25): Korall heißt Wunsch, Gold heißt Besitz
+
+Die erste Fassung des Herzens trug eine dauerhaft sichtbare graue Scheibe und
+ein hartkodiertes Rosa. Beides ist berichtigt, und die Begründung ist eine
+Entscheidung, nicht Geschmack:
+
+| | |
+|---|---|
+| **Zwei Zustände, zwei Farben** | Gold bedeutet in diesem Produkt **Besitz** — Rahmen, Krone, „In deiner Sammlung", seit V4.6 sogar der Maßstab der Karte. Ein Favorit ist die Gegenaussage: *nicht* haben und wollen. Dieselbe Farbe für beides machte den einen Blick, den jemand auf ein Raster wirft, zweideutig. Deshalb `--favorite-ink`, ein warmes Korall — und ausdrücklich **nicht** `--danger`, das für einen Alarm reserviert ist |
+| **Die Karte selbst ändert sich nicht** | Heller, größer, gerahmt — diese Mittel gehören dem Sammlungsstatus. Das Herz geht als `favoriteSlot` in `FigureCard`, also als Inhalt und nicht als Zustand; die Kartenvorlage kennt das Wort „favorite" nicht |
+| **Kontrast aus einem Halo, nicht aus einer Platte** | Das Artwork hinter dem Herz ist nicht eine Farbe: `standard` ist elfenbeinhell, `dark` und `legendary` sind dunkel. Ein enger dunkler Schatten am Umriss trennt den Glyph auf beidem — und kostet keine Fläche. Die Trägerfläche bleibt 36 px, aber **unsichtbar**, bis jemand sie sucht (Hover, Fokus) |
+| **Die Bewegung steht in `globals.css`** | `@keyframes favorite-pop`, 220 ms, nur beim *Setzen*. Dort und nicht in der Komponente, weil die Reduced-Motion-Regel genau diesen Block neutralisiert — ein Keyframe in einer Komponente entkäme ihr |
+| **Kein Schleier während des Fluges** | `opacity-70` am laufenden Aufruf ist gestrichen. Ein optimistisches Update, das anschließend „lade noch" signalisiert, nimmt sich seinen eigenen Zweck; `aria-busy` bleibt, weil es Auskunft ist und kein Effekt |
+
+**`CatalogView` bekommt einen `heading`-Slot.** Auf `/favoriten` stand bis zu
+diesem Nachtrag „Skylanders Katalog", weil die Ansicht ihren Kopf selbst
+mitbrachte. Eine zweite Ansicht dafür hätte Suche, Serien-Tabs, Filter,
+Sortierung und das Raster verdoppelt; ein Slot genügt, und das Suchfeld
+bleibt, wo es ist. Die Seite führt darin drei Kennzahlen — Vorgemerkt, Mit
+Angebot, Ohne Angebot —, und „Mit Angebot" fragt `hasV1BuyableOffer()`,
+dieselbe Funktion wie die Angebotszeile jeder Karte. **Keine zweite
+Definition von „kaufbar".**
+
+Der Plan für die Benachrichtigungen, die darauf aufsetzen sollen, steht in
+`docs/FAVORITE_NOTIFICATIONS.md` — **nichts davon ist gebaut.**
+
 ### Konsequenzen
 
 - Die Katalogkarte bekommt ein Herz **in der Geschwister-Ebene über dem
