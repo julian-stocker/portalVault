@@ -329,7 +329,68 @@ create policy purchase_calculations_update_own on public.purchase_calculations
   using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
 create policy purchase_calculations_delete_own on public.purchase_calculations
   for delete to authenticated using ((select auth.uid()) = user_id);
+
+-- Favoriten: DREI Policies, und das ist Absicht (0145, ADR-0136)
+-- NOCH NICHT ANGEWENDET.
+create policy favorites_select_own on public.favorites
+  for select to authenticated
+  using ((select auth.uid()) = user_id and public.is_collector_account());
+create policy favorites_insert_own on public.favorites
+  for insert to authenticated
+  with check ((select auth.uid()) = user_id and public.is_collector_account());
+create policy favorites_delete_own on public.favorites
+  for delete to authenticated
+  using ((select auth.uid()) = user_id and public.is_collector_account());
+-- keine UPDATE-Policy und kein UPDATE-Recht: ein Favorit hat kein Feld,
+-- das sich aendern kann
 ```
+
+**`favorites` (`0145`, noch nicht angewendet)** weicht an zwei Stellen von
+`purchase_calculations` ab, und beide Abweichungen sind **enger**, nicht
+weiter:
+
+* **Drei Policies statt vier.** Es gibt kein `update`, weil es nichts zu
+  ändern gibt. Wo `collection_items` `using` **und** `with check` braucht,
+  damit niemand seine Zeile einem fremden Konto zuschiebt, existiert dieser
+  Weg hier nicht — und `revoke update … from authenticated` nimmt auch das
+  Recht. Das ist die strengere Lesart von „keine fremden Favoriten ändern":
+  nicht bewacht, sondern nicht vorhanden.
+* **Jede Policy fragt zusätzlich `is_collector_account()`** — das Muster von
+  `collection_items` **nach `0042`**, nicht das von `0001`. Ein Betriebs-
+  oder Adminkonto sammelt nicht im eigenen Katalog, und was für die Sammlung
+  gilt, gilt für die Wunschliste.
+
+**Die Nachfragezahl ist der interessante Teil.** Der Betrieb soll sehen, **wie
+viele** Konten eine Figur vorgemerkt haben, und **nicht**, wer. Die Policies
+oben zeigen ihm deshalb zu Recht keine Zeile — ein `grant select` auf
+`favorites` hätte ihm jede fremde Wunschliste geöffnet, um eine Zahl zu
+bekommen. Stattdessen:
+
+```sql
+create or replace function public.favorite_demand(p_sky_ids text[] default null)
+returns table (sky_id text, users integer)
+language plpgsql stable security definer set search_path = ''
+-- Rumpf: erst can_operate_active_seller(), dann group by sky_id
+revoke all on function public.favorite_demand(text[]) from public, anon;
+grant execute on function public.favorite_demand(text[]) to authenticated;
+```
+
+Die Signatur ist die Sicherheitsgrenze: **`(sky_id, users)` und sonst
+nichts** — keine Kennung, keine Adresse, kein Zeitpunkt, keine Zeile. Dasselbe
+Prinzip, das interne Notizen in `catalog_editorial` hält: **ein Tabellenrecht
+kennt keine Spalten, eine Funktion schon.** `src/lib/favorites/schema.test.ts`
+liest die Signatur und verlangt, dass `user_id` darin nicht vorkommt; Probelauf
+**P52** ruft die Funktion an echtem PostgreSQL auf und prüft die
+Spaltennamen der Antwort.
+
+**Das Tor ist `can_operate_active_seller()`**, dasselbe wie bei jeder anderen
+`seller_*`-Funktion. Ein Plattformadministrator ist nach `0042` bewusst
+**nicht** zugelassen: er betreibt die Plattform, nicht den Einkauf.
+
+**In keiner der beiden Sicherungen als Zeile.** Aus der Betriebssicherung
+dauerhaft ausgeschlossen — fremde Wunschlisten in einem Händlerexport wären
+nicht eine Lücke, sondern ein Leck. Aus der Plattformsicherung heute
+ebenfalls, aber **vorübergehend und mit benannter Bedingung** (ADR-0136).
 
 **`purchase_calculations` (`0142`, noch nicht angewendet)** folgt genau dem Muster von
 `collection_items`, und zwar in allen drei Schichten:

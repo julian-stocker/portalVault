@@ -3918,6 +3918,333 @@ async function main(): Promise<void> {
     });
   }
 
+
+  /* P52 — `0145`: DIE FAVORITEN.
+   *
+   * Eine neue Tabelle mit DREI Richtlinien und einer Aggregatfunktion. Was
+   * ein Probelauf daran prueft und kein Test im Arbeitsbaum:
+   *
+   *   1. Sie laeuft in einer Transaktion durch, und ihre Nachbedingungen
+   *      halten — drei Spalten, der zusammengesetzte Primaerschluessel, RLS
+   *      an, drei Richtlinien, der Index, kein Recht fuer `anon`, keine
+   *      Zeile.
+   *   2. Ein ZWEITER Lauf prallt ab.
+   *   3. DER PRIMAERSCHLUESSEL GREIFT. Zweimal dieselbe Figur fuer dasselbe
+   *      Konto wird abgewiesen; dieselbe Figur fuer ZWEI Konten geht, und
+   *      zwei VARIANTEN fuer dasselbe Konto gehen auch — das ist die
+   *      Zusage „Varianten getrennt" an echtem PostgreSQL gefahren.
+   *   4. `on conflict do nothing` laeuft durch. Das ist die
+   *      Endzustandssemantik der Oberflaeche: „Favorit" zweimal gesagt ist
+   *      „Favorit".
+   *   5. `favorite_demand()` WEIST OHNE BETRIEBSROLLE AB — und gibt mit
+   *      Rolle ausschliesslich `(sky_id, users)` zurueck. Die Spaltenliste
+   *      wird gelesen, nicht behauptet: eine `user_id` darin waere der
+   *      Fehler, den die ganze Funktion verhindern soll.
+   *   6. Die Ruecknahme bricht ab, solange Zeilen stehen — und nimmt
+   *      danach die Funktion MIT, nicht nur die Tabelle.
+   *   7. Der SAMMLUNGS-VERTRAG blockiert. Fehlt die Zeile, ist sie
+   *      abgeschnitten, vertauscht oder von Hand gesetzt, meldet die
+   *      Nachkontrolle es — dieselbe Pruefung, die P50 fuer die
+   *      Shop-Baseline fuehrt, hier fuer die neue zweite Zeile.
+   *
+   * WAS DAFUER GESTELLT WIRD. `auth.uid()` ist im Stub `null` und
+   * `can_operate_active_seller()` liest leere Tabellen. Fuer Fall 5 wird die
+   * Rolle sichtbar und begrenzt ERSETZT; dass sie ueberhaupt gefragt wird,
+   * ist der erste Teil desselben Falls. Die Richtlinien selbst greifen hier
+   * NICHT — PGlite faehrt als Eigentuemer, und RLS gilt fuer ihn nicht. Dass
+   * sie DA sind, prueft die Nachkontrolle; dass sie GREIFEN, prueft
+   * `npm run verify:rls:staging` mit zwei echten Konten.
+   */
+  {
+    const M145 = join(MIG_DIR, "0145_favorites.sql");
+    const R145 = "supabase/rollback/R0145_drop_favorites.sql";
+    const KONTO_A = "44444444-4444-4444-4444-444444444444";
+    const KONTO_B = "55555555-5555-5555-5555-555555555555";
+    const wert = async (db: InstanceType<typeof PGlite>, sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    const db = await frisch();
+    /* Das Stub-Schema entsteht aus ALLEN Migrationen und traegt beide schon.
+       Beide fallen, damit `0145` wirklich LAEUFT und nicht an ihrer eigenen
+       „steht schon"-Pruefung abprallt — dass sie das tut, ist Fall 2. */
+    await db.exec("drop table if exists public.favorites cascade;");
+    await db.exec("drop function if exists public.favorite_demand(text[]);");
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('${KONTO_A}'), ('${KONTO_B}')
+        on conflict do nothing;
+      -- Der Fremdschluessel auf die Figur braucht einen eindeutigen
+      -- Schluessel auf der Gegenseite; das Stub-Schema ist reine Struktur
+      -- ohne Schluessel. In der Wirklichkeit ist sky_id Primaerschluessel
+      -- (0001, ADR-0002).
+      --
+      -- (Als SQL-Kommentar, nicht als Blockkommentar: dieser Text steht in
+      -- einem Template-Literal, und ein Gravis darin wuerde es beenden.)
+      alter table public.skylanders add constraint z_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug)
+      values ('SKY-0001', 'Basis', 'basis'), ('SKY-0002', 'Variante', 'variante')
+        on conflict do nothing;
+      -- DREI SAMMLUNGSZEILEN AUS ZWEI KONTEN, und der Grund ist Fall 8.
+      --
+      -- Der Vertauschungsfall tauscht Feld 2 (zeilen) gegen Feld 3 (konten).
+      -- Bei LEERER Sammlung sind beide 0, und zwei vertauschte Nullen sind
+      -- keine Vertauschung: der Durchgang meldete "NICHTS ROT" und hatte
+      -- recht damit. Drei Zeilen aus zwei Konten machen 3 <> 2, und der Fall
+      -- prueft, was er pruefen soll. Gefunden vom Durchgang selbst.
+      insert into public.collection_items (user_id, sky_id, quantity) values
+        ('${KONTO_A}', 'SKY-0001', 1), ('${KONTO_A}', 'SKY-0002', 2),
+        ('${KONTO_B}', 'SKY-0001', 1)
+        on conflict do nothing;`);
+
+    /* Die drei Attrappen, die die Baseline messbar machen — s. Helfer. */
+    await attrappenFuerBaseline(db);
+
+    /*
+     * 0. BEIDE BASISZEILEN, SO WIE DER BEDIENER SIE BEKOMMT: Zeile 900 und
+     *    Zeile 901 des Preflights. Damit ist die Uebergabe selbst geprueft
+     *    und nicht nur beschrieben.
+     */
+    const vorBlatt = (await db.query(
+      readFileSync("supabase/checks/0145_preflight.sql", "utf8"))) as {
+        rows: { nr: number; befund: string; ok: boolean | null }[] };
+    const basis145 = vorBlatt.rows.find((r) => r.nr === 900)?.befund ?? "(keine)";
+    const coll145 = vorBlatt.rows.find((r) => r.nr === 901)?.befund ?? "(keine)";
+    /* Der Preflight selbst: Zeile 110/111 muessen „true" sagen — die Tabelle
+       ist oben gefallen, also ist sie wirklich noch nicht da. */
+    const vorNochNicht = [110, 111]
+      .map((n) => vorBlatt.rows.find((r) => r.nr === n)?.befund ?? "(fehlt)").join("/");
+
+    /* 1. Der Lauf. */
+    const lauf = await fahre(db, M145);
+
+    const spalten = lauf === null ? await wert(db,
+      "select string_agg(column_name, ',' order by ordinal_position) as w "
+      + "from information_schema.columns where table_schema = 'public' "
+      + "and table_name = 'favorites'") : "-";
+    const pk = lauf === null ? await wert(db,
+      "select string_agg(a.attname, ',' order by k.ord) as w from pg_constraint c "
+      + "cross join lateral unnest(c.conkey) with ordinality as k(attnum, ord) "
+      + "join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.attnum "
+      + "where c.conrelid = 'public.favorites'::regclass and c.contype = 'p'") : "-";
+    const policies = lauf === null ? await wert(db,
+      "select count(*)::text as w from pg_policies where schemaname = 'public' "
+      + "and tablename = 'favorites'") : "-";
+    const rls = lauf === null ? await wert(db,
+      "select relrowsecurity::text as w from pg_class "
+      + "where oid = 'public.favorites'::regclass") : "-";
+
+    /*
+     * 1b. UND DIE NACHKONTROLLE, GEFAHREN — SOLANGE DIE TABELLE LEER IST.
+     *
+     * Zeile 108 verlangt eine LEERE Tabelle, und die Einfuegeproben unten
+     * legen Zeilen an. Dieselbe Reihenfolge wie in P48.
+     *
+     * ZWEI ZEILEN KANN EIN STUB NICHT ERFUELLEN und sie werden namentlich
+     * zugelassen: 141 und 142 verlangen die vier eigenen Richtlinien von
+     * `collection_items` und RLS darauf — das Stub-Schema ist reine
+     * Struktur OHNE Richtlinien. Jede andere rote Zeile laesst diesen
+     * Durchgang scheitern.
+     */
+    let nachRot = "-";
+    let nachLeer = "-";
+    if (lauf === null) {
+      await db.exec("begin;");
+      await db.exec(`select set_config('skyisles.base', `
+        + `'${basis145.split("'").join("''")}', true);`);
+      await db.exec(`select set_config('skyisles.coll', `
+        + `'${coll145.split("'").join("''")}', true);`);
+      const blatt = await db.query(
+        readFileSync("supabase/checks/0145_postflight.sql", "utf8")) as {
+          rows: { nr: number; befund: string; ok: boolean | null }[] };
+      await db.exec("rollback;");
+      nachRot = blatt.rows.filter((r) => r.ok === false).map((r) => r.nr).join(", ");
+      nachLeer = blatt.rows.find((r) => r.nr === 108)?.befund ?? "(fehlt)";
+    }
+
+    /* 2. Noch einmal — muss abbrechen. */
+    const zweimal = lauf === null ? await fahre(db, M145) : "-";
+
+    /*
+     * 3. Der Primaerschluessel, gefahren: was gehen MUSS und was nicht.
+     */
+    let zweiKonten = "-";
+    let zweiVarianten = "-";
+    let doppelt = "-";
+    let idempotent = "-";
+    if (lauf === null) {
+      try {
+        await db.exec(`
+          insert into public.favorites (user_id, sky_id) values
+            ('${KONTO_A}', 'SKY-0001'), ('${KONTO_B}', 'SKY-0001');`);
+        zweiKonten = "ok";
+      } catch (f) { zweiKonten = `BEFUND: ${(f as Error).message}`; }
+
+      try {
+        await db.exec(
+          `insert into public.favorites (user_id, sky_id) values ('${KONTO_A}', 'SKY-0002');`);
+        zweiVarianten = "ok";
+      } catch (f) { zweiVarianten = `BEFUND: ${(f as Error).message}`; }
+
+      try {
+        await db.exec(
+          `insert into public.favorites (user_id, sky_id) values ('${KONTO_A}', 'SKY-0001');`);
+        doppelt = "DURCHGELAUFEN — Befund";
+      } catch { doppelt = "abgewiesen"; }
+
+      /* 4. Und derselbe Satz MIT `on conflict do nothing`: das ist der Weg,
+       *    den die Server Action geht, und er muss durchlaufen. */
+      try {
+        await db.exec(`
+          insert into public.favorites (user_id, sky_id) values ('${KONTO_A}', 'SKY-0001')
+          on conflict (user_id, sky_id) do nothing;`);
+        idempotent = "laeuft durch";
+      } catch (f) { idempotent = `BEFUND: ${(f as Error).message}`; }
+    }
+
+    /* 5. `favorite_demand()`: erst ohne Rolle, dann mit. */
+    let ohneRolle = "-";
+    let demandSpalten = "-";
+    let demandZeilen = "-";
+    let demandZahl = "-";
+    if (lauf === null) {
+      try {
+        await db.query("select * from public.favorite_demand(null);");
+        ohneRolle = "DURCHGELAUFEN — Befund";
+      } catch (f) {
+        ohneRolle = (f as Error).message.includes("seller operator role required")
+          ? "abgewiesen" : `ANDERER FEHLER: ${(f as Error).message}`;
+      }
+
+      await db.exec(`
+        create or replace function public.can_operate_active_seller() returns boolean
+          language sql stable as $stub$ select true $stub$;`);
+
+      const blatt = (await db.query("select * from public.favorite_demand(null);")) as {
+        rows: Record<string, unknown>[] };
+      demandSpalten = Object.keys(blatt.rows[0] ?? {}).sort().join(",");
+      demandZeilen = String(blatt.rows.length);
+      demandZahl = String(
+        (blatt.rows.find((r) => r.sky_id === "SKY-0001") ?? {}).users ?? "?");
+    }
+
+    /*
+     * 6. DIE DECKE. Mehr als 2000 SKY-IDs weist sie ab — eine Schleife, die
+     *    einmal zu oft anhaengt, laeuft nicht in einen Seq Scan ueber ein
+     *    Array mit Zehntausenden Werten.
+     */
+    let decke = "-";
+    if (lauf === null) {
+      try {
+        await db.query(
+          "select * from public.favorite_demand("
+          + "(select array_agg('SKY-' || lpad(g::text, 4, '0')) "
+          + "from generate_series(1, 2001) g));");
+        decke = "DURCHGELAUFEN — Befund";
+      } catch (f) {
+        decke = (f as Error).message.includes("zu viele") ? "abgewiesen"
+          : `ANDERER FEHLER: ${(f as Error).message}`;
+      }
+    }
+
+    /* 7. Die Ruecknahme: mit Zeilen abbrechen, ohne Zeilen durchlaufen —
+     *    und die Funktion MIT fortnehmen. */
+    const mitZeilen = lauf === null ? await fahre(db, R145) : "-";
+    if (lauf === null) await db.exec("delete from public.favorites;");
+    const ohneZeilen = lauf === null ? await fahre(db, R145) : "-";
+    const fort = lauf === null && ohneZeilen === null
+      ? await wert(db, "select ((to_regclass('public.favorites') is null) and "
+          + "(to_regprocedure('public.favorite_demand(text[])') is null))::text as w")
+      : "-";
+    /* Und die Sammlung steht noch — das ist die Zusage der Ruecknahme. */
+    const sammlungDa = lauf === null && ohneZeilen === null
+      ? await wert(db, "select (to_regclass('public.collection_items') is not null)::text as w")
+      : "-";
+
+    /*
+     * 8. DER SAMMLUNGS-VERTRAG, UNTER FALSCHEN ZEILEN.
+     *
+     * Dieselbe Pruefung, die P50 fuer die Shop-Baseline fuehrt, hier fuer
+     * die zweite Zeile: fehlt sie, ist sie abgeschnitten, vertauscht oder
+     * von Hand gesetzt — die Nachkontrolle muss es melden. Die Tabelle ist
+     * inzwischen fort, deshalb laeuft `0145` noch einmal.
+     */
+    const collRot: string[] = [];
+    if (lauf === null && ohneZeilen === null) {
+      const nochmal = await fahre(db, M145);
+      if (nochmal !== null) throw new Error(`P52 Aufbau 8: 0145 scheiterte — ${nochmal}`);
+      const teile = coll145.split("|");
+      const faelle: [string, string | null][] = [
+        ["fehlt", null],
+        ["Platzhalter", "SAMMLUNG-HIER-EINSETZEN"],
+        ["vier Felder", teile.slice(0, 4).join("|")],
+        ["falsche Marke", ["skyisles-coll-9", ...teile.slice(1)].join("|")],
+        ["vertauscht", [teile[0], teile[2], teile[1], teile[3], teile[4]].join("|")],
+        ["Wert ohne neue Summe",
+          [teile[0], String(Number(teile[1]) + 1), ...teile.slice(2)].join("|")],
+      ];
+      for (const [titel, zeile] of faelle) {
+        await db.exec("begin;");
+        await db.exec(`select set_config('skyisles.base', `
+          + `'${basis145.split("'").join("''")}', true);`);
+        if (zeile !== null) {
+          await db.exec(`select set_config('skyisles.coll', `
+            + `'${zeile.split("'").join("''")}', true);`);
+        }
+        const blatt = await db.query(
+          readFileSync("supabase/checks/0145_postflight.sql", "utf8")) as {
+            rows: { nr: number; ok: boolean | null }[] };
+        await db.exec("rollback;");
+        const rot = blatt.rows.filter((r) => r.ok === false && r.nr >= 821 && r.nr < 900)
+          .map((r) => r.nr);
+        collRot.push(`${titel}: ${rot.length > 0 ? rot.join("/") : "NICHTS ROT — Befund"}`);
+      }
+    }
+
+    probe.push({
+      name: "P52 0145 legt die Favoriten an: PK (user_id, sky_id) greift, Varianten bleiben "
+        + "getrennt, favorite_demand weist ohne Betriebsrolle ab und gibt nur Zahlen, "
+        + "Ruecknahme schuetzt Zeilen, und eine falsche Sammlungs-Baseline blockiert",
+      ok: lauf === null
+        && vorNochNicht === "true/true"
+        && spalten === "user_id,sky_id,created_at"
+        && pk === "user_id,sky_id"
+        && policies === "3" && rls === "true"
+        /* Die Nachkontrolle: nur die beiden Stub-Zeilen duerfen rot sein. */
+        && nachRot === "141, 142, 9999" && nachLeer === "0"
+        && typeof zweimal === "string" && zweimal.includes("steht schon")
+        && zweiKonten === "ok" && zweiVarianten === "ok"
+        && doppelt === "abgewiesen" && idempotent === "laeuft durch"
+        && ohneRolle === "abgewiesen"
+        /* KEINE user_id im Ergebnis — das ist der Kern der Funktion. */
+        && demandSpalten === "sky_id,users"
+        && demandZeilen === "2" && demandZahl === "2"
+        && decke === "abgewiesen"
+        && typeof mitZeilen === "string" && mitZeilen.includes("Zeile(n) stehen in der Tabelle")
+        && ohneZeilen === null && fort === "true" && sammlungDa === "true"
+        /* Jeder der sechs Faelle muss mindestens eine Zeile rot machen. */
+        && collRot.length === 6 && collRot.every((z) => !z.includes("NICHTS ROT")),
+      sagt: `0145: ${lauf ?? "durch"} · vorher noch nicht da ${vorNochNicht}`
+        + ` · Spalten ${spalten} · PK ${pk} · ${policies} Richtlinien · RLS ${rls}`
+        + ` · Nachkontrolle rot: ${nachRot}`
+        + `${nachRot === "141, 142, 9999" ? " (nur die Stub-Zeilen 141/142)" : ""}`
+        + ` (Zeilen nach der Migration ${nachLeer})`
+        + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
+        + ` · dieselbe Figur fuer zwei Konten: ${zweiKonten}`
+        + ` · zwei Varianten fuer ein Konto: ${zweiVarianten}`
+        + ` · derselbe Favorit zweimal: ${doppelt}`
+        + ` · mit on conflict: ${idempotent}`
+        + ` · favorite_demand ohne Rolle: ${ohneRolle}`
+        + ` · mit Rolle: Spalten ${demandSpalten}, ${demandZeilen} Zeilen,`
+        + ` SKY-0001 von ${demandZahl} Konten`
+        + ` · Decke bei 2001 IDs: ${decke}`
+        + ` · Ruecknahme mit Zeilen: ${mitZeilen === null ? "DURCHGELAUFEN — Befund" : "bricht ab"}`
+        + ` · ohne Zeilen: ${ohneZeilen ?? "durch"} (Tabelle UND Funktion fort ${fort},`
+        + ` Sammlung steht ${sammlungDa})`
+        + ` · Sammlungs-Baseline — ${collRot.join(" · ")}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

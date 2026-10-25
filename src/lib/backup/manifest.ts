@@ -247,6 +247,27 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "Export als Kontoidentität sperrt — und eine Kalkulation ist eine Bewertung, " +
     "kein Geschäftsvorfall: der Einkauf daraus steht in purchases. Sie gehört in " +
     "die Plattformsicherung, dort vorgesehen als Bereich mit 0144.",
+
+  /*
+   * DAUERHAFT DRAUSSEN, und hier ist der Ausschluss keine Zwischenlösung.
+   *
+   * Ein Favorit ist die private Vormerkung eines Sammlers. Er hängt an
+   * `user_id` — die Kontoidentität, die dieser Export sperrt — und er ist
+   * kein Geschäftsvorfall: nichts wurde gekauft, verkauft, bewegt oder
+   * bezahlt. Ein Händlerexport, der fremde Wunschlisten enthielte, gäbe
+   * genau das heraus, was `favorite_demand()` dem Betrieb bewusst nur als
+   * ZAHL zeigt (`0145`). Das wäre nicht eine Lücke, sondern ein Leck.
+   *
+   * WO ER STATTDESSEN HINGEHOERT: in die Plattformsicherung. Dort steht er
+   * heute in `PLATFORM_EXCLUDED_TABLES` — mit Ablaufdatum und einer
+   * Bedingung, nicht als Urteil (siehe dort, ADR-0136).
+   */
+  favorites:
+    "Vorgemerkte Figuren eines Sammlers (0145). Sie hängen an user_id, das dieser " +
+    "Export als Kontoidentität sperrt — und eine Vormerkung ist kein " +
+    "Geschäftsvorfall. Fremde Wunschlisten in einem Händlerexport wären ein Leck: " +
+    "dem Betrieb zeigt favorite_demand() ausdrücklich nur aggregierte Zahlen. " +
+    "Gehört in die Plattformsicherung, dort als Bereich vorgesehen (ADR-0136).",
 };
 
 /* -------------------------------------------------------------------------

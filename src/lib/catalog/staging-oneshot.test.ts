@@ -384,6 +384,9 @@ const LAEUFE = [
   /* Und `0143` — die Uebernahme ins Orderbuch (ADR-0132). */
   ["supabase/operations/staging-0143.sql", "0143_purchase_from_calculation.sql"],
   ["supabase/operations/staging-0144.sql", "0144_platform_export_calculations.sql"],
+  /* Und `0145` — die Favoriten (ADR-0136). Eine Tabelle, drei Richtlinien,
+     eine Aggregatfunktion; rein additiv. */
+  ["supabase/operations/staging-0145.sql", "0145_favorites.sql"],
 ] as const;
 
 describe("die Einzellaeufe fuer 0139 bis 0143", () => {
@@ -471,6 +474,18 @@ const LESELAEUFE = [
 const LESELAEUFE_OHNE_Z0 = [
   ["supabase/operations/staging-s-postflight-0142.sql", "0142_postflight.sql"],
   ["supabase/operations/staging-s-postflight-0143.sql", "0143_postflight.sql"],
+  /*
+   * UND DIE BEIDEN ZU `0144` UND `0145`.
+   *
+   * Die zu `0144` lagen bis zum 2026-10-25 unregistriert im Ordner — die
+   * Dateien gab es, die Zusicherung „Zeichen fuer Zeichen eingebettet" galt
+   * fuer sie nicht. Aufgefallen beim Anlegen der Huellen zu `0145`; eine
+   * Luecke in einem Waechter, nicht in einer Datei.
+   */
+  ["supabase/operations/staging-s-preflight-0144.sql", "0144_preflight.sql"],
+  ["supabase/operations/staging-s-postflight-0144.sql", "0144_postflight.sql"],
+  ["supabase/operations/staging-s-preflight-0145.sql", "0145_preflight.sql"],
+  ["supabase/operations/staging-s-postflight-0145.sql", "0145_postflight.sql"],
 ] as const;
 
 describe.each(LESELAEUFE_OHNE_Z0)("der lesende Staging-Lauf %s", (skript, pruefdatei) => {
@@ -646,6 +661,8 @@ const PROD_LESELAEUFE_BASIS = [
   ["supabase/operations/prod-s-postflight-0143.sql", "0143_postflight.sql", "post"],
   ["supabase/operations/prod-s-preflight-0144.sql", "0144_preflight.sql", "pre"],
   ["supabase/operations/prod-s-postflight-0144.sql", "0144_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0145.sql", "0145_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0145.sql", "0145_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -1276,6 +1293,9 @@ const PRODUKTIONSLAEUFE = [
   ["supabase/operations/prod-0143.sql", "0143_purchase_from_calculation.sql"],
   /* `0144`: die Sicherungsfunktion bekommt einen Bereich mehr. */
   ["supabase/operations/prod-0144.sql", "0144_platform_export_calculations.sql"],
+  /* `0145`: die Favoriten. NICHT fahren, bevor die Folgemigration sie in die
+     Plattformsicherung aufgenommen hat — die Huelle sagt es in ihrem Kopf. */
+  ["supabase/operations/prod-0145.sql", "0145_favorites.sql"],
 ] as const;
 
 describe("die zehn Production-Laeufe", () => {

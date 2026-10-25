@@ -407,6 +407,8 @@ Migration.
 | Fremder Eintrag nach allen Versuchen intakt · eigener löschbar | 2 | ✅ |
 | Katalog für Angemeldete lesbar, aber weder änderbar noch erweiterbar | 3 | ✅ |
 | Anonym: Katalog lesbar, Profile und Sammlungen nicht | 3 | ✅ |
+
+Die Favoriten (`0145`) stehen in dieser Tabelle **noch nicht** — die Migration ist nirgends angewendet, und ein funktionaler RLS-Lauf gegen eine Tabelle, die es nicht gibt, wäre keine Prüfung. Nach `staging-0145.sql` gehört `npm run verify:rls:staging` dazu: dass eine Richtlinie **dasteht**, prüfen der Postflight und `src/lib/favorites/schema.test.ts`; dass sie **greift**, beantwortet nur ein Lauf mit zwei echten Konten.
 | **Summe** | **31** | **31/31** |
 
 **Damit ist bewiesen, nicht nur konfiguriert:** Ein angemeldeter Benutzer kommt an fremde

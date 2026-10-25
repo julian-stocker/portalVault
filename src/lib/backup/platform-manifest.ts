@@ -741,6 +741,45 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
 
 export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   /*
+   * DRAUSSEN AUF ZEIT, UND ZWAR MIT ABLAUFDATUM (`0145`, ADR-0136).
+   *
+   * `favorites` ist persönliche Nutzerdaten — dieselbe Klasse wie
+   * `collection_items` und `purchase_calculations`: rein nutzergeneriert,
+   * aus nichts ableitbar, von keinem anderen Export erfasst. **Sie gehört
+   * ins Plattformarchiv**, und der Betreiber hat das am 2026-10-25
+   * ausdrücklich so entschieden.
+   *
+   * WARUM SIE HEUTE TROTZDEM HIER STEHT, und es ist kein Urteil über ihren
+   * Wert: ein Bereich im Archiv heißt `system_platform_export()` ersetzen,
+   * und diese Funktion prüft den `md5` ihrer Vorgängerfassung, bevor sie
+   * sich überschreiben lässt. `0144` hat sie auf Staging schon ersetzt, auf
+   * Production noch nicht. Eine Migration, die sie JETZT ein zweites Mal
+   * ersetzt, wäre auf Production nicht anwendbar — sie fände dort den Rumpf
+   * aus `0105` statt den aus `0144`. `0145` bleibt deshalb isoliert
+   * anwendbar, und die Aufnahme kommt getrennt.
+   *
+   * WAS DIESEN EINTRAG WIEDER ENTFERNT, als Bedingung und nicht als Absicht:
+   *
+   *   1. `0144` liegt auf Production (`supabase/migrations/APPLIED.md`).
+   *   2. Die Folgemigration nimmt `favorites` als Bereich auf und zählt
+   *      `PLATFORM_FORMAT_VERSION` auf 3 hoch.
+   *   3. Dieser Eintrag fällt, und der Wächter unten verlangt dann einen
+   *      Bereich — er kann nicht übersehen werden.
+   *
+   * **VOR DEM PRODUCTION-ROLLOUT DER FAVORITEN muss Punkt 2 erledigt sein.**
+   * Das ist die Zusage, unter der `0145` freigegeben wurde; ein Rollout mit
+   * diesem Eintrag an Ort und Stelle wäre ein Bruch davon.
+   * `supabase/checks/platform_export_gap.md` führt ihn als offenen Punkt.
+   */
+  favorites:
+    "Vorgemerkte Figuren eines Sammlers (0145). Persönliche Nutzerdaten und " +
+    "GEHOERT INS ARCHIV — vorübergehend draußen, weil ein Bereich " +
+    "system_platform_export() ersetzen würde und 0144 noch nicht auf " +
+    "Production liegt. Die Folgemigration nach 0144-auf-Production nimmt sie " +
+    "auf (Formatversion 3) und entfernt diesen Eintrag; das muss VOR dem " +
+    "Production-Rollout der Favoriten geschehen (ADR-0136).",
+
+  /*
    * NOCH NICHT DRIN — UND DAS IST EIN OFFENER PUNKT, KEINE ENTSCHEIDUNG GEGEN
    * SIE.
    *

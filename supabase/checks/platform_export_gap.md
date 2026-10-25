@@ -196,3 +196,49 @@ neuesten Funktionsdefinition, der Spaltenwächter prüft jede Spalte eines
 bekannten Bereichs, und das Verfahren aus `0144` — Rumpf kopieren, Abdruck
 vorher und nachher, Umkehrprobe, P-Lauf — lässt sich für eine `0145`
 wiederholen. Was fehlt, ist die Entscheidung und eine eigene Freigabe.
+
+---
+
+## Eine neue Lücke, mit Ablaufdatum: `favorites` (2026-10-25)
+
+`0145` legt `public.favorites` an (ADR-0136) — **persönliche Nutzerdaten**,
+dieselbe Klasse wie `collection_items` und `purchase_calculations`. Sie
+**gehört ins Plattformarchiv**, und der Betreiber hat das ausdrücklich so
+entschieden: „Neue persönliche Nutzerdaten dürfen nicht dauerhaft aus dem
+Plattformbackup ausgeschlossen bleiben."
+
+Heute steht sie trotzdem in `PLATFORM_EXCLUDED_TABLES`. Der Grund ist
+**Reihenfolge, nicht Wert**: ein Bereich im Archiv heißt
+`system_platform_export()` ersetzen, und diese Funktion prüft den `md5` ihrer
+Vorgängerfassung, bevor sie sich überschreiben lässt. `0144` hat sie auf
+Staging schon ersetzt (`4c4d2e7c…`), auf Production noch nicht — dort steht
+weiter der Rumpf aus `0105` (`2e2da90e…`). Eine Migration, die sie **jetzt**
+ein zweites Mal ersetzt, wäre auf Production nicht anwendbar. `0145` bleibt
+deshalb isoliert anwendbar, und die Aufnahme kommt getrennt.
+
+**Was diesen Eintrag wieder entfernt — als Bedingung, nicht als Absicht:**
+
+1. `0144` liegt auf Production (`supabase/migrations/APPLIED.md`).
+2. Die Folgemigration nimmt `favorites` als Bereich auf und zählt
+   `PLATFORM_FORMAT_VERSION` auf **3** hoch
+   (`SECTIONS_BY_FORMAT_VERSION = { 1: 53, 2: 54, 3: 55 }`).
+3. Der Eintrag in `PLATFORM_EXCLUDED_TABLES` fällt — und danach verlangt der
+   Vollständigkeitswächter (ADR-0134) einen Bereich, kann ihn also nicht
+   übersehen.
+
+> **Punkt 2 muss VOR dem Production-Rollout der Favoriten erledigt sein.**
+> Das ist die Zusage, unter der `0145` freigegeben wurde.
+> `supabase/operations/prod-0145.sql` sagt es in ihrem eigenen Kopf, und
+> `src/lib/favorites/schema.test.ts` hält fest, dass der Ausschluss seinen
+> Ablauf benennt — ein Eintrag ohne diese Sätze wäre der stille
+> Dauerausschluss, den es nicht geben soll.
+
+**Aus der Betriebssicherung bleibt `favorites` dauerhaft draußen**, und das
+ist kein Zwischenstand: sie hängt an `user_id`, das dieser Export als
+Kontoidentität sperrt, und fremde Wunschlisten in einem Händlerexport wären
+nicht eine Lücke, sondern ein Leck — sie gäben genau das heraus, was
+`favorite_demand()` dem Betrieb bewusst nur als **Zahl** zeigt.
+
+**Der offene Punkt dieser Datei ist damit zweiteilig:** die vier Spalten
+oben (ohne Termin, eigene Entscheidung) und `favorites` (mit Bedingung und
+Termin, Entscheidung getroffen).

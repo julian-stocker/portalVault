@@ -44,6 +44,7 @@ SQL-Editor angewandt (ADR-0051).
 | `shipping_countries` | 1 (`DE`) | wohin der Shop liefert | öffentlich lesbar, nur Admin schreibt |
 | `shipping_methods` | 2 | Versandarten und Preise | kein Clientrecht, öffentlich über `shipping_quote()` |
 | `purchase_calculations` (`0142`) | wächst | bewusst gespeicherte Einkaufskalkulationen | nur der Eigentümer |
+| `favorites` (`0145`) | wächst | vorgemerkte Figuren: Benutzer × Figur | nur der Eigentümer; Zahlen für den Betrieb über `favorite_demand()` |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -2108,6 +2109,51 @@ Die Unterscheidung ist wichtig genug, um sie festzuhalten:
 Stößt jemals eine echte Sammlung an diese Grenze, wird der Wert angehoben — das ist eine
 Betriebsentscheidung, keine Änderung des Datenmodells.
 
+### 3.5a `favorites` (Migration `0145`)
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `user_id` | `uuid not null` | FK → `auth.users(id)`, `on delete cascade`, `on update cascade` |
+| `sky_id` | `text not null` | FK → `skylanders(sky_id)`, `on delete restrict`, `on update cascade` |
+| `created_at` | `timestamptz not null default now()` | wann vorgemerkt |
+
+**Primärschlüssel: `(user_id, sky_id)`.** Index zusätzlich auf `(sky_id)`.
+
+**Drei Abweichungen von `collection_items`, jede mit Grund (ADR-0136).**
+
+| | |
+|---|---|
+| **Kein Surrogatschlüssel** | `collection_items` trägt eine `id uuid`, weil dort später mehrere Zeilen je Konto und Figur stehen können (Zustand je Exemplar, Abschnitt 7). Ein Favorit kennt diesen Fall nicht: es gibt ihn oder es gibt ihn nicht. Der Primärschlüssel **ist** die Eindeutigkeit — „doppelter Favorit“ ist kein Zustand, den die Datenbank darstellen kann |
+| **Kein `updated_at`, kein Trigger** | Es gibt kein Feld, das sich ändern kann; ein „zuletzt geändert“ wäre immer `created_at` |
+| **Keine `update`-Richtlinie, kein `update`-Recht** | Aus demselben Grund. Favorisieren ist ein `insert`, Entfavorisieren ein `delete`. Die engere Fassung von „keine fremden Favoriten ändern“: der Weg existiert nicht, statt bewacht zu sein |
+
+**Varianten sind getrennte Zeilen.** Eine Legendary ist eine andere SKY-ID als
+ihre Basisfigur, und der Schlüssel sagt das, ohne es zu wissen (ADR-0002,
+ADR-0034).
+
+**Richtlinien: drei, das Muster von `collection_items` nach `0042`** —
+`(select auth.uid()) = user_id` **und** `public.is_collector_account()`.
+Rechte: `authenticated` hat genau `SELECT`, `INSERT`, `DELETE`; `anon` hat
+nichts; `truncate`, `update`, `references` und `trigger` sind ausdrücklich
+entzogen.
+
+**`favorite_demand(p_sky_ids text[] default null)`** → `(sky_id, users)`.
+`security definer`, `stable`, `set search_path = ''`, hinter
+`can_operate_active_seller()`; ein Plattformadministrator ist nach `0042`
+bewusst nicht zugelassen. Sie gibt **ausschließlich** die SKY-ID und eine
+Anzahl zurück — keine Kennung, keine Adresse, keinen Zeitpunkt, keine Zeile.
+Der Grund ist strukturell: **ein Tabellenrecht kennt keine Spalten, eine
+Funktion schon** (dasselbe Prinzip hält interne Notizen in
+`catalog_editorial`). Figuren ohne Favorit fehlen im Ergebnis; der Aufrufer
+setzt sie auf 0. Decke bei 2000 SKY-IDs je Aufruf.
+
+**Sicherung.** Aus der Betriebssicherung **dauerhaft** ausgeschlossen
+(hängt an `user_id`, und fremde Wunschlisten in einem Händlerexport wären ein
+Leck). In der Plattformsicherung heute ebenfalls ausgeschlossen — **aber
+vorübergehend und mit Bedingung**: die Folgemigration nach
+`0144`-auf-Production nimmt sie als Bereich auf (Formatversion 3). Siehe
+ADR-0136 und `supabase/checks/platform_export_gap.md`.
+
 ### 3.6 `ON DELETE` / `ON UPDATE` — bewusste Entscheidungen
 
 | Fremdschlüssel | ON DELETE | ON UPDATE | Warum |
@@ -2115,6 +2161,8 @@ Betriebsentscheidung, keine Änderung des Datenmodells.
 | `profiles.id → auth.users.id` | `cascade` | – | Konto gelöscht → Profil verschwindet. DSGVO-konform, keine Waisen. |
 | `collection_items.user_id → auth.users.id` | `cascade` | `cascade` | Konto gelöscht → Sammlung verschwindet mit. |
 | `collection_items.sky_id → skylanders.sky_id` | **`restrict`** | **`restrict`** | Ein Katalogeintrag darf nicht unter einer Sammlung wegbrechen. `restrict` lässt ein versehentliches Löschen **laut scheitern**, statt still Benutzerdaten mitzunehmen. Der Import löscht ohnehin nie, sondern setzt `is_active = false`. `on update restrict` statt `cascade`: eine SKY-ID ändert sich nie — ein Änderungsversuch soll fehlschlagen, nicht stillschweigend durch alle Sammlungen propagieren. |
+| `favorites.user_id → auth.users.id` | `cascade` | `cascade` | Konto gelöscht → Wunschliste verschwindet mit. |
+| `favorites.sky_id → skylanders.sky_id` | **`restrict`** | `cascade` | Dieselbe Regel wie bei der Sammlung: eine Katalogzeile darf nicht unter einer Wunschliste wegbrechen. |
 | `categories.series_code → series.code` | `restrict` | `cascade` | Eine Serie mit Kategorien ist nicht löschbar. Der Serien-Code ist Präsentationsmetadatum, keine Identitätsverankerung wie die SKY-ID — eine Umbenennung darf daher propagieren. |
 | `skylanders.(category_id, series_code) → categories.(id, series_code)` | `restrict` | `cascade` | Eine benutzte Kategorie ist nicht löschbar; Umbenennungen propagieren. |
 | `shop_admins.user_id → auth.users.id` | `cascade` | `cascade` | Konto gelöscht → Berechtigung verschwindet. Anders als beim Journal ist hier nichts zu bewahren. |
@@ -3198,7 +3246,7 @@ Entscheidungen sie nicht verbauen:
 
 | Später | Wie es andockt | Was heute schon passt |
 |---|---|---|
-| `wishlist_items` | `(user_id, sky_id, priority)` | referenziert dieselbe `skylanders`-Tabelle |
+| `wishlist_items` | `(user_id, sky_id, priority)` | referenziert dieselbe `skylanders`-Tabelle. **Nicht zu verwechseln mit `favorites` (`0145`, Abschnitt 3.5a):** die gibt es, und sie nimmt diesen Andockpunkt ausdrücklich NICHT in Anspruch — kein `priority`, kein Preislimit, keine Sichtbarkeit nach außen, keine Gegenseite. Dieser Eintrag beschreibt weiter die Marketplace-Tabelle, die ADR-0021 nicht gebaut sehen will (ADR-0136) |
 | ~~`characters`~~ | **existiert seit Migration 0002** (Abschnitt 3.0) | — |
 | `skylanders.element` | Element für Nicht-Charakter-Objekte (Traps 55/57, Kristalle 27/27 tragen es im Produktnamen) | Modell A: `characters.element` und `skylanders.element` treffen sich nie auf derselben Zeile, weil ein Objekt mit Charakter kein Trap ist (ADR-0034) |
 | `listings` (Verkauf) | `(id, user_id, sky_id, quantity, price, status)` | eigene Tabelle, `collection_items` bleibt unverändert |

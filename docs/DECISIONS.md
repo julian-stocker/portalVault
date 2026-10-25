@@ -12646,3 +12646,151 @@ Die vier bekannten **Spalten**lücken — `item_type`, `usk_rating`,
 `sale_released`, `delivery_scope` — bleiben draußen
 (`platform_export_gap.md`). Sie in `0144` mitzunehmen wäre eine Änderung, die
 niemand geprüft hat, an der Funktion, die unsere Absicherung ist.
+
+---
+
+## ADR-0136 · Favoriten sind eine Sammlerfunktion, kein Marketplace-Schritt
+
+**Status:** akzeptiert (Entscheidung des Betreibers, 2026-10-25) ·
+**Umsetzung:** `0145`, `favorite_demand()`, Katalogkarte, `/favoriten` —
+Migration **nirgends angewendet**
+
+### Die Entscheidung in einem Satz
+
+Ein Sammler kann Figuren vormerken; die Tabelle heißt **`favorites`**, nicht
+`wishlist_items`, und der Marketplace-Stopp aus ADR-0021 bleibt unberührt.
+
+### Warum der Name wichtig ist
+
+ADR-0021 führt `wishlist_items` namentlich in der Liste dessen, was
+„dokumentiert, aber **nicht gebaut**" ist — „auch nicht konzeptionell, auch
+nicht ‚nur das Datenmodell'". `docs/DATABASE.md` Abschnitt 7 beschreibt dort
+eine Tabelle `(user_id, sky_id, priority)`: einen **Andockpunkt für einen
+Handelsplatz**, auf dem Angebot und Nachfrage sich treffen sollen.
+
+Was hier gebaut wird, ist etwas anderes, und der Unterschied ist nicht
+sprachlich. Ein Favorit sagt „das fehlt mir" und sonst nichts: keine
+Priorität, kein Preislimit, kein Zustand, keine Sichtbarkeit nach außen,
+keine Gegenseite. Er ist die Fortsetzung dessen, was ADR-0027 schon
+entschieden hat — der Owned-Toggle hat **keine Wunschlisten-Semantik**, weil
+Besitz und Wunsch zwei Aussagen sind.
+
+**Deshalb ein eigener Name.** `favorites` nimmt den Andockpunkt nicht in
+Anspruch; `wishlist_items` samt `priority` bleibt frei für den Tag, an dem
+ADR-0021 seine Bedingung erfüllt sieht. Wer später beides will, muss nichts
+umbauen und nichts umbenennen — er hat zwei Tabellen für zwei Sachen.
+
+### Was die Tabelle ist, und was sie absichtlich nicht hat
+
+```
+favorites (user_id uuid, sky_id text, created_at timestamptz)
+primary key (user_id, sky_id)
+```
+
+| Weggelassen | Warum |
+|---|---|
+| **Surrogatschlüssel `id`** | `collection_items` trägt einen, weil dort später mehrere Zeilen je Konto und Figur stehen können (Zustand je Exemplar). Ein Favorit kennt diesen Fall nicht: es gibt ihn oder es gibt ihn nicht. Der Primärschlüssel **ist** die geforderte Eindeutigkeit — „doppelter Favorit" ist kein Zustand, den die Datenbank darstellen kann |
+| **`updated_at` und Trigger** | Es gibt kein Feld, das sich ändern kann. Ein „zuletzt geändert" wäre immer `created_at` |
+| **Die `update`-Richtlinie und das `update`-Recht** | Aus demselben Grund. Favorisieren ist ein `insert`, Entfavorisieren ein `delete`. Das ist die engere Fassung von „keine fremden Favoriten ändern": der Weg existiert nicht, statt bewacht zu sein |
+| **`priority`** | Siehe oben — die Spalte gehört dem Andockpunkt, nicht dieser Tabelle |
+
+**Drei Richtlinien, das Muster von `collection_items` nach `0042`:**
+`(select auth.uid()) = user_id` **und** `public.is_collector_account()`. Die
+zweite Hälfte ist kein Beiwerk — ein Betriebs- oder Adminkonto sammelt nicht
+im eigenen Katalog, und was für die Sammlung gilt, gilt für die Wunschliste.
+Wird ein Konto zum Betrieb, verschwinden seine Favoriten aus der Sicht und
+bleiben in der Tabelle; wird die Rolle zurückgenommen, sind sie wieder da.
+
+### Die Nachfragezahl: eine Funktion, weil ein Grant keine Spalten kennt
+
+Der Betrieb soll beim Anlegen eines Einkaufs sehen, **wie viele** Konten eine
+Figur vorgemerkt haben. Er darf aber **nicht** sehen, **wer** — und die
+Richtlinien zeigen ihm zu Recht keine Zeile.
+
+`favorite_demand(text[])` löst das: `security definer`, `stable`, hinter
+`can_operate_active_seller()` (dasselbe Tor wie jede andere
+`seller_*`-Funktion; ein Plattformadministrator ist nach `0042` bewusst nicht
+zugelassen), und sie gibt **ausschließlich `(sky_id, users)`** zurück. Keine
+Kennung, keine Adresse, kein Zeitpunkt, keine Zeile, keine Sortierung nach
+Konto. Aus dem Ergebnis lässt sich nicht sagen, wer vorgemerkt hat.
+
+Dasselbe Prinzip hält interne Notizen in `catalog_editorial`: **ein
+Tabellenrecht kennt keine Spalten, eine Funktion schon.** Ein `grant select`
+auf `favorites` hätte dem Betrieb jede fremde Wunschliste geöffnet — es gibt
+ihn deshalb nicht.
+
+Figuren ohne einen einzigen Favoriten fehlen im Ergebnis. Der Aufrufer setzt
+sie auf 0; das ist eine Zeile Code und spart bei gut 820 Katalogzeilen den
+größten Teil der Antwort.
+
+### „Mehrere zukünftige Händler berücksichtigen" — und was das heißen darf
+
+Der Auftrag nannte das als Anforderung. `CLAUDE.md` verbietet ausnahmslos
+`seller_id`, sellerbezogene Strukturen, Seller-RLS und Marketplace-Fan-out —
+auch konzeptionell. **Davon wird nichts gebaut.**
+
+Was stattdessen gilt: die Angebotslage hängt an der `sky_id`, so wie
+`shop_offers()` sie **für die Plattform** beantwortet, nicht an einem
+Verkäufer. Käme je ein zweiter Verkäufer, ändert sich `shop_offers()` — und
+der Favoritenmechanismus bleibt unverändert richtig. Das ist
+„berücksichtigt" in der einzigen Form, die die Projektregeln zulassen; mehr
+wäre der verbotene Schritt.
+
+### Der Ausschluss aus der Plattformsicherung ist vorübergehend, und das ist Teil der Entscheidung
+
+Ein Favorit ist persönliche Nutzerdaten — dieselbe Klasse wie
+`collection_items` und `purchase_calculations` (ADR-0135). **Er gehört ins
+Plattformarchiv.** Der Betreiber hat das ausdrücklich so entschieden:
+„Neue persönliche Nutzerdaten dürfen nicht dauerhaft aus dem Plattformbackup
+ausgeschlossen bleiben."
+
+Heute steht er trotzdem in `PLATFORM_EXCLUDED_TABLES`, und der Grund ist
+Reihenfolge, nicht Wert: ein Bereich im Archiv heißt
+`system_platform_export()` ersetzen, und diese Funktion prüft den `md5` ihrer
+Vorgängerfassung, bevor sie sich überschreiben lässt. `0144` hat sie auf
+Staging schon ersetzt, auf Production noch nicht. Eine Migration, die sie
+**jetzt** ein zweites Mal ersetzt, wäre auf Production nicht anwendbar.
+
+**Die Bedingung, unter der `0145` freigegeben wurde:**
+
+1. `0144` liegt auf Production.
+2. Die Folgemigration nimmt `favorites` als Bereich auf und zählt
+   `PLATFORM_FORMAT_VERSION` auf **3**.
+3. Der Eintrag in `PLATFORM_EXCLUDED_TABLES` fällt — und danach verlangt der
+   Vollständigkeitswächter (ADR-0134) einen Bereich, kann also nicht
+   übersehen werden.
+
+**Punkt 2 muss vor dem Production-Rollout der Favoriten erledigt sein.**
+`prod-0145.sql` sagt das in ihrem eigenen Kopf, und
+`src/lib/favorites/schema.test.ts` hält fest, dass der Ausschluss seinen
+Ablauf benennt — ein Eintrag ohne diese Sätze wäre der stille
+Dauerausschluss, den es nicht geben soll.
+
+Aus der **Betriebs**sicherung bleibt `favorites` **dauerhaft** draußen, und
+das ist kein Zwischenstand: fremde Wunschlisten in einem Händlerexport wären
+nicht eine Lücke, sondern ein Leck — sie gäben genau das heraus, was
+`favorite_demand()` dem Betrieb bewusst nur als Zahl zeigt.
+
+### Konsequenzen
+
+- Die Katalogkarte bekommt ein Herz **in der Geschwister-Ebene über dem
+  Kartenkörper**, nicht darin. Seit ADR-0038 ist die ganze Kartenfläche der
+  Sammeln-Toggle; ein Kind dieses Körpers würde beim Antippen sammeln. Die
+  Angebotszeile löst dasselbe Problem seit V3.2 auf demselben Weg.
+- `/favoriten` rendert **`CatalogView`** mit der gefilterten Figurenmenge —
+  dieselben Karten, Filter, Serien-Tabs und Sortierungen. Kein zweites
+  Raster und keine zweite Kartenkomponente.
+- Favoriten werden **gesammelt** geladen (`fetchFavoritedSkyIds()`, ein
+  Aufruf je Seite), wie der Besitz seit V1.5. Keine Abfrage je Karte.
+- Benachrichtigungen sind **nicht** Teil dieser Entscheidung. Sie brauchen
+  eine eigene, weil sie an der Veröffentlichungslage hängen und das
+  Reservierungsflattern von `available_quantity` aushalten müssen.
+- E-Mail bleibt aus: eine Opt-in-Infrastruktur für nicht-transaktionale Mail
+  existiert nicht, und `send-order-mail` ist ausschließlich an Bestellungen
+  gebunden.
+
+**Verworfen:** `wishlist_items` zu bauen (nimmt den Andockpunkt aus ADR-0021
+in Anspruch, den dieser Stopp ausdrücklich frei hält) · ein `grant select`
+auf `favorites` für den Betrieb (öffnet jede fremde Wunschliste, um eine Zahl
+zu bekommen) · eine `priority`-Spalte „weil sie später sowieso kommt"
+(Vorbereiten ist genau das, was ADR-0021 untersagt).
