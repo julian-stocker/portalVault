@@ -130,7 +130,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die achtzehn angewendeten", () => {
+  it("die Staging-Tabelle führt die neunzehn angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
@@ -142,7 +142,14 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * weiter: die Tabelle hat damit eine Lücke, und die ist gewollt (die
      * Nummer ist eine Reihenfolge, keine Kette).
      *
-     * **`0144` KAM AM 2026-10-25 DAZU** — die achtzehnte. Sie lief über
+     * **`0144` UND `0145` KAMEN AM 2026-10-25 DAZU** — die achtzehnte und
+     * die neunzehnte. `0145` legt die Favoriten an (ADR-0136); ihr
+     * Postflight meldete im ERSTEN Lauf `9999 = 18`, und zwar genau die
+     * achtzehn Zeilen der Baseline-Übergabe — die Platzhalter waren nicht
+     * ersetzt. Alles andere war grün. Die Migration selbst lief durch, und
+     * deshalb steht sie hier.
+     *
+     * **`0144` KAM AM SELBEN TAG DAZU** — sie lief zuerst. Sie lief über
      * `supabase/operations/staging-0144.sql`, der Postflight war vollständig
      * bestanden, und danach wurde ein echter Plattformexport gezogen und
      * lokal geprüft. Bis zu diesem Eintrag stand sie in der Akte als
@@ -154,9 +161,11 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * bekannte Lücke der Akte und kein Befund über `0144`; sie zu füllen
      * braucht die Prüfsummen der dort gelaufenen Fassungen.
      */
-    expect(zeilen.length).toBe(18);
-    expect(zeilen.map((z) => z.datei))
-      .toContain("0144_platform_export_calculations.sql");
+    expect(zeilen.length).toBe(19);
+    for (const datei of ["0144_platform_export_calculations.sql",
+                         "0145_favorites.sql"]) {
+      expect(zeilen.map((z) => z.datei), datei).toContain(datei);
+    }
     for (const datei of ["0135_catalog_item_type.sql",
                          "0136_business_backup_item_type.sql",
                          "0137_catalog_accessories.sql",
@@ -216,9 +225,10 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   it("wo `gleich` steht, ist die Datei bitgenau die ausgeführte Fassung", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
-       `0137`/`0138`, sechzehn seit `0139`/`0140`, siebzehn seit `0144` am
-       2026-10-25. Nur `0130` weicht ab und zeigt auf ihren Nachtrag. */
-    expect(gleiche.length).toBe(17);
+       `0137`/`0138`, sechzehn seit `0139`/`0140`, achtzehn seit `0144` und
+       `0145` am 2026-10-25. Nur `0130` weicht ab und zeigt auf ihren
+       Nachtrag. */
+    expect(gleiche.length).toBe(18);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
