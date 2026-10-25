@@ -180,16 +180,76 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
    * Muster von collection_items nach 0042". Steht dieses Muster hier nicht
    * mehr, ist die Beschreibung falsch, und dann gehoert das VOR den Lauf.
    */
-  (121, 'Vorbild', 'collection_items hat vier Richtlinien',
-      (select count(*)::text from pg_policies
-        where schemaname = 'public' and tablename = 'collection_items'), '4'),
-  (122, 'Vorbild', 'und jede davon fragt is_collector_account()',
+  /*
+   * HIER STAND EINE ZAHL, UND DIE WAR FALSCH — berichtigt am 2026-10-25,
+   * nachdem der Betreiber den Preflight gefahren hat.
+   *
+   * Die Zeile verlangte „genau vier Richtlinien" auf `collection_items`. Auf
+   * Staging sind es FUENF, und das ist richtig: `staging-agent-setup.sql`
+   * legt je Tabelle eine eigene Lesepolicy `agent_read_<tabelle>` fuer die
+   * Rolle `skyisles_agent` an — fuer zwoelf Tabellen, `collection_items`
+   * darunter (`docs/SECURITY.md`, 4b). `select`, nur diese Rolle, nur
+   * Staging, und sie stand lange vor `0145`.
+   *
+   * DAS PEINLICHE DARAN: `0142` hatte genau diesen Fehler, er wurde am
+   * 2026-10-22 gefunden und in `0142_postflight.sql` berichtigt — und
+   * `0145` hat die ALTE Formulierung kopiert statt der neuen. Deshalb steht
+   * die Begruendung hier noch einmal vollstaendig, nicht als Verweis.
+   *
+   * Eine Zahl ist die falsche Formulierung: sie bricht, sobald jemand eine
+   * berechtigte Diagnosepolicy anlegt, und sie sagt nichts darueber, ob die
+   * VIER, auf die es ankommt, noch da sind. Gepruefft wird deshalb die
+   * EIGENSCHAFT — und zwar in vier Schritten.
+   */
+  (121, 'Vorbild', 'die vier eigenen Richtlinien von collection_items stehen, '
+        'fuer authenticated',
       (select count(*)::text from pg_policies
         where schemaname = 'public' and tablename = 'collection_items'
-          and coalesce(qual, with_check) like '%is_collector_account()%'), '4'),
+          and policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own')
+          and 'authenticated' = any (roles)), '4'),
+  (122, 'Vorbild', 'und jede der vier fragt Konto UND Rolle',
+      (select count(*)::text from pg_policies
+        where schemaname = 'public' and tablename = 'collection_items'
+          and policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own')
+          and coalesce(qual, with_check) like '%is_collector_account()%'
+          and coalesce(qual, with_check) like '%auth.uid()%'), '4'),
   (123, 'Vorbild', 'RLS ist dort an',
       coalesce((select relrowsecurity::text from pg_class
                  where oid = to_regclass('public.collection_items')), '(keine)'), 'true'),
+  (124, 'Vorbild', 'keine Richtlinie dieser Tabelle gibt anon etwas',
+      (select count(*)::text from pg_policies
+        where schemaname = 'public' and tablename = 'collection_items'
+          and 'anon' = any (roles)), '0'),
+  /*
+   * UND KEINE UNBEKANNTE SECHSTE — die Agentenpolicy wird AUSDRUECKLICH
+   * zugelassen, nicht pauschal uebergangen.
+   *
+   * Zugelassen ist sie nur in ihrer bekannten Form: `agent_read_collection_items`,
+   * `select`, GENAU die Rolle `skyisles_agent`, permissiv. Haette jemand ihr
+   * Schreiben gegeben oder eine zweite Rolle, faellt sie hier auf.
+   *
+   * Dieselbe Formulierung traegt BEIDE Umgebungen: auf Production gibt es
+   * die Agentenpolicy nicht, dort sind die vier alles — und die Zahl ist
+   * ebenfalls 0. `prod-s-preflight-0145.sql` bettet genau diese Datei ein.
+   */
+  (125, 'Vorbild', 'und KEINE unbekannte weitere Richtlinie auf collection_items',
+      (select count(*)::text from pg_policies p
+        where p.schemaname = 'public' and p.tablename = 'collection_items'
+          and not (p.policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own'))
+          and not (p.policyname = 'agent_read_collection_items'
+                   and p.cmd = 'SELECT'
+                   and p.permissive = 'PERMISSIVE'
+                   and array_to_string(p.roles, '+') = 'skyisles_agent')), '0'),
+  (126, 'Vorbild', 'Info: alle Richtlinien von collection_items, mit Befehl und Rollen',
+      coalesce((select string_agg(policyname || ' (' || cmd || ', '
+                                  || array_to_string(roles, '+') || ')', '; '
+                                  order by policyname)
+                  from pg_policies
+                 where schemaname = 'public' and tablename = 'collection_items'),
+               '(keine)'), null),
 
   -- --------------------------- Die Zahlen des Betriebs (Basis-Vertrag)
   (301, 'Shop', 'oeffentliche Angebote',
