@@ -12911,7 +12911,16 @@ Nullen sind kein Befund. Die Daten tragen dafür `undefined` und nicht `0`:
 „nicht geladen“ ist nicht „niemand“.
 
 Der Plan für die Benachrichtigungen, die darauf aufsetzen sollen, steht in
-`docs/FAVORITE_NOTIFICATIONS.md` — **nichts davon ist gebaut.**
+`docs/FAVORITE_NOTIFICATIONS.md` — **nichts davon ist gebaut.** Die Fassung
+vom 2026-10-25 (Phase 4) hat den ersten Entwurf an drei Stellen widerlegt:
+ein Trigger auf `shop_inventory` hätte zwei der **drei** Preisquellen nicht
+gesehen (`skylanders.market_price` kommt vom Importwerkzeug,
+`shop_settings.price_percentage` ist eine Zahl für alles), er könnte keine
+Karenzzeit, und ein Fehler darin hätte einen **Kauf** scheitern lassen.
+Empfohlen wird stattdessen eine **lazy angestoßene Zustandsprüfung ohne
+Trigger** — sie setzt an `shop_offers()` an, ist damit automatisch
+marktplatztauglich, und ein Fehler darin kann den Shop strukturell nicht
+erreichen.
 
 ### Konsequenzen
 

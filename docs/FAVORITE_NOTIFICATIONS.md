@@ -1,297 +1,786 @@
-# Benachrichtigungen zu Favoriten — technischer Plan
+# Benachrichtigungen zu Favoriten — technisches Konzept
 
-**Stand 2026-10-25. Nichts davon ist gebaut.** Diese Datei beschreibt, *wie*
-es gebaut würde, und sie ist die Vorbereitung, um die der Auftrag gebeten hat
-— keine Freigabe und keine Migration. `favorites` steht (ADR-0136, `0145`);
-hier geht es um das, was darauf aufsetzt.
+**Stand 2026-10-25, Phase 4. Nichts davon ist gebaut.** Dieses Dokument ist
+die Planung, um die der Auftrag gebeten hat — keine Freigabe, keine
+Migration, keine Oberfläche.
+
+> **Diese Fassung ersetzt den Entwurf vom selben Tag.** Der Entwurf schlug
+> vor, Benachrichtigungen **synchron in der Veröffentlichungstransaktion**
+> per Trigger auf `shop_inventory` zu schreiben und dafür eine Karenzzeit zu
+> fordern. Der Betreiber hat zu Recht angemerkt, dass sich das ohne spätere
+> Ausführung nicht vereinbaren lässt. Die Prüfung gegen den Code hat zwei
+> weitere Gründe gefunden, warum der Weg falsch war — Abschnitt 1.6.
 
 ---
 
-## 0. Die drei Befunde, aus denen der Plan folgt
+## 1. Was wirklich da ist
 
-Bevor irgendein Entwurf: drei Eigenschaften dieses Systems entscheiden alles
-Weitere, und zwei davon sind unbequem.
+Alles in diesem Abschnitt ist am Code gelesen, nicht aus dem Entwurf
+übernommen. Dateien und Zeilen sind nachprüfbar genannt.
 
-### 0.1 Es gibt keinen Scheduler
+### 1.1 Vier Zustände, die nie dasselbe sind
 
-Kein `pg_cron`, kein `pg_net`, kein Realtime, keinen Hintergrundjob, keine
-vierte Edge Function neben `create-payment`, `stripe-webhook`,
-`refund-payment` und `send-order-mail`. Wo aufgeräumt werden muss, geschieht
-es **lazy in der Transaktion**: `release_expired_reservations(v_ids)` wird
-*innerhalb* der Reservierungsfunktion gerufen.
+Der Auftrag verlangt diese Unterscheidung ausdrücklich, und der Code macht
+sie an vier verschiedenen Stellen:
 
-> **Folge:** Eine Benachrichtigung entsteht **synchron in der Transaktion,
-> die ein Angebot veröffentlicht** — nicht in einem Sweep, der alle fünf
-> Minuten nachsieht. Das ist nicht nur die einzige verfügbare Bauform, es
-> ist auch die bessere: deterministisch, in derselben Transaktion
-> zurückrollbar, und ohne ein zweites System, das ausfallen kann.
+| Zustand | Wo er steht | Wer ihn ändert |
+|---|---|---|
+| **Angebot veröffentlicht** | `shop_inventory.is_listed` | `admin_set_listing()` ← `setListing()` in `src/lib/admin/actions.ts` |
+| **Verkauf freigegeben** | `shop_inventory.sale_released` (`0139`) | `admin_set_sale_release()` ← `setSaleRelease()` |
+| **Bestand vorhanden** | `shop_inventory.quantity` | `system_record_inventory_movement()` — jede Buchung, jeder Wareneingang, jeder Verkauf |
+| **Warenkorbreservierung** | `shop_inventory.reserved` | `reserve_order_stock()`, `release_order_reservations()`, `release_expired_reservations()`, `convert_order_reservations()` (`0010`/`0012`) |
 
-### 0.2 „Kaufbar" ist ein Verbund aus fünf Bedingungen, und eine davon flattert
+**`available_quantity` ist eine generierte Spalte** —
+`generated always as (quantity - reserved) stored`, `0003_shop_foundation.sql:113`.
+Sie ist also weder Bestand noch Reservierung, sondern deren Differenz, und
+sie bewegt sich bei **jedem** Warenkorb.
 
-`shop_offers()` (`0029`):
+### 1.2 „Kaufbar" ist ein Verbund aus fünf Bedingungen
+
+`public.shop_offers()`, zuletzt `0029_v1_loose_only_offers.sql`:
 
 ```sql
+from shop_inventory i join skylanders s cross join shop_settings st
 where i.is_listed
-  and i.condition = public.v1_sale_condition()
-  and public.is_shop_eligible(i.sky_id)      -- aktiv ∧ catalog_visible
-                                             -- ∧ item_type='figure' ∧ Kategorie
-  and public.shop_price(…) is not null
+  and i.condition = public.v1_sale_condition()          -- V1 verkauft nur lose
+  and public.is_shop_eligible(i.sky_id)                 -- is_active ∧ catalog_visible
+                                                        -- ∧ item_type='figure'
+                                                        -- ∧ Kategorie sammelbar
+  and public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null
 returns … (i.available_quantity > 0) as available
 ```
 
-**`available_quantity` ist eine generierte Spalte: `quantity - reserved`.**
-Ein Warenkorb reserviert. Ein Letztexemplar geht damit auf `0` und nach
-Ablauf der Reservierung zurück auf `1` — **ohne dass sich am Angebot
-irgendetwas geändert hat**.
+**Die Projektion liefert auch ausverkaufte Zeilen** (`available = false`).
+„Tatsächlich kaufbar" ist deshalb nicht „kommt in `shop_offers()` vor",
+sondern die Regel in `src/lib/shop/offer.ts`:
 
-> **Folge:** Ein naiver Trigger auf „wurde verfügbar" meldet dasselbe Angebot
-> bei jedem Warenkorb erneut. Das ist der Kern des Problems, nicht ein
-> Randfall. Abschnitt 2 löst es.
+```ts
+v1BuyableOffers(offers) = offers.filter(o => o.available && o.condition === "loose")
+hasV1BuyableOffer(offers) = v1BuyableOffers(offers).length > 0
+```
 
-### 0.3 In-App-Benachrichtigungen haben schon eine Mechanik
+Diese beiden Funktionen sind die **einzige** Definition von „kaufbar" in der
+Anwendung — die Angebotszeile jeder Karte, die Schnellansicht und seit Phase 3
+die Kennzahl „Mit Angebot" auf `/favoriten` fragen sie. **Das
+Benachrichtigungssystem darf keine zweite aufstellen.**
 
-| Vorhanden | Was es ist |
-|---|---|
-| `AttentionBadge` + `Unread {mine, seller}` in `site-nav.tsx` | Zähler am Navigationspunkt, gespeist aus `(app)/layout.tsx` und `(business)/layout.tsx` |
-| `order_mail (order_id, kind)` **PK** | Ein Anspruchs- und Dedup-Register: eine Zeile je Vorgang und Art, `claimed_at`/`sent_at` |
-| `order_attention_reads (order_id, reader)` | Ein **Wasserstand** je Seite |
+> **Folge für A:** „wieder verfügbar" heißt `hasV1BuyableOffer()` wechselt für
+> diese SKY-ID von `false` auf `true`. Orderbuch-Einkäufe, Kalkulationen,
+> Wareneingänge ohne Listung und nicht freigegebene Positionen kommen in
+> `shop_offers()` **gar nicht vor** — das ist strukturell und braucht keine
+> zusätzliche Bedingung.
 
-Der Wasserstand taugt hier **nicht**: er kann nicht sagen „dieses eine
-Angebot wurde gemeldet". Das Dedup-Muster von `order_mail` dagegen ist genau
-die richtige Form — ein Schlüssel, der den Vorgang benennt.
+### 1.3 Der Preis hat DREI unabhängige Quellen — und das hat der Entwurf übersehen
 
-**E-Mail bleibt aus.** Es gibt keine Opt-in-Infrastruktur für
-nicht-transaktionale Mail; `send-order-mail` ist ausschließlich an
-Bestellungen gebunden. In-App zuerst, und nur das.
+`public.shop_price(override, market_price, percentage)`,
+`0007_shop_pricing_and_images.sql`:
+
+```sql
+when p_override is not null then p_override                       -- 1
+when p_market_price is null or p_percentage is null then null
+else round(p_market_price * p_percentage / 100, 2)                -- 2 × 3
+```
+
+| # | Feld | Wer schreibt | Umfang einer Änderung |
+|---|---|---|---|
+| 1 | `shop_inventory.sale_price` | `setListing()` → `admin_set_listing()` | **eine** Position |
+| 2 | `skylanders.market_price` | **die Importwerkzeuge** (`tools/import-catalog.mts`, `import-legacy-*.mts`) | **der halbe Katalog** in einem Lauf |
+| 3 | `shop_settings.price_percentage` | `setShopPercentage()` → `admin_set_shop_percentage()` | **jede automatisch bepreiste Position auf einmal** |
+
+> **Das widerlegt den Entwurf.** Ein Trigger auf `shop_inventory` hätte 2 und
+> 3 **nicht gesehen** — eine Preissenkung durch einen Importlauf oder durch
+> das Drehen der einen Prozentzahl wäre lautlos vorbeigegangen. Ein Trigger
+> auf `skylanders` hätte das Gegenteil getan: ein Katalogimport hätte ihn für
+> jede Zeile gefeuert.
+
+### 1.4 Verzögerte Verarbeitung: es gibt keine, und das ist bereits ein bekanntes Problem
+
+Gesucht und **nicht gefunden**: `pg_cron`, `pg_net`, `cron.schedule`, irgendein
+`create extension` in `supabase/migrations/`, eine `vercel.json`, ein
+Cron-Eintrag in `next.config.ts` oder `package.json`, ein Route Handler, der
+etwas anstößt.
+
+**Stärker noch:** `expire_stale_checkouts()` (`0012_payment_core.sql:851`)
+trägt im eigenen Kommentar
+
+> *„Intended to run every five minutes; no scheduler is installed by this
+> migration."*
+
+und **keine der vier Edge Functions** (`create-payment`, `stripe-webhook`,
+`refund-payment`, `send-order-mail`) ruft sie. Erreicht wird sie nur
+mittelbar: `release_expired_reservations(v_ids)` läuft *innerhalb* von
+`reserve_order_stock()` (`0010:1087`), also beim nächsten Warenkorb.
+
+> **Das ist das Muster dieses Projekts: lazy in der Transaktion, die ohnehin
+> kommt.** Es gibt dafür einen Präzedenzfall, er ist dokumentiert, und er hat
+> eine bekannte Schwäche — ohne Besucher läuft nichts. Für
+> Zahlungsabläufe ist das ein Mangel. **Für In-App-Benachrichtigungen ist es
+> genau richtig**, und Abschnitt 3 baut darauf.
+
+### 1.5 Die Oberfläche hat die Mechanik schon
+
+| Vorhanden | Datei | Was es ist |
+|---|---|---|
+| `AttentionBadge` | `src/components/ui/attention-badge.tsx` | die Zahl am Navigationspunkt |
+| `Unread { mine, seller }`, `Attention { mine, seller }` | `src/components/layout/site-nav.tsx:253/264` | zwei Kanäle je Rolle (`0098`/`0099`) |
+| **Die Berechnung auf JEDER Seite** | `src/app/(app)/layout.tsx:37–45` | `fetchMyUnread()`, `fetchMyAttentionTotal()` — beide `cache()`-gebunden |
+| `order_mail (order_id, kind)` **PK** | `0019_transactional_mail.sql:157` | ein Anspruchs- und Dedup-Register |
+| `order_attention_reads (order_id, reader)` | `0099_order_attention.sql:103` | ein **Wasserstand** je Seite |
+
+**`(app)/layout.tsx` ist der Schlüssel.** Dort laufen bei jedem Seitenaufbau
+im angemeldeten Bereich schon heute vier Aggregatabfragen. Eine fünfte,
+`cache()`-gebunden, ist der natürliche Ort für eine fällige Prüfung — und
+zwar genau dann, wenn der Empfänger hinsieht.
+
+`order_mail`s Dedup-Muster (ein Schlüssel, der den Vorgang benennt) ist
+richtig; der **Wasserstand** aus `order_attention_reads` ist hier falsch: er
+kann nicht sagen „dieses eine Angebot wurde gemeldet", und der Auftrag
+verlangt Einzelquittierung.
+
+### 1.6 Drei Gründe, warum der Trigger-Weg des Entwurfs falsch war
+
+1. **Er kann keine Karenzzeit** — die Beobachtung des Betreibers. Ein
+   Trigger weiß nur, dass sich *jetzt* etwas geändert hat; „und es ist seit
+   20 Minuten so" braucht eine spätere Ausführung, die es nicht gibt.
+2. **Er sieht zwei der drei Preisquellen nicht** (1.3) und würde bei der
+   dritten über den ganzen Katalog feuern.
+3. **Er hängt im Einkauf.** Ein Trigger auf `shop_inventory` läuft in
+   derselben Transaktion wie `reserve_order_stock()` und
+   `system_record_inventory_movement()`. Ein Fehler darin lässt einen
+   **Kauf** scheitern. Der Auftrag verbietet das ausdrücklich — und mit einem
+   Trigger ist es nicht abwendbar, sondern nur unwahrscheinlich.
+
+### 1.7 Eigener Shop und späterer Marktplatz
+
+`shop_offers()` ist die Projektion **der Plattform**, nicht die eines
+Verkäufers: die Funktion kennt kein `seller_id`, und `CLAUDE.md` verbietet
+eines. Jeder Entwurf, der an `shop_offers()` ansetzt, ist damit automatisch
+marktplatztauglich — käme ein zweiter Verkäufer, ändert sich die Projektion,
+und die Benachrichtigungslogik bleibt unverändert richtig. Jeder Entwurf, der
+an `shop_inventory` ansetzt, wäre an den einen Verkäufer gebunden.
+
+> Das ist das stärkste Argument für die Zustandsprüfung aus Abschnitt 3 — und
+> es ist kein Marktplatz-Feature, sondern dessen Abwesenheit.
 
 ---
 
-## 1. Das Datenmodell — zwei Tabellen, nicht fünf
+## 2. Die Auslöseregeln, exakt
 
-### 1.1 `offer_state` — der Latch, und er ist der ganze Trick
+Alle Preise **in Cent als `integer`**. `shop_price()` rundet auf zwei
+Dezimalstellen (`round(…, 2)`), `shop_offers().price` ist `numeric`;
+umgerechnet wird mit `round(price * 100)`. Fließkommavergleiche kommen
+nirgends vor.
+
+### 2.1 Der Zustand einer Figur
+
+Für eine SKY-ID, abgeleitet **ausschließlich** aus `shop_offers()` und
+`v1BuyableOffers()`:
+
+```
+buyable        := es gibt ein Angebot mit available ∧ condition = 'loose'
+cheapest_cents := min(round(price*100)) über genau diese Angebote,  NULL wenn ¬buyable
+```
+
+Mehrere Angebote derselben SKY-ID sind damit erledigt: `min` über die
+kaufbaren. Ein boxed-Angebot und ein ausverkauftes loses zählen nicht — V1
+verkauft sie nicht.
+
+### 2.2 A · Wieder verfügbar
+
+> **Meldung, wenn der zuletzt GEMELDETE Zustand `¬buyable` war und der
+> aktuelle Zustand `buyable` ist und mindestens `grace` stabil ist.**
+
+Entscheidend: verglichen wird gegen den zuletzt **gemeldeten** Zustand, nicht
+gegen den zuletzt *beobachteten*. Damit sind alle vom Auftrag genannten Fälle
+abgedeckt:
+
+| Fall | Verhalten |
+|---|---|
+| Neues Angebot veröffentlicht | `¬buyable → buyable` → **Meldung** |
+| Bestehendes reaktiviert (`is_listed`, `sale_released`) | ebenso → **Meldung** |
+| Bestand wieder aufgefüllt | ebenso → **Meldung** |
+| Warenkorbreservierung des letzten Stücks | `buyable → ¬buyable`. **Keine** Meldung (A meldet nur in die andere Richtung); der gemeldete Zustand bleibt `buyable` |
+| Reservierung läuft ab, Stück kommt zurück | aktuell `buyable`, gemeldet `buyable` → **nichts**. Das ist der Flattern-Schutz, und er ist **strukturell**, nicht eine Karenzzeit |
+| Vorübergehend ausverkauft, später nachgeliefert | gemeldet wird `¬buyable` erst, wenn der Zustand `grace` lang stabil war; danach ist die Nachlieferung eine echte A-Meldung |
+| Nicht öffentlich / gesperrt | kommt in `shop_offers()` nicht vor → `¬buyable` |
+
+**Der gemeldete Zustand wird auch ohne Meldung fortgeschrieben**: wird eine
+Figur dauerhaft unverfügbar (stabil `¬buyable`), merkt das System sich das
+*ohne* jemanden zu benachrichtigen. Nur so kann die nächste echte
+Verfügbarkeit wieder eine Meldung sein.
+
+### 2.3 B · Preis gesunken
+
+> **Meldung, wenn `buyable` ∧ der gemeldete Zustand `buyable` war ∧
+> `cheapest_cents` um mindestens die Schwelle unter dem gemeldeten Preis
+> liegt ∧ der Zustand mindestens `grace` stabil ist.**
+
+| Fall | Verhalten |
+|---|---|
+| Direkte Senkung eines Angebots | `min` sinkt → **Meldung**, wenn über der Schwelle |
+| Neues, günstigeres Angebot | ebenso |
+| Das bisher günstigste wird deaktiviert oder ausverkauft | `min` **steigt** → keine Meldung, aber der gemeldete Preis wird **stillschweigend nachgezogen**. Sonst wäre die Rückkehr des günstigen Angebots eine Falschmeldung („gesunken", obwohl es derselbe Preis wie vorher ist) |
+| Günstigeres Angebot kehrt nach Reservierungsablauf zurück | gemeldeter Preis wurde beim Verschwinden nachgezogen — und die Rückkehr liegt unter ihm. Hier **würde** gemeldet. **Darum greift die Karenzzeit**: beim Nachziehen bekommt der Zustand ein neues `changed_at`, und der Rücksprung innerhalb von `grace` wird nie gemeldet |
+| Mehrere Angebote | `min` über die kaufbaren, siehe 2.1 |
+| Übergang `¬buyable → buyable` | **A** meldet, **B nicht** — und der gemeldete Preis wird auf den neuen gesetzt. Zwei Meldungen für ein Ereignis wären Spam |
+
+**Die Schwelle.** Vorschlag, fachlich begründet:
+
+```
+relevant := alter_preis − neuer_preis  ≥  max(50 Cent, 5 % des alten Preises)
+```
+
+* **5 %** weil der automatische Preis `market_price × percentage / 100` ist:
+  ein Importlauf verschiebt Marktwerte typischerweise um wenige Prozent, und
+  das ist Rauschen, keine Nachricht.
+* **50 Cent als Boden** weil 5 % einer 6-€-Figur 30 Cent wären — für diese
+  Preisklasse eine Meldung ohne Anlass.
+* Beide Zahlen gehören nach `shop_settings`, nicht in eine Funktion: sie sind
+  eine Betriebsentscheidung, und sie zu ändern darf keine Migration kosten.
+
+**Offene Entscheidung D-3** (Abschnitt 8): ob zusätzlich eine Sperre je Figur
+gilt — „höchstens eine B-Meldung je Figur und Tag". Mein Vorschlag: **nein**
+für V1. Die Schwelle plus der nachgezogene gemeldete Preis sorgen bereits
+dafür, dass eine zweite Meldung einen zweiten echten Rückgang verlangt.
+
+### 2.4 Die Karenzzeit, und woraus sie folgt
+
+`public.reservation_ttl()` (`0010_commerce_core.sql:70`) ist **20 Minuten**,
+gespiegelt als `RESERVATION_TTL_MINUTES = 20` in
+`src/lib/commerce/reservation.ts:35`.
+
+> **`grace := reservation_ttl() + 10 Minuten = 30 Minuten`**, und zwar
+> **abgeleitet statt getippt**: die Funktion wird gefragt, nicht die Zahl
+> kopiert. Eine Reservierung kann einen Zustand höchstens 20 Minuten
+> verfälschen; nach 30 ist er echt.
+
+---
+
+## 3. Die Architektur — zwei Varianten, eine Empfehlung
+
+### 3.1 Variante 1 · Ereigniserfassung im Trigger + verzögerte Verarbeitung
+
+Trigger auf `shop_inventory` (und `skylanders`, und `shop_settings`) schreiben
+Ereigniszeilen; ein Verarbeiter macht daraus später Meldungen.
+
+| | |
+|---|---|
+| **Zuverlässigkeit** | hoch für `shop_inventory`, **lückenhaft** für die beiden anderen Preisquellen; ein Katalogimport feuert über den ganzen Katalog |
+| **Komplexität** | drei Trigger, eine Ereignistabelle, ein Verarbeiter, eine Wiederholungslogik, eine Aufräumung |
+| **Datenbanklast** | ein Insert bei **jedem** Warenkorb und jedem Verkauf, auch wenn niemand die Figur vorgemerkt hat |
+| **Betriebskosten** | braucht einen Scheduler, den es nicht gibt (Abschnitt 1.4) — also entweder `pg_cron` zubuchen oder eine fünfte Edge Function samt Aufrufer |
+| **Wiederherstellbarkeit** | gut: der Ereignislog ist nachvollziehbar |
+| **Marktplatz** | schlecht: Trigger hängen an `shop_inventory`, also am einen Verkäufer (1.7) |
+| **Tödlicher Einwand** | **ein Fehler darin lässt einen Kauf scheitern** (1.6.3) |
+
+### 3.2 Variante 2 · Periodische Zustandsprüfung, lazy ausgelöst — **empfohlen**
+
+**Kein Trigger. Zwei Stufen, beide lesend angestoßen.**
+
+```
+Stufe 1 — DER SPIEGEL (global, gedrosselt, idempotent)
+  ein Statement: shop_offers() + v1-Regel  →  offer_state
+  schreibt nur, wo sich buyable oder cheapest_cents WIRKLICH geändert hat,
+  und setzt dort changed_at = now()
+
+Stufe 2 — DIE MELDUNG (je Leser, nur für dessen Favoriten)
+  für jede favorisierte SKY-ID mit now() - changed_at >= grace:
+    vergleiche offer_state mit dem GEMELDETEN Zustand (announced_*)
+    → A oder B nach Abschnitt 2, Zeile in favorite_notifications
+    → announced_* := aktueller Zustand   (auch ohne Meldung)
+```
+
+| | |
+|---|---|
+| **Zuverlässigkeit** | **vollständig für alle drei Preisquellen**, weil der Spiegel die Projektion liest und nicht ihre Eingaben. Verloren geht nur, was zwischen zwei Prüfungen auftritt **und sich wieder aufhebt** — und genau das soll verloren gehen |
+| **Komplexität** | **zwei Tabellen, zwei Funktionen, kein Trigger, kein Job** |
+| **Datenbanklast** | ein Vergleich über ~290 Lagerzeilen, höchstens einmal je Drosselfenster; Stufe 2 über die Favoriten **eines** Nutzers |
+| **Betriebskosten** | **null** — kein Scheduler, keine Erweiterung, keine fünfte Function |
+| **Wiederherstellbarkeit** | der Spiegel ist jederzeit aus `shop_offers()` neu herstellbar; `announced_*` ist der einzige echte Zustand |
+| **Marktplatz** | **gut**: setzt an `shop_offers()` an, also an der Plattformprojektion (1.7) |
+| **Schwäche** | ohne Besucher läuft nichts — siehe 3.4 |
+
+### 3.3 Warum das Flattern strukturell erledigt ist
+
+Der Entwurf wollte vier Riegel. Die Zustandsprüfung braucht **zwei**, und der
+erste ist keine Regel, sondern die Bauform:
+
+1. **Verglichen wird mit dem GEMELDETEN Zustand, nicht mit dem vorigen.**
+   Warenkorb rein (`buyable → ¬buyable`), Reservierung ab
+   (`¬buyable → buyable`): der gemeldete Zustand war die ganze Zeit
+   `buyable`, also entsteht nichts. **Egal wie oft das passiert.**
+2. **Die Karenzzeit (30 min > `reservation_ttl()`).** Sie fängt den
+   verbleibenden Fall: einen Zustand, der gerade erst gekippt ist und
+   vielleicht wieder zurückkippt — vor allem den nachgezogenen Preis aus 2.3.
+3. *(Zusatz, kein Riegel)* Ein **partieller Unique-Index**
+   `unique (user_id, sky_id, kind, announced_at) where read_at is null`
+   macht Stufe 2 bei paralleler Ausführung idempotent: zwei gleichzeitige
+   Seitenaufbauten desselben Nutzers schreiben dieselbe Zeile, und die zweite
+   prallt ab. **Dedup an einem Ereignis, nicht an `read_at is null`** — wie
+   der Auftrag verlangt.
+
+### 3.4 Wie eine fällige Prüfung garantiert wieder läuft
+
+Die ehrliche Antwort zuerst: **sie läuft nicht, solange niemand hinsieht.**
+Bei einer rein In-App-Benachrichtigung ist das kein Verlust — es gibt
+niemanden, dem etwas entgeht. Was zählt: **wenn der Empfänger kommt, ist die
+Zahl richtig.**
+
+Das wird so garantiert:
+
+| Auslöser | Was er anstößt | Wie oft |
+|---|---|---|
+| `(app)/layout.tsx` — **jeder** Seitenaufbau im angemeldeten Bereich | Stufe 1 (gedrosselt) **und** Stufe 2 für diesen Nutzer | bei jedem Klick |
+| `/shop`, `/`, `/skylanders/<slug>` — jeder Aufruf, der `fetchOffers()` macht | Stufe 1 (gedrosselt) | bei jedem Besucher, auch anonym |
+| `/favoriten` | beides, für diesen Nutzer | bei jedem Besuch |
+
+**Die Drosselung** ist eine Zeile in `shop_settings` (oder eine eigene
+einzeilige Tabelle) mit `mirror_ran_at`. Stufe 1 nimmt einen
+`pg_try_advisory_xact_lock`, prüft `now() - mirror_ran_at >= 60 s`, läuft
+oder kehrt sofort zurück. Zwei gleichzeitige Besucher kosten **einen** Lauf.
+
+**Kein Fehler erreicht den Shop.** Beide Stufen laufen in eigenen Aufrufen,
+nicht in einer Shop-Transaktion, und die Server-Seite ruft sie in einem
+`try/catch`, das nichts weiterwirft — dasselbe Muster wie
+`fetchFavoriteDemand()` aus Phase 3, das bei einer Abweisung eine leere Map
+gibt statt zu werfen. **Mit einem Trigger wäre diese Zusage nicht machbar.**
+
+### 3.5 Was später dazukäme, wenn ein Scheduler existiert
+
+Käme `pg_cron` (oder ein Vercel-Cron auf einen geschützten Route Handler),
+ruft er genau **dieselben zwei Funktionen** — Stufe 1 global, Stufe 2 für
+alle Nutzer. Keine Umstellung, nur ein zweiter Auslöser. Und derselbe
+Scheduler hätte dann auch `expire_stale_checkouts()` wieder, das seit `0012`
+darauf wartet. **Das ist eine eigene Entscheidung und nicht Teil dieser
+Phase.**
+
+---
+
+## 4. Datenmodell und Sicherheit
+
+### 4.1 `offer_state` — der Spiegel
 
 ```sql
 create table public.offer_state (
-  sky_id          text    primary key references public.skylanders (sky_id)
-                            on update cascade on delete restrict,
-  -- Ist diese Figur JETZT oeffentlich kaufbar? Der Verbund aus 0.2.
+  sky_id          text primary key
+                    references public.skylanders (sky_id)
+                    on update cascade on delete restrict,
   buyable         boolean not null,
-  -- Der guenstigste kaufbare Preis, oder null.
-  cheapest_cents  integer,
-  -- Wann sich `buyable` das letzte Mal WIRKLICH geaendert hat.
+  cheapest_cents  integer check (cheapest_cents is null or cheapest_cents > 0),
+  -- Wann buyable/cheapest_cents sich WIRKLICH geaendert haben. Die Karenzzeit
+  -- rechnet hiergegen.
   changed_at      timestamptz not null default now(),
-  -- Wann zuletzt eine Benachrichtigung aus dieser Zeile entstand.
-  notified_at     timestamptz
+  -- Was zuletzt GEMELDET wurde. Der einzige echte Zustand dieser Tabelle:
+  -- alles andere ist aus shop_offers() neu herstellbar.
+  announced_buyable boolean,
+  announced_cents   integer,
+  announced_at      timestamptz,
+  constraint offer_state_price_consistent
+    check (buyable or cheapest_cents is null)
 );
 ```
 
-**Eine Zeile je Figur, nicht je Ereignis.** Sie ist die Antwort auf „war das
-schon so?" — und ohne sie gibt es keine Kante, nur einen Zustand.
+Eine Zeile je Figur, nicht je Ereignis. **Kein `seller_id`** — der Zustand
+gehört der Figur, so wie `shop_offers()` ihn für die Plattform beantwortet
+(1.7).
 
-Kein `seller_id`, keine sellerbezogene Struktur: der Zustand gehört der
-**Figur**, so wie `shop_offers()` ihn für die Plattform beantwortet. Käme je
-ein zweiter Verkäufer, ändert sich `shop_offers()` — und diese Tabelle bleibt
-unverändert richtig. Das ist „mehrere Händler berücksichtigt" in der einzigen
-Form, die ADR-0021 und `CLAUDE.md` zulassen.
+**Rechte: keine.** `revoke all … from public, anon, authenticated`, RLS an
+ohne Richtlinie. Betriebszustand, den keine Oberfläche braucht — Karten lesen
+`shop_offers()`.
 
-### 1.2 `favorite_notifications` — der Posteingang
+### 4.2 `favorite_notifications` — der Posteingang
 
 ```sql
 create table public.favorite_notifications (
   id          bigint generated always as identity primary key,
-  user_id     uuid    not null references auth.users (id) on delete cascade,
-  sky_id      text    not null references public.skylanders (sky_id)
-                        on update cascade on delete restrict,
-  kind        text    not null check (kind in ('available', 'price_drop', 'target_price')),
+  user_id     uuid not null references auth.users (id) on delete cascade,
+  sky_id      text not null references public.skylanders (sky_id)
+                on update cascade on delete restrict,
+  kind        text not null check (kind in ('available', 'price_drop')),
   -- Der Preis, der die Meldung ausgeloest hat. Historie, kein Verweis.
   price_cents integer,
+  -- Das Ereignis, gegen das dedupliziert wird: der Zeitpunkt, zu dem der
+  -- gemeldete Zustand gesetzt wurde. NICHT read_at.
+  event_at    timestamptz not null,
   created_at  timestamptz not null default now(),
-  read_at     timestamptz
+  read_at     timestamptz,
+  constraint favorite_notifications_event_uniq
+    unique (user_id, sky_id, kind, event_at)
 );
 
 create index favorite_notifications_inbox_idx
   on public.favorite_notifications (user_id, read_at, created_at desc);
 ```
 
-`read_at` statt einer zweiten Tabelle: eine Benachrichtigung hat genau einen
-Empfänger, also ist „gelesen" eine Eigenschaft der Zeile. Der Wasserstand aus
+**`read_at` statt einer zweiten Tabelle**: eine Meldung hat genau einen
+Empfänger, „gelesen" ist also eine Eigenschaft der Zeile. Der Wasserstand aus
 `order_attention_reads` existiert nur, weil dort **zwei Seiten** auf
 denselben Vorgang schauen.
 
-### 1.3 Einstellungen — die kleinste Form, die trägt
+**Die Dedup-Grenze ist `event_at`**, nicht `read_at is null`: dasselbe
+Ereignis kann nicht zweimal eingetragen werden, auch nachdem der Nutzer die
+erste Meldung gelesen hat. Ein *neues* Ereignis derselben Art für dieselbe
+Figur bekommt ein neues `event_at` und darf durch.
+
+**Richtlinien** (Muster von `favorites`, `0145`):
+
+| Befehl | Bedingung |
+|---|---|
+| `select` | `auth.uid() = user_id and is_collector_account()` |
+| `update` | dieselbe, `using` **und** `with check` — und **nur `read_at`** darf sich ändern (Spaltenrechte: `grant update (read_at)`) |
+| `insert` | **keine Richtlinie, kein Recht.** Zeilen entstehen ausschließlich in der `definer`-Funktion. Niemand soll sich selbst oder anderen eine Meldung schreiben können |
+| `delete` | **keine.** Meldungen verschwinden mit dem Konto (`on delete cascade`) |
+
+### 4.3 Einstellungen — zwei Spalten auf `profiles`
 
 ```sql
 alter table public.profiles
-  add column notify_available   boolean not null default true,
-  add column notify_price_drop  boolean not null default false;
+  add column notify_available  boolean not null default true,
+  add column notify_price_drop boolean not null default true;
 ```
 
-**Keine eigene Tabelle.** Es sind zwei Schalter je Konto, `profiles` gehört
-dem Konto, und seine RLS steht seit `0001`. Eine Tabelle
-`notification_settings` wäre eine zweite Stelle mit demselben Besitzer und
-derselben Richtlinie.
+**Keine eigene Tabelle:** es sind zwei Schalter je Konto, `profiles` gehört
+dem Konto, und seine RLS steht seit `0001` (`profiles_update_own` mit
+`using` und `with check`).
 
-Vorgabe: **neue Verfügbarkeit an, Preissenkung aus.** Das Erste ist, worum
-jemand ein Herz anklickt; das Zweite ist eine Zugabe, und eine Zugabe
-schaltet man ein, nicht ab.
+**Vorgaben: beide `true`** — und das ist eine Änderung gegenüber dem Entwurf,
+der `notify_price_drop` auf `false` setzen wollte. Begründung: beide
+Meldungsarten entstehen **nur für Figuren, die der Nutzer selbst vorgemerkt
+hat**, und sie sind durch Schwelle und Karenzzeit gedeckelt. Wer ein Herz
+anklickt, will genau das wissen. Eine Zugabe, die standardmäßig aus ist,
+findet niemand.
 
-### 1.4 Wunschpreis (C) — eine Spalte auf `favorites`
+> **Offene Entscheidung D-4:** falls der Betreiber das anders sieht, ist es
+> eine Zeile in der Migration.
+
+### 4.4 Favorit entfernt, Konto gelöscht
+
+| Fall | Verhalten | Begründung |
+|---|---|---|
+| **Favorit entfernt** | bestehende Meldungen **bleiben**, neue entstehen nicht | Die Meldung ist ein Ereignis der Vergangenheit und war wahr. Sie zu löschen, weil das Herz ausgeht, nähme dem Nutzer die Begründung dafür, dass er gerade etwas gekauft hat. Der Posteingang zeigt sie weiter; `read_at` gilt wie immer |
+| **Konto gelöscht** | `on delete cascade` — alles fort | DSGVO, dasselbe Muster wie `favorites` und `collection_items` |
+| **Figur deaktiviert** | `on delete restrict` auf `skylanders` | Eine Katalogzeile darf nicht unter einem Posteingang wegbrechen; der Import deaktiviert über `is_active` statt zu löschen |
+| **Einstellung ausgeschaltet** | neue Meldungen dieser Art entstehen nicht, `announced_*` wird **trotzdem** fortgeschrieben | Sonst käme beim Wiedereinschalten eine Flut alter Ereignisse |
+
+### 4.5 Die beiden Funktionen
 
 ```sql
-alter table public.favorites
-  add column target_cents integer check (target_cents is null or target_cents > 0);
+-- Stufe 1. Kein Argument, kein Rueckgabewert ausser der Anzahl Aenderungen.
+public.refresh_offer_state() returns integer
+  security definer, volatile, set search_path = ''
+  -- Drosselung per pg_try_advisory_xact_lock + mirror_ran_at.
+  -- Liest shop_offers(), schreibt offer_state. Beruehrt NICHTS sonst.
+  -- Rechte: execute fuer authenticated UND anon (auch ein anonymer
+  --         Shopbesucher darf den Spiegel auffrischen; er sieht nichts davon).
+
+-- Stufe 2. Laeuft fuer den AUFRUFER, nie fuer jemand anderen.
+public.sync_favorite_notifications() returns integer
+  security definer, volatile, set search_path = ''
+  -- auth.uid() ist der Empfaenger. Kein Parameter dafuer — eine Funktion,
+  -- die einen fremden Nutzer annehmen kann, ist eine Funktion, die man
+  -- missbrauchen kann.
+  -- Prueft is_collector_account(); ein Betriebs- oder Adminkonto bekommt 0.
+  -- Rechte: execute nur fuer authenticated.
+
+-- Lesen und Quittieren braucht KEINE Funktion: RLS deckt es ab.
+--   select  → die eigenen Zeilen
+--   update  → read_at, die eigenen Zeilen
 ```
 
-An `favorites` und nicht in einer eigenen Tabelle: es ist eine Eigenschaft
-**dieses** Favoriten. Der Primärschlüssel `(user_id, sky_id)` bindet ihn
-damit automatisch an die Variante — was Abschnitt 3.1 fordert, ohne eine
-Zeile Code.
+**Kein Dienstschlüssel, nirgends.** Beide Funktionen laufen als der
+angemeldete Nutzer über den Anon-Key; `security definer` gibt ihnen den
+Tabellenzugriff, den die Richtlinien verwehren. Dasselbe Muster wie
+`favorite_demand()` in Phase 3.
 
-> **Achtung, und das ist eine echte Änderung:** `0145` gibt `authenticated`
-> **kein** `update`-Recht auf `favorites`, weil es nichts zu ändern gab. Ein
-> Wunschpreis ändert das. Dann braucht es eine `update`-Richtlinie mit
-> `using` **und** `with check` — beide Hälften, sonst könnte jemand seine
-> Zeile einem fremden Konto zuschieben. Das ist der Grund, warum C **zuletzt**
-> kommt: es ist der einzige Teil, der eine Sicherheitsgrenze anfasst.
+### 4.6 Parallele Transaktionen
 
----
-
-## 2. Die Deduplizierung — vier Riegel, und jeder fängt etwas anderes
-
-Das Reservierungsflattern aus 0.2 ist mit **einem** Mechanismus nicht zu
-erschlagen. Vier, von grob nach fein:
-
-| # | Riegel | Fängt |
-|---|---|---|
-| 1 | **Kante statt Zustand.** Der Trigger meldet nur bei `buyable: false → true`. Bleibt `true`, passiert nichts | Preisänderungen, Nachlieferungen, jeden Schreibvorgang an einer bereits kaufbaren Zeile |
-| 2 | **Karenz auf `changed_at`.** Eine Kante zählt erst, wenn die letzte mindestens *N* Minuten her ist. `N` = Reservierungsdauer + Zuschlag | Genau das Flattern: Warenkorb rein (`true→false`), Reservierung ab (`false→true`) — die zweite Kante liegt innerhalb der Karenz und löst nichts aus |
-| 3 | **Karenz auf `notified_at`.** Je Figur höchstens eine Meldung pro Zeitfenster (Vorschlag: 24 h) | Eine Figur, die über Tage ein- und ausgeht, weil der Betrieb einzeln einbucht |
-| 4 | **Partieller Unique-Index je Empfänger.** `unique (user_id, sky_id, kind) where read_at is null` | Zwei ungelesene Meldungen derselben Art für dieselbe Figur im Posteingang. Der Riegel ist die Datenbank, nicht die Anwendung — ein `on conflict do nothing` macht den Trigger damit idempotent |
-
-**Riegel 2 ist der wichtige, und er ist ohne Vorbild im Projekt.** Er heißt:
-eine Angebotslage gilt erst als *neu*, wenn sie eine Weile gehalten hat. Das
-ist eine fachliche Entscheidung mit einer Zahl darin, und die Zahl gehört in
-`shop_settings`, nicht in den Trigger — sonst ändert man sie per Migration.
-
-### Was die Riegel NICHT leisten
-
-Sie verhindern keine Meldung, die kurz nach dem Absenden wieder falsch wird:
-Figur wird kaufbar, Meldung geht raus, eine Minute später kauft sie jemand.
-**Das ist richtig so.** Die Meldung war wahr, als sie entstand, und sie sagt
-„es gab ein Angebot", nicht „es gibt eines". Die Oberfläche muss das
-aushalten — der Posteingang zeigt den Zeitpunkt, und die Karte daneben zeigt
-die Gegenwart.
-
----
-
-## 3. Die Regeln, die nicht verhandelbar sind
-
-### 3.1 Immer die SKY-ID, niemals die Figur „ungefähr"
-
-Favoriten hängen an `sky_id`. Eine Legendary ist eine andere SKY-ID als ihre
-Basisfigur (ADR-0002, ADR-0034), also eine andere Benachrichtigung. Der
-Trigger liest `favorites.sky_id = new.sky_id` und hat damit keine
-Gelegenheit, über `character_id` zu verallgemeinern. **Keine Meldung für eine
-andere Variante** ist hier keine Prüfung, sondern die Abwesenheit eines
-Joins.
-
-### 3.2 Nur `shop_offers()` entscheidet, was kaufbar ist
-
-Der Trigger rechnet den Verbund aus 0.2 **nicht nach**. Er fragt dieselbe
-Projektion, die der Shop, die Karte und die Schnellansicht fragen — sonst
-gibt es zwei Definitionen von „kaufbar", und eine davon ist irgendwann die
-falsche. Orderbuch-Einkäufe, Kalkulationen, Wareneingänge und
-unveröffentlichte Lagerzeilen kommen in `shop_offers()` gar nicht vor; das
-ist strukturell und braucht keine zusätzliche Bedingung.
-
-### 3.3 RLS: der Posteingang ist privat, und `offer_state` ist es nicht
-
-| Tabelle | Richtlinien |
+| Gefahr | Abwehr |
 |---|---|
-| `favorite_notifications` | `select` und `update` (nur `read_at`) auf `auth.uid() = user_id` **und** `is_collector_account()` — das Muster von `favorites`. **Kein `insert` für `authenticated`**: Zeilen entstehen ausschließlich im Trigger, also als `definer`. Niemand soll sich selbst oder anderen eine Benachrichtigung schreiben können |
-| `offer_state` | weltlesbar wie `skylanders`? **Nein** — kein Clientrecht. Sie enthält keine Personendaten, aber sie ist ein Betriebszustand, und die Oberfläche braucht sie nicht: Karten lesen `shop_offers()` |
-
-Ein Trigger, der in `favorite_notifications` für *fremde* `user_id` schreibt,
-ist genau der Fall, für den `security definer` da ist — und genau deshalb
-darf `authenticated` dort kein `insert` haben.
-
-### 3.4 Datenschutz: eine Benachrichtigung verrät nichts über andere
-
-Sie trägt `user_id`, `sky_id`, `kind`, `price_cents`, Zeitstempel. Kein
-Hinweis darauf, wie viele andere dieselbe Figur vorgemerkt haben — diese
-Zahl bleibt dem Betrieb über `favorite_demand()` vorbehalten, und auch dort
-nur aggregiert.
-
-### 3.5 Sicherung
-
-Beide Tabellen sind **persönliche Nutzerdaten** bzw. Betriebszustand und
-müssen in beiden Vollständigkeitswächtern entschieden werden (ADR-0134) —
-`favorite_notifications` gehört in die Plattformsicherung,
-`offer_state` ist ableitbar und kann begründet draußen bleiben. Und:
-`favorites` selbst steht dort noch mit Ablaufdatum draußen (ADR-0136); das
-muss **vor** diesem Vorhaben erledigt sein, sonst wachsen zwei offene
-Sicherungspunkte übereinander.
+| Zwei Seitenaufbauten desselben Nutzers gleichzeitig | der partielle Unique-Index (3.3.3); der zweite Insert prallt mit `on conflict do nothing` ab |
+| Zwei Besucher lösen Stufe 1 gleichzeitig aus | `pg_try_advisory_xact_lock` — der zweite kehrt sofort zurück, ohne zu warten |
+| Stufe 1 läuft, während ein Kauf `reserved` ändert | Stufe 1 liest nur. Der Spiegel ist dann eine Sekunde alt — und die Karenzzeit von 30 Minuten macht das bedeutungslos |
+| `announced_*` wird doppelt fortgeschrieben | `update … where announced_at is distinct from <neu>`, idempotent |
 
 ---
 
-## 4. Die Reihenfolge — vier Schritte, jeder für sich lieferbar
+## 5. Oberfläche
 
-### Schritt 1 · Der Latch, still (Migration, 1 Tabelle, 1 Trigger)
+### 5.1 Der Zähler in der Leiste
 
-`offer_state` anlegen, aus `shop_offers()` initial füllen, und einen Trigger
-auf `shop_inventory` hängen, der sie **nur pflegt** — ohne irgendetwas zu
-melden. Dazu `offer_state_drift.sql` als lesende Prüfdatei: stimmt der Latch
-mit `shop_offers()` überein?
+Ein **dritter Kanal** neben `unread` und `attention`, über dieselbe Mechanik:
+`Unread`/`Attention` in `site-nav.tsx` bekommen ein Geschwister
+`favorites: number`, gespeist aus `(app)/layout.tsx` wie die vier anderen
+Zahlen.
 
-**Warum zuerst und ohne Wirkung:** der Trigger sitzt an der Tabelle, an der
-jeder Verkauf, jeder Wareneingang und jede Umpreisung vorbeigeht. Er soll
-eine Woche mitlaufen und beobachtet werden, bevor er etwas auslöst. Ein
-Fehler hier ist in Schritt 1 eine falsche Zeile in einer Hilfstabelle; in
-Schritt 2 wäre er eine falsche Meldung an einen Nutzer.
+**Die Zahl sitzt am Navigationspunkt „Favoriten"** — nicht an einem neuen
+Glockensymbol. Begründung: die Meldungen betreffen ausschließlich Favoriten,
+und ein vierter Punkt in einer Leiste mit drei Zielen (ADR-0036) wäre genau
+die Überladung, die der Auftrag ausschließt. Auf dem Telefon stehen dort
+schon drei Punkte; eine Zahl am dritten kostet keine Breite.
 
-### Schritt 2 · Fall A, neue Verfügbarkeit (Migration + Oberfläche)
+### 5.2 Der Posteingang: ein Abschnitt auf `/favoriten`, keine eigene Seite
 
-`favorite_notifications`, die beiden `profiles`-Schalter, die vier
-Dedup-Riegel, und die Erweiterung des Triggers auf das Schreiben. Dazu:
-`Unread` in `site-nav.tsx` um ein drittes Feld, ein Posteingang unter
-`/favoriten` (ein Abschnitt, keine eigene Seite — die Meldungen gehören zu
-den Favoriten) und `markFavoriteNotificationsRead()`.
+Oberhalb des Kennzahlenblocks, und **nur wenn es Ungelesenes gibt**:
 
-**Das ist die Lieferung, die Nutzen bringt.** Alles Weitere ist Komfort.
+```
+Neu für dich                                      [Alle gelesen]
+  ♥  Blue Bash ist wieder verfügbar.          vor 2 Stunden   →
+  ♥  Legendary Bash ist jetzt ab 14,99 € erhältlich.  gestern  →
+```
 
-### Schritt 3 · Fall B, Preissenkung (Migration, klein)
+| Entscheidung | Begründung |
+|---|---|
+| Kein eigener Pfad `/benachrichtigungen` | Die Meldungen sind Favoriten-Ereignisse, und die Liste der betroffenen Figuren steht direkt darunter. Eine eigene Seite wäre ein zweiter Ort für dieselbe Sache |
+| Jede Zeile führt auf **die Figur** (`/skylanders/<slug>`) | dort steht das Angebot mitsamt Preis und Zustand; ein Direktlink in den Warenkorb wäre eine Kaufentscheidung, die niemand getroffen hat |
+| Eine Zeile anzutippen quittiert sie | ein zweiter Knopf je Zeile wäre auf dem Telefon ein Ziel neben einem Ziel |
+| „Alle gelesen" als ein Knopf | ein `update … set read_at = now() where user_id = auth.uid() and read_at is null` |
+| Gelesene Meldungen bleiben, aber eingeklappt | „Älteres anzeigen" — der Posteingang ist kein Protokoll |
+| Leerer Zustand | **keiner.** Der Abschnitt erscheint gar nicht, wenn nichts da ist. Ein „keine Benachrichtigungen" über einer Wunschliste ist eine Zeile, die nichts sagt |
 
-`cheapest_cents` im Latch vergleichen, `kind = 'price_drop'`. Eigener
-Schalter, Vorgabe **aus**. Eigene Karenz, weil eine Umpreisung um einen Cent
-keine Nachricht ist — Vorschlag: eine Meldung erst ab einer Senkung um
-*x* Prozent **oder** *y* Cent, je nachdem was größer ist, und auch das in
-`shop_settings`.
+### 5.3 Ein Hinweis an der Karte?
 
-### Schritt 4 · Fall C, Wunschpreis (Migration + Oberfläche + **Sicherheitsänderung**)
+Der Auftrag fragt danach. **Mein Vorschlag: nein.** Die Karte trägt schon
+Herz, Variantensiegel, Mengen-Chip, Angebotszeile und (angemeldet) den
+Besitzrahmen. Ein sechstes Zeichen für „hierzu gibt es eine Meldung" wäre
+dieselbe Auskunft doppelt — die Meldung steht zehn Zentimeter darüber und
+nennt die Figur beim Namen.
 
-`favorites.target_cents`, die neue `update`-Richtlinie samt `update`-Recht,
-ein Eingabefeld an der Karte auf `/favoriten`, `kind = 'target_price'`.
+**Was stattdessen genügt:** Die Angebotszeile sagt ohnehin schon „ab
+14,99 €". Wer die Meldung gelesen hat, sieht an der Karte sofort, dass sie
+stimmt.
 
-**Zuletzt, weil es der einzige Schritt ist, der eine Grenze verschiebt.**
-Nach `0145` gibt es auf `favorites` kein `update` — das wieder zu öffnen
-verlangt dieselbe Sorgfalt wie `collection_items` sie hat: `using` und
-`with check`, und ein funktionaler RLS-Lauf mit zwei Konten, der beweist,
-dass niemand seine Zeile umhängen kann.
+> **Offene Entscheidung D-5**, falls der Betreiber es anders will. Die
+> billigste Variante wäre dann, die betroffenen Karten im Raster **nach oben
+> zu sortieren**, statt ein Zeichen hinzuzufügen.
+
+### 5.4 Einstellungen
+
+Zwei Schalter unter `/account` (nicht unter `/settings` — das ist seit
+ADR-0061 eine Weiterleitung). Beschriftung:
+
+* „Sag mir, wenn eine vorgemerkte Figur wieder verfügbar ist"
+* „Sag mir, wenn eine vorgemerkte Figur günstiger wird"
+
+Keine Zahlen, keine Schwellenwerte in der Oberfläche: die Schwelle ist eine
+Betriebsentscheidung (2.3) und keine Nutzereinstellung.
 
 ---
 
-## 5. Was dieser Plan ausdrücklich nicht vorschlägt
+## 6. Migrationen und Sicherung — die Reihenfolge
 
-* **Keine E-Mail, kein Push.** Es gibt keine Opt-in-Infrastruktur dafür, und
-  der Auftrag sagt In-App zuerst.
-* **Kein Sweep, kein Cron, keine fünfte Edge Function.** Es gibt keinen
-  Scheduler, und synchron im Trigger ist hier die bessere Bauform.
-* **Keine Marketplace-Struktur.** Kein `seller_id`, kein Fan-out je
-  Verkäufer, keine Angebotsüberwachung fremder Anbieter. Der Zustand gehört
-  der Figur, und ADR-0021 bleibt unberührt.
-* **Keine Realtime-Verbindung.** Der Badge wird beim Seitenaufbau gelesen,
-  wie `Unread` seit `0098`. Ein offener Socket je Besucher ist ein zweites
-  Betriebsmodell für einen Zähler.
-* **Kein Verlauf je Preis.** `price_history` steht in `docs/DATABASE.md`
-  Abschnitt 7 und ist ein eigenes Vorhaben; `cheapest_cents` im Latch ist
-  genau so viel Gedächtnis, wie Fall B braucht.
+### 6.1 Der Stand heute
+
+| | Staging | Production |
+|---|---|---|
+| `0144` Plattformexport + Kalkulationen | **angewendet** 2026-10-25 | **nein** |
+| `0145` Favoriten | **angewendet** 2026-10-25 | **nein** |
+| `favorites` im Plattformarchiv | **nein** — steht in `PLATFORM_EXCLUDED_TABLES` mit Ablaufdatum (ADR-0136) | — |
+
+### 6.2 Die Reihenfolge, und warum sie zwingend ist
+
+```
+ 1.  0144  →  Production
+     Erst danach traegt dort der Rumpf aus 0144 (md5 4c4d2e7c…), und erst
+     dann ist eine weitere Exportmigration ueberhaupt anwendbar: jede prueft
+     den Abdruck ihrer Vorgaengerfassung.
+
+ 2.  0146  Exportmigration: favorites UND die beiden neuen Tabellen
+     PLATFORM_FORMAT_VERSION 2 → 3, SECTIONS_BY_FORMAT_VERSION { …, 3: 57 }
+     (54 + favorites + offer_state? + favorite_notifications — siehe 6.3)
+     Der Eintrag in PLATFORM_EXCLUDED_TABLES faellt, und der
+     Vollstaendigkeitswaechter (ADR-0134) verlangt dann einen Bereich.
+
+ 3.  0147  offer_state + favorite_notifications + die zwei profiles-Spalten
+           + refresh_offer_state() + sync_favorite_notifications()
+
+ 4.  0145, 0146, 0147  →  Production, in dieser Folge
+```
+
+**Punkt 2 vor Punkt 4** ist die Zusage aus ADR-0136: neue persönliche
+Nutzerdaten dürfen nicht ungesichert auf Production stehen.
+
+> **Achtung, Henne und Ei:** `0146` muss die Tabellen aus `0147` exportieren,
+> die es dann noch nicht gibt. Zwei Wege:
+>
+> **(a) Reihenfolge tauschen** — `0146` legt die Tabellen an, `0147` nimmt
+> sie in den Export. Dann sind Tabellen kurz ungesichert, aber **nur auf
+> Staging**, und auf Production geht beides zusammen.
+>
+> **(b) Eine Migration** — Tabellen und Export in einem Schritt. Verstößt
+> gegen „eine Sache, eine Migration" (CLAUDE.md) und macht die Rücknahme
+> schwerer.
+>
+> **Empfehlung: (a).** Sie ist die einzige, die auf Staging wie auf
+> Production dieselbe Reihenfolge hat.
+
+### 6.3 Was in die Sicherung gehört — und was nicht
+
+| Tabelle | Betriebssicherung | Plattformsicherung | Begründung |
+|---|---|---|---|
+| `favorites` | **dauerhaft draußen** | **Bereich** | persönliche Nutzerdaten; fremde Wunschlisten in einem Händlerexport wären ein Leck (ADR-0136) |
+| `favorite_notifications` | **dauerhaft draußen** | **Bereich** | dieselbe Klasse. Eine verlorene Meldung ist kein Weltuntergang, aber `read_at` ist eine Nutzerhandlung |
+| `offer_state` | draußen | **begründet draußen** | **vollständig aus `shop_offers()` neu herstellbar** — bis auf `announced_*`. Und genau deshalb: `announced_*` ist der einzige echte Zustand, und ein Archiv ohne ihn würde nach einer Wiederherstellung **jede** Figur neu melden |
+
+> **Daraus folgt: `offer_state` gehört DOCH ins Archiv** — nicht als
+> Spiegel, sondern wegen der drei `announced_*`-Spalten. Das ist eine
+> Korrektur gegenüber dem Entwurf, der sie als „ableitbar" draußen lassen
+> wollte. **Entscheidung D-6:** ganze Tabelle exportieren (einfacher) oder
+> nur die drei Spalten (sparsamer). Mein Vorschlag: ganze Tabelle, sie hat
+> eine Zeile je Figur.
+
+### 6.4 Prüfdateien je Migration
+
+Für `0146` und `0147` je das volle Paket nach dem Muster von `0145`:
+Preflight, Postflight, Rücknahme, `operations/`-Hüllen für Staging und
+Production, Probelauf in `tools/validate-check-sql.mts`, Eintrag in
+`APPLIED.md`, `npm run sums:write`. Für `0147` zusätzlich der
+**Basis-Vertrag** (`skyisles-base-1` **und** `skyisles-coll-1`), weil sie
+`profiles` anfasst — und ein Sammlungs-Vertrag, der `profiles` mitzählt, ist
+eine eigene kleine Erweiterung.
+
+---
+
+## 7. Testplan und Abnahmekriterien
+
+**Messbar heißt: eine Zahl oder ein Zustand, der vorher benannt ist.**
+
+### 7.1 Probelauf an echtem PostgreSQL (`validate-check-sql.mts`, P53/P54)
+
+| # | Aufbau | Abnahme |
+|---|---|---|
+| 1 | Figur ohne kaufbares Angebot, ein Nutzer hat sie vorgemerkt. Angebot wird gelistet, Stufe 1, 31 Minuten vorspulen, Stufe 2 | **genau 1** Zeile, `kind = 'available'`, `price_cents` = der Preis |
+| 2 | Stufe 2 noch zweimal aufrufen | immer noch **genau 1** Zeile |
+| 3 | Dasselbe, aber nur **29 Minuten** vorgespult | **0** Zeilen (Karenzzeit) |
+| 4 | Kaufbar. `reserved` auf `quantity` setzen, Stufe 1, 1 min, `reserved` zurück, Stufe 1, 31 min, Stufe 2 | **0** Zeilen (Flattern) |
+| 5 | Zwei Angebote, 20,00 € und 15,00 €. Das günstige ausverkauft, Stufe 1, 31 min, Stufe 2 | **0** Zeilen, aber `announced_cents = 2000` |
+| 6 | Danach das günstige zurück, Stufe 1, 31 min, Stufe 2 | **genau 1** Zeile `price_drop`, `price_cents = 1500` |
+| 7 | Preis von 15,00 auf 14,80 (20 Cent, unter der Schwelle) | **0** Zeilen |
+| 8 | Preis von 15,00 auf 14,00 (1,00 €, über 50 Cent und über 5 %) | **genau 1** Zeile |
+| 9 | `price_percentage` von 90 auf 80 — **alle** automatischen Preise sinken | Zeilen **nur** für vorgemerkte Figuren; Anzahl = Anzahl der Favoriten über der Schwelle, **nicht** Katalogzeilen |
+| 10 | `market_price` eines Imports ändert 500 Zeilen | ebenso; Stufe 1 bleibt **ein** Statement |
+| 11 | Basisfigur und Legendary beide vorgemerkt, nur die Legendary wird verfügbar | **genau 1** Zeile, und zwar auf der Legendary-SKY-ID |
+| 12 | `notify_available = false` | **0** Zeilen, aber `announced_buyable` fortgeschrieben |
+| 13 | Favorit entfernt, dann Figur verfügbar | **0** neue Zeilen; eine ältere Zeile bleibt |
+| 14 | Stufe 1 zweimal in derselben Sekunde | der zweite Lauf meldet `0` Änderungen (Drosselung) |
+| 15 | Stufe 2 als Betriebskonto | **0**, keine Ausnahme |
+| 16 | Rücknahme `R0147` mit Zeilen in `favorite_notifications` | **bricht ab**, wie `R0145` |
+
+### 7.2 Funktionale RLS-Prüfung (`verify:rls:staging`, Abschnitt 11)
+
+Zwei echte Sammlerkonten, nach dem Muster von Abschnitt 10:
+
+| Abnahme |
+|---|
+| A sieht **nur** die eigenen Meldungen; `count` = die für A erzeugten, **0** fremde |
+| A liest B's Meldung über `eq("user_id", idB)` → **0 Zeilen** |
+| A setzt `read_at` auf B's Meldung → **0 Zeilen geändert**, und B's Zeile ist danach **von B gelesen** unverändert |
+| A ändert ein **anderes** Feld der eigenen Zeile (`kind`, `price_cents`) → **abgewiesen** (`42501`, Spaltenrecht) |
+| A legt eine Meldung an (`insert`) → **abgewiesen** (`42501`), auch für sich selbst |
+| A löscht eine Meldung → **abgewiesen** |
+| `anon` liest / schreibt → **abgewiesen** |
+| `offer_state` für `authenticated` und `anon` → **abgewiesen** |
+| `sync_favorite_notifications()` als B erzeugt Zeilen **nur** für B |
+| Konto A löschen → A's Meldungen **0**, B's unverändert |
+
+### 7.3 Browser, Desktop und Telefon
+
+| Abnahme |
+|---|
+| Zahl am Navigationspunkt „Favoriten" = Anzahl ungelesener Meldungen, **gezählt gegen die Datenbank** |
+| Eine Zeile antippen → `read_at` gesetzt, Zahl sinkt um **genau 1**, Ziel ist die Figurenseite |
+| „Alle gelesen" → Zahl **0**, Abschnitt verschwindet |
+| Telefonbreite 360 px: drei Navigationspunkte, die Zahl bricht die Leiste **nicht** um |
+| Posteingang mit 20 Meldungen: kein horizontales Scrollen, Zeilenhöhe ≥ 44 px |
+| Einstellung ausschalten → nach einem neuen Ereignis **keine** neue Zeile |
+
+### 7.4 Nichts anderes hat sich bewegt
+
+| Abnahme |
+|---|
+| Der Basis-Vertrag der Nachkontrolle: **alle sieben** Shop-Werte unverändert |
+| Der Sammlungs-Vertrag: **alle drei** unverändert |
+| Ein Kauf über `/checkout` geht durch, während Stufe 1 läuft |
+| **Kein Trigger** auf `shop_inventory`, `skylanders` oder `shop_settings` kommt dazu — geprüft am Schema, nicht am Vorsatz |
+| `shop_offers()` ist **zeichengleich** unverändert (md5 des Rumpfs) |
+| Orderbuch, Lager, Kalkulation, Nachfrageanzeige: Testsuite grün, `9999 = 0` |
+
+---
+
+## 8. Risiken, offene Entscheidungen, einfachere Alternativen
+
+### 8.1 Risiken
+
+| Risiko | Schwere | Abwehr |
+|---|---|---|
+| **Ohne Besucher läuft nichts** | mittel | Bei In-App-only kein Verlust (3.4). Wird es eines, ist der Weg ein Scheduler, der dieselben zwei Funktionen ruft (3.5) |
+| Stufe 1 wird zur Last, wenn das Lager wächst | niedrig | Ein Statement über ~290 Zeilen, gedrosselt auf 1/min. Bei 10 000 Zeilen immer noch ein Statement |
+| Die Schwelle ist falsch gewählt | mittel | Sie steht in `shop_settings`, nicht in einer Funktion — ändern kostet keine Migration |
+| Ein Nutzer mit 500 Favoriten | niedrig | Stufe 2 ist ein Join über seine Favoriten; die Decke von `favorite_demand()` (2000) ist der Vergleichsmaßstab |
+| `announced_*` geht bei einer Wiederherstellung verloren | **hoch** | Genau deshalb gehört `offer_state` ins Archiv (6.3). Ohne sie würde nach einem Wiederaufbau **jede** Figur neu gemeldet |
+| Eine Meldung wird kurz nach dem Absenden falsch (jemand kauft) | niedrig | Sie **war** wahr. Die Oberfläche zeigt den Zeitpunkt, die Karte daneben die Gegenwart |
+
+### 8.2 Entscheidungen, die der Betreiber treffen muss
+
+| # | Frage | Mein Vorschlag |
+|---|---|---|
+| **D-1** | Karenzzeit | **30 min**, abgeleitet aus `reservation_ttl()` + 10 |
+| **D-2** | Preisschwelle | **max(50 Cent, 5 %)**, in `shop_settings` |
+| **D-3** | Zusätzliche Tagessperre je Figur für B | **nein** für V1 |
+| **D-4** | Vorgaben der beiden Schalter | **beide an** |
+| **D-5** | Hinweis an der Karte auf `/favoriten` | **nein**; falls doch, dann Sortierung statt Symbol |
+| **D-6** | `offer_state` ganz oder nur `announced_*` ins Archiv | **ganz** |
+| **D-7** | Migrationsreihenfolge 6.2 (a) oder (b) | **(a)** |
+| **D-8** | Zählt die Zahl am Punkt „Favoriten" oder an einem neuen Glockensymbol | **„Favoriten"** |
+
+### 8.3 Die einfachere Alternative, falls das zu viel ist
+
+**„Neu seit deinem letzten Besuch", ohne Posteingang.** Ein
+Zeitstempel je Nutzer (`profiles.favorites_seen_at`), und `/favoriten`
+hebt die Figuren hervor, die seit dann verfügbar wurden.
+
+| | |
+|---|---|
+| Kosten | **eine** Spalte, **keine** neue Tabelle, keine Meldungszeilen |
+| Was fehlt | kein Verlauf, keine Einzelquittierung, keine Preissenkung (dafür bräuchte es den gemeldeten Preis — also doch `offer_state`) |
+| Wann sinnvoll | wenn A allein genügt und B warten kann |
+
+Sie ist **kein Zwischenschritt**: wer später B will, baut `offer_state`
+ohnehin. Ich empfehle sie nur, wenn B gestrichen wird.
+
+---
+
+## 9. Implementierung in kleinen Schritten
+
+Jeder Schritt ist für sich prüfbar und für sich zurücknehmbar.
+
+| Schritt | Inhalt | Prüfbar durch |
+|---|---|---|
+| **S1** | `0146`: `offer_state` + `refresh_offer_state()` — **nur der Spiegel**, keine Meldungen, keine Oberfläche. Dazu `offer_state_drift.sql`: stimmt der Spiegel mit `shop_offers()` überein? | Probelauf P53; eine Woche auf Staging mitlaufen lassen und die Driftprüfung fahren |
+| **S2** | `0147`: `favorite_notifications`, die zwei `profiles`-Spalten, `sync_favorite_notifications()` — **ohne Oberfläche** | Probelauf P54, `verify:rls:staging` Abschnitt 11 |
+| **S3** | Exportmigration: `favorites`, `favorite_notifications`, `offer_state` ins Plattformarchiv, Formatversion 3 | `verify:platform-archive`, Bereichszahl, beide Vollständigkeitswächter |
+| **S4** | Oberfläche: Zahl in der Leiste, Posteingang auf `/favoriten`, Quittieren | DOM-Tests mit echten Klicks (Muster `favorite-interaction.test.tsx`), Browser-Durchlauf |
+| **S5** | Die zwei Schalter unter `/account` | Tests + Browser |
+| **S6** | Production-Rollout in der Reihenfolge aus 6.2 | Preflight/Postflight je Migration, `9999 = 0` |
+
+**S1 zuerst und ohne Wirkung** ist Absicht: der Spiegel soll beobachtet
+werden, bevor er etwas auslöst. Ein Fehler in S1 ist eine falsche Zeile in
+einer Hilfstabelle; derselbe Fehler in S2 wäre eine falsche Meldung an einen
+Nutzer.
+
+---
+
+## Anhang · Was dieses Konzept ausdrücklich nicht vorsieht
+
+* **Kein Wunschpreis.** Ausdrücklich nicht Teil dieser Phase. Er bräuchte
+  `favorites.target_cents` und damit ein `update`-Recht auf `favorites`, das
+  `0145` bewusst nicht erteilt — die einzige Stelle, an der eine
+  Sicherheitsgrenze verschoben würde.
+* **Keine E-Mail, kein Push, kein externer Dienst.**
+* **Kein Trigger**, nirgends. Begründung in 1.6 und 3.1.
+* **Keine Marktplatzstruktur.** Kein `seller_id`, kein Fan-out je Verkäufer,
+  keine Überwachung fremder Angebote. ADR-0021 bleibt unberührt.
+* **Keine Realtime-Verbindung.** Der Zähler wird beim Seitenaufbau gelesen,
+  wie `Unread` seit `0098`.
+* **Kein Preisverlauf.** `price_history` steht in `docs/DATABASE.md`
+  Abschnitt 7 und ist ein eigenes Vorhaben; `announced_cents` ist genau so
+  viel Gedächtnis, wie B braucht.
