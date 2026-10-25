@@ -13073,3 +13073,135 @@ beweist nichts) · die Platzhalter aus den Hüllen entfernen (sie sind der
 Rückfallweg, und ein Platzhalter blockiert sichtbar, während eine fehlende
 Zeile stillschweigend durchliefe) · den Runner je Migration erweitern (Daten
 statt Code, sonst wächst eine Sonderlogik je Rollout).
+
+---
+
+## ADR-0138 · TLS zum Staging-Pooler: Vollprüfung gegen eine benannte CA, und verbunden wird mit Feldern
+
+**Datum:** 2026-10-25
+**Status:** angenommen
+**Betrifft:** `tools/lib/staging-db.mts`, `~/.skyisles/supabase-ca.crt`, jedes
+Werkzeug mit direkter PostgreSQL-Sitzung (`db:check:staging`,
+`db:migrate:staging`)
+
+### Der Anlass
+
+`npm run db:migrate:staging -- 0146 --resume` scheiterte mit
+`self-signed certificate in certificate chain`. Gemessen gegen
+`aws-1-eu-west-1.pooler.supabase.com:5432`:
+
+```
+*.pooler.supabase.com  ←  Supabase Intermediate 2021 CA
+                       ←  Supabase Root 2021 CA   (selbstsigniert)
+```
+
+Diese Wurzel steht in keinem öffentlichen Vertrauensspeicher und auch nicht
+in dem, den Node mitbringt. **Es fehlte die CA, nicht die Verschlüsselung** —
+nichts war kaputt, und nichts an der Gegenseite war das Problem.
+
+Dazu warnte `pg-connection-string`, dass `prefer`, `require` und `verify-ca`
+heute Aliasse für `verify-full` sind und ab `pg` v9 libpq-Semantik bekommen.
+Das heißt: **unsere Verbindung prüfte das Zertifikat nur, weil die Bibliothek
+gerade großzügig ist, und hätte beim nächsten Hauptversionssprung still
+aufgehört zu prüfen.**
+
+### Die Entscheidung
+
+**1. `sslmode=verify-full`, ausgeschrieben.** `require`, `prefer` und
+`verify-ca` werden abgelehnt, mit genau dieser Begründung in der
+Fehlermeldung. `uselibpqcompat` wird abgelehnt — das ist der Schalter, der
+`require` auf „verschlüsselt, aber ungeprüft" zurückdreht.
+
+**2. Verbunden wird mit diskreten Feldern, nicht mit der Zeichenkette.**
+Nachgemessen in `pg` 8.23.1:
+
+```
+new Client({ host, user, …, ssl: { ca } })       → ssl = { ca: … }
+new Client({ connectionString, ssl: { ca } })    → ssl = {}        ← verworfen
+```
+
+Ursache: `connection-parameters.js` macht
+`Object.assign({}, config, parse(config.connectionString))` — die geparste
+Zeichenkette gewinnt und setzt wegen ihres `sslmode` ein leeres `ssl`
+darüber. Das hat drei Folgen, und alle drei sind Verbesserungen:
+
+- Die TLS-Haltung hängt nicht mehr an der Auslegung von `sslmode` — auch
+  nicht an der künftigen.
+- Riegel 1 prüft **dieselbe Zerlegung**, mit der verbunden wird. Vorher
+  prüfte `new URL`, verband aber `pg-connection-string`; im `#`-Fall waren
+  das zwei Ergebnisse.
+- `ca` **ersetzt** den Standardspeicher: vertraut wird genau dieser Wurzel,
+  nicht ~150 öffentlichen CAs. `NODE_EXTRA_CA_CERTS` greift dabei nicht, weil
+  der Standardspeicher gar nicht benutzt wird.
+
+**3. Die CA kommt aus dem Dashboard, nie aus der Verbindung.** Die Kette, die
+der Server präsentiert, ist **keine Vertrauensquelle**: wer die Verbindung
+umlenkt, liefert seine eigene Wurzel mit. Die Datei liegt unter
+`~/.skyisles/supabase-ca.crt` — außerhalb des Repositorys, nicht weil sie
+geheim wäre (ein CA-Zertifikat ist öffentlich), sondern weil sie
+rechnerlokale Einrichtung ist und keine Projektdatei.
+
+**4. Der erwartete Fingerabdruck ist eine Gegenprobe, kein Riegel.**
+`ERWARTETE_WURZEL` steht im Code und wird gemeldet; eine Abweichung
+**blockiert nicht**. Dreht Supabase die Wurzel, soll das ein Hinweis sein und
+kein Stillstand — und gegen eine manipulierte Datei im Heimverzeichnis
+schützt er ohnehin nicht, denn wer dort schreiben kann, ändert auch die
+Zugangsdatei.
+
+**5. Die Hostnamenprüfung ist nicht abschaltbar**, und zwar durch `pg`:
+`connection.js` setzt `options.servername = host` **nach**
+`Object.assign(options, self.ssl)`. Ein `servername` im `ssl`-Objekt wird
+überschrieben, geprüft wird immer gegen den Host, zu dem wirklich verbunden
+wird. Nachgemessen — mit `servername: "boeser.example.com"` lief der
+Handschlag trotzdem gegen den echten Namen.
+
+**6. `NODE_TLS_REJECT_UNAUTHORIZED=0` ist ein Abbruch**, keine Warnung. Die
+Variable wirkt prozessweit und schlägt jede Einstellung in diesem Modul;
+dagegen hilft kein sorgfältiges `ssl`-Objekt, nur eine Verweigerung.
+
+### Was eine Verweigerung jetzt sagt
+
+Jede CA-Verweigerung bringt die Einrichtungsanleitung samt erwartetem
+Fingerabdruck mit, und jeder TLS-Fehlercode wird in eine Ursache übersetzt —
+`SELF_SIGNED_CERT_IN_CHAIN` heißt „es fehlt die CA auf diesem Rechner", nicht
+„die Gegenseite ist falsch konfiguriert". **`28P01` wird ausdrücklich als
+Beweis gelesen, dass TLS steht:** bis zur Anmeldung kommt es nur nach einem
+gelungenen Handschlag. Ohne diese Unterscheidung sucht man den Fehler weiter
+im Zertifikat.
+
+### Was dabei auffiel und fast falsch dokumentiert war
+
+Der erwartete Fingerabdruck stand hier zuerst falsch. `openssl x509 -noout
+-subject -issuer -fingerprint -sha256 -dates -ext basicConstraints` druckte
+für dieselbe Datei einen **anderen** 32-Byte-Wert als derselbe Aufruf ohne
+`-dates -ext` (openssl 4.0.3). Verlassen wird sich deshalb auf drei Wege, die
+übereinstimmen: `openssl x509 -outform der | shasum -a 256`, Nodes
+`new X509Certificate(pem).fingerprint256`, und `openssl x509 -noout
+-fingerprint -sha256`.
+
+### Einmalige Einrichtung, je Rechner
+
+1. Dashboard → Project Settings → Database → SSL Configuration →
+   **Download certificate** (`prod-ca-2021.crt`).
+2. Ablegen als `~/.skyisles/supabase-ca.crt`.
+3. In `~/.skyisles/staging-db.env` `sslmode=require` → `sslmode=verify-full`.
+
+### Konsequenzen
+
+- Die Zugangsdatei muss einmal geändert werden; bis dahin verweigert der
+  Riegel den Start und sagt genau, welches Wort zu ändern ist.
+- Production ist nicht betroffen: diese Werkzeuge haben keinen
+  Production-Pfad (ADR-0137).
+- Zwei Zusagen über `pg` sind jetzt getestet statt erinnert — fällt eine weg,
+  meldet es der Test, und dann ist die **Begründung** zu prüfen, nicht der
+  Code anzupassen.
+
+**Verworfen:** `rejectUnauthorized: false` oder
+`NODE_TLS_REJECT_UNAUTHORIZED=0` (ersetzt eine geprüfte Verbindung durch eine
+verschlüsselte zu irgendwem) · die Wurzel aus der präsentierten Kette als
+Anker nehmen (zirkulär) · `NODE_EXTRA_CA_CERTS` statt `ssl.ca` (weitet das
+Vertrauen auf den ganzen Prozess aus, statt es auf eine Wurzel zu verengen) ·
+`sslrootcert` in der Verbindungszeichenkette (würde bei Feldverbindung nicht
+gelesen — eine Einstellung, die nichts tut) · den Fingerabdruck als harten
+Riegel (bricht bei jeder Rotation, schützt gegen die eine realistische
+Bedrohung nicht).

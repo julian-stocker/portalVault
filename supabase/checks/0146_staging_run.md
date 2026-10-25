@@ -65,7 +65,16 @@ in der Akte selbst (`herkunft: "bediener"`, Feld `bemerkung`).
 npm run db:migrate:staging -- 0146 --resume
 ```
 
-**Erwartet: Zeile 9999 = `0`.** Die untenstehende Tabelle zu Schritt 3 bleibt
+**Erwartet: Zeile 9999 = `0`.**
+
+> **Voraussetzung, einmal je Rechner (ADR-0138):** die CA des Poolers muss
+> unter `~/.skyisles/supabase-ca.crt` liegen, und die Zugangsdatei muss
+> `sslmode=verify-full` nennen. Fehlt eines davon, bricht der Runner **vor**
+> jeder Verbindung ab und druckt die Anleitung. Der erste Lauf am 2026-10-25
+> scheiterte genau daran — `self-signed certificate in certificate chain`,
+> weil die private Wurzel von Supabase in keinem öffentlichen
+> Vertrauensspeicher steht. Einrichtung: `staging_agent_access_plan.md`,
+> Schritt 3b. Die untenstehende Tabelle zu Schritt 3 bleibt
 das Abnahmeraster.
 
 ---

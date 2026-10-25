@@ -509,7 +509,8 @@ Konvention:
 | Zugangsdatum | Wo | Warum dort |
 |---|---|---|
 | Staging: URL, Anon-, Service-Role-Key | `.env.staging` (nicht committet) | Kanal A, abgesichert durch `tools/lib/staging-guard.mts` |
-| Staging: Datenbankverbindung des Prüfzugangs | `~/.skyisles/staging-db.env`, `chmod 600` — **außerhalb des Repositorys** | kein `git add -f` kann sie erfassen, kein `--env-file` im Projekt zeigt versehentlich darauf. Form: `postgresql://skyisles_agent.<ref>:<pw>@<host>.pooler.supabase.com:5432/postgres?sslmode=require` — **`sslmode` ist Pflicht**, weil `pg` ohne ihn unverschlüsselt verbindet |
+| Staging: Datenbankverbindung des Prüfzugangs | `~/.skyisles/staging-db.env`, `chmod 600` — **außerhalb des Repositorys** | kein `git add -f` kann sie erfassen, kein `--env-file` im Projekt zeigt versehentlich darauf. Form: `postgresql://skyisles_agent.<ref>:<pw>@<host>.pooler.supabase.com:5432/postgres?sslmode=verify-full` — **`sslmode=verify-full`, ausgeschrieben** (ADR-0138). Ohne `sslmode` verbindet `pg` unverschlüsselt; `require` wird abgelehnt, weil es ab `pg` v9 libpq-Semantik bekommt und das Zertifikat dann nicht mehr prüft |
+| Staging: die CA des Poolers | `~/.skyisles/supabase-ca.crt` — **außerhalb des Repositorys**, Pfad überschreibbar mit `SKYISLES_STAGING_DB_CA` | ein **öffentliches** Zertifikat, kein Geheimnis — es liegt dort, weil es rechnerlokale Einrichtung ist und keine Projektdatei. Ohne diese Datei verweigert `verbindeStaging()` den Start |
 | **Production: jedes Zugangsdatum** | **unverändert** `.env.local`; Absicherung ist ein eigenes Vorhaben | im selben Benutzerkontext ist **keine** Dateirechte- oder Schlüsselbund-Maßnahme eine Grenze: ein Eintrag, dessen ACL das aufrufende Programm kennt oder dem „Always Allow" erteilt wurde, wird ohne Rückfrage ausgelesen. Die Werkzeuge der Phase A kennen deshalb **kein** Production-Zugangsdatum und brauchen keines |
 | Stripe, Resend | Supabase Function Secrets | wie bisher; nie im Repository, nie bei Vercel |
 
@@ -542,6 +543,52 @@ Berechtigung** — sie prüft rein lesend. `npm run verify:check-sql` fährt sie
 PostgreSQL 18.6 durch (P15) und prüft die Gegenprobe: ohne Policy liest die
 Rolle 0 Zeilen, und bei offener Belegsperre bricht die Datei ab (P16). Plan und
 Phasen: `supabase/checks/staging_agent_access_plan.md`.
+
+#### TLS: Vollprüfung gegen eine ausdrücklich benannte CA (ADR-0138)
+
+**Der Pooler präsentiert eine private Kette.** Gemessen am 2026-10-25 gegen
+`aws-1-eu-west-1.pooler.supabase.com:5432`:
+
+```
+*.pooler.supabase.com  ←  Supabase Intermediate 2021 CA
+                       ←  Supabase Root 2021 CA   (selbstsigniert)
+```
+
+Diese Wurzel steht in **keinem** öffentlichen Vertrauensspeicher und auch
+nicht in dem, den Node mitbringt. Deshalb — und nur deshalb — endete der
+erste Lauf des Migrations-Runners mit `SELF_SIGNED_CERT_IN_CHAIN`. Es fehlte
+die CA, nicht die Verschlüsselung.
+
+| Mechanismus | Wie |
+|---|---|
+| Zertifikatsprüfung | `ssl: { ca: <PEM> }`, `rejectUnauthorized` bleibt beim Standard `true`. **`ca` ersetzt den Standardspeicher** — vertraut wird genau dieser einen Wurzel, nicht ~150 öffentlichen CAs, und `NODE_EXTRA_CA_CERTS` greift dabei nicht |
+| Hostnamenprüfung | Nodes eigene, und sie ist **nicht abschaltbar**: `pg/lib/connection.js` setzt `options.servername = host` **nach** `Object.assign(options, self.ssl)`, also gegen den Host, zu dem wirklich verbunden wird. Nachgemessen |
+| Woher die CA kommt | **aus dem Dashboard**, nicht aus der Verbindung. Die Kette, die der Server präsentiert, ist keine Vertrauensquelle: wer die Verbindung umlenkt, liefert seine eigene Wurzel mit |
+| Gegenprobe | der Abdruck der erwarteten Wurzel steht im Code (`ERWARTETE_WURZEL`) und wird gemeldet, **blockiert aber nicht**. Dreht Supabase die Wurzel, soll das ein Hinweis sein und kein Stillstand |
+| CA-Datei | muss lesbar, PEM, parsbar, mit `CA:TRUE` und unabgelaufen sein. Ein abgelaufener Anker erzeugt sonst einen Handschlagfehler, der nach einem Problem der Gegenseite aussieht |
+| Verweigert wird | `NODE_TLS_REJECT_UNAUTHORIZED=0`/`false` (wirkt prozessweit und schlägt jede Einstellung hier), `uselibpqcompat` (dreht `require`/`verify-ca` auf ungeprüft zurück), `sslrootcert`/`sslcert`/`sslkey` in der URL (würden nicht gelesen) |
+| Nie | `rejectUnauthorized: false`, ein eigenes `checkServerIdentity`, eine CA aus der präsentierten Kette |
+
+**Verbunden wird mit diskreten Feldern, nicht mit der Zeichenkette** — und
+das ist die Voraussetzung für alles darüber. Nachgemessen in `pg` 8.23.1:
+
+```
+new Client({ host, user, …, ssl: { ca } })       → ssl = { ca: … }
+new Client({ connectionString, ssl: { ca } })    → ssl = {}        ← verworfen
+```
+
+Ursache: `connection-parameters.js` macht
+`Object.assign({}, config, parse(config.connectionString))`; die geparste
+Zeichenkette gewinnt und setzt wegen ihres `sslmode` ein `config.ssl = {}`
+darüber. Die Felder kommen aus **genau der Zerlegung, die Riegel 1 geprüft
+hat** — vorher prüfte `new URL`, verband aber `pg-connection-string`: zwei
+Leser, und im `#`-Fall zwei Ergebnisse.
+
+**Einmalige Einrichtung** (jeder Rechner, einmal): CA im Dashboard unter
+Project Settings → Database → SSL Configuration herunterladen
+(`prod-ca-2021.crt`), ablegen als `~/.skyisles/supabase-ca.crt`, und in der
+Zugangsdatei `sslmode=require` auf `sslmode=verify-full` ändern. Jede
+Verweigerung druckt diese Anleitung samt erwartetem Fingerabdruck mit.
 
 **Zwei Werkzeuge laufen über diesen Zugang, und nur diese zwei:**
 `npm run db:check:staging` und `npm run db:migrate:staging` (ADR-0137). Beide

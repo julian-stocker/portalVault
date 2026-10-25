@@ -33,10 +33,16 @@ import { bewerte } from "../../../tools/env-audit.mts";
  * ======================================================================== */
 
 describe("pruefeVerbindung lässt nur den lesenden Staging-Zugang durch", () => {
+  /*
+   * `sslmode=verify-full` AUSGESCHRIEBEN — seit dem 2026-10-25 die einzige
+   * zugelassene Form (ADR-0138). `require` war bis dahin erlaubt; in `pg`
+   * 8.23 ist es noch ein Alias fuer Vollpruefung, ab `pg` v9 bekommt es
+   * libpq-Semantik und pruefte das Zertifikat nicht mehr.
+   */
   const POOLER = `postgresql://${LESE_ROLLE}.${STAGING_REF}:gEhEim123@`
-    + "aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=require";
+    + "aws-0-eu-central-1.pooler.supabase.com:5432/postgres?sslmode=verify-full";
   const DIREKT = `postgresql://${LESE_ROLLE}:gEhEim123@db.${STAGING_REF}.supabase.co`
-    + ":5432/postgres?sslmode=require";
+    + ":5432/postgres?sslmode=verify-full";
 
   it("die Session-Pooler-Form, wie Supabase sie ausgibt", () => {
     const u = pruefeVerbindung(POOLER);
@@ -44,7 +50,7 @@ describe("pruefeVerbindung lässt nur den lesenden Staging-Zugang durch", () => 
     if (u.ok) {
       expect(u.benutzer).toBe(`${LESE_ROLLE}.${STAGING_REF}`);
       expect(u.port).toBe("5432");
-      expect(u.sslmode).toBe("require");
+      expect(u.sslmode).toBe("verify-full");
     }
   });
 
@@ -99,16 +105,20 @@ describe("pruefeVerbindung lässt nur den lesenden Staging-Zugang durch", () => 
   });
 
   it("OHNE sslmode wird abgelehnt — sonst verbindet pg unverschlüsselt", () => {
-    const u = pruefeVerbindung(POOLER.replace("?sslmode=require", ""));
+    const u = pruefeVerbindung(POOLER.replace("?sslmode=verify-full", ""));
     expect(u.ok).toBe(false);
     if (!u.ok) expect(u.grund).toContain("sslmode");
-    /* `verify-full` ist die strengere Form und wird akzeptiert. */
-    const v = pruefeVerbindung(POOLER.replace("require", "verify-full"));
-    expect(v.ok).toBe(true);
-    if (v.ok) expect(v.sslmode).toBe("verify-full");
-    /* `disable` und `prefer` nicht. */
-    for (const modus of ["disable", "prefer", "allow"]) {
-      expect(pruefeVerbindung(POOLER.replace("sslmode=require", `sslmode=${modus}`)).ok,
+  });
+
+  it("und jede Form AUSSER verify-full wird abgelehnt", () => {
+    /*
+     * Auch `require`, `prefer` und `verify-ca`: heute sind sie Aliasse fuer
+     * Vollpruefung, ab `pg` v9 nicht mehr. Die ganze Begruendung steht in
+     * `staging-tls.test.ts`.
+     */
+    for (const modus of ["disable", "prefer", "allow", "require", "verify-ca",
+                         "no-verify"]) {
+      expect(pruefeVerbindung(POOLER.replace("sslmode=verify-full", `sslmode=${modus}`)).ok,
              modus).toBe(false);
     }
   });
@@ -359,6 +369,8 @@ describe("der ganze Lauf — derselbe Code, nur gegen PGlite", () => {
         return r.map((x) => (x.rows ?? []) as Zeile[]);
       },
       async schliesse() { /* Wegwerf-Instanz */ },
+      /* PGlite statt Pooler — keine TLS-Strecke, und das soll dastehen. */
+      tls: "(PGlite, keine Netzverbindung)",
     };
     /* Aufwaermen: PGlite richtet seine Instanz erst bei der ersten Abfrage
        vollstaendig ein. Ohne diese Zeile fiel die Wartezeit auf den ERSTEN
@@ -729,39 +741,55 @@ describe("die Verbindung ist verschlüsselt, und zwar nachprüfbar", () => {
     expect(pruefeVerbindung(url("")).ok).toBe(false);
   });
 
-  it("mit sslmode=require ist TLS an", async () => {
+  it("mit sslmode ist TLS an", async () => {
     const { Client } = await import("pg");
-    const mit = new Client({ connectionString: url("?sslmode=require") });
+    const mit = new Client({ connectionString: url("?sslmode=verify-full") });
     expect(Boolean((mit as unknown as { connectionParameters: { ssl: unknown } })
       .connectionParameters.ssl)).toBe(true);
-    expect(pruefeVerbindung(url("?sslmode=require")).ok).toBe(true);
+    expect(pruefeVerbindung(url("?sslmode=verify-full")).ok).toBe(true);
   });
 
-  it("ein ausdrückliches ssl-Argument würde ignoriert — darum übergibt das Werkzeug keines", async () => {
+  it("eine connectionString VERWIRFT ein ssl-Argument — darum verbindet das Werkzeug mit Feldern", async () => {
     /*
-     * DER GRUND, WARUM IM WERKZEUG KEIN `ssl` STEHT.
+     * DER GRUND, WARUM DAS WERKZEUG KEINE `connectionString` MEHR UEBERGIBT.
      *
      * Enthält die Zeichenkette ein `sslmode=`, überschreibt `pg` ein
      * übergebenes `ssl` nicht — es verwirft es. Ein Parameter, der nichts
-     * tut, behauptet eine Einstellung, die nicht gilt.
+     * tut, behauptet eine Einstellung, die nicht gilt. Also umgekehrt: keine
+     * Zeichenkette an den Treiber, dafür diskrete Felder plus ein
+     * ausdrückliches `ssl: { ca }` (ADR-0138).
+     *
+     * Nachgemessen, beide Richtungen:
      */
     const { Client } = await import("pg");
-    const c = new Client({
-      connectionString: url("?sslmode=require"),
+    const mitKette = new Client({
+      connectionString: url("?sslmode=verify-full"),
       ssl: { rejectUnauthorized: false },
     } as never);
-    expect((c as unknown as { connectionParameters: { ssl: unknown } })
-      .connectionParameters.ssl).toEqual({});
+    expect((mitKette as unknown as { connectionParameters: { ssl: unknown } })
+      .connectionParameters.ssl, "die Zeichenkette gewinnt").toEqual({});
+
+    const mitFeldern = new Client({
+      user: `${LESE_ROLLE}.${STAGING_REF}`, password: "gEhEim123",
+      host: "aws-0-eu-central-1.pooler.supabase.com", port: 5432,
+      database: "postgres", ssl: { ca: "PEM-HIER" },
+    } as never);
+    expect((mitFeldern as unknown as { connectionParameters: { ssl: unknown } })
+      .connectionParameters.ssl, "ohne Zeichenkette gilt das ssl-Objekt")
+      .toEqual({ ca: "PEM-HIER" });
+
     const quelle = readFileSync("tools/lib/staging-db.mts", "utf8");
     const code = quelle.replace(/\/\*[\s\S]*?\*\//g, "");
     expect(code).not.toMatch(/ssl:\s*\{\s*rejectUnauthorized/);
-    expect(quelle).toContain("KEIN `ssl`-ARGUMENT HIER");
+    expect(code).not.toContain("connectionString:");
+    expect(quelle).toContain("DISKRETE FELDER UND EIN AUSDRUECKLICHES `ssl`");
   });
 
   it("ein Passwort mit # bricht schon das Parsen — der Riegel fängt es vorher", async () => {
     const { parse } = await import("pg-connection-string");
-    expect(() => parse(url("?sslmode=require").replace("gEhEim123", "a#b"))).toThrow();
-    expect(pruefeVerbindung(url("?sslmode=require").replace("gEhEim123", "a#b")).ok).toBe(false);
+    const kaputt = url("?sslmode=verify-full").replace("gEhEim123", "a#b");
+    expect(() => parse(kaputt)).toThrow();
+    expect(pruefeVerbindung(kaputt).ok).toBe(false);
   });
 });
 

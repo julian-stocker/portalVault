@@ -426,7 +426,8 @@ async function main(): Promise<void> {
   const db = await verbindeStaging();
   const plaene = ladePlaene();
   console.log(`  Ziel:      ${STAGING_REF}  ·  ${ERWARTETER_STEMPEL}`);
-  console.log("  Zugang:    lesend, Sitzung schreibgeschuetzt");
+  console.log(`  Zugang:    lesend, Sitzung schreibgeschuetzt`);
+  console.log(`  TLS:       ${db.tls}`);
   console.log(`  Migration: ${nummer} — ${plaene[nummer!]?.zweck ?? "unbekannt"}`);
   console.log("");
 
