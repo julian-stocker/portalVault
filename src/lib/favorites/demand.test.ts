@@ -438,10 +438,25 @@ describe("Lager, Einkauf und Kalkulation bleiben unberührt", () => {
     expect(code(ORDERBOOK)).toContain("marketPrice: fact?.marketPrice ?? null");
   });
 
-  it("keine Migration und keine neue Datenbankfunktion", () => {
-    /* Die Funktion existiert seit `0145`; diese Phase legt keine an. */
-    const dateien = readFileSync("supabase/SHA256SUMS.txt", "utf8");
-    expect(dateien).not.toContain("0146_");
+  it("keine neue Datenbankfunktion fuer die Nachfrageanzeige", () => {
+    /*
+     * BERICHTIGT AM 2026-10-25. Hier stand `expect(dateien).not.toContain("0146_")`
+     * — und das war die falsche Frage. Gemeint war „Phase 3 braucht keine
+     * Migration", gemessen wurde „es gibt keine Migration 0146". Phase 4
+     * legt mit `0146` den Angebotsspiegel an, und damit wurde ein Test rot,
+     * der über die Nachfrageanzeige gar nichts sagte.
+     *
+     * Gefragt wird jetzt, was gemeint war: die Anzeige benutzt
+     * `favorite_demand()` aus `0145` und bringt keine eigene Funktion mit.
+     */
     expect(code(QUERIES)).not.toContain("create function");
+    expect(code(QUERIES)).toContain('supabase.rpc("favorite_demand"');
+    /* Und die Funktion steht in `0145`, nicht in einer neueren Migration. */
+    expect(quelle(MIGRATION)).toContain(
+      "create or replace function public.favorite_demand(");
+    for (const spaeter of ["0146_offer_state.sql"]) {
+      expect(readFileSync(`supabase/migrations/${spaeter}`, "utf8"), spaeter)
+        .not.toContain("favorite_demand");
+    }
   });
 });

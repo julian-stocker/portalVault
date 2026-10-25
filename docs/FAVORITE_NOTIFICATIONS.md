@@ -4,6 +4,28 @@
 die Planung, um die der Auftrag gebeten hat — keine Freigabe, keine
 Migration, keine Oberfläche.
 
+> ## Stand der Umsetzung (2026-10-25)
+>
+> | Schritt | Stand |
+> |---|---|
+> | **S1 · Der Spiegel** | **gebaut**, Migration `0146` — **nirgends angewendet** |
+> | S2 · Meldungen | geplant, nicht gebaut |
+> | S3 · Plattformsicherung | geplant, nicht gebaut |
+> | S4–S6 · Oberfläche, Einstellungen, Rollout | geplant, nicht gebaut |
+>
+> **Die acht Entscheidungen sind getroffen** (Betreiber, 2026-10-25) und
+> stehen in Abschnitt 8.2 mit dem jeweiligen Stand. **D-4 weicht von meinem
+> Vorschlag ab:** Preissenkungen sind standardmäßig **aus**.
+>
+> **Drei Korrekturen an dieser Fassung**, aus der Umsetzung von S1:
+>
+> 1. `shop_offers()` filtert seit `0139` **`is_position_sellable(i.id)`**,
+>    nicht `is_shop_eligible()`. Abschnitt 1.2 nannte die alte Funktion.
+> 2. Die Gegenwart wird als **Sicht** `offer_state_live` gelesen, nicht als
+>    Unterabfrage in jeder Anweisung — siehe 3.2 und 4.1a.
+> 3. `refresh_offer_state()` ist **nur für `authenticated`** ausführbar, nicht
+>    für `anon`. Begründung in 3.4.
+
 > **Diese Fassung ersetzt den Entwurf vom selben Tag.** Der Entwurf schlug
 > vor, Benachrichtigungen **synchron in der Veröffentlichungstransaktion**
 > per Trigger auf `shop_inventory` zu schreiben und dafür eine Karenzzeit zu
@@ -43,9 +65,9 @@ sie bewegt sich bei **jedem** Warenkorb.
 from shop_inventory i join skylanders s cross join shop_settings st
 where i.is_listed
   and i.condition = public.v1_sale_condition()          -- V1 verkauft nur lose
-  and public.is_shop_eligible(i.sky_id)                 -- is_active ∧ catalog_visible
-                                                        -- ∧ item_type='figure'
-                                                        -- ∧ Kategorie sammelbar
+  and public.is_position_sellable(i.id)                 -- seit 0139: Listung,
+                                                        -- Freigabe, Artikeltyp,
+                                                        -- Kategorie, USK
   and public.shop_price(i.sale_price, s.market_price, st.price_percentage) is not null
 returns … (i.available_quantity > 0) as available
 ```
@@ -278,17 +300,39 @@ Ereigniszeilen; ein Verarbeiter macht daraus später Meldungen.
 **Kein Trigger. Zwei Stufen, beide lesend angestoßen.**
 
 ```
-Stufe 1 — DER SPIEGEL (global, gedrosselt, idempotent)
-  ein Statement: shop_offers() + v1-Regel  →  offer_state
-  schreibt nur, wo sich buyable oder cheapest_cents WIRKLICH geändert hat,
-  und setzt dort changed_at = now()
+Stufe 1 — DER SPIEGEL (global, gedrosselt, idempotent)      ← S1, gebaut
+  offer_state_live  =  shop_offers() + v1-Regel, als SICHT
+  refresh_offer_state()  schreibt die Sicht in offer_state,
+    changed_at nur bei echter Änderung, checked_at bei jedem Lauf,
+    gedrosselt auf offer_state_window() und durch
+    pg_try_advisory_xact_lock(146, 1) gegen parallele Läufe gesichert.
+    Antwort: ran | throttled | locked — drei unterscheidbare Fälle.
 
-Stufe 2 — DIE MELDUNG (je Leser, nur für dessen Favoriten)
+Stufe 2 — DIE MELDUNG (je Leser, nur für dessen Favoriten)   ← S2, geplant
   für jede favorisierte SKY-ID mit now() - changed_at >= grace:
+    **und** die Figur steht JETZT so in offer_state_live  ← Pflicht, s. u.
     vergleiche offer_state mit dem GEMELDETEN Zustand (announced_*)
     → A oder B nach Abschnitt 2, Zeile in favorite_notifications
     → announced_* := aktueller Zustand   (auch ohne Meldung)
 ```
+
+> ### **S2 MUSS gegen `offer_state_live` gegenprüfen**
+>
+> `checked_at` ist **keine** Frischegarantie. Eine Minute Drosselung heißt
+> nicht, dass der Spiegel eine Minute alt ist, sondern dass er **höchstens**
+> jede Minute nachgezogen wird. Das Szenario:
+>
+> 1. Der Spiegel sagt: kaufbar. 2. Das Angebot wird ausverkauft.
+> 3. Noch kein Abgleich. 4. Ein Sammler kommt. 5. Der Abgleich ist gesperrt
+> oder scheitert.
+>
+> Dann steht „kaufbar" im Spiegel und ist nicht mehr wahr. **Kein
+> Zeitstempel kann das verhindern.** S2 schreibt eine Meldung deshalb nur,
+> wo der Spiegel (*was sich geändert hat*) und die Sicht (*was jetzt gilt*)
+> übereinstimmen — in derselben Transaktion. S1 liefert dafür die drei
+> Voraussetzungen: die Sicht, `checked_at` als Alter, und drei
+> unterscheidbare Antworten, damit ein `locked` nie als eigener Erfolg
+> gelesen wird.
 
 | | |
 |---|---|
@@ -358,27 +402,68 @@ Phase.**
 
 ## 4. Datenmodell und Sicherheit
 
-### 4.1 `offer_state` — der Spiegel
+### 4.1a `offer_state_live` — die Gegenwart (gebaut, `0146`)
 
 ```sql
-create table public.offer_state (
-  sky_id          text primary key
-                    references public.skylanders (sky_id)
-                    on update cascade on delete restrict,
-  buyable         boolean not null,
-  cheapest_cents  integer check (cheapest_cents is null or cheapest_cents > 0),
-  -- Wann buyable/cheapest_cents sich WIRKLICH geaendert haben. Die Karenzzeit
-  -- rechnet hiergegen.
-  changed_at      timestamptz not null default now(),
-  -- Was zuletzt GEMELDET wurde. Der einzige echte Zustand dieser Tabelle:
-  -- alles andere ist aus shop_offers() neu herstellbar.
-  announced_buyable boolean,
-  announced_cents   integer,
-  announced_at      timestamptz,
-  constraint offer_state_price_consistent
-    check (buyable or cheapest_cents is null)
-);
+create view public.offer_state_live as
+  select o.sky_id, min(round(o.price * 100))::integer as cheapest_cents
+    from public.shop_offers() o
+   where o.available and o.condition = public.v1_sale_condition()
+   group by o.sky_id;
 ```
+
+**Eine Sicht und keine zweite Rechnung.** Hier steht kein Preis, keine
+Prozentzahl und keine Bestandsregel — `shop_offers()` beantwortet das. Der
+Zustandsfilter steht trotzdem da, obwohl die Projektion ihn seit `0029`
+selbst setzt: dieselbe Doppelung macht `v1BuyableOffers()` in
+`src/lib/shop/offer.ts`, und der Spiegel soll „was V1 verkauft" bedeuten,
+auch wenn die Projektion eines Tages breiter wird. **Kein Clientrecht** — die
+`definer`-Funktionen lesen sie als Eigentümer.
+
+### 4.1 `offer_state` — der Spiegel
+
+**Gebaut in `0146`, mit drei Abweichungen vom Entwurf.** Die Spalten:
+
+| Spalte | Typ | Aufgabe |
+|---|---|---|
+| `sky_id` | `text` **PK**, FK → `skylanders` RESTRICT | die Figur, exakt |
+| `buyable` | `boolean not null` | gibt es jetzt ein tatsächlich kaufbares Angebot |
+| `cheapest_cents` | `integer` | der günstigste kaufbare Preis in Cent, `null` wenn nicht kaufbar |
+| `changed_at` | `timestamptz not null` | die letzte **echte** Änderung. Die Karenzzeit rechnet hiergegen |
+| **`checked_at`** | `timestamptz not null` | die letzte **erfolgreiche Prüfung**. Neu gegenüber dem Entwurf |
+| `announced_buyable`, `announced_cents`, `announced_at` | | was zuletzt **gemeldet** wurde — der einzige nicht wiederherstellbare Teil |
+
+**Fünf CHECKs**, und zwei davon sind Entscheidungen:
+
+* `offer_state_checked_after_changed`: `checked_at >= changed_at`. Dass eine
+  Prüfung ohne Änderung `changed_at` nicht zurücksetzt, steht als **CHECK**
+  da und nicht als Absicht.
+* `offer_state_price_sane`: `cheapest_cents >= 0`, **nicht** `> 0`. Der
+  Entwurf hatte `> 0`. `shop_price()` rundet auf zwei Dezimalstellen, und
+  bei einem sehr kleinen Marktwert kann daraus `0.00` werden — ein `> 0`
+  hätte den ganzen Spiegellauf an einer solchen Zeile abbrechen lassen. Ein
+  Spiegel, der an echten Daten scheitert, ist schlechter als einer, der eine
+  Null abbildet.
+
+Dazu `offer_state_price_consistent` (kaufbar ⟺ es gibt einen Preis),
+`offer_state_announced_consistent` und `offer_state_announced_price_sane`.
+
+### 4.1b `refresh_offer_state()` (gebaut, `0146`)
+
+```
+returns table (ran boolean, reason text, rows_checked integer, rows_changed integer)
+security definer · volatile · search_path = '' · nur für authenticated
+```
+
+| | |
+|---|---|
+| **Drosselung** | `max(checked_at)` gegen `offer_state_window()` (eine Minute). **Kein zusätzlicher Zeitstempel**: ein erfolgreicher Lauf setzt `checked_at` auf jeder Zeile, also ist das Maximum genau der letzte Erfolg |
+| **Zweimal geprüft** | davor **und** unter dem Schloss. Zwei Aufrufe, die die erste Prüfung gleichzeitig passieren, würden sonst beide laufen |
+| **Schloss** | `pg_try_advisory_xact_lock(146, 1)`. `try`, damit ein zweiter Besucher nicht hängt; `xact`, damit ein **gescheiterter** Lauf keines zurücklässt und beim nächsten Aufruf wieder möglich ist |
+| **Erstbefüllung** | ist die Tabelle leer, entsteht jede Zeile **bereits gemeldet**. Ein Angebot, das seit Wochen steht, ist keine Neuigkeit. Jede **später** entstehende Zeile bekommt `announced_* = null` und ist damit zu Recht eine |
+| **Keine unnötigen Schreibvorgänge** | `changed_at` nur bei echter Änderung (`is distinct from`). `checked_at` wandert bei jedem Lauf — das ist der Preis der Frischeauskunft, und er ist bewusst bezahlt |
+| **Keine Zeile verschwindet** | „nicht kaufbar" ist ein Zustand, den S2 braucht; ohne ihn könnte die nächste Verfügbarkeit keine Kante sein |
+| **Keine personenbezogenen Daten** | die Funktion nennt `favorites` nicht, liest es nicht und kennt keine `user_id` |
 
 Eine Zeile je Figur, nicht je Ereignis. **Kein `seller_id`** — der Zustand
 gehört der Figur, so wie `shop_offers()` ihn für die Plattform beantwortet
@@ -721,16 +806,22 @@ Zwei echte Sammlerkonten, nach dem Muster von Abschnitt 10:
 
 ### 8.2 Entscheidungen, die der Betreiber treffen muss
 
-| # | Frage | Mein Vorschlag |
-|---|---|---|
-| **D-1** | Karenzzeit | **30 min**, abgeleitet aus `reservation_ttl()` + 10 |
-| **D-2** | Preisschwelle | **max(50 Cent, 5 %)**, in `shop_settings` |
-| **D-3** | Zusätzliche Tagessperre je Figur für B | **nein** für V1 |
-| **D-4** | Vorgaben der beiden Schalter | **beide an** |
-| **D-5** | Hinweis an der Karte auf `/favoriten` | **nein**; falls doch, dann Sortierung statt Symbol |
-| **D-6** | `offer_state` ganz oder nur `announced_*` ins Archiv | **ganz** |
-| **D-7** | Migrationsreihenfolge 6.2 (a) oder (b) | **(a)** |
-| **D-8** | Zählt die Zahl am Punkt „Favoriten" oder an einem neuen Glockensymbol | **„Favoriten"** |
+| # | Frage | **Entscheidung des Betreibers (2026-10-25)** | Stand |
+|---|---|---|---|
+| **D-1** | Karenzzeit | **30 min**, abgeleitet aus `reservation_ttl()` + 10 | in `0146` nur vorbereitet (`changed_at`); angewandt in S2 |
+| **D-2** | Preisschwelle | **max(0,50 €, 5 %)** gegenüber dem maßgeblichen Vergleichspreis | S2 |
+| **D-3** | Tagessperre je Figur für B | **nein** in V1 | S2 |
+| **D-4** | Vorgaben der zwei Schalter | neue Verfügbarkeit **an**, Preissenkung **aus** — *weicht von meinem Vorschlag ab* | S2 |
+| **D-5** | Hinweis an einzelnen Favoritenkarten | **nein** | S4 |
+| **D-6** | `offer_state` in der Plattformsicherung | **vollständig**, später Pflicht | vorbereitet: `0146` trägt `announced_*`, der Ausschluss nennt seinen Ablauf |
+| **D-7** | Migrationsreihenfolge | nach den tatsächlich vorhandenen Tabellen und Abhängigkeiten | `0146` legt an, die Folgemigration exportiert — Variante (a) aus 6.2 |
+| **D-8** | Zähler am Navigationspunkt | **„Favoriten"**, keine Glocke | S4 |
+
+**Für S1 relevant waren D-6 und D-7.** D-6 ist der Grund, warum die drei
+`announced_*`-Spalten schon jetzt in der Tabelle stehen und nicht erst mit
+S2 dazukommen: eine Spalte nachzurüsten ist eine Migration, und der
+Ausschluss aus dem Archiv muss bis dahin seinen Ablauf benennen. D-7 ist der
+Grund für die Reihenfolge *anlegen, dann exportieren*.
 
 ### 8.3 Die einfachere Alternative, falls das zu viel ist
 
@@ -755,7 +846,7 @@ Jeder Schritt ist für sich prüfbar und für sich zurücknehmbar.
 
 | Schritt | Inhalt | Prüfbar durch |
 |---|---|---|
-| **S1** | `0146`: `offer_state` + `refresh_offer_state()` — **nur der Spiegel**, keine Meldungen, keine Oberfläche. Dazu `offer_state_drift.sql`: stimmt der Spiegel mit `shop_offers()` überein? | Probelauf P53; eine Woche auf Staging mitlaufen lassen und die Driftprüfung fahren |
+| **S1** | **GEBAUT (2026-10-25).** `0146`: `offer_state`, die Sicht `offer_state_live`, `refresh_offer_state()`, `offer_state_window()` — **nur der Spiegel**, keine Meldungen, keine Oberfläche. **Nirgends angewendet.** | Probelauf **P53** (sechzehn Szenarien an echtem PostgreSQL), `src/lib/favorites/offer-state.test.ts` (48 Tests), Preflight und Postflight `0146`. **Noch offen:** eine Woche auf Staging mitlaufen lassen und die Drift gegen `offer_state_live` prüfen |
 | **S2** | `0147`: `favorite_notifications`, die zwei `profiles`-Spalten, `sync_favorite_notifications()` — **ohne Oberfläche** | Probelauf P54, `verify:rls:staging` Abschnitt 11 |
 | **S3** | Exportmigration: `favorites`, `favorite_notifications`, `offer_state` ins Plattformarchiv, Formatversion 3 | `verify:platform-archive`, Bereichszahl, beide Vollständigkeitswächter |
 | **S4** | Oberfläche: Zahl in der Leiste, Posteingang auf `/favoriten`, Quittieren | DOM-Tests mit echten Klicks (Muster `favorite-interaction.test.tsx`), Browser-Durchlauf |
