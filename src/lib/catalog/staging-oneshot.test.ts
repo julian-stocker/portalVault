@@ -387,6 +387,9 @@ const LAEUFE = [
   /* Und `0145` — die Favoriten (ADR-0136). Eine Tabelle, drei Richtlinien,
      eine Aggregatfunktion; rein additiv. */
   ["supabase/operations/staging-0145.sql", "0145_favorites.sql"],
+  /* Und `0146` — der Angebotsspiegel (Phase 4 S1). Eine Tabelle, eine
+     Sicht, zwei Funktionen, KEIN Trigger; rein additiv. */
+  ["supabase/operations/staging-0146.sql", "0146_offer_state.sql"],
 ] as const;
 
 describe("die Einzellaeufe fuer 0139 bis 0143", () => {
@@ -486,6 +489,8 @@ const LESELAEUFE_OHNE_Z0 = [
   ["supabase/operations/staging-s-postflight-0144.sql", "0144_postflight.sql"],
   ["supabase/operations/staging-s-preflight-0145.sql", "0145_preflight.sql"],
   ["supabase/operations/staging-s-postflight-0145.sql", "0145_postflight.sql"],
+  ["supabase/operations/staging-s-preflight-0146.sql", "0146_preflight.sql"],
+  ["supabase/operations/staging-s-postflight-0146.sql", "0146_postflight.sql"],
 ] as const;
 
 describe.each(LESELAEUFE_OHNE_Z0)("der lesende Staging-Lauf %s", (skript, pruefdatei) => {
@@ -663,6 +668,8 @@ const PROD_LESELAEUFE_BASIS = [
   ["supabase/operations/prod-s-postflight-0144.sql", "0144_postflight.sql", "post"],
   ["supabase/operations/prod-s-preflight-0145.sql", "0145_preflight.sql", "pre"],
   ["supabase/operations/prod-s-postflight-0145.sql", "0145_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0146.sql", "0146_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0146.sql", "0146_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -1296,6 +1303,9 @@ const PRODUKTIONSLAEUFE = [
   /* `0145`: die Favoriten. NICHT fahren, bevor die Folgemigration sie in die
      Plattformsicherung aufgenommen hat — die Huelle sagt es in ihrem Kopf. */
   ["supabase/operations/prod-0145.sql", "0145_favorites.sql"],
+  /* `0146`: der Angebotsspiegel. NICHT fahren, bevor die Folgemigration
+     favorites UND offer_state in die Plattformsicherung aufgenommen hat. */
+  ["supabase/operations/prod-0146.sql", "0146_offer_state.sql"],
 ] as const;
 
 describe("die zehn Production-Laeufe", () => {

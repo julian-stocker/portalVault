@@ -4251,6 +4251,431 @@ async function main(): Promise<void> {
     });
   }
 
+
+  /* P53 — `0146`: DER ANGEBOTSSPIEGEL, und jeder Zustandswechsel gefahren.
+   *
+   * Was ein Probelauf hier zeigt und kein Test im Arbeitsbaum: der Spiegel
+   * reagiert auf ECHTE Vorgaenge. Ein Quelltextvergleich kann sagen, dass
+   * `changed_at` in einem `case` steht; er kann nicht sagen, dass es nach
+   * einer Reservierung unveraendert bleibt.
+   *
+   * NEUN SZENARIEN, die der Auftrag nennt — und die Erstbefuellung, die
+   * Drosselung und die Ruecknahme dazu.
+   *
+   * WAS DAFUER GESTELLT WIRD. `shop_offers()` wird fuer diesen Durchgang
+   * ERSETZT, und zwar durch eine Fassung, die alle DREI Preisquellen
+   * wirklich benutzt: `sale_price`, `market_price` und `price_percentage`,
+   * durch `shop_price()` gerechnet. `available_quantity` wird als generierte
+   * Spalte neu angelegt, weil das Stub-Schema Generierung nicht uebernimmt —
+   * so reagiert der Spiegel auf `reserved` genau wie im Betrieb.
+   *
+   * WAS ER NICHT ZEIGT: die Antwort `locked`. PGlite faehrt EINE Verbindung,
+   * und ein Beratschlagungsschloss laesst dieselbe Sitzung wieder durch.
+   * Dass der Zweig existiert und `locked` zurueckgibt, prueft
+   * `src/lib/favorites/offer-state.test.ts`; dass er im Betrieb greift,
+   * gehoert in die funktionale Staging-Pruefung.
+   */
+  {
+    const M146 = join(MIG_DIR, "0146_offer_state.sql");
+    const R146 = "supabase/rollback/R0146_drop_offer_state.sql";
+    /*
+     * `Date` UND NICHT `string`. PGlite gibt `timestamptz` als JS-`Date`
+     * zurueck, und zwei `Date`-Objekte sind NIEMALS `===` — der erste
+     * Leerlauftest meldete deshalb „changed_at hat sich geaendert", obwohl
+     * die Funktion sie korrekt stehen liess. Verglichen wird mit `+date`,
+     * also als Zahl.
+     */
+    type Zeile = {
+      sky_id: string; buyable: boolean; cheapest_cents: number | null;
+      changed_at: Date; checked_at: Date;
+      announced_buyable: boolean | null; announced_cents: number | null;
+      announced_at: Date | null;
+    };
+
+    const db = await frisch();
+    /* Das Stub-Schema entsteht aus ALLEN Migrationen und traegt beides schon.
+       Beide fallen, damit `0146` wirklich LAEUFT. */
+    await db.exec("drop function if exists public.refresh_offer_state();");
+    await db.exec("drop view if exists public.offer_state_live;");
+    await db.exec("drop table if exists public.offer_state cascade;");
+    await db.exec("drop function if exists public.offer_state_window();");
+
+    await attrappenFuerBaseline(db);
+
+    await db.exec(`
+      alter table public.skylanders add constraint z_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug, market_price)
+      values ('SKY-7001', 'Probe Bash', 'probe-bash', 20.00),
+             ('SKY-7002', 'Probe Legendary Bash', 'probe-legendary-bash', 30.00)
+        on conflict do nothing;
+      insert into public.shop_settings (id, price_percentage)
+      values (true, 100) on conflict do nothing;
+      -- DIE GENERIERTE SPALTE, wie im Betrieb: available_quantity ist
+      -- quantity - reserved. Das Stub-Schema uebernimmt Generierung nicht,
+      -- also wird sie hier neu angelegt — sonst reagierte der Spiegel nicht
+      -- auf eine Reservierung, und genau das soll er.
+      --
+      -- (Als SQL-Kommentar, nicht als Blockkommentar: dieser Text steht in
+      -- einem Template-Literal, und ein Gravis darin wuerde es beenden.)
+      alter table public.shop_inventory drop column if exists available_quantity;
+      alter table public.shop_inventory
+        add column available_quantity integer
+        generated always as (quantity - reserved) stored;
+      create sequence if not exists public.z_inv_seq start 1;
+      alter table public.shop_inventory alter column id set default nextval('public.z_inv_seq');`);
+
+    /*
+     * Die ersetzte Projektion. Sie benutzt `shop_price()` wirklich, also
+     * haengen alle drei Preisquellen daran — und `available` kommt aus der
+     * generierten Spalte.
+     */
+    await db.exec(`
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $probe$
+        select i.sky_id, i.condition,
+               public.shop_price(i.sale_price, s.market_price, st.price_percentage),
+               (i.available_quantity > 0),
+               null::text
+          from public.shop_inventory i
+          join public.skylanders s on s.sky_id = i.sky_id
+          cross join public.shop_settings st
+         where i.is_listed
+           and i.condition = public.v1_sale_condition()
+           and public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+               is not null;
+      $probe$;`);
+
+    /* Zwei Lagerzeilen: die Basisfigur zu 20 EUR, die Variante zu 30. */
+    await db.exec(`
+      insert into public.shop_inventory (sky_id, condition, quantity, reserved, is_listed)
+      values ('SKY-7001', 'loose', 2, 0, true),
+             ('SKY-7002', 'loose', 1, 0, true);`);
+
+    /* -------------------------------------------------------- Werkzeuge */
+    const wert = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    /** Den Spiegel lesen, nach SKY-ID. */
+    const spiegel = async (): Promise<Map<string, Zeile>> => {
+      const r = (await db.query(
+        "select * from public.offer_state order by sky_id")) as { rows: Zeile[] };
+      return new Map(r.rows.map((z) => [z.sky_id, z]));
+    };
+    /** Die Drossel oeffnen: so tun, als waere der letzte Lauf lange her. */
+    const oeffne = async () => {
+      await db.exec(
+        "update public.offer_state set checked_at = changed_at;"
+        + "update public.offer_state set changed_at = changed_at - interval '2 hours',"
+        + " checked_at = checked_at - interval '2 hours';");
+    };
+    /** Auffrischen und die Antwort lesen. */
+    const ruf = async (): Promise<{ ran: boolean; reason: string; changed: number }> => {
+      const r = (await db.query("select * from public.refresh_offer_state()")) as {
+        rows: { ran: boolean; reason: string; rows_changed: number }[] };
+      return { ran: r.rows[0].ran, reason: r.rows[0].reason,
+               changed: r.rows[0].rows_changed };
+    };
+    const befund: string[] = [];
+    const sag = (was: string, gut: boolean, text: string) => {
+      befund.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+
+    /* 1. Der Lauf. */
+    const lauf = await fahre(db, M146);
+    let ok = lauf === null;
+
+    const spalten = ok ? await wert(
+      "select string_agg(column_name, ',' order by ordinal_position) as w "
+      + "from information_schema.columns where table_schema = 'public' "
+      + "and table_name = 'offer_state'") : "-";
+    ok = ok && sag("Spalten", spalten === "sky_id,buyable,cheapest_cents,changed_at,"
+      + "checked_at,announced_buyable,announced_cents,announced_at", spalten);
+
+    const leer = ok ? await wert("select count(*)::text as w from public.offer_state") : "-";
+    ok = ok && sag("Migration legt keine Zeile an", leer === "0", `${leer} Zeilen`);
+
+    /* 2. ERSTBEFUELLUNG: beide Figuren kaufbar, und BEREITS GEMELDET. */
+    let erst = "-";
+    if (ok) {
+      const a = await ruf();
+      const s = await spiegel();
+      const beide = s.size === 2;
+      const gemeldet = [...s.values()].every(
+        (z) => z.announced_buyable === true && z.announced_at !== null
+               && z.announced_cents === z.cheapest_cents);
+      const preise = s.get("SKY-7001")?.cheapest_cents === 2000
+                  && s.get("SKY-7002")?.cheapest_cents === 3000;
+      erst = `${a.reason}, ${s.size} Zeilen, gemeldet ${gemeldet}, Preise ${preise}`;
+      ok = sag("Erstbefuellung", a.ran && beide && gemeldet && preise, erst);
+    }
+
+    /* 3. DROSSELUNG: sofort nochmal → `throttled`, nichts geaendert. */
+    let drossel = "-";
+    if (ok) {
+      const a = await ruf();
+      drossel = `${a.reason}, ${a.changed} geaendert`;
+      ok = sag("Drosselung", !a.ran && a.reason === "throttled" && a.changed === 0, drossel);
+    }
+
+    /* 4. KEINE UNNOETIGEN SCHREIBVORGAENGE: Drossel oeffnen, nichts aendern,
+     *    auffrischen → `changed_at` bleibt, `checked_at` wandert. */
+    let leerlauf = "-";
+    if (ok) {
+      await oeffne();
+      const vor = await spiegel();
+      const a = await ruf();
+      const nach = await spiegel();
+      const z = "SKY-7001";
+      const changedGleich = +vor.get(z)!.changed_at === +nach.get(z)!.changed_at;
+      const checkedNeu = +nach.get(z)!.checked_at > +vor.get(z)!.checked_at;
+      leerlauf = `${a.reason}, ${a.changed} geaendert, changed_at gleich `
+        + `${changedGleich}, checked_at neu ${checkedNeu}`;
+      ok = sag("Leerlauf", a.ran && a.changed === 0 && changedGleich && checkedNeu,
+               leerlauf);
+    }
+
+    /* 5. RESERVIERUNGSFLATTERN: voll reserviert → wieder frei.
+     *    Der Spiegel muss BEIDE Kanten sehen — S2 entscheidet spaeter, dass
+     *    daraus keine Meldung wird. */
+    let flattern = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_inventory set reserved = quantity "
+        + "where sky_id = 'SKY-7001';");
+      const a1 = await ruf();
+      const s1 = await spiegel();
+      await oeffne();
+      await db.exec("update public.shop_inventory set reserved = 0 "
+        + "where sky_id = 'SKY-7001';");
+      const a2 = await ruf();
+      const s2 = await spiegel();
+      const z = "SKY-7001";
+      const raus = s1.get(z)!.buyable === false && s1.get(z)!.cheapest_cents === null;
+      const rein = s2.get(z)!.buyable === true && s2.get(z)!.cheapest_cents === 2000;
+      /* Der GEMELDETE Stand hat sich nie bewegt — das ist der Flattern-Schutz. */
+      const gemeldetGleich = s2.get(z)!.announced_buyable === true;
+      flattern = `raus ${raus} (${a1.changed}), rein ${rein} (${a2.changed}), `
+        + `gemeldet unveraendert ${gemeldetGleich}`;
+      ok = sag("Reservierungsflattern", raus && rein && gemeldetGleich
+        && a1.changed === 1 && a2.changed === 1, flattern);
+    }
+
+    /* 6. AUSVERKAUFT → WIEDER AUFGEFUELLT (ueber `quantity`, nicht `reserved`). */
+    let bestand = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_inventory set quantity = 0 "
+        + "where sky_id = 'SKY-7001';");
+      await ruf();
+      const s1 = await spiegel();
+      await oeffne();
+      await db.exec("update public.shop_inventory set quantity = 3 "
+        + "where sky_id = 'SKY-7001';");
+      await ruf();
+      const s2 = await spiegel();
+      bestand = `ausverkauft ${!s1.get("SKY-7001")!.buyable}, `
+        + `nachgeliefert ${s2.get("SKY-7001")!.buyable}`;
+      ok = sag("Bestand", !s1.get("SKY-7001")!.buyable && s2.get("SKY-7001")!.buyable,
+               bestand);
+    }
+
+    /* 7. NICHT KAUFBAR → KAUFBAR ueber `is_listed` (Veroeffentlichung). */
+    let listung = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_inventory set is_listed = false "
+        + "where sky_id = 'SKY-7002';");
+      await ruf();
+      const s1 = await spiegel();
+      await oeffne();
+      await db.exec("update public.shop_inventory set is_listed = true "
+        + "where sky_id = 'SKY-7002';");
+      await ruf();
+      const s2 = await spiegel();
+      listung = `entlistet ${!s2.get("SKY-7002")!.buyable === false
+        && !s1.get("SKY-7002")!.buyable}, wieder gelistet `
+        + `${s2.get("SKY-7002")!.buyable}`;
+      ok = sag("Veroeffentlichung", !s1.get("SKY-7002")!.buyable
+        && s2.get("SKY-7002")!.buyable, listung);
+    }
+
+    /* 8. PREIS SINKT und STEIGT — ueber `sale_price` (Quelle 1). */
+    let preis1 = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_inventory set sale_price = 14.99 "
+        + "where sky_id = 'SKY-7001';");
+      const a1 = await ruf();
+      const s1 = await spiegel();
+      await oeffne();
+      await db.exec("update public.shop_inventory set sale_price = 17.50 "
+        + "where sky_id = 'SKY-7001';");
+      const a2 = await ruf();
+      const s2 = await spiegel();
+      preis1 = `gesunken ${s1.get("SKY-7001")!.cheapest_cents} (${a1.changed}), `
+        + `gestiegen ${s2.get("SKY-7001")!.cheapest_cents} (${a2.changed})`;
+      ok = sag("sale_price", s1.get("SKY-7001")!.cheapest_cents === 1499
+        && s2.get("SKY-7001")!.cheapest_cents === 1750
+        && a1.changed === 1 && a2.changed === 1, preis1);
+    }
+
+    /* 9. QUELLE 2: `market_price`. Der Override muss weg, sonst gewinnt er. */
+    let preis2 = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_inventory set sale_price = null "
+        + "where sky_id = 'SKY-7001';"
+        + "update public.skylanders set market_price = 11.00 where sky_id = 'SKY-7001';");
+      await ruf();
+      const s = await spiegel();
+      preis2 = `${s.get("SKY-7001")!.cheapest_cents} Cent`;
+      ok = sag("market_price", s.get("SKY-7001")!.cheapest_cents === 1100, preis2);
+    }
+
+    /* 10. QUELLE 3: `price_percentage` — EINE Zahl, alle automatischen Preise. */
+    let preis3 = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec("update public.shop_settings set price_percentage = 50;");
+      const a = await ruf();
+      const s = await spiegel();
+      /* 11,00 * 50 % = 5,50 und 30,00 * 50 % = 15,00 — beide Figuren. */
+      preis3 = `SKY-7001 ${s.get("SKY-7001")!.cheapest_cents}, `
+        + `SKY-7002 ${s.get("SKY-7002")!.cheapest_cents}, ${a.changed} geaendert`;
+      ok = sag("price_percentage", s.get("SKY-7001")!.cheapest_cents === 550
+        && s.get("SKY-7002")!.cheapest_cents === 1500 && a.changed === 2, preis3);
+      await db.exec("update public.shop_settings set price_percentage = 100;");
+    }
+
+    /* 11. MEHRERE ANGEBOTE EINER FIGUR: das guenstigste verschwindet, ein
+     *     teureres bleibt — und kehrt dann zurueck. `min` muss folgen. */
+    let mehrere = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec(
+        "update public.shop_inventory set sale_price = 20.00 where sky_id = 'SKY-7001';"
+        + "insert into public.shop_inventory (sky_id, condition, quantity, reserved,"
+        + " is_listed, sale_price) values ('SKY-7001', 'loose', 1, 0, true, 12.00);");
+      await ruf();
+      const s1 = await spiegel();
+      await oeffne();
+      /* Das guenstige ausverkaufen. */
+      await db.exec("update public.shop_inventory set quantity = 0 "
+        + "where sky_id = 'SKY-7001' and sale_price = 12.00;");
+      await ruf();
+      const s2 = await spiegel();
+      await oeffne();
+      /* Und zurueck. */
+      await db.exec("update public.shop_inventory set quantity = 1 "
+        + "where sky_id = 'SKY-7001' and sale_price = 12.00;");
+      await ruf();
+      const s3 = await spiegel();
+      mehrere = `min ${s1.get("SKY-7001")!.cheapest_cents} → `
+        + `${s2.get("SKY-7001")!.cheapest_cents} → ${s3.get("SKY-7001")!.cheapest_cents}`;
+      ok = sag("mehrere Angebote", s1.get("SKY-7001")!.cheapest_cents === 1200
+        && s2.get("SKY-7001")!.cheapest_cents === 2000
+        && s3.get("SKY-7001")!.cheapest_cents === 1200, mehrere);
+    }
+
+    /* 12. VIELE AENDERUNGEN IN EINER MINUTE: nur der erste Lauf greift. */
+    let schnell = "-";
+    if (ok) {
+      await oeffne();
+      const a1 = await ruf();                     // laeuft
+      await db.exec("update public.shop_inventory set quantity = 0 where sky_id = 'SKY-7002';");
+      const a2 = await ruf();                     // gedrosselt
+      await db.exec("update public.shop_inventory set quantity = 5 where sky_id = 'SKY-7002';");
+      const a3 = await ruf();                     // gedrosselt
+      const s = await spiegel();
+      schnell = `${a1.reason}/${a2.reason}/${a3.reason}, SKY-7002 kaufbar `
+        + `${s.get("SKY-7002")!.buyable}`;
+      ok = sag("Drosselung bei schnellen Aenderungen",
+        a1.ran && a2.reason === "throttled" && a3.reason === "throttled"
+        && s.get("SKY-7002")!.buyable === true, schnell);
+    }
+
+    /* 13. LAENGER ALS 30 MINUTEN STABIL: `changed_at` bleibt alt, `checked_at`
+     *     wandert — genau die Lage, in der S2 spaeter meldet. */
+    let stabil = "-";
+    if (ok) {
+      await db.exec(
+        "update public.offer_state set changed_at = now() - interval '45 minutes',"
+        + " checked_at = now() - interval '45 minutes';");
+      const a = await ruf();
+      const s = await spiegel();
+      const z = s.get("SKY-7001")!;
+      const alt = await wert(
+        "select (now() - changed_at > interval '30 minutes')::text as w "
+        + "from public.offer_state where sky_id = 'SKY-7001'");
+      stabil = `${a.reason}, ${a.changed} geaendert, ueber 30 min stabil ${alt}, `
+        + `checked_at frisch ${+z.checked_at > +z.changed_at}`;
+      ok = sag("30 Minuten stabil", a.ran && a.changed === 0 && alt === "true"
+        && +z.checked_at > +z.changed_at, stabil);
+    }
+
+    /* 14. KEINE ZEILE VERSCHWINDET, und `announced_*` hat S1 nie angefasst. */
+    let unberuehrt = "-";
+    if (ok) {
+      const s = await spiegel();
+      const nurErst = [...s.values()].every((z) => z.announced_buyable === true);
+      unberuehrt = `${s.size} Zeilen, announced_* unveraendert ${nurErst}`;
+      ok = sag("announced_* unberuehrt", s.size === 2 && nurErst, unberuehrt);
+    }
+
+    /* 15. EINE SPAETER DAZUKOMMENDE FIGUR ist eine NEUIGKEIT: announced_* null. */
+    let neue = "-";
+    if (ok) {
+      await oeffne();
+      await db.exec(
+        "insert into public.skylanders (sky_id, name, slug, market_price)"
+        + " values ('SKY-7003', 'Probe Neu', 'probe-neu', 9.00);"
+        + "insert into public.shop_inventory (sky_id, condition, quantity, reserved,"
+        + " is_listed) values ('SKY-7003', 'loose', 1, 0, true);");
+      await ruf();
+      const s = await spiegel();
+      const z = s.get("SKY-7003");
+      neue = z === undefined ? "fehlt"
+        : `kaufbar ${z.buyable}, announced ${z.announced_buyable ?? "null"}`;
+      ok = sag("spaetere Figur ist Neuigkeit",
+        z !== undefined && z.buyable && z.announced_buyable === null
+        && z.announced_at === null, neue);
+    }
+
+    /* 16. DIE RUECKNAHME: bricht ab, solange ein gemeldeter Stand steht. */
+    let mitGemeldet = "-";
+    let ohneGemeldet = "-";
+    let fort = "-";
+    if (ok) {
+      const r1 = await fahre(db, R146);
+      mitGemeldet = r1 === null ? "DURCHGELAUFEN — Befund" : "bricht ab";
+      await db.exec("update public.offer_state set announced_buyable = null,"
+        + " announced_cents = null, announced_at = null;");
+      const r2 = await fahre(db, R146);
+      ohneGemeldet = r2 ?? "durch";
+      fort = r2 === null ? await wert(
+        "select ((to_regclass('public.offer_state') is null)"
+        + " and (to_regclass('public.offer_state_live') is null)"
+        + " and (to_regprocedure('public.refresh_offer_state()') is null)"
+        + " and (to_regprocedure('public.offer_state_window()') is null))::text as w")
+        : "-";
+      ok = sag("Ruecknahme", typeof r1 === "string" && r1.includes("GEMELDETEN Stand")
+        && r2 === null && fort === "true",
+        `mit gemeldetem Stand: ${mitGemeldet}, ohne: ${ohneGemeldet}, fort ${fort}`);
+    }
+
+    probe.push({
+      name: "P53 0146 spiegelt die Angebotslage: Erstbefuellung bereits gemeldet, alle drei "
+        + "Preisquellen, Reservierungsflattern sichtbar, Drosselung greift, keine unnoetigen "
+        + "Schreibvorgaenge, Ruecknahme schuetzt den gemeldeten Stand",
+      ok: lauf === null && ok,
+      sagt: `0146: ${lauf ?? "durch"} · Spalten ${spalten} · ${befund.join(" · ")}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);

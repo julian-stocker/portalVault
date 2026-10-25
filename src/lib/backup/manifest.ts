@@ -262,6 +262,24 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * heute in `PLATFORM_EXCLUDED_TABLES` — mit Ablaufdatum und einer
    * Bedingung, nicht als Urteil (siehe dort, ADR-0136).
    */
+  /*
+   * DAUERHAFT DRAUSSEN, und hier ist der Ausschluss kein Zwischenstand.
+   *
+   * `offer_state` (`0146`) ist ein abgeleiteter Betriebszustand: was der
+   * Spiegel sagt, sagt `shop_offers()` auch — und das ist dieselbe Quelle,
+   * aus der `shop_inventory` in diesem Export schon stammt. Die
+   * `announced_*`-Spalten gehören dagegen zur Benachrichtigung eines
+   * NUTZERS; in einem Händlerexport hätten sie nichts zu suchen.
+   *
+   * Wo er hingehört: in die Plattformsicherung (siehe dort).
+   */
+  offer_state:
+    "Der Angebotsspiegel (0146). Abgeleiteter Betriebszustand — was er sagt, " +
+    "sagt shop_offers() auch, und shop_inventory steht in diesem Export " +
+    "schon. Die announced_*-Spalten gehören zur Benachrichtigung eines " +
+    "Nutzers und nicht in einen Händlerexport. Gehört in die " +
+    "Plattformsicherung (ADR-0136, D-6).",
+
   favorites:
     "Vorgemerkte Figuren eines Sammlers (0145). Sie hängen an user_id, das dieser " +
     "Export als Kontoidentität sperrt — und eine Vormerkung ist kein " +

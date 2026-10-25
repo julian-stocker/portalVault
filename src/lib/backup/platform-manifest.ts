@@ -771,6 +771,36 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * diesem Eintrag an Ort und Stelle wäre ein Bruch davon.
    * `supabase/checks/platform_export_gap.md` führt ihn als offenen Punkt.
    */
+  /*
+   * DRAUSSEN AUF ZEIT, aus derselben Reihenfolge-Not wie `favorites`
+   * (`0146`, Phase 4 S1).
+   *
+   * `offer_state` ist der Angebotsspiegel. `buyable`, `cheapest_cents` und
+   * `changed_at` sind jederzeit aus `shop_offers()` neu herstellbar — die
+   * drei `announced_*`-Spalten **nicht**. Sie halten, was einem Nutzer
+   * zuletzt gemeldet wurde, und ein Archiv ohne sie würde nach einer
+   * Wiederherstellung **jede** Figur neu melden.
+   *
+   * **Sie gehört also ins Archiv**, und der Betreiber hat das als D-6
+   * entschieden. Dass sie heute hier steht, hat denselben Grund wie bei
+   * `favorites`: ein Bereich im Archiv heißt `system_platform_export()`
+   * ersetzen, und diese Funktion prüft den `md5` ihrer Vorgängerfassung.
+   * `0144` liegt auf Staging, nicht auf Production.
+   *
+   * **Die Folgemigration nimmt beide zusammen auf** (Formatversion 3), und
+   * das muss vor dem Production-Rollout geschehen — siehe ADR-0136 und
+   * `supabase/checks/platform_export_gap.md`.
+   */
+  offer_state:
+    "Der Angebotsspiegel (0146). GEHOERT INS ARCHIV — nicht wegen des " +
+    "Spiegels, der aus shop_offers() neu entsteht, sondern wegen der drei " +
+    "announced_*-Spalten: sie halten den zuletzt gemeldeten Stand, und ohne " +
+    "sie würde nach einer Wiederherstellung jede Figur neu gemeldet. " +
+    "Vorübergehend draußen, weil ein Bereich system_platform_export() " +
+    "ersetzen würde und 0144 noch nicht auf Production liegt. Die " +
+    "Folgemigration nimmt sie mit favorites zusammen auf (Formatversion 3); " +
+    "das muss VOR dem Production-Rollout geschehen (ADR-0136, D-6).",
+
   favorites:
     "Vorgemerkte Figuren eines Sammlers (0145). Persönliche Nutzerdaten und " +
     "GEHOERT INS ARCHIV — vorübergehend draußen, weil ein Bereich " +

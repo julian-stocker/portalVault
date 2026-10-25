@@ -12922,6 +12922,18 @@ Trigger** — sie setzt an `shop_offers()` an, ist damit automatisch
 marktplatztauglich, und ein Fehler darin kann den Shop strukturell nicht
 erreichen.
 
+**Schritt S1 davon ist gebaut (`0146`, 2026-10-25, nirgends angewendet):**
+`offer_state` als Gedächtnis, `offer_state_live` als Sicht auf die
+Gegenwart, `refresh_offer_state()` als gedrosselter Vergleich. **Kein
+Trigger**, und die Nachbedingung der Migration misst das. Die Funktion gibt
+**drei** unterscheidbare Antworten (`ran`/`throttled`/`locked`), weil ein
+Aufrufer einen fremden Lauf niemals als eigenen Erfolg lesen darf — und
+weil `checked_at` **keine Frischegarantie** ist: S2 muss vor einer Meldung
+gegen `offer_state_live` gegenprüfen. Die acht Entscheidungen D-1 bis D-8
+sind getroffen und stehen in `docs/FAVORITE_NOTIFICATIONS.md`, Abschnitt
+8.2; **D-4 weicht von meinem Vorschlag ab** (Preissenkungen standardmäßig
+aus).
+
 ### Konsequenzen
 
 - Die Katalogkarte bekommt ein Herz **in der Geschwister-Ebene über dem
