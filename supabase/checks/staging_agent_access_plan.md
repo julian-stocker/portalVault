@@ -478,6 +478,44 @@ printf 'SKYISLES_STAGING_DB_URL=%s\n' '<URL aus Schritt 1 mit dem neuen Passwort
 chmod 600 ~/.skyisles/staging-db.env
 ```
 
+**An die URL gehört `?sslmode=verify-full`**, ausgeschrieben (ADR-0138).
+`require` wird abgelehnt: in `pg` 8.23 ist es noch ein Alias für
+Vollprüfung, ab `pg` v9 bekommt es libpq-Semantik und prüfte das Zertifikat
+nicht mehr.
+
+### Schritt 3b · Die CA des Poolers holen — einmal je Rechner
+
+Der Session-Pooler präsentiert eine **private** Kette:
+
+```
+*.pooler.supabase.com  ←  Supabase Intermediate 2021 CA
+                       ←  Supabase Root 2021 CA   (selbstsigniert)
+```
+
+Diese Wurzel steht in keinem öffentlichen Vertrauensspeicher. Ohne sie endet
+der Handschlag mit `self-signed certificate in certificate chain` — es fehlt
+die **CA**, nicht die Verschlüsselung.
+
+1. Dashboard → Project Settings → Database → **SSL Configuration** →
+   *Download certificate*. Die Datei heißt `prod-ca-2021.crt`.
+2. Ablegen und sichern:
+
+```bash
+mv ~/Downloads/prod-ca-2021.crt ~/.skyisles/supabase-ca.crt
+chmod 600 ~/.skyisles/supabase-ca.crt
+# Gegenprobe — muss 807025ad50d4ed21… ergeben:
+openssl x509 -in ~/.skyisles/supabase-ca.crt -outform der | shasum -a 256
+```
+
+**Warum aus dem Dashboard und nicht aus der Verbindung.** Die Kette, die der
+Server präsentiert, ist keine Vertrauensquelle: wer die Verbindung umlenkt,
+liefert seine eigene Wurzel mit. Der Download ist der unabhängige Weg; der
+Abdruck oben ist nur die Gegenprobe, dass beide dasselbe meinen.
+
+Ein anderer Pfad geht mit `SKYISLES_STAGING_DB_CA`. Die Datei ist **kein
+Geheimnis** — ein CA-Zertifikat ist öffentlich; sie liegt außerhalb des
+Repositorys, weil sie rechnerlokale Einrichtung ist und keine Projektdatei.
+
 **Production bleibt unangetastet.** `.env.local` bleibt liegen, die 18
 `:prod`-Skripte bleiben, wie sie sind. Phase A liest, verschiebt und
 importiert **keine** Production-Zugangsdaten — sie braucht genau eine

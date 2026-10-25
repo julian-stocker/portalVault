@@ -108,6 +108,19 @@ npm run db:migrate:staging -- 0146 --resume   # Nachkontrolle
 | Production | **kein** `db:migrate:prod`, absichtlich. Dort bleibt der Weg von Hand, mit **frisch auf Production gemessenen** Baselines |
 | Nachweise | 62 Prüfungen in `src/lib/admin/migration-runner.test.ts`, davon die Reihenfolgezusagen als **durchlaufener** Ablauf (Verbindung und Prüfdateien eingesetzt). Vier Mutationen am Runner — Riegel entfernt, Akte überschrieben, Baselines im Wiederaufnahmezweig neu erhoben, roter Preflight ignoriert — werden alle rot |
 
+**TLS nachgezogen (2026-10-25, ADR-0138).** Der erste Lauf scheiterte mit
+`self-signed certificate in certificate chain`: der Session-Pooler präsentiert eine **private**
+Kette (`*.pooler.supabase.com` ← `Supabase Intermediate 2021 CA` ← `Supabase Root 2021 CA`),
+und diese Wurzel steht in keinem öffentlichen Vertrauensspeicher. Es fehlte die CA, nicht die
+Verschlüsselung. Jetzt: `sslmode=verify-full` ausgeschrieben verlangt, verbunden mit **diskreten
+Feldern** statt einer Verbindungszeichenkette (ein `ssl`-Objekt neben einer `connectionString`
+wird von `pg` verworfen — nachgemessen), `ssl: { ca }` aus `~/.skyisles/supabase-ca.crt`, damit
+genau eine Wurzel vertraut wird statt ~150. `NODE_TLS_REJECT_UNAUTHORIZED=0` und
+`uselibpqcompat` sind Abbrüche. Gegen Staging gemessen: Handschlag gelingt, Antwort `28P01` —
+**das Passwort in der Zugangsdatei ist nicht mehr gültig** (vier Zeichen), das bleibt zu tun.
+**Einmalige Einrichtung je Rechner:** CA aus dem Dashboard holen und ein Wort in der
+Zugangsdatei ändern — `staging_agent_access_plan.md`, Schritt 3 und 3b.
+
 **Noch nicht gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist vorbereitet und
 ausdrücklich nicht eigenmächtig ausgeführt. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
