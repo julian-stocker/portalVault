@@ -30,6 +30,7 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import { FavoriteDemandIndicator } from "@/components/business/favorite-demand-indicator";
 import { AdminThumb } from "@/components/admin/admin-thumb";
 import { PriceEditor } from "@/components/admin/price-editor";
 import { StockLedger } from "@/components/admin/stock-ledger";
@@ -224,6 +225,20 @@ export function InventoryCard({
             {` · ${conditionLabel}`}
           </span>
         </p>
+
+        {/*
+          DIE NACHFRAGE, ZWISCHEN TITEL UND SHOP-SCHALTER (0145, ADR-0136).
+
+          Hier und nicht in einer eigenen Zeile: der Kopf der Karte ist eine
+          Zeile, und eine zweite darunter machte jede der knapp 290 Karten
+          hoeher — fuer eine Zahl, die die meisten nicht haben. `shrink-0`,
+          also weicht der Titel und nicht die Zahl; und sie steht VOR dem
+          Schalter, also ueberdeckt sie keine Bedienflaeche.
+
+          Bei null erscheint nichts (`FavoriteDemandIndicator`). Das ist der
+          Normalfall, und 290 Nullen waeren kein Befund, sondern Rauschen.
+        */}
+        <FavoriteDemandIndicator count={position.favoriteDemand} />
 
         {/* The shop release, and the control that changes it (ADR-0048).
             "Im Shop" means released, never "in stock": the two are separate

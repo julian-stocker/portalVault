@@ -23,6 +23,7 @@
 
 import { useId, useMemo, useRef, useState, type RefObject } from "react";
 
+import { FavoriteDemandIndicator } from "@/components/business/favorite-demand-indicator";
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
@@ -43,6 +44,7 @@ export function FigureSearch({
   limit = MAX_RESULTS,
   initialQuery = "",
   showImage = false,
+  showDemand = false,
   loading = false,
   onFree,
   inputRef,
@@ -74,6 +76,21 @@ export function FigureSearch({
    * Kleinanzeigen-Foto mit einem Bild vergleicht und nicht mit einem Namen.
    */
   showImage?: boolean;
+  /**
+   * Ob die Zeile zeigt, wie viele Konten die Figur vorgemerkt haben
+   * (`0145`, ADR-0136).
+   *
+   * AUS ALS VORGABE, und das ist keine Vorsicht: die Zahl gehoert an die
+   * Stelle, an der ueber einen ANKAUF entschieden wird. Derselbe Picker
+   * steht auch im Kalkulator und in den Verkaufsbildschirmen; dort waere sie
+   * eine vierte Zahl in einer Zeile, die drei schon hat, und sie wuerde
+   * keine Entscheidung stuetzen.
+   *
+   * Die Zahl selbst reist mit `FigureChoice.favoriteDemand` und wird hier
+   * nicht geholt — gebuendelt von `fetchFavoriteDemand()`, einmal je
+   * Ansicht.
+   */
+  showDemand?: boolean;
   /*
    * Der Katalog ist noch unterwegs.
    *
@@ -321,6 +338,20 @@ export function FigureSearch({
                 </span>
               ) : null}
               <span className="min-w-0 flex-1 truncate">{choice.name}</span>
+              {/*
+                DIE NACHFRAGE, NEBEN DEM NAMEN (0145, ADR-0136).
+
+                Hier und nicht in einer eigenen Zeile: die Zeile ist 44 px
+                hoch und das ist ihre Trefferflaeche — eine zweite Textzeile
+                waere eine andere Geometrie fuer dieselbe Liste. `shrink-0`,
+                damit der Name weicht und nicht die Zahl, und sie erscheint
+                nur, wenn sie groesser als null ist, also auf den wenigen
+                Zeilen, auf denen sie etwas sagt.
+
+                Sie liegt INNERHALB des Knopfes, also ueberdeckt sie keine
+                Klickflaeche — sie ist Teil derselben.
+              */}
+              {showDemand ? <FavoriteDemandIndicator count={choice.favoriteDemand} /> : null}
               <span className="shrink-0 text-xs tabular-nums text-muted">{choice.skyId}</span>
               <span className="w-16 shrink-0 text-right tabular-nums">
                 {choice.marketPrice === null ? "—" : formatPrice(choice.marketPrice)}

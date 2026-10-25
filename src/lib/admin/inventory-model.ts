@@ -183,6 +183,19 @@ export type InventoryPosition = InventoryRow & {
    * Auskunft zeigt die Karte die Zubehörsteuerungen nicht an.
    */
   saleState?: SaleState | null;
+  /**
+   * Wie viele Konten diese FIGUR vorgemerkt haben (`0145`, ADR-0136).
+   *
+   * An der FIGUR und nicht an der Position: ein Favorit haengt an der
+   * SKY-ID, nicht an einem Zustand. Lose und originalverpackt sind zwei
+   * Positionen derselben Figur und zeigen dieselbe Zahl — alles andere
+   * waere eine Aufteilung, die die Favoriten nicht kennen.
+   *
+   * `undefined` heisst „nicht geladen", nicht „niemand": `favorite_demand()`
+   * antwortet nur einem aktiven Verkaeuferbetrieb, und Figuren ohne Favorit
+   * fehlen in der Antwort.
+   */
+  favoriteDemand?: number;
 };
 
 export type Movement = {

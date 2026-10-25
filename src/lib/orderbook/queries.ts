@@ -9,6 +9,7 @@ import { cache } from "react";
 import { canOperateSeller } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 import { imageSrc } from "@/lib/catalog/image";
+import { fetchFavoriteDemand } from "@/lib/favorites/queries";
 import { isPickableCatalogRow, type FigureChoice } from "./figure-search";
 import {
   EMPTY_COUNTS, readCounts, type ClassificationCounts, type StatusScope,
@@ -322,13 +323,31 @@ export const fetchOrderbookCatalog = cache(
   async (): Promise<FigureChoice[]> => {
     if (!(await canOperateSeller())) return [];
     const supabase = await createClient();
-    const [catalog, prices] = await Promise.all([
+    const [catalog, prices, demand] = await Promise.all([
       supabase.rpc("seller_import_catalog"),
       /* Bild und Preis in einem Zug: `skylanders` ist weltlesbar, die Zeile
          wird ohnehin geholt, und der Kalkulator braucht beides. Aufgelöst
          wird über `imageSrc()` — dieselbe eine Stelle, die seit ADR-0046
          entscheidet, welche der drei Quellen gilt. */
       supabase.from("skylanders").select("sky_id, market_price, image_file, image_override_path"),
+      /*
+       * DIE NACHFRAGE, EINMAL FÜR DEN GANZEN KATALOG (`0145`, ADR-0136).
+       *
+       * In derselben Runde und aus demselben Grund wie Bild und Preis: der
+       * Picker filtert ein Array im Browser, also muss alles, was eine Zeile
+       * zeigt, VORHER da sein. Eine Abfrage je Figur wären hunderte
+       * Anfragen für eine Zahl.
+       *
+       * Ohne Liste, also alle: `favorite_demand()` gibt Figuren OHNE
+       * Favorit nicht zurück — die Antwort ist so groß wie die Zahl der
+       * vorgemerkten Figuren, nicht wie der Katalog. 534 SKY-IDs zu senden,
+       * um dreißig Zahlen zu bekommen, wäre die größere Anfrage.
+       *
+       * `fetchFavoriteDemand()` gibt bei einem Fehler eine leere Map und
+       * wirft nicht: eine fehlende Nachfragezahl ist eine fehlende
+       * Zusatzinformation, kein Grund, den Picker nicht zu zeigen.
+       */
+      fetchFavoriteDemand(),
     ]);
     if (catalog.error || !Array.isArray(catalog.data)) return [];
     const facts = new Map(
@@ -394,6 +413,13 @@ export const fetchOrderbookCatalog = cache(
           categoryName: r.category === undefined || r.category === null
             ? undefined
             : String(r.category),
+          /*
+           * `undefined` und nicht `0`, wenn niemand sie vorgemerkt hat: die
+           * Anzeige unterscheidet „nicht geladen" von „niemand" nicht, aber
+           * sie zeichnet beides nicht — und eine 0 in die Daten zu schreiben
+           * hieße, eine Auskunft zu behaupten, die die Funktion nicht gibt.
+           */
+          favoriteDemand: demand.get(String(r.sky_id)),
         };
       });
   },

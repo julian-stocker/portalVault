@@ -369,6 +369,23 @@ export const de = {
     removeHint: "Mit dem Herz an der Karte wieder entfernen",
     /** Was die Ladegrenze ansagt, solange das Raster noch Gerüst ist. */
     loading: "Favoriten werden geladen …",
+    /*
+     * DIE NACHFRAGE, wie der Betrieb sie liest.
+     *
+     * „vorgemerkt" und NICHT „Käufer", „Interessenten" oder „wartet". Ein
+     * Favorit ist eine Vormerkung, keine Kaufabsicht — wer daraus „12 Käufer
+     * warten" macht, verkauft dem Betrieb eine Gewissheit, die die Zahl
+     * nicht hat. Die Entscheidung, die sie stützt, ist „welche Figur kaufe
+     * ich bevorzugt an", und dafür genügt sie.
+     *
+     * `demandShort` ist die Zahl allein, für die enge Zeile des Pickers;
+     * `demandFull` steht als `title` und als Name für eine Hilfstechnik
+     * daneben, damit die Zahl nie ohne ihre Bedeutung erscheint.
+     */
+    demandLabel: "vorgemerkt",
+    demandShort: (n: number) => `${n}`,
+    demandFull: (n: number) =>
+      n === 1 ? "Von 1 Nutzer vorgemerkt" : `Von ${n} Nutzern vorgemerkt`,
   },
 
   collection: {

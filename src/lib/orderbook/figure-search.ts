@@ -76,6 +76,20 @@ export type FigureChoice = {
    * abgeleitetes Etikett: interpretiert wird er nirgends, nur verglichen.
    */
   categoryName?: string;
+  /**
+   * Wie viele Konten diese Figur vorgemerkt haben (`0145`, ADR-0136).
+   *
+   * OPTIONAL, und `undefined` heisst „nicht geladen" — nicht „niemand". Die
+   * Zahl kommt aus `favorite_demand()`, und die Funktion antwortet nur einem
+   * aktiven Verkaeuferbetrieb; ein Sammler, der denselben Picker im
+   * Kalkulator benutzt, bekommt sie gar nicht. Figuren OHNE Favorit fehlen
+   * in der Antwort, also ist `undefined` auch dort der Normalfall.
+   *
+   * NUR DATEN, keine Suchgrundlage: `searchFigures()` liest sie nicht, und
+   * die Reihenfolge der Treffer aendert sich dadurch nicht. Wer nach
+   * Nachfrage sortieren wollte, wuerde eine andere Frage stellen.
+   */
+  favoriteDemand?: number;
 };
 
 /** Below this, a query matches too much to be worth showing. */
