@@ -632,14 +632,27 @@ export function FigureCard({
          * sitzt das Variantensiegel, unten links auch der Mengen-Chip —
          * oben rechts ist die eine freie Ecke des Fensters.
          *
+         * DERSELBE `INSET.image` WIE DAS BILD, und kein zusaetzliches
+         * Polster von oben. Der Slot ist damit genau das Fenster: die
+         * Zeile `image` beginnt nach `frame-top`, und die Seiten sind um
+         * dieselben 10,8 % eingezogen wie das Bild selbst. Das Herz kann
+         * also nicht auf dem gemalten Rahmen landen, auf keiner Breite.
+         *
+         * Hier stand bis zum 2026-10-25 `paddingTop: "4%"` — auf einer
+         * 402-px-Karte 16 px, die das Herz ohne Grund ins Bild schoben.
+         * Den Abstand zum Rahmen setzt jetzt der Knopf selbst, in festen
+         * Pixeln (`FavoriteHeart`: 4 px Knopf + 5 px Grund = 9 px), damit er
+         * auf einer 173-px-Karte derselbe ist wie auf einer 268er.
+         *
          * `pointer-events-none` BLEIBT AM SLOT und wird nur am Knopf
          * zurueckgenommen (`FavoriteHeart` traegt `pointer-events-auto`).
          * Sonst waere der ganze obere Rand des Fensters ein Loch, durch das
-         * kein Tippen mehr zum Sammeln durchkommt.
+         * kein Tippen mehr zum Sammeln durchkommt — und der Knopf ist jetzt
+         * 44 px, also 2,9 % der Flaeche einer 211-px-Karte.
          */}
         {favoriteSlot ? (
           <Slot area="image" className="flex items-start justify-end"
-                style={{ paddingInline: INSET.image, paddingTop: "4%" }}>
+                style={{ paddingInline: INSET.image }}>
             {favoriteSlot}
           </Slot>
         ) : null}

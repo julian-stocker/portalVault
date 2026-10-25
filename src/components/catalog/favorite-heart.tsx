@@ -60,11 +60,12 @@ const HERZ =
  * Herz liest man am selben Ort als denselben Gegenstand in zwei Zustaenden.
  * Zwei verschiedene Umrisse waeren zwei Gegenstaende.
  */
-const HALO_LEER = "drop-shadow(0 0 1.5px rgb(10 9 24 / 0.95)) "
-  + "drop-shadow(0 1px 2px rgb(10 9 24 / 0.6))";
+const HALO_LEER = "drop-shadow(0 0 2px rgb(10 9 24 / 0.95)) "
+  + "drop-shadow(0 0 1px rgb(10 9 24 / 0.9)) "
+  + "drop-shadow(0 1px 3px rgb(10 9 24 / 0.65))";
 /* Gefuellt kommt das Leuchten dazu — dezent, siehe `--favorite-glow`. */
-const HALO_VOLL = "drop-shadow(0 0 1px rgb(10 9 24 / 0.75)) "
-  + "drop-shadow(0 0 6px var(--favorite-glow))";
+const HALO_VOLL = "drop-shadow(0 0 1.5px rgb(10 9 24 / 0.8)) "
+  + "drop-shadow(0 0 8px var(--favorite-glow))";
 
 function HeartGlyph({ filled }: { filled: boolean }) {
   return (
@@ -74,7 +75,7 @@ function HeartGlyph({ filled }: { filled: boolean }) {
       className="h-full w-full"
       fill={filled ? "currentColor" : "none"}
       stroke="currentColor"
-      strokeWidth={filled ? 1.4 : 2.1}
+      strokeWidth={filled ? 1.3 : 1.9}
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{ filter: filled ? HALO_VOLL : HALO_LEER }}
@@ -85,26 +86,59 @@ function HeartGlyph({ filled }: { filled: boolean }) {
 }
 
 /*
- * DIE TRAGFLAECHE, und sie ist groesser als das Symbol — aber UNSICHTBAR.
+ * DREI MASSE, UND JEDES HAT EINEN GRUND. Gemessen an den echten Karten, nicht
+ * geschaetzt — `src/lib/favorites/geometry.test.ts` rechnet sie aus
+ * `CARD_ASPECT`, `ROWS` und `INSET` nach, fuer jeden Rasterpunkt.
  *
- * Das Herz zeichnet 14 px, die Flaeche misst 36 px. Auf einem Telefon ist das
- * der Unterschied zwischen „getroffen" und „die Karte hat gesammelt, weil
- * ich daneben kam" — und daneben liegt hier wirklich der Sammeln-Toggle.
- * 36 px ist so gross, wie es neben dem Variantensiegel auf einer 211-px-Karte
- * sein kann; der Abstand zum Kartenrand kommt dazu.
+ * DAS SYMBOL: 22 px, FEST.
  *
- * Sichtbar wird sie erst, wenn jemand sie sucht: bei Hover und bei Fokus. Im
- * Ruhezustand ist nur der Glyph da, und die Karte bleibt eine Karte.
+ * Es zeichnete 14 px, und das war auf einem Laptop zu klein: eine Karte ist
+ * dort 268 px breit (vier Spalten in `max-w-6xl`), 14 px sind davon **5,2 %**
+ * — auf den drei Bash-Karten nebeneinander kaum noch als Bedienelement zu
+ * erkennen. 22 px sind 8,2 % dort und 12,7 % auf dem Telefon.
+ *
+ * FEST und nicht in `cqw`: die Karte schrumpft von 268 auf 173 px, und ein
+ * mitschrumpfendes Herz waere genau dort am kleinsten, wo der Finger am
+ * groebsten ist. Alles andere auf dieser Karte skaliert mit der Breite, weil
+ * es TEXT ist; ein Bedienelement folgt dem Finger, nicht der Typografie.
+ *
+ * DIE FLAECHE: 44 px, UNSICHTBAR.
+ *
+ * Die Zahl ist Apples Empfehlung, und die vorige Fassung lag mit 36 px
+ * darunter. Sie passt in jedes Fenster: das kleinste misst 136 × 112 px
+ * (Telefon, 173-px-Karte), das grosse 210 × 173 px.
+ *
+ * DER GLYPH SITZT IN DER ECKE DER FLAECHE, nicht in ihrer Mitte — und das ist
+ * der Teil, der ohne Nachrechnen falsch wird. Zentriert waere das Herz 11 px
+ * weiter innen als die Flaeche, also 11 px vom Fensterrand weg gewandert,
+ * sobald die Flaeche groesser wird. So bleibt es, wo es hingehoert, und die
+ * zusaetzliche Flaeche waechst nach unten links INS BILD — dorther kommt der
+ * Daumen, und dort ist kein Rahmen.
+ *
+ * Sichtbar wird sie erst, wenn jemand sie sucht: bei Hover und bei Fokus, und
+ * dann als kleiner Kreis hinter dem GLYPH, nicht als 44-px-Scheibe. Im
+ * Ruhezustand ist nur das Herz da, und die Karte bleibt eine Karte.
  */
 const KNOPF =
-  "pointer-events-auto grid h-9 w-9 place-items-center rounded-full "
-  + "transition-colors duration-150 "
-  + "hover:bg-white/14 focus-visible:bg-white/14 "
-  + "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 "
-  + "focus-visible:outline-white/90";
+  "group/fav pointer-events-auto flex h-11 w-11 items-start justify-end p-1 "
+  + "focus-visible:outline-none";
 
-/** Das Symbol darin — klein, damit die Flaeche nicht wie ein Knopf aussieht. */
-const SYMBOL = "h-[14px] w-[14px]";
+/**
+ * Der Kreis hinter dem Glyph — die einzige Flaeche, die je erscheint.
+ *
+ * Am GLYPH und nicht am Knopf: ein Grund hinter der ganzen 44-px-Flaeche waere
+ * wieder die Scheibe, die hier gerade verschwunden ist, nur groesser. Der
+ * Fokusring sitzt aus demselben Grund hier — ein Ring um eine unsichtbare
+ * Flaeche umschliesst nichts, was man sieht.
+ */
+const GRUND =
+  "grid place-items-center rounded-full p-[5px] transition-colors duration-150 "
+  + "group-hover/fav:bg-white/16 group-focus-visible/fav:bg-white/16 "
+  + "group-focus-visible/fav:outline group-focus-visible/fav:outline-2 "
+  + "group-focus-visible/fav:outline-offset-1 group-focus-visible/fav:outline-white/90";
+
+/** Das Symbol selbst. 22 px, siehe oben. */
+const SYMBOL = "block h-[22px] w-[22px]";
 
 /*
  * DIE ZWEI ZUSTAENDE, als Farbe.
@@ -186,7 +220,9 @@ export function FavoriteHeart({
       <Link href={signInHref} aria-label={de.catalog.favoriteSignedOut}
             title={de.catalog.favoriteSignedOut}
             className={`${KNOPF} ${LEER}`}>
-        <span className={SYMBOL}><HeartGlyph filled={false} /></span>
+        <span className={GRUND}>
+          <span className={SYMBOL}><HeartGlyph filled={false} /></span>
+        </span>
       </Link>
     );
   }
@@ -242,6 +278,7 @@ export function FavoriteHeart({
       aria-busy={pending || undefined}
       className={`${KNOPF} ${failed ? "text-danger" : favorited ? VOLL : LEER}`}
     >
+      <span className={GRUND}>
       <span
         className={SYMBOL}
         /*
@@ -262,6 +299,7 @@ export function FavoriteHeart({
           : undefined}
       >
         <HeartGlyph filled={favorited} />
+      </span>
       </span>
       {/* Der Zustand steht in `aria-pressed`; dies ist der Satz, der ihn
           ausspricht, falls eine Hilfstechnik ihn nicht vorliest. */}
