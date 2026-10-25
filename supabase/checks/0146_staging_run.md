@@ -1,11 +1,79 @@
 # `0146` auf Staging — die Anleitung
 
-**Noch nicht gefahren.** Phase 4, Schritt **S1**: der Angebotsspiegel. Diese
-Datei ist die Schritt-für-Schritt-Anleitung und das Abnahmeraster.
+**Angewendet am 2026-10-25.** Phase 4, Schritt **S1**: der Angebotsspiegel.
+Die Nachkontrolle ist **offen** — siehe „Stand" gleich unten.
 
 > **Was S1 tut:** einen Spiegel der Angebotslage anlegen und ihn auffrischen
 > können. **Was S1 nicht tut:** eine Benachrichtigung erzeugen. Keine
 > Oberfläche, keine Einstellung, keine Zeile für einen Nutzer.
+
+---
+
+## Stand
+
+| | |
+|---|---|
+| Preflight | **9999 = 0** |
+| Migration | **angewendet**, eine Transaktion, `commit` |
+| Nachkontrolle | **9999 = 18** — und zwar ausschließlich die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833) |
+| Zu tun | die Nachkontrolle **einmal wiederholen**, mit den eingefrorenen Baselines |
+
+### Warum achtzehn
+
+Nicht weil der Spiegel falsch wäre, sondern weil die Nachkontrolle **nichts
+hatte, womit sie vergleichen konnte.** Sie prüft unter anderem, dass die
+Migration an Shop, Lager und Sammlung nichts verändert hat; dafür braucht sie
+die beiden Vertragszeilen des Preflights — den Stand **vor** der Migration.
+Die Hülle brachte an deren Stelle Platzhalter mit, die ein Mensch ersetzen
+muss. Dieser Schritt ist übersprungen worden, und ein stehengelassener
+Platzhalter zählt als **fehlende** Baseline.
+
+Also: **die Riegel haben funktioniert, der Ablauf war der Fehler.** Dasselbe
+war bei `0145` passiert. Zweimal derselbe Handgriff, zweimal vergessen — das
+ist keine Unachtsamkeit, das ist ein schlechter Ablauf.
+
+**Behoben.** `npm run db:migrate:staging` nimmt die Übergabe jetzt selbst vor
+(ADR-0137). Es gibt keinen Platzhalter mehr zu ersetzen.
+
+---
+
+## Der Weg jetzt: ein Befehl
+
+```bash
+npm run db:migrate:staging -- 0146            # prüft, friert ein, hält an
+#   … die eine Anweisung in den SQL-Editor einfügen …
+npm run db:migrate:staging -- 0146 --resume   # Nachkontrolle
+```
+
+Der Runner prüft das Zielprojekt, fährt den Preflight, friert dessen Zeilen
+900 und 901 **unveränderbar** nach `supabase/baselines/baseline-0146.json`
+ein, bricht bei jeder Abweichung ab — und reicht die eingefrorenen Zeilen der
+Nachkontrolle in derselben Einreichung mit. Er kann die Migration selbst
+**nicht** anwenden; warum nicht, steht im Kopf von
+`tools/db-migrate-staging.mts`.
+
+### Für `0146` jetzt: nur die Nachkontrolle
+
+Die Migration liegt schon. Der Runner erkennt das (`public.offer_state`
+steht) und **weigert sich, sie erneut anzuwenden**; ohne `--resume` bricht er
+mit genau diesem Hinweis ab. Die Baselines des damaligen Preflights sind in
+der Akte **nachgetragen** — sie stammen aus dem Protokoll des Preflights, der
+**vor** der Migration lief, nicht aus einer nachträglichen Messung. Das steht
+in der Akte selbst (`herkunft: "bediener"`, Feld `bemerkung`).
+
+```bash
+npm run db:migrate:staging -- 0146 --resume
+```
+
+**Erwartet: Zeile 9999 = `0`.** Die untenstehende Tabelle zu Schritt 3 bleibt
+das Abnahmeraster.
+
+---
+
+## Die Schritte im Einzelnen
+
+Was folgt, ist das fachliche Raster — unverändert gültig, auch wenn der
+Runner die Handgriffe jetzt übernimmt.
 
 ---
 
@@ -32,7 +100,8 @@ ausführen. `begin` und `rollback` stehen darin; die Datei schreibt nichts.
 | **124** | `0` | keiner davon trägt `offer_state` im Namen |
 | 131–134 | Auskunft | **die nützlichsten Werte dieses Blattes**: so viele Zeilen bekommt der Spiegel beim ersten Lauf |
 
-**Zeile 900 und Zeile 901 vollständig kopieren.**
+Zeile **900** und **901** sind die beiden Vertragszeilen. Über den Runner
+werden sie automatisch eingefroren; von Hand vollständig kopieren.
 
 ---
 
@@ -58,9 +127,17 @@ offer_state_window() ohne Clientrecht, **KEIN Trigger**, 0 Zeilen.*
 supabase/operations/staging-s-postflight-0146.sql
 ```
 
-**Vorher zwei Stellen ersetzen:** `BASIS-HIER-EINSETZEN` ← Zeile 900,
+Über den Runner (`--resume`) braucht es hier **keinen Handgriff**: die
+beiden Vertragszeilen kommen aus der Akte und werden in derselben Einreichung
+mitgereicht.
+
+Von Hand — nur noch der Rückfallweg, und auf Production der einzige Weg —
+sind vorher zwei Stellen zu ersetzen: `BASIS-HIER-EINSETZEN` ← Zeile 900,
 `SAMMLUNG-HIER-EINSETZEN` ← Zeile 901. Ein stehengelassener Platzhalter
-zählt als **fehlende** Baseline und blockiert — das ist Absicht.
+zählt als **fehlende** Baseline und blockiert; genau das ist am 2026-10-25
+passiert. **Für Production frisch auf Production messen** — eine
+Staging-Baseline hier einzusetzen verglich Production gegen die Zahlen einer
+anderen Datenbank.
 
 **Erwartet: Zeile 9999 = `0`.** Besonders:
 

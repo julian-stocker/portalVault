@@ -12957,3 +12957,119 @@ in Anspruch, den dieser Stopp ausdrücklich frei hält) · ein `grant select`
 auf `favorites` für den Betrieb (öffnet jede fremde Wunschliste, um eine Zahl
 zu bekommen) · eine `priority`-Spalte „weil sie später sowieso kommt"
 (Vorbereiten ist genau das, was ADR-0021 untersagt).
+
+---
+
+## ADR-0137 · Ein Befehl fährt eine Migration, und die Baselines werden vorher eingefroren
+
+**Datum:** 2026-10-25
+**Status:** angenommen
+**Betrifft:** `tools/db-migrate-staging.mts`, `tools/lib/baseline.mts`,
+`supabase/checks/migration-plans.json`, `supabase/baselines/`
+
+### Das Problem, zweimal dasselbe
+
+Der Laufzettel einer Migration verlangte vier Handgriffe: Preflight fahren,
+Zeile 900 und 901 von Hand kopieren, zwei Platzhalter in der Nachkontrolle
+ersetzen, Nachkontrolle fahren. Bei **`0145`** und bei **`0146`** sind der
+zweite und dritte Schritt übersprungen worden, und beide Male meldete die
+Nachkontrolle `9999 = 18` — achtzehn rote Zeilen, und zwar ausschließlich die
+der Baseline-Übergabe.
+
+Wichtig ist, was das **nicht** war: kein Fehler in der Migration, kein Fehler
+in der Prüfung. Die Nachkontrolle hatte nichts, womit sie vergleichen konnte,
+und hat genau das gemeldet. **Die Riegel haben funktioniert; der Ablauf war
+der Fehler.** Ein Handgriff, der zweimal in Folge vergessen wird, ist keine
+Unachtsamkeit — er ist schlecht gebaut.
+
+### Die Entscheidung
+
+Ein Befehl übernimmt alles Lesende und alles Rechnende:
+
+```bash
+npm run db:migrate:staging -- <nummer>            # prüft, friert ein, hält an
+npm run db:migrate:staging -- <nummer> --resume   # Nachkontrolle
+```
+
+Vier Festlegungen tragen das:
+
+**1. Baselines werden VOR der Migration eingefroren, in eine Akte.** Nach
+einem bestandenen Preflight schreibt der Runner die Vertragszeilen nach
+`supabase/baselines/baseline-<nr>.json` und liest sie für die Nachkontrolle
+von **dort**. Er erhebt sie danach **nie** neu. Das ist der eine Fehler, der
+alle Abweichungen verschwinden lässt und nichts beweist: eine nach der
+Migration erhobene Baseline ist der aktuelle Stand, und dann vergleichen sich
+die Daten mit sich selbst. Steht eine Akte schon, wird sie nicht
+überschrieben — sie ist der Beweis, nicht ein Zwischenstand.
+
+Die Akte ist **versioniert**, nicht Laufausgabe. Sie gehört zur Akte eines
+Rollouts wie `APPLIED.md`, und eine Wiederaufnahme muss sie auch nach einem
+frischen Clone finden. Sie enthält Zählstände und Prüfsummen, keine Namen und
+keine Adressen.
+
+**2. Jede eingefrorene Zeile wird nachgerechnet.** `tools/lib/baseline.mts`
+prüft Marke, Feldzahl und Schutzsumme — beim Einfrieren und bei **jedem**
+Lesen. Eine Akte, der man blind glaubt, ist keine Akte. Ein stehengelassener
+Platzhalter zählt dabei wie eine fehlende Zeile; sonst wäre die
+Bequemlichkeit der Hülle die Lücke im Riegel.
+
+**3. Eine Migration pro Eintrag, nicht pro Codezweig.**
+`supabase/checks/migration-plans.json` nennt je Migration die drei Dateien,
+eine **lesende** Standsabfrage mit einer Spalte `erfuellt`, und welche
+Verträge sie liefert und braucht. Der Runner kennt keine Migrationsnummer.
+Eine neue Migration braucht einen Eintrag — und keinen neuen Code.
+
+**4. Der Runner wendet die Migration NICHT an.** Der Prüfzugang
+(`skyisles_agent`) ist an der Rolle auf `default_transaction_read_only`
+gesetzt, und es gibt keinen zweiten Weg: der Dienstschlüssel läuft über
+PostgREST und kann kein DDL, eine `exec_sql`-Funktion existiert nicht
+(nachgesehen, nicht vermutet).
+
+Einen schreibenden Zugang dafür anzulegen wäre die falsche Vereinfachung: er
+müsste DDL dürfen, also alles, und er läge als Datei auf einem Arbeitsrechner.
+**Der Preis für „ein Befehl" wäre eine Schlüsseldatei mit Vollzugriff auf
+Staging.** Also: ein Befehl, ein Einfügen, ein Befehl — und genau die
+Handarbeit, die zweimal schiefgegangen ist, fällt weg.
+
+### Was der Runner abbricht, statt zu raten
+
+| Lage | Verhalten |
+|---|---|
+| Stand nicht zweifelsfrei (keine Zeile, zwei Zeilen, keine Spalte `erfuellt`) | Abbruch, bevor etwas gefahren wird |
+| Migration liegt schon, kein `--resume` | Abbruch mit dem Hinweis auf `--resume`. **Sie wird nicht erneut angewendet** |
+| `--resume`, aber Migration liegt noch nicht | Abbruch — es gibt keine Nachkontrolle wiederaufzunehmen |
+| Preflight rot | Abbruch. Keine Akte, keine Migration |
+| Baseline fehlt, beschädigt oder vertauscht | Abbruch, bevor etwas eingefroren wird |
+| Akte fehlt bei `--resume` | Abbruch. Sie wird **nicht** neu erhoben |
+| Nachkontrolle rot | Abbruch mit Protokoll. **Kein zweiter Lauf der Migration** |
+| Verbindungsabbruch | Abbruch, Meldung redigiert. Es gibt nichts aufzuräumen — der Runner hat keinen schreibenden Zugang |
+
+### Was Production davon hat: nichts, und das ist Absicht
+
+Es gibt **kein** `db:migrate:prod`. Der Zugang des Runners zeigt
+ausschließlich auf Staging und darf dort nur lesen. Auf Production bleibt der
+Weg von Hand — mit **frisch auf Production gemessenen** Baselines. Eine
+Staging-Baseline dort einzusetzen wäre die schlimmste Form von grün: sie
+verglich Production gegen die Zahlen einer anderen Datenbank.
+
+### Konsequenzen
+
+- Die Übergabe der Prüfsummen ist keine Handarbeit mehr. Der Fehlermodus, der
+  `0145` und `0146` getroffen hat, existiert auf Staging nicht mehr.
+- Eine neue Migration kostet einen JSON-Eintrag.
+- `supabase/baselines/` wächst um eine kleine Datei je Migration und wird
+  mitversioniert.
+- Der Ablauf ist **durchlaufbar prüfbar**: `fahreAblauf()` bekommt Verbindung
+  und Prüfdateien eingesetzt, also lässt sich jede Reihenfolgezusage als Test
+  fahren statt im Kommentar behaupten
+  (`src/lib/admin/migration-runner.test.ts`, 62 Prüfungen).
+- Die Hüllen in `supabase/operations/` bleiben, und ihre Platzhalter bleiben:
+  sie sind der Rückfallweg und auf Production der einzige Weg.
+
+**Verworfen:** einen schreibenden Staging-Zugang anlegen, damit der Runner
+auch die Migration fährt (tauscht den Riegel gegen Bequemlichkeit) · die
+Baselines nach der Migration erheben (macht jede Abweichung unsichtbar und
+beweist nichts) · die Platzhalter aus den Hüllen entfernen (sie sind der
+Rückfallweg, und ein Platzhalter blockiert sichtbar, während eine fehlende
+Zeile stillschweigend durchliefe) · den Runner je Migration erweitern (Daten
+statt Code, sonst wächst eine Sonderlogik je Rollout).

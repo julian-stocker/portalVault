@@ -82,7 +82,40 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-## Favoriten und Wunschliste (2026-10-25, `0145`, ADR-0136) — lokal fertig, nirgends angewendet
+## Eine Migration auf Staging ist ein Befehl (2026-10-25, ADR-0137) — gebaut, nicht gefahren
+
+**Der Anlass war ein Fehlermodus, nicht Bequemlichkeit.** Bei `0145` und bei `0146` ist das
+Kopieren der beiden Baselinezeilen in die Nachkontrolle übersprungen worden, und beide Male
+meldete sie `9999 = 18` — achtzehn rote Zeilen, und zwar ausschließlich die der Übergabe.
+Kein Fehler in der Migration, kein Fehler in der Prüfung: die Nachkontrolle hatte nichts,
+womit sie vergleichen konnte, und hat genau das gemeldet. **Die Riegel haben funktioniert,
+der Ablauf war der Fehler.** Ein Handgriff, der zweimal in Folge vergessen wird, gehört nicht
+auf den Laufzettel.
+
+```bash
+npm run db:migrate:staging -- 0146            # prüft, friert ein, hält an
+#   … die eine Anweisung in den SQL-Editor einfügen …
+npm run db:migrate:staging -- 0146 --resume   # Nachkontrolle
+```
+
+| | |
+|---|---|
+| Baselines | nach bestandenem Preflight **unveränderbar** nach `supabase/baselines/baseline-<nr>.json`. Für die Nachkontrolle von **dort** gelesen, **nie** neu erhoben. Eine vorhandene Akte wird nicht überschrieben |
+| Nachrechnen | `tools/lib/baseline.mts` prüft Marke, Feldzahl und Schutzsumme — beim Einfrieren **und bei jedem Lesen**. Ein Platzhalter zählt wie eine fehlende Zeile |
+| Je Migration | ein Eintrag in `supabase/checks/migration-plans.json` (drei Dateien, lesende Standsabfrage mit Spalte `erfuellt`, gelieferte und gebrauchte Verträge). Der Runner kennt **keine** Migrationsnummer |
+| Schreiben | **gar nicht.** Der Zugang ist an der Rolle `default_transaction_read_only`; es gibt kein `exec_sql` und über PostgREST kein DDL. Die eine schreibende Anweisung fügt der Bediener unverändert ein |
+| Abbruch statt Raten | unklarer Stand · Migration liegt schon (ohne `--resume`) · `--resume` ohne angewendete Migration · roter Preflight · fehlende, beschädigte oder vertauschte Baseline · fehlende Akte · rote Nachkontrolle · Verbindungsabbruch (Meldung redigiert) |
+| Production | **kein** `db:migrate:prod`, absichtlich. Dort bleibt der Weg von Hand, mit **frisch auf Production gemessenen** Baselines |
+| Nachweise | 62 Prüfungen in `src/lib/admin/migration-runner.test.ts`, davon die Reihenfolgezusagen als **durchlaufener** Ablauf (Verbindung und Prüfdateien eingesetzt). Vier Mutationen am Runner — Riegel entfernt, Akte überschrieben, Baselines im Wiederaufnahmezweig neu erhoben, roter Preflight ignoriert — werden alle rot |
+
+**Noch nicht gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist vorbereitet und
+ausdrücklich nicht eigenmächtig ausgeführt. Die Akte `supabase/baselines/baseline-0146.json`
+trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
+Migration stammen und **nicht** nachträglich gemessen wurden.
+
+---
+
+## Favoriten und Wunschliste (2026-10-25, `0145`, ADR-0136) — auf Staging, nicht auf Production
 
 **Ein Sammler kann Figuren vormerken.** Das Herz sitzt an jeder Katalogkarte, `/favoriten`
 zeigt die vorgemerkten Figuren, und der Betrieb sieht von fremden Wunschlisten
@@ -90,7 +123,7 @@ ausschließlich eine **Zahl**.
 
 | | |
 |---|---|
-| Migration | `0145_favorites.sql` — **nirgends angewendet**, weder Staging noch Production |
+| Migration | `0145_favorites.sql` — **auf Staging angewendet** am 2026-10-25, Nachkontrolle `9999 = 0`. **Nicht auf Production** |
 | Tabelle | `favorites (user_id, sky_id, created_at)`, `primary key (user_id, sky_id)` — die Eindeutigkeit **ist** der Schlüssel |
 | Richtlinien | **drei**, nicht vier: kein `update`, weil es nichts zu ändern gibt. Jede fragt `auth.uid() = user_id` **und** `is_collector_account()` |
 | Rechte | `authenticated`: `SELECT`, `INSERT`, `DELETE`. `anon`: nichts. `update` und `truncate` ausdrücklich entzogen |
@@ -100,9 +133,10 @@ ausschließlich eine **Zahl**.
 
 **Was noch nicht geschehen ist, und zwar ausdrücklich:**
 
-* `0145` ist **nirgends ausgeführt**. Preflight, Migration und Nachkontrolle liegen als
-  einfügefertige Hüllen für Staging und Production bereit
-  (`supabase/operations/staging-0145.sql` und die vier Prüfhüllen).
+* **Production steht aus.** Die Hüllen (`supabase/operations/prod-0145.sql` und die zwei
+  Prüfhüllen) liegen einfügefertig, sind aber **nicht gefahren**. Die Baselines dafür müssen
+  **frisch auf Production** gemessen werden — eine Staging-Baseline dort einzusetzen verglich
+  Production gegen die Zahlen einer anderen Datenbank.
 * **`favorites` steht noch in `PLATFORM_EXCLUDED_TABLES`** — vorübergehend, weil ein Bereich
   im Archiv `system_platform_export()` ersetzen würde und `0144` noch nicht auf Production
   liegt. **Die Folgemigration muss das vor dem Production-Rollout aufheben** (ADR-0136,
@@ -110,8 +144,11 @@ ausschließlich eine **Zahl**.
 * **Benachrichtigungen sind nicht gebaut.** Sie hängen an der Veröffentlichungslage und
   müssen das Reservierungsflattern von `available_quantity` aushalten; das braucht eine
   eigene Entscheidung und einen eigenen Schritt.
-* `npm run verify:rls:staging` für `favorites` steht aus — dass eine Richtlinie **dasteht**,
-  prüft die Nachkontrolle; dass sie **greift**, nur ein Lauf mit zwei echten Konten.
+* Die funktionale RLS-Prüfung auf Staging **ist gelaufen**: zwei Sammlerkonten kommen
+  gegenseitig nicht an Favoriten, und `favorite_demand()` weist auch den Dienstschlüssel ab
+  (eine Definer-Funktion prüft ihr eigenes Tor, und `auth.uid()` ist dort NULL).
+  Neun Oberflächenpunkte brauchen eine interaktive Anmeldung und sind **offen** —
+  `supabase/checks/0145_staging_run.md` trennt Gemessenes von Offenem.
 
 **Überarbeitung vom 2026-10-25 (Gestaltung und Bedienung).** Das Herz trug eine dauerhaft
 sichtbare graue Scheibe auf jeder von bis zu 561 Karten und dunkelte während des Serveraufrufs
@@ -124,7 +161,7 @@ Vorher stand dort „Skylanders Katalog". **Zweiter Durchgang am selben Tag:** 1
 
 **Nachfrageanzeige (2026-10-25).** `favorite_demand()` wird jetzt benutzt: die Zahl steht in der Trefferzeile des **Einkaufs**-Pickers (Entwurfsliste, „Position hinzufügen“, „Ändern“) und am Kopf jeder **Lager**karte. Gebündelt geladen über `fetchFavoriteDemand()` (`cache()`-gebunden, in den vorhandenen Leserunden von `fetchOrderbookCatalog()` und `fetchInventory()`), Decke von 2000 vor dem Aufruf geprüft, Fehler gibt eine leere Map und blockiert nichts. „vorgemerkt“, nicht „Käufer“ — ein Favorit ist keine Kaufabsicht. Keine Migration, keine neue Richtlinie, kein Tabellenrecht auf `favorites` für den Betrieb. **Mit echten Zahlen noch nicht im Browser gesehen** — dafür fehlt eine Verkäuferanmeldung.
 
-**Angebotsspiegel (2026-10-25, `0146`, Phase 4 S1) — nirgends angewendet.** Die Grundlage für spätere Benachrichtigungen: `offer_state` (je Figur, ob sie jetzt kaufbar ist und zu welchem günstigsten Preis in Cent, plus `changed_at`, `checked_at` und drei `announced_*`-Spalten), die Sicht `offer_state_live` (liest ausschließlich `shop_offers()`) und `refresh_offer_state()` — gedrosselt auf eine Minute, durch `pg_try_advisory_xact_lock(146, 1)` gegen parallele Läufe gesichert, mit drei unterscheidbaren Antworten. **Kein Trigger**, also kann ein Fehler darin strukturell keinen Kauf erreichen. **Erzeugt keine Benachrichtigung.** Probelauf **P53** fährt sechzehn Szenarien an echtem PostgreSQL. `checked_at` ist **keine Frischegarantie** — S2 muss gegen `offer_state_live` gegenprüfen, und das steht im Spalten- und Funktionskommentar. `offer_state` steht noch mit Ablaufdatum aus der Plattformsicherung (D-6).
+**Angebotsspiegel (2026-10-25, `0146`, Phase 4 S1) — auf Staging angewendet, Nachkontrolle offen.** Die Grundlage für spätere Benachrichtigungen: `offer_state` (je Figur, ob sie jetzt kaufbar ist und zu welchem günstigsten Preis in Cent, plus `changed_at`, `checked_at` und drei `announced_*`-Spalten), die Sicht `offer_state_live` (liest ausschließlich `shop_offers()`) und `refresh_offer_state()` — gedrosselt auf eine Minute, durch `pg_try_advisory_xact_lock(146, 1)` gegen parallele Läufe gesichert, mit drei unterscheidbaren Antworten. **Kein Trigger**, also kann ein Fehler darin strukturell keinen Kauf erreichen. **Erzeugt keine Benachrichtigung.** Probelauf **P53** fährt sechzehn Szenarien an echtem PostgreSQL. `checked_at` ist **keine Frischegarantie** — S2 muss gegen `offer_state_live` gegenprüfen, und das steht im Spalten- und Funktionskommentar. `offer_state` steht noch mit Ablaufdatum aus der Plattformsicherung (D-6). **Die Nachkontrolle muss einmal wiederholt werden:** sie meldete `9999 = 18` — ausschließlich die achtzehn Zeilen der Baseline-Übergabe, weil die beiden Vertragszeilen nicht eingesetzt waren. Dafür reicht jetzt `npm run db:migrate:staging -- 0146 --resume` (ADR-0137).
 `docs/FAVORITE_NOTIFICATIONS.md`, **nichts davon gebaut**.
 
 **Ein Fehler aus dem Staging-Durchlauf, behoben:** `/favoriten` fehlte in den geschützten
