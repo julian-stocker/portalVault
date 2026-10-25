@@ -24,9 +24,32 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-import { BACKUP_SECTIONS } from "./manifest";
+import { BACKUP_SECTIONS, EXCLUDED_TABLES } from "./manifest";
 import { fieldsFromBackupSql } from "./export-audit";
-import { columnsOf } from "@/test-support/migrations";
+import { columnsOf, tablesOf } from "@/test-support/migrations";
+
+/**
+ * Tabellen, die der Betriebsexport weder führt noch begründet auslässt.
+ *
+ * DIE ANDERE HÄLFTE DESSELBEN WÄCHTERS, und sie fehlte. Diese Datei prüft
+ * seit `0130`/`0131`, dass jede SPALTE eines bekannten Bereichs entschieden
+ * ist — die Grundgesamtheit war damit eine Liste von BEREICHEN. Eine ganze
+ * Tabelle, die in keinem Bereich vorkommt, war für sie unsichtbar.
+ *
+ * Am 2026-10-25 waren es **vierzehn**: 28 Bereiche plus 24 begründete
+ * Ausschlüsse gegen 66 Tabellen im Schema. `purchase_calculations` aus `0142`
+ * war eine davon. Gefunden beim Production-Release-Check, nicht von einem
+ * Test — und dasselbe war im Plattformmanifest passiert, zweimal.
+ *
+ * Als Funktion, damit derselbe Satz Regeln zweimal gefragt werden kann: mit
+ * dem echten Schema (muss leer sein) und mit einer erfundenen Tabelle (muss
+ * SIE nennen).
+ */
+function unentschiedeneTabellen(tabellen: Iterable<string>): string[] {
+  const drin = new Set(BACKUP_SECTIONS.map((s) => s.source));
+  const raus = new Set(Object.keys(EXCLUDED_TABLES));
+  return [...tabellen].filter((t) => !drin.has(t) && !raus.has(t)).sort();
+}
 
 /** Spalten, die ein Bereich weder führt noch begründet auslässt. */
 function luecke(source: string): string[] {
@@ -45,6 +68,70 @@ const NICHT_FREIGEGEBEN = [
   "sender_country", "listing_title", "listing_url", "listing_details",
   "agreement_note",
 ] as const;
+
+describe("jede Tabelle ist im Betriebsexport entschieden", () => {
+  const ALLE = [...tablesOf()].sort();
+
+  it("ist entweder ein Bereich oder ausdrücklich ausgeschlossen — keine vergessen", () => {
+    /*
+     * Eine Tabelle, die weder gesichert noch begründet ausgelassen ist, fällt
+     * im Ernstfall lautlos weg — dieselbe Zusicherung, die das
+     * Plattformmanifest für sich führt, jetzt auch hier.
+     */
+    expect(unentschiedeneTabellen(ALLE), "unentschiedene Tabellen").toEqual([]);
+  });
+
+  it("und keine Tabelle ist beides", () => {
+    const raus = new Set(Object.keys(EXCLUDED_TABLES));
+    for (const s of BACKUP_SECTIONS) {
+      expect(raus.has(s.source), `${s.source} ist Bereich und ausgeschlossen`).toBe(false);
+    }
+  });
+
+  it("kein Ausschluss nennt eine Tabelle, die es nicht gibt", () => {
+    /*
+     * Die Gegenrichtung: ein Ausschluss für eine gelöschte oder umbenannte
+     * Tabelle ist toter Text, der Sicherheit vortäuscht. `0026` hat
+     * `business_settings` zu `platform_settings` umbenannt — genau so
+     * entsteht er.
+     */
+    const schema = new Set(ALLE);
+    for (const t of Object.keys(EXCLUDED_TABLES)) {
+      expect(schema.has(t), `${t} ist ausgeschlossen, existiert aber nicht`).toBe(true);
+    }
+  });
+
+  it("und eine NEUE, nicht klassifizierte Tabelle bringt ihn zu Fall", () => {
+    /*
+     * DER BEWEIS, DASS ER ANSCHLÄGT. Vierzehn Tabellen sind ihm entgangen,
+     * weil seine Grundgesamtheit aus Bereichen bestand. Jetzt kommt sie aus
+     * den Migrationen — und dass die REGEL darüber greift, steht hier.
+     */
+    const erfunden = "frisch_erfundene_tabelle_0999";
+    expect(ALLE).not.toContain(erfunden);
+    expect(unentschiedeneTabellen([...ALLE, erfunden])).toEqual([erfunden]);
+  });
+
+  it("jeder Ausschluss trägt einen Grund, der etwas sagt", () => {
+    /* Ein leerer oder einsilbiger Grund ist ein Haken, keine Entscheidung. */
+    for (const [t, grund] of Object.entries(EXCLUDED_TABLES)) {
+      expect(grund.length, `${t} ohne tragenden Grund`).toBeGreaterThan(25);
+    }
+  });
+
+  it("purchase_calculations ist begründet draußen — und sagt, wohin sie gehört", () => {
+    /*
+     * Die Tabelle, um die es ging. Sie bleibt draußen, aber nicht stumm:
+     * `user_id` steht auf der Sperrliste dieses Exports, und der Platz, an
+     * den sie gehört, wird genannt.
+     */
+    const grund = EXCLUDED_TABLES.purchase_calculations;
+    expect(grund).toBeDefined();
+    expect(grund).toContain("user_id");
+    expect(grund).toContain("Plattformsicherung");
+    expect(grund).toContain("0144");
+  });
+});
 
 describe("keine Spalte ist unentschieden", () => {
   it("über alle 28 Bereiche: keine einzige", () => {

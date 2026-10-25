@@ -12470,3 +12470,88 @@ ohne DOM und ohne dessen Kosten laufen. `jsdom` ist eine
 - `0142`, `0143`, die Einkaufserstellung und die Richtlinien sind
   **unberührt** — die Ursache lag nicht dort, und es wurde dort nichts
   angefasst.
+
+---
+
+## ADR-0134 · Ein Vollständigkeitswächter leitet seine Grundgesamtheit aus dem Schema ab, nie aus einer Liste
+
+**Status:** akzeptiert (Phase 1 der Sicherungslücke, 2026-10-25) ·
+**Umsetzung:** `tablesOf()` / `tablesFromMigrations()` in
+`src/test-support/migrations.ts`, beide Sicherungsmanifeste, drei Testdateien
+
+### Der Befund, und er ist zweimal derselbe
+
+Beide Sicherungen führen eine Zusicherung der Form **„jede Tabelle ist
+entschieden — gesichert oder begründet ausgeschlossen"**. Beide haben sie
+gebrochen, ohne rot zu werden:
+
+| wann | was fehlte | warum es niemand merkte |
+|---|---|---|
+| vor `0122` | drei Belegtabellen | sie standen nicht in `ALL_PUBLIC_TABLES`, einer **getippten Liste im Test** |
+| `0142` | `purchase_calculations` | dieselbe Liste, dasselbe Schweigen. Gefunden am 2026-10-25 **von Hand** beim Production-Release-Check |
+| dauerhaft | **vierzehn** Tabellen im Betriebsexport | sein Wächter prüfte jede **Spalte** eines bekannten **Bereichs** — die Grundgesamtheit bestand aus Bereichen, eine ganze Tabelle war unsichtbar |
+
+Der Kommentar, der nach dem ersten Mal geschrieben wurde, war schon richtig:
+*„Ein Wächter, der seine eigene Grundgesamtheit veraltet führt, prüft
+nichts."* Zweimal derselbe Satz ist kein Zufall, sondern ein Entwurfsfehler.
+
+### Die Entscheidung
+
+**Eine Grundgesamtheit, die ein Mensch nachziehen muss, zieht ein Mensch
+irgendwann nicht nach.** Sie kommt deshalb aus den Migrationen — demselben
+Weg, den `columnsOf()` für Spalten und `latestFunction()` für
+Funktionsfassungen schon gehen.
+
+`tablesOf()` faltet drei Formen in Migrationsreihenfolge: `create table
+public.x`, `drop table public.x`, `alter table public.x rename to y`. Damit
+fällt auch die Umbenennung aus `0026` (`business_settings` →
+`platform_settings`) aus dem Fold, die die alte Liste mit einem
+`.filter().concat()` nachstellte.
+
+### Und sie scheitert laut, statt zu raten
+
+Das ist der Teil, auf den es ankommt: der alte Fehlgrund war ein Wächter, der
+**bestand**, während etwas fehlte. Jede Form, die der Fold nicht versteht —
+ein fremdes Schema, eine unqualifizierte nicht-temporäre Tabelle, ein `rename
+to` mit Schemaqualifikation, ein `drop`, dessen Ziel sich nicht auflösen
+lässt — hält die Suite an und nennt Datei und Anweisung. Auch die **leere
+Menge** ist ein Fehler und kein Ergebnis.
+
+> **Dieser Riegel hat sich beim Bau sofort bewährt.** Der Fold war zuerst
+> über `new RegExp("create\\s+…")` gebaut; in einer Zeichenkette ist `\s`
+> aber nicht das Klassenkürzel, sondern der Buchstabe `s`. Aus `create\s+`
+> wurde `creates+`, der Fold fand **null** Tabellen — und hätte jeden
+> Wächter leer bestehen lassen. Gemeldet hat es der Riegel gegen die leere
+> Menge. Seitdem ist es ein Regex-**Literal**, das diesen Fehler nicht machen
+> kann.
+
+**Was ausdrücklich nicht mitgezählt wird:** temporäre Notizblöcke (elf
+Migrationen bauen sie; erkannt an der **Form**, nicht an einem Namen),
+Ansichten (drei auf `public`; sie tragen keine eigenen Zeilen) und alles, was
+in einem Kommentar steht. Letzteres ist keine Feinheit: **jedes** `drop
+table` dieser Historie steht in einem Kommentar, und ein Fold über den
+Rohtext entfernte vier Tabellen, die es gibt.
+
+### Was ein Wächter beweisen muss, um einer zu sein
+
+Beide Wächter haben seit heute einen Test, der **das Anschlagen prüft**: eine
+erfundene, nicht klassifizierte Tabelle muss genau sie nennen. Die Regel dafür
+steht als eigene Funktion da und wird zweimal gefragt — einmal mit dem echten
+Schema (muss leer sein), einmal mit der Erfindung (muss sie nennen). Ein
+Riegel, dessen Anschlagen nie geprüft wurde, ist eine Behauptung.
+
+### Konsequenzen
+
+- Eine neue Tabelle hält ab jetzt **beide** Sicherungs-Suiten an, bis jemand
+  sie entscheidet. Das ist der Zweck, nicht ein Nebeneffekt.
+- Die vierzehn offenen Tabellen des Betriebsexports sind entschieden, jede
+  mit einem Grund, der etwas sagt (ein Test verlangt Substanz, nicht nur
+  einen Haken — eine vorbestehende 23-Zeichen-Begründung ist daran gleich
+  aufgefallen).
+- `purchase_calculations` ist im Betriebsexport **begründet draußen**: sie
+  hängt an `user_id`, und das sperrt dieser Export als Kontoidentität. Ihr
+  Platz ist die Plattformsicherung (Phase 2, `0144`).
+- `platform-sql.test.ts` liest den Funktionsrumpf jetzt über
+  `latestFunction("system_platform_export")`. Historische Aussagen über die
+  **Datei** `0105` bleiben bei `0105` — sie ist angewendet und nach Regel 1
+  eingefroren.

@@ -79,6 +79,163 @@ export function code(sql: string): string {
 }
 
 /**
+ * Every `public` table the migration history leaves behind.
+ *
+ * WHY THIS EXISTS. Two backup manifests carry a completeness guard — "every
+ * table is decided: exported, or excluded with a reason". Both derived their
+ * UNIVERSE from a list typed by hand, and both therefore failed open: a table
+ * missing from the list could not be missed. It happened twice.
+ *
+ *   * before `0122` the three receipt tables were absent from
+ *     `platform-manifest.test.ts`, and the guard said nothing;
+ *   * `0142` added `purchase_calculations`, and the same guard said nothing
+ *     again — found by hand during the production release check on
+ *     2026-10-25, not by a test.
+ *
+ * A guard that keeps its own universe out of date checks nothing. So the
+ * universe comes from the migrations now, the same way `columnsOf()` folds
+ * columns and `latestFunction()` folds redefinitions.
+ *
+ * WHAT IT UNDERSTANDS, AND IT IS DELIBERATELY ONLY THIS
+ *
+ *   create table [if not exists] public.<name>      → the table exists
+ *   drop table [if exists] public.<name>            → it does not any more
+ *   alter table public.<old> rename to <new>        → it is called <new>
+ *
+ * Applied in migration order, so create → rename → drop lands where it
+ * should. `0026` renames `business_settings` to `platform_settings`, and that
+ * rename was the one the hand-written list patched with a `.filter().concat()`
+ * — now it falls out of the fold.
+ *
+ * COMMENTS FIRST, AND THAT IS NOT TIDINESS. Every single `drop table` in this
+ * history sits INSIDE a comment — `0105` documents one as a rollback hint,
+ * `0135`/`0137`/`0138` explain why they do NOT drop their scratch tables.
+ * Reading raw text would delete four tables that are still there, one of them
+ * `platform_export_runs`. `code()` strips comments, so this reads only what
+ * PostgreSQL would run.
+ *
+ * TEMPORARY TABLES ARE NOT SCHEMA. Eleven migrations build unqualified
+ * `create temporary table` scratch pads (`z1_abdruck`, `tmp_0067_orders`, …)
+ * to hold a fingerprint across their own statements. They live for one
+ * transaction, `on commit drop` clears them, and no backup could or should
+ * carry them. They are skipped BY SHAPE — temporary and unqualified — never
+ * by a name on a list.
+ *
+ * VIEWS ARE NOT TABLES. Three `create view`s exist on `public`
+ * (`business_movements`, `reservation_reconciliation`,
+ * `shop_inventory_reconciliation`). They carry no rows of their own, and
+ * `create … table` does not match them.
+ *
+ * AND IT REFUSES TO GUESS. Anything shaped like a table statement that is
+ * none of the three forms above — a different schema, an unqualified
+ * non-temporary table, a `rename to` it cannot parse — makes this THROW with
+ * the offending text. That is the whole point: the previous failure mode was
+ * a guard that passed while something was missing, so the limit of the
+ * analysis has to be loud. A new form in a future migration stops the suite
+ * until somebody teaches it here.
+ */
+export function tablesOf(): ReadonlySet<string> {
+  return tablesFromMigrations(
+    migrationFiles.map((file) => ({ file, sql: migrationSource(file) })));
+}
+
+/**
+ * Derselbe Fold über beliebige Quellen — damit er prüfbar ist.
+ *
+ * `tablesOf()` ruft ihn mit der echten Historie. Ein Test kann ihm erfundene
+ * Anweisungen vorlegen und nachsehen, ob er bei einer unbekannten Form
+ * wirklich scheitert. Ein Riegel, dessen Anschlagen nie geprüft wurde, ist
+ * eine Behauptung — und genau diese Sorte Behauptung hat die beiden
+ * Sicherungswächter zweimal durchfallen lassen.
+ */
+export function tablesFromMigrations(
+  quellen: Iterable<{ file: string; sql: string }>,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  const unverstanden: string[] = [];
+
+  /*
+   * Eine Fundstelle je Anweisung, in Quelltextreihenfolge — `matchAll`
+   * liefert sie so, und innerhalb einer Datei ist das die Ausführungsfolge.
+   *
+   * ALS LITERAL, NICHT ALS `new RegExp("…")`. In einer Zeichenkette ist `\s`
+   * kein Klassenkürzel, sondern der Buchstabe `s`: aus `create\s+` wurde
+   * `creates+`, der Fold fand NULL Tabellen, und nur der Riegel gegen die
+   * leere Menge unten hat das gemeldet statt jeden Wächter leer bestehen zu
+   * lassen. Ein Literal kann diesen Fehler nicht machen.
+   */
+  const EREIGNIS =
+    /create\s+(?:(?:global|local)\s+)?(temp|temporary|unlogged)?\s*table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_0-9."]+)|drop\s+table\s+(?:if\s+exists\s+)?([a-zA-Z_0-9."]+)|alter\s+table\s+([a-zA-Z_0-9."]+)\s+rename\s+to\s+([a-zA-Z_0-9."]+)/gi;
+
+  /** `public.x` → `x`; alles andere → `null`. */
+  const inPublic = (roh: string): string | null => {
+    const name = roh.replace(/"/g, "").toLowerCase();
+    return name.startsWith("public.") ? name.slice("public.".length) : null;
+  };
+
+  for (const { file, sql } of quellen) {
+    for (const m of code(sql).matchAll(EREIGNIS)) {
+      const [ganz, temporaer, angelegt, entfernt, vonRoh, nachRoh] = m;
+
+      if (angelegt !== undefined) {
+        const name = inPublic(angelegt);
+        if (name !== null) { out.add(name); continue; }
+        /* Unqualifiziert UND temporär: ein Notizblock für eine Transaktion. */
+        if (temporaer !== undefined && !angelegt.includes(".")) continue;
+        unverstanden.push(`${file}: ${ganz.trim()}`);
+        continue;
+      }
+
+      if (entfernt !== undefined) {
+        const name = inPublic(entfernt);
+        if (name !== null) { out.delete(name); continue; }
+        /*
+         * `drop table z1_abdruck` trägt keine `temporary`-Kennzeichnung —
+         * die Syntax kennt sie nicht. Ein unqualifizierter Name, den dieser
+         * Fold nicht als Tabelle kennt, ist deshalb der Notizblock von
+         * oben. Kollidiert er mit einer echten `public`-Tabelle, ist die
+         * Anweisung nicht entscheidbar und wird gemeldet.
+         */
+        if (!entfernt.includes(".") && !out.has(entfernt.toLowerCase())) continue;
+        unverstanden.push(`${file}: ${ganz.trim()}`);
+        continue;
+      }
+
+      const von = inPublic(vonRoh!);
+      /*
+       * DER PUNKT GEHOERT IN DIE ZEICHENKLASSE DES ZIELS, obwohl
+       * `rename to` in PostgreSQL nur einen bloßen Namen nimmt. Ohne ihn
+       * matchte `rename to anders.y` nur `anders`, der Rest fiel weg — und
+       * die Tabelle hieß hinterher `anders`, lautlos. Mit ihm ist die Form
+       * unverstanden und wird gemeldet.
+       */
+      const nach = nachRoh!.replace(/"/g, "").toLowerCase();
+      if (von === null || nach.includes(".")) {
+        unverstanden.push(`${file}: ${ganz.trim()}`);
+        continue;
+      }
+      out.delete(von);
+      out.add(nach);
+    }
+  }
+
+  if (unverstanden.length > 0) {
+    throw new Error(
+      `tablesOf(): ${unverstanden.length} Tabellenanweisung(en) in einer Form, die `
+        + `dieser Fold nicht versteht. Lieber laut scheitern als eine Tabelle `
+        + `uebersehen:\n  ${unverstanden.join("\n  ")}`,
+    );
+  }
+  if (out.size === 0) {
+    throw new Error(
+      "tablesOf(): keine einzige Tabelle gefunden — dann stimmt der Fold nicht, "
+        + "und ein leeres Ergebnis wuerde jeden Vollstaendigkeitstest leer bestehen.",
+    );
+  }
+  return out;
+}
+
+/**
  * Every column a table has, folded over the whole migration history.
  *
  * WHY THIS EXISTS, AND WHAT IT COST TO LEARN. Every other test in this project

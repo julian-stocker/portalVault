@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
+import { tablesOf } from "@/test-support/migrations";
+
 import { BACKUP_SECTIONS, FORBIDDEN_FIELDS } from "./manifest";
 import {
   allPlatformFields, AUTH_FORBIDDEN_FIELDS, AUTH_INVENTORY_DISCLAIMER,
@@ -22,45 +24,27 @@ import {
  */
 
 /**
- * Die heutigen `public`-Tabellen, aus den Migrationen erhoben.
+ * Die heutigen `public`-Tabellen — jetzt AUS DEN MIGRATIONEN, nicht aus einer
+ * Liste.
  *
- * SIE WAR DREI TABELLEN ZU KURZ. Die Liste stammt aus der Zeit vor `0122`,
- * und die drei Belegtabellen standen nicht darin — der Test „keine
- * vergessen" konnte sie deshalb nicht vermissen. Ein Wächter, der seine
- * eigene Grundgesamtheit veraltet führt, prüft nichts.
+ * HIER STAND EINE HANDGEPFLEGTE LISTE, und sie hat zweimal versagt. Vor
+ * `0122` fehlten die drei Belegtabellen darin; der Test „keine vergessen"
+ * konnte sie deshalb nicht vermissen. `0142` legte dann
+ * `purchase_calculations` an — und derselbe Test sagte wieder nichts. Gefunden
+ * wurde es beim Production-Release-Check am 2026-10-25, von Hand.
  *
- * UND ES IST WIEDER PASSIERT (2026-10-24). `0142` legt
- * `purchase_calculations` an; die Liste kannte sie nicht, also konnte der
- * Test sie nicht vermissen — eine Tabelle wäre lautlos aus der einzigen
- * Katastrophensicherung gefallen, die es unter Supabase Free gibt. Gefunden
- * beim Release-Check zu `0142`/`0143`, nicht von einem Test.
+ * Der Kommentar, der damals hier stand, war schon richtig: „Ein Wächter, der
+ * seine eigene Grundgesamtheit veraltet führt, prüft nichts." Zweimal
+ * derselbe Satz ist kein Zufall mehr, sondern ein Entwurfsfehler — eine
+ * Liste, die ein Mensch nachziehen muss, zieht ein Mensch irgendwann nicht
+ * nach.
  *
- * Das ist zweimal derselbe Fehlgrund: eine HANDGEPFLEGTE Grundgesamtheit.
- * Sie aus den Migrationen zu erheben, ist die eigentliche Antwort und ein
- * eigener Schritt — `supabase/checks/platform_export_gap.md` führt ihn als
- * Folgeaufgabe.
+ * `tablesOf()` faltet `create table`, `drop table` und `alter table … rename
+ * to` über die ganze Historie und kann deshalb nicht veralten. Was es
+ * ausdrücklich NICHT kann, steht an ihm selbst — und es scheitert laut statt
+ * leer zu bestehen.
  */
-const ALL_PUBLIC_TABLES = `
-business_settings cart_items catalog_admin_changes catalog_editorial categories
-characters collection_items commerce_settings commerce_testers customer_contacts
-inventory_import_mappings inventory_import_rows inventory_imports inventory_movements
-invoices legacy_stock_events legal_document_versions order_addresses
-order_attention_reads order_conversation_reads order_events order_legal_snapshots
-order_line_events order_lines order_mail order_messages order_refund_allocations
-order_refunds order_reservations orderbook_audit orderbook_name_mappings orders
-payment_attempts payment_events perf_interactions perf_navigations platform_admins
-profiles purchase_items purchases sale_fees sale_items sale_refunds sales
-seller_monthly_reports seller_operators sellers series settlement_adjustments
-shipping_countries shipping_methods shop_admins shop_inventory shop_settings
-skylanders tester_features tester_permission_changes tester_permissions testers
-withdrawal_attempts withdrawal_requests
-purchase_receipts purchase_receipt_downloads purchase_receipt_counters
-purchase_calculations
-`.trim().split(/\s+/)
-  // 0026 hat business_settings in platform_settings umbenannt; die Tabelle
-  // gibt es nicht mehr, dafür platform_settings.
-  .filter((t) => t !== "business_settings")
-  .concat("platform_settings");
+const ALL_PUBLIC_TABLES: readonly string[] = [...tablesOf()].sort();
 
 describe("der Formatvertrag", () => {
   it("hat einen eigenen Namen und eine eigene Version", () => {
@@ -90,16 +74,60 @@ describe("der Formatvertrag", () => {
   });
 });
 
+/**
+ * Welche Tabellen im Plattformmanifest keine Entscheidung tragen.
+ *
+ * Als Funktion und nicht inline, damit derselbe Satz Regeln zweimal gefragt
+ * werden kann: einmal mit dem echten Schema (muss leer sein) und einmal mit
+ * einer erfundenen Tabelle (muss SIE nennen). Ein Wächter, dessen Anschlagen
+ * nie geprüft wurde, ist eine Behauptung.
+ */
+function unentschiedenImPlattformexport(tabellen: Iterable<string>): string[] {
+  const drin = new Set(platformSourceTables());
+  const raus = new Set(Object.keys(PLATFORM_EXCLUDED_TABLES));
+  return [...tabellen].filter((t) => !drin.has(t) && !raus.has(t)).sort();
+}
+
 describe("jede Tabelle der Plattform ist entschieden", () => {
   it("ist entweder ein Bereich oder ausdrücklich ausgeschlossen — keine vergessen", () => {
     /*
      * Der wichtigste Test dieser Datei. Eine Tabelle, die weder gesichert
      * noch begründet ausgeschlossen ist, fällt im Ernstfall lautlos weg.
      */
-    const drin = new Set(platformSourceTables());
-    const raus = new Set(Object.keys(PLATFORM_EXCLUDED_TABLES));
-    const unentschieden = ALL_PUBLIC_TABLES.filter((t) => !drin.has(t) && !raus.has(t));
-    expect(unentschieden, "unentschiedene Tabellen").toEqual([]);
+    expect(unentschiedenImPlattformexport(ALL_PUBLIC_TABLES),
+           "unentschiedene Tabellen").toEqual([]);
+  });
+
+  it("und eine NEUE, nicht klassifizierte Tabelle bringt ihn zu Fall", () => {
+    /*
+     * DER BEWEIS, DASS DER WÄCHTER ANSCHLÄGT.
+     *
+     * Zweimal hat er geschwiegen, als eine Tabelle fehlte — beide Male, weil
+     * sie in seiner Grundgesamtheit nicht vorkam. Die Grundgesamtheit kommt
+     * jetzt aus den Migrationen; was noch fehlte, war der Nachweis, dass die
+     * REGEL darüber greift. Hier ist er: eine erfundene Tabelle, und der
+     * Wächter nennt genau sie.
+     */
+    const erfunden = "frisch_erfundene_tabelle_0999";
+    expect(platformSourceTables()).not.toContain(erfunden);
+    expect(Object.keys(PLATFORM_EXCLUDED_TABLES)).not.toContain(erfunden);
+    expect(unentschiedenImPlattformexport([...ALL_PUBLIC_TABLES, erfunden]))
+      .toEqual([erfunden]);
+  });
+
+  it("und `tablesOf()` sieht jede Tabelle, die eine Migration anlegt", () => {
+    /*
+     * Die andere Hälfte desselben Beweises: der Wächter kann nur anschlagen,
+     * wenn die Tabelle in seiner Grundgesamtheit AUFTAUCHT. Genau das war
+     * zweimal nicht der Fall. Drei Stichproben aus drei Epochen — die
+     * älteste Tabelle, eine aus der Belegfamilie (die beim ersten Mal fehlte)
+     * und die aus `0142` (die beim zweiten Mal fehlte).
+     */
+    for (const t of ["skylanders", "purchase_receipts", "purchase_calculations"]) {
+      expect(ALL_PUBLIC_TABLES, `${t} fehlt in der Grundgesamtheit`).toContain(t);
+    }
+    /* Und sie ist nicht aus Versehen klein: 66 Tabellen am 2026-10-25. */
+    expect(ALL_PUBLIC_TABLES.length).toBeGreaterThanOrEqual(66);
   });
 
   it("und keine Tabelle ist beides", () => {

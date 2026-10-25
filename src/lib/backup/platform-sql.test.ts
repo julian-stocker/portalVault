@@ -14,9 +14,10 @@ import {
   PLATFORM_SECTIONS,
   allPlatformFields,
 } from "./platform-manifest";
+import { latestFunction } from "@/test-support/migrations";
 
 /**
- * Migration `0105` gegen das Plattform-Manifest (Schritt 3).
+ * Der Export gegen das Plattform-Manifest (Schritt 3).
  *
  * Der SQL-Rumpf wurde aus `platform-manifest.ts` ERZEUGT und nicht
  * abgeschrieben. Diese Datei ist die Gegenprobe: sie liest beide Seiten und
@@ -24,6 +25,24 @@ import {
  * ein neues Feld in der SQL, ein gestrichenes im Manifest —, schlägt sie an.
  * Sie gleicht dabei ausdrücklich NICHT still eine Seite an die andere an:
  * ein roter Test ist eine Entscheidung, die jemand treffen muss.
+ *
+ * ZWEI QUELLEN, UND SEIT DEM 2026-10-25 SIND SIE GETRENNT.
+ *
+ * Bis hierher las diese Datei ALLES aus `0105` — auch den Funktionsrumpf.
+ * Das hielt, solange `0105` die letzte Migration war, die
+ * `system_platform_export()` schreibt. Sobald eine spätere sie ersetzt, wäre
+ * es ein Test, der eine Fassung prüft, welche die Datenbank nicht mehr
+ * ausführt: er bliebe grün, während das lebende Verhalten davonläuft. Genau
+ * der Fehlgrund, den `latestFunction()` verhindert (und den dieses Projekt
+ * mit `shop_offers()` schon einmal hatte).
+ *
+ *   `DEFINITION`  die NEUESTE Fassung der Funktion, woher auch immer sie
+ *                 kommt. Alles, was den Rumpf, die Signatur und die
+ *                 Attribute betrifft, liest hier.
+ *   `SQL`/`CODE`  Migration `0105` als DATEI. Historische Prüfungen bleiben
+ *                 historisch: die Historientabelle, die Rücknahmehinweise
+ *                 und „`0105` tut nichts Destruktives" sind Aussagen über
+ *                 diese Datei und nicht über die Funktion von heute.
  */
 const FILE = "supabase/migrations/0105_platform_export.sql";
 const SQL = readFileSync(FILE, "utf8");
@@ -31,8 +50,15 @@ const SQL = readFileSync(FILE, "utf8");
 /** Ohne Kommentare: die Kopfzeilen nennen Tabellen, die gerade NICHT vorkommen. */
 const CODE = SQL.split("\n").filter((l) => !l.trimStart().startsWith("--")).join("\n");
 
-/** Der Rumpf der Exportfunktion, zwischen den `$$`-Marken. */
-const BODY = CODE.slice(CODE.indexOf("as $$") + 5, CODE.indexOf("$$;"));
+/** Die neueste Fassung der Exportfunktion — Signatur, Attribute und Rumpf. */
+const DEFINITION = latestFunction("system_platform_export");
+
+/** Dieselbe Kommentarbehandlung wie bei `CODE`, damit beide vergleichbar sind. */
+const DEF_CODE = DEFINITION.body
+  .split("\n").filter((l) => !l.trimStart().startsWith("--")).join("\n");
+
+/** Der Rumpf der Exportfunktion, hinter der `$$`-Marke der neuesten Fassung. */
+const BODY = DEF_CODE.slice(DEF_CODE.indexOf("as $$") + 5);
 
 /** Die Definition der Historientabelle, von `create table` bis zur Klammer. */
 const TABLE = CODE.slice(
@@ -100,6 +126,45 @@ function sqlFields(key: string): string[] {
 // ---------------------------------------------------------------------------
 // 1. Die Historie
 // ---------------------------------------------------------------------------
+
+describe("woher diese Datei liest", () => {
+  /*
+   * Die Trennung selbst wird geprüft, nicht nur beschrieben. Ohne diese
+   * Gruppe könnte jemand `BODY` wieder aus `0105` schneiden, und alle
+   * Feldvergleiche blieben grün — während die Datenbank eine andere Fassung
+   * ausführt.
+   */
+  it("den Rumpf aus der NEUESTEN Fassung der Funktion", () => {
+    expect(DEFINITION.file).toMatch(/^\d{4}_.*\.sql$/);
+    expect(DEFINITION.body).toContain("system_platform_export()");
+    /* Und der Rumpf ist nicht aus Versehen leer — ein leerer bestünde jeden
+       `not.toContain` dieser Datei. */
+    expect(BODY.length).toBeGreaterThan(5000);
+    expect(BODY).toContain("'format',");
+  });
+
+  it("und heute ist das noch 0105 — gemessen, nicht angenommen", () => {
+    /*
+     * Eine Messung mit Absicht: solange keine spätere Migration die Funktion
+     * ersetzt, ist die neueste Fassung die aus `0105`. Kommt `0144`, ändert
+     * sich DIESE Zeile — an einer Stelle, die jemand liest, statt dass ein
+     * Vergleich stillschweigend die falsche Fassung prüft.
+     */
+    expect(DEFINITION.file).toBe("0105_platform_export.sql");
+  });
+
+  it("historische Prüfungen bleiben historisch", () => {
+    /*
+     * `0105` ist angewendet und nach Regel 1 eingefroren. Was über die DATEI
+     * gesagt wird — die Historientabelle, die Rücknahmehinweise, „sie tut
+     * nichts Destruktives" —, bleibt an ihr und wandert nicht mit der
+     * Funktion weiter.
+     */
+    expect(FILE).toBe("supabase/migrations/0105_platform_export.sql");
+    expect(CODE).toContain("create table if not exists public.platform_export_runs (");
+    expect(SQL).toContain("drop function if exists public.system_platform_export();");
+  });
+});
 
 describe("platform_export_runs hält genau die Fragen fest, die es beantworten soll", () => {
   /** Die Spalten der Tabelle, in Reihenfolge — ohne Constraints. */
@@ -226,12 +291,14 @@ describe("platform_export_runs hält genau die Fragen fest, die es beantworten s
 
 describe("system_platform_export() ist read-only und richtig eingehängt", () => {
   it("ist stable, security definer und hat den leeren search_path", () => {
-    expect(CODE).toContain("create or replace function public.system_platform_export()");
-    expect(CODE).toContain("language sql");
-    expect(CODE).toContain("stable");
-    expect(CODE).toContain("security definer");
-    expect(CODE).toContain("set search_path = ''");
-    expect(CODE).not.toContain("volatile");
+    /* Aus der NEUESTEN Fassung, nicht aus `0105` — siehe Kopf dieser Datei. */
+    expect(DEF_CODE).toMatch(
+      /create (?:or replace )?function public\.system_platform_export\(\)/);
+    expect(DEF_CODE).toContain("language sql");
+    expect(DEF_CODE).toContain("stable");
+    expect(DEF_CODE).toContain("security definer");
+    expect(DEF_CODE).toContain("set search_path = ''");
+    expect(DEF_CODE).not.toContain("volatile");
   });
 
   it("schreibt nichts — in keiner Form", () => {

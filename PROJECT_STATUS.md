@@ -274,6 +274,52 @@ Abfragefehler ein Fehlschlag (`wirftNicht`), die Gleichheit zählt nur mit
 Inhalt, und „eingebucht" liest `movement_id` — den Beweis, dass eine
 Bewegung existiert.
 
+### Sicherungswächter: die Grundgesamtheit kommt jetzt aus dem Schema (2026-10-25)
+
+**Phase 1 der Sicherungslücke, einzeln freigegeben und umgesetzt.** Keine
+Migration, keine Änderung an einer produktiven Sicherungsfunktion, keine
+Datenbank angefasst — reine Prüfwerkzeuge (ADR-0134).
+
+**Drei Lücken, und die dritte war neu:**
+
+| | |
+|---|---|
+| Plattformsicherung | `ALL_PUBLIC_TABLES` war eine **getippte Liste im Test**. Sie hat zweimal geschwiegen: vor `0122` bei drei Belegtabellen, bei `0142` bei `purchase_calculations` |
+| **Betriebssicherung** | **vierzehn** Tabellen waren nie entschieden — 28 Bereiche + 24 Ausschlüsse gegen **66** im Schema. Ihr Wächter prüfte jede *Spalte* eines bekannten *Bereichs*; eine ganze Tabelle konnte er nicht vermissen |
+| eine dünne Begründung | `platform_settings: "Plattformkonfiguration."` — 23 Zeichen. Der neue Test, der Substanz verlangt, hat sie sofort gemeldet |
+
+**Was jetzt schützt:** `tablesOf()` faltet `create table`, `drop table` und
+`alter table … rename to` über die ganze Historie — damit fällt auch die
+Umbenennung aus `0026` aus dem Fold, die die alte Liste von Hand nachstellte.
+Temporäre Notizblöcke (elf Migrationen bauen sie) und die drei Ansichten
+zählen nicht mit, erkannt an der **Form**. Kommentare werden nicht gelesen,
+und das ist keine Feinheit: **jedes** `drop table` dieser Historie steht in
+einem Kommentar.
+
+**Und er scheitert laut.** Ein fremdes Schema, eine unqualifizierte
+nicht-temporäre Tabelle, ein `rename to` mit Schemaqualifikation, ein
+unauflösbares `drop` — jede unverstandene Form hält die Suite an und nennt
+Datei und Anweisung. Auch die **leere Menge** ist ein Fehler: genau dieser
+Riegel hat beim Bau gemeldet, dass `new RegExp("create\\s+…")` den Buchstaben
+`s` statt des Klassenkürzels suchte und der Fold **null** Tabellen fand. Seit
+dem ist es ein Regex-Literal.
+
+**Beide Wächter beweisen ihr Anschlagen:** eine erfundene, nicht
+klassifizierte Tabelle muss genau sie nennen. Die Regel steht als eigene
+Funktion da und wird zweimal gefragt — mit dem echten Schema (leer) und mit
+der Erfindung (sie).
+
+**Dazu entnagelt:** `platform-sql.test.ts` liest den Funktionsrumpf über
+`latestFunction("system_platform_export")` statt aus einer festen Datei.
+Historische Aussagen über `0105` bleiben bei `0105`. Damit ist die
+Voraussetzung für Phase 2 geschaffen, ohne sie zu beginnen.
+
+**Offen bleibt die Lücke selbst:** `purchase_calculations` ist weiter nur
+begründet ausgeschlossen, und die vier Spalten aus
+`platform_export_gap.md` fehlen weiter im Export. Entschieden ist beides
+(Plattformsicherung, `PLATFORM_FORMAT_VERSION = 2`, Version-1-Archive bleiben
+gültig, kein Restore in `0144`) — umgesetzt nichts davon.
+
 ### 0142 und 0143 liegen auf Production (2026-10-25) — der Code wartet
 
 **Beide Migrationen sind angewendet, beide Postflights `9999 = 0`**, vom

@@ -138,3 +138,34 @@ einem Satz: **ja, und zwar als eigenes kleines Release nach `0142`/`0143`**,
 weil die Erweiterung die eine Funktion ersetzt, die unsere Absicherung ist.
 Punkt 1 oben (die Grundgesamtheit aus den Migrationen erheben) ist dort
 Schritt 1.
+
+---
+
+## Phase 1 erledigt (2026-10-25) — der Fehlgrund ist behoben, die Lücke noch nicht
+
+Punkt 1 der Folgeaufgabe oben („die Grundgesamtheit aus den Migrationen
+erheben") **ist umgesetzt** — und dabei kam eine dritte Lücke heraus.
+
+**Was gefunden wurde:**
+
+| | |
+|---|---|
+| Plattformsicherung | `ALL_PUBLIC_TABLES` war eine **getippte Liste im Test**. Zweimal hat sie eine Tabelle verschwiegen |
+| **Betriebssicherung** | **vierzehn** Tabellen waren nie entschieden: 28 Bereiche + 24 Ausschlüsse gegen **66** Tabellen im Schema. Ihr Wächter prüfte jede **Spalte** eines bekannten **Bereichs** — eine ganze Tabelle konnte er nicht vermissen |
+| eine dünne Begründung | `platform_settings: "Plattformkonfiguration."` — 23 Zeichen, ein Haken statt einer Entscheidung. Vom neuen Test sofort gemeldet |
+
+**Was jetzt schützt:** `tablesOf()` faltet `create table`, `drop table` und
+`alter table … rename to` über die ganze Historie; beide Wächter fragen ihn.
+Er zählt temporäre Notizblöcke und Ansichten nicht mit, liest keine
+Kommentare — **jedes** `drop table` dieser Historie steht in einem — und
+**scheitert laut**, sobald eine Form auftaucht, die er nicht versteht. Auch
+die leere Menge ist ein Fehler. Beide Wächter haben zusätzlich einen Test,
+der ihr **Anschlagen** beweist: eine erfundene Tabelle muss genau sie nennen.
+
+Vollständig: **ADR-0134**.
+
+**Was damit NICHT behoben ist:** die vier Spalten oben
+(`item_type`, `usk_rating`, `sale_released`, `delivery_scope`) fehlen weiter
+in `system_platform_export()`, und `purchase_calculations` ist weiter nur
+begründet ausgeschlossen statt gesichert. Beides ist Phase 2 (`0144`) und
+braucht eine eigene Freigabe. **Die Lücke ist sichtbar, nicht geschlossen.**

@@ -204,6 +204,33 @@ Lücke ein drittes Mal entsteht.
 
 ---
 
+## 6a. Nachtrag 2026-10-25: Phase 1 ist umgesetzt
+
+Der Betreiber hat **ausschließlich Phase 1** freigegeben — Option B oben,
+plus die Befreiung des festgenagelten Tests. Beides ist erledigt, und dabei
+kam eine dritte Lücke heraus:
+
+**Die Betriebssicherung hatte vierzehn unentschiedene Tabellen.** 28 Bereiche
+plus 24 begründete Ausschlüsse gegen 66 Tabellen im Schema. Ihr Wächter
+prüfte jede Spalte eines bekannten *Bereichs* — eine ganze Tabelle war für
+ihn unsichtbar, genau wie im Plattformmanifest. Alle vierzehn sind jetzt
+entschieden, `purchase_calculations` darunter: **begründet draußen**, weil sie
+an `user_id` hängt und dieser Export genau das als Kontoidentität sperrt.
+
+**Was jetzt nicht mehr passieren kann:** eine neue Tabelle hält beide
+Sicherungs-Suiten an, bis jemand sie entscheidet. Die Grundgesamtheit kommt
+aus den Migrationen (`tablesOf()`), nicht aus einer Liste, und der Fold
+scheitert laut statt leer zu bestehen. ADR-0134.
+
+**Was offen bleibt:** alles aus Abschnitt 5, Option C — die Aufnahme selbst.
+Die Architekturentscheidungen dafür hat der Betreiber am 2026-10-25
+getroffen: `purchase_calculations` in die Plattformsicherung,
+Betriebssicherung mit begründetem Ausschluss, **`PLATFORM_FORMAT_VERSION =
+2`**, Archive der Version 1 bleiben gültig, **kein automatischer Restore in
+`0144`**. Umgesetzt ist nichts davon.
+
+---
+
 ## 7. Was hier ausdrücklich nicht getan wurde
 
 Keine Migration geschrieben, kein Manifest geändert, kein Test umgestellt,

@@ -160,7 +160,15 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "Gelesen wird aus ihr einzig `mode` für das Metadatum `commerce_mode` — damit " +
     "ein Staging-Backup nie mit einem Production-Backup verwechselt wird. Das Salz " +
     "verlässt die Datenbank nicht.",
-  platform_settings: "Plattformkonfiguration.",
+  /*
+   * Hier stand „Plattformkonfiguration." — 23 Zeichen, und der neue Wächter
+   * hat das zu Recht als Haken statt als Entscheidung gelesen. Der Grund ist
+   * derselbe wie immer, er stand nur nicht da.
+   */
+  platform_settings:
+    "Konfiguration der Plattform (Kontaktangaben, Singleton). Gehört SkyIsles, " +
+    "nicht dem Verkäufer — dessen rechtliche Identität liegt in sellers, und " +
+    "die ist ein Bereich.",
 
   /* Bewusst offen gelassen */
   order_addresses:
@@ -172,6 +180,73 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   withdrawal_requests:
     "Widerrufserklärungen mit Name und Kontaktadresse. Eigener Aufbewahrungszweck, " +
     "eigene Entscheidung — nicht Teil des Bestands-Backups von V1.",
+
+  /* ---------------------------------------------------------------------
+   * Ergänzt am 2026-10-25 — die vierzehn, die nie entschieden waren
+   *
+   * Diese Liste führte 24 Tabellen, die Bereiche deckten 28, und das Schema
+   * hat 66. Vierzehn standen also nirgends — nicht ausgeschlossen, nicht
+   * enthalten, nicht entschieden. Auffallen konnte das nicht: der Wächter
+   * `manifest-gap.test.ts` prüfte jede SPALTE eines bekannten Bereichs, also
+   * eine Grundgesamtheit aus Bereichen. Eine ganze Tabelle war für ihn
+   * unsichtbar.
+   *
+   * Gefunden beim Release-Check zu `0142`, wo dieselbe Lücke im
+   * PLATTFORM-Manifest auffiel — zweimal derselbe Entwurfsfehler in zwei
+   * Wächtern. Seit heute leiten beide ihre Grundgesamtheit aus den
+   * Migrationen ab (`tablesOf()`), und diese vierzehn sind entschieden.
+   * ------------------------------------------------------------------ */
+
+  /* Plattformeigenes — der Betrieb verkauft, er betreibt nicht */
+  collection_items:
+    "Die Sammlungen der Nutzer. Reines Plattformdatum: der Betrieb verkauft Figuren, " +
+    "er sammelt sie nicht. Im Plattformexport enthalten, und dort gehört es hin.",
+  catalog_admin_changes:
+    "Änderungsjournal der Katalogredaktion. Plattformseite, wie catalog_editorial.",
+  legal_document_versions:
+    "Fassungen der Rechtstexte der Plattform. Welche Fassung bei einem Kauf galt, " +
+    "liegt als Schnappschuss in order_legal_snapshots — und der ist ein Bereich.",
+  shipping_countries:
+    "Welche Länder die Plattform beliefert. Konfiguration; die Versandart eines " +
+    "Kaufs steht in shipping_methods, und die ist ein Bereich.",
+  platform_export_runs:
+    "Historie der Plattformexporte. Fremde Werkzeugspur — und ein Backup, das " +
+    "seine eigene Vorgeschichte mitschleppt, wächst ohne Erkenntnisgewinn.",
+
+  /* Testerverwaltung — Berechtigung, kein Geschäftsdatum (ADR-0072) */
+  testers: "Wer unfertige Funktionen sehen darf. Berechtigung, wie seller_operators.",
+  tester_features: "Welche unfertige Funktion es überhaupt gibt. Konfiguration.",
+  tester_permissions: "Welcher Tester welche Funktion sieht. Berechtigung.",
+  tester_permission_changes: "Journal dieser Berechtigungen. Verwaltungsspur.",
+  commerce_testers: "Wer den Zahlungsweg vor der Öffnung benutzen durfte. Berechtigung.",
+
+  /* Flüchtiges und Telemetrie */
+  cart_items:
+    "Warenkörbe, die zu keinem abgeschlossenen Vorgang gehören. Flüchtig; ein " +
+    "wiederhergestellter fremder Warenkorb wäre eher verwirrend als nützlich.",
+  perf_navigations: "Telemetrie (ADR-0072). Ohne Geschäftswert, jederzeit neu messbar.",
+  perf_interactions: "Telemetrie der Interaktionen (ADR-0072). Ebenso.",
+
+  /*
+   * UND DIE, UM DIE ES GING. Zwei Gründe, und jeder allein würde reichen:
+   *
+   * 1. Sie hängt an `user_id`, und genau dieses Feld steht in
+   *    `FORBIDDEN_FIELDS` dieses Exports („Kontoidentität"). Ohne es wäre
+   *    die Zuordnung fort, mit ihm die Regel gebrochen.
+   * 2. Eine Kalkulation ist eine BEWERTUNG, kein Geschäftsvorfall. Der
+   *    Einkauf, der daraus wurde, steht in `purchases` — mit allen Zahlen,
+   *    auf die es buchhalterisch ankommt.
+   *
+   * Sie gehört in die PLATTFORMsicherung, wo `collection_items` aus demselben
+   * Grund steht: nutzergeneriert und aus nichts ableitbar. Dort ist sie als
+   * Bereich vorgesehen (Migration `0144`) — die Entscheidung ist getroffen,
+   * umgesetzt ist sie nicht.
+   */
+  purchase_calculations:
+    "Gespeicherte Einkaufskalkulationen (0142). Sie hängen an user_id, das dieser " +
+    "Export als Kontoidentität sperrt — und eine Kalkulation ist eine Bewertung, " +
+    "kein Geschäftsvorfall: der Einkauf daraus steht in purchases. Sie gehört in " +
+    "die Plattformsicherung, dort vorgesehen als Bereich mit 0144.",
 };
 
 /* -------------------------------------------------------------------------
