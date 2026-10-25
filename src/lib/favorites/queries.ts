@@ -27,6 +27,8 @@ import {
 import { isCollectible } from "@/lib/catalog/collectible";
 import { sortFigures } from "@/lib/catalog/sort";
 import type { CatalogFigure } from "@/lib/catalog/types";
+import { cache } from "react";
+
 import { currentUser } from "@/lib/auth/user";
 import { createClient } from "@/lib/supabase/server";
 
@@ -102,3 +104,67 @@ export async function fetchFavorites(): Promise<CatalogFigure[]> {
 
   return sortFigures(enriched);
 }
+
+/* ---------------------------------------------------------------------------
+ * DIE NACHFRAGE — Zahlen für den Betrieb, und nur Zahlen
+ * ------------------------------------------------------------------------ */
+
+/** Die Decke, die `favorite_demand()` selbst zieht (`0145`). */
+export const MAX_DEMAND_SKY_IDS = 2000;
+
+/**
+ * Wie viele Konten eine Figur vorgemerkt haben, je SKY-ID.
+ *
+ * EIN AUFRUF FÜR EINE GANZE ANSICHT. Der Figuren-Picker filtert ein Array im
+ * Browser (`figure-search.tsx`), das Lager zeichnet knapp 290 Karten — eine
+ * Abfrage je Figur wären hunderte Anfragen für eine Zahl. `cache()` bindet
+ * das Ergebnis an die Anfrage, also zahlt eine Seite es höchstens einmal,
+ * auch wenn Katalog und Lager beide fragen.
+ *
+ * OHNE LISTE HOLT SIE ALLES, und das ist hier das Kleinere: `favorite_demand()`
+ * gibt Figuren OHNE Favorit nicht zurück, also ist die Antwort so groß wie
+ * die Zahl der vorgemerkten Figuren — und nicht so groß wie der Katalog. Eine
+ * Liste von 534 SKY-IDs zu senden, um 30 Zahlen zu bekommen, wäre die
+ * größere Anfrage.
+ *
+ * WER FRAGEN DARF, ENTSCHEIDET DIE DATENBANK. Die Funktion ist
+ * `security definer` hinter `can_operate_active_seller()`; ein Sammler, ein
+ * Plattformadministrator und `anon` werden mit `insufficient_privilege`
+ * abgewiesen. Hier steht KEINE zweite Rollenprüfung, die auseinanderlaufen
+ * könnte — was zurückkommt, ist leer oder richtig.
+ *
+ * EIN FEHLER BLOCKIERT NICHTS. Eine fehlende Nachfragezahl ist eine fehlende
+ * Zusatzinformation, kein Grund, den Picker oder das Lager nicht zu zeigen.
+ * Deshalb eine leere Map statt eines Fehlers — die Anzeige verschwindet
+ * dann einfach, und der Einkauf geht weiter.
+ *
+ * @param skyIds  Nur diese Figuren. Ohne Angabe: alle mit mindestens einem
+ *   Favoriten. Mehr als 2000 weist `0145` ab, und diese Funktion weist
+ *   vorher ab — eine Decke, die erst in der Datenbank greift, ist eine
+ *   Fehlermeldung statt einer Grenze.
+ */
+export const fetchFavoriteDemand = cache(
+  async (skyIds?: readonly string[]): Promise<ReadonlyMap<string, number>> => {
+    if (skyIds && skyIds.length > MAX_DEMAND_SKY_IDS) {
+      throw new Error(
+        `favorite demand: ${skyIds.length} SKY-IDs sind zu viele (max ${MAX_DEMAND_SKY_IDS})`);
+    }
+    if (skyIds && skyIds.length === 0) return new Map();
+
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("favorite_demand", {
+      p_sky_ids: skyIds ? [...skyIds] : null,
+    });
+    /* Kein `throw`: siehe oben. Ein Sammler landet hier regelmäßig, und für
+       ihn ist „keine Zahlen" die richtige Antwort und kein Zwischenfall. */
+    if (error || !Array.isArray(data)) return new Map();
+
+    const out = new Map<string, number>();
+    for (const row of data as { sky_id: unknown; users: unknown }[]) {
+      if (typeof row.sky_id === "string" && typeof row.users === "number") {
+        out.set(row.sky_id, row.users);
+      }
+    }
+    return out;
+  },
+);

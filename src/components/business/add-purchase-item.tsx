@@ -140,6 +140,7 @@ export function AddPurchaseItem({
         <>
           <p className="mb-1 text-xs text-muted">{copy.addItem}</p>
           <FigureSearch
+            showDemand
             catalog={catalog}
             disabled={pending}
             /*

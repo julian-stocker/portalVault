@@ -115,6 +115,7 @@ export function PurchaseDraftList({
       {/* Das Suchfeld bleibt oben und unverändert — dieselbe Auswahl wie im
           Verkaufsformular und auf der Detailseite. */}
       <FigureSearch
+            showDemand
         catalog={catalog}
         disabled={disabled}
         onSelect={(choice) => onChange(addPurchaseFigure(lines, choice))}

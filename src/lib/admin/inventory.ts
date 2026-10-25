@@ -26,6 +26,7 @@
  * place, and this module only reads the result. Money is not computed twice.
  */
 import type { CatalogFigure } from "@/lib/catalog/types";
+import { fetchFavoriteDemand } from "@/lib/favorites/queries";
 import { createClient } from "@/lib/supabase/server";
 
 import type { TradeTotals } from "@/lib/admin/stock-history";
@@ -115,7 +116,19 @@ export async function fetchInventory(
   const { data, error } = await supabase.rpc("admin_shop_inventory");
   if (error) throw new Error(`inventory: ${error.message}`);
 
-  const saleState = await fetchSaleState();
+  /*
+   * DIE NACHFRAGE, EINMAL FUER DAS GANZE LAGER (`0145`, ADR-0136).
+   *
+   * Das Lager zeichnet knapp 290 Karten; eine Abfrage je Position waeren
+   * 290 Anfragen fuer eine Zahl — und zwei davon je Figur, weil lose und
+   * originalverpackt zwei Positionen sind.
+   *
+   * Ohne Liste, also alle: `favorite_demand()` gibt Figuren OHNE Favorit
+   * nicht zurueck. `fetchFavoriteDemand()` ist `cache()`-gebunden und wirft
+   * nicht — eine fehlende Nachfragezahl ist eine fehlende
+   * Zusatzinformation, kein Grund, das Lager nicht zu zeigen.
+   */
+  const [saleState, demand] = await Promise.all([fetchSaleState(), fetchFavoriteDemand()]);
 
   const byId = new Map(catalog.map((figure) => [figure.skyId, figure]));
   const positions: InventoryPosition[] = [];
@@ -125,7 +138,12 @@ export async function fetchInventory(
     const row = toRow(raw);
     const figure = byId.get(row.skyId) ?? null;
     const zustand = saleState?.get(`${row.skyId}:${row.condition}`) ?? null;
-    (figure ? positions : outsideScope).push({ ...row, figure, saleState: zustand });
+    (figure ? positions : outsideScope).push({
+      ...row, figure, saleState: zustand,
+      /* `undefined`, wenn niemand sie vorgemerkt hat — siehe
+         `InventoryPosition.favoriteDemand`. */
+      favoriteDemand: demand.get(row.skyId),
+    });
   }
 
   return { positions, outsideScope };

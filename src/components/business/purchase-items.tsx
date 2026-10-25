@@ -387,6 +387,7 @@ export function PurchaseItems({
               {remapping === item.id ? (
                 <div className="mt-3 border-t border-border/70 pt-3">
                   <FigureSearch
+            showDemand
                     catalog={catalog}
                     autoFocus
                     disabled={pending}

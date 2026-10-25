@@ -12862,6 +12862,54 @@ Angebot, Ohne Angebot —, und „Mit Angebot" fragt `hasV1BuyableOffer()`,
 dieselbe Funktion wie die Angebotszeile jeder Karte. **Keine zweite
 Definition von „kaufbar".**
 
+### Nachtrag (2026-10-25): die Nachfrage, und was sie nicht behauptet
+
+`favorite_demand()` gab es seit `0145`, aufgerufen wurde sie nicht. Jetzt
+steht ihre Zahl an den beiden Stellen, an denen sie eine Entscheidung
+stützt — und an keiner weiteren.
+
+| Ort | Wo genau |
+|---|---|
+| Figuren-Picker des **Einkaufs** | in der Trefferzeile, zwischen Name und SKY-ID: Entwurfsliste des neuen Einkaufs, „Position hinzufügen“ und „Ändern“ an einer bestehenden |
+| **Lager** | am Kopf jeder Karte, zwischen Titel und Shop-Schalter |
+
+**Nicht** im externen Verkauf, nicht im Kalkulator, nicht im Katalog. Die
+Anzeige ist deshalb `showDemand`-gesteuert und **aus als Vorgabe**: derselbe
+Picker steht an sieben Stellen, und an fünf davon wäre die Zahl eine vierte
+Angabe in einer Zeile, die drei schon hat.
+
+**„vorgemerkt“, und nicht „Käufer“.** Ein Favorit ist eine Vormerkung, keine
+Kaufabsicht. „12 Käufer warten“ verkauft dem Betrieb eine Gewissheit, die
+die Zahl nicht hat; sie stützt eine Einschätzung, und das reicht für die
+Frage, welche Figur bevorzugt angekauft wird. Ein Test hält die verbotenen
+Wörter fest.
+
+**Geladen wird gebündelt, einmal je Ansicht.** `fetchFavoriteDemand()` ist
+`cache()`-gebunden und reist mit den beiden Leseabfragen, die es ohnehin gibt
+— `fetchOrderbookCatalog()` und `fetchInventory()`. Der Picker filtert ein
+Array im Browser, also muss die Zahl vorher da sein; eine Abfrage je Zeile
+wären im Picker hunderte und im Lager knapp 290 Anfragen. Ohne Liste
+aufgerufen, weil die Funktion Figuren **ohne** Favorit nicht zurückgibt: 534
+SKY-IDs zu senden, um dreißig Zahlen zu bekommen, wäre die größere Anfrage.
+Die Decke von 2000 prüft die Anwendung **vor** dem Aufruf — eine Grenze, die
+erst in der Datenbank greift, ist eine Fehlermeldung.
+
+**Ein Fehler blockiert nichts.** `fetchFavoriteDemand()` gibt bei einer
+Abweisung eine leere Map und wirft nicht. Ein Sammler landet dort
+regelmäßig — er benutzt denselben Picker im Kalkulator —, und für ihn ist
+„keine Zahlen“ die richtige Antwort und kein Zwischenfall.
+
+**Die Berechtigung bleibt, wo sie war.** Keine zweite Rollenprüfung in der
+Anwendung: die Funktion ist `security definer` hinter
+`can_operate_active_seller()`, und eine Prüfung daneben wäre eine zweite
+Wahrheit darüber, wer fragen darf. Kein Tabellenrecht auf `favorites` für den
+Betrieb, kein Dienstschlüssel, keine neue Migration, keine Erweiterung der
+Richtlinien.
+
+**Null zeichnet nichts.** Die meisten Figuren haben keinen Favoriten, und 290
+Nullen sind kein Befund. Die Daten tragen dafür `undefined` und nicht `0`:
+„nicht geladen“ ist nicht „niemand“.
+
 Der Plan für die Benachrichtigungen, die darauf aufsetzen sollen, steht in
 `docs/FAVORITE_NOTIFICATIONS.md` — **nichts davon ist gebaut.**
 
