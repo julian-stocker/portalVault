@@ -130,7 +130,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die siebzehn angewendeten", () => {
+  it("die Staging-Tabelle führt die achtzehn angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
@@ -141,8 +141,22 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * damit der Beweis von `0139` lesbar bleibt. `0133` und `0134` fehlen
      * weiter: die Tabelle hat damit eine Lücke, und die ist gewollt (die
      * Nummer ist eine Reihenfolge, keine Kette).
+     *
+     * **`0144` KAM AM 2026-10-25 DAZU** — die achtzehnte. Sie lief über
+     * `supabase/operations/staging-0144.sql`, der Postflight war vollständig
+     * bestanden, und danach wurde ein echter Plattformexport gezogen und
+     * lokal geprüft. Bis zu diesem Eintrag stand sie in der Akte als
+     * „nirgends angewendet"; das war ab dem Lauf falsch und ist genau die
+     * Sorte stiller Veralterung, gegen die diese Akte existiert.
+     *
+     * `0141`–`0143` fehlen in DIESER Tabelle weiter, obwohl sie auf Staging
+     * liegen — sie stehen nur in der Production-Tabelle. Das ist eine
+     * bekannte Lücke der Akte und kein Befund über `0144`; sie zu füllen
+     * braucht die Prüfsummen der dort gelaufenen Fassungen.
      */
-    expect(zeilen.length).toBe(17);
+    expect(zeilen.length).toBe(18);
+    expect(zeilen.map((z) => z.datei))
+      .toContain("0144_platform_export_calculations.sql");
     for (const datei of ["0135_catalog_item_type.sql",
                          "0136_business_backup_item_type.sql",
                          "0137_catalog_accessories.sql",
@@ -202,9 +216,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   it("wo `gleich` steht, ist die Datei bitgenau die ausgeführte Fassung", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
-       `0137`/`0138`, sechzehn seit `0139`/`0140`. Nur `0130` weicht ab und
-       zeigt auf ihren Nachtrag. */
-    expect(gleiche.length).toBe(16);
+       `0137`/`0138`, sechzehn seit `0139`/`0140`, siebzehn seit `0144` am
+       2026-10-25. Nur `0130` weicht ab und zeigt auf ihren Nachtrag. */
+    expect(gleiche.length).toBe(17);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
