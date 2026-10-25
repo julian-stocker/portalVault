@@ -1,0 +1,31 @@
+{
+  "_lies_mich": [
+    "Was eine Migration auf Staging braucht, als Daten statt als Sonderlogik.",
+    "Der Runner `tools/db-migrate-staging.mts` liest genau diese Datei; eine neue",
+    "Migration bedeutet einen neuen Eintrag und keinen neuen Code.",
+    "",
+    "angewendet  Eine LESENDE Abfrage mit einer Spalte `erfuellt`. true heisst:",
+    "            die Migration liegt schon. Sie entscheidet ueber den",
+    "            Wiederaufnahmemodus und darf NIE raten — kann sie es nicht",
+    "            zweifelsfrei sagen, gehoert sie nicht in diese Datei.",
+    "liefert     Welche Vertraege der Preflight ausgibt, und in welcher Zeile.",
+    "braucht     Welche Vertraege die Nachkontrolle braucht.",
+    "lauf        Die einfuegefertige Huelle. Der Runner kann sie NICHT fahren —",
+    "            der lesende Pruefzugang ist schreibgeschuetzt (Absicht). Sie",
+    "            wird angezeigt, und der Bediener fuegt sie einmal ein."
+  ],
+  "migrationen": {
+    "0146": {
+      "zweck": "Der Angebotsspiegel (Phase 4 S1)",
+      "preflight": "0146_preflight.sql",
+      "lauf": "staging-0146.sql",
+      "postflight": "0146_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.offer_state steht",
+        "sql": "select (to_regclass('public.offer_state') is not null) as erfuellt"
+      },
+      "liefert": { "skyisles.base": 900, "skyisles.coll": 901 },
+      "braucht": ["skyisles.base", "skyisles.coll"]
+    }
+  }
+}

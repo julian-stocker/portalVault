@@ -385,6 +385,31 @@ Preflight, Postflight, Abschlussprüfung und Protokoll laufen über Phase A. Der
 Gewinn gegenüber heute ist dann schon groß: von sieben manuellen Schritten
 bleibt einer.
 
+### Diese Alternative ist gebaut — 2026-10-25 (ADR-0137)
+
+```bash
+npm run db:migrate:staging -- 0146            # prüft, friert ein, hält an
+#   … die eine Anweisung in den SQL-Editor einfügen …
+npm run db:migrate:staging -- 0146 --resume   # Nachkontrolle
+```
+
+`tools/db-migrate-staging.mts` fährt über **denselben lesenden Zugang** wie
+Phase A — kein zweiter Zugang, kein DDL-Passwort, kein neues Geheimnis auf
+dieser Maschine. Er prüft den Stand, fährt den Preflight, friert dessen
+Vertragszeilen **unveränderbar** nach `supabase/baselines/` ein und reicht sie
+der Nachkontrolle in derselben Einreichung mit.
+
+**Der Anlass war kein Wunsch nach Bequemlichkeit, sondern ein Fehlermodus.**
+Bei `0145` und `0146` ist das Kopieren der Baselines übersprungen worden, und
+beide Male meldete die Nachkontrolle achtzehn Abweichungen — ausschließlich
+die der Übergabe. Ein Handgriff, der zweimal in Folge vergessen wird, gehört
+nicht auf den Laufzettel.
+
+**Phase C bleibt damit offen und unnötig.** Der Weg mit DDL-Passwort am
+Terminal ist nicht gebaut; der Gewinn wäre ein eingespartes Einfügen, der
+Preis ein Prozess mit `postgres`-Rechten. Solange das Verhältnis so steht,
+bleibt es bei dieser Alternative.
+
 ---
 
 ## 6. Das Freigabemodell

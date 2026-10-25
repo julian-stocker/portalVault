@@ -80,6 +80,7 @@ const befund = (z: Zeile): string => String(z.befund ?? "");
  */
 export async function fahreEintrag(
   db: DbZugang, eintrag: SuiteEintrag, verzeichnis = CHECK_DIR,
+  vertraege: ReadonlyMap<string, string> = new Map(),
 ): Promise<Befund> {
   const start = Date.now();
   const pfad = join(verzeichnis, eintrag.datei);
@@ -98,12 +99,35 @@ export async function fahreEintrag(
       }
     }
 
+    /*
+     * JEDER VERTRAG IN DERSELBEN KLAMMER WIE DIE DATEI.
+     *
+     * `set_config(…, true)` gilt nur in seiner Transaktion, und der
+     * SQL-Editor fuehrt jeden Lauf getrennt aus — genau daran ist die
+     * Uebergabe von Hand bei `0145` und `0146` gescheitert. Hier kann sie
+     * nicht scheitern: die Zeilen und die Datei gehen als EINE Einreichung
+     * hinaus.
+     *
+     * `vertraege` kam mit dem Migrations-Runner dazu (`db:migrate:staging`).
+     * Der Z0-Vertrag bleibt, wo er war — die bestehende Suite ist davon
+     * unberuehrt.
+     *
+     * Die Werte sind GEPRUEFTE Baselines (`tools/lib/baseline.mts`), aber
+     * einfache Anfuehrungszeichen werden trotzdem verdoppelt: eine Zeile,
+     * die aus einer Datei kommt, wird nicht ungepruefter Teil einer
+     * Anweisung.
+     */
+    const vertragsZeilen = [...vertraege].map(([name, wert]) =>
+      `select set_config('${name}', '${wert.split("'").join("''")}', true) as ${
+        name.replace(/[^a-z]/g, "_")}`);
+
     const teile = [
       "begin",
       "set transaction read only",
       ...(eintrag.vertrag === "staging"
         ? [`select set_config('skyisles.z0', '${eintrag.vertrag}', true) as vertrag`]
         : []),
+      ...vertragsZeilen,
       sql.replace(/;\s*$/, ""),
       "rollback",
     ];

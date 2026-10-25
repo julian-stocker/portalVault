@@ -1,0 +1,11 @@
+{
+  "migration": "0146",
+  "erhoben": "2026-10-25T00:00:00.000Z",
+  "herkunft": "bediener",
+  "preflightSha256": null,
+  "vertraege": {
+    "skyisles.base": "skyisles-base-1|256|4d1d6c30fe0ae886ca2689bcb1fe9634|534|534|286|626|3821eb4f6bb067a408d973c3c14145e0|e61aa1ea49a4",
+    "skyisles.coll": "skyisles-coll-1|1|1|a8c965923be52b4d6fee837ae35fd22e|c8a5542794f2"
+  },
+  "bemerkung": "NACHGETRAGEN, nicht vom Runner erhoben. 0146 wurde am 2026-10-25 von Hand auf Staging gefahren, bevor es diesen Runner gab; die Nachkontrolle meldete 9999 = 18, weil die beiden Zeilen nicht uebergeben wurden. Diese Werte sind die Zeilen 900 und 901 aus GENAU DEM Preflight, der vor der Migration lief, vom Betreiber berichtet. Beide Schutzsummen sind nachgerechnet (e61aa1ea49a4 und c8a5542794f2) — tools/lib/baseline.mts prueft sie bei jedem Lesen erneut. Sie wurden NICHT nach der Migration erhoben; das waere der eine Fehler, der alle Abweichungen verschwinden laesst und nichts beweist."
+}

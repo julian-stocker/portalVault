@@ -225,6 +225,21 @@ function scripts(): Record<string, string> {
     .scripts;
 }
 
+/**
+ * Die Werkzeuge, die eine eigene PostgreSQL-Sitzung oeffnen.
+ *
+ * Sie tragen keinen Dienstschluessel und keine `--env-file`; ihr Zugang
+ * liegt ausserhalb des Repositorys und wird dreifach geprueft, bevor eine
+ * Anweisung laeuft. Beide sind LESEND — die Rolle `skyisles_agent` ist auf
+ * `default_transaction_read_only` gesetzt.
+ */
+const DIREKTE_SITZUNG: Record<string, string> = {
+  "db:check:staging": "tools/db-check-staging.mts",
+  /* Der Migrations-Runner. Er fuehrt die Migration NICHT aus; er prueft,
+     friert die Baselines ein und fahrt die Nachkontrolle (0146). */
+  "db:migrate:staging": "tools/db-migrate-staging.mts",
+};
+
 describe("every staging-only writer is actually guarded", () => {
   /**
    * The guard is only worth having if it is called. A tool added later that
@@ -262,26 +277,31 @@ describe("every staging-only writer is actually guarded", () => {
       // dev:staging carries its own interlock and passes no service-role key.
       if (name === "dev:staging") continue;
       /*
-       * `db:check:staging` IS THE ONE EXCEPTION, AND ITS GUARD IS STRONGER.
+       * THE DIRECT-SESSION TOOLS ARE THE EXCEPTION, AND THEIR GUARD IS
+       * STRONGER.
        *
-       * It opens a PostgreSQL session, not a Supabase client, so there is no
-       * service-role key to point at an env file. Its credential lives OUTSIDE
-       * the repository (`~/.skyisles/staging-db.env`) and is checked three
-       * ways before a statement runs: the connection string must carry the
-       * staging ref and must not mention the production ref anywhere, the
+       * They open a PostgreSQL session, not a Supabase client, so there is no
+       * service-role key to point at an env file. Their credential lives
+       * OUTSIDE the repository (`~/.skyisles/staging-db.env`) and is checked
+       * three ways before a statement runs: the connection string must carry
+       * the staging ref and must not mention the production ref anywhere, the
        * session must answer with the staging stamp, and the role is read-only
        * by its own configuration. Asserting `--env-file=.env.staging` here
        * would demand the weaker mechanism.
        *
-       * The replacement assertion is below, and `staging-access.test.ts`
-       * covers every refusal path.
+       * Listed by name rather than matched by a pattern: a new tool on this
+       * path is a security decision and should have to be written down here.
+       * `staging-access.test.ts` covers every refusal path.
        */
-      if (name === "db:check:staging") {
-        expect(command, name).toBe("node tools/db-check-staging.mts");
+      const direkt = DIREKTE_SITZUNG[name];
+      if (direkt !== undefined) {
+        expect(command, name).toBe(`node ${direkt}`);
         expect(command, name).not.toContain("--env-file");
-        const quelle = readFileSync("tools/db-check-staging.mts", "utf8");
+        const quelle = readFileSync(direkt, "utf8");
         expect(quelle).toContain("verbindeStaging");
         expect(quelle).not.toMatch(/\.env\.local/);
+        /* Und keiner von ihnen bringt einen Dienstschluessel mit. */
+        expect(quelle).not.toContain("SERVICE_ROLE");
         continue;
       }
       expect(command, name).toContain("--env-file=.env.staging");

@@ -19,16 +19,34 @@
 -- Erstbefuellung gehoert in den ersten Aufruf der Funktion, nicht in die
 -- Migration. Zeile 161 haelt das fest.
 --
--- SO UEBERGIBST DU DIE BEIDEN BASISZEILEN. Zeile 900 und Zeile 901 des
--- Preflights vollstaendig kopieren und VOR diesem SELECT ausfuehren:
+-- WOHER DIE BEIDEN BASISZEILEN KOMMEN. Diese Datei vergleicht gegen die
+-- Zeilen 900 und 901 DES PREFLIGHTS — den Stand VOR der Migration. Sie
+-- erhebt sie nicht selbst, und die aktuellen Werte werden NIEMALS als
+-- Sollwert eingesetzt.
+--
+-- AUF STAGING UEBERNIMMT DAS EIN BEFEHL.
+-- `npm run db:migrate:staging -- 0146` friert die beiden Zeilen nach dem
+-- Preflight in `supabase/baselines/` ein, und `--resume` reicht sie dieser
+-- Datei in DERSELBEN Einreichung mit. Kein Kopieren, kein Platzhalter. Genau
+-- diese Handarbeit ist bei `0145` und bei `0146` vergessen worden, und beide
+-- Male meldete Zeile 9999 achtzehn Abweichungen — ausschliesslich die der
+-- Uebergabe.
+--
+-- AUF PRODUCTION GIBT ES DIESEN BEFEHL NICHT, und das ist Absicht: der
+-- Runner haengt an einem Zugang, der ausschliesslich auf Staging zeigt und
+-- dort nur lesen darf. Fuer Production gilt der Weg von Hand — mit FRISCH
+-- auf Production gemessenen Zeilen. Eine Staging-Baseline hier einzusetzen
+-- waere die schlimmste Form von gruen: sie vergliche Production gegen die
+-- Zahlen einer anderen Datenbank.
+--
+-- SO GEHT ES VON HAND: Zeile 900 und 901 des Preflights DERSELBEN Umgebung
+-- vollstaendig kopieren und VOR diesem SELECT ausfuehren —
 --
 --   select set_config('skyisles.base', 'skyisles-base-1|…', true);
 --   select set_config('skyisles.coll', 'skyisles-coll-1|…', true);
 --
--- Alles zusammen markieren und ausfuehren — `set_config(…, true)` gilt nur
--- in DERSELBEN Transaktion, und der SQL-Editor fuehrt jeden Lauf getrennt
--- aus. Ohne Baseline laeuft hier nichts durch, und die aktuellen Werte
--- werden NIEMALS als Sollwert eingesetzt.
+-- Alles zusammen markieren und ausfuehren: `set_config(…, true)` gilt nur in
+-- DERSELBEN Transaktion, und der SQL-Editor fuehrt jeden Lauf getrennt aus.
 --
 -- BLEIBT DER PLATZHALTER STEHEN, LAEUFT DIESE DATEI NICHT DURCH. Die Huelle
 -- bringt beide `set_config`-Zeilen schon mit, damit niemand sie vergisst —

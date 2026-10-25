@@ -81,7 +81,21 @@ npm run verify:check-sql # jede Datei in supabase/checks/ gegen echtes PostgreSQ
 npm run verify:rls:staging       # funktionale RLS-Prüfung (SCHREIBT: Auth-Nutzer, Fixtures)
 npm run verify:shop:staging      # öffentliche Angebotsprojektion prüfen (schreibfrei)
 npm run catalog:import:staging   # Katalogimport nach Staging
+
+npm run db:check:staging         # Prüfdateien gegen Staging fahren (rein lesend)
+npm run db:migrate:staging -- 0146           # eine Migration auf Staging: Stand prüfen,
+                                 # Preflight, Baselines unveränderbar einfrieren, anhalten
+npm run db:migrate:staging -- 0146 --resume  # danach die Nachkontrolle, mit genau
+                                 # diesen Baselines (ADR-0137)
 ```
+
+**Eine Migration auf Staging läuft über `db:migrate:staging`, nicht über
+Handgriffe.** Der Runner fährt alles Lesende und Rechnende; die eine
+schreibende Anweisung fügt der Bediener unverändert in den SQL-Editor ein —
+der Prüfzugang darf bewusst nicht schreiben. Er übernimmt die Baselines
+selbst: sie werden **vor** der Migration erhoben, in `supabase/baselines/`
+eingefroren und danach **nie** neu erhoben. Keine Prüfsumme von Hand kopieren,
+keinen Platzhalter ersetzen.
 
 **Jedes datenbankschreibende Werkzeug nennt seine Umgebung im Namen.** Es gibt keinen
 umgebungsneutralen Alias mehr: `:prod` zielt auf Production, `:staging` auf Staging. Die

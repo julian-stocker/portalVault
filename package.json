@@ -75,6 +75,7 @@
     "fix:legacy-raw-name:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/fix-legacy-raw-name.mts",
     "verify:check-sql": "node tools/validate-check-sql.mts",
     "db:check:staging": "node tools/db-check-staging.mts",
+    "db:migrate:staging": "node tools/db-migrate-staging.mts",
     "db:grants:plan": "python3 tools/lib/grant-plan.py",
     "db:acl:audit": "python3 tools/lib/function-acl-audit.py",
     "env:audit": "node tools/env-audit.mts"

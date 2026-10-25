@@ -17,6 +17,10 @@
 # Written by the CLI (version cache, link state). Never part of the repo:
 # it can name a project ref, and this repository serves more than one.
 supabase/.temp/
+# Laufausgabe der Staging-Pruefungen. Die EINGEFRORENEN Baselines liegen
+# dagegen in supabase/baselines/ und sind versioniert — ein
+# Wiederaufnahmelauf muss sie auch nach einem frischen Clone finden.
+supabase/log/
 
 # --- Internal legacy data -------------------------------------------------
 # These patterns are an extra brake, not a permission: the legacy project

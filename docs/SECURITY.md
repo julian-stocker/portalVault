@@ -543,6 +543,21 @@ PostgreSQL 18.6 durch (P15) und prüft die Gegenprobe: ohne Policy liest die
 Rolle 0 Zeilen, und bei offener Belegsperre bricht die Datei ab (P16). Plan und
 Phasen: `supabase/checks/staging_agent_access_plan.md`.
 
+**Zwei Werkzeuge laufen über diesen Zugang, und nur diese zwei:**
+`npm run db:check:staging` und `npm run db:migrate:staging` (ADR-0137). Beide
+tragen **keine** `--env-file` und **keinen** Dienstschlüssel; der Wächter in
+`src/lib/ops/staging-guard.test.ts` führt sie namentlich und prüft das nach —
+ein drittes Werkzeug auf diesem Weg ist eine Sicherheitsentscheidung und muss
+dort eingetragen werden.
+
+**Der Migrations-Runner wendet keine Migration an**, und das ist die Folge
+dieses Zugangs, keine Lücke: `default_transaction_read_only` gilt an der
+Rolle, der Dienstschlüssel läuft über PostgREST und kann kein DDL, und eine
+`exec_sql`-Funktion existiert nicht. Die eine schreibende Anweisung fügt der
+Bediener unverändert in den SQL-Editor ein. Einen DDL-fähigen Zugang dafür
+anzulegen hieße, eine Schlüsseldatei mit Vollzugriff auf Staging auf einem
+Arbeitsrechner zu halten — der Preis für ein eingespartes Einfügen.
+
 **Was PUBLIC ausführen darf, ist vollständig aufgezählt** —
 `npm run db:acl:audit`, über alle **337** lebenden Funktionen:
 
