@@ -4040,11 +4040,17 @@ async function main(): Promise<void> {
      * Zeile 108 verlangt eine LEERE Tabelle, und die Einfuegeproben unten
      * legen Zeilen an. Dieselbe Reihenfolge wie in P48.
      *
-     * ZWEI ZEILEN KANN EIN STUB NICHT ERFUELLEN und sie werden namentlich
-     * zugelassen: 141 und 142 verlangen die vier eigenen Richtlinien von
-     * `collection_items` und RLS darauf — das Stub-Schema ist reine
-     * Struktur OHNE Richtlinien. Jede andere rote Zeile laesst diesen
-     * Durchgang scheitern.
+     * DREI ZEILEN KANN EIN STUB NICHT ERFUELLEN und sie werden namentlich
+     * zugelassen: 141 und 143 verlangen die vier eigenen Richtlinien von
+     * `collection_items` (Existenz und Inhalt), 142 verlangt RLS darauf —
+     * das Stub-Schema ist reine Struktur OHNE Richtlinien. Jede andere rote
+     * Zeile laesst diesen Durchgang scheitern.
+     *
+     * 144 UND 145 SIND NICHT DARUNTER, und das ist der interessante Teil:
+     * „keine Richtlinie gibt anon etwas" und „keine unbekannte sechste"
+     * sind im Stub beide WAHR, weil es dort gar keine Richtlinien gibt.
+     * Beide Zeilen laufen hier also mit — eine berechtigte Agentenpolicy
+     * waere zugelassen, eine fremde nicht.
      */
     let nachRot = "-";
     let nachLeer = "-";
@@ -4211,7 +4217,7 @@ async function main(): Promise<void> {
         && pk === "user_id,sky_id"
         && policies === "3" && rls === "true"
         /* Die Nachkontrolle: nur die beiden Stub-Zeilen duerfen rot sein. */
-        && nachRot === "141, 142, 9999" && nachLeer === "0"
+        && nachRot === "141, 142, 143, 9999" && nachLeer === "0"
         && typeof zweimal === "string" && zweimal.includes("steht schon")
         && zweiKonten === "ok" && zweiVarianten === "ok"
         && doppelt === "abgewiesen" && idempotent === "laeuft durch"
@@ -4227,7 +4233,7 @@ async function main(): Promise<void> {
       sagt: `0145: ${lauf ?? "durch"} · vorher noch nicht da ${vorNochNicht}`
         + ` · Spalten ${spalten} · PK ${pk} · ${policies} Richtlinien · RLS ${rls}`
         + ` · Nachkontrolle rot: ${nachRot}`
-        + `${nachRot === "141, 142, 9999" ? " (nur die Stub-Zeilen 141/142)" : ""}`
+        + `${nachRot === "141, 142, 143, 9999" ? " (nur die Stub-Zeilen 141/142/143)" : ""}`
         + ` (Zeilen nach der Migration ${nachLeer})`
         + ` · zweiter Lauf: ${zweimal === null ? "DURCHGELAUFEN — Befund" : "prallt ab"}`
         + ` · dieselbe Figur fuer zwei Konten: ${zweiKonten}`

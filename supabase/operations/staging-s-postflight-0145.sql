@@ -401,15 +401,54 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- -------------------- Das Vorbild ist unberuehrt: collection_items
   /*
    * `0145` kopiert das Muster von `collection_items`. Es zu VERAENDERN war
-   * nie die Absicht — diese vier Zeilen halten fest, dass es auch nicht
+   * nie die Absicht — diese Zeilen halten fest, dass es auch nicht
    * versehentlich geschehen ist.
+   *
+   * DIESELBE BERICHTIGUNG WIE IM PREFLIGHT (2026-10-25). Hier stand „genau
+   * vier Richtlinien", und auf Staging sind es fuenf: die Lesepolicy
+   * `agent_read_collection_items` der Rolle `skyisles_agent`
+   * (`staging-agent-setup.sql`, `docs/SECURITY.md` 4b). Eine Zahl bricht an
+   * einer berechtigten Diagnosepolicy und sagt nichts darueber, ob die
+   * vier, auf die es ankommt, noch stehen. Gepruefft wird die Eigenschaft —
+   * und eine unbekannte sechste faellt trotzdem auf.
    */
-  (141, 'Sammlung', 'collection_items hat weiterhin vier Richtlinien',
+  (141, 'Sammlung', 'die vier eigenen Richtlinien von collection_items stehen weiterhin, '
+        'fuer authenticated',
       (select count(*)::text from pg_policies
-        where schemaname = 'public' and tablename = 'collection_items'), '4'),
+        where schemaname = 'public' and tablename = 'collection_items'
+          and policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own')
+          and 'authenticated' = any (roles)), '4'),
   (142, 'Sammlung', 'und RLS ist dort weiterhin an',
       coalesce((select relrowsecurity::text from pg_class
                  where oid = to_regclass('public.collection_items')), '(keine)'), 'true'),
+  (143, 'Sammlung', 'jede der vier fragt weiterhin Konto UND Rolle',
+      (select count(*)::text from pg_policies
+        where schemaname = 'public' and tablename = 'collection_items'
+          and policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own')
+          and coalesce(qual, with_check) like '%is_collector_account()%'
+          and coalesce(qual, with_check) like '%auth.uid()%'), '4'),
+  (144, 'Sammlung', 'keine Richtlinie dieser Tabelle gibt anon etwas',
+      (select count(*)::text from pg_policies
+        where schemaname = 'public' and tablename = 'collection_items'
+          and 'anon' = any (roles)), '0'),
+  (145, 'Sammlung', 'und 0145 hat KEINE Richtlinie auf collection_items hinterlassen',
+      (select count(*)::text from pg_policies p
+        where p.schemaname = 'public' and p.tablename = 'collection_items'
+          and not (p.policyname in ('collection_items_select_own', 'collection_items_insert_own',
+                             'collection_items_update_own', 'collection_items_delete_own'))
+          and not (p.policyname = 'agent_read_collection_items'
+                   and p.cmd = 'SELECT'
+                   and p.permissive = 'PERMISSIVE'
+                   and array_to_string(p.roles, '+') = 'skyisles_agent')), '0'),
+  (146, 'Sammlung', 'Info: alle Richtlinien von collection_items, mit Befehl und Rollen',
+      coalesce((select string_agg(policyname || ' (' || cmd || ', '
+                                  || array_to_string(roles, '+') || ')', '; '
+                                  order by policyname)
+                  from pg_policies
+                 where schemaname = 'public' and tablename = 'collection_items'),
+               '(keine)'), null),
 
   -- ------------------------------- Nichts ist freigegeben, und bleibt es
   (311, 'Nichts offen', 'freigegebene Lagerpositionen (0145 ruehrt das nicht an)',

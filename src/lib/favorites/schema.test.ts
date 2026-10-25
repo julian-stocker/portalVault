@@ -333,6 +333,83 @@ describe("die beiden Prüfdateien", () => {
     expect(POSTTEXT).toContain("'\"\"'");
   });
 
+  /**
+   * Jede Prüfzeile des `values`-Blocks als eigener Brocken.
+   *
+   * Nötig, weil die Frage „was erwartet DIESE Zeile" nur auf einer ganzen
+   * Zeile beantwortbar ist: der Sollwert steht am Ende, die Abfrage in der
+   * Mitte. Die erste Fassung dieses Wächters schnitt am ersten `),` ab und
+   * las damit einen leeren Abschnitt — sie hätte die alte Formulierung
+   * **nicht** gefangen. Gemerkt habe ich es, weil ich sie gegen
+   * `git show HEAD:…` gefahren habe, statt sie zu behaupten.
+   */
+  function pruefzeilen(text: string): string[] {
+    const block = text.slice(text.indexOf("as (values"));
+    return block.split("\n  (").slice(1).map((z) => `(${z}`);
+  }
+
+  it("zaehlt KEINE Richtlinien von collection_items — sie prueft Eigenschaften", () => {
+    /*
+     * DER REGRESSIONSTEST ZU EINEM FEHLER, DEN DIESES PROJEKT ZWEIMAL HATTE.
+     *
+     * Beide Dateien verlangten „genau vier Richtlinien" auf
+     * `collection_items`. Auf Staging sind es fünf: `staging-agent-setup.sql`
+     * legt die Lesepolicy `agent_read_collection_items` für die Rolle
+     * `skyisles_agent` an (`docs/SECURITY.md` 4b). `0142` hatte denselben
+     * Fehler, er wurde am 2026-10-22 gefunden und dort berichtigt — und
+     * `0145` hat die ALTE Formulierung kopiert statt der neuen. Gefunden hat
+     * es der Betreiber beim Preflight-Lauf am 2026-10-25.
+     *
+     * Eine Zahl ist hier die falsche Frage: sie bricht an einer berechtigten
+     * Diagnosepolicy und sagt nichts darüber, ob die VIER, auf die es
+     * ankommt, noch stehen.
+     *
+     * DIE REGEL, die dieser Test durchsetzt: wer über `pg_policies` dieser
+     * Tabelle zählt und eine POSITIVE Zahl erwartet („so viele müssen da
+     * sein"), muss die Richtlinien benennen. Eine Erwartung von `0` („nichts
+     * dieser Art existiert") darf und soll das nicht — sonst liefe sie an
+     * dem vorbei, wonach sie sucht.
+     */
+    for (const [name, text] of [["preflight", PRETEXT], ["postflight", POSTTEXT]] as const) {
+      const verstoesse = pruefzeilen(text).filter((z) =>
+        z.includes("tablename = 'collection_items'")
+        && z.includes("count(*)")
+        && !z.includes("policyname in")
+        && /,\s*'[1-9][0-9]*'\)/.test(z));
+      expect(verstoesse.map((z) => z.split("\n")[0]),
+             `${name}: zählt Richtlinien statt sie zu benennen`).toEqual([]);
+    }
+  });
+
+  it("nennt die vier beim Namen und laesst die Agentenpolicy AUSDRUECKLICH zu", () => {
+    for (const [name, text] of [["preflight", PRETEXT], ["postflight", POSTTEXT]] as const) {
+      for (const richtlinie of ["collection_items_select_own", "collection_items_insert_own",
+                                "collection_items_update_own", "collection_items_delete_own"]) {
+        expect(text, `${name}: ${richtlinie}`).toContain(richtlinie);
+      }
+      /* Zugelassen nur in ihrer bekannten Form — Befehl, Rolle und
+         Permissivität werden mitgeprüft, nicht nur der Name. */
+      expect(text, name).toContain("p.policyname = 'agent_read_collection_items'");
+      expect(text, name).toContain("p.cmd = 'SELECT'");
+      expect(text, name).toContain("array_to_string(p.roles, '+') = 'skyisles_agent'");
+    }
+  });
+
+  it("und eine unbekannte weitere Richtlinie faellt trotzdem auf", () => {
+    /*
+     * Der Punkt, an dem diese Fassung über die von `0142` hinausgeht: dort
+     * werden die vier geprüft und alles andere übergangen. Hier muss die
+     * Menge „weder eine der vier noch die bekannte Agentenpolicy" LEER
+     * sein — eine sechste Richtlinie ist eine blockierende Abweichung.
+     */
+    for (const [name, nr] of [["preflight", 125], ["postflight", 145]] as const) {
+      const text = name === "preflight" ? PRETEXT : POSTTEXT;
+      expect(text, name).toContain(`(${nr}, `);
+      const block = text.slice(text.indexOf(`(${nr}, `));
+      expect(block.slice(0, block.indexOf("),")), name).toContain("not (p.policyname in");
+    }
+  });
+
   it("und beide Dateien enden auf Zeile 9999 mit der Null", () => {
     for (const text of [PRETEXT, POSTTEXT]) {
       expect(text).toContain("blockierende Abweichungen (muss 0 sein)");
