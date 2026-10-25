@@ -13495,3 +13495,116 @@ Werkzeug, das Rechte erteilen *kann*) · jede Migration als rechtserheblich
 zählen (ein Riegel, der nach jeder Migration eine Staging-Messung verlangt,
 wird abgeschaltet) · den Abdruck am Datum statt am Inhalt festmachen (ein
 Alter sagt nichts darüber, ob sich etwas geändert hat).
+
+---
+
+## ADR-0141 · Strukturprüfungen lesen `pg_catalog`, nicht `information_schema`
+
+**Datum:** 2026-10-26
+**Status:** angenommen
+**Betrifft:** alle Prüfdateien `0142`–`0146`, Probelauf **P54**
+
+### Der Anlass, und der viel schlimmere Nebenbefund
+
+Prüfung 102 der Nachkontrolle von `0146` meldete `(keine Tabelle)` statt der
+acht Spalten — obwohl `offer_state` mit allen acht dasteht, in der richtigen
+Reihenfolge und mit den richtigen Typen. Ursache: **`information_schema` ist
+rechtegefiltert.** Es zeigt nur Objekte, auf die die aufrufende Rolle
+irgendein Recht hat, und der lesende Prüfzugang hat auf `offer_state` keines.
+
+An Staging gemessen, als `skyisles_agent`:
+
+| | `information_schema` | `pg_catalog` |
+|---|---|---|
+| Spalten von `offer_state` | *(keine Zeile)* | alle acht, richtige Reihenfolge |
+| `is_generated` von `available_quantity` | `ALWAYS` | `ALWAYS` |
+
+**Der Nebenbefund ist der eigentliche Befund.**
+`information_schema.role_table_grants` zeigt nur Erteilungen, bei denen die
+Rolle Erteiler oder Empfänger ist. Also:
+
+| `public.skylanders`, Erteilungen an `anon`/`authenticated` | |
+|---|---|
+| `information_schema.role_table_grants` (als Prüfzugang) | **0** |
+| `aclexplode(pg_class.relacl)` | **4** |
+
+Eine Zeile „keine Grants für `anon` — erwartet 0" war damit **grün, ohne
+hingesehen zu haben.** Ein falsches Grün auf einer Sicherheitsfrage, und zwar
+lautlos. Prüfung 102 war ein Fehlalarm und fiel auf; das hier wäre nie
+aufgefallen.
+
+Betroffen waren sechs Stellen in `0146` (laut: 102, 109; **still**: 113, 114,
+401 im Postflight und 401 im Preflight) und weitere elf in `0142`–`0145`.
+
+### Die Entscheidung
+
+**1. Strukturen und Rechte kommen aus `pg_catalog`.** Es filtert nicht.
+
+| Frage | statt | jetzt |
+|---|---|---|
+| Spalten, Reihenfolge | `information_schema.columns` | `pg_attribute`, `order by attnum` |
+| Typen | `columns.data_type` | `format_type(atttypid, atttypmod)` |
+| generierte Spalte | `columns.is_generated` | `attgenerated = 's'` |
+| Tabellenrechte | `role_table_grants` | `aclexplode(pg_class.relacl)` |
+| Tabelle existiert | `information_schema.tables` | `pg_class` / `to_regclass` |
+
+**`pg_policies` und `pg_views` bleiben** — sie sind nicht rechtegefiltert, an
+Staging nachgemessen (drei Richtlinien bzw. die Sichtdefinition sichtbar).
+
+**2. `to_regclass` statt `::regclass`.** Fehlt das Objekt wirklich, ist das
+Ergebnis NULL statt eines Fehlers — eine echte Strukturabweichung meldet
+weiter `(keine Tabelle)`. An echtem PostgreSQL geprüft: fehlende Tabelle,
+fehlende Spalte und zusätzliche Spalte werden alle drei erkannt.
+
+**3. Zwei Filter, beide tragend.** `attnum > 0` hält die Systemspalten
+heraus (`tableoid,cmax,xmax,cmin,xmin,ctid`), `not attisdropped` die
+verworfenen (`........pg.dropped.2........`). Beides nachgemessen — und eine
+Mutationsprobe hat gezeigt, dass dieser Punkt **ungeprüft** war: das
+Entfernen von `attnum > 0` ließ alle Tests grün, weil keiner die Form *aus
+der Datei* fuhr. Jetzt prüft ein Test beide Filter in allen zehn Dateien.
+
+**4. Bei Rechtelisten nur die Standardrechte.** `aclexplode` nennt auch
+`MAINTAIN` (PostgreSQL 17+, in `favorites` als `m` wirklich erteilt), das
+`information_schema` nicht kennt, weil es nicht im SQL-Standard steht. Die
+Beschränkung auf `SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES,
+TRIGGER` hält die Erwartung über PostgreSQL-Fassungen stabil, ohne etwas zu
+verbergen: ein `TRUNCATE` stünde weiter in der Liste. An Staging geprüft —
+die Erwartungen `DELETE,INSERT,SELECT,UPDATE` und `DELETE,INSERT,SELECT`
+bleiben unverändert.
+
+**5. Ein leeres `relacl` heißt bei Tabellen wirklich „kein Recht".** Anders
+als bei Funktionen, wo NULL `EXECUTE TO PUBLIC` bedeutet — die Falle in den
+Zeilen 136/141 (ADR-0139). Für eine Tabelle ist der Standard: nur der Eigner.
+
+**6. Zwei Riegel, und einer davon ist der verlässliche.**
+
+- **Statisch:** keine vom Runner gefahrene Prüfdatei darf
+  `information_schema` im Code nennen (im Kommentar erklärt: erlaubt).
+  Dieselbe Regel gilt für die ganze Basis-Vertrags-Familie `0142`–`0146`.
+  Fünf Gegenproben.
+- **Durchlaufend:** **P54** fährt jede Datei zweimal — als Eigner und als
+  Prüfzugang — und verlangt, dass jede Zeile **dasselbe** liefert, mit genau
+  einer erlaubten Ausnahme: `KEIN-RECHT`. Jeder andere Unterschied heißt,
+  dass eine Abfrage je nach Rolle etwas anderes sieht.
+
+**Die Reichweite des zweiten Riegels ist begrenzt**, und das gehört gesagt:
+er erkennt eine gefilterte Sicht nur, wenn die Antwort sich zwischen den
+Rollen *unterscheidet* — im Stub-Schema hat `offer_state` keine
+Clientrechte, also liefern beide Rollen 0. Die Gegenprobe in P54 erteilt
+deshalb eigens ein Recht und zeigt dann „Eigner 1, Prüfzugang 0". Der
+statische Riegel ist das verlässliche Netz; der durchlaufende ist die zweite
+Schicht.
+
+### Was nicht umgestellt wurde, und warum
+
+`0139`–`0141` und `production_baseline_drift.sql` benutzen
+`role_table_grants` weiterhin. Sie laufen im SQL-Editor als `postgres`, wo
+nicht gefiltert wird — dort ist die Aussage richtig. Kommt eine davon je in
+`migration-plans.json`, schlägt der statische Riegel an, und dann ist sie
+umzustellen. Ein Test hält fest, dass sie heute nicht darin stehen.
+
+**Verworfen:** die Erwartung um `MAINTAIN` erweitern (bindet die Prüfdatei an
+eine PostgreSQL-Fassung) · `information_schema` behalten und dem Prüfzugang
+Rechte geben, damit es etwas zeigt (dann prüft der Zugang, was er selbst
+sehen darf — ADR-0140) · nur Prüfung 102 beheben (die stillen drei wären
+geblieben, und das ist die gefährlichere Hälfte).

@@ -616,6 +616,19 @@ namentlich genannt. Der vollständige Nachweis läuft als `postgres` über die
 Datei, die der Runner dafür schreibt (`supabase/log/staging/`, Baselines
 schon eingesetzt).
 
+**Strukturprüfungen lesen `pg_catalog`, nicht `information_schema`
+(ADR-0141).** `information_schema` ist **rechtegefiltert** — und das ist
+nicht nur unbequem, es war ein stilles falsches Grün:
+`information_schema.role_table_grants` meldete dem Prüfzugang **0**
+Erteilungen auf `public.skylanders`, wo `aclexplode(relacl)` **4** zählt. Eine
+Zeile „keine Grants für `anon` — erwartet 0" war damit grün, ohne hingesehen
+zu haben. Deshalb: Spalten aus `pg_attribute`, Typen aus `format_type`,
+Tabellenrechte aus `aclexplode(pg_class.relacl)`, Existenz über
+`to_regclass`. `pg_policies` und `pg_views` sind nicht gefiltert (nachgemessen)
+und bleiben. Ein statischer Riegel verbietet `information_schema` in jeder vom
+Runner gefahrenen Datei; **P54** fährt zusätzlich jede Datei als Eigner *und*
+als Prüfzugang und verlangt Zeile für Zeile dasselbe — außer `KEIN-RECHT`.
+
 **Was er darf, sagt die Datenbank — nicht die Einrichtungsdatei (ADR-0140).**
 `npm run db:privileges:staging` erhebt es rein lesend und schreibt die Messung
 nach `supabase/privileges/staging-agent.json`; die Probeläufe bauen ihre Welt

@@ -354,9 +354,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (101, 'Tabelle', 'favorites steht',
       (to_regclass('public.favorites') is not null)::text, 'true'),
   (102, 'Tabelle', 'genau drei Spalten, in dieser Reihenfolge',
-      coalesce((select string_agg(column_name, ',' order by ordinal_position)
-                  from information_schema.columns
-                 where table_schema = 'public' and table_name = 'favorites'),
+      coalesce((select string_agg(a.attname, ',' order by a.attnum)
+                  from pg_attribute a
+                 where a.attrelid = to_regclass('public.favorites')
+                   and a.attnum > 0 and not a.attisdropped),
                '(keine Tabelle)'), 'user_id,sky_id,created_at'),
   /*
    * DIE REIHENFOLGE KOMMT AUS `array_position`, NICHT AUS `with ordinality`.
@@ -421,15 +422,26 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- ------------------------------------------------------------- Die Rechte
   (121, 'Rechte', 'anon hat KEIN Tabellenrecht',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public' and table_name = 'favorites'
-          and grantee = 'anon'), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.favorites'))
+          and (a.grantee::regrole::text in ('anon'))), '0'),
   (122, 'Rechte', 'authenticated hat genau SELECT/INSERT/DELETE — kein update, '
         'kein truncate (dafuer gilt RLS nicht)',
-      coalesce((select string_agg(distinct privilege_type, ',' order by privilege_type)
-                  from information_schema.role_table_grants
-                 where table_schema = 'public' and table_name = 'favorites'
-                   and grantee = 'authenticated'), '(keine)'),
+      /*
+       * NUR DIE STANDARDRECHTE. `aclexplode` nennt auch `MAINTAIN`
+       * (PostgreSQL 17+, in `favorites` als `m` wirklich erteilt), und das
+       * kennt `information_schema` nicht, weil es nicht im SQL-Standard
+       * steht. Die Beschraenkung haelt die Erwartung ueber
+       * PostgreSQL-Fassungen stabil, ohne etwas zu verbergen: ein
+       * `TRUNCATE` oder `UPDATE` stuende weiter in der Liste.
+       */
+      coalesce((select string_agg(distinct a.privilege_type, ',' order by a.privilege_type)
+                  from pg_class c, aclexplode(c.relacl) a
+                 where c.oid = to_regclass('public.favorites')
+                   and a.grantee::regrole::text = 'authenticated'
+                   and a.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE',
+                                            'TRUNCATE', 'REFERENCES', 'TRIGGER')),
+               '(keine)'),
       'DELETE,INSERT,SELECT'),
 
   -- ---------------------------------------------------------- Die Funktion
@@ -517,10 +529,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
-      (select count(*)::text from information_schema.role_table_grants g
-        where g.table_schema = 'public'
-          and g.table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and g.grantee in ('anon', 'authenticated')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and (a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
   (402, 'Belege', 'keine API-Rolle darf ausstellen oder korrigieren',
       (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
         where p.oid in (to_regprocedure('public.issue_platform_receipt(bigint)'),

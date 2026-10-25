@@ -345,10 +345,39 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   -- ------------------------------------------------------------ Die Tabelle
   (101, 'Tabelle', 'offer_state steht',
       (to_regclass('public.offer_state') is not null)::text, 'true'),
+  /*
+   * pg_catalog, NICHT information_schema — UND ZWAR AUS SICHERHEITSGRUENDEN.
+   *
+   * `information_schema` ist RECHTEGEFILTERT: es zeigt nur Objekte, auf die
+   * die aufrufende Rolle irgendein Recht hat. Fuer den lesenden Pruefzugang
+   * hat das zwei Folgen, und die zweite ist die schlimmere:
+   *
+   *   LAUT   `information_schema.columns` lieferte fuer `offer_state` KEINE
+   *          Zeile — Pruefung 102 meldete „(keine Tabelle)", obwohl die
+   *          Tabelle mit allen acht Spalten dasteht. Ein Fehlalarm, der
+   *          auffaellt.
+   *
+   *   STILL  `information_schema.role_table_grants` zeigt nur Erteilungen,
+   *          bei denen die Rolle Erteiler oder Empfaenger ist. Eine Zeile
+   *          „keine Grants fuer anon — erwartet 0" bekam also 0, OHNE
+   *          HINGESEHEN ZU HABEN. Nachgemessen an Staging: auf
+   *          `public.skylanders` zaehlt `role_table_grants` fuer den
+   *          Pruefzugang 0, `aclexplode(relacl)` zaehlt 4. Ein falsches
+   *          Gruen auf einer Sicherheitsfrage.
+   *
+   * `pg_catalog` filtert nicht. `pg_policies` und `pg_views` sind davon
+   * nicht betroffen (nachgemessen: 3 Richtlinien bzw. die Sichtdefinition
+   * sichtbar) und bleiben, wo sie stehen.
+   *
+   * `to_regclass` statt `::regclass`: fehlt das Objekt wirklich, ist das
+   * Ergebnis NULL statt eines Fehlers — eine echte Strukturabweichung meldet
+   * also weiter „(keine Tabelle)".
+   */
   (102, 'Tabelle', 'genau acht Spalten, in dieser Reihenfolge',
-      coalesce((select string_agg(column_name, ',' order by ordinal_position)
-                  from information_schema.columns
-                 where table_schema = 'public' and table_name = 'offer_state'),
+      coalesce((select string_agg(a.attname, ',' order by a.attnum)
+                  from pg_attribute a
+                 where a.attrelid = to_regclass('public.offer_state')
+                   and a.attnum > 0 and not a.attisdropped),
                '(keine Tabelle)'),
       'sky_id,buyable,cheapest_cents,changed_at,checked_at,'
       || 'announced_buyable,announced_cents,announced_at'),
@@ -386,13 +415,15 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select count(*)::text from pg_policies
         where schemaname = 'public' and tablename = 'offer_state'), '0'),
   (113, 'Rechte', 'keine API-Rolle hat ein Tabellenrecht',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public' and table_name = 'offer_state'
-          and grantee in ('anon', 'authenticated', 'PUBLIC')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid = to_regclass('public.offer_state')
+          and (a.grantee = 0
+               or a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
   (114, 'Rechte', 'und keine ein Recht auf die Sicht offer_state_live',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public' and table_name = 'offer_state_live'
-          and grantee in ('anon', 'authenticated', 'PUBLIC')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid = to_regclass('public.offer_state_live')
+          and (a.grantee = 0
+               or a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
 
   -- -------------------------------------------------------------- Die Sicht
   (121, 'Sicht', 'offer_state_live steht',
@@ -520,10 +551,16 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
-      (select count(*)::text from information_schema.role_table_grants g
-        where g.table_schema = 'public'
-          and g.table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and g.grantee in ('anon', 'authenticated')), '0'),
+      /*
+       * EIN LEERES `relacl` IST HIER WIRKLICH „KEIN RECHT" — anders als bei
+       * Funktionen. Der Standard einer Tabelle ist: nur der Eigner. Bei
+       * Funktionen waere NULL dagegen `EXECUTE TO PUBLIC`, weshalb die
+       * Zeilen 136/141 den NULL-Fall ausdruecklich benennen.
+       */
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and a.grantee::regrole::text in ('anon', 'authenticated')), '0'),
   (402, 'Belege', 'keine API-Rolle darf ausstellen oder korrigieren',
       (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
         where p.oid in (to_regprocedure('public.issue_platform_receipt(bigint)'),

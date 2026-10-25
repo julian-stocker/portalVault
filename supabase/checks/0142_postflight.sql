@@ -179,18 +179,25 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (101, 'Tabelle', 'public.purchase_calculations steht',
       (to_regclass('public.purchase_calculations') is not null)::text, 'true'),
   (102, 'Tabelle', 'zwoelf Spalten, in dieser Folge',
-      coalesce((select string_agg(column_name, ',' order by ordinal_position)
-                  from information_schema.columns
-                 where table_schema = 'public'
-                   and table_name = 'purchase_calculations'), '(keine)'),
+      coalesce((select string_agg(a.attname, ',' order by a.attnum)
+                  from pg_attribute a
+                 where a.attrelid = to_regclass('public.purchase_calculations')
+                   and a.attnum > 0 and not a.attisdropped), '(keine)'),
       'id,user_id,name,status,lines,factor_percent,total_cents,positions,units,'
       || 'purchase_id,created_at,updated_at'),
   (103, 'Tabelle', 'und die Typen, die sie tragen muessen',
-      coalesce((select string_agg(column_name || ':' || data_type, ',' order by column_name)
-                  from information_schema.columns
-                 where table_schema = 'public' and table_name = 'purchase_calculations'
-                   and column_name in ('id', 'user_id', 'lines', 'factor_percent',
-                                       'purchase_id')), '(keine)'),
+      /* `format_type` liefert fuer diese fuenf Spalten dieselbe Zeichenkette
+         wie `data_type` — an Staging nachgemessen. */
+      /* `attname::text`: die Katalogspalte hat den Typ `name`, und an einer
+         Verkettung endet das sonst in `42725` (unbestimmter Operator). */
+      coalesce((select string_agg(a.attname::text || ':'
+                                    || format_type(a.atttypid, a.atttypmod),
+                                  ',' order by a.attname)
+                  from pg_attribute a
+                 where a.attrelid = to_regclass('public.purchase_calculations')
+                   and a.attname in ('id', 'user_id', 'lines', 'factor_percent',
+                                     'purchase_id')
+                   and a.attnum > 0 and not a.attisdropped), '(keine)'),
       'factor_percent:smallint,id:uuid,lines:jsonb,purchase_id:bigint,user_id:uuid'),
   /*
    * BERICHTIGT AM 2026-10-22: AUCH HIER STAND EINE ZAHL, DIE VERFAELLT.
@@ -250,14 +257,25 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- ---------------------------------------------------------------- Rechte
   (301, 'Rechte', 'anon hat KEIN Tabellenrecht',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public' and table_name = 'purchase_calculations'
-          and grantee = 'anon'), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.purchase_calculations'))
+          and (a.grantee::regrole::text in ('anon'))), '0'),
   (302, 'Rechte', 'authenticated hat genau die vier — kein truncate',
-      coalesce((select string_agg(distinct privilege_type, ',' order by privilege_type)
-                  from information_schema.role_table_grants
-                 where table_schema = 'public' and table_name = 'purchase_calculations'
-                   and grantee = 'authenticated'), '(keine)'),
+      /*
+       * NUR DIE STANDARDRECHTE. `aclexplode` nennt auch `MAINTAIN`
+       * (PostgreSQL 17+, in `favorites` als `m` wirklich erteilt), und das
+       * kennt `information_schema` nicht, weil es nicht im SQL-Standard
+       * steht. Die Beschraenkung haelt die Erwartung ueber
+       * PostgreSQL-Fassungen stabil, ohne etwas zu verbergen: ein
+       * `TRUNCATE` oder `UPDATE` stuende weiter in der Liste.
+       */
+      coalesce((select string_agg(distinct a.privilege_type, ',' order by a.privilege_type)
+                  from pg_class c, aclexplode(c.relacl) a
+                 where c.oid = to_regclass('public.purchase_calculations')
+                   and a.grantee::regrole::text = 'authenticated'
+                   and a.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE',
+                                            'TRUNCATE', 'REFERENCES', 'TRIGGER')),
+               '(keine)'),
       'DELETE,INSERT,SELECT,UPDATE'),
 
   -- --------------------------------------------------- Indizes und Trigger
@@ -277,9 +295,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- ------------------------------------------- Was NICHT dazugekommen ist
   (501, 'Unberuehrt', 'keine zweite Tabelle fuer den Arbeitsstand',
-      (select count(*)::text from information_schema.tables
-        where table_schema = 'public'
-          and (table_name like '%calculator%' or table_name like '%draft%')), '0'),
+      (select count(*)::text from pg_class c
+        where c.relnamespace = 'public'::regnamespace
+          and c.relkind in ('r', 'v', 'm', 'p')
+          and (c.relname like '%calculator%' or c.relname like '%draft%')), '0'),
   /*
    * BERICHTIGT AM 2026-10-22: HIER STAND EINE ZAHL, UND DIE WAR FALSCH.
    *
@@ -317,10 +336,10 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
         where schemaname = 'public' and tablename = 'collection_items'
           and 'anon' = any (roles)), '0'),
   (503, 'Unberuehrt', 'die Belegsperre haelt unveraendert',
-      (select count(*)::text from information_schema.role_table_grants
-        where table_schema = 'public'
-          and table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and grantee in ('anon', 'authenticated')), '0'),
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and (a.grantee::regrole::text in ('anon', 'authenticated'))), '0'),
   (504, 'Unberuehrt', 'Info: Einkaeufe (0142 legt keinen an)',
       (select count(*)::text from public.purchases), null),
 

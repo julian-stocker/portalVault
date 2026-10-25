@@ -17,7 +17,7 @@ Die Nachkontrolle ist **offen** — siehe „Stand" gleich unten.
 | Migration | **angewendet**, eine Transaktion, `commit` |
 | Nachkontrolle | **9999 = 18** — und zwar ausschließlich die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833) |
 | Zu tun | die Nachkontrolle **einmal wiederholen**, mit den eingefrorenen Baselines |
-| Vier weitere Hürden, alle behoben | TLS (die private CA des Poolers fehlte, ADR-0138) · die Leserechte der zwei Datenzeilen · der Funktionsaufruf in Zeile 142 (beides ADR-0139) · die verlorene Erteilung auf `shop_offers()` (ADR-0140) |
+| Fünf weitere Hürden, alle behoben | TLS (die private CA des Poolers fehlte, ADR-0138) · die Leserechte der zwei Datenzeilen · der Funktionsaufruf in Zeile 142 (beides ADR-0139) · die verlorene Erteilung auf `shop_offers()` (ADR-0140) · `information_schema` ist rechtegefiltert und meldete „(keine Tabelle)" (ADR-0141) |
 
 ### Eine Voraussetzung, einmalig
 

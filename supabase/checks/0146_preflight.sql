@@ -159,10 +159,40 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                   'select public.reservation_ttl()::text as c',
                   false, true, '')))[1]::text
            else 'KEIN-RECHT' end, null),
+  /*
+   * pg_catalog, NICHT information_schema — UND ZWAR AUS SICHERHEITSGRUENDEN.
+   *
+   * `information_schema` ist RECHTEGEFILTERT: es zeigt nur Objekte, auf die
+   * die aufrufende Rolle irgendein Recht hat. Fuer den lesenden Pruefzugang
+   * hat das zwei Folgen, und die zweite ist die schlimmere:
+   *
+   *   LAUT   `information_schema.columns` lieferte fuer `offer_state` KEINE
+   *          Zeile — Pruefung 102 meldete „(keine Tabelle)", obwohl die
+   *          Tabelle mit allen acht Spalten dasteht. Ein Fehlalarm, der
+   *          auffaellt.
+   *
+   *   STILL  `information_schema.role_table_grants` zeigt nur Erteilungen,
+   *          bei denen die Rolle Erteiler oder Empfaenger ist. Eine Zeile
+   *          „keine Grants fuer anon — erwartet 0" bekam also 0, OHNE
+   *          HINGESEHEN ZU HABEN. Nachgemessen an Staging: auf
+   *          `public.skylanders` zaehlt `role_table_grants` fuer den
+   *          Pruefzugang 0, `aclexplode(relacl)` zaehlt 4. Ein falsches
+   *          Gruen auf einer Sicherheitsfrage.
+   *
+   * `pg_catalog` filtert nicht. `pg_policies` und `pg_views` sind davon
+   * nicht betroffen (nachgemessen: 3 Richtlinien bzw. die Sichtdefinition
+   * sichtbar) und bleiben, wo sie stehen.
+   *
+   * `to_regclass` statt `::regclass`: fehlt das Objekt wirklich, ist das
+   * Ergebnis NULL statt eines Fehlers — eine echte Strukturabweichung meldet
+   * also weiter „(keine Tabelle)".
+   */
   (109, 'Grundlage', 'available_quantity ist weiterhin eine GENERIERTE Spalte',
-      (select is_generated from information_schema.columns
-        where table_schema = 'public' and table_name = 'shop_inventory'
-          and column_name = 'available_quantity'), 'ALWAYS'),
+      (select case when a.attgenerated = 's' then 'ALWAYS' else 'NEVER' end
+         from pg_attribute a
+        where a.attrelid = to_regclass('public.shop_inventory')
+          and a.attname = 'available_quantity'
+          and a.attnum > 0 and not a.attisdropped), 'ALWAYS'),
 
   -- --------------------------------------- Und 0146 ist noch nicht da
   (110, 'Neu', 'offer_state steht NOCH NICHT',
@@ -293,10 +323,16 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
 
   -- -------------------------------------------------------- Die Belegsperre
   (401, 'Belege', 'keine Grants auf die Belegtabellen fuer anon/authenticated',
-      (select count(*)::text from information_schema.role_table_grants g
-        where g.table_schema = 'public'
-          and g.table_name in ('platform_receipts', 'platform_receipt_sequence')
-          and g.grantee in ('anon', 'authenticated')), '0'),
+      /*
+       * EIN LEERES `relacl` IST HIER WIRKLICH „KEIN RECHT" — anders als bei
+       * Funktionen. Der Standard einer Tabelle ist: nur der Eigner. Bei
+       * Funktionen waere NULL dagegen `EXECUTE TO PUBLIC`, weshalb die
+       * Zeilen 136/141 den NULL-Fall ausdruecklich benennen.
+       */
+      (select count(*)::text from pg_class c, aclexplode(c.relacl) a
+        where c.oid in (to_regclass('public.platform_receipts'),
+                        to_regclass('public.platform_receipt_sequence'))
+          and a.grantee::regrole::text in ('anon', 'authenticated')), '0'),
   (402, 'Belege', 'keine API-Rolle darf ausstellen oder korrigieren',
       (select count(*)::text from pg_proc p, aclexplode(p.proacl) a
         where p.oid in (to_regprocedure('public.issue_platform_receipt(bigint)'),
