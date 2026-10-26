@@ -5,6 +5,8 @@ import {
   CA_STANDARD, CA_VARIABLE, ERWARTETE_WURZEL, caAnleitung, caPfad,
   erklaereVerbindungsfehler, pruefeCa, pruefeTlsUmgebung, pruefeVerbindung,
   verbindungsFelder,
+  VERSUCHS_AKTE, VERSUCHS_AKTE_KOPF, anmeldeAuskunft, darfErneutVersuchen,
+  herkunftDerAblehnung, versuchsNotiz,
 } from "@/../tools/lib/staging-db.mts";
 
 /**
@@ -436,5 +438,232 @@ describe("die Quelle schaltet nichts ab", () => {
     expect(ca).toBeGreaterThan(-1);
     expect(treiber, "der Treiber wird vor der CA-Pruefung geladen")
       .toBeGreaterThan(ca);
+  });
+});
+
+/* =========================================================================
+ * DIE ABGELEHNTE ANMELDUNG (28P01) — WER HAT ABGELEHNT?
+ *
+ * DER ANLASS. Bei 0147 und 0148 am 2026-10-26 trat `28P01` unmittelbar nach
+ * einem gelungenen Preflight auf, mehrfach, und ein spaeterer Versuch gelang
+ * ohne jede Passwortaenderung. Die alte Meldung behauptete trotzdem „es ist
+ * das Passwort in der Zugangsdatei" — das ist durch den gelungenen Lauf
+ * widerlegt, und es ist genau der Rat, der zu einem unnoetigen
+ * Passwortwechsel gefuehrt haette.
+ *
+ * ZWEI BELEGBARE FEHLER, und nur die werden hier behoben:
+ *   1. die Meldung behauptete eine Ursache, die sie nicht wissen kann;
+ *   2. ein Verbindungsfehler hinterliess KEINE Spur — das Pruefprotokoll
+ *      entsteht erst nach dem Verbinden, also existiert von den Faellen am
+ *      2026-10-26 kein Beleg.
+ *
+ * Was NICHT behauptet wird: dass die Ursache am Pooler bewiesen sei. Dafuer
+ * fehlt der Beleg, und deshalb raet die Meldung zuerst zu dem Test, der sie
+ * entscheidet — und nicht zum Passwortwechsel.
+ * ====================================================================== */
+
+/** Was PostgreSQL bei einer verworfenen Anmeldung wirklich sendet. */
+const AUS_DER_DATENBANK = Object.assign(
+  new Error('password authentication failed for user "skyisles_agent"'),
+  { code: "28P01", severity: "FATAL", file: "auth.c", line: "326", routine: "auth_failed" },
+);
+
+/** Dieselbe Lage, aber von einem Zwischenstueck geschrieben. */
+const AUS_DEM_POOLER = Object.assign(
+  new Error('password authentication failed for user "skyisles_agent"'),
+  { code: "28P01", severity: "FATAL" },
+);
+
+describe("herkunftDerAblehnung", () => {
+  it("erkennt PostgreSQLs eigenen Anmeldecode an `routine: auth_failed`", () => {
+    expect(herkunftDerAblehnung(AUS_DER_DATENBANK)).toBe("datenbank");
+  });
+
+  it("erkennt an FEHLENDEM `routine` und `file`, dass die Datenbank nicht gefragt wurde", () => {
+    expect(herkunftDerAblehnung(AUS_DEM_POOLER)).toBe("pooler");
+  });
+
+  it("schliesst NICHT umgekehrt: Herkunftsfelder ohne `auth_failed` bleiben unklar", () => {
+    /* GEGENPROBE ZUR FOLGERUNG. Die Folgerung traegt nur in einer Richtung.
+       Ein Zwischenstueck KOENNTE `file` mitschicken — dann wird nicht auf
+       „Datenbank" geraten, sondern `unklar` gesagt. */
+    const anders = Object.assign(new Error("..."), {
+      code: "28P01", file: "proxy.ex", routine: "handle_auth",
+    });
+    expect(herkunftDerAblehnung(anders)).toBe("unklar");
+  });
+
+  it("wertet ein leeres `routine` nicht als Herkunftsfeld", () => {
+    const leer = Object.assign(new Error("..."), { code: "28P01", routine: "", file: "" });
+    expect(herkunftDerAblehnung(leer)).toBe("pooler");
+  });
+});
+
+describe("darfErneutVersuchen", () => {
+  it("wiederholt eine Ablehnung, die die Datenbank nie gesehen hat — genau einmal", () => {
+    expect(darfErneutVersuchen(AUS_DEM_POOLER, 1)).toBe(true);
+    expect(darfErneutVersuchen(AUS_DEM_POOLER, 2)).toBe(false);
+    expect(darfErneutVersuchen(AUS_DEM_POOLER, 3)).toBe(false);
+  });
+
+  it("wiederholt ein von der Datenbank verworfenes Passwort NIEMALS", () => {
+    /* DAS IST DIE WICHTIGE GEGENPROBE. Wiederholungen gegen eine echte
+       Anmeldung sind das Muster, das Sperren ausloest — und ein falsches
+       Passwort wird beim zweiten Mal nicht richtig. */
+    expect(darfErneutVersuchen(AUS_DER_DATENBANK, 1)).toBe(false);
+  });
+
+  it("wiederholt bei unklarer Herkunft nicht", () => {
+    const anders = Object.assign(new Error("..."), { code: "28P01", file: "proxy.ex" });
+    expect(darfErneutVersuchen(anders, 1)).toBe(false);
+  });
+
+  it("wiederholt keinen anderen Fehler als 28P01", () => {
+    for (const code of ["SELF_SIGNED_CERT_IN_CHAIN", "ETIMEDOUT", "53300", "08P01", ""]) {
+      expect(darfErneutVersuchen(Object.assign(new Error("x"), { code }), 1)).toBe(false);
+    }
+  });
+});
+
+describe("anmeldeAuskunft", () => {
+  it("raet bei Herkunft `datenbank` zum Passwortwechsel", () => {
+    const t = anmeldeAuskunft("datenbank");
+    expect(t).toContain("auth_failed");
+    expect(t).toContain("alter role skyisles_agent with password");
+  });
+
+  it("nennt bei Herkunft `pooler` zuerst den direkten Weg — nicht das Passwort", () => {
+    const t = anmeldeAuskunft("pooler");
+    const direkt = t.indexOf("db.qqxcpesbwfxzgytkdsac.supabase.co");
+    const passwort = t.indexOf("alter role");
+    expect(direkt, "der direkte Weg wird genannt").toBeGreaterThan(-1);
+    expect(passwort, "der Passwortwechsel steht DANACH").toBeGreaterThan(direkt);
+  });
+
+  it("macht den Passwortwechsel bei `pooler` ausdruecklich von dem Test abhaengig", () => {
+    /* „Keine Passwortaenderung auf Verdacht" — das muss in der Meldung
+       stehen, nicht nur in der Absicht. */
+    expect(anmeldeAuskunft("pooler")).toContain("BEVOR irgendein Passwort angefasst wird");
+    expect(anmeldeAuskunft("pooler")).toContain("NUR wenn der Test oben es zeigt");
+  });
+
+  it("behauptet bei `pooler` NICHT, es sei das Passwort", () => {
+    /* Die alte Meldung sagte genau das. Sie darf nicht zurueckkommen. */
+    const t = anmeldeAuskunft("pooler");
+    expect(t).not.toContain("Es ist das Passwort");
+    expect(t).toContain("sie wurde nicht gefragt");
+  });
+
+  it("sagt in jedem Fall, dass TLS stand", () => {
+    for (const h of ["datenbank", "pooler", "unklar"] as const) {
+      expect(anmeldeAuskunft(h)).toContain("TLS steht");
+    }
+  });
+});
+
+describe("erklaereVerbindungsfehler bei 28P01", () => {
+  it("waehlt die Auskunft nach der gemessenen Herkunft", () => {
+    expect(erklaereVerbindungsfehler(AUS_DEM_POOLER, "/ca.crt"))
+      .toContain("sie wurde nicht gefragt");
+    expect(erklaereVerbindungsfehler(AUS_DER_DATENBANK, "/ca.crt"))
+      .toContain("auth_failed");
+  });
+
+  it("nennt 28P01 weiterhin nicht als TLS-Fehler", () => {
+    const t = erklaereVerbindungsfehler(AUS_DEM_POOLER, "/ca.crt");
+    expect(t.startsWith("ANMELDUNG abgelehnt (28P01)")).toBe(true);
+    expect(t).not.toContain("Es fehlt also die CA");
+  });
+});
+
+describe("versuchsNotiz", () => {
+  const JETZT = new Date("2026-10-26T10:38:00.000Z");
+
+  it("haelt Zeitpunkt, Form, Versuch, Code, Herkunft und Dauer fest", () => {
+    const z = versuchsNotiz(AUS_DEM_POOLER, "pooler", 412, 1, JETZT);
+    expect(z).toContain("2026-10-26T10:38:00.000Z");
+    expect(z).toContain("| pooler |");
+    expect(z).toContain("| 1 |");
+    expect(z).toContain("| 28P01 |");
+    expect(z).toContain("| 412 |");
+    expect(z.endsWith("\n")).toBe(true);
+  });
+
+  it("schreibt die gemessene Herkunft in die Akte", () => {
+    expect(versuchsNotiz(AUS_DEM_POOLER, "pooler", 1, 1, JETZT)).toMatch(/\| pooler \| 1 \|/);
+    expect(versuchsNotiz(AUS_DER_DATENBANK, "pooler", 1, 1, JETZT)).toContain("| datenbank |");
+  });
+
+  it("nennt bei einem anderen Code keine Herkunft", () => {
+    const z = versuchsNotiz(
+      Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }), "direkt", 9, 1, JETZT,
+    );
+    expect(z).toContain("| ETIMEDOUT | — |");
+  });
+
+  it("bleibt EINE Tabellenzeile, auch bei mehrzeiliger Treibermeldung", () => {
+    const mehrzeilig = Object.assign(new Error("a\nb|c\nd"), { code: "28P01" });
+    const z = versuchsNotiz(mehrzeilig, "pooler", 1, 1, JETZT);
+    expect(z.split("\n").filter((x) => x !== "")).toHaveLength(1);
+  });
+
+  it("enthaelt keine Zugangsdaten — und redigiert die Treibermeldung", () => {
+    /* Der Host, der Benutzername und das Passwort gehoeren in keine Akte.
+       Festgehalten wird die FORM des Zugangs, nicht der Zugang. */
+    const mitUrl = Object.assign(
+      new Error("connect failed: postgres://skyisles_agent:s3cr3t@aws-1-eu-west-1.pooler.supabase.com:5432/postgres"),
+      { code: "28P01" },
+    );
+    const z = versuchsNotiz(mitUrl, "pooler", 1, 1, JETZT);
+    expect(z).not.toContain("s3cr3t");
+  });
+});
+
+describe("die Akte der abgelehnten Anmeldungen", () => {
+  it("liegt im Protokollordner, der nicht ins Repository geht", () => {
+    expect(VERSUCHS_AKTE).toBe("supabase/log/staging/anmeldeversuche.md");
+    const ignore = readFileSync(".gitignore", "utf8")
+      .split("\n").map((z) => z.trim()).filter((z) => z !== "" && !z.startsWith("#"));
+    expect(
+      ignore.some((z) => z === "supabase/log" || z === "supabase/log/" || z.startsWith("supabase/log")),
+      "supabase/log muss ignoriert sein",
+    ).toBe(true);
+  });
+
+  it("erklaert im Kopf, was `pooler` bedeutet, und sagt zu, keine Zugangsdaten zu fuehren", () => {
+    expect(VERSUCHS_AKTE_KOPF).toContain("Keine Zugangsdaten");
+    expect(VERSUCHS_AKTE_KOPF).toContain("Passwort nie gesehen");
+    expect(VERSUCHS_AKTE_KOPF).toContain("| Zeitpunkt | Form | Versuch | Code | Herkunft | ms | Meldung |");
+  });
+});
+
+describe("der Verbindungsaufbau selbst", () => {
+  const quelle = readFileSync("tools/lib/staging-db.mts", "utf8");
+  const code = quelle
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").filter((z) => !z.trim().startsWith("//")).join("\n");
+
+  it("haelt JEDEN gescheiterten Versuch fest, bevor er entscheidet", () => {
+    const notiz = code.indexOf("haltFest(versuchsNotiz(");
+    const entscheidung = code.indexOf("darfErneutVersuchen(e, versuch)");
+    expect(notiz, "die Notiz wird geschrieben").toBeGreaterThan(-1);
+    expect(entscheidung, "danach wird entschieden").toBeGreaterThan(notiz);
+  });
+
+  it("nimmt fuer den zweiten Versuch einen frischen Client", () => {
+    /* Ein `pg.Client`, dessen `connect()` geworfen hat, ist verbraucht —
+       ein zweiter `connect()` darauf wirft unabhaengig vom Passwort. */
+    expect(code).toContain("let client = neuerClient();");
+    expect(code).toContain("      client = neuerClient();");
+    /* Genau zwei Aufrufe der Fabrik: einer je moeglichem Versuch. */
+    expect(code.match(/neuerClient\(\);/g)?.length ?? 0).toBe(2);
+  });
+
+  it("setzt `rejectUnauthorized` in keiner WIRKSAMEN Zeile", () => {
+    /* Gegen den Code, nicht gegen die Prosa: das Verbot ist in dieser Datei
+       ausfuehrlich kommentiert, und ein Kommentar darueber ist kein Verstoss
+       dagegen. */
+    expect(code.includes("rejectUnauthorized")).toBe(false);
+    expect(code.includes("NODE_TLS_REJECT_UNAUTHORIZED = ")).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchUnreadNoticeCount } from "@/lib/favorites/notification-queries";
 import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
@@ -47,6 +48,19 @@ export default async function PublicLayout({ children }: { children: React.React
   const unread = {
     mine: user ? await fetchMyUnread() : 0,
     seller: caps.sellerOperator ? await fetchSellerUnread() : 0,
+    /*
+     * UND HIER ZAEHLT SIE WIRKLICH (Phase 4 S4, `0149`). Diese Leiste traegt
+     * den Katalog — die Seite, auf der ein Sammler die meiste Zeit ist. Eine
+     * Marke, die nur in den geschuetzten Bereichen erscheint, erreicht genau
+     * den nicht, fuer den sie gedacht ist.
+     *
+     * Ohne Konto wird nicht gefragt: `fetchUnreadNoticeCount()` antwortet
+     * einem Gast ohne Zugriff mit 0, und fuer ein Betriebs- oder Adminkonto
+     * gibt es keine Wunschliste (ADR-0078) und damit nichts zu zaehlen.
+     */
+    notices: user && !caps.platformAdmin && !caps.sellerOperator
+      ? await fetchUnreadNoticeCount()
+      : 0,
   };
   /* Zweiter Kanal (0099). Ohne Konto beides 0, und dafür wird nichts
      gefragt — dieselbe Zurückhaltung wie bei den Nachrichten. */

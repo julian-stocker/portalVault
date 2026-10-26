@@ -1,0 +1,10 @@
+{
+  "migration": "0148",
+  "erhoben": "2026-10-26T10:39:16.393Z",
+  "herkunft": "preflight",
+  "preflightSha256": "74e5860e9a0227a6db66fb475b5279c10aa59bd1ad360a1b16b4c125d16e21ce",
+  "vertraege": {
+    "skyisles.base": "skyisles-base-1|256|4d1d6c30fe0ae886ca2689bcb1fe9634|534|534|286|626|3821eb4f6bb067a408d973c3c14145e0|e61aa1ea49a4",
+    "skyisles.coll": "skyisles-coll-1|1|1|a8c965923be52b4d6fee837ae35fd22e|c8a5542794f2"
+  }
+}

@@ -5681,6 +5681,10 @@ async function main(): Promise<void> {
     const C = "cccccccc-0000-0000-0000-000000000003";
 
     const db = await frisch();
+    /* Das Stub-Schema kennt ALLE Migrationen, also auch 0148 und 0149. Beide
+       werden hier erst wieder angelegt — die Reihenfolge ist Teil dessen,
+       was geprueft wird. */
+    await db.exec("drop function if exists public.mark_availability_notifications_read(text[]);");
     await db.exec("drop function if exists public.claim_availability_notifications();");
     await db.exec("drop table if exists public.availability_notifications cascade;");
     await db.exec("drop function if exists public.offer_availability_due();");
@@ -6014,6 +6018,272 @@ async function main(): Promise<void> {
       ok = sag("keine beanspruchte Phase ohne Meldung", luecken === "0",
         `Luecken: ${luecken}`);
     }
+
+    /* =====================================================================
+     * P57 — `0149`: GELESEN ODER NICHT.
+     *
+     * Dieselbe Welt, dieselbe PGlite-Instanz: hier liegen jetzt Meldungen
+     * von drei Nutzern, erzeugt von `0148` und nicht gestellt. Genau daran
+     * laesst sich pruefen, was `0149` zusagt — und die wichtigste Zusage ist
+     * eine NEGATIVE: lesen markiert nicht.
+     * ================================================================== */
+    const befund49: string[] = [];
+    let ok49 = ok;
+    const sag49 = (was: string, gut: boolean, text: string): boolean => {
+      befund49.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+    const ungelesen = (uid?: string) => wert(
+      "select count(*)::text as w from public.availability_notifications"
+      + " where read_at is null" + (uid ? ` and user_id = '${uid}'` : ""));
+    const markiere = async (skyIds: string[] | null): Promise<string> => wert(
+      "select public.mark_availability_notifications_read("
+      /* `::text[]` ausgeschrieben: `array[]` ohne Typ ist in PostgreSQL ein
+         Fehler („cannot determine type of empty array"), und genau die leere
+         Liste ist einer der Faelle, die hier geprueft werden. */
+      + (skyIds === null
+          ? "null"
+          : `array[${skyIds.map((x) => `'${x}'`).join(",")}]::text[]`)
+      + ")::text as w");
+
+    /* --------------- 1. Der Preflight als Eigner, VOR 0149 -------------- */
+    if (ok49) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0149_preflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok49 = sag49("Preflight 0149 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* -------------------------- 2. Die Migration ------------------------ */
+    const vor49 = ok49 ? await abdruck() : "-";
+    const meldungenVor = ok49 ? await meldungen() : "-";
+    const l149 = ok49 ? await fahre(db, join(MIG_DIR, "0149_notification_read_state.sql"))
+                      : "-";
+    ok49 = ok49 && sag49("0149", l149 === null, l149 ?? "durch");
+    if (ok49) {
+      ok49 = sag49("Migration ruehrt Lager und Sammlung nicht an",
+        await abdruck() === vor49, "Abdruck unveraendert");
+    }
+
+    /* ------- 3. KEINE ZEILE WURDE ALS GELESEN ERFUNDEN ------------------ */
+    if (ok49) {
+      /*
+       * DIE ZEILE, AUF DIE ES ANKOMMT. Ein Vorgabewert `now()` oder ein
+       * Backfill haetten alle bestehenden Meldungen auf einen Schlag als
+       * gelesen gefuehrt — eine Lesehandlung, die nicht stattgefunden hat.
+       */
+      const alle = await meldungen();
+      const neu = await ungelesen();
+      ok49 = sag49("bestehende Meldungen gelten alle als ungelesen",
+        alle === meldungenVor && neu === alle,
+        `${alle} Meldungen, davon ${neu} ungelesen (vorher ${meldungenVor})`);
+    }
+
+    /* ------------- 4. Die Nachkontrolle als Eigner ---------------------- */
+    if (ok49) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0149_postflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok49 = sag49("Nachkontrolle 0149 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* ---------- 5. LESEN MARKIERT NICHT — die Zusage, gemessen --------- */
+    if (ok49) {
+      /*
+       * Die Anzeige liest mit einem `select` unter RLS. Dass ein solcher
+       * Lesevorgang `read_at` nicht setzt, ist in PostgreSQL selbstredend —
+       * geprueft wird es trotzdem, weil die Zusage genau hier haengt und ein
+       * kuenftiger Trigger sie unbemerkt brechen koennte.
+       */
+      await als(A);
+      for (let i = 0; i < 3; i += 1) {
+        await db.exec("begin;");
+        try {
+          await db.exec("set local role authenticated;");
+          await db.query("select * from public.availability_notifications");
+        } finally { await db.exec("rollback;"); }
+      }
+      const nach = await ungelesen();
+      const alle = await meldungen();
+      ok49 = sag49("dreimal gelesen, nichts markiert", nach === alle,
+        `${nach} von ${alle} weiter ungelesen`);
+    }
+
+    /* ------------------ 6. NUR DIE GENANNTE FIGUR ---------------------- */
+    if (ok49) {
+      /*
+       * EINE SKY-ID MARKIERT ALLE UNGELESENEN MELDUNGEN ZU DIESER FIGUR —
+       * und das ist Absicht, nicht Zufall: nach einem zweiten echten Zyklus
+       * koennen zu derselben Figur zwei Meldungen liegen (zwei Phasen), und
+       * „ich habe gesehen, dass sie wieder da ist" gilt dann fuer beide.
+       * Die Karte zeigt sie uebereinander; ein Klick, der nur eine davon
+       * still macht, waere nicht erklaerbar.
+       *
+       * Zuerst die Gegenprobe mit einer Figur OHNE Meldung: markiert sie
+       * etwas, trifft das Argument nicht.
+       */
+      await als(A);
+      const fremd = await markiere(["SKY-7002"]);
+      const eigen7001 = await wert(`select count(*)::text as w
+        from public.availability_notifications
+       where user_id = '${A}' and sky_id = 'SKY-7001' and read_at is null`);
+      const n = await markiere(["SKY-7001"]);
+      const rest = await wert(`select count(*)::text as w
+        from public.availability_notifications
+       where user_id = '${A}' and sky_id = 'SKY-7001' and read_at is null`);
+      ok49 = sag49("nur die genannte Figur",
+        fremd === "0" && n === eigen7001 && Number(n) >= 1 && rest === "0",
+        `SKY-7002 ohne Meldung: ${fremd} markiert · SKY-7001: ${n} von `
+        + `${eigen7001} markiert, ${rest} ungelesen`);
+    }
+
+    /* ------- 7. NOCHMAL DIESELBE: KEIN VERSCHIEBEN DES ZEITPUNKTS ------ */
+    if (ok49) {
+      /*
+       * `read_at is null` im `where` ist kein Schmuck: ohne sie wuerde ein
+       * zweiter Klick den Lesezeitpunkt nach vorn schieben, und „seit wann
+       * gesehen" waere nicht mehr beantwortbar.
+       */
+      const vorher = await wert(`select read_at::text as w
+        from public.availability_notifications
+       where user_id = '${A}' and sky_id = 'SKY-7001'`);
+      const n = await markiere(["SKY-7001"]);
+      const nachher = await wert(`select read_at::text as w
+        from public.availability_notifications
+       where user_id = '${A}' and sky_id = 'SKY-7001'`);
+      ok49 = sag49("zweiter Aufruf markiert nichts und verschiebt nichts",
+        n === "0" && nachher === vorher, `${n} markiert, read_at unveraendert`);
+    }
+
+    /* --------- 8. FREMDE ZEILEN BLEIBEN UNBERUEHRT --------------------- */
+    if (ok49) {
+      /*
+       * DIE GEGENPROBE ZUR GRENZE. `A` markiert alles, was `A` markieren
+       * darf — und `C` hat danach genauso viele ungelesene wie vorher. Das
+       * `where` der Definer-Funktion IST die Grenze; faellt es weg, schlaegt
+       * genau diese Zeile an.
+       */
+      const cVorher = await ungelesen(C);
+      await als(A);
+      await markiere(null);
+      const aNachher = await ungelesen(A);
+      const cNachher = await ungelesen(C);
+      ok49 = sag49("alles markieren trifft nur das Eigene",
+        aNachher === "0" && cNachher === cVorher,
+        `A ${aNachher} ungelesen, C unveraendert ${cNachher}`);
+    }
+
+    /* ------- 9. OHNE ANMELDUNG MARKIERT NIEMAND ----------------------- */
+    if (ok49) {
+      const cVorher = await ungelesen(C);
+      await als(null);
+      const n = await markiere(null);
+      const cNachher = await ungelesen(C);
+      await als(C);
+      ok49 = sag49("ohne Anmeldung markiert niemand",
+        n === "0" && cNachher === cVorher, `${n} markiert, C unveraendert`);
+    }
+
+    /* --------- 10. EINE LEERE LISTE MARKIERT NICHTS ------------------- */
+    if (ok49) {
+      /*
+       * `null` heisst „alle", eine LEERE Liste heisst „keine". Waeren beide
+       * gleich, wuerde aus „markiere diese null Karten" stillschweigend
+       * „markiere alles" — in der Datenbank, nicht nur in der Oberflaeche.
+       */
+      await als(C);
+      const vorher = await ungelesen(C);
+      const n = await markiere([]);
+      const nachher = await ungelesen(C);
+      ok49 = sag49("leere Liste markiert nichts", n === "0" && nachher === vorher,
+        `${n} markiert, ${nachher} weiter ungelesen`);
+    }
+
+    /* ----- 11. EINE NEUE MELDUNG ENTSTEHT UNGELESEN ------------------- */
+    if (ok49) {
+      /*
+       * Nach einem echten neuen Zyklus entsteht eine Meldung mit neuer
+       * Phasengrenze. Sie muss ungelesen sein — auch fuer einen Nutzer, der
+       * die vorige Meldung zu derselben Figur schon als gesehen markiert hat.
+       */
+      await als(A);
+      await neuerZyklus("SKY-7001");
+      const entstanden = await beansprucht();
+      const neu = await wert(`select count(*)::text as w
+        from public.availability_notifications
+       where sky_id = 'SKY-7001' and read_at is null`);
+      ok49 = sag49("ein neuer Zyklus erzeugt eine UNGELESENE Meldung",
+        Number(entstanden) >= 1 && Number(neu) >= 1,
+        `${entstanden} fuer den Aufrufer, ${neu} ungelesen zu SKY-7001`);
+    }
+
+    /* ----- 12. DER ZAEHLER SIEHT NUR DAS EIGENE ----------------------- */
+    if (ok49) {
+      /*
+       * Die Marke zaehlt mit `count(*) … where read_at is null` UNTER RLS.
+       * Geprueft wird hier, dass die Rolle `authenticated` dabei genau die
+       * eigenen Zeilen zaehlt — dieselbe Form wie in Schritt 8 von P56,
+       * jetzt mit dem Lesezustand.
+       */
+      const zaehleAls = async (uid: string | null): Promise<string> => {
+        await db.exec("begin;");
+        try {
+          await db.exec(uid === null
+            ? "select set_config('z56.uid', '', true)"
+            : `select set_config('z56.uid', '${uid}', true)`);
+          await db.exec("set local role authenticated;");
+          const r = (await db.query("select count(*)::text as w"
+            + " from public.availability_notifications where read_at is null")) as
+            { rows: { w: string }[] };
+          return String(r.rows[0]?.w);
+        } finally { await db.exec("rollback;"); }
+      };
+      const eigenA = await ungelesen(A);
+      const sichtA = await zaehleAls(A);
+      const sichtOhne = await zaehleAls(null);
+      ok49 = sag49("der Zaehler zaehlt nur das Eigene",
+        sichtA === eigenA && sichtOhne === "0",
+        `A zaehlt ${sichtA} (eigene ${eigenA}), ohne Anmeldung ${sichtOhne}`);
+    }
+
+    /* ----------------- 13. RUECKNAHME VON 0149 ----------------------- */
+    if (ok49) {
+      const gelesenVorher = await wert(`select count(*)::text as w
+        from public.availability_notifications where read_at is not null`);
+      const r = await fahre(db, "supabase/rollback/R0149_notification_read_state.sql");
+      const fort = r === null ? await wert(
+        "select ((to_regprocedure('public.mark_availability_notifications_read(text[])')"
+        + "        is null)"
+        + " and (to_regclass('public.availability_notifications_unread_idx') is null)"
+        + " and not exists (select 1 from pg_attribute a"
+        + "                  where a.attrelid = to_regclass("
+        + "                          'public.availability_notifications')"
+        + "                    and a.attname = 'read_at' and a.attnum > 0"
+        + "                    and not a.attisdropped))::text as w") : "-";
+      /* Die Meldungen selbst bleiben liegen — R0149 nimmt 0149 zurueck, nicht 0148. */
+      const bleiben = r === null ? await meldungen() : "-";
+      ok49 = sag49("Ruecknahme 0149", r === null && fort === "true" && bleiben !== "0",
+        `${r ?? "durch"}, fort ${fort}, ${bleiben} Meldungen bleiben `
+        + `(${gelesenVorher} waren gelesen und gelten wieder als neu)`);
+    }
+
+    probe.push({
+      name: "P57 0149 trennt gelesen von ungelesen: die Migration erfindet keine Lesehandlung, "
+        + "dreimal lesen markiert nichts, ein zweiter Klick verschiebt den Zeitpunkt nicht, "
+        + "eine leere Liste markiert nichts statt alles, fremde Zeilen bleiben unberuehrt",
+      ok: ok49,
+      sagt: `0149: ${befund49.join(" · ")}`,
+    });
 
     /* ------------------------- 10. RUECKNAHME ---------------------------- */
     if (ok) {

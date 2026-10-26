@@ -82,12 +82,94 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Benachrichtigungsoberfläche (2026-10-26, `0149`, Phase 4 S4, ADR-0144) — gebaut, nirgends angewendet
+
+**Die Meldungen aus `0148` bekommen ein Gesicht** — und eine Spalte, die „neu" von „gesehen"
+unterscheidet. **Keine E-Mail, kein Push, kein Preisalarm, kein Scheduler, kein Hintergrundjob,
+keine Benachrichtigungseinstellung, kein neuer Navigationspunkt, keine Glocke.**
+
+Die eine Forderung, die alles bestimmt hat: **„prüfe insbesondere, dass die Anzeige keine
+Benachrichtigungen versehentlich als gelesen markiert."** Das ist die einzige Zusage dieses
+Schritts, deren Bruch *unbemerkt* bliebe — eine Meldung, die beim Ansehen als gelesen gilt, ist
+weg, bevor jemand sie gelesen hat, und die Seite sieht genauso aus. Gehalten wird sie nicht durch
+Sorgfalt, sondern durch **Trennung der Wege**:
+
+| | |
+|---|---|
+| **Lesen ≠ Markieren** | `notification-queries.ts` liest und **kann** nicht schreiben (kein `.update()`, kein `.insert()`, kein Aufruf der Markierfunktion). `notification-actions.ts` schreibt und wird ausschließlich aus einem `onClick` gerufen. Die Komponente hat **kein** `useEffect` und **keinen** `IntersectionObserver` — die beiden Formen, in denen „markiere, weil es sichtbar ist" entsteht |
+| Auch der Weg zum Angebot markiert nichts | verlockend („wer das Angebot ansieht, *hat* es gesehen") und trotzdem eine Markierung ohne Handlung — und keine rückholbare. Stattdessen ein eigener, leiser Knopf „Gesehen" je Karte |
+| **Kein `update`-Recht für Clients** | der naheliegende Weg (`grant update (read_at)` + `for update`-Richtlinie) wird **nicht** genommen: ein Tabellenrecht ist breiter als die Absicht, und es wäre das erste Schreibrecht eines Clients auf dieser Tabelle. `authenticated` hat weiter genau `SELECT`, es bleibt bei **einer** Richtlinie |
+| Die Grenze | `mark_availability_notifications_read(text[])`, `definer`, **eine** Anweisung, mit der Eigentümerbedingung **Wort für Wort** wie die `select`-Richtlinie im `where` — plus `read_at is null`, sonst verschöbe ein zweiter Klick den Lesezeitpunkt. **RLS gilt für eine Definer-Funktion nicht, also IST dieses `where` die Grenze**; die Migration misst, dass alle drei Teile drinstehen |
+| Leere Liste ≠ `null` | `null` heißt „alle eigenen ungelesenen", eine **leere** Liste „keine". Wären beide gleich, würde aus „markiere diese null Karten" stillschweigend „markiere alles" — in der Datenbank |
+| Die Spalte kommt leer | nullbar, **ohne Vorgabewert**, **kein Backfill**. Jede Meldung aus `0148` gilt danach als ungelesen, und das ist richtig: es gab bis jetzt keine Oberfläche, in der sie jemand hätte sehen können. Die Migration misst, dass **0** Zeilen als gelesen geführt sind |
+| Keine falsche Kaufbarkeit | `stillBuyable` aus `hasV1BuyableOffer()` — derselben Funktion, die die Kennzahl im Kopf und die Angebotszeile jeder Karte benutzen, aus denselben Angeboten. Ist das Angebot weg, sagt die Karte „Inzwischen vergriffen" und der Weg heißt „Zur Figur" |
+| Gelesene bleiben stehen | nur ruhiger: kein Korallrand, gedämpfte Schrift, Häkchen statt Knopf. „Gesehen" heißt „ich weiß es", nicht „weg damit" — eine Karte, die verschwindet, nimmt den Weg zum Angebot mit |
+| Die Marke | am **vorhandenen** Menüpunkt „Favoriten", in **Korall** und nicht Rot: Rot heißt in dieser Leiste „etwas ist kaputt" (ADR-0050), und „deine Figur ist wieder da" ist das Gegenteil. Eine Abfrage, nur die Zahl (`head: true`), über den Teilindex `(user_id) where read_at is null`, nur für ein Sammlerkonto — auch im öffentlichen Layout, denn dort ist der Sammler |
+| Die Verarbeitung | `claimAvailabilityNotifications()` hängt am Aufruf von `/favoriten`, nicht am Layout. Eine Meldung, die **genau dadurch** entsteht, steht sofort auf der Seite; die Marke zählt sie erst bei der nächsten Navigation — unsichtbar, weil dieser Punkt auf `/favoriten` der aktive ist. Der Preis für die exakte Zahl wäre ein Schreibaufruf bei **jedem** geschützten Seitenaufruf |
+| Nachweise | **P57** fährt `0149` an echtem PostgreSQL, in derselben Welt wie P56: die Migration erfindet keine Lesehandlung · dreimal lesen markiert nichts · ein zweiter Klick verschiebt den Zeitpunkt nicht · eine leere Liste markiert nichts statt alles · ein Konto markiert „alles" und ein zweites bleibt unberührt · ohne Anmeldung markiert niemand · ein neuer Zyklus erzeugt eine **ungelesene** Meldung · der Zähler zählt nur das Eigene · Rücknahme. Dazu **46** Quellprüfungen (`notification-ui.test.ts`) |
+
+**Ein Fehler, und er lag wieder im Prüfaufbau:** das Stub-Schema kennt *alle* Migrationen, also
+auch `0149` — die Markierfunktion stand bereits, und Zeile 112 des Preflights („steht noch
+nicht") schlug zu Recht an. Dieselbe Lehre wie dreimal bei P56: der Probelauf muss die Welt
+*vor* der Migration herstellen, nicht die nach ihr.
+
+**Staging-Rollout vorbereitet:** `0149_preflight.sql`, `0149_postflight.sql`, Eintrag in
+`migration-plans.json`, Hülle `supabase/operations/staging-0149.sql`, Laufzettel
+`supabase/checks/0149_staging_run.md`, Rücknahme
+`supabase/rollback/R0149_notification_read_state.sql`. Die Erwartungen beider Prüfdateien sind
+in P57 als Eigner gefahren.
+
+**Noch unbestätigt:** die fünf Browserpunkte des Laufzettels (darunter „mehrfach neu laden —
+die Karten bleiben ungelesen") und die neun aus `0145`.
+
+---
+
+## Der wiederkehrende `28P01` am Prüfzugang (2026-10-26) — Ursache eingegrenzt, zwei Fehler behoben
+
+Bei `0147` und `0148` trat beim `--resume` unmittelbar nach gelungenem Preflight mehrfach
+`28P01` auf; ein späterer Versuch gelang **ohne Passwortänderung**. Damit ist die alte
+Fehlermeldung **widerlegt** — sie behauptete „es ist das Passwort in der Zugangsdatei" und
+schickte damit genau zu dem Wechsel, den der Auftrag ausschließt.
+
+**Was belegbar falsch war, und jetzt behoben ist:**
+
+1. **Die Meldung behauptete eine Ursache, die sie nicht wissen kann.** Jetzt nennt sie die
+   **Herkunft**: jede Ablehnung aus PostgreSQLs Anmeldecode trägt `file`, `line` und
+   `routine = auth_failed` (Protokollverhalten von `ereport()`). **Fehlen diese Felder, kann die
+   Meldung nicht von dort stammen** — dann hat ein Zwischenstück abgelehnt, am Session-Pooler
+   also Supavisor, und die Datenbank hat das Passwort **nie gesehen**. Die Folgerung wird nur in
+   dieser einen Richtung gezogen; der Gegenfall heißt `unklar` und nicht „sicher das Passwort".
+2. **Ein Verbindungsfehler hinterließ keine Spur.** `verbindeStaging()` wirft, und das
+   Pruefprotokoll entsteht erst danach — von den Fällen am 2026-10-26 existiert deshalb **kein
+   Beleg**. Jetzt geht jeder abgelehnte Versuch mit Zeitpunkt, Form, Code, Herkunft und Dauer in
+   `supabase/log/staging/anmeldeversuche.md`. Keine Zugangsdaten: kein Passwort, kein Host, kein
+   Benutzername, und die Treibermeldung läuft durch `redigiere()`.
+
+**Genau ein zweiter Versuch, und nur bei Herkunft `pooler`** — eine Ablehnung, die das Passwort
+nie geprüft hat, zu wiederholen fragt nicht dasselbe nochmal, sondern fragt die Datenbank
+überhaupt erst. Bei `datenbank` oder `unklar` wird **nicht** wiederholt: ein falsches Passwort
+wird beim zweiten Mal nicht richtig, und Wiederholungen gegen eine Anmeldung sind das Muster,
+das Sperren auslöst.
+
+**Nicht behauptet** wird, dass die Ursache am Pooler *bewiesen* sei — dafür fehlt der Beleg, und
+die drei fehlgeschlagenen Läufe sind nicht mehr nachprüfbar. Deshalb nennt die Meldung zuerst den
+Test, der es entscheidet: dieselbe Zugangsdatei mit dem **direkten** Host
+(`db.<ref>.supabase.co`, Riegel 1 lässt beide Formen zu) — der umgeht Supavisor. Meldet die
+direkte Verbindung sich an, war das Passwort richtig. **25 neue Tests**, darunter die Gegenprobe,
+dass ein von der Datenbank verworfenes Passwort **niemals** wiederholt wird.
+
+Keine Abschwächung von TLS: `sslmode=verify-full` mit benannter CA bleibt, `rejectUnauthorized`
+kommt in keiner wirksamen Zeile vor, und kein Passwort wurde geändert.
+
+---
+
 ## Persönliche Verfügbarkeitsmeldungen (2026-10-26, `0148`, Phase 4 S3, ADR-0143) — gebaut, nirgends angewendet
 
 **Aus einem erkannten Ereignis werden Meldungen.** Je betroffenem Nutzer genau eine, dauerhaft
 gespeichert, RLS-geschützt. **Keine E-Mail, kein Push, kein Preisalarm, kein Scheduler, keine
-Einstellung, keine Oberfläche** — Anzeige, Ungelesen-Zähler und „als gelesen markieren" sind S4,
-weshalb die Tabelle noch **keine `read_at`-Spalte** hat.
+Einstellung, keine Oberfläche** — Anzeige, Ungelesen-Zähler und „als gelesen markieren" waren S4
+und sind mit `0149` gebaut (Abschnitt oben); `0148` selbst legt deshalb **keine `read_at`-Spalte**
+an.
 
 Zwei Forderungen haben den Entwurf bestimmt — „weder verloren gehen noch mehrfach entstehen" —,
 und beide hält nicht die Anwendungslogik:
@@ -122,7 +204,7 @@ vollständig gemeldet, es gibt kein fälliges Ereignis; Zeile 123 des Preflights
 `favorites` und `offer_state`, weil sie der einzige Teil ist, den eine Wiederherstellung nicht
 rekonstruieren kann (`announced_*` bliebe gesetzt, verlorene Meldungen entstünden nicht neu).
 Vor Production: `0144` → Folgemigration (Formatversion 3, alle drei) → `0145` → `0146` →
-`0147` → `0148`.
+`0147` → `0148` → `0149`.
 
 ---
 

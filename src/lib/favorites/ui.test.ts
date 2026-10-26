@@ -277,11 +277,34 @@ describe("die Navigation, auf beiden Breiten", () => {
 
 
 describe("was es nicht gibt", () => {
-  it("keine Marketplace-Struktur und keine E-Mail in der ganzen Domäne", () => {
-    for (const p of [ACTIONS, QUERIES, HEART, PAGE, "src/app/(app)/favoriten/loading.tsx"]) {
+  it("keine Marketplace-Struktur, keine E-Mail, kein Push, kein Scheduler", () => {
+    /*
+     * WARUM „notification" NICHT MEHR AUF DER LISTE STEHT. Bis `0147` war
+     * das Wort ein guter Stellvertreter: es gab in dieser Domäne nichts,
+     * was benachrichtigt, also durfte es auch nicht so heißen. Seit `0148`
+     * gibt es persönliche Verfügbarkeitsmeldungen — ausdrücklich beauftragt,
+     * in der Datenbank, mit RLS — und seit `0149` ihre Oberfläche. Das Wort
+     * zu verbieten hieße jetzt, die Sache falsch zu benennen.
+     *
+     * VERBOTEN BLEIBT, WAS DIE LISTE EIGENTLICH MEINTE: kein Versandweg nach
+     * draußen und kein Hintergrundlauf. Eine Meldung entsteht in der
+     * Datenbank und wird auf einer Seite gezeigt — das ist die ganze
+     * Zustellung (ADR-0136, ADR-0143).
+     */
+    const DRAUSSEN = [
+      "seller_id", "wishlist_items", "priority",
+      /* E-Mail */ "resend", "sendmail", "nodemailer", "send-order-mail",
+      /* Push */ "webpush", "onesignal", "firebase", "serviceworker",
+      /* Scheduler */ "pg_cron", "setinterval", "cronjob",
+      /* Preisalarm */ "pricealert", "price_alert",
+    ];
+    for (const p of [ACTIONS, QUERIES, HEART, PAGE, "src/app/(app)/favoriten/loading.tsx",
+                     "src/lib/favorites/notifications.ts",
+                     "src/lib/favorites/notification-queries.ts",
+                     "src/lib/favorites/notification-actions.ts",
+                     "src/components/catalog/availability-notices.tsx"]) {
       const c = code(p).toLowerCase();
-      for (const wort of ["seller_id", "wishlist_items", "priority", "resend",
-                          "sendmail", "notification"]) {
+      for (const wort of DRAUSSEN) {
         expect(c, `${p}: ${wort}`).not.toContain(wort);
       }
     }
