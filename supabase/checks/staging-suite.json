@@ -67,6 +67,11 @@
       "datei": "state_audit_readonly.sql",
       "zweck": "Bestandsaufnahme: welche Migrationen leben hier wirklich",
       "modus": "messung"
+    },
+    {
+      "datei": "offer_state_freshness.sql",
+      "zweck": "Ist der Angebotsspiegel frisch, und wo weicht er von der Wirklichkeit ab",
+      "modus": "9999"
     }
   ]
 }

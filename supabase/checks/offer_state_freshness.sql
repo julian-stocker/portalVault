@@ -68,8 +68,18 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
            else 'KEIN-RECHT' end, 'true'),
 
   -- ------------------------- Spiegel gegen Wirklichkeit
-  (201, 'Abgleich', 'Info: Figuren mit kaufbarem Angebot — LIVE (shop_offers)',
-      case when has_function_privilege('public.shop_offers()', 'execute')
+  /*
+   * AUF DIE VIEW GEPRUEFT, NICHT AUF DIE FUNKTION — und das war ein Fehler
+   * in der ersten Fassung. Diese Zeilen lesen `offer_state_live`, und die
+   * ist allen API-Rollen und dem Pruefzugang entzogen (`0146`). Geprueft
+   * wurde aber `has_function_privilege` auf `shop_offers()`, das der
+   * Pruefzugang HAT — also waere der Wachtposten durchgewinkt und
+   * `query_to_xml` haette die ganze Einreichung mit `42501` abgebrochen,
+   * statt `KEIN-RECHT` zu melden. Dieselbe Klasse Fehler wie bei
+   * `information_schema` (ADR-0141): der Waechter fragte das Falsche.
+   */
+  (201, 'Abgleich', 'Info: Figuren mit kaufbarem Angebot — LIVE (offer_state_live)',
+      case when has_table_privilege('public.offer_state_live', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select count(*) as c from public.offer_state_live l',
                false, true, '')))[1]::text
@@ -93,7 +103,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (211, 'Abgleich', 'Info: Figuren, bei denen Spiegel und Wirklichkeit '
         'auseinanderliegen (0 = deckungsgleich)',
       case when has_table_privilege('public.offer_state', 'select')
-            and has_function_privilege('public.shop_offers()', 'execute')
+            and has_table_privilege('public.offer_state_live', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select count(*) as c from ('
                '  select l.sky_id, true as buyable, l.cheapest_cents'
@@ -112,7 +122,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (212, 'Abgleich', 'Info: davon NEU kaufbar — im Angebot, aber im Spiegel '
         'nicht als kaufbar gefuehrt (das sind die stummen Ereignisse)',
       case when has_table_privilege('public.offer_state', 'select')
-            and has_function_privilege('public.shop_offers()', 'execute')
+            and has_table_privilege('public.offer_state_live', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select count(*) as c from public.offer_state_live l'
                ' where not exists (select 1 from public.offer_state s'
@@ -121,7 +131,7 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
            else 'KEIN-RECHT' end, null),
   (213, 'Abgleich', 'Info: und welche (bis zu zehn SKY-IDs)',
       case when has_table_privilege('public.offer_state', 'select')
-            and has_function_privilege('public.shop_offers()', 'execute')
+            and has_table_privilege('public.offer_state_live', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select coalesce(string_agg(x.sky_id, '', '' order by x.sky_id), ''(keine)'') '
                'as c from (select l.sky_id from public.offer_state_live l'
@@ -206,9 +216,9 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                || quote_literal((select sky from gewuenscht))
                || '), ''(keine Zeile im Spiegel)'') as c', false, true, '')))[1]::text
            else 'KEIN-RECHT' end, null),
-  (406, 'Figur', 'Info: ist sie LIVE kaufbar (shop_offers), und zu welchem Preis in Cent',
+  (406, 'Figur', 'Info: ist sie LIVE kaufbar, und zu welchem Preis in Cent',
       case when (select sky from gewuenscht) is null then '(keine angegeben)'
-           when has_function_privilege('public.shop_offers()', 'execute')
+           when has_table_privilege('public.offer_state_live', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select coalesce((select l.cheapest_cents::text '
                'from public.offer_state_live l where l.sky_id = '
