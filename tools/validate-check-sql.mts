@@ -5173,6 +5173,20 @@ async function main(): Promise<void> {
     ok = sag("0146", l146 === null, l146 ?? "durch");
     /* Erstbefuellung: beide kaufbar, beide BEREITS GEMELDET. */
     if (ok) await ruf();
+    /* Der Preflight, als Eigner, VOR 0147 — mit seinen echten Erwartungen. */
+    if (ok) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0147_preflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet
+                                   from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok = sag("Preflight 0147 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
     const vorMigration = ok ? await abdruck() : "-";
     const l147 = ok ? await fahre(db, join(MIG_DIR, "0147_offer_availability.sql")) : "-";
     ok = ok && sag("0147", l147 === null, l147 ?? "durch");
@@ -5204,6 +5218,74 @@ async function main(): Promise<void> {
       + "where a.attrelid = to_regclass('public.offer_state') "
       + "and a.attnum > 0 and not a.attisdropped") : "-";
     ok = ok && sag("Spalten", spalten.endsWith(",buyable_since"), spalten);
+
+    /* ---- 1a. DIE NACHKONTROLLE VON 0147, MIT IHREN ECHTEN ERWARTUNGEN -- */
+    if (ok) {
+      /*
+       * Eine Nachkontrolle, deren Sollwerte nie gelaufen sind, ist eine
+       * Vermutung. Hier laeuft sie als EIGNER direkt nach der Migration:
+       * jede Zeile mit einer Erwartung muss stimmen.
+       *
+       * Die Baselinezeilen (8xx) bleiben aussen vor — die brauchen die zwei
+       * Vertragszeilen des Preflights, und die reicht der Runner erst beim
+       * Lauf mit. Dass sie greifen, faehrt `P52` fuer `0145`.
+       */
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0147_postflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, pruefung, befund, erwartet, ok
+                                   from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; pruefung: string; befund: string; erwartet: string }[] };
+      ok = sag("Nachkontrolle 0147 als Eigner",
+        r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* ---- 1b. EINE PREISAENDERUNG VOR 0147 DARF KEINE NEUIGKEIT WERDEN --- */
+    if (ok) {
+      /*
+       * DER FALL, DER DIE NACHFUELLUNG BEINAHE FALSCH GEMACHT HAETTE.
+       *
+       * `changed_at` bewegt sich auch bei einer Preisaenderung. Hat sich
+       * nach der Erstbefuellung bei einer durchgehend kaufbaren Figur der
+       * Preis geaendert, steht `changed_at` HINTER `announced_at` — und ein
+       * `buyable_since = changed_at` haette sie faellig gemacht. Hier wird
+       * genau das hergestellt und geprueft.
+       *
+       * Gefahren wird es NACH `0147`, indem die Lage nachgebaut und die
+       * Nachfuellung noch einmal angewandt wird: `buyable_since` bekommt
+       * `least(changed_at, announced_at)`, und damit ist die Zeile nicht
+       * faellig.
+       */
+      await db.exec("update public.shop_inventory set sale_price = 25.00"
+        + " where sky_id = 'SKY-7001'");
+      await ruf();
+      const preisNeuer = await wert(
+        "select (changed_at > announced_at)::text as w from public.offer_state"
+        + " where sky_id = 'SKY-7001'");
+      /* Die Nachfuellung von 0147 noch einmal, auf genau diese Zeile. */
+      await db.exec(`update public.offer_state
+           set buyable_since = case
+                 when announced_at is not null then least(changed_at, announced_at)
+                 else changed_at
+               end
+         where buyable and sky_id = 'SKY-7001'`);
+      await warte(31, "SKY-7001");
+      const faelligNachPreis = (await faellig()).includes("SKY-7001");
+      ok = sag("Preisaenderung vor 0147 ist keine Neuigkeit",
+        preisNeuer === "true" && !faelligNachPreis,
+        `changed_at hinter announced_at: ${preisNeuer}, `
+        + `danach faellig: ${faelligNachPreis} (muss false sein)`);
+      /* Fuer die folgenden Szenarien denselben Stand wiederherstellen. */
+      await db.exec("update public.shop_inventory set sale_price = null"
+        + " where sky_id = 'SKY-7001'");
+      await ruf();
+      await db.exec("update public.offer_state set announced_cents = cheapest_cents,"
+        + " announced_at = now(), buyable_since = least(buyable_since, now())"
+        + " where sky_id = 'SKY-7001'");
+    }
 
     /* ------------- 2. BEREITS VERFUEGBARE AUS DER ERSTINITIALISIERUNG ----- */
     if (ok) {
@@ -5297,6 +5379,78 @@ async function main(): Promise<void> {
         + `Phase neu begonnen ${neuBegonnen} (muss false sein), danach ${nachKorb}`);
     }
 
+    /* ---- 7b. MEHRERE AUFFRISCHUNGEN WAEHREND EINER KURZEN ABWESENHEIT -- */
+    if (ok) {
+      /*
+       * DIE FRAGE DES BETREIBERS: haelt die Uebernahme auch, wenn WAEHREND
+       * der Reservierung mehrfach aufgefrischt wird?
+       *
+       * Sie haelt, und zwar aus einem Grund, der am SQL zu lesen ist:
+       * Schritt 6 setzt `changed_at` nur, WENN die Zeile vorher kaufbar war
+       * (`case when s.buyable then now() else s.changed_at end`). Jede
+       * weitere Auffrischung derselben Abwesenheit laesst ihn also stehen,
+       * und `now() - s.changed_at` waechst mit der echten Zeit statt mit der
+       * Zahl der Aufrufe. Hier wird das gefahren, nicht behauptet.
+       */
+      /*
+       * ERST EINEN ECHTEN ZYKLUS HERSTELLEN. SKY-7001 ist an dieser Stelle
+       * kaufbar UND gemeldet — ohne diesen Schritt waere sie nie faellig,
+       * und der Test pruefte nichts. (Genau das war der erste Entwurf.)
+       */
+      await db.exec("update public.shop_inventory set reserved = 2 where sky_id = 'SKY-7001'");
+      await ruf();
+      await warte(25, "SKY-7001");
+      await db.exec("update public.shop_inventory set reserved = 0 where sky_id = 'SKY-7001'");
+      await ruf();
+      await warte(31, "SKY-7001");
+      const vorher = (await faellig()).includes("SKY-7001") ? "faellig" : "NICHT faellig";
+      await melde("SKY-7001");
+
+      /* Reservierung, und dann VIER Auffrischungen ueber drei Minuten. */
+      await db.exec("update public.shop_inventory set reserved = 2 where sky_id = 'SKY-7001'");
+      await ruf();
+      const zwischen: string[] = [];
+      for (let i = 0; i < 3; i++) {
+        await warte(1, "SKY-7001");            /* eine Minute je Runde */
+        await ruf();
+        zwischen.push(await wert(
+          "select (now() - changed_at)::text as w from public.offer_state"
+          + " where sky_id = 'SKY-7001'"));
+      }
+      await db.exec("update public.shop_inventory set reserved = 0 where sky_id = 'SKY-7001'");
+      await ruf();
+      const neuBegonnen = await phaseNeu("SKY-7001");
+      await warte(31, "SKY-7001");
+      const danach = (await faellig()).includes("SKY-7001") ? "faellig" : "nicht faellig";
+      ok = sag("vier Auffrischungen in der Reservierung",
+        vorher === "faellig" && neuBegonnen === "false" && danach === "nicht faellig",
+        `vorher ${vorher}, Abwesenheit wuchs auf ${zwischen[zwischen.length - 1]}, `
+        + `Phase neu begonnen ${neuBegonnen} (muss false sein), danach ${danach}`);
+    }
+
+    /* ---- 7c. DIE GRENZE: GENAU AB reservation_ttl() IST ES EIN ZYKLUS --- */
+    if (ok) {
+      /*
+       * Die Bedingung ist `< reservation_ttl()`, also ist GENAU die TTL
+       * schon eine echte Abwesenheit. Beide Seiten der Grenze werden
+       * gefahren — eine Regel, deren Rand nicht geprueft ist, ist eine
+       * halbe Regel.
+       */
+      const rand = async (minuten: number): Promise<string> => {
+        await db.exec("update public.shop_inventory set reserved = 2 where sky_id = 'SKY-7001'");
+        await ruf();
+        await warte(minuten, "SKY-7001");
+        await db.exec("update public.shop_inventory set reserved = 0 where sky_id = 'SKY-7001'");
+        await ruf();
+        return await phaseNeu("SKY-7001");
+      };
+      const knappDrunter = await rand(19);   /* 19 < 20 → dieselbe Phase */
+      const genauDrauf = await rand(20);     /* 20 → neue Phase */
+      ok = sag("die Grenze bei reservation_ttl()",
+        knappDrunter === "false" && genauDrauf === "true",
+        `19 min: neu ${knappDrunter} (muss false) · 20 min: neu ${genauDrauf} (muss true)`);
+    }
+
     /* ------------------ 8. MEHRERE ZYKLEN DERSELBEN SKY-ID --------------- */
     if (ok) {
       /* Echte Abwesenheit: 25 min > reservation_ttl(). */
@@ -5330,6 +5484,44 @@ async function main(): Promise<void> {
       ok = sag("Gegenprobe gegen offer_state_live",
         vorher === "SKY-7002" && nachher === "(keine)" && spiegelSagt === "true",
         `vorher ${vorher}, nach dem Entlisten ${nachher}, Spiegel sagt noch ${spiegelSagt}`);
+    }
+
+    /* ------- 9b. DIE UEBERNAHME DURCH S3: ATOMAR UND NUR EINMAL --------- */
+    if (ok) {
+      /*
+       * Der Vertrag aus dem Kopf von `0147`, gefahren. Zwei Aufrufe
+       * versuchen dasselbe Ereignis zu uebernehmen; der zweite muss NULL
+       * Zeilen bekommen.
+       *
+       * ECHTE GLEICHZEITIGKEIT ist in PGlite nicht fahrbar (eine
+       * Verbindung). Was hier laeuft, ist die Lage NACH dem Warten auf die
+       * Zeilensperre: der zweite Aufruf prueft sein `where` gegen die neue
+       * Fassung der Zeile. Genau das tut PostgreSQL unter READ COMMITTED,
+       * und genau das ist der Riegel.
+       */
+      const uebernimm = async (sky: string): Promise<number> => {
+        const r = (await db.query(`
+          update public.offer_state s
+             set announced_buyable = true,
+                 announced_cents   = s.cheapest_cents,
+                 announced_at      = now()
+           where s.sky_id = '${sky}'
+             and s.buyable
+             and s.buyable_since is not null
+             and now() - s.buyable_since >= public.offer_availability_grace()
+             and (s.announced_at is null or s.buyable_since > s.announced_at)
+          returning s.sky_id`)) as { rows: unknown[] };
+        return r.rows.length;
+      };
+      /* SKY-7002 ist aus Szenario 8 faellig. */
+      const faelligVor = (await faellig()).includes("SKY-7002");
+      const ersterLauf = await uebernimm("SKY-7002");
+      const zweiterLauf = await uebernimm("SKY-7002");
+      const faelligNach = (await faellig()).includes("SKY-7002");
+      ok = sag("Uebernahme genau einmal",
+        faelligVor && ersterLauf === 1 && zweiterLauf === 0 && !faelligNach,
+        `vorher faellig ${faelligVor}, erster Lauf ${ersterLauf} Zeile(n), `
+        + `zweiter ${zweiterLauf} (muss 0 sein), danach faellig ${faelligNach}`);
     }
 
     /* ------------------- 10. KARENZZEIT UND RUECKNAHME ------------------- */

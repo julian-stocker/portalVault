@@ -294,9 +294,18 @@ describe("die Pläne sind Daten, nicht Sonderlogik", () => {
   it("jeder Plan nennt eine LESENDE Standsabfrage mit einer Spalte `erfuellt`", () => {
     for (const [nummer, p] of Object.entries(plaene)) {
       expect(p.angewendet.sql, nummer).toContain("as erfuellt");
-      /* Lesend: kein Schreibwort darin. */
-      for (const wort of ["insert", "update", "delete", "drop", "alter", "create"]) {
-        expect(p.angewendet.sql.toLowerCase(), `${nummer}: ${wort}`).not.toContain(wort);
+      /*
+       * Lesend: kein Schreibwort darin — und zwar als WORT.
+       *
+       * Ein Teilstringvergleich stolperte ueber `attisdropped` (enthaelt
+       * „drop"), eine voellig harmlose Katalogspalte, mit der `0147` seinen
+       * Stand feststellt. Ein Waechter, der richtige Abfragen ablehnt, wird
+       * umgangen.
+       */
+      for (const wort of ["insert", "update", "delete", "drop", "alter", "create",
+                          "truncate", "grant", "revoke"]) {
+        expect(p.angewendet.sql, `${nummer}: ${wort}`)
+          .not.toMatch(new RegExp(`\\b${wort}\\b`, "i"));
       }
     }
   });

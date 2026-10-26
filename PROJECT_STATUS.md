@@ -111,9 +111,28 @@ weil nur der Beginn der laufenden Phase gespeichert ist. Behoben mit **einer Spa
 — das Ergebnis ist eine **verpasste** Meldung, nie eine falsche. Solange kein Scheduler
 existiert, ist das die richtige Richtung zu irren.
 
-**Offen:** Preflight, Nachkontrolle und die Einfüge-Hüllen für `0147` entstehen mit der
-Freigabe des Rollouts; `offer_state` und `favorites` stehen weiter in
-`PLATFORM_EXCLUDED_TABLES` (ADR-0136, D-6).
+**Staging-Rollout vorbereitet (2026-10-26).** `0147_preflight.sql`,
+`0147_postflight.sql`, Eintrag in `migration-plans.json`, Einfüge-Hülle
+`supabase/operations/staging-0147.sql`, Laufzettel `supabase/checks/0147_staging_run.md`.
+Beide Prüfdateien teilen den Basis-Vertrag **zeichengleich** mit `0142`–`0146`, und ihre
+Erwartungen sind in P55 als Eigner gefahren — Sollwerte, die nie gelaufen sind, sind
+Vermutungen. Unter dem Prüfzugang laufen sie durch (7 bzw. 6 offene Zeilen, 9998 stimmt).
+
+**Zwei Fehler hat das Entwerfen des Preflights aufgedeckt, beide in meiner eigenen Migration:**
+die Abschlussprüfung hätte abgebrochen, sobald seit der Erstbefüllung **eine** Figur neu
+kaufbar geworden wäre (eine Zeile mit `announced_* = null` ist zu Recht fällig) — ein Abbruch
+ohne Mangel. Und schlimmer: `buyable_since = changed_at` hätte jede Figur **fällig gemacht**,
+bei der sich nach der Erstbefüllung ein **Preis** geändert hat — eine Meldung „wieder
+verfügbar" für etwas, das durchgehend kaufbar war. Behoben mit
+`least(changed_at, announced_at)`, und P55 fährt genau diesen Fall.
+
+**Die Plattformsicherung bleibt bis Production offen, begründet:** auf Staging gibt es zwei
+Testkonten und 225 gespiegelte Shopzeilen; was eine Wiederherstellung dort verlöre, ist der
+gemeldete Stand von Testfiguren an Testkonten. Die Aufnahme ins Archiv ist die **größere**
+Änderung (eigene Exportmigration, Formatversion 3) und soll eine kleine additive nicht
+blockieren. **Der Preis, benannt:** ein Plattformexport auf Staging lässt beide Tabellen
+stillschweigend weg. Vor Production ist die Reihenfolge unverändert: `0144` → Folgemigration →
+`0145` → `0146` → `0147`.
 
 ---
 

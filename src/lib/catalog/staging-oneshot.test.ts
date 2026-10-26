@@ -390,6 +390,10 @@ const LAEUFE = [
   /* Und `0146` — der Angebotsspiegel (Phase 4 S1). Eine Tabelle, eine
      Sicht, zwei Funktionen, KEIN Trigger; rein additiv. */
   ["supabase/operations/staging-0146.sql", "0146_offer_state.sql"],
+  /* Und `0147` — die Verfuegbarkeitskante (Phase 4 S2). Eine Spalte, ein
+     CHECK, eine ersetzte und zwei neue Funktionen; KEIN Trigger, keine
+     Tabelle. Sie setzt `0146` voraus und prueft das selbst. */
+  ["supabase/operations/staging-0147.sql", "0147_offer_availability.sql"],
 ] as const;
 
 describe("die Einzellaeufe fuer 0139 bis 0143", () => {
