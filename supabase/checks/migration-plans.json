@@ -68,6 +68,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0149": {
+      "zweck": "Gelesen oder nicht: read_at und ihr Schreibweg (Phase 4 S4)",
+      "preflight": "0149_preflight.sql",
+      "lauf": "staging-0149.sql",
+      "postflight": "0149_postflight.sql",
+      "angewendet": {
+        "beschreibung": "availability_notifications.read_at steht",
+        "sql": "select exists (select 1 from pg_attribute a where a.attrelid = to_regclass('public.availability_notifications') and a.attname = 'read_at' and a.attnum > 0 and not a.attisdropped) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

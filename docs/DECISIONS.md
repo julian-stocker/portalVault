@@ -13866,3 +13866,145 @@ dasselbe, ohne eine zweite Sperrlogik) · eine Hilfsfunktion für die
 Fälligkeitsbedingung (sähe den Schnappschuss und erzeugte das Duplikat) · die
 Zahl je Figur zurückgeben (umgeht ADR-0136) · `read_at` jetzt anlegen
 (Vorbereiten) · ein Scheduler (ADR bewusst offen, und S3 braucht keinen).
+
+---
+
+## ADR-0144 · Gelesen wird durch eine Funktion gesetzt, nicht durch ein Tabellenrecht
+
+**Datum:** 2026-10-26
+**Status:** angenommen
+**Betrifft:** `supabase/migrations/0149_notification_read_state.sql`,
+`src/lib/favorites/notification-queries.ts`,
+`src/lib/favorites/notification-actions.ts`,
+`src/components/catalog/availability-notices.tsx`, Probelauf **P57**
+
+### Die Forderung, die alles bestimmt hat
+
+**„Prüfe insbesondere, dass die Anzeige keine Benachrichtigungen
+versehentlich als gelesen markiert."** Das ist die einzige Zusage dieses
+Schritts, deren Bruch *unbemerkt* bliebe: eine Meldung, die beim Ansehen als
+gelesen gilt, ist weg, bevor jemand sie gelesen hat — und die Seite sieht
+genauso aus. Alle anderen Fehler dieses Schritts fallen auf.
+
+Sie wird deshalb nicht durch Sorgfalt gehalten, sondern durch **Trennung der
+Wege**.
+
+### 1. Zwei Dateien, zwei Richtungen
+
+`notification-queries.ts` liest und kann nicht schreiben: kein `.update()`,
+kein `.insert()`, kein Aufruf der Markierfunktion. `notification-actions.ts`
+schreibt und wird ausschließlich aus einem `onClick` gerufen. Die Komponente
+hat **kein** `useEffect` und **keinen** `IntersectionObserver` — die beiden
+Formen, in denen „markiere, weil es sichtbar ist" entstehen würde.
+
+Der Weg zum Angebot markiert ebenfalls nichts. Verlockend wäre es — wer das
+Angebot ansieht, *hat* die Meldung gesehen — und es ist trotzdem eine
+Markierung ohne Handlung, und zwar eine nicht rückholbare.
+
+### 2. Kein `update`-Recht für Clients
+
+Der naheliegende Weg wäre `grant update (read_at) … to authenticated` mit
+einer `for update`-Richtlinie. Er wird **nicht** genommen:
+
+- **Ein Tabellenrecht ist breiter als die Absicht.** „Als gelesen markieren"
+  heißt `read_at = now()` für eigene **ungelesene** Zeilen — nicht „setze
+  diese Spalte auf irgendeinen Wert", nicht auf einen in der Zukunft, nicht
+  zurück auf NULL.
+- **Es wäre das erste Schreibrecht eines Clients auf dieser Tabelle.** `0148`
+  hat festgehalten, dass ausschließlich eine Funktion schreibt. Diese Zusage
+  bleibt gültig, und sie bleibt prüfbar: `authenticated` hat genau `SELECT`,
+  und es bleibt bei der **einen** Richtlinie.
+
+`mark_availability_notifications_read(text[])` ist `security definer` und
+trägt die Eigentümerbedingung **Wort für Wort** wie die `select`-Richtlinie
+aus `0148` in ihrem `where`. RLS gilt für eine Definer-Funktion nicht, also
+**ist** dieses `where` die Grenze — es gibt nichts dahinter. Die Migration
+misst, dass alle drei Teile drinstehen (`auth.uid()`,
+`is_collector_account()`, `read_at is null`); fällt einer weg, bricht sie ab.
+
+`read_at is null` ist dabei kein Schmuck: ohne sie würde ein zweiter Klick
+den Lesezeitpunkt nach vorn schieben, und „seit wann gesehen" wäre nicht mehr
+beantwortbar. **P57** fährt genau das.
+
+### 3. Ohne Liste alles, mit Liste genau diese — und eine leere Liste nichts
+
+Eine Funktion mit `p_sky_ids text[] default null` statt zweier Funktionen:
+zwei wären zwei Stellen, an denen die Eigentümerbedingung richtig sein muss.
+`null` heißt „alle eigenen ungelesenen", eine **leere** Liste heißt „keine".
+Wären beide gleich, würde aus einem „markiere diese null Karten" im
+Anwendungscode stillschweigend „markiere alles" — in der Datenbank, nicht nur
+auf dem Bildschirm. Die Serveraktion hält dieselbe Grenze ein.
+
+### 4. Die Spalte kommt leer, und das ist eine Aussage
+
+`read_at timestamptz`, nullbar, **ohne Vorgabewert**. Kein Backfill. Jede
+Meldung aus `0148` gilt danach als ungelesen, und das ist richtig: es gab bis
+`0149` keine Oberfläche, in der sie jemand hätte sehen können. Ein
+Vorgabewert `now()` hätte sie alle auf einen Schlag als gelesen geführt — und
+jede *neue* Meldung sofort dazu.
+
+Dass eine neue Meldung ungelesen entsteht, entscheidet die **fehlende**
+Spaltenangabe im `insert` von `0148`, kein Wert. `0149` misst, dass
+`claim_availability_notifications()` `read_at` nicht nennt.
+
+### 5. Die Marke hängt am vorhandenen Menüpunkt
+
+Kein Glockensymbol und kein neuer Navigationspunkt. Eine
+Verfügbarkeitsmeldung ist eine Nachricht **über die Wunschliste**, also
+gehört sie an die Wunschliste; eine Glocke wäre ein zweites Ziel für dieselbe
+Sache, und genau diese Form hat ADR-0036 für diese Leiste ausgeschlossen.
+
+**Korall und nicht Rot.** Rot heißt in dieser Leiste „etwas ist kaputt" (eine
+gekennzeichnete Bestellung, ADR-0050). „Deine Figur ist wieder da" ist das
+Gegenteil davon; in der Farbe eines Zwischenfalls gezeigt, verkauft sie einen
+Schrecken für ein Geschenk. `AttentionBadge` bekommt dafür einen zweiten Ton
+und behält den bisherigen als Standard.
+
+Der Zähler ist **eine** Abfrage, holt nur die Zahl (`head: true`) und läuft
+über den Teilindex `(user_id) where read_at is null`. Erhoben wird er nur für
+ein Sammlerkonto — die Wunschliste wird nur einem Sammler angeboten
+(ADR-0078) —, dafür aber auch im öffentlichen Layout: dort ist der Sammler.
+
+### 6. Die Verarbeitung hängt am Aufruf von `/favoriten`
+
+`claimAvailabilityNotifications()` wird im Seitenaufruf angestoßen, nicht im
+Layout. Eine Meldung, die **genau durch** diesen Aufruf entsteht, steht
+deshalb sofort auf der Seite, während die Marke sie erst bei der nächsten
+Navigation zählt. Das ist unsichtbar: auf `/favoriten` ist dieser Menüpunkt
+der aktive, und die Meldungen stehen dort groß in Sicht. Eine Marke an der
+Seite, auf der man schon ist, erzählt niemandem etwas Neues. Der Preis für
+die exakte Zahl wäre ein Schreibaufruf bei **jedem** geschützten
+Seitenaufruf, und der ist höher.
+
+### Konsequenzen
+
+- Eine Spalte, ein Teilindex, eine Funktion. Keine neue Tabelle, kein
+  Trigger, kein Scheduler, kein Hintergrundjob, keine Einstellung.
+- `authenticated` hat auf `availability_notifications` weiterhin genau
+  `SELECT`, `anon` nichts, und es bleibt bei **einer** Richtlinie.
+- Die Oberfläche verspricht keine Kaufbarkeit, die es nicht mehr gibt:
+  `stillBuyable` kommt aus `hasV1BuyableOffer()` — derselben Funktion, die
+  die Kennzahl im Kopf und die Angebotszeile jeder Karte benutzen, aus
+  denselben Angeboten. Ist das Angebot weg, sagt die Karte das.
+- Gelesene Meldungen bleiben stehen und werden nur ruhiger. „Gesehen" heißt
+  „ich weiß es", nicht „weg damit" — eine Karte, die beim Klick verschwindet,
+  nimmt den Weg zum Angebot mit.
+- **P57** fährt `0149` an echtem PostgreSQL, in derselben Welt wie **P56**:
+  die Migration erfindet keine Lesehandlung, dreimal lesen markiert nichts,
+  ein zweiter Klick verschiebt den Zeitpunkt nicht, eine leere Liste markiert
+  nichts statt alles, `A` markiert alles und `C` bleibt unberührt, ohne
+  Anmeldung markiert niemand, ein neuer Zyklus erzeugt eine **ungelesene**
+  Meldung, der Zähler zählt nur das Eigene, und die Rücknahme lässt die
+  Meldungen liegen.
+
+**Verworfen:** `grant update (read_at)` mit `for update`-Richtlinie (breiter
+als die Absicht, siehe 2) · zwei Funktionen für „eine" und „alle" (zwei
+Stellen für eine Grenze) · Markieren beim Anzeigen oder beim Klick auf den
+Weg zum Angebot (Markierung ohne Handlung) · gelesene Meldungen ausblenden
+oder löschen (nimmt den Weg zum Angebot mit) · ein Glockensymbol oder ein
+eigener Navigationspunkt (zweites Ziel für dieselbe Sache, ADR-0036) · Rot
+für die Marke (Farbe eines Zwischenfalls für eine gute Nachricht) · die
+Verarbeitung ins Layout ziehen (ein Schreibaufruf je geschützter Seite, für
+eine Zahl, die dort niemand braucht) · ein relativer Zeitstempel („vor zwei
+Stunden") als neue Formatierungsmaschine (`formatDate()` ist die Konvention
+dieses Projekts).

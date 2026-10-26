@@ -34,7 +34,7 @@ import {
   InventoryGlyph,
   MessagesGlyph,
 } from "@/components/layout/nav-glyphs";
-import { AttentionBadge } from "@/components/ui/attention-badge";
+import { AttentionBadge, type BadgeTone } from "@/components/ui/attention-badge";
 import { CalculatorLauncher } from "@/components/calculator/calculator-launcher";
 import { CartToast } from "@/components/cart/cart-toast";
 import { Wordmark } from "@/components/layout/wordmark";
@@ -52,6 +52,10 @@ type Item = {
   prefetch?: boolean;
   /** How many orders are flagged. Only the shop ever carries this (F5). */
   badge?: number;
+  /** Welche Art Wartendes die Marke anzeigt. Siehe `AttentionBadge`. */
+  badgeTone?: BadgeTone;
+  /** Was die Marke vorgelesen bekommt. Ohne Angabe: der Bestelltext. */
+  badgeLabel?: (n: number) => string;
 };
 
 /** Who is asking. Nothing else decides what the bar offers. */
@@ -106,6 +110,8 @@ const DESTINATIONS: readonly {
    * none of them is.
    */
   badge?: (counts: OpenOrderCounts, unread: Unread) => number;
+  badgeTone?: BadgeTone;
+  badgeLabel?: (n: number) => string;
 }[] = [
   {
     href: "/",
@@ -164,6 +170,22 @@ const DESTINATIONS: readonly {
        eine Anfrage samt Sitzungsprüfung für eine Seite, die niemand sieht —
        dieselbe Rechnung wie bei `/collection` (V4.4). */
     prefetch: (viewer) => (viewer.signedIn ? undefined : false),
+    /*
+     * DIE MARKE AM VORHANDENEN MENÜPUNKT (Phase 4 S4, `0149`).
+     *
+     * Kein Glockensymbol und kein neuer Navigationspunkt: eine
+     * Verfügbarkeitsmeldung ist eine Nachricht ÜBER die Wunschliste, also
+     * gehört sie an die Wunschliste. Eine Glocke wäre ein zweites Ziel für
+     * dieselbe Sache — und das ist genau die Form, die ADR-0036 für diese
+     * Leiste ausgeschlossen hat.
+     *
+     * KORALL UND NICHT ROT. Rot heißt in dieser Leiste „etwas ist kaputt"
+     * (eine gekennzeichnete Bestellung). „Deine Figur ist wieder da" ist das
+     * Gegenteil davon; siehe `AttentionBadge`.
+     */
+    badge: (_counts, unread) => unread.notices,
+    badgeTone: "favorite",
+    badgeLabel: (n) => de.favorites.noticeBadgeLabel(n),
   },
 
   {
@@ -250,8 +272,21 @@ const DESTINATIONS: readonly {
  * Posteingänge, und ein Verkäufer hat beide. Welche gefüllt ist, entscheidet
  * das Layout — es weiß, wessen Seite gerade gezeigt wird.
  */
-export type Unread = { mine: number; seller: number };
-export const NO_UNREAD: Unread = { mine: 0, seller: 0 };
+export type Unread = {
+  mine: number;
+  seller: number;
+  /**
+   * Ungelesene Verfuegbarkeitsmeldungen (Phase 4 S4, `0149`).
+   *
+   * EINE DRITTE ZAHL UND KEIN DRITTER PARAMETER: „ungelesen" ist, was dieser
+   * Typ bedeutet, und eine Verfuegbarkeitsmeldung ist ungelesen oder nicht —
+   * genau wie eine Nachricht. Sie gehoert aber zu KEINEM der zwei
+   * Posteingaenge, sondern zur Wunschliste; deshalb ein eigenes Feld und
+   * nicht `mine`.
+   */
+  notices: number;
+};
+export const NO_UNREAD: Unread = { mine: 0, seller: 0, notices: 0 };
 
 /**
  * Was an Bestellungen ungesehen ist — je Rolle (0099).
@@ -278,13 +313,15 @@ function itemsFor(
    */
   const viewer: Viewer = { signedIn, admin, business, collector: !admin && !business };
   return DESTINATIONS.filter((destination) => destination.applies(viewer)).map(
-    ({ href, label, section, icon, prefetch, badge }) => ({
+    ({ href, label, section, icon, prefetch, badge, badgeTone, badgeLabel }) => ({
       href,
       label,
       section,
       icon,
       prefetch: prefetch?.(viewer),
       badge: badge?.(counts, unread) ?? 0,
+      badgeTone,
+      badgeLabel,
     }),
   );
 }
@@ -467,7 +504,13 @@ function NavItem({ item, active }: { item: Item; active: boolean }) {
        */}
       <item.icon className="h-[18px] w-[18px] md:hidden" />
       {item.label}
-      {item.badge ? <AttentionBadge count={item.badge} /> : null}
+      {item.badge ? (
+        <AttentionBadge
+          count={item.badge}
+          tone={item.badgeTone}
+          label={item.badgeLabel?.(item.badge)}
+        />
+      ) : null}
       <PendingDot />
       {/* A shape as well as a colour. Above the label in the phone bar so
           the thumb never covers it, under it in the header. */}

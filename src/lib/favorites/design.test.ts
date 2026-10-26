@@ -290,7 +290,12 @@ describe("die Seite hat eine eigene Identität", () => {
      */
     expect(code(VIEW)).toContain("heading?: ReactNode");
     expect(code(VIEW)).toContain("{heading ?? (");
-    expect(code(PAGE)).toContain("heading={<FavoritesHeading");
+    /* Seit `0149` gehen ZWEI Dinge in den Slot: der Kopf und die
+       Verfügbarkeitsmeldungen. Beide aus demselben Grund dort — innerhalb
+       des Blocks, den die Weltkulisse hinterlegt. */
+    expect(code(PAGE)).toContain("<FavoritesHeading total={figures.length}");
+    expect(code(PAGE)).toMatch(/heading=\{\s*<>\s*<FavoritesHeading/);
+    expect(code(PAGE)).toMatch(/<FavoritesHeading[^>]*\/>\s*<AvailabilityNotices/);
   });
 
   it("und das Suchfeld bleibt, wo es war", () => {

@@ -370,6 +370,69 @@ export const de = {
     /** Was die Ladegrenze ansagt, solange das Raster noch Gerüst ist. */
     loading: "Favoriten werden geladen …",
     /*
+     * DIE VERFÜGBARKEITSMELDUNGEN (Phase 4 S4, `0149`).
+     *
+     * „ist wieder verfügbar" — WIEDER, und das ist die ganze Aussage dieser
+     * Funktion. Gemeldet wird nur ein echter Wechsel von nicht kaufbar zu
+     * kaufbar (`0147`); eine Figur, die beim Vormerken schon zu haben war,
+     * erzeugt nichts. „Jetzt verfügbar" würde dieselbe Karte auch für den
+     * zweiten Fall behaupten.
+     *
+     * KEIN AUSRUFEZEICHEN IM ABSCHNITTSTITEL und eines in der Meldung: die
+     * Überschrift ordnet ein, die Karte ist die gute Nachricht.
+     */
+    noticesTitle: "Wieder verfügbar",
+    /*
+     * DIE UNTERZEILE ZÄHLT, SIE BEHAUPTET NICHT.
+     *
+     * „3 vorgemerkte Figuren sind wieder zu haben" stand hier zuerst und war
+     * falsch: in der Liste stehen auch gesehene Meldungen und solche, deren
+     * Angebot inzwischen weg ist. Eine Zusammenfassung, die mehr verspricht
+     * als die Karten darunter, ist schlechter als keine.
+     */
+    noticesSubline: (ungelesen: number) =>
+      ungelesen === 0
+        ? "Alles gesehen."
+        : ungelesen === 1
+          ? "1 neue Meldung."
+          : `${ungelesen} neue Meldungen.`,
+    /** Die Meldung selbst. Der Name kommt aus dem Katalog, nicht von hier. */
+    noticeHeadline: (name: string) => `${name} ist wieder verfügbar!`,
+    /**
+     * Der Preis, der GEMELDET wurde — nicht der von heute.
+     *
+     * Ausdrücklich „damals", weil zwischen Meldung und Ansehen Stunden
+     * liegen können und der Preis sich geändert haben kann. Was die Karte
+     * zeigt, ist der gespeicherte Stand; was gilt, steht auf der Figurenseite.
+     */
+    noticePriceThen: (preis: string) => `${preis} bei der Meldung`,
+    /** Der Weg zur Figur, solange es dort etwas zu kaufen gibt. */
+    noticeToOffer: "Zum Angebot",
+    /**
+     * Und der Weg dorthin, wenn nicht mehr.
+     *
+     * KEINE FALSCHE KAUFBARKEIT. Ist das Angebot inzwischen weg, sagt die
+     * Karte das — sie verschwindet nicht und sie behauptet auch nichts. Die
+     * Meldung war richtig, als sie entstand; sie ist Geschichte, nicht ein
+     * Versprechen.
+     */
+    noticeGone: "Inzwischen vergriffen",
+    noticeToFigure: "Zur Figur",
+    /** Als gelesen markieren, einzeln und für alle. */
+    noticeMarkRead: "Gesehen",
+    noticeMarkReadLabel: (name: string) => `Meldung zu ${name} als gesehen markieren`,
+    noticesMarkAllRead: "Alle als gesehen markieren",
+    noticesMarkingRead: "Wird markiert …",
+    /** Wann die Meldung entstand. Davor steht das Datum. */
+    noticeWhen: (datum: string) => `Gemeldet am ${datum}`,
+    /** Eine schon gesehene Meldung sagt das, damit „ruhiger" nicht „kaputt" heißt. */
+    noticeRead: "Gesehen",
+    /** Die Marke am Menüpunkt, für eine Hilfstechnik. */
+    noticeBadgeLabel: (n: number) =>
+      n === 1 ? "1 neue Verfügbarkeitsmeldung" : `${n} neue Verfügbarkeitsmeldungen`,
+    /** Wenn das Markieren scheitert. Ein Satz, kein Stapelabbild. */
+    noticeMarkFailed: "Konnte nicht als gesehen markiert werden. Bitte neu laden.",
+    /*
      * DIE NACHFRAGE, wie der Betrieb sie liest.
      *
      * „vorgemerkt" und NICHT „Käufer", „Interessenten" oder „wartet". Ein

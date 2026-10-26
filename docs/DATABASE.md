@@ -46,7 +46,7 @@ SQL-Editor angewandt (ADR-0051).
 | `purchase_calculations` (`0142`) | wächst | bewusst gespeicherte Einkaufskalkulationen | nur der Eigentümer |
 | `favorites` (`0145`) | wächst | vorgemerkte Figuren: Benutzer × Figur | nur der Eigentümer; Zahlen für den Betrieb über `favorite_demand()` |
 | `offer_state` (`0146`, `0147`) | eine je kaufbarer Figur | der Angebotsspiegel: ob eine Figur jetzt kaufbar ist, seit wann ununterbrochen, und was zuletzt gemeldet wurde | **kein Clientrecht**, RLS an ohne Richtlinie — alles läuft über Funktionen |
-| `availability_notifications` (`0148`) | eine je Nutzer, Figur und Phase | persönliche Verfügbarkeitsmeldungen | nur der Eigentümer, **nur lesen** — geschrieben wird ausschließlich von `claim_availability_notifications()` |
+| `availability_notifications` (`0148`, `0149`) | eine je Nutzer, Figur und Phase | persönliche Verfügbarkeitsmeldungen, mit Lesezustand | nur der Eigentümer, **nur lesen** — geschrieben wird ausschließlich von `claim_availability_notifications()` und `mark_availability_notifications_read()` |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -2210,7 +2210,7 @@ nicht wiederherstellbare Teil, und ein Archiv ohne sie würde nach einer
 Wiederherstellung **jede** Figur neu melden. Die Folgemigration muss sie
 aufnehmen (ADR-0136, D-6).
 
-### 3.5c `availability_notifications` — persönliche Meldungen (Migration `0148`)
+### 3.5c `availability_notifications` — persönliche Meldungen (Migrationen `0148`, `0149`)
 
 | Spalte | Typ | Regel |
 |---|---|---|
@@ -2219,6 +2219,7 @@ aufnehmen (ADR-0136, D-6).
 | `buyable_since` | `timestamptz not null` | welche **Phase** gemeldet wurde (`0147`) |
 | `cheapest_cents` | `integer not null` | was zum Zeitpunkt der Meldung galt, in Cent |
 | `created_at` | `timestamptz not null default now()` | wann gemeldet |
+| `read_at` | `timestamptz` (`0149`) | wann der Nutzer sie als gesehen markiert hat; **NULL heißt ungelesen** |
 
 **Primärschlüssel: `(user_id, sky_id, buyable_since)` — und er IST der
 Duplikatschutz.** „Genau eine Meldung je Nutzer, Figur und
@@ -2228,15 +2229,27 @@ Ein echter späterer Zyklus hat eine neue Phasengrenze und darf deshalb eine
 neue Meldung erzeugen; eine kurze Warenkorbreservierung behält die alte und
 erzeugt keine (ADR-0143).
 
-**Keine `read_at`-Spalte.** Anzeige, Ungelesen-Zähler und „als gelesen
-markieren" sind S4 — die Spalte und ihr `update`-Weg kommen dort.
+**`read_at` kam mit `0149`, nullbar und ohne Vorgabewert** — und beides ist
+die Aussage: NULL heißt ungelesen. Kein Backfill: jede Meldung aus `0148`
+gilt danach als ungelesen, was richtig ist, weil es bis `0149` keine
+Oberfläche gab, in der sie jemand hätte sehen können. Eine **neue** Meldung
+entsteht ungelesen, und das entscheidet die **fehlende** Spaltenangabe im
+`insert` von `0148`, kein Wert (`0149` misst, dass
+`claim_availability_notifications()` `read_at` nicht nennt).
+
+**Teilindex** `availability_notifications_unread_idx (user_id) where read_at
+is null` — für den Ungelesen-Zähler der Navigationsleiste, die häufigste
+Abfrage dieser Tabelle. Nur ungelesene Zeilen: gelesene werden mit der Zeit
+die Mehrheit und beantworten diese Frage nicht.
 
 #### Sicherheit
 
 RLS an, **eine** Richtlinie: `for select to authenticated using ((select
 auth.uid()) = user_id and public.is_collector_account())`. `authenticated`
 hat **genau** `SELECT`, `anon` **nichts**. Es gibt **keinen Schreibweg für
-Clients** — geschrieben wird ausschließlich von der Funktion.
+Clients** — geschrieben wird ausschließlich von Funktionen, und das gilt nach
+`0149` unverändert. `0149` legt insbesondere **kein** `update`-Recht und
+**keine** zweite Richtlinie an (ADR-0144).
 
 #### `claim_availability_notifications()`
 
@@ -2257,6 +2270,31 @@ Benachrichtigt wird, wer **vor** der Phasengrenze vorgemerkt hat
 (`favorites.created_at < buyable_since`). Zurück kommt **nur** die Zahl der
 Meldungen für den Aufrufer — eine Zahl je Figur wäre die Nachfrage, und die
 ist nach ADR-0136 dem Verkäuferbetrieb vorbehalten.
+
+#### `mark_availability_notifications_read(text[])` (`0149`)
+
+`definer`, `volatile`, leerer `search_path`, `execute` nur für
+`authenticated`. **Ein einziges Statement:** ein `update … returning` in
+einem `with`-Ausdruck, darüber ein `count(*)`.
+
+Das `where` trägt die Eigentümerbedingung **Wort für Wort** wie die
+`select`-Richtlinie — `(select auth.uid()) = n.user_id and
+public.is_collector_account()` — dazu `n.read_at is null`. **RLS gilt für
+eine Definer-Funktion nicht, also IST dieses `where` die Grenze**; es gibt
+nichts dahinter. Die Migration misst, dass alle drei Teile drinstehen.
+
+`n.read_at is null` ist dabei nicht Schmuck: ohne sie würde ein zweiter Klick
+den Lesezeitpunkt nach vorn schieben.
+
+**Ohne `p_sky_ids` alle** eigenen ungelesenen, **mit `p_sky_ids` genau
+diese** Figuren. Eine **leere** Liste markiert **nichts** — nicht alles; aus
+„markiere diese null Karten" darf kein „markiere alles" werden.
+
+**Es ist der einzige Weg, `read_at` zu setzen.** Insbesondere setzt das
+*Anzeigen* einer Meldung sie nicht: Lesen
+(`src/lib/favorites/notification-queries.ts`) und Markieren
+(`src/lib/favorites/notification-actions.ts`, nur am Klick) sind zwei Wege
+und nicht zwei Wirkungen eines Weges (ADR-0144).
 
 **Noch nicht in der Plattformsicherung**, und hier dringlicher als bei
 `favorites` und `offer_state`: diese Tabelle ist der **einzige** Teil, den

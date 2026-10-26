@@ -387,6 +387,67 @@ Spaltennamen der Antwort.
 `seller_*`-Funktion. Ein Plattformadministrator ist nach `0042` bewusst
 **nicht** zugelassen: er betreibt die Plattform, nicht den Einkauf.
 
+### Die Verfügbarkeitsmeldungen (`0148`, `0149`)
+
+`availability_notifications` ist die **engste** Tabelle dieses Projekts:
+**eine** Richtlinie, und zwar `for select to authenticated using ((select
+auth.uid()) = user_id and public.is_collector_account())`. `authenticated` hat
+**genau `SELECT`**, `anon` **nichts**, `PUBLIC` **nichts**.
+
+**Es gibt keinen Schreibweg für Clients — auch nach `0149` nicht**, und das
+ist die Entscheidung, auf die es hier ankommt (ADR-0144). Der naheliegende
+Weg zu „als gelesen markieren" wäre:
+
+```sql
+-- NICHT GENOMMEN:
+grant update (read_at) on public.availability_notifications to authenticated;
+create policy … for update to authenticated using (…) with check (…);
+```
+
+Zwei Gründe, und beide sind Sicherheitsgründe:
+
+* **Ein Tabellenrecht ist breiter als die Absicht.** „Als gelesen markieren"
+  heißt `read_at = now()` für eigene **ungelesene** Zeilen — nicht „setze
+  diese Spalte auf irgendeinen Wert", nicht auf einen in der Zukunft, nicht
+  zurück auf NULL.
+* **Es wäre das erste Schreibrecht eines Clients auf dieser Tabelle.** Die
+  Zusage aus `0148` („geschrieben wird ausschließlich von einer Funktion")
+  bleibt dadurch gültig und prüfbar: die Nachkontrolle von `0149` verlangt
+  weiterhin genau `SELECT` und genau **eine** Richtlinie.
+
+Stattdessen:
+
+```sql
+create or replace function public.mark_availability_notifications_read(
+  p_sky_ids text[] default null)
+returns integer language sql volatile security definer set search_path = ''
+-- Rumpf: update … where (select auth.uid()) = n.user_id
+--                    and public.is_collector_account()
+--                    and n.read_at is null
+--                    and (p_sky_ids is null or n.sky_id = any (p_sky_ids))
+revoke all on function … from public, anon;
+grant execute on function … to authenticated;
+```
+
+**Für eine Definer-Funktion gilt RLS nicht, also IST dieses `where` die
+Grenze** — es gibt nichts dahinter, was einen Fehler darin noch abfangen
+würde. Deshalb steht die Eigentümerbedingung dort **Wort für Wort** wie in
+der `select`-Richtlinie, und deshalb **misst die Migration, dass sie
+drinsteht**: fällt einer der drei Teile weg, bricht `0149` ab. Probelauf
+**P57** fährt die Gegenprobe an echtem PostgreSQL — ein Konto markiert
+„alles", und die Zeilen eines zweiten Kontos bleiben unberührt.
+
+**Eine leere Liste markiert nichts, `null` markiert alles.** Wären beide
+gleich, würde aus einem „markiere diese null Karten" im Anwendungscode
+stillschweigend „markiere alles" — in der Datenbank. Serveraktion und
+Funktion halten beide diese Grenze.
+
+**Und das Lesen schreibt nicht.** `notification-queries.ts` enthält keinen
+Schreibaufruf, die Komponente hat kein `useEffect` und keinen
+`IntersectionObserver`, und auch der Weg zum Angebot markiert nichts. Eine
+Meldung, die beim Ansehen als gelesen gilt, wäre weg, bevor jemand sie
+gelesen hat — und niemand würde es merken.
+
 **In keiner der beiden Sicherungen als Zeile.** Aus der Betriebssicherung
 dauerhaft ausgeschlossen — fremde Wunschlisten in einem Händlerexport wären
 nicht eine Lücke, sondern ein Leck. Aus der Plattformsicherung heute

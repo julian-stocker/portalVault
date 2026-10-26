@@ -38,7 +38,9 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     fetchMyUnread(), sellerOperator ? fetchSellerUnread() : Promise.resolve(0),
   ]);
   /* Auch hier: die Zahl gehört an den Menschen, nicht an den Bereich. */
-  const unread = { mine, seller };
+  /* Ein Plattformadminkonto hat keine Wunschliste (ADR-0078), also keine
+     Verfuegbarkeitsmeldungen und nichts zu zaehlen (`0149`). */
+  const unread = { mine, seller, notices: 0 };
   const attention = {
     mine: await fetchMyAttentionTotal(),
     seller: sellerOperator ? await fetchSellerAttentionTotal() : 0,

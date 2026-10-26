@@ -13,6 +13,7 @@ import { NavSpacer, SiteNav } from "@/components/layout/site-nav";
 import { WorldZone } from "@/components/layout/world-zone";
 import { fetchOpenOrderCounts } from "@/lib/admin/order-queries";
 import { fetchMyUnread, fetchSellerUnread } from "@/lib/messages/queries";
+import { fetchUnreadNoticeCount } from "@/lib/favorites/notification-queries";
 import { fetchMyAttentionTotal, fetchSellerAttentionTotal } from "@/lib/attention/queries";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentProfile } from "@/lib/auth/profile";
@@ -34,9 +35,32 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   /* Zwei Kanäle je Rolle (0099): Nachrichten und Bestellereignisse. Beide
      `cache()`-gebunden, beide in derselben Anfrage — deshalb kann die Zahl am
      Symbol nicht von den Zahlen an den Karten abweichen. */
+  /*
+   * DIE DRITTE ZAHL: ungelesene Verfuegbarkeitsmeldungen (Phase 4 S4, `0149`).
+   *
+   * NUR FUER EIN SAMMLERKONTO, und das ist keine Sparsamkeit, sondern
+   * dieselbe Grenze wie am Menuepunkt selbst: die Wunschliste wird nur einem
+   * Sammler angeboten (ADR-0078), also traegt nur dort eine Marke eine
+   * Aussage. Fuer ein Betriebs- oder Adminkonto gibt es nichts zu zaehlen,
+   * und es wird auch nicht gefragt — `0` ohne Zugriff.
+   *
+   * EINE ABFRAGE, und sie holt nur die Zahl (`head: true`) ueber den
+   * Teilindex aus `0149`. `cache()` bindet sie an die Anfrage: fragt eine
+   * Seite dieselbe Zahl noch einmal, kostet sie dort nichts.
+   *
+   * WARUM DIE LEISTE NICHT SELBST VERARBEITET. Die Verarbeitung faelliger
+   * Ereignisse haengt am Aufruf von `/favoriten` (S4, Punkt 4) und nicht an
+   * jedem geschuetzten Seitenaufruf. Eine Meldung, die GENAU DURCH diesen
+   * Aufruf von `/favoriten` entsteht, steht deshalb sofort auf der Seite,
+   * waehrend die Marke sie erst bei der naechsten Navigation zaehlt — und
+   * das ist unsichtbar: auf `/favoriten` ist dieser Menuepunkt der aktive,
+   * und die Meldungen stehen dort gross in Sicht. Eine Marke an der Seite,
+   * auf der man schon ist, erzaehlt niemandem etwas Neues.
+   */
   const unread = {
     mine: await fetchMyUnread(),
     seller: sellerOperator ? await fetchSellerUnread() : 0,
+    notices: !platformAdmin && !sellerOperator ? await fetchUnreadNoticeCount() : 0,
   };
   const attention = {
     mine: await fetchMyAttentionTotal(),

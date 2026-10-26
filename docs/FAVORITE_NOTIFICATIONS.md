@@ -600,37 +600,73 @@ Tabellenzugriff, den die Richtlinien verwehren. Dasselbe Muster wie
 
 ## 5. Oberfläche
 
-### 5.1 Der Zähler in der Leiste
+### 5.1 Der Zähler in der Leiste — **gebaut** (`0149`, ADR-0144)
 
-Ein **dritter Kanal** neben `unread` und `attention`, über dieselbe Mechanik:
-`Unread`/`Attention` in `site-nav.tsx` bekommen ein Geschwister
-`favorites: number`, gespeist aus `(app)/layout.tsx` wie die vier anderen
-Zahlen.
+Eine **dritte Zahl** in `Unread`, nicht ein vierter Typ: `Unread` heißt
+„ungelesen", und eine Verfügbarkeitsmeldung ist ungelesen oder nicht, genau
+wie eine Nachricht. Sie gehört aber zu keinem der zwei Posteingänge, sondern
+zur Wunschliste — deshalb ein eigenes Feld `notices` und nicht `mine`.
 
-**Die Zahl sitzt am Navigationspunkt „Favoriten"** — nicht an einem neuen
-Glockensymbol. Begründung: die Meldungen betreffen ausschließlich Favoriten,
-und ein vierter Punkt in einer Leiste mit drei Zielen (ADR-0036) wäre genau
-die Überladung, die der Auftrag ausschließt. Auf dem Telefon stehen dort
-schon drei Punkte; eine Zahl am dritten kostet keine Breite.
+**Die Zahl sitzt am vorhandenen Navigationspunkt „Favoriten"** — nicht an
+einem neuen Glockensymbol und nicht an einem neuen Ziel. Begründung: die
+Meldungen betreffen ausschließlich Favoriten, und ein vierter Punkt in einer
+Leiste mit drei Zielen (ADR-0036) wäre genau die Überladung, die der Auftrag
+ausschließt.
 
-### 5.2 Der Posteingang: ein Abschnitt auf `/favoriten`, keine eigene Seite
+**Korall und nicht Rot.** Rot heißt in dieser Leiste „etwas ist kaputt" (eine
+gekennzeichnete Bestellung, ADR-0050). „Deine Figur ist wieder da" ist das
+Gegenteil; `AttentionBadge` hat dafür einen zweiten Ton bekommen und behält
+den bisherigen als Standard.
 
-Oberhalb des Kennzahlenblocks, und **nur wenn es Ungelesenes gibt**:
+**Erhoben wird sie in vier Layouts**, aber nur für ein Sammlerkonto: die
+Wunschliste wird nur einem Sammler angeboten (ADR-0078), also trägt nur dort
+eine Marke eine Aussage. Auch im **öffentlichen** Layout — dort ist der
+Sammler die meiste Zeit, und eine Marke, die nur in den geschützten
+Bereichen erscheint, erreicht genau den nicht, für den sie gedacht ist. Eine
+Abfrage, nur die Zahl (`head: true`), über den Teilindex aus `0149`,
+`cache()`-gebunden.
+
+**Eine Navigation Verzug, und sie ist unsichtbar.** Die Verarbeitung hängt am
+Aufruf von `/favoriten`, nicht am Layout. Eine Meldung, die **genau durch**
+diesen Aufruf entsteht, steht sofort auf der Seite, während die Marke sie
+erst bei der nächsten Navigation zählt. Das fällt niemandem auf: auf
+`/favoriten` ist dieser Menüpunkt der aktive, und die Meldungen stehen dort
+groß in Sicht. Der Preis für die exakte Zahl wäre ein Schreibaufruf bei
+**jedem** geschützten Seitenaufruf.
+
+### 5.2 Der Abschnitt auf `/favoriten` — **gebaut** (ADR-0144)
+
+Im `heading`-Slot von `CatalogView`, also **innerhalb** des Blocks, den die
+Weltkulisse hinterlegt — dieselbe Stelle wie der Kopf (ADR-0038, V3.3). Als
+Markup der Seite stünde er auf eigenem Grund und schnitte ein Rechteck in die
+Kulisse.
 
 ```
-Neu für dich                                      [Alle gelesen]
-  ♥  Blue Bash ist wieder verfügbar.          vor 2 Stunden   →
-  ♥  Legendary Bash ist jetzt ab 14,99 € erhältlich.  gestern  →
+♥ Wieder verfügbar                      [Alle als gesehen markieren]
+2 vorgemerkte Figuren sind wieder zu haben.
+
+ [Bild]  Trigger Happy ist wieder verfügbar!
+         Gemeldet am 26.10.2026 · 14,99 € bei der Meldung
+         Zum Angebot        Gesehen
+
+ [Bild]  Blue Bash ist wieder verfügbar!
+         Gemeldet am 24.10.2026 · 9,90 € bei der Meldung · Inzwischen vergriffen
+         Zur Figur          ✓ Gesehen
 ```
 
 | Entscheidung | Begründung |
 |---|---|
 | Kein eigener Pfad `/benachrichtigungen` | Die Meldungen sind Favoriten-Ereignisse, und die Liste der betroffenen Figuren steht direkt darunter. Eine eigene Seite wäre ein zweiter Ort für dieselbe Sache |
-| Jede Zeile führt auf **die Figur** (`/skylanders/<slug>`) | dort steht das Angebot mitsamt Preis und Zustand; ein Direktlink in den Warenkorb wäre eine Kaufentscheidung, die niemand getroffen hat |
-| Eine Zeile anzutippen quittiert sie | ein zweiter Knopf je Zeile wäre auf dem Telefon ein Ziel neben einem Ziel |
-| „Alle gelesen" als ein Knopf | ein `update … set read_at = now() where user_id = auth.uid() and read_at is null` |
-| Gelesene Meldungen bleiben, aber eingeklappt | „Älteres anzeigen" — der Posteingang ist kein Protokoll |
-| Leerer Zustand | **keiner.** Der Abschnitt erscheint gar nicht, wenn nichts da ist. Ein „keine Benachrichtigungen" über einer Wunschliste ist eine Zeile, die nichts sagt |
+| Jede Karte führt auf **die Figur** (`/skylanders/<slug>`) | dort steht das Angebot mitsamt Preis und Zustand; ein Direktlink in den Warenkorb wäre eine Kaufentscheidung, die niemand getroffen hat. Nicht vorgeladen — bis zu 24 Karten |
+| **Eine Karte anzutippen quittiert sie NICHT** | *Hier weicht die Umsetzung vom Entwurf ab, und zwar bewusst.* „Wer das Angebot ansieht, hat die Meldung gesehen" ist verlockend und trotzdem eine Markierung ohne Handlung — und keine rückholbare. Der Auftrag nennt genau das als Prüfpunkt. Stattdessen ein eigener, leiser Textknopf „Gesehen" je Karte |
+| „Alle als gesehen markieren" am Kopf | ein Aufruf von `mark_availability_notifications_read()` **ohne** Argument; erscheint nur, wenn es Ungelesenes gibt |
+| **Gelesene bleiben stehen und werden nur ruhiger** | *Auch hier anders als im Entwurf („eingeklappt"):* kein Korallrand, gedämpfte Schrift, statt des Knopfs ein Häkchen. „Gesehen" heißt „ich weiß es", nicht „weg damit" — eine Karte, die beim Klick verschwindet, nimmt den Weg zum Angebot mit |
+| „Wieder verfügbar", nicht „Jetzt verfügbar" | **wieder** ist die ganze Aussage: gemeldet wird nur ein echter Wechsel (`0147`). Eine Figur, die beim Vormerken schon zu haben war, erzeugt nichts |
+| Der Preis heißt „… bei der Meldung" | zwischen Meldung und Ansehen können Stunden liegen. Gezeigt wird der **gespeicherte** Stand; was gilt, steht auf der Figurenseite |
+| Ist das Angebot weg, sagt die Karte das | `stillBuyable` aus `hasV1BuyableOffer()` — derselben Funktion, die die Kennzahl im Kopf und die Angebotszeile jeder Karte benutzen, aus denselben Angeboten. Keine zweite Definition von „kaufbar", und keine behauptete Kaufbarkeit |
+| Leerer Zustand | **keiner.** Ohne Meldungen erscheint der Abschnitt gar nicht. Ein „keine Benachrichtigungen" über einer Wunschliste ist eine Zeile, die nichts sagt |
+| Auch ohne vorgemerkte Figuren | wer alles wieder entfernt, hat seine Meldungen noch — sie stehen dann über dem leeren Zustand |
+| Decke bei 24 Karten | an der Abfrage, nicht erst in der Antwort |
 
 ### 5.3 Ein Hinweis an der Karte?
 
@@ -648,18 +684,17 @@ stimmt.
 > billigste Variante wäre dann, die betroffenen Karten im Raster **nach oben
 > zu sortieren**, statt ein Zeichen hinzuzufügen.
 
-### 5.4 Einstellungen
+### 5.4 Einstellungen — **nicht gebaut, und vorerst auch nicht vorgesehen**
 
-Zwei Schalter unter `/account` (nicht unter `/settings` — das ist seit
-ADR-0061 eine Weiterleitung). Beschriftung:
+Der Entwurf schlug zwei Schalter unter `/account` vor. Der Auftrag für S4 hat
+sie ausdrücklich ausgeschlossen („keine zusätzlichen
+Benachrichtigungseinstellungen"), und das ist auch die richtige Reihenfolge:
+ein Schalter ist erst dann eine Hilfe, wenn es etwas abzuschalten gibt, das
+jemanden erreicht, ohne dass er die Seite öffnet. Solange eine Meldung nur
+**auf** `/favoriten` erscheint, ist das Nichtöffnen der Seite der Schalter.
 
-* „Sag mir, wenn eine vorgemerkte Figur wieder verfügbar ist"
-* „Sag mir, wenn eine vorgemerkte Figur günstiger wird"
-
-Keine Zahlen, keine Schwellenwerte in der Oberfläche: die Schwelle ist eine
-Betriebsentscheidung (2.3) und keine Nutzereinstellung.
-
----
+Mit einer E-Mail oder einer Push-Nachricht ändert sich das sofort — dann
+gehört ein Schalter dazu, und zwar **vor** dem Versandweg. Bis dahin: nichts.
 
 ## 6. Migrationen und Sicherung — die Reihenfolge
 

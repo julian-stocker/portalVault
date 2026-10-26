@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { AvailabilityNotices, type NoticeView } from "@/components/catalog/availability-notices";
 import { CatalogView } from "@/components/catalog/catalog-view";
 import { FavoritesHeading } from "@/components/catalog/favorites-heading";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
@@ -12,6 +13,9 @@ import { fetchSeries } from "@/lib/catalog/queries";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchFavorites } from "@/lib/favorites/queries";
+import { fetchAvailabilityNotices } from "@/lib/favorites/notification-queries";
+import { claimAvailabilityNotifications } from "@/lib/favorites/notifications";
+import { imageSrc } from "@/lib/catalog/image";
 import { hasV1BuyableOffer, offerRecord, offersFor } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
 import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
@@ -52,7 +56,30 @@ export default async function FavoritesPage() {
   const profile = await currentProfile();
   if (!profile?.username) redirect(ONBOARDING_PATH);
 
-  const [figures, series, owned, offers, seller, marketBoost, freeShippingFrom] =
+  /*
+   * DIE VERARBEITUNG, HIER UND SONST NIRGENDS (Phase 4 S4, Auftrag Punkt 4).
+   *
+   * `claimAvailabilityNotifications()` ist der bedarfsgesteuerte Anstoß aus
+   * S3: es gibt keinen Scheduler, also stößt ein angemeldeter Besuch dieser
+   * Seite die Verarbeitung an. Was dabei geschieht, steht vollständig in
+   * `0148` — EINE Anweisung, die das Ereignis beansprucht und im selben
+   * Zug die Meldungen anlegt. Hier wird nichts erkannt und nichts
+   * entschieden; eine zweite Erkennung gibt es nicht.
+   *
+   * ZUERST VERARBEITEN, DANN LESEN, und deshalb eine Kette statt zweier
+   * Einträge in `Promise.all`: eine Meldung, die dieser Aufruf gerade
+   * angelegt hat, soll auf DIESER Seite stehen und nicht erst beim nächsten
+   * Mal. Die Kette läuft parallel zu allem anderen, kostet also keine
+   * zusätzliche Wartezeit.
+   *
+   * EIN ZWEITER AUFRUF KOSTET NICHTS: ohne fälliges Ereignis liest die
+   * Funktion nur. Die 30-Minuten-Karenzzeit steckt in
+   * `offer_availability_grace()` und wird hier nicht nachgebaut.
+   */
+  const noticesPromise = claimAvailabilityNotifications()
+    .then(() => fetchAvailabilityNotices());
+
+  const [figures, series, owned, offers, seller, marketBoost, freeShippingFrom, notices] =
     await Promise.all([
       /*
        * Die vorgemerkten Figuren, EIN Aufruf. Die Liste ist zugleich die
@@ -71,6 +98,7 @@ export default async function FavoritesPage() {
       fetchSellerPublic(),
       fetchCatalogMarketBoost(),
       fetchFreeShippingFrom(),
+      noticesPromise,
     ]);
 
   const favorited = figures.map((f) => f.skyId);
@@ -89,6 +117,30 @@ export default async function FavoritesPage() {
    * widersprechen.
    */
   const withOffer = figures.filter((f) => hasV1BuyableOffer(offersFor(offers, f.skyId))).length;
+
+  /*
+   * DIE MELDUNGEN, FERTIG FÜR DIE ANZEIGE.
+   *
+   * `stillBuyable` kommt aus `hasV1BuyableOffer()` — derselben Funktion, die
+   * die Kennzahl oben und die Angebotszeile jeder Karte benutzen, und aus
+   * denselben `offers`, die ohnehin geladen sind. Kein zweiter Aufruf und
+   * keine zweite Definition von „kaufbar": sagt sie `false`, nennt die Karte
+   * das ausdrücklich, statt eine Kaufbarkeit zu suggerieren, die es nicht
+   * mehr gibt (Auftrag Punkt 1).
+   *
+   * Das Bild über `imageSrc()`, wie überall — Override zuerst, dann die
+   * importierte Datei, und `null` ist ein echter Zustand (ADR-0009).
+   */
+  const noticeViews: NoticeView[] = notices.map((n) => ({
+    skyId: n.figure.skyId,
+    name: n.figure.name,
+    slug: n.figure.slug,
+    picture: imageSrc(n.figure),
+    cheapestCents: n.cheapestCents,
+    createdAt: n.createdAt,
+    read: n.readAt !== null,
+    stillBuyable: hasV1BuyableOffer(offersFor(offers, n.figure.skyId)),
+  }));
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 pt-8 pb-6 md:pt-12 md:pb-10">
@@ -118,9 +170,18 @@ export default async function FavoritesPage() {
            * und ein Weg dorthin. Kein Ausrufezeichen, keine Illustration,
            * kein zweiter Knopf — eine leere Wunschliste ist der Anfang.
            */}
+          {/*
+            * AUCH OHNE VORGEMERKTE FIGUREN. Wer alles wieder entfernt, hat
+            * seine Meldungen noch — sie gehören zu dem, was einmal
+            * vorgemerkt war, und nicht zur aktuellen Liste. Sie stehen hier
+            * ÜBER dem leeren Zustand, weil eine Meldung eine Nachricht ist
+            * und der leere Zustand nur eine Einladung.
+            */}
+          <AvailabilityNotices notices={noticeViews} />
+
           <section
             className={
-              "rounded-sky-lg bg-deep/70 px-5 py-10 text-center "
+              "mt-5 rounded-sky-lg bg-deep/70 px-5 py-10 text-center "
               + "ring-1 ring-border-strong/60 backdrop-blur-sm"
             }
           >
@@ -155,9 +216,18 @@ export default async function FavoritesPage() {
           favoritedSkyIds={favorited}
           favorites
           favoritesOnly
-          /* Der eigene Kopf, INNERHALB der Weltkulisse — siehe
-             `favorites-heading.tsx`. */
-          heading={<FavoritesHeading total={figures.length} withOffer={withOffer} />}
+          /*
+           * Der eigene Kopf, INNERHALB der Weltkulisse — siehe
+           * `favorites-heading.tsx`. Die Meldungen gehören in denselben
+           * Slot und aus demselben Grund: als Markup der Seite stünden sie
+           * auf eigenem Grund und schnitten ein Rechteck in die Kulisse.
+           */
+          heading={
+            <>
+              <FavoritesHeading total={figures.length} withOffer={withOffer} />
+              <AvailabilityNotices notices={noticeViews} />
+            </>
+          }
           signedIn
           highlightSkyId={null}
           offers={offerRecord(offers)}

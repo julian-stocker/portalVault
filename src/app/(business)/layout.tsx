@@ -40,7 +40,9 @@ export default async function BusinessLayout({ children }: { children: React.Rea
   ]);
   /* Zwei Posteingänge, zwei Zahlen (0098): der des Betriebs und das eigene
      Konto. Ein Verkäufer hat beide, und sie stehen an verschiedenen Stellen. */
-  const unread = { mine, seller };
+  /* Ein Betriebskonto hat keine Wunschliste (ADR-0078), also keine
+     Verfuegbarkeitsmeldungen und nichts zu zaehlen (`0149`). */
+  const unread = { mine, seller, notices: 0 };
   /* Der zweite Kanal (0099): was an Bestellungen seit dem letzten Blick
      passiert ist. Am Symbol steht die Summe beider. */
   const attention = { mine: mineOrders, seller: sellerOrders };

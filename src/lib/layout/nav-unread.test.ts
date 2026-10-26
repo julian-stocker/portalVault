@@ -123,8 +123,28 @@ describe("die Navigation zeichnet die Zahl aus dem, was sie bekommt", () => {
     expect(nav).toContain("{ messages: unread.mine, orders: attention.mine }");
   });
 
-  it("fällt ohne Angabe auf zwei Nullen zurück, statt zu raten", () => {
-    expect(nav).toContain("export const NO_UNREAD: Unread = { mine: 0, seller: 0 };");
+  it("fällt ohne Angabe auf Nullen zurück, statt zu raten", () => {
+    /* Seit `0149` sind es DREI Zahlen: die zwei Posteingänge und die
+       ungelesenen Verfügbarkeitsmeldungen. Keine davon darf geraten
+       werden — eine fehlende Angabe heißt 0 und nicht „irgendwas". */
+    expect(nav).toContain("export const NO_UNREAD: Unread = { mine: 0, seller: 0, notices: 0 };");
     expect(nav).toContain("unread = NO_UNREAD,");
+  });
+
+  it("nimmt die Meldungen für den vorhandenen Menüpunkt Favoriten — ohne Glocke", () => {
+    /*
+     * KEIN NEUER NAVIGATIONSPUNKT UND KEIN GLOCKENSYMBOL (Auftrag S4,
+     * Punkt 3). Die Marke hängt an dem Ziel, über das sie etwas sagt.
+     */
+    expect(nav).toContain('href: "/favoriten"');
+    expect(nav).toContain("badge: (_counts, unread) => unread.notices,");
+    expect(nav).toContain('badgeTone: "favorite",');
+
+    /* Kein Ziel und kein Zeichen, das nach einem Benachrichtigungszentrum
+       aussieht — die Meldungen haben keinen eigenen Ort. */
+    expect(nav).not.toMatch(/BellGlyph|NotificationGlyph|BenachrichtigungGlyph/);
+    expect(nav).not.toContain('href: "/benachrichtigungen"');
+    /* Und der Korallton hängt an genau EINEM Ziel. */
+    expect(nav.match(/badgeTone: "favorite"/g)).toHaveLength(1);
   });
 });

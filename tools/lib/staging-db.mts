@@ -92,7 +92,7 @@
  * abhaengt, ist keine. Deshalb steht die Kennung hier im Code.
  */
 import { X509Certificate } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 
 /** Die beiden Projekte, als Literal. Nicht aus einer Datei, nicht ableitbar. */
 export const STAGING_REF = "qqxcpesbwfxzgytkdsac";
@@ -682,6 +682,168 @@ export function verbindungsFelder(roh: string): {
   };
 }
 
+/* -------------------------------------------------------------------------
+ * Eine abgelehnte Anmeldung: WER hat abgelehnt?
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Woher die Ablehnung kam. `datenbank` heisst: PostgreSQL selbst hat das
+ * Passwort geprueft und verworfen. `pooler` heisst: die Anmeldung ist in
+ * Supavisor steckengeblieben und die Datenbank hat das Passwort NIE gesehen.
+ */
+export type AnmeldeHerkunft = "datenbank" | "pooler" | "unklar";
+
+/**
+ * DER UNTERSCHEIDER, UND WARUM ER TRAEGT.
+ *
+ * Jede Fehlermeldung, die PostgreSQL ueber `ereport()` sendet, traegt die
+ * Felder `file`, `line` und `routine` — das ist Protokollverhalten, nicht
+ * Zufall, und bei einer verworfenen Anmeldung lautet `routine` `auth_failed`
+ * (`src/backend/libpq/auth.c`). `pg` legt diese Felder unveraendert auf das
+ * Fehlerobjekt.
+ *
+ * Also gilt die Folgerung in EINER Richtung, und nur die wird gezogen:
+ * fehlen `routine` und `file`, kann die Meldung nicht aus PostgreSQLs
+ * Anmeldecode stammen. Dann hat sie ein Zwischenstueck geschrieben — am
+ * Session-Pooler ist das Supavisor. Die Datenbank hat das Passwort dann
+ * nicht abgelehnt; sie wurde nicht gefragt.
+ *
+ * Umgekehrt wird NICHT geschlossen: ein Zwischenstueck KOENNTE die Felder
+ * mitschicken. Darum heisst der eine Fall `datenbank` und nicht „sicher das
+ * Passwort" — und der dritte Fall heisst `unklar`.
+ */
+export function herkunftDerAblehnung(e: unknown): AnmeldeHerkunft {
+  const f = e as { routine?: unknown; file?: unknown; severity?: unknown };
+  const hatRoutine = typeof f.routine === "string" && f.routine !== "";
+  const hatDatei = typeof f.file === "string" && f.file !== "";
+
+  if (hatRoutine && f.routine === "auth_failed") return "datenbank";
+  if (hatRoutine || hatDatei) return "unklar";
+  return "pooler";
+}
+
+/**
+ * Darf nach diesem Fehler ein zweites Mal verbunden werden?
+ *
+ * Eine abgelehnte Anmeldung wird normalerweise NICHT wiederholt — ein
+ * falsches Passwort wird beim zweiten Mal nicht richtig, und Wiederholungen
+ * gegen eine Anmeldung sind das Muster, das Sperren ausloest.
+ *
+ * Genau eine Ausnahme, und die ist eng: eine Ablehnung, die nachweislich
+ * NICHT aus PostgreSQLs Anmeldecode kommt (`pooler`), hat das Passwort nie
+ * geprueft. Sie EINMAL zu wiederholen fragt nicht dasselbe nochmal, sondern
+ * fragt die Datenbank ueberhaupt erst. Mehr als einmal nicht, und bei
+ * `datenbank` oder `unklar` gar nicht.
+ */
+export function darfErneutVersuchen(e: unknown, versuch: number): boolean {
+  const code = (e as { code?: unknown }).code;
+  if (code !== "28P01") return false;
+  if (versuch !== 1) return false;
+  return herkunftDerAblehnung(e) === "pooler";
+}
+
+/** Der Rat, der zur Herkunft passt — getrennt, damit er pruefbar ist. */
+export function anmeldeAuskunft(herkunft: AnmeldeHerkunft): string {
+  const kopf = "  TLS steht — bis zur Anmeldung kommt es nur nach einem\n"
+    + "  gelungenen Handschlag.\n\n";
+
+  const wechsel = `  Passwort neu setzen (NUR wenn der Test oben es zeigt):\n`
+    + `  Dashboard → Database → Roles → ${LESE_ROLLE}, oder per SQL\n`
+    + "  `alter role skyisles_agent with password '…'`, danach in die\n"
+    + "  Zugangsdatei eintragen (Sonderzeichen prozentkodieren).";
+
+  if (herkunft === "datenbank") {
+    return kopf
+      + "  HERKUNFT: die Datenbank selbst (`routine: auth_failed`).\n"
+      + "  PostgreSQL hat das Passwort geprueft und verworfen. Hier ist ein\n"
+      + "  Passwortwechsel die richtige Antwort.\n\n"
+      + wechsel;
+  }
+
+  if (herkunft === "pooler") {
+    return kopf
+      + "  HERKUNFT: NICHT die Datenbank. Der Fehler traegt kein `routine`\n"
+      + "  und kein `file`; jede Ablehnung aus PostgreSQLs Anmeldecode traegt\n"
+      + "  beides. Die Datenbank hat das Passwort also nicht verworfen —\n"
+      + "  sie wurde nicht gefragt. Abgelehnt hat der Session-Pooler.\n\n"
+      + "  ANDERE URSACHE ALS GEDACHT: am 2026-10-26 trat genau das bei 0147\n"
+      + "  und 0148 unmittelbar nach einem gelungenen Preflight auf, und ein\n"
+      + "  spaeterer Versuch gelang ohne jede Passwortaenderung.\n\n"
+      + "  ZUERST DIESER TEST, BEVOR irgendein Passwort angefasst wird — er\n"
+      + "  umgeht den Pooler und fragt die Datenbank direkt:\n\n"
+      + `     Zugangsdatei kopieren, Host auf db.${STAGING_REF}.supabase.co\n`
+      + `     und Benutzer auf ${LESE_ROLLE} ohne Projektkennung aendern\n`
+      + "     (beide Formen sind zugelassen, siehe Riegel 1), dann\n"
+      + "     npm run db:check:staging\n\n"
+      + "  Meldet die DIREKTE Verbindung sich an, ist das Passwort richtig\n"
+      + "  und der Pooler war die Ursache: der Lauf kann einfach wiederholt\n"
+      + "  werden. Meldet auch sie 28P01 mit `routine: auth_failed`, dann\n"
+      + "  erst ist es das Passwort.\n\n"
+      + wechsel;
+  }
+
+  return kopf
+    + "  HERKUNFT: unklar. Der Fehler traegt Herkunftsfelder, aber nicht\n"
+    + "  PostgreSQLs `auth_failed`. Erst den direkten Weg pruefen\n"
+    + `  (Host db.${STAGING_REF}.supabase.co), bevor ein Passwort geaendert\n`
+    + "  wird.\n\n"
+    + wechsel;
+}
+
+/**
+ * Eine gescheiterte Anmeldung AKTENKUNDIG machen.
+ *
+ * WARUM DAS NOETIG WAR. Bis hierher hinterliess ein Verbindungsfehler keine
+ * einzige Spur: `verbindeStaging()` wirft, und das Pruefprotokoll entsteht
+ * erst danach. Von den 28P01-Faellen am 2026-10-26 existiert deshalb kein
+ * Beleg — weder Zeitpunkt noch Herkunft noch Abstand zum Preflight. Beim
+ * naechsten Mal ist es Beweis statt Erinnerung.
+ *
+ * KEINE ZUGANGSDATEN. Festgehalten werden Zeitpunkt, Code, Herkunft, Dauer
+ * und die FORM des Zugangs (Pooler oder direkt) — kein Passwort, kein Host,
+ * kein Benutzername; die Treibermeldung laeuft durch `redigiere()`.
+ */
+export function versuchsNotiz(
+  e: unknown,
+  form: "pooler" | "direkt",
+  dauerMs: number,
+  versuch: number,
+  jetzt: Date,
+): string {
+  const f = e as { code?: unknown; message?: unknown };
+  const code = typeof f.code === "string" ? f.code : "(ohne Code)";
+  const text = redigiere(
+    typeof f.message === "string" ? f.message : String(e),
+  );
+  const herkunft = code === "28P01" ? herkunftDerAblehnung(e) : "—";
+  return `| ${jetzt.toISOString()} | ${form} | ${versuch} | ${code} `
+    + `| ${herkunft} | ${dauerMs} | ${text.replace(/[|\n]/g, " ")} |\n`;
+}
+
+const VERSUCHS_AKTE_DIR = "supabase/log/staging";
+export const VERSUCHS_AKTE = `${VERSUCHS_AKTE_DIR}/anmeldeversuche.md`;
+
+export const VERSUCHS_AKTE_KOPF =
+  "# Abgelehnte Anmeldungen am Staging-Pruefzugang\n\n"
+  + "Jede Zeile ist ein GESCHEITERTER Verbindungsversuch. Keine Zugangsdaten:\n"
+  + "weder Passwort noch Host noch Benutzername, und die Treibermeldung laeuft\n"
+  + "durch `redigiere()`. `Herkunft = pooler` heisst, dass die Datenbank das\n"
+  + "Passwort nie gesehen hat (siehe `herkunftDerAblehnung()`).\n\n"
+  + "| Zeitpunkt | Form | Versuch | Code | Herkunft | ms | Meldung |\n"
+  + "|---|---|---|---|---|---|---|\n";
+
+/** Die Notiz anhaengen — und ein fehlgeschlagenes Schreiben verschlucken. */
+function haltFest(zeile: string): void {
+  try {
+    mkdirSync(VERSUCHS_AKTE_DIR, { recursive: true });
+    if (!existsSync(VERSUCHS_AKTE)) appendFileSync(VERSUCHS_AKTE, VERSUCHS_AKTE_KOPF, "utf8");
+    appendFileSync(VERSUCHS_AKTE, zeile, "utf8");
+  } catch {
+    /* Eine Notiz, die nicht geschrieben werden kann, darf den Lauf nicht
+       zum Absturz bringen — der Fehler, um den es geht, ist der andere. */
+  }
+}
+
 /**
  * Einen Verbindungsfehler in eine Auskunft verwandeln, die weiterhilft.
  *
@@ -727,14 +889,17 @@ export function erklaereVerbindungsfehler(e: unknown, ca: string): string {
    * 28P01 ist KEIN TLS-Fehler, sondern der Beweis, dass TLS steht: ohne
    * Handschlag kommt es nie zur Anmeldung. Deshalb wird es ausdruecklich
    * unterschieden — sonst sucht man den Fehler weiter im Zertifikat.
+   *
+   * WAS HIER FRUEHER STAND, WAR FALSCH. Die Meldung behauptete „es ist das
+   * Passwort in der Zugangsdatei" und schickte damit zum Passwortwechsel.
+   * Am 2026-10-26 trat 28P01 bei 0147 und 0148 unmittelbar nach einem
+   * gelungenen Preflight auf und ein spaeterer Versuch gelang OHNE
+   * Passwortaenderung — die Behauptung ist damit widerlegt. Jetzt nennt die
+   * Meldung die HERKUNFT der Ablehnung und den Test, der sie entscheidet.
    */
   if (code === "28P01") {
     return `ANMELDUNG abgelehnt (28P01): ${text}\n\n`
-      + "  TLS steht — bis zur Anmeldung kommt es nur nach einem gelungenen\n"
-      + "  Handschlag. Es ist das Passwort in der Zugangsdatei.\n"
-      + `  Neu setzen: Dashboard → Database → Roles → ${LESE_ROLLE}, oder\n`
-      + "  per SQL `alter role skyisles_agent with password '…'`, und dann in\n"
-      + "  die Zugangsdatei eintragen (Sonderzeichen prozentkodieren).";
+      + anmeldeAuskunft(herkunftDerAblehnung(e));
   }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
     return `NETZ: ${text}\n\n  Der Host ist nicht aufloesbar.`;
@@ -814,15 +979,45 @@ export async function verbindeStaging(): Promise<DbZugang> {
    * `checkServerIdentity` bei Nodes eigener Pruefung — `pg` bindet sie an den
    * Host, zu dem wirklich verbunden wird.
    */
-  const client = new Client({
-    ...verbindungsFelder(process.env[URL_VARIABLE] as string),
+  const felder = verbindungsFelder(process.env[URL_VARIABLE] as string);
+  const neuerClient = (): InstanceType<typeof Client> => new Client({
+    ...felder,
     application_name: "skyisles-phase-a",
     ssl: { ca: ca.pem },
   });
-  try {
-    await client.connect();
-  } catch (e) {
-    throw new Error(`STAGING-ZUGANG: ${erklaereVerbindungsfehler(e, ca.pfad)}`);
+
+  /*
+   * GENAU ZWEI VERSUCHE, UND NUR UNTER EINER BEDINGUNG.
+   *
+   * Der zweite Versuch laeuft allein dann, wenn `darfErneutVersuchen()` eine
+   * Ablehnung sieht, die NICHT aus PostgreSQLs Anmeldecode kam — also eine,
+   * bei der das Passwort nie geprueft wurde. Jede andere Ablehnung wird
+   * sofort gemeldet; ein falsches Passwort wird durch Wiederholen nicht
+   * richtig. Jeder Versuch geht in die Akte, auch der gelungene zweite.
+   */
+  const form = felder.host.endsWith(".pooler.supabase.com") ? "pooler" : "direkt";
+  let client = neuerClient();
+  for (let versuch = 1; ; versuch += 1) {
+    const begonnen = Date.now();
+    try {
+      await client.connect();
+      break;
+    } catch (e) {
+      haltFest(versuchsNotiz(e, form, Date.now() - begonnen, versuch, new Date()));
+      if (!darfErneutVersuchen(e, versuch)) {
+        throw new Error(`STAGING-ZUGANG: ${erklaereVerbindungsfehler(e, ca.pfad)}`);
+      }
+      console.error(
+        "\n  ANMELDUNG ABGELEHNT — und nicht von der Datenbank: der Fehler"
+        + "\n  traegt keine Herkunftsfelder aus PostgreSQLs Anmeldecode."
+        + "\n  Genau EIN zweiter Versuch in 3 Sekunden. Notiert in"
+        + `\n  ${VERSUCHS_AKTE}.\n`,
+      );
+      await new Promise((f) => setTimeout(f, 3000));
+      /* Ein `pg.Client`, dessen `connect()` geworfen hat, ist verbraucht —
+         der zweite Versuch braucht einen eigenen. */
+      client = neuerClient();
+    }
   }
 
   const zugang: DbZugang = {

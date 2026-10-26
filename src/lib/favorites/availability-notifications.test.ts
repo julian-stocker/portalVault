@@ -76,20 +76,32 @@ describe("der Primärschlüssel IST der Duplikatschutz", () => {
   });
 
   it("die fünf Spalten, in dieser Reihenfolge", () => {
-    expect([...columnsOf("availability_notifications")]).toEqual([
+    /* `0148` legt fünf an. Die sechste (`read_at`) kommt aus `0149` und
+       hängt hinten an — deshalb prüft diese Zeile die ERWARTUNG DER
+       MIGRATION und nicht das Ergebnis aller Migrationen. */
+    expect(CODE).toContain("'user_id,sky_id,buyable_since,cheapest_cents,created_at'");
+    expect([...columnsOf("availability_notifications")].slice(0, 5)).toEqual([
       "user_id", "sky_id", "buyable_since", "cheapest_cents", "created_at",
     ]);
-    expect(CODE).toContain("'user_id,sky_id,buyable_since,cheapest_cents,created_at'");
   });
 
-  it("und KEINE read_at-Spalte — das ist S4", () => {
+  it("und 0148 selbst legt KEINE read_at-Spalte an — die kam erst mit 0149", () => {
     /*
      * Eine Spalte anzulegen, deren Mechanik noch fehlt, wäre Vorbereiten.
      * ADR-0021 untersagt genau das, und ADR-0136 hat es für `priority`
-     * schon einmal abgelehnt.
+     * schon einmal abgelehnt. `0149` bringt die Mechanik — Anzeige,
+     * Zähler, „als gesehen markieren" — und deshalb erst dort die Spalte.
+     *
+     * Gegen den Code von `0148`, nicht gegen das Schema: dass `read_at`
+     * HEUTE existiert, ist richtig und widerspricht dem nicht.
      */
-    expect([...columnsOf("availability_notifications")]).not.toContain("read_at");
+    /* `0148` nennt `read_at` nur in Prosa und in seiner eigenen
+       Schlussmeldung („keine read_at-Spalte") — es LEGT sie nirgends an. */
+    expect(CODE).not.toMatch(/read_at\s+timestamptz/);
+    expect(CODE).not.toMatch(/add\s+column\s+read_at/);
     expect(SQL).toContain("KEINE `read_at`-Spalte");
+    /* Und sie steht in 0149, nicht irgendwo dazwischen. */
+    expect([...columnsOf("availability_notifications")]).toContain("read_at");
   });
 
   it("und `tablesOf()` sieht die Tabelle — sonst könnte kein Wächter fragen", () => {
