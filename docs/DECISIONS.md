@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-09-06 (ADR-0038, Design V4.2).
+Letzte Aktualisierung: 2026-10-26 (ADR-0148, zweite Figurendarstellung).
 
 ---
 
@@ -14618,3 +14618,220 @@ gefuehrten Leser steht.
 `0151`; die Fehlermeldung ihrer Vorbedingung und ihr Kopf sagen das. An der
 Tabelle, den Indizes, den vier Funktionen und den Rechten aus `0150` wurde
 nichts geaendert.
+
+---
+
+## ADR-0148 · Eine zweite Darstellung derselben Figur, und die Karte bleibt unberührt
+
+**Datum:** 2026-10-26
+**Status:** ANGENOMMEN (Entscheidung des Betreibers, UX-01B)
+**Betrifft:** `src/components/catalog/figure-row.tsx` (neu),
+`src/lib/catalog/row-template.ts` (neu), `src/lib/catalog/card.ts`,
+`src/components/catalog/catalog-card.tsx` · lässt **ADR-0038**, **ADR-0042**
+und **ADR-0043** unberührt · bereitet **UX-01C** (Umschalter) und **UX-02**
+(Verfügbarkeitsglocke, ADR-0147) vor
+**Umsetzung:** UX-01B ist gebaut. Keine produktive Route zeigt die neue
+Darstellung — der Umschalter ist UX-01C.
+
+> **Zwei Punkte hat der Betreiber nach dem Prüfbericht ausdrücklich
+> bestätigt** (2026-10-26), weil sie als Abweichung vorgelegt waren:
+> **das Angebotsband bleibt unter dem Identitätsbereich** — die volle Breite
+> auf dem Telefon wiegt mehr als eine erzwungene Platzierung rechts — und
+> **der Edition-Chip bleibt**, weil die Zeile die Editionsangabe nicht aus
+> dem Artwork der klassischen Karte beziehen kann.
+
+### Die Frage
+
+Der Katalog soll eine zweite, horizontale Darstellung bekommen: Bild links,
+eine feine Trennlinie, rechts Name, Edition, Serie, Element, Marktwert und
+Angebotsstatus, das Herz oben rechts und Platz für die spätere
+Verfügbarkeitsglocke. Die naheliegende Bauform wäre ein `layout`-Zweig in
+`FigureCard`.
+
+### Der Befund, der dagegen entscheidet, und er ist am Code gelesen
+
+`FigureCard` ist **keine konfigurierbare Karte, sondern ein Rahmenwerk über
+fertigem Artwork**. `card-template.ts` legt fest: Leinwand 1007 × 1562,
+`CARD_ASPECT` als fester Wert, **neun Bänder, die auf exakt 100 % summieren**
+(`ROWS`), sieben PNG-Vorlagen, ein Besitz-Leuchten als eigenes PNG mit
+gemessenen Faktoren 1,16 × 1,12, Seiteneinzüge je Slot und eine Herzposition,
+die **am Alphakanal** der sieben Artworks gemessen wurde (9,8 % / 11,0 %,
+festgehalten in `favorites/geometry.test.ts`).
+
+Eine Zeile hat davon **nichts**: kein horizontales Artwork, kein 2:3-Kasten,
+kein mittiges Leuchten, keine neun Bänder.
+
+> **Ein `layout="row"`-Zweig in dieser Datei wäre ein zweites
+> Koordinatensystem neben den Messungen des ersten.**
+
+Dazu ein zweiter, prüfbarer Befund: **18 Testdateien lesen
+`figure-card.tsx` als Quelltext.** `figure-card-v3.test.ts` verlangt unter
+anderem, dass in der **ganzen Datei** kein `mt-[`, kein `mb-[`, kein
+`mt-auto`, kein `flex-1` und kein `grow` vorkommt — Zusagen, die genau die
+Mittel verbieten, mit denen man eine Zeile baut. Sie sind nicht im Weg,
+sondern sie beschreiben korrekt, was diese Karte ist.
+
+### Die Entscheidung
+
+**`FigureRow` ist eine eigene Darstellung. Geteilt werden die Regeln, nicht
+das Markup.**
+
+```
+STEUERUNG     CatalogCard          Besitz, Favorit, Angebot, Schnellansicht
+                 │
+      ┌──────────┴──────────┐
+  FigureCard            FigureRow      zwei Darstellungen, eine Steuerung
+  Artwork, 9 Bänder      Fluss, 4 Spalten
+```
+
+Derselbe Präzedenzfall, den `AccessoryCard` gesetzt hat („**An `FigureCard`
+ändert sich nichts**"), und dieselbe Gestalt, die `admin/inventory-card.tsx`
+für den Betrieb schon hat.
+
+**Was geteilt wird, und zwar als Aufruf und nicht als Kopie:**
+`marksOwnership` · `understatesCard` · `duplicateBadge` · `namesEdition`
+(alle `card.ts`) · `imageSrc` · `catalogDisplayMarketPrice` · `OfferLink` und
+damit `summarizeOffers`/`v1BuyableOffers` · `FavoriteHeart`.
+
+**`CatalogCard` bleibt die einzige Stelle, die schreibt.** Ein `setCollected`,
+ein optimistischer Zustand, eine Rücknahme, ein Herz, eine Angebotszeile, ein
+Schnellansicht-Handler — alles davor berechnet und an die gewählte
+Darstellung übergeben. Dass Zeile und Karte sich gleich verhalten, ist damit
+eine **Struktureigenschaft** und nichts, was von Hand nachgehalten werden
+muss. Ein Test zählt die Aufrufe.
+
+**Der Administrator bekommt nie eine Zeile.** Sein Zweig kehrt zurück, bevor
+die Darstellung gewählt wird: eine redaktionelle Karte trägt Namenseditor,
+`Verborgen`-Marke und `Bearbeiten`, und `/admin` ist keine der Flächen, für
+die die Zeile gedacht ist (ADR-0042).
+
+### Besitz ist der Grund und die Kante, nicht das Artwork
+
+Gold heißt Besitz (ADR-0038, V3.1) — auf einer Zeile kann es das Artwork
+nicht sein, weil es keines gibt. Also:
+
+| Zustand | Träger |
+|---|---|
+| **besessen** | warmer Grund (`--own-subtle`, 70 %), 1 px Goldkante (`--own-line-strong`), weiches Leuchten **außerhalb** der Kante, und `◆ In deiner Sammlung · 2×` in Worten |
+| **fehlend, Fläche kennt die Sammlung** | ein Ton stiller (`--deep`, 55 %) |
+| **Fläche kennt die Sammlung nicht** | der gewöhnliche Weltstein (`--deep`, 70 %) |
+
+**Drei Gründe und nicht zwei**, und der dritte ist der, den man leicht falsch
+macht: eine ausgeloggte Katalogseite kennt niemandes Sammlung, und jede Zeile
+als „nicht deine" zu zeichnen sagt nichts über Besitz und lässt bloß die
+Liste verblassen. Genau dafür existiert `understatesCard` seit V4.6.
+
+**Das Foto wird nie angefasst** — kein Filter, keine Deckkraft, keine
+Skalierung. Die Karte darf `card-shell-unowned` benutzen, weil ihr Artwork
+ein **eigenes Element** neben dem Foto ist; eine Zeile hat diese Ebene nicht,
+dasselbe Mittel landete dort auf der Figur. **Und keine Größenänderung:** die
+Karte skaliert um 3 % per `transform`, weil eine Breite das Raster
+neu vermessen würde. In einer Liste wäre eine skalierte Zeile unscharfer
+Text ohne Gewinn — der Grund und die Kante tragen die Aussage allein.
+
+**Die Edition wird in Worten genannt** (`namesEdition`, `CARD_TYPE_LABELS`).
+Auf der Karte sagt das Artwork, welche der sieben Editionen eine Figur ist;
+die Zeile hat diesen Träger nicht, und eine Edition, die niemand sehen kann,
+ist eine verlorene Edition. `standard` ist ausgenommen und ist die einzige
+Ausnahme: es ist, was eine Figur ist, wenn niemand etwas anderes gesagt hat.
+Der Chip ist **neutral** — dieselbe Begründung, aus der `VariantSeal`
+ausdrücklich nicht gold ist: Seltenheit gehört dem Gegenstand, Besitz dem
+Betrachter, und beide stehen auf derselben Zeile.
+
+### Die Angebotszeile ist ein Band und ein Geschwister
+
+```
+┌────────┬─┬──────────────────────────────┬────┐
+│ Bild   │ │ Name                [Edition]│ ♥  │
+│ 72 px  │ │ Serie · Element              │    │
+│        │ │ MARKTWERT 4,99 €             │    │
+├────────┴─┴──────────────────────────────┤    │
+│ Angebote ab 4,49 €                    › │    │
+└─────────────────────────────────────────┴────┘
+```
+
+**Ein Band unter dem Identitätsblock, nicht die vierte Zeile darin**, und
+beide Gründe sind Messungen: in der Textspalte hätte es auf einem 360-px-
+Telefon rund 171 px und würde unter dem Marktwert umbrechen, als Band hat es
+rund 260 px. Und es ist ein **Geschwister** des Umschalters, nie sein Kind —
+ein Link in einem Knopf ist ungültiges Markup und ein uneindeutiges Ziel.
+Die Karte löst dasselbe Problem mit einer Geschwister-Ebene über einem
+Raster fester Höhe; eine Zeile kann es einfach darunter stellen.
+
+**Die Zeile rechnet keinen Preis und keine Kaufbarkeit.** Sie importiert
+`@/lib/shop/offer` nicht — ein Modul, das die Regeln nicht importiert, kann
+sie nicht nachbauen. `trade` kommt als fertiges Element von `CatalogCard`.
+
+**Die Handelstinte wird getauscht, nicht erfunden.** `OfferLink` schreibt in
+`--trade-ink`, fast schwarz, weil es auf der Karte auf einer gemalten
+Silberplatte sitzt. Eine Zeile hat keine Platte und einen dunklen Grund, also
+setzt sie `--trade-ink`/`--trade-ink-quiet` auf die vorhandenen
+`*-on-dark`-Werte — **dasselbe Paar und derselbe Mechanismus, die
+`FigureCard` für ihre beiden dunklen Artworks schon benutzt.** An `OfferLink`
+ändert sich nichts.
+
+### Die Geometrie ist Arithmetik, und deshalb ein Modul
+
+`row-template.ts` existiert für genau eine Frage: **hat der Name auf einem
+360-px-Telefon noch Platz, nachdem Bild, Haarlinie und Aktionsspalte das
+Ihre genommen haben?** Das ist Rechnen und kein Geschmack, und Rechnen gehört
+dorthin, wo ein Test es ausführen kann.
+
+| | |
+|---|---|
+| Zeilenbreite bei 360 px | 328 px (`main … px-4` nimmt 2 × 16) |
+| Textspalte | **171 px** bei 360, 201 bei 390, 225 bei 414 |
+| längster Name im echten Katalog | **39 Zeichen** (`data/catalog/products.json`, abgeleitet über `displayNameFor`) |
+| was in zwei Zeilen passt | **46 Zeichen** bei 360 px, bei 0,56 em je Zeichen — eine absichtlich pessimistische Schätzung |
+| Angebotsband | **260 px** bei 360; `OfferLink` braucht rund 117 |
+| Touchziele | 44 px, überall |
+
+**Die Aktionsspalte reserviert ZWEI Touchslots, obwohl nur einer gefüllt
+ist.** Die Glocke ist UX-02 (ADR-0147, `0150`); den Platz jetzt zu halten ist
+der Unterschied zwischen einem Feature und einer Layoutänderung — sonst
+wächst am Tag der Glocke jede Zeile um 44 px.
+
+**Kein `@container`.** Die Karte ist einer, damit ihre Typografie in `cqw`
+skalieren kann; die Zeile misst in Pixeln und lässt die Textspalte die Breite
+aufnehmen. Nebenwirkung, und eine erwünschte: die Zeile ist damit **kein
+Containing Block** für ein `position: fixed`-Kind — die Gefahr, die die
+Schnellansicht aus dem Kartenbaum heraushält (IR-001), entsteht hier gar
+nicht.
+
+### Der eine Punkt, an dem Zeile und Karte verschiedene Props nehmen
+
+Die Karte bekommt ein fertiges `notice`-Element, weil ihr Aufrufer es
+**absolut** setzen muss: ihre Höhe ist ein Seitenverhältnis, und eine Meldung
+im Fluss zerbräche das Raster. Die Zeile bekommt `failed: boolean` und setzt
+die Meldung **in den Fluss** — eine absolute Marke müsste hier über das
+Angebotsband oder über das Bild gelegt werden, und etwas über etwas anderes
+zu legen ist das Einzige, was eine Zeile nicht darf. **Wo eine Meldung steht,
+ist eine Eigenschaft der Darstellung und nicht des Aufrufers.**
+
+### Konsequenzen
+
+- `catalog-card.tsx` nimmt `layout?: "card" | "row"`, Vorgabe `"card"`.
+  **Keine ausgelieferte Fläche übergibt es** — nachgewiesen durch einen Test
+  über sechs Dateien. Die klassische Kartenansicht bleibt der Standard
+  (Vorgabe des Betreibers).
+- `collected-emphasis.test.ts` zählt `knowsCollection` jetzt **zweimal statt
+  einmal**: eine Zahl je Darstellung, und beide im angemeldeten Zweig. Die
+  Zusage wird dadurch strenger, nicht schwächer — eins hieße, eine
+  Darstellung hätte still aufgehört zu ranken, drei hieße, ein Zweig, der
+  nicht ranken darf, hätte es bekommen.
+- Die Sammlung behält ihren eigenen Karten-/Tabellenumschalter
+  (`collection/view-mode.ts`). Zwei Umschalter, zwei Fragen: die Sammlung
+  wechselt zwischen *Karten und Tabelle*, der Katalog zwischen *zwei
+  Kartenformen*.
+- Kein neuer Farbtoken. Besitz, Kante, Leuchten, Chip und Handelstinte
+  kommen ausschließlich aus vorhandenen Rollen-Tokens; die Zeile enthält
+  **kein einziges Farbliteral**, und ein Test hält das fest.
+
+### Was ausdrücklich NICHT entschieden und NICHT gebaut ist
+
+Kein Ansichtsumschalter (UX-01C) · keine Glocke, kein
+Benachrichtigungscenter, kein Scheduler (UX-02 bis UX-04) · keine Zeile auf
+`/shop`, `/favoriten` oder `/collection` · keine Migration, kein Schema,
+keine neue Abfrage, keine neue Server Action · keine Änderung an Warenkorb,
+Checkout, Lager oder Reservierung. ADR-0021 bleibt unberührt: die Zeile kennt
+kein `seller_id` und nennt keinen Verkäufer.

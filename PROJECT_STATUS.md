@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-20 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-10-26 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -133,10 +133,113 @@ Empfängerliste. Die Lehre aus `df7337c` geht nicht verloren, sie wandert von ei
 **Vorbedingung**: auf einer kaufbaren Figur kann kein Alarm existieren. **SKY-0009 ist als
 Prüffigur verbraucht** (sie ist kaufbar), der neue Praxistest braucht eine nicht kaufbare Figur.
 
-**Stand der Umsetzung: nichts.** Freigegeben war allein **M1** — diese Dokumentation. `0150`
-`availability_alerts` ist beschrieben, aber nicht geschrieben; `0146`–`0149` stehen auf Staging
-unverändert und unangetastet. **Nächster Schritt: M2** (`0150`, rein additiv, kein Aufrufer) —
-nach gesonderter Freigabe.
+**Stand der Umsetzung: M1 und M2 sind abgeschlossen, angewendet ist nichts.**
+
+| Phase | Gegenstand | Stand |
+|---|---|---|
+| **M1** | ADR-0146, ADR-0147 — die Entscheidung | **abgeschlossen** (`dc2caa7`) |
+| **M2** | `0150_availability_alerts.sql` und `0151_offer_state_live.sql` schreiben, prüfen, liegen lassen — samt Preflight, Nachkontrolle, Einfügehülle, Laufzettel, `migration-plans.json` und den Probeläufen **P58**/**P59** | **abgeschlossen** (`7fbb9a5`) |
+| **M3** | dieselben zwei auf **Staging** anwenden, in der Reihenfolge `0151` dann `0150` (ADR-0147 E-2) | **nicht freigegeben** |
+
+**Beide Migrationen sind nirgends angewendet** — auf Staging stehen `0146`–`0149`
+unverändert, auf Production keine von `0145`–`0151`. `0151` meldet auf Staging
+„liegt schon" und ändert dort nichts; das ist die Bestätigung und kein Fehler
+(`supabase/checks/0151_staging_run.md`).
+
+**M1 bis M9 sind seit dem 2026-10-26 der verbindliche Arbeitsplan**, und die
+Herkunft jeder Zeile bleibt unterscheidbar. In den ADRs und Laufzetteln
+**dokumentiert** sind **M1**, **M2**, **M4** (der Aufrufer), **M6**
+(Plattformarchiv Formatversion 3, **vor** Production) und **M9** (Rückbau mit
+eigener `R0146b`-Fassung, die `offer_state_live` stehen lässt). **M3, M5, M7
+und M8** standen nirgends; sie sind aus den offenen Punkten abgeleitet und
+vom Betreiber **bestätigt**.
+
+> **Vorrangregel:** Wo eine dokumentierte Definition besteht, gilt sie —
+> eine bestätigte Planung ergänzt die Akte, sie überschreibt sie nicht.
+> Weicht ein ADR von der Tabelle unten ab, gewinnt das ADR, und die Tabelle
+> wird korrigiert.
+
+---
+
+## SkyIsles V2 — UX-Umbau (ab 2026-10-26)
+
+**Der Arbeitszweig ist `development/skyisles-v2`.** Production bleibt unberührt;
+`origin/main` steht weiter auf `81d1ba9` und ist 35 Commits hinter dem
+Entwicklungsstand.
+
+> **Die Git-Lage ist am 2026-10-26 bereinigt.** Bis dahin hieß der **lokale**
+> Zweig `main` und folgte `origin/main`, trug aber die V2-Arbeit — ein
+> `git push` ohne Argumente hätte die Entwicklung auf die Produktionslinie
+> geschoben. Jetzt heißt der lokale Zweig `development/skyisles-v2` und folgt
+> `origin/development/skyisles-v2`; daneben steht ein lokales `main`, das
+> `origin/main` **ist**. Umbenannt wurde, nichts überschrieben, nichts
+> erzwungen, keine Remote-Konfiguration geändert.
+
+### Zielbild
+
+Moderner, übersichtlicher Katalog: eine horizontale Figurenkarte neben der
+klassischen, Besitz deutlich aber elegant hervorgehoben, Favorit und
+Verfügbarkeitsalarm als drei unabhängige Zustände, Mobile First — und keine
+zweite Geschäftslogik für Preise, Kaufbarkeit oder Besitz.
+
+### Arbeitspakete
+
+| Paket | Gegenstand | Stand |
+|---|---|---|
+| **UX-01A** | Analyse des Bestands, dateibezogen | **abgeschlossen** (2026-10-26) |
+| **UX-01B** | `FigureRow` — horizontale Darstellung und Besitz-Hervorhebung, ADR-0148 | **gebaut**, nicht committet, **keine Route umgestellt** |
+| **UX-01C** | Ansichtsumschalter samt Persistenz, responsive Feinschliff | offen |
+| **UX-02** | Favoritenherz und Verfügbarkeitsglocke in den Karten | offen — braucht **M3** |
+| **UX-03** | Benachrichtigungszentrale `/benachrichtigungen` und Kopfzeilen-Glocke | offen — braucht UX-02 |
+| **UX-04** | automatische Alarmauslösung (Netz **und** sieben Betriebsaktionen) | offen — **ist M4**, Scheduler ist Freigabe-Tor |
+| **UX-05** | einheitlicher Mobile- und Shop-Feinschliff | offen |
+
+### Zuordnung der technischen Meilensteine — verbindlich ab 2026-10-26
+
+Alle neun Zeilen sind verbindlich. Die Spalte **Herkunft** sagt, woher die
+Definition kommt: `dokumentiert` steht in einem ADR oder Laufzettel und hat
+nach der Vorrangregel oben Vorrang; `bestätigt` ist aus den offenen Punkten
+abgeleitet und vom Betreiber am 2026-10-26 angenommen.
+
+| M | Gegenstand | UX-Paket | Herkunft |
+|---|---|---|---|
+| **M3** | `0151` dann `0150` auf **Staging** anwenden, Reihenfolge nach ADR-0147 E-2 | Tor vor UX-02 | **bestätigt** (2026-10-26) |
+| **M4** | der Aufrufer für `fire_availability_alerts()` — beide Layouts und die sieben Betriebsaktionen | **UX-04** | dokumentiert: ADR-0147, `0150_staging_run.md` |
+| **M5** | Scheduler: `pg_cron` (fünf Minuten) bevorzugt, Verfügbarkeit und Rechte vorher **lesend** prüfen, sonst Vercel-Cron. Freigabe-Tor **vor** produktiver Aktivierung | UX-04, zweite Hälfte | Gegenstand dokumentiert (ADR-0147), Nummer **bestätigt** |
+| **M6** | Plattformarchiv **Formatversion 3**: `availability_alerts` aufnehmen, `favorites` aus `PLATFORM_EXCLUDED_TABLES` holen — **vor** Production | Tor vor UX-03 in Production | dokumentiert: ADR-0136 D-6, `0150_staging_run.md` |
+| **M7** | lesende Bestandsprüfung vor dem Rückbau: `count(*)` und `read_at` aus `availability_notifications`, danach Entscheidung über die Übernahme ungelesener Meldungen | vor Abschluss UX-03 | Gegenstand dokumentiert (ADR-0147), Nummer **bestätigt** |
+| **M8** | Production-Rollout `0145`–`0151` in geklärter Reihenfolge — `0151` legt die Sicht eigenständig an, Production braucht die Spiegelarchitektur **nie** (ADR-0147 E-1) | nach UX-04 | **bestätigt** (2026-10-26) |
+| **M9** | Rückbau `0146`–`0149` mit eigener Fassung, die `offer_state_live` **stehen lässt**; `R0146` bleibt nach Regel 1 der Akte unberührt | nach allem | dokumentiert: ADR-0147 E-4, `0151_staging_run.md` |
+
+### UX-01B, was tatsächlich gebaut ist
+
+**Neu:** `src/components/catalog/figure-row.tsx` · `src/lib/catalog/row-template.ts`
+**Geändert:** `src/lib/catalog/card.ts` (`namesEdition`) ·
+`src/components/catalog/catalog-card.tsx` (`layout`-Prop, Vorgabe `"card"`)
+**Tests:** `src/lib/catalog/figure-row.test.ts` (46) ·
+`src/components/catalog/figure-row.test.tsx` (29, echtes DOM) ·
+`src/lib/catalog/collected-emphasis.test.ts` (eine Zusage verschärft)
+
+`FigureCard` und ihre Artwork-Geometrie sind **unberührt**; die 18
+Testdateien, die sie als Quelltext lesen, laufen unverändert. **Keine
+Migration, keine Server Action, keine Abfrage, keine Änderung an Warenkorb,
+Checkout, Lager oder Reservierung.** Der Umschalter fehlt bewusst — bis
+UX-01C ist die Zeile nur aus einem Test erreichbar.
+
+### Offene Punkte
+
+1. **Keine Sichtprüfung im Browser.** jsdom rechnet keine Geometrie: 360, 390
+   und 414 px sind arithmetisch bewiesen (`row-template.ts` gegen den
+   längsten Namen aus `data/catalog/products.json`), und jede verwendete
+   Tailwind-Klasse ist im gebauten CSS nachgewiesen — aber gesehen hat die
+   Zeile noch niemand. Sie wird mit dem Umschalter sichtbar (UX-01C), und
+   dort gehört die Sichtprüfung hin.
+2. **M3 freigeben** (`0151` dann `0150` auf Staging), sonst bleibt UX-02
+   blockiert.
+3. **Produktionsstand:** laut dem Abschnitt „Aktuelle Phase" liegt der
+   Anwendungscode zu `0117`–`0123` unkommittiert vor und Production läuft auf
+   `c24926e`. Das ist ein eigener offener Posten und **nicht** Teil der
+   UX-Kette.
 
 ---
 

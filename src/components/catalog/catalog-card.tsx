@@ -35,6 +35,7 @@ import { useState, useTransition } from "react";
 import { AdminEditAction, HiddenBadge } from "@/components/admin/card-actions";
 import { FavoriteHeart } from "@/components/catalog/favorite-heart";
 import { FigureCard } from "@/components/catalog/figure-card";
+import { FigureRow } from "@/components/catalog/figure-row";
 import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -59,6 +60,7 @@ export function CatalogCard({
   onOpenOffers,
   onEdit,
   marketBoostPercent = 0,
+  layout = "card",
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
@@ -134,6 +136,31 @@ export function CatalogCard({
    * that does not pass one shows the stored price.
    */
   marketBoostPercent?: number;
+  /**
+   * WHICH PRESENTATION DRAWS THIS FIGURE (UX-01B, ADR-0148).
+   *
+   * `card` is the collector's card on its artwork and stays the default, so
+   * every existing surface renders exactly what it rendered before. `row` is
+   * the horizontal presentation.
+   *
+   * THE CHOICE IS THE ONLY THING THAT CHANGES. The collect toggle, its
+   * optimistic state, its rollback, the heart, the offer line and the quick
+   * view handler are all computed above this and handed to whichever
+   * presentation is chosen — there is no second `setCollected()` call, no
+   * second piece of optimistic state and no second offer rule anywhere in
+   * this file. That is what makes "the row and the card behave identically"
+   * a structural fact rather than something to keep in step by hand.
+   *
+   * THE ADMINISTRATOR NEVER GETS A ROW. Their branch returns before this is
+   * read: an editorial card carries an inline name editor, a hidden badge and
+   * a "Bearbeiten" action, none of which the row has a place for, and
+   * `/admin` is not one of the surfaces the row is meant for (ADR-0148).
+   *
+   * Nothing passes this yet. UX-01C adds the switch that does, and until then
+   * the row is reachable only from a test — which is the point of shipping
+   * the presentation before the control that selects it.
+   */
+  layout?: "card" | "row";
 }) {
   const [collected, setLocal] = useState(initialCollected);
   const [failed, setFailed] = useState(false);
@@ -270,7 +297,22 @@ export function CatalogCard({
   // Signed out the body is a link rather than a toggle: there is nothing to
   // toggle yet, and the same tap should lead where the visitor needs to go.
   if (signInHref) {
-    return (
+    return layout === "row" ? (
+      /* The same props, and `failed` instead of `notice`: where a failure
+         message is placed is a property of the presentation, not of this
+         caller — see `figure-row.tsx`. */
+      <FigureRow
+        figure={figure}
+        marketBoostPercent={marketBoostPercent}
+        ownership="catalog"
+        href={signInHref}
+        highlighted={highlighted}
+        showSeries={showSeries}
+        trade={trade}
+        favoriteSlot={favorite}
+        failed={failed}
+      />
+    ) : (
       <FigureCard
         figure={figure}
         marketBoostPercent={marketBoostPercent}
@@ -285,7 +327,26 @@ export function CatalogCard({
     );
   }
 
-  return (
+  return layout === "row" ? (
+    <FigureRow
+      figure={figure}
+      marketBoostPercent={marketBoostPercent}
+      ownership="catalog"
+      collected={collected}
+      /* The same ranking rule as the card below, through the same prop and
+         the same function (`understatesCard`) — on a row it is carried by the
+         ground rather than by a desaturated shell, because a row has no
+         artwork to take the colour out of. */
+      knowsCollection
+      onToggle={onToggle}
+      toggleLabel={collected ? de.catalog.collectedHint : de.catalog.collect}
+      highlighted={highlighted}
+      showSeries={showSeries}
+      trade={trade}
+      favoriteSlot={favorite}
+      failed={failed}
+    />
+  ) : (
     <FigureCard
       figure={figure}
       marketBoostPercent={marketBoostPercent}

@@ -1,11 +1,12 @@
 /**
- * The two presentation rules of a figure card, in one place.
+ * The presentation rules of a figure card, in one place.
  *
- * Both used to live inline in the JSX, where "does this card get the frame"
- * was a condition rather than a decision. They are here so the rule is
+ * They used to live inline in the JSX, where "does this card get the frame"
+ * was a condition rather than a decision. They are here so each rule is
  * written down once, testable, and cannot drift between the catalog and the
- * collection.
+ * collection — or, since UX-01B, between the card and the row (ADR-0148).
  */
+import { DEFAULT_CARD_TYPE, type CardType } from "@/lib/catalog/card-type";
 
 /**
  * What a card is being asked to say about ownership.
@@ -129,4 +130,29 @@ export function understatesCard(
  */
 export function duplicateBadge(quantity: number | undefined): number | null {
   return quantity !== undefined && quantity > 1 ? quantity : null;
+}
+
+/**
+ * Whether a figure's edition has to be said in words.
+ *
+ * THE ROW HAS NO ARTWORK, AND THAT IS WHAT THIS RULE IS FOR.
+ *
+ * On the vertical card the edition is not written anywhere: `card_type`
+ * chooses which of the seven templates the figure is printed on, and a
+ * `legendary` or a `prestige` is recognisable because the card itself looks
+ * different (V3.5, `card-template.ts`). A row has one ground for every
+ * figure, so that carrier is gone — and an edition nobody can see is an
+ * edition the row has lost.
+ *
+ * `standard` is excluded, and it is the only exclusion. It is what a figure
+ * is when nobody has said otherwise (`DEFAULT_CARD_TYPE`), so a chip saying
+ * "Standard" would stand on most of 561 rows and tell nobody anything. Every
+ * other type was assigned deliberately and is worth a word.
+ *
+ * The word itself is not here: it comes from `CARD_TYPE_LABELS`, which is
+ * already the one place those names live. This answers only whether to show
+ * it — which keeps the question testable and the label singular.
+ */
+export function namesEdition(cardType: CardType): boolean {
+  return cardType !== DEFAULT_CARD_TYPE;
 }

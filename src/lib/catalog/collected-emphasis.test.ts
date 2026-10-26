@@ -254,8 +254,34 @@ describe("the filter itself", () => {
 });
 
 describe("what the catalog passes", () => {
-  it("turns the ranking on for the signed-in card only", () => {
-    expect((CATALOG_CARD_CODE.match(/knowsCollection/g) ?? [])).toHaveLength(1);
+  it("turns the ranking on once per presentation, and only for the signed-in one", () => {
+    /*
+     * TWO SINCE UX-01B, AND EXACTLY TWO (ADR-0148).
+     *
+     * `catalog-card.tsx` chooses between two presentations of the same
+     * figure, and the ranking rule belongs to both — the card draws it as a
+     * desaturated shell, the row as a quieter ground. The count is therefore
+     * two rather than one, and the number is the assertion: ONE would mean a
+     * presentation had silently stopped ranking, THREE would mean a branch
+     * that must not rank had acquired it.
+     */
+    expect(CATALOG_CARD_CODE.match(/knowsCollection/g) ?? []).toHaveLength(2);
+
+    /*
+     * And both stand in the signed-in branch — the last `return` in the
+     * file. Everything before it is the administrator's card and the
+     * signed-out one, and neither has a collection to compare against.
+     */
+    const signedIn = CATALOG_CARD_CODE.slice(
+      CATALOG_CARD_CODE.lastIndexOf('return layout === "row"'),
+    );
+    expect(signedIn.match(/knowsCollection/g) ?? []).toHaveLength(2);
+
+    /* One in each presentation, not twice in one of them. */
+    const row = signedIn.slice(signedIn.indexOf("<FigureRow"), signedIn.indexOf("<FigureCard"));
+    expect(row, "the row ranks").toContain("knowsCollection");
+    expect(signedIn.slice(signedIn.indexOf("<FigureCard")), "the card ranks")
+      .toContain("knowsCollection");
   });
 
   /** One `<FigureCard …/>` element, from its tag to its self-closing end. */
