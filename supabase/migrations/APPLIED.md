@@ -38,9 +38,9 @@ jede Zeile bei jedem Testlauf. Die Spalte `Datei heute` ist der Vertrag:
 | `0144_platform_export_calculations.sql` | `e012bba227640c7a40a914fd9e365120b0f7f887c88be7623f21747ce0727380` | gleich | **2026-10-25**, Betreiber: manuell im SQL-Editor, **über den Einmal-Durchgang** `supabase/operations/staging-0144.sql` (SHA-256 `89ca0cd697a449c75d8cc90bc2a718088946464d7ccf87f05f6ca16c246a2c93`), der die Migration **zeichengleich** einbettet — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. Preflight bestanden (Rumpfabdruck `2e2da90e976a1e73ca00aba7cd830fae`, 53 Bereiche), Postflight **vollständig bestanden** (`9999 = 0`): Abdruck `4c4d2e7c81e4efa8e18cdffa06bba40a`, **54 Bereiche**, Formatversion 2. **Zusätzlich im Betrieb nachgewiesen**, und das ist der stärkere Beweis: ein echter Plattformexport über `/admin/datensicherung`, lokal geprüft mit `npm run verify:platform-archive`, und die Historienzeile in `platform_export_runs` stimmte mit dem ZIP überein. **Auf Production NICHT angewendet** — dort steht weiter der Rumpf aus `0105` |
 | `0145_favorites.sql` | `6f9c20b0197386077a092f1e4b62e20e64488cc5a7e43bdf497e2a2c6bd7d71d` | gleich | **2026-10-25**, Betreiber: manuell im SQL-Editor, **über den Einmal-Durchgang** `supabase/operations/staging-0145.sql` (SHA-256 `151ce263f7be7897b0e270ff7b53ddabbcbed22f20f98fc811130f2ed5bb7924`), der die Migration **zeichengleich** einbettet. Preflight bestanden (nach einer Berichtigung: Zeile 121 zählte Richtlinien statt sie zu benennen — auf Staging trägt `collection_items` fünf, weil `agent_read_collection_items` dazukommt, `docs/SECURITY.md` 4b). Postflight: der **erste Lauf** meldete `9999 = 18` — genau die achtzehn Zeilen der Baseline-Übergabe (801–804, 811–817, 821–824, 831–833), weil die Platzhälter nicht ersetzt waren; **alle übrigen Prüfungen grün** — Tabelle, Primärschlüssel `(user_id, sky_id)`, RLS, die drei Richtlinien, die Rechte `SELECT/INSERT/DELETE`, `favorite_demand()`. Die gemessenen Baselines stehen seitdem in `staging-s-postflight-0145.sql`, und der **Wiederholungslauf ist vollständig bestanden: `9999 = 0`** — Shop und Sammlung unverändert. **Funktional nachgewiesen:** `npm run verify:rls:staging`, Abschnitt 10, **17 von 17** mit zwei echten Konten — keines liest, legt an oder löscht beim anderen, `favorite_demand()` weist Sammler, `anon` UND den Dienstschlüssel ab. Einzelheiten: `supabase/checks/0145_staging_run.md`. **Auf Production NICHT angewendet** — und sie darf dort erst nach der Folgemigration laufen, die `favorites` in die Plattformsicherung aufnimmt (ADR-0136) |
 | `0146_offer_state.sql` | `2a9caf5a13c3962e9e27e2707d6274f47ca1e7833b28183466d35a65378171ad` | gleich | **2026-10-25**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0146.sql`. Preflight bestanden. Die Nachkontrolle brauchte **fünf Anläufe**, und jeder deckte einen echten Mangel am Prüfweg auf, nicht an der Migration: die Baseline-Übergabe war Handarbeit (ADR-0137), dem Pooler fehlte die private CA (ADR-0138), `offer_state`/`offer_state_live` und der Aufruf von `offer_state_window()` waren dem Prüfzugang nicht erteilt (ADR-0139), die Erteilung auf `shop_offers()` war durch `drop function` in `0139` verloren gegangen (ADR-0140), und `information_schema` ist rechtegefiltert — Prüfung 102 meldete „(keine Tabelle)“, während drei Rechtezeilen **still grün** waren (ADR-0141). **Vollständig bestanden: `9998 = 0`, `9999 = 0`** — Shop, Lager und Sammlung unverändert. **Erstbefüllung im Betrieb nachgewiesen:** 225 kaufbare SKY-IDs, alle als bereits angekündigt angelegt, Wiederholung `225 geprüft, 0 verändert`. Einzelheiten: `supabase/checks/0146_staging_run.md`. **Auf Production NICHT angewendet** |
-| `0147_offer_availability.sql` | `d708276f267c3e422fdab00e348dcbee666413686e1937149a67d99fee9c44d7` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0147.sql`, nach `npm run db:migrate:staging -- 0147`. **Der erste Versuch brach ab** — von der Migration selbst, mit `ERROR P0001: 0147 ABBRUCH: 6 Trigger an den Quellen oder am Spiegel`: die Prüfung ZÄHLTE Trigger und erwartete null, die Quellen tragen aber sechs völlig legitime. Eine Transaktion, also wurde nichts hinterlassen — lesend bestätigt (`buyable_since` fort, beide Funktionen fort, fünf CHECKs, `refresh_offer_state()` in der Fassung aus `0146`). Behoben mit einer **benannten** Erwartung statt einer Zählung. Danach: Preflight `9999 = 0` bei 7 offenen Zeilen, Nachkontrolle `9999 = 0` bei 6 offenen (`migrate-0147-2026-10-26T08-30-01-575Z.md`). **Der berechtigte Lauf für `9998 = 0` steht noch aus** — `0147-postflight-berechtigt.sql`. **Auf Production NICHT angewendet** |
-| `0148_availability_notifications.sql` | `a6f96a9d52b324a69f15117d6d7616341b206f875f3206e3845b4850e672f50e` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0148.sql`. Preflight `9999 = 0` bei 4 offenen Zeilen, Nachkontrolle `9999 = 0` bei 1 offenen (`migrate-0148-2026-10-26T10-40-26-253Z.md`). **Der berechtigte Lauf für `9998 = 0` steht noch aus** — `0148-postflight-berechtigt.sql`. **Auf Production NICHT angewendet** |
-| `0149_notification_read_state.sql` | `131bbd98eeda0e3ff7391a46e6af020b48a3eaaf093d97bbf2a02b2160a62526` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0149.sql`. **Der kürzeste Durchgang dieser Reihe: 44 Sekunden vom Preflight bis zur bestandenen Nachkontrolle.** Preflight `9999 = 0` bei 3 offenen Zeilen (`11:43:50`), Nachkontrolle `9999 = 0` bei 2 offenen (`11:44:34`) — offen sind genau die zwei Zeilen, die `availability_notifications` lesen müssten (104, 105). Alle Struktur- und Rechtezeilen (101–103, 111–126) sind **geprüft und bestanden**, weil sie `pg_catalog` lesen und das nicht rechtegefiltert ist (ADR-0141). **Der berechtigte Lauf für `9998 = 0` steht noch aus** — `0149-postflight-berechtigt.sql`; dort wird Zeile 104 (`KEINE Meldung ist als gelesen geführt`) zur blockierenden Prüfung. **Dabei trat der `28P01` erstmals mit Beleg auf** — siehe die Zeile darunter. **Auf Production NICHT angewendet** |
+| `0147_offer_availability.sql` | `d708276f267c3e422fdab00e348dcbee666413686e1937149a67d99fee9c44d7` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0147.sql`, nach `npm run db:migrate:staging -- 0147`. **Der erste Versuch brach ab** — von der Migration selbst, mit `ERROR P0001: 0147 ABBRUCH: 6 Trigger an den Quellen oder am Spiegel`: die Prüfung ZÄHLTE Trigger und erwartete null, die Quellen tragen aber sechs völlig legitime. Eine Transaktion, also wurde nichts hinterlassen — lesend bestätigt (`buyable_since` fort, beide Funktionen fort, fünf CHECKs, `refresh_offer_state()` in der Fassung aus `0146`). Behoben mit einer **benannten** Erwartung statt einer Zählung. Danach: Preflight `9999 = 0` bei 7 offenen Zeilen, Nachkontrolle `9999 = 0` bei 6 offenen (`migrate-0147-2026-10-26T08-30-01-575Z.md`). **Der berechtigte Lauf ist gefahren** (2026-10-26, `0147-postflight-berechtigt.sql`): **`9998 = 0`** und `9999 = 4`. Keine der Abweichungen stammt aus dieser Migration — Einordnung unter „Die berechtigten Nachkontrollen zu `0147`–`0149`“ weiter unten. **Auf Production NICHT angewendet** |
+| `0148_availability_notifications.sql` | `a6f96a9d52b324a69f15117d6d7616341b206f875f3206e3845b4850e672f50e` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0148.sql`. Preflight `9999 = 0` bei 4 offenen Zeilen, Nachkontrolle `9999 = 0` bei 1 offenen (`migrate-0148-2026-10-26T10-40-26-253Z.md`). **Der berechtigte Lauf ist gefahren** (2026-10-26, `0148-postflight-berechtigt.sql`): **`9998 = 0`** und `9999 = 6`. Keine der Abweichungen stammt aus dieser Migration — Einordnung unter „Die berechtigten Nachkontrollen zu `0147`–`0149`“ weiter unten. **Auf Production NICHT angewendet** |
+| `0149_notification_read_state.sql` | `131bbd98eeda0e3ff7391a46e6af020b48a3eaaf093d97bbf2a02b2160a62526` | gleich | **2026-10-26**, Betreiber: manuell im SQL-Editor über den Einmal-Durchgang `supabase/operations/staging-0149.sql`. **Der kürzeste Durchgang dieser Reihe: 44 Sekunden vom Preflight bis zur bestandenen Nachkontrolle.** Preflight `9999 = 0` bei 3 offenen Zeilen (`11:43:50`), Nachkontrolle `9999 = 0` bei 2 offenen (`11:44:34`) — offen sind genau die zwei Zeilen, die `availability_notifications` lesen müssten (104, 105). Alle Struktur- und Rechtezeilen (101–103, 111–126) sind **geprüft und bestanden**, weil sie `pg_catalog` lesen und das nicht rechtegefiltert ist (ADR-0141). **Der berechtigte Lauf ist gefahren** (2026-10-26, `0149-postflight-berechtigt.sql`): **`9998 = 0`** und `9999 = 4`. **Zeile 104 (`KEINE Meldung ist als gelesen geführt`) ist bestanden.** Keine der vier Abweichungen stammt aus dieser Migration — Einordnung unter „Die berechtigten Nachkontrollen zu `0147`–`0149`“ weiter unten. **Dabei trat der `28P01` erstmals mit Beleg auf** — siehe die Zeile darunter. **Auf Production NICHT angewendet** |
 
 **Gelaufen ist der Einmal-Durchgang:** `supabase/operations/staging-0137-0138.sql`
 (SHA-256 `83af5cebdcb9130a3b5cb0df17162bde94505aee5d8d83d3c454675fa48b9344`) bettet `0137` und `0138` **zeichengleich** ein — geprüft von
@@ -52,6 +52,63 @@ Der lokale Probelauf fährt beide Migrationen, beide Rücknahmen **und dieses
 Skript** gegen echtes PostgreSQL (`npm run verify:check-sql`, Durchgänge
 **P22–P30**) — was eine bestandene Planprüfung **nicht** ist, steht in
 `supabase/checks/open_verifications.md`, Abschnitt 3a.
+
+### Die berechtigten Nachkontrollen zu `0147`–`0149` (2026-10-26) — gefahren, vier erklärte Abweichungen
+
+Alle drei liefen als `postgres` im SQL-Editor von `qqxcpesbwfxzgytkdsac`, aus
+`supabase/log/staging/01??-postflight-berechtigt.sql`, in `begin … rollback`.
+**`9998 = 0` in allen drei** — keine Zeile war unlesbar, der berechtigte Lauf
+hat also getan, wofür er da ist. Damit sind die drei zuvor hier als offen
+geführten Nachweise erbracht.
+
+| Datei | 9998 | 9999 | davon erklärt |
+|---|---|---|---|
+| `0147_offer_availability.sql` | 0 | **4** | die vier Basiszeilen 811 / 812 / 815 / 817 |
+| `0148_availability_notifications.sql` | 0 | **6** | dieselben vier plus zwei Anachronismen (siehe unten) |
+| `0149_notification_read_state.sql` | 0 | **4** | dieselben vier; **Zeile 104 bestanden** |
+
+**Die vier gemeinsamen Abweichungen haben genau eine Ursache: die Einbuchung
+von Blue Bash (`SKY-0009`) am 2026-10-26 um 11:53:24.** Sie hat eine **neue**
+Lagerposition angelegt (ADR-0145), und daraus folgt zwingend und vollständig:
+
+| Vertragsfeld (`skyisles-base-1`) | eingefroren | gemessen | warum |
+|---|---|---|---|
+| `angebote` | 256 | **257** | die neue Position ist gelistet und bepreist, erscheint also in `shop_offers()` |
+| `angebote_md5` | `4d1d6c30…` | geändert | md5 über `sky_id`, `condition` und `price` **jeder** Angebotszeile |
+| `lagerzeilen` | 286 | **287** | `count(*) from shop_inventory`, eine Zeile mehr |
+| `lager_md5` | `3821eb4f…` | geändert | md5 über `id`, `is_listed`, `sale_price` und `sale_released` je Lagerzeile |
+
+**Die Zeitfolge passt:** `0149` lief von 11:43:50 bis 11:44:34, die Baselines
+wurden davor eingefroren (ADR-0137), die Einbuchung kam neun Minuten später.
+Eine Nachkontrolle, die heute gegen diese Baselines läuft, **muss** diese vier
+Abweichungen zeigen.
+
+**Drei Gegenproben, die die Deutung tragen** — ohne sie wäre sie geraten:
+
+1. **`shopfaehig` ist unverändert bei 534.** Wäre Blue Bash neu aktiviert oder
+   katalogsichtbar gemacht worden, hätte sich dieses Feld mitbewegt. Die Figur
+   war längst shopfähig, ihr fehlte nur eine Lagerposition.
+2. **`katalogzeilen` ist unverändert bei 626.** Am Katalog wurde nichts
+   angelegt, gelöscht oder importiert.
+3. **Cynder (`SKY-0020`) ist in diesem Vertrag unsichtbar, und das erklärt,
+   warum es genau vier sind.** `lager_md5` hasht `id`, `is_listed`,
+   `sale_price` und `sale_released` — **nicht `quantity`**. Ihre Buchung von
+   fünf auf sechs ändert kein Feld. Eine fünfte Abweichung wäre ein Befund
+   gegen diese Deutung gewesen.
+
+**Die zwei zusätzlichen Zeilen bei `0148`** — sechs statt fünf Spalten in
+`availability_notifications`, `read_at` bereits vorhanden — sind **kein
+Mangel, sondern ein Anachronismus**: `0148_postflight.sql` behauptet den
+Zustand **unmittelbar nach `0148`**, und `0149` hat `read_at` danach
+hinzugefügt. Eine angewendete Prüfdatei wird nach Regel 1 nicht geändert.
+Umgekehrt gelesen sind diese zwei Zeilen der **Beweis, dass `0149` korrekt
+angewendet wurde**.
+
+**Die Baselines bleiben eingefroren.** Sie neu zu erheben würde ihren Zweck
+zerstören (ADR-0137); eine erklärte Abweichung ist etwas anderes als eine
+unerklärte. Der Sammlungsvertrag `skyisles-coll-1` wies keine Abweichung aus
+— `favorites` und `collection_items` sind unberührt.
+
 
 ## Production
 

@@ -14154,3 +14154,376 @@ Genau diese Datei hätte den Fehler am 2026-10-25 gefunden.
 Dazu ein Regressionstest, der die **Reihenfolge** der Kette festhält: fällt
 `refreshOfferState()` weg, ist das Feature wieder vollständig stumm — und
 zwar lautlos.
+
+---
+
+## ADR-0146 · Benachrichtigungen sind eine Projektion über Quellen, kein Speicher
+
+**Datum:** 2026-10-26
+**Status:** angenommen (Entscheidung des Betreibers)
+**Betrifft:** geplant `src/lib/notifications/`, die Header-Glocke,
+`/benachrichtigungen` · schreibt **ADR-0111** fort · hebt **ADR-0144 D-8**
+auf · lässt **ADR-0036** und **ADR-0043** unberührt
+**Umsetzung:** noch keine. Dieser Eintrag ist die Entscheidung, nicht ihr Code.
+
+### Die Frage
+
+SkyIsles soll ein zentrales Benachrichtigungscenter bekommen: eine Glocke im
+Kopf, ein Posteingang, ein Ungelesen-Zähler — und zwar erweiterbar für
+Verfügbarkeitsmeldungen, private Nachrichten, Bestellereignisse und später
+vielleicht Preisalarme. Die naheliegende Bauform wäre eine Tabelle
+`notifications` mit einer Zeile je Ereignis.
+
+### Der Befund, der dagegen entscheidet, und er ist am Code gelesen
+
+Die drei Arten, die zusammenkommen sollen, sind **nicht gleich gebaut**:
+
+| Art | Woraus „ungelesen" heute entsteht | Ereigniszeilen? |
+|---|---|---|
+| Verfügbarkeit (`0148`/`0149`) | `availability_notifications`, eine Zeile je Ereignis, `read_at` an der Zeile | **ja** |
+| Nachrichten (`0098`) | `order_conversation_reads (order_id, reader, last_read_at)` — ein **Wasserstand**; `conversation_summaries()` zählt Ereignisse **nach** ihm | **nein** |
+| Bestellereignisse (`0099`) | `order_attention_reads` — Wasserstand; `order_attention_events(order_id, role)` **leitet die Ereignisse aus der Bestellung selbst ab** | **nein, nicht eine** |
+
+Der Wasserstand steht dort nicht aus Bequemlichkeit: bei einer Bestellung
+schauen **zwei Seiten** auf denselben Vorgang (`order_attention_role()`), und
+eine Zeile je Ereignis **je Leser** wäre ein Fan-out. Genau den hat ADR-0111
+ausgeschlossen, wörtlich: „Es gibt keine Queue, keinen Fan-out, keine
+Push-Infrastruktur und **keine zweite Wahrheit**."
+
+> **Eine generische `notifications`-Tabelle wäre für zwei der drei Arten der
+> falsche Speicher.** Um Nachrichten und Bestellungen hineinzuschreiben,
+> bräuchte es Trigger auf die Bestellwelt oder einen Projektor — also entweder
+> das, was `0146` aus gutem Grund vermieden hat, oder einen Scheduler, den es
+> nicht gibt. Und die Zeile wäre eine zweite Wahrheit: sie behauptet
+> „versandt" weiter, nachdem eine Korrektur die Bestellung geändert hat.
+
+### Die Entscheidung
+
+**Die Quellen bleiben spezialisiert. Zentralisiert wird die Leseseite.**
+
+```
+QUELLEN      je eigene Semantik — heute eine, später drei
+ADAPTER      src/lib/notifications/sources/*.ts   reines TypeScript
+MITTE        types.ts · queries.ts · registry.ts
+OBERFLÄCHE   Header-Glocke · /benachrichtigungen
+```
+
+Der Vertrag je Meldung: `kind` · `key` · `target` · `occurredAt` · `readAt` ·
+`acknowledgeable` · `payload`. Drei Regeln machen ihn tragfähig:
+
+1. **Keine URL im Vertrag, nur ein `target`.** Eine gespeicherte Adresse ist
+   ein offener Redirect in Wartestellung. Der Weg entsteht in `registry.ts`
+   aus einer Whitelist; gespeichert wird die **SKY-ID**, der Slug wird beim
+   Lesen aufgelöst (ADR-0011).
+2. **Kein fertiger Text im Vertrag.** Oberflächentexte liegen in
+   `src/lib/i18n/de.ts` (ADR-0019). Die Projektion liefert Daten, die
+   Komponente bildet den Satz — damit bleibt die Mitte artunabhängig.
+3. **`acknowledgeable` ist Teil des Vertrags.** Die drei Arten haben **nicht**
+   dasselbe Lesemodell, und das zu verstecken wäre die Lüge, die später teuer
+   wird — siehe unten.
+
+**Für V1 wird ausschließlich die Verfügbarkeit angebunden.** Eine weitere Art
+kostet eine Adapterdatei und einen Registry-Eintrag: keine Tabelle, keine
+Migration, kein Trigger. `my_conversations()` rechnet seine Ungelesen-Zahl
+schon heute aus; ein Adapter formt sie um, er erfindet sie nicht.
+
+**Für V1 braucht die Mitte keine einzige Migration.** Das ist nicht
+Sparsamkeit, sondern der Prüfstein der Entscheidung: eine Abstraktion, die
+Schema verlangt, ist keine Abstraktion über das Bestehende.
+
+### Der Widerspruch, der dabei sichtbar wird, und wie er behandelt ist
+
+Der Auftrag sagt: „Das bloße Öffnen des Centers **oder des Zielinhalts**
+markiert nichts automatisch als gelesen." ADR-0111 Punkt 4 sagt: „**Gelesen
+wird beim Öffnen der Bestellung**, nie beim Öffnen einer Liste."
+
+Für die Verfügbarkeit stimmen beide (ADR-0144 hat „Gesehen" als eigene
+Handlung entschieden). Für Nachrichten und Bestellungen stehen sie
+gegeneinander. **Heute ist das folgenlos** — nur die Verfügbarkeit ist
+angebunden. Der Vertrag trägt die Unterscheidung trotzdem jetzt, damit sie
+später nicht erfunden wird:
+
+* `acknowledgeable: true` → die Karte zeigt „Gesehen", und nur das markiert.
+* `acknowledgeable: false` → keine solche Karte; gelesen wird beim Öffnen des
+  Ziels, wie ADR-0111 es entschieden hat.
+
+**ADR-0111 Punkt 4 fällt nicht.** Ein geöffnetes Gespräch ist gelesen; eine
+angesehene Figur ist keine abgeschlossene Vormerkung.
+
+### Was damit aufgehoben wird
+
+**ADR-0144, D-8** hat entschieden: Zähler am Menüpunkt „Favoriten",
+ausdrücklich „keine Glocke". Das war richtig für den damaligen Gegenstand —
+**eine** Art, die ausschließlich Favoriten betraf. Für ein Center über mehrere
+Arten trägt die Begründung nicht: eine Marke an einem Produktbereich würde
+behaupten, die Meldung gehöre dorthin. **Die Zahl wandert an eine Glocke in
+der Kopfzeile, der Datenpfad bleibt unverändert** (`Unread.notices`, dieselbe
+Wache, derselbe Teilindex).
+
+**ADR-0036 bleibt unberührt:** die Leiste behält drei Ziele. Die Glocke ist
+eine *globale Aktion* wie Warenkorb und Konto — dieselbe Unterscheidung, die
+ADR-0043 für den Warenkorb getroffen hat.
+
+### Konsequenzen
+
+- `availability_notifications` zieht **nicht** um. Ihr Primärschlüssel ist der
+  Duplikatschutz (ADR-0143), und ein Umzug hieße, das einzige nachweislich
+  wettlauffeste Stück der Kette neu zu schreiben. (Dass sie aus einem anderen
+  Grund verschwindet, entscheidet ADR-0147.)
+- `/favoriten` wird zur reinen Beobachtungsliste; der Meldungsabschnitt zieht
+  nach `/benachrichtigungen`. **Daraus folgt eine Invariante:** der Zähler
+  darf niemals von einer Seite abhängen, die man nur wegen des Zählers
+  besucht — die Verarbeitung gehört deshalb nicht an die Zielseite.
+- Zwei Marken stehen vorerst nebeneinander: Glocke (Verfügbarkeit, Korall) und
+  `ProfileAction` (Nachrichten plus Bestellungen, über `roleAttention()`
+  summiert, Rot). Zusammengelegt wird, wenn die beiden Adapter kommen — eine
+  Zwischenlösung wäre schlechter als beide Endzustände.
+- Die Dateilage `src/lib/favorites/notification-*.ts` wird irreführend und
+  gehört nach `src/lib/availability/` bzw. `src/lib/notifications/`.
+
+### Was ausdrücklich NICHT entschieden ist
+
+Keine E-Mail, kein Push, keine Realtime-Verbindung, keine Queue, kein
+Fan-out, keine Benachrichtigungseinstellungen, keine Preisalarme — und keine
+Geschäftslogik für Nachrichten- oder Bestellmeldungen. ADR-0021 bleibt
+unberührt: die Projektion setzt an `shop_offers()` und an vorhandenen
+Funktionen an, kennt kein `seller_id` und kein Fan-out je Verkäufer.
+
+---
+
+## ADR-0147 · Ein Fire-and-Forget-Alarm braucht keine Verfügbarkeitshistorie
+
+**Datum:** 2026-10-26
+**Status:** angenommen (Entscheidung des Betreibers)
+**Betrifft:** geplant `0150` `availability_alerts` · löst die Bauform aus
+`0146`–`0149` ab · **ADR-0142** verliert seinen Gegenstand · **ADR-0143**
+wird fortgeschrieben · **ADR-0145** verliert seine Fehlerklasse ·
+`docs/FAVORITE_NOTIFICATIONS.md` wird historisch
+**Umsetzung:** noch keine. Freigegeben ist allein dieser Eintrag.
+
+### Die vereinfachte Anforderung
+
+Der Betreiber hat den Gegenstand neu gefasst: ein **klassisches „Wieder
+verfügbar"** wie in Onlineshops.
+
+* Glocke an einer **nicht kaufbaren** Figur, unabhängig vom Herz.
+* Wird sie wieder kaufbar, erhalten alle Abonnenten **zeitnah genau eine**
+  Meldung.
+* **Keine 30 Minuten Wartezeit.**
+* Die Meldung **garantiert ausdrücklich nicht**, dass die Figur beim späteren
+  Öffnen noch da ist. Kauft sie jemand zwischenzeitlich, ist das in Ordnung.
+* Nach Auslösung keine zweite Meldung; die Meldung bleibt ungelesen, bis der
+  Nutzer ausdrücklich bestätigt; erst das schließt die Vormerkung ab.
+* Eine neue Vormerkung erst bei erneuter Nichtverfügbarkeit.
+* Shop-, Reservierungs- und Checkout-Logik bleiben **unverändert**.
+
+### Der Befund: der Spiegel trägt nichts außer sich selbst
+
+Erschöpfend gesucht (`src/`, `tools/`, `supabase/`): `offer_state`,
+`offer_state_live`, `refresh_offer_state()`, `offer_state_window()`,
+`offer_availability_grace()` und `offer_availability_due()` kommen
+**ausschließlich** vor in (a) der Benachrichtigungskette, (b) ihren eigenen
+Migrationen, Prüf-, Hüllen- und Rücknahmedateien, (c) den beiden
+Sicherungs-Manifesten — dort als **ausgeschlossene** Tabelle —, (d) dem
+Frischewächter, der nur existiert, um den Spiegel zu bewachen.
+
+> **Kein Shop, kein Katalog, keine Admin-Fläche und kein Werkzeug liest ihn.**
+
+### Warum er gebaut wurde, und warum die Begründung entfällt
+
+Der Spiegel beantwortet: *war diese Figur schon einmal weg, wie lange, und
+galt das als echt?* Das brauchte eine **globale Verfügbarkeitshistorie je
+Figur**, weil **jeder Favorit ein stehendes Abonnement** war: das System
+musste von sich aus für alle 820 Figuren dauerhaft Phasen führen.
+
+Ein Fire-and-Forget-Alarm kennt diese Frage nicht. Er entsteht in **einem
+Augenblick**, durch einen Klick, unter der Bedingung „jetzt nicht kaufbar".
+
+> **Damit ist die Vormerkungszeile selbst die Grundlinie.** Es gibt keine
+> zweite Historie zu führen, weil die erste in der Vormerkung steht.
+
+### Die Entscheidung
+
+**Eine Tabelle, drei Zustände, vier Funktionen mit je genau einer Anweisung.**
+
+```
+availability_alerts
+  id · user_id · sky_id · created_at · notified_at · notified_cents · read_at
+
+  scharf        notified_at is null
+  ausgelöst     notified_at gesetzt, read_at null   (Vormerkung bleibt aktiv)
+  abgeschlossen read_at gesetzt                     (bleibt als Historie stehen)
+
+unique (user_id, sky_id) where read_at is null
+```
+
+**Der Teilindex IST die Fachregel.** „Eine erneute Vormerkung erst nach
+Bestätigung" ist damit kein Zustand, den die Datenbank darstellen kann — das
+ist die Fortschreibung von ADR-0143: das Prinzip „der Schlüssel ist der
+Duplikatschutz" bleibt, sein Träger wechselt vom Primärschlüssel auf einen
+partiellen Unique-Index.
+
+**Die Zeile wird nie gelöscht.** Vormerkung und Meldung sind dieselbe Zeile,
+also kann das eine nicht ohne das andere gelten — und „Gesehen" trifft über
+die `id` **das konkrete Ereignis** und nicht eine SKY-ID. Das behebt
+nebenbei einen engen Mangel in `0149`: `mark_availability_notifications_read(text[])`
+markiert **alle** ungelesenen Meldungen einer Figur, und zwei echte Phasen
+derselben Figur können zwei ungelesene Zeilen erzeugen.
+
+Die vier Funktionen, `security definer`, leerer `search_path`,
+Eigentümerbedingung im `where`, nur für `authenticated`, nichts für `anon`:
+`watch_availability` · `unwatch_availability` · `fire_availability_alerts` ·
+`acknowledge_availability_alerts`.
+
+**Der Abgleich ist eine Anweisung:**
+
+```sql
+update public.availability_alerts a
+   set notified_at = now(), notified_cents = l.cheapest_cents
+  from public.offer_state_live l
+ where l.sky_id = a.sky_id and a.notified_at is null and a.read_at is null;
+```
+
+Kein CTE, keine zweite Tabelle, kein zweiter Schreibvorgang — **es gibt
+keinen halben Zustand.** Idempotent über `notified_at is null`; parallele
+Läufe serialisieren über Zeilensperren; alle Abonnenten derselben Figur in
+einem Zug. Er benutzt **`auth.uid()` nirgends** und ist damit von sich aus
+scheduler-fähig; zurückgegeben wird ausschließlich die Zahl **für den
+Aufrufer**, wie `0148` es für die Nachfragegrenze festgelegt hat.
+
+**`offer_state_live` bleibt.** Die Sicht ist die eine Definition von „was ist
+jetzt kaufbar, zu welchem günstigsten Preis", hat **keinen Zustand** und
+liest `shop_offers()`. Sie ist das Stück aus `0146`, das die neue Bauform
+braucht. **Scharf gestellt wird gegen sie, nicht gegen einen Spiegel** — ein
+Spiegel könnte veraltet sein und eine Vormerkung auf eine längst kaufbare
+Figur zulassen.
+
+### Die 30 Minuten entfallen — und warum das sauber ist
+
+`available_quantity` ist `quantity - reserved` (`0003:113`) und bewegt sich
+bei **jedem** Warenkorb. Eine Reservierung macht eine Figur also fälschlich
+**nicht** kaufbar, nie fälschlich kaufbar. Die Karenzzeit verhinderte genau
+ein Muster: eine vom System erfundene Abwesenheit („jemand hat sie im Korb")
+wird zur Phase, der Korb verfällt, und die Rückkehr gilt als „wieder
+verfügbar". Drei Dinge nehmen dem die Grundlage:
+
+1. Ein Alarm entsteht nur, wenn die Figur im Augenblick des Klicks nicht
+   kaufbar ist — der Nutzer stellt die Grundlinie selbst her. Das System
+   erfindet keine Abwesenheit mehr.
+2. Die **Garantie ist gestrichen**. Wird jemand benachrichtigt, weil ein
+   fremder Warenkorb verfiel, dann *ist* die Figur in diesem Moment kaufbar.
+3. Der Alarm feuert **genau einmal**. Flattern kann höchstens eine Meldung
+   erzeugen, und genau eine ist gewünscht.
+
+> **Karenzzeit 0.** Benachrichtigt wird beim ersten Abgleich, der die Figur in
+> `offer_state_live` sieht. Die 30 Minuten waren eine Antwort auf die
+> Bauform, nicht auf die Fachlichkeit. **ADR-0142 verliert damit seinen
+> Gegenstand:** die Phasengrenze `buyable_since` war nötig, weil `changed_at`
+> sich auch bei einer Preisänderung bewegt — eine Unterscheidung, die ohne
+> Phasen niemand mehr trifft.
+
+Wollte der Betreiber später doch eine Sekundenbremse, wäre sie eine Spalte
+`first_seen_buyable_at` **auf dem Alarm** — kein Spiegel.
+
+### Verworfen, und jedes mit Grund
+
+* **Variante A, den Spiegel behalten und nur für Alarme melden.** Sie behielte
+  `buyable_since` (eine Phasengrenze, die niemand braucht) und `announced_*`
+  („diese *Figur* wurde gemeldet", während jetzt ein *Alarm* gemeldet wird).
+  Das wäre keine stehengelassene Infrastruktur, sondern eine zweite, falsche
+  Wahrheit daneben.
+* **Variante C, ereignisbasiert über Trigger.** Zwei unabhängige Gründe. Erstens
+  scheitert sie an der Anforderung selbst: ein Trigger auf `shop_inventory`
+  läuft in derselben Transaktion wie `reserve_order_stock()` — das **ist** eine
+  Änderung der Checkout-Transaktion, auch wenn deren Code unberührt bleibt, und
+  ein Fehler darin lässt einen **Kauf** scheitern. Zweitens kann sie es
+  technisch nicht: Kaufbarkeit hängt an `shop_inventory`, `skylanders`,
+  `categories` und `shop_settings` — **und an der Zeit**, denn der
+  Reservierungsablauf ändert **keine Zeile**. Kein Trigger kann ihn sehen. C
+  bräuchte den Abgleich also zusätzlich zu allem anderen.
+
+### Die Kombination, die stattdessen gilt
+
+**Der Abgleich läuft bei Seitenaufrufen (Netz) und zusätzlich nach den
+Betriebsaktionen, die eine Figur überhaupt kaufbar machen.** Diese liegen
+alle in `src/lib/admin/actions.ts` als Server Actions **außerhalb jeder
+Kundentransaktion**: `bookMovement`, `setListing`, `setSaleRelease`,
+`setDeliveryScope`, `setUskRating`, `setShopPercentage`, `setCatalogVisible`.
+Je Stelle eine Zeile, kein Kaufrisiko, keine Infrastruktur — und der
+häufigste Fall (der Betreiber bucht ein und listet) wird in Sekunden
+gemeldet.
+
+**Der Vertrag dazu, und er ist geprüft, nicht beabsichtigt:** der Aufruf steht
+**nach** der Erfolgsentscheidung, in einem `try`/`catch`, das nichts
+weiterwirft, und sein Ergebnis geht in den Rückgabewert der Aktion **nicht**
+ein. Ein Fehler im Abgleich darf eine bereits erfolgreiche Betriebsaktion
+weder gefährden noch nachträglich als fehlgeschlagen melden. Dasselbe Muster
+wie `fetchFavoriteDemand()` und `refreshOfferState()`. Nachgewiesen wird es
+durch einen Test, der den Abgleich werfen lässt und prüft, dass `setListing()`
+weiterhin Erfolg meldet und die Lagerzeile gelistet ist.
+
+### Ein Scheduler ist Freigabe-Tor, nicht Zukunftsmusik
+
+**Seitenaufrufe dürfen nicht die einzige Auslösung bleiben.** Vor der
+produktiven Aktivierung muss ein unabhängiger serverseitiger Abgleich
+stehen; bevorzugt `pg_cron` mit fünf Minuten, weil es keine neue Route, kein
+Geheimnis und keine Deployment-Kopplung braucht — Verfügbarkeit und Rechte
+sind vorher zu prüfen, und es wäre die **erste** Erweiterung dieses Projekts.
+Fällt das aus, wird Vercel-Cron auf einen geschützten Route Handler bewertet.
+**Es ist dieselbe Funktion, also ein zweiter Auslöser und kein Umbau.**
+
+Was sich damit **nicht** erledigt: ohne Besucher und ohne Scheduler bleibt es
+still. Die Vereinfachung beseitigt die Fehlerklasse *Spiegeldrift* (ADR-0145
+kann es nicht mehr geben, weil es keinen Spiegel gibt) — sie beseitigt nicht
+die Frage, wer auslöst. Was sie zusätzlich beseitigt: die **zwei Besuche**.
+Ohne `buyable_since` gibt es keine Uhr, die erst starten muss.
+
+### Der Rückbau ist ein eigener Schritt mit eigener Freigabe
+
+Die alte Bauform wird **erst nach erfolgreicher Prüfung der neuen und auf
+ausdrückliche Freigabe** entfernt. Drei Dinge gehören davor, rein lesend:
+
+1. **Was an historischen Meldungen existiert** — `count(*)` und Zeilen aus
+   `availability_notifications` samt `read_at`. Möglich ist **null**: der
+   Spiegel hatte bis zum 2026-10-26 keinen Aufrufer, es kann nie etwas
+   gefeuert haben. Das muss gemessen sein, nicht gefolgert.
+2. **Ob eine ungelesene Meldung übernommen werden soll** — technisch möglich
+   (eine Alarmzeile je Meldung), bei Staging-Testdaten vermutlich nicht
+   sinnvoll. Entscheidung des Betreibers **nach** der Messung.
+3. **Dass `availability_alerts` vorher im Plattformarchiv steht**, sonst
+   entsteht ein Fenster ohne Sicherung (ADR-0136).
+
+> **Und ein Befund zum Weg selbst:** `R0146_drop_offer_state.sql` zählt die
+> Zeilen mit gesetztem `announced_at` und **bricht ab**, sobald eine darin
+> steht. Die Erstbefüllung hat **alle 225** als bereits angekündigt angelegt.
+> Der Riegel schützt vor einem Szenario, das es dann nicht mehr gibt — ein
+> erneutes `0146` mit Neumeldung aller Figuren. Der Rückbau ist deshalb
+> **nicht** „die vier Dateien fahren": er braucht eine bewusste,
+> dokumentierte Variante, die den Verlust der `announced_*` benennt und
+> annimmt. Es gibt dafür keinen Nachfolger, weil „gemeldet je Figur" in der
+> neuen Bauform kein Begriff mehr ist.
+
+### Konsequenzen, als Zahl
+
+| | bisher (`0146`–`0149`) | neu |
+|---|---|---|
+| Tabellen | 3 beteiligt (`offer_state`, `availability_notifications`, `favorites` als Abonnement) | **1** |
+| Sichten | 1 | 1 (dieselbe) |
+| Funktionen | 6 | **4**, je eine Anweisung |
+| CHECKs | 6 | 3 |
+| Wächter | `offer_state_freshness.sql`, 15 seiner 25 Zeilen nur als `postgres` lesbar | **keiner nötig** |
+| Probeläufe | P53, P54, P55, P56 | **einer** |
+| Unit-Tests am Spiegel | ~171 | entfallen mit ihrem Gegenstand |
+| Migrationen auf Production | `0146`–`0149` plus vier geplante | **`0150` plus Exportmigration** |
+| Plattformarchiv V3 | 58 Bereiche, `announced_*` als „hoch" geführtes Verlustrisiko | **56 Bereiche**, Risiko entfällt |
+
+**Favoriten bleiben unberührt** (`0145`, ADR-0136): das Herz ist weiterhin
+eine reine Sammlerfunktion und hat **keinerlei** Einfluss auf
+Benachrichtigungen. Die Lehre aus `df7337c` — eine Einbuchung, die eine
+bestehende Position auffüllt, ist kein Verfügbarkeitsereignis — wandert von
+einem Test in eine **Vorbedingung**: auf einer kaufbaren Figur kann kein
+Alarm existieren. Das ist die bessere Stelle.
+
+**Preisbeobachtung bleibt möglich.** Ein Preisalarm wäre dasselbe Muster mit
+einer Grundlinie, die beim Scharfstellen festgehalten wird — er braucht
+ebenfalls keinen globalen Spiegel. Verbaut wird nichts.

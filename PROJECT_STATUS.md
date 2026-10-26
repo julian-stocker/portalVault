@@ -82,6 +82,64 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Architekturentscheidung Benachrichtigungen (2026-10-26, ADR-0146, ADR-0147) — **entschieden, nichts gebaut**
+
+**Der Betreiber hat die Anforderung vereinfacht und die Architektur daraufhin neu entschieden.**
+Gewollt ist ein klassisches „Wieder verfügbar" wie in Onlineshops: Glocke an einer nicht
+kaufbaren Figur, **zeitnah genau eine** Meldung, **keine Wartezeit**, und ausdrücklich **keine
+Zusage**, dass die Figur beim späteren Öffnen noch da ist. Favoriten haben **keinerlei**
+Einfluss mehr.
+
+**Zwei Entscheidungen, beide in `docs/DECISIONS.md`:**
+
+| | |
+|---|---|
+| **ADR-0146** | Das Benachrichtigungscenter ist eine **Projektion** über spezialisierte Quellen, **kein Speicher**. Keine generische `notifications`-Tabelle — Nachrichten (`0098`) und Bestellereignisse (`0099`) führen **gar keine Ereigniszeilen**, sondern einen Wasserstand je Leser; eine Zeile je Ereignis und Leser wäre der Fan-out, den ADR-0111 ausgeschlossen hat. Die Mitte ist TypeScript und braucht **keine Migration**. Die Glocke sitzt in der Kopfzeile — das hebt ADR-0144 D-8 auf, ADR-0036 bleibt unberührt |
+| **ADR-0147** | Ein Fire-and-Forget-Alarm braucht **keine Verfügbarkeitshistorie**. **Eine** Tabelle `availability_alerts` trägt Vormerkung und Meldung; ein partieller Unique-Index **ist** die Regel „erneute Vormerkung erst nach Bestätigung"; der Abgleich ist **eine Anweisung** gegen `offer_state_live`. `offer_state`, die 30-Minuten-Karenz und die Phasenlogik entfallen |
+
+**Der Befund, der das getragen hat:** `offer_state` und seine fünf Funktionen haben
+**keinen einzigen Verbraucher** außerhalb der Benachrichtigungskette, ihrer eigenen Prüf- und
+Rücknahmedateien und des Frischewächters, der nur sie bewacht. Kein Shop, kein Katalog, keine
+Admin-Fläche, kein Werkzeug liest sie. Der Spiegel beantwortete die Frage „war diese Figur
+schon einmal weg, und galt das als echt" — die brauchte eine globale Historie, weil **jeder
+Favorit ein stehendes Abonnement** war. Ein Alarm entsteht in einem Augenblick, unter der
+Bedingung „jetzt nicht kaufbar": **damit ist die Alarmzeile selbst die Grundlinie.**
+
+**Was dadurch wegfällt** (Soll gegen Ist): 3 beteiligte Tabellen → **1** · 6 Funktionen →
+**4**, je eine Anweisung · 6 CHECKs → 3 · Frischewächter → **keiner nötig** · P53–P56 →
+**ein** Probelauf · ~171 Unit-Tests am Spiegel entfallen mit ihrem Gegenstand ·
+Plattformarchiv V3 **56** statt 58 Bereiche, und das als „hoch" geführte Verlustrisiko der
+`announced_*` entfällt.
+
+**Drei Vorgaben des Betreibers, als Tore festgeschrieben:**
+
+1. **Ein Scheduler ist Freigabe-Tor vor der produktiven Aktivierung** — Seitenaufrufe dürfen
+   nicht die einzige Auslösung bleiben. Bevorzugt `pg_cron` (fünf Minuten); Verfügbarkeit und
+   Rechte sind vorher zu prüfen, sonst Vercel-Cron. **Dieselbe Funktion, ein zweiter Auslöser,
+   kein Umbau.**
+2. **Ein Fehler im Abgleich darf eine erfolgreiche Betriebsaktion nicht gefährden** und sie
+   nicht nachträglich als fehlgeschlagen melden. Der Aufruf steht **nach** der
+   Erfolgsentscheidung, in einem `try`/`catch`, und sein Ergebnis geht in den Rückgabewert
+   nicht ein — nachgewiesen durch einen Test, der den Abgleich werfen lässt.
+3. **Vor dem Rückbau der alten Tabellen** werden vorhandene historische Meldungen und
+   mögliche Datenverluste **lesend geprüft**, und der Rückbau braucht eine eigene Freigabe.
+   Dazu ein Befund: `R0146_drop_offer_state.sql` **bricht ab**, sobald eine Zeile ein
+   `announced_at` trägt — und die Erstbefüllung hat **alle 225** als angekündigt angelegt. Der
+   Rückbau ist also nicht „die vier Dateien fahren".
+
+**Der alte Blue-Bash-Browsertest entfällt** (Entscheidung D-8): er würde genau die drei
+Mechanismen beweisen, die verschwinden — Spiegel nachziehen, Karenzzeit, `favorites` als
+Empfängerliste. Die Lehre aus `df7337c` geht nicht verloren, sie wandert von einem Test in eine
+**Vorbedingung**: auf einer kaufbaren Figur kann kein Alarm existieren. **SKY-0009 ist als
+Prüffigur verbraucht** (sie ist kaufbar), der neue Praxistest braucht eine nicht kaufbare Figur.
+
+**Stand der Umsetzung: nichts.** Freigegeben war allein **M1** — diese Dokumentation. `0150`
+`availability_alerts` ist beschrieben, aber nicht geschrieben; `0146`–`0149` stehen auf Staging
+unverändert und unangetastet. **Nächster Schritt: M2** (`0150`, rein additiv, kein Aufrufer) —
+nach gesonderter Freigabe.
+
+---
+
 ## Der Spiegel hatte keinen Aufrufer (2026-10-26, ADR-0145) — behoben
 
 **Der Betreiber hat vorgemerkt, eingekauft, eingebucht — und keine Benachrichtigung bekommen.**
@@ -256,10 +314,11 @@ in P57 als Eigner gefahren.
 **Auf Staging angewendet am 2026-10-26**, in 44 Sekunden: Preflight `9999 = 0` (3 offene
 Zeilen), Nachkontrolle `9999 = 0` (2 offene — genau die zwei, die `availability_notifications`
 lesen müssten). Alle Struktur- und Rechtezeilen sind geprüft und bestanden, weil sie
-`pg_catalog` lesen (ADR-0141). **Offen:** der berechtigte Lauf von
-`0149-postflight-berechtigt.sql` als `postgres` für `9998 = 0` — dort wird Zeile 104 („KEINE
-Meldung ist als gelesen geführt") zur blockierenden Prüfung. Dasselbe steht für `0147` und
-`0148` noch aus.
+`pg_catalog` lesen (ADR-0141). **Nachgeholt am 2026-10-26:** die berechtigten Läufe von
+`0147`-, `0148`- und `0149-postflight-berechtigt.sql` als `postgres` — **`9998 = 0` in
+allen drei**, und Zeile 104 von `0149` ist bestanden. Die verbleibenden Abweichungen
+(`9999 = 4` bzw. `6`) sind vollständig erklärt und stammen nicht aus diesen
+Migrationen; die Einordnung steht in `supabase/migrations/APPLIED.md`.
 
 **Noch unbestätigt:** die fünf Browserpunkte des Laufzettels (darunter „mehrfach neu laden —
 die Karten bleiben ungelesen") und die neun aus `0145`.

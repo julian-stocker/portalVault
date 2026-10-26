@@ -1,5 +1,37 @@
 # Benachrichtigungen zu Favoriten — technisches Konzept
 
+> # ⚠ HISTORISCHE AKTE — nicht mehr fortgeschrieben
+>
+> **Überholt am 2026-10-26 durch ADR-0146 und ADR-0147.** Dieses Dokument
+> beschreibt die Bauform aus `0146`–`0149`: einen **Angebotsspiegel** mit
+> Verfügbarkeitsphasen je Figur, eine **30-Minuten-Karenzzeit** und
+> **Favoriten als stehendes Abonnement**. Alle drei sind durch eine
+> Betreiberentscheidung ersetzt:
+>
+> | hier beschrieben | gilt seit 2026-10-26 |
+> |---|---|
+> | `offer_state` samt `buyable_since` und `announced_*` | entfällt; `offer_state_live` bleibt |
+> | Karenzzeit `reservation_ttl() + 10 min` = 30 min | **keine Karenzzeit** — Meldung beim ersten bestätigten kaufbaren Zustand |
+> | `favorites` bestimmt die Empfänger | **`availability_alerts`** — eine Glocke je Figur, vom Herz vollständig unabhängig |
+> | Meldung und Posteingang auf `/favoriten` | zentrales Center, Glocke in der Kopfzeile, `/benachrichtigungen` |
+> | Preissenkungsmeldung (B) als zweite Art | gestrichen; später als eigene Alarmart denkbar |
+>
+> **Warum es stehen bleibt.** Es ist der Nachweis, *warum* so gebaut wurde,
+> und mehrere Befunde darin gelten unverändert: die drei Preisquellen von
+> `shop_price()` (Abschnitt 1.3), die Abwesenheit eines Schedulers (1.4), die
+> drei Gründe gegen einen Trigger (1.6) und die Begründung, warum jeder
+> Entwurf an `shop_offers()` ansetzen muss (1.7). Wer die neue Entscheidung
+> verstehen will, braucht diese Abschnitte.
+>
+> **Was darin nicht mehr stimmt, und das ist ausdrücklich gesagt:** die
+> Statustabelle gleich unten war schon am 2026-10-26 veraltet — sie führt S3
+> als „nirgends angewendet" und S4 als „nicht gebaut", während `0148` und
+> `0149` auf Staging liegen und die Oberfläche steht. Maßgeblich für den
+> Anwendungsstand ist **`supabase/migrations/APPLIED.md`**, für die
+> Entscheidungen **`docs/DECISIONS.md`** (ADR-0146, ADR-0147), für den
+> aktuellen Zustand **`PROJECT_STATUS.md`**. Dieses Dokument wird **nicht**
+> mehr berichtigt.
+
 **Stand 2026-10-25, Phase 4. Nichts davon ist gebaut.** Dieses Dokument ist
 die Planung, um die der Auftrag gebeten hat — keine Freigabe, keine
 Migration, keine Oberfläche.
