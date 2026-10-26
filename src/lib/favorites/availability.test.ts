@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+
+import { join } from "node:path";
 
 import { columnsOf } from "@/test-support/migrations";
 import { EXCLUDED_TABLES } from "@/lib/backup/manifest";
@@ -382,5 +384,127 @@ describe("der Vertrag für S3", () => {
 
   it("und nennt, was S3 NICHT von hier bekommt: die Konten", () => {
     expect(SQL).toContain("favorites.created_at < buyable_since");
+  });
+});
+
+
+/* ==========================================================================
+ * DIE TRIGGER-ERWARTUNG
+ * ==========================================================================
+ *
+ * DER ABBRUCH VOM 2026-10-26. `0147` zählte Trigger an den Quellen und
+ * erwartete **null** — und brach den Staging-Lauf mit sechs völlig legitimen
+ * Triggern ab: Zeitstempel, Unveränderlichkeit von `sky_id` und
+ * Lageridentität, Redaktionsprotokoll, Artikeltyp-Ableitung. Die Quellen
+ * HABEN Trigger, und sie sollen sie haben.
+ *
+ * Dieselbe Sorte Fehler wie die Richtlinienzahl in `0142` und die
+ * Trigger-Zahl, die `0146` bewusst VERMIED (es fragte nur nach Triggern mit
+ * `offer_state` im Namen). Ich habe das beim Verbreitern kaputtgemacht.
+ *
+ * Jetzt eine benannte Erwartung — und die steht an drei Stellen: Migration,
+ * Preflight, Nachkontrolle. Laufen sie auseinander, bricht die eine ab, wo
+ * die andere durchlässt. Dieser Block hält sie zusammen UND gegen die
+ * Migrationshistorie.
+ */
+
+describe("die sechs bekannten Trigger", () => {
+  const DATEIEN = {
+    Migration: MIG,
+    Preflight: "supabase/checks/0147_preflight.sql",
+    Nachkontrolle: "supabase/checks/0147_postflight.sql",
+    Huelle: "supabase/operations/staging-0147.sql",
+  } as const;
+
+  /** Die Erwartungsliste aus einer Datei lesen — `tabelle.trigger`, sortiert. */
+  const liste = (pfad: string): string[] => {
+    const t = datei(pfad);
+    const treffer = [...t.matchAll(/'(shop_inventory|skylanders|shop_settings|offer_state)\.(\w+)'/g)]
+      .map((m) => `${m[1]}.${m[2]}`);
+    return [...new Set(treffer)].sort();
+  };
+
+  /**
+   * Was die Migrationen WIRKLICH an den Quellen anlegen.
+   *
+   * Nicht abgeschrieben: aus `create trigger <name> ... on public.<tabelle>`
+   * gelesen, über die ganze Historie, und um später wieder entfernte
+   * bereinigt.
+   */
+  const ausHistorie = (): string[] => {
+    const quellen = new Set(["shop_inventory", "skylanders", "shop_settings"]);
+    const da = new Set<string>();
+    for (const f of readdirSync("supabase/migrations").filter((x) => x.endsWith(".sql")).sort()) {
+      const t = readFileSync(join("supabase/migrations", f), "utf8");
+      for (const m of t.matchAll(
+        /create\s+trigger\s+(\w+)[\s\S]{0,200}?\bon\s+public\.(\w+)/gi)) {
+        if (quellen.has(m[2])) da.add(`${m[2]}.${m[1]}`);
+      }
+      for (const m of t.matchAll(
+        /drop\s+trigger\s+(?:if exists\s+)?(\w+)\s+on\s+public\.(\w+)/gi)) {
+        if (quellen.has(m[2])) da.delete(`${m[2]}.${m[1]}`);
+      }
+    }
+    return [...da].sort();
+  };
+
+  it("die Historie legt genau diese sechs an", () => {
+    expect(ausHistorie()).toEqual([
+      "shop_inventory.shop_inventory_identity_immutable",
+      "shop_inventory.shop_inventory_set_updated_at",
+      "skylanders.skylanders_item_type_from_category",
+      "skylanders.skylanders_log_editorial",
+      "skylanders.skylanders_set_updated_at",
+      "skylanders.skylanders_sky_id_immutable",
+    ]);
+  });
+
+  it("und Migration, Preflight, Nachkontrolle und Hülle führen dieselbe Liste", () => {
+    /*
+     * DIE DRIFTGEFAHR. Vier Dateien, eine Erwartung. Weicht eine ab, bricht
+     * sie ab, wo die anderen durchlassen — oder umgekehrt, und das ist
+     * schlimmer.
+     */
+    const erwartet = ausHistorie();
+    for (const [name, pfad] of Object.entries(DATEIEN)) {
+      expect(liste(pfad), `${name} (${pfad})`).toEqual(erwartet);
+    }
+  });
+
+  it("keine der vier zählt Trigger mehr pauschal", () => {
+    /*
+     * DER FEHLGRIFF, als Regel. `count(*) ... = 0` über die Quellen ist
+     * genau die Form, die am 2026-10-26 abgebrochen hat.
+     */
+    for (const [name, pfad] of Object.entries(DATEIEN)) {
+      const text = code(datei(pfad));
+      const stelle = text.indexOf("from pg_trigger");
+      expect(stelle, `${name}: keine Triggerabfrage`).toBeGreaterThan(-1);
+      /* Wo die Quellen zusammen abgefragt werden, muss eine Namensliste
+         dabeistehen — nicht nur ein Zähler. */
+      const alleVier = text.includes("to_regclass('public.shop_inventory')")
+        && text.includes("to_regclass('public.skylanders')");
+      if (alleVier) {
+        expect(text, `${name}: Erwartungsliste fehlt`)
+          .toContain("skylanders.skylanders_sky_id_immutable");
+      }
+    }
+  });
+
+  it("der Spiegel wird ZUERST geprüft — die präzisere Meldung gewinnt", () => {
+    /*
+     * Ein Trigger auf `offer_state` stünde auch nicht in der
+     * Erwartungsliste, die ihn also ebenfalls fände. Dann hieße der Abbruch
+     * aber „unerwarteter Trigger" statt „Trigger auf dem Spiegel", und das
+     * ist die wichtigere Aussage der Phase 4.
+     */
+    const spiegel = CODE.indexOf("Trigger auf offer_state");
+    const liste_ = CODE.indexOf("skylanders.skylanders_sky_id_immutable");
+    expect(spiegel).toBeGreaterThan(-1);
+    expect(liste_).toBeGreaterThan(spiegel);
+  });
+
+  it("und 0147 legt selbst keinen Trigger an", () => {
+    expect(CODE).not.toMatch(/create\s+trigger/i);
   });
 });

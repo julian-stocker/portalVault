@@ -26,7 +26,12 @@
 -- `offer_availability_grace()` und `offer_availability_due()` an.
 --
 -- WAS SIE NICHT TUT: **keine Benachrichtigung**, keine Tabelle dafuer, kein
--- Trigger, kein Scheduler, kein Clientrecht, keine Oberflaeche. Und sie
+-- Trigger, kein Scheduler, kein Clientrecht, keine Oberflaeche. Sie PRUEFT
+-- die Trigger und legt keine an: am Spiegel darf keiner stehen, an den
+-- Quellen nur die sechs bekannten aus `0001`, `0003`, `0004` und `0135`
+-- (Zeitstempel, Unveraenderlichkeit, Redaktionsprotokoll, Artikeltyp) —
+-- jeder beim Namen. Eine fruehere Fassung zaehlte sie nur und brach
+-- deshalb am 2026-10-26 ab, obwohl nichts fehlte. Und sie
 -- VERBRAUCHT KEIN EREIGNIS: `offer_availability_due()` ist `stable` und
 -- setzt `announced_*` nicht — das tut erst S3, in derselben Transaktion, in
 -- der es die Meldungen anlegt.
@@ -551,23 +556,84 @@ begin
     raise exception '%: % Clientrecht(e) auf die neuen Funktionen', v_wer, v_n;
   end if;
 
-  /* Kein Trigger, keine neue Tabelle. */
+  /*
+   * ============================================================
+   * TRIGGER: BENANNTE ERWARTUNG, KEINE ZAEHLUNG
+   * ============================================================
+   *
+   * HIER STAND EINE ZAEHLUNG, UND SIE WAR FALSCH. „`count(*) <> 0` an den
+   * Quellen" hat den Staging-Lauf am 2026-10-26 abgebrochen — mit sechs
+   * voellig legitimen Triggern als Grund: Zeitstempel, Unveraenderlichkeit
+   * von `sky_id` und Lageridentitaet, das Redaktionsprotokoll und die
+   * Artikeltyp-Ableitung. Die Quellen HABEN Trigger, und sie sollen sie
+   * haben.
+   *
+   * Es ist dieselbe Sorte Fehler, die `0142` schon gelehrt hat: eine
+   * Konstante, die eine Zahl behauptet, haelt ein Release an und sagt nicht,
+   * was los ist. `0146` hatte es richtig — es fragte nur nach Triggern mit
+   * `offer_state` im Namen.
+   *
+   * JETZT ZWEI AUSSAGEN, und beide sind scharf:
+   *
+   *   1. Am Spiegel selbst: KEIN Trigger. Das ist die zentrale Zusage der
+   *      Phase 4 — ein Fehler im Benachrichtigungssystem soll strukturell
+   *      keinen Kauf erreichen koennen.
+   *   2. An den Quellen: nur die sechs BEKANNTEN, jeder beim Namen. Ein
+   *      siebter faellt auf, und die Meldung nennt ihn.
+   *
+   * Die Liste steht hier ausgeschrieben und nicht als Zahl, damit ein
+   * Abbruch SAGT, was er gefunden hat. Dass sie zur Migrationshistorie
+   * passt, prueft `src/lib/favorites/availability.test.ts` — alle sechs
+   * entstehen in `0001`, `0003`, `0004` und `0135`.
+   */
+  /*
+   * DER SPIEGEL ZUERST, und zwar damit die Meldung die PRAEZISERE ist. Ein
+   * Trigger auf `offer_state` steht auch nicht in der Erwartungsliste, die
+   * ihn also ebenfalls faende — aber dann hiesse der Abbruch „unerwarteter
+   * Trigger" statt „Trigger auf dem Spiegel", und das ist die wichtigere
+   * Aussage der Phase 4.
+   */
   select count(*) into v_n from pg_trigger t
-   where t.tgrelid in ('public.shop_inventory'::regclass,
-                       'public.skylanders'::regclass,
-                       'public.shop_settings'::regclass,
-                       'public.offer_state'::regclass)
+   where t.tgrelid = to_regclass('public.offer_state')
      and not t.tgisinternal;
   if v_n <> 0 then
-    raise exception '%: % Trigger an den Quellen oder am Spiegel', v_wer, v_n;
+    raise exception '%: % Trigger auf offer_state. Phase 4 haengt nichts an '
+      'den Spiegel — ein Fehler darin darf strukturell keinen Kauf erreichen',
+      v_wer, v_n;
   end if;
+
+  select coalesce(string_agg(c.relname::text || '.' || t.tgname::text, ', '
+                             order by c.relname, t.tgname), '(keine)')
+    into v_t
+    from pg_trigger t
+    join pg_class c on c.oid = t.tgrelid
+   where c.oid in (to_regclass('public.shop_inventory'),
+                   to_regclass('public.skylanders'),
+                   to_regclass('public.shop_settings'),
+                   to_regclass('public.offer_state'))
+     and not t.tgisinternal
+     and (c.relname::text || '.' || t.tgname::text) <> all (array[
+           'shop_inventory.shop_inventory_identity_immutable',
+           'shop_inventory.shop_inventory_set_updated_at',
+           'skylanders.skylanders_item_type_from_category',
+           'skylanders.skylanders_log_editorial',
+           'skylanders.skylanders_set_updated_at',
+           'skylanders.skylanders_sky_id_immutable']);
+  if v_t <> '(keine)' then
+    raise exception '%: unerwartete Trigger an den Quellen oder am Spiegel: %. '
+      'Erwartet sind nur die sechs bestehenden aus 0001, 0003, 0004 und 0135 '
+      '(Zeitstempel, Unveraenderlichkeit, Redaktionsprotokoll, Artikeltyp). '
+      'Ein Trigger darueber hinaus ist zu klaeren, nicht zu uebergehen', v_wer, v_t;
+  end if;
+
 
   raise notice '0147 ok: offer_state hat 9 Spalten (buyable_since zuletzt), '
     '6 CHECKs, jede kaufbare Zeile mit Phasengrenze, keine bereits '
     'gemeldete Zeile wieder faellig; '
     'offer_availability_grace() immutable und offer_availability_due() '
     'definer+stable, beide ohne Clientrecht; refresh_offer_state() pflegt '
-    'buyable_since; kein Trigger, keine neue Tabelle, keine Benachrichtigung.';
+    'buyable_since; KEIN Trigger am Spiegel und nur die sechs bekannten an den '
+    'Quellen; keine neue Tabelle, keine Benachrichtigung.';
 end $$;
 -- <<< ENDE: supabase/migrations/0147_offer_availability.sql
 

@@ -5098,6 +5098,36 @@ async function main(): Promise<void> {
       values ('SKY-7001', 'loose', 2, 0, true),
              ('SKY-7002', 'loose', 1, 0, true);`);
 
+    /*
+     * DIE SECHS BEKANNTEN TRIGGER, wie Staging sie hat.
+     *
+     * Das Stub-Schema legt keine Trigger an, und genau dadurch war der
+     * Fehlgriff in `0147` hier UNSICHTBAR: die Migration zaehlte Trigger an
+     * den Quellen und erwartete null, der Probelauf fand null, alles gruen —
+     * und auf Staging brach sie mit sechs voellig legitimen Triggern ab.
+     * Ein Probelauf, der eine leerere Welt nachbildet als die echte, beweist
+     * nichts. (Dieselbe Lehre wie bei `P54` und den Entzuegen.)
+     *
+     * Die Namen stammen aus `0001`, `0003`, `0004` und `0135`; die
+     * Triggerfunktion ist hier eine Attrappe, denn geprueft wird die
+     * ERWARTUNGSLISTE und nicht ihr Rumpf.
+     */
+    await db.exec(`
+      create or replace function public.z55_trg() returns trigger
+      language plpgsql as $t$ begin return new; end $t$;
+      create trigger shop_inventory_identity_immutable before update
+        on public.shop_inventory for each row execute function public.z55_trg();
+      create trigger shop_inventory_set_updated_at before update
+        on public.shop_inventory for each row execute function public.z55_trg();
+      create trigger skylanders_item_type_from_category before insert
+        on public.skylanders for each row execute function public.z55_trg();
+      create trigger skylanders_log_editorial after update
+        on public.skylanders for each row execute function public.z55_trg();
+      create trigger skylanders_set_updated_at before update
+        on public.skylanders for each row execute function public.z55_trg();
+      create trigger skylanders_sky_id_immutable before update
+        on public.skylanders for each row execute function public.z55_trg();`);
+
     const befund: string[] = [];
     let ok = true;
     const sag = (was: string, gut: boolean, text: string): boolean => {
@@ -5173,6 +5203,38 @@ async function main(): Promise<void> {
     ok = sag("0146", l146 === null, l146 ?? "durch");
     /* Erstbefuellung: beide kaufbar, beide BEREITS GEMELDET. */
     if (ok) await ruf();
+    /* ----- 1x. DIE DREI TRIGGERFAELLE: erlaubt, unerwartet, am Spiegel ---- */
+    if (ok) {
+      /*
+       * DER ABBRUCH VOM 2026-10-26, als Pruefung. Erst muessen die sechs
+       * bekannten DURCHGEHEN — das war der Fehler. Dann muss ein siebter
+       * auffallen, und einer am Spiegel auch.
+       */
+      const mitTrigger = async (ddl: string): Promise<string> => {
+        await db.exec(ddl);
+        const r = await fahre(db, join(MIG_DIR, "0147_offer_availability.sql"));
+        return r ?? "(durchgelaufen)";
+      };
+
+      /* a) ein siebter an einer Quelle */
+      const siebter = await mitTrigger(
+        "create trigger z55_unerwartet after insert on public.shop_inventory"
+        + " for each row execute function public.z55_trg();");
+      await db.exec("drop trigger z55_unerwartet on public.shop_inventory;");
+
+      /* b) einer am Spiegel selbst */
+      const amSpiegel = await mitTrigger(
+        "create trigger z55_am_spiegel after insert on public.offer_state"
+        + " for each row execute function public.z55_trg();");
+      await db.exec("drop trigger z55_am_spiegel on public.offer_state;");
+
+      ok = sag("Triggerfaelle",
+        siebter.includes("unerwartete Trigger")
+        && siebter.includes("z55_unerwartet")
+        && amSpiegel.includes("Trigger auf offer_state"),
+        `siebter: ${siebter.slice(0, 70)} · am Spiegel: ${amSpiegel.slice(0, 60)}`);
+    }
+
     /* Der Preflight, als Eigner, VOR 0147 — mit seinen echten Erwartungen. */
     if (ok) {
       const anw = anweisungen(readFileSync(

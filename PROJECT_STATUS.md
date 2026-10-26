@@ -111,6 +111,8 @@ weil nur der Beginn der laufenden Phase gespeichert ist. Behoben mit **einer Spa
 — das Ergebnis ist eine **verpasste** Meldung, nie eine falsche. Solange kein Scheduler
 existiert, ist das die richtige Richtung zu irren.
 
+**Erster Staging-Versuch abgebrochen und behoben (2026-10-26).** `ERROR P0001: 0147 ABBRUCH: 6 Trigger an den Quellen oder am Spiegel` — die Pruefung **zaehlte** Trigger und erwartete null, die Quellen tragen aber sechs legitime (Zeitstempel, Unveraenderlichkeit, Redaktionsprotokoll, Artikeltyp aus `0001`, `0003`, `0004`, `0135`). Dieselbe Sorte Fehler wie die Richtlinienzahl in `0142`; `0146` hatte es richtig und fragte nur nach Triggern mit `offer_state` im Namen — beim Verbreitern habe ich es kaputtgemacht. **Nichts hinterlassen:** eine Transaktion, lesend bestaetigt. Jetzt eine **benannte** Erwartung an vier Stellen, zusammengehalten von einem Test, der sie auch gegen die Migrationshistorie prueft. **Und der Probelauf legt die sechs Trigger jetzt selbst an** — er bildete eine leerere Welt nach als die echte, und genau dadurch war der Fehlgriff unsichtbar.
+
 **Staging-Rollout vorbereitet (2026-10-26).** `0147_preflight.sql`,
 `0147_postflight.sql`, Eintrag in `migration-plans.json`, Einfüge-Hülle
 `supabase/operations/staging-0147.sql`, Laufzettel `supabase/checks/0147_staging_run.md`.
