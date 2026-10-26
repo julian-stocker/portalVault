@@ -82,6 +82,87 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Der Spiegel hatte keinen Aufrufer (2026-10-26, ADR-0145) — behoben
+
+**Der Betreiber hat vorgemerkt, eingekauft, eingebucht — und keine Benachrichtigung bekommen.**
+Die Ursache war weder die Karenzzeit noch die Meldungslogik:
+
+> **`refresh_offer_state()` hatte keinen einzigen Aufrufer.**
+
+`0146` hat den Spiegel bewusst ohne Trigger gebaut und die Gegenleistung in seinen eigenen Kopf
+geschrieben: „die Meldungen gehen an angemeldete Sammler, und **deren eigener Seitenaufbau
+frischt auf**". Gebaut hat diesen Aufrufer niemand. S1 legte den Spiegel an, S2 die Erkennung,
+S3 die Verarbeitung, S4 die Oberfläche — und alle vier hingen an einer Tabelle, die seit der
+Erstbefüllung am 2026-10-25 niemand mehr nachgezogen hat.
+
+**Vollständige Stille, nicht Verzögerung.** `shop_offers()` liest live, das Angebot erschien also
+sofort im Shop. `offer_state` erfuhr es nie → `offer_availability_due()` fand nichts →
+`claim_availability_notifications()` beanspruchte nichts. Keine Meldung, nicht nach dreißig
+Minuten und nicht nach einer Woche.
+
+**Nachgemessen (lesend, Staging, 2026-10-26):** `shop_offers()` lieferte **226** kaufbare
+Figuren, der Spiegel war mit **225** befüllt worden, und **SKY-0020** (Cynder, Spyro's
+Adventure) war live kaufbar zu **7,19 €**.
+
+**Behoben** mit dem Aufrufer, den `0146` angekündigt hatte — als erstes Glied einer Kette im
+authentifizierten Aufbau von `/favoriten`:
+
+```
+refreshOfferState()  →  claimAvailabilityNotifications()  →  fetchAvailabilityNotices()
+```
+
+Die Reihenfolge **ist** die Sache. Gedrosselt bleibt es in der Datenbank
+(`offer_state_window()`, eine Minute, plus Transaktionsschloss); `locked` wird nicht als Erfolg
+gelesen.
+
+**Die ehrliche Einschränkung:** `buyable_since` wird beim **ersten Nachziehen** gesetzt, nicht
+beim Einbuchen — „verfügbar seit" heißt „seit wir es bemerkt haben". Praktisch zwei Besuche: der
+erste startet die Uhr, der zweite nach Ablauf der Karenzzeit zeigt die Meldung. Das Ereignis
+bleibt fällig, bis es jemand abholt. Ein Scheduler wäre die einzige Lösung, die die Uhr beim
+Einbuchen startet — er bleibt eine **offene Entscheidung des Betreibers** (Infrastruktur,
+ADR-0136 sieht keine ohne konkreten Bedarf vor).
+
+**Der Wächter dagegen:** `supabase/checks/offer_state_freshness.sql`, jederzeit lesend fahrbar.
+Zeile **111** blockiert auf die Frische, **211** zeigt, wie weit Spiegel und Wirklichkeit
+auseinanderliegen, **212/213** nennen die stummen Ereignisse, **303** unterscheidet „die
+Karenzzeit läuft" von „es passiert nichts", **401–408** beantworten alles für eine einzelne
+SKY-ID. Diese Datei hätte den Fehler am 2026-10-25 gefunden.
+
+**Die Lehre, allgemeiner als dieser Fehler:** eine Entscheidung, die eine Aufgabe an einen
+„späteren Aufrufer" delegiert, ist nicht getroffen, solange dieser Aufrufer nicht existiert. Ein
+Kommentar ruft nichts auf. Vier aufeinander aufbauende Schritte haben es nicht bemerkt, weil
+jeder für sich vollständig war und seine Probeläufe `refresh_offer_state()` selbst aufrufen.
+
+---
+
+## Favoritenhinweis im Einkaufsbuch (2026-10-26) — gebaut
+
+Im aufgeklappten Bestellbereich zeigt jede **offene** Position neben dem Figurennamen, wie viele
+Konten diese Figur vorgemerkt haben — dasselbe Herz und dieselbe Komponente wie in der
+Lagerkarte und im Figuren-Picker.
+
+**Die Vorfrage, und sie hat die Umsetzung entschieden:** „meine Favoritenliste" kann es dort
+nicht geben. Wer das Einkaufsbuch öffnen darf, ist ein **Verkäuferbetrieb**, und seit `0042` ist
+ein Konto genau eines von drei Dingen (ADR-0078). `is_collector_account()` ist für ein solches
+Konto falsch, und **alle drei** Richtlinien auf `favorites` fragen danach — es kann keine eigene
+Wunschliste haben, nicht lesen, nicht anlegen, nicht löschen. Gezeigt wird deshalb die
+**Nachfrage**: `favorite_demand()`, dessen Signatur `(sky_id, users)` die Sicherheitsgrenze IST
+(ADR-0136) — eine Zahl, nie wer.
+
+| Anforderung | Umsetzung |
+|---|---|
+| dezent, neben dem Namen | `FavoriteDemandIndicator` in der **Namensspur**, `shrink-0` und `whitespace-nowrap`; der Name gibt nach (`min-w-0` + `truncate`) |
+| keine zusätzliche Spalte | `.ob-item` hat unverändert **fünf** Spuren — auf dem Telefon keine Breite dazu |
+| nur die exakte SKY-ID | `demand[purchase.id]?.[item.skyId]`, und `skyId === null` bekommt nichts |
+| nur solange nicht eingebucht | `itemStatus(item) === "open"` — keine neue Regel, dieselbe Funktion füllt die Statusspalte daneben |
+| verschwindet beim Einbuchen | das Einbuchen gibt die neue Positionsliste zurück, die Zeile wird `complete`, die Bedingung ist falsch |
+| kein Favorit wird entfernt | hier wird gelesen und gezeichnet; `setFavorite` kommt in der ganzen Kette nicht vor, und das Einbuchen kennt `favorites` nicht |
+| keine Gegenanzeige | die Komponente zeichnet bei `0`, `null` und `undefined` nichts |
+| Status und Einbuchen unverändert | eine Prop dazu, eine Bedingung um eine Anzeige; dieselben Aktionen |
+| keine fremden Favoriten | eine Abfrage je Aufklappen für genau die SKY-IDs dieses Einkaufs, aus `loadPurchaseItems()` — das Tor ist `can_operate_active_seller()` in der Datenbank, und weder Aktion noch Zeile noch Anzeige kennt eine Kontokennung |
+
+---
+
 ## Benachrichtigungsoberfläche (2026-10-26, `0149`, Phase 4 S4, ADR-0144) — **auf Staging angewendet**
 
 **Die Meldungen aus `0148` bekommen ein Gesicht** — und eine Spalte, die „neu" von „gesehen"
