@@ -214,14 +214,65 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
            else 'KEIN-RECHT' end, null),
 
   -- --------------------------------------------- Kein Trigger, und bleibt so
+  /*
+   * TRIGGER: BENANNTE ERWARTUNG, KEINE ZAEHLUNG.
+   *
+   * Eine Zeile „`count(*) = 0` an den Quellen" hat den Staging-Lauf von
+   * `0147` am 2026-10-26 abgebrochen — mit sechs voellig legitimen Triggern
+   * als Grund. Die Quellen HABEN Trigger (Zeitstempel, Unveraenderlichkeit,
+   * Redaktionsprotokoll, Artikeltyp), und sie sollen sie haben. Dieselbe
+   * Sorte Fehler wie die Richtlinienzahl in `0142`.
+   *
+   * Jetzt drei Zeilen: am Spiegel KEINER, an den Quellen nur die sechs
+   * bekannten (jeder beim Namen), und die sechs sind noch da. Die Liste ist
+   * in Migration, Preflight und Nachkontrolle dieselbe —
+   * `availability.test.ts` prueft, dass sie nicht auseinanderlaufen.
+   */
   (131, 'Trigger', 'Info: Trigger an den Quellen und am Spiegel',
-      (select coalesce(string_agg(t.tgname::text, ',' order by t.tgname), '(keine)')
+      (select coalesce(string_agg(c.relname::text || '.' || t.tgname::text, ', '
+                                  order by c.relname, t.tgname), '(keine)')
          from pg_trigger t
-        where t.tgrelid in (to_regclass('public.shop_inventory'),
-                            to_regclass('public.skylanders'),
-                            to_regclass('public.shop_settings'),
-                            to_regclass('public.offer_state'))
+         join pg_class c on c.oid = t.tgrelid
+        where c.oid in (to_regclass('public.shop_inventory'),
+                        to_regclass('public.skylanders'),
+                        to_regclass('public.shop_settings'),
+                        to_regclass('public.offer_state'))
           and not t.tgisinternal), null),
+  (132, 'Trigger', 'KEIN Trigger am Spiegel',
+      (select count(*)::text from pg_trigger t
+        where t.tgrelid = to_regclass('public.offer_state')
+          and not t.tgisinternal), '0'),
+  (133, 'Trigger', 'und an den Quellen nur die sechs bekannten — ein siebter ist zu '
+        'klaeren, bevor 0147 laeuft',
+      (select coalesce(string_agg(c.relname::text || '.' || t.tgname::text, ', '
+                                  order by c.relname, t.tgname), '(keine)')
+         from pg_trigger t
+         join pg_class c on c.oid = t.tgrelid
+        where c.oid in (to_regclass('public.shop_inventory'),
+                        to_regclass('public.skylanders'),
+                        to_regclass('public.shop_settings'),
+                        to_regclass('public.offer_state'))
+          and not t.tgisinternal
+          and (c.relname::text || '.' || t.tgname::text) <> all (array[
+             'shop_inventory.shop_inventory_identity_immutable',
+             'shop_inventory.shop_inventory_set_updated_at',
+             'skylanders.skylanders_item_type_from_category',
+             'skylanders.skylanders_log_editorial',
+             'skylanders.skylanders_set_updated_at',
+             'skylanders.skylanders_sky_id_immutable'])),
+      '(keine)'),
+  (134, 'Trigger', 'die sechs bestehenden sind da (0001, 0003, 0004, 0135)',
+      (select count(*)::text
+         from pg_trigger t
+         join pg_class c on c.oid = t.tgrelid
+        where not t.tgisinternal
+          and (c.relname::text || '.' || t.tgname::text) = any (array[
+             'shop_inventory.shop_inventory_identity_immutable',
+             'shop_inventory.shop_inventory_set_updated_at',
+             'skylanders.skylanders_item_type_from_category',
+             'skylanders.skylanders_log_editorial',
+             'skylanders.skylanders_set_updated_at',
+             'skylanders.skylanders_sky_id_immutable'])), '6'),
 
   -- --------------------------- Die Zahlen des Betriebs (Basis-Vertrag)
   (301, 'Shop', 'oeffentliche Angebote',

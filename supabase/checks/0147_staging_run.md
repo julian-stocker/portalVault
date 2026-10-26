@@ -27,6 +27,17 @@ Voraussetzung ist dieselbe wie bei `0146` (ADR-0138, ADR-0140): die CA unter
 
 ## Schritt 1 — Preflight
 
+> **Der erste Versuch am 2026-10-26 brach hier ab**, und zwar in der
+> Migration: `ERROR P0001: 0147 ABBRUCH: 6 Trigger an den Quellen oder am
+> Spiegel`. Die Prüfung **zählte** Trigger und erwartete null — die Quellen
+> haben aber sechs völlig legitime (Zeitstempel, Unveränderlichkeit,
+> Redaktionsprotokoll, Artikeltyp). Dieselbe Sorte Fehler wie die
+> Richtlinienzahl in `0142`. Die Migration lief in **einer** Transaktion und
+> hat damit **nichts** hinterlassen — lesend bestätigt: `buyable_since` fort,
+> beide Funktionen fort, fünf CHECKs, `refresh_offer_state()` in der Fassung
+> aus `0146`. Jetzt steht eine **benannte** Erwartung, und die sechs gehen
+> durch.
+
 **Erwartet: Zeile 9999 = `0`**, und **7 offene Zeilen** (9998 = 7): der
 Prüfzugang darf `offer_state` nicht lesen und `reservation_ttl()` nicht
 aufrufen. Das ist kein Mangel, sondern die Lage seit ADR-0139.
@@ -38,7 +49,10 @@ aufrufen. Das ist kein Mangel, sondern die Lage seit ADR-0139.
 | 108 | Auskunft | die Reservierungsdauer — daraus leitet sich die Karenzzeit ab |
 | **111–114** | `0` · `true` · `true` · `true` | `0147` ist **noch nicht** da. Ein zweiter Lauf soll an seiner Vorbedingung abprallen |
 | **121–126** | Auskunft | **die nützlichsten Zahlen des Blattes.** 121/122 der Spiegelstand (erwartet: **225 Zeilen, 225 kaufbar**), 123 wie viele einen gemeldeten Stand tragen (erwartet: **225**), **124** die `least()`-Fälle (Figuren mit Preisänderung seit der Erstbefüllung), **125** die kaufbaren **ohne** gemeldeten Stand — die werden nach `0147` **zu Recht** fällig |
-| 131 | Auskunft | welche Trigger es gibt |
+| 131 | Auskunft | welche Trigger es gibt — erwartet die **sechs bekannten**: `shop_inventory_identity_immutable`, `shop_inventory_set_updated_at`, `skylanders_item_type_from_category`, `skylanders_log_editorial`, `skylanders_set_updated_at`, `skylanders_sky_id_immutable` |
+| **132** | `0` | **kein Trigger am Spiegel** |
+| **133** | `(keine)` | und an den Quellen **kein siebter**. Steht hier ein Name, ist er zu klären, bevor `0147` läuft |
+| **134** | `6` | die sechs bestehenden sind da |
 | 301–307 | Auskunft | die sieben Geschäftszahlen des Basis-Vertrags |
 | **900 / 901** | zwei Vertragszeilen | Shop- und Sammlungs-Baseline. Der Runner friert sie selbst ein |
 
@@ -91,8 +105,10 @@ und 9999 = 0**.
 | **113** | `true` | `offer_availability_due()` ist `definer` **und `stable`** — sie *kann* kein Ereignis verbrauchen |
 | 114–116 | `2` · `""` · `0` | leerer `search_path` (ausgepackt, nicht verglichen), kein Clientrecht |
 | 117 / 118 | `true` · `true` | `refresh_offer_state()` pflegt `buyable_since`, rechnet gegen `reservation_ttl()`, bleibt definer+volatile |
-| **121** | `0` | **kein Trigger** an den Quellen oder am Spiegel |
-| 122 / 123 | Auskunft | Spiegelstand — muss den Zahlen 121/122 des Preflights entsprechen |
+| **121** | `0` | **kein Trigger am Spiegel** — die zentrale Zusage der Phase 4 |
+| **122** | `(keine)` | und an den Quellen nur die sechs bekannten, jeder beim Namen |
+| 123 | `6` | die sechs bestehenden sind noch da |
+| 124 / 125 | Auskunft | Spiegelstand — muss den Zahlen 121/122 des Preflights entsprechen |
 | **801–833** | unverändert | Shop, Lager und Sammlung haben sich nicht bewegt |
 
 ---

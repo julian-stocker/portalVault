@@ -314,21 +314,62 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
                '(keine Funktion)'), 'true'),
 
   -- ---------------------------------------------- Kein Trigger, nichts sonst
-  (121, 'Trigger', 'kein Trigger an den Quellen oder am Spiegel',
+  /*
+   * TRIGGER: BENANNTE ERWARTUNG, KEINE ZAEHLUNG.
+   *
+   * Eine Zeile „`count(*) = 0` an den Quellen" hat den Staging-Lauf von
+   * `0147` am 2026-10-26 abgebrochen — mit sechs voellig legitimen Triggern
+   * als Grund. Die Quellen HABEN Trigger (Zeitstempel, Unveraenderlichkeit,
+   * Redaktionsprotokoll, Artikeltyp), und sie sollen sie haben. Dieselbe
+   * Sorte Fehler wie die Richtlinienzahl in `0142`.
+   *
+   * Jetzt drei Zeilen: am Spiegel KEINER, an den Quellen nur die sechs
+   * bekannten (jeder beim Namen), und die sechs sind noch da. Die Liste ist
+   * in Migration, Preflight, Nachkontrolle und Huelle dieselbe —
+   * `availability.test.ts` prueft, dass sie nicht auseinanderlaufen.
+   */
+  (121, 'Trigger', 'KEIN Trigger am Spiegel — die zentrale Zusage der Phase 4',
       (select count(*)::text from pg_trigger t
-        where t.tgrelid in (to_regclass('public.shop_inventory'),
-                            to_regclass('public.skylanders'),
-                            to_regclass('public.shop_settings'),
-                            to_regclass('public.offer_state'))
+        where t.tgrelid = to_regclass('public.offer_state')
           and not t.tgisinternal), '0'),
-  (122, 'Spiegel', 'Info: Zeilen im Spiegel (unveraendert gegenueber Zeile 121 des '
+  (122, 'Trigger', 'und an den Quellen nur die sechs bekannten',
+      (select coalesce(string_agg(c.relname::text || '.' || t.tgname::text, ', '
+                                  order by c.relname, t.tgname), '(keine)')
+         from pg_trigger t
+         join pg_class c on c.oid = t.tgrelid
+        where c.oid in (to_regclass('public.shop_inventory'),
+                        to_regclass('public.skylanders'),
+                        to_regclass('public.shop_settings'),
+                        to_regclass('public.offer_state'))
+          and not t.tgisinternal
+          and (c.relname::text || '.' || t.tgname::text) <> all (array[
+             'shop_inventory.shop_inventory_identity_immutable',
+             'shop_inventory.shop_inventory_set_updated_at',
+             'skylanders.skylanders_item_type_from_category',
+             'skylanders.skylanders_log_editorial',
+             'skylanders.skylanders_set_updated_at',
+             'skylanders.skylanders_sky_id_immutable'])),
+      '(keine)'),
+  (123, 'Trigger', 'die sechs bestehenden sind noch da (0001, 0003, 0004, 0135)',
+      (select count(*)::text
+         from pg_trigger t
+         join pg_class c on c.oid = t.tgrelid
+        where not t.tgisinternal
+          and (c.relname::text || '.' || t.tgname::text) = any (array[
+             'shop_inventory.shop_inventory_identity_immutable',
+             'shop_inventory.shop_inventory_set_updated_at',
+             'skylanders.skylanders_item_type_from_category',
+             'skylanders.skylanders_log_editorial',
+             'skylanders.skylanders_set_updated_at',
+             'skylanders.skylanders_sky_id_immutable'])), '6'),
+  (124, 'Spiegel', 'Info: Zeilen im Spiegel (unveraendert gegenueber Zeile 121 des '
         'Preflights)',
       case when has_table_privilege('public.offer_state', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select count(*) as c from public.offer_state',
                false, true, '')))[1]::text
            else 'KEIN-RECHT' end, null),
-  (123, 'Spiegel', 'Info: davon kaufbar',
+  (125, 'Spiegel', 'Info: davon kaufbar',
       case when has_table_privilege('public.offer_state', 'select')
            then (xpath('/row/c/text()', query_to_xml(
                'select count(*) as c from public.offer_state where buyable',
