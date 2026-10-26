@@ -412,8 +412,8 @@ describe("0122 legt an, was der Beleg braucht", () => {
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    expect(files[files.length - 1]).toBe("0149_notification_read_state.sql");
-    expect(files[files.length - 2]).toBe("0148_availability_notifications.sql");
+    expect(files[files.length - 1]).toBe("0151_offer_state_live.sql");
+    expect(files[files.length - 2]).toBe("0150_availability_alerts.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

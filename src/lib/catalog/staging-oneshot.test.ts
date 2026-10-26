@@ -398,9 +398,21 @@ const LAEUFE = [
      eine Richtlinie, eine Funktion; KEIN Trigger, kein Scheduler. Sie setzt
      `0145`, `0146` und `0147` voraus und prueft jedes selbst. */
   ["supabase/operations/staging-0148.sql", "0148_availability_notifications.sql"],
+  /* Und `0149` — der Lesezustand (Phase 4 S4). Sie stand bis jetzt NICHT in
+     dieser Liste, obwohl ihre Huelle im Kopf zusagt, dass dieser Test sie
+     vergleicht. Eine Zusage, die niemand prueft, ist keine. */
+  ["supabase/operations/staging-0149.sql", "0149_notification_read_state.sql"],
+  /* Und `0150` — die Verfuegbarkeitsalarme (ADR-0147). Eine Tabelle, eine
+     Richtlinie, drei Teilindizes, vier Funktionen; KEIN Trigger, kein
+     Scheduler, kein Aufrufer. Sie setzt von `0146` nur die SICHT voraus. */
+  ["supabase/operations/staging-0150.sql", "0150_availability_alerts.sql"],
+  /* Und `0151` — die Live-Sicht eigenstaendig (ADR-0147, E-1/B2). Sie
+     gehoert fachlich VOR `0150`, steht hier aber nach ihr: diese Liste ist
+     nach Dateinamen sortiert und sagt nichts ueber die Laufreihenfolge. */
+  ["supabase/operations/staging-0151.sql", "0151_offer_state_live.sql"],
 ] as const;
 
-describe("die Einzellaeufe fuer 0139 bis 0143", () => {
+describe("die Einzellaeufe fuer 0139 bis 0151", () => {
   for (const [skript, migration] of LAEUFE) {
     const text = readFileSync(skript, "utf8");
 

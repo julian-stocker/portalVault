@@ -86,6 +86,42 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0150": {
+      "zweck": "Verfuegbarkeitsalarme, Fire and forget (ADR-0147)",
+      "preflight": "0150_preflight.sql",
+      "lauf": "staging-0150.sql",
+      "postflight": "0150_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.availability_alerts steht",
+        "sql": "select (to_regclass('public.availability_alerts') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0151": {
+      "zweck": "Die Live-Sicht wird eigenstaendig (ADR-0147, E-1/B2) — gehoert VOR 0150",
+      "preflight": "0151_preflight.sql",
+      "lauf": "staging-0151.sql",
+      "postflight": "0151_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.offer_state_live steht. ACHTUNG, die Probe fragt den ZUSTAND und nicht das Ereignis: 0151 ist wiederholbar und laesst auf Staging alles, wie es ist, also gibt es dort keine Spur, die den Lauf von der Sicht unterscheidet. Auf Staging antwortet sie deshalb von Anfang an JA - der Runner verweigert dann zu Recht die Anwendung und laesst nur --resume zu. Auf Production antwortet sie nein, bis die Sicht steht.",
+        "sql": "select (to_regclass('public.offer_state_live') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

@@ -14527,3 +14527,94 @@ Alarm existieren. Das ist die bessere Stelle.
 **Preisbeobachtung bleibt möglich.** Ein Preisalarm wäre dasselbe Muster mit
 einer Grundlinie, die beim Scharfstellen festgehalten wird — er braucht
 ebenfalls keinen globalen Spiegel. Verbaut wird nichts.
+
+### Nachtrag vom 2026-10-26 — die Live-Sicht wird eigenstaendig (E-1 bis E-4)
+
+**Anlass.** Beim Schreiben von `0150` blieb ein Risiko offen (R-1): die
+Migration liest `public.offer_state_live`, und die Sicht stammt aus `0146`.
+Auf Production haette das bedeutet, erst den ganzen Spiegel auszurollen —
+eine Tabelle mit rund 290 Zeilen `announced_*`, zwei Funktionen und ein
+Mechanismus ohne Aufrufer —, nur um ihn gleich wieder zurueckzubauen. Der
+Betreiber hat das zur Entscheidung gestellt; **gemessen** wurde dazu, wovon
+die Sicht wirklich abhaengt.
+
+**Der Befund, der die Entscheidung getragen hat.** Die Sicht liest
+`public.shop_offers()` (`0029`, ersetzt in `0139`) und
+`public.v1_sale_condition()` (`0028`) — **und nichts sonst**. Sie nennt
+`offer_state` nirgends; die Abhaengigkeit laeuft genau umgekehrt, der Spiegel
+liest *sie*. Beide Funktionen liegen auf Production (die Akte fuehrt `0139`
+mit Pruefsumme und „gleich"). Die Sicht ist dort also **heute** anlegbar, ohne
+jede weitere Voraussetzung. Probelauf **P58** fuhr das bereits nach, bevor es
+entschieden war: er loescht Spiegel, Favoriten und Meldungen und laesst `0150`
+mit der Sicht allein durchlaufen.
+
+| # | Entscheidung | Festlegung |
+|---|---|---|
+| **E-1** | Variante **B2** | Eine eigenstaendige Migration `0151_offer_state_live.sql` stellt die Sicht bereit. Production braucht die Spiegelarchitektur aus `0146`–`0149` **nicht**. Nicht in `0150` hineingenommen (B1), weil die bereits verifizierte Migration dafuer wieder aufgemacht werden muesste und weil die Sicht fachlich eine **Shop-Projektion** ist und keine Benachrichtigungssache |
+| **E-2** | Reihenfolge **`0151` → `0150`** | In jeder Umgebung, auf Production also eine hoehere Nummer zuerst. Gedeckt durch „Die Nummer ist eine Reihenfolge, keine Kette" (`APPLIED.md`); der dort verlangte Nachweis: `0151` aendert nur `offer_state_live`, `0150` nur seine fuenf eigenen Objekte, **die Schnittmenge der geaenderten Objekte ist leer**, und es besteht genau eine Abhaengigkeit — `0150` liest die Sicht. **P58 faehrt seitdem genau diese Folge** |
+| **E-3** | Name und Referenz bleiben | Die Sicht heisst weiter `offer_state_live` — ein zweiter Name fuer dieselbe Sache mitten im Uebergang waere schlimmer als ein historischer. **Die Fassung aus `0146` ist die verbindliche Referenz**; `0151` uebernimmt Rumpf UND Kommentar zeichengleich. **Keine zweite Definition der Shop-Kaufbarkeit** |
+| **E-4** | Rueckbau erst in M9 | `R0146b` wird **nicht** jetzt als ausfuehrbares SQL geschrieben. Die Anforderungen sind dokumentiert (`supabase/checks/0151_staging_run.md`, Abschnitt „Der spaetere Rueckbau") |
+
+**Wie „keine zweite Definition" durchgehalten wird, und das ist der Kern.**
+`0151` traegt den Rumpf als **ein einziges Literal** (`v_rumpf`), das zweimal
+BENUTZT wird: einmal zum Anlegen (`create view … as` verkettet mit ihm) und
+einmal als Unterabfrage, deren Ergebnis mit dem der bestehenden Sicht
+verglichen wird. Es gibt also keine zweite Textfassung der Regel — auch nicht
+zum Pruefen. `src/lib/availability/alerts-schema.test.ts` haelt das Literal
+gegen `0146`; liefen die beiden auseinander, haette dieses Projekt zwei
+Antworten auf „ist diese Figur kaufbar", und die Benachrichtigung stuende auf
+der anderen als der Shop.
+
+**Zwei Ausgangslagen, ein Endzustand.** Fehlt die Sicht (Production), wird sie
+angelegt; steht sie (Staging seit `0146`), wird sie **geprueft und nicht
+angefasst**. `create or replace view` kommt nicht vor — es waere der kurze und
+gleichzeitig der gefaehrliche Weg, weil es auf Staging einen bestehenden Rumpf
+stillschweigend ersetzen wuerde.
+
+**`0151` ist deshalb wiederholbar, `0150` nicht** — und das ist kein
+Widerspruch, sondern der Unterschied ihrer Gegenstaende: `0151` stellt einen
+ZUSTAND her („die Sicht steht und ist die richtige"), `0150` ein EREIGNIS
+(„diese fuenf Objekte entstehen jetzt"). Aus demselben Grund fragt die
+`angewendet`-Probe in `migration-plans.json` fuer `0151` den Zustand und sagt
+ausdruecklich, dass sie das tut: auf Staging antwortet sie von Anfang an JA,
+und der Runner verweigert dann zu Recht die Anwendung.
+
+**Fachliche Gleichwertigkeit, in vier Stufen.** Eine abweichende bestehende
+Sicht darf nicht stillschweigend durchgehen — geprueft wird deshalb nicht nur
+der Name:
+
+| Stufe | Frage | Faengt |
+|---|---|---|
+| **1 Bauart** | eine Sicht, genau `sky_id text` und `cheapest_cents integer` | eine erweiterte oder umbenannte Fassung |
+| **2 Herkunft** | haengt an `shop_offers()` UND `v1_sale_condition()` und an **keiner** Relation — gelesen aus `pg_depend` ueber die Umschreiberegel | eine Fassung, die `offer_state` oder `shop_inventory` direkt liest. Formatunabhaengig, weil aus dem Katalog gelesen |
+| **3 Wortlaut** | der normalisierte `pg_get_viewdef()` enthaelt `shop_offers`, `v1_sale_condition`, `min(round(`, `*100`, `available`, `group by` | **`max` statt `min`** und ein **fehlendes `available`** — beides laesst Spalten und Herkunft unveraendert |
+| **4 Verhalten** | ihr Ergebnis ist zeichengleich mit dem der verbindlichen Fassung, **beide Abdruecke in EINER Anweisung** | eine Fassung, die alle sechs Woerter enthaelt und trotzdem etwas anderes liefert |
+
+Dazu: kein Clientrecht, sonst Abbruch. **Probelauf P59 provoziert jede der
+vier Stufen einzeln** — dritte Spalte, Relation im Verbund, `max` statt `min`,
+zusaetzlicher Filter bei vollstaendigem Wortlaut — und zusaetzlich ein
+Clientrecht, die Wiederholbarkeit und `R0151`.
+
+> **Ehrliche Grenze von Stufe 4.** Zeichengleiche Ergebnisse auf den HEUTIGEN
+> Daten beweisen keine Gleichheit fuer alle denkbaren Daten, und bei einem
+> leeren Shop ist der Vergleich leer gegen leer. Stufe 4 ist das vierte Bein
+> und nicht das einzige; die Last tragen 1 bis 3, die von Daten unabhaengig
+> sind.
+
+**Und die Zusage an den Rueckbau, die daraus folgt.**
+`R0146_drop_offer_state.sql` enthaelt
+`drop view if exists public.offer_state_live`. **Nach der Einfuehrung von
+`0150` wuerde dieser Rueckbau die neue Benachrichtigungsfunktion
+zerbrechen** — `watch_availability()` und `fire_availability_alerts()` lesen
+die Sicht, und PostgreSQL haelt auf einen Funktionsrumpf keine
+Abhaengigkeit: der `drop` liefe glatt durch, und der Bruch fiele erst beim
+naechsten Klick auf eine Glocke auf. **M9 braucht deshalb eine eigene
+Rueckbaufassung, die den Spiegel nimmt und die Sicht LAESST** — `R0146`
+selbst bleibt nach Regel 1 der Akte unberuehrt. `R0151` zieht dieselbe Lehre
+in der anderen Richtung: sie verweigert, solange einer der vier namentlich
+gefuehrten Leser steht.
+
+**R-1 ist damit erledigt.** `0150` setzt nicht mehr `0146` voraus, sondern
+`0151`; die Fehlermeldung ihrer Vorbedingung und ihr Kopf sagen das. An der
+Tabelle, den Indizes, den vier Funktionen und den Rechten aus `0150` wurde
+nichts geaendert.

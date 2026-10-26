@@ -290,6 +290,26 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * Hier ist der Ausschluss DAUERHAFT, nicht vorübergehend: sie gehört in
    * die Plattformsicherung, nicht in die des Betriebs.
    */
+  /*
+   * DAUERHAFT DRAUSSEN, dieselbe Klasse wie die drei darunter.
+   *
+   * `availability_alerts` (`0150`, ADR-0147) trägt Vormerkung UND Meldung in
+   * einer Zeile, und beide hängen an `user_id` — der Kontoidentität, die
+   * dieser Export sperrt. Ein Alarm ist kein Geschäftsvorfall: nichts wurde
+   * gekauft, verkauft, bewegt oder bezahlt. Ein Händlerexport, der fremde
+   * Alarme enthielte, gäbe genau das heraus, was dem Betrieb bewusst nur als
+   * ZAHL gezeigt wird (`favorite_demand()`, `0145`) — und `0150` gibt ihm
+   * nicht einmal die.
+   *
+   * Wo sie hingehört: in die Plattformsicherung (siehe dort).
+   */
+  availability_alerts:
+    "Verfügbarkeitsalarme eines Sammlers (0150, ADR-0147). Vormerkung und " +
+    "Meldung in einer Zeile, beide an user_id — der Kontoidentität, die dieser " +
+    "Export sperrt. Ein Alarm ist kein Geschäftsvorfall; fremde Alarme in einem " +
+    "Händlerexport wären ein Leck. Gehört in die Plattformsicherung — hier " +
+    "dauerhaft draußen.",
+
   availability_notifications:
     "Persönliche Verfügbarkeitsmeldungen (0148). Eine Meldung an einen Sammler ist " +
     "kein Geschäftsvorfall, und sie hängt an user_id, das dieser Export als " +
