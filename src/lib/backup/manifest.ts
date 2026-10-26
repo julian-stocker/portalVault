@@ -280,6 +280,22 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "Nutzers und nicht in einen Händlerexport. Gehört in die " +
     "Plattformsicherung (ADR-0136, D-6).",
 
+  /*
+   * Dieselbe Begründung wie bei `favorites`, einen Schritt deutlicher: eine
+   * Benachrichtigung an einen Sammler ist kein Geschäftsvorfall, und sie
+   * hängt an `user_id`, das dieser Export als Kontoidentität sperrt. Ein
+   * Händlerexport mit fremden Meldungen wäre ein Leck — dem Betrieb zeigt
+   * `favorite_demand()` ausdrücklich nur aggregierte Zahlen.
+   *
+   * Hier ist der Ausschluss DAUERHAFT, nicht vorübergehend: sie gehört in
+   * die Plattformsicherung, nicht in die des Betriebs.
+   */
+  availability_notifications:
+    "Persönliche Verfügbarkeitsmeldungen (0148). Eine Meldung an einen Sammler ist " +
+    "kein Geschäftsvorfall, und sie hängt an user_id, das dieser Export als " +
+    "Kontoidentität sperrt. Fremde Meldungen in einem Händlerexport wären ein Leck. " +
+    "Gehört in die Plattformsicherung (ADR-0136) — hier dauerhaft draußen.",
+
   favorites:
     "Vorgemerkte Figuren eines Sammlers (0145). Sie hängen an user_id, das dieser " +
     "Export als Kontoidentität sperrt — und eine Vormerkung ist kein " +

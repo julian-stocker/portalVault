@@ -801,6 +801,33 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "Folgemigration nimmt sie mit favorites zusammen auf (Formatversion 3); " +
     "das muss VOR dem Production-Rollout geschehen (ADR-0136, D-6).",
 
+  /*
+   * `availability_notifications` sind persönliche Nutzerdaten, und zwar die
+   * einzigen, die eine Wiederherstellung NICHT aus anderen Daten
+   * rekonstruieren kann: was einem Nutzer gemeldet wurde, steht nur hier.
+   *
+   * **Sie gehört also ins Archiv** — und sie steht hier aus demselben
+   * vorübergehenden Grund wie `favorites` und `offer_state` draußen: ein
+   * Bereich würde `system_platform_export()` ersetzen, und `0144` liegt
+   * noch nicht auf Production. Die Folgemigration nimmt alle drei zusammen
+   * auf (Formatversion 3), und das muss VOR dem Production-Rollout
+   * geschehen (ADR-0136, D-6; Betreiberentscheidung vom 2026-10-25: neue
+   * persönliche Nutzerdaten dürfen nicht dauerhaft draußen bleiben).
+   *
+   * EIN ARCHIV OHNE SIE wäre nach einer Wiederherstellung übrigens nicht
+   * „leer, aber harmlos": `offer_state.announced_*` bliebe gesetzt, also
+   * entstünden die verlorenen Meldungen auch nicht neu. Der Nutzer verlöre
+   * sie endgültig.
+   */
+  availability_notifications:
+    "Persönliche Verfügbarkeitsmeldungen (0148). Persönliche Nutzerdaten, und " +
+    "der einzige Teil, den eine Wiederherstellung nicht rekonstruieren kann — " +
+    "was gemeldet wurde, steht nur hier. GEHOERT INS ARCHIV; vorübergehend " +
+    "draußen, weil ein Bereich system_platform_export() ersetzen würde und " +
+    "0144 noch nicht auf Production liegt. Die Folgemigration nimmt sie mit " +
+    "favorites und offer_state zusammen auf (Formatversion 3); das muss VOR " +
+    "dem Production-Rollout geschehen (ADR-0136, D-6).",
+
   favorites:
     "Vorgemerkte Figuren eines Sammlers (0145). Persönliche Nutzerdaten und " +
     "GEHOERT INS ARCHIV — vorübergehend draußen, weil ein Bereich " +

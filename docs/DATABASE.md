@@ -46,6 +46,7 @@ SQL-Editor angewandt (ADR-0051).
 | `purchase_calculations` (`0142`) | wächst | bewusst gespeicherte Einkaufskalkulationen | nur der Eigentümer |
 | `favorites` (`0145`) | wächst | vorgemerkte Figuren: Benutzer × Figur | nur der Eigentümer; Zahlen für den Betrieb über `favorite_demand()` |
 | `offer_state` (`0146`, `0147`) | eine je kaufbarer Figur | der Angebotsspiegel: ob eine Figur jetzt kaufbar ist, seit wann ununterbrochen, und was zuletzt gemeldet wurde | **kein Clientrecht**, RLS an ohne Richtlinie — alles läuft über Funktionen |
+| `availability_notifications` (`0148`) | eine je Nutzer, Figur und Phase | persönliche Verfügbarkeitsmeldungen | nur der Eigentümer, **nur lesen** — geschrieben wird ausschließlich von `claim_availability_notifications()` |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -2208,6 +2209,60 @@ in `PLATFORM_EXCLUDED_TABLES`: die `announced_*`-Spalten sind der einzige
 nicht wiederherstellbare Teil, und ein Archiv ohne sie würde nach einer
 Wiederherstellung **jede** Figur neu melden. Die Folgemigration muss sie
 aufnehmen (ADR-0136, D-6).
+
+### 3.5c `availability_notifications` — persönliche Meldungen (Migration `0148`)
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `user_id` | `uuid not null` | FK → `auth.users(id)`, `on delete cascade` |
+| `sky_id` | `text not null` | FK → `skylanders(sky_id)`, `on delete restrict` |
+| `buyable_since` | `timestamptz not null` | welche **Phase** gemeldet wurde (`0147`) |
+| `cheapest_cents` | `integer not null` | was zum Zeitpunkt der Meldung galt, in Cent |
+| `created_at` | `timestamptz not null default now()` | wann gemeldet |
+
+**Primärschlüssel: `(user_id, sky_id, buyable_since)` — und er IST der
+Duplikatschutz.** „Genau eine Meldung je Nutzer, Figur und
+Verfügbarkeitsphase" ist damit eine Eigenschaft der Datenbank, keine Zusage
+der Anwendungslogik: zwei gleichzeitige Aufrufe können sie nicht verletzen.
+Ein echter späterer Zyklus hat eine neue Phasengrenze und darf deshalb eine
+neue Meldung erzeugen; eine kurze Warenkorbreservierung behält die alte und
+erzeugt keine (ADR-0143).
+
+**Keine `read_at`-Spalte.** Anzeige, Ungelesen-Zähler und „als gelesen
+markieren" sind S4 — die Spalte und ihr `update`-Weg kommen dort.
+
+#### Sicherheit
+
+RLS an, **eine** Richtlinie: `for select to authenticated using ((select
+auth.uid()) = user_id and public.is_collector_account())`. `authenticated`
+hat **genau** `SELECT`, `anon` **nichts**. Es gibt **keinen Schreibweg für
+Clients** — geschrieben wird ausschließlich von der Funktion.
+
+#### `claim_availability_notifications()`
+
+`definer`, `volatile`, leerer `search_path`, `execute` nur für
+`authenticated`. **Ein einziges Statement**, und daran hängt die Atomarität:
+
+1. `offer_availability_due()` — die Erkennung aus `0147`, samt Gegenprobe
+   gegen `offer_state_live`. **Keine zweite Erkennung.**
+2. ein `update` auf `offer_state`, das die Fälligkeitsbedingung als `where`
+   **mitträgt** und `announced_*` setzt — das ist das Beanspruchen.
+3. ein `insert`, das aus dem `returning` des `update` liest.
+
+Es gibt damit **keinen Zustand**, in dem ein Ereignis als verarbeitet gilt und
+die Meldungen fehlen. Die Migration misst, dass der Rumpf genau eine
+Anweisung ist.
+
+Benachrichtigt wird, wer **vor** der Phasengrenze vorgemerkt hat
+(`favorites.created_at < buyable_since`). Zurück kommt **nur** die Zahl der
+Meldungen für den Aufrufer — eine Zahl je Figur wäre die Nachfrage, und die
+ist nach ADR-0136 dem Verkäuferbetrieb vorbehalten.
+
+**Noch nicht in der Plattformsicherung**, und hier dringlicher als bei
+`favorites` und `offer_state`: diese Tabelle ist der **einzige** Teil, den
+eine Wiederherstellung nicht rekonstruieren kann — `offer_state.announced_*`
+bliebe gesetzt, also entstünden verlorene Meldungen auch nicht neu. Die
+Folgemigration muss sie aufnehmen (ADR-0136, D-6).
 
 ### 3.6 `ON DELETE` / `ON UPDATE` — bewusste Entscheidungen
 

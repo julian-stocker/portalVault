@@ -13730,3 +13730,139 @@ wird jede Warenkorbreservierung zu einem neuen Zyklus) · die Karenzzeit gegen
 `changed_at` rechnen (eine Preisänderung verschöbe sie) ·
 `offer_availability_due()` schreibend bauen (verbraucht Ereignisse, bevor S3
 sie übernehmen kann).
+
+---
+
+## ADR-0143 · Der Primärschlüssel ist der Duplikatschutz, und die Verarbeitung ist eine Anweisung
+
+**Datum:** 2026-10-26
+**Status:** angenommen
+**Betrifft:** `supabase/migrations/0148_availability_notifications.sql`,
+`src/lib/favorites/notifications.ts`, Probelauf **P56**
+
+### Die zwei Forderungen, die alles bestimmt haben
+
+**„Benachrichtigungen dürfen weder verloren gehen noch mehrfach
+entstehen."** Beides sind Zusagen, die eine Anwendungslogik nicht halten
+kann, wenn zwei Aufrufe gleichzeitig laufen oder einer mitten im Vorgang
+abbricht. Also halten sie zwei andere Dinge.
+
+### 1. Kein Duplikat: der Primärschlüssel
+
+```
+primary key (user_id, sky_id, buyable_since)
+```
+
+„Genau eine Meldung je Nutzer, Figur und Verfügbarkeitsphase" ist damit eine
+**Eigenschaft der Datenbank** und keine Zusage einer Funktion. Zwei
+gleichzeitige Aufrufe können sie nicht verletzen, ein wiederholter
+Seitenaufruf nicht, und ein künftiger Fehler in einer Funktion auch nicht.
+
+Und `buyable_since` ist deshalb **Teil des Schlüssels**, nicht Beigabe: sie
+**ist** die Phase (ADR-0142). Ein echter späterer Zyklus bekommt eine neue
+Phasengrenze — neuer Schlüssel, zu Recht neue Meldung. Eine kurze
+Warenkorbreservierung behält die alte, weil `0147` die Phase übernimmt —
+also entsteht dort gar keine.
+
+### 2. Kein Verlust: eine einzige Anweisung
+
+`claim_availability_notifications()` ist **ein** `with`-Ausdruck:
+
+| CTE | was er tut |
+|---|---|
+| `faellig` | `offer_availability_due()` — die Erkennung aus `0147`, samt Gegenprobe gegen `offer_state_live`. **Keine zweite Erkennung** |
+| `beansprucht` | das `update` auf `offer_state`, das die Fälligkeitsbedingung als `where` **mitträgt** und `announced_*` setzt |
+| `gemeldet` | das `insert`, das aus dem `returning` des `update` liest |
+
+Eine Anweisung ist atomar. Es gibt **keinen** Zustand, in dem ein Ereignis
+als verarbeitet gilt und die Meldungen fehlen — nicht für einen Augenblick,
+nicht bei einem Fehler, nicht bei einem Verbindungsabbruch. Das `insert` kann
+nur für Zeilen schreiben, die **diese** Anweisung beansprucht hat.
+
+Die Migration **misst** das: mehr als ein Semikolon im Rumpf heißt mehr als
+eine Anweisung, und dann bricht sie ab. Eine Atomaritätszusage, die nur im
+Kommentar steht, ist eine Absicht.
+
+**Gleichzeitigkeit** folgt daraus: PostgreSQL nimmt für das `update` eine
+Zeilensperre, der zweite Aufruf wartet und prüft sein `where` gegen die
+**neue** Zeile (READ COMMITTED) — `announced_at` steht, `buyable_since >
+announced_at` ist falsch, null Zeilen beansprucht, null Meldungen
+geschrieben. **Die Bedingung ist der Riegel**, und genau deshalb steht sie an
+der Zeile und nicht in einer Hilfsfunktion: eine `stable` Funktion im `where`
+sähe den Schnappschuss der Anweisung und sagte nach dem Warten weiter `true`.
+
+### 3. Wer benachrichtigt wird
+
+`favorites.created_at < offer_state.buyable_since`. Wer eine **bereits
+kaufbare** Figur vormerkt, bekommt für diese Phase nichts — er hat sie
+kaufbar gesehen. Dass `buyable_since` dafür verlässlich ist, ist die ganze
+Begründung von ADR-0142: `changed_at` bewegt sich auch bei einer
+Preisänderung und hätte genau hier falsch benachrichtigt.
+
+Der Verbund läuft über `sky_id` — die Identität des Sammelobjekts
+(ADR-0034). Zwei Varianten sind zwei SKY-IDs und zwei unabhängige Vorgänge.
+
+### 4. Die Rückgabe ist eine Zahl, und zwar die des Aufrufers
+
+Nicht „SKY-0001: 7 Meldungen". Der Grund ist ADR-0136: `favorite_demand()`
+ist ausdrücklich auf den aktiven Verkäuferbetrieb begrenzt, damit ein Sammler
+nicht erfährt, wie viele andere eine Figur vorgemerkt haben. Eine Zahl je
+Figur hätte **diese Grenze umgangen, ohne dass jemand eine Richtlinie
+angefasst hätte.**
+
+`security definer` heißt hier auch: der Rumpf liest `favorites` **aller**
+Nutzer (der Eigner umgeht RLS). Das ist notwendig — und genau deshalb ist die
+Rückgabe so eng. `auth.uid()` bleibt dabei der Aufrufer; `definer` tauscht
+die Rolle, nicht die Identität.
+
+### 5. Was nicht gebaut wurde
+
+**Keine `read_at`-Spalte.** Anzeige, Ungelesen-Zähler und „als gelesen
+markieren" sind S4. Eine Spalte anzulegen, deren Mechanik fehlt, wäre
+Vorbereiten — und das ist in diesem Projekt kein Verfahren (ADR-0021; für
+`priority` schon einmal abgelehnt, ADR-0136).
+
+**Kein Schreibweg für Clients.** Eine Richtlinie, nur `select`, nur das
+Eigene. `authenticated` hat genau `SELECT`, `anon` nichts. Geschrieben wird
+ausschließlich von der Funktion.
+
+**Kein Scheduler, kein Trigger, keine E-Mail, kein Push, kein Preisalarm.**
+Der Aufruf ist bedarfsgesteuert: ein angemeldeter Besuch stößt ihn an
+(Variante 2 des Konzepts). `src/lib/favorites/notifications.ts` ist der
+vorbereitete Aufrufpunkt und hat **noch keinen Aufrufer** — S4 setzt ihn an
+den Anfang von `/favoriten`. Ein zweiter Aufruf kostet nichts: ohne fälliges
+Ereignis liest die Funktion nur.
+
+### Die Grenze, benannt
+
+Dieselbe wie bei ADR-0142: **ohne Beobachtung während der Abwesenheit weiß
+niemand etwas.** Läuft `refresh_offer_state()` nicht, während eine Figur weg
+ist, entsteht keine Kante und damit keine Meldung. Das Ergebnis ist eine
+**verpasste** Meldung, nie eine falsche.
+
+Und eine zweite: **die Rücknahme löscht Meldungen unwiederbringlich**, während
+`offer_state.announced_*` stehen bleibt. Nach einer Rücknahme und einem
+erneuten `0148` entsteht für diese Phasen **keine neue** Meldung. Lieber eine
+verlorene Anzeige als eine zweite Benachrichtigung für dasselbe Ereignis.
+
+### Konsequenzen
+
+- Eine Tabelle, eine Richtlinie, eine Funktion. **Kein** Trigger, **kein**
+  Scheduler, **keine** Abstraktionsschicht.
+- Die Tabelle steht mit Ablaufdatum in beiden Ausschlusslisten: dauerhaft
+  draußen in der Betriebssicherung (eine Meldung ist kein Geschäftsvorfall),
+  **vorübergehend** draußen in der Plattformsicherung — und dort dringlicher
+  als `favorites` und `offer_state`, weil sie der einzige Teil ist, den eine
+  Wiederherstellung nicht rekonstruieren kann.
+- **P56** fährt `0146`–`0148` an echtem PostgreSQL: zwei Nutzer vor der Phase
+  und einer danach, wiederholte Aufrufe (auch als anderer Nutzer),
+  Preisänderung allein, kurze Reservierung, zweiter echter Zyklus, Varianten,
+  RLS mit drei Identitäten, und „keine beanspruchte Phase ohne Meldung".
+
+**Verworfen:** eine Ereignistabelle mit Verarbeitungsstatus (zweite Wahrheit,
+Aufräumbedarf, und der Status wäre genau der Zustand, den die eine Anweisung
+vermeidet) · `for update skip locked` (die Bedingung im `where` leistet
+dasselbe, ohne eine zweite Sperrlogik) · eine Hilfsfunktion für die
+Fälligkeitsbedingung (sähe den Schnappschuss und erzeugte das Duplikat) · die
+Zahl je Figur zurückgeben (umgeht ADR-0136) · `read_at` jetzt anlegen
+(Vorbereiten) · ein Scheduler (ADR bewusst offen, und S3 braucht keinen).

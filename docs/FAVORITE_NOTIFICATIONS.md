@@ -9,9 +9,11 @@ Migration, keine Oberfläche.
 > | Schritt | Stand |
 > |---|---|
 > | **S1 · Der Spiegel** | **gebaut**, Migration `0146` — **auf Staging angewendet** am 2026-10-25, Nachkontrolle vollständig, 225 kaufbare SKY-IDs als Ausgangszustand |
-> | **S2 · Die Verfügbarkeitskante** | **gebaut**, Migration `0147` — **nirgends angewendet**. Erkennung und Entscheidung, **keine** Meldung |
-> | S3 · Meldungen je Leser + Plattformsicherung | geplant, nicht gebaut |
-> | S4–S6 · Oberfläche, Einstellungen, Rollout | geplant, nicht gebaut |
+> | **S2 · Die Verfügbarkeitskante** | **gebaut**, Migration `0147` — **auf Staging angewendet**. Erkennung und Entscheidung, **keine** Meldung |
+> | **S3 · Meldungen je Leser** | **gebaut**, Migration `0148` — **nirgends angewendet**. Je Nutzer, Figur und Phase genau eine, RLS-geschützt |
+> | S4 · Oberfläche, Ungelesen-Zähler, „als gelesen" | geplant, nicht gebaut — bringt `read_at` und den Aufruf mit |
+> | S5–S6 · Einstellungen, Rollout | geplant, nicht gebaut |
+> | Plattformsicherung | **offen**: `favorites`, `offer_state` **und** `availability_notifications` stehen mit Ablaufdatum draußen (ADR-0136, D-6) |
 >
 > **S2 hat eine Lücke im Datenmodell von `0146` aufgedeckt**, und sie ist mit
 > **einer Spalte** behoben: `changed_at` bewegt sich auch bei einer
