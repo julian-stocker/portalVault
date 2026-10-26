@@ -128,6 +128,16 @@ auseinanderliegen, **212/213** nennen die stummen Ereignisse, **303** unterschei
 Karenzzeit läuft" von „es passiert nichts", **401–408** beantworten alles für eine einzelne
 SKY-ID. Diese Datei hätte den Fehler am 2026-10-25 gefunden.
 
+**Der Testplan für Staging:** `supabase/checks/offer_state_refresh_test.md` — vier Schritte für
+SKY-0020 (Cynder, Spyro's Adventure), jeder mit den erwarteten Zeilen der Prüfdatei. Er ändert
+**keine** Shop-, Bestell- oder Lagerdaten und fordert keine schreibende SQL-Anweisung: alles
+Schreibende löst die Anwendung selbst aus, so wie ein Besucher es täte.
+
+**Nachgemessen an echtem PostgreSQL (P53):** ein Konto in der Rolle `authenticated` darf
+`refresh_offer_state()` aufrufen, der Aufruf **schreibt** (`checked_at` wandert), und dieselbe
+Rolle darf `offer_state` weiterhin **nicht** lesen (`42501`). Der zweite Aufruf in derselben
+Minute antwortet `false/throttled` — und ist damit kein Erfolg, sondern ein übersprungener Lauf.
+
 **Die Lehre, allgemeiner als dieser Fehler:** eine Entscheidung, die eine Aufgabe an einen
 „späteren Aufrufer" delegiert, ist nicht getroffen, solange dieser Aufrufer nicht existiert. Ein
 Kommentar ruft nichts auf. Vier aufeinander aufbauende Schritte haben es nicht bemerkt, weil
