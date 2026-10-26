@@ -5935,6 +5935,38 @@ async function main(): Promise<void> {
     await db.exec(`create or replace function public.offer_state_window()
       returns interval language sql immutable set search_path = ''
       as $w$ select interval '0' $w$;`);
+
+    /* ---- AUFFUELLEN IST KEIN EREIGNIS — der Fall vom 2026-10-26 ----------
+     *
+     * DER ANLASS. Im selben Testeinkauf lagen zwei Figuren. Bei der einen
+     * entstand die Lagerposition NEU (0 → 1): eine echte neue
+     * Verfuegbarkeitsphase. Bei der anderen stieg nur die Menge einer
+     * bestehenden, gelisteten, bepreisten Position (5 → 6) — und die war
+     * schon bei der Erstbefuellung kaufbar und damit als angekuendigt
+     * markiert. Der Betreiber erwartete fuer beide eine Meldung; richtig ist
+     * sie nur fuer die erste.
+     *
+     * Diese Zeile haelt das fest: eine Mengenerhoehung an einer bereits
+     * kaufbaren Figur aendert `offer_state_live` nicht (weder `buyable` noch
+     * `cheapest_cents`), also bleibt `buyable_since` stehen, `announced_at`
+     * bleibt stehen, und es wird nichts faellig. „Wieder verfuegbar" setzt
+     * voraus, dass sie weg war.
+     */
+    if (ok) {
+      const stand = () => wert(`select buyable::text || '|' || buyable_since::text
+          || '|' || coalesce(announced_at::text, '-') as w
+        from public.offer_state where sky_id = 'SKY-7002'`);
+      const vorher = await stand();
+      await db.exec(`update public.shop_inventory set quantity = quantity + 5
+                      where sky_id = 'SKY-7002'`);
+      await ruf();
+      const nachher = await stand();
+      ok = sag("Auffuellen einer kaufbaren Figur erzeugt keine neue Phase",
+        nachher === vorher && vorher.startsWith("true|"),
+        nachher === vorher ? `buyable|buyable_since|announced_at unveraendert`
+          : `${vorher} → ${nachher}`);
+    }
+
     /* Der Preflight, als Eigner, VOR 0148 — mit seinen echten Erwartungen. */
     if (ok) {
       const anw = anweisungen(readFileSync(

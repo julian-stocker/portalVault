@@ -101,8 +101,50 @@ sofort im Shop. `offer_state` erfuhr es nie → `offer_availability_due()` fand 
 Minuten und nicht nach einer Woche.
 
 **Nachgemessen (lesend, Staging, 2026-10-26):** `shop_offers()` lieferte **226** kaufbare
-Figuren, der Spiegel war mit **225** befüllt worden, und **SKY-0020** (Cynder, Spyro's
-Adventure) war live kaufbar zu **7,19 €**.
+Figuren, der Spiegel war mit **225** befüllt worden — die eine Abweichung ist **SKY-0009
+(Blue Bash)**, live kaufbar zu 21,59 €.
+
+**Und hier habe ich mich zuerst geirrt, in einer Aussage, die ich als gemessen ausgegeben
+habe.** Im ersten Bericht stand, **SKY-0020** (Cynder) sei vor dem Einbuchen nicht kaufbar
+gewesen. Das war eine Folgerung aus „niemand frischt auf", keine Messung — und sie ist falsch.
+Das Bewegungsjournal und `shop_inventory`, die der Prüfzugang die ganze Zeit lesen durfte,
+sagen:
+
+| | SKY-0009 · Blue Bash | SKY-0020 · Cynder |
+|---|---|---|
+| Lagerposition | **neu**, 2026-10-26 11:53:24 | besteht seit **2026-09-18**, bis dahin **nie** geändert |
+| Menge | 0 → 1 | **5 → 6** |
+| vorher kaufbar? | **nein** | **ja**, durchgehend |
+| bei der `0146`-Erstbefüllung im Spiegel? | nein | **ja — und damit `announced_*` gesetzt** |
+| neue Verfügbarkeitsphase? | **ja** | **nein** |
+| Meldung erwartet? | **ja** | **nein, und das ist richtig** |
+
+Beide Figuren lagen im selben Testeinkauf (`purchases.id = 113`, Positionen 3 und 4, beide
+`booked`). **Nur Blue Bash war je ein Kandidat.** Cynders Stille war von Anfang an korrekt: sie
+war nie weg, also gibt es kein „wieder verfügbar". Ein Test auf SKY-0020 wäre fehlgeschlagen
+und hätte wie ein kaputter Fix ausgesehen — gefunden hat das die Nachfrage des Betreibers nach
+Blue Bash, nicht meine Prüfung.
+
+**Der Mechanismus hat damit genau einen Fehler gehabt**, den fehlenden Aufrufer, und keinen
+zweiten.
+
+**Unabhängige Gegenprobe zur Arithmetik:** 225 bei der Erstbefüllung + 1 (Blue Bash) = 226 heute
+gemessen. Wäre Cynder nicht schon unter den 225 gewesen, müssten es 227 sein.
+
+**Regressionstest dazu (P56):** „Auffüllen einer kaufbaren Figur erzeugt keine neue Phase" —
+Menge erhöht, nachgezogen, und `buyable`, `buyable_since` und `announced_at` bleiben
+unverändert. Damit geht die Unterscheidung nicht wieder verloren: eine Einbuchung, die eine
+Position **neu anlegt**, ist ein Verfügbarkeitsereignis; eine, die eine bestehende **auffüllt**,
+ist keines.
+
+**Und ein Fehler in meiner eigenen Prüfdatei, gefunden beim Vorbereiten der Befehle:** fünf
+Zeilen von `offer_state_freshness.sql` lesen die View `offer_state_live`, prüften aber das Recht
+auf `shop_offers()` — das der Prüfzugang **hat**. Der Wächter hätte durchgewinkt und
+`query_to_xml` die ganze Einreichung mit `42501` abgebrochen, statt `KEIN-RECHT` zu melden;
+dieselbe Klasse Fehler wie bei `information_schema` (ADR-0141). Behoben und **gegen Staging
+nachgemessen**: die Datei läuft unter dem Prüfzugang mit 15 offenen Zeilen und `9999 = 0` durch.
+Sie steht jetzt in `staging-suite.json`, also findet sie
+`npm run db:check:staging -- offer_state_freshness`.
 
 **Behoben** mit dem Aufrufer, den `0146` angekündigt hatte — als erstes Glied einer Kette im
 authentifizierten Aufbau von `/favoriten`:
@@ -128,8 +170,9 @@ auseinanderliegen, **212/213** nennen die stummen Ereignisse, **303** unterschei
 Karenzzeit läuft" von „es passiert nichts", **401–408** beantworten alles für eine einzelne
 SKY-ID. Diese Datei hätte den Fehler am 2026-10-25 gefunden.
 
-**Der Testplan für Staging:** `supabase/checks/offer_state_refresh_test.md` — vier Schritte für
-SKY-0020 (Cynder, Spyro's Adventure), jeder mit den erwarteten Zeilen der Prüfdatei. Er ändert
+**Der Testplan für Staging:** `supabase/checks/offer_state_refresh_test.md` — vier Schritte mit
+**zwei** Figuren: **SKY-0009**, die melden **muss**, und **SKY-0020** als Gegenkontrolle, die
+**nicht** melden darf. Beides zusammen beweist mehr als jede der beiden allein. Er ändert
 **keine** Shop-, Bestell- oder Lagerdaten und fordert keine schreibende SQL-Anweisung: alles
 Schreibende löst die Anwendung selbst aus, so wie ein Besucher es täte.
 

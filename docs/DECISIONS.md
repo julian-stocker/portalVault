@@ -14042,8 +14042,23 @@ beanspruchte `claim_availability_notifications()` nichts. Keine Meldung —
 nicht nach dreißig Minuten, nicht nach einer Woche.
 
 **Nachgemessen am 2026-10-26** (lesend, Staging): `shop_offers()` lieferte
-226 kaufbare Figuren, der Spiegel war mit 225 befüllt worden, und
-SKY-0020 (Cynder, Spyro's Adventure) war live kaufbar zu 7,19 €.
+226 kaufbare Figuren, der Spiegel war mit 225 befüllt worden. Die eine
+Abweichung ist **SKY-0009 (Blue Bash)**: ihre Lagerposition entstand erst
+beim Einbuchen, sie stand also nicht in der Erstbefüllung und hat **keine
+Zeile** im Spiegel — eine echte neue Verfügbarkeitsphase, die stumm blieb.
+
+**Die zweite Figur desselben Testeinkaufs war KEIN Fall**, und das ist
+wichtig für die Abgrenzung des Fehlers: SKY-0020 (Cynder) lag seit
+2026-09-18 mit fünf Stück gelistet und bepreist im Lager, war bei der
+Erstbefüllung also unter den 225 und dort als **angekündigt** markiert. Das
+Einbuchen hob die Menge von fünf auf sechs — `shop_offers()` sagte vorher
+und nachher „verfügbar", der Preis blieb gleich, also hat sich im Spiegel
+**nichts** geändert. Keine neue Phase, keine Meldung, und das ist richtig:
+sie war nie weg.
+
+Daraus folgt die Abgrenzung: **der Mechanismus hatte genau diesen einen
+Fehler.** Eine Einbuchung, die eine bestehende Position auffüllt, ist kein
+Verfügbarkeitsereignis — eine, die eine Position neu anlegt, ist eines.
 
 ### Die Lehre, und sie ist allgemeiner als dieser Fehler
 
