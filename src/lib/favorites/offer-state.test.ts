@@ -48,12 +48,24 @@ const RUMPF = CODE.slice(
 
 
 describe("die Tabelle, wie 0146 sie anlegt", () => {
-  it("trägt genau die acht Spalten des Konzepts", () => {
+  it("trägt die acht Spalten des Konzepts — plus die eine aus 0147", () => {
+    /*
+     * `columnsOf()` liest die GANZE Historie, nicht nur `0146`. Seit
+     * `0147` (Phase 4 S2) kommt `buyable_since` dazu: die Phasengrenze, die
+     * eine Preisänderung nicht zurücksetzt. Dass `0146` selbst acht legt,
+     * prüft seine eigene Abschlussmeldung und Zeile 102 seiner
+     * Nachkontrolle.
+     */
     expect([...columnsOf("offer_state")].sort()).toEqual([
       /* Alphabetisch, und „cheapest" steht vor „checked" — 'a' < 'k'. */
       "announced_at", "announced_buyable", "announced_cents",
-      "buyable", "changed_at", "cheapest_cents", "checked_at", "sky_id",
+      "buyable", "buyable_since", "changed_at", "cheapest_cents", "checked_at",
+      "sky_id",
     ]);
+  });
+
+  it("und 0146 selbst legt acht — als Messung in seiner Abschlussmeldung", () => {
+    expect(SQL).toContain("offer_state steht (8 Spalten");
   });
 
   it("und `tablesOf()` sieht sie — sonst könnte kein Wächter nach ihr fragen", () => {

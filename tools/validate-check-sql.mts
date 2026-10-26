@@ -246,6 +246,15 @@ async function main(): Promise<void> {
 
   /** Das Stub-Schema in eine frische Instanz spielen — Stufe 2, 3 und 4 brauchen es. */
   const stubAnweisungen = anweisungen(readFileSync(STUB, "utf8"));
+  /**
+   * Die `create view`-Anweisungen des Stub-Schemas, gesondert.
+   *
+   * Der Definitionslauf muss eine Funktion gelegentlich mit
+   * `drop ... cascade` ersetzen, und das nimmt jede abhaengige Sicht mit.
+   * Danach werden sie aus dieser Liste wieder angelegt.
+   */
+  const stubSichten = stubAnweisungen.filter((x) => /^\s*create\s+view\b/i.test(x));
+
   async function stubAnwenden(
     ziel: InstanceType<typeof PGlite>,
   ): Promise<{ angewendet: number; abgelehnt: number }> {
@@ -378,6 +387,23 @@ async function main(): Promise<void> {
           await dbDef.exec(
             `drop function if exists public.${signaturOhneVorgaben(sig)} cascade;`);
           await dbDef.exec(sql + ";");
+          /*
+           * `cascade` NIMMT DIE ABHAENGIGEN SICHTEN MIT — und die braucht
+           * eine spaetere Funktion vielleicht noch.
+           *
+           * `offer_state_live` (0146) liest `shop_offers()`. Wird dessen
+           * Rumpf hier ersetzt, faellt die Sicht mit, und
+           * `offer_availability_due()` (0147) scheiterte danach mit
+           * `42P01 relation "public.offer_state_live" does not exist` —
+           * ein Fehler, der nichts ueber die Migration sagte, sondern ueber
+           * die Reihenfolge in diesem Werkzeug.
+           *
+           * Also: die Sichten des Stub-Schemas danach wieder anlegen. Was
+           * schon steht, lehnt `create view` ab; das ist unerheblich.
+           */
+          for (const v of stubSichten) {
+            try { await dbDef.exec(v + ";"); } catch { /* steht schon */ }
+          }
           erzeugt++;
           if (NICHT_ERZEUGBAR[sig]) unnoetigeAusnahme.push(sig);
           continue;
@@ -5013,6 +5039,357 @@ async function main(): Promise<void> {
       sagt: befund.join(" · "),
     });
     } /* Ende: gueltige Rechteaufnahme */
+  }
+
+  /* P55 — `0147`: DIE VERFUEGBARKEITSKANTE, jeder geforderte Fall gefahren.
+   *
+   * WAS HIER ZUR PRUEFUNG STEHT: dass aus dem Spiegel eine KANTE wird, und
+   * zwar ohne falsche Meldungen. Die acht Faelle des Auftrags, in einer
+   * Instanz hintereinander — und am Ende der Abdruck von Shop, Lager und
+   * Sammlung, der sich nicht bewegt haben darf.
+   *
+   * ZEITREISE DURCH ZURUECKDATIEREN. PGlite faehrt eine Verbindung, `now()`
+   * ist die Transaktionszeit. Dreissig Minuten vergehen hier also, indem die
+   * Zeitstempel im Spiegel zurueckdatiert werden — das ist genau die Groesse,
+   * auf die die Karenzzeit rechnet, und es prueft die Regel und nicht die Uhr.
+   */
+  {
+    const db = await frisch();
+    await db.exec("drop function if exists public.offer_availability_due();");
+    await db.exec("drop function if exists public.offer_availability_grace();");
+    await db.exec("drop function if exists public.refresh_offer_state();");
+    await db.exec("drop view if exists public.offer_state_live;");
+    await db.exec("drop table if exists public.offer_state cascade;");
+    await db.exec("drop function if exists public.offer_state_window();");
+    await attrappenFuerBaseline(db);
+
+    await db.exec(`
+      alter table public.skylanders add constraint z55_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug, market_price)
+      values ('SKY-7001', 'Probe Bash', 'probe-bash-55', 20.00),
+             ('SKY-7002', 'Probe Legendary Bash', 'probe-legendary-55', 30.00)
+        on conflict do nothing;
+      insert into public.shop_settings (id, price_percentage)
+      values (true, 100) on conflict do nothing;
+      alter table public.shop_inventory drop column if exists available_quantity;
+      alter table public.shop_inventory
+        add column available_quantity integer
+        generated always as (quantity - reserved) stored;
+      create sequence if not exists public.z55_inv_seq start 1;
+      alter table public.shop_inventory alter column id set default nextval('public.z55_inv_seq');
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $p55$
+        select i.sky_id, i.condition,
+               public.shop_price(i.sale_price, s.market_price, st.price_percentage),
+               (i.available_quantity > 0),
+               null::text
+          from public.shop_inventory i
+          join public.skylanders s on s.sky_id = i.sky_id
+          cross join public.shop_settings st
+         where i.is_listed
+           and i.condition = public.v1_sale_condition()
+           and public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+               is not null;
+      $p55$;
+      insert into public.shop_inventory (sky_id, condition, quantity, reserved, is_listed)
+      values ('SKY-7001', 'loose', 2, 0, true),
+             ('SKY-7002', 'loose', 1, 0, true);`);
+
+    const befund: string[] = [];
+    let ok = true;
+    const sag = (was: string, gut: boolean, text: string): boolean => {
+      befund.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+    const wert = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    const ruf = async (): Promise<string> =>
+      String(((await db.query("select reason as w from public.refresh_offer_state()")) as
+        { rows: { w: string }[] }).rows[0]?.w);
+    /** Welche SKY-IDs sind faellig? */
+    const faellig = async (): Promise<string> =>
+      await wert("select coalesce(string_agg(sky_id, ',' order by sky_id), '(keine)') as w "
+        + "from public.offer_availability_due()");
+    /**
+     * Zeit vergehen lassen.
+     *
+     * ES MUSS DIE GANZE VORGESCHICHTE SEIN, nicht nur ein Zeitstempel. Ein
+     * erster Entwurf datierte allein `buyable_since` und `changed_at`
+     * zurueck — damit rutschte der Phasenbeginn VOR `announced_at`, und die
+     * Bedingung `buyable_since > announced_at` war falsch. Der Fall sah aus
+     * wie ein Fehler in der Migration und war einer im Test: in der
+     * Wirklichkeit laeuft die Uhr vorwaerts, also wird hier ALLES
+     * Vergangene gleich weit zurueckgeschoben.
+     *
+     * `announced_at` darf dabei `null` sein (Zeilen, die nach der
+     * Erstbefuellung entstanden sind) — `null - interval` bleibt `null`.
+     */
+    const warte = (minuten: number, nur = "") => db.exec(
+      `update public.offer_state set`
+      + ` buyable_since = buyable_since - interval '${minuten} minutes',`
+      + ` changed_at = changed_at - interval '${minuten} minutes',`
+      + ` checked_at = checked_at - interval '${minuten} minutes',`
+      + ` announced_at = announced_at - interval '${minuten} minutes'`
+      + (nur ? ` where sky_id = '${nur}'` : ""));
+    /** Was S3 tun wird: das Ereignis uebernehmen. */
+    const melde = (sky: string) => db.exec(
+      `update public.offer_state set announced_buyable = true, announced_at = now(),`
+      + ` announced_cents = cheapest_cents where sky_id = '${sky}'`);
+    /**
+     * Ist die Phasengrenze FRISCH, also gerade neu gesetzt?
+     *
+     * Absolute Zeitstempel ueber ein `warte()` hinweg zu vergleichen geht
+     * nicht — `warte` verschiebt sie mit. Gefragt ist die Aussage: wurde die
+     * Phase NEU BEGONNEN (`buyable_since` ist eben entstanden) oder
+     * UEBERNOMMEN (sie ist aelter)?
+     */
+    const phaseNeu = (sky: string) => wert(
+      `select (buyable_since > now() - interval '1 minute')::text as w`
+      + ` from public.offer_state where sky_id = '${sky}'`);
+
+    /**
+     * Der Abdruck von Shop, Lager und Sammlung.
+     *
+     * Die Szenarien unten veraendern das Lager ABSICHTLICH — sie bauen
+     * damit die Angebotslage. Gefragt ist etwas anderes: dass die MIGRATION
+     * und die ENTSCHEIDUNGSFUNKTION nichts daran aendern.
+     */
+    const abdruck = () => wert(`select md5(
+        coalesce((select string_agg(i.id::text || '|' || i.sky_id || '|'
+                                    || i.is_listed::text || '|' || i.quantity::text || '|'
+                                    || i.reserved::text, ';' order by i.id)
+                    from public.shop_inventory i), '-')
+     || coalesce((select string_agg(k.sky_id || '|' || coalesce(k.market_price::text, '-'),
+                                    ';' order by k.sky_id)
+                    from public.skylanders k), '-')
+     || coalesce((select count(*)::text from public.collection_items), '-')) as w`);
+
+    /* -------------------------------------------------- 1. Die Migrationen */
+    const l146 = await fahre(db, join(MIG_DIR, "0146_offer_state.sql"));
+    ok = sag("0146", l146 === null, l146 ?? "durch");
+    /* Erstbefuellung: beide kaufbar, beide BEREITS GEMELDET. */
+    if (ok) await ruf();
+    const vorMigration = ok ? await abdruck() : "-";
+    const l147 = ok ? await fahre(db, join(MIG_DIR, "0147_offer_availability.sql")) : "-";
+    ok = ok && sag("0147", l147 === null, l147 ?? "durch");
+    if (ok) {
+      ok = sag("Migration ruehrt Shop/Lager/Sammlung nicht an",
+        await abdruck() === vorMigration, "Abdruck unveraendert");
+    }
+
+    /*
+     * DIE DROSSEL BLEIBT OFFEN — ueber das Fenster, NACH den Migrationen.
+     *
+     * Drei Anlaeufe, drei Lehren: `checked_at` zurueckzudatieren verletzt
+     * `offer_state_checked_after_changed`; `changed_at` mitzualtern laesst
+     * JEDE Abwesenheit echt aussehen und macht den Warenkorbfall unpruefbar;
+     * und das Fenster VOR den Migrationen zu setzen hilft nicht, weil `0146`
+     * `offer_state_window()` selbst neu anlegt.
+     *
+     * Dass die Drosselung greift, faehrt `P53`. Hier steht die Kante zur
+     * Pruefung, nicht die Uhr.
+     */
+    if (ok) {
+      await db.exec(`create or replace function public.offer_state_window()
+        returns interval language sql immutable set search_path = ''
+        as $p55w$ select interval '0' $p55w$;`);
+    }
+
+    const spalten = ok ? await wert(
+      "select string_agg(a.attname::text, ',' order by a.attnum) as w from pg_attribute a "
+      + "where a.attrelid = to_regclass('public.offer_state') "
+      + "and a.attnum > 0 and not a.attisdropped") : "-";
+    ok = ok && sag("Spalten", spalten.endsWith(",buyable_since"), spalten);
+
+    /* ------------- 2. BEREITS VERFUEGBARE AUS DER ERSTINITIALISIERUNG ----- */
+    if (ok) {
+      await warte(90);
+      ok = sag("Erstbestand nie faellig", await faellig() === "(keine)",
+        `nach 90 min: ${await faellig()}`);
+    }
+
+    /* --------------- 3. NICHT VERFUEGBAR → VERFUEGBAR → 30 min STABIL ---- */
+    if (ok) {
+      /* Weg: entlisten, auffrischen. */
+      await db.exec("update public.shop_inventory set is_listed = false where sky_id = 'SKY-7001'");
+      await ruf();
+      const weg = await wert("select buyable::text as w from public.offer_state "
+        + "where sky_id = 'SKY-7001'");
+      /* Die Abwesenheit muss ECHT sein: laenger als reservation_ttl(). */
+      await warte(25, "SKY-7001");
+      /* Wieder da. */
+      await db.exec("update public.shop_inventory set is_listed = true where sky_id = 'SKY-7001'");
+      await ruf();
+      const sofort = await faellig();
+      await warte(31, "SKY-7001");
+      const spaeter = await faellig();
+      ok = sag("nicht kaufbar → kaufbar → 30 min",
+        weg === "false" && sofort === "(keine)" && spaeter === "SKY-7001",
+        `weg ${weg}, sofort ${sofort}, nach 31 min ${spaeter}`);
+    }
+
+    /* --------------------- 4. VARIANTEN BLEIBEN GETRENNT ----------------- */
+    if (ok) {
+      ok = sag("nur die exakte SKY-ID", await faellig() === "SKY-7001",
+        `faellig: ${await faellig()} (SKY-7002 ist dieselbe Figur als Variante)`);
+    }
+
+    /* -------- 5. WIEDERHOLTE UND PARALLELE AUFRUFE, DANN UEBERNAHME ------ */
+    if (ok) {
+      const a = await faellig();
+      const b = await faellig();
+      const c = await faellig();
+      /* Rein lesend heisst: dreimal dasselbe, nichts verbraucht. */
+      const gleich = a === b && b === c;
+      await melde("SKY-7001");
+      const danach = await faellig();
+      ok = sag("mehrfach lesen, dann uebernehmen",
+        gleich && danach === "(keine)",
+        `dreimal ${a}, nach der Uebernahme ${danach}`);
+    }
+
+    /* ------- 6. ANGEBOT VERSCHWINDET VOR ABLAUF DER 30 MINUTEN ---------- */
+    if (ok) {
+      await db.exec("update public.shop_inventory set is_listed = false where sky_id = 'SKY-7002'");
+      await ruf();
+      await warte(25, "SKY-7002");
+      await db.exec("update public.shop_inventory set is_listed = true where sky_id = 'SKY-7002'");
+      await ruf();
+      await warte(10, "SKY-7002");                     /* erst 10 von 30 min */
+      const mitten = await faellig();
+      await db.exec("update public.shop_inventory set is_listed = false where sky_id = 'SKY-7002'");
+      await ruf();
+      const fort = await faellig();
+      ok = sag("verschwindet vor 30 min", mitten === "(keine)" && fort === "(keine)",
+        `nach 10 min ${mitten}, nach dem Verschwinden ${fort}`);
+    }
+
+    /* --------------- 7. KURZE WARENKORBRESERVIERUNG ---------------------- */
+    if (ok) {
+      /* SKY-7002 wieder da und 31 min stabil, aber NOCH NICHT gemeldet. */
+      await db.exec("update public.shop_inventory set is_listed = true where sky_id = 'SKY-7002'");
+      await ruf();
+      await warte(31, "SKY-7002");
+      const vorher = await faellig();
+      await melde("SKY-7002");
+
+      /* Jetzt die Reservierung: reserved = quantity → available_quantity 0. */
+      await db.exec("update public.shop_inventory set reserved = 1 where sky_id = 'SKY-7002'");
+      await ruf();
+      const wegDurchKorb = await wert("select buyable::text as w from public.offer_state "
+        + "where sky_id = 'SKY-7002'");
+      /* Zwei Minuten spaeter wieder frei — kuerzer als reservation_ttl(). */
+      await warte(2, "SKY-7002");
+      await db.exec("update public.shop_inventory set reserved = 0 where sky_id = 'SKY-7002'");
+      await ruf();
+      /* DIE ENTSCHEIDENDE FRAGE: uebernommen, nicht neu begonnen. */
+      const neuBegonnen = await phaseNeu("SKY-7002");
+      await warte(31, "SKY-7002");
+      const nachKorb = await faellig();
+      ok = sag("kurze Reservierung",
+        vorher === "SKY-7002" && wegDurchKorb === "false"
+        && neuBegonnen === "false" && nachKorb === "(keine)",
+        `vorher ${vorher}, durch Korb weg ${wegDurchKorb}, `
+        + `Phase neu begonnen ${neuBegonnen} (muss false sein), danach ${nachKorb}`);
+    }
+
+    /* ------------------ 8. MEHRERE ZYKLEN DERSELBEN SKY-ID --------------- */
+    if (ok) {
+      /* Echte Abwesenheit: 25 min > reservation_ttl(). */
+      await db.exec("update public.shop_inventory set is_listed = false where sky_id = 'SKY-7002'");
+      await ruf();
+      await warte(25, "SKY-7002");
+      await db.exec("update public.shop_inventory set is_listed = true where sky_id = 'SKY-7002'");
+      await ruf();
+      /* Hier MUSS die Phase neu beginnen — die Gegenprobe zum Warenkorbfall. */
+      const neuBegonnen = await phaseNeu("SKY-7002");
+      await warte(31, "SKY-7002");
+      const zweiterZyklus = await faellig();
+      ok = sag("zweiter echter Zyklus",
+        neuBegonnen === "true" && zweiterZyklus === "SKY-7002",
+        `Phase neu begonnen ${neuBegonnen} (muss true sein), faellig ${zweiterZyklus}`);
+    }
+
+    /* ---------------- 9. DIE GEGENPROBE GEGEN DIE GEGENWART -------------- */
+    if (ok) {
+      /*
+       * Der Spiegel sagt kaufbar, die Sicht nicht mehr — genau das Szenario
+       * aus dem Vertrag von `0146`. Das Angebot wird entlistet, OHNE den
+       * Spiegel nachzuziehen.
+       */
+      const vorher = await faellig();
+      await db.exec("update public.shop_inventory set is_listed = false where sky_id = 'SKY-7002'");
+      const nachher = await faellig();
+      const spiegelSagt = await wert("select buyable::text as w from public.offer_state "
+        + "where sky_id = 'SKY-7002'");
+      await db.exec("update public.shop_inventory set is_listed = true where sky_id = 'SKY-7002'");
+      ok = sag("Gegenprobe gegen offer_state_live",
+        vorher === "SKY-7002" && nachher === "(keine)" && spiegelSagt === "true",
+        `vorher ${vorher}, nach dem Entlisten ${nachher}, Spiegel sagt noch ${spiegelSagt}`);
+    }
+
+    /* ------------------- 10. KARENZZEIT UND RUECKNAHME ------------------- */
+    if (ok) {
+      const grace = await wert("select public.offer_availability_grace()::text as w");
+      const ttl = await wert("select public.reservation_ttl()::text as w");
+      ok = sag("Karenzzeit", grace === "00:30:00" && ttl === "00:20:00",
+        `${grace} aus ${ttl} + 10 min`);
+    }
+    /* ------------- 11. DIE ENTSCHEIDUNG SCHREIBT NICHT, UND KANN NICHT --- */
+    if (ok) {
+      const vor = await abdruck();
+      const zustandVor = await wert(
+        "select md5(string_agg(sky_id || '|' || buyable::text || '|'"
+        + " || coalesce(buyable_since::text, '-') || '|'"
+        + " || coalesce(announced_at::text, '-'), ';' order by sky_id)) as w"
+        + " from public.offer_state");
+      for (let i = 0; i < 5; i++) await faellig();
+      const nach = await abdruck();
+      const zustandNach = await wert(
+        "select md5(string_agg(sky_id || '|' || buyable::text || '|'"
+        + " || coalesce(buyable_since::text, '-') || '|'"
+        + " || coalesce(announced_at::text, '-'), ';' order by sky_id)) as w"
+        + " from public.offer_state");
+      /*
+       * UND SIE KANN ES AUCH NICHT: `stable` statt `volatile`. Das ist die
+       * Zusage an S3 — ein Ereignis gilt erst als uebernommen, wenn S3
+       * `announced_*` setzt, in derselben Transaktion wie die Meldungen.
+       *
+       * ECHTE PARALLELITAET ist hier nicht fahrbar: PGlite faehrt EINE
+       * Verbindung. Dass gleichzeitige Aufrufe unkritisch sind, folgt
+       * daraus, dass diese Funktion nichts schreibt — und das steht hier
+       * als Messung.
+       */
+      const art = await wert("select provolatile::text as w from pg_proc"
+        + " where oid = to_regprocedure('public.offer_availability_due()')");
+      ok = sag("fuenf Aufrufe schreiben nichts",
+        vor === nach && zustandVor === zustandNach && art === "s",
+        `Abdruck ${vor === nach}, Spiegel ${zustandVor === zustandNach}, provolatile ${art}`);
+    }
+
+    if (ok) {
+      const r = await fahre(db, "supabase/rollback/R0147_offer_availability.sql");
+      const fort = r === null ? await wert(
+        "select ((to_regprocedure('public.offer_availability_due()') is null)"
+        + " and (to_regprocedure('public.offer_availability_grace()') is null)"
+        + " and (select count(*) = 0 from pg_attribute a"
+        + "        where a.attrelid = to_regclass('public.offer_state')"
+        + "          and a.attname = 'buyable_since' and not a.attisdropped))::text as w")
+        : "-";
+      ok = sag("Ruecknahme", r === null && fort === "true", `${r ?? "durch"}, fort ${fort}`);
+    }
+
+    probe.push({
+      name: "P55 0147 erkennt die Verfuegbarkeitskante: 30 min Stabilisierung, "
+        + "Warenkorbreservierung unterbricht die Phase nicht, kein Duplikat, spaetere "
+        + "Zyklen wieder moeglich, Gegenprobe gegen die Gegenwart",
+      ok,
+      sagt: `0147: ${befund.join(" · ")}`,
+    });
   }
 
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);

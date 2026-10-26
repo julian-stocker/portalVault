@@ -13608,3 +13608,125 @@ eine PostgreSQL-Fassung) · `information_schema` behalten und dem Prüfzugang
 Rechte geben, damit es etwas zeigt (dann prüft der Zugang, was er selbst
 sehen darf — ADR-0140) · nur Prüfung 102 beheben (die stillen drei wären
 geblieben, und das ist die gefährlichere Hälfte).
+
+---
+
+## ADR-0142 · Die Verfügbarkeitskante braucht eine eigene Phasengrenze
+
+**Datum:** 2026-10-26
+**Status:** angenommen
+**Betrifft:** `supabase/migrations/0147_offer_availability.sql`,
+`supabase/rollback/R0147_offer_availability.sql`, Probelauf **P55**
+
+### Die Frage
+
+S2 soll erkennen, wenn eine zuvor nicht kaufbare Figur **wieder** kaufbar
+wird — mindestens 30 Minuten stabil, ohne Duplikate, mit späteren Zyklen.
+`0146` hält dafür einen Zeitstempel: `changed_at`, „die letzte echte Änderung
+von `buyable` **oder** `cheapest_cents`".
+
+### Das reicht nicht, und zwar an zwei Stellen
+
+**1. Eine Preisänderung setzt ihn zurück.** Eine durchgehend kaufbare Figur,
+die nach zehn Minuten billiger wird, hat `changed_at = jetzt`. Für die
+Karenzzeit ist das nur eine Verzögerung. Für S3 ist es ein **falsches
+Ergebnis**: benachrichtigt werden soll, wer **vor** dieser Kaufbarkeit
+vorgemerkt hat (`favorites.created_at < Phasenbeginn`). Mit dem
+zurückgesetzten Zeitstempel bekäme auch jemand eine Meldung, der *während*
+der laufenden Kaufbarkeit vorgemerkt hat — genau der Fall, den die
+Anforderung ausschließt.
+
+**2. Eine kurze Abwesenheit ist hinterher nicht von einer echten zu
+unterscheiden.** Eine Warenkorbreservierung macht `available_quantity` null,
+also `buyable = false`, also `changed_at = jetzt`. Gibt der Warenkorb wieder
+frei, sieht das aus wie ein neuer Zyklus — und 30 Minuten später wäre eine
+zweite Meldung für dasselbe Angebot fällig. Gespeichert ist nur der **Beginn
+der laufenden Phase**, nicht die Dauer der vorigen; nach dem Übergang ist die
+Unterscheidung unwiederbringlich fort.
+
+### Die Entscheidung: eine Spalte
+
+`offer_state.buyable_since`.
+
+- Sie bewegt sich **nur** bei einem Übergang „nicht kaufbar → kaufbar", nie
+  bei einer Preisänderung. Damit ist sie die Phasengrenze, gegen die sowohl
+  die Karenzzeit als auch S3 rechnen dürfen.
+- Und sie bewegt sich nur, wenn die vorige Abwesenheit **mindestens
+  `reservation_ttl()`** gedauert hat. War sie kürzer, galt sie als dieselbe
+  Phase: **eine Warenkorbreservierung unterbricht nichts.** Damit ist das
+  Flattern nicht „herausgefiltert", sondern es entsteht gar keine Kante.
+
+`changed_at` wird **nicht umgedeutet**: die Spalte ist angewendet, ihr
+Kommentar steht, und die Preisänderung ist das Signal für die späteren
+Preissenkungsmeldungen (D-4, standardmäßig aus). Zwei Fragen, zwei Spalten.
+
+### Die Entscheidung ist ABLEITBAR, deshalb keine Ereignistabelle
+
+```
+kaufbar                        buyable
+stabil seit mindestens 30 min  now() - buyable_since >= offer_availability_grace()
+noch nicht berichtet           announced_at is null or buyable_since > announced_at
+und JETZT wirklich kaufbar     innerer Verbund auf offer_state_live
+```
+
+Vier Bedingungen über drei Spalten. Eine Ereignistabelle daneben wäre eine
+zweite Wahrheit, die mit der ersten auseinanderlaufen kann — und sie müsste
+aufgeräumt werden. S3 legt an, was S3 braucht.
+
+**Kein Duplikat, ohne eine Zeile zu schreiben.** Dass dasselbe Ereignis nicht
+zweimal freigegeben wird, hängt an `announced_at` — und das setzt **S3**, wenn
+es die Meldungen anlegt. Ein späterer Zyklus geht wieder, weil eine echte
+Abwesenheit `buyable_since` neu setzt.
+
+### `offer_availability_due()` ist `stable`, und das ist die Zusage an S3
+
+Sie **verbraucht kein Ereignis**. Ein Ereignis gilt erst als übernommen, wenn
+S3 `announced_*` setzt — in derselben Transaktion, in der es die Meldungen
+anlegt. Wäre die Funktion `volatile`, könnte sie ein Ereignis vermerken,
+bevor es jemand übernehmen kann; scheitert S3 danach, wäre es verloren.
+
+Daraus folgt auch die Antwort auf die Parallelität: gleichzeitige Aufrufe sind
+unkritisch, weil nichts geschrieben wird. Die Serialisierung gehört an die
+Stelle, die **schreibt** — S3, über `for update skip locked` auf
+`offer_state`.
+
+### Die Gegenprobe gegen die Gegenwart
+
+Der innere Verbund auf `offer_state_live` ist die Prüfung, die `0146`
+ausdrücklich verlangt: der Spiegel sagt, **was sich geändert hat**, die Sicht
+sagt, **was jetzt gilt**. `offer_state_live` liest ausschließlich
+`shop_offers()` — dieselbe Projektion, die den Shop speist. Ein zu alter
+Spiegel kann damit nur noch ein Ereignis **verpassen**, nie eines erfinden.
+`mirror_checked_at` kommt mit zurück: keine Frischegarantie, sondern die
+Angabe, die eine Frischeprüfung erst möglich macht.
+
+### Die Grenze, benannt
+
+**Ohne Beobachtung während der Abwesenheit weiß niemand etwas.** Läuft
+`refresh_offer_state()` nicht, während eine Figur weg ist, sieht der nächste
+Lauf nur „kaufbar" wie vorher — und erkennt keine Kante. Das Ergebnis ist eine
+**verpasste** Meldung, nie eine falsche. Solange kein Scheduler existiert
+(ADR bewusst offen), ist das die Lage, und sie ist die richtige Richtung zu
+irren.
+
+### Konsequenzen
+
+- Eine Spalte mehr auf `offer_state` (nullable, mit CHECK), eine ersetzte
+  Funktion, zwei neue Funktionen — **keine** Tabelle, **kein** Trigger,
+  **kein** Scheduler, **kein** Clientrecht.
+- `refresh_offer_state()` pflegt die Phasengrenze mit; Drosselung, Schloss,
+  Erstbefüllung und die drei Antworten bleiben Wort für Wort.
+- Die Nachfüllung für die 225 bestehenden Zeilen setzt `buyable_since =
+  changed_at`. Das ist ehrlich eine Annäherung — und folgenlos, weil alle aus
+  der Erstbefüllung stammen und `announced_at = changed_at` tragen, also
+  nicht fällig sind. Die Migration **misst** das, statt es anzunehmen.
+- Probelauf **P55** fährt beide Migrationen an echtem PostgreSQL und
+  durchläuft jeden geforderten Fall.
+
+**Verworfen:** `changed_at` umdeuten (angewendete Spalte, und das
+Preissignal für D-4 ginge verloren) · eine Ereignistabelle (zweite Wahrheit,
+Aufräumbedarf) · `announced_buyable` beim Verschwinden zurücksetzen (dann
+wird jede Warenkorbreservierung zu einem neuen Zyklus) · die Karenzzeit gegen
+`changed_at` rechnen (eine Preisänderung verschöbe sie) ·
+`offer_availability_due()` schreibend bauen (verbraucht Ereignisse, bevor S3
+sie übernehmen kann).

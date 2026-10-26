@@ -82,6 +82,41 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Verfügbarkeitserkennung (2026-10-26, `0147`, Phase 4 S2, ADR-0142) — gebaut, nirgends angewendet
+
+**Aus dem Spiegel wird eine Kante.** `0146` weiß, ob eine Figur jetzt kaufbar ist; `0147`
+weiß, ob sie es **wieder** geworden ist, seit wann ununterbrochen, und ob darüber schon
+berichtet wurde. **Keine Benachrichtigung, keine Tabelle dafür, keine Oberfläche** — das ist S3.
+
+**Zuerst der Befund, denn er hat den Entwurf bestimmt:** das Datenmodell von `0146` konnte einen
+vollständigen Verfügbarkeitszyklus **nicht** zuverlässig abbilden. `changed_at` bewegt sich auch
+bei einer **Preisänderung** und ist damit keine Phasengrenze — S3 braucht sie aber, um nur die
+Konten zu benachrichtigen, die **vor** der Kaufbarkeit vorgemerkt haben. Und eine kurze
+**Warenkorbreservierung** war hinterher nicht von einer echten Abwesenheit zu unterscheiden,
+weil nur der Beginn der laufenden Phase gespeichert ist. Behoben mit **einer Spalte**.
+
+| | |
+|---|---|
+| Neue Spalte | `offer_state.buyable_since` — bewegt sich **nur** bei einem Übergang nach kaufbar, und nur wenn die vorige Abwesenheit mindestens `reservation_ttl()` gedauert hat. Eine Preisänderung setzt sie **nicht** zurück |
+| Karenzzeit | `offer_availability_grace()` = `reservation_ttl() + 10 min`, heute 30 Minuten. **Keine Zahl im Code** |
+| Entscheidung | `offer_availability_due()` — `definer`, **`stable`**, ohne Clientrecht. Vier Bedingungen: kaufbar · 30 min stabil · noch nicht berichtet · **und jetzt wirklich kaufbar** (innerer Verbund auf `offer_state_live`, also `shop_offers()`) |
+| Duplikatschutz | **ableitbar**, ohne eine Zeile zu schreiben: `announced_at is null or buyable_since > announced_at`. Gesetzt wird `announced_*` erst von S3 |
+| Übergabe an S3 | S2 **verbraucht kein Ereignis**. `stable` heißt: sie *kann* keines verbrauchen — scheitert S3 beim Anlegen der Meldungen, bleibt das Ereignis fällig |
+| Parallelität | unkritisch, weil nichts geschrieben wird. Die Serialisierung gehört an die schreibende Stelle (S3, `for update skip locked`) |
+| Nicht angefasst | kein Trigger, keine Tabelle, kein Scheduler, kein Clientrecht, keine RLS-Änderung, `changed_at` unverändert in Bedeutung |
+| Nachweise | Probelauf **P55** fährt `0146` **und** `0147` an echtem PostgreSQL: nicht kaufbar → kaufbar → 30 min · Verschwinden vor Ablauf · kurze Reservierung (Phase wird **übernommen**, nicht neu begonnen) · fünf Aufrufe schreiben nichts · Erstbestand nie fällig · zweiter echter Zyklus · Varianten getrennt · Gegenprobe gegen die Gegenwart · Shop/Lager/Sammlung unverändert · Rücknahme. Dazu 28 Quellprüfungen in `src/lib/favorites/availability.test.ts` |
+
+**Die Grenze, benannt:** ohne Beobachtung während der Abwesenheit weiß niemand etwas. Läuft
+`refresh_offer_state()` nicht, während eine Figur weg ist, erkennt der nächste Lauf keine Kante
+— das Ergebnis ist eine **verpasste** Meldung, nie eine falsche. Solange kein Scheduler
+existiert, ist das die richtige Richtung zu irren.
+
+**Offen:** Preflight, Nachkontrolle und die Einfüge-Hüllen für `0147` entstehen mit der
+Freigabe des Rollouts; `offer_state` und `favorites` stehen weiter in
+`PLATFORM_EXCLUDED_TABLES` (ADR-0136, D-6).
+
+---
+
 ## Eine Migration auf Staging ist ein Befehl (2026-10-25, ADR-0137) — gebaut, nicht gefahren
 
 **Der Anlass war ein Fehlermodus, nicht Bequemlichkeit.** Bei `0145` und bei `0146` ist das
@@ -190,10 +225,11 @@ Prüfzugang und verlangt Zeile für Zeile dasselbe — außer `KEIN-RECHT`. Eine
 deckte dabei auf, dass die Filter `attnum > 0` und `not attisdropped` **ungeprüft** waren;
 beide sind tragend (Systemspalten bzw. `........pg.dropped.2........`) und jetzt geprüft.
 
-**Noch nicht vollständig gegen Staging gelaufen.** Der Wiederaufnahmemodus für `0146` ist
-vorbereitet; TLS, Anmeldung, Baseline-Übernahme und die wiederhergestellte Erteilung auf
-`shop_offers()` stehen (gemessen am 2026-10-25). Offen: der Lauf, dann die drei offenen Zeilen
-(124, 142, 161) als `postgres`. Die Akte `supabase/baselines/baseline-0146.json`
+**`0146` ist auf Staging vollständig abgenommen** (2026-10-26 berichtet): Nachkontrolle
+`9998 = 0`, `9999 = 0`. Die Erstbefüllung hat **225 kaufbare SKY-IDs** angelegt, alle als
+bereits angekündigter Ausgangszustand, und eine Wiederholung meldete `225 geprüft, 0 verändert`.
+Fünf Anläufe hat es gebraucht, und jeder deckte einen echten Mangel am **Prüfweg** auf, keinen
+an der Migration — ADR-0137 bis ADR-0141. Production unverändert. Die Akte `supabase/baselines/baseline-0146.json`
 trägt `herkunft: "bediener"` und vermerkt, dass die Zeilen aus dem Preflight **vor** der
 Migration stammen und **nicht** nachträglich gemessen wurden.
 

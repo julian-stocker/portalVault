@@ -45,6 +45,7 @@ SQL-Editor angewandt (ADR-0051).
 | `shipping_methods` | 2 | Versandarten und Preise | kein Clientrecht, öffentlich über `shipping_quote()` |
 | `purchase_calculations` (`0142`) | wächst | bewusst gespeicherte Einkaufskalkulationen | nur der Eigentümer |
 | `favorites` (`0145`) | wächst | vorgemerkte Figuren: Benutzer × Figur | nur der Eigentümer; Zahlen für den Betrieb über `favorite_demand()` |
+| `offer_state` (`0146`, `0147`) | eine je kaufbarer Figur | der Angebotsspiegel: ob eine Figur jetzt kaufbar ist, seit wann ununterbrochen, und was zuletzt gemeldet wurde | **kein Clientrecht**, RLS an ohne Richtlinie — alles läuft über Funktionen |
 
 Bewusst **nicht** in V1: `wanted`, `for_sale`, `for_trade`, `listings`, `trades`, `orders`,
 `price_history`, `inventory`. Siehe Abschnitt 7 zur Erweiterbarkeit.
@@ -2153,6 +2154,60 @@ Leck). In der Plattformsicherung heute ebenfalls ausgeschlossen — **aber
 vorübergehend und mit Bedingung**: die Folgemigration nach
 `0144`-auf-Production nimmt sie als Bereich auf (Formatversion 3). Siehe
 ADR-0136 und `supabase/checks/platform_export_gap.md`.
+
+### 3.5b `offer_state` — der Angebotsspiegel (Migrationen `0146`, `0147`)
+
+Eine Zeile **je Figur**, nicht je Ereignis: die Antwort auf „war das schon
+so?". Ohne sie gäbe es nur einen Zustand und keine **Kante**.
+
+| Spalte | Typ | Regel |
+|---|---|---|
+| `sky_id` | `text not null` | PK, FK → `skylanders(sky_id)`, `on delete restrict` |
+| `buyable` | `boolean not null` | gibt es **jetzt** mindestens ein kaufbares Angebot? |
+| `cheapest_cents` | `integer` | günstigster kaufbarer Preis in Cent, `null` wenn nicht kaufbar |
+| `changed_at` | `timestamptz not null` | letzte **echte** Änderung von `buyable` **oder** `cheapest_cents` |
+| `checked_at` | `timestamptz not null` | letzte erfolgreiche Prüfung — **keine** Frischegarantie |
+| `announced_buyable` | `boolean` | was zuletzt gemeldet wurde |
+| `announced_cents` | `integer` | zu welchem Preis |
+| `announced_at` | `timestamptz` | wann |
+| `buyable_since` (`0147`) | `timestamptz` | seit wann **ununterbrochen** kaufbar |
+
+**Sechs CHECKs**, darunter `checked_at >= changed_at` (eine Prüfung ohne
+Änderung darf die Änderung nicht zurücksetzen) und `not buyable or
+buyable_since is not null`.
+
+#### Warum `changed_at` und `buyable_since` zwei Spalten sind
+
+Sie beantworten zwei Fragen, und eine Spalte kann nicht beide beantworten:
+
+* `changed_at` bewegt sich **auch bei einer Preisänderung**. Das ist das
+  Signal für die späteren Preissenkungsmeldungen.
+* `buyable_since` bewegt sich **nur** bei einem Übergang „nicht kaufbar →
+  kaufbar", und auch dann nur, wenn die vorige Abwesenheit mindestens
+  `reservation_ttl()` gedauert hat. Eine **Warenkorbreservierung unterbricht
+  die Phase also nicht** — es entsteht gar keine Kante, statt eine
+  herauszufiltern.
+
+Die ganze Begründung: ADR-0142.
+
+#### Die drei Funktionen
+
+| Funktion | Art | Was sie tut |
+|---|---|---|
+| `refresh_offer_state()` | `definer`, `volatile`, nur `authenticated` | zieht den Spiegel gegen `offer_state_live` nach. Gedrosselt über `offer_state_window()` (eine Minute, gemessen an `max(checked_at)`), ein Lauf je Transaktion über `pg_try_advisory_xact_lock(146, 1)`. Drei unterscheidbare Antworten `ran` / `throttled` / `locked` — **`locked` darf der Aufrufer nie als eigenen Erfolg lesen** |
+| `offer_availability_grace()` | `immutable`, kein Clientrecht | die Karenzzeit: `reservation_ttl() + interval '10 minutes'`, heute 30 Minuten. **Keine Zahl im Code** |
+| `offer_availability_due()` | `definer`, **`stable`**, kein Clientrecht | welche Figuren jetzt für eine Verfügbarkeitsmeldung fällig sind. **Rein lesend** — sie verbraucht kein Ereignis |
+
+`offer_state_live` ist die Gegenwart: eine Sicht, die **ausschließlich**
+`shop_offers()` liest und keinen Preis nachrechnet. Der innere Verbund darauf
+in `offer_availability_due()` ist die Gegenprobe — der Spiegel sagt, *was sich
+geändert hat*, die Sicht sagt, *was jetzt gilt*.
+
+**Noch nicht in der Plattformsicherung.** `offer_state` steht mit Ablaufdatum
+in `PLATFORM_EXCLUDED_TABLES`: die `announced_*`-Spalten sind der einzige
+nicht wiederherstellbare Teil, und ein Archiv ohne sie würde nach einer
+Wiederherstellung **jede** Figur neu melden. Die Folgemigration muss sie
+aufnehmen (ADR-0136, D-6).
 
 ### 3.6 `ON DELETE` / `ON UPDATE` — bewusste Entscheidungen
 
