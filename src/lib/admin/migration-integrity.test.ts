@@ -130,7 +130,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die neunzehn angewendeten", () => {
+  it("die Staging-Tabelle führt die zwanzig angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
@@ -156,12 +156,24 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * „nirgends angewendet"; das war ab dem Lauf falsch und ist genau die
      * Sorte stiller Veralterung, gegen die diese Akte existiert.
      *
+     * **`0146` KAM ALS ZWANZIGSTE DAZU**, am selben 2026-10-25. Sie legt den
+     * Angebotsspiegel an (Phase 4 S1), und ihre Nachkontrolle brauchte
+     * **fünf Anläufe** — jeder davon deckte einen echten Mangel am PRÜFWEG
+     * auf und keinen an der Migration: Handarbeit bei der Baseline-Übergabe
+     * (ADR-0137), die fehlende private CA des Poolers (ADR-0138), zwei
+     * Klassen fehlender Leserechte (ADR-0139), eine durch `drop function`
+     * verlorene Erteilung (ADR-0140) und die rechtegefilterte
+     * `information_schema`, bei der drei Rechtezeilen **still grün** waren
+     * (ADR-0141). Danach `9998 = 0` und `9999 = 0`. Bis zu diesem Eintrag
+     * stand sie in der Akte als „nirgends angewendet"; das war ab dem Lauf
+     * falsch — dieselbe stille Veralterung wie bei `0144`.
+     *
      * `0141`–`0143` fehlen in DIESER Tabelle weiter, obwohl sie auf Staging
      * liegen — sie stehen nur in der Production-Tabelle. Das ist eine
      * bekannte Lücke der Akte und kein Befund über `0144`; sie zu füllen
      * braucht die Prüfsummen der dort gelaufenen Fassungen.
      */
-    expect(zeilen.length).toBe(19);
+    expect(zeilen.length).toBe(20);
     for (const datei of ["0144_platform_export_calculations.sql",
                          "0145_favorites.sql"]) {
       expect(zeilen.map((z) => z.datei), datei).toContain(datei);
@@ -226,9 +238,9 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
        `0137`/`0138`, sechzehn seit `0139`/`0140`, achtzehn seit `0144` und
-       `0145` am 2026-10-25. Nur `0130` weicht ab und zeigt auf ihren
-       Nachtrag. */
-    expect(gleiche.length).toBe(18);
+       `0145` am 2026-10-25, neunzehn seit `0146` am selben Tag. Nur `0130`
+       weicht ab und zeigt auf ihren Nachtrag. */
+    expect(gleiche.length).toBe(19);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

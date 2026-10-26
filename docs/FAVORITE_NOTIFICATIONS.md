@@ -8,10 +8,18 @@ Migration, keine Oberfläche.
 >
 > | Schritt | Stand |
 > |---|---|
-> | **S1 · Der Spiegel** | **gebaut**, Migration `0146` — **nirgends angewendet** |
-> | S2 · Meldungen | geplant, nicht gebaut |
-> | S3 · Plattformsicherung | geplant, nicht gebaut |
+> | **S1 · Der Spiegel** | **gebaut**, Migration `0146` — **auf Staging angewendet** am 2026-10-25, Nachkontrolle vollständig, 225 kaufbare SKY-IDs als Ausgangszustand |
+> | **S2 · Die Verfügbarkeitskante** | **gebaut**, Migration `0147` — **nirgends angewendet**. Erkennung und Entscheidung, **keine** Meldung |
+> | S3 · Meldungen je Leser + Plattformsicherung | geplant, nicht gebaut |
 > | S4–S6 · Oberfläche, Einstellungen, Rollout | geplant, nicht gebaut |
+>
+> **S2 hat eine Lücke im Datenmodell von `0146` aufgedeckt**, und sie ist mit
+> **einer Spalte** behoben: `changed_at` bewegt sich auch bei einer
+> Preisänderung und ist damit keine Phasengrenze; und eine kurze
+> Warenkorbreservierung war hinterher nicht von einer echten Abwesenheit zu
+> unterscheiden. `offer_state.buyable_since` behebt beides. Abschnitt 2.2 und
+> 3.2 beschreiben jetzt den **gebauten** Stand; ADR-0142 trägt die
+> Entscheidung.
 >
 > **Die acht Entscheidungen sind getroffen** (Betreiber, 2026-10-25) und
 > stehen in Abschnitt 8.2 mit dem jeweiligen Stand. **D-4 weicht von meinem
@@ -808,7 +816,7 @@ Zwei echte Sammlerkonten, nach dem Muster von Abschnitt 10:
 
 | # | Frage | **Entscheidung des Betreibers (2026-10-25)** | Stand |
 |---|---|---|---|
-| **D-1** | Karenzzeit | **30 min**, abgeleitet aus `reservation_ttl()` + 10 | in `0146` nur vorbereitet (`changed_at`); angewandt in S2 |
+| **D-1** | Karenzzeit | **30 min**, abgeleitet aus `reservation_ttl()` + 10 | **gebaut** in `0147` als `offer_availability_grace()` — keine Zahl im Code, sondern `reservation_ttl() + interval '10 minutes'`. Gerechnet wird gegen `buyable_since`, nicht gegen `changed_at` |
 | **D-2** | Preisschwelle | **max(0,50 €, 5 %)** gegenüber dem maßgeblichen Vergleichspreis | S2 |
 | **D-3** | Tagessperre je Figur für B | **nein** in V1 | S2 |
 | **D-4** | Vorgaben der zwei Schalter | neue Verfügbarkeit **an**, Preissenkung **aus** — *weicht von meinem Vorschlag ab* | S2 |
