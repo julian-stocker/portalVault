@@ -559,10 +559,10 @@ describe("die Rechtefilterung von information_schema, an echtem PostgreSQL", () 
       .toContain("tableoid");
   });
 
-  it("und jede Spaltenabfrage der zehn Dateien traegt beide Filter", () => {
+  it("und jede Spaltenabfrage der Familie traegt beide Filter", () => {
     /* Der statische Teil derselben Zusage — damit die Mutation auffaellt. */
     const funde: string[] = [];
-    for (const nr of ["0142", "0143", "0144", "0145", "0146"]) {
+    for (const nr of ["0142", "0143", "0144", "0145", "0146", "0147"]) {
       for (const art of ["preflight", "postflight"]) {
         const datei = `${nr}_${art}.sql`;
         const text = readFileSync(join("supabase/checks", datei), "utf8")
@@ -639,11 +639,11 @@ describe("keine Runner-Pruefdatei benutzt information_schema", () => {
     expect(funde, "rechtegefilterte Sicht in einer Runner-Pruefdatei").toEqual([]);
   });
 
-  it("und die ganze Basis-Vertrags-Familie 0142–0146 auch", () => {
+  it("und die ganze Basis-Vertrags-Familie 0142–0147 auch", () => {
     /* Sie sind die naechsten Kandidaten fuer den Runner und teilen einen
        Vertrag — also dieselbe Regel. */
     const funde: string[] = [];
-    for (const nr of ["0142", "0143", "0144", "0145", "0146"]) {
+    for (const nr of ["0142", "0143", "0144", "0145", "0146", "0147"]) {
       for (const art of ["preflight", "postflight"]) {
         const datei = `${nr}_${art}.sql`;
         const code = ohneKommentare(

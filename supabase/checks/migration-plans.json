@@ -24,8 +24,32 @@
         "beschreibung": "public.offer_state steht",
         "sql": "select (to_regclass('public.offer_state') is not null) as erfuellt"
       },
-      "liefert": { "skyisles.base": 900, "skyisles.coll": 901 },
-      "braucht": ["skyisles.base", "skyisles.coll"]
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0147": {
+      "zweck": "Die Verfuegbarkeitskante (Phase 4 S2)",
+      "preflight": "0147_preflight.sql",
+      "lauf": "staging-0147.sql",
+      "postflight": "0147_postflight.sql",
+      "angewendet": {
+        "beschreibung": "offer_state.buyable_since steht",
+        "sql": "select (select count(*) from pg_attribute a where a.attrelid = to_regclass('public.offer_state') and a.attname = 'buyable_since' and not a.attisdropped) = 1 as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

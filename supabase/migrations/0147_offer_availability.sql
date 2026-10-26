@@ -91,6 +91,51 @@
 -- `reservation_ttl()`) setzt beim naechsten Mal `buyable_since` neu, und
 -- dann ist `buyable_since > announced_at` wieder wahr.
 --
+-- ===========================================================================
+-- DER VERTRAG FUER S3: SO UEBERNIMMT ES EIN EREIGNIS, ATOMAR UND
+-- KONKURRIERUNGSSICHER
+-- ===========================================================================
+--
+-- S3 legt die Meldungen an und vermerkt den gemeldeten Stand IN DERSELBEN
+-- TRANSAKTION. Der Vermerk ist dabei kein blosses `set`, sondern traegt die
+-- FAELLIGKEITSBEDINGUNG als `where` mit:
+--
+--   update public.offer_state s
+--      set announced_buyable = true,
+--          announced_cents   = s.cheapest_cents,
+--          announced_at      = now()
+--    where s.sky_id = <sky_id>
+--      and s.buyable
+--      and s.buyable_since is not null
+--      and now() - s.buyable_since >= public.offer_availability_grace()
+--      and (s.announced_at is null or s.buyable_since > s.announced_at)
+--   returning s.sky_id;
+--
+-- KOMMT KEINE ZEILE ZURUECK, IST DAS EREIGNIS SCHON UEBERNOMMEN — und dann
+-- darf S3 keine Meldung schreiben. Kommt eine zurueck, gehoert sie dieser
+-- Transaktion.
+--
+-- WARUM DAS OHNE SPERRE UND OHNE EINE WEITERE FUNKTION REICHT. PostgreSQL
+-- nimmt fuer ein `update` eine Zeilensperre. Laeuft ein zweiter Aufruf
+-- gleichzeitig, wartet er darauf und prueft sein `where` danach gegen die
+-- NEUE Fassung der Zeile (READ COMMITTED) — dort steht dann `announced_at`
+-- auf jetzt und `buyable_since > announced_at` ist falsch. Er bekommt null
+-- Zeilen. Die Bedingung IST der Riegel.
+--
+-- UND DESHALB STEHT SIE AN DER ZEILE, nicht in einer Hilfsfunktion. Eine
+-- `stable` Funktion im `where` eines `update` sieht den Schnappschuss der
+-- Anweisung und nicht die neu gelesene Zeile; sie wuerde nach dem Warten
+-- WEITER `true` sagen, und genau dann entstuende das Duplikat, das sie
+-- verhindern soll. Die drei Bedingungen hier sind dieselben, die
+-- `offer_availability_due()` fragt — `availability.test.ts` prueft, dass sie
+-- nicht auseinanderlaufen.
+--
+-- WAS S3 AUSSERDEM BRAUCHT, und was es NICHT von hier bekommt: die Konten.
+-- Benachrichtigt wird, wer VOR dieser Kaufbarkeit vorgemerkt hat, also
+-- `favorites.created_at < buyable_since`. Dafuer gibt
+-- `offer_availability_due()` die Phasengrenze mit zurueck.
+-- ===========================================================================
+--
 -- NICHTS AN SHOP, LAGER ODER SAMMLUNG. Diese Migration liest
 -- `shop_offers()` ueber die bestehende Sicht und schreibt ausschliesslich in
 -- `offer_state`. Kein Trigger, kein Scheduler, keine neue Tabelle, keine
@@ -144,20 +189,29 @@ comment on column public.offer_state.buyable_since is
   'Seit wann die Figur ununterbrochen kaufbar ist (0147, Phase 4 S2). Bewegt sich NUR bei einem Uebergang nicht kaufbar -> kaufbar, und auch dann nur, wenn die vorige Abwesenheit mindestens reservation_ttl() gedauert hat — eine Warenkorbreservierung unterbricht die Phase also nicht. Anders als changed_at setzt eine PREISAENDERUNG sie nicht zurueck: changed_at ist das Signal fuer eine spaetere Preissenkungsmeldung, buyable_since die Phasengrenze fuer die Verfuegbarkeitsmeldung. Bleibt stehen, wenn die Figur nicht mehr kaufbar ist — das ist die Phase, die geendet hat.';
 
 /*
- * DIE NACHFUELLUNG, und sie ist ehrlich eine Annaeherung.
+ * DIE NACHFUELLUNG, und sie darf keine Neuigkeit erfinden.
  *
- * Fuer die bestehenden kaufbaren Zeilen ist `changed_at` das Beste, was
- * bekannt ist: der Zeitpunkt, an dem der Spiegel sie zuletzt als geaendert
- * gesehen hat. Ob die Kaufbarkeit schon vorher begann, weiss niemand mehr.
+ * `changed_at` ist das Beste, was ueber den Beginn der Kaufbarkeit bekannt
+ * ist — aber es ist NICHT sicher. `changed_at` bewegt sich auch bei einer
+ * PREISAENDERUNG (genau die Luecke, die diese Migration behebt). Hat sich
+ * seit der Erstbefuellung bei einer Figur der Preis geaendert, steht
+ * `changed_at` HINTER `announced_at` — und ein blosses
+ * `buyable_since = changed_at` haette sie damit faellig gemacht. Eine
+ * Meldung „wieder verfuegbar" fuer eine Figur, die durchgehend kaufbar war.
  *
- * FOLGENLOS IST DAS TROTZDEM: alle bestehenden Zeilen stammen aus der
- * Erstbefuellung und tragen `announced_at = changed_at`. Damit ist
- * `buyable_since > announced_at` fuer sie FALSCH, und sie sind nicht
- * faellig — unabhaengig davon, wie genau die Nachfuellung ist. Erst eine
- * echte neue Phase setzt den Wert selbst.
+ * DESHALB `least(...)`: ueber eine bereits gemeldete Zeile wurde berichtet,
+ * WAEHREND sie kaufbar war. Die Phase begann also spaetestens damals, und
+ * der frueheste der beiden bekannten Zeitpunkte ist die sichere Annahme.
+ * Fuer eine noch nicht gemeldete Zeile bleibt `changed_at` — sie ist zu
+ * Recht eine Neuigkeit, so wie `0146` sie angelegt hat.
+ *
+ * Die Zusicherung wird unten GEMESSEN, nicht angenommen.
  */
 update public.offer_state
-   set buyable_since = changed_at
+   set buyable_since = case
+         when announced_at is not null then least(changed_at, announced_at)
+         else changed_at
+       end
  where buyable;
 
 alter table public.offer_state
@@ -346,7 +400,7 @@ as $$
 $$;
 
 comment on function public.offer_availability_due() is
-  'Welche Figuren jetzt fuer eine Verfuegbarkeitsmeldung faellig sind (0147, Phase 4 S2): kaufbar, seit mindestens offer_availability_grace() ununterbrochen, darueber noch nicht berichtet (announced_at is null oder buyable_since > announced_at) — UND im inneren Verbund mit offer_state_live, also jetzt wirklich kaufbar nach shop_offers(). REIN LESEND: sie verbraucht kein Ereignis und setzt announced_* nicht. Dasselbe Ereignis kommt bei jedem Aufruf wieder, solange es faellig ist; die Serialisierung gehoert an die Stelle, die schreibt (S3). mirror_checked_at ist das Alter des Spiegels und KEINE Frischegarantie — es macht eine Frischepruefung moeglich. Nennt keine Nutzer: wer vorgemerkt hat und wer eine Meldung bekommt, entscheidet S3 ueber favorites.created_at < buyable_since.';
+  'Welche Figuren jetzt fuer eine Verfuegbarkeitsmeldung faellig sind (0147, Phase 4 S2): kaufbar, seit mindestens offer_availability_grace() ununterbrochen, darueber noch nicht berichtet (announced_at is null oder buyable_since > announced_at) — UND im inneren Verbund mit offer_state_live, also jetzt wirklich kaufbar nach shop_offers(). REIN LESEND: sie verbraucht kein Ereignis und setzt announced_* nicht. Dasselbe Ereignis kommt bei jedem Aufruf wieder, solange es faellig ist; die Serialisierung gehoert an die Stelle, die schreibt (S3). mirror_checked_at ist das Alter des Spiegels und KEINE Frischegarantie — es macht eine Frischepruefung moeglich. Nennt keine Nutzer: wer vorgemerkt hat und wer eine Meldung bekommt, entscheidet S3 ueber favorites.created_at < buyable_since. Wie S3 ein Ereignis atomar und konkurrierungssicher uebernimmt, steht im Kopf von 0147: ein update, das die Faelligkeitsbedingung als where mittraegt — kommt keine Zeile zurueck, war ein anderer Aufruf schneller.';
 
 revoke all on function public.offer_availability_due() from public, anon, authenticated;
 
@@ -390,14 +444,28 @@ begin
     raise exception '%: % kaufbare Zeile(n) ohne buyable_since', v_wer, v_n;
   end if;
 
-  /* Und die Nachfuellung hat keine Faelligkeit erzeugt. */
+  /*
+   * DIE NACHFUELLUNG DARF KEINE FAELLIGKEIT ERFINDEN — und das ist enger
+   * gefasst, als es zuerst dastand.
+   *
+   * Eine Zeile mit `announced_at is null` ist ZU RECHT faellig: `0146` legt
+   * jede NACH der Erstbefuellung entstehende Zeile so an, weil eine Figur,
+   * die neu kaufbar wird, eine Neuigkeit ist. Ein `count(... or announced_at
+   * is null) <> 0` haette diese Migration also abgebrochen, sobald seit der
+   * Erstbefuellung eine einzige Figur dazugekommen ist — ein Abbruch ohne
+   * Mangel.
+   *
+   * Die wirkliche Zusage: fuer eine Zeile, ueber die SCHON BERICHTET wurde,
+   * darf die Nachfuellung `buyable_since` nicht hinter `announced_at`
+   * setzen. Genau das wird gemessen.
+   */
   select count(*) into v_n from public.offer_state
    where buyable and buyable_since is not null
-     and (announced_at is null or buyable_since > announced_at);
+     and announced_at is not null and buyable_since > announced_at;
   if v_n <> 0 then
-    raise exception '%: % Zeile(n) waeren nach der Nachfuellung faellig — die '
-      'Erstbefuellung traegt announced_at = changed_at, also darf keine '
-      'einzige faellig sein', v_wer, v_n;
+    raise exception '%: % bereits gemeldete Zeile(n) waeren nach der '
+      'Nachfuellung wieder faellig — die Erstbefuellung traegt '
+      'announced_at = changed_at, also darf das nicht vorkommen', v_wer, v_n;
   end if;
 
   if (select prosecdef from pg_proc
@@ -438,7 +506,8 @@ begin
   end if;
 
   raise notice '0147 ok: offer_state hat 9 Spalten (buyable_since zuletzt), '
-    '6 CHECKs, jede kaufbare Zeile mit Phasengrenze und KEINE faellig; '
+    '6 CHECKs, jede kaufbare Zeile mit Phasengrenze, keine bereits '
+    'gemeldete Zeile wieder faellig; '
     'offer_availability_grace() immutable und offer_availability_due() '
     'definer+stable, beide ohne Clientrecht; refresh_offer_state() pflegt '
     'buyable_since; kein Trigger, keine neue Tabelle, keine Benachrichtigung.';

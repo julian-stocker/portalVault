@@ -243,9 +243,19 @@ describe("was 0147 nicht anfasst", () => {
     }
   });
 
-  it("die Nachfüllung erzeugt keine Fälligkeit — als Nachweis, nicht als Absicht", () => {
-    expect(CODE).toContain("where buyable and buyable_since is not null");
-    expect(SQL).toContain("waeren nach der Nachfuellung faellig");
+  it("die Nachfüllung macht keine GEMELDETE Zeile wieder fällig", () => {
+    /*
+     * ENGER GEFASST ALS ZUERST GEDACHT. Eine Zeile mit `announced_at is
+     * null` ist ZU RECHT fällig — `0146` legt jede nach der Erstbefüllung
+     * entstehende Zeile so an, weil eine neu kaufbare Figur eine Neuigkeit
+     * ist. Die erste Fassung dieser Prüfung hätte die Migration
+     * abgebrochen, sobald eine einzige Figur dazugekommen wäre: ein Abbruch
+     * ohne Mangel.
+     */
+    expect(CODE).toContain(
+      "announced_at is not null and buyable_since > announced_at");
+    expect(SQL).toContain("bereits gemeldete Zeile(n) waeren nach der");
+    expect(SQL).toContain("ein Abbruch ohne");
   });
 });
 
@@ -316,5 +326,61 @@ describe("die Spalte in den beiden Sicherungen", () => {
     const spalten = columnsOf("offer_state");
     expect(spalten).toContain("buyable_since");
     expect(spalten).toHaveLength(9);
+  });
+});
+
+
+describe("der Vertrag für S3", () => {
+  it("steht als vollständige Anweisung im Kopf, nicht als Andeutung", () => {
+    /*
+     * S3 muss die Meldungen und den Vermerk in EINER Transaktion schreiben.
+     * Damit das nachvollziehbar ist, steht die Anweisung ausgeschrieben in
+     * der Migration — mit `returning`, denn daran erkennt S3, ob ihm das
+     * Ereignis gehört.
+     */
+    expect(SQL).toContain("DER VERTRAG FUER S3");
+    expect(SQL).toContain("update public.offer_state s");
+    expect(SQL).toContain("returning s.sky_id;");
+    expect(SQL).toContain("KOMMT KEINE ZEILE ZURUECK, IST DAS EREIGNIS SCHON UEBERNOMMEN");
+  });
+
+  it("und seine Bedingung läuft NICHT von der Entscheidung weg", () => {
+    /*
+     * DIE DRIFTGEFAHR. Dieselbe Fälligkeitsbedingung steht an zwei Stellen:
+     * in `offer_availability_due()` und im dokumentierten `update` für S3.
+     * Laufen sie auseinander, entstehen genau die Duplikate, die beide
+     * verhindern sollen.
+     *
+     * Also: jede der drei Bedingungen der Funktion muss im Vertrag
+     * wiederkehren. Textgleich, nur `s.` statt `s.` — die Funktion benutzt
+     * denselben Alias.
+     */
+    const stelle = CODE.indexOf("create or replace function public.offer_availability_due()");
+    const rumpf = CODE.slice(stelle, CODE.indexOf("$$;", stelle));
+    const vertrag = SQL.slice(SQL.indexOf("DER VERTRAG FUER S3"),
+                              SQL.indexOf("returning s.sky_id;"));
+    for (const bedingung of [
+      "s.buyable_since is not null",
+      "now() - s.buyable_since >= public.offer_availability_grace()",
+      "s.announced_at is null or s.buyable_since > s.announced_at",
+    ]) {
+      expect(rumpf, `Funktion: ${bedingung}`).toContain(bedingung);
+      expect(vertrag, `Vertrag: ${bedingung}`).toContain(bedingung);
+    }
+  });
+
+  it("er erklärt, warum die Bedingung an der ZEILE hängt", () => {
+    /*
+     * Eine `stable` Hilfsfunktion im `where` eines `update` sieht den
+     * Schnappschuss der Anweisung, nicht die neu gelesene Zeile — sie würde
+     * nach dem Warten auf die Sperre weiter `true` sagen. Das ist der Grund
+     * gegen eine Hilfsfunktion, und er muss dastehen, sonst baut ihn jemand.
+     */
+    expect(SQL).toContain("UND DESHALB STEHT SIE AN DER ZEILE");
+    expect(SQL).toContain("READ COMMITTED");
+  });
+
+  it("und nennt, was S3 NICHT von hier bekommt: die Konten", () => {
+    expect(SQL).toContain("favorites.created_at < buyable_since");
   });
 });
