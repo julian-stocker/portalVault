@@ -14008,3 +14008,111 @@ Verarbeitung ins Layout ziehen (ein Schreibaufruf je geschützter Seite, für
 eine Zahl, die dort niemand braucht) · ein relativer Zeitstempel („vor zwei
 Stunden") als neue Formatierungsmaschine (`formatDate()` ist die Konvention
 dieses Projekts).
+
+---
+
+## ADR-0145 · Der Spiegel wird vom Seitenaufbau nachgezogen — und jemand muss es tun
+
+**Datum:** 2026-10-26
+**Status:** angenommen
+**Betrifft:** `src/lib/favorites/offer-state.ts`,
+`src/app/(app)/favoriten/page.tsx`,
+`supabase/checks/offer_state_freshness.sql`
+
+### Der Befund, und er ist unangenehm
+
+Der Betreiber hat Figuren vorgemerkt, einen Testeinkauf angelegt, eingebucht
+— und **keine Benachrichtigung** bekommen. Die Ursache war weder die
+Karenzzeit noch die Meldungslogik:
+
+> **`refresh_offer_state()` hatte keinen einzigen Aufrufer.**
+
+`0146` hat den Spiegel bewusst **ohne Trigger** gebaut — ein Fehler darin
+soll strukturell keinen Kauf erreichen können — und die Gegenleistung in
+seinen eigenen Kopf geschrieben: „die Meldungen gehen an angemeldete
+Sammler, und **deren eigener Seitenaufbau frischt auf**". Diesen Aufrufer hat
+niemand gebaut. S1 legte den Spiegel an, S2 die Erkennung, S3 die
+Verarbeitung, S4 die Oberfläche — und alle vier hingen an einer Tabelle, die
+seit der Erstbefüllung am 2026-10-25 niemand mehr nachgezogen hat.
+
+**Die Folge war vollständige Stille, nicht Verzögerung.** `shop_offers()`
+liest live, also erschien das neue Angebot sofort im Shop. `offer_state`
+erfuhr davon nie, also fand `offer_availability_due()` nichts, also
+beanspruchte `claim_availability_notifications()` nichts. Keine Meldung —
+nicht nach dreißig Minuten, nicht nach einer Woche.
+
+**Nachgemessen am 2026-10-26** (lesend, Staging): `shop_offers()` lieferte
+226 kaufbare Figuren, der Spiegel war mit 225 befüllt worden, und
+SKY-0020 (Cynder, Spyro's Adventure) war live kaufbar zu 7,19 €.
+
+### Die Lehre, und sie ist allgemeiner als dieser Fehler
+
+**Eine Entscheidung, die eine Aufgabe an einen „späteren Aufrufer" delegiert,
+ist nicht getroffen, solange dieser Aufrufer nicht existiert.** `0146` hat
+den Trigger aus einem guten Grund abgelehnt und den Ersatz im Kommentar
+beschrieben — ein Kommentar ruft nichts auf. Vier aufeinander aufbauende
+Schritte haben die Lücke nicht bemerkt, weil jeder einzelne für sich
+vollständig war und seine Tests gegen eine Welt liefen, in der der Probelauf
+`refresh_offer_state()` selbst aufruft.
+
+### Die Entscheidung
+
+**Der Aufrufer sitzt im authentifizierten Aufbau von `/favoriten`**, als
+erstes Glied einer Kette:
+
+```
+refreshOfferState()  →  claimAvailabilityNotifications()  →  fetchAvailabilityNotices()
+```
+
+Die Reihenfolge **ist** die Sache: nachziehen vor dem Beanspruchen, sonst
+sieht der Aufruf die eingebuchte Figur nicht; beanspruchen vor dem Lesen,
+sonst steht die neue Meldung erst beim nächsten Mal da. Eine Kette, kein
+`Promise.all` — dort wäre die Reihenfolge verloren.
+
+**Gedrosselt bleibt es in der Datenbank.** `offer_state_window()` (eine
+Minute) und ein Transaktionsschloss entscheiden; ein zweiter Aufruf in
+derselben Minute kostet einen `max(checked_at)`. Eine zweite Drossel im
+Anwendungscode wäre eine zweite Wahrheit darüber, wann zuletzt nachgezogen
+wurde. Und `locked` wird **nicht** als Erfolg gelesen — das steht so im
+Funktionskommentar von `0146`.
+
+### Was das für den Zeitpunkt bedeutet — eine ehrliche Einschränkung
+
+`buyable_since` wird beim **ersten Nachziehen** gesetzt, nicht beim
+Einbuchen. „Verfügbar seit" heißt also „seit wir es bemerkt haben". Ohne
+Scheduler geht es nicht anders, und für die Karenzzeit ist es die
+vorsichtigere Richtung: die dreißig Minuten laufen ab dem Bemerken.
+
+**Praktisch heißt das zwei Besuche:** wer `/favoriten` fünf Minuten nach dem
+Einbuchen öffnet, startet die Uhr und sieht nichts; beim nächsten Besuch nach
+Ablauf der Karenzzeit steht die Meldung da. Das Ereignis bleibt fällig, bis es
+jemand abholt — es verfällt nicht.
+
+**Verworfen, und jedes mit Grund:**
+
+* **Ein Trigger auf `shop_inventory`** — genau das, was `0146` ausgeschlossen
+  hat: ein Fehler im Spiegel könnte dann einen Kauf erreichen.
+* **Der Aufruf aus der Einbuchen-Aktion** — koppelt den Schreibpfad des Shops
+  an den Spiegel und hat dieselbe Wirkung wie ein Trigger, nur von Hand.
+* **Ein Scheduler** (`pg_cron`, Edge Function mit Zeitplan) — wäre die
+  einzige Lösung, die die Uhr beim Einbuchen starten lässt. Er bleibt eine
+  offene Entscheidung des Betreibers, denn er ist Infrastruktur, und
+  ADR-0136 hat ausdrücklich keine ohne konkreten Bedarf vorgesehen.
+* **Auch der Katalog frischt auf** — würde die Uhr früher starten (dort ist
+  der Sammler die meiste Zeit) und kostet einen Schreibaufruf auf der
+  häufigsten Seite. Angebotene, nicht getroffene Entscheidung: eine Zeile,
+  wenn der Betreiber es will.
+
+### Der Wächter dagegen
+
+`supabase/checks/offer_state_freshness.sql`, jederzeit lesend fahrbar.
+**Zeile 111 blockiert:** ein Spiegel, der älter als ein Tag ist, heißt, dass
+niemand nachzieht. **Zeile 211** sagt, wie weit Spiegel und Wirklichkeit
+auseinanderliegen, **212/213** nennen die stummen Ereignisse, **303**
+unterscheidet „die Karenzzeit läuft" von „es passiert nichts", und **401–408**
+beantworten für eine einzelne SKY-ID alles, was dieser Befund gebraucht hätte.
+Genau diese Datei hätte den Fehler am 2026-10-25 gefunden.
+
+Dazu ein Regressionstest, der die **Reihenfolge** der Kette festhält: fällt
+`refreshOfferState()` weg, ist das Feature wieder vollständig stumm — und
+zwar lautlos.

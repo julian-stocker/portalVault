@@ -15,6 +15,7 @@ import { fetchOwnedSkyIds } from "@/lib/collection/queries";
 import { fetchFavorites } from "@/lib/favorites/queries";
 import { fetchAvailabilityNotices } from "@/lib/favorites/notification-queries";
 import { claimAvailabilityNotifications } from "@/lib/favorites/notifications";
+import { refreshOfferState } from "@/lib/favorites/offer-state";
 import { imageSrc } from "@/lib/catalog/image";
 import { hasV1BuyableOffer, offerRecord, offersFor } from "@/lib/shop/offer";
 import { fetchOffers } from "@/lib/shop/queries";
@@ -66,17 +67,38 @@ export default async function FavoritesPage() {
    * Zug die Meldungen anlegt. Hier wird nichts erkannt und nichts
    * entschieden; eine zweite Erkennung gibt es nicht.
    *
-   * ZUERST VERARBEITEN, DANN LESEN, und deshalb eine Kette statt zweier
-   * Einträge in `Promise.all`: eine Meldung, die dieser Aufruf gerade
-   * angelegt hat, soll auf DIESER Seite stehen und nicht erst beim nächsten
-   * Mal. Die Kette läuft parallel zu allem anderen, kostet also keine
-   * zusätzliche Wartezeit.
+   * ZUERST NACHZIEHEN, DANN VERARBEITEN, DANN LESEN — drei Schritte in
+   * dieser Reihenfolge, und jeder davon ist nötig.
    *
-   * EIN ZWEITER AUFRUF KOSTET NICHTS: ohne fälliges Ereignis liest die
-   * Funktion nur. Die 30-Minuten-Karenzzeit steckt in
-   * `offer_availability_grace()` und wird hier nicht nachgebaut.
+   * `refreshOfferState()` IST DER SCHRITT, DER AM 2026-10-26 GEFEHLT HAT.
+   * `0146` hat den Spiegel ohne Trigger gebaut und den Aufrufer dem
+   * Seitenaufbau eines angemeldeten Sammlers überlassen — gebaut hatte ihn
+   * niemand. Die Folge: wird eine Figur eingebucht, zeigt `shop_offers()`
+   * das Angebot sofort, aber `offer_state` erfuhr nie davon, also fand
+   * `offer_availability_due()` nichts und es entstand NIE eine Meldung.
+   * Einzelheiten in `src/lib/favorites/offer-state.ts`.
+   *
+   * Dann `claimAvailabilityNotifications()`: der bedarfsgesteuerte Anstoß
+   * aus S3.
+   *
+   * EINE KETTE STATT DREIER EINTRÄGE IN `Promise.all`: die Reihenfolge ist
+   * die Sache selbst. Nachziehen muss vor dem Beanspruchen liegen, sonst
+   * sieht dieser Aufruf die gerade eingebuchte Figur nicht; und Beanspruchen
+   * vor dem Lesen, sonst steht die gerade entstandene Meldung erst beim
+   * nächsten Mal auf der Seite. Die Kette läuft parallel zu allem anderen.
+   *
+   * KEIN SCHRITT DARF DEN NÄCHSTEN AUFHALTEN. Beide Funktionen geben bei
+   * einem Fehler ihren neutralen Wert zurück, statt zu werfen — ein nicht
+   * nachgezogener Spiegel heißt „die Meldung kommt später", nicht „die
+   * Wunschliste lädt nicht".
+   *
+   * BEIDE SIND BILLIG, WENN NICHTS ZU TUN IST: das Nachziehen ist in der
+   * Datenbank auf `offer_state_window()` gedrosselt (eine Minute), und ohne
+   * fälliges Ereignis liest `claim_…()` nur. Die 30-Minuten-Karenzzeit
+   * steckt in `offer_availability_grace()` und wird hier nicht nachgebaut.
    */
-  const noticesPromise = claimAvailabilityNotifications()
+  const noticesPromise = refreshOfferState()
+    .then(() => claimAvailabilityNotifications())
     .then(() => fetchAvailabilityNotices());
 
   const [figures, series, owned, offers, seller, marketBoost, freeShippingFrom, notices] =

@@ -2195,7 +2195,7 @@ Die ganze Begründung: ADR-0142.
 
 | Funktion | Art | Was sie tut |
 |---|---|---|
-| `refresh_offer_state()` | `definer`, `volatile`, nur `authenticated` | zieht den Spiegel gegen `offer_state_live` nach. Gedrosselt über `offer_state_window()` (eine Minute, gemessen an `max(checked_at)`), ein Lauf je Transaktion über `pg_try_advisory_xact_lock(146, 1)`. Drei unterscheidbare Antworten `ran` / `throttled` / `locked` — **`locked` darf der Aufrufer nie als eigenen Erfolg lesen** |
+| `refresh_offer_state()` | `definer`, `volatile`, nur `authenticated` | zieht den Spiegel gegen `offer_state_live` nach. Gedrosselt über `offer_state_window()` (eine Minute, gemessen an `max(checked_at)`), ein Lauf je Transaktion über `pg_try_advisory_xact_lock(146, 1)`. Drei unterscheidbare Antworten `ran` / `throttled` / `locked` — **`locked` darf der Aufrufer nie als eigenen Erfolg lesen**. **Aufgerufen von `refreshOfferState()`** (`src/lib/favorites/offer-state.ts`) als erstes Glied im authentifizierten Aufbau von `/favoriten` — bis zum 2026-10-26 rief sie **niemand** auf, und deshalb entstand keine einzige Verfuegbarkeitsmeldung (ADR-0145). `buyable_since` wird damit beim **ersten Nachziehen** gesetzt, nicht beim Einbuchen: „verfuegbar seit“ heisst „seit wir es bemerkt haben“. Ob der Spiegel frisch ist, sagt `supabase/checks/offer_state_freshness.sql` |
 | `offer_availability_grace()` | `immutable`, kein Clientrecht | die Karenzzeit: `reservation_ttl() + interval '10 minutes'`, heute 30 Minuten. **Keine Zahl im Code** |
 | `offer_availability_due()` | `definer`, **`stable`**, kein Clientrecht | welche Figuren jetzt für eine Verfügbarkeitsmeldung fällig sind. **Rein lesend** — sie verbraucht kein Ereignis |
 

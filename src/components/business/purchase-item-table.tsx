@@ -40,6 +40,7 @@ import {
   canChangeEnding, creditsNoValue, endingsFor, type ItemState,
 } from "@/lib/orderbook/purchase";
 import type { PurchaseItem } from "@/lib/orderbook/queries";
+import { FavoriteDemandIndicator } from "./favorite-demand-indicator";
 import { LedgerItemHead, LedgerItemRow } from "./ledger-table";
 
 const copy = de.business.orderbook;
@@ -132,8 +133,25 @@ export function PurchaseItemHead() {
  * `Aktion` track exists whether or not a button is in it — so a historical row
  * and a bookable one line up instead of the columns shifting under each other.
  */
-export function ItemRow({ item, onBook, onState, busy, failure }: {
+export function ItemRow({ item, onBook, onState, busy, failure, favoriteDemand }: {
   item: PurchaseItem;
+  /**
+   * Wie viele Konten GENAU DIESE SKY-ID vorgemerkt haben, oder `undefined`.
+   *
+   * NUR EINE ZAHL, NIE WER. Sie kommt aus `favorite_demand()`, dessen
+   * Signatur `(sky_id, users)` die Sicherheitsgrenze IST (ADR-0136) — keine
+   * Kennung, keine Adresse, kein Zeitpunkt. `undefined` heißt „nicht
+   * geladen" und `0` heißt „niemand"; beide zeichnen nichts.
+   *
+   * WARUM NICHT „MEIN FAVORIT". Ein Konto, das das Einkaufsbuch öffnen darf,
+   * ist ein Verkäuferbetrieb — und seit `0042` ist ein Konto genau eines von
+   * drei Dingen (ADR-0078). `is_collector_account()` ist für es falsch, und
+   * alle drei Richtlinien auf `favorites` fragen danach: es KANN keine
+   * eigene Wunschliste haben. „Favorit" ohne Angabe wessen wäre deshalb eine
+   * Behauptung über fremde Daten; die Zahl ist die Auskunft, die dem Betrieb
+   * zusteht.
+   */
+  favoriteDemand?: number;
   /** Einbuchen — die eine Aktion, die Bestand erzeugt. */
   onBook: () => void;
   /** Die drei Enden aus dem Plus-Menü: beschädigt, fehlt, Vitrine. */
@@ -164,7 +182,34 @@ export function ItemRow({ item, onBook, onState, busy, failure }: {
       {/* `truncate` is a last resort, not a strategy — the floor above is
           sized so it rarely fires. When it does, the full name is still
           reachable rather than gone. */}
-      <span className="truncate" title={item.name}>{item.name}</span>
+      {/*
+        DER NAME, UND DANEBEN DER HINWEIS — in derselben Spur.
+        
+        KEINE SECHSTE SPALTE: `.ob-item` hat fünf Spuren, und eine weitere
+        hätte die Tabelle auf dem Telefon breiter gemacht. Der Hinweis fährt
+        deshalb IN der Namensspur mit (`shrink-0`, `whitespace-nowrap`), und
+        der Name gibt bei Platzmangel nach — `min-w-0` an der Spur, `truncate`
+        am Namen. Das ist dieselbe Lösung wie in der Lagerkarte und im
+        Figuren-Picker, mit derselben Komponente.
+
+        NUR SOLANGE DIE POSITION OFFEN IST. `itemStatus(item) === "open"`:
+        eine eingebuchte Position (`movementId` gesetzt) ist `complete`, eine
+        abgelegte `settled`, eine Arbeitsmappenzeile `historical` — in allen
+        drei Fällen ist nichts mehr zu entscheiden, und der Hinweis
+        verschwindet von selbst, sobald die Buchung die Zeile ersetzt. Keine
+        eigene Regel dafür: `itemStatus` ist dieselbe Funktion, die die
+        Statusspalte rechts füllt.
+
+        UND ER ENTFERNT KEINEN FAVORITEN. Hier wird gelesen und gezeichnet;
+        `favorites` wird von dieser Datei nicht angefasst, und das Einbuchen
+        kennt die Tabelle überhaupt nicht.
+      */}
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="truncate" title={item.name}>{item.name}</span>
+        {status === "open"
+          ? <FavoriteDemandIndicator count={favoriteDemand} />
+          : null}
+      </span>
       <span className="text-right tabular-nums">
         {item.marketPrice === null ? "—" : formatPrice(item.marketPrice)}
       </span>

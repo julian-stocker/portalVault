@@ -23,6 +23,7 @@ import { de } from "@/lib/i18n/de";
 const QUERIES = "src/lib/favorites/notification-queries.ts";
 const ACTIONS = "src/lib/favorites/notification-actions.ts";
 const CLAIM = "src/lib/favorites/notifications.ts";
+const REFRESH = "src/lib/favorites/offer-state.ts";
 const SECTION = "src/components/catalog/availability-notices.tsx";
 const PAGE = "src/app/(app)/favoriten/page.tsx";
 const NAV = "src/components/layout/site-nav.tsx";
@@ -513,6 +514,75 @@ describe("die Verarbeitung", () => {
     /* Und sie steht VOR dem Lesen, sonst fehlte die gerade entstandene
        Meldung auf genau dieser Seite. */
     expect(c).toContain(".then(() => fetchAvailabilityNotices())");
+  });
+
+  it("UND DER SPIEGEL WIRD VORHER NACHGEZOGEN — genau das hat gefehlt", () => {
+    /*
+     * DER BEFUND VOM 2026-10-26. `0146` hat den Spiegel ohne Trigger gebaut
+     * und den Aufrufer dem Seitenaufbau eines angemeldeten Sammlers
+     * überlassen („deren eigener Seitenaufbau frischt auf") — gebaut hatte
+     * ihn NIEMAND. Vier Schritte (S1–S4) hingen damit an einer Tabelle, die
+     * seit der Erstbefüllung niemand mehr nachgezogen hat: eine eingebuchte
+     * Figur erschien sofort in `shop_offers()`, aber `offer_state` erfuhr es
+     * nie, also wurde NIE etwas fällig und NIE eine Meldung erzeugt.
+     *
+     * Diese Zeile ist der Riegel dagegen. Fällt der Aufruf weg, ist das
+     * Feature wieder vollständig stumm — und zwar lautlos.
+     */
+    const c = code(PAGE);
+    expect(c).toContain("refreshOfferState()");
+    expect(c).toContain('from "@/lib/favorites/offer-state"');
+  });
+
+  it("und die REIHENFOLGE ist die Sache selbst: nachziehen → beanspruchen → lesen", () => {
+    /*
+     * Nachziehen muss vor dem Beanspruchen liegen, sonst sieht der Aufruf
+     * die gerade eingebuchte Figur nicht. Beanspruchen vor dem Lesen, sonst
+     * steht die gerade entstandene Meldung erst beim nächsten Mal da.
+     * Eine Kette, kein `Promise.all` — dort wäre die Reihenfolge verloren.
+     */
+    const c = code(PAGE);
+    const nachziehen = c.indexOf("refreshOfferState()");
+    const beanspruchen = c.indexOf("claimAvailabilityNotifications())");
+    const lesen = c.indexOf("fetchAvailabilityNotices())");
+    expect(nachziehen).toBeGreaterThan(-1);
+    expect(beanspruchen, "beanspruchen nach nachziehen").toBeGreaterThan(nachziehen);
+    expect(lesen, "lesen nach beanspruchen").toBeGreaterThan(beanspruchen);
+    /* Und nicht nebeneinander in `Promise.all`, wo die Reihenfolge fehlte. */
+    expect(c).toMatch(/refreshOfferState\(\)\s*\n?\s*\.then/);
+  });
+
+  it("der Nachzieher liest `locked` nicht als Erfolg", () => {
+    /*
+     * `0146` sagt es im Funktionskommentar: „ein Aufrufer darf locked
+     * NIEMALS als eigenen Erfolg lesen". Deshalb gibt dieser Aufrufpunkt den
+     * Grund unverändert zurück, statt ihn auf einen Wahrheitswert zu
+     * verkürzen — wer `locked` als „ran" liest, glaubt an einen Lauf, den
+     * jemand anders gerade erst begonnen hat.
+     */
+    const c = code(REFRESH);
+    expect(c).toContain('export type RefreshResult = "ran" | "throttled" | "locked" | "failed";');
+    expect(c).toContain('if (grund === "ran" || grund === "throttled" || grund === "locked") return grund;');
+    expect(c).not.toMatch(/return\s+true/);
+  });
+
+  it("und er baut die Drossel nicht nach", () => {
+    /*
+     * `offer_state_window()` und das Transaktionsschloss entscheiden in der
+     * Datenbank. Eine zweite Drossel hier wäre eine zweite Wahrheit darüber,
+     * wann zuletzt nachgezogen wurde.
+     */
+    const c = code(REFRESH);
+    expect(c).not.toContain("offer_state_window");
+    expect(c).not.toContain("Date.now()");
+    expect(c).not.toContain("setTimeout");
+    expect(c).not.toContain("checked_at");
+  });
+
+  it("ein Fehler beim Nachziehen hält die Seite nicht auf", () => {
+    const c = code(REFRESH);
+    expect(c).toContain('if (error) return "failed";');
+    expect(c).not.toContain("throw");
   });
 
   it("und nirgends sonst — kein Scheduler, kein Hintergrundlauf", () => {

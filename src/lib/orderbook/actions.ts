@@ -10,6 +10,7 @@
 import { revalidatePath } from "next/cache";
 
 import { canOperateSeller } from "@/lib/auth/capabilities";
+import { fetchFavoriteDemand } from "@/lib/favorites/queries";
 import { de } from "@/lib/i18n/de";
 import { purchaseDateProblem } from "@/lib/orderbook/purchase-date-rule";
 import { createClient } from "@/lib/supabase/server";
@@ -188,14 +189,45 @@ function orderbookMessage(error: { code?: string; message?: string }): string {
  * ON DEMAND, NOT UP FRONT. Fifteen collapsed rows must not cost 561 item rows
  * of payload and DOM, and 2026 would make that 2 193. One expansion is one
  * query, and a collapsed ledger makes none.
+ *
+ * DIE NACHFRAGE REIST MIT, und zwar aus demselben Grund. Das Einkaufsbuch
+ * soll an der Position zeigen, dass eine Figur vorgemerkt ist — und die Zahl
+ * dafuer gehoert an dieselbe Stelle wie die Positionen selbst: eine Abfrage
+ * je Aufklappen, fuer genau die SKY-IDs dieses Einkaufs. Sie vorab fuer
+ * fuenfundachtzig Einkaeufe zu laden waere die Rechnung, die diese Funktion
+ * ueberhaupt erst vermeidet.
+ *
+ * NUR ZAHLEN, NIE WER. `fetchFavoriteDemand()` ruft `favorite_demand()`, und
+ * dessen Signatur IST die Sicherheitsgrenze: `(sky_id, users)` und sonst
+ * nichts — keine Kennung, keine Adresse, kein Zeitpunkt (ADR-0136,
+ * `docs/SECURITY.md`). Das Tor ist `can_operate_active_seller()` in der
+ * Datenbank; hier steht KEINE zweite Rollenpruefung, die davon abweichen
+ * koennte. Ein Fehler gibt eine leere Map, und dann fehlt nur die Anzeige.
  */
 export async function loadPurchaseItems(
   id: number,
-): Promise<{ ok: true; items: PurchaseItem[] } | { ok: false; message: string }> {
+): Promise<
+  { ok: true; items: PurchaseItem[]; demand: Record<string, number> }
+  | { ok: false; message: string }
+> {
   if (!(await canOperateSeller())) return { ok: false, message: de.admin.notAllowed };
   const detail = await fetchPurchase(id);
   if (!detail) return { ok: false, message: de.admin.writeFailed };
-  return { ok: true, items: detail.items };
+
+  /*
+   * Nur die SKY-IDs dieses Einkaufs, und nur die echten: eine Position ohne
+   * Katalogzuordnung (`skyId === null`) ist eine Arbeitsmappenzeile oder ein
+   * Portal und hat keine Favoriten. Doppelte fallen weg — drei Wash
+   * Bucklers sind drei Positionen und eine Figur.
+   */
+  const skyIds = [...new Set(
+    detail.items.map((i) => i.skyId).filter((x): x is string => x !== null),
+  )];
+  const demand = await fetchFavoriteDemand(skyIds);
+
+  /* Als einfaches Objekt, weil eine `Map` die Grenze zum Browser nicht
+     unveraendert ueberquert. */
+  return { ok: true, items: detail.items, demand: Object.fromEntries(demand) };
 }
 
 /**

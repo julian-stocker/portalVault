@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { de } from "@/lib/i18n/de";
 import { MAX_DEMAND_SKY_IDS } from "@/lib/favorites/queries";
+import { itemStatus } from "@/lib/orderbook/ledger";
 
 /**
  * Die Nachfrageanzeige (0145, ADR-0136).
@@ -23,6 +24,9 @@ const ORDERBOOK = "src/lib/orderbook/queries.ts";
 const INVENTORY = "src/lib/admin/inventory.ts";
 const CARD = "src/components/admin/inventory-card.tsx";
 const MIGRATION = "supabase/migrations/0145_favorites.sql";
+const ITEM_TABLE = "src/components/business/purchase-item-table.tsx";
+const LEDGER = "src/components/business/orderbook-ledger.tsx";
+const ACTIONS = "src/lib/orderbook/actions.ts";
 
 const quelle = (p: string): string => readFileSync(p, "utf8");
 function code(p: string): string {
@@ -364,6 +368,135 @@ describe("wo die Zahl erscheint — und wo nicht", () => {
 
   it("die Vorgabe ist AUS, also bleibt jede andere Fläche unverändert", () => {
     expect(code(SEARCH)).toContain("showDemand = false");
+  });
+
+  it("DAS EINKAUFSBUCH zeigt sie an der Position — in der Namensspur", () => {
+    /*
+     * DER AUFTRAG VOM 2026-10-26: im aufgeklappten Bestellbereich erkennen,
+     * welche noch nicht eingebuchten Figuren vorgemerkt sind.
+     *
+     * KEINE SECHSTE SPALTE. `.ob-item` hat fünf Spuren; eine weitere hätte
+     * die Tabelle auf dem Telefon breiter gemacht. Der Hinweis fährt deshalb
+     * IN der Namensspur mit, und der Name gibt bei Platzmangel nach.
+     */
+    const t = code(ITEM_TABLE);
+    expect(t).toContain("<FavoriteDemandIndicator count={favoriteDemand} />");
+    /* In derselben Spur wie der Name, nicht daneben. */
+    expect(t).toMatch(/<span className="flex min-w-0 items-center gap-1\.5">\s*<span className="truncate" title=\{item\.name\}>/);
+    /* Und die Spurenzahl ist unverändert fünf. */
+    expect(code(LEDGER)).toContain("PURCHASE_ITEM_COLUMNS");
+    expect(t).not.toContain("--ob-item-columns");
+  });
+
+  it("und NUR solange die Position offen ist — eingebucht verschwindet sie", () => {
+    /*
+     * `itemStatus(item) === "open"` ist die ganze Bedingung, und sie ist
+     * KEINE neue Regel: dieselbe Funktion füllt die Statusspalte rechts
+     * daneben. Eine eingebuchte Position (`movementId` gesetzt) ist
+     * `complete`, eine abgelegte `settled`, eine Arbeitsmappenzeile
+     * `historical` — in allen drei Fällen ist nichts mehr zu entscheiden.
+     *
+     * „Verschwindet automatisch" fällt daraus heraus: das Einbuchen gibt die
+     * neue Positionsliste zurück, die Zeile wird mit `complete` neu
+     * gezeichnet, und die Bedingung ist dann falsch.
+     */
+    const t = code(ITEM_TABLE);
+    expect(t).toContain('status === "open"');
+    const bedingung = t.indexOf('status === "open"');
+    const anzeige = t.indexOf("<FavoriteDemandIndicator");
+    expect(bedingung).toBeGreaterThan(-1);
+    expect(anzeige, "die Anzeige steht hinter der Bedingung").toBeGreaterThan(bedingung);
+    /* Keine zweite Definition von „eingebucht". */
+    expect(t).not.toContain("movementId !== null");
+
+    /*
+     * UND DIE BEDINGUNG IST WIRKLICH WAHR BZW. FALSCH — gegen die Funktion
+     * selbst, nicht gegen den Quelltext. Damit ist die Kette geschlossen:
+     * die Anzeige hängt an `status === "open"`, und `open` ist genau der
+     * Zustand vor dem Einbuchen.
+     */
+    expect(itemStatus({ state: "arrived", movementId: null })).toBe("open");
+    expect(itemStatus({ state: "ordered", movementId: null })).toBe("open");
+    expect(itemStatus({ state: "arrived", movementId: 42 })).toBe("complete");
+    expect(itemStatus({ state: "settled", movementId: null })).toBe("settled");
+    expect(itemStatus({ state: "reconciled_legacy", movementId: null })).toBe("historical");
+  });
+
+  it("die Zahl kommt aus derselben Antwort wie die Positionen — kein zweiter Aufruf", () => {
+    /*
+     * Eine Abfrage je Aufklappen, für genau die SKY-IDs dieses Einkaufs. Sie
+     * vorab für fünfundachtzig Einkäufe zu laden wäre die Rechnung, die
+     * `loadPurchaseItems()` überhaupt erst vermeidet.
+     */
+    const a = code(ACTIONS);
+    expect(a).toContain("const demand = await fetchFavoriteDemand(skyIds);");
+    expect(a).toContain("items: detail.items, demand: Object.fromEntries(demand)");
+    /* Nur die echten SKY-IDs, und jede einmal. */
+    expect(a).toContain("new Set(");
+    expect(a).toContain('(x): x is string => x !== null');
+
+    const l = code(LEDGER);
+    expect(l).toContain("setDemand((current) => ({ ...current, [id]: result.demand }))");
+    /* Und die Komponente ruft nichts selbst. */
+    expect(code(ITEM_TABLE)).not.toContain("fetchFavoriteDemand");
+  });
+
+  it("sie hängt an der EXAKTEN SKY-ID, und eine Position ohne Zuordnung bekommt nichts", () => {
+    const l = code(LEDGER);
+    expect(l).toContain("item.skyId === null ? undefined");
+    expect(l).toContain("demand[purchase.id]?.[item.skyId]");
+  });
+
+  it("das Einkaufsbuch legt KEINE fremden Favoriten offen", () => {
+    /*
+     * Die Grenze ist die Signatur von `favorite_demand()`: `(sky_id, users)`
+     * und sonst nichts (ADR-0136). Weder die Aktion noch die Zeile noch die
+     * Anzeige kennt eine Kontokennung — und `favorites` wird von keiner der
+     * drei gelesen.
+     */
+    for (const p of [ACTIONS, LEDGER, ITEM_TABLE, INDICATOR]) {
+      const c = code(p);
+      expect(c, `${p}: user_id`).not.toContain("user_id");
+      expect(c, `${p}: userId`).not.toContain("userId");
+      expect(c, `${p}: from("favorites")`).not.toContain('from("favorites")');
+      expect(c, `${p}: fetchFavoritedSkyIds`).not.toContain("fetchFavoritedSkyIds");
+    }
+  });
+
+  it("und es ENTFERNT keinen Favoriten — weder beim Anzeigen noch beim Einbuchen", () => {
+    /*
+     * Der Auftrag nennt es ausdrücklich. Hier wird gelesen und gezeichnet;
+     * `setFavorite` kommt in der ganzen Kette nicht vor, und das Einbuchen
+     * kennt `favorites` überhaupt nicht.
+     */
+    for (const p of [ACTIONS, LEDGER, ITEM_TABLE]) {
+      const c = code(p);
+      expect(c, `${p}: setFavorite`).not.toContain("setFavorite");
+      expect(c, `${p}: delete`).not.toMatch(/from\("favorites"\)[\s\S]{0,80}\.delete/);
+    }
+  });
+
+  it("es gibt keine Gegenanzeige fuer Figuren ohne Favorit", () => {
+    /* `FavoriteDemandIndicator` zeichnet bei 0, null und undefined nichts —
+       geprüft im Abschnitt „null Favoriten zeichnen nichts". Hier nur: es
+       gibt keinen zweiten Zweig, der etwas anderes sagt. */
+    const t = code(ITEM_TABLE);
+    expect(t).not.toContain("Kein Favorit");
+    expect(t).not.toMatch(/favoriteDemand\s*\?\s*[^:]+:\s*["'`]/);
+  });
+
+  it("Status und Einbuchen sind unverändert", () => {
+    /*
+     * Die Zeile hat eine Prop dazubekommen und eine Bedingung um eine
+     * Anzeige. Die Aktionen sind dieselben Aufrufe mit denselben Namen.
+     */
+    const t = code(ITEM_TABLE);
+    expect(t).toContain("{canCheckIn(item) ? (");
+    expect(t).toContain("onClick={onBook}");
+    expect(t).toContain("<Status status={status} text={text} title={title} />");
+    const l = code(LEDGER);
+    expect(l).toContain("processBookPurchaseItem(item.id, purchase.id)");
+    expect(l).toContain("processPurchaseItemState(item.id, state, purchase.id)");
   });
 
   it("das Lager zeigt sie am Kopf der Karte, vor dem Shop-Schalter", () => {

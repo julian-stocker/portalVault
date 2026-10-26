@@ -274,6 +274,22 @@ export function OrderbookLedger({
     () => new Set(purchases.filter((p) => p.matchItems.length > 0).map((p) => p.id)));
   const [items, setItems] = useState<Record<number, PurchaseItem[] | "failed">>({});
   /*
+   * WIE VIELE KONTEN JEDE FIGUR VORGEMERKT HABEN — je Einkauf, so wie die
+   * Positionen selbst.
+   *
+   * NUR ZAHLEN, NIE WER. `favorite_demand()` gibt `(sky_id, users)` und
+   * sonst nichts; die Signatur IST die Grenze (ADR-0136). Dieser Zustand
+   * trägt deshalb auch nur Zahlen, und es gibt keinen Weg von hier zu einer
+   * Kontokennung.
+   *
+   * Getrennt von `items` und nicht als Feld daran: `items` wird von einer
+   * Buchung ersetzt (die Aktion gibt die neue Liste zurück), die Nachfrage
+   * ändert sich dabei nicht. Zusammengelegt müsste jede Aktion sie
+   * mitschleppen, und eine vergessene Mitnahme wäre eine verschwundene
+   * Anzeige.
+   */
+  const [demand, setDemand] = useState<Record<number, Record<string, number>>>({});
+  /*
    * WELCHE POSITION GERADE LÄUFT, nicht „läuft irgendetwas".
    *
    * Hier stand ein `useTransition`, dessen `pending` an JEDEM Knopf JEDER
@@ -348,6 +364,8 @@ export function OrderbookLedger({
     void loadPurchaseItems(id).then((result) => {
       loading.current.delete(id);
       setItems((current) => ({ ...current, [id]: result.ok ? result.items : "failed" }));
+      /* Die Nachfrage kommt aus derselben Antwort — kein zweiter Aufruf. */
+      if (result.ok) setDemand((current) => ({ ...current, [id]: result.demand }));
     });
   }, []);
 
@@ -633,6 +651,14 @@ export function OrderbookLedger({
                       <ul className="divide-y divide-border/40">
                         {loaded.map((item) => (
                           <ItemRow key={item.id} item={item}
+                                   /*
+                                     Die Zahl zu GENAU dieser SKY-ID. Ohne
+                                     Katalogzuordnung und ohne Favoriten
+                                     kommt `undefined`, und die Anzeige
+                                     zeichnet dann nichts.
+                                   */
+                                   favoriteDemand={item.skyId === null ? undefined
+                                     : demand[purchase.id]?.[item.skyId]}
                                    busy={busy.has(item.id)}
                                    failure={failed.get(item.id) ?? null}
                                    onBook={() => act(purchase.id, item.id,
