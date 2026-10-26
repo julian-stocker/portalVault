@@ -172,10 +172,24 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * liegen — sie stehen nur in der Production-Tabelle. Das ist eine
      * bekannte Lücke der Akte und kein Befund über `0144`; sie zu füllen
      * braucht die Prüfsummen der dort gelaufenen Fassungen.
+     *
+     * DREI DAZU AM 2026-10-26: `0147`, `0148` und `0149` (Phase 4, S2 bis
+     * S4). Alle drei liefen über `db:migrate:staging`, und ein
+     * Nachkontrollprotokoll IST der Beweis der Anwendung — der Runner bricht
+     * im `--resume` mit „liegt noch nicht" ab, solange die
+     * `angewendet`-Probe nicht zutrifft. `0147` beim zweiten Versuch: der
+     * erste brach in der Migration selbst ab (sechs legitime Trigger gegen
+     * eine Zählung) und hinterließ nichts. Auch hier stand die Akte bis zum
+     * Lauf auf „nirgends angewendet"; dieselbe stille Veralterung wie bei
+     * `0144` und `0146`, und derselbe Grund, sie zu führen.
      */
-    expect(zeilen.length).toBe(20);
+    expect(zeilen.length).toBe(23);
     for (const datei of ["0144_platform_export_calculations.sql",
-                         "0145_favorites.sql"]) {
+                         "0145_favorites.sql",
+                         "0146_offer_state.sql",
+                         "0147_offer_availability.sql",
+                         "0148_availability_notifications.sql",
+                         "0149_notification_read_state.sql"]) {
       expect(zeilen.map((z) => z.datei), datei).toContain(datei);
     }
     for (const datei of ["0135_catalog_item_type.sql",
@@ -238,9 +252,16 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     const gleiche = zeilen.filter((z) => z.heute === "gleich");
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
        `0137`/`0138`, sechzehn seit `0139`/`0140`, achtzehn seit `0144` und
-       `0145` am 2026-10-25, neunzehn seit `0146` am selben Tag. Nur `0130`
-       weicht ab und zeigt auf ihren Nachtrag. */
-    expect(gleiche.length).toBe(19);
+       `0145` am 2026-10-25, neunzehn seit `0146` am selben Tag,
+       zweiundzwanzig seit `0147`–`0149` am 2026-10-26. Nur `0130` weicht ab
+       und zeigt auf ihren Nachtrag.
+
+       DIE ZEILE PRÜFT MEHR, ALS SIE ZÄHLT: für jede dieser Dateien wird die
+       Prüfsumme nachgerechnet. Eine angewendete Migration wird nicht mehr
+       geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
+       wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
+       der benannten Triggererwartung — nicht die, die abgebrochen ist. */
+    expect(gleiche.length).toBe(22);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

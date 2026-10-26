@@ -82,7 +82,7 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-## Benachrichtigungsoberfläche (2026-10-26, `0149`, Phase 4 S4, ADR-0144) — gebaut, nirgends angewendet
+## Benachrichtigungsoberfläche (2026-10-26, `0149`, Phase 4 S4, ADR-0144) — **auf Staging angewendet**
 
 **Die Meldungen aus `0148` bekommen ein Gesicht** — und eine Spalte, die „neu" von „gesehen"
 unterscheidet. **Keine E-Mail, kein Push, kein Preisalarm, kein Scheduler, kein Hintergrundjob,
@@ -119,12 +119,20 @@ nicht") schlug zu Recht an. Dieselbe Lehre wie dreimal bei P56: der Probelauf mu
 `supabase/rollback/R0149_notification_read_state.sql`. Die Erwartungen beider Prüfdateien sind
 in P57 als Eigner gefahren.
 
+**Auf Staging angewendet am 2026-10-26**, in 44 Sekunden: Preflight `9999 = 0` (3 offene
+Zeilen), Nachkontrolle `9999 = 0` (2 offene — genau die zwei, die `availability_notifications`
+lesen müssten). Alle Struktur- und Rechtezeilen sind geprüft und bestanden, weil sie
+`pg_catalog` lesen (ADR-0141). **Offen:** der berechtigte Lauf von
+`0149-postflight-berechtigt.sql` als `postgres` für `9998 = 0` — dort wird Zeile 104 („KEINE
+Meldung ist als gelesen geführt") zur blockierenden Prüfung. Dasselbe steht für `0147` und
+`0148` noch aus.
+
 **Noch unbestätigt:** die fünf Browserpunkte des Laufzettels (darunter „mehrfach neu laden —
 die Karten bleiben ungelesen") und die neun aus `0145`.
 
 ---
 
-## Der wiederkehrende `28P01` am Prüfzugang (2026-10-26) — Ursache eingegrenzt, zwei Fehler behoben
+## Der wiederkehrende `28P01` am Prüfzugang (2026-10-26) — **gemessen**, zwei Fehler behoben
 
 Bei `0147` und `0148` trat beim `--resume` unmittelbar nach gelungenem Preflight mehrfach
 `28P01` auf; ein späterer Versuch gelang **ohne Passwortänderung**. Damit ist die alte
@@ -151,12 +159,40 @@ nie geprüft hat, zu wiederholen fragt nicht dasselbe nochmal, sondern fragt die
 wird beim zweiten Mal nicht richtig, und Wiederholungen gegen eine Anmeldung sind das Muster,
 das Sperren auslöst.
 
-**Nicht behauptet** wird, dass die Ursache am Pooler *bewiesen* sei — dafür fehlt der Beleg, und
-die drei fehlgeschlagenen Läufe sind nicht mehr nachprüfbar. Deshalb nennt die Meldung zuerst den
-Test, der es entscheidet: dieselbe Zugangsdatei mit dem **direkten** Host
-(`db.<ref>.supabase.co`, Riegel 1 lässt beide Formen zu) — der umgeht Supavisor. Meldet die
-direkte Verbindung sich an, war das Passwort richtig. **25 neue Tests**, darunter die Gegenprobe,
-dass ein von der Datenbank verworfenes Passwort **niemals** wiederholt wird.
+**Und dann trat er beim ersten Einsatz der Akte sofort auf** — der `0149`-Rollout 40 Minuten
+später hat ihn mitgeschrieben:
+
+```
+| 2026-10-26T11:44:30.379Z | pooler | 1 | 28P01 | pooler | 980 | password authentication failed … |
+```
+
+Das ist die Messung, die vorher fehlte, und sie reproduziert die Lage genau: `11:43:50` lief der
+Preflight **mit derselben Zugangsdatei durch**, `11:44:30` wurde die Anmeldung abgelehnt,
+`11:44:34` stand die bestandene Nachkontrolle. Dazwischen lag **nichts** als der eine
+Wiederholungsversuch nach drei Sekunden — kein Passwortwechsel, kein Eingriff des Bedieners.
+
+Was damit **belegt** ist:
+
+* **Es war nicht das Passwort.** Vierzig Sekunden davor und vier Sekunden danach hat sich
+  dieselbe Datei erfolgreich angemeldet. Die alte Fehlermeldung war falsch, und zwar nicht nur
+  unscharf.
+* **Die Ablehnung kam nicht aus PostgreSQLs Anmeldecode.** Der Fehler trug weder `routine` noch
+  `file`; jede Ablehnung aus `auth.c` trägt beides. Die Datenbank hat das Passwort nicht
+  verworfen — sie wurde nicht gefragt.
+* **980 ms** bis zur Ablehnung, also kein sofortiges Nein, sondern ein langsamer Handschlag —
+  was zu einem Pool passt, der gerade aufgebaut wird.
+* **Drei Sekunden genügen.** Das „später" aus dem ursprünglichen Befund war nicht nötig; der
+  Bediener muss nichts mehr tun.
+
+Was **weiter offen** ist: *warum* Supavisor ablehnt. Das lässt sich von hier nicht entscheiden,
+und es braucht auch keine Entscheidung mehr — der Lauf geht durch. Sollte es häufiger werden,
+steht in der Akte eine Zeitreihe, und dann ist der Supabase-Support der richtige Adressat, nicht
+ein Passwortwechsel.
+
+Der Test für den Zweifelsfall bleibt in der Meldung: dieselbe Zugangsdatei mit dem **direkten**
+Host (`db.<ref>.supabase.co`, Riegel 1 lässt beide Formen zu) umgeht Supavisor. **25 neue
+Tests**, darunter die Gegenprobe, dass ein von der Datenbank verworfenes Passwort **niemals**
+wiederholt wird.
 
 Keine Abschwächung von TLS: `sslmode=verify-full` mit benannter CA bleibt, `rejectUnauthorized`
 kommt in keiner wirksamen Zeile vor, und kein Passwort wurde geändert.
