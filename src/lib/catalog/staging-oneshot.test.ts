@@ -394,6 +394,10 @@ const LAEUFE = [
      CHECK, eine ersetzte und zwei neue Funktionen; KEIN Trigger, keine
      Tabelle. Sie setzt `0146` voraus und prueft das selbst. */
   ["supabase/operations/staging-0147.sql", "0147_offer_availability.sql"],
+  /* Und `0148` — die persoenlichen Meldungen (Phase 4 S3). Eine Tabelle,
+     eine Richtlinie, eine Funktion; KEIN Trigger, kein Scheduler. Sie setzt
+     `0145`, `0146` und `0147` voraus und prueft jedes selbst. */
+  ["supabase/operations/staging-0148.sql", "0148_availability_notifications.sql"],
 ] as const;
 
 describe("die Einzellaeufe fuer 0139 bis 0143", () => {

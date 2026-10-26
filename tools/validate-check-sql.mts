@@ -4962,6 +4962,16 @@ async function main(): Promise<void> {
       for (const datei of [plan.preflight, plan.postflight]) {
         const anw = anweisungen(readFileSync(join(CHECK_DIR, datei), "utf8"))
           .filter((x) => planbar(x));
+        /*
+         * EIN FEHLER HIER IST EIN BEFUND, KEIN ABBRUCH DER VALIDIERUNG.
+         *
+         * Ohne `catch` riss eine Pruefdatei, die unter dem Pruefzugang
+         * abbricht, den ganzen Lauf mit — und dann sagte die Ausgabe
+         * „Validierung fehlgeschlagen: permission denied for schema auth"
+         * ohne zu nennen, WELCHE Datei es war. Genau so ist `0148`s
+         * Preflight-Zeile zu `auth.users` aufgefallen, nur unnoetig
+         * schwer.
+         */
         const fahre = async (rolle: string | null) => {
           await db.exec("begin;");
           if (rolle) await db.exec(`set local role ${rolle};`);
@@ -4969,10 +4979,17 @@ async function main(): Promise<void> {
             const r = (await db.query(`select nr, befund from (${ohneKopf(anw[0])}) x`)) as
               { rows: { nr: number; befund: string }[] };
             return new Map(r.rows.map((z) => [Number(z.nr), String(z.befund)]));
+          } catch (e) {
+            return (e as Error).message.split("\n")[0];
           } finally { await db.exec("rollback;"); }
         };
         const alsEigner = await fahre(null);
         const alsAgent = await fahre("pruefrolle");
+        if (typeof alsEigner === "string" || typeof alsAgent === "string") {
+          abweichend.push(`${nummer}/${datei}: BRICHT AB — `
+            + `${typeof alsEigner === "string" ? alsEigner : alsAgent}`);
+          continue;
+        }
         for (const [nr, wert] of alsEigner) {
           /* Die Summenzeilen haengen naturgemaess an den offenen Zeilen. */
           if (nr >= 9998) continue;
@@ -5643,6 +5660,377 @@ async function main(): Promise<void> {
         + "Zyklen wieder moeglich, Gegenprobe gegen die Gegenwart",
       ok,
       sagt: `0147: ${befund.join(" · ")}`,
+    });
+  }
+
+  /* P56 — `0148`: AUS EINEM EREIGNIS WERDEN PERSOENLICHE MELDUNGEN.
+   *
+   * WAS DAFUER GESTELLT WIRD, sichtbar und begrenzt: `auth.uid()` liest hier
+   * eine Sitzungsvariable, damit mehrere Nutzer pruefbar sind, und
+   * `is_collector_account()` gibt `true`. Geprueft wird `0148`, nicht die
+   * Rollenlogik — dass die Richtlinie ueberhaupt fragt, steht im Text und in
+   * der Nachkontrolle.
+   *
+   * ZEITREISE durch Zurueckdatieren, wie in P55: die ganze Vorgeschichte
+   * wird gleich weit zurueckgeschoben, `announced_at` und `created_at` der
+   * Favoriten eingeschlossen.
+   */
+  {
+    const A = "aaaaaaaa-0000-0000-0000-000000000001";
+    const B = "bbbbbbbb-0000-0000-0000-000000000002";
+    const C = "cccccccc-0000-0000-0000-000000000003";
+
+    const db = await frisch();
+    await db.exec("drop function if exists public.claim_availability_notifications();");
+    await db.exec("drop table if exists public.availability_notifications cascade;");
+    await db.exec("drop function if exists public.offer_availability_due();");
+    await db.exec("drop function if exists public.offer_availability_grace();");
+    await db.exec("drop function if exists public.refresh_offer_state();");
+    await db.exec("drop view if exists public.offer_state_live;");
+    await db.exec("drop table if exists public.offer_state cascade;");
+    await db.exec("drop function if exists public.offer_state_window();");
+    await attrappenFuerBaseline(db);
+
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('${A}'), ('${B}'), ('${C}')
+        on conflict do nothing;
+      create or replace function auth.uid() returns uuid
+        language sql stable
+        as $u$ select nullif(current_setting('z56.uid', true), '')::uuid $u$;
+      create or replace function public.is_collector_account() returns boolean
+        language sql stable as $k$ select true $k$;
+      alter table public.skylanders add constraint z56_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug, market_price)
+      values ('SKY-7001', 'Probe Bash', 'probe-bash-56', 20.00),
+             ('SKY-7002', 'Probe Variante', 'probe-variante-56', 30.00)
+        on conflict do nothing;
+      insert into public.shop_settings (id, price_percentage)
+      values (true, 100) on conflict do nothing;
+      alter table public.shop_inventory drop column if exists available_quantity;
+      alter table public.shop_inventory
+        add column available_quantity integer
+        generated always as (quantity - reserved) stored;
+      create sequence if not exists public.z56_inv_seq start 1;
+      alter table public.shop_inventory alter column id set default nextval('public.z56_inv_seq');
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $p56$
+        select i.sky_id, i.condition,
+               public.shop_price(i.sale_price, s.market_price, st.price_percentage),
+               (i.available_quantity > 0), null::text
+          from public.shop_inventory i
+          join public.skylanders s on s.sky_id = i.sky_id
+          cross join public.shop_settings st
+         where i.is_listed
+           and i.condition = public.v1_sale_condition()
+           and public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+               is not null;
+      $p56$;
+      insert into public.shop_inventory (sky_id, condition, quantity, reserved, is_listed)
+      values ('SKY-7001', 'loose', 2, 0, true),
+             ('SKY-7002', 'loose', 1, 0, true);`);
+
+    /*
+     * `favorites` WIE 0145 SIE ANLEGT — und das war noetig.
+     *
+     * Das Stub-Schema ist reine Struktur: Spalten mit Typen, ohne Default
+     * und ohne `not null`. Ein `insert into favorites (user_id, sky_id)`
+     * speicherte dort also `created_at = NULL`, der Verbund
+     * `created_at < buyable_since` wurde NULL, und es entstand STILL keine
+     * Meldung. Der erste Lauf meldete „0 Meldungen" und sah aus wie ein
+     * Fehler in `0148` — er war einer im Probelauf, der eine mildere Welt
+     * nachbildete als die echte. Dieselbe Lehre wie bei P54 (Entzuege) und
+     * P55 (die sechs Trigger).
+     *
+     * Deshalb: Default UND `not null`, so wie `0145` es legt. Ein kuenftiges
+     * Versaeumnis derselben Art bricht dann LAUT ab.
+     */
+    await db.exec(`
+      alter table public.favorites alter column created_at set default now();
+      update public.favorites set created_at = now() where created_at is null;
+      alter table public.favorites alter column created_at set not null;
+      alter table public.favorites add constraint z56_fav_pk
+        primary key (user_id, sky_id);
+      -- Und die drei Richtlinien aus 0145, in ihrer Form: der Preflight von
+      -- 0148 prueft, dass sie dastehen, und ein Stub ohne sie ist wieder
+      -- eine mildere Welt als die echte.
+      --
+      -- (Als SQL-Kommentar, nicht als Blockkommentar: dieser Text steht in
+      -- einem Template-Literal, und ein Gravis darin wuerde es beenden.)
+      alter table public.favorites enable row level security;
+      create policy favorites_select_own on public.favorites
+        for select to authenticated
+        using ((select auth.uid()) = user_id and public.is_collector_account());
+      create policy favorites_insert_own on public.favorites
+        for insert to authenticated
+        with check ((select auth.uid()) = user_id and public.is_collector_account());
+      create policy favorites_delete_own on public.favorites
+        for delete to authenticated
+        using ((select auth.uid()) = user_id and public.is_collector_account());`);
+
+    const befund: string[] = [];
+    let ok = true;
+    const sag = (was: string, gut: boolean, text: string): boolean => {
+      befund.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+    const wert = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    const ruf = () => db.exec("select public.refresh_offer_state()");
+    /** Zeit vergehen lassen — die GANZE Vorgeschichte, wie in P55. */
+    const warte = async (minuten: number) => {
+      await db.exec(`update public.offer_state set
+          buyable_since = buyable_since - interval '${minuten} minutes',
+          changed_at    = changed_at - interval '${minuten} minutes',
+          checked_at    = checked_at - interval '${minuten} minutes',
+          announced_at  = announced_at - interval '${minuten} minutes'`);
+      await db.exec(`update public.favorites set
+          created_at = created_at - interval '${minuten} minutes'`);
+      await db.exec(`update public.availability_notifications set
+          created_at = created_at - interval '${minuten} minutes'`);
+    };
+    /** Als wer? */
+    const als = (uid: string | null) => db.exec(
+      uid === null ? "select set_config('z56.uid', '', false)"
+                   : `select set_config('z56.uid', '${uid}', false)`);
+    const beansprucht = async (): Promise<string> =>
+      await wert("select public.claim_availability_notifications()::text as w");
+    const meldungen = (uid?: string) => wert(
+      "select count(*)::text as w from public.availability_notifications"
+      + (uid ? ` where user_id = '${uid}'` : ""));
+    /** Eine echte Abwesenheit herstellen und danach 31 Minuten warten. */
+    const neuerZyklus = async (sky: string) => {
+      await db.exec(`update public.shop_inventory set is_listed = false
+                      where sky_id = '${sky}'`);
+      await ruf();
+      await warte(25);
+      await db.exec(`update public.shop_inventory set is_listed = true
+                      where sky_id = '${sky}'`);
+      await ruf();
+      await warte(31);
+    };
+    const abdruck = () => wert(`select md5(
+        coalesce((select string_agg(i.id::text || '|' || i.sky_id || '|'
+                                    || i.is_listed::text || '|' || i.quantity::text,
+                                    ';' order by i.id)
+                    from public.shop_inventory i), '-')
+     || coalesce((select count(*)::text from public.collection_items), '-')) as w`);
+
+    /* ------------------------------------------------- 1. Die Migrationen */
+    const l146 = await fahre(db, join(MIG_DIR, "0146_offer_state.sql"));
+    ok = sag("0146", l146 === null, l146 ?? "durch");
+    if (ok) await ruf();                        /* Erstbefuellung, beide gemeldet */
+    const l147 = ok ? await fahre(db, join(MIG_DIR, "0147_offer_availability.sql")) : "-";
+    ok = ok && sag("0147", l147 === null, l147 ?? "durch");
+    await db.exec(`create or replace function public.offer_state_window()
+      returns interval language sql immutable set search_path = ''
+      as $w$ select interval '0' $w$;`);
+    /* Der Preflight, als Eigner, VOR 0148 — mit seinen echten Erwartungen. */
+    if (ok) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0148_preflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok = sag("Preflight 0148 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    const vorMigration = ok ? await abdruck() : "-";
+    const l148 = ok ? await fahre(db, join(MIG_DIR, "0148_availability_notifications.sql"))
+                    : "-";
+    ok = ok && sag("0148", l148 === null, l148 ?? "durch");
+    if (ok) {
+      ok = sag("Migration ruehrt Lager und Sammlung nicht an",
+        await abdruck() === vorMigration, "Abdruck unveraendert");
+    }
+
+    /* Die Nachkontrolle, als Eigner, direkt nach 0148. */
+    if (ok) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0148_postflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok = sag("Nachkontrolle 0148 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* -------- 2. ZWEI NUTZER VOR DER PHASE, EINER DANACH ---------------- */
+    if (ok) {
+      /* A und B merken JETZT vor — bevor die neue Phase beginnt. */
+      await db.exec(`insert into public.favorites (user_id, sky_id)
+                     values ('${A}', 'SKY-7001'), ('${B}', 'SKY-7001')`);
+      await neuerZyklus("SKY-7001");
+      /* C merkt ERST JETZT vor — nach dem Beginn der Phase. */
+      await db.exec(`insert into public.favorites (user_id, sky_id)
+                     values ('${C}', 'SKY-7001')`);
+
+      await als(A);
+      const faellig = await wert(
+        "select coalesce(string_agg(sky_id, ',' order by sky_id), '(keine)') as w "
+        + "from public.offer_availability_due()");
+      /* Drei Favoriten, zwei davor — als Zahl, nicht als Zeitstempelwand. */
+      const davor = await wert(`select count(*)::text as w
+        from public.favorites v join public.offer_state s on s.sky_id = v.sky_id
+       where v.sky_id = 'SKY-7001' and v.created_at < s.buyable_since`);
+      const fuerA = await beansprucht();
+      const gesamt = await meldungen();
+      const cHat = await meldungen(C);
+      ok = sag("zwei vor der Phase, einer danach",
+        faellig === "SKY-7001" && davor === "2"
+        && fuerA === "1" && gesamt === "2" && cHat === "0",
+        `faellig ${faellig}, ${davor} von 3 Favoriten vor der Phase, `
+        + `Rueckgabe fuer A ${fuerA}, gesamt ${gesamt}, C hat ${cHat}`);
+    }
+
+    /* ------------------- 3. WIEDERHOLTE UND „PARALLELE" AUFRUFE --------- */
+    if (ok) {
+      /*
+       * ECHTE GLEICHZEITIGKEIT ist in PGlite nicht fahrbar (eine
+       * Verbindung). Was hier laeuft, ist die Lage NACH dem Warten auf die
+       * Zeilensperre: der zweite Aufruf prueft sein `where` gegen die neue
+       * Zeile. Genau das tut PostgreSQL unter READ COMMITTED.
+       */
+      const zweiter = await beansprucht();
+      await als(B);
+      const dritter = await beansprucht();
+      const gesamt = await meldungen();
+      ok = sag("wiederholte Aufrufe", zweiter === "0" && dritter === "0" && gesamt === "2",
+        `zweiter ${zweiter}, dritter (als B) ${dritter}, Meldungen gesamt ${gesamt}`);
+    }
+
+    /* --------------------- 4. PREISAENDERUNG ALLEIN --------------------- */
+    if (ok) {
+      await db.exec("update public.shop_inventory set sale_price = 12.00 "
+        + "where sky_id = 'SKY-7001'");
+      await ruf();
+      await warte(31);
+      const nach = await beansprucht();
+      ok = sag("Preisaenderung allein", nach === "0" && await meldungen() === "2",
+        `beansprucht ${nach}, Meldungen ${await meldungen()}`);
+      await db.exec("update public.shop_inventory set sale_price = null "
+        + "where sky_id = 'SKY-7001'");
+      await ruf();
+    }
+
+    /* ------------------- 5. KURZE WARENKORBRESERVIERUNG ----------------- */
+    if (ok) {
+      await db.exec("update public.shop_inventory set reserved = 2 "
+        + "where sky_id = 'SKY-7001'");
+      await ruf();
+      await warte(2);                       /* kuerzer als reservation_ttl() */
+      await db.exec("update public.shop_inventory set reserved = 0 "
+        + "where sky_id = 'SKY-7001'");
+      await ruf();
+      await warte(31);
+      const nach = await beansprucht();
+      ok = sag("kurze Reservierung", nach === "0" && await meldungen() === "2",
+        `beansprucht ${nach}, Meldungen ${await meldungen()}`);
+    }
+
+    /* ----------------------- 6. ECHTER ZWEITER ZYKLUS ------------------- */
+    if (ok) {
+      await neuerZyklus("SKY-7001");
+      await als(A);
+      const fuerA = await beansprucht();
+      const gesamt = await meldungen();
+      const aHat = await meldungen(A);
+      const cHat = await meldungen(C);
+      ok = sag("zweiter echter Zyklus",
+        fuerA === "1" && gesamt === "5" && aHat === "2" && cHat === "1",
+        `Rueckgabe fuer A ${fuerA}, gesamt ${gesamt} (erwartet 5: A,B je 2 und C 1), `
+        + `A hat ${aHat}, C hat ${cHat}`);
+    }
+
+    /* --------------- 7. DIE VARIANTE BLEIBT UNBERUEHRT ------------------ */
+    if (ok) {
+      const fuerVariante = await wert(
+        "select count(*)::text as w from public.availability_notifications "
+        + "where sky_id = 'SKY-7002'");
+      ok = sag("nur die exakte SKY-ID", fuerVariante === "0",
+        `Meldungen fuer SKY-7002: ${fuerVariante}`);
+    }
+
+    /* ----------------------- 8. RLS: NUR DAS EIGENE --------------------- */
+    if (ok) {
+      /*
+       * ALS `authenticated`, UND NICHT ALS EIGENE ROLLE.
+       *
+       * Die Richtlinie lautet `for select to authenticated`. Ein erster
+       * Entwurf legte eine Rolle `z56_leser` an und sah 0 Zeilen — RICHTIG,
+       * denn fuer eine Rolle ohne passende Richtlinie verweigert RLS alles.
+       * Der Test war falsch gebaut, nicht die Richtlinie. Gelesen wird
+       * deshalb als `authenticated`, so wie es die Anwendung tut, und die
+       * Identitaet kommt aus `auth.uid()`.
+       */
+      await db.exec("grant usage on schema auth to authenticated;");
+      const alsLeser = async (uid: string | null): Promise<string> => {
+        await db.exec("begin;");
+        try {
+          await db.exec(uid === null
+            ? "select set_config('z56.uid', '', true)"
+            : `select set_config('z56.uid', '${uid}', true)`);
+          await db.exec("set local role authenticated;");
+          const r = (await db.query(
+            "select count(*)::text as w from public.availability_notifications")) as
+            { rows: { w: string }[] };
+          return String(r.rows[0]?.w);
+        } finally { await db.exec("rollback;"); }
+      };
+      const sichtA = await alsLeser(A);
+      const sichtC = await alsLeser(C);
+      const sichtOhne = await alsLeser(null);
+      ok = sag("RLS: nur das Eigene",
+        sichtA === "2" && sichtC === "1" && sichtOhne === "0",
+        `A sieht ${sichtA}, C sieht ${sichtC}, ohne Anmeldung ${sichtOhne}`);
+    }
+
+    /* --------- 9. JEDE BEANSPRUCHTE ZEILE HAT IHRE MELDUNGEN ------------ */
+    if (ok) {
+      /*
+       * DIE ATOMARITAET, als Zustandspruefung: es darf keine Phase geben,
+       * die als gemeldet gilt, obwohl fuer einen berechtigten Favoriten
+       * keine Meldung existiert.
+       */
+      const luecken = await wert(`select count(*)::text as w
+        from public.offer_state s
+        join public.favorites v on v.sky_id = s.sky_id
+       where s.announced_at is not null
+         and s.buyable_since is not null
+         and v.created_at < s.buyable_since
+         and not exists (select 1 from public.availability_notifications n
+                          where n.user_id = v.user_id and n.sky_id = s.sky_id
+                            and n.buyable_since = s.buyable_since)`);
+      ok = sag("keine beanspruchte Phase ohne Meldung", luecken === "0",
+        `Luecken: ${luecken}`);
+    }
+
+    /* ------------------------- 10. RUECKNAHME ---------------------------- */
+    if (ok) {
+      const r = await fahre(db, "supabase/rollback/R0148_availability_notifications.sql");
+      const fort = r === null ? await wert(
+        "select ((to_regclass('public.availability_notifications') is null)"
+        + " and (to_regprocedure('public.claim_availability_notifications()')"
+        + "      is null))::text as w") : "-";
+      ok = sag("Ruecknahme", r === null && fort === "true", `${r ?? "durch"}, fort ${fort}`);
+    }
+
+    probe.push({
+      name: "P56 0148 macht aus einem Ereignis persoenliche Meldungen: zwei Nutzer vor der "
+        + "Phase und einer danach, keine Duplikate bei wiederholten Aufrufen, Preis und "
+        + "Reservierung erzeugen nichts, zweiter Zyklus erzeugt neue, RLS zeigt nur Eigenes",
+      ok,
+      sagt: `0148: ${befund.join(" · ")}`,
     });
   }
 

@@ -50,6 +50,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0148": {
+      "zweck": "Persoenliche Verfuegbarkeitsmeldungen (Phase 4 S3)",
+      "preflight": "0148_preflight.sql",
+      "lauf": "staging-0148.sql",
+      "postflight": "0148_postflight.sql",
+      "angewendet": {
+        "beschreibung": "public.availability_notifications steht",
+        "sql": "select (to_regclass('public.availability_notifications') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

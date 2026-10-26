@@ -82,6 +82,50 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
+## Persönliche Verfügbarkeitsmeldungen (2026-10-26, `0148`, Phase 4 S3, ADR-0143) — gebaut, nirgends angewendet
+
+**Aus einem erkannten Ereignis werden Meldungen.** Je betroffenem Nutzer genau eine, dauerhaft
+gespeichert, RLS-geschützt. **Keine E-Mail, kein Push, kein Preisalarm, kein Scheduler, keine
+Einstellung, keine Oberfläche** — Anzeige, Ungelesen-Zähler und „als gelesen markieren" sind S4,
+weshalb die Tabelle noch **keine `read_at`-Spalte** hat.
+
+Zwei Forderungen haben den Entwurf bestimmt — „weder verloren gehen noch mehrfach entstehen" —,
+und beide hält nicht die Anwendungslogik:
+
+| | |
+|---|---|
+| **Kein Duplikat** | der **Primärschlüssel** `(user_id, sky_id, buyable_since)`. „Genau eine Meldung je Nutzer, Figur und Phase" ist damit eine Eigenschaft der Datenbank. `buyable_since` ist Teil des Schlüssels, weil sie **die Phase ist** (ADR-0142): echter zweiter Zyklus → neue Grenze → zu Recht neue Meldung; Warenkorbreservierung → alte Grenze → keine |
+| **Kein Verlust** | die Verarbeitung ist **EINE Anweisung**: `offer_availability_due()` (die Erkennung aus `0147`), ein `update`, das die Fälligkeitsbedingung als `where` mitträgt, und ein `insert`, das aus dessen `returning` liest. Es gibt keinen Zustand mit beanspruchtem Ereignis und fehlenden Meldungen. **Die Migration misst, dass es eine ist** |
+| Gleichzeitigkeit | folgt daraus: der zweite Aufruf wartet auf die Zeilensperre, prüft sein `where` gegen die neue Zeile und beansprucht null. Die Bedingung **ist** der Riegel — deshalb steht sie an der Zeile und nicht in einer Hilfsfunktion |
+| Wer | `favorites.created_at < buyable_since` — wer eine bereits kaufbare Figur vormerkt, bekommt für diese Phase nichts. Verbund über die exakte `sky_id` |
+| Rückgabe | **nur die Zahl für den Aufrufer.** Eine Zahl je Figur wäre die Nachfrage, und die ist nach ADR-0136 dem Verkäuferbetrieb vorbehalten — sie hier zurückzugeben hätte die Grenze umgangen, ohne eine Richtlinie anzufassen |
+| Sicherheit | RLS an, **eine** Richtlinie (nur lesen, nur das Eigene), `authenticated` genau `SELECT`, `anon` nichts, **kein Schreibweg für Clients** |
+| Nachweise | **P56** fährt `0146`–`0148` an echtem PostgreSQL: zwei Nutzer vor der Phase und einer danach · wiederholte Aufrufe, auch als anderer Nutzer · Preisänderung allein · kurze Reservierung · zweiter echter Zyklus · Varianten getrennt · RLS mit drei Identitäten · „keine beanspruchte Phase ohne Meldung" · Rücknahme. Dazu 33 Quellprüfungen und 6 für den Aufrufpunkt |
+
+**Drei Fehler hat der Probelauf aufgedeckt, alle in meinem Prüfaufbau** und alle derselben Art:
+das Stub-Schema war eine *mildere* Welt als die echte. `favorites.created_at` hatte dort keinen
+Standardwert und kein `not null` — meine Einfügungen speicherten **NULL**, der Verbund
+`created_at < buyable_since` wurde NULL, und es entstand **still** keine Meldung. Die drei
+Richtlinien aus `0145` fehlten. Und mein RLS-Test las als eigene Rolle statt als
+`authenticated`, für die die Richtlinie gilt — RLS verweigerte korrekt alles, der Test war
+falsch gebaut. Dazu ein echter Befund in meinem Preflight: `to_regclass('auth.users')` braucht
+`usage` auf dem Schema `auth`, das der Prüfzugang nicht hat — die Zeile hätte die ganze
+Einreichung abgebrochen und war überdies redundant.
+
+**Staging-Rollout vorbereitet:** `0148_preflight.sql`, `0148_postflight.sql`, Eintrag in
+`migration-plans.json`, Hülle `supabase/operations/staging-0148.sql`, Laufzettel
+`supabase/checks/0148_staging_run.md`. Die Erwartungen beider Prüfdateien sind in P56 als
+Eigner gefahren. **Der erwartete Normalfall nach dem Rollout ist `0`** — der Spiegel ist
+vollständig gemeldet, es gibt kein fälliges Ereignis; Zeile 123 des Preflights sagt es vorher.
+
+**Plattformsicherung:** die Tabelle steht mit Ablaufdatum draußen — und hier **dringlicher** als
+`favorites` und `offer_state`, weil sie der einzige Teil ist, den eine Wiederherstellung nicht
+rekonstruieren kann (`announced_*` bliebe gesetzt, verlorene Meldungen entstünden nicht neu).
+Vor Production: `0144` → Folgemigration (Formatversion 3, alle drei) → `0145` → `0146` →
+`0147` → `0148`.
+
+---
+
 ## Verfügbarkeitserkennung (2026-10-26, `0147`, Phase 4 S2, ADR-0142) — gebaut, nirgends angewendet
 
 **Aus dem Spiegel wird eine Kante.** `0146` weiß, ob eine Figur jetzt kaufbar ist; `0147`
