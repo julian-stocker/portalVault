@@ -99,7 +99,21 @@ export default async function FavoritesPage() {
    */
   const noticesPromise = refreshOfferState()
     .then(() => claimAvailabilityNotifications())
-    .then(() => fetchAvailabilityNotices());
+    .then(() => fetchAvailabilityNotices())
+    /*
+     * DER LETZTE RIEGEL, und er gilt für die ganze Kette.
+     *
+     * Jedes der drei Glieder gibt bei einem Fehler schon seinen neutralen
+     * Wert zurück, statt zu werfen — die Reihenfolge bleibt also auch dann
+     * erhalten: ein gescheitertes Nachziehen hält das Beanspruchen nicht
+     * auf, ein gescheitertes Beanspruchen nicht das Lesen. Dieses `catch`
+     * fängt, was davor niemand vorhergesehen hat, und macht daraus „keine
+     * Meldungen" statt „diese Seite ist kaputt".
+     *
+     * EINE WUNSCHLISTE OHNE MELDUNGSABSCHNITT IST VOLLSTÄNDIG BRAUCHBAR.
+     * Eine Wunschliste, die wegen einer Beigabe nicht lädt, ist es nicht.
+     */
+    .catch(() => []);
 
   const [figures, series, owned, offers, seller, marketBoost, freeShippingFrom, notices] =
     await Promise.all([

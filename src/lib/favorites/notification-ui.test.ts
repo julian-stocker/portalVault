@@ -552,18 +552,25 @@ describe("die Verarbeitung", () => {
     expect(c).toMatch(/refreshOfferState\(\)\s*\n?\s*\.then/);
   });
 
-  it("der Nachzieher liest `locked` nicht als Erfolg", () => {
+  it("ein uebersprungener Refresh kann NICHT als erfolgreicher gelesen werden", () => {
     /*
-     * `0146` sagt es im Funktionskommentar: „ein Aufrufer darf locked
-     * NIEMALS als eigenen Erfolg lesen". Deshalb gibt dieser Aufrufpunkt den
-     * Grund unverändert zurück, statt ihn auf einen Wahrheitswert zu
-     * verkürzen — wer `locked` als „ran" liest, glaubt an einen Lauf, den
-     * jemand anders gerade erst begonnen hat.
+     * `0146` sagt es im Funktionskommentar: „ein Aufrufer darf `locked`
+     * NIEMALS als eigenen Erfolg lesen". Als reine Zeichenkette waere aber
+     * jeder der vier Werte `truthy` — `if (await refreshOfferState())` haette
+     * fuer **„failed"** dasselbe gesagt wie fuer „ran". Deshalb ein
+     * Wahrheitswert, der nur fuer `ran` wahr ist: die Verwechslung ist dann
+     * unmoeglich, nicht bloss untersagt.
      */
     const c = code(REFRESH);
-    expect(c).toContain('export type RefreshResult = "ran" | "throttled" | "locked" | "failed";');
-    expect(c).toContain('if (grund === "ran" || grund === "throttled" || grund === "locked") return grund;');
-    expect(c).not.toMatch(/return\s+true/);
+    expect(c).toContain("export type RefreshOutcome = { refreshed: boolean; reason: RefreshReason };");
+    /* `refreshed: true` steht genau EINMAL, und zwar bei `ran`. */
+    expect(c.match(/refreshed: true/g)).toHaveLength(1);
+    expect(c).toContain('if (grund === "ran") return { refreshed: true, reason: "ran" };');
+    for (const grund of ["throttled", "locked", "failed"]) {
+      expect(c, grund).toContain(`refreshed: false, reason: "${grund}"`);
+    }
+    /* Und eine unerwartete Antwort ist auch kein Erfolg. */
+    expect(c).toContain("unerwartete Antwort");
   });
 
   it("und er baut die Drossel nicht nach", () => {
@@ -581,8 +588,47 @@ describe("die Verarbeitung", () => {
 
   it("ein Fehler beim Nachziehen hält die Seite nicht auf", () => {
     const c = code(REFRESH);
-    expect(c).toContain('if (error) return "failed";');
+    expect(c).toContain("} catch (e) {");
     expect(c).not.toContain("throw");
+    /* Ein Datenbankfehler UND ein Transportfehler geben denselben
+       neutralen Wert — der eine kommt als `error`, der andere wirft. */
+    expect(c.match(/return \{ refreshed: false, reason: "failed" \};/g)?.length ?? 0)
+      .toBeGreaterThanOrEqual(3);
+  });
+
+  it("aber er ist AUFFINDBAR — ein stiller Fix wiederholt den Fehler, den er behebt", () => {
+    /*
+     * Der behobene Fehler war eine unbemerkte Stille: ein Spiegel, den
+     * niemand nachzog, und niemandem fiel es auf. Scheitert das Nachziehen
+     * jetzt, steht es im Serverprotokoll — und zwar nur dann: `throttled`
+     * und `locked` sind Normalbetrieb.
+     */
+    const c = code(REFRESH);
+    expect(c).toContain("console.error(`offer state refresh:");
+    expect(c).not.toMatch(/console\.error[^\n]*throttled/);
+    expect(c).not.toMatch(/console\.error[^\n]*locked/);
+    /* Dasselbe beim Beanspruchen. */
+    expect(code(CLAIM)).toContain("console.error(`availability claim:");
+  });
+
+  it("und die REIHENFOLGE haelt auch dann, wenn ein Glied scheitert", () => {
+    /*
+     * Jedes Glied gibt bei einem Fehler seinen neutralen Wert zurueck statt
+     * zu werfen, also laeuft die Kette weiter: ein gescheitertes Nachziehen
+     * haelt das Beanspruchen nicht auf, ein gescheitertes Beanspruchen nicht
+     * das Lesen. Das `catch` am Ende faengt, was davor niemand vorhergesehen
+     * hat — und macht daraus „keine Meldungen" statt „diese Seite ist
+     * kaputt".
+     */
+    const c = code(PAGE);
+    expect(c).toContain(".catch(() => []);");
+    const lesen = c.indexOf("fetchAvailabilityNotices())");
+    const fang = c.indexOf(".catch(() => [])");
+    expect(fang, "das catch steht hinter dem Lesen").toBeGreaterThan(lesen);
+    /* Kein Glied wirft. */
+    for (const p of [REFRESH, CLAIM, QUERIES]) {
+      expect(code(p), p).not.toContain("throw ");
+    }
   });
 
   it("und nirgends sonst — kein Scheduler, kein Hintergrundlauf", () => {

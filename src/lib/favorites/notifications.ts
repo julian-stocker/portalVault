@@ -36,8 +36,21 @@ import { createClient } from "@/lib/supabase/server";
  * den neutralen Wert und keine Ausnahme.
  */
 export async function claimAvailabilityNotifications(): Promise<number> {
-  const supabase = await createClient();
-  const { data, error } = await supabase.rpc("claim_availability_notifications");
-  if (error || typeof data !== "number" || !Number.isFinite(data)) return 0;
-  return data;
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase.rpc("claim_availability_notifications");
+    if (error) {
+      /* Laut genug, um auffindbar zu sein — dieselbe Begründung wie bei
+         `refreshOfferState()`: ein Fix, dessen Scheitern still ist,
+         wiederholt den Fehler, den er behebt. */
+      console.error(`availability claim: ${error.code ?? "?"} ${error.message}`);
+      return 0;
+    }
+    if (typeof data !== "number" || !Number.isFinite(data)) return 0;
+    return data;
+  } catch (e) {
+    /* Ein Transportfehler darf das Laden der Wunschliste nicht mitnehmen. */
+    console.error(`availability claim: ${e instanceof Error ? e.message : String(e)}`);
+    return 0;
+  }
 }

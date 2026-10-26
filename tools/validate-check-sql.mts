@@ -4673,6 +4673,107 @@ async function main(): Promise<void> {
         && z.announced_at === null, neue);
     }
 
+    /* ------------- DER AUFRUF ALS `authenticated` — PUNKT 1 DES AUFTRAGS
+     *
+     * BIS HIERHER WAR DIESE NAHTSTELLE UNGEMESSEN. Jeder Lauf oben ruft
+     * `refresh_offer_state()` als EIGNER. Die Anwendung ruft sie aber als
+     * `authenticated`, und zwar ueber genau ein Recht: das `grant execute`
+     * aus `0146`. Dass das ausreicht, ist eine Behauptung ueber das
+     * Zusammenspiel von `security definer`, RLS und entzogenen
+     * Tabellenrechten — und solche Behauptungen gehoeren gemessen.
+     *
+     * Geprueft wird dreierlei in einem:
+     *   1. ein Sammlerkonto DARF sie aufrufen und sie schreibt dabei,
+     *   2. es darf `offer_state` trotzdem NICHT selbst lesen,
+     *   3. und es erfaehrt keine fremden Daten — die Antwort sind vier
+     *      Zahlen bzw. Zustaende ueber die oeffentliche Angebotslage.
+     */
+    if (ok) {
+      /* Die Rollen, wie Supabase sie mitbringt. `nologin`, weil hier nur
+         `set local role` gebraucht wird. */
+      await db.exec(`do $$ begin
+        if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+          create role authenticated nologin;
+        end if;
+      end $$;`);
+      /* Und genau die Rechte aus `0146`, nicht mehr: `usage` auf dem Schema
+         und `execute` auf dieser einen Funktion. */
+      await db.exec(`
+        grant usage on schema public to authenticated;
+        revoke all on public.offer_state from authenticated;
+        revoke all on public.offer_state_live from authenticated;
+        grant execute on function public.refresh_offer_state() to authenticated;`);
+
+      await oeffne();
+      const vorher = await wert("select max(checked_at)::text as w from public.offer_state");
+
+      /*
+       * ZWEI TRANSAKTIONEN, UND DAS WAR EIN BEFUND AN DIESEM PROBELAUF.
+       *
+       * Der erste Entwurf machte beides in EINER: aufrufen, und danach im
+       * selben Rollenkontext die Gegenprobe „lesen darf sie nicht". Die
+       * Gegenprobe loest `42501` aus — und ein Fehler in einer Transaktion
+       * versetzt sie in PostgreSQL in den Abbruchzustand. Das folgende
+       * `commit` wirkte dann als ROLLBACK, und die Messung meldete
+       * „checked_at UNVERAENDERT": die Gegenprobe hatte genau das zerstoert,
+       * was sie beobachten sollte.
+       *
+       * Deshalb getrennt: erst schreiben und festschreiben, dann in einer
+       * eigenen Transaktion das Verbot pruefen und verwerfen. `set local
+       * role` gilt ohnehin nur fuer seine Transaktion.
+       */
+      let grund = "(nichts)";
+      await db.exec("begin;");
+      try {
+        await db.exec("set local role authenticated;");
+        const r = (await db.query("select * from public.refresh_offer_state()")) as {
+          rows: { ran: boolean; reason: string }[] };
+        grund = `${r.rows[0]?.ran}/${r.rows[0]?.reason}`;
+        await db.exec("commit;");
+      } catch (e) {
+        await db.exec("rollback;");
+        grund = `WURF ${(e as { message?: string }).message ?? String(e)}`;
+      }
+
+      const nachher = await wert("select max(checked_at)::text as w from public.offer_state");
+
+      /* Die Gegenprobe, in ihrer eigenen Transaktion. */
+      let darfLesen = "(nicht geprueft)";
+      await db.exec("begin;");
+      try {
+        await db.exec("set local role authenticated;");
+        await db.query("select count(*) from public.offer_state");
+        darfLesen = "JA — das waere ein Befund";
+      } catch (e) {
+        darfLesen = (e as { code?: string }).code === "42501"
+          ? "nein (42501)" : `nein (${(e as { code?: string }).code})`;
+      } finally { await db.exec("rollback;"); }
+      ok = sag("als authenticated: Aufruf gelingt, schreibt, und lesen bleibt verboten",
+        grund === "true/ran" && darfLesen === "nein (42501)" && nachher !== vorher,
+        `Antwort ${grund}, select auf offer_state: ${darfLesen}, `
+        + `checked_at ${nachher === vorher ? "UNVERAENDERT" : "nachgezogen"}`);
+    }
+
+    /* ---- UND DIE DROSSEL GILT AUCH FUER IHN — PUNKT 2 DES AUFTRAGS ----
+     *
+     * Ein zweiter Aufruf in derselben Minute darf NICHT `ran` sagen. Das ist
+     * die Zeile, an der die Unterscheidung `refreshed` gegen `reason` haengt:
+     * `throttled` heisst „jemand war schon da", nicht „ich habe
+     * nachgezogen".
+     */
+    if (ok) {
+      let zweiter = "(nichts)";
+      await db.exec("begin;");
+      try {
+        await db.exec("set local role authenticated;");
+        const r = (await db.query("select * from public.refresh_offer_state()")) as {
+          rows: { ran: boolean; reason: string }[] };
+        zweiter = `${r.rows[0]?.ran}/${r.rows[0]?.reason}`;
+      } finally { await db.exec("rollback;"); }
+      ok = sag("als authenticated: der zweite Aufruf ist gedrosselt, nicht erfolgreich",
+        zweiter === "false/throttled", `Antwort ${zweiter}`);
+    }
+
     /* 16. DIE RUECKNAHME: bricht ab, solange ein gemeldeter Stand steht. */
     let mitGemeldet = "-";
     let ohneGemeldet = "-";

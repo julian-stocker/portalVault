@@ -14103,6 +14103,29 @@ jemand abholt — es verfällt nicht.
   häufigsten Seite. Angebotene, nicht getroffene Entscheidung: eine Zeile,
   wenn der Betreiber es will.
 
+### Die Rest-Unschärfe, die bleibt
+
+`buyable_since` heißt „seit wir es bemerkt haben". Daraus folgt ein Fenster,
+in dem die Regel *„bereits verfügbare Figuren erzeugen beim erstmaligen
+Vormerken keine Meldung"* **nicht** greift:
+
+```
+10:00  eingebucht            → im Shop kaufbar, der Spiegel weiß es nicht
+10:10  jemand merkt sie vor  → sieht die Figur als kaufbar
+10:20  jemand öffnet /favoriten → buyable_since = 10:20  (> 10:10)
+10:50  Meldung „wieder verfügbar"  ← beim Vormerken war sie schon da
+```
+
+Die Meldung ist nicht **falsch** — die Figur ist kaufbar, der Weg führt auf
+ein echtes Angebot. Sie ist *unnötig*: der Nutzer wusste es schon.
+
+Das Fenster ist so groß wie die Veraltung des Spiegels, also mit diesem Fix
+„bis zum nächsten Aufruf von `/favoriten`" statt „unbegrenzt". Ganz zu
+schließen wäre es nur mit dem Katalog-Aufruf (Fenster = eine Minute) oder
+einem Scheduler (Fenster = null) — und beides bleibt die Entscheidung des
+Betreibers. **Festgehalten, nicht behoben:** eine bekannte und benannte
+Unschärfe ist etwas anderes als eine unbemerkte.
+
 ### Der Wächter dagegen
 
 `supabase/checks/offer_state_freshness.sql`, jederzeit lesend fahrbar.
