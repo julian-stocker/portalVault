@@ -819,6 +819,34 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * entstünden die verlorenen Meldungen auch nicht neu. Der Nutzer verlöre
    * sie endgültig.
    */
+  /*
+   * DRAUSSEN AUF ZEIT, aus derselben Reihenfolge-Not wie die drei anderen —
+   * und mit demselben Ablaufdatum (`0150`, ADR-0147).
+   *
+   * `availability_alerts` ist die Nachfolgerin von `favorites` als
+   * Abonnement UND von `availability_notifications` als Posteingang: eine
+   * Zeile trägt beides. Sie ist damit **persönliche Nutzerdaten der
+   * schwersten Klasse in diesem Bereich** — aus nichts ableitbar, von
+   * keinem anderen Export erfasst, und `read_at` ist eine Nutzerhandlung.
+   * Nach einer Wiederherstellung ohne sie wären alle offenen Vormerkungen
+   * fort, und es käme auch keine Meldung nach.
+   *
+   * **Sie gehört also ins Archiv**, und sie steht hier aus demselben
+   * vorübergehenden Grund draußen: ein Bereich würde
+   * `system_platform_export()` ersetzen, und `0144` liegt noch nicht auf
+   * Production. **Die Folgemigration nimmt sie mit auf (Formatversion 3),
+   * und das muss VOR dem Production-Rollout geschehen** (ADR-0136, D-6;
+   * ADR-0147 führt es als Tor M6).
+   */
+  availability_alerts:
+    "Verfügbarkeitsalarme eines Sammlers (0150, ADR-0147). Vormerkung UND " +
+    "Meldung in einer Zeile: persönliche Nutzerdaten, aus nichts ableitbar, und " +
+    "read_at ist eine Nutzerhandlung. GEHOERT INS ARCHIV; vorübergehend draußen, " +
+    "weil ein Bereich system_platform_export() ersetzen würde und 0144 noch " +
+    "nicht auf Production liegt. Die Folgemigration nimmt sie mit favorites, " +
+    "offer_state und availability_notifications zusammen auf (Formatversion 3); " +
+    "das muss VOR dem Production-Rollout geschehen (ADR-0136, D-6).",
+
   availability_notifications:
     "Persönliche Verfügbarkeitsmeldungen (0148). Persönliche Nutzerdaten, und " +
     "der einzige Teil, den eine Wiederherstellung nicht rekonstruieren kann — " +

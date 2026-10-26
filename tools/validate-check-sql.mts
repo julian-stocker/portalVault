@@ -6437,6 +6437,750 @@ async function main(): Promise<void> {
     });
   }
 
+  /* =====================================================================
+   * P58 — `0150`: FIRE AND FORGET, OHNE SPIEGELZUSTAND.
+   *
+   * WAS DIESE WELT ABSICHTLICH NICHT ENTHAELT: `favorites`, `offer_state`,
+   * `availability_notifications` und die vier Spiegelfunktionen. Sie werden
+   * aus dem Stub-Schema GELOESCHT, bevor `0150` laeuft — und genau das ist
+   * der Beweis fuer die Unabhaengigkeit, um die der Auftrag gebeten hat
+   * (Punkt 4): die Migration muss in einer Welt laufen, in der die alte
+   * Bauform nie existiert hat. So sieht Production aus.
+   *
+   * Stehen bleibt genau eines: die SICHT `offer_state_live`, angelegt wie
+   * `0146` sie anlegt. Sie ist die einzige Definition von „jetzt kaufbar".
+   *
+   * WAS DAFUER GESTELLT WIRD, sichtbar und begrenzt: `auth.uid()` liest eine
+   * Sitzungsvariable, damit zwei Nutzer pruefbar sind, und
+   * `is_collector_account()` gibt `true`. Geprueft wird `0150`, nicht die
+   * Rollenlogik — dass die Richtlinie ueberhaupt fragt, messen die
+   * Nachkontrolle (113) und die Migration selbst.
+   *
+   * KEINE ZEITREISE. Es gibt keine Karenzzeit mehr, also auch nichts
+   * vorzuspulen — das ist der sichtbarste Unterschied zu P55 und P56.
+   * ================================================================== */
+  {
+    const A = "aaaaaaaa-0000-0000-0000-000000000011";
+    const B = "bbbbbbbb-0000-0000-0000-000000000012";
+
+    const db = await frisch();
+
+    /* 0150 kommt aus dem Stub-Schema wieder heraus — die Reihenfolge ist
+       Teil dessen, was geprueft wird. */
+    await db.exec("drop function if exists public.acknowledge_availability_alerts(bigint[]);");
+    await db.exec("drop function if exists public.fire_availability_alerts();");
+    await db.exec("drop function if exists public.unwatch_availability(text);");
+    await db.exec("drop function if exists public.watch_availability(text);");
+    await db.exec("drop table if exists public.availability_alerts cascade;");
+
+    /* UND DIE GANZE ALTE BAUFORM. Nicht um sie zu pruefen, sondern um sie
+       ABWESEND zu haben: was `0150` nicht braucht, darf hier nicht stehen. */
+    await db.exec("drop function if exists public.mark_availability_notifications_read(text[]);");
+    await db.exec("drop function if exists public.claim_availability_notifications();");
+    await db.exec("drop table if exists public.availability_notifications cascade;");
+    await db.exec("drop function if exists public.offer_availability_due();");
+    await db.exec("drop function if exists public.offer_availability_grace();");
+    await db.exec("drop function if exists public.refresh_offer_state();");
+    await db.exec("drop function if exists public.offer_state_window();");
+    await db.exec("drop table if exists public.offer_state cascade;");
+    await db.exec("drop function if exists public.favorite_demand(text[]);");
+    await db.exec("drop table if exists public.favorites cascade;");
+    await db.exec("drop view if exists public.offer_state_live;");
+
+    await attrappenFuerBaseline(db);
+
+    await db.exec(`
+      create schema if not exists auth;
+      create table if not exists auth.users (id uuid primary key);
+      insert into auth.users (id) values ('${A}'), ('${B}')
+        on conflict do nothing;
+      create or replace function auth.uid() returns uuid
+        language sql stable
+        as $u$ select nullif(current_setting('z58.uid', true), '')::uuid $u$;
+      create or replace function public.is_collector_account() returns boolean
+        language sql stable as $k$ select true $k$;
+      alter table public.skylanders add constraint z58_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug, market_price)
+      values ('SKY-7101', 'Probe Glocke', 'probe-glocke-58', 20.00),
+             ('SKY-7102', 'Probe Zweite', 'probe-zweite-58', 30.00)
+        on conflict do nothing;
+      insert into public.shop_settings (id, price_percentage)
+      values (true, 100) on conflict do nothing;
+      alter table public.shop_inventory drop column if exists available_quantity;
+      alter table public.shop_inventory
+        add column available_quantity integer
+        generated always as (quantity - reserved) stored;
+      create sequence if not exists public.z58_inv_seq start 1;
+      alter table public.shop_inventory alter column id set default nextval('public.z58_inv_seq');
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $p58$
+        select i.sky_id, i.condition,
+               public.shop_price(i.sale_price, s.market_price, st.price_percentage),
+               (i.available_quantity > 0), null::text
+          from public.shop_inventory i
+          join public.skylanders s on s.sky_id = i.sky_id
+          cross join public.shop_settings st
+         where i.is_listed
+           and i.condition = public.v1_sale_condition()
+           and public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+               is not null;
+      $p58$;
+      -- Die Sicht legt 0151 an — siehe Schritt 0 unten. Hier NICHT.
+      -- SKY-7101 ist NICHT kaufbar (kein Bestand), SKY-7102 ist es.
+      insert into public.shop_inventory (sky_id, condition, quantity, reserved, is_listed)
+      values ('SKY-7101', 'loose', 0, 0, true),
+             ('SKY-7102', 'loose', 1, 0, true);
+      grant usage on schema auth to authenticated;`);
+
+    const befund58: string[] = [];
+    let ok58 = true;
+    const sag58 = (was: string, gut: boolean, text: string): boolean => {
+      befund58.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+    const w58 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    /** Eine Funktion als ein bestimmtes Konto rufen. */
+    const als = async (uid: string | null, sql: string): Promise<string> => {
+      await db.exec("begin;");
+      try {
+        await db.exec(uid === null
+          ? "select set_config('z58.uid', '', true)"
+          : `select set_config('z58.uid', '${uid}', true)`);
+        const r = (await db.query(sql)) as { rows: { w: string }[] };
+        await db.exec("commit;");
+        return String(r.rows[0]?.w);
+      } catch (e) {
+        await db.exec("rollback;");
+        const err = e as { message?: string; code?: string };
+        return `[${err.code ?? "?"}] ${(err.message ?? "").split("\n")[0]}`;
+      }
+    };
+    const merke = (uid: string, sky: string) =>
+      als(uid, `select public.watch_availability('${sky}')::text as w`);
+    const feuere = (uid: string | null) =>
+      als(uid, "select public.fire_availability_alerts()::text as w");
+    const alarme = () => w58("select count(*)::text as w from public.availability_alerts");
+    const gemeldet = () => w58(
+      "select count(*)::text as w from public.availability_alerts"
+      + " where notified_at is not null");
+    const offenFuer = (uid: string) => w58(
+      `select count(*)::text as w from public.availability_alerts`
+      + ` where user_id = '${uid}' and read_at is null`);
+    /* Lager und Sammlung in einer Zahl — derselbe Abdruck wie in P56/P57. */
+    const abdruck58 = () => w58(`select md5(
+        coalesce((select string_agg(i.id::text || '|' || i.sky_id || '|'
+                                    || i.is_listed::text || '|' || i.quantity::text,
+                                    ';' order by i.id)
+                    from public.shop_inventory i), '-')
+     || coalesce((select count(*)::text from public.collection_items), '-')) as w`);
+
+    /* ------- 0. DIE ECHTE REIHENFOLGE: 0151 LEGT DIE SICHT AN ---------- */
+    /*
+     * Bis zur Entscheidung E-1/B2 stellte dieser Probelauf die Sicht selbst
+     * her — eine mildere Welt als die echte, denn dort legt sie eine
+     * MIGRATION an. Jetzt laeuft `0151` zuerst, so wie es auf Production
+     * laufen wird: die Sicht fehlt, `0151` erzeugt sie, und erst danach
+     * beginnt `0150`. Damit faehrt P58 die Abhaengigkeit `0151 → 0150` nach
+     * und behauptet sie nicht.
+     */
+    if (ok58) {
+      const vorhanden = await w58(
+        "select (to_regclass('public.offer_state_live') is not null)::text as w");
+      const l151 = await fahre(db, join(MIG_DIR, "0151_offer_state_live.sql"));
+      const danach = await w58(
+        "select (to_regclass('public.offer_state_live') is not null)::text as w");
+      ok58 = sag58("0151 legt die Sicht an, dann 0150",
+        vorhanden === "false" && l151 === null && danach === "true",
+        `vorher ${vorhanden} · 0151: ${l151 ?? "durch"} · nachher ${danach}`);
+    }
+
+    /* --------------- 1. Der Preflight als Eigner, VOR 0150 -------------- */
+    if (ok58) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0150_preflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok58 = sag58("Preflight 0150 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* ---- 2. DIE MIGRATION, in einer Welt OHNE die alte Bauform -------- */
+    const vor58 = ok58 ? await abdruck58() : "-";
+    const l150 = ok58 ? await fahre(db, join(MIG_DIR, "0150_availability_alerts.sql"))
+                      : "-";
+    ok58 = ok58 && sag58("0150 laeuft OHNE favorites, offer_state und "
+      + "availability_notifications", l150 === null, l150 ?? "durch");
+    if (ok58) {
+      ok58 = sag58("Migration ruehrt Lager und Sammlung nicht an",
+        await abdruck58() === vor58, "Abdruck unveraendert");
+      ok58 = ok58 && sag58("die alte Bauform ist und bleibt abwesend",
+        await w58("select ((to_regclass('public.favorites') is null)"
+          + " and (to_regclass('public.offer_state') is null)"
+          + " and (to_regclass('public.availability_notifications') is null))::text as w")
+          === "true", "keine der drei steht");
+    }
+
+    /* ------------- 3. Die Nachkontrolle als Eigner, NACH 0150 ---------- */
+    if (ok58) {
+      const anw = anweisungen(readFileSync(
+        join(CHECK_DIR, "0150_postflight.sql"), "utf8")).filter((x) => planbar(x));
+      const r = (await db.query(`select nr, befund, erwartet from (${ohneKopf(anw[0])}) x
+                                  where ok is false and nr < 800`)) as
+        { rows: { nr: number; befund: string; erwartet: string }[] };
+      ok58 = sag58("Nachkontrolle 0150 als Eigner", r.rows.length === 0,
+        r.rows.length === 0 ? "jede Zeile mit Erwartung stimmt"
+          : r.rows.map((z) => `${z.nr} ${JSON.stringify(z.befund)} statt `
+              + `${JSON.stringify(z.erwartet)}`).join(" | "));
+    }
+
+    /* ------------- 4. Ein zweiter Lauf prallt ab ----------------------- */
+    if (ok58) {
+      const r = await fahre(db, join(MIG_DIR, "0150_availability_alerts.sql"));
+      ok58 = sag58("zweiter Lauf", r !== null && r.includes("steht schon"),
+        r ?? "lief durch (muss abbrechen)");
+    }
+
+    /* ------------- 5. SCHARF STELLEN: die drei Antworten --------------- */
+    if (ok58) {
+      const a1 = await merke(A, "SKY-7101");
+      const a2 = await merke(A, "SKY-7101");
+      const a3 = await merke(A, "SKY-7102");
+      const n = await alarme();
+      ok58 = sag58("drei Antworten", a1 === "armed" && a2 === "already_open"
+        && a3 === "buyable" && n === "1",
+        `nicht kaufbar: ${a1} · nochmal: ${a2} · kaufbar: ${a3} · Zeilen: ${n}`);
+    }
+
+    /* ------------- 6. Zwei Konten, dieselbe Figur ---------------------- */
+    if (ok58) {
+      const b1 = await merke(B, "SKY-7101");
+      const n = await alarme();
+      ok58 = sag58("der Teilindex gilt JE KONTO", b1 === "armed" && n === "2",
+        `B: ${b1} · Zeilen: ${n}`);
+    }
+
+    /* ------------- 7. Ohne Anmeldung geht nichts ----------------------- */
+    if (ok58) {
+      const r = await als(null,
+        "select public.watch_availability('SKY-7101')::text as w");
+      ok58 = sag58("ohne Anmeldung scharf stellen",
+        r.includes("insufficient_privilege") || r.includes("[42501]"), r);
+    }
+
+    /* ------------- 8. DER ABGLEICH: ein Ereignis, eine Meldung --------- */
+    if (ok58) {
+      /* Bestand kommt an — SKY-7101 wird kaufbar. Mehr passiert nicht. */
+      await db.exec("update public.shop_inventory set quantity = 3 "
+        + "where sky_id = 'SKY-7101';");
+      const live = await w58("select coalesce(min(cheapest_cents)::text, '(keine)') as w"
+        + " from public.offer_state_live where sky_id = 'SKY-7101'");
+      const fuerA = await feuere(A);
+      const g = await gemeldet();
+      const cents = await w58("select string_agg(distinct notified_cents::text, ',') as w"
+        + " from public.availability_alerts where notified_at is not null");
+      ok58 = sag58("Auslösung ohne Karenzzeit",
+        live === "2000" && fuerA === "1" && g === "2" && cents === "2000",
+        `live ${live} Cent · Rueckgabe fuer A ${fuerA} (nur das Eigene) · `
+        + `gemeldet ${g} · Preis ${cents}`);
+    }
+
+    /* ------------- 9. EIN ZWEITER LAUF MELDET NICHTS NEU --------------- */
+    if (ok58) {
+      const stand = await w58("select md5(string_agg(id::text || '|' "
+        + "|| notified_at::text, ',' order by id)) as w "
+        + "from public.availability_alerts");
+      const z1 = await feuere(A);
+      const z2 = await feuere(B);
+      const z3 = await feuere(null);
+      const danach = await w58("select md5(string_agg(id::text || '|' "
+        + "|| notified_at::text, ',' order by id)) as w "
+        + "from public.availability_alerts");
+      ok58 = sag58("dreimal nachgefeuert", z1 === "0" && z2 === "0" && z3 === "0"
+        && stand === danach,
+        `${z1}/${z2}/${z3} Meldungen, notified_at unveraendert ${stand === danach}`);
+    }
+
+    /* ------------- 10. OHNE NUTZERKONTEXT (der spaetere Scheduler) ----- */
+    if (ok58) {
+      /* Ein frischer Alarm von B auf die zweite Figur, die gerade nicht
+         kaufbar ist — dann Bestand, dann feuern OHNE Anmeldung. */
+      await db.exec("update public.shop_inventory set quantity = 0 "
+        + "where sky_id = 'SKY-7102';");
+      const b2 = await merke(B, "SKY-7102");
+      await db.exec("update public.shop_inventory set quantity = 4 "
+        + "where sky_id = 'SKY-7102';");
+      const vorher = await gemeldet();
+      const r = await feuere(null);
+      const nachher = await gemeldet();
+      ok58 = sag58("Abgleich ohne Nutzerkontext", b2 === "armed" && r === "0"
+        && nachher === String(Number(vorher) + 1),
+        `Rueckgabe ${r} (muss 0 sein, auth.uid() ist NULL) · gemeldet `
+        + `${vorher} → ${nachher} · die Ausloesung lief vollstaendig`);
+    }
+
+    /* ------------- 11. „GESEHEN" IST EREIGNISGENAU --------------------- */
+    if (ok58) {
+      const idA = await w58("select min(id)::text as w from public.availability_alerts"
+        + ` where user_id = '${A}'`);
+      const idB = await w58("select min(id)::text as w from public.availability_alerts"
+        + ` where user_id = '${B}'`);
+      /* A bestaetigt B's Alarm: nichts. */
+      const fremd = await als(A, "select public.acknowledge_availability_alerts("
+        + `array[${idB}]::bigint[])::text as w`);
+      /* A bestaetigt eine LEERE Liste: nichts, und nicht alles. */
+      const leer = await als(A, "select public.acknowledge_availability_alerts("
+        + "array[]::bigint[])::text as w");
+      /* A bestaetigt den eigenen: genau einen. */
+      const eigen = await als(A, "select public.acknowledge_availability_alerts("
+        + `array[${idA}]::bigint[])::text as w`);
+      /* Und ein zweites Mal: nichts, und der Zeitpunkt bleibt. */
+      const zeit = await w58(`select read_at::text as w from public.availability_alerts
+                               where id = ${idA}`);
+      const nochmal = await als(A, "select public.acknowledge_availability_alerts("
+        + `array[${idA}]::bigint[])::text as w`);
+      const zeit2 = await w58(`select read_at::text as w from public.availability_alerts
+                                where id = ${idA}`);
+      const bOffen = await w58("select (read_at is null)::text as w "
+        + `from public.availability_alerts where id = ${idB}`);
+      ok58 = sag58("Gesehen trifft das Ereignis", fremd === "0" && leer === "0"
+        && eigen === "1" && nochmal === "0" && zeit === zeit2 && bOffen === "true",
+        `fremd ${fremd} · leere Liste ${leer} · eigen ${eigen} · zweiter Klick `
+        + `${nochmal} und read_at unveraendert ${zeit === zeit2} · B unberuehrt ${bOffen}`);
+    }
+
+    /* ------------- 12. ERNEUT VORMERKEN: erst wenn wieder weg ---------- */
+    if (ok58) {
+      /* SKY-7101 ist noch kaufbar — also nein. */
+      const jetzt = await merke(A, "SKY-7101");
+      await db.exec("update public.shop_inventory set quantity = 0 "
+        + "where sky_id = 'SKY-7101';");
+      const danach = await merke(A, "SKY-7101");
+      const zeilen = await w58("select count(*)::text as w from public.availability_alerts"
+        + ` where user_id = '${A}' and sky_id = 'SKY-7101'`);
+      const offen = await offenFuer(A);
+      ok58 = sag58("neuer Alarm erst bei neuer Nichtverfuegbarkeit",
+        jetzt === "buyable" && danach === "armed" && zeilen === "2" && offen === "1",
+        `kaufbar: ${jetzt} · nicht kaufbar: ${danach} · Zeilen zu SKY-7101: `
+        + `${zeilen} (eine abgeschlossen, eine offen) · offen fuer A: ${offen}`);
+    }
+
+    /* ------------- 13. Zuruecknehmen nur vor der Ausloesung ------------ */
+    if (ok58) {
+      const weg = await als(A, "select public.unwatch_availability('SKY-7101')::text as w");
+      const gemeldeteWeg = await als(B, "select public.unwatch_availability('SKY-7101')::text as w");
+      const bSteht = await w58("select count(*)::text as w from public.availability_alerts"
+        + ` where user_id = '${B}' and sky_id = 'SKY-7101'`);
+      ok58 = sag58("zurueckziehen", weg === "1" && gemeldeteWeg === "0" && bSteht === "1",
+        `scharf: ${weg} · ausgeloest: ${gemeldeteWeg} (muss 0 sein) · B's Meldung `
+        + `steht noch: ${bSteht}`);
+    }
+
+    /* ------------- 14. Die CHECKs halten ------------------------------- */
+    if (ok58) {
+      /* read_at ohne notified_at ist kein Zustand. */
+      let verweigert = "lief durch (muss abbrechen)";
+      await db.exec("begin;");
+      try {
+        await db.exec("insert into public.availability_alerts (user_id, sky_id, read_at) "
+          + `values ('${A}', 'SKY-7102', now());`);
+      } catch (e) {
+        verweigert = `[${(e as { code?: string }).code ?? "?"}]`;
+      } finally { await db.exec("rollback;"); }
+      /* Ein Preis ohne Zeitpunkt ebenso. */
+      let verweigert2 = "lief durch (muss abbrechen)";
+      await db.exec("begin;");
+      try {
+        await db.exec("insert into public.availability_alerts (user_id, sky_id, notified_cents) "
+          + `values ('${A}', 'SKY-7102', 100);`);
+      } catch (e) {
+        verweigert2 = `[${(e as { code?: string }).code ?? "?"}]`;
+      } finally { await db.exec("rollback;"); }
+      ok58 = sag58("die CHECKs halten", verweigert.startsWith("[23514]")
+        && verweigert2.startsWith("[23514]"),
+        `read_at ohne notified_at: ${verweigert} · Preis ohne Zeitpunkt: ${verweigert2}`);
+    }
+
+    /* ------------- 15. RLS: nur das Eigene ----------------------------- */
+    if (ok58) {
+      const alsLeser = async (uid: string | null): Promise<string> => {
+        await db.exec("begin;");
+        try {
+          await db.exec(uid === null
+            ? "select set_config('z58.uid', '', true)"
+            : `select set_config('z58.uid', '${uid}', true)`);
+          await db.exec("set local role authenticated;");
+          const r = (await db.query(
+            "select count(*)::text as w from public.availability_alerts")) as
+            { rows: { w: string }[] };
+          return String(r.rows[0]?.w);
+        } finally { await db.exec("rollback;"); }
+      };
+      const alle = await alarme();
+      const sichtA = await alsLeser(A);
+      const sichtB = await alsLeser(B);
+      const sichtOhne = await alsLeser(null);
+      ok58 = sag58("RLS: nur das Eigene",
+        Number(sichtA) + Number(sichtB) === Number(alle) && sichtOhne === "0"
+        && sichtA !== alle,
+        `insgesamt ${alle} · A sieht ${sichtA} · B sieht ${sichtB} · `
+        + `ohne Anmeldung ${sichtOhne}`);
+    }
+
+    /* ------------- 16. Die Ruecknahme ---------------------------------- */
+    if (ok58) {
+      const mit = await fahre(db, "supabase/rollback/R0150_drop_availability_alerts.sql");
+      const bleibt = await alarme();
+      await db.exec("delete from public.availability_alerts;");
+      const ohne = await fahre(db, "supabase/rollback/R0150_drop_availability_alerts.sql");
+      const fort = ohne === null ? await w58(
+        "select ((to_regclass('public.availability_alerts') is null)"
+        + " and (to_regprocedure('public.watch_availability(text)') is null)"
+        + " and (to_regprocedure('public.fire_availability_alerts()') is null)"
+        + " and (to_regclass('public.offer_state_live') is not null))::text as w") : "-";
+      ok58 = sag58("Ruecknahme",
+        mit !== null && mit.includes("stehen in der Tabelle") && bleibt !== "0"
+        && ohne === null && fort === "true",
+        `mit Zeilen: bricht ab (${bleibt} blieben) · ohne Zeilen: ${ohne ?? "durch"} · `
+        + `fort und offer_state_live steht: ${fort}`);
+    }
+
+    probe.push({
+      name: "P58 0150 meldet genau einmal, ohne Spiegel und ohne Karenzzeit: 0151 legt die Sicht an, laeuft ohne "
+        + "favorites/offer_state/availability_notifications, drei Antworten beim Scharfstellen, "
+        + "ein zweiter Lauf meldet nichts, ohne Nutzerkontext loest er vollstaendig aus, "
+        + "Gesehen trifft das Ereignis, neuer Alarm erst bei neuer Nichtverfuegbarkeit",
+      ok: ok58,
+      sagt: `0150: ${befund58.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P59 — `0151`: ZWEI AUSGANGSLAGEN, EIN ENDZUSTAND — UND VIER
+   *       ABWEICHUNGEN, DIE AUFFALLEN MUESSEN.
+   *
+   * `0151` ist die einzige Migration dieser Reihe, die eine bestehende Welt
+   * ANTREFFEN darf: auf Production fehlt die Sicht und wird angelegt, auf
+   * Staging steht sie seit `0146` und wird geprueft. Beides ist richtig, und
+   * beides wird hier gefahren.
+   *
+   * DER EIGENTLICHE GEGENSTAND dieses Durchgangs ist aber der dritte Fall:
+   * eine bestehende Sicht, die ANDERS ist. Der Auftrag verlangt, dass sie
+   * nicht stillschweigend durchgeht — also wird jede der vier Pruefstufen
+   * einzeln provoziert:
+   *
+   *   Stufe 1  Bauart     eine dritte Spalte
+   *   Stufe 2  Herkunft   dieselben Spalten, aber sie liest eine RELATION
+   *   Stufe 3  Wortlaut   `max` statt `min` — Spalten und Herkunft gleich
+   *   Stufe 4  Verhalten  jedes Stueck im Wortlaut vorhanden, Ergebnis anders
+   *
+   * Stufe 4 ist der Fall, den nur ein Vergleich am echten Datenbestand
+   * findet — und er ist der Grund, warum dieser Probelauf eine Figur hat,
+   * die kaufbar ist, und eine, die es nicht ist.
+   * ================================================================== */
+  {
+    const db = await frisch();
+
+    /* 0151 und 0150 aus dem Stub-Schema heraus, und die ganze alte Bauform:
+       diese Welt ist Production, nicht Staging. */
+    await db.exec("drop function if exists public.acknowledge_availability_alerts(bigint[]);");
+    await db.exec("drop function if exists public.fire_availability_alerts();");
+    await db.exec("drop function if exists public.unwatch_availability(text);");
+    await db.exec("drop function if exists public.watch_availability(text);");
+    await db.exec("drop table if exists public.availability_alerts cascade;");
+    await db.exec("drop function if exists public.mark_availability_notifications_read(text[]);");
+    await db.exec("drop function if exists public.claim_availability_notifications();");
+    await db.exec("drop table if exists public.availability_notifications cascade;");
+    await db.exec("drop function if exists public.offer_availability_due();");
+    await db.exec("drop function if exists public.offer_availability_grace();");
+    await db.exec("drop function if exists public.refresh_offer_state();");
+    await db.exec("drop function if exists public.offer_state_window();");
+    await db.exec("drop table if exists public.offer_state cascade;");
+    await db.exec("drop function if exists public.favorite_demand(text[]);");
+    await db.exec("drop table if exists public.favorites cascade;");
+    await db.exec("drop view if exists public.offer_state_live;");
+
+    await attrappenFuerBaseline(db);
+
+    await db.exec(`
+      alter table public.skylanders add constraint z59_sky_pk primary key (sky_id);
+      insert into public.skylanders (sky_id, name, slug, market_price)
+      values ('SKY-7201', 'Probe Kaufbar', 'probe-kaufbar-59', 20.00),
+             ('SKY-7202', 'Probe Vergriffen', 'probe-vergriffen-59', 30.00)
+        on conflict do nothing;
+      insert into public.shop_settings (id, price_percentage)
+      values (true, 100) on conflict do nothing;
+      alter table public.shop_inventory drop column if exists available_quantity;
+      alter table public.shop_inventory
+        add column available_quantity integer
+        generated always as (quantity - reserved) stored;
+      create sequence if not exists public.z59_inv_seq start 1;
+      alter table public.shop_inventory alter column id set default nextval('public.z59_inv_seq');
+      drop function if exists public.shop_offers();
+      create function public.shop_offers()
+      returns table (sky_id text, condition text, price numeric,
+                     available boolean, delivery_scope text)
+      language sql stable as $p59$
+        select i.sky_id, i.condition,
+               public.shop_price(i.sale_price, s.market_price, st.price_percentage),
+               (i.available_quantity > 0), null::text
+          from public.shop_inventory i
+          join public.skylanders s on s.sky_id = i.sky_id
+          cross join public.shop_settings st
+         where i.is_listed
+           and i.condition = public.v1_sale_condition()
+           and public.shop_price(i.sale_price, s.market_price, st.price_percentage)
+               is not null;
+      $p59$;
+      -- EINE kaufbare und EINE gelistete, aber vergriffene Figur. Die zweite
+      -- ist der Grund, warum Stufe 4 ueberhaupt etwas unterscheiden kann.
+      insert into public.shop_inventory (sky_id, condition, quantity, reserved, is_listed)
+      values ('SKY-7201', 'loose', 2, 0, true),
+             ('SKY-7202', 'loose', 0, 0, true);`);
+
+    const befund59: string[] = [];
+    let ok59 = true;
+    const sag59 = (was: string, gut: boolean, text: string): boolean => {
+      befund59.push(`${was}: ${gut ? text : `BEFUND ${text}`}`);
+      return gut;
+    };
+    const w59 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    const sichtDa = () => w59(
+      "select (to_regclass('public.offer_state_live') is not null)::text as w");
+    /** Der Abdruck der Sicht: Definition UND Rechte in einer Zahl. */
+    const sichtAbdruck = () => w59(
+      `select md5(pg_get_viewdef(to_regclass('public.offer_state_live'), true)
+        || coalesce((select string_agg(a.grantee::regrole::text || ':'
+                                      || a.privilege_type, ',' order by a.privilege_type)
+                       from pg_class c, aclexplode(c.relacl) a
+                      where c.oid = to_regclass('public.offer_state_live')), '-')) as w`);
+    const M151 = join(MIG_DIR, "0151_offer_state_live.sql");
+    /** Eine abweichende Sicht stellen — und 0151 darauf loslassen. */
+    const abweichung = async (name: string, ddl: string): Promise<string> => {
+      await db.exec("drop view if exists public.offer_state_live;");
+      await db.exec(ddl);
+      const r = await fahre(db, M151);
+      await db.exec("drop view if exists public.offer_state_live;");
+      return r ?? `${name}: LIEF DURCH (muss abbrechen)`;
+    };
+
+    /* ---- 1. AUSGANGSLAGE PRODUCTION: die Sicht fehlt ------------------ */
+    if (ok59) {
+      const vorher = await sichtDa();
+      const r = await fahre(db, M151);
+      const nachher = await sichtDa();
+      const spalten = await w59(
+        `select string_agg(a.attname::text || ' '
+                || format_type(a.atttypid, a.atttypmod), ', ' order by a.attnum) as w
+           from pg_attribute a
+          where a.attrelid = to_regclass('public.offer_state_live')
+            and a.attnum > 0 and not a.attisdropped`);
+      ok59 = sag59("Production: die Sicht fehlt und entsteht",
+        vorher === "false" && r === null && nachher === "true"
+        && spalten === "sky_id text, cheapest_cents integer",
+        `vorher ${vorher} · ${r ?? "durch"} · nachher ${nachher} · Spalten ${spalten}`);
+    }
+
+    /* ---- 2. Sie liest keine Relation, nur die zwei Funktionen --------- */
+    if (ok59) {
+      const relationen = await w59(
+        `select count(*)::text as w from pg_depend d
+           join pg_rewrite r on r.oid = d.objid
+          where d.classid = 'pg_rewrite'::regclass
+            and d.refclassid = 'pg_class'::regclass
+            and r.ev_class = to_regclass('public.offer_state_live')
+            and d.refobjid <> to_regclass('public.offer_state_live')`);
+      const funktionen = await w59(
+        `select string_agg(distinct p.proname::text, ',' order by p.proname::text) as w
+           from pg_depend d
+           join pg_rewrite r on r.oid = d.objid
+           join pg_proc p on p.oid = d.refobjid
+          where d.classid = 'pg_rewrite'::regclass
+            and d.refclassid = 'pg_proc'::regclass
+            and r.ev_class = to_regclass('public.offer_state_live')`);
+      const rechte = await w59(
+        `select coalesce((select count(*)::text from pg_class c, aclexplode(c.relacl) a
+                           where c.oid = to_regclass('public.offer_state_live')
+                             and (a.grantee = 0
+                                  or a.grantee::regrole::text
+                                     in ('anon', 'authenticated'))), '0') as w`);
+      ok59 = sag59("Herkunft und Rechte", relationen === "0"
+        && funktionen !== null && funktionen.includes("shop_offers")
+        && funktionen.includes("v1_sale_condition") && rechte === "0",
+        `Relationen ${relationen} · Funktionen ${funktionen} · Clientrechte ${rechte}`);
+    }
+
+    /* ---- 3. Und sie trifft fachlich zu: nur die kaufbare Figur -------- */
+    if (ok59) {
+      const inhalt = await w59(
+        `select coalesce(string_agg(x.sky_id || '=' || x.cheapest_cents::text,
+                                    ',' order by x.sky_id), '(leer)') as w
+           from public.offer_state_live x`);
+      ok59 = sag59("die Sicht sagt, was kaufbar ist", inhalt === "SKY-7201=2000",
+        `${inhalt} (SKY-7202 ist gelistet, aber vergriffen)`);
+    }
+
+    /* ---- 4. WIEDERHOLBAR: ein zweiter Lauf aendert nichts ------------- */
+    if (ok59) {
+      const vor = await sichtAbdruck();
+      const r2 = await fahre(db, M151);
+      const nach = await sichtAbdruck();
+      const r3 = await fahre(db, M151);
+      const nach3 = await sichtAbdruck();
+      ok59 = sag59("wiederholbar", r2 === null && r3 === null
+        && vor === nach && nach === nach3,
+        `zweiter Lauf ${r2 ?? "durch"} · dritter ${r3 ?? "durch"} · `
+        + `Abdruck unveraendert ${vor === nach && nach === nach3}`);
+    }
+
+    /* ---- 5. STUFE 1: eine dritte Spalte faellt auf -------------------- */
+    if (ok59) {
+      const r = await abweichung("Spalten", `
+        create view public.offer_state_live as
+          select o.sky_id,
+                 min(round(o.price * 100))::integer as cheapest_cents,
+                 count(*)::integer as wie_viele
+            from public.shop_offers() o
+           where o.available and o.condition = public.v1_sale_condition()
+           group by o.sky_id;`);
+      ok59 = sag59("Stufe 1 Bauart", r.includes("die Spalten"), r);
+    }
+
+    /* ---- 6. STUFE 2: dieselben Spalten, aber sie liest eine Relation -- */
+    if (ok59) {
+      const r = await abweichung("Relation", `
+        create view public.offer_state_live as
+          select o.sky_id,
+                 min(round(o.price * 100))::integer as cheapest_cents
+            from public.shop_offers() o
+           where o.available and o.condition = public.v1_sale_condition()
+             and exists (select 1 from public.shop_inventory)
+           group by o.sky_id;`);
+      ok59 = sag59("Stufe 2 Herkunft", r.includes("Relation(en) direkt"), r);
+    }
+
+    /* ---- 7. STUFE 3: max statt min — Spalten und Herkunft gleich ------ */
+    if (ok59) {
+      const r = await abweichung("Wortlaut", `
+        create view public.offer_state_live as
+          select o.sky_id,
+                 max(round(o.price * 100))::integer as cheapest_cents
+            from public.shop_offers() o
+           where o.available and o.condition = public.v1_sale_condition()
+           group by o.sky_id;`);
+      ok59 = sag59("Stufe 3 Wortlaut (max statt min)",
+        r.includes("im Wortlaut der bestehenden Sicht fehlt"), r);
+    }
+
+    /* ---- 8. STUFE 4: jedes Stueck da, Ergebnis anders ----------------- */
+    if (ok59) {
+      /*
+       * DER FALL, DEN NUR DER DATENVERGLEICH FINDET. Spalten stimmen,
+       * Herkunft stimmt, und der Wortlaut enthaelt `shop_offers`,
+       * `v1_sale_condition`, `min(round(`, `*100`, `available` und
+       * `group by` — alle sechs. Nur das Ergebnis ist ein anderes.
+       */
+      const r = await abweichung("Verhalten", `
+        create view public.offer_state_live as
+          select o.sky_id,
+                 min(round(o.price * 100))::integer as cheapest_cents
+            from public.shop_offers() o
+           where o.available and o.condition = public.v1_sale_condition()
+             and o.sky_id <> 'SKY-7201'
+           group by o.sky_id;`);
+      ok59 = sag59("Stufe 4 Verhalten", r.includes("ein anderes Ergebnis"), r);
+    }
+
+    /* ---- 9. Ein Clientrecht faellt ebenfalls auf ---------------------- */
+    if (ok59) {
+      await db.exec("drop view if exists public.offer_state_live;");
+      await db.exec(`
+        create view public.offer_state_live as
+          select o.sky_id,
+                 min(round(o.price * 100))::integer as cheapest_cents
+            from public.shop_offers() o
+           where o.available and o.condition = public.v1_sale_condition()
+           group by o.sky_id;
+        grant select on public.offer_state_live to authenticated;`);
+      const r = await fahre(db, M151);
+      ok59 = sag59("ein Clientrecht faellt auf",
+        r !== null && r.includes("Clientrecht"), r ?? "LIEF DURCH (muss abbrechen)");
+      /* Wieder herstellen, wie 0151 sie will. */
+      await db.exec("revoke all on public.offer_state_live from authenticated;");
+      const gut = await fahre(db, M151);
+      ok59 = ok59 && sag59("und nach dem Entzug laeuft sie wieder durch",
+        gut === null, gut ?? "durch");
+    }
+
+    /* ---- 10. AUSGANGSLAGE STAGING: 0146 hat sie angelegt ------------- */
+    if (ok59) {
+      /*
+       * Die Staging-Welt: der Spiegel samt Sicht aus `0146`. Danach `0151` —
+       * sie muss pruefen und NICHTS anfassen, und zwar auch die Rechte und
+       * den Kommentar nicht.
+       */
+      await db.exec("drop view if exists public.offer_state_live;");
+      const l146 = await fahre(db, join(MIG_DIR, "0146_offer_state.sql"));
+      const vorhanden = await sichtDa();
+      const vor = l146 === null ? await sichtAbdruck() : "-";
+      const kommentarVor = l146 === null ? await w59(
+        `select coalesce(obj_description(to_regclass('public.offer_state_live'),
+                                         'pg_class'), '(keiner)') as w`) : "-";
+      const r = l146 === null ? await fahre(db, M151) : "-";
+      const nach = r === null ? await sichtAbdruck() : "-";
+      const kommentarNach = r === null ? await w59(
+        `select coalesce(obj_description(to_regclass('public.offer_state_live'),
+                                         'pg_class'), '(keiner)') as w`) : "-";
+      const spiegelSteht = await w59(
+        "select (to_regclass('public.offer_state') is not null)::text as w");
+      ok59 = sag59("Staging: 0146 hat sie angelegt, 0151 laesst sie unberuehrt",
+        l146 === null && vorhanden === "true" && r === null && vor === nach
+        && kommentarVor === kommentarNach && kommentarVor !== "(keiner)"
+        && spiegelSteht === "true",
+        `0146: ${l146 ?? "durch"} · 0151: ${r ?? "durch"} · Abdruck unveraendert `
+        + `${vor === nach} · Kommentar unveraendert ${kommentarVor === kommentarNach} `
+        + `· offer_state steht ${spiegelSteht}`);
+    }
+
+    /* ---- 11. R0151 verweigert, solange jemand liest ------------------- */
+    if (ok59) {
+      /* In dieser Welt steht `refresh_offer_state()` aus 0146 — ein Leser. */
+      const mitLeser = await fahre(db, "supabase/rollback/R0151_drop_offer_state_live.sql");
+      const stehtNoch = await sichtDa();
+      /* Die Leser der alten Bauform fort (R0146 nimmt die Sicht mit — genau
+         deshalb braucht M9 eine eigene Fassung; hier reicht ein drop). */
+      await db.exec("drop function if exists public.refresh_offer_state();");
+      await db.exec("drop function if exists public.offer_availability_due();");
+      const ohneLeser = await fahre(db, "supabase/rollback/R0151_drop_offer_state_live.sql");
+      const fort = ohneLeser === null ? await sichtDa() : "-";
+      const shopSteht = await w59(
+        "select (to_regprocedure('public.shop_offers()') is not null)::text as w");
+      ok59 = sag59("R0151",
+        mitLeser !== null && mitLeser.includes("lesen die Sicht")
+        && stehtNoch === "true" && ohneLeser === null && fort === "false"
+        && shopSteht === "true",
+        `mit Leser: bricht ab und die Sicht steht noch (${stehtNoch}) · ohne Leser: `
+        + `${ohneLeser ?? "durch"}, fort ${fort} · shop_offers unberuehrt ${shopSteht}`);
+    }
+
+    probe.push({
+      name: "P59 0151 stellt die Live-Sicht eigenstaendig bereit: sie entsteht, wo sie fehlt, "
+        + "bleibt unberuehrt, wo sie steht, ist wiederholbar — und eine abweichende Fassung "
+        + "faellt in jeder der vier Stufen auf (Bauart, Herkunft, Wortlaut, Verhalten)",
+      ok: ok59,
+      sagt: `0151: ${befund59.join(" · ")}`,
+    });
+  }
+
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
   console.log("-".repeat(76));
   const probeFehler = probe.filter((p) => !p.ok);
