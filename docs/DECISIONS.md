@@ -12,7 +12,7 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-10-26 (ADR-0148, zweite Figurendarstellung).
+Letzte Aktualisierung: 2026-10-27 (ADR-0149, zwei Umgebungen und der lokale LAN-Server).
 
 ---
 
@@ -15098,3 +15098,70 @@ mit umgebrochener Preiszeile, 108 px bei zweizeiligem Namen). Die Banderole
 Container-Query-Raster (eine Spalte mobil, zwei ab 52 rem, nie drei),
 Preisermittlung, Angebotsermittlung, Favoriten, Besitzaktionen, Shop-Logik.
 Keine funktionierende Glocke: `CatalogCard` übergibt kein `bellSlot`.
+
+---
+
+## ADR-0149 · Zwei Umgebungen, und die zweite läuft auf dem Mac
+
+**Datum:** 2026-10-27
+**Status:** ANGENOMMEN (Entscheidung des Betreibers)
+**Betrifft:** `tools/dev-staging.mts`, `next.config.ts`, `package.json`,
+`docs/DEPLOYMENT.md` · ersetzt die stillschweigende Annahme, ein
+Vercel-Preview sei eine Testumgebung · lässt **ADR-0017** (anon key ist
+öffentlich), **ADR-0051** (Service-Role-Key gehört nicht in die Webanwendung)
+und die Production-Konfiguration unberührt
+**Umsetzung:** gebaut. Kein Commit, kein Deployment, keine Migration.
+
+### Die Frage
+
+Die Staging-Untersuchung vom 2026-10-26 hat ergeben, dass **keine isolierte
+Web-Staging-Umgebung existiert**: Vercels Preview-Environment trägt dieselben
+`NEXT_PUBLIC_SUPABASE_*`-Werte wie Production, ein Preview-Deployment redet
+also mit der Production-Datenbank. Damit stand die Frage, ob ein zweites
+Vercel-Projekt mit eigener Domain und eigener Auth-Konfiguration eingerichtet
+wird — oder ob es bei zwei Umgehungen bleibt und die zweite lokal läuft.
+
+### Die Entscheidung
+
+**Genau zwei Umgebungen.** Production auf Vercel von `main` gegen
+Production-Supabase; Development/Staging als lokaler `next dev` auf dem Mac
+des Betreibers, vom Branch `development/skyisles-v2` gegen das
+Staging-Supabase-Projekt. **Kein zusätzliches Vercel-Projekt und keine
+Preview-Deployment-Infrastruktur.**
+
+Der lokale Server wird für andere Geräte im eigenen Netz erreichbar gemacht,
+damit die Oberfläche auf dem Telefon geprüft werden kann — genau das, wofür
+die horizontale Zeile gebaut wurde. **Der Betreiber hat diese Erreichbarkeit
+im privaten Netz ausdrücklich akzeptiert.**
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **D-1** | **Keine dritte Umgebung.** Kein zweites Vercel-Projekt, keine Staging-Domain, keine Preview-Pipeline | Eine dritte Umgebung kostet ein weiteres Supabase-Projekt, einen weiteren Satz Auth-Redirects und eine weitere Migrationskette, die in Rückstand gerät. Sie beantwortet keine Frage, die der lokale Server nicht auch beantwortet — und die eine Frage, die sie beantworten würde (verhält sich Vercels Build anders?), beantwortet `npm run check` billiger |
+| **D-2** | **Ein Skript, zwei Modi.** `dev:staging` bleibt, `dev:staging:lan` kommt hinzu; `--lan` ist ein Flag, keine zweite Datei | „Dieselbe Konfiguration, derselbe Guard" bleibt nur wahr, wenn es wirklich derselbe Code ist. Zwei Dateien driften, und die eine ohne Guard wäre die, die man abends schnell benutzt |
+| **D-3** | **Der Host steht im Befehl** — `127.0.0.1` normal, `0.0.0.0` im LAN-Modus | **Befund:** `next dev` bindet in dieser Next-Version von sich aus `0.0.0.0`. `dev:staging` war also schon vorher im Netz erreichbar, ohne dass es irgendwo stand. Schweigen hieß hier Erreichbarkeit; jetzt ist beides ausgesprochen und der normale Modus wirklich lokal |
+| **D-4** | **Adressen werden bei jedem Start ermittelt, keine steht im Projekt.** `os.networkInterfaces()`, gefiltert auf `10/8`, `172.16/12`, `192.168/16` | Der Betreiber arbeitet zu Hause **und** am iPhone-Hotspot, die Adresse wechselt. Eine notierte Adresse wäre die Hälfte der Zeit falsch, und zwar lautlos. Eine öffentliche Adresse würde heißen, dass der Rechner direkt am Internet hängt; `169.254.*` heißt, dass kein DHCP geantwortet hat — beides wird nicht als Testadresse angeboten |
+| **D-5** | **Der iPhone-Hotspot wird erkannt und benannt** (`172.20.10.0/28`), Hotspot-Adressen zuerst | Jeder Personal Hotspot verteilt genau diesen Block — das ist eine Eigenschaft von iOS, keine dieses Netzes, und darf deshalb aufgeschrieben werden, ohne zu veralten. Die Erkennung selbst vergleicht Zahlen; die Ausgabe sagt „du bist unterwegs" statt den Betreiber eine Zahl deuten zu lassen |
+| **D-6** | **Der Rückzugriff vom Hotspot wird nicht versprochen.** Der Befehl schreibt „may or may not work" und nennt vier Diagnoseschritte | iOS erlaubt nicht in jeder Konstellation, dass das Telefon einen Client seines eigenen Hotspots erreicht. Eine Zusage, die vom Mobilfunkanbieter und von der iOS-Version abhängt, ist keine Zusage. Im Heim-WLAN geht es zuverlässig, solange der Router keine Client-Isolation erzwingt |
+| **D-7** | **`allowedDevOrigins` kommt aus `SKYISLES_DEV_ORIGINS`, nicht aus der Konfiguration** | Next blockiert im Dev-Modus `/_next/*` und den HMR-Socket für fremde Origins — und ein Telefon im WLAN **ist** ein fremder Origin. Das ist die eigentliche LAN-Hürde, nicht das Binden. Der Wert muss die aktuellen Adressen enthalten, darf also nicht in einer eingecheckten Datei stehen. **Ist die Variable nicht gesetzt, fehlt der Schlüssel ganz** — jeder Build auf Vercel sieht die Option nie. Kein Wildcard |
+| **D-8** | **Kein Tunnel, keine Internetfreigabe**, und Signale erreichen das Kind | Der Modus bindet eine private Schnittstelle und nennt eine private Adresse. `SIGINT`/`SIGTERM` werden weitergegeben, weil ein verwaister `next dev` sonst mit Staging-Zugangsdaten weiterläuft — **genau das ist einmal passiert** und hat zusätzlich eine falsche „von außen erreichbar"-Messung erzeugt |
+
+### Folgen
+
+**Die Grenze bei Auth ist echt und bleibt.** E-Mail-Bestätigung und
+Passwort-Reset funktionieren über eine LAN- oder Hotspot-Adresse nicht: die
+Anwendung baut diese Links aus `window.location.origin`, und die
+Redirect-Allow-List des Staging-Projekts kennt nur `skyisles.app/**` und
+`localhost:3000/**`. Eine Anmeldung mit einem bereits bestätigten Konto geht.
+Das wird **nicht** durch Aufnehmen wechselnder LAN-Adressen in die
+Allow-List behoben — Adressen, die sich ändern, taugen nicht als
+Sicherheitsgrenze.
+
+**Was unberührt bleibt:** die Production-Konfiguration auf Vercel, die
+Supabase-Konfiguration beider Projekte, die Domains, `npm run dev` und
+`npm run build`, der Produktions-Guard und die Service-Role-Sperre vom
+2026-10-25. Für Production ändert sich **nichts**.
+
+**Offen, bewusst:** Preview-Deployments bleiben auf Production-Daten
+konfiguriert. Solange nicht auf Preview getestet wird, ist das kein Problem
+— aber es ist eine Falle, und sie steht jetzt in `docs/DEPLOYMENT.md`
+geschrieben statt nur im Sitzungsgedächtnis.

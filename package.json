@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:staging": "node tools/dev-staging.mts",
+    "dev:staging:lan": "node tools/dev-staging.mts --lan",
     "snapshot:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/staging-snapshot.mts",
     "build": "next build",
     "start": "next start",

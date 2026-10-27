@@ -161,6 +161,61 @@ vom Betreiber **bestätigt**.
 
 ---
 
+## Entwicklungsumgebung — zwei Umgebungen (2026-10-27, ADR-0149) — gebaut, nicht committet
+
+**Es gibt genau zwei Umgebungen, und keine dritte ist geplant.** Production
+auf Vercel von `main` gegen Production-Supabase; Development/Staging als
+lokaler `next dev` auf dem Mac, vom Branch `development/skyisles-v2` gegen das
+Staging-Projekt. **Kein zusätzliches Vercel-Projekt, keine
+Preview-Infrastruktur.** Vollständig in `docs/DEPLOYMENT.md` unter „Zwei
+Umgebungen".
+
+```bash
+npm run dev:staging       # nur dieser Rechner  — http://127.0.0.1:3000
+npm run dev:staging:lan   # zusätzlich das eigene Netz — Adresse wird ausgegeben
+```
+
+Beide gehen durch dasselbe Skript (`--lan` ist ein Flag), dieselbe
+`.env.staging` und denselben Produktions-Guard; der Service-Role-Key wird in
+beiden Modi entzogen. Der Betreiber hat die Erreichbarkeit im privaten Netz
+ausdrücklich akzeptiert.
+
+**Drei Befunde, die beim Bauen herauskamen:**
+
+1. **`next dev` bindet in dieser Next-Version von sich aus `0.0.0.0`.**
+   `dev:staging` war damit schon vorher im Netzwerk erreichbar, ohne dass es
+   irgendwo stand. Jetzt steht der Host in beiden Modi im Befehl, und der
+   normale Modus ist wirklich lokal.
+2. **Die eigentliche LAN-Hürde ist nicht das Binden, sondern Nexts
+   Cross-Origin-Sperre** für `/_next/*` und den HMR-Socket. Gelöst über
+   `allowedDevOrigins`, gefüttert aus `SKYISLES_DEV_ORIGINS`, das der Befehl
+   setzt. Variable nicht gesetzt → Schlüssel fehlt ganz → **jeder Build auf
+   Vercel sieht die Option nie**.
+3. **E-Mail-Bestätigung und Passwort-Reset funktionieren über eine LAN- oder
+   Hotspot-Adresse nicht** — die Links entstehen aus
+   `window.location.origin`, und die Redirect-Allow-List des Staging-Projekts
+   kennt nur `skyisles.app/**` und `localhost:3000/**`. **Anmeldung mit einem
+   bereits bestätigten Konto geht.** Konten für Telefontests werden am Mac
+   angelegt.
+
+**Unterwegs am iPhone-Hotspot** funktioniert der LAN-Modus auch: die Adresse
+wird bei jedem Start neu ermittelt (keine steht im Projekt), der Hotspot wird
+an seiner festen Apple-Range `172.20.10.0/28` erkannt und benannt, und der
+Befehl **verspricht den Rückzugriff nicht** — iOS erlaubt ihn nicht in jeder
+Konstellation. Drei Testschritte und vier Diagnosepunkte gibt der Befehl beim
+Start aus.
+
+**Geändert:** `tools/dev-staging.mts`, `next.config.ts`, `package.json` ·
+**Neu:** `src/lib/ops/dev-lan.test.ts` (19 Prüfungen).
+
+**Verwaister Server, einmal passiert:** ein nicht interaktiv beendeter
+Elternprozess ließ `next dev` mit Staging-Zugangsdaten auf Port 3000 weiter
+lauschen — und erzeugte zusätzlich eine falsche „von außen erreichbar"-Messung.
+`SIGINT`/`SIGTERM` werden jetzt an das Kind weitergegeben; nachgemessen: 0
+Listener nach `SIGTERM`.
+
+---
+
 ## SkyIsles V2 — UX-Umbau (ab 2026-10-26)
 
 **Der Arbeitszweig ist `development/skyisles-v2`.** Production bleibt unberührt;
@@ -361,7 +416,10 @@ kontrolliert um — kein Beschnitt, keine verkleinerten Preise.
    CSS, und die Hydration (`renderToString` plus `hydrateRoot`, Reacts eigene
    Warnung als Zusage). **Nicht bewiesen: wie es aussieht.** Der manuelle
    Prüfplan und eine Vorschau mit eingebautem Messskript liegen beim
-   UX-01C-Bericht.
+   UX-01C-Bericht. **Seit ADR-0149 gibt es dafür einen Weg,
+   der kein Werkzeug hier braucht:** `npm run dev:staging:lan` und das eigene
+   Telefon. Die Prüfung macht dann der Betreiber am echten Gerät — was von
+   Anfang an der bessere Nachweis war als ein Headless-Screenshot.
 2. **M3 freigeben** (`0151` dann `0150` auf Staging), sonst bleibt UX-02
    blockiert.
 3. **Produktionsstand:** laut dem Abschnitt „Aktuelle Phase" liegt der
