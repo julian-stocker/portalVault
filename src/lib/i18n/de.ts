@@ -261,6 +261,20 @@ export const de = {
     availabilityNav: "Verfügbarkeit filtern",
     availabilityAll: "Alle",
     availabilityOffered: "Mit Angebot",
+    /*
+     * DER ANSICHTSUMSCHALTER (UX-01C, ADR-0148).
+     *
+     * „Karten" und „Liste", und beides sind Substantive für das, was man
+     * sieht — nicht „Kartenansicht"/„Listenansicht", weil der Knopf schon in
+     * einer Gruppe mit der Beschriftung „Ansicht" steht und das Wort sonst
+     * zweimal dastünde.
+     *
+     * EIGENE SCHLÜSSEL, NICHT DIE DER SAMMLUNG. `collection.view` heißt
+     * „Symbole · Tabelle" und beantwortet eine andere Frage: dort geht es um
+     * Karten GEGEN eine Tabelle, hier um zwei Arten von Karte.
+     */
+    viewLabel: "Ansicht",
+    view: { cards: "Karten", rows: "Liste" } as Record<string, string>,
     /** Wenn der Filter aus ist und trotzdem nichts fehlt. */
     /** „Fehlen" ist leer: alles vorhanden. */
     ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",

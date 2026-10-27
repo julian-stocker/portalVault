@@ -5,37 +5,49 @@ import { join } from "node:path";
 import { CARD_TYPES, CARD_TYPE_LABELS, DEFAULT_CARD_TYPE } from "@/lib/catalog/card-type";
 import { duplicateBadge, marksOwnership, namesEdition, understatesCard } from "@/lib/catalog/card";
 import {
+  ACTION_WITH_BELL,
+  AMOUNT_LINE,
+  AMOUNT_PX,
+  CHIP_INSET,
+  CHIP_VISIBLE,
+  EDITION_CHIP_PX,
+  INFO,
+  INFO_HEIGHT,
   NAME_LINES,
+  OFFER_CHIP_PX,
   OFFER_LABEL_PX,
   PAGE_PAD,
   PHONE_WIDTHS,
+  PREVIOUS_ROW_HEIGHT,
   ROW,
-  ROW_ACTION_HEIGHT,
   ROW_COLUMNS,
+  TWO_COLUMN_AT_PX,
+  MARKET_LABEL_PX,
   nameCharsPerLine,
   phoneRowWidth,
-  rowOfferWidth,
+  priceLineFits,
+  rowHeight,
   rowTextWidth,
 } from "@/lib/catalog/row-template";
 import { displayNameFor, parseVariant } from "@/lib/catalog/variant";
 
 /**
- * The horizontal figure row (UX-01B, ADR-0148).
+ * The horizontal figure row (UX-01B, corrected in UX-01C, ADR-0148).
  *
  * WHAT THESE TESTS ARE FOR, AND IT IS NOT "DOES IT LOOK RIGHT"
  *
- * Four promises were made when this presentation was approved, and three of
- * them are checkable without a browser:
+ * Five promises, and four of them are checkable without a browser:
  *
  *   1. the card is untouched — a second presentation, not a mode of the first
  *   2. ownership, wanting and the later alarm stay three independent states
  *   3. there is no second price, buyability or write path anywhere in it
- *   4. the name still has room on a 360 px phone
+ *   4. the name still has room on a 360 px phone — AND the row is FLAT
+ *   5. it looks good — which only a browser can answer, named as a limit
  *
- * The fourth is the one worth having a module for. `rowTextWidth()` is
- * arithmetic, the longest name in the catalogue is a measurement that can be
- * taken from `data/catalog/products.json`, and together they answer the
- * question a screenshot can only answer for one name at a time.
+ * The fourth is the one worth having a module for. `rowTextWidth()` and
+ * `rowHeight()` are arithmetic, the longest name in the catalogue is a
+ * measurement that can be taken from `data/catalog/products.json`, and
+ * together they answer questions a screenshot answers for one name at a time.
  *
  * Contrast is COMPUTED rather than asserted as a string, the way
  * `src/lib/design/roles.test.ts` does it: a token can be renamed correctly
@@ -96,22 +108,9 @@ function token(name: string): string {
 
 describe("the classic figure card is untouched", () => {
   it("knows nothing about the row, its geometry or the layout choice", () => {
-    /*
-     * The whole reason the row is its own file. `figure-card.tsx` places its
-     * content on finished artwork through nine measured bands that sum to
-     * 100 % (`card-template.ts`); a horizontal branch inside it would be a
-     * second coordinate system beside those measurements. Eighteen other test
-     * files hold the card's own promises — this one only holds that the row
-     * did not reach into it.
-     */
-    for (const marker of ["FigureRow", "figure-row", "row-template", "ROW_ACTION_HEIGHT"]) {
+    for (const marker of ["FigureRow", "figure-row", "row-template", "INFO_HEIGHT"]) {
       expect(CARD_SRC, `the card mentions ${marker}`).not.toContain(marker);
     }
-    /*
-     * And it takes no layout decision. Named precisely rather than as a word
-     * search: the card legitimately carries `data-card-layout-debug`, which
-     * is its own debug overlay and has nothing to do with this.
-     */
     for (const form of [/layout\s*\?:/, /layout\s*===/, /layout\s*=\s*"/]) {
       expect(CARD_CODE, `the card has a layout switch: ${form}`).not.toMatch(form);
     }
@@ -119,27 +118,15 @@ describe("the classic figure card is untouched", () => {
   });
 
   it("and the row does not borrow the card's artwork geometry", () => {
-    /*
-     * The other direction, and it matters just as much: a row that imported
-     * `card-template.ts` would be reaching for numbers measured off a PNG it
-     * does not draw. Its own module is small on purpose.
-     */
     expect(ROW_SRC).not.toContain("card-template");
     for (const name of ["CARD_ASPECT", "GRID_ROWS", "GRID_AREAS", "artworkFor", "COLLECTED_GLOW"]) {
       expect(ROW_SRC, `the row reaches for ${name}`).not.toContain(name);
     }
-    /* And it draws no artwork of its own either — no template, no seal, no
-       glow layer. A row is markup, and that is the point. */
     expect(ROW_SRC).not.toContain("CollectedSeal");
     expect(ROW_CODE).not.toMatch(/\.(png|webp)\b/);
   });
 
   it("the administrator keeps the card, whatever the layout says", () => {
-    /*
-     * An editorial card carries an inline name editor, a hidden badge and an
-     * edit action, and the row has no place for any of them. The admin branch
-     * must therefore return BEFORE the layout choice is read.
-     */
     const adminBranch = CATALOG_CARD_CODE.slice(
       CATALOG_CARD_CODE.indexOf("if (admin) {"),
       CATALOG_CARD_CODE.indexOf("const quickBuy"),
@@ -149,15 +136,25 @@ describe("the classic figure card is untouched", () => {
     expect(adminBranch).not.toContain("layout");
   });
 
-  it("the card stays the default, so no shipped surface changes", () => {
+  it("the card stays the default, so a surface that says nothing is unchanged", () => {
     expect(CATALOG_CARD_CODE).toContain('layout = "card"');
     expect(CATALOG_CARD_CODE).toContain('layout?: "card" | "row"');
-    /* Nothing passes it yet: UX-01C adds the switch. A surface that started
-       passing `layout` would be a production route changing its appearance,
-       which this step explicitly does not do. */
-    for (const surface of [
+
+    /*
+     * WHO CHOOSES, AND WHO MUST NOT (UX-01C).
+     *
+     * The two interactive views choose a layout and nobody else does. The
+     * server pages hand down DATA and the choice is the viewer's, remembered
+     * in their browser; a page that passed one would be deciding something it
+     * cannot know. The collection is out of scope by decision.
+     */
+    for (const chooser of [
       "src/components/catalog/catalog-view.tsx",
       "src/components/shop/shop-view.tsx",
+    ]) {
+      expect(code(read(chooser)), `${chooser} should select a layout`).toMatch(/layout=\{/);
+    }
+    for (const surface of [
       "src/components/collection/collection-view.tsx",
       "src/app/(public)/(catalog)/page.tsx",
       "src/app/(app)/favoriten/page.tsx",
@@ -168,7 +165,6 @@ describe("the classic figure card is untouched", () => {
   });
 
   it("the collection keeps its own card-or-table switch", () => {
-    /* Decision 5 of the brief: the showcase is not part of this change. */
     const view = code(read("src/components/collection/collection-view.tsx"));
     expect(view).toContain("useSyncExternalStore(subscribeViewMode, readViewMode, serverViewMode)");
     expect(view).not.toContain("FigureRow");
@@ -176,23 +172,305 @@ describe("the classic figure card is untouched", () => {
 });
 
 /* ========================================================================
- * 2. OWNERSHIP
+ * 2. THE CORRECTION: THE ROW IS FLAT
+ * ===================================================================== */
+
+describe("the row is compact, and the reduction is a number", () => {
+  it("the first version was 138 px on a phone", () => {
+    /* 8 + 8 of padding, a 72 px picture beside a 50 px text stack, a 6 px gap
+       and a 44 px offer band of its own. Kept as the yardstick so the
+       reduction is measured rather than claimed. */
+    expect(PREVIOUS_ROW_HEIGHT).toBe(138);
+  });
+
+  it("and the corrected one is 92 px — a third flatter", () => {
+    expect(rowHeight(1)).toBe(92);
+    /* The `sm:` step changes nothing: at 72 px the picture is still shorter
+       than the text block, so the row does not grow on a tablet. */
+    expect(rowHeight(1, true)).toBe(92);
+    const saved = (PREVIOUS_ROW_HEIGHT - rowHeight(1)) / PREVIOUS_ROW_HEIGHT;
+    expect(saved).toBeGreaterThan(0.33);
+  });
+
+  it("and a row that carries a bell grows by the bell, not in advance", () => {
+    /*
+     * THE POINT OF `ACTION_WITH_BELL`. Two 44 px marks on one x need 88 px,
+     * which is 10 px more than the text block. Only the rows that actually
+     * show a bell pay it — and those are exactly the rows with nothing to
+     * buy, so the extra height tracks a real difference in content.
+     */
+    expect(rowHeight(1, false, true)).toBe(100);
+    expect(rowHeight(1, false, true) - rowHeight(1)).toBe(8);
+    expect(ACTION_WITH_BELL).toBe(2 * ROW.touch);
+  });
+
+  it("and a wrapped price line grows by one line, which is the fallback", () => {
+    /*
+     * THE OPERATOR'S INSTRUCTION, as arithmetic: when a long amount and a
+     * long offer cannot share the line, the chip drops below it — nothing is
+     * truncated and no price is shrunk. Only the figures that need it pay.
+     */
+    expect(rowHeight(1, false, false, true)).toBe(rowHeight(1) + AMOUNT_LINE + INFO.gap + 2);
+    expect(priceLineFits(rowTextWidth(phoneRowWidth(360)), 48)).toBe(true);
+    expect(priceLineFits(rowTextWidth(phoneRowWidth(360)), AMOUNT_PX)).toBe(false);
+  });
+
+  it("the text block decides the height, not the picture", () => {
+    /*
+     * THE REASON THE PICTURE COULD GROW WHILE THE ROW SHRANK. At 72 px the
+     * picture was the tallest thing in the row; the three text lines need
+     * 70 px anyway, so anything up to 70 is free.
+     */
+    expect(INFO_HEIGHT).toBe(80);
+    expect(ROW.image).toBeLessThan(INFO_HEIGHT);
+    expect(ROW.imageWide).toBeLessThan(INFO_HEIGHT);
+    expect(rowHeight(1)).toBe(2 * ROW.padY + INFO_HEIGHT);
+    /* And it did grow: 56 was the first draft of the correction, 64 shipped. */
+    expect(ROW.image).toBe(64);
+  });
+
+  it("a long name may add a line, and only one line's worth", () => {
+    expect(rowHeight(2) - rowHeight(1)).toBe(INFO.name);
+    /* Still flatter than the version it replaces, even with two lines. */
+    expect(rowHeight(2)).toBeLessThan(PREVIOUS_ROW_HEIGHT);
+  });
+
+  it("nothing is reserved for the bell any more", () => {
+    /*
+     * The first version forced the heart's column to two touch slots — 88 px
+     * of height for a control that does not exist yet. That was the single
+     * largest piece of the air this correction removed.
+     */
+    expect(TEMPLATE_SRC).not.toContain("actionSlots");
+    expect(TEMPLATE_SRC).not.toContain("ROW_ACTION_HEIGHT");
+    expect(ROW_CODE).not.toContain("min-h-22");
+    expect(ROW_CODE, "the heart's column holds only what is in it")
+      .toContain("flex w-11 shrink-0 flex-col items-center self-stretch");
+    /* The slot exists and the column supports two positions, but the height
+       follows the content: `justify-start` with the heart alone. */
+    expect(ROW_CODE).toContain("bellSlot");
+    expect(ROW_CODE).toContain('bellSlot ? "justify-between" : "justify-start"');
+  });
+
+  it("and the offer is no longer a band under the picture", () => {
+    /*
+     * It spanned the whole row below the picture and cost 44 px plus a gap.
+     * It is the last line of the text block now, right-aligned.
+     */
+    expect(ROW_CODE).toContain("flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1");
+    expect(ROW_CODE).toContain("group relative ml-auto inline-flex min-h-11 shrink-0");
+    /* And no padding of its own: `OfferLink` brings `px-1.5 sm:px-2`, and
+       doubling it made the line wrap on every phone row. */
+    expect(ROW_CODE).not.toContain("inline-flex min-h-11 shrink-0 items-center px-2");
+    expect(INFO.price).toBe(44);
+  });
+
+  it("and the line's left half carries what the meta line lost", () => {
+    /*
+     * CAUGHT BY THE LINT, NOT BY A REVIEW. Moving the element into a mark
+     * took the series and the "not in the catalogue" notice off the meta
+     * line with it, and `showSeries` went unused — which is how the loss
+     * announced itself. Both now sit at the left of the offer line, where
+     * the space was empty anyway, so they cost no height.
+     */
+    expect(ROW_CODE).toContain("!figure.isActive || showSeries ?");
+    expect(ROW_CODE).toContain("de.catalog.inactive");
+    expect(ROW_CODE).toContain("figure.seriesLabel");
+    /* Out of range outranks the game, the same order the card's band uses. */
+    expect(ROW_CODE).toContain("!figure.isActive ? de.catalog.inactive : figure.seriesLabel");
+    /* They share the CAPTION line, never the price line. */
+    const priceLine = ROW_CODE.slice(ROW_CODE.indexOf("flex-wrap items-center"));
+    expect(priceLine).not.toContain("figure.seriesLabel");
+    expect(priceLine).not.toContain("{edition}");
+  });
+
+  it("the padding and the gaps are the smaller pair now", () => {
+    expect(ROW.padX).toBe(6);
+    expect(ROW.padY).toBe(6);
+    expect(ROW.gap).toBe(6);
+    expect(ROW_CODE).toContain("gap-1.5 rounded-sky-md px-1.5 py-1.5 sm:gap-2.5");
+    /* The same at every width: vertically it competes with nothing but
+       height, and the row must not get taller on a tablet than on a phone. */
+    expect(ROW_CODE).not.toContain("sm:p-3");
+    expect(ROW_CODE).not.toContain("sm:py-");
+    expect(ROW_CODE).not.toContain("sm:px-");
+  });
+});
+
+/* ========================================================================
+ * 3. THE ARRANGEMENT
+ * ===================================================================== */
+
+describe("four columns, and the order is the information hierarchy", () => {
+  it("picture, hairline, text block, heart", () => {
+    expect(ROW_COLUMNS).toBe(4);
+    expect(ROW.divider).toBe(1);
+    expect(ROW_CODE).toContain("w-px shrink-0 self-stretch");
+    /* The text block absorbs the width; everything else is fixed. */
+    expect(ROW_CODE).toContain("flex min-w-0 flex-1 flex-col gap-0.5");
+  });
+
+  it("the name is the first line, and the edition is not in it", () => {
+    expect(ROW_CODE).toContain("figure.displayName");
+    expect(ROW_CODE).toContain("line-clamp-2 min-w-0 text-[13px]");
+    const nameLine = ROW_CODE.slice(
+      ROW_CODE.indexOf("<p className=\"flex min-w-0 items-baseline gap-1\">"),
+      ROW_CODE.indexOf("</p>"),
+    );
+    expect(nameLine).not.toContain("CARD_TYPE_LABELS");
+    expect(nameLine).not.toContain("elementLabel");
+  });
+
+  it("the caption stands ABOVE the amount, not beside it", () => {
+    /*
+     * THE OPERATOR'S INSTRUCTION, and it is the reason line two exists. The
+     * label named the number next to it before; now it names the number
+     * below it, and the hierarchy reads name → MARKTWERT → amount.
+     */
+    const captionAt = ROW_CODE.indexOf("de.catalog.marketValue");
+    const amountAt = ROW_CODE.indexOf("catalogDisplayMarketPrice(");
+    expect(captionAt).toBeGreaterThan(-1);
+    expect(captionAt, "the caption comes before the amount").toBeLessThan(amountAt);
+    /* Different lines: the caption's paragraph closes before the price line
+       opens. */
+    const priceLineAt = ROW_CODE.indexOf("flex min-w-0 flex-wrap items-center");
+    expect(captionAt).toBeLessThan(priceLineAt);
+    expect(amountAt).toBeGreaterThan(priceLineAt);
+    /* And the amount is the prominent one of the two. */
+    expect(ROW_CODE).toContain("text-[17px] leading-none font-semibold tabular-nums");
+    expect(ROW_CODE).toContain('text-[8px] leading-none font-medium tracking-[0.08em] uppercase');
+  });
+
+  it("the caption line holds the label and the chip with room to spare", () => {
+    /*
+     * 56 for the caption, 62 for the longest edition chip, 8 of gap — 126 of
+     * a phone's 179. What is left is the series' share, and the series is the
+     * one thing on this line allowed to shorten.
+     */
+    const text = rowTextWidth(phoneRowWidth(360));
+    expect(MARKET_LABEL_PX + ROW.gap + EDITION_CHIP_PX).toBeLessThanOrEqual(text);
+    expect(text - (MARKET_LABEL_PX + 2 * ROW.gap + EDITION_CHIP_PX),
+      "and the series still gets a readable share").toBeGreaterThan(30);
+  });
+
+  it("the edition is gone from the information area entirely", () => {
+    /*
+     * THE OPERATOR'S INSTRUCTION. It was a chip at the right of the caption
+     * line; it is a banderole on the picture now, so the text block never
+     * mentions an edition at all — not on the caption line, not on the price
+     * line.
+     */
+    expect(ROW_CODE).not.toContain("CARD_TYPE_LABELS");
+    expect(ROW_CODE).not.toContain("{edition}");
+    expect(ROW_CODE).not.toContain("bg-status-ground");
+    expect(ROW_CODE).toContain("<EditionBanner cardType={figure.cardType} />");
+    const stage = ROW_CODE.slice(
+      ROW_CODE.indexOf("relative flex h-16 w-16"),
+      ROW_CODE.indexOf("w-px shrink-0 self-stretch"),
+    );
+    expect(stage, "the banner belongs to the picture").toContain("<EditionBanner");
+  });
+
+  it("the offer is the last line of the text block, pushed to the right", () => {
+    const block = ROW_CODE.slice(
+      ROW_CODE.indexOf("flex min-w-0 flex-1 flex-col"),
+      ROW_CODE.indexOf("flex w-11 shrink-0"),
+    );
+    expect(block, "the offer is not in the text block").toContain("{trade}");
+    /* `ml-auto` on the pill rather than `justify-end` on the line: the line
+       also carries the series at its left, and the pill still has to sit at
+       the right whether or not that is there. */
+    expect(block).toContain("ml-auto inline-flex");
+    /* And it IS the last line: nothing but the failure notice follows it. */
+    expect(block.indexOf("{trade}")).toBeGreaterThan(block.indexOf("de.catalog.marketValue"));
+  });
+
+  it("the heart's column is 44 px wide and as tall as the heart", () => {
+    expect(ROW.touch).toBe(44);
+    expect(ROW.touch).toBe(11 * 4);
+    expect(ROW_CODE).toContain("w-11");
+    expect(ROW_CODE).toContain("self-start");
+  });
+
+  it("the picture sits at the top when a name pushed the row open", () => {
+    expect(ROW_CODE).toContain("shrink-0 self-start items-center justify-center");
+  });
+});
+
+describe("the whole row is the toggle, and the two controls are not", () => {
+  it("the toggle is an overlay, first in the DOM", () => {
+    /*
+     * THE STACKING IS THE TRICK, so it is asserted rather than trusted:
+     * static children paint first, then positioned ones in DOM order. The
+     * overlay comes first and the two controls carry `relative`, so they
+     * paint above it and keep their own clicks. No `z-index` anywhere — and
+     * NOT a negative one, which would paint the overlay behind the article's
+     * own background and let the article win the hit test.
+     */
+    const article = ROW_CODE.indexOf("<article");
+    const overlay = ROW_CODE.indexOf("absolute inset-0 h-full w-full rounded-sky-md");
+    const offer = ROW_CODE.indexOf("{trade}");
+    const heart = ROW_CODE.indexOf("{favoriteSlot}");
+    expect(overlay).toBeGreaterThan(article);
+    expect(overlay, "the overlay must come before the controls").toBeLessThan(offer);
+    expect(overlay).toBeLessThan(heart);
+    expect(ROW_CODE).not.toContain("-z-10");
+    expect(ROW_CODE).not.toMatch(/\bz-\d/);
+  });
+
+  it("and ONLY the two controls are positioned — not the boxes around them", () => {
+    /*
+     * THE DEFECT THIS FIXES, found while chasing the preview's hit-test
+     * report: the offer's whole LINE and the heart's whole COLUMN used to
+     * carry `relative`, so their empty halves painted above the collect
+     * overlay and swallowed every tap that landed there. A third of the row
+     * was dead. Now the line and the column are static and only the 44 px
+     * that actually hold a control sit above the overlay.
+     */
+    expect(ROW_CODE).toContain("group relative ml-auto inline-flex min-h-11");
+    expect(ROW_CODE).toContain('<span className="relative">{favoriteSlot}</span>');
+    expect(ROW_CODE).toContain('<span className="relative">{bellSlot}</span>');
+    expect(ROW_CODE, "the price line must not be positioned")
+      .toContain("flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1");
+    expect(ROW_CODE, "the action column must not be positioned")
+      .toContain("flex w-11 shrink-0 flex-col items-center self-stretch");
+  });
+
+  it("no nesting, and therefore no event handling to keep them apart", () => {
+    /* A link inside a button is invalid markup and an ambiguous target. */
+    expect(ROW_CODE).not.toContain("stopPropagation");
+    const toggle = ROW_CODE.slice(
+      ROW_CODE.indexOf("<button"),
+      ROW_CODE.indexOf("</button>"),
+    );
+    expect(toggle).not.toContain("{trade}");
+    expect(toggle).not.toContain("{favoriteSlot}");
+  });
+
+  it("the toggle says which figure it is about", () => {
+    expect(ROW_CODE).toContain("aria-pressed={collected}");
+    expect(ROW_CODE).toMatch(/sr-only[\s\S]{0,120}figure\.displayName/);
+  });
+});
+
+/* ========================================================================
+ * 4. OWNERSHIP
  * ===================================================================== */
 
 describe("ownership on a row uses the rules that already exist", () => {
   it("asks the same four functions the card asks", () => {
     expect(ROW_SRC).toContain('from "@/lib/catalog/card"');
-    for (const fn of ["marksOwnership(", "understatesCard(", "duplicateBadge(", "namesEdition("]) {
+    for (const fn of ["marksOwnership(", "understatesCard(", "duplicateBadge("]) {
       expect(ROW_CODE, `the row calls ${fn}`).toContain(fn);
     }
-    /* No second rule: the row never decides ownership from a quantity, a
-       price or an offer. */
+    /* `namesEdition` moved one level in: `EditionBanner` asks it, so the rule
+       is still one rule in one place. */
+    expect(code(read("src/components/catalog/edition-banner.tsx")))
+      .toContain("namesEdition(cardType)");
     expect(ROW_CODE).not.toMatch(/quantity\s*>\s*0/);
   });
 
   it("and therefore answers exactly as the card does", () => {
-    /* The rule itself, stated once more here so a change to it fails loudly
-       on both presentations at once. */
     expect(marksOwnership("catalog", true)).toBe(true);
     expect(marksOwnership("catalog", false)).toBe(false);
     expect(marksOwnership("showcase", true)).toBe(false);
@@ -205,34 +483,39 @@ describe("ownership on a row uses the rules that already exist", () => {
   });
 
   it("three grounds, because a surface that cannot answer must not pretend", () => {
-    /*
-     * The third is the one that is easy to get wrong. A signed-out catalogue
-     * knows nobody's collection, so drawing every row as "not yours" would
-     * say nothing about ownership and merely fade the list — the same
-     * distinction `understatesCard` exists for.
-     */
-    expect(ROW_CODE).toMatch(/owned:\s*$|owned:/m);
     for (const ground of ["owned:", "understated:", "neutral:"]) {
       expect(ROW_CODE, `GROUND is missing ${ground}`).toContain(ground);
     }
-    expect(ROW_CODE).toContain("owned ? GROUND.owned : understated ? GROUND.understated : GROUND.neutral");
+    expect(ROW_CODE)
+      .toContain("owned ? GROUND.owned : understated ? GROUND.understated : GROUND.neutral");
   });
 
   it("possession is gold, from the gold tokens and not from a literal", () => {
     const owned = ROW_CODE.slice(ROW_CODE.indexOf("owned:"), ROW_CODE.indexOf("understated:"));
     expect(owned).toContain("bg-own-subtle/70");
     expect(owned).toContain("ring-own-line-strong");
-    /* The glow the brief asked for — at the edge, from a token, with a
-       negative spread so it stays a glow and not a halo. */
     expect(owned).toMatch(/shadow-\[0_0_18px_-8px_var\(--own-line-strong\)\]/);
-    /* No colour literal anywhere in the row: every ink and ground is a token. */
     expect(ROW_CODE, "the row hard-codes a colour").not.toMatch(/#[0-9a-fA-F]{6}/);
   });
 
+  it("said compactly: a gold diamond, and the sentence for anyone who needs it", () => {
+    /*
+     * THE COMPACT FORM THE CORRECTION ASKED FOR. "◆ In deiner Sammlung" as
+     * visible text took most of the meta line and pushed the edition and the
+     * value off it. The ground, the edge and the diamond say it three times
+     * over for anyone who can see them; the sentence stays in the markup for
+     * anyone who cannot — and for a forced-colours display, where the gold is
+     * repainted away.
+     */
+    expect(ROW_CODE).toContain("text-own-ink");
+    expect(ROW_CODE).toContain("◆");
+    expect(ROW_CODE).toContain("de.catalog.collectedBadge");
+    expect(ROW_CODE).toContain("sr-only");
+    /* And the copies count goes with it, in the same hidden sentence. */
+    expect(ROW_CODE).toContain("de.collection.copies(copies)");
+  });
+
   it("and it is not the coral of wanting, which is a different question", () => {
-    /* Gold means possession, coral means wanting (V3.1). The row paints
-       neither over the other: the heart arrives as a slot and brings its own
-       colour with it. */
     expect(ROW_CODE).not.toContain("favorite-ink");
     expect(ROW_CODE).not.toContain("favorite-glow");
   });
@@ -245,8 +528,6 @@ describe("ownership on a row uses the rules that already exist", () => {
     const muted = token("muted");
     const ownInk = token("own-ink");
 
-    /* The grounds, as the browser composites them: a 70 % / 55 % alpha over
-       whichever of the two dark backdrops is behind the grid. */
     const grounds = [deep, canvas].flatMap((behind) => [
       { name: "owned", hex: over(ownSubtle, 0.7, behind) },
       { name: "understated", hex: over(deep, 0.55, behind) },
@@ -254,25 +535,15 @@ describe("ownership on a row uses the rules that already exist", () => {
     ]);
 
     for (const ground of grounds) {
-      /* AA for body text is 4.5:1. The name carries the row, so it is held
-         to a higher bar than the floor. */
       expect(contrast(foreground, ground.hex), `name on ${ground.name}`).toBeGreaterThan(7);
       expect(contrast(muted, ground.hex), `meta on ${ground.name}`).toBeGreaterThan(4.5);
     }
-    /* Gold ink appears only on the owned ground, so it is only measured there. */
     for (const ground of grounds.filter((g) => g.name === "owned")) {
       expect(contrast(ownInk, ground.hex), "gold ink on the owned ground").toBeGreaterThan(4.5);
     }
   });
 
   it("the offer line's ink is swapped for the dark ground, not reinvented", () => {
-    /*
-     * `OfferLink` writes in `--trade-ink`, which is near-black because on a
-     * card it sits on a silver plate the artwork paints. A row has no plate,
-     * so the row redefines the pair — the same two variables and the same
-     * mechanism `figure-card.tsx` already uses for its two dark artworks.
-     * `OfferLink` itself is not touched.
-     */
     expect(ROW_CODE).toContain('"--trade-ink": "var(--trade-ink-on-dark)"');
     expect(ROW_CODE).toContain('"--trade-ink-quiet": "var(--trade-ink-quiet-on-dark)"');
     expect(CARD_CODE, "the card still does the same swap").toContain(
@@ -292,37 +563,19 @@ describe("ownership on a row uses the rules that already exist", () => {
 
 describe("a figure nobody owns keeps its photograph", () => {
   it("no filter, no opacity and no scale anywhere in the row", () => {
-    /*
-     * The brief is explicit, and so is the risk: the card takes the colour
-     * out of its ARTWORK (`card-shell-unowned` on layer 2 only), which it can
-     * do because the artwork is a separate element from the photograph. A row
-     * has no such layer, so the same trick applied here would land on the
-     * figure itself.
-     */
     for (const forbidden of [
-      "card-shell-unowned",
-      "saturate(",
-      "brightness(",
-      "grayscale",
-      "opacity-",
-      "scale(",
-      "UNCOLLECTED_SCALE",
+      "card-shell-unowned", "saturate(", "brightness(", "grayscale",
+      "opacity-", "scale(", "UNCOLLECTED_SCALE",
     ]) {
       expect(ROW_SRC, `the row uses ${forbidden}`).not.toContain(forbidden);
     }
-    /* And no transform at all, so there is nothing that could move a row and
-       nothing that could blur its text. */
     expect(ROW_CODE).not.toContain("transform");
   });
 
   it("the picture keeps its own stage, reserved before the file arrives", () => {
-    /* Size on the wrapper, not on the `<img>`: the space is held open while
-       the list loads, so rows do not jump as images arrive. */
-    expect(ROW_CODE).toMatch(/h-18 w-18 shrink-0/);
-    expect(ROW_CODE).toContain("sm:h-22 sm:w-22");
+    expect(ROW_CODE).toMatch(/h-16 w-16 shrink-0/);
+    expect(ROW_CODE).toContain("sm:h-18 sm:w-18");
     expect(ROW_CODE).toContain("bg-plate");
-    /* `object-contain`, because a figure is cut out and a crop takes its head
-       off — the same rule the collection's table follows. */
     expect(ROW_CODE).toContain("object-contain");
     expect(ROW_CODE).toContain('loading="lazy"');
   });
@@ -333,7 +586,7 @@ describe("a figure nobody owns keeps its photograph", () => {
 });
 
 /* ========================================================================
- * 3. THE EDITION, WHICH THE ROW HAS TO SAY IN WORDS
+ * 5. THE EDITION
  * ===================================================================== */
 
 describe("the edition is named, because a row has no artwork to show it", () => {
@@ -346,31 +599,23 @@ describe("the edition is named, because a row has no artwork to show it", () => 
   });
 
   it("and the word comes from the one place those names live", () => {
-    expect(ROW_SRC).toContain("CARD_TYPE_LABELS");
-    expect(ROW_CODE).toContain("namesEdition(figure.cardType) ? CARD_TYPE_LABELS[figure.cardType]");
-    /* Not re-spelled here: the row prints what the label map says. */
+    const banner = code(read("src/components/catalog/edition-banner.tsx"));
+    expect(banner).toContain("CARD_TYPE_LABELS[cardType]");
     for (const label of Object.values(CARD_TYPE_LABELS)) {
-      expect(ROW_CODE, `the row spells out "${label}"`).not.toContain(`"${label}"`);
+      expect(banner, `the banner spells out "${label}"`).not.toContain(`"${label}"`);
     }
   });
 
-  it("the chip is neutral — an edition is a property of the object", () => {
-    /*
-     * The same reasoning `VariantSeal` is built on: rarity belongs to the
-     * figure, possession belongs to the viewer, and they appear on the same
-     * row. A gold chip would make an unowned Legendary look owned.
-     */
-    const chip = ROW_CODE.slice(ROW_CODE.indexOf("{edition ?"), ROW_CODE.indexOf("{edition}"));
-    expect(chip).toContain("bg-status-ground");
-    expect(chip).toContain("text-status-ink");
-    expect(chip).not.toContain("own-");
-    expect(chip).not.toContain("favorite-");
+  it("the banner is never gold — an edition is a property of the object", () => {
+    /* Gold means possession; a gold banner would make an unowned Legendary
+       look owned. The same reason `VariantSeal` is not gold. */
+    const banner = code(read("src/components/catalog/edition-banner.tsx"));
+    expect(banner).not.toContain("own-");
+    expect(banner).not.toContain("favorite-");
+    expect(banner).not.toContain("gold");
   });
 
   it("the variant stays inside the name, where V3.6 put it", () => {
-    /* `displayName` is "Legendary Bash" since V3.6 — the variant is part of
-       the name, not a suffix hanging off it. The row prints that name and
-       does not invent a second presentation of the variant. */
     expect(ROW_CODE).toContain("figure.displayName");
     expect(ROW_CODE).not.toContain("sortBaseName");
     expect(ROW_SRC).not.toContain("VariantSeal");
@@ -378,13 +623,11 @@ describe("the edition is named, because a row has no artwork to show it", () => 
 });
 
 /* ========================================================================
- * 4. THREE INDEPENDENT STATES
+ * 6. THREE INDEPENDENT STATES
  * ===================================================================== */
 
-describe("possession, wanting and the later alarm are three separate states", () => {
+describe("possession, wanting and the reserved alarm slot are independent", () => {
   it("the row receives each of them separately and couples none of them", () => {
-    /* Possession is a boolean it draws; wanting is a slot it places; the
-       alarm is a slot it holds open. No branch reads one to decide another. */
     expect(ROW_CODE).toContain("collected = false");
     expect(ROW_CODE).toContain("favoriteSlot");
     expect(ROW_CODE).toContain("bellSlot");
@@ -393,37 +636,15 @@ describe("possession, wanting and the later alarm are three separate states", ()
   });
 
   it("and it knows nothing about favourites beyond the slot", () => {
-    /*
-     * The heart is passed in, exactly as it is to the card: `FigureRow` draws
-     * a figure and knows nothing about collections, wishlists or sessions.
-     */
     expect(ROW_CODE).not.toContain("FavoriteHeart");
     expect(ROW_CODE).not.toContain("setFavorite");
     expect(ROW_CODE).not.toContain("favorites/");
   });
 
-  it("the action column holds room for the bell before the bell exists", () => {
-    /*
-     * ADR-0147's bell is UX-02. Reserving its slot now is what keeps that
-     * step from being a layout change: no row grows, no text reflows.
-     */
-    expect(ROW.actionSlots).toBe(2);
-    expect(ROW_ACTION_HEIGHT).toBe(ROW.touch * ROW.actionSlots);
-    expect(ROW_ACTION_HEIGHT).toBe(88);
-    /* `w-11` is 44 px and `min-h-22` is 88 px on Tailwind's 4 px scale. */
-    expect(ROW_CODE).toContain("min-h-22 w-11 shrink-0");
-    expect(ROW.touch).toBe(11 * 4);
-    expect(ROW_ACTION_HEIGHT).toBe(22 * 4);
-  });
-
   it("but no bell, no notification centre and no scheduler are built", () => {
     for (const forbidden of [
-      "watch_availability",
-      "unwatch_availability",
-      "fire_availability_alerts",
-      "acknowledge_availability_alerts",
-      "availability_alerts",
-      "benachrichtigungen",
+      "watch_availability", "unwatch_availability", "fire_availability_alerts",
+      "acknowledge_availability_alerts", "availability_alerts", "benachrichtigungen",
       "BellGlyph",
     ]) {
       expect(ROW_SRC, `the row reaches for ${forbidden}`).not.toContain(forbidden);
@@ -433,26 +654,16 @@ describe("possession, wanting and the later alarm are three separate states", ()
 });
 
 /* ========================================================================
- * 5. THE OFFER SEMANTICS ARE THE EXISTING ONES
+ * 7. THE OFFER SEMANTICS ARE THE EXISTING ONES
  * ===================================================================== */
 
 describe("the offer is the one that already exists", () => {
   it("the row computes no price and no buyability — it is handed the line", () => {
-    /*
-     * THE ONE THAT MATTERS. A module that does not import the offer rules
-     * cannot restate them, whatever its comments say. `trade` arrives as a
-     * finished element from `catalog-card.tsx`, which builds it from
-     * `OfferLink` exactly as it does for the card.
-     */
     expect(ROW_SRC).not.toContain("@/lib/shop/offer");
     expect(ROW_CODE).not.toContain("OfferLink");
     for (const name of [
-      "summarizeOffers",
-      "v1BuyableOffers",
-      "hasV1BuyableOffer",
-      "automaticShopPrice",
-      "available",
-      "condition",
+      "summarizeOffers", "v1BuyableOffers", "hasV1BuyableOffer", "automaticShopPrice",
+      "available", "condition",
     ]) {
       expect(ROW_CODE, `the row mentions ${name}`).not.toContain(name);
     }
@@ -460,70 +671,39 @@ describe("the offer is the one that already exists", () => {
   });
 
   it("and the market value is the catalog's, boosted at the last moment", () => {
-    /* The same import, the same default and the same call the card makes, so
-       the printed number cannot differ between the two presentations. */
     expect(ROW_SRC).toContain("NO_MARKET_BOOST, catalogDisplayMarketPrice");
     expect(ROW_CODE).toContain("marketBoostPercent = NO_MARKET_BOOST");
     expect(ROW_CODE).toContain(
       "catalogDisplayMarketPrice(figure.marketPrice, marketBoostPercent)",
     );
-    /* `null` is a real state and never a zero (ADR-0010). */
     expect(ROW_CODE).toContain("figure.marketPrice === null");
     expect(ROW_CODE).toContain("de.catalog.noPrice");
     expect(ROW_SRC).not.toContain("fetchCatalogMarketBoost");
   });
 
-  it("the two prices are told apart by a label, as they must be", () => {
-    /* The market value and the asking price stand on the same row, and they
-       are different things (ADR-0033). The label is what keeps them from
-       being read as one number. */
+  it("the two prices are told apart by a label and by a line", () => {
+    /* Different rows, different sizes, different inks, and both labelled —
+       they are two numbers and must never read as one (ADR-0033). */
     expect(ROW_CODE).toContain("de.catalog.marketValue");
+    const valueLine = ROW_CODE.indexOf("de.catalog.marketValue");
+    const offerLine = ROW_CODE.indexOf("{trade}");
+    expect(valueLine).toBeLessThan(offerLine);
   });
 
-  it("the offer band is a sibling of the toggle, never a child of it", () => {
-    /*
-     * A link inside a button is invalid markup and an ambiguous target. The
-     * card keeps its trade plate outside its body for the same reason; a row
-     * can simply put the band underneath. Proved structurally: `{trade}` does
-     * not occur between the toggle's tags.
-     */
-    const open = ROW_CODE.indexOf("<button");
-    const close = ROW_CODE.indexOf("</button>");
-    expect(open, "the row has a toggle").toBeGreaterThan(-1);
-    expect(close).toBeGreaterThan(open);
-    expect(ROW_CODE.slice(open, close), "the offer sits inside the toggle")
-      .not.toContain("{trade}");
-    /* And the band is a real 44 px target even when its content is one line
-       of 11 px type. */
-    expect(ROW_CODE).toContain("flex min-h-11 items-center");
-  });
-
-  it("the band exists whether or not anything is for sale", () => {
-    /*
-     * `OfferLink` draws the quiet sentence when there is nothing to buy, so
-     * the row must not make the band conditional: a row would then change
-     * height between a figure that is for sale and one that is not, and a
-     * list of 561 of them would ripple.
-     */
+  it("the line exists whether or not anything is for sale", () => {
     expect(ROW_CODE).not.toMatch(/trade \?\s*</);
   });
 });
 
 /* ========================================================================
- * 6. NO NEW WRITE PATHS
+ * 8. NO NEW WRITE PATHS
  * ===================================================================== */
 
 describe("nothing new writes anywhere", () => {
   it("the row is presentation only — no action, no client, no fetch", () => {
     for (const forbidden of [
-      '"use server"',
-      "@/lib/supabase",
-      "createClient",
-      "revalidatePath",
-      "useTransition",
-      "useState",
-      "fetch(",
-      "/actions",
+      '"use server"', "@/lib/supabase", "createClient", "revalidatePath",
+      "useTransition", "useState", "fetch(", "/actions",
     ]) {
       expect(ROW_SRC, `the row contains ${forbidden}`).not.toContain(forbidden);
     }
@@ -531,87 +711,77 @@ describe("nothing new writes anywhere", () => {
   });
 
   it("there is still exactly one collect call, in the shared control", () => {
-    /*
-     * Decision 2 of the brief: `CatalogCard` stays the one place that mutates.
-     * Two presentations, one server action, one optimistic state, one
-     * rollback — so a row and a card cannot drift apart in behaviour.
-     */
     expect(CATALOG_CARD_CODE.match(/setCollected\(/g) ?? []).toHaveLength(1);
-    expect(CATALOG_CARD_CODE.match(/useState\(/g) ?? []).toHaveLength(2); // collected, failed
+    expect(CATALOG_CARD_CODE.match(/useState\(/g) ?? []).toHaveLength(2);
     expect(CATALOG_CARD_CODE.match(/startTransition\(/g) ?? []).toHaveLength(1);
   });
 
   it("and no shop, stock, cart or checkout module was touched by it", () => {
     for (const forbidden of [
-      "@/lib/cart",
-      "@/lib/commerce",
-      "shop_inventory",
-      "reserve_order_stock",
-      "shop_offers",
-      "inventory_movements",
+      "@/lib/cart", "@/lib/commerce", "shop_inventory", "reserve_order_stock",
+      "shop_offers", "inventory_movements",
     ]) {
       expect(ROW_SRC, `the row reaches for ${forbidden}`).not.toContain(forbidden);
     }
   });
 
   it("no dialog can be mounted inside a row", () => {
-    /*
-     * The card is an `@container`, which makes it a containing block for a
-     * `position: fixed` descendant — which is why the quick view is owned by
-     * the grid and not by a card (IR-001). The row is not a container at all,
-     * so the hazard does not arise; it still must not mount a dialog.
-     */
     expect(ROW_CODE).not.toContain("@container");
-    expect(ROW_SRC).not.toContain("QuickView");
+    /*
+     * THE JSX, NOT THE WORD. The row legitimately NAMES the caller's
+     * `hasQuickViewOffer()` in a comment, because that is where `offered`
+     * comes from; what it must not do is render a dialog.
+     */
+    expect(ROW_CODE).not.toContain("<QuickView");
+    expect(ROW_SRC).not.toContain('from "@/components/catalog/quick-view"');
     expect(ROW_SRC).not.toContain("Modal");
     expect(ROW_CODE).not.toMatch(/\bfixed\b/);
   });
 });
 
 /* ========================================================================
- * 7. MOBILE GEOMETRY — THE PART THAT IS ARITHMETIC
+ * 9. MOBILE GEOMETRY — THE PART THAT IS ARITHMETIC
  * ===================================================================== */
 
 describe("the geometry is measured, and the markup says the same numbers", () => {
-  it("four columns, and the hairline is one of them", () => {
-    expect(ROW_COLUMNS).toBe(4);
-    expect(ROW.divider).toBe(1);
-    expect(ROW_CODE).toContain("w-px shrink-0 self-stretch");
-  });
-
   it("the class names agree with the constants", () => {
     /* Tailwind's spacing scale is 4 px, so these are the same numbers twice —
        which is exactly what would silently stop being true otherwise. */
-    expect(ROW.pad).toBe(2 * 4);
-    expect(ROW.padWide).toBe(3 * 4);
-    expect(ROW.gap).toBe(2 * 4);
-    expect(ROW.gapWide).toBe(3 * 4);
-    expect(ROW.image).toBe(18 * 4);
-    expect(ROW.imageWide).toBe(22 * 4);
-    expect(ROW_CODE).toContain("gap-2 rounded-sky-md p-2 sm:gap-3 sm:p-3");
-    expect(ROW_CODE).toContain("gap-2 rounded-sky-sm text-left sm:gap-3");
+    expect(ROW.padX).toBe(6); // `px-1.5`
+    expect(ROW.padY).toBe(6); // `py-1.5`
+    expect(ROW.gap).toBe(6); // `gap-1.5`
+    expect(ROW.gapWide).toBe(10); // `sm:gap-2.5`
+    expect(ROW.image).toBe(16 * 4);
+    expect(ROW.imageWide).toBe(18 * 4);
+    expect(INFO.price).toBe(11 * 4);
+    expect(INFO.gap).toBe(2);
+    expect(ROW_CODE).toContain("gap-0.5");
   });
 
-  it("every control is at least 44 px, on every width", () => {
+  it("every control is 44 px, and the chip is visibly smaller than its target", () => {
+    /*
+     * THE OPERATOR ALLOWED THESE TO DIFFER, and they do. The ring and the
+     * ground are drawn by a layer inset 9 px top and bottom, so the chip
+     * reads as 26 px; the link fills the whole 44 and is what a finger hits.
+     */
     expect(ROW.touch).toBe(44);
-    /* The three controls a row can carry: the identity toggle, the offer
-       band, and the heart in its column. The toggle is the tallest of the
-       three by construction — it holds the picture. */
-    expect(ROW.image).toBeGreaterThanOrEqual(ROW.touch);
+    expect(INFO.price).toBe(ROW.touch);
+    expect(CHIP_VISIBLE).toBe(24);
+    expect(CHIP_VISIBLE).toBeLessThan(ROW.touch);
+    expect(CHIP_INSET).toBe(10);
     expect(ROW_CODE).toContain("min-h-11");
     expect(ROW_CODE).toContain("w-11");
+    /* The visible layer is inset and cannot take a tap of its own. */
+    expect(ROW_CODE).toContain("pointer-events-none absolute inset-x-0 inset-y-[10px]");
   });
 
   it("declares no width a phone cannot hold", () => {
-    /* Nothing is sized in a way that could exceed the narrowest row. */
     const widths = [...ROW_CODE.matchAll(/\b(?:min-)?w-\[(\d+)px\]/g)].map((m) => Number(m[1]));
     for (const width of widths) {
       expect(width, "a hard-coded width").toBeLessThanOrEqual(phoneRowWidth(PHONE_WIDTHS[0]));
     }
     expect(ROW_CODE).not.toMatch(/\bw-screen\b/);
     expect(ROW_CODE).not.toMatch(/\boverflow-x-/);
-    /* The text column may shrink to nothing, so nothing in it can push the
-       row sideways. */
     expect(ROW_CODE.match(/min-w-0/g) ?? []).not.toHaveLength(0);
   });
 });
@@ -620,11 +790,6 @@ describe("the name still has room on a phone", () => {
   /**
    * The longest name the catalogue actually contains, derived the way the
    * catalogue derives it.
-   *
-   * `products.json` is the import's own snapshot of the 600 rows. The name a
-   * row PRINTS is `displayName`, which `variant.ts` derives — a prefix
-   * spelling keeps its length, a bracket spelling loses two characters — so
-   * both forms are measured and the longer wins.
    */
   const items = (JSON.parse(read("data/catalog/products.json")) as {
     items: { name: string; series: string }[];
@@ -645,8 +810,6 @@ describe("the name still has room on a phone", () => {
 
   it("measures a real catalogue rather than a guess", () => {
     expect(items.length).toBeGreaterThan(500);
-    /* If this number moves a lot, the arithmetic below deserves a second
-       look rather than a quiet pass. */
     expect(longest).toBeGreaterThanOrEqual(30);
     expect(longest).toBeLessThanOrEqual(60);
   });
@@ -660,79 +823,117 @@ describe("the name still has room on a phone", () => {
     }
   });
 
-  it("and the estimate errs on the pessimistic side", () => {
-    /* 0.56 em per character at 13 px is 7.28 px, against a measured average
-       nearer 6.4 px for mixed-case Latin text in this stack. An estimate used
-       as a guarantee has to be too big, not too small. */
-    expect(rowTextWidth(phoneRowWidth(360))).toBe(171);
-    expect(nameCharsPerLine(171)).toBe(23);
+  it("the text block grew with the correction, not shrank", () => {
+    /*
+     * A nice side effect of a 64 px picture replacing a 72 px one: the text
+     * block is 8 px WIDER than in the version that was too tall.
+     */
+    /* 10 px wider than before this pass: the padding and the column gaps
+       each gave up 2 px so an ordinary amount could sit beside the chip. */
+    expect(rowTextWidth(phoneRowWidth(360))).toBe(189);
+    expect(nameCharsPerLine(189)).toBe(25);
   });
 
-  it("the text column grows with the viewport and never shrinks", () => {
+  it("and it grows with the viewport, never shrinks", () => {
     const widths = PHONE_WIDTHS.map((v) => rowTextWidth(phoneRowWidth(v)));
     expect(widths).toEqual([...widths].sort((a, b) => a - b));
     expect(widths[0]).toBeGreaterThan(0);
   });
 
-  it("the wider step spends its extra width on the picture, not against it", () => {
-    /* At `sm:` the picture and the gaps grow. The text column must still end
-       up wider, or the breakpoint would be a regression. */
-    const narrow = rowTextWidth(phoneRowWidth(640), false);
-    const wide = rowTextWidth(phoneRowWidth(640), true);
-    expect(narrow - wide).toBe(ROW.imageWide - ROW.image + 3 * (ROW.gapWide - ROW.gap) + 2 * (ROW.padWide - ROW.pad));
-    expect(wide).toBeGreaterThan(rowTextWidth(phoneRowWidth(414)));
-  });
-});
-
-describe("the offer band has room for its longer label", () => {
-  it("at every phone width", () => {
+  it("the value and the offer each fit their own line at every phone width", () => {
+    /* Which is why they are on two lines rather than one. */
     for (const viewport of PHONE_WIDTHS) {
-      expect(rowOfferWidth(phoneRowWidth(viewport)), `${viewport} px`)
-        .toBeGreaterThanOrEqual(OFFER_LABEL_PX);
-    }
-  });
-
-  it("and it is wider than the text column, which is why it is a band", () => {
-    /* The band keeps the picture's width and the hairline's as well — about
-       90 px more than the text column has. That is the measurement that
-       decided it should not be a fourth line in the text column. */
-    for (const viewport of PHONE_WIDTHS) {
-      const row = phoneRowWidth(viewport);
-      expect(rowOfferWidth(row) - rowTextWidth(row)).toBe(ROW.image + ROW.divider + 2 * ROW.gap);
+      const text = rowTextWidth(phoneRowWidth(viewport));
+      expect(text, `${viewport}: the caption`).toBeGreaterThanOrEqual(MARKET_LABEL_PX);
+      expect(text, `${viewport}: the offer`).toBeGreaterThanOrEqual(OFFER_LABEL_PX);
     }
   });
 
   it("the page's own padding is accounted for, not forgotten", () => {
-    /* Every catalogue surface wraps its content in `main … px-4`, so a row on
-       a 360 px phone is 328 px wide. Forgetting this is how a layout passes
-       its own arithmetic and overflows in a browser. */
     expect(PAGE_PAD).toBe(16);
     expect(phoneRowWidth(360)).toBe(328);
     expect(code(read("src/app/(public)/(catalog)/page.tsx"))).toContain("px-4");
   });
 });
 
+describe("one column, then two, decided by the container", () => {
+  it("the threshold is a measurement in rem and in px", () => {
+    expect(TWO_COLUMN_AT_PX).toBe(832);
+  });
+
+  /**
+   * THE RULE THE THRESHOLD IMPLEMENTS, and it is worth stating exactly
+   * because the first attempt at this test justified it from the OLD
+   * geometry and was wrong:
+   *
+   *   > A row in two columns must never be narrower than a row on the
+   *   > largest phone.
+   *
+   * The largest phone this design is held to is 414 px, which gives the text
+   * block 237 px. The row's fixed parts take 169 px at the `sm:` step, so a
+   * row needs 406 px to match it — and two of those plus a 12 px gap is
+   * 824 px of container. 52 rem (832) is the next round number above it.
+   */
+  const LARGEST_PHONE_TEXT = rowTextWidth(phoneRowWidth(414));
+
+  it("two columns are never narrower than the largest phone", () => {
+    const rowWidth = (TWO_COLUMN_AT_PX - ROW.gapWide) / 2;
+    expect(Math.round(rowWidth)).toBe(411);
+    expect(rowTextWidth(rowWidth, true)).toBeGreaterThanOrEqual(LARGEST_PHONE_TEXT);
+  });
+
+  it("and just below the threshold they would be", () => {
+    /* The honest counter-test: the threshold is not decoration. */
+    const tooNarrow = (TWO_COLUMN_AT_PX - 64 - ROW.gapWide) / 2;
+    expect(rowTextWidth(tooNarrow, true)).toBeLessThan(LARGEST_PHONE_TEXT);
+  });
+
+  it("a tablet at 768 px therefore stays one column", () => {
+    const inner = 768 - 2 * PAGE_PAD;
+    expect(inner).toBeLessThan(TWO_COLUMN_AT_PX);
+    /* Not because two columns would be unusable there — 193 px of text would
+       work — but because they would be narrower than the phone the design is
+       tuned for, and a tablet is not a worse phone. */
+    expect(rowTextWidth((inner - ROW.gapWide) / 2, true)).toBeLessThan(LARGEST_PHONE_TEXT);
+  });
+
+  it("at the threshold the value and the offer could even share a line", () => {
+    /* They do not — the layout keeps them apart for the phone's sake — but it
+       shows how much room two columns have at 832 px and upwards. */
+    const rowWidth = (TWO_COLUMN_AT_PX - ROW.gapWide) / 2;
+    expect(rowTextWidth(rowWidth, true)).toBeGreaterThan(AMOUNT_PX + OFFER_CHIP_PX);
+  });
+
+  it("never a third column, let alone a fourth", () => {
+    const grid = code(read("src/components/catalog/figure-grid.tsx"));
+    expect(grid).toContain("@min-[52rem]:grid-cols-2");
+    /* `sm:grid-cols-3` belongs to the CARD grid and stays; what must not
+       exist is a third column for ROWS — a container-query one. */
+    expect(grid).not.toMatch(/@min-\[[^\]]*\]:grid-cols-[3-9]/);
+    const rows = grid.slice(grid.indexOf("const ROWS"), grid.indexOf("export function"));
+    expect(rows).not.toContain("grid-cols-3");
+    expect(rows).not.toContain("grid-cols-4");
+    /* And the arithmetic agrees: three columns at the widest container are
+       narrower than two, so a third would make the list worse. */
+    const widest = 1152;
+    expect(rowTextWidth((widest - 2 * ROW.gapWide) / 3, true))
+      .toBeLessThan(rowTextWidth((widest - ROW.gapWide) / 2, true));
+  });
+});
+
 /* ========================================================================
- * 8. THE ERROR PATH
+ * 10. THE ERROR PATH
  * ===================================================================== */
 
 describe("a failed collect says so without covering anything", () => {
   it("in flow, because a row must never lay one thing over another", () => {
-    /*
-     * The card's notice is absolute and sits over its artwork, because a
-     * card's height is an aspect ratio and a notice in flow would break the
-     * grid. A row has no fixed height, and an absolute pill here would have
-     * to be laid over the offer band or the picture.
-     */
     expect(ROW_CODE).toContain('role="alert"');
     expect(ROW_CODE).toContain("de.catalog.collectFailed");
     const notice = ROW_CODE.slice(ROW_CODE.indexOf("{failed ?"));
-    expect(notice).not.toContain("absolute");
+    expect(notice.slice(0, 200)).not.toContain("absolute");
   });
 
   it("and the card keeps the absolute one it needs", () => {
-    /* Unchanged, and asserted here as well so that moving the row's notice
-       cannot quietly take the card's with it. */
     expect(CATALOG_CARD_CODE).toContain("absolute inset-x-1 bottom-1");
     expect(CATALOG_CARD_CODE).toContain("failed={failed}");
   });

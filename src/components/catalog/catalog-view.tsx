@@ -8,9 +8,21 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import {
+  useDeferredValue,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { CatalogViewToggle } from "@/components/catalog/catalog-view-toggle";
+import {
+  catalogViewStore,
+  layoutFor,
+  type CatalogView as CatalogViewMode,
+} from "@/components/catalog/catalog-view-mode";
 import { AddFigureModal } from "@/components/admin/add-figure-modal";
 import { AdminFigureModal } from "@/components/admin/figure-modal";
 import type { AdminFigureDraft } from "@/lib/admin/figure-draft";
@@ -260,6 +272,41 @@ export function CatalogView({
   const [ownership, setOwnership] = useState<OwnershipMode>(DEFAULT_OWNERSHIP);
 
   /**
+   * Cards or rows (UX-01C, ADR-0148).
+   *
+   * `useSyncExternalStore` rather than an effect, exactly as the collection
+   * does it: the remembered choice lives outside React, the server's answer
+   * differs from the browser's, and that is precisely what this hook is for.
+   * The server snapshot is the default, so the first paint matches what was
+   * rendered and React swaps in the stored value immediately after
+   * hydration — no mismatch, and no render triggered from inside another one.
+   *
+   * IT IS NOT STATE, SO SWITCHING COSTS NOTHING ELSE. `write` notifies this
+   * hook and every other tab; the series, the group, the search, both
+   * filters and the scroll position are untouched, and nothing is fetched.
+   * This file reaches for no router and refreshes no route — three existing
+   * test files hold it to that, and one of them matches on the raw source,
+   * so even naming the call in a comment fails the build. Switching a view
+   * is a repaint, not a navigation.
+   *
+   * AN ADMINISTRATOR DOES NOT GET THE SWITCH — see the toolbar below. The
+   * value is still read, because reading it is free and a branch here would
+   * only move the condition.
+   */
+  const view = useSyncExternalStore(
+    catalogViewStore.subscribe,
+    catalogViewStore.read,
+    catalogViewStore.server,
+  );
+  function selectView(next: CatalogViewMode) {
+    catalogViewStore.write(next);
+  }
+  /* The editorial card has no row (ADR-0148): an operator keeps the card
+     whatever the collector's remembered choice happens to be. */
+  const layout = admin ? "card" : layoutFor(view);
+  const gridMode = admin ? "cards" : view;
+
+  /**
    * Whether to show only figures somebody is offering (V3.3).
    *
    * Its own dimension, combining freely with the ownership filter above it —
@@ -465,6 +512,10 @@ export function CatalogView({
         visible={isVisible(figure)}
         offers={offers[figure.skyId] ?? EMPTY_OFFERS}
         marketBoostPercent={marketBoostPercent}
+        /* The only new prop, and it decides nothing else: the collect
+           toggle, the heart, the offer line and the quick view handler are
+           the same objects either way (ADR-0148). */
+        layout={layout}
         onOpenOffers={() => setQuickViewSkyId(figure.skyId)}
         onEdit={() => setEditSkyId(figure.skyId)}
       />
@@ -653,6 +704,21 @@ export function CatalogView({
           </FilterSheet>
 
           {/*
+           * THE VIEW SWITCH, BESIDE THE FILTER AND NOT INSIDE IT (UX-01C).
+           *
+           * It draws the figures; it does not narrow them. Folding it into
+           * the sheet would file a presentation choice among the narrowings
+           * and would make the filter badge count something that filters
+           * nothing — the rule `ui/browse.test.ts` already holds the
+           * collection to, now held to the catalogue as well.
+           *
+           * Not for an administrator: their card carries editorial actions
+           * and has no row (ADR-0042, ADR-0148), so a switch with one
+           * reachable state would be a control that cannot do anything.
+           */}
+          {admin ? null : <CatalogViewToggle view={view} onSelect={selectView} />}
+
+          {/*
             * Creating a figure (V3.9, ADR-0070), beside the filter rather than
             * on a page of its own — the administrator works in the catalogue,
             * not next to it (ADR-0042).
@@ -701,7 +767,7 @@ export function CatalogView({
               {group.figures.length === 0 ? (
                 <p className="text-sm text-muted">{de.catalog.noHitsHere}</p>
               ) : (
-                <FigureGrid>{group.figures.map(card)}</FigureGrid>
+                <FigureGrid mode={gridMode}>{group.figures.map(card)}</FigureGrid>
               )}
             </section>
           ))}
@@ -723,7 +789,7 @@ export function CatalogView({
           ) : null}
         </div>
       ) : (
-        <FigureGrid>{visible.map(card)}</FigureGrid>
+        <FigureGrid mode={gridMode}>{visible.map(card)}</FigureGrid>
       )}
 
       {/*

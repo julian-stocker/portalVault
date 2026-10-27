@@ -1,5 +1,5 @@
 /**
- * One figure, as a row (UX-01B, ADR-0148).
+ * One figure, as a compact row (UX-01B/01C, ADR-0148).
  *
  * THE SECOND PRESENTATION OF A FIGURE, AND NOT A MODE OF THE FIRST
  *
@@ -26,30 +26,57 @@
  * own. The offer arrives as the `trade` element the card also receives, so a
  * row and a card cannot disagree about what is for sale.
  *
- * THE LAYOUT, AND WHY IT IS FLOW RATHER THAN A STACK OF LAYERS
+ * ---------------------------------------------------------------------------
+ * THE LAYOUT
  *
- *   ┌────────┬─┬──────────────────────────────┬────┐
- *   │picture │ │ name                [edition]│ ♥  │
- *   │ 72 px  │ │ series · element             │    │
- *   │        │ │ MARKTWERT 4,99 €             │    │
- *   ├────────┴─┴──────────────────────────────┤    │
- *   │ Angebote ab 4,49 €                    › │    │
- *   └─────────────────────────────────────────┴────┘
+ *   ┌────────┬─┬──────────────────────────────────────┬────┐
+ *   │        │ │ ◆ ● Slobber Tooth                    │ ♥  │
+ *   │ 64 px  │ │ MARKTWERT 4,99 €          [Prestige] │    │
+ *   │        │ │              ( Angebote ab 4,49 € › )│ 🔔 │
+ *   └────────┴─┴──────────────────────────────────────┴────┘
+ *     picture  ‖            text block                 heart
+ *                                                      bell
  *
- * The card is built from absolutely positioned layers because its height is
- * fixed by an aspect ratio. A row's height comes from its content, so layers
- * would collapse it; everything here is in normal flow.
+ * 92 px on a phone with one line of name, against 138 px for the first
+ * version — and the picture is BIGGER than it was (64 against 72 px, which
+ * only sounds like a contradiction until you see that the text block decides
+ * the height). Where the air went:
  *
- * The offer is a band under the identity block rather than a fourth line
- * inside it. Two reasons, and both are measurements: in the text column it
- * would have about 171 px on a 360 px phone and would wrap under the market
- * value anyway, and as a band it is a sibling of the toggle rather than a
- * child of it — which is the same separation `FigureCard` keeps between its
- * body and its trade plate, and it needs no event handling to hold.
+ *   1. THE OFFER CAME INSIDE. It used to be a band of its own under the
+ *      picture, 44 px plus a 6 px gap, spanning the whole row. It is now the
+ *      last line of the text block, right-aligned and dressed as a pill —
+ *      which is also where a reader looks for the next step.
+ *   2. THE BELL RESERVATION WENT. The heart's column was forced to 88 px to
+ *      hold a slot for a control that did not exist. The column is as tall
+ *      as what is in it; a bell only appears where one belongs, and only
+ *      then does the row grow for it.
+ *   3. THE PICTURE STOPPED DECIDING THE HEIGHT. At 72 px it was the tallest
+ *      thing in the row; the text block needs 80 px anyway.
+ *   4. THE ELEMENT BECAME A MARK. The word "Technologie" held the left of
+ *      the meta line; a 14 px rune in front of the name gives that whole
+ *      line to the market value, which is why the value could move up to
+ *      where it is read.
  *
- * NO `@container`, DELIBERATELY. The card is one so that its type can scale
- * in `cqw`; this row sizes in pixels and lets the text column absorb the
- * width. That also means the row is not a containing block for a
+ * THREE STEPS DOWN ONE LEFT EDGE: name, then value, then the offer. That is
+ * the hierarchy, and it is why the value sits under the name rather than at
+ * the right end of a line it shares.
+ *
+ * THE HEART HAS ITS OWN COLUMN, and that is geometry rather than taste. Its
+ * touch area is 44 px (`FavoriteHeart`, unchanged) and the offer sits at the
+ * bottom right of the text block. Two right-aligned targets stacked inside
+ * one column would either overlap — a tap meant for the offer landing on the
+ * heart — or force the row to be 44 + 44 px tall. In its own column the
+ * heart's box can never meet the offer's, whatever either one's height.
+ *
+ * THE OFFER AND THE MARKET VALUE ARE ON DIFFERENT LINES, and that is also
+ * measurement: side by side they need 215 px and a phone's text block has
+ * 179. The value shares the meta line, where it has the room; the offer
+ * keeps the bottom line to itself. Both stay labelled, because they are two
+ * different numbers and must never read as one (ADR-0033).
+ *
+ * NO `@container` ON THE ROW, DELIBERATELY. The card is one so that its type
+ * can scale in `cqw`; this row sizes in pixels and lets the text block absorb
+ * the width. That also means the row is not a containing block for a
  * `position: fixed` descendant — so the hazard that keeps the quick view out
  * of the card's subtree does not exist here either, and the dialog stays
  * where it belongs: one instance, owned by the grid (IR-001).
@@ -58,9 +85,10 @@
  *
  * Gold means possession (V3.1), and on a row it cannot mean the artwork
  * because there is none. So it is the ground (`--own-subtle`, the warm dark
- * surface that already carries `--own-ink` elsewhere), a one-pixel gold edge
- * and a soft glow outside it. No frame, no crown, no animation — and the
- * figure's own photograph is never touched: no filter, no opacity, no scale.
+ * surface that already carries `--own-ink` elsewhere), a one-pixel gold edge,
+ * a soft glow outside it and a gold diamond in front of the name. No frame,
+ * no crown, no animation — and the figure's own photograph is never touched:
+ * no filter, no opacity, no scale.
  */
 import Link from "next/link";
 import type { CSSProperties, ReactNode } from "react";
@@ -68,12 +96,11 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   duplicateBadge,
   marksOwnership,
-  namesEdition,
   understatesCard,
   type CardOwnership,
 } from "@/lib/catalog/card";
-import { CARD_TYPE_LABELS } from "@/lib/catalog/card-type";
-import { elementLabel } from "@/lib/catalog/element";
+import { EditionBanner } from "@/components/catalog/edition-banner";
+import { ElementIcon } from "@/components/catalog/element-icon";
 import { imageSrc } from "@/lib/catalog/image";
 import { NO_MARKET_BOOST, catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -108,6 +135,7 @@ const GROUND = {
 export function FigureRow({
   figure,
   trade,
+  offered = false,
   highlighted = false,
   collected = false,
   ownership = "showcase",
@@ -125,6 +153,21 @@ export function FigureRow({
   figure: CatalogFigure;
   /** The offer line, built by the caller. Usually an `OfferLink`. */
   trade?: ReactNode;
+  /**
+   * Whether anything can actually be bought — the caller's
+   * `hasQuickViewOffer()`, which resolves to `v1BuyableOffers`.
+   *
+   * IT CHANGES NOTHING ABOUT THE OFFER ITSELF, only how its pill is dressed:
+   * a silver action when there is something to press, a quiet chip when
+   * `OfferLink` is drawing "Aktuell kein Angebot". No buyability is computed
+   * here and no second rule exists — the flag is handed down from the one
+   * place that already asks the question.
+   *
+   * It is also the condition UX-02's bell hangs on, inverted: a bell belongs
+   * to a figure that CANNOT be bought right now. That the same flag answers
+   * both is a sign it is the right flag.
+   */
+  offered?: boolean;
   /** A deep link landed on this row (`?highlight=SKY-0042`). Neutral. */
   highlighted?: boolean;
   /** Real collection state, never derived. */
@@ -142,13 +185,13 @@ export function FigureRow({
   /** The heart, top right. Absent means no heart, never an empty one. */
   favoriteSlot?: ReactNode;
   /**
-   * The availability bell, under the heart — UX-02 and migration `0150`.
+   * The availability bell — UX-02 and migration `0150`.
    *
-   * NOTHING PASSES THIS YET, AND THE SPACE IS HELD ANYWAY. The action column
-   * reserves `ROW.actionSlots` touch slots whether or not they are filled
-   * (`row-template.ts`), so the day the bell arrives it lands in a column
-   * that already has room for it: no row grows, no text reflows, and the
-   * geometry this release measured stays the geometry.
+   * NOTHING PASSES THIS YET, AND NO SPACE IS HELD FOR IT. The first version
+   * forced the heart's column to two touch slots, which made every row 44 px
+   * taller for a control that does not exist. The column is as tall as what
+   * is in it; when the bell arrives it goes beside or below the heart, and
+   * the row grows at that point rather than in advance.
    */
   bellSlot?: ReactNode;
   /**
@@ -180,14 +223,99 @@ export function FigureRow({
   const understated = understatesCard(ownership, collected, knowsCollection);
   const picture = imageSrc(figure);
   /*
-   * The edition, in words, because the row has no artwork to say it with.
-   * `standard` says nothing and is excluded by the rule, not here.
+   * THE EDITION IS NOT A VALUE HERE ANY MORE. It used to be a chip on the
+   * caption line; it is a banderole across the foot of the picture now, and
+   * `EditionBanner` reads `card_type` itself and draws nothing for a
+   * `standard` figure. The rule is still `namesEdition()` — one rule, one
+   * place — it is simply asked one level further in.
    */
-  const edition = namesEdition(figure.cardType) ? CARD_TYPE_LABELS[figure.cardType] : null;
 
-  /** The identity block: picture, hairline, and what the figure is. */
-  const identity = (
-    <>
+  return (
+    <article
+      className={
+        "relative flex items-stretch gap-1.5 rounded-sky-md px-1.5 py-1.5 sm:gap-2.5 "
+        + (owned ? GROUND.owned : understated ? GROUND.understated : GROUND.neutral)
+        + (highlighted ? " outline outline-2 outline-offset-2 outline-nav-active-ink" : "")
+      }
+      /*
+       * THE TRADE INKS, SWAPPED FOR A DARK GROUND.
+       * (see the stacking note at the overlay below)
+       *
+       * `OfferLink` writes in `--trade-ink` and `--trade-ink-quiet`, which
+       * are near-black because on a card they sit on a silver plate the
+       * artwork paints. A row has no plate and a dark ground, so both would
+       * be unreadable. The project already has the pair for this case and
+       * `FigureCard` already swaps to it on its two dark artworks — same
+       * variables, same mechanism, no second set of colours and no change to
+       * `OfferLink` itself.
+       */
+      style={
+        {
+          "--trade-ink": "var(--trade-ink-on-dark)",
+          "--trade-ink-quiet": "var(--trade-ink-quiet-on-dark)",
+        } as CSSProperties
+      }
+    >
+      {/*
+       * THE WHOLE ROW IS THE COLLECT TOGGLE — an overlay, FIRST in the DOM.
+       *
+       * Since ADR-0038 the card's body IS the toggle, and the row keeps that:
+       * tapping it collects the figure, tapping it again gives it up.
+       *
+       * AN OVERLAY RATHER THAN A WRAPPER, because the heart and the offer are
+       * controls of their own: nested inside a button they would be invalid
+       * markup and an ambiguous target. And the STACKING is the whole trick,
+       * so it is written down rather than discovered later —
+       *
+       *   static children  picture, hairline, text  painted first
+       *   positioned, in DOM order:
+       *     1. this overlay            covers the row, takes every tap
+       *     2. the offer line          `relative`, so it paints ABOVE and
+       *                                keeps its own clicks
+       *     3. the heart's column      `relative`, same
+       *
+       * That is why exactly two elements below carry `relative`, and why no
+       * `z-index` and no `pointer-events-none` layer is needed. A negative
+       * `z-index` on the overlay would have been the obvious alternative and
+       * is wrong: it paints behind the article's own background, and the
+       * article then wins the hit test.
+       *
+       * The accessible name is the figure and then what pressing it does; a
+       * sighted reader takes the name from the line above.
+       */}
+      {onToggle ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={collected}
+          className="focus-ring absolute inset-0 h-full w-full rounded-sky-md"
+        >
+          <span className="sr-only">
+            {figure.displayName} — {collected ? de.catalog.collected : ""} {toggleLabel}
+          </span>
+        </button>
+      ) : href ? (
+        <Link
+          href={href}
+          /*
+           * No prefetch decision is made here, and that is deliberate. This
+           * branch only ever runs with a destination the CALLER chose, and
+           * today that is `signInHref` — one address shared by every row on
+           * the page, which is what Next's default handles well. A surface
+           * that later passes a per-figure address has to pass
+           * `prefetch={false}` with it, for the reason the card's own comment
+           * gives: 561 rows of dynamic routes are 561 proxy round trips
+           * through the auth server as they scroll into view.
+           */
+          className="focus-ring absolute inset-0 h-full w-full rounded-sky-md"
+        >
+          <span className="sr-only">
+            {figure.displayName}
+            {owned ? ` — ${de.catalog.collectedBadge}` : ""}
+          </span>
+        </Link>
+      ) : null}
+
       {/*
        * THE PICTURE STAGE, AND IT IS WHITE ON PURPOSE.
        *
@@ -197,13 +325,14 @@ export function FigureRow({
        * the space is reserved before the file arrives and the row does not
        * jump as the list loads.
        *
-       * `object-contain`, because a figure is a free-standing object and a
-       * crop takes its head off.
+       * `self-start`, so a row that grew for a two-line name keeps the
+       * picture at the top rather than floating it in the middle.
        */}
       <span
         className={
-          "relative flex h-18 w-18 shrink-0 items-center justify-center overflow-hidden "
-          + "rounded-sky-sm bg-plate ring-1 ring-card-border/70 sm:h-22 sm:w-22"
+          "relative flex h-16 w-16 shrink-0 self-start items-center justify-center "
+          + "overflow-hidden rounded-sky-sm bg-plate ring-1 ring-card-border/70 "
+          + "sm:h-18 sm:w-18"
         }
       >
         {picture ? (
@@ -228,12 +357,22 @@ export function FigureRow({
             {de.catalog.noImage}
           </span>
         )}
+
+        {/*
+         * THE EDITION, ACROSS THE FOOT OF THE PICTURE.
+         *
+         * Inside the stage, which is already `relative overflow-hidden`, so
+         * it costs the row NO height and cannot escape the rounded corners.
+         * It covers the bottom 13 px of 64 — a fifth, at the end where a
+         * figure has its base. The photograph is untouched.
+         */}
+        <EditionBanner cardType={figure.cardType} />
       </span>
 
       {/*
        * The hairline. Its own element rather than a border on a neighbour, so
-       * it spans the identity block's height whatever that turns out to be —
-       * and it is gold on an owned row, where it belongs to the edge.
+       * it spans the row's height whatever that turns out to be — and it is
+       * gold on an owned row, where it belongs to the edge.
        */}
       <span
         aria-hidden="true"
@@ -243,93 +382,105 @@ export function FigureRow({
         }
       />
 
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      {/*
+       * THE TEXT BLOCK — three lines, and the row's height comes from here.
+       *
+       * `min-w-0` so it can shrink to nothing rather than pushing the row
+       * sideways; `flex-1` so it absorbs every width the grid hands over.
+       */}
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         {/*
-         * THE NAME, AND THE EDITION BESIDE IT.
+         * LINE 1 — the element's mark, then the name.
          *
-         * `displayName`, like the card — "Legendary Bash", not "Bash". The
-         * variant is part of the name since V3.6, so this line carries it;
-         * the edition is a different question (which of the seven card types
-         * the figure is) and gets its own chip, because the row has no
-         * artwork to answer it with.
+         * `displayName`, like the card: "Legendary Bash", not "Bash". The
+         * variant is part of the name since V3.6; the edition is a different
+         * question and gets its chip on the line below, where it can crowd
+         * neither the name nor the price.
          *
-         * Two lines at most and then clipped, so one long name cannot push a
-         * row to three times the height of its neighbours.
+         * THE OWNERSHIP MARK IS A DIAMOND AND A HIDDEN SENTENCE. "◆ In
+         * deiner Sammlung" as visible text would take a line of its own. The
+         * gold ground, the gold edge and this diamond say it three times over
+         * for anyone who can see them; the sentence stays in the markup for
+         * anyone who cannot, and for a forced-colours display where the gold
+         * is repainted away.
          */}
-        <span className="flex items-start gap-1.5">
+        <p className="flex min-w-0 items-center gap-1.5">
+          {owned ? (
+            <>
+              <span aria-hidden="true" className="shrink-0 text-[11px] text-own-ink">◆</span>
+              <span className="sr-only">
+                {de.catalog.collectedBadge}
+                {copies !== null ? ` · ${de.collection.copies(copies)}` : ""}
+              </span>
+            </>
+          ) : null}
+          <ElementIcon element={figure.element} className="h-3.5 w-3.5" />
           <span
             className="line-clamp-2 min-w-0 text-[13px] leading-[1.2] font-semibold text-foreground"
             title={figure.displayName}
           >
             {figure.displayName}
           </span>
-          {edition ? (
-            /*
-             * Neutral, and that is a decision: gold means possession and
-             * coral means wanting (V3.1). An edition is a property of the
-             * object, like the variant seal on the card — which is
-             * deliberately not gold for exactly the same reason.
-             */
-            <span
-              className={
-                "mt-px shrink-0 rounded-full bg-status-ground px-1.5 py-0.5 text-[10px] "
-                + "leading-none font-medium text-status-ink ring-1 ring-status-line"
-              }
-            >
-              {edition}
-            </span>
-          ) : null}
-        </span>
+        </p>
 
         {/*
-         * One line: what this is, or that it is yours.
+         * LINE 2 — THE LABEL, AND THE TWO SOFTER FACTS.
          *
-         * The same order of questions the card's `meta` band answers, and the
-         * same answers — ownership wins over the series, an inactive figure
-         * takes the series' place rather than adding a line, and the element
-         * sits at the right end where it cannot collide with the text beside
-         * it.
-         */}
-        <span className="flex items-baseline gap-2 text-[11px] leading-[1.25]">
-          <span className={"min-w-0 truncate " + (owned ? "text-own-ink" : "text-muted")}>
-            {owned ? (
-              <>
-                <span aria-hidden="true" className="text-[0.85em]">◆{" "}</span>
-                {de.catalog.collectedBadge}
-                {copies !== null ? ` · ${copies}×` : ""}
-              </>
-            ) : !figure.isActive ? (
-              de.catalog.inactive
-            ) : showSeries ? (
-              figure.seriesLabel
-            ) : null}
-          </span>
-          <span className="ml-auto shrink-0 whitespace-nowrap text-muted">
-            {figure.element ? elementLabel(figure.element) : null}
-          </span>
-        </span>
-
-        {/*
-         * THE MARKET VALUE, LABELLED.
+         * `MARKTWERT` stands ABOVE the amount, not beside it. That is the
+         * hierarchy the operator settled on, and it is the reason this line
+         * exists: the label names the number below it and must not compete
+         * with it, so it is small and quiet.
          *
-         * The label is not decoration: the offer band below carries a price
-         * too, and the two are different things that must never be read as
-         * one number (ADR-0033). The boost is applied here, at the last
-         * possible moment; `figure.marketPrice` leaves this component
-         * unchanged in every other direction.
+         * The rest of the line was empty, so the two facts with nowhere
+         * better to be share it:
+         *
+         *   NOT IN THE CATALOGUE  rare, administrator-facing, and it takes
+         *                         precedence over the game
+         *   THE SERIES            only where the surface asks for it — the
+         *                         catalogue has a series tab selected, while
+         *                         `/shop` mixes all six games
+         *
+         * The edition used to have a chip at the right of this line. It is a
+         * banderole on the picture now, which is why the line is quieter and
+         * why the series has the whole of it to itself.
          */}
-        <span className="flex items-baseline gap-1.5">
+        <p className="flex min-w-0 items-center gap-2">
           <span
             className={
-              "text-[9px] leading-none font-medium tracking-[0.08em] uppercase "
+              "shrink-0 text-[8px] leading-none font-medium tracking-[0.08em] uppercase "
               + (owned ? "text-own-ink/80" : "text-muted")
             }
           >
             {de.catalog.marketValue}
           </span>
+
+          {!figure.isActive || showSeries ? (
+            <span className="min-w-0 truncate text-[11px] leading-none text-muted">
+              {!figure.isActive ? de.catalog.inactive : figure.seriesLabel}
+            </span>
+          ) : null}
+        </p>
+
+        {/*
+         * LINE 3 — THE AMOUNT, AND THE OFFER BESIDE IT.
+         *
+         * The market value at the left, prominent at 17 px, with its label
+         * directly above it. The offer at the right, as a compact chip.
+         *
+         * `flex-wrap` IS THE RESPONSIVE FALLBACK the operator asked for, and
+         * the width it has to work in was widened for it: taking the edition
+         * chip off the caption line did nothing for THIS line, so the row's
+         * horizontal padding went from 8 to 6 px and its column gaps from 8
+         * to 6, which buys the text block 10 px. Measured at 189 px on a
+         * 360 px phone: an ordinary "49,99 €" beside "Angebote ab 4,49 €"
+         * needs 179 and fits; a three-digit "189,50 €" needs 193 and the chip
+         * drops to its own line. Nothing is truncated and no price is shrunk,
+         * and only the figures that need it pay a line.
+         */}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <span
             className={
-              "text-[13px] leading-none font-semibold tabular-nums whitespace-nowrap "
+              "shrink-0 text-[17px] leading-none font-semibold tabular-nums whitespace-nowrap "
               + (figure.marketPrice === null ? "text-muted" : "text-foreground")
             }
           >
@@ -337,102 +488,55 @@ export function FigureRow({
               ? de.catalog.noPrice
               : formatPrice(catalogDisplayMarketPrice(figure.marketPrice, marketBoostPercent))}
           </span>
-        </span>
-      </span>
-    </>
-  );
 
-  /** What the identity block is: a toggle, a link, or neither. */
-  const identityClass =
-    "focus-ring flex min-w-0 items-center gap-2 rounded-sky-sm text-left sm:gap-3";
-
-  const block = onToggle ? (
-    <button type="button" onClick={onToggle} aria-pressed={collected} className={identityClass}>
-      {identity}
-      {/* The state in words, for anyone the gold does not reach. The visible
-          name is inside this button, so the accessible name is the figure
-          and then what pressing it does. */}
-      <span className="sr-only">
-        {collected ? de.catalog.collected : ""} {toggleLabel}
-      </span>
-    </button>
-  ) : href ? (
-    <Link
-      href={href}
-      /*
-       * No prefetch decision is made here, and that is deliberate.
-       *
-       * This branch only ever runs with a destination the CALLER chose, and
-       * today that is `signInHref` — one address shared by every row on the
-       * page, which is exactly the case Next's default handles well. A
-       * surface that later passes a per-figure address has to pass
-       * `prefetch={false}` with it, for the reason the card's own comment
-       * gives: 561 rows of dynamic routes are 561 proxy round trips through
-       * the auth server as they scroll into view (V3.6, A/B). Writing
-       * `prefetch={undefined}` here would look like that decision had been
-       * taken when it had not.
-       */
-      className={identityClass}
-    >
-      {identity}
-      {owned ? <span className="sr-only">{de.catalog.collectedBadge}</span> : null}
-    </Link>
-  ) : (
-    /* Neither: the figure page's siblings, where the row is a picture with
-       words beside it and the whole surrounding card is the link. */
-    <div className={"flex min-w-0 items-center gap-2 sm:gap-3"}>{identity}</div>
-  );
-
-  return (
-    <article
-      className={
-        "relative flex items-stretch gap-2 rounded-sky-md p-2 sm:gap-3 sm:p-3 "
-        + (owned ? GROUND.owned : understated ? GROUND.understated : GROUND.neutral)
-        + (highlighted ? " outline outline-2 outline-offset-2 outline-nav-active-ink" : "")
-      }
-      /*
-       * THE TRADE INKS, SWAPPED FOR A DARK GROUND.
-       *
-       * `OfferLink` writes in `--trade-ink` and `--trade-ink-quiet`, which
-       * are near-black because on a card they sit on a silver plate the
-       * artwork paints. A row has no plate and a dark ground, so both would
-       * be unreadable. The project already has the pair for this case and
-       * `FigureCard` already swaps to it on its two dark artworks — same
-       * variables, same mechanism, no second set of colours and no change to
-       * `OfferLink` itself.
-       */
-      style={
-        {
-          "--trade-ink": "var(--trade-ink-on-dark)",
-          "--trade-ink-quiet": "var(--trade-ink-quiet-on-dark)",
-        } as CSSProperties
-      }
-    >
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        {block}
-
-        {/*
-         * THE OFFER BAND — a sibling of the identity block, never a child.
-         *
-         * `min-h-11` is the 44 px target, and it is the reason the band is
-         * worth its own row: the offer is a link, and a link inside the
-         * collect toggle would be a link inside a button. The card solves the
-         * same problem with a sibling layer over a fixed-height grid; a row
-         * can simply put it underneath.
-         *
-         * `OfferLink` draws the quiet sentence when there is nothing to buy,
-         * so the band is never empty and the row never changes height
-         * between a figure that is for sale and one that is not.
-         */}
-        <div className="flex min-h-11 items-center">{trade}</div>
+          {/*
+           * THE OFFER CHIP — VISIBLY COMPACT, 44 px TO THE THUMB.
+           *
+           * The two may differ, and here they do: the ring and the ground are
+           * drawn by the inset layer below, 26 px tall and vertically
+           * centred, while the LINK fills the full 44 px of this wrapper and
+           * is what a finger actually hits. A 44 px pill read as a button in
+           * a list of ninety; a 26 px chip with a 44 px target reads as a
+           * chip and behaves like a control.
+           *
+           * `relative` HERE AND NOT ON THE LINE — the fix to a real defect.
+           * With the whole line positioned, its empty half painted above the
+           * row's collect overlay and swallowed every tap that landed there.
+           * Only the chip has to be above the overlay.
+           *
+           * The treatment is on the wrapper, never on `OfferLink`: that
+           * component is shared with the vertical card, where it sits on the
+           * artwork's silver plate. Its link, label, chevron, quick-view
+           * interception and `data-perf` marker are untouched.
+           */}
+          {/* NO HORIZONTAL PADDING HERE. `OfferLink` brings its own
+               (`px-1.5 sm:px-2`), and doubling it pushed the chip to 133 px —
+               wide enough that the price line wrapped on EVERY phone row
+               instead of only on the expensive ones. Found by the arithmetic,
+               not by looking. */}
+          <span className="group relative ml-auto inline-flex min-h-11 shrink-0 items-center">
+            <span
+              aria-hidden="true"
+              className={
+                "pointer-events-none absolute inset-x-0 inset-y-[10px] rounded-full "
+                + "transition-colors "
+                + (offered
+                  ? "bg-trade-solid/12 ring-1 ring-trade-line "
+                    + "group-hover:bg-trade-solid/22 group-focus-within:bg-trade-solid/22 "
+                    + "group-focus-within:ring-trade-line-strong"
+                  : "bg-deep/40 ring-1 ring-border/50")
+              }
+            />
+            {trade}
+          </span>
+        </div>
 
         {/*
          * A collect that did not stick has to say so on the row it failed on.
          *
          * In flow, and that is the point: an absolute pill here would have to
-         * be laid over the offer band or over the picture, and laying one
-         * thing over another is precisely what a row must not do. It costs a
-         * line of height on an error path and guarantees nothing overlaps.
+         * be laid over the offer or over the picture, and laying one thing
+         * over another is precisely what a row must not do.
          */}
         {failed ? (
           <p role="alert" className="text-[10px] leading-tight font-medium text-danger">
@@ -442,22 +546,32 @@ export function FigureRow({
       </div>
 
       {/*
-       * THE ACTION COLUMN.
+       * THE ACTION COLUMN — two positions, one x.
        *
-       * 44 px wide, and tall enough for two touch slots whether or not both
-       * are filled — see `bellSlot` above. `justify-start`, so the heart sits
-       * at the top where it is on the card, and the reserved space grows
-       * downward into the row rather than pushing the heart around.
+       * The heart at the top, the availability bell underneath it, both 44 px
+       * and both centred in a 44 px column, so the two marks line up however
+       * tall the row becomes. `justify-between` only when a bell is there;
+       * otherwise the heart sits at the top and the column stays as short as
+       * the heart. NOTHING HOLDS SPACE OPEN.
+       *
+       * THE COLUMN ITSELF IS NOT POSITIONED, AND EACH SLOT IS — the same fix
+       * as the offer chip, for the same real defect. A positioned column
+       * painted its empty lower half above the collect overlay and ate every
+       * tap that landed there; now only the 44 px that actually hold a
+       * control sit above the overlay, and the rest falls through to the row.
        */}
       {favoriteSlot || bellSlot ? (
-        /* `w-11` is `ROW.touch`, `min-h-22` is `ROW_ACTION_HEIGHT` — two touch
-           slots, held open whether or not both are filled. A test holds both
-           class names against those constants. */
-        <div className="flex min-h-22 w-11 shrink-0 flex-col items-center justify-start gap-1">
-          {favoriteSlot}
-          {bellSlot}
+        <div
+          className={
+            "flex w-11 shrink-0 flex-col items-center self-stretch "
+            + (bellSlot ? "justify-between" : "justify-start")
+          }
+        >
+          {favoriteSlot ? <span className="relative">{favoriteSlot}</span> : null}
+          {bellSlot ? <span className="relative">{bellSlot}</span> : null}
         </div>
       ) : null}
+
     </article>
   );
 }

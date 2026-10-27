@@ -105,6 +105,13 @@ const toggle = (): HTMLElement => {
   return found as HTMLElement;
 };
 
+/** The signed-out variant: the overlay is a link instead of a button. */
+const overlayLink = (): HTMLElement => {
+  const found = article().querySelector("a:not([data-id])");
+  if (found === null) throw new Error("no overlay link rendered");
+  return found as HTMLElement;
+};
+
 const byId = (id: string): HTMLElement => {
   const found = document.querySelector(`[data-id="${id}"]`);
   if (found === null) throw new Error(`no ${id} rendered`);
@@ -184,9 +191,18 @@ describe("the ground says whether the figure is owned", () => {
     expect(cls).toContain("shadow-[0_0_18px_-8px_var(--own-line-strong)]");
   });
 
-  it("and it says so in words as well, for anyone the gold does not reach", async () => {
+  it("and it says so compactly: a diamond, plus the sentence for a reader who needs it", async () => {
+    /*
+     * THE CORRECTION'S COMPACT FORM. The visible mark is a gold diamond; the
+     * sentence is in the markup but `sr-only`, because as visible text it
+     * took most of the meta line and pushed the edition and the value off it.
+     */
     await row({ collected: true, knowsCollection: true });
-    expect(article().textContent).toContain(de.catalog.collectedBadge);
+    expect(article().textContent, "the diamond is drawn").toContain("\u25c6");
+    const hidden = [...article().querySelectorAll(".sr-only")]
+      .map((el) => el.textContent ?? "").join(" ");
+    expect(hidden, "the sentence is still there for assistive tech")
+      .toContain(de.catalog.collectedBadge);
   });
 
   it("missing, on a surface that knows: the quiet ground, and nothing else", async () => {
@@ -220,16 +236,19 @@ describe("the ground says whether the figure is owned", () => {
     await row({ ownership: "showcase", collected: true, knowsCollection: true });
     expect(article().className).toContain("bg-deep/70");
     expect(article().textContent, "the showcase drew the ownership marker")
-      .not.toContain("◆");
+      .not.toContain("\u25c6");
   });
 
   it("copies are named above one and never at one", async () => {
+    /* In the hidden sentence now, with the ownership mark it belongs to. */
+    const hidden = () => [...article().querySelectorAll(".sr-only")]
+      .map((el) => el.textContent ?? "").join(" ");
     await row({ collected: true, knowsCollection: true, quantity: 3 });
-    expect(article().textContent).toContain("3×");
+    expect(hidden()).toContain("3");
     await act(async () => { root?.unmount(); });
     container?.remove();
     await row({ collected: true, knowsCollection: true, quantity: 1 });
-    expect(article().textContent).not.toContain("1×");
+    expect(hidden()).not.toMatch(/\b1 ?×/);
   });
 });
 
@@ -296,33 +315,216 @@ describe("possession, wanting and the reserved alarm slot are independent", () =
     }
   });
 
-  it("the action column holds its two slots open with only the heart in it", async () => {
+  /** Each slot sits in a positioned span, so the column is one level up. */
+  const actionColumn = (): HTMLElement => byId("heart").parentElement!.parentElement!;
+
+  it("the heart's column is 44 px wide and reserves no height", async () => {
+    /*
+     * THE CORRECTION. It used to carry `min-h-22` — 88 px held open for a
+     * bell that does not exist — which was the largest single piece of the
+     * air the row has now lost. The column supports two positions, but its
+     * height follows what is in it.
+     */
     await row();
-    const column = byId("heart").parentElement!;
-    expect(column.className).toContain("min-h-22");
-    expect(column.className).toContain("w-11");
+    expect(actionColumn().className).toContain("w-11");
+    expect(actionColumn().className).not.toContain("min-h-22");
+    expect(actionColumn().className).toContain("justify-start");
+  });
+
+  it("the column is NOT positioned, and each slot is", async () => {
+    /*
+     * The defect this fixes: a positioned column painted its empty lower
+     * half above the collect overlay and swallowed every tap there.
+     */
+    await row();
+    expect(actionColumn().className).not.toContain("relative");
+    expect(byId("heart").parentElement!.className).toBe("relative");
+  });
+
+  it("and with a bell it holds both marks on one x, heart above", async () => {
+    await row({ bellSlot: createElement("span", { "data-id": "bell" }, "Glocke") });
+    const column = actionColumn();
+    expect(column.className).toContain("justify-between");
+    expect(column.className).toContain("items-center");
+    expect(column.contains(byId("bell"))).toBe(true);
+    const slots = [...column.children];
+    expect(slots.findIndex((el) => el.contains(byId("heart"))))
+      .toBeLessThan(slots.findIndex((el) => el.contains(byId("bell"))));
   });
 
   it("the bell slot lands under the heart when it eventually arrives", async () => {
-    /* UX-02 passes a second control; the column already has room, so nothing
-       about the row's geometry changes on that day. */
+    /* UX-02 passes a second control; the column already supports it, so
+       nothing about the row's arrangement changes on that day. */
     await row({ bellSlot: createElement("button", { type: "button", "data-id": "bell" }, "Glocke") });
-    const column = byId("heart").parentElement!;
-    expect(column.contains(byId("bell"))).toBe(true);
-    expect([...column.children].indexOf(byId("heart")))
-      .toBeLessThan([...column.children].indexOf(byId("bell")));
+    expect(actionColumn().contains(byId("bell"))).toBe(true);
     expect(toggle().contains(byId("bell"))).toBe(false);
   });
 
-  it("no action column at all when a surface offers neither", async () => {
+  it("no heart column at all when a surface offers neither control", async () => {
     await row({ favoriteSlot: null, bellSlot: null });
-    expect(article().querySelector(".min-h-22")).toBeNull();
+    expect(article().querySelector(".w-11")).toBeNull();
   });
 });
 
 /* ========================================================================
  * PRICES AND EDITIONS
  * ===================================================================== */
+
+describe("the offer is dressed as an action", () => {
+  /** The 44 px wrapper around `OfferLink` — the actual touch target. */
+  const pill = (): HTMLElement => byId("offer").parentElement!;
+  /** The visible chip: the inset layer the wrapper paints. */
+  const chip = (): HTMLElement => pill().querySelector("[aria-hidden]")!;
+
+  it("the target is 44 px and the visible chip is inset inside it", async () => {
+    /* The operator allowed the two to differ. The ring is drawn 9 px in from
+       the top and the bottom, so it reads as 26 px; the link fills the whole
+       44 and is what a finger hits. */
+    await row({ offered: true });
+    expect(pill().className).toContain("min-h-11");
+    expect(chip().className).toContain("absolute inset-x-0 inset-y-[10px]");
+    expect(chip().className).toContain("pointer-events-none");
+  });
+
+  it("a figure with something to sell gets the silver action", async () => {
+    await row({ offered: true });
+    expect(chip().className).toContain("bg-trade-solid/12");
+    expect(chip().className).toContain("ring-trade-line");
+    expect(chip().className).toContain("group-hover:bg-trade-solid/22");
+    expect(chip().className).toContain("group-focus-within:");
+  });
+
+  it("and one with nothing gets the quiet chip, with no hover promise", async () => {
+    await row({ offered: false });
+    expect(chip().className).toContain("bg-deep/40");
+    expect(chip().className).not.toContain("group-hover:");
+    expect(chip().className).not.toContain("trade-solid");
+  });
+
+  it("the chip hugs its label rather than stretching into a bar", async () => {
+    await row({ offered: true });
+    expect(pill().className).toContain("ml-auto");
+    expect(pill().className).toContain("shrink-0");
+    /* And it adds no padding of its own — `OfferLink` brings it. */
+    expect(pill().className).not.toMatch(/\bpx-\d/);
+  });
+
+  it("and it is still a sibling of the toggle, not a child", async () => {
+    await row({ offered: true });
+    expect(toggle().contains(pill())).toBe(false);
+  });
+
+  it("the series shares that line where a surface asks for it", async () => {
+    /* `/shop` mixes all six games, so the series is the one thing a row
+       there cannot be assumed to share with its neighbours. */
+    await row({ showSeries: true });
+    expect(article().textContent).toContain("Spyro's Adventure");
+  });
+
+  it("and the catalogue, which has a series tab, does not repeat it", async () => {
+    await row({ showSeries: false });
+    expect(article().textContent).not.toContain("Spyro's Adventure");
+  });
+
+  it("a figure out of range says so instead of naming its game", async () => {
+    await row({ showSeries: true, figure: figure({ isActive: false }) });
+    expect(article().textContent).toContain(de.catalog.inactive);
+    expect(article().textContent).not.toContain("Spyro's Adventure");
+  });
+});
+
+describe("a special edition is a banderole on the picture", () => {
+  /** The picture stage: the first span inside the article. */
+  const stage = (): HTMLElement => article().querySelector(".bg-plate")!;
+
+  it("a standard figure gets none", async () => {
+    await row({ figure: figure({ cardType: "standard" }) });
+    expect(stage().textContent).not.toMatch(/standard/i);
+    expect(stage().querySelector("[aria-hidden].absolute")).toBeNull();
+  });
+
+  it("every other modelled type gets one, named from the label map", async () => {
+    for (const [type, label] of [["legendary", "Legendary"], ["prestige", "Prestige"],
+                                 ["chase", "Chase"], ["dark", "Dark"],
+                                 ["special", "Special"], ["elite", "Elite"]] as const) {
+      await row({ figure: figure({ cardType: type }) });
+      expect(stage().textContent, type).toContain(label);
+      await act(async () => { root?.unmount(); });
+      container?.remove();
+    }
+  });
+
+  it("it sits across the foot of the picture and covers nothing else", async () => {
+    await row({ figure: figure({ cardType: "chase", imageFile: "x.webp" }) });
+    const banner = [...stage().querySelectorAll("span")]
+      .find((el) => el.textContent === "Chase")!;
+    expect(banner.className).toContain("absolute inset-x-0 bottom-0");
+    expect(banner.className).toContain("pointer-events-none");
+    /* And it is inside the stage, so it adds no height to the row. */
+    expect(stage().contains(banner)).toBe(true);
+  });
+
+  it("the photograph is not touched by it", async () => {
+    await row({ figure: figure({ cardType: "legendary", imageFile: "x.webp" }) });
+    const img = stage().querySelector("img")!;
+    expect(img.className).not.toMatch(/opacity|saturate|grayscale|scale|brightness/);
+    expect(img.style.filter).toBe("");
+  });
+
+  it("the two tiers come from EDITION_RANK, not from a new opinion", async () => {
+    await row({ figure: figure({ cardType: "legendary" }) });
+    const bright = [...stage().querySelectorAll("span")]
+      .find((el) => el.textContent === "Legendary")!.className;
+    await act(async () => { root?.unmount(); });
+    container?.remove();
+    await row({ figure: figure({ cardType: "chase" }) });
+    const quiet = [...stage().querySelectorAll("span")]
+      .find((el) => el.textContent === "Chase")!.className;
+    expect(bright).not.toBe(quiet);
+    expect(bright).toContain("#241f19");
+    expect(quiet).toContain("#3a3442");
+  });
+
+  it("and the information area no longer carries an edition chip", async () => {
+    await row({ figure: figure({ cardType: "prestige" }) });
+    const text = article().querySelector(".flex-1")!;
+    expect(text.textContent).not.toContain("Prestige");
+  });
+});
+
+describe("the element is a mark in front of the name", () => {
+  it("drawn for a figure that has one, and named for a reader", async () => {
+    await row();
+    const icon = article().querySelector('[title="Erde"]');
+    expect(icon, "the element mark is drawn").not.toBeNull();
+    expect(icon!.querySelector("svg")).not.toBeNull();
+    /* The word is gone from the visible line but not from the markup. */
+    expect(icon!.textContent).toContain("Erde");
+  });
+
+  it("and nothing at all for the 457 figures without one", async () => {
+    await row({ figure: figure({ element: null }) });
+    expect(article().querySelector("[title]")?.getAttribute("title"))
+      .not.toBe("Erde");
+    expect(article().textContent).not.toContain("Erde");
+  });
+
+  it("an unknown stored value renders nothing rather than a default", async () => {
+    await row({ figure: { ...figure(), element: "Plasma" } as never });
+    expect(article().textContent).not.toContain("Plasma");
+  });
+
+  it("it sits before the name, not after it", async () => {
+    await row();
+    const line = article().querySelector("p")!;
+    const icon = line.querySelector('[title="Erde"]')!;
+    const name = [...line.querySelectorAll("span")].find(
+      (el) => el.textContent === "Bash");
+    expect(name, "the name is on the first line").toBeTruthy();
+    expect([...line.querySelectorAll("*")].indexOf(icon))
+      .toBeLessThan([...line.querySelectorAll("*")].indexOf(name!));
+  });
+});
 
 describe("what the row says about money and editions", () => {
   it("labels the market value, because an asking price stands beside it", async () => {
@@ -380,15 +582,17 @@ describe("a failed collect", () => {
 describe("signed out the identity block is a link, not a toggle", () => {
   it("leads where the visitor has to go, and toggles nothing", async () => {
     await row({ onToggle: undefined, href: "/login?next=%2F" });
-    const link = article().querySelector("a:not([data-id])");
-    expect(link, "the identity block is a link").not.toBeNull();
-    expect(link!.getAttribute("href")).toBe("/login?next=%2F");
+    expect(overlayLink().getAttribute("href")).toBe("/login?next=%2F");
     expect(article().querySelector("button:not([data-id])")).toBeNull();
   });
 
   it("and the offer is still its own target beside it", async () => {
     await row({ onToggle: undefined, href: "/login?next=%2F" });
-    const link = article().querySelector("a:not([data-id])") as HTMLElement;
-    expect(link.contains(byId("offer"))).toBe(false);
+    expect(overlayLink().contains(byId("offer"))).toBe(false);
+  });
+
+  it("the overlay names the figure, since its content is hidden text", async () => {
+    await row({ onToggle: undefined, href: "/login?next=%2F" });
+    expect(overlayLink().textContent).toContain("Bash");
   });
 });
