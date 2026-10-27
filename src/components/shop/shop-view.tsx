@@ -18,13 +18,20 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState, useSyncExternalStore } from "react";
 
 import { AccessoryCard } from "@/components/catalog/accessory-card";
 import { CatalogCard } from "@/components/catalog/catalog-card";
+import { CatalogViewToggle } from "@/components/catalog/catalog-view-toggle";
+import {
+  catalogViewStore,
+  layoutFor,
+  type CatalogView,
+} from "@/components/catalog/catalog-view-mode";
 import { isAccessory } from "@/lib/catalog/item-type";
 import { QuickView } from "@/components/catalog/quick-view";
 import { FigureGrid } from "@/components/catalog/figure-grid";
+import { BrowseToolbar } from "@/components/ui/browse-toolbar";
 import { ACTION_NEUTRAL } from "@/components/ui/action";
 import { matchesQuery, normalizeForSearch } from "@/lib/catalog/search";
 import { quickViewModel } from "@/lib/ui/quick-view";
@@ -75,6 +82,27 @@ export function ShopView({
   const [quickViewSkyId, setQuickViewSkyId] = useState<string | null>(null);
   const owned = useMemo(() => new Set(ownedSkyIds), [ownedSkyIds]);
 
+  /**
+   * Cards or rows — THE SAME REMEMBERED CHOICE THE CATALOGUE USES (UX-01C).
+   *
+   * One store, one key, three surfaces: somebody who switches to the list on
+   * `/` finds the list here and on `/favoriten` as well. A second key per
+   * surface would mean the same question answered three times, and the
+   * answer would differ depending on where it was asked.
+   *
+   * `useSyncExternalStore` for the reason the catalogue gives: the value
+   * lives outside React, the server's answer differs from the browser's, and
+   * the server snapshot is the default so the first paint matches.
+   */
+  const view = useSyncExternalStore(
+    catalogViewStore.subscribe,
+    catalogViewStore.read,
+    catalogViewStore.server,
+  );
+  function selectView(next: CatalogView) {
+    catalogViewStore.write(next);
+  }
+
   const normalized = normalizeForSearch(deferredQuery);
   const visible = useMemo(
     () => entries.filter((entry) => matchesQuery(entry.figure, normalized)),
@@ -117,9 +145,22 @@ export function ShopView({
         />
       </div>
 
-      <p className="text-sm text-muted" aria-live="polite">
-        {de.shop.page.count(visible.length)}
-      </p>
+      {/*
+       * THE TOOLBAR THE OTHER TWO SURFACES ALREADY HAVE (UX-01C).
+       *
+       * This was a bare `<p aria-live>` with the count in it. `BrowseToolbar`
+       * exists because the catalogue and the collection had grown the same
+       * shape twice and drawn it differently — "this is what you are looking
+       * at, and this is what you can do about it" — and the shop is now the
+       * third page that needs exactly that row. The count keeps its wording
+       * and its polite announcement; what is new is a control beside it.
+       *
+       * No filter sheet here, and that is unchanged: the shop is usually a
+       * few dozen cards, and a filter bar over that many is furniture.
+       */}
+      <BrowseToolbar count={de.shop.page.count(visible.length)}>
+        <CatalogViewToggle view={view} onSelect={selectView} />
+      </BrowseToolbar>
 
       {visible.length === 0 ? (
         <div className="flex flex-col items-center gap-3 rounded-sky-lg bg-surface/80 px-4 py-12 text-center ring-1 ring-border/70">
@@ -134,7 +175,7 @@ export function ShopView({
           </button>
         </div>
       ) : (
-        <FigureGrid>
+        <FigureGrid mode={view}>
           {visible.map((entry) => (
             /*
              * ZWEI KACHELN, EIN RASTER (ADR-0129/0130).
@@ -147,6 +188,15 @@ export function ShopView({
              *
              * An `CatalogCard` ändert sich dafür nichts — die Entscheidung
              * fällt hier, vor der Karte.
+             *
+             * UND ZUBEHÖR HAT KEINE ZEILENDARSTELLUNG (UX-01C). `FigureRow`
+             * zeichnet Element, Marktwert, Besitz und einen Sammelknopf —
+             * für ein Portal ist davon nichts wahr, genau wie bei der
+             * Figurenkarte. Im Listenmodus bleibt die Kachel deshalb eine
+             * Kachel und nimmt eine Zelle des einspaltigen Rasters ein. Eine
+             * Zubehörzeile zu erfinden war nicht Teil dieses Schritts; die
+             * Alternative — Zubehör im Listenmodus verbergen — wäre die
+             * schlechtere, weil sie Ware versteckt.
              */
             isAccessory(entry.figure) ? (
               <AccessoryCard
@@ -177,6 +227,11 @@ export function ShopView({
               // Unlike the catalog, this grid mixes all six games, so the
               // series is worth naming on every card.
               showSeries
+              /* The remembered presentation (UX-01C). Nothing else about this
+                 card changes with it — the series label, the sign-in link,
+                 the offers, the boost and the quick view handler are the same
+                 values either way. */
+              layout={layoutFor(view)}
             />
             )
           ))}

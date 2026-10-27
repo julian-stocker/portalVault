@@ -14835,3 +14835,266 @@ Benachrichtigungscenter, kein Scheduler (UX-02 bis UX-04) · keine Zeile auf
 keine neue Abfrage, keine neue Server Action · keine Änderung an Warenkorb,
 Checkout, Lager oder Reservierung. ADR-0021 bleibt unberührt: die Zeile kennt
 kein `seller_id` und nennt keinen Verkäufer.
+
+### Nachtrag vom 2026-10-26 — UX-01C: der Umschalter, und was er nicht anfassen darf
+
+**Freigegeben und gebaut.** Die Zeile aus UX-01B ist jetzt auf `/`,
+`/favoriten` und `/shop` auswählbar. Fünf Festlegungen, jede mit ihrem Grund.
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **C-1** | **Eigener Schlüssel** `skyisles.catalog.view`, Werte `cards`/`rows` | `skyisles.collection.view` wählt zwischen Karten und einer **Tabelle**, dieser zwischen **zwei Arten von Karte**. Ein gemeinsamer Wert müsste „Tabelle" im Katalog bedeuten — eine Funktion, die niemand bestellt hat — und ein gespeicherter Wert käme auf der anderen Fläche mit anderer Bedeutung an |
+| **C-2** | **Karten bleiben Vorgabe** | Entscheidung des Betreibers. Die Sammlung entscheidet umgekehrt (Tabelle), weil eine große Sammlung gelesen wird, bevor sie durchgesehen wird; der Katalog ist eine Vitrine, und die Karte ist, wofür ein Sammler kommt |
+| **C-3** | **Der Mechanismus wird geteilt, die Sammlung nicht angefasst** | `src/lib/ui/view-store.ts` trägt die vier subtilen Dinge, die `collection/view-mode.ts` einmal richtig gemacht hat (nach dem Mount lesen · ein stabiler Schnappschuss · jeder Zugriff gekapselt · andere Tabs). Der Schlüssel wird Parameter, statt vierzig Zeilen ein zweites Mal zu schreiben. **Die Sammlung migriert nicht:** ihr Modul ist im Betrieb und durch eigene Tests gedeckt, `/collection` war ausdrücklich außerhalb von UX-01C, und ein folgenloser Umbau funktionierenden Codes ist ein Risiko für Ordentlichkeit |
+| **C-4** | **Zwei Spalten erst ab `lg:`** | Eine Messung, keine Vorliebe. Bei `lg` (992 px innen) lassen zwei Spalten je Zeile rund 490 px und der Textspalte rund 297 px. Bei `md:` wären es **169 px — weniger als die 171 px, die ein 360-px-Telefon lässt**, und eine Desktopspalte, die enger ist als ein Telefon, ist die falsche Richtung. Eine einzige Spalte über die ganze Breite wäre bei `max-w-6xl` eine Zeile Text in einem Feld aus Nichts |
+| **C-5** | **Zubehör behält im Listenmodus seine Kachel** | `FigureRow` zeichnet Element, Marktwert, Besitz und einen Sammelknopf — für ein Portal ist davon nichts wahr, genau wie bei der Figurenkarte (ADR-0128/0129). Eine Zubehörzeile zu erfinden war nicht Teil des Schritts; Zubehör im Listenmodus zu verbergen wäre schlechter, weil es Ware versteckt |
+
+**Der Umschalter sitzt in der Werkzeugleiste, nie in der Filtertafel.** Er
+zeichnet die Figuren, er verengt sie nicht — dieselbe Regel, auf die
+`src/lib/ui/browse.test.ts` die Sammlung schon festlegt. In der Tafel würde
+die Filtermarke etwas zählen, das nichts filtert.
+
+**Dass Filter, Suche, Serie und Gruppe unberührt bleiben, ist aus den
+Abhängigkeitslisten bewiesen und nicht aus dem JSX gelesen:** keine der drei
+`useMemo`-Listen (`pool`, `visible`, `groups`) nennt `view`, `layout` oder
+`gridMode`. Ein Memo kann nicht von einem Wert abhängen, den seine Liste
+nicht nennt — also kann das Umschalten nicht ändern, welche Figuren auf dem
+Schirm stehen.
+
+**Der Administrator bekommt den Umschalter nicht** (`admin ? null : …`) und
+seine Karte bleibt die Karte: ein Steuerelement mit einem erreichbaren
+Zustand wäre eines, das nichts kann.
+
+**`/favoriten` brauchte keine Zeile Verdrahtung**, weil es `CatalogView`
+rendert (ADR-0136). Ein Test hält das fest — eine spätere eigene Ansicht
+dort würde den Umschalter sonst stillschweigend verlieren.
+
+**Ein bestehender Test hat beim Bauen zugeschlagen, und zu Recht:**
+`admin-created-visibility.test.ts` verbietet `router.refresh` in
+`catalog-view.tsx` und liest die **Rohdatei** — der Name in einem Kommentar
+genügte zum Fehlschlag. Das Umschalten ist ein Neuzeichnen und keine
+Navigation; die Datei nennt die Funktion jetzt nirgends.
+
+> **Grenze der Prüfung, ausdrücklich:** in dieser Umgebung ist **kein
+> Browser** verfügbar (kein Playwright, kein Chromium, nur Safari ohne
+> freigeschaltete Automatisierung), und einen zu installieren wäre eine
+> Änderung des Tech-Stacks, die nach CLAUDE.md eine eigene Freigabe braucht.
+> Der Hydrationsnachweis ist deshalb echt (`renderToString` plus
+> `hydrateRoot`, Reaktions eigene Warnung als Zusage), die **Darstellung**
+> aber nicht gesehen. Overflow, Touchgrößen und Überlappungen sind gerechnet
+> und zusätzlich als Messskript in eine Vorschau gelegt, die der Betreiber in
+> seinem eigenen Browser öffnet.
+
+### Nachtrag vom 2026-10-27 — UX-01C: die Designkorrektur der Zeile (C-6 bis C-10)
+
+**Anlass.** Der Betreiber hat die Browser-Vorschau geprüft und die Zeile
+**nicht** freigegeben: zu hoch, zu viel ungenutzter Leerraum, noch nicht das
+kompakte horizontale Layout. Die funktionale Prüfung war bestanden, die
+gestalterische nicht — und das war am Code zu belegen.
+
+**Der Befund, in Zahlen.** Die erste Fassung war auf dem Telefon **138 px**
+hoch, und drei Dinge trugen fast nichts dazu bei:
+
+| Posten | Höhe | Was er leistete |
+|---|---|---|
+| Bild | 72 px | war das Höchste in der Zeile und bestimmte sie damit |
+| Angebotsband quer unter dem Bild | 44 px + 6 px Abstand | eine Zeile 11-px-Text in 44 px Kasten, über die ganze Breite |
+| Aktionsspalte mit `min-h-22` | 88 px | hielt 44 px **leer** für eine Glocke, die es nicht gibt |
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **C-6** | **Das Angebot zieht in den Infobereich**, als letzte Zeile, rechtsbündig | Als eigenes Band kostete es 50 px und spannte quer unter dem Bild — genau das, was der Auftrag ausschließt. Unten rechts ist außerdem die Stelle, an der ein Leser den nächsten Schritt sucht |
+| **C-7** | **Keine Reservierung für die Glocke mehr** | Ein dauerhaft leerer 44-px-Bereich ist der größte Einzelposten des entfernten Leerraums. `bellSlot` bleibt als Steckplatz, damit UX-02 keine Layoutänderung wird; die Spalte ist dann so hoch wie ihr Inhalt |
+| **C-8** | **Der Marktwert teilt die Metazeile**, rechtsbündig neben Edition und Element | Messung: der Wert braucht 102 px, das Angebot 117, und ein Telefon hat 179 px Textspalte. Nebeneinander auf der letzten Zeile würden sie umbrechen — und das Angebot muss unten rechts bleiben. Beide bleiben beschriftet (ADR-0033) |
+| **C-9** | **Besitz wird kompakt gesagt:** goldener Grund, goldene Kante, goldene Raute vor dem Namen — der Satz „In deiner Sammlung" bleibt als `sr-only` | Als sichtbarer Text nahm er die halbe Metazeile und verdrängte Edition und Wert. Dreimal sichtbar für den, der Farbe sieht; der Satz bleibt für Hilfstechnik und für erzwungene Farben, wo das Gold wegfällt |
+| **C-10** | **Das Bild wächst auf 64 px**, obwohl die Zeile flacher wird | Es ist gratis: der Textblock braucht ohnehin 70 px, also kostet alles bis 70 keine Höhe. Die erste Skizze der Korrektur hatte 56 px — das wäre eine Verschlechterung ohne Gegenwert gewesen |
+
+**Ergebnis: 138 px → 86 px, also −38 %** (−52 px), bei einem **größeren** Bild
+und einer um 8 px **breiteren** Textspalte. Mit zweizeiligem Namen 102 px, also
+immer noch flacher als die alte Fassung mit einzeiligem.
+
+**Die Stapelordnung ist jetzt die Sache, die man wissen muss.** Die ganze
+Zeile ist der Sammeln-Toggle (ADR-0038), und das geht nur als Überlagerung:
+Herz und Angebot sind eigene Bedienelemente und dürfen nicht in einem Knopf
+stecken. Also —
+
+```
+statische Kinder    Bild, Haarlinie, Textblock      werden zuerst gemalt
+positioniert, in DOM-Reihenfolge:
+  1. die Überlagerung   deckt die Zeile, nimmt jeden Tipp
+  2. die Angebotszeile  `relative`, malt darüber, behält ihre Klicks
+  3. die Herzspalte     `relative`, ebenso
+```
+
+Genau zwei Elemente tragen `relative`, es gibt **kein** `z-index` und keine
+`pointer-events-none`-Ebene. Ein negatives `z-index` auf der Überlagerung war
+der naheliegende Weg und ist falsch: sie würde hinter den eigenen Hintergrund
+des `article` gemalt, und der gewinnt dann die Trefferprüfung.
+
+**Das Herz behält seine 44 px, das Angebot bekommt 36.** Zwei rechtsbündige
+Ziele übereinander in einer Spalte würden sich entweder überlappen oder die
+Zeile auf 88 px Ziele zwingen. Das Herz steht deshalb in einer **eigenen
+Spalte** — dort kann sein Kasten den des Angebots nie treffen, bei welcher
+Höhe auch immer. Die 36 px des Angebots sind die Höhe, die der
+Ansichtsumschalter schon hat; benannt in `row-template.ts`, damit die
+Abwägung sichtbar und an einer Stelle widerrufbar ist.
+
+**Die Spaltenlogik fragt den Container, nicht das Fenster** (korrigiert C-4):
+`@container` plus `@min-[52rem]`. **Die Regel hinter der Zahl:** eine Zeile in
+zwei Spalten darf nie schmaler sein als auf dem größten Telefon. Das sind
+414 px mit 237 px Textspalte; die festen Teile nehmen 169 px, also braucht
+eine Zeile 406 px, und zwei davon plus 12 px Abstand sind 824 px — 52 rem
+(832) ist die nächste runde Zahl darüber. Ein Tablet mit 768 px bleibt
+deshalb einspaltig, **nicht** weil zwei Spalten dort unbrauchbar wären
+(193 px Text würden gehen), sondern weil sie schmaler wären als das Telefon,
+auf das die Zeile ausgelegt ist. Drei Spalten gibt es nicht: bei 1152 px
+Container wären sie schmaler als zwei.
+
+> **Die „18 beschnittenen Kästen" waren kein Fehler, und die Messung war
+> es.** 18 = 9 Karten × 2 Mechanismen: der zweizeilige Namensklemmer
+> (`line-clamp-2`) und die Metazeile mit Auslassungspunkten (`truncate`).
+> Beides sind **Affordanzen** — der Leser sieht, dass mehr da ist —, und die
+> alte Prüfung zählte jeden Kasten mit `overflow: hidden`, dessen Inhalt
+> breiter war. Dass die Zahl ein genaues Vielfaches der Kartenzahl war, war
+> der Hinweis: ein echter Verlust wäre von der Namenslänge abhängig gewesen
+> und hätte nicht auf jeder Karte gleich zugeschlagen.
+>
+> Die Messung unterscheidet jetzt **gewollt** (Klemmer, Auslassungspunkte,
+> Bildbühne) von **Verlust** (abgeschnitten ohne jede Affordanz) und nennt
+> die verlustigen Elemente namentlich. Dazu ersetzt sie die
+> Kasten-Schnittmenge durch eine **echte Trefferprüfung** per
+> `elementFromPoint`: für jedes Bedienelement wird im Browser gefragt, ob ein
+> Tipp auf seine Mitte wirklich bei ihm landet. Das war nötig, weil die
+> Überlagerung aus C-6 die Kästen von Herz und Angebot zwangsläufig
+> überdeckt — die alte Prüfung hätte das als 18 Überlappungen gemeldet,
+> obwohl die Stapelordnung genau dafür gebaut ist.
+
+### Nachtrag vom 2026-10-27 — UX-01C: Element als Marke, Marktwert nach oben, Angebot als Aktion (C-11 bis C-15)
+
+**Anlass.** Die kompakte Höhe war freigegeben, die Gestaltung noch nicht. Der
+Betreiber wollte das Element als Icon statt als Wort, den Marktwert
+unmittelbar unter dem Namen, das Angebot sichtbar als Aktion mit wieder
+44 px Trefferhöhe, und die rechte Spalte auf zwei Positionen vorbereitet.
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **C-11** | **Das Element wird eine Marke vor dem Namen**, kein Wort auf der Metazeile. `src/components/catalog/element-icon.tsx` | Gesucht wurde zuerst: das Projekt hat **keine** Element-Assets (`public/images` führt die Markenzeichen, die Kartenvorlagen und 475 Fotos). Also ein **Platzhalter**, und zwar ausdrücklich abstrakt — **eine** Form für alle zehn, unterschieden durch die zehn Farbtoken, die für genau das schon existieren. Zehn verschiedene Formen wären erfundene Embleme, die sich als die echten ausgeben |
+| **C-12** | **Der Marktwert nimmt den frei gewordenen Platz** — Zeile 2, links, direkt unter dem Namen, 14 px statt 13 | Name → Wert → Angebot lesen sich jetzt als drei Stufen an einer linken Kante. Der Edition-Chip behält das rechte Ende und ist das Einzige auf der Zeile, das kürzen darf: ein beschnittenes „Legendary" ist der kleinere Verlust als ein umgebrochener Preis |
+| **C-13** | **Das Angebot wird eine Pille mit 44 px** — ruhiger Grund, Haarlinie, Hover und Fokus; die ruhige Variante ohne Hover für „Aktuell kein Angebot" | Die Gestaltung sitzt am **Umschlag**, nicht an `OfferLink`: die Komponente ist mit der vertikalen Karte geteilt, wo sie auf der gemalten Silberplatte sitzt. Ihr Link, ihr Text, ihr Pfeil, ihre Schnellansicht-Abfangung und ihr `data-perf`-Marker bleiben unberührt. Welche der zwei Pillen, entscheidet `offered` — das `hasQuickViewOffer()` des Aufrufers, also `v1BuyableOffers`; **keine zweite Kaufbarkeitsregel** |
+| **C-14** | **Die Aktionsspalte trägt zwei Positionen auf einer X-Achse**, Herz oben, Glocke unten — und **reserviert nichts** | `justify-between` nur, wenn eine Glocke da ist, sonst `justify-start`. Eine Zeile ohne Glocke ist nicht für die Glocke höher; eine mit einer wächst auf 100 px, und das sind genau die Zeilen ohne kaufbares Angebot. Ein dauerhaft leerer 44-px-Bereich war der größte Posten der ersten Korrektur und darf nicht zurückkommen |
+| **C-15** | **Auf produktiven Routen erscheint keine Glocke.** `CatalogCard` übergibt kein `bellSlot` | UX-02 und `0150`/`0151` sind nirgends angewendet. Eine Glocke, die aussieht wie eine Funktion und keine ist, wäre eine Lüge. Der Platzhalter für die Designvorschau lebt in der Wegwerf-Hülle im Scratchpad, nicht im Repository: ein `span` ohne Rolle, gestrichelt, halbtransparent, mit `sr-only`-Hinweis |
+
+**Die Höhe: 90 px** bei einem einzeiligen Namen (gegen 86 px davor und 138 px
+am Anfang). Die 44-px-Pille kostet 8 px mehr als der 36-px-Text, bezahlt
+aus dem senkrechten Polster (8 → 6 px) und aus dem Elementwort. Eine Zeile
+mit Glocke ist 100 px. Zweizeiliger Name: 106 px.
+
+> **Der ehrliche Preis von C-11, und er steht im Kopf der Komponente.**
+> `element.ts` sagt: „Colour is never the only signal — the label always names
+> the element." Auf der Zeile **ist** Farbe für einen sehenden Leser ohne
+> Zeigegerät jetzt das einzige Signal. Das ist, was „Icon statt Wort"
+> bedeutet, und es war die Entscheidung des Betreibers. Abgefedert, nicht
+> weggeredet: `title` für den Zeiger, `sr-only` für Hilfstechnik, und
+> **jede andere Fläche** — Karte, Sammlungstabelle, Schnellansicht,
+> Figurenseite, Charakterpanel — schreibt das Element weiter aus. Echte
+> SVG-Formen stellen das zweite Signal wieder her, sobald es sie gibt;
+> `ELEMENT_ICON` ist der eine Ort, an dem sie eingehängt werden, Element für
+> Element und ohne eine Zeile Code.
+
+**Ein Verlust, den die Lint-Warnung gefunden hat und nicht ein Review.** Mit
+dem Elementwort verschwanden die **Serienangabe** und der Hinweis **„Nicht
+mehr im Katalog"** von der Metazeile — `showSeries` wurde unbenutzt, und das
+war die Meldung. Beide sitzen jetzt **links auf der Angebotszeile**, in der
+Hälfte, die vorher leer war: kostet keine Höhe, und „außer Reichweite"
+schlägt die Serienangabe, dieselbe Reihenfolge wie im Metaband der Karte.
+
+### Nachtrag vom 2026-10-27 — UX-01C: die Preishierarchie, und zwei Messfehler (C-16 bis C-20)
+
+**Anlass.** Verbindliche Entscheidung des Betreibers: `MARKTWERT` **über** dem
+Betrag statt daneben, der Betrag prominent unten links, das Angebot als
+**kompakter Chip** unten rechts. Das ersetzt die Anordnung aus C-12/C-13.
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **C-16** | **Drei Zeilen, eine Hierarchie:** Rune + Name · `MARKTWERT` + Serie/Status + Edition · Betrag (17 px) + Angebots-Chip | Die Beschriftung steht jetzt über der Zahl, die sie benennt, und der Betrag ist das Prominenteste im Textblock. Name → Beschriftung → Betrag lesen sich als drei Stufen |
+| **C-17** | **Der Edition-Chip zieht auf die Beschriftungszeile**, ausdrücklich **nicht** auf die Preiszeile | Vorgabe des Betreibers. Die Beschriftungszeile war sonst fast leer — 56 px Beschriftung, 62 px Chip, 8 px Abstand von 179 px — und der Chip kann dort weder den Namen noch den Preis verdrängen. Serie und „Nicht mehr im Katalog" teilen dieselbe Zeile; die Serie ist das Einzige, was kürzen darf |
+| **C-18** | **Sichtbarer Chip 26 px, Touchziel 44 px** | Ausdrücklich erlaubt. Ring und Grund zeichnet eine Ebene, die oben und unten um 9 px eingerückt ist (`CHIP_INSET`); der **Link** füllt die vollen 44 px und ist, was ein Finger trifft. Eine 44-px-Pille las sich in einer Liste von neunzig als Knopf; ein 26-px-Chip liest sich als Chip und verhält sich als Bedienelement |
+| **C-19** | **Der Fallback ist ein Umbruch, nie ein Beschnitt und nie ein kleinerer Preis** | `flex-wrap` auf der Preiszeile. Gemessen: „4,99 €" neben „Angebote ab 4,49 €" braucht 173 px und passt in 179; ein dreistelliges Paar braucht 209 und bricht um. Nur die Figuren, die es brauchen, zahlen eine Zeile Höhe. `priceLineFits()` ist die Stelle, an der ein Test die Grenze nennt |
+| **C-20** | **Nur die Bedienelemente werden positioniert, nicht die Kästen um sie** | Siehe unten — das war ein echter Bedienfehler |
+
+**Höhe: 92 px** bei einem einzeiligen Namen (90 px davor, 138 px am Anfang).
+Mit Glocke 100 px, mit umgebrochener Preiszeile 112 px, mit zweizeiligem
+Namen 108 px.
+
+> ### Die zwei Messfehler der Vorschau, und was dahinter steckte
+>
+> **1. `sr-only` ist kein beschnittener Inhalt.** Tailwinds Helfer ist
+> `width:1px; height:1px; overflow:hidden; white-space:nowrap` — **jede** der
+> 30 Hilfstext-Spannen je Rahmen meldet damit zwangsläufig
+> `scrollWidth > clientWidth`. Die Prüfung zählte sie als Verlust. Sie
+> überspringt jetzt alles, was auf einen 1-px-Kasten geklemmt ist oder einen
+> `clip-path` trägt: versteckt **durch Bauart** ist kein Layoutfehler.
+>
+> **2. Ein Bedienelement, das die ganze Zeile ist, wird absichtlich
+> verdeckt.** Die Sammeln-Überlagerung spannt die ganze Karte; ihr
+> geometrischer Mittelpunkt liegt bei 92 px Höhe mitten in der Preiszeile,
+> die mit Absicht darüber malt. Ein Punkt zu prüfen hieß „neunmal
+> unerreichbar". Gemessen wird jetzt der **erreichbare Anteil** über ein
+> Punktraster; es schlägt nur bei **null** an, und bei kleinen Zielen
+> zusätzlich am Mittelpunkt — denn ein Daumen zielt auf die Mitte eines
+> 44-px-Kastens.
+>
+> **Und dahinter steckte ein echter Fehler, den erst diese Überlegung
+> sichtbar gemacht hat (C-20):** die Angebots**zeile** und die Herz**spalte**
+> trugen `relative` als Ganzes. Damit malten ihre leeren Hälften über der
+> Überlagerung und schluckten jeden Tipp, der dort landete — rund ein Drittel
+> der Karte war tot. Jetzt sind Zeile und Spalte statisch, und nur die 44 px,
+> die wirklich ein Bedienelement halten, liegen über der Überlagerung.
+
+**Ein zweiter echter Fund, von der Arithmetik und nicht vom Hinsehen.** Der
+Chip-Umschlag hatte zunächst `px-2` — zusätzlich zu `OfferLink`s eigenem
+`px-1.5 sm:px-2`. Doppelt gepolstert wird der Chip 133 px breit, und dann
+bricht die Preiszeile auf **jeder** Telefonzeile um statt nur bei den teuren.
+`priceLineFits()` hat es gemeldet, bevor es jemand gesehen hätte; ein
+Screenshot hätte nur nach Pech ausgesehen.
+
+### Nachtrag vom 2026-10-27 — UX-01C: Editions-Banderole, und Preis neben Angebot (C-21 bis C-24)
+
+**Anlass.** Verbindliche Entscheidung des Betreibers: der Edition-Chip raus
+aus dem Infobereich und als **schmale Banderole am Fuß des Figurenbilds**;
+Marktwert und Angebotsaktion auf 360–414 px bei üblichen Preisen **auf einer
+Linie**.
+
+> ### Die Pflichtuntersuchung zuerst: welche Editionen existieren wirklich
+>
+> **Strukturiert modelliert ist genau eine Spalte:** `skylanders.card_type`,
+> per DB-CHECK (`0032`) begrenzt auf **sieben** Werte — `standard`,
+> `special`, `elite`, `dark`, `legendary`, `chase`, `prestige`. Sie ist
+> editoriell und permanent, und V3.6 hat festgelegt, dass sie das Einzige
+> ist, was über die Darstellung entscheidet: „no `name.includes(…)` at render
+> time, no re-derivation from `parseVariant()`, no client-side guess".
+>
+> **„Crystal" ist kein Editionstyp, und ich habe keinen erfunden.**
+> Kristallfinishes tragen `chase` — dessen Artwork der Build wörtlich „a
+> crystal artwork" nennt. Die einzige Crystal-Sprache im Projekt sind
+> `VARIANT_TOKENS` („Clear Crystal", „Green Crystal" …), und die werden gegen
+> **Namen** gematcht. Daraus ein Banner zu bauen wäre genau das Raten, das
+> ADR-0034 und V3.6 verbieten. `creation_crystal` ist außerdem eine
+> Produktart (Katalog-Gruppe), keine Edition.
+
+| # | Festlegung | Grund |
+|---|---|---|
+| **C-21** | **Sechs Banderolen, kein Chip mehr im Infobereich.** `edition-banner.tsx` liest `card_type` über `namesEdition()`; `standard` bekommt keine | Die Regel bleibt eine Regel an einer Stelle, nur eine Ebene weiter innen. Der Textblock nennt keine Edition mehr — nicht auf der Beschriftungszeile und nicht auf der Preiszeile |
+| **C-22** | **Zwei Tinten, abgeleitet aus `EDITION_RANK`** — helle Platte ab Rang 3 (Legendary, Prestige), ruhige für Dark, Special, Elite, Chase | `VariantSeal` hat dieselbe Frage für die vertikale Karte beantwortet und den Kontrast dort gemessen: zwei dunkle Platten mit heller Kante, „Legendary ivory on near-black, the one finish collectors chase". Die Zeile übernimmt die Sprache und leitet die Stufe aus der vorhandenen Ordnung ab statt eine neue Meinung zu bilden. Ein Test hält beide Dateien zeichengleich. **Nie gold** — Gold heißt Besitz, und ein goldenes Banner ließe eine nicht besessene Legendary besessen aussehen |
+| **C-23** | **Die Banderole kostet keine Höhe.** Absolut am Fuß der Bildbühne, die ohnehin `relative overflow-hidden` ist: 13 px von 64, also das untere Fünftel, wo eine Figur ihren Sockel hat. `pointer-events-none`, `aria-hidden`, `truncate` | Vorgabe: kein zusätzlicher Platz unter dem Bild, Figur möglichst wenig verdeckt, Bild nicht gefiltert, abgedunkelt oder skaliert — und sie frisst keinen Tipp, der dem Sammeln-Toggle gehört |
+| **C-24** | **10 px mehr Textspalte, damit die Preiszeile hält:** Polster 8 → 6 px, Spaltenabstände 8 → 6 px; sichtbarer Chip 26 → 24 px | Den Chip wegzunehmen half der **Beschriftungs**zeile, nicht der Preiszeile. Gemessen bei 189 px: „49,99 €" neben „Angebote ab 4,49 €" braucht 179 und passt; „189,50 €" braucht 193 und der Chip bricht um. **Kein Beschnitt, keine verkleinerten Preise** — nur die dreistelligen Beträge zahlen eine Zeile |
+
+**Höhe unverändert 92 px** bei einzeiligem Namen (100 px mit Glocke, 112 px
+mit umgebrochener Preiszeile, 108 px bei zweizeiligem Namen). Die Banderole
+ändert nichts daran, weil sie in der Bildbühne liegt.
+
+**Was unberührt bleibt:** `FigureCard` und `card-template.ts`, `VariantSeal`,
+`OfferLink`, `FavoriteHeart`, Element-Rune, goldene Besitzdarstellung,
+Container-Query-Raster (eine Spalte mobil, zwei ab 52 rem, nie drei),
+Preisermittlung, Angebotsermittlung, Favoriten, Besitzaktionen, Shop-Logik.
+Keine funktionierende Glocke: `CatalogCard` übergibt kein `bellSlot`.

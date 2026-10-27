@@ -188,7 +188,7 @@ zweite Geschäftslogik für Preise, Kaufbarkeit oder Besitz.
 |---|---|---|
 | **UX-01A** | Analyse des Bestands, dateibezogen | **abgeschlossen** (2026-10-26) |
 | **UX-01B** | `FigureRow` — horizontale Darstellung und Besitz-Hervorhebung, ADR-0148 | **gebaut**, nicht committet, **keine Route umgestellt** |
-| **UX-01C** | Ansichtsumschalter samt Persistenz, responsive Feinschliff | offen |
+| **UX-01C** | Ansichtsumschalter, responsive Integration, **Designkorrektur der Zeile** | **gebaut**, nicht committet — Zeile nach der Korrektur noch nicht freigegeben |
 | **UX-02** | Favoritenherz und Verfügbarkeitsglocke in den Karten | offen — braucht **M3** |
 | **UX-03** | Benachrichtigungszentrale `/benachrichtigungen` und Kopfzeilen-Glocke | offen — braucht UX-02 |
 | **UX-04** | automatische Alarmauslösung (Netz **und** sieben Betriebsaktionen) | offen — **ist M4**, Scheduler ist Freigabe-Tor |
@@ -226,14 +226,142 @@ Migration, keine Server Action, keine Abfrage, keine Änderung an Warenkorb,
 Checkout, Lager oder Reservierung.** Der Umschalter fehlt bewusst — bis
 UX-01C ist die Zeile nur aus einem Test erreichbar.
 
+### UX-01C, was tatsächlich gebaut ist
+
+**Neu:** `src/lib/ui/view-store.ts` (generischer Speicher) ·
+`src/components/catalog/catalog-view-mode.ts` ·
+`src/components/catalog/catalog-view-toggle.tsx`
+**Geändert:** `src/components/catalog/figure-grid.tsx` (Rastermodus) ·
+`src/components/catalog/catalog-view.tsx` · `src/components/shop/shop-view.tsx` ·
+`src/lib/i18n/de.ts` · `src/lib/catalog/figure-row.test.ts` (eine Zusage auf
+den neuen Stand gebracht)
+**Tests:** `src/lib/ui/view-store.test.ts` (17) ·
+`src/components/catalog/catalog-view-toggle.test.tsx` (11, echtes DOM
+**inklusive Hydration**) · `src/lib/catalog/catalog-view-mode.test.ts` (35)
+
+Ein Schlüssel (`skyisles.catalog.view`), drei Flächen: `/`, `/favoriten`
+(bekommt ihn, weil sie `CatalogView` rendert) und `/shop`. Vorgabe bleibt die
+klassische Karte. Zeilen stehen einspaltig, ab `lg:` zweispaltig — die
+Begründung ist eine Messung und steht in ADR-0148, Nachtrag C-4. Die Sammlung
+ist unberührt und behält ihren eigenen Karten-/Tabellenumschalter; der
+Administrator bekommt weder Umschalter noch Zeile.
+
+**Was NICHT geprüft ist:** die Darstellung im Browser. In dieser Umgebung ist
+keiner verfügbar (kein Playwright, kein Chromium, Safari ohne freigeschaltete
+Automatisierung). Der Hydrationsnachweis ist echt; Overflow und Touchgrößen
+sind gerechnet und als Messskript in eine Vorschau gelegt, die der Betreiber
+selbst öffnet. Der manuelle Prüfplan steht im Abschlussbericht zu UX-01C.
+
+### UX-01C, Designkorrektur der Zeile (2026-10-27)
+
+**Der Betreiber hat die erste Fassung nach der Sichtprüfung abgelehnt:** zu
+hoch, zu viel Leerraum. Die Zeile ist jetzt **86 px statt 138 px** auf dem
+Telefon — **−38 %** — bei einem **größeren** Bild (64 statt 72 px kostet keine
+Höhe mehr, weil der Textblock die Höhe bestimmt) und einer um 8 px breiteren
+Textspalte.
+
+| Posten | vorher | nachher |
+|---|---|---|
+| Höhe, einzeiliger Name | 138 px | **86 px** |
+| Höhe, zweizeiliger Name | 154 px | **102 px** |
+| Angebot | Band quer unter dem Bild, 44 px + 6 px | letzte Zeile im Infobereich, rechts, 36 px |
+| Glockenreservierung | 88 px Spalte, davon 44 leer | **keine** — `bellSlot` bleibt als Steckplatz |
+| Bild | 72 px, bestimmte die Höhe | 64 px, gratis |
+| Spalten | `lg:` (Fenster) | `@container` ab 52 rem (Kartenbreite) |
+
+Anordnung: Bild · Haarlinie · Infobereich (Name mit goldener Besitzraute ·
+Edition und Element links, Marktwert rechts · Angebot unten rechts) · Herz in
+eigener Spalte. Begründungen und die Stapelordnung stehen in ADR-0148,
+Nachtrag vom 2026-10-27 (C-6 bis C-10).
+
+**Die „18 beschnittenen Kästen" der ersten Messung waren kein Fehler**, sondern
+9 Karten × 2 Affordanzen (Namensklemmer, Auslassungspunkte). Die Messlogik
+unterscheidet jetzt gewollt von Verlust und prüft Treffer per
+`elementFromPoint` statt über Kastenschnittmengen — nötig, weil die Zeile ihren
+Sammeln-Toggle als Überlagerung trägt.
+
+### UX-01C, letzte Designkorrektur (2026-10-27)
+
+Element als farbige Rune **vor** dem Namen statt als Wort · Marktwert
+**direkt unter** dem Namen · Angebot als **44-px-Pille** unten rechts mit
+Grund, Haarlinie und Zuständen · rechte Spalte für **zwei** Positionen
+(Herz oben, Glocke unten, gleiche X-Achse) ohne Reservierung.
+
+| | vorher | jetzt |
+|---|---|---|
+| Höhe, einzeilig | 86 px | **90 px** |
+| Höhe mit Glocke | — | 100 px (nur Zeilen ohne Angebot) |
+| Angebot | 36-px-Text | **44-px-Pille**, zwei Dressuren |
+| Element | Wort rechts auf der Metazeile | 14-px-Rune vor dem Namen |
+| Marktwert | rechts auf der Metazeile | links, direkt unter dem Namen |
+
+**Neu:** `src/components/catalog/element-icon.tsx` (zehn Elemente, eine Form,
+zehn Farbtoken, `ELEMENT_ICON` als einziger Einhängepunkt für echte SVGs) ·
+`src/lib/catalog/element-icon.test.ts`.
+
+**Keine Glocke auf produktiven Routen** (ADR-0148 C-15): `CatalogCard`
+übergibt kein `bellSlot`, weil UX-02 und `0150`/`0151` nirgends angewendet
+sind. Der Platzhalter für die Vorschau lebt in der Wegwerf-Hülle.
+
+**Ehrlicher Preis:** auf der Zeile ist Farbe für einen sehenden Leser ohne
+Zeigegerät das einzige Elementsignal — `element.ts` fordert das Gegenteil.
+`title` und `sr-only` federn es ab, jede andere Fläche schreibt das Element
+weiter aus, und echte SVGs stellen das zweite Signal wieder her.
+
+### UX-01C, Preishierarchie (2026-10-27)
+
+`MARKTWERT` steht **über** dem Betrag, der Betrag prominent (17 px) unten
+links, das Angebot als **kompakter Chip** unten rechts — sichtbar 26 px,
+Touchziel 44 px. Edition-Chip auf der Beschriftungszeile, nie auf der
+Preiszeile. Fallback bei langen Beträgen: der Chip **bricht um**, nichts wird
+beschnitten und kein Preis verkleinert.
+
+| | |
+|---|---|
+| Höhe, einzeilig | **92 px** (138 px am Anfang) |
+| mit Glocke | 100 px · umgebrochene Preiszeile 112 px · zweizeiliger Name 108 px |
+| Umbruchgrenze | „4,99 €" + „Angebote ab 4,49 €" = 173 px passt in 179; dreistellig = 209 bricht um |
+
+**Zwei Messfehler der Vorschau behoben** (ADR-0148 C-20): `sr-only` ist
+1 px breit und muss clippen — kein Verlust; und die Sammeln-Überlagerung ist
+die ganze Zeile, ihr Mittelpunkt liegt absichtlich unter dem Chip. Treffer
+wird jetzt als erreichbarer Anteil gemessen.
+
+**Dahinter ein echter Bedienfehler:** Angebotszeile und Herzspalte trugen
+`relative` als Ganzes und schluckten jeden Tipp in ihren leeren Hälften —
+rund ein Drittel der Karte war tot. Jetzt sind beide statisch, nur die
+Bedienelemente selbst sind positioniert.
+
+### UX-01C, Banderole und Preiszeile (2026-10-27)
+
+**Sondereditionen sind eine Banderole am Fuß des Figurenbilds**, nicht mehr
+ein Chip im Infobereich — sechs von sieben `card_type`-Werten, `standard`
+ohne. Zwei Tinten aus `EDITION_RANK`, zeichengleich mit `VariantSeal`, nie
+gold. Kostet keine Höhe (absolut in der Bildbühne, 13 px von 64).
+
+**„Crystal" ist kein Editionstyp** und wurde nicht erfunden: Kristallfinishes
+tragen `chase`; „Clear Crystal" o. ä. ist ein **namensabgeleitetes**
+Variantenlabel, dessen Benutzung ADR-0034/V3.6 verbieten.
+
+**Marktwert und Angebot auf einer Linie:** Textspalte von 179 auf **189 px**
+(Polster und Spaltenabstände je 8 → 6 px), sichtbarer Chip 24 px bei 44 px
+Touchziel. Übliche Beträge passen nebeneinander, dreistellige brechen
+kontrolliert um — kein Beschnitt, keine verkleinerten Preise.
+
+**Neu:** `src/components/catalog/edition-banner.tsx` ·
+`src/lib/catalog/edition-banner.test.ts`.
+
 ### Offene Punkte
 
-1. **Keine Sichtprüfung im Browser.** jsdom rechnet keine Geometrie: 360, 390
-   und 414 px sind arithmetisch bewiesen (`row-template.ts` gegen den
-   längsten Namen aus `data/catalog/products.json`), und jede verwendete
-   Tailwind-Klasse ist im gebauten CSS nachgewiesen — aber gesehen hat die
-   Zeile noch niemand. Sie wird mit dem Umschalter sichtbar (UX-01C), und
-   dort gehört die Sichtprüfung hin.
+1. **Keine Sichtprüfung im Browser, und das bleibt nach UX-01C offen.** In
+   dieser Umgebung ist kein Browser verfügbar; einen zu installieren wäre
+   eine Änderung des Tech-Stacks und braucht eine eigene Freigabe. Bewiesen
+   sind: die Arithmetik (`row-template.ts` gegen den längsten Namen aus
+   `data/catalog/products.json`), jede verwendete Tailwind-Klasse im gebauten
+   CSS, und die Hydration (`renderToString` plus `hydrateRoot`, Reacts eigene
+   Warnung als Zusage). **Nicht bewiesen: wie es aussieht.** Der manuelle
+   Prüfplan und eine Vorschau mit eingebautem Messskript liegen beim
+   UX-01C-Bericht.
 2. **M3 freigeben** (`0151` dann `0150` auf Staging), sonst bleibt UX-02
    blockiert.
 3. **Produktionsstand:** laut dem Abschnitt „Aktuelle Phase" liegt der

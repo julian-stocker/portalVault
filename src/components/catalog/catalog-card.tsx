@@ -309,6 +309,7 @@ export function CatalogCard({
         highlighted={highlighted}
         showSeries={showSeries}
         trade={trade}
+        offered={quickBuy}
         favoriteSlot={favorite}
         failed={failed}
       />
@@ -343,6 +344,17 @@ export function CatalogCard({
       highlighted={highlighted}
       showSeries={showSeries}
       trade={trade}
+      /*
+       * Whether the offer's pill is dressed as an action (UX-01C). The same
+       * `hasQuickViewOffer()` the quick view already hangs on — no second
+       * buyability rule, and no new call: `quickBuy` is computed once above.
+       *
+       * NO `bellSlot` IS PASSED, AND THAT IS THE POINT. The row supports a
+       * second position in its action column, but the availability bell is
+       * UX-02 and its migrations are not applied anywhere. A bell on a
+       * production route would look like a working feature and be none.
+       */
+      offered={quickBuy}
       favoriteSlot={favorite}
       failed={failed}
     />
