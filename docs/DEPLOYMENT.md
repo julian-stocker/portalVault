@@ -26,6 +26,108 @@ und keine Voraussetzung für irgendetwas.
 
 ---
 
+## Zwei Umgebungen — und die zweite läuft auf dem Mac
+
+**Entscheidung vom 2026-10-27 (ADR-0149).** SkyIsles hat genau zwei
+Umgebungen, und keine dritte ist geplant:
+
+| | Production | Development/Staging |
+|---|---|---|
+| Wo | Vercel, `https://skyisles.app` | lokaler `next dev` auf dem Entwicklungsrechner |
+| Branch | `main` | `development/skyisles-v2` |
+| Datenbank | Production-Supabase | Staging-Supabase (`skyisles-staging`) |
+| Zahlungen | Stripe Live | nichts — kein Stripe-Schlüssel im Browser |
+| Erreichbar für | alle | der Rechner selbst, im LAN-Modus zusätzlich Geräte im eigenen Netz |
+| Start | Push nach `main` | `npm run dev:staging` bzw. `npm run dev:staging:lan` |
+
+**Es gibt kein zweites Vercel-Projekt und keine Staging-Domain.** Das ist
+bewusst: eine dritte Umgebung kostet ein weiteres Supabase-Projekt, einen
+weiteren Satz Auth-Redirects, eine weitere Migrationskette im Rückstand — und
+sie beantwortet keine Frage, die der lokale Server nicht auch beantwortet.
+
+**Vercel-Preview-Deployments sind kein Staging.** Die Preview-Environment
+trägt dieselben `NEXT_PUBLIC_SUPABASE_*`-Werte wie Production (geprüft am
+2026-10-26, siehe „Auf Vercel"), ein Preview redet also mit der
+**Production-Datenbank**. Solange das so ist, ist ein Preview-Deployment zum
+Ausprobieren kein harmloser Vorgang, und die Prüfung einer neuen Oberfläche
+gehört auf den lokalen Server.
+
+### Die beiden Befehle
+
+```bash
+npm run dev:staging       # nur dieser Rechner  — http://127.0.0.1:3000
+npm run dev:staging:lan   # zusätzlich das eigene Netz — Adresse wird ausgegeben
+```
+
+Beide gehen durch **dasselbe Skript** (`tools/dev-staging.mts`, `--lan` ist
+nur ein Flag), lesen **dieselbe** `.env.staging` und passieren **denselben**
+Produktions-Guard: trägt das Ziel nicht genau die in `.env.staging` genannte
+Projektkennung, startet nichts (`tools/lib/staging-guard.mts`). Der
+Service-Role-Key wird in beiden Modi durch einen Platzhalter ersetzt, und die
+Umgebung, die der Server wirklich bekommt, wird vorher nach der
+Production-Projektkennung durchsucht.
+
+**Der Host wird in beiden Modi ausdrücklich gesetzt** — `127.0.0.1`
+beziehungsweise `0.0.0.0`:
+
+> **Befund vom 2026-10-27:** `next dev` bindet in dieser Next-Version **von
+> sich aus `0.0.0.0`**. `npm run dev:staging` war damit schon vorher im
+> Netzwerk erreichbar, ohne dass irgendwo stand, dass das so ist. Jetzt steht
+> der Host in beiden Fällen im Befehl, und der normale Modus ist wirklich
+> lokal.
+
+### Was der LAN-Modus ausgibt
+
+Die Adresse wird **bei jedem Start neu ermittelt** (`os.networkInterfaces()`),
+denn sie wechselt: im Heim-WLAN eine andere als am iPhone-Hotspot. **Keine
+Adresse steht irgendwo im Projekt** — ein Test hält das fest.
+
+Gezählt wird nur, was privat ist (`10/8`, `172.16/12`, `192.168/16`); eine
+öffentliche Adresse würde bedeuten, dass der Rechner direkt am Internet
+hängt, und `169.254.*` heißt, dass kein DHCP geantwortet hat. **Der
+iPhone-Hotspot wird benannt**, weil er immer `172.20.10.0/28` verteilt — das
+ist eine Eigenschaft von iOS und nicht dieses Netzes, deshalb darf sie
+aufgeschrieben werden. Hotspot-Adressen stehen zuerst in der Liste.
+
+**Next blockiert im Entwicklungsmodus fremde Origins.** Ein Telefon, das
+`http://192.168.x.y:3000` aufruft, ist für `next dev` ein anderer Origin als
+der, mit dem der Server gestartet wurde — die Seite kommt, `/_next/*` und der
+HMR-Socket nicht. Der Weg dahin ist `allowedDevOrigins`; der Wert kommt nicht
+aus der Konfiguration, sondern vom Befehl: `tools/dev-staging.mts` setzt
+`SKYISLES_DEV_ORIGINS` (die gefundenen Adressen, der Hostname und der
+Bonjour-Name), und `next.config.ts` liest die Variable. **Ist sie nicht
+gesetzt, fehlt der Schlüssel ganz** — jeder Build, den Vercel macht, sieht die
+Option also nie.
+
+### Vom iPhone aus prüfen
+
+1. Gleiches Netz sicherstellen — entweder beide im WLAN, oder der Mac am
+   Hotspot des Telefons.
+2. `npm run dev:staging:lan` starten und die ausgegebene Adresse am Telefon
+   im Safari öffnen.
+3. Antwortet nichts: `curl -I http://<adresse>:3000/` **auf dem Mac** — kommt
+   dort kein `200`, liegt es am Server und nicht am Netz.
+
+**Der Rückzugriff vom Hotspot-Gerät ist nicht garantiert.** iOS erlaubt nicht
+in jeder Konstellation, dass das Telefon einen Client seines eigenen Hotspots
+erreicht. Wenn es nicht geht, liegt das an iOS, nicht an diesem Server; der
+Befehl sagt das auch so und nennt vier Dinge, die man prüfen kann. Im
+Heim-WLAN funktioniert es zuverlässig, solange der Router keine
+Client-Isolation erzwingt.
+
+> **Grenze bei Auth:** E-Mail-Bestätigung und Passwort-Reset funktionieren
+> über eine LAN- oder Hotspot-Adresse **nicht**. Die Anwendung baut diese
+> Links aus `window.location.origin`, und die Redirect-Allow-List des
+> Staging-Projekts kennt nur `skyisles.app/**` und `localhost:3000/**`. Eine
+> **Anmeldung mit einem bereits bestätigten Konto** geht. Wer am Telefon eine
+> Registrierung durchspielen muss, legt das Konto vorher am Mac an.
+
+**Kein Tunnel, keine Internetfreigabe.** Der LAN-Modus bindet eine private
+Schnittstelle, nennt eine private Adresse, öffnet keinen Port an einem Router
+und registriert keinen öffentlichen Host.
+
+---
+
 ## Environment Variables
 
 Der ausgelieferte Webcode liest genau drei Variablen — nachgewiesen über
@@ -57,6 +159,12 @@ unter `tools/` ihn brauchen (`npm run catalog:import`, `characters:import`,
 
 Nur die beiden `NEXT_PUBLIC_*`-Variablen, für **Production, Preview und
 Development**.
+
+**Und zwar mit denselben Werten** — Preview und Development zeigen auf das
+**Production**-Projekt (geprüft am 2026-10-26). Ein Preview-Deployment ist
+damit keine isolierte Umgebung, sondern Production-Daten unter einer anderen
+Adresse. Darum wird nicht auf Preview getestet, sondern lokal gegen Staging
+(siehe „Zwei Umgebungen").
 
 **`SUPABASE_SERVICE_ROLE_KEY` gehört nicht nach Vercel.** Kein Pfad im
 ausgelieferten Code liest ihn; er umgeht RLS vollständig. Erst wenn die
