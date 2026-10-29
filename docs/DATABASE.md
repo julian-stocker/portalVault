@@ -162,13 +162,16 @@ syntaktisch nötig: er ist das Ziel des zusammengesetzten Fremdschlüssels von `
 | `image_file` | `text` | `^[0-9a-f]{16}\.webp$`, nur Dateiname, nie URL |
 | `is_active` | `boolean not null default true` | statt Löschen; **import-owned**, bei jedem Lauf `true` |
 | `catalog_visible` | `boolean not null default true` | redaktionelle Sichtbarkeit (ADR-0039), **admin-owned**, öffentlich |
+| `catalog_status` | `text not null` **ohne DEFAULT** | redaktioneller Status mit **drei** Werten (`0152`, ADR-0151, **auf Staging seit 2026-10-27**, auf Production nicht); CHECK `public \| hidden \| draft` **und** `(catalog_status = 'public') = catalog_visible`; **admin-owned**, öffentlich |
 | `display_name_override` | `text` **nullbar** | öffentlicher Name statt `name`; nicht leer, wenn gesetzt; öffentlich |
 | `card_type` | `text not null default 'standard'` | auf welches Kartenmotiv die Figur gedruckt wird (0030, sechster Wert in 0031, siebter in 0032); CHECK `standard \| special \| elite \| dark \| legendary \| chase \| prestige`; **admin-owned**, öffentlich |
+| `base_sky_id` | `text` **nullbar** | wovon diese Variante eine Variante ist — **innerhalb derselben Serie** (`0159`, ADR-0156, **auf Staging seit 2026-10-28**, auf Production nicht); zusammengesetzter FK `(base_sky_id, series_code)` mit `ON UPDATE/DELETE RESTRICT`, CHECK gegen Selbstbezug, Trigger gegen Ketten; **admin-owned**, öffentlich; Abschnitt 3.2f |
 | `source` | `text not null default 'import'` | Herkunft (ADR-0070); CHECK `import \| admin`; **nie in der Import-Payload** |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | `updated_at` per Trigger |
 
 Indizes: `(series_code, category_id)` · `(is_active)` · unique `(slug)` ·
-`(series_code) where is_active and catalog_visible` (die öffentliche Katalogabfrage).
+`(series_code) where is_active and catalog_visible` (die öffentliche Katalogabfrage) ·
+unique `(sky_id, series_code)` und `(base_sky_id) where base_sky_id is not null` (beide `0159`, Abschnitt 3.2f).
 
 **`source` ist reine Herkunft (0033, ADR-0070).** Nach erfolgreichem Anlegen ist eine
 admin-erzeugte Figur genauso kanonisch wie eine importierte. Die Spalte steuert **nichts** —
@@ -256,8 +259,112 @@ Tabelle, unabhängig davon, welche Spalten ein Statement nennt.
 |---|---|---|
 | `skylanders.is_active` | Kennt die Legacy-Quelle die Zeile? | Import |
 | `skylanders.catalog_visible` | Soll sie im öffentlichen Katalog erscheinen? | Admin |
+| `skylanders.catalog_status` | **Warum** erscheint sie nicht? `hidden` oder `draft` | Admin (`0152`) |
 | `skylanders.source` | Woher kam die Zeile? `import` \| `admin` | System (0033) |
 | `shop_inventory.is_listed` | Bietet der Shop sie an? | Shop |
+
+**`catalog_status` ist eine BEGRÜNDUNG, keine zweite Sichtbarkeit (`0152`, CAT-02B).**
+`catalog_visible` bleibt die Sicherheitsgrenze: beide Lesepolitiken fragen weiter
+`is_active and catalog_visible` und **nicht** den Status. Ein Entwurf ist deshalb genau so
+unsichtbar wie eine versteckte Zeile, und aus demselben Grund wie vorher. Was dazukommt, ist
+die Auskunft, **warum** — „noch nicht fertig" gegen „absichtlich nicht öffentlich".
+
+**Der Trigger ist der Grund, warum nichts zerbricht.** `skylanders_sync_catalog_status`
+(BEFORE INSERT OR UPDATE, FOR EACH ROW) leitet ab, was der Aufrufer nicht nennt, und der CHECK
+`(catalog_status = 'public') = catalog_visible` bleibt als **Nachweis**, dass die beiden
+Spalten nie auseinanderlaufen. Ein reiner CHECK hätte drei bestehende Schreibpfade verletzt,
+die `catalog_visible` ohne Status schreiben: `admin_set_catalog_visible` (UPDATE nur dieser
+einen Spalte), `admin_create_figure` und `seller_create_catalog_item`.
+
+**Ein Entwurf, den der alte Weg versteckt, BLEIBT Entwurf.** Setzt
+`admin_set_catalog_visible(sky_id, false)` die Sichtbarkeit auf einer `draft`-Zeile, bleibt der
+Status `draft` — die Absicht gehört dem, der sie gesetzt hat. Die vollständige Wahrheitstabelle
+aller siebzehn Schreibwege fährt Probelauf **P60** in `tools/validate-check-sql.mts` an echtem
+PostgreSQL.
+
+**Kein DEFAULT, und das ist Absicht.** `NULL` beim INSERT ist das Signal „der Aufrufer hat
+nichts gesagt", und genau dann leitet der Trigger aus `catalog_visible` ab. Ein Vorgabewert
+`'public'` widerspräche `seller_create_catalog_item`, das ausdrücklich `catalog_visible = false`
+schreibt; ein `'draft'` hätte den Backfill überschrieben.
+
+**Schreibwege:** `admin_set_catalog_status(text, text)` (`0152`, nur `is_platform_admin()`) für
+die drei Werte; `admin_set_catalog_visible(text, boolean)` (`0041`) **bleibt**, weil Zubehör-
+und Betriebsflächen weiterhin die Zwei-Zustands-Frage stellen.
+
+#### 3.2e Was mit einem Entwurf geschieht: zusammenführen oder verwerfen
+
+Der einmalige Katalogimport hat 105 Entwürfe angelegt (CAT-04E). Für jeden gibt es drei
+Wege — bearbeiten und veröffentlichen, in einer bestehenden Figur **aufgehen**, oder
+**verwerfen**. Die beiden letzten sind je eine Definer-Funktion, beide nur für
+`is_platform_admin()` und ohne Recht für `anon`/`public`.
+
+| Funktion | Migration | Was sie tut |
+|---|---|---|
+| `admin_merge_references(text)` | `0154` (Staging seit 2026-10-28) | zählt, wer auf eine SKY-ID zeigt — **hergeleitet aus `pg_constraint`**, nicht aus einer getippten Liste (ADR-0134). `catalog_editorial` zählt ausdrücklich NICHT mit: diese Zeile gehört dem Entwurf selbst |
+| `admin_merge_plan(text, text, text)` | `0156` (Staging seit 2026-10-28), eingeschränkt durch `0157` | der Änderungsplan, **rein lesend** (`stable`): was eine Zusammenführung schreiben WÜRDE, als jsonb-Array `{field, old, new}` in fester Reihenfolge. **Die einzige Stelle, an der die Übernahmeregeln stehen** |
+| `admin_merge_draft(text, text, text, jsonb)` | `0156` (Staging seit 2026-10-28), Rumpf ersetzt durch `0157` (Staging seit 2026-10-28) | führt zusammen und übernimmt **nur die ausgewählten** Felder — **acht** seit `0157` |
+| `merge_note(text, text)` | `0157` (Staging seit 2026-10-28) | die eine Regel für die interne Notiz: Zielnotiz bleibt, veraltete Importhinweise fallen weg, der Rest wird einmal angehängt. `immutable`, ohne Seiteneffekt — sie lässt sich prüfen, ohne zu schreiben |
+| `admin_merge_draft(text, text, text)` | `0154`, Rumpf ersetzt durch `0156` | die Fassung aus `0154` — ab `0156` eine **Weiterleitung** mit `p_selection = NULL` (= alles). Abwärtskompatibel, und es gibt dadurch genau eine Übernahmelogik |
+| `admin_discard_draft(text)` | `0155` (Staging seit 2026-10-28) | löscht **einen** importierten Entwurf. Vier Riegel: Status `draft`, `source = 'admin'`, **nie öffentlich gewesen** (das Journal aus `0152` weiß es), keine Verweise |
+| `admin_delete_figure(text)` | `0162` (**auf Staging seit 2026-10-29**, auf Production nicht — brauchte eine eigene Freigabe) | löscht **jede** Katalogzeile, auf die nichts zeigt — auch eine öffentliche, auch eine aus der Legacy-Quelle. **Drei** Prüfungen: die gezählten Verweise aus `admin_merge_references`, die vier `ON DELETE CASCADE`-Schlüssel **namentlich** in der Meldung, und `order_lines.sky_id` **ausdrücklich** — die einzige SKY-ID-Spalte ohne Fremdschlüssel (ADR-0159). Sie fasst keine Datei in Storage an und gibt die SKY-ID nicht zurück in den Umlauf |
+
+> **ZWEI LÖSCHWEGE, UND SIE BLEIBEN GETRENNT.** `admin_discard_draft` verwirft einen
+> **importierten Entwurf**, der nie öffentlich war — die vier Riegel sind der Grund, warum
+> sie ohne Rückfrage laufen darf. `admin_delete_figure` (`0162`) entfernt **jede**
+> referenzfreie Zeile und ist deshalb hinter einem Bestätigungsdialog. Das Journal
+> unterscheidet sie: `discarded` gegen `deleted`. Sonst deaktiviert der Import nur über
+> `is_active` (`0001`) — löschen tun ausschließlich diese zwei.
+
+**Die bestehende SKY-ID bleibt, und das ist der ganze Punkt.** An ihr hängen Sammlungen,
+Favoriten, Lager, Angebote, Bestellungen und das Orderbuch. Eine Zusammenführung, die eine
+SKY-ID verschiebt, ist Datenverlust mit einem freundlichen Namen. Übernommen werden **acht**
+fachliche Felder — `name`, `display_name_override`, `series_code`, `category_id`, `card_type`,
+`item_type`, `character_id`, `image_override_path`. Nicht übernommen: `sky_id`,
+`slug` (reine Navigation, ADR-0011), `catalog_status` und `catalog_visible` (eine
+Zusammenführung veröffentlicht nichts), `market_price`, `price_updated_at`, `image_file`,
+`source`, `is_active`.
+
+**Drei Regeln, die keine Kür sind:**
+
+* **`series_code` und `category_id` wandern immer gemeinsam.** Das ist EIN zusammengesetzter
+  Fremdschlüssel; eine halbe Übernahme legt die Figur in eine Kategorie einer anderen Serie.
+  `0156` weist eine halbe Auswahl ab, statt sie zurechtzubiegen.
+* **Ein Platzhalter ersetzt keine Angabe.** `card_type`/`item_type` haben generische
+  Vorgabewerte (`standard`, `figure`); bei 51 der 105 Entwürfe stehen sie nur, weil es einen
+  Vorgabewert gibt. Ein unspezifischer Wert überschreibt deshalb nie einen spezifischen —
+  umgekehrt schon.
+* **`admin_note` ist seit `0157` KEIN auswählbares Feld.** Eine interne Notiz ist keine
+  fachliche Katalogangabe, über die ein Mensch Fall für Fall entscheidet — sie ist Buchhaltung.
+  `merge_note()` verarbeitet sie bei **jeder** Zusammenführung: die Notiz der Zielfigur bleibt,
+  veraltete Importhinweise fallen weg, der Rest wird **einmal** angehängt, Leeres bleibt leer.
+  Erzeugt wird nichts: dass zusammengeführt wurde, steht als `merged_from` im Journal
+  (ADR-0154).
+
+**Das Journal muss den Vorgang kennen (`0157`, ADR-0154).**
+`catalog_admin_changes_field_known` (`0004`, erweitert in `0007` und `0033`) kennt die
+erlaubten `field`-Werte. `0152` hat den Journaltrigger ersetzt, damit er `catalog_status`
+schreibt, und die Liste nicht erweitert — **jeder Statuswechsel lief damit in `SQLSTATE
+23514`**, und der erste echte Merge ebenso (`merged_from`). `0157` nimmt genau drei Werte dazu:
+`catalog_status`, `merged_from`, `discarded`. Die Liste bleibt eine Liste; sie ist der Grund,
+warum ein vertippter Feldname auffällt statt still im Journal zu landen.
+
+**Die Feldauswahl ist serverseitig (`0156`, ADR-0153).** Die Allowlist ist eine Konstante im
+Funktionsrumpf, es gibt **kein dynamisches SQL**, und die Werte im Aufruf sind eine
+**Behauptung über den Bildschirm** — kein Schreibauftrag: `p_selection` nennt je Feld das
+Paar `{old, new}`, das der Bediener gesehen hat, der Server vergleicht es mit
+`admin_merge_plan()` und bricht bei jeder Abweichung ab. Geschrieben wird aus der Zeile des
+Entwurfs; nur `admin_note` und `image_override_path` nehmen ihren Wert aus dem Plan, weil er
+dort erst entsteht.
+
+**Das Bild zieht um, und zwar vor der Datenbank.** PostgreSQL und Supabase Storage teilen
+keine Transaktion. Der Aufrufer kopiert das Objekt **zuerst** unter die SKY-ID der Zielfigur —
+inhaltsadressiert, ein zweiter Versuch ist also folgenlos — und reicht den fertigen Pfad
+herein; die Funktion prüft nur, dass er der Zielfigur gehört. Kopieren-dann-schreiben lässt
+nur zwei Ausgänge zu: alles fertig, oder ein **verwaistes Objekt** von ein paar Kilobyte ohne
+Datenbankänderung. Umgekehrt könnte die Karte auf ein Objekt zeigen, das es nicht gibt, und
+das ist ein fehlendes Bild. **Gelöscht wird im Speicher nichts** — weder das Objekt des
+Entwurfs noch das bisherige der Zielfigur; `admin_discard_draft()` **benennt** ein verwaistes
+Bild im Rückgabewert (`orphaned_image`), statt es anzufassen.
 
 **Warum hier keine interne Notiz steht.** `grant select on public.skylanders to anon` gilt für
 **jede** Spalte, die die Tabelle je bekommt, und RLS filtert Zeilen, nicht Spalten. Am
@@ -308,6 +415,167 @@ transitiv über `categories`.
 **Nicht enthalten und nicht vorgesehen:** Lagerbestand, `available`, Ankaufpreis, eBay-Daten,
 externe Titel, Mapping-Informationen (ADR-0008). Statisch geprüft: keine dieser Spalten
 existiert.
+
+#### 3.2f Vier Identitäten, und `base_sky_id` ist die engste (Migrationen `0158`, `0159`)
+
+Eine Katalogzeile trägt vier Identitäten, und sie fallen nie zusammen:
+
+| | Was sie sagt | Reichweite | Wo sie steht |
+|---|---|---|---|
+| `sky_id` | **dieses Sammelobjekt** — daran hängen Sammlung, Favorit, Lager, Angebot, Bestellung | eine Zeile | PK, nie abgeleitet, nie neu vergeben (ADR-0070) |
+| `character_id` | **derselbe Charakter**, über Serien hinweg („Drobot") | serienübergreifend | `characters.id`, kuratiert (ADR-0034, ADR-0070b) |
+| `base_sky_id` | **wovon diese Variante eine Variante ist** | innerhalb **einer** Serie | `skylanders.base_sky_id` (`0159`, ADR-0156) |
+| Anzeigename | reine Darstellung | — | abgeleitet, nie gespeichert (ADR-0030) |
+
+**`skylanders.base_sky_id`** — `text`, nullbar, und `NULL` ist der Normalfall: eine Figur, die
+keine Variante ist, hat keine Basisfigur. Vier Riegel hängen daran, und jeder fängt etwas
+anderes:
+
+| Riegel | Was er abfängt | SQLSTATE |
+|---|---|---|
+| `skylanders_id_series_uniq` unique `(sky_id, series_code)` | trägt den Fremdschlüssel überhaupt erst | — |
+| `skylanders_base_same_series` FK `(base_sky_id, series_code)` → `(sky_id, series_code)`, `on update restrict on delete restrict` | eine Basisfigur aus einer **anderen** Serie, und das Löschen einer Figur, die noch Varianten trägt | `23503` bzw. `23001` |
+| `skylanders_base_not_self` CHECK `base_sky_id is distinct from sky_id` | die Figur als eigene Basis | `23514` |
+| Trigger `skylanders_variant_base_guard()` | **Ketten in beiden Richtungen** — eine Variante als Basis, und eine Basisfigur, die selbst eine bekommt. Greift auch bei einem rohen `UPDATE`, der die RPC umgeht | `P0001` |
+
+Teilindex `skylanders_base_sky_id_idx` `where base_sky_id is not null`.
+
+**Serienänderung heißt `RESTRICT`, niemals `CASCADE`** (Entscheidung des Betreibers,
+ADR-0156). Zöge eine Serienänderung die Varianten mit, verschöbe ein einzelner Klick eine
+ganze Gruppe — und eine Figur in der falschen Serie ist im Katalog unsichtbar falsch
+einsortiert. `RESTRICT` sagt stattdessen „löse die Varianten erst", und das ist eine
+Entscheidung, die ein Mensch trifft.
+
+**Die Schreibwege, alle nur für `is_platform_admin()`, alle `security definer` mit leerem
+`search_path` und ohne Recht für `anon`/`public`:**
+
+| Funktion | Migration | Was sie tut |
+|---|---|---|
+| `admin_create_character(text)` | `0158` | legt eine Familie an; ein bereits vorhandener Name wird abgewiesen, nicht stillschweigend geteilt |
+| `admin_set_character(text, bigint)` | `0158` | ordnet eine Figur einer Familie zu; `NULL` ist der Rückweg |
+| `admin_publish_as_variant(text, bigint)` | `0158` | der dritte Importweg: Entwurf veröffentlichen **und** einer Familie zuordnen, in einem Vorgang (ADR-0155) |
+| `admin_set_variant_base(text, text, boolean)` | `0159` | setzt oder löst die Basisfigur einer bestehenden Figur |
+| `admin_publish_with_base(text, text, boolean)` | `0159` | Entwurf veröffentlichen **und** auf eine Basisfigur setzen, atomar — ein Fehler an der Journalzeile rollt beides zurück |
+| `admin_publish_variant_auto(text, text)` | `0161` (**auf Staging seit 2026-10-29**, auf Production nicht) | dasselbe **ohne Frage an den Bediener**: er wählt nur die Basisfigur, die Familie regelt die Datenbank (ADR-0157). Sie schreibt **nicht selbst**, sondern ruft `admin_set_character`, `admin_set_variant_base` und `admin_set_catalog_status` — es gibt weiterhin einen Schreibweg je Spalte |
+
+Jede dieser Funktionen schreibt ihre Journalzeile; `base_sky_id` ist der **zwölfte** erlaubte
+`field`-Wert in `catalog_admin_changes_field_known`, `character_id` der elfte. `0162` nimmt
+`market_price` als **dreizehnten** und `deleted` als **vierzehnten** auf (auf Staging seit 2026-10-29), `0163` dann `types` und `visible_type` als **fünfzehnten** und **sechzehnten** (auf Staging ebenfalls seit 2026-10-29).
+
+**Der TYPE als Menge (`0163` und `0164` auf Staging seit 2026-10-29, ADR-0160).**
+`skylanders.types` (`text[]`) führt die vollständige Klassifikation eines
+Artikels aus **17** Werten in drei Gruppen — Figuren (Giant, Swapper, Master,
+Sensei, Mini, Sidekick), weitere Artikel (Item, Trap, Vehicle, Crystal) und
+Varianten (LightCore, Special, Dark, Legendary, Elite, Chase, Prestige).
+„Standard" ist **kein Wert**, sondern die leere Menge. Daneben stehen
+`visible_type` (der eine, der als Banner erscheint) und
+`visible_type_decided` — drei Zustände, die eine nullbare Textspalte nicht
+auseinanderhalten kann:
+
+| `visible_type` | `decided` | Bedeutung |
+|---|---|---|
+| NULL | `false` | niemand hat entschieden |
+| NULL | `true` | **ausdrücklich „–"** |
+| gesetzt | immer `true` | dieses Banner |
+
+> **Die Mitgliedschaft ist eine Zeilen-CHECK**, kein Trigger und kein
+> Versprechen der Anwendung: `visible_type is null or visible_type = any
+> (types)`. Genau dafür steht die Menge als Array auf derselben Zeile und
+> nicht in einer Zuordnungstabelle — dort bräuchte dieselbe Regel einen
+> zusammengesetzten Fremdschlüssel, der Katalogexport einen eigenen Bereich,
+> und `admin_merge_references` zählte einen neuen Fremdschlüssel und
+> blockierte damit **jede** Figurenlöschung (ADR-0159).
+
+Ein normalisierender Trigger (`skylanders_canonical_types`) hält die Menge
+sortiert und doppelfrei — „keine Doppel" bräuchte eine Unterabfrage und geht
+in einer CHECK nicht.
+
+| Funktion | Migration | Was sie tut |
+|---|---|---|
+| `admin_set_figure_types(text, text[])` | `0163` (**auf Staging seit 2026-10-29**, auf Production nicht) | ersetzt die Menge; fällt der sichtbare Type heraus, wird das Banner auf **ausdrückliches „–"** gesetzt |
+| `admin_set_visible_type(text, text)` | `0163` (**auf Staging seit 2026-10-29**, auf Production nicht) | wählt EINEN der hinterlegten als Banner, oder keinen; weist jeden anderen ab und nennt die Wahl |
+
+> **`card_type` BLEIBT EINE EIGENE SPALTE, und das ist gemessen.** Sie steuert
+> die **Kartenkunst** der senkrechten Karte in Shop und Sammlung — sieben
+> Werte, jeder mit einer PNG-Datei. Eine Ableitung aus der Typmenge ist
+> **nicht verlustfrei**: `supabase/checks/cat10_projection_proof.sql` (alle 701
+> Zeilen) findet SKY-0854, deren Kartenkunst sich änderte, zwei Werte mit
+> demselben Rang (`chase`/`elite`), und 508 bzw. 193 Zeilen, bei denen jede
+> Typänderung das Artwork mitbewegte. Zwei Fragen, zwei Spalten; der Dialog
+> nennt sie „Types" und „Kartenkunst".
+
+Die Erstbelegung kommt aus `categories.catalog_group`, dem **Kategorienamen**
+(nur so sind Mini und Sidekick zu trennen — beide tragen heute die Gruppe
+`mini`) und `card_type`, dazu eine **kuratierte Liste von 21 LightCore-SKY-IDs**
+nach dem Muster von `0032`. **Kein Figurenname wird gelesen** (ADR-0034).
+`0164` nimmt alle drei Felder in die Plattformsicherung — `types` allein wäre
+eine halbe Sicherung, weil jedes Banner verloren ginge.
+
+**Der Marktwert an der Kachel (`0162`, auf Staging seit 2026-10-29, ADR-0159).**
+`admin_set_market_price(text, numeric)` schreibt `skylanders.market_price` und
+`price_updated_at` — **eine** Spalte und ihr Datum, sonst nichts. `NULL` heißt „Preis
+offen" (ADR-0010) und nimmt das Datum mit; eine `0` weist sie mit einem eigenen Satz ab,
+und `skylanders_market_price_positive` (`null or > 0`) bleibt die letzte Schicht dahinter.
+
+> **Der angezeigte Marktwert ist nicht der gespeicherte.** Der Katalog druckt
+> `market_price × (1 + boost/100)`, gerechnet in `src/lib/catalog/market-boost.ts` im
+> Moment des Druckens und **nie gespeichert**. Die Inlinebearbeitung bindet deshalb an den
+> **gespeicherten** Wert — schriebe sie den gedruckten zurück, wäre der Zuschlag beim
+> nächsten Lesen zweimal drin und beim nächsten Speichern dreimal.
+
+**Die Familie entsteht von selbst (`0161`, ADR-0157).** `admin_publish_variant_auto` kennt
+vier Lagen: die Familie der Basisfigur wird **übernommen** · hat nur die Variante eine, bleibt
+die Basisfigur **unberührt** · hat keine von beiden eine, wird die Familie mit dem **Namen der
+Basisfigur** gesucht, **bestätigt** und benutzt oder angelegt · haben beide **verschiedene**,
+bricht der Aufruf ab.
+
+> **Namensgleichheit findet eine Familie, bestätigt sie aber nicht.** Nötig ist die
+> Wiederverwendung, weil „Chop Chop", „Stump Smash" und „Wrecking Ball" je **zweimal** im
+> Katalog stehen (`SA` und `G` Series 2) und beide Zeilen Basisfigur eines Entwurfs sind.
+> Hinreichend ist sie nicht (ADR-0034: „Kaos" ist Trap, Trophy **und** Sensei). Deshalb muss
+> **jedes Mitglied** der gefundenen Familie einen Namen tragen, der mit dem der Basisfigur an
+> einer **Wortgrenze** vereinbar ist — sonst Abbruch mit Nennung des Mitglieds. Das ist ein
+> **Veto, keine Suche**: gefunden wird nur über Gleichheit, und damit entsteht keine Zuordnung
+> aus einer Namensähnlichkeit. Verglichen wird mit `right()` statt `like`, weil ein Artikelname
+> `%` oder `_` enthalten darf.
+
+**Nebenläufigkeit:** ein `pg_advisory_xact_lock` auf dem kleingeschriebenen Familiennamen vor
+der Suche, und beide Katalogzeilen in **einer** Anweisung in `sky_id`-Ordnung gesperrt — eine
+feste Sperrordnung kann keinen Deadlock bauen. Vorbedingung ist der eindeutige Index auf
+`lower(characters.canonical_name)` aus `0002`: ohne ihn wäre „die Familie mit diesem Namen"
+eine Auswahl und keine Beschreibung.
+
+**Eine Zusammenführung überträgt die Basiszuordnung NICHT** (zweite Entscheidung des
+Betreibers, ADR-0156). Geht eine Variante in einer bestehenden Figur auf, ist deren
+Basiszuordnung eine Aussage über die **verschwindende** Zeile — sie auf das Ziel zu schreiben
+hieße behaupten, das Ziel sei eine Variante derselben Basis. Das ist eine fachliche Aussage,
+die niemand getroffen hat. `base_sky_id` steht deshalb **nicht** in der Allowlist der acht
+übernehmbaren Felder.
+
+**Was `0159` am Zusammenführen ändern musste.** `admin_merge_references(text)` (`0154`) leitet
+aus `pg_constraint` her, wer auf eine SKY-ID zeigt — und nahm dabei an, ein Fremdschlüssel habe
+**eine** Spalte. `base_sky_id` ist der erste zweispaltige im Projekt. Ohne Anpassung hätte jede
+Zusammenführung und jedes Verwerfen abgebrochen (Probelauf `P67` hat das vorher gezeigt).
+`0159` ersetzt den Rumpf: die verweisende Spalte wird über `confkey` bestimmt, also über die
+Stelle, an der der Schlüssel wirklich auf `sky_id` zeigt. Ein Fremdschlüssel, der **nicht** auf
+`sky_id` zeigt, scheitert weiterhin laut statt leise.
+
+**In der Sicherung** führt die Plattformsicherung `base_sky_id` seit `0160` (**auf Staging
+seit 2026-10-28**, auf Production nicht) als **Feld** des Bereichs `skylanders` — Bereichszahl und
+`format_version` bleiben, Archive ohne das Feld bleiben lesbar. Die Betriebssicherung führt es
+**dauerhaft nicht**: eine Variantenbeziehung ist redaktionelle Gruppierung der Plattform, kein
+Händlerdatum. **Eine Wiederherstellung hat damit eine Reihenfolge INNERHALB einer Tabelle** —
+der Verweis zeigt auf `skylanders` selbst. Ein Einspielen in **einer** Anweisung ist
+reihenfolgefrei (der Fremdschlüssel prüft am Anweisungsende), ein zeilenweises nicht
+(`23503`), und `set constraints all deferred` hilft **nicht**, weil die Constraint nicht
+aufschiebbar ist. Alles gemessen in Probelauf **P69**, aufgeschrieben in
+`supabase/checks/0160_restore_order.md`.
+
+**Keine Massenverknüpfung.** `0159` ordnet **nichts** zu; die Nachkontrolle belegt 0
+Zuordnungen und 0 Journalzeilen. Die 70 zuordenbaren Paare aus
+`supabase/checks/cat07_base_figure_survey.sql` bleiben offen, und jede Zuordnung ist eine
+einzelne Entscheidung.
+
 
 ### 3.3c `catalog_editorial` — die interne Seite (Migration `0004`)
 
@@ -497,7 +765,8 @@ sichtbar und benannt, statt als Fehler zu erscheinen.
 
 #### Seit `0139`: eine dritte Stufe, und sie sitzt an der Position
 
-**Vorbereitet, nirgends angewendet** (`supabase/migrations/APPLIED.md`). Spiele und Portale
+**Auf Staging seit dem 2026-10-20, auf Production seit dem 2026-10-21 angewendet**
+(`supabase/migrations/APPLIED.md`). Spiele und Portale
 dürfen künftig verkauft werden (ADR-0129) — aber **Stück für Stück**:
 
 | Stufe | wo | sagt |
@@ -4258,7 +4527,8 @@ richtig: die Datei ist älter als das Manifest.
 
 ### 3.3at3 Zubehör wird ein Katalogartikel (`0137`, `0138`, ADR-0128 Z2/Z3)
 
-**Stand: lokal vorbereitet, nirgends angewendet** (`supabase/migrations/APPLIED.md`).
+**Stand: auf Staging seit dem 2026-10-20, auf Production seit dem 2026-10-21 angewendet**
+(`supabase/migrations/APPLIED.md`).
 
 #### Was `0137` ändert — der Weg
 
@@ -4388,9 +4658,9 @@ sie doppelt, und `reconciled_legacy` lässt sich über
 `seller_set_purchase_item_state` ohnehin nicht setzen (`0053`).
 
 Prüf-SQL: `supabase/checks/0132_preflight.sql` und `0132_postflight.sql`.
-Tests: `src/lib/orderbook/purchase-historical-edit.test.ts`. **`0132` ist
-lokal vorbereitet und nirgends angewendet** (`supabase/migrations/APPLIED.md`,
-Abschnitt „Nicht angewendet").
+Tests: `src/lib/orderbook/purchase-historical-edit.test.ts`. **`0132` ist seit dem
+2026-10-18 auf Production und inzwischen auch auf Staging angewendet** — dort mit
+zwei Postflights belegt (`supabase/migrations/APPLIED.md`).
 
 ### First-Party-Shop — konzeptionelle Richtung, **keine dieser Strukturen existiert**
 
@@ -4815,7 +5085,7 @@ verschiedene Feldregeln, verschiedene Wächter; `0104` wurde dafür nicht angefa
 
 | Funktion | Migration | Liefert |
 |---|---|---|
-| `system_platform_export()` | `0105`, erweitert in `0144` (**nirgends angewendet**) | `database.json` — **53** Bereiche in einem Statement, **54 ab `0144`** (`purchase_calculations` kommt dazu, `format_version` steigt auf 2) |
+| `system_platform_export()` | `0105`, erweitert in `0144` (**auf Staging seit 2026-10-25, auf Production nicht**), in `0153` (**auf Staging seit 2026-10-28**, auf Production nicht) und in `0160` (**auf Staging seit 2026-10-28**, auf Production nicht) | `database.json` — **53** Bereiche in einem Statement, **54 ab `0144`** (`purchase_calculations` kommt dazu, `format_version` steigt auf 2). `0153` fügt **ein Feld** hinzu, keinen Bereich: `skylanders.catalog_status`. Die Bereichszahl bleibt 54, `format_version` bleibt 2, und Archive der Version 2 ohne das Feld bleiben lesbar. **Ohne `0153` käme jeder Entwurf nach einer Wiederherstellung als `hidden` zurück** — `catalog_visible` ist bei beiden `false`. `0160` fügt nach demselben Muster ein zweites Feld hinzu: `skylanders.base_sky_id`; ohne es käme **jede Variante als eigenständige Figur** zurück, mit Familie aber ohne Basis. Bereichszahl und `format_version` bleiben; was eine Wiederherstellung mit Varianten verlangt, steht in `supabase/checks/0160_restore_order.md` |
 | `system_auth_inventory()` | `0107` | `auth-users.json` — sieben Felder je Konto |
 | `admin_platform_export_runs()` | `0106` | die Historie, neueste zuerst (`order by id desc`) |
 | `admin_record_platform_export()` | `0106` | ein Lauf, immer als `generated`, gibt die `id` zurück |
@@ -5137,7 +5407,7 @@ purchase_id is not null`). Damit kann kein Einkauf zweimal beansprucht werden, u
 übernommen" ist einfach `purchase_id is not null`. Der Übernahmeweg selbst existiert nicht;
 geschrieben wird die Spalte später ausschließlich serverseitig, niemals vom Client.
 
-### In der Plattformsicherung ab `0144` (vorbereitet, nirgends angewendet)
+### In der Plattformsicherung ab `0144` (auf Staging seit 2026-10-25, auf Production nicht)
 
 Die Tabelle fiel zunächst aus der Sicherung — nicht aus einer Entscheidung,
 sondern weil der Vollständigkeitswächter seine Tabellenliste von Hand

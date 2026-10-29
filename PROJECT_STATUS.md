@@ -406,6 +406,1613 @@ kontrolliert um — kein Beschnitt, keine verkleinerten Preise.
 **Neu:** `src/components/catalog/edition-banner.tsx` ·
 `src/lib/catalog/edition-banner.test.ts`.
 
+### UX-01D, Aktionsleiste und Preiszeile (2026-10-27) — gebaut, nicht committet
+
+Nach dem Test auf dem echten iPhone. Zwei Änderungen, die zusammengehören:
+**die Aktionen verlassen die rechte Spalte** und wandern als waagrechte
+Leiste neben den Namen, und die 50 px, die diese Spalte kostete, gehen an
+den Namen und an die Preiszeile — **deshalb** reicht der Angebots-Chip jetzt
+an die Kante.
+
+```
+┌────────┬─┬───────────────────────────────────────────┐
+│        │ │ ◆ ● Slobber Tooth              ⓘ    ♥    │
+│ 64 px  │ │ MARKTWERT                                 │
+│[Chase] │ │ 189,50 €   Spyro's Adv.    ⟨ab 4,49 € ›⟩ │
+└────────┴─┴───────────────────────────────────────────┘
+```
+
+**Die Infoansicht musste nicht erfunden werden.** `QuickView` ist ein
+**Kaufdialog** — `quickViewModel()` gibt ohne Angebot `null` zurück, also
+öffnet es genau im Zustand nichts, der einen Info-Knopf am nötigsten
+braucht. `/skylanders/<slug>` ist die echte Detailseite und existiert für
+jedes Sammelobjekt. Dorthin führt Info, nicht prefetched. Auch die
+Beschriftung lag schon im Wörterbuch (`de.catalog.infoFor`, bis jetzt
+unbenutzt).
+
+**Die Glocke bekommt Platz und Bedingung, keinen Knopf:** erste Position in
+der Leiste, und nur bei `!offered` — dieselbe Fahne wie der Chip, invertiert.
+`CatalogCard` übergibt weiterhin **kein** `bellSlot`, also zeigt keine
+produktive Route ein Steuerelement, das nicht funktionieren kann. Eine Zeile
+**mit** Angebot zeigt auch dann keine Glocke, wenn ein Aufrufer eine
+übergibt.
+
+**Höhe: gleichmäßig 102 px** — 44 (Leistenziel) + 2 + 44 (Chipziel) statt
+16 + 16 + 44. Das sind 10 px mehr als UX-01C bei einzeiligem Namen und
+**6 px weniger** bei zweizeiligem, weil 32 px jetzt in die 44 der Leiste
+passen. Eine Liste aus 90 Zeilen springt nicht mehr.
+
+**Der eine Preis, offen benannt:** bei **360 px** fasst der Name rund 17
+Zeichen je Zeile, der längste Katalogname (39 Zeichen) wird also auf der
+zweiten Zeile beschnitten — voller Text im `title`, und ab **390 px** wieder
+vollständig. Die Alternative wäre eine Leiste gewesen, die ein langer Name
+überdecken kann, und genau das war ausgeschlossen. **Ein Test hat das
+aufgedeckt:** die bisherige Namensprüfung rechnete mit der ganzen
+Textbreite, die der Name nie hatte.
+
+**Zwei Modellfehler mitbehoben:** die Zwei-Spalten-Prüfung zog das
+Seitenpolster zweimal ab (`@container` sitzt schon innerhalb) und benutzte
+den Spaltenabstand der Zeile für den des Rasters. Beides heißt jetzt
+`GRID_GAP_WIDE`; die Schwelle von 52 rem hält mit 7 px je Spalte Luft.
+
+**Neu:** `src/components/catalog/info-link.tsx` · **geändert:**
+`figure-row.tsx`, `row-template.ts`, `catalog-card.tsx`, `offer-link.tsx`,
+`de.ts` und die beiden Zeilen-Testdateien. Prüfungen: 85 in
+`figure-row.test.ts`, 50 im DOM-Test; Gesamtsuite 12 644 grün,
+`npm run check` vollständig.
+
+**Keine Sichtprüfung im Browser** — die neun von dir genannten Fälle (360,
+390, 414, zwei Spalten, lange Namen, dreistellige Werte, lange
+Angebotspreise, Figuren ohne Angebot, gesammelt/nicht gesammelt) sind als
+**Rechnung** über die gemessene Vorlage geprüft, nicht als Screenshot. Das
+Urteil fällt am iPhone.
+
+### UX-01E, responsive Kachelansicht (2026-10-27) — gebaut, nicht committet
+
+Nach der Sichtprüfung am Desktop, **einschließlich der Korrektur des
+Rasterfehlers, den diese Prüfung gefunden hat.**
+
+**Der Modus heißt „Kacheln".** Der gespeicherte Wert (`rows`) und der
+Schlüssel (`skyisles.catalog.view`) bleiben unverändert — eine gemerkte
+Ansicht ist Benutzerzustand und wird nicht für ein Wort im Oberflächentext
+verworfen. Live im echten HTML bestätigt.
+
+#### Der Rasterfehler, und warum die Rechnung ihn nicht fand
+
+Die erste Fassung schrieb den 520-px-Deckel der Kachel in die **Rasterspur**:
+
+```
+grid-cols-[ repeat( auto-fill, minmax( min(360px,100%), 520px ) ) ]   ← falsch
+                                       ↑ hier stand der Deckel
+(mit Leerzeichen notiert: Tailwind scannt auch diese Datei, und die
+ geschlossene Schreibweise würde die tote Regel weiter erzeugen)
+```
+
+Das liest sich als „Kacheln zwischen 360 und 520 px, so viele wie passen" —
+aber **`auto-fill` zählt die Wiederholungen nach dem MAXIMUM der Spur, wann
+immer dieses Maximum definit ist.** 520 px ist definit, der Browser fragte
+also, wie viele 520-px-Kacheln passen:
+
+| Container | Spuren nach MAX (520) | Spuren nach MIN (360) |
+|---|---|---|
+| 968 (normales Laptopfenster) | **1** | 2 |
+| 1120 (`max-w-6xl`, das Maximum) | **2** | 3 |
+| für drei nötig | **1584** | 1104 |
+
+Drei Spalten hätten 1584 px Container gebraucht, die `max-w-6xl` nie
+hergibt. Also **eine** Kachel von 520 px, von `justify-center` mittig
+gestellt, mit leerer Seite links und rechts — genau der Screenshot. Und
+`tileColumns()` teilte durch das **Minimum**, hat das Modell also bestätigt,
+statt den Fehler zu fangen.
+
+**Die Elternkette war unschuldig,** und das ist am echten gerenderten HTML
+des laufenden Servers geprüft, nicht am Quelltext:
+`body → div → main.mx-auto.w-full.max-w-6xl → div.flex.flex-col.gap-7 → grid`.
+Alles blocklevel, Spalten-Flex mit `stretch`, kein zweites `max-w`, kein
+`w-fit`, kein `items-center`, kein shrink-to-fit.
+
+#### Die Korrektur
+
+```
+grid gap-x-3 gap-y-2 grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]
+```
+
+**Der Deckel gehört der Kachel, nicht der Spur:** `FigureRow` trägt
+`mx-auto w-full max-w-[520px]`. Damit kommt die Zählung wieder vom Minimum,
+und `justify-center` ist weg — `1fr`-Spuren verbrauchen die Zeile, es bleibt
+nichts zu zentrieren. (Dass überhaupt etwas zu zentrieren übrig war, hat den
+Fehler wie eine Absicht aussehen lassen.)
+
+| Viewport | Container | Spalten | Kachel | Textblock | Name mit Glocke |
+|---|---|---|---|---|---|
+| 360 / 390 / 414 | 328 / 358 / 382 | 1 | 328 / 358 / 382 | 239 / 269 / 293 | 101 / 131 / 155 |
+| 768 | 736 | **2** | 362 | 257 | 119 |
+| 1024 | 992 | **2** | 490 | 385 | 247 |
+| 1280 / 1600 | 1120 | **3** | 365 | 260 | 122 |
+
+Ein einzelner 600-px-Track ergibt eine Kachel von 520, mittig in ihrem Track
+— der Fall „übermäßig langgezogene Einzelkachel" bleibt behoben.
+
+#### Das Übrige
+
+**Das Elementsymbol ist aus der Kachel entfernt** (Korrektur C-45): oben links
+steht nur der Name, 14 px fett. `element-icon.tsx`, die Elementdaten und die
+Detailseite sind unberührt, und jede andere Fläche nennt das Element weiter in
+Worten. Der Name gewinnt dadurch 20 px — bei 360 px mit Glocke jetzt **24
+Zeichen über zwei Zeilen statt 20**, also mehr als neun von zehn
+Katalognamen vollständig statt vier von fünf.
+
+**Die Editions-Banderole liegt in einem eigenen Streifen unter dem Bild**,
+Bild und Streifen in einer gerundeten, geringten Platte. Kein Overlay, nichts
+beschnitten, nichts verkleinert — 64 + 13 = 77 px bleiben unter den 90 px des
+Textblocks, der Streifen kostet also **keine Höhe**, und eine Kachel mit
+Edition ist exakt so hoch wie eine ohne.
+
+**Kein Besitzsymbol vor dem Namen**, goldene Hervorhebung vollständig
+erhalten; der unsichtbare Besitzsatz blieb, weil er die Stückzahl nennt und
+eine Darstellung mit erzwungenen Farben überlebt.
+
+**Die Glocke ist sichtbar und eindeutig deaktiviert** — ein echter
+`disabled`-Knopf mit „Benachrichtigungen folgen", ohne Handler, RPC, Abfrage
+oder Zustand, nur ohne verfügbares Angebot, im schon endgültigen 44-px-Kasten.
+**UX-02 ist ein entferntes `disabled`**, kein Layoutumbau.
+
+**Preisbereich unverändert:** `MARKTWERT` über dem Betrag, Betrag links, Chip
+rechtsbündig, mobil kurz.
+
+#### Prüfung
+
+**Neu:** `availability-bell.tsx` + Test, `tile-grid-layout.test.tsx` ·
+**geändert:** `figure-row.tsx`, `figure-grid.tsx`, `edition-banner.tsx`,
+`catalog-card.tsx`, `row-template.ts`, `de.ts` und fünf Testdateien.
+Gesamtsuite **12 677 grün** (315 Dateien), `npm run check` vollständig.
+
+`tile-grid-layout.test.tsx` ist der Regressionstest, den die Korrektur
+verlangt. Er hält **zwei** Dinge, weil jedes allein den Fehler verpasst hätte:
+
+1. **Das Spurmaximum bleibt indefinit** (`1fr`); jede definite Länge an
+   dieser Stelle fällt auf. Zusätzlich steht die alte Zählung als
+   ausführbarer Beleg im Test.
+2. **Die Kette gibt die Breite frei** — der Test rendert das echte Raster in
+   der echten Kette und läuft von ihm nach oben, gegen eine Liste von
+   Klassen, die die Breite nehmen würden (`w-fit`, `w-max`, `inline-*`,
+   `float-*`, `items-*` auf einem Spalten-Flex, `justify-*`, ein zweites
+   `max-w-`, feste `w-[…]`). Ein indefiniter Platz lässt `auto-fill` auf
+   **eine** Wiederholung fallen, also dasselbe Symptom aus anderer Ursache.
+
+**Grenze, ausdrücklich:** jsdom hat keine Layout-Engine,
+`getBoundingClientRect` liefert hier Nullen. Der Test prüft die echte
+DOM-Struktur und die echten Klassennamen, **nicht gemessene Pixel**. Ein
+Browser ist in dieser Umgebung nicht verfügbar; einen zu installieren wäre
+eine Änderung des Tech-Stacks mit eigener Freigabe. Im gebauten CSS
+nachgewiesen sind die Spurregel und `max-width:520px`.
+
+**Nebenbefund:** Tailwind scannt auch die Markdown-Dateien im Projekt. Die
+alte Klasse stand noch in `PROJECT_STATUS.md` und erzeugte deshalb weiter
+eine tote CSS-Regel — mit dieser Aktualisierung ist sie weg.
+
+### UX-01F, Katalogkopf (2026-10-27, ADR-0150) — gebaut, nicht committet
+
+Drei Bereiche, ein Serienraster, ein Schnellfilter, zwei neue Filter im
+Dialog. Am laufenden Staging-Server geprüft — anders als bei der Kachel steht
+dieser Bereich vollständig im Server-HTML.
+
+**Ein Schalter statt zweier:** `Figuren · Zubehör · Karten`. Die Mechanik
+bleibt verschieden und das ist Absicht — Zubehör ist eine Route (`<Link>`,
+teilbar, Lesezeichen, Zurück-Knopf; ADR-0128), die beiden Figurenansichten
+sind die gemerkte Darstellung (`<button>`, sofort, lädt nichts; UX-01C).
+**Keine gespeicherte Präferenz verliert ihre Bedeutung:** Schlüssel und Werte
+sind unverändert, `rows` → Figuren, `cards` → Karten.
+
+„Karten" zeigt vorerst die klassischen vertikalen Figurenkarten. Für echte
+Sammelkarten ist **eine Naht** vorgesehen und sonst nichts:
+`sectionTarget("cards")` ist die eine Stelle, die sich ändert — keine
+Kartentabelle, kein Kartentyp, keine leere Seite. Ein Test hält die erfundenen
+Begriffe draußen.
+
+**Serienauswahl: 3×2 oder 6×1, entschieden von der Containerbreite**
+(Ergänzung des Betreibers mitten in der Umsetzung). `@container` auf dem
+Block, `grid-cols-3` bis 44 rem, sechs Spalten darüber — Container-Query und
+nicht `auto-fit`, weil genau drei **oder** sechs gefordert waren. Vorher lag
+Imaginators auf dem Telefon hinter dem rechten Rand.
+
+| Viewport | Container | Raster | Zelle | Blockhöhe |
+|---|---|---|---|---|
+| 360 / 390 / 414 | 328 / 358 / 382 | **3 × 2** | 105 / 115 / 123 px | 102 px |
+| 768 | 736 | **6 × 1** | 118 px | 48 px |
+| 1024 | 992 | **6 × 1** | 160 px | 48 px |
+| 1280 / 1600 | 1120 | **6 × 1** | 182 px | 48 px |
+
+Die Schwelle 44 rem ist gemessen: dort bleiben 112 px je Zelle, und
+„SuperChargers" (längstes Einzelwort, ~78 px) muss nie umbrechen. Zellen
+48 px hoch (`min-h-12`) — innerhalb der geforderten 48–56 px und über der
+44-px-Tippfläche. Kein Beschnitt, kein waagrechter Überlauf, keine
+Figurenzahlen in den Zellen.
+
+**Die aktive Serie ist golden — und gibt weniger Gold aus als Besitz:**
+goldene Kontur, schwach goldener Grund, **kein** Schein. Gold heißt in
+diesem Produkt Besitz, und der Unterschied liegt im dritten Signal: Besitz
+ist Grund **plus** Kante **plus** Schein. Der fehlende Schein ist zugleich
+das, was „keine großen Glüheffekte" verlangt. **Keine Serien-Icons**, weil
+keine existieren (`public/images/` hat brand, cards, skylanders).
+
+Die Trennung Spiel/Sonderkategorie kommt aus `series.position` (Schwelle
+**90**, nicht „die ersten sechs"), die Testserien stehen hinter einem
+dezenten `<select>`, und eine gewählte Sonderkategorie hebt **keine**
+Rasterzelle hervor.
+
+**Der Kopf ist flacher** — 20 px zwischen den Blöcken statt 28, also 32 px
+gespart. Reihenfolge im ausgelieferten HTML nachgeprüft: Suche ·
+Serienraster · Bereichsschalter · Schnellfilter · Ergebnisanzahl mit
+Filterknopf · Figurenkacheln. **Eine Abweichung:** der Filterknopf steht mit
+der Ergebnisanzahl in einer Zeile statt über dem Schnellfilter — das ist eine
+Zeile weniger auf dem Telefon, also genau das erklärte Ziel, und
+`BrowseToolbar` bleibt die Leiste, die die Sammlung mitbenutzt.
+
+**Keine Sortierung gebaut:** für Figuren gibt es kein Sortiermodell
+(`catalog-view.tsx` seit V3.3, `browse.test.ts` verbietet die Steuerung aus
+demselben Grund wie bei Element). Der Zubehörbereich hat eines und behält
+es.
+
+**Das Raster gilt nur für Figuren.** Gemessen: bei Figuren ist immer eine
+Serie gewählt (ADR-0038), im Zubehörbereich ist „Alle" die Vorauswahl und es
+wird nach Art und Plattform eingeschränkt. Der Zubehörbereich behält seine
+Steuerungen unverändert.
+
+**Der Schnellfilter „Anzeigen" ist eine Projektion, kein vierter Zustand:**
+`Alle · Sammlung · Fehlen · Verfügbar` sind vier Paare aus
+`ownership × availability`. Damit ist die Steuerung exklusiv und das Modell
+nicht — `availability.ts` sagt in seinem Kopf, dass eine echte
+Zusammenlegung **„fehlend UND kaufbar"** unausdrückbar machen würde, und
+genau das ist weiter ausdrückbar: der Dialog setzt beide Dimensionen einzeln,
+und dann hebt die Leiste **nichts** hervor, statt das Nächstliegende zu
+behaupten.
+
+**Abgemeldet nur `Alle · Verfügbar`** über die bestehende Regel
+`offersOwnershipFilter` — live nachgeprüft, eine unangemeldete Anfrage
+liefert genau zwei Segmente. „Fehlen = alles" kann nicht entstehen.
+
+**Zwei neue Filterdimensionen im Dialog**, jede liest ein Feld:
+
+- **Element**, mehrfach wählbar, mit der ehrlichen Angabe daneben: ein Element
+  erreicht eine Figur nur über eine kuratierte `character_id` (ADR-0034), und
+  die Kuratierung deckt **92 von 594** Zeilen. Die Zahl wird aus den Daten
+  gezählt, nicht notiert.
+- **Marktwert von/bis**, unverkennbar der Marktwert („Marktwert, nicht
+  Angebotspreis"), verglichen gegen den **angezeigten** Betrag inklusive
+  Aufschlag. Figuren ohne bekannten Marktwert erfüllen keine Grenze und
+  gelten nie als 0 (ADR-0010); **27 von 594** sind das, und der Dialog sagt
+  es.
+
+**Alle fünf Einschränkungen wirken im einen Pool**, vor Suche und Serie — es
+gibt **keine Pagination**, von der versehentlich ein Ausschnitt gefiltert
+werden könnte (ADR-0043), und ein Test hält das durch Abwesenheit. Der
+Filterbadge zählt nur noch, was man nicht sieht.
+
+**Neu:** `catalog-section.ts`, `quick-filter.ts`, `element-filter.ts`,
+`market-filter.ts`, `catalog-section-switch.tsx`, `series-grid.tsx`,
+`quick-filter.tsx`, `element-filter.tsx`, `market-range-filter.tsx`,
+`catalog-top.test.ts` (32 Prüfungen) · **geändert:** `catalog-view.tsx`,
+`accessory-view.tsx`, `series-nav.ts`, `ownership.ts`, `de.ts` und fünf
+Testdateien. Gesamtsuite **12 709 grün** (316 Dateien), `npm run check`
+vollständig.
+
+**Live geprüft:** `aria-label="Katalogbereich"` mit Figuren/Karten als
+Knöpfe und Zubehör als Verweis · das 3-Spalten-Raster mit allen sechs Spielen
+und „Spyro's Adventure" als aktive Zelle · „Sonderkategorien" mit Smoke Test
+und RLS Test Series · `aria-label="Anzeigen"` mit genau zwei Segmenten
+abgemeldet · auf `/zubehoer` trägt Zubehör `aria-current="page"`, Figuren und
+Karten sind Verweise.
+
+**`series-tabs.tsx` ist seit diesem Paket unbenutzt.** Nicht gelöscht,
+weil `browse.test.ts` die Datei noch liest und das Löschen eine eigene,
+kleine Aufräumentscheidung ist — als offener Posten vermerkt.
+
+### CAT-02B, Katalogstatus (2026-10-27, ADR-0151) — **auf Staging angewendet**
+
+Jeder Katalogeintrag hat im bestehenden Bearbeitungsformular ein Dropdown
+**Öffentlich · Versteckt · Entwurf**. Status wählen, „Speichern", fertig —
+kein Bestätigungsdialog, kein Review, keine neue Adminseite.
+
+**`hidden` und `draft` sind verhaltensgleich** und unterscheiden sich in der
+Absicht. Deshalb kostet der dritte Wert **keine neue Sichtbarkeitsregel**:
+`catalog_visible` bleibt maßgeblich, und RLS, Teilindex, Sicht und
+`shop_offers()` sind unberührt.
+
+#### Der Befund, der den Entwurf bestimmt hat
+
+Ein reiner CHECK zwischen Status und Sichtbarkeit hätte **drei** bestehende
+Schreibpfade verletzt — nachgezählt, nicht vermutet:
+
+| Schreibpfad | was er tut | warum der CHECK gefallen wäre |
+|---|---|---|
+| `admin_set_catalog_visible` | `update … set catalog_visible` | nennt den Status nicht |
+| `admin_create_figure` | `insert … catalog_visible = false` | Vorgabewert wäre `public` |
+| `seller_create_catalog_item` (0137) | dasselbe aus dem Einkaufsbuch | ebenso |
+
+Deshalb ein **BEFORE-Trigger**, der ableitet, was der Aufrufer nicht nennt —
+und der CHECK bleibt daneben als **Nachweis**, dass die Spalten nie
+auseinanderlaufen. Erst der Trigger macht die Zusage einhaltbar, erst der
+CHECK macht sie nachweisbar. Das Muster ist nicht neu: `0135` leitet
+`item_type` aus der Kategorie ab, `0001` schützt die SKY-ID so.
+
+**Ein Entwurf bleibt ein Entwurf,** wenn der alte Weg ihn versteckt — nur der
+Wechsel nach sichtbar ist eindeutig.
+
+#### Migration `0152_catalog_status.sql` — **auf Staging angewendet am 2026-10-27**, auf Production nicht
+
+Additiv: Spalte (nullable, **ohne DEFAULT**, danach `not null`), Backfill
+`public`/`hidden` — **kein bestehender Eintrag wird zum Entwurf** —, zwei
+CHECKs, ein Trigger, eine neue Definer-Funktion
+`admin_set_catalog_status(text, text)` (nur `is_platform_admin()`), und zwei
+ersetzte Rümpfe: das Journal um ein Feld, `admin_create_figure` um eine Zeile
+im INSERT (mit **identischer Signatur** — ein zusätzlicher Parameter wäre
+eine Überladung).
+
+**Nicht angefasst:** RLS, Index, Sicht, `shop_offers()`,
+`seller_create_catalog_item`, SKY-IDs, Sammlungs-, Favoriten-, Lager- und
+Angebotsbeziehungen. `admin_set_catalog_visible` bleibt erhalten.
+
+#### Der Staging-Lauf (2026-10-27, CAT-04B)
+
+Preflight `9999 = 0` (34 Zeilen) → die eine schreibende Anweisung vom
+Betreiber im SQL-Editor → Nachkontrolle `9999 = 0` (52 Zeilen) gegen die
+**vorher** eingefrorenen Baselines. **626 Zeilen unverändert, 596 `public`,
+30 `hidden`, 0 `draft`.** Shop, Lager und Sammlung unverändert, beide
+Lesepolitiken unberührt.
+
+**Der erste Preflight brach ab — an der Prüfdatei, nicht an der Migration.**
+Zeile 105 nannte eine von Hand getippte Signatur von `admin_create_figure`;
+`to_regprocedure` antwortet darauf NULL, genau wie auf eine fehlende
+Funktion. Sie fragt seitdem die **Parameterzahl**, und eine zweite Zeile
+schreibt die tatsächliche Signatur ins Protokoll.
+
+**Offen:** der berechtigte Lauf
+`supabase/log/staging/0152-postflight-berechtigt.sql` als `postgres`
+schließt die eine Zeile (136, Journal), die der Prüfzugang nicht lesen darf.
+
+**Der Anwendungscode ist nicht deployt** und war nie Voraussetzung: er läuft
+auch ohne die Spalte — `fetchCatalogStatuses()` darf fehlschlagen und
+liefert dann eine leere Zuordnung, und die Ableitung aus `catalog_visible`
+ist exakt.
+
+#### Offene Entscheidungen
+
+1. **Favoriten in der Lesepolitik** (CAT-02A, P7): wer ein Objekt vorgemerkt,
+   aber nicht besessen hat, verliert es aus seiner Wunschliste, sobald es
+   nicht öffentlich ist. Gilt heute schon für `hidden`; mit `draft` häufiger.
+   Sicherheitsgrenze, eigene Freigabe, eigene RLS-Prüfung.
+2. **`seller_create_catalog_item`:** legt Zubehör als `hidden` an. Ob dort
+   `draft` richtiger wäre, ist nicht entschieden.
+
+**Neu:** `0152_catalog_status.sql`, `catalog-status.ts`, `status-select.tsx`,
+`catalog-status.test.ts` (24 Prüfungen) · **geändert:** `figure-modal.tsx`,
+`figure-draft.ts`, `admin/actions.ts`, `admin/queries.ts`,
+`catalog/queries.ts`, `catalog/types.ts`, `catalog-view.tsx`, beide
+Adminseiten, `de.ts`, beide Sicherungsmanifeste, `APPLIED.md`,
+`SHA256SUMS.txt` und fünf Testdateien.
+
+### CAT-02C, Nachweis und Laufzettel (2026-10-27) — geprüft, nichts gefahren
+
+**Die Wahrheitstabelle ist gefahren, nicht gelesen.** Probelauf **P60** in
+`tools/validate-check-sql.mts` baut eine Welt vor `0152`, wendet die Migration
+an und prüft **siebzehn** Schreibwege an echtem PostgreSQL: die acht genannten
+Fälle, beide Legacy-Pfade, den Katalogimport als Upsert, den **Einspielweg
+einer Wiederherstellung** für alle drei Werte, zwei kontrollierte Abweisungen
+(`23514`, `23502`), das Journal, eine neu angelegte Figur als Entwurf — und
+danach `R0153` gefolgt von `R0152`, die alles zurücknehmen, ohne eine Zeile
+anzufassen. **Jeder Fall erzeugt den erwarteten Zustand.**
+
+**Drei Grenzen des Prüfwerkzeugs, jede mit einem Fehlalarm belegt:** das
+Stub-Schema ignoriert `drop function` (die Siebenparameterfassung von
+`admin_create_figure` stand noch → `42725`), es trägt **keine Trigger** (das
+Journal blieb leer) und es setzt **keine Schlüssel** (`on conflict (sky_id)`
+scheiterte mit `42P10`). Alle drei sind Befunde über das Werkzeug, keiner über
+`0152`.
+
+**Eine Korrektur an `0152` selbst:** sie klammerte sich mit `begin;`/`commit;`
+selbst. Das ist nicht die Hausform — die Klammer gehört in die Einfüge-Hülle,
+damit deren Wächter in derselben Transaktion liegen. Eine zweite Klammer hätte
+mit ihrem inneren `commit` die äußere vorzeitig abgeschlossen. Entfernt.
+
+**Die Lücke in der Plattformsicherung ist geschlossen:** `0153` nimmt
+`catalog_status` in den Rumpf von `system_platform_export()` auf — **ein Feld,
+kein Bereich**, also bleibt die Bereichszahl 54 und `format_version` 2. Ohne
+sie käme jeder Entwurf nach einer Wiederherstellung als `hidden` zurück.
+**Die logische Sicherung mit `pg_dump` war davon nie betroffen** (P60 fährt
+den Einspielweg). `0153` setzt `0144` voraus — auf Staging liegt die seit
+2026-10-25, auf Production nicht.
+
+**Vorbereitet für Staging:** `0152_preflight.sql`, `0152_postflight.sql`,
+Eintrag in `migration-plans.json`, Einfüge-Hülle `staging-0152.sql` mit
+**sieben** Wächtern, Laufzettel `0152_staging_run.md`, Rücknahme
+`R0152_drop_catalog_status.sql` (nennt die betroffenen SKY-IDs **vor** dem
+ersten Eingriff und verweigert, solange `0153` liegt) und
+`R0153_platform_export_back_to_0144.sql`.
+
+**Neu:** `0153_platform_export_catalog_status.sql`, beide Rücknahmen, beide
+Prüfdateien, Hülle, Laufzettel, `platform-export-0153.test.ts` (13 Prüfungen)
+· **geändert:** `platform-manifest.ts` (die erklärte Lücke ist ein Feld
+geworden), `platform-sql.test.ts`, `seller-schema.test.ts` (der
+`seller_id`-Boden vergleicht jetzt **alle** kopierenden Fassungen),
+`platform-seller-schema.test.ts`, `purchase-receipt.test.ts`,
+`staging-oneshot.test.ts`, `catalog-status.test.ts` (13 Prüfungen mehr),
+`validate-check-sql.mts`, `APPLIED.md`, `DATABASE.md`.
+
+### CAT-03, Katalogentwürfe aus der externen Checkliste (2026-10-27, ADR-0152) — vorbereitet, nichts importiert
+
+**105 Entwürfe stehen bereit.** Jeder trägt Name (roh aus der Quelle), Serie,
+Kategorie, `item_type`, Edition, Variantenfamilie, Referenz auf die
+Grundfigur, Bildangaben, Quelle und Verifikationsstatus — und
+**`catalog_status = 'draft'`**.
+
+**Die Rechnung geht genau auf: 107 Kandidaten = 105 Entwürfe + 2.** Die zwei
+existieren als **versteckte** Zeile; CAT-01B las mit dem anon-Schlüssel und
+sah sie nicht. Beide wären Duplikate mit neuer, dauerhafter SKY-ID geworden.
+
+**Aus 123 Kandidaten wurden 107, und das war ein Fehler im Abgleich selbst.**
+Er prüfte den **vollen Namen** nie: „Punch Pop Fizz" galt als fehlend,
+während SKY-0144 genau so heißt und öffentlich sichtbar ist — an **16**
+Zeilen. Der Vollnamengriff steht jetzt vorn, aber nur, wenn **jedes Merkmal
+im Namen steht**: die Eon's-Elite-Zeile „Boomer" trägt `elite` aus dem
+**Abschnitt**, nicht aus dem Namen, und träfe sonst SKY-0010 statt SKY-0011.
+Dieser zweite Fehler entstand beim Beheben des ersten und ist mit ihm
+behoben. CAT-01B neu gerechnet: „Bereits vorhanden" 349 → 366,
+„Fehlende Variante" 82 → 66.
+
+**16 Einträge sind als unklar markiert und NICHT vorbereitet.** Keiner von
+ihnen war ein Kandidat — es sind Zuordnungen, die gegen den **vollständigen**
+Katalog mehrdeutig werden, weil er mehr Elite-Zeilen führt als die
+öffentliche Momentaufnahme. Eine Namensnormalisierung ist ein Suchhilfsmittel,
+kein Identitätsbeweis.
+
+**Kein Bild übernommen.** 40 Entwürfe bekommen ein **vorhandenes
+Projektbild vorgeschlagen** (nur wo die Grundfigur genau eines führt — das
+Projekt teilt Bilder zwischen Grundfigur und Varianten, 44 Bilder belegen es),
+65 einen Platzhalter. Die externen Bilder sind als Pfad *innerhalb* der .xlsx
+vermerkt, Status `unverified`.
+
+**Das Importwerkzeug hat keinen Schreibpfad in die Datenbank.**
+`npm run cat03:import:staging` ist ein Probelauf gegen den Katalog, wie er
+**jetzt** ist; mit `-- --sql` entsteht eine Einfüge-Hülle, die der Bediener im
+SQL-Editor ausführt. Sie ist idempotent, zieht `nextval` erst **nach** der
+Dublettenprüfung und bricht ab, wenn ein Entwurf sichtbar wäre.
+
+#### Zwei Hindernisse, bevor importiert wird
+
+1. **`0152` liegt nirgends.** Ohne `catalog_status` kann ein Entwurf nicht als
+   Entwurf entstehen. Der Probelauf sagt es.
+2. **Staging führt 626 Zeilen, der echte Katalog 820.** Ein Kandidat, der hier
+   fehlt, kann auf Production stehen. Ein Import nach Production braucht
+   vorher denselben Abgleich dort — rein lesend, eigene Freigabe.
+   `supabase/checks/cat03_import_run.md`, Abschnitt 1.
+
+**Neu:** `cat03-drafts.mts`, `lib/cat03-drafts.py`, `cat03-import.mts`,
+`cat03-drafts.test.ts` (23 Prüfungen), `cat03_import_run.md`, vier Dateien
+unter `resources/analysis/` · **geändert:** `lib/cat01-diff.py`
+(Vollnamengriff), `package.json`, `DECISIONS.md`, `PROJECT_STATUS.md`.
+
+### CAT-04A, Staging-Probe mit fünf Entwürfen (2026-10-27) — vorbereitet, nichts gefahren
+
+**Eine Charge von genau fünf**, benannt in `resources/analysis/cat-04-charge.json`
+mit Begründung je Kandidat: Crystal Clear Cynder (SA, `chase`), Smolderdash
+LightCore (SF, `special`), Dark Turbo Charge Donkey Kong (SC, `dark`),
+Legendary Life Acorn (I, `legendary`), Metallic Purple Lightning Rod (G,
+`chase`). Fünf Serien, vier Editionen — die Probe deckt Breite ab statt
+fünfmal dasselbe zu prüfen. Aus 105 Entwürfen erfüllen **11** alle strengen
+Kriterien; die Dublettenfrage ist für jeden der fünf einzeln am Katalog
+geprüft.
+
+**Der Statustest braucht genau EINE Migration: `0152`.** `0153` ist danach
+empfohlen (Plattformsicherung), `0150`/`0151` sind nicht beteiligt — die
+Schnittmenge der geänderten Objekte ist leer. Gemessen auf Staging:
+`catalog_status` fehlt, `availability_alerts` fehlt, `offer_state`,
+`favorites` und `purchase_calculations` stehen.
+
+**Alle fünf bekommen einen Platzhalter, kein Bild.** Das vorgeschlagene
+Projektbild zeigt jeweils die **Grundfigur**; alle fünf sind sichtbare
+Varianten. Zwei Bilder wurden angesehen und bestätigt. Eine ausdrückliche
+Lizenzaussage zu den Projektbildern steht nicht in der Dokumentation — für
+diese Charge ist das gegenstandslos, weil keines übernommen wird.
+
+**Das Importwerkzeug kennt jetzt Chargen** (`--charge`). Sie kann nur
+**verkleinern**: ein unbekannter Name ist ein Abbruch, kein stilles
+Weglassen, und die Zahl muss stimmen. Die Hülle bekommt einen eigenen
+Dateinamen, damit ein Chargenlauf die Hülle für alle 105 nicht überschreibt.
+
+**Zwei Wächter sind dazugekommen, beide aus dem Vorbereiten heraus gefunden:**
+`ABBRUCH A4` prüft, ob `sky_id_seq` weit genug steht — liegt sie hinter der
+höchsten vergebenen SKY-ID, verletzte der Lauf mitten in der Schleife den
+Primärschlüssel; der reservierte Bereich 9000–9999 zählt dabei nicht mit, und
+auf Staging stehen dort tatsächlich Zeilen (SKY-9998, SKY-9994, SKY-9101).
+Dazu beweist eine Zeilenzählung vorher/nachher, dass **genau** die angelegten
+Zeilen dazugekommen sind.
+
+**Probelauf P61 fährt die erzeugte Hülle an echtem PostgreSQL** — fünf
+Entwürfe, keiner sichtbar, IDs aus der Sequenz, Slugs aus
+`next_figure_slug()`, Herkunft in der internen Notiz, zweiter Lauf folgenlos,
+und `A4` schlägt bei zurückliegender Sequenz an.
+
+**Neu:** `cat-04-charge.json`, `staging-cat-04a-import.sql` (erzeugt),
+`cat04a_staging_run.md` (Migrationsreihenfolge, Ausführungsplan,
+**achtstufiger Admin-Testplan**, Risiken, Abbruchbedingungen) ·
+**geändert:** `cat03-import.mts`, `lib/cat03-drafts.py`,
+`validate-check-sql.mts` (P61), `cat03-drafts.test.ts` (10 Prüfungen mehr).
+
+### CAT-04D, Variantenbilder aus der Checkliste (2026-10-27) — zugeordnet, nichts übernommen
+
+**102 von 105 Entwürfen haben ein eindeutig zugeordnetes Bild**, 3 sind
+mehrdeutig, **keiner ist ohne**. Die Zuordnung kommt aus den **Zellankern**
+der .xlsx, nicht aus der Reihenfolge der Mediendateien: `drawing1.xml` nennt
+je Bild Spalte und Zeile, `drawing1.xml.rels` löst die Beziehung nach
+`xl/media/` auf.
+
+**Die Zeilenverschiebung ist bewiesen, nicht angenommen.** Der Anker sitzt auf
+der Bildzeile, der Name eine Zeile darunter (`+2` in 0-basierter Zählung).
+Vier Signale, alle 603/603: Zeilenhöhe > 100, nicht-numerischer Name darunter,
+Hyperlink zur Figurenseite (602), **Zahl in der Zeile darunter**. Das letzte
+ist das entscheidende — ein naiver Test „steht dort ein Name?" bestätigt auch
+`+3`, weil die Mengenspalte die Zeichenkette `"0"` trägt. Genau dieser
+Fehlschluss ist beim Bauen passiert.
+
+**Semantisch gegengeprüft:** „Crystal Clear Cynder" zeigt einen
+**durchsichtigen** Cynder, „Legendary Life Acorn" ein **goldenes** Gehäuse —
+beide Male die Variante, nicht die Standardfigur.
+
+**Drei mehrdeutige bekommen kein Bild.** „Mobile Hot Streak" teilt sein Medium
+mit dem gewöhnlichen „Hot Streak" — das wäre genau das verbotene
+Standardbild; die zwei „Blue Chest"-Einträge teilen sich eine Abbildung.
+
+**Der Blocker ist rechtlich, nicht technisch, und er ist gemessen:** der Bucket
+`catalog` ist öffentlich lesbar — ein anonymer `HEAD` auf ein bestehendes
+Objekt antwortet **200**. Ein Upload dorthin ist eine **Veröffentlichung**,
+auch wenn die Figur ein unsichtbarer Entwurf ist. Solange die Rechte an den
+Bildern der fremden Checkliste ungeklärt sind, geht keines hoch.
+
+**Figur und Bild können nicht atomar entstehen:** der Pfad
+`catalog/<SKY-ID>/<16 hex sha256>.<ext>` braucht die SKY-ID, die erst beim
+Anlegen entsteht, und Storage ist ein zweites System ohne gemeinsame
+Transaktion. Der zweistufige Ablauf mit Wiederaufnahme steht in
+`supabase/checks/cat04d_bildimport_plan.md`.
+
+**Die Hülle setzt weiterhin kein Bild** — sie schreibt die **Zuordnung** mit
+Prüfsumme in die interne Notiz, damit Stufe 2 später reproduzierbar ist.
+
+**Neu:** `cat04-images.mts`, `lib/cat04-images.py`, `cat04-images.test.ts`
+(14 Prüfungen), `cat04d_bildimport_plan.md`, `cat-04-bildmanifest.{json,csv}`,
+`resources/review/` mit Kontaktbogen und `.gitignore`, aus dem **nichts**
+committierbar ist · **geändert:** `cat03-import.mts`, `package.json`.
+
+### CAT-04E, einmalige Katalogvervollständigung (2026-10-27) — ein Lauf, vorbereitet
+
+**Die Zielsetzung ist einmalig, nicht wiederkehrend.** Der Excel-Import
+ergänzt den Katalog ein Mal; es entsteht **kein** dauerhaftes
+Importverfahren. Alle gültigen Entwürfe gehen in **einer** Hülle
+(`supabase/operations/staging-cat03-import.sql`, 105 Zeilen, eine
+Transaktion); die separate Fünfer-Hülle ist **gelöscht**, damit sie niemand
+versehentlich einfügt.
+
+**Gemessen gegen den aktuellen Staging-Katalog: 105 von 105 anlegbar, 0
+Dubletten, 0 zurückgehalten — 626 + 105 = 731 Zeilen.** Die
+Dublettenprüfung vergleicht jetzt auch `display_name_override`; das war in
+CAT-04C noch als Lücke benannt und ist geschlossen.
+
+**Ungültige Kandidaten brechen den Lauf nicht mehr ab**, sie werden
+übersprungen und protokolliert (`cat-04-importprotokoll.json`) — bei einer
+einmaligen Vervollständigung ist ein Einzelfall Sache des Adminbereichs und
+kein Grund, hundert andere aufzuhalten.
+
+**Bilder bleiben lokal.** Die Entscheidungslogik für die spätere, einmalige
+Übernahme liegt als prüfbares Modul in `src/lib/catalog/image-import.ts`:
+SKY-ID wird **gesucht** und nie aus einer Reihenfolge gerechnet, ein
+vorhandenes Adminbild wird **nie** überschrieben, Format und Größe kommen aus
+`sniffImage()`/`MAX_IMAGE_BYTES` der echten Pipeline, die Prüfsumme muss zum
+Manifest passen, und Hochladen verlangt **zwei** Flaggen (`--upload` **und**
+`--rechte-geklaert`). Ein Uploader darauf sind rund vierzig Zeilen — und sie
+lohnen erst mit geklärten Rechten. Die Zuordnung überlebt den Import in der
+internen Notiz; eine lesende Abfrage holt sie zurück.
+
+**Production bekommt keinen vorbereiteten Import.** Der Bestand dort ist ein
+anderer; dieselben 105 Zeilen blind zu übernehmen wäre falsch. Dafür braucht
+es einen eigenen lesenden Abgleich und eine eigene Freigabe.
+
+**Neu:** `image-import.ts`, `image-import.test.ts` (19 Prüfungen),
+`cat-04-importprotokoll.json` · **geändert:** `cat03-import.mts`
+(Override-Dublettenprüfung, Überspringen statt Abbruch, Protokoll,
+Zeilenzahl-Vorschau), `cat03_import_run.md`, `cat04a_staging_run.md`
+(als überholt gekennzeichnet), `cat04d_bildimport_plan.md`,
+`cat03-drafts.test.ts`, `cat04-images.test.ts` · **gelöscht:**
+`staging-cat-04a-import.sql`.
+
+### CAT-04F, der Import ist gelaufen (2026-10-27) — 731 Zeilen, 105 Entwürfe
+
+**Rein lesend nachgemessen:** Katalog **626 → 731**, davon **105 `draft`**
+(SKY-0823 … SKY-0927), **keiner sichtbar**, alle `source = admin`.
+`public`/`hidden` unverändert bei 596/30, Lagerzeilen 287, öffentliche
+Angebote 257 — beide unverändert. 105 Zeilen in `catalog_editorial`, davon
+**102 mit Bildzuordnung** (die drei mehrdeutigen tragen keine). Kein Entwurf
+hat ein Bild oder einen Preis.
+
+**Alle 105 tragen denselben Zeitstempel `21:46:19.223501`** — eine
+Transaktion. **Der zweite Lauf war folgenlos:** zu den neuen SKY-IDs stehen
+**genau 105** Journalzeilen `field = created`, nicht 210.
+
+**Eine erklärte Abweichung, und sie stammt nicht vom Import:** die Sammlung
+wuchs von **14 auf 21** Zeilen. Nimmt man nur die Zeilen von **vor** der
+Baseline-Erhebung (20:23:19.426), bleiben genau **14**, und ihr Abdruck ist
+**zeichengleich** der eingefrorene Wert. Die sieben übrigen entstanden
+**20:43:35–20:43:44** — sieben Klicks in neun Sekunden auf **bestehende**
+Katalogfiguren, eine Stunde **vor** dem Import; keine einzige verweist auf
+einen der neuen Entwürfe. Der Betreiber hat in diesem Zeitraum das neue UX
+bedient.
+
+**Die Baseline wurde nicht angepasst und keine Prüfung abgeschwächt.** Die
+zwei Zeilen bleiben abweichend und zählen weiter in `9999` — dieselbe
+Einordnung wie bei den berechtigten Nachkontrollen zu `0147`–`0149`.
+
+**Der berechtigte Lauf ist gefahren:** `9998 = 0` und `9999 = 2` — die zwei
+Abweichungen sind genau die beiden Sammlungszeilen und damit erklärt.
+
+### CAT-05, Durchsicht und Zusammenführung (2026-10-27) — analysiert, nichts geschrieben
+
+**Bildnutzung freigegeben.** Der Betreiber hat erklärt, die Rechte an der
+Excel-Liste und ihren Bildern selbst geprüft zu haben, und gibt Verwendung
+und Veröffentlichung frei. **Das ist seine Aussage, nicht meine Prüfung** —
+so steht es auch in `resources/review/cat-04-bilder/HERKUNFT.md`.
+
+**Bildübernahme vorbereitet:** `npm run cat05:bilder:staging` ist ein
+**Probelauf** und lädt nichts. Ergebnis: **102 würden geladen**, 3
+übersprungen (mehrdeutig), **0 Fehler** — Format, Größe und `sha256` aller
+102 stimmen. Der echte Lauf verlangt **beide** Flaggen `--upload
+--rechte-geklaert`. Die Entscheidungslogik liegt prüfbar in
+`src/lib/catalog/image-import.ts` (19 Prüfungen).
+
+**Dublettenanalyse der 105:** 0 eindeutig identisch, **4 wahrscheinlich
+identisch**, 24 unsicher, 77 eigenständig; 62 haben eine Grundfigur im
+Bestand. Die vier Kandidaten sind Wortstellungsfälle —
+`Bronze Mystery Chest` ↔ `Mystery Chest Bronze`, `Gold Mystery Chest` ↔
+`Mystery Chest Gold`, `Light Owl (Heavenly Hawk)` ↔ `Light Hawk Owl`,
+`Kaos Trap` ↔ `Kaos`.
+
+**Drei Fehlschlüsse auf dem Weg dorthin, jeder behoben:** eine Variante gegen
+ihre Grundfigur ist **keine** Dublette; bei Zubehör ist die Farbe die
+**Identität** (`Gold Mystery Chest` vs. `Mystery Chest Blue` sind zwei
+Truhen); und ein Merkmalswort auf nur einer Seite ist ein **Unterschied**,
+kein Rauschen.
+
+**`0154` bereitet die Zusammenführung vor** (nirgends angewendet):
+`admin_merge_draft()` übernimmt benannte Felder in eine **bestehende** Figur,
+die ihre SKY-ID behält; `admin_merge_references()` leitet aus `pg_catalog`
+her, wer auf eine SKY-ID zeigt — heute 14 Fremdschlüssel — und blockiert das
+Löschen, sobald jemand den Entwurf referenziert. Probelauf **P62** fährt
+beides an echtem PostgreSQL.
+
+**Automatisch eindeutig ergänzbar: 22 von 105** — 5 Editionen und 17
+`character_id` (mit Element). Alles andere bleibt manuell, und die Gründe
+stehen je Zeile in `resources/analysis/cat-05-*.csv`.
+
+**Offen:** die Admin-Oberfläche für den Datenvergleich und die
+Zusammenführung. Die serverseitige Hälfte steht und ist bewiesen; die
+Bedienfläche fehlt.
+
+**Neu:** `0154_merge_draft_into_figure.sql`, `cat05-bilder.mts`,
+`cat-05-dubletten.{json,csv}`, `cat-05-vervollstaendigung.{md,json,csv}`,
+`cat-05-bildprotokoll.json`, P62 · **geändert:** `image-import.ts`
+(Laufzeitimport), `cat04-images.mts` (Rechtestand), `HERKUNFT.md`,
+`purchase-receipt.test.ts`, `cat04-images.test.ts`.
+
+### CAT-05B, Bilder übernommen und Merge-Oberfläche gebaut (2026-10-27)
+
+**102 Bilder sind auf Staging übernommen** — freigegeben vom Betreiber, der
+die Rechte selbst geprüft hat. Lauf: `102 geladen · 102 Spalten gesetzt · 0
+gescheitert`. Rein lesend nachgemessen: 102 Entwürfe mit Bild, **3 ohne** (die
+mehrdeutigen), 36 bestehende Bilder unberührt (36 + 102 = 138), alle Pfade in
+der Form `SKY-xxxx/<16 hex>.<ext>` und auf die **eigene** SKY-ID, alle 102
+anonym erreichbar. 105 Entwürfe weiterhin `draft` und unsichtbar; 731 / 596 /
+30 unverändert. Stichprobe angesehen: SKY-0825 „Chrome Spyro" zeigt einen
+**verchromten** Spyro.
+
+**Die Merge-Oberfläche steht** — in der bestehenden Figurenbearbeitung, keine
+eigene Verwaltungsseite. Sie erscheint **nur** bei Entwürfen: Vorschläge,
+Suche nach Name oder SKY-ID, Gegenüberstellung aller neun übernehmbaren
+Felder mit Hervorhebung der Unterschiede, Feldauswahl, Zusammenfassung, ein
+Knopf. **Die Sperre sitzt vor dem Knopf:** zeigt noch etwas auf den Entwurf —
+oder lässt es sich nicht feststellen —, ist das Formular gar nicht bedienbar.
+
+**Zwei Wächter des Projekts haben dabei angeschlagen, beide zu Recht:** Gold
+darf keine Handlung bezeichnen (V3.1) — der Knopf benutzt jetzt
+`ACTION_PRIMARY`; und die Liste der Admin-RPCs ist bewusst fixiert, damit
+eine neue benannt werden muss — `admin_merge_draft` steht dort jetzt mit
+Begründung.
+
+**`0154` ist gegen das echte Staging-Schema geprüft:** Preflight **27 Zeilen,
+`9999 = 0`** — unter anderem, dass **alle** Fremdschlüssel auf `skylanders`
+einspaltig sind. Die Migration ist **nicht** angewendet. Vorbereitet sind
+Preflight, Nachkontrolle, Plan-Eintrag und Einfüge-Hülle mit fünf Wächtern.
+
+**Die 22 eindeutigen Ergänzungen** liegen als Liste in
+`resources/analysis/CAT-05-ergaenzungen.md` — 5 Editionen über die
+bestehende Admin-RPC, 17 Charakterzuordnungen über die Kuratierungsdatei.
+Nichts davon ist geschrieben.
+
+**Neu:** `merge-candidates.ts`, `merge-candidates.test.ts` (17 Prüfungen),
+`merge-panel.tsx`, `0154_preflight.sql`, `0154_postflight.sql`,
+`staging-0154.sql`, `CAT-05-ergaenzungen.md` · **geändert:** `queries.ts`
+(drei Merge-Abfragen), `actions.ts` (`mergeDraftIntoFigure`), `de.ts`,
+Detailseite, `in-context.test.ts`, `staging-oneshot.test.ts`, `APPLIED.md`.
+
+### CAT-05D, drei Handlungen an der Katalogzeile (2026-10-28)
+
+**Aus „Bearbeiten" wurden drei Icons:** `git-merge`, `pencil`, `trash-2` —
+44 px Berührungsfläche, 16 px Symbol, dauerhaft sichtbar, mit Tooltip und
+`aria-label`. Zusammenführen und Löschen erscheinen **nur bei Entwürfen**;
+eine öffentliche Figur wird weder zusammengeführt noch gelöscht, und ein
+Icon, das nur zum Scheitern da ist, wäre eine schlechte Oberfläche.
+
+**Die Zusammenführung ist vereinfacht** (eigene Anweisung des Betreibers):
+keine Feld-Kästchen mehr. **Was der Entwurf hat, geht über; was er nicht hat,
+lässt den bisherigen Wert stehen.** Zwei Ausnahmen, beide eine Regel über
+Platzhalter: ein **generischer** `card_type`/`item_type` ersetzt nie einen
+spezifischen — bei 51 der 105 Entwürfe steht `standard` nur, weil es einen
+Vorgabewert gibt —, und `admin_note` wird **angehängt** statt ersetzt.
+`series_code` und `category_id` wandern immer gemeinsam.
+
+Die Oberfläche ist jetzt ein **kompakter Dialog an der Zeile** (am Telefon
+von unten, am Schreibtisch mittig): suchen → auswählen → Vorschau
+*alt → neu* → bestätigen. Die Vorschau ist dieselbe Rechnung wie in `0154`;
+eine Anzeige, die etwas anderes verspricht als geschieht, wäre schlimmer als
+keine. Die Panel-Fassung auf der Detailseite ist entfallen — eine Oberfläche
+an zwei Orten wären zwei Orte zum Nachsehen.
+
+**`0155` liefert das Löschen** (nirgends angewendet): drei Riegel —
+`catalog_status = 'draft'`, `source = 'admin'`, keine Verweise (gezählt von
+`admin_merge_references()` aus `0154`, damit es die Prüfung genau einmal
+gibt). Journalzeile **vor** dem Löschen, Speicher unberührt, das verwaiste
+Bild wird im Rückgabewert **benannt**. Nur das Löschen fragt nach —
+Zusammenführen und Bearbeiten nicht.
+
+**Die Oberfläche täuscht nichts vor:** solange `0154`/`0155` nicht liegen,
+antwortet PostgREST mit `PGRST202`, der Dialog sagt „noch nicht
+freigeschaltet" und sperrt. Dasselbe bei Referenzen auf den Entwurf.
+
+**Probelauf P62** fährt beide Migrationen an echtem PostgreSQL: die
+Platzhalterregel, das Anhängen der Notiz, drei Abweisungen beim
+Zusammenführen und vier beim Verwerfen.
+
+**Neu:** `0155_discard_draft.sql`, `merge-dialog.tsx`, `row-actions.tsx`,
+`merge-search.ts`, `row-actions.test.ts` (17 Prüfungen) · **geändert:**
+`0154` (vereinfachte Regel, neue Signatur), `merge-candidates.ts` (Vorschau
+statt Gegenüberstellung), `actions.ts`, `queries.ts`, `de.ts`, Listenseite,
+Detailseite, `in-context.test.ts`, `purchase-receipt.test.ts` ·
+**entfallen:** `merge-panel.tsx`.
+
+### CAT-05E, 0154 und 0155 sind auf Staging angewendet (2026-10-28)
+
+Beide Migrationen laufen, beide Nachkontrollen sind grün: `0154` mit
+**43 Zeilen, `9999 = 0`** und einer offenen Zeile (125, `catalog_editorial` —
+der Prüfzugang darf das Objekt nicht lesen, ADR-0141), `0155` mit
+**42 Zeilen, `9999 = 0`, `9998 = 0`** und keiner offenen. Die Reihenfolge war
+nicht nur behauptet: der Preflight von `0155` ist am selben Tag **vor** der
+Anwendung von `0154` in Zeile 103 zu Recht gescheitert.
+
+**Zwei Sicherheitsfragen wurden vorher geklärt.** Die Reichweite des Löschens
+ist **gemessen**: 128 Zeilen tragen `source = admin`, davon sind 105 Entwürfe
+— genau die importierten —, die übrigen 23 sind öffentlich. `0155` bekam
+deshalb einen **vierten** Riegel: eine Zeile, die einmal öffentlich stand,
+wird nicht gelöscht (das Journal aus `0152` weiß es). Und das Bild zieht beim
+Zusammenführen unter die **bestehende** SKY-ID um — die Aktion kopiert das
+Objekt **vor** dem Datenbankaufruf, weil die beiden Systeme keine gemeinsame
+Transaktion haben; der schlimmste Ausgang ist ein verwaistes Objekt, nie ein
+fehlendes Bild.
+
+**Eine Baseline ist dabei verloren gegangen, und das steht hier, weil es
+nicht wieder passieren soll.** Die erste Erhebung für `0154` vom 2026-10-27
+wurde von Hand gelöscht, damit der Runner den Stand unmittelbar vor dem
+Schreiben misst; ihr Inhalt ist nicht rekonstruierbar. Der Runner kennt dafür
+jetzt `npm run db:migrate:staging -- <nr> --refreeze`: er **archiviert** die
+vorhandene Akte nach `supabase/baselines/archiv/` und friert danach neu ein.
+Auf eine schon archivierte Datei schreibt er nicht, `--refreeze` mit
+`--resume` wird abgewiesen, und `rmSync`/`unlinkSync` kommen im Runner nicht
+vor. Sechs Tests sichern das, darunter die Reihenfolge *archivieren vor
+schreiben*.
+
+### CAT-05F, die Zusammenführung bekommt eine Änderungstabelle (2026-10-28)
+
+**Aus der Vorschau wurde eine Tabelle mit Kästchen:** Auswahl · Feld ·
+bisheriger Wert · neuer Wert. Jede **tatsächlich anstehende** Änderung ist
+eine Zeile; unveränderte Felder kommen nicht vor. Standardmäßig ist alles
+angekreuzt, eine Kopfzeile schaltet alle an oder aus, und der Knopf nennt die
+Zahl (`3 Änderungen übernehmen und Entwurf entfernen`). Bei null Änderungen
+ist er gesperrt. Die Bildzeile zeigt **zwei Vorschaubilder nebeneinander**,
+mit neutralem Platzhalter, wenn es bisher keines gibt.
+
+Das ist keine Rücknahme von CAT-05D: dort waren es neun Kästchen, von denen
+sieben nichts taten. Jetzt werden nur die anstehenden Änderungen angeboten.
+
+**Die Kästchen wirken wirklich — `0156` ist die Serverseite** (**auf Staging
+angewendet am 2026-10-28**, Nachkontrolle `9999 = 0`, `9998 = 0`). `admin_merge_plan(text,text,text)` rechnet den
+Änderungsplan rein lesend und ist die **einzige** Stelle, an der die
+Übernahmeregeln stehen; die schreibende Funktion ruft sie auf. Die Werte im
+Aufruf sind eine **Behauptung über den Bildschirm**, kein Schreibauftrag: der
+Server vergleicht sie mit seiner eigenen Rechnung und bricht bei jeder
+Abweichung ab. Geschrieben wird aus der Zeile des Entwurfs. Dazu eine
+serverseitige **Allowlist von neun Feldern** als Konstante im Rumpf, **kein
+dynamisches SQL**, `series_code`/`category_id` nur gemeinsam, ein Bildpfad
+nur bei ausgewähltem Bild, und eine leere Auswahl löscht keinen Entwurf.
+`admin_merge_draft(text,text,text)` aus `0154` bleibt — als Weiterleitung,
+damit es die Übernahmelogik genau einmal gibt (ADR-0153).
+
+**Zwei Fehler sind dabei aufgefallen und behoben**, beide derselben Klasse:
+die Vorschau verglich den **Anzeigenamen** (`display_name_override ?? name`)
+gegen die Spalte `name`, und der Dialog baute die Entwurfszeile aus der
+Katalogliste zusammen und füllte Fehlendes mit Platzhaltern
+(`itemType: "figure"`, `characterId: null`, `adminNote: null`). Vor CAT-05F
+waren das Schönheitsfehler; mit der Veraltungsprüfung wäre **jede**
+Zusammenführung abgebrochen. `MergeBestandszeile` führt jetzt `nameRaw`, und
+`searchMergeTargets()` liefert die vollständige Entwurfszeile mit.
+
+**Probelauf P63** fährt `0156` an echtem PostgreSQL: alle Felder, nur der
+Name, nur das Bild, Bild abgewählt (beide Richtungen), leere Auswahl, vier
+manipulierte Auswahlen (`market_price`, `catalog_status`, `sky_id`, kein
+Objekt), ein halber Fremdschlüssel und drei Gestalten einer veralteten
+Vorschau — nach jedem abgewiesenen Fall ist nachgemessen, dass sich nichts
+bewegt hat. Die Referenz auf das Ziel überlebt, die auf den Entwurf
+blockiert. **Siebter Werkzeugbefund:** das Stub-Schema legt jede Signatur aus
+allen Migrationen an, die Vorbedingung „`0156` braucht `0154`" war deshalb
+zuerst still grün — P63 nimmt die Funktionen jetzt erst weg.
+
+**Die erste Nachkontrolle wich ab, und die Ursache lag in der Prüfdatei.**
+`9999 = 1` an Zeile 115 — sie suchte `%kein Bildpfad%`, und diese Meldung ist
+im Funktionsrumpf über **zwei** SQL-Literale verteilt (`… es kommt kein '` +
+`'Bildpfad mit`). `prosrc` trägt den Rumpf so, wie er geschrieben ist: mit
+Umbruch und Anführungszeichen dazwischen, PostgreSQL fügt benachbarte
+Literale erst beim Ausführen zusammen. Das Muster konnte also nie treffen —
+**obwohl der Riegel steht und wirkt.** Dieselbe Klasse wie der Fehlalarm im
+`0152`-Preflight: die Prüfung war falsch, nicht die Migration.
+
+**Bei der Durchsicht fiel ein zweiter Mangel auf:** Zeile 113 suchte
+`%series_code%category_id%` — grün, aber wertlos, weil beide Namen ein
+Dutzend Mal in demselben Rumpf stehen; das Muster hätte auch ohne jede
+Kopplungsprüfung getroffen. Sie prüft jetzt die Bedingung selbst.
+
+**`check-body-patterns.test.ts` schließt die Klasse.** Es emuliert SQL `LIKE`,
+schneidet die Rümpfe aus allen Migrationen heraus und rechnet für **jede**
+Prüfzeile nach, die `prosrc` liest, ob ihr Muster den genannten Rumpf
+überhaupt treffen kann — bejahende müssen treffen, verneinende dürfen nicht,
+und ein Muster aus mehreren kurzen Teilen wird abgelehnt. Beide Schreibweisen
+sind abgedeckt (`to_regprocedure` mit Signatur und `p.proname` mit
+Überladung). **Am echten Fehler erprobt:** mit dem alten Muster schlägt er
+fehl, mit dem neuen nicht.
+
+**Probelauf P63 misst diesen Fall jetzt an den Daten und nicht an der
+Meldung.** Vier Gestalten von „Bildübernahme ohne gültigen Zielbildpfad" —
+kein Pfad, leerer Pfad, fremde SKY-ID im Pfad, formal falscher Pfad — und
+nach jedem Versuch ist der Abdruck der Zielfigur, der Entwurf, seine Notiz
+und die Zeilenzahl **zeichengleich** derselbe. Eine Fehlermeldung ist kein
+Nachweis über Daten: eine Funktion könnte abbrechen und vorher doch
+geschrieben haben.
+
+**Neu:** `0156_merge_selected_fields.sql`, `0156_preflight.sql`,
+`0156_postflight.sql`, `staging-0156.sql`, `supabase/baselines/archiv/` ·
+**geändert:** `merge-dialog.tsx` (Tabelle statt Liste), `merge-candidates.ts`
+(`tabellenzeilen`, `nutzlast`, `ZUSAMMEN`), `actions.ts`, `merge-search.ts`,
+`queries.ts`, `row-actions.tsx`, `de.ts`, Listenseite,
+`db-migrate-staging.mts` (`--refreeze`), `validate-check-sql.mts` (P63),
+`migration-plans.json`, `APPLIED.md`, `SHA256SUMS.txt`,
+`merge-candidates.test.ts`, `check-body-patterns.test.ts` (neu),
+`migration-runner.test.ts`,
+`migration-integrity.test.ts`, `staging-oneshot.test.ts`, `DATABASE.md`,
+`DECISIONS.md`.
+
+### CAT-05G, die Merge-Tabelle richtet sich aus (2026-10-28)
+
+**Eine vererbte Eigenschaft war die Ursache, nicht das Tabellenlayout.** Der
+Dialog wird **innerhalb** der Katalogtabelle gerendert, in der Zelle der
+Aktionsspalte — und die trägt `text-right`, damit die drei Icons rechts
+stehen (`admin/catalog/page.tsx:175`). `position: fixed` nimmt das Element
+aus dem Fluss, aber `text-align` ist eine **vererbte** Eigenschaft und
+kaskadiert durch den DOM-Baum weiter, unabhängig von der Positionierung.
+Die Kopfzeile setzte ihr `text-left` selbst, die Zellen im Rumpf erbten
+rechts: Kopf links, Namen rechts, Vorschaubilder verschieden platziert.
+Behoben mit **einem** `text-left` an der Dialogwurzel — für den ganzen
+Dialog, nicht je Zelle.
+
+**Zweite Ursache: die Breiten waren nur Vorschläge.** Ohne `table-fixed` ist
+eine Breitenangabe unverbindlich — der Browser rechnet aus dem Inhalt, und
+zwei Zeilen mit unterschiedlich langen Werten verschieben die Spalten
+gegeneinander. Jetzt `table-fixed` mit einem `colgroup`: **44 px** Kästchen,
+**88 px** Feldname, **35 %** und **35 %** für die beiden Wertespalten. Die
+Breiten stehen an einer Stelle und gelten für Kopf und Rumpf gleich; bei der
+Mindestbreite von 28 rem ergeben sich genau die gewünschten Anteile, und am
+Schreibtisch wachsen nur die beiden Wertespalten mit. Einheitlich
+`px-2 py-1.5 align-middle` in jeder Zelle, beide Vorschaubilder **48 × 48**
+(auch der Platzhalter, sonst springt die Zeile), lange Werte brechen an der
+Wortgrenze statt die Spalte zu sprengen.
+
+**Nur Darstellung.** Kästchenauswahl, Alle-an/aus, Vorschau, Bildübernahme,
+die serverseitige Prüfung in `0156` und das Entfernen des Entwurfs sind
+unberührt — keine Migration, keine Datenbankänderung.
+
+**Acht neue Tests** halten die Ursache fest und nicht nur das Symptom: dass
+die Aktionsspalte wirklich `text-right` trägt (ändert sie sich, soll die
+Zeile auffallen), dass der Dialog die Ausrichtung einmal oben setzt, dass
+**keine** Zelle sich mehr einzeln ausrichtet, dass die vier Breiten im
+`colgroup` stehen, dass Padding und vertikale Ausrichtung überall gleich
+sind und dass beide Bildzellen zeichengleich dieselbe Zellform haben.
+**Erprobt:** ohne `text-left` schlägt der Riegel fehl, ohne `table-fixed`
+ebenso. Jede benutzte Klasse ist im gebauten CSS nachgewiesen
+(`table-layout:fixed`, `5.5rem`, `35%`, `size-12`, `vertical-align:middle`,
+`28rem`) — eine Sichtprüfung im Browser ist hier weiter nicht möglich.
+
+**Geändert:** `merge-dialog.tsx`, `merge-candidates.test.ts`.
+
+### CAT-05H, der erste echte Merge-Versuch schlug fehl (2026-10-28)
+
+**Was der Betreiber sah:** „Das hat nicht geklappt." — Entwurf SKY-0824
+„Pirate Seas" in SKY-0103 „Pirate Ship", nur der Name ausgewählt, Bild
+abgewählt.
+
+**Rein lesend nachgemessen: nichts ist geschehen.** SKY-0103 heißt weiter
+„Pirate Ship", `public`, Serie SA, Kategorie 12, Bild unverändert (kein
+Override, Altimport `f6da37ded1e8fac4.webp`). SKY-0824 steht als Entwurf mit
+`source = admin` und seinem Bild. SKY-0103 trägt **14 Einkaufs-, 7 Verkaufs-
+und 1 Lagerposition** — genau deshalb muss die SKY-ID bleiben.
+
+**Sechs Ursachen sind mit Nachweis ausgeschlossen:**
+
+1. **Nicht die RPC-Signatur und nicht die Überladung.** Ein Aufruf über
+   PostgREST mit **nicht existierenden** SKY-IDs (also ohne jede
+   Schreibwirkung) antwortete `403 / 42501 not authorised` — die
+   Vierparameterfassung wurde korrekt aufgelöst und der Rumpf erreicht;
+   abgewiesen hat erst die Adminprüfung, weil der Service-Role keine
+   `auth.uid()` hat. Schema-Cache und Signatur sind in Ordnung.
+2. **Nicht die veraltete Vorschau.** Der Server rechnet `Pirate Ship →
+   Pirate Seas`, genau wie angezeigt; der Plan nennt ein Feld.
+3. **Nicht `ON CONFLICT`.** `catalog_editorial` hat `PRIMARY KEY (sky_id)` —
+   `42P10` ist unmöglich. (Im Probelauf musste dieser Index von Hand
+   angelegt werden; das Stub-Schema hat keine Schlüssel.)
+4. **Nicht die Rechte.** Beide Fassungen `security definer`, je ein
+   `EXECUTE` für `authenticated`, null offene Rechte.
+5. **Nicht die Verweise.** Alle 13 Fremdschlüssel sind einspaltig, 12 gehen
+   durch die Zählung — und der Dialog benutzt **dieselbe** Funktion
+   (`admin_merge_references`), hätte also gesperrt.
+6. **Nicht die Fachlogik.** Probelauf **P63, Fall 2b** stellt den Fall des
+   Betreimbers Zeile für Zeile an echtem PostgreSQL nach — Ziel ohne
+   Override aber mit Altimportbild, Entwurf mit Bild und Notiz, Auswahl nur
+   Name, Verweise auf dem Ziel. Ergebnis: Name wandert, Bild und Notiz
+   bleiben, Entwurf verschwindet, Verweise überleben.
+
+**Der nachgewiesene Defekt ist, dass es keinen Nachweis gab.** `call()` hat
+den Fehler **ersatzlos verworfen** — kein SQLSTATE, keine Meldung, kein
+Protokoll —, und von dreizehn Abweisungen der Merge-Migrationen hatten
+**sechs keinen deutschen Satz**; sie fielen alle in denselben Auffangtext.
+Welche davon gefeuert hat, ist deshalb nicht rekonstruierbar.
+
+**Behoben:** `call()` protokolliert jetzt jeden Fehler serverseitig (Code,
+Meldung, Details, Hinweis, Aufrufname und die **Schlüssel** der Argumente —
+nie deren Werte, weil dieselbe Funktion Handelsvorgänge mit Kundendaten
+bedient), und der Auffangtext nennt den geprüften SQLSTATE statt nichts. Die
+rohe Meldung der Datenbank erreicht die Oberfläche nicht. Jede Abweisung von
+`0154`, `0155` und `0156` hat jetzt einen Satz; `rpc-errors.test.ts` liest
+beide Seiten und lässt keine neue `raise exception` ohne Zuordnung durch —
+benachbarte SQL-Literale werden dabei zusammengefügt, dieselbe Falle wie bei
+Zeile 115 der `0156`-Nachkontrolle.
+
+**Ein zweiter Fehler fiel bei der Suche auf, und er war still.** In
+`merge-search.ts` stand `const noten = new Map()` — leer, und **nichts hat
+sie je gefüllt**. `adminNote` war damit bei jeder Zeile `null`, bei Ziel wie
+Entwurf. Folge: `vorschau()` sah im Entwurf keine Notiz, bot keine
+Tabellenzeile „Interne Notiz" an, das Kästchen konnte nicht angekreuzt
+werden — und `0156` übernimmt nur Ausgewähltes. **Die Herkunftszeile des
+Imports wäre bei jeder Zusammenführung verloren gegangen**, ohne dass es
+auffällt. Jetzt lädt die Suche `fetchAdminNotes()`.
+
+**Keine Korrekturmigration.** `0154`–`0156` sind unverändert; an der
+Datenbank ist nach heutigem Nachweis nichts zu korrigieren.
+
+**Nächster Schritt:** ein zweiter Versuch. Er zeigt jetzt entweder einen
+lesbaren Satz oder den Code — und das Serverprotokoll trägt die genaue
+Meldung.
+
+**Neu:** `cat05h_merge_diagnosis.sql`, `cat05h_runtime_gaps.sql`,
+`cat05h_all_references.sql` (alle rein lesend, in der Staging-Suite),
+`rpc-errors.test.ts` · **geändert:** `actions.ts`, `merge-search.ts`,
+`de.ts`, `validate-check-sql.mts` (P63 Fall 2b), `staging-suite.json`,
+`SHA256SUMS.txt`.
+
+### CAT-05I, die Audit-Constraint und die automatische Notiz (2026-10-28)
+
+**Die Ursache des Merge-Fehlers ist gefunden, und sie war größer als der
+Merge.** `SQLSTATE 23514` an `catalog_admin_changes_field_known`: die Liste
+erlaubter Journalfelder kennt **sieben** Werte, `merged_from` ist keiner
+davon. Der ganze Vorgang wurde zurückgerollt — richtig so, es ist eine
+Transaktion, und genau deshalb sind SKY-0103 und SKY-0824 unverändert.
+
+**Drei Schreibstellen nennen Werte, die in der Liste fehlen — und der
+schwerste ist nicht der Merge.** `0152` hat `log_skylander_editorial_change`
+**ersetzt**, damit der Trigger auch `catalog_status` journalisiert, und die
+Constraint nicht erweitert: **jeder Statuswechsel auf Staging läuft seit dem
+27.10. in denselben Fehler**, ohne dass es auffiel. Dass `0152` durchlief,
+ist kein Widerspruch — ihr Backfill steht in Abschnitt 2, die
+Triggerersetzung erst in Abschnitt 5, die 626 Backfill-Zeilen haben den
+neuen Trigger nie gesehen. Dazu `merged_from` (`0154`, `0156`) und
+`discarded` (`0155`). Der Merge hat einen Fehler sichtbar gemacht, der nicht
+sein Fehler war.
+
+**Achter Werkzeugbefund:** das Stub-Schema des Probelaufs trägt **keine
+CHECK-Constraints**. P60 war grün, obwohl `0152` denselben Fehler auslöst;
+P62 und P63 ebenso. Ein Probelauf ohne die eine Einschränkung, an der es
+scheitert, prüft an der entscheidenden Stelle nichts.
+
+**`0157` nimmt genau drei Werte dazu** — `catalog_status`, `merged_from`,
+`discarded` —, read-only aus den Funktionsrümpfen der laufenden Datenbank
+nachgemessen. Die Liste bleibt eine Liste: sie ist der Grund, warum ein
+vertippter Feldname auffällt statt still im Journal zu landen. `drop` und
+`add` in einer Transaktion, ohne `not valid`.
+
+**Die interne Notiz ist kein auswählbares Feld mehr.** `0156` führte sie als
+neuntes Feld mit eigener Kästchenzeile, und das war eine Fehlkategorie: eine
+interne Notiz ist keine fachliche Katalogangabe, über die ein Mensch Fall
+für Fall entscheidet — sie ist Buchhaltung. Die Allowlist zählt jetzt
+**acht** Felder, der Plan nennt sie nicht, `MERGE_FELDER` kennt sie nicht
+(ein Aufruf mit ihr kompiliert nicht), und `0157` weist eine manipulierte
+Auswahl ab. Drei Ebenen, und die verbindliche ist die Datenbank.
+
+**`public.merge_note(text, text)` ist die ganze Regel**, `immutable` und
+ohne Seiteneffekt: Zielnotiz bleibt immer, veraltete Importhinweise fallen
+weg, der Rest wird **einmal** angehängt, Leeres bleibt leer — und sie hängt
+an **keinem** Kästchen. Erzeugt wird nichts: dass zusammengeführt wurde,
+steht als `merged_from` im Journal. Keine Dokumentation um ihrer selbst
+willen (ADR-0154).
+
+**Die veralteten Hinweise, gezählt statt geschätzt:** alle **105**
+Importnotizen enden auf „Kein Bild uebernommen; externe Bildrechte
+ungeklaert", alle in derselben Form. Beides ist überholt — CAT-05B hat 102
+Bilder übernommen, und die Verwendung ist freigegeben. Nach der Regel bleibt
+bei **allen 105** eine nicht-leere Herkunftszeile (`CAT-01 Kandidat, Quelle
+<Zelle> der externen Checkliste (<Abschnitt>).`); **keine** wird leer.
+**Keine Massenänderung:** `0157` fasst keine bestehende Notiz an, aufgeräumt
+wird im Augenblick der Übernahme.
+
+**Probelauf P64 ist der Kern dieser Runde.** Er legt die echte Constraint
+wortgetreu an, **reproduziert den Fehler 23514 des Betreibers** und
+misst danach, dass nichts geschrieben wurde; zeigt, dass `catalog_status`
+und `discarded` ebenso verboten sind; fährt `0157`; und lässt denselben
+Aufruf durchlaufen. Dazu alle zwölf geforderten Fälle, `merge_note` über
+**alle 105 echten Importnotizen** (105 sauber, 105 mit Herkunft, 0 leer) und
+ein erzwungener Fehler an der Journalzeile, der **alles** zurückrollt —
+Name, Notiz und Entwurf stehen danach wie vorher.
+
+**Der Preflight läuft gegen echtes Staging durch:** 36 Zeilen, `9999 = 0`,
+eine Informationszeile (das Journal, Rechtegrenze). Baseline eingefroren
+(Angebote 257, Katalogzeilen 731, Sammlung 21).
+
+**Neu:** `0157_audit_fields_and_automatic_notes.sql`, `0157_preflight.sql`,
+`0157_postflight.sql`, `staging-0157.sql`, `cat05i_audit_constraint.sql` ·
+**geändert:** `merge-candidates.ts` (acht Felder, keine Notizzeile),
+`merge-dialog.tsx`, `de.ts`, `validate-check-sql.mts` (P64),
+`migration-plans.json`, `staging-suite.json`, `APPLIED.md`,
+`SHA256SUMS.txt`, `merge-candidates.test.ts`, `rpc-errors.test.ts`,
+`staging-oneshot.test.ts`, `purchase-receipt.test.ts`, `DATABASE.md`,
+`DECISIONS.md` (ADR-0154).
+
+### CAT-06, drei Importwege und die Figurenfamilien (2026-10-28)
+
+**Der wichtigste Befund von Phase 1:** das Familienmodell existiert seit
+`0002`. `skylanders.character_id → characters.id` erfüllt jede Anforderung
+strukturell — stabile ID statt Name, **eine** Spalte (zwei widersprechende
+Familien unmöglich), nullable, kuratiert, unabhängig von Serie, Kategorie,
+Edition und SKY-ID. Was fehlte, war ein **Schreibweg**: gesetzt wurde die
+Spalte nur von `tools/import-characters.mts` und beiläufig von der
+Zusammenführung; in der Oberfläche war sie nicht korrigierbar.
+
+**Drei Wege, und zwei gab es schon.** Weg A ist die Zusammenführung
+(`admin_merge_draft`, CAT-05), Weg C ist `admin_set_catalog_status` (`0152`,
+unverändert — ein Entwurf hat SKY-ID und Slug schon, veröffentlichen heißt
+den Status setzen). **Neu ist nur Weg B:** `admin_publish_as_variant` ordnet
+zu **und** veröffentlicht in **einer** Transaktion und ruft dafür die beiden
+vorhandenen Funktionen auf, statt einen zweiten Veröffentlichungsweg zu
+erfinden. Die Grundfigur wird dabei nicht abgeschrieben: der Entwurf behält
+SKY-ID, Slug, Namen, Bild, Edition und Preis.
+
+**`0158`** (**auf Staging angewendet am 2026-10-28**, auf Production nicht) bringt
+`admin_create_character` (nur der Name; Element und Beschreibung bleiben
+NULL, weil das kuratierte Arbeit ist; ein vorhandener Name wird abgewiesen
+statt verdoppelt), `admin_set_character` (zuordnen, ändern, mit NULL
+entfernen — **für jede Figur**, nicht nur für Entwürfe, denn eine Zuordnung
+ist eine Korrektur) und `admin_publish_as_variant`. Dazu den **elften**
+Journalwert `character_id`; ohne ihn wäre jede Zuordnung `SQLSTATE 23514` —
+dieselbe Lehre wie in CAT-05I, und sie hat dort einen Tag gekostet.
+
+**Die Klammerschreibweise ist als Konvention abgeschafft, nicht als
+Lesbarkeit.** Kein Code erzeugt `Grundfigur (Variante)`;
+`displayNameFor()` normalisiert beide Schreibweisen auf die Präfixform, und
+`searchFormsFor()` behält die Klammerform **absichtlich** als Suchform. Die
+67 vorhandenen Klammernamen bleiben unverändert — eine Massenumbenennung
+wäre genau das, was CLAUDE.md Regel 4 verbietet. Eine Ausnahme ist benannt
+und bleibt: `Eon's Elite Boomer (2)` ist eine Produktlinie mit Zählung, kein
+Variantenname.
+
+**`VARIANT_TOKENS` wird NICHT erweitert.** Chrome, Silver, Flocked,
+LightCore und Volcanic kommen nicht hinein: die Liste wirkt auf **jede**
+Figur, deren Name so beginnt, eine kuratierte Familie ist eine Entscheidung
+**je Figur**. Ein Test hält die Liste bei 31 Einträgen, damit dieser Reflex
+auffällt und begründet werden muss.
+
+**Die Sortierung wurde nicht ersetzt, sondern beliefert.**
+`compareFigures()` sortiert unverändert Serie → Kategorie → Basisname →
+**Edition** → Grundfigur zuerst → Label → Name, und
+`withCharacterFamily()` (ADR-0070b) lässt den kuratierten Charakter den
+Sortierschlüssel bestimmen. Das Problem war die **Abdeckung**: 561 von 668
+sammelbaren Zeilen haben keine Familie. Sobald `character_id` gesetzt ist,
+sortiert „Chrome Spyro" bei Spyro — ohne eine Zeile neue Sortierlogik.
+Nachgewiesen an der Spyro-Familie aus fünf natürlichen Namen: Spyro, Chrome
+Spyro, LightCore Spyro, Dark Spyro, Legendary Spyro.
+
+**Die Bestandsaufnahme, rein lesend gemessen:** 668 sammelbar, **107 mit
+Familie**, 561 ohne, 20 Familien (die größte mit 10 Mitgliedern), **13 davon
+über mehrere Serien**. Die Vorschlagsliste sortiert die Fälle in vier
+Gruppen: **7 eindeutig** (Grundfigur in derselben Serie hat schon eine
+Familie — darunter `SKY-0825 Chrome Spyro → SKY-0053 Spyro`), **49 möglich**
+(Grundfigur da, selbst ohne Familie), **36 Handarbeit**, **67
+Klammernamen**. Sie verknüpft nichts.
+
+**Der Charakterimport überschreibt keine Adminentscheidung mehr.** Er liest
+das Journal (`field = 'character_id'`) und überspringt, was ein Admin anders
+gesetzt hat; `--overwrite-admin` ist der ausdrückliche Weg. Die Datei ist
+die Erstkuratierung, die Oberfläche die Korrektur.
+
+**Probelauf P65** fährt mit der **echten** Audit-Constraint alle sechzehn
+Fälle aus CAT-06 §10: der Fehler 23514 vorher, Dublettenschutz auch bei
+anderer Schreibweise, Weg B atomar mit unberührter Grundfigur und erhaltener
+Sammlung, Weg C eigenständig, Zuordnung setzen/ändern/entfernen an einer
+**veröffentlichten** Figur mit drei Journalzeilen, Nichtänderung ohne
+Journalzeile, vier manipulierte Eingaben, drei Rechteprüfungen,
+**vollständiger Rollback an der Journalzeile**, eine Familie über zwei
+Serien mit erhaltener Serienzugehörigkeit, Weg A unverändert, und ein
+Klammername, der zugeordnet und **nicht** umbenannt wird.
+
+**Der Preflight läuft gegen echtes Staging durch:** 32 Zeilen, `9999 = 0`,
+drei Informationszeilen (Rechtegrenze auf `characters` und dem Journal).
+
+**Neu:** `0158_figure_families.sql`, `0158_preflight.sql`,
+`0158_postflight.sql`, `staging-0158.sql`, `family-search.ts`,
+`family-select.tsx`, `draft-dialog.tsx` (aus `merge-dialog.tsx`),
+`family-sort.test.ts`, `cat06_variant_survey.sql`,
+`cat06_family_suggestions.sql` · **geändert:** `actions.ts` (Weg B und C,
+Familienverwaltung), `queries.ts` (`fetchFamilies`, `characterId` an
+`AdminFigure`), `row-actions.tsx`, Detailseite, `de.ts`,
+`import-characters.mts` (Konfliktschutz), `validate-check-sql.mts` (P65),
+`migration-plans.json`, `staging-suite.json`, `APPLIED.md`,
+`SHA256SUMS.txt`, `in-context.test.ts`, `row-actions.test.ts`,
+`purchase-receipt.test.ts`, `staging-oneshot.test.ts`, `DECISIONS.md`
+(ADR-0155) · **entfallen:** `merge-dialog.tsx`.
+
+### CAT-07, die Variante kennt ihre Basisfigur (2026-10-28) — `0159` auf Staging angewendet
+
+**Was gefehlt hat.** `character_id` (CAT-06) sagt, **wer** dargestellt ist, über Serien
+hinweg. Es sagt nicht, **wovon** eine Variante eine Variante ist: die Familie ist eine Menge
+ohne Mitte. In der Sammleransicht ist die Mitte aber genau die Frage — eine Serienvariante
+gehört unter **die** Figur derselben Serie, von der sie abgeleitet ist.
+
+**`skylanders.base_sky_id`** ist die vierte Identität neben `sky_id`, `character_id` und dem
+abgeleiteten Anzeigenamen. Nullbar, und `NULL` ist der Normalfall. ADR-0070b hatte genau diese
+Spalte ausdrücklich abgelehnt („Keine Abstammung"); **ADR-0156 hebt diesen Absatz auf** und
+begründet es — der Rest von ADR-0070b gilt unverändert.
+
+**Die Serienregel ist strukturell, nicht geprüft.** Der Fremdschlüssel ist
+**zweispaltig**: `(base_sky_id, series_code) → (sky_id, series_code)`. Ein einspaltiger
+Schlüssel plus Trigger wäre dieselbe Regel in Anwendungslogik — sie gilt, solange niemand sie
+umgeht. Dafür braucht es `unique (sky_id, series_code)`, technisch redundant neben dem
+Primärschlüssel und der Preis für eine Regel, die die Datenbank selbst hält.
+
+**Die zwei Entscheidungen des Betreibers.** `ON UPDATE RESTRICT`, **niemals** `CASCADE`: eine
+Serienänderung an einer Basisfigur mit Varianten wird abgewiesen (`23001`), statt die Gruppe
+stillschweigend mitzuziehen. Und: **eine Zusammenführung überträgt die Basiszuordnung nicht** —
+sie ist eine Aussage über die verschwindende Zeile, nicht über das Ziel. `base_sky_id` steht
+deshalb nicht in der Allowlist der acht übernehmbaren Felder.
+
+**Der Fund, der vor der Anwendung wehgetan hätte.** Probelauf **P67** hat gezeigt, dass
+`admin_merge_references` (`0154`) annimmt, ein Fremdschlüssel habe **eine** Spalte.
+`base_sky_id` ist der erste zweispaltige im Projekt — ohne Anpassung hätte **jede**
+Zusammenführung und **jedes** Verwerfen abgebrochen. `0159` ersetzt den Rumpf: die verweisende
+Spalte wird über `confkey` bestimmt. Ein Schlüssel, der nicht auf `sky_id` zeigt, scheitert
+weiterhin laut.
+
+**Vier Riegel, jeder für etwas anderes:** der zusammengesetzte Fremdschlüssel (fremde Serie,
+Löschen oder Umziehen einer Basisfigur mit Varianten), ein CHECK (Selbstbezug), ein Trigger
+(Ketten in **beiden** Richtungen, auch bei rohem `UPDATE`) und die Audit-Constraint (der
+**zwölfte** Journalwert `base_sky_id`).
+
+**Auf Staging angewendet am 2026-10-28, vollständig geprüft.** Preflight 40 Zeilen `9999 = 0`;
+Nachkontrolle 57 Zeilen `9999 = 0`; der berechtigte Lauf als `postgres` **`9998 = 0` und
+`9999 = 0`** mit **0** Journalzeilen `base_sky_id` und **0** Zuordnungen. Alle Katalog-,
+Angebots-, Lager- und Sammlungs-Bezugswerte unverändert (257 Angebote, 535 shopfähig, 287
+Lagerzeilen, 729 Katalogzeilen, 21 Sammlungszeilen). **Auf Production nicht angewendet.**
+
+**Die eine Abweichung lag in der Prüfdatei, nicht in der Migration.** Zeile 123 meldete `0`
+statt `2` für „beide sind `security definer` mit genau einer `search_path`-Festlegung", weil
+das Suchmuster **zwei** Backslashes trug — SQL `LIKE` liest das als einen echten Backslash und
+findet dann nichts. Vor jeder Änderung rein lesend gegengemessen: beide Funktionen sind
+`prosecdef` mit genau einer Festlegung `search_path=""` und **0** offenen EXECUTE-Rechten.
+Korrigiert wurde **ein Zeichen in der Prüfdatei**; die Migration blieb unberührt. Zwei neue
+Wächter halten die Klasse fest: der Abschnitt *Maskierung in Suchmustern* in
+`check-body-patterns.test.ts` (alle 357 `LIKE`-Muster aller Prüfdateien, gegengeprobt) und
+**P68**, der den Ausdruck **aus der Prüfdatei selbst** gegen echtes PostgreSQL fährt.
+
+**Nebenbefund, gemessen und als Hausnorm bestätigt.** `skylanders_variant_base_guard()` trägt
+EXECUTE für PUBLIC und `anon` — wie **32 von 45** Triggerfunktionen im Schema `public`,
+darunter **jede** andere an `public.skylanders`. Rückgabetyp `trigger` ist nicht als Ausdruck
+aufrufbar und wird von PostgREST nicht angeboten. Kein Sonderfall, keine Reparatur; wer die 32
+widerrufen will, tut das als eigene Aufgabe für alle.
+
+**Keine Massenverknüpfung.** Die 70 zuordenbaren Paare aus `cat07_base_figure_survey.sql`
+bleiben offen. Jede Zuordnung ist eine einzelne Entscheidung.
+
+**Die Folgemigration ist gelaufen:** `0160` nimmt `base_sky_id` in die
+**Plattformsicherung** auf — eigener Eintrag weiter unten, **auf Staging angewendet am
+2026-10-28**, auf Production nicht. In der
+**Betriebssicherung** bleibt die Spalte dauerhaft draußen: redaktionelle Gruppierung der
+Plattform, kein Händlerdatum.
+
+**Neu:** `0159_variant_base_figure.sql`, `0159_preflight.sql`, `0159_postflight.sql`,
+`staging-0159.sql`, `0159_staging_run.md`, `base-select.tsx`,
+`cat07_base_figure_survey.sql`, `cat07_function_attributes.sql`, `cat07_trigger_acl.sql` ·
+**geändert:** `actions.ts` (`setVariantBase`, `publishDraftWithBase`), `queries.ts`
+(`fetchBaseFigures`, `baseSkyId`, `withBaseFigure`), `draft-dialog.tsx` (dritter Weg),
+Detailseite, `de.ts`, `validate-check-sql.mts` (P67, P68), `check-body-patterns.test.ts`
+(Maskierung), `migration-integrity.test.ts`, `platform-manifest.ts`, `manifest.ts`,
+`APPLIED.md`, `SHA256SUMS.txt`, `DATABASE.md` (Abschnitt 3.2f), `DECISIONS.md` (ADR-0156,
+Aufhebungsvermerk in ADR-0070b).
+
+
+### CAT-07 Nachtrag, `base_sky_id` in der Plattformsicherung (2026-10-28) — `0160` auf Staging angewendet
+
+**Die Lücke, und sie ist leise.** `database.json` führt `character_id`, also
+die **Familie** einer Figur — „Chrome Spyro" und „Spyro" gehören demselben
+Charakter. Was fehlt, ist die **Mitte**: welche Figur derselben Serie die
+Basis ist. Nach einer Wiederherstellung käme jede Variante als eigenständige
+Figur zurück, mit SKY-ID, Namen, Preis und Familie, aber ohne Basis. Im
+Katalog sähe das nicht nach einem Fehler aus, sondern nach einer falschen
+Sortierung.
+
+**`0160` ist dieselbe Bauform wie `0153`:** **eine** Zeile im Rumpf von
+`system_platform_export()`, alles andere Zeichen für Zeichen die Fassung aus
+`0153`. Abdruck `92c48444…` → `ff4f38e6…`, 31 072 → **31 114** Zeichen, **54
+Bereiche unverändert**, `format_version` bleibt **2**. Die Umkehrprobe ist die
+Zusage: neuer Rumpf minus die eine Zeile ist byteweise der alte —
+nachgerechnet im Test und, Zeile 105, am **lebenden** Rumpf in der Datenbank.
+
+**Alte Archive bleiben lesbar, und das ist nachgerechnet.** Die
+Vollständigkeitsprüfung in `platform-archive.ts` zählt **Bereiche**, nicht
+Felder; ein Archiv der Version 2 ohne `base_sky_id` führt weiter 54 Bereiche.
+`base_sky_id` ist nullbar, und `NULL` ist der Normalfall — eine alte Zeile
+ohne das Feld ist keine unvollständige Zeile, sondern eine Figur ohne
+Basisfigur.
+
+**Der Befund, nach dem gefragt war: Fremdschlüssel und Reihenfolge.** Der
+Verweis zeigt auf **dieselbe Tabelle**. Das ist neu in diesem Schema — jeder
+andere Fremdschlüssel der Sicherung zeigt auf eine andere Tabelle, und daraus
+folgt eine Reihenfolge **zwischen** Tabellen. Hier liegt sie **innerhalb**
+einer, und das löst keine Tabellenreihenfolge. Gemessen gegen echtes
+PostgreSQL (**P69**):
+
+| | Vorgang | Ergebnis |
+|---|---|---|
+| **A** | **eine** `insert`-Anweisung, Varianten **vor** der Basisfigur | **läuft durch** |
+| **B** | **zwei** Anweisungen, Variante zuerst | **`23503`** |
+| **C** | erst alle mit `NULL`, dann ein `update` | **läuft durch**, **0** Journalzeilen |
+| **D** | `set constraints all deferred`, dann Variante zuerst | **`23503`** — die Anweisung tut **nichts** |
+
+**A ist die gute Nachricht:** ein nicht aufschiebbarer Fremdschlüssel wird am
+**Anweisungsende** geprüft, nicht nach jeder Zeile. Eine JSON-Wiederherstellung
+hat von sich aus diese Form — **eine** Anweisung je Bereich —, und damit ist
+die Reihenfolge der Katalogzeilen im Archiv gleichgültig. Das Archiv sortiert
+nach `sky_id`, also gerade **nicht** nach Abhängigkeit.
+
+**D ist die Falle**, und deshalb steht sie aufgeschrieben: `SET CONSTRAINTS`
+wirkt nur auf Constraints, die `deferrable` deklariert sind. Diese ist es
+nicht, PostgreSQL sagt das **nicht**, und die Anweisung läuft ohne Fehler
+durch. Wer glaubt, er habe die Prüfung aufgeschoben, hat sie nicht
+aufgeschoben.
+
+**Die Constraint wird NICHT `deferrable` gemacht.** Das wäre eine Änderung an
+einer Constraint aus einer angewendeten Migration, also eine eigene Frage mit
+eigener Freigabe — und sie wird nicht gebraucht, weil Variante A das Problem
+vollständig löst. Die Option steht mit ihrem Preis in
+`0160_restore_order.md`, Abschnitt 4.
+
+**Der Kettenschutz-Trigger stört dabei nicht**, obwohl er ein
+`before`-Trigger ist und Zeile für Zeile feuert: existiert die genannte
+Basisfigur noch nicht, findet er nichts und lässt durch — richtig, denn eine
+Kette ist das nicht. Bei einer Basisfigur (`base_sky_id is null`) kehrt er
+sofort zurück.
+
+**Die Wiederherstellung schreibt keine erfundene Geschichte.**
+`log_skylander_editorial_change` journalisiert fünf redaktionelle Felder, und
+`base_sky_id` ist keines davon — die Beziehung wird von den RPCs aus `0159`
+ausdrücklich journalisiert, nicht vom Trigger. Gemessen: Durchgang C, **0**
+Journalzeilen.
+
+**Probelauf P69** fährt den vollständigen Umlauf: eine Basisfigur und **drei**
+Varianten, exportieren, löschen, aus dem Archiv wieder einspielen — in der
+schlechtesten Reihenfolge, Varianten zuerst. Dazu die Lücke ohne `0160`
+(Familie da, Mitte fehlt), die vier Riegel (ohne `0159`, gegen `0105`, gegen
+`0144`, zweiter Lauf) und die Rücknahme, die **einen** Schritt zurückgeht:
+`catalog_status` aus `0153` bleibt, Spalte und Beziehungen bleiben unberührt.
+
+**Zwei Befunde am Rand, beide behoben.** `R0153` verweigerte sich im Probelauf
+P60 — zu Recht: in der Stub-Welt stand der Rumpf aus `0160`, und eine dritte
+Fassung wird nicht überschrieben. Die Rücknahmekette ist jetzt
+**R0160 → R0153 → R0152**, und sie ist keine Konvention, sondern die Folge der
+Abdruck-Riegel. Und `0160_postflight.sql` Zeile 139 las das Journal direkt,
+was beim lesenden Prüfzugang nicht die Zeile offenlässt, sondern die **Datei**
+abbricht (P54 hat es gemeldet) — sie liest es jetzt über
+`has_table_privilege`, wie ADR-0139/0141 es verlangt.
+
+**Neu:** `0160_platform_export_base_sky_id.sql`,
+`R0160_platform_export_back_to_0153.sql`, `0160_preflight.sql`,
+`0160_postflight.sql`, `staging-0160.sql`, `0160_staging_run.md`,
+`0160_restore_order.md`, `platform-export-0160.test.ts` ·
+**geändert:** `platform-manifest.ts` (`base_sky_id` ist ein Feld, der
+Ausschluss ist fort), `platform-sql.test.ts` (neueste Fassung, 500 Felder),
+`platform-export-0153.test.ts` (Nachzügler-Abgrenzung),
+`validate-check-sql.mts` (P69, Rücknahmekette in P60),
+`staging-oneshot.test.ts`, `purchase-receipt.test.ts`,
+`seller-schema.test.ts`, `platform-seller-schema.test.ts`,
+`migration-plans.json`, `APPLIED.md`, `SHA256SUMS.txt`, `DATABASE.md`,
+`DECISIONS.md` (ADR-0156, Folge auf `0160`), `0159_staging_run.md`.
+
+**Auf Staging angewendet am 2026-10-28, vollständig geprüft.** Preflight 45 Zeilen
+`9999 = 0` **ohne eine offene Zeile**; Nachkontrolle 59 Zeilen `9999 = 0`; der berechtigte
+Lauf als `postgres` **`9998 = 0` und `9999 = 0`**. Die Baseline ist zeichengleich der von
+`0159` (257 Angebote, 535 shopfähig, 287 Lagerzeilen, 729 Katalogzeilen, 21
+Sammlungszeilen) — zwischen den beiden Migrationen hat sich nichts bewegt, und nach dieser
+auch nicht. Keine Katalogdaten verändert, keine Production-Änderung, kein Commit.
+
+
+### CAT-08 Stufe 1, die Familie entsteht von selbst (2026-10-28) — `0161` auf Staging angewendet
+
+**Was wegfällt:** die Checkbox „Neue Familie anlegen und beiden zuordnen?" im
+Entwurfsdialog. Sie war eine Frage, die der Bediener nicht beantworten kann —
+keine eigene Entscheidung, sondern eine Folge daraus, dass er eine Basisfigur
+gewählt hat. Wer „Gold Chop Chop" als Variante von „Chop Chop" einordnet, hat
+damit gesagt, dass es derselbe Charakter ist.
+
+**`admin_publish_variant_auto(text, text)`** ist eine **vierte** Funktion
+neben den drei Wegen aus `0158`/`0159` — sie ersetzt keine, sie **ruft** sie:
+`admin_set_character` schreibt die Familie, `admin_set_variant_base` die
+Basisfigur, `admin_set_catalog_status` veröffentlicht. Es gibt weiterhin
+**einen** Schreibweg je Spalte. Vier Lagen: übernehmen · die Basisfigur
+unberührt lassen · suchen, bestätigen, benutzen oder anlegen · bei
+Widerspruch abbrechen.
+
+**Die Frage, an der alles hing: reicht Namensgleichheit?** Nötig ist die
+Wiederverwendung, denn „Chop Chop", „Stump Smash" und „Wrecking Ball" stehen
+je **zweimal** im Katalog — `SA` und `G` Series 2 —, beide Zeilen sind
+Basisfigur eines Entwurfs, und beide sind derselbe Charakter; ohne sie bräche
+der zweite Lauf an `admin_create_character` ab. Hinreichend ist sie **nicht**
+(ADR-0034: „Kaos" ist Trap, Trophy und Sensei; `Mini Drobit` ist ein eigener
+Charakter). **Deshalb wird die Identität bestätigt, nicht angenommen:** jedes
+Mitglied der gefundenen Familie muss einen Namen tragen, der mit dem der
+Basisfigur an einer **Wortgrenze** vereinbar ist — sonst Abbruch mit Nennung
+des Mitglieds. Das ist ein **Veto, keine Suche**, und damit bleibt **ADR-0034
+unberührt**.
+
+**Gemessen, bevor etwas gebaut wurde** (fünf lesende Prüfdateien
+`cat08_*`, Stand 2026-10-28): 470 Charakterzeilen, 107 mit Familie, 20
+Familien. 47 Entwürfe mit genau einer Basisfigur derselben Serie, davon **13**
+mit Übernahme und **34**, bei denen eine Familie entsteht. **0** mehrdeutige
+Fälle. 24 mehrfach vorkommende Namen und **kein einziger** mit zwei
+verschiedenen `character_id`. Die Wortgrenzenregel stimmt an **96 von 96**
+bereits kuratierten Paaren — und ihre **drei falschen Freunde** (`Crypt
+Crusher → Crusher`, ein Fahrzeug; `Fire Torch`/`Life Torch → Torch`, Traps
+heißen `<Element> <Form>`) liegen alle außerhalb der Charakterkategorien und
+berühren Stufe 1 nicht, weil sie keine Namenssuche macht.
+
+**Stufe 2 bleibt ungebaut** (Entscheidung des Betreibers): die
+serienübergreifende Suche hätte heute an **34 von 34** Fällen nichts
+gefunden, weil nur 107 von 470 Zeilen überhaupt eine Familie haben. Sie wäre
+eine Lockerung von ADR-0034 ohne Nutzen.
+
+**Nebenläufigkeit, zwei Riegel:** `pg_advisory_xact_lock` auf dem
+kleingeschriebenen Familiennamen **vor** der Suche — der zweite Aufruf wartet
+und **benutzt** die Familie, statt in `23505` zu laufen; und beide
+Katalogzeilen in **einer** Anweisung in `sky_id`-Ordnung gesperrt, weil
+`0159`s Reihenfolge Variante-dann-Basis bei zwei verschränkten Aufrufen ein
+Deadlock wäre.
+
+**Verglichen wird mit `right()`, nicht mit `like`.** Ein Artikelname darf `%`
+oder `_` enthalten (CLAUDE.md Regel 4), und in einem Muster wäre beides ein
+Platzhalter — ein Muster, das an einem Namen zerbricht, wäre ein stiller
+Fehler.
+
+**Probelauf P70** fährt gegen echtes PostgreSQL, mit den echten Schlüsseln,
+dem Eindeutigkeitsindex und der echten Audit-Constraint: die **drei genannten
+Fälle namentlich** (der zweite Entwurf benutzt die Familie des ersten, vier
+Mitglieder, **eine** Familie, die Basisfiguren bleiben Basisfiguren), **das
+Veto** samt Gegenprobe, die Übernahme ohne neue Familie, der
+Widerspruchsabbruch mit unberührter Variante, vier Abweisungen mit eigener
+Meldung, `42501` ohne Adminrecht, das Journal, **keine Massenzuordnung**
+(genau zwei Zeilen; eine gleichnamige dritte Figur bleibt unberührt), der
+verlorene Wettlauf, `admin_publish_with_base` aus `0159` unverändert, und
+eine Rücknahme, die **eine** Funktion entfernt und **keine** Zuordnung.
+
+**Die Oberfläche:** eine Zeile statt eines Formulars — `Familie wird
+übernommen: #7` oder `Familie wird angelegt: Boomer`. Das Veto und der
+Widerspruch erscheinen als verständlicher Satz im Dialog; das Veto nennt das
+unvereinbare Mitglied in der Hausform `SKY-0149 Chop Chop`, nicht in der
+Klammerform, die im Projekt einen Variantennamen bezeichnet. Die **manuelle
+Familienverwaltung** auf der Detailseite bleibt als Korrekturweg.
+
+**Ein Nebenbefund:** während der Analyse hat sich der Staging-Bestand bewegt —
+Entwürfe 102 → 99, Varianten mit Basisfigur 0 → 3, Familien 107 → 108. Der
+Betreiber arbeitet parallel in der Oberfläche. Die Zahlen oben sind deshalb
+eine **Momentaufnahme**; die Struktur der Befunde ändert sich dadurch nicht,
+die absoluten Zahlen schon.
+
+**Neu:** `0161_variant_family_auto.sql`,
+`R0161_drop_variant_family_auto.sql`, `0161_preflight.sql`,
+`0161_postflight.sql`, `staging-0161.sql`, `0161_staging_run.md`,
+`variant-family-auto.test.ts`, fünf `cat08_*`-Analysedateien ·
+**geändert:** `actions.ts` (`publishDraftVariantAuto`, zwei neue Meldungen),
+`draft-dialog.tsx` (Checkbox fort), `de.ts` (drei Sätze neu, zwei fort),
+`validate-check-sql.mts` (P70), `in-context.test.ts`,
+`staging-oneshot.test.ts`, `purchase-receipt.test.ts`,
+`migration-plans.json`, `staging-suite.json`, `APPLIED.md`,
+`SHA256SUMS.txt`, `DATABASE.md`, `DECISIONS.md` (ADR-0157).
+
+**Auf Staging angewendet am 2026-10-29, vollständig geprüft.** Preflight 43 Zeilen
+`9999 = 0` **ohne eine offene Zeile**, Nachkontrolle 59 Zeilen **`9998 = 0` und
+`9999 = 0`**. Zusätzlich am **Rumpfabdruck** nachgewiesen, dass die angewendete Funktion
+die aus der Datei ist — `md5(prosrc)` = `adf679deb5d42fad5dff15bd1641f318` bei 6553
+Zeichen, Parameternamen `p_sky_id text, p_base_sky_id text` (PostgREST ruft benannt) —
+und an ihren Abdrücken, dass die sechs Funktionen aus `0152`/`0158`/`0159` **unverändert**
+sind. Die Baseline weicht von der von `0160` ab (shopfähig 535 → 552, Katalogzeilen
+729 → 725), weil der Betreiber zwischen beiden redaktionell gearbeitet hat; Pre- und
+Postflight dieser Migration stimmen überein. Bestand bei der Anwendung: 81 Entwürfe, 725
+Katalogzeilen, 109 Zeilen mit Familie in 20 Familien, **17 Varianten mit Basisfigur**.
+Keine Katalogdaten durch die Migration verändert, keine Production-Änderung, kein Commit.
+
+
+### CAT-08 Korrektur, die Basisartikelsuche kennt die Artikelart (2026-10-29) — nur Oberfläche, die Migration zu ADR-0158 bleibt offen
+
+**Der Anlass:** beim Entwurf SKY-0854 „White Flocked LightCore Prism Break"
+bot die Auswahl **Portale** an. `fetchBaseFigures` kannte vier Filter —
+dieselbe Serie, keine Varianten, keine Entwürfe, nicht sie selbst — und
+**keinen fachlichen**. Gemessen: ohne ihn kämen in Serie `G` zusätzlich **4
+Portale, 4 Magic Items und 5 Spiele** in die Liste.
+
+**Mein erster Versuch war falsch, und der Betreiber hat ihn korrigiert.** Ich
+hatte auf „nur Charakterfiguren" gefiltert. Das hätte Traps, Fahrzeugen und
+Kristallen **jede** Basis genommen — und **30 der Entwürfe** sind genau das.
+Die richtige Regel ist **dieselbe Artikelart**: Figur → Figur, Trap → Trap,
+Fahrzeug → Fahrzeug, Kristall → Kristall.
+
+**Die Art kommt aus strukturierten Daten, nie aus dem Namen**
+(`src/lib/catalog/article-class.ts`, ADR-0158): `item_type` zuerst, danach der
+Kategoriename. `item_type` allein genügt **nicht** — gemessen tragen **alle
+640** Figurenzeilen `figure`, Traps und Fahrzeuge eingeschlossen. Eine
+unbekannte Kategorie oder ein Widerspruch zwischen beiden ergibt **keine
+Auskunft**, und dann bietet die Suche nichts an und sagt warum.
+
+**Was der Dialog jetzt zeigt** (gemessen, `cat08_candidates_0854.sql`):
+
+| Entwurf | Art | Kandidaten | zuerst |
+|---|---|---|---|
+| SKY-0854 White Flocked LightCore Prism Break (`G`) | character | **77** (statt 90) | `SKY-0170 Prism Break`, Rang 11 |
+| SKY-0880 Legendary Undead Orb Trap (`T`) | trap | **66**, nur `Traps`/`Trap Items` | alphabetisch, kein Namenstreffer |
+| SKY-0899 Mobile Hot Streak (`SC`) | vehicle | **31**, nur `Fahrzeuge` | `SKY-0510 Hot Streak`, Rang 10 |
+
+**Sortiert wird nach zwei Signalen, und beide sind nur eine Reihenfolge:** das
+starke (der Name des Kandidaten steht an einer Wortgrenze am Ende des
+Entwurfsnamens) und das schwache (jedes Wort des Kandidaten kommt im
+Entwurfsnamen vor, mindestens zwei). Das zweite gibt es, weil die
+LightCore-Figur in `G` **„Prism Break Light Core"** heißt — die Suffixform —,
+während der Entwurf „LightCore Prism Break" trägt; die Suffixregel allein
+findet sie nicht. **Keine Auswahl, keine Vorbelegung, keine Artbestimmung.**
+
+**Die Liste ist mobil kurz:** Name groß, SKY-ID und Serie klein, Kategorie
+nur wenn sie in dieser Liste etwas unterscheidet, Variantenzahl nur wenn > 0.
+Die Zeile „bisher ohne Varianten" ist entfallen. Darüber steht, wie viele
+Treffer es insgesamt gibt. Die Suche trifft Anzeigename, **Rohname** und
+SKY-ID; sortiert und begrenzt wird auch ohne Suchwort.
+
+**`NOT_FIGURES` ist aus dem Test nach `collectible.ts` gewandert** und heißt
+`NON_CHARACTER_CATEGORIES`. Sie bleibt die Regel für **Charakterfamilien** und
+ist ausdrücklich **nicht** der Variantenfilter; `character-data.test.ts` fragt
+jetzt dieselbe Quelle.
+
+**DER OFFENE PUNKT, UND ER BRAUCHT EINE FREIGABE:** `admin_publish_variant_auto`
+(`0161`) regelt die Charakterfamilie und fragt die Artikelart **nicht**. Für
+einen Trap-Entwurf mit Trap-Basis würde sie eine **Charakterfamilie, benannt
+nach dem Trap**, anlegen. **Gemessen ist noch nichts passiert** (0 Zeilen
+tragen eine Familie, die keine Charaktere sind) — es gibt also keinen
+Datenschaden, nur eine Lücke. Zweiter Befund: `0159` prüft die Art
+**überhaupt nicht**; der Fremdschlüssel erzwingt nur die **Serie**, ein Trap
+als Basis einer Figur wäre strukturell erlaubt (der Bestand ist sauber: 22
+von 22 Beziehungen innerhalb einer Kategorie).
+
+**Die Zwischenlösung liegt an der sicheren Seite:** der Dialog ruft `0161`
+**nur für Charakterfiguren**; für jede andere Art nimmt er
+`admin_publish_with_base(…, false)` aus `0159` — Basiszuordnung und
+Veröffentlichung, **keine Familie**. Die Oberfläche sagt es auch. Der
+Vorschlag steht in ADR-0158 in vier Schritten. **Die Nummer `0162` ist seit
+dem 2026-10-29 von CAT-09 belegt** (Marktwert und Löschung, auf Staging
+angewendet); die Migration zur Artikelklasse braucht deshalb eine Nummer
+**nach** `0163` und `0164` (beide angewendet).
+
+**Neu:** `article-class.ts`, `base-figure-rank.ts`,
+`base-figure-rank.test.ts`, `cat08_article_types.sql`,
+`cat08_candidates_0854.sql` · **geändert:** `collectible.ts`
+(`NON_CHARACTER_CATEGORIES`, `isCharacterCategory`, `isCharacterFigure`),
+`queries.ts` (Artfilter, `nameRaw`, `art`), `base-figure-search.ts` (Rang,
+`gefunden`, `empfehlung`, `art`), `draft-dialog.tsx`, `base-select.tsx`,
+`de.ts`, `character-data.test.ts`, `variant-family-auto.test.ts`,
+`DECISIONS.md` (ADR-0158).
+
+**Keine Migration ausgeführt, keine Katalogdaten verändert, kein Commit.**
+
+
+### UX-01G, eine Kachel für alle drei Konten (2026-10-29)
+
+**Was vorher war:** `const layout = admin ? "card" : layoutFor(view)`. Ein
+Administrator bekam **immer** die klassische Sammelkarte, ein Sammler die
+gemerkte Wahl zwischen Karte und Kachel. Das war die einzige Stelle im
+Katalog, an der die **Rolle das Aussehen** entschied.
+
+**Jetzt entscheidet sie nur die Handlungen.** Der Katalog zeichnet die
+Kachel — `FigureRow` in `FigureGrid`, unverändert in Design, Maßen, Bildern,
+Preisen, Beschriftungen und Verhalten. Die Rolle kommt als `accountType` aus
+`my_capabilities()` (ADR-0078) und entscheidet, was in der **vorhandenen**
+Aktionsleiste steht:
+
+| Konto | Aktionsleiste | Körper |
+|---|---|---|
+| `user` | `[Glocke] [Info] [Herz]` | Sammeln (Tippen) |
+| `business` | `[Info]` | Weg zur Figur |
+| `admin` | `[Info] [Stift] [Auge]` | ruhig |
+
+**Umgestellte Routen:** `/` (Hauptkatalog) und `/favoriten` — beide rendern
+`CatalogView`. `/zubehoer` hat nie eine Sammelkarte gezeichnet (`AccessoryCard`
+ist eine eigene Kachel für Portale und Spiele) und bleibt unverändert; dort ist
+nur die tote Pille „Karten" aus dem Bereichsschalter entfallen.
+
+**Was wiederverwendet wird, ohne eine Zeile neuer Geschäftslogik:**
+`AvailabilityBell` (vorbereitet und deaktiviert, solange `0150`/`0151`
+nirgends angewendet sind), `FavoriteHeart` → `favorite_demand()`, `InfoLink` →
+`/skylanders/<slug>`, `AdminFigureModal` über `onEdit`, und das Auge →
+`setCatalogStatus` → `admin_set_catalog_status` (`0152`), das
+`is_platform_admin()` **selbst in der Datenbank** fragt. Ein ausgeblendeter
+Knopf ist Darstellung, nicht Grenze.
+
+**Zwei Befunde, die der Umbau mitgenommen hat.** Erstens: ein
+**Betriebskonto** bekam bis hierher einen **Sammelknopf**, weil nur `admin`
+abgefragt wurde — `0145` weist ihn über `is_collector_account()` ab, also war
+es ein Knopf, der nur scheitern konnte. Zweitens: das Abzeichen `HiddenBadge`
+sagte „versteckt" und konnte nichts; das **Auge** sagt denselben Satz und
+schaltet ihn um. Auf einem **Entwurf** ist es aus — veröffentlichen ist eine
+Entscheidung mit eigenem Dialog (ADR-0151), nicht ein Griff im Raster.
+
+**Was NICHT gelöscht wurde, und warum:** `FigureCard`, `card-template.ts`,
+die sieben Artworks, `CatalogViewToggle` und `catalog-view-mode.ts` sind
+**nicht** ungenutzt — die **Sammlung** zeichnet die Karte, und der **Shop**
+behält seine Wahl. Gelöscht wurde nichts; der Katalog zeichnet die Karte nur
+nicht mehr. Die Vorgabe von `CatalogCard` ist dafür umgedreht: `layout = "row"`.
+
+**Neu:** `tile-roles.test.tsx` (9 Zusagen: die drei Rollen an der gerenderten
+Leiste, das Auge auf einer versteckten Figur, das abgeschaltete Auge auf einem
+Entwurf, und dass die Rolle aus der Datenbank kommt) ·
+**geändert:** `catalog-view.tsx` (eine Darstellung, keine Wahl mehr),
+`catalog-card.tsx` (Rolle, Kachel für Admins, Herz und Glocke nur für
+Sammler, kein Sammelknopf für Betriebskonten), `figure-row.tsx` (ein
+`adminSlot` in der vorhandenen Leiste), `card-actions.tsx`
+(`AdminTileActions`), `accessory-view.tsx`, `de.ts`, die beiden Routen, und
+sieben Testdateien, deren Zusagen den alten Zustand festhielten.
+
+**Keine Migration, keine Katalogdatenänderung, kein Commit.**
+
+
 ### Offene Punkte
 
 1. **Keine Sichtprüfung im Browser, und das bleibt nach UX-01C offen.** In
@@ -427,6 +2034,197 @@ kontrolliert um — kein Beschnitt, keine verkleinerten Preise.
    `c24926e`. Das ist ein eigener offener Posten und **nicht** Teil der
    UX-Kette.
 
+### CAT-09, die Adminkachel lernt vier Dinge (2026-10-29) — Oberfläche gebaut, `0162` offen
+
+**Vier gezielte Verbesserungen an der Kachel aus UX-01G**, kein Redesign und
+keine neue Kachelgeometrie.
+
+**1. Eine versteckte Figur ist gedämpft.** `opacity-55 saturate-[0.35]` auf
+der Bildspalte, `text-muted` auf Namen und Betrag — und die **Aktionsleiste
+bleibt bei voller Deckkraft**, weil sie der Weg zurück ist. Die Dämpfung hängt
+am **Status** (`catalog_status = 'hidden'`) und nicht an `catalogVisible`:
+ein **Entwurf** ist ebenfalls nicht öffentlich, aber etwas anderes — er wartet
+auf eine Entscheidung, die versteckte Figur hat eine. Nur in der Adminansicht.
+
+**2. Ein roter Papierkorb, als vierte Marke.** Reihenfolge
+`[Info] [Stift] [Auge] [Papierkorb]`; rot ist hier keine Farbwahl, sondern die
+einzige — die drei anderen Handlungen sind umkehrbar, diese nicht. Er **fragt**
+in einem `alertdialog` mit **Name und SKY-ID**, nennt vorher, was geprüft
+wird, und warnt zusätzlich, wenn die Figur öffentlich ist.
+
+**3. Eine Größe je Ort.** Die vier Marken der Leiste tragen **22 px** auf
+einem 22er-Raster in 44-px-Feldern, aus **einem** `ICON`-Objekt; die drei
+Steuerzeichen der Preiszelle (Stift, Haken, Kreuz) tragen **18 px**, weil sie
+neben einem 17-px-Betrag stehen — aber alle drei dieselben. Meine erste
+Fassung hatte 16 für den Stift und 18 für die beiden anderen, und genau diese
+Sorte Unterschied war der Befund des Betreibers.
+
+**4. Der Marktwert inline — und die Falle, die er benannt hat.** Die Kachel
+**druckt** `market_price × (1 + boost/100)`, gerechnet in
+`src/lib/catalog/market-boost.ts` im Moment des Druckens und **nie
+gespeichert**. Das Eingabefeld wird deshalb mit dem **gespeicherten** Wert
+vorbelegt; schriebe es den gedruckten zurück, wäre der Zuschlag beim nächsten
+Lesen zweimal drin und beim nächsten Speichern dreimal. Ein Satz unter dem
+Feld sagt beides. Komma und Punkt gelten, Enter oder Haken speichert, Escape
+oder Kreuz bricht ab, ein Fehler **behält die Eingabe**. Das **leere** Feld
+schreibt `NULL` — „Preis offen" (ADR-0010) —, und eine `0` wird abgewiesen:
+sie ist kein Preis und ausdrücklich nicht „offen".
+
+**Was dafür gebaut wurde:** `src/lib/admin/price-input.ts` (drei Ergebnisse:
+Zahl, `null`, `"ungueltig"` — nie stillschweigend 0),
+`src/components/admin/inline-price.tsx`, `AdminTileActions` um Papierkorb und
+`DeleteDialog` erweitert, `dimmed` und `priceSlot` an `FigureRow`, beides in
+der Adminverzweigung von `CatalogCard` verdrahtet, und zwei Serveraktionen
+(`setMarketPrice`, `deleteFigure`) mit ihren Fehlerzuordnungen.
+
+**Migration `0162` ist seit dem 2026-10-29 auf Staging angewendet** (Betreiber
+im SQL-Editor von `qqxcpesbwfxzgytkdsac` über `supabase/operations/staging-0162.sql`;
+Preflight 40 Zeilen `9999 = 0`, Nachkontrolle 66 Zeilen `9999 = 0`, berechtigter
+Lauf als `postgres` `9998 = 0` UND `9999 = 0`; Akte: `supabase/migrations/APPLIED.md`).
+**Auf Production nicht.** Sie brauchte eine ausdrückliche Freigabe, weil sie den
+ersten Weg anlegt, der eine Katalogzeile **entfernt**. `admin_set_market_price(text, numeric)` schreibt eine Spalte und
+ihr Datum; `admin_delete_figure(text)` prüft **drei** Dinge, und die dritte
+ist der Grund für die Funktion:
+
+| | |
+|---|---|
+| gezählte Verweise | `admin_merge_references` aus `pg_constraint` — **14** Fremdschlüssel |
+| die vier mit `ON DELETE CASCADE` | `cart_items`, `catalog_editorial`, `inventory_import_mappings`, `orderbook_name_mappings` — **namentlich in der Meldung**, weil ein `delete` sie stillschweigend mitgenommen hätte |
+| **der stille Verweis** | `order_lines.sky_id` ist die **einzige** SKY-ID-Spalte ohne Fremdschlüssel (ein Beleg soll Katalogänderungen überleben), also sieht `admin_merge_references` sie **nicht** |
+
+Dazu: Varianten werden mit einem lesbaren Satz abgewiesen, bevor der
+Schlüssel aus `0159` es mit `23001` tut; nichts wird umgehängt; **kein
+`cascade` als Umweg**; **kein Zugriff auf Storage** (gemessen: 44 Bilddateien
+sind von 103 Zeilen **geteilt** — eine verwaiste Datei ist der harmlose
+Fehler, eine gelöschte nähme einer anderen Figur das Bild); **kein `setval`**
+— die SKY-ID kommt nie zurück. Das **Journal überlebt** die Löschung:
+`catalog_admin_changes` hat keinen Fremdschlüssel auf `skylanders`, und die
+Zeile wird **vor** dem `delete` geschrieben.
+
+**Gemessen, bevor etwas ausgeführt wird:** Probelauf **P71** fährt beides an
+echtem PostgreSQL **mit den echten Fremdschlüsseln**, die das Stub-Schema
+nicht trägt — Preis gesetzt → offen → gesetzt, `0` und negativ mit dem Satz
+abgewiesen, jede Abhängigkeitsklasse einzeln blockiert, der CASCADE-Schlüssel
+namentlich, der stille Verweis, eine Basisfigur mit Variante, `42501` ohne
+Adminrecht, der Wettlauf, das geteilte Bild und `R0162`.
+`src/components/catalog/tile-admin-actions.test.tsx` prüft die Oberfläche
+(27 Fälle), darunter die Vorbelegung **mit Zuschlag**: gespeichert 10,
+gedruckt 12,00 €, im Feld `10,00`.
+
+**Laufzettel:** `supabase/checks/0162_staging_run.md` — mit den **drei
+Punkten, die der Betreiber vor einer Ausführung bestätigen muss** (eine
+referenzfreie Zeile verschwindet endgültig, die SKY-ID ist verbraucht, die
+verwaisten Bilddateien bleiben liegen).
+
+**Was offen bleibt:** `0162` auf Production, und weiterhin die
+Artikelklassenlücke aus **ADR-0158** — `0161` würde einem Trap oder Fahrzeug
+eine Charakterfamilie geben, und `0159` prüft die Artikelart gar nicht. Beide
+brauchen eine eigene Migration mit einer Nummer **nach** `0162`.
+
+---
+
+### CAT-10, der TYPE als Menge (2026-10-29, ADR-0160) — Oberfläche gebaut, `0163` und `0164` auf Staging
+
+**Eine Katalogzeile trug bis hierher EINE Klassifikation** — `card_type`,
+sieben Werte. Gemessen (`cat10_type_system.sql`, 2026-10-29 um 13:11, 694
+Zeilen) verschweigt das bei **206** Zeilen eine Eigenschaft: was ein Ding *ist* (Giant, Trap, Fahrzeug)
+hing an der **Kategorie** und kam nie auf eine Kachel. „Legendary Giant" war
+entweder das eine oder das andere.
+
+**Jetzt:** `types text[]` (die vollständige Menge aus **17** Werten in drei
+Gruppen), `visible_type` (der eine, der als Banner erscheint) und
+`visible_type_decided` (hat ein Mensch entschieden?). **Die Mitgliedschaft ist
+eine Zeilen-CHECK** — `visible_type is null or visible_type = any (types)` —
+und damit eine Eigenschaft der Datenbank, nicht ein Versprechen der Anwendung.
+
+**Die Frage, an der alles hing, und sie ist beantwortet:** lässt sich
+`card_type` aus der Menge ableiten? Der Betreiber hat verlangt, das sorgfältig
+zu prüfen. `cat10_projection_proof.sql`, gegen **alle 701** Zeilen gefahren,
+sagt **nein** — in drei Punkten:
+
+1. Um 11:12 (701 Zeilen) hätte **eine** Zeile ihre Kartenkunst verloren:
+   **SKY-0854** „White Flocked LightCore Prism Break", damals `standard`,
+   projiziert `special`. Um 13:11 (694 Zeilen) sind es **zwei** — SKY-0172 und
+   SKY-0854, beide inzwischen `chase`. Abdruck `4b81b918…`, projiziert
+   `5d324fcb…`. Die Zahl bewegt sich, der Befund nicht.
+2. `EDITION_RANK` gibt `standard`, `chase` und `elite` denselben **Rang 0**.
+   Eine Menge mit Chase *und* Elite hätte keine fachliche Antwort; 45 bzw. 42
+   Zeilen könnten morgen beides tragen.
+3. Jede Typänderung bewegte die Kartenkunst — **488** Zeilen beim Hinzufügen,
+   **206** beim Entfernen, 39 davon im Shop gelistet.
+
+**Also zwei Eigenschaften, zwei Spalten, zwei Felder im Dialog: „Types" und
+„Kartenkunst".** Die Spalte heißt weiter `card_type` — eine angewendete
+Migration wird nicht umbenannt, und im Code ist der Name richtig.
+
+**Die Erstbelegung kommt aus strukturierten Daten**, kein Figurenname wird
+gelesen (ADR-0034): `categories.catalog_group` für Giant/Swapper/Master/Sensei
+und Item/Trap/Vehicle/Crystal; der **Kategoriename** für Mini vs. **Sidekick**
+(beide tragen heute die Gruppe `mini` — 27 = 19 + 8); `card_type` für die
+Variantentypen; und eine **kuratierte Liste von 21 LightCore-SKY-IDs** nach dem
+Muster von `0032`.
+
+**Die eine gewollte Änderung am Bildschirm:** die LightCore-Zeilen mit der
+Kartenkunst `special` zeigen danach LIGHTCORE statt SPECIAL (Stand 13:11: **17
+von 21**) — Folge von Entscheidung D3, weil `special` dort nur die Kartenkunst
+war. Ihre Kartenkunst bleibt `special`. Die übrigen **189** Banner bleiben
+zeichengleich, und die **273** Zeilen mit nur einer Gruppe (davon 251
+öffentlich) bekommen **kein** Banner: die Priorität ist ein **Vorschlag im
+Dropdown** und nie eine Wirkung.
+
+**Keine Bestandszahl steht in einem Riegel.** Wächter A7 der Hülle misst den
+Abdruck der Kartenkunst und die Zahl der erwarteten Bannerwechsel vor dem Lauf
+und legt sie transaktionslokal ab; B3 und B5 vergleichen danach und brechen
+auch ab, wenn der Wert fehlt. Die erste Fassung hatte den Abdruck
+`4d6bbb02…` eingefroren — nach zwei Stunden redaktioneller Arbeit des
+Betreibers war er veraltet, und die Hülle hätte die Transaktion dafür
+abgebrochen.
+
+**Oberfläche:** `src/lib/catalog/catalog-type.ts` (Vokabular, Gruppen,
+Beschriftungen, Priorität, `bannerType`), `src/components/admin/type-select.tsx`
+(das Dropdown, im vorhandenen `trade`-Slot der Kachel — keine neue Geometrie),
+der Bereich **„Types"** im Bearbeiten-Dialog (Mehrfachauswahl, nach den drei
+Gruppen gegliedert, über den vorhandenen Entwurfsmechanismus als **sechstes**
+Feld), `EditionBanner` liest jetzt den sichtbaren Type, und die Detailseite
+zeigt die Menge **nur zum Lesen**.
+
+**Migration `0163` ist seit dem 2026-10-29 auf Staging angewendet** (Preflight
+42 Zeilen `9999 = 0` ohne offene Zeile, Nachkontrolle 69 Zeilen `9999 = 0`,
+berechtigter Lauf als `postgres` `9998 = 0` UND `9999 = 0`; Akte
+`supabase/migrations/APPLIED.md`). Gemessen danach: 479 Zeilen mit mindestens
+einem Type, 206 Banner — **alle** ausdrücklich entschieden —, 21 LightCore aus
+der kuratierten Liste, **17** Bannerwechsel SPECIAL → LIGHTCORE, und der
+Kartenkunst-Abdruck `4b81b918…` unverändert. **`0164` ist seit demselben Tag
+ebenfalls auf Staging angewendet und technisch verifiziert** (Preflight 28
+Zeilen `9999 = 0`; Rumpfabdruck `7e9e58e2…`, 31248 Zeichen, Umkehrprobe ergibt
+zeichengleich den Rumpf aus `0160`; 54 Bereiche, `format_version` 2,
+`security definer` mit leerem Suchpfad, `execute` nur `authenticated`). Ihre
+Nachkontrolle lief mit **`9999 = 2` — zwei ausdrücklich erklärten
+Abweichungen**: SKY-0564 „Kaos in OVP" wurde um 14:38:40 UTC, also nach dem
+Einfrieren der Baseline, redaktionell versteckt; shopfähig und sammelbar fielen
+dadurch von 565 auf 564, die Gegenrechnung ergibt mit dieser einen Zeile wieder
+565, und das Journal nennt keine zweite Änderung. Prüfdatei und Baseline
+blieben unverändert. Reihenfolge war **`0162` → `0163` → `0164`**; `0163` baut die Audit-Constraint aus
+dem **vorgefundenen** Stand plus den eigenen zwei Werten und kann deshalb
+keinen verlieren. `0164` nimmt alle drei Felder in die **Plattformsicherung**
+(`types` allein wäre eine halbe Sicherung — die Menge stünde wieder da und
+jedes Banner wäre fort). Die Betriebssicherung bleibt unberührt.
+
+**Gemessen, bevor etwas ausgeführt wird:** **P72** fährt `0163` an echtem
+PostgreSQL — die Kartenkunst bleibt **zeichengleich**, Giant+Legendary,
+Trap+Special, Vehicle+Chase, Sensei+Elite und Crystal+Dark stehen
+nebeneinander, Sidekick und Mini sind getrennt, die Mitgliedschaft weist an der
+Tabelle selbst ab, alle 17 Werte sind zuweisbar, „–" bleibt, `42501` ohne
+Adminrecht, die Zusammenführung trägt die Menge als **neuntes** Feld, `R0163`.
+**P73** fährt den **Umlauf** durch das Archiv: sichern, löschen, einspielen —
+jede Menge, jedes Banner und jedes ausdrückliche „–" steht wieder da.
+
+**Was offen bleibt:** CAT-10 ist auf Staging vollständig — `0162`, `0163` und
+`0164` stehen dort seit dem 2026-10-29. Offen sind **Production** (dort steht
+keine Migration nach `0143`) und weiterhin die Artikelklassenlücke aus
+ADR-0158.
+
+---
 ---
 
 ## Der Spiegel hatte keinen Aufrufer (2026-10-26, ADR-0145) — behoben
@@ -681,7 +2479,7 @@ kommt in keiner wirksamen Zeile vor, und kein Passwort wurde geändert.
 
 ---
 
-## Persönliche Verfügbarkeitsmeldungen (2026-10-26, `0148`, Phase 4 S3, ADR-0143) — gebaut, nirgends angewendet
+## Persönliche Verfügbarkeitsmeldungen (2026-10-26, `0148`, Phase 4 S3, ADR-0143) — gebaut, auf Staging seit dem 2026-10-26
 
 **Aus einem erkannten Ereignis werden Meldungen.** Je betroffenem Nutzer genau eine, dauerhaft
 gespeichert, RLS-geschützt. **Keine E-Mail, kein Push, kein Preisalarm, kein Scheduler, keine
@@ -726,7 +2524,7 @@ Vor Production: `0144` → Folgemigration (Formatversion 3, alle drei) → `0145
 
 ---
 
-## Verfügbarkeitserkennung (2026-10-26, `0147`, Phase 4 S2, ADR-0142) — gebaut, nirgends angewendet
+## Verfügbarkeitserkennung (2026-10-26, `0147`, Phase 4 S2, ADR-0142) — gebaut, auf Staging seit dem 2026-10-26
 
 **Aus dem Spiegel wird eine Kante.** `0146` weiß, ob eine Figur jetzt kaufbar ist; `0147`
 weiß, ob sie es **wieder** geworden ist, seit wann ununterbrochen, und ob darüber schon
@@ -1106,7 +2904,7 @@ Formular** (ADR-0132). Der Kalkulator liefert nur SKY-IDs und Stückzahlen.
 | Geld | **keines** aus der Kalkulation — Bewertung ist keine Ausgabe |
 | Verknüpfung | `0143`: `seller_create_purchase_from_calculation` ruft `seller_create_purchase_with_items` unverändert auf und schreibt `purchase_id` in **derselben Transaktion** |
 | Riegel | Betriebsrolle · Besitz (ausdrücklich, weil `security definer`) · `purchase_id is null` mit `for update`; Ausnahme nur für die wortgleiche Wiederholung desselben Entwurfs |
-| Migration | `0143_purchase_from_calculation.sql` — **nirgends angewendet**; Rücknahme `R0143` lässt bestehende Verknüpfungen stehen; Staging-Lauf `staging-0143.sql` bereit |
+| Migration | `0143_purchase_from_calculation.sql` — **auf Staging seit dem 2026-10-24, auf Production seit dem 2026-10-25**; Rücknahme `R0143` lässt bestehende Verknüpfungen stehen; Staging-Lauf `staging-0143.sql` bereit |
 | Probelauf | **P49**: ohne Rolle abgewiesen · fremde Kalkulation „not found" · guter Fall ein Einkauf mit zwei Positionen, verknüpft · derselbe Entwurf nochmal: derselbe Einkauf, **kein zweiter** · neuer Entwurf: abgewiesen und **kein Einkauf zurückgelassen** · Rücknahme lässt die Verknüpfung stehen |
 
 **Nicht entstanden:** kein zweites Einkaufsformular, kein Importdialog, keine
@@ -1471,7 +3269,7 @@ Der Kalkulator behält jetzt zwei Dinge auseinander (ADR-0131): den
 
 | | |
 |---|---|
-| Migration | `0142_purchase_calculations.sql` — **nirgends angewendet**; Rücknahme `R0142`, Probelauf **P48** |
+| Migration | `0142_purchase_calculations.sql` — **auf Staging seit dem 2026-10-22, auf Production seit dem 2026-10-25**; Rücknahme `R0142`, Probelauf **P48** |
 | Staging-Lauf | `supabase/operations/staging-0142.sql` liegt bereit (ein Einfügen, Stempel auf Staging) — **braucht eine Freigabe** |
 | neu | `src/lib/calculator/draft.ts`, `saved.ts`, `saved-actions.ts`, `src/components/calculator/saved-panel.tsx` |
 | geändert | `calculation.ts` (zuletzt hinzugefügt steht oben), `calculator-modal.tsx`, `src/lib/i18n/de.ts` |
