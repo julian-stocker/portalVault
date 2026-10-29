@@ -64,7 +64,7 @@
  * keine.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { ladeAufnahme } from "./lib/privileges.mts";
@@ -7179,6 +7179,5149 @@ async function main(): Promise<void> {
       ok: ok59,
       sagt: `0151: ${befund59.join(" · ")}`,
     });
+  }
+
+  /* ==================================================================
+   * P60 — `0152`: DIE WAHRHEITSTABELLE DES STATUS-TRIGGERS.
+   *
+   * WOFUER. `0152` fuegt eine Spalte hinzu, deren Wert ein Trigger aus der
+   * jeweils anderen ableitet. Das ist genau die Art Mechanik, die man nicht
+   * durch Lesen pruefen kann: welcher Zweig feuert, haengt davon ab, welche
+   * Spalte sich gegenueber der alten Zeile UNTERSCHEIDET — und PL/pgSQL kann
+   * „genannt" nicht von „genannt mit demselben Wert" unterscheiden.
+   *
+   * Dieser Durchgang fuehrt deshalb JEDEN Schreibweg an echtem PostgreSQL
+   * und schreibt das Ergebnis auf. Vierzehn Faelle, darunter die acht, die
+   * der Betreiber ausdruecklich genannt hat, die drei Legacy-Pfade und die
+   * beiden Faelle, die kontrolliert abgewiesen werden muessen.
+   *
+   * DIE WELT IST „VOR DER MIGRATION": Spalte, Trigger und beide CHECKs
+   * werden aus dem Stub-Schema entfernt, dann laeuft `0152`.
+   * ================================================================== */
+  {
+    const db = await frisch();
+    const M152 = join(MIG_DIR, "0152_catalog_status.sql");
+    const befund60: string[] = [];
+    let ok60 = true;
+    const sag60 = (was: string, gut: boolean, text: string): boolean => {
+      /* Der Schritt, der anschlaegt, nennt sich selbst — sonst muss man bei
+         siebzehn Befunden raten, welcher gemeint ist. */
+      befund60.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok60 = false;
+      return gut;
+    };
+    const w60 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] })
+        .rows[0]?.w ?? "?");
+    /** Der Zustand einer Zeile, als ein Wort: `status/visible`. */
+    const zustand = (id: string) => w60(
+      `select catalog_status || '/' || catalog_visible::text as w
+         from public.skylanders where sky_id = '${id}'`);
+    /** Eine Anweisung fahren; gibt den Fehlercode zurueck oder null. */
+    const tu = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) { return (e as { code?: string }).code ?? "FEHLER"; }
+    };
+
+    /* --- die Welt vor der Migration ------------------------------------ */
+    /*
+     * ZUERST EIN BEFUND DES WERKZEUGS, NICHT DER MIGRATION.
+     *
+     * `0033` legte `admin_create_figure` mit SIEBEN Parametern an, `0034` mit
+     * acht — und `0034` loescht die alte Fassung ausdruecklich (Zeile 41).
+     * In der echten Datenbank gibt es also genau eine. Das Stub-Schema
+     * sammelt Funktionen aber nach Signatur und wertet `drop function`
+     * NICHT aus, also stehen hier beide, und ein Aufruf mit drei Argumenten
+     * ist mehrdeutig.
+     *
+     * Deshalb wird die ueberholte Fassung hier genauso entfernt, wie `0034`
+     * sie entfernt. Die Welt dieses Durchgangs soll der Datenbank
+     * entsprechen, nicht dem Stub.
+     */
+    await db.exec(`drop function if exists
+      public.admin_create_figure(text, text, bigint, text, boolean, text, text);`);
+    await db.exec("drop trigger if exists skylanders_sync_catalog_status on public.skylanders;");
+    await db.exec("drop function if exists public.skylanders_sync_catalog_status();");
+    await db.exec(`alter table public.skylanders
+                     drop constraint if exists skylanders_catalog_status_known,
+                     drop constraint if exists skylanders_catalog_status_matches_visibility,
+                     drop column if exists catalog_status;`);
+    const vorher = await w60(
+      `select (not exists (select 1 from information_schema.columns
+                where table_schema='public' and table_name='skylanders'
+                  and column_name='catalog_status'))::text as w`);
+    await serienUndIdentitaet(db);
+    /*
+     * ZWEITER WERKZEUGBEFUND. Das Stub-Schema beschreibt Spalten, aber keine
+     * Schluessel — in der echten Tabelle ist `sky_id` der Primaerschluessel
+     * (`0001`), hier gibt es keinen, und ein `on conflict (sky_id)` wie der
+     * Katalogimport es benutzt scheitert mit `42P10`. Der Index wird deshalb
+     * nachgezogen: dieser Durchgang soll den Import in seiner ECHTEN Form
+     * fahren, nicht in einer, die der Stub zufaellig zulaesst.
+     */
+    await db.exec("create unique index if not exists z_sky_id_uniq on public.skylanders (sky_id);");
+    await db.exec(`insert into public.categories (series_code, name, position)
+                   values ('SA', 'Skylanders', 0);`);
+    /* Zwei Zeilen VOR der Migration: eine sichtbare, eine versteckte. Der
+       Backfill muss aus ihnen 'public' und 'hidden' machen — und keinen
+       Entwurf. */
+    await db.exec(`insert into public.skylanders
+                     (sky_id, name, slug, series_code, category_id, is_active, catalog_visible)
+                   select 'SKY-9001', 'Alt sichtbar', 'alt-sichtbar', 'SA', c.id, true, true
+                     from public.categories c limit 1;`);
+    await db.exec(`insert into public.skylanders
+                     (sky_id, name, slug, series_code, category_id, is_active, catalog_visible)
+                   select 'SKY-9002', 'Alt versteckt', 'alt-versteckt', 'SA', c.id, true, false
+                     from public.categories c limit 1;`);
+
+    const lauf = await fahre(db, M152);
+    sag60("Lauf", vorher === "true" && lauf === null,
+          `Spalte fehlte vorher ${vorher} · Migration ${lauf ?? "durch"}`);
+
+    if (lauf === null) {
+      /* --- der Backfill --------------------------------------------- */
+      const b1 = await zustand("SKY-9001");
+      const b2 = await zustand("SKY-9002");
+      const entwuerfe = await w60(
+        "select count(*)::text as w from public.skylanders where catalog_status = 'draft'");
+      sag60("Backfill", b1 === "public/true" && b2 === "hidden/false" && entwuerfe === "0",
+            `sichtbar → ${b1} · versteckt → ${b2} · Entwuerfe nach dem Backfill: ${entwuerfe}`);
+
+      /* --- eine Zeile je Fall, damit die Faelle sich nicht stoeren ---- */
+      const neu = async (id: string, sichtbar: boolean, status: string | null) => {
+        const spalten = status === null
+          ? "(sky_id, name, slug, series_code, category_id, is_active, catalog_visible)"
+          : "(sky_id, name, slug, series_code, category_id, is_active, catalog_visible, catalog_status)";
+        const werte = status === null
+          ? `'${id}', '${id}', '${id.toLowerCase()}', 'SA', c.id, true, ${sichtbar}`
+          : `'${id}', '${id}', '${id.toLowerCase()}', 'SA', c.id, true, ${sichtbar}, '${status}'`;
+        return tu(`insert into public.skylanders ${spalten}
+                   select ${werte} from public.categories c limit 1;`);
+      };
+
+      /* FALL 5 und 6: INSERT ohne Status. */
+      const f5 = await neu("SKY-9005", true, null);
+      const f6 = await neu("SKY-9006", false, null);
+      sag60("F5/F6 INSERT ohne Status",
+            f5 === null && f6 === null
+            && (await zustand("SKY-9005")) === "public/true"
+            && (await zustand("SKY-9006")) === "hidden/false",
+            `sichtbar → ${await zustand("SKY-9005")} · unsichtbar → ${await zustand("SKY-9006")}`);
+
+      /* FALL 7: INSERT mit ausdruecklichem 'draft'. */
+      const f7 = await neu("SKY-9007", false, "draft");
+      sag60("F7 INSERT mit draft", f7 === null && (await zustand("SKY-9007")) === "draft/false",
+            `${await zustand("SKY-9007")}`);
+
+      /* FALL 10: INSERT mit 'draft' UND catalog_visible = true.
+         Der Status gewinnt — die Sichtbarkeit hat einen Vorgabewert und kann
+         unbeabsichtigt dort stehen, ein genannter Status nicht. */
+      const f10 = await neu("SKY-9010", true, "draft");
+      sag60("F10 INSERT draft + visible true", f10 === null
+            && (await zustand("SKY-9010")) === "draft/false",
+            `${await zustand("SKY-9010")} (der Status gewinnt)`);
+
+      /* FALL 1: public → catalog_visible false. */
+      await neu("SKY-9011", true, null);
+      const f1 = await tu("update public.skylanders set catalog_visible = false where sky_id = 'SKY-9011';");
+      sag60("F1 public → visible false", f1 === null && (await zustand("SKY-9011")) === "hidden/false",
+            `${await zustand("SKY-9011")}`);
+
+      /* FALL 2: hidden → catalog_visible true. */
+      await neu("SKY-9012", false, "hidden");
+      const f2 = await tu("update public.skylanders set catalog_visible = true where sky_id = 'SKY-9012';");
+      sag60("F2 hidden → visible true", f2 === null && (await zustand("SKY-9012")) === "public/true",
+            `${await zustand("SKY-9012")}`);
+
+      /* FALL 3: draft → catalog_visible true. Der Entwurf wird oeffentlich,
+         denn der Wechsel nach sichtbar ist der eine eindeutige. */
+      await neu("SKY-9013", false, "draft");
+      const f3 = await tu("update public.skylanders set catalog_visible = true where sky_id = 'SKY-9013';");
+      sag60("F3 draft → visible true", f3 === null && (await zustand("SKY-9013")) === "public/true",
+            `${await zustand("SKY-9013")}`);
+
+      /* FALL 4: draft → catalog_visible false. KEINE Aenderung, also bleibt
+         der Entwurf ein Entwurf — das ist die Zusage aus ADR-0151 F-6. */
+      await neu("SKY-9014", false, "draft");
+      const f4 = await tu("update public.skylanders set catalog_visible = false where sky_id = 'SKY-9014';");
+      sag60("F4 draft → visible false", f4 === null && (await zustand("SKY-9014")) === "draft/false",
+            `${await zustand("SKY-9014")} (Entwurf bleibt Entwurf)`);
+
+      /* FALL 8 und 9: UPDATE nur des Status. */
+      await neu("SKY-9008", false, "hidden");
+      const f8 = await tu("update public.skylanders set catalog_status = 'draft' where sky_id = 'SKY-9008';");
+      await neu("SKY-9009", true, null);
+      const f9 = await tu("update public.skylanders set catalog_status = 'draft' where sky_id = 'SKY-9009';");
+      sag60("F8/F9 nur Status geaendert",
+            f8 === null && f9 === null
+            && (await zustand("SKY-9008")) === "draft/false"
+            && (await zustand("SKY-9009")) === "draft/false",
+            `hidden→draft ${await zustand("SKY-9008")} · public→draft ${await zustand("SKY-9009")}`);
+
+      /* FALL 11: BEIDE genannt, der Status unveraendert, die Sichtbarkeit
+         geaendert. Die geaenderte Spalte entscheidet — und das ist die
+         einzige Regel, die ein Trigger haben KANN: „genannt mit demselben
+         Wert" ist von „nicht genannt" nicht unterscheidbar. */
+      await neu("SKY-9015", false, "hidden");
+      const f11 = await tu(`update public.skylanders
+                              set catalog_status = 'hidden', catalog_visible = true
+                            where sky_id = 'SKY-9015';`);
+      sag60("F11 beide genannt, nur Sichtbarkeit geaendert",
+            f11 === null && (await zustand("SKY-9015")) === "public/true",
+            `${await zustand("SKY-9015")} (die geaenderte Spalte entscheidet)`);
+
+      /* FALL 12 und 13: was abgewiesen werden MUSS. */
+      await neu("SKY-9016", true, null);
+      const f12 = await tu("update public.skylanders set catalog_status = 'bogus' where sky_id = 'SKY-9016';");
+      const f13 = await tu("update public.skylanders set catalog_status = null where sky_id = 'SKY-9016';");
+      const nach1213 = await zustand("SKY-9016");
+      sag60("F12/F13 abgewiesen",
+            f12 !== null && f13 !== null && nach1213 === "public/true",
+            `unbekannter Wert ${f12} · NULL ${f13} · Zeile unveraendert ${nach1213}`);
+
+      /* FALL 14: ein UPDATE, das keine der beiden Spalten nennt. */
+      await neu("SKY-9017", false, "draft");
+      const f14 = await tu("update public.skylanders set name = 'Umbenannt' where sky_id = 'SKY-9017';");
+      sag60("F14 UPDATE ohne die beiden Spalten",
+            f14 === null && (await zustand("SKY-9017")) === "draft/false",
+            `${await zustand("SKY-9017")}`);
+
+      /* DER IMPORT, in seiner echten Form: ein Upsert ueber acht Spalten,
+         der keine der beiden nennt. Eine bestehende Zeile darf sich nicht
+         bewegen — auch nicht ihr Entwurfszustand. */
+      await neu("SKY-9018", false, "draft");
+      const fImp = await tu(`insert into public.skylanders
+                               (sky_id, name, slug, series_code, category_id, market_price,
+                                image_file, is_active)
+                             select 'SKY-9018', 'Import', 'sky-9018', 'SA', c.id, 9.99, null, true
+                               from public.categories c limit 1
+                             on conflict (sky_id) do update set
+                               name = excluded.name, market_price = excluded.market_price;`);
+      sag60("Import-Upsert", fImp === null && (await zustand("SKY-9018")) === "draft/false",
+            `${await zustand("SKY-9018")} (Entwurf unberuehrt)`);
+
+      /*
+       * DIE WIEDERHERSTELLUNG, und sie ist der Fall, der CAT-02C Teil B
+       * entscheidet: ein `pg_restore` spielt die Tabelle mit ALLEN Spalten
+       * ein, nennt also beide — und ein widerspruchsfreies Paar, weil der
+       * CHECK es beim Sichern erzwungen hat. Der Trigger muss dann NICHTS
+       * tun: seine Ableitung trifft genau den Wert, der schon dasteht.
+       *
+       * `COPY` feuert Zeilentrigger genauso wie `INSERT`, deshalb modelliert
+       * ein INSERT mit beiden Spalten den Einspielweg richtig.
+       *
+       * Wuerde der Trigger hier etwas anderes ableiten, waere jeder Entwurf
+       * nach einer Wiederherstellung still verloren.
+       */
+      let wh = "";
+      for (const [id, sichtbar, status] of [
+        ["SKY-9031", "true",  "public"],
+        ["SKY-9032", "false", "hidden"],
+        ["SKY-9033", "false", "draft"],
+      ] as const) {
+        const f = await tu(`insert into public.skylanders
+                              (sky_id, name, slug, series_code, category_id, market_price,
+                               image_file, is_active, catalog_visible, catalog_status)
+                            select '${id}', 'Restore', '${id.toLowerCase()}', 'SA', c.id,
+                                   9.99, null, true, ${sichtbar}, '${status}'
+                              from public.categories c limit 1;`);
+        const soll = `${status}/${sichtbar}`;
+        const ist = await zustand(id);
+        sag60(`Restore ${status}`, f === null && ist === soll, `${ist} (gesichert: ${soll})`);
+        wh += ist;
+      }
+      sag60("Restore erhaelt den Entwurf", wh === "public/truehidden/falsedraft/false",
+            wh.replaceAll("/", ":"));
+
+      /* DIE BEIDEN CHECKS sind da und greifen auch gegen einen direkten
+         Widerspruch, den der Trigger nicht aufloesen kann: eine Zeile, die
+         den Trigger umgeht, gibt es nicht — aber der CHECK ist der
+         Nachweis, dass es sie nicht geben KANN. */
+      const checks = await w60(
+        `select count(*)::text as w from pg_constraint
+          where conrelid = 'public.skylanders'::regclass
+            and conname in ('skylanders_catalog_status_known',
+                            'skylanders_catalog_status_matches_visibility')`);
+      const widerspruch = await w60(
+        `select count(*)::text as w from public.skylanders
+          where (catalog_status = 'public') <> catalog_visible`);
+      sag60("Zwei CHECKs, kein Widerspruch", checks === "2" && widerspruch === "0",
+            `CHECKs ${checks} · widerspruechliche Zeilen ${widerspruch}`);
+
+      /* DAS JOURNAL: ein Statuswechsel schreibt eine Zeile, und der alte
+         Weg schreibt weiterhin seine.
+         .
+         DER TRIGGER WIRD HIER ANGELEGT, weil das Stub-Schema Funktionen und
+         Tabellen fuehrt, aber KEINE Trigger — `skylanders_log_editorial`
+         stammt aus `0004` und fehlt deshalb in dieser Welt. `0152` ersetzt
+         nur den Rumpf; ohne den Trigger waere der Rumpf nie aufgerufen und
+         die Pruefung sagte nichts. Zeichengleich mit `0004`, Zeile 412. */
+      await db.exec(`create trigger skylanders_log_editorial
+                       after update on public.skylanders
+                       for each row execute function public.log_skylander_editorial_change();`);
+      /* MIT PRUEFUNG, und das ist eine Lehre aus diesem Durchgang: `neu` gibt
+         einen Fehlercode ZURUECK statt zu werfen. Ein stilles Scheitern hier
+         liesse die Pruefung an einer Zeile arbeiten, die ein anderer Fall
+         angelegt hat — sie waere dann gruen, ohne etwas zu zeigen. */
+      const fJ = await neu("SKY-9019", true, null);
+      sag60("Journalzeile entsteht", fJ === null, fJ ?? "angelegt");
+      await db.exec("delete from public.catalog_admin_changes;");
+      await db.exec("update public.skylanders set catalog_status = 'hidden' where sky_id = 'SKY-9019';");
+      const journal = await w60(
+        `select string_agg(field || ':' || coalesce(old_value,'-') || '→' || coalesce(new_value,'-'),
+                           ' ' order by field) as w
+           from public.catalog_admin_changes where entity_id = 'SKY-9019'`);
+      sag60("Journal", journal.includes("catalog_status:public→hidden")
+            && journal.includes("catalog_visible:true→false"),
+            journal);
+
+      /* `admin_create_figure`: eine neu angelegte Figur ist ein Entwurf. */
+      await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                     language sql as $stub$ select true $stub$;`);
+      const neueId = await w60(
+        `select public.admin_create_figure('Neu aus dem Editor', 'SA',
+                  (select id from public.categories limit 1)) as w`);
+      const neuerStatus = neueId.startsWith("SKY-") ? await zustand(neueId) : "?";
+      sag60("admin_create_figure", neuerStatus === "draft/false",
+            `${neueId} → ${neuerStatus}`);
+
+      /*
+       * DIE RUECKNAHME, gefahren und nicht behauptet — so wie P58 und P59 es
+       * mit `R0150` und `R0151` tun. Sie muss drei Dinge zugleich leisten:
+       * die Spalte samt Trigger, CHECKs und Schreibweg entfernen, die ZEILEN
+       * unberuehrt lassen, und die beiden ersetzten Ruempfe auf ihre
+       * Vorfassungen stellen — sonst liefe `admin_create_figure` danach
+       * gegen eine Spalte, die es nicht mehr gibt.
+       */
+      const zeilenVorher = await w60("select count(*)::text as w from public.skylanders");
+
+      /*
+       * ZUERST `R0153`, UND DAS HAT DIESER DURCHGANG SELBST GEZEIGT. Das
+       * Stub-Schema wird aus ALLEN Migrationen gebaut, `0153` eingeschlossen
+       * — der Rumpf von `system_platform_export()` nennt hier also
+       * `t.catalog_status`. `R0152` hat das erkannt und sich verweigert,
+       * genau wie vorgesehen: ein `drop column` darunter liesse die
+       * Sicherungsfunktion stehen und braeche sie erst beim naechsten
+       * Aufruf. Die richtige Reihenfolge steht im Laufzettel, und hier wird
+       * sie gefahren statt behauptet.
+       */
+      /*
+       * UND SEIT `0160` IST ES EINE KETTE VON DREI. Dasselbe Argument eine
+       * Stufe weiter: das Stub-Schema traegt auch `0160`, der Rumpf nennt
+       * hier also `t.base_sky_id`. `R0153` hat das erkannt und sich
+       * verweigert — eine dritte Fassung wird nicht ueberschrieben, genau
+       * wie vorgesehen. Die Reihenfolge ist R0160 → R0153 → R0152, und sie
+       * ist keine Konvention, sondern die Folge der Abdruck-Riegel.
+       */
+      /*
+       * UND SEIT `0164` IST ES EINE KETTE VON VIER — mit einem Unterschied:
+       * `R0164` stellt den Rumpf NICHT selbst her. Sie prueft den Abdruck und
+       * sagt, welcher Abschnitt einzufuegen ist (eine zweite Kopie von 31 000
+       * Zeichen waere die dritte Fassung, die auseinanderlaufen kann). Hier
+       * wird deshalb getan, was ihr Hinweis verlangt: der Abschnitt aus
+       * `0160`, aus der Datei geschnitten.
+       *
+       * Ohne diesen Schritt findet `R0160` den Rumpf aus `0164` vor und
+       * verweigert sich — richtig, und genau daran ist dieser Durchgang beim
+       * ersten Lauf nach `0164` gescheitert.
+       */
+      const rumpf0160 = (() => {
+        const sql = readFileSync(
+          join(MIG_DIR, "0160_platform_export_base_sky_id.sql"), "utf8");
+        const von = sql.indexOf(
+          "create or replace function public.system_platform_export()");
+        const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+        return sql.slice(von, bis);
+      })();
+      const fR64 = await (async () => {
+        try { await db.exec(rumpf0160); return null; }
+        catch (e) { return String((e as { message?: string }).message ?? "FEHLER"); }
+      })();
+      sag60("R0164 zuerst: der Abschnitt aus 0160 bringt den Exportrumpf auf "
+            + "den Stand von 0160 zurueck",
+            fR64 === null, fR64 ?? "durch");
+
+      const fR60 = await fahre(db, "supabase/rollback/R0160_platform_export_back_to_0153.sql");
+      const basisFort = await w60(
+        `select (count(*) = 0)::text as w from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'system_platform_export'
+            and p.prosrc like '%''base_sky_id'', t.base_sky_id,%'`);
+      sag60("R0160 vor R0153", fR60 === null && basisFort === "true",
+            `durch ${fR60 ?? "ok"} · Export ohne base_sky_id ${basisFort}`);
+
+      const fR53 = await fahre(db, "supabase/rollback/R0153_platform_export_back_to_0144.sql");
+      const exportSauber = await w60(
+        `select (count(*) = 0)::text as w from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public' and p.proname = 'system_platform_export'
+            and p.prosrc like '%''catalog_status'', t.catalog_status,%'`);
+      sag60("R0153 vor R0152", fR53 === null && exportSauber === "true",
+            `durch ${fR53 ?? "ok"} · Export ohne das Feld ${exportSauber}`);
+
+      const fR = await fahre(db, "supabase/rollback/R0152_drop_catalog_status.sql");
+      const spalteFort = await w60(
+        `select (count(*) = 0)::text as w from pg_attribute a
+          where a.attrelid = to_regclass('public.skylanders')
+            and a.attname = 'catalog_status' and not a.attisdropped`);
+      const triggerFort = await w60(
+        `select (count(*) = 0)::text as w from pg_trigger t
+          where t.tgrelid = to_regclass('public.skylanders')
+            and not t.tgisinternal and t.tgname = 'skylanders_sync_catalog_status'`);
+      const checksFort = await w60(
+        `select (count(*) = 0)::text as w from pg_constraint c
+          where c.conrelid = to_regclass('public.skylanders')
+            and c.contype = 'c' and c.conname like '%catalog_status%'`);
+      const ruempfeRein = await w60(
+        `select (count(*) = 0)::text as w from pg_proc p
+           join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'public'
+            and p.proname in ('log_skylander_editorial_change', 'admin_create_figure')
+            and p.prosrc like '%catalog_status%'`);
+      const zeilenNachher = await w60("select count(*)::text as w from public.skylanders");
+      sag60("R0152",
+            fR === null && spalteFort === "true" && triggerFort === "true"
+            && checksFort === "true" && ruempfeRein === "true"
+            && zeilenVorher === zeilenNachher,
+            `durch ${fR ?? "ok"} · Spalte fort ${spalteFort} · Trigger fort ${triggerFort}`
+            + ` · CHECKs fort ${checksFort} · Ruempfe sauber ${ruempfeRein}`
+            + ` · Zeilen ${zeilenVorher} → ${zeilenNachher}`);
+
+      /* UND DANACH LEGT DER EDITOR WIEDER EIN VERSTECKTES OBJEKT AN, keinen
+         Entwurf — das war der Zustand vor `0152`, und die Rücknahme muss ihn
+         wirklich herstellen, nicht nur die Spalte entfernen. */
+      const nachR = await w60(
+        `select public.admin_create_figure('Nach der Ruecknahme', 'SA',
+                  (select id from public.categories limit 1)) as w`);
+      const sichtNachR = nachR.startsWith("SKY-")
+        ? await w60(`select catalog_visible::text as w from public.skylanders
+                      where sky_id = '${nachR}'`)
+        : "?";
+      sag60("nach R0152 legt der Editor wieder versteckt an", sichtNachR === "false",
+            `${nachR} → catalog_visible ${sichtNachR}`);
+    }
+
+    probe.push({
+      name: "P60 0152 leitet den Status in jedem Schreibweg richtig ab: die acht genannten Faelle, "
+        + "die Legacy-Pfade, der Import-Upsert, der Einspielweg einer Wiederherstellung, "
+        + "zwei kontrollierte Abweisungen, das Journal, "
+        + "eine neu angelegte Figur als Entwurf — und R0152 nimmt alles zurueck, "
+        + "ohne eine Zeile anzufassen",
+      ok: ok60,
+      sagt: `0152: ${befund60.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P61 — die ERZEUGTE Einfuege-Huelle aus CAT-04A, wirklich gefahren.
+   *
+   * WARUM SIE EINEN PROBELAUF BRAUCHT. Jede Migration dieses Projekts wird
+   * geplant und probegefahren, bevor jemand sie einfuegt. Die Huelle aus
+   * `cat03:import:staging -- --sql` ist genauso eine Datei, die im
+   * SQL-Editor landet — nur dass sie ERZEUGT wird und deshalb bisher von
+   * niemandem geprueft wurde. Ein Tippfehler im Generator faellt sonst erst
+   * dem Bediener auf, und zwar an der Produktionsdatenbank-Oberflaeche.
+   *
+   * SIE PRUEFT VIER ZUSAGEN, und jede ist eine, die der Laufzettel macht:
+   * fuenf Zeilen als Entwurf, keine davon sichtbar, der zweite Lauf legt
+   * nichts an, und der Sequenzwaechter A4 schlaegt an, wenn `sky_id_seq`
+   * hinter der hoechsten SKY-ID steht.
+   * ===================================================================== */
+  {
+    /* SEIT CAT-04E gibt es EINE Huelle fuer den einmaligen Lauf. */
+    const HUELLE_04A = "supabase/operations/staging-cat03-import.sql";
+    const befund61: string[] = [];
+    let ok61 = true;
+    const sag61 = (was: string, gut: boolean, text: string): boolean => {
+      befund61.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok61 = false;
+      return gut;
+    };
+
+    if (!existsSync(HUELLE_04A)) {
+      sag61("Huelle", false, `${HUELLE_04A} fehlt — zuerst cat03:import:staging -- --sql`);
+    } else {
+      /** Die Welt, auf die die Huelle trifft. */
+      const welt = async (): Promise<InstanceType<typeof PGlite>> => {
+        /* `frischNach0136()` statt `frisch()`: die Spalte `item_type` kommt
+           aus `0135`, und die Huelle nennt sie. Dieselbe Welt wie P22. */
+        const db = await frischNach0136();
+        await serienUndIdentitaet(db);
+        /*
+         * DIE KATEGORIEN WERDEN AUS DER HUELLE GELESEN, nicht getippt.
+         *
+         * Sie nennt je Zeile eine `category_id`, weil die auf Staging so
+         * heisst. Welche das sind, aendert sich mit der Charge — eine feste
+         * Liste hier waere beim naechsten Lauf falsch, ohne dass es
+         * auffiele. Also: aus der Datei ziehen, mit genau diesen ids
+         * anlegen, und die Serie aus derselben Zeile nehmen.
+         */
+        const werte = huelleText.slice(huelleText.indexOf("select * from (values"),
+                                       huelleText.indexOf(") as t(name, series_code"));
+        const kat = new Map<string, string>();
+        for (const m of werte.matchAll(/^\s*\('(?:[^']|'')*',\s*'([A-Z]+)',\s*(\d+),/gm)) {
+          kat.set(m[2], m[1]);
+        }
+        if (kat.size === 0) throw new Error("P61: keine Kategorien in der Huelle gefunden");
+        const zeilen = [...kat].map(([id, serie]) =>
+          `(${id}, '${serie}', 'Kategorie ${id}', 1)`).join(", ");
+        await db.exec(`insert into public.categories (id, series_code, name, position)
+                       values ${zeilen};`);
+        /*
+         * DER UMGEBUNGSSTEMPEL, den ABBRUCH A1 verlangt — aber NUR, wenn er
+         * fehlt. Die Welt dieses Werkzeugs traegt SKY-0821 und SKY-0822
+         * bereits, und weil das Stub-Schema keinen Primaerschluessel setzt,
+         * legte ein blindes `insert` sie ein ZWEITES Mal an. A1 zaehlt dann
+         * vier statt zwei und bricht ab — ein Befund ueber den Probelauf und
+         * keiner ueber die Huelle.
+         */
+        for (const id of ["SKY-0821", "SKY-0822"]) {
+          await db.exec(`insert into public.skylanders
+            (sky_id, name, slug, series_code, category_id, is_active, catalog_visible)
+            select '${id}', '${id}', '${id.toLowerCase()}', 'SA', 10, true, true
+             where not exists (select 1 from public.skylanders where sky_id = '${id}');`);
+        }
+        /*
+         * VIERTER WERKZEUGBEFUND. Das Stub-Schema legt Sequenzen zwar an,
+         * aber ohne Startwert — `sky_id_seq` beginnt dort bei 1 statt bei
+         * 821 (`0033`). Der erste Zug liefere sonst SKY-0001, und das waere
+         * ein Befund ueber den Stub und keiner ueber die Huelle. Sie wird
+         * deshalb auf den Stand gesetzt, den die echte Datenbank hat: hinter
+         * der hoechsten vergebenen ID.
+         */
+        await db.exec("select setval('public.sky_id_seq', 822);");
+        /*
+         * UND DER SCHLUESSEL AUF `catalog_editorial`. In der Wirklichkeit ist
+         * `sky_id` dort Primaerschluessel (`0004`); das Stub-Schema
+         * beschreibt Spalten, aber keine Schluessel, und das
+         * `on conflict (sky_id)` der Huelle scheitert deshalb mit `42P10` —
+         * derselbe Werkzeugbefund wie beim Katalogimport in P60.
+         */
+        await db.exec(`create unique index if not exists z_ce_sky_uniq
+                         on public.catalog_editorial (sky_id);`);
+        return db;
+      };
+
+      const huelleText = readFileSync(HUELLE_04A, "utf8");
+      /* Wie viele Zeilen die Huelle traegt, sagt sie selbst im Kopf. */
+      const erwartet = Number(/(\d+) Katalogentwuerfe anlegen/.exec(huelleText)?.[1] ?? "0");
+      const db = await welt();
+      const w61 = async (sql: string): Promise<string> =>
+        String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+      /*
+       * `0152` WIRD HIER NICHT GEFAHREN, und das ist kein Auslassen.
+       *
+       * FUENFTER WERKZEUGBEFUND: das Stub-Schema wird aus ALLEN Migrationen
+       * gebaut, `0152` eingeschlossen — `catalog_status` steht in dieser Welt
+       * also schon, und ein Lauf von `0152` scheitert mit `42701`. Geprueft
+       * wird deshalb, dass die Spalte DA ist; dass `0152` sie richtig anlegt,
+       * fuehrt P60 an einer eigens zurueckgebauten Welt vor.
+       *
+       * DER TRIGGER FEHLT HIER (das Stub traegt keine Trigger), und genau
+       * deshalb ist dieser Lauf ein schaerferer Test der Huelle als die
+       * Wirklichkeit: sie muss `catalog_status` und `catalog_visible` SELBST
+       * widerspruchsfrei schreiben, ohne dass ein Trigger nachbessert.
+       */
+      const spalteDa = await w61(
+        `select (count(*) = 1)::text as w from pg_attribute a
+          where a.attrelid = to_regclass('public.skylanders')
+            and a.attname = 'catalog_status' and not a.attisdropped`);
+      const stempel = await w61(
+        `select count(*)::text as w from public.skylanders
+          where sky_id in ('SKY-0821', 'SKY-0822')`);
+      const start = await w61("select count(*)::text as w from public.skylanders");
+      sag61("Welt steht", spalteDa === "true" && stempel === "2",
+            `catalog_status ${spalteDa} · Stempel ${stempel} · Zeilen ${start}`);
+
+      /* ERSTER LAUF. Die Huelle bringt ihre eigene Klammer mit. */
+      const f1 = await fahre(db, HUELLE_04A, { klammer: false });
+      const angelegt = await w61(
+        `select count(*)::text as w from public.skylanders where source = 'admin'
+          and catalog_status = 'draft'`);
+      const sichtbar = await w61(
+        `select count(*)::text as w from public.skylanders
+          where catalog_status = 'draft' and catalog_visible`);
+      sag61("erster Lauf legt alle Entwuerfe an",
+            f1 === null && angelegt === String(erwartet) && sichtbar === "0",
+            `${f1 ?? "durch"} · Entwuerfe ${angelegt}/${erwartet} · davon sichtbar ${sichtbar}`);
+
+      /* DIE IDENTITAETEN: aus der Sequenz, nicht aus einem Namen. */
+      const ids = await w61(
+        `select string_agg(sky_id, ',' order by sky_id) as w from public.skylanders
+          where catalog_status = 'draft'`);
+      const slugs = await w61(
+        `select string_agg(slug, ',' order by slug) as w from public.skylanders
+          where catalog_status = 'draft'`);
+      /* KEINE ERWARTUNG AUF FORTLAUFENDE IDs — nur darauf, dass sie aus der
+         Sequenz stammen und das Format halten. */
+      const idListe = ids.split(",");
+      sag61("SKY-IDs aus sky_id_seq, Slugs aus next_figure_slug",
+            idListe.length === erwartet
+            && idListe.every((x) => /^SKY-0[89]\d{2}$/.test(x))
+            && slugs.includes("crystal-clear-cynder"),
+            `${idListe.length} IDs, ${idListe[0]}…${idListe[idListe.length - 1]} · `
+            + `${slugs.slice(0, 40)}`);
+
+      /* DIE NOTIZ traegt die Herkunft, und sie steht NICHT auf skylanders. */
+      const notiz = await w61(
+        `select count(*)::text as w from public.catalog_editorial
+          where admin_note like 'CAT-01 Kandidat%'`);
+      const mitBild = await w61(
+        `select count(*)::text as w from public.catalog_editorial
+          where admin_note like '%Zugeordnetes Bild:%'`);
+      const journal = await w61(
+        `select count(*)::text as w from public.catalog_admin_changes
+          where field = 'created'`);
+      sag61("Herkunft in der internen Notiz, Journal geschrieben",
+            notiz === String(erwartet) && journal === String(erwartet),
+            `Notizen ${notiz} · Journalzeilen ${journal} · davon mit Bildzuordnung ${mitBild}`);
+
+      /* ZWEITER LAUF: idempotent, und er verbraucht keine SKY-ID. */
+      const start7 = await w61("select count(*)::text as w from public.skylanders");
+      const vorher = await w61("select last_value::text as w from public.sky_id_seq");
+      const f2 = await fahre(db, HUELLE_04A, { klammer: false });
+      const nachher = await w61("select last_value::text as w from public.sky_id_seq");
+      const zeilen = await w61("select count(*)::text as w from public.skylanders");
+      sag61("zweiter Lauf legt nichts an und zieht keine ID",
+            f2 === null && vorher === nachher && zeilen === start7,
+            `${f2 ?? "durch"} · Sequenz ${vorher} → ${nachher} · Zeilen ${zeilen} (erwartet ${start7})`);
+
+      /*
+       * UND DER SEQUENZWAECHTER. Er ist der Grund, warum es ihn gibt: steht
+       * `sky_id_seq` hinter der hoechsten vergebenen ID, wuerde der Lauf
+       * mitten in der Schleife einen Primaerschluessel verletzen.
+       */
+      await db.exec("select setval('public.sky_id_seq', 822);");
+      const f3 = await fahre(db, HUELLE_04A, { klammer: false });
+      const nochZeilen = await w61("select count(*)::text as w from public.skylanders");
+      sag61("A4 faengt eine zurueckliegende Sequenz ab",
+            f3 !== null && f3.includes("A4") && nochZeilen === start7,
+            `${f3 ?? "durchgelaufen (falsch)"} · Zeilen unveraendert ${nochZeilen}`);
+    }
+
+    probe.push({
+      name: "P61 die erzeugte Einfuege-Huelle des einmaligen Katalogimports laeuft: alle "
+        + "Entwuerfe angelegt, keiner sichtbar, IDs aus der Sequenz (nicht fortlaufend "
+        + "erwartet), Herkunft in der internen Notiz, zweiter Lauf folgenlos — und der "
+        + "Sequenzwaechter greift",
+      ok: ok61,
+      sagt: `Katalogimport: ${befund61.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P62 — 0154: einen Entwurf mit einer bestehenden Figur zusammenfuehren.
+   *
+   * DIE EINE ZUSAGE, AN DER ALLES HAENGT: die bestehende SKY-ID bleibt. An
+   * ihr haengen Sammlungen, Favoriten, Lager, Angebote und Bestellungen —
+   * eine Zusammenfuehrung, die sie verschiebt, ist Datenverlust mit einem
+   * freundlichen Namen. Dieser Durchgang fuehrt sie wirklich aus und sieht
+   * danach nach, was steht.
+   * ===================================================================== */
+  {
+    const befund62: string[] = [];
+    let ok62 = true;
+    const sag62 = (was: string, gut: boolean, text: string): void => {
+      befund62.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok62 = false;
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w62 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu62 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) { return ((e as { message?: string }).message ?? "FEHLER").slice(0, 110); }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+    await db.exec(`create unique index if not exists z_ce2_uniq
+                     on public.catalog_editorial (sky_id);`);
+    /*
+     * SECHSTER WERKZEUGBEFUND, und ohne ihn prueft dieser Durchgang nichts.
+     *
+     * `admin_merge_references()` leitet die verweisenden Tabellen aus
+     * `pg_constraint` her — das ist ihre Staerke, denn eine getippte Liste
+     * veraltet. Das Stub-Schema traegt aber KEINE Fremdschluessel: die
+     * Herleitung findet dort nichts, der Waechter greift nie, und der
+     * Durchgang waere gruen, ohne die Zusage geprueft zu haben. Genau so ist
+     * es beim ersten Lauf passiert.
+     *
+     * Zwei Schluessel werden deshalb nachgezogen — einer, der blockieren
+     * MUSS (`collection_items`), und einer, der ausdruecklich NICHT zaehlt
+     * (`catalog_editorial`, die eigene Notiz des Entwurfs).
+     */
+    await db.exec(`create unique index if not exists z_sky2_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`alter table public.collection_items
+                     add constraint z_ci_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    await db.exec(`alter table public.catalog_editorial
+                     add constraint z_ce_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    /* Das Stub-Schema traegt keine Trigger; der Admincheck wird gestellt. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+
+    const f154 = await fahre(db, "supabase/migrations/0154_merge_draft_into_figure.sql");
+    sag62("0154 laeuft", f154 === null, f154 ?? "durch");
+
+    const anlegen = async (id: string, name: string, status: string, extra = "") =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source${extra ? ", " + extra.split("=")[0] : ""})
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10, 'figure',
+                  'standard', true, ${status === "public"}, '${status}', 'admin'${extra ? ", " + extra.split("=")[1] : ""});`);
+
+    /* Ziel: eine oeffentliche Figur mit Preis und Bild. Entwurf: der Import. */
+    await anlegen("SKY-0100", "Mystery Chest Bronze", "public");
+    await db.exec(`update public.skylanders set market_price = 9.99,
+                     image_file = 'aaaaaaaaaaaaaaaa.webp' where sky_id = 'SKY-0100';`);
+    await anlegen("SKY-0900", "Bronze Mystery Chest", "draft");
+    await db.exec(`update public.skylanders set card_type = 'chase',
+                     image_override_path = 'SKY-0900/bbbbbbbbbbbbbbbb.png'
+                   where sky_id = 'SKY-0900';`);
+    await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                   values ('SKY-0900', 'CAT-01 Kandidat', now());`);
+
+    /* ---- Abweisungen zuerst: sie duerfen NICHTS hinterlassen. */
+    const fSelbst = await tu62("select public.admin_merge_draft('SKY-0900','SKY-0900');");
+    const fZielEntwurf = await tu62("select public.admin_merge_draft('SKY-0100','SKY-0900');");
+    const fFehlt = await tu62("select public.admin_merge_draft('SKY-7777','SKY-0100');");
+    sag62("drei kontrollierte Abweisungen",
+          [fSelbst, fZielEntwurf, fFehlt].every((x) => x !== null),
+          [fSelbst, fZielEntwurf, fFehlt].map((x) => (x ?? "DURCHGELAUFEN").slice(0, 36)).join(" | "));
+
+    /* ---- Eine Referenz auf den Entwurf blockiert. */
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-000000000001', 'SKY-0900', 1);`);
+    const fRef = await tu62("select public.admin_merge_draft('SKY-0900','SKY-0100');");
+    const nochDa = await w62("select count(*)::text as w from public.skylanders where sky_id = 'SKY-0900'");
+    sag62("eine Referenz blockiert und laesst den Entwurf stehen",
+          fRef !== null && fRef.includes("zeigen noch Daten") && nochDa === "1",
+          `${(fRef ?? "DURCHGELAUFEN").slice(0, 60)} · Entwurf steht ${nochDa}`);
+
+    await db.exec("delete from public.collection_items where sky_id = 'SKY-0900';");
+
+    /*
+     * ---- UND NUN DER GUTE FALL, mit den beiden Platzhalterregeln.
+     *
+     * Das Ziel traegt eine ECHTE Notiz und einen GENERISCHEN `item_type`;
+     * der Entwurf einen spezifischen `card_type`, einen generischen
+     * `item_type` und eine Herkunftsnotiz. Erwartet:
+     *   name            geht ueber          (der Entwurf hat einen)
+     *   card_type       geht ueber          (chase schlaegt standard)
+     *   item_type       bleibt              (figure gegen figure, kein Zuwachs)
+     *   image           geht ueber          (der Entwurf hat eines)
+     *   admin_note      wird ANGEHAENGT     (beide bleiben lesbar)
+     */
+    await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                   values ('SKY-0100', 'vom Admin gepflegt', now());`);
+    /* MIT BILDPFAD: er muss der ZIELFIGUR gehoeren. Der Aufrufer hat das
+       Objekt vorher dorthin kopiert; die Funktion prueft nur. */
+    const fFremd = await tu62(`select public.admin_merge_draft('SKY-0900','SKY-0100',
+                                 'SKY-0900/bbbbbbbbbbbbbbbb.png');`);
+    sag62("ein fremder Bildpfad wird abgewiesen",
+          fFremd !== null && fFremd.includes("gehoert nicht zu"),
+          (fFremd ?? "DURCHGELAUFEN").slice(0, 56));
+
+    const fGut = await tu62(`select public.admin_merge_draft('SKY-0900','SKY-0100',
+                               'SKY-0100/bbbbbbbbbbbbbbbb.png');`);
+    const ziel = await w62(`select sky_id || '|' || name || '|' || card_type || '|'
+                              || coalesce(image_override_path,'-') || '|' || catalog_status
+                              || '|' || catalog_visible::text || '|' || coalesce(market_price::text,'-')
+                              || '|' || coalesce(image_file,'-') || '|' || slug as w
+                            from public.skylanders where sky_id = 'SKY-0100'`);
+    const entwurfFort = await w62("select (count(*) = 0)::text as w from public.skylanders where sky_id = 'SKY-0900'");
+    const notizFort = await w62("select (count(*) = 0)::text as w from public.catalog_editorial where sky_id = 'SKY-0900'");
+    const notizZiel = await w62("select coalesce(max(admin_note),'-') as w from public.catalog_editorial where sky_id = 'SKY-0100'");
+    sag62("zusammengefuehrt: die SKY-ID des Ziels bleibt, Status/Preis/Slug unberuehrt",
+          fGut === null
+          && ziel === "SKY-0100|Bronze Mystery Chest|chase|SKY-0100/bbbbbbbbbbbbbbbb.png|public|true|9.99|aaaaaaaaaaaaaaaa.webp|sky-0100"
+          && entwurfFort === "true" && notizFort === "true",
+          `${fGut ?? "durch"} · ${ziel} · Entwurf fort ${entwurfFort}`);
+    sag62("die Notiz wird ANGEHAENGT, nicht ersetzt",
+          notizZiel.includes("vom Admin gepflegt") && notizZiel.includes("CAT-01 Kandidat"),
+          notizZiel.replace(/\n/g, " ⏎ "));
+
+    /*
+     * ---- DER PLATZHALTERFALL, und er ist der eigentliche Zuwachs dieser
+     * Fassung: ein generisches `standard` darf ein spezifisches `chase`
+     * NICHT ersetzen. Sonst machte jeder der 51 Entwuerfe mit unsicherer
+     * Edition aus einer belegten Angabe wieder einen Vorgabewert.
+     */
+    await anlegen("SKY-0901", "Noch ein Entwurf", "draft");
+    const fPlatz = await tu62("select public.admin_merge_draft('SKY-0901','SKY-0100');");
+    const nachPlatz = await w62(`select card_type || '|' || name as w
+                                 from public.skylanders where sky_id = 'SKY-0100'`);
+    sag62("ein generisches standard ersetzt kein spezifisches chase",
+          fPlatz === null && nachPlatz.startsWith("chase|"),
+          `${fPlatz ?? "durch"} · ${nachPlatz}`);
+
+    const journal = await w62(`select coalesce(string_agg(field, ',' order by field),'-') as w
+                               from public.catalog_admin_changes where entity_id = 'SKY-0100'`);
+    sag62("der Vorgang steht im Journal", journal.includes("merged_from"), journal);
+
+    /* ====================================================================
+     * 0155 — denselben Entwurf stattdessen VERWERFEN.
+     *
+     * Drei Riegel, und jeder einzeln geprueft: nur Entwuerfe, nur
+     * `source = admin`, und nichts darf auf die Zeile zeigen. Der letzte
+     * benutzt dieselbe Zaehlung wie die Zusammenfuehrung — es soll sie
+     * genau einmal geben.
+     * ================================================================= */
+    const f155 = await fahre(db, "supabase/migrations/0155_discard_draft.sql");
+    sag62("0155 laeuft", f155 === null, f155 ?? "durch");
+
+    /* Eine oeffentliche Figur wird nie geloescht. */
+    const dOeff = await tu62("select public.admin_discard_draft('SKY-0100');");
+    const oeffDa = await w62("select count(*)::text as w from public.skylanders where sky_id = 'SKY-0100'");
+    sag62("eine oeffentliche Figur wird nicht geloescht",
+          dOeff !== null && dOeff.includes("kein Entwurf") && oeffDa === "1",
+          `${(dOeff ?? "DURCHGELAUFEN").slice(0, 50)} · steht noch ${oeffDa}`);
+
+    /* Ein Entwurf aus dem Katalogimport ebenfalls nicht. */
+    await anlegen("SKY-0902", "Importzeile", "draft");
+    await db.exec("update public.skylanders set source = 'import' where sky_id = 'SKY-0902';");
+    const dImport = await tu62("select public.admin_discard_draft('SKY-0902');");
+    sag62("eine Importzeile wird nicht geloescht",
+          dImport !== null && dImport.includes("source="),
+          (dImport ?? "DURCHGELAUFEN").slice(0, 52));
+
+    /* Eine Zeile mit Vergangenheit: war einmal oeffentlich, ist jetzt Entwurf. */
+    await anlegen("SKY-0905", "War mal oeffentlich", "draft");
+    await db.exec(`insert into public.catalog_admin_changes
+                     (entity, entity_id, field, old_value, new_value, changed_by)
+                   values ('skylander', 'SKY-0905', 'catalog_status', 'public', 'draft', null);`);
+    const dFrueher = await tu62("select public.admin_discard_draft('SKY-0905');");
+    const frueherDa = await w62("select count(*)::text as w from public.skylanders where sky_id = 'SKY-0905'");
+    sag62("eine Zeile, die einmal oeffentlich stand, wird nicht geloescht",
+          dFrueher !== null && dFrueher.includes("oeffentlich") && frueherDa === "1",
+          `${(dFrueher ?? "DURCHGELAUFEN").slice(0, 50)} · steht noch ${frueherDa}`);
+
+    /* Mit einer Referenz: abgewiesen, und die Zeile steht noch. */
+    await anlegen("SKY-0903", "Mit Referenz", "draft");
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-000000000002', 'SKY-0903', 1);`);
+    const dRef = await tu62("select public.admin_discard_draft('SKY-0903');");
+    const refDa = await w62("select count(*)::text as w from public.skylanders where sky_id = 'SKY-0903'");
+    sag62("eine Referenz blockiert auch das Verwerfen",
+          dRef !== null && dRef.includes("zeigen noch Daten") && refDa === "1",
+          `${(dRef ?? "DURCHGELAUFEN").slice(0, 48)} · steht noch ${refDa}`);
+
+    /* Und der gute Fall: referenzfrei, mit Bild und Notiz. */
+    await anlegen("SKY-0904", "Zu verwerfen", "draft");
+    await db.exec(`update public.skylanders
+                     set image_override_path = 'SKY-0904/cccccccccccccccc.png'
+                   where sky_id = 'SKY-0904';`);
+    await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                   values ('SKY-0904', 'CAT-01 Kandidat', now());`);
+    const vorherZeilen = await w62("select count(*)::text as w from public.skylanders");
+    const dGut = await w62("select public.admin_discard_draft('SKY-0904')::text as w");
+    const fort = await w62("select (count(*) = 0)::text as w from public.skylanders where sky_id = 'SKY-0904'");
+    const notizFort2 = await w62("select (count(*) = 0)::text as w from public.catalog_editorial where sky_id = 'SKY-0904'");
+    const nachherZeilen = await w62("select count(*)::text as w from public.skylanders");
+    const jDisc = await w62(`select coalesce(max(field),'-') as w from public.catalog_admin_changes
+                             where entity_id = 'SKY-0904' and field = 'discarded'`);
+    sag62("ein referenzfreier Entwurf wird geloescht, Journal bleibt, Bild wird benannt",
+          fort === "true" && notizFort2 === "true" && jDisc === "discarded"
+          && dGut.includes("cccccccccccccccc.png")
+          && Number(nachherZeilen) === Number(vorherZeilen) - 1,
+          `fort ${fort} · Journal ${jDisc} · Zeilen ${vorherZeilen}→${nachherZeilen} `
+          + `· verwaistes Bild genannt ${dGut.includes("orphaned_image")}`);
+
+    probe.push({
+      name: "P62 0154 und 0155: zusammenfuehren nach der einfachen Regel (was der Entwurf "
+        + "hat, geht ueber; ein Platzhalter ersetzt keine Angabe; die Notiz wird angehaengt), "
+        + "die SKY-ID des Ziels bleibt samt Status, Preis und Slug — und verwerfen scheitert "
+        + "an jedem der drei Riegel, raeumt sonst Zeile und Notiz weg und nennt das "
+        + "verwaiste Bild",
+      ok: ok62,
+      sagt: `0154: ${befund62.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P63 — 0156: die Zusammenfuehrung uebernimmt nur die AUSGEWAEHLTEN Felder.
+   *
+   * WAS HIER WIRKLICH GEPRUEFT WIRD. Nicht, dass ein Kaestchen angezeigt
+   * wird — das sieht man. Sondern dass die Auswahl die SCHREIBENDE Seite
+   * bestimmt: dass ein abgewaehltes Feld seinen alten Wert behaelt, dass ein
+   * Feld ausserhalb der Allowlist abgewiesen wird, bevor etwas geschrieben
+   * ist, und dass eine veraltete Vorschau zum Abbruch fuehrt und nicht zu
+   * einem stillen Fremdwert.
+   *
+   * UND DASS DIE ALTE FASSUNG WEITERLAEUFT. `admin_merge_draft(text,text,text)`
+   * aus `0154` bleibt die Abwaertskompatibilitaet; sie leitet jetzt weiter,
+   * damit es die Uebernahmelogik genau einmal gibt.
+   * ===================================================================== */
+  {
+    const befund63: string[] = [];
+    let ok63 = true;
+    const sag63 = (was: string, gut: boolean, text: string): void => {
+      befund63.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok63 = false;
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w63 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu63 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) { return ((e as { message?: string }).message ?? "FEHLER").slice(0, 130); }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+    await db.exec(`create unique index if not exists z_ce3_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create unique index if not exists z_sky3_uniq
+                     on public.skylanders (sky_id);`);
+    /* Dieselben zwei Fremdschluessel wie in P62: das Stub-Schema traegt
+       keine, und ohne sie prueft die Referenzzaehlung nichts. */
+    await db.exec(`alter table public.collection_items
+                     add constraint z_ci3_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    await db.exec(`alter table public.catalog_editorial
+                     add constraint z_ce3_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+
+    const f154b = await fahre(db, "supabase/migrations/0154_merge_draft_into_figure.sql");
+    const f156 = await fahre(db, "supabase/migrations/0156_merge_selected_fields.sql");
+    sag63("0154 und 0156 laufen in dieser Reihenfolge",
+          f154b === null && f156 === null,
+          `0154 ${f154b ?? "durch"} · 0156 ${f156 ?? "durch"}`);
+
+    /*
+     * 0156 OHNE 0154 MUSS ABBRECHEN — die Vorbedingung ist echt.
+     *
+     * SIEBTER WERKZEUGBEFUND, und ohne ihn prueft diese Zeile nichts. Das
+     * Stub-Schema legt JEDE Signatur aus ALLEN Migrationen an, also auch
+     * `admin_merge_draft(text,text,text)` aus `0154` — in einer frischen
+     * Welt steht sie schon, bevor `0154` gelaufen ist. Die Vorbedingung von
+     * `0156` fragt `to_regprocedure`, findet sie und liess den ersten Lauf
+     * gruen durchgehen, ohne die Abhaengigkeit geprueft zu haben.
+     *
+     * Die beiden Fassungen werden deshalb erst weggenommen. Das ist der
+     * Zustand, den eine Datenbank ohne `0154` wirklich hat.
+     */
+    {
+      const leer = await frischNach0136();
+      await serienUndIdentitaet(leer);
+      await leer.exec(`create or replace function public.is_platform_admin() returns boolean
+                       language sql as $stub$ select true $stub$;`);
+      await leer.exec(`drop function if exists public.admin_merge_draft(text,text,text) cascade;
+                       drop function if exists public.admin_merge_draft(text,text,text,jsonb) cascade;
+                       drop function if exists public.admin_merge_references(text) cascade;`);
+      const stehtNoch = String(((await leer.query(
+        `select (to_regprocedure('public.admin_merge_draft(text,text,text)') is null)::text as w`,
+      )) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+      const nurs156 = await fahre(leer, "supabase/migrations/0156_merge_selected_fields.sql");
+      sag63("0156 ohne 0154 bricht ab (die Vorbedingung ist echt)",
+            stehtNoch === "true" && nurs156 !== null
+            && nurs156.includes("0154 ist hier nicht angewendet"),
+            `0154 wirklich abwesend ${stehtNoch} · ${(nurs156 ?? "DURCHGELAUFEN").slice(0, 56)}`);
+    }
+
+    const anlegen = async (id: string, name: string, status: string) =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10, 'figure',
+                  'standard', true, ${status === "public"}, '${status}', 'admin');`);
+
+    /*
+     * DIE WELT: ein oeffentliches Ziel mit Bild, Preis, Notiz und Sammlung,
+     * und Entwuerfe, die jeweils etwas anderes mitbringen.
+     */
+    await anlegen("SKY-0100", "Pirate Ship", "public");
+    await db.exec(`update public.skylanders
+                     set market_price = 9.99, card_type = 'chase',
+                         image_override_path = 'SKY-0100/1111111111111111.webp'
+                   where sky_id = 'SKY-0100';`);
+    await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                   values ('SKY-0100', 'vom Admin gepflegt', now());`);
+    /* EINE REFERENZ AUF DAS ZIEL. Sie muss die Zusammenfuehrung ueberleben —
+       das ist der ganze Zweck, die bestehende SKY-ID zu behalten. */
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-000000000009', 'SKY-0100', 3);`);
+
+    const neuerEntwurf = async (id: string) => {
+      await anlegen(id, "Pirate Seas", "draft");
+      await db.exec(`update public.skylanders
+                       set series_code = 'G', category_id = 11, character_id = null,
+                           image_override_path = '${id}/2222222222222222.webp'
+                     where sky_id = '${id}';`);
+      await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                     values ('${id}', 'CAT-01 Kandidat', now());`);
+    };
+
+    /* ---- DER PLAN. Rein lesend, und er ist die EINE Rechnung. */
+    await neuerEntwurf("SKY-0900");
+    const plan = await w63(`select public.admin_merge_plan('SKY-0900','SKY-0100',
+                              'SKY-0100/2222222222222222.webp')::text as w`);
+    const planFelder = await w63(`select coalesce(string_agg(e.wert ->> 'field', ','),'-') as w
+                                  from jsonb_array_elements(
+                                    public.admin_merge_plan('SKY-0900','SKY-0100',
+                                      'SKY-0100/2222222222222222.webp')) as e(wert)`);
+    sag63("der Plan nennt genau die anstehenden Felder, in fester Reihenfolge",
+          planFelder === "name,series_code,category_id,image_override_path,admin_note",
+          planFelder);
+    sag63("der Plan ist rein lesend — das Ziel ist unberuehrt",
+          (await w63("select name as w from public.skylanders where sky_id = 'SKY-0100'"))
+            === "Pirate Ship",
+          plan.slice(0, 40));
+
+    /* ---- FALL 1: ALLE FELDER AUSGEWAEHLT. */
+    const alle = `'{"name":{"old":"Pirate Ship","new":"Pirate Seas"},
+                    "series_code":{"old":"SA","new":"G"},
+                    "category_id":{"old":"10","new":"11"},
+                    "image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+                                           "new":"SKY-0100/2222222222222222.webp"},
+                    "admin_note":{"old":"vom Admin gepflegt",
+                                  "new":"vom Admin gepflegt\\nCAT-01 Kandidat"}}'::jsonb`;
+    const fAlle = await tu63(`select public.admin_merge_draft('SKY-0900','SKY-0100',
+                                'SKY-0100/2222222222222222.webp', ${alle});`);
+    const nachAlle = await w63(`select name || '|' || series_code || '|' || category_id::text
+                                  || '|' || coalesce(image_override_path,'-') || '|' || card_type
+                                  || '|' || catalog_status || '|' || coalesce(market_price::text,'-')
+                                  || '|' || slug as w
+                                from public.skylanders where sky_id = 'SKY-0100'`);
+    const sammlungDa = await w63(`select coalesce(max(quantity)::text,'-') as w
+                                  from public.collection_items where sky_id = 'SKY-0100'`);
+    sag63("alle Felder ausgewaehlt: alles geht ueber, Status/Preis/Slug/Edition bleiben",
+          fAlle === null
+          && nachAlle === "Pirate Seas|G|11|SKY-0100/2222222222222222.webp|chase|public|9.99|sky-0100",
+          `${fAlle ?? "durch"} · ${nachAlle}`);
+    sag63("die Referenz auf das Ziel ueberlebt",
+          sammlungDa === "3", `Sammlung ${sammlungDa}`);
+
+    /* ---- FALL 2: NUR NAME AUSGEWAEHLT. Alles andere behaelt seinen Wert. */
+    await db.exec(`update public.skylanders set name = 'Pirate Ship', series_code = 'SA',
+                     category_id = 10, image_override_path = 'SKY-0100/1111111111111111.webp'
+                   where sky_id = 'SKY-0100';`);
+    await db.exec(`update public.catalog_editorial set admin_note = 'vom Admin gepflegt'
+                   where sky_id = 'SKY-0100';`);
+    await neuerEntwurf("SKY-0901");
+    const fNur = await tu63(`select public.admin_merge_draft('SKY-0901','SKY-0100', null,
+                               '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const nachNur = await w63(`select name || '|' || series_code || '|' || category_id::text
+                                 || '|' || coalesce(image_override_path,'-') as w
+                               from public.skylanders where sky_id = 'SKY-0100'`);
+    const notizNur = await w63(`select coalesce(max(admin_note),'-') as w
+                                from public.catalog_editorial where sky_id = 'SKY-0100'`);
+    const entwurfFort63 = await w63(`select (count(*) = 0)::text as w
+                                     from public.skylanders where sky_id = 'SKY-0901'`);
+    sag63("nur Name ausgewaehlt: Serie, Kategorie, Bild und Notiz bleiben unberuehrt",
+          fNur === null
+          && nachNur === "Pirate Seas|SA|10|SKY-0100/1111111111111111.webp"
+          && notizNur === "vom Admin gepflegt"
+          && entwurfFort63 === "true",
+          `${fNur ?? "durch"} · ${nachNur} · Notiz "${notizNur}" · Entwurf fort ${entwurfFort63}`);
+
+    /*
+     * ---- FALL 2b: DER FALL DES BETREIBERS, Zeile fuer Zeile (CAT-05H).
+     *
+     * Am 2026-10-28 ist der erste echte Merge-Versuch fehlgeschlagen:
+     * Entwurf „Pirate Seas" in die bestehende „Pirate Ship", nur der Name
+     * ausgewaehlt, das Bild ABGEWAEHLT. Die Oberflaeche zeigte den
+     * Auffangtext.
+     *
+     * Was FALL 2 nicht nachstellt und dieser Fall schon:
+     *   * Das Ziel hat KEIN `image_override_path`, aber ein Bild aus dem
+     *     Altimport (`image_file`). Genau so steht SKY-0103 da.
+     *   * Der Entwurf hat ein `image_override_path` UND eine interne Notiz —
+     *     der Plan nennt also mehr Felder, als ausgewaehlt sind.
+     *   * Auf dem ZIEL haengen Verweise (Lager, Einkauf, Verkauf). Sie sind
+     *     der Grund, warum die SKY-ID bleiben muss, und sie muessen den
+     *     Vorgang ueberleben.
+     */
+    {
+      await db.exec(`update public.skylanders
+                       set name = 'Pirate Ship', image_override_path = null,
+                           image_file = 'f6da37ded1e8fac4.webp'
+                     where sky_id = 'SKY-0100';`);
+      await db.exec(`update public.catalog_editorial set admin_note = 'vom Admin gepflegt'
+                     where sky_id = 'SKY-0100';`);
+      await neuerEntwurf("SKY-0910");
+      /* Verweise auf das ZIEL — sie duerfen nicht verschwinden. */
+      await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                     values ('00000000-0000-0000-0000-00000000000a', 'SKY-0100', 2);`);
+
+      const vorZiel = await w63(`select coalesce(image_override_path,'-') || '|'
+                                   || coalesce(image_file,'-') || '|' || catalog_status
+                                   || '|' || coalesce(market_price::text,'-') || '|' || slug as w
+                                 from public.skylanders where sky_id = 'SKY-0100'`);
+      /* Der Plan nennt mehr als der Bediener ausgewaehlt hat — das ist der
+         Normalfall und darf nichts bewirken. */
+      const planFelder2b = await w63(`select coalesce(string_agg(e.wert ->> 'field', ','),'-') as w
+                                      from jsonb_array_elements(
+                                        public.admin_merge_plan('SKY-0910','SKY-0100', null)) as e(wert)`);
+
+      const f2b = await tu63(`select public.admin_merge_draft('SKY-0910','SKY-0100', null,
+                                '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+      const nachZiel = await w63(`select coalesce(image_override_path,'-') || '|'
+                                    || coalesce(image_file,'-') || '|' || catalog_status
+                                    || '|' || coalesce(market_price::text,'-') || '|' || slug as w
+                                  from public.skylanders where sky_id = 'SKY-0100'`);
+      const nameNach = await w63(`select name as w from public.skylanders where sky_id = 'SKY-0100'`);
+      const notizNach = await w63(`select coalesce(max(admin_note),'-') as w
+                                   from public.catalog_editorial where sky_id = 'SKY-0100'`);
+      const entwurfWeg = await w63(`select (count(*) = 0)::text as w
+                                    from public.skylanders where sky_id = 'SKY-0910'`);
+      /* GENAU DIESE Zeile, nicht „irgendeine" — FALL 1 hat auf derselben
+         Zielfigur schon eine angelegt, und `max()` haette die gemessen. */
+      const verweisDa = await w63(`select coalesce(max(quantity)::text,'-') as w
+                                   from public.collection_items
+                                  where sky_id = 'SKY-0100'
+                                    and user_id = '00000000-0000-0000-0000-00000000000a'`);
+
+      sag63("DER FALL DES BETREIBERS: nur Name, Bild abgewaehlt — der Name wandert, das "
+            + "Altimportbild und das fehlende Override bleiben, die Notiz bleibt, der "
+            + "Entwurf verschwindet, die Verweise auf das Ziel ueberleben",
+            f2b === null
+            && nameNach === "Pirate Seas"
+            && nachZiel === vorZiel
+            && notizNach === "vom Admin gepflegt"
+            && entwurfWeg === "true"
+            && verweisDa === "2",
+            `${f2b ?? "durch"} · Plan nannte [${planFelder2b}], ausgewaehlt war nur name `
+            + `· Name ${nameNach} · unveraendert ${nachZiel === vorZiel} (${nachZiel}) `
+            + `· Notiz "${notizNach}" · Entwurf fort ${entwurfWeg} · Sammlung ${verweisDa}`);
+
+      await db.exec(`delete from public.collection_items
+                      where sky_id = 'SKY-0100'
+                        and user_id = '00000000-0000-0000-0000-00000000000a';`);
+    }
+
+    /* ---- FALL 3: NUR BILD AUSGEWAEHLT.
+     *
+     * JEDER FALL SETZT SEINE VORAUSSETZUNG SELBST. Fall 2b laesst das Ziel
+     * ohne `image_override_path` zurueck — das gehoert zu seinem Befund und
+     * wird hier nicht stillschweigend vorausgesetzt, sondern gesetzt. Sonst
+     * waere dieser Fall von der Reihenfolge der Faelle abhaengig, und das
+     * ist genau die Art stiller Kopplung, die spaeter als Raetsel auftaucht.
+     */
+    await db.exec(`update public.skylanders
+                     set name = 'Pirate Ship',
+                         image_override_path = 'SKY-0100/1111111111111111.webp'
+                   where sky_id = 'SKY-0100';`);
+    await neuerEntwurf("SKY-0902");
+    const fBild = await tu63(`select public.admin_merge_draft('SKY-0902','SKY-0100',
+                                'SKY-0100/2222222222222222.webp',
+                                '{"image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+                                  "new":"SKY-0100/2222222222222222.webp"}}'::jsonb);`);
+    const nachBild = await w63(`select name || '|' || coalesce(image_override_path,'-') as w
+                                from public.skylanders where sky_id = 'SKY-0100'`);
+    sag63("nur Bild ausgewaehlt: der Name bleibt der alte",
+          fBild === null && nachBild === "Pirate Ship|SKY-0100/2222222222222222.webp",
+          `${fBild ?? "durch"} · ${nachBild}`);
+
+    /* ---- FALL 4: BILD DEAKTIVIERT. Kein Pfad darf mitkommen, und das
+     *      bisherige Bild bleibt stehen. Beide Richtungen sind ein Abbruch. */
+    await neuerEntwurf("SKY-0903");
+    const fPfadOhneWahl = await tu63(`select public.admin_merge_draft('SKY-0903','SKY-0100',
+                                        'SKY-0100/2222222222222222.webp',
+                                        '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const fWahlOhnePfad = await tu63(`select public.admin_merge_draft('SKY-0903','SKY-0100', null,
+                                        '{"image_override_path":{"old":null,"new":"x"}}'::jsonb);`);
+    sag63("Bild abgewaehlt: ein Pfad ohne Auswahl und eine Auswahl ohne Pfad brechen ab",
+          fPfadOhneWahl !== null && fPfadOhneWahl.includes("nicht ausgewaehlt")
+          && fWahlOhnePfad !== null && fWahlOhnePfad.includes("kein Bildpfad"),
+          `${(fPfadOhneWahl ?? "DURCH").slice(0, 44)} | ${(fWahlOhnePfad ?? "DURCH").slice(0, 40)}`);
+
+    /*
+     * ---- FALL 4b: DERSELBE FALL, ABER AN DEN DATEN GEMESSEN.
+     *
+     * WARUM ES DIESEN DURCHGANG GIBT. Am 2026-10-28 hat die Nachkontrolle
+     * von `0156` auf Staging an Zeile 115 abgewichen — die Zeile, die genau
+     * diesen Riegel sucht. Die Ursache lag in der PRUEFDATEI (ein Muster
+     * ueber zwei SQL-Literale), nicht in der Funktion; der Riegel stand und
+     * wirkte. Dass der Riegel wirkt, war aber nur an einer FEHLERMELDUNG
+     * belegt, und eine Meldung ist kein Nachweis ueber Daten: eine Funktion
+     * koennte abbrechen und vorher doch geschrieben haben.
+     *
+     * Deshalb wird hier der Zustand VOR und NACH dem Fehlversuch gemessen:
+     * die Zielfigur Zeichen fuer Zeichen, der Entwurf, seine Notiz und die
+     * Zeilenzahl. Nichts davon darf sich bewegen.
+     *
+     * Vier Gestalten des Fehlers, und alle vier sind „Bilduebernahme ohne
+     * gueltigen Zielbildpfad": kein Pfad, leerer Pfad, ein Pfad der
+     * ZIELFIGUR eines anderen Eintrags, und ein formal falscher Pfad.
+     */
+    {
+      const abdruck = async (): Promise<string> => w63(
+        `select (select name || '|' || series_code || '|' || category_id::text
+                   || '|' || coalesce(image_override_path,'-') || '|' || card_type
+                   || '|' || catalog_status || '|' || catalog_visible::text
+                   || '|' || coalesce(market_price::text,'-') || '|' || slug
+                 from public.skylanders where sky_id = 'SKY-0100')
+             || ' ## Entwurf ' || (select count(*)::text from public.skylanders
+                                   where sky_id = 'SKY-0903')
+             || ' ## Notiz ' || (select count(*)::text from public.catalog_editorial
+                                  where sky_id = 'SKY-0903')
+             || ' ## Zeilen ' || (select count(*)::text from public.skylanders) as w`);
+
+      const vorher4b = await abdruck();
+      const versuche: [string, string][] = [
+        ["kein Pfad",
+         `select public.admin_merge_draft('SKY-0903','SKY-0100', null,
+            '{"image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+              "new":"SKY-0100/2222222222222222.webp"}}'::jsonb);`],
+        ["leerer Pfad",
+         `select public.admin_merge_draft('SKY-0903','SKY-0100', '   ',
+            '{"image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+              "new":"SKY-0100/2222222222222222.webp"}}'::jsonb);`],
+        ["fremde SKY-ID im Pfad",
+         `select public.admin_merge_draft('SKY-0903','SKY-0100',
+            'SKY-0903/2222222222222222.webp',
+            '{"image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+              "new":"SKY-0903/2222222222222222.webp"}}'::jsonb);`],
+        ["formal falscher Pfad",
+         `select public.admin_merge_draft('SKY-0903','SKY-0100',
+            'SKY-0100/nicht-hex.gif',
+            '{"image_override_path":{"old":"SKY-0100/1111111111111111.webp",
+              "new":"SKY-0100/nicht-hex.gif"}}'::jsonb);`],
+      ];
+      const meldungen: string[] = [];
+      let alleAb = true;
+      let allesStill = true;
+      for (const [was, sql] of versuche) {
+        const fehler = await tu63(sql);
+        if (fehler === null) alleAb = false;
+        meldungen.push(`${was}: ${(fehler ?? "DURCHGELAUFEN").slice(0, 30)}`);
+        if ((await abdruck()) !== vorher4b) allesStill = false;
+      }
+      sag63("Bilduebernahme ohne gueltigen Zielbildpfad: vier Gestalten, vier Abbrueche "
+            + "— und danach ist die Zielfigur Zeichen fuer Zeichen dieselbe, der Entwurf "
+            + "steht noch, seine Notiz auch, die Zeilenzahl ist unveraendert",
+            alleAb && allesStill,
+            `${meldungen.join(" | ")} · Abdruck unveraendert ${allesStill} · ${vorher4b}`);
+    }
+
+    const fOhneBild = await tu63(`select public.admin_merge_draft('SKY-0903','SKY-0100', null,
+                                    '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const bildGeblieben = await w63(`select coalesce(image_override_path,'-') as w
+                                     from public.skylanders where sky_id = 'SKY-0100'`);
+    sag63("und ohne Bild laeuft es durch, das bisherige Bild bleibt",
+          fOhneBild === null && bildGeblieben === "SKY-0100/2222222222222222.webp",
+          `${fOhneBild ?? "durch"} · ${bildGeblieben}`);
+
+    /* ---- FALL 5: KEINE AENDERUNG AUSGEWAEHLT. Kein Grund, zu loeschen. */
+    await db.exec("update public.skylanders set name = 'Pirate Ship' where sky_id = 'SKY-0100';");
+    await neuerEntwurf("SKY-0904");
+    const fLeer = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                '{}'::jsonb);`);
+    const leerDa = await w63(`select count(*)::text as w from public.skylanders
+                              where sky_id = 'SKY-0904'`);
+    sag63("leere Auswahl: Abbruch, und der Entwurf steht noch",
+          fLeer !== null && fLeer.includes("kein Feld zur Übernahme") && leerDa === "1",
+          `${(fLeer ?? "DURCHGELAUFEN").slice(0, 52)} · steht noch ${leerDa}`);
+
+    /* ---- FALL 6: MANIPULIERTE FELDAUSWAHL. Vier Angriffe, vier Abbrueche,
+     *      und in jedem Fall steht hinterher alles unveraendert da. */
+    const vorAngriff = await w63(`select name || '|' || slug || '|' || catalog_status
+                                    || '|' || coalesce(market_price::text,'-')
+                                    || '|' || sky_id as w
+                                  from public.skylanders where sky_id = 'SKY-0100'`);
+    const aGeschuetzt = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                      '{"market_price":{"old":"9.99","new":"0.01"}}'::jsonb);`);
+    const aStatus = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                  '{"catalog_status":{"old":"public","new":"draft"}}'::jsonb);`);
+    const aSkyId = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                 '{"sky_id":{"old":"SKY-0100","new":"SKY-0900"}}'::jsonb);`);
+    const aKeinObjekt = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                      '["name"]'::jsonb);`);
+    const nachAngriff = await w63(`select name || '|' || slug || '|' || catalog_status
+                                     || '|' || coalesce(market_price::text,'-')
+                                     || '|' || sky_id as w
+                                   from public.skylanders where sky_id = 'SKY-0100'`);
+    sag63("manipulierte Auswahl: vier Abweisungen, und nichts hat sich bewegt",
+          [aGeschuetzt, aStatus, aSkyId].every(
+            (x) => x !== null && x.includes("kein uebernehmbares Feld"))
+          && aKeinObjekt !== null && aKeinObjekt.includes("muss ein Objekt sein")
+          && nachAngriff === vorAngriff,
+          `${[aGeschuetzt, aStatus, aSkyId, aKeinObjekt]
+              .map((x) => (x ?? "DURCH").slice(0, 28)).join(" | ")} · unveraendert `
+          + `${nachAngriff === vorAngriff}`);
+
+    /* ---- FALL 7: SERIE UND KATEGORIE HALB AUSGEWAEHLT. */
+    const aHalb = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                '{"series_code":{"old":"SA","new":"G"}}'::jsonb);`);
+    sag63("Serie ohne Kategorie: Abbruch, ein zusammengesetzter Schluessel bleibt ganz",
+          aHalb !== null && aHalb.includes("zusammengesetzter Fremdschluessel"),
+          (aHalb ?? "DURCHGELAUFEN").slice(0, 56));
+
+    /* ---- FALL 8: VERALTETE VORSCHAU. Drei Gestalten, und keine schreibt. */
+    const sAlterWert = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                     '{"name":{"old":"Irgendwas Anderes","new":"Pirate Seas"}}'::jsonb);`);
+    const sNeuerWert = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                     '{"name":{"old":"Pirate Ship","new":"Was ich will"}}'::jsonb);`);
+    const sNichtImPlan = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100', null,
+                                       '{"card_type":{"old":"chase","new":"standard"}}'::jsonb);`);
+    const nachStale = await w63(`select name || '|' || card_type as w
+                                 from public.skylanders where sky_id = 'SKY-0100'`);
+    sag63("veraltete Vorschau: anderer Ausgangswert, erfundener Zielwert und ein Feld "
+          + "ohne Aenderung brechen alle ab",
+          sAlterWert !== null && sAlterWert.includes("seit der Vorschau geaendert")
+          && sNeuerWert !== null && sNeuerWert.includes("seit der Vorschau geaendert")
+          && sNichtImPlan !== null && sNichtImPlan.includes("nicht (mehr) zur Uebernahme")
+          && nachStale === "Pirate Ship|chase",
+          `${(sAlterWert ?? "DURCH").slice(0, 30)} | ${(sNeuerWert ?? "DURCH").slice(0, 30)} | `
+          + `${(sNichtImPlan ?? "DURCH").slice(0, 34)} · unveraendert ${nachStale}`);
+
+    /* ---- FALL 9: DIE ALTE DREIPARAMETERFASSUNG. Sie muss weiterlaufen und
+     *      alles uebernehmen — das ist die Abwaertskompatibilitaet. */
+    const fAlt = await tu63(`select public.admin_merge_draft('SKY-0904','SKY-0100',
+                               'SKY-0100/2222222222222222.webp');`);
+    const nachAlt = await w63(`select name || '|' || series_code || '|' || category_id::text as w
+                               from public.skylanders where sky_id = 'SKY-0100'`);
+    sag63("die Dreiparameterfassung aus 0154 laeuft weiter und uebernimmt alles",
+          fAlt === null && nachAlt === "Pirate Seas|G|11",
+          `${fAlt ?? "durch"} · ${nachAlt}`);
+
+    /* ---- FALL 10: Referenzen auf den ENTWURF blockieren weiterhin. */
+    await neuerEntwurf("SKY-0905");
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-000000000008', 'SKY-0905', 1);`);
+    const fRef63 = await tu63(`select public.admin_merge_draft('SKY-0905','SKY-0100', null,
+                                 '{"name":{"old":"Pirate Seas","new":"Pirate Seas"}}'::jsonb);`);
+    const refDa63 = await w63(`select count(*)::text as w from public.skylanders
+                               where sky_id = 'SKY-0905'`);
+    sag63("eine Referenz auf den Entwurf blockiert auch mit Auswahl",
+          fRef63 !== null && fRef63.includes("zeigen noch Daten") && refDa63 === "1",
+          `${(fRef63 ?? "DURCHGELAUFEN").slice(0, 44)} · steht noch ${refDa63}`);
+
+    /* ---- Rechte und Attribute: wie 0154, und der Plan ist `stable`. */
+    const rechte = await w63(`select coalesce(string_agg(p.proname || ':' || p.pronargs::text
+                                || ':' || p.prosecdef::text || ':' || p.provolatile::text, ',' order by p.proname, p.pronargs),'-') as w
+                              from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                              where n.nspname = 'public'
+                                and p.proname in ('admin_merge_plan','admin_merge_draft')`);
+    sag63("beide Fassungen und der Plan stehen, alle security definer",
+          rechte.includes("admin_merge_draft:3:true")
+          && rechte.includes("admin_merge_draft:4:true")
+          && rechte.includes("admin_merge_plan:3:true:s"),
+          rechte);
+
+    /* ---- Das Journal nennt den Vorgang, mit der Zahl der Felder. */
+    const j63 = await w63(`select coalesce(string_agg(new_value, ';' order by new_value),'-') as w
+                           from public.catalog_admin_changes
+                           where entity_id = 'SKY-0100' and field = 'merged_from'`);
+    sag63("jeder Vorgang steht mit seiner Feldzahl im Journal",
+          j63.includes("1 Feld(er)") && j63.includes("5 Feld(er)"), j63);
+
+    probe.push({
+      name: "P63 0156: die Auswahl entscheidet wirklich — alle Felder, nur der Name, nur das "
+        + "Bild, Bild abgewaehlt, leere Auswahl, vier manipulierte Auswahlen, ein halber "
+        + "Fremdschluessel und drei Gestalten einer veralteten Vorschau; die Referenz auf "
+        + "das Ziel ueberlebt, die auf den Entwurf blockiert, und die Dreiparameterfassung "
+        + "aus 0154 laeuft unveraendert weiter",
+      ok: ok63,
+      sagt: `0156: ${befund63.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P64 — 0157: die echte Audit-Constraint, und die Notiz ohne Kaestchen.
+   *
+   * WARUM DIESER DURCHGANG EXISTIERT. Am 2026-10-28 scheiterte der erste
+   * echte Merge mit `SQLSTATE 23514` an
+   * `catalog_admin_changes_field_known` — die Constraint kennt sieben
+   * `field`-Werte, und `merged_from` ist keiner davon. P62 und P63 waren
+   * gruen, weil das Stub-Schema **keine CHECK-Constraints traegt**. Ein
+   * Probelauf, der die eine Einschraenkung nicht hat, an der es scheitert,
+   * prueft an der entscheidenden Stelle nichts.
+   *
+   * DESHALB LEGT DIESER DURCHGANG SIE WORTGETREU AN — den Wortlaut aus der
+   * laufenden Staging-Datenbank gemessen (`cat05i_audit_constraint.sql`,
+   * Zeile 403) — und faehrt dann drei Schritte:
+   *
+   *   1. VORHER: der Merge scheitert mit 23514, und zwar genau so wie beim
+   *      Betreiber. Danach ist nachgemessen, dass NICHTS geschrieben wurde.
+   *   2. `0157` laeuft.
+   *   3. NACHHER: derselbe Merge geht durch, die Journalzeile steht, und die
+   *      interne Notiz ist automatisch verarbeitet.
+   * ===================================================================== */
+  {
+    const befund64: string[] = [];
+    let ok64 = true;
+    const sag64 = (was: string, gut: boolean, text: string): void => {
+      befund64.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok64 = false;
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w64 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu64 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        /* 180 ZEICHEN, NICHT 100. Der Name der Constraint steht am ENDE der
+           Meldung („violates check constraint \"…\""), und genau auf ihn
+           kommt es hier an — eine zu kurze Kuerzung hat die erste Fassung
+           dieses Durchgangs scheitern lassen. */
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 180)}`;
+      }
+    };
+
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+    await db.exec(`create unique index if not exists z_ce4_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create unique index if not exists z_sky4_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`alter table public.collection_items
+                     add constraint z_ci4_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    /* WIRKLICHKEITSTREU: auf Staging heisst er `ON UPDATE CASCADE ON DELETE
+       CASCADE` (gemessen in `cat05i_audit_constraint.sql`, Zeile 202). Ohne
+       das Kaskadieren verhielte sich die Probewelt strenger als die echte. */
+    await db.exec(`alter table public.catalog_editorial
+                     add constraint z_ce4_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id)
+                     on update cascade on delete cascade;`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+
+    /*
+     * ACHTER WERKZEUGBEFUND, und er hat einen echten Fehlschlag gekostet:
+     * das Stub-Schema traegt KEINE CHECK-Constraints. Die hier wird
+     * nachgezogen, wortgetreu wie auf Staging — sieben Werte, ohne
+     * `catalog_status`, ohne `merged_from`, ohne `discarded`.
+     */
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created'));`);
+    const conDa = await w64(`select count(*)::text as w from pg_constraint
+                             where conname = 'catalog_admin_changes_field_known'`);
+    sag64("die echte Audit-Constraint steht in der Probewelt", conDa === "1",
+          `Constraints ${conDa}`);
+
+    for (const m of ["supabase/migrations/0154_merge_draft_into_figure.sql",
+                     "supabase/migrations/0155_discard_draft.sql",
+                     "supabase/migrations/0156_merge_selected_fields.sql"]) {
+      const f = await fahre(db, m);
+      if (f !== null) sag64(`Aufbau ${m.slice(21, 25)}`, false, f);
+    }
+
+    const anlegen = async (id: string, name: string, status: string) =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10, 'figure',
+                  'standard', true, ${status === "public"}, '${status}', 'admin');`);
+
+    /* Die Welt: der Fall des Betreibers, mit der echten Importnotiz. */
+    const IMPORTNOTIZ = "CAT-01 Kandidat, Quelle B412 der externen Checkliste "
+      + "(Trap Team). Kein Bild uebernommen; externe Bildrechte ungeklaert.";
+    const HERKUNFT = "CAT-01 Kandidat, Quelle B412 der externen Checkliste (Trap Team).";
+
+    await anlegen("SKY-0103", "Pirate Ship", "public");
+    await db.exec(`update public.skylanders set market_price = 9.99,
+                     image_file = 'f6da37ded1e8fac4.webp'
+                   where sky_id = 'SKY-0103';`);
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-00000000000b', 'SKY-0103', 5);`);
+
+    const neuerEntwurf64 = async (id: string, notiz: string | null) => {
+      await anlegen(id, "Pirate Seas", "draft");
+      await db.exec(`update public.skylanders
+                       set image_override_path = '${id}/c478a8fcef4098d1.png'
+                     where sky_id = '${id}';`);
+      if (notiz !== null) {
+        await db.exec(`insert into public.catalog_editorial (sky_id, admin_note, updated_at)
+                       values ('${id}', ${notiz === "" ? "null" : `'${notiz}'`}, now());`);
+      }
+    };
+
+    /* ================================================================
+     * SCHRITT 1 — VORHER: der Fehler des Betreibers, reproduziert.
+     * ============================================================= */
+    await neuerEntwurf64("SKY-0824", IMPORTNOTIZ);
+    const vorherAbdruck = await w64(
+      `select (select name || '|' || coalesce(image_override_path,'-') from public.skylanders
+                where sky_id = 'SKY-0103')
+           || ' ## Entwurf ' || (select count(*)::text from public.skylanders
+                                 where sky_id = 'SKY-0824')
+           || ' ## Zeilen ' || (select count(*)::text from public.skylanders) as w`);
+    const f23514 = await tu64(`select public.admin_merge_draft('SKY-0824','SKY-0103', null,
+                                 '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const nachFehler = await w64(
+      `select (select name || '|' || coalesce(image_override_path,'-') from public.skylanders
+                where sky_id = 'SKY-0103')
+           || ' ## Entwurf ' || (select count(*)::text from public.skylanders
+                                 where sky_id = 'SKY-0824')
+           || ' ## Zeilen ' || (select count(*)::text from public.skylanders) as w`);
+    sag64("VORHER: der Merge scheitert mit 23514 an catalog_admin_changes_field_known, "
+          + "und der ganze Vorgang ist zurueckgerollt",
+          f23514 !== null && f23514.includes("23514")
+          && f23514.includes("catalog_admin_changes_field_known")
+          && nachFehler === vorherAbdruck,
+          `${f23514 ?? "DURCHGELAUFEN"} · unveraendert ${nachFehler === vorherAbdruck} `
+          + `(${nachFehler})`);
+
+    /* Und derselbe Fehler trifft schon den Statuswechsel aus 0152 — das ist
+       der zweite, bereits aktive Fall. */
+    const fStatus = await tu64(`insert into public.catalog_admin_changes
+                                  (entity, entity_id, field, old_value, new_value)
+                                values ('skylander','SKY-0103','catalog_status','public','hidden');`);
+    const fDiscard = await tu64(`insert into public.catalog_admin_changes
+                                   (entity, entity_id, field, old_value, new_value)
+                                 values ('skylander','SKY-0824','discarded','x',null);`);
+    sag64("VORHER: catalog_status und discarded sind ebenso verboten — nicht nur der Merge "
+          + "ist betroffen",
+          fStatus !== null && fStatus.includes("23514")
+          && fDiscard !== null && fDiscard.includes("23514"),
+          `catalog_status ${(fStatus ?? "DURCH").slice(0, 24)} | discarded `
+          + `${(fDiscard ?? "DURCH").slice(0, 24)}`);
+
+    /* ================================================================
+     * SCHRITT 2 — 0157.
+     * ============================================================= */
+    const f157 = await fahre(db, "supabase/migrations/0157_audit_fields_and_automatic_notes.sql");
+    const conDef = await w64(`select pg_get_constraintdef(oid) as w from pg_constraint
+                              where conname = 'catalog_admin_changes_field_known'`);
+    sag64("0157 laeuft und die Constraint kennt jetzt zehn Werte — und keinen weniger",
+          f157 === null
+          && ["catalog_visible", "display_name_override", "admin_note", "catalog_group",
+              "image_override_path", "card_type", "created",
+              "catalog_status", "merged_from", "discarded"].every((v) => conDef.includes(v)),
+          `${f157 ?? "durch"} · ${conDef.slice(0, 70)}…`);
+
+    /* `merge_note()` ist rein — sie laesst sich einzeln pruefen. */
+    const n1 = await w64(`select public.merge_note('vom Admin gepflegt', '${IMPORTNOTIZ}') as w`);
+    const n2 = await w64(`select coalesce(public.merge_note(null, '${IMPORTNOTIZ}'),'(null)') as w`);
+    const n3 = await w64(`select coalesce(public.merge_note('vom Admin', null),'(null)') as w`);
+    const n4 = await w64(`select coalesce(public.merge_note('vom Admin', '   '),'(null)') as w`);
+    const n5 = await w64(`select coalesce(public.merge_note(
+                            'vom Admin' || chr(10) || '${HERKUNFT}', '${IMPORTNOTIZ}'),'(null)') as w`);
+    const n6 = await w64(`select coalesce(public.merge_note('vom Admin',
+                            'Kein Bild uebernommen; externe Bildrechte ungeklaert.'),'(null)') as w`);
+    sag64("merge_note: der veraltete Bildhinweis faellt weg, die Herkunft bleibt",
+          n1 === `vom Admin gepflegt\n${HERKUNFT}` && !n1.includes("ungeklaert"),
+          n1.replace(/\n/g, " ⏎ "));
+    sag64("merge_note: ohne Zielnotiz bleibt nur die Herkunft",
+          n2 === HERKUNFT, n2);
+    sag64("merge_note: ohne Entwurfsnotiz aendert sich nichts",
+          n3 === "vom Admin", n3);
+    sag64("merge_note: eine leere Entwurfsnotiz aendert nichts",
+          n4 === "vom Admin", n4);
+    sag64("merge_note: Doppeltes wird nicht doppelt angehaengt",
+          n5 === `vom Admin\n${HERKUNFT}`, n5.replace(/\n/g, " ⏎ "));
+    sag64("merge_note: bleibt nach dem Aufraeumen nichts, wird nichts angehaengt",
+          n6 === "vom Admin", n6);
+
+    /* ================================================================
+     * SCHRITT 3 — NACHHER: derselbe Merge, derselbe Aufruf.
+     * ============================================================= */
+    const fGut = await tu64(`select public.admin_merge_draft('SKY-0824','SKY-0103', null,
+                               '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const ziel = await w64(`select name || '|' || coalesce(image_override_path,'-') || '|'
+                              || coalesce(image_file,'-') || '|' || catalog_status || '|'
+                              || coalesce(market_price::text,'-') || '|' || slug as w
+                            from public.skylanders where sky_id = 'SKY-0103'`);
+    const notiz = await w64(`select coalesce(max(admin_note),'(keine)') as w
+                             from public.catalog_editorial where sky_id = 'SKY-0103'`);
+    const journal = await w64(`select coalesce(string_agg(field || '=' || coalesce(new_value,'-'),
+                                                          ', ' order by field),'-') as w
+                               from public.catalog_admin_changes where entity_id = 'SKY-0103'`);
+    const entwurfFort = await w64(`select (count(*) = 0)::text as w from public.skylanders
+                                   where sky_id = 'SKY-0824'`);
+    const sammlung = await w64(`select coalesce(max(quantity)::text,'-') as w
+                                from public.collection_items where sky_id = 'SKY-0103'`);
+    sag64("NACHHER: derselbe Merge geht durch — Name uebernommen, Bild unberuehrt, "
+          + "Journalzeile merged_from steht, Entwurf fort, Sammlung erhalten",
+          fGut === null
+          && ziel === "Pirate Seas|-|f6da37ded1e8fac4.webp|public|9.99|sky-0103"
+          && journal.includes("merged_from=1 Feld(er)")
+          && entwurfFort === "true" && sammlung === "5",
+          `${fGut ?? "durch"} · ${ziel} · Journal [${journal}] · Entwurf fort `
+          + `${entwurfFort} · Sammlung ${sammlung}`);
+    sag64("NACHHER: die Notiz ist automatisch verarbeitet — Herkunft da, veralteter "
+          + "Hinweis fort, und das ohne jedes Kaestchen",
+          notiz === HERKUNFT && !notiz.includes("ungeklaert"),
+          notiz);
+
+    /*
+     * ---- ALLE 105 ECHTEN IMPORTNOTIZEN, durch `merge_note()` gerechnet.
+     *
+     * Nicht ein erfundenes Beispiel, sondern der Bestand: die Notizen, die
+     * der einmalige Katalogimport wirklich geschrieben hat, aus
+     * `resources/analysis/cat-03-entwuerfe.json`. Die Zusage ist zweiteilig
+     * und beides muss fuer JEDE der 105 gelten — der veraltete Hinweis ist
+     * weg, UND die Herkunft ist noch da. Eine Regel, die aufraeumt und dabei
+     * die Quelle verliert, waere schlimmer als keine.
+     */
+    {
+      type Entwurf = { admin_note?: string | null };
+      const roh = JSON.parse(
+        readFileSync("resources/analysis/cat-03-entwuerfe.json", "utf8"),
+      ) as Entwurf[] | { entwuerfe?: Entwurf[] };
+      const liste = Array.isArray(roh) ? roh : (roh.entwuerfe ?? []);
+      const notizen = liste.map((e) => e.admin_note ?? "").filter((n) => n.trim() !== "");
+
+      let mitHinweis = 0;
+      let sauber = 0;
+      let herkunftErhalten = 0;
+      let leerGeworden = 0;
+      for (const n of notizen) {
+        if (n.includes("Bildrechte ungeklaert")) mitHinweis += 1;
+        const rest = await w64(
+          `select coalesce(public.merge_note(null, $kl$${n}$kl$), '') as w`);
+        if (!rest.includes("ungeklaert") && !rest.includes("Kein Bild")) sauber += 1;
+        if (rest.includes("CAT-01 Kandidat") && rest.includes("Checkliste")) {
+          herkunftErhalten += 1;
+        }
+        if (rest.trim() === "") leerGeworden += 1;
+      }
+      sag64("alle echten Importnotizen: der veraltete Hinweis faellt bei JEDER weg, "
+            + "die Herkunft bleibt bei JEDER, und keine wird leer",
+            notizen.length === 105 && mitHinweis === 105
+            && sauber === 105 && herkunftErhalten === 105 && leerGeworden === 0,
+            `${notizen.length} Notizen · ${mitHinweis} trugen den Hinweis · ${sauber} `
+            + `danach sauber · ${herkunftErhalten} mit Herkunft · ${leerGeworden} leer`);
+    }
+
+    /* ---- Eine manipulierte Auswahl mit `admin_note` wird abgewiesen. */
+    await neuerEntwurf64("SKY-0825", IMPORTNOTIZ);
+    const fNote = await tu64(`select public.admin_merge_draft('SKY-0825','SKY-0103', null,
+                                '{"admin_note":{"old":null,"new":"was ich will"}}'::jsonb);`);
+    const notizUnberuehrt = await w64(`select coalesce(max(admin_note),'(keine)') as w
+                                       from public.catalog_editorial where sky_id = 'SKY-0103'`);
+    sag64("eine manipulierte Auswahl mit admin_note wird abgewiesen — das Entfernen des "
+          + "Kaestchens ist keine blosse Anzeigeaenderung",
+          fNote !== null && fNote.includes("kein uebernehmbares Feld")
+          && notizUnberuehrt === HERKUNFT,
+          `${(fNote ?? "DURCHGELAUFEN").slice(0, 56)} · Notiz unveraendert `
+          + `${notizUnberuehrt === HERKUNFT}`);
+
+    /* ---- Der Plan nennt admin_note nicht mehr. */
+    const planFelder = await w64(`select coalesce(string_agg(e.wert ->> 'field', ','),'-') as w
+                                  from jsonb_array_elements(
+                                    public.admin_merge_plan('SKY-0825','SKY-0103', null)) as e(wert)`);
+    sag64("der Plan nennt admin_note nicht mehr", !planFelder.includes("admin_note"),
+          planFelder);
+
+    /* ---- Ein Entwurf OHNE Notiz: die Zielnotiz bleibt, keine leere Zeile. */
+    await db.exec("delete from public.skylanders where sky_id = 'SKY-0825';");
+    await neuerEntwurf64("SKY-0826", null);
+    await db.exec(`update public.skylanders set name = 'Pirate Ship' where sky_id = 'SKY-0103';`);
+    const fOhneNotiz = await tu64(`select public.admin_merge_draft('SKY-0826','SKY-0103', null,
+                                     '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const notizDanach = await w64(`select coalesce(max(admin_note),'(keine)') as w
+                                   from public.catalog_editorial where sky_id = 'SKY-0103'`);
+    const notizZeilen = await w64(`select count(*)::text as w from public.catalog_editorial
+                                   where sky_id = 'SKY-0103'`);
+    sag64("ein Entwurf ohne Notiz laesst die Zielnotiz unberuehrt und legt keine Zeile an",
+          fOhneNotiz === null && notizDanach === HERKUNFT && notizZeilen === "1",
+          `${fOhneNotiz ?? "durch"} · "${notizDanach}" · Zeilen ${notizZeilen}`);
+
+    /* ---- Bild UND Name zusammen, mit echter Constraint: zwei Journalzeilen
+     *      (merged_from von der Funktion, image_override_path vom Trigger —
+     *      letzterer fehlt im Stub, deshalb wird nur merged_from erwartet). */
+    await neuerEntwurf64("SKY-0827", IMPORTNOTIZ);
+    await db.exec(`update public.skylanders set name = 'Pirate Ship' where sky_id = 'SKY-0103';`);
+    const fBeides = await tu64(`select public.admin_merge_draft('SKY-0827','SKY-0103',
+                                  'SKY-0103/c478a8fcef4098d1.png',
+                                  '{"name":{"old":"Pirate Ship","new":"Pirate Seas"},
+                                    "image_override_path":{"old":null,
+                                      "new":"SKY-0103/c478a8fcef4098d1.png"}}'::jsonb);`);
+    const zielBeides = await w64(`select name || '|' || coalesce(image_override_path,'-') as w
+                                  from public.skylanders where sky_id = 'SKY-0103'`);
+    const jBeides = await w64(`select coalesce(max(new_value),'-') as w
+                               from public.catalog_admin_changes
+                              where entity_id = 'SKY-0103' and field = 'merged_from'
+                                and new_value = '2 Feld(er)'`);
+    sag64("Name UND Bild: beide wandern, das Journal zaehlt zwei Felder",
+          fBeides === null
+          && zielBeides === "Pirate Seas|SKY-0103/c478a8fcef4098d1.png"
+          && jBeides === "2 Feld(er)",
+          `${fBeides ?? "durch"} · ${zielBeides} · Journal ${jBeides}`);
+
+    /* ---- Keine fachliche Aenderung ausgewaehlt: Abbruch, Entwurf bleibt. */
+    await neuerEntwurf64("SKY-0828", IMPORTNOTIZ);
+    const fLeer = await tu64(`select public.admin_merge_draft('SKY-0828','SKY-0103', null,
+                                '{}'::jsonb);`);
+    const leerDa = await w64(`select count(*)::text as w from public.skylanders
+                              where sky_id = 'SKY-0828'`);
+    sag64("keine fachliche Aenderung ausgewaehlt: Abbruch, und der Entwurf steht noch — "
+          + "die automatische Notiz zaehlt nicht als Aenderung",
+          fLeer !== null && fLeer.includes("kein Feld zur Übernahme") && leerDa === "1",
+          `${(fLeer ?? "DURCHGELAUFEN").slice(0, 50)} · steht noch ${leerDa}`);
+
+    /* ---- UND DER ROLLBACK, an der Audit-Zeile erzwungen. */
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;`);
+    /*
+     * `not valid`, UND ZWAR ABSICHTLICH. Die vorigen Faelle haben schon
+     * `merged_from`-Zeilen geschrieben; eine geprueft angelegte Constraint
+     * scheiterte an denen, statt den naechsten Schreibvorgang zu treffen.
+     * Hier geht es allein darum, die Journalzeile des NAECHSTEN Merges
+     * scheitern zu lassen — und zu sehen, dass dann alles zurueckgeht.
+     */
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field <> 'merged_from') not valid;`);
+    await db.exec(`update public.skylanders set name = 'Pirate Ship' where sky_id = 'SKY-0103';`);
+    const vorRollback = await w64(
+      `select (select name from public.skylanders where sky_id = 'SKY-0103')
+           || ' ## ' || (select count(*)::text from public.skylanders where sky_id = 'SKY-0828')
+           || ' ## ' || (select coalesce(max(admin_note),'-') from public.catalog_editorial
+                          where sky_id = 'SKY-0103') as w`);
+    const fRoll = await tu64(`select public.admin_merge_draft('SKY-0828','SKY-0103', null,
+                                '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const nachRollback = await w64(
+      `select (select name from public.skylanders where sky_id = 'SKY-0103')
+           || ' ## ' || (select count(*)::text from public.skylanders where sky_id = 'SKY-0828')
+           || ' ## ' || (select coalesce(max(admin_note),'-') from public.catalog_editorial
+                          where sky_id = 'SKY-0103') as w`);
+    sag64("ein Fehler an der Journalzeile rollt ALLES zurueck — Name, Notiz und der "
+          + "Entwurf stehen danach wie vorher",
+          fRoll !== null && fRoll.includes("23514") && nachRollback === vorRollback,
+          `${(fRoll ?? "DURCHGELAUFEN").slice(0, 40)} · unveraendert `
+          + `${nachRollback === vorRollback} (${nachRollback.replace(/\n/g, " ⏎ ")})`);
+
+    probe.push({
+      name: "P64 0157 an der ECHTEN Audit-Constraint: der Fehler 23514 des Betreibers wird "
+        + "reproduziert und faellt danach weg, catalog_status und discarded ebenso, "
+        + "merge_note raeumt den veralteten Bildhinweis weg ohne die Herkunft zu "
+        + "verlieren, admin_note ist kein auswaehlbares Feld mehr (auch nicht fuer eine "
+        + "manipulierte Anfrage) — und ein Fehler an der Journalzeile rollt alles zurueck",
+      ok: ok64,
+      sagt: `0157: ${befund64.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P65 — 0158: die Figurenfamilien und der dritte Importweg.
+   *
+   * MIT DER ECHTEN AUDIT-CONSTRAINT, wie P64: das Stub-Schema traegt keine
+   * CHECK-Constraints (achter Werkzeugbefund), und `character_id` ist der
+   * ELFTE erlaubte Journalwert. Ohne die Constraint im Spiel wuerde dieser
+   * Durchgang die eine Zeile nicht pruefen, an der es scheitern koennte —
+   * genau der Fehler, der CAT-05I einen Tag gekostet hat.
+   * ===================================================================== */
+  {
+    const befund65: string[] = [];
+    let ok65 = true;
+    const sag65 = (was: string, gut: boolean, text: string): void => {
+      befund65.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok65 = false;
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w65 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu65 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 180)}`;
+      }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+    await db.exec(`create unique index if not exists z_sky5_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce5_uniq
+                     on public.catalog_editorial (sky_id);`);
+    /* Der Dublettenschutz fuer Familien ist dieser Index (`0002`); das
+       Stub-Schema traegt ihn nicht, und `0158` verlangt ihn ausdruecklich. */
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    /*
+     * DAS STUB-SCHEMA TRAEGT KEINE IDENTITAETSSPALTEN UND KEINE SCHLUESSEL.
+     * In der Wirklichkeit ist `characters.id` `generated always as identity`
+     * (`0002`); hier bekaeme eine neue Familie die id NULL, und
+     * `admin_create_character` gaebe NULL zurueck — der Durchgang waere
+     * gruen, ohne eine Familie angelegt zu haben. Dieselbe Nachhilfe, die
+     * `serienUndIdentitaet()` fuer `categories.id` leistet.
+     */
+    await db.exec(`create sequence if not exists public.z_char_id_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char_id_seq');`);
+    await db.exec(`create unique index if not exists z_char5_id_uniq
+                     on public.characters (id);`);
+    await db.exec(`alter table public.skylanders
+                     add constraint z_sk5_char_fk foreign key (character_id)
+                     references public.characters (id);`);
+    await db.exec(`alter table public.collection_items
+                     add constraint z_ci5_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded'));`);
+
+    for (const m of ["supabase/migrations/0154_merge_draft_into_figure.sql",
+                     "supabase/migrations/0155_discard_draft.sql",
+                     "supabase/migrations/0156_merge_selected_fields.sql",
+                     "supabase/migrations/0157_audit_fields_and_automatic_notes.sql"]) {
+      const f = await fahre(db, m);
+      if (f !== null) sag65(`Aufbau ${m.slice(21, 25)}`, false, f);
+    }
+
+    const anlegen = async (id: string, name: string, status: string, kt = "standard") =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10, 'figure',
+                  '${kt}', true, ${status === "public"}, '${status}', 'admin');`);
+
+    /* Die Welt: Spyro steht oeffentlich, Chrome Spyro ist ein Entwurf. */
+    await anlegen("SKY-0001", "Spyro", "public");
+    await anlegen("SKY-0825", "Chrome Spyro", "draft");
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-00000000000c', 'SKY-0001', 4);`);
+
+    /* ---- 8./7. VORHER: ohne 0158 scheitert die Zuordnung an der Constraint. */
+    const fVorher = await tu65(`insert into public.catalog_admin_changes
+                                  (entity, entity_id, field, old_value, new_value)
+                                values ('skylander','SKY-0825','character_id',null,'1');`);
+    sag65("VORHER: character_id ist als Journalfeld verboten (23514) — ohne 0158 "
+          + "waere jede Zuordnung derselbe Fehler wie in CAT-05I",
+          fVorher !== null && fVorher.includes("23514")
+          && fVorher.includes("catalog_admin_changes_field_known"),
+          (fVorher ?? "DURCHGELAUFEN").slice(0, 70));
+
+    /* ---- 0158 ohne 0157 bricht ab: die Reihenfolge ist echt. */
+    {
+      const leer = await frischNach0136();
+      await serienUndIdentitaet(leer);
+      await leer.exec(`create or replace function public.is_platform_admin() returns boolean
+                       language sql as $stub$ select true $stub$;`);
+      await leer.exec(`create unique index if not exists characters_canonical_name_key
+                         on public.characters (lower(canonical_name));`);
+      await leer.exec(`alter table public.catalog_admin_changes
+                         add constraint catalog_admin_changes_field_known
+                         check (field in ('catalog_visible', 'created'));`);
+      await leer.exec(`drop function if exists public.admin_set_catalog_status(text,text) cascade;`);
+      const nur158 = await fahre(leer, "supabase/migrations/0158_figure_families.sql");
+      sag65("0158 ohne 0152/0157 bricht ab (die Vorbedingungen sind echt)",
+            nur158 !== null && nur158.includes("0158 Vorbedingung"),
+            (nur158 ?? "DURCHGELAUFEN").slice(0, 62));
+    }
+
+    const f158 = await fahre(db, "supabase/migrations/0158_figure_families.sql");
+    const conDef = await w65(`select pg_get_constraintdef(oid) as w from pg_constraint
+                              where conname = 'catalog_admin_changes_field_known'`);
+    sag65("0158 laeuft; die Constraint kennt elf Werte und keinen weniger",
+          f158 === null
+          && ["catalog_visible", "display_name_override", "admin_note", "catalog_group",
+              "image_override_path", "card_type", "created", "catalog_status",
+              "merged_from", "discarded", "character_id"].every((v) => conDef.includes(v)),
+          `${f158 ?? "durch"} · ${conDef.slice(-60)}`);
+
+    /* ---- 5. Familie anlegen, und der Dublettenschutz. */
+    const famId = await w65(`select public.admin_create_character('Spyro')::text as w`);
+    const fDupl = await tu65(`select public.admin_create_character('spyro');`);
+    const fLeer = await tu65(`select public.admin_create_character('   ');`);
+    const famZahl = await w65(`select count(*)::text as w from public.characters`);
+    sag65("eine Familie entsteht; derselbe Name — auch anders geschrieben — wird "
+          + "abgewiesen und die bestehende genannt",
+          famId !== "?" && famId !== ""
+          && fDupl !== null && fDupl.includes("gibt es schon")
+          && fLeer !== null && fLeer.includes("braucht einen Namen")
+          && famZahl === "1",
+          `id ${famId} · ${(fDupl ?? "DURCH").slice(0, 44)} · Familien ${famZahl}`);
+    /* Element, Spezies und Beschreibung bleiben leer — kuratierte Arbeit. */
+    const famLeerFelder = await w65(`select (element is null and species is null
+                                        and short_description is null)::text as w
+                                      from public.characters where id = ${famId}`);
+    sag65("sie traegt nur den Namen — Element, Spezies und Beschreibung bleiben leer",
+          famLeerFelder === "true", famLeerFelder);
+
+    /* ---- 1./10./11. WEG B: atomar veroeffentlichen und zuordnen. */
+    const vorB = await w65(`select (select count(*)::text from public.skylanders)
+                              || '|' || (select coalesce(max(quantity)::text,'-')
+                                          from public.collection_items where sky_id = 'SKY-0001')
+                              || '|' || (select name || '/' || slug from public.skylanders
+                                          where sky_id = 'SKY-0001') as w`);
+    const fB = await tu65(`select public.admin_publish_as_variant('SKY-0825', ${famId});`);
+    const nachB = await w65(`select sky_id || '|' || name || '|' || slug || '|'
+                               || catalog_status || '|' || catalog_visible::text || '|'
+                               || character_id::text || '|' || card_type as w
+                             from public.skylanders where sky_id = 'SKY-0825'`);
+    const nachBWelt = await w65(`select (select count(*)::text from public.skylanders)
+                                   || '|' || (select coalesce(max(quantity)::text,'-')
+                                               from public.collection_items where sky_id = 'SKY-0001')
+                                   || '|' || (select name || '/' || slug from public.skylanders
+                                               where sky_id = 'SKY-0001') as w`);
+    const jB = await w65(`select coalesce(string_agg(field || '=' || coalesce(new_value,'-'),
+                                                     ', ' order by field),'-') as w
+                          from public.catalog_admin_changes where entity_id = 'SKY-0825'`);
+    sag65("WEG B: der Entwurf wird oeffentlich UND der Familie zugeordnet — SKY-ID, "
+          + "Slug, Name und Edition bleiben seine eigenen",
+          fB === null
+          && nachB === `SKY-0825|Chrome Spyro|sky-0825|public|true|${famId}|standard`,
+          `${fB ?? "durch"} · ${nachB}`);
+    sag65("WEG B: die Grundfigur und ihre Referenzen sind unberuehrt",
+          nachBWelt === vorB, `${nachBWelt} (vorher ${vorB})`);
+    /*
+     * NUR `character_id`, UND DAS IST KEINE LUECKE DIESES DURCHGANGS.
+     * Die Zeile schreibt `admin_set_character` selbst, also laesst sie sich
+     * hier sehen. Die Zeile `catalog_status` schreibt dagegen der
+     * Journaltrigger `log_skylander_editorial_change` — und das Stub-Schema
+     * traegt KEINE Trigger (dokumentierter Werkzeugbefund). Dass der Trigger
+     * `catalog_status` schreibt und die Constraint ihn seit `0157` kennt,
+     * belegen P60 und P64; hier waere es eine Behauptung ueber eine
+     * Umgebung, die es nicht gibt.
+     */
+    sag65("WEG B: das Journal nennt die Familienzuordnung mit IDs (die Statuszeile "
+          + "schreibt der Trigger, den das Stub-Schema nicht hat)",
+          jB.includes(`character_id=${famId}`), jB);
+    /* 12. DER NAME TRAEGT KEINE KLAMMER. */
+    sag65("WEG B: der Name bleibt natuerlich — kein Grundfigur-(Variante)-Format",
+          !nachB.includes("(") && nachB.includes("Chrome Spyro"), nachB.split("|")[1]);
+
+    /* ---- 6./7. Manipulierte Eingaben und Berechtigung. */
+    await anlegen("SKY-0826", "Dark Spyro", "draft");
+    const mFam = await tu65(`select public.admin_publish_as_variant('SKY-0826', 999);`);
+    const mNull = await tu65(`select public.admin_publish_as_variant('SKY-0826', null);`);
+    const mFigur = await tu65(`select public.admin_publish_as_variant('SKY-9999', ${famId});`);
+    const mOeff = await tu65(`select public.admin_publish_as_variant('SKY-0001', ${famId});`);
+    const nachAngriff = await w65(`select catalog_status || '|'
+                                     || coalesce(character_id::text,'-') as w
+                                   from public.skylanders where sky_id = 'SKY-0826'`);
+    const grundUnberuehrt = await w65(`select catalog_status || '|'
+                                         || coalesce(character_id::text,'-') as w
+                                       from public.skylanders where sky_id = 'SKY-0001'`);
+    sag65("vier manipulierte Eingaben, vier Abweisungen — und danach ist nichts bewegt",
+          [mFam, mNull, mFigur, mOeff].every((x) => x !== null)
+          && nachAngriff === "draft|-" && grundUnberuehrt === "public|-",
+          `${[mFam, mNull, mFigur, mOeff].map((x) => (x ?? "DURCH").slice(0, 26)).join(" | ")} `
+          + `· Entwurf ${nachAngriff} · Grundfigur ${grundUnberuehrt}`);
+
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select false $stub$;`);
+    const kSet = await tu65(`select public.admin_set_character('SKY-0826', ${famId});`);
+    const kNeu = await tu65(`select public.admin_create_character('Fremd');`);
+    const kPub = await tu65(`select public.admin_publish_as_variant('SKY-0826', ${famId});`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    sag65("ohne Adminrecht weist jede der drei Funktionen ab (42501)",
+          [kSet, kNeu, kPub].every((x) => x !== null && x.includes("42501")),
+          [kSet, kNeu, kPub].map((x) => (x ?? "DURCH").slice(0, 22)).join(" | "));
+
+    /* ---- 4. Zuordnung setzen, aendern, entfernen — auch an einer
+     *      VEROEFFENTLICHTEN Figur. */
+    const sSet = await tu65(`select public.admin_set_character('SKY-0001', ${famId});`);
+    const nachSet = await w65(`select coalesce(character_id::text,'-') || '|' || catalog_status
+                                 || '|' || name as w
+                               from public.skylanders where sky_id = 'SKY-0001'`);
+    const famZwei = await w65(`select public.admin_create_character('Eruptor')::text as w`);
+    const sAendern = await tu65(`select public.admin_set_character('SKY-0001', ${famZwei});`);
+    const nachAendern = await w65(`select coalesce(character_id::text,'-') as w
+                                   from public.skylanders where sky_id = 'SKY-0001'`);
+    const sWeg = await tu65(`select public.admin_set_character('SKY-0001', null);`);
+    const nachWeg = await w65(`select coalesce(character_id::text,'(null)') as w
+                               from public.skylanders where sky_id = 'SKY-0001'`);
+    const jSet = await w65(`select coalesce(string_agg(coalesce(old_value,'-') || '->'
+                                            || coalesce(new_value,'-'), ', ' order by id),'-') as w
+                            from public.catalog_admin_changes
+                           where entity_id = 'SKY-0001' and field = 'character_id'`);
+    sag65("setzen, aendern, entfernen — an einer VEROEFFENTLICHTEN Figur, und das "
+          + "Journal fuehrt alle drei Schritte mit IDs",
+          sSet === null && nachSet === `${famId}|public|Spyro`
+          && sAendern === null && nachAendern === famZwei
+          && sWeg === null && nachWeg === "(null)"
+          && jSet === `-->${famId}, ${famId}->${famZwei}, ${famZwei}->-`,
+          `${nachSet} → ${nachAendern} → ${nachWeg} · Journal [${jSet}]`);
+
+    /* Eine Nichtaenderung schreibt keine Journalzeile. */
+    const vorNoop = await w65(`select count(*)::text as w from public.catalog_admin_changes
+                               where entity_id = 'SKY-0001' and field = 'character_id'`);
+    const noop = await w65(`select (public.admin_set_character('SKY-0001', null)
+                                     ->> 'changed') as w`);
+    const nachNoop = await w65(`select count(*)::text as w from public.catalog_admin_changes
+                                where entity_id = 'SKY-0001' and field = 'character_id'`);
+    sag65("eine Nichtaenderung schreibt keine Journalzeile",
+          noop === "false" && vorNoop === nachNoop, `changed ${noop} · Zeilen ${nachNoop}`);
+
+    /* ---- 2. WEG C: eigenstaendig, ohne Familie. */
+    await anlegen("SKY-0827", "Flocked Stump Smash", "draft");
+    const fC = await tu65(`select public.admin_set_catalog_status('SKY-0827', 'public');`);
+    const nachC = await w65(`select catalog_status || '|' || catalog_visible::text || '|'
+                               || coalesce(character_id::text,'(null)') || '|' || slug as w
+                             from public.skylanders where sky_id = 'SKY-0827'`);
+    sag65("WEG C: eigenstaendig veroeffentlicht, ohne Familie, mit eigenem Slug",
+          fC === null && nachC === "public|true|(null)|sky-0827", `${fC ?? "durch"} · ${nachC}`);
+
+    /* ---- 9. ROLLBACK: ein Fehler an der Journalzeile nimmt alles mit. */
+    await anlegen("SKY-0828", "Legendary Spyro", "draft");
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field <> 'character_id') not valid;`);
+    const vorRoll = await w65(`select catalog_status || '|'
+                                 || coalesce(character_id::text,'-') as w
+                               from public.skylanders where sky_id = 'SKY-0828'`);
+    const fRoll = await tu65(`select public.admin_publish_as_variant('SKY-0828', ${famId});`);
+    const nachRoll = await w65(`select catalog_status || '|'
+                                  || coalesce(character_id::text,'-') as w
+                                from public.skylanders where sky_id = 'SKY-0828'`);
+    sag65("ein Fehler an der Journalzeile rollt BEIDE Haelften zurueck — der Entwurf "
+          + "ist danach weder veroeffentlicht noch zugeordnet",
+          fRoll !== null && fRoll.includes("23514") && nachRoll === vorRoll
+          && nachRoll === "draft|-",
+          `${(fRoll ?? "DURCHGELAUFEN").slice(0, 34)} · ${nachRoll} (vorher ${vorRoll})`);
+
+    /* ---- 14. Eine Familie ueber mehrere Serien. */
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group', 'image_override_path',
+                                      'card_type', 'created', 'catalog_status',
+                                      'merged_from', 'discarded', 'character_id'));`);
+    await db.exec(`insert into public.skylanders
+                     (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                      is_active, catalog_visible, catalog_status, source)
+                   values ('SKY-0829', 'LightCore Spyro', 'sky-0829', 'G', 11, 'figure',
+                      'special', true, false, 'draft', 'admin');`);
+    const fSerie = await tu65(`select public.admin_publish_as_variant('SKY-0829', ${famId});`);
+    const serienDerFamilie = await w65(`select coalesce(string_agg(distinct series_code, ',' ),'-') as w
+                                        from public.skylanders where character_id = ${famId}`);
+    const serieErhalten = await w65(`select series_code || '|' || category_id::text as w
+                                     from public.skylanders where sky_id = 'SKY-0829'`);
+    sag65("eine Familie darf Figuren in mehreren Serien haben, und die Serie der "
+          + "Figur bleibt ihre eigene",
+          fSerie === null && serienDerFamilie === "G,SA" && serieErhalten === "G|11",
+          `Serien der Familie ${serienDerFamilie} · SKY-0829 ${serieErhalten}`);
+
+    /* ---- 3. Die Zusammenfuehrung aus 0157 laeuft unveraendert weiter. */
+    await anlegen("SKY-0830", "Pirate Seas", "draft");
+    await anlegen("SKY-0103", "Pirate Ship", "public");
+    const fMerge = await tu65(`select public.admin_merge_draft('SKY-0830','SKY-0103', null,
+                                 '{"name":{"old":"Pirate Ship","new":"Pirate Seas"}}'::jsonb);`);
+    const nachMerge = await w65(`select name || '|' || slug as w from public.skylanders
+                                 where sky_id = 'SKY-0103'`);
+    sag65("die Zusammenfuehrung aus 0157 ist unberuehrt — 0158 verschlechtert Weg A nicht",
+          fMerge === null && nachMerge === "Pirate Seas|sky-0103",
+          `${fMerge ?? "durch"} · ${nachMerge}`);
+
+    /* ---- 16. Ein Altbestandsname mit Klammer bleibt, wie er ist. */
+    await db.exec(`insert into public.skylanders
+                     (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                      is_active, catalog_visible, catalog_status, source)
+                   values ('SKY-0831', 'Crusher (Granite)', 'sky-0831', 'SA', 10, 'figure',
+                      'special', true, true, 'public', 'import');`);
+    const fAlt = await tu65(`select public.admin_set_character('SKY-0831', ${famId});`);
+    const nachAlt = await w65(`select name || '|' || coalesce(character_id::text,'-') as w
+                               from public.skylanders where sky_id = 'SKY-0831'`);
+    sag65("ein vorhandener Klammername wird zugeordnet und NICHT umbenannt — "
+          + "Altbestand bleibt Altbestand",
+          fAlt === null && nachAlt === `Crusher (Granite)|${famId}`, nachAlt);
+
+    probe.push({
+      name: "P65 0158 an der echten Audit-Constraint: Familie anlegen mit Dublettenschutz, "
+        + "Weg B atomar (veroeffentlichen UND zuordnen, Grundfigur unberuehrt), Weg C "
+        + "eigenstaendig, Zuordnung setzen/aendern/entfernen auch an veroeffentlichten "
+        + "Figuren, vier manipulierte Eingaben und drei Rechtepruefungen abgewiesen, "
+        + "vollstaendiger Rollback an der Journalzeile, eine Familie ueber zwei Serien, "
+        + "Weg A unveraendert — und kein Name bekommt eine Klammer",
+      ok: ok65,
+      sagt: `0158: ${befund65.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P66 — 0153: `catalog_status` in der Plattformsicherung, und der UMLAUF.
+   *
+   * WAS DIESER DURCHGANG ZEIGT, DEN ES SO NOCH NICHT GAB: er RUFT die
+   * Sicherungsfunktion auf. P51 prueft `0144` am Rumpf — Abdruck, Attribute,
+   * Rechte, Ruecknahme — und fuehrt sie nie aus. Hier geht es aber genau um
+   * das ERGEBNIS: traegt das Archiv den Status, und kommt ein Entwurf nach
+   * einer Wiederherstellung als Entwurf zurueck?
+   *
+   * Deshalb faehrt dieser Durchgang einen echten UMLAUF an erfundenen
+   * Zeilen: drei Katalogzeilen mit `draft`, `hidden` und `public`,
+   * exportieren, die Zeilen loeschen, aus dem Archiv wieder einspielen, und
+   * danach die Status vergleichen. Einmal OHNE `0153` — da muss es
+   * scheitern, und zwar genau so, wie die Migration es beschreibt — und
+   * einmal MIT.
+   *
+   * Dazu die Riegel: ohne `0152` bricht sie ab, gegen eine fremde Fassung
+   * ebenso, ein zweiter Lauf prallt ab, und die Ruecknahme stellt den Rumpf
+   * aus `0144` zeichengleich her, ohne die Spalte anzufassen.
+   * ===================================================================== */
+  {
+    const befund66: string[] = [];
+    let ok66 = true;
+    const sag66 = (was: string, gut: boolean, text: string): void => {
+      befund66.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok66 = false;
+    };
+
+    const M153 = join(MIG_DIR, "0153_platform_export_catalog_status.sql");
+    const R153 = "supabase/rollback/R0153_platform_export_back_to_0144.sql";
+    const A0105 = "2e2da90e976a1e73ca00aba7cd830fae";
+    const A0144 = "4c4d2e7c81e4efa8e18cdffa06bba40a";
+    const A0153 = "92c48444f99b9e294f9703d0c0ddeaa8";
+
+    const anweisungVon66 = (datei: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf("create or replace function public.system_platform_export()");
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+
+    /* `frischNach0136()` und nicht `frisch()`: das Stub-Schema traegt
+       `skylanders.item_type` erst ab `0135` (dokumentierter Werkzeugbefund),
+       und die drei erfundenen Zeilen brauchen die Spalte. */
+    const db = await frischNach0136();
+    const w66 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu66 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 160)}`;
+      }
+    };
+    const abdruck66 = async (): Promise<string> => w66(
+      "select md5(prosrc) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+
+    await db.exec(`create schema if not exists auth;
+                   create table if not exists auth.users (id uuid primary key);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`create unique index if not exists z_sky6_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1);`);
+
+    /*
+     * DIE SPALTE AUS `0152` IST IM STUB SCHON DA (dokumentierter
+     * Werkzeugbefund). Fuer den ersten Riegel muss sie weg — das ist die
+     * Lage, in der `0153` ohne `0152` wirklich laeuft.
+     */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon66(join(MIG_DIR, "0144_platform_export_calculations.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const start66 = await abdruck66();
+    sag66("Aufbau: der Rumpf aus 0144 steht", start66 === A0144, start66);
+
+    await db.exec("alter table public.skylanders drop column catalog_status;");
+    const ohne0152 = await fahre(db, M153);
+    sag66("ohne 0152 bricht 0153 ab", ohne0152 !== null && ohne0152.includes("0152"),
+          (ohne0152 ?? "DURCHGELAUFEN").slice(0, 56));
+    /* Die Spalte zurueck, so wie `0152` sie anlegt. */
+    await db.exec(`alter table public.skylanders add column catalog_status text;
+                   update public.skylanders set catalog_status =
+                     case when catalog_visible then 'public' else 'hidden' end;
+                   alter table public.skylanders alter column catalog_status set not null;`);
+
+    /* Eine FREMDE Fassung wird nicht ueberschrieben. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon66(join(MIG_DIR, "0105_platform_export.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const gegen0105 = await fahre(db, M153);
+    sag66("gegen den Rumpf aus 0105 bricht sie ab, statt ihn zu ueberschreiben",
+          gegen0105 !== null && gegen0105.includes("0105"),
+          (gegen0105 ?? "DURCHGELAUFEN").slice(0, 60));
+    sag66("und der fremde Rumpf steht unveraendert",
+          (await abdruck66()) === A0105, await abdruck66());
+
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon66(join(MIG_DIR, "0144_platform_export_calculations.sql")));
+    await db.exec("set check_function_bodies = on;");
+
+    /* ================================================================
+     * DIE DREI ZEILEN, auf die alles ankommt.
+     * ============================================================= */
+    const anlegen66 = async (id: string, status: string) =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source)
+               values ('${id}', 'P66 ${status}', '${id.toLowerCase()}', 'SA', 10,
+                  'figure', 'standard', true, ${status === "public"}, '${status}',
+                  'admin');`);
+    await anlegen66("SKY-7001", "public");
+    await anlegen66("SKY-7002", "hidden");
+    await anlegen66("SKY-7003", "draft");
+
+    /** Der Katalogbereich des Archivs, als eine Zeile je SKY-ID. */
+    const archivStatus = async (): Promise<string> => w66(
+      `select coalesce(string_agg(x.sky_id || '=' || coalesce(x.status, '(FEHLT)'),
+                                  ', ' order by x.sky_id), '(leer)') as w
+         from (select e ->> 'sky_id' as sky_id, e ->> 'catalog_status' as status
+                 from jsonb_array_elements(
+                        (public.system_platform_export() -> 'data' -> 'skylanders')) as e
+                where e ->> 'sky_id' like 'SKY-700%') x`);
+
+    /* ---- OHNE 0153: das Archiv kennt den Status NICHT. Genau die Luecke. */
+    const vorher66 = await archivStatus();
+    sag66("OHNE 0153 fuehrt das Archiv keinen catalog_status — Entwurf und versteckte "
+          + "Zeile sind darin nicht zu unterscheiden",
+          vorher66.includes("SKY-7003=(FEHLT)") && vorher66.includes("SKY-7002=(FEHLT)"),
+          vorher66);
+    /* Und `catalog_visible` ist bei beiden `false` — der Beweis der Luecke. */
+    const sichtbarkeit = await w66(
+      `select coalesce(string_agg(e ->> 'sky_id' || '=' || (e ->> 'catalog_visible'),
+                                  ', ' order by e ->> 'sky_id'), '(leer)') as w
+         from jsonb_array_elements(
+                (public.system_platform_export() -> 'data' -> 'skylanders')) as e
+        where e ->> 'sky_id' in ('SKY-7002', 'SKY-7003')`);
+    sag66("und catalog_visible ist bei Entwurf UND versteckter Zeile false — daraus "
+          + "laesst sich der Status nicht zurueckgewinnen",
+          sichtbarkeit === "SKY-7002=false, SKY-7003=false", sichtbarkeit);
+
+    /* ---- 0153 laeuft. */
+    const lauf = await fahre(db, M153);
+    const nachher = await abdruck66();
+    const laenge = await w66(
+      "select length(prosrc)::text as w from pg_proc p join pg_namespace n"
+      + " on n.oid = p.pronamespace where n.nspname = 'public'"
+      + " and p.proname = 'system_platform_export'");
+    sag66("0153 laeuft; der Rumpf ist der zugesagte und 31072 Zeichen lang",
+          lauf === null && nachher === A0153 && laenge === "31072",
+          `${lauf ?? "durch"} · ${nachher} · ${laenge} Zeichen`);
+
+    /* DIE UMKEHRPROBE AM LEBENDEN RUMPF. */
+    const zurueckgedreht = await w66(
+      "select md5(replace(prosrc, E'\\n            ''catalog_status'', t.catalog_status,',"
+      + " '')) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+    sag66("zieht man die eine Zeile ab, ist er zeichengleich der aus 0144",
+          zurueckgedreht === A0144, zurueckgedreht);
+
+    /* ---- MIT 0153: das Archiv fuehrt alle drei Werte. */
+    const nachher66 = await archivStatus();
+    sag66("MIT 0153 fuehrt das Archiv alle drei Werte",
+          nachher66 === "SKY-7001=public, SKY-7002=hidden, SKY-7003=draft", nachher66);
+
+    /* ================================================================
+     * DER UMLAUF: sichern, loeschen, aus dem Archiv wieder einspielen.
+     *
+     * Das ist die Frage aus CAT-02C in einem Satz: bleibt ein Entwurf nach
+     * einer Wiederherstellung ein Entwurf? Hier wird sie nicht beantwortet,
+     * sondern gemessen.
+     * ============================================================= */
+    await db.exec(`create table z_archiv as
+                   select public.system_platform_export() as doc;`);
+    await db.exec("delete from public.skylanders where sky_id like 'SKY-700%';");
+    const weg = await w66("select count(*)::text as w from public.skylanders"
+                          + " where sky_id like 'SKY-700%'");
+    const einspielen = await tu66(`
+      insert into public.skylanders
+        (sky_id, name, slug, series_code, category_id, item_type, card_type,
+         is_active, catalog_visible, catalog_status, source)
+      select e ->> 'sky_id', e ->> 'name', e ->> 'slug', e ->> 'series_code',
+             (e ->> 'category_id')::bigint, 'figure', 'standard',
+             (e ->> 'is_active')::boolean, (e ->> 'catalog_visible')::boolean,
+             e ->> 'catalog_status', 'admin'
+        from z_archiv z, jsonb_array_elements(z.doc -> 'data' -> 'skylanders') as e
+       where e ->> 'sky_id' like 'SKY-700%';`);
+    const danach = await w66(
+      `select coalesce(string_agg(sky_id || '=' || catalog_status || '/'
+                                  || catalog_visible::text, ', ' order by sky_id), '(leer)') as w
+         from public.skylanders where sky_id like 'SKY-700%'`);
+    sag66("DER UMLAUF: nach dem Einspielen aus dem Archiv steht jeder Status wieder "
+          + "da — ein Entwurf ist wieder ein Entwurf",
+          weg === "0" && einspielen === null
+          && danach === "SKY-7001=public/true, SKY-7002=hidden/false, "
+                      + "SKY-7003=draft/false",
+          `geloescht ${weg} · ${einspielen ?? "eingespielt"} · ${danach}`);
+
+    /* ---- Ein zweiter Lauf prallt ab. */
+    const zweimal = await fahre(db, M153);
+    sag66("ein zweiter Lauf prallt an seinem eigenen Riegel ab",
+          zweimal !== null && zweimal.includes("schon der neue"),
+          (zweimal ?? "DURCHGELAUFEN").slice(0, 52));
+
+    /* ---- Die Ruecknahme. */
+    const zurueck = await fahre(db, R153);
+    const nachRuecknahme = await abdruck66();
+    const spalteDa = await w66(
+      "select count(*)::text as w from pg_attribute a"
+      + " where a.attrelid = to_regclass('public.skylanders')"
+      + " and a.attname = 'catalog_status' and not a.attisdropped");
+    const zeilenDa = await w66(
+      `select coalesce(string_agg(sky_id || '=' || catalog_status, ', ' order by sky_id),
+                       '(leer)') as w
+         from public.skylanders where sky_id like 'SKY-700%'`);
+    sag66("die Ruecknahme stellt den Rumpf aus 0144 zeichengleich her und laesst die "
+          + "Spalte samt Werten stehen",
+          zurueck === null && nachRuecknahme === A0144 && spalteDa === "1"
+          && zeilenDa === "SKY-7001=public, SKY-7002=hidden, SKY-7003=draft",
+          `${zurueck ?? "durch"} · ${nachRuecknahme} · Spalte ${spalteDa} · ${zeilenDa}`);
+
+    probe.push({
+      name: "P66 0153: das Archiv fuehrt catalog_status — und zwar GEMESSEN, nicht am "
+        + "Rumpf behauptet. Dieser Durchgang RUFT die Sicherung auf, zeigt die Luecke "
+        + "ohne 0153 (Entwurf und versteckte Zeile beide catalog_visible=false, Status "
+        + "fehlt), faehrt die Migration und spielt dann aus dem Archiv wieder ein: "
+        + "public, hidden und draft kommen alle drei zurueck. Dazu die Riegel (ohne "
+        + "0152, gegen 0105, zweiter Lauf) und die Ruecknahme, die die Spalte verschont",
+      ok: ok66,
+      sagt: `0153: ${befund66.join(" · ")}`,
+    });
+  }
+
+  /* ========================================================================
+   * P67 — 0159: die Variante kennt ihre Basisfigur.
+   *
+   * MIT DEN ECHTEN SCHLUESSELN UND DER ECHTEN AUDIT-CONSTRAINT. Das
+   * Stub-Schema traegt weder Schluessel noch CHECKs (Werkzeugbefunde); ein
+   * Durchgang ohne sie koennte die zwei wichtigsten Zusagen dieser Migration
+   * nicht pruefen — die Serienregel ist ein FREMDSCHLUESSEL, und der zwoelfte
+   * Journalwert haengt an einer CHECK-Constraint.
+   *
+   * WAS HIER AUSEINANDERGEHALTEN WIRD: welcher Riegel greift. Die Serie
+   * faengt der zusammengesetzte Fremdschluessel (23503), den Selbstbezug ein
+   * CHECK (23514), die Ketten ein Trigger. Ein Durchgang, der nur „es bricht
+   * ab" prueft, saehe nicht, ob der strukturelle Riegel ueberhaupt da ist —
+   * und genau der ist die Zusage.
+   * ===================================================================== */
+  {
+    const befund67: string[] = [];
+    let ok67 = true;
+    const sag67 = (was: string, gut: boolean, text: string): void => {
+      befund67.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok67 = false;
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w67 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu67 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 150)}`;
+      }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+    await db.exec(`create unique index if not exists z_sky7_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce7_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create sequence if not exists public.z_char7_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char7_seq');`);
+    await db.exec(`create unique index if not exists z_char7_id
+                     on public.characters (id);`);
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`alter table public.skylanders
+                     add constraint z_sk7_char_fk foreign key (character_id)
+                     references public.characters (id);`);
+    await db.exec(`alter table public.collection_items
+                     add constraint z_ci7_sky_fk foreign key (sky_id)
+                     references public.skylanders (sky_id);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id'));`);
+
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag67(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+
+    /* ---- Ohne 0158 bricht 0159 ab: die Reihenfolge ist echt. */
+    {
+      const leer = await frischNach0136();
+      await serienUndIdentitaet(leer);
+      await leer.exec(`create or replace function public.is_platform_admin() returns boolean
+                       language sql as $stub$ select true $stub$;`);
+      await leer.exec(`drop function if exists public.admin_set_character(text,bigint) cascade;`);
+      const nur159 = await fahre(leer, join(MIG_DIR, "0159_variant_base_figure.sql"));
+      sag67("0159 ohne 0158 bricht ab (die Vorbedingung ist echt)",
+            nur159 !== null && nur159.includes("0158"),
+            (nur159 ?? "DURCHGELAUFEN").slice(0, 58));
+    }
+
+    const anlegen67 = async (id: string, name: string, serie: string, kat: number,
+                             status = "public") =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source)
+               values ('${id}', '${name}', '${id.toLowerCase()}', '${serie}', ${kat},
+                  'figure', 'standard', true, ${status === "public"}, '${status}',
+                  'admin');`);
+
+    /* Die Welt: Spyro (SA), drei Varianten (SA), ein Spyro in Giants. */
+    await anlegen67("SKY-0053", "Spyro", "SA", 10);
+    await anlegen67("SKY-0825", "Chrome Spyro", "SA", 10, "draft");
+    await anlegen67("SKY-0826", "Dark Spyro", "SA", 10);
+    await anlegen67("SKY-0827", "Legendary Spyro", "SA", 10);
+    await anlegen67("SKY-0900", "Spyro", "G", 11);     /* andere Serie */
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('00000000-0000-0000-0000-00000000000d', 'SKY-0053', 6);`);
+
+    const f159 = await fahre(db, join(MIG_DIR, "0159_variant_base_figure.sql"));
+    const struktur = await w67(
+      `select (select count(*)::text from pg_attribute a
+                where a.attrelid = to_regclass('public.skylanders')
+                  and a.attname = 'base_sky_id' and not a.attisdropped)
+           || '|' || (select count(*)::text from pg_constraint c
+                       where c.conrelid = to_regclass('public.skylanders')
+                         and c.conname = 'skylanders_base_same_series' and c.contype = 'f')
+           || '|' || (select count(*)::text from pg_constraint c
+                       where c.conrelid = to_regclass('public.skylanders')
+                         and c.conname = 'skylanders_id_series_uniq' and c.contype = 'u')
+           || '|' || (select count(*)::text from pg_constraint c
+                       where c.conrelid = to_regclass('public.skylanders')
+                         and c.conname = 'skylanders_base_not_self' and c.contype = 'c')
+           || '|' || (select count(*)::text from pg_trigger t
+                       where t.tgrelid = to_regclass('public.skylanders')
+                         and t.tgname = 'skylanders_variant_base_guard_trg'
+                         and not t.tgisinternal) as w`);
+    const journal12 = await w67(`select (pg_get_constraintdef(oid) like '%base_sky_id%')::text as w
+                                 from pg_constraint
+                                where conname = 'catalog_admin_changes_field_known'`);
+    const fkDef = await w67(`select pg_get_constraintdef(oid) as w from pg_constraint
+                             where conname = 'skylanders_base_same_series'`);
+    sag67("0159 laeuft: Spalte, Serienriegel, Eindeutigkeit, Selbstbezugsriegel, "
+          + "Kettenriegel und der zwoelfte Journalwert stehen",
+          f159 === null && struktur === "1|1|1|1|1" && journal12 === "true",
+          `${f159 ?? "durch"} · ${struktur} · Journal ${journal12}`);
+    sag67("der Serienriegel nennt BEIDE Spalten und RESTRICT (nicht CASCADE)",
+          fkDef.includes("base_sky_id") && fkDef.includes("series_code")
+          && fkDef.includes("ON UPDATE RESTRICT"),
+          fkDef);
+    sag67("und die Migration hat NICHTS zugeordnet",
+          (await w67("select count(*)::text as w from public.skylanders"
+                     + " where base_sky_id is not null")) === "0",
+          await w67("select count(*)::text as w from public.skylanders"
+                    + " where base_sky_id is not null"));
+
+    /* ---- DER SERIENRIEGEL IST STRUKTURELL: 23503 vom Fremdschluessel. */
+    const fSerieRoh = await tu67(`update public.skylanders set base_sky_id = 'SKY-0900'
+                                  where sky_id = 'SKY-0826';`);
+    sag67("eine Basisfigur aus einer ANDEREN Serie weist der FREMDSCHLUESSEL ab "
+          + "(23503) — nicht die Anwendung, nicht ein Trigger",
+          fSerieRoh !== null && fSerieRoh.includes("23503")
+          && fSerieRoh.includes("skylanders_base_same_series"),
+          (fSerieRoh ?? "DURCHGELAUFEN").slice(0, 92));
+
+    /* ---- DER SELBSTBEZUG: 23514 vom CHECK. */
+    const fSelbstRoh = await tu67(`update public.skylanders set base_sky_id = 'SKY-0826'
+                                   where sky_id = 'SKY-0826';`);
+    sag67("der Selbstbezug weist ein CHECK ab (23514)",
+          fSelbstRoh !== null && fSelbstRoh.includes("23514")
+          && fSelbstRoh.includes("skylanders_base_not_self"),
+          (fSelbstRoh ?? "DURCHGELAUFEN").slice(0, 80));
+
+    /* ---- DIE GUTE ZUORDNUNG, ueber die RPC. */
+    const fGut = await tu67(`select public.admin_set_variant_base('SKY-0826', 'SKY-0053');`);
+    const nachGut = await w67(`select sky_id || '|' || name || '|' || slug || '|'
+                                 || coalesce(base_sky_id,'-') || '|' || series_code
+                                 || '|' || catalog_status || '|' || card_type as w
+                               from public.skylanders where sky_id = 'SKY-0826'`);
+    const basisUnberuehrt = await w67(`select name || '|' || coalesce(base_sky_id,'-')
+                                         || '|' || coalesce(character_id::text,'-') as w
+                                       from public.skylanders where sky_id = 'SKY-0053'`);
+    const sammlung = await w67(`select coalesce(max(quantity)::text,'-') as w
+                                from public.collection_items where sky_id = 'SKY-0053'`);
+    const jBase = await w67(`select coalesce(string_agg(coalesce(old_value,'-') || '->'
+                                            || coalesce(new_value,'-'), ', ' order by id),'-') as w
+                             from public.catalog_admin_changes
+                            where entity_id = 'SKY-0826' and field = 'base_sky_id'`);
+    sag67("zugeordnet: SKY-ID, Name, Slug, Serie, Status und Edition bleiben; die "
+          + "Basisfigur und ihre Sammlung sind unberuehrt; das Journal fuehrt es",
+          fGut === null
+          && nachGut === "SKY-0826|Dark Spyro|sky-0826|SKY-0053|SA|public|standard"
+          && basisUnberuehrt === "Spyro|-|-" && sammlung === "6"
+          && jBase === "-->SKY-0053",
+          `${fGut ?? "durch"} · ${nachGut} · Basis ${basisUnberuehrt} · Sammlung `
+          + `${sammlung} · Journal [${jBase}]`);
+
+    /* ---- KEINE KETTEN, BEIDE RICHTUNGEN. */
+    const fKette1 = await tu67(`select public.admin_set_variant_base('SKY-0827', 'SKY-0826');`);
+    const fKette2 = await tu67(`select public.admin_set_variant_base('SKY-0053', 'SKY-0827');`);
+    const fKetteRoh = await tu67(`update public.skylanders set base_sky_id = 'SKY-0826'
+                                  where sky_id = 'SKY-0827';`);
+    sag67("Varianten von Varianten: beide Richtungen abgewiesen — und auch der rohe "
+          + "UPDATE, der die RPC umgeht, faellt am Trigger",
+          fKette1 !== null && fKette1.includes("selbst eine Variante")
+          && fKette2 !== null && fKette2.includes("zeigen schon Varianten")
+          && fKetteRoh !== null && fKetteRoh.includes("Varianten von"),
+          `${(fKette1 ?? "DURCH").slice(0, 34)} | ${(fKette2 ?? "DURCH").slice(0, 34)} `
+          + `| roh ${(fKetteRoh ?? "DURCH").slice(0, 30)}`);
+
+    /* ---- SERIENAENDERUNG an einer Basisfigur mit Varianten: RESTRICT. */
+    const fSerieWechsel = await tu67(`update public.skylanders set series_code = 'G',
+                                        category_id = 11 where sky_id = 'SKY-0053';`);
+    const serieNoch = await w67(`select series_code as w from public.skylanders
+                                 where sky_id = 'SKY-0053'`);
+    /*
+     * `23001` IST DER BEWEIS, NICHT EIN DETAIL. PostgreSQL meldet
+     * `restrict_violation` nur bei einem ausdruecklichen `RESTRICT`; ein
+     * `NO ACTION` haette `23503` ergeben und ein `CASCADE` haette die Serie
+     * der Varianten stillschweigend mitgezogen. Der Fehlercode sagt also,
+     * WELCHE der drei Fassungen wirklich dasteht.
+     */
+    sag67("eine Serienaenderung an einer Basisfigur mit Varianten wird ABGEWIESEN, "
+          + "und der Code 23001 belegt RESTRICT (nicht CASCADE, nicht NO ACTION) "
+          + "— die Serie steht unveraendert",
+          fSerieWechsel !== null && fSerieWechsel.includes("23001")
+          && fSerieWechsel.includes("skylanders_base_same_series")
+          && serieNoch === "SA",
+          `${(fSerieWechsel ?? "DURCHGELAUFEN").slice(0, 86)} · Serie ${serieNoch}`);
+
+    /*
+     * ---- LOESCHEN einer Basisfigur mit Varianten.
+     *
+     * AN EINER FIGUR OHNE SAMMLUNGSZEILE. Der erste Versuch nahm SKY-0053,
+     * und die traegt eine Sammlungszeile — geblockt haette dann der
+     * Sammlungsschluessel (`23503`) und nicht der Variantenschluessel. Der
+     * Durchgang waere gruen gewesen, ohne die Zusage geprueft zu haben.
+     * Hier steht eine Basisfigur, auf die NUR eine Variante zeigt.
+     */
+    await anlegen67("SKY-0940", "Wrecking Ball", "SA", 10);
+    await anlegen67("SKY-0941", "Chrome Wrecking Ball", "SA", 10);
+    await db.exec(`select public.admin_set_variant_base('SKY-0941', 'SKY-0940');`);
+    const fLoeschRoh = await tu67("delete from public.skylanders where sky_id = 'SKY-0940';");
+    const refs = await w67(`select coalesce(string_agg(tabelle || ':' || zeilen::text, ', '),'-') as w
+                            from public.admin_merge_references('SKY-0940')`);
+    const nochDa67 = await w67(`select count(*)::text as w from public.skylanders
+                                where sky_id = 'SKY-0940'`);
+    sag67("eine Basisfigur, auf die NUR eine Variante zeigt, wird nicht geloescht "
+          + "(23001 vom Variantenschluessel) — und admin_merge_references zaehlt sie, "
+          + "weil sie aus pg_constraint herleitet und 0159 sie mehrspaltig lesen lehrt",
+          fLoeschRoh !== null && fLoeschRoh.includes("23001")
+          && fLoeschRoh.includes("skylanders_base_same_series")
+          && refs.includes("skylanders:1") && nochDa67 === "1",
+          `${(fLoeschRoh ?? "DURCHGELAUFEN").slice(0, 80)} · Verweise [${refs}] `
+          + `· steht noch ${nochDa67}`);
+
+    /* ---- DIE FAMILIE, vier Lagen. */
+    const famA = await w67(`select public.admin_create_character('Spyro')::text as w`);
+    await db.exec(`select public.admin_set_character('SKY-0053', ${famA});`);
+    /* (1) Basisfigur hat eine, Variante keine -> uebernehmen. */
+    const r1 = await w67(`select (public.admin_set_variant_base('SKY-0827', 'SKY-0053')
+                                   ->> 'family') as w`);
+    const fam1 = await w67(`select coalesce(character_id::text,'-') as w
+                            from public.skylanders where sky_id = 'SKY-0827'`);
+    /* (2) beide dieselbe -> nichts. */
+    const r2 = await w67(`select (public.admin_set_variant_base('SKY-0827', 'SKY-0053')
+                                   ->> 'family') as w`);
+    /* (3) verschiedene -> Abbruch. */
+    const famB = await w67(`select public.admin_create_character('Eruptor')::text as w`);
+    await db.exec(`select public.admin_set_character('SKY-0825', ${famB});`);
+    const r3 = await tu67(`select public.admin_set_variant_base('SKY-0825', 'SKY-0053');`);
+    const fam3 = await w67(`select coalesce(character_id::text,'-') || '|'
+                              || coalesce(base_sky_id,'-') as w
+                            from public.skylanders where sky_id = 'SKY-0825'`);
+    sag67("die Familie: aus der Basisfigur uebernommen, beim zweiten Mal unveraendert, "
+          + "und ein WIDERSPRUCH bricht ab, ohne etwas zu ueberschreiben",
+          r1 === "aus der Basisfigur uebernommen" && fam1 === famA
+          && r2 === "war schon dieselbe"
+          && r3 !== null && r3.includes("klaeren") && fam3 === `${famB}|-`,
+          `(1) ${r1} -> ${fam1} · (2) ${r2} · (3) ${(r3 ?? "DURCH").slice(0, 30)} `
+          + `· unveraendert ${fam3}`);
+
+    /* (4) beide ohne Familie: nur mit ausdruecklicher Bestaetigung. */
+    await anlegen67("SKY-0930", "Bash", "SA", 10);
+    await anlegen67("SKY-0931", "Chrome Bash", "SA", 10);
+    const r4a = await w67(`select (public.admin_set_variant_base('SKY-0931', 'SKY-0930', false)
+                                    ->> 'family') as w`);
+    const fam4a = await w67(`select coalesce(character_id::text,'(null)') as w
+                             from public.skylanders where sky_id = 'SKY-0931'`);
+    const r4b = await w67(`select (public.admin_set_variant_base('SKY-0931', 'SKY-0930', true)
+                                    ->> 'family') as w`);
+    const fam4b = await w67(`select coalesce(string_agg(sky_id || '=' || character_id::text,
+                                              ', ' order by sky_id),'-') as w
+                             from public.skylanders
+                            where sky_id in ('SKY-0930', 'SKY-0931')
+                              and character_id is not null`);
+    sag67("beide ohne Familie: ohne Bestaetigung wird KEINE angelegt, mit Bestaetigung "
+          + "eine, und beide bekommen sie",
+          r4a === "beide ohne Familie — keine angelegt" && fam4a === "(null)"
+          && r4b === "neu angelegt und beiden zugeordnet"
+          && fam4b.includes("SKY-0930=") && fam4b.includes("SKY-0931="),
+          `ohne: ${r4a} (${fam4a}) · mit: ${r4b} (${fam4b})`);
+
+    /* ---- UMORDNEN und LOESEN. */
+    await anlegen67("SKY-0932", "Dino-Rang", "SA", 10);
+    const rUm = await w67(`select (public.admin_set_variant_base('SKY-0931', 'SKY-0932')
+                                    ->> 'base_sky_id') as w`);
+    const rWeg = await w67(`select coalesce(public.admin_set_variant_base('SKY-0931', null)
+                                     ->> 'base_sky_id', '(null)') as w`);
+    const nachWeg = await w67(`select coalesce(base_sky_id,'(null)') as w
+                               from public.skylanders where sky_id = 'SKY-0931'`);
+    const jAlle = await w67(`select coalesce(string_agg(coalesce(old_value,'-') || '->'
+                                             || coalesce(new_value,'-'), ', ' order by id),'-') as w
+                             from public.catalog_admin_changes
+                            where entity_id = 'SKY-0931' and field = 'base_sky_id'`);
+    sag67("umordnen und loesen gehen, und das Journal fuehrt jeden Schritt",
+          rUm === "SKY-0932" && rWeg === "(null)" && nachWeg === "(null)"
+          && jAlle === "-->SKY-0930, SKY-0930->SKY-0932, SKY-0932->-",
+          `${rUm} -> ${rWeg} · Journal [${jAlle}]`);
+
+    /* ---- WEG B: veroeffentlichen und zuordnen in EINER Transaktion. */
+    await anlegen67("SKY-0933", "Silver Bash", "SA", 10, "draft");
+    const vorB67 = await w67(`select catalog_status || '|' || coalesce(base_sky_id,'-') as w
+                              from public.skylanders where sky_id = 'SKY-0933'`);
+    const fB67 = await tu67(`select public.admin_publish_with_base('SKY-0933', 'SKY-0930');`);
+    const nachB67 = await w67(`select catalog_status || '|' || catalog_visible::text || '|'
+                                 || coalesce(base_sky_id,'-') || '|' || slug as w
+                               from public.skylanders where sky_id = 'SKY-0933'`);
+    sag67("WEG B: aus dem Entwurf wird eine veroeffentlichte Variante — in einer "
+          + "Transaktion, mit eigenem Slug",
+          fB67 === null && vorB67 === "draft|-"
+          && nachB67 === "public|true|SKY-0930|sky-0933",
+          `${fB67 ?? "durch"} · ${vorB67} -> ${nachB67}`);
+
+    /* Eine schon veroeffentlichte Figur geht nicht durch Weg B. */
+    const fB67Oeff = await tu67(`select public.admin_publish_with_base('SKY-0930', 'SKY-0932');`);
+    sag67("Weg B weist eine schon veroeffentlichte Figur ab",
+          fB67Oeff !== null && fB67Oeff.includes("kein Entwurf"),
+          (fB67Oeff ?? "DURCHGELAUFEN").slice(0, 44));
+
+    /* ---- RECHTE. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select false $stub$;`);
+    const kSet67 = await tu67(`select public.admin_set_variant_base('SKY-0931', 'SKY-0930');`);
+    const kPub67 = await tu67(`select public.admin_publish_with_base('SKY-0931', 'SKY-0930');`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    sag67("ohne Adminrecht weisen beide ab (42501)",
+          [kSet67, kPub67].every((x) => x !== null && x.includes("42501")),
+          [kSet67, kPub67].map((x) => (x ?? "DURCH").slice(0, 20)).join(" | "));
+
+    /* ---- VOLLSTAENDIGER ROLLBACK an der Journalzeile. */
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field <> 'base_sky_id') not valid;`);
+    const vorRoll67 = await w67(`select coalesce(base_sky_id,'-') || '|'
+                                   || coalesce(character_id::text,'-') as w
+                                 from public.skylanders where sky_id = 'SKY-0931'`);
+    const fRoll67 = await tu67(`select public.admin_set_variant_base('SKY-0931', 'SKY-0930');`);
+    const nachRoll67 = await w67(`select coalesce(base_sky_id,'-') || '|'
+                                    || coalesce(character_id::text,'-') as w
+                                  from public.skylanders where sky_id = 'SKY-0931'`);
+    sag67("ein Fehler an der Journalzeile rollt die ganze Zuordnung zurueck — "
+          + "Basisfigur UND Familie stehen danach wie vorher",
+          fRoll67 !== null && fRoll67.includes("23514") && nachRoll67 === vorRoll67,
+          `${(fRoll67 ?? "DURCHGELAUFEN").slice(0, 34)} · ${nachRoll67} `
+          + `(vorher ${vorRoll67})`);
+
+    probe.push({
+      name: "P67 0159 mit den ECHTEN Schluesseln: die Serienregel weist eine fremde "
+        + "Serie als FREMDSCHLUESSEL ab (23503) und nicht als Anwendungslogik, der "
+        + "Selbstbezug als CHECK (23514), die Ketten in beiden Richtungen am Trigger "
+        + "— auch bei einem rohen UPDATE, der die RPC umgeht. Serienaenderung und "
+        + "Loeschen einer Basisfigur mit Varianten werden abgewiesen, "
+        + "admin_merge_references zaehlt sie ohne eine Zeile Aenderung, die Familie "
+        + "kommt in vier Lagen richtig heraus (Widerspruch bricht ab), umordnen und "
+        + "loesen fuehren Journal, Weg B ist atomar — und ein Fehler an der "
+        + "Journalzeile rollt alles zurueck",
+      ok: ok67,
+      sagt: `0159: ${befund67.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P68 — die MASKIERUNG eines LIKE-Musters, an der echten Semantik.
+   *
+   * WARUM DIESER DURCHGANG EXISTIERT. Am 2026-10-28 hat die Nachkontrolle
+   * von `0159` mit `9999 = 1` abgewichen — an Zeile 123, und die Ursache lag
+   * wieder in der PRUEFDATEI. Sie suchte in `pg_proc.proconfig` nach
+   *
+   *     c like 'search\\_path=%'      (zwei Backslashes)
+   *
+   * SQL `LIKE` deutet `\\` als EINEN echten Backslash im Suchmuster. Die
+   * Zeile suchte also Eintraege, die woertlich mit `search\_path=` beginnen —
+   * die gibt es nicht, die Zaehlung war 0, und die Zeile meldete 0 statt 2,
+   * obwohl beide Funktionen richtig konfiguriert sind.
+   *
+   * WAS KEIN ANDERES WERKZEUG FINDET. Die Datei ist syntaktisch
+   * einwandfrei, jeder Name loest auf, jeder Typ passt — Stufe 2 dieses
+   * Laufs ist gruen und bleibt gruen. Der Fehler sitzt in der BEDEUTUNG des
+   * Musters, und die sieht nur, wer es gegen echte `proconfig`-Eintraege
+   * haelt. Genau das tut dieser Durchgang.
+   *
+   * ER LIEST DIE PRUEFDATEI SELBST, nicht eine Kopie des Musters: nur so
+   * sagt er etwas ueber das Artefakt, das am Ende im SQL-Editor laeuft.
+   * ===================================================================== */
+  {
+    const befund68: string[] = [];
+    let ok68 = true;
+    const sag68 = (was: string, gut: boolean, text: string): void => {
+      befund68.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok68 = false;
+    };
+
+    const db = new PGlite();
+    const z68 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+
+    /*
+     * Zwei Attrappen mit den ECHTEN Signaturen aus `0159` und derselben
+     * Festlegung, die die Migration setzt: `security definer` und ein leerer
+     * Suchpfad. Mehr braucht es nicht — gemessen wird `pg_proc`, nicht das
+     * Verhalten der Funktionen.
+     */
+    for (const sig of ["admin_set_variant_base(p_a text, p_b text, p_c boolean)",
+                       "admin_publish_with_base(p_a text, p_b text, p_c boolean)"]) {
+      await db.exec(`create function public.${sig} returns text
+                     language sql security definer set search_path = ''
+                     as $stub$ select 'ok'::text $stub$;`);
+    }
+
+    /* ---- Die Semantik selbst, nebeneinander. */
+    const einfach68 = await z68(`select count(*)::text as w
+                                   from pg_proc p,
+                                        unnest(coalesce(p.proconfig, '{}')) c
+                                  where p.proname = 'admin_set_variant_base'
+                                    and c like 'search\\_path=%'`);
+    const doppelt68 = await z68(`select count(*)::text as w
+                                   from pg_proc p,
+                                        unnest(coalesce(p.proconfig, '{}')) c
+                                  where p.proname = 'admin_set_variant_base'
+                                    and c like 'search\\\\_path=%'`);
+    sag68("ein Backslash trifft den Eintrag, zwei treffen nichts",
+          einfach68 === "1" && doppelt68 === "0",
+          `einfach ${einfach68} · doppelt ${doppelt68}`);
+
+    /* ---- Und was wirklich in `proconfig` steht. */
+    const wert68 = await z68(`select string_agg(c, ' | ') as w
+                                from pg_proc p,
+                                     unnest(coalesce(p.proconfig, '{}')) c
+                               where p.proname = 'admin_set_variant_base'`);
+    sag68("der Eintrag traegt keinen Backslash, deshalb kann ihn keiner finden",
+          !wert68.includes("\\"), wert68);
+
+    /*
+     * ---- DIE ZEILE SELBST, aus der Datei gelesen.
+     *
+     * Der Ausdruck wird woertlich uebernommen und gefahren. Stimmt die
+     * Maskierung in `supabase/checks/0159_postflight.sql` nicht, kommt hier
+     * 0 heraus — und dieser Durchgang bricht ab, bevor jemand den
+     * SQL-Editor oeffnet.
+     */
+    const datei68 = readFileSync(join(process.cwd(), CHECK_DIR, "0159_postflight.sql"), "utf8");
+    /*
+     * Die runde Klammer am Ende GEHOERT in den Ausdruck. Nimmt man sie ins
+     * Trennmuster, kommt ein unbalancierter Ausdruck heraus und PostgreSQL
+     * meldet `syntax error at or near "as"` — beim ersten Versuch genau so
+     * passiert.
+     */
+    const roh68 = /\n {2}\(123, '[^']*', '[^']*',\n([\s\S]*?\)), '(\d+)'\),\n/.exec(datei68);
+    sag68("Zeile 123 laesst sich aus der Pruefdatei lesen", roh68 !== null,
+          roh68 === null ? "NICHT GEFUNDEN" : `erwartet ${roh68[2]}`);
+    if (roh68 !== null) {
+      const ist68 = await z68(`select (${roh68[1].trim()}) as w`);
+      sag68("und sie zaehlt an zwei richtig konfigurierten Funktionen wirklich zwei",
+            ist68 === roh68[2], `${ist68} (erwartet ${roh68[2]})`);
+    }
+
+    /* ---- Gegenprobe: eine Funktion OHNE Festlegung darf nicht mitzaehlen. */
+    await db.exec(`create or replace function public.admin_publish_with_base(
+                     p_a text, p_b text, p_c boolean) returns text
+                   language sql security definer
+                   as $stub$ select 'ok'::text $stub$;`);
+    if (roh68 !== null) {
+      const ohne68 = await z68(`select (${roh68[1].trim()}) as w`);
+      sag68("nimmt man einer Funktion den Suchpfad, zaehlt die Zeile nur noch eine "
+            + "— sie prueft also wirklich, was sie behauptet",
+            ohne68 === "1", `${ohne68} (vorher ${roh68[2]})`);
+    }
+
+    probe.push({
+      name: "P68 die Maskierung von Zeile 123: ein Backslash trifft den "
+        + "proconfig-Eintrag, zwei treffen nichts — und der Ausdruck AUS DER "
+        + "Pruefdatei zaehlt an zwei richtig konfigurierten Funktionen zwei, an "
+        + "einer entwaffneten nur eine",
+      ok: ok68,
+      sagt: `0159 Zeile 123: ${befund68.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P69 — 0160: `base_sky_id` in der Plattformsicherung, und der UMLAUF
+   *       MIT DER SCHLECHTESTEN REIHENFOLGE.
+   *
+   * WAS DIESER DURCHGANG ZEIGT. P66 hat dieselbe Frage fuer `catalog_status`
+   * beantwortet; hier kommt eine Schwierigkeit dazu, die es dort nicht gab:
+   * `base_sky_id` zeigt auf DIESELBE Tabelle. Eine Wiederherstellung hat
+   * damit eine Reihenfolge INNERHALB einer Tabelle — und das ist der Fall,
+   * den eine Tabellenreihenfolge nicht loest.
+   *
+   * Deshalb faehrt dieser Durchgang den Umlauf an erfundenen Zeilen: eine
+   * Basisfigur und DREI Varianten, exportieren, loeschen, und aus dem Archiv
+   * wieder einspielen — in der SCHLECHTESTEN Reihenfolge, Varianten zuerst.
+   * Einmal OHNE `0160` (da fehlt das Feld, und die Beziehung ist fort) und
+   * einmal MIT.
+   *
+   * DAZU DIE VIER MESSUNGEN, die `supabase/checks/0160_restore_order.md`
+   * behauptet, und keine davon ist hier eine Behauptung:
+   *
+   *   A  EINE Anweisung, Varianten vor der Basisfigur      -> laeuft durch
+   *   B  ZWEI Anweisungen, Variante zuerst                 -> 23503
+   *   C  erst alles mit NULL, dann ein UPDATE              -> durch, 0 Journalzeilen
+   *   D  `set constraints all deferred` auf einem nicht
+   *      aufschiebbaren Fremdschluessel                    -> wirkungslos, 23503
+   *
+   * D IST DER WICHTIGSTE. Die Anweisung laeuft ohne Fehler durch und tut
+   * nichts — wer glaubt, er habe die Pruefung aufgeschoben, hat sie nicht
+   * aufgeschoben. Eine Falle, die mitten in einer Wiederherstellung
+   * auffaellt.
+   *
+   * Dazu die Riegel: ohne `0159` bricht `0160` ab, gegen eine fremde Fassung
+   * ebenso, ein zweiter Lauf prallt ab, und die Ruecknahme stellt den Rumpf
+   * aus `0153` zeichengleich her — EINEN Schritt zurueck, nicht zwei.
+   * ===================================================================== */
+  {
+    const befund69: string[] = [];
+    let ok69 = true;
+    const sag69 = (was: string, gut: boolean, text: string): void => {
+      befund69.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok69 = false;
+    };
+
+    const M160 = join(MIG_DIR, "0160_platform_export_base_sky_id.sql");
+    const R160 = "supabase/rollback/R0160_platform_export_back_to_0153.sql";
+    /* Die zwei fremden Fassungen (`0105` und `0144`) werden hier an der
+       MELDUNG erkannt und nicht am Abdruck: die Zusage ist, dass die
+       Migration SAGT, welche Fassung dasteht — nicht nur, dass sie
+       abbricht. */
+    const A0153 = "92c48444f99b9e294f9703d0c0ddeaa8";
+    const A0160 = "ff4f38e61cbd4e5857ea914d6be68d44";
+
+    const anweisungVon69 = (datei: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf("create or replace function public.system_platform_export()");
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w69 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu69 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 150)}`;
+      }
+    };
+    const abdruck69 = async (): Promise<string> => w69(
+      "select md5(prosrc) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+
+    await db.exec(`create schema if not exists auth;
+                   create table if not exists auth.users (id uuid primary key);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants', 1);`);
+
+    /*
+     * DIE ECHTEN SCHLUESSEL UND DIE ECHTE AUDIT-CONSTRAINT, wie in P67. Ohne
+     * sie koennte dieser Durchgang seine wichtigste Frage nicht stellen: die
+     * Reihenfolge zaehlt NUR, weil der Fremdschluessel wirklich dasteht.
+     */
+    await db.exec(`create unique index if not exists z_sky9_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce9_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create sequence if not exists public.z_char9_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char9_seq');
+                   create unique index if not exists z_char9_id
+                     on public.characters (id);
+                   create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id'));`);
+
+    /* ---- Der Rumpf aus `0153`, und darauf baut alles auf. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon69(join(MIG_DIR, "0144_platform_export_calculations.sql")));
+    await db.exec("set check_function_bodies = on;");
+    await db.exec(`alter table public.skylanders drop column if exists catalog_status;
+                   alter table public.skylanders add column catalog_status text;
+                   update public.skylanders set catalog_status =
+                     case when catalog_visible then 'public' else 'hidden' end;
+                   alter table public.skylanders alter column catalog_status set not null;`);
+    const f153 = await fahre(db, join(MIG_DIR, "0153_platform_export_catalog_status.sql"));
+    sag69("Aufbau: 0153 laeuft, der Rumpf ist der aus 0153",
+          f153 === null && (await abdruck69()) === A0153,
+          `${f153 ?? "durch"} · ${await abdruck69()}`);
+
+    /*
+     * ---- OHNE 0159 bricht 0160 ab: die Vorbedingung ist echt.
+     *
+     * DIE SPALTE IST IM STUB SCHON DA (dokumentierter Werkzeugbefund: das
+     * Stub-Schema entsteht aus ALLEN Migrationen). Fuer diesen Riegel muss
+     * sie weg — das ist die Lage, in der `0160` ohne `0159` wirklich laeuft.
+     * `cascade` nimmt den Fremdschluessel und den CHECK mit, die der Stub
+     * ohnehin nicht traegt; `0159` legt beides unten neu an.
+     */
+    await db.exec("alter table public.skylanders drop column base_sky_id cascade;");
+    const ohne0159 = await fahre(db, M160);
+    sag69("ohne 0159 bricht 0160 ab (skylanders.base_sky_id fehlt)",
+          ohne0159 !== null && ohne0159.includes("0159"),
+          (ohne0159 ?? "DURCHGELAUFEN").slice(0, 58));
+
+    /* ---- Jetzt 0154-0159, damit die Spalte und die Riegel wirklich da sind. */
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql", "0159_variant_base_figure.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag69(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+    const riegel69 = await w69(
+      `select (count(*) filter (where c.conname = 'skylanders_base_same_series'
+                                 and c.confrelid = c.conrelid
+                                 and array_length(c.conkey, 1) = 2
+                                 and c.confupdtype = 'r' and c.confdeltype = 'r'))::text as w
+         from pg_constraint c where c.conrelid = to_regclass('public.skylanders')`);
+    sag69("der zweispaltige Selbst-Fremdschluessel mit RESTRICT steht",
+          riegel69 === "1", riegel69);
+
+    /* ================================================================
+     * EINE BASISFIGUR UND DREI VARIANTEN.
+     * ============================================================= */
+    const anlegen69 = async (id: string, name: string, basis: string | null) =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source, base_sky_id)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10,
+                  'figure', 'standard', true, true, 'public', 'admin',
+                  ${basis === null ? "null" : `'${basis}'`});`);
+    await anlegen69("SKY-9001", "P69 Spyro", null);
+    await anlegen69("SKY-9002", "P69 Chrome Spyro", "SKY-9001");
+    await anlegen69("SKY-9003", "P69 Dark Spyro", "SKY-9001");
+    await anlegen69("SKY-9004", "P69 Legendary Spyro", "SKY-9001");
+
+    /** Der Katalogbereich des Archivs, als eine Zeile je SKY-ID. */
+    const archivBasis = async (): Promise<string> => w69(
+      `select coalesce(string_agg(x.sky_id || '->' || coalesce(x.basis, '(FEHLT)'),
+                                  ', ' order by x.sky_id), '(leer)') as w
+         from (select e ->> 'sky_id' as sky_id, e ->> 'base_sky_id' as basis
+                 from jsonb_array_elements(
+                        (public.system_platform_export() -> 'data' -> 'skylanders')) as e
+                where e ->> 'sky_id' like 'SKY-900%') x`);
+
+    /* ---- OHNE 0160: das Archiv kennt die Beziehung NICHT. Genau die Luecke. */
+    const vorher69 = await archivBasis();
+    sag69("OHNE 0160 fuehrt das Archiv kein base_sky_id — jede Variante stuende nach "
+          + "einer Wiederherstellung allein",
+          vorher69 === "SKY-9001->(FEHLT), SKY-9002->(FEHLT), SKY-9003->(FEHLT), "
+                     + "SKY-9004->(FEHLT)", vorher69);
+    /* Und die Familie waere da — das ist der Grund, warum es LEISE ist. */
+    const familie69 = await w69(
+      `select coalesce(string_agg(e ->> 'sky_id' || '=' || coalesce(e ->> 'character_id', '-'),
+                                  ', ' order by e ->> 'sky_id'), '(leer)') as w
+         from jsonb_array_elements(
+                (public.system_platform_export() -> 'data' -> 'skylanders')) as e
+        where e ->> 'sky_id' like 'SKY-900%'`);
+    sag69("das Archiv fuehrt character_id schon (die FAMILIE) — es fehlt nur die MITTE",
+          familie69.includes("SKY-9002="), familie69.slice(0, 48));
+
+    /* ---- Gegen eine fremde Fassung bricht sie ab. */
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon69(join(MIG_DIR, "0105_platform_export.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const gegen0105 = await fahre(db, M160);
+    sag69("gegen den Rumpf aus 0105 bricht sie ab, statt ihn zu ueberschreiben",
+          gegen0105 !== null && gegen0105.includes("0105"),
+          (gegen0105 ?? "DURCHGELAUFEN").slice(0, 60));
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon69(join(MIG_DIR, "0144_platform_export_calculations.sql")));
+    await db.exec("set check_function_bodies = on;");
+    const gegen0144 = await fahre(db, M160);
+    sag69("und gegen den aus 0144 ebenso — mit eigener Meldung",
+          gegen0144 !== null && gegen0144.includes("0144"),
+          (gegen0144 ?? "DURCHGELAUFEN").slice(0, 60));
+    await db.exec("set check_function_bodies = off;");
+    await db.exec(anweisungVon69(join(MIG_DIR, "0153_platform_export_catalog_status.sql")));
+    await db.exec("set check_function_bodies = on;");
+
+    /* ---- 0160 laeuft. */
+    const lauf69 = await fahre(db, M160);
+    const nach69 = await abdruck69();
+    const laenge69 = await w69(
+      "select length(prosrc)::text as w from pg_proc p join pg_namespace n"
+      + " on n.oid = p.pronamespace where n.nspname = 'public'"
+      + " and p.proname = 'system_platform_export'");
+    sag69("0160 laeuft; der Rumpf ist der zugesagte und 31114 Zeichen lang",
+          lauf69 === null && nach69 === A0160 && laenge69 === "31114",
+          `${lauf69 ?? "durch"} · ${nach69} · ${laenge69} Zeichen`);
+
+    /* DIE UMKEHRPROBE AM LEBENDEN RUMPF. */
+    const zurueck69 = await w69(
+      "select md5(replace(prosrc, E'\\n            ''base_sky_id'', t.base_sky_id,',"
+      + " '')) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+    sag69("zieht man die eine Zeile ab, ist er zeichengleich der aus 0153",
+          zurueck69 === A0153, zurueck69);
+
+    /* ---- MIT 0160: das Archiv fuehrt die Beziehung. */
+    const nachher69 = await archivBasis();
+    sag69("MIT 0160 fuehrt das Archiv die Basisfigur jeder Variante",
+          nachher69 === "SKY-9001->(FEHLT), SKY-9002->SKY-9001, SKY-9003->SKY-9001, "
+                      + "SKY-9004->SKY-9001", nachher69);
+
+    /* ================================================================
+     * DER UMLAUF, IN DER SCHLECHTESTEN REIHENFOLGE.
+     *
+     * Das Archiv sortiert nach `sky_id`, also gerade nicht nach
+     * Abhaengigkeit. Hier wird absichtlich UMGEKEHRT eingespielt — die drei
+     * Varianten zuerst, die Basisfigur zuletzt — und zwar in EINER
+     * Anweisung. Laeuft das durch, ist die Reihenfolge der Katalogzeilen im
+     * Archiv gleichgueltig, und genau das ist die Zusage.
+     * ============================================================= */
+    await db.exec(`create table z_archiv69 as
+                   select public.system_platform_export() as doc;`);
+    await db.exec("delete from public.skylanders where sky_id like 'SKY-900%';");
+    const weg69 = await w69("select count(*)::text as w from public.skylanders"
+                            + " where sky_id like 'SKY-900%'");
+    const einEinzeln = `
+      insert into public.skylanders
+        (sky_id, name, slug, series_code, category_id, item_type, card_type,
+         is_active, catalog_visible, catalog_status, source, base_sky_id)
+      select e ->> 'sky_id', e ->> 'name', e ->> 'slug', e ->> 'series_code',
+             (e ->> 'category_id')::bigint, 'figure', 'standard',
+             (e ->> 'is_active')::boolean, (e ->> 'catalog_visible')::boolean,
+             e ->> 'catalog_status', 'admin', e ->> 'base_sky_id'
+        from z_archiv69 z, jsonb_array_elements(z.doc -> 'data' -> 'skylanders') as e
+       where e ->> 'sky_id' like 'SKY-900%'`;
+    /* A: EINE Anweisung, absteigend sortiert — Varianten vor der Basisfigur. */
+    const einA = await tu69(`${einEinzeln} order by e ->> 'sky_id' desc;`);
+    const danach69 = await w69(
+      `select coalesce(string_agg(sky_id || '->' || coalesce(base_sky_id, '-'),
+                                  ', ' order by sky_id), '(leer)') as w
+         from public.skylanders where sky_id like 'SKY-900%'`);
+    sag69("DER UMLAUF in der schlechtesten Reihenfolge: EINE Anweisung, Varianten vor "
+          + "der Basisfigur — laeuft durch, und jede Beziehung steht wieder",
+          weg69 === "0" && einA === null
+          && danach69 === "SKY-9001->-, SKY-9002->SKY-9001, SKY-9003->SKY-9001, "
+                        + "SKY-9004->SKY-9001",
+          `geloescht ${weg69} · ${einA ?? "eingespielt"} · ${danach69}`);
+
+    /* B: ZWEI Anweisungen, Variante zuerst — das MUSS scheitern. */
+    await db.exec("delete from public.skylanders where sky_id like 'SKY-900%';");
+    const einB = await tu69(
+      `insert into public.skylanders
+         (sky_id, name, slug, series_code, category_id, item_type, card_type,
+          is_active, catalog_visible, catalog_status, source, base_sky_id)
+       values ('SKY-9002', 'P69 Chrome Spyro', 'sky-9002', 'SA', 10, 'figure',
+               'standard', true, true, 'public', 'admin', 'SKY-9001');`);
+    sag69("ZEILENWEISE in der falschen Reihenfolge scheitert — 23503, am "
+          + "Fremdschluessel und nicht an Anwendungslogik",
+          einB !== null && einB.includes("23503")
+          && einB.includes("skylanders_base_same_series"),
+          (einB ?? "DURCHGELAUFEN").slice(0, 62));
+
+    /* D: und `set constraints all deferred` hilft NICHT. Die leise Falle. */
+    const einD = await tu69(
+      `set constraints all deferred;
+       insert into public.skylanders
+         (sky_id, name, slug, series_code, category_id, item_type, card_type,
+          is_active, catalog_visible, catalog_status, source, base_sky_id)
+       values ('SKY-9002', 'P69 Chrome Spyro', 'sky-9002', 'SA', 10, 'figure',
+               'standard', true, true, 'public', 'admin', 'SKY-9001');`);
+    sag69("`set constraints all deferred` laeuft durch und TUT NICHTS — der "
+          + "Fremdschluessel ist nicht aufschiebbar, und PostgreSQL sagt es nicht",
+          einD !== null && einD.includes("23503"),
+          (einD ?? "DURCHGELAUFEN").slice(0, 46));
+
+    /* C: zwei Durchgaenge, und sie schreiben KEINE Journalzeile. */
+    const journalVor = await w69("select count(*)::text as w"
+                                 + " from public.catalog_admin_changes");
+    const einC1 = await tu69(`${einEinzeln.replace("e ->> 'base_sky_id'", "null")};`);
+    const einC2 = await tu69(
+      `update public.skylanders s
+          set base_sky_id = a.basis
+         from (select e ->> 'sky_id' as sky_id, e ->> 'base_sky_id' as basis
+                 from z_archiv69 z,
+                      jsonb_array_elements(z.doc -> 'data' -> 'skylanders') as e
+                where e ->> 'sky_id' like 'SKY-900%') a
+        where a.sky_id = s.sky_id and a.basis is not null;`);
+    const danachC = await w69(
+      `select coalesce(string_agg(sky_id || '->' || coalesce(base_sky_id, '-'),
+                                  ', ' order by sky_id), '(leer)') as w
+         from public.skylanders where sky_id like 'SKY-900%'`);
+    const journalNach = await w69("select count(*)::text as w"
+                                  + " from public.catalog_admin_changes");
+    sag69("ZWEI DURCHGAENGE (erst NULL, dann UPDATE) fuehren zum selben Ergebnis — und "
+          + "schreiben KEINE Journalzeile, denn der Trigger journalisiert base_sky_id nicht",
+          einC1 === null && einC2 === null
+          && danachC === "SKY-9001->-, SKY-9002->SKY-9001, SKY-9003->SKY-9001, "
+                       + "SKY-9004->SKY-9001"
+          && journalNach === journalVor,
+          `${einC1 ?? "durch"} · ${einC2 ?? "durch"} · ${danachC} · Journal `
+          + `${journalVor} -> ${journalNach}`);
+
+    /* ---- Und die Riegel aus 0159 wirken auch auf dem Weg ueber das Archiv. */
+    const kette69 = await tu69(
+      "update public.skylanders set base_sky_id = 'SKY-9002' where sky_id = 'SKY-9003';");
+    sag69("eine Kette ueber den Wiederherstellungsweg wird abgewiesen (23514)",
+          kette69 !== null && kette69.includes("23514"),
+          (kette69 ?? "DURCHGELAUFEN").slice(0, 44));
+    const serie69 = await tu69(
+      "update public.skylanders set series_code = 'G' where sky_id = 'SKY-9001';");
+    sag69("und die Serienaenderung einer Basisfigur mit Varianten ebenso (23001)",
+          serie69 !== null && serie69.includes("23001"),
+          (serie69 ?? "DURCHGELAUFEN").slice(0, 44));
+
+    /* ---- Ein zweiter Lauf prallt ab. */
+    const zweimal69 = await fahre(db, M160);
+    sag69("ein zweiter Lauf prallt an seinem eigenen Riegel ab",
+          zweimal69 !== null && zweimal69.includes("schon der neue"),
+          (zweimal69 ?? "DURCHGELAUFEN").slice(0, 52));
+
+    /* ---- Die Ruecknahme: EINEN Schritt zurueck, nicht zwei. */
+    const zurueckLauf = await fahre(db, R160);
+    const nachRuecknahme69 = await abdruck69();
+    const spalte69 = await w69(
+      "select count(*)::text as w from pg_attribute a"
+      + " where a.attrelid = to_regclass('public.skylanders')"
+      + " and a.attname = 'base_sky_id' and not a.attisdropped");
+    const beziehung69 = await w69(
+      `select coalesce(string_agg(sky_id || '->' || base_sky_id, ', ' order by sky_id),
+                       '(leer)') as w
+         from public.skylanders where base_sky_id is not null`);
+    const statusNoch = await w69(
+      "select (prosrc like '%''catalog_status'', t.catalog_status,%')::text as w"
+      + " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+      + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+    sag69("die Ruecknahme stellt den Rumpf aus 0153 zeichengleich her, laesst "
+          + "catalog_status drin und die Spalte samt Beziehungen stehen",
+          zurueckLauf === null && nachRuecknahme69 === A0153 && spalte69 === "1"
+          && statusNoch === "true"
+          && beziehung69 === "SKY-9002->SKY-9001, SKY-9003->SKY-9001, "
+                           + "SKY-9004->SKY-9001",
+          `${zurueckLauf ?? "durch"} · ${nachRuecknahme69} · catalog_status `
+          + `${statusNoch} · Spalte ${spalte69} · ${beziehung69}`);
+
+    probe.push({
+      name: "P69 0160: das Archiv fuehrt base_sky_id — GEMESSEN, nicht am Rumpf "
+        + "behauptet. Dieser Durchgang RUFT die Sicherung auf, zeigt die Luecke ohne "
+        + "0160 (die Familie ist da, die Mitte fehlt), faehrt die Migration und spielt "
+        + "aus dem Archiv wieder ein — in der SCHLECHTESTEN Reihenfolge, Varianten vor "
+        + "der Basisfigur, in EINER Anweisung: laeuft durch. Zeilenweise in derselben "
+        + "Reihenfolge scheitert mit 23503, `set constraints all deferred` hilft NICHT "
+        + "(die leise Falle), und zwei Durchgaenge mit anschliessendem UPDATE fuehren "
+        + "zum selben Ergebnis ohne eine Journalzeile. Dazu die Riegel (ohne 0159, "
+        + "gegen 0105, gegen 0144, zweiter Lauf) und die Ruecknahme, die EINEN Schritt "
+        + "zurueckgeht",
+      ok: ok69,
+      sagt: `0160: ${befund69.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P70 — 0161: die Familie entsteht von selbst, und der NAME allein
+   *       entscheidet nicht.
+   *
+   * WAS DIESER DURCHGANG BEWEIST, und keine andere Stelle kann es: dass die
+   * drei Faelle, die der Betreiber namentlich genannt hat, wirklich
+   * aufgehen. „Chop Chop", „Stump Smash" und „Wrecking Ball" stehen je
+   * ZWEIMAL im Katalog — einmal in `SA`, einmal in `G` Series 2 —, beide
+   * Zeilen sind Basisfigur eines Entwurfs, und beide sind DERSELBE
+   * Charakter. Der zweite Lauf darf also nicht an
+   * `admin_create_character` abbrechen, sondern muss die vorhandene Familie
+   * BENUTZEN.
+   *
+   * UND DAS GEGENSTUECK: eine Familie gleichen Namens, die etwas anderes
+   * enthaelt, darf NICHT benutzt werden. Dafuer steht hier die Familie
+   * „Zook", in die eine fremde Figur gelegt wurde — der Lauf muss abbrechen
+   * und das Mitglied nennen. Das ist die Antwort auf die Frage, ob
+   * Namensgleichheit als Identitaetsbeweis reicht: sie FINDET eine Familie,
+   * aber sie BESTAETIGT sie nicht.
+   *
+   * MIT DEN ECHTEN SCHLUESSELN UND DER ECHTEN AUDIT-CONSTRAINT, wie P67 und
+   * P69: ohne den Eindeutigkeitsindex auf `lower(canonical_name)` waere die
+   * ganze Frage gegenstandslos, und ohne die Constraint fiele jede
+   * Journalzeile.
+   * ===================================================================== */
+  {
+    const befund70: string[] = [];
+    let ok70 = true;
+    const sag70 = (was: string, gut: boolean, text: string): void => {
+      befund70.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok70 = false;
+    };
+
+    const M161 = join(MIG_DIR, "0161_variant_family_auto.sql");
+    const R161 = "supabase/rollback/R0161_drop_variant_family_auto.sql";
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w70 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu70 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 170)}`;
+      }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1), (11, 'G', 'Giants Series 2 Figuren', 1);`);
+    await db.exec(`create unique index if not exists z_sky10_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce10_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create sequence if not exists public.z_char10_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char10_seq');
+                   create unique index if not exists z_char10_id
+                     on public.characters (id);`);
+    /*
+     * DER EINDEUTIGKEITSINDEX IST DIE VORBEDINGUNG VON `0161`, und das
+     * Stub-Schema traegt ihn nicht (keine Keys, Werkzeugbefund). Ohne ihn
+     * koennten zwei Familien denselben Namen tragen — dann waere „die
+     * Familie mit diesem Namen" keine Beschreibung mehr.
+     */
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`alter table public.skylanders
+                     add constraint z_sk10_char_fk foreign key (character_id)
+                     references public.characters (id);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id'));`);
+
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql", "0159_variant_base_figure.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag70(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+
+    /*
+     * DIE FUNKTION IST IM STUB SCHON DA (dokumentierter Werkzeugbefund: das
+     * Stub-Schema entsteht aus ALLEN Migrationen, `0161` eingeschlossen).
+     * Fuer jeden Riegel dieser Migration muss sie weg — das ist die Lage, in
+     * der `0161` wirklich laeuft. Derselbe Handgriff wie in P69 fuer
+     * `base_sky_id`.
+     */
+    await db.exec("drop function if exists public.admin_publish_variant_auto(text,text);");
+
+    /* ---- Ohne den Eindeutigkeitsindex bricht 0161 ab: die Zusage ist echt. */
+    {
+      await db.exec("drop index if exists characters_canonical_name_key;");
+      const ohneIndex = await fahre(db, M161);
+      await db.exec(`create unique index characters_canonical_name_key
+                       on public.characters (lower(canonical_name));`);
+      sag70("ohne den eindeutigen Index auf lower(canonical_name) bricht 0161 ab",
+            ohneIndex !== null && ohneIndex.includes("canonical_name"),
+            (ohneIndex ?? "DURCHGELAUFEN").slice(0, 56));
+    }
+
+    const f161 = await fahre(db, M161);
+    sag70("0161 laeuft", f161 === null, f161 ?? "durch");
+    const zweimal70 = await fahre(db, M161);
+    sag70("ein zweiter Lauf prallt ab", zweimal70 !== null && zweimal70.includes("steht schon"),
+          (zweimal70 ?? "DURCHGELAUFEN").slice(0, 48));
+
+    const anlegen70 = async (id: string, name: string, serie: string, kat: number,
+                             status: string, familie: string | null = null) =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source, character_id)
+               values ('${id}', '${name.replace(/'/g, "''")}',
+                  '${id.toLowerCase()}', '${serie}', ${kat}, 'figure', 'standard',
+                  true, ${status === "public"}, '${status}', 'admin', ${familie ?? "null"});`);
+
+    const fam70 = async (id: string): Promise<string> => w70(
+      `select coalesce(s.character_id::text, '-') || '/' || coalesce(c.canonical_name, '-')
+              || '/' || coalesce(s.base_sky_id, '-') || '/' || s.catalog_status as w
+         from public.skylanders s
+         left join public.characters c on c.id = s.character_id
+        where s.sky_id = '${id}'`);
+
+    /* ================================================================
+     * DER FALL CHOP CHOP: zweimal derselbe Name, zwei Serien, zwei
+     * Entwuerfe. Genau der Fall, an dem die naive Fassung abgebrochen waere.
+     * ============================================================= */
+    await anlegen70("SKY-9101", "Chop Chop", "SA", 10, "public");
+    await anlegen70("SKY-9102", "Chop Chop", "G", 11, "public");
+    await anlegen70("SKY-9103", "Gold Chop Chop", "SA", 10, "draft");
+    await anlegen70("SKY-9104", "Metallic Blue Chop Chop", "G", 11, "draft");
+
+    const famVor = await w70("select count(*)::text as w from public.characters");
+    const ersterLauf = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9103', 'SKY-9101');");
+    const nach9103 = await fam70("SKY-9103");
+    const nach9101 = await fam70("SKY-9101");
+    sag70("CHOP CHOP, erster Entwurf: eine Familie entsteht, benannt nach der "
+          + "Basisfigur, und beide bekommen sie",
+          ersterLauf === null
+          && nach9101.includes("/Chop Chop/-/public")
+          && nach9103.includes("/Chop Chop/SKY-9101/public"),
+          `${ersterLauf ?? "durch"} · Basis ${nach9101} · Variante ${nach9103}`);
+
+    /* DIE ENTSCHEIDENDE ZEILE DIESES DURCHGANGS. */
+    const zweiterLauf = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9104', 'SKY-9102');");
+    const nach9104 = await fam70("SKY-9104");
+    const nach9102 = await fam70("SKY-9102");
+    const famNach = await w70("select count(*)::text as w from public.characters");
+    const mitglieder = await w70(
+      `select count(*)::text as w from public.skylanders s
+        where s.character_id = (select id from public.characters
+                                 where lower(canonical_name) = 'chop chop')`);
+    sag70("CHOP CHOP, zweiter Entwurf in der ANDEREN Serie: dieselbe Familie wird "
+          + "BENUTZT statt abgebrochen — vier Mitglieder, EINE Familie",
+          zweiterLauf === null
+          && nach9102.includes("/Chop Chop/-/public")
+          && nach9104.includes("/Chop Chop/SKY-9102/public")
+          && mitglieder === "4"
+          && Number(famNach) - Number(famVor) === 1,
+          `${zweiterLauf ?? "durch"} · ${nach9104} · Mitglieder ${mitglieder} `
+          + `· Familien ${famVor} -> ${famNach}`);
+    /* Und die Basisfiguren sind NICHT Varianten geworden. */
+    const basenFrei = await w70(
+      `select (count(*) = 0)::text as w from public.skylanders
+        where sky_id in ('SKY-9101', 'SKY-9102') and base_sky_id is not null`);
+    sag70("die beiden Basisfiguren bleiben Basisfiguren (keine Kette)",
+          basenFrei === "true", basenFrei);
+
+    /* ---- STUMP SMASH und WRECKING BALL: dieselbe Form, beide namentlich. */
+    for (const [n, basis1, basis2, v1, v2, name, var1, var2] of [
+      ["9110", "SKY-9111", "SKY-9112", "SKY-9113", "SKY-9114", "Stump Smash",
+       "Flocked Stump Smash", "White Flocked Stump Smash"],
+      ["9120", "SKY-9121", "SKY-9122", "SKY-9123", "SKY-9124", "Wrecking Ball",
+       "Glow-in-the-Dark Wrecking Ball", "Metallic Purple Wrecking Ball"],
+    ] as const) {
+      await anlegen70(basis1, name, "SA", 10, "public");
+      await anlegen70(basis2, name, "G", 11, "public");
+      await anlegen70(v1, var1, "SA", 10, "draft");
+      await anlegen70(v2, var2, "G", 11, "draft");
+      const a = await tu70(`select public.admin_publish_variant_auto('${v1}', '${basis1}');`);
+      const b = await tu70(`select public.admin_publish_variant_auto('${v2}', '${basis2}');`);
+      const m = await w70(
+        `select count(*)::text as w from public.skylanders s
+          where s.character_id = (select id from public.characters
+                                   where lower(canonical_name) = lower('${name}'))`);
+      sag70(`${name.toUpperCase()}: beide Serien in EINER Familie`,
+            a === null && b === null && m === "4",
+            `${a ?? "durch"} · ${b ?? "durch"} · Mitglieder ${m}`);
+      void n;
+    }
+
+    /* ================================================================
+     * DAS VETO: eine Familie gleichen Namens, die etwas anderes enthaelt.
+     * ============================================================= */
+    await anlegen70("SKY-9131", "Zook", "SA", 10, "public");
+    await anlegen70("SKY-9132", "Stone Zook", "SA", 10, "draft");
+    await db.exec(`insert into public.characters (canonical_name) values ('Zook');`);
+    await db.exec(`insert into public.skylanders
+                     (sky_id, name, slug, series_code, category_id, item_type,
+                      card_type, is_active, catalog_visible, catalog_status, source,
+                      character_id)
+                   values ('SKY-9133', 'Cynder', 'sky-9133', 'G', 11, 'figure',
+                      'standard', true, true, 'public', 'admin',
+                      (select id from public.characters where canonical_name = 'Zook'));`);
+    const veto = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9132', 'SKY-9131');");
+    const nach9132 = await fam70("SKY-9132");
+    const nach9131 = await fam70("SKY-9131");
+    sag70("DAS VETO: es gibt eine Familie „Zook\", aber sie enthaelt „Cynder\" — der "
+          + "Lauf bricht ab, nennt das Mitglied, und schreibt NICHTS",
+          veto !== null && veto.includes("Cynder") && veto.includes("nicht vereinbar")
+          && nach9132 === "-/-/-/draft" && nach9131 === "-/-/-/public",
+          `${(veto ?? "DURCHGELAUFEN").slice(0, 80)} · Variante ${nach9132}`);
+
+    /* Und die Gegenprobe: ist das fremde Mitglied vereinbar, geht es durch. */
+    await db.exec(`update public.skylanders set name = 'Gold Zook' where sky_id = 'SKY-9133';`);
+    const nachVeto = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9132', 'SKY-9131');");
+    const nach9132b = await fam70("SKY-9132");
+    sag70("heisst dasselbe Mitglied „Gold Zook\", ist die Identitaet bestaetigt und "
+          + "die Familie wird benutzt",
+          nachVeto === null && nach9132b.includes("/Zook/SKY-9131/public"),
+          `${nachVeto ?? "durch"} · ${nach9132b}`);
+
+    /* ================================================================
+     * DIE UEBERNAHME und die vier Abweisungen.
+     * ============================================================= */
+    await db.exec(`insert into public.characters (canonical_name) values ('Spyro');`);
+    await anlegen70("SKY-9141", "Spyro", "SA", 10, "public",
+                    "(select id from public.characters where canonical_name = 'Spyro')");
+    await anlegen70("SKY-9142", "Chrome Spyro", "SA", 10, "draft");
+    const uebernahme = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9142', 'SKY-9141');");
+    const famNeu = await w70("select count(*)::text as w from public.characters");
+    sag70("UEBERNAHME: hat die Basisfigur eine Familie, wird sie uebernommen und "
+          + "KEINE neue angelegt",
+          uebernahme === null && (await fam70("SKY-9142")).includes("/Spyro/SKY-9141/public"),
+          `${uebernahme ?? "durch"} · ${await fam70("SKY-9142")} · Familien ${famNeu}`);
+
+    /* WIDERSPRUCH: beide haben eine, und zwar verschiedene. */
+    await db.exec(`insert into public.characters (canonical_name) values ('Cynder');`);
+    await anlegen70("SKY-9143", "Dark Spyro", "SA", 10, "draft",
+                    "(select id from public.characters where canonical_name = 'Cynder')");
+    const widerspruch = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9143', 'SKY-9141');");
+    sag70("WIDERSPRUCH: verschiedene Familien brechen ab, statt zu ueberschreiben",
+          widerspruch !== null && widerspruch.includes("klaeren"),
+          (widerspruch ?? "DURCHGELAUFEN").slice(0, 58));
+    const unberuehrt = await fam70("SKY-9143");
+    sag70("und die Variante behaelt ihre Familie und bleibt Entwurf",
+          unberuehrt.includes("/Cynder/-/draft"), unberuehrt);
+
+    /* FREMDE SERIE, KETTE, KEIN ENTWURF, SELBSTBEZUG. */
+    await anlegen70("SKY-9151", "Bash", "G", 11, "public");
+    await anlegen70("SKY-9152", "Blue Bash", "SA", 10, "draft");
+    const serie = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9152', 'SKY-9151');");
+    const kette = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9152', 'SKY-9103');");
+    const keinEntwurf = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9101', 'SKY-9102');");
+    const selbst = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9152', 'SKY-9152');");
+    sag70("vier Abweisungen mit eigener Meldung: fremde Serie, Kette, kein Entwurf, "
+          + "Selbstbezug",
+          serie !== null && serie.includes("DERSELBEN Serie")
+          && kette !== null && kette.includes("selbst eine Variante")
+          && keinEntwurf !== null && keinEntwurf.includes("kein Entwurf")
+          && selbst !== null && selbst.includes("eigene Variante"),
+          [serie, kette, keinEntwurf, selbst]
+            .map((x) => (x ?? "DURCH").slice(0, 22)).join(" | "));
+
+    /* ---- Und ohne Adminrecht gar nichts. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select false $stub$;`);
+    const ohneRecht = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9152', 'SKY-9151');");
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    sag70("ohne Adminrecht weist sie ab (42501)",
+          ohneRecht !== null && ohneRecht.includes("42501"),
+          (ohneRecht ?? "DURCHGELAUFEN").slice(0, 24));
+
+    /* ================================================================
+     * KEINE MASSENZUORDNUNG: die Funktion schreibt ZWEI Zeilen.
+     * ============================================================= */
+    await anlegen70("SKY-9161", "Camo", "SA", 10, "public");
+    await anlegen70("SKY-9162", "Red Camo", "SA", 10, "draft");
+    await anlegen70("SKY-9163", "Thorn Horn Camo", "SA", 10, "public");
+    const vorZahl = await w70(
+      "select count(*)::text as w from public.skylanders where character_id is not null");
+    await db.exec("select public.admin_publish_variant_auto('SKY-9162', 'SKY-9161');");
+    const nachZahl = await w70(
+      "select count(*)::text as w from public.skylanders where character_id is not null");
+    const dritte = await fam70("SKY-9163");
+    sag70("KEINE MASSENZUORDNUNG: genau zwei Zeilen bekommen die Familie, die "
+          + "gleichnamige dritte Figur bleibt unberuehrt",
+          Number(nachZahl) - Number(vorZahl) === 2 && dritte === "-/-/-/public",
+          `${vorZahl} -> ${nachZahl} · Thorn Horn Camo ${dritte}`);
+
+    /* ---- Das Journal: zwei Familienzeilen und eine Basiszeile je Lauf. */
+    const journal = await w70(
+      `select coalesce(string_agg(x.field || ':' || x.n::text, ', ' order by x.field),
+                       '(leer)') as w
+         from (select field, count(*) as n from public.catalog_admin_changes
+                where entity_id in ('SKY-9161', 'SKY-9162') group by field) x`);
+    sag70("jede Schreibung steht im Journal — character_id zweimal, base_sky_id "
+          + "einmal, catalog_status einmal",
+          journal.includes("base_sky_id:1") && journal.includes("character_id:2"),
+          journal);
+
+    /* ================================================================
+     * DER „VERLORENE WETTLAUF": die Familie ist schon da, wenn der Aufruf
+     * kommt. Genau das Ergebnis, das der Advisory-Lock herstellt — PGlite
+     * hat eine Verbindung, also wird das ERGEBNIS geprueft und nicht die
+     * Gleichzeitigkeit.
+     * ============================================================= */
+    await anlegen70("SKY-9171", "Warnado", "SA", 10, "public");
+    await anlegen70("SKY-9172", "Glow Warnado", "SA", 10, "draft");
+    await db.exec(`insert into public.characters (canonical_name) values ('Warnado');`);
+    const wettlauf = await tu70(
+      "select public.admin_publish_variant_auto('SKY-9172', 'SKY-9171');");
+    const famZahlW = await w70(
+      "select count(*)::text as w from public.characters where lower(canonical_name) = 'warnado'");
+    sag70("VERLORENER WETTLAUF: steht die Familie schon (leer, von einem anderen "
+          + "Lauf), wird sie benutzt — keine zweite, kein 23505",
+          wettlauf === null && famZahlW === "1"
+          && (await fam70("SKY-9172")).includes("/Warnado/SKY-9171/public"),
+          `${wettlauf ?? "durch"} · Familien mit dem Namen ${famZahlW}`);
+    sag70("und der Rumpf nimmt den Advisory-Lock, bevor er sucht",
+          await w70(
+            "select (prosrc like '%pg_advisory_xact_lock%' and prosrc like '%skyisles.family:%')"
+            + "::text as w from pg_proc p where p.oid = "
+            + "to_regprocedure('public.admin_publish_variant_auto(text,text)')") === "true",
+          "pg_advisory_xact_lock steht im Rumpf");
+
+    /* ---- Die Wege aus 0158/0159 sind unveraendert aufrufbar. */
+    await anlegen70("SKY-9181", "Hex", "SA", 10, "public");
+    await anlegen70("SKY-9182", "Pearl Hex", "SA", 10, "draft");
+    const alt159 = await tu70(
+      "select public.admin_publish_with_base('SKY-9182', 'SKY-9181', true);");
+    sag70("admin_publish_with_base aus 0159 laeuft unveraendert weiter (0161 ersetzt "
+          + "sie nicht)",
+          alt159 === null && (await fam70("SKY-9182")).includes("/Hex/SKY-9181/public"),
+          `${alt159 ?? "durch"} · ${await fam70("SKY-9182")}`);
+
+    /* ---- Die Ruecknahme nimmt EINE Funktion und keine Zuordnung. */
+    const famVorR = await w70(
+      "select count(*)::text as w from public.skylanders where character_id is not null");
+    const rueck = await fahre(db, R161);
+    const weg = await w70(
+      "select (to_regprocedure('public.admin_publish_variant_auto(text,text)') is null)"
+      + "::text as w");
+    const famNachR = await w70(
+      "select count(*)::text as w from public.skylanders where character_id is not null");
+    const andereDa = await w70(
+      `select (to_regprocedure('public.admin_set_variant_base(text,text,boolean)') is not null
+           and to_regprocedure('public.admin_publish_with_base(text,text,boolean)') is not null
+           and to_regprocedure('public.admin_create_character(text)') is not null)::text as w`);
+    sag70("R0161 entfernt genau eine Funktion, laesst die aus 0158/0159 stehen und "
+          + "fasst keine Zuordnung an",
+          rueck === null && weg === "true" && andereDa === "true" && famNachR === famVorR,
+          `${rueck ?? "durch"} · fort ${weg} · andere ${andereDa} · Zuordnungen `
+          + `${famVorR} -> ${famNachR}`);
+
+    probe.push({
+      name: "P70 0161: die Familie entsteht von selbst — und der NAME allein "
+        + "entscheidet nicht. Die drei Faelle des Betreibers namentlich: Chop Chop, "
+        + "Stump Smash und Wrecking Ball stehen je zweimal im Katalog, und der zweite "
+        + "Entwurf BENUTZT die Familie des ersten statt abzubrechen (vier Mitglieder, "
+        + "eine Familie). Das Veto: eine Familie „Zook\", die „Cynder\" enthaelt, "
+        + "wird NICHT benutzt — Abbruch mit Nennung des Mitglieds, und nach der "
+        + "Umbenennung in „Gold Zook\" geht derselbe Lauf durch. Dazu die Uebernahme "
+        + "ohne neue Familie, der Widerspruchsabbruch, vier Abweisungen mit eigener "
+        + "Meldung, die Rechtepruefung, der verlorene Wettlauf, das Journal, KEINE "
+        + "Massenzuordnung (genau zwei Zeilen), die unveraenderte Funktion aus 0159 "
+        + "und eine Ruecknahme, die keine Zuordnung anfasst",
+      ok: ok70,
+      sagt: `0161: ${befund70.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P71 — 0162: der Marktwert, und die Loeschung einer Zeile, auf die
+   *       nichts zeigt.
+   *
+   * WAS DIESER DURCHGANG BEWEIST, und keine andere Stelle kann es: dass
+   * jede Abhaengigkeitsklasse die Loeschung WIRKLICH blockiert. Eine Liste
+   * im Kopf der Migration ist eine Behauptung; hier wird fuer jede Klasse
+   * eine Zeile angelegt und die Loeschung versucht.
+   *
+   * MIT DEN ECHTEN SCHLUESSELN: das Stub-Schema traegt keine (Werkzeugbefund),
+   * und ohne sie waere die ganze Frage gegenstandslos — `admin_merge_references`
+   * leitet aus `pg_constraint` her, und wo kein Schluessel steht, zaehlt sie
+   * nichts.
+   *
+   * DAZU DER STILLE VERWEIS. `order_lines.sky_id` traegt KEINEN
+   * Fremdschluessel; die Funktion fragt ihn ausdruecklich. Ohne diese Zeile
+   * waere „referenzfrei" eine halbe Aussage, und eine Bestellung haette ihre
+   * Figur verloren.
+   * ===================================================================== */
+  {
+    const befund71: string[] = [];
+    let ok71 = true;
+    const sag71 = (was: string, gut: boolean, text: string): void => {
+      befund71.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok71 = false;
+    };
+
+    const M162 = join(MIG_DIR, "0162_admin_price_and_delete.sql");
+    const R162 = "supabase/rollback/R0162_drop_price_and_delete.sql";
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w71 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu71 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 180)}`;
+      }
+    };
+
+    await db.exec(`insert into public.categories (id, series_code, name, position)
+                   values (10, 'SA', 'Figuren', 1);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`create schema if not exists auth;
+                   create table if not exists auth.users (id uuid primary key);`);
+    await db.exec(`create unique index if not exists z_sky11_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce11_uniq
+                     on public.catalog_editorial (sky_id);`);
+    /*
+     * DERSELBE AUFBAU WIE IN P70, UND ER IST KEINE ZIERDE. `0158` verlangt
+     * den eindeutigen Index auf `lower(characters.canonical_name)`, `0159`
+     * verlangt die Fassung der Audit-Constraint aus `0158`. Fehlt das
+     * Erste, bricht die Kette ab, die Constraint bleibt bei zehn Werten,
+     * und der erste Aufruf von `admin_set_variant_base` schreibt
+     * `base_sky_id` in eine Liste, die es nicht kennt — `23514`, und zwar
+     * UNGEFANGEN. Mein erster Anlauf hat damit den ganzen Probelauf
+     * abgerissen, nicht nur diesen Durchgang.
+     */
+    await db.exec(`create sequence if not exists public.z_char11_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char11_seq');
+                   create unique index if not exists z_char11_id
+                     on public.characters (id);`);
+    /*
+     * DER NAME IST TEIL DER VORBEDINGUNG. `0158` fragt nach
+     * `characters_canonical_name_key` — namentlich, nicht nach „irgendeinem
+     * eindeutigen Index auf lower(canonical_name)". Mein erster Anlauf nannte
+     * ihn `z_char11_name_key`, und daran brach die ganze Kette: `0158` ab,
+     * `0159` ab, die Audit-Constraint bei zehn Werten, `0162` ab.
+     */
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`alter table public.skylanders
+                     add constraint z_sk11_char_fk foreign key (character_id)
+                     references public.characters (id);`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id'));`);
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql", "0159_variant_base_figure.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag71(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+
+    /*
+     * DIE ECHTEN SCHLUESSEL, EINER JE ABHAENGIGKEITSKLASSE. Gemessen auf
+     * Staging am 2026-10-29 sind es vierzehn; hier stehen die, die eine
+     * Loeschung blockieren muessen — je einer mit RESTRICT und einer mit
+     * CASCADE, damit beide Wege geprueft sind.
+     */
+    for (const [tab, spalte, art] of [
+      ["collection_items", "sky_id", "restrict"],
+      ["favorites", "sky_id", "restrict"],
+      ["shop_inventory", "sky_id", "restrict"],
+      ["cart_items", "sky_id", "cascade"],
+      ["catalog_editorial", "sky_id", "cascade"],
+    ] as const) {
+      await db.exec(`alter table public.${tab}
+                       add constraint z_${tab}_sky_fk foreign key (${spalte})
+                       references public.skylanders (sky_id) on delete ${art};`);
+    }
+
+    /* Die Funktion ist im Stub schon da (Werkzeugbefund) — fuer die Riegel weg. */
+    await db.exec(`drop function if exists public.admin_set_market_price(text,numeric);
+                   drop function if exists public.admin_delete_figure(text);`);
+
+    /*
+     * UND DIE KETTE WIRD NACHGESEHEN, BEVOR ES WEITERGEHT. Ein abgebrochener
+     * Aufbau ist kein Befund ueber `0162`, und er soll nicht als einer
+     * aussehen.
+     */
+    const kette = await w71(
+      `select (pg_get_constraintdef(c.oid) like '%base_sky_id%'
+           and pg_get_constraintdef(c.oid) like '%character_id%')::text as w
+         from pg_constraint c
+        where c.conrelid = to_regclass('public.catalog_admin_changes')
+          and c.conname = 'catalog_admin_changes_field_known'`);
+    sag71("Aufbau: die Audit-Constraint ist die Fassung aus 0159 (zwoelf Werte)",
+          kette === "true", kette);
+
+    const f162 = await fahre(db, M162);
+    sag71("0162 laeuft", f162 === null, f162 ?? "durch");
+    const zweimal = await fahre(db, M162);
+    sag71("ein zweiter Lauf prallt ab", zweimal !== null && zweimal.includes("steht schon"),
+          (zweimal ?? "DURCHGELAUFEN").slice(0, 44));
+    const vierzehn = await w71(
+      `select (pg_get_constraintdef(c.oid) like '%market_price%'
+           and pg_get_constraintdef(c.oid) like '%deleted%'
+           and pg_get_constraintdef(c.oid) like '%base_sky_id%')::text as w
+         from pg_constraint c
+        where c.conrelid = to_regclass('public.catalog_admin_changes')
+          and c.conname = 'catalog_admin_changes_field_known'`);
+    sag71("das Journal kennt market_price und deleted — und die zwoelf alten",
+          vierzehn === "true", vierzehn);
+
+    const anlegen71 = async (id: string, name: string, status = "public",
+                             preis: string | null = "9.99") =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type, card_type,
+                  is_active, catalog_visible, catalog_status, source, market_price)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', 10, 'figure',
+                  'standard', true, ${status === "public"}, '${status}', 'admin',
+                  ${preis ?? "null"});`);
+
+    /* ================================================================
+     * DER MARKTWERT.
+     * ============================================================= */
+    await anlegen71("SKY-9201", "P71 Preisfigur", "public", "5.48");
+    const preisLesen = async (id: string): Promise<string> => w71(
+      `select coalesce(market_price::text, '(offen)') || '/'
+              || coalesce(price_updated_at is not null, false)::text as w
+         from public.skylanders where sky_id = '${id}'`);
+
+    const setzen = await tu71("select public.admin_set_market_price('SKY-9201', 7.25);");
+    sag71("der Preis wird gesetzt, und das Datum folgt ihm",
+          setzen === null && (await preisLesen("SKY-9201")) === "7.25/true",
+          `${setzen ?? "durch"} · ${await preisLesen("SKY-9201")}`);
+
+    const offen = await tu71("select public.admin_set_market_price('SKY-9201', null);");
+    sag71("NULL macht „Preis offen“ — und nimmt das Datum mit",
+          offen === null && (await preisLesen("SKY-9201")) === "(offen)/false",
+          `${offen ?? "durch"} · ${await preisLesen("SKY-9201")}`);
+
+    const zurueck = await tu71("select public.admin_set_market_price('SKY-9201', 4.99);");
+    sag71("und wieder zurueck auf einen Preis",
+          zurueck === null && (await preisLesen("SKY-9201")) === "4.99/true",
+          `${zurueck ?? "durch"} · ${await preisLesen("SKY-9201")}`);
+
+    const null_euro = await tu71("select public.admin_set_market_price('SKY-9201', 0);");
+    const negativ = await tu71("select public.admin_set_market_price('SKY-9201', -3);");
+    sag71("0 und ein negativer Betrag werden mit einem SATZ abgewiesen, nicht von "
+          + "der Constraint",
+          null_euro !== null && null_euro.includes("kein Preis")
+          && negativ !== null && negativ.includes("kein Preis")
+          && (await preisLesen("SKY-9201")) === "4.99/true",
+          `${(null_euro ?? "DURCH").slice(0, 40)} · unveraendert `
+          + `${await preisLesen("SKY-9201")}`);
+
+    const journalPreis = await w71(
+      `select coalesce(string_agg(old_value || '→' || coalesce(new_value, 'NULL'), ', '
+                                  order by changed_at), '(leer)') as w
+         from public.catalog_admin_changes
+        where entity_id = 'SKY-9201' and field = 'market_price'`);
+    sag71("jede Preisaenderung steht im Journal, mit altem und neuem Wert",
+          journalPreis.includes("5.48→7.25") && journalPreis.includes("7.25→NULL"),
+          journalPreis);
+
+    /* Und sie fasst KEINE andere Spalte an. */
+    const nebenan = await w71(
+      `select (catalog_status = 'public' and catalog_visible
+           and name = 'P71 Preisfigur' and card_type = 'standard'
+           and base_sky_id is null and character_id is null)::text as w
+         from public.skylanders where sky_id = 'SKY-9201'`);
+    sag71("und keine andere Spalte der Zeile", nebenan === "true", nebenan);
+
+    /* ================================================================
+     * DIE LOESCHUNG — JE ABHAENGIGKEITSKLASSE EIN VERSUCH.
+     * ============================================================= */
+    const konto = "11111111-1111-1111-1111-111111111111";
+    await db.exec(`insert into auth.users (id) values ('${konto}')
+                   on conflict do nothing;`);
+
+    /* ---- A: eine Zeile, auf die NICHTS zeigt. */
+    await anlegen71("SKY-9210", "P71 Doppelt angelegt", "hidden", null);
+    const journalVor = await w71("select count(*)::text as w"
+                                 + " from public.catalog_admin_changes");
+    const weg = await tu71("select public.admin_delete_figure('SKY-9210');");
+    const nochDa = await w71("select count(*)::text as w from public.skylanders"
+                             + " where sky_id = 'SKY-9210'");
+    const journalNach = await w71(
+      `select coalesce(max(old_value), '(keine)') as w
+         from public.catalog_admin_changes
+        where entity_id = 'SKY-9210' and field = 'deleted'`);
+    sag71("EINE REFERENZFREIE ZEILE wird geloescht — und das Journal UEBERLEBT sie",
+          weg === null && nochDa === "0" && journalNach.includes("P71 Doppelt angelegt")
+          && Number(journalVor) + 1
+             === Number(await w71("select count(*)::text as w"
+                                  + " from public.catalog_admin_changes")),
+          `${weg ?? "durch"} · Zeilen ${nochDa} · Journal „${journalNach.slice(0, 44)}"`);
+
+    /* ---- B: jede Abhaengigkeitsklasse, einzeln. */
+    const klassen: readonly (readonly [string, string, string])[] = [
+      ["collection_items",
+       `insert into public.collection_items (user_id, sky_id, quantity)
+          values ('${konto}', 'SKY-9220', 1)`, "Sammlung"],
+      ["favorites",
+       `insert into public.favorites (user_id, sky_id)
+          values ('${konto}', 'SKY-9220')`, "Favorit"],
+      ["shop_inventory",
+       `insert into public.shop_inventory (sky_id, condition, quantity, is_listed)
+          values ('SKY-9220', 'loose', 1, false)`, "Lager"],
+      ["cart_items",
+       `insert into public.cart_items (user_id, sky_id, condition, quantity)
+          values ('${konto}', 'SKY-9220', 'loose', 1)`, "Warenkorb (CASCADE!)"],
+    ];
+    for (const [tab, einfuegen, was] of klassen) {
+      await anlegen71("SKY-9220", `P71 ${was}`, "public", "3.00");
+      const f = await tu71(einfuegen);
+      if (f !== null) { sag71(`Aufbau ${tab}`, false, f); continue; }
+      const versuch = await tu71("select public.admin_delete_figure('SKY-9220');");
+      const steht = await w71("select count(*)::text as w from public.skylanders"
+                              + " where sky_id = 'SKY-9220'");
+      const fremdNoch = await w71(
+        `select count(*)::text as w from public.${tab} where sky_id = 'SKY-9220'`);
+      sag71(`${was} blockiert, und die fremde Zeile bleibt`,
+            versuch !== null && versuch.includes("zeigen noch Daten")
+            && versuch.includes(tab) && steht === "1" && fremdNoch === "1",
+            `${(versuch ?? "DURCHGELAUFEN").slice(0, 52)} · Figur ${steht} · `
+            + `${tab} ${fremdNoch}`);
+      await db.exec(`delete from public.${tab} where sky_id = 'SKY-9220';`);
+      await db.exec("delete from public.catalog_editorial where sky_id = 'SKY-9220';");
+      await db.exec("delete from public.skylanders where sky_id = 'SKY-9220';");
+    }
+
+    /* ---- C: der CASCADE-Schluessel wird NAMENTLICH genannt. */
+    await anlegen71("SKY-9230", "P71 Warenkorb", "public", "3.00");
+    await db.exec(`insert into public.cart_items (user_id, sky_id, condition, quantity)
+                   values ('${konto}', 'SKY-9230', 'loose', 2);`);
+    const cascade = await tu71("select public.admin_delete_figure('SKY-9230');");
+    sag71("und die Meldung sagt, dass es ein CASCADE-Schluessel war — der waere "
+          + "stillschweigend mitgegangen",
+          cascade !== null && cascade.includes("CASCADE")
+          && cascade.includes("cart_items"),
+          (cascade ?? "DURCHGELAUFEN").slice(0, 100));
+
+    /* ---- D: DER STILLE VERWEIS. `order_lines.sky_id` hat keinen Schluessel. */
+    /*
+     * DIE SPALTEN SIND DIE ECHTEN AUS `0010`, und das war beim ersten Anlauf
+     * nicht so: ich hatte `status` und `total_cents` geraten, der Einschub
+     * scheiterte an `42703`, und die Probe hat sich selbst uebersprungen —
+     * eine uebersprungene Probe ist bei DIESER Frage das Schlimmste, denn
+     * sie ist der Kern der ganzen Funktion.
+     */
+    const ordnung = await tu71(
+      `insert into public.orders
+         (id, order_number, request_id, user_id, customer_email,
+          items_subtotal, total_amount)
+       values (99071, 'P71-0001', 'p71-req', '${konto}', 'p71@example.invalid',
+               5.00, 5.00)`);
+    if (ordnung !== null) {
+      sag71("Aufbau orders", false, ordnung.slice(0, 90));
+    } else {
+      await anlegen71("SKY-9240", "P71 Bestellt", "public", "5.00");
+      const zeile = await tu71(
+        `insert into public.order_lines
+           (order_id, sky_id, condition, quantity, name_snapshot,
+            unit_price, line_total)
+         values (99071, 'SKY-9240', 'loose', 1, 'P71 Bestellt', 5.00, 5.00)`);
+      if (zeile !== null) {
+        sag71("Aufbau order_lines", false, zeile.slice(0, 90));
+      } else {
+        const refs = await w71(
+          `select count(*)::text as w from public.admin_merge_references('SKY-9240')
+            where zeilen > 0`);
+        const versuch = await tu71("select public.admin_delete_figure('SKY-9240');");
+        const steht = await w71("select count(*)::text as w from public.skylanders"
+                                + " where sky_id = 'SKY-9240'");
+        const bestellung = await w71("select count(*)::text as w"
+                                     + " from public.order_lines"
+                                     + " where sky_id = 'SKY-9240'");
+        sag71("DER STILLE VERWEIS: `admin_merge_references` zaehlt NICHTS, weil "
+              + "order_lines keinen Fremdschluessel hat — und die Loeschung "
+              + "blockiert trotzdem, und die Bestellzeile bleibt",
+              refs === "0" && versuch !== null && versuch.includes("Bestellzeile")
+              && steht === "1" && bestellung === "1",
+              `gezaehlte Verweise ${refs} · ${(versuch ?? "DURCH").slice(0, 46)} · `
+              + `Figur ${steht} · Bestellzeile ${bestellung}`);
+      }
+    }
+
+    /* ---- E: eine Basisfigur mit Variante. */
+    await anlegen71("SKY-9250", "P71 Basis", "public", "4.00");
+    await anlegen71("SKY-9251", "P71 Gold Basis", "public", "6.00");
+    const basisSetzen = await tu71(
+      "select public.admin_set_variant_base('SKY-9251', 'SKY-9250', false);");
+    sag71("Aufbau: SKY-9251 ist Variante von SKY-9250", basisSetzen === null,
+          basisSetzen ?? "durch");
+    const basis = await tu71("select public.admin_delete_figure('SKY-9250');");
+    const variante = await tu71("select public.admin_delete_figure('SKY-9251');");
+    sag71("eine BASISFIGUR mit Variante blockiert mit einem lesbaren Satz — die "
+          + "Variante selbst ist loeschbar",
+          basis !== null && basis.includes("Basisfigur") && variante === null
+          && (await w71("select count(*)::text as w from public.skylanders"
+                        + " where sky_id = 'SKY-9250'")) === "1",
+          `${(basis ?? "DURCHGELAUFEN").slice(0, 46)} · Variante `
+          + `${variante ?? "geloescht"}`);
+
+    /* ---- F: ohne Adminrecht gar nichts. */
+    await anlegen71("SKY-9260", "P71 Ohne Recht", "public", "2.00");
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select false $stub$;`);
+    const ohnePreis = await tu71("select public.admin_set_market_price('SKY-9260', 1);");
+    const ohneWeg = await tu71("select public.admin_delete_figure('SKY-9260');");
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    sag71("ohne Adminrecht weisen beide ab (42501), und die Zeile steht",
+          ohnePreis !== null && ohnePreis.includes("42501")
+          && ohneWeg !== null && ohneWeg.includes("42501")
+          && (await w71("select count(*)::text as w from public.skylanders"
+                        + " where sky_id = 'SKY-9260'")) === "1",
+          `${(ohnePreis ?? "DURCH").slice(0, 18)} | ${(ohneWeg ?? "DURCH").slice(0, 18)}`);
+
+    /* ---- G: DER WETTLAUF. Eine Referenz entsteht NACH der Pruefung —
+     *         dann faengt sie der Fremdschluessel, und nichts geht verloren. */
+    await anlegen71("SKY-9270", "P71 Wettlauf", "public", "2.00");
+    /*
+     * DER EINSCHUB UND DER AUFRUF SIND ZWEI ANWEISUNGEN, und das muss so
+     * sein: steckten beide in EINEM `do`-Block, nähme die Ausnahme des
+     * Aufrufs den Einschub mit zurück — PostgreSQL rollt die ganze
+     * Anweisung zurück —, und die Probe wuerde „die fremde Zeile bleibt"
+     * pruefen, nachdem sie sie selbst wieder entfernt hat. Meine erste
+     * Fassung tat genau das.
+     */
+    await db.exec(`insert into public.collection_items (user_id, sky_id, quantity)
+                   values ('${konto}', 'SKY-9270', 1);`);
+    const rollback = await tu71("select public.admin_delete_figure('SKY-9270');");
+    const nachRace = await w71(
+      `select (select count(*) from public.skylanders where sky_id = 'SKY-9270')::text
+              || '/' || (select count(*) from public.collection_items
+                          where sky_id = 'SKY-9270')::text as w`);
+    sag71("WETTLAUF: entsteht die Referenz vor dem Aufruf, blockiert die Pruefung — "
+          + "und beide Zeilen stehen danach unveraendert",
+          rollback !== null && nachRace === "1/1",
+          `${(rollback ?? "DURCHGELAUFEN").slice(0, 46)} · ${nachRace}`);
+
+    /*
+     * UND DIE ANDERE RICHTUNG, die der Fremdschluessel faengt: die Referenz
+     * entsteht NACH der Pruefung. Nachgestellt wird sie, indem die Pruefung
+     * ueberhaupt nichts findet und der `delete` trotzdem scheitert — dafuer
+     * wird die Zeile in einer Transaktion geloescht, in der zuvor eine
+     * Sammlungszeile steht, die `admin_merge_references` nicht sieht. Das
+     * ist in einer einzelnen Verbindung nicht echt nachzustellen (zwei
+     * Sitzungen braeuchte es dafuer), also wird hier das BELEGBARE geprueft:
+     * der Fremdschluessel steht auf RESTRICT und wuerde es faengen.
+     */
+    const letzteSchicht = await w71(
+      `select (select count(*) from pg_constraint c
+                where c.conrelid = to_regclass('public.collection_items')
+                  and c.contype = 'f'
+                  and c.confrelid = to_regclass('public.skylanders')
+                  and c.confdeltype in ('r', 'a'))::text as w`);
+    sag71("und die letzte Schicht steht: der Fremdschluessel der Sammlung "
+          + "verweigert (RESTRICT/NO ACTION) — er faengt, was nach der "
+          + "Pruefung entsteht",
+          letzteSchicht === "1", letzteSchicht);
+
+    /* ---- H: und das Bild bleibt liegen. */
+    /*
+     * DIE ZWEITE ZEILE MUSS NOCH STEHEN. SKY-9251 ist in Fall E geloescht
+     * worden (die Variante ist loeschbar) — ein `update` darauf traf nichts,
+     * und „die andere behaelt die Datei" pruefte dann an null Zeilen.
+     * SKY-9250 steht, weil die Loeschung sie als Basisfigur abgewiesen hat.
+     */
+    await db.exec(`update public.skylanders set image_file = 'abc1234567890def.webp'
+                    where sky_id in ('SKY-9250');`);
+    await anlegen71("SKY-9280", "P71 Geteiltes Bild", "hidden", null);
+    await db.exec(`update public.skylanders set image_file = 'abc1234567890def.webp'
+                    where sky_id = 'SKY-9280';`);
+    const mitBild = await tu71("select public.admin_delete_figure('SKY-9280');");
+    const bildNoch = await w71(
+      `select count(*)::text as w from public.skylanders
+        where image_file = 'abc1234567890def.webp'`);
+    sag71("eine Zeile mit GETEILTEM Bild wird geloescht, und die andere behaelt die "
+          + "Datei — die Funktion fasst Storage nicht an",
+          mitBild === null && bildNoch === "1",
+          `${mitBild ?? "durch"} · Zeilen mit der Datei ${bildNoch}`);
+    /*
+     * GESUCHT WIRD DER SCHEMANAME MIT PUNKT, und das ist der ganze
+     * Unterschied. Der Rumpf NENNT `0162_storage_note.md` in einem
+     * Kommentar — die Datei, die festhaelt, was liegen bleibt. Eine Pruefung
+     * auf „enthaelt das Wort storage" hat diesen Kommentar als Zugriff
+     * gelesen; `storage.` mit Punkt trifft nur das Schema, denn der
+     * Dateiname traegt einen Unterstrich.
+     *
+     * UND KEINE REGEX DAFUER. Mein zweiter Anlauf wollte die Kommentare
+     * wegrechnen und schickte ein Muster an PostgreSQL, das mit einem Stern
+     * hinter einem Schraegstrich beginnt — ein Quantifizierer ohne Operand,
+     * und der Probelauf brach ab, statt etwas zu messen. (Dasselbe Muster
+     * hat danach diesen Kommentar selbst geschlossen; es wird hier deshalb
+     * beschrieben und nicht zitiert.)
+     * Eine Pruefung, die genauer sein will als notwendig, wird dabei
+     * zerbrechlich.
+     */
+    const ohneProsa71 = await w71(
+      `select (prosrc not ilike '%storage.%')::text as w
+         from pg_proc p
+        where p.oid = to_regprocedure('public.admin_delete_figure(text)')`);
+    sag71("und der Rumpf greift nirgends auf das Schema `storage` zu "
+          + "(am Code gemessen, nicht am Kommentar)",
+          ohneProsa71 === "true", ohneProsa71);
+
+    /* ================================================================
+     * V: DIE DREI PRUEFZEILEN DER NACHKONTROLLE, IN BEIDE RICHTUNGEN.
+     *
+     * WARUM DIESER ABSCHNITT EXISTIERT. Am 2026-10-29 hat die Nachkontrolle
+     * des echten Laufs zweimal falschen Alarm geschlagen: Zeile 114 suchte
+     * das Wort `card_type`, und der Rumpf NENNT es in seinem eigenen
+     * Kommentar; Zeile 122 suchte `storage`, und der Rumpf nennt die Datei
+     * `0162_storage_note.md`. Beide Zusagen waren erfuellt, beide Zeilen
+     * sagten das Gegenteil.
+     *
+     * Eine berichtigte Pruefung ist nur dann besser, wenn sie den ECHTEN
+     * Fall weiter faengt. Deshalb laufen hier beide Richtungen:
+     *
+     *   1. gegen die richtigen Ruempfe            -> bestanden
+     *   2. gegen eine fremde Spaltenaenderung     -> faellt
+     *   3. gegen einen echten Storage-Zugriff     -> faellt
+     *   4. gegen einen zweiten Schreibweg         -> faellt
+     *   5. gegen einen Rumpf, der beide Woerter nur im KOMMENTAR nennt
+     *      -> bestanden (die Regression, die diesen Abschnitt ausgeloest hat)
+     *
+     * Gefahren wird der ECHTE Zeilentext aus `0162_postflight.sql`, aus der
+     * Datei geschnitten — eine Kopie koennte von ihr abweichen.
+     * ============================================================= */
+    {
+      const post = readFileSync("supabase/checks/0162_postflight.sql", "utf8");
+      /** Eine Pruefzeile, von ihrer Nummer bis zum Beginn der naechsten. */
+      const zeile = (nr: number): string => {
+        const a = post.indexOf(`  (${nr}, `);
+        if (a < 0) return "";
+        let b = post.length;
+        for (const marke of ["\n  (", "\n  /*"]) {
+          const k = post.indexOf(marke, a + 4);
+          if (k >= 0 && k < b) b = k;
+        }
+        return post.slice(a, b).trimEnd().replace(/,$/, "");
+      };
+      const frage = async (nr: number): Promise<string> => w71(
+        `with pruef (nr, bereich, pruefung, befund, erwartet) as (values\n`
+        + `${zeile(nr)}\n) select befund || '|' || coalesce(erwartet, '-') as w`
+        + ` from pruef`);
+
+      sag71("Aufbau V: die drei Pruefzeilen sind aus der Nachkontrolle "
+            + "geschnitten",
+            zeile(114) !== "" && zeile(120) !== "" && zeile(122) !== "",
+            `114 ${zeile(114).length} · 120 ${zeile(120).length} · `
+            + `122 ${zeile(122).length}`);
+
+      /* ---- V1: gegen die ECHTEN Ruempfe. */
+      const echt114 = await frage(114);
+      const echt120 = await frage(120);
+      const echt122 = await frage(122);
+      sag71("RICHTIG HERUM: 114, 120 und 122 bestehen gegen die echten "
+            + "Ruempfe — obwohl diese `card_type` und `0162_storage_note.md` "
+            + "in ihren Kommentaren nennen",
+            echt114 === "true|true" && echt120 === "7|7" && echt122 === "0|0",
+            `114 ${echt114} · 120 ${echt120} · 122 ${echt122}`);
+
+      /** Eine Preisfunktion mit dem genannten Rumpf — fuer die Gegenproben. */
+      const preisRumpf = async (rumpf: string): Promise<string | null> => tu71(
+        `create or replace function public.admin_set_market_price(
+           p_sky_id text, p_price numeric) returns jsonb
+         language plpgsql security definer set search_path = '' as $boese$
+         begin ${rumpf} return '{}'::jsonb; end $boese$;`);
+
+      /* ---- V2: eine FREMDE SPALTENAENDERUNG wird gefangen. */
+      await preisRumpf(`update public.skylanders
+                          set market_price = p_price, card_type = 'dark'
+                        where sky_id = p_sky_id;`);
+      const fremd = await frage(114);
+      sag71("GEGENPROBE: eine fremde Spaltenaenderung (`card_type` hinter dem "
+            + "Komma, ohne eigenes `set`) wird gefangen",
+            fremd === "false|true", fremd);
+
+      /* ---- V3: und jede andere Schreibweise ebenso. */
+      const schreibweisen: readonly (readonly [string, string])[] = [
+        ["set name='x', market_price=p_price", "ohne Leerzeichen"],
+        [`set "card_type" = 'dark'`, "angefuehrt"],
+        ["set\n            base_sky_id = null", "mit Umbruch nach set"],
+        ["set (slug, market_price) = ('x', p_price)", "zeilenweise Zuweisung"],
+        ["set market_price = (select market_price from public.skylanders"
+         + " where item_type = 'figure' limit 1)", "nur LESEND genannt"],
+      ];
+      let gefangen = 0;
+      for (const [satz, was] of schreibweisen) {
+        await preisRumpf(`update public.skylanders ${satz} where sky_id = p_sky_id;`);
+        const r = await frage(114);
+        if (r === "false|true") gefangen += 1;
+        else befund71.push(`!! Schreibweise „${was}" NICHT gefangen: ${r}`);
+      }
+      sag71("und zwar in JEDER Schreibweise — ohne Leerzeichen, angefuehrt, "
+            + "mit Umbruch, zeilenweise, und sogar nur lesend genannt",
+            gefangen === schreibweisen.length,
+            `${gefangen} von ${schreibweisen.length}`);
+
+      /* ---- V4: ein ZWEITER Schreibweg wird gefangen (Zeile 120). */
+      await preisRumpf(`update public.skylanders set market_price = p_price
+                        where sky_id = p_sky_id;
+                        update public.skylanders set market_price = p_price
+                        where sky_id = p_sky_id;`);
+      const zweiWege = await frage(120);
+      sag71("ZWEI `update` im Rumpf werden gefangen (Zeile 120)",
+            zweiWege === "14|7", zweiWege);
+
+      /* ---- V5: ein ECHTER Storage-Zugriff wird gefangen (Zeile 122). */
+      for (const [zugriff, was] of [
+        ["perform 1 from storage.objects;", "storage.objects"],
+        ["perform 1 from storage . objects;", "mit Abstand vor dem Punkt"],
+        [`perform 1 from "storage".objects;`, "angefuehrt"],
+      ] as const) {
+        await preisRumpf(zugriff);
+        const r = await frage(122);
+        sag71(`GEGENPROBE Storage (${was}) wird gefangen`, r === "1|0", r);
+      }
+
+      /* ---- V6: DIE REGRESSION. Ein Rumpf, der beide Woerter NUR im
+       *          Kommentar nennt, besteht — genau der Fall, an dem die erste
+       *          Fassung gescheitert ist. */
+      await preisRumpf(
+        `/* kein card_type, kein slug, kein base_sky_id — und die Datei\n`
+        + `   supabase/checks/0162_storage_note.md haelt fest, was liegen\n`
+        + `   bleibt. */\n`
+        + `-- auch hier: card_type und storage_note bleiben Prosa\n`
+        + `update public.skylanders set market_price = p_price\n`
+        + ` where sky_id = p_sky_id;`);
+      const nurProsa114 = await frage(114);
+      const nurProsa122 = await frage(122);
+      sag71("DIE REGRESSION: ein Rumpf, der `card_type` und "
+            + "`0162_storage_note.md` NUR im Kommentar nennt, besteht beide "
+            + "Zeilen — daran ist die erste Fassung gescheitert",
+            nurProsa114 === "true|true" && nurProsa122 === "0|0",
+            `114 ${nurProsa114} · 122 ${nurProsa122}`);
+    }
+
+    /* ---- I: die Ruecknahme. */
+    const rueck = await fahre(db, R162);
+    const fort = await w71(
+      `select (to_regprocedure('public.admin_set_market_price(text,numeric)') is null
+           and to_regprocedure('public.admin_delete_figure(text)') is null)::text as w`);
+    const constraintNoch = await w71(
+      `select (pg_get_constraintdef(c.oid) like '%market_price%')::text as w
+         from pg_constraint c
+        where c.conrelid = to_regclass('public.catalog_admin_changes')
+          and c.conname = 'catalog_admin_changes_field_known'`);
+    const journalNochDa = await w71(
+      "select count(*)::text as w from public.catalog_admin_changes"
+      + " where field in ('market_price', 'deleted')");
+    sag71("R0162 entfernt die zwei Funktionen, laesst die Constraint stehen und "
+          + "jede Journalzeile",
+          rueck === null && fort === "true" && constraintNoch === "true"
+          && Number(journalNochDa) > 0,
+          `${rueck ?? "durch"} · fort ${fort} · Constraint ${constraintNoch} · `
+          + `Journalzeilen ${journalNochDa}`);
+
+    probe.push({
+      name: "P71 0162: der Marktwert und die Loeschung. Der Preis wird gesetzt, auf "
+        + "„offen“ zurueckgenommen und wieder gesetzt; 0 und negative Betraege weist "
+        + "sie mit einem SATZ ab; jede Aenderung steht im Journal und keine andere "
+        + "Spalte bewegt sich. Die Loeschung nimmt eine referenzfreie Zeile mit — und "
+        + "das Journal ueberlebt sie —, blockiert aber an JEDER "
+        + "Abhaengigkeitsklasse einzeln (Sammlung, Favorit, Lager, Warenkorb), nennt "
+        + "den CASCADE-Schluessel namentlich, faengt den STILLEN Verweis in "
+        + "order_lines, den `admin_merge_references` nicht zaehlt, weist eine "
+        + "Basisfigur mit Variante ab, weist ohne Adminrecht ab (42501), verliert im "
+        + "Wettlauf nichts, und laesst ein GETEILTES Bild unberuehrt. Dazu die "
+        + "Ruecknahme, die die Audit-Constraint und jede Journalzeile stehen laesst",
+      ok: ok71,
+      sagt: `0162: ${befund71.join(" · ")}`,
+    });
+  }
+
+  /* =====================================================================
+   * P72 — 0163: der Type als MENGE, und genau ein Banner.
+   *
+   * WAS DIESER DURCHGANG BEWEIST, und keine andere Stelle kann es: dass die
+   * MITGLIEDSCHAFT eine Eigenschaft der Datenbank ist. „Der sichtbare Type
+   * gehoert zur Menge" steht als Zeilen-CHECK da; hier wird versucht, sie zu
+   * verletzen — von Hand, an der Tabelle vorbei an jeder Funktion.
+   *
+   * UND DASS DIE KARTENKUNST SICH NICHT BEWEGT. Der Betreiber hat genau das
+   * verlangt. Die Erstbelegung wird mit einem Bestand gefahren, der jeden
+   * gemessenen Fall enthaelt — Giant mit Legendary, Trap mit Special,
+   * LightCore mit und ohne weitere Eigenschaft, die Zeile mit `standard` —,
+   * und der Abdruck von `card_type` wird vorher und nachher verglichen.
+   * ===================================================================== */
+  {
+    const befund72: string[] = [];
+    let ok72 = true;
+    const sag72 = (was: string, gut: boolean, text: string): void => {
+      befund72.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok72 = false;
+    };
+
+    const M163 = join(MIG_DIR, "0163_catalog_types.sql");
+    const R163 = "supabase/rollback/R0163_drop_catalog_types.sql";
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w72 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu72 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 200)}`;
+      }
+    };
+
+    /* ---- Die Welt, in der `0163` laufen kann. Wie P70/P71. */
+    await db.exec(`create unique index if not exists z_sky12_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce12_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create sequence if not exists public.z_char12_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char12_seq');
+                   create unique index if not exists z_char12_id
+                     on public.characters (id);`);
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`create schema if not exists auth;
+                   create table if not exists auth.users (id uuid primary key);`);
+    /*
+     * DER CHECK AUF `card_type`, DEN DAS STUB-SCHEMA NICHT TRAEGT (es hat
+     * keine CHECKs, Werkzeugbefund). `0163` prueft als Nachbedingung, dass er
+     * UNVERAENDERT dasteht — die Zusage, dass die Kartenkunst nicht angefasst
+     * wird. Ohne ihn waere diese Pruefung in der Probe gegenstandslos, und
+     * genau daran ist mein zweiter Lauf gescheitert.
+     */
+    /*
+     * ERST DIE ERFUNDENEN ZEILEN IN ORDNUNG BRINGEN, DANN DEN CHECK. Die
+     * Attrappe traegt Kartentypen, die es in Wirklichkeit nicht gibt (sie
+     * kennt keine CHECKs, Werkzeugbefund). `not valid` genuegt dafuer nicht:
+     * ein solcher CHECK gilt sehr wohl fuer jedes spaetere UPDATE, und die
+     * Erstbelegung von `0163` fasst jede Zeile an.
+     */
+    await db.exec(`update public.skylanders set card_type = 'standard'
+                    where card_type is null
+                       or card_type not in ('standard', 'special', 'elite',
+                                            'dark', 'legendary', 'chase',
+                                            'prestige');`);
+    await db.exec(`alter table public.skylanders
+                     add constraint skylanders_card_type_known
+                     check (card_type in ('standard', 'special', 'elite', 'dark',
+                                          'legendary', 'chase', 'prestige'));`);
+    /*
+     * DIE AUDIT-CONSTRAINT MIT VIERZEHN WERTEN — also so, wie sie NACH `0162`
+     * aussieht. `0163` verlangt das ausdruecklich, und genau diese
+     * Vorbedingung wird unten auch einmal verletzt.
+     */
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id',
+                                      'market_price', 'deleted'));`);
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql", "0159_variant_base_figure.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag72(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+    /* Das Stub-Schema traegt die Spalten schon (Werkzeugbefund) — fuer die
+       Riegel weg, samt allem, was `0163` selbst anlegt. */
+    await db.exec(`drop trigger if exists skylanders_canonical_types
+                     on public.skylanders;
+                   drop function if exists public.skylanders_canonical_types();
+                   drop function if exists
+                     public.admin_set_figure_types(text,text[]);
+                   drop function if exists public.admin_set_visible_type(text,text);
+                   alter table public.skylanders
+                     drop constraint if exists skylanders_visible_type_decided,
+                     drop constraint if exists skylanders_visible_type_member,
+                     drop constraint if exists skylanders_types_known,
+                     drop column if exists visible_type_decided,
+                     drop column if exists visible_type,
+                     drop column if exists types;`);
+
+    /*
+     * DER BESTAND, UND ER IST DER GEMESSENE IM KLEINEN. Jede Kategorie, die
+     * eine Gruppe traegt, und jeder Fall, den der Betreiber genannt hat.
+     */
+    const kat: readonly (readonly [number, string, string | null])[] = [
+      [20, "Figuren", "figure"],
+      [21, "Giants grosse Figuren", "giant"],
+      [22, "SWAP Force", "swapper"],
+      [23, "Trap Masters", "trap_master"],
+      [24, "Senseis", "sensei"],
+      [25, "Minis", "mini"],
+      [26, "Sidekicks", "mini"],
+      [27, "Magic Items", "item"],
+      [28, "Traps", "trap"],
+      [29, "Fahrzeuge", "vehicle"],
+      [30, "Kreationskristalle", "creation_crystal"],
+      [31, "Portale", null],
+    ];
+    for (const [id, name, gruppe] of kat) {
+      await db.exec(`insert into public.categories
+                       (id, series_code, name, position, catalog_group)
+                     values (${id}, 'SA', '${name}', ${id},
+                             ${gruppe === null ? "null" : `'${gruppe}'`});`);
+    }
+    const anlegen72 = async (id: string, name: string, katId: number,
+                             kunst = "standard", status = "public") =>
+      db.exec(`insert into public.skylanders
+                 (sky_id, name, slug, series_code, category_id, item_type,
+                  card_type, is_active, catalog_visible, catalog_status, source)
+               values ('${id}', '${name}', '${id.toLowerCase()}', 'SA', ${katId},
+                       'figure', '${kunst}', true, ${status === "public"},
+                       '${status}', 'admin');`);
+
+    /* Die Faelle des Betreibers, namentlich. */
+    await anlegen72("SKY-9301", "P72 Spyro", 20, "standard");
+    await anlegen72("SKY-9302", "P72 Legendary Bouncer", 21, "legendary");  // Giant+Legendary
+    await anlegen72("SKY-9303", "P72 Fire Torch", 28, "special");           // Trap+Special
+    await anlegen72("SKY-9304", "P72 Chill Light Core", 20, "special");     // LightCore allein
+    await anlegen72("SKY-9305", "P72 Legendary LightCore Chill", 20, "legendary");
+    await anlegen72("SKY-9306", "P72 Employee LightCore", 20, "prestige");
+    await anlegen72("SKY-9307", "P72 White Flocked LightCore", 20, "standard");
+    await anlegen72("SKY-9308", "P72 Barkley", 26, "standard");             // Sidekick
+    await anlegen72("SKY-9309", "P72 Eye Small", 25, "standard");           // Mini
+    await anlegen72("SKY-9310", "P72 Hot Streak", 29, "chase");             // Vehicle+Chase
+    await anlegen72("SKY-9311", "P72 Portal", 31, "standard");              // ohne Gruppe
+    await anlegen72("SKY-9312", "P72 Gusto", 24, "elite");                  // Sensei+Elite
+    await anlegen72("SKY-9313", "P72 Kristall", 30, "dark");                // Crystal+Dark
+    await anlegen72("SKY-9314", "P72 Wash Buckler", 22, "standard");        // Swapper
+    await anlegen72("SKY-9315", "P72 Snap Shot", 23, "standard");           // Master
+
+    /*
+     * DIE KURATIERTE LISTE DER MIGRATION TRIFFT DIESE ZEILEN NICHT — sie
+     * nennt die echten SKY-IDs. Fuer die Probe werden die vier erfundenen
+     * LightCores deshalb NACH dem Lauf von Hand zugeordnet, und die
+     * Erstbelegung wird an den echten Regeln geprueft.
+     */
+    const kunstVor = await w72(
+      `select coalesce(md5(string_agg(sky_id || '|' || card_type, E'\n'
+                                      order by sky_id)), '(leer)') as w
+         from public.skylanders`);
+
+    /* ---- A: ohne 0162 bricht sie ab. */
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;
+                   alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id'));`);
+    const ohne0162 = await fahre(db, M163);
+    sag72("ohne 0162 bricht 0163 ab — und nennt die Reihenfolge",
+          ohne0162 !== null && ohne0162.includes("setzt 0162 voraus"),
+          (ohne0162 ?? "DURCHGELAUFEN").slice(0, 60));
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;
+                   alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id',
+                                      'market_price', 'deleted'));`);
+
+    /* ---- B: der gute Lauf. */
+    const f163 = await fahre(db, M163);
+    sag72("0163 laeuft", f163 === null, f163 ?? "durch");
+    /*
+     * OHNE DIE MIGRATION GIBT ES NICHTS ZU PRUEFEN, und jede weitere Zeile
+     * liefe in „column types does not exist" — ein Fehlgrund, der den
+     * eigentlichen verdeckt. Also hier abbrechen und BERICHTEN.
+     */
+    if (f163 !== null) {
+      probe.push({
+        name: "P72 0163: der Type als MENGE und genau ein Banner",
+        ok: false,
+        sagt: `0163 LAEUFT NICHT: ${f163}`,
+      });
+    } else {
+    const zweimal = await fahre(db, M163);
+    sag72("ein zweiter Lauf prallt ab", zweimal !== null && zweimal.includes("steht schon"),
+          (zweimal ?? "DURCHGELAUFEN").slice(0, 44));
+
+    /* ---- C: DIE KARTENKUNST HAT SICH NICHT BEWEGT. */
+    const kunstNach = await w72(
+      `select coalesce(md5(string_agg(sky_id || '|' || card_type, E'\n'
+                                      order by sky_id)), '(leer)') as w
+         from public.skylanders`);
+    sag72("DIE KARTENKUNST IST ZEICHENGLEICH — derselbe Abdruck vor und nach "
+          + "der Erstbelegung", kunstVor === kunstNach,
+          `${kunstVor.slice(0, 12)} / ${kunstNach.slice(0, 12)}`);
+
+    /* ---- D: die Erstbelegung, Zeile fuer Zeile. */
+    const menge = async (id: string): Promise<string> => w72(
+      `select coalesce(array_to_string(types, '+'), '(null)')
+              || ' / ' || coalesce(visible_type, '-')
+              || ' / ' || visible_type_decided::text as w
+         from public.skylanders where sky_id = '${id}'`);
+    for (const [id, erwartet, was] of [
+      ["SKY-9301", " / - / false", "eine Figur ohne alles bleibt Standard"],
+      ["SKY-9302", "giant+legendary / legendary / true", "GIANT + LEGENDARY"],
+      ["SKY-9303", "special+trap / special / true", "TRAP + SPECIAL"],
+      ["SKY-9310", "chase+vehicle / chase / true", "VEHICLE + CHASE"],
+      ["SKY-9312", "elite+sensei / elite / true", "SENSEI + ELITE"],
+      ["SKY-9313", "crystal+dark / dark / true", "CRYSTAL + DARK"],
+      ["SKY-9308", "sidekick / - / false", "SIDEKICK — aus dem Kategorienamen"],
+      ["SKY-9309", "mini / - / false", "MINI — ebenso, und nicht dasselbe"],
+      ["SKY-9314", "swapper / - / false", "SWAPPER"],
+      ["SKY-9315", "master / - / false", "MASTER (Trap Master)"],
+      ["SKY-9311", " / - / false", "ein PORTAL bekommt keinen Figurentype"],
+    ] as const) {
+      const ist = await menge(id);
+      sag72(`Erstbelegung ${was}`, ist === erwartet, `${id} ${ist}`);
+    }
+    sag72("und keine Gruppe ist auf einem Banner gelandet (D4): Zeilen mit "
+          + "Gruppentype UND Banner, deren Banner ein Gruppentype ist",
+          await w72(
+            `select count(*)::text as w from public.skylanders
+              where visible_type = any (array['giant','swapper','master','sensei',
+                                              'mini','sidekick','item','trap',
+                                              'vehicle','crystal'])`) === "0",
+          "0");
+
+    /* ---- E: die Menge ist kanonisch — der Trigger. */
+    await db.exec(`update public.skylanders
+                      set types = array['legendary','giant','legendary']
+                    where sky_id = 'SKY-9302';`);
+    sag72("der Trigger macht die Menge kanonisch: sortiert, jeder Wert einmal",
+          (await w72("select array_to_string(types, '+') as w"
+                     + " from public.skylanders where sky_id = 'SKY-9302'"))
+          === "giant+legendary", await menge("SKY-9302"));
+
+    /* ---- F: DIE MITGLIEDSCHAFT, AN DER TABELLE VORBEI VERSUCHT. */
+    const fremd = await tu72(
+      "update public.skylanders set visible_type = 'chase' where sky_id = 'SKY-9302';");
+    sag72("DIE CHECK WEIST EIN BANNER AB, DAS NICHT IN DER MENGE STEHT — auch "
+          + "an jeder Funktion vorbei",
+          fremd !== null && fremd.includes("skylanders_visible_type_member"),
+          (fremd ?? "DURCHGELAUFEN").slice(0, 70));
+    const unbekannt = await tu72(
+      "update public.skylanders set types = array['giant','superduper']"
+      + " where sky_id = 'SKY-9302';");
+    sag72("und ein unbekannter Type an der Menge ebenso",
+          unbekannt !== null && unbekannt.includes("skylanders_types_known"),
+          (unbekannt ?? "DURCHGELAUFEN").slice(0, 70));
+    const unentschieden = await tu72(
+      "update public.skylanders set visible_type = 'giant',"
+      + " visible_type_decided = false where sky_id = 'SKY-9302';");
+    sag72("und ein Banner ohne Entscheidung auch",
+          unentschieden !== null && unentschieden.includes("visible_type_decided"),
+          (unentschieden ?? "DURCHGELAUFEN").slice(0, 70));
+
+    /* ---- G: ALLE SIEBZEHN WERTE sind einzeln zulaessig. */
+    const alle = ["giant", "swapper", "master", "sensei", "mini", "sidekick",
+                  "item", "trap", "vehicle", "crystal", "lightcore", "special",
+                  "dark", "legendary", "elite", "chase", "prestige"];
+    let einzeln = 0;
+    for (const t of alle) {
+      const f = await tu72(
+        `select public.admin_set_figure_types('SKY-9301', array['${t}']);`);
+      if (f === null
+          && (await w72("select array_to_string(types, '+') as w"
+                        + " from public.skylanders where sky_id = 'SKY-9301'")) === t) {
+        einzeln += 1;
+      }
+    }
+    sag72("alle siebzehn Types sind einzeln zuweisbar", einzeln === 17,
+          `${einzeln} von 17`);
+
+    /* ---- H: DIE VIER KOMBINATIONEN DES BETREIBERS, ueber die RPC. */
+    for (const [paar, was] of [
+      [["lightcore", "legendary"], "Legendary + LightCore"],
+      [["mini", "chase"], "Mini + Chase"],
+      [["giant", "legendary"], "Giant + Legendary"],
+      [["trap", "special"], "Trap + Special"],
+    ] as const) {
+      const f = await tu72(
+        `select public.admin_set_figure_types('SKY-9301',`
+        + ` array['${paar[0]}','${paar[1]}']);`);
+      const ist = await w72("select array_to_string(types, '+') as w"
+                            + " from public.skylanders where sky_id = 'SKY-9301'");
+      const beide = ist.split("+").sort().join("+")
+                 === [...paar].sort().join("+");
+      sag72(`${was} stehen NEBENEINANDER`, f === null && beide,
+            `${f ?? ""} {${ist}}`);
+    }
+
+    /* ---- I: das Banner — nur ein hinterlegter Type, und „–" bleibt. */
+    await db.exec("select public.admin_set_figure_types('SKY-9301',"
+                  + " array['lightcore','legendary']);");
+    const nichtDrin = await tu72(
+      "select public.admin_set_visible_type('SKY-9301', 'chase');");
+    sag72("die RPC weist einen Type ab, der nicht zugeordnet ist — und NENNT, "
+          + "was zur Wahl stand",
+          nichtDrin !== null && nichtDrin.includes("nicht zugeordnet")
+          && nichtDrin.includes("legendary"),
+          (nichtDrin ?? "DURCHGELAUFEN").slice(0, 80));
+    const gesetzt = await tu72(
+      "select public.admin_set_visible_type('SKY-9301', 'legendary');");
+    sag72("LEGENDARY wird Banner, LightCore bleibt hinterlegt",
+          gesetzt === null && (await menge("SKY-9301"))
+            === "legendary+lightcore / legendary / true",
+          await menge("SKY-9301"));
+    const gewechselt = await tu72(
+      "select public.admin_set_visible_type('SKY-9301', 'lightcore');");
+    sag72("und der Wechsel auf LIGHTCORE laesst Legendary stehen",
+          gewechselt === null && (await menge("SKY-9301"))
+            === "legendary+lightcore / lightcore / true",
+          await menge("SKY-9301"));
+    const strich = await tu72(
+      "select public.admin_set_visible_type('SKY-9301', null);");
+    sag72("AUSDRUECKLICHES „–“: kein Banner, aber ENTSCHIEDEN — der Vorschlag "
+          + "greift nie wieder",
+          strich === null && (await menge("SKY-9301"))
+            === "legendary+lightcore / - / true",
+          await menge("SKY-9301"));
+    const leer = await tu72(
+      "select public.admin_set_visible_type('SKY-9301', '  ');");
+    sag72("ein leerer String ist dasselbe wie „–“", leer === null
+          && (await menge("SKY-9301")) === "legendary+lightcore / - / true",
+          await menge("SKY-9301"));
+
+    /* ---- J: wird der sichtbare Type entfernt, faellt das Banner auf „–". */
+    await db.exec("select public.admin_set_visible_type('SKY-9301', 'legendary');");
+    const entfernt = await tu72(
+      "select public.admin_set_figure_types('SKY-9301', array['lightcore']);");
+    sag72("ENTFERNEN DES SICHTBAREN TYPES setzt das Banner auf ausdrueckliches "
+          + "„–“ — und die uebrigen Types bleiben",
+          entfernt === null && (await menge("SKY-9301")) === "lightcore / - / true",
+          await menge("SKY-9301"));
+
+    /* ---- K: eine Zeile OHNE Banner bleibt UNENTSCHIEDEN. */
+    await db.exec("select public.admin_set_figure_types('SKY-9309',"
+                  + " array['mini','chase']);");
+    sag72("eine Zeile ohne Banner bleibt nach einer Mengenaenderung "
+          + "UNENTSCHIEDEN — sonst waere der Vorschlag still stillgelegt",
+          (await menge("SKY-9309")) === "chase+mini / - / false",
+          await menge("SKY-9309"));
+
+    /* ---- L: das Journal. */
+    const journal = await w72(
+      `select coalesce(string_agg(field || ':' || coalesce(old_value, '-') || '>'
+                                  || coalesce(new_value, '-'), ', '
+                                  order by changed_at, id), '(leer)') as w
+         from public.catalog_admin_changes
+        where entity_id = 'SKY-9301' and field in ('types', 'visible_type')`);
+    sag72("jede Mengen- und Banneraenderung steht im Journal",
+          journal.includes("types:") && journal.includes("visible_type:")
+          && journal.includes("legendary>-"),
+          journal.slice(0, 120));
+
+    /* ---- M: keine andere Spalte bewegt sich. */
+    const nebenan = await w72(
+      `select (card_type = 'standard' and name = 'P72 Spyro'
+           and slug = 'sky-9301' and series_code = 'SA' and category_id = 20
+           and catalog_status = 'public' and catalog_visible
+           and base_sky_id is null and character_id is null)::text as w
+         from public.skylanders where sky_id = 'SKY-9301'`);
+    sag72("und KEINE andere Spalte der Zeile — auch nicht die Kartenkunst",
+          nebenan === "true", nebenan);
+
+    /* ---- N: ohne Adminrecht gar nichts. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select false $stub$;`);
+    const ohneRecht1 = await tu72(
+      "select public.admin_set_figure_types('SKY-9302', array['giant']);");
+    const ohneRecht2 = await tu72(
+      "select public.admin_set_visible_type('SKY-9302', 'giant');");
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    sag72("ohne Adminrecht weisen beide ab (42501)",
+          ohneRecht1 !== null && ohneRecht1.includes("42501")
+          && ohneRecht2 !== null && ohneRecht2.includes("42501"),
+          `${(ohneRecht1 ?? "DURCH").slice(0, 16)} | ${(ohneRecht2 ?? "DURCH").slice(0, 16)}`);
+
+    /* ---- O: DER WETTLAUF. Zwei Aenderungen an derselben Zeile. */
+    const race = await tu72(
+      `do $t$
+       begin
+         perform public.admin_set_figure_types('SKY-9313', array['crystal']);
+         perform public.admin_set_visible_type('SKY-9313', 'crystal');
+         perform public.admin_set_figure_types('SKY-9313', array['crystal','dark']);
+       end $t$;`);
+    sag72("drei Aenderungen in EINER Transaktion: die letzte gilt, das Banner "
+          + "bleibt gueltig", race === null
+          && (await menge("SKY-9313")) === "crystal+dark / crystal / true",
+          `${race ?? ""} ${await menge("SKY-9313")}`);
+
+    /* ---- P: DIE ZUSAMMENFUEHRUNG traegt die Menge. */
+    await anlegen72("SKY-9320", "P72 Ziel", 20, "standard");
+    await anlegen72("SKY-9321", "P72 Entwurf", 20, "standard", "draft");
+    await db.exec("select public.admin_set_figure_types('SKY-9321',"
+                  + " array['giant','chase']);");
+    const plan = await w72(
+      `select coalesce((select string_agg(e.wert ->> 'field', ',' order by
+                                          e.wert ->> 'field')
+                          from jsonb_array_elements(
+                                 public.admin_merge_plan('SKY-9321','SKY-9320',null))
+                               as e(wert)), '(leer)') as w`);
+    sag72("der Plan nennt `types` als neuntes Feld",
+          plan.includes("types"), plan);
+    const verschmolzen = await tu72(
+      "select public.admin_merge_draft('SKY-9321','SKY-9320',null,null);");
+    sag72("und die Zusammenfuehrung uebernimmt sie",
+          verschmolzen === null
+          && (await w72("select array_to_string(types, '+') as w"
+                        + " from public.skylanders where sky_id = 'SKY-9320'"))
+             === "chase+giant",
+          `${verschmolzen ?? ""} ${await menge("SKY-9320")}`);
+
+    /* ---- Q: ein Entwurf OHNE Types nimmt dem Ziel nichts. */
+    await anlegen72("SKY-9322", "P72 Entwurf leer", 20, "standard", "draft");
+    await db.exec("select public.admin_set_visible_type('SKY-9320', 'giant');");
+    const leerVerschmolzen = await tu72(
+      "select public.admin_merge_draft('SKY-9322','SKY-9320',null,null);");
+    sag72("ein Entwurf OHNE Types laesst die Menge des Ziels unberuehrt",
+          leerVerschmolzen === null
+          && (await menge("SKY-9320")) === "chase+giant / giant / true",
+          `${leerVerschmolzen ?? ""} ${await menge("SKY-9320")}`);
+
+    /* ---- R: faellt das Banner des Ziels aus der uebernommenen Menge,
+     *         bricht die Zusammenfuehrung NICHT ab. */
+    await anlegen72("SKY-9323", "P72 Entwurf anders", 20, "standard", "draft");
+    await db.exec("select public.admin_set_figure_types('SKY-9323',"
+                  + " array['trap','special']);");
+    const andersVerschmolzen = await tu72(
+      "select public.admin_merge_draft('SKY-9323','SKY-9320',null,null);");
+    sag72("faellt das Banner aus der uebernommenen Menge, wird es auf „–“ "
+          + "gesetzt — und die Zusammenfuehrung laeuft durch",
+          andersVerschmolzen === null
+          && (await menge("SKY-9320")) === "special+trap / - / true",
+          `${andersVerschmolzen ?? ""} ${await menge("SKY-9320")}`);
+
+    /* ---- S: die Variantenbeziehung ist unberuehrt (D7). */
+    await anlegen72("SKY-9330", "P72 Basis", 20, "standard");
+    await anlegen72("SKY-9331", "P72 Gold Basis", 20, "standard");
+    await db.exec("select public.admin_set_variant_base('SKY-9331','SKY-9330',false);");
+    await db.exec("select public.admin_set_figure_types('SKY-9331', array['chase']);");
+    sag72("ein Type erzeugt KEINE Variantenbeziehung, und eine "
+          + "Variantenbeziehung keinen Type (D7)",
+          await w72(
+            `select ((select base_sky_id from public.skylanders
+                       where sky_id = 'SKY-9331') = 'SKY-9330'
+                 and (select cardinality(types) from public.skylanders
+                       where sky_id = 'SKY-9330') = 0)::text as w`) === "true",
+          `${await menge("SKY-9330")} | ${await menge("SKY-9331")}`);
+
+    /* ================================================================
+     * U: DIE ZWEI MESSENDEN WAECHTER DER HUELLE — aus der Datei
+     *    geschnitten und hier wirklich gefahren.
+     *
+     * WARUM DAS HIERHIN GEHOERT. `staging-0163.sql` wird vom Bediener in
+     * den SQL-Editor eingefuegt; was dort schiefgeht, geht in einer
+     * Transaktion auf der echten Datenbank schief. Die Huelle traegt seit
+     * dem 2026-10-29 zwei Waechter, die den Bestand MESSEN statt eine Zahl
+     * zu nennen — der eingefrorene Abdruck `4d6bbb02…` war nach zwei
+     * Stunden redaktioneller Arbeit des Betreibers veraltet und haette die
+     * Transaktion abgebrochen.
+     *
+     * Gefahren wird der ECHTE Text aus der Datei, nicht eine Kopie: so
+     * kann die Probe nicht davon abweichen, was der Bediener einfuegt.
+     * ============================================================= */
+    {
+      const huelle = readFileSync("supabase/operations/staging-0163.sql", "utf8");
+      const schnitt = (von: string, bis: string): string => {
+        const a = huelle.indexOf(von);
+        const b = huelle.indexOf(bis, a);
+        return a < 0 || b < 0 ? "" : huelle.slice(a, b);
+      };
+      /* A7: die zwei `set_config`-Anweisungen. */
+      const a7 = schnitt("perform set_config('skyisles.kunst_vor'",
+                         "  /*\n   * A7b:");
+      /* B3 und B5, je bis zum naechsten Waechter. */
+      const b3 = schnitt("v_vorher := current_setting", "  /* B4:");
+      const b5 = schnitt("v_erwartet := current_setting", "  /*\n   * UND DIE REGEL");
+      const rumpf = (sql: string) =>
+        `do $u$ declare v_n integer; v_vorher text; v_nachher text;`
+        + ` v_erwartet text; begin ${sql} end $u$;`;
+
+      sag72("Aufbau U: die drei Blöcke sind aus der Hülle geschnitten",
+            a7 !== "" && b3 !== "" && b5 !== "",
+            `A7 ${a7.length} · B3 ${b3.length} · B5 ${b5.length}`);
+
+      /* ---- U1: ohne A7 brechen beide ab, und sie sagen warum. */
+      const ohneA7 = await tu72(rumpf(b3));
+      sag72("OHNE den abgelegten Wert bricht B3 ab — ein Riegel, der sich "
+            + "durch Weglassen entschaerfen laesst, ist keiner",
+            ohneA7 !== null && ohneA7.includes("Waechter A7"),
+            (ohneA7 ?? "DURCHGELAUFEN").slice(0, 60));
+      const ohneA7b = await tu72(rumpf(b5));
+      sag72("und B5 ebenso", ohneA7b !== null && ohneA7b.includes("Waechter A7"),
+            (ohneA7b ?? "DURCHGELAUFEN").slice(0, 60));
+
+      /* ---- U2: mit A7 und unveraenderter Kartenkunst gehen beide durch. */
+      const gut = await tu72(
+        `begin;\n${rumpf(a7)}\n${rumpf(b3)}\n${rumpf(b5)}\ncommit;`);
+      sag72("MIT dem abgelegten Wert und unveraenderter Kartenkunst gehen "
+            + "beide durch — bei JEDEM Bestand, ohne eingefrorene Zahl",
+            gut === null, gut ?? "durch");
+
+      /* ---- U3: und sie FANGEN eine veraenderte Kartenkunst. */
+      const faengt = await tu72(
+        `begin;\n${rumpf(a7)}\n`
+        + `update public.skylanders set card_type = 'chase'`
+        + ` where sky_id = 'SKY-9301';\n${rumpf(b3)}\ncommit;`);
+      await tu72("rollback;");
+      sag72("UND SIE FANGEN EINE VERAENDERTE KARTENKUNST — vorher/nachher "
+            + "stehen beide in der Meldung",
+            faengt !== null && faengt.includes("KARTENKUNST hat sich bewegt"),
+            (faengt ?? "DURCHGELAUFEN").slice(0, 70));
+      sag72("und die Transaktion ist zurueckgerollt: die Kartenkunst steht "
+            + "unveraendert da",
+            (await w72("select card_type as w from public.skylanders"
+                       + " where sky_id = 'SKY-9301'")) === "standard",
+            await w72("select card_type as w from public.skylanders"
+                      + " where sky_id = 'SKY-9301'"));
+    }
+
+    /* ---- T: die Ruecknahme. */
+    const journalVorR = await w72(
+      "select count(*)::text as w from public.catalog_admin_changes"
+      + " where field in ('types', 'visible_type')");
+    const rueck = await fahre(db, R163);
+    const fort = await w72(
+      `select (select count(*) from pg_attribute a
+                where a.attrelid = to_regclass('public.skylanders')
+                  and a.attname in ('types','visible_type','visible_type_decided')
+                  and not a.attisdropped)::text as w`);
+    const kunstBleibt = await w72(
+      `select (select count(*) from pg_attribute a
+                where a.attrelid = to_regclass('public.skylanders')
+                  and a.attname = 'card_type' and not a.attisdropped)::text as w`);
+    const journalNachR = await w72(
+      "select count(*)::text as w from public.catalog_admin_changes"
+      + " where field in ('types', 'visible_type')");
+    sag72("R0163 verweigert, solange die 0163-Fassung der Zusammenfuehrung "
+          + "steht — sie wuerde eine Spalte schreiben, die es nicht mehr gibt",
+          rueck !== null && rueck.includes("admin_merge_plan"),
+          (rueck ?? "DURCHGELAUFEN").slice(0, 70));
+    /*
+     * ZURUECK MIT DEN ZWEI RUEMPFEN — und NICHT mit der ganzen Datei `0157`.
+     *
+     * DAS IST EIN ECHTER BEFUND UND KEINE BEQUEMLICHKEIT: `0157` schreibt
+     * auch die Audit-Constraint neu, mit ZEHN Werten. Im Journal stehen
+     * inzwischen Zeilen mit `field = 'types'`, und die Constraint wird beim
+     * Anlegen gegen den Bestand geprueft — der Lauf scheitert also an seiner
+     * eigenen Regel (`23514`). Deshalb nennt R0163 ausdruecklich „die
+     * Abschnitte 4 und 5" und nicht „die Datei", und hier wird genau das
+     * getan: die zwei Funktionsdefinitionen, herausgeschnitten.
+     */
+    const t0157 = readFileSync(
+      join(MIG_DIR, "0157_audit_fields_and_automatic_notes.sql"), "utf8");
+    const schnitt = (marke: string): string => {
+      const a = t0157.indexOf(marke);
+      const b = t0157.indexOf("\n$$;", a);
+      return a < 0 || b < 0 ? "" : t0157.slice(a, b + 4);
+    };
+    const zurueck = await tu72(
+      schnitt("create or replace function public.admin_merge_plan("));
+    const zurueck2 = zurueck !== null ? zurueck : await tu72(
+      schnitt("create or replace function public.admin_merge_draft(\n"
+              + "  p_draft      text,\n  p_target     text,\n"
+              + "  p_image_path text,\n  p_selection  jsonb\n)"));
+    const rueck2 = zurueck2 === null ? await fahre(db, R163)
+                                     : `0157-Abschnitt: ${zurueck2}`;
+    sag72("danach entfernt sie die drei Spalten, laesst card_type stehen und "
+          + "jede Journalzeile",
+          rueck2 === null && fort !== "0" && kunstBleibt === "1"
+          && journalVorR === journalNachR && Number(journalVorR) > 0,
+          `${rueck2 ?? "durch"} · Spalten vorher ${fort} · card_type `
+          + `${kunstBleibt} · Journal ${journalVorR}/${journalNachR}`);
+    const fortNach = await w72(
+      `select (select count(*) from pg_attribute a
+                where a.attrelid = to_regclass('public.skylanders')
+                  and a.attname in ('types','visible_type','visible_type_decided')
+                  and not a.attisdropped)::text as w`);
+    sag72("und die drei Spalten sind wirklich fort", fortNach === "0", fortNach);
+
+    probe.push({
+      name: "P72 0163: der Type als MENGE und genau ein Banner. Die "
+        + "Erstbelegung aus Gruppe, Kategoriename und Kartentyp laesst die "
+        + "KARTENKUNST zeichengleich — derselbe Abdruck vor und nach dem Lauf; "
+        + "Giant+Legendary, Trap+Special, Vehicle+Chase, Sensei+Elite und "
+        + "Crystal+Dark stehen nebeneinander, Sidekick und Mini sind "
+        + "auseinandergehalten, ein Portal bekommt keinen Figurentype und "
+        + "keine Gruppe landet auf einem Banner. Die MITGLIEDSCHAFT ist eine "
+        + "CHECK: ein Banner ausserhalb der Menge, ein unbekannter Type und "
+        + "ein Banner ohne Entscheidung werden an der Tabelle selbst "
+        + "abgewiesen. Alle siebzehn Werte sind einzeln zuweisbar, die vier "
+        + "Kombinationen des Betreibers stehen nebeneinander, „–“ bleibt "
+        + "erhalten, das Entfernen des sichtbaren Types setzt auf „–“ "
+        + "zurueck, eine Zeile ohne Banner bleibt unentschieden, ohne "
+        + "Adminrecht geht nichts (42501), die Zusammenfuehrung traegt die "
+        + "Menge als neuntes Feld, und die Variantenbeziehung bleibt "
+        + "unberuehrt. Dazu die Ruecknahme, die card_type und jede "
+        + "Journalzeile stehen laesst",
+      ok: ok72,
+      sagt: `0163: ${befund72.join(" · ")}`,
+    });
+    }
+  }
+
+  /* =====================================================================
+   * P73 — 0164: der TYPE kommt in die Plattformsicherung.
+   *
+   * WAS DIESER DURCHGANG BEWEIST, und keine andere Stelle kann es: dass ein
+   * Archiv OHNE diese Migration die Types VERLIERT, und mit ihr nicht. Nicht
+   * am Rumpf abgelesen, sondern am Umlauf: sichern, loeschen, aus dem Archiv
+   * wieder einspielen, vergleichen.
+   *
+   * UND DASS ALLE DREI FELDER NOETIG SIND. Mit `types` allein stuende die
+   * Menge nach dem Einspielen wieder da und JEDES Banner waere fort; ohne
+   * `visible_type_decided` waere „ausdruecklich kein Banner" danach wieder
+   * „unentschieden". Jedes der drei wird einzeln geprueft.
+   * ===================================================================== */
+  {
+    const befund73: string[] = [];
+    let ok73 = true;
+    const sag73 = (was: string, gut: boolean, text: string): void => {
+      befund73.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok73 = false;
+    };
+
+    const M163 = join(MIG_DIR, "0163_catalog_types.sql");
+    const M164 = join(MIG_DIR, "0164_platform_export_types.sql");
+    const A0160 = "ff4f38e61cbd4e5857ea914d6be68d44";
+    const A0164 = "7e9e58e2d84a9f8a7c660262aa21926b";
+
+    const db = await frischNach0136();
+    await serienUndIdentitaet(db);
+    const w73 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const tu73 = async (sql: string): Promise<string | null> => {
+      try { await db.exec(sql); return null; }
+      catch (e) {
+        const f = e as { message?: string; code?: string };
+        return `[${f.code ?? "?"}] ${(f.message ?? "FEHLER").slice(0, 160)}`;
+      }
+    };
+    const abdruck73 = async (): Promise<string> => w73(
+      "select md5(prosrc) as w from pg_proc p join pg_namespace n"
+      + " on n.oid = p.pronamespace where n.nspname = 'public'"
+      + " and p.proname = 'system_platform_export'");
+
+    /* ---- Die Welt: wie P72, plus der Exportrumpf aus `0160`. */
+    await db.exec(`create schema if not exists auth;
+                   create table if not exists auth.users (id uuid primary key);`);
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                   language sql as $stub$ select true $stub$;`);
+    await db.exec(`create unique index if not exists z_sky13_uniq
+                     on public.skylanders (sky_id);`);
+    await db.exec(`create unique index if not exists z_ce13_uniq
+                     on public.catalog_editorial (sky_id);`);
+    await db.exec(`create sequence if not exists public.z_char13_seq start 1;
+                   alter table public.characters
+                     alter column id set default nextval('public.z_char13_seq');
+                   create unique index if not exists z_char13_id
+                     on public.characters (id);`);
+    await db.exec(`create unique index if not exists characters_canonical_name_key
+                     on public.characters (lower(canonical_name));`);
+    await db.exec(`insert into public.categories
+                     (id, series_code, name, position, catalog_group)
+                   values (40, 'SA', 'Figuren', 1, 'figure'),
+                          (41, 'SA', 'Traps', 2, 'trap');`);
+    await db.exec(`update public.skylanders set card_type = 'standard'
+                    where card_type is null
+                       or card_type not in ('standard', 'special', 'elite',
+                                            'dark', 'legendary', 'chase',
+                                            'prestige');`);
+    await db.exec(`alter table public.skylanders
+                     add constraint skylanders_card_type_known
+                     check (card_type in ('standard', 'special', 'elite', 'dark',
+                                          'legendary', 'chase', 'prestige'));`);
+    await db.exec(`alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id'));`);
+    for (const m of ["0154_merge_draft_into_figure.sql", "0155_discard_draft.sql",
+                     "0156_merge_selected_fields.sql",
+                     "0157_audit_fields_and_automatic_notes.sql",
+                     "0158_figure_families.sql", "0159_variant_base_figure.sql"]) {
+      const f = await fahre(db, join(MIG_DIR, m));
+      if (f !== null) sag73(`Aufbau ${m.slice(0, 4)}`, false, f);
+    }
+    /*
+     * DIE VIERZEHN WERTE ERST JETZT — also so, wie die Constraint NACH `0162`
+     * aussieht. `0157` schreibt sie neu und `0159` laesst sie mit zwoelf
+     * Werten zurueck; wer sie vorher setzt, findet sie hinterher kleiner vor,
+     * und `0163` bricht an seiner Reihenfolgepruefung ab. Daran ist mein
+     * erster Lauf dieses Durchgangs gescheitert.
+     */
+    await db.exec(`alter table public.catalog_admin_changes
+                     drop constraint catalog_admin_changes_field_known;
+                   alter table public.catalog_admin_changes
+                     add constraint catalog_admin_changes_field_known
+                     check (field in ('catalog_visible', 'display_name_override',
+                                      'admin_note', 'catalog_group',
+                                      'image_override_path', 'card_type', 'created',
+                                      'catalog_status', 'merged_from', 'discarded',
+                                      'character_id', 'base_sky_id',
+                                      'market_price', 'deleted'));`);
+    await db.exec(`drop trigger if exists skylanders_canonical_types
+                     on public.skylanders;
+                   drop function if exists public.skylanders_canonical_types();
+                   drop function if exists
+                     public.admin_set_figure_types(text,text[]);
+                   drop function if exists public.admin_set_visible_type(text,text);
+                   alter table public.skylanders
+                     drop constraint if exists skylanders_visible_type_decided,
+                     drop constraint if exists skylanders_visible_type_member,
+                     drop constraint if exists skylanders_types_known,
+                     drop column if exists visible_type_decided,
+                     drop column if exists visible_type,
+                     drop column if exists types;`);
+
+    /*
+     * DER EXPORTRUMPF AUS `0160`, aus der Datei geschnitten — das Stub-Schema
+     * traegt die Fassung aus `0164`, weil es aus ALLEN Migrationen entsteht.
+     * Fuer den Riegel muss der VORGAENGER dastehen.
+     */
+    const anweisungVon73 = (datei: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf(
+        "create or replace function public.system_platform_export()");
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+    await db.exec(anweisungVon73(
+      join(MIG_DIR, "0160_platform_export_base_sky_id.sql")));
+    sag73("Aufbau: der Exportrumpf ist der aus 0160",
+          (await abdruck73()) === A0160, await abdruck73());
+
+    /* ---- A: OHNE 0163 bricht 0164 ab. */
+    const ohne0163 = await fahre(db, M164);
+    sag73("ohne 0163 bricht 0164 ab — die drei Spalten fehlen",
+          ohne0163 !== null && ohne0163.includes("setzt 0163 voraus"),
+          (ohne0163 ?? "DURCHGELAUFEN").slice(0, 60));
+
+    /* ---- B: 0163, dann der Bestand. */
+    const f163 = await fahre(db, M163);
+    if (f163 !== null) {
+      probe.push({ name: "P73 0164: der Type in der Plattformsicherung",
+                   ok: false, sagt: `0163 laeuft nicht: ${f163}` });
+    } else {
+      const anlegen73 = async (id: string, name: string, katId: number) =>
+        db.exec(`insert into public.skylanders
+                   (sky_id, name, slug, series_code, category_id, item_type,
+                    card_type, is_active, catalog_visible, catalog_status, source)
+                 values ('${id}', '${name}', '${id.toLowerCase()}', 'SA',
+                         ${katId}, 'figure', 'standard', true, true, 'public',
+                         'admin');`);
+      await anlegen73("SKY-7301", "P73 mit Banner", 41);
+      await anlegen73("SKY-7302", "P73 ohne Banner", 41);
+      await anlegen73("SKY-7303", "P73 ausdruecklich ohne", 41);
+      await db.exec(`select public.admin_set_figure_types('SKY-7301',
+                       array['trap','legendary']);
+                     select public.admin_set_visible_type('SKY-7301', 'legendary');
+                     select public.admin_set_figure_types('SKY-7302',
+                       array['trap','chase']);
+                     select public.admin_set_figure_types('SKY-7303',
+                       array['trap']);
+                     select public.admin_set_visible_type('SKY-7303', null);`);
+
+      /** Der Katalogbereich des Archivs, als eine Zeile je SKY-ID. */
+      const archiv = async (): Promise<string> => w73(
+        `select coalesce(string_agg(x.sky_id || '=' || x.t || '/' || x.v || '/' || x.d,
+                                    ', ' order by x.sky_id), '(leer)') as w
+           from (select e ->> 'sky_id' as sky_id,
+                        coalesce(e ->> 'types', '(FEHLT)') as t,
+                        coalesce(e ->> 'visible_type', '-') as v,
+                        coalesce(e ->> 'visible_type_decided', '(FEHLT)') as d
+                   from jsonb_array_elements(
+                          (public.system_platform_export() -> 'data' -> 'skylanders')) as e
+                  where e ->> 'sky_id' like 'SKY-730%') x`);
+
+      /* ---- C: OHNE 0164 fuehrt das Archiv die Types NICHT. Die Luecke. */
+      const vorher = await archiv();
+      sag73("OHNE 0164 fuehrt das Archiv weder Menge noch Banner — eine "
+            + "Wiederherstellung verlore beides",
+            vorher.includes("(FEHLT)") && !vorher.includes("legendary"),
+            vorher.slice(0, 110));
+
+      /* ---- D: 0164 laeuft. */
+      const lauf = await fahre(db, M164);
+      const nachher = await abdruck73();
+      const laenge = await w73(
+        "select length(prosrc)::text as w from pg_proc p join pg_namespace n"
+        + " on n.oid = p.pronamespace where n.nspname = 'public'"
+        + " and p.proname = 'system_platform_export'");
+      sag73("0164 laeuft; der Rumpf ist der zugesagte und 31248 Zeichen lang",
+            lauf === null && nachher === A0164 && laenge === "31248",
+            `${lauf ?? "durch"} · ${nachher} · ${laenge}`);
+
+      /* DIE UMKEHRPROBE AM LEBENDEN RUMPF: die drei Zeilen abziehen. */
+      const zurueckgedreht = await w73(
+        "select md5(replace(replace(replace(prosrc,"
+        + " E'\\n            ''types'', t.types,', ''),"
+        + " E'\\n            ''visible_type'', t.visible_type,', ''),"
+        + " E'\\n            ''visible_type_decided'', t.visible_type_decided,',"
+        + " '')) as w from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+        + " where n.nspname = 'public' and p.proname = 'system_platform_export'");
+      sag73("zieht man die DREI Zeilen ab, ist er zeichengleich der aus 0160",
+            zurueckgedreht === A0160, zurueckgedreht);
+
+      /* ---- E: MIT 0164 fuehrt das Archiv alle drei Felder. */
+      const nachArchiv = await archiv();
+      sag73("MIT 0164 fuehrt das Archiv Menge, Banner UND das Kennzeichen",
+            nachArchiv === 'SKY-7301=["legendary", "trap"]/legendary/true, '
+                         + 'SKY-7302=["chase", "trap"]/-/false, '
+                         + 'SKY-7303=["trap"]/-/true',
+            nachArchiv);
+
+      /* ================================================================
+       * DER UMLAUF: sichern, loeschen, aus dem Archiv wieder einspielen.
+       * ============================================================= */
+      await db.exec(`create table z_archiv73 as
+                     select public.system_platform_export() as doc;`);
+      await db.exec("delete from public.skylanders where sky_id like 'SKY-730%';");
+      const weg = await w73("select count(*)::text as w from public.skylanders"
+                            + " where sky_id like 'SKY-730%'");
+      const einspielen = await tu73(`
+        insert into public.skylanders
+          (sky_id, name, slug, series_code, category_id, item_type, card_type,
+           is_active, catalog_visible, catalog_status, source,
+           types, visible_type, visible_type_decided)
+        select e ->> 'sky_id', e ->> 'name', e ->> 'slug', e ->> 'series_code',
+               (e ->> 'category_id')::bigint, 'figure', 'standard',
+               (e ->> 'is_active')::boolean, (e ->> 'catalog_visible')::boolean,
+               e ->> 'catalog_status', 'admin',
+               array(select jsonb_array_elements_text(e -> 'types')),
+               e ->> 'visible_type',
+               (e ->> 'visible_type_decided')::boolean
+          from z_archiv73 z,
+               jsonb_array_elements(z.doc -> 'data' -> 'skylanders') as e
+         where e ->> 'sky_id' like 'SKY-730%';`);
+      const danach = await w73(
+        `select coalesce(string_agg(sky_id || '=' || array_to_string(types, '+')
+                                    || '/' || coalesce(visible_type, '-')
+                                    || '/' || visible_type_decided::text,
+                                    ', ' order by sky_id), '(leer)') as w
+           from public.skylanders where sky_id like 'SKY-730%'`);
+      sag73("DER UMLAUF: nach dem Einspielen stehen Menge, Banner und das "
+            + "Kennzeichen wieder da — auch das ausdrueckliche „–“",
+            weg === "0" && einspielen === null
+            && danach === "SKY-7301=legendary+trap/legendary/true, "
+                        + "SKY-7302=chase+trap/-/false, "
+                        + "SKY-7303=trap/-/true",
+            `geloescht ${weg} · ${einspielen ?? "eingespielt"} · ${danach}`);
+
+      /*
+       * UND DIE MITGLIEDSCHAFT HAT DAS EINSPIELEN UEBERLEBT. Das ist der
+       * Grund, warum alle drei Felder mitmuessen: ein Archiv mit `types`
+       * aber ohne `visible_type` koennte eine Zeile nur noch ohne Banner
+       * zurueckbringen, und ein Archiv mit `visible_type` ohne die Menge
+       * braechte eine Zeile, die die CHECK gar nicht annimmt.
+       */
+      const halb = await tu73(`
+        insert into public.skylanders
+          (sky_id, name, slug, series_code, category_id, item_type, card_type,
+           is_active, catalog_visible, catalog_status, source,
+           types, visible_type, visible_type_decided)
+        values ('SKY-7309', 'P73 halbes Archiv', 'sky-7309', 'SA', 41, 'figure',
+                'standard', true, true, 'public', 'admin',
+                '{}', 'legendary', true);`);
+      sag73("ein halbes Archiv — Banner ohne Menge — wird von der CHECK "
+            + "abgewiesen, nicht stillschweigend eingespielt",
+            halb !== null && halb.includes("visible_type_member"),
+            (halb ?? "DURCHGELAUFEN").slice(0, 60));
+
+      /* ---- F: ein zweiter Lauf prallt ab. */
+      const zweimal = await fahre(db, M164);
+      sag73("ein zweiter Lauf prallt am eigenen Abdruck ab",
+            zweimal !== null && zweimal.includes("bereits angewendet"),
+            (zweimal ?? "DURCHGELAUFEN").slice(0, 50));
+
+      /* ---- G: eine fremde Fassung wird nicht ueberschrieben. */
+      await db.exec(`create or replace function public.system_platform_export()
+                     returns jsonb language sql security definer
+                     set search_path = '' as $fremd$ select '{}'::jsonb $fremd$;`);
+      const fremd = await fahre(db, M164);
+      sag73("und eine FREMDE Fassung erst recht nicht",
+            fremd !== null && fremd.includes("nicht der aus 0160"),
+            (fremd ?? "DURCHGELAUFEN").slice(0, 60));
+
+      /* ---- H: die Ruecknahme — sie verweigert bei einer fremden Fassung. */
+      const rueckFremd = await fahre(db,
+        "supabase/rollback/R0164_platform_export_back_to_0160.sql");
+      sag73("R0164 verweigert bei einer fremden Fassung",
+            rueckFremd !== null && rueckFremd.includes("weder der aus 0164"),
+            (rueckFremd ?? "DURCHGELAUFEN").slice(0, 60));
+
+      /* Mit dem Rumpf aus 0164 zurueck: dann sagt sie, was einzufuegen ist. */
+      await db.exec(anweisungVon73(M164));
+      const rueckEcht = await fahre(db,
+        "supabase/rollback/R0164_platform_export_back_to_0160.sql");
+      sag73("mit dem Rumpf aus 0164 verlangt sie den Abschnitt aus 0160 — und "
+            + "ohne ihn schlaegt ihre Nachbedingung an",
+            rueckEcht !== null && rueckEcht.includes("Abschnitt oben fehlt"),
+            (rueckEcht ?? "DURCHGELAUFEN").slice(0, 70));
+
+      /* Und mit dem Abschnitt laeuft sie durch. */
+      await db.exec(anweisungVon73(
+        join(MIG_DIR, "0160_platform_export_base_sky_id.sql")));
+      const rueckGut = await fahre(db,
+        "supabase/rollback/R0164_platform_export_back_to_0160.sql");
+      sag73("mit ihm laeuft sie durch, und der Abdruck ist der aus 0160",
+            rueckGut === null && (await abdruck73()) === A0160,
+            `${rueckGut ?? "durch"} · ${await abdruck73()}`);
+
+      /* ---- I: UND DIE SPALTEN SIND UNBERUEHRT. */
+      sag73("die drei Spalten stehen nach der Ruecknahme unveraendert da — "
+            + "R0164 nimmt nur den Rumpf zurueck",
+            await w73(
+              `select coalesce(string_agg(sky_id || '=' || array_to_string(types, '+'),
+                                          ', ' order by sky_id), '(leer)') as w
+                 from public.skylanders where sky_id like 'SKY-730%'`)
+            === "SKY-7301=legendary+trap, SKY-7302=chase+trap, SKY-7303=trap",
+            "unveraendert");
+
+      probe.push({
+        name: "P73 0164: der TYPE kommt in die Plattformsicherung. Ohne sie "
+          + "fuehrt das Archiv weder Menge noch Banner noch Kennzeichen — mit "
+          + "ihr alle drei, und der UMLAUF beweist es: sichern, loeschen, "
+          + "einspielen, und jede Menge, jedes Banner und jedes ausdrueckliche "
+          + "„–“ steht wieder da. Ein halbes Archiv (Banner ohne Menge) weist "
+          + "die Mitgliedschafts-CHECK ab. Dazu die drei Riegel — ohne 0163, "
+          + "ein zweiter Lauf, eine fremde Fassung —, die Umkehrprobe am "
+          + "lebenden Rumpf (die drei Zeilen abgezogen ergibt zeichengleich "
+          + "den aus 0160) und die Ruecknahme, die nur den Rumpf zurueckdreht "
+          + "und die Spalten stehen laesst",
+        ok: ok73,
+        sagt: `0164: ${befund73.join(" · ")}`,
+      });
+    }
   }
 
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
