@@ -161,10 +161,78 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
     purpose:
       "Der VOLLSTÄNDIGE Katalog, nicht nur die gehandelten Figuren. Der " +
       "Business-Export führt eine Teilmenge; hier fehlt keine Zeile.",
+    /*
+     * `catalog_status` IST SEIT `0153` DABEI, und das war eine eigene
+     * Migration (CAT-02C, Teil B).
+     *
+     * Er ist echter Adminzustand: ohne ihn kaeme jede Zeile, die zum
+     * Zeitpunkt der Sicherung ein Entwurf war, als 'hidden' zurueck —
+     * `catalog_visible` ist bei beiden `false`, und die Unterscheidung
+     * waere fort. Ein Entwurf muss nach einer Wiederherstellung ein
+     * Entwurf sein, also musste das Feld in den Rumpf.
+     *
+     * ES IST EIN FELD, KEIN BEREICH. Deshalb bleibt die Bereichszahl 54 und
+     * `PLATFORM_FORMAT_VERSION` bleibt 2 — anders als bei `favorites`, das
+     * einen Bereich braucht und die Version auf 3 zaehlt. Archive der
+     * Version 2, die vor `0153` entstanden sind, bleiben lesbar und
+     * vollstaendig im Sinne ihrer Version.
+     */
+    /*
+     * `base_sky_id` IST SEIT `0160` DABEI, und das war — wie `0153` — eine
+     * eigene Migration.
+     *
+     * Der Ausschluss, der hier stand, hatte ein Ablaufdatum: `0159` (CAT-07)
+     * gibt jeder Variante eine direkte Beziehung zu ihrer Basisfigur, und
+     * ohne sie im Archiv käme nach einer Wiederherstellung jede Variante als
+     * eigenständige Figur zurück. Die Familie (`character_id`) wäre da, die
+     * MITTE wäre fort — dieselbe Klasse Verlust wie bei `catalog_status` vor
+     * `0153`, nur leiser: es fällt nicht auf, es sieht nur falsch sortiert
+     * aus.
+     *
+     * ES IST EIN FELD, KEIN BEREICH. Deshalb bleibt die Bereichszahl 54 und
+     * `PLATFORM_FORMAT_VERSION` bleibt 2. Archive der Version 2, die vor
+     * `0160` entstanden sind, bleiben lesbar und vollständig im Sinne ihrer
+     * Version — die Vollständigkeitsprüfung in `platform-archive.ts` zählt
+     * Bereiche, nicht Felder.
+     *
+     * WAS DAS FELD AN EINE WIEDERHERSTELLUNG STELLT, steht nicht hier,
+     * sondern in `supabase/checks/0160_restore_order.md`: der Verweis zeigt
+     * auf dieselbe Tabelle, und ein zeilenweises Einspielen in der falschen
+     * Reihenfolge scheitert mit `23503`. Gemessen in Probelauf **P69**.
+     */
+    /*
+     * DIE DREI TYPFELDER SIND SEIT `0164` DABEI (CAT-10) — und es mussten
+     * alle drei sein.
+     *
+     * `types` allein wäre eine halbe Sicherung: die Menge stünde nach einer
+     * Wiederherstellung wieder da, und JEDE Kachel hätte ihr Banner
+     * verloren. Welcher der hinterlegten Types erscheint, ist eine
+     * redaktionelle Entscheidung und aus nichts ableitbar — 175 Zeilen
+     * tragen eine. Und ohne `visible_type_decided` wäre „ausdrücklich kein
+     * Banner" danach wieder „noch nicht entschieden", und der Vorschlag
+     * würde beim nächsten Öffnen etwas anderes anbieten.
+     *
+     * `card_type` STEHT DANEBEN UND BLEIBT. Es ist die KARTENKUNST der
+     * senkrechten Karte, nicht die Typmenge; dass die eine aus der anderen
+     * nicht verlustfrei folgt, ist gemessen
+     * (`supabase/checks/cat10_projection_proof.sql`: eine Zeile hätte ihre
+     * Kartenkunst verloren, und zwei Werte haben denselben Rang).
+     *
+     * DREI FELDER, KEIN BEREICH — also bleibt die Bereichszahl 54 und
+     * `PLATFORM_FORMAT_VERSION` bleibt 2. Probelauf **P73** fährt den
+     * Umlauf: sichern, löschen, einspielen, und jede Menge, jedes Banner und
+     * jedes ausdrückliche „–" steht wieder da.
+     */
     fields: ["sky_id", "name", "slug", "series_code", "category_id", "market_price",
              "price_updated_at", "image_file", "image_override_path", "is_active",
-             "catalog_visible", "display_name_override", "card_type", "source",
-             "character_id", "created_at", "updated_at"],
+             "catalog_visible", "catalog_status", "display_name_override", "card_type",
+             "source", "character_id", "base_sky_id",
+             /* In DIESER Reihenfolge, weil `0164` sie hinter `base_sky_id`
+                einfuegt — `platform-sql.test.ts` vergleicht die Listen der
+                Reihe nach, und das ist richtig so: zwei Reihenfolgen fuer
+                eine Liste waeren zwei Listen. */
+             "types", "visible_type", "visible_type_decided",
+             "created_at", "updated_at"],
     restoreRelevant: true,
   },
   {
