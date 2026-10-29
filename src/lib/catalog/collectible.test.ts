@@ -35,6 +35,7 @@ function figure(categoryName: string, name = "Drobot"): CatalogFigure {
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
   };
 }
 

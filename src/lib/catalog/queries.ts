@@ -19,6 +19,11 @@ import type { Character, Element } from "@/lib/catalog/character";
 import { asElement } from "@/lib/catalog/element";
 import { collectibleOnly, isCollectible, isCollectibleCategory } from "@/lib/catalog/collectible";
 import { asCardType } from "@/lib/catalog/card-type";
+import {
+  asCatalogStatus,
+  statusFromVisibility,
+  type CatalogStatus,
+} from "@/lib/catalog/catalog-status";
 import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { buildSearchIndex } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
@@ -47,16 +52,21 @@ type FigureRow = {
   catalog_visible: boolean;
   display_name_override: string | null;
   character_id: number | null;
+  base_sky_id: string | null;
   card_type: string;
   /* Seit 0135. Optional, damit ein Leser, der die Spalte nicht anfordert,
      dieselbe Zeilenform behält. */
   item_type?: string | null;
+  /* Seit 0163 (CAT-10), aus demselben Grund optional. */
+  types?: string[] | null;
+  visible_type?: string | null;
+  visible_type_decided?: boolean | null;
 };
 
 // One string literal, not a concatenation: PostgREST's typing reads the
 // select list at the type level, and a computed string loses the row type.
 const FIGURE_COLUMNS =
-  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, catalog_visible, display_name_override, card_type, item_type";
+  "sky_id, name, slug, series_code, category_id, market_price, image_file, image_override_path, is_active, character_id, base_sky_id, catalog_visible, display_name_override, card_type, item_type, types, visible_type, visible_type_decided";
 
 type Lookups = {
   series: Map<string, { label: string; position: number }>;
@@ -142,6 +152,16 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     /* Roh weitergegeben, nicht gedeutet: `isCollectible()` ist die eine
        Stelle, die daraus eine Folge zieht (0137). */
     itemType: row.item_type ?? null,
+    /*
+     * DIE TYPMENGE UND DAS BANNER (CAT-10), ebenfalls roh. `bannerType()`
+     * ist die eine Stelle, die daraus ein Banner macht, und sie liest
+     * AUSSCHLIESSLICH `visible_type` — nie die Menge und nie die
+     * Prioritaet: ein abgeleitetes Banner waere eine Veraenderung des
+     * oeffentlichen Katalogs ohne Entscheidung (D4).
+     */
+    types: row.types ?? [],
+    visibleType: row.visible_type ?? null,
+    visibleTypeDecided: row.visible_type_decided ?? false,
     // Filled in by withVariants() once the series context is known — unless
     // an administrator has chosen the public name, which wins over the
     // derivation (ADR-0039).
@@ -158,9 +178,14 @@ export function toFigure(row: FigureRow, lookups: Lookups): CatalogFigure {
     imageOverridePath: row.image_override_path,
     isActive: row.is_active,
     catalogVisible: row.catalog_visible,
+    /* Der gelesene Wert, sonst exakt abgeleitet — siehe `hatStatusSpalte`. */
+    catalogStatus:
+      asCatalogStatus((row as { catalog_status?: unknown }).catalog_status)
+      ?? statusFromVisibility(row.catalog_visible),
     canonicalName: row.name,
     displayNameOverride: row.display_name_override,
     characterId: row.character_id,
+    baseSkyId: row.base_sky_id ?? null,
     // Filled in by withCharacterElement() once the character index is known.
     element: null,
   };
@@ -317,6 +342,54 @@ export function withCharacterFamily(
   });
 }
 
+/**
+ * DIE BASISFIGUR, WO SIE AUSDRÜCKLICH ZUGEORDNET IST (CAT-07).
+ *
+ * Der dritte und genaueste Griff nach der Familie. Die Reihenfolge der
+ * Durchgänge ist die Architektur:
+ *
+ *   1. `withVariants()`        die Namensregel — „Legendary Bash" → „Bash",
+ *                              aber nur wenn „Bash" in derselben Serie
+ *                              wirklich existiert (ADR-0030)
+ *   2. `withCharacterFamily()` der kuratierte Charakter, serienübergreifend
+ *                              (ADR-0070b)
+ *   3. `withBaseFigure()`      diese Funktion: die ausdrücklich zugeordnete
+ *                              Basisfigur, innerhalb EINER Serie
+ *
+ * Jeder spätere überschreibt den früheren, weil er genauer ist. Eine
+ * Namensregel rät; ein Charakter sagt „dieselbe Person"; eine Basisfigur
+ * sagt „Variante GENAU dieser Figur". Nur die letzte hat ein Mensch je
+ * Zeile entschieden.
+ *
+ * SIE SCHREIBT EIN FELD. Das ist dieselbe Sicherheitszusage wie bei
+ * `withCharacterFamily()`: `sortVariantLabel` ist das Siegel, das
+ * `figure-card.tsx` zeichnet, und diese Funktion fasst es nicht an. Eine
+ * Figur, deren Familie sich verbessert, behält genau das Abzeichen, das sie
+ * hatte — auch keines. Und `displayName` bleibt unberührt: „Chrome Spyro"
+ * heißt weiter „Chrome Spyro" und sortiert unter Spyro.
+ *
+ * SIE NIMMT DEN ANZEIGENAMEN DER BASISFIGUR, nicht deren Rohnamen: das ist
+ * der Name, unter dem die Basisfigur selbst einsortiert ist, und nur so
+ * landen beide im gleichen Block. Steht die Basisfigur nicht in der Liste —
+ * weil sie versteckt ist oder ein Entwurf —, bleibt die Variante, wie sie
+ * kam. Eine fehlende Zuordnung beschädigt nichts.
+ */
+export function withBaseFigure(
+  figures: readonly CatalogFigure[],
+): CatalogFigure[] {
+  /* Der Anzeigename je SKY-ID, aus derselben Liste. Kein zweiter Weg und
+     keine zweite Abfrage: `fetchCatalog()` hält den ganzen Katalog ohnehin. */
+  const anzeige = new Map<string, string>();
+  for (const f of figures) anzeige.set(f.skyId, f.displayName);
+
+  return figures.map((figure) => {
+    if (figure.baseSkyId === null) return figure;
+    const basis = anzeige.get(figure.baseSkyId);
+    if (basis === undefined || basis === figure.sortBaseName) return figure;
+    return { ...figure, sortBaseName: basis };
+  });
+}
+
 export type CharacterIndex = Map<number, { canonicalName: string; element: Element | null }>;
 
 /** id -> name and element for every curated character. Nineteen rows today. */
@@ -408,7 +481,11 @@ export async function fetchCatalog(
   // The family pass runs after the name rule and before the sort: it is the
   // curated answer overriding the derived one, and only for sortBaseName.
   const withFamily = withCharacterFamily(withSearch, names);
-  return sortFigures(withCharacterElement(withFamily, characterElements(index)));
+  /* Und zuletzt die ausdrücklich zugeordnete Basisfigur: der genaueste
+     Griff, deshalb der letzte (CAT-07). Auch sie schreibt nur
+     `sortBaseName`. */
+  const withBase = withBaseFigure(withFamily);
+  return sortFigures(withCharacterElement(withBase, characterElements(index)));
 }
 
 /**
@@ -736,4 +813,40 @@ export async function countCollectibleFiguresBySeries(): Promise<Record<string, 
 }
 
 export type { FigureRow, Lookups };
+/**
+ * Der redaktionelle Status je SKY-ID — eine eigene, winzige Abfrage.
+ *
+ * WARUM NICHT IN `FIGURE_COLUMNS`. Zwei Gründe, beide hart:
+ *
+ *   1. `supabase-js` leitet den Zeilentyp aus dem LITERAL der Spaltenliste
+ *      ab. Eine zur Laufzeit zusammengesetzte Liste ergibt
+ *      `GenericStringError` — die Typisierung des ganzen Katalogs fiele weg.
+ *   2. `catalog_status` kommt erst mit Migration `0152`. Die Spalte in die
+ *      Katalogabfrage zu schreiben, bevor sie existiert, beantwortet
+ *      PostgREST mit `42703` — und der Katalog wäre leer, bis jemand
+ *      migriert.
+ *
+ * Deshalb eine Abfrage für sich, die nur der Adminbereich stellt: zwei
+ * Spalten, keine Verknüpfung, und sie DARF fehlschlagen. Fehlt die Spalte,
+ * kommt eine leere Zuordnung zurück, und `statusOf()` leitet den Wert aus
+ * `catalogVisible` ab — **exakt**, denn `0152` füllt die Spalte mit derselben
+ * Rechnung, und vorher kann es keine Entwürfe geben.
+ *
+ * Nach `0152` auf Staging UND Production darf der Fehlerzweig verschwinden;
+ * die Abfrage selbst bleibt, weil Grund 1 bleibt.
+ */
+export async function fetchCatalogStatuses(): Promise<Map<string, CatalogStatus>> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("skylanders")
+    .select("sky_id, catalog_status");
+  if (error !== null || data === null) return new Map();
+  const aus = new Map<string, CatalogStatus>();
+  for (const row of data as { sky_id: string; catalog_status: unknown }[]) {
+    const status = asCatalogStatus(row.catalog_status);
+    if (status !== null) aus.set(row.sky_id, status);
+  }
+  return aus;
+}
+
 export { loadLookups, FIGURE_COLUMNS };

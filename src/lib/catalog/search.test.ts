@@ -41,6 +41,7 @@ function figure(overrides: Partial<CatalogFigure> = {}, namesInSeries: string[] 
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
     displayName: displayNameFor(name, variant),
     sortBaseName: parts.sortBaseName,
     sortVariantLabel: parts.sortVariantLabel,
@@ -186,6 +187,7 @@ describe("groupSearchResults — searching past the active tab", () => {
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
   });
   const figures = [
     make("SKY-0001", "Drobot", "SA"),

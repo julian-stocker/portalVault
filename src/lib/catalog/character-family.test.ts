@@ -349,11 +349,41 @@ describe("J — every surface agrees about the family", () => {
      * One shared helper, four call sites. A surface that derived the family
      * differently would put the same figure in two places depending on where
      * it was looked at.
+     *
+     * COUNTED IN CODE, NOT IN PROSE. The first version counted every textual
+     * occurrence, and a doc comment that NAMED the helper broke it — which
+     * is a finding about the test, not about the code: a comment explaining
+     * the pass order is exactly what should be there. Comments are stripped
+     * before counting.
      */
-    const catalogCalls = (queries.match(/withCharacterFamily\(/g) ?? []).length;
+    const ohneKommentar = (text: string) => text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const catalogCalls =
+      (ohneKommentar(queries).match(/withCharacterFamily\(/g) ?? []).length;
     // One definition plus three uses: fetchCatalog, fetchFigureBySlug, related.
     expect(catalogCalls).toBe(4);
-    expect(collection).toContain("withCharacterFamily(");
+    expect(ohneKommentar(collection)).toContain("withCharacterFamily(");
+  });
+
+  it("and so does the base-figure pass, in both places that sort (CAT-07)", () => {
+    /*
+     * Die dritte und genaueste Ebene (`0159`). Sie muss überall laufen, wo
+     * die Familie läuft und sortiert wird — Katalog und Sammlung —, sonst
+     * stünde dieselbe Figur je nach Oberfläche an zwei Stellen. Auf der
+     * Detailseite läuft sie nicht: dort gibt es nur eine Figur, und ein
+     * Sortierschlüssel entscheidet dort nichts.
+     */
+    const ohneKommentar = (text: string) => text
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    const kat = ohneKommentar(queries);
+    const samm = ohneKommentar(collection);
+    expect(kat).toContain("withBaseFigure(");
+    expect(samm).toContain("withBaseFigure(");
+    /* Und sie läuft NACH der Familie — der genauere Griff gewinnt. */
+    expect(kat.indexOf("withCharacterFamily(withSearch"))
+      .toBeLessThan(kat.indexOf("withBaseFigure(withFamily"));
   });
 
   it("derives it in one place only", () => {

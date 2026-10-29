@@ -8,6 +8,7 @@
 import type { Element } from "@/lib/catalog/character";
 import type { CardType } from "@/lib/catalog/card-type";
 import type { CatalogGroup } from "@/lib/catalog/group";
+import type { CatalogStatus } from "@/lib/catalog/catalog-status";
 
 export type CatalogFigure = {
   /** Permanent identity. Every relation hangs off this, never off the slug. */
@@ -58,6 +59,28 @@ export type CatalogFigure = {
    */
   cardType: CardType;
   /**
+   * DIE TYPMENGE (CAT-10, `0163`) — was dieser Artikel IST, vollstaendig.
+   *
+   * Leer heisst „Standard". Roh weitergegeben und nicht gedeutet:
+   * `asCatalogTypes()` ist die eine Stelle, die unbekannte Werte aussortiert
+   * und die Reihenfolge festlegt. Optional, damit ein Leser, der die Spalte
+   * nicht anfordert, dieselbe Zeilenform behaelt — dieselbe Regel wie bei
+   * `itemType`.
+   */
+  types?: readonly string[];
+  /**
+   * DER EINE TYPE, DER ALS BANNER ERSCHEINT — oder `null`.
+   *
+   * NICHT `cardType`. Der entscheidet, auf welche KARTENKUNST die senkrechte
+   * Karte gedruckt wird (sieben PNG-Dateien); dieser hier entscheidet, was
+   * auf der Kachel STEHT. Dass das zwei Fragen sind, ist gemessen: eine
+   * Projektion von `card_type` aus der Menge haette eine Kartenkunst
+   * veraendert (`supabase/checks/cat10_projection_proof.sql`).
+   */
+  visibleType?: string | null;
+  /** Hat ein Mensch ueber das Banner entschieden? Siehe `0163`. */
+  visibleTypeDecided?: boolean;
+  /**
    * What the collector area shows: "Astroblast (Legendary)" where the raw
    * name is "Legendary Astroblast". Equals `name` when no variant is
    * recognised. Derived at read time — the database keeps the raw name
@@ -89,6 +112,17 @@ export type CatalogFigure = {
    * collection rows of everyone who owns it stay untouched.
    */
   catalogVisible: boolean;
+  /**
+   * Der redaktionelle Status (CAT-02B): public · hidden · draft.
+   *
+   * OPTIONAL, UND DAS IST ABSICHT. `catalogVisible` bleibt die Sichtbarkeit —
+   * sie ist, was RLS, der Teilindex und `shop_offers()` lesen. Dieses Feld
+   * sagt zusätzlich, WARUM etwas nicht öffentlich ist, und danach fragt nur
+   * der Adminbereich. Jede Fläche, die den Unterschied nicht braucht, muss
+   * ihn deshalb nicht mitführen, und `statusOf()` leitet ihn exakt ab, wo er
+   * fehlt.
+   */
+  catalogStatus?: CatalogStatus;
   /** The imported canonical name, for the admin area. Never rewritten. */
   canonicalName: string;
   /** Admin-chosen public name, or null when the derivation applies. */
@@ -109,6 +143,21 @@ export type CatalogFigure = {
    * figures is assigned so far. Never derived from the name (ADR-0034).
    */
   characterId: number | null;
+  /**
+   * Die Basisfigur, deren Variante diese Figur ist — oder `null` (CAT-07).
+   *
+   * EINE ANDERE FRAGE ALS `characterId`. Die Familie verbindet denselben
+   * Charakter SERIENÜBERGREIFEND; die Basisfigur sagt, welche Figur
+   * DERSELBEN Serie diese Zeile eine Variante von ist. `Elite Boomer` und
+   * `Boomer` sind derselbe Charakter und keine Variante voneinander — nur
+   * zwei Ebenen können das unterscheiden.
+   *
+   * `null` heißt „das ist selbst eine Basisfigur, oder sie steht für sich" —
+   * nie „unbekannt". Garantiert durch die Datenbank (`0159`): dieselbe Serie
+   * strukturell über einen zusammengesetzten Fremdschlüssel, höchstens eine,
+   * und niemals eine Variante einer Variante.
+   */
+  baseSkyId: string | null;
 };
 
 export type SeriesOption = {

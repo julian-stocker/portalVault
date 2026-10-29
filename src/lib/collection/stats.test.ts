@@ -34,6 +34,7 @@ function entry(
     isActive,
     element: null,
     characterId: null,
+    baseSkyId: null,
   };
   return { figure, quantity };
 }

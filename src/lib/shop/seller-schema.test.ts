@@ -130,7 +130,11 @@ describe("this is an identity, not a marketplace", () => {
      * reads the column that already exists. `0144` inherits that exemption
      * for the narrowest possible reason: it REPLACES the same function with
      * the same body plus one section, so the one mention is a copy and not a
-     * new usage. The floor below proves it by comparing both files. An export that dropped it would
+     * new usage. `0153`, `0160` and `0164` inherit it again, each adding one or
+     * more FIELDS to the catalogue section (`catalog_status`, then `base_sky_id`) —
+     * their own tests prove that the new body minus that one line is byte for
+     * byte the previous one, so the mention is the same copy four times
+     * over. The floor below proves it by comparing all four files. An export that dropped it would
      * lose which shop an operator belongs to — a hole in a backup, to
      * satisfy a guard about something else. The floor below keeps that
      * exemption to exactly one projection.
@@ -154,7 +158,10 @@ describe("this is an identity, not a marketplace", () => {
           !f.startsWith("0042_") &&
           !f.startsWith("0051_") &&
           !f.startsWith("0105_") &&
-          !f.startsWith("0144_"),
+          !f.startsWith("0144_") &&
+          !f.startsWith("0153_") &&
+          !f.startsWith("0160_") &&
+          !f.startsWith("0164_"),
       )
       .map((f) => readFileSync(`${MIGRATIONS}/${f}`, "utf8"))
       .join("\n")
@@ -213,37 +220,48 @@ describe("this is an identity, not a marketplace", () => {
     expect(sql105).not.toContain("p_seller_id");
   });
 
-  it("and 0144's exemption is literally 0105's, copied", () => {
+  it("and every later copy of that exemption is literally 0105's", () => {
     /*
-     * DER ENGSTE MOEGLICHE BODEN. `0144` ersetzt die Exportfunktion und
-     * nennt `seller_id` genau dort, wo `0105` es tut — weil es dieselbe
-     * Zeile ist. Statt dieselben Regeln ein zweites Mal zu formulieren,
-     * wird VERGLICHEN: die Umgebung der Nennung muss in beiden Dateien
-     * zeichengleich sein. Eine neue Verwendung in `0144` fällt damit auf,
-     * auch wenn sie harmlos aussieht.
+     * DER ENGSTE MOEGLICHE BODEN. `0144` und `0153` ersetzen die
+     * Exportfunktion und nennen `seller_id` genau dort, wo `0105` es tut —
+     * weil es dieselbe Zeile ist. Statt dieselben Regeln noch einmal zu
+     * formulieren, wird VERGLICHEN: die Umgebung der Nennung muss in jeder
+     * dieser Dateien zeichengleich sein. Eine neue Verwendung fällt damit
+     * auf, auch wenn sie harmlos aussieht.
+     *
+     * DIE LISTE WÄCHST MIT JEDER WEITEREN FASSUNG, und das ist Absicht: wer
+     * die Exportfunktion ersetzt, muss hier eine Zeile hinzufügen und liest
+     * dabei, warum.
      */
     const roh = (f: string) => readFileSync(`${MIGRATIONS}/${f}`, "utf8")
       .split("\n")
       .filter((line) => !line.trimStart().startsWith("--"))
       .join("\n")
       .replace(/'(?:[^']|'')*'/g, "''");
-    const sql144 = roh("0144_platform_export_calculations.sql");
-
-    /* Genau eine Nennung, und derselbe Alias wie in 0105. */
-    const mentions = [...sql144.matchAll(/[\w.]*seller_id/g)].map((m) => m[0]);
-    expect(mentions).toEqual(["t.seller_id"]);
-
-    /* Und ihre Umgebung ist die aus 0105, Zeile für Zeile. */
     const umfeld = (sql: string) => {
       const i = sql.indexOf("t.seller_id");
       return sql.slice(i - 200, i + 200);
     };
-    expect(umfeld(sql144)).toBe(umfeld(roh("0105_platform_export.sql")));
+    const original = umfeld(roh("0105_platform_export.sql"));
 
-    /* Nie zum Filtern, nie als Spalte, nie als Parameter. */
-    expect(sql144).not.toMatch(/where[^;]*seller_id/i);
-    expect(sql144).not.toMatch(/add column[^;]*seller_id/i);
-    expect(sql144).not.toContain("p_seller_id");
+    for (const datei of ["0144_platform_export_calculations.sql",
+                         "0153_platform_export_catalog_status.sql",
+                         "0160_platform_export_base_sky_id.sql",
+                         "0164_platform_export_types.sql"]) {
+      const sql = roh(datei);
+
+      /* Genau eine Nennung, und derselbe Alias wie in 0105. */
+      const mentions = [...sql.matchAll(/[\w.]*seller_id/g)].map((m) => m[0]);
+      expect(mentions, datei).toEqual(["t.seller_id"]);
+
+      /* Und ihre Umgebung ist die aus 0105, Zeile für Zeile. */
+      expect(umfeld(sql), datei).toBe(original);
+
+      /* Nie zum Filtern, nie als Spalte, nie als Parameter. */
+      expect(sql, datei).not.toMatch(/where[^;]*seller_id/i);
+      expect(sql, datei).not.toMatch(/add column[^;]*seller_id/i);
+      expect(sql, datei).not.toContain("p_seller_id");
+    }
   });
 
   it("says in its own comment that it is not a relation", () => {

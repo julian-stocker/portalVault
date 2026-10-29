@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+
+import { de } from "@/lib/i18n/de";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -9,13 +11,22 @@ import {
   layoutFor,
 } from "@/components/catalog/catalog-view-mode";
 import {
+  GRID_GAP_X,
+  GRID_GAP_Y,
   NAME_LINES,
   PHONE_WIDTHS,
   ROW,
+  TILE_COLUMNS_MAX,
+  TILE_MAX,
+  TILE_MIN,
   TWO_COLUMN_AT_PX,
+  DESKTOP_WIDTHS,
+  containerWidth,
   nameCharsPerLine,
   phoneRowWidth,
   rowTextWidth,
+  tileColumns,
+  tileWidth,
 } from "@/lib/catalog/row-template";
 
 /**
@@ -199,24 +210,18 @@ describe("no filter, search, series or group depends on the view", () => {
     }
   });
 
-  it("the switch sits in the toolbar, never in the filter sheet", () => {
+  it("der Katalog hat seit UX-01G keinen Umschalter mehr — der Shop hat ihn", () => {
     /*
-     * The rule `ui/browse.test.ts` holds the collection to, now holding for
-     * the catalogue: a presentation choice filed among the narrowings would
-     * make the filter badge count something that narrows nothing.
+     * DIE REGEL BLEIBT, DIE FLÄCHE WECHSELT. Eine Darstellungswahl gehört
+     * nicht zu den Einschränkungen (`ui/browse.test.ts`), sonst zählte das
+     * Filterabzeichen etwas, das nichts einschränkt. Im KATALOG gibt es
+     * seit UX-01G gar keine Wahl mehr: eine Kachel für alle drei Konten.
+     * Der SHOP behält seine, und dort gilt die Regel weiter.
      */
-    const sheet = catalog.slice(
-      catalog.indexOf("<FilterSheet"),
-      catalog.indexOf("</FilterSheet>"),
-    );
+    expect(catalog).not.toContain("CatalogViewToggle");
+    const sheet = shop.slice(shop.indexOf("<FilterSheet"), shop.indexOf("</FilterSheet>"));
     expect(sheet).not.toContain("CatalogViewToggle");
-    expect(catalog).toContain("<CatalogViewToggle");
-    /* Inside the toolbar, which is the row that carries the count. */
-    const toolbar = catalog.slice(
-      catalog.indexOf("<BrowseToolbar"),
-      catalog.indexOf("</BrowseToolbar>"),
-    );
-    expect(toolbar).toContain("<CatalogViewToggle");
+    expect(shop).toContain("<CatalogViewToggle");
   });
 });
 
@@ -225,12 +230,20 @@ describe("no filter, search, series or group depends on the view", () => {
  * ===================================================================== */
 
 describe("three surfaces, one remembered choice", () => {
-  it("the catalogue and the shop read the same store", () => {
-    for (const [name, src] of [["catalogue", catalog], ["shop", shop]] as const) {
-      expect(src, name).toContain("catalogViewStore.subscribe");
-      expect(src, name).toContain("catalogViewStore.read");
-      expect(src, name).toContain("catalogViewStore.server");
+  it("der Shop liest den Speicher — der Katalog nicht mehr", () => {
+    /*
+     * UX-01G: zwei Flächen, eine Frage, und der Katalog stellt sie nicht
+     * mehr. Er hat eine Darstellung; ein gemerkter Wert aus dem Shop soll
+     * dort nichts bedeuten, und deshalb liest er ihn gar nicht.
+     */
+    for (const teil of ["catalogViewStore.subscribe", "catalogViewStore.read",
+                        "catalogViewStore.server"]) {
+      expect(shop, `shop: ${teil}`).toContain(teil);
+      expect(catalog, `catalogue: ${teil}`).not.toContain(teil);
     }
+    /* Der Speicher selbst bleibt — eine Fläche benutzt ihn. */
+    expect(read("src/components/catalog/catalog-view-mode.ts"))
+      .toContain("catalogViewStore");
   });
 
   it("and the wishlist gets it for free, because it IS the catalogue", () => {
@@ -266,12 +279,26 @@ describe("three surfaces, one remembered choice", () => {
     expect(shop).not.toContain("knowsCollection");
   });
 
-  it("an administrator gets neither the switch nor a row", () => {
-    /* An editorial card carries an inline editor and an edit action; the row
-       has no place for either (ADR-0042, ADR-0148). */
-    expect(catalog).toContain('const layout = admin ? "card" : layoutFor(view)');
-    expect(catalog).toContain('const gridMode = admin ? "cards" : view');
-    expect(catalog).toContain("{admin ? null : <CatalogViewToggle");
+  it("seit UX-01G bekommt JEDE Rolle dieselbe Kachel", () => {
+    /*
+     * HIER STAND DAS GEGENTEIL, und es war der Anlass dieses Schritts:
+     * `const layout = admin ? "card" : layoutFor(view)` — ein Administrator
+     * bekam immer die klassische Sammelkarte. Das war die einzige Stelle im
+     * Katalog, an der die ROLLE das Aussehen entschied.
+     *
+     * Jetzt entscheidet sie nur noch die HANDLUNGEN, und die stehen in der
+     * Aktionsleiste derselben Kachel: `[Glocke] [Info] [Herz]` beim Sammler,
+     * `[Info]` beim Betrieb, `[Info] [Stift] [Auge]` beim Administrator.
+     */
+    expect(catalog).toContain('const layout = "row" as const;');
+    expect(catalog).toContain('const gridMode = "rows" as const;');
+    expect(catalog).not.toContain('admin ? "card"');
+    expect(catalog).not.toContain('admin ? "cards"');
+    /* Und keine Darstellungswahl mehr, nirgends im Katalog. */
+    expect(catalog).not.toContain("CatalogViewToggle");
+    expect(catalog).not.toContain("onSelectView=");
+    /* Die Rolle reist als Kontoart zur Kachel. */
+    expect(catalog).toContain("accountType={accountType}");
   });
 
   it("the accessory area is not switched, and keeps the card grid it had", () => {
@@ -280,6 +307,14 @@ describe("three surfaces, one remembered choice", () => {
     const accessories = code(read("src/components/catalog/accessory-view.tsx"));
     expect(accessories).not.toContain("CatalogViewToggle");
     expect(accessories).not.toContain("catalogViewStore");
+    /*
+     * It DOES carry the section switch since UX-01F — that is how somebody
+     * gets back to the figures — but it passes the default view and never
+     * reads the stored one: on this page Zubehör is current, and
+     * `activeSection` deliberately does not consult the view for it.
+     */
+    expect(accessories).toContain("<CatalogSectionSwitch");
+    expect(accessories).toContain("view={DEFAULT_CATALOG_VIEW}");
   });
 });
 
@@ -298,26 +333,79 @@ describe("the grid lays out rows in one column, two from a container query", () 
     expect(grid).toContain('dense ? " xl:grid-cols-5" : ""');
   });
 
-  it("rows ask the CONTAINER, not the viewport (UX-01C correction)", () => {
+  it("tiles ask the REAL width, and no longer at a single threshold (UX-01E)", () => {
     /*
-     * The question "one column or two" is about how wide a ROW would be, and
-     * that is the container's width. A viewport breakpoint answers it right
-     * only as long as the grid spans the page; in a narrower column `lg:`
-     * would promise two columns in 400 px.
+     * A container query was already the right KIND of answer — the question
+     * "how many fit" is about the box, not the screen. But it answered at ONE
+     * number: 52 rem, two columns, nothing in between. `auto-fill` answers
+     * continuously, at every width, with no threshold to keep in step with
+     * the page's own layout — so the query, and the wrapper that existed only
+     * to be measured, are both gone.
      */
-    expect(grid).toContain('<div className="@container">');
-    expect(grid).toContain("grid grid-cols-1 gap-2 @min-[52rem]:grid-cols-2");
-    /* And the viewport-based rule it replaces is gone. */
-    expect(grid).not.toContain("lg:grid-cols-2");
+    expect(grid).toContain("grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]");
+    expect(grid).toContain("gap-x-3 gap-y-2");
+    /*
+     * AND NO `justify-content`, WHICH IS PART OF THE FIX. `1fr` tracks take
+     * the whole row between them, so there is nothing left over to centre —
+     * and a `justify-center` that DID have leftover space was what made the
+     * single mis-counted tile sit in the middle of an empty page instead of
+     * overflowing visibly, which is why the bug read as a design choice.
+     */
+    expect(grid).not.toContain("justify-center");
+    expect(grid).not.toContain("@container");
+    expect(grid).not.toContain("@min-[52rem]");
+    /*
+     * And no viewport breakpoint crept back in to replace it — asserted on
+     * the ROWS literal alone, because the CARDS literal beside it legitimately
+     * uses `sm:` and `md:` and must keep doing so.
+     */
+    const rows = grid.slice(grid.indexOf("const ROWS ="), grid.indexOf("export function FigureGrid"));
+    expect(rows).not.toMatch(/\b(?:sm|md|lg|xl):/);
+    expect(rows).not.toMatch(/@min-\[/);
   });
 
-  it("the threshold agrees with the geometry module", () => {
+  it("the numbers in the class agree with the geometry module", () => {
+    /*
+     * THE TRACK CARRIES THE MINIMUM AND `1fr`, NEVER A DEFINITE MAXIMUM —
+     * the regression this test exists to prevent. `auto-fill` counts
+     * repetitions by the track's maximum whenever that maximum is definite,
+     * so writing the tile's 520 px ceiling into the track made the browser
+     * count 520 px tiles: one on a normal laptop window, never three. The
+     * ceiling belongs to the tile; the track's maximum must stay indefinite.
+     */
+    expect(grid).toContain(`minmax(min(${TILE_MIN}px,100%),1fr)`);
+    expect(grid, "a definite maximum in the track breaks the count")
+      .not.toMatch(/minmax\(min\([^)]*\),\s*\d+px\)/);
+    expect(TILE_MIN).toBe(360);
+    expect(TILE_MAX).toBe(520);
+    /* And the cap really is on the tile, where it cannot affect the count. */
+    const row = readFileSync(
+      join(process.cwd(), "src/components/catalog/figure-row.tsx"), "utf8");
+    expect(row).toContain(`max-w-[${TILE_MAX}px]`);
+    expect(row).toContain("mx-auto");
+    /* `gap-x-3` is 12 px, and that is the gap the column arithmetic counts. */
+    expect(GRID_GAP_X).toBe(12);
+    expect(GRID_GAP_Y).toBe(8);
+  });
+
+  it("one, two, then three — and never four, because the page is 6xl", () => {
+    expect(tileColumns(containerWidth(390))).toBe(1);
+    expect(tileColumns(containerWidth(768))).toBe(2);
+    expect(tileColumns(containerWidth(1280))).toBe(3);
+    expect(tileColumns(containerWidth(1600))).toBe(TILE_COLUMNS_MAX);
+    /* The widest the page ever gives the grid is 1120 px, and a fourth tile
+       would be 271 — far below the 360 a tile needs. */
+    expect(containerWidth(4000)).toBe(1120);
+    expect(tileColumns(containerWidth(4000))).toBe(3);
+  });
+
+  it("and the old 52 rem threshold still lands on two, which is continuity", () => {
+    /* The number is no longer in the markup, but the behaviour it encoded did
+       not change at that width — the new formula simply also answers every
+       width between. */
     expect(TWO_COLUMN_AT_PX).toBe(832);
-    expect(grid).toContain(`@min-[${TWO_COLUMN_AT_PX / 16}rem]`);
-  });
-
-  it("two is the ceiling, for rows", () => {
-    expect(grid).not.toMatch(/@min-\[[^\]]*\]:grid-cols-[3-9]/);
+    expect(tileColumns(TWO_COLUMN_AT_PX)).toBe(2);
+    expect(tileWidth(TWO_COLUMN_AT_PX)).toBe(410);
   });
 
   it("and the default is cards, so every other surface is untouched", () => {
@@ -437,5 +525,80 @@ describe("nothing else changed", () => {
                              "shop_offers", "usk_rating", "sale_released"]) {
       expect(shop, `the shop restates ${forbidden}`).not.toContain(forbidden);
     }
+  });
+});
+
+describe("UX-01E renamed the label and nothing else", () => {
+  it('the switcher says "Kacheln" now, not "Liste"', () => {
+    expect(de.catalog.view.rows).toBe("Kacheln");
+    expect(de.catalog.view.cards).toBe("Karten");
+    /* And the old word is gone from the dictionary, so it cannot come back
+       through a second key. */
+    expect(JSON.stringify(de.catalog.view)).not.toContain("Liste");
+  });
+
+  it("but the stored value and the key are untouched, so a remembered view survives", () => {
+    /*
+     * THE POINT OF THE SEPARATION. A remembered view is user state; throwing
+     * it away for a word in the interface would be the wrong trade, and
+     * renaming either the key or the value would do exactly that — silently,
+     * on the next visit, for everyone who had chosen tiles.
+     */
+    expect(catalogViewStore.key).toBe("skyisles.catalog.view");
+    expect(CATALOG_VIEWS).toEqual(["cards", "rows"]);
+    expect(DEFAULT_CATALOG_VIEW).toBe("cards");
+    /* A value written before the rename still reads back as the tile view. */
+    expect(catalogViewStore.is("rows")).toBe(true);
+    expect(layoutFor("rows")).toBe("row");
+  });
+
+  it("and the label is read from the dictionary, never written in the markup", () => {
+    const toggle = readFileSync(
+      join(process.cwd(), "src/components/catalog/catalog-view-toggle.tsx"), "utf8");
+    expect(toggle).not.toContain("Liste");
+    expect(toggle).not.toContain("Kacheln");
+    expect(toggle).toContain("de.catalog.view");
+  });
+
+  it("no tile is ever narrower than TILE_MIN or wider than TILE_MAX", () => {
+    /*
+     * THE TWO FAILURE MODES THE REVIEW FOUND, as one loop: a tile too narrow
+     * to hold its own content, and a single tile stretched across a tablet.
+     * Checked at every width the operator named, plus the awkward ones
+     * between — a container just under and just over each threshold.
+     */
+    const widths = [...PHONE_WIDTHS, ...DESKTOP_WIDTHS, 600, 731, 733, 1103, 1105, 4000];
+    for (const viewport of widths) {
+      const container = containerWidth(viewport);
+      const tile = tileWidth(container);
+      const columns = tileColumns(container);
+      const label = `${viewport} px → ${columns} × ${Math.round(tile)}`;
+
+      expect(tile, `${label}: too wide`).toBeLessThanOrEqual(TILE_MAX);
+      /* A phone narrower than TILE_MIN is the one allowed exception, and it
+         is the `min(360px,100%)` in the class: the tile is the container. */
+      if (container >= TILE_MIN) {
+        expect(tile, `${label}: too narrow`).toBeGreaterThanOrEqual(TILE_MIN - 1);
+      } else {
+        expect(tile, `${label}: must not overflow`).toBe(container);
+      }
+      /* And the tiles plus their gaps never exceed the container. */
+      expect(columns * tile + (columns - 1) * GRID_GAP_X,
+        `${label}: overflows`).toBeLessThanOrEqual(container + 0.5);
+      expect(columns).toBeLessThanOrEqual(TILE_COLUMNS_MAX);
+    }
+  });
+
+  it("the awkward widths land where the arithmetic says, not where one hopes", () => {
+    /* One below and one above each step, so a threshold cannot drift. */
+    expect(tileColumns(731)).toBe(1);
+    expect(tileColumns(732)).toBe(2);
+    expect(tileColumns(1103)).toBe(2);
+    expect(tileColumns(1104)).toBe(3);
+    /* A single tile in a 600 px container is capped and centred, not
+       stretched — the "übermäßig langgezogene Einzelkachel" the review
+       found. */
+    expect(tileWidth(600)).toBe(TILE_MAX);
+    expect(tileWidth(600)).toBeLessThan(600);
   });
 });

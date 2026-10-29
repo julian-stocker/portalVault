@@ -30,6 +30,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CatalogFigure } from "@/lib/catalog/types";
+import { AvailabilityBell } from "@/components/catalog/availability-bell";
 import { de } from "@/lib/i18n/de";
 
 /* A real anchor is all `next/link` has to be here. */
@@ -52,7 +53,7 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
     canonicalName: "Bash", displayNameOverride: null, marketPrice: 4.99,
     imageFile: null, imageOverridePath: null,
     displayName: "Bash", sortBaseName: "Bash", sortVariantLabel: null,
-    searchIndex: "bash", isActive: true, element: "Earth", characterId: null,
+    searchIndex: "bash", isActive: true, element: "Earth", characterId: null, baseSkyId: null,
     ...over,
   };
 }
@@ -191,14 +192,21 @@ describe("the ground says whether the figure is owned", () => {
     expect(cls).toContain("shadow-[0_0_18px_-8px_var(--own-line-strong)]");
   });
 
-  it("and it says so compactly: a diamond, plus the sentence for a reader who needs it", async () => {
+  it("and it says so WITHOUT a mark of its own since UX-01E", async () => {
     /*
-     * THE CORRECTION'S COMPACT FORM. The visible mark is a gold diamond; the
-     * sentence is in the markup but `sr-only`, because as visible text it
-     * took most of the meta line and pushed the edition and the value off it.
+     * The visible mark was a gold diamond before the element. After the
+     * desktop review the operator asked for the top left to be the element
+     * and the name and nothing else, with the gold highlight carrying
+     * ownership on its own.
+     *
+     * THE HIDDEN SENTENCE STAYED, and that is the half worth testing. It is
+     * the only place on the row that says how many copies are owned; it is
+     * invisible, so removing it would have cost a screen reader information
+     * while changing nothing on screen; and it survives a forced-colours
+     * display, where the gold is repainted away.
      */
     await row({ collected: true, knowsCollection: true });
-    expect(article().textContent, "the diamond is drawn").toContain("\u25c6");
+    expect(article().textContent, "no diamond is drawn").not.toContain("\u25c6");
     const hidden = [...article().querySelectorAll(".sr-only")]
       .map((el) => el.textContent ?? "").join(" ");
     expect(hidden, "the sentence is still there for assistive tech")
@@ -315,54 +323,159 @@ describe("possession, wanting and the reserved alarm slot are independent", () =
     }
   });
 
-  /** Each slot sits in a positioned span, so the column is one level up. */
-  const actionColumn = (): HTMLElement => byId("heart").parentElement!.parentElement!;
+  const infoAction = (): HTMLAnchorElement =>
+    article().querySelector<HTMLAnchorElement>('a[aria-label^="Info zu"]')!;
+  /*
+   * Each slot sits in a positioned span, so the bar is one level up — and it
+   * is found through the INFO action rather than the heart, because the info
+   * action is the one slot that is always there. A surface with favourites
+   * switched off still has a bar.
+   */
+  const actionBar = (): HTMLElement => infoAction().parentElement!.parentElement!;
 
-  it("the heart's column is 44 px wide and reserves no height", async () => {
+  it("the bar is horizontal, hard right, and reserves no height", async () => {
     /*
-     * THE CORRECTION. It used to carry `min-h-22` — 88 px held open for a
-     * bell that does not exist — which was the largest single piece of the
-     * air the row has now lost. The column supports two positions, but its
-     * height follows what is in it.
+     * UX-01D. It was a 44 px COLUMN at the row's far edge, which took 50 px
+     * of width off the text block for one heart and left the rest of it
+     * empty. The marks are a bar on the identity line now; the width went to
+     * the name and to the price line, which is why the offer chip can reach
+     * the row's own edge.
      */
     await row();
-    expect(actionColumn().className).toContain("w-11");
-    expect(actionColumn().className).not.toContain("min-h-22");
-    expect(actionColumn().className).toContain("justify-start");
+    expect(actionBar().className).toBe("ml-auto flex shrink-0 items-center");
+    expect(actionBar().className).not.toContain("flex-col");
+    expect(actionBar().className).not.toContain("min-h");
   });
 
-  it("the column is NOT positioned, and each slot is", async () => {
+  it("and it stands on the identity line, beside the name", async () => {
+    await row();
+    const line = actionBar().parentElement!;
+    expect(line.textContent).toContain("Bash");
+    expect(line.className).toContain("items-center");
+  });
+
+  it("the bar is NOT positioned, and each slot is", async () => {
     /*
-     * The defect this fixes: a positioned column painted its empty lower
-     * half above the collect overlay and swallowed every tap there.
+     * The defect this fixes: a positioned box painted its empty space above
+     * the collect overlay and swallowed every tap there.
      */
     await row();
-    expect(actionColumn().className).not.toContain("relative");
+    expect(actionBar().className).not.toContain("relative");
     expect(byId("heart").parentElement!.className).toBe("relative");
+    expect(infoAction().parentElement!.className).toBe("relative");
   });
 
-  it("and with a bell it holds both marks on one x, heart above", async () => {
-    await row({ bellSlot: createElement("span", { "data-id": "bell" }, "Glocke") });
-    const column = actionColumn();
-    expect(column.className).toContain("justify-between");
-    expect(column.className).toContain("items-center");
-    expect(column.contains(byId("bell"))).toBe(true);
-    const slots = [...column.children];
-    expect(slots.findIndex((el) => el.contains(byId("heart"))))
-      .toBeLessThan(slots.findIndex((el) => el.contains(byId("bell"))));
+  it("with an offer the order is info, then favourite", async () => {
+    await row({ offered: true });
+    const slots = [...actionBar().children];
+    expect(slots).toHaveLength(2);
+    expect(slots.findIndex((el) => el.contains(infoAction())))
+      .toBeLessThan(slots.findIndex((el) => el.contains(byId("heart"))));
   });
 
-  it("the bell slot lands under the heart when it eventually arrives", async () => {
-    /* UX-02 passes a second control; the column already supports it, so
-       nothing about the row's arrangement changes on that day. */
-    await row({ bellSlot: createElement("button", { type: "button", "data-id": "bell" }, "Glocke") });
-    expect(actionColumn().contains(byId("bell"))).toBe(true);
+  it("and without one the bell comes first — bell, info, favourite", async () => {
+    /*
+     * THE ORDER THE OPERATOR SPECIFIED, and the condition that goes with it:
+     * the bell answers "tell me when this is available", which is a question
+     * about a figure that cannot be bought. Nothing passes a bell yet, so
+     * this is the arrangement waiting for UX-02 rather than a control on
+     * screen.
+     */
+    await row({
+      offered: false,
+      bellSlot: createElement("span", { "data-id": "bell" }, "Glocke"),
+    });
+    const slots = [...actionBar().children];
+    expect(slots).toHaveLength(3);
+    const at = (el: Element) => slots.findIndex((slot) => slot.contains(el));
+    expect(at(byId("bell"))).toBeLessThan(at(infoAction()));
+    expect(at(infoAction())).toBeLessThan(at(byId("heart")));
     expect(toggle().contains(byId("bell"))).toBe(false);
   });
 
-  it("no heart column at all when a surface offers neither control", async () => {
+  it("and a row with something to buy shows NO bell, even if one is passed", async () => {
+    /*
+     * One flag, inverted, and no second rule: `offered` dresses the offer
+     * chip and decides the bell. A figure you can buy needs no reminder.
+     */
+    await row({
+      offered: true,
+      bellSlot: createElement("span", { "data-id": "bell" }, "Glocke"),
+    });
+    expect(article().querySelector('[data-id="bell"]')).toBeNull();
+    expect([...actionBar().children]).toHaveLength(2);
+  });
+
+  it("the info action leads to the figure's own page, and is not prefetched", async () => {
+    /*
+     * REUSE, NOT A NEW SURFACE. `/skylanders/<slug>` is the detail page the
+     * vertical card's body has always led to; a row's body is the collect
+     * toggle instead, which is exactly why the row needs this second way
+     * there. `QuickView` could not do it: it is a BUYING dialog and
+     * `quickViewModel()` returns null without an offer — the state that needs
+     * an info action most.
+     */
+    await row();
+    expect(infoAction().getAttribute("href")).toBe("/skylanders/bash");
+    expect(infoAction().getAttribute("aria-label")).toBe("Info zu Bash");
+    /* Not prefetched — asserted on the source in `figure-row.test.ts`,
+       because `prefetch` is a Next prop and leaves no trace in the DOM. */
+  });
+
+  it("the REAL bell renders disabled, and only where there is nothing to buy", async () => {
+    /*
+     * UX-01E made the bell visible, so this renders the component the
+     * application actually passes rather than a stand-in. Two statements in
+     * one: it is there without an offer and absent with one, and it cannot be
+     * pressed either way.
+     */
+    await row({ offered: false, bellSlot: createElement(AvailabilityBell) });
+    const bell = article().querySelector<HTMLButtonElement>("button[disabled]")!;
+    expect(bell, "a bell without an offer").toBeTruthy();
+    expect(bell.disabled).toBe(true);
+    expect(bell.getAttribute("title")).toBe(de.catalog.alarmPending);
+    /* It is in the bar, first, and inside its own positioned slot. */
+    const slots = [...actionBar().children];
+    expect(slots).toHaveLength(3);
+    expect(slots[0].contains(bell)).toBe(true);
+    expect(slots[0].className).toBe("relative");
+  });
+
+  it("and the bell covers neither the info nor the favourite target", async () => {
+    /*
+     * THE OPERATOR'S REQUIREMENT, and the reason the marks are 44 px boxes
+     * side by side rather than glyphs with expanded hit areas: three separate
+     * elements in three separate slots, in document order, none of them
+     * positioned over another. Two overlapping 44 px targets would make it
+     * undecidable which one a thumb hit.
+     */
+    await row({ offered: false, bellSlot: createElement(AvailabilityBell) });
+    const bell = article().querySelector<HTMLButtonElement>("button[disabled]")!;
+    const marks = [bell, infoAction(), byId("heart")];
+    for (const mark of marks) {
+      /* Each in its own slot, and no slot contains another's mark. */
+      const slot = mark.parentElement!;
+      expect(slot.className).toBe("relative");
+      for (const other of marks) {
+        if (other !== mark) expect(slot.contains(other)).toBe(false);
+      }
+    }
+    /*
+     * 44 px boxes, so adjacent glyph centres are 44 px apart. Only the two
+     * REAL components are measured here — the heart in this file is a
+     * stand-in with no classes of its own, and its box is held against the
+     * other two in `availability-bell.test.tsx`.
+     */
+    expect(bell.className).toContain("h-11 w-11");
+    expect(infoAction().className).toContain("h-11 w-11");
+    /* And the disabled bell takes no pointer events away from them. */
+    expect(bell.className).toContain("cursor-not-allowed");
+  });
+
+  it("the info action is always there — it is the one that never depends on state", async () => {
     await row({ favoriteSlot: null, bellSlot: null });
-    expect(article().querySelector(".w-11")).toBeNull();
+    expect(infoAction()).toBeTruthy();
+    expect([...actionBar().children]).toHaveLength(1);
   });
 });
 
@@ -433,52 +546,78 @@ describe("the offer is dressed as an action", () => {
   });
 });
 
-describe("a special edition is a banderole on the picture", () => {
-  /** The picture stage: the first span inside the article. */
+describe("a special edition is a strip under the picture", () => {
+  /** The white stage that holds the photograph. */
   const stage = (): HTMLElement => article().querySelector(".bg-plate")!;
+  /** The column that holds the stage AND the edition strip (UX-01E). */
+  const column = (): HTMLElement => stage().parentElement!;
 
   it("a standard figure gets none", async () => {
     await row({ figure: figure({ cardType: "standard" }) });
-    expect(stage().textContent).not.toMatch(/standard/i);
-    expect(stage().querySelector("[aria-hidden].absolute")).toBeNull();
+    expect(column().textContent).not.toMatch(/standard/i);
+    /* Nothing is reserved for it either — the column is the stage alone. */
+    expect(column().children).toHaveLength(1);
   });
 
   it("every other modelled type gets one, named from the label map", async () => {
     for (const [type, label] of [["legendary", "Legendary"], ["prestige", "Prestige"],
                                  ["chase", "Chase"], ["dark", "Dark"],
                                  ["special", "Special"], ["elite", "Elite"]] as const) {
-      await row({ figure: figure({ cardType: type }) });
-      expect(stage().textContent, type).toContain(label);
+      await row({ figure: figure({ cardType: type, types: [type],
+                                   visibleType: type }) });
+      expect(column().textContent, type).toContain(label);
       await act(async () => { root?.unmount(); });
       container?.remove();
     }
   });
 
-  it("it sits across the foot of the picture and covers nothing else", async () => {
-    await row({ figure: figure({ cardType: "chase", imageFile: "x.webp" }) });
-    const banner = [...stage().querySelectorAll("span")]
+  it("it sits BELOW the picture and overlays no artwork at all (UX-01E)", async () => {
+    await row({ figure: figure({ cardType: "chase", types: ["chase"],
+                                 visibleType: "chase", imageFile: "x.webp" }) });
+    const strip = [...column().querySelectorAll("span")]
       .find((el) => el.textContent === "Chase")!;
-    expect(banner.className).toContain("absolute inset-x-0 bottom-0");
-    expect(banner.className).toContain("pointer-events-none");
-    /* And it is inside the stage, so it adds no height to the row. */
-    expect(stage().contains(banner)).toBe(true);
+    /* In flow, under the stage, the full width of the column. */
+    expect(strip.className).not.toContain("absolute");
+    expect(strip.className).toContain("block w-full");
+    expect(strip.className).toContain("pointer-events-none");
+    expect(stage().contains(strip), "not inside the stage any more").toBe(false);
+    expect(column().contains(strip), "but still in the picture column").toBe(true);
+    /* And it comes AFTER the stage, which is what "below" means here. */
+    const parts = [...column().children];
+    expect(parts.indexOf(stage())).toBeLessThan(parts.findIndex((el) => el.contains(strip) || el === strip));
+  });
+
+  it("and the picture is whole — not cropped, not shrunk, not dimmed", async () => {
+    await row({ figure: figure({ cardType: "legendary", types: ["legendary"],
+                                 visibleType: "legendary",
+                                 imageFile: "x.webp" }) });
+    /* The stage keeps its full square, with or without a strip beneath it. */
+    expect(stage().className).toContain("h-16 w-16");
+    expect(stage().className).toContain("sm:h-18 sm:w-18");
+    const img = stage().querySelector("img")!;
+    expect(img.className).toContain("h-full w-full object-contain");
+    expect(img.className).not.toMatch(/opacity|saturate|grayscale|scale|brightness/);
   });
 
   it("the photograph is not touched by it", async () => {
-    await row({ figure: figure({ cardType: "legendary", imageFile: "x.webp" }) });
+    await row({ figure: figure({ cardType: "legendary", types: ["legendary"],
+                                 visibleType: "legendary",
+                                 imageFile: "x.webp" }) });
     const img = stage().querySelector("img")!;
     expect(img.className).not.toMatch(/opacity|saturate|grayscale|scale|brightness/);
     expect(img.style.filter).toBe("");
   });
 
   it("the two tiers come from EDITION_RANK, not from a new opinion", async () => {
-    await row({ figure: figure({ cardType: "legendary" }) });
-    const bright = [...stage().querySelectorAll("span")]
+    await row({ figure: figure({ cardType: "legendary", types: ["legendary"],
+                                 visibleType: "legendary" }) });
+    const bright = [...column().querySelectorAll("span")]
       .find((el) => el.textContent === "Legendary")!.className;
     await act(async () => { root?.unmount(); });
     container?.remove();
-    await row({ figure: figure({ cardType: "chase" }) });
-    const quiet = [...stage().querySelectorAll("span")]
+    await row({ figure: figure({ cardType: "chase", types: ["chase"],
+                                 visibleType: "chase" }) });
+    const quiet = [...column().querySelectorAll("span")]
       .find((el) => el.textContent === "Chase")!.className;
     expect(bright).not.toBe(quiet);
     expect(bright).toContain("#241f19");
@@ -492,20 +631,31 @@ describe("a special edition is a banderole on the picture", () => {
   });
 });
 
-describe("the element is a mark in front of the name", () => {
-  it("drawn for a figure that has one, and named for a reader", async () => {
+describe("the element is not on the tile at all", () => {
+  it("no mark, no word, for a figure that HAS an element (UX-01E correction)", async () => {
+    /*
+     * The tile drew the element as an abstract rune — one shape in ten
+     * colours, a placeholder because the project has no element artwork. At
+     * the desktop review the operator asked for it to go for now, so the top
+     * left is the figure's name alone.
+     *
+     * The element DATA is untouched and every other surface still names it;
+     * `element-icon.test.ts` holds that, and the component remains as the
+     * swap point for real files.
+     */
     await row();
-    const icon = article().querySelector('[title="Erde"]');
-    expect(icon, "the element mark is drawn").not.toBeNull();
-    expect(icon!.querySelector("svg")).not.toBeNull();
-    /* The word is gone from the visible line but not from the markup. */
-    expect(icon!.textContent).toContain("Erde");
+    expect(article().querySelector('[title="Erde"]'), "no element mark").toBeNull();
+    expect(article().textContent, "and no element word").not.toContain("Erde");
+    /* The only `title` left on the tile is the name's own full text. */
+    const titled = [...article().querySelectorAll("[title]")]
+      .map((el) => el.getAttribute("title"));
+    /* The only `title` left on the tile is the name's own full text. The
+       harness passes no bell here, so nothing else carries one. */
+    expect(titled).toEqual(["Bash"]);
   });
 
-  it("and nothing at all for the 457 figures without one", async () => {
+  it("and nothing for the 457 figures without one either", async () => {
     await row({ figure: figure({ element: null }) });
-    expect(article().querySelector("[title]")?.getAttribute("title"))
-      .not.toBe("Erde");
     expect(article().textContent).not.toContain("Erde");
   });
 
@@ -516,7 +666,7 @@ describe("the element is a mark in front of the name", () => {
 
   it("it sits before the name, not after it", async () => {
     await row();
-    const line = article().querySelector("p")!;
+    const line = article().querySelector("div.items-center")!;
     const icon = line.querySelector('[title="Erde"]')!;
     const name = [...line.querySelectorAll("span")].find(
       (el) => el.textContent === "Bash");
@@ -545,8 +695,30 @@ describe("what the row says about money and editions", () => {
   });
 
   it("names the edition, because a row has no artwork to show it with", async () => {
-    await row({ figure: figure({ cardType: "legendary" }) });
+    /*
+     * SEIT CAT-10 KOMMT DER NAME AUS `visibleType` und nicht aus
+     * `cardType`: der eine ist das BANNER, der andere die KARTENKUNST der
+     * senkrechten Karte. Die Zeile hat keine Kartenkunst zu zeigen — das ist
+     * weiterhin der Grund, warum sie die Ausgabe BENENNT —, aber WELCHE sie
+     * benennt, entscheidet jetzt die Auswahl des Administrators.
+     */
+    await row({ figure: figure({ cardType: "legendary", types: ["legendary"],
+                                 visibleType: "legendary" }) });
     expect(article().textContent).toContain("Legendary");
+  });
+
+  it("und eine Figur MIT Kartenkunst, aber OHNE Auswahl zeigt keines", async () => {
+    /*
+     * DER UNTERSCHIED, DEN CAT-10 EINFUEHRT, als Test. `card_type` bleibt
+     * `legendary` — die senkrechte Karte in Shop und Sammlung wird weiter
+     * auf das Legendary-Artwork gedruckt —, aber die Kachel zeigt kein
+     * Banner, solange niemand eines gewaehlt hat. Ein abgeleitetes Banner
+     * waere eine Veraenderung des oeffentlichen Katalogs ohne Entscheidung
+     * (Entscheidung D4).
+     */
+    await row({ figure: figure({ cardType: "legendary", types: ["legendary"],
+                                 visibleType: null }) });
+    expect(article().textContent).not.toContain("Legendary");
   });
 
   it("and says nothing when the figure is a plain one", async () => {

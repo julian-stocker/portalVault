@@ -31,6 +31,7 @@ function figure(
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
     displayName: variant ? `${variant.label} ${variant.base}` : name,
     sortBaseName: variant ? variant.base : name,
     sortVariantLabel: variant ? variant.label : null,

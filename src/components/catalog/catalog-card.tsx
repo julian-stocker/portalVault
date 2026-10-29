@@ -32,12 +32,16 @@
 
 import { useState, useTransition } from "react";
 
-import { AdminEditAction, HiddenBadge } from "@/components/admin/card-actions";
+import { AdminTileActions } from "@/components/admin/card-actions";
+import { InlinePrice } from "@/components/admin/inline-price";
+import { TypeSelect } from "@/components/admin/type-select";
+import { AvailabilityBell } from "@/components/catalog/availability-bell";
 import { FavoriteHeart } from "@/components/catalog/favorite-heart";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { FigureRow } from "@/components/catalog/figure-row";
 import { OfferLink } from "@/components/shop/offer-link";
 import { setCollected } from "@/lib/collection/actions";
+import type { AccountType } from "@/lib/auth/capabilities";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import type { Offer } from "@/lib/shop/offer";
 import { hasQuickViewOffer } from "@/lib/ui/quick-view";
@@ -54,18 +58,48 @@ export function CatalogCard({
   signInHref,
   highlighted = false,
   admin = false,
+  accountType = "user",
   visible = true,
   offers = [],
   showSeries = false,
   onOpenOffers,
   onEdit,
   marketBoostPercent = 0,
-  layout = "card",
+  /*
+   * UX-01G: DIE KACHEL IST DIE VORGABE. Vorher war es `"card"` — die
+   * klassische Sammelkarte —, und der Katalog musste die Kachel ausdrücklich
+   * verlangen. Jetzt ist es umgekehrt: der Katalog zeichnet die Kachel ohne
+   * Zutun, und der SHOP verlangt seine Wahl ausdrücklich
+   * (`layout={layoutFor(view)}`). Wer die Eigenschaft vergisst, bekommt die
+   * Darstellung des Katalogs und nicht die eines anderen.
+   */
+  layout = "row",
 }: {
   figure: CatalogFigure;
   initialCollected: boolean;
   /** Admin only: opens the edit dialog for this figure. */
   onEdit?: (figure: CatalogFigure) => void;
+  /**
+   * Welches der drei Konten hier liest (ADR-0078) — und damit, welche
+   * Handlungen die Kachel trägt (UX-01G).
+   *
+   *   user      `[Glocke] [Info] [Herz]`, und der Körper sammelt
+   *   business  `[Info]` — kein Herz, keine Glocke, kein Sammeln
+   *   admin     `[Info] [Stift] [Auge]`
+   *
+   * WARUM EIN BETRIEBSKONTO NICHTS DAVON BEKOMMT: es sammelt nicht
+   * (ADR-0042/ADR-0078), und `0145` weist ein Herz über
+   * `is_collector_account()` ohnehin ab. Ein Knopf, der nur scheitern kann,
+   * ist schlimmer als keiner — und bis UX-01G bekam ein Betriebskonto
+   * genau den, weil nur `admin` abgefragt wurde.
+   *
+   * ES IST KEINE GRENZE. Jede Schreibhandlung dahinter fragt ihr Recht in
+   * der Datenbank selbst: `setCollected` über die Richtlinien von
+   * `collection_items`, das Herz über `favorite_demand()`, das Auge über
+   * `is_platform_admin()` in `admin_set_catalog_status`. Diese Eigenschaft
+   * entscheidet, was gezeichnet wird.
+   */
+  accountType?: AccountType;
   /**
    * Tells the catalog what this card just did, so the ownership filter sees
    * it in the same frame rather than after a round trip (V4.3).
@@ -194,32 +228,91 @@ export function CatalogCard({
   // action: the operator manages prices and listings in /admin/inventory and
   // does not shop in their own catalog (ADR-0042).
   if (admin) {
+    /*
+     * SEIT UX-01G IST DAS DIESELBE KACHEL WIE FÜR JEDES ANDERE KONTO.
+     *
+     * Vorher stand hier `FigureCard` — die klassische Sammelkarte —, und
+     * zwar für jeden Administrator und unabhängig von der gemerkten Wahl:
+     * `layout = admin ? "card" : …`. Das war der einzige Ort im Katalog, an
+     * dem die Rolle das AUSSEHEN entschied und nicht nur die Handlung. Jetzt
+     * entscheidet sie nur noch die Handlung, und die Kachel ist eine.
+     *
+     * KEIN SAMMELN UND KEIN HERZ: ein Betrieb oder Admin verwaltet den
+     * Katalog und sammelt nicht daraus (ADR-0042). Die Kachel bekommt
+     * deshalb weder `onToggle` noch `favoriteSlot` — ihr Körper ist dann
+     * ruhig, und der Weg zur Figur steht als Info-Marke in der Leiste, wo er
+     * bei jeder Rolle steht.
+     *
+     * DAS VARIANTENSIEGEL BLEIBT: es ist eine Eigenschaft der Figur und
+     * nicht des Lesers, und ein Betreiber muss eine Legendary von ihrer
+     * Grundfigur unterscheiden können — mehr als jeder andere (V3.2).
+     *
+     * KEINE ANGEBOTSZEILE: den Preis hat der Betreiber in
+     * `/admin/inventory`, wo er ihn auch ändern kann. Ihn hier zu
+     * wiederholen wäre eine zweite Stelle, die einen Preis nennt und ihn
+     * nicht bearbeiten kann.
+     */
     return (
-      <FigureCard
+      <FigureRow
         figure={figure}
         marketBoostPercent={marketBoostPercent}
-        // No ownership frame and no crown: the business account manages the
-        // catalog, it does not collect from it (ADR-0042). The VARIANT SEAL
-        // does appear — it is a property of the figure, not of a viewer, and
-        // the operator needs to tell a Legendary from its base figure more
-        // than anyone (V3.2).
         ownership="catalog"
         highlighted={highlighted}
-        showSeries={false}
-        interactive={false}
-        muted={!visible}
-        statusBadge={visible ? null : <HiddenBadge />}
+        showSeries={showSeries}
         /*
-         * No `nameSlot`: the name is the name. The inline editor that used to
-         * live here was a second way to change one of five fields, in a place
-         * where the other four could not be seen — and it made the admin card
-         * the one card in the catalogue whose name looked different.
+         * CAT-09 — GEDÄMPFT, WENN SIE VERSTECKT IST, und nur dann.
          *
-         * No offer line either: the operator has the price in
-         * /admin/inventory, where it can also be changed. Repeating it here
-         * would be a second place that states a price and cannot edit it.
+         * EIN ENTWURF IST NICHT VERSTECKT. Er stand noch nie öffentlich, und
+         * ihn wie eine zurückgenommene Figur zu zeichnen wäre eine falsche
+         * Aussage über seinen Zustand (ADR-0151 führt drei Werte, nicht
+         * zwei). Deshalb `=== "hidden"` und nicht `!visible`.
          */
-        trade={<AdminEditAction name={figure.displayName} onEdit={() => onEdit?.(figure)} />}
+        dimmed={(figure.catalogStatus ?? (visible ? "public" : "hidden")) === "hidden"}
+        priceSlot={
+          <InlinePrice
+            skyId={figure.skyId}
+            name={figure.displayName}
+            /* DER GESPEICHERTE WERT. Der Zuschlag wird daneben gerechnet und
+               nie zurückgeschrieben — siehe `inline-price.tsx`. */
+            marketPrice={figure.marketPrice}
+            marketBoostPercent={marketBoostPercent}
+            dimmed={(figure.catalogStatus ?? (visible ? "public" : "hidden")) === "hidden"}
+          />
+        }
+        adminSlot={
+          <AdminTileActions
+            skyId={figure.skyId}
+            name={figure.displayName}
+            /* Der redaktionelle Status, wie die Datenbank ihn führt. Die
+               Kachel kennt `catalogVisible`; `draft` kommt aus dem
+               Katalogstatus, den `0152` eingeführt hat. */
+            status={figure.catalogStatus ?? (visible ? "public" : "hidden")}
+            onEdit={() => onEdit?.(figure)}
+          />
+        }
+        /*
+         * CAT-10 — DAS BANNER-DROPDOWN STEHT, WO DER SAMMLER DAS ANGEBOT
+         * SIEHT.
+         *
+         * `trade` ist der vorhandene Slot am rechten Rand der zweiten Zeile.
+         * Ein Administrator braucht dort keine Angebotszeile — er sieht die
+         * Angebote im Betriebsbereich —, und der Betreiber hat genau diese
+         * Stelle verlangt. Keine neue Kachel, kein neuer Slot, keine
+         * geänderte Geometrie.
+         *
+         * ES WÄHLT NUR AUS DER HINTERLEGTEN MENGE. Zuordnen geht im
+         * Bearbeiten-Dialog; dieses Feld entscheidet ausschließlich, welcher
+         * der zugeordneten Types als Banner erscheint.
+         */
+        trade={
+          <TypeSelect
+            skyId={figure.skyId}
+            name={figure.displayName}
+            types={figure.types ?? []}
+            visibleType={figure.visibleType ?? null}
+            decided={figure.visibleTypeDecided ?? false}
+          />
+        }
       />
     );
   }
@@ -261,7 +354,7 @@ export function CatalogCard({
    * Ein leeres Herz ist eine Aussage („nicht vorgemerkt"), und sie waere
    * dort falsch.
    */
-  const favorite = favorites ? (
+  const favorite = favorites && accountType === "user" ? (
     <FavoriteHeart
       skyId={figure.skyId}
       initialFavorited={initialFavorited}
@@ -270,12 +363,48 @@ export function CatalogCard({
     />
   ) : null;
 
+  /**
+   * Die Handelszeile — einmal gebaut, von beiden Darstellungen benutzt.
+   *
+   * `compact` ist das Einzige, worin sich die beiden unterscheiden, und die
+   * Entscheidung gehoert hierher, weil nur diese Stelle `layout` kennt
+   * (UX-01D). Auf der Karte spannt der Link die ganze Silberplatte des
+   * Artworks und hat den Platz fuer „Angebote ab"; auf der Zeile steht er
+   * neben dem Marktwert, und dort kostet das Wort 54 px, die der Serienname
+   * braucht. Ab `sm:` steht auch auf der Zeile wieder die lange Fassung —
+   * das entscheidet CSS, nicht dieser Zweig.
+   *
+   * An den Angeboten selbst aendert das nichts: dieselben `offers`, dasselbe
+   * Ziel, derselbe zugaengliche Name, dieselbe Quick-View-Abfangung.
+   */
+  /**
+   * Die vorbereitete Glocke — sichtbar, deaktiviert, und nur auf der Kachel.
+   *
+   * SIE WIRD BEDINGUNGSLOS ÜBERGEBEN UND BEDINGT GEZEIGT (UX-01E). Ob eine
+   * Glocke erscheint, entscheidet `FigureRow` an `!offered` — eine Figur mit
+   * Angebot braucht keine Erinnerung. Diese Stelle entscheidet nur, DASS es
+   * eine gibt, und `FigureCard` bekommt sie nicht: die klassische Karte
+   * bleibt unverändert.
+   *
+   * Sie ist nicht funktionsfähig und tut auch nicht so: ein `disabled`
+   * Knopf, kein Alarm-RPC, keine Abfrage, kein Zustand. `0150` ist nirgends
+   * angewandt, und UX-02 ist ein entferntes `disabled` — keine
+   * Layoutänderung, weil der 44-px-Platz schon jetzt der endgültige ist.
+   */
+  /*
+   * UX-01G: NUR EIN SAMMLERKONTO BEKOMMT SIE. „Benachrichtige mich, wenn es
+   * wieder da ist" ist eine Frage des Sammlers; ein Betriebskonto stellt sie
+   * nicht, und ein Adminkonto hat die Leiste schon voll.
+   */
+  const bell = accountType === "user" ? <AvailabilityBell /> : null;
+
   const trade = (
     <OfferLink
       offers={offers}
       slug={figure.slug}
       name={figure.displayName}
       onOpen={quickBuy ? onOpenOffers : undefined}
+      compact={layout === "row"}
     />
   );
 
@@ -311,6 +440,7 @@ export function CatalogCard({
         trade={trade}
         offered={quickBuy}
         favoriteSlot={favorite}
+        bellSlot={bell}
         failed={failed}
       />
     ) : (
@@ -324,6 +454,35 @@ export function CatalogCard({
         trade={trade}
         favoriteSlot={favorite}
         notice={notice}
+      />
+    );
+  }
+
+  /*
+   * UX-01G — EIN BETRIEBSKONTO SAMMELT NICHT, UND DER KÖRPER SAGT DAS.
+   *
+   * Bis hierher kam bisher jedes Konto, das nicht `admin` war — auch ein
+   * Betriebskonto. Es bekam damit einen Sammelknopf, den die Datenbank
+   * ablehnt: `collection_items` gehört Sammlern, und `0145` weist ein
+   * Betriebskonto über `is_collector_account()` ab. Ein Knopf, der nur
+   * scheitern kann, ist schlimmer als keiner.
+   *
+   * Statt zu sammeln führt der Körper zur Figur — dorthin, wo ein
+   * Betriebskonto ohnehin hinwill, und wohin die Info-Marke daneben auch
+   * führt.
+   */
+  const sammelt = accountType === "user";
+  if (!sammelt) {
+    return (
+      <FigureRow
+        figure={figure}
+        marketBoostPercent={marketBoostPercent}
+        ownership="catalog"
+        highlighted={highlighted}
+        showSeries={showSeries}
+        href={`/skylanders/${figure.slug}`}
+        trade={trade}
+        offered={quickBuy}
       />
     );
   }
@@ -356,6 +515,7 @@ export function CatalogCard({
        */
       offered={quickBuy}
       favoriteSlot={favorite}
+      bellSlot={bell}
       failed={failed}
     />
   ) : (

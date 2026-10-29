@@ -1,6 +1,6 @@
 /**
- * A special edition, as a banderole across the foot of the photograph
- * (UX-01C, ADR-0148).
+ * A special edition, as a strip of its own beneath the photograph
+ * (UX-01C, revised by UX-01E, ADR-0148).
  *
  * WHICH EDITIONS EXIST, AND IT IS NOT A JUDGEMENT CALL
  *
@@ -37,14 +37,63 @@
  * possession and an edition is a property of the OBJECT. A gold banner would
  * make an unowned Legendary look owned.
  *
- * WHERE IT SITS: absolutely, across the foot of the picture stage. It costs
- * the row NO height — the stage is a fixed square and the banner is inside
- * it — and it covers the bottom fifth, where a figure has its base rather
- * than its face. The photograph itself is untouched: no filter, no dimming,
- * no scaling.
+ * WHERE IT SITS, AND WHY IT MOVED. It used to lie across the foot of the
+ * picture stage, absolutely positioned inside it. That covered the bottom
+ * fifth of the photograph — the base rather than the face, but artwork all
+ * the same — and after the desktop review the operator ruled it out: no
+ * overlay on the artwork, and the picture must not be cropped or shrunk to
+ * make room for one either.
+ *
+ * So it is a strip of its own now, directly under the picture and inside the
+ * same left column. Two consequences worth stating:
+ *
+ *   THE PHOTOGRAPH IS WHOLE. No overlay, no filter, no dimming, no scaling,
+ *   nothing cropped. The 64 px square is 64 px of picture.
+ *
+ *   IT STILL COSTS THE ROW NO HEIGHT. 64 px of picture plus 13 px of strip
+ *   is 77, and the text block beside it needs 90 anyway (`INFO_HEIGHT`), so
+ *   the whole left column still fits inside a height the row was already
+ *   paying. A tile with an edition and a tile without are exactly the same
+ *   height — which is what "einheitliche Kachelhöhe" requires, and it comes
+ *   out of the arithmetic rather than out of a reserved blank.
+ *
+ * The strip and the picture share one rounded, ringed box, so the two read
+ * as one plate with a caption rather than as two stacked objects. That is
+ * the whole of the "quiet, high-grade" treatment: a white stage, a dark
+ * label under it, one edge around both.
  */
-import { namesEdition } from "@/lib/catalog/card";
-import { CARD_TYPE_LABELS, EDITION_RANK, type CardType } from "@/lib/catalog/card-type";
+/* ===========================================================================
+ * NACHTRAG CAT-10 (`0163`): DIE QUELLE IST NICHT MEHR `card_type`
+ * ===========================================================================
+ *
+ * Alles oben bleibt richtig — bis auf die Quelle. Das Banner liest jetzt
+ * `skylanders.visible_type`: den EINEN Type, den ein Administrator aus der
+ * Menge der hinterlegten ausgewaehlt hat.
+ *
+ * WARUM DER WECHSEL. `card_type` konnte nur EINE Eigenschaft tragen, und bei
+ * 192 von 701 Zeilen war das zu wenig: „Legendary Giant" war entweder ein
+ * Giant (an der Kategorie, nie auf einem Banner) oder ein Legendary. Jetzt
+ * traegt die Zeile beide, und der Bediener sagt, welcher erscheint.
+ *
+ * WAS SICH NICHT AENDERT. `card_type` bleibt die KARTENKUNST der senkrechten
+ * Karte in Shop und Sammlung — sieben PNG-Dateien, unveraendert. Und diese
+ * Komponente leitet NICHTS ab: sie liest den ausgewaehlten Type und sonst
+ * nichts. Eine Ableitung aus der Menge (etwa „der staerkste gewinnt") haette
+ * auf 248 oeffentlichen Kacheln ein Banner erscheinen lassen, ohne dass
+ * jemand es entschieden hat.
+ *
+ * DIE ZWEI PLATTEN BLEIBEN, und ihre Zuordnung auch: Legendary und Prestige
+ * hell, alles andere leise (`isHeadlineType`). Fuer „Giant" oder „Trap" gibt
+ * es keinen Rang — ein Giant ist keine staerkere Ausgabe von irgendetwas —,
+ * also stehen sie auf der leisen Platte.
+ * ======================================================================== */
+/* `EDITION_RANK` bleibt fuer `isHeadlineEdition()` — die Funktion gehoert zur
+   senkrechten Karte und wird von `variant-seal.tsx` und ihren Tests gegen
+   dieselbe Rangliste gehalten. Die Beschriftung kommt seit CAT-10 aus
+   `TYPE_LABELS`. */
+import { EDITION_RANK, type CardType } from "@/lib/catalog/card-type";
+import { TYPE_LABELS, isHeadlineType, type CatalogType }
+  from "@/lib/catalog/catalog-type";
 
 /**
  * The two plates, character for character the pair `variant-seal.tsx` uses.
@@ -73,13 +122,15 @@ export function isHeadlineEdition(cardType: CardType): boolean {
   return EDITION_RANK[cardType] >= BRIGHT_FROM_RANK;
 }
 
-export function EditionBanner({ cardType }: { cardType: CardType }) {
+export function EditionBanner({ type }: { type: CatalogType | null }) {
   /*
-   * `standard` is what a figure is when nobody has said otherwise, so it gets
-   * no banner — the same rule, and the same function, the row already uses to
-   * decide whether an edition is worth naming at all.
+   * KEIN TYPE, KEIN BANNER. Drei Lagen fuehren hierher, und fuer den
+   * Betrachter sehen sie gleich aus: niemand hat entschieden, jemand hat
+   * ausdruecklich „–" gewaehlt, oder der gewaehlte Type ist aus der Menge
+   * gefallen. Welche es war, steht in `visible_type_decided` und gehoert in
+   * den Dialog, nicht auf die Kachel.
    */
-  if (!namesEdition(cardType)) return null;
+  if (type === null) return null;
 
   return (
     <span
@@ -89,21 +140,24 @@ export function EditionBanner({ cardType }: { cardType: CardType }) {
        * of what the figure IS rather than a state anybody acts on. One more
        * word between the picture and the name would be noise.
        *
-       * `pointer-events-none` so the banderole never eats a tap meant for the
-       * row's collect toggle underneath it.
+       * `pointer-events-none` so the strip never eats a tap meant for the
+       * row's collect toggle underneath it. It is no longer over the artwork,
+       * but it is still over the row.
        */
       aria-hidden="true"
       className={
-        "pointer-events-none absolute inset-x-0 bottom-0 truncate px-1 text-center "
+        /* In flow, full width of the picture column, and `block` so the
+           13 px line box is the strip's whole height. */
+        "pointer-events-none block w-full truncate px-1 text-center "
         + "font-mono text-[8px] leading-[13px] font-medium tracking-[0.08em] uppercase "
         /* One pixel of highlight inside a dark field is what makes a plate
            look pressed rather than laid on. No radius, no blur, no glow —
            the same treatment the variant seal uses. */
         + "shadow-[inset_0_1px_0_rgb(255_255_255/0.22)] "
-        + (isHeadlineEdition(cardType) ? BRIGHT : QUIET)
+        + (isHeadlineType(type) ? BRIGHT : QUIET)
       }
     >
-      {CARD_TYPE_LABELS[cardType]}
+      {TYPE_LABELS[type]}
     </span>
   );
 }

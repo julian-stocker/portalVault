@@ -274,7 +274,17 @@ export const de = {
      * Karten GEGEN eine Tabelle, hier um zwei Arten von Karte.
      */
     viewLabel: "Ansicht",
-    view: { cards: "Karten", rows: "Liste" } as Record<string, string>,
+    /*
+     * „Kacheln" seit UX-01E, und der interne Wert bleibt `rows`.
+     *
+     * Die Beschriftung war „Liste", und das beschrieb die erste Fassung: eine
+     * Spalte untereinander. Seit das Raster bis zu drei nebeneinander legt,
+     * ist es keine Liste mehr. Der gespeicherte Wert und der
+     * localStorage-Schlüssel sind absichtlich NICHT mitumbenannt — eine
+     * gemerkte Ansicht ist Benutzerzustand, und ihn für ein Wort im
+     * Oberflächentext zu verwerfen wäre der falsche Handel.
+     */
+    view: { cards: "Karten", rows: "Kacheln" } as Record<string, string>,
     /** Wenn der Filter aus ist und trotzdem nichts fehlt. */
     /** „Fehlen" ist leer: alles vorhanden. */
     ownedEmpty: "Aus dieser Serie besitzt du noch nichts.",
@@ -297,15 +307,87 @@ export const de = {
     collectedBadge: "In deiner Sammlung",
     collectedHint: "Aus der Sammlung entfernen",
     collectSignedOut: "Zur Sammlung hinzufügen",
+    /**
+     * Der redaktionelle Katalogstatus (CAT-02B).
+     *
+     * Drei Werte, und „Versteckt" und „Entwurf" verhalten sich gleich — sie
+     * sagen Verschiedenes über die Absicht. Deshalb zwei Wörter und nicht
+     * eines mit Zusatz.
+     */
+    statusLabel: "Status",
+    statusPublic: "Öffentlich",
+    statusHidden: "Versteckt",
+    statusDraft: "Entwurf",
+    statusAll: "Alle",
+    statusNav: "Status",
+    statusHint:
+      "Nur „Öffentlich“ erscheint im Katalog. „Versteckt“ und „Entwurf“ "
+      + "bleiben gespeichert und bearbeitbar.",
     /** Beschriftung der separaten Navigationsaktion auf der Karte. */
     info: "Info",
     infoFor: (name: string) => `Info zu ${name}`,
+    /**
+     * Die vorbereitete, noch nicht funktionsfähige Verfügbarkeitsglocke
+     * (UX-01E). Sagt, was kommt — nicht, dass etwas kaputt ist.
+     */
+    alarmPending: "Benachrichtigungen folgen",
     collectFailed: "Das hat nicht geklappt.",
     inactive: "Nicht mehr im Katalog",
     backToCatalog: "Zurück zum Katalog",
     marketValue: "Marktwert",
     series: "Serie",
     /** Screenreader-Vorspann für die SKY-ID auf der Detailseite. */
+    /**
+     * Die drei Katalogbereiche (UX-01F).
+     *
+     * „Karten" meint vorerst die klassischen vertikalen Figurenkarten und
+     * später echte sammelbare Skylanders-Karten. Die Beschriftung passt auf
+     * beides, deshalb muss sie beim Übergang nicht geändert werden.
+     */
+    sectionNav: "Katalogbereich",
+    sectionFigures: "Figuren",
+    sectionAccessories: "Zubehör",
+    sectionCards: "Karten",
+    /**
+     * Der Schnellfilter „Anzeigen" (UX-01F).
+     *
+     * „Sammlung" statt „Besitz": der Nutzer nennt es seine Sammlung, und das
+     * Wort steht so auch in der Hauptnavigation. Die ausführlichen Filter im
+     * Dialog behalten ihre eigenen, älteren Beschriftungen — sie setzen zwei
+     * unabhängige Dimensionen, dieser Schalter vier benannte Ansichten.
+     */
+    quickNav: "Anzeigen",
+    quickAll: "Alle",
+    quickOwned: "Sammlung",
+    quickMissing: "Fehlen",
+    quickAvailable: "Verfügbar",
+    /** Die beiden neuen ausführlichen Filter (UX-01F). */
+    elementNav: "Element",
+    elementCurated: (shown: number, total: number) =>
+      `Nur kuratierte Charakterzuordnungen — ${shown} von ${total} Figuren`,
+    marketRangeNav: "Marktwert von/bis",
+    marketRangeFrom: "von",
+    marketRangeTo: "bis",
+    marketRangeHint: "Marktwert, nicht Angebotspreis",
+    marketRangeNoPrice: (count: number) =>
+      `${count} Figuren ohne bekannten Marktwert bleiben ausgeblendet`,
+    /**
+     * Die zweite, dezente Tür zu den Testkategorien (UX-01F).
+     *
+     * DIE SCHLÜSSEL HEISSEN ABSICHTLICH NICHT `specialSeries…`. `de.catalog`
+     * darf das Wort „Special" nicht enthalten, und das ist eine Zusage mit
+     * Grund: es gibt keinen Specials-Filter für Sonderausgaben von Figuren,
+     * weil nichts in den Daten sagt, was eine Sonderausgabe ist (ADR-0034),
+     * und ein Test hält das Wort deshalb aus dem Wörterbuch heraus.
+     *
+     * Hier ist etwas anderes gemeint — Serienkategorien jenseits der sechs
+     * Spiele, also Smoke Test und RLS Test Series. Statt die Zusage
+     * aufzuweichen, trägt der Schlüssel ein anderes Wort; der sichtbare Text
+     * bleibt „Sonderkategorien". Im Code heisst das Konzept weiterhin
+     * `isSpecialSeries` (`series-nav.ts`), wo keine Kollision besteht.
+     */
+    seriesExtraLabel: "Sonderkategorien",
+    seriesExtraNone: "— keine —",
     reference: "Sammlerreferenz",
   },
 
@@ -3078,10 +3160,374 @@ export const de = {
     next: "Weiter",
     notAllowed: "Dafür fehlt die Berechtigung.",
     writeFailed: "Das hat nicht geklappt.",
+    /*
+     * CAT-05H — der Auffangtext mit Fehlercode.
+     *
+     * Die rohe Meldung der Datenbank gehört nicht in die Oberfläche: sie
+     * kann Namen, Spaltennamen und Teile von Anweisungen enthalten. Der
+     * SQLSTATE allein ist technisch genug, um die Zeile im Serverprotokoll
+     * wiederzufinden, und verrät nichts.
+     */
+    writeFailedCode: (code: string) =>
+      `Die Datenbank hat den Vorgang abgewiesen (Code ${code}). Es wurde `
+      + "nichts geändert. Die technischen Einzelheiten stehen im "
+      + "Serverprotokoll.",
     unknownFigure: "Unbekannte Figur.",
+    mergeHeading: "Mit bestehender Figur zusammenführen",
+    mergeIntro:
+      "Dieser Entwurf stammt aus dem Katalogimport. Beschreibt er eine Figur, "
+      + "die es schon gibt, kann er in ihr aufgehen — die bestehende Figur "
+      + "behält ihre SKY-ID und alle Verknüpfungen.",
+    mergeSearch: "Bestehende Figur suchen (Name oder SKY-ID)",
+    mergeSuggestions: "Mögliche Treffer",
+    mergeNoSuggestions: "Kein naheliegender Treffer. Suche oben nach Name oder SKY-ID.",
+    mergeCompare: "Gegenüberstellung",
+    mergeTakeOver: "übernehmen",
+    mergeField: "Feld",
+    mergeCurrent: "bestehender Eintrag",
+    mergeDraftValue: "Entwurf",
+    mergeEmpty: "—",
+    mergeSame: "gleich",
+    mergeSummary: "Es werden übernommen:",
+    mergeNothing: "Noch nichts ausgewählt.",
+    mergeSubmit: "Zusammenführen und Entwurf entfernen",
+    /* CAT-05F — die Änderungstabelle */
+    mergeSelect: "Auswahl",
+    mergeSelectAll: "Alle auswählen",
+    mergeSelectNone: "Alle abwählen",
+    mergeSelectRow: (feld: string) => `${feld} übernehmen`,
+    mergeOldValue: "Bisheriger Wert",
+    mergeNewValue: "Neuer Wert",
+    mergeSubmitCount: (n: number) =>
+      n === 1 ? "1 Änderung übernehmen und Entwurf entfernen"
+              : `${n} Änderungen übernehmen und Entwurf entfernen`,
+    mergeImageOld: "bisheriges Bild",
+    mergeImageNew: "neues Importbild",
+    mergeImageNone: "kein Bild",
+    mergeStale:
+      "Die Vorschau ist nicht mehr aktuell — an einer der beiden Zeilen hat "
+      + "sich etwas geändert. Es wurde nichts übernommen. Bitte den Dialog "
+      + "schließen, neu laden und erneut prüfen.",
+    mergeFieldRejected:
+      "Es war ein Feld ausgewählt, das nicht übernommen werden darf. "
+      + "Es wurde nichts geändert.",
+    mergeLinkedHalf:
+      "Serie und Kategorie gehören zusammen und werden nur gemeinsam "
+      + "übernommen.",
+    mergeImageMissing:
+      "Das Bild ist ausgewählt, aber der Entwurf hat keinen Bildpfad. "
+      + "Es wurde nichts geändert.",
+    /* CAT-05H — die übrigen Abweisungen von 0154/0155/0156, damit keine
+       davon im Auffangtext landet. */
+    mergeImagePathUnselected:
+      "Es wurde ein Bildpfad mitgeschickt, obwohl das Bild abgewählt ist. "
+      + "Es wurde nichts geändert — bitte den Dialog neu öffnen.",
+    mergeImagePathForeign:
+      "Der Bildpfad gehört nicht zur bestehenden Figur. Es wurde nichts "
+      + "geändert.",
+    mergeRowGone:
+      "Eine der beiden Zeilen gibt es nicht mehr. Es wurde nichts geändert — "
+      + "bitte die Liste neu laden.",
+    mergeNotADraft:
+      "Nur Entwürfe können zusammengeführt werden, und das Ziel darf selbst "
+      + "keiner sein. Es wurde nichts geändert.",
+    mergeSelectionShape:
+      "Die Feldauswahl war nicht lesbar. Es wurde nichts geändert — bitte "
+      + "den Dialog neu öffnen.",
+    mergeNotAdmin:
+      "Die Datenbank hat die Berechtigung verweigert. Nur Plattformadmins "
+      + "dürfen zusammenführen.",
+    mergeReferencesUnsupported:
+      "Auf den Katalog zeigt ein zusammengesetzter Verweis, den die "
+      + "Referenzprüfung nicht zählen kann. Es wurde nichts geändert — das "
+      + "ist von Hand zu klären.",
+    mergePreview: "Das ändert sich:",
+    mergeNoChange: "Nichts — der Entwurf bringt nichts Neues mit.",
+    mergeKept: "bleibt",
+    mergeProtected: "Unverändert bleiben",
+    /*
+     * CAT-05I — die interne Notiz ist keine auswählbare Änderung mehr.
+     *
+     * Sie wird bei jeder Zusammenführung automatisch verarbeitet: die Notiz
+     * der bestehenden Figur bleibt, die Herkunft des Entwurfs kommt einmal
+     * dazu, veraltete Importhinweise fallen weg. Ein Satz statt eines
+     * Kästchens, das nichts entscheidet.
+     */
+    /* CAT-06 — die drei Importwege und die Figurenfamilien. */
+    draftWhat: "Was möchtest du mit diesem Entwurf machen?",
+    draftWayUpdate: "Bestehende Figur aktualisieren",
+    draftWayUpdateHint: "Der Entwurf geht in einer vorhandenen Figur auf.",
+    draftWayVariant: "Als Variante hinzufügen",
+    draftWayVariantHint: "Bleibt eine eigene Figur, gehört aber zu einer Familie.",
+    draftWaySolo: "Als eigenständige Figur hinzufügen",
+    draftWaySoloHint: "Wird veröffentlicht, ohne Familienzuordnung.",
+    familySearch: "Figurenfamilie suchen (z. B. Spyro)",
+    familyNone: "Keine Familie gefunden. Du kannst sie unten anlegen.",
+    familyCreate: "Neue Familie anlegen",
+    familyCreateAs: (name: string) => `Familie „${name}" anlegen`,
+    familyPreview: "Das wird zugeordnet",
+    familyMembers: (n: number) =>
+      n === 1 ? "1 Figur in dieser Familie" : `${n} Figuren in dieser Familie`,
+    familyKeeps:
+      "Der Entwurf behält SKY-ID, Slug, Namen, Bild, Edition und Preis. Von "
+      + "der Grundfigur wird nichts übernommen.",
+    familySubmit: "Als Variante veröffentlichen",
+    soloSubmit: "Eigenständig veröffentlichen",
+    soloKeeps:
+      "Die Figur wird genau so veröffentlicht, wie sie dasteht — mit ihrer "
+      + "SKY-ID und ihrem Slug, ohne Familienzuordnung.",
+    familyAssign: "Figurenfamilie",
+    familyAssignNone: "keine Familie",
+    familyRemove: "Zuordnung entfernen",
+    familySubmitAssign: "Familie zuordnen",
+    familyNotEnabled:
+      "Die Familienverwaltung ist noch nicht freigeschaltet — die Migration "
+      + "0158 liegt auf dieser Datenbank nicht.",
+    familyRequired:
+      "Für eine Variante braucht es eine Familie. Ohne Familie ist es eine "
+      + "eigenständige Figur.",
+    familyUnknown: "Diese Figurenfamilie gibt es nicht.",
+    familyDuplicate:
+      "Diese Familie gibt es schon. Bitte die vorhandene auswählen, statt "
+      + "eine zweite anzulegen.",
+    familyNameMissing: "Eine Familie braucht einen Namen.",
+    familyNameLong: "Der Familienname ist zu lang (höchstens 120 Zeichen).",
+    /* CAT-07 — die Basisfigur. Zwei Ebenen, zwei Wortfelder: „Familie"
+       verbindet serienübergreifend, „Basisfigur" ist eine konkrete Figur
+       derselben Serie. Die Oberfläche darf die beiden nie vermischen. */
+    baseAssign: "Variante von",
+    baseAssignNone: "keine Basisfigur — eigenständige Figur",
+    baseSearch: "Basisartikel derselben Serie suchen",
+    baseSearchHint: (serie: string) =>
+      `Es werden nur Basisartikel der Serie ${serie} angeboten — keine `
+      + "anderen Serien, keine Varianten, keine Entwürfe.",
+    /* CAT-08 Korrektur — die ARTIKELART. Nicht nur Charakterfiguren haben
+       Varianten: ein Trap, ein Fahrzeug, ein Kreationskristall ebenso. Die
+       Suche bietet deshalb nur Artikel DERSELBEN Art an, und dieser Satz
+       sagt, welche das ist. */
+    baseClassName: (art: string) => ({
+      character: "Figuren", trap: "Traps", vehicle: "Fahrzeuge",
+      crystal: "Kreationskristalle", magic_item: "Magic Items",
+      trophy: "Trophäen", location: "Locations & Truhen", portal: "Portale",
+      game: "Spiele", bundle: "Bundles", bag: "Taschen", accessory: "Zubehör",
+    }[art] ?? art),
+    baseSearchHintClass: (serie: string, artName: string) =>
+      `Es werden nur ${artName} der Serie ${serie} angeboten — keine anderen `
+      + "Serien, keine andere Artikelart, keine Varianten, keine Entwürfe.",
+    baseClassUnknown:
+      "Für diesen Artikel lässt sich die Art nicht sicher bestimmen — seine "
+      + "Kategorie ist keiner Artikelart zugeordnet. Deshalb werden keine "
+      + "Basisartikel vorgeschlagen; bitte die Kategorie klären oder die "
+      + "Zuordnung von Hand setzen.",
+    baseFamilyOnlyCharacters:
+      "Dieser Artikel ist keine Charakterfigur. Er bekommt deshalb keine "
+      + "Charakterfamilie — nur die Basiszuordnung wird gesetzt.",
+    baseNone: "Keine passende Basisfigur in dieser Serie gefunden.",
+    baseNoneAtAll:
+      "In dieser Serie gibt es keine Basisfigur, der diese Figur zugeordnet "
+      + "werden könnte.",
+    basePreview: "Das wird zugeordnet",
+    baseVariantsSoFar: (n: number) =>
+      n === 0 ? "bisher ohne Varianten"
+              : n === 1 ? "hat bisher 1 Variante" : `hat bisher ${n} Varianten`,
+    /* CAT-08 — die Trefferliste. Kurz, weil sie auf dem Telefon gelesen
+       wird: der Name trägt, SKY-ID und Serie stehen klein darunter, und die
+       Kategorie nur dann, wenn sie in dieser Liste etwas unterscheidet. Die
+       Zeile „bisher ohne Varianten" ist entfallen — sie stand bei fast jeder
+       Figur und sagte nichts. */
+    baseVariantsShort: (n: number) => (n === 1 ? "1 Variante" : `${n} Varianten`),
+    baseLikely: (vorsilbe: string) =>
+      vorsilbe === ""
+        ? "wahrscheinlich die richtige"
+        : `wahrscheinlich — der Entwurf heißt „${vorsilbe}" davor`,
+    baseShown: (gezeigt: number, gefunden: number) =>
+      gefunden <= gezeigt
+        ? `${gefunden} ${gefunden === 1 ? "Basisfigur" : "Basisfiguren"}`
+        : `${gezeigt} von ${gefunden} — Suche eingrenzen`,
+    baseKeeps:
+      "Die Figur behält SKY-ID, Slug, Namen, Bild, Edition und Preis. Von der "
+      + "Basisfigur wird nichts übernommen außer der Familienzuordnung.",
+    baseFamilyFromBase: (name: string) => `Familie wird übernommen: ${name}`,
+    /* CAT-08 — die Familie wird nicht mehr gefragt, sondern angekündigt.
+       `baseFamilyNoneYet` und `baseFamilyCreate` sind mit der Checkbox
+       entfallen: „soll eine Familie angelegt werden?" war eine Frage, die
+       der Bediener nicht beantworten kann, weil sie nur eine Folge seiner
+       Wahl der Basisfigur ist (`0161`). */
+    baseFamilyAuto: (name: string) =>
+      `Familie wird angelegt: ${name} — benannt nach der Basisfigur, und `
+      + "beide Figuren bekommen sie.",
+    baseFamilyNotConfirmed: (mitglied: string) =>
+      "Es gibt schon eine Familie mit dem Namen der Basisfigur, aber zu ihr "
+      + (mitglied === ""
+          ? "gehört eine Figur mit einem unvereinbaren Namen."
+          : `gehört ${mitglied} — ein Name, der nicht dazu passt.`)
+      + " Dass es derselbe Charakter ist, steht damit nicht fest, und es wird "
+      + "nichts geraten. Bitte die Familie auf der Detailseite von Hand setzen.",
+    baseFamilyNoName:
+      "Die Basisfigur hat keinen Namen, aus dem eine Familie benannt werden "
+      + "könnte.",
+    baseSubmit: "Als Variante veröffentlichen",
+    baseSubmitAssign: "Basisfigur zuordnen",
+    baseRemove: "Zuordnung entfernen",
+    baseNotEnabled:
+      "Die Variantenzuordnung ist noch nicht freigeschaltet — die Migration "
+      + "0159 liegt auf dieser Datenbank nicht.",
+    baseWrongSeries:
+      "Die Basisfigur steht in einer anderen Spielserie. Eine Variante "
+      + "gehört zu einer Basisfigur derselben Serie.",
+    baseIsVariant:
+      "Die gewählte Figur ist selbst eine Variante. Varianten von Varianten "
+      + "gibt es nicht — bitte die Basisfigur wählen.",
+    baseHasVariants:
+      "Auf diese Figur zeigen schon Varianten. Sie kann nicht selbst Variante "
+      + "werden — erst die Varianten lösen.",
+    baseSelf: "Eine Figur kann nicht ihre eigene Variante sein.",
+    baseUnknown: "Diese Basisfigur gibt es nicht.",
+    baseRequired:
+      "Für eine Variante braucht es eine Basisfigur. Ohne Basisfigur ist es "
+      + "eine eigenständige Figur.",
+    baseFamilyConflict:
+      "Figur und Basisfigur gehören zu verschiedenen Familien. Das wird nicht "
+      + "stillschweigend überschrieben — bitte erst klären, welche gilt.",
+    publishNotADraft:
+      "Nur Entwürfe werden veröffentlicht. Für eine bestehende Figur die "
+      + "Familienzuordnung benutzen.",
+    mergeNoteAuto:
+      "Die interne Notiz wird automatisch übernommen: die bestehende bleibt, "
+      + "die Herkunft des Entwurfs kommt einmal dazu, veraltete "
+      + "Importhinweise entfallen.",
+    mergeImageFailed:
+      "Das Bild konnte nicht unter die bestehende SKY-ID kopiert werden. "
+      + "Es wurde nichts zusammengeführt.",
+    mergeImageAfter: "Bild danach",
+    mergeKeepsId: "Diese SKY-ID bleibt",
+    mergeSameRow: "Entwurf und Ziel sind dieselbe Zeile.",
+    mergeNoFields: "Es ist kein Feld zur Übernahme ausgewählt.",
+    mergeBlocked:
+      "Auf diesen Entwurf zeigen noch Daten — er wird nicht entfernt. "
+      + "Erst klären, was damit geschehen soll.",
+    mergeReferences: "Referenzen auf diesen Entwurf",
+    mergeReferencesNone: "Keine — der Entwurf kann entfernt werden.",
+    mergeReferencesUnknown: "Nicht feststellbar. Die Zusammenführung bleibt gesperrt.",
+    mergeLinked: "Serie und Kategorie werden immer gemeinsam übernommen.",
+    mergeNotEnabled:
+      "Die Zusammenführung ist noch nicht freigeschaltet — die Migration 0156 "
+      + "liegt auf dieser Datenbank nicht. Bis dahin ist die Schaltfläche gesperrt.",
+    rowMerge: "Zusammenführen",
+    rowEdit: "Bearbeiten",
+    rowDiscard: "Löschen",
+    discardConfirmTitle: "Entwurf wirklich löschen?",
+    discardConfirmBody:
+      "Der Eintrag wird entfernt und die SKY-ID nie wieder vergeben. "
+      + "Ein hochgeladenes Bild bleibt im Speicher liegen.",
+    discardConfirmYes: "Endgültig löschen",
+    discardConfirmNo: "Abbrechen",
+    discardBlocked:
+      "Auf diesen Entwurf zeigen noch Daten — er wird nicht gelöscht.",
+    discardNotDraft: "Nur Entwürfe können gelöscht werden.",
+    /* CAT-05H — auch beim Verwerfen fällt keine Abweisung in den Auffangtext. */
+    discardGone:
+      "Diesen Entwurf gibt es nicht mehr. Bitte die Liste neu laden.",
+    discardWasPublic:
+      "Dieser Eintrag stand schon einmal öffentlich und wird deshalb nicht "
+      + "gelöscht, sondern versteckt. Es wurde nichts geändert.",
+    discardNotAdmin:
+      "Dieser Eintrag stammt aus dem Katalogimport und wird über \u201eaktiv\u201c "
+      + "gesteuert, nicht gelöscht.",
     unknownCategory: "Unbekannte Kategorie.",
     /** Der Bearbeiten-Knopf auf der Adminkarte, mit Figurennamen (V3.8). */
     editFigure: (name: string) => `${name} bearbeiten`,
+    /* UX-01G — die zwei Admin-Handlungen in der Aktionsleiste der Kachel.
+       Das Auge schaltet zwischen `public` und `hidden`; ein ENTWURF wird
+       hier nicht veröffentlicht, das ist eine eigene Entscheidung
+       (ADR-0151). */
+    toggleVisibilityFor: (name: string, sichtbar: boolean) =>
+      sichtbar ? `${name} verstecken` : `${name} sichtbar machen`,
+    visibilityHide: "Verstecken",
+    visibilityShow: "Sichtbar machen",
+    visibilityDraft: "Entwurf — veröffentlichen geht über Bearbeiten",
+    /* CAT-09 — der Papierkorb. Rot, mit Bestätigung, und jede Abweisung
+       nennt ihren Grund: eine blockierte Löschung ohne Grund ist eine
+       Aufforderung zu raten. */
+    deleteFigure: "Löschen",
+    deleteFigureFor: (name: string, skyId: string) =>
+      `${name} ${skyId} dauerhaft aus dem Katalog löschen`,
+    deleteConfirmTitle: "Dauerhaft aus dem Katalog löschen?",
+    deleteConfirmBody:
+      "Die Figur wird dauerhaft aus dem Katalog entfernt. Die SKY-ID wird "
+      + "nicht wiederverwendet, und der Vorgang lässt sich nicht rückgängig "
+      + "machen.",
+    deleteConfirmChecks:
+      "SkyIsles prüft vorher, dass nichts auf die Figur zeigt: Sammlungen, "
+      + "Favoriten, Benachrichtigungen, Lager, Angebote, Warenkörbe, "
+      + "Einkäufe, Verkäufe, Bestellzeilen, Importzuordnungen und Varianten. "
+      + "Besteht eine davon, wird nichts gelöscht.",
+    deleteConfirmPublic:
+      "Diese Figur ist derzeit öffentlich sichtbar.",
+    deleteConfirmYes: "Dauerhaft löschen",
+    deleteDone: "gelöscht",
+    deleteNotEnabled:
+      "Das Löschen ist noch nicht freigeschaltet — die Migration 0162 liegt "
+      + "auf dieser Datenbank nicht.",
+    deleteBlocked: (wo: string) =>
+      wo === ""
+        ? "Auf diese Figur zeigen noch Daten. Sie wird nicht gelöscht, und es "
+          + "wird nichts mitgelöscht."
+        : `Auf diese Figur zeigen noch Daten: ${wo}. Sie wird nicht gelöscht, `
+          + "und es wird nichts mitgelöscht.",
+    deleteBlockedBase:
+      "Diese Figur ist Basisfigur einer Variante. Erst die Variante lösen, "
+      + "dann löschen.",
+    deleteBlockedOrder:
+      "Diese Figur steht in einer Bestellung. Eine Bestellung ist ein Beleg "
+      + "und wird nicht verändert — die Figur bleibt.",
+    deleteRaced:
+      "Während der Prüfung ist eine Referenz entstanden. Es wurde nichts "
+      + "gelöscht; bitte noch einmal versuchen.",
+    /* CAT-10 — der Type, und das eine Banner. */
+    typeBanner: "Banner",
+    typeBannerFor: (name: string) => `Banner von ${name} auswählen`,
+    typeNoBanner: "–",
+    typeNone: "keine Types",
+    typePropose: (label: string) => `Vorschlag: ${label}`,
+    typeProposeFor: (name: string, label: string) =>
+      `Vorschlag ${label} für ${name} übernehmen`,
+    typeProposeShort: "Vorschlag",
+    typeHeading: "Types",
+    typeHint:
+      "Mehrere Types sind möglich. Welcher als Banner erscheint, entscheidet "
+      + "das Feld auf der Kachel.",
+    typeArtwork: "Kartenkunst",
+    typeArtworkHint:
+      "Welche Karte in Shop und Sammlung gedruckt wird. Unabhängig von den "
+      + "Types — ein Type ändert sie nicht.",
+    typeNotEnabled:
+      "Die Typverwaltung ist noch nicht freigeschaltet — die Migration 0163 "
+      + "liegt auf dieser Datenbank nicht.",
+    typeUnknown:
+      "Dieser Type ist nicht bekannt. Erlaubt sind die siebzehn aus der "
+      + "Liste.",
+    typeNotAssigned:
+      "Dieser Type ist der Figur nicht zugeordnet. Zuordnen geht im "
+      + "Bearbeiten-Dialog.",
+    /* CAT-09 — der Marktwert direkt an der Kachel. */
+    priceEdit: (name: string) => `Marktwert von ${name} bearbeiten`,
+    priceSave: "Marktwert speichern",
+    priceCancel: "Abbrechen",
+    priceStored: "gespeicherter Wert",
+    priceBoostHint: (prozent: number) =>
+      `Der Katalog zeigt ${prozent} % Zuschlag auf diesen Wert.`,
+    priceOpenHint: "Leer lassen heißt „Preis offen“ — nicht 0 €.",
+    priceNotAPrice:
+      "Das ist kein Preis. Für „Preis offen“ das Feld leer lassen; "
+      + "0 € wird nicht gespeichert.",
+    priceTooBig: "Dieser Betrag ist zu groß.",
+    priceInvalid:
+      "Das ist kein Betrag. Erlaubt sind Zahlen wie 4,99 oder 4.99 — "
+      + "für \u201ePreis offen\u201c das Feld leer lassen.",
+    priceNotEnabled:
+      "Die Preisbearbeitung ist noch nicht freigeschaltet — die Migration "
+      + "0162 liegt auf dieser Datenbank nicht.",
     /** Überschrift und Abschnitte des Bearbeiten-Dialogs (V3.8). */
     editTitle: "Figur bearbeiten",
     /* Der Adminblock hatte keins von beiden — `cancel` steht im Checkout-Block
@@ -3188,9 +3634,21 @@ export const de = {
     loadFailed: "Die Figur konnte nicht geladen werden.",
     /** Ein Kartentyp, den es nicht gibt (V3.5). */
     unknownCardType: "Unbekannter Kartentyp.",
-    /** Überschrift und Bezeichnung des Kartentyp-Felds (V3.5). */
-    cardType: "Kartentyp",
-    cardTypeHint: "Bestimmt nur die Kartengrafik — der Name der Figur ändert sich dadurch nicht.",
+    /**
+     * Überschrift und Bezeichnung des Kartenkunst-Felds (V3.5, umbenannt in
+     * CAT-10).
+     *
+     * ES HIESS „KARTENTYP" UND HEISST JETZT „KARTENKUNST". Das Wort „Type"
+     * gehört seit CAT-10 der Typmenge (`types`), und zwei Felder, die beide
+     * „Typ" heißen, wären zwei Namen für zwei verschiedene Dinge. Die
+     * SPALTE bleibt `card_type` — eine angewendete Migration wird nicht
+     * umbenannt, und der Name ist im Code richtig: es ist der Typ der
+     * KARTE, nicht der der Figur.
+     */
+    cardType: "Kartenkunst",
+    cardTypeHint:
+      "Bestimmt nur, auf welche Karte die Figur gedruckt wird — in Shop und "
+      + "Sammlung. Unabhängig von den Types: ein Type ändert sie nicht.",
     nameTooLong: "Der Name ist zu lang.",
     noteTooLong: "Die Notiz ist zu lang.",
     completionNote:
@@ -4318,6 +4776,16 @@ export const de = {
     offersFrom: (price: string) => `Angebote ab ${price}`,
     /** Dieselbe Zeile, aber getrennt — der Preis wird schwerer gesetzt (V3.2). */
     offersFromLabel: "Angebote ab",
+    /**
+     * Dasselbe auf einem Telefon (UX-01D).
+     *
+     * Auf der horizontalen Zeile steht der Chip neben dem Marktwert, und
+     * „Angebote ab" kostete dort 54 px, die der Serienname braucht. Das Wort
+     * „Angebote" sagt auf dieser Zeile ohnehin nichts, was der Chip nicht
+     * schon durch seine Form sagt — „ab 4,49 €" ist dieselbe Aussage.
+     * Ab `sm:` ist wieder Platz, und dann steht die ausführliche Fassung.
+     */
+    offerFromLabel: "ab",
     offersFor: (name: string) => `Angebote für ${name} ansehen`,
     offerFrom: (price: string) => `ab ${price}`,
     /*

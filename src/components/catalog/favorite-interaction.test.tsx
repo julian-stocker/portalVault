@@ -74,7 +74,7 @@ function figur(skyId: string, name: string): CatalogFigure {
     canonicalName: "", displayNameOverride: null, marketPrice: 12,
     imageFile: null, imageOverridePath: null,
     displayName: name, sortBaseName: name, sortVariantLabel: null,
-    searchIndex: name.toLowerCase(), isActive: true, element: null, characterId: null,
+    searchIndex: name.toLowerCase(), isActive: true, element: null, characterId: null, baseSkyId: null,
   };
 }
 
@@ -191,7 +191,14 @@ describe("das Herz löst NIEMALS den Gesammelt-Toggle aus", () => {
      * ganzen oberen Kartenrand abfängt, nähme dem Sammeln seine Fläche.
      * `pointer-events-none` an der Ebene, `auto` nur am Knopf.
      */
-    await karte({});
+    /*
+     * UX-01G: GEPRÜFT AN DER KARTE, DIE DIE EBENE HAT. Die Überlagerung
+     * gehört `FigureCard` — der Kachel liegt das Herz in der Aktionsleiste,
+     * wo es ein Feld von 44 px ist und nichts abfängt. Die Gefahr, die diese
+     * Zusage beschreibt, gibt es nur auf der Karte, also wird sie dort
+     * gemessen: `layout: "card"`.
+     */
+    await karte({ layout: "card" });
     const ebene = herz().closest("[data-slot]")?.parentElement;
     expect(ebene?.className ?? "").toContain("pointer-events-none");
     expect(herz().className).toContain("pointer-events-auto");
@@ -394,7 +401,20 @@ describe("die Wunschliste verliert eine Karte im SELBEN Bild", () => {
   it("die andere Karte bleibt unberührt", async () => {
     await wunschliste();
     await klick(herzen()[0]);
-    expect(document.body.textContent).toContain("Legendary");
+    /*
+     * GEPRÜFT AN DER SKY-ID, NICHT AM VARIANTENSIEGEL (UX-01G). Vorher stand
+     * hier `toContain("Legendary")` — das Siegel der klassischen Karte, das
+     * den Variantennamen als Text druckte. Die Kachel trägt stattdessen den
+     * `displayName`, und der ist bei diesen zwei Prüffiguren derselbe
+     * („Spyro", zwei SKY-IDs — genau der Fall aus ADR-0034). Die Identität
+     * ist die SKY-ID, also wird sie gefragt: der Weg zur Figur steht in der
+     * Info-Marke.
+     */
+    expect(karten()).toBe(1);
+    const wege = [...document.querySelectorAll('a[href^="/skylanders/"]')]
+      .map((a) => a.getAttribute("href"));
+    expect(wege).toContain("/skylanders/sky-0002");
+    expect(wege).not.toContain("/skylanders/sky-0001");
   });
 
   it("im Katalog dagegen bleibt die Karte stehen", async () => {

@@ -53,6 +53,7 @@ function figure(name: string, characterId: number | null): CatalogFigure {
     isActive: true,
     element: null,
     characterId,
+    baseSkyId: null,
   };
 }
 

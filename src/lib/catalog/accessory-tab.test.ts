@@ -46,7 +46,8 @@ function artikel(over: Partial<CatalogFigure> = {}): CatalogFigure {
     displayNameOverride: null, marketPrice: null, imageFile: null, imageOverridePath: null,
     displayName: over.displayName ?? name, sortBaseName: name, sortVariantLabel: null,
     searchIndex: buildSearchIndex([name]), isActive: true, element: null,
-    characterId: null, itemType: "game", ...over,
+    characterId: null,
+    baseSkyId: null, itemType: "game", ...over,
   };
 }
 
@@ -83,15 +84,27 @@ describe("1. die oberste Katalognavigation", () => {
     expect(tabs).toContain("whitespace-nowrap");
   });
 
-  it("beide Seiten tragen sie, mit dem jeweils eigenen aktiven Eintrag", () => {
-    expect(code(CATALOG_VIEW)).toContain('<CatalogAreaTabs active="figures" />');
-    expect(code(VIEW)).toContain('<CatalogAreaTabs active="accessories" />');
+  it("beide Seiten tragen sie, mit dem jeweils eigenen aktiven Bereich", () => {
+    /* Seit UX-01F ein Schalter mit drei Bereichen statt zweier Leisten. Der
+       aktive Bereich kommt aus `area` plus der gemerkten Ansicht
+       (`activeSection`), damit Zubehör nie neben Karten hervorgehoben wird. */
+    expect(code(CATALOG_VIEW)).toContain('area="figures"');
+    expect(code(VIEW)).toContain('area="accessories"');
+    for (const file of [CATALOG_VIEW, VIEW]) {
+      expect(code(file)).toContain("<CatalogSectionSwitch");
+    }
   });
 
-  it("und sie steht ÜBER der Serienleiste, nicht daneben", () => {
-    /* Erst WAS, dann welches Spiel, dann welche Gruppe. */
+  it("und sie steht unter der Serienauswahl, nicht daneben", () => {
+    /*
+     * UMGEKEHRT SEIT DER ERGÄNZUNG VOM 2026-10-27. Vorher: erst WAS, dann
+     * welches Spiel. Jetzt erst das Spiel — es ist die Frage, die bei jedem
+     * Besuch beantwortet wird, während der Bereich selten wechselt, und auf
+     * einem Telefon soll die häufigste Steuerung am weitesten oben stehen.
+     * Nebeneinander stehen sie weiterhin nicht.
+     */
     const v = code(CATALOG_VIEW);
-    expect(v.indexOf("CatalogAreaTabs active=")).toBeLessThan(v.indexOf("<SeriesTabs"));
+    expect(v.indexOf("<SeriesGrid")).toBeLessThan(v.indexOf("<CatalogSectionSwitch"));
   });
 
   it("und nicht in der Hauptnavigation", () => {

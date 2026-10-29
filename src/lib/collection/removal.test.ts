@@ -30,6 +30,7 @@ function entry(skyId: string, marketPrice: number | null = 10, quantity = 1): Co
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
   };
   return { figure, quantity };
 }

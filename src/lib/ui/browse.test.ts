@@ -59,7 +59,7 @@ describe("the filter badge counts real state", () => {
      * badge lie about what the panel holds.
      */
     expect(catalogFilterCount(null, "all")).toBe(0);
-    expect(code(CATALOG)).toContain("catalogFilterCount(group, ownership, availability)");
+    expect(code(CATALOG)).toContain("catalogFilterCount(group, ownership, availability");
     expect(code(CATALOG)).not.toMatch(/catalogFilterCount\([^)]*seriesCode/);
     expect(code(CATALOG)).not.toMatch(/catalogFilterCount\([^)]*query/);
   });
@@ -76,7 +76,10 @@ describe("the filter badge counts real state", () => {
 describe("the games are navigation and stay outside the panel", () => {
   it("the catalog renders its series row outside the sheet", () => {
     const catalog = code(CATALOG);
-    const series = catalog.indexOf("<SeriesTabs");
+    /* A fixed 3 x 2 grid since UX-01F, still outside the sheet and still
+       above it: picking a game is how somebody browses 561 figures, not a
+       narrowing of a list they are already looking at. */
+    const series = catalog.indexOf("<SeriesGrid");
     const sheet = catalog.indexOf("<FilterSheet");
     expect(series).toBeGreaterThan(-1);
     expect(sheet).toBeGreaterThan(series);
@@ -144,7 +147,24 @@ describe("the panel holds only what each page really filters by", () => {
         code(file).indexOf("<FilterSheet"),
         code(file).indexOf("</FilterSheet>"),
       );
-      for (const invented of ["sort", "Sortier", "element", "Element", "variant", "Variante"]) {
+      /*
+       * ELEMENT CAME OFF THIS LIST IN UX-01F, and only for the catalogue.
+       *
+       * The reason it was here was "no filter model behind it", and that
+       * stopped being true: `element-filter.ts` reads `CatalogFigure.element`,
+       * which comes from a curated `character_id` and is the same field every
+       * other surface names. The deeper worry — "it promises an answer the
+       * data cannot give" — is real and is answered ON SCREEN instead of by
+       * absence: the curation covers a small part of the catalogue, so the
+       * panel prints the coverage beside the pills. The next test holds that.
+       *
+       * Sort and variant stay forbidden: neither has a model, and the
+       * collection keeps all four.
+       */
+      const forbidden = file === CATALOG
+        ? ["sort", "Sortier", "variant", "Variante"]
+        : ["sort", "Sortier", "element", "Element", "variant", "Variante"];
+      for (const invented of forbidden) {
         expect(sheet, `${invented} has no filter model in ${file}`).not.toContain(invented);
       }
     }

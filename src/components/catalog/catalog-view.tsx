@@ -8,21 +8,13 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useDeferredValue,
-  useMemo,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from "react";
+import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
 
 import { CatalogCard } from "@/components/catalog/catalog-card";
-import { CatalogViewToggle } from "@/components/catalog/catalog-view-toggle";
-import {
-  catalogViewStore,
-  layoutFor,
-  type CatalogView as CatalogViewMode,
-} from "@/components/catalog/catalog-view-mode";
+import type { AccountType } from "@/lib/auth/capabilities";
+/* UX-01G: nur noch der Vorgabewert — der Bereichsschalter braucht einen,
+   und der Katalog hat keine Wahl mehr, die er lesen müsste. */
+import { DEFAULT_CATALOG_VIEW } from "@/components/catalog/catalog-view-mode";
 import { AddFigureModal } from "@/components/admin/add-figure-modal";
 import { AdminFigureModal } from "@/components/admin/figure-modal";
 import type { AdminFigureDraft } from "@/lib/admin/figure-draft";
@@ -42,8 +34,33 @@ import { FilterGroup, FilterSheet } from "@/components/ui/filter-sheet";
 import type { PublicSeller } from "@/lib/shop/seller";
 import { OwnershipFilter } from "@/components/catalog/ownership-filter";
 import { ProductGroupTabs } from "@/components/catalog/group-tabs";
-import { CatalogAreaTabs } from "@/components/catalog/area-tabs";
-import { SeriesTabs } from "@/components/catalog/series-tabs";
+import { CatalogSectionSwitch } from "@/components/catalog/catalog-section-switch";
+import { ElementFilter } from "@/components/catalog/element-filter";
+import { MarketRangeFilter } from "@/components/catalog/market-range-filter";
+import { QuickFilterBar } from "@/components/catalog/quick-filter";
+import { SeriesGrid } from "@/components/catalog/series-grid";
+import type { Element } from "@/lib/catalog/character";
+import {
+  NO_ELEMENTS,
+  elementCoverage,
+  isElementActive,
+  matchesElement,
+  toggleElement,
+  type ElementSelection,
+} from "@/lib/catalog/element-filter";
+import {
+  DEFAULT_MARKET_RANGE,
+  isMarketRangeActive,
+  matchesMarketRange,
+  withoutMarketPrice,
+  type MarketRange,
+} from "@/lib/catalog/market-filter";
+import {
+  quickFilterOf,
+  quickFilterPair,
+  quickFiltersFor,
+  type QuickFilter,
+} from "@/lib/catalog/quick-filter";
 import { groupTabs, matchesGroup, type CatalogGroup } from "@/lib/catalog/group";
 import { filterFigures, groupSearchResults } from "@/lib/catalog/search";
 import {
@@ -58,6 +75,7 @@ import { SeriesSectionHeader } from "@/components/collection/series-section";
 import { defaultSeriesCode } from "@/lib/catalog/series-nav";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
 import type { Offer } from "@/lib/shop/offer";
+import { visibleFor } from "@/lib/catalog/catalog-status";
 import { de } from "@/lib/i18n/de";
 
 /** One shared empty array, so a card without an offer keeps a stable prop. */
@@ -73,6 +91,7 @@ export function CatalogView({
   heading,
   signedIn,
   admin = false,
+  accountType = "user",
   highlightSkyId,
   initialSeriesCode,
   initialQuery = "",
@@ -127,6 +146,17 @@ export function CatalogView({
    * because otherwise a figure could be hidden and never found again.
    */
   admin?: boolean;
+  /**
+   * Welches der drei Konten liest (ADR-0078) — und damit, welche Handlungen
+   * die Kachel trägt (UX-01G).
+   *
+   * `admin` bleibt daneben: es entscheidet, welche SCHEIBE des Katalogs
+   * geladen wird (`includeHidden`) und ob die redaktionellen Werkzeuge der
+   * Werkzeugleiste erscheinen. `accountType` entscheidet die Handlungen an
+   * der einzelnen Kachel. Zwei Fragen, zwei Eigenschaften — und die
+   * Berechtigung hängt an keiner von beiden, sondern an der Datenbank.
+   */
+  accountType?: AccountType;
   highlightSkyId: string | null;
   /** Restores the view someone left when they went to sign in (ADR-0027). */
   initialSeriesCode?: string;
@@ -293,18 +323,33 @@ export function CatalogView({
    * value is still read, because reading it is free and a branch here would
    * only move the condition.
    */
-  const view = useSyncExternalStore(
-    catalogViewStore.subscribe,
-    catalogViewStore.read,
-    catalogViewStore.server,
-  );
-  function selectView(next: CatalogViewMode) {
-    catalogViewStore.write(next);
-  }
-  /* The editorial card has no row (ADR-0148): an operator keeps the card
-     whatever the collector's remembered choice happens to be. */
-  const layout = admin ? "card" : layoutFor(view);
-  const gridMode = admin ? "cards" : view;
+  /*
+   * UX-01G: DER KATALOG LIEST DEN DARSTELLUNGSSPEICHER NICHT MEHR.
+   *
+   * Er hatte eine Wahl, jetzt hat er eine Darstellung. Der Speicher bleibt —
+   * der SHOP benutzt ihn weiter, und ein gemerkter Wert von dort soll hier
+   * nichts bedeuten.
+   */
+  /*
+   * UX-01G — EINE DARSTELLUNG, FÜR ALLE DREI KONTEN.
+   *
+   * Hier stand `admin ? "card" : layoutFor(view)`: ein Administrator bekam
+   * immer die klassische Sammelkarte, ein Sammler die gemerkte Wahl. Das war
+   * die einzige Stelle im Katalog, an der die ROLLE das Aussehen entschied,
+   * und sie war der Grund, warum derselbe Katalog für zwei Konten
+   * verschieden aussah.
+   *
+   * Jetzt ist die Kachel die Darstellung des Katalogs — für Sammler,
+   * Betrieb und Administrator gleich. Was sich mit der Rolle ändert, sind
+   * die HANDLUNGEN in ihrer Aktionsleiste, und die entscheidet `CatalogCard`
+   * an `accountType`.
+   *
+   * Die klassische `FigureCard` bleibt, wo sie hingehört: in der SAMMLUNG
+   * (`collection-view.tsx`) und im SHOP, die beide ihre eigene Wahl haben.
+   * Hier wird sie nicht mehr gezeichnet.
+   */
+  const layout = "row" as const;
+  const gridMode = "rows" as const;
 
   /**
    * Whether to show only figures somebody is offering (V3.3).
@@ -314,6 +359,17 @@ export function CatalogView({
    * `ownership` could not say it.
    */
   const [availability, setAvailability] = useState<AvailabilityMode>(DEFAULT_AVAILABILITY);
+
+  /**
+   * The two narrowings UX-01F added, both in the filter dialog.
+   *
+   * Dimensions of their own, like the three before them, and for the same
+   * reason: each reads one field and knows nothing about the others, which is
+   * what lets every combination work without any of them being aware that
+   * the rest exist (ADR-0026, ADR-0041).
+   */
+  const [elements, setElements] = useState<ElementSelection>(NO_ELEMENTS);
+  const [market, setMarket] = useState<MarketRange>(DEFAULT_MARKET_RANGE);
 
   /**
    * Visibility changed on this page, before the server has caught up.
@@ -410,11 +466,53 @@ export function CatalogView({
      * `offers` is the object the page already handed down — the same one the
      * cards and the quick view read. Nothing is fetched to answer this.
      */
-    return availability === DEFAULT_AVAILABILITY
+    const offered = availability === DEFAULT_AVAILABILITY
       ? grouped
       : grouped.filter((figure) => matchesAvailability(offers[figure.skyId], availability));
+    /*
+     * The fourth and fifth narrowings (UX-01F), in the same pool as the
+     * first three — so series × group × ownership × availability × element ×
+     * market value all combine by construction, and the search reads the
+     * result of all of them.
+     *
+     * THE MARKET RANGE IS COMPARED AGAINST THE PRINTED VALUE, boost included:
+     * a filter that read the raw figure would drop a tile showing 11 € out of
+     * "bis 12 €", which is the kind of disagreement nobody can debug from the
+     * screen.
+     */
+    const byElement = isElementActive(elements)
+      ? offered.filter((figure) => matchesElement(figure, elements))
+      : offered;
+    return isMarketRangeActive(market)
+      ? byElement.filter((figure) => matchesMarketRange(figure, market, marketBoostPercent))
+      : byElement;
   }, [admin, ownership, figures, owned, group, availability, offers,
-      favoritesOnly, favorited]);
+      favoritesOnly, favorited, elements, market, marketBoostPercent]);
+
+  /**
+   * THE QUICK FILTER IS DERIVED, NOT STORED (UX-01F).
+   *
+   * Four named views over the two real dimensions, so nothing was merged and
+   * the dialog can still set both independently. `null` means the dialog has
+   * set a combination none of the four describes — "Fehlen" plus "nur mit
+   * Angebot" — and the bar then highlights nothing rather than claiming the
+   * nearest segment.
+   */
+  const quick = quickFilterOf({ ownership, availability });
+
+  function selectQuick(value: QuickFilter) {
+    const pair = quickFilterPair(value);
+    setOwnership(pair.ownership);
+    setAvailability(pair.availability);
+  }
+
+  /*
+   * What the two new filters can reach, counted from the figures this
+   * visitor actually has — an administrator's catalogue includes hidden rows
+   * and a collector's does not, so the numbers describe the right catalogue.
+   */
+  const coverage = useMemo(() => elementCoverage(figures), [figures]);
+  const unpriced = useMemo(() => withoutMarketPrice(figures), [figures]);
 
   /**
    * The second level's tabs, for the chosen game.
@@ -475,6 +573,8 @@ export function CatalogView({
     setOwnership(DEFAULT_OWNERSHIP);
     setGroup(null);
     setAvailability(DEFAULT_AVAILABILITY);
+    setElements(NO_ELEMENTS);
+    setMarket(DEFAULT_MARKET_RANGE);
   }
 
   /**
@@ -485,12 +585,24 @@ export function CatalogView({
    * hidden — and clearing them from inside the panel would undo navigation
    * somebody can see.
    */
-  const filterCount = catalogFilterCount(group, ownership, availability);
+  const filterCount = catalogFilterCount(group, ownership, availability, {
+    element: isElementActive(elements),
+    market: isMarketRangeActive(market),
+    /*
+     * The ownership and availability narrowings are ON SCREEN now, in the
+     * quick bar — so they are not what this badge promises. The exception is
+     * the combination the bar cannot name: then they really are hidden, and
+     * `quick === null` is exactly that case.
+     */
+    quickVisible: quick !== null,
+  });
 
   function resetFilters() {
     setOwnership(DEFAULT_OWNERSHIP);
     setGroup(null);
     setAvailability(DEFAULT_AVAILABILITY);
+    setElements(NO_ELEMENTS);
+    setMarket(DEFAULT_MARKET_RANGE);
   }
 
   /** One card, in whichever mode the visitor is in. */
@@ -499,6 +611,7 @@ export function CatalogView({
     const figure = withEdits(original);
     return (
       <CatalogCard
+        accountType={accountType}
         key={figure.skyId}
         figure={figure}
         initialCollected={owned.has(figure.skyId)}
@@ -541,7 +654,15 @@ export function CatalogView({
   }
 
   return (
-    <div className="flex flex-col gap-7">
+    /*
+     * 20 px zwischen den Blöcken statt 28 (Ergänzung vom 2026-10-27).
+     *
+     * Der Kopf soll flach sein, damit auf einem Telefon die ersten Figuren
+     * früh sichtbar werden. Vier Blöcke über dem Raster mal 8 px gespart
+     * sind 32 px — mehr als eine halbe Kachelhöhe, und ohne dass ein Block
+     * mit dem nächsten verklebt.
+     */
+    <div className="flex flex-col gap-5">
       {/*
        * The intro. No panel and no picture of its own (ADR-0038, V3.3): the
        * world is already behind this whole block, painted by the layout's
@@ -644,18 +765,92 @@ export function CatalogView({
          * behind the one that is used on some.
          */}
         {/*
-          DIE OBERSTE EBENE, ÜBER DER SERIENLEISTE (ADR-0128).
+         * DIE SERIE ALS FESTES RASTER (UX-01F).
+         *
+         * Vorher eine waagrecht scrollende Leiste: die sechs Spiele passten
+         * auf einem Telefon nicht, also lag Imaginators bei jedem Besuch
+         * hinter dem rechten Rand. Drei Spalten, zwei Zeilen, alle sechs
+         * sichtbar, einheitliche Zellen aus dem Raster selbst — und auf
+         * 34 rem begrenzt, damit der Block auf dem Desktop nicht die Seite
+         * einnimmt und die Kacheln die Hauptsache bleiben.
+         *
+         * DREI SPALTEN, DANN SECHS — entschieden von der Containerbreite, nicht
+         * von der Bildschirmbreite. Unter 44 rem bleibt es 3 × 2 und auf
+         * 34 rem begrenzt; darüber stehen alle sechs in einer Zeile und der
+         * Block ist nur noch 48 px hoch.
+         *
+         * UND ES STEHT ÜBER DEM BEREICHSSCHALTER (Ergänzung vom 2026-10-27).
+         * Die Serie ist die Frage, die bei jedem Besuch zuerst beantwortet
+         * wird; der Bereich wechselt selten. Auf einem Telefon heisst das:
+         * die am häufigsten benutzte Steuerung steht am weitesten oben.
+         *
+         * Sonderkategorien (Smoke Test, RLS Test Series) bleiben über die
+         * dezente Auswahl darunter erreichbar; die Zuordnung in der Datenbank
+         * ist unverändert.
+         */}
+        <SeriesGrid series={series} active={seriesCode} onSelect={setSeriesCode} />
+
+        {/*
+          DIE OBERSTE EBENE (ADR-0128, neu gefasst in UX-01F).
 
           Ein vierter Punkt in der Hauptnavigation wäre das Falsche — die hat
           drei Ziele und behält sie (ADR-0036). Zubehör ist ein Teil des
           Katalogs, also steht der Wechsel im Katalog, und zwar über der
           Serie: erst WAS, dann welches Spiel, dann welche Gruppe.
 
-          An den Karten darunter ändert sich nichts.
-        */}
-        <CatalogAreaTabs active="figures" />
+          SEIT UX-01F IST ES EIN SCHALTER STATT ZWEIER. „Figuren · Zubehör"
+          und „Karten · Kacheln" beantworteten beide die Frage „was sehe ich
+          hier", standen aber an zwei Stellen und sahen wie zwei verschiedene
+          Arten von Steuerung aus. Jetzt: Figuren · Zubehör · Karten, eine
+          Reihe, genau eines aktuell. Die Mechanik darunter bleibt
+          unverändert — Zubehör ist eine Route, die beiden Figurenansichten
+          sind die gemerkte Darstellung (`catalog-section.ts`).
 
-        <SeriesTabs series={series} active={seriesCode} onSelect={setSeriesCode} />
+          NICHT AUF DER WUNSCHLISTE. `/favoriten` ist kein Katalogbereich,
+          sondern eine eigene Seite; sie behält den reinen Ansichtsumschalter
+          weiter unten.
+        */}
+        {favoritesOnly ? null : (
+          <CatalogSectionSwitch
+            area="figures"
+            /*
+             * UX-01G — ZWEI BEREICHE, KEINE DARSTELLUNGSWAHL MEHR.
+             *
+             * Die Pille „Karten" ist entfallen: der Katalog hat nur noch
+             * eine Darstellung, und ein Schalter mit zwei gleich aussehenden
+             * Zuständen wäre genau die Steuerung, die diese Datei an anderer
+             * Stelle als „ein erreichbarer Zustand mit zwei Beschriftungen"
+             * ablehnt. Bleiben „Figuren" und „Zubehör", und das ist, was der
+             * Schalter immer war: wo bin ich.
+             *
+             * `view` bekommt den Vorgabewert und `onSelectView` nichts —
+             * dieselbe Form, in der `accessory-view.tsx` ihn schon benutzt.
+             */
+            view={DEFAULT_CATALOG_VIEW}
+            sections={["figures", "accessories"]}
+          />
+        )}
+
+        {/*
+         * DER SCHNELLFILTER (UX-01F) — eine eigene Zeile, über der
+         * Werkzeugleiste.
+         *
+         * Nicht in der Leiste daneben: Beschriftung plus vier Pillen braucht
+         * mehr als die 328 px eines 360-px-Telefons, die dort schon die
+         * Anzahl und der Filterknopf teilen. Und nicht im Filterdialog: er
+         * wird bei den meisten Besuchen benutzt, und was oft benutzt wird,
+         * gehört nicht hinter einen Knopf.
+         *
+         * Welche vier jemand bekommt, entscheidet die bestehende Regel
+         * `offersOwnershipFilter` — abgemeldet gibt es auf „Sammlung" und
+         * „Fehlen" keine Antwort, und „Fehlen = alles" wäre genau die
+         * irreführende Anzeige, die hier nicht entstehen darf.
+         */}
+        <QuickFilterBar
+          options={quickFiltersFor(offersOwnershipFilter({ signedIn, admin }))}
+          active={quick}
+          onSelect={selectQuick}
+        />
 
         {/*
          * THE TOOLBAR (V3.3): what is being shown, and what can be done about
@@ -701,6 +896,31 @@ export function CatalogView({
             <FilterGroup label={de.catalog.availabilityNav}>
               <AvailabilityFilter active={availability} onSelect={setAvailability} />
             </FilterGroup>
+
+            {/*
+             * THE TWO DIMENSIONS THE DIALOG GAINED (UX-01F).
+             *
+             * Here and not in the quick bar: both are occasional, both need
+             * more than a pill — ten elements, two number fields — and the
+             * bar is for the four views somebody wants on most visits.
+             *
+             * The ownership and availability groups ABOVE stay as they are,
+             * which is what keeps "fehlend UND kaufbar" expressible. The
+             * quick bar is a shortcut for four of their combinations, not a
+             * replacement for either (`quick-filter.ts`).
+             */}
+            <FilterGroup label={de.catalog.elementNav}>
+              <ElementFilter
+                selected={elements}
+                coverage={coverage}
+                onToggle={(element: Element) =>
+                  setElements((current) => toggleElement(current, element))}
+              />
+            </FilterGroup>
+
+            <FilterGroup label={de.catalog.marketRangeNav}>
+              <MarketRangeFilter range={market} withoutPrice={unpriced} onChange={setMarket} />
+            </FilterGroup>
           </FilterSheet>
 
           {/*
@@ -716,7 +936,10 @@ export function CatalogView({
            * and has no row (ADR-0042, ADR-0148), so a switch with one
            * reachable state would be a control that cannot do anything.
            */}
-          {admin ? null : <CatalogViewToggle view={view} onSelect={selectView} />}
+          {/* UX-01G: ENTFALLEN. Der Katalog hat eine Darstellung — die
+              Kachel —, und damit hat der Umschalter nichts mehr zu
+              schalten. Er bleibt als Komponente für den SHOP, der seine
+              eigene Wahl behält. */}
 
           {/*
             * Creating a figure (V3.9, ADR-0070), beside the filter rather than
@@ -840,8 +1063,10 @@ export function CatalogView({
           onSaved={(skyId, draft) => {
             setEdited((current) => ({ ...current, [skyId]: draft }));
             /* Visibility has its own path through the grid, and the card is
-               dimmed by it rather than by the draft. */
-            onVisibilityChange(skyId, draft.catalogVisible);
+               dimmed by it rather than by the draft. Seit CAT-02B kommt sie
+               aus dem Status: nur `public` ist öffentlich, und `visibleFor`
+               ist dieselbe Rechnung, die die Datenbank erzwingt. */
+            onVisibilityChange(skyId, visibleFor(draft.catalogStatus));
           }}
         />
       ) : null}

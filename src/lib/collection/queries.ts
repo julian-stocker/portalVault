@@ -15,6 +15,7 @@ import {
   toFigure,
   type FigureRow,
   withCharacterElement,
+  withBaseFigure,
   withCharacterFamily,
   withVariants,
 } from "@/lib/catalog/queries";
@@ -91,10 +92,23 @@ export async function fetchCollection(): Promise<CollectionEntry[]> {
 
   // Same derived display name and the same element as the catalog, from the
   // same functions — a collection card must not look different.
+  /*
+   * DIESELBE KETTE IN DERSELBEN REIHENFOLGE wie `fetchCatalog()` — Name,
+   * Familie, Basisfigur (CAT-07). Eine Sammlungskarte darf nicht anders
+   * aussehen und nicht anders einsortiert sein als dieselbe Figur im
+   * Katalog, und eine zweite Reihenfolge wäre genau das.
+   *
+   * `withBaseFigure()` arbeitet hier auf der SAMMLUNG: steht die Basisfigur
+   * nicht darin, weil der Besitzer sie nicht hat, bleibt die Variante wie
+   * sie kam. Das ist richtig — sie kann sich nicht neben eine Figur
+   * sortieren, die hier nicht vorkommt.
+   */
   const enriched = withCharacterElement(
-    withCharacterFamily(
-      withVariants(entries.map((e) => e.figure), nameIndex),
-      characterNames(characterIndex),
+    withBaseFigure(
+      withCharacterFamily(
+        withVariants(entries.map((e) => e.figure), nameIndex),
+        characterNames(characterIndex),
+      ),
     ),
     characterElements(characterIndex),
   );

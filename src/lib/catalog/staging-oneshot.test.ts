@@ -410,9 +410,81 @@ const LAEUFE = [
      gehoert fachlich VOR `0150`, steht hier aber nach ihr: diese Liste ist
      nach Dateinamen sortiert und sagt nichts ueber die Laufreihenfolge. */
   ["supabase/operations/staging-0151.sql", "0151_offer_state_live.sql"],
+  /* Und `0152` — der redaktionelle Katalogstatus (CAT-02B, ADR-0151). Eine
+     Spalte, zwei CHECKs, ein BEFORE-Trigger, eine Funktion, zwei ersetzte
+     Ruempfe. Ihre Huelle traegt SIEBEN Waechter statt der sonst ueblichen
+     vier, weil `0152` drei bestehende Ruempfe ersetzt und jeder davon
+     dastehen muss. */
+  ["supabase/operations/staging-0152.sql", "0152_catalog_status.sql"],
+  /* `0153` — `catalog_status` in die Plattformsicherung (CAT-02C Teil B).
+     Sie ersetzt EINEN Funktionsrumpf und nichts sonst; ihre Waechter pruefen
+     den Abdruck, bevor die Transaktion etwas tut. */
+  ["supabase/operations/staging-0153.sql", "0153_platform_export_catalog_status.sql"],
+  /* Und `0154` — die Zusammenfuehrung (CAT-05). Zwei Definer-Funktionen und
+     sonst nichts: keine Tabelle, keine Spalte, keine Zeile. Ihre Huelle
+     traegt fuenf Waechter, darunter einen gegen einen mehrspaltigen
+     Fremdschluessel, den `admin_merge_references()` nicht zaehlen koennte. */
+  ["supabase/operations/staging-0154.sql", "0154_merge_draft_into_figure.sql"],
+  /* Und `0155` — das Verwerfen (CAT-05D). Eine Funktion, vier Riegel, und
+     eine echte Abhaengigkeit: ihr Waechter A2 verlangt `0154`. */
+  ["supabase/operations/staging-0155.sql", "0155_discard_draft.sql"],
+  /* Und `0156` — die Feldauswahl (CAT-05F). Sie ersetzt EINEN Rumpf, den der
+     Dreiparameterfassung aus `0154`, und legt zwei Funktionen daneben; ihr
+     Waechter A5 verlangt, dass heute genau eine Fassung steht. */
+  ["supabase/operations/staging-0156.sql", "0156_merge_selected_fields.sql"],
+  /* Und `0157` — die Audit-Constraint und die automatische Notiz (CAT-05I).
+     Sie tauscht eine Constraint und ersetzt zwei Ruempfe; ihr Waechter A4
+     verlangt den Wortlaut aus `0033`, damit keine fremde Fassung
+     stillschweigend wegfaellt. */
+  ["supabase/operations/staging-0157.sql", "0157_audit_fields_and_automatic_notes.sql"],
+  /* Und `0158` — die Figurenfamilien (CAT-06). Sie tauscht dieselbe
+     Constraint wie `0157` und legt drei Funktionen an; ihr Waechter A4
+     verlangt die Fassung aus `0157`, damit keine zehn Werte verloren gehen. */
+  ["supabase/operations/staging-0158.sql", "0158_figure_families.sql"],
+  /* Und `0159` — die Basisfigur (CAT-07). Sie legt einen ZWEISPALTIGEN
+     Fremdschluessel an und muss deshalb den Rumpf von
+     `admin_merge_references` ersetzen; ihr Waechter A5 prueft, dass dort
+     heute wirklich die Fassung aus `0154` steht. */
+  ["supabase/operations/staging-0159.sql", "0159_variant_base_figure.sql"],
+  /* Und `0160` — `base_sky_id` in die Plattformsicherung (CAT-07, Nachtrag).
+     Dieselbe Bauform wie `0153`: sie ersetzt EINEN Funktionsrumpf und nichts
+     sonst. Ihre Huelle traegt sechs Waechter, darunter A5, der die
+     Variantenbeziehung vor dem Lauf auf Ketten, Seriengrenzen und verwaiste
+     Verweise prueft — gesichert wird nur ein Zustand, den `0159` zulaesst. */
+  ["supabase/operations/staging-0160.sql", "0160_platform_export_base_sky_id.sql"],
+  /* Und `0161` — die automatische Familienbildung (CAT-08 Stufe 1). Sie legt
+     EINE Funktion an und ersetzt keine; ihre Huelle traegt sechs Waechter,
+     darunter A3, der die ABDRUECKE der drei Funktionen prueft, die sie
+     aufruft: `0161` verlaesst sich auf ihr Verhalten, nicht nur auf ihre
+     Existenz. Und A5, der abbricht, wenn im Katalog ein Name zwei
+     verschiedene Familien traegt — dann waere Namensgleichheit kein
+     Beweis. */
+  ["supabase/operations/staging-0161.sql", "0161_variant_family_auto.sql"],
+  /* Und `0162` — der Marktwert und die Loeschung (CAT-09). Sie legt ZWEI
+     Funktionen an und tauscht dieselbe Audit-Constraint wie `0157`/`0158`;
+     ihre Huelle traegt sieben Waechter, darunter A3 und A4, die die zwei
+     ANNAHMEN pruefen, auf denen die Loeschung beruht: dass
+     `order_lines.sky_id` KEINEN Fremdschluessel traegt (sonst waere die
+     Zusatzpruefung ueberholt) und dass `catalog_admin_changes` NICHT an
+     `skylanders` haengt (sonst blockierte der Auditsatz die Loeschung
+     selbst). */
+  ["supabase/operations/staging-0162.sql", "0162_admin_price_and_delete.sql"],
+  /* Und `0163` — der TYPE als Menge (CAT-10). Drei Spalten, dieselbe
+     Audit-Constraint wie `0157`/`0158`/`0162`, und die zwei
+     Zusammenfuehrungsruempfe aus `0157` mit je einem Block mehr. Ihre Huelle
+     traegt sieben Waechter, und zwei davon sind MESSEND statt feststehend:
+     A7 legt den Abdruck der Kartenkunst transaktionslokal ab, B3 vergleicht
+     ihn nach dem Lauf. Eine eingefrorene Zahl stand dort und war nach zwei
+     Stunden redaktioneller Arbeit veraltet — ein Riegel, der bei normaler
+     Arbeit zuschnappt, ist keiner. */
+  ["supabase/operations/staging-0163.sql", "0163_catalog_types.sql"],
+  /* Und `0164` — der TYPE in der Plattformsicherung. Dieselbe Bauform wie
+     `0153` und `0160`: EIN Funktionsrumpf, drei Zeilen mehr, und die
+     Umkehrprobe am lebenden Rumpf in der Nachkontrolle. */
+  ["supabase/operations/staging-0164.sql", "0164_platform_export_types.sql"],
 ] as const;
 
-describe("die Einzellaeufe fuer 0139 bis 0151", () => {
+describe("die Einzellaeufe fuer 0139 bis 0164", () => {
   for (const [skript, migration] of LAEUFE) {
     const text = readFileSync(skript, "utf8");
 

@@ -43,23 +43,66 @@ const CARDS = "grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 md:grid-cols-4";
  * put the same list in a narrower column on some later surface and `lg:`
  * would promise two columns in 400 px. `@container` asks the box itself.
  *
- * THE RULE BEHIND THE NUMBER: a row in two columns must never be narrower
- * than a row on the largest phone. 52 rem is 832 px (`TWO_COLUMN_AT_REM`),
- * which splits into two rows of 410 px and 241 px of text block — just above
- * the 237 px a 414 px phone gives. So a tablet at 768 px stays one column,
- * not because two would be unusable there but because they would be narrower
- * than the phone this design is tuned for.
+ * NO BREAKPOINT AT ALL SINCE UX-01E, AND THAT IS THE BETTER ANSWER TO THE
+ * SAME QUESTION. A container query still asks at ONE threshold: 52 rem, two
+ * columns, and nothing in between. `repeat(auto-fill, …)` asks continuously —
+ * it fits as many tiles of at least `TILE_MIN` as the real width holds, at
+ * every width, with no number to keep in step with the page's own layout.
  *
- * TWO IS THE CEILING, on purpose. A third column at `max-w-6xl` would leave
- * each row 373 px — narrower than the two-column case it replaced — and four
- * horizontal rows side by side stop being a list and become a worse grid of
- * cards. The cards already do that job better.
+ * THE FIRST ATTEMPT PUT THE 520 px CAP IN THE TRACK, AND THAT WAS THE BUG.
+ * `minmax(min(360px,100%), 520px)` reads as "between 360 and 520", but it
+ * also decides HOW MANY tracks there are — and `auto-fill` counts repetitions
+ * by the track's MAXIMUM sizing function whenever that maximum is definite.
+ * 520 px is definite, so the browser asked how many 520 px tiles fit, not how
+ * many 360 px ones:
  *
- * Tighter gaps than the cards: rows are separated by their own grounds and
- * edges, so the air between them is a seam rather than a margin.
+ *     container 1120 → floor((1120+12) / (520+12)) = 2
+ *     container  968 → floor(( 968+12) / 532)      = 1
+ *
+ * and three tracks would have needed 3 × 520 + 2 × 12 = 1584 px of container,
+ * which `max-w-6xl` never gives. So on a normal laptop window the grid drew
+ * ONE tile of 520, centred by `justify-center`, with the rest of the page
+ * empty either side. Exactly what the desktop review found — and the
+ * arithmetic meant to prevent it had divided by the MINIMUM, so it confirmed
+ * a model the browser does not use.
+ *
+ * THE CAP THEREFORE BELONGS TO THE TILE, NOT TO THE TRACK. Two statements:
+ *
+ *   min(360px, 100%)  a tile is never narrower than 360 px, and never wider
+ *                     than its container either — which is what stops a
+ *                     360 px track from overflowing a 328 px phone. With the
+ *                     maximum left indefinite, THIS is the figure `auto-fill`
+ *                     counts by, which is what was wanted all along.
+ *   1fr               the tracks share the row equally and use all of it, so
+ *                     no `justify-content` is needed and nothing is left over
+ *                     to centre.
+ *
+ * The 520 px ceiling lives on `FigureRow` itself (`mx-auto max-w-[520px]`),
+ * where it caps the TILE and not the count: a lone tile in a 736 px container
+ * is 520 and centred in its own track, and a tile in a three-column row is
+ * 365 because the track is.
+ *
+ * WHAT THAT GIVES, measured against `max-w-6xl` (the page's own ceiling, so
+ * the container never exceeds 1120 px):
+ *
+ *   phone 328–382      1 tile, full width
+ *   600                1 track of 600, tile capped to 520 and centred in it
+ *   736  (tablet 768)  2 tiles of 362
+ *   968  (laptop)      2 tiles of 478
+ *   992  (1024)        2 tiles of 490
+ *   1120 (1280, 1600)  3 tiles of 365
+ *
+ * THREE IS THE CEILING because the page is: `max-w-6xl` leaves 1120 px, and
+ * a fourth tile would be 271 px — far below the 360 a tile needs. The
+ * constant says 3; the arithmetic is what enforces it.
+ *
+ * A wider column gap than row gap: side by side, tiles need a seam the eye
+ * reads as a gutter (12 px); stacked, they are separated by their own
+ * grounds and edges, so 8 px is enough and 90 rows of catalogue stay short.
  */
 const ROWS =
-  "grid grid-cols-1 gap-2 @min-[52rem]:grid-cols-2 @min-[52rem]:gap-3";
+  "grid gap-x-3 gap-y-2 "
+  + "grid-cols-[repeat(auto-fill,minmax(min(360px,100%),1fr))]";
 
 export function FigureGrid({
   children,
@@ -80,19 +123,14 @@ export function FigureGrid({
 }) {
   if (mode === "rows") {
     /*
-     * Two elements, because a container query needs something to measure.
-     * `@container` turns the outer box into the query's subject; the grid
-     * inside it asks about that box rather than about the viewport.
-     *
-     * The wrapper draws nothing and is not a stacking hazard for the quick
-     * view: the dialog is a sibling of this grid, owned by the page, never a
-     * descendant of it (IR-001).
+     * ONE ELEMENT SINCE UX-01E. The container-query wrapper existed because
+     * a query needs a subject to measure; `auto-fill` measures the grid
+     * itself, so the grid IS the subject and the extra box had nothing left
+     * to do. Still a width answered by the box rather than by the viewport —
+     * put this list in a narrower column on some later surface and it lays
+     * out for that column, which is the whole point of the question.
      */
-    return (
-      <div className="@container">
-        <div className={ROWS}>{children}</div>
-      </div>
-    );
+    return <div className={ROWS}>{children}</div>;
   }
 
   return <div className={CARDS + (dense ? " xl:grid-cols-5" : "")}>{children}</div>;
