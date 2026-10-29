@@ -242,3 +242,86 @@ nicht eine Lücke, sondern ein Leck — sie gäben genau das heraus, was
 **Der offene Punkt dieser Datei ist damit zweiteilig:** die vier Spalten
 oben (ohne Termin, eigene Entscheidung) und `favorites` (mit Bedingung und
 Termin, Entscheidung getroffen).
+
+---
+
+## `catalog_status`: aufgenommen, und warum das hier anders lief (2026-10-27)
+
+`0152` gibt dem Katalog einen redaktionellen Status mit drei Werten —
+`public`, `hidden`, `draft` (CAT-02B, ADR-0151). Damit entstand dieselbe
+Lücke wie bei den vier Spalten oben, und sie war **schlimmer als ein
+fehlendes Feld**:
+
+> `catalog_visible` ist bei `hidden` und bei `draft` **beides** `false`.
+> Ein Archiv, das nur die Sichtbarkeit führt, kann die beiden nach einer
+> Wiederherstellung nicht mehr unterscheiden — **jeder Entwurf käme als
+> versteckte Zeile zurück**. Nicht ein fehlendes Feld, sondern eine
+> umgekippte Absicht.
+
+**`0153` nimmt das Feld auf** (lokal vorbereitet, nirgends angewendet). Sie
+folgt dem Verfahren aus `0144` Schritt für Schritt: Rumpf kopieren, Abdruck
+vorher und nachher, Umkehrprobe im Test, eigene Rücknahme.
+
+**Der Unterschied zu `favorites`, und er ist der Grund, warum diese Lücke
+sofort geschlossen werden konnte:**
+
+| | `favorites` | `catalog_status` |
+|---|---|---|
+| braucht | einen **Bereich** | ein **Feld** eines bestehenden Bereichs |
+| Bereichszahl | 54 → 55 | 54 → **54** |
+| `format_version` | 2 → **3** | 2 → **2** |
+| `SECTIONS_BY_FORMAT_VERSION` | neuer Eintrag | unverändert |
+| alte Archive | Version 2 bleibt gültig | Version 2 bleibt **lesbar**, nur ohne das Feld |
+
+Eine Version zu zählen ist eine Formatentscheidung mit Folgen für jeden
+Leser. Ein Feld hinzuzufügen ist keine — deshalb blieb `0153` klein.
+
+**Was `0153` NICHT auflöst:** sie ist aus dem `0144`-Rumpf gerechnet und
+ersetzt nur genau diesen. Auf Production steht weiter der Rumpf aus `0105`,
+und dort bricht sie mit eigener Meldung ab. Die Reihenfolge-Not dieser Datei
+gilt also unverändert — `0153` reiht sich in sie ein, statt sie zu lösen.
+
+**Der offene Punkt dieser Datei ist damit dreiteilig:**
+
+1. die **vier Spalten** oben (ohne Termin, eigene Entscheidung),
+2. **`favorites`** (mit Bedingung und Termin, Entscheidung getroffen),
+3. **`offer_state`** (dieselbe Reihenfolge-Not).
+
+`catalog_status` ist **nicht** mehr Teil davon — sobald `0153` läuft.
+
+---
+
+## Und was mit `pg_dump` ohnehin nie verloren war
+
+Der Satz gehört dazu, weil er die Lücke richtig einordnet: **Stufe 2 war von
+dieser Frage nie betroffen.** Eine logische Sicherung kopiert die Spalte von
+sich aus, und der Trigger aus `0152` leitet beim Einspielen genau den Wert
+ab, der schon dasteht — der CHECK hat das Paar beim Sichern ja
+widerspruchsfrei erzwungen. Probelauf **P60** fährt diesen Einspielweg an
+echtem PostgreSQL für alle drei Werte:
+
+```
+Restore public: public/true   (gesichert: public/true)
+Restore hidden: hidden/false  (gesichert: hidden/false)
+Restore draft:  draft/false   (gesichert: draft/false)
+```
+
+Der Trigger ist dort also ein **No-op**, und das ist kein Zufall, sondern
+die Folge des CHECKs: ein widerspruchsfreies Paar kann er nicht verändern.
+
+**Daraus folgt die Antwort auf die Frage „bleibt ein Entwurf nach einer
+Wiederherstellung ein Entwurf?" in zwei Hälften:**
+
+* **Stufe 2 (`pg_dump`):** ja, und zwar bauartbedingt — nachgewiesen, ohne
+  dass eine Migration dafür nötig war. Das ist der einzige Weg, den
+  `backup_architecture_two_tier.md` als vollständige Wiederherstellung
+  überhaupt anerkennt (Abschnitt A.2).
+* **Stufe 1 (JSON-Archiv):** erst **mit `0153`**. Vorher nein, und zwar
+  still — genau die Sorte Lücke, die diese Datei sammelt.
+
+**Es gibt weiterhin keine automatische Wiederherstellung** —
+`restore_supported` steht fest auf `false`, und `0153` ändert daran nichts.
+Sie sorgt nur dafür, dass die Angabe im Archiv **steht**, wenn eines Tages
+jemand sie braucht. Eine Spalte, die nicht gesichert wird, ist nach dem
+Schadensfall nicht wiederherstellbar; eine, die gesichert und nicht benutzt
+wird, ist nur ungenutzt.
