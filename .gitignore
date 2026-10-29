@@ -86,6 +86,29 @@ Thumbs.db
 /designs/artwork/
 /designs/cards/
 
+# Design- und Pruefmaterial unter resources/, das nicht ausgeliefert wird.
+#
+# `resources/designs/elements/` (8 PNG, 20 MB) und `resources/designs/series/`
+# (6 PNG, 7,6 MB) sind Quellen. Ausgeliefert wird daraus nichts: die
+# Elementsymbole rendert `src/components/catalog/element-icon.tsx` als
+# inline-SVG, und kein Pfad im Code oder in `public/` nennt diese Dateien.
+# Dieselbe Regel wie fuer `/designs/artwork/` und `/designs/cards/` oben.
+/resources/designs/elements/
+/resources/designs/series/
+
+# `resources/analysis/` sind ERZEUGTE Analysen der CAT-Phasen (md, csv, json).
+# Die Schluesse daraus stehen in `docs/` und `supabase/checks/`; die Rohstuecke
+# gehoeren auf die Platte des Betreibers. Entscheidend ist
+# `cat-01-quelle.json`: ein strukturierter Auszug der Legacy-Excel MIT
+# ZELLKOORDINATEN. Interne Daten werden nicht versteckt, sie sind gar nicht
+# erst im Repository (CLAUDE.md, Regel 3).
+/resources/analysis/
+
+# `resources/review/` traegt eine eigene `.gitignore` mit `*` — die
+# Nutzungsrechte an diesen Bildern sind UNGEKLAERT, und aus dem Baum ist
+# nichts ausser dieser einen Datei committierbar. Sie steht dort und nicht
+# hier, damit die Zusage im Baum selbst liegt.
+
 # Local backups of production storage objects. Image bytes an administrator
 # uploaded live in Supabase Storage, not in Git (ADR-0046); an export of them
 # is a safety copy, not a repository asset.

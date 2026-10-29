@@ -1,0 +1,11 @@
+# CAT-04D — lokale Pruefdateien aus einer fremden Checkliste.
+# Die Nutzungsrechte sind UNGEKLAERT. Nichts davon gehoert ins
+# Repository, nach public/ oder in einen Storage-Bucket.
+#
+# `*` schliesst auch das Unterverzeichnis aus, git steigt gar nicht erst
+# hinein. Aus diesem Baum ist damit NICHTS ausser dieser Datei
+# committierbar — auch HERKUNFT.md nicht. Das ist die staerkere Zusage;
+# die Herkunft steht ohnehin in supabase/checks/cat04d_bildimport_plan.md
+# und im Manifest.
+*
+!.gitignore
