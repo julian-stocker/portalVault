@@ -60,7 +60,8 @@ function artikel(over: Partial<CatalogFigure> = {}): CatalogFigure {
     displayNameOverride: null, marketPrice: null, imageFile: null, imageOverridePath: null,
     displayName: over.displayName ?? name, sortBaseName: name, sortVariantLabel: null,
     searchIndex: buildSearchIndex([name]), isActive: true, element: null,
-    characterId: null, itemType: "game", ...over,
+    characterId: null,
+    baseSkyId: null, itemType: "game", ...over,
   };
 }
 

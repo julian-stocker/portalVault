@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { firstReleaseSeries, validateCuratedFile } from "./character.ts";
-import { isCollectibleCategory } from "./collectible.ts";
+import { isCharacterCategory, isCollectibleCategory, NON_CHARACTER_CATEGORIES }
+  from "./collectible.ts";
 import { skyIdRange } from "./sky-id.ts";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
@@ -101,19 +102,23 @@ describe("the curated pilot file", () => {
   });
 
   it("assigns only figures — no trap, vehicle, crystal or magic item", () => {
-    const NOT_FIGURES = new Set([
-      "Traps",
-      "Trap Items",
-      "Fahrzeuge",
-      "Kreationskristalle",
-      "Magic Items",
-      "Trophies",
-      "Locations & Truhen",
-    ]);
+    /*
+     * DIE LISTE STEHT SEIT DEM 2026-10-29 IN `collectible.ts`, nicht mehr
+     * hier. Sie war eine fachliche Regel, die nur dieser Test kannte — und
+     * genau deshalb fehlte sie der Basisfigurensuche, die darum `Portale`
+     * und Traps angeboten hat. Jetzt fragt diese Zusage dieselbe Quelle wie
+     * der Dialog, und ein neuer Kategoriename muss nur an einer Stelle
+     * entschieden werden.
+     */
     for (const entry of characters) {
       for (const skyId of fromExport(entry.sky_ids)) {
         const row = item.get(skyId)!;
-        expect(NOT_FIGURES.has(row.category), `${skyId} is in '${row.category}'`).toBe(false);
+        expect(NON_CHARACTER_CATEGORIES.has(row.category),
+               `${skyId} is in '${row.category}'`).toBe(false);
+        /* Und positiv formuliert dieselbe Frage — so, wie der Dialog sie
+           stellt. */
+        expect(isCharacterCategory(row.category),
+               `${skyId} (${row.name}) is in '${row.category}'`).toBe(true);
       }
     }
   });

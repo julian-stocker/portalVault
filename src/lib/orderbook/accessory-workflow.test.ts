@@ -80,7 +80,7 @@ function katalogzeile(choice: FigureChoice, over: Partial<CatalogFigure> = {}): 
     marketPrice: choice.marketPrice, imageFile: null, imageOverridePath: null,
     displayName: choice.name, sortBaseName: choice.name, sortVariantLabel: null,
     searchIndex: buildSearchIndex([choice.name, choice.rawName ?? choice.name]),
-    isActive: true, element: null, characterId: null, itemType: choice.itemType, ...over,
+    isActive: true, element: null, characterId: null, baseSkyId: null, itemType: choice.itemType, ...over,
   };
 }
 

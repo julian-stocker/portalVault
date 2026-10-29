@@ -57,6 +57,7 @@ function figure(skyId: string, seriesCode: string, seriesPosition: number): Cata
     isActive: true,
     element: null,
     characterId: 1,
+    baseSkyId: null,
   };
 }
 

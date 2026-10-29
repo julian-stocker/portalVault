@@ -108,6 +108,7 @@ export function OfferLink({
   slug,
   name,
   onOpen,
+  compact = false,
 }: {
   offers: readonly Offer[];
   slug: string;
@@ -123,6 +124,20 @@ export function OfferLink({
    * intercepted and the catalog stays put.
    */
   onOpen?: () => void;
+  /**
+   * Drop the word "Angebote" where the room is not there (UX-01D).
+   *
+   * THE HORIZONTAL ROW ASKED FOR THIS AND THE CARD DID NOT, which is why it
+   * is a parameter and not a change: on a card this link spans the artwork's
+   * full silver plate and has the room; on a row it stands beside the market
+   * value, and "Angebote ab" costs 54 px that the series name needs.
+   *
+   * Off by default, so `FigureCard` renders exactly what it rendered before.
+   * And it is a LABEL choice only — the link, its destination, its accessible
+   * name, the price, the chevron and the quick-view interception are the same
+   * in both. Nothing about which offers exist is decided here.
+   */
+  compact?: boolean;
 }) {
   const summary = summarizeOffers(offers);
 
@@ -214,7 +229,22 @@ export function OfferLink({
     >
       {/* The price is the fact somebody is scanning for, so it is the heavier
           of the two. The label stays light and does not compete. */}
-      <span>{de.shop.offersFromLabel}</span>
+      {compact ? (
+        /*
+         * Both words are in the markup and CSS picks one, rather than a
+         * `useMediaQuery` picking one in JavaScript: this component renders on
+         * the server, a hook would make it a client component and give it a
+         * first paint with the wrong label. The accessible name does not
+         * change either way — it is `de.shop.offersFor(name)` above, and it
+         * says the whole sentence.
+         */
+        <>
+          <span className="sm:hidden">{de.shop.offerFromLabel}</span>
+          <span className="hidden sm:inline">{de.shop.offersFromLabel}</span>
+        </>
+      ) : (
+        <span>{de.shop.offersFromLabel}</span>
+      )}
       <span className="font-bold tabular-nums">{formatPrice(summary.price)}</span>
       <span aria-hidden="true" className="shrink-0 text-[13px] leading-none">
         ›

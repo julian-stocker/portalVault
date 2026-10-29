@@ -5,6 +5,13 @@ import { join } from "node:path";
 import { CARD_TYPES, CARD_TYPE_LABELS, DEFAULT_CARD_TYPE, EDITION_RANK } from "@/lib/catalog/card-type";
 import { isHeadlineEdition } from "@/components/catalog/edition-banner";
 import { namesEdition } from "@/lib/catalog/card";
+import {
+  EDITION_STRIP,
+  imageColumnHeight,
+  INFO_HEIGHT,
+  ROW,
+  rowHeight,
+} from "@/lib/catalog/row-template";
 
 /**
  * The edition banderole (UX-01C, ADR-0148).
@@ -122,13 +129,35 @@ describe("two tiers, derived from the rank that already exists", () => {
   });
 });
 
-describe("it costs the row no height and covers as little as it can", () => {
-  it("absolutely placed across the foot of the picture", () => {
-    expect(CODE).toContain("absolute inset-x-0 bottom-0");
-    /* 13 px of a 64 px stage — the bottom fifth, where a figure has its
-       base rather than its face. */
+describe("it costs the row no height and covers no artwork at all", () => {
+  it("a strip of its own BELOW the picture, never over it (UX-01E)", () => {
+    /*
+     * IT USED TO LIE ACROSS THE FOOT OF THE PHOTOGRAPH, absolutely placed
+     * inside the stage. After the desktop review the operator ruled that
+     * out: no overlay on the artwork, and no cropping or shrinking of the
+     * picture to make room for one either. So it is in flow, under the
+     * picture, inside the same left column.
+     */
+    expect(CODE).not.toContain("absolute");
+    expect(CODE).not.toContain("inset-x-0");
+    expect(CODE).not.toContain("bottom-0");
+    expect(CODE).toContain("block w-full");
+    /* One line of 8 px type, which is the whole of the strip's height. */
     expect(CODE).toContain("leading-[13px]");
     expect(CODE).toContain("text-[8px]");
+  });
+
+  it("and it still costs the row no height, which is why nothing is reserved", () => {
+    /*
+     * 64 px of picture plus 13 of strip is 77, and the text block beside it
+     * needs 90 anyway (`INFO_HEIGHT`). So a tile with an edition is exactly
+     * as tall as one without, and the figures that have none need no blank
+     * kept open for them.
+     */
+    expect(imageColumnHeight(false, true)).toBe(ROW.image + EDITION_STRIP);
+    expect(imageColumnHeight(false, true)).toBeLessThan(INFO_HEIGHT);
+    expect(imageColumnHeight(true, true)).toBeLessThan(INFO_HEIGHT);
+    expect(rowHeight(1)).toBe(2 * ROW.padY + INFO_HEIGHT);
   });
 
   it("it never eats a tap meant for the row", () => {

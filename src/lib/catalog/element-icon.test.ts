@@ -135,7 +135,34 @@ describe("the icons can be swapped for files without touching the component", ()
        side by side with no condition anywhere else. */
     const row = code(read("src/components/catalog/figure-row.tsx"));
     expect(row).not.toContain("ELEMENT_ICON");
-    expect(row).toContain("<ElementIcon element={figure.element}");
+  });
+
+  it("but the tile does not draw it at all since the UX-01E correction", () => {
+    /*
+     * THE RUNE CAME OFF ONE SURFACE, AND NOTHING ELSE CHANGED. At the desktop
+     * review the operator asked for the element mark to go from the tile for
+     * now, so the top left is the figure's name alone.
+     *
+     * This component, its ten colours and its swap point are untouched — it
+     * is still where real artwork will land — and the element DATA is
+     * untouched, which the surfaces below prove: every one of them still
+     * spells the element out in words.
+     */
+    const row = code(read("src/components/catalog/figure-row.tsx"));
+    expect(row).not.toContain("<ElementIcon");
+    expect(row).not.toContain("element-icon");
+    expect(row).not.toContain("figure.element");
+    /* The component still exists and still supports all ten. */
+    expect(Object.keys(ELEMENT_ICON)).toHaveLength(10);
+    /* And the word is still on every surface that had it. */
+    for (const surface of [
+      "src/components/catalog/figure-card.tsx",
+      "src/components/collection/collection-table.tsx",
+      "src/components/catalog/quick-view.tsx",
+      "src/components/catalog/character-panel.tsx",
+    ]) {
+      expect(code(read(surface)), surface).toMatch(/elementLabel|ElementChip/);
+    }
   });
 
   it("it brings no query, no action and no state", () => {

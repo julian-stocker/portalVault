@@ -87,11 +87,32 @@ export function catalogFilterCount(
   group: string | null,
   ownership: OwnershipMode,
   availability: AvailabilityMode = DEFAULT_AVAILABILITY,
+  /**
+   * The narrowings UX-01F added, and the one it moved into view.
+   *
+   * `quickVisible` IS THE INTERESTING ONE. Since the quick filter sits on
+   * screen, the ownership and availability narrowings are no longer hidden —
+   * and this badge promises hidden ones. Counting them while the bar shows
+   * them would say "two filters you cannot see" about two a visitor is
+   * looking at, which is the same mistake as counting the chosen game.
+   *
+   * The caller passes `false` for the case the bar CANNOT show: a combination
+   * like "missing AND buyable", which the dialog can set and no single
+   * segment names. Then the narrowing really is hidden and really is counted.
+   *
+   * Both default to the pre-UX-01F behaviour, so every existing caller and
+   * every existing test keeps its answer.
+   */
+  more: { element?: boolean; market?: boolean; quickVisible?: boolean } = {},
 ): number {
+  const pairCounted = more.quickVisible === true
+    ? 0
+    : (isOwnershipActive(ownership) ? 1 : 0) + (isAvailabilityActive(availability) ? 1 : 0);
   return (
     (group === null ? 0 : 1) +
-    (isOwnershipActive(ownership) ? 1 : 0) +
-    (isAvailabilityActive(availability) ? 1 : 0)
+    pairCounted +
+    (more.element === true ? 1 : 0) +
+    (more.market === true ? 1 : 0)
   );
 }
 

@@ -46,6 +46,7 @@ export const metadata: Metadata = { title: de.favorites.title };
  * den Aufruf ablehnt. Kein eigener „Entfernen"-Knopf, der dasselbe nochmal
  * anders täte.
  */
+/* UX-01G: die Kontoart entscheidet die Handlungen der Kachel. */
 export default async function FavoritesPage() {
   /*
    * Eine Wunschliste ist die eines Sammlers (ADR-0078, ADR-0136). Ein
@@ -246,6 +247,11 @@ export default async function FavoritesPage() {
         </>
       ) : (
         <CatalogView
+          /* UX-01G: diese Route ist Sammlern vorbehalten — `isCollector()`
+             leitet jedes andere Konto vorher weg. Die Kontoart ist hier
+             deshalb keine Frage, sondern eine Tatsache, und eine zweite
+             Abfrage wäre eine Abfrage für eine bekannte Antwort. */
+          accountType="user"
           figures={figures}
           series={series}
           ownedSkyIds={[...owned]}

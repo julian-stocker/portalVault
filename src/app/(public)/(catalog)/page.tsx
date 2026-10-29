@@ -13,6 +13,7 @@ import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 import { isAdmin } from "@/lib/auth/admin";
+import { capabilities } from "@/lib/auth/capabilities";
 import { currentUser } from "@/lib/auth/user";
 
 export const metadata: Metadata = {
@@ -42,6 +43,9 @@ export default async function CatalogPage({
   // actions the cards carry (ADR-0042). Asked on the server, from the
   // database — never from a claim the browser sent.
   const admin = await isAdmin();
+  /* UX-01G: welche Handlungen die Kachel trägt. Die Rolle kommt aus
+     der Datenbank (`my_capabilities`), nicht aus dem Browser. */
+  const { accountType } = await capabilities();
 
   const [user, figures, series, owned, favorited, offers, seller, formOptions, marketBoost,
          freeShippingFrom] = await Promise.all([
@@ -97,6 +101,7 @@ export default async function CatalogPage({
       {/* The heading lives inside CatalogView's intro panel since V3, so the
           title, the subline and the tools read as one block (ADR-0038). */}
       <CatalogView
+        accountType={accountType}
         figures={figures}
         series={series}
         ownedSkyIds={[...owned]}

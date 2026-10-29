@@ -45,6 +45,7 @@ function figure(
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
     ...overrides,
   };
 }

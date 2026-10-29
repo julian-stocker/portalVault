@@ -32,6 +32,7 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
     displayNameOverride: null,
     element: null,
     characterId: null,
+    baseSkyId: null,
     ...over,
   };
 }

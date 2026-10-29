@@ -44,7 +44,8 @@ import {
 import { platformsPresent, seriesScopeOf } from "@/lib/catalog/accessory-facts";
 import { sortAccessories, type AccessorySort } from "@/lib/catalog/accessory-sort";
 import { AccessoryCard } from "@/components/catalog/accessory-card";
-import { CatalogAreaTabs } from "@/components/catalog/area-tabs";
+import { CatalogSectionSwitch } from "@/components/catalog/catalog-section-switch";
+import { DEFAULT_CATALOG_VIEW } from "@/components/catalog/catalog-view-mode";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { itemTypesPresent } from "@/lib/catalog/item-type";
 import type { CatalogFigure, SeriesOption } from "@/lib/catalog/types";
@@ -140,7 +141,27 @@ export function AccessoryView({
         </p>
       </div>
 
-      <CatalogAreaTabs active="accessories" />
+      {/*
+       * Derselbe Bereichsschalter wie im Hauptkatalog (UX-01F).
+       *
+       * Hier sind beide Figurenbereiche Verweise auf `/` — es gibt eine Seite,
+       * zu der man zurückgeht — und jeder schreibt vorher die gemerkte
+       * Darstellung, damit „Karten" wirklich auf den Karten landet und nicht
+       * auf dem, was zuletzt gemerkt war. Das Element bleibt ein echter Link,
+       * ein Mittelklick öffnet also weiter einen Tab.
+       *
+       * `view` wird hier nur gebraucht, um NICHTS hervorzuheben: auf dieser
+       * Seite ist Zubehör aktuell, und `activeSection` fragt die gemerkte
+       * Ansicht für den Zubehörbereich bewusst nicht.
+       */}
+      {/* UX-01G: zwei Bereiche. Die Pille „Karten" ist entfallen — der
+            Katalog hat nur noch eine Darstellung, und ein Verweis auf eine
+            Ansicht, die es nicht mehr gibt, wäre ein toter Weg. */}
+        <CatalogSectionSwitch
+          area="accessories"
+          view={DEFAULT_CATALOG_VIEW}
+          sections={["figures", "accessories"]}
+        />
 
       {items.length === 0 ? (
         /* Der Bereich ist leer, weil nichts freigegeben ist — nicht, weil

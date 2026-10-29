@@ -65,6 +65,59 @@ export function isCollectibleCategory(categoryName: string): boolean {
 }
 
 /**
+ * Kategorien, deren Zeilen sammelbar sind, aber KEIN Charakter.
+ *
+ * ZWEI FRAGEN, NICHT EINE. „Sammelbar" heisst: jemand sammelt es, es zaehlt
+ * in den Fortschritt. „Charakter" heisst: es ist eine Figur, die einen
+ * Charakter DARSTELLT. Ein Trap, ein Fahrzeug, ein Kreationskristall, ein
+ * Magic Item, eine Trophy und eine Location sind sammelbar und trotzdem
+ * keine Charaktere — `docs/DATABASE.md` nennt die Zahl: 159 der
+ * Sammelobjekte sind gar keine Charaktere.
+ *
+ * WARUM DIESE LISTE HIER STEHT UND NICHT IN EINEM TEST. Sie stand bis zum
+ * 2026-10-29 als lokale Konstante `NOT_FIGURES` in
+ * `src/lib/catalog/character-data.test.ts` — eine fachliche Regel, die nur
+ * ein Test kannte. Beim Bau der Basisfigurensuche (CAT-07/CAT-08) fehlte sie
+ * dort: der Dialog bot `Portale`, Traps und Fahrzeuge als Basisfigur an.
+ * Eine Regel, die an zwei Stellen gebraucht wird, gehoert an eine.
+ *
+ * WAS SIE ENTSCHEIDET:
+ *
+ *   * keine Charakterfamilie enthaelt eine solche Zeile
+ *     (`character-data.test.ts` rechnet das gegen die kuratierte Datei nach)
+ *   * keine davon wird als BASISFIGUR angeboten (`fetchBaseFigures`)
+ *
+ * WAS SIE NICHT ENTSCHEIDET: ob die Zeile im Katalog steht, ob sie zaehlt,
+ * ob sie verkauft werden darf. Ein Trap ist ein vollwertiges Sammelobjekt.
+ *
+ * DIE TRAPS SIND DER GRUND, WARUM ES OHNE DIESE LISTE SCHIEFGEHT: sie heissen
+ * `<Element> <Form>` — „Fire Torch", „Life Torch", „Dark Sword". Jede
+ * Namensregel haelt sie fuer eine Variante von „Torch" bzw. „Sword"
+ * (`src/lib/catalog/variant.ts`, ADR-0034). Die Kategorie weiss es besser.
+ */
+export const NON_CHARACTER_CATEGORIES: ReadonlySet<string> = new Set([
+  "Traps", "Trap Items", "Fahrzeuge", "Kreationskristalle",
+  "Magic Items", "Trophies", "Locations & Truhen",
+]);
+
+/** Sammelbar UND ein Charakter — beides muss gelten. */
+export function isCharacterCategory(categoryName: string): boolean {
+  return isCollectibleCategory(categoryName)
+      && !NON_CHARACTER_CATEGORIES.has(categoryName);
+}
+
+/**
+ * Dieselbe Frage an einer Zeile, mit dem Artikeltyp davor.
+ *
+ * Derselbe Aufbau wie `isCollectible()`: der ARTIKELTYP entscheidet zuerst,
+ * weil er auch dann gilt, wenn jemand eine Kategorie anders benennt;
+ * `undefined` heisst „keine Auskunft" und nicht „kein Charakter".
+ */
+export function isCharacterFigure(figure: MitTyp): boolean {
+  return isCollectible(figure) && isCharacterCategory(figure.categoryName);
+}
+
+/**
  * Der Artikeltyp, soweit er bekannt ist.
  *
  * `undefined` heisst „keine Auskunft" und NICHT „keine Figur": ein Aufrufer,

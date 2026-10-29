@@ -37,6 +37,7 @@ function figure(overrides: Partial<CatalogFigure> = {}): CatalogFigure {
     isActive: true,
     element: null,
     characterId: null,
+    baseSkyId: null,
     ...overrides,
   };
 }

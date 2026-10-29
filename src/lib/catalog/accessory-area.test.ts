@@ -48,7 +48,8 @@ function artikel(over: Partial<CatalogFigure> = {}): CatalogFigure {
     displayNameOverride: null, marketPrice: 10, imageFile: null, imageOverridePath: null,
     displayName: name, sortBaseName: name, sortVariantLabel: null,
     searchIndex: buildSearchIndex([name]), isActive: true, element: null,
-    characterId: null, itemType: "figure", ...over,
+    characterId: null,
+    baseSkyId: null, itemType: "figure", ...over,
   };
 }
 
@@ -210,12 +211,13 @@ describe("der Zubehörbereich zeigt nur, was freigegeben ist", () => {
     /*
      * Die hat drei Ziele und soll sie behalten (ADR-0036). Seit der
      * Tab-Leiste steht der Weg nicht mehr als einzelner Link im Kopf,
-     * sondern als oberste Navigationsebene — `CatalogAreaTabs`, und die
-     * kennt beide Adressen. Die Leiste selbst prüft
-     * `accessory-tab.test.ts`.
+     * sondern als oberste Navigationsebene — seit UX-01F als
+     * `CatalogSectionSwitch` mit drei Bereichen, und die Adresse steht
+     * weiterhin in der Bereichsdefinition, nicht in der Leiste.
      */
-    expect(code(CATALOG_VIEW)).toContain('<CatalogAreaTabs active="figures" />');
-    expect(code("src/components/catalog/area-tabs.tsx")).toContain('href: "/zubehoer"');
+    expect(code(CATALOG_VIEW)).toContain("<CatalogSectionSwitch");
+    expect(code(CATALOG_VIEW)).toContain('area="figures"');
+    expect(code("src/lib/catalog/catalog-section.ts")).toContain('href: "/zubehoer"');
     expect(code("src/components/layout/site-nav.tsx")).not.toContain("/zubehoer");
   });
 });

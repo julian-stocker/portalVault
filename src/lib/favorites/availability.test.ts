@@ -431,10 +431,28 @@ describe("die sechs bekannten Trigger", () => {
    * gelesen, über die ganze Historie, und um später wieder entfernte
    * bereinigt.
    */
+const BIS = "0151";
+
+  /**
+   * DIE HISTORIE BIS `0151`, und die Grenze ist kein Trick.
+   *
+   * Das Inventar in `0147`s vier Dateien beschreibt die Welt, fuer die es
+   * geschrieben wurde. `0152` legt einen siebten Trigger an
+   * (`skylanders_sync_catalog_status`, CAT-02B) — er hat mit dem
+   * Angebotsspiegel nichts zu tun, und `0147`s eingefrorene Pruefdateien
+   * nachtraeglich umzuschreiben waere der falsche Weg: sie sind der Nachweis
+   * eines Laufs, keine lebende Liste.
+   *
+   * Die Zusage bleibt trotzdem scharf: der Vergleich endet bei `0151`, und
+   * der eigene Test unten zaehlt auf, was danach hinzukam. Ein
+   * UNANGEKUENDIGTER Trigger faellt also weiterhin auf — in genau einem der
+   * beiden Tests.
+   */
   const ausHistorie = (): string[] => {
     const quellen = new Set(["shop_inventory", "skylanders", "shop_settings"]);
     const da = new Set<string>();
-    for (const f of readdirSync("supabase/migrations").filter((x) => x.endsWith(".sql")).sort()) {
+    for (const f of readdirSync("supabase/migrations")
+      .filter((x) => x.endsWith(".sql") && x.slice(0, 4) <= BIS).sort()) {
       const t = readFileSync(join("supabase/migrations", f), "utf8");
       for (const m of t.matchAll(
         /create\s+trigger\s+(\w+)[\s\S]{0,200}?\bon\s+public\.(\w+)/gi)) {
@@ -447,6 +465,44 @@ describe("die sechs bekannten Trigger", () => {
     }
     return [...da].sort();
   };
+
+  it("und was NACH 0151 hinzukam, ist einzeln aufgezaehlt", () => {
+    /*
+     * Die Gegenprobe zur Grenze oben: jeder Trigger, den eine Migration nach
+     * `0151` an einer der drei Quellen anlegt, steht hier mit Namen. Kommt
+     * einer dazu, den niemand genannt hat, faellt dieser Test.
+     */
+    const quellen = new Set(["shop_inventory", "skylanders", "shop_settings"]);
+    const spaeter = new Set<string>();
+    for (const f of readdirSync("supabase/migrations")
+      .filter((x) => x.endsWith(".sql") && x.slice(0, 4) > BIS).sort()) {
+      const t = readFileSync(join("supabase/migrations", f), "utf8");
+      for (const m of t.matchAll(/create\s+trigger\s+(\w+)[\s\S]{0,200}?\bon\s+public\.(\w+)/gi)) {
+        if (quellen.has(m[2])) spaeter.add(`${m[2]}.${m[1]}`);
+      }
+    }
+    expect([...spaeter].sort()).toEqual([
+      /*
+       * 0159, CAT-07: haelt die Variantenbeziehung eine Ebene tief. Ein
+       * Fremdschluessel kann nicht in eine andere Zeile sehen — die
+       * genannte Basisfigur muss selbst eine Basisfigur sein, und eine
+       * Zeile mit Varianten wird selbst keine. Beide Richtungen, weil die
+       * verbotene Kette von beiden Enden gebaut werden kann.
+       */
+      "skylanders.skylanders_variant_base_guard_trg",
+      // 0152, CAT-02B: haelt catalog_status und catalog_visible in Deckung.
+      "skylanders.skylanders_sync_catalog_status",
+      /*
+       * 0163, CAT-10: haelt `types` kanonisch — sortiert, jeder Wert
+       * einmal. Er fuegt KEINEN Wert hinzu und entfernt keinen; „keine
+       * Doppel" braucht eine Unterabfrage und geht in einer CHECK nicht,
+       * also macht ein Trigger die Spalte kanonisch statt sie zu pruefen.
+       * Er feuert nur bei `update of types` und bei `insert`, nicht bei
+       * jeder Katalogaenderung.
+       */
+      "skylanders.skylanders_canonical_types",
+    ].sort());
+  });
 
   it("die Historie legt genau diese sechs an", () => {
     expect(ausHistorie()).toEqual([
