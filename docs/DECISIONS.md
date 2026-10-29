@@ -12,7 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-10-27 (ADR-0151, Katalogstatus mit drei Werten).
+Letzte Aktualisierung: 2026-10-29 (ADR-0161, atomare Migrationsgruppe auf
+Production — sieben Migrationen in einer Transaktion).
 
 ---
 
@@ -16927,3 +16928,125 @@ ein eigener Schritt mit eigener Freigabe ist.
   Kachel: das Dropdown bietet nur Hinterlegtes an, das Banner ist für alle
   Rollen dasselbe, der Vorschlag ist ein Knopf, und eine unentschiedene Zeile
   zeigt nichts.
+
+
+---
+
+## ADR-0161 · Eine Production-Migration ist nicht immer eine Datei — sieben in einer Transaktion, wenn der Zwischenzustand schadet
+
+**Status:** Angenommen · 2026-10-29
+**Betrifft:** `supabase/operations/prod-g2-0152-0158.sql`,
+`supabase/checks/g2_preflight.sql`, `supabase/checks/g2_postflight.sql`,
+ADR-0137 (Migrationsdisziplin), ADR-0139/0141 (Prüfzugang und Dreizustand)
+
+### Der Anlass ist eine Lücke, die auf Staging niemand gemerkt hat
+
+`0152` lässt den Journaltrigger `log_skylander_editorial_change()` das Feld
+`catalog_status` schreiben — nimmt den Namen aber **nicht** in
+`catalog_admin_changes_field_known` auf. `0157` tut es, `0158` fügt den elften
+Wert hinzu. Zwischen `0152` und `0157` scheitert deshalb **jeder**
+Statuswechsel mit `23514`, und zwar nicht nur der neue Weg: auch die heute
+deployte `admin_set_catalog_visible(text,boolean)` schreibt `catalog_visible`,
+der BEFORE-Trigger leitet `catalog_status` ab, der AFTER-Trigger will beides
+journalisieren, und die Constraint weist das zweite Feld ab. Die Transaktion
+der Funktion rollt zurück; der Adminbereich zeigt einen Fehler ohne
+erkennbaren Grund.
+
+Auf Staging liefen die sieben schnell hintereinander, und niemand schaltete in
+der Zwischenzeit eine Figur um. Auf Production wären es fünf Migrationen und
+zwei Prüfdurchgänge — eine halbe Stunde, in der niemand eine Figur verstecken
+oder veröffentlichen kann.
+
+**Die naheliegende Reparatur wäre gewesen, `0152` zu ändern.** Sie ist
+abgelehnt: `0152` ist auf Staging angewendet, und eine angewendete Migration
+wird nicht umgeschrieben (ADR-0137). Eine achte Migration, die nur die
+Constraint nachzieht, wäre möglich gewesen — aber sie hätte `0157` eine
+Vorwegnahme vorangestellt und die Reihenfolge der sieben verwischt.
+
+### Die Entscheidung
+
+**Mehrere Migrationen dürfen auf Production als EINE Transaktion laufen, wenn
+ein Zwischenzustand schadet.** Für die Gruppe gilt:
+
+1. **Die Originaldateien bleiben zeichengleich** und stehen in
+   **numerischer Reihenfolge** in der Hülle. Mechanisch geprüft, Datei für
+   Datei (`staging-oneshot.test.ts`).
+2. **Ein `begin`, ein `commit`, kein `rollback`.** Keine der sieben bringt
+   eine eigene Klammer mit — auch das ist mechanisch geprüft, nicht zugesagt.
+3. **Jede der sieben behält ihre eigenen `do $vor$`- und
+   `do $nach$`-Blöcke.** Scheitert einer, rollt die ganze Gruppe zurück.
+4. **Die Hülle misst, was die sieben nicht prüfen:** beide
+   Geschäftsverträge, den Sichtbarkeits-Abdruck aller Katalogzeilen, die
+   Backfill-Zahlen, das Triggerinventar und den Eingangszustand der drei
+   Rümpfe, die die Gruppe ersetzt — vorher, und nach der siebten noch einmal.
+   Bei jeder Abweichung `raise exception`, also Rücknahme statt Bericht.
+5. **Die Gruppe bekommt ihr eigenes Prüfdateipaar.** Die sieben einzelnen
+   Pre- und Postflights bleiben unverändert stehen, sind aber für den
+   Gruppenlauf unbrauchbar: `0153_preflight.sql` verlangt
+   `skylanders.catalog_status`, die es vor der Gruppe nicht gibt;
+   `0158_preflight.sql` verlangt die Constraint aus `0157`. Sechs der sieben
+   würden vor der Gruppe zu Recht rot melden — sie messen Zustände, die diese
+   Datenbank nie durchläuft.
+
+### Was das kostet, und zwar gemessen
+
+Eine Transaktion hält ihre Sperren bis zum `commit`. `skylanders` bekommt
+`ACCESS EXCLUSIVE` (drei `alter table`, ein `create trigger`) und ist so lange
+**nicht lesbar**; `catalog_admin_changes` bekommt es zweimal, je mit
+Validierung der bestehenden Zeilen.
+
+Gemessen in echtem PostgreSQL (PGlite, WASM — ein Server ist schneller, nicht
+langsamer), Phase für Phase:
+
+| Zeilen | gesamt | davon `0152` | davon Messung A + B |
+|---|---|---|---|
+| 624 (der Production-Stand) | **93 ms** | 23 ms | 24 + 19 ms |
+| 6 240 (zehnfach) | **424 ms** | 174 ms | 109 + 111 ms |
+
+Der Backfill und die beiden Abdrücke wachsen linear mit der Zeilenzahl, die
+fünf Funktionsmigrationen sind von ihr unabhängig (je 1–13 ms). Bei 624
+Zeilen ist die Sperrzeit also ein Augenblick — und die Zahl gilt nicht nur für
+624, weil der zweite Lauf die Steigung zeigt.
+
+**Zwei Obergrenzen stehen trotzdem in der Hülle, vor dem ersten Zugriff:**
+`set local lock_timeout = '5s'` (hält eine andere Sitzung eine Sperre auf
+`skylanders`, bricht die Gruppe ab, statt den Katalog beliebig lange zu
+blockieren) und `set local statement_timeout = '600s'` als Notbremse. **Ein
+Abbruch ist kostenlos**, weil nichts committet ist.
+
+### Konsequenzen
+
+* Der Nachweis ist **ein** `9999 = 0` für die Gruppe, nicht sieben.
+  `g2_postflight.sql` Zeile **253** ist der Beweis, den die Gruppe schuldet:
+  die Constraint kennt `catalog_status`, also war der fehlerhafte
+  Zwischenzustand nie veröffentlicht.
+* Der Bediener fügt **eine** Datei ein — 4 393 Zeilen, rund 200 kB. Das ist
+  der Preis der Atomarität und bleibt vertretbar, solange es die Ausnahme ist.
+* ADR-0137 gilt unverändert: lesender Preflight, eine schreibende Anweisung,
+  lesende Nachkontrolle, umgekehrter Umgebungsstempel, selbst gemessene
+  Verträge ohne Platzhalter.
+* **Nicht** entschieden ist, dass künftig gebündelt wird. Gebündelt wird, wenn
+  ein Zwischenzustand nachweislich schadet — die Begründung gehört in den Kopf
+  der Gruppendatei.
+
+### Der Nachweis
+
+* Probelauf `g2strich.mjs` — 25 Fälle: der Normallauf (ein `commit` für
+  sieben), **ein erzwungener Fehler nach jeder der sieben Phasen** mit
+  vollständiger Rücknahme (Spalte fort, keine Funktion, Constraint auf sieben
+  Werten, Exportrumpf zurück auf `4c4d2e7c…`, Sichtbarkeit unverändert), die
+  Wiederholung, die drei Umgebungsriegel, vier Fälle veränderter
+  Ausgangsdaten und sieben Fälle fremder Vorzustände (A6b/A6c/A6d/A6g/A6i/A6l
+  und eine Journalzeile mit unbekanntem Feld).
+* Probelauf `g2strich-proben.mjs` — 22 Fälle: **die Lücke negativ** (nur
+  `0152` angewendet → `admin_set_catalog_visible` scheitert mit `23514`, und
+  die Figur bleibt unverändert sichtbar) und **positiv** (nach der Gruppe
+  läuft sie durch und journalisiert beide Felder), elf Bedienproben der neuen
+  Funktionen im `savepoint` ohne eine dauerhafte Datenänderung, die
+  Sichtbarkeit aller 624 Zeilen unverändert, Lager, Sammlung und Journal
+  unverändert, dazu die Laufzeitmessung.
+* `staging-oneshot.test.ts` — die Zusagen an der Datei selbst: sieben
+  zeichengleiche Einbettungen in numerischer Reihenfolge, eine Klammer, keine
+  eigene Klammer in den sieben, der Rahmen **außerhalb aller sieben Bereiche**
+  ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
+  und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.

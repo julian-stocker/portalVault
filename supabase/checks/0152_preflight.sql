@@ -29,6 +29,44 @@
 -- `postgres` (ADR-0139, ADR-0141). Alles Uebrige liest `pg_catalog` oder
 -- `public.skylanders` — beides darf er, und `information_schema` kommt hier
 -- bewusst nicht vor, weil es rechtegefiltert ist (ADR-0141).
+--
+-- DIE ZWEI BASELINES (900/901 im Preflight, 801-829 in der Nachkontrolle),
+-- unveraendert aus der Familie `0142`-`0149`: `0152` schreibt EINE Spalte in
+-- jede Katalogzeile, aber keinen Shop-, Lager-, Katalog- oder
+-- Sammlungszaehler und keine Sichtbarkeit — die Nachkontrolle vergleicht
+-- blockierend gegen genau diesen Stand.
+--
+-- DIE FELDFOLGE BEIDER VERTRAEGE, AUSGESCHRIEBEN. Sie steht hier, weil ein
+-- vertauschtes Feld eine stille Fehlinformation waere: verglichen wird nach
+-- POSITION (`t[2]` … `t[8]`), nicht nach Namen.
+--
+-- DER BASIS-VERTRAG — sieben Geschaeftszahlen, eine Zeile, feste Reihenfolge
+--
+--   skyisles-base-1|angebote|angebote_md5|shopfaehig|sammelbar|lagerzeilen|
+--   katalogzeilen|lager_md5|schutz
+--
+-- Neun Felder, getrennt durch `|`, in GENAU dieser Folge:
+--
+--   1  skyisles-base-1   die Marke. Eine fremde Zeile faellt daran auf
+--   2  angebote          count(*) ueber shop_offers()
+--   3  angebote_md5      md5 ueber sky_id|condition|price, sortiert
+--   4  shopfaehig        count(*) mit is_shop_eligible()
+--   5  sammelbar         der Fortschrittsnenner
+--   6  lagerzeilen       count(*) ueber shop_inventory
+--   7  katalogzeilen     count(*) ueber skylanders
+--   8  lager_md5         md5 ueber id|is_listed|sale_price|sale_released
+--   9  schutz            left(md5(Felder 2-8, mit | verbunden), 12)
+--
+-- DER SAMMLUNGS-VERTRAG — fuenf Felder
+--
+--   skyisles-coll-1|zeilen|konten|sammlung_md5|schutz
+--
+--   1  skyisles-coll-1   die Marke
+--   2  zeilen            count(*) ueber collection_items
+--   3  konten            count(distinct user_id)
+--   4  sammlung_md5      md5 ueber user_id|sky_id|quantity, sortiert
+--   5  schutz            left(md5(Felder 2-4, mit | verbunden), 12)
+--
 -- ===========================================================================
 
 with sammelbar as (

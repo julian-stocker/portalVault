@@ -762,6 +762,27 @@ const PROD_LESELAEUFE_BASIS = [
   ["supabase/operations/prod-s-postflight-0145.sql", "0145_postflight.sql", "post"],
   ["supabase/operations/prod-s-preflight-0146.sql", "0146_preflight.sql", "pre"],
   ["supabase/operations/prod-s-postflight-0146.sql", "0146_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0147.sql", "0147_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0147.sql", "0147_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0148.sql", "0148_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0148.sql", "0148_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0149.sql", "0149_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0149.sql", "0149_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-0152.sql", "0152_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-0152.sql", "0152_postflight.sql", "post"],
+  /*
+   * DIE GRUPPE G2' (0152-0158) hat ihr eigenes Paar, und zwar aus einem
+   * Grund, der in `g2_preflight.sql` auch ausgeschrieben steht: auf
+   * Production laufen die sieben als EINE Transaktion, also gibt es die
+   * sechs Zwischenzustaende dort nie. `0153_preflight.sql` verlangt
+   * `skylanders.catalog_status` (die es vor der Gruppe nicht gibt) und
+   * `0158_preflight.sql` die Constraint aus `0157` — sechs der sieben
+   * Dateien wuerden vor der Gruppe zu Recht rot melden. Die sieben
+   * einzelnen bleiben unveraendert stehen; auf Staging sind sie genau so
+   * gelaufen.
+   */
+  ["supabase/operations/prod-s-preflight-g2.sql", "g2_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-g2.sql", "g2_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -1070,7 +1091,7 @@ describe.each(PROD_LESELAEUFE_BASIS)(
   });
 });
 
-describe("die vier Dateien teilen EINEN Basis-Vertrag", () => {
+describe("die zwanzig Dateien teilen EINEN Basis-Vertrag", () => {
   it("die Messung ist in allen vier Dateien zeichengleich", () => {
     /*
      * Der Vergleich funktioniert nur, wenn Preflight und Nachkontrolle
@@ -1398,9 +1419,24 @@ const PRODUKTIONSLAEUFE = [
   /* `0146`: der Angebotsspiegel. NICHT fahren, bevor die Folgemigration
      favorites UND offer_state in die Plattformsicherung aufgenommen hat. */
   ["supabase/operations/prod-0146.sql", "0146_offer_state.sql"],
+  /* `0147`: die Phasengrenze im Spiegel. Erste Migration dieser Familie, die
+     eine ANGEWENDETE Tabelle erweitert und eine ANGEWENDETE Funktion ersetzt
+     — deshalb prueft ihr Preflight `0146` vollstaendig, bevor etwas laeuft. */
+  ["supabase/operations/prod-0147.sql", "0147_offer_availability.sql"],
+  /* `0148`: die Meldungstabelle. Erste Migration dieser Kette, die ein
+     CLIENTRECHT vergibt — `select` und `execute` fuer `authenticated`, und
+     sonst nichts; die Nachkontrolle misst jedes Stueck davon einzeln. */
+  ["supabase/operations/prod-0148.sql", "0148_availability_notifications.sql"],
+  /* `0149`: GRUPPE G1 und die erste Huelle, die ihre Vertraege SELBST misst
+     und vergleicht — siehe den eigenen Abschnitt weiter unten. */
+  ["supabase/operations/prod-0149.sql", "0149_notification_read_state.sql"],
+  /* `0152`: GRUPPE G2, die riskanteste des Rests — Backfill in JEDE
+     Katalogzeile, Ersetzung der Journal-Triggerfunktion, ein neuer Trigger.
+     Ihre Huelle traegt deshalb vier Absicherungsabschnitte statt zwei. */
+  ["supabase/operations/prod-0152.sql", "0152_catalog_status.sql"],
 ] as const;
 
-describe("die zehn Production-Laeufe", () => {
+describe("die sechzehn Production-Laeufe", () => {
   for (const [skript, migration] of PRODUKTIONSLAEUFE) {
     const text = readFileSync(skript, "utf8");
 
@@ -1508,5 +1544,379 @@ describe("die zehn Production-Laeufe", () => {
     const text = readFileSync("supabase/operations/prod-0138.sql", "utf8");
     expect(text).toContain("ERST NACH DEM VERCEL-DEPLOYMENT");
     expect(text).toContain("81386e6");
+  });
+});
+
+/* ==========================================================================
+ * AB GRUPPE G1: DIE HÜLLE MISST IHRE VERTRÄGE SELBST
+ *
+ * Bis `0148` hat der Bediener Zeile 900/901 des Preflights von Hand in zwei
+ * Platzhalter der Nachkontrolle kopiert. Das funktionierte, hatte aber zwei
+ * Schwächen: einen manuellen Schritt, und einen Vergleich, der ERST NACH dem
+ * Schreiben stattfand — er konnte melden, nicht verhindern.
+ *
+ * `prod-0149.sql` misst beide Verträge selbst (Abschnitt A4), legt sie
+ * transaktionslokal ab, misst nach der Migration NOCH EINMAL und vergleicht
+ * (Abschnitt B). Abweichung oder fehlende Ablage → `raise exception` → die
+ * ganze Gruppe rollt zurück.
+ *
+ * DER KERN DIESER PRÜFUNG IST DIE ZEICHENGLEICHHEIT. Ein Vergleich zweier
+ * Messungen taugt nur, wenn beide Messungen derselbe Text sind — und derselbe
+ * Text wie in den Prüfdateien, sonst bedeuten die Zahlen nicht dasselbe.
+ * ========================================================================== */
+
+describe.each([
+  ["supabase/operations/prod-0149.sql", "supabase/checks/0149_preflight.sql"],
+  ["supabase/operations/prod-0152.sql", "supabase/checks/0152_preflight.sql"],
+])("die selbstmessende Hülle %s", (HUELLE, PRUEFDATEI) => {
+  const text = readFileSync(HUELLE, "utf8");
+  const pruef = readFileSync(PRUEFDATEI, "utf8");
+
+  /** Die Messkette einer Prüfdatei: von `with sammelbar as (` bis `coll_mess`. */
+  const ketteBasis = pruef.slice(pruef.indexOf("with sammelbar as ("),
+                                 pruef.indexOf("coll_mess as (")).trimEnd().replace(/,$/, "");
+  const ketteColl = "with " + pruef.slice(pruef.indexOf("coll_mess as ("),
+                                          pruef.indexOf("pruef (nr, bereich")).trimEnd().replace(/,$/, "");
+
+  it("legt beide Verträge selbst ab — ohne jeden Platzhalter", () => {
+    expect(text).toContain("select set_config('skyisles.base', (");
+    expect(text).toContain("select set_config('skyisles.coll', (");
+    /* Der alte Weg darf in der schreibenden Datei nicht vorkommen. */
+    expect(text).not.toContain("BASIS-HIER-EINSETZEN");
+    expect(text).not.toContain("SAMMLUNG-HIER-EINSETZEN");
+  });
+
+  it("misst ZWEIMAL mit demselben Text, und es ist der der Prüfdatei", () => {
+    const zaehle = (nadel: string) => text.split(nadel).length - 1;
+    /* Einmal in A4 (ohne Einzug), einmal in B (um zwei Zeichen eingerückt). */
+    expect(zaehle(ketteBasis), "Basis-Messung nicht wörtlich aus der Prüfdatei")
+      .toBeGreaterThanOrEqual(1);
+    const eingerueckt = ketteBasis.replace("with sammelbar as (", "  with sammelbar as (");
+    expect(zaehle(eingerueckt) + zaehle(ketteBasis)).toBeGreaterThanOrEqual(2);
+    expect(zaehle(ketteColl)).toBeGreaterThanOrEqual(1);
+    const collEin = ketteColl.replace("with coll_mess as (", "  with coll_mess as (");
+    expect(zaehle(collEin) + zaehle(ketteColl)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("wirft, wenn die Ablage fehlt — und wenn ein Vertrag sich bewegt hat", () => {
+    for (const kennung of ["ABBRUCH B1", "ABBRUCH B2", "ABBRUCH B3", "ABBRUCH B4"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+    expect(text).toContain("current_setting('skyisles.base', true)");
+    expect(text).toContain("current_setting('skyisles.coll', true)");
+    /* Und der Vergleich ist NULL-sicher — `=` würde bei NULL stillschweigend
+       nichts melden. */
+    expect(text).toContain("v_nach_base is distinct from v_vor_base");
+    expect(text).toContain("v_nach_coll is distinct from v_vor_coll");
+  });
+
+  it("ist EINE Transaktion, und ihre eigenen Abschnitte schreiben nichts", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(0);
+    /* Was die Hülle selbst beiträgt — Riegel, A4, B — darf keine
+       Datenanweisung enthalten; geschrieben wird ausschließlich in der
+       eingebetteten Migration. */
+    const anfang = text.indexOf("-- >>> EINGEBETTET:");
+    const ende = text.indexOf("-- <<< ENDE:");
+    const eigen = (text.slice(0, anfang) + text.slice(ende))
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create table", "create function", "grant ", "revoke "]) {
+      expect(eigen.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+});
+
+/* ==========================================================================
+ * G2 — DIE VIER ZUSÄTZLICHEN ABSCHNITTE VON `prod-0152.sql`
+ *
+ * `0152` ist die riskanteste der verbleibenden Migrationen: sie schreibt in
+ * JEDE Katalogzeile, ersetzt `log_skylander_editorial_change()` — die
+ * Trigger­funktion, durch die jeder Katalogschreibvorgang läuft — und legt
+ * einen neuen Trigger an. Die Migration selbst prüft den vorgefundenen Rumpf
+ * NICHT; auf Staging war das unkritisch, auf Production wäre es eine Lücke.
+ * ========================================================================== */
+
+describe("prod-0152 sichert die drei Risiken von 0152 ab", () => {
+  const text = readFileSync("supabase/operations/prod-0152.sql", "utf8");
+
+  it("legt den Sichtbarkeits-Abdruck und die zwei Backfill-Zahlen ab", () => {
+    expect(text).toContain("select set_config('skyisles.sicht', (");
+    expect(text).toContain("select set_config('skyisles.sichtbar', (");
+    expect(text).toContain("select set_config('skyisles.unsichtbar', (");
+    /* Zeile für Zeile, nicht gezählt: der Abdruck hängt an sky_id UND Wert. */
+    expect(text).toContain("s.sky_id || '|' || s.catalog_visible::text");
+  });
+
+  it("sieht die beiden zu ersetzenden Rümpfe VORHER an", () => {
+    for (const kennung of ["ABBRUCH A6a", "ABBRUCH A6b", "ABBRUCH A6c",
+      "ABBRUCH A6d", "ABBRUCH A6e", "ABBRUCH A6f"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+    /* Die vier Felder, die die erwartete Fassung aus 0004/0007/0033 nennt —
+       `admin_note` gehört NICHT dazu, das journalisiert catalog_editorial. */
+    for (const feld of ["catalog_visible", "display_name_override",
+      "card_type", "image_override_path"]) {
+      expect(text, feld).toContain(`v_journal not like '%${feld}%'`);
+    }
+    /* Und die Signatur aus 0034, vollständig. */
+    expect(text).toContain(
+      "public.admin_create_figure(text,text,bigint,text,boolean,text,text,text)");
+  });
+
+  it("zählt die Trigger vorher und verlangt nachher GENAU einen mehr", () => {
+    expect(text).toContain("select set_config('skyisles.trigger', (");
+    expect(text).toContain("array['skylanders_sync_catalog_status']");
+    expect(text).toContain("ABBRUCH B9");
+  });
+
+  it("prüft Sichtbarkeit, Backfill und Entwurfsfreiheit, und rollt zurück", () => {
+    for (const kennung of ["ABBRUCH B5", "ABBRUCH B6", "ABBRUCH B7", "ABBRUCH B8"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+    /* Kein `=`: bei NULL würde ein Vergleich stillschweigend nichts melden. */
+    expect(text).toContain("v_nach is distinct from v_vor_sicht");
+  });
+});
+
+/* ==========================================================================
+ * G2' — DIE ATOMARE GRUPPE `0152` BIS `0158` IN EINER TRANSAKTION
+ *
+ * DER ANLASS IST EINE LÜCKE, DIE AUF STAGING NIEMAND GEMERKT HAT. `0152`
+ * lässt den Journaltrigger das Feld `catalog_status` schreiben, nimmt den
+ * Namen aber nicht in `catalog_admin_changes_field_known` auf; `0157` tut es,
+ * `0158` fügt den elften Wert hinzu. Zwischen `0152` und `0157` scheitert
+ * deshalb JEDER Statuswechsel mit `23514` — auch der der heute deployten
+ * `admin_set_catalog_visible(text,boolean)`. Auf Staging liefen die sieben
+ * schnell hintereinander und niemand schaltete in der Zwischenzeit eine
+ * Figur um; auf Production wäre es eine halbe Stunde, in der der
+ * Adminbereich ohne erkennbaren Grund Fehler zeigt.
+ *
+ * DIE ANTWORT IST EIN `begin`, SIEBEN MIGRATIONEN, EIN `commit`. Vor dem
+ * `commit` ist die Constraint erweitert; der fehlerhafte Zwischenzustand ist
+ * nie veröffentlicht — nicht für eine Sekunde, nicht für eine andere
+ * Sitzung. Diese Prüfungen halten fest, dass die Hülle das wirklich leistet.
+ * ========================================================================== */
+
+describe("die atomare Gruppe prod-g2-0152-0158", () => {
+  const HUELLE = "supabase/operations/prod-g2-0152-0158.sql";
+  const text = readFileSync(HUELLE, "utf8");
+  const SIEBEN = [
+    "0152_catalog_status.sql",
+    "0153_platform_export_catalog_status.sql",
+    "0154_merge_draft_into_figure.sql",
+    "0155_discard_draft.sql",
+    "0156_merge_selected_fields.sql",
+    "0157_audit_fields_and_automatic_notes.sql",
+    "0158_figure_families.sql",
+  ] as const;
+
+  /** Die sieben Bereiche zwischen den Marken, in der Reihenfolge der Datei. */
+  const bereiche = SIEBEN.map((m) => {
+    const anfang = `-- >>> EINGEBETTET: supabase/migrations/${m}\n`;
+    const ende = `-- <<< ENDE: supabase/migrations/${m}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    return { m, a, b, inhalt: text.slice(a + anfang.length, b) };
+  });
+
+  it("bettet alle sieben Zeichen für Zeichen ein", () => {
+    for (const { m, a, b, inhalt } of bereiche) {
+      expect(a, `${m}: Marke fehlt`).toBeGreaterThan(-1);
+      expect(b, `${m}: Endmarke fehlt`).toBeGreaterThan(a);
+      expect(inhalt, `${m} ist nicht zeichengleich`)
+        .toBe(readFileSync(`supabase/migrations/${m}`, "utf8"));
+    }
+  });
+
+  it("und zwar in NUMERISCHER Reihenfolge — die Abhängigkeiten verlangen es", () => {
+    /*
+     * `0153` braucht `skylanders.catalog_status` aus `0152`, `0156` braucht
+     * `admin_merge_draft` aus `0154`, `0157` braucht `admin_merge_plan` aus
+     * `0156`, `0158` braucht die Constraint aus `0157`. Jede der sieben
+     * prüft ihre Vorbedingung selbst und bricht ab — eine falsche
+     * Reihenfolge wäre also kein stiller Fehler, aber ein teurer:
+     * die ganze Gruppe rollt zurück.
+     */
+    const marken = [...text.matchAll(/^-- >>> EINGEBETTET: supabase\/migrations\/(\S+)$/gm)]
+      .map((m) => m[1]);
+    expect(marken).toEqual([...SIEBEN]);
+    for (let i = 1; i < bereiche.length; i++) {
+      expect(bereiche[i].a, `${bereiche[i].m} steht vor ${bereiche[i - 1].m}`)
+        .toBeGreaterThan(bereiche[i - 1].b);
+    }
+  });
+
+  it("ist EINE Transaktion — ein begin, ein commit, kein rollback", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(0);
+    /* Und keine der sieben bringt eine eigene Klammer mit — sonst wäre die
+       Atomarität dahin. Mechanisch, nicht als Zusage im Kopf. */
+    for (const { m, inhalt } of bereiche) {
+      const code = inhalt.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      for (const klammer of [/^\s*begin\s*;/m, /^\s*commit\s*;/m, /^\s*rollback\s*;/m]) {
+        expect(code, `${m} trägt eine eigene Klammer`).not.toMatch(klammer);
+      }
+    }
+  });
+
+  it("trägt den UMGEKEHRTEN Riegel, und er steht vor der ersten Migration", () => {
+    expect(text).toContain("'SKY-0821', 'SKY-0822')) = 2 then");
+    expect(text).toContain("ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da");
+    expect(text).not.toContain("'SKY-0821', 'SKY-0822')) <> 0 then");
+    expect(text).toContain("to_regprocedure('public.purchases_paid_total_is_final()') is null");
+    expect(text).toContain("zmiwxswrpkmizvqsgype");
+    const riegel = text.indexOf("raise exception 'ABBRUCH A1");
+    expect(riegel).toBeGreaterThan(text.indexOf("begin;"));
+    expect(riegel).toBeLessThan(bereiche[0].a);
+  });
+
+  it("begrenzt die Sperrzeit, und zwar VOR dem ersten Zugriff", () => {
+    /*
+     * Eine Transaktion hält ihre Sperren bis zum `commit`; `skylanders`
+     * bekommt `ACCESS EXCLUSIVE` und ist so lange nicht lesbar. Wartet die
+     * Gruppe auf eine fremde Sperre, soll sie abbrechen und nicht den
+     * Katalog beliebig lange blockieren — ein Abbruch hier ist kostenlos,
+     * weil nichts committet ist.
+     */
+    expect(text).toContain("set local lock_timeout = '5s';");
+    expect(text).toContain("set local statement_timeout = '600s';");
+    expect(text.indexOf("set local lock_timeout"))
+      .toBeLessThan(text.indexOf("raise exception 'ABBRUCH A1"));
+  });
+
+  it("fügt den sieben Migrationen nichts Fachliches hinzu", () => {
+    /*
+     * Der Rahmen ist hier NICHT „vor der ersten und nach der letzten Marke",
+     * sondern alles außerhalb aller sieben Bereiche — sonst blieben die
+     * sechs Zwischenräume ungeprüft, und genau dort könnte eine zusätzliche
+     * Anweisung unauffällig stehen.
+     */
+    let rahmen = "";
+    let pos = 0;
+    for (const { a, b } of bereiche) {
+      rahmen += text.slice(pos, a);
+      pos = b;
+    }
+    rahmen += text.slice(pos);
+    rahmen = rahmen.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create or replace function", "create table",
+      "create trigger", "grant ", "revoke "]) {
+      expect(rahmen.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+
+  it("legt beide Verträge selbst ab — ohne jeden Platzhalter", () => {
+    expect(text).toContain("select set_config('skyisles.base', (");
+    expect(text).toContain("select set_config('skyisles.coll', (");
+    expect(text).not.toContain("BASIS-HIER-EINSETZEN");
+    expect(text).not.toContain("SAMMLUNG-HIER-EINSETZEN");
+  });
+
+  it("misst ZWEIMAL mit dem Text der Prüfdatei", () => {
+    const pruef = readFileSync("supabase/checks/g2_preflight.sql", "utf8");
+    const ketteBasis = pruef.slice(pruef.indexOf("with sammelbar as ("),
+      pruef.indexOf("coll_mess as (")).trimEnd().replace(/,$/, "");
+    const ketteColl = "with " + pruef.slice(pruef.indexOf("coll_mess as ("),
+      pruef.indexOf("pruef (nr, bereich")).trimEnd().replace(/,$/, "");
+    const zaehle = (nadel: string) => text.split(nadel).length - 1;
+    expect(zaehle(ketteBasis)).toBeGreaterThanOrEqual(1);
+    expect(zaehle(ketteBasis.replace("with sammelbar as (", "  with sammelbar as ("))
+      + zaehle(ketteBasis)).toBeGreaterThanOrEqual(2);
+    expect(zaehle(ketteColl)).toBeGreaterThanOrEqual(1);
+    expect(zaehle(ketteColl.replace("with coll_mess as (", "  with coll_mess as ("))
+      + zaehle(ketteColl)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("sichert den Sichtbarkeits-Abdruck Zeile für Zeile", () => {
+    expect(text).toContain("select set_config('skyisles.sicht', (");
+    expect(text).toContain("s.sky_id || '|' || s.catalog_visible::text");
+    expect(text).toContain("select set_config('skyisles.sichtbar', (");
+    expect(text).toContain("select set_config('skyisles.unsichtbar', (");
+    expect(text).toContain("select set_config('skyisles.journal', (");
+    expect(text).toContain("select set_config('skyisles.trigger', (");
+    for (const kennung of ["ABBRUCH B1", "ABBRUCH B2b", "ABBRUCH B3", "ABBRUCH B4",
+      "ABBRUCH B5", "ABBRUCH B6", "ABBRUCH B7", "ABBRUCH B8", "ABBRUCH B9"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+    /* NULL-sicher, überall — `=` würde bei NULL stillschweigend nichts melden. */
+    expect(text).toContain("v_nach_base is distinct from v_vor_base");
+    expect(text).toContain("v_nach_coll is distinct from v_vor_coll");
+    expect(text).toContain("v_nach is distinct from v_vor_sicht");
+  });
+
+  it("prüft den Eingangszustand aller DREI ersetzten Rümpfe", () => {
+    /* Keine der sieben Migrationen prüft, was sie überschreibt. */
+    for (const kennung of ["ABBRUCH A6a", "ABBRUCH A6b", "ABBRUCH A6c", "ABBRUCH A6d",
+      "ABBRUCH A6e", "ABBRUCH A6f", "ABBRUCH A6h", "ABBRUCH A6i", "ABBRUCH A6j",
+      "ABBRUCH A6k", "ABBRUCH A6l"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+    /* Die vier Felder, die der Journalrumpf wirklich führt. */
+    for (const feld of ["catalog_visible", "display_name_override", "card_type",
+      "image_override_path"]) {
+      expect(text, feld).toContain(`v_journal not like '%${feld}%'`);
+    }
+    /* Die Signatur aus 0034, ausgeschrieben — eine Ersetzung darf keine
+       Überladung werden. */
+    expect(text).toContain(
+      "public.admin_create_figure(text,text,bigint,text,boolean,text,text,text)");
+    /* Und der Exportrumpf, den `0153` vorfinden muss. */
+    expect(text).toContain("4c4d2e7c81e4efa8e18cdffa06bba40a");
+  });
+
+  it("verlangt, dass die zehn neuen Funktionen noch NICHT liegen", () => {
+    const ZEHN = ["admin_set_catalog_status", "skylanders_sync_catalog_status",
+      "admin_merge_references", "admin_merge_draft", "admin_discard_draft",
+      "admin_merge_plan", "merge_note", "admin_create_character",
+      "admin_set_character", "admin_publish_as_variant"];
+    for (const name of ZEHN) {
+      expect(text, `${name} wird nicht auf Abwesenheit geprüft`)
+        .toContain(`and p.proname = '${name}';`);
+    }
+    expect(text).toContain("ABBRUCH A6g");
+    /* Zehn Abwesenheiten vorher, und danach zehn Anwesenheiten mit der
+       erwarteten Zahl von Fassungen. */
+    expect(text.match(/ABBRUCH A6g/g)?.length).toBe(ZEHN.length);
+    expect(text.match(/ABBRUCH B10/g)?.length).toBe(ZEHN.length);
+  });
+
+  it("erwartet bei admin_merge_draft ZWEI Fassungen und sagt, warum", () => {
+    /*
+     * `0156` lässt die dreiarmige Fassung aus `0154` als Weiterleitung
+     * stehen, damit deployter Code sie weiter findet. Zwei Fassungen sind
+     * hier also richtig; „genau eine" wäre der Fehler.
+     */
+    expect(text).toContain("erwartet 2 (0154/0156");
+    expect(text).toContain("die dreiarmige leitet weiter");
+  });
+
+  it("beweist am Ende, dass die CHECK-Lücke geschlossen ist", () => {
+    /* Der ganze Grund dieser Gruppe, als blockierende Prüfung vor dem commit. */
+    expect(text).toContain("ABBRUCH B12");
+    expect(text).toContain("ABBRUCH B12b");
+    expect(text).toContain("ABBRUCH B12d");
+    expect(text).toContain("v_def not like '%catalog_status%'");
+    expect(text).toContain("v_def not like '%merged_from%'");
+    expect(text).toContain("v_def not like '%discarded%'");
+    expect(text).toContain("v_def not like '%character_id%'");
+    /* Und der Exportrumpf ist der aus 0153, nicht der aus 0144. */
+    expect(text).toContain("ABBRUCH B13");
+    expect(text).toContain("92c48444f99b9e294f9703d0c0ddeaa8");
+    /* Keine der sieben schreibt eine Journalzeile. */
+    expect(text).toContain("ABBRUCH B14");
+  });
+
+  it("sagt im Kopf, warum die sieben zusammen fahren", () => {
+    const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+    expect(fliesstext).toContain("23514");
+    expect(fliesstext).toContain("admin_set_catalog_visible");
+    expect(fliesstext).toMatch(/SPERRWIRKUNG/);
+    expect(fliesstext).toContain("lock_timeout");
   });
 });
