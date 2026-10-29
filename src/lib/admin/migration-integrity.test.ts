@@ -130,7 +130,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
   const zeilen: Zeile[] = tabelle("Staging");
   const production: Zeile[] = tabelle("Production");
 
-  it("die Staging-Tabelle führt die zwanzig angewendeten", () => {
+  it("die Staging-Tabelle führt die dreissig angewendeten", () => {
     /*
      * Elf waren es bis zum 2026-10-18 (`0122`–`0132`). Am 2026-10-19 kamen
      * `0135` und `0136` dazu — in EINEM Durchgang über
@@ -182,14 +182,132 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * eine Zählung) und hinterließ nichts. Auch hier stand die Akte bis zum
      * Lauf auf „nirgends angewendet"; dieselbe stille Veralterung wie bei
      * `0144` und `0146`, und derselbe Grund, sie zu führen.
+     *
+     * **`0152` KAM AM 2026-10-27 DAZU** (CAT-04B) — der redaktionelle
+     * Katalogstatus. Ihr Weg ist der, den dieser Test erzwingt: Preflight,
+     * eingefrorene Baselines, die eine schreibende Anweisung vom Bediener,
+     * Nachkontrolle gegen GENAU diese Baselines. `9999 = 0` in beiden
+     * Läufen; 596 Zeilen wurden `public`, 30 `hidden`, **keine** `draft`.
+     *
+     * **Der erste Preflight brach ab, und das war der Beweis seines
+     * Nutzens** — an einer von Hand getippten Signatur in der PRÜFDATEI,
+     * nicht an der Migration. `to_regprocedure` antwortet auf eine falsch
+     * geschriebene Signatur NULL, genau wie auf eine fehlende Funktion. Die
+     * Zeile fragt seitdem die Parameterzahl, und eine zweite schreibt die
+     * tatsächliche Signatur ins Protokoll. Auch `0152` stand bis zum Lauf
+     * als „nirgends angewendet" in der Akte; dieselbe stille Veralterung wie
+     * bei `0144`, `0146` und `0147`–`0149`.
+     * **`0154` UND `0155` KAMEN AM 2026-10-28 DAZU** (CAT-05E) — die
+     * Zusammenführung und das Verwerfen. Ihre Reihenfolge ist nicht nur
+     * behauptet: der Preflight von `0155` ist am selben Tag **vor** der
+     * Anwendung von `0154` in Zeile 103 zu Recht gescheitert (`9999 = 1`),
+     * und erst danach lief er durch. Auch diese beiden standen bis zum Lauf
+     * als „nirgends angewendet" in der Akte; dieselbe stille Veralterung wie
+     * bei `0144`, `0146`, `0147`–`0149` und `0152`.
+     *
+     * **Eine Baseline ging dabei verloren** und das steht hier, weil eine
+     * Akte auch die eigenen Fehler führt: die erste Erhebung für `0154` vom
+     * 2026-10-27 wurde von Hand gelöscht, damit der Runner den Stand
+     * unmittelbar vor dem Schreiben misst. Ihr Inhalt ist nicht
+     * rekonstruierbar. Der Runner kennt dafür jetzt `--refreeze`, das
+     * archiviert statt zu löschen (`supabase/baselines/archiv/README.md`).
+     *
+     * **`0159` KAM AM 2026-10-28 DAZU** (CAT-07, ADR-0156) — die Basisfigur
+     * einer Variante. Ihre Nachkontrolle brauchte zwei Anläufe, und der
+     * erste Befund lag in der PRÜFDATEI: ein Suchmuster mit zwei
+     * Backslashes, das nichts treffen konnte. Dieselbe Klasse wie `0156`
+     * Zeile 115 und `0153` Zeile 104 — und seit diesem Lauf hält sie der
+     * Abschnitt *Maskierung in Suchmustern* in
+     * `src/lib/admin/check-body-patterns.test.ts` samt `P68` fest. Die
+     * Migrationsdatei selbst blieb unberührt (Regel 1), und erst der
+     * berechtigte Lauf als `postgres` mit `9998 = 0` UND `9999 = 0` hat sie
+     * in diese Tabelle gebracht.
+     *
+     * **`0160` KAM AM SELBEN TAG DAZU** (CAT-07, Nachtrag; ADR-0156) — die
+     * Folgemigration, die `base_sky_id` in die Plattformsicherung nimmt.
+     * Dieselbe Bauform wie `0153`: ein Funktionsrumpf, eine Zeile, und die
+     * Umkehrprobe am lebenden Rumpf als Zusage. Preflight ohne eine offene
+     * Zeile, Nachkontrolle `9999 = 0`, berechtigter Lauf `9998 = 0` und
+     * `9999 = 0`. Ihre Baseline ist zeichengleich der von `0159`: zwischen
+     * den beiden Migrationen hat sich im Katalog nichts bewegt.
+     *
+     * **`0161` KAM AM 2026-10-29 DAZU** (CAT-08 Stufe 1; ADR-0157) — die
+     * automatische Familienbildung. Sie legt eine vierte Funktion an und
+     * ersetzt keine: dass die sechs aus `0152`/`0158`/`0159` unverändert
+     * sind, ist an ihren Abdrücken gemessen, und dass die angewendete
+     * Funktion die aus der Datei ist, ebenso
+     * (`supabase/checks/cat08_applied_fingerprint.sql`). Ihre Baseline
+     * weicht von der von `0160` ab, und das ist richtig: der Betreiber hat
+     * zwischen beiden redaktionell gearbeitet. Pre- und Postflight dieser
+     * Migration stimmen überein.
+     *
+     * **`0162` KAM AM SELBEN TAG DAZU** (CAT-09, ADR-0159) — der Marktwert an
+     * der Adminkachel und die Löschung einer unbenutzten Katalogzeile. Auch
+     * ihre Nachkontrolle brauchte zwei Anläufe, und der Befund lag beide Male
+     * in der PRÜFDATEI: die Zeilen 114 und 122 suchten ein blankes Wort in
+     * `prosrc`, und `prosrc` enthält die KOMMENTARE — die Preisfunktion sagt
+     * im Kommentar „kein `card_type`", die Löschfunktion nennt
+     * `0162_storage_note.md`. Dieselbe Klasse wie `0159` Zeile 51, `0156`
+     * Zeile 115 und `0153` Zeile 104; sie ist damit die vierte, und deshalb
+     * messen beide Zeilen jetzt am kommentarfreien Rumpf und suchen die
+     * SCHREIBFORM statt des Wortes. Die Migrationsdatei blieb unberührt
+     * (Regel 1), die Baseline unverändert, und erst der berechtigte Lauf als
+     * `postgres` mit `9998 = 0` UND `9999 = 0` hat sie in diese Tabelle
+     * gebracht. Ihre Baseline weicht von der von `0161` ab — der Betreiber
+     * hat auch zwischen diesen beiden redaktionell gearbeitet (725 → 694
+     * Katalogzeilen).
+     *
+     * **`0163` KAM AM SELBEN TAG DAZU** (CAT-10, ADR-0160) — der TYPE als
+     * Menge je Artikel mit höchstens einem Banner. Drei Spalten, drei CHECKs,
+     * ein Trigger, zwei Funktionen und die Erstbelegung aus STRUKTURIERTEN
+     * Quellen. Preflight ohne eine offene Zeile, Nachkontrolle `9999 = 0` mit
+     * einer rechtegeschützten Zeile, berechtigter Lauf `9998 = 0` und
+     * `9999 = 0`. Ihre Baseline ist zeichengleich der von `0162`: zwischen den
+     * beiden hat sich im Katalog nichts bewegt — `0162` hat, wie zugesagt,
+     * keine Datenzeile angefasst. **Sie ist die erste Migration, deren Hülle
+     * einen Abdruck MISST statt ihn einzufrieren:** der eingefrorene Wert vom
+     * Vormittag war durch die redaktionelle Arbeit des Betreibers überholt und
+     * hätte die Transaktion abgebrochen. A7 legt ihn jetzt transaktionslokal
+     * ab, B3 liest ihn zurück und bricht ab, wenn die Ablage fehlt — die
+     * Schutzwirkung bleibt, der falsche Sollwert ist weg.
+     *
+     * **`0164` KAM AM SELBEN TAG DAZU** (CAT-10, Nachtrag; ADR-0160) — die drei
+     * Felder in der Plattformsicherung. Dieselbe Bauform wie `0153` und
+     * `0160`: ein Funktionsrumpf, drei Zeilen, und die Umkehrprobe am lebenden
+     * Rumpf als Zusage (die drei Zeilen abgezogen ergibt zeichengleich den aus
+     * `0160`, `ff4f38e6…`).
+     *
+     * **SIE IST DIE EINZIGE ZEILE DIESER TABELLE MIT EINER ERKLÄRTEN
+     * ABWEICHUNG IN DER NACHKONTROLLE** (`9999 = 2`), und das steht hier,
+     * weil eine Akte den Befund nicht gegen die Erklärung tauscht: der
+     * Betreiber hat SKY-0564 „Kaos in OVP" um 14:38:40 UTC versteckt — nach
+     * dem Einfrieren der Baseline (14:31:06) und vor der Nachkontrolle
+     * (14:44:24). Shopfähig und sammelbar fielen deshalb von 565 auf 564. Das
+     * Journal belegt den Statuswechsel und nennt keine zweite Änderung, die
+     * Gegenrechnung ergibt mit dieser einen Zeile wieder 565, und die
+     * Migration enthält genau EINE Anweisung — sie kann die Ursache nicht
+     * sein. Die Prüfdatei wurde nicht angefasst.
      */
-    expect(zeilen.length).toBe(23);
+    expect(zeilen.length).toBe(36);
     for (const datei of ["0144_platform_export_calculations.sql",
                          "0145_favorites.sql",
                          "0146_offer_state.sql",
                          "0147_offer_availability.sql",
                          "0148_availability_notifications.sql",
-                         "0149_notification_read_state.sql"]) {
+                         "0149_notification_read_state.sql",
+                         "0152_catalog_status.sql",
+                         "0153_platform_export_catalog_status.sql",
+                         "0154_merge_draft_into_figure.sql",
+                         "0155_discard_draft.sql",
+                         "0156_merge_selected_fields.sql",
+                         "0157_audit_fields_and_automatic_notes.sql",
+                         "0158_figure_families.sql",
+                         "0159_variant_base_figure.sql",
+                         "0160_platform_export_base_sky_id.sql",
+                         "0161_variant_family_auto.sql",
+                         "0162_admin_price_and_delete.sql",
+                         "0163_catalog_types.sql",
+                         "0164_platform_export_types.sql"]) {
       expect(zeilen.map((z) => z.datei), datei).toContain(datei);
     }
     for (const datei of ["0135_catalog_item_type.sql",
@@ -253,15 +371,27 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
     /* Zehn bis zum 2026-10-18, zwölf seit `0135`/`0136`, vierzehn seit
        `0137`/`0138`, sechzehn seit `0139`/`0140`, achtzehn seit `0144` und
        `0145` am 2026-10-25, neunzehn seit `0146` am selben Tag,
-       zweiundzwanzig seit `0147`–`0149` am 2026-10-26. Nur `0130` weicht ab
-       und zeigt auf ihren Nachtrag.
+       zweiundzwanzig seit `0147`–`0149` am 2026-10-26, dreiundzwanzig seit
+       `0152` am 2026-10-27, fünfundzwanzig seit `0154`/`0155` und
+       sechsundzwanzig seit `0156`, siebenundzwanzig seit `0157` und
+       achtundzwanzig seit `0158`, neunundzwanzig seit `0153`, dreißig seit
+       `0159` und einunddreißig seit `0160` am 2026-10-28, zweiunddreißig seit
+       `0161`, dreiunddreißig seit `0162`, vierunddreißig seit `0163` und
+       fünfunddreißig seit `0164` am 2026-10-29. Nur `0130` weicht ab und
+       zeigt auf ihren Nachtrag.
+
+       `0154` STEHT WEITER AUF `gleich`, OBWOHL `0156` IHREN RUMPF ERSETZT.
+       Das ist kein Widerspruch: Regel 1 spricht über die DATEI, und die ist
+       unverändert — `0156` ist eine eigene Migration, die eine eigene Zeile
+       hat. Würde jemand `0154` selbst anfassen, träte Regel 3 in Kraft und
+       die Spalte stünde auf `abweichend`.
 
        DIE ZEILE PRÜFT MEHR, ALS SIE ZÄHLT: für jede dieser Dateien wird die
        Prüfsumme nachgerechnet. Eine angewendete Migration wird nicht mehr
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(22);
+    expect(gleiche.length).toBe(35);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

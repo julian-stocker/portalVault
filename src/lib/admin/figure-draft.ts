@@ -29,7 +29,10 @@
  *
  * THERE IS NO SIXTH FIELD TO ADD WITHOUT A SCHEMA DECISION.
  */
+import { statusOf, type CatalogStatus } from "@/lib/catalog/catalog-status";
 import { asCardType, type CardType } from "@/lib/catalog/card-type";
+import { asCatalogTypes, type CatalogType }
+  from "@/lib/catalog/catalog-type";
 
 /** What the dialog edits. Every value is what the server would store. */
 export type AdminFigureDraft = {
@@ -38,17 +41,40 @@ export type AdminFigureDraft = {
   cardType: CardType;
   /** `null` means "no override" — the imported picture is shown instead. */
   imageOverridePath: string | null;
-  catalogVisible: boolean;
+  /**
+   * Der redaktionelle Status (CAT-02B) — drei Werte statt eines Häkchens.
+   *
+   * Er ERSETZT `catalogVisible` im Entwurf: zwei Felder für eine Frage wären
+   * zwei Wahrheiten, und das Formular schreibt ohnehin nur geänderte Felder.
+   * Die Sichtbarkeit folgt in der Datenbank aus dem Status (`0152`).
+   */
+  catalogStatus: CatalogStatus;
   /** `""` is a real value: the note was cleared. */
   adminNote: string;
+  /**
+   * DIE TYPMENGE (CAT-10, `0163`) — das sechste Feld, und die Schemaänderung,
+   * die der Kopf dieser Datei verlangt hat.
+   *
+   * Sie steht hier und nicht neben `cardType`, weil sie etwas anderes ist:
+   * `cardType` ist die KARTENKUNST (eine von sieben PNG-Dateien),
+   * `types` die fachliche Klassifikation (eine Menge aus siebzehn). Die
+   * Kartenkunst aus der Menge abzuleiten wäre falsch, und zwar gemessen —
+   * `supabase/checks/cat10_projection_proof.sql`.
+   *
+   * ALS SORTIERTE LISTE, nicht als Menge: der Vergleich in `changedFields`
+   * ist ein Zeichenvergleich, und zwei gleiche Mengen in anderer Reihenfolge
+   * wären sonst eine Änderung. `asCatalogTypes()` sortiert.
+   */
+  types: readonly CatalogType[];
 };
 
 /** The fields, in the order they are saved. */
 export const DRAFT_FIELDS = [
   "displayNameOverride",
   "cardType",
+  "types",
   "imageOverridePath",
-  "catalogVisible",
+  "catalogStatus",
   "adminNote",
 ] as const;
 
@@ -66,12 +92,20 @@ export function draftFrom(figure: {
   cardType: string;
   imageOverridePath: string | null;
   catalogVisible: boolean;
+  catalogStatus?: CatalogStatus;
+  types?: readonly string[];
 }, adminNote: string | null): AdminFigureDraft {
   return {
     displayNameOverride: figure.displayNameOverride,
     cardType: asCardType(figure.cardType),
+    /* Dieselbe Bewachung wie bei `cardType`: ein Wert, den diese Fassung
+       nicht kennt, fällt heraus statt eine Beschriftungssuche zu
+       zerbrechen. */
+    types: asCatalogTypes(figure.types ?? []),
     imageOverridePath: figure.imageOverridePath,
-    catalogVisible: figure.catalogVisible,
+    /* `statusOf` und nicht `figure.catalogStatus`: fehlt das Feld, ist die
+       Ableitung aus der Sichtbarkeit exakt — siehe `catalog-status.ts`. */
+    catalogStatus: statusOf(figure),
     adminNote: adminNote ?? "",
   };
 }
@@ -88,7 +122,25 @@ export function changedFields(
   initial: AdminFigureDraft,
   draft: AdminFigureDraft,
 ): DraftField[] {
-  return DRAFT_FIELDS.filter((field) => initial[field] !== draft[field]);
+  return DRAFT_FIELDS.filter((field) => {
+    /*
+     * EIN ARRAY IST MIT `!==` IMMER UNGLEICH, auch wenn nichts geändert
+     * wurde — und dann schriebe jedes Speichern die Typmenge neu, stünde in
+     * ihrem Journal und kollidierte mit jedem, der sie inzwischen geändert
+     * hat. Verglichen wird deshalb der Inhalt; beide Seiten sind sortiert
+     * (`asCatalogTypes`), also genügt die Verkettung.
+     */
+    if (field === "types") {
+      /*
+       * `?? []` UND NICHT EIN VERLASS AUF DEN TYP: ein Entwurf, der aus einem
+       * aelteren Build oder aus einer unvollstaendigen Antwort kommt, traegt
+       * die Menge nicht — und „kein Feld" soll „keine Aenderung" heissen und
+       * nicht einen Absturz im Speicherplan.
+       */
+      return (initial.types ?? []).join(",") !== (draft.types ?? []).join(",");
+    }
+    return initial[field] !== draft[field];
+  });
 }
 
 /** Whether anything at all has been changed. */
@@ -159,19 +211,23 @@ export function baselineAfter(
 }
 
 /**
- * Visibility is not a consequence of anything else.
+ * Der Status ist keine Folge von etwas anderem.
  *
- * Changing a figure's card type must never change whether the public
- * catalogue shows it, and the two are separate fields for that reason. Eon's
- * Elite is the case that makes it concrete: all 42 rows are `elite`, and 28
- * of them are deliberately not public (ADR-0069). A dialog that coupled the
- * two would make them public the moment somebody reclassified them.
+ * Den Kartentyp zu ändern darf niemals ändern, ob der öffentliche Katalog
+ * eine Figur zeigt, und genau deshalb sind es getrennte Felder. Eon's Elite
+ * ist der Fall, der es greifbar macht: alle 42 Zeilen sind `elite`, und 28
+ * davon sind absichtlich nicht öffentlich (ADR-0069). Ein Dialog, der die
+ * beiden koppelte, machte sie öffentlich, sobald jemand sie umklassifiziert.
+ *
+ * SEIT CAT-02B HEISST DAS FELD `catalogStatus` und hat drei Werte. Die Zusage
+ * ist dieselbe und sogar etwas stärker: ein Statuswechsel steht genau dann im
+ * Speicherplan, wenn jemand ihn gewählt hat.
  */
 export function visibilityIsIndependent(
   initial: AdminFigureDraft,
   draft: AdminFigureDraft,
 ): boolean {
-  return initial.catalogVisible === draft.catalogVisible
+  return initial.catalogStatus === draft.catalogStatus
     ? true
-    : changedFields(initial, draft).includes("catalogVisible");
+    : changedFields(initial, draft).includes("catalogStatus");
 }

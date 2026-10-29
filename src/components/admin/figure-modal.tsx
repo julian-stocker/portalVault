@@ -40,6 +40,9 @@ import { Modal } from "@/components/ui/modal";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { CARD_TYPES, CARD_TYPE_LABELS } from "@/lib/catalog/card-type";
 import {
+  TYPE_GROUPS, TYPE_GROUP_LABELS, TYPE_GROUP_ORDER, TYPE_LABELS, asCatalogTypes,
+} from "@/lib/catalog/catalog-type";
+import {
   baselineAfter,
   changedFields,
   draftFrom,
@@ -53,7 +56,7 @@ import { loadFigureEditor } from "@/lib/admin/figure-editor-data";
 import {
   setAdminNote,
   setCardType,
-  setCatalogVisible,
+  setFigureTypes,
   setDisplayNameOverride,
   setImageOverride,
   type AdminResult,
@@ -66,7 +69,14 @@ import type { CatalogFigure } from "@/lib/catalog/types";
 import { groupLabel } from "@/lib/catalog/group";
 import { imageSrc } from "@/lib/catalog/image";
 import { formatDate } from "@/lib/format";
+import {
+  CATALOG_STATUSES,
+  DEFAULT_CATALOG_STATUS,
+  isCatalogStatus,
+  type CatalogStatus,
+} from "@/lib/catalog/catalog-status";
 import { de } from "@/lib/i18n/de";
+import { setCatalogStatus } from "@/lib/admin/actions";
 
 /**
  * One field, one server action.
@@ -76,12 +86,30 @@ import { de } from "@/lib/i18n/de";
  * `imageOverridePath` and `displayNameOverride` both take an empty string as
  * "clear it" — that is the database's contract, not this file's.
  */
+/** Die drei Beschriftungen, an einer Stelle. */
+export const STATUS_LABELS: Readonly<Record<CatalogStatus, string>> = {
+  public: de.catalog.statusPublic,
+  hidden: de.catalog.statusHidden,
+  draft: de.catalog.statusDraft,
+};
+
+/** Ein `select` liefert `string`; der Wächter macht daraus einen Status. */
+function asStatus(value: string): CatalogStatus {
+  return isCatalogStatus(value) ? value : DEFAULT_CATALOG_STATUS;
+}
+
 const WRITERS: Record<DraftField, (skyId: string, draft: AdminFigureDraft) => Promise<AdminResult>> = {
   displayNameOverride: (skyId, draft) =>
     setDisplayNameOverride(skyId, draft.displayNameOverride ?? ""),
   cardType: (skyId, draft) => setCardType(skyId, draft.cardType),
+  /*
+   * EIN EIGENER SCHREIBWEG, wie jedes andere Feld. `setFigureTypes` ersetzt
+   * die Menge und setzt dabei das Banner auf „–", wenn der sichtbare Type
+   * herausfällt — die Regel liegt in `0163` und nicht hier.
+   */
+  types: (skyId, draft) => setFigureTypes(skyId, draft.types),
   imageOverridePath: (skyId, draft) => setImageOverride(skyId, draft.imageOverridePath),
-  catalogVisible: (skyId, draft) => setCatalogVisible(skyId, draft.catalogVisible),
+  catalogStatus: (skyId, draft) => setCatalogStatus(skyId, draft.catalogStatus),
   adminNote: (skyId, draft) => setAdminNote(skyId, draft.adminNote),
 };
 
@@ -408,6 +436,56 @@ export function AdminFigureModal({
               </label>
 
               {/*
+                * DIE TYPES — MEHRFACHAUSWAHL, nach den drei Gruppen
+                * gegliedert (CAT-10).
+                *
+                * KÄSTCHEN UND KEIN MEHRFACH-`select`. Ein `<select multiple>`
+                * verliert auf dem Telefon jede Bedienbarkeit, und mit
+                * siebzehn Werten in drei Gruppen ist eine Liste aus Kästchen
+                * das, was man auch mit dem Daumen trifft. Jedes Kästchen ist
+                * 44 px hoch.
+                *
+                * SIE ÄNDERN NUR DEN ENTWURF. Gespeichert wird beim Speichern
+                * des Dialogs, über `setFigureTypes` — ein Kästchen ist keine
+                * Schreiboperation, und ein Abbrechen lässt die Figur
+                * unverändert. Dasselbe Verhalten wie bei jedem anderen Feld
+                * hier.
+                */}
+              <fieldset className="flex flex-col gap-1">
+                <legend className="text-xs text-muted">{de.admin.typeHeading}</legend>
+                <span className="text-xs text-muted">{de.admin.typeHint}</span>
+                <div className="mt-1 flex flex-col gap-3">
+                  {TYPE_GROUP_ORDER.map((gruppe) => (
+                    <div key={gruppe} className="flex flex-col gap-0.5">
+                      <span className="text-[11px] font-medium tracking-wide uppercase
+                                       text-muted">
+                        {TYPE_GROUP_LABELS[gruppe]}
+                      </span>
+                      <div className="flex flex-wrap gap-x-3">
+                        {TYPE_GROUPS[gruppe].map((typ) => (
+                          <label key={typ}
+                                 className="flex min-h-11 items-center gap-1.5 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={draft.types.includes(typ)}
+                              onChange={(event) =>
+                                set("types", asCatalogTypes(
+                                  event.target.checked
+                                    ? [...draft.types, typ]
+                                    : draft.types.filter((t) => t !== typ)))
+                              }
+                              className="size-4 accent-[var(--trade-line-strong,#9aa4b2)]"
+                            />
+                            <span>{TYPE_LABELS[typ]}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </fieldset>
+
+              {/*
                 * THE PICTURE, IN TWO STEPS THAT ARE NOT ONE.
                 *
                 * Choosing a file uploads it to storage straight away —
@@ -473,15 +551,28 @@ export function AdminFigureModal({
               </div>
             </Section>
 
-            <Section title={de.admin.sectionVisibility} hint={de.admin.sectionVisibilityHint}>
-              <label className="flex min-h-11 items-center gap-3">
-                <input
-                  type="checkbox"
-                  checked={draft.catalogVisible}
-                  onChange={(event) => set("catalogVisible", event.target.checked)}
-                  className="h-5 w-5 accent-[#3b2a17] focus-ring"
-                />
-                <span className="text-sm">{de.admin.visibleLabel}</span>
+            {/*
+              DREI WERTE STATT EINES HÄKCHENS (CAT-02B).
+              Ein `select` und kein drittes Kästchen: die drei Zustände sind
+              einer von drei, nicht drei Schalter. Gespeichert wird wie jedes
+              andere Feld — der Status steht in `WRITERS`, und „Speichern"
+              schreibt nur, was sich geändert hat. Keine Warnung, keine
+              Bestätigung, kein Freigabeschritt.
+            */}
+            <Section title={de.admin.sectionVisibility} hint={de.catalog.statusHint}>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted">{de.catalog.statusLabel}</span>
+                <select
+                  value={draft.catalogStatus}
+                  onChange={(event) => set("catalogStatus", asStatus(event.target.value))}
+                  className="min-h-11 rounded-sky-sm bg-deep/50 px-2 text-sm text-foreground ring-1 ring-border/50 focus-ring"
+                >
+                  {CATALOG_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {STATUS_LABELS[status]}
+                    </option>
+                  ))}
+                </select>
               </label>
             </Section>
 

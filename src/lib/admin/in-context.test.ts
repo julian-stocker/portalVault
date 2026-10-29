@@ -115,44 +115,85 @@ describe("what an administrator's card offers", () => {
     expect(source("src/app/(admin)/admin/catalog/[skyId]/page.tsx")).toContain("FigureEditor");
   });
 
-  it("does not let a tap on the card change anything", () => {
-    // Not a tap on the card: on a phone that is one mis-tap away from taking
-    // a figure out of the public catalog.
-    expect(card).toContain("interactive={false}");
+  it("ein Tipp auf die Kachel ändert nichts", () => {
+    /*
+     * Nicht der Körper: auf einem Telefon ist das ein Fehlgriff davon
+     * entfernt, eine Figur aus dem öffentlichen Katalog zu nehmen. Die
+     * Kachel des Administrators bekommt deshalb weder `onToggle` noch
+     * `href` — gehandelt wird in der Aktionsleiste, mit 44-px-Feldern, und
+     * das Verstecken fragt dort ausdrücklich nach einem Druck auf das Auge.
+     */
+    /* Am CODE gemessen, nicht am Kommentar: der Zweig erklärt in Prosa,
+       warum er `onToggle` NICHT bekommt, und das Wort steht dort. */
+    const branch = code(CARD).slice(code(CARD).indexOf("if (admin) {"),
+                                    code(CARD).indexOf("const quickBuy"));
+    expect(branch).not.toContain("onToggle");
+    expect(branch).not.toContain("href=");
+    expect(branch).toContain("<AdminTileActions");
   });
 
-  it("carries exactly one action, and it opens the editor (V3.8)", () => {
+  it("trägt zwei Handlungen in der Leiste der Kachel (UX-01G)", () => {
     /*
-     * THE BUG THIS REPLACED. The trade row is 9.05 % of the card's height —
-     * 29 px on a two-column phone — and it used to hold a 40 px button, a
-     * link and an error line stacked on top of each other. The row clips, so
-     * the button was cut and the link was invisible.
+     * BIS UX-01G WAR ES EINE, und der Grund stand in der Geometrie: die
+     * Handelszeile der klassischen Karte ist 9,05 % ihrer Höhe — 29 px auf
+     * einem zweispaltigen Telefon —, und dort passt ein 40-px-Knopf nicht,
+     * geschweige denn drei gestapelte.
      *
-     * One control, in the same box the public offer line uses.
+     * Die Kachel hat eine Aktionsleiste aus 44-px-Feldern. Dort stehen beim
+     * Administrator `[Info] [Stift] [Auge]`, in denselben Feldern, in denen
+     * beim Sammler `[Glocke] [Info] [Herz]` stehen — dieselbe Geometrie,
+     * dieselbe Berührungsfläche, dieselbe Rechnung in `row-template.ts`.
      */
     const actions = code(ACTIONS);
-    expect(actions).toContain("AdminEditAction");
-    expect(actions.match(/<button/g) ?? []).toHaveLength(1);
-    expect(actions).not.toContain("<Link");
-    expect(actions).not.toContain("aria-pressed");
-    // The public row's geometry, not a second one.
-    expect(actions).toContain("h-full w-full");
-    expect(actions).not.toContain("min-h-");
-    expect(actions).not.toContain("flex-col");
-  });
-
-  it("marks a hidden figure rather than dropping it", () => {
-    expect(card).toContain("muted={!visible}");
-    expect(card).toContain("<HiddenBadge />");
-  });
-
-  it("opens the dialog rather than navigating away (V3.8)", () => {
+    expect(actions).toContain("AdminTileActions");
     /*
-     * The detail page still exists and is still reachable from
-     * /admin/catalog. What changed is that fixing one field no longer costs a
-     * page load and a trip back.
+     * SECHS KNÖPFE IN DER DATEI, und jeder hat seinen Ort: der alte aus der
+     * Handelszeile (für die klassische Karte in Sammlung und Shop), die drei
+     * der Aktionsleiste — Stift, Auge, Papierkorb — und die zwei des
+     * Bestätigungsdialogs. In der LEISTE stehen drei.
      */
-    expect(card).toContain("<AdminEditAction");
+    expect(actions.match(/<button/g) ?? []).toHaveLength(6);
+    expect(actions).toContain("deleteFigureFor");
+    expect(actions).not.toContain("<Link");
+    /* Das Auge IST ein Schalter und sagt das. */
+    expect(actions).toContain("aria-pressed={sichtbar}");
+    /*
+     * UND SIE TRAGEN DIE GEOMETRIE DER VORHANDENEN MARKEN, Zeichen für
+     * Zeichen: ein 44-px-Feld (`h-11 w-11`) mit einem 22-px-Glyph auf einem
+     * 22er-Raster — dasselbe wie Info, Herz und Glocke. Das war der Anlass
+     * für CAT-09 Punkt 3: meine erste Fassung nahm ein 16-px-Icon, und
+     * daneben wirkte sie kleiner.
+     */
+    expect(actions).toContain("h-11 w-11");
+    expect(actions).toContain('viewBox: "0 0 22 22"');
+    expect(actions).toContain("h-[22px] w-[22px]");
+    const info = source("src/components/catalog/info-link.tsx");
+    expect(info).toContain("h-11 w-11");
+    expect(info).toContain("h-[22px] w-[22px]");
+  });
+
+  it("eine versteckte Figur bleibt sichtbar — und das Auge sagt, dass sie es ist", () => {
+    /*
+     * Die Anforderung des Betreibers, wörtlich: versteckte Figuren bleiben
+     * für Admins sichtbar und können über das Auge umgeschaltet werden. Die
+     * Scheibe entscheidet die Route (`fetchCatalog({ includeHidden: admin })`),
+     * der Zustand steht am Auge, und für Sammler- und Betriebskonten lädt
+     * die Route sie gar nicht.
+     */
+    const actions = code(ACTIONS);
+    expect(actions).toContain('status === "public"');
+    expect(actions).toContain("aria-pressed={sichtbar}");
+    expect(source("src/app/(public)/(catalog)/page.tsx"))
+      .toContain("fetchCatalog({ includeHidden: admin })");
+  });
+
+  it("der Stift öffnet den Dialog und navigiert nicht weg (V3.8)", () => {
+    /*
+     * Die Detailseite gibt es weiter und sie ist weiter von
+     * `/admin/catalog` erreichbar. Was sich geändert hat: ein Feld zu
+     * berichtigen kostet keinen Seitenwechsel und keinen Weg zurück.
+     */
+    expect(card).toContain("<AdminTileActions");
     expect(card).toContain("onEdit={() => onEdit?.(figure)}");
     expect(source(ACTIONS)).not.toContain("/admin/catalog/");
     expect(source(VIEW)).toContain("<AdminFigureModal");
@@ -160,7 +201,8 @@ describe("what an administrator's card offers", () => {
   });
 
   it("offers no collection action", () => {
-    const branch = card.slice(card.indexOf("if (admin) {"), card.indexOf("const trade ="));
+    const branch = code(CARD).slice(code(CARD).indexOf("if (admin) {"),
+                                    code(CARD).indexOf("const quickBuy"));
     expect(branch).not.toContain("onToggle");
     expect(branch).not.toContain("setCollected");
     expect(branch).not.toContain("initialCollected");
@@ -170,14 +212,18 @@ describe("what an administrator's card offers", () => {
 describe("the same mutations as /admin, not new ones", () => {
   it("reuses the existing server actions, and adds none (V3.8)", () => {
     /*
-     * The dialog writes five fields. All five actions existed before it did;
-     * it orchestrates them, it does not replace them — and the detail page
-     * still calls the same ones.
+     * The dialog writes five fields, and it orchestrates existing actions
+     * rather than replacing them — the detail page calls the same ones.
+     *
+     * SINCE CAT-02B THE FIFTH IS `setCatalogStatus` AND NOT
+     * `setCatalogVisible`: the visibility checkbox became a three-value
+     * status (ADR-0151). `setCatalogVisible` still exists and is still
+     * called — by the two-state surfaces — but no longer from this dialog.
      */
     const modal = source("src/components/admin/figure-modal.tsx");
     for (const action of [
       "setDisplayNameOverride", "setCardType", "setImageOverride",
-      "setCatalogVisible", "setAdminNote",
+      "setCatalogStatus", "setAdminNote",
     ]) {
       expect(modal, action).toContain(action);
     }
@@ -197,7 +243,139 @@ describe("the same mutations as /admin, not new ones", () => {
     const rpcs = [...actions.matchAll(/"(admin_[a-z_]+)"/g)].map((m) => m[1]);
     expect(new Set(rpcs)).toEqual(
       new Set([
+        // CAT-02B: der redaktionelle Status mit drei Werten. Er ersetzt im
+        // Formular das Sichtbarkeits-Haekchen; `admin_set_catalog_visible`
+        // bleibt daneben, weil Zubehoer- und Betriebsflaechen weiterhin die
+        // Zwei-Zustands-Frage stellen (ADR-0151).
+        "admin_set_catalog_status",
         "admin_set_catalog_visible",
+        // CAT-05 (`0154`): die Zusammenfuehrung eines importierten Entwurfs
+        // mit einer bestehenden Figur. Sie steht hier, weil sie eine BEWUSSTE
+        // Erweiterung ist und keine stille — und sie ist etwas anderes als
+        // die uebrigen: die anderen aendern ein Feld, diese loescht eine
+        // Zeile. Deshalb prueft sie in der Datenbank selbst, dass niemand
+        // mehr auf den Entwurf zeigt, und deshalb wird sie NICHT aus der
+        // Katalogkarte aufgerufen, sondern nur aus der Figurenbearbeitung.
+        "admin_merge_draft",
+        // CAT-05D (`0155`): einen Entwurf verwerfen — die dritte Handlung
+        // an der Katalogzeile. Sie steht hier aus demselben Grund wie die
+        // Zusammenfuehrung, und aus einem staerkeren: sie LOESCHT. Drei
+        // Riegel in der Datenbank (Entwurf, source=admin, keine Verweise),
+        // und auch sie wird nicht aus der Katalogkarte aufgerufen.
+        "admin_discard_draft",
+        /*
+         * CAT-06 (`0158`): die drei Funktionen der Figurenfamilien. Sie
+         * stehen hier aus demselben Grund wie die beiden darueber — eine
+         * bewusste Erweiterung und keine stille —, und sie sind
+         * ausdruecklich HARMLOSER als jene: keine von ihnen loescht etwas.
+         *
+         *   `admin_create_character`  legt eine Familie an, nur den Namen,
+         *                             und weist einen vorhandenen ab.
+         *   `admin_set_character`     schreibt EINE Spalte: `character_id`.
+         *                             Kein Name, kein Slug, kein Status,
+         *                             kein Preis — Angebote, Sammlungen und
+         *                             Bestellungen haengen an der SKY-ID und
+         *                             bleiben unberuehrt. Sie gilt fuer jede
+         *                             Figur, nicht nur fuer Entwuerfe: eine
+         *                             Familienzuordnung ist eine Korrektur.
+         *   `admin_publish_as_variant` zuordnen UND veroeffentlichen in
+         *                             einer Transaktion, nur fuer Entwuerfe.
+         *                             Sie erfindet keinen zweiten
+         *                             Veroeffentlichungsweg, sondern ruft
+         *                             `admin_set_catalog_status` aus `0152`.
+         */
+        "admin_create_character",
+        "admin_set_character",
+        "admin_publish_as_variant",
+        /*
+         * CAT-07 (`0159`): die BASISFIGUR. Eine andere Ebene als die
+         * Familie — `character_id` verbindet denselben Charakter
+         * serienuebergreifend, `base_sky_id` sagt, welche Figur DERSELBEN
+         * Serie diese Zeile eine Variante von ist. `Elite Boomer` und
+         * `Boomer` sind derselbe Charakter und keine Variante voneinander;
+         * nur zwei Ebenen koennen das unterscheiden.
+         *
+         *   `admin_set_variant_base`   schreibt EINE Spalte: `base_sky_id`.
+         *                              Dieselbe Serie erzwingt ein
+         *                              zusammengesetzter Fremdschluessel,
+         *                              die Ketten ein Trigger — auch
+         *                              gegen einen Zugriff, der diese
+         *                              Aktion umgeht. Gilt fuer jede Figur,
+         *                              nicht nur fuer Entwuerfe.
+         *   `admin_publish_with_base`  zuordnen UND veroeffentlichen in
+         *                              einer Transaktion, nur fuer
+         *                              Entwuerfe. Sie ruft
+         *                              `admin_set_catalog_status` aus
+         *                              `0152` — es gibt weiterhin EINEN
+         *                              Veroeffentlichungsweg.
+         */
+        "admin_set_variant_base",
+        "admin_publish_with_base",
+        /*
+         * CAT-08 Stufe 1 (`0161`): dieselbe Handlung OHNE Frage an den
+         * Bediener. Sie steht hier als vierte und nicht anstelle einer der
+         * drei — `0158` und `0159` bleiben unveraendert gueltig, und
+         * `0161` ERSETZT keine von ihnen, sondern RUFT sie auf.
+         *
+         *   `admin_publish_variant_auto` waehlt die Familie selbst:
+         *                              uebernehmen, wenn die Basisfigur
+         *                              eine hat; sonst die Familie mit dem
+         *                              NAMEN der Basisfigur suchen,
+         *                              BESTAETIGEN (jedes Mitglied muss
+         *                              namensvereinbar sein) und benutzen;
+         *                              sonst anlegen. Verschiedene Familien
+         *                              brechen ab. Sie schreibt NICHT
+         *                              selbst: `admin_set_character`,
+         *                              `admin_set_variant_base` und
+         *                              `admin_set_catalog_status` tun es —
+         *                              es gibt weiterhin EINEN Schreibweg
+         *                              je Spalte. Und sie wird nicht aus
+         *                              der Katalogkarte aufgerufen, sondern
+         *                              nur aus dem Entwurfsdialog.
+         */
+        "admin_publish_variant_auto",
+        /*
+         * CAT-09 (`0162`): der Marktwert an der Kachel und die Löschung einer
+         * unbenutzten Zeile. Beide stehen hier, weil sie bewusste
+         * Erweiterungen sind — und die zweite ist die zweitgefährlichste
+         * Funktion des Projekts:
+         *
+         *   `admin_set_market_price` schreibt EINE Spalte plus ihr Datum,
+         *                            und zwar den GESPEICHERTEN Wert; der
+         *                            Zuschlag des Katalogs wird nie
+         *                            zurückgeschrieben.
+         *   `admin_delete_figure`    löscht EINE Zeile, und nur wenn nichts
+         *                            auf sie zeigt: vierzehn Fremdschlüssel
+         *                            aus `pg_constraint`, die vier
+         *                            CASCADE-Schlüssel einzeln benannt, und
+         *                            `order_lines.sky_id` ausdrücklich —
+         *                            die einzige SKY-ID-Spalte ohne
+         *                            Schlüssel. Sie wird NICHT aus der
+         *                            Katalogkarte gerufen, sondern aus dem
+         *                            Papierkorb der Admin-Kachel, und erst
+         *                            nach einer Bestätigung.
+         */
+        "admin_set_market_price",
+        "admin_delete_figure",
+        /*
+         * CAT-10 (`0163`): DER TYPE ALS MENGE, und das Banner daraus.
+         *
+         *   `admin_set_figure_types`  ersetzt die Menge (17 moegliche Werte)
+         *   `admin_set_visible_type`  waehlt EINEN daraus als Banner, oder
+         *                             ausdruecklich keinen
+         *
+         * ZWEI FUNKTIONEN FUER ZWEI FRAGEN, und das ist der Grund, warum das
+         * Dropdown auf der Kachel ungefaehrlich ist: es ruft nur die zweite,
+         * und die weist jeden Type ab, der der Zeile nicht zugeordnet ist.
+         * Zuordnen geht im Bearbeiten-Dialog.
+         *
+         * `admin_set_card_type` BLEIBT DANEBEN STEHEN. Es schreibt die
+         * KARTENKUNST — eine von sieben PNG-Dateien —, und dass die aus der
+         * Typmenge nicht verlustfrei folgt, ist gegen alle 701 Katalogzeilen
+         * gemessen (`supabase/checks/cat10_projection_proof.sql`).
+         */
+        "admin_set_figure_types",
+        "admin_set_visible_type",
         "admin_set_card_type",
         "admin_set_display_name_override",
         "admin_set_admin_note",
@@ -288,7 +466,10 @@ describe("the collector's catalog is untouched", () => {
 
   it("leaves search and series navigation shared", () => {
     expect(view).toContain("groupSearchResults(pool");
-    expect(view).toContain("<SeriesTabs");
+    /* The series bar became a fixed 3 x 2 grid in UX-01F, and it is still the
+       one component both roles use — an administrator browses the same games
+       in the same control (ADR-0042). */
+    expect(view).toContain("<SeriesGrid");
   });
 });
 

@@ -20,6 +20,7 @@ const FIGURE = {
   cardType: "standard",
   imageOverridePath: null as string | null,
   catalogVisible: true,
+  catalogStatus: "public" as const,
 };
 
 const base = (): AdminFigureDraft => draftFrom(FIGURE, null);
@@ -37,18 +38,27 @@ const CARD = "src/components/catalog/catalog-card.tsx";
 const VIEW = "src/components/catalog/catalog-view.tsx";
 
 describe("the five fields an administrator owns", () => {
-  it("are exactly five, and exactly these", () => {
+  it("are exactly SIX since CAT-10, and exactly these", () => {
     /*
      * Everything else a figure has belongs to the catalogue import, which
      * rewrites it on every run — the name, the slug, the series, the
      * category, the market price. Offering one of those here would be
      * offering an edit that silently disappears.
+     *
+     * `types` IST DAS SECHSTE (CAT-10, `0163`) — und die Schemaentscheidung,
+     * die der Kopf von `figure-draft.ts` dafuer verlangt hat. Es steht
+     * NEBEN `cardType` und nicht an seiner Stelle: das eine ist die
+     * Kartenkunst (eine von sieben PNG-Dateien), das andere die fachliche
+     * Klassifikation (eine Menge aus siebzehn). Dass die eine aus der
+     * anderen nicht verlustfrei folgt, ist gegen alle 701 Katalogzeilen
+     * gemessen (`supabase/checks/cat10_projection_proof.sql`).
      */
     expect([...DRAFT_FIELDS]).toEqual([
       "displayNameOverride",
       "cardType",
+      "types",
       "imageOverridePath",
-      "catalogVisible",
+      "catalogStatus",
       "adminNote",
     ]);
   });
@@ -67,8 +77,14 @@ describe("the five fields an administrator owns", () => {
       displayNameOverride: "Blue Bash",
       cardType: "legendary",
       imageOverridePath: "SKY-0009/abc.jpg",
-      catalogVisible: false,
+      /* Kein `catalogStatus` in der Antwort: `statusOf` leitet ihn exakt aus
+         der Sichtbarkeit ab, solange `0152` nicht gefahren ist (CAT-02B). */
+      catalogStatus: "hidden",
       adminNote: "geprüft",
+      /* Keine `types` in der Antwort: eine leere Menge heisst „Standard",
+         und das ist kein Zoegern, sondern dieselbe Regel wie bei `itemType`
+         — fehlt das Feld, verhaelt sich alles wie vor `0163`. */
+      types: [],
     });
   });
 
@@ -105,9 +121,12 @@ describe("nothing is written until it is saved", () => {
     for (const field of DRAFT_FIELDS) {
       const draft: AdminFigureDraft = { ...initial };
       // One deliberate change per field, of the right type.
-      if (field === "catalogVisible") draft.catalogVisible = !initial.catalogVisible;
+      if (field === "catalogStatus") draft.catalogStatus = "hidden";
       else if (field === "cardType") draft.cardType = "dark";
       else if (field === "adminNote") draft.adminNote = "note";
+      /* Eine MENGE, und ein echter Wert daraus: `"value"` waere kein Type,
+         und `changedFields` vergleicht den Inhalt. */
+      else if (field === "types") draft.types = ["giant"];
       else (draft as Record<string, unknown>)[field] = "value";
       expect(changedFields(initial, draft), field).toEqual([field]);
     }
@@ -123,7 +142,7 @@ describe("nothing is written until it is saved", () => {
 });
 
 describe("five writes are not one transaction", () => {
-  const plan: DraftField[] = ["cardType", "catalogVisible", "adminNote"];
+  const plan: DraftField[] = ["cardType", "catalogStatus", "adminNote"];
 
   it("calls a complete save complete", () => {
     const report = summarise(plan, plan.map((field) => ({ field, ok: true })));
@@ -142,7 +161,7 @@ describe("five writes are not one transaction", () => {
      */
     const report = summarise(plan, [
       { field: "cardType", ok: true },
-      { field: "catalogVisible", ok: false, message: "nope" },
+      { field: "catalogStatus", ok: false, message: "nope" },
     ]);
     expect(report.saved).toEqual(["cardType"]);
     expect(report.failed).toHaveLength(1);
@@ -169,8 +188,8 @@ describe("five writes are not one transaction", () => {
 
   it("leaves nothing dirty after a complete save", () => {
     const initial = base();
-    const draft = { ...initial, cardType: "chase" as const, catalogVisible: false };
-    const next = baselineAfter(initial, draft, ["cardType", "catalogVisible"]);
+    const draft = { ...initial, cardType: "chase" as const, catalogStatus: "hidden" as const };
+    const next = baselineAfter(initial, draft, ["cardType", "catalogStatus"]);
     expect(isDirty(next, draft)).toBe(false);
   });
 });
@@ -183,35 +202,37 @@ describe("visibility is not a consequence of the card type", () => {
      * that coupled the two would make them public the moment somebody
      * reclassified them.
      */
-    const initial = draftFrom({ ...FIGURE, catalogVisible: false }, null);
+    const initial = draftFrom({ ...FIGURE, catalogVisible: false, catalogStatus: undefined }, null);
     const draft = { ...initial, cardType: "elite" as const };
     expect(changedFields(initial, draft)).toEqual(["cardType"]);
-    expect(draft.catalogVisible).toBe(false);
+    expect(draft.catalogStatus).toBe("hidden");
     expect(visibilityIsIndependent(initial, draft)).toBe(true);
   });
 
   it("moves only when it is changed itself", () => {
     const initial = base();
-    const draft = { ...initial, catalogVisible: false };
-    expect(changedFields(initial, draft)).toEqual(["catalogVisible"]);
+    const draft = { ...initial, catalogStatus: "hidden" as const };
+    expect(changedFields(initial, draft)).toEqual(["catalogStatus"]);
     expect(visibilityIsIndependent(initial, draft)).toBe(true);
   });
 
   it("is a field of its own, never derived", () => {
     const logic = code("src/lib/admin/figure-draft.ts");
-    expect(logic).not.toMatch(/catalogVisible\s*=\s*[^;]*cardType/);
+    expect(logic).not.toMatch(/catalogStatus\s*=\s*[^;]*cardType/);
     /*
-     * In the dialog the only thing that sets it is its own checkbox. A
-     * broader scan would trip over the writer table, where the two fields are
-     * simply neighbours — being near each other is not being derived from
-     * each other.
+     * In the dialog the only thing that sets it is its own control — seit
+     * CAT-02B ein `select` mit drei Werten statt eines Häkchens, und der
+     * Wert läuft durch `asStatus`, damit ein unbekannter String nicht als
+     * Status behauptet wird. Ein breiterer Scan würde über die Writer-Tabelle
+     * stolpern, wo die Felder bloß Nachbarn sind — nebeneinander zu stehen
+     * ist nicht voneinander abgeleitet zu sein.
      */
     const modal = code(MODAL);
-    const setters = [...modal.matchAll(/set\("catalogVisible",\s*([^)]*)\)/g)].map((m) => m[1].trim());
-    expect(setters).toEqual(["event.target.checked"]);
-    expect(modal).not.toMatch(/set\("catalogVisible"[^)]*cardType/);
+    const setters = [...modal.matchAll(/set\("catalogStatus",\s*([^)]*)\)/g)].map((m) => m[1].trim());
+    expect(setters).toEqual(["asStatus(event.target.value"]);
+    expect(modal).not.toMatch(/set\("catalogStatus"[^)]*cardType/);
     // And nothing else in the dialog writes that field at all.
-    expect(modal.match(/catalogVisible:/g) ?? []).toHaveLength(1); // the writer table
+    expect(modal.match(/catalogStatus:/g) ?? []).toHaveLength(1); // the writer table
   });
 });
 
@@ -337,11 +358,25 @@ describe("the card in admin mode", () => {
     expect(view.lastIndexOf("{admin ? (", at)).toBeGreaterThan(-1);
   });
 
-  it("still marks a hidden figure without giving it a second action", () => {
-    expect(card).toContain("muted={!visible}");
-    expect(card).toContain("<HiddenBadge />");
-    // The badge is a badge: it sits over the window, not in the action row.
-    expect(code(ACTIONS)).toContain("absolute top-2 left-2");
+  it("markiert eine versteckte Figur — seit UX-01G am Auge", () => {
+    /*
+     * `HiddenBadge` sass über dem Fenster der klassischen Karte. Die Kachel
+     * hat kein Fenster, und das Auge sagt denselben Satz: offen bedeutet
+     * sichtbar, durchgestrichen bedeutet versteckt. Es kann ihn ausserdem
+     * ändern, was ein Abzeichen nie konnte.
+     *
+     * DAS ABZEICHEN SELBST BLEIBT, denn die klassische Karte bleibt — in der
+     * Sammlung und im Shop.
+     */
+    const actions = code(ACTIONS);
+    expect(actions).toContain("HiddenBadge");
+    expect(actions).toContain("absolute top-2 left-2");
+    /* Und die Kachel bekommt es nicht: der Zustand steht im Auge. */
+    expect(card).not.toContain("<HiddenBadge />");
+    /* Der durchgestrichene Strich des zweiten Auges — Markup, nicht
+       Kommentar: `code()` nimmt Kommentare heraus. Seit CAT-09 liegt er auf
+       dem 22er-Raster der anderen Marken. */
+    expect(actions).toContain("m2 2 18 18");
   });
 
   it("redraws the card from what was saved", () => {
@@ -366,11 +401,19 @@ describe("the admin card edits nothing itself", () => {
   const actions = code(ACTIONS);
   const adminBranch = card.slice(card.indexOf("if (admin) {"), card.indexOf("const quickBuy"));
 
-  it("carries no editor, toggle or second destination", () => {
+  it("carries no editor and no second destination", () => {
+    /*
+     * UX-01G HAT EINE ZEILE DIESER LISTE AUFGEHOBEN, und nur eine:
+     * `setCatalogVisible` stand hier, weil die Karte NICHTS schreiben
+     * durfte. Das Auge schreibt jetzt genau eine Sache — die Sichtbarkeit —
+     * über `setCatalogStatus` (`0152`), die vorhandene Aktion. Alles andere
+     * bleibt verboten: kein Namenseditor, kein Kartentyp, kein Bild, keine
+     * Notiz, kein zweiter Weg zur Detailseite.
+     */
     for (const forbidden of [
-      "InlineName", "VisibilityToggle", "CardTypeSelect", "ImageEditor", "FigureEditor",
-      "setCatalogVisible", "setDisplayNameOverride", "setCardType", "setImageOverride",
-      "setAdminNote", "nameSlot", "aria-pressed", "/admin/catalog/",
+      "InlineName", "CardTypeSelect", "ImageEditor", "FigureEditor",
+      "setDisplayNameOverride", "setCardType", "setImageOverride",
+      "setAdminNote", "nameSlot", "/admin/catalog/",
     ]) {
       expect(adminBranch, forbidden).not.toContain(forbidden);
       expect(actions, forbidden).not.toContain(forbidden);
@@ -380,36 +423,83 @@ describe("the admin card edits nothing itself", () => {
   it("sells nothing and collects nothing", () => {
     for (const forbidden of [
       "OfferLink", "onOpenOffers", "quickBuy", "cart", "Cart",
-      "onToggle", "setCollected", "initialCollected",
+      "onToggle", "setCollected", "initialCollected", "favoriteSlot",
     ]) {
       expect(adminBranch, forbidden).not.toContain(forbidden);
     }
-    // And the body is not a target at all.
-    expect(adminBranch).toContain("interactive={false}");
+    /* Und der Körper ist kein Ziel: die Kachel bekommt weder `onToggle`
+       noch `href` — der Weg zur Figur steht als Info-Marke in der Leiste,
+       wie bei jeder Rolle. */
+    expect(adminBranch).not.toContain("href=");
   });
 
-  it("has exactly one action, and it opens the dialog", () => {
-    expect(actions.match(/<button/g) ?? []).toHaveLength(1);
-    expect(actions).not.toContain("<Link");
-    expect(actions).not.toContain("<a ");
-    expect(adminBranch).toContain("<AdminEditAction");
-    expect(adminBranch.match(/<AdminEditAction/g) ?? []).toHaveLength(1);
-    expect(actions).toContain("onClick={onEdit}");
+  it("hat DREI Handlungen: Stift, Auge, Papierkorb — in dieser Reihenfolge", () => {
+    /*
+     * CAT-09 nimmt den Papierkorb dazu, und die Reihenfolge ist die, die der
+     * Betreiber genannt hat: Info → Bearbeiten → Sichtbarkeit → Löschen. Die
+     * Info-Marke gehört der Kachel (`figure-row.tsx`), die drei anderen
+     * dieser Datei.
+     */
+    expect(adminBranch).toContain("<AdminTileActions");
+    const stift = actions.indexOf("onClick={onEdit}");
+    const auge = actions.indexOf("onClick={umschalten}");
+    const korb = actions.indexOf("setFrage(true)");
+    expect(stift).toBeGreaterThan(-1);
+    expect(auge).toBeGreaterThan(stift);
+    expect(korb).toBeGreaterThan(auge);
+    /* Und der Papierkorb ist rot — die einzige Marke, die das ist. */
+    expect(actions).toContain("text-danger");
   });
 
-  it("writes nothing from the card, at all", () => {
-    // `card-actions.tsx` used to import a server action. It imports none now:
-    // the only thing it does is tell its parent that a button was pressed.
-    expect(actions).not.toContain('from "@/lib/admin/actions"');
-    expect(actions).not.toContain("useTransition");
+  it("der Papierkorb fragt, bevor er etwas tut", () => {
+    /*
+     * Sicherheitsregel 1 bis 3: ein Dialog mit Namen und SKY-ID, der sagt,
+     * dass die Figur DAUERHAFT verschwindet, und der eine ausdrückliche
+     * Bestätigung verlangt.
+     */
+    expect(actions).toContain('role="alertdialog"');
+    expect(actions).toContain("deleteConfirmTitle");
+    expect(actions).toContain("deleteConfirmBody");
+    expect(actions).toContain("deleteConfirmYes");
+    expect(actions).toContain("{skyId}");
+    /* Der Papierkorb selbst löscht NICHT — er öffnet die Frage. */
+    const korb = actions.slice(actions.indexOf("deleteFigureFor"));
+    expect(korb.slice(0, 400)).not.toContain("deleteFigure(skyId)");
+  });
+
+  it("und schreibt von der Kachel GENAU ZWEI Sachen — über vorhandene Aktionen", () => {
+    /*
+     * Die Sichtbarkeit (`0152`) und die Löschung (`0162`), beide über
+     * Serveraktionen, die ihr Recht in der DATENBANK prüfen:
+     * `admin_set_catalog_status` und `admin_delete_figure` fragen
+     * `is_platform_admin()` selbst. Keine zweite Geschäftslogik, kein
+     * eigenes `update`, kein `delete` im Browser, kein `router.refresh`.
+     */
+    expect(actions).toContain("import { deleteFigure, setCatalogStatus }");
+    expect(actions.match(/from "@\/lib\/admin\/actions"/g) ?? []).toHaveLength(1);
+    for (const andere of ["setCatalogVisible", "setCatalogGroup", "setCollected",
+                          "admin_set_catalog_status", "admin_delete_figure",
+                          "supabase", "createClient", "delete from"]) {
+      expect(actions, andere).not.toContain(andere);
+    }
     expect(actions).not.toContain("useRouter");
     expect(actions).not.toContain("router.refresh");
   });
 
-  it("still shows the figure's state, which is not an interaction", () => {
-    expect(card).toContain("muted={!visible}");
-    expect(card).toContain("<HiddenBadge />");
-    expect(actions).toContain("HiddenBadge");
+  it("der Zustand der Figur steht am Auge, nicht mehr als Abzeichen", () => {
+    /*
+     * `HiddenBadge` war das Abzeichen auf der klassischen Karte. Auf der
+     * Kachel sagt das Auge denselben Satz und kann ihn ändern — ein
+     * Abzeichen DANEBEN wäre dieselbe Aussage zweimal.
+     *
+     * DREI WERTE, ZWEI ZUSTÄNDE: ein ENTWURF wird hier nicht
+     * veröffentlicht (ADR-0151), das Auge ist auf ihm aus.
+     */
+    expect(actions).toContain("aria-pressed={sichtbar}");
+    expect(actions).toContain('status === "public"');
+    expect(actions).toContain('status === "draft"');
+    expect(actions).toContain("disabled={pending || entwurf}");
+    expect(card).not.toContain("muted={!visible}");
   });
 });
 
@@ -442,7 +532,15 @@ describe("a hidden figure stays in the operator's catalogue", () => {
     const uses = [...view.matchAll(/^.*catalogVisible.*$/gm)].map((m) => m[0].trim());
     expect(uses).toEqual([
       "visibility.get(figure.skyId) ?? figure.catalogVisible;",
-      "onVisibilityChange(skyId, draft.catalogVisible);",
+    ]);
+    /*
+     * Die Meldung des Dialogs läuft seit CAT-02B über den Status, nicht über
+     * das Boolean — und `visibleFor` ist dieselbe Rechnung, die `0152` in der
+     * Datenbank erzwingt. Auch sie ist einzeln aufgezählt.
+     */
+    const ausStatus = [...view.matchAll(/^.*visibleFor\(.*$/gm)].map((m) => m[0].trim());
+    expect(ausStatus).toEqual([
+      "onVisibilityChange(skyId, visibleFor(draft.catalogStatus));",
     ]);
   });
 });

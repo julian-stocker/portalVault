@@ -34,8 +34,12 @@ import {
   isValidPercentage,
 } from "@/lib/admin/inventory-model";
 import { USK_RATINGS, isDeliveryScope } from "@/lib/shop/delivery-scope";
-import { isOverridePath } from "@/lib/catalog/image";
+import { CATALOG_BUCKET, isOverridePath } from "@/lib/catalog/image";
+import { MERGE_FELDER, type MergeAuswahl } from "@/lib/admin/merge-candidates";
 import { createClient } from "@/lib/supabase/server";
+import { isCatalogStatus, type CatalogStatus } from "@/lib/catalog/catalog-status";
+import { asCatalogTypes, isCatalogType } from "@/lib/catalog/catalog-type";
+import { istUnbekannteFunktion } from "@/lib/admin/queries";
 import { de } from "@/lib/i18n/de";
 
 export type AdminResult = { ok: true } | { ok: false; message: string };
@@ -57,6 +61,44 @@ async function allowed(capability: Capability): Promise<boolean> {
   return capability === "platform" ? isPlatformAdmin() : canOperateSeller();
 }
 
+/**
+ * Was PostgREST an einem Fehler mitliefert.
+ *
+ * Alle vier Felder sind für die Ursache nötig: `code` ist der SQLSTATE
+ * beziehungsweise der `PGRST…`-Code, `message` der Satz aus `raise
+ * exception`, `details` und `hint` die Zusätze, die PostgREST bei einer
+ * nicht gefundenen Funktion schreibt.
+ */
+type RpcFehler = { code?: string; message?: string; details?: string; hint?: string };
+
+/**
+ * Den Fehler ins SERVERPROTOKOLL schreiben — und nur dorthin.
+ *
+ * WARUM ES DIESE FUNKTION GIBT. Bis CAT-05H hat `call()` den Fehler
+ * ERSATZLOS verworfen: `const { error } = await supabase.rpc(...)`, und wenn
+ * kein Zuordner ihn kannte, blieb „Das hat nicht geklappt." Beim ersten
+ * echten Merge-Versuch war das die einzige Information, die es gab — weder
+ * SQLSTATE noch Meldung, und damit kein Weg zur Ursache ausser Raten.
+ * Einen Fehler zu verschlucken ist schlimmer, als ihn hässlich anzuzeigen.
+ *
+ * WAS NICHT HINEINKOMMT: die WERTE der Argumente. `call()` bedient auch
+ * Handelsvorgänge, deren Argumente Kundendaten tragen; die Schlüssel sagen,
+ * welcher Aufruf es war, und mehr braucht die Ursachensuche nicht. Die
+ * Meldung der Datenbank wird vollständig protokolliert — das Protokoll ist
+ * serverseitig und nicht öffentlich —, aber sie erreicht die Oberfläche
+ * NIE unverändert.
+ */
+function protokolliere(fn: string, args: Record<string, unknown>, error: RpcFehler): void {
+  console.error("[admin-rpc] Abweisung", JSON.stringify({
+    fn,
+    argumentschluessel: Object.keys(args).sort(),
+    code: error.code ?? null,
+    message: error.message ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+  }));
+}
+
 async function call(
   fn: string,
   args: Record<string, unknown>,
@@ -65,26 +107,680 @@ async function call(
   /**
    * Turns one specific database refusal into a sentence worth reading.
    *
-   * Everything else stays `writeFailed`: an administrator does not need the
-   * error code, and a raw Postgres message is not a user interface. This is
-   * for refusals that are a rule of the product rather than a fault — the
-   * caller is being told what to do, not that something broke.
+   * Everything a mapper does not claim falls back — aber nicht mehr
+   * sprachlos: der Auffangtext nennt den SQLSTATE, damit der Betreiber
+   * etwas in der Hand hat, was im Protokoll wiederzufinden ist. Die rohe
+   * Meldung der Datenbank erreicht die Oberfläche nicht; sie kann Namen,
+   * Spaltennamen und Teile von Anweisungen enthalten.
    */
-  domainError?: (error: { code?: string; message?: string }) => string | null,
+  domainError?: (error: RpcFehler) => string | null,
 ): Promise<AdminResult> {
   if (!(await allowed(capability))) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
   const { error } = await supabase.rpc(fn, args);
   if (error) {
+    protokolliere(fn, args, error);
     const specific = domainError?.(error) ?? null;
-    return { ok: false, message: specific ?? de.admin.writeFailed };
+    if (specific !== null) return { ok: false, message: specific };
+    /* Kein Zuordner kannte ihn. Der Code hilft beim Nachsehen; die Meldung
+       bleibt im Protokoll. */
+    const code = typeof error.code === "string" && /^[A-Z0-9]{5,8}$/.test(error.code)
+      ? error.code : null;
+    return { ok: false,
+             message: code === null ? de.admin.writeFailed
+                                    : de.admin.writeFailedCode(code) };
   }
 
   for (const path of paths) revalidatePath(path);
   return { ok: true };
 }
 
+/**
+ * Der redaktionelle Status eines Katalogeintrags (CAT-02B).
+ *
+ * Eine RPC, ein UPDATE, beide Spalten — `admin_set_catalog_status` schreibt
+ * Status und Sichtbarkeit zusammen, damit der CHECK aus `0152` nicht einmal
+ * zwischenzeitlich verletzt ist. Journalisiert wird vom Trigger, nicht von
+ * hier; es gibt keinen Freigabeschritt und keinen zweiten Akteur.
+ *
+ * Dieselben Revalidierungspfade wie bei der Sichtbarkeit: ein Statuswechsel
+ * ändert, was auf `/` und in der Sammlung zu sehen ist.
+ */
+export async function setCatalogStatus(skyId: string, status: CatalogStatus): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!isCatalogStatus(status)) return { ok: false, message: de.admin.unknownFigure };
+  return call(
+    "admin_set_catalog_status",
+    { p_sky_id: skyId, p_status: status },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+  );
+}
+
+/**
+ * Einen importierten Entwurf in einer bestehenden Figur aufgehen lassen
+ * (CAT-05, vereinfacht in CAT-05D, feldweise auswählbar in CAT-05F).
+ *
+ * DIE AUSWAHL IST ECHT. Der Dialog zeigt jede anstehende Änderung als eigene
+ * Tabellenzeile mit Kästchen; `auswahl` ist genau das, was angekreuzt
+ * blieb — und zwar samt den Werten, die dabei auf dem Bildschirm standen.
+ * `0156` vergleicht sie mit dem, was es selbst rechnet, und bricht bei jeder
+ * Abweichung ab. Ein Kästchen, das nur die Anzeige ändert, wäre eine
+ * Behauptung.
+ *
+ * DIE ALLOWLIST STEHT IM SERVER. Die Prüfung hier ist Höflichkeit — eine
+ * frühe, verständliche Meldung statt einer SQL-Ausnahme. Verbindlich ist
+ * `c_allow` in `0156`, denn ein Aufruf muss nicht aus diesem Formular kommen.
+ */
+export async function mergeDraftIntoFigure(
+  draftId: string,
+  targetId: string,
+  /** Die angekreuzten Felder mit den angezeigten Werten. */
+  auswahl: MergeAuswahl,
+  /** Der Bildpfad des Entwurfs — nur nötig, wenn das Bild ausgewählt ist. */
+  draftImagePath: string | null = null,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(draftId) || !SKY_ID.test(targetId)) {
+    return { ok: false, message: de.admin.unknownFigure };
+  }
+  if (draftId === targetId) return { ok: false, message: de.admin.mergeSameRow };
+
+  const felder = Object.keys(auswahl);
+  if (felder.length === 0) return { ok: false, message: de.admin.mergeNoFields };
+  if (felder.some((f) => !(MERGE_FELDER as readonly string[]).includes(f))) {
+    return { ok: false, message: de.admin.mergeFieldRejected };
+  }
+  /* SERIE UND KATEGORIE SIND EIN FELD — halb ausgewählt weist `0156` ab. */
+  if (("series_code" in auswahl) !== ("category_id" in auswahl)) {
+    return { ok: false, message: de.admin.mergeLinkedHalf };
+  }
+  if (!(await allowed("platform"))) return { ok: false, message: de.admin.notAllowed };
+
+  /*
+   * DAS BILD ZUERST, DIE DATENBANK DANACH — UND NUR, WENN ES AUSGEWÄHLT IST.
+   *
+   * Beide Systeme teilen keine Transaktion. Diese Reihenfolge lässt nur zwei
+   * Ausgänge zu: alles fertig, oder eine Kopie im Speicher ohne
+   * Datenbankänderung — ein verwaistes Objekt von ein paar Kilobyte.
+   * Umgekehrt könnte die Karte auf ein Objekt zeigen, das es nicht gibt, und
+   * das wäre ein fehlendes Bild.
+   *
+   * Ist das Kästchen leer, wird NICHT kopiert: kein Speichervorgang, kein
+   * neuer Pfad, das bisherige Bild bleibt. `0156` weist einen Pfad ohne
+   * ausgewähltes Bild ausdrücklich ab, damit beide Seiten dasselbe meinen.
+   *
+   * Die Kopie ist inhaltsadressiert: derselbe Hash, neuer Ordner. Ein
+   * zweiter Versuch legt dieselben Bytes an dieselbe Stelle — ein `409` ist
+   * deshalb kein Fehler, sondern der Beweis der Wiederholbarkeit.
+   *
+   * DAS ALTE OBJEKT BLEIBT. Weder das des Entwurfs noch das bisherige der
+   * Zielfigur wird gelöscht: ein verwaistes Objekt ist billiger als ein
+   * verlorenes Bild (dieselbe Regel wie in `image-actions.ts`).
+   */
+  let zielPfad: string | null = null;
+  if ("image_override_path" in auswahl) {
+    if (draftImagePath === null || draftImagePath.trim() === "") {
+      return { ok: false, message: de.admin.mergeImageMissing };
+    }
+    const datei = draftImagePath.slice(draftImagePath.indexOf("/") + 1);
+    if (!/^[0-9a-f]{16}\.(webp|png|jpg)$/.test(datei)) {
+      return { ok: false, message: de.admin.imageFailed };
+    }
+    zielPfad = `${targetId}/${datei}`;
+    /* Was der Server prüft, muss die Vorschau versprochen haben. */
+    if (auswahl.image_override_path?.new !== zielPfad) {
+      return { ok: false, message: de.admin.mergeStale };
+    }
+    const supabase = await createClient();
+    const { error } = await supabase.storage.from(CATALOG_BUCKET)
+      .copy(draftImagePath, zielPfad);
+    /* `Duplicate`/409: die Kopie liegt schon — genau das Richtige. */
+    if (error && !/duplicate|exists|409/i.test(error.message ?? "")) {
+      return { ok: false, message: de.admin.mergeImageFailed };
+    }
+  }
+
+  return call(
+    "admin_merge_draft",
+    {
+      p_draft: draftId, p_target: targetId, p_image_path: zielPfad,
+      p_selection: auswahl,
+    },
+    ["/admin/catalog", `/admin/catalog/${targetId}`, `/admin/catalog/${draftId}`, "/"],
+    "platform",
+    (error) => {
+      /*
+       * JEDE ABWEISUNG VON `0156` HAT HIER EINEN SATZ (CAT-05H).
+       *
+       * Vorher hatten sechs von dreizehn keinen, und die fielen in den
+       * Auffangtext „Das hat nicht geklappt." — genau das hat den ersten
+       * echten Merge-Versuch unerklärbar gemacht. Eine Abweisung, die eine
+       * REGEL ist, muss der Oberfläche sagen, was zu tun ist; nur ein
+       * echter Fehler darf den Code zeigen.
+       *
+       * Die Reihenfolge ist nicht beliebig: `nicht ausgewaehlt` steckt auch
+       * in der Bildpfadmeldung, deshalb wird die spezifischere zuerst
+       * gefragt.
+       */
+      /* `0156` fehlt — dann gibt es die Vierparameterfassung nicht. */
+      if (istUnbekannteFunktion(error)) return de.admin.mergeNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      /* Die Abweisungen, die eine Anweisung sind und kein Fehler. */
+      if (text.includes("zeigen noch Daten")) return de.admin.mergeBlocked;
+      if (text.includes("veraltet") || text.includes("seit der Vorschau")) {
+        return de.admin.mergeStale;
+      }
+      if (text.includes("kein uebernehmbares Feld")) return de.admin.mergeFieldRejected;
+      if (text.includes("zusammengesetzter Fremdschluessel")) return de.admin.mergeLinkedHalf;
+      if (text.includes("kein Feld zur Übernahme")) return de.admin.mergeNoFields;
+      if (text.includes("gehoert nicht zu")) return de.admin.mergeImagePathForeign;
+      if (text.includes("kein Bildpfad mit")) return de.admin.mergeImageMissing;
+      if (text.includes("nicht ausgewaehlt")) return de.admin.mergeImagePathUnselected;
+      if (text.includes("gibt es nicht") || text.includes("dieselbe Zeile")) {
+        return de.admin.mergeRowGone;
+      }
+      if (text.includes("ist kein Entwurf") || text.includes("ist selbst ein Entwurf")) {
+        return de.admin.mergeNotADraft;
+      }
+      if (text.includes("muss ein Objekt sein")) return de.admin.mergeSelectionShape;
+      if (text.includes("mehrspaltigen Fremdschluessel")) {
+        return de.admin.mergeReferencesUnsupported;
+      }
+      /*
+       * „unbekanntes Planfeld" bleibt BEWUSST ohne eigenen Satz. Es ist kein
+       * Eingabefehler, sondern ein Fehler in `0156` selbst — ein zehntes
+       * Planfeld ohne Zweig in der Übernahme. Dafür ist der Auffangtext mit
+       * Code und das Serverprotokoll genau das Richtige: der Betreiber kann
+       * damit nichts anfangen, ich schon.
+       */
+      return null;
+    },
+  );
+}
+
+/* =========================================================================
+ * CAT-06 — die drei Importwege
+ *
+ * Weg A ist `mergeDraftIntoFigure` oben: eine bestehende Figur aktualisieren.
+ * Weg B und C stehen hier. Alle drei bedienen dieselbe Frage — was soll aus
+ * diesem Entwurf werden —, und keine erfindet einen zweiten Mechanismus:
+ *
+ *   A  aktualisieren   `admin_merge_draft`        (0154/0156/0157)
+ *   B  als Variante    `admin_publish_as_variant` (0158) = C + Familie, atomar
+ *   C  eigenständig    `admin_set_catalog_status` (0152), unverändert
+ *
+ * WEG C BRAUCHTE KEINE NEUE FUNKTION. Ein Entwurf hat seine SKY-ID und
+ * seinen Slug schon; veröffentlichen heißt, den Status zu setzen. Das kann
+ * `setCatalogStatus` seit CAT-02B, und `publishDraftStandalone` ist nur der
+ * Name, unter dem der Dialog es aufruft — damit der Bestätigungstext die
+ * Handlung benennt und nicht ein Auswahlfeld.
+ * ====================================================================== */
+
+/**
+ * Weg C — den Entwurf als eigenständige Figur veröffentlichen.
+ *
+ * Keine Zielsuche, keine Familie, keine Änderungstabelle. Die Figur behält
+ * alles, was sie hat, und erscheint ab sofort in Katalog, Sammlung und Shop.
+ */
+export async function publishDraftStandalone(skyId: string): Promise<AdminResult> {
+  return setCatalogStatus(skyId, "public");
+}
+
+/**
+ * Weg B — den Entwurf als Variante einer Figurenfamilie veröffentlichen.
+ *
+ * ZUORDNEN UND VERÖFFENTLICHEN IN EINER TRANSAKTION. `0158` tut beides in
+ * einem Funktionsrumpf: eine veröffentlichte Figur ohne Familie stünde
+ * sichtbar an der falschen Stelle im Katalog, eine zugeordnete
+ * unveröffentlichte wäre ein halber Vorgang.
+ *
+ * DIE GRUNDFIGUR WIRD NICHT ABGESCHRIEBEN. Die Familie ist eine Zuordnung,
+ * kein Datensatz, aus dem Felder kopiert werden — der Entwurf behält Namen,
+ * Bild, Edition, SKY-ID und Slug. „Chrome Spyro" bleibt „Chrome Spyro".
+ */
+export async function publishDraftAsVariant(
+  skyId: string,
+  characterId: number,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!Number.isSafeInteger(characterId) || characterId <= 0) {
+    return { ok: false, message: de.admin.familyUnknown };
+  }
+  return call(
+    "admin_publish_as_variant",
+    { p_sky_id: skyId, p_character_id: characterId },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.familyNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("braucht eine Familie")) return de.admin.familyRequired;
+      if (text.includes("Familie mit der id")) return de.admin.familyUnknown;
+      if (text.includes("gibt es nicht")) return de.admin.mergeRowGone;
+      if (text.includes("ist kein Entwurf")) return de.admin.publishNotADraft;
+      return null;
+    },
+  );
+}
+
+/* =========================================================================
+ * CAT-07 — die Basisfigur
+ *
+ * ZWEI EBENEN, NICHT EINE. `setFigureCharacter` unten ordnet eine FAMILIE
+ * zu — denselben Charakter serienübergreifend. Die beiden hier ordnen eine
+ * BASISFIGUR zu: eine konkrete Katalogzeile derselben Serie, deren Variante
+ * die Figur ist. `Elite Boomer` und `Boomer` sind derselbe Charakter und
+ * keine Variante voneinander; nur zwei Ebenen können das unterscheiden.
+ * ====================================================================== */
+
+/**
+ * Die Basisfigur einer Figur setzen, ändern — oder mit `null` lösen.
+ *
+ * SIE GILT FÜR JEDE FIGUR, nicht nur für Entwürfe (CAT-07): eine Zuordnung
+ * wird falsch, wird nachgeholt, wird zurückgenommen, und das muss an einer
+ * längst veröffentlichten Figur genauso gehen.
+ *
+ * DIE FAMILIE KOMMT MIT, ABER NIE GEGEN EINE VORHANDENE. `0159` übernimmt
+ * sie aus der Basisfigur, wenn die Variante keine hat; widersprechen sich
+ * beide, bricht es ab und nennt beide. `erzeugeFamilie` legt nur dann eine
+ * neue an, wenn WEDER Variante NOCH Basisfigur eine haben — und nur, wenn
+ * der Bediener es ausdrücklich bestätigt hat.
+ */
+export async function setVariantBase(
+  skyId: string,
+  baseSkyId: string | null,
+  erzeugeFamilie = false,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (baseSkyId !== null && !SKY_ID.test(baseSkyId)) {
+    return { ok: false, message: de.admin.baseUnknown };
+  }
+  if (baseSkyId === skyId) return { ok: false, message: de.admin.baseSelf };
+  return call(
+    "admin_set_variant_base",
+    { p_sky_id: skyId, p_base_sky_id: baseSkyId, p_create_family: erzeugeFamilie },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+    baseFehler,
+  );
+}
+
+/**
+ * Weg B — den Entwurf als Variante einer Basisfigur veröffentlichen.
+ *
+ * ZUORDNEN UND VERÖFFENTLICHEN IN EINER TRANSAKTION (`0159`). Eine
+ * veröffentlichte Variante ohne Basisfigur stünde sichtbar an der falschen
+ * Stelle im Katalog; eine zugeordnete unveröffentlichte wäre ein halber
+ * Vorgang. Von der Basisfigur wird **kein Feld** abgeschrieben — der
+ * Entwurf behält Namen, Bild, Edition, SKY-ID und Slug.
+ */
+export async function publishDraftWithBase(
+  skyId: string,
+  baseSkyId: string,
+  erzeugeFamilie = false,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!SKY_ID.test(baseSkyId)) return { ok: false, message: de.admin.baseUnknown };
+  if (baseSkyId === skyId) return { ok: false, message: de.admin.baseSelf };
+  return call(
+    "admin_publish_with_base",
+    { p_sky_id: skyId, p_base_sky_id: baseSkyId, p_create_family: erzeugeFamilie },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+    baseFehler,
+  );
+}
+
+/**
+ * Weg B ohne Frage an den Bediener (`0161`, CAT-08 Stufe 1).
+ *
+ * DER UNTERSCHIED ZU `publishDraftWithBase`: es gibt kein Kennzeichen mehr.
+ * „Soll eine Familie angelegt werden?" ist keine fachliche Frage, sondern
+ * eine Folge daraus, dass der Bediener eine Basisfigur gewählt hat — und die
+ * Datenbank kann sie besser beantworten als ein Formular:
+ *
+ *   Basisfigur hat eine Familie  → sie wird übernommen
+ *   nur die Variante hat eine    → sie bleibt, die Basisfigur unberührt
+ *   keine von beiden             → die Familie mit dem NAMEN der Basisfigur
+ *                                  wird gesucht, bestätigt und benutzt —
+ *                                  oder angelegt
+ *   verschiedene                 → Abbruch, nichts wird überschrieben
+ *
+ * `publishDraftWithBase` BLEIBT: `0159` ist unverändert gültig, und eine
+ * Oberfläche, die beides kann, ist nicht das Problem — eine Datenbank mit
+ * zwei Schreibwegen wäre es.
+ */
+export async function publishDraftVariantAuto(
+  skyId: string,
+  baseSkyId: string,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (!SKY_ID.test(baseSkyId)) return { ok: false, message: de.admin.baseUnknown };
+  if (baseSkyId === skyId) return { ok: false, message: de.admin.baseSelf };
+  return call(
+    "admin_publish_variant_auto",
+    { p_sky_id: skyId, p_base_sky_id: baseSkyId },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+    baseFehler,
+  );
+}
+
+/**
+ * Den Marktwert setzen oder auf „Preis offen" zurücknehmen (`0162`, CAT-09).
+ *
+ * DER GESPEICHERTE WERT, NICHT DER ANGEZEIGTE. Der Katalog druckt
+ * `market_price × (1 + Zuschlag)` — gerechnet im letzten Moment, nie
+ * gespeichert (`src/lib/catalog/market-boost.ts`). Wer den gedruckten Betrag
+ * zurückschreibt, hat den Zuschlag beim nächsten Lesen zweimal drin, und
+ * zwar jedes Mal wieder. Diese Aktion nimmt deshalb den gespeicherten Wert,
+ * und das Eingabefeld der Kachel ist mit ihm vorbelegt.
+ *
+ * `null` HEISST „PREIS OFFEN" UND NICHT NULL EURO (ADR-0010). Ein leeres
+ * Feld schreibt `null`; eine 0 weist die Datenbank mit einem Satz ab.
+ */
+export async function setMarketPrice(
+  skyId: string,
+  price: number | null,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (price !== null && (!Number.isFinite(price) || price <= 0)) {
+    return { ok: false, message: de.admin.priceNotAPrice };
+  }
+  return call(
+    "admin_set_market_price",
+    /* Auf zwei Stellen gerundet, weil die Spalte `numeric(10,2)` ist — und
+       in Zehntelcents, damit `4,565` nicht zu `4,56` abgeschnitten wird. */
+    { p_sky_id: skyId, p_price: price === null ? null : Math.round(price * 100) / 100 },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection", "/shop"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.priceNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("kein Preis")) return de.admin.priceNotAPrice;
+      if (text.includes("zu gross")) return de.admin.priceTooBig;
+      if (text.includes("gibt es nicht")) return de.admin.unknownFigure;
+      return null;
+    },
+  );
+}
+
+/**
+ * Eine Katalogzeile löschen, auf die nichts zeigt (`0162`, CAT-09).
+ *
+ * DIE PRÜFUNG STEHT IN DER DATENBANK, nicht hier. `admin_delete_figure`
+ * zählt jeden Fremdschlüssel aus `pg_constraint`, nennt die vier
+ * `ON DELETE CASCADE`-Schlüssel einzeln, fragt `order_lines.sky_id` — die
+ * einzige SKY-ID-Spalte ohne Schlüssel — und bricht bei jeder Abhängigkeit
+ * vollständig ab. Diese Funktion reicht die Meldung durch, weil sie den
+ * GRUND trägt; sie nennt Tabellennamen und Zeilenzahlen, keine Käuferdaten.
+ */
+/**
+ * DIE TYPMENGE EINER FIGUR (CAT-10, `0163`).
+ *
+ * Sie ERSETZT die Menge — das ist, was das Formular meint, wenn es Kästchen
+ * schickt. Jeder unbekannte Wert wird hier schon abgewiesen, damit die
+ * Meldung den Wert nennt und nicht die Constraint.
+ *
+ * SIE SCHREIBT KEINE KARTENKUNST. `card_type` ist eine eigene Eigenschaft
+ * und hat ihren eigenen Weg (`setCardType`); ein Type ändert sie nicht.
+ */
+export async function setFigureTypes(
+  skyId: string,
+  types: readonly string[],
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (types.some((t) => !isCatalogType(t))) {
+    return { ok: false, message: de.admin.typeUnknown };
+  }
+  return call(
+    "admin_set_figure_types",
+    { p_sky_id: skyId, p_types: asCatalogTypes(types) },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection", "/shop"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.typeNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("ist kein Type")) return de.admin.typeUnknown;
+      if (text.includes("gibt es nicht")) return de.admin.unknownFigure;
+      return null;
+    },
+  );
+}
+
+/**
+ * WELCHER TYPE ALS BANNER ERSCHEINT (CAT-10, `0163`).
+ *
+ * `null` heißt „–" und ist eine **Entscheidung**: die Datenbank merkt sie in
+ * `visible_type_decided`, damit der Prioritätsvorschlag sie nicht
+ * überschreibt und sie nach einem Neuladen noch dasteht.
+ *
+ * SIE ÄNDERT DIE MENGE NICHT. Ein Type, der der Figur nicht zugeordnet ist,
+ * wird abgewiesen — zuordnen geht im Bearbeiten-Dialog, und das ist die
+ * Trennung, die das Dropdown auf der Kachel erst ungefährlich macht.
+ */
+export async function setVisibleType(
+  skyId: string,
+  type: string | null,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (type !== null && !isCatalogType(type)) {
+    return { ok: false, message: de.admin.typeUnknown };
+  }
+  return call(
+    "admin_set_visible_type",
+    { p_sky_id: skyId, p_type: type },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection", "/shop"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.typeNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("nicht zugeordnet")) return de.admin.typeNotAssigned;
+      if (text.includes("gibt es nicht")) return de.admin.unknownFigure;
+      return null;
+    },
+  );
+}
+
+export async function deleteFigure(skyId: string): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  return call(
+    "admin_delete_figure",
+    { p_sky_id: skyId },
+    ["/admin/catalog", "/", "/collection", "/shop", "/zubehoer"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.deleteNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("Variante(n) als Basisfigur")) return de.admin.deleteBlockedBase;
+      if (text.includes("Bestellzeile")) return de.admin.deleteBlockedOrder;
+      if (text.includes("zeigen noch Daten")) {
+        /* Der Grund ist die Liste der Tabellen — sie steht im Serversatz,
+           und sie ist das Einzige, was dem Bediener weiterhilft. */
+        const m = /zeigen noch Daten: ([^.]*)/.exec(text);
+        return de.admin.deleteBlocked(m === null ? "" : m[1].trim());
+      }
+      if (text.includes("gibt es nicht")) return de.admin.unknownFigure;
+      /* Der Fremdschlüssel als letzte Schicht — wenn jemand zwischen
+         Prüfung und `delete` eine Zeile angelegt hat. */
+      if (error.code === "23503") return de.admin.deleteRaced;
+      return null;
+    },
+  );
+}
+
+/**
+ * Die Abweisungen von `0159`, als Sätze.
+ *
+ * Eine Stelle für beide Aktionen: sie rufen dieselben Prüfungen auf, und
+ * zwei Zuordner wären zwei Orte, an denen ein neuer `raise` vergessen wird.
+ */
+function baseFehler(error: { code?: string; message?: string }): string | null {
+  if (istUnbekannteFunktion(error)) return de.admin.baseNotEnabled;
+  if (error.code === "42501") return de.admin.mergeNotAdmin;
+  const text = error.message ?? "";
+  /*
+   * DAS VETO AUS `0161` ZUERST. Es nennt im Meldungstext den Namen des
+   * Mitglieds, das nicht passt — und diese Auskunft ist der ganze Zweck der
+   * Meldung. Sie wird deshalb DURCHGEREICHT und nicht gegen einen allgemeinen
+   * Satz getauscht; `0161` gibt dort nur Katalognamen aus, keine internen
+   * Daten.
+   */
+  if (text.includes("nicht vereinbar")) {
+    return de.admin.baseFamilyNotConfirmed(familienSatz(text));
+  }
+  if (text.includes("hat keinen Namen")) return de.admin.baseFamilyNoName;
+  if (text.includes("DERSELBEN Serie") || text.includes("steht in Serie")) {
+    return de.admin.baseWrongSeries;
+  }
+  if (text.includes("ist selbst eine Variante")) return de.admin.baseIsVariant;
+  if (text.includes("zeigen schon Varianten") || text.includes("zeigen")) {
+    return de.admin.baseHasVariants;
+  }
+  if (text.includes("Familie") && text.includes("klaeren")) return de.admin.baseFamilyConflict;
+  if (text.includes("eigene Variante")) return de.admin.baseSelf;
+  if (text.includes("braucht eine Basisfigur")) return de.admin.baseRequired;
+  if (text.includes("ist kein Entwurf")) return de.admin.publishNotADraft;
+  if (text.includes("gibt es nicht")) return de.admin.baseUnknown;
+  return null;
+}
+
+/**
+ * Aus der Servermeldung des Vetos den Teil holen, der dem Bediener hilft.
+ *
+ * `0161` schreibt: `es gibt schon eine Familie "Zook" (id 4), aber zu ihr
+ * gehoert SKY-9133 "Cynder" — ein Name, der mit "Zook" nicht vereinbar ist.`
+ * Gebraucht wird daraus die SKY-ID mit dem Namen; die interne `id` der
+ * Familie gehört nicht in die Oberfläche.
+ *
+ * DIE REIHENFOLGE IST ABSICHT: `SKY-0149 Chop Chop`, nicht
+ * `Chop Chop (SKY-0149)`. Die Klammerform ist im Projekt die Schreibweise
+ * eines VARIANTENNAMENS und als Mechanismus abgeschafft (CAT-06); ein
+ * Fehlertext, der sie nachbaut, wäre genau das Muster, das
+ * `family-sort.test.ts` sucht — und ein Leser könnte ihn für einen
+ * Figurennamen halten.
+ */
+function familienSatz(text: string): string {
+  const m = /gehoert (SKY-\d{4}) "([^"]+)"/.exec(text);
+  return m === null ? "" : `${m[1]} ${m[2]}`;
+}
+
+/**
+ * Eine Figur einer Familie zuordnen — oder die Zuordnung entfernen (`null`).
+ *
+ * SIE GILT FÜR JEDE FIGUR, nicht nur für Entwürfe: eine Familienzuordnung
+ * ist eine redaktionelle Korrektur und muss auch an einer längst
+ * veröffentlichten Figur möglich sein (CAT-06 §7).
+ *
+ * `0158` schreibt dabei EINE Spalte. Angebote, Sammlungen, Lager, Favoriten
+ * und Bestellungen hängen an der SKY-ID und bleiben unberührt; was sich
+ * ändert, ist allein, womit die Figur zusammen angezeigt wird.
+ */
+export async function setFigureCharacter(
+  skyId: string,
+  characterId: number | null,
+): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  if (characterId !== null
+      && (!Number.isSafeInteger(characterId) || characterId <= 0)) {
+    return { ok: false, message: de.admin.familyUnknown };
+  }
+  return call(
+    "admin_set_character",
+    { p_sky_id: skyId, p_character_id: characterId },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.familyNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("Familie mit der id")) return de.admin.familyUnknown;
+      if (text.includes("gibt es nicht")) return de.admin.mergeRowGone;
+      return null;
+    },
+  );
+}
+
+/**
+ * Eine neue Figurenfamilie anlegen — nur der Name.
+ *
+ * Element, Spezies, Rolle und Beschreibung bleiben leer: das ist kuratierte
+ * Arbeit und gehört in `data/characters/characters.json`, nicht in ein
+ * Formular, das sie raten müsste. `0158` weist einen Namen ab, den es schon
+ * gibt, und nennt die bestehende Familie — eine zweite „Spyro"-Familie wäre
+ * genau die Art Fehler, nach der niemand sucht.
+ */
+export async function createCharacterFamily(name: string): Promise<AdminResult> {
+  const sauber = name.trim();
+  if (sauber === "") return { ok: false, message: de.admin.familyNameMissing };
+  if (sauber.length > 120) return { ok: false, message: de.admin.familyNameLong };
+  return call(
+    "admin_create_character",
+    { p_name: sauber },
+    ["/admin/catalog"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.familyNotEnabled;
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      const text = error.message ?? "";
+      if (text.includes("gibt es schon")) return de.admin.familyDuplicate;
+      if (text.includes("braucht einen Namen")) return de.admin.familyNameMissing;
+      if (text.includes("zu lang")) return de.admin.familyNameLong;
+      return null;
+    },
+  );
+}
+
+/**
+ * Einen importierten Entwurf verwerfen (CAT-05D).
+ *
+ * DIE EINZIGE STELLE IM PRODUKT, DIE EINEN KATALOGEINTRAG LÖSCHT. Der Import
+ * deaktiviert sonst über `is_active` (`0001`), und das aus gutem Grund — an
+ * einer SKY-ID hängen Sammlungen, Favoriten, Lager und Bestellungen.
+ *
+ * Die drei Riegel stehen in `0155` und nicht hier: Entwurf, `source = admin`,
+ * keine Verweise. Diese Funktion macht daraus einen deutschen Satz.
+ */
+export async function discardDraft(skyId: string): Promise<AdminResult> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  return call(
+    "admin_discard_draft",
+    { p_draft: skyId },
+    ["/admin/catalog", `/admin/catalog/${skyId}`, "/"],
+    "platform",
+    (error) => {
+      if (istUnbekannteFunktion(error)) return de.admin.mergeNotEnabled;
+      const text = error.message ?? "";
+      if (error.code === "42501") return de.admin.mergeNotAdmin;
+      if (text.includes("zeigen noch Daten")) return de.admin.discardBlocked;
+      if (text.includes("ist kein Entwurf")) return de.admin.discardNotDraft;
+      if (text.includes("source=")) return de.admin.discardNotAdmin;
+      /* CAT-05H — die beiden, die vorher in den Auffangtext fielen. */
+      if (text.includes("stand schon einmal oeffentlich")) return de.admin.discardWasPublic;
+      if (text.includes("gibt es nicht")) return de.admin.discardGone;
+      if (text.includes("mehrspaltigen Fremdschluessel")) {
+        return de.admin.mergeReferencesUnsupported;
+      }
+      return null;
+    },
+  );
+}
+
+/**
+ * Der alte Zwei-Zustands-Weg, und er BLEIBT (CAT-02B).
+ *
+ * Nicht aus Nostalgie: Zubehör- und Betriebsflächen stellen weiterhin die
+ * Frage „öffentlich oder nicht", und der Trigger aus `0152` setzt den Status
+ * dabei mit. Eine Funktion zu entfernen, die noch aufgerufen wird, wäre eine
+ * Änderung mit Reichweite.
+ */
 export async function setCatalogVisible(skyId: string, visible: boolean): Promise<AdminResult> {
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
   return call(

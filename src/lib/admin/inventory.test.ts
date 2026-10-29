@@ -135,10 +135,47 @@ describe("price and listing", () => {
   });
 
   it("never touch the catalog's market price", () => {
-    // Read from the code: the comments explain precisely this separation.
-    for (const path of [ACTIONS, QUERIES]) {
-      expect(code(path), path).not.toMatch(/market_price|admin_set_market/);
+    /*
+     * DIE GRENZE IST DIESELBE, DIE PRUEFUNG IST SCHAERFER GEWORDEN — CAT-09.
+     *
+     * Bis zum 2026-10-29 hiess sie: in `actions.ts` darf `market_price`
+     * NIRGENDS vorkommen. Das war eine bequeme Fassung einer anderen Regel.
+     * Die Regel ist: der LAGERWEG schreibt den Marktwert des Katalogs nicht
+     * — `set_shop_listing` setzt einen SHOPPREIS, und das sind zwei
+     * verschiedene Zahlen (ADR-0048).
+     *
+     * Seit CAT-09 gibt es in derselben Datei eine Handlung, die den
+     * Marktwert SEHR WOHL schreibt: `setMarketPrice`, die Inlinebearbeitung
+     * an der Adminkachel, hinter `isPlatformAdmin()` und
+     * `admin_set_market_price` (`0162`). Sie ist kein Lagerweg.
+     *
+     * Also wird jetzt gemessen, WO die Nennung steht, statt dass sie
+     * verboten ist: jede einzelne muss innerhalb von `setMarketPrice`
+     * liegen. Eine Nennung in `setListing`, `bookMovement` oder
+     * `setSaleRelease` faellt damit genauso auf wie vorher — und zwar
+     * genauer.
+     */
+    const roh = code(ACTIONS);
+    const anfang = roh.indexOf("export async function setMarketPrice(");
+    expect(anfang, "setMarketPrice fehlt").toBeGreaterThan(-1);
+    const ende = roh.indexOf("export async function", anfang + 10);
+    for (const treffer of roh.matchAll(/market_price|admin_set_market|marketPrice/g)) {
+      expect(treffer.index, `"${treffer[0]}" steht ausserhalb von setMarketPrice`)
+        .toBeGreaterThanOrEqual(anfang);
+      expect(treffer.index, `"${treffer[0]}" steht ausserhalb von setMarketPrice`)
+        .toBeLessThan(ende);
     }
+    /* Und der LAGERWEG selbst nennt sie nicht — die drei Handlungen, die
+       einen Preis oder eine Freigabe schreiben, einzeln nachgesehen. */
+    for (const name of ["setListing", "setSaleRelease", "bookMovement"]) {
+      const a = roh.indexOf(`export async function ${name}(`);
+      expect(a, name).toBeGreaterThan(-1);
+      const e = roh.indexOf("export async function", a + 10);
+      expect(roh.slice(a, e === -1 ? undefined : e), name)
+        .not.toMatch(/market_price|marketPrice/);
+    }
+    /* Die Lagerabfragen bleiben, wie sie waren: keine Nennung, gar keine. */
+    expect(code(QUERIES), QUERIES).not.toMatch(/market_price|admin_set_market/);
     // The card reads `figure.marketPrice` to display it beside the shop
     // price — reading is the point, writing is what must not exist.
     expect(code(CARD)).not.toMatch(/marketPrice\s*[:=][^=]/);
