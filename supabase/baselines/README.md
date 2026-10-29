@@ -18,6 +18,12 @@ enthalten Zählstände und Prüfsummen — keine Namen, keine Adressen.
 Die Laufprotokolle liegen dagegen unter `supabase/log/staging/` und sind
 ungetrackt.
 
+**Niemals eine Akte von Hand löschen.** Soll vor einer noch nicht
+angewendeten Migration frisch gemessen werden, dann
+`npm run db:migrate:staging -- <nummer> --refreeze`: der Runner legt die
+alte Akte nach `archiv/` und friert danach neu ein. Was dort liegt und
+warum, steht in `archiv/README.md`.
+
 | Datei | Herkunft |
 |---|---|
 | `baseline-0146.json` | **nachgetragen** — `0146` lief von Hand, bevor es den Runner gab. Die Werte sind die Zeilen 900/901 aus genau dem Preflight, der vor der Migration lief |

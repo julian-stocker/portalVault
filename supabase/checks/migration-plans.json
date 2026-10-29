@@ -122,6 +122,240 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0152": {
+      "zweck": "Der redaktionelle Katalogstatus mit drei Werten (CAT-02B, ADR-0151)",
+      "preflight": "0152_preflight.sql",
+      "lauf": "staging-0152.sql",
+      "postflight": "0152_postflight.sql",
+      "angewendet": {
+        "beschreibung": "skylanders.catalog_status steht. Diese Probe fragt das EREIGNIS und nicht nur einen Zustand: die Spalte entsteht genau einmal, es gibt keinen Weg, sie anders zu bekommen, und 0152 ist deshalb nicht wiederholbar. Antwortet sie JA, ist 0152 hier angewendet - der Runner laesst dann nur noch --resume zu, und das ist richtig.",
+        "sql": "select exists (select 1 from pg_attribute a where a.attrelid = to_regclass('public.skylanders') and a.attname = 'catalog_status' and not a.attisdropped) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0153": {
+      "zweck": "catalog_status kommt in die Plattformsicherung (CAT-02C Teil B) - setzt 0144 und 0152 voraus",
+      "preflight": "0153_preflight.sql",
+      "lauf": "staging-0153.sql",
+      "postflight": "0153_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Der Rumpf von system_platform_export() traegt den Abdruck 92c48444f99b9e294f9703d0c0ddeaa8. Die Migration ersetzt genau einen Funktionsrumpf; der Abdruck IST die Spur, und ein zweiter Lauf prallt an ihm ab.",
+        "sql": "select (select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')) = '92c48444f99b9e294f9703d0c0ddeaa8' as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0154": {
+      "zweck": "Zusammenfuehrung eines Entwurfs mit einer bestehenden Figur (CAT-05)",
+      "preflight": "0154_preflight.sql",
+      "lauf": "staging-0154.sql",
+      "postflight": "0154_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_merge_draft(text,text,text) steht. Die Funktionen sind `create or replace`, ein zweiter Lauf waere also folgenlos - die Probe fragt trotzdem den ZUSTAND, weil es keine Spur gibt, die den Lauf davon unterscheidet.",
+        "sql": "select (to_regprocedure('public.admin_merge_draft(text,text,text)') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0155": {
+      "zweck": "Einen importierten Entwurf verwerfen (CAT-05D) - setzt 0154 voraus",
+      "preflight": "0155_preflight.sql",
+      "lauf": "staging-0155.sql",
+      "postflight": "0155_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_discard_draft(text) steht. Die Funktion ist `create or replace`, ein zweiter Lauf waere folgenlos - die Probe fragt den ZUSTAND, weil es keine Spur gibt, die den Lauf davon unterscheidet.",
+        "sql": "select (to_regprocedure('public.admin_discard_draft(text)') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0156": {
+      "zweck": "Die Zusammenfuehrung uebernimmt nur die ausgewaehlten Felder (CAT-05F) - setzt 0154 voraus",
+      "preflight": "0156_preflight.sql",
+      "lauf": "staging-0156.sql",
+      "postflight": "0156_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_merge_plan(text,text,text) und admin_merge_draft(text,text,text,jsonb) stehen. Beide sind `create or replace`, ein zweiter Lauf waere folgenlos - die Probe fragt den ZUSTAND, weil es keine Spur gibt, die den Lauf davon unterscheidet.",
+        "sql": "select (to_regprocedure('public.admin_merge_plan(text,text,text)') is not null and to_regprocedure('public.admin_merge_draft(text,text,text,jsonb)') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0157": {
+      "zweck": "Das Journal kennt catalog_status, merged_from und discarded; die interne Notiz ist kein auswaehlbares Feld mehr (CAT-05I) - setzt 0156 voraus",
+      "preflight": "0157_preflight.sql",
+      "lauf": "staging-0157.sql",
+      "postflight": "0157_postflight.sql",
+      "angewendet": {
+        "beschreibung": "catalog_admin_changes_field_known kennt merged_from, und merge_note(text,text) steht. Die Migration ist `create or replace` plus ein Constraint-Tausch, ein zweiter Lauf waere folgenlos - die Probe fragt den ZUSTAND.",
+        "sql": "select (to_regprocedure('public.merge_note(text,text)') is not null and exists (select 1 from pg_constraint c where c.conrelid = to_regclass('public.catalog_admin_changes') and c.conname = 'catalog_admin_changes_field_known' and pg_get_constraintdef(c.oid) like '%merged_from%')) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0158": {
+      "zweck": "Figurenfamilien administrativ verwalten und Weg B des Imports (CAT-06) - setzt 0152 und 0157 voraus",
+      "preflight": "0158_preflight.sql",
+      "lauf": "staging-0158.sql",
+      "postflight": "0158_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_set_character(text,bigint) steht und catalog_admin_changes_field_known kennt character_id. `create or replace` plus ein Constraint-Tausch, ein zweiter Lauf waere folgenlos - die Probe fragt den ZUSTAND.",
+        "sql": "select (to_regprocedure('public.admin_set_character(text,bigint)') is not null and exists (select 1 from pg_constraint c where c.conrelid = to_regclass('public.catalog_admin_changes') and c.conname = 'catalog_admin_changes_field_known' and pg_get_constraintdef(c.oid) like '%character_id%')) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0159": {
+      "zweck": "Die Variante kennt ihre Basisfigur (CAT-07) - setzt 0152 und 0158 voraus, ersetzt den Rumpf von admin_merge_references",
+      "preflight": "0159_preflight.sql",
+      "lauf": "staging-0159.sql",
+      "postflight": "0159_postflight.sql",
+      "angewendet": {
+        "beschreibung": "skylanders.base_sky_id steht mit dem zusammengesetzten Serienriegel, und admin_set_variant_base ist da. Die Spalte und die Constraint sind die Spur; `add column if not exists` macht einen zweiten Lauf folgenlos.",
+        "sql": "select (exists (select 1 from pg_attribute a where a.attrelid = to_regclass('public.skylanders') and a.attname = 'base_sky_id' and not a.attisdropped) and exists (select 1 from pg_constraint c where c.conrelid = to_regclass('public.skylanders') and c.conname = 'skylanders_base_same_series') and to_regprocedure('public.admin_set_variant_base(text,text,boolean)') is not null) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0160": {
+      "zweck": "base_sky_id kommt in die Plattformsicherung (CAT-07, Nachtrag) - setzt 0153 und 0159 voraus",
+      "preflight": "0160_preflight.sql",
+      "lauf": "staging-0160.sql",
+      "postflight": "0160_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Der Rumpf von system_platform_export() traegt den Abdruck ff4f38e61cbd4e5857ea914d6be68d44. Die Migration ersetzt genau einen Funktionsrumpf; der Abdruck IST die Spur, und ein zweiter Lauf prallt an ihm ab.",
+        "sql": "select (select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')) = 'ff4f38e61cbd4e5857ea914d6be68d44' as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0161": {
+      "zweck": "Die Familie entsteht von selbst (CAT-08 Stufe 1) - setzt 0152, 0158 und 0159 voraus",
+      "preflight": "0161_preflight.sql",
+      "lauf": "staging-0161.sql",
+      "postflight": "0161_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_publish_variant_auto(text,text) steht. Die Migration legt genau diese Funktion an; ihre Existenz IST die Spur, und ein zweiter Lauf prallt an ihr ab.",
+        "sql": "select to_regprocedure('public.admin_publish_variant_auto(text,text)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0162": {
+      "zweck": "Der Marktwert an der Kachel und die Loeschung einer unbenutzten Zeile (CAT-09) - setzt 0154, 0155 und 0159 voraus",
+      "preflight": "0162_preflight.sql",
+      "lauf": "staging-0162.sql",
+      "postflight": "0162_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_delete_figure(text) steht. Die Migration legt genau diese Funktion an; ihre Existenz IST die Spur, und ein zweiter Lauf prallt an ihr ab.",
+        "sql": "select to_regprocedure('public.admin_delete_figure(text)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0163": {
+      "zweck": "Der TYPE: eine Menge je Artikel, hoechstens ein Banner (CAT-10) - setzt 0157 und 0162 voraus",
+      "preflight": "0163_preflight.sql",
+      "lauf": "staging-0163.sql",
+      "postflight": "0163_postflight.sql",
+      "angewendet": {
+        "beschreibung": "skylanders.types steht. Die Spalte entsteht genau einmal; ihre Existenz IST die Spur, und ein zweiter Lauf prallt an ihr ab.",
+        "sql": "select (select count(*) from pg_attribute a where a.attrelid = to_regclass('public.skylanders') and a.attname = 'types' and not a.attisdropped) = 1 as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0164": {
+      "zweck": "Der TYPE kommt in die Plattformsicherung (CAT-10) - setzt 0163 voraus",
+      "preflight": "0164_preflight.sql",
+      "lauf": "staging-0164.sql",
+      "postflight": "0164_postflight.sql",
+      "angewendet": {
+        "beschreibung": "Der Rumpf von system_platform_export() traegt den Abdruck 7e9e58e2d84a9f8a7c660262aa21926b. Die Migration ersetzt genau einen Funktionsrumpf; der Abdruck IST die Spur, und ein zweiter Lauf prallt an ihm ab.",
+        "sql": "select (select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')) = '7e9e58e2d84a9f8a7c660262aa21926b' as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

@@ -72,6 +72,126 @@
       "datei": "offer_state_freshness.sql",
       "zweck": "Ist der Angebotsspiegel frisch, und wo weicht er von der Wirklichkeit ab",
       "modus": "9999"
+    },
+    {
+      "datei": "cat05h_merge_diagnosis.sql",
+      "zweck": "CAT-05H: warum der erste echte Merge-Versuch fehlschlug — Zustand von SKY-0103/SKY-0824, die RPC-Ueberladung, die Rechte und der Plan. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat05h_runtime_gaps.sql",
+      "zweck": "CAT-05H Teil 2: was der PGlite-Probelauf nicht hat — ON CONFLICT auf catalog_editorial, die Trigger auf skylanders, RLS, die gerufenen Funktionen. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat05h_all_references.sql",
+      "zweck": "CAT-05H Teil 3: alle dreizehn verweisenden Tabellen fuer SKY-0824 und SKY-0103. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat05i_audit_constraint.sql",
+      "zweck": "CAT-05I: der Wortlaut von catalog_admin_changes_field_known, die drei Schreibstellen, die ihn verletzen, und der Stand der Notizen. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat06_variant_survey.sql",
+      "zweck": "CAT-06 Phase 1: wie weit die Familienkuratierung (character_id) reicht, wo die Namensregel versagt und welche Familien die Sortierung trennt. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat06_family_suggestions.sql",
+      "zweck": "CAT-06 §9: die Vorschlagsliste fuer die Familienkuratierung in vier Gruppen - eindeutig, moeglich, unbekanntes Wort, Klammer-Altbestand. Rein lesend, verknuepft nichts.",
+      "modus": "messung"
+    },
+    {
+      "datei": "pending_0150_0153.sql",
+      "zweck": "Der gemessene Stand der drei offenen Migrationen 0150, 0151 und 0153 - die Akte sagt 'nirgends angewendet', diese Datei fragt die Objekte. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat07_base_figure_survey.sql",
+      "zweck": "CAT-07 Analyse: taugt eine direkte Basisfigur-Referenz - Serie, Kategorie, Familienkonflikte, Ketten und die Struktur. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat07_function_attributes.sql",
+      "zweck": "DIAGNOSE CAT-07: prosecdef und proconfig der Funktionen aus 0159, ausgepackt und einzeln - liegt Zeile 123 an der Pruefung oder an der Migration. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat07_trigger_acl.sql",
+      "zweck": "DIAGNOSE CAT-07 Teil 2: tragen alle Triggerfunktionen ein offenes EXECUTE, oder ist 0159 die Ausnahme. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_family_automation.sql",
+      "zweck": "ANALYSE CAT-08: wie zuverlaessig ist eine Namensregel fuer die automatische Familienbildung — eindeutig, mehrdeutig, falsche Freunde. Rein lesend, liest characters NICHT.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_name_rule_pairs.sql",
+      "zweck": "ANALYSE CAT-08 Teil 2: ALLE Paare der Namensregel namentlich, zum Nachsehen auf falsche Freunde. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_pair_categories.sql",
+      "zweck": "ANALYSE CAT-08 Teil 3: wo die Namensregel zwei verschiedene Kategorien oder item_type zusammenlegen wuerde (Fahrzeug gegen Figur). Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_rule_with_figure_filter.sql",
+      "zweck": "ANALYSE CAT-08 Teil 4: die Namensregel mit dem vorhandenen Figurenfilter (NOT_FIGURES) — sind die falschen Freunde weg, und was bleibt automatisierbar. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_new_family_effect.sql",
+      "zweck": "ANALYSE CAT-08 Teil 5: welche 34 Familien die Automatik heute anlegen wuerde, und ob zwei davon denselben Charakter spalten. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_name_equality.sql",
+      "zweck": "ANALYSE CAT-08 / 0161: reicht Namensgleichheit als Identitaetsbeweis, und die Abdruecke der Funktionen aus 0158/0159. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_applied_fingerprint.sql",
+      "zweck": "NACHWEIS 0161: der Rumpfabdruck der angewendeten Funktion gegen die Datei im Repository, und die Abdruecke der sechs, die unveraendert bleiben mussten. Rein lesend.",
+      "modus": "9999"
+    },
+    {
+      "datei": "cat08_inventory_note.sql",
+      "zweck": "Bestandsaufnahme fuer die Akte nach 0161 — Entwuerfe, Familien, Varianten. Rein lesend, prueft nichts.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_article_types.sql",
+      "zweck": "ANALYSE CAT-08 Korrektur: woran der Server die Artikelart erkennt (item_type, Kategorien), welche Variantenbeziehungen es gibt, und ob 0161 schon einem Nicht-Charakter eine Familie gegeben hat. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat08_candidates_0854.sql",
+      "zweck": "ANALYSE CAT-08: welche Basisartikel der Dialog bei SKY-0854, einem Trap-Entwurf und einem Fahrzeugentwurf anbietet. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat09_delete_references.sql",
+      "zweck": "ANALYSE CAT-09: alle Fremdschluessel auf skylanders, stille Textverweise, das Auditjournal, die SKY-ID-Vergabe und geteilte Bilddateien. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat10_type_system.sql",
+      "zweck": "ANALYSE CAT-10: was heute card_type, item_type und categories.catalog_group tragen, wie viele Zeilen mehrere fachliche Eigenschaften haben, und was ein Type-System mit Mehrfachzuordnung uebernehmen muesste. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat10_projection_proof.sql",
+      "zweck": "BEWEIS CAT-10: laesst sich card_type aus der neuen Typmenge ableiten, ohne eine Kartenkunst zu veraendern? Rechnet die Erstbelegung inline nach und vergleicht Zeile fuer Zeile. Rein lesend.",
+      "modus": "messung"
+    },
+    {
+      "datei": "cat10_gates.sql",
+      "zweck": "CAT-10: die Abdruecke der Ruempfe, die 0163/0164 ersetzen, und der Zustand der Audit-Constraint. Rein lesend.",
+      "modus": "messung"
     }
   ]
 }
