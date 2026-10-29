@@ -787,6 +787,25 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
       updated_at: "wie created_at",
       price_updated_at: "wann der Marktpreis zuletzt lief — Werkzeugspur",
       catalog_visible: "redaktionelle Spalte der Plattform",
+      catalog_status: "redaktionelle Spalte der Plattform (CAT-02B)",
+      base_sky_id:
+        "Variante → Basisfigur (0159, CAT-07) — redaktionelle Gruppierung der "
+        + "Plattform, kein Händlerdatum. Sie entscheidet, womit eine Figur "
+        + "zusammen ANGEZEIGT wird, nicht was gehandelt wird; dieselbe "
+        + "Begründung wie bei catalog_visible und catalog_status",
+      types:
+        "die Typmenge (0163, CAT-10) — redaktionelle Klassifikation der "
+        + "Plattform. Sie sagt, was ein Artikel IST (Giant, Trap, Legendary), "
+        + "und nicht, was mit ihm gehandelt wird; `card_type` oben bleibt "
+        + "dabei, weil es die KARTENKUNST ist und auf jedem Angebot zu sehen "
+        + "ist. Dieselbe Begründung wie bei catalog_status und base_sky_id",
+      visible_type:
+        "welcher Type als Banner erscheint (0163) — eine Anzeigeentscheidung "
+        + "der Plattform, und zwar eine, die ein Administrator Figur für "
+        + "Figur trifft. Im Archiv des Betriebs hätte sie keinen Leser",
+      visible_type_decided:
+        "ob über das Banner entschieden wurde (0163) — Zustand derselben "
+        + "Anzeigeentscheidung",
       display_name_override: "redaktionelle Spalte der Plattform",
       image_file: "Dateiname; außerhalb der Anwendung ohne Nutzen",
       image_override_path: "Dateiname",

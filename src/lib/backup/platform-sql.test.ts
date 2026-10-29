@@ -155,8 +155,15 @@ describe("woher diese Datei liest", () => {
      * die Umstellung auf `latestFunction()` zeigt sich an einer Stelle, die
      * jemand liest, statt dass ein Feldvergleich stillschweigend die
      * Fassung aus `0105` prüft, während die Datenbank eine andere ausführt.
+     *
+     * Dann `0153` am 2026-10-28 (`skylanders.catalog_status`) und am selben
+     * Tag `0160` (`skylanders.base_sky_id`) — **beide seit dem 2026-10-28 auf
+     * Staging angewendet, auf Production keine von beiden.** Diese Zusage
+     * spricht über die NEUESTE Fassung in den Migrationen, nicht über die,
+     * die auf einer Datenbank steht: welche wo steht, sagt
+     * `supabase/migrations/APPLIED.md`.
      */
-    expect(DEFINITION.file).toBe("0144_platform_export_calculations.sql");
+    expect(DEFINITION.file).toBe("0164_platform_export_types.sql");
   });
 
   it("historische Prüfungen bleiben historisch", () => {
@@ -570,8 +577,13 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
     const gesamt = PLATFORM_SECTIONS.reduce((n, s) => n + sqlFields(s.key).length, 0);
     const gebildet = PLATFORM_SECTIONS.reduce((n, s) => n + (s.denormalised?.length ?? 0), 0);
     expect(gesamt).toBe(allPlatformFields().length);
-    /* 486 bis `0105`, 498 seit `0144` (zwölf Spalten dazu). */
-    expect(gesamt).toBe(498);
+    /* 486 bis `0105`, 498 seit `0144` (zwölf Spalten dazu),
+       499 seit `0153` (`skylanders.catalog_status`), 500 seit `0160`
+       (`skylanders.base_sky_id`) und **503** seit `0164` — die drei Felder
+       des Type-Systems (`types`, `visible_type`, `visible_type_decided`,
+       CAT-10). Drei FELDER und kein Bereich: die Bereichszahl bleibt 54 und
+       `format_version` bleibt 2. */
+    expect(gesamt).toBe(503);
     expect(gebildet).toBe(4);
   });
 
