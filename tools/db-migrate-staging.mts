@@ -3,6 +3,8 @@
  *
  *   npm run db:migrate:staging -- 0146
  *   npm run db:migrate:staging -- 0146 --resume
+ *   npm run db:migrate:staging -- 0146 --refreeze   (vorhandene Akte
+ *                                      archivieren, frisch messen)
  *
  * WAS ER LOEST. Der Laufzettel verlangte bisher vier Handgriffe: Preflight
  * fahren, Zeile 900 und 901 von Hand kopieren, zwei Platzhalter in der
@@ -48,7 +50,7 @@
  * Marke, Feldzahl und Schutzsumme nach, bevor etwas in die Akte kommt. Eine
  * beschaedigte Baseline soll gar nicht erst aufgeschrieben werden.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -73,8 +75,15 @@ const PLAENE = join(CHECK_DIR, "migration-plans.json");
  * Pruefsummen, keine Namen und keine Adressen.
  *
  * `LOG_DIR` ist Laufausgabe und bleibt ungetrackt (`.gitignore`).
+ *
+ * `ARCHIV` liegt unter `AKTE_DIR` und ist ebenfalls versioniert. Eine Akte
+ * wird NIE geloescht und NIE ueberschrieben: soll vor einer noch nicht
+ * angewendeten Migration neu eingefroren werden (`--refreeze`), wandert die
+ * alte Akte unveraendert hierher. Ein Pruefbeleg verschwindet nicht, weil
+ * ein spaeterer Lauf eine frischere Messung braucht.
  */
 const AKTE_DIR = "supabase/baselines";
+const ARCHIV = "archiv";
 const LOG_DIR = "supabase/log/staging";
 
 /* ------------------------------------------------------------------ Plaene */
@@ -110,6 +119,27 @@ export type Akte = {
 
 export const aktePfad = (nr: string, dir = AKTE_DIR): string =>
   join(dir, `baseline-${nr}.json`);
+
+/**
+ * Eine vorhandene Akte ins Archiv LEGEN — kopieren, nicht verschieben, und
+ * niemals auf eine schon archivierte Datei schreiben.
+ *
+ * Der Name traegt den Erhebungszeitpunkt, damit zwei Messungen derselben
+ * Migration unterscheidbar bleiben. Liegt der Zielname schon, gilt die Akte
+ * als bereits archiviert und es passiert nichts.
+ *
+ * Gibt den Archivpfad zurueck, oder null, wenn nichts zu tun war.
+ */
+export function archiviereAkte(
+  pfad: string, akte: Akte, dir = AKTE_DIR,
+): string | null {
+  const stempel = akte.erhoben.replace(/[:.]/g, "-");
+  const ziel = join(dir, ARCHIV, `baseline-${akte.migration}-${stempel}.json`);
+  if (existsSync(ziel)) return null;
+  mkdirSync(join(dir, ARCHIV), { recursive: true });
+  copyFileSync(pfad, ziel);
+  return ziel;
+}
 
 /**
  * Die Akte lesen und JEDE Zeile nachrechnen.
@@ -240,7 +270,7 @@ export type Ablauf =
  * pruefbar, sondern nur beobachtbar.
  */
 export async function fahreAblauf(
-  w: Werkzeuge, nummer: string, resume: boolean,
+  w: Werkzeuge, nummer: string, resume: boolean, refreeze = false,
 ): Promise<Ablauf> {
   const befunde: Befund[] = [];
   const plan = w.plaene[nummer];
@@ -276,6 +306,12 @@ export async function fahreAblauf(
         + "  Fuer die Nachkontrolle mit den urspruenglichen Baselines:\n"
         + `      npm run db:migrate:staging -- ${nummer} --resume` };
     }
+    if (resume && refreeze) {
+      return { ende: "abbruch", stufe: "preflight", befunde, grund:
+        "--resume und --refreeze zusammen ergeben keinen Sinn: die Baselines\n"
+        + "  werden VOR der Migration eingefroren, die Nachkontrolle liest sie\n"
+        + "  nur. Ein Neueinfrieren nach dem Schreiben waere kein Nachweis." };
+    }
     if (!liegtSchon && resume) {
       return { ende: "abbruch", stufe: "liegt-noch-nicht", befunde, grund:
         `--resume, aber ${nummer} liegt noch nicht (${plan.angewendet.beschreibung}).\n`
@@ -307,24 +343,46 @@ export async function fahreAblauf(
           + "  Abgebrochen, bevor etwas eingefroren wurde." };
       }
 
+      /*
+       * EINE VORHANDENE AKTE GEWINNT — ausser der Bediener fordert mit
+       * `--refreeze` ausdruecklich eine frische Messung. Sie ist der Stand
+       * VOR der Migration; was der Preflight heute misst, ist es
+       * moeglicherweise nicht mehr. Stillschweigend ueberschreiben hiesse,
+       * den Beweis durch die Gegenwart zu ersetzen.
+       *
+       * Und auch mit `--refreeze` wird nichts ueberschrieben: die alte Akte
+       * liegt danach im Archiv.
+       */
+      const vorhanden = existsSync(akte) ? ladeAkte(akte) : null;
+      if (vorhanden !== null && !vorhanden.ok) {
+        return { ende: "abbruch", stufe: "akte", befunde, grund:
+          `${akte} liegt schon, ist aber beschaedigt: ${vorhanden.grund}` };
+      }
+
       let vertraege: Map<string, string>;
       let neu: boolean;
-      if (existsSync(akte)) {
-        /*
-         * EINE VORHANDENE AKTE GEWINNT. Sie ist der Stand VOR der Migration;
-         * was der Preflight heute misst, ist es moeglicherweise nicht mehr.
-         * Ueberschreiben hiesse, den Beweis durch die Gegenwart zu ersetzen.
-         */
-        const alt = ladeAkte(akte);
-        if (!alt.ok) {
-          return { ende: "abbruch", stufe: "akte", befunde, grund:
-            `${akte} liegt schon, ist aber beschaedigt: ${alt.grund}` };
-        }
-        w.melde(`  Akte:      ${akte} liegt schon (erhoben ${alt.akte.erhoben}) — `
+      if (vorhanden !== null && !refreeze) {
+        w.melde(`  Akte:      ${akte} liegt schon (erhoben ${vorhanden.akte.erhoben}) — `
           + "sie wird NICHT ueberschrieben.");
-        vertraege = new Map(Object.entries(alt.akte.vertraege));
+        w.melde("             Soll stattdessen der Stand unmittelbar vor dem "
+          + "Schreiben gemessen werden:");
+        w.melde(`               npm run db:migrate:staging -- ${nummer} --refreeze`);
+        w.melde("             Die alte Akte wandert dann ins Archiv. Niemals "
+          + "von Hand loeschen.");
+        vertraege = new Map(Object.entries(vorhanden.akte.vertraege));
         neu = false;
       } else {
+        if (vorhanden !== null) {
+          /*
+           * Legitim ist das NUR hier: die Migration ist noch nicht
+           * angewendet (Zeile 272 hat das geprueft), die alte Messung ist
+           * also kein Nachweis ueber einen Schreibvorgang, sondern die
+           * Momentaufnahme eines frueheren Augenblicks.
+           */
+          const archiv = archiviereAkte(akte, vorhanden.akte, w.akteDir);
+          w.melde(`  Archiv:    ${archiv ?? "(lag dort schon)"} — die Messung `
+            + `vom ${vorhanden.akte.erhoben} bleibt erhalten.`);
+        }
         const inhalt: Akte = {
           migration: nummer,
           erhoben: w.jetzt().toISOString(),
@@ -428,6 +486,7 @@ const ab: (text: string) => never = (text) => {
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const resume = argv.includes("--resume");
+  const refreeze = argv.includes("--refreeze");
   const nummer = argv.find((a) => /^\d{4}$/.test(a));
 
   console.log("");
@@ -435,7 +494,7 @@ async function main(): Promise<void> {
   console.log("  ---------------------");
 
   if (nummer === undefined) {
-    ab("Aufruf: npm run db:migrate:staging -- <nummer> [--resume]\n"
+    ab("Aufruf: npm run db:migrate:staging -- <nummer> [--resume] [--refreeze]\n"
       + `  Bekannt: ${Object.keys(ladePlaene()).join(", ")}`);
   }
 
@@ -469,7 +528,7 @@ async function main(): Promise<void> {
       logDir: LOG_DIR,
       jetzt: () => new Date(),
       melde: (text) => console.log(text),
-    }, nummer!, resume);
+    }, nummer!, resume, refreeze);
   } finally {
     await db.schliesse();
   }

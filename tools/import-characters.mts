@@ -67,6 +67,13 @@ function toRow(entry: CuratedCharacter): Record<string, unknown> {
 
 async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
+  /*
+   * `--overwrite-admin`: eine im Adminbereich gesetzte Familienzuordnung
+   * DOCH ueberschreiben. Ohne das Flag wird sie uebersprungen und benannt
+   * (CAT-06 §7) — eine Korrektur, die beim naechsten Importlauf
+   * stillschweigend zurueckfiele, waere schlimmer als keine.
+   */
+  const overwriteAdmin = process.argv.includes("--overwrite-admin");
   const validateOnly = process.argv.includes("--validate-only");
   const inputPath = readFlagValue("--input") ?? DEFAULT_INPUT;
 
@@ -164,6 +171,72 @@ async function main(): Promise<void> {
   const unlinked = assignments.filter((assignment) => currentLink.get(assignment.skyId) == null);
   console.log(`  assignments  ${assignments.length} total, ${unlinked.length} not linked yet`);
 
+  /*
+   * EINE ADMINENTSCHEIDUNG WIRD NICHT STILL UEBERSCHRIEBEN (CAT-06 §7).
+   *
+   * Seit `0158` kann ein Plattformadmin `character_id` in der Oberflaeche
+   * setzen, und `admin_set_character` schreibt dabei eine Journalzeile
+   * `field = 'character_id'`. Diese Datei ist die ERSTKURATIERUNG; die
+   * Oberflaeche ist die KORREKTUR. Eine Korrektur, die beim naechsten
+   * Importlauf stillschweigend zurueckfiele, waere schlimmer als keine —
+   * der Admin saehe sein Ergebnis und spaeter ein anderes, ohne Hinweis.
+   *
+   * Betroffen ist nur der Fall, in dem die Datei eine ANDERE Familie nennt
+   * als die, die der Admin gesetzt hat. Dieselbe Familie noch einmal zu
+   * schreiben ist folgenlos.
+   *
+   * `--overwrite-admin` ist der ausdrueckliche Weg, es doch zu tun. Ohne das
+   * Flag wird die Zeile uebersprungen und benannt.
+   */
+  const { data: journal, error: journalError } = await client
+    .from("catalog_admin_changes")
+    .select("entity_id, new_value, changed_at")
+    .eq("entity", "skylander")
+    .eq("field", "character_id")
+    .in("entity_id", assignments.map((assignment) => assignment.skyId))
+    .order("changed_at", { ascending: true });
+  if (journalError) throw new Error(`read journal: ${journalError.message}`);
+
+  /* Die LETZTE Journalzeile je Figur zaehlt — eine frueher zurueckgenommene
+     Zuordnung ist keine Entscheidung mehr. */
+  const adminGesetzt = new Map<string, number | null>();
+  for (const row of journal ?? []) {
+    const wert = row.new_value as string | null;
+    adminGesetzt.set(row.entity_id as string, wert === null ? null : Number(wert));
+  }
+
+  const vomAdminBeruehrt = assignments.filter((a) => adminGesetzt.has(a.skyId));
+  console.log(`  admin links  ${vomAdminBeruehrt.length} of them were set in the admin UI`);
+
+  /*
+   * DIE ZEILEN, DIE DIESER LAUF VERAENDERN WUERDE, obwohl ein Admin sie
+   * gesetzt hat. Verglichen wird gegen den HEUTIGEN Stand der Spalte: nennt
+   * die Datei dieselbe Familie, ist nichts zu melden.
+   */
+  const bedroht: string[] = [];
+  for (const entry of characters) {
+    for (const skyId of entry.sky_ids) {
+      if (!adminGesetzt.has(skyId)) continue;
+      const heute = currentLink.get(skyId) ?? null;
+      const soll = byName.get(entry.canonical_name.toLowerCase());
+      const sollId = soll === undefined ? null : (soll.id as number);
+      if (sollId !== null && heute !== null && sollId !== heute) {
+        bedroht.push(`${skyId} (admin: ${heute} -> file: ${sollId} ${entry.canonical_name})`);
+      }
+    }
+  }
+  if (bedroht.length > 0) {
+    console.log("");
+    console.log(`  !! ${bedroht.length} admin decision(s) would be overwritten:`);
+    for (const z of bedroht) console.log(`     ${z}`);
+    if (!overwriteAdmin) {
+      console.log("     These are SKIPPED. Re-run with --overwrite-admin to apply them.");
+    } else {
+      console.log("     --overwrite-admin given: they WILL be overwritten.");
+    }
+  }
+  const uebersprungen = new Set(overwriteAdmin ? [] : bedroht.map((z) => z.split(" ")[0]));
+
   if (!apply) {
     heading("Result");
     console.log("  DRY RUN - nothing was written.");
@@ -203,12 +276,16 @@ async function main(): Promise<void> {
     }
     // Only the curated SKY-IDs are touched. Every other row keeps whatever
     // character_id it has, including NULL. This import never clears links.
+    /* Was ein Admin anders entschieden hat, bleibt draussen — es sei denn,
+       `--overwrite-admin` sagt ausdruecklich etwas anderes. */
+    const ziele = entry.sky_ids.filter((id) => !uebersprungen.has(id));
+    if (ziele.length === 0) continue;
     const { error } = await client
       .from("skylanders")
       .update({ character_id: characterId })
-      .in("sky_id", entry.sky_ids);
+      .in("sky_id", ziele);
     if (error) throw new Error(`link ${entry.canonical_name}: ${error.message}`);
-    written += entry.sky_ids.length;
+    written += ziele.length;
   }
   console.log(`  assignments: ${written} figures linked`);
 

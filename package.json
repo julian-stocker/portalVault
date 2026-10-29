@@ -7,6 +7,7 @@
     "dev": "next dev",
     "dev:staging": "node tools/dev-staging.mts",
     "dev:staging:lan": "node tools/dev-staging.mts --lan",
+    "cat01:diff": "node tools/cat01-diff.mts",
     "snapshot:staging": "SKYISLES_REQUIRE_STAGING=1 node --env-file=.env.staging tools/staging-snapshot.mts",
     "build": "next build",
     "start": "next start",
@@ -80,7 +81,11 @@
     "db:privileges:staging": "node tools/db-privileges-staging.mts",
     "db:grants:plan": "python3 tools/lib/grant-plan.py",
     "db:acl:audit": "python3 tools/lib/function-acl-audit.py",
-    "env:audit": "node tools/env-audit.mts"
+    "env:audit": "node tools/env-audit.mts",
+    "cat03:drafts:staging": "node --env-file=.env.staging tools/cat03-drafts.mts",
+    "cat03:import:staging": "node --env-file=.env.staging tools/cat03-import.mts",
+    "cat04:images": "node tools/cat04-images.mts",
+    "cat05:bilder:staging": "node --env-file=.env.staging tools/cat05-bilder.mts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
