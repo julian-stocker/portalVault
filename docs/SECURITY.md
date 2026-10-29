@@ -1096,8 +1096,72 @@ in der Datenbank — ein Parameter dafür wäre der Weg, eine Identität aus ein
 Ebenso wenig schreibt sie Preis, Bild oder `character_id`: diese Spalten gehören anderen Pfaden,
 und ein Create, der sie annähme, wäre eine stille Tür in fremdes Gebiet.
 
-**Kein Delete.** Es gibt keine Delete-RPC und kein Delete-Recht. Eine falsch angelegte Figur wird
-verborgen (`catalog_visible = false`); ihre SKY-ID bleibt vergeben.
+**Kein Delete-RECHT, und seit `0155` zwei Delete-WEGE.** Dieser Absatz sagte bis zum
+2026-10-29 „es gibt keine Delete-RPC" — das war seit `0155` (Staging 2026-10-28) nicht mehr
+richtig und wird hier ersetzt, nicht ergänzt. Richtig bleibt der Kern: `delete` auf
+`public.skylanders` ist für `anon` und `authenticated` **entzogen**, und daran ändert sich
+nichts. Gelöscht wird ausschließlich durch eine `security definer`-Funktion, die
+`is_platform_admin()` als erste Anweisung fragt:
+
+| | |
+|---|---|
+| `admin_discard_draft(text)` (`0155`) | ein **importierter Entwurf**, der nie öffentlich war — vier Riegel |
+| `admin_delete_figure(text)` (`0162`, **auf Staging seit 2026-10-29**, auf Production nicht) | **jede** Zeile, auf die nichts zeigt — drei Prüfungen, ADR-0159 |
+
+Eine Figur, auf die etwas zeigt, wird weiterhin **verborgen** (`catalog_status = 'hidden'`),
+nicht gelöscht. Und die SKY-ID bleibt in beiden Fällen vergeben: `sky_id_seq` ist für
+niemanden erreichbar (siehe oben), und keine der beiden Funktionen enthält ein `setval` —
+der Postflight von `0162` misst genau das, und am 2026-10-29 hat er es auf Staging am
+angewendeten Rumpf gemessen: `9998 = 0` UND `9999 = 0`.
+
+> **ZWEI PRÜFZEILEN DIESES POSTFLIGHTS WAREN SELBST FALSCH, UND DAS GEHÖRT HIERHER.**
+> Die Zeilen 114 („keine andere Spalte") und 122 („kein Zugriff auf `storage`") suchten
+> ein blankes Wort in `prosrc` — und `prosrc` enthält die **Kommentare** der Funktion. Der
+> erste Lauf meldete deshalb `9999 = 2`, obwohl beide Rümpfe in Ordnung waren. Sie messen
+> jetzt am **kommentarfreien** Rumpf und suchen die **Schreibform** (`set`-Zuweisung,
+> `storage` mit folgendem Punkt), und `P71` Abschnitt V fährt den echten Zeilentext gegen
+> Rümpfe, die den Fehler wirklich enthalten. **Entfernt wurde keine Prüfung**, und die
+> Migrationsdatei blieb unberührt. Eine Prüfung, die Prosa für einen Befund hält, schützt
+> nichts — sie verbraucht nur das Vertrauen in die nächste.
+
+**Was `admin_delete_figure` nicht darf, als Sicherheitsaussage.** Sie fasst **keine Datei in
+Supabase Storage** an: 44 Bilddateien sind von 103 Katalogzeilen **geteilt** (gemessen
+2026-10-29), und eine mitgelöschte Datei nähme einer weiter bestehenden Figur ihr Bild. Sie
+benutzt **kein `ON DELETE CASCADE`** als Umweg — vier der vierzehn Fremdschlüssel stehen
+darauf, und ein blankes `delete` hätte einen **Warenkorb** stillschweigend mitgenommen. Und
+sie hängt nichts um: keine fremde SKY-ID bekommt die Daten.
+
+**Der TYPE ist redaktionell, und er hat zwei Schreibwege (`0163`, auf Staging seit 2026-10-29, ADR-0160).**
+`admin_set_figure_types(text, text[])` ersetzt die Typmenge einer Zeile,
+`admin_set_visible_type(text, text)` wählt daraus das Banner — beide hinter
+`is_platform_admin()`, beide ohne Tabellenrecht, beide `security definer` mit
+leerem Suchpfad. **Die Trennung ist die Sicherheitsaussage:** das Dropdown an
+der Kachel ruft nur die zweite, und die **weist jeden Type ab, den die Zeile
+nicht trägt**. Zuordnen geht ausschließlich im Bearbeiten-Dialog, und damit
+kann ein Bedienelement auf einer Kachel die Klassifikation nicht erweitern.
+
+**Die drei Spalten liegen auf `skylanders` und sind damit weltlesbar** — und
+das ist richtig: ein Type ist öffentliche Produktinformation, genau wie
+`card_type` und `catalog_visible`. Nichts Internes kommt dadurch an die Zeile
+(CLAUDE.md: interne Daten gehören in `catalog_editorial`). Die
+**Betriebssicherung** führt die drei trotzdem nicht: ein Type ist eine
+redaktionelle Angabe der Plattform (ADR-0039), dieselbe Begründung, mit der
+`catalog_status` und `base_sky_id` dort fehlen — `manifest.ts` nennt jeden der
+drei als Ausschluss mit Grund.
+
+**Und keine der zwei Funktionen fasst die Kartenkunst an.** `card_type` bleibt
+sein eigener Schreibweg (`admin_set_card_type`); dass eine Ableitung nicht
+verlustfrei wäre, ist gegen alle 701 Katalogzeilen gemessen
+(`supabase/checks/cat10_projection_proof.sql`), und `0163_postflight.sql`
+Zeile 118 prüft am Rumpf, dass keine der beiden das Wort überhaupt nennt.
+
+**Der Marktwert hat seinen eigenen Weg, und er ist nicht der des Lagers.**
+`admin_set_market_price(text, numeric)` (`0162`, auf Staging seit 2026-10-29) schreibt
+`skylanders.market_price` — hinter
+`is_platform_admin()`, ohne Tabellenrecht, eine Spalte und ihr Datum. Der **Shoppreis** läuft
+weiter über `set_shop_listing` im Verkäuferbetrieb; das sind zwei verschiedene Zahlen mit zwei
+verschiedenen Berechtigungen (ADR-0048), und `src/lib/admin/inventory.test.ts` misst, dass
+der Lagerweg den Marktwert nicht nennt.
 
 **Das Bild läuft weiter über die Storage-Policy**, deren Prädikat `is_shop_admin()` ist
 (ADR-0046) — keine zweite Upload-Architektur, kein Service-Role-Key im Webprozess.

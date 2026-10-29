@@ -331,6 +331,60 @@ Angaben unvollständig sind.
 `set_shop_listing()` wird dabei **nicht** erweitert. Preis und Freigabe bleiben zwei Aufrufe —
 wer beides in einen legt, gibt irgendwann beim Preispflegen versehentlich frei.
 
+**Nachtrag 2026-10-29 (ADR-0159): zwei Türen an der Adminkachel, und eine davon ist die erste,
+die eine Katalogzeile entfernt.** `0162` ist **seit dem 2026-10-29 auf Staging angewendet**
+(berechtigte Nachkontrolle `9998 = 0` UND `9999 = 0`, Akte `supabase/migrations/APPLIED.md`),
+auf **Production nicht**. Sie brauchte eine ausdrückliche Freigabe des Betreibers.
+
+| Funktion | Rolle | entscheidet |
+|---|---|---|
+| `admin_set_market_price(sky_id, price)` | `is_platform_admin()` | **Was ist diese Figur wert?** Ein Katalogdatum wie `usk_rating` — es beschreibt das Produkt, nicht ein Angebot |
+| `admin_delete_figure(sky_id)` | `is_platform_admin()` | **Darf diese Zeile verschwinden?** Nur, wenn nichts auf sie zeigt |
+
+**Der Marktwert ist nicht der Shoppreis**, und die beiden bleiben an verschiedenen Rollen:
+`set_shop_listing()` (`can_operate_active_seller()`) setzt den **Verkaufspreis einer
+Lagerposition**, `admin_set_market_price()` den **Referenzwert des Katalogs** (ADR-0048). Ein
+Betriebskonto kann den Marktwert nicht ändern, ein Plattformadmin keinen Shoppreis — dieselbe
+Trennung wie bei USK-Kennzeichnung und Verkaufsfreigabe.
+
+**Die Löschung ist die erste ihrer Art für eine veröffentlichte Zeile.** `admin_discard_draft`
+(`0155`) verwirft nur einen **importierten Entwurf**, der nie öffentlich war.
+`admin_delete_figure` kann jede referenzfreie Zeile entfernen und prüft dafür alle
+**vierzehn** Fremdschlüssel, die vier mit `ON DELETE CASCADE` **namentlich**, und
+`order_lines.sky_id` ausdrücklich — die einzige SKY-ID-Spalte ohne Fremdschlüssel. Ein
+ausgeblendeter Papierkorb wäre auch hier keine Berechtigung: beide Funktionen fragen
+`is_platform_admin()` als **erste Anweisung** in der Datenbank, und ein Aufruf ohne Recht
+scheitert mit `42501`. Die Grenzen vollständig in `docs/SECURITY.md`.
+
+**Nachtrag 2026-10-29 (ADR-0160): zwei weitere Türen für den TYPE.** `0163`
+ist **seit dem 2026-10-29 auf Staging angewendet** (berechtigte Nachkontrolle
+`9998 = 0` UND `9999 = 0`), auf **Production nicht**. Am angewendeten Rumpf
+gemessen: beide Funktionen sind `security definer` mit `search_path=""`, Eigner
+`postgres`, `execute` nur für `authenticated` und `service_role`, und beide
+prüfen `is_platform_admin()`.
+
+| Funktion | Rolle | entscheidet |
+|---|---|---|
+| `admin_set_figure_types(sky_id, types[])` | `is_platform_admin()` | **Was ist dieser Artikel?** Die vollständige Menge aus 17 Werten |
+| `admin_set_visible_type(sky_id, type)` | `is_platform_admin()` | **Welcher davon steht auf der Kachel?** Genau einer, oder keiner |
+
+**Zwei Funktionen für zwei Fragen — und das macht das Dropdown an der Kachel
+erst ungefährlich.** Es ruft nur die zweite, und die **weist jeden Type ab, den
+die Zeile nicht trägt**, mit Nennung der Wahl. Zuordnen geht ausschließlich im
+Bearbeiten-Dialog. Ein Dropdown, das alle siebzehn anbieten würde, wäre ein
+zweiter Schreibweg zur Typmenge.
+
+**USER und BUSINESS sehen das Banner und können es nicht ändern** — kein
+Dropdown, kein Schreibrecht. Wie überall gilt: ein ausgeblendetes Bedienelement
+ist keine Berechtigung. Beide Funktionen fragen `is_platform_admin()` als
+**erste Anweisung** in der Datenbank, und ein Aufruf ohne Recht scheitert mit
+`42501`.
+
+**Der Type ist nicht die Kartenkunst.** `admin_set_card_type` schreibt weiter,
+auf welche Karte eine Figur gedruckt wird; keine der zwei neuen Funktionen
+nennt `card_type` (am Rumpf gemessen, `0163_postflight.sql` Zeile 118). Dass
+die eine aus der anderen nicht verlustfrei folgt, steht in ADR-0160.
+
 ---
 
 ## 7. E-Mail-Versand
