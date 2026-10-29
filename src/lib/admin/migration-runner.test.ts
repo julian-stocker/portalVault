@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 import { pruefeBaseline, PLATZHALTER, VERTRAEGE } from "@/../tools/lib/baseline.mts";
 import {
-  fahreAblauf, ladeAkte, ladePlaene, sammleBaselines, aktePfad,
+  archiviereAkte, fahreAblauf, ladeAkte, ladePlaene, sammleBaselines, aktePfad,
   type Ablauf, type Plan, type Werkzeuge,
 } from "@/../tools/db-migrate-staging.mts";
 
@@ -424,8 +424,22 @@ describe("die Sicherheitsriegel des Runners", () => {
   });
 
   it("eine vorhandene Akte wird nicht überschrieben", () => {
-    expect(code).toContain("if (existsSync(akte))");
+    expect(code).toContain("existsSync(akte) ? ladeAkte(akte) : null");
     expect(runner).toContain("wird NICHT ueberschrieben");
+  });
+
+  it("und sie wird nicht geloescht: --refreeze archiviert, bevor es schreibt", () => {
+    /*
+     * Die Reihenfolge ist die Zusage. `archiviereAkte` muss VOR
+     * `writeFileSync` stehen, sonst waere die alte Messung schon weg.
+     */
+    expect(code).toContain("archiviereAkte(akte, vorhanden.akte, w.akteDir)");
+    expect(code.indexOf("archiviereAkte(akte, vorhanden.akte"))
+      .toBeLessThan(code.indexOf("writeFileSync(akte,"));
+    /* Und im Archiv wird nie ueberschrieben. */
+    expect(code).toContain("if (existsSync(ziel)) return null;");
+    expect(code).not.toContain("rmSync(akte");
+    expect(code).not.toContain("unlinkSync");
   });
 
   it("eine fehlende Akte im Wiederaufnahmemodus ist ein Abbruch", () => {
@@ -599,6 +613,89 @@ describe("der erfolgreiche vollstaendige Ablauf", () => {
     const l = werkzeuge({ akteDir: tmp() });
     await fahreAblauf(l.w, "0199", false);
     expect(l.gefahren[0].vertraege).toEqual({});
+  });
+});
+
+
+describe("eine Akte geht nicht verloren — auch nicht beim Neueinfrieren", () => {
+  /*
+   * WARUM DIESE ZEILEN STEHEN. Am 2026-10-28 lag fuer `0154` eine Akte vom
+   * Vorabend. Gemessen werden muss aber der Stand unmittelbar VOR dem
+   * Schreiben, und zwischen beiden Zeitpunkten hatte der Bediener auf
+   * Staging getestet. Die alte Akte wurde von Hand geloescht, damit der
+   * Runner frisch einfriert — ihr Inhalt war danach nicht rekonstruierbar.
+   * Dafuer gibt es jetzt `--refreeze`: archivieren, dann neu messen.
+   */
+  it("legt die alte Akte ins Archiv, bevor sie neu geschrieben wird", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const vorher = ladeAkte(join(d, "baseline-0199.json"));
+    expect(vorher.ok).toBe(true);
+    if (!vorher.ok) return;
+
+    const a = await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false, true);
+    expect(a.ende).toBe("handarbeit");
+
+    /* Die archivierte Datei traegt den Erhebungszeitpunkt im Namen. */
+    const stempel = vorher.akte.erhoben.replace(/[:.]/g, "-");
+    const archiviert = join(d, "archiv", `baseline-0199-${stempel}.json`);
+    expect(existsSync(archiviert)).toBe(true);
+    /* Und zwar UNVERAENDERT — Zeichen fuer Zeichen die alte Akte. */
+    expect(readFileSync(archiviert, "utf8"))
+      .toBe(readFileSync(join(d, "baseline-0199.json"), "utf8")
+        .replace(vorher.akte.erhoben, vorher.akte.erhoben));
+    const alt = ladeAkte(archiviert);
+    expect(alt.ok).toBe(true);
+    if (alt.ok) expect(alt.akte.vertraege).toEqual(vorher.akte.vertraege);
+  });
+
+  it("schreibt NIE auf eine schon archivierte Datei", () => {
+    const d = tmp();
+    const pfad = join(d, "baseline-9199.json");
+    const akte = {
+      migration: "9199", erhoben: "2026-10-27T20:23:19.426Z",
+      herkunft: "preflight" as const, preflightSha256: null,
+      vertraege: { "skyisles.base": BASE },
+    };
+    writeFileSync(pfad, JSON.stringify(akte), "utf8");
+    const erst = archiviereAkte(pfad, akte, d);
+    expect(erst).not.toBeNull();
+    /* Inhalt der Quelle veraendern und nochmal archivieren wollen. */
+    writeFileSync(pfad, JSON.stringify({ ...akte, preflightSha256: "a".repeat(64) }), "utf8");
+    expect(archiviereAkte(pfad, akte, d)).toBeNull();
+    const wieder = ladeAkte(erst!);
+    expect(wieder.ok).toBe(true);
+    if (wieder.ok) expect(wieder.akte.preflightSha256).toBeNull();
+  });
+
+  it("ohne --refreeze bleibt die alte Akte die gueltige und das Archiv leer", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    const a = await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    expect(a.ende).toBe("handarbeit");
+    if (a.ende !== "handarbeit") return;
+    expect(a.neu).toBe(false);
+    expect(existsSync(join(d, "archiv"))).toBe(false);
+  });
+
+  it("--resume und --refreeze zusammen werden abgewiesen", async () => {
+    const d = tmp();
+    const a = await fahreAblauf(
+      werkzeuge({ akteDir: d, liegtSchon: true }).w, "0199", true, true);
+    expect(a.ende).toBe("abbruch");
+    if (a.ende !== "abbruch") return;
+    expect(a.grund).toContain("kein Nachweis");
+  });
+
+  it("das Neueinfrieren laesst die Nachkontrolle gegen die NEUE Akte laufen", async () => {
+    const d = tmp();
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false);
+    await fahreAblauf(werkzeuge({ akteDir: d }).w, "0199", false, true);
+    const l = werkzeuge({ akteDir: d, liegtSchon: true });
+    const a = await fahreAblauf(l.w, "0199", true);
+    expect(a.ende).toBe("bestanden");
+    expect(l.gefahren[0].vertraege).toEqual({
+      "skyisles.base": BASE, "skyisles.coll": COLL });
   });
 });
 

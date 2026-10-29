@@ -49,6 +49,7 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
     displayNameOverride: "Bash the Rock",
     element: "Earth",
     characterId: 7,
+    baseSkyId: null,
     ...over,
   };
 }
@@ -183,6 +184,7 @@ describe("the template carries two foreign keys and nothing else", () => {
     catalogVisible: true,
     displayNameOverride: "Bash the Rock",
     characterId: 7,
+    baseSkyId: null,
     marketPrice: 29.99,
     imageFile: "abcdefabcdefabcd.webp",
     imageOverridePath: "SKY-0148/abcdefabcdefabcd.webp",

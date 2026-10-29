@@ -45,7 +45,7 @@ function figure(over: Partial<CatalogFigure> = {}): CatalogFigure {
     catalogGroup: "figure", cardType: "standard", catalogVisible: true, canonicalName: "Bash",
     displayNameOverride: null, marketPrice: 10, imageFile: null, imageOverridePath: null,
     displayName: "Bash", sortBaseName: "Bash", sortVariantLabel: null,
-    searchIndex: "bash", isActive: true, element: null, characterId: null, ...over,
+    searchIndex: "bash", isActive: true, element: null, characterId: null, baseSkyId: null, ...over,
   };
 }
 

@@ -87,6 +87,26 @@ describe("guard 1 — no table carries a seller", () => {
          Verwendung. `seller-schema.test.ts` vergleicht beide Dateien
          zeichengleich an der Stelle. */
       "0144_platform_export_calculations.sql",
+      /* `0153` tut dasselbe noch einmal: derselbe Rumpf plus EIN Feld im
+         Katalogbereich. Die Nennung ist wieder eine Kopie, und der Boden in
+         `seller-schema.test.ts` vergleicht jetzt alle vier Dateien
+         zeichengleich an der Stelle. */
+      "0153_platform_export_catalog_status.sql",
+      /* `0160` zum vierten Mal, und aus demselben Grund: derselbe Rumpf plus
+         EIN Feld im Katalogbereich (`base_sky_id`, CAT-07). Die Nennung
+         `t.seller_id` steht dort, wo `0105` sie hingeschrieben hat, und
+         `platform-export-0160.test.ts` beweist, dass der neue Rumpf MINUS
+         die eine Zeile byteweise der aus `0153` ist — eine Kopie also, und
+         keine neue Verwendung. */
+      "0160_platform_export_base_sky_id.sql",
+      /* `0164` zum fuenften Mal, und zum letzten in dieser Kette:
+         derselbe Rumpf plus DREI Felder im Katalogbereich (`types`,
+         `visible_type`, `visible_type_decided`, CAT-10). Die Nennung
+         `t.seller_id` steht dort, wo `0105` sie hingeschrieben hat, und
+         `0164_postflight.sql` Zeile 107 beweist am LEBENDEN Rumpf, dass
+         er minus die drei Zeilen zeichengleich der aus `0160` ist —
+         eine Kopie also, und keine neue Verwendung. */
+      "0164_platform_export_types.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")
