@@ -12,8 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-10-29 (ADR-0161, atomare Migrationsgruppe auf
-Production — sieben Migrationen in einer Transaktion).
+Letzte Aktualisierung: 2026-10-30 (ADR-0162, `0159` auf Production — eine
+Gruppe aus einer Migration und die Ersetzung, die sie tragen muss).
 
 ---
 
@@ -17050,3 +17050,129 @@ Abbruch ist kostenlos**, weil nichts committet ist.
   eigene Klammer in den sieben, der Rahmen **außerhalb aller sieben Bereiche**
   ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
   und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.
+
+
+---
+
+## ADR-0162 · `0159` auf Production — eine Gruppe aus einer Migration, und die Ersetzung, die sie tragen muss
+
+**Status:** ANGENOMMEN für die **Vorbereitung** · 2026-10-30. **Die Ausführung
+auf Production ist nicht freigegeben.**
+**Betrifft:** `supabase/operations/prod-s-preflight-g3.sql`,
+`prod-g3-0159.sql`, `prod-s-postflight-g3.sql`, ADR-0161 (atomare Gruppen),
+ADR-0134 (Referenzen aus `pg_catalog`), CAT-07
+
+### Was entschieden ist
+
+**1. G3' ist eine Gruppe aus EINER Migration, und sie bekommt denselben
+Rahmen wie G2'.** Bei G2' musste gebündelt werden, weil ein Zwischenzustand
+schadet (ADR-0161). `0159` ist in sich vollständig — der Rahmen kommt nicht
+aus Not, sondern weil er gut ist: umgekehrter Umgebungsstempel,
+selbstgemessene Verträge, ein Identitätsabdruck, achtzehn A6-Prüfungen des
+Eingangszustands und fünfzehn B-Vergleiche, die zurückrollen statt zu
+berichten.
+
+**2. Die Prüfblätter bleiben die einzelnen.** `0159_preflight.sql` und
+`0159_postflight.sql` messen genau den Zustand, der vorliegt — nach `0158`,
+vor `0159`. Sie werden **unverändert** eingebettet; neue Blätter daneben wären
+eine zweite Ordnung für dieselbe Sache. Sie stehen deshalb auch nicht in der
+Familie `PROD_LESELAEUFE_BASIS` des Wächtertests: die verlangt die
+ausgeschriebene Feldfolge in der PRÜFDATEI, und die zwei Dateien sind auf
+Staging in genau dieser Fassung gelaufen. Sie nachträglich zu ergänzen würde
+den SHA-256 im Staging-Protokoll entwerten. Die Feldfolge steht stattdessen
+im Kopf der Hülle, und der Test prüft, dass sie dort steht.
+
+**3. `0159` wird unverändert übernommen.** Es wurde kein Defekt in ihr
+gefunden. Das Risiko, das sie trägt, löst sie selbst — und genau deshalb darf
+niemand es wegkürzen:
+
+> `0154` leitet die verweisenden Tabellen aus `pg_constraint` her (ADR-0134)
+> und weist einen **mehrspaltigen** Fremdschlüssel ausdrücklich ab. `0159`
+> legt genau so einen an: `(base_sky_id, series_code)`. Ohne die Ersetzung von
+> `admin_merge_references` würden `admin_merge_draft` und
+> `admin_discard_draft` ab dem Commit bei **jedem** Aufruf scheitern — zwei
+> Funktionen, die angewendet und in Gebrauch sind.
+
+Die Ersetzung steht in derselben Migration und damit in derselben
+Transaktion. Einen Augenblick, in dem der neue Fremdschlüssel steht und der
+alte Rumpf noch, gibt es für keine andere Sitzung. `A6i`/`A6j` prüfen vorher,
+dass wirklich der Rumpf aus `0154` vorliegt (er weist noch ab, er kennt
+`confkey` noch nicht); `B11c`/`B11d` prüfen danach das Gegenteil.
+
+**4. Nach G3' werden keine Basisfiguren zugeordnet, bis `0160` liegt.**
+`system_platform_export()` führt `base_sky_id` erst ab `0160`. Solange sie
+fehlt, wäre eine Zuordnung in einer Sicherung nicht enthalten und bei einer
+Wiederherstellung verloren. Heute ohne Folge, weil `0159` **nichts** zuordnet
+(`B7` rollt zurück, wenn eine Zeile einen Wert trägt) — als Betriebsregel
+steht es im Kopf der Hülle, nicht in einem Gedächtnis.
+
+**5. Die Nachkontrolle bricht ab, wenn keine Baseline ankommt.** Am
+2026-10-29 lief die G2'-Nachkontrolle mit stehengelassenen Platzhaltern. Die
+eingebettete Prüfung meldete das korrekt — neunzehn rote Zeilen —, aber die
+sahen aus wie ein Befund an den Daten und kosteten einen zweiten Lauf.
+`prod-s-postflight-g3.sql` fragt deshalb **vor** der Tabelle: ist eine Zeile
+da, trägt sie die Marke, hat sie die richtige Feldzahl, stimmt die
+Schutzsumme (`ABBRUCH B2a` bis `B2h`). Die roten Zeilen bleiben als zweite
+Lage stehen.
+
+### Was dabei richtiggestellt wurde
+
+**Die Zahlen 500/124 waren nie ein Production-Stand.** Sie stammen aus dem
+Testaufbau in PGlite: 624 erfundene Zeilen, jede fünfte unsichtbar
+(`g % 5 <> 0`) — genau 500 sichtbar, 124 unsichtbar. Production ist am
+2026-10-29 mit **571/53** gemessen worden. Es gab also keine unerklärte
+Abweichung, sondern eine Testkonstante, die wie ein Befund gelesen wurde.
+
+### Die Risiken, benannt
+
+* **Die Sperre.** `skylanders` bekommt `ACCESS EXCLUSIVE` (ein `add column`,
+  drei `add constraint`, ein `create index`, ein `create trigger`) und behält
+  es bis zum `commit`; der Katalog ist so lange nicht lesbar. Gemessen in
+  echtem PostgreSQL, zwei Laeufe auf derselben Maschine: **54 bis 94 ms** bei
+  624 Zeilen und **230 bis 277 ms** bei 6 240 — und die Migration selbst ist
+  dabei der kleinste Posten (12 bis 25 ms, bei zehnfacher Zeilenzahl
+  unveraendert 17 bis 20 ms), weil sie reine Struktur ist. Was mit der
+  Zeilenzahl waechst, sind die MESSABSCHNITTE der Huelle, nicht `0159`. Die UNIQUE baut einen Index über 624 Zeilen, und der
+  Fremdschlüssel validiert Zeilen, die alle `NULL` tragen, weil die Spalte in
+  derselben Transaktion entstanden ist.
+* **`lock_timeout = '5s'`** verhindert, dass die Gruppe auf eine fremde Sperre
+  beliebig lange wartet. Ein Abbruch dort ist kostenlos.
+* **Die UNIQUE kann nicht kollidieren.** `sky_id` ist der Primärschlüssel,
+  also ist `(sky_id, series_code)` ohnehin eindeutig. Gemessen wird es
+  trotzdem (`A6q`), und eine `NULL` in `series_code` wäre ein eigener Befund
+  (`A6p`).
+* **`ON DELETE RESTRICT` meldet `23001`, nicht `23503`.** Der Unterschied ist
+  gewollt: `RESTRICT` weist sofort ab, `NO ACTION` wartet bis zum Ende der
+  Anweisung. Wer die Fehlerbehandlung im Adminbereich darauf stützt, muss den
+  Code kennen.
+* **Was offen bleibt:** dieses Repository hat kein eigenes Protokoll der
+  Production-Läufe (siehe `APPLIED.md`), und der Lock-Fall lässt sich lokal
+  nicht nachstellen — PGlite hat genau eine Verbindung, also kann kein
+  zweiter Sitzungskontext eine Sperre halten. Dass `lock_timeout` gesetzt ist
+  und mit dem `commit` wieder verschwindet, ist gemessen; dass es im
+  Wartefall greift, ist PostgreSQL-Verhalten und hier nicht bewiesen.
+
+### Der Nachweis
+
+Drei Läufe an echtem PostgreSQL (PGlite 0.5.10 = PostgreSQL 18.6), alle auf
+dem **echten G2'-Zustand**: dem Testaufbau plus `prod-g2-0152-0158.sql`,
+Zeichen für Zeichen der Datei, die auf Production gelaufen ist.
+
+* `g3-riegel.mjs` — **25 Fälle**: Normallauf, zwei erzwungene Fehler mit
+  vollständiger Rücknahme, die Wiederholung (`A6a`), die drei
+  Umgebungsriegel, sechs Fälle veränderter Ausgangsdaten (Shop, Sammlung,
+  Sichtbarkeit, Familie, eine Zuordnung, fehlende Ablage) und zehn Fälle
+  fremder Vorzustände (`A6a`-`A6r`).
+* `g3-verhalten.mjs` — **32 Fälle**: Struktur und Attribute, die
+  Feuerreihenfolge der sechs Trigger, Rechte und `search_path`, RLS; der
+  Kettenriegel bei INSERT und UPDATE in beiden Richtungen, die Serienregel
+  (`23503`), der Selbstbezug (`23514`), `ON DELETE RESTRICT` (`23001`), die
+  Unveränderlichkeit der SKY-ID; `admin_set_variant_base` (zuordnen, lösen,
+  Familie übernehmen, widersprechende Familien), `admin_publish_with_base`,
+  `admin_merge_references` mit dem zweispaltigen Schlüssel und die
+  Zusammenführung, die ohne die Korrektur bräche; keine dauerhafte Änderung;
+  und die erfüllten Vorbedingungen von `0160`, `0161` und `0162`.
+* `g3-blatt.mjs` — **11 Fälle**: beide Blätter in der echten Reihenfolge
+  (`9999 = 0`, `9998 = 0`), zweimal gefahren mit identischem Ergebnis, ohne
+  Baseline, mit verfälschter, vertauschter und abgeschnittener Zeile, und das
+  Nachher-Blatt vor der Migration.
