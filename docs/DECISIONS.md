@@ -17178,6 +17178,20 @@ Ketten über die echten Daten und erwartet `0`; Zeile 134 Zuordnungen über
 Seriengrenzen, 135 Selbstbezüge, 136 verwaiste Verweise. Entstünde je eine
 Kette, hält der nächste Rollout-Schritt an.
 
+**Deadlocks: möglich, folgenlos, und `0161` macht es vor.**
+`admin_set_variant_base` sperrt ZUERST `p_sky_id` und DANN `p_base_sky_id` —
+also in der Reihenfolge der Argumente (gemessen am Rumpf). Zwei gleichzeitige
+Aufrufe mit VERTAUSCHTEN Argumenten sperren damit gegenläufig; PostgreSQL
+erkennt das und bricht eine der beiden mit `40P01` ab. Kein Datenschaden,
+nichts committet — aber ein Abbruch, den eine feste Ordnung nicht hätte.
+`admin_publish_variant_auto` (`0161`, Gruppe G4') sperrt **beide Zeilen in
+EINER Anweisung, `order by s.sky_id`**, und ihr Kommentar nennt den Grund:
+„eine feste Sperrordnung kann keinen Deadlock bauen, eine aufrufabhaengige
+schon." Ab G4' ist der Weg ohne Rückfrage damit deadlockfrei; der direkte
+Aufruf von `admin_set_variant_base` bleibt aufrufabhängig. Die Härtung ist
+dieselbe eine Anweisung und gehört in dieselbe künftige Migration wie das
+`for update` im Riegel.
+
 **Die Berichtigung ist eine Zeile** — `for update` in Richtung 1 des Riegels;
 gemessen ist, dass die Basisfigur damit wirklich gesperrt wird. Sie gehört in
 eine eigene Migration, weil `0159` auf Staging angewendet ist und nicht
