@@ -783,6 +783,12 @@ const PROD_LESELAEUFE_BASIS = [
    */
   ["supabase/operations/prod-s-preflight-g2.sql", "g2_preflight.sql", "pre"],
   ["supabase/operations/prod-s-postflight-g2.sql", "g2_postflight.sql", "post"],
+  /* G4' (0160-0162) und G5' (0163-0164): dieselbe Lage wie G2' — auf
+     Production EINE Transaktion, also eigene Blätter. */
+  ["supabase/operations/prod-s-preflight-g4.sql", "g4_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-g4.sql", "g4_postflight.sql", "post"],
+  ["supabase/operations/prod-s-preflight-g5.sql", "g5_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-g5.sql", "g5_postflight.sql", "post"],
 ] as const;
 
 describe.each(PROD_LESELAEUFE)("der lesende Production-Lauf %s", (datei, pruefdatei) => {
@@ -1091,7 +1097,7 @@ describe.each(PROD_LESELAEUFE_BASIS)(
   });
 });
 
-describe("die zwanzig Dateien teilen EINEN Basis-Vertrag", () => {
+describe("die sechsundzwanzig Dateien teilen EINEN Basis-Vertrag", () => {
   it("die Messung ist in allen vier Dateien zeichengleich", () => {
     /*
      * Der Vergleich funktioniert nur, wenn Preflight und Nachkontrolle
@@ -1448,6 +1454,21 @@ const PRODUKTIONSLAEUFE = [
   ["supabase/operations/prod-g3-0159.sql", "0159_variant_base_figure.sql"],
 ] as const;
 
+/*
+ * DIE ZWEI MEHRFACHGRUPPEN STEHEN NICHT IN DER LISTE OBEN, und der Grund ist
+ * mechanisch: die Schleife dort prüft EINE eingebettete Migration und
+ * schneidet den Rahmen an der ERSTEN Marke — bei drei bzw. zwei Einbettungen
+ * blieben die Zwischenräume ungeprüft. Sie haben deshalb eigene Blöcke, die
+ * den Rahmen außerhalb ALLER Bereiche prüfen (wie G2').
+ */
+const PRODUKTIONSGRUPPEN = [
+  ["supabase/operations/prod-g4-0160-0162.sql",
+   ["0160_platform_export_base_sky_id.sql", "0161_variant_family_auto.sql",
+    "0162_admin_price_and_delete.sql"]],
+  ["supabase/operations/prod-g5-0163-0164.sql",
+   ["0163_catalog_types.sql", "0164_platform_export_types.sql"]],
+] as const;
+
 describe("die siebzehn Production-Laeufe", () => {
   for (const [skript, migration] of PRODUKTIONSLAEUFE) {
     const text = readFileSync(skript, "utf8");
@@ -1581,6 +1602,8 @@ describe.each([
   ["supabase/operations/prod-0149.sql", "supabase/checks/0149_preflight.sql"],
   ["supabase/operations/prod-0152.sql", "supabase/checks/0152_preflight.sql"],
   ["supabase/operations/prod-g3-0159.sql", "supabase/checks/0159_preflight.sql"],
+  ["supabase/operations/prod-g4-0160-0162.sql", "supabase/checks/g4_preflight.sql"],
+  ["supabase/operations/prod-g5-0163-0164.sql", "supabase/checks/g5_preflight.sql"],
 ])("die selbstmessende Hülle %s", (HUELLE, PRUEFDATEI) => {
   const text = readFileSync(HUELLE, "utf8");
   const pruef = readFileSync(PRUEFDATEI, "utf8");
@@ -1628,12 +1651,29 @@ describe.each([
     expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
     expect(zeilen.filter((l) => l === "commit;")).toHaveLength(1);
     expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(0);
-    /* Was die Hülle selbst beiträgt — Riegel, A4, B — darf keine
-       Datenanweisung enthalten; geschrieben wird ausschließlich in der
-       eingebetteten Migration. */
-    const anfang = text.indexOf("-- >>> EINGEBETTET:");
-    const ende = text.indexOf("-- <<< ENDE:");
-    const eigen = (text.slice(0, anfang) + text.slice(ende))
+    /*
+     * Was die Hülle selbst beiträgt — Riegel, A4, B — darf keine
+     * Datenanweisung enthalten; geschrieben wird ausschließlich in den
+     * eingebetteten Migrationen.
+     *
+     * AUSSERHALB ALLER BEREICHE, nicht bloß vor der ersten Marke: `prod-g4`
+     * bettet drei Migrationen ein und `prod-g5` zwei. Ein Rahmen, der an der
+     * ERSTEN Endmarke beginnt, enthielte die folgenden Migrationen — und
+     * damit ihre `insert`-Anweisungen in Funktionsrümpfen. Die Prüfung wäre
+     * dann nicht streng, sondern unmöglich.
+     */
+    const bereiche = [...text.matchAll(/^-- >>> EINGEBETTET: (\S+)$/gm)].map((m) => {
+      const anfang = text.indexOf(`-- >>> EINGEBETTET: ${m[1]}\n`);
+      const ende = text.indexOf(`-- <<< ENDE: ${m[1]}\n`);
+      return { anfang, ende };
+    });
+    let eigen = "";
+    let pos = 0;
+    for (const { anfang, ende } of bereiche) {
+      eigen += text.slice(pos, anfang);
+      pos = ende;
+    }
+    eigen = (eigen + text.slice(pos))
       .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
     for (const verboten of ["insert into", "update public.", "delete from",
       "alter table", "create table", "create function", "grant ", "revoke "]) {
@@ -2188,4 +2228,196 @@ describe.each([
       }
     });
   }
+});
+
+/* ==========================================================================
+ * G4' UND G5' — DIE ZWEI MEHRFACHGRUPPEN
+ *
+ * G4' (`0160`-`0162`) schreibt KEINE Datenzeile: ein ersetzter Exportrumpf,
+ * drei neue Funktionen, eine neu gebaute Journal-Constraint. G5'
+ * (`0163`-`0164`) ist die zweite Gruppe, die in JEDE Katalogzeile schreibt —
+ * drei Spalten und ihre Erstbelegung in vier Anweisungen.
+ *
+ * Beide bekommen denselben Rahmen wie G2' (ADR-0161) und werden hier auf
+ * dieselben Zusagen geprüft: zeichengleiche Einbettung in numerischer
+ * Reihenfolge, EINE Transaktion, keine eigene Klammer in den Migrationen,
+ * der Rahmen außerhalb ALLER Bereiche ohne fachliche Anweisung.
+ * ========================================================================== */
+
+describe.each(PRODUKTIONSGRUPPEN)("die Gruppenhülle %s", (HUELLE, MIGRATIONEN) => {
+  const text = readFileSync(HUELLE, "utf8");
+  const bereiche = MIGRATIONEN.map((m) => {
+    const anfang = `-- >>> EINGEBETTET: supabase/migrations/${m}\n`;
+    const ende = `-- <<< ENDE: supabase/migrations/${m}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    return { m, a, b, inhalt: text.slice(a + anfang.length, b) };
+  });
+
+  it("bettet jede Migration Zeichen für Zeichen ein", () => {
+    for (const { m, a, b, inhalt } of bereiche) {
+      expect(a, `${m}: Marke fehlt`).toBeGreaterThan(-1);
+      expect(b, `${m}: Endmarke fehlt`).toBeGreaterThan(a);
+      expect(inhalt, `${m} ist nicht zeichengleich`)
+        .toBe(readFileSync(`supabase/migrations/${m}`, "utf8"));
+    }
+  });
+
+  it("und zwar in NUMERISCHER Reihenfolge", () => {
+    const marken = [...text.matchAll(/^-- >>> EINGEBETTET: supabase\/migrations\/(\S+)$/gm)]
+      .map((m) => m[1]);
+    expect(marken).toEqual([...MIGRATIONEN]);
+    for (let i = 1; i < bereiche.length; i++) {
+      expect(bereiche[i].a).toBeGreaterThan(bereiche[i - 1].b);
+    }
+  });
+
+  it("ist EINE Transaktion, und keine Migration bringt eine eigene Klammer mit", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(0);
+    for (const { m, inhalt } of bereiche) {
+      const code = inhalt.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      for (const klammer of [/^\s*begin\s*;/m, /^\s*commit\s*;/m, /^\s*rollback\s*;/m]) {
+        expect(code, `${m} trägt eine eigene Klammer`).not.toMatch(klammer);
+      }
+    }
+    /* Die letzte Zeile ist `commit;` — eine abgeschnittene Paste committet nichts. */
+    const nichtLeer = zeilen.filter((l) => l !== "");
+    expect(nichtLeer[nichtLeer.length - 1]).toBe("commit;");
+  });
+
+  it("trägt den UMGEKEHRTEN Riegel vor der ersten Migration", () => {
+    expect(text).toContain("'SKY-0821', 'SKY-0822')) = 2 then");
+    expect(text).toContain("ABBRUCH A1: das vollstaendige STAGING-Markerpaar ist da");
+    expect(text).toContain("to_regprocedure('public.purchases_paid_total_is_final()') is null");
+    expect(text).toContain("zmiwxswrpkmizvqsgype");
+    const riegel = text.indexOf("raise exception 'ABBRUCH A1");
+    expect(riegel).toBeGreaterThan(text.indexOf("begin;"));
+    expect(riegel).toBeLessThan(bereiche[0].a);
+    expect(text).toContain("set local lock_timeout = '5s';");
+    expect(text).toContain("set local statement_timeout = '300s';");
+  });
+
+  it("fügt den Migrationen nichts Fachliches hinzu — außerhalb ALLER Bereiche", () => {
+    let rahmen = "";
+    let pos = 0;
+    for (const { a, b } of bereiche) { rahmen += text.slice(pos, a); pos = b; }
+    rahmen = (rahmen + text.slice(pos))
+      .replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create or replace function", "create table",
+      "create trigger", "grant ", "revoke "]) {
+      expect(rahmen.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+
+  it("legt beide Verträge selbst ab und vergleicht sie NULL-sicher", () => {
+    expect(text).toContain("select set_config('skyisles.base', (");
+    expect(text).toContain("select set_config('skyisles.coll', (");
+    expect(text).not.toContain("BASIS-HIER-EINSETZEN");
+    expect(text).toContain("v_nach_base is distinct from v_vor_base");
+    expect(text).toContain("v_nach_coll is distinct from v_vor_coll");
+    for (const kennung of ["ABBRUCH B1", "ABBRUCH B2", "ABBRUCH B3", "ABBRUCH B4", "ABBRUCH B5"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+  });
+});
+
+describe("prod-g4-0160-0162 verlangt Gleichheit, wo G5 Zuwachs verlangt", () => {
+  const text = readFileSync("supabase/operations/prod-g4-0160-0162.sql", "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it("B8 und B9 verlangen die ZEICHENGLEICHE Liste — die Gruppe legt nichts an", () => {
+    /* `0160`-`0162` legen keinen Trigger, keine Spalte, keinen Index und
+       keine Politik an. Eine Erwartung „plus eins" wäre hier falsch. */
+    expect(text).toContain("erwartet '\n      'ZEICHENGLEICH die vorgefundene");
+    expect(text).toContain("ABBRUCH B8");
+    expect(text).toContain("ABBRUCH B9");
+    expect(fliesstext).toContain("Sie schreibt **keine einzige Datenzeile**");
+  });
+
+  it("prüft den Exportrumpf in beide Richtungen und die Formatversion", () => {
+    expect(text).toContain("92c48444f99b9e294f9703d0c0ddeaa8");   /* vorher: 0153 */
+    expect(text).toContain("ff4f38e61cbd4e5857ea914d6be68d44");   /* nachher: 0160 */
+    expect(text).toContain("ABBRUCH A6b");
+    expect(text).toContain("ABBRUCH B13");
+    expect(text).toContain("ABBRUCH B13c");
+    expect(text).toContain("'format_version', 2,");
+  });
+
+  it("verlangt die berichtigte Fassung von admin_merge_references", () => {
+    /* `0162` zählt mit ihr die Verweise. Die alte aus `0154` wies den
+       zweispaltigen Schlüssel aus `0159` ab — dann bräche jede Löschung. */
+    expect(text).toContain("ABBRUCH A6i");
+    expect(text).toContain("ABBRUCH B14c");
+    expect(text).toContain("v_src not like '%confkey%'");
+  });
+
+  it("fängt eine Journalzeile ab, die 0162 scheitern lassen würde", () => {
+    expect(text).toContain("ABBRUCH A6m");
+    expect(text).toContain("'market_price', 'deleted')");
+  });
+});
+
+describe("prod-g5-0163-0164 rechnet die LightCore-Zahl, statt sie zu kennen", () => {
+  const text = readFileSync("supabase/operations/prod-g5-0163-0164.sql", "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it("legt die Zahl aus der KURATIERTEN LISTE ab und vergleicht sie danach", () => {
+    /*
+     * DAS IST DIE ANTWORT AUF 21 GEGEN 20. `0163` trägt eine kuratierte
+     * Liste von 21 SKY-IDs; `SKY-0854` gibt es auf Production nicht. Die
+     * Hülle zählt deshalb VORHER, wie viele der IDs dieser Katalog hat, und
+     * verlangt NACHHER genau diese Zahl an belegten LightCore-Zeilen.
+     */
+    expect(text).toContain("select set_config('skyisles.lightcore', (");
+    expect(text).toContain("ABBRUCH B6c");
+    expect(text).toContain("ABBRUCH B6d");
+    /* Keine der beiden Zahlen steht als Erwartung in der Datei. */
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    expect(code).not.toMatch(/v_n\s*<>\s*21\b/);
+    expect(code).not.toMatch(/v_n\s*<>\s*20\b/);
+    expect(fliesstext).toContain("SKY-0854");
+    expect(fliesstext).toContain("prod-ab-0821.csv");
+  });
+
+  it("legt den Abdruck der KARTENKUNST getrennt ab und vergleicht ihn", () => {
+    /* ADR-0160: der Type ist eine Menge, `card_type` bleibt eine eigene
+       Spalte, und die Projektion ist nicht verlustfrei. */
+    expect(text).toContain("select set_config('skyisles.karte', (");
+    expect(text).toContain("s.sky_id || '|' || s.card_type");
+    expect(text).toContain("ABBRUCH B5b");
+    expect(fliesstext).toContain("ADR-0160");
+  });
+
+  it("verlangt die zwei Merge-Rümpfe aus 0157, bevor sie sie ersetzt", () => {
+    expect(text).toContain("ef512e9ea093ae36926d3f0333bd0622");
+    expect(text).toContain("0b724dff0bb0fe535e3e5b9ec3573298");
+    expect(text).toContain("ABBRUCH A6e");
+    expect(text).toContain("ABBRUCH A6f");
+    /* Und danach: ersetzt, nicht überladen. */
+    expect(text).toContain("ABBRUCH B10d");
+  });
+
+  it("zählt Riegel ohne die NOT-NULL-Einträge — sonst hinge sie an der Serverfassung", () => {
+    /*
+     * Seit PostgreSQL 17 stehen NOT-NULL-Bedingungen als eigene Zeilen in
+     * `pg_constraint`. `0163` legt zwei Spalten mit NOT NULL an, also wüchse
+     * die Liste dort um fünf Namen und auf älteren Fassungen um drei. Die
+     * Hülle zählt deshalb nur `c`, `f`, `u` und `p`.
+     */
+    expect(text).toContain("c.contype in ('c', 'f', 'u', 'p')");
+    expect(fliesstext).toContain("PostgreSQL 17");
+    expect(text).toContain("ABBRUCH B8");
+  });
+
+  it("prüft die Mitgliedschaft und die Kanonik der Mengen", () => {
+    expect(text).toContain("ABBRUCH B6e");
+    expect(text).toContain("ABBRUCH B6f");
+    expect(text).toContain("ABBRUCH B6g");
+    expect(text).toContain("array_agg(t order by t)");
+    expect(text).toContain("visible_type = any (types)");
+  });
 });
