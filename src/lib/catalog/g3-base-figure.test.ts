@@ -464,6 +464,35 @@ describe("0159 und die Zeilensperren der Schreibwege", () => {
     expect(weiter).toContain("public.admin_set_variant_base(");
   });
 
+  it("DIE SPERRORDNUNG IST AUFRUFABHÄNGIG — und das kann einen Deadlock bauen", async () => {
+    /*
+     * `admin_set_variant_base` sperrt ZUERST `p_sky_id` und DANN
+     * `p_base_sky_id` — also in der Reihenfolge der Argumente. Zwei
+     * gleichzeitige Aufrufe mit VERTAUSCHTEN Argumenten, etwa ('A','B') und
+     * ('B','A'), sperren damit gegenläufig: PostgreSQL erkennt den Deadlock
+     * und bricht EINE der beiden mit `40P01` ab. Kein Datenschaden, nichts
+     * committet — aber ein Abbruch, den eine feste Ordnung nicht hätte.
+     *
+     * `0161` (Gruppe G4') macht es vor und sagt es in ihrem Kommentar: beide
+     * Zeilen in EINER Anweisung, `order by s.sky_id`, `for update`. Genau
+     * das ist die Härtung für `admin_set_variant_base` — sie gehört in
+     * dieselbe künftige Migration wie das `for update` im Kettenriegel
+     * (ADR-0162), weil `0159` auf Staging angewendet ist.
+     *
+     * Dieser Fall FRIERT den heutigen Zustand ein: kippt die Erwartung
+     * eines Tages, ist das die Berichtigung und kein Fehler.
+     */
+    const rumpf = (await eins(db, `select prosrc from pg_proc
+      where oid = to_regprocedure('public.admin_set_variant_base(text,text,boolean)')`)).prosrc as string;
+    const ersteSperre = rumpf.indexOf("p_sky_id for update");
+    const zweiteSperre = rumpf.indexOf("p_base_sky_id for update");
+    expect(ersteSperre, "die Variante wird zuerst gesperrt").toBeGreaterThan(-1);
+    expect(zweiteSperre, "die Basisfigur danach").toBeGreaterThan(ersteSperre);
+    /* Und es gibt KEINE feste Ordnung und keine Beratungssperre. */
+    expect(rumpf).not.toMatch(/order by\s+s?\.?sky_id/);
+    expect(rumpf).not.toMatch(/advisory/i);
+  });
+
   it("und die Härtung WÜRDE greifen: mit for update in Richtung 1 ist die Basisfigur gesperrt", async () => {
     /*
      * Die vorgeschlagene Berichtigung (ADR-0162) in einer Transaktion, die
