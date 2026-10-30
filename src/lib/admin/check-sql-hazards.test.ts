@@ -321,6 +321,15 @@ describe("der Stub-Schema-Generator bricht bei nicht unterstützten Anweisungen 
     expect(r.code).toBe(0);
   });
 
+  /*
+   * DIE 60 SEKUNDEN SIND KEIN SCHÖNHEITSWUNSCH. Dieser Test startet `python3`
+   * und lässt es ALLE Migrationen übersetzen; allein kommt er in gut einer
+   * Sekunde durch, in der vollen Suite nicht. Mit dem Standardbudget von
+   * fünf Sekunden ist er seit dem 2026-10-29 mehrfach gekippt — nicht, weil
+   * seine Zusicherung wackelt, sondern weil parallele Testdateien die CPU
+   * belegen. Ein Test, der unter Last rot wird und allein grün, sagt nichts
+   * über die Sache und viel über sein Zeitbudget.
+   */
   it("und die echten Migrationen enthalten keine solche Anweisung", () => {
     /*
      * Das ist die Zusicherung, auf der das Stub-Schema ruht. Fällt sie eines
@@ -333,5 +342,5 @@ describe("der Stub-Schema-Generator bricht bei nicht unterstützten Anweisungen 
     catch (e) { code = (e as { status?: number }).status ?? -1; }
     finally { rmSync(dir, { recursive: true, force: true }); }
     expect(code, "supabase/migrations/ enthält eine nicht unterstützte Anweisung").toBe(0);
-  });
+  }, 60_000);
 });

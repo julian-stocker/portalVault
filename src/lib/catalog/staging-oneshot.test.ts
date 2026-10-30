@@ -1434,9 +1434,21 @@ const PRODUKTIONSLAEUFE = [
      Katalogzeile, Ersetzung der Journal-Triggerfunktion, ein neuer Trigger.
      Ihre Huelle traegt deshalb vier Absicherungsabschnitte statt zwei. */
   ["supabase/operations/prod-0152.sql", "0152_catalog_status.sql"],
+  /*
+   * `0159`: GRUPPE G3' — eine Gruppe aus EINER Migration, und das ist kein
+   * Widerspruch zu G2': dort mussten sieben zusammen fahren, weil ein
+   * Zwischenzustand schadet (ADR-0161). `0159` ist in sich vollstaendig und
+   * bekommt denselben Rahmen, weil der Rahmen gut ist.
+   *
+   * Sie schreibt KEINE Datenzeile — eine leere Spalte, drei Riegel, ein
+   * Teilindex, ein Trigger, zwei Funktionen, ein ersetzter Rumpf. Der
+   * ersetzte Rumpf ist der Grund fuer Sorgfalt: ohne ihn braeche jede
+   * Zusammenfuehrung, sobald der zweispaltige Fremdschluessel steht.
+   */
+  ["supabase/operations/prod-g3-0159.sql", "0159_variant_base_figure.sql"],
 ] as const;
 
-describe("die sechzehn Production-Laeufe", () => {
+describe("die siebzehn Production-Laeufe", () => {
   for (const [skript, migration] of PRODUKTIONSLAEUFE) {
     const text = readFileSync(skript, "utf8");
 
@@ -1568,6 +1580,7 @@ describe("die sechzehn Production-Laeufe", () => {
 describe.each([
   ["supabase/operations/prod-0149.sql", "supabase/checks/0149_preflight.sql"],
   ["supabase/operations/prod-0152.sql", "supabase/checks/0152_preflight.sql"],
+  ["supabase/operations/prod-g3-0159.sql", "supabase/checks/0159_preflight.sql"],
 ])("die selbstmessende Hülle %s", (HUELLE, PRUEFDATEI) => {
   const text = readFileSync(HUELLE, "utf8");
   const pruef = readFileSync(PRUEFDATEI, "utf8");
@@ -1919,4 +1932,260 @@ describe("die atomare Gruppe prod-g2-0152-0158", () => {
     expect(fliesstext).toMatch(/SPERRWIRKUNG/);
     expect(fliesstext).toContain("lock_timeout");
   });
+});
+
+/* ==========================================================================
+ * G3' — `0159`, DIE VARIANTE KENNT IHRE BASISFIGUR
+ *
+ * EINE GRUPPE AUS EINER MIGRATION. `0159` legt `base_sky_id` an (leer), drei
+ * Riegel, einen Teilindex, einen Trigger und zwei Funktionen — und sie
+ * ERSETZT `admin_merge_references`. Das ist der Grund für Sorgfalt: der
+ * Rumpf aus `0154` weist einen MEHRSPALTIGEN Fremdschlüssel ausdrücklich ab,
+ * und genau so einen legt `0159` an. Ohne die Ersetzung würden
+ * `admin_merge_draft` und `admin_discard_draft` ab dem Commit bei jedem
+ * Aufruf scheitern — zwei Funktionen, die angewendet und in Gebrauch sind.
+ * ========================================================================== */
+
+describe("prod-g3-0159 sichert die Risiken von 0159 ab", () => {
+  const text = readFileSync("supabase/operations/prod-g3-0159.sql", "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it("legt den Identitäts- und Zustandsabdruck ab, nicht bloß eine Zählung", () => {
+    /*
+     * `0159` legt eine UNIQUE über `(sky_id, series_code)` und einen
+     * Fremdschlüssel auf dieselben zwei Spalten. Was dabei nicht wandern
+     * darf, ist die IDENTITÄT — und die hängt an fünf Feldern, nicht an
+     * einer Zeilenzahl.
+     */
+    expect(text).toContain("select set_config('skyisles.ident', (");
+    expect(text).toContain("s.sky_id || '|' || s.series_code || '|' || s.catalog_visible::text");
+    expect(text).toContain("|| '|' || s.catalog_status || '|' || coalesce(s.character_id::text, '-')");
+    expect(text).toContain("select set_config('skyisles.zeilen', (");
+    expect(text).toContain("select set_config('skyisles.familien', (");
+    expect(text).toContain("select set_config('skyisles.trigger', (");
+    expect(text).toContain("select set_config('skyisles.riegel', (");
+    /* NULL-sicher verglichen, wie in der ganzen Familie. */
+    expect(text).toContain("v_nach is distinct from v_vor_ident");
+  });
+
+  it("prüft den Eingangszustand, den die Migration selbst nicht prüft", () => {
+    /*
+     * `0159` sagt `add column if not exists` und MELDET nur, wenn die Spalte
+     * schon steht — sie läuft dann weiter. Auf Production ist das keine
+     * Beruhigung, sondern eine offene Frage; A6a macht daraus einen Abbruch.
+     */
+    for (const kennung of ["ABBRUCH A6a", "ABBRUCH A6b", "ABBRUCH A6c", "ABBRUCH A6d",
+      "ABBRUCH A6e", "ABBRUCH A6f", "ABBRUCH A6g", "ABBRUCH A6h", "ABBRUCH A6i",
+      "ABBRUCH A6j", "ABBRUCH A6k", "ABBRUCH A6l", "ABBRUCH A6m", "ABBRUCH A6n",
+      "ABBRUCH A6o", "ABBRUCH A6p", "ABBRUCH A6q", "ABBRUCH A6r"]) {
+      expect(text, kennung).toContain(kennung);
+    }
+  });
+
+  it("verlangt den Rumpf aus 0154, bevor sie ihn ersetzt — in beide Richtungen", () => {
+    /*
+     * Die Probe, die den Unterschied macht: der vorgefundene Rumpf muss den
+     * mehrspaltigen Fremdschlüssel NOCH abweisen (dann ist es der aus 0154)
+     * und darf `confkey` NOCH NICHT kennen (dann liegt 0159 nicht schon).
+     */
+    expect(text).toContain("if v_src like '%confkey%' then");
+    expect(text).toContain("if v_src not like '%mehrspaltigen Fremdschluessel%' then");
+    /* Und danach genau umgekehrt. */
+    expect(text).toContain("if v_src not like '%confkey%' then");
+    expect(text).toContain("if v_src like '%mehrspaltigen Fremdschluessel%' then");
+    expect(text).toContain("ABBRUCH B11c");
+    expect(text).toContain("ABBRUCH B11d");
+  });
+
+  it("beweist nach dem Commit, dass NICHTS zugeordnet ist", () => {
+    /* Die Kernzusage von CAT-07: die Spalte entsteht LEER. Kein Backfill,
+       keine Massenverknüpfung. B7 rollt zurück, wenn eine Zeile einen Wert
+       trägt — auch wenn jemand sie zwischen A und B gesetzt hätte. */
+    expect(text).toContain("ABBRUCH B7");
+    expect(text).toContain("where base_sky_id is not null");
+    expect(text).toContain("Diese '\n      'Migration ordnet nichts zu");
+  });
+
+  it("zählt Trigger und Riegel namentlich, nicht als Zahl", () => {
+    /*
+     * `0147` brach ab, weil eine Prüfung Trigger ZÄHLTE und null erwartete,
+     * während sechs legitime standen. Hier wird die Liste verglichen: die
+     * vorgefundene plus genau der eine neue Trigger, plus genau die drei
+     * neuen Riegel.
+     */
+    expect(text).toContain("array['skylanders_variant_base_guard_trg']");
+    expect(text).toContain("array['skylanders_id_series_uniq',");
+    expect(text).toContain("'skylanders_base_not_self',");
+    expect(text).toContain("'skylanders_base_same_series']");
+    expect(text).toContain("ABBRUCH B8");
+    expect(text).toContain("ABBRUCH B9");
+  });
+
+  it("prüft den Serienriegel auf BEIDE Spalten und auf RESTRICT", () => {
+    /* Ein einspaltiger Fremdschlüssel auf `sky_id` allein sähe gleich aus
+       und ließe jede Serie zu — das ist der Unterschied zwischen Riegel und
+       Anschein. */
+    expect(text).toContain("v_def not like '%base_sky_id%series_code%'");
+    expect(text).toContain("v_def not like '%ON UPDATE RESTRICT%'");
+    expect(text).toContain("v_def not like '%ON DELETE RESTRICT%'");
+    expect(text).toContain("ABBRUCH B9d");
+    /* Und der Teilindex, der die Abfrage „alle Varianten dieser Basisfigur"
+       trägt. */
+    expect(text).toContain("skylanders_base_sky_id_idx");
+    expect(text).toContain("ABBRUCH B9e");
+  });
+
+  it("verlangt den zwölften Journalwert vor dem Commit", () => {
+    /* Dieselbe Lehre zum dritten Mal: wer eine Spalte journalisiert, muss
+       ihren Namen in die Liste aufnehmen. `0152` hat es vergessen, und jeder
+       Statuswechsel lief danach in `23514`. */
+    expect(text).toContain("ABBRUCH B10b");
+    expect(text).toContain("v_def not like '%base_sky_id%'");
+    expect(fliesstext).toContain("23514");
+  });
+
+  it("lässt die Rechte nicht offen und nimmt nichts Bestehendes mit", () => {
+    expect(text).toContain("ABBRUCH B13");
+    expect(text).toContain("a.grantee = 0 or a.grantee::regrole::text in ('anon', 'public')");
+    expect(text).toContain("has_function_privilege('authenticated',");
+    expect(text).toContain("ABBRUCH B14");
+    for (const bestehend of ["admin_set_character(text,bigint)", "admin_create_character(text)",
+      "admin_publish_as_variant(text,bigint)", "admin_set_catalog_status(text,text)",
+      "admin_set_catalog_visible(text,boolean)", "admin_merge_draft(text,text,text,jsonb)",
+      "admin_discard_draft(text)"]) {
+      expect(text, bestehend).toContain(bestehend);
+    }
+  });
+
+  it("sagt im Kopf, was nach G3' NICHT getan werden darf", () => {
+    /*
+     * `system_platform_export()` führt `base_sky_id` erst ab `0160`. Solange
+     * sie fehlt, wäre eine Zuordnung in einer Sicherung nicht enthalten und
+     * bei einer Wiederherstellung verloren. Heute ohne Folge, weil nichts
+     * zugeordnet ist — aber es gehört in die Datei und nicht in ein
+     * Gedächtnis.
+     */
+    expect(fliesstext).toContain("keine Basisfiguren zuordnen, bis 0160 liegt");
+    expect(fliesstext).toContain("system_platform_export");
+    /* Und die Sperrwirkung samt Obergrenzen. */
+    expect(fliesstext).toMatch(/SPERRWIRKUNG/);
+    expect(text).toContain("set local lock_timeout = '5s';");
+    expect(text).toContain("set local statement_timeout = '300s';");
+  });
+});
+
+/* ==========================================================================
+ * DIE ZWEI LESENDEN G3'-BLÄTTER
+ *
+ * Sie betten die EINZELNEN Prüfdateien `0159_preflight.sql` und
+ * `0159_postflight.sql` ein, und das ist richtig: G3' ist EINE Migration,
+ * also messen die beiden genau den Zustand, der vorliegt. G2' brauchte
+ * eigene Blätter, weil dort sieben Migrationen als eine Transaktion liefen
+ * und die sechs Zwischenzustände auf Production nie existierten.
+ *
+ * Deshalb stehen sie NICHT in `PROD_LESELAEUFE_BASIS`: die Familie dort
+ * verlangt die ausgeschriebene Feldfolge in der PRÜFDATEI, und die zwei
+ * `0159`-Dateien sind auf Staging in genau dieser Fassung gelaufen. Sie
+ * nachträglich zu ergänzen würde den SHA-256 im Staging-Protokoll entwerten.
+ * Die Feldfolge steht stattdessen im Kopf der Hülle, und hier steht, dass
+ * sie dort steht.
+ * ========================================================================== */
+
+describe.each([
+  ["supabase/operations/prod-s-preflight-g3.sql", "0159_preflight.sql", "pre"],
+  ["supabase/operations/prod-s-postflight-g3.sql", "0159_postflight.sql", "post"],
+])("das lesende G3'-Blatt %s", (datei, pruefdatei, rolle) => {
+  const text = readFileSync(datei, "utf8");
+  const pruef = readFileSync(`supabase/checks/${pruefdatei}`, "utf8");
+  const fliesstext = text.replace(/^\s*--\s?/gm, "").replace(/\s+/g, " ");
+
+  it(`bettet ${pruefdatei} Zeichen für Zeichen ein`, () => {
+    const anfang = `-- >>> EINGEBETTET: supabase/checks/${pruefdatei}\n`;
+    const ende = `-- <<< ENDE: supabase/checks/${pruefdatei}\n`;
+    const a = text.indexOf(anfang);
+    const b = text.indexOf(ende);
+    expect(a, "Marke fehlt").toBeGreaterThan(-1);
+    expect(b, "Endmarke fehlt").toBeGreaterThan(a);
+    expect(text.slice(a + anfang.length, b)).toBe(pruef);
+  });
+
+  it("trägt den Riegel der Familie — zeichengleich in allen drei Bedingungen", () => {
+    const schreibend = readFileSync("supabase/operations/prod-0136.sql", "utf8");
+    for (const bedingung of [
+      "if (select count(*) from public.skylanders\n       where sky_id in ('SKY-0821', 'SKY-0822')) = 2 then",
+      "if to_regprocedure('public.purchases_paid_total_is_final()') is null then",
+      "if (select count(*) from public.skylanders) < 100 then",
+    ]) {
+      expect(schreibend, bedingung).toContain(bedingung);
+      expect(text, bedingung).toContain(bedingung);
+    }
+  });
+
+  it("endet mit rollback und schreibt nichts", () => {
+    const zeilen = text.split("\n").map((l) => l.trim());
+    expect(zeilen.filter((l) => l === "begin;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "rollback;")).toHaveLength(1);
+    expect(zeilen.filter((l) => l === "commit;")).toHaveLength(0);
+    const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+    for (const verboten of ["insert into", "update public.", "delete from",
+      "alter table", "create ", "grant ", "revoke "]) {
+      expect(code.toLowerCase(), verboten).not.toContain(verboten);
+    }
+  });
+
+  it("schreibt die Feldfolge beider Verträge aus", () => {
+    /* Nach POSITION verglichen — eine vertauschte Zeile wäre eine stille
+       Fehlinformation. Deshalb steht die Folge im Kopf, ausgeschrieben. */
+    expect(fliesstext).toContain("skyisles-base-1|angebote|angebote_md5");
+    expect(fliesstext).toContain("1 skyisles-base-1 die Marke");
+    expect(fliesstext).toContain("9 schutz left(md5(Felder 2-8, mit | verbunden), 12)");
+    expect(fliesstext).toContain("skyisles-coll-1|zeilen|konten|sammlung_md5|schutz");
+    expect(fliesstext).toContain("zeigt `NOTICE`-Meldungen nicht");
+    expect(fliesstext).toContain("DIE GRENZE EINES VORHER-NACHHER-VERGLEICHS");
+  });
+
+  if (rolle === "pre") {
+    it("MESST die Verträge und gibt sie als zwei Zeilen aus", () => {
+      expect(pruef).toContain("(900, 'BASIS'");
+      expect(pruef).toContain("(901, 'BASIS'");
+      expect(pruef).toContain("'skyisles-base-1|' || kern || '|' || left(md5(kern), 12)");
+      expect(fliesstext).toContain("ZEILE 900 IST DAS ERGEBNIS, DAS WEITERGEHT");
+      /* Und sie nimmt selbst keine Baseline entgegen — sie erzeugt eine. */
+      const ausfuehrbar = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*--.*$/gm, "");
+      expect(ausfuehrbar).not.toContain("set_config('skyisles.base'");
+    });
+  } else {
+    it("NIMMT beide Baselines entgegen und BRICHT AB, wenn eine fehlt", () => {
+      /*
+       * DIE LEHRE AUS DEM G2'-LAUF VOM 2026-10-29. Dort lief die
+       * Nachkontrolle mit stehengelassenen Platzhaltern; die eingebettete
+       * Prüfung meldete das korrekt mit neunzehn roten Zeilen — aber die
+       * sahen aus wie ein Befund an den Daten. Jetzt steht die Frage VOR der
+       * Tabelle und blockiert, und die roten Zeilen bleiben als zweite Lage.
+       */
+      expect(text).toContain("select set_config('skyisles.base', 'BASIS-HIER-EINSETZEN', true);");
+      expect(text).toContain("select set_config('skyisles.coll', 'SAMMLUNG-HIER-EINSETZEN', true);");
+      for (const kennung of ["ABBRUCH B2a", "ABBRUCH B2b", "ABBRUCH B2c", "ABBRUCH B2d",
+        "ABBRUCH B2e", "ABBRUCH B2f", "ABBRUCH B2g", "ABBRUCH B2h"]) {
+        expect(text, kennung).toContain(kennung);
+      }
+      /* Der Riegel steht VOR der eingebetteten Prüfung. */
+      expect(text.indexOf("$lauf_b2$;")).toBeLessThan(text.indexOf("-- >>> EINGEBETTET"));
+      /* Und die zweite Lage ist noch da. */
+      expect(pruef).toContain("'BASIS-HIER-EINSETZEN') as roh");
+      expect(pruef).toContain("'SAMMLUNG-HIER-EINSETZEN') as roh");
+      expect(pruef).toContain("else '(keine gueltige Basis)' end");
+    });
+
+    it("vergleicht alle sieben Shop-Werte BLOCKIEREND gegen die Basis", () => {
+      for (const nr of [811, 812, 813, 814, 815, 816, 817]) {
+        expect(pruef, `Zeile ${nr} fehlt`).toContain(`(${nr}, 'Shop'`);
+      }
+      expect(pruef.match(/when gueltig then t\[[2-8]\]/g)).toHaveLength(7);
+      expect(pruef.match(/when coll_gueltig then k\[[2-4]\]/g)).toHaveLength(3);
+      for (const nr of [801, 802, 803, 804]) {
+        expect(pruef, `Zeile ${nr} fehlt`).toContain(`(${nr}, 'Basis'`);
+      }
+    });
+  }
 });
