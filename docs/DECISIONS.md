@@ -17152,6 +17152,103 @@ Abweichung, sondern eine Testkonstante, die wie ein Befund gelesen wurde.
   und mit dem `commit` wieder verschwindet, ist gemessen; dass es im
   Wartefall greift, ist PostgreSQL-Verhalten und hier nicht bewiesen.
 
+### Nachtrag (2026-10-30): die zwei offenen Fragen zu `0159`, und was G4' und G5' daraus gelernt haben
+
+**1. Die Nebenläufigkeit des Kettenriegels.** Der Trigger prüft eine Bedingung
+über ZWEI Zeilen mit zwei gewöhnlichen `select` und nimmt dabei **keine
+Sperre** (gemessen: sein Rumpf enthält kein `for update`). Unter `READ
+COMMITTED` sieht ein solcher `select` den letzten committeten Stand — zwei
+gleichzeitige Zuordnungen könnten also beide durchgehen und zusammen die
+verbotene Kette ergeben. **Der Fremdschlüssel hält das nicht auf:** er sperrt
+die verwiesene Zeile mit `FOR KEY SHARE` (gemessen: `xmax` ist gesetzt), und
+die kollidiert nach der dokumentierten Konfliktmatrix nur mit `FOR UPDATE`,
+nicht mit dem UPDATE einer Nicht-Schlüsselspalte.
+
+**Erreichbar ist die Lücke nicht.** `admin_set_variant_base` sperrt die
+Variante UND die Basisfigur mit `for update` (zweimal, gemessen);
+`admin_publish_with_base` und `admin_publish_variant_auto` (`0161`) rufen sie,
+statt selbst zu schreiben — `0161` sperrt zusätzlich beide Katalogzeilen in
+EINER Anweisung in `sky_id`-Reihenfolge und nimmt eine Beratungssperre auf den
+Familiennamen. Einen Tabellen-Schreibweg auf `skylanders` gibt es für **keine**
+Clientrolle (`0033`). Übrig bleibt eine von Hand getippte Anweisung als
+`postgres` — und zwei davon gleichzeitig.
+
+**Und es gibt einen zweiten Fangpunkt:** `0160_preflight.sql` Zeile 133 zählt
+Ketten über die echten Daten und erwartet `0`; Zeile 134 Zuordnungen über
+Seriengrenzen, 135 Selbstbezüge, 136 verwaiste Verweise. Entstünde je eine
+Kette, hält der nächste Rollout-Schritt an.
+
+**Die Berichtigung ist eine Zeile** — `for update` in Richtung 1 des Riegels;
+gemessen ist, dass die Basisfigur damit wirklich gesperrt wird. Sie gehört in
+eine eigene Migration, weil `0159` auf Staging angewendet ist und nicht
+geändert wird, und sie ist **nicht Teil von G3'**: der Weg, auf dem die Lücke
+erreichbar wäre, existiert nicht, und eine Migration ohne Staging-Lauf an ein
+Release zu hängen wäre der schlechtere Tausch.
+
+**Der verlangte Test mit zwei parallelen Transaktionen ist hier nicht fahrbar,
+und das ist gemessen:** PGlite hat je Instanz einen Backend; zwei Instanzen auf
+demselben Verzeichnis sind ZWEI unabhängige Datenbanken — die zweite durfte
+dieselbe Zeile schreiben, ohne zu warten, und danach sahen beide verschiedene
+Werte. `pgrowlocks` und `pageinspect` fehlen, der Sperr-MODUS ist also auch
+nicht ablesbar. Was messbar war, ist gemessen; der Rest steht als Matrix und
+ist als solcher gekennzeichnet.
+
+**2. `admin_merge_references` und der zweispaltige Schlüssel.** Sie zählt
+**nicht** falsch, und sie blockiert nichts unnötig — gemessen an echtem
+PostgreSQL: eine Figur ohne Varianten erscheint gar nicht in der Liste, die
+624 Zeilen mit `base_sky_id IS NULL` zählen nicht mit (sonst wäre ab dem
+Commit jede Zusammenführung blockiert), eine Figur mit zwei Varianten wird mit
+genau 2 gezählt, Zusammenführen und Verwerfen laufen weiter, und ein Entwurf
+MIT Variante wird richtig abgewiesen.
+
+**Warum eine Spalte genügt:** `series_code` steht auf beiden Seiten des
+Schlüssels, und weil `sky_id` eindeutig ist, erzwingt er Gleichheit — eine
+Zeile mit abweichender Serie kann gar nicht entstehen (`23503`, gemessen).
+**Die Grenze, ausdrücklich:** bei einem KÜNFTIGEN mehrspaltigen Schlüssel,
+dessen zweite Spalte abweichen darf, würde sie überzählen (vorgeführt mit
+einem künstlichen Schlüssel: 2 statt 1). So einen Schlüssel gibt es heute
+nicht; der Fall steht als Dauertest in `g3-base-figure.test.ts`, damit die
+Grenze nicht in Vergessenheit gerät.
+
+**3. Zwei Funde, die aus den Messungen selbst kamen.**
+
+* `B8`/`B9` der G3'-Hülle verglichen falsch, wenn die Tabelle vorher KEINEN
+  Trigger oder Riegel trägt — das Platzhalterwort `(keine)` wanderte in die
+  Erwartung. Auf Production stehen fünf Trigger, dort hätte es nicht gefeuert.
+  Berichtigt.
+* **Seit PostgreSQL 17 stehen NOT-NULL-Bedingungen als eigene Zeilen in
+  `pg_constraint`.** `0163` legt zwei Spalten mit NOT NULL an, also wächst die
+  Riegelliste dort um FÜNF Namen und auf älteren Fassungen um DREI. Eine
+  Erwartung, die die drei aufzählt, hinge damit an der Serverfassung — die
+  G5'-Hülle zählt deshalb nur `c`, `f`, `u` und `p`. Gefunden in PGlite 0.5.10
+  (= PostgreSQL 18.6); welche Fassung Production fährt, ist von hier nicht
+  lesbar, und genau deshalb darf die Prüfung nicht davon abhängen.
+
+### G4' (`0160`-`0162`) und G5' (`0163`-`0164`)
+
+**G4' schreibt keine einzige Datenzeile** — ein ersetzter Exportrumpf, drei
+neue Funktionen, eine neu gebaute Journal-Constraint (vierzehn Werte). Ihre
+Hülle verlangt deshalb bei Trigger- und Riegelliste **Gleichheit statt
+Zuwachs**. Sie fängt zwei Dinge vorher ab, die sonst mitten in der Gruppe
+scheiterten: eine Journalzeile mit einem Feld außerhalb der vierzehn (`0162`
+baut die Constraint ohne `not valid` neu) und die alte Fassung von
+`admin_merge_references`.
+
+**G5' ist die zweite Gruppe, die in jede Katalogzeile schreibt.** Der Kern
+ihrer Absicherung ist die **Kartenkunst**: `card_type` bleibt eine eigene
+Spalte (ADR-0160), und ihr Abdruck wird getrennt abgelegt und verglichen
+(`ABBRUCH B5b`). Die LightCore-Zahl ist **gerechnet, nicht codiert**: die
+Hülle zählt vorher, wie viele der 21 kuratierten SKY-IDs dieser Katalog hat,
+und verlangt nachher genau so viele belegte Zeilen. Auf Staging sind das 21,
+auf Production 20 — **`SKY-0854` existiert dort nicht** (Nachweis:
+`resources/analysis/prod-ab-0821.csv`, drei Zeilen ab SKY-0821, keine davon
+SKY-0854). Damit ist die „unerklärte Abweichung 21 gegen 20" erklärt und
+zugleich strukturell unschädlich.
+
+**Die Reihenfolge ist zwingend und wird geprüft:** G4' verlangt den
+Exportrumpf aus `0153` und hinterlässt den aus `0160`; G5' verlangt den aus
+`0160` und hinterlässt den aus `0164`. Jede Gruppe prüft beide Enden.
+
 ### Der Nachweis
 
 Drei Läufe an echtem PostgreSQL (PGlite 0.5.10 = PostgreSQL 18.6), alle auf

@@ -83,6 +83,54 @@
 -- ist heute ohne Folge, weil nichts zugeordnet ist (B7). ES HEISST ABER:
 -- **nach G3' im Adminbereich keine Basisfiguren zuordnen, bis 0160 liegt.**
 --
+-- ZWEI FRAGEN, DIE VOR DER FREIGABE GEPRUEFT WURDEN (2026-10-30)
+-- ========================================================================
+--
+-- 1. KANN EINE VERBOTENE VARIANTENKETTE DURCH NEBENLAEUFIGKEIT ENTSTEHEN?
+--
+--    DER KETTENRIEGEL ALLEIN IST NICHT NEBENLAEUFIGKEITSSICHER, und das ist
+--    gemessen: er prueft eine Bedingung ueber ZWEI Zeilen mit zwei
+--    gewoehnlichen `select` und nimmt dabei KEINE Sperre. Unter READ
+--    COMMITTED sieht ein solcher `select` den letzten committeten Stand —
+--    zwei gleichzeitige Zuordnungen koennten also beide durchgehen und
+--    zusammen eine Kette ergeben. Der Fremdschluessel haelt das nicht auf:
+--    er sperrt die verwiesene Zeile mit `FOR KEY SHARE`, und die kollidiert
+--    nach der Konfliktmatrix nur mit `FOR UPDATE`, nicht mit dem UPDATE
+--    einer Nicht-Schluesselspalte.
+--
+--    ERREICHBAR IST DIE LUECKE TROTZDEM NICHT, und zwar aus drei Gruenden:
+--    `admin_set_variant_base` sperrt die Variante UND die Basisfigur mit
+--    `for update` (zweimal, gemessen); `admin_publish_with_base` und — ab
+--    `0161` — `admin_publish_variant_auto` rufen sie, statt selbst zu
+--    schreiben; und einen Tabellen-Schreibweg auf `skylanders` gibt es fuer
+--    KEINE Clientrolle (`0033`). Uebrig bleibt eine von Hand getippte
+--    Anweisung als `postgres` — und zwei davon gleichzeitig.
+--
+--    UND ES GIBT EINEN ZWEITEN FANGPUNKT: `0160_preflight.sql`, Zeile 133,
+--    zaehlt Ketten ueber die echten Daten und erwartet `0`. Entstuende je
+--    eine, haelt der naechste Rollout-Schritt an.
+--
+--    DIE BERICHTIGUNG IST EINE ZEILE (`for update` in Richtung 1 des
+--    Riegels) und gehoert in eine eigene Migration — `0159` ist auf Staging
+--    angewendet und wird nicht geaendert. Vorschlag und Begruendung:
+--    ADR-0162. SIE IST NICHT TEIL VON G3'.
+--
+-- 2. ZAEHLT `admin_merge_references` BEIM ZWEISPALTIGEN SCHLUESSEL FALSCH
+--    UND BLOCKIERT DADURCH UNNOETIG?
+--
+--    NEIN, und auch das ist gemessen: sie zaehlt auf `base_sky_id`, und eine
+--    Zeile mit `base_sky_id = X` hat zwingend dieselbe Serie wie X — ein
+--    Versuch mit abweichender Serie wird mit `23503` abgewiesen. Die
+--    Zaehlung auf EINER Spalte ist fuer diesen Schluessel also exakt. Zeilen
+--    mit `base_sky_id IS NULL` zaehlen nicht mit (sonst waere jede
+--    Zusammenfuehrung ab dem Commit blockiert); eine Figur ohne Varianten
+--    erscheint gar nicht in der Liste; eine mit zwei Varianten mit genau 2.
+--
+--    DIE GRENZE, ausdruecklich: bei einem KUENFTIGEN mehrspaltigen
+--    Schluessel, dessen zweite Spalte abweichen darf, wuerde sie
+--    ueberzaehlen. So einen Schluessel gibt es heute nicht; der Fall steht
+--    als Dauertest in `src/lib/catalog/g3-base-figure.test.ts`.
+--
 -- WAS DIESE HUELLE HINZUFUEGT
 -- ========================================================================
 --

@@ -376,3 +376,232 @@ describe("prod-g3-0159 nimmt bei einem Fehler ALLES mit", () => {
     expect(nach.spalte).toBe(0);
   }, 120_000);
 });
+
+/* ==========================================================================
+ * `0159` UNTER NEBENLÄUFIGKEIT — WAS GEMESSEN WERDEN KANN UND WAS NICHT
+ *
+ * Der Kettenriegel prüft eine Bedingung über ZWEI Zeilen, und zwar mit zwei
+ * gewöhnlichen `select`. Unter `READ COMMITTED` sieht ein solches `select`
+ * den letzten committeten Stand — nicht die offene Arbeit einer anderen
+ * Sitzung. Zwei gleichzeitige Zuordnungen könnten also beide durchgehen und
+ * zusammen eine verbotene Kette ergeben.
+ *
+ * DER TEST MIT ZWEI SITZUNGEN IST HIER NICHT FAHRBAR, und das ist gemessen:
+ * PGlite hat je Instanz einen Backend, und zwei Instanzen auf demselben
+ * Verzeichnis sind ZWEI unabhängige Datenbanken — die zweite durfte dieselbe
+ * Zeile schreiben, ohne zu warten, und danach sahen beide verschiedene
+ * Werte. Ein „Nebenläufigkeitstest" darauf sagte nichts über PostgreSQL.
+ *
+ * MESSBAR IST DIE EIGENSCHAFT, AN DER ALLES HÄNGT: wer nimmt welche
+ * Zeilensperre? Eine gesperrte Zeile trägt die sperrende
+ * Transaktionsnummer in `xmax`, und das ist in EINER Sitzung ablesbar. Was
+ * nicht ablesbar ist, ist der MODUS der Sperre — `pgrowlocks` und
+ * `pageinspect` gibt es in PGlite nicht. Dafür gilt die dokumentierte
+ * Konfliktmatrix (PostgreSQL 13.3.2), und sie steht in ADR-0162.
+ * ========================================================================== */
+
+describe("0159 und die Zeilensperren der Schreibwege", () => {
+  let db: DB;
+  beforeAll(async () => {
+    db = await frisch();
+    expect(await lauf(db, HUELLE)).toBeNull();
+  }, 120_000);
+  afterAll(async () => { await db?.close(); });
+
+  /** Trägt die Zeile die Sperre der laufenden Transaktion? */
+  const gesperrt = async (sky: string) =>
+    (await eins(db, `select (xmax <> 0 and xmax::text = pg_current_xact_id()::text) as g
+                       from public.skylanders where sky_id = '${sky}'`)).g;
+
+  it("ein direktes UPDATE sperrt die Variante — und die Basisfigur nur über den Fremdschlüssel", async () => {
+    await db.exec("begin;");
+    await db.query(`update public.skylanders set base_sky_id = 'SKY-0002' where sky_id = 'SKY-0003'`);
+    const variante = await gesperrt("SKY-0003");
+    const basis = await gesperrt("SKY-0002");
+    await db.exec("rollback;");
+    expect(variante, "die geschriebene Zeile ist gesperrt").toBe(true);
+    /*
+     * DIE BASISFIGUR IST AUCH GESPERRT — aber vom FREMDSCHLÜSSEL, nicht vom
+     * Riegel: PostgreSQL nimmt beim Schreiben eines verweisenden Wertes eine
+     * Sperre auf die verwiesene Zeile. Das ist `FOR KEY SHARE`, und die
+     * kollidiert nach der Konfliktmatrix NUR mit `FOR UPDATE` — ein UPDATE,
+     * das keine Schlüsselspalte ändert, nimmt `FOR NO KEY UPDATE`. Sie hält
+     * einen gleichzeitigen Schreiber von `base_sky_id` also NICHT auf.
+     */
+    expect(basis, "der Fremdschlüssel sperrt die verwiesene Zeile").toBe(true);
+  });
+
+  it("der Kettenriegel selbst nimmt KEINE Sperre — er liest einen Schnappschuss", async () => {
+    const rumpf = (await eins(db, `select prosrc from pg_proc
+      where oid = to_regprocedure('public.skylanders_variant_base_guard()')`)).prosrc as string;
+    expect(rumpf).not.toMatch(/for\s+update/i);
+    expect(rumpf).not.toMatch(/advisory/i);
+    /* Zwei gewöhnliche Lesezugriffe, einer je Richtung. */
+    expect((rumpf.match(/select/gi) || []).length).toBe(2);
+  });
+
+  it("aber JEDER Schreibweg, den es gibt, sperrt BEIDE Zeilen mit for update", async () => {
+    /*
+     * DAS IST DER GRUND, WARUM DIE LÜCKE HEUTE UNERREICHBAR IST.
+     * `admin_set_variant_base` sperrt die Variante und die Basisfigur, und
+     * `admin_publish_with_base` ruft sie. Einen Tabellen-Schreibweg gibt es
+     * für keine Clientrolle (`0033`). Übrig bleibt eine von Hand getippte
+     * Anweisung als `postgres` — und zwei davon gleichzeitig.
+     */
+    await db.exec("begin;");
+    await db.query(`select public.admin_set_variant_base('SKY-0003', 'SKY-0002')`);
+    const variante = await gesperrt("SKY-0003");
+    const basis = await gesperrt("SKY-0002");
+    await db.exec("rollback;");
+    expect([variante, basis]).toEqual([true, true]);
+
+    const rumpf = (await eins(db, `select prosrc from pg_proc
+      where oid = to_regprocedure('public.admin_set_variant_base(text,text,boolean)')`)).prosrc as string;
+    expect((rumpf.match(/for update/gi) || []).length,
+      "zwei for update: die Variante und die Basisfigur").toBe(2);
+    const weiter = (await eins(db, `select prosrc from pg_proc
+      where oid = to_regprocedure('public.admin_publish_with_base(text,text,boolean)')`)).prosrc as string;
+    expect(weiter).toContain("public.admin_set_variant_base(");
+  });
+
+  it("und die Härtung WÜRDE greifen: mit for update in Richtung 1 ist die Basisfigur gesperrt", async () => {
+    /*
+     * Die vorgeschlagene Berichtigung (ADR-0162) in einer Transaktion, die
+     * zurückgerollt wird — `0159` bleibt unberührt. Gemessen wird nur, dass
+     * die Sperre dann WIRKLICH entsteht; dass `FOR UPDATE` mit dem UPDATE
+     * der anderen Sitzung kollidiert, ist die Konfliktmatrix.
+     */
+    await db.exec("begin;");
+    await db.exec(`create or replace function public.skylanders_variant_base_guard()
+      returns trigger language plpgsql security definer set search_path = '' as $f$
+      declare v_b text; v_n integer;
+      begin
+        if new.base_sky_id is null then return new; end if;
+        select s.base_sky_id into v_b from public.skylanders s
+          where s.sky_id = new.base_sky_id for update;
+        if v_b is not null then
+          raise exception 'PROBE' using errcode = 'check_violation';
+        end if;
+        select count(*) into v_n from public.skylanders s where s.base_sky_id = new.sky_id;
+        if v_n > 0 then raise exception 'PROBE' using errcode = 'check_violation'; end if;
+        return new;
+      end $f$;`);
+    await db.query(`update public.skylanders set base_sky_id = 'SKY-0004' where sky_id = 'SKY-0005'`);
+    const basis = await gesperrt("SKY-0004");
+    await db.exec("rollback;");
+    expect(basis, "mit for update sperrt der Riegel die Basisfigur selbst").toBe(true);
+
+    const danach = (await eins(db, `select prosrc from pg_proc
+      where oid = to_regprocedure('public.skylanders_variant_base_guard()')`)).prosrc as string;
+    expect(danach, "die Probe ist zurückgerollt").not.toMatch(/PROBE/);
+  });
+});
+
+/* ==========================================================================
+ * admin_merge_references UND DER ZWEISPALTIGE SCHLÜSSEL
+ *
+ * Die Funktion zählt je Fremdschlüssel auf GENAU EINER Spalte — der, die auf
+ * `sky_id` zeigt. Bei einem zweispaltigen Schlüssel ist das nur dann exakt,
+ * wenn die zweite Spalte nicht abweichen KANN. Beim Serienriegel kann sie es
+ * nicht: `series_code` steht auf beiden Seiten, und weil `sky_id` eindeutig
+ * ist, erzwingt der Schlüssel Gleichheit.
+ *
+ * Hier steht beides: dass es für diesen Schlüssel exakt ist, und wo die
+ * Grenze liegt.
+ * ========================================================================== */
+
+describe("admin_merge_references zählt den zweispaltigen Schlüssel exakt", () => {
+  let db: DB;
+  beforeAll(async () => {
+    db = await frisch();
+    expect(await lauf(db, HUELLE)).toBeNull();
+  }, 120_000);
+  afterAll(async () => { await db?.close(); });
+
+  const refs = async (sky: string) => (await db.query(
+    `select tabelle, spalte, zeilen::int as zeilen from public.admin_merge_references('${sky}')
+      order by 1, 2`)).rows;
+
+  it("eine Figur ohne Varianten erscheint NICHT als Referenz", async () => {
+    /*
+     * DER FEHLALARM, DEN ES NICHT GIBT: 120 Zeilen tragen `base_sky_id IS
+     * NULL`. Zählte die Funktion sie mit, wäre ab diesem Commit JEDE
+     * Zusammenführung und jedes Verwerfen blockiert.
+     */
+    const r = await refs("SKY-0100");
+    expect(r.some((x) => x.tabelle === "public.skylanders")).toBe(false);
+    const n = (await eins(db, `select count(*)::int as n from public.skylanders
+      where base_sky_id is null`)).n;
+    expect(n).toBeGreaterThan(100);
+  });
+
+  it("eine Figur mit zwei Varianten wird mit GENAU 2 gezählt, auf base_sky_id", async () => {
+    await db.exec("begin;");
+    await db.query(`update public.skylanders set base_sky_id = 'SKY-0100' where sky_id = 'SKY-0101'`);
+    await db.query(`update public.skylanders set base_sky_id = 'SKY-0100' where sky_id = 'SKY-0102'`);
+    const r = await refs("SKY-0100");
+    await db.exec("rollback;");
+    expect(r).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tabelle: "public.skylanders", spalte: "base_sky_id", zeilen: 2 })]));
+  });
+
+  it("eine Zuordnung über Seriengrenzen kann gar nicht entstehen — deshalb ist EINE Spalte genug", async () => {
+    /*
+     * Das ist der Beweis für die Exaktheit: gäbe es eine Zeile mit
+     * `base_sky_id = X` und einer anderen Serie als X, zählte die Funktion
+     * sie mit, obwohl sie den Schlüssel nicht erfüllt. Eine solche Zeile
+     * weist die Datenbank ab.
+     */
+    await db.exec("begin;");
+    await db.query(`insert into public.skylanders
+      (sky_id, name, slug, series_code, category_id, catalog_visible, catalog_status)
+      values ('SKY-9301','Andere Serie','andere-9301','SF',
+              (select id from public.categories where series_code='SF'), false, 'hidden')`);
+    let code: string | undefined;
+    try { await db.query(`update public.skylanders set base_sky_id = 'SKY-0100'
+                           where sky_id = 'SKY-9301'`); }
+    catch (e) { code = (e as { code?: string }).code; }
+    await db.exec("rollback;");
+    expect(code).toBe("23503");
+  });
+
+  it("DIE GRENZE: ein Schlüssel mit abweichbarer zweiter Spalte würde überzählen", async () => {
+    /*
+     * HEUTE GIBT ES SO EINEN SCHLÜSSEL NICHT, und dieser Fall legt einen
+     * künstlichen an, um die Grenze zu zeigen: `b` darf NULL sein, der
+     * Schlüssel ist dann (MATCH SIMPLE) ungeprüft — die Funktion zählt die
+     * Zeile trotzdem mit, weil sie nur auf `a` schaut. Ergebnis 2 statt 1.
+     *
+     * SOLLTE DIESE ERWARTUNG EINES TAGES KIPPEN, ist das kein Fehler,
+     * sondern die Berichtigung: dann zählt die Funktion über ALLE Spalten
+     * des Schlüssels. Der Fall steht hier, damit die Grenze nicht in
+     * Vergessenheit gerät (ADR-0162).
+     */
+    await db.exec("begin;");
+    await db.query(`alter table public.skylanders
+      add constraint probe_id_name_uniq unique (sky_id, name)`);
+    await db.query(`create table public.probe_ref (a text, b text,
+      constraint probe_ref_fk foreign key (a, b)
+        references public.skylanders (sky_id, name) on delete restrict)`);
+    await db.query(`insert into public.probe_ref (a, b)
+      select sky_id, name from public.skylanders where sky_id = 'SKY-0100'`);
+    await db.query(`insert into public.probe_ref (a, b) values ('SKY-0100', null)`);
+    const r = await refs("SKY-0100");
+    await db.exec("rollback;");
+    expect(r).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tabelle: "public.probe_ref", spalte: "a", zeilen: 2 })]));
+    /* Und die Probe ist fort. */
+    const weg = (await eins(db, `select (to_regclass('public.probe_ref') is null) as weg`)).weg;
+    expect(weg).toBe(true);
+  });
+
+  it("einspaltige Schlüssel zählt sie unverändert richtig", async () => {
+    const lager = await refs("SKY-0001");
+    expect(lager).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tabelle: "public.shop_inventory", spalte: "sky_id", zeilen: 1 })]));
+    const sammlung = await refs("SKY-0003");
+    expect(sammlung).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tabelle: "public.collection_items", spalte: "sky_id" })]));
+    expect(await refs("SKY-0050")).toEqual([]);
+  });
+});
