@@ -667,6 +667,65 @@ und führt sie nicht mehr im Plan. Dass der neu gerechnete Plan
 desselben Zustands durch TOR 1b kommt, der alte aber nicht, ist in
 `sync-character-gate.test.ts` festgehalten.
 
+## 0j. Offene Datenkorrekturen — benannt, nicht ausgeführt (2026-10-31)
+
+Zwei Punkte, die **keine** Schreiboperation dieses Arbeitsstands sind. Sie
+stehen hier, damit sie nicht in einen Publish oder Import geraten, ohne dass
+jemand sie entschieden hat.
+
+### K1 — `data/characters/characters.json` nennt für Fire Kraken eine falsche SKY-ID
+
+| | |
+|---|---|
+| Befund | Die kuratierte Datei führt bei `Fire Kraken` noch `SKY-0821` |
+| Richtig wäre | **`SKY-0928`** — `Gold Fire Kraken`, am 2026-10-30 dorthin umnummeriert |
+| Was `SKY-0821` heute ist | `Winterfest Lob-Star` (Trap Team, `hidden`) — auf **beiden** Umgebungen |
+| Gemessen am 2026-10-31 | 106 von 107 kuratierten Verknüpfungen stehen richtig; **die eine, die ein Import setzen würde, ist diese falsche** |
+| Greift der Schutz? | **Nein.** `import-characters.mts` überspringt nur Zeilen mit einer Journalzeile `field = 'character_id'`. Für `SKY-0821` gibt es auf Production keine |
+| Folge eines Imports ohne Korrektur | `Winterfest Lob-Star` würde der Familie `Fire Kraken` zugeordnet |
+
+**Die Datenbank ist richtig, die Datei ist stehengeblieben.** Auf beiden
+Umgebungen gilt: `SKY-0928` → `Fire Kraken`, `SKY-0821` → keine Familie.
+`SKY-0928` wurde in Etappe D über `admin_set_character` verknüpft und trägt
+deshalb eine Journalzeile.
+
+**Erforderlich vor jedem Charakterimport:** in `data/characters/characters.json`
+bei `Fire Kraken` `"SKY-0821"` → `"SKY-0928"`. Danach wären es 107 richtige
+Verknüpfungen und genau **eine** Metadatenänderung — die sieben kuratierten
+Felder von `Fire Kraken`, die auf Production NULL sind (ADR-0034; die vier
+anderen im Lauf angelegten Charaktere sind auf beiden Seiten NULL und
+stimmen).
+
+**Der Katalog-Publish ist davon nicht betroffen.** Er synchronisiert
+Charaktermetadaten nicht und schreibt `character_id` nur aus dem
+`familie`-Feld des Plans, nie aus dieser Datei. Ein Test hält fest, dass der
+Apply-Pfad keines der sieben Metadatenfelder nennt.
+
+### K2 — 35 gespeicherte Namen, zwei Quellgenerationen
+
+| | |
+|---|---|
+| Production | trägt in allen 35 Fällen den Wert aus `data/catalog/products.json` (2026-09-04) |
+| Staging | trägt in allen 35 Fällen den Entwurfsnamen aus dem CAT-03-Import, figurweise über `admin_merge_draft_into_figure` (0156) übernommen |
+| mit `display_name_override` | 16 — beidseitig gleich, der sichtbare Name stimmt |
+| ohne | **19** — dort sieht der Besucher auf Production einen anderen Namen |
+
+Beide Seiten sind in sich stimmig; der Unterschied sind zwei Generationen
+derselben Quelle. **Welche heute gilt, entscheidet die Arbeitsmappe** — und
+die liegt bewusst nicht im Repository (`docs/SECURITY.md`).
+
+**Nicht betroffen:** Slugs (0 Abweichungen, URLs bleiben gültig), Sammlungen,
+Bestellungen, Lager, Favoriten (alles an der SKY-ID). Die Suche folgt
+automatisch — `buildSearchIndex(searchFormsFor(figure.name, …))` wird zur
+Laufzeit gebildet, es gibt keine gespeicherte Spalte.
+
+**Zwei Wege, beide mit eigener Freigabe:** die 19 Anzeigenamen setzen (der
+Publish trägt sie als gewöhnlichen Feldschritt nach Production, ADR-0030
+bleibt unberührt) — oder `products.json` aus der aktuellen Mappe erneuern und
+`name` für genau diese 35 einmalig als publishfähig behandeln.
+
+Vollständige Tabelle: `resources/analysis/ETAPPE-E-DIFFERENZ.md`.
+
 ## 0e. Migration `0132` auf Staging — angewendet und zweifach belegt
 
 | | |

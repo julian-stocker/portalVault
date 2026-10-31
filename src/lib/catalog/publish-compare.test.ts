@@ -57,7 +57,14 @@ describe("EINE Quelle für die Regel, nicht zwei", () => {
      * `if (f === "name" || f === "slug") continue;` — und die
      * Fingerprintprüfung in Etappe E kannte diese Regel nicht.
      */
-    expect(ohne(PLANER)).toContain('import { UNGEREGELT } from "../src/lib/catalog/publish-compare.ts"');
+    /*
+     * Die Importzeile fuehrt seit ADR-0164 auch `GEREGELT` (der Driftriegel
+     * braucht die Projektion). Geprueft wird deshalb, DASS der Planer
+     * `UNGEREGELT` aus diesem Modul nimmt — nicht die genaue Schreibweise
+     * der Zeile.
+     */
+    expect(ohne(PLANER)).toMatch(
+      /import \{[^}]*\bUNGEREGELT\b[^}]*\} from "\.\.\/src\/lib\/catalog\/publish-compare\.ts"/);
     expect(ohne(PLANER)).toContain("(UNGEREGELT as readonly string[]).includes(f)");
     expect(ohne(PLANER)).not.toContain('f === "name" || f === "slug"');
   });

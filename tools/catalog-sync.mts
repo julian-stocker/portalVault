@@ -38,7 +38,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { riegel3, type Ausschluss, type Figur }
   from "../src/lib/catalog/sync-collision-gate.ts";
-import { UNGEREGELT } from "../src/lib/catalog/publish-compare.ts";
+import { GEREGELT, UNGEREGELT } from "../src/lib/catalog/publish-compare.ts";
+import { liesModus, pruefeEinwegrichtung, type Modus }
+  from "../src/lib/catalog/publish-mode.ts";
+import { driftBericht, pruefeDrift, pruefeLedger, standAbdruck,
+         type Ledger, type Stand } from "../src/lib/catalog/publish-drift.ts";
 
 const STAGING_REF = "qqxcpesbwfxzgytkdsac";
 const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
@@ -242,6 +246,24 @@ function fingerprint(a: Abzug, d: Zeile) {
  */
 const RIEGEL2_MESSEN = process.argv.includes("--riegel2=messen");
 
+/*
+ * DER MODUS WIRD VERLANGT, NICHT GERATEN.
+ *
+ * `bootstrap` ist der einmalige Abgleich vom 2026-10-30/31 — er plant in
+ * beide Richtungen und kennt die Einmalregeln. `publish` ist der
+ * Dauerbetrieb nach ADR-0163: einseitig nach Production, ohne jede dieser
+ * Regeln. Ein Vorgabewert waere genau die stille Annahme, die hier teuer
+ * ist; die ganze Begruendung steht in `src/lib/catalog/publish-mode.ts`.
+ */
+const modusOderFehler = liesModus(process.argv);
+if (typeof modusOderFehler !== "string") {
+  console.error(`\n  ABBRUCH. ${modusOderFehler.fehler}\n`);
+  process.exit(1);
+}
+const MODUS: Modus = modusOderFehler;
+const BOOTSTRAP = MODUS === "bootstrap";
+const LEDGER_DATEI = "resources/sync/publish-ledger.json";
+
 const D = JSON.parse(readFileSync(ENTSCHEIDUNGEN, "utf8")) as Zeile;
 
 const S = verbinde(".env.staging", STAGING_REF, "Staging");
@@ -254,33 +276,104 @@ const fp = {
   production: fingerprint(abzug.production, D),
 };
 
-const live = D.fingerprint_live as Record<string, Record<string, { zeilen: number; abdruck: string }>>;
-const abweichungen: string[] = [];
-for (const u of ["staging", "production"] as Umgebung[]) {
-  for (const b of ["katalog_freigegeben", "kategorien", "charaktere", "ausgeschlossen"]) {
-    const soll = live[u][b]; const ist = (fp[u] as Record<string, { zeilen: number; abdruck: string }>)[b];
-    if (soll.zeilen !== ist.zeilen || soll.abdruck !== ist.abdruck) {
-      abweichungen.push(`${u}/${b}: erwartet ${soll.zeilen}·${soll.abdruck}, gemessen ${ist.zeilen}·${ist.abdruck}`);
-    }
+const sS = sicht(abzug.staging); const sP = sicht(abzug.production);
+
+/** Die geregelte Projektion der freigegebenen Zeilen — ohne name und slug. */
+function geregelterStand(m: Map<string, Zeile>): Stand {
+  const out: Record<string, string> = {};
+  for (const id of [...m.keys()].sort()) {
+    const r = m.get(id)!;
+    if (ausgeschlossen(r, D)) continue;
+    out[id] = GEREGELT.map((f) => t(r[f])).join("|");
   }
-}
-if (abweichungen.length > 0 && !RIEGEL2_MESSEN) {
-  console.error("\n  RIEGEL 2 — Abbruch. Der Fingerprint weicht vom Messwert des Betreibers ab:\n");
-  for (const a of abweichungen) console.error(`    ${a}`);
-  console.error("\n  Es hat sich seit dem 2026-10-30 etwas bewegt. Erst klaeren, dann neu planen.\n");
-  process.exit(1);
-}
-if (abweichungen.length > 0) {
-  console.log("  Riegel 2 ALS MESSUNG (--riegel2=messen) — die Abweichung wird "
-    + "berichtet, nicht geriegelt:");
-  for (const a of abweichungen) console.log(`    ${a}`);
-  console.log("  Das ist nach einem eigenen Schreibvorgang erwartet. Den Zielzustand\n"
-    + "  verlangt Etappe E, nicht dieser Riegel.\n");
-} else {
-  console.log("  Riegel 2 ok — alle acht Abdruecke entsprechen dem Messwert\n");
+  return out;
 }
 
-const sS = sicht(abzug.staging); const sP = sicht(abzug.production);
+if (BOOTSTRAP) {
+  /* ---- RIEGEL 2 (Bootstrap): nichts darf sich bewegt haben ---- */
+  const live = D.fingerprint_live as
+    Record<string, Record<string, { zeilen: number; abdruck: string }>>;
+  const abweichungen: string[] = [];
+  for (const u of ["staging", "production"] as Umgebung[]) {
+    for (const b of ["katalog_freigegeben", "kategorien", "charaktere", "ausgeschlossen"]) {
+      const soll = live[u][b];
+      const ist = (fp[u] as Record<string, { zeilen: number; abdruck: string }>)[b];
+      if (soll.zeilen !== ist.zeilen || soll.abdruck !== ist.abdruck) {
+        abweichungen.push(`${u}/${b}: erwartet ${soll.zeilen}·${soll.abdruck}, `
+          + `gemessen ${ist.zeilen}·${ist.abdruck}`);
+      }
+    }
+  }
+  if (abweichungen.length > 0 && !RIEGEL2_MESSEN) {
+    console.error("\n  RIEGEL 2 — Abbruch. Der Fingerprint weicht vom Messwert des "
+      + "Betreibers ab:\n");
+    for (const a of abweichungen) console.error(`    ${a}`);
+    console.error("\n  Es hat sich seit dem 2026-10-30 etwas bewegt. Erst klaeren, "
+      + "dann neu planen.\n");
+    process.exit(1);
+  }
+  if (abweichungen.length > 0) {
+    console.log("  Riegel 2 ALS MESSUNG (--riegel2=messen) — die Abweichung wird "
+      + "berichtet, nicht geriegelt:");
+    for (const a of abweichungen) console.log(`    ${a}`);
+    console.log("  Das ist nach einem eigenen Schreibvorgang erwartet. Den Zielzustand\n"
+      + "  verlangt Etappe E, nicht dieser Riegel.\n");
+  } else {
+    console.log("  Riegel 2 ok — alle acht Abdruecke entsprechen dem Messwert\n");
+  }
+} else {
+  /* ---- RIEGEL 2 (Publish): der DRIFTRIEGEL ---- */
+  /*
+   * Staging darf sich bewegen — das ist der Zweck. Production darf es nicht.
+   * Geprueft wird deshalb nicht Unveraendertheit, sondern HERKUNFT: traegt
+   * jedes geregelte Feld auf Production den veroeffentlichten Wert oder den,
+   * auf den dieser Publish zielt? Ein dritter Wert ist Drift. Die ganze
+   * Begruendung steht in `src/lib/catalog/publish-drift.ts`.
+   */
+  let ledger: Ledger;
+  try {
+    ledger = JSON.parse(readFileSync(LEDGER_DATEI, "utf8")) as Ledger;
+  } catch (e) {
+    console.error(`\n  RIEGEL 2 — Abbruch. ${LEDGER_DATEI} ist nicht lesbar `
+      + `(${e instanceof Error ? e.message : String(e)}).\n\n  Ohne den `
+      + `veroeffentlichten Stand laesst sich Drift nicht von eigener Arbeit\n`
+      + `  unterscheiden. Eine fehlende Datei ist kein Bestehen.\n`);
+    process.exit(1);
+  }
+  const schluessig = pruefeLedger(ledger);
+  if (!schluessig.ok) {
+    console.error(`\n  RIEGEL 2 — Abbruch. ${LEDGER_DATEI} ist nicht schluessig:\n`);
+    for (const b of schluessig.befunde) console.error(`    ${b}`);
+    console.error("");
+    process.exit(1);
+  }
+  if (ledger.geregelte_felder.join("|") !== GEREGELT.join("|")) {
+    console.error(`\n  RIEGEL 2 — Abbruch. Der Stand nennt andere geregelte Felder `
+      + `als der Vergleich:\n    Stand:     ${ledger.geregelte_felder.join(", ")}`
+      + `\n    Vergleich: ${GEREGELT.join(", ")}\n`);
+    process.exit(1);
+  }
+  const standS = geregelterStand(sS); const standP = geregelterStand(sP);
+  const drift = pruefeDrift(ledger, standS, standP);
+  console.log(`  Riegel 2 — Driftpruefung gegen ${LEDGER_DATEI}`);
+  console.log(`             Stand vom ${ledger.veroeffentlicht_am}, `
+    + `${ledger.zeilen} Zeilen, Abdruck ${ledger.abdruck.slice(0, 8)}`);
+  for (const z of driftBericht(drift)) console.log(`             ${z}`);
+  const jetztS = standAbdruck(standS); const jetztP = standAbdruck(standP);
+  console.log(`             Staging jetzt ${jetztS.zeilen}·${jetztS.abdruck.slice(0, 8)}`
+    + `   Production jetzt ${jetztP.zeilen}·${jetztP.abdruck.slice(0, 8)}`);
+  if (!drift.ok && !RIEGEL2_MESSEN) {
+    console.error(`\n  RIEGEL 2 — Abbruch. Production ist von Hand veraendert worden.\n\n`
+      + `  Der naechste Publish wuerde diese Werte stillschweigend `
+      + `ueberschreiben.\n  Erst klaeren: gehoert die Aenderung nach Staging, oder `
+      + `war sie ein\n  Versehen? Danach neu planen.\n`);
+    process.exit(1);
+  }
+  if (!drift.ok) {
+    console.log("             (--riegel2=messen: Drift wird berichtet, nicht geriegelt)");
+  }
+  console.log(`  Riegel 2 ok — kein Production-Drift\n`);
+}
 
 /*
  * DIE ENTSCHIEDENEN KOLLISIONEN — ABER NUR DIE NOCH OFFENEN.
@@ -375,9 +468,19 @@ for (const c of abzug.staging.characters) {
   }
 }
 
-// 2. Anzeigenamen
+// 2. Anzeigenamen — die entschiedene Liste
+/*
+ * NUR IM BOOTSTRAP AUCH NACH STAGING. Die Liste lag als Entscheidung vor und
+ * musste auf beide Umgebungen. Im Dauerbetrieb pflegt der Admin den
+ * Anzeigenamen auf Staging, und der Publish traegt ihn als gewoehnlichen
+ * Feldschritt nach Production — Abschnitt 5. Eine Liste, die weiter nach
+ * Staging schreibt, wuerde redaktionelle Arbeit zuruecknehmen.
+ */
+const ovrZiele: [Umgebung, Map<string, Zeile>][] = BOOTSTRAP
+  ? [["production", sP], ["staging", sS]]
+  : [["production", sP]];
 for (const [id, o] of Object.entries(ovr)) {
-  for (const [u, s] of [["production", sP], ["staging", sS]] as [Umgebung, Map<string, Zeile>][]) {
+  for (const [u, s] of ovrZiele) {
     const r = s.get(id);
     if (r && t(r.display_name_override) !== o.wert) {
       plan.push({ ziel: u, art: "feld", sky_id: id, feld: "display_name_override", klasse: "A",
@@ -387,8 +490,14 @@ for (const [id, o] of Object.entries(ovr)) {
   }
 }
 
-// 3. Namenskorrektur auf Staging (nicht aus der Excel)
-for (const [id, n] of Object.entries(nameKorr)) {
+// 3. Namenskorrektur auf Staging (nicht aus der Excel) — EINMALIG
+/*
+ * SKY-0922 traegt einen Namen, der nicht aus der Excel kommt (`source =
+ * admin`), weshalb ADR-0030 ihn nicht bindet. Einmal gesetzt ist die Sache
+ * erledigt; im Dauerbetrieb schreibt dieser Abgleich keinen Namen mehr,
+ * nirgends.
+ */
+for (const [id, n] of Object.entries(BOOTSTRAP ? nameKorr : {})) {
   const r = sS.get(id);
   if (r && t(r.name) !== n.wert) {
     plan.push({ ziel: "staging", art: "feld", sky_id: id, feld: "name", klasse: "C",
@@ -488,7 +597,13 @@ function planeFigurenanlage(ziel: Umgebung) {
 }
 
 planeFigurenanlage("production");
-planeFigurenanlage("staging");
+/*
+ * NACH STAGING NUR IM BOOTSTRAP. Dort fehlten Staging echte Zeilen —
+ * SKY-0821 und die Production-eigenen. Im Dauerbetrieb entstehen neue
+ * Figuren auf Staging; eine Figur, die nur Production fuehrt, waere ein
+ * Befund und keine Arbeitsanweisung (der Driftriegel nennt sie).
+ */
+if (BOOTSTRAP) planeFigurenanlage("staging");
 // 5. Feldabweichungen an bestehenden Zeilen
 const sichtbarkeitProdGewinnt = (D.sichtbarkeit as Zeile).richtung === "production_gewinnt";
 for (const id of [...sS.keys()].sort()) {
@@ -509,16 +624,29 @@ for (const id of [...sS.keys()].sort()) {
      */
     if ((UNGEREGELT as readonly string[]).includes(f)) continue;   // Excel ist Hoheit
     if (Object.prototype.hasOwnProperty.call(ovr, id) && f === "display_name_override") continue;
-    if (sichtAb && (f === "catalog_visible" || f === "catalog_status")) {
+    /*
+     * SICHTBARKEIT: STAGING FOLGT PRODUCTION — NUR IM BOOTSTRAP.
+     * Die 22 abweichenden Zeilen trugen ihre Entscheidung auf Production.
+     * Im Dauerbetrieb entscheidet Staging (ADR-0163), und eine
+     * Sichtbarkeitsaenderung dort ist ein gewoehnlicher Schritt nach
+     * Production.
+     */
+    if (BOOTSTRAP && sichtAb && (f === "catalog_visible" || f === "catalog_status")) {
       plan.push({ ziel: "staging", art: "feld", sky_id: id, feld: f, klasse: "A",
         von: t(a[f]), nach: t(b[f]), weg: WEG[f],
         grund: "Sichtbarkeit: Staging folgt Production" });
       continue;
     }
-    // Richtung: wer eine eigene Entscheidung traegt, gewinnt sie.
+    /*
+     * PRODUCTION-EIGENE ENTSCHEIDUNG GEWINNT — NUR IM BOOTSTRAP.
+     * Production trug Anzeigenamen und Bildverweise, die Staging fehlten.
+     * Sie wurden einmal uebernommen; danach ginge dieselbe Regel in die
+     * falsche Richtung und wuerde eine Loeschung auf Staging zurueckdrehen.
+     */
     const prodEigen = f === "display_name_override" || f === "image_override_path";
     const prodHatWert = t(b[f]) !== "~";
-    const nachStaging = sichtbarkeitProdGewinnt && prodEigen && prodHatWert && t(a[f]) === "~";
+    const nachStaging = BOOTSTRAP && sichtbarkeitProdGewinnt && prodEigen
+      && prodHatWert && t(a[f]) === "~";
     plan.push(nachStaging
       ? { ziel: "staging", art: "feld", sky_id: id, feld: f, klasse: klasse(f),
           von: t(a[f]), nach: t(b[f]), weg: WEG[f] ?? "R update (nicht journalisierbar)",
@@ -527,6 +655,35 @@ for (const id of [...sS.keys()].sort()) {
           von: t(b[f]), nach: t(a[f]), weg: WEG[f] ?? "R update (nicht journalisierbar)",
           grund: "Staging-Stand" });
   }
+}
+
+/* ----------------------------------- RIEGEL 4: die Einwegrichtung */
+/*
+ * DIE REGELN EINZELN ABZUSCHALTEN GENUEGT NICHT.
+ *
+ * Jede der fuenf Einmalregeln haengt jetzt an `BOOTSTRAP` — aber eine
+ * kuenftig hinzugefuegte Regel koennte wieder nach Staging planen, ohne dass
+ * es jemandem auffaellt. Dieser Riegel prueft das ERGEBNIS: im Publish darf
+ * der Plan keinen einzigen Schritt Richtung Staging fuehren, egal woher er
+ * kaeme.
+ */
+if (!BOOTSTRAP) {
+  const einweg = pruefeEinwegrichtung(plan);
+  if (!einweg.ok) {
+    console.error(`\n  RIEGEL 4 — Abbruch. Der Publish-Plan fuehrt `
+      + `${einweg.nachStaging.length} Schritt(e) Richtung STAGING:\n`);
+    for (const x of einweg.nachStaging.slice(0, 20)) {
+      console.error(`    ${x.sky_id} ${x.art}${x.feld ? ` ${x.feld}` : ""} — ${x.grund}`);
+    }
+    if (einweg.nachStaging.length > 20) {
+      console.error(`    … und ${einweg.nachStaging.length - 20} weitere`);
+    }
+    console.error("\n  Im Dauerbetrieb ist Production nur Ziel (ADR-0163). Eine Regel,\n"
+      + "  die nach Staging schreibt, gehoert an den Bootstrap gebunden —\n"
+      + "  siehe src/lib/catalog/publish-mode.ts.\n");
+    process.exit(1);
+  }
+  console.log("  Riegel 4 ok — kein Schritt zeigt nach Staging\n");
 }
 
 /* ------------------------------------------------------------- Ausgabe */
@@ -542,6 +699,7 @@ const stag = plan.filter((s) => s.ziel === "staging");
 
 writeFileSync("resources/analysis/sync-dryrun.json", JSON.stringify({
   erzeugt: new Date().toISOString(), schreibt_nichts: true,
+  modus: MODUS,
   fingerprint_gemessen: fp, kollisionen,
   production: zz(prod), staging: zz(stag), plan,
 }, null, 1));

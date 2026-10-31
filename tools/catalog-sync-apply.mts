@@ -439,6 +439,64 @@ console.log(`  TOR 1b ok — ${riegelB.familien} Familienzuordnung(en) sind aufl
   + `${riegelB.ausBestand} aus dem Bestand, ${riegelB.ausAnlagen} aus den `
   + `${riegelB.anlagen} geplanten Charakteranlagen.\n`);
 
+/* ---- TOR 4: kein Bildverweis ohne das Bildobjekt ---- */
+/*
+ * *** DIE DRITTE LUECKE DES REGULAEREN PUBLISH (2026-10-31) ***
+ *
+ * Dieses Werkzeug nannte `storage` null Mal. Ein `image_override_path` ist
+ * aber nur so viel wert wie das Objekt, auf das er zeigt: wird der Pfad
+ * geschrieben, bevor die Datei im Ziel-Bucket liegt, zeigt der Katalog auf
+ * ein Loch — und zwar oeffentlich, denn `skylanders` ist weltlesbar.
+ *
+ * Etappe A des Bootstrap-Runners hat das geleistet. Ein Riegel, der nur im
+ * Runner steht, ist aber umgehbar: `catalog:publish` ruft diesen Apply-Pfad
+ * direkt. Also steht er hier, VOR der Schleife — alle Objekte auf einmal,
+ * damit ein fehlendes auffaellt, bevor irgendetwas geschrieben ist.
+ *
+ * Geprueft wird dasselbe wie im Transferwerkzeug: liegt das Objekt da, und
+ * sind die 16 Hexstellen des Dateinamens die ersten 16 des SHA-256 ueber den
+ * Inhalt. Uebertragen wird hier NICHTS — das ist die Aufgabe von
+ * `storage-transfer.mts`, mit `upsert: false`.
+ */
+const bildschritte = schritte.filter((s) =>
+  s.feld === "image_override_path" && s.nach !== "~" && typeof s.nach === "string");
+if (bildschritte.length > 0) {
+  const fehlend: string[] = []; const falsch: string[] = []; let ok = 0;
+  for (const s of bildschritte) {
+    const pfad = String(s.nach);
+    if (pfad.split("/")[0] !== s.sky_id) {
+      falsch.push(`${s.sky_id}: der Pfad ${pfad} gehoert nicht zu seiner Figur`);
+      continue;
+    }
+    const r = await R.storage.from("catalog").download(pfad);
+    if (r.error || !r.data) {
+      fehlend.push(`${s.sky_id}: ${pfad} liegt nicht im Bucket `
+        + `(${r.error?.message ?? "kein Inhalt"})`);
+      continue;
+    }
+    const buf = Buffer.from(await r.data.arrayBuffer());
+    const sha = createHash("sha256").update(buf).digest("hex");
+    const erwartet = pfad.split("/")[1].replace(/\.[a-z0-9]+$/i, "");
+    if (!sha.startsWith(erwartet)) {
+      falsch.push(`${s.sky_id}: ${pfad} — Name ${erwartet}, SHA ${sha.slice(0, 16)}`);
+      continue;
+    }
+    ok += 1;
+  }
+  if (fehlend.length > 0 || falsch.length > 0) {
+    abbruch(`TOR 4 — ${fehlend.length + falsch.length} von ${bildschritte.length} `
+      + `Bildobjekt(en) sind nicht verwendbar:\n\n`
+      + [...fehlend, ...falsch].map((z) => `    ${z}`).join("\n")
+      + `\n\n  Es ist nichts geschrieben worden. Erst uebertragen und pruefen:\n`
+      + `    npm run storage:transfer:apply:${ZIEL}\n`
+      + `  danach neu planen und erneut anwenden.`);
+  }
+  console.log(`  TOR 4 ok — alle ${ok} Bildobjekt(e) liegen im Ziel-Bucket und `
+    + `sind inhaltsadressiert.\n`);
+} else {
+  console.log("  TOR 4 ok — der Plan nennt keinen neuen Bildverweis.\n");
+}
+
 /**
  * TOR 2 — Compare-and-Set. Die Bedingung steht IN der schreibenden Anweisung,
  * nicht davor: es gibt kein Fenster zwischen Pruefen und Schreiben.

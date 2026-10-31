@@ -216,8 +216,14 @@ type Plan = { plan: Record<string, unknown>[]; fingerprint_gemessen: Record<stri
  * Lauf sehr wohl aufhalten, bevor er beginnt.
  */
 function planeNeu(etappe: string, nachEigenemSchreiben = false): Plan {
+  /*
+   * DER BOOTSTRAP-RUNNER PLANT IM BOOTSTRAP-MODUS — seit dem 2026-10-31
+   * ausdruecklich. Der Planer verlangt den Modus, und dieser Lauf IST der
+   * einmalige Abgleich: beide Richtungen, die fuenf Einmalregeln, Riegel 2
+   * gegen den eingefrorenen Messwert.
+   */
   werkzeug(etappe, "tools/catalog-sync.mts",
-    nachEigenemSchreiben ? ["--riegel2=messen"] : []);
+    nachEigenemSchreiben ? ["--modus=bootstrap", "--riegel2=messen"] : ["--modus=bootstrap"]);
   return JSON.parse(readFileSync(PLAN, "utf8")) as Plan;
 }
 

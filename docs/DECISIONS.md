@@ -17054,6 +17054,121 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0164 · Der reguläre Publish: zwei Modi, zwei Standdateien, ein Driftriegel
+
+**Status:** ANGENOMMEN · 2026-10-31
+**Betrifft:** ADR-0163 (Staging führt), ADR-0030 (Namenshoheit), ADR-0034
+(drei Identitäten), ADR-0070 (reservierter Bereich), `tools/catalog-sync.mts`,
+`tools/catalog-sync-apply.mts`, `tools/catalog-publish.mts`,
+`tools/storage-transfer.mts`
+**Folgt auf:** den einmaligen Abgleich aus ADR-0163, versiegelt am 2026-10-31
+
+### Das Problem
+
+Der einmalige Abgleich war fertig, und der Dauerbetrieb war trotzdem nicht
+möglich. Drei Lücken, alle am abgeschlossenen Zustand gemessen:
+
+1. **Die versiegelte Baseline wurde geschrieben und nie gelesen.** Riegel 2
+   prüfte weiter gegen die eingefrorenen Fingerprints aus
+   `bootstrap-decisions.json`. Die **erste** redaktionelle Änderung auf
+   Staging hätte `catalog:publish:plan` abgebrochen — mit „Es hat sich seit
+   dem 2026-10-30 etwas bewegt". Für einen Bootstrap war das richtig; für den
+   Alltag ist Staging bearbeiten der Zweck.
+2. **Fünf Einmalregeln planten weiter Schritte nach Staging.** Sie waren nur
+   deshalb unauffällig, weil der Plan auf null stand.
+3. **Bilder waren im Publish nicht abgedeckt.** `catalog-sync-apply.mts`
+   nannte `storage` null Mal. Ein neuer Bildverweis wäre nach Production
+   geschrieben worden, ohne dass die Datei dort liegt — und `skylanders` ist
+   weltlesbar.
+
+### Was entschieden ist
+
+**1. Der Modus wird verlangt, nicht geraten.** `tools/catalog-sync.mts`
+nimmt `--modus=bootstrap` oder `--modus=publish` und bricht ohne Angabe ab.
+`bootstrap` ist die Geschichte: beide Richtungen, die fünf Einmalregeln,
+Riegel 2 gegen den eingefrorenen Messwert. `publish` ist der Alltag:
+einseitig, ohne jede dieser Regeln. **Ein Vorgabewert wäre genau die stille
+Annahme, die hier teuer ist.** Der Plan trägt seinen Modus in der Datei, und
+der Publish weist einen Bootstrap-Plan ab.
+
+**2. Die fünf Einmalregeln bleiben erhalten, aber gebunden.** Gelöscht wären
+sie nicht nachvollziehbar; unbedingt wären sie im Alltag ein Rückschritt. Sie
+stehen als Daten in `src/lib/catalog/publish-mode.ts` — mit Zweck, Begründung
+und Quelle — und hängen im Planer je an `BOOTSTRAP`:
+`sichtbarkeit_production_gewinnt` · `name_korrektur_staging` ·
+`display_name_override_nach_staging` · `production_eigene_entscheidung` ·
+`figurenanlage_nach_staging`.
+
+**3. Riegel 4 prüft das Ergebnis, nicht die Regeln.** Im Publish darf der
+Plan **keinen einzigen** Schritt Richtung Staging führen, egal woher er käme.
+Die Regeln einzeln abzuschalten genügt nicht: eine künftig hinzugefügte
+Regel könnte wieder nach Staging planen, ohne dass es auffällt.
+
+**4. Zwei Dateien, zwei Aufgaben.**
+
+| Datei | Rolle | wird geschrieben |
+|---|---|---|
+| `resources/sync/catalog-baseline.json` | **Siegel** des einmaligen Abgleichs | **nie wieder** |
+| `resources/sync/publish-ledger.json` | **fortlaufender** veröffentlichter Stand | von jedem erfolgreichen Publish |
+
+Eine Datei für beides wäre bequemer und falsch: das Siegel wäre nach dem
+ersten Publish keins mehr. Der Stand führt die 655 Zeilen **einzeln** in der
+geregelten Projektion, nicht nur als Abdruck — der Git-Diff zeigt damit Zeile
+für Zeile, was ein Publish getan hat. Der erste Eintrag ist der versiegelte
+Zustand; sein Abdruck ist gegen das Siegel gegengeprüft
+(`655·df54fd6e74b681d5c521d02bcb75eb30`, zeichengleich).
+
+**5. Der Driftriegel ersetzt im Publish die Gleichheitsprüfung.** Für jedes
+geregelte Feld einer veröffentlichten Zeile gibt es drei Zustände:
+
+| Zustand | Bedeutung | erlaubt |
+|---|---|---|
+| `veroeffentlicht` | Production trägt den Wert aus dem Stand | ja |
+| `publiziert` | Production trägt den **aktuellen Staging-Wert**, der Stand noch den alten — ein teilweise gelaufener Publish | ja |
+| `drift` | ein **dritter** Wert, den kein Lauf dieses Werkzeugs erzeugt haben kann | **Abbruch** |
+
+Damit ist beides zugleich erfüllt: Staging darf sich bewegen, Production
+nicht — **und ein abgebrochener Lauf ist ohne Sonderweg fortsetzbar**, weil
+die schon geschriebenen Felder als `publiziert` durchgehen. Genau daran ist
+der Bootstrap viermal gescheitert.
+
+**Der blinde Fleck ist benannt und harmlos:** ein fremder Eingriff, der ein
+Feld ausgerechnet auf den aktuellen Staging-Wert setzt, zählt als
+`publiziert`. Dorthin will der Publish ohnehin.
+
+**6. Bilder vor Verweisen, in sechs Stufen.** `tools/catalog-publish.mts`
+reiht: Plan → benötigte Objekte bestimmen → prüfen → fehlende übertragen
+(`upsert: false`) → **erneut** prüfen → erst dann die Katalogänderungen.
+Daneben steht **TOR 4** im Apply-Pfad selbst: vor dem ersten Schreibzugriff
+muss jedes Objekt eines `image_override_path`-Schritts im Ziel-Bucket liegen
+und inhaltsadressiert sein. Ein Riegel, der nur im Sequenzer steht, ist
+umgehbar — man könnte den Apply-Pfad direkt aufrufen.
+
+### Was unverändert gilt
+
+SKY-ID als Identität (ADR-0001) · projektlokale Datenbank-IDs (ADR-0034) ·
+Charaktere vor Figuren und TOR 1b vor dem ersten Schreibzugriff · Entwürfe,
+Testserien und `SKY-9000+` ausgeschlossen (ADR-0070) · `name` und `slug`
+folgen der Excel und werden nicht veröffentlicht (ADR-0030) · kuratierte
+Charaktermetadaten kommen über `characters:import`, nicht über den Sync
+(ADR-0034) · TOR 2 Compare-and-Set · TOR 3 die geschützten Tabellen · die 35
+Namensabweichungen und die eine Charaktermetadatenabweichung bleiben als
+entschiedene Unterschiede erhalten und werden nach Anzahl **und** Abdruck
+geprüft.
+
+### Konsequenzen
+
+- `catalog:publish:plan` und `catalog:publish` sind ab jetzt die normalen
+  Befehle. `catalog:sync:plan` und `catalog:finish:*` bleiben als
+  Bootstrap-Pfad erhalten und nennen ihren Modus selbst.
+- Ein Publish schreibt **drei** Dinge: Production, den Publish-Stand und den
+  Bericht `resources/analysis/CATALOG-PUBLISH.md`. Nichts davon ist stillschweigend.
+- **Production-Drift hält den Betrieb an, bis jemand entscheidet.** Das ist
+  Absicht: eine Änderung, die auf Production entstanden ist, gehört nach
+  Staging oder war ein Versehen, und beides muss ein Mensch klären.
+
+---
+
 ## ADR-0163 · Staging führt den Katalog, Production wird veröffentlicht — und der einmalige Übergang dorthin
 
 **Status:** ANGENOMMEN für die **Vorbereitung** · 2026-10-31. **Die Ausführung

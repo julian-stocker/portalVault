@@ -6521,6 +6521,55 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-10-31, der reguläre Publish ist produktionsreif — drei Lücken
+geschlossen, alles lesend geprüft (ADR-0164):**
+
+Der einmalige Abgleich war versiegelt, der Dauerbetrieb trotzdem nicht
+möglich. Drei Lücken, am abgeschlossenen Zustand gemessen:
+
+| Lücke | Was passiert wäre |
+|---|---|
+| Die versiegelte Baseline wurde geschrieben und **nie gelesen** | Die **erste** redaktionelle Änderung auf Staging hätte `catalog:publish:plan` abgebrochen |
+| **Fünf Einmalregeln** planten weiter Schritte nach Staging | Ein Production-eigener Anzeigename hätte redaktionelle Arbeit zurückgedreht |
+| `catalog-sync-apply.mts` nannte `storage` **null Mal** | Ein neuer Bildverweis wäre veröffentlicht worden, ohne dass die Datei im Bucket liegt — `skylanders` ist weltlesbar |
+
+**Was jetzt gilt:**
+
+| | |
+|---|---|
+| **Der Modus wird verlangt** | `--modus=bootstrap` oder `--modus=publish`, kein Vorgabewert. Der Plan trägt ihn in der Datei, der Publish weist einen Bootstrap-Plan ab |
+| **Fünf Einmalregeln gebunden** | als Daten in `src/lib/catalog/publish-mode.ts`, je mit Zweck, Begründung, Quelle — im Planer an `BOOTSTRAP` gehängt |
+| **Riegel 4** | prüft das **Ergebnis**: im Publish zeigt kein Schritt nach Staging, egal woher er käme |
+| **Zwei Standdateien** | `catalog-baseline.json` ist das Siegel und wird **nie wieder** geschrieben; `publish-ledger.json` ist der fortlaufende Stand, 655 Zeilen **einzeln** — der Git-Diff zeigt, was ein Publish getan hat |
+| **Der Driftriegel** | drei Zustände je Feld: `veroeffentlicht` · `publiziert` (Teillauf, erlaubt) · `drift` (dritter Wert, Abbruch) |
+| **TOR 4** | im Apply-Pfad selbst, vor dem ersten Schreibzugriff: jedes Bildobjekt liegt im Ziel-Bucket und ist inhaltsadressiert |
+
+**Der Driftriegel löst beides zugleich:** Staging darf sich bewegen,
+Production nicht — **und ein abgebrochener Lauf ist ohne Sonderweg
+fortsetzbar**, weil die schon geschriebenen Felder als `publiziert`
+durchgehen. Genau daran ist der Bootstrap viermal gescheitert.
+
+**Gemessen, lesend, gegen beide Umgebungen:** 11 135 Felder (655 × 17) seit
+dem letzten Publish unberührt · 0 publiziert · 0 Drift · 0 neue Zeilen auf
+Staging · Riegel 1–4 ok · **0 Schritte in beiden Richtungen** · die neun
+Schutzwerte unverändert. Der erste Publish-Stand ist gegen das Siegel
+gegengeprüft: `655·df54fd6e74b681d5c521d02bcb75eb30`, zeichengleich.
+
+**Zwei offene Datenkorrekturen, benannt und nicht ausgeführt**
+(`supabase/checks/open_verifications.md`, Abschnitt 0j): `characters.json`
+nennt für `Fire Kraken` noch `SKY-0821` statt `SKY-0928` — ein Import würde
+`Winterfest Lob-Star` der falschen Familie zuordnen, und der Admin-Schutz
+greift dort nicht. Und die 35 Namen, bei denen Production und Staging zwei
+Quellgenerationen tragen.
+
+**Die Befehle für den Dauerbetrieb:**
+
+```bash
+npm run catalog:publish:plan     # Vorschau, schreibt nichts
+npm run catalog:publish          # veröffentlicht, mit --confirm-production
+npm run catalog:publish:plan     # danach: muss 0 melden
+```
+
 **2026-10-31, Katalog-Publish nach Production — Etappe C vollständig, Etappe D
 nach 142 von 715 Schritten abgebrochen, Ursache behoben:**
 

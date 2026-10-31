@@ -86,7 +86,7 @@
     "cat03:import:staging": "node --env-file=.env.staging tools/cat03-import.mts",
     "cat04:images": "node tools/cat04-images.mts",
     "cat05:bilder:staging": "node --env-file=.env.staging tools/cat05-bilder.mts",
-    "catalog:sync:plan": "node tools/catalog-sync.mts",
+    "catalog:sync:plan": "node tools/catalog-sync.mts --modus=bootstrap",
     "catalog:collisions": "node tools/sync-collision-report.mts",
     "storage:transfer:plan": "node tools/storage-transfer.mts",
     "storage:transfer:apply:staging": "node tools/storage-transfer.mts --ziel staging --apply",
@@ -96,8 +96,8 @@
     "catalog:sync:apply": "node tools/catalog-sync-apply.mts",
     "catalog:finish:plan": "node tools/catalog-finish.mts",
     "catalog:finish:apply": "node tools/catalog-finish.mts --apply --confirm-production",
-    "catalog:publish:plan": "node tools/catalog-sync.mts",
-    "catalog:publish": "node tools/catalog-sync-apply.mts --target=production --apply --confirm-production"
+    "catalog:publish:plan": "node tools/catalog-sync.mts --modus=publish",
+    "catalog:publish": "node tools/catalog-publish.mts --apply --confirm-production"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",
