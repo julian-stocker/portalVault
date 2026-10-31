@@ -79,14 +79,69 @@ describe("the curated pilot file", () => {
 
   it("holds 20 characters and 107 assignments", () => {
     /*
-     * The twentieth is Fire Kraken, and its third assignment is `SKY-0821` —
+     * The twentieth is Fire Kraken, and its third assignment is `SKY-0928` —
      * the first admin-created figure ever curated. It is counted here like
      * any other: an admin-created row is a canonical catalogue figure
      * (ADR-0070), and this file's only concession to that is knowing which
      * questions `products.json` can answer about it.
+     *
+     * *** DIESER KOMMENTAR NANNTE BIS ZUM 2026-10-31 `SKY-0821` ***
+     *
+     * Und das war keine Kleinigkeit: die Datei nannte sie auch, obwohl
+     * `Gold Fire Kraken` am 2026-10-30 auf `SKY-0928` umnummeriert wurde.
+     * Siehe die Zusage unten.
      */
     expect(characters).toHaveLength(20);
     expect(characters.flatMap((entry) => entry.sky_ids)).toHaveLength(107);
+  });
+
+  /* ---------------------------------------------------------------------- */
+
+  it("weist SKY-0821 NIEMALS Fire Kraken zu — dort steht Winterfest Lob-Star", () => {
+    /*
+     * *** DER DATENFEHLER VOM 2026-10-31 (K1) ***
+     *
+     * `Gold Fire Kraken` stand bis zum 2026-10-30 unter `SKY-0821` und
+     * wurde dann in das gesperrte Band umnummeriert: `SKY-0928`. Unter
+     * `SKY-0821` steht seither `Winterfest Lob-Star` — eine Trap-Team-Figur,
+     * auf BEIDEN Umgebungen, ohne Familie.
+     *
+     * Die kuratierte Datei blieb stehen. Gemessen am 2026-10-31 waere ein
+     * `characters:import` damit auf genau eine falsche Zuordnung gelaufen,
+     * und der Schutz haette NICHT gegriffen: `import-characters.mts`
+     * ueberspringt nur Zeilen mit einer Journalzeile `field =
+     * 'character_id'`, und fuer `SKY-0821` gibt es auf Production keine.
+     *
+     * Deshalb diese Zusage hier und nicht als Kommentar: ein Kommentar haette
+     * den Fehler nicht aufgehalten — er hat ihn mitgetragen.
+     */
+    const fireKraken = characters.find((c) => c.canonical_name === "Fire Kraken");
+    expect(fireKraken, "Fire Kraken fehlt in der kuratierten Datei").toBeTruthy();
+    expect(fireKraken!.sky_ids).toContain("SKY-0928");
+    expect(fireKraken!.sky_ids).not.toContain("SKY-0821");
+  });
+
+  it("und SKY-0821 kommt in der ganzen Datei nicht mehr vor", () => {
+    /*
+     * Nicht nur bei Fire Kraken: die Nummer ist auf Staging VERBRAUCHT
+     * (`admin_delete_figure`, drei Journalzeilen darunter `deleted`) und
+     * traegt auf Production eine andere Figur. Sie gehoert in keine
+     * Kuratierung — ADR-0001.
+     */
+    expect(characters.flatMap((c) => c.sky_ids)).not.toContain("SKY-0821");
+  });
+
+  it("jede SKY-ID steht genau einmal, im richtigen Format, ausserhalb des reservierten Bereichs", () => {
+    /*
+     * Eine Dublette waere ein Widerspruch — zwei Familien fuer eine Figur —
+     * und eine Nummer ab `SKY-9000` ist reserviert (ADR-0070).
+     */
+    const alle = characters.flatMap((c) => c.sky_ids);
+    expect(new Set(alle).size).toBe(alle.length);
+    for (const id of alle) {
+      expect(id, `${id} hat nicht das Format SKY-nnnn`).toMatch(/^SKY-\d{4}$/);
+      expect(id < "SKY-9000", `${id} liegt im reservierten Bereich`).toBe(true);
+    }
   });
 
   it("assigns only collectibles — never a console game", () => {

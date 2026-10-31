@@ -673,7 +673,34 @@ Zwei Punkte, die **keine** Schreiboperation dieses Arbeitsstands sind. Sie
 stehen hier, damit sie nicht in einen Publish oder Import geraten, ohne dass
 jemand sie entschieden hat.
 
-### K1 — `data/characters/characters.json` nennt für Fire Kraken eine falsche SKY-ID
+### K1 — `characters.json` nannte für Fire Kraken eine falsche SKY-ID — **BEHOBEN**
+
+**Korrigiert am 2026-10-31:** `"SKY-0821"` → `"SKY-0928"`. Eine Zeile, ein
+Wert, kein Datenbankzugriff. Gegengeprüft gegen **beide** Umgebungen:
+
+| | Staging | Production |
+|---|---|---|
+| Zuordnungen richtig auflösbar | **107 / 107** | **107 / 107** |
+| `SKY-0928` | `Gold Fire Kraken` → Familie `Fire Kraken` | dito |
+| `SKY-0821` | `Winterfest Lob-Star` → **keine Familie** | dito |
+| was ein Import noch ändern würde | **nichts** | **nur die 7 Metadatenfelder von `Fire Kraken`** |
+
+Weitere veraltete Verweise: **keine.** Alle 107 SKY-IDs im Format `SKY-nnnn`,
+keine Dublette, keine im reservierten Bereich ab `SKY-9000`.
+
+**Drei Zusagen halten es fest** (`src/lib/catalog/character-data.test.ts`):
+`Fire Kraken` enthält `SKY-0928` und **nicht** `SKY-0821` · `SKY-0821` kommt
+in der ganzen Datei nicht mehr vor · jede SKY-ID steht genau einmal, im
+richtigen Format, außerhalb des reservierten Bereichs. Mutationsprobe: setzt
+man die Datei zurück, schlagen zwei davon an.
+
+**Ein Kommentar in derselben Testdatei nannte `SKY-0821` als die richtige
+Zuordnung** — er hat den Fehler mitgetragen, statt ihn aufzuhalten. Deshalb
+steht die Aussage jetzt als Zusage und nicht als Kommentar.
+
+**Der Befund, wie er war:**
+
+### K1 — `data/characters/characters.json` nannte für Fire Kraken eine falsche SKY-ID
 
 | | |
 |---|---|
