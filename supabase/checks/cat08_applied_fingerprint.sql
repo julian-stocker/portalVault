@@ -66,10 +66,46 @@ with pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select coalesce(md5(p.prosrc), '(fehlt)') from pg_proc p
         where p.oid = to_regprocedure('public.admin_set_catalog_status(text,text)')),
       'e3c76fa571341e737c41fc2c3d6cdb8e'),
-  (117, 'Unveraendert', 'system_platform_export (0160) — derselbe Abdruck wie nach 0160',
+  /*
+   * NACHGEZOGEN AUF 0164 am 2026-10-30 — und zwar belegt, nicht angepasst,
+   * bis es passt.
+   *
+   * Diese Zeile erwartete `ff4f38e6…` und „derselbe Abdruck wie nach 0160".
+   * Der Staging-Suite-Lauf vom 2026-10-30 hat `7e9e58e2…` gemessen und damit
+   * als EINZIGE der acht Rumpfpruefungen dieser Datei angeschlagen.
+   *
+   * DER BEWEIS, dass die Abweichung die Pruefung und nicht die Datenbank
+   * betrifft: `system_platform_export()` wird in dieser Reihenfolge ersetzt —
+   * `0105`, `0144`, `0153`, `0160`, **`0164`**. Rechnet man den Rumpf aus den
+   * Migrationsdateien selbst, kommt heraus:
+   *
+   *     0160  31 114 Zeichen  ->  ff4f38e61cbd4e5857ea914d6be68d44
+   *     0164  31 248 Zeichen  ->  7e9e58e2d84a9f8a7c660262aa21926b
+   *
+   * Der alte Sollwert IST der Rumpf aus `0160`, der gemessene IST der Rumpf
+   * aus `0164` — zeichengleich mit der Fassung im Repository. `0164` ist auf
+   * Staging angewendet (`APPLIED.md`, Zeile der Staging-Uebersicht:
+   * `0152`-`0164`). Die Datenbank fuehrt also genau den Stand, den die Akte
+   * nennt; veraltet war die Erwartung.
+   *
+   * Die anderen sieben Rumpfpruefungen (101, 111-116) stimmen unveraendert
+   * mit ihrer jeweils letzten definierenden Migration ueberein; nachgerechnet
+   * am 2026-10-30 ueber alle acht.
+   *
+   * UEBER PRODUCTION SAGT DAS NICHTS. Diese Datei ist eine
+   * Staging-Pruefung. Eine erste Fassung dieses Kommentars behauptete, auf
+   * Production sei `0164` offen und der Rumpf weiter der aus `0160` — das war
+   * aus `APPLIED.md` uebernommen und NICHT gemessen. Am 2026-10-30 hat eine
+   * lesende Messung dort Objekte aus `0159`, `0161`, `0162` und `0163`
+   * gefunden, die laut Akte fehlen sollten. Der Production-Stand ist deshalb
+   * ein offener Widerspruch; er wird mit
+   * `supabase/checks/prod_0159_0165_state.sql` geklaert, nicht hier
+   * behauptet.
+   */
+  (117, 'Unveraendert', 'system_platform_export (0164) — derselbe Abdruck wie nach 0164',
       (select coalesce(md5(p.prosrc), '(fehlt)') from pg_proc p
         where p.oid = to_regprocedure('public.system_platform_export()')),
-      'ff4f38e61cbd4e5857ea914d6be68d44'),
+      '7e9e58e2d84a9f8a7c660262aa21926b'),
 
   -- Und der Bestand, als Auskunft fuer die Akte.
   (131, 'Bestand', 'Info: Entwuerfe',

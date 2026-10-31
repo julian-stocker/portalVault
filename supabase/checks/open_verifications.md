@@ -178,6 +178,495 @@ Zustand **A MIGRATIONSSTAND**):
 * `RECEIPT_ISSUANCE_RELEASED = false` ist unverändert. **Freigabe B bleibt
   verweigert** — die Sperre ersetzt sie nicht, sie trägt sie.
 
+### SKY-ID-Bereichssperre auf Staging (SYNC-16, 2026-10-30) — ausgeführt und verifiziert
+
+| | |
+|---|---|
+| Vorgang | `supabase/operations/staging-sky-id-band.sql` |
+| SHA-256 der ausgeführten Fassung | `b8f451e39e49a2adf0346e8cd0ea687bfa9525a20a29344c7fbe3ab4083efe13` |
+| Art | **Betriebsvorgang, keine Migration.** Sie ändert kein Schema und keine Zeile, sondern die **Vergabe** |
+| Wirksame Anweisung | **eine**: `alter sequence public.sky_id_seq minvalue 928 maxvalue 4999 no cycle start with 928 restart with 928` |
+| Ausführung | **manuell im Supabase-SQL-Editor durch den Betreiber** als `postgres`, `begin` / `commit` in der Datei. Nicht aus diesem Repository heraus — der Prüfzugang darf bewusst nicht schreiben |
+| Zeitpunkt | **2026-10-30**, vom Betreiber gemeldet |
+| Nachkontrolle | `supabase/checks/sky_id_band_postflight.sql`, Baseline aus Zeile 900 des Preflights |
+| Rücknahme | `supabase/rollback/R_staging_sky_id_band.sql` — **bricht ab**, sobald im Band eine Nummer vergeben ist, denn ein Zurücksetzen der Zählung vergäbe eine SKY-ID zweimal (ADR-0001) |
+
+**Ergebnis der Nachkontrolle: `9999 = 0`, `9998 = 0`.**
+
+| Prüfung | Befund |
+|---|---|
+| 201–204 (Band) | `928` · `4999` · `false` (NO CYCLE) · Startwert `928` |
+| 205 (Sequenzstand) | **`928\|false`** — der nächste Zug ist `SKY-0928` **selbst**, nicht einer mehr |
+| 211–212 (Sperre) | `true` · `true` — ab `SKY-9000` strukturell unerreichbar |
+| 221–222 (fremde IDs) | `true` · `true` — die Formatconstraint ist unverändert, **keine** CHECK auf `sky_id` dazugekommen |
+| 301–309 (gegen die Baseline) | alle `true`, alle Abdrücke unverändert |
+
+**Bestand danach**, gegen die Preflight-Baseline unverändert:
+
+| | |
+|---|---:|
+| Katalogzeilen | 694 |
+| Lagerzeilen | 287 |
+| Sammlungszeilen | 21 |
+| Kategorien | 38 |
+| Journalzeilen | 1066 |
+
+**Was damit auf Staging gilt:** die automatische Vergabe kann das Band
+`SKY-0928`–`SKY-4999` nicht mehr verlassen — weder durch `nextval`, noch durch
+`setval`, noch durch eine `security definer`-Funktion. Die Grenze hängt an der
+**Sequenz**, nicht am Aufrufer. Der reservierte System- und Testbereich ab
+`SKY-9000` (ADR-0070) ist damit **strukturell** geschützt und nicht mehr nur
+Konvention in vier Funktionsrümpfen.
+
+**Was sich nicht bewegt hat:** keine Zeile, keine bestehende SKY-ID, keine
+Funktion, keine Storage-Datei. Die Grenze gilt für die **Vergabe**, nicht für
+die **Speicherung** — und genau darauf beruht der Katalogabgleich: eine auf
+Production vergebene Nummer muss auf Staging unter derselben Nummer entstehen
+können. Es ist deshalb bewusst **keine** CHECK-Constraint auf
+`skylanders.sky_id` gesetzt worden, und 221–222 prüfen, dass auch keine
+dazugekommen ist.
+
+**Folgen, die ins Gedächtnis gehören:**
+
+* Die Datei ist **einmalig**. Wächter A2 bricht ab, wenn die Sequenz schon ein
+  Band trägt.
+* Ihr Umgebungsstempel A1 ist das vollständige Paar `SKY-0821` + `SKY-0822`.
+  Nach der Umnummerierung von `Gold Fire Kraken` ist dieses Paar
+  unvollständig — für diese Datei ohne Belang, weil sie gelaufen ist, aber
+  **jede künftige Datei, die Staging an diesem Stempel erkennen will, braucht
+  einen anderen Marker.**
+* Die Sperre steht in **keiner** Migration. Ein neu aufgebautes Staging hätte
+  sie nicht; `supabase/checks/sky_id_band_postflight.sql` ist der Weg, das zu
+  merken.
+* Die Bereichssperre auf **Production** (`SKY-5001`–`SKY-8999`,
+  `supabase/operations/production-sky-id-band.sql`) ist vorbereitet und
+  **nicht gefahren**. Sie braucht eine eigene Freigabe.
+
+### Umnummerierung `Gold Fire Kraken`: SKY-0821 → SKY-0928 auf Staging (2026-10-30) — ausgeführt und verifiziert
+
+| | |
+|---|---|
+| Vorgang | `supabase/operations/staging-sky-0821-renumber.sql` |
+| Art | **Betriebsvorgang, keine Migration.** Eine Transaktion, Wächter A0–A5, acht Schritte, Nachbedingungen |
+| Voraussetzung | die Bereichssperre (Abschnitt oben) — Wächter A2 bricht ohne sie ab |
+| Ausführung | **manuell im SQL-Editor durch den Betreiber** als `postgres`, 2026-10-30 um 17:12 UTC |
+| Preflight | `supabase/checks/sky_0821_renumber_preflight.sql`, `9999 = 0`. Baseline Zeile 900: `skyisles-0821-1|694|1066|287|21|d1e68c3afd1c5d2a005da61c5fa9c39b|d464d3436a04` |
+| Nachkontrolle | `supabase/checks/sky_0821_renumber_postflight.sql`, **`9999 = 0`, `9998 = 0`** |
+| Rücknahme | `supabase/rollback/R_staging_sky_0821_renumber.md` — es gibt keine, und warum |
+
+**Warum überhaupt:** `SKY-0821` war die einzige echte Identitätskollision
+zwischen den Umgebungen (SYNC-18). Auf Production ist das `Winterfest
+Lob-Star` (Trap Team, `source = admin`, bebildert, redaktionell
+ausgeblendet), auf Staging war es `Gold Fire Kraken` (SuperChargers,
+`chase`). Beide Zeilen waren unbenutzt — 0 Verweise auf allen Pfaden —, aber
+die Production-Figur ist ein eigenständiger kuratierter Eintrag mit eigenem
+Bildobjekt, dessen Speicherpfad die SKY-ID trägt. Das Ersetzen dort wäre in
+jeder Hinsicht teurer gewesen und hätte Production geschrieben; die
+Umnummerierung auf Staging kostet eine Nummer aus dem eigenen Band und sonst
+nichts.
+
+**Was jetzt gilt:**
+
+* **Die alte `SKY-0821` ist auf Staging GELÖSCHT.** `admin_delete_figure`
+  (0162) hat sie entfernt, nachdem es jeden Fremdschlüssel aus
+  `pg_constraint` gezählt, die vier mit `ON DELETE CASCADE` einzeln geprüft,
+  `order_lines` eigens gefragt und Varianten ausgeschlossen hat.
+* **Die Journalhistorie ist erhalten.** `catalog_admin_changes` hat hierher
+  keinen Fremdschlüssel, also hat die Spur das Löschen überlebt — und ist
+  gewachsen: unter `SKY-0821` stehen jetzt **drei** Zeilen, `created`
+  (2026-09-16), `card_type` `prestige`→`chase` (2026-10-29) und `deleted`
+  (`Gold Fire Kraken | SF | hidden | admin`, 2026-10-30). Genau diese Spur ist
+  der Beweis, dass `SKY-0821` auf Staging **verbraucht** ist und nie
+  wiederkommt (ADR-0001).
+* **`Gold Fire Kraken` trägt jetzt `SKY-0928`** — die erste Nummer aus dem
+  gesperrten Band, mit jedem Feld der alten Zeile: `gold-fire-kraken`, `SF`,
+  Kategorie 20, `chase`, `hidden`, nicht sichtbar, Charakter 105
+  (`Fire Kraken`), `types` `chase+swapper`, `visible_type` `chase`,
+  `item_type` `figure` aus der Kategorie, **ohne Preis, ohne Bild**. Sechs
+  eigene Journalzeilen, darunter `created`.
+* **Die Herkunft ist lesbar:** `catalog_editorial.admin_note` auf `SKY-0928`
+  nennt `SKY-0821` und den Grund.
+
+**Bestand, gegen die Preflight-Baseline:**
+
+| | vorher | nachher | |
+|---|---:|---:|---|
+| Katalogzeilen | 694 | **694** | eine ging, eine kam |
+| Lagerzeilen | 287 | **287** | unberührt |
+| Sammlungszeilen | 21 | **21** | unberührt |
+| Journalzeilen | 1066 | **1073** | +7 |
+
+Der Katalogabdruck hat sich geändert, und das muss er — Nachkontrolle 316
+verlangt es. **Gegenprobe:** rechnet man denselben Bestand mit `SKY-0821` an
+der Stelle von `SKY-0928`, kommt der Baseline-Abdruck
+`d1e68c3afd1c5d2a005da61c5fa9c39b` **zeichengleich** heraus. Die
+Umnummerierung ist die einzige Änderung am Katalog.
+
+### Zwei Lehren aus dem Lauf
+
+**Der erste Preflight brach ab** mit
+`42P01 relation "public.availability_alerts" does not exist`. Meine Liste der
+Referenzpfade war aus `references public.skylanders` im **Quelltext der
+Migrationen** gegrept — und `0150`, die diese Tabelle anlegt, ist auf beiden
+Umgebungen offen. Eine Migration im Repository ist keine Tabelle in der
+Datenbank. Der Preflight leitet die Pfade jetzt aus `pg_constraint` her (wie
+`admin_merge_references` und wie `cat09_delete_references.sql`, das es längst
+gab) und nagelt die gefundene Struktur fest: 14 Fremdschlüssel, vier davon
+`CASCADE`, ein stiller Weg `order_lines.sky_id`, Abdruck
+`a221fee44b98985c7903fd09fbdf8516`.
+
+**Schlimmer war das Messwerkzeug.** PostgREST antwortet auf eine
+HEAD-Anfrage an eine nicht existierende Tabelle mit **204 ohne Fehler**;
+`count` ist dann `null`, und ein `count ?? 0` machte daraus eine Null. Der
+Bericht meldete „0 Verweise" für eine Tabelle, die es nicht gibt. Es
+unterscheidet jetzt drei Zustände — gezählt, Tabelle fehlt (dann ist 0
+richtig, und es wird ausgesprochen), unbestimmt (dann gibt es keine Summe und
+kein Urteil).
+
+**Die erste Nachkontrolle meldete 19 blockierende Abweichungen**, obwohl der
+Lauf geglückt war: sie verlangte die neue SKY-ID und die Baseline als
+`set_config`, und der Lauf hatte die Nummer nur **transaktionslokal**
+abgelegt — mit dem `commit` war sie fort. Eine Nachkontrolle, die eine Angabe
+braucht, die der Vorgang selbst nicht hinterlässt, ist falsch gebaut. Sie
+leitet die Nummer jetzt auf drei unabhängigen Wegen ab, die übereinstimmen
+müssen (101–105): die einzige Zeile im Band, der Name, und die redaktionelle
+Notiz.
+
+### Eine Folge, die man kennen muss
+
+**Das Staging-Markerpaar `SKY-0821` + `SKY-0822` ist jetzt unvollständig**
+(Nachkontrolle 233 hält es fest). Die sieben vorbereiteten
+Production-Dateien `prod-0135` bis `prod-0141` tragen den umgekehrten
+Riegel — sie brechen ab, wenn das *vollständige* Paar da ist. Auf Staging
+fängt sie ab jetzt nicht mehr A1, sondern nur noch A2 (`0133` fehlt hier) und
+A3. Der Schutz bleibt, er ist nur einschichtig statt zweischichtig; genau der
+Fall, den Probelauf P41 vorführt. **Jede künftige Datei, die Staging an diesem
+Stempel erkennen will, braucht einen anderen Marker.**
+
+## 0i. Katalog-Publish nach Production — Etappe D teilweise ausgeführt (2026-10-31)
+
+Der freigegebene Abschlusslauf (`npm run catalog:finish:apply`) hat Etappe C
+vollständig beendet und ist in Etappe D abgebrochen. **Es wurde nichts
+zurückgerollt und nichts wiederholt** — der tatsächliche Zustand steht, und
+dieser Abschnitt hält fest, welcher.
+
+| | |
+|---|---|
+| Lauf | 2026-10-31, 08:48:13 bis 08:48:43 UTC |
+| Bericht | `resources/analysis/CATALOG-FINISH.md` (Zustand ABGEBROCHEN, letzte Etappe D) |
+| Protokoll Etappe C | `supabase/log/sync/2026-10-31T08-48-11-807Z-staging.json` — 52 von 52, `journalDelta 51 = erwartet`, keine Befunde |
+| Protokoll Etappe D | **keines** — der Apply-Pfad schrieb es damals erst nach der Schleife. Behoben; siehe unten |
+| Abbruchmeldung | `feld-neu familie SKY-0854: der Charakter "Prism Break Light Core" steht im Ziel nicht.` |
+
+### Was auf Production wirklich steht — lesend festgestellt
+
+Alles hier ist **gemessen**, nicht aus der Fehlermeldung geschlossen.
+
+| Messung | Wert |
+|---|---|
+| Charakteranlagen | **5 von 5 ausgeführt** — `Dune Bug` 215, `Fire Kraken` 216, `Heavy Duty Sprocket` 217, `Prism Break Light Core` **218**, `Stump Smash` 219 |
+| Figurenanlagen | **33 von 33 ausgeführt**, `SKY-0822` … `SKY-0928` |
+| Feldschritte | **104 von 677 geschrieben**, 573 offen |
+| **Werte, die weder `von` noch `nach` sind** | **0** |
+| Journalzeilen 2026-10-31 | **137** — `created` 33, `types` 32, `visible_type` 32, `image_override_path` 19, `base_sky_id` 18, `character_id` 3 |
+| Urheber der Journalzeilen | 85 Plattformadmin (`2d8a0ffc…`), 52 Service-Role |
+| Die neun Schutzwerte | **unverändert**: 622 · 95 · 0 · 2 · 1 · 340 · 711 · 585 · `f8385f748963efc58440adbceed22554` |
+
+**Die Kreuzprobe geht auf:** was das Journal sagt und was der Istzustand
+hergibt, ist deckungsgleich — 104 Feldschritte verteilen sich genau auf die
+Journalhistogramm-Spalten, und `familie` erscheint dort als `character_id`.
+Die 5 Charakteranlagen erzeugen keine Journalzeile (sie schreiben
+`characters`, nicht `skylanders`); 137 = 33 + 104.
+
+### Die Ursache — und warum die Fehlermeldung in die falsche Richtung wies
+
+Die Meldung behauptete einen Reihenfolgefehler. Es war keiner:
+`charakter-anlegen` hat `RANG 0` und läuft zuerst, und
+`Prism Break Light Core` stand um **08:48:16.715** auf Production — **4,6
+Sekunden vor** dem Schritt um 08:48:21, der ihn nicht fand.
+
+Was fehlte, war der Eintrag in `charakterId`, der Zuordnung Name → `id`. Sie
+wird **einmal vor der Schleife** aus dem Ziel gelesen und kennt deshalb
+keinen Charakter, der **in** diesem Lauf entsteht. `.get()` gab `undefined`,
+obwohl die Zeile in der Datenbank stand.
+
+**Der Beweis liegt in den Daten, nicht im Code:** drei Familienzuordnungen
+liefen durch — `SKY-0829` und `SKY-0851` auf `Whirlwind`, `SKY-0853` auf
+`Eruptor` —, **alle drei auf Charaktere, die Production schon führte**. Der
+erste Schritt auf einen im Lauf angelegten Charakter brach ab. Hätte die
+Reihenfolge gefehlt, wären auch diese drei gescheitert.
+
+Das ist **dieselbe Ursache wie die vier Erscheinungsformen desselben Tages**:
+eine Momentaufnahme, die nach eigenen Schreibvorgängen weiterbenutzt wird
+(`jetzt._zeilen` bei den Vergleichsmarken, `charakterId` hier).
+
+### Was dagegen gebaut ist
+
+1. **Behoben an der Quelle.** `admin_create_character` (0158) gibt die `id`
+   zurück. Die Anlage trägt sie sofort in `charakterId` ein, liest die Zeile
+   zur Kontrolle über die `id` zurück und verweigert eine unbrauchbare `id`.
+   Nichts wird über den Namen nachgeschlagen und nichts geraten.
+2. **TOR 1b**, vor dem ersten Schreibzugriff.
+   `src/lib/catalog/sync-character-gate.ts` — rein, ohne Datenbank, in
+   `sync-character-gate.test.ts` einzeln geprüft. Es misst, dass jede
+   Familienzuordnung auflösbar **wird** (steht schon oder wird angelegt), und
+   es weist einen **veralteten Plan** ab, der anlegen will, was schon steht —
+   genau der Zustand nach diesem Abbruch. `RANG` steht jetzt nur noch an
+   dieser einen Stelle.
+3. **Das Protokoll wird auch bei einem Abbruch geschrieben.** Vorher stand
+   `writeFileSync` nach der Schleife; 142 geschriebene Schritte hinterließen
+   deshalb keine Datei. Der Abbruchzweig schreibt `abgebrochen: true`,
+   `abgebrochen_nach` und die Fehlermeldung — und wirft den Fehler **erneut**,
+   er wird nicht verschluckt.
+4. **Die Meldung sagt nicht mehr das Falsche.** „Die Charaktere müssen VOR
+   den Figuren angelegt werden" kommt nicht zurück; ein Test hält das fest.
+5. **Die sechs Stufen sind jetzt wirklich sechs.** Die Reihenfolge war für
+   die Stufen 1 bis 3 schon richtig (Charaktere, Figuren, Typen und Banner),
+   aber `familie`, `base_sky_id` und `image_override_path` lagen alle im
+   Vorgaberang und wurden deshalb figurweise vermischt. `FELDRANG` trennt sie
+   jetzt: Varianten und Familien vor den übrigen Katalogfeldern, und der
+   Bildverweis ganz zuletzt — ein Abbruch soll keine Figur hinterlassen, die
+   auf ein Bild zeigt, deren Typ und Familie aber noch offen sind. Gemessen
+   am Plan der 573 offenen Schritte: `types` 1–10, `visible_type` 11–264,
+   `base_sky_id` 265–275, `familie` 276–286, übrige Felder 287–556,
+   `image_override_path` **557–573**.
+
+**Compare-and-Set und alle übrigen Riegel bleiben unverändert aktiv.** Ein
+Test prüft weiterhin, dass es keinen Schalter gibt, TOR 2 zu überspringen.
+
+### Der Stand nach der Reparatur, mit scharfem Riegel 2 gemessen
+
+| | |
+|---|---|
+| Riegel 1 | ✅ beide Verbindungen an der erwarteten Kennung |
+| Riegel 2 | ✅ **alle acht Abdrücke entsprechen dem Messwert** |
+| Riegel 3 | ✅ **0 Identitätskonflikte**; 35 Namensabweichungen (kein Konflikt, ADR-0030), `SKY-0821` aufgelöst, `SKY-9994`/`SKY-9998` außerhalb |
+| Richtung Staging | ✅ **0 Schritte** |
+| Richtung Production | **573 Schritte**, alle `feld`, 331 erwartete Journalzeilen |
+| TOR 1b gegen den Istzustand | ✅ **11 Familienzuordnungen, alle 11 aus dem Bestand** — `SKY-0854` darunter |
+| Bildobjekte | ✅ 66 beidseitige Pfade bytegleich und inhaltsadressiert; die **17 offenen liegen auf Production schon im Bucket und sind bytegleich** |
+
+**Die Messwerte in `resources/sync/bootstrap-decisions.json` sind nachgezogen
+— mit Gegenprobe.** Production: entfernt man die 33 Figuren und 5 Charaktere
+und dreht die 104 Feldwerte auf ihren `von`-Wert, kommen
+`622·23a9af3ca7db7fb55d286eafd83cda3f` und
+`19·b84ce2fe98ea3935da54b9ed1435b1f9` **zeichengleich** heraus. Staging:
+dreht man die 51 journalisierten Feldwerte auf `old_value` und den einen
+nicht journalisierten (`SKY-0922/name`, Klasse C) auf seinen `von`-Wert,
+kommt `655·cb46865d85176fc04b58c063166a17fb` zeichengleich heraus. **Kein
+fremder Schreibvorgang.**
+
+### Eine Folge, die man kennen muss
+
+Vier Bildentscheidungen auf Production werden vom Publish durch die
+Staging-Fassung ersetzt:
+
+| SKY-ID | Production jetzt | wird |
+|---|---|---|
+| `SKY-0492` | `2f43531dc4d786e8.jpg` | `8fe6c41fff1a2ab5.png` |
+| `SKY-0585` | `179a220e25741ce1.png` | `a11ed721b29ea805.png` |
+| `SKY-0586` | `9a757f5aa0f1a87d.jpg` | `7f190d6bdbaaba2a.png` |
+| `SKY-0587` | `b77f2a9703ee8f66.jpg` | `853e6044d2c638c3.png` |
+
+So will es ADR-0163: Staging führt, Production übernimmt. **Die alten Objekte
+bleiben im Bucket** — `storage.remove` kommt in
+`tools/storage-transfer.mts` nicht vor und `upsert` ist aus. Rückweg also
+offen, falls eine der vier Entscheidungen doch die bessere war.
+
+### Etappe A: der zweite Abbruch, und die Lücke, die er aufdeckte (2026-10-31)
+
+Der Fortsetzungslauf kam durch Etappe D nicht hinaus, weil er schon in
+**Etappe A** abbrach:
+
+```
+RIEGEL 2 — Abbruch: der Dry-Run nennt keinen Bildschritt.
+```
+
+**Die Aussage war falsch.** Der Dry-Run nannte 17 Bildschritte, alle Richtung
+Production. Richtung **Staging** war nach Etappe C keiner mehr offen — und
+genau dort rief der Runner trotzdem einen Apply auf.
+
+| | |
+|---|---|
+| Was der Runner tat | zwei **unbedingte** Apply-Aufrufe, `--ziel staging` und `--ziel production` |
+| Was Riegel 2 prüfte | `schritte.length === 0` — die **Auswahl**, nicht den Plan |
+| Folge 1 | eine leere Richtung meldete „der Dry-Run nennt keinen Bildschritt" — unwahr |
+| Folge 2 | **Riegel 2b war unerreichbar.** Er ist für genau diesen Fall gedacht („zur Richtung … gibt es keinen Bildschritt"), stand aber hinter einer Bedingung, die vorher schon abgebrochen hatte |
+
+**Und eine dritte Lücke, die beim Nachsehen auffiel:**
+`tools/storage-transfer.mts` meldete `Fehler: N` und **endete mit Code 0**.
+Der Abschlusslauf ruft es über `execFileSync` auf und bricht nur bei einem
+Fehlercode ab. Ein fehlgeschlagener Upload, ein nicht bytegleiches Objekt
+oder ein Name, der nicht zum Inhalt passt, wäre also **berichtet und
+übergangen** worden — und Etappe C hätte darauf aufgebaut. Ein Zustand, der
+im Bericht fett gedruckt ist, darf den Aufrufer nicht mit „alles gut"
+verlassen.
+
+**Was jetzt gilt — Riegel 2 ist nicht gelockert, sondern richtig gestellt:**
+
+1. **Riegel 2 prüft den Plan** (`alleSchritte`), nicht die Auswahl. Damit ist
+   seine Meldung wahr, und **Riegel 2b ist erreichbar**: er fängt die leere
+   Richtung ab und nennt `--pruefen` als den richtigen Aufruf.
+2. **Der Runner fragt je Richtung den Plan.** ≥ 1 Bildschritt dorthin → der
+   bisherige Apply-Pfad, unverändert, mit allen Riegeln. 0 Bildschritte →
+   `--pruefen`.
+3. **`--pruefen` ist ein lesender Modus.** Kein `upload`, kein `remove`, kein
+   `insert`, kein `rpc` — ein Test prüft den Block darauf ab. Er endet mit
+   `process.exit(0)`, fällt also nicht in die Übertragungsschleife durch.
+   `--apply` und `--pruefen` schließen sich aus.
+4. **Jeder Befund hat einen Fehlercode.** In beiden Modi.
+
+**Was `--pruefen` prüft — bewusst eng:** die Pfade, die **beide** Umgebungen
+referenzieren (also die, die dieser Abgleich übertragen hat), und die Pfade,
+die der Plan noch in diese Richtung schreiben will. Pfade, die **nur** die
+Gegenseite führt und der Plan nicht anfasst, bleiben außer Betracht — etwa
+die 37 Entwürfe auf Staging, die nach ADR-0163 nie veröffentlicht werden.
+Eine Etappe A, die an denen scheitert, hielte den Publish aus einem Grund
+auf, der ihn nichts angeht.
+
+Je Objekt drei Urteile, dieselben wie im Transferpfad: **Pfad gehört zu
+seiner Figur** (Riegel 3) · **Name ist die Prüfsumme** (erste 16 Hexstellen
+des SHA-256) · **Byte-Vergleich**, wo beide Seiten den Pfad führen. Ein
+übertragenes Objekt, das im Ziel fehlt, ist ein Befund — es war da und ist
+weg. Ein **geplanter** Pfad, der fehlt, ist keiner: das sagt der Plan selbst,
+und dafür ist der Apply-Pfad da.
+
+**Gemessen, lesend, am 2026-10-31:**
+
+| Richtung | Modus | benötigt | in Ordnung | noch nicht übertragen | Befunde |
+|---|---|---:|---:|---:|---:|
+| Staging | `--pruefen` (0 offen) | **66** (66 übertragen) | **66** | 0 | **0** |
+| Production | `--pruefen`, zur Kontrolle | **83** (66 übertragen + 17 geplant) | **83** | **0** | **0** |
+| Production | Apply-Pfad, Trockenlauf | 17 | — | — | 0, **17 übersprungen** |
+
+Die 17 Planpfade liegen auf Production also **schon im Bucket und sind
+bytegleich** — der Apply-Pfad läuft dort durch, ohne ein Objekt zu schreiben
+(`upsert` ist aus, ein vorhandener Pfad wird nie ersetzt). **Kein doppelter
+Upload, keine Überschreibung, keine Löschung.**
+
+Die Urteilslogik steht in `src/lib/catalog/storage-verify.ts` — rein, ohne
+Netz, mit `storage-verify.test.ts` an echten Bytes geprüft: vorhanden,
+fehlend, falscher Hash, gleich-falsch auf beiden Seiten, einseitig, Pfad an
+der falschen Figur, leere Prüfung. Vier Mutationsproben (Riegel 2 zurück auf
+die Auswahl · Runner wieder unbedingt · fehlendes Objekt als harmlos · der
+Fehlercode entfernt) schlagen jeweils an.
+
+### Etappe E: die Prüfung, die nie bestehen konnte (2026-10-31)
+
+Etappe D lief **vollständig** durch. Trotzdem brach Etappe E ab:
+
+```
+die Fingerprints weichen ab: katalog_freigegeben, charaktere.
+```
+
+| Nachweis zu Etappe D | Wert |
+|---|---|
+| Protokoll | `supabase/log/sync/2026-10-31T10-27-02-297Z-production.json` |
+| Schritte | **573 von 573**, davon 325 geschrieben (die 248 `visible_type_decided` setzt `admin_set_visible_type` mit) |
+| Journal | **331 — genau die vorher berechnete Erwartung** |
+| TOR 3 | **ohne Befund** |
+| Plan danach | **0 Schritte in beiden Richtungen** |
+
+**Der Plan stand auf null und die Prüfung schlug fehl. Das kann nur heißen,
+dass die Prüfung etwas anderes fragt als der Plan.** Sie tat es:
+
+#### `katalog_freigegeben` — das Feld `name`
+
+Der Abdruck läuft über alle 19 Felder. Der Planer überspringt `name` und
+`slug` aber ausdrücklich — **die Excel ist Hoheit** (ADR-0030,
+`name_hoheit: "excel"`). Gemessen:
+
+| | |
+|---|---|
+| die **17 geregelten** Felder | **zeichengleich**, `655·df54fd6e74b681d5c521d02bcb75eb30` auf beiden |
+| `name` | **35 Abweichungen**, Abdruck `72897221a6cb27d46e171636a7a7fb44` |
+| `slug` | **0 Abweichungen** |
+| `display_name_override` | beidseitig gleich in **allen 655** Zeilen |
+
+Die 35 sind **genau die 35**, die Riegel 3 des Dry-Runs seit Beginn als
+„Namensabweichung — kein Konflikt, dieselbe Figur (ADR-0030)" meldet. Die
+Zahl stimmt auf den Datensatz.
+
+#### `charaktere` — kuratierte Metadaten
+
+Der Abdruck läuft über sieben Metadatenfelder. **Keines davon ist unter den
+19 synchronisierten Feldern**, und `admin_create_character` (0158) legt eine
+Familie mit *nichts als dem Namen* an — kuratierte Arbeit gehört nach
+ADR-0034 in `data/characters/characters.json`. Gemessen:
+
+| | |
+|---|---|
+| Identität (`canonical_name`) | **zeichengleich**, `24·ec1e750f4f37e31c8402a257f69381fa` |
+| Metadatenabweichungen | **genau eine: `Fire Kraken`** — auf Staging kuratiert, auf Production alle sieben Felder NULL |
+| die anderen vier im Lauf angelegten Charaktere | auf **beiden** Seiten NULL, stimmen daher |
+
+#### Die Korrektur: zwei Fragen statt einer
+
+Eine Prüfung, die nach etwas fragt, das der Lauf nicht herstellen darf, kann
+nie bestehen. **Etappe E1** fragt jetzt getrennt:
+
+1. **Was der Publish regelt, muss gleich sein.** Keine Toleranz — die 17
+   Felder und die Charakteridentität.
+2. **Was er nicht regelt, muss genau die entschiedene Abweichung sein** —
+   nach **Anzahl UND Abdruck über die Menge**. Eine 36. Namensabweichung hält
+   den Lauf an; eine *andere* Zeile bei gleicher Anzahl ebenso.
+
+Punkt 2 ist der Unterschied zwischen „richtig stellen" und „ignorieren". Die
+Erwartung steht als Daten in `resources/sync/bootstrap-decisions.json`
+(`publish_ungeregelt`), mit den ADRs als Begründung und dem Weg zur Abhilfe.
+Eine **fehlende** Erwartung wird nicht als Bestehen gelesen, sondern bricht ab.
+
+**Und es gibt nur noch EINE Quelle für die Regel.** Im Planer stand
+`if (f === "name" || f === "slug") continue;` als eigene Bedingung — die
+Fingerprintprüfung kannte sie nicht. Beide nehmen jetzt `UNGEREGELT` aus
+`src/lib/catalog/publish-compare.ts`. Ein Test hält zusätzlich fest, dass die
+drei `FELDER`-Listen (Modul, Planer, Apply-Pfad) Feld für Feld übereinstimmen.
+
+**Etappe F versiegelt entsprechend beides** — die geregelte Projektion und
+die Charakteridentität als das, was gleich ist, und die ungeregelten
+Abweichungen als das, was bewusst bleibt. Die Selbstprobe läuft über die
+geregelte Projektion; vorher lief sie über Abdrücke, die eine Gleichheit
+besiegelt hätten, die es nicht gibt.
+
+#### Was echt bleibt, und was dagegen zu tun wäre
+
+Die Vergleichslogik war falsch. **Die Unterschiede sind es nicht.** Beides
+gehört gesagt:
+
+* **19 der 35 Figuren tragen keinen `display_name_override`** — dort sieht
+  der Besucher auf Production einen anderen Namen als auf Staging, und
+  mehrere sind dort Schreibfehler: `Air Latern`, `Magic Latern`,
+  `Undead Latern`, `Fire Acron`, `Legendary Grim Creemper`,
+  `Mini Power Punsh Pet Vac`, `Mystery Chest Silber`, `Trillipede (Easter)`,
+  `Start Strike (LC, Enchanted)`. Abhilfe ist **nicht** dieser Publish
+  (ADR-0030 verbietet ihn ausdrücklich), sondern ein eigener Namensimport
+  gegen Production — eigene Handlung, eigene Freigabe.
+* **`Fire Kraken` hat auf Production keine kuratierten Metadaten.** Abhilfe
+  ist `npm run characters:import` gegen Production — ebenfalls eine eigene
+  Handlung mit eigener Freigabe.
+
+**Der Messwert `production/katalog_freigegeben` ist nachgezogen** auf
+`655·e0c4ecbff2b4619cbb871486d6a500ad`. Der Nachweis ist dreifach und
+lesend: alle 325 protokollierten Felder stehen heute noch auf ihrem
+`nach`-Wert · das Journal im Zeitfenster ab 10:25Z führt genau 331 Zeilen und
+kein Feld, das der Plan nicht nennt · die geregelte Projektion ist auf beiden
+Umgebungen zeichengleich, Production trägt also genau den Staging-Stand, auf
+den der Publish zielte. **Eine Rücknahme-Gegenprobe wie bei den früheren
+Nachziehungen war hier nicht möglich** — 248 der 573 Schritte wurden implizit
+geschrieben, und der Plan mit ihren `von`-Werten ist von der Neuberechnung in
+Etappe E überschrieben. Das ist die schwächere Form des Nachweises, und sie
+steht hier als solche benannt.
+
+### Die Fortsetzung braucht keinen Sonderweg
+
+Jede Etappe ist zustandsgetrieben, deshalb ist derselbe Befehl die
+Fortsetzung und nicht ein Neustart: Etappe A verifiziert die erledigte
+Richtung und überspringt vorhandene Objekte in der anderen (`upsert` aus),
+Etappe C hat 0 Schritte, Etappe D findet die 5 Charaktere und 33 Figuren vor
+und führt sie nicht mehr im Plan. Dass der neu gerechnete Plan
+desselben Zustands durch TOR 1b kommt, der alte aber nicht, ist in
+`sync-character-gate.test.ts` festgehalten.
+
 ## 0e. Migration `0132` auf Staging — angewendet und zweifach belegt
 
 | | |

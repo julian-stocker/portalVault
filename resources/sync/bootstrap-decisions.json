@@ -1,0 +1,182 @@
+{
+ "_zweck": "Die fachlichen Entscheidungen des Betreibers zum Initialabgleich, als Daten statt als Code. Der Dry-Run liest sie; wer sie aendert, aendert den Plan - nachvollziehbar im Git-Diff. Quelle: SYNC-08 Abschnitt 1 und die Freigaben vom 2026-10-30.",
+ "format_version": 1,
+ "entschieden_am": "2026-10-30",
+ "name_hoheit": "excel",
+ "_name_hoheit": "ADR-0030: der gespeicherte Name folgt der Excel. Staging-Namen werden NICHT nach Production uebernommen.",
+ "display_name_override": {
+  "_": "13 Werte. Gesetzt wird auf der Umgebung, die die Zeile schon hat; der Sync traegt ihn danach in die andere.",
+  "SKY-0252": {
+   "wert": "Legendary LightCore Grim Creeper",
+   "grund": "kuratierter Charakter Grim Creeper; types enthaelt lightcore"
+  },
+  "SKY-0266": {
+   "wert": "Enchanted LightCore Star Strike",
+   "grund": "kuratierter Charakter Star Strike; LC ausgeschrieben"
+  },
+  "SKY-0494": {
+   "wert": "Dark Turbo Charge Donkey Kong",
+   "grund": "kuratierter Charakter Turbo Charge Donkey Kong"
+  },
+  "SKY-0589": {
+   "wert": "Air Lantern",
+   "grund": "Latern ist kein Wort"
+  },
+  "SKY-0605": {
+   "wert": "Magic Lantern",
+   "grund": "Latern ist kein Wort"
+  },
+  "SKY-0611": {
+   "wert": "Undead Lantern",
+   "grund": "Latern ist kein Wort"
+  },
+  "SKY-0596": {
+   "wert": "Fire Acorn",
+   "grund": "Acron ist kein Wort"
+  },
+  "SKY-0263": {
+   "wert": "Smolderdash LightCore",
+   "grund": "Katalogkonvention; Gedankenstrich entfaellt"
+  },
+  "SKY-0102": {
+   "wert": "Empire of Ice",
+   "grund": "Bild zeigt das Ortsteil Empire of Ice"
+  },
+  "SKY-0103": {
+   "wert": "Pirate Seas",
+   "grund": "Produktname statt Formbeschreibung"
+  },
+  "SKY-0172": {
+   "wert": "Employee Edition LightCore Prism Break",
+   "grund": "Herkunft schlaegt Farbe; types enthaelt lightcore"
+  },
+  "SKY-0584": {
+   "wert": "Mystery Chest Blue (Cursed Tiki Temple)",
+   "grund": "unterscheidet von SKY-0922, das der Bootstrap anlegt"
+  },
+  "SKY-0586": {
+   "wert": "Mystery Chest Silver",
+   "grund": "einziges deutsches Wort unter vier Truhen"
+  }
+ },
+ "kein_override": {
+  "SKY-0585": "reine Wortfolge",
+  "SKY-0587": "reine Wortfolge",
+  "SKY-0130": "reine Wortfolge und Wortfuge",
+  "SKY-0154": "Royale ist eine zulaessige Schreibweise",
+  "SKY-0284": "jeder Checklistenname unterschlaegt die Dark-Eigenschaft"
+ },
+ "name_korrektur_staging": {
+  "SKY-0922": {
+   "wert": "Mystery Chest Blue (Lost Imaginite Mines)",
+   "grund": "nicht aus der Excel (source=admin), ADR-0030 bindet den Namen nicht"
+  }
+ },
+ "sichtbarkeit": {
+  "richtung": "production_gewinnt",
+  "_": "Die 22 Zeilen mit abweichender Sichtbarkeit: Staging folgt Production. Keine automatische Veroeffentlichung."
+ },
+ "sky_id": {
+  "kollision": {
+   "SKY-0821": {
+    "production_behaelt": true,
+    "staging_neu_anlegen": true,
+    "geloest": {
+     "am": "2026-10-30",
+     "wie": "Staging umnummeriert: Gold Fire Kraken steht jetzt unter SKY-0928",
+     "production": "behaelt Winterfest Lob-Star unter SKY-0821, unangetastet",
+     "nachweis": "supabase/checks/sky_0821_renumber_postflight.sql, 9999 = 0",
+     "hinweis": "SKY-0821 ist auf Staging VERBRAUCHT (3 Journalzeilen, darunter deleted) und kommt nie zurueck (ADR-0001)"
+    }
+   }
+  },
+  "baender": {
+   "staging_ab": "SKY-0928",
+   "production_ab": "SKY-5001"
+  },
+  "setval": {
+   "production": 5000,
+   "staging": null
+  },
+  "_setval": "Zweiparameterform, is_called bleibt true. Staging braucht keines: last_value 927 am 2026-10-30 gemessen."
+ },
+ "ausschluss": {
+  "testserien": [
+   "TEST",
+   "SMOK"
+  ],
+  "band_ab": "SKY-9000",
+  "status": [
+   "draft"
+  ]
+ },
+ "fingerprint_live": {
+  "_": "Am 2026-10-30 vom Betreiber im SQL-Editor als postgres gemessen. Der Dry-Run bricht ab, wenn er heute etwas anderes misst.",
+  "staging": {
+   "katalog_freigegeben": {
+    "zeilen": 655,
+    "abdruck": "16ece43edc857b863727ecb51943f239"
+   },
+   "kategorien": {
+    "zeilen": 36,
+    "abdruck": "45ca88be08b3d64cba0eb528318ba19c"
+   },
+   "charaktere": {
+    "zeilen": 24,
+    "abdruck": "f4854b4dd2488895dafa68e30c4b51df"
+   },
+   "ausgeschlossen": {
+    "zeilen": 40,
+    "abdruck": "d802774263d7dbcb83f0d79973f93014"
+   },
+   "sequenz_last_value": 927,
+   "_nachgezogen": "2026-10-31 (drittes Mal): katalog_freigegeben von cb46865d85176fc04b58c063166a17fb auf 16ece43edc857b863727ecb51943f239. URSACHE BELEGT: Etappe C des Abschlusslaufs hat die verbleibenden 52 Staging-Schritte geschrieben und TOR 3 sauber beendet (supabase/log/sync/2026-10-31T08-48-11-807Z-staging.json: 52 von 52, journalDelta 51 = erwartet, keine Befunde). GEGENPROBE: dreht man die 51 journalisierten Feldwerte auf old_value zurueck und den einen nicht journalisierten (SKY-0922/name, Klasse C) auf seinen von-Wert, kommt cb46865d85176fc04b58c063166a17fb zeichengleich heraus. Zeilenzahl unveraendert 655. | 2026-10-31 (zweites Mal): katalog_freigegeben von b1ee325aa5c4abc0c0d3bb398e067a44 auf cb46865d85176fc04b58c063166a17fb. URSACHE BELEGT: Etappe C des Abschlusslaufs hat 23 der 75 Staging-Schritte geschrieben, bevor sie an TOR 2 (SKY-0584) abbrach. Gegenprobe: dreht man genau diese 23 Feldwerte zurueck, kommt b1ee325aa5c4abc0c0d3bb398e067a44 zeichengleich heraus. Zeilenzahl unveraendert 655. | 2026-10-31: katalog_freigegeben von 654·ec68f30b855eb58d99452f78f9e336ba auf 655·b1ee325aa5c4abc0c0d3bb398e067a44 nachgezogen. URSACHE BELEGT: Etappe C des Abschlusslaufs hat SKY-0821 (Winterfest Lob-Star) auf Staging angelegt, bevor sie am Bildverweis abbrach. Gegenprobe: rechnet man denselben Bestand OHNE SKY-0821, kommt genau der alte Wert heraus (654·ec68f30b855eb58d99452f78f9e336ba). Vorher: 2026-10-30: katalog_freigegeben von 32f75996b1254ed815d3b8311380c138 auf ec68f30b855eb58d99452f78f9e336ba nachgezogen. URSACHE BELEGT: die Umnummerierung SKY-0821 -> SKY-0928 auf Staging. Gegenprobe: rechnet man denselben Bestand mit SKY-0821 an der Stelle von SKY-0928, kommt genau der alte Wert heraus. Zeilenzahl unveraendert 654."
+  },
+  "production": {
+   "katalog_freigegeben": {
+    "zeilen": 655,
+    "abdruck": "e0c4ecbff2b4619cbb871486d6a500ad"
+   },
+   "kategorien": {
+    "zeilen": 36,
+    "abdruck": "45ca88be08b3d64cba0eb528318ba19c"
+   },
+   "charaktere": {
+    "zeilen": 24,
+    "abdruck": "0362c74433513a468ca8908713b57851"
+   },
+   "ausgeschlossen": {
+    "zeilen": 2,
+    "abdruck": "8df0a49ae7518fbff5cc2cefac336ccb"
+   },
+   "sequenz_last_value": 821,
+   "_nachgezogen": "2026-10-31 (zweites Mal): katalog_freigegeben von 655·0d9eb0d0b6a676496e3b05486c51d4b5 auf 655·e0c4ecbff2b4619cbb871486d6a500ad. URSACHE: Etappe D des Abschlusslaufs ist VOLLSTAENDIG durchgelaufen — 573 von 573 Schritten, 325 geschrieben (die 248 visible_type_decided setzt admin_set_visible_type mit), journalDelta 331 = genau die vorher berechnete Erwartung, TOR 3 ohne Befund (supabase/log/sync/2026-10-31T10-27-02-297Z-production.json). NACHWEIS, dreifach und lesend: (1) alle 325 protokollierten Felder stehen heute noch auf ihrem nach-Wert — nach dem Lauf hat niemand nachgefasst; (2) das Journal im Zeitfenster ab 10:25Z fuehrt genau 331 Zeilen und KEIN Feld, das der Plan nicht nennt; (3) die GEREGELTE Projektion (die 17 Felder ohne name und slug) ist auf beiden Umgebungen zeichengleich 655·df54fd6e74b681d5c521d02bcb75eb30 — Production traegt also genau den Staging-Stand, auf den der Publish zielte, und Staging ist seit Etappe C nicht geschrieben worden (0 Schritte). WAS HIER NICHT GEHT, UND WARUM: eine Ruecknahme-Gegenprobe wie bei den fruehEREN Nachziehungen ist nicht moeglich. 248 der 573 Schritte wurden nicht einzeln, sondern implizit von admin_set_visible_type geschrieben, und der Plan, der ihre von-Werte trug, ist von der Neuberechnung in Etappe E ueberschrieben. Der Nachweis ist deshalb vorwaerts gefuehrt (das Ziel ist erreicht) statt rueckwaerts (der alte Wert kommt zurueck). Das ist ausdruecklich die schwaechere Form und steht hier, damit niemand mehr hineinliest. | 2026-10-31: katalog_freigegeben von 622·23a9af3ca7db7fb55d286eafd83cda3f auf 655·0d9eb0d0b6a676496e3b05486c51d4b5 und charaktere von 19·b84ce2fe98ea3935da54b9ed1435b1f9 auf 24·0362c74433513a468ca8908713b57851 nachgezogen. URSACHE BELEGT: Etappe D des Abschlusslaufs hat 142 der 715 Schritte geschrieben, bevor sie an der veralteten Charakterzuordnung abbrach (feld-neu familie SKY-0854) — 5 Charakteranlagen, 33 Figurenanlagen, 104 Feldschritte. KREUZPROBE: das Journal fuehrt fuer den 2026-10-31 genau 137 Zeilen (created 33, types 32, visible_type 32, image_override_path 19, base_sky_id 18, character_id 3) und ist damit deckungsgleich mit dem aus dem Istzustand erschlossenen Schreibsatz. GEGENPROBE: entfernt man die 33 Figuren und die 5 Charaktere und dreht die 104 Feldwerte auf ihren von-Wert zurueck, kommen 622·23a9af3ca7db7fb55d286eafd83cda3f und 19·b84ce2fe98ea3935da54b9ed1435b1f9 zeichengleich heraus. Kein fremder Schreibvorgang. Die neun Schutzwerte (Sammlungen, Favoriten, Warenkoerbe, Bestellpositionen, Bestellungen, Lagerzeilen, Lagerbewegungen, Preisanzahl, Preisabdruck) sind unveraendert — Preisabdruck weiterhin f8385f748963efc58440adbceed22554."
+  }
+ },
+ "publish_ungeregelt": {
+  "_": "Was der Publish NICHT regelt — und die Abweichung, die deshalb bestehen bleibt. Etappe E prueft das als ERWARTUNG, nicht als Ausnahme: Anzahl UND Abdruck ueber die Menge. Eine 36. Namensabweichung haelt den Lauf an, und eine andere Zeile bei gleicher Anzahl ebenso. Gemessen am 2026-10-31, nachdem Etappe D vollstaendig durchgelaufen war und der Plan in beiden Richtungen 0 Schritte meldete.",
+  "_warum": "ADR-0030: der gespeicherte Name folgt der Excel; Staging-Namen werden nicht nach Production uebernommen. tools/catalog-sync.mts ueberspringt genau diese Felder im Feldvergleich (jetzt ueber UNGEREGELT aus src/lib/catalog/publish-compare.ts, damit es nur eine Quelle gibt). ADR-0034: Charaktermetadaten sind kuratierte Arbeit aus data/characters/characters.json; admin_create_character (0158) legt eine Familie mit nichts als dem Namen an.",
+  "felder": [
+   "name",
+   "slug"
+  ],
+  "name": {
+   "abweichungen": 35,
+   "abdruck": "72897221a6cb27d46e171636a7a7fb44",
+   "_": "Genau die 35, die Riegel 3 des Dry-Runs als 'Namensabweichung - kein Konflikt, dieselbe Figur' meldet. 16 davon tragen einen display_name_override, der beidseitig GLEICH ist - dort stimmt der sichtbare Name. Bei den uebrigen 19 sieht der Besucher auf Production einen anderen Namen als auf Staging; mehrere sind dort Schreibfehler (Latern, Acron, Creemper, Punsh, Silber, Trillipede, Start Strike). Das ist eine ECHTE Differenz, nur keine, die dieser Publish herstellen darf."
+  },
+  "slug": {
+   "abweichungen": 0,
+   "abdruck": null,
+   "_": "Gemessen: keine einzige. slug steht hier, weil der Planer ihn ebenso ueberspringt - nicht, weil er abweicht."
+  },
+  "charakter_metadaten": {
+   "abweichungen": 1,
+   "namen": [
+    "Fire Kraken"
+   ],
+   "abdruck": "e9cd4896bcd6342049b2068247a57c25",
+   "_": "Die Identitaet (canonical_name) ist zeichengleich, 24 zu 24. Genau ein Charakter traegt abweichende Metadaten: Fire Kraken ist auf Staging kuratiert (Element, Spezies, Rolle, Beschreibung, Quelle, Label, Pruefdatum) und auf Production vollstaendig NULL, weil admin_create_character ihn im Lauf nur mit dem Namen angelegt hat. Die anderen vier im Lauf angelegten Charaktere sind auf BEIDEN Seiten NULL und stimmen daher. Abhilfe ist nicht der Sync, sondern npm run characters:import gegen Production - eine eigene Handlung mit eigener Freigabe."
+  }
+ }
+}

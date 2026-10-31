@@ -356,6 +356,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0165": {
+      "zweck": "Der Systemweg fuer die Figurenanlage mit VORGEGEBENER SKY-ID, mit created-Journalzeile in derselben Transaktion (Katalogabgleich)",
+      "preflight": "0165_preflight.sql",
+      "lauf": "staging-0165.sql",
+      "postflight": "0165_postflight.sql",
+      "angewendet": {
+        "beschreibung": "system_sync_create_figure(text,text,text,text,bigint,text,text,text,text,text,smallint) steht. Die Migration legt GENAU EINE Funktion an; ihre Existenz IST die Spur, und ihre eigene Vorbedingung bricht bei einem zweiten Lauf daran ab.",
+        "sql": "select to_regprocedure('public.system_sync_create_figure(text,text,text,text,bigint,text,text,text,text,text,smallint)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

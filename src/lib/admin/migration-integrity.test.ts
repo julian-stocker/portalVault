@@ -288,7 +288,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * Migration enthält genau EINE Anweisung — sie kann die Ursache nicht
      * sein. Die Prüfdatei wurde nicht angefasst.
      */
-    expect(zeilen.length).toBe(36);
+    expect(zeilen.length).toBe(37);
     for (const datei of ["0144_platform_export_calculations.sql",
                          "0145_favorites.sql",
                          "0146_offer_state.sql",
@@ -391,7 +391,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(35);
+    expect(gleiche.length).toBe(36);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }
@@ -677,6 +677,83 @@ describe("search_path: die quotierte Darstellung von PostgreSQL", () => {
     const proconfig = [WIE_POSTGRES_ES_ABLEGT];
     expect(hatFestlegung(proconfig)).toBe(true);
     expect(wertIstLeer(proconfig)).toBe(true);
+  });
+
+  /*
+   * UND JETZT UEBER DEN GANZEN BESTAND, NICHT NUR AN EINER NACHBILDUNG.
+   *
+   * Dieser Abschnitt bewies die Semantik bisher an erfundenen Eingaben — und
+   * genau daneben ist mir am 2026-10-30 derselbe Fehler noch einmal
+   * passiert: `prod_0165_postflight.sql` packte den Wert aus und erwartete
+   * eine LEERE Zeichenkette. Production meldete `""`, die Zeile schlug an,
+   * die Funktion war in Ordnung.
+   *
+   * Ein Test, der eine Regel vorfuehrt, sie aber nicht erzwingt, haelt sie
+   * nicht. Ab hier wird jede Datei durchsucht, die den Suchpfad aus
+   * `proconfig` auspackt: wer `substring(... 'search_path=(.*)$')` benutzt,
+   * MUSS die Anfuehrungszeichen abschneiden.
+   */
+  /*
+   * UND JETZT UEBER DEN GANZEN BESTAND, NICHT NUR AN EINER NACHBILDUNG.
+   *
+   * Dieser Abschnitt bewies die Semantik bisher an erfundenen Eingaben — und
+   * genau daneben ist mir am 2026-10-30 derselbe Fehler noch einmal
+   * passiert: `prod_0165_postflight.sql` packte den Wert aus und erwartete
+   * eine LEERE Zeichenkette. Production meldete `""`, die Zeile schlug an,
+   * die Funktion war in Ordnung.
+   *
+   * ES GIBT ZWEI RICHTIGE WEGE, und die erste Fassung dieses Waechters
+   * kannte nur einen. Sie hat vier fehlerfreie, erfolgreich gelaufene
+   * Dateien angeklagt (`0147_postflight`, `0148_postflight` und ihre zwei
+   * Production-Fassungen) — dieselbe Sorte Fehlalarm wie die zu breite
+   * `conname`-Regel in `validate-check-sql`:
+   *
+   *   A  ENTQUOTEN: `btrim(substring(c from 'search_path=(.*)$'), '"')`
+   *      und gegen leer pruefen — so macht es `0165`.
+   *   B  QUOTIERT ERWARTEN: auspacken und gegen das Literal `'""'` halten —
+   *      so machen es `0147` und `0148`.
+   *
+   * FALSCH ist nur der dritte Fall: auspacken, nicht entquoten UND eine
+   * leere Zeichenkette erwarten. Genau den faengt dieser Waechter.
+   */
+  const ENTQUOTET = /btrim\(\s*substring\([^)]*search_path=\(\.\*\)\$[^)]*\)\s*,\s*'"'\s*\)/;
+  const QUOTIERT_ERWARTET = /'""'/;
+
+  const nurCodeVon = (sql: string) => sql.replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n").filter((z) => !z.trimStart().startsWith("--")).join("\n");
+
+  it("jede Datei, die den search_path auspackt, behandelt die Quotierung", () => {
+    const dateien = ["supabase/checks", "supabase/operations", "supabase/migrations"]
+      .flatMap((d) => readdirSync(d).filter((f) => f.endsWith(".sql")).map((f) => `${d}/${f}`));
+    const falsch: string[] = [];
+    let betrachtet = 0;
+    for (const d of dateien) {
+      const code = nurCodeVon(readFileSync(d, "utf8"));
+      if (!code.includes("search_path=(.*)$")) continue;
+      betrachtet++;
+      if (!ENTQUOTET.test(code) && !QUOTIERT_ERWARTET.test(code)) falsch.push(d);
+    }
+    // Ein Waechter, der nichts betrachtet, beweist nichts.
+    expect(betrachtet).toBeGreaterThanOrEqual(3);
+    expect(falsch,
+      "diese Dateien packen den search_path aus, entquoten ihn NICHT und "
+      + "erwarten auch nicht die quotierte Form — PostgreSQL legt den leeren "
+      + "Wert als search_path=\"\" ab").toEqual([]);
+  });
+
+  /*
+   * NEGATIVKONTROLLE. Links der Fehler vom 2026-10-30, rechts die zwei
+   * richtigen Fassungen.
+   */
+  it("POSITIVKONTROLLE: die naive Fassung würde auffallen, beide richtigen nicht", () => {
+    const naiv = "(select substring(c from 'search_path=(.*)$') from pg_proc), ''),";
+    expect(ENTQUOTET.test(naiv) || QUOTIERT_ERWARTET.test(naiv)).toBe(false);
+
+    const wegA = "nullif(btrim(substring(c from 'search_path=(.*)$'), '\"'), '')";
+    expect(ENTQUOTET.test(wegA)).toBe(true);
+
+    const wegB = "(select substring(c from 'search_path=(.*)$') from pg_proc), '\"\"'),";
+    expect(QUOTIERT_ERWARTET.test(wegB)).toBe(true);
   });
 
   it("und lässt einen NICHT leeren search_path nicht durch", () => {

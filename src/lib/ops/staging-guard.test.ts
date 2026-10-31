@@ -243,6 +243,51 @@ const DIREKTE_SITZUNG: Record<string, string> = {
   "db:privileges:staging": "tools/db-privileges-staging.mts",
 };
 
+/*
+ * DIE ZWEITE AUSNAHME: EIN WERKZEUG, DAS BEIDE UMGEBUNGEN BRAUCHT.
+ *
+ * `storage-transfer.mts` LIEST Production und SCHREIBT Staging. Es kann
+ * deshalb nicht `--env-file=.env.staging` tragen — es liest BEIDE
+ * `.env`-Dateien selbst und prueft BEIDE Projektkennungen, bevor eine
+ * Verbindung entsteht. Ein einzelnes `--env-file` waere hier nicht die
+ * strengere, sondern die unmoegliche Form.
+ *
+ * Der Name behaelt sein `:staging`-Versprechen: dieses Skript SCHREIBT
+ * ausschliesslich nach Staging. Dafuer wird hier MEHR verlangt als die Regel,
+ * die es ersetzt — vier Zusicherungen statt einer:
+ *
+ *   1  Der Befehl ist exakt dieser, mit `--ziel staging`. Kein richtungsloser
+ *      Apply.
+ *   2  Der Quelltext riegelt BEIDE Projektkennungen ab, bevor eine
+ *      Verbindung entsteht.
+ *   3  `--apply` ohne `--ziel` bricht ab (Riegel 0).
+ *   4  Es ueberschreibt nie (`upsert: false`) und loescht nie.
+ *
+ * Wie bei `DIREKTE_SITZUNG` namentlich und nicht per Muster: ein neues
+ * Werkzeug auf diesem Weg ist eine Sicherheitsentscheidung und soll hier
+ * aufgeschrieben werden muessen.
+ */
+const UEBER_BEIDE_UMGEBUNGEN: Record<string, string> = {
+  "storage:transfer:apply:staging": "tools/storage-transfer.mts",
+};
+
+/**
+ * Und dasselbe Werkzeug im LESENDEN Modus.
+ *
+ * `--pruefen` liest beide Umgebungen und schreibt in keine. Es steht hier
+ * getrennt, weil es eine andere Zusage macht als `--apply` — und weil diese
+ * Zusage geprüft gehört, nicht angenommen: der Prüfblock darf überhaupt
+ * keinen Schreibweg enthalten.
+ *
+ * Grund für den Eintrag: der Abschlusslauf vom 2026-10-31 brach in Etappe A
+ * ab, weil der Runner für eine Richtung ohne offenen Bildschritt trotzdem
+ * einen Apply erzwang. Die erledigte Richtung wird jetzt verifiziert statt
+ * übertragen — lesend.
+ */
+const UEBER_BEIDE_UMGEBUNGEN_LESEND: Record<string, string> = {
+  "storage:verify:staging": "tools/storage-transfer.mts",
+};
+
 describe("every staging-only writer is actually guarded", () => {
   /**
    * The guard is only worth having if it is called. A tool added later that
@@ -296,6 +341,59 @@ describe("every staging-only writer is actually guarded", () => {
        * path is a security decision and should have to be written down here.
        * `staging-access.test.ts` covers every refusal path.
        */
+      const beide = UEBER_BEIDE_UMGEBUNGEN[name];
+      if (beide !== undefined) {
+        // 1 — genau dieser Befehl, mit Richtung.
+        expect(command, name).toBe(`node ${beide} --ziel staging --apply`);
+        expect(command, name).not.toContain("--env-file");
+        const quelle = readFileSync(beide, "utf8");
+        // 2 — beide Kennungen sind abgeriegelt, bevor eine Verbindung entsteht.
+        expect(quelle).toContain('const STAGING_REF = "qqxcpesbwfxzgytkdsac"');
+        expect(quelle).toContain('const PRODUCTION_REF = "zmiwxswrpkmizvqsgype"');
+        expect(quelle).toContain('verbinde(".env.staging", STAGING_REF');
+        expect(quelle).toContain('verbinde(".env.local", PRODUCTION_REF');
+        expect(quelle).toContain("RIEGEL 1");
+        // 3 — ein Apply ohne Richtung laeuft nicht.
+        expect(quelle).toContain("if (ANWENDEN && ZIEL_ARG === null)");
+        expect(quelle).toContain("RIEGEL 0");
+        // 4 — nie ueberschreiben, nie loeschen.
+        expect(quelle).toContain("upsert: false");
+        expect(quelle).not.toContain("upsert: true");
+        expect(quelle).not.toContain(".remove(");
+        continue;
+      }
+
+      const lesend = UEBER_BEIDE_UMGEBUNGEN_LESEND[name];
+      if (lesend !== undefined) {
+        // 1 — genau dieser Befehl, mit Richtung, und OHNE --apply.
+        expect(command, name).toBe(`node ${lesend} --ziel staging --pruefen`);
+        expect(command, name).not.toContain("--env-file");
+        expect(command, name).not.toContain("--apply");
+        const quelle = readFileSync(lesend, "utf8");
+        // 2 — beide Kennungen sind abgeriegelt, bevor eine Verbindung entsteht.
+        expect(quelle).toContain('const STAGING_REF = "qqxcpesbwfxzgytkdsac"');
+        expect(quelle).toContain('const PRODUCTION_REF = "zmiwxswrpkmizvqsgype"');
+        expect(quelle).toContain("RIEGEL 1");
+        // 3 — die beiden Modi schliessen sich aus.
+        expect(quelle).toContain("ANWENDEN && PRUEFEN");
+        // 4 — der Pruefblock hat keinen Schreibweg, und er endet vor dem Transfer.
+        const ab = quelle.indexOf("if (PRUEFEN) {");
+        const bis = quelle.indexOf("type Ergebnis = Schritt", ab);
+        expect(ab).toBeGreaterThan(-1);
+        expect(bis).toBeGreaterThan(ab);
+        const block = quelle.slice(ab, bis);
+        for (const schreibend of [".upload(", ".remove(", ".insert(", ".update(", ".rpc("]) {
+          expect(block, `${name}: ${schreibend}`).not.toContain(schreibend);
+        }
+        expect(block).toContain(".download(");
+        expect(block).toContain("process.exit(0)");
+        // 5 — nie ueberschreiben, nie loeschen, im ganzen Werkzeug.
+        expect(quelle).toContain("upsert: false");
+        expect(quelle).not.toContain("upsert: true");
+        expect(quelle).not.toContain(".remove(");
+        continue;
+      }
+
       const direkt = DIREKTE_SITZUNG[name];
       if (direkt !== undefined) {
         expect(command, name).toBe(`node ${direkt}`);

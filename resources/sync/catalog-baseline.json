@@ -1,0 +1,129 @@
+{
+ "marke": "skyisles-katalog-baseline-1",
+ "versiegelt": "2026-10-31T12:29:59.366Z",
+ "entscheidung": "ADR-0163 — Staging fuehrt, Production wird veroeffentlicht",
+ "staging": "qqxcpesbwfxzgytkdsac",
+ "production": "zmiwxswrpkmizvqsgype",
+ "fingerprint": {
+  "staging": {
+   "katalog_freigegeben": {
+    "zeilen": 655,
+    "abdruck": "16ece43edc857b863727ecb51943f239"
+   },
+   "kategorien": {
+    "zeilen": 36,
+    "abdruck": "45ca88be08b3d64cba0eb528318ba19c"
+   },
+   "charaktere": {
+    "zeilen": 24,
+    "abdruck": "f4854b4dd2488895dafa68e30c4b51df"
+   },
+   "ausgeschlossen": {
+    "zeilen": 40,
+    "abdruck": "d802774263d7dbcb83f0d79973f93014"
+   }
+  },
+  "production": {
+   "katalog_freigegeben": {
+    "zeilen": 655,
+    "abdruck": "e0c4ecbff2b4619cbb871486d6a500ad"
+   },
+   "kategorien": {
+    "zeilen": 36,
+    "abdruck": "45ca88be08b3d64cba0eb528318ba19c"
+   },
+   "charaktere": {
+    "zeilen": 24,
+    "abdruck": "0362c74433513a468ca8908713b57851"
+   },
+   "ausgeschlossen": {
+    "zeilen": 2,
+    "abdruck": "8df0a49ae7518fbff5cc2cefac336ccb"
+   }
+  }
+ },
+ "verglichen": [
+  "kategorien"
+ ],
+ "nur_bericht": [
+  "ausgeschlossen"
+ ],
+ "geregelt": {
+  "staging": {
+   "zeilen": 655,
+   "abdruck": "df54fd6e74b681d5c521d02bcb75eb30"
+  },
+  "production": {
+   "zeilen": 655,
+   "abdruck": "df54fd6e74b681d5c521d02bcb75eb30"
+  }
+ },
+ "geregelte_felder": [
+  "series_code",
+  "kategorie",
+  "display_name_override",
+  "card_type",
+  "item_type",
+  "is_active",
+  "catalog_visible",
+  "catalog_status",
+  "base_sky_id",
+  "familie",
+  "types",
+  "visible_type",
+  "visible_type_decided",
+  "image_file",
+  "image_override_path",
+  "source",
+  "usk_rating"
+ ],
+ "charakteridentitaet": {
+  "staging": {
+   "zeilen": 24,
+   "abdruck": "ec1e750f4f37e31c8402a257f69381fa"
+  },
+  "production": {
+   "zeilen": 24,
+   "abdruck": "ec1e750f4f37e31c8402a257f69381fa"
+  }
+ },
+ "ungeregelt": {
+  "name": {
+   "anzahl": 35,
+   "abdruck": "72897221a6cb27d46e171636a7a7fb44"
+  },
+  "slug": {
+   "anzahl": 0,
+   "abdruck": "d41d8cd98f00b204e9800998ecf8427e"
+  }
+ },
+ "ungeregelte_felder": [
+  "name",
+  "slug"
+ ],
+ "charakter_metadaten": {
+  "anzahl": 1,
+  "namen": [
+   "Fire Kraken"
+  ],
+  "abdruck": "e9cd4896bcd6342049b2068247a57c25"
+ },
+ "hinweis_ungeregelt": "name und slug folgen der Excel (ADR-0030) und werden nicht veroeffentlicht; Charaktermetadaten sind kuratiert (ADR-0034) und kommen ueber characters:import, nicht ueber den Sync. Die hier festgehaltenen Abweichungen sind die entschiedenen — Etappe E1 prueft sie nach Anzahl UND Abdruck.",
+ "hinweis_ausschluss": "Der Bereich `ausgeschlossen` weicht bewusst ab: Entwuerfe und Testfixtures bleiben auf Staging und werden nicht veroeffentlicht (ADR-0163).",
+ "schutz_production": {
+  "sammlungen": "622",
+  "favoriten": "95",
+  "warenkoerbe": "0",
+  "bestellpositionen": "2",
+  "bestellungen": "1",
+  "lagerzeilen": "340",
+  "lagerbewegungen": "711",
+  "preise_anzahl": "585",
+  "preise_abdruck": "f8385f748963efc58440adbceed22554"
+ },
+ "ausgeschlossen": {
+  "staging": 40,
+  "production": 2
+ },
+ "selbstprobe": "6ccd3230392c"
+}

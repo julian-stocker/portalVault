@@ -17054,6 +17054,82 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0163 · Staging führt den Katalog, Production wird veröffentlicht — und der einmalige Übergang dorthin
+
+**Status:** ANGENOMMEN für die **Vorbereitung** · 2026-10-31. **Die Ausführung
+auf Production und Staging ist nicht freigegeben.**
+**Betrifft:** ADR-0001 (SKY-ID), ADR-0010 (`market_price`), ADR-0030
+(Namenshoheit), ADR-0034 (drei Identitäten), ADR-0070 (reservierter Bereich),
+SYNC-01 bis SYNC-18, `tools/catalog-sync.mts`, `tools/catalog-sync-apply.mts`
+**Ersetzt:** die bidirektionale, konfliktbewusste Zielarchitektur aus SYNC-01
+
+### Was entschieden ist
+
+**1. Die Richtung ist künftig einseitig.** Die redaktionelle Katalogpflege
+findet auf **Staging** statt; Production erhält den freigegebenen Stand über
+einen kontrollierten **Publish**. Der dreiwege-Merge mit Konfliktmeldung aus
+SYNC-01 war für zwei gleichberechtigte Umgebungen gebaut. Die gibt es nicht
+mehr — und eine Architektur, die eine Gleichberechtigung verwaltet, die nicht
+existiert, ist teurer als eine, die die Richtung kennt.
+
+**2. Der Rückwärts-Sync entfällt NICHT, aber er läuft genau einmal.** Das ist
+der Punkt, an dem die Entscheidung leicht falsch umgesetzt würde.
+
+Production trägt heute Kataloginformation, die Staging **nicht** hat: 22
+Sichtbarkeitsentscheidungen, 19 kuratierte Anzeigenamen, 10 Bildverweise, ein
+Name. Ein Publish mit Staging als Führung würde sie **stillschweigend
+überschreiben** — und zwar in der schädlichsten Richtung: 21 der 22
+versteckten Zeilen sind Portale, deren Name eine rohe Artikelnummer ist
+(`84157790 (SA)`), die 22. ist `SKY-0591 Dark Pyramid - OVP`. Sie auf
+Production sichtbar zu machen hieße, Artikelnummern in den öffentlichen
+Katalog zu stellen.
+
+Die 74 Rückwärtsschritte sind deshalb **kein Rest der alten Architektur,
+sondern die einmalige Übernahme der nur auf Production gepflegten Arbeit in
+die künftig führende Umgebung.** Erst danach ist Staging wirklich führend.
+Nach diesem einen Lauf ist die Richtung dauerhaft einseitig.
+
+**3. Was der Publish nie anfasst.** `market_price` kommt im Plan nicht vor —
+das Werkzeug liest die Spalte nicht einmal, und ein Test misst das am
+Quelltext (ADR-0010: NULL heißt unbekannt, nie 0). Ebenso unberührt:
+Nutzerkonten, Sammlungen, Favoriten, Warenkörbe, Bestellungen, Lagerbestände
+und bestehende Bildobjekte. Berührt werden ausschließlich `skylanders`,
+`categories`, `characters` und `catalog_editorial`.
+
+**4. Entwürfe und Fixtures werden nicht veröffentlicht.** `catalog_status =
+'draft'` und jede SKY-ID ab `SKY-9000` (ADR-0070) sind vom Abgleich
+ausgeschlossen — gemessen: 0 Planschritte berühren eine ID ab 9000, 37
+Entwürfe bleiben auf Staging.
+
+**5. Production-eigene Katalogzeilen bleiben.** Der Publish löscht nichts.
+`SKY-0821` (`Winterfest Lob-Star`) existiert nur auf Production und bleibt
+dort; sie wandert nicht nach Staging, weil der Publish beim Anlegen einseitig
+ist. Das ist eine bewusste Lücke, nicht ein Versehen: eine Zeile, die nur
+Production kennt, ist nach dieser Entscheidung ein Altbestand, und sie wird
+benannt statt stillschweigend gespiegelt.
+
+### Warum nicht die bidirektionale Architektur behalten
+
+Sie war richtig, solange beide Umgebungen redaktionell gepflegt wurden. Der
+Preis war hoch: ein in Git gehaltener Vergleichsstand, eine Journalklassen-
+Analyse über 20 Felder, Konfliktmeldung statt Entscheidung, und für jedes
+Feld die Frage, welche Seite gewinnt. Mit einer führenden Umgebung fällt all
+das weg — die Frage „welche Seite gewinnt" hat künftig genau eine Antwort.
+
+### Konsequenzen
+
+* `tools/catalog-sync.mts` bleibt als **Vergleichswerkzeug**: er rechnet den
+  Unterschied und die Fingerprints, und seine drei Riegel bleiben die
+  Abbruchbedingung. Er heißt nur nicht mehr „Merge", sondern „Publish-Plan".
+* Riegel 3 (Identitätskonflikte) bleibt. Unter einer führenden Umgebung
+  **sollte** es keine mehr geben; dass er trotzdem prüft, ist der Riegel
+  gegen die Annahme.
+* Die gemeinsame Baseline wird nach dem Lauf **versiegelt** und in Git
+  gehalten. Ab dann ist jede Abweichung ein Befund, nicht ein Zustand.
+* **Was diese Entscheidung nicht ändert:** SKY-IDs bleiben dauerhafte
+  Identitäten (ADR-0001), die Namenshoheit der Excel bleibt (ADR-0030), die
+  drei Identitäten bleiben getrennt (ADR-0034).
+
 ## ADR-0162 · `0159` auf Production — eine Gruppe aus einer Migration, und die Ersetzung, die sie tragen muss
 
 **Status:** ANGENOMMEN für die **Vorbereitung** · 2026-10-30. **Die Ausführung

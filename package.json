@@ -85,7 +85,19 @@
     "cat03:drafts:staging": "node --env-file=.env.staging tools/cat03-drafts.mts",
     "cat03:import:staging": "node --env-file=.env.staging tools/cat03-import.mts",
     "cat04:images": "node tools/cat04-images.mts",
-    "cat05:bilder:staging": "node --env-file=.env.staging tools/cat05-bilder.mts"
+    "cat05:bilder:staging": "node --env-file=.env.staging tools/cat05-bilder.mts",
+    "catalog:sync:plan": "node tools/catalog-sync.mts",
+    "catalog:collisions": "node tools/sync-collision-report.mts",
+    "storage:transfer:plan": "node tools/storage-transfer.mts",
+    "storage:transfer:apply:staging": "node tools/storage-transfer.mts --ziel staging --apply",
+    "storage:transfer:apply:production": "node tools/storage-transfer.mts --ziel production --apply",
+    "storage:verify:staging": "node tools/storage-transfer.mts --ziel staging --pruefen",
+    "storage:verify:production": "node tools/storage-transfer.mts --ziel production --pruefen",
+    "catalog:sync:apply": "node tools/catalog-sync-apply.mts",
+    "catalog:finish:plan": "node tools/catalog-finish.mts",
+    "catalog:finish:apply": "node tools/catalog-finish.mts --apply --confirm-production",
+    "catalog:publish:plan": "node tools/catalog-sync.mts",
+    "catalog:publish": "node tools/catalog-sync-apply.mts --target=production --apply --confirm-production"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

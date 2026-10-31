@@ -54,6 +54,7 @@ jede Zeile bei jedem Testlauf. Die Spalte `Datei heute` ist der Vertrag:
 | `0162_admin_price_and_delete.sql` | `5bb5caf934ea218a9bda37b1a11cb5f7c8947976e681e797bfe966da662a0f63` | gleich | **2026-10-29**, Betreiber: manuell im SQL-Editor über `supabase/operations/staging-0162.sql` (SHA-256 `6d9ccb558033377bcbcaf1521512c1f4fd24049dd68e57d3b08c50d0e76b7563`), das diese Datei **zeichengleich** einbettet — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. CAT-09, ADR-0159, Laufzettel `supabase/checks/0162_staging_run.md`. Zwei Funktionen und zwei Journalwerte, sonst nichts — keine Tabelle, keine Spalte, keine Zeile, kein Trigger, keine Richtlinie, kein Index. `admin_set_market_price(text, numeric)` schreibt **eine** Spalte und ihr Datum (`market_price`, `price_updated_at`); der Katalog druckt `market_price × (1 + boost/100)`, gerechnet in `src/lib/catalog/market-boost.ts` im Moment des Druckens und **nie gespeichert** — die Inlinebearbeitung bindet deshalb an den **gespeicherten** Wert. `admin_delete_figure(text)` löscht **eine** referenzfreie Zeile und prüft dafür drei Dinge: die **vierzehn** gezählten Fremdschlüssel aus `admin_merge_references`, die **vier mit `ON DELETE CASCADE`** (`cart_items`, `catalog_editorial`, `inventory_import_mappings`, `orderbook_name_mappings`) namentlich in der Meldung, und **DEN STILLEN VERWEIS** `order_lines.sky_id`, den kein Fremdschlüssel schützt und `admin_merge_references` deshalb nicht sieht. **Ein echter Fehler wurde VOR dem Lauf gefunden**, und zwar von `P71` an echtem PostgreSQL: `to_regclass('public.' || r.tabelle)` auf den schon qualifizierten Namen des Helfers wäre `0A000 cross-database references are not implemented` gewesen. Gelaufen ist die korrigierte Fassung, deren Prüfsumme hier steht. **Preflight bestanden:** 40 Zeilen, `9999 = 0`, vier offene Zeilen (133, 134, 137, 139) — alle vier lesen Objekte, auf die der lesende Prüfzugang kein `select` hat. Baselines eingefroren in `supabase/baselines/baseline-0162.json` (erhoben 13:45:02.688Z: Angebote 257, shopfähig 565, sammelbar 565, Lagerzeilen 287, Katalogzeilen 694, Sammlung 21, Favoriten 1) und danach **nie neu erhoben**; Pre- und Postflight stimmen überein, **die Migration selbst hat keine Datenzeile bewegt**. **Die Nachkontrolle brauchte zwei Anläufe, und der Befund lag beide Male in der PRÜFDATEI, nicht in der Datenbank:** `9999 = 2`, Zeile **114** („und KEINE andere Spalte") und Zeile **122** („kein Zugriff auf `storage`"). Beide suchten ein blankes Wort in `prosrc` — und `prosrc` enthält die **Kommentare**: die Preisfunktion sagt im Kommentar „kein `card_type`", die Löschfunktion nennt `0162_storage_note.md`. Dieselbe Klasse wie `0159` Zeile 51, `0156` Zeile 115 und `0153` Zeile 104. Beide Zeilen messen jetzt am **kommentarfreien** Rumpf (`/* … */` und `--` zuvor herausgenommen) und suchen die **Schreibform** statt des Wortes: Zeile 114 die Spalte in einem `set`, Zeile 122 `storage` mit folgendem Punkt oder in Anführungszeichen; neu dazu Zeile **120** — genau ein `update` im Rumpf. **Keine Prüfung wurde entfernt oder pauschal auf Erfolg gesetzt**, und `P71` Abschnitt **V** schneidet den echten Zeilentext aus der Prüfdatei heraus und fährt ihn gegen Rümpfe, die den Fehler wirklich enthalten: fremde Spalte nach Komma, ohne Leerzeichen, in Anführungszeichen, Zeilenumbruch nach `set`, zeilenweises `set (a, b) = (…)`, ein zweites `update`, drei Formen des Storage-Zugriffs — und den Rückfall, dass beide Wörter nur im Kommentar stehen. Die Migrationsdatei blieb unberührt (Regel 1), und die Baseline ebenso: ihre Prüfsumme `0c78c34f7b83c038…` ist vor und nach dem Lauf dieselbe. **Nachkontrolle bestanden:** `0162_postflight.sql`, 66 Zeilen, `9999 = 0`, vier offene Zeilen (133, 134, 137, 138) — und der **berechtigte Lauf** als `postgres` über `supabase/log/staging/0162-postflight-berechtigt.sql`, in das der Runner die eingefrorenen Baselines schon eingesetzt hatte: **`9998 = 0` UND `9999 = 0`**, keine offene Zeile mehr. `admin_set_market_price` und `admin_delete_figure` stehen, kein `setval`, kein Zugriff auf Supabase Storage, keine unerwartete Datenänderung. Rücknahme: `supabase/rollback/R0162_drop_price_and_delete.sql` (entfernt die zwei Funktionen, lässt die Audit-Constraint und **jede** Journalzeile stehen). |
 | `0163_catalog_types.sql` | `f75b04eaf426aea1ec80ef4000b3470b305441003f4ff56f4b9530134fec1763` | gleich | **2026-10-29**, Betreiber: manuell im SQL-Editor über `supabase/operations/staging-0163.sql` (SHA-256 `efbc229c05eb5a4cc9ee53b6ddf61bd1535456e6b33ae319edfc905aaf2ee620`), das diese Datei **zeichengleich** einbettet — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. CAT-10, ADR-0160, Laufzettel `supabase/checks/0163_staging_run.md`. Angelegt: `types text[] not null default '{}'`, `visible_type text`, `visible_type_decided boolean not null default false`; die drei CHECKs `skylanders_types_known` (`types <@` **17** Werte), `skylanders_visible_type_member` (`visible_type is null or = any (types)`) und `skylanders_visible_type_decided`; der normalisierende Trigger `skylanders_canonical_types`; zwei Journalwerte (**fünfzehnter** und **sechzehnter**); `admin_set_figure_types(text, text[])` und `admin_set_visible_type(text, text)`; und die zwei Zusammenführungsrümpfe aus `0157` mit `types` als **neuntem** Feld. **Preflight bestanden:** 42 Zeilen, `9999 = 0`, **keine offene Zeile**. Baselines eingefroren in `supabase/baselines/baseline-0163.json` (erhoben 14:17:15.335Z, Prüfsumme `f00787e5f82b4627…`): Angebote 257, shopfähig 565, sammelbar 565, Lagerzeilen 287, Katalogzeilen 694, Sammlung 21, Favoriten 1 — **zeichengleich mit `baseline-0162.json`**, zwischen den beiden Migrationen hat sich im Katalog nichts bewegt, und `0162` hat damit nachweislich keine Datenzeile angefasst. **Nachkontrolle bestanden:** `0163_postflight.sql`, 69 Zeilen, `9999 = 0`, **eine** offene Zeile (144, `catalog_admin_changes` — kein `select` für den Prüfzugang); der **berechtigte Lauf** als `postgres` über `supabase/log/staging/0163-postflight-berechtigt.sql` schloss sie: **`9998 = 0` UND `9999 = 0`**, Zeile 144 = **0** (die Migration ruft die beiden Funktionen nicht auf, sie schreibt die Erstbelegung direkt). **Der gemessene Zustand nach dem Lauf** (rein lesend nachgemessen, `set transaction read only`): 694 Katalogzeilen, **479** mit mindestens einem Type und 215 ohne, **66** mit zwei (größte Menge 2), **206** mit Banner und **alle 206** mit `visible_type_decided = true`, **0** Banner ohne Mitgliedschaft in der eigenen Menge, **0** Zeilen „kein Banner, aber entschieden"; Banner `chase` 56, `elite` 42, `special` 42, `legendary` 28, `dark` 21, `lightcore` 17 — **kein Gruppen-Type ist Banner geworden** (D4/D6), `categories.catalog_group` bleibt für die Navigation maßgeblich (D5). **Die 21 LightCore-Zeilen kommen vollständig aus der kuratierten Liste** (D2, kein Treffer außerhalb, keine Namensheuristik): 17 davon tragen nur `{lightcore}` und zeigen seither LIGHTCORE statt SPECIAL — **die 17 gewollten Bannerwechsel** —, vier tragen eine **zweite, echte** Eigenschaft und behalten deren Banner (`{legendary,lightcore}` SKY-0130 und SKY-0252, `{chase,lightcore}` SKY-0172 und SKY-0854). **DIE KARTENKUNST IST UNVERÄNDERT, UND DAS IST GEMESSEN:** `md5(sky_id|card_type)` über alle 694 Zeilen ist `4b81b91886b911d6f9dcbbca0d381be3` — genau der Wert, den Wächter **A7** der Hülle **vor** dem Lauf aus den lebenden Daten genommen hat; **B3** hat ihn nach der Erstbelegung neu gerechnet und verglichen, und die Migration selbst tut dasselbe und bricht ab, wenn er sich bewegt. Verteilung unangetastet: `standard` 488, `special` 59, `chase` 56, `elite` 42, `legendary` 28, `dark` 21. `card_type` bleibt eine **eigene** Spalte, weil die vorgeschlagene Projektion am ganzen Katalog nachweislich nicht verlustfrei ist (`supabase/checks/cat10_projection_proof.sql`), und keine der beiden neuen Funktionen nennt sie (Postflightzeile 118 = 0). **EINE KORREKTUR AN DER HÜLLE VOR DEM LAUF, UND SIE GEHÖRT HIERHER:** `staging-0163.sql` verglich den Kunstabdruck ursprünglich gegen einen **eingefrorenen** Wert (`4d6bbb02…` vom 11:12). Nach der redaktionellen Arbeit des Betreibers war der lebende Wert `4b81b918…`, und die Hülle hätte die ganze Transaktion abgebrochen. Der Wert ist **nicht ungeschützt entfernt** worden: A7 **misst** ihn jetzt und legt ihn transaktionslokal ab (`set_config(..., true)`), B3 liest ihn zurück und bricht ab, wenn die Ablage **fehlt** — ein Lauf ohne A7 kann die Prüfung also nicht überspringen. `P72` Abschnitt **U** fährt genau das: fehlende Ablage bricht ab, unveränderte Kunst geht durch, veränderte wird gefangen und zurückgerollt. **Die beiden neuen Funktionen, als Sicherheitsaussage:** `security definer`, `search_path=""`, Eigner `postgres`, `execute` nur für `authenticated` und `service_role` (kein `public`, kein `anon`), und beide prüfen `is_platform_admin()` im kommentarfreien Rumpf. Unberührt: `base_sky_id`, `character_id` (D7), Name, Slug, Serie, Kategorie, Preis, Bild, Status, Lager, Angebote, Sammlungen, Bestellungen. Rücknahme: `supabase/rollback/R0163_drop_catalog_types.sql` — sie **verwirft Daten** (jede Typzuordnung) und sagt die Zahl vorher; `card_type` und jede Journalzeile bleiben, und sie **verweigert**, solange die `0163`-Fassung der Zusammenführung steht. |
 | `0164_platform_export_types.sql` | `f2d5e77cf56c94c832614a5eff0eb8c3b480d2fe1166416944d47b721902e601` | gleich | **2026-10-29**, Betreiber: manuell im SQL-Editor über `supabase/operations/staging-0164.sql` (SHA-256 `5c4338cf249a7b556d54878311d4acfef8fb603bcbe902750a4fa89d8ddc668d`), das diese Datei **zeichengleich** einbettet — geprüft von `src/lib/catalog/staging-oneshot.test.ts`. CAT-10, ADR-0160, derselbe Laufzettel wie `0163`. Sie ersetzt **einen** Funktionsrumpf und fügt im Bereich `skylanders` genau **drei** Zeilen hinzu: `'types', t.types,` · `'visible_type', t.visible_type,` · `'visible_type_decided', t.visible_type_decided,`. **Preflight bestanden:** 28 Zeilen, `9999 = 0`, **keine offene Zeile** — darunter die drei Riegel: `0163` liegt, der vorhandene Rumpf **war** der aus `0160` (`md5 ff4f38e61cbd4e5857ea914d6be68d44`, 31114 Zeichen), und der Rumpf nannte die drei Spalten **noch nicht**. Baselines eingefroren in `supabase/baselines/baseline-0164.json` (erhoben 14:31:06.306Z, Prüfsumme `d4a7322d6972d263…`): Angebote 257, shopfähig 565, sammelbar 565, Lagerzeilen 287, Katalogzeilen 694, Sammlung 21, Favoriten 1. **Technisch verifiziert:** `md5(prosrc)` ist **`7e9e58e2d84a9f8a7c660262aa21926b`** bei **31248** Zeichen; die **Umkehrprobe** zieht die drei Zeilen wieder heraus und ergibt **`ff4f38e61cbd4e5857ea914d6be68d44`** — zeichengleich der Rumpf aus `0160`, also ist **nichts anderes** am Export verändert; **540** Bereichsklammern (die 54 Bereiche, kein neuer), `format_version` bleibt **2**, `catalog_status` (0153) und `base_sky_id` (0160) stehen weiter drin; `security definer`, `search_path=""`, Eigner `postgres`, `execute` nur für `postgres` und `authenticated` — **kein `service_role`, kein `public`, kein `anon`**. Typmengen, Banner und Kartenkunst unberührt (479 mit Type, 478 Banner, 21 LightCore, 17 `lightcore`-Banner, Kunstabdruck `4b81b918…`), die zwei Funktionen aus `0163` unverändert, Betriebssicherung nicht angefasst. **ZWEI ERKLÄRTE ABWEICHUNGEN, UND DER BEFUND WIRD NICHT WEGGESCHRIEBEN:** die Nachkontrolle `0164_postflight.sql` lief mit **44 Zeilen, `9999 = 2`** (keine offene Zeile, also war **kein** berechtigter Lauf erforderlich) — Zeile **813** „shopfaehige Katalogzeilen wie vor der Migration" mit `564` statt `565` und Zeile **814** „sammelbare Katalogzeilen" ebenso. **Ursache: eine beabsichtigte redaktionelle Änderung des Betreibers im offenen Migrationsfenster.** `SKY-0564` „Kaos in OVP" (Serie I, Kategorie Senseis, `item_type = figure`, aktiv) wurde am **2026-10-29 um 14:38:40 UTC** auf versteckt gesetzt — nach dem Einfrieren der Baseline um 14:31:06 und vor der Nachkontrolle um 14:44:24. Das **Journal belegt es**: `catalog_status` `public` → `hidden`, `catalog_visible` `true` → `false`, und **keine weitere Status- oder Sichtbarkeitsänderung** im geprüften Zeitraum (gelesen als `postgres`; der lesende Prüfzugang hat auf `catalog_admin_changes` kein `select`). **Die Gegenrechnung geht ohne Rest auf:** beide Zahlen hängen an `is_active ∧ catalog_visible ∧ (figure) ∧ sammelbare Kategorie`, und mit `catalog_visible` **nur für diese eine Zeile** als wahr angenommen ergeben sie wieder **565** und **565** — genau die eingefrorenen Werte. Jeder andere Vertragswert stimmt: Angebote 257, Angebots-Abdruck, Lagerzeilen 287, Lager-Abdruck, Katalogzeilen 694, Sammlung. **Die Migration kann die Ursache nicht sein:** sie enthält **genau eine** Anweisung, `create or replace function public.system_platform_export()` — kein `update`, `insert`, `delete`, `alter`, keinen Trigger, keine Richtlinie; eine versteckte Katalogzeile liegt außerhalb dessen, was sie berühren kann. Die Prüfdatei wurde **nicht** geändert und keine Prüfung abgeschwächt: `0164_postflight.sql` sagt weiter `9999 = 2`, und `baseline-0164.json` bleibt eingefroren (Prüfsumme vor und nach dem Lauf dieselbe). **Lehre für die nächste Migration:** solange ein Migrationsfenster offen ist, keine redaktionelle Arbeit im Adminbereich — die Baseline wird **vor** dem Schreiben erhoben und **danach** verglichen, jede Zwischenänderung erscheint zwangsläufig als Abweichung. Rücknahme: `supabase/rollback/R0164_platform_export_back_to_0160.sql` (stellt nur den Rumpf wieder her, fasst keine Spalte und keine Zeile an); **Reihenfolge einer Rücknahme: erst `R0164`, dann `R0163`.** |
+| `0165_system_sync_create_figure.sql` | `c3183ffac4e7cace57b5884a4da550fdb3d7672975c4ad7af50ddb66836918df` | gleich | **2026-10-30**, Betreiber: manuell im SQL-Editor ueber `supabase/operations/staging-0165.sql`. Preflight **9999 = 0** (31 Zeilen, 1 offen: Sequenzstand — der Pruefzugang darf `sky_id_seq` nicht lesen). Nachkontrolle mit berechtigtem Zugang: **9998 = 0 und 9999 = 0**. Die Funktion steht genau einmal, elf Parameter, SECURITY DEFINER mit leerem `search_path`; `service_role` darf sie, `anon`, `authenticated` und PUBLIC nicht; ihr Rumpf nennt weder `sky_id_seq` noch `market_price`. Katalog, Shop, Lager und Sammlungen unveraendert; `sky_id_seq` 927 / `is_called` true. Baseline: `supabase/baselines/baseline-0165.json`. **ZWEI PRUEFZEILEN WAREN FALSCH UND SIND KORRIGIERT, die Migration nicht:** die Registrierung im Runner fehlte zunaechst ganz, und Postflight 242 behauptete, `service_role` habe auf den zwei Tabellen kein TRUNCATE/REFERENCES/TRIGGER — es hat sie, wie auf 68 von 69 Tabellen des Schemas, als Supabase-Projektvorgabe. Beides traegt jetzt einen Regressionstest (`src/lib/admin/migration-registration.test.ts`). **Production: nicht angewendet, eigene Freigabe.** |
 
 **Gelaufen ist der Einmal-Durchgang:** `supabase/operations/staging-0137-0138.sql`
 (SHA-256 `83af5cebdcb9130a3b5cb0df17162bde94505aee5d8d83d3c454675fa48b9344`) bettet `0137` und `0138` **zeichengleich** ein — geprüft von
@@ -397,20 +398,252 @@ werden:**
    `availability_notifications` nicht.** `0145`-`0149` liefen vor der
    Folgemigration, die sie aufnimmt (ADR-0136, D-6, Formatversion 3). Eine
    Wiederherstellung aus `system_platform_export()` verlore diese Daten. Die
-   Migration dafuer ist `0165`, und sie existiert noch nicht.
+   Migration dafuer existiert noch nicht.
+
+   **Nachtrag 2026-10-30: sie bekommt NICHT `0165`.** Diese Nummer traegt
+   jetzt `0165_system_sync_create_figure.sql` (der Systemweg fuer die
+   Figurenanlage mit vorgegebener SKY-ID, Katalogabgleich). Der Grund ist
+   nicht Vorrang, sondern eine Regel dieses Projekts: vier Testdateien
+   sichern `numbers === [1 … n]` zu — `create-order.test.ts`,
+   `payment-bootstrap.test.ts`, `payment.test.ts` und
+   `purchase-sender-listing.test.ts`. Eine reservierte, aber nicht
+   geschriebene Nummer waere eine Luecke, und eine Luecke bricht die Suite.
+   Reserviert wird in diesem Projekt also nicht durch Freihalten, sondern
+   durch Hinschreiben — die Sicherungserweiterung bekommt die naechste freie
+   Nummer, wenn sie geschrieben wird.
 2. **Dieses Repository hat kein eigenes Protokoll dieser Laeufe.** Ein
    Production-Lauf laeuft im SQL-Editor; das Ergebnisblatt liegt beim
    Betreiber. Solange das so ist, bleibt diese Akte eine Mitschrift und kein
    Nachweis — und das ist eine bewusste Grenze, keine Luecke, die ein
    Werkzeug schliessen koennte, ohne dem Pruefzugang Schreibrechte zu geben.
 
-### Vorbereitet, aber nicht ausgefuehrt: `0159` (Gruppe **G3'**)
+### Der Production-Stand von `0159`–`0165`, am 2026-10-30 GEMESSEN
 
-Drei Dateien liegen fertig und sind lokal geprueft, **ausgefuehrt ist nichts**:
+Der Widerspruch, der hier zwischenzeitlich stand, ist aufgelöst. Der Betreiber
+hat **`supabase/checks/prod_0159_0165_state.sql`** im Production-SQL-Editor als
+`postgres` ausgeführt; das Ergebnisblatt ist der Nachweis.
+
+**Zwei Arten von Nachweis, und sie werden hier nicht vermischt:**
+
+| | |
+|---|---|
+| **Funktions- und Schemanachweis** | Was in der Datenbank an Objekten STEHT — Spalten, Constraints, Trigger, Rumpfabdrücke, Rechte, und bei `0163` zusätzlich die Erstbelegung in den Daten. Das ist für `0159`–`0164` **belegt**. |
+| **Ausführungsprotokoll** | WANN, WOMIT und mit welchem Ergebnisblatt ein Lauf stattgefunden hat. Das ist für `0159`–`0164` auf Production **nicht vorhanden** und auch nicht mehr herstellbar. |
+
+Der Schemanachweis sagt, dass der Zustand erreicht ist. Er sagt nicht, über
+welche Datei, in welcher Reihenfolge und mit welchem Postflight. Diese Lücke
+bleibt offen stehen, statt sie zu erfinden.
+
+| Migration | Urteil (gemessen) | woran |
+|---|---|---|
+| `0159` | **ANGEWENDET** | `base_sky_id`, `skylanders_base_same_series`, `admin_set_variant_base`, `admin_publish_with_base` |
+| `0160` | **ANGEWENDET** | im Rumpfabdruck von `0164` enthalten |
+| `0161` | **ANGEWENDET** | `admin_publish_variant_auto` |
+| `0162` | **ANGEWENDET** | `admin_set_market_price`, `admin_delete_figure` |
+| `0163` | **ANGEWENDET** | drei Spalten, Trigger `skylanders_canonical_types`, zwei RPCs, **und die Erstbelegung**: 418 Zeilen mit Typmenge, 171 mit entschiedenem Banner |
+| `0164` | **ANGEWENDET** | `system_platform_export` trägt `7e9e58e2d84a9f8a7c660262aa21926b` — das ist der Rumpf aus `0164` (aus der Migrationsdatei nachgerechnet; `0160` wäre `ff4f38e6…`) |
+| **`0165`** | **FEHLT** | `system_sync_create_figure`: **0 Fassungen** |
+
+**Zwei Befunde daneben, beide neu und beide offen:**
+
+* **`system_set_image_override` (0035) fehlt auf Production — 0 Fassungen.**
+  Keine Migration löscht sie; `0035` ist dort also nie angewendet worden. Der
+  Katalogabgleich plant **7 Bildschritte** über diese Funktion. Sie haben
+  derzeit keinen Weg. Eigene Klärung, eigene Freigabe.
+* **Die SKY-ID-Sequenz steht auf `821|true`**, unbegrenzt (`1` ..
+  `9223372036854775807`, NO CYCLE). Der **nächste Zug wäre `SKY-0822`** — die
+  erste der 33 Nummern, die der Abgleich dort anlegen soll. Das
+  Production-Band `5001`–`8999` ist leer und nicht gesperrt.
+
+**Gemessener Bestand auf Production (2026-10-30):** 624 Katalogzeilen, 217
+Journalzeilen, 340 Lagerzeilen, 622 Sammlungszeilen, 36 Kategorien. Ein
+Plattformadmin. Die vier Klasse-B-RPCs liegen (1/1/1/1). Der Importbereich
+`SKY-0822`–`SKY-0928` ist in Tabelle **und** Journal frei.
+
+### `0035` auf Production — angewendet und durch Preflight/Postflight belegt (2026-10-31)
+
+| | |
+|---|---|
+| Weg | `supabase/operations/prod-0035.sql`, manuell im SQL-Editor als `postgres`, eine Transaktion |
+| Eingebettet | `0035_system_set_image_override.sql`, **zeichengleich** — von `src/lib/catalog/sync-blocker.test.ts` gemessen |
+| Preflight | `supabase/checks/prod_0035_preflight.sql`, `9999 = 0` |
+| Nachkontrolle | `supabase/checks/prod_0035_postflight.sql`, **`9998 = 0`, `9999 = 0`** |
+| Rücknahme | `supabase/rollback/R0035_drop_system_set_image_override.sql` — verwirft keine Daten |
+
+**Bestätigt:** `system_set_image_override(text, text)` genau einmal,
+`SECURITY DEFINER`, leerer `search_path`, **Rumpfabdruck
+`f269a6fe05349cad53c0cf44a8e01e11`** — derselbe Wert, den der Rumpf aus der
+Migrationsdatei ergibt (889 Zeichen), Production führt also zeichengleich die
+freigegebene Fassung. EXECUTE ausschließlich `postgres` und `service_role`.
+Bestand unverändert: 624 Katalog · 217 Journal · 340 Lager · 622 Sammlungen ·
+51 Bildverweise, Abdruck `e6dfa5729833703f5173df77c4b3b8db`.
+
+**Wozu:** die 7 Bildschritte des Katalogabgleichs nach Production laufen über
+diese Funktion. Vorher hatten sie dort keinen Weg.
+
+### Über die Vergangenheit von `0035` auf Production wird nichts behauptet
+
+**Es ist nicht nachweisbar, ob `0035` dort früher schon einmal gelaufen ist.**
+Der Grund steht in der Migration selbst: sie legt **genau ein Objekt** an —
+diese Funktion. Es gibt kein zweites, an dem sich die Migration erkennen
+ließe, und keine spätere Migration löscht, ersetzt oder benennt sie um (alle
+Migrationen am 2026-10-30 durchsucht; ein Test hält beides fest).
+
+Was die Forensik hergab, und was nicht:
+
+* Production führte vor dem Lauf **59 Journalzeilen** zu
+  `image_override_path`, davon **6 mit `changed_by = NULL`**. NULL heißt nach
+  `0004` „über die Service-Rolle **oder** nach dem Löschen des Kontos" — ein
+  serverseitiger Weg hat dort geschrieben, **welcher**, sagt die Zeile nicht.
+  Ein direktes `update` der Service-Rolle sieht genauso aus.
+* Das einzige Werkzeug, das die Funktion aufruft
+  (`tools/sync-image-overrides.mts`), ist mit `SKYISLES_REQUIRE_STAGING=1` auf
+  Staging festgenagelt.
+* `admin_set_image_override` lag auf beiden Seiten; nur der serverseitige Weg
+  fehlte.
+
+**Belegt ist der Zustand ab dem 2026-10-31**, nicht die Geschichte davor. Die
+Lücke bleibt offen stehen — wie bei `0159`–`0164`, nur aus einem anderen
+Grund: dort fehlt das Protokoll, hier fehlt jedes messbare Objekt, an dem ein
+Protokoll hängen könnte.
+
+### SKY-ID-Bereichssperre auf Production — angewendet und verifiziert (2026-10-30)
+
+**Ein Betriebsvorgang, keine Migration.** Sie ändert kein Schema und keine
+Zeile, sondern die **Vergabe**.
+
+| | |
+|---|---|
+| Vorgang | `supabase/operations/production-sky-id-band.sql`, manuell im SQL-Editor als `postgres`, eine Transaktion |
+| Wirksame Anweisung | **eine**: `alter sequence public.sky_id_seq minvalue 5001 maxvalue 8999 no cycle start with 5001 restart with 5001` |
+| Preflight | `supabase/checks/prod_sky_id_band_preflight.sql`, `9999 = 0` |
+| Nachkontrolle | `supabase/checks/prod_sky_id_band_postflight.sql`, **`9998 = 0`, `9999 = 0`** |
+| Rücknahme | `supabase/rollback/R_production_sky_id_band.sql` — **verweigert nach jeder Vergabe**, auf zwei Wegen |
+
+**Bestätigt:** `MINVALUE 5001`, `MAXVALUE 8999`, `NO CYCLE`, `START 5001`,
+`last_value = 5001` mit **`is_called = false`** — der nächste Zug ist
+`SKY-5001` **selbst**, und es ist seit der Umstellung keine Nummer gezogen
+worden. Importbereich `SKY-0822`–`SKY-0928` frei. Bestand unverändert: 624
+Katalog · 217 Journal · 340 Lager · 622 Sammlungen · 95 Favoriten · 0
+Warenkörbe · 2 Bestellpositionen, Katalogabdruck
+`95bbbb51bd6ca2fd9d0be184b22bfda4`.
+
+**Warum sie vor dem Figurenimport liegen musste:** vorher stand die Sequenz
+auf `821|true`, der nächste Zug wäre **`SKY-0822`** gewesen — die erste der
+33 Importnummern. Eine gewöhnliche Figurenanlage über `admin_create_figure`
+hätte sie gezogen und dem Abgleich weggenommen. Jetzt vergibt sie ab `5001`,
+und der Importbereich ist strukturell geschützt.
+
+**Der Importbereich liegt UNTER dem Band — und das ist kein Widerspruch.** Ein
+Band regelt die **Vergabe**, nicht die **Speicherung**;
+`system_sync_create_figure` (0165) bekommt die SKY-ID als Parameter und zieht
+die Sequenz nicht. Deshalb trägt `skylanders.sky_id` bewusst **keine**
+CHECK-Constraint auf ein Band; Nachkontrolle 221/222 prüft, dass auch keine
+dazugekommen ist.
+
+### Drei Dinge, die an dieser Datei vor dem Lauf korrigiert wurden
+
+* **Der Umgebungswächter A1** erkannte Production an ZEILEN: „`SKY-0821`
+  steht, `SKY-0822` steht nicht". Der Abgleich legt `SKY-0822` dort an — der
+  Stempel hätte sich durch den eigenen Sync zerstört. Ersetzt durch zwei
+  POSITIVE Nachweise am Schema: `0133` mit **beiden** Objekten
+  (Triggerfunktion *und* Trigger, nur auf Production) und „die Sequenz trägt
+  nicht das Staging-Band". Beides überlebt jeden Zeilenimport. Dieselbe
+  latente Falle steckte noch in `prod-0165.sql` (A3b) und ist dort ebenfalls
+  entfernt.
+* **Das Zeitfenster zwischen A4 und der Anweisung.** Dort hält niemand die
+  Sequenz; eine gleichzeitige Figurenanlage hätte `SKY-0822` ziehen können,
+  und an der Sequenz wäre das hinterher nicht mehr zu sehen gewesen, weil
+  `restart` den Stand überschreibt. A5 legt jetzt Katalog-, Journal-, Lager-
+  und Sammlungszahlen **und die höchste SKY-ID** ab; **B1–B4** halten sie
+  danach dagegen. Dazu `lock_timeout = '5s'`.
+* **Das Transaktionsverhalten wurde gemessen statt angenommen.** Die
+  verbreitete Annahme lautet, `RESTART` sei wie `setval` nicht transaktional.
+  An echtem PostgreSQL mit genau dieser Anweisung nachgemessen: nach
+  `rollback` **und** nach einem Fehler steht alles wieder auf `821|true`,
+  Grenzen unverändert. **`ALTER SEQUENCE … RESTART` ist vollständig
+  transaktional** — ein Abbruch lässt nichts Halbes zurück. Für `setval()`
+  gilt das nicht; deshalb benutzt die Datei es nicht.
+
+### `0165` auf Production — angewendet und durch den vollständigen Postflight belegt (2026-10-30)
+
+**Die erste Production-Migration dieser Arbeitsreihe mit lückenlosem
+Nachweis**, und damit der Gegenentwurf zu `0159`–`0164`.
+
+| | |
+|---|---|
+| Weg | `supabase/operations/prod-0165.sql`, manuell im SQL-Editor als `postgres`, eine Transaktion |
+| Eingebettet | `0165_system_sync_create_figure.sql`, **zeichengleich** — von `src/lib/catalog/prod-0165-hull.test.ts` gemessen |
+| Preflight | `supabase/checks/prod_0165_preflight.sql`, `9998 = 0`, `9999 = 0`, Baseline Zeile 900 |
+| Nachkontrolle | `supabase/checks/prod_0165_postflight.sql`, **`9998 = 0`, `9999 = 0`** |
+
+**Der konkrete Nachweis, Stück für Stück:**
+
+| | |
+|---|---|
+| Funktion | `system_sync_create_figure` **genau einmal**, erwartete Signatur |
+| Autorisierung | `SECURITY DEFINER`, `search_path` explizit leer; EXECUTE **ausschließlich** `postgres` und `service_role` — `anon`, `authenticated` und **PUBLIC** haben keines |
+| **Rumpfabdruck** | **`6a0383c5c4da7fec3cdd6a39041c3069`** — identisch mit dem Rumpf aus der Migrationsdatei im Repository (4232 Zeichen, nachgerechnet). Production führt also zeichengleich die freigegebene Fassung |
+| nicht aufgerufen | keine Figur im Importbereich `SKY-0822`–`SKY-0928` |
+| nichts bewegt | Katalog 624, Journal 217, Lager 340, Sammlungen 622, Favoriten 95, Warenkörbe 0, Bestellpositionen 2 — alle gegen die Preflight-Baseline; Katalogabdruck unverändert `95bbbb51bd6ca2fd9d0be184b22bfda4` |
+| Sequenz | unberührt: `1 .. 9223372036854775807`, NO CYCLE, Stand `821\|true` |
+
+**Die Abgrenzung zu `0159`–`0164`, und sie ist der Punkt:**
+
+| | `0159`–`0164` | **`0165`** |
+|---|---|---|
+| Funktions- und Schemanachweis | ja, am 2026-10-30 nachgemessen | ja |
+| **Ausführungsprotokoll** | **nein** — wann, womit, mit welchem Ergebnisblatt ist nicht festgehalten und nicht mehr herstellbar | **ja** — benannte Hülle, Preflight mit Baseline, Postflight mit `9999 = 0` |
+| Rumpf gegen das Repository geprüft | nur für `system_platform_export` (`7e9e58e2…`) | ja, `6a0383c5…` |
+| Vorher/Nachher-Vergleich des Bestands | nein | ja, Feld für Feld gegen die Baseline |
+
+Bei `0159`–`0164` ist belegt, **dass** der Zustand erreicht ist. Bei `0165`
+ist zusätzlich belegt, **wie** er erreicht wurde und **dass sonst nichts
+passiert ist**. Diese Lücke in der Historie bleibt stehen; sie wird nicht
+nachträglich gefüllt.
+
+**Drei Korrekturen am Weg dorthin, alle an meinen Prüfdateien und keine an
+der Migration:**
+
+* Der erste Postflight meldete `9999 = 3`. Zeile 204 erwartete einen leeren
+  `search_path` als leere Zeichenkette — PostgreSQL legt ihn **quotiert** als
+  `search_path=""` ab. `""` war richtig, die Erwartung falsch. Dieselbe Falle
+  hat `staging-0137.sql` am 2026-10-20 abbrechen lassen; `0165` selbst macht
+  es richtig, und der Ausdruck ist von dort übernommen.
+* Die Baseline war per `set_config(…, true)` verlangt — **transaktionslokal**,
+  im SQL-Editor also zwischen zwei Ausführungen unerreichbar. Sie steht
+  jetzt als Literal in der Prüfdatei. **Regel ab sofort für jedes
+  Preflight/Postflight-Paar dieses Projekts.**
+* `9999 = 3` war zu **klein**: ohne Baseline waren sieben Erwartungen NULL,
+  und diese Zeilen gaben gar kein Urteil ab. Jede Erwartung ist jetzt mit
+  `coalesce(…, '(BASELINE FEHLT)')` gesichert — aus Schweigen wird ein
+  Fehlschlag.
+
+### `G3'`, `G4'` und `G5'` sind aus der Ausführungsplanung GESTRICHEN
+
+**Sie werden nicht mehr gefahren.** Der Zustand, den sie herstellen sollten,
+ist auf Production erreicht; ihre Vorbedingungen verlangen das Gegenteil
+(`prod-s-preflight-g3.sql` Zeile 111 und 115 verlangen, dass `base_sky_id` und
+`admin_set_variant_base` FEHLEN, die Hülle bricht an `ABBRUCH A6a` ab). Ein
+Lauf wäre gegenstandslos.
+
+**Die Dateien bleiben liegen** — `prod-g3-0159.sql`, `prod-g4-0160-0162.sql`,
+`prod-g5-0163-0164.sql` samt ihrer sechs Prüfdateien. Sie sind die einzige
+Beschreibung dessen, was die Objekte dort herstellen, und ihre Wächter
+dokumentieren die Vorbedingungen. Gelöscht wird nichts; sie sind ab jetzt
+**Archiv, nicht Plan**.
+
+### Archiv: die Dateien zu `0159` (Gruppe **G3'**)
+
+Drei Dateien liegen fertig und sind lokal geprueft:
 `supabase/operations/prod-s-preflight-g3.sql` (rein lesend),
 `supabase/operations/prod-g3-0159.sql` (eine Transaktion) und
 `supabase/operations/prod-s-postflight-g3.sql` (rein lesend). Die Entscheidung
 und die Risiken stehen in ADR-0162.
+
+**Sie werden nicht gefahren** — siehe den Abschnitt oben. `0159` ist auf
+Production gemessen ANGEWENDET; diese Dateien verlangen in ihren
+Vorbedingungen, dass die Objekte fehlen.
 
 ## Nicht angewendet
 
@@ -478,7 +711,7 @@ Deshalb ist die folgende Lücke erlaubt und keine Nachlässigkeit:
 | Umgebung | angewendet (mit Zeile in dieser Akte) | offen |
 |---|---|---|
 | Staging `qqxcpesbwfxzgytkdsac` | … `0132`, `0135`–`0140`, `0144`–`0149`, `0152`–`0164` | `0133`, `0134`, `0150`, `0151` |
-| Production `zmiwxswrpkmizvqsgype` | … `0133`, `0135`–`0149`, `0152`–`0158` | `0134`, `0150`, `0151`, `0159`–`0164` |
+| Production `zmiwxswrpkmizvqsgype` | … **`0035`** (2026-10-31, mit vollständigem Nachweis; über eine frühere Ausführung wird nichts behauptet), `0133`, `0135`–`0149`, `0152`–**`0165`** (`0159`–`0164` am 2026-10-30 **gemessen**, ohne Ausführungsprotokoll; **`0165` mit vollständigem Nachweis**) | `0134`, `0150`, `0151` |
 
 **Diese Tabelle stand bis zum 2026-10-29 auf dem Stand vom 2026-10-18** („Staging
 … `0132`") und war damit über zwanzig Migrationen veraltet. Sie ist beim Lauf von
