@@ -20,7 +20,10 @@
  */
 "use server";
 
-import { fetchAdminNote, fetchCatalogChanges, type CatalogChange } from "@/lib/admin/queries";
+import {
+  fetchAdminNote, fetchBaseContext, fetchCatalogChanges, type CatalogChange,
+} from "@/lib/admin/queries";
+import { isEditorialCatalogSource } from "@/lib/admin/catalog-source";
 import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 
@@ -30,10 +33,22 @@ export type FigureEditorData = {
   /** `""` when there is none — the dialog edits a string, not a maybe. */
   note: string;
   changes: CatalogChange[];
+  /** The base figure's name, or `null` when the figure stands on its own. */
+  baseName: string | null;
+  /** How many variants point at THIS figure (`0159`: then it cannot become one). */
+  variantCount: number;
+  /**
+   * Whether this deployment is where the catalogue is edited (Staging,
+   * ADR-0167). Decided on the server; the dialog only offers "Variante von"
+   * as an edit when it is `true`. Not a security boundary — see
+   * `catalog-source.ts`.
+   */
+  editorialSource: boolean;
 };
 
 export async function loadFigureEditor(
   skyId: string,
+  baseSkyId: string | null = null,
 ): Promise<{ ok: true; data: FigureEditorData } | { ok: false; message: string }> {
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
   /*
@@ -43,9 +58,22 @@ export async function loadFigureEditor(
    */
   if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
-  const [note, changes] = await Promise.all([
+  if (baseSkyId !== null && !SKY_ID.test(baseSkyId)) {
+    return { ok: false, message: de.admin.baseUnknown };
+  }
+  const [note, changes, base] = await Promise.all([
     fetchAdminNote(skyId),
     fetchCatalogChanges(skyId),
+    fetchBaseContext(skyId, baseSkyId),
   ]);
-  return { ok: true, data: { note: note ?? "", changes } };
+  return {
+    ok: true,
+    data: {
+      note: note ?? "",
+      changes,
+      baseName: base.baseName,
+      variantCount: base.variantCount,
+      editorialSource: isEditorialCatalogSource(),
+    },
+  };
 }

@@ -55,6 +55,7 @@ describe("the five fields an administrator owns", () => {
      */
     expect([...DRAFT_FIELDS]).toEqual([
       "displayNameOverride",
+      "baseSkyId",
       "cardType",
       "types",
       "imageOverridePath",
@@ -85,6 +86,11 @@ describe("the five fields an administrator owns", () => {
          und das ist kein Zoegern, sondern dieselbe Regel wie bei `itemType`
          — fehlt das Feld, verhaelt sich alles wie vor `0163`. */
       types: [],
+      /* Keine Basisfigur in der Antwort: eigenständig (CAT-14). Der
+         Begleitwert für die Familie steht immer auf „nein", bis jemand im
+         Dialog eine Basisfigur wählt. */
+      baseSkyId: null,
+      createFamilyWithBase: false,
     });
   });
 
@@ -320,7 +326,7 @@ describe("the dialog", () => {
 
   it("loads the note and the journal once, when it opens", () => {
     // Not per card: a catalogue screen is up to 561 of them.
-    expect(modal).toContain("loadFigureEditor(figure.skyId)");
+    expect(modal).toContain("loadFigureEditor(figure.skyId, figure.baseSkyId)");
     expect(code(VIEW)).not.toContain("loadFigureEditor");
     expect(code(CARD)).not.toContain("loadFigureEditor");
   });
@@ -616,8 +622,10 @@ describe("the picture is staged, not saved", () => {
   });
 
   it("previews the draft through the resolver every other surface uses", () => {
-    expect(modal).toContain("imageSrc({ imageOverridePath: draft.imageOverridePath, imageFile: figure.imageFile })");
-    expect(modal).toContain("<FigureImage src={previewSrc}");
+    /* Seit CAT-14 im Kopf, mit dem Werkzeug auf dem Bild. */
+    expect(modal).toContain("imageSrc({");
+    expect(modal).toContain("draft === null ? figure.imageOverridePath : draft.imageOverridePath");
+    expect(modal).toContain('src={previewSrc ?? ""}');
   });
 
   it("checks the size before the file leaves the machine", () => {

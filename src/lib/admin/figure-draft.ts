@@ -66,11 +66,28 @@ export type AdminFigureDraft = {
    * wären sonst eine Änderung. `asCatalogTypes()` sortiert.
    */
   types: readonly CatalogType[];
+  /**
+   * „Variante von" (`base_sky_id`, `0159`) — `null` heisst „eigenstaendige
+   * Figur". Geschrieben ueber `setVariantBase`, denselben Weg wie die
+   * Detailseite. Im Dialog nur dort aenderbar, wo der Katalog gepflegt wird
+   * (Staging, ADR-0167); sonst bleibt das Feld unberuehrt und wird nie
+   * geschrieben.
+   */
+  baseSkyId: string | null;
+  /**
+   * KEIN FELD, SONDERN EIN BEGLEITWERT zu `baseSkyId`: ob mit der Zuordnung
+   * eine Familie angelegt werden soll. Entschieden wird es bei der Auswahl,
+   * nach derselben Regel wie auf der Detailseite (`base-select.tsx`). Es
+   * steht nicht in `DRAFT_FIELDS`, wird also nie verglichen und nie allein
+   * geschrieben.
+   */
+  createFamilyWithBase: boolean;
 };
 
 /** The fields, in the order they are saved. */
 export const DRAFT_FIELDS = [
   "displayNameOverride",
+  "baseSkyId",
   "cardType",
   "types",
   "imageOverridePath",
@@ -94,6 +111,7 @@ export function draftFrom(figure: {
   catalogVisible: boolean;
   catalogStatus?: CatalogStatus;
   types?: readonly string[];
+  baseSkyId?: string | null;
 }, adminNote: string | null): AdminFigureDraft {
   return {
     displayNameOverride: figure.displayNameOverride,
@@ -107,6 +125,8 @@ export function draftFrom(figure: {
        Ableitung aus der Sichtbarkeit exakt — siehe `catalog-status.ts`. */
     catalogStatus: statusOf(figure),
     adminNote: adminNote ?? "",
+    baseSkyId: figure.baseSkyId ?? null,
+    createFamilyWithBase: false,
   };
 }
 

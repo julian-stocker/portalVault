@@ -251,7 +251,11 @@ describe("zwei Felder, zwei Fragen — am Code gemessen", () => {
   it("und die Mehrfachauswahl steht im Dialog, nicht an der Kachel", () => {
     const modal = code("src/components/admin/figure-modal.tsx");
     expect(modal).toContain("setFigureTypes(skyId, draft.types)");
-    expect(modal).toContain('type="checkbox"');
+    /* Seit CAT-14 als Chips mit Plus statt als Kästchengruppen — die
+       Mehrfachauswahl bleibt im Dialog und ändert nur den Entwurf. */
+    expect(modal).toContain("<TypeChips");
+    expect(modal).toContain('onChange={(next) => set("types", next)}');
+    expect(code("src/components/admin/type-chips.tsx")).toContain("asCatalogTypes(");
     /* Die Kachel kennt die Mehrfachauswahl nicht. */
     expect(code("src/components/admin/type-select.tsx"))
       .not.toContain('type="checkbox"');

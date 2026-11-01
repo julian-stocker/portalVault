@@ -48,6 +48,10 @@ const FILTER_SHEET = "src/components/ui/filter-sheet.tsx";
  * fails one test rather than every test that needs to find this element.
  */
 const BODY_ANCHOR = "min-h-0 overflow-y-auto overscroll-contain";
+/** A section of the editor body: the old `Section`, or since CAT-14 `Property` and `More`. */
+const SECTION = /<(Section|Property|More)\b/g;
+/** The same, without `g`, for `toMatch` — a global regex keeps state between tests. */
+const SECTION_ANY = /<(Section|Property|More)\b/;
 
 /**
  * The scrolling region's own class string, read from the file.
@@ -217,16 +221,21 @@ describe("the head and the foot stay reachable", () => {
   it("names the figure in the head, where it stays visible", () => {
     const { head } = zones(editor);
     expect(head).toContain("id={headingId}");
-    expect(head).toContain("figure.displayName");
+    /* `shownName`: der Anzeigename aus dem Entwurf, sonst der abgeleitete
+       (`figure.displayName`) — seit CAT-14 mit dem Stift bearbeitbar. */
+    expect(head).toContain("{shownName}");
+    expect(editor).toContain("figure.displayName");
     expect(head).toContain("figure.skyId");
   });
 
   it("puts every setting inside the scrolling content", () => {
     const { head, scrolling, foot } = zones(editor);
-    const sections = scrolling.match(/<Section\b/g) ?? [];
+    /* Seit CAT-14 heissen die Bereiche `Property` (oben) und `More`
+       (geschlossen, „Weitere Details"). */
+    const sections = scrolling.match(SECTION) ?? [];
     expect(sections.length, "the editor's sections all scroll").toBeGreaterThanOrEqual(4);
-    expect(head).not.toContain("<Section");
-    expect(foot).not.toContain("<Section");
+    expect(head).not.toMatch(SECTION_ANY);
+    expect(foot).not.toMatch(SECTION_ANY);
   });
 });
 
@@ -276,9 +285,9 @@ describe("it still works when the editor grows", () => {
 
   it("still keeps every one of them inside the scroll", () => {
     const { head, scrolling, foot } = zones(grown(20));
-    expect((scrolling.match(/<Section\b/g) ?? []).length).toBeGreaterThanOrEqual(24);
-    expect(head).not.toContain("<Section");
-    expect(foot).not.toContain("<Section");
+    expect((scrolling.match(SECTION) ?? []).length).toBeGreaterThanOrEqual(24);
+    expect(head).not.toMatch(SECTION_ANY);
+    expect(foot).not.toMatch(SECTION_ANY);
   });
 
   it("still leaves the close button and saving reachable", () => {

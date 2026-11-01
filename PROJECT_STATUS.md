@@ -6521,6 +6521,23 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-11-01, CAT-14: kompakter Figuren-Editor — gebaut und geprüft, nicht
+committet, keine Datenbankänderung.** Der Bearbeiten-Dialog im Katalog
+(`figure-modal.tsx`) ist ein Eigenschaften-Editor:
+
+| | |
+|---|---|
+| Kopf (fest) | Bild mit Bearbeiten-Overlay (hochladen/ersetzen/entfernen über den bestehenden Upload), Name mit Stift (nur `display_name_override`, Original darunter), SKY-ID · Serie · Element, Status als kleines Auswahlfeld, Schließen |
+| Eigenschaften | „Variante von" (Basisfigur oder „Keine"; ändern nur auf Staging, ADR-0167), Types als Chips mit ✕ und + |
+| Weitere Details (zu) | Kartenkunst (bleibt: gedruckt in Katalog/Shop/Sammlung, vom Publish übertragen), interne Notiz, technische Identität, Änderungen |
+| Speichern (fest) | unverändert: nur Geändertes, Feld für Feld über die bestehenden Server Actions, Abbruch beim ersten Fehler |
+
+„Variante von" ist ein Entwurfsfeld (`baseSkyId`) und wird über `setVariantBase`
+geschrieben, mit derselben Familienregel wie auf der Detailseite. Ob die
+Umgebung Staging ist, entscheidet der Server (`catalog-source.ts`,
+fail-closed) — eine UI-Regel, keine Sperre (die ist CAT-13). Neue
+Schreibwege: keine. Offen: Browserprüfung durch den Betreiber.
+
 **2026-10-31, OVP-Katalogduplikate: endgültige Entfernung vorbereitet (ADR-0166).
 Migration `0167` ist auf Staging angewendet (berechtigter Postflight `9998 = 0`,
 `9999 = 0`, Grabstein leer, Katalog 696 und alle 30 OVP-Zeilen unverändert,

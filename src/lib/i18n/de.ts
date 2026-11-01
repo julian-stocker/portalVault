@@ -3658,6 +3658,24 @@ export const de = {
       "Unabhängig vom Kartentyp. Eine Figur auszublenden ändert nicht, worauf sie gedruckt ist.",
     sectionInternal: "Intern",
     sectionHistory: "Änderungen",
+    /* Der kompakte Editor (CAT-14): Kopf, Eigenschaften, „Weitere Details". */
+    nameEdit: "Anzeigename bearbeiten",
+    nameEditDone: "Fertig",
+    originalName: (name: string) => `Original: ${name}`,
+    propertyVariantOf: "Variante von",
+    propertyNone: "Keine",
+    propertyStatus: "Status",
+    baseChange: "Ändern",
+    baseEditOnStaging: "Wird auf Staging gepflegt",
+    typeAdd: "Type hinzufügen",
+    typeAddClose: "Type-Auswahl schließen",
+    typeRemove: (label: string) => `${label} entfernen`,
+    typeChipHint:
+      "Fällt der Banner-Type heraus, wird das Banner auf „–“ gesetzt.",
+    imageEdit: "Bild bearbeiten",
+    imageUpload: "Bild hochladen",
+    sectionMoreDetails: "Weitere Details",
+    sectionTechnical: "Technische Identität",
     /* `overrideLabel`, `overrideHint` und `noteLabel` stehen in diesem Block
        bereits — `FigureEditor` benutzt sie auf der Detailseite. Derselbe Text
        für dasselbe Feld, an einer Stelle. */

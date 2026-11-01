@@ -650,6 +650,11 @@ export function CatalogView({
       cardType: saved.cardType,
       displayName: saved.displayNameOverride ?? figure.displayName,
       displayNameOverride: saved.displayNameOverride,
+      /* Seit CAT-14 auch Basisfigur, Types und Bild: wer den Editor ein
+         zweites Mal öffnet, muss vom gespeicherten Stand ausgehen. */
+      baseSkyId: saved.baseSkyId,
+      types: saved.types,
+      imageOverridePath: saved.imageOverridePath,
     };
   }
 

@@ -1,5 +1,5 @@
 /**
- * The administrator's figure editor, as a dialog (V3.8).
+ * The administrator's figure editor, as a dialog (V3.8, compact since CAT-14).
  *
  * WHY A DIALOG AND NOT A PAGE
  *
@@ -9,7 +9,16 @@
  * work this actually is — glance at a grid, fix one thing, glance at the next.
  * The page stays; this is the fast path beside it.
  *
- * FIVE FIELDS, COLLECTED, THEN SAVED
+ * WHAT IS WHERE (CAT-14)
+ *
+ * The head carries the figure: picture (with a small edit overlay for the
+ * image), the name (a pencil edits the display-name override — the imported
+ * name is never touched), SKY-ID, series, element and the status. Below it
+ * the two properties that are changed most: "Variante von" and the types.
+ * Everything else — card art, internal note, technical identity, history —
+ * sits in closed sections under "Weitere Details".
+ *
+ * FIELDS ARE COLLECTED, THEN SAVED
  *
  * Every editor on the detail page writes the moment you touch it. Here they
  * do not: the dialog takes a copy, the operator changes what they like, and
@@ -17,13 +26,20 @@
  *
  * THAT SAVE IS NOT A TRANSACTION, AND THIS FILE DOES NOT PRETEND IT IS.
  *
- * Each field is its own `security definer` function with its own
- * `is_shop_admin()` check. There is no RPC that takes all five, and inventing
- * one would be a schema change for a dialog — so five changed fields are five
- * writes, in order, and any of them can fail on its own. What that costs is
- * honesty: a partial save says which fields landed, keeps the dialog open,
- * and leaves the rest dirty. It never says "Gespeichert" when four of five
- * went through.
+ * Each field is its own `security definer` function with its own admin
+ * check. There is no RPC that takes all of them, and inventing one would be a
+ * schema change for a dialog — so changed fields are separate writes, in
+ * order, and any of them can fail on its own. What that costs is honesty: a
+ * partial save says which fields landed, keeps the dialog open, and leaves
+ * the rest dirty. It never says "Gespeichert" when only some went through.
+ *
+ * "VARIANTE VON" IS ONLY OFFERED AS AN EDIT WHERE THE CATALOGUE IS EDITED
+ *
+ * Staging is the editorial source (ADR-0167). The server tells the dialog
+ * whether this deployment is it (`loadFigureEditor` → `editorialSource`);
+ * elsewhere the relation is shown and not offered, so this dialog opens no
+ * new catalogue write path on Production. That is a UI rule, not the lock —
+ * the lock is CAT-13.
  *
  * WHAT IS READ-ONLY, AND WHY IT IS SHOWN ANYWAY
  *
@@ -38,10 +54,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, useTransition
 
 import { Modal } from "@/components/ui/modal";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import { BasePicker } from "@/components/admin/base-picker";
+import { TypeChips } from "@/components/admin/type-chips";
 import { CARD_TYPES, CARD_TYPE_LABELS } from "@/lib/catalog/card-type";
-import {
-  TYPE_GROUPS, TYPE_GROUP_LABELS, TYPE_GROUP_ORDER, TYPE_LABELS, asCatalogTypes,
-} from "@/lib/catalog/catalog-type";
 import {
   baselineAfter,
   changedFields,
@@ -59,10 +74,10 @@ import {
   setFigureTypes,
   setDisplayNameOverride,
   setImageOverride,
+  setVariantBase,
   type AdminResult,
 } from "@/lib/admin/actions";
 import { stageFigureImage } from "@/lib/admin/image-actions";
-import { FigureImage } from "@/components/catalog/figure-image";
 import { MAX_IMAGE_BYTES } from "@/lib/admin/image-file";
 import type { CatalogChange } from "@/lib/admin/queries";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -78,14 +93,6 @@ import {
 import { de } from "@/lib/i18n/de";
 import { setCatalogStatus } from "@/lib/admin/actions";
 
-/**
- * One field, one server action.
- *
- * A table rather than a switch, so the save loop is a loop and the order the
- * fields are written in is the order they are declared in `DRAFT_FIELDS`.
- * `imageOverridePath` and `displayNameOverride` both take an empty string as
- * "clear it" — that is the database's contract, not this file's.
- */
 /** Die drei Beschriftungen, an einer Stelle. */
 export const STATUS_LABELS: Readonly<Record<CatalogStatus, string>> = {
   public: de.catalog.statusPublic,
@@ -98,9 +105,25 @@ function asStatus(value: string): CatalogStatus {
   return isCatalogStatus(value) ? value : DEFAULT_CATALOG_STATUS;
 }
 
+/**
+ * One field, one server action.
+ *
+ * A table rather than a switch, so the save loop is a loop and the order the
+ * fields are written in is the order they are declared in `DRAFT_FIELDS`.
+ * `imageOverridePath` and `displayNameOverride` both take an empty string as
+ * "clear it" — that is the database's contract, not this file's.
+ */
 const WRITERS: Record<DraftField, (skyId: string, draft: AdminFigureDraft) => Promise<AdminResult>> = {
   displayNameOverride: (skyId, draft) =>
     setDisplayNameOverride(skyId, draft.displayNameOverride ?? ""),
+  /*
+   * DERSELBE SCHREIBWEG WIE AUF DER DETAILSEITE (`0159`): Serie, keine
+   * Kette, keine Figur mit eigenen Varianten, Familienregel — alles in der
+   * Datenbank. Der Dialog bietet das Feld nur auf Staging an (ADR-0167);
+   * anderswo ändert es sich nie und steht deshalb nie im Speicherplan.
+   */
+  baseSkyId: (skyId, draft) =>
+    setVariantBase(skyId, draft.baseSkyId, draft.createFamilyWithBase),
   cardType: (skyId, draft) => setCardType(skyId, draft.cardType),
   /*
    * EIN EIGENER SCHREIBWEG, wie jedes andere Feld. `setFigureTypes` ersetzt
@@ -113,22 +136,48 @@ const WRITERS: Record<DraftField, (skyId: string, draft: AdminFigureDraft) => Pr
   adminNote: (skyId, draft) => setAdminNote(skyId, draft.adminNote),
 };
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section className="border-t border-border/60 pt-4 first:border-0 first:pt-0">
-      <h3 className="text-sm font-medium">{title}</h3>
-      {hint ? <p className="mt-0.5 text-xs text-muted">{hint}</p> : null}
-      <div className="mt-3 flex flex-col gap-3">{children}</div>
-    </section>
-  );
-}
-
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
       <dt className="text-xs text-muted">{label}</dt>
       <dd className="truncate text-sm">{value}</dd>
     </div>
+  );
+}
+
+/** One property row: the label on the left, the value beside it. */
+function Property({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-x-3 gap-y-1">
+      <span className="pt-1.5 text-xs text-muted">{label}</span>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * A closed-by-default section. `<details>` and not a state flag: the browser
+ * already makes it a keyboard-operable disclosure with the right semantics.
+ */
+function More({ title, summary, children }: {
+  title: string; summary?: string; children: React.ReactNode;
+}) {
+  return (
+    <details className="group rounded-sky-md ring-1 ring-border/60">
+      <summary
+        className="focus-ring flex min-h-11 cursor-pointer list-none items-center gap-2 rounded-sky-md
+                   px-3 text-sm [&::-webkit-details-marker]:hidden"
+      >
+        <svg aria-hidden="true" viewBox="0 0 16 16"
+             className="h-3 w-3 shrink-0 text-muted transition-transform group-open:rotate-90"
+             fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+          <path d="M6 3l5 5-5 5" />
+        </svg>
+        <span className="font-medium">{title}</span>
+        {summary ? <span className="ml-auto truncate text-xs text-muted">{summary}</span> : null}
+      </summary>
+      <div className="flex flex-col gap-3 px-3 pt-1 pb-3">{children}</div>
+    </details>
   );
 }
 
@@ -156,24 +205,29 @@ export function AdminFigureModal({
   const fileInput = useRef<HTMLInputElement>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const [uploading, startUpload] = useTransition();
+  const [imageMenu, setImageMenu] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [pickingBase, setPickingBase] = useState(false);
+  /* What the server said about the relation; the name follows the draft. */
+  const [editorialSource, setEditorialSource] = useState(false);
+  const [variantCount, setVariantCount] = useState(0);
+  const [baseName, setBaseName] = useState<string | null>(null);
 
   const skyId = figure?.skyId ?? null;
 
   /*
-   * The note and the journal are not on a catalogue card. One request, when
-   * the dialog opens — never one per card.
+   * The note, the journal and the base figure's name are not on a catalogue
+   * card. One request, when the dialog opens — never one per card.
    *
    * Nothing is reset here. The dialog is mounted with `key={skyId}` by the
    * catalogue, so a different figure is a different component with fresh
-   * state — which is both cheaper and safer than five setters at the top of
-   * an effect, where React would have to throw away a render it had just
-   * started.
+   * state.
    */
   useEffect(() => {
     if (!figure) return;
     let cancelled = false;
 
-    void loadFigureEditor(figure.skyId).then((result) => {
+    void loadFigureEditor(figure.skyId, figure.baseSkyId).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setLoadError(result.message);
@@ -183,6 +237,9 @@ export function AdminFigureModal({
       setInitial(base);
       setDraft(base);
       setChanges(result.data.changes);
+      setBaseName(result.data.baseName);
+      setVariantCount(result.data.variantCount);
+      setEditorialSource(result.data.editorialSource);
     });
 
     return () => {
@@ -191,18 +248,18 @@ export function AdminFigureModal({
   }, [figure]);
 
   /*
-   * What the preview shows: the draft's picture if one has been chosen, the
-   * figure's current one otherwise. Resolved the same way every other surface
-   * resolves it, so a staged upload looks exactly like it will look once it
-   * is saved.
+   * What the head shows: the draft's picture if one has been chosen, the
+   * figure's current one otherwise — resolved the same way every other
+   * surface resolves it, so a staged upload already looks exactly like it
+   * will look once it is saved.
    */
   const previewSrc =
-    figure === null || draft === null
+    figure === null
       ? null
-      : /* The same resolver every other surface uses, given the DRAFT's
-           override rather than the stored one — so a staged upload already
-           looks exactly like it will look once it is saved. */
-        imageSrc({ imageOverridePath: draft.imageOverridePath, imageFile: figure.imageFile });
+      : imageSrc({
+          imageOverridePath: draft === null ? figure.imageOverridePath : draft.imageOverridePath,
+          imageFile: figure.imageFile,
+        });
 
   function stage(file: File) {
     setImageError(null);
@@ -273,9 +330,8 @@ export function AdminFigureModal({
     /*
      * A COMPLETE SAVE CLOSES THE DIALOG. The operator came from a card in a
      * grid, changed one thing, and wants to be back at that card — so the
-     * dialog gets out of the way, `Modal` puts focus back on the button that
-     * opened it, and the page never navigated, so the scroll position was
-     * never anywhere else.
+     * dialog gets out of the way and `Modal` puts focus back on the button
+     * that opened it.
      *
      * A PARTIAL SAVE DOES NOT. Closing on a half-written figure would hide
      * the one thing the operator needs to see, and the fields that failed are
@@ -290,6 +346,17 @@ export function AdminFigureModal({
     setDraft((current) => (current === null ? current : { ...current, [key]: value }));
 
   const complete = report !== null && report.failed.length === 0 && report.saved.length > 0;
+  const busy = saving || uploading;
+
+  /*
+   * THE NAME IN THE HEAD. The override when the draft has one; otherwise the
+   * name the catalogue derives. `figure.displayName` IS that derived name
+   * only while the stored override is empty — once one is stored, the raw
+   * imported name is the honest fallback to show.
+   */
+  const shownName = draft?.displayNameOverride
+    ?? (figure.displayNameOverride === null ? figure.displayName : figure.canonicalName);
+  const overridden = (draft?.displayNameOverride ?? null) !== null;
 
   return (
     <Modal open onClose={requestClose} labelledBy={headingId} size="lg">
@@ -297,41 +364,111 @@ export function AdminFigureModal({
         * THE PANEL IS THE COLUMN. THIS FILE ONLY FILLS IT.
         *
         * `Modal` already is `flex flex-col` with a `dvh` ceiling and
-        * `overflow-hidden`, and `filter-sheet.tsx` already puts a head, a
-        * scrolling body and a foot straight into it. This editor used to wrap
-        * all three in a `flex max-h-[85vh] flex-col` div instead, which broke
-        * the scroll in two ways at once — see the note on the body below.
-        *
-        * So there is no wrapper. Head, body and foot are the panel's own flex
+        * `overflow-hidden`. Head, body and foot are the panel's own flex
         * children, and the chain that has to hold is one link long.
         */}
-      {/* The figure, so there is no doubt which one is being changed. */}
-      <header className="flex shrink-0 items-start gap-3 border-b border-border/60 p-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={imageSrc(figure) ?? ""}
-          alt=""
-          aria-hidden="true"
-          className="h-14 w-14 shrink-0 rounded-sky-sm bg-white object-contain"
-        />
+      <header className="relative flex shrink-0 items-start gap-3 border-b border-border/60 p-4">
+        {/*
+          * THE PICTURE, WITH ITS OWN SMALL TOOL.
+          *
+          * Choosing a file uploads it to storage straight away — bytes have
+          * to exist somewhere before anything can point at them — but the
+          * FIGURE is not changed until the dialog is saved. Cancelling leaves
+          * the figure showing exactly what it showed before; an orphan in the
+          * bucket is the cheaper of the two mistakes (`image-actions.ts`).
+          */}
+        <div className="relative h-16 w-16 shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewSrc ?? ""}
+            alt=""
+            aria-hidden="true"
+            className="h-16 w-16 rounded-sky-sm bg-white object-contain"
+          />
+          <button
+            type="button"
+            onClick={() => setImageMenu((open) => !open)}
+            disabled={draft === null || busy}
+            aria-expanded={imageMenu}
+            aria-label={de.admin.imageEdit}
+            aria-busy={uploading || undefined}
+            className="focus-ring absolute -right-1.5 -bottom-1.5 inline-flex h-7 w-7 items-center
+                       justify-center rounded-full bg-surface text-muted shadow ring-1 ring-border
+                       hover:text-foreground disabled:opacity-60"
+          >
+            <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none"
+                 stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.5 2.5l3 3L6 13H3v-3z" />
+            </svg>
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="sr-only"
+            tabIndex={-1}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = "";
+              if (file) stage(file);
+            }}
+          />
+        </div>
+
         <div className="min-w-0 flex-1">
-          <h2 id={headingId} className="truncate text-base font-semibold">
-            {figure.displayName}
-          </h2>
-          <p className="mt-0.5 font-mono text-xs text-muted">
-            {figure.skyId} · {CARD_TYPE_LABELS[draft?.cardType ?? figure.cardType]}
+          <div className="flex items-start gap-1">
+            <h2 id={headingId} className="min-w-0 truncate text-base font-semibold">
+              {shownName}
+            </h2>
+            <button
+              type="button"
+              onClick={() => setEditingName((open) => !open)}
+              disabled={draft === null || saving}
+              aria-expanded={editingName}
+              aria-label={de.admin.nameEdit}
+              className="focus-ring -mt-1 inline-flex h-8 w-8 shrink-0 items-center justify-center
+                         rounded-full text-muted hover:bg-white/10 hover:text-foreground
+                         disabled:opacity-50"
+            >
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none"
+                   stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.5 2.5l3 3L6 13H3v-3z" />
+              </svg>
+            </button>
+          </div>
+          {overridden ? (
+            <p className="truncate text-[11px] text-muted">{de.admin.originalName(figure.canonicalName)}</p>
+          ) : null}
+          <p className="mt-0.5 truncate text-xs text-muted">
+            <span className="font-mono">{figure.skyId}</span>
+            {" · "}{figure.seriesLabel}
+            {figure.element ? ` · ${figure.element}` : ""}
           </p>
+          {draft !== null ? (
+            <label className="mt-1 inline-flex items-center gap-1.5 text-xs text-muted">
+              <span className="sr-only">{de.admin.propertyStatus}</span>
+              <select
+                value={draft.catalogStatus}
+                onChange={(event) => set("catalogStatus", asStatus(event.target.value))}
+                disabled={saving}
+                className="min-h-8 rounded-sky-sm bg-deep/50 px-1.5 text-xs text-foreground
+                           ring-1 ring-border/50 focus-ring"
+              >
+                {CATALOG_STATUSES.map((status) => (
+                  <option key={status} value={status}>
+                    {STATUS_LABELS[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </div>
 
         {/*
           * `requestClose`, not `onClose`: this is the same door as Escape and
           * the backdrop, so it asks before throwing away an unsaved edit. It
-          * sits in the head rather than over the body, so a long form scrolls
-          * underneath it and never past it.
-          *
-          * Same shape and the same 44 px target as the quick view's and the
-          * filter sheet's — an inline glyph in each, which is how this
-          * codebase already carries it.
+          * sits in the head, so a long form scrolls underneath it and never
+          * past it.
           */}
         <button
           type="button"
@@ -356,33 +493,41 @@ export function AdminFigureModal({
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
         </button>
+
+        {/* The image tool's two actions, under the picture. */}
+        {imageMenu && draft !== null ? (
+          <div className="absolute top-[5.25rem] left-4 z-10 flex flex-col gap-1 rounded-sky-md
+                          bg-surface p-1.5 shadow-lg ring-1 ring-border">
+            <button
+              type="button"
+              onClick={() => { setImageMenu(false); fileInput.current?.click(); }}
+              disabled={busy}
+              className="focus-ring min-h-11 rounded-sky-sm px-3 text-left text-sm hover:bg-white/10"
+            >
+              {draft.imageOverridePath !== null || figure.imageFile ? de.admin.imageReplace
+                                                                      : de.admin.imageUpload}
+            </button>
+            {draft.imageOverridePath !== null ? (
+              <button
+                type="button"
+                onClick={() => { setImageMenu(false); set("imageOverridePath", null); }}
+                disabled={busy}
+                className="focus-ring min-h-11 rounded-sky-sm px-3 text-left text-sm hover:bg-white/10"
+              >
+                {de.admin.imageRemove}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {/*
         * THE ONLY SCROLLING REGION, AND WHY IT IS SPELLED LIKE THIS.
         *
-        * `min-h-0` is the whole bug. A flex child's `min-height` defaults to
-        * `auto`, which resolves to its min-content height — so a body full of
-        * sections REFUSES to shrink below the height of those sections, the
-        * column grows past the panel's ceiling, and `overflow-hidden` on the
-        * panel cuts the rest off. That is exactly what "the last fields are
-        * unreachable" looked like: not a missing scrollbar, a clipped column.
-        * `overflow-y-auto` cannot help while the element never gets smaller
-        * than its content, because then there is nothing to scroll.
-        *
-        * NOT `flex-1`. That is `flex: 1 1 0%`, which would make this claim the
-        * panel's full ceiling even for a figure with no history — a short
-        * editor with a band of empty space above the buttons. The default
-        * `flex: 0 1 auto` is the half that was wanted: be the size of the
-        * content, give way once the ceiling is reached. `quick-view.tsx`
-        * records the same reasoning.
-        *
-        * `overscroll-contain` keeps the gesture here once the ends are
-        * reached, so the catalogue behind never takes over the scroll.
-        *
-        * `pb-6` rather than the `p-4` on the other three sides: the last field
-        * must not sit against the foot, and on a phone the bottom edge is
-        * where the browser's own chrome comes and goes.
+        * `min-h-0` lets a flex child shrink below its content, so the body
+        * scrolls instead of the column growing past the panel's ceiling.
+        * NOT `flex-1`: a short editor stays short. `overscroll-contain`
+        * keeps the gesture here. `pb-6` keeps the last field off the foot.
         */}
       <div className="min-h-0 overflow-y-auto overscroll-contain p-4 pb-6">
         {loadError !== null ? (
@@ -392,225 +537,174 @@ export function AdminFigureModal({
         ) : draft === null ? (
           <p className="text-sm text-muted">{de.admin.loading}</p>
         ) : (
-          <div className="flex flex-col gap-5">
-            <Section title={de.admin.sectionIdentity} hint={de.admin.sectionIdentityHint}>
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-                <Fact label={de.admin.skyId} value={figure.skyId} />
-                <Fact label={de.admin.canonicalName} value={figure.canonicalName} />
-                <Fact label={de.admin.series} value={figure.seriesLabel} />
-                <Fact label={de.admin.category} value={figure.categoryName} />
-                <Fact label={de.admin.group} value={groupLabel(figure.catalogGroup)} />
-                <Fact label={de.admin.elementLabel} value={figure.element ?? "—"} />
-              </dl>
-            </Section>
+          <div className="flex flex-col gap-4">
+            {imageError !== null ? (
+              <p role="alert" className="text-xs text-danger">{imageError}</p>
+            ) : null}
 
-            <Section title={de.admin.sectionDisplay}>
+            {editingName ? (
               <label className="flex flex-col gap-1">
                 <span className="text-xs text-muted">{de.admin.overrideLabel}</span>
-                <input
-                  type="text"
-                  value={draft.displayNameOverride ?? ""}
-                  onChange={(event) =>
-                    set("displayNameOverride", event.target.value === "" ? null : event.target.value)
-                  }
-                  maxLength={120}
-                  className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
-                />
+                <span className="flex gap-2">
+                  <input
+                    type="text"
+                    value={draft.displayNameOverride ?? ""}
+                    autoFocus
+                    onChange={(event) =>
+                      set("displayNameOverride", event.target.value === "" ? null : event.target.value)
+                    }
+                    onKeyDown={(event) => {
+                      /* Enter and Escape end the edit, not the dialog. The
+                         value stays in the draft either way. */
+                      if (event.key === "Enter" || event.key === "Escape") {
+                        event.preventDefault();
+                        setEditingName(false);
+                      }
+                    }}
+                    maxLength={120}
+                    className="min-h-11 min-w-0 flex-1 rounded-sky-md bg-surface px-3 py-2 text-sm
+                               ring-1 ring-border focus-ring"
+                  />
+                  <button type="button" onClick={() => setEditingName(false)} className={ACTION_NEUTRAL}>
+                    {de.admin.nameEditDone}
+                  </button>
+                </span>
                 <span className="text-xs text-muted">{de.admin.overrideHint}</span>
               </label>
+            ) : null}
 
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted">{de.admin.cardType}</span>
-                <select
-                  value={draft.cardType}
-                  onChange={(event) => set("cardType", event.target.value as AdminFigureDraft["cardType"])}
-                  className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
-                >
-                  {CARD_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {CARD_TYPE_LABELS[type]}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-muted">{de.admin.cardTypeHint}</span>
-              </label>
-
-              {/*
-                * DIE TYPES — MEHRFACHAUSWAHL, nach den drei Gruppen
-                * gegliedert (CAT-10).
-                *
-                * KÄSTCHEN UND KEIN MEHRFACH-`select`. Ein `<select multiple>`
-                * verliert auf dem Telefon jede Bedienbarkeit, und mit
-                * siebzehn Werten in drei Gruppen ist eine Liste aus Kästchen
-                * das, was man auch mit dem Daumen trifft. Jedes Kästchen ist
-                * 44 px hoch.
-                *
-                * SIE ÄNDERN NUR DEN ENTWURF. Gespeichert wird beim Speichern
-                * des Dialogs, über `setFigureTypes` — ein Kästchen ist keine
-                * Schreiboperation, und ein Abbrechen lässt die Figur
-                * unverändert. Dasselbe Verhalten wie bei jedem anderen Feld
-                * hier.
-                */}
-              <fieldset className="flex flex-col gap-1">
-                <legend className="text-xs text-muted">{de.admin.typeHeading}</legend>
-                <span className="text-xs text-muted">{de.admin.typeHint}</span>
-                <div className="mt-1 flex flex-col gap-3">
-                  {TYPE_GROUP_ORDER.map((gruppe) => (
-                    <div key={gruppe} className="flex flex-col gap-0.5">
-                      <span className="text-[11px] font-medium tracking-wide uppercase
-                                       text-muted">
-                        {TYPE_GROUP_LABELS[gruppe]}
-                      </span>
-                      <div className="flex flex-wrap gap-x-3">
-                        {TYPE_GROUPS[gruppe].map((typ) => (
-                          <label key={typ}
-                                 className="flex min-h-11 items-center gap-1.5 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={draft.types.includes(typ)}
-                              onChange={(event) =>
-                                set("types", asCatalogTypes(
-                                  event.target.checked
-                                    ? [...draft.types, typ]
-                                    : draft.types.filter((t) => t !== typ)))
-                              }
-                              className="size-4 accent-[var(--trade-line-strong,#9aa4b2)]"
-                            />
-                            <span>{TYPE_LABELS[typ]}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </fieldset>
-
-              {/*
-                * THE PICTURE, IN TWO STEPS THAT ARE NOT ONE.
-                *
-                * Choosing a file uploads it to storage straight away —
-                * bytes have to exist somewhere before anything can point at
-                * them — but the FIGURE is not changed until the dialog is
-                * saved. So the preview below is a draft like every other
-                * field, and cancelling leaves the figure showing exactly
-                * what it showed before.
-                *
-                * What that costs is an orphan in the bucket if the operator
-                * uploads and then discards. The object is content-addressed,
-                * so the same picture is the same object however often it is
-                * chosen, and `image-actions.ts` already records that an
-                * orphan is the cheaper of the two mistakes.
-                */}
-              <div className="flex flex-col gap-2">
-                <span className="text-xs text-muted">{de.admin.image}</span>
-                <div className="flex items-start gap-3">
-                  <div className="w-24 shrink-0">
-                    <FigureImage src={previewSrc} name={figure.displayName} />
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <p className="text-[11px] text-muted">
-                      {draft.imageOverridePath ? de.admin.imageOwn : de.admin.imageImported}
-                    </p>
-                    <input
-                      ref={fileInput}
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      className="sr-only"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (file) stage(file);
-                      }}
-                    />
+            <Property label={de.admin.propertyVariantOf}>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-sm">
+                  {draft.baseSkyId === null ? de.admin.propertyNone : (baseName ?? draft.baseSkyId)}
+                </span>
+                {draft.baseSkyId !== null ? (
+                  <span className="font-mono text-[11px] text-muted">{draft.baseSkyId}</span>
+                ) : null}
+                {editorialSource ? (
+                  !pickingBase ? (
                     <button
                       type="button"
-                      onClick={() => fileInput.current?.click()}
-                      disabled={uploading || saving}
-                      aria-busy={uploading || undefined}
-                      className={ACTION_NEUTRAL}
+                      onClick={() => setPickingBase(true)}
+                      disabled={saving}
+                      className="focus-ring min-h-8 text-xs text-muted underline decoration-dotted
+                                 hover:text-foreground"
                     >
-                      {uploading ? de.admin.imageUploading : de.admin.imageReplace}
+                      {de.admin.baseChange}
                     </button>
-                    {draft.imageOverridePath !== null ? (
-                      <button
-                        type="button"
-                        onClick={() => set("imageOverridePath", null)}
-                        disabled={uploading || saving}
-                        className="text-xs text-link underline underline-offset-2"
-                      >
-                        {de.admin.imageRemove}
-                      </button>
-                    ) : null}
-                    {imageError !== null ? (
-                      <p role="alert" className="text-xs text-danger">
-                        {imageError}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
+                  ) : null
+                ) : (
+                  <span className="text-[11px] text-muted">{de.admin.baseEditOnStaging}</span>
+                )}
               </div>
-            </Section>
-
-            {/*
-              DREI WERTE STATT EINES HÄKCHENS (CAT-02B).
-              Ein `select` und kein drittes Kästchen: die drei Zustände sind
-              einer von drei, nicht drei Schalter. Gespeichert wird wie jedes
-              andere Feld — der Status steht in `WRITERS`, und „Speichern"
-              schreibt nur, was sich geändert hat. Keine Warnung, keine
-              Bestätigung, kein Freigabeschritt.
-            */}
-            <Section title={de.admin.sectionVisibility} hint={de.catalog.statusHint}>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted">{de.catalog.statusLabel}</span>
-                <select
-                  value={draft.catalogStatus}
-                  onChange={(event) => set("catalogStatus", asStatus(event.target.value))}
-                  className="min-h-11 rounded-sky-sm bg-deep/50 px-2 text-sm text-foreground ring-1 ring-border/50 focus-ring"
-                >
-                  {CATALOG_STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {STATUS_LABELS[status]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </Section>
-
-            <Section title={de.admin.sectionInternal}>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-muted">{de.admin.note}</span>
-                <textarea
-                  value={draft.adminNote}
-                  onChange={(event) => set("adminNote", event.target.value)}
-                  maxLength={2000}
-                  rows={3}
-                  className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+              {variantCount > 0 ? (
+                <p className="mt-0.5 text-[11px] text-muted">{de.admin.baseVariantsSoFar(variantCount)}</p>
+              ) : null}
+              {editorialSource && pickingBase ? (
+                <BasePicker
+                  skyId={figure.skyId}
+                  disabled={saving}
+                  canRemove={draft.baseSkyId !== null}
+                  onCancel={() => setPickingBase(false)}
+                  onPick={(target, createFamily) => {
+                    setDraft((current) => current === null ? current : {
+                      ...current,
+                      baseSkyId: target?.skyId ?? null,
+                      createFamilyWithBase: target !== null && createFamily,
+                    });
+                    setBaseName(target?.name ?? null);
+                    setPickingBase(false);
+                  }}
                 />
-                <span className="text-xs text-muted">{de.admin.noteHint}</span>
-              </label>
-            </Section>
+              ) : null}
+            </Property>
 
-            {changes.length > 0 ? (
-              <Section title={de.admin.sectionHistory}>
-                <ul className="flex flex-col gap-1 text-xs text-muted">
-                  {changes.map((change) => (
-                    <li key={`${change.field}-${change.changedAt}`}>
-                      <span className="text-foreground">{change.field}</span>{" "}
-                      {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
-                      {formatDate(change.changedAt)}
-                    </li>
-                  ))}
-                </ul>
-              </Section>
-            ) : null}
+            <Property label={de.admin.typeHeading}>
+              <TypeChips
+                types={draft.types}
+                bannerType={figure.visibleType ?? null}
+                disabled={saving}
+                onChange={(next) => set("types", next)}
+              />
+              <p className="mt-1 text-[11px] text-muted">{de.admin.typeChipHint}</p>
+            </Property>
+
+            <div className="flex flex-col gap-2">
+              <h3 className="text-xs font-medium tracking-wide text-muted uppercase">
+                {de.admin.sectionMoreDetails}
+              </h3>
+
+              {/*
+                * KARTENKUNST BLEIBT. `card_type` entscheidet, auf welche Karte
+                * die Figur in Katalog, Shop und Sammlung gedruckt wird, und der
+                * Publish überträgt das Feld (`publish-compare.ts`). Es wird nur
+                * seltener geändert — darum hier und nicht oben.
+                */}
+              <More title={de.admin.cardType} summary={CARD_TYPE_LABELS[draft.cardType]}>
+                <label className="flex flex-col gap-1">
+                  <span className="sr-only">{de.admin.cardType}</span>
+                  <select
+                    value={draft.cardType}
+                    onChange={(event) => set("cardType", event.target.value as AdminFigureDraft["cardType"])}
+                    className="min-h-11 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+                  >
+                    {CARD_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {CARD_TYPE_LABELS[type]}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-muted">{de.admin.cardTypeHint}</span>
+                </label>
+              </More>
+
+              <More title={de.admin.note} summary={draft.adminNote.trim() === "" ? undefined : "•"}>
+                <label className="flex flex-col gap-1">
+                  <span className="sr-only">{de.admin.note}</span>
+                  <textarea
+                    value={draft.adminNote}
+                    onChange={(event) => set("adminNote", event.target.value)}
+                    maxLength={2000}
+                    rows={3}
+                    className="rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border focus-ring"
+                  />
+                  <span className="text-xs text-muted">{de.admin.noteHint}</span>
+                </label>
+              </More>
+
+              <More title={de.admin.sectionTechnical} summary={figure.skyId}>
+                <p className="text-xs text-muted">{de.admin.sectionIdentityHint}</p>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
+                  <Fact label={de.admin.skyId} value={figure.skyId} />
+                  <Fact label={de.admin.canonicalName} value={figure.canonicalName} />
+                  <Fact label={de.admin.series} value={figure.seriesLabel} />
+                  <Fact label={de.admin.category} value={figure.categoryName} />
+                  <Fact label={de.admin.group} value={groupLabel(figure.catalogGroup)} />
+                  <Fact label={de.admin.elementLabel} value={figure.element ?? "—"} />
+                </dl>
+              </More>
+
+              {changes.length > 0 ? (
+                <More title={de.admin.sectionHistory} summary={String(changes.length)}>
+                  <ul className="flex flex-col gap-1 text-xs text-muted">
+                    {changes.map((change) => (
+                      <li key={`${change.field}-${change.changedAt}`} className="break-words">
+                        <span className="text-foreground">{change.field}</span>{" "}
+                        {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
+                        {formatDate(change.changedAt)}
+                      </li>
+                    ))}
+                  </ul>
+                </More>
+              ) : null}
+            </div>
           </div>
         )}
       </div>
 
       {/*
         * `shrink-0`, like the head: whatever the body does, saving stays one
-        * press away. Which matters more with every setting this editor gains
-        * — the operator must never scroll past twenty fields to reach it.
+        * press away.
         */}
       <footer className="flex shrink-0 flex-col gap-2 border-t border-border/60 p-4">
         {/* The result, stated as what it is. A partial save is not a success. */}

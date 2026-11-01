@@ -177,6 +177,34 @@ export async function fetchAdminNote(skyId: string): Promise<string | null> {
 }
 
 /**
+ * „Variante von" fuer den Figureneditor: der Name der Basisfigur und wie
+ * viele Varianten auf DIESE Figur zeigen.
+ *
+ * Die Zahl braucht der Dialog aus demselben Grund wie die Detailseite: eine
+ * Figur mit eigenen Varianten kann selbst keine Variante werden (`0159`).
+ * Das soll man sehen, bevor man es versucht. Rein lesend.
+ */
+export async function fetchBaseContext(
+  skyId: string,
+  baseSkyId: string | null,
+): Promise<{ baseName: string | null; variantCount: number }> {
+  const supabase = await createClient();
+  const [base, variants] = await Promise.all([
+    baseSkyId === null
+      ? Promise.resolve({ data: null, error: null })
+      : supabase.from("skylanders").select("name,display_name_override")
+          .eq("sky_id", baseSkyId).maybeSingle(),
+    supabase.from("skylanders").select("sky_id", { count: "exact", head: true })
+      .eq("base_sky_id", skyId),
+  ]);
+  const row = base.data as { name: string; display_name_override: string | null } | null;
+  return {
+    baseName: row ? (row.display_name_override ?? row.name) : null,
+    variantCount: variants.count ?? 0,
+  };
+}
+
+/**
  * Wer zeigt noch auf diesen Entwurf? (CAT-05)
  *
  * Ruft `admin_merge_references()` aus `0154`. Die Funktion leitet die
