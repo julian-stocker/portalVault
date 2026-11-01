@@ -12,8 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-01 (ADR-0167, Staging ist die einzige redaktionelle
-Katalogquelle; Production-Schreibsperre als Folgeaufgabe CAT-13).
+Letzte Aktualisierung: 2026-11-01 (ADR-0168, bestehende Familien nur nach Bestätigung
+wiederverwenden; davor ADR-0167, Staging als einzige redaktionelle Katalogquelle).
 
 ---
 
@@ -17051,6 +17051,42 @@ Abbruch ist kostenlos**, weil nichts committet ist.
   ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
   und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.
 
+
+---
+
+## ADR-0168 · Eine bestehende Familie wird beim Setzen der Basisfigur nur nach Bestätigung wiederverwendet
+
+**Status:** ANGENOMMEN · 2026-11-01 (Code, keine Migration)
+**Betrifft:** ADR-0034 (drei Identitäten), ADR-0156/0157 (Basisfigur, Familie), `0158`, `0159`, `0161`
+
+### Anlass
+
+Auf Staging scheiterte `setVariantBase("SKY-0166", "SKY-0164", true)` (Giants: Hex Light Core → Hex)
+an `0158: die Familie "Hex" gibt es schon (id 139)`. `admin_set_variant_base` (`0159`) legt mit
+`p_create_family` stur eine Familie mit dem Namen der Basisfigur an und sucht keine bestehende.
+Familien gelten aber serienübergreifend: „Hex“ entstand kurz vorher für Spyro's Adventure.
+Dasselbe bei Legendary Slam Bam (SKY-0174 → SKY-0173, Familie „Slam Bam“ 135).
+
+### Entscheidung
+
+* Haben weder Variante noch Basisfigur eine Familie und gibt es eine Familie mit **gleichem**
+  Namen wie die Basisfigur (ohne Groß-/Kleinschreibung, nie per Ähnlichkeit), wird **nichts
+  angelegt**. Der Editor zeigt die Familie mit ihren Mitgliedern; erst die ausdrückliche
+  Bestätigung ordnet sie Basisfigur und Variante zu (`admin_set_character` an der Basisfigur,
+  dann `admin_set_variant_base`, das sie überträgt und alle Riegel prüft).
+* Widersprechen sich die Familien von Variante und Basisfigur (oder hat nur die Variante eine),
+  bleibt `0159`s Abbruch bestehen; der Editor bietet ausdrücklich „Familie der Basisfigur
+  übernehmen“ an.
+* `0161`s automatische Wiederverwendung mit Wortgrenzen-Veto wird **nicht** übernommen: gegen den
+  echten Bestand gemessen weist das Veto 60 Mitglieder ab (Rohnamen wie „Hex (Pearl)“,
+  „Elite Slam Bam - ohne OVP“), träfe also genau die Fälle, die es lösen soll.
+
+### Konsequenzen
+
+Keine Migration, keine neue Datenbankfunktion, keine Änderung am Publish. Eine Familie, die aus
+dem Namen einer Basisfigur neu angelegt wird, kann weiterhin ein Pseudocharakter sein
+(„Prism Break Light Core“, „Twin Blade Chop Chop“) — der Editor zeigt den Namen jetzt **vor**
+dem Speichern; die Bereinigung bestehender Fälle ist eine redaktionelle Entscheidung.
 
 ---
 

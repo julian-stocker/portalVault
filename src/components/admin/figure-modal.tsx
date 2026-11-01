@@ -78,6 +78,8 @@ import {
   type AdminResult,
 } from "@/lib/admin/actions";
 import { stageFigureImage } from "@/lib/admin/image-actions";
+import { previewVariantFamily } from "@/lib/admin/base-figure-search";
+import type { VariantFamilyOutcome } from "@/lib/admin/variant-family-rule";
 import { MAX_IMAGE_BYTES } from "@/lib/admin/image-file";
 import type { CatalogChange } from "@/lib/admin/queries";
 import type { CatalogFigure } from "@/lib/catalog/types";
@@ -123,7 +125,10 @@ const WRITERS: Record<DraftField, (skyId: string, draft: AdminFigureDraft) => Pr
    * anderswo ändert es sich nie und steht deshalb nie im Speicherplan.
    */
   baseSkyId: (skyId, draft) =>
-    setVariantBase(skyId, draft.baseSkyId, draft.createFamilyWithBase),
+    setVariantBase(skyId, draft.baseSkyId,
+                   draft.adoptBaseFamily ? "adopt-base"
+                   : draft.reuseFamilyId !== null ? { reuseFamilyId: draft.reuseFamilyId }
+                   : draft.createFamilyWithBase),
   cardType: (skyId, draft) => setCardType(skyId, draft.cardType),
   /*
    * EIN EIGENER SCHREIBWEG, wie jedes andere Feld. `setFigureTypes` ersetzt
@@ -181,6 +186,66 @@ function More({ title, summary, children }: {
   );
 }
 
+/**
+ * What happens to the family with the new base (CAT-15) — and, where the two
+ * disagree, the explicit choice to take the base's. Nothing is decided here;
+ * the server reads again and the RPCs check again.
+ */
+function FamilyPlanLine({ plan, adopt, reuse, disabled, onAdopt, onReuse }: {
+  plan: VariantFamilyOutcome;
+  adopt: boolean;
+  reuse: number | null;
+  disabled: boolean;
+  onAdopt: (value: boolean) => void;
+  onReuse: (id: number | null) => void;
+}) {
+  const t = de.admin;
+  const line =
+    plan.kind === "carry" ? t.familyPlanCarry(plan.family.name)
+    : plan.kind === "same" ? t.familyPlanSame(plan.family.name)
+    : plan.kind === "existing"
+      ? t.familyPlanExisting(plan.family.name,
+          plan.members.slice(0, 4).map((m) => `${m.skyId} ${m.name}`).join(", ")
+          + (plan.members.length > 4 ? " …" : ""))
+    : plan.kind === "create" ? t.familyPlanCreate(plan.name)
+    : plan.kind === "none" ? t.familyPlanNone
+    : plan.kind === "variant-only" ? t.familyPlanVariantOnly(plan.variant.name)
+    : t.familyPlanConflict(plan.variant.name, plan.base.name);
+  const warn = plan.kind === "conflict";
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      <p role={warn ? "alert" : undefined}
+         className={`text-[11px] ${warn ? "text-danger" : "text-muted"}`}>
+        {line}
+      </p>
+      {plan.kind === "conflict" || plan.kind === "variant-only" ? (
+        <label className="flex min-h-8 items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={adopt}
+            disabled={disabled}
+            onChange={(event) => onAdopt(event.target.checked)}
+            className="size-4"
+          />
+          {plan.kind === "conflict" ? t.familyAdoptBase(plan.base.name) : t.familyAdoptNone}
+        </label>
+      ) : null}
+      {plan.kind === "existing" ? (
+        <label className="flex min-h-8 items-center gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={reuse === plan.family.id}
+            disabled={disabled}
+            onChange={(event) => onReuse(event.target.checked ? plan.family.id : null)}
+            className="size-4"
+          />
+          {t.familyReuseConfirm(plan.family.name)}
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminFigureModal({
   figure,
   onClose,
@@ -212,6 +277,8 @@ export function AdminFigureModal({
   const [editorialSource, setEditorialSource] = useState(false);
   const [variantCount, setVariantCount] = useState(0);
   const [baseName, setBaseName] = useState<string | null>(null);
+  /* What the family will be once the new base is saved (CAT-15). */
+  const [familyPlan, setFamilyPlan] = useState<VariantFamilyOutcome | null>(null);
 
   const skyId = figure?.skyId ?? null;
 
@@ -288,6 +355,22 @@ export function AdminFigureModal({
     () => (initial && draft ? changedFields(initial, draft) : []),
     [initial, draft],
   );
+
+  /*
+   * THE FAMILY, SHOWN BEFORE IT IS WRITTEN (CAT-15). Only for a base that
+   * differs from the stored one; the same rule `setVariantBase` writes by.
+   */
+  const pendingBase = draft !== null && initial !== null && draft.baseSkyId !== initial.baseSkyId
+    ? draft.baseSkyId : null;
+  const familyWanted = draft?.createFamilyWithBase ?? false;
+  useEffect(() => {
+    if (skyId === null || pendingBase === null) return;
+    let cancelled = false;
+    void previewVariantFamily(skyId, pendingBase, familyWanted).then((outcome) => {
+      if (!cancelled) setFamilyPlan(outcome);
+    });
+    return () => { cancelled = true; };
+  }, [skyId, pendingBase, familyWanted]);
   const dirty = plan.length > 0;
 
   const requestClose = useCallback(() => {
@@ -597,6 +680,16 @@ export function AdminFigureModal({
                   <span className="text-[11px] text-muted">{de.admin.baseEditOnStaging}</span>
                 )}
               </div>
+              {pendingBase !== null && familyPlan !== null ? (
+                <FamilyPlanLine
+                  plan={familyPlan}
+                  adopt={draft.adoptBaseFamily}
+                  reuse={draft.reuseFamilyId}
+                  disabled={saving}
+                  onAdopt={(value) => set("adoptBaseFamily", value)}
+                  onReuse={(id) => set("reuseFamilyId", id)}
+                />
+              ) : null}
               {variantCount > 0 ? (
                 <p className="mt-0.5 text-[11px] text-muted">{de.admin.baseVariantsSoFar(variantCount)}</p>
               ) : null}
@@ -607,10 +700,13 @@ export function AdminFigureModal({
                   canRemove={draft.baseSkyId !== null}
                   onCancel={() => setPickingBase(false)}
                   onPick={(target, createFamily) => {
+                    setFamilyPlan(null);
                     setDraft((current) => current === null ? current : {
                       ...current,
                       baseSkyId: target?.skyId ?? null,
                       createFamilyWithBase: target !== null && createFamily,
+                      adoptBaseFamily: false,
+                      reuseFamilyId: null,
                     });
                     setBaseName(target?.name ?? null);
                     setPickingBase(false);

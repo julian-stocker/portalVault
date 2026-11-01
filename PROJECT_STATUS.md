@@ -6521,6 +6521,14 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-11-01, CAT-15: Familien beim Setzen der Basisfigur (ADR-0168) — Code und Tests,
+keine Migration, lokal committet.** Ursache der Giants-Fehler: `0159` legte mit
+`p_create_family` stur eine Familie mit dem Namen der Basisfigur an, auch wenn es sie
+serienübergreifend schon gab („Hex“, „Slam Bam“). Jetzt: gleichnamige bestehende Familie
+wird nur nach Bestätigung im Editor zugeordnet, nie doppelt angelegt; ein
+Familienwiderspruch lässt sich ausdrücklich mit „Familie der Basisfigur übernehmen“
+korrigieren. Der Editor zeigt die Familienfolge vor dem Speichern.
+
 **2026-11-01, CAT-14: kompakter Figuren-Editor — gebaut und geprüft, nicht
 committet, keine Datenbankänderung.** Der Bearbeiten-Dialog im Katalog
 (`figure-modal.tsx`) ist ein Eigenschaften-Editor:

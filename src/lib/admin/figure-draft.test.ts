@@ -91,6 +91,8 @@ describe("the five fields an administrator owns", () => {
          Dialog eine Basisfigur wählt. */
       baseSkyId: null,
       createFamilyWithBase: false,
+      adoptBaseFamily: false,
+      reuseFamilyId: null,
     });
   });
 

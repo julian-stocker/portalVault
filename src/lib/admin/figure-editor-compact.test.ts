@@ -59,8 +59,8 @@ describe("Variante von", () => {
   });
 
   it("writes through the existing action, with the family rule from the detail page", () => {
-    expect(MODAL).toContain(
-      "setVariantBase(skyId, draft.baseSkyId, draft.createFamilyWithBase)");
+    expect(MODAL).toContain("setVariantBase(skyId, draft.baseSkyId,");
+    expect(MODAL).toContain('draft.adoptBaseFamily ? "adopt-base"');
     expect(PICKER).toContain("searchBaseFigures(skyId, query)");
     expect(PICKER).toContain('target.characterId === null && result?.art === "character"');
     // The picker itself writes nothing.

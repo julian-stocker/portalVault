@@ -63,6 +63,8 @@ import { falte } from "@/lib/admin/merge-candidates";
 import { baseRank, basePrefix, baseWordScore, sortByBaseRank }
   from "@/lib/admin/base-figure-rank";
 import type { ArticleClass } from "@/lib/catalog/article-class";
+import { loadVariantFamily } from "@/lib/admin/variant-family";
+import type { VariantFamilyOutcome } from "@/lib/admin/variant-family-rule";
 
 export type { Basiszeile };
 
@@ -162,4 +164,22 @@ export async function searchBaseFigures(
     empfehlung,
     treffer: sortiert.slice(0, 8),
   };
+}
+
+/**
+ * Was mit der Familie passiert, wenn `skyId` auf `baseSkyId` gesetzt wird
+ * (CAT-15) — für die Anzeige im Editor, VOR dem Speichern. Rein lesend;
+ * dieselbe Regel, nach der `setVariantBase` danach schreibt.
+ *
+ * `null` heißt „nicht berechtigt" oder „Figur nicht gefunden".
+ */
+export async function previewVariantFamily(
+  skyId: string,
+  baseSkyId: string,
+  familyWanted: boolean,
+): Promise<VariantFamilyOutcome | null> {
+  if (!/^SKY-[0-9]{4}$/.test(skyId) || !/^SKY-[0-9]{4}$/.test(baseSkyId)) return null;
+  if (!(await isPlatformAdmin())) return null;
+  const plan = await loadVariantFamily(skyId, baseSkyId, familyWanted);
+  return plan?.outcome ?? null;
 }

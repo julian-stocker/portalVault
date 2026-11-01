@@ -40,6 +40,8 @@ import { createClient } from "@/lib/supabase/server";
 import { isCatalogStatus, type CatalogStatus } from "@/lib/catalog/catalog-status";
 import { asCatalogTypes, isCatalogType } from "@/lib/catalog/catalog-type";
 import { istUnbekannteFunktion } from "@/lib/admin/queries";
+import { loadVariantFamily } from "@/lib/admin/variant-family";
+import type { VariantFamilyMode } from "@/lib/admin/variant-family-rule";
 import { verweisListe } from "@/lib/admin/delete-errors";
 import { de } from "@/lib/i18n/de";
 
@@ -386,27 +388,76 @@ export async function publishDraftAsVariant(
  *
  * DIE FAMILIE KOMMT MIT, ABER NIE GEGEN EINE VORHANDENE. `0159` übernimmt
  * sie aus der Basisfigur, wenn die Variante keine hat; widersprechen sich
- * beide, bricht es ab und nennt beide. `erzeugeFamilie` legt nur dann eine
- * neue an, wenn WEDER Variante NOCH Basisfigur eine haben — und nur, wenn
- * der Bediener es ausdrücklich bestätigt hat.
+ * beide, bricht es ab und nennt beide.
+ *
+ * `familie` (CAT-15, `variant-family-rule.ts`):
+ *
+ *   * `false`             — nur die Basisfigur; die Familie regelt `0159`.
+ *   * `true`              — haben WEDER Variante NOCH Basisfigur eine Familie,
+ *                           legt `0159` eine an — aber NUR, wenn es keine
+ *                           gleichnamige gibt. Gibt es sie, wird nichts
+ *                           angelegt und gesagt, dass sie zu bestätigen ist.
+ *                           Vorher legte `0159` stur an und scheiterte an jeder
+ *                           Familie, die es serienübergreifend schon gab.
+ *   * `{ reuseFamilyId }` — die bestätigte, gleichnamige bestehende Familie
+ *                           wird Basisfigur und Variante zugeordnet.
+ *   * `"adopt-base"`      — die ausdrückliche Korrektur einer falschen
+ *                           Familie: die Variante bekommt die Familie der
+ *                           Basisfigur (auch „keine"), dann die Basisfigur.
+ *
+ * NUR BESTEHENDE SCHREIBWEGE. Wiederverwenden heißt `admin_set_character`
+ * an der Basisfigur, dann `admin_set_variant_base` — das die Familie in
+ * derselben Transaktion auf die Variante überträgt und ALLE Riegel prüft
+ * (Serie, Kette, Selbstbezug, Varianten an der Figur, Familienkonflikt).
+ * Scheitert der zweite Schritt, steht die Basisfigur bereits in ihrer
+ * gleichnamigen Familie; das ist die Familie, in die sie gehört, und ein
+ * zweiter Versuch setzt dort fort.
  */
 export async function setVariantBase(
   skyId: string,
   baseSkyId: string | null,
-  erzeugeFamilie = false,
+  familie: VariantFamilyMode = false,
 ): Promise<AdminResult> {
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
   if (baseSkyId !== null && !SKY_ID.test(baseSkyId)) {
     return { ok: false, message: de.admin.baseUnknown };
   }
   if (baseSkyId === skyId) return { ok: false, message: de.admin.baseSelf };
-  return call(
+
+  const paths = ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"];
+  const setBase = (create: boolean) => call(
     "admin_set_variant_base",
-    { p_sky_id: skyId, p_base_sky_id: baseSkyId, p_create_family: erzeugeFamilie },
-    ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
-    "platform",
-    baseFehler,
+    { p_sky_id: skyId, p_base_sky_id: baseSkyId, p_create_family: create },
+    paths, "platform", baseFehler,
   );
+  if (baseSkyId === null || familie === false) return setBase(false);
+  if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
+
+  const plan = await loadVariantFamily(skyId, baseSkyId, true);
+  if (plan === null) return { ok: false, message: de.admin.baseUnknown };
+  const { outcome } = plan;
+
+  if (familie === "adopt-base"
+      && (outcome.kind === "conflict" || outcome.kind === "variant-only")) {
+    const ziel = outcome.kind === "conflict" ? outcome.base.id : null;
+    const umgehaengt = await setFigureCharacter(skyId, ziel);
+    if (!umgehaengt.ok) return umgehaengt;
+    return setBase(false);
+  }
+  switch (outcome.kind) {
+    case "existing": {
+      /* Nur die bestätigte Familie, und nur genau die gleichnamige. */
+      const bestaetigt = typeof familie === "object" && familie.reuseFamilyId === outcome.family.id;
+      if (!bestaetigt) return { ok: false, message: de.admin.familyExistsConfirm(outcome.family.name) };
+      const basis = await setFigureCharacter(baseSkyId, outcome.family.id);
+      if (!basis.ok) return basis;
+      return setBase(false);
+    }
+    case "create":
+      return setBase(familie === true);
+    default:
+      return setBase(false);
+  }
 }
 
 /**
@@ -647,6 +698,10 @@ function baseFehler(error: { code?: string; message?: string }): string | null {
     return de.admin.baseHasVariants;
   }
   if (text.includes("Familie") && text.includes("klaeren")) return de.admin.baseFamilyConflict;
+  /* `0158` aus dem Anlegepfad: es gibt die Familie schon. Seit CAT-15 wird
+     sie wiederverwendet; kommt die Meldung trotzdem, hat jemand sie
+     zwischen Lesen und Schreiben angelegt — ein zweiter Versuch nimmt sie. */
+  if (text.includes("gibt es schon")) return de.admin.baseFamilyExists;
   if (text.includes("eigene Variante")) return de.admin.baseSelf;
   if (text.includes("braucht eine Basisfigur")) return de.admin.baseRequired;
   if (text.includes("ist kein Entwurf")) return de.admin.publishNotADraft;

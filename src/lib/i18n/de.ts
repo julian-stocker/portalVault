@@ -3391,7 +3391,28 @@ export const de = {
       + "eine eigenständige Figur.",
     baseFamilyConflict:
       "Figur und Basisfigur gehören zu verschiedenen Familien. Das wird nicht "
-      + "stillschweigend überschrieben — bitte erst klären, welche gilt.",
+      + "stillschweigend überschrieben — „Familie der Basisfigur übernehmen“ "
+      + "wählen, wenn die der Basisfigur gilt.",
+    baseFamilyExists:
+      "Die Familie gibt es inzwischen schon. Bitte noch einmal speichern — "
+      + "sie wird dann wiederverwendet.",
+    /* CAT-15: was mit der Familie passiert, bevor gespeichert wird. */
+    familyPlanCarry: (name: string) => `Familie: ${name} (von der Basisfigur)`,
+    familyPlanSame: (name: string) => `Familie: ${name}`,
+    familyPlanExisting: (name: string, members: string) =>
+      `Es gibt die Familie „${name}“ schon${members === "" ? "" : ` (${members})`}.`,
+    familyReuseConfirm: (name: string) => `Familie „${name}“ Basisfigur und Variante zuordnen`,
+    familyExistsConfirm: (name: string) =>
+      `Es gibt die Familie „${name}“ schon. Im Editor bestätigen, dass sie gilt — `
+      + "eine zweite wird nicht angelegt.",
+    familyPlanCreate: (name: string) => `Familie „${name}“ wird neu angelegt`,
+    familyPlanNone: "Ohne Familie",
+    familyPlanVariantOnly: (name: string) =>
+      `Familie bleibt ${name} — die Basisfigur hat keine.`,
+    familyPlanConflict: (variant: string, base: string) =>
+      `Familien widersprechen sich: Figur ${variant}, Basisfigur ${base}.`,
+    familyAdoptBase: (name: string) => `Familie der Basisfigur übernehmen (${name})`,
+    familyAdoptNone: "Familie entfernen, wie bei der Basisfigur",
     publishNotADraft:
       "Nur Entwürfe werden veröffentlicht. Für eine bestehende Figur die "
       + "Familienzuordnung benutzen.",

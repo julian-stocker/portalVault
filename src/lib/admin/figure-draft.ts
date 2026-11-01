@@ -82,6 +82,19 @@ export type AdminFigureDraft = {
    * geschrieben.
    */
   createFamilyWithBase: boolean;
+  /**
+   * EBENFALLS EIN BEGLEITWERT (CAT-15): die ausdrückliche Korrektur einer
+   * falschen Familie — die Variante übernimmt mit der neuen Basisfigur deren
+   * Familie (auch „keine"). Nur der Bediener setzt ihn, im Editor, wenn die
+   * Vorschau einen Widerspruch zeigt.
+   */
+  adoptBaseFamily: boolean;
+  /**
+   * EBENFALLS EIN BEGLEITWERT (CAT-15): die vom Bediener bestätigte,
+   * gleichnamige bestehende Familie, die Basisfigur und Variante bekommen
+   * sollen. `null`, solange nichts bestätigt ist.
+   */
+  reuseFamilyId: number | null;
 };
 
 /** The fields, in the order they are saved. */
@@ -127,6 +140,8 @@ export function draftFrom(figure: {
     adminNote: adminNote ?? "",
     baseSkyId: figure.baseSkyId ?? null,
     createFamilyWithBase: false,
+    adoptBaseFamily: false,
+    reuseFamilyId: null,
   };
 }
 
