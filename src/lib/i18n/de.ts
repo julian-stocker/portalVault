@@ -389,6 +389,9 @@ export const de = {
     seriesExtraLabel: "Sonderkategorien",
     seriesExtraNone: "— keine —",
     reference: "Sammlerreferenz",
+    /* CAT-11 — die Variantenbeziehung auf der Detailseite. */
+    variantOf: (name: string) => `Variante von ${name}`,
+    variantsOf: (name: string) => `Varianten von ${name}`,
   },
 
   character: {
@@ -3452,11 +3455,17 @@ export const de = {
     deleteFigure: "Löschen",
     deleteFigureFor: (name: string, skyId: string) =>
       `${name} ${skyId} dauerhaft aus dem Katalog löschen`,
-    deleteConfirmTitle: "Dauerhaft aus dem Katalog löschen?",
+    /* CAT-11: kurz, damit der Dialog auch in einem kleinen Fenster in den
+       Bildschirm passt. Die Liste der Prüfungen steht aufklappbar darunter. */
+    deleteConfirmTitle: "Figur dauerhaft löschen?",
     deleteConfirmBody:
-      "Die Figur wird dauerhaft aus dem Katalog entfernt. Die SKY-ID wird "
-      + "nicht wiederverwendet, und der Vorgang lässt sich nicht rückgängig "
-      + "machen.",
+      "Diese Aktion kann nicht rückgängig gemacht werden. Die SKY-ID bleibt "
+      + "dauerhaft gesperrt.",
+    deleteConfirmBlocked:
+      "Diese Figur kann nicht gelöscht werden, solange sie an anderer Stelle "
+      + "verwendet wird.",
+    deleteConfirmChecksTitle: "Welche Referenzen werden geprüft?",
+    deleting: "Wird gelöscht …",
     deleteConfirmChecks:
       "SkyIsles prüft vorher, dass nichts auf die Figur zeigt: Sammlungen, "
       + "Favoriten, Benachrichtigungen, Lager, Angebote, Warenkörbe, "
@@ -3540,7 +3549,7 @@ export const de = {
        ------------------------------------------------------------------ */
     /** Der Knopf in der Katalogleiste, nur für Admins sichtbar. */
     addFigure: "Hinzufügen",
-    addFigureTitle: "Figur hinzufügen",
+    addFigureTitle: "Neue Figur",
     /** Das X im Kopf des Hinzufügen-Dialogs. */
     closeAdd: "Hinzufügen schließen",
 
@@ -3599,6 +3608,39 @@ export const de = {
     createSeriesRequired: "Bitte eine Serie wählen.",
     createCategoryRequired: "Bitte eine Kategorie wählen, die zur Serie gehört.",
     createFailed: "Die Figur konnte nicht angelegt werden.",
+    /* CAT-11 — jede Abweisung sagt, was zu tun ist, und dass nichts
+       angelegt wurde. Vorher stand hier für jeden Fehler derselbe Satz. */
+    createFailedCode: (code: string) =>
+      `Die Figur konnte nicht angelegt werden (Fehlercode ${code}). Es wurde nichts angelegt.`,
+    createIdExhausted:
+      "Der SKY-ID-Bereich dieser Umgebung ist erschöpft. Es wurde nichts angelegt.",
+    createIdTaken:
+      "Die nächste SKY-ID ist bereits vergeben. Es wurde nichts angelegt — "
+      + "die SKY-ID-Vergabe muss geprüft werden, bevor es weitergeht.",
+    createSlugTaken: "Das URL-Kürzel ist bereits vergeben. Es wurde nichts angelegt.",
+
+    /* „Variante von" im Dialog „Neue Figur" (CAT-11). */
+    variantOf: "Variante von",
+    variantNone: "Keine – eigenständige Figur",
+    variantSearch: "Basisfigur suchen …",
+    variantNoMatch: "Keine passende Basisfigur. Varianten und Entwürfe stehen nicht zur Wahl.",
+    variantChange: "Ändern",
+    variantType: "Varianten-Typ",
+    variantTypeChoose: "Bitte wählen",
+    variantTypeRequired: "Bitte einen Varianten-Typ wählen.",
+    variantOfName: (name: string) => `Variante von ${name}`,
+    standaloneFigure: "Eigenständige Figur",
+    moreOptions: "Weitere Optionen",
+    previewLabel: "Vorschau",
+    variantCreateNotEnabled:
+      "Varianten lassen sich noch nicht direkt anlegen — Migration 0166 ist "
+      + "nicht angewendet. Es wurde nichts angelegt.",
+    variantBaseIsVariant:
+      "Die gewählte Basisfigur ist selbst eine Variante. Bitte die ursprüngliche Figur wählen.",
+    variantBaseIsDraft:
+      "Die gewählte Basisfigur ist noch ein Entwurf. Erst die Basisfigur veröffentlichen "
+      + "oder ausblenden.",
+    variantSeriesMismatch: "Eine Variante gehört zur Serie ihrer Basisfigur.",
 
     /**
      * Das X im Kopf des Bearbeiten-Dialogs (V3.8a). Eigener Text statt

@@ -300,7 +300,11 @@ describe("the action sends no identity and decides nothing", () => {
   const action = code(ACTION);
 
   it("calls the one function and passes no SKY-ID or slug", () => {
-    expect(action).toContain('supabase.rpc("admin_create_figure"');
+    /* One call site since CAT-11: the standalone figure goes to
+       `admin_create_figure`, a variant to `admin_create_variant_figure`
+       (0166) — chosen before the call, never both. */
+    expect(action).toContain('["admin_create_figure", {');
+    expect(action).toContain("await supabase.rpc(fn, args)");
     expect(action).not.toContain("p_sky_id");
     expect(action).not.toContain("p_slug");
   });

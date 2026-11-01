@@ -128,7 +128,10 @@ describe("the dialog is a dialog", () => {
   const modal = code(MODAL);
 
   it("is announced as a modal dialog with a name", () => {
-    expect(modal).toContain('role="dialog"');
+    /* `dialog` by default; `alertdialog` only when a caller asks for it
+       (the permanent delete, CAT-11). */
+    expect(modal).toContain('role = "dialog"');
+    expect(modal).toContain("role={role}");
     expect(modal).toContain('aria-modal="true"');
     expect(modal).toContain("aria-labelledby={labelledBy}");
     // The name comes from the heading that is actually on screen.

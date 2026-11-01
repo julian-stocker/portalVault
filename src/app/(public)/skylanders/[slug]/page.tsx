@@ -6,6 +6,8 @@ import { CharacterPanel, ElementChip } from "@/components/catalog/character-pane
 import { CollectButton } from "@/components/catalog/collect-button";
 import { OfferPanel } from "@/components/shop/offer-panel";
 import { FigureCard } from "@/components/catalog/figure-card";
+import { TypeBadge } from "@/components/catalog/edition-banner";
+import { bannerType } from "@/lib/catalog/catalog-type";
 import { catalogDisplayMarketPrice } from "@/lib/catalog/market-boost";
 import { fetchCatalogMarketBoost } from "@/lib/catalog/market-boost-server";
 import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
@@ -121,6 +123,21 @@ export default async function FigurePage({ params }: Params) {
               {figure.displayName}
             </h1>
 
+            {/* The type, on the same plate as the catalogue's banner, and the
+                base it is a variant of — from `base_sky_id`, never from the
+                name (CAT-11). Nothing at all on a standard figure. */}
+            {bannerType(figure) !== null || detail.base !== null ? (
+              <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
+                <TypeBadge type={bannerType(figure)} />
+                {detail.base !== null ? (
+                  <Link href={`/skylanders/${detail.base.slug}`} prefetch={false}
+                        className="underline underline-offset-2 hover:text-foreground">
+                    {de.catalog.variantOf(detail.base.displayName)}
+                  </Link>
+                ) : null}
+              </p>
+            ) : null}
+
             <p className="text-sm text-muted">
               {figure.seriesLabel}
               {figure.categoryName ? ` · ${figure.categoryName}` : ""}
@@ -199,6 +216,18 @@ export default async function FigurePage({ params }: Params) {
             firstReleaseLabel={firstRelease?.label ?? null}
           />
         </div>
+      ) : null}
+
+      {detail.variants.length > 0 ? (
+        <section className="mt-8 md:mt-10">
+          <h2 className="text-sm font-medium">{de.catalog.variantsOf(figure.displayName)}</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {detail.variants.map((variant) => (
+              <FigureCard key={variant.skyId} figure={variant}
+                          marketBoostPercent={marketBoost} />
+            ))}
+          </div>
+        </section>
       ) : null}
 
       {detail.related.length > 0 ? (

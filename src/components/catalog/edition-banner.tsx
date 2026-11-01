@@ -161,3 +161,29 @@ export function EditionBanner({ type }: { type: CatalogType | null }) {
     </span>
   );
 }
+
+/**
+ * The same type as an INLINE badge — for places that have no picture column
+ * to hang a strip under: the figure detail page and the preview in the
+ * „Neue Figur" dialog (CAT-11).
+ *
+ * Same two plates, same label, same decision (`bannerType()` upstream), so
+ * a Chase variant reads „CHASE" on the same plate everywhere. Unlike the
+ * strip it is NOT hidden from screen readers: on a detail page it is the one
+ * place the edition is said at all.
+ */
+export function TypeBadge({ type }: { type: CatalogType | null }) {
+  if (type === null) return null;
+  return (
+    <span
+      className={
+        "inline-flex items-center rounded-sky-sm px-1.5 font-mono text-[10px] leading-[18px] "
+        + "font-medium tracking-[0.08em] uppercase "
+        + "shadow-[inset_0_1px_0_rgb(255_255_255/0.22)] "
+        + (isHeadlineType(type) ? BRIGHT : QUIET)
+      }
+    >
+      {TYPE_LABELS[type]}
+    </span>
+  );
+}

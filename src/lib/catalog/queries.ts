@@ -25,7 +25,7 @@ import {
   type CatalogStatus,
 } from "@/lib/catalog/catalog-status";
 import { isCatalogGroup, type CatalogGroup } from "@/lib/catalog/group";
-import { buildSearchIndex } from "@/lib/catalog/search";
+import { buildSearchIndex, normalizeForSearch } from "@/lib/catalog/search";
 import { sortFigures } from "@/lib/catalog/sort";
 import {
   displayNameFor,
@@ -361,7 +361,8 @@ export function withCharacterFamily(
  * sagt „Variante GENAU dieser Figur". Nur die letzte hat ein Mensch je
  * Zeile entschieden.
  *
- * SIE SCHREIBT EIN FELD. Das ist dieselbe Sicherheitszusage wie bei
+ * SIE SCHREIBT ZWEI FELDER: `sortBaseName` und, seit CAT-11, den Suchindex
+ * (unten). Sonst gilt dieselbe Sicherheitszusage wie bei
  * `withCharacterFamily()`: `sortVariantLabel` ist das Siegel, das
  * `figure-card.tsx` zeichnet, und diese Funktion fasst es nicht an. Eine
  * Figur, deren Familie sich verbessert, behält genau das Abzeichen, das sie
@@ -385,8 +386,21 @@ export function withBaseFigure(
   return figures.map((figure) => {
     if (figure.baseSkyId === null) return figure;
     const basis = anzeige.get(figure.baseSkyId);
-    if (basis === undefined || basis === figure.sortBaseName) return figure;
-    return { ...figure, sortBaseName: basis };
+    if (basis === undefined) return figure;
+    /*
+     * UND DIE SUCHE KENNT DEN NAMEN DER BASISFIGUR (CAT-11). Wer „Boomer"
+     * sucht, findet seine Varianten — auch eine, deren eigener Name das Wort
+     * nicht enthaelt. Nur angehaengt, nie ersetzt: der eigene Name bleibt der
+     * erste Treffer. Die Quelle ist die ausdrueckliche Zuordnung, kein
+     * Namensvergleich (ADR-0034).
+     */
+    const form = normalizeForSearch(basis);
+    const vorhanden = figure.searchIndex ?? "";
+    const searchIndex = new Set(vorhanden.split(" | ")).has(form)
+      ? vorhanden
+      : vorhanden === "" ? form : `${vorhanden} | ${form}`;
+    if (basis === figure.sortBaseName && searchIndex === vorhanden) return figure;
+    return { ...figure, sortBaseName: basis, searchIndex };
   });
 }
 
@@ -681,7 +695,47 @@ export type FigureDetail = {
   character: Character | null;
   /** Other collectibles of the same character. Never contains `figure`. */
   related: CatalogFigure[];
+  /**
+   * The base figure this one is a variant of (`base_sky_id`, CAT-07), when
+   * the reader may see it. `null` for a base figure, a standalone figure, or
+   * a base that is not public.
+   */
+  base: CatalogFigure | null;
+  /** The visible variants OF this figure, in catalogue order (CAT-11). */
+  variants: CatalogFigure[];
 };
+
+/**
+ * The variant relation around one figure: its base, and the variants that
+ * point at it. Both from the explicit `base_sky_id`, never from a name.
+ *
+ * Row-level security decides what comes back, exactly as for the catalogue:
+ * a hidden base or a draft variant is simply absent for a visitor.
+ */
+async function fetchVariantContext(
+  figure: CatalogFigure,
+): Promise<{ base: CatalogFigure | null; variants: CatalogFigure[] }> {
+  const supabase = await createClient();
+  const [lookups, baseResult, variantResult] = await Promise.all([
+    loadLookups(),
+    figure.baseSkyId === null
+      ? Promise.resolve({ data: null, error: null })
+      : supabase.from("skylanders").select(FIGURE_COLUMNS).eq("sky_id", figure.baseSkyId).maybeSingle(),
+    supabase.from("skylanders").select(FIGURE_COLUMNS).eq("base_sky_id", figure.skyId),
+  ]);
+  if (baseResult.error) throw new Error(`base figure: ${baseResult.error.message}`);
+  if (variantResult.error) throw new Error(`variants: ${variantResult.error.message}`);
+
+  const nameIndex = await fetchNameIndex();
+  const base = baseResult.data
+    ? withVariants([toFigure(baseResult.data as FigureRow, lookups)], nameIndex)[0]
+    : null;
+  const variants = sortFigures(withVariants(
+    collectibleOnly(((variantResult.data ?? []) as FigureRow[]).map((row) => toFigure(row, lookups))),
+    nameIndex,
+  ));
+  return { base, variants };
+}
 
 /**
  * One figure with its character context.
@@ -692,7 +746,10 @@ export type FigureDetail = {
 export async function fetchFigureDetail(slug: string): Promise<FigureDetail | null> {
   const figure = await fetchFigureBySlug(slug);
   if (!figure) return null;
-  if (figure.characterId === null) return { figure, character: null, related: [] };
+  const { base, variants } = await fetchVariantContext(figure);
+  if (figure.characterId === null) {
+    return { figure, character: null, related: [], base, variants };
+  }
 
   const supabase = await createClient();
   const [lookups, characterResult, siblingResult] = await Promise.all([
@@ -729,10 +786,15 @@ export async function fetchFigureDetail(slug: string): Promise<FigureDetail | nu
     withCharacterElement(withCharacterFamily(withVariants(siblings, nameIndex), names), elements),
   );
 
+  /* A variant listed under „Varianten" is not listed a second time under
+     „Weitere Versionen". */
+  const shown = new Set([...variants.map((v) => v.skyId), base?.skyId]);
   return {
     figure: withCharacterElement([figure], elements)[0],
     character,
-    related,
+    related: related.filter((sibling) => !shown.has(sibling.skyId)),
+    base,
+    variants,
   };
 }
 

@@ -84,8 +84,12 @@ describe("a new figure starts hidden and plain", () => {
      * it is not stored on it, and there is still no `characterId` field —
      * which is what keeps a curated link from becoming client input.
      */
+    /* `baseSkyId` (CAT-11) is the same kind of reference as the template:
+       a figure that already exists. It is stored on the NEW row as
+       `base_sky_id`, but it is never the new row's own identity. */
     expect(Object.keys(EMPTY_DRAFT).sort()).toEqual([
       "adminNote",
+      "baseSkyId",
       "cardType",
       "catalogVisible",
       "categoryId",
@@ -93,6 +97,7 @@ describe("a new figure starts hidden and plain", () => {
       "name",
       "seriesCode",
       "templateSkyId",
+      "variantType",
     ]);
     expect(Object.keys(EMPTY_DRAFT)).not.toContain("characterId");
     expect(EMPTY_DRAFT.templateSkyId).toBeNull();

@@ -26,8 +26,9 @@
  */
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 
+import { Modal } from "@/components/ui/modal";
 import { deleteFigure, setCatalogStatus } from "@/lib/admin/actions";
 import { de } from "@/lib/i18n/de";
 
@@ -135,6 +136,8 @@ export function AdminTileActions({
   }
 
   function loeschen() {
+    /* Ein zweiter Klick waehrend des ersten loescht nicht zweimal. */
+    if (pending) return;
     setFehler(null);
     start(async () => {
       const ergebnis = await deleteFigure(skyId);
@@ -232,8 +235,9 @@ export function AdminTileActions({
         </span>
       </button>
 
-      {/* Die Meldung des Servers, wo sie gelesen wird: an der Kachel. */}
-      {fehler ? (
+      {/* Die Meldung des Servers, wo sie gelesen wird: an der Kachel — oder,
+          solange die Löschfrage offen ist, IN ihr (unten). */}
+      {fehler && !frage ? (
         <span role="alert"
               className="absolute top-11 right-0 z-10 w-56 rounded-sky-md bg-surface
                          p-2 text-[11px] leading-snug text-danger shadow-card
@@ -248,7 +252,8 @@ export function AdminTileActions({
           skyId={skyId}
           status={status}
           pending={pending}
-          onCancel={() => setFrage(false)}
+          fehler={fehler}
+          onCancel={() => { if (!pending) { setFrage(false); setFehler(null); } }}
           onConfirm={loeschen}
         />
       ) : null}
@@ -260,59 +265,88 @@ export function AdminTileActions({
  * Die Bestätigung — Name, SKY-ID, und was dauerhaft heisst.
  *
  * WARUM SIE EIGEN STEHT UND NICHT IM KNOPF: sie ist ein Dialog, und ein
- * Dialog in einem 44-px-Feld waere ein Dialog in einem Knopf. Dieselbe Form
- * wie die Verwerfen-Bestätigung in `row-actions.tsx`, damit zwei
- * Löschfragen nicht zwei verschiedene Dinge zu sein scheinen.
+ * Dialog in einem 44-px-Feld waere ein Dialog in einem Knopf.
+ *
+ * SEIT CAT-11 IM GEMEINSAMEN `Modal`. Vorher war sie ein eigenes
+ * `fixed inset-0` IN der Kachel — und die Kachel traegt `@container`
+ * (`container-type: inline-size`), was sie zum umschliessenden Block fuer
+ * `position: fixed` macht. Das Overlay lag damit in der Kachel statt ueber
+ * der Seite, ohne Hoehengrenze, und bei langem Namen und Pruefliste waren
+ * Abbrechen und Bestätigen nicht mehr zu erreichen. `Modal` portiert nach
+ * `document.body`, deckelt die Hoehe am Viewport (`dvh`) und haelt Kopf und
+ * Fuss fest; nur der Inhalt dazwischen scrollt. Escape, Fokusfalle und
+ * Rueckgabe des Fokus kommen von dort und sind dort getestet.
+ *
+ * DIE PRUEFLISTE IST AUFKLAPPBAR. Sie war der lange Absatz, der den Dialog
+ * hoch gemacht hat; geprueft wird sie trotzdem jedes Mal, in der Datenbank
+ * (`admin_delete_figure`, `0162`) — der Text sagt nur, was.
  */
 function DeleteDialog({
-  name, skyId, status, pending, onCancel, onConfirm,
+  name, skyId, status, pending, fehler, onCancel, onConfirm,
 }: {
   name: string; skyId: string; status: "public" | "hidden" | "draft";
-  pending: boolean; onCancel: () => void; onConfirm: () => void;
+  pending: boolean; fehler: string | null;
+  onCancel: () => void; onConfirm: () => void;
 }) {
+  const titel = useId();
+  /* Die drei Abweisungen, die „es zeigt noch etwas darauf" heissen. */
+  const blockiert = fehler !== null && (
+    fehler === de.admin.deleteBlockedBase
+    || fehler === de.admin.deleteBlockedOrder
+    || fehler.startsWith("Auf diese Figur zeigen noch Daten"));
+
   return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-label={de.admin.deleteConfirmTitle}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
-      onKeyDown={(e) => { if (e.key === "Escape") onCancel(); }}
-    >
-      <div className="w-full max-w-sm rounded-sky-md bg-surface p-4 text-left
-                      ring-1 ring-border-strong">
-        <h2 className="text-sm font-medium">{de.admin.deleteConfirmTitle}</h2>
-        <p className="mt-2 text-sm">
-          {name}{" "}
-          <span className="font-mono text-xs text-muted">{skyId}</span>
+    <Modal open onClose={onCancel} labelledBy={titel} size="md" role="alertdialog">
+      <header className="shrink-0 border-b border-border/60 px-4 py-3">
+        <h2 id={titel} className="text-base font-semibold">{de.admin.deleteConfirmTitle}</h2>
+        <p className="mt-1 flex min-w-0 items-baseline gap-2 text-sm">
+          <span className="min-w-0 break-words">{name}</span>
+          <span className="shrink-0 font-mono text-xs text-muted">{skyId}</span>
         </p>
-        <p className="mt-2 text-xs text-muted">{de.admin.deleteConfirmBody}</p>
-        {/* Was geprüft wird, bevor etwas geschieht — damit niemand rät. */}
-        <p className="mt-2 text-[11px] text-muted">{de.admin.deleteConfirmChecks}</p>
+      </header>
+
+      <div className="min-h-0 overflow-y-auto overscroll-contain px-4 py-3">
+        <p className="text-sm">{de.admin.deleteConfirmBody}</p>
         {status === "public" ? (
-          <p className="mt-2 text-[11px] text-warning">{de.admin.deleteConfirmPublic}</p>
+          <p className="mt-2 text-xs text-warning">{de.admin.deleteConfirmPublic}</p>
         ) : null}
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="focus-ring min-h-11 flex-1 rounded-sky-md bg-base px-3 text-sm
-                       ring-1 ring-border"
-          >
-            {de.admin.discardConfirmNo}
-          </button>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={onConfirm}
-            className="focus-ring min-h-11 flex-1 rounded-sky-md bg-danger px-3 text-sm
-                       font-medium text-on-danger disabled:opacity-50"
-          >
-            {de.admin.deleteConfirmYes}
-          </button>
-        </div>
+        {fehler !== null ? (
+          <div role="alert" className="mt-3 rounded-sky-md bg-danger/10 p-2 text-sm text-danger">
+            {blockiert ? <p className="font-medium">{de.admin.deleteConfirmBlocked}</p> : null}
+            <p className={blockiert ? "mt-1 text-xs" : ""}>{fehler}</p>
+          </div>
+        ) : null}
+        {/* Was geprüft wird, bevor etwas geschieht — damit niemand rät. */}
+        <details className="mt-3 text-xs text-muted">
+          <summary className="focus-ring cursor-pointer rounded-sky-sm py-1">
+            {de.admin.deleteConfirmChecksTitle}
+          </summary>
+          <p className="mt-1">{de.admin.deleteConfirmChecks}</p>
+        </details>
       </div>
-    </div>
+
+      <footer className="flex shrink-0 gap-2 border-t border-border/60 px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={pending}
+          className="focus-ring min-h-11 flex-1 rounded-sky-md bg-base px-3 text-sm
+                     ring-1 ring-border disabled:opacity-50"
+        >
+          {de.admin.discardConfirmNo}
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          aria-busy={pending || undefined}
+          onClick={onConfirm}
+          className="focus-ring min-h-11 flex-1 rounded-sky-md bg-danger px-3 text-sm
+                     font-medium text-on-danger disabled:opacity-50"
+        >
+          {pending ? de.admin.deleting : de.admin.deleteConfirmYes}
+        </button>
+      </footer>
+    </Modal>
   );
 }
 

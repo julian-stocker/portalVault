@@ -24,7 +24,8 @@
 
 import { refresh, revalidatePath } from "next/cache";
 
-import { isCardTypeValue } from "@/lib/admin/new-figure-draft";
+import { createErrorMessage } from "@/lib/admin/create-errors";
+import { isCardTypeValue, isVariantTypeValue } from "@/lib/admin/new-figure-draft";
 import { isPlatformAdmin } from "@/lib/auth/capabilities";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
@@ -58,6 +59,18 @@ export type CreateFigureInput = {
    * catalogue does not already hold.
    */
   templateSkyId: string | null;
+  /**
+   * The base figure this one is a VARIANT of, or `null` for a figure that
+   * stands on its own (CAT-11, `0166`).
+   *
+   * Not the same thing as the template above: a template hands over a
+   * character and nothing is stored about it; a base is a persistent
+   * relation (`base_sky_id`). With a base, the series is the base's — the
+   * database takes it from there and ignores `seriesCode`.
+   */
+  baseSkyId: string | null;
+  /** The variant type (`chase`, `legendary`, …). Required with a base. */
+  variantType: string | null;
 };
 
 export async function createFigure(input: CreateFigureInput): Promise<CreateResult> {
@@ -71,22 +84,47 @@ export async function createFigure(input: CreateFigureInput): Promise<CreateResu
   if (input.templateSkyId !== null && !SKY_ID.test(input.templateSkyId)) {
     return { ok: false, message: de.admin.unknownFigure };
   }
+  const variant = input.baseSkyId !== null;
+  if (variant && !SKY_ID.test(input.baseSkyId as string)) {
+    return { ok: false, message: de.admin.baseUnknown };
+  }
+  if (variant && (input.variantType === null || !isVariantTypeValue(input.variantType))) {
+    return { ok: false, message: de.admin.variantTypeRequired };
+  }
 
   if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("admin_create_figure", {
+  // The database turns an empty string into NULL; sending "" rather than
+  // null keeps the two optional fields the same shape as everywhere else.
+  const shared = {
     p_name: name,
-    p_series_code: input.seriesCode,
     p_category_id: input.categoryId,
     p_card_type: input.cardType,
     p_catalog_visible: input.catalogVisible,
-    // The database turns an empty string into NULL; sending "" rather than
-    // null keeps the two optional fields the same shape as everywhere else.
     p_display_name_override: input.displayNameOverride.trim(),
     p_admin_note: input.adminNote.trim(),
-    p_template_sky_id: input.templateSkyId,
-  });
+  };
+
+  /*
+   * TWO FUNCTIONS, ONE CALL EACH. A variant goes through
+   * `admin_create_variant_figure` (`0166`), which creates the row AND writes
+   * the relation, the type set and the banner in the same transaction. Doing
+   * that here as four requests would leave a figure that looks like a
+   * variant and is not, the moment the third one failed.
+   */
+  const [fn, args] = variant
+    ? ["admin_create_variant_figure", {
+        ...shared,
+        p_base_sky_id: input.baseSkyId,
+        p_variant_type: input.variantType,
+      }] as const
+    : ["admin_create_figure", {
+        ...shared,
+        p_series_code: input.seriesCode,
+        p_template_sky_id: input.templateSkyId,
+      }] as const;
+  const { data, error } = await supabase.rpc(fn, args);
 
   /*
    * Every failure below has already rolled the row back — the function is one
@@ -94,8 +132,16 @@ export async function createFigure(input: CreateFigureInput): Promise<CreateResu
    * why a retry produces the next number rather than the same one. That is
    * the intended behaviour (ADR-0001: never reissued), and it is also why
    * this returns a message rather than retrying by itself.
+   *
+   * The raw error goes to the server log — code and message, nothing from
+   * the form — so a failure can be traced afterwards. Before CAT-11 it was
+   * swallowed, and the cause of a failed create could not be established.
    */
-  if (error) return { ok: false, message: de.admin.createFailed };
+  if (error) {
+    console.error("[createFigure] %s %s: %s", variant ? "variant" : "figure",
+      error.code ?? "-", error.message ?? "");
+    return { ok: false, message: createErrorMessage(error, variant) };
+  }
   if (typeof data !== "string") return { ok: false, message: de.admin.createFailed };
 
   /*

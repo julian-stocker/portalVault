@@ -93,12 +93,18 @@ export function Modal({
   /** Id of the element that names this dialog — usually its heading. */
   labelledBy,
   size = "md",
+  role = "dialog",
   children,
 }: {
   open: boolean;
   onClose: () => void;
   labelledBy: string;
   size?: keyof typeof WIDTH;
+  /**
+   * `alertdialog` for a confirmation that interrupts — a permanent delete.
+   * The behaviour is the same; a screen reader announces it as urgent.
+   */
+  role?: "dialog" | "alertdialog";
   children?: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -131,6 +137,12 @@ export function Modal({
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
+        /*
+         * A control inside the dialog may use Escape for itself — a search
+         * list closes its list first (CAT-11). It says so by preventing the
+         * default; the dialog then stays open, and the next Escape closes it.
+         */
+        if (event.defaultPrevented) return;
         event.preventDefault();
         onClose();
         return;
@@ -236,7 +248,7 @@ export function Modal({
     >
       <div
         ref={panel}
-        role="dialog"
+        role={role}
         aria-modal="true"
         aria-labelledby={labelledBy}
         // Focusable, not tabbable: it receives focus on open and then steps

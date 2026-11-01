@@ -19,6 +19,7 @@
  * bare form, and then the database qualifies it.
  */
 import { CARD_TYPES, type CardType } from "@/lib/catalog/card-type";
+import { TYPE_GROUPS } from "@/lib/catalog/catalog-type";
 import { slugify } from "@/lib/catalog/slug";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
@@ -54,6 +55,10 @@ export type NewFigureDraft = {
    * collectibles are the same character.
    */
   templateSkyId: string | null;
+  /** „Variante von" — a persistent relation, not a template (CAT-11). */
+  baseSkyId: string | null;
+  /** The variant type; only meaningful, and then required, with a base. */
+  variantType: VariantType | null;
 };
 
 export const EMPTY_DRAFT: NewFigureDraft = {
@@ -65,6 +70,8 @@ export const EMPTY_DRAFT: NewFigureDraft = {
   displayNameOverride: "",
   adminNote: "",
   templateSkyId: null,
+  baseSkyId: null,
+  variantType: null,
 };
 
 /**
@@ -107,7 +114,7 @@ export function groupOf(
   return categories.find((category) => category.id === categoryId)?.catalogGroup ?? null;
 }
 
-export type DraftProblem = "name" | "series" | "category";
+export type DraftProblem = "name" | "series" | "category" | "variantType";
 
 /**
  * What still stands in the way of creating this figure.
@@ -128,6 +135,7 @@ export function problemsWith(
   // Not merely "is one picked": a category left over from a series the
   // operator has since changed is worse than none, because it looks answered.
   if (chosen === undefined || chosen.seriesCode !== draft.seriesCode) problems.push("category");
+  if (draft.baseSkyId !== null && draft.variantType === null) problems.push("variantType");
 
   return problems;
 }
@@ -281,4 +289,96 @@ export function similarFigures(
 /** Narrowing for a value that arrived from a `<select>`. */
 export function isCardTypeValue(value: string): value is CardType {
   return (CARD_TYPES as readonly string[]).includes(value);
+}
+
+/* ==========================================================================
+ * „VARIANTE VON" (CAT-11)
+ *
+ * A base figure is a persistent relation — `base_sky_id`, written by
+ * `admin_create_variant_figure` (`0166`). It is NOT the template above: the
+ * template hands over a character and is forgotten; the base is stored, and
+ * the catalogue groups, sorts and badges by it.
+ * ========================================================================== */
+
+/** The seven variant types, from the one vocabulary (`catalog-type.ts`). */
+export const VARIANT_TYPES = TYPE_GROUPS.variants;
+export type VariantType = (typeof VARIANT_TYPES)[number];
+
+export function isVariantTypeValue(value: string): value is VariantType {
+  return (VARIANT_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Who can be chosen as a base — the same rules the database enforces, so
+ * the list never offers something the create then refuses:
+ *
+ *   * not a variant itself (`0159`: no chains),
+ *   * not a draft (`0166`: the publish does not carry drafts),
+ *   * active.
+ *
+ * Matched on display name, raw name and SKY-ID; at most `limit` rows. The
+ * figures come from the catalogue already on screen — no request.
+ */
+export function baseCandidates(
+  figures: readonly CatalogFigure[],
+  query: string,
+  limit = 8,
+): CatalogFigure[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return [];
+  return figures
+    .filter((figure) =>
+      figure.baseSkyId === null
+      && figure.isActive
+      && figure.catalogStatus !== "draft"
+      && (figure.displayName.toLowerCase().includes(needle)
+        || figure.name.toLowerCase().includes(needle)
+        || figure.skyId.toLowerCase().includes(needle)))
+    .sort((a, b) => {
+      /* A name that STARTS with the query first: "Boomer" before
+         "Elite Boomer" when somebody types "boo". */
+      const aStarts = a.displayName.toLowerCase().startsWith(needle) ? 0 : 1;
+      const bStarts = b.displayName.toLowerCase().startsWith(needle) ? 0 : 1;
+      return aStarts - bStarts || a.displayName.localeCompare(b.displayName, "de");
+    })
+    .slice(0, limit);
+}
+
+/**
+ * Choosing a base: series and category come from it, nothing else.
+ *
+ * The series is not a start value but a rule — a variant belongs to a base
+ * of the SAME series (`0159`). The category is a start value. The name stays
+ * what the operator typed: a variant has its own name ("Silver Boomer"), and
+ * copying "Boomer" into the field would invite the wrong one.
+ */
+export function withBase(draft: NewFigureDraft, base: CatalogFigure | null): NewFigureDraft {
+  if (base === null) {
+    return { ...draft, baseSkyId: null, variantType: null };
+  }
+  return {
+    ...draft,
+    baseSkyId: base.skyId,
+    seriesCode: base.seriesCode,
+    categoryId: base.categoryId,
+    /* A base and a template at once would be two answers to "where does the
+       character come from". The base wins; the database takes it from there. */
+    templateSkyId: null,
+  };
+}
+
+/**
+ * Choosing a variant type also proposes the matching card art, when there
+ * is one — a chase variant is usually printed on the chase card.
+ *
+ * A PROPOSAL, NOT A DERIVATION. `card_type` and `types` stay two columns
+ * (ADR-0160); the field remains editable under „Weitere Optionen", and the
+ * database never couples them.
+ */
+export function withVariantType(
+  draft: NewFigureDraft,
+  type: VariantType | null,
+): NewFigureDraft {
+  const card = type !== null && isCardTypeValue(type) ? type : "standard";
+  return { ...draft, variantType: type, cardType: card };
 }
