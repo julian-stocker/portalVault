@@ -39,6 +39,9 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { charakterRiegel, RANG } from "../src/lib/catalog/sync-character-gate.ts";
+import { ordneVariantenschritte } from "../src/lib/catalog/publish-variants.ts";
+import { SPALTE, planwert, pruefeNachher, pruefeVorher, type KlasseBFeld }
+  from "../src/lib/catalog/publish-cas.ts";
 import { createInterface } from "node:readline";
 
 const STAGING_REF = "qqxcpesbwfxzgytkdsac";
@@ -387,6 +390,13 @@ schritte.sort((a, b) =>
   (RANG[a.art] ?? 9) - (RANG[b.art] ?? 9)
   || (FELDRANG[a.feld ?? ""] ?? 5) - (FELDRANG[b.feld ?? ""] ?? 5)
   || a.sky_id.localeCompare(b.sky_id));
+/*
+ * UND DIE VARIANTENSCHRITTE NACH IHREN ABHAENGIGKEITEN (CAT-11). Die
+ * Sortierung oben kennt nur Schrittarten; „X wird Basisfigur" muss aber vor
+ * „Y wird Variante von X" laufen, auch wenn Y neu ist und X nicht. Ein
+ * Zyklus bricht hier ab, vor dem ersten Schreibzugriff.
+ */
+schritte.splice(0, schritte.length, ...ordneVariantenschritte(schritte));
 
 const brauchtW = schritte.some((s) => s.feld && s.feld in RPC_B);
 const W = APPLY && brauchtW ? await adminClient(ENV.datei, ENV.ref, ZIEL) : null;
@@ -567,19 +577,24 @@ async function setzeFelder(
  * `skylanders` und verschieben `updated_at` genauso, geben es aber nicht
  * zurueck.
  */
-async function markeNachziehen(sky_id: string): Promise<void> {
+/** Eine Klasse-B-Spalte und die Vergleichsmarke, frisch gelesen (TOR 2b). */
+async function liesKlasseB(
+  sky_id: string, feld: KlasseBFeld,
+): Promise<{ ist: string; marke: unknown }> {
+  const spalte = SPALTE[feld];
   const { data, error } = await R.from("skylanders")
-    .select("updated_at").eq("sky_id", sky_id).single();
+    .select(`updated_at, ${spalte}`).eq("sky_id", sky_id).single();
   if (error || !data) {
-    throw new Error(`${sky_id}: die Vergleichsmarke liess sich nach dem Schreiben `
-      + `nicht nachziehen (${error?.message ?? "keine Zeile"}). Ein Folgeschritt `
-      + "an derselben Figur wuerde an TOR 2 scheitern.");
+    throw new Error(`${sky_id}: ${spalte} liess sich nicht lesen `
+      + `(${error?.message ?? "keine Zeile"}). Es wird nichts geschrieben.`);
   }
-  const vorhanden = jetzt._zeilen.get(sky_id);
-  if (vorhanden) {
-    vorhanden.updated_at = (data as unknown as Record<string, unknown>).updated_at;
-  }
+  const zeile = data as unknown as Record<string, unknown>;
+  const namen = new Map([...charakterId].map(([name, id]) => [id, name] as const));
+  return { ist: planwert(feld, zeile[spalte], namen), marke: zeile.updated_at };
 }
+
+/** Welche Figuren in diesem Lauf schon einen `types`-Schritt hatten. */
+const typenGeschrieben = new Set<string>();
 
 /**
  * Schreibt das Protokoll — auch wenn der Lauf mitten in der Schleife abbricht.
@@ -616,10 +631,17 @@ for (const s of schritte) {
       + "Er beruehrt den zusammengesetzten Fremdschluessel (category_id, series_code) "
       + "und gehoert in eine eigene, einzeln freigegebene Handlung.");
   }
-  if (s.feld === "visible_type_decided" && setztBanner.has(s.sky_id)) {
+  if (s.feld === "visible_type_decided" && setztBanner.has(s.sky_id) && s.nach === "true") {
     console.log(`  [uebersprungen] ${wie.padEnd(42)} setzt admin_set_visible_type mit`);
     continue;
   }
+  /*
+   * UND WENN DAS ZIEL `false` IST (CAT-11): dann laeuft der Schritt — nach
+   * dem Banner (FELDRANG) —, und sein erwarteter alter Wert ist `true`,
+   * denn genau das hat `admin_set_visible_type` eben geschrieben. Vorher
+   * wurde er auch hier uebersprungen, und die Zeile blieb falsch.
+   */
+  if (s.feld === "visible_type_decided" && setztBanner.has(s.sky_id)) s.von = "true";
 
   /*
    * DIE JOURNALERWARTUNG — vorher ausgerechnet, nicht hinterher gezaehlt.
@@ -778,14 +800,36 @@ for (const s of schritte) {
         wert = id;
       }
     }
+    /*
+     * COMPARE-AND-SET FUER KLASSE B (CAT-11, `src/lib/catalog/publish-cas.ts`).
+     * Die Funktionen nehmen keinen erwarteten Wert entgegen; also wird
+     * unmittelbar davor gelesen — Marke UND Feldwert — und danach geprueft,
+     * dass genau der geplante Wert steht.
+     */
+    const feldB = s.feld as KlasseBFeld;
+    const vorher = await liesKlasseB(s.sky_id, feldB);
+    const vorUrteil = pruefeVorher({
+      wie, ist: vorher.ist, von: t(s.von), nach: t(s.nach),
+      markeIst: vorher.marke, markeErwartet: jetzt._zeilen.get(s.sky_id)?.updated_at,
+      auchErlaubt: feldB === "visible_type" && typenGeschrieben.has(s.sky_id) ? ["~"] : [],
+    });
+    if (!vorUrteil.ok) throw new Error(`TOR 2b — ${vorUrteil.grund}`);
+
     const { error } = await W.rpc(r.fn, { p_sky_id: s.sky_id, [r.arg]: wert });
     if (error) throw new Error(`${wie}: ${error.message}`);
+    if (feldB === "types") typenGeschrieben.add(s.sky_id);
+
     /*
      * Die RPC hat `skylanders` geschrieben und damit `updated_at`
-     * verschoben. Ohne dieses Nachziehen scheitert jeder Folgeschritt an
-     * derselben Figur an TOR 2 — auf Production waeren das 283 Figuren.
+     * verschoben. Die neue Marke wird nur uebernommen, wenn der Wert der
+     * geplante ist — sonst hat zwischen Funktion und Lesen jemand anderes
+     * geschrieben, und dessen Marke darf nicht zu unserer werden.
      */
-    await markeNachziehen(s.sky_id);
+    const nachher = await liesKlasseB(s.sky_id, feldB);
+    const nachUrteil = pruefeNachher({ wie, ist: nachher.ist, nach: t(s.nach) });
+    if (!nachUrteil.ok) throw new Error(`TOR 2b — ${nachUrteil.grund}`);
+    const eintrag = jetzt._zeilen.get(s.sky_id);
+    if (eintrag) eintrag.updated_at = nachher.marke;
   } else if (s.feld === "catalog_visible" || s.feld === "catalog_status") {
     /*
      * BEIDE IN EINER ANWEISUNG. Sonst waere der CHECK

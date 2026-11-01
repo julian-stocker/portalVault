@@ -40,6 +40,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isCatalogStatus, type CatalogStatus } from "@/lib/catalog/catalog-status";
 import { asCatalogTypes, isCatalogType } from "@/lib/catalog/catalog-type";
 import { istUnbekannteFunktion } from "@/lib/admin/queries";
+import { verweisListe } from "@/lib/admin/delete-errors";
 import { de } from "@/lib/i18n/de";
 
 export type AdminResult = { ok: true } | { ok: false; message: string };
@@ -603,9 +604,10 @@ export async function deleteFigure(skyId: string): Promise<AdminResult> {
       if (text.includes("Bestellzeile")) return de.admin.deleteBlockedOrder;
       if (text.includes("zeigen noch Daten")) {
         /* Der Grund ist die Liste der Tabellen — sie steht im Serversatz,
-           und sie ist das Einzige, was dem Bediener weiterhilft. */
-        const m = /zeigen noch Daten: ([^.]*)/.exec(text);
-        return de.admin.deleteBlocked(m === null ? "" : m[1].trim());
+           und sie ist das Einzige, was dem Bediener weiterhilft. Seit CAT-12
+           ueber `verweisListe()`: der alte Ausdruck hoerte am ersten Punkt
+           auf, und der steht im Schema-Praefix — angezeigt wurde „public". */
+        return de.admin.deleteBlocked(verweisListe(text));
       }
       if (text.includes("gibt es nicht")) return de.admin.unknownFigure;
       /* Der Fremdschlüssel als letzte Schicht — wenn jemand zwischen

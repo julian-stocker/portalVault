@@ -265,14 +265,27 @@ describe("zwei Dateien, zwei Aufgaben", () => {
     const l = JSON.parse(readFileSync("resources/sync/publish-ledger.json", "utf8")) as Ledger;
     expect(pruefeLedger(l).befunde).toEqual([]);
     expect(l.geregelte_felder).toEqual([...GEREGELT]);
-    expect(l.zeilen).toBe(655);
+    /* 655 bis zum 2026-11-01; seit P-3 (ADR-0166) ohne die 30 entfernten
+       OVP-Duplikate. */
+    expect(l.zeilen).toBe(625);
   });
 
-  it("und sie entspricht dem Siegel des einmaligen Abgleichs", () => {
+  it("das Siegel bleibt, und das Ledger ist es — ohne genau die 30 entfernten OVP-Duplikate", () => {
+    /*
+     * BIS ZUM 2026-11-01 WAR DAS LEDGER DAS SIEGEL, Zeichen fuer Zeichen. Seit
+     * P-3 ist es dessen erster fortgeschriebener Stand: dieselben Zeilen ohne
+     * die 30 SKY-IDs aus `data/catalog/ovp-removal.json`, geschrieben vom
+     * 0-Schritte-Zweig ueber `ledgerOhneEntfernte()`. Das Siegel selbst wird
+     * nie wieder geschrieben — das prueft die erste Haelfte.
+     */
     const l = JSON.parse(readFileSync("resources/sync/publish-ledger.json", "utf8")) as Ledger;
     const siegel = JSON.parse(readFileSync("resources/sync/catalog-baseline.json", "utf8")) as
       { geregelt: { production: { zeilen: number; abdruck: string } } };
-    expect(l.abdruck).toBe(siegel.geregelt.production.abdruck);
-    expect(l.zeilen).toBe(siegel.geregelt.production.zeilen);
+    expect(siegel.geregelt.production).toMatchObject({ zeilen: 655, abdruck: "df54fd6e74b681d5c521d02bcb75eb30" });
+    const entfernt = (JSON.parse(readFileSync("data/catalog/ovp-removal.json", "utf8")) as
+      { eintraege: { sky_id: string }[] }).eintraege.map((e) => e.sky_id);
+    expect(l.zeilen).toBe(siegel.geregelt.production.zeilen - entfernt.length);
+    for (const id of entfernt) expect(Object.keys(l.stand), id).not.toContain(id);
+    expect(l.abdruck).toBe("16746058d479c5dadc7feb31eb0338d1");
   });
 });

@@ -204,9 +204,24 @@ describe("every shop UX state is represented", () => {
 
     "not listed at all": () => positions.some((p) => !p.isListed),
 
-    "no market price, so no shop price is possible": () =>
-      positions.some((p) => p.salePrice === null && priced.get(p.skyId) === null && p.isListed),
+    /*
+     * „no market price, so no shop price is possible" STAND HIER BIS CAT-12.
+     * Getragen hat ihn SKY-0090 „Elite Zook" — ein OVP-Duplikat, das
+     * ADR-0166 dauerhaft entfernt. Nach der Entfernung hat KEINE Figur des
+     * Legacy-Exports mehr einen leeren Marktwert (nur noch Spiele, und die
+     * sind nicht sammelbar). Der Zustand kommt heute nur noch an
+     * SkyIsles-eigenen Figuren vor; eine Fixture dafuer braucht eine
+     * oeffentliche, admin-angelegte Figur und ist ein offener Punkt — die
+     * Pruefung unten haelt fest, dass er offen ist, statt ihn still zu
+     * streichen.
+     */
   };
+
+  it("der Zustand „kein Marktwert“ hat nach CAT-12 keine Fixture mehr — ausdruecklich offen", () => {
+    expect(positions.some((p) => p.skyId === "SKY-0090")).toBe(false);
+    expect(positions.some((p) => p.salePrice === null && priced.get(p.skyId) === null && p.isListed))
+      .toBe(false);
+  });
 
   for (const [label, holds] of Object.entries(CASES)) {
     it(label, () => {

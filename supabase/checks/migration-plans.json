@@ -374,6 +374,42 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0166": {
+      "zweck": "Eine Figur als Variante einer Basisfigur in EINER Transaktion anlegen (CAT-11), ausschliesslich ueber admin_create_figure, admin_set_variant_base, admin_set_figure_types und admin_set_visible_type",
+      "preflight": "0166_preflight.sql",
+      "lauf": "staging-0166.sql",
+      "postflight": "0166_postflight.sql",
+      "angewendet": {
+        "beschreibung": "admin_create_variant_figure(text,text,text,bigint,text,boolean,text,text) steht. Die Migration legt GENAU EINE Funktion an; ihre Existenz IST die Spur, und ihre eigene Vorbedingung bricht bei einem zweiten Lauf daran ab.",
+        "sql": "select to_regprocedure('public.admin_create_variant_figure(text,text,text,bigint,text,boolean,text,text)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0167": {
+      "zweck": "Grabstein catalog_removed_sky_ids, Anlage-Riegel und system_remove_ovp_figure fuer die 30 OVP-Duplikate (CAT-12, ADR-0166) — entfernt selbst nichts",
+      "preflight": "0167_preflight.sql",
+      "lauf": "staging-0167.sql",
+      "postflight": "0167_postflight.sql",
+      "angewendet": {
+        "beschreibung": "catalog_removed_sky_ids steht. Die Migration legt die Tabelle an; ihre eigene Vorbedingung bricht bei einem zweiten Lauf daran ab.",
+        "sql": "select to_regclass('public.catalog_removed_sky_ids') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

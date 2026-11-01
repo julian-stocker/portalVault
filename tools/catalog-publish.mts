@@ -56,6 +56,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { GEREGELT, t, type Zeile } from "../src/lib/catalog/publish-compare.ts";
 import { LEDGER_MARKE, pruefeLedger, standAbdruck,
          type Ledger, type Stand } from "../src/lib/catalog/publish-drift.ts";
+import { OVP_REMOVED_SKY_IDS, ledgerOhneEntfernte } from "../src/lib/catalog/ovp-removal.ts";
 
 const STAGING_REF = "qqxcpesbwfxzgytkdsac";
 const PRODUCTION_REF = "zmiwxswrpkmizvqsgype";
@@ -179,6 +180,11 @@ async function geregelterStand(db: SupabaseClient): Promise<Stand> {
     const id = r.sky_id as string;
     if (["TEST", "SMOK"].includes(r.series_code as string) || id >= "SKY-9000"
         || r.catalog_status === "draft") continue;
+    /* Die 30 entfernten OVP-Duplikate zaehlen nicht (CAT-12) — dieselbe
+       Regel wie in `catalog-sync.mts`, sonst waere der Gleichstand zwischen
+       der Entfernung auf Staging und der auf Production verletzt, und das
+       neue Ledger fuehrte sie weiter. */
+    if (OVP_REMOVED_SKY_IDS.has(id)) continue;
     const v: Zeile = { ...r, kategorie: kat.get(r.category_id as number) ?? null,
                        familie: chr.get(r.character_id as number) ?? null };
     out[id] = GEREGELT.map((f) => t(v[f])).join("|");
@@ -259,8 +265,37 @@ if (nach(p0, "staging") !== 0) {
 
 /* ---- Kein Schritt? Dann ist der Lauf fertig, und das ist ein Erfolg. ---- */
 if (nach(p0, "production") === 0) {
+  /*
+   * DIE EINE AUSNAHME: DAS LEDGER FUEHRT NOCH ENTFERNTE OVP-DUPLIKATE (CAT-12).
+   *
+   * Nach der Entfernung auf BEIDEN Umgebungen gibt es nichts zu
+   * veroeffentlichen — und ohne diesen Zweig stuenden die 30 fuer immer im
+   * Ledger. Fortgeschrieben wird nur, wenn das Ledger ohne sie ZEICHENGLEICH
+   * dem heutigen Production-Stand ist und Staging gleich steht
+   * (`ledgerOhneEntfernte`). Kein Datenbankzugriff schreibt hier; nur die
+   * Datei, und nur mit `--apply`.
+   */
+  const fort = ledgerOhneEntfernte(ledgerRoh.stand, await geregelterStand(S), await geregelterStand(P));
+  if (fort.ok) {
+    const a = standAbdruck(fort.stand);
+    const neu: Ledger = { ...ledgerRoh, veroeffentlicht_am: new Date().toISOString(),
+                          zeilen: a.zeilen, abdruck: a.abdruck, stand: fort.stand };
+    const probe = pruefeLedger(neu);
+    if (!probe.ok) abbruch("STAND NEU", `der fortgeschriebene Stand ist nicht schluessig: ${probe.befunde.join("; ")}`);
+    sage(`\n  [STAND] ${fort.entfernt.length} entfernte OVP-Duplikat(e) aus dem Ledger nehmen: `
+      + `${ledgerRoh.zeilen} -> ${a.zeilen} Zeilen`);
+    if (APPLY) {
+      const roh = JSON.parse(readFileSync(LEDGER, "utf8")) as Record<string, unknown>;
+      writeFileSync(LEDGER, JSON.stringify({ _zweck: roh._zweck, _abgrenzung: roh._abgrenzung, ...neu }, null, 1) + "\n");
+      sage(`      geschrieben: ${LEDGER}  (${a.zeilen} Zeilen, Abdruck ${a.abdruck})`);
+    } else {
+      sage("      (Vorschau: das Ledger wird nicht geschrieben)");
+    }
+  }
   sage("\n  [FERTIG] 0 offene Schritte — es gibt nichts zu veroeffentlichen.");
-  sage("      Der Publish-Stand bleibt unveraendert. Kein Schreibvorgang, kein Befund.");
+  sage(fort.ok
+    ? "      Kein Schreibvorgang an einer Datenbank; nur das Ledger ohne die entfernten OVP-Duplikate."
+    : "      Der Publish-Stand bleibt unveraendert. Kein Schreibvorgang, kein Befund.");
   schreibeBericht(APPLY ? "NICHTS ZU TUN" : "Vorschau — nichts zu tun", "FERTIG",
     { schutz_vorher: schutzVorher, plan: { production: 0, staging: 0 },
       ledger: { zeilen: ledgerRoh.zeilen, abdruck: ledgerRoh.abdruck } });

@@ -809,6 +809,20 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
 
 export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   /*
+   * DRAUSSEN, UND DAS IST EINE ABWAEGUNG (`0167`, ADR-0166).
+   *
+   * Der Grabstein ist klein und wichtig: er haelt das Versprechen, dass eine
+   * entfernte SKY-ID nie wieder angelegt wird. Ins Archiv kaeme er nur ueber
+   * eine neue Fassung von `system_platform_export()` — eine eigene Migration
+   * auf beiden Umgebungen. Bis dahin ist er aus drei Quellen wiederherstellbar,
+   * die das Archiv ueberleben: `data/catalog/ovp-removal.json` (die Liste),
+   * die Konstante in `system_remove_ovp_figure` (0167) und die Journalzeilen
+   * `deleted` in `catalog_admin_changes`.
+   */
+  catalog_removed_sky_ids:
+    "Grabstein entfernter SKY-IDs (0167). Wiederherstellbar aus data/catalog/ovp-removal.json "
+    + "und den deleted-Zeilen des Journals; Aufnahme ins Archiv mit der naechsten Exportfassung.",
+  /*
    * DRAUSSEN AUF ZEIT, UND ZWAR MIT ABLAUFDATUM (`0145`, ADR-0136).
    *
    * `favorites` ist persönliche Nutzerdaten — dieselbe Klasse wie

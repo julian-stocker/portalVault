@@ -77,7 +77,7 @@ describe("the curated pilot file", () => {
     expect(problems).toEqual([]);
   });
 
-  it("holds 20 characters and 107 assignments", () => {
+  it("holds 20 characters and 92 assignments", () => {
     /*
      * The twentieth is Fire Kraken, and its third assignment is `SKY-0928` —
      * the first admin-created figure ever curated. It is counted here like
@@ -92,7 +92,9 @@ describe("the curated pilot file", () => {
      * Siehe die Zusage unten.
      */
     expect(characters).toHaveLength(20);
-    expect(characters.flatMap((entry) => entry.sky_ids)).toHaveLength(107);
+    /* 107 bis CAT-12; die 15 Zuordnungen an OVP-Duplikate sind mit ihnen
+       entfernt worden (ADR-0166) — die regulaeren Figuren behalten ihre. */
+    expect(characters.flatMap((entry) => entry.sky_ids)).toHaveLength(92);
   });
 
   /* ---------------------------------------------------------------------- */
@@ -254,8 +256,9 @@ describe("the grouping cases a name rule gets wrong", () => {
     expect(item.get("SKY-0377")!.category).toBe("Minis");
   });
 
-  it("Kaos covers the two Sensei figures and none of the trap objects", () => {
-    expect(idsOf("Kaos")).toEqual(["SKY-0563", "SKY-0564"]);
+  it("Kaos covers the Sensei figure and none of the trap objects", () => {
+    /* `SKY-0564 Kaos in OVP` ist ein entferntes OVP-Duplikat (ADR-0166). */
+    expect(idsOf("Kaos")).toEqual(["SKY-0563"]);
     const assigned = new Set(characters.flatMap((entry) => entry.sky_ids));
     // Same name, entirely different objects — they stay character_id NULL.
     for (const skyId of ["SKY-0419", "SKY-0420", "SKY-0495"]) {
@@ -277,11 +280,11 @@ describe("the grouping cases a name rule gets wrong", () => {
     expect(idsOf("Grim Creeper")).toContain("SKY-0252"); // "Legendary Grim Creemper"
     expect(idsOf("Star Strike")).toContain("SKY-0266"); // "Start Strike (LC, Enchanted)"
     expect(idsOf("Turbo Charge Donkey Kong")).toContain("SKY-0494"); // "Dark Turbo Charge D.K."
-    expect(idsOf("Dino-Rang")).toContain("SKY-0023"); // "Elite Dino Rang", no hyphen
+    expect(idsOf("Dino-Rang")).toContain("SKY-0022"); // "Elite Dino Rang - ohne OVP", no hyphen
   });
 
   it("keeps Eon's Elite and LightCore with their character", () => {
-    expect(idsOf("Spyro")).toContain("SKY-0057"); // Elite Spyro
+    expect(idsOf("Spyro")).toContain("SKY-0056"); // Elite Spyro (die lose Figur; die OVP-Schachteln sind entfernt)
     expect(idsOf("Drobot")).toContain("SKY-0157"); // Drobot Light Core
     expect(idsOf("Chill")).toContain("SKY-0130"); // Legendary Chill Light Core
   });
@@ -329,5 +332,14 @@ describe("derived first release, checked for all 20", () => {
     // (ADR-0034).
     expect(firstReleaseSeries(figuresOf("Kaos"))?.code).toBe("I");
     expect(firstReleaseSeries(figuresOf("Kaos"))?.code).not.toBe("SA");
+  });
+});
+
+describe("CAT-12 — keine Zuordnung an ein entferntes OVP-Duplikat", () => {
+  it("keine der 30 SKY-IDs aus data/catalog/ovp-removal.json steht in der Charakterdatei", () => {
+    const entfernt = (JSON.parse(readFileSync("data/catalog/ovp-removal.json", "utf8")) as
+      { eintraege: { sky_id: string }[] }).eintraege.map((e) => e.sky_id);
+    const zugeordnet = new Set(characters.flatMap((entry) => entry.sky_ids));
+    for (const id of entfernt) expect(zugeordnet.has(id), id).toBe(false);
   });
 });

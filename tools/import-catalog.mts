@@ -29,6 +29,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 import { assignSlugs, seriesSlug } from "../src/lib/catalog/slug.ts";
 import { requireStagingIfRequested } from "./lib/staging-guard.mts";
+import { OVP_REMOVED_SKY_IDS } from "../src/lib/catalog/ovp-removal.ts";
 
 const DEFAULT_INPUT = "data/catalog/products.json";
 const IMAGE_DIR = "public/images/skylanders";
@@ -290,6 +291,22 @@ async function main(): Promise<void> {
     console.error("\nInput rejected:");
     for (const problem of problems) console.error(`  - ${problem}`);
     process.exit(1);
+  }
+  /*
+   * DIE 30 ENTFERNTEN OVP-DUPLIKATE KOMMEN NICHT ZURUECK (CAT-12, ADR-0166).
+   *
+   * Sie sind aus `products.json` entfernt — aber dieses Werkzeug soll auch
+   * einen kuenftigen Export aus der Arbeitsmappe ueberstehen, in dem sie
+   * wieder stehen. Also werden sie hier ausgesondert, BEVOR validiert und
+   * geplant wird, und genannt. Die Datenbank wuerde eine Wiederanlage
+   * ohnehin abweisen (`skylanders_refuse_removed`, 0167) — dann aber mitten
+   * im Upsert und fuer den ganzen Block.
+   */
+  const ausgesondert = data.items.filter((item) => OVP_REMOVED_SKY_IDS.has(item.id));
+  if (ausgesondert.length > 0) {
+    data.items = data.items.filter((item) => !OVP_REMOVED_SKY_IDS.has(item.id));
+    console.log(`  ${ausgesondert.length} entfernte OVP-Duplikate ausgesondert `
+      + `(data/catalog/ovp-removal.json): ${ausgesondert.map((i) => i.id).join(", ")}`);
   }
   console.log(`  ${INPUT}`);
   console.log(`  generated ${data.generated}, currency ${data.currency}`);

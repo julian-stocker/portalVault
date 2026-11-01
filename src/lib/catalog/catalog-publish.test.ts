@@ -211,9 +211,13 @@ describe("der Bericht ist der Nachweis", () => {
   it("ein No-op endet mit Erfolg und ohne Schreibvorgang", () => {
     const ab = C.indexOf('nach(p0, "production") === 0');
     expect(ab).toBeGreaterThan(-1);
-    const block = C.slice(ab, ab + 700);
+    /* Seit CAT-12 steht davor die Ledger-Fortschreibung fuer die entfernten
+       OVP-Duplikate — sie schreibt keine Datenbank, nur (mit --apply) das
+       Ledger; `ovp-removal.test.ts` haelt das fest. */
+    const block = C.slice(ab, C.indexOf("process.exit(0)", ab) + "process.exit(0)".length);
     expect(block).toContain("0 offene Schritte");
     expect(block).toContain("Der Publish-Stand bleibt unveraendert");
     expect(block).toContain("process.exit(0)");
+    expect(block).not.toMatch(/\.(insert|update|delete|upsert|rpc)\(/);
   });
 });

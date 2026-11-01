@@ -307,8 +307,13 @@ describe("der Planer ist seit ADR-0163 symmetrisch", () => {
   });
 
   it("und er plant den Bildverweis neuer Figuren mit", () => {
-    expect(PLANER).toContain('feld: "image_override_path"');
+    /* Seit CAT-11 nicht mehr von Hand, sondern als einer der Folgeschritte
+       aus `folgeschritte()` — `publish-new-figure.test.ts` rechnet nach, dass
+       er dabei ist. */
+    expect(PLANER).toContain('f.feld === "image_override_path"');
     expect(PLANER).toContain("Bild der neuen Zeile");
+    expect(readFileSync("src/lib/catalog/publish-new-figure.ts", "utf8"))
+      .toContain('image_override_path: "~"');
   });
 
   it("die Zielkategorie wird über (series_code, Name) aufgelöst, nie über die Zahl", () => {

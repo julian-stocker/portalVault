@@ -39,6 +39,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { riegel3, type Ausschluss, type Figur }
   from "../src/lib/catalog/sync-collision-gate.ts";
 import { GEREGELT, UNGEREGELT } from "../src/lib/catalog/publish-compare.ts";
+import { pruefeBasisziele } from "../src/lib/catalog/publish-variants.ts";
+import { folgeschritte } from "../src/lib/catalog/publish-new-figure.ts";
+import { OVP_REMOVED_SKY_IDS, pruefeEntfernte } from "../src/lib/catalog/ovp-removal.ts";
 import { liesModus, pruefeEinwegrichtung, type Modus }
   from "../src/lib/catalog/publish-mode.ts";
 import { driftBericht, pruefeDrift, pruefeLedger, standAbdruck,
@@ -284,6 +287,15 @@ function geregelterStand(m: Map<string, Zeile>): Stand {
   for (const id of [...m.keys()].sort()) {
     const r = m.get(id)!;
     if (ausgeschlossen(r, D)) continue;
+    /*
+     * DIE 30 ENTFERNTEN OVP-DUPLIKATE GEHOEREN NICHT ZUM GEREGELTEN STAND
+     * (CAT-12, ADR-0166). Sie verschwinden erst auf Staging, dann auf
+     * Production; dazwischen fuehrt nur Production sie. Ohne diese Zeile
+     * stuende der Stand in diesem Fenster ungleich, und der Publish brache
+     * nach dem Schreiben an GLEICHSTAND ab. NICHT in `ausgeschlossen()`:
+     * die zaehlt im versiegelten Bootstrap-Fingerprint mit.
+     */
+    if (OVP_REMOVED_SKY_IDS.has(id)) continue;
     out[id] = GEREGELT.map((f) => t(r[f])).join("|");
   }
   return out;
@@ -563,35 +575,26 @@ function planeFigurenanlage(ziel: Umgebung) {
         catalog_status: r.catalog_status, source: r.source,
         image_file: r.image_file ?? null, usk_rating: r.usk_rating ?? null,
       } });
-    for (const f of ["types", "visible_type", "familie", "base_sky_id"] as const) {
-      if (t(r[f]) !== "~") {
-        plan.push({ ziel, art: "feld-neu", sky_id: id, feld: f, klasse: "B",
-          von: "~", nach: t(r[f]), weg: WEG[f], grund: "Wert der neuen Zeile" });
-      }
-    }
     /*
-     * UND DER BILDVERWEIS. Eine neue Zeile ohne ihn waere dieselbe Figur
-     * ohne ihr Bild — bei `SKY-0821` das einzige, was sie zeigt. Der
-     * Storage-Transfer muss das Objekt vorher gebracht haben; `catalog:finish`
-     * faehrt Etappe A deshalb vor C und D.
+     * DIE FOLGESCHRITTE — ALLE, IN EINEM LAUF (CAT-11).
+     *
+     * Bis hierher standen hier vier Felder und der Bildverweis von Hand.
+     * `display_name_override` und `visible_type_decided` fehlten, und eine
+     * neue Figur wurde erst im ZWEITEN Publish vollstaendig. Jetzt rechnet
+     * `folgeschritte()` gegen den Zustand NACH der Anlage: jedes geregelte
+     * Feld, das davon abweicht, bekommt einen Schritt.
+     *
+     * Der Bildverweis bleibt ein direktes `update` mit Compare-and-Set
+     * (nicht `system_set_image_override`) und laeuft im Apply zuletzt
+     * (FELDRANG 9); der Storage-Transfer muss das Objekt vorher gebracht
+     * haben.
      */
-    if (t(r.image_override_path) !== "~") {
-      plan.push({ ziel, art: "feld-neu", sky_id: id, feld: "image_override_path",
-        klasse: "A", von: "~", nach: t(r.image_override_path),
-        /*
-         * DER WEG IST EIN DIREKTES `update` MIT COMPARE-AND-SET, nicht die
-         * RPC. Eine erste Fassung schrieb hier `R system_set_image_override
-         * (0035)` — und der Apply-Pfad ruft diese Funktion nirgends auf
-         * (gemessen: 0 Treffer). Eine Wegangabe, die etwas anderes verspricht
-         * als geschieht, ist schlimmer als keine.
-         *
-         * Das direkte `update` ist hier auch das Richtige: es traegt die
-         * Vergleichsbedingung IN der schreibenden Anweisung, was die RPC
-         * nicht tut. Dass der Pfad zur Figur gehoert, prueft der
-         * Storage-Transfer in seinem Riegel 3 — dieselbe Bedingung, nur
-         * frueher.
-         */
-        weg: WEG.image_override_path, grund: "Bild der neuen Zeile" });
+    const quelleFelder = Object.fromEntries(GEREGELT.map((f) => [f, t(r[f])]));
+    for (const f of folgeschritte(quelleFelder, GEREGELT)) {
+      plan.push({ ziel, art: "feld-neu", sky_id: id, feld: f.feld, klasse: klasse(f.feld),
+        von: f.von, nach: f.nach,
+        weg: WEG[f.feld] ?? "R update (nicht journalisierbar)",
+        grund: f.feld === "image_override_path" ? "Bild der neuen Zeile" : "Wert der neuen Zeile" });
     }
   }
 }
@@ -657,6 +660,31 @@ for (const id of [...sS.keys()].sort()) {
   }
 }
 
+/* ------------------------ RIEGEL 6: keine entfernte SKY-ID kommt zurueck */
+/*
+ * IN BEIDEN MODI (CAT-12, ADR-0166). Die 30 OVP-Duplikate werden erst auf
+ * Staging und spaeter auf Production entfernt. Dazwischen fuehrt Production
+ * sie noch — und der BOOTSTRAP plant fehlende Figuren auch nach Staging. Ein
+ * Plan, der eine davon anlegt oder beschreibt, ist falsch, egal in welche
+ * Richtung. Die Datenbank wuerde die Anlage ohnehin abweisen
+ * (`skylanders_refuse_removed`, 0167); hier faellt es auf, bevor geschrieben
+ * wird.
+ */
+{
+  const r6 = pruefeEntfernte(plan);
+  if (r6.length > 0) {
+    console.error(`\n  RIEGEL 6 — Abbruch. ${r6.length} Schritt(e) betreffen dauerhaft `
+      + "entfernte OVP-Duplikate (data/catalog/ovp-removal.json):\n");
+    for (const x of r6.slice(0, 20)) {
+      console.error(`    ${x.ziel} ${x.art}${x.feld ? ` ${x.feld}` : ""} ${x.sky_id}`);
+    }
+    console.error("\n  Erst auf BEIDEN Umgebungen entfernen (supabase/operations/*-ovp-removal.sql),\n"
+      + "  dann neu planen. Nie eine entfernte SKY-ID wieder anlegen (ADR-0001).\n");
+    process.exit(1);
+  }
+  console.log("  Riegel 6 ok — kein Schritt betrifft ein entferntes OVP-Duplikat\n");
+}
+
 /* ----------------------------------- RIEGEL 4: die Einwegrichtung */
 /*
  * DIE REGELN EINZELN ABZUSCHALTEN GENUEGT NICHT.
@@ -684,6 +712,28 @@ if (!BOOTSTRAP) {
     process.exit(1);
   }
   console.log("  Riegel 4 ok — kein Schritt zeigt nach Staging\n");
+}
+
+/* --------------------------- RIEGEL 5: keine verwaiste Basisfigur */
+/*
+ * Eine Zuordnung `base_sky_id` muss auf dem Ziel auf eine Figur zeigen, die
+ * es dort gibt oder die dieser Lauf anlegt. Fehlt sie — typisch: die
+ * Basisfigur ist auf Staging ein Entwurf, und Entwuerfe traegt der Publish
+ * nicht —, bricht der Lauf HIER ab, im Plan, und nicht mitten im Apply am
+ * Fremdschluessel aus 0159 (CAT-11, `src/lib/catalog/publish-variants.ts`).
+ */
+/* Nur im Publish: der versiegelte Bootstrap bleibt, wie er gelaufen ist. */
+if (!BOOTSTRAP) {
+  const r5 = pruefeBasisziele(plan.filter((s) => s.ziel === "production"), new Set(sP.keys()));
+  if (!r5.ok) {
+    console.error(`\n  RIEGEL 5 — Abbruch. ${r5.verwaist.length} Variantenzuordnung(en) `
+      + "zeigen auf Production auf eine Basisfigur, die dort fehlt und nicht angelegt wird:\n");
+    for (const x of r5.verwaist.slice(0, 20)) console.error(`    ${x.sky_id} → ${x.nach}`);
+    console.error("\n  Meist ist die Basisfigur auf Staging ein Entwurf. Erst sie "
+      + "veroeffentlichen oder ausblenden, dann neu planen.\n");
+    process.exit(1);
+  }
+  console.log("  Riegel 5 ok — jede Variantenzuordnung hat ihre Basisfigur auf Production\n");
 }
 
 /* ------------------------------------------------------------- Ausgabe */

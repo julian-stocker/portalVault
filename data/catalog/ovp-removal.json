@@ -1,0 +1,246 @@
+{
+ "_": "CAT-12 / ADR-0166. Die 30 eigenstaendigen OVP-Katalogduplikate, die SkyIsles dauerhaft entfernt (Betreiberentscheidung 2026-10-31). EXPLIZIT, nicht aus einem Namensmuster: jede Zeile ist auf Staging UND Production am 2026-10-31 rein lesend mit SKY-ID, Serie und Rohnamen bestaetigt. Diese Liste ist die einzige Quelle fuer: system_remove_ovp_figure (0167, dort als Konstante, ein Test haelt beide gleich), den Importausschluss (tools/import-catalog.mts), Riegel 6 des Publish und die Entfernung aus data/catalog/products.json. Die SKY-IDs werden NIE wieder vergeben (ADR-0001); die Datenbank fuehrt sie in public.catalog_removed_sky_ids.",
+ "erhoben": "2026-10-31",
+ "eintraege": [
+  {
+   "sky_id": "SKY-0012",
+   "series_code": "SA",
+   "name": "Elite Boomer",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0011"
+  },
+  {
+   "sky_id": "SKY-0013",
+   "series_code": "SA",
+   "name": "Elite Boomer (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0011"
+  },
+  {
+   "sky_id": "SKY-0018",
+   "series_code": "SA",
+   "name": "Elite Chop Chop",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0017"
+  },
+  {
+   "sky_id": "SKY-0019",
+   "series_code": "SA",
+   "name": "Elite Chop Chop (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0017"
+  },
+  {
+   "sky_id": "SKY-0023",
+   "series_code": "SA",
+   "name": "Elite Dino Rang",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0022"
+  },
+  {
+   "sky_id": "SKY-0024",
+   "series_code": "SA",
+   "name": "Elite Dino Rang (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0022"
+  },
+  {
+   "sky_id": "SKY-0031",
+   "series_code": "SA",
+   "name": "Elite Eruptor",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0030"
+  },
+  {
+   "sky_id": "SKY-0032",
+   "series_code": "SA",
+   "name": "Elite Eruptor (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0030"
+  },
+  {
+   "sky_id": "SKY-0036",
+   "series_code": "SA",
+   "name": "Elite Ghost Roaster",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0035"
+  },
+  {
+   "sky_id": "SKY-0037",
+   "series_code": "SA",
+   "name": "Elite Ghost Roaster (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0035"
+  },
+  {
+   "sky_id": "SKY-0041",
+   "series_code": "SA",
+   "name": "Elite Gill Grunt",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0040"
+  },
+  {
+   "sky_id": "SKY-0042",
+   "series_code": "SA",
+   "name": "Elite Gill Grunt (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0040"
+  },
+  {
+   "sky_id": "SKY-0050",
+   "series_code": "SA",
+   "name": "Elite Slam Bam",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0049"
+  },
+  {
+   "sky_id": "SKY-0051",
+   "series_code": "SA",
+   "name": "Elite Slam Bam (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0049"
+  },
+  {
+   "sky_id": "SKY-0057",
+   "series_code": "SA",
+   "name": "Elite Spyro",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0056"
+  },
+  {
+   "sky_id": "SKY-0058",
+   "series_code": "SA",
+   "name": "Elite Spyro (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0056"
+  },
+  {
+   "sky_id": "SKY-0061",
+   "series_code": "SA",
+   "name": "Elite Stealth Elf",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0060"
+  },
+  {
+   "sky_id": "SKY-0062",
+   "series_code": "SA",
+   "name": "Elite Stealth Elf (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0060"
+  },
+  {
+   "sky_id": "SKY-0067",
+   "series_code": "SA",
+   "name": "Elite Terrafin",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0066"
+  },
+  {
+   "sky_id": "SKY-0068",
+   "series_code": "SA",
+   "name": "Elite Terrafin (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0066"
+  },
+  {
+   "sky_id": "SKY-0072",
+   "series_code": "SA",
+   "name": "Elite Trigger Happy",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0071"
+  },
+  {
+   "sky_id": "SKY-0073",
+   "series_code": "SA",
+   "name": "Elite Trigger Happy (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0071"
+  },
+  {
+   "sky_id": "SKY-0076",
+   "series_code": "SA",
+   "name": "Elite Voodood",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0075"
+  },
+  {
+   "sky_id": "SKY-0077",
+   "series_code": "SA",
+   "name": "Elite Voodood (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0075"
+  },
+  {
+   "sky_id": "SKY-0084",
+   "series_code": "SA",
+   "name": "Elite Whirlwind",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0083"
+  },
+  {
+   "sky_id": "SKY-0085",
+   "series_code": "SA",
+   "name": "Elite Whirlwind (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0083"
+  },
+  {
+   "sky_id": "SKY-0090",
+   "series_code": "SA",
+   "name": "Elite Zook",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-1",
+   "regulaere_figur": "SKY-0089"
+  },
+  {
+   "sky_id": "SKY-0091",
+   "series_code": "SA",
+   "name": "Elite Zook (2)",
+   "card_type": "elite",
+   "gruppe": "elite-ovp-series-2",
+   "regulaere_figur": "SKY-0089"
+  },
+  {
+   "sky_id": "SKY-0564",
+   "series_code": "I",
+   "name": "Kaos in OVP",
+   "card_type": "standard",
+   "gruppe": "ovp-im-namen",
+   "regulaere_figur": "SKY-0563"
+  },
+  {
+   "sky_id": "SKY-0591",
+   "series_code": "I",
+   "name": "Dark Pyramid - OVP",
+   "card_type": "standard",
+   "gruppe": "ovp-im-namen",
+   "regulaere_figur": "SKY-0590"
+  }
+ ]
+}

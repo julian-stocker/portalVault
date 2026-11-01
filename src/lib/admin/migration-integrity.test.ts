@@ -288,7 +288,11 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * Migration enthält genau EINE Anweisung — sie kann die Ursache nicht
      * sein. Die Prüfdatei wurde nicht angefasst.
      */
-    expect(zeilen.length).toBe(37);
+    /* `0166` kam am 2026-10-31 dazu — die achtunddreissigste —, `0167`
+       am selben Tag als neununddreissigste. */
+    expect(zeilen.length).toBe(39);
+    expect(zeilen.map((z) => z.datei)).toContain("0167_ovp_removal.sql");
+    expect(zeilen.map((z) => z.datei)).toContain("0166_admin_create_variant_figure.sql");
     for (const datei of ["0144_platform_export_calculations.sql",
                          "0145_favorites.sql",
                          "0146_offer_state.sql",
@@ -377,7 +381,10 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        achtundzwanzig seit `0158`, neunundzwanzig seit `0153`, dreißig seit
        `0159` und einunddreißig seit `0160` am 2026-10-28, zweiunddreißig seit
        `0161`, dreiunddreißig seit `0162`, vierunddreißig seit `0163` und
-       fünfunddreißig seit `0164` am 2026-10-29. Nur `0130` weicht ab und
+       fünfunddreißig seit `0164` am 2026-10-29, sechsunddreißig seit `0165`
+       am 2026-10-30 und siebenunddreißig seit `0166` und achtunddreißig seit `0167` am
+       2026-10-31. Nur
+       `0130` weicht ab und
        zeigt auf ihren Nachtrag.
 
        `0154` STEHT WEITER AUF `gleich`, OBWOHL `0156` IHREN RUMPF ERSETZT.
@@ -391,7 +398,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(36);
+    expect(gleiche.length).toBe(38);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

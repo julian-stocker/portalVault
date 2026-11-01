@@ -133,7 +133,8 @@ describe("catalog-sync-apply.mts — die Tore", () => {
 
   it("überspringt visible_type_decided, wenn die RPC es mitsetzt", () => {
     expect(CODE).toContain("setztBanner");
-    expect(CODE).toContain('s.feld === "visible_type_decided" && setztBanner.has(s.sky_id)');
+    /* Nur wenn das Ziel `true` ist — genau das, was die RPC setzt (CAT-11). */
+    expect(CODE).toContain('s.feld === "visible_type_decided" && setztBanner.has(s.sky_id) && s.nach === "true"');
   });
 
   it("schreibt catalog_visible und catalog_status in EINER Anweisung", () => {
@@ -279,8 +280,9 @@ describe("eine im Lauf angelegte Figur bekommt eine echte Vergleichsmarke", () =
       '  image_override_path: "R update (Trigger journalisiert)",');
     expect(planer).not.toContain(
       '  image_override_path: "R system_set_image_override (0035)",');
-    // Und beide Aufrufstellen nehmen den Wert aus der Tabelle.
-    expect(planer).toContain("weg: WEG.image_override_path");
+    // Und die Aufrufstellen nehmen den Wert aus der Tabelle — seit CAT-11
+    // fuer neue Figuren generisch ueber `WEG[f.feld]` (folgeschritte()).
+    expect(planer).toContain("weg: WEG[f.feld]");
     // Der Apply-Pfad ruft die RPC nirgends auf — das war der Anlass.
     expect(QUELLE).not.toContain("system_set_image_override");
   });
@@ -313,14 +315,18 @@ describe("nach jedem Schreibvorgang wird die Vergleichsmarke nachgezogen", () =>
     expect(Q).toContain("vorhanden.updated_at = neueMarke");
   });
 
-  it("und nach den Klasse-B-RPCs wird sie nachgelesen", () => {
-    expect(Q).toContain("async function markeNachziehen(");
-    expect(Q).toContain("await markeNachziehen(s.sky_id)");
+  it("und nach den Klasse-B-RPCs wird sie nachgelesen — mit dem Feldwert (TOR 2b, CAT-11)", () => {
+    /* `markeNachziehen` las nur die Marke; seit CAT-11 liest `liesKlasseB`
+       Marke UND Wert, und die neue Marke wird nur uebernommen, wenn der Wert
+       der geplante ist. */
+    expect(Q).toContain("async function liesKlasseB(");
+    expect(Q).toContain("const nachher = await liesKlasseB(s.sky_id, feldB)");
+    expect(Q).toContain("if (eintrag) eintrag.updated_at = nachher.marke");
   });
 
-  it("ein fehlgeschlagenes Nachziehen bricht ab, statt stillschweigend weiterzumachen", () => {
-    expect(Q).toContain("liess sich nach dem Schreiben");
-    expect(Q).toContain("wuerde an TOR 2 scheitern");
+  it("ein fehlgeschlagenes Nachlesen bricht ab, statt stillschweigend weiterzumachen", () => {
+    expect(Q).toContain("liess sich nicht lesen");
+    expect(Q).toContain("Es wird nichts geschrieben.");
   });
 
   /*

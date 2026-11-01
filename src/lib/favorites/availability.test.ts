@@ -501,6 +501,12 @@ const BIS = "0151";
        * jeder Katalogaenderung.
        */
       "skylanders.skylanders_canonical_types",
+      /*
+       * 0167, CAT-12: weist die Anlage einer dauerhaft entfernten SKY-ID ab.
+       * Er feuert nur bei `insert` und liest nur den Grabstein — keine
+       * Spalte, die die Verfuegbarkeit beruehrt.
+       */
+      "skylanders.skylanders_refuse_removed_trg",
     ].sort());
   });
 

@@ -1,5 +1,5 @@
 {
-  "note": "STAGING ONLY. A controlled shop fixture for judging the customer-facing UX: 21 canonical figures, 26 stock positions, every public shop state the product can show. Contains no production stock, no real purchase costs, no customer data. Quantities are invented, small and deliberately unrealistic; they exist to produce a state on screen, not to describe a shelf. Applied by tools/seed-shop-fixtures.mts, which refuses to run anywhere but staging.",
+  "note": "STAGING ONLY. A controlled shop fixture for judging the customer-facing UX: 20 canonical figures, 25 stock positions, every public shop state the product can show. Contains no production stock, no real purchase costs, no customer data. Quantities are invented, small and deliberately unrealistic; they exist to produce a state on screen, not to describe a shelf. Applied by tools/seed-shop-fixtures.mts, which refuses to run anywhere but staging.",
   "approved": "2026-09-11",
   "positions": [
     { "skyId": "SKY-0053", "name": "Spyro",                                   "series": "SA", "condition": "loose", "quantity": 3, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
@@ -8,7 +8,6 @@
     { "skyId": "SKY-0043", "name": "Hex",                                     "series": "SA", "condition": "boxed", "quantity": 2, "salePrice": 21.5,   "isListed": true,  "state": "boxed only, manual price - shortest name in the catalog" },
     { "skyId": "SKY-0096", "name": "Anvil Rain",                              "series": "SA", "condition": "loose", "quantity": 5, "salePrice": null,   "isListed": true,  "state": "auto price on the cheapest figure in the catalog (0.89)" },
     { "skyId": "SKY-0092", "name": "Sidekick Gill Runt",                      "series": "SA", "condition": "loose", "quantity": 1, "salePrice": null,   "isListed": true,  "state": "auto price, last one in stock" },
-    { "skyId": "SKY-0090", "name": "Elite Zook",                              "series": "SA", "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "NO market price and no manual price -> no shop price at all; listed but absent from shop_offers()" },
 
     { "skyId": "SKY-0114", "name": "Bouncer",                                 "series": "G",  "condition": "loose", "quantity": 2, "salePrice": null,   "isListed": true,  "state": "auto price, in stock" },
     { "skyId": "SKY-0114", "name": "Bouncer",                                 "series": "G",  "condition": "boxed", "quantity": 0, "salePrice": 39.9,   "isListed": true,  "state": "listed but SOLD OUT alongside a buyable loose - only the loose price may be offered" },

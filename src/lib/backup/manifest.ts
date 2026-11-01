@@ -130,6 +130,9 @@ export const EXCLUDED_TABLES: Readonly<Record<string, string>> = {
   inventory_imports: "Excel-Importläufe. Werkzeugspur, kein Geschäftsvorfall.",
   inventory_import_rows: "Zeilen eines Excel-Importlaufs.",
   inventory_import_mappings: "Zuordnungen eines Excel-Importlaufs.",
+  catalog_removed_sky_ids:
+    "Grabstein dauerhaft entfernter Katalog-SKY-IDs (0167, ADR-0166). Katalogverwaltung, " +
+    "kein Geschäftsvorfall des Betriebs.",
 
   /* Konten und lebende Stammdaten */
   profiles: "Plattformkonten, keine Geschäftsdaten.",

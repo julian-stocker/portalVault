@@ -26,8 +26,6 @@
         "SKY-0054",
         "SKY-0055",
         "SKY-0056",
-        "SKY-0057",
-        "SKY-0058",
         "SKY-0177",
         "SKY-0285",
         "SKY-0286"
@@ -46,8 +44,6 @@
         "SKY-0038",
         "SKY-0039",
         "SKY-0040",
-        "SKY-0041",
-        "SKY-0042",
         "SKY-0162",
         "SKY-0163",
         "SKY-0270",
@@ -67,8 +63,6 @@
       "sky_ids": [
         "SKY-0059",
         "SKY-0060",
-        "SKY-0061",
-        "SKY-0062",
         "SKY-0178",
         "SKY-0179",
         "SKY-0287",
@@ -90,8 +84,6 @@
         "SKY-0069",
         "SKY-0070",
         "SKY-0071",
-        "SKY-0072",
-        "SKY-0073",
         "SKY-0182",
         "SKY-0271",
         "SKY-0272",
@@ -111,8 +103,6 @@
       "sky_ids": [
         "SKY-0029",
         "SKY-0030",
-        "SKY-0031",
-        "SKY-0032",
         "SKY-0158",
         "SKY-0159",
         "SKY-0283",
@@ -183,8 +173,6 @@
         "SKY-0081",
         "SKY-0082",
         "SKY-0083",
-        "SKY-0084",
-        "SKY-0085",
         "SKY-0183",
         "SKY-0184",
         "SKY-0279",
@@ -266,7 +254,7 @@
       "source_url": "https://skylanders.fandom.com/wiki/Dino-Rang",
       "source_label": "Skylanders Wiki (Fandom)",
       "verified_at": "2026-09-04",
-      "sky_ids": ["SKY-0021", "SKY-0022", "SKY-0023", "SKY-0024"]
+      "sky_ids": ["SKY-0021", "SKY-0022"]
     },
     {
       "canonical_name": "Kaos",
@@ -277,7 +265,7 @@
       "source_url": "https://skylanders.fandom.com/wiki/Kaos_(Sensei)",
       "source_label": "Skylanders Wiki (Fandom)",
       "verified_at": "2026-09-04",
-      "sky_ids": ["SKY-0563", "SKY-0564"]
+      "sky_ids": ["SKY-0563"]
     },
     {
       "canonical_name": "Ninjini",
