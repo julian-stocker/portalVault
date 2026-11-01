@@ -369,11 +369,18 @@ export function withCharacterFamily(
  * hatte — auch keines. Und `displayName` bleibt unberührt: „Chrome Spyro"
  * heißt weiter „Chrome Spyro" und sortiert unter Spyro.
  *
- * SIE NIMMT DEN ANZEIGENAMEN DER BASISFIGUR, nicht deren Rohnamen: das ist
- * der Name, unter dem die Basisfigur selbst einsortiert ist, und nur so
- * landen beide im gleichen Block. Steht die Basisfigur nicht in der Liste —
- * weil sie versteckt ist oder ein Entwurf —, bleibt die Variante, wie sie
- * kam. Eine fehlende Zuordnung beschädigt nichts.
+ * ZUM SORTIEREN NIMMT SIE DEN SORTIERNAMEN DER BASISFIGUR — den, unter dem
+ * die Basisfigur selbst einsortiert ist, nachdem Namensregel und Familie
+ * gelaufen sind. Nur so landen beide im gleichen Block. Bis CAT-16 stand
+ * hier der ANZEIGENAME, in der Annahme, beide seien gleich. Sie sind es
+ * nicht, sobald die Familie die Basisfigur umsortiert: „Fire Bone Hot Dog"
+ * (SKY-0274, Charakter Hot Dog) sortierte unter „Hot Dog", ihre drei
+ * Frito-Lay-Varianten unter „Fire Bone Hot Dog" — mitten im Alphabet
+ * getrennt. Für die SUCHE bleibt es beim Anzeigenamen: den tippt man.
+ *
+ * Steht die Basisfigur nicht in der Liste — weil sie versteckt ist oder ein
+ * Entwurf —, bleibt die Variante, wie sie kam. Eine fehlende Zuordnung
+ * beschädigt nichts.
  */
 export function withBaseFigure(
   figures: readonly CatalogFigure[],
@@ -381,12 +388,17 @@ export function withBaseFigure(
   /* Der Anzeigename je SKY-ID, aus derselben Liste. Kein zweiter Weg und
      keine zweite Abfrage: `fetchCatalog()` hält den ganzen Katalog ohnehin. */
   const anzeige = new Map<string, string>();
-  for (const f of figures) anzeige.set(f.skyId, f.displayName);
+  const sortName = new Map<string, string>();
+  for (const f of figures) {
+    anzeige.set(f.skyId, f.displayName);
+    sortName.set(f.skyId, f.sortBaseName);
+  }
 
   return figures.map((figure) => {
     if (figure.baseSkyId === null) return figure;
     const basis = anzeige.get(figure.baseSkyId);
-    if (basis === undefined) return figure;
+    const gruppe = sortName.get(figure.baseSkyId);
+    if (basis === undefined || gruppe === undefined) return figure;
     /*
      * UND DIE SUCHE KENNT DEN NAMEN DER BASISFIGUR (CAT-11). Wer „Boomer"
      * sucht, findet seine Varianten — auch eine, deren eigener Name das Wort
@@ -399,8 +411,8 @@ export function withBaseFigure(
     const searchIndex = new Set(vorhanden.split(" | ")).has(form)
       ? vorhanden
       : vorhanden === "" ? form : `${vorhanden} | ${form}`;
-    if (basis === figure.sortBaseName && searchIndex === vorhanden) return figure;
-    return { ...figure, sortBaseName: basis, searchIndex };
+    if (gruppe === figure.sortBaseName && searchIndex === vorhanden) return figure;
+    return { ...figure, sortBaseName: gruppe, searchIndex };
   });
 }
 

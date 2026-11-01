@@ -432,3 +432,76 @@ describe("Familie und Basisfigur sind zwei Dinge", () => {
     expect(fn).toContain("figure.baseSkyId");
   });
 });
+
+/* ==========================================================================
+ * CAT-16 — Familie und Basisfigur dürfen eine Gruppe nicht zerreißen
+ *
+ * Gemessen auf Staging am 2026-11-01 (rein lesend): „Fire Bone Hot Dog"
+ * (SKY-0274, Swap Force, Charakter Hot Dog) ist Basisfigur von drei
+ * Frito-Lay-Varianten. Die Familie sortierte die Basisfigur unter „Hot Dog",
+ * `withBaseFigure()` die Varianten unter „Fire Bone Hot Dog" — zwei Blöcke,
+ * mitten im Alphabet getrennt. Dasselbe bei Lava Barf Eruptor, Mega Ram
+ * Spyro und Ninja Stealth Elf.
+ * ======================================================================= */
+
+describe("eine Basisfigur, die die Familie umsortiert, nimmt ihre Varianten mit", () => {
+  const hotDog = new Map([[42, "Hot Dog"]]);
+  const basis = figur({ name: "Fire Bone Hot Dog", skyId: "SKY-0274", characterId: 42 });
+  const varianten = [
+    figur({ name: "Frito-Lay Hot Dog (Red)", skyId: "SKY-0275", baseSkyId: "SKY-0274",
+            characterId: 42, cardType: "chase" }),
+    figur({ name: "Frito-Lay Hot Dog (Purple)", skyId: "SKY-0276", baseSkyId: "SKY-0274",
+            characterId: 42, cardType: "chase" }),
+    figur({ name: "Frito-Lay Hot Dog (Green)", skyId: "SKY-0277", baseSkyId: "SKY-0274",
+            characterId: 42, cardType: "chase" }),
+  ];
+  /* Ein Nachbar, der alphabetisch ZWISCHEN „Fire Bone …" und „Hot Dog" steht. */
+  const nachbar = figur({ name: "Freeze Blade", skyId: "SKY-0217" });
+
+  function katalog(eingabe: CatalogFigure[]) {
+    // Dieselbe Reihenfolge der Durchgänge wie `fetchCatalog()`.
+    return sortFigures(withBaseFigure(withCharacterFamily(eingabe, hotDog)));
+  }
+
+  it("die Varianten sortieren unter dem Namen, unter dem die Basisfigur steht", () => {
+    const mit = withBaseFigure(withCharacterFamily([basis, ...varianten], hotDog));
+    expect(new Set(mit.map((f) => f.sortBaseName))).toEqual(new Set(["Hot Dog"]));
+  });
+
+  it("und stehen direkt hinter ihr — nichts schiebt sich dazwischen", () => {
+    const namen = katalog([...varianten, nachbar, basis]).map((f) => f.name);
+    const i = namen.indexOf("Fire Bone Hot Dog");
+    expect(namen.slice(i, i + 4)).toEqual([
+      "Fire Bone Hot Dog",
+      "Frito-Lay Hot Dog (Green)",
+      "Frito-Lay Hot Dog (Purple)",
+      "Frito-Lay Hot Dog (Red)",
+    ]);
+    expect(namen).toContain("Freeze Blade");
+  });
+
+  it("keine Kachel geht verloren und keine kommt doppelt", () => {
+    const eingabe = [...varianten, nachbar, basis];
+    const aus = katalog(eingabe);
+    expect(aus).toHaveLength(eingabe.length);
+    expect(new Set(aus.map((f) => f.skyId)).size).toBe(eingabe.length);
+  });
+
+  it("die Suche kennt weiter den ANZEIGENAMEN der Basisfigur", () => {
+    const mit = withBaseFigure(withCharacterFamily([basis, ...varianten], hotDog));
+    for (const v of mit.filter((f) => Boolean(f.baseSkyId))) {
+      expect(v.searchIndex, v.name).toContain("fire bone hot dog");
+    }
+  });
+
+  it("Name, Siegel und Familie der Varianten bleiben unberührt", () => {
+    const mit = withBaseFigure(withCharacterFamily([basis, ...varianten], hotDog));
+    for (const v of mit.filter((f) => Boolean(f.baseSkyId))) {
+      const vorher = varianten.find((x) => x.skyId === v.skyId)!;
+      expect(v.displayName).toBe(vorher.displayName);
+      expect(v.sortVariantLabel).toBe(vorher.sortVariantLabel);
+      expect(v.characterId).toBe(vorher.characterId);
+      expect(v.baseSkyId).toBe(vorher.baseSkyId);
+    }
+  });
+});
