@@ -6521,6 +6521,71 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-10-31, OVP-Katalogduplikate: endgültige Entfernung vorbereitet (ADR-0166).
+Migration `0167` ist auf Staging angewendet (berechtigter Postflight `9998 = 0`,
+`9999 = 0`, Grabstein leer, Katalog 696 und alle 30 OVP-Zeilen unverändert,
+Sequenz `929|true`); auf Production nicht. **2026-11-01: die 30 sind auf
+Staging entfernt** (`staging-ovp-removal.sql`, Betreiber): Katalog 696 → 666,
+30 Grabsteine, 84 Importprotokolle und die leere Fixture fort, 16 reguläre
+Figuren, Sammlung, Angebote und Shopzahlen gleich der Baseline, Publish-Plan
+0 Schritte. **Staging abgeschlossen und berechtigt nachkontrolliert**
+(`ovp_removal_postflight.sql` als `postgres`: `9998 = 0`, `9999 = 0`,
+Sequenz `929|true` nachgewiesen). Dokumentationslücke: die NOTICE-Zeilen
+A3/`C ok` des Laufs liegen nicht vor. **Production:
+`0167` angewendet (P-1, 2026-11-01; Abweichung 804 = Sammlungen/Favoriten
+des Betreibers, bestätigt); **die 30 entfernt und gesperrt (P-2, 2026-11-01,
+berechtigte Nachkontrolle `9998 = 0`, `9999 = 0`, Sequenz `5001|false`)**,
+Katalog 627. **P-3 abgeschlossen (2026-11-01):** Publish-Ledger 655 → 625
+(`16746058d479…`), ohne Datenbank- oder Storage-Schreiben; neuer Plan 0
+Schritte, Staging = Production = Ledger. **OVP-Bereinigung vollständig.** **`0166` wird auf
+Production bewusst nicht angewendet** (ADR-0167, 2026-11-01: Staging ist die
+einzige redaktionelle Katalogquelle; die vorbereiteten Dateien bleiben Archiv).
+**Folgeaufgabe CAT-13 (nicht gebaut):** serverseitige Katalogschreibsperre auf
+Production in der Datenbank — zuerst die Publish-Schritte, die heute über eine
+Adminsitzung schreiben, auf service-role-eigene Wege umstellen, dann sperren;
+UI zusätzlich ausblenden. Bis dahin gilt die Sperre als Betriebsregel. Eine
+eigene Production-Sichtbarkeitssteuerung (nicht `catalog_visible`) ist eine
+spätere, getrennte Aufgabe. Offen außerdem: Silver-Boomer-Bereinigung auf
+Staging (`silver_boomer_cleanup_plan.md`).
+Vorbereitet:** `prod_0167_preflight.sql`, `prod-0167.sql`,
+`prod_0167_postflight.sql`, `prod-ovp-removal.sql`; Production lesend
+geprüft: alle 30 exakt, 0 Verweise. Plan: `ovp_cleanup_plan.md` §4b.
+Nichts committet.** Betreiberentscheidung: die 30
+eigenständigen OVP-Einträge (28 Eon's-Elite-Schachteln, `Kaos in OVP`,
+`Dark Pyramid - OVP`) verschwinden auf beiden Umgebungen. Vorbereitet: Liste
+`data/catalog/ovp-removal.json`, Migration `0167` (Grabstein, Anlage-Riegel,
+Entfernungsfunktion nur für die 30), Betriebsvorgänge
+`staging-ovp-removal.sql` / `prod-ovp-removal.sql`, Importausschluss,
+Publish-Riegel 6, Quelldaten ohne die 30 (`products.json` 570 Zeilen). Die
+Admin-Löschsperre nennt jetzt die echte Tabelle statt „public". Ablauf und
+Risiken: `supabase/checks/ovp_cleanup_plan.md`.
+
+**2026-10-31, „Variante von" im Dialog „Neue Figur", Löschdialog, Varianten im
+Publish (ADR-0165) — Code fertig und geprüft, Migration `0166` **auf Staging
+angewendet** (2026-10-31, Postflight berechtigt `9998 = 0`, `9999 = 0`,
+Sequenz `929|true`, Katalog und die drei Boomer-Zeilen abdruckgleich), auf
+Production nicht; nichts committet:**
+
+| | |
+|---|---|
+| Dialog „Neue Figur" | kompakt: Variante von · Name · Varianten-Typ + Serie · Kategorie + Kartenkunst · „Weitere Optionen" (zu) · einzeilige Vorschau · Aktionen im festen Fuß; Fehler am Feld |
+| Persistenz | `admin_create_variant_figure` (`0166`): Anlage, `base_sky_id`, Types, Banner in **einer** Transaktion über die vier vorhandenen Schreibwege |
+| Katalog | Suche findet Varianten auch über den Namen der Basisfigur; Detailseite zeigt Typ-Badge, „Variante von …" und die Varianten |
+| Löschdialog | im gemeinsamen `Modal` (portiert, `dvh`-Deckel, fester Fuß); Prüfungen in `0162` unverändert |
+| Publish | Riegel 5 (keine verwaiste Basisfigur) im Planer, Abhängigkeitsordnung der `base_sky_id`-Schritte im Apply |
+| Fehler beim Anlegen | benannt und serverseitig protokolliert statt eines Einheitssatzes |
+| Verwerfen-Dialog | ebenfalls im gemeinsamen `Modal`; `0155` unverändert |
+| Publish neuer Figuren | vollständig in **einem** Lauf (auch Anzeigename und Bannerkennzeichen); Test: erster Lauf, danach leerer Plan |
+| Funktionsschritte im Publish | TOR 2b: Marke und Wert vorher, geplanter Wert nachher — nicht atomar, Rest über TOR 3 |
+| Prüfungen | `npm run check` grün; `npm test` grün, darunter 22 an echtem PostgreSQL für `0166` (inkl. Hülle mit Stempelabbruch, Wiederholung, Rücknahme) |
+
+**Silver Boomer auf Staging (rein lesend gemessen):** zwei Zeilen, `SKY-0836`
+(CAT-03-Entwurf, mit Bild) und `SKY-0929` (Dialog, `chase`), beide ohne
+Basisfigur, Type und Banner. **Nichts geändert** — welche bleibt, entscheidet
+der Betreiber (ADR-0165, „offen"; Plan:
+`supabase/checks/silver_boomer_cleanup_plan.md`). Boomer (`SKY-0010`) hat keinen Charakter,
+weil `characters.json` ihn nicht führt; das ist kein Datenfehler.
+
 **2026-10-31, der reguläre Publish ist produktionsreif — drei Lücken
 geschlossen, alles lesend geprüft (ADR-0164):**
 

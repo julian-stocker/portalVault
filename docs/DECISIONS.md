@@ -12,8 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-10-30 (ADR-0162, `0159` auf Production — eine
-Gruppe aus einer Migration und die Ersetzung, die sie tragen muss).
+Letzte Aktualisierung: 2026-11-01 (ADR-0167, Staging ist die einzige redaktionelle
+Katalogquelle; Production-Schreibsperre als Folgeaufgabe CAT-13).
 
 ---
 
@@ -17054,6 +17054,285 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0167 · Staging ist die einzige redaktionelle Katalogquelle — Production schreibt den Katalog nur über den Publish
+
+**Status:** ANGENOMMEN · 2026-11-01 (Betreiberentscheidung). Die **Entscheidung** gilt ab
+sofort; die **serverseitige Schreibsperre auf Production ist nicht gebaut** und als
+Folgeaufgabe CAT-13 abgegrenzt (unten).
+**Betrifft:** ADR-0163 (präzisiert), ADR-0164 (Publish), ADR-0165 (`0166` nur Staging),
+ADR-0032/0039 (Adminrechte), ADR-0151 (Katalogstatus)
+
+### Entscheidung
+
+1. **Staging ist die einzige redaktionelle Quelle** für den Figurenkatalog: Figuren anlegen,
+   bearbeiten, löschen, verwerfen, zusammenführen, Variantenbeziehung, Types, Banner,
+   Kartenkunst, Familie, Bilder, Anzeigename, USK, Kategoriegruppen, Status und Sichtbarkeit.
+2. **Production ist ein kontrolliert veröffentlichter Spiegel.** Katalogänderungen erreichen
+   Production ausschließlich über `npm run catalog:publish` (ADR-0164).
+3. **Migration `0166` wird auf Production bewusst nicht angewendet.** Die vorbereiteten
+   Dateien (`prod_0166_preflight.sql`, `prod-0166.sql`, `prod_0166_postflight.sql`,
+   `prod-s-postflight-0166.sql`) bleiben als geprüftes Archiv liegen; sie sind kein
+   ausstehender Schritt. Der Dialog „Neue Figur" meldet ohne `0166` verständlich, dass
+   Varianten nicht direkt angelegt werden können.
+4. **Direkte Katalog-Schreibwege auf Production werden künftig vollständig gesperrt** —
+   serverseitig, in der Datenbank. Eine UI-Sperre oder Umgebungsvariable allein ist keine
+   Sicherheitsgrenze.
+5. **Eine eigene Production-Sichtbarkeitssteuerung** (kurzfristig ausblenden, ohne den
+   veröffentlichten Bestand zu ändern) ist eine **spätere, getrennte** Aufgabe.
+
+### Warum
+
+Eine auf Production angelegte oder geänderte Katalogzeile ist eine Abweichung, die nur
+Production führt. Der Driftriegel des Publish (ADR-0164) meldet sie (`nur_production` bzw.
+Feldabweichung) und hält **jeden** weiteren Publish an, bis sie von Hand aufgelöst ist. Zwei
+schreibende Quellen sind genau die bidirektionale Lage, die ADR-0163 ersetzt hat.
+
+### Bis CAT-13 gebaut ist
+
+Die Sperre ist eine **Betriebsregel**: im Production-Admin wird nichts am Katalog
+geschrieben. Bestehende Wege (`admin_create_figure`, die Editoren) sind technisch noch offen.
+
+### Folgeaufgabe CAT-13 — Production-Katalogschreibsperre (abgegrenzt, nicht gebaut)
+
+Erhoben am 2026-11-01, rein lesend am Code:
+
+* **Kein Client darf `skylanders` direkt schreiben** (`0033`: kein INSERT/UPDATE/DELETE-Grant
+  für `anon`/`authenticated`). Jeder Schreibweg ist eine `SECURITY DEFINER`-Funktion oder
+  der Service-Schlüssel. Die Sperre gehört deshalb **in die Datenbank**, an diese Wege.
+* **Redaktionelle Katalogwege (zu sperren):** `admin_create_figure`,
+  `admin_create_variant_figure`, `admin_set_catalog_status`, `admin_set_catalog_visible`,
+  `admin_merge_draft`, `admin_publish_as_variant`, `admin_publish_with_base`,
+  `admin_publish_variant_auto`, `admin_set_variant_base`, `admin_set_figure_types`,
+  `admin_set_visible_type`, `admin_set_card_type`, `admin_set_display_name_override`,
+  `admin_set_usk_rating`, `admin_set_image_override`, `admin_set_character`,
+  `admin_create_character`, `admin_delete_figure`, `admin_discard_draft`,
+  `admin_set_catalog_group`; dazu der Bild-Upload in den Bucket `catalog`
+  (`image-actions.ts`, Storage-Policy `is_shop_admin()`) und die Werkzeuge
+  `catalog:import:prod`, `characters:import:prod`.
+* **Ausdrücklich NICHT betroffen:** Lager, Angebote, Shopeinstellungen, Bestellungen,
+  Rechnungen, Erstattungen, Orderbuch, Importe des Verkäufers (`seller_*`,
+  `record_inventory_movement`, `set_shop_listing`, …), Sammlungen, Favoriten, Konten,
+  Rollen. `admin_set_admin_note` (interne Notiz, nicht veröffentlicht) und
+  `admin_set_market_price` (ADR-0010, vom Publish nicht geregelt) werden in CAT-13 einzeln
+  eingeordnet.
+* **Der Publish muss weiter schreiben können — und das ist der Knackpunkt.** Er schreibt auf
+  Production über zwei Identitäten: den Service-Schlüssel (Klasse A direkt per
+  Compare-and-set, `system_sync_create_figure`) **und eine angemeldete Adminsitzung**
+  (`admin_set_figure_types`, `admin_set_visible_type`, `admin_set_variant_base`,
+  `admin_set_character`, `admin_create_character`). Eine Sperre der `admin_*`-Wege würde den
+  Publish brechen. CAT-13 muss diese Schritte daher **zuerst** auf service-role-eigene
+  `system_publish_*`-Wege umstellen (gleiche Prüfungen, kein Recht für `authenticated`) und
+  erst dann sperren.
+* **Die Datenbank muss wissen, dass sie Production ist** — über eine dauerhafte, ausdrückliche
+  Kennzeichnung, die **geschlossen ausfällt** (ohne Kennzeichnung gesperrt), nicht über
+  Schemamerkmale oder Sequenzbänder.
+* **UI zusätzlich:** Editoren, „Neue Figur", Löschen/Verwerfen/Zusammenführen auf Production
+  ausblenden, mit Hinweis auf Staging.
+* **Spätere Sichtbarkeitssteuerung:** darf **nicht** `catalog_visible` sein — das Feld regelt
+  der Publish (`publish-compare.ts`, `FELDER`). Sie braucht eine eigene, vom Publish nicht
+  verglichene Spalte oder Tabelle, und Katalog, Suche, Detailseite, Sammlung und Shop müssen
+  sie einzeln berücksichtigen.
+
+Umfang von CAT-13: eine Migration (Kennzeichnung, Sperre, `system_publish_*`), Umstellung von
+`tools/catalog-sync-apply.mts`, UI-Ausblendung, Tests an echtem PostgreSQL; Anwendung erst auf
+Staging (Sperre dort **aus**), dann Production — jeweils mit eigener Freigabe.
+
+### Konsequenzen
+
+* ADR-0163 bleibt gültig und wird um die ausdrückliche Sperrabsicht ergänzt.
+* ADR-0165: `0166` bleibt auf Staging; „auf Production nicht" ist **entschieden**, nicht offen.
+* Release-Planung: der anstehende Release braucht keine Production-Migration; CAT-13 ist ein
+  eigener späterer Release.
+
+---
+
+## ADR-0166 · Die 30 OVP-Katalogduplikate werden entfernt — mit Grabstein, nicht mit Status
+
+**Status:** ANGENOMMEN · 2026-10-31 (Betreiberentscheidung); Migration `0167` **auf Staging
+angewendet** (2026-10-31, berechtigter Postflight `9998 = 0`, `9999 = 0`, Grabstein leer); auf
+Production am 2026-11-01 (P-1, Nachweis `APPLIED.md`). **Entfernung auf Staging ausgeführt am
+2026-11-01** (30 entfernt, 30 Grabsteine, Katalog 666; `ovp_cleanup_plan.md` §4a); **auf Production
+ausgeführt am 2026-11-01** (P-2: 30 entfernt, 30 Grabsteine, Katalog 627). Ledger-Fortschreibung
+(P-3) am 2026-11-01: 655 → 625 Zeilen. **Abgeschlossen.**
+**Betrifft:** ADR-0037 §5/5a (OVP ist ein Bestandszustand), ADR-0001 (SKY-ID nie wiederverwenden),
+ADR-0159 (Löschsperren), ADR-0164 (Publish), ADR-0031/0032 (Eon's Elite)
+
+### Entscheidung
+
+Die 30 eigenständigen OVP-Einträge — 14 × „Eon's Elite … (OVP Series 1)", 14 × „(OVP Series 2)",
+`SKY-0564 Kaos in OVP`, `SKY-0591 Dark Pyramid - OVP` — verschwinden aus `skylanders`, auf Staging
+und Production. Die frühere Excel-Katalogentscheidung, Verpackung als eigene Zeile zu führen, ist
+zurückgenommen. **Kein Status `retired`, keine Archivierung im Katalog.** OVP bleibt als
+`shop_inventory.condition = 'boxed'` an der regulären Figur erlaubt.
+
+### Wie
+
+* **Eine explizite Liste**, `data/catalog/ovp-removal.json` — 30 SKY-IDs mit Serie, Rohname,
+  Kartenkunst und regulärer Figur, auf beiden Umgebungen am 2026-10-31 rein lesend bestätigt.
+  Kein Namensmuster entscheidet; `parseEliteEdition()` ist nur die Gegenprobe im Test.
+* **`0167`** legt an: den Grabstein `catalog_removed_sky_ids`, einen `BEFORE INSERT`-Trigger auf
+  `skylanders`, der jede SKY-ID mit Grabstein abweist, und `system_remove_ovp_figure(text)`.
+  Die Funktion kennt die 30 als **Konstante** (ein Test hält sie mit der JSON-Datei gleich), prüft
+  Identität, Sichtbarkeit und Varianten, zählt jeden Verweis aus `pg_constraint` plus
+  `order_lines.sky_id` und nimmt **nur** mit: Importprotokolle ohne Lagerbewegung, eine leere
+  Lagerposition, auf die nichts zeigt, und die interne Notiz. Alles andere bricht ab — nichts wird
+  umgehängt. Journal `deleted` vorher, Grabstein nachher. Recht: **nur der Eigentümer**.
+* **`admin_delete_figure` und `admin_discard_draft` bleiben unverändert.** Die allgemeinen
+  Löschsperren werden nicht gelockert; die neue Funktion ist enger als beide.
+* **Die Entfernung ist ein eigener Betriebsvorgang je Umgebung** (`staging-ovp-removal.sql`,
+  `prod-ovp-removal.sql`): eine Transaktion, Umgebungsriegel, 30 Aufrufe, danach zehn
+  Nachbedingungen (Katalog, reguläre Figuren, Sammlungen, Favoriten, Warenkörbe, Bestellungen,
+  Einkauf, Verkauf, Lagerbewegungen, übriges Lager, Sequenz). Jede Abweichung nimmt den ganzen
+  Lauf zurück; ein zweiter Lauf ist ein Nichtstun.
+* **Keine Wiederanlage:** Grabstein-Trigger (jeder Weg), `catalog:import` sondert die 30 aus,
+  Publish-Riegel 6 bricht bei jedem Schritt an einer der 30 ab (beide Modi), `products.json`,
+  `characters.json` (15 Zuordnungen) und die Staging-Shop-Fixture (`SKY-0090`) führen sie nicht mehr.
+* **Reihenfolge Staging → Production ist zwingend.** Der Publish überträgt keine Löschungen;
+  eine Zeile, die Production zuerst verlöre, legte der nächste Publish wieder an — Riegel 6 und
+  der Grabstein verhindern das jetzt doppelt. Nach Phase B schreibt der nächste Publish das Ledger
+  ohne die 30.
+* **Bilder bleiben.** Jede der 28 Bilddateien ist auch die der regulären Figur; Storage-Objekte
+  gibt es keine.
+* **Die Löschsperre im Admin nennt den Grund.** Angezeigt wurde „public" — der bis zum ersten
+  Punkt abgeschnittene Tabellenname `public.inventory_import_rows`. `verweisListe()` zeigt jetzt
+  `inventory_import_rows (3)`.
+
+### Verworfen
+
+Status `retired` (Betreiber: nicht gewünscht) · Löschen über `admin_delete_figure` mit gelockerter
+Sperre (schwächt die Regel für alle Figuren) · Importprotokolle vorab per SQL löschen (ohne Riegel)
+· Löschen auf Production vor Staging (der Publish legte sie wieder an) · Zusammenführen auf die
+lose Figur (es gibt nichts umzuhängen, und Importprotokolle sind keine Umzugsware).
+
+### Konsequenzen
+
+* Die Staging-Fixture für den Shop-Zustand „kein Marktwert" entfällt; im Legacy-Export hat keine
+  sammelbare Figur mehr einen leeren Marktwert. Offen, ausdrücklich im Test vermerkt.
+* Der Grabstein steht in keinem der beiden Exporte; wiederherstellbar aus der Liste, der Konstante
+  in `0167` und den `deleted`-Zeilen des Journals.
+* **Publish zwischen und nach den Entfernungen:** beide Publish-Werkzeuge nehmen die 30 aus der
+  geregelten Projektion (nicht aus dem versiegelten Bootstrap-Fingerprint) — sonst stünde der
+  Gleichstand zwischen Staging- und Production-Entfernung ungleich, und `catalog:publish` bräche
+  nach dem Schreiben ab. Ein Publish mit 0 Schritten nimmt die 30 aus dem Ledger, wenn das Ledger
+  ohne sie zeichengleich dem Production-Stand ist (`ledgerOhneEntfernte`) — sonst stünden sie dort
+  für immer als Auskunft.
+
+---
+
+## ADR-0165 · „Variante von" ist eine Beziehung, keine Vorlage — angelegt in einer Transaktion, veröffentlicht in der richtigen Reihenfolge
+
+**Status:** ANGENOMMEN · 2026-10-31 (Code); Migration `0166` **auf Staging angewendet (2026-10-31), auf Production bewusst nicht** (ADR-0167, 2026-11-01)
+**Betrifft:** ADR-0156 (`base_sky_id`), ADR-0160 (Types/Banner/Kartenkunst),
+ADR-0070a (Vorlage), ADR-0164 (Publish), ADR-0159 (Löschen)
+
+### Anlass
+
+Beim Anlegen von **Silver Boomer** als Chase-Variante von **Boomer** (Spyro's
+Adventure) ist gemessen worden (Staging, rein lesend, 2026-10-31):
+
+* Es gibt **zwei** Zeilen „Silver Boomer": `SKY-0836` (CAT-03-Entwurf vom
+  2026-10-27, `standard`, mit Bild) und `SKY-0929` (am 2026-10-31 14:22 UTC
+  über den Dialog angelegt, `card_type = chase`). **Beide** ohne
+  `base_sky_id`, ohne Type, ohne Banner, ohne Charakter.
+* `SKY-0929` ist **vollständig** angelegt (`created_at = updated_at`, nächste
+  Nummer nach `SKY-0928` im Band). Der Dialog hatte **kein** Feld „Variante
+  von" — nur „Bestehende Figur als Vorlage", und die speichert nichts. Die
+  Beziehung entstand deshalb nie; der Katalog sortierte die Figur nach ihrem
+  Namen unter „S", und ohne `visible_type` gab es kein Chase-Banner
+  (`card_type` ist die Kartenkunst, nicht das Banner — ADR-0160).
+* **Boomer hat keine Charakterzuordnung**, weil `data/characters/characters.json`
+  keinen Boomer führt. Das ist das korrekte Ergebnis des Modells (NULL heißt
+  „nicht kuratiert", ADR-0010), kein Datenfehler — und für die
+  Variantenbeziehung belanglos: `base_sky_id` hängt nicht an `character_id`.
+* Die Ursache der gemeldeten **Fehlermeldung** ließ sich nicht belegen:
+  `createFigure()` hat jeden Datenbankfehler auf denselben Satz abgebildet und
+  nichts protokolliert, das Journal und `sky_id_seq` sind dem Prüfzugang
+  nicht lesbar, und Server-Logs liegen nicht vor. Belegt ist nur: eine
+  fehlgeschlagene Anlage hat **keine** Zeile hinterlassen.
+
+### Entscheidung
+
+1. **„Variante von" ist das erste Feld im Dialog „Neue Figur"** und schreibt
+   `base_sky_id`. Die Vorlage bleibt, für eigenständige Figuren, unter
+   „Weitere Optionen".
+2. **Eine Variante entsteht in EINER Transaktion** über
+   `admin_create_variant_figure` (`0166`). Sie schreibt keine Spalte selbst,
+   sondern ruft die vier vorhandenen Schreibwege — keine zweite
+   Variantenlogik, jede Journalzeile wie bisher. Vier PostgREST-Aufrufe
+   hätten bei einem Abbruch eine Figur hinterlassen, die nach Variante
+   aussieht und keine ist.
+3. **Die Typmenge der Variante** ist die Figurenart der Basisfigur plus der
+   gewählte Variantentype; das Banner ist der Variantentype. Die
+   **Kartenkunst** schlägt das Formular passend vor, die Datenbank koppelt
+   sie nicht (ADR-0160 bleibt).
+4. **Eine Basisfigur darf kein Entwurf sein** — der Publish trägt Entwürfe
+   nicht, und die Variante zeigte auf Production ins Leere.
+5. **Fehler beim Anlegen werden benannt und protokolliert**
+   (`src/lib/admin/create-errors.ts`): belegte SKY-ID, erschöpftes Band,
+   falsche Kategorie, abgewiesene Basisfigur, fehlende Migration — jeweils
+   mit dem Satz „Es wurde nichts angelegt". Unbekanntes nennt den Code, nie
+   die rohe Meldung. Der Server schreibt Code und Meldung ins Log.
+6. **Suche und Detailseite lesen die Beziehung.** `withBaseFigure()` hängt
+   den Namen der Basisfigur an den Suchindex der Variante; die Detailseite
+   zeigt Typ-Badge, „Variante von …" und die Varianten einer Basisfigur —
+   alles aus `base_sky_id`, nichts aus einem Namen.
+7. **Publish:** `base_sky_id`, `types`, `visible_type` gingen schon mit
+   (ADR-0164). Neu sind **Riegel 5** im Planer (jede Zuordnung zeigt auf eine
+   Figur, die Production hat oder der Lauf anlegt) und eine
+   **Abhängigkeitsordnung** der `base_sky_id`-Schritte im Apply
+   (`ordneVariantenschritte`): „X wird Basisfigur" vor „Y wird Variante von
+   X", und wer auf F zeigt, hängt um, bevor F Variante wird. Ein Zyklus
+   bricht vor dem ersten Schreibzugriff ab.
+8. **Der Löschdialog steht im gemeinsamen `Modal`.** Er war ein eigenes
+   `fixed`-Overlay IN der Kachel; deren `@container` machte die Kachel zum
+   Bezugsrahmen, ohne Höhengrenze — Abbrechen und Bestätigen lagen außerhalb
+   des Bildschirms. Jetzt: portiert, `dvh`-Deckel, fester Kopf und Fuß, die
+   Prüfliste aufklappbar. **Jede Löschschutzprüfung bleibt in
+   `admin_delete_figure` (`0162`)** und ist unverändert.
+
+### Härtung vor der Freigabe von `0166` (2026-10-31)
+
+9. **Der Verwerfen-Dialog** (`row-actions.tsx`) steht ebenfalls im
+   gemeinsamen `Modal` — dieselbe Bauform wie die Löschfrage; `0155` prüft
+   unverändert. Geprüft wurden alle Overlays mit `fixed inset-0`: übrig ist
+   nur der Zusammenführungsdialog (`draft-dialog.tsx`). Er hat eine
+   Höhengrenze (`max-h-[90dvh]`) und scrollt als Ganzes, ist also bedienbar;
+   seine Knöpfe scrollen aber mit, und er kennt weder Escape noch Fokusfang.
+   Nicht umgebaut — eigener, größerer Schritt.
+10. **Neue Figuren sind nach EINEM Publish vollständig.** Der Planer rechnet
+    die Folgeschritte gegen den Zustand nach der Anlage
+    (`publish-new-figure.ts`): jedes geregelte Feld, das abweicht, bekommt
+    einen Schritt — auch `display_name_override` und `visible_type_decided`,
+    die vorher erst im zweiten Lauf kamen. Der Apply-Pfad überspringt das
+    Kennzeichen nur noch, wenn die Banner-Funktion genau `true` setzt.
+11. **Compare-and-Set für die Funktionsschritte** (`publish-cas.ts`, TOR 2b):
+    vor jeder der vier Admin-Funktionen werden Marke und Feldwert gelesen —
+    erwartet ist der alte oder schon der neue Wert —, danach muss genau der
+    geplante Wert stehen, sonst Abbruch, und die Marke wird nur dann
+    übernommen. **Nicht atomar:** zwischen Lesen und Funktion liegt ein
+    Lesevorgang; eine fremde Schreibung genau dort fällt über TOR 3
+    (Journalwachstum) auf, wird aber nicht verhindert. Atomar ginge es nur mit
+    einer Datenbankfunktion, die Prüfung und Schreibung hält — eine eigene
+    Production-Migration.
+
+### Nicht entschieden, ausdrücklich offen
+
+* **Welche der zwei Silver-Boomer-Zeilen bleibt** und ob die Bildfreigabe
+  aus CAT-05B für `SKY-0836` gilt. Plan:
+  `supabase/checks/silver_boomer_cleanup_plan.md`. Nichts wurde verknüpft,
+  verworfen oder gelöscht.
+
+### Konsequenzen
+
+* Ohne `0166` legt der Dialog eigenständige Figuren wie bisher an; eine
+  Variante meldet verständlich, dass die Migration fehlt — nichts wird
+  angelegt.
+* Nachweis: `src/lib/catalog/variant-create-0166.test.ts` (echtes PostgreSQL,
+  wörtliche Rümpfe aus `0033`/`0152`/`0158`/`0159`/`0163`),
+  `src/lib/admin/variant-create.test.ts`, `src/lib/catalog/publish-variants.test.ts`.
+
+---
+
 ## ADR-0164 · Der reguläre Publish: zwei Modi, zwei Standdateien, ein Driftriegel
 
 **Status:** ANGENOMMEN · 2026-10-31
@@ -17176,6 +17455,8 @@ auf Production und Staging ist nicht freigegeben.**
 **Betrifft:** ADR-0001 (SKY-ID), ADR-0010 (`market_price`), ADR-0030
 (Namenshoheit), ADR-0034 (drei Identitäten), ADR-0070 (reservierter Bereich),
 SYNC-01 bis SYNC-18, `tools/catalog-sync.mts`, `tools/catalog-sync-apply.mts`
+**Präzisiert durch:** ADR-0167 (2026-11-01) — Staging ist die einzige redaktionelle Quelle;
+Production-Katalogschreibwege werden gesperrt (Folgeaufgabe CAT-13)
 **Ersetzt:** die bidirektionale, konfliktbewusste Zielarchitektur aus SYNC-01
 
 ### Was entschieden ist
