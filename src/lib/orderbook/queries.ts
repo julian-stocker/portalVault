@@ -11,6 +11,7 @@ import { createClient } from "@/lib/supabase/server";
 import { imageSrc } from "@/lib/catalog/image";
 import { fetchFavoriteDemand } from "@/lib/favorites/queries";
 import { isPickableCatalogRow, type FigureChoice } from "./figure-search";
+import { sortPurchaseItemsBySeries, type SeriesPositions } from "./series-order";
 import {
   EMPTY_COUNTS, readCounts, type ClassificationCounts, type StatusScope,
 } from "./classification";
@@ -157,7 +158,8 @@ export const fetchLedger = cache(
 );
 
 /**
- * `series_code` → human label, from the canonical table.
+ * The canonical `series` table: `series_code` → human label, and
+ * `series_code` → `position` (release order).
  *
  * Eight rows, world-readable, and the same source `lib/catalog/queries.ts`
  * uses for every other screen that prints a series — so the Orderbuch says
@@ -166,12 +168,24 @@ export const fetchLedger = cache(
  *
  * The code is the fallback, not a guess: if a figure names a series this table
  * does not have, showing `SA` is honest where inventing a label would not be.
+ *
+ * The position is what `series-order.ts` sorts by (V2: purchase items and the
+ * calculator search in series blocks). Read in the same query as the label,
+ * and `cache`d, so a page that needs both the purchase and the catalog asks
+ * the table once. On an error both maps are empty: labels fall back to the
+ * code and every row sorts as "unknown series" — nothing disappears.
  */
-export const fetchSeriesLabels = cache(async (): Promise<Map<string, string>> => {
+export const fetchSeriesTable = cache(async (): Promise<{
+  labels: Map<string, string>;
+  positions: SeriesPositions;
+}> => {
   const supabase = await createClient();
-  const { data, error } = await supabase.from("series").select("code, label");
-  if (error || !Array.isArray(data)) return new Map();
-  return new Map(data.map((row) => [String(row.code), String(row.label)]));
+  const { data, error } = await supabase.from("series").select("code, label, position");
+  if (error || !Array.isArray(data)) return { labels: new Map(), positions: new Map() };
+  return {
+    labels: new Map(data.map((row) => [String(row.code), String(row.label)])),
+    positions: new Map(data.map((row) => [String(row.code), Number(row.position)])),
+  };
 });
 
 export type PurchaseItem = {
@@ -222,9 +236,9 @@ export type PurchaseDetail = {
 export const fetchPurchase = cache(async (id: number): Promise<PurchaseDetail | null> => {
   if (!(await canOperateSeller())) return null;
   const supabase = await createClient();
-  const [{ data, error }, series] = await Promise.all([
+  const [{ data, error }, { labels: series, positions }] = await Promise.all([
     supabase.rpc("seller_purchase", { p_id: id }),
-    fetchSeriesLabels(),
+    fetchSeriesTable(),
   ]);
   if (error || data === null || typeof data !== "object") return null;
 
@@ -247,7 +261,22 @@ export const fetchPurchase = cache(async (id: number): Promise<PurchaseDetail | 
     countedItems: Number(v?.total_items ?? 0),
     bookedItems: Number(v?.booked_items ?? 0),
     factor: root.factor === null ? null : Number(root.factor),
-    items: (Array.isArray(root.items) ? root.items : []).map((raw) => {
+    /*
+     * IN SERIENBLÖCKEN (V2): SA → G → SF → T → SC → I, ohne Serie zuletzt.
+     *
+     * Die Datenbank liefert nach `position`, also in Erfassungsreihenfolge.
+     * Wer eine große Sammlung einbucht, arbeitet aber Serie für Serie, und
+     * deshalb ordnet diese EINE Stelle um — Detailseite, aufgeklappte
+     * Ledger-Zeile und das Nachlesen nach jeder Buchung kommen alle hier
+     * vorbei und sehen dieselbe Reihenfolge.
+     *
+     * NUR DARSTELLUNG. Jede Position behält ihre `id` und ihre `position`
+     * (sie steht weiter als Nummer in der Zeile); Mengen, Preise, Zustände
+     * und Buchungen hängen an der `id`, nie am Platz in dieser Liste. Ein
+     * Verkauf läuft nicht hierüber und behält seine Reihenfolge. Die Regel
+     * samt Rückfall steht in `sortPurchaseItemsBySeries`.
+     */
+    items: sortPurchaseItemsBySeries((Array.isArray(root.items) ? root.items : []).map((raw) => {
       const i = raw as Record<string, unknown>;
       return {
         id: Number(i.id),
@@ -276,7 +305,7 @@ export const fetchPurchase = cache(async (id: number): Promise<PurchaseDetail | 
         sourceRow:
           i.source_row === null || i.source_row === undefined ? null : Number(i.source_row),
       };
-    }),
+    }), positions),
   };
 });
 
@@ -323,7 +352,7 @@ export const fetchOrderbookCatalog = cache(
   async (): Promise<FigureChoice[]> => {
     if (!(await canOperateSeller())) return [];
     const supabase = await createClient();
-    const [catalog, prices, demand] = await Promise.all([
+    const [catalog, prices, demand, { positions }] = await Promise.all([
       supabase.rpc("seller_import_catalog"),
       /* Bild und Preis in einem Zug: `skylanders` ist weltlesbar, die Zeile
          wird ohnehin geholt, und der Kalkulator braucht beides. Aufgelöst
@@ -348,6 +377,12 @@ export const fetchOrderbookCatalog = cache(
        * Zusatzinformation, kein Grund, den Picker nicht zu zeigen.
        */
       fetchFavoriteDemand(),
+      /*
+       * Die Serienreihenfolge, für die Kalkulator-Suche (V2). Acht Zeilen,
+       * einmal je Anfrage — nicht je Treffer; `fetchPurchase` auf derselben
+       * Seite teilt sich die Antwort über `cache`.
+       */
+      fetchSeriesTable(),
     ]);
     if (catalog.error || !Array.isArray(catalog.data)) return [];
     const facts = new Map(
@@ -391,6 +426,7 @@ export const fetchOrderbookCatalog = cache(
           name: shown,
           rawName: raw,
           series: String(r.series_code),
+          seriesPosition: positions.get(String(r.series_code)),
           marketPrice: fact?.marketPrice ?? null,
           image: fact?.image ?? null,
           /*

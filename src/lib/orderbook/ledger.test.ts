@@ -840,8 +840,9 @@ describe("Serie comes from the catalog and nowhere else", () => {
   const QUERIES = read("src/lib/orderbook/queries.ts");
 
   it("is read from the canonical `series` table", () => {
-    expect(QUERIES).toContain('from("series").select("code, label")');
-    expect(QUERIES).toContain("fetchSeriesLabels");
+    /* Seit V2 mit `position`: dieselbe Abfrage liefert die Serienreihenfolge. */
+    expect(QUERIES).toContain('from("series").select("code, label, position")');
+    expect(QUERIES).toContain("fetchSeriesTable");
   });
 
   it("is keyed by the CATALOG row's series_code, never by anything guessable", () => {

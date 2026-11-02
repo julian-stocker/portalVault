@@ -105,9 +105,10 @@ describe("die Auswahl fällt, bevor das Feld den Fokus verlieren kann", () => {
     const choose = SEARCH.slice(SEARCH.indexOf("function choose(choice"),
                                 SEARCH.indexOf("function onKeyDown"));
     expect(choose).toContain("onSelect(choice)");
-    expect(choose).toContain('setQuery("")');
+    /* Seit V2 über `changeQuery`, das auch die Trefferseite zurücksetzt. */
+    expect(choose).toContain('changeQuery("")');
     /* Die Reihenfolge zählt: erst übernehmen, dann leeren. */
-    expect(choose.indexOf("onSelect(choice)")).toBeLessThan(choose.indexOf('setQuery("")'));
+    expect(choose.indexOf("onSelect(choice)")).toBeLessThan(choose.indexOf('changeQuery("")'));
   });
 });
 

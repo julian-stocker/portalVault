@@ -6521,6 +6521,12 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-11-02, Calculator- und Orderbuch-Fixes (ADR-0172) — Code und Tests, keine Migration,
+nicht committet.** Kalkulator-Suche schneidet nicht mehr ab (Ursache: `slice` nach 6 Treffern;
+„Punch Pop Fizz" stand auf Platz 7) und sortiert nach Serie; alle Figurensuchen blättern über
+„weitere Treffer" und zeigen Bilder; gespeicherte Einkäufe erscheinen in Serienblöcken, die
+Erfassung zeigt die neueste Position oben. Zwei überflüssige Hinweissätze gekürzt.
+
 **2026-11-01, CAT-15: Familien beim Setzen der Basisfigur (ADR-0168) — Code und Tests,
 keine Migration, lokal committet.** Ursache der Giants-Fehler: `0159` legte mit
 `p_create_family` stur eine Familie mit dem Namen der Basisfigur an, auch wenn es sie

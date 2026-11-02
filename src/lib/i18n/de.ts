@@ -1507,7 +1507,9 @@ export const de = {
        */
       figures: {
         heading: "Artikel",
-        hint: "Suchen und auswählen. Gespeichert wird erst beim Anlegen.",
+        /* „Suchen und auswählen" stand davor — das sagt das Suchfeld
+           selbst. Was es nicht sagt: dass noch nichts gespeichert ist. */
+        hint: "Gespeichert wird erst beim Anlegen.",
         search: "Artikel suchen …",
         searchLabel: "Artikel suchen",
         tooShort: "Mindestens zwei Zeichen eingeben.",
@@ -1517,6 +1519,9 @@ export const de = {
            „noch nicht da" ist kein Fehlschlag. */
         loadingCatalog: "Katalog wird geladen …",
         results: "Suchergebnisse",
+        /* Der Rest einer langen Trefferliste, eine Seite weiter (V2). */
+        moreResults: (n: number) =>
+          n === 1 ? "1 weiterer Treffer" : `${plainNumber(n)} weitere Treffer`,
         selected: "Ausgewählte Artikel",
         none: "Noch kein Artikel ausgewählt.",
         /* Ausgeschrieben, weil „3 × 2" auf einem Telefon niemand entziffert.
@@ -5234,7 +5239,9 @@ export const de = {
     loadFailed: "Der Katalog konnte nicht geladen werden.",
 
     empty: "Noch keine Figur in der Kalkulation.",
-    emptyHint: "Tippe einen Figurennamen und drücke Enter. Dieselbe Figur erneut erhöht die Menge.",
+    /* Wie man hinzufügt, sagt der Platzhalter des Suchfelds schon; hier
+       steht nur, was er nicht sagt. */
+    emptyHint: "Dieselbe Figur erneut erhöht die Menge.",
 
     /* Positionen */
     positionsLabel: "Positionen",

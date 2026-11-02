@@ -253,6 +253,49 @@ export function splitPurchaseUnit(
 }
 
 /**
+ * In welcher Reihenfolge die Erfassungsliste ihre Zeilen ZEIGT (V2).
+ *
+ * NEUESTE OBEN. Wer einen Karton auspackt, sieht die Figur, die er gerade
+ * gewählt hat, direkt unter dem Suchfeld — dieselbe Regel wie im Kalkulator.
+ *
+ * NUR DIE ANZEIGE. `lines` selbst bleibt in Erfassungsreihenfolge, und
+ * daraus entsteht die Nutzlast (`purchaseDraftPayload`) — also auch die
+ * Positionsnummern des gespeicherten Einkaufs. Diese Funktion gibt eine neue
+ * Liste zurück und ändert keine Zeile.
+ *
+ * DIE VORBELEGUNG AUS EINER KALKULATION BLEIBT, WIE SIE KAM. Ihre Zeilen
+ * (`prefilled`, die Schlüssel des Anfangszustands) stehen schon in der
+ * Reihenfolge des Kalkulators, der seinerseits die neueste oben führt. Sie
+ * noch einmal umzudrehen, hieße, die Liste auf den Kopf zu stellen, die der
+ * Betreiber eben noch gesehen hat. Deshalb: neu Getipptes, neueste zuerst —
+ * darunter die Vorbelegung in ihrer Reihenfolge.
+ *
+ * EINE ABGETRENNTE EINHEIT BLEIBT NEBEN IHRER ZEILE. Sie ist keine neu
+ * erfasste Figur, sondern die Hälfte einer bestehenden Zeile, und Abtrennen
+ * ist der erste von zwei Handgriffen — der zweite ist ihr Zustand. Eine
+ * Zeile, die dabei an den Anfang springt, wäre dieselbe „Zeile verschwindet
+ * unter der Hand", die `setPurchaseLineState` ausdrücklich vermeidet.
+ * `splitPurchaseUnit` fügt sie direkt hinter ihrer Ausgangszeile ein; der
+ * Block, zu dem sie gehört, folgt deshalb aus ihrem PLATZ in `lines` und
+ * nicht aus ihrem Schlüssel: alles bis zur letzten vorbelegten Zeile ist
+ * Vorbelegung (in Reihenfolge), alles danach ist getippt (umgekehrt).
+ */
+export function purchaseDraftDisplayOrder(
+  lines: readonly PurchaseDraftLine[],
+  prefilled: ReadonlySet<number> = new Set(),
+): PurchaseDraftLine[] {
+  let boundary = 0;
+  lines.forEach((line, index) => { if (prefilled.has(line.key)) boundary = index + 1; });
+  /* Hinter der letzten vorbelegten Zeile kann ihre abgetrennte Einheit
+     stehen — dieselbe Figur, direkt dahinter. Sie gehört noch dazu. */
+  while (boundary > 0 && boundary < lines.length
+         && lines[boundary].skyId === lines[boundary - 1].skyId) boundary += 1;
+  const carried = lines.slice(0, boundary);
+  const typed = lines.slice(boundary).reverse();
+  return [...typed, ...carried];
+}
+
+/**
  * What goes to `seller_create_purchase_with_items`.
  *
  * One element per physical unit, in draft order, each carrying its state. The

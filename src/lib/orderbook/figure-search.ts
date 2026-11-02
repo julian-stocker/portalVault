@@ -26,6 +26,8 @@
  * metadata about them.
  */
 
+import { compareSeriesRank, UNKNOWN_SERIES } from "./series-order";
+
 /** One catalog row, as the screens receive it from `fetchOrderbookCatalog`. */
 export type FigureChoice = {
   skyId: string;
@@ -46,8 +48,17 @@ export type FigureChoice = {
    * das muss der Rohname bleiben und nicht die heutige Darstellung.
    */
   rawName?: string;
-  /** The canonical `series_code`: `SA`, `G`, `SF`, `TT`, `SC`, `I`. */
+  /** The canonical `series_code`: `SA`, `G`, `SF`, `T`, `SC`, `I`. */
   series: string;
+  /**
+   * `series.position` dieser Serie — die Erscheinungsreihenfolge, wie die
+   * Datenbank sie führt (`series-order.ts`).
+   *
+   * OPTIONAL: fehlt sie, steht die Zeile in einer Seriensortierung hinter
+   * allen bekannten Serien, und die Reihenfolge nach Relevanz bleibt davon
+   * ohnehin unberührt.
+   */
+  seriesPosition?: number;
   /** `null` is "no price known" and is never treated as zero. */
   marketPrice: number | null;
   /*
@@ -95,7 +106,12 @@ export type FigureChoice = {
 /** Below this, a query matches too much to be worth showing. */
 export const MIN_QUERY = 2;
 
-/** How many results one list shows. Enough to choose from, few enough to scan. */
+/**
+ * How many results one list shows AT FIRST. Enough to choose from, few enough
+ * to scan — and since V2 a page, not a ceiling: `FigureSearch` offers the
+ * rest behind „Weitere Treffer". Before that, `searchFigures` cut the list
+ * here and everything below was unreachable (the missing „Punch Pop Fizz").
+ */
 export const MAX_RESULTS = 8;
 
 /**
@@ -149,8 +165,14 @@ export function rankFigure(choice: FigureChoice, query: string): number | null {
   const name = normalise(choice.name);
   if (name === q) return EXACT_NAME;
   if (name.startsWith(q)) return NAME_PREFIX;
-  // `wash` finds `Dark Wash Buckler` at word level, below a real prefix hit.
-  if (name.split(/\s+/).some((word) => word.startsWith(q))) return WORD_PREFIX;
+  /*
+   * `wash` finds `Dark Wash Buckler` at word level, below a real prefix hit.
+   * Checked on the whole name, not word by word: a query of two words —
+   * `pop fizz` — starts at a word in `Punch Pop Fizz` but in none of its
+   * single words, and used to fall through to NAME_CONTAINS.
+   */
+  if (/\s/.test(name) && name.split(/\s+/).some((_, i, words) =>
+    words.slice(i).join(" ").startsWith(q))) return WORD_PREFIX;
   if (name.includes(q)) return NAME_CONTAINS;
   if (normalise(choice.skyId).includes(q)) return ID_MATCH;
   // Erst jetzt der Rohname, und nur wenn er ein anderer ist.
@@ -170,26 +192,98 @@ export function rankFigure(choice: FigureChoice, query: string): number | null {
 }
 
 /**
- * The results for one query, best first.
+ * In welcher Reihenfolge die Treffer stehen.
  *
- * Ties break by name so the list is stable: the same query always produces
- * the same order, which is what makes the keyboard path (`Enter` takes the
- * first) safe to rely on.
+ *   `relevance`  bester Treffer zuerst (0064). Die Orderbuch-Bildschirme.
+ *   `series`     Spielserie zuerst (SA → G → SF → T → SC → I), darin der
+ *                beste Treffer zuerst. Der Kalkulator (V2): man vergleicht
+ *                eine Kleinanzeige mit dem Katalog, und der ist nach Serien
+ *                geordnet.
+ */
+export type SearchOrder = "relevance" | "series";
+
+/**
+ * ALLE Treffer einer Suche, sortiert — ohne Obergrenze.
+ *
+ * Wie viele davon zu sehen sind, entscheidet die Oberfläche (eine Seite, dann
+ * „Weitere Treffer"), nicht diese Funktion. Bis V2 schnitt die Suche selbst
+ * ab, und was dahinter lag, war nicht erreichbar.
+ *
+ * Gleichstände brechen nach Name und zuletzt nach SKY-ID: dieselbe Eingabe
+ * ergibt immer dieselbe Liste, und darauf verlässt sich `Enter` (nimmt die
+ * erste Zeile).
+ *
+ * JEDE SKY-ID HÖCHSTENS EINMAL. Der Katalog liefert jede Zeile einmal; käme
+ * eine doppelt, stünde sie hier trotzdem nur einmal — die Zeile ist die
+ * Identität, und `key` in der Liste ist die SKY-ID.
+ */
+export function matchFigures(
+  catalog: readonly FigureChoice[],
+  query: string,
+  order: SearchOrder = "relevance",
+): FigureChoice[] {
+  if (normalise(query).length < MIN_QUERY) return [];
+  const seen = new Set<string>();
+  const ranked: { choice: FigureChoice; rank: number; series: number }[] = [];
+  for (const choice of catalog) {
+    if (seen.has(choice.skyId)) continue;
+    const rank = rankFigure(choice, query);
+    if (rank === null) continue;
+    seen.add(choice.skyId);
+    ranked.push({ choice, rank, series: choice.seriesPosition ?? UNKNOWN_SERIES });
+  }
+  ranked.sort((a, b) => {
+    if (order === "series") {
+      const bySeries = compareSeriesRank(a.series, b.series);
+      if (bySeries !== 0) return bySeries;
+    }
+    if (a.rank !== b.rank) return a.rank - b.rank;
+    const byName = a.choice.name.localeCompare(b.choice.name, "de-AT");
+    if (byName !== 0) return byName;
+    return a.choice.skyId.localeCompare(b.choice.skyId, "de-AT");
+  });
+  return ranked.map((r) => r.choice);
+}
+
+/**
+ * Wo in einer Trefferliste der EXAKTE Name steht — dort beginnt die
+ * Markierung, und `Enter` nimmt die markierte Zeile.
+ *
+ * WARUM DAS NÖTIG WURDE (V2). Nach Relevanz stand ein exakter Name immer
+ * oben. Nach Serie nicht: wer „Mini Jini" (T) tippt, bekäme zuerst
+ * „Sidekick Mini Jini" (G), bei „Scorp" (SF) zuerst „Scorpion Striker
+ * Catapult" (G). Die Liste bleibt nach Serie sortiert; nur die Markierung
+ * springt auf den Namen, den man vollständig getippt hat.
+ *
+ * `-1`, wenn kein Name exakt passt. Bei mehreren gleichnamigen Figuren
+ * (`Chop Chop` in SA und G) der erste in der Liste — also die frühere Serie.
+ */
+export function exactMatchIndex(matches: readonly FigureChoice[], query: string): number {
+  const q = normalise(query);
+  if (q.length < MIN_QUERY) return -1;
+  return matches.findIndex((choice) => normalise(choice.name) === q);
+}
+
+/**
+ * The first `limit` results for one query, best first.
+ *
+ * Kept for callers that want a fixed short list; the picker itself pages over
+ * `matchFigures` instead, so nothing it finds is out of reach.
  */
 export function searchFigures(
   catalog: readonly FigureChoice[],
   query: string,
   limit: number = MAX_RESULTS,
 ): FigureChoice[] {
-  if (normalise(query).length < MIN_QUERY) return [];
-  const ranked: { choice: FigureChoice; rank: number }[] = [];
-  for (const choice of catalog) {
-    const rank = rankFigure(choice, query);
-    if (rank !== null) ranked.push({ choice, rank });
-  }
-  ranked.sort((a, b) =>
-    a.rank !== b.rank ? a.rank - b.rank : a.choice.name.localeCompare(b.choice.name, "de-AT"));
-  return ranked.slice(0, Math.max(0, limit)).map((r) => r.choice);
+  return matchFigures(catalog, query).slice(0, Math.max(0, limit));
+}
+
+/**
+ * Wie viele Treffer nach „Weitere Treffer" zu sehen sind: eine Seite mehr,
+ * höchstens alle.
+ */
+export function nextPage(shown: number, pageSize: number, total: number): number {
+  return Math.min(total, shown + Math.max(1, pageSize));
 }
 
 /**

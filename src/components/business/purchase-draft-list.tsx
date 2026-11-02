@@ -68,7 +68,7 @@
 import { de } from "@/lib/i18n/de";
 import type { FigureChoice } from "@/lib/orderbook/figure-search";
 import {
-  PURCHASE_DRAFT_STATES, addPurchaseFigure, isPurchaseDraftState,
+  PURCHASE_DRAFT_STATES, addPurchaseFigure, isPurchaseDraftState, purchaseDraftDisplayOrder,
   removePurchaseLine, setPurchaseLineState, setPurchaseQuantity, splitPurchaseUnit,
   type PurchaseDraftLine,
 } from "@/lib/orderbook/purchase-draft";
@@ -98,13 +98,22 @@ const STATE_SELECT =
   "focus-ring disabled:opacity-40 md:min-h-8";
 
 export function PurchaseDraftList({
-  lines, catalog, onChange, disabled = false,
+  lines, catalog, onChange, disabled = false, prefilled,
 }: {
   lines: readonly PurchaseDraftLine[];
   catalog: readonly FigureChoice[];
   onChange: (next: PurchaseDraftLine[]) => void;
   disabled?: boolean;
+  /**
+   * Die Schlüssel der Zeilen, die aus einer Kalkulation mitkamen. Sie
+   * behalten ihre Reihenfolge; alles neu Getippte steht darüber, neueste
+   * zuerst (`purchaseDraftDisplayOrder`).
+   */
+  prefilled?: ReadonlySet<number>;
 }) {
+  /* Nur die Anzeige: jede Änderung geht weiter über `lines` in
+     Erfassungsreihenfolge, und daraus entsteht die Nutzlast. */
+  const shown = purchaseDraftDisplayOrder(lines, prefilled);
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -115,7 +124,7 @@ export function PurchaseDraftList({
       {/* Das Suchfeld bleibt oben und unverändert — dieselbe Auswahl wie im
           Verkaufsformular und auf der Detailseite. */}
       <FigureSearch
-            showDemand
+        showDemand
         catalog={catalog}
         disabled={disabled}
         onSelect={(choice) => onChange(addPurchaseFigure(lines, choice))}
@@ -126,7 +135,7 @@ export function PurchaseDraftList({
       ) : (
         <ul aria-label={copy.selected}
             className="divide-y divide-border/50 rounded-sky-lg ring-1 ring-border/60">
-          {lines.map((line) => (
+          {shown.map((line) => (
             <li key={line.key} className="bg-surface/60 px-2 py-1.5 md:py-1">
               <div className={ROW}>
                 {/* 1 — Name. `truncate` statt Umbruch: die Zeile bleibt eine

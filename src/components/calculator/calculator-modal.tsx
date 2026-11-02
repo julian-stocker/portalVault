@@ -151,11 +151,12 @@ function BackGlyph() {
 const TOOL_BUTTON = "h-11 min-h-11 sm:h-9 sm:min-h-9 w-auto gap-1.5 px-2.5 text-xs sm:px-3";
 
 /**
- * Wie viele Treffer die Suche zeigt.
+ * Wie viele Treffer die Suche zuerst zeigt — eine Seite, keine Grenze (V2).
  *
  * Weniger als die acht der Orderbuch-Bildschirme: dort steht der Kasten auf
  * einer ganzen Seite, hier in einem Dialog über einer Liste, die ebenfalls
- * sichtbar bleiben muss.
+ * sichtbar bleiben muss. Was darüber hinausgeht, steht hinter „weitere
+ * Treffer"; bis V2 war es schlicht weg.
  */
 const CALC_RESULTS = 6;
 
@@ -797,7 +798,10 @@ export function CalculatorModal({ open, onClose }: { open: boolean; onClose: () 
               placeholder={copy.searchPlaceholder}
               showImage
               inputRef={searchInput}
-              limit={CALC_RESULTS}
+              pageSize={CALC_RESULTS}
+              /* Serie zuerst (V2): SA → G → SF → T → SC → I, wie der
+                 Katalog, mit dem man eine Kleinanzeige vergleicht. */
+              order="series"
             />
           )}
         </div>

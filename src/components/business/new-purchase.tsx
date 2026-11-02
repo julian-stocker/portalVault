@@ -173,6 +173,11 @@ export function NewPurchase({
    * die ab dem ersten Bild ganz normaler Formularzustand ist.
    */
   const [lines, setLines] = useState<PurchaseDraftLine[]>([...initialLines]);
+  /* Welche Zeilen die Seite mitgebracht hat — sie behalten in der Liste ihre
+     Reihenfolge, neu Getipptes steht darüber (`purchaseDraftDisplayOrder`).
+     Einmal beim Mounten, wie der Entwurf selbst. */
+  const [prefilled] = useState<ReadonlySet<number>>(
+    () => new Set(initialLines.map((line) => line.key)));
   const [error, setError] = useState<string | null>(null);
   /*
    * Die Ablehnung des Datums steht AM FELD und nicht oben bei `error`: der
@@ -413,7 +418,8 @@ export function NewPurchase({
 
       {/* 2. What was in the parcel. */}
       <FormSection title={copy.newSections.figures}>
-        <PurchaseDraftList lines={lines} catalog={catalog} onChange={setLines} disabled={pending} />
+        <PurchaseDraftList lines={lines} catalog={catalog} onChange={setLines} disabled={pending}
+                           prefilled={prefilled} />
       </FormSection>
 
       {/*

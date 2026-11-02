@@ -27,8 +27,8 @@ import { FavoriteDemandIndicator } from "@/components/business/favorite-demand-i
 import { formatPrice } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import {
-  isAccessory, MAX_RESULTS, moveHighlight, searchFigures, searchState,
-  type FigureChoice,
+  exactMatchIndex, isAccessory, matchFigures, MAX_RESULTS, moveHighlight, nextPage, searchState,
+  type FigureChoice, type SearchOrder,
 } from "@/lib/orderbook/figure-search";
 
 const copy = de.business.orderbook.figures;
@@ -41,9 +41,10 @@ export function FigureSearch({
   autoFocus = false,
   disabled = false,
   onCancel,
-  limit = MAX_RESULTS,
+  pageSize = MAX_RESULTS,
+  order = "relevance",
   initialQuery = "",
-  showImage = false,
+  showImage = true,
   showDemand = false,
   loading = false,
   onFree,
@@ -58,7 +59,16 @@ export function FigureSearch({
   disabled?: boolean;
   /** Rendered as a quiet `Abbrechen` when the search is a mode, not a field. */
   onCancel?: () => void;
-  limit?: number;
+  /**
+   * Wie viele Treffer zuerst zu sehen sind — eine SEITE, keine Obergrenze
+   * (V2). Gibt es mehr, steht darunter „Weitere Treffer", und `ArrowDown`
+   * auf der letzten Zeile blättert ebenfalls weiter. Bis V2 hieß das
+   * `limit` und schnitt ab: „Punch Pop Fizz" stand im Kalkulator auf Platz
+   * sieben von acht und war bei sechs sichtbaren Zeilen nicht erreichbar.
+   */
+  pageSize?: number;
+  /** Relevanz (Orderbuch) oder Serie zuerst (Kalkulator), siehe `SearchOrder`. */
+  order?: SearchOrder;
   /**
    * Vorbelegung des Suchfelds (0127).
    *
@@ -69,11 +79,12 @@ export function FigureSearch({
    */
   initialQuery?: string;
   /*
-   * Das Bild vor dem Namen. AUS, wo dieser Kasten schon steht: Einkauf,
-   * Verkauf und Remap zeigen seit `0064` Serie, Name, SKY-ID und Preis, und
-   * eine Zeile, die über Nacht ein Bild bekommt, wäre eine Änderung an drei
-   * abgenommenen Bildschirmen. Der Kalkulator schaltet es ein, weil man ein
-   * Kleinanzeigen-Foto mit einem Bild vergleicht und nicht mit einem Namen.
+   * Das Bild vor dem Namen. AN SEIT V2, überall: zuerst nur im Kalkulator
+   * (man vergleicht ein Kleinanzeigen-Foto mit einem Bild, nicht mit einem
+   * Namen), jetzt auch in Einkauf und Verkauf — dort hält man die Figur in
+   * der Hand. Das Bild kommt mit der Katalogzeile (`fetchOrderbookCatalog`),
+   * es gibt keine Anfrage je Treffer. Serie, Name und SKY-ID bleiben in der
+   * Zeile; das Bild ergänzt sie und ersetzt keine.
    */
   showImage?: boolean;
   /**
@@ -140,19 +151,47 @@ export function FigureSearch({
    * hineinschreibt.
    */
   const [query, setQuery] = useState(initialQuery);
-  const [highlight, setHighlight] = useState(0);
+  /* `null`: noch nicht bewegt — dann gilt die Vorauswahl (`preferred`).
+     Eine Zahl: der Betreiber hat mit Pfeil oder Maus gewählt, und das gilt. */
+  const [highlight, setHighlight] = useState<number | null>(null);
+  /* Wie viele Treffer gerade zu sehen sind. Jede neue Eingabe beginnt
+     wieder bei einer Seite — gesetzt dort, wo die Eingabe sich ändert. */
+  const [shown, setShown] = useState(pageSize);
   const own = useRef<HTMLInputElement>(null);
   const input = inputRef ?? own;
   const listId = useId();
 
-  const results = useMemo(() => searchFigures(catalog, query, limit), [catalog, query, limit]);
-  const state = searchState(catalog, query, results);
-  const active = Math.min(highlight, Math.max(0, results.length - 1));
+  /* ALLE Treffer, sortiert; die Seite schneidet erst die Anzeige zu. */
+  const matches = useMemo(() => matchFigures(catalog, query, order), [catalog, query, order]);
+  /*
+   * DIE VORAUSWAHL: der exakte Name, sonst die erste Zeile. Nach Relevanz
+   * ist das dieselbe Zeile; nach Serie kann der exakte Name weiter unten
+   * stehen (`exactMatchIndex`). Er bleibt dann sichtbar — die Seite reicht
+   * notfalls bis zu ihm —, denn eine Markierung, die man nicht sieht, wäre
+   * ein `Enter` ins Blaue.
+   */
+  const preferred = Math.max(0, exactMatchIndex(matches, query));
+  const results = matches.slice(0, Math.max(shown, preferred + 1));
+  const hidden = matches.length - results.length;
+  const state = searchState(catalog, query, matches);
+  const active = Math.min(highlight ?? preferred, Math.max(0, results.length - 1));
+
+  function changeQuery(next: string) {
+    setQuery(next);
+    setHighlight(null);
+    setShown(pageSize);
+  }
+
+  /* Eine Seite mehr. Die Markierung bleibt auf ihrer Zeile — die neuen
+     Treffer kommen darunter, über ihr verschiebt sich nichts. */
+  function showMore() {
+    setShown(nextPage(results.length, pageSize, matches.length));
+    setHighlight(active);
+  }
 
   function choose(choice: FigureChoice) {
     onSelect(choice);
-    setQuery("");
-    setHighlight(0);
+    changeQuery("");
     // Straight on to the next figure: the operator is working through a box.
     input.current?.focus();
   }
@@ -160,7 +199,15 @@ export function FigureSearch({
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      setHighlight(moveHighlight(active, event.key === "ArrowDown" ? 1 : -1, results.length));
+      const down = event.key === "ArrowDown";
+      /* Auf der letzten sichtbaren Zeile blättert `ArrowDown` weiter, statt
+         stehen zu bleiben — die Tastatur erreicht jeden Treffer. */
+      if (down && hidden > 0 && active === results.length - 1) {
+        setShown(nextPage(results.length, pageSize, matches.length));
+        setHighlight(active + 1);
+        return;
+      }
+      setHighlight(moveHighlight(active, down ? 1 : -1, results.length));
       return;
     }
     if (event.key === "Enter") {
@@ -172,7 +219,7 @@ export function FigureSearch({
     }
     if (event.key === "Escape") {
       event.preventDefault();
-      if (query !== "") { setQuery(""); setHighlight(0); return; }
+      if (query !== "") { changeQuery(""); return; }
       onCancel?.();
     }
   }
@@ -192,8 +239,7 @@ export function FigureSearch({
   /** Den eingegebenen Namen übernehmen — roh, nur außen beschnitten. */
   function chooseFree(name: string) {
     onFree?.(name);
-    setQuery("");
-    setHighlight(0);
+    changeQuery("");
     input.current?.focus();
   }
 
@@ -207,7 +253,7 @@ export function FigureSearch({
           value={query}
           autoFocus={autoFocus}
           disabled={disabled || (state === "noCatalog" && !loading)}
-          onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
+          onChange={(e) => changeQuery(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           /*
@@ -308,18 +354,7 @@ export function FigureSearch({
                 index === active ? "bg-surface ring-fg/40" : "ring-border/70 hover:ring-fg/30"
               }`}
             >
-              {showImage ? (
-                <span className="h-8 w-8 shrink-0 overflow-hidden rounded-sky-sm bg-deep/40 ring-1 ring-border/60">
-                  {choice.image ? (
-                    /* Wie `FigureImage`: die Dateien sind vorab auf 640 px
-                       optimiert und liegen statisch, `next/image` würde sie
-                       zur Laufzeit erneut rechnen (ADR-0026). */
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={choice.image} alt="" loading="lazy"
-                         className="h-full w-full object-contain" />
-                  ) : null}
-                </span>
-              ) : null}
+              {showImage ? <FigureThumb src={choice.image ?? null} /> : null}
               {/* Serie zuerst: sie unterscheidet zwei gleich benannte Figuren
                   schneller als der Name, den man gerade getippt hat. */}
               <span className="w-10 shrink-0 text-xs uppercase tabular-nums text-muted">
@@ -337,7 +372,19 @@ export function FigureSearch({
                   {copy.itemTypes[choice.itemType ?? ""]}
                 </span>
               ) : null}
-              <span className="min-w-0 flex-1 truncate">{choice.name}</span>
+              {/*
+                AUF DEM TELEFON ZWEI ZEILEN FÜR DEN NAMEN (V2).
+                Seit das Bild davor steht, bleiben bei 360 px rund 75 px —
+                zu wenig für „Birthday Bash Big Bubble Pop Fizz", und die
+                Variante steht vorne im Namen, also genau dort, wo nichts
+                abgeschnitten wird, aber das Ende fehlt. Zwei Zeilen tragen
+                beides; die Zeile wächst dafür über 44 px hinaus, was eine
+                Trefferfläche nur größer macht. Ab `sm:` eine Zeile wie bisher.
+              */}
+              <span className="min-w-0 flex-1 break-words line-clamp-2 leading-tight sm:line-clamp-1 sm:leading-normal"
+                    title={choice.name}>
+                {choice.name}
+              </span>
               {/*
                 DIE NACHFRAGE, NEBEN DEM NAMEN (0145, ADR-0136).
 
@@ -361,6 +408,34 @@ export function FigureSearch({
         ))}
       </ul>
 
+      {/*
+        DER REST DER TREFFER, EINE SEITE WEITER.
+
+        Ein Knopf und kein unendliches Scrollen: der Kasten steht im
+        Kalkulator in einem gedeckelten Rollbereich und im Orderbuch mitten
+        im Formular, und ein Nachladen beim Scrollen wäre an beiden Stellen
+        ein Rollbereich, der sich unter dem Finger verlängert. Die Zahl im
+        Knopf sagt, wie viele noch fehlen.
+
+        `mousedown` + `preventDefault` aus demselben Grund wie bei den
+        Treffern: der Fokus bleibt im Suchfeld, keine Ersetzung des Systems
+        kann die Eingabe dazwischen ändern, und `Enter` nimmt danach weiter
+        die hervorgehobene Zeile.
+      */}
+      {hidden > 0 ? (
+        <button type="button" disabled={disabled}
+                onMouseDown={(event) => { event.preventDefault(); showMore(); }}
+                /* Per Tastatur ausgelöst, geht der Fokus zurück ins Suchfeld:
+                   dort wirken Pfeile und `Enter`, und der Knopf selbst
+                   verschwindet auf der letzten Seite unter dem Fokus. */
+                onClick={(event) => {
+                  if (event.detail === 0) { showMore(); input.current?.focus(); }
+                }}
+                className="min-h-11 self-start rounded-sky-md px-3 text-left text-xs text-muted ring-1 ring-border/70 hover:ring-fg/30 disabled:opacity-60 sm:min-h-8">
+          {copy.moreResults(hidden)}
+        </button>
+      ) : null}
+
       {onCancel ? (
         <button type="button" onClick={onCancel}
                 className="self-start min-h-11 text-xs text-muted underline underline-offset-2">
@@ -368,5 +443,34 @@ export function FigureSearch({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Das kleine Bild in einer Trefferzeile.
+ *
+ * DER KASTEN, DEN DER KALKULATOR SCHON HATTE (`bg-deep/40`), unverändert —
+ * jetzt auch im Orderbuch. Die Datei ist vorab optimiert und liegt
+ * statisch — `next/image` würde sie zur Laufzeit erneut rechnen (ADR-0026).
+ *
+ * `alt=""`, weil der Name direkt daneben steht: ein Screenreader soll ihn
+ * einmal hören, nicht zweimal. Das Bild ist Zusatz, nie die einzige Angabe.
+ *
+ * OHNE BILD bleibt der Kasten stehen — gleiche Größe, keine verrutschte
+ * Zeile — mit einem stillen Strich statt des Textes von `FigureImage`, der
+ * in 32 px nicht lesbar wäre.
+ */
+function FigureThumb({ src }: { src: string | null }) {
+  return (
+    <span aria-hidden="true"
+          className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-sky-sm bg-deep/40 ring-1 ring-border/60">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" loading="lazy" decoding="async"
+             className="h-full w-full object-contain" />
+      ) : (
+        <span className="text-xs text-muted">–</span>
+      )}
+    </span>
   );
 }

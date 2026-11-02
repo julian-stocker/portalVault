@@ -419,7 +419,8 @@ describe("die Oberfläche der kompakten Liste", () => {
     expect(LIST).toContain("<FigureSearch");
     expect(LIST).toContain("addPurchaseFigure(lines, choice)");
     /* Vor der Liste, nicht darunter. */
-    expect(LIST.indexOf("<FigureSearch")).toBeLessThan(LIST.indexOf("lines.map"));
+    /* Gezeichnet wird seit V2 `shown` — dieselben Zeilen, neueste oben. */
+    expect(LIST.indexOf("<FigureSearch")).toBeLessThan(LIST.indexOf("shown.map"));
   });
 
   it("die Entwurfslogik ist UNVERÄNDERT — die Liste zeichnet nur", () => {

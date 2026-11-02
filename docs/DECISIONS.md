@@ -17056,6 +17056,67 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0172 · Figurensuche ohne Abschneiden, Serie als Darstellungsregel in Kalkulator und Einkauf
+
+**Status:** UMGESETZT · 2026-11-02, lokal auf `development/skyisles-v2`, nicht committet.
+Keine Migration, keine Datenänderung.
+**Betrifft:** 0064 (gemeinsame Figurensuche), ADR-0131 (Kalkulator), ADR-0088 (Einkaufsorderbuch)
+
+### Befund
+
+Im Kalkulator fehlte bei „Pop Fizz" u. a. „Punch Pop Fizz". **Ursache:** `searchFigures()` schnitt
+die Trefferliste hart ab (`slice(0, limit)`; Kalkulator `CALC_RESULTS = 6`, Orderbuch 8). „Pop
+Fizz" trifft acht Katalogzeilen; „Punch Pop Fizz" lag als bloßer „Name enthält"-Treffer
+alphabetisch auf Platz 7 — die Wortgrenzen-Stufe verglich Wörter einzeln, und ein zweiwortiger
+Suchbegriff beginnt in keinem einzelnen Wort. Datenbank, Katalogfilter (`isPickableCatalogRow`),
+Berechtigung und Rollbereich waren nicht beteiligt: der Katalog kommt vollständig in den Speicher.
+
+### Entscheidung
+
+1. **Seite statt Grenze.** `matchFigures()` liefert **alle** Treffer (jede SKY-ID einmal);
+   `FigureSearch` zeigt `pageSize` davon und darunter „N weitere Treffer". `ArrowDown` auf der
+   letzten Zeile blättert weiter. Gilt in allen Pickern; bei ≤ einer Seite ändert sich nichts.
+2. **Wortgrenze über den ganzen Namen.** „pop fizz" ist in „Punch Pop Fizz" ein Wort-Treffer.
+3. **Kalkulator: Serie zuerst** (`order="series"`), darin Relevanz → Name → SKY-ID. Das
+   Orderbuch bleibt bei Relevanz. **`Enter` nimmt die markierte Zeile, und die Markierung
+   beginnt auf dem exakten Namen** (`exactMatchIndex`), sonst auf der ersten Zeile. Ohne das
+   nähme `Enter` bei „Mini Jini" (T) „Sidekick Mini Jini" (G) und bei „Scorp" (SF) „Scorpion
+   Striker Catapult" (G) — die zwei Fälle unter allen 594 Katalognamen. Eine per Pfeil oder
+   Maus gewählte Zeile gilt immer; liegt der exakte Name hinter der ersten Seite, wird die Seite
+   bis zu ihm verlängert.
+4. **Gespeicherter Einkauf in Serienblöcken**, sortiert an der einen Stelle `fetchPurchase()`
+   (Detailseite, Ledger-Aufklappung, Nachlesen nach Buchungen): Serie → Name → Positionsnummer.
+   Ohne oder mit unbekannter Serie: ein Block am Ende, nach Positionsnummer.
+   **Reine Darstellung** — `id`, `position`, Mengen, Preise, Zustände und Buchungen unverändert.
+   Verkäufe werden nicht umsortiert.
+5. **Erfassung eines Einkaufs: neueste Position oben** (`purchaseDraftDisplayOrder`), nur in der
+   Anzeige; Nutzlast und damit Positionsnummern bleiben in Erfassungsreihenfolge. Vorbelegte
+   Zeilen aus einer Kalkulation behalten ihre Reihenfolge, neu Getipptes steht darüber. Eine
+   abgetrennte Einheit bleibt **direkt neben ihrer Ausgangszeile** — sie ist keine neue Figur,
+   und Abtrennen ist der erste von zwei Handgriffen.
+   *Befund dabei:* der Auftrag nannte „neueste oben" als bestehendes Verhalten; tatsächlich stand
+   die neueste Zeile bis hierher **unten** — so war es nur im Kalkulator.
+6. **Bilder in jeder Figurensuche** (`showImage` jetzt `true`): Thumbnail im bisherigen
+   Kalkulator-Kasten (`bg-deep/40`), ohne Bild ein stiller Strich in derselben Größe. Bild kommt
+   mit der Katalogzeile — keine Anfrage je Treffer. Unter `sm:` hat der Name zwei Zeilen, damit
+   die Variante neben Bild, Serie, SKY-ID und Preis lesbar bleibt.
+
+**Serienreihenfolge aus der Datenbank** (`series.position`, Trap Team = `T`), gelesen in
+derselben Abfrage wie die Serienbezeichnung (`fetchSeriesTable`, `cache`), nie als Liste im Code
+(`series-order.ts`). Fehlt die Tabelle, sortiert alles als „unbekannt" — nichts verschwindet.
+
+### Konsequenzen
+
+* Positionsnummern im gespeicherten Einkauf stehen nicht mehr aufsteigend da; sie bleiben die
+  Identität der Zeile.
+* Alle Einkaufsaktionen (Einbuchen, Zustand, Figur ändern, Entfernen, Rücknahme, Bearbeiten im
+  Ledger-Fenster) adressieren die Positions-`id`, nie einen Listenplatz — geprüft und durch
+  `purchase-items-identity.test.tsx` festgehalten.
+* Ändert man die Figur einer Position auf eine andere Serie, wandert die Zeile nach dem
+  Nachladen in deren Block.
+
+---
+
 ## ADR-0171 · Die Familie wird an der Basisfigur gepflegt — Varianten erben sie, auch rückwirkend
 
 **Status:** ANGENOMMEN · 2026-11-02 (Regel vom Betreiber). `0168` **auf Staging angewendet am

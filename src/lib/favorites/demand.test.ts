@@ -92,7 +92,7 @@ describe("gebündelt geladen, nicht je Figur", () => {
      * Antwort, die verspätet eine neuere überschreiben könnte.
      */
     const suche = code(SEARCH);
-    expect(suche).toContain("useMemo(() => searchFigures(catalog, query, limit)");
+    expect(suche).toContain("useMemo(() => matchFigures(catalog, query, order)");
     expect(suche).not.toContain("useEffect");
     expect(suche).not.toContain("fetch(");
   });

@@ -117,8 +117,8 @@ describe("die Figuren kommen aus dem Katalog des Projekts", () => {
   it("zeigt in den Treffern ein Bild — dafür gibt es die Zusatzangabe", () => {
     expect(modal).toContain("showImage");
     const search = code("src/components/business/figure-search.tsx");
-    // Aus für alle bestehenden Aufrufer, an nur für den Kalkulator.
-    expect(search).toContain("showImage = false");
+    // Seit V2 überall an — auch Einkauf und Verkauf zeigen das Bild.
+    expect(search).toContain("showImage = true");
   });
 
   it("holt den Katalog erst beim Öffnen und genau einmal", () => {
@@ -456,7 +456,10 @@ describe("die Geometrie hält eine lange Liste aus", () => {
      */
     expect(modal).toContain("max-h-[28dvh]");
     expect(modal).not.toContain("max-h-[45dvh]");
-    expect(modal).toContain("limit={CALC_RESULTS}");
+    /* Seit V2 eine SEITE, keine Grenze: der Rest steht hinter „weitere
+       Treffer" (figure-search-paging.test.tsx). */
+    expect(modal).toContain("pageSize={CALC_RESULTS}");
+    expect(modal).not.toContain("limit={CALC_RESULTS}");
     expect(modal).toContain("const CALC_RESULTS = 6;");
   });
 
