@@ -286,6 +286,8 @@ describe("zwei Dateien, zwei Aufgaben", () => {
       { eintraege: { sky_id: string }[] }).eintraege.map((e) => e.sky_id);
     expect(l.zeilen).toBe(siegel.geregelt.production.zeilen - entfernt.length);
     for (const id of entfernt) expect(Object.keys(l.stand), id).not.toContain(id);
-    expect(l.abdruck).toBe("16746058d479c5dadc7feb31eb0338d1");
+    /* Fortgeschrieben vom Publish am 2026-11-02 (476 Schritte, 283 Figuren);
+       vorher `16746058d479c5dadc7feb31eb0338d1`. Jeder Publish ändert ihn. */
+    expect(l.abdruck).toBe("dc97d5ad6d584e2ac4f8f3df67fbbb83");
   });
 });
