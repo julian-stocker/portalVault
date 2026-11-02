@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-10-26 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-11-02 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -218,9 +218,9 @@ Listener nach `SIGTERM`.
 
 ## SkyIsles V2 — UX-Umbau (ab 2026-10-26)
 
-**Der Arbeitszweig ist `development/skyisles-v2`.** Production bleibt unberührt;
-`origin/main` steht weiter auf `81d1ba9` und ist 35 Commits hinter dem
-Entwicklungsstand.
+**Der Arbeitszweig ist `development/skyisles-v2`.** Production (`origin/main`) steht seit
+2026-11-02 auf `95da00b` (Calculator- und Orderbuch-Fixes, ADR-0172) und ist damit gleichauf
+mit dem Arbeitszweig. Nach Production geht nur, was ausdrücklich freigegeben ist.
 
 > **Die Git-Lage ist am 2026-10-26 bereinigt.** Bis dahin hieß der **lokale**
 > Zweig `main` und folgte `origin/main`, trug aber die V2-Arbeit — ein
@@ -6521,11 +6521,22 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
-**2026-11-02, Calculator- und Orderbuch-Fixes (ADR-0172) — Code und Tests, keine Migration,
-nicht committet.** Kalkulator-Suche schneidet nicht mehr ab (Ursache: `slice` nach 6 Treffern;
-„Punch Pop Fizz" stand auf Platz 7) und sortiert nach Serie; alle Figurensuchen blättern über
-„weitere Treffer" und zeigen Bilder; gespeicherte Einkäufe erscheinen in Serienblöcken, die
-Erfassung zeigt die neueste Position oben. Zwei überflüssige Hinweissätze gekürzt.
+**2026-11-02, Calculator- und Orderbuch-Fixes (ADR-0172) — auf Production ausgerollt und
+abgenommen.** Commit `95da00b`, per Fast-Forward von `bdf55a7` nach `main`; Vercel-Deployment
+`9kU9id1DMnQnRhgMdUWxqvm1HW5r` erfolgreich. Keine Migration, keine Datenänderung, kein
+Katalog-Publish. Vor dem Push: `npm test` 15 525 Tests grün, `npm run check` grün
+(Production-Build, SQL-Planprüfung 73/73), `verify:sums` 525 Dateien. Die sechs
+Production-Smoke-Tests hat der Betreiber am 2026-11-02 bestätigt.
+
+| Stand auf Production | |
+|---|---|
+| Kalkulator-Suche | liefert **alle** passenden Figuren; Ursache des Fehlers war ein `slice` nach 6 Treffern („Punch Pop Fizz" stand auf Platz 7). Weitere Treffer über „N weitere Treffer" und `ArrowDown` |
+| Reihenfolge im Kalkulator | nach Spielserie (SA → G → SF → T → SC → I, aus `series.position`), darin Relevanz → Name → SKY-ID |
+| `Enter` im Kalkulator | die Markierung beginnt auf dem exakten Namen („Mini Jini", „Scorp"); per Pfeil oder Maus Gewähltes gilt |
+| Gespeicherte Einkäufe | in Serienblöcken, ohne Serie zuletzt; Positions-IDs, Mengen, Preise und Buchungen unverändert |
+| Verkäufe | bisherige Reihenfolge, unverändert |
+| Erfassung eines Einkaufs | neueste Position oben; abgetrennte Einheiten bleiben neben ihrer Zeile |
+| Figurensuche im Orderbuch | Thumbnails in Einkauf und Verkauf, Platzhalter ohne Bild; Orderbuch-Reihenfolge weiter nach Relevanz |
 
 **2026-11-01, CAT-15: Familien beim Setzen der Basisfigur (ADR-0168) — Code und Tests,
 keine Migration, lokal committet.** Ursache der Giants-Fehler: `0159` legte mit

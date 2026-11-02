@@ -17058,8 +17058,9 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ## ADR-0172 · Figurensuche ohne Abschneiden, Serie als Darstellungsregel in Kalkulator und Einkauf
 
-**Status:** UMGESETZT · 2026-11-02, lokal auf `development/skyisles-v2`, nicht committet.
-Keine Migration, keine Datenänderung.
+**Status:** UMGESETZT, AUF PRODUCTION · 2026-11-02. Commit `95da00b` (Fast-Forward von
+`bdf55a7`), Vercel-Deployment `9kU9id1DMnQnRhgMdUWxqvm1HW5r`, Production-Smoke-Tests vom
+Betreiber bestätigt. Keine Migration, keine Datenänderung, kein Katalog-Publish.
 **Betrifft:** 0064 (gemeinsame Figurensuche), ADR-0131 (Kalkulator), ADR-0088 (Einkaufsorderbuch)
 
 ### Befund
