@@ -110,3 +110,82 @@ export function ordneVariantenschritte<T extends VariantenSchritt>(schritte: rea
   const danach = rest.slice(davor.length);
   return [...davor, ...geordnet, ...danach];
 }
+
+/* ==========================================================================
+ * CAT-19 — die Familie folgt der Basisfigur (`0168`, ADR-0171)
+ * ======================================================================= */
+
+const istFamilie = (s: VariantenSchritt) => s.feld === "familie";
+
+/**
+ * Die `familie`-Schritte der Basisfiguren VOR denen ihrer Varianten.
+ *
+ * WARUM. Mit `0168` weist das Ziel eine Familie an einer Variante ab, die
+ * nicht die ihrer Basisfigur ist. Liefe „Variante → B" vor „Basisfigur → B",
+ * stünde die Basisfigur noch auf A — abgelehnt. Andersherum hat die Kaskade
+ * die Variante schon mitgenommen, und ihr eigener Schritt findet den Zielwert
+ * vor (`tools/catalog-sync-apply.mts` schreibt ihn dann nicht).
+ *
+ * `basisVon` sagt, wessen Variante eine Figur NACH den `base_sky_id`-Schritten
+ * ist — die laufen vorher (FELDRANG). Stabil: innerhalb beider Gruppen bleibt
+ * die Reihenfolge. Ohne `0168` auf dem Ziel schadet sie nicht.
+ */
+export function ordneFamilienschritte<T extends VariantenSchritt>(
+  schritte: readonly T[],
+  basisVon: (skyId: string) => string | null,
+): T[] {
+  const erste = schritte.findIndex(istFamilie);
+  if (erste < 0) return [...schritte];
+  const familie = schritte.filter(istFamilie);
+  const basen = familie.filter((s) => basisVon(s.sky_id) === null);
+  const varianten = familie.filter((s) => basisVon(s.sky_id) !== null);
+  const davor = schritte.slice(0, erste).filter((s) => !istFamilie(s));
+  const danach = schritte.slice(erste).filter((s) => !istFamilie(s));
+  return [...davor, ...basen, ...varianten, ...danach];
+}
+
+/** Eine Figur, wie der Planer sie sieht: Basisfigur und Familie (Name). */
+export type FamilienZeile = { base_sky_id: string | null; familie: string | null };
+
+export type FamilienWiderspruch = {
+  sky_id: string; basis: string; familie: string | null; basisFamilie: string | null;
+};
+
+/**
+ * RIEGEL 7 — keine Variante mit einer anderen Familie als ihre Basisfigur,
+ * im Stand, der veröffentlicht würde.
+ *
+ * Mit `0168` auf dem Ziel liesse sich so ein Stand dort gar nicht schreiben
+ * (Abbruch mitten im Lauf); ohne `0168` landete der Widerspruch auf
+ * Production. Beides verhindert der Riegel — VOR dem ersten Schreibzugriff.
+ * Auch `null` zählt: hat die Basisfigur keine Familie, hat die Variante keine.
+ */
+export function familienWidersprueche(
+  zeilen: ReadonlyMap<string, FamilienZeile>,
+  gilt: (skyId: string) => boolean = () => true,
+): FamilienWiderspruch[] {
+  const out: FamilienWiderspruch[] = [];
+  for (const [sky_id, z] of [...zeilen].sort(([a], [b]) => a.localeCompare(b))) {
+    if (z.base_sky_id === null || !gilt(sky_id)) continue;
+    const basis = zeilen.get(z.base_sky_id);
+    if (basis === undefined) continue;   // Riegel 5 beantwortet das
+    if ((z.familie ?? null) !== (basis.familie ?? null)) {
+      out.push({ sky_id, basis: z.base_sky_id, familie: z.familie ?? null,
+                 basisFamilie: basis.familie ?? null });
+    }
+  }
+  return out;
+}
+
+/**
+ * Welche Familien Production ANLEGEN muss: nur die, die eine zu
+ * veröffentlichende Figur trägt. Eine leere Staging-Familie — eine
+ * verlassene Pseudofamilie etwa — entsteht auf Production nie.
+ */
+export function gebrauchteFamilien(
+  zeilen: Iterable<FamilienZeile & { gilt: boolean }>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const z of zeilen) if (z.gilt && z.familie !== null) out.add(z.familie);
+  return out;
+}

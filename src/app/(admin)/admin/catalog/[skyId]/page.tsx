@@ -211,6 +211,7 @@ export default async function AdminFigurePage({
               skyId={figure.skyId}
               familie={figure.characterId ?? null}
               familienname={familienname}
+              basis={figure.baseSkyId === null ? null : (basisname ?? figure.baseSkyId)}
             />
           </dd>
         </div>

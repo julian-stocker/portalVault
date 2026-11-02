@@ -14,7 +14,8 @@
  * The head carries the figure: picture (with a small edit overlay for the
  * image), the name (a pencil edits the display-name override — the imported
  * name is never touched), SKY-ID, series, element and the status. Below it
- * the two properties that are changed most: "Variante von" and the types.
+ * the properties that are changed most: "Variante von" and "Familie" side by
+ * side (stacked on a phone, CAT-18), then the types.
  * Everything else — card art, internal note, technical identity, history —
  * sits in closed sections under "Weitere Details".
  *
@@ -56,6 +57,11 @@ import { Modal } from "@/components/ui/modal";
 import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
 import { BasePicker } from "@/components/admin/base-picker";
 import { TypeChips } from "@/components/admin/type-chips";
+import { FamilyPicker } from "@/components/admin/family-field";
+import {
+  alignToBase, baseChanged, chooseFamily, familyBlocker, familyChanged, familyIsInherited,
+  inheritedDiffers, type FamilyRef,
+} from "@/lib/admin/family-draft";
 import { CARD_TYPES, CARD_TYPE_LABELS } from "@/lib/catalog/card-type";
 import {
   baselineAfter,
@@ -75,6 +81,8 @@ import {
   setDisplayNameOverride,
   setImageOverride,
   setVariantBase,
+  setFigureCharacter,
+  createAndAssignFamily,
   type AdminResult,
 } from "@/lib/admin/actions";
 import { stageFigureImage } from "@/lib/admin/image-actions";
@@ -126,9 +134,14 @@ const WRITERS: Record<DraftField, (skyId: string, draft: AdminFigureDraft) => Pr
    */
   baseSkyId: (skyId, draft) =>
     setVariantBase(skyId, draft.baseSkyId,
-                   draft.adoptBaseFamily ? "adopt-base"
-                   : draft.reuseFamilyId !== null ? { reuseFamilyId: draft.reuseFamilyId }
+                   draft.reuseFamilyId !== null ? { reuseFamilyId: draft.reuseFamilyId }
                    : draft.createFamilyWithBase),
+  /*
+   * DIE FAMILIE (CAT-18) über `0158`, denselben Weg wie die Detailseite. Eine
+   * NEU anzulegende Familie geht über `createAndAssignFamily` — das braucht
+   * die neue id zurück und läuft deshalb in `save()` selbst, nicht hier.
+   */
+  characterId: (skyId, draft) => setFigureCharacter(skyId, draft.characterId),
   cardType: (skyId, draft) => setCardType(skyId, draft.cardType),
   /*
    * EIN EIGENER SCHREIBWEG, wie jedes andere Feld. `setFigureTypes` ersetzt
@@ -160,6 +173,16 @@ function Property({ label, children }: { label: string; children: React.ReactNod
   );
 }
 
+/** The same, with the label above — for the two-column row (CAT-18). */
+function StackedProperty({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <span className="text-xs text-muted">{label}</span>
+      <div className="mt-0.5 min-w-0">{children}</div>
+    </div>
+  );
+}
+
 /**
  * A closed-by-default section. `<details>` and not a state flag: the browser
  * already makes it a keyboard-operable disclosure with the right semantics.
@@ -187,16 +210,15 @@ function More({ title, summary, children }: {
 }
 
 /**
- * What happens to the family with the new base (CAT-15) — and, where the two
- * disagree, the explicit choice to take the base's. Nothing is decided here;
- * the server reads again and the RPCs check again.
+ * What happens to the family with the new base (CAT-15). Since `0168` the
+ * variant always takes the base's family, NULL included — so this only
+ * SAYS what will happen; the one choice left is to give the base an
+ * existing same-named family first. The server reads and checks again.
  */
-function FamilyPlanLine({ plan, adopt, reuse, disabled, onAdopt, onReuse }: {
+function FamilyPlanLine({ plan, reuse, disabled, onReuse }: {
   plan: VariantFamilyOutcome;
-  adopt: boolean;
   reuse: number | null;
   disabled: boolean;
-  onAdopt: (value: boolean) => void;
   onReuse: (id: number | null) => void;
 }) {
   const t = de.admin;
@@ -209,27 +231,11 @@ function FamilyPlanLine({ plan, adopt, reuse, disabled, onAdopt, onReuse }: {
           + (plan.members.length > 4 ? " …" : ""))
     : plan.kind === "create" ? t.familyPlanCreate(plan.name)
     : plan.kind === "none" ? t.familyPlanNone
-    : plan.kind === "variant-only" ? t.familyPlanVariantOnly(plan.variant.name)
-    : t.familyPlanConflict(plan.variant.name, plan.base.name);
-  const warn = plan.kind === "conflict";
+    : plan.kind === "drop" ? t.familyPlanDrop(plan.variant.name)
+    : t.familyPlanReplace(plan.variant.name, plan.base.name);
   return (
     <div className="mt-1 flex flex-col gap-1">
-      <p role={warn ? "alert" : undefined}
-         className={`text-[11px] ${warn ? "text-danger" : "text-muted"}`}>
-        {line}
-      </p>
-      {plan.kind === "conflict" || plan.kind === "variant-only" ? (
-        <label className="flex min-h-8 items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            checked={adopt}
-            disabled={disabled}
-            onChange={(event) => onAdopt(event.target.checked)}
-            className="size-4"
-          />
-          {plan.kind === "conflict" ? t.familyAdoptBase(plan.base.name) : t.familyAdoptNone}
-        </label>
-      ) : null}
+      <p className="text-[11px] text-muted">{line}</p>
       {plan.kind === "existing" ? (
         <label className="flex min-h-8 items-center gap-2 text-xs">
           <input
@@ -279,6 +285,11 @@ export function AdminFigureModal({
   const [baseName, setBaseName] = useState<string | null>(null);
   /* What the family will be once the new base is saved (CAT-15). */
   const [familyPlan, setFamilyPlan] = useState<VariantFamilyOutcome | null>(null);
+  /* The family (CAT-18): the name the draft's choice is shown with, the base
+     figure's family, and how many variants share the stored one. */
+  const [familyName, setFamilyName] = useState<string | null>(null);
+  const [baseFamily, setBaseFamily] = useState<FamilyRef | null>(null);
+  const [pickingFamily, setPickingFamily] = useState(false);
 
   const skyId = figure?.skyId ?? null;
 
@@ -294,7 +305,7 @@ export function AdminFigureModal({
     if (!figure) return;
     let cancelled = false;
 
-    void loadFigureEditor(figure.skyId, figure.baseSkyId).then((result) => {
+    void loadFigureEditor(figure.skyId, figure.baseSkyId, figure.characterId).then((result) => {
       if (cancelled) return;
       if (!result.ok) {
         setLoadError(result.message);
@@ -307,6 +318,8 @@ export function AdminFigureModal({
       setBaseName(result.data.baseName);
       setVariantCount(result.data.variantCount);
       setEditorialSource(result.data.editorialSource);
+      setFamilyName(result.data.family?.name ?? null);
+      setBaseFamily(result.data.baseFamily);
     });
 
     return () => {
@@ -372,6 +385,8 @@ export function AdminFigureModal({
     return () => { cancelled = true; };
   }, [skyId, pendingBase, familyWanted]);
   const dirty = plan.length > 0;
+  /* What stops a save before anything is written (`family-draft.ts`). */
+  const blocker = initial && draft ? familyBlocker(initial, draft, baseFamily) : null;
 
   const requestClose = useCallback(() => {
     if (saving) return; // a save in flight is not interrupted by Escape
@@ -384,13 +399,29 @@ export function AdminFigureModal({
 
   async function save() {
     if (!skyId || !initial || !draft || inFlight.current || plan.length === 0) return;
+    /* Checked again here, not only on the button: no half of a contradiction
+       is ever written. */
+    if (familyBlocker(initial, draft, baseFamily) !== null) return;
     inFlight.current = true;
     setSaving(true);
     setReport(null);
 
+    /* `working` can learn one thing on the way: the id of a family this save
+       created. The baseline is taken from it, so a retry only assigns. */
+    let working = draft;
     const outcomes: FieldOutcome[] = [];
     for (const field of plan) {
-      const result = await WRITERS[field](skyId, draft);
+      let result: AdminResult;
+      if (field === "characterId" && working.newFamilyName !== null) {
+        const created = await createAndAssignFamily(skyId, working.newFamilyName);
+        if (created.characterId !== undefined) {
+          working = { ...working, characterId: created.characterId, newFamilyName: null };
+          setFamilyName(draft.newFamilyName);
+        }
+        result = created;
+      } else {
+        result = await WRITERS[field](skyId, working);
+      }
       outcomes.push(
         result.ok ? { field, ok: true } : { field, ok: false, message: result.message },
       );
@@ -401,8 +432,9 @@ export function AdminFigureModal({
     }
 
     const summary = summarise(plan, outcomes);
-    const next = baselineAfter(initial, draft, summary.saved);
+    const next = baselineAfter(initial, working, summary.saved);
     setInitial(next);
+    if (working !== draft) setDraft(working);
     setReport({ saved: summary.saved, failed: summary.failed });
     setSaving(false);
     inFlight.current = false;
@@ -656,7 +688,15 @@ export function AdminFigureModal({
               </label>
             ) : null}
 
-            <Property label={de.admin.propertyVariantOf}>
+            {/*
+              * „VARIANTE VON" UND „FAMILIE" NEBENEINANDER, auf dem Telefon
+              * untereinander (CAT-18). Zwei Beziehungen, unabhängig
+              * voneinander (ADR-0034): die Basisfigur sagt „Variante GENAU
+              * dieser Figur derselben Serie", die Familie „derselbe Charakter",
+              * serienübergreifend. Keine ändert die andere still.
+              */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <StackedProperty label={de.admin.propertyVariantOf}>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm">
                   {draft.baseSkyId === null ? de.admin.propertyNone : (baseName ?? draft.baseSkyId)}
@@ -668,8 +708,10 @@ export function AdminFigureModal({
                   !pickingBase ? (
                     <button
                       type="button"
-                      onClick={() => setPickingBase(true)}
-                      disabled={saving}
+                      onClick={() => { setPickingBase(true); setPickingFamily(false); }}
+                      disabled={saving || (initial !== null && familyChanged(initial, draft))}
+                      title={initial !== null && familyChanged(initial, draft)
+                        ? de.admin.baseAfterFamily : undefined}
                       className="focus-ring min-h-8 text-xs text-muted underline decoration-dotted
                                  hover:text-foreground"
                     >
@@ -683,10 +725,8 @@ export function AdminFigureModal({
               {pendingBase !== null && familyPlan !== null ? (
                 <FamilyPlanLine
                   plan={familyPlan}
-                  adopt={draft.adoptBaseFamily}
                   reuse={draft.reuseFamilyId}
                   disabled={saving}
-                  onAdopt={(value) => set("adoptBaseFamily", value)}
                   onReuse={(id) => set("reuseFamilyId", id)}
                 />
               ) : null}
@@ -705,7 +745,6 @@ export function AdminFigureModal({
                       ...current,
                       baseSkyId: target?.skyId ?? null,
                       createFamilyWithBase: target !== null && createFamily,
-                      adoptBaseFamily: false,
                       reuseFamilyId: null,
                     });
                     setBaseName(target?.name ?? null);
@@ -713,7 +752,111 @@ export function AdminFigureModal({
                   }}
                 />
               ) : null}
-            </Property>
+            </StackedProperty>
+
+            <StackedProperty label={de.admin.propertyFamily}>
+              {/*
+                * AN EINER VARIANTE GEERBT, NICHT BEARBEITBAR (CAT-19, `0168`).
+                * Sie zeigt die Familie ihrer Basisfigur und sagt woher. Wird
+                * die Basisfigur im Entwurf geändert, folgt die Familie nach
+                * dem Speichern der neuen — die Zeile unter „Variante von"
+                * sagt, welche.
+                */}
+              {initial !== null && (familyIsInherited(initial) || draft.baseSkyId !== null) ? (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-sm">
+                    {baseChanged(initial, draft)
+                      ? de.admin.familyFollowsNewBase
+                      : baseFamily !== null ? baseFamily.name : de.admin.familyInheritedNone}
+                  </span>
+                  {!baseChanged(initial, draft) && baseFamily !== null ? (
+                    <span className="text-[11px] text-muted">
+                      {de.admin.familyInherited(baseName ?? initial.baseSkyId ?? "")}
+                    </span>
+                  ) : null}
+                  {/* Eine Altabweichung von vor `0168`: sichtbar, und nur in
+                      EINE Richtung korrigierbar — auf die Basisfigur. */}
+                  {!baseChanged(initial, draft) && inheritedDiffers(initial, baseFamily) ? (
+                    familyChanged(initial, draft) ? (
+                      <span className="text-[11px] text-muted">{de.admin.familyAligned}</span>
+                    ) : (
+                      <>
+                        <span role="alert" className="text-[11px] text-danger">
+                          {initial.characterId === null ? de.admin.familyDiffersNone
+                            : de.admin.familyDiffers(familyName ?? `#${initial.characterId}`)}
+                        </span>
+                        {editorialSource ? (
+                          <button
+                            type="button"
+                            disabled={saving}
+                            onClick={() => setDraft((current) => current === null ? current
+                              : alignToBase(current, baseFamily))}
+                            className="focus-ring min-h-8 self-start text-xs underline decoration-dotted"
+                          >
+                            {de.admin.familyAlign}
+                          </button>
+                        ) : null}
+                      </>
+                    )
+                  ) : null}
+                </div>
+              ) : (
+              <>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="text-sm">
+                  {draft.newFamilyName !== null
+                    ? de.admin.familyNewPending(draft.newFamilyName)
+                    : draft.characterId === null ? de.admin.propertyNone
+                    : (familyName ?? `#${draft.characterId}`)}
+                </span>
+                {draft.characterId !== null && draft.newFamilyName === null ? (
+                  <span className="font-mono text-[11px] text-muted">#{draft.characterId}</span>
+                ) : null}
+                {editorialSource ? (
+                  !pickingFamily ? (
+                    <button
+                      type="button"
+                      onClick={() => { setPickingFamily(true); setPickingBase(false); }}
+                      disabled={saving || (initial !== null && baseChanged(initial, draft))}
+                      className="focus-ring min-h-8 text-xs text-muted underline decoration-dotted
+                                 hover:text-foreground disabled:no-underline disabled:opacity-60"
+                    >
+                      {de.admin.baseChange}
+                    </button>
+                  ) : null
+                ) : (
+                  <span className="text-[11px] text-muted">{de.admin.baseEditOnStaging}</span>
+                )}
+              </div>
+              {/* Die Basisfigur nimmt ALLE ihre Varianten mit — das sagt der
+                  Dialog vorher, nicht danach. */}
+              {initial !== null && familyChanged(initial, draft) && variantCount > 0 ? (
+                <p className="mt-0.5 text-[11px] text-muted">
+                  {de.admin.familyCascade(variantCount)}
+                </p>
+              ) : null}
+              {editorialSource && pickingFamily ? (
+                <FamilyPicker
+                  disabled={saving}
+                  canRemove={draft.characterId !== null || draft.newFamilyName !== null}
+                  onCancel={() => setPickingFamily(false)}
+                  onPick={(family) => {
+                    setDraft((current) => current === null ? current : chooseFamily(current, family));
+                    setFamilyName(family?.name ?? null);
+                    setPickingFamily(false);
+                  }}
+                  onPlanNew={(name) => {
+                    setDraft((current) => current === null ? current : {
+                      ...current, characterId: null, newFamilyName: name,
+                    });
+                    setPickingFamily(false);
+                  }}
+                />
+              ) : null}
+              </>
+              )}
+            </StackedProperty>
+            </div>
 
             <Property label={de.admin.typeHeading}>
               <TypeChips
@@ -816,6 +959,9 @@ export function AdminFigureModal({
           </p>
         ) : null}
 
+        {blocker?.kind === "base-and-family" ? (
+          <p role="alert" className="text-xs text-danger">{de.admin.familyBaseAndFamily}</p>
+        ) : null}
         <div className="flex gap-2">
           <button type="button" onClick={requestClose} disabled={saving} className={ACTION_NEUTRAL}>
             {de.admin.cancel}
@@ -823,9 +969,9 @@ export function AdminFigureModal({
           <button
             type="button"
             onClick={() => void save()}
-            disabled={!dirty || saving}
+            disabled={!dirty || saving || blocker !== null}
             aria-busy={saving || undefined}
-            className={ACTION_PRIMARY + (dirty && !saving ? "" : " opacity-60")}
+            className={ACTION_PRIMARY + (dirty && !saving && blocker === null ? "" : " opacity-60")}
           >
             {saving ? de.admin.saving : de.admin.saveChanges}
           </button>

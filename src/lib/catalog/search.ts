@@ -76,15 +76,67 @@ export function missingFigures(
   return figures.filter((figure) => !ownedSkyIds.has(figure.skyId));
 }
 
+/**
+ * WAS EINE EINGABE ALS SKY-ID BEDEUTET (CAT-18) — oder `null`.
+ *
+ *   „SKY-0147", „sky-0147", „sky 147", „SKY147"   → genau SKY-0147, nur sie
+ *   „0147", „147"                                 → SKY-0147, NEBEN der Namenssuche
+ *
+ * EXAKT, NIE ALS TEILTREFFER. „147" ist SKY-0147 und nicht SKY-1470; „14"
+ * ist SKY-0014 und nicht SKY-0147. Eine SKY-ID hat vier Ziffern
+ * (ADR-0001); fünf und mehr sind keine, sondern z. B. eine Modellnummer im
+ * Namen eines Portals, und bleiben reine Namenssuche.
+ *
+ * `exclusive` sagt, ob die Namenssuche daneben schweigt: wer das Präfix
+ * tippt, meint die ID; wer nur Ziffern tippt, kann auch einen Namen meinen.
+ */
+export function skyIdQuery(query: string): { skyId: string; exclusive: boolean } | null {
+  const q = query.trim();
+  const mitPraefix = /^sky\s*-?\s*(\d{1,4})$/i.exec(q);
+  if (mitPraefix) return { skyId: `SKY-${mitPraefix[1].padStart(4, "0")}`, exclusive: true };
+  const ziffern = /^(\d{1,4})$/.exec(q);
+  if (ziffern) return { skyId: `SKY-${ziffern[1].padStart(4, "0")}`, exclusive: false };
+  return null;
+}
+
+/**
+ * Die Trefferregel, mit oder ohne SKY-ID.
+ *
+ * NUR DORT, WO DIE SKY-ID EIN ARBEITSWERKZEUG IST — im Admin-Katalog. Ein
+ * Sammler sucht nach Namen; „147" soll ihm keine Figur liefern, deren Name
+ * nichts davon enthält. Ohne `skyIds` ist das hier exakt `matchesQuery`.
+ */
+function searcher(query: string, skyIds: boolean): (figure: CatalogFigure) => boolean {
+  const normalized = normalizeForSearch(query);
+  const id = skyIds ? skyIdQuery(query) : null;
+  if (id === null) return (figure) => matchesQuery(figure, normalized);
+  if (id.exclusive) return (figure) => figure.skyId === id.skyId;
+  return (figure) => figure.skyId === id.skyId || matchesQuery(figure, normalized);
+}
+
+/**
+ * Der exakte ID-Treffer zuerst, sonst die Reihenfolge der Eingabe. Nur er
+ * wandert; alles andere bleibt in Katalogreihenfolge (ADR-0169).
+ */
+function exactFirst(figures: CatalogFigure[], query: string, skyIds: boolean): CatalogFigure[] {
+  const id = skyIds ? skyIdQuery(query) : null;
+  if (id === null) return figures;
+  const i = figures.findIndex((figure) => figure.skyId === id.skyId);
+  return i <= 0 ? figures : [figures[i], ...figures.slice(0, i), ...figures.slice(i + 1)];
+}
+
 /** Applies search and series filter together. Order of the input is kept. */
 export function filterFigures(
   figures: readonly CatalogFigure[],
-  options: { query?: string; seriesCode?: string },
+  options: { query?: string; seriesCode?: string; skyIds?: boolean },
 ): CatalogFigure[] {
-  const normalized = normalizeForSearch(options.query ?? "");
+  const query = options.query ?? "";
+  const skyIds = options.skyIds ?? false;
   const series = options.seriesCode ?? ALL_SERIES;
-  return figures.filter(
-    (figure) => matchesSeries(figure, series) && matchesQuery(figure, normalized),
+  const trifft = searcher(query, skyIds);
+  return exactFirst(
+    figures.filter((figure) => matchesSeries(figure, series) && trifft(figure)),
+    query, skyIds,
   );
 }
 
@@ -117,13 +169,16 @@ export function groupSearchResults(
     seriesCode: string;
     /** Series in database order; only those with hits are returned. */
     series: readonly { code: string; label: string }[];
+    /** Also resolve SKY-IDs (admin catalogue only, see `skyIdQuery`). */
+    skyIds?: boolean;
   },
 ): SearchGroup[] {
-  const normalized = normalizeForSearch(options.query);
+  const skyIds = options.skyIds ?? false;
+  const trifft = searcher(options.query, skyIds);
   const hits = new Map<string, CatalogFigure[]>();
 
   for (const figure of figures) {
-    if (!matchesQuery(figure, normalized)) continue;
+    if (!trifft(figure)) continue;
     const list = hits.get(figure.seriesCode);
     if (list) list.push(figure);
     else hits.set(figure.seriesCode, [figure]);
@@ -138,7 +193,7 @@ export function groupSearchResults(
     .map((one) => ({
       code: one.code,
       label: one.label,
-      figures: hits.get(one.code) ?? [],
+      figures: exactFirst(hits.get(one.code) ?? [], options.query, skyIds),
       active: one.code === options.seriesCode,
     }))
     // The active group is kept even when empty: "nothing here, but three in

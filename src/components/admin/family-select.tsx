@@ -25,13 +25,18 @@ import { de } from "@/lib/i18n/de";
  * und liegt bewusst daneben, nicht darin.
  */
 export function FamilySelect({
-  skyId, familie, familienname,
+  skyId, familie, familienname, basis = null,
 }: {
   skyId: string;
   /** Die heutige Zuordnung, oder `null`. */
   familie: number | null;
   /** Ihr Name, falls bekannt — für die Anzeige ohne zweite Abfrage. */
   familienname: string | null;
+  /**
+   * Ist die Figur eine Variante, ihre Basisfigur (Name). Dann ERBT sie die
+   * Familie (`0168`, ADR-0171) — angezeigt, nicht bearbeitbar.
+   */
+  basis?: string | null;
 }) {
   const [offen, setOffen] = useState(false);
   const [suche, setSuche] = useState("");
@@ -70,6 +75,17 @@ export function FamilySelect({
       const antwort = await searchFamilies(name);
       if (antwort !== null) setTreffer(antwort);
     });
+  }
+
+  if (basis !== null) {
+    return (
+      <div className="text-left">
+        <p className="text-sm">{familienname ?? de.admin.familyInheritedNone}</p>
+        {familienname !== null ? (
+          <p className="text-[11px] text-muted">{de.admin.familyInherited(basis)}</p>
+        ) : null}
+      </div>
+    );
   }
 
   return (

@@ -83,24 +83,34 @@ export type AdminFigureDraft = {
    */
   createFamilyWithBase: boolean;
   /**
-   * EBENFALLS EIN BEGLEITWERT (CAT-15): die ausdrückliche Korrektur einer
-   * falschen Familie — die Variante übernimmt mit der neuen Basisfigur deren
-   * Familie (auch „keine"). Nur der Bediener setzt ihn, im Editor, wenn die
-   * Vorschau einen Widerspruch zeigt.
-   */
-  adoptBaseFamily: boolean;
-  /**
    * EBENFALLS EIN BEGLEITWERT (CAT-15): die vom Bediener bestätigte,
    * gleichnamige bestehende Familie, die Basisfigur und Variante bekommen
    * sollen. `null`, solange nichts bestätigt ist.
    */
   reuseFamilyId: number | null;
+  /**
+   * DIE FAMILIE (`character_id`, CAT-18) — serienübergreifend und
+   * unabhängig von der Basisfigur (ADR-0034). `null` heißt „keine".
+   * Geschrieben über `setFigureCharacter` (`0158`), denselben Weg wie die
+   * Detailseite; im Dialog nur dort änderbar, wo der Katalog gepflegt wird —
+   * und nur an einer Basisfigur: eine Variante erbt sie (`0168`, ADR-0171).
+   */
+  characterId: number | null;
+  /**
+   * BEGLEITWERT: der Name einer Familie, die beim Speichern ERST angelegt
+   * und dann zugeordnet wird — nur, wenn der Bediener „anlegen" gewählt hat.
+   * `null` sonst. Nie automatisch.
+   */
+  newFamilyName: string | null;
 };
 
 /** The fields, in the order they are saved. */
 export const DRAFT_FIELDS = [
   "displayNameOverride",
   "baseSkyId",
+  /* Nach der Basisfigur: `0159` kann beim Setzen der Basis die Familie
+     mitbewegen. Beides in einem Speichern lässt `family-draft.ts` nicht zu. */
+  "characterId",
   "cardType",
   "types",
   "imageOverridePath",
@@ -125,6 +135,7 @@ export function draftFrom(figure: {
   catalogStatus?: CatalogStatus;
   types?: readonly string[];
   baseSkyId?: string | null;
+  characterId?: number | null;
 }, adminNote: string | null): AdminFigureDraft {
   return {
     displayNameOverride: figure.displayNameOverride,
@@ -140,8 +151,9 @@ export function draftFrom(figure: {
     adminNote: adminNote ?? "",
     baseSkyId: figure.baseSkyId ?? null,
     createFamilyWithBase: false,
-    adoptBaseFamily: false,
     reuseFamilyId: null,
+    characterId: figure.characterId ?? null,
+    newFamilyName: null,
   };
 }
 
@@ -173,6 +185,12 @@ export function changedFields(
        * nicht einen Absturz im Speicherplan.
        */
       return (initial.types ?? []).join(",") !== (draft.types ?? []).join(",");
+    }
+    /* Eine neu anzulegende Familie ist eine Änderung, auch solange sie noch
+       keine id hat. `?? null`: ein älterer Entwurf ohne die Felder. */
+    if (field === "characterId") {
+      return (initial.characterId ?? null) !== (draft.characterId ?? null)
+          || (draft.newFamilyName ?? null) !== null;
     }
     return initial[field] !== draft[field];
   });

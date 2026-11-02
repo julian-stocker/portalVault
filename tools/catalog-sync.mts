@@ -39,7 +39,9 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { riegel3, type Ausschluss, type Figur }
   from "../src/lib/catalog/sync-collision-gate.ts";
 import { GEREGELT, UNGEREGELT } from "../src/lib/catalog/publish-compare.ts";
-import { pruefeBasisziele } from "../src/lib/catalog/publish-variants.ts";
+import {
+  familienWidersprueche, gebrauchteFamilien, pruefeBasisziele,
+} from "../src/lib/catalog/publish-variants.ts";
 import { folgeschritte } from "../src/lib/catalog/publish-new-figure.ts";
 import { OVP_REMOVED_SKY_IDS, pruefeEntfernte } from "../src/lib/catalog/ovp-removal.ts";
 import { liesModus, pruefeEinwegrichtung, type Modus }
@@ -471,9 +473,23 @@ const ovr = D.display_name_override as Record<string, { wert: string; grund: str
 const nameKorr = D.name_korrektur_staging as Record<string, { wert: string; grund: string }>;
 
 // 1. Charaktere, die Production fehlen
+/*
+ * NUR DIE, DIE EINE ZU VERÖFFENTLICHENDE FIGUR TRÄGT (CAT-19). Bis dahin
+ * legte der Plan JEDE Staging-Familie an, die Production fehlte — auch eine
+ * leere, etwa eine verlassene Pseudofamilie. Die entstand dann auf
+ * Production ohne ein einziges Mitglied.
+ */
+const giltFuerPublish = (id: string, r: Zeile) => !ausgeschlossen(r, D) && !OVP_REMOVED_SKY_IDS.has(id);
+const gebraucht = gebrauchteFamilien([...sS].map(([id, r]) => ({
+  base_sky_id: (r.base_sky_id as string | null) ?? null,
+  familie: (r.familie as string | null) ?? null,
+  gilt: giltFuerPublish(id, r),
+})));
 const chrP = new Set(abzug.production.characters.map((c) => c.canonical_name as string));
 for (const c of abzug.staging.characters) {
-  if (!chrP.has(c.canonical_name as string)) {
+  /* Der versiegelte Bootstrap bleibt, wie er gelaufen ist. */
+  if (!chrP.has(c.canonical_name as string)
+      && (BOOTSTRAP || gebraucht.has(c.canonical_name as string))) {
     plan.push({ ziel: "production", art: "charakter-anlegen", sky_id: "—",
       nach: c.canonical_name as string, weg: "W admin_create_character (0158)",
       grund: "wird von einer zu uebernehmenden Figur gebraucht" });
@@ -736,6 +752,31 @@ if (!BOOTSTRAP) {
   console.log("  Riegel 5 ok — jede Variantenzuordnung hat ihre Basisfigur auf Production\n");
 }
 
+/* ------------------- RIEGEL 7: die Variante traegt die Familie der Basis */
+/*
+ * CAT-19, ADR-0171. Gemessen am STAGING-Stand, der veroeffentlicht wuerde.
+ * Der Plan wird trotzdem geschrieben — man soll sehen koennen, was er
+ * enthaelt —, aber `catalog-sync-apply.mts` bricht an TOR 1c ab, solange
+ * diese Liste nicht leer ist.
+ */
+const familienwidersprueche = BOOTSTRAP ? [] : familienWidersprueche(
+  new Map([...sS].map(([id, r]) => [id, {
+    base_sky_id: (r.base_sky_id as string | null) ?? null,
+    familie: (r.familie as string | null) ?? null,
+  }])),
+  (id) => giltFuerPublish(id, sS.get(id)!),
+);
+if (familienwidersprueche.length > 0) {
+  console.error(`  RIEGEL 7 — ${familienwidersprueche.length} Variante(n) tragen eine andere `
+    + "Familie als ihre Basisfigur. Der Plan wird geschrieben, der Publish bricht an TOR 1c ab:\n");
+  for (const w of familienwidersprueche) {
+    console.error(`    ${w.sky_id} (${w.familie ?? "keine"}) → Basis ${w.basis} (${w.basisFamilie ?? "keine"})`);
+  }
+  console.error("");
+} else if (!BOOTSTRAP) {
+  console.log("  Riegel 7 ok — jede Variante traegt die Familie ihrer Basisfigur\n");
+}
+
 /* ------------------------------------------------------------- Ausgabe */
 
 const zz = (p: Schritt[]) => ({
@@ -751,6 +792,7 @@ writeFileSync("resources/analysis/sync-dryrun.json", JSON.stringify({
   erzeugt: new Date().toISOString(), schreibt_nichts: true,
   modus: MODUS,
   fingerprint_gemessen: fp, kollisionen,
+  familienwidersprueche,
   production: zz(prod), staging: zz(stag), plan,
 }, null, 1));
 

@@ -497,7 +497,7 @@ describe("the filters work together, on everything", () => {
       at = next;
     }
     /* And the search reads the pool, not the other way round. */
-    expect(VIEW).toContain("filterFigures(pool, { query: deferredQuery, seriesCode })");
+    expect(VIEW).toContain("filterFigures(pool, { query: deferredQuery, seriesCode, skyIds: admin })");
   });
 
   it("and on the WHOLE catalogue — there is no pagination to filter a slice of", () => {

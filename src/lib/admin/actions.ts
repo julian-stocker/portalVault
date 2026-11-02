@@ -37,6 +37,7 @@ import { USK_RATINGS, isDeliveryScope } from "@/lib/shop/delivery-scope";
 import { CATALOG_BUCKET, isOverridePath } from "@/lib/catalog/image";
 import { MERGE_FELDER, type MergeAuswahl } from "@/lib/admin/merge-candidates";
 import { createClient } from "@/lib/supabase/server";
+import { isEditorialCatalogSource } from "@/lib/admin/catalog-source";
 import { isCatalogStatus, type CatalogStatus } from "@/lib/catalog/catalog-status";
 import { asCatalogTypes, isCatalogType } from "@/lib/catalog/catalog-type";
 import { istUnbekannteFunktion } from "@/lib/admin/queries";
@@ -401,9 +402,10 @@ export async function publishDraftAsVariant(
  *                           Familie, die es serienübergreifend schon gab.
  *   * `{ reuseFamilyId }` — die bestätigte, gleichnamige bestehende Familie
  *                           wird Basisfigur und Variante zugeordnet.
- *   * `"adopt-base"`      — die ausdrückliche Korrektur einer falschen
- *                           Familie: die Variante bekommt die Familie der
- *                           Basisfigur (auch „keine"), dann die Basisfigur.
+ *
+ * SEIT `0168` (ADR-0171) GIBT ES KEINEN FAMILIENKONFLIKT MEHR: die Variante
+ * bekommt beim Setzen der Basisfigur deren Familie — auch „keine". Die
+ * frühere ausdrückliche Übernahme („adopt-base") ist damit die Regel selbst.
  *
  * NUR BESTEHENDE SCHREIBWEGE. Wiederverwenden heißt `admin_set_character`
  * an der Basisfigur, dann `admin_set_variant_base` — das die Familie in
@@ -430,20 +432,20 @@ export async function setVariantBase(
     { p_sky_id: skyId, p_base_sky_id: baseSkyId, p_create_family: create },
     paths, "platform", baseFehler,
   );
-  if (baseSkyId === null || familie === false) return setBase(false);
+  /* Die Familie, die die Figur bisher trug: wird sie durch die neue
+     Basisfigur leer, räumt Staging sie weg (ADR-0171). */
+  const vorher = await familienVon(skyId);
+  const mitAufraeumen = async (ergebnis: AdminResult) => {
+    if (ergebnis.ok) await leereFamilienAufraeumen(vorher);
+    return ergebnis;
+  };
+  if (baseSkyId === null || familie === false) return mitAufraeumen(await setBase(false));
   if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
 
   const plan = await loadVariantFamily(skyId, baseSkyId, true);
   if (plan === null) return { ok: false, message: de.admin.baseUnknown };
   const { outcome } = plan;
 
-  if (familie === "adopt-base"
-      && (outcome.kind === "conflict" || outcome.kind === "variant-only")) {
-    const ziel = outcome.kind === "conflict" ? outcome.base.id : null;
-    const umgehaengt = await setFigureCharacter(skyId, ziel);
-    if (!umgehaengt.ok) return umgehaengt;
-    return setBase(false);
-  }
   switch (outcome.kind) {
     case "existing": {
       /* Nur die bestätigte Familie, und nur genau die gleichnamige. */
@@ -451,12 +453,62 @@ export async function setVariantBase(
       if (!bestaetigt) return { ok: false, message: de.admin.familyExistsConfirm(outcome.family.name) };
       const basis = await setFigureCharacter(baseSkyId, outcome.family.id);
       if (!basis.ok) return basis;
-      return setBase(false);
+      return mitAufraeumen(await setBase(false));
     }
     case "create":
-      return setBase(familie === true);
+      return mitAufraeumen(await setBase(familie === true));
     default:
-      return setBase(false);
+      return mitAufraeumen(await setBase(false));
+  }
+}
+
+/**
+ * Die Familien, die eine Figur und ihre direkten Varianten heute tragen —
+ * gelesen VOR einer Änderung, damit danach feststeht, welche leer geworden
+ * sein könnten. Rein lesend; `skylanders` ist lesbar.
+ */
+async function familienVon(skyId: string): Promise<number[]> {
+  /* Nur für das Aufräumen danach — ein Lesefehler heißt „nichts aufräumen",
+     nie „nicht speichern". */
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.from("skylanders").select("character_id")
+      .or(`sky_id.eq.${skyId},base_sky_id.eq.${skyId}`);
+    return [...new Set(((data ?? []) as { character_id: number | null }[])
+      .map((r) => r.character_id).filter((id): id is number => id !== null))];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Leere Familien wegräumen — NUR auf Staging (ADR-0167, ADR-0171).
+ *
+ * Fragt `admin_delete_empty_character` (`0168`) je Familie. Die Datenbank
+ * entscheidet: gelöscht wird nur, was keine Figur mehr trägt, nicht
+ * kuratiert ist und auf der Staging-Datenbank liegt; alles andere bleibt,
+ * und das ist kein Fehler. Ein Fehlschlag hier macht die vorangegangene
+ * Zuordnung nicht ungeschehen — die ist schon gespeichert —, er wird nur
+ * protokolliert. Auf Production ruft das niemand: der Publish nicht, und
+ * dieser Weg nicht, weil `isEditorialCatalogSource()` dort `false` ist.
+ */
+async function leereFamilienAufraeumen(ids: readonly number[]): Promise<void> {
+  if (ids.length === 0 || !isEditorialCatalogSource()) return;
+  /*
+   * NIE WERFEN. Die Zuordnung davor ist gespeichert; ein Fehler HIER darf
+   * daraus keine Fehlermeldung machen und keinen Speichervorgang hängen
+   * lassen. Schlimmstenfalls bleibt eine leere Familie stehen — folgenlos.
+   */
+  try {
+    const supabase = await createClient();
+    for (const id of ids) {
+      const { error } = await supabase.rpc("admin_delete_empty_character", { p_character_id: id });
+      if (error && !istUnbekannteFunktion(error)) {
+        protokolliere("admin_delete_empty_character", { p_character_id: id }, error);
+      }
+    }
+  } catch (fehler) {
+    console.error("[admin] Aufräumen leerer Familien fehlgeschlagen", fehler);
   }
 }
 
@@ -749,7 +801,10 @@ export async function setFigureCharacter(
       && (!Number.isSafeInteger(characterId) || characterId <= 0)) {
     return { ok: false, message: de.admin.familyUnknown };
   }
-  return call(
+  /* Die Familien vorher: die der Figur und ihrer Varianten (die `0168`
+     mitnimmt). Was dadurch leer wird, räumt Staging danach weg. */
+  const vorher = await familienVon(skyId);
+  const ergebnis = await call(
     "admin_set_character",
     { p_sky_id: skyId, p_character_id: characterId },
     ["/admin/catalog", `/admin/catalog/${skyId}`, "/", "/collection"],
@@ -759,10 +814,16 @@ export async function setFigureCharacter(
       if (error.code === "42501") return de.admin.mergeNotAdmin;
       const text = error.message ?? "";
       if (text.includes("Familie mit der id")) return de.admin.familyUnknown;
+      /* `0168`: an einer Variante folgt die Familie der Basisfigur. */
+      if (text.includes("traegt deren Familie")) return de.admin.familyFollowsBase;
       if (text.includes("gibt es nicht")) return de.admin.mergeRowGone;
       return null;
     },
   );
+  if (ergebnis.ok) {
+    await leereFamilienAufraeumen(vorher.filter((id) => id !== characterId));
+  }
+  return ergebnis;
 }
 
 /**
@@ -783,16 +844,69 @@ export async function createCharacterFamily(name: string): Promise<AdminResult> 
     { p_name: sauber },
     ["/admin/catalog"],
     "platform",
-    (error) => {
-      if (istUnbekannteFunktion(error)) return de.admin.familyNotEnabled;
-      if (error.code === "42501") return de.admin.mergeNotAdmin;
-      const text = error.message ?? "";
-      if (text.includes("gibt es schon")) return de.admin.familyDuplicate;
-      if (text.includes("braucht einen Namen")) return de.admin.familyNameMissing;
-      if (text.includes("zu lang")) return de.admin.familyNameLong;
-      return null;
-    },
+    familyCreateError,
   );
+}
+
+/** Die Ablehnungen von `admin_create_character` (`0158`), auf Deutsch. */
+function familyCreateError(error: RpcFehler): string | null {
+  if (istUnbekannteFunktion(error)) return de.admin.familyNotEnabled;
+  if (error.code === "42501") return de.admin.mergeNotAdmin;
+  const text = error.message ?? "";
+  if (text.includes("gibt es schon")) return de.admin.familyDuplicate;
+  if (text.includes("braucht einen Namen")) return de.admin.familyNameMissing;
+  if (text.includes("zu lang")) return de.admin.familyNameLong;
+  return null;
+}
+
+/**
+ * Eine NEUE Familie anlegen und dieser einen Figur zuordnen (CAT-18) —
+ * für das „anlegen" im Figureneditor.
+ *
+ * ZWEI SCHREIBVORGÄNGE, KEINE TRANSAKTION, und die Antwort sagt ehrlich,
+ * wie weit es kam: scheitert die Zuordnung, nachdem die Familie angelegt
+ * ist, kommt ihre `characterId` trotzdem zurück. Der Dialog merkt sie sich,
+ * und ein zweiter Versuch ordnet nur noch zu — er legt keine zweite an
+ * (`0158` wiese sie ohnehin ab).
+ *
+ * NIE WIEDERVERWENDEN. Gibt es den Namen schon, lehnt `0158` ab und es
+ * wird NICHTS zugeordnet — eine bestehende Familie wählt der Bediener
+ * ausdrücklich (ADR-0168). Keine neue RPC: `admin_create_character` und
+ * `admin_set_character` reichen.
+ */
+export async function createAndAssignFamily(
+  skyId: string,
+  name: string,
+): Promise<AdminResult & { characterId?: number }> {
+  if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
+  const sauber = name.trim();
+  if (sauber === "") return { ok: false, message: de.admin.familyNameMissing };
+  if (sauber.length > 120) return { ok: false, message: de.admin.familyNameLong };
+  if (!(await allowed("platform"))) return { ok: false, message: de.admin.notAllowed };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("admin_create_character", { p_name: sauber });
+  if (error) {
+    protokolliere("admin_create_character", { p_name: sauber }, error);
+    return { ok: false, message: familyCreateError(error) ?? de.admin.writeFailed };
+  }
+  const characterId = Number(data);
+  if (!Number.isSafeInteger(characterId) || characterId <= 0) {
+    return { ok: false, message: de.admin.writeFailed };
+  }
+  revalidatePath("/admin/catalog");
+  const zuordnung = await setFigureCharacter(skyId, characterId);
+  if (zuordnung.ok) return { ok: true, characterId };
+  /*
+   * DIE ZUORDNUNG SCHEITERTE, DIE FAMILIE STEHT LEER (CAT-19). Auf Staging
+   * wird sie sofort wieder entfernt — dann ist nichts geschehen, und ein
+   * zweiter Versuch legt sie neu an. Bleibt sie (anderswo, oder die
+   * Datenbank lehnt ab), kommt ihre id zurück, und der Dialog ordnet beim
+   * zweiten Versuch nur noch zu — eine zweite gleichnamige entsteht nie.
+   */
+  await leereFamilienAufraeumen([characterId]);
+  const bleibt = await supabase.from("characters").select("id").eq("id", characterId).maybeSingle();
+  return bleibt.data ? { ...zuordnung, characterId } : zuordnung;
 }
 
 /**

@@ -56,6 +56,8 @@ describe("the five fields an administrator owns", () => {
     expect([...DRAFT_FIELDS]).toEqual([
       "displayNameOverride",
       "baseSkyId",
+      /* CAT-18: die Familie, direkt nach der Basisfigur. */
+      "characterId",
       "cardType",
       "types",
       "imageOverridePath",
@@ -91,8 +93,10 @@ describe("the five fields an administrator owns", () => {
          Dialog eine Basisfigur wählt. */
       baseSkyId: null,
       createFamilyWithBase: false,
-      adoptBaseFamily: false,
       reuseFamilyId: null,
+      /* Keine Familie in der Antwort: keine (CAT-18). Nichts vorgemerkt. */
+      characterId: null,
+      newFamilyName: null,
     });
   });
 
@@ -286,7 +290,9 @@ describe("the dialog", () => {
 
   it("writes only what changed, through the existing actions", () => {
     expect(modal).toContain("for (const field of plan)");
-    expect(modal).toContain("WRITERS[field](skyId, draft)");
+    /* `working` statt `draft` seit CAT-18: er kann die id einer beim
+       Speichern angelegten Familie aufnehmen. */
+    expect(modal).toContain("WRITERS[field](skyId, working)");
     expect(modal).toContain("changedFields(initial, draft)");
     // Every field has exactly one writer, and there are five.
     const writers = [...modal.matchAll(/^\s{2}(\w+): \(skyId, draft\)/gm)].map((m) => m[1]);
@@ -300,7 +306,7 @@ describe("the dialog", () => {
   it("cannot submit twice", () => {
     expect(modal).toContain("inFlight");
     expect(modal).toContain("if (!skyId || !initial || !draft || inFlight.current || plan.length === 0) return;");
-    expect(modal).toContain("disabled={!dirty || saving}");
+    expect(modal).toContain("disabled={!dirty || saving || blocker !== null}");
     expect(modal).toContain('aria-busy={saving || undefined}');
   });
 
@@ -317,7 +323,7 @@ describe("the dialog", () => {
 
   it("tells the catalogue only what actually landed", () => {
     expect(modal).toContain("if (summary.saved.length > 0) onSaved(skyId, next);");
-    expect(modal).toContain("baselineAfter(initial, draft, summary.saved)");
+    expect(modal).toContain("baselineAfter(initial, working, summary.saved)");
   });
 
   it("does not announce success when part of it failed", () => {
@@ -328,7 +334,7 @@ describe("the dialog", () => {
 
   it("loads the note and the journal once, when it opens", () => {
     // Not per card: a catalogue screen is up to 561 of them.
-    expect(modal).toContain("loadFigureEditor(figure.skyId, figure.baseSkyId)");
+    expect(modal).toContain("loadFigureEditor(figure.skyId, figure.baseSkyId, figure.characterId)");
     expect(code(VIEW)).not.toContain("loadFigureEditor");
     expect(code(CARD)).not.toContain("loadFigureEditor");
   });

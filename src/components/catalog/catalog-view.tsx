@@ -529,8 +529,9 @@ export function CatalogView({
   );
 
   const visible = useMemo(
-    () => filterFigures(pool, { query: deferredQuery, seriesCode }),
-    [pool, deferredQuery, seriesCode],
+    /* Die SKY-ID-Suche nur im Admin-Katalog (CAT-18, `skyIdQuery`). */
+    () => filterFigures(pool, { query: deferredQuery, seriesCode, skyIds: admin }),
+    [pool, deferredQuery, seriesCode, admin],
   );
 
   /**
@@ -542,9 +543,9 @@ export function CatalogView({
   const groups = useMemo(
     () =>
       searching
-        ? groupSearchResults(pool, { query: deferredQuery, seriesCode, series })
+        ? groupSearchResults(pool, { query: deferredQuery, seriesCode, series, skyIds: admin })
         : null,
-    [searching, pool, deferredQuery, seriesCode, series],
+    [searching, pool, deferredQuery, seriesCode, series, admin],
   );
 
   /**
@@ -653,6 +654,8 @@ export function CatalogView({
       /* Seit CAT-14 auch Basisfigur, Types und Bild: wer den Editor ein
          zweites Mal öffnet, muss vom gespeicherten Stand ausgehen. */
       baseSkyId: saved.baseSkyId,
+      /* Seit CAT-18 auch die Familie. */
+      characterId: saved.characterId,
       types: saved.types,
       imageOverridePath: saved.imageOverridePath,
     };

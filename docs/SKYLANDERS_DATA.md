@@ -905,6 +905,13 @@ Namen („Dark Sword" ist ein Trap, dessen Element „Dark" heißt).
 **Basisfigur** —, nie über den Anzeigenamen. „Bash", „Blue Bash" und „Legendary Bash" stehen
 deshalb als ein Block unter *Bash*, nicht unter B, B und L.
 
+**Die Familie wird an der Basisfigur gepflegt (ADR-0171, `0168` lokal vorbereitet).** Eine
+Variante trägt immer die Familie (`character_id`) ihrer Basisfigur — auch keine. Wer die Familie
+einer Basisfigur setzt, wechselt oder entfernt, nimmt alle ihre Varianten mit, auch Wochen
+später. Zwei Basisfiguren verschiedener Serien dürfen dieselbe Familie tragen (Sprocket,
+Heavy Duty Sprocket), ohne Varianten voneinander zu sein. Eine leere, nicht kuratierte Familie
+räumt Staging nach der Änderung weg; Production nie selbst.
+
 **Basisfigur und Varianten sind ein Block (ADR-0169).** Wo eine Zeile ihre Basisfigur nennt
 (`base_sky_id`), steht sie im Block dieser Basisfigur — innerhalb derselben Serie und Kategorie —,
 und der Block steht dort, wo die Basisfigur steht. Im Block: **Basisfigur ·

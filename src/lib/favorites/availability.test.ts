@@ -507,6 +507,14 @@ const BIS = "0151";
        * Spalte, die die Verfuegbarkeit beruehrt.
        */
       "skylanders.skylanders_refuse_removed_trg",
+      /*
+       * 0168, CAT-19: die Variante traegt die Familie ihrer Basisfigur. Beide
+       * feuern nur bei `base_sky_id`/`character_id` und schreiben nur
+       * `character_id` (und das Journal) — keine Spalte, die Angebot,
+       * Bestand oder Verfuegbarkeit beruehrt.
+       */
+      "skylanders.skylanders_variant_family_cascade_trg",
+      "skylanders.skylanders_variant_family_follow_trg",
     ].sort());
   });
 

@@ -110,3 +110,69 @@ export function pruefeNachher(args: { wie: string; ist: string; nach: string }):
     ? { ok: true, grund: "" }
     : { ok: false, grund: `${wie}: nach dem Schreiben steht ${ist}, geplant war ${nach}.` };
 }
+
+/* ==========================================================================
+ * CAT-19 — was ein Familien- oder Basisschritt NEBENBEI bewegt hat
+ * ======================================================================= */
+
+/** Die Familie einer Zeile und ihrer direkten Varianten, wie gelesen. */
+export type Familienbild = ReadonlyMap<string, {
+  character_id: number | null; base_sky_id: string | null; updated_at: unknown;
+}>;
+
+export type Familienbefund = {
+  /** Journalzeilen, die der Schritt über seine eigene hinaus erzeugt hat. */
+  nebenbei: number;
+  /** Die Familie der Zeile selbst nach dem Schritt. */
+  eigeneNeu: number | null;
+  /** Hat ein `base_sky_id`-Schritt die Familie der Zeile selbst bewegt? */
+  eigeneUebernommen: boolean;
+  /** Mitbewegte Varianten mit ihrem neuen Wert und ihrer neuen Marke. */
+  mitbewegt: [string, { character_id: number | null; updated_at: unknown }][];
+  /** Gesetzt, wenn sich etwas bewegt hat, das die Regel nicht erklärt. */
+  fehler: string | null;
+};
+
+/**
+ * Bewertet das Familienbild vor und nach einem Klasse-B-Schritt (`0168`).
+ *
+ *   * `base_sky_id`-Schritt: die Zeile selbst darf ihre Familie wechseln —
+ *     auf die ihrer neuen Basisfigur (`0168`) oder, ohne `0168`, durch die
+ *     Übertragung aus `0159`. Eine Journalzeile mehr.
+ *   * `familie`-Schritt: die eigene Änderung ist der Schritt selbst; jede
+ *     Variante der Zeile, die sich bewegt, muss GENAU den neuen Wert der
+ *     Zeile tragen und noch auf sie zeigen. Je eine Journalzeile mehr.
+ *   * Alles andere ist ein fremder Eingriff — `fehler`.
+ *
+ * REIN: der Executor liest, diese Funktion urteilt.
+ */
+export function bewerteFamilienbild(args: {
+  feld: "familie" | "base_sky_id";
+  skyId: string;
+  vor: Familienbild;
+  nach: Familienbild;
+}): Familienbefund {
+  const { feld, skyId, vor, nach } = args;
+  const eigeneNeu = nach.get(skyId)?.character_id ?? null;
+  const eigeneAlt = vor.get(skyId)?.character_id ?? null;
+  const befund: Familienbefund = {
+    nebenbei: 0, eigeneNeu, eigeneUebernommen: false, mitbewegt: [], fehler: null,
+  };
+  if (feld === "base_sky_id" && eigeneNeu !== eigeneAlt) {
+    befund.nebenbei += 1;
+    befund.eigeneUebernommen = true;
+  }
+  for (const [id, n] of nach) {
+    if (id === skyId) continue;
+    const v = vor.get(id);
+    if (v === undefined || v.character_id === n.character_id) continue;
+    if (feld !== "familie" || n.base_sky_id !== skyId || n.character_id !== eigeneNeu) {
+      befund.fehler = `${id} hat sich mitbewegt, aber nicht auf die Familie der Basisfigur `
+        + `(${String(n.character_id)} statt ${String(eigeneNeu)}).`;
+      return befund;
+    }
+    befund.nebenbei += 1;
+    befund.mitbewegt.push([id, { character_id: n.character_id, updated_at: n.updated_at }]);
+  }
+  return befund;
+}

@@ -46,7 +46,8 @@ export async function loadVariantFamily(
   let sameNameFamily: FamilyRef | null = null;
   let sameNameMembers: FamilyMember[] = [];
   const baseName = base.name.trim();
-  if (familyWanted && variant.character_id === null && base.character_id === null && baseName !== "") {
+  /* Only needed when the base has none — then a family may be put on it (`0168`). */
+  if (familyWanted && base.character_id === null && baseName !== "") {
     const { data } = await supabase.from("characters").select("id,canonical_name")
       .ilike("canonical_name", literal(baseName));
     const hit = ((data ?? []) as { id: number; canonical_name: string }[])

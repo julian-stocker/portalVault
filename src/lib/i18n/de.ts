@@ -3407,12 +3407,11 @@ export const de = {
       + "eine zweite wird nicht angelegt.",
     familyPlanCreate: (name: string) => `Familie „${name}“ wird neu angelegt`,
     familyPlanNone: "Ohne Familie",
-    familyPlanVariantOnly: (name: string) =>
-      `Familie bleibt ${name} — die Basisfigur hat keine.`,
-    familyPlanConflict: (variant: string, base: string) =>
-      `Familien widersprechen sich: Figur ${variant}, Basisfigur ${base}.`,
-    familyAdoptBase: (name: string) => `Familie der Basisfigur übernehmen (${name})`,
-    familyAdoptNone: "Familie entfernen, wie bei der Basisfigur",
+    /* CAT-19 (`0168`): die Variante folgt der Basisfigur — auch „keine". */
+    familyPlanDrop: (name: string) =>
+      `Familie ${name} entfällt — die neue Basisfigur hat keine.`,
+    familyPlanReplace: (variant: string, base: string) =>
+      `Familie wechselt von ${variant} zu ${base} (von der Basisfigur).`,
     publishNotADraft:
       "Nur Entwürfe werden veröffentlicht. Für eine bestehende Figur die "
       + "Familienzuordnung benutzen.",
@@ -3688,6 +3687,30 @@ export const de = {
     propertyStatus: "Status",
     baseChange: "Ändern",
     baseEditOnStaging: "Wird auf Staging gepflegt",
+    /* CAT-18 — die Familie im kompakten Editor. */
+    propertyFamily: "Familie",
+    familyNewPending: (name: string) => `${name} (neu, wird beim Speichern angelegt)`,
+    familyCreateOnSave: (name: string) => `Familie „${name}" beim Speichern anlegen`,
+    familyAfterBase: "Familie erst nach dem Speichern der Basisfigur ändern.",
+    baseAfterFamily: "Basisfigur erst nach dem Speichern der Familie ändern.",
+    familyBaseAndFamily:
+      "Basisfigur und Familie bitte nacheinander speichern — beide bewegen die Familie.",
+    /* CAT-19 — an einer Variante ist die Familie geerbt, nicht bearbeitbar. */
+    familyInherited: (base: string) =>
+      `Wird automatisch von der Basisfigur übernommen (${base}).`,
+    familyInheritedNone: "Keine Familie – Basisfigur hat keine Zuordnung",
+    familyFollowsNewBase: "Folgt nach dem Speichern der neuen Basisfigur.",
+    familyCascade: (n: number) =>
+      n === 1
+        ? "Diese Familienänderung wird automatisch auf 1 Variante übertragen."
+        : `Diese Familienänderung wird automatisch auf ${n} Varianten übertragen.`,
+    familyFollowsBase:
+      "Diese Figur ist eine Variante — ihre Familie wird an der Basisfigur gepflegt.",
+    familyDiffers: (name: string) =>
+      `Weicht noch ab: trägt „${name}" aus der Zeit vor der automatischen Übernahme.`,
+    familyDiffersNone: "Weicht noch ab: trägt keine Familie, die Basisfigur schon.",
+    familyAlign: "An die Basisfigur angleichen",
+    familyAligned: "Wird beim Speichern an die Basisfigur angeglichen.",
     typeAdd: "Type hinzufügen",
     typeAddClose: "Type-Auswahl schließen",
     typeRemove: (label: string) => `${label} entfernen`,

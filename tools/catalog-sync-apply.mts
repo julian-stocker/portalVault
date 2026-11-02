@@ -39,8 +39,10 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { charakterRiegel, RANG } from "../src/lib/catalog/sync-character-gate.ts";
-import { ordneVariantenschritte } from "../src/lib/catalog/publish-variants.ts";
-import { SPALTE, planwert, pruefeNachher, pruefeVorher, type KlasseBFeld }
+import {
+  ordneFamilienschritte, ordneVariantenschritte, type FamilienWiderspruch,
+} from "../src/lib/catalog/publish-variants.ts";
+import { SPALTE, bewerteFamilienbild, planwert, pruefeNachher, pruefeVorher, type KlasseBFeld }
   from "../src/lib/catalog/publish-cas.ts";
 import { createInterface } from "node:readline";
 
@@ -331,7 +333,8 @@ async function baseline(db: SupabaseClient) {
 /* -------------------------------------------------------------- Der Lauf */
 
 const plan = JSON.parse(readFileSync(PLAN, "utf8")) as
-  { erzeugt: string; fingerprint_gemessen: Record<string, Zeile>; plan: Schritt[] };
+  { erzeugt: string; fingerprint_gemessen: Record<string, Zeile>; plan: Schritt[];
+    familienwidersprueche?: FamilienWiderspruch[] };
 const schritte = plan.plan.filter((s) => s.ziel === ZIEL);
 
 console.log(`\n  Ziel      ${ZIEL} (${ENV.ref})`);
@@ -353,6 +356,24 @@ for (const b of ["katalog_freigegeben", "kategorien", "charaktere", "ausgeschlos
   }
 }
 console.log("  TOR 1 ok — der Plan ist noch gueltig.\n");
+
+/*
+ * ---- TOR 1c: keine Variante mit einer anderen Familie als ihre Basisfigur
+ * (CAT-19, ADR-0171). Der Planer misst das am Staging-Stand (Riegel 7). Ein
+ * Plan ohne das Feld stammt von vor CAT-19 und wird nicht ausgefuehrt.
+ */
+if (plan.familienwidersprueche === undefined) {
+  abbruch("TOR 1c — der Plan kennt Riegel 7 noch nicht. Neu planen: npm run catalog:publish:plan");
+}
+if (plan.familienwidersprueche.length > 0) {
+  abbruch(`TOR 1c — ${plan.familienwidersprueche.length} Variante(n) tragen auf Staging eine `
+    + "andere Familie als ihre Basisfigur:\n"
+    + plan.familienwidersprueche.map((w) =>
+        `    ${w.sky_id} (${w.familie ?? "keine"}) → Basis ${w.basis} (${w.basisFamilie ?? "keine"})`)
+      .join("\n")
+    + "\n  Erst auf Staging an der Basisfigur korrigieren, dann neu planen.");
+}
+console.log("  TOR 1c ok — jede Variante traegt die Familie ihrer Basisfigur.\n");
 
 /* ---- Feld-Positivliste ---- */
 for (const s of schritte) {
@@ -397,6 +418,16 @@ schritte.sort((a, b) =>
  * Zyklus bricht hier ab, vor dem ersten Schreibzugriff.
  */
 schritte.splice(0, schritte.length, ...ordneVariantenschritte(schritte));
+/*
+ * UND DIE FAMILIEN: Basisfiguren vor ihren Varianten (CAT-19). Wessen
+ * Variante eine Figur ist, sagt nach den `base_sky_id`-Schritten deren
+ * Zielwert, sonst die Momentaufnahme.
+ */
+const basisZiel = new Map(schritte.filter((s) => s.feld === "base_sky_id")
+  .map((s) => [s.sky_id, s.nach === "~" ? null : (s.nach ?? null)] as const));
+schritte.splice(0, schritte.length, ...ordneFamilienschritte(schritte, (id) =>
+  basisZiel.has(id) ? basisZiel.get(id)!
+    : ((jetzt._zeilen.get(id)?.base_sky_id as string | null | undefined) ?? null)));
 
 const brauchtW = schritte.some((s) => s.feld && s.feld in RPC_B);
 const W = APPLY && brauchtW ? await adminClient(ENV.datei, ENV.ref, ZIEL) : null;
@@ -592,6 +623,36 @@ async function liesKlasseB(
   const namen = new Map([...charakterId].map(([name, id]) => [id, name] as const));
   return { ist: planwert(feld, zeile[spalte], namen), marke: zeile.updated_at };
 }
+
+/**
+ * Die Familie einer Zeile und ihrer direkten Varianten, frisch gelesen
+ * (CAT-19). Vor und nach jedem Familien- oder Basisschritt — der Unterschied
+ * ist, was `0168` nebenbei bewegt hat.
+ */
+async function familienbild(sky_id: string): Promise<Map<string,
+  { character_id: number | null; base_sky_id: string | null; updated_at: unknown }>> {
+  const { data, error } = await R.from("skylanders")
+    .select("sky_id,character_id,base_sky_id,updated_at")
+    .or(`sky_id.eq.${sky_id},base_sky_id.eq.${sky_id}`);
+  if (error || !data) {
+    throw new Error(`${sky_id}: Familienbild nicht lesbar (${error?.message ?? "keine Zeilen"}). `
+      + "Es wird nichts geschrieben.");
+  }
+  return new Map((data as Zeile[]).map((z) => [z.sky_id as string, {
+    character_id: (z.character_id as number | null) ?? null,
+    base_sky_id: (z.base_sky_id as string | null) ?? null,
+    updated_at: z.updated_at,
+  }]));
+}
+
+/**
+ * Die Familie, die ein `base_sky_id`-Schritt einer Zeile in DIESEM Lauf
+ * gegeben hat (CAT-19) — als Planwert. Ohne `0168` auf dem Ziel überträgt
+ * `0159` die Familie der Basisfigur, wie sie in diesem Moment ist; der
+ * spätere eigene `familie`-Schritt der Zeile findet dann diesen Wert vor —
+ * weder `von` noch `nach`, und doch kein fremder Eingriff.
+ */
+const familieGeerbt = new Map<string, string>();
 
 /** Welche Figuren in diesem Lauf schon einen `types`-Schritt hatten. */
 const typenGeschrieben = new Set<string>();
@@ -807,13 +868,35 @@ for (const s of schritte) {
      * dass genau der geplante Wert steht.
      */
     const feldB = s.feld as KlasseBFeld;
+    /* CAT-19: die Familien der Zeile UND ihrer Varianten vor dem Schritt. */
+    const familienschritt = feldB === "familie" || feldB === "base_sky_id";
+    const bildVor = familienschritt ? await familienbild(s.sky_id) : null;
     const vorher = await liesKlasseB(s.sky_id, feldB);
     const vorUrteil = pruefeVorher({
       wie, ist: vorher.ist, von: t(s.von), nach: t(s.nach),
       markeIst: vorher.marke, markeErwartet: jetzt._zeilen.get(s.sky_id)?.updated_at,
-      auchErlaubt: feldB === "visible_type" && typenGeschrieben.has(s.sky_id) ? ["~"] : [],
+      auchErlaubt: feldB === "visible_type" && typenGeschrieben.has(s.sky_id) ? ["~"]
+        : feldB === "familie" && familieGeerbt.has(s.sky_id) ? [familieGeerbt.get(s.sky_id)!]
+        : [],
     });
     if (!vorUrteil.ok) throw new Error(`TOR 2b — ${vorUrteil.grund}`);
+
+    /*
+     * SCHON DA, DURCH VERERBUNG (CAT-19). Die Basisfigur hat die Variante in
+     * diesem Lauf mitgenommen (Kaskade aus `0168`), oder `0159` hat die
+     * Familie beim Setzen der Basisfigur uebertragen. Dann wird NICHT
+     * geschrieben — und es entsteht keine Journalzeile, also wird keine
+     * erwartet.
+     */
+    if (feldB === "familie" && vorher.ist === t(s.nach)) {
+      erwarteteJournalzeilen -= journalt;
+      geschrieben += 1;
+      protokoll.push({ art: s.art, sky_id: s.sky_id, feld: s.feld ?? null,
+                       von: s.von ?? null, nach: s.nach ?? null, journalt: 0,
+                       vererbt: true });
+      console.log(`  [vererbt] ${wie.padEnd(44)} steht schon auf ${t(s.nach)}`);
+      continue;
+    }
 
     const { error } = await W.rpc(r.fn, { p_sky_id: s.sky_id, [r.arg]: wert });
     if (error) throw new Error(`${wie}: ${error.message}`);
@@ -830,6 +913,34 @@ for (const s of schritte) {
     if (!nachUrteil.ok) throw new Error(`TOR 2b — ${nachUrteil.grund}`);
     const eintrag = jetzt._zeilen.get(s.sky_id);
     if (eintrag) eintrag.updated_at = nachher.marke;
+
+    /*
+     * WAS DER SCHRITT NEBENBEI BEWEGT HAT (CAT-19). Mit `0168` nimmt die
+     * Familie einer Basisfigur ihre Varianten mit, und eine neue Basisfigur
+     * gibt der Variante ihre Familie — beides mit je einer Journalzeile, die
+     * kein Schritt ausdruecklich geschrieben hat. Erwartet wird sie nur, wenn
+     * der neue Wert GENAU der der Basisfigur ist; alles andere ist ein
+     * fremder Eingriff. Die neuen Marken der Varianten werden uebernommen,
+     * damit ihre eigenen Schritte nicht an TOR 2b scheitern.
+     */
+    if (bildVor !== null) {
+      const bildNach = await familienbild(s.sky_id);
+      const befund = bewerteFamilienbild({
+        feld: feldB as "familie" | "base_sky_id", skyId: s.sky_id, vor: bildVor, nach: bildNach,
+      });
+      if (befund.fehler !== null) throw new Error(`TOR 2c — ${wie}: ${befund.fehler}`);
+      for (const [id, n] of befund.mitbewegt) {
+        const mit = jetzt._zeilen.get(id);
+        if (mit) { mit.updated_at = n.updated_at; mit.character_id = n.character_id; }
+      }
+      if (eintrag) eintrag.character_id = befund.eigeneNeu;
+      if (befund.eigeneUebernommen) {
+        const namen = new Map([...charakterId].map(([name, id]) => [id, name] as const));
+        familieGeerbt.set(s.sky_id, planwert("familie", befund.eigeneNeu, namen));
+      }
+      erwarteteJournalzeilen += befund.nebenbei;
+      journalt += befund.nebenbei;
+    }
   } else if (s.feld === "catalog_visible" || s.feld === "catalog_status") {
     /*
      * BEIDE IN EINER ANWEISUNG. Sonst waere der CHECK

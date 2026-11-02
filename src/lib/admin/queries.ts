@@ -177,6 +177,43 @@ export async function fetchAdminNote(skyId: string): Promise<string | null> {
 }
 
 /**
+ * „Familie" fuer den Figureneditor (CAT-18): der Name der heutigen Familie
+ * und die Familie der Basisfigur. Rein lesend; `characters` und
+ * `skylanders` sind lesbar.
+ *
+ * Die Basisfamilie braucht der Dialog, weil eine Variante sie seit `0168`
+ * erbt (ADR-0171): er zeigt sie dort an, statt eine eigene anzubieten.
+ */
+export type FamilyRefRow = { id: number; name: string };
+
+export async function fetchFamilyContext(
+  skyId: string,
+  characterId: number | null,
+  baseSkyId: string | null,
+): Promise<{
+  family: FamilyRefRow | null;
+  baseFamily: FamilyRefRow | null;
+}> {
+  const supabase = await createClient();
+  const base = baseSkyId === null
+    ? null
+    : (await supabase.from("skylanders").select("character_id")
+        .eq("sky_id", baseSkyId).maybeSingle()).data as { character_id: number | null } | null;
+  const baseId = base?.character_id ?? null;
+  const ids = [characterId, baseId].filter((id): id is number => id !== null);
+  const names = ids.length === 0
+    ? { data: [] as { id: number; canonical_name: string }[] }
+    : await supabase.from("characters").select("id,canonical_name").in("id", ids);
+  const name = new Map(((names.data ?? []) as { id: number; canonical_name: string }[])
+    .map((c) => [c.id, c.canonical_name]));
+  const ref = (id: number | null) => id === null ? null : { id, name: name.get(id) ?? `#${id}` };
+  return {
+    family: ref(characterId),
+    baseFamily: ref(baseId),
+  };
+}
+
+/**
  * „Variante von" fuer den Figureneditor: der Name der Basisfigur und wie
  * viele Varianten auf DIESE Figur zeigen.
  *

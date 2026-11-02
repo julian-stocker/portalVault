@@ -12,8 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-02 (ADR-0169, Basisfigur und Varianten als ein Block mit einer
-Stufenliste; davor ADR-0168, bestehende Familien nur nach Bestätigung wiederverwenden).
+Letzte Aktualisierung: 2026-11-02 (ADR-0171, die Variante erbt die Familie ihrer Basisfigur,
+leere Familien auf Staging; davor ADR-0170, Familie im kompakten Editor und SKY-ID-Suche).
 
 ---
 
@@ -17056,6 +17056,137 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0171 · Die Familie wird an der Basisfigur gepflegt — Varianten erben sie, auch rückwirkend
+
+**Status:** ANGENOMMEN · 2026-11-02 (Regel vom Betreiber; Umsetzung lokal, `0168` **nirgends
+angewendet**)
+**Betrifft:** ADR-0034 (drei Identitäten), ADR-0156 (Basisfigur), ADR-0167 (Staging pflegt),
+ADR-0168 (Familienkonflikt — **ersetzt**), ADR-0170 (Familie im Editor — **teilweise ersetzt**)
+
+### Die Regel
+
+Eine Variante (`base_sky_id` gesetzt) trägt **immer** dieselbe `character_id` wie ihre direkte
+Basisfigur, `NULL` eingeschlossen. Gepflegt wird die Familie **nur** an Basisfiguren (und an
+eigenständigen Figuren); jede Variante folgt sofort, in derselben Transaktion, egal wann die
+Familie gesetzt, gewechselt oder entfernt wird. Familien bleiben serienübergreifend: zwei
+Basisfiguren verschiedener Serien dürfen dieselbe tragen, ohne Varianten voneinander zu sein.
+
+### Entscheidung — zentral in der Datenbank
+
+* **Trigger statt RPC-Logik.** `character_id` hat sieben Schreibwege (0158, 0159, 0161, 0166,
+  Zusammenführung 0156, kuratierter Import). Zwei Trigger an `skylanders` (`0168`) decken alle ab:
+  `…_follow` (BEFORE) gibt einer Variante die Familie ihrer Basisfigur und weist einen
+  abweichenden Wert ab; `…_cascade` (AFTER) nimmt bei einer Familienänderung alle Varianten mit.
+  Beides journalt je Zeile. Keine React-Komponente kennt eine eigene Familienlogik.
+* **`admin_set_variant_base` ohne Konflikt.** Statt abzubrechen, wenn Variante und neue Basisfigur
+  verschiedene Familien haben, erbt die Variante die der Basisfigur. `p_create_family` legt eine
+  Familie nur auf ausdrücklichen Wunsch und nur **an der Basisfigur** an.
+* **Nebenläufigkeit:** die Variante liest die Familie der Basisfigur `for share`; die Kaskade
+  sperrt die Varianten in `sky_id`-Ordnung. Ein verbleibender Deadlock bricht **eine**
+  Transaktion vollständig ab — kein Teilzustand.
+* **Altabweichungen** (fünf auf Staging, 2026-11-02) korrigiert die Migration **nicht**. Der
+  Editor bietet an einer abweichenden Variante „An die Basisfigur angleichen" — genau auf deren
+  Wert, nie auf einen anderen; die Datenbank nimmt nur diesen Wert an.
+
+### Entscheidung — Editor
+
+* An einer **Basisfigur** bleibt die Familie frei (wählen, neu anlegen, wechseln, entfernen); der
+  Dialog sagt vorher, auf wie viele Varianten sie übertragen wird.
+* An einer **Variante** ist sie nur sichtbar: geerbte Familie, Basisfigur, „Wird automatisch von
+  der Basisfigur übernommen" bzw. „Keine Familie – Basisfigur hat keine Zuordnung". Die
+  Bestätigung einer bewussten Abweichung (ADR-0170) entfällt, ebenso „Familie der Basisfigur
+  übernehmen" beim Basiswechsel (ADR-0168) — das ist jetzt die Regel selbst.
+* Neue Familie: angelegt erst beim Speichern; scheitert die Zuordnung danach, wird die leere
+  Familie auf Staging sofort wieder entfernt — eine zweite gleichnamige entsteht nie.
+
+### Entscheidung — leere Familien
+
+* **Staging:** nach jeder gelungenen Familien- oder Basisänderung fragt die App
+  `admin_delete_empty_character` für die Familien, die die Figur und ihre Varianten vorher
+  trugen. Gelöscht wird nur, was keine Figur mehr trägt, **nicht kuratiert** ist und auf der
+  Datenbank mit Staging-Stempel liegt; die Zeile wird `for update` gesperrt, der Fremdschlüssel
+  (`on delete restrict`) hält jede belegte. Der Name bleibt im Journal (`family_deleted`), weil
+  das Journal Familien nur als Nummer führt.
+* **Production löscht keine Familie selbst.** Der Publish ruft die Funktion nie; sie verweigert
+  ohne Staging-Stempel. Der Planer legt seit CAT-19 nur noch Familien an, die eine zu
+  veröffentlichende Figur trägt (vorher jede fehlende Staging-Familie, auch leere).
+* **Offen — Bereinigung auf Production (Blocker dokumentiert, nicht gebaut):** Familien werden
+  zwischen den Umgebungen über den **Namen** zugeordnet, ids weichen ab (#126 ↔ #218). Ein
+  sicherer Löschschritt bräuchte eine eigene Schrittklasse im Planer (Name auf Staging nicht mehr
+  vorhanden **und** auf Production ohne Mitglied **und** nicht kuratiert), eine
+  Production-Freigabe der Löschfunktion und denselben Journaleintrag. Bis dahin bleiben leere
+  Familien auf Production stehen; sie sind folgenlos (heute: keine; nach dem nächsten Publish
+  voraussichtlich #218 „Prism Break Light Core").
+
+### Entscheidung — Catalog-Publish
+
+* **Riegel 7 / TOR 1c:** der Planer misst am Staging-Stand, ob eine zu veröffentlichende Variante
+  eine andere Familie trägt als ihre Basisfigur, und schreibt das in den Plan; der Executor
+  bricht vor dem ersten Schreibzugriff ab, solange die Liste nicht leer ist.
+* **Familienschritte der Basisfiguren vor denen ihrer Varianten.**
+* **Kaskadenbewusst:** vor und nach jedem `familie`- und `base_sky_id`-Schritt liest der
+  Executor die Familie der Zeile und ihrer Varianten. Mitbewegte Varianten werden nur
+  hingenommen, wenn sie genau den Wert der Basisfigur tragen (sonst TOR 2c), ihre Marken werden
+  übernommen, ihre Journalzeilen erwartet. Ein Familienschritt, dessen Zielwert schon steht
+  (vererbt), wird nicht geschrieben und erwartet keine Journalzeile. Das gilt mit und ohne `0168`
+  auf dem Ziel.
+
+### Reihenfolge der Aktivierung
+
+1. Staging-Korrekturen und Freigabe; `0168` auf Staging über den Runner
+   (`staging-0168.sql`, Pre-/Postflight, Baselines).
+2. Altabweichungen auf Staging angleichen (Editor), bis Riegel 7 leer ist.
+3. Publish mit dem angepassten Executor.
+4. `0168` auf Production erst danach, mit eigener Freigabe und eigener Hülle.
+
+Rücknahme: `supabase/rollback/R0168_drop_variant_family_inheritance.sql` (Trigger und
+Löschfunktion weg, `admin_set_variant_base` wörtlich wie in `0159`; keine Datenanweisung).
+
+---
+
+## ADR-0170 · Die Familie im kompakten Editor ist ein Entwurfsfeld; der Admin-Katalog findet SKY-IDs
+
+**Status:** ANGENOMMEN · 2026-11-02 (Code, keine Migration, keine neue RPC) · **Familienregeln an
+Varianten (Abweichung bestätigen, Varianten behalten ihre Familie) ersetzt durch ADR-0171**
+**Betrifft:** ADR-0034 (drei Identitäten), ADR-0167 (Staging pflegt), ADR-0168 (Familie nur
+bestätigt wiederverwenden), CAT-14/15 (kompakter Editor, Basisfigur)
+
+### Entscheidung — Familie
+
+* Im Figureneditor stehen „Variante von“ und „Familie“ nebeneinander (auf dem Telefon
+  untereinander). Die Familie (`character_id`) ist ein **Entwurfsfeld** wie die übrigen: gewählt,
+  gewechselt, entfernt oder von der Basisfigur übernommen wird im Entwurf; geschrieben wird erst
+  beim Speichern über `admin_set_character` (`0158`), denselben Weg wie die Detailseite.
+* Eine **neue** Familie wird nur auf ausdrücklichen Wunsch vorgemerkt und beim Speichern über
+  `admin_create_character` angelegt und dann zugeordnet (`createAndAssignFamily`). Gibt es den
+  Namen schon, wird nichts angelegt und nichts zugeordnet — eine bestehende Familie wählt man
+  (ADR-0168).
+* **Basisfigur und Familie nie in einem Speichern.** `0159` bewegt beim Setzen der Basisfigur
+  die Familie mit; ein zweiter ausdrücklicher Familienwert hieße zwei Schreibwege für eine
+  Spalte. Eine Familienänderung ändert nie die Basisfigur.
+* **Eine Variante weicht nur bestätigt von der Familie ihrer Basisfigur ab** (auch „keine“).
+  `0158` prüft das nicht, deshalb fragt der Dialog — vor dem ersten Schreibzugriff.
+* Ändert eine Basisfigur ihre Familie, behalten ihre Varianten die bisherige; der Dialog sagt,
+  wie viele. Keine automatische Korrektur.
+* Bearbeitbar nur, wo der Katalog gepflegt wird (Staging, ADR-0167), wie „Variante von“.
+
+### Entscheidung — SKY-ID-Suche
+
+* Nur im **Admin-Katalog**: „SKY-0147“, „sky-0147“, „sky 147“ treffen **genau** SKY-0147;
+  „0147“ und „147“ treffen SKY-0147 **zusätzlich** zu Namenstreffern, der exakte Treffer steht
+  vorn. Exakter Vergleich nach Auffüllen auf vier Ziffern — „14“ ist SKY-0014, nie SKY-0147;
+  fünf und mehr Ziffern sind Namenssuche (Modellnummern).
+* Öffentlicher Katalog, Sammlung und Shop bleiben reine Namenssuche; das Lager hatte seine
+  eigene SKY-ID-Suche schon und bleibt unverändert.
+
+### Konsequenzen
+
+Keine Migration, keine neue Datenbankfunktion. Das Speichern bleibt eine Folge einzelner
+Schreibvorgänge (V3.8): scheitert nach dem Anlegen einer neuen Familie die Zuordnung, merkt
+sich der Dialog die neue id, und ein zweiter Versuch ordnet nur noch zu.
+
+---
+
 ## ADR-0169 · Basisfigur und Varianten sind ein Block — eine Stufenliste für alle sechs Serien
 
 **Status:** ANGENOMMEN · 2026-11-02 (Code, keine Migration; Reihenfolge vom Betreiber vorgegeben,
@@ -17112,7 +17243,9 @@ doppelt. Varianten ohne Variantentype sind ein Datenhinweis, kein Sortierfehler.
 
 ## ADR-0168 · Eine bestehende Familie wird beim Setzen der Basisfigur nur nach Bestätigung wiederverwendet
 
-**Status:** ANGENOMMEN · 2026-11-01 (Code, keine Migration)
+**Status:** ANGENOMMEN · 2026-11-01 (Code, keine Migration) · **Der Familienkonflikt und „Familie
+der Basisfigur übernehmen" sind ersetzt durch ADR-0171**; die bestätigte Wiederverwendung gilt
+weiter
 **Betrifft:** ADR-0034 (drei Identitäten), ADR-0156/0157 (Basisfigur, Familie), `0158`, `0159`, `0161`
 
 ### Anlass

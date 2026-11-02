@@ -288,6 +288,14 @@ describe("the same mutations as /admin, not new ones", () => {
         "admin_set_character",
         "admin_publish_as_variant",
         /*
+         * CAT-19 (`0168`): eine LEERE Familie wegräumen. Sie loescht — aber
+         * nur eine Familie, auf die keine Figur zeigt, die nicht kuratiert
+         * ist und auf der Staging-Datenbank liegt; der Fremdschluessel aus
+         * `0002` (ON DELETE RESTRICT) haelt jede belegte. Aufgerufen nur
+         * nach einer gelungenen Familienaenderung, nie aus der Karte.
+         */
+        "admin_delete_empty_character",
+        /*
          * CAT-07 (`0159`): die BASISFIGUR. Eine andere Ebene als die
          * Familie — `character_id` verbindet denselben Charakter
          * serienuebergreifend, `base_sky_id` sagt, welche Figur DERSELBEN

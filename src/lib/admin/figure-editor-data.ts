@@ -21,7 +21,8 @@
 "use server";
 
 import {
-  fetchAdminNote, fetchBaseContext, fetchCatalogChanges, type CatalogChange,
+  fetchAdminNote, fetchBaseContext, fetchCatalogChanges, fetchFamilyContext,
+  type CatalogChange, type FamilyRefRow,
 } from "@/lib/admin/queries";
 import { isEditorialCatalogSource } from "@/lib/admin/catalog-source";
 import { isPlatformAdmin } from "@/lib/auth/capabilities";
@@ -37,6 +38,10 @@ export type FigureEditorData = {
   baseName: string | null;
   /** How many variants point at THIS figure (`0159`: then it cannot become one). */
   variantCount: number;
+  /** The figure's family today, or `null` (CAT-18). */
+  family: FamilyRefRow | null;
+  /** The base figure's family, or `null` — also when there is no base. */
+  baseFamily: FamilyRefRow | null;
   /**
    * Whether this deployment is where the catalogue is edited (Staging,
    * ADR-0167). Decided on the server; the dialog only offers "Variante von"
@@ -49,6 +54,7 @@ export type FigureEditorData = {
 export async function loadFigureEditor(
   skyId: string,
   baseSkyId: string | null = null,
+  characterId: number | null = null,
 ): Promise<{ ok: true; data: FigureEditorData } | { ok: false; message: string }> {
   if (!SKY_ID.test(skyId)) return { ok: false, message: de.admin.unknownFigure };
   /*
@@ -61,10 +67,14 @@ export async function loadFigureEditor(
   if (baseSkyId !== null && !SKY_ID.test(baseSkyId)) {
     return { ok: false, message: de.admin.baseUnknown };
   }
-  const [note, changes, base] = await Promise.all([
+  if (characterId !== null && (!Number.isSafeInteger(characterId) || characterId <= 0)) {
+    return { ok: false, message: de.admin.familyUnknown };
+  }
+  const [note, changes, base, family] = await Promise.all([
     fetchAdminNote(skyId),
     fetchCatalogChanges(skyId),
     fetchBaseContext(skyId, baseSkyId),
+    fetchFamilyContext(skyId, characterId, baseSkyId),
   ]);
   return {
     ok: true,
@@ -73,6 +83,8 @@ export async function loadFigureEditor(
       changes,
       baseName: base.baseName,
       variantCount: base.variantCount,
+      family: family.family,
+      baseFamily: family.baseFamily,
       editorialSource: isEditorialCatalogSource(),
     },
   };

@@ -12,11 +12,13 @@ import { resolveVariantFamily } from "@/lib/admin/variant-family-rule";
  *      "Hex" (139) exists since Spyro's Adventure. 0159 was asked to CREATE
  *      a second one and 0158 refused.
  *   B  SKY-0854 White Flocked LightCore Prism Break -> SKY-0170 Prism Break.
- *      Variant in "Prism Break Light Core" (126), base in "Prism Break" (152):
- *      a conflict 0159 refuses — correctable only explicitly.
+ *      Variant in "Prism Break Light Core" (126), base in "Prism Break" (152).
+ *      Until 0168 a conflict 0159 refused; since 0168 (ADR-0171) the variant
+ *      simply takes the base's family.
  *   C  SKY-0174 Legendary Slam Bam -> SKY-0173 Slam Bam (G): as A, "Slam Bam" (135).
  *   W  SKY-0829 Glow-in-the-Dark Warnado: base Warnado has no family, the
- *      variant still carries Whirlwind (15) from the old, wrong base.
+ *      variant still carries Whirlwind (15) from the old, wrong base — since
+ *      0168 it is dropped when the base is set.
  */
 
 const base = {
@@ -60,20 +62,27 @@ describe("which family a variant gets", () => {
       .toEqual({ kind: "none" });
   });
 
-  it("B: a conflict stays a conflict — never resolved silently", () => {
+  it("B: different families — the base's replaces the variant's, and the editor says so", () => {
     expect(resolveVariantFamily({
       ...base, baseName: "Prism Break",
       variantFamily: { id: 126, name: "Prism Break Light Core" },
       baseFamily: { id: 152, name: "Prism Break" },
-    })).toEqual({ kind: "conflict",
+    })).toEqual({ kind: "replace",
                   variant: { id: 126, name: "Prism Break Light Core" },
                   base: { id: 152, name: "Prism Break" } });
   });
 
-  it("W: only the variant has one — kept, and shown, until corrected explicitly", () => {
+  it("W: only the variant has one — it is dropped, the base has none", () => {
+    expect(resolveVariantFamily({
+      ...base, baseName: "Warnado", familyWanted: false,
+      variantFamily: { id: 15, name: "Whirlwind" },
+    })).toEqual({ kind: "drop", variant: { id: 15, name: "Whirlwind" } });
+  });
+
+  it("W, with a family wanted: the base gets one — never the variant's wrong one", () => {
     expect(resolveVariantFamily({
       ...base, baseName: "Warnado", variantFamily: { id: 15, name: "Whirlwind" },
-    })).toEqual({ kind: "variant-only", variant: { id: 15, name: "Whirlwind" } });
+    })).toEqual({ kind: "create", name: "Warnado" });
   });
 
   it("carries the base's family, or reports it is already the same", () => {
@@ -103,7 +112,7 @@ describe("setVariantBase writes only through the existing RPCs", () => {
   const fn = src.slice(start, src.indexOf("\n}\n", start));
 
   it("keeps the old path when no family is asked for", () => {
-    expect(fn).toContain("if (baseSkyId === null || familie === false) return setBase(false);");
+    expect(fn).toContain("if (baseSkyId === null || familie === false) return mitAufraeumen(await setBase(false));");
   });
 
   it("reuses an existing family only when exactly that one was confirmed", () => {
@@ -116,15 +125,19 @@ describe("setVariantBase writes only through the existing RPCs", () => {
     expect(existing.indexOf("setFigureCharacter")).toBeLessThan(existing.indexOf("setBase(false)"));
   });
 
-  it("asks 0159 to create only when nothing exists by that name, and only if asked", () => {
-    expect(fn).toContain('case "create":\n      return setBase(familie === true);');
+  it("asks 0168 to create only when nothing exists by that name, and only if asked", () => {
+    expect(fn).toContain('case "create":\n      return mitAufraeumen(await setBase(familie === true));');
     expect(fn).not.toContain("setBase(true)");
   });
 
-  it("corrects a wrong family only when asked, and only for conflict or variant-only", () => {
-    expect(fn).toContain('familie === "adopt-base"');
-    expect(fn).toContain('(outcome.kind === "conflict" || outcome.kind === "variant-only")');
-    expect(fn).toContain('const ziel = outcome.kind === "conflict" ? outcome.base.id : null;');
+  it("no longer writes the variant's family itself — 0168 does (ADR-0171)", () => {
+    expect(fn).not.toContain("adopt-base");
+    expect(fn).not.toContain("setFigureCharacter(skyId");
+  });
+
+  it("tidies up a family the change left empty, afterwards and only on success", () => {
+    expect(fn).toContain("const vorher = await familienVon(skyId);");
+    expect(fn).toContain("if (ergebnis.ok) await leereFamilienAufraeumen(vorher);");
   });
 
   it("introduces no RPC of its own", () => {
@@ -135,8 +148,8 @@ describe("setVariantBase writes only through the existing RPCs", () => {
 
 describe("the editor confirms, the server checks again", () => {
   const modal = readFileSync("src/components/admin/figure-modal.tsx", "utf8");
-  it("passes the confirmed family, the takeover, or the old create flag", () => {
-    expect(modal).toContain('draft.adoptBaseFamily ? "adopt-base"');
+  it("passes the confirmed family or the create flag — no takeover flag any more", () => {
+    expect(modal).not.toContain("adoptBaseFamily");
     expect(modal).toContain("draft.reuseFamilyId !== null ? { reuseFamilyId: draft.reuseFamilyId }");
     expect(modal).toContain("previewVariantFamily(skyId, pendingBase, familyWanted)");
   });
