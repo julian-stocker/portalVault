@@ -454,8 +454,8 @@ Entscheidung, die ein Mensch trifft.
 | `admin_create_character(text)` | `0158` | legt eine Familie an; ein bereits vorhandener Name wird abgewiesen, nicht stillschweigend geteilt |
 | `admin_set_character(text, bigint)` | `0158` | ordnet eine Figur einer Familie zu; `NULL` ist der Rückweg |
 | `admin_publish_as_variant(text, bigint)` | `0158` | der dritte Importweg: Entwurf veröffentlichen **und** einer Familie zuordnen, in einem Vorgang (ADR-0155) |
-| `admin_set_variant_base(text, text, boolean)` | `0159`, neu gefasst in `0168` (**lokal, nirgends angewendet**) | setzt oder löst die Basisfigur einer bestehenden Figur. Bis `0168` übertrug sie die Familie und brach bei verschiedenen Familien ab; mit `0168` erbt die Variante die Familie der neuen Basisfigur über den Trigger, `p_create_family` legt eine Familie nur noch **an der Basisfigur** an |
-| `admin_delete_empty_character(bigint)` | `0168` (**lokal, nirgends angewendet**) | löscht **eine** Familie nur, wenn keine Figur auf sie zeigt, sie **nicht kuratiert** ist (Element, Spezies, Rolle, Beschreibung, Quelle leer) und die Datenbank den Staging-Stempel trägt; sonst `in_use`, `curated`, `not_editorial` oder `gone`. Sperrt die Zeile `for update`, journalt den Namen als `family_deleted` (Entität `character`). Kein CASCADE: der Fremdschlüssel aus `0002` (`on delete restrict`) hält jede belegte Familie. Der Publish ruft sie nie (ADR-0171) |
+| `admin_set_variant_base(text, text, boolean)` | `0159`, neu gefasst in `0168` (**auf Staging seit 2026-11-02**, auf Production nicht) | setzt oder löst die Basisfigur einer bestehenden Figur. Bis `0168` übertrug sie die Familie und brach bei verschiedenen Familien ab; mit `0168` erbt die Variante die Familie der neuen Basisfigur über den Trigger, `p_create_family` legt eine Familie nur noch **an der Basisfigur** an |
+| `admin_delete_empty_character(bigint)` | `0168` (**auf Staging seit 2026-11-02**, auf Production nicht) | löscht **eine** Familie nur, wenn keine Figur auf sie zeigt, sie **nicht kuratiert** ist (Element, Spezies, Rolle, Beschreibung, Quelle leer) und die Datenbank den Staging-Stempel trägt; sonst `in_use`, `curated`, `not_editorial` oder `gone`. Sperrt die Zeile `for update`, journalt den Namen als `family_deleted` (Entität `character`). Kein CASCADE: der Fremdschlüssel aus `0002` (`on delete restrict`) hält jede belegte Familie. Der Publish ruft sie nie (ADR-0171) |
 | `admin_publish_with_base(text, text, boolean)` | `0159` | Entwurf veröffentlichen **und** auf eine Basisfigur setzen, atomar — ein Fehler an der Journalzeile rollt beides zurück |
 | `admin_publish_variant_auto(text, text)` | `0161` (**auf Staging seit 2026-10-29**, auf Production nicht) | dasselbe **ohne Frage an den Bediener**: er wählt nur die Basisfigur, die Familie regelt die Datenbank (ADR-0157). Sie schreibt **nicht selbst**, sondern ruft `admin_set_character`, `admin_set_variant_base` und `admin_set_catalog_status` — es gibt weiterhin einen Schreibweg je Spalte |
 | `admin_create_variant_figure(text, text, text, bigint, text, boolean, text, text)` | `0166` (**auf Staging seit 2026-10-31**, auf Production nicht) | legt eine Figur **als Variante** einer Basisfigur an, in **einer** Transaktion: ruft `admin_create_figure` (SKY-ID, Slug, `created`; Charakter aus der Basisfigur), `admin_set_variant_base`, `admin_set_figure_types` (Figurenart der Basisfigur + Variantentype, nie deren Variantentypes) und `admin_set_visible_type` (Banner = Variantentype). Schreibt selbst keine Spalte. Serie immer die der Basisfigur; weist eine Basisfigur ab, die selbst Variante oder ein **Entwurf** ist (der Publish trägt keine Entwürfe). Recht: `authenticated`, geprüft wird `is_platform_admin()` in der Funktion (ADR-0165) |
@@ -526,8 +526,8 @@ und `skylanders_market_price_positive` (`null or > 0`) bleibt die letzte Schicht
 > **gespeicherten** Wert — schriebe sie den gedruckten zurück, wäre der Zuschlag beim
 > nächsten Lesen zweimal drin und beim nächsten Speichern dreimal.
 
-**Die Variante trägt die Familie ihrer Basisfigur (`0168`, ADR-0171, lokal vorbereitet,
-nirgends angewendet).** Zwei Trigger an `skylanders`:
+**Die Variante trägt die Familie ihrer Basisfigur (`0168`, ADR-0171, auf Staging seit
+2026-11-02, auf Production nicht).** Zwei Trigger an `skylanders`:
 
 | Trigger | Wann | Was |
 |---|---|---|

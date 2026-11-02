@@ -289,8 +289,10 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
      * sein. Die Prüfdatei wurde nicht angefasst.
      */
     /* `0166` kam am 2026-10-31 dazu — die achtunddreissigste —, `0167`
-       am selben Tag als neununddreissigste. */
-    expect(zeilen.length).toBe(39);
+       am selben Tag als neununddreissigste, `0168` am 2026-11-02 als
+       vierzigste (berechtigter Postflight 9998 = 0, 9999 = 0). */
+    expect(zeilen.length).toBe(40);
+    expect(zeilen.map((z) => z.datei)).toContain("0168_variant_family_inheritance.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0167_ovp_removal.sql");
     expect(zeilen.map((z) => z.datei)).toContain("0166_admin_create_variant_figure.sql");
     for (const datei of ["0144_platform_export_calculations.sql",
@@ -383,7 +385,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        `0161`, dreiunddreißig seit `0162`, vierunddreißig seit `0163` und
        fünfunddreißig seit `0164` am 2026-10-29, sechsunddreißig seit `0165`
        am 2026-10-30 und siebenunddreißig seit `0166` und achtunddreißig seit `0167` am
-       2026-10-31. Nur
+       2026-10-31, neununddreißig seit `0168` am 2026-11-02. Nur
        `0130` weicht ab und
        zeigt auf ihren Nachtrag.
 
@@ -398,7 +400,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(38);
+    expect(gleiche.length).toBe(39);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

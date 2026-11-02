@@ -17058,8 +17058,9 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ## ADR-0171 · Die Familie wird an der Basisfigur gepflegt — Varianten erben sie, auch rückwirkend
 
-**Status:** ANGENOMMEN · 2026-11-02 (Regel vom Betreiber; Umsetzung lokal, `0168` **nirgends
-angewendet**)
+**Status:** ANGENOMMEN · 2026-11-02 (Regel vom Betreiber). `0168` **auf Staging angewendet am
+2026-11-02** (berechtigter Postflight `9998 = 0`, `9999 = 0`, `supabase/migrations/APPLIED.md`),
+auf Production **nicht**
 **Betrifft:** ADR-0034 (drei Identitäten), ADR-0156 (Basisfigur), ADR-0167 (Staging pflegt),
 ADR-0168 (Familienkonflikt — **ersetzt**), ADR-0170 (Familie im Editor — **teilweise ersetzt**)
 

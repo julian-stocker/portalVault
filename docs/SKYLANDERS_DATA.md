@@ -905,7 +905,7 @@ Namen („Dark Sword" ist ein Trap, dessen Element „Dark" heißt).
 **Basisfigur** —, nie über den Anzeigenamen. „Bash", „Blue Bash" und „Legendary Bash" stehen
 deshalb als ein Block unter *Bash*, nicht unter B, B und L.
 
-**Die Familie wird an der Basisfigur gepflegt (ADR-0171, `0168` lokal vorbereitet).** Eine
+**Die Familie wird an der Basisfigur gepflegt (ADR-0171, `0168` auf Staging seit 2026-11-02).** Eine
 Variante trägt immer die Familie (`character_id`) ihrer Basisfigur — auch keine. Wer die Familie
 einer Basisfigur setzt, wechselt oder entfernt, nimmt alle ihre Varianten mit, auch Wochen
 später. Zwei Basisfiguren verschiedener Serien dürfen dieselbe Familie tragen (Sprocket,
