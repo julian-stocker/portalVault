@@ -22,6 +22,9 @@ function figure(
     categoryId: 1,
     catalogGroup: "figure",
     cardType,
+    /* Since 0163 the types mirror the card type for every backfilled row;
+       the order reads the types (ADR-0169). */
+    types: cardType === "standard" ? [] : [cardType],
     catalogVisible: true,
     canonicalName: "",
     displayNameOverride: null,
@@ -137,10 +140,9 @@ describe("the Bash block", () => {
 
   it("orders one family by edition, not by label", () => {
     /*
-     * standard · special · chase · dark · legendary · prestige — the
-     * operator's order. Alphabetically the labels would run Blue, Chase, Dark,
-     * Legendary, which happens to agree; "Zebra" proves it is the type that
-     * decides and not the word.
+     * standard · special · legendary · dark · … · chase — the operator's
+     * order since ADR-0169 (before: special · chase · dark · legendary).
+     * "Zebra" proves it is the type that decides and not the word.
      */
     const family = [
       figure("Legendary Spyro", 0, 0, { base: "Spyro", label: "Legendary" }, "legendary"),
@@ -152,9 +154,9 @@ describe("the Bash block", () => {
     expect(sortFigures(family).map((f) => f.cardType)).toEqual([
       "standard",
       "special",
-      "chase",
-      "dark",
       "legendary",
+      "dark",
+      "chase",
     ]);
   });
 

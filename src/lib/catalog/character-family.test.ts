@@ -11,7 +11,7 @@ import {
   type Lookups,
 } from "./queries.ts";
 import { compareFigures, sortFigures } from "./sort.ts";
-import { FAMILY_ORDER } from "./card-type.ts";
+import { VARIANT_SORT_ORDER } from "./catalog-type.ts";
 import { VARIANT_TOKENS } from "./variant.ts";
 import type { CatalogFigure } from "./types.ts";
 
@@ -283,11 +283,12 @@ describe("H — the figure the family is named after leads it", () => {
     ]);
   });
 
-  it("does not outrank the edition order", () => {
-    // A legendary base figure still sorts after a standard sibling: the
-    // tie-break runs AFTER familyRank, not before it.
+  it("does not outrank the tier order", () => {
+    // A legendary figure still sorts after a plain sibling: the tie-break
+    // runs AFTER the tier (ADR-0169), not before it.
     const rows = [
-      row({ sky_id: "SKY-0002", name: "Pop Fizz", character_id: 8, card_type: "legendary" }),
+      row({ sky_id: "SKY-0002", name: "Pop Fizz", character_id: 8, card_type: "legendary",
+            types: ["legendary"] }),
       row({ sky_id: "SKY-0001", name: "Punch Pop Fizz", character_id: 8, card_type: "standard" }),
     ];
     expect(sortFigures(withFamily(rows)).map((f) => f.skyId)).toEqual(["SKY-0001", "SKY-0002"]);
@@ -319,15 +320,9 @@ describe("I/K — what did not change", () => {
     expect(readFileSync("src/lib/catalog/sort.ts", "utf8")).not.toContain("source");
   });
 
-  it("leaves FAMILY_ORDER exactly as it was", () => {
-    expect([...FAMILY_ORDER]).toEqual([
-      "standard",
-      "special",
-      "elite",
-      "chase",
-      "dark",
-      "legendary",
-      "prestige",
+  it("orders a family by the one tier list (ADR-0169)", () => {
+    expect([...VARIANT_SORT_ORDER]).toEqual([
+      "special", "legendary", "dark", "lightcore", "elite", "chase", "prestige",
     ]);
   });
 

@@ -5,8 +5,6 @@ import { createHash } from "node:crypto";
 import {
   CARD_TYPES,
   EDITION_RANK,
-  FAMILY_ORDER,
-  familyRank,
   CARD_TYPE_LABELS,
   DEFAULT_CARD_TYPE,
   asCardType,
@@ -150,19 +148,10 @@ describe("there are seven card types, and collection is not one of them", () => 
     for (const type of CARD_TYPES) expect(typeof EDITION_RANK[type]).toBe("number");
   });
 
-  it("orders a family the way a collector reads it", () => {
-    expect([...FAMILY_ORDER]).toEqual([
-      "standard",
-      "special",
-      "elite",
-      "chase",
-      "dark",
-      "legendary",
-      "prestige",
-    ]);
-    // Every card type appears exactly once, so `familyRank` is never -1.
-    expect(new Set(FAMILY_ORDER).size).toBe(CARD_TYPES.length);
-    for (const type of CARD_TYPES) expect(familyRank(type)).toBeGreaterThanOrEqual(0);
+  it("no longer orders a family — the types do (ADR-0169)", () => {
+    const modul = readFileSync("src/lib/catalog/card-type.ts", "utf8");
+    expect(modul).not.toContain("export const FAMILY_ORDER");
+    expect(modul).not.toContain("export function familyRank");
   });
 });
 

@@ -10,14 +10,41 @@
  * since V3.6 begins with the variant label ("Blue Bash") and would scatter a
  * family across the alphabet.
  *
- * Inside one family the order is by EDITION, not by label: standard, special,
- * chase, dark, legendary, prestige (ADR-0068).
+ * A BASE FIGURE AND ITS VARIANTS ARE ONE BLOCK (CAT-17, ADR-0169). Where a
+ * row names its base (`base_sky_id`), it is not compared against the rest of
+ * the catalogue at all: the block is placed by its base, and inside it the
+ * base comes first and the variants follow by `VARIANT_SORT_ORDER`. Nothing
+ * about a variant — its name, its SKY-ID, when it was created — can move it
+ * in front of its base or into another figure's block.
  */
-import { familyRank } from "@/lib/catalog/card-type";
+import { VARIANT_SORT_ORDER, variantTier } from "@/lib/catalog/catalog-type";
 import type { CatalogFigure } from "@/lib/catalog/types";
 
 const collator = new Intl.Collator("de", { sensitivity: "base", numeric: true });
 
+/**
+ * Where a figure stands in `VARIANT_SORT_ORDER`, counting the plain figure
+ * as 0.
+ *
+ * `untypedLast` decides what a figure WITHOUT a variant type is. Next to
+ * other figures it is the plain one and leads (0). Inside a base's block it
+ * is a variant nobody has classified yet — Silver Boomer, the Mini and Sensei
+ * repaints — and goes to the end, after every classified one, rather than
+ * being given a tier the data does not state.
+ */
+export function variantRank(figure: CatalogFigure, untypedLast = false): number {
+  const tier = variantTier(figure);
+  if (tier === null) return untypedLast ? VARIANT_SORT_ORDER.length + 1 : 0;
+  return VARIANT_SORT_ORDER.indexOf(tier) + 1;
+}
+
+/**
+ * Two figures, each standing for itself.
+ *
+ * What places one BLOCK against another in `sortFigures()`, and the
+ * tie-break the shop uses under its price order. It knows nothing about
+ * `base_sky_id`; `sortFigures()` does.
+ */
 export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
   if (a.seriesPosition !== b.seriesPosition) return a.seriesPosition - b.seriesPosition;
   if (a.categoryPosition !== b.categoryPosition) return a.categoryPosition - b.categoryPosition;
@@ -28,20 +55,13 @@ export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
   if (byBase !== 0) return byBase;
 
   /*
-   * Within one family, by edition (V3.6).
-   *
-   *   standard · special · chase · dark · legendary · prestige
-   *
-   * The operator's order, held in `FAMILY_ORDER` so this reads it rather than
-   * restating it. It replaces "base figure before its variants", which could
-   * only ever say two things and put a Legendary next to a seasonal repaint.
-   *
-   * It is the CARD TYPE that orders here, not the name: a figure whose form
-   * the name does not spell out still sorts where it belongs, and a figure
-   * the operator reclassifies moves with its type.
+   * Within one family, by tier (ADR-0169; before that by card type,
+   * ADR-0068). It is the TYPE that orders here, not the name: a figure whose
+   * form the name does not spell out still sorts where it belongs, and a
+   * figure the operator reclassifies moves with its type.
    */
-  const byEdition = familyRank(a.cardType) - familyRank(b.cardType);
-  if (byEdition !== 0) return byEdition;
+  const byTier = variantRank(a) - variantRank(b);
+  if (byTier !== 0) return byTier;
 
   /*
    * THE FIGURE THE FAMILY IS NAMED AFTER COMES FIRST (V3.9a).
@@ -55,18 +75,14 @@ export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
    * So the plain figure leads, stated rather than hoped for. It asks about
    * the DISPLAY name, which is what the visitor reads and what "this is the
    * figure itself" means to them.
-   *
-   * Only a tie-break. Series, category, base name and edition have all
-   * already had their say, and FAMILY_ORDER is untouched.
    */
   const aIsBase = a.displayName === a.sortBaseName;
   const bIsBase = b.displayName === b.sortBaseName;
   if (aIsBase !== bIsBase) return aIsBase ? -1 : 1;
 
   /*
-   * Same base, same edition. The label breaks the tie — there are families
-   * with two chases — and the plain figure still comes before a labelled one,
-   * because a base figure and its unnamed-form sibling share a rank.
+   * Same base, same tier. The label breaks the tie — there are families
+   * with two chases — and the plain figure still comes before a labelled one.
    */
   const aIsVariant = a.sortVariantLabel !== null;
   const bIsVariant = b.sortVariantLabel !== null;
@@ -76,11 +92,59 @@ export function compareFigures(a: CatalogFigure, b: CatalogFigure): number {
     if (byLabel !== 0) return byLabel;
   }
 
-  // Last resort: identical names in one category are possible.
-  return collator.compare(a.name, b.name);
+  // Identical names in one category are possible; the SKY-ID is permanent,
+  // so the order never depends on the order rows arrived in.
+  return collator.compare(a.name, b.name) || (a.skyId < b.skyId ? -1 : a.skyId > b.skyId ? 1 : 0);
 }
 
-/** Returns a sorted copy; the input is left alone. */
+/**
+ * Two variants of the same base: by tier, then by what the visitor reads,
+ * then by SKY-ID — only ever to break a tie INSIDE the block.
+ */
+function compareVariants(a: CatalogFigure, b: CatalogFigure): number {
+  return variantRank(a, true) - variantRank(b, true)
+    || collator.compare(a.displayName, b.displayName)
+    || collator.compare(a.name, b.name)
+    || (a.skyId < b.skyId ? -1 : a.skyId > b.skyId ? 1 : 0);
+}
+
+/**
+ * Returns a sorted copy; the input is left alone.
+ *
+ * Every figure is filed into a block: its own, or its base's. A variant
+ * joins its base's block only within the same series AND category — the
+ * category boundary is the owner's and wins; a variant filed elsewhere sorts
+ * there, on its own. A block whose base is not in the list (a draft, hidden,
+ * or not owned in a collection) keeps its variants together and is placed by
+ * the first of them.
+ */
 export function sortFigures(figures: readonly CatalogFigure[]): CatalogFigure[] {
-  return [...figures].sort(compareFigures);
+  const blocks = new Map<string, { head: CatalogFigure | null; variants: CatalogFigure[] }>();
+  const keyOf = (f: CatalogFigure, skyId: string) => `${f.seriesCode}|${f.categoryPosition}|${skyId}`;
+  const block = (key: string) => {
+    let entry = blocks.get(key);
+    if (!entry) blocks.set(key, (entry = { head: null, variants: [] }));
+    return entry;
+  };
+
+  /* Figures that cannot head a block: the same SKY-ID twice in one list. They
+     stand on their own rather than replace the first — nothing is dropped. */
+  const loose: CatalogFigure[][] = [];
+
+  for (const figure of figures) {
+    if (figure.baseSkyId && figure.baseSkyId !== figure.skyId) {
+      block(keyOf(figure, figure.baseSkyId)).variants.push(figure);
+    } else {
+      const own = block(keyOf(figure, figure.skyId));
+      if (own.head === null) own.head = figure;
+      else loose.push([figure]);
+    }
+  }
+
+  const ordered = [...blocks.values(), ...loose.map((one) => ({ head: one[0], variants: [] }))].map(({ head, variants }) => {
+    const sorted = variants.sort(compareVariants);
+    return head === null ? sorted : [head, ...sorted];
+  });
+  ordered.sort((a, b) => compareFigures(a[0], b[0]));
+  return ordered.flat();
 }

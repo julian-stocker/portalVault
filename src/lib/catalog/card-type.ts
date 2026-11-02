@@ -132,26 +132,9 @@ export const EDITION_RANK: Readonly<Record<CardType, number>> = {
   prestige: 4,
 };
 
-/**
- * The order a base figure's family is shown in (V3.6, operator's rule).
- *
- * Not `EDITION_RANK`: that answers "which mark is stronger", this answers
- * "what does a collector want to see first", and the operator put `chase`
- * between `special` and `dark` rather than beside the plain figure.
+/*
+ * The order a family is SHOWN in is no longer a card-type question. Until
+ * CAT-17 it was `FAMILY_ORDER` here (V3.6); since ADR-0169 it is
+ * `VARIANT_SORT_ORDER` in `catalog-type.ts`, read from the types — what a
+ * figure IS — and not from the artwork it is printed on.
  */
-export const FAMILY_ORDER: readonly CardType[] = [
-  "standard",
-  "special",
-  /* Eon's Elite sits with the figure it is a version OF: after the plain
-     figure and the broader special forms, before the finishes and editions. */
-  "elite",
-  "chase",
-  "dark",
-  "legendary",
-  "prestige",
-];
-
-/** Where a card type sits in its family. Lower comes first. */
-export function familyRank(cardType: CardType): number {
-  return FAMILY_ORDER.indexOf(cardType);
-}

@@ -163,8 +163,13 @@ describe("die Priorität ist ein VORSCHLAG und nie eine Wirkung (D4)", () => {
     expect(bannerType({ visibleType: "legendary" })).toBe("legendary");
     /* Auch nicht, wenn eine Menge daneben steht. */
     expect(bannerType({ visibleType: null } as never)).toBeNull();
-    expect(code(MODUL)).not.toMatch(/bannerType[\s\S]{0,300}proposeVisibleType/);
-    expect(code(MODUL)).not.toMatch(/bannerType[\s\S]{0,300}TYPE_PRIORITY/);
+    /* Nur ihr eigener Rumpf: `variantTier()` (ADR-0169) ruft sie auf und
+       DARF danach den Vorschlag fragen — für die Reihenfolge, nie fürs Banner. */
+    const quelle = code(MODUL);
+    const start = quelle.indexOf("export function bannerType");
+    const rumpf = quelle.slice(start, quelle.indexOf("\n}\n", start));
+    expect(rumpf).not.toContain("proposeVisibleType");
+    expect(rumpf).not.toContain("TYPE_PRIORITY");
   });
 
   it("und ein unbekannter Wert in `visible_type` zeichnet nichts", () => {

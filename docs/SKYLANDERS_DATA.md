@@ -903,8 +903,17 @@ Namen („Dark Sword" ist ein Trap, dessen Element „Dark" heißt).
 
 **Anzeigename ≠ Sortierwahrheit.** Sortiert und gruppiert wird über `sortBaseName` — die
 **Basisfigur** —, nie über den Anzeigenamen. „Bash", „Blue Bash" und „Legendary Bash" stehen
-deshalb als ein Block unter *Bash*, nicht unter B, B und L. Innerhalb einer Familie ordnet der
-**Kartentyp**: `standard · special · chase · dark · legendary · prestige`.
+deshalb als ein Block unter *Bash*, nicht unter B, B und L.
+
+**Basisfigur und Varianten sind ein Block (ADR-0169).** Wo eine Zeile ihre Basisfigur nennt
+(`base_sky_id`), steht sie im Block dieser Basisfigur — innerhalb derselben Serie und Kategorie —,
+und der Block steht dort, wo die Basisfigur steht. Im Block: **Basisfigur ·
+Special · Legendary · Dark · LightCore · Elite · Chase · Prestige · Variante ohne
+Variantentype**, gelesen aus den **Types** (Banner zuerst, sonst der Bannervorschlag), nicht aus
+dem Kartentyp und nie aus dem Namen. Gleichrangige nach Anzeigename, dann SKY-ID. Figurentypen
+(Giant, Swapper, Sensei, Mini, …) sind keine Stufe. Zwischen Figuren ohne Basisfigur derselben
+Familie gilt dieselbe Stufenliste, die Figur ohne Variantentype vorn
+(`VARIANT_SORT_ORDER` in `src/lib/catalog/catalog-type.ts`, `sortFigures()` in `sort.ts`).
 
 ## 11i. Eon's Elite: eine Linie, drei Zeilen je Figur (2026-09-15, ADR-0069)
 

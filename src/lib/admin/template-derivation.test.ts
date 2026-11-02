@@ -279,8 +279,16 @@ describe("G — provenance still sorts nothing", () => {
   });
 
   it("sorts by neither SKY-ID nor creation time", () => {
-    expect(readFileSync("src/lib/catalog/sort.ts", "utf8")).not.toContain("created_at");
-    expect(readFileSync("src/lib/catalog/sort.ts", "utf8")).not.toContain("skyId");
+    const sort = readFileSync("src/lib/catalog/sort.ts", "utf8");
+    expect(sort).not.toContain("created_at");
+    /* Since ADR-0169 the SKY-ID is a block's identity (which base a variant
+       belongs to) and the very last tie-break, after every name — never an
+       order of its own. */
+    for (const fn of ["export function compareFigures", "function compareVariants"]) {
+      const start = sort.indexOf(fn);
+      const body = sort.slice(start, sort.indexOf("\n}\n", start));
+      expect(body.indexOf("a.skyId"), fn).toBeGreaterThan(body.lastIndexOf("collator.compare"));
+    }
   });
 });
 

@@ -188,6 +188,51 @@ export function proposeVisibleType(
 }
 
 /**
+ * DIE REIHENFOLGE IM VARIANTENBLOCK (CAT-17, ADR-0169) — die eine Regel,
+ * für alle sechs Serien.
+ *
+ *   Basisfigur · Special · Legendary · Dark · LightCore · Elite · Chase ·
+ *   Prestige · (Variante ohne Variantentype)
+ *
+ * NICHT `TYPE_PRIORITY`. Die beantwortet „welches Banner, wenn mehrere
+ * passen" und stellt das Seltenste nach vorn; diese hier beantwortet „was
+ * sieht ein Sammler nach der Basisfigur zuerst" — die breiten Formen vor
+ * den Finishes. Die Reihenfolge ist die des Betreibers; `prestige` stand
+ * nicht darin und steht als seltenste Form am Ende (auf Staging am
+ * 2026-11-02: keine Zeile).
+ *
+ * Figurentypen (Giant, Swapper, Sensei, Mini, …) und Weitere (Trap,
+ * Fahrzeug, …) sind KEINE Stufe: ein Mini ist kein seltenerer Barkley. Sie
+ * stehen deshalb nicht in der Liste und ordnen nichts.
+ */
+export const VARIANT_SORT_ORDER: readonly CatalogType[] = [
+  "special", "legendary", "dark", "lightcore", "elite", "chase", "prestige",
+];
+
+/**
+ * Auf welcher Stufe eine Figur steht — `null`, wenn sie keinen
+ * Variantentype trägt.
+ *
+ * MEHRERE VARIANTENTYPES: das BANNER entscheidet, denn das hat ein Mensch
+ * gewählt und das steht auf der Kachel — „Legendary LightCore Chill"
+ * (SKY-0130) zeigt Legendary und steht bei den Legendaries. Ohne Banner
+ * (oder mit einem Figurenbanner wie „Mini") entscheidet derselbe Vorschlag,
+ * den das Dropdown macht (`proposeVisibleType`), beschränkt auf
+ * Variantentypes. Keine zweite Priorität.
+ *
+ * Liest NICHT `card_type`: das ist die Kartenkunst, eine andere Frage
+ * (siehe Kopf). Und keinen Namen.
+ */
+export function variantTier(figure: {
+  types?: readonly string[];
+  visibleType?: string | null;
+}): CatalogType | null {
+  const banner = bannerType(figure);
+  if (banner !== null && isVariantType(banner)) return banner;
+  return proposeVisibleType(asCatalogTypes(figure.types ?? []).filter(isVariantType));
+}
+
+/**
  * Die Menge, bereinigt: nur bekannte Werte, jeder einmal, in fester
  * Reihenfolge.
  *

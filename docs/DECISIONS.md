@@ -12,8 +12,8 @@ Session-Kontext von Claude.
 | `OPEN DECISION` | offen, muss entschieden werden, mit Optionen und Empfehlung |
 | `ERSETZT DURCH ADR-XXXX` | überholt |
 
-Letzte Aktualisierung: 2026-11-01 (ADR-0168, bestehende Familien nur nach Bestätigung
-wiederverwenden; davor ADR-0167, Staging als einzige redaktionelle Katalogquelle).
+Letzte Aktualisierung: 2026-11-02 (ADR-0169, Basisfigur und Varianten als ein Block mit einer
+Stufenliste; davor ADR-0168, bestehende Familien nur nach Bestätigung wiederverwenden).
 
 ---
 
@@ -5299,7 +5299,9 @@ dem Import; die drei vergleichbaren Admin-Mutationen lassen sie ebenfalls in Ruh
 
 ## ADR-0068 — Der Anzeigename gehört dem Leser, die Sortierung der Basisfigur
 
-**Status:** angenommen · **Datum:** 2026-09-15 · **Migration:** `0031_special_card_type.sql`
+**Status:** angenommen · **Datum:** 2026-09-15 · **Migration:** `0031_special_card_type.sql` ·
+**Die Reihenfolge innerhalb der Familie (nach Kartentyp) ist ersetzt durch ADR-0169** (Block je
+Basisfigur, Stufen aus den Types).
 
 **Kontext.** Drei Dinge liefen in V3.6 zusammen, und alle drei hängen an derselben Frage: was
 gehört in die Datenbank, und was wird beim Lesen abgeleitet?
@@ -17051,6 +17053,60 @@ Abbruch ist kostenlos**, weil nichts committet ist.
   ohne jede fachliche Anweisung, kein Platzhalter, zehn Abwesenheiten vorher
   und zehn Anwesenheiten nachher, und bei `admin_merge_draft` die Zahl **2**.
 
+
+---
+
+## ADR-0169 · Basisfigur und Varianten sind ein Block — eine Stufenliste für alle sechs Serien
+
+**Status:** ANGENOMMEN · 2026-11-02 (Code, keine Migration; Reihenfolge vom Betreiber vorgegeben,
+Prestige und „ohne Variantentype“ von Claude ergänzt)
+**Betrifft:** ADR-0030 (Sortierung über `sortBaseName`), ADR-0068 (Editionsreihenfolge, hier
+**ersetzt**), ADR-0070b (Familie), ADR-0156 (Basisfigur), CAT-10 (`types`, `visible_type`), CAT-16
+
+### Anlass
+
+Die Sortierung kannte `base_sky_id` nicht. Sie ordnete nach Serie, Kategorie, `sortBaseName` und
+dann nach **Kartentyp** (`FAMILY_ORDER`: standard · special · elite · chase · dark · legendary ·
+prestige); dass eine Variante hinter ihrer Basisfigur stand, war eine Folge gleicher Namen, keine
+Zusage. Auf Staging (2026-11-02, alle sechs Serien, 157 Blöcke) standen dadurch SKY-0370 Gnarly
+Barkley und SKY-0386 Eggsellent Weeruptor **vor** ihrer Basisfigur (Minis, beide `standard`; der
+Tiebreak über den Anzeigenamen entschied). CAT-16 (fe9f185) hatte den Gruppennamen repariert,
+nicht die Regel.
+
+### Entscheidung
+
+* `sortFigures()` bildet **Blöcke**: jede Figur mit `base_sky_id` gehört in den Block ihrer
+  Basisfigur, **sofern Serie und Kategorie gleich sind** (die Kategorie des Betreibers gewinnt;
+  eine Variante in anderer Kategorie steht dort allein). Blöcke werden mit `compareFigures()`
+  über ihre Basisfigur eingeordnet; die Basisfigur steht immer zuerst.
+* Im Block ordnet `VARIANT_SORT_ORDER`:
+  **Special · Legendary · Dark · LightCore · Elite · Chase · Prestige**, danach Varianten
+  **ohne Variantentype** (Silver Boomer, Mini-/Sensei-/Fahrzeug-Repaints) — sie bekommen keine
+  erfundene Stufe, sondern stehen am Ende, nie vor der Basisfigur.
+* Die Stufe kommt aus den **Types**, nicht aus `card_type` (das ist die Kartenkunst, CAT-10) und
+  nie aus dem Namen: bei mehreren Variantentypes das **Banner**, sonst der bestehende
+  Bannervorschlag `proposeVisibleType()` (keine zweite Priorität). Figurentypen (Giant, Swapper,
+  Master, Sensei, Mini, Sidekick) und Weitere (Trap, Fahrzeug, Item, Crystal) sind keine Stufe.
+* Gleichrangige: Anzeigename, Rohname, SKY-ID. Damit ist die Reihenfolge von der Eingangs- und
+  Anlagereihenfolge unabhängig; die SKY-ID dient nur als letzter Tiebreak **innerhalb** eines Blocks.
+* Zwischen Figuren **ohne** Basisfigur derselben Familie gilt dieselbe Liste (Figur ohne
+  Variantentype vorn). `FAMILY_ORDER`/`familyRank()` entfallen.
+
+### Ausnahmen, bewusst
+
+* **Shop:** sortiert nach Preis; `compareFigures()` ist nur der Tiebreak bei gleichem Preis. Eine
+  Preisliste gruppiert nicht.
+* **Sammlung / Wunschliste / Detailseite:** dieselbe Funktion auf der jeweiligen Teilmenge. Fehlt
+  die Basisfigur (nicht im Besitz, Entwurf, versteckt), bleiben ihre Varianten als Block
+  beisammen und werden über die erste von ihnen eingeordnet.
+* **Filter und Suche** sortieren nicht neu, sie blenden nur aus — die Reihenfolge bleibt die des
+  Katalogs. Einen Type-Filter gibt es nicht; die Gruppen-Tabs filtern nach Kategorie.
+
+### Konsequenzen
+
+Keine Migration, keine Datenänderung. Gemessen an Staging ändern sich im Admin-Katalog 43 von 596
+Positionen (öffentlich 31 von 563), alle innerhalb ihres Blocks; keine Figur fehlt oder kommt
+doppelt. Varianten ohne Variantentype sind ein Datenhinweis, kein Sortierfehler.
 
 ---
 

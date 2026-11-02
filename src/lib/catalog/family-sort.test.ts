@@ -6,7 +6,7 @@ import {
   VARIANT_TOKENS, displayNameFor, eliteDisplayNameFor, parseVariant,
   searchFormsFor,
 } from "./variant";
-import { FAMILY_ORDER, familyRank } from "./card-type";
+import { VARIANT_SORT_ORDER } from "./catalog-type";
 import { withBaseFigure, withCharacterFamily } from "./queries";
 import type { CatalogFigure } from "./types";
 
@@ -36,6 +36,9 @@ function figur(ueber: Partial<CatalogFigure> & { name: string }): CatalogFigure 
     element: null, imageFile: null, imageOverridePath: null,
     displayNameOverride: null, displayName: name, sortBaseName: name,
     sortVariantLabel: null, marketPrice: null, catalogVisible: true,
+    /* Wie nach `0163`: die Types spiegeln die Kartenart, die Reihenfolge
+       liest die Types (ADR-0169). */
+    types: rest.cardType && rest.cardType !== "standard" ? [rest.cardType] : [],
     ...KAT, name, ...rest,
   } as CatalogFigure;
 }
@@ -75,18 +78,18 @@ describe("eine kuratierte Familie hält zusammen", () => {
       "Chrome Spyro",
       /* special */
       "LightCore Spyro",
+      /* legendary — seit ADR-0169 vor dark */
+      "Legendary Spyro",
       /* dark */
       "Dark Spyro",
-      /* legendary */
-      "Legendary Spyro",
     ]);
   });
 
   it("die Editionsreihenfolge hat Vorrang vor der alphabetischen", () => {
     /* „Dark" kommt alphabetisch vor „LightCore", aber `special` kommt vor
        `dark` — eine fachlich begründete Reihenfolge schlägt das Alphabet. */
-    expect(familyRank("special")).toBeLessThan(familyRank("dark"));
-    expect(FAMILY_ORDER.indexOf("standard")).toBe(0);
+    expect(VARIANT_SORT_ORDER.indexOf("special")).toBeLessThan(VARIANT_SORT_ORDER.indexOf("dark"));
+    expect(VARIANT_SORT_ORDER[0]).toBe("special");
   });
 
   it("sie funktioniert ohne Standardfigur", () => {
@@ -94,7 +97,7 @@ describe("eine kuratierte Familie hält zusammen", () => {
       SPYRO_FAMILIE.filter((f) => f.name !== "Spyro"), namen);
     const sortiert = sortFigures(ohneBasis);
     expect(sortiert.map((f) => f.name)).toEqual([
-      "Chrome Spyro", "LightCore Spyro", "Dark Spyro", "Legendary Spyro"]);
+      "Chrome Spyro", "LightCore Spyro", "Legendary Spyro", "Dark Spyro"]);
   });
 
   it("eine Familie über mehrere Serien wird NICHT in eine falsche Serie geholt", () => {
@@ -271,7 +274,7 @@ describe("Familie, Serie, Edition und Katalogeintrag bleiben vier Dinge", () => 
     /* Die Reihenfolge der Kriterien ist die Architektur: Serie, Kategorie,
        Familie (als `sortBaseName`), dann Edition. */
     expect(rumpf.indexOf("seriesPosition")).toBeLessThan(rumpf.indexOf("sortBaseName"));
-    expect(rumpf.indexOf("sortBaseName")).toBeLessThan(rumpf.indexOf("familyRank"));
+    expect(rumpf.indexOf("sortBaseName")).toBeLessThan(rumpf.indexOf("variantRank(a)"));
   });
 
   it("eine Edition sagt nichts über die Familie", () => {
@@ -309,11 +312,11 @@ describe("eine zugeordnete Basisfigur gruppiert genauer als alles andere", () =>
   it("die Basisfigur steht zuerst, dann die Varianten in Editionsreihenfolge", () => {
     const sortiert = sortFigures(withBaseFigure([...varianten, spyro]));
     expect(sortiert.map((f) => f.name)).toEqual([
-      "Spyro",            /* standard, und sie trägt den Namen der Gruppe */
-      "Chrome Spyro",     /* standard */
+      "Spyro",            /* die Basisfigur */
       "LightCore Spyro",  /* special */
-      "Dark Spyro",       /* dark */
       "Legendary Spyro",  /* legendary */
+      "Dark Spyro",       /* dark */
+      "Chrome Spyro",     /* Variante ohne Variantentype: ans Ende (ADR-0169) */
     ]);
   });
 
