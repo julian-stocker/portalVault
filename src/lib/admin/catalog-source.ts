@@ -32,3 +32,18 @@ export function isStagingProjectUrl(url: string | undefined | null): boolean {
 export function isEditorialCatalogSource(): boolean {
   return isStagingProjectUrl(process.env.NEXT_PUBLIC_SUPABASE_URL);
 }
+
+/**
+ * May a figure be created AS A VARIANT here? (CAT-20)
+ *
+ * `admin_create_variant_figure` (`0166`) exists on Staging only — Production
+ * deliberately does not get it (ADR-0167: the catalogue is edited on Staging
+ * and published). So this is the same answer as `isEditorialCatalogSource()`,
+ * named for what it decides: the dialog hides the choice, and
+ * `createFigure()` refuses a variant before it reaches the database. If the
+ * function were missing on Staging after all, the database refuses too
+ * (`PGRST202`, `create-errors.ts`) — a second layer, not the first.
+ */
+export function canCreateVariants(): boolean {
+  return isEditorialCatalogSource();
+}

@@ -13,6 +13,7 @@ import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { fetchSellerPublic } from "@/lib/shop/seller";
 import { de } from "@/lib/i18n/de";
 import { isAdmin } from "@/lib/auth/admin";
+import { canCreateVariants } from "@/lib/admin/catalog-source";
 import { capabilities } from "@/lib/auth/capabilities";
 import { currentUser } from "@/lib/auth/user";
 
@@ -126,6 +127,9 @@ export default async function CatalogPage({
         seller={seller}
         freeShippingFrom={freeShippingFrom}
         categories={formOptions?.categories ?? []}
+        /* CAT-20: Varianten nur dort anlegen, wo `0166` steht (Staging).
+           Entschieden auf dem Server, der Dialog liest es nur. */
+        variantCreation={admin && canCreateVariants()}
         marketBoostPercent={marketBoost}
       />
     </main>

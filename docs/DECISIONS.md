@@ -17318,6 +17318,15 @@ schreibende Quellen sind genau die bidirektionale Lage, die ADR-0163 ersetzt hat
 Die Sperre ist eine **Betriebsregel**: im Production-Admin wird nichts am Katalog
 geschrieben. Bestehende Wege (`admin_create_figure`, die Editoren) sind technisch noch offen.
 
+**Ausnahme bereits technisch gesperrt: die Variantenanlage (CAT-20, 2026-11-02).** Eine Figur
+wird nur auf Staging **als Variante** angelegt. Ob das erlaubt ist, entscheidet der Server über
+`canCreateVariants()` (`src/lib/admin/catalog-source.ts`) anhand der konfigurierten
+Supabase-Umgebung — exakt das Staging-Projekt `qqxcpesbwfxzgytkdsac`, sonst nein. Production
+sperrt sie doppelt: der Anlegedialog zeigt „Variante von" nur als „Eigenständige Figur" mit
+Hinweis, und `createFigure()` weist eine Variante ab, bevor die Datenbank gefragt wird — auch
+eine Anfrage, die nicht aus dem Dialog kommt. `0166` (`admin_create_variant_figure`) ist dafür
+auf Production **nicht** erforderlich; sie bleibt dort bewusst unangewendet.
+
 ### Folgeaufgabe CAT-13 — Production-Katalogschreibsperre (abgegrenzt, nicht gebaut)
 
 Erhoben am 2026-11-01, rein lesend am Code:

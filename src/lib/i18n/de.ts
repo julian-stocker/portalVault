@@ -3689,6 +3689,9 @@ export const de = {
     baseEditOnStaging: "Wird auf Staging gepflegt",
     /* CAT-18 — die Familie im kompakten Editor. */
     propertyFamily: "Familie",
+    /* CAT-20 — Varianten entstehen nur auf Staging. */
+    variantCreateStagingOnly:
+      "Varianten werden auf Staging angelegt und mit dem Katalog-Publish übernommen.",
     familyNewPending: (name: string) => `${name} (neu, wird beim Speichern angelegt)`,
     familyCreateOnSave: (name: string) => `Familie „${name}" beim Speichern anlegen`,
     familyAfterBase: "Familie erst nach dem Speichern der Basisfigur ändern.",

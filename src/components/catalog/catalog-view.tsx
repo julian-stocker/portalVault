@@ -99,6 +99,7 @@ export function CatalogView({
   offers = {},
   seller = null,
   categories = [],
+  variantCreation = false,
   marketBoostPercent = 0,
   freeShippingFrom = null,
 }: {
@@ -194,6 +195,12 @@ export function CatalogView({
    * admin page and none to the public one.
    */
   categories?: readonly CategoryOption[];
+  /**
+   * Whether the create dialog may offer „Variante von" (CAT-20). Decided on
+   * the server (`canCreateVariants()`); `false` unless the page says so.
+   * Not the boundary — `createFigure()` refuses a variant itself.
+   */
+  variantCreation?: boolean;
   /**
    * The temporary catalog market-value boost, in per cent (0094).
    *
@@ -1087,6 +1094,7 @@ export function CatalogView({
           onClose={() => setAdding(false)}
           series={series}
           categories={categories}
+          variantCreation={variantCreation}
           figures={figures}
           onCreated={(skyId) => {
             setCreated(skyId);

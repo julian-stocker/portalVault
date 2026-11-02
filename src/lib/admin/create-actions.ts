@@ -27,6 +27,7 @@ import { refresh, revalidatePath } from "next/cache";
 import { createErrorMessage } from "@/lib/admin/create-errors";
 import { isCardTypeValue, isVariantTypeValue } from "@/lib/admin/new-figure-draft";
 import { isPlatformAdmin } from "@/lib/auth/capabilities";
+import { canCreateVariants } from "@/lib/admin/catalog-source";
 import { createClient } from "@/lib/supabase/server";
 import { de } from "@/lib/i18n/de";
 
@@ -93,6 +94,14 @@ export async function createFigure(input: CreateFigureInput): Promise<CreateResu
   }
 
   if (!(await isPlatformAdmin())) return { ok: false, message: de.admin.notAllowed };
+  /*
+   * NOT ON PRODUCTION (CAT-20). The dialog does not offer it there, and this
+   * is the check that holds when a request does not come from the dialog:
+   * a variant is refused here, before any request to the database.
+   */
+  if (variant && !canCreateVariants()) {
+    return { ok: false, message: de.admin.variantCreateStagingOnly };
+  }
 
   const supabase = await createClient();
   // The database turns an empty string into NULL; sending "" rather than

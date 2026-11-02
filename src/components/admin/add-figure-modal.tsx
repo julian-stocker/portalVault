@@ -160,6 +160,7 @@ export function AddFigureModal({
   onClose,
   series,
   categories,
+  variantCreation = false,
   figures,
   onCreated,
 }: {
@@ -167,6 +168,12 @@ export function AddFigureModal({
   onClose: () => void;
   series: readonly SeriesOption[];
   categories: readonly CategoryOption[];
+  /**
+   * May „Variante von" be chosen here? (CAT-20) Only where `0166` exists —
+   * Staging. Elsewhere the field stays „eigenständig" and says why; the
+   * server refuses a variant regardless.
+   */
+  variantCreation?: boolean;
   /** The catalogue already on screen — the base and template pickers and the
       duplicate warning all read it, so none of them costs a request. */
   figures: readonly CatalogFigure[];
@@ -480,7 +487,14 @@ export function AddFigureModal({
               <span id={`${ids.base}-label`} className="text-xs text-muted">
                 {de.admin.variantOf}
               </span>
-              {picking ? (
+              {!variantCreation ? (
+                <>
+                  <span id={ids.base} className={FIELD + " flex items-center text-muted"}>
+                    {de.admin.variantNone}
+                  </span>
+                  <span className="text-[11px] text-muted">{de.admin.variantCreateStagingOnly}</span>
+                </>
+              ) : picking ? (
                 <div className="flex flex-col gap-1">
                   <input
                     id={ids.base}
