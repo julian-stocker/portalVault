@@ -17066,6 +17066,49 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0173 · Elementembleme auf der Figurenseite; Serienlogos vorbereitet, nicht verwendet
+
+**Status:** UMGESETZT · 2026-11-02, lokal auf `development/skyisles-v2`, nicht committet.
+Keine Migration, keine Datenänderung.
+**Betrifft:** ADR-0148 (Elementmarke, C-41/UX-01E), UX-01F (Seriengitter), ADR-0026 (statische
+Bilder)
+
+### Entscheidung
+
+1. **Die Grafiken des Betreibers, keine eigenen.** Quellen bleiben unversioniert unter
+   `resources/designs/series/` (6 PNG) und `resources/designs/elements/` (8 PNG).
+   `tools/build-design-icons.mts` (`npm run designs:build`, sharp — wie
+   `build-card-templates.mts`) prüft Leinwand 1254 × 1254 und Alphakanal, schneidet den
+   transparenten Rand ab und schreibt **eine** WebP je Quelle: Embleme 64 px (3–4 KB).
+   Standardmäßig nur die Embleme; `--with-series` baut zusätzlich die Logos
+   (≤ 360 × 120 px). Die Quellen werden nur gelesen.
+2. **Elementembleme nur auf der Figurenseite** (`/skylanders/<slug>`, die Seite hinter dem
+   „i" der Kachel): die Zeile unter der Serie lautet **„[Emblem] Element: Feuer"** — 24 px,
+   8 px Abstand, vertikal zentriert, ohne Hintergrundbox; sie ersetzt dort den Element-Chip.
+   Das Emblem ist dekorativ (`decorative`), der Text nennt das Element. `ELEMENT_ICON`
+   (`element-icon.tsx`) ist die einzige Zuordnung (`Tech` → `technic.webp`). **Licht und
+   Dunkel haben keine Grafik** und zeigen nur den Text; ein unbekannter Wert zeigt keine
+   Zeile, ein Ladefehler kein kaputtes Bild. **Die Platzhalter-Rune ist entfernt.**
+3. **Die Kacheln bleiben ohne Element.** Zwei Fassungen wurden nach Sichtprüfung verworfen
+   (eine feste Spalte vor „MARKTWERT", dann das Emblem vor dem Namen); Namenszeile,
+   Marktwert und Breitenrechnung sind wie vor diesem Paket. ADR-0148 C-41/UX-01E gilt weiter.
+4. **Die Serien-Navigation bleibt das UX-01F-Raster mit Text-Tabs.** Zwei Logo-Fassungen
+   (Logos in den Zellen, dann eine schlanke Logo-Zeile ohne Boxen) wurden nach Sichtprüfung
+   zurückgenommen; `series-grid.tsx` ist wieder der Stand von `8c45089`. Serien-WebP werden
+   **nicht ausgeliefert** und nicht versioniert; das Skript erzeugt sie bei Bedarf mit
+   `--with-series` für eine spätere Überarbeitung.
+
+### Konsequenzen
+
+* Das Emblem erscheint nur auf der Figurenseite, nicht in Katalog-, Favoriten- oder
+  Shopkacheln und nicht in der Schnellansicht (dort bleibt der Element-Chip).
+* Licht- und Dunkel-Figuren zeigen kein Emblem, bis es Grafiken dafür gibt — dann genügt
+  der Eintrag in `ELEMENT_ICON` und die Zeile in `build-design-icons.mts`.
+* Ausgeliefert werden nur die acht Embleme unter `public/images/elements/` (zusammen
+  etwa 29 KB).
+
+---
+
 ## ADR-0172 · Figurensuche ohne Abschneiden, Serie als Darstellungsregel in Kalkulator und Einkauf
 
 **Status:** UMGESETZT, AUF PRODUCTION · 2026-11-02. Commit `95da00b` (Fast-Forward von

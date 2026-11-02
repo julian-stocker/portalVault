@@ -335,6 +335,8 @@ export const de = {
     inactive: "Nicht mehr im Katalog",
     backToCatalog: "Zurück zum Katalog",
     marketValue: "Marktwert",
+    /* Die Elementzeile der Figurenseite (UX-Design): „Element: Feuer". */
+    elementLine: (element: string) => `Element: ${element}`,
     series: "Serie",
     /** Screenreader-Vorspann für die SKY-ID auf der Detailseite. */
     /**

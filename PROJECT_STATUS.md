@@ -6521,6 +6521,13 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-11-02, UX-Design: Elementembleme auf der Figurenseite (ADR-0173) — Code, Assets und
+Tests, keine Migration, nicht committet.** Die Figurenseite zeigt „[Emblem] Element: Feuer";
+Licht und Dunkel nur als Text. Kacheln und Serien-Navigation sind nach Sichtprüfung wieder wie
+vor dem Paket (Text-Tabs aus UX-01F, keine Embleme in Kacheln). Assets per
+`npm run designs:build` nach `public/images/elements/`; Serienlogos nur auf Anforderung
+(`--with-series`), nicht ausgeliefert.
+
 **2026-11-02, UX-A: sechs Fehler aus dem UX-Audit — Code und Tests, keine Migration,
 nicht committet.** Kunden-Bestelldetail zeigt „Gebraucht"/„OVP" über `conditionLabel()`
 statt „Lose"; Platztausch im Einkaufsfenster zeigt „—" statt „Unbekannt"; die

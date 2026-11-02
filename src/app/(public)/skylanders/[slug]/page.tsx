@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { CharacterPanel, ElementChip } from "@/components/catalog/character-panel";
+import { CharacterPanel } from "@/components/catalog/character-panel";
+import { ElementIcon } from "@/components/catalog/element-icon";
 import { CollectButton } from "@/components/catalog/collect-button";
 import { OfferPanel } from "@/components/shop/offer-panel";
 import { FigureCard } from "@/components/catalog/figure-card";
@@ -14,6 +15,7 @@ import { fetchFreeShippingFrom } from "@/lib/commerce/shipping-queries";
 import { FigureImage } from "@/components/catalog/figure-image";
 import { firstReleaseSeries } from "@/lib/catalog/character";
 import { isCollectible } from "@/lib/catalog/collectible";
+import { asElement, elementLabel } from "@/lib/catalog/element";
 import { imageSrc } from "@/lib/catalog/image";
 import { fetchFigureBySlug, fetchFigureDetail } from "@/lib/catalog/queries";
 import { fetchOwnedSkyIds } from "@/lib/collection/queries";
@@ -143,12 +145,24 @@ export default async function FigurePage({ params }: Params) {
               {figure.categoryName ? ` · ${figure.categoryName}` : ""}
             </p>
 
-            {figure.element ? (
-              /* Secondary and decorative here: the element belongs to the
-                 character, and the panel below is where it is stated. Same
-                 central table, no second mapping. */
-              <p>
-                <ElementChip element={figure.element} size="xs" />
+            {asElement(figure.element) !== null ? (
+              /*
+               * „[Emblem] Element: Feuer" (UX-Design, 2026-11-02).
+               *
+               * The emblem is the operator's artwork through the one map in
+               * `element-icon.tsx`; Light and Dark have none yet, and an
+               * unknown value or a file that fails to load draws nothing —
+               * so those rows are the text alone, with no empty square
+               * before it. 24 px, a hair taller than the line, centred with
+               * it, 8 px from the text; no box behind either. The name comes
+               * from the same central table as everywhere else
+               * (`elementLabel`), and the panel below still states it too.
+               * An unknown stored value is no element: `asElement()` guards
+               * the line, so it never reads „Element: undefined".
+               */
+              <p className="flex items-center gap-2 text-sm">
+                <ElementIcon element={figure.element} decorative className="h-6 w-6" />
+                <span>{de.catalog.elementLine(elementLabel(asElement(figure.element)!))}</span>
               </p>
             ) : null}
 

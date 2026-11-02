@@ -89,9 +89,10 @@ Thumbs.db
 # Design- und Pruefmaterial unter resources/, das nicht ausgeliefert wird.
 #
 # `resources/designs/elements/` (8 PNG, 20 MB) und `resources/designs/series/`
-# (6 PNG, 7,6 MB) sind Quellen. Ausgeliefert wird daraus nichts: die
-# Elementsymbole rendert `src/components/catalog/element-icon.tsx` als
-# inline-SVG, und kein Pfad im Code oder in `public/` nennt diese Dateien.
+# (6 PNG, 7,6 MB) sind Quellen. Ausgeliefert werden nur ihre Ableitungen:
+# `tools/build-design-icons.mts` (`npm run designs:build`) schreibt sie als
+# WebP nach `public/images/elements/` (Figurenseite). Serienlogos nur mit
+# `--with-series`; sie werden derzeit weder verwendet noch ausgeliefert (ADR-0173).
 # Dieselbe Regel wie fuer `/designs/artwork/` und `/designs/cards/` oben.
 /resources/designs/elements/
 /resources/designs/series/
