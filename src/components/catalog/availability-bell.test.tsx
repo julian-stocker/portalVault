@@ -134,7 +134,8 @@ describe("UX-02 will need no layout pass", () => {
 
 describe("it reaches the tile, and only the tile", () => {
   it("the card hands it to the row and never to FigureCard", () => {
-    expect(CARD).toContain('const bell = accountType === "user" ? <AvailabilityBell /> : null;');
+    expect(CARD).toContain(
+      'const bell = AVAILABILITY_BELL_RELEASED && accountType === "user" ? <AvailabilityBell /> : null;');
     /* Both row branches — signed in and signed out — and neither card one. */
     expect((CARD.match(/bellSlot=\{bell\}/g) ?? [])).toHaveLength(2);
     /* Each `<FigureCard …/>` element on its own, not everything after it:

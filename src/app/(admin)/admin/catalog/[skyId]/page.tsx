@@ -16,6 +16,7 @@ import {
 } from "@/lib/admin/queries";
 import { fetchFigureBySlug } from "@/lib/catalog/queries";
 import { groupLabel } from "@/lib/catalog/group";
+import { changeFieldLabel } from "@/lib/admin/change-field";
 import { formatDate } from "@/lib/format";
 import { ImageEditor } from "@/components/admin/image-editor";
 import { hasImageOverride, imageSrc } from "@/lib/catalog/image";
@@ -239,7 +240,7 @@ export default async function AdminFigurePage({
           <ul className="mt-2 flex flex-col gap-1 text-sm text-muted">
             {changes.map((change) => (
               <li key={`${change.field}-${change.changedAt}`}>
-                <span className="text-foreground">{change.field}</span>{" "}
+                <span className="text-foreground">{changeFieldLabel(change.field)}</span>{" "}
                 {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
                 <span className="text-xs">{formatDate(change.changedAt)}</span>
               </li>

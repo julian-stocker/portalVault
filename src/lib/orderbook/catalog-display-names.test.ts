@@ -426,7 +426,11 @@ describe("0118: eBay, und die Plattform in der Übersicht", () => {
        eine leere Zelle in einer tabellarischen Zeile liest sich wie ein
        Darstellungsfehler. */
     expect(LEDGER).toContain("copy.detailsModal.platformUnknown");
-    expect(DETAILS).toContain('<option value="">{modal.platformUnknown}</option>');
+    /* Im Fenster ist die leere Wahl „—": bei der Plattform schon immer, beim
+       Platztausch seit UX-A2 — dort stand die Plattform-Vorgabe „Unbekannt"
+       versehentlich für „kein Platz gewählt". */
+    expect(DETAILS).not.toContain('<option value="">{modal.platformUnknown}</option>');
+    expect(DETAILS.match(/<option value="">—<\/option>/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   it("die Spuren passen in den erklärten Boden", () => {

@@ -257,8 +257,11 @@ describe("historische Anzeige außerhalb des Lager-Workflows bleibt", () => {
   });
 
   it("die Kundenansicht einer alten Bestellung zeigt OVP weiterhin", () => {
+    /* Seit UX-A1 über `conditionLabel()` — „boxed" bleibt „OVP", der
+       Normalfall heißt „Gebraucht" wie in Warenkorb und Checkout. */
     const own = codeOf("src/app/(app)/account/orders/[orderNumber]/page.tsx");
-    expect(own).toContain('line.condition === "boxed" ? "OVP" : "Lose"');
+    expect(own).toContain("conditionLabel(isOfferCondition(line.condition)");
+    expect(own).not.toContain('"Lose"');
   });
 
   it("positionKey trägt die Condition weiter", () => {

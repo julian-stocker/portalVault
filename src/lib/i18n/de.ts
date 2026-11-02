@@ -3160,6 +3160,21 @@ export const de = {
     saved: "Gespeichert.",
     history: "Letzte redaktionelle Änderungen",
     noHistory: "Noch keine redaktionellen Änderungen.",
+    /*
+     * Feldnamen der Änderungshistorie, die es als Bezeichnung noch nicht
+     * gab (UX-A5). Die übrigen kommen aus den Schlüsseln, unter denen das
+     * Feld schon im Editor heißt — siehe `changeFieldLabel()`.
+     */
+    changeFields: {
+      displayName: "Anzeigename",
+      created: "Angelegt",
+      status: "Status",
+      mergedFrom: "Zusammengeführt aus",
+      discarded: "Verworfen",
+      marketPrice: "Marktpreis",
+      deleted: "Gelöscht",
+      familyDeleted: "Familie gelöscht",
+    },
     searchLabel: "Figur oder SKY-ID suchen",
     hiddenFilter: "Nur verborgene",
     allSeries: "Alle Serien",

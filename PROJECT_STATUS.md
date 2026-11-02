@@ -6521,6 +6521,15 @@ Vorschlag vor und ist **nicht** gebaut.
 
 ### Tatsächlich ausgeführt
 
+**2026-11-02, UX-A: sechs Fehler aus dem UX-Audit — Code und Tests, keine Migration,
+nicht committet.** Kunden-Bestelldetail zeigt „Gebraucht"/„OVP" über `conditionLabel()`
+statt „Lose"; Platztausch im Einkaufsfenster zeigt „—" statt „Unbekannt"; die
+deaktivierte Glocke ist bis UX-02 ausgeblendet (`AVAILABILITY_BELL_RELEASED`, Nachtrag zu
+ADR-0148); die Warnung im Admin-Löschdialog nutzt den vorhandenen Hinweiston
+`--attention` (die bisherige Warnklasse hatte kein Token); die Änderungshistorie nennt
+Feldbezeichnungen statt Spaltennamen (`changeFieldLabel`); das Kontaktformular setzt
+`autoComplete` wie der Checkout.
+
 **2026-11-02, Calculator- und Orderbuch-Fixes (ADR-0172) — auf Production ausgerollt und
 abgenommen.** Commit `95da00b`, per Fast-Forward von `bdf55a7` nach `main`; Vercel-Deployment
 `9kU9id1DMnQnRhgMdUWxqvm1HW5r` erfolgreich. Keine Migration, keine Datenänderung, kein

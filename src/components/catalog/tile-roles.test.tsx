@@ -66,7 +66,7 @@ const namen = () => [...document.querySelectorAll("button, a")]
   .filter((t) => t.trim() !== "");
 
 describe("die Aktionsleiste der Kachel folgt der Kontoart", () => {
-  it("ein SAMMLER bekommt Glocke, Info und Herz", async () => {
+  it("ein SAMMLER bekommt Info und Herz — die Glocke erst mit UX-02", async () => {
     const { CatalogCard } = await import("./catalog-card");
     await mount(createElement(CatalogCard, {
       figure: FIGUR, initialCollected: false, signInHref: null,
@@ -77,9 +77,9 @@ describe("die Aktionsleiste der Kachel folgt der Kontoart", () => {
     expect(document.querySelector('a[href="/skylanders/sky-0001"]')).not.toBeNull();
     /* Das Herz ist ein Schalter mit Zustand. */
     expect(document.querySelector('button[aria-pressed]')).not.toBeNull();
-    /* Und die Glocke ist da — vorbereitet und deaktiviert, solange `0150`
-       nirgends angewendet ist (UX-01E). */
-    expect(t.toLowerCase()).toContain("benachricht");
+    /* Keine Glocke (UX-A3): ein ausgegrauter Knopf ohne Funktion war auf
+       jeder Kachel. Sie kommt mit `AVAILABILITY_BELL_RELEASED`. */
+    expect(t.toLowerCase()).not.toContain("benachricht");
     /* Kein Stift, kein Auge. */
     expect(t).not.toContain("bearbeiten");
     expect(t).not.toContain("verstecken");
@@ -169,7 +169,7 @@ describe("eine Darstellung, und sie steht im Server fest", () => {
   });
 
   it("und die Kachel entscheidet daran, was sie zeichnet", () => {
-    expect(card).toContain('const bell = accountType === "user"');
+    expect(card).toContain('const bell = AVAILABILITY_BELL_RELEASED && accountType === "user"');
     expect(card).toContain('favorites && accountType === "user"');
     expect(card).toContain('const sammelt = accountType === "user";');
   });

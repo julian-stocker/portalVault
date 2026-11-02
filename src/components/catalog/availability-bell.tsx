@@ -75,6 +75,17 @@ function BellGlyph() {
   );
 }
 
+/**
+ * Ob die Glocke überhaupt gezeigt wird (UX-A3).
+ *
+ * `false`, solange UX-02 nicht gebaut ist: eine ausgegraute Glocke auf jeder
+ * Kachel ohne Angebot war ein Bedienelement, das nichts tut. Die Komponente,
+ * der Platz in der Zeile und ihre Arithmetik bleiben — der Tag, an dem die
+ * Benachrichtigung funktioniert, ist dieser eine Schalter plus das Entfernen
+ * von `disabled`.
+ */
+export const AVAILABILITY_BELL_RELEASED = false;
+
 export function AvailabilityBell() {
   return (
     <button

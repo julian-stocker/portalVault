@@ -12,6 +12,8 @@ import { fetchMyOrder } from "@/lib/account/orders";
 import { currentProfile } from "@/lib/auth/profile";
 import { ONBOARDING_PATH, SIGN_IN_PATH } from "@/lib/auth/redirect";
 import { formatDate, formatPrice } from "@/lib/format";
+import { conditionLabel } from "@/lib/shop/condition";
+import { isOfferCondition } from "@/lib/shop/offer";
 import { paymentMethodLabel } from "@/lib/commerce/payment-method";
 import { de } from "@/lib/i18n/de";
 import { fetchConversation } from "@/lib/messages/queries";
@@ -176,7 +178,10 @@ export default async function MyOrderPage({
                 <span>
                   {line.quantity} × {line.name}
                   <span className="ml-2 text-muted">
-                    {line.condition === "boxed" ? "OVP" : "Lose"}
+                    {/* Dieselbe Bezeichnung wie in Warenkorb und Checkout
+                        (UX-A1). Ein unbekannter Wert fällt wie bisher auf
+                        den Normalfall zurück. */}
+                    {conditionLabel(isOfferCondition(line.condition) ? line.condition : "loose")}
                   </span>
                 </span>
                 {/*

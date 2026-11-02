@@ -15274,6 +15274,16 @@ eine tote CSS-Regel im Bundle. Wo eine falsche Klasse dokumentiert werden
 muss, steht sie jetzt mit Leerzeichen notiert, damit der Scanner sie nicht
 als Kandidaten liest.
 
+### Nachtrag vom 2026-11-02 — UX-A3: die Glocke wird bis UX-02 nicht gezeigt
+
+**C-41 ist für die Sichtbarkeit aufgehoben.** Das UX-Audit vom 2026-11-02 hat die
+ausgegraute Glocke als Bedienelement ohne Funktion auf jeder Kachel ohne Angebot
+gewertet. `AVAILABILITY_BELL_RELEASED = false` (`availability-bell.tsx`) hält sie von
+jeder Route fern; die Komponente, ihr `disabled`-Vertrag, der Platz in der Zeile und
+die Breitenarithmetik bleiben unverändert. UX-02 schaltet den einen Wert um und
+entfernt `disabled`. Bis dahin hat der Name auf Telefonen wieder die 44 px, die C-40
+für die Glocke abgezogen hatte.
+
 ---
 
 ## ADR-0149 · Zwei Umgebungen, und die zweite läuft auf dem Mac

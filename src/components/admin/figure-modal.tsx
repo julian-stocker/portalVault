@@ -93,6 +93,7 @@ import type { CatalogChange } from "@/lib/admin/queries";
 import type { CatalogFigure } from "@/lib/catalog/types";
 import { groupLabel } from "@/lib/catalog/group";
 import { imageSrc } from "@/lib/catalog/image";
+import { changeFieldLabel } from "@/lib/admin/change-field";
 import { formatDate } from "@/lib/format";
 import {
   CATALOG_STATUSES,
@@ -928,7 +929,7 @@ export function AdminFigureModal({
                   <ul className="flex flex-col gap-1 text-xs text-muted">
                     {changes.map((change) => (
                       <li key={`${change.field}-${change.changedAt}`} className="break-words">
-                        <span className="text-foreground">{change.field}</span>{" "}
+                        <span className="text-foreground">{changeFieldLabel(change.field)}</span>{" "}
                         {change.oldValue ?? "—"} → {change.newValue ?? "—"}{" "}
                         {formatDate(change.changedAt)}
                       </li>

@@ -35,7 +35,7 @@ import { useState, useTransition } from "react";
 import { AdminTileActions } from "@/components/admin/card-actions";
 import { InlinePrice } from "@/components/admin/inline-price";
 import { TypeSelect } from "@/components/admin/type-select";
-import { AvailabilityBell } from "@/components/catalog/availability-bell";
+import { AVAILABILITY_BELL_RELEASED, AvailabilityBell } from "@/components/catalog/availability-bell";
 import { FavoriteHeart } from "@/components/catalog/favorite-heart";
 import { FigureCard } from "@/components/catalog/figure-card";
 import { FigureRow } from "@/components/catalog/figure-row";
@@ -396,7 +396,8 @@ export function CatalogCard({
    * wieder da ist" ist eine Frage des Sammlers; ein Betriebskonto stellt sie
    * nicht, und ein Adminkonto hat die Leiste schon voll.
    */
-  const bell = accountType === "user" ? <AvailabilityBell /> : null;
+  /* UX-A3: bis UX-02 nicht freigegeben — dann ist `bell` immer `null`. */
+  const bell = AVAILABILITY_BELL_RELEASED && accountType === "user" ? <AvailabilityBell /> : null;
 
   const trade = (
     <OfferLink
@@ -508,10 +509,10 @@ export function CatalogCard({
        * `hasQuickViewOffer()` the quick view already hangs on — no second
        * buyability rule, and no new call: `quickBuy` is computed once above.
        *
-       * NO `bellSlot` IS PASSED, AND THAT IS THE POINT. The row supports a
-       * second position in its action column, but the availability bell is
-       * UX-02 and its migrations are not applied anywhere. A bell on a
-       * production route would look like a working feature and be none.
+       * `bellSlot` IS PASSED, BUT IT IS `null` UNTIL UX-02 IS RELEASED. The
+       * row supports a second position in its action column; the bell is
+       * UX-02 and its migrations are not applied anywhere, so
+       * `AVAILABILITY_BELL_RELEASED` keeps it off every route (UX-A3).
        */
       offered={quickBuy}
       favoriteSlot={favorite}

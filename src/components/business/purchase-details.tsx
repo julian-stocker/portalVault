@@ -1214,7 +1214,9 @@ export function PurchaseDetails({
                           if (Number.isFinite(place) && place > 0) void swapPlace(place);
                         }}
                         className={`${INPUT} w-28`}>
-                  <option value="">{modal.platformUnknown}</option>
+                  {/* „—" wie beim Verkauf: kein Platz gewählt, nicht
+                      „Unbekannt" (das ist die Plattform-Vorgabe; UX-A2). */}
+                  <option value="">—</option>
                   {dayOrder.filter((row) => row.id !== purchase.id).map((row) => (
                     <option key={row.id} value={row.dailyIndex}>{row.dailyIndex}</option>
                   ))}

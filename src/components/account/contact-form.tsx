@@ -22,14 +22,20 @@ const LABEL = "mb-1 block text-xs font-medium text-muted";
 
 type Key = keyof SavedContact;
 
-const ROWS: { key: Key; label: string; autoComplete: string; wide?: boolean }[] = [
+/*
+ * `autoComplete` wie im Checkout (UX-A6): die Straße ist `address-line1`, der
+ * Adresszusatz `address-line2`. Für die Hausnummer gibt es kein Token; sie
+ * bekommt keins, statt das der zweiten Adresszeile zu leihen — sonst füllt
+ * der Browser den Adresszusatz in das Hausnummernfeld.
+ */
+const ROWS: { key: Key; label: string; autoComplete?: string; wide?: boolean }[] = [
   { key: "email", label: de.checkout.email, autoComplete: "email", wide: true },
   { key: "firstName", label: de.checkout.firstName, autoComplete: "given-name" },
   { key: "lastName", label: de.checkout.lastName, autoComplete: "family-name" },
   { key: "company", label: de.checkout.company, autoComplete: "organization", wide: true },
   { key: "street", label: de.checkout.street, autoComplete: "address-line1" },
-  { key: "houseNumber", label: de.checkout.houseNumber, autoComplete: "address-line2" },
-  { key: "addressLine2", label: de.checkout.addressLine2, autoComplete: "address-line3", wide: true },
+  { key: "houseNumber", label: de.checkout.houseNumber },
+  { key: "addressLine2", label: de.checkout.addressLine2, autoComplete: "address-line2", wide: true },
   { key: "postalCode", label: de.checkout.postalCode, autoComplete: "postal-code" },
   { key: "city", label: de.checkout.city, autoComplete: "address-level2" },
   // No telephone field: the checkout does not ask for one either, and a

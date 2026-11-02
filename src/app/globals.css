@@ -302,7 +302,7 @@
 
   /* Status, filters and toggles. Also tonal — "Verborgen", "Sandbox" and an
      active filter chip mean none of the four languages. Genuinely semantic
-     states keep their own colours: --success, --danger, --warn stay. */
+     states keep their own colours: --success, --danger, --attention stay. */
   --status-ground: var(--surface-raised);
   --status-ink: var(--foreground);
   --status-line: var(--border-strong);

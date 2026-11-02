@@ -308,7 +308,7 @@ function DeleteDialog({
       <div className="min-h-0 overflow-y-auto overscroll-contain px-4 py-3">
         <p className="text-sm">{de.admin.deleteConfirmBody}</p>
         {status === "public" ? (
-          <p className="mt-2 text-xs text-warning">{de.admin.deleteConfirmPublic}</p>
+          <p className="mt-2 text-xs text-attention">{de.admin.deleteConfirmPublic}</p>
         ) : null}
         {fehler !== null ? (
           <div role="alert" className="mt-3 rounded-sky-md bg-danger/10 p-2 text-sm text-danger">
