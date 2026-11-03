@@ -136,6 +136,23 @@ skyisles-business-backup-*.json
 # Zeile fest.
 skyisles-platform-backup-*.zip
 
+# --- Marketplace reports and database exports -----------------------------
+# An eBay order report carries buyer names, addresses, phone numbers and
+# tracking numbers; a SQL-editor export carries sales figures. Both belong on
+# the owner's disk under ~/SkyIsles-Daten/, never here (docs/SECURITY.md §2).
+#
+# Ignoring every CSV is deliberate and costs nothing: no CSV is a project
+# asset. The only ones ever committed were nine eBay reports (removed from
+# tracking and from history on 2026-11-03), and the analysis tools write
+# theirs into resources/analysis/, which is ignored above.
+#
+# `repository-data-hygiene.test.ts` keeps these rules and the tracked tree
+# honest.
+*.csv
+*.tsv
+*OrdersReport*
+/resources/ebay/
+
 # Local state of the staging UI fixtures (tools/ui-fixtures-ship-day.mts).
 # Which throwaway sales exist right now is a fact about one machine.
 .ui-fixtures-ship-day.json

@@ -41,6 +41,20 @@ Aus der Analyse von `../webpage`:
 | Serien `ZB`, `DI A` | Zubehör, Disney Infinity | in V1 nicht öffentlich |
 | Artikel mit ` - BESCHÄDIGT`, ` - OBERTEIL`, ` - UNTERTEIL` | interne Lagerpositionen | 14 Artikel, gehören nicht in den Katalog |
 
+Aus dem Betrieb von SkyIsles selbst:
+
+| Quelle | Inhalt | Warum verboten |
+|---|---|---|
+| eBay-Bestellberichte (`eBay-OrdersReport-*.csv`) und Berichte anderer Verkaufsplattformen | Käufername, Nutzername, Liefer- und Rechnungsadresse, Telefonnummer, Sendungsnummer, dazu Verkaufszahlen | personenbezogene und geschäftliche Daten |
+| Exporte aus dem Supabase-SQL-Editor (`*.csv`), etwa `production-ebay-sales.csv` | Verkäufe, Beträge, Erstattungen aus Production | Geschäftsdaten |
+| Business- und Plattformsicherung (`skyisles-*-backup-*`) | s. Abschnitt 5 | s. dort |
+
+**Wo diese Dateien stattdessen liegen:** `~/SkyIsles-Daten/` auf dem Rechner des Betreibers —
+außerhalb jedes Git-Repositorys, Ordner `700`, Dateien `600`, mit `SHA256SUMS` je Ordner.
+`ebay/<Jahr>/` für Plattformberichte, `exports/` für Datenbankexporte, `backups/` für Sicherungen.
+Werkzeuge und Tests, die solche Dateien lesen, bekommen den Pfad als Argument oder
+Umgebungsvariable; eine Anwendungsfunktion liest sie nur über den Datei-Upload im Browser.
+
 **Strukturelle Absicherung:** PortalVault liest `skylanders.xlsx` **nie** direkt. Der einzige
 zulässige Eingang ist `site/data/products.json` — ein Export, den das Legacy-Projekt bereits
 durch `guard_public()` geprüft hat. Damit kann keine interne Spalte auf diesem Weg entstehen.
@@ -1341,31 +1355,29 @@ Der Katalog bleibt für alle drei lesbar (ADR-0076). Eingeschränkt hat sich nur
 
 ## 5. Git-Sicherheit
 
-Geplante `.gitignore`-Strategie (**noch nicht angelegt** — dieser Durchlauf schreibt nur Doku):
+Die `.gitignore` im Repository ist maßgeblich und begründet jede Regel selbst. Die
+datenbezogenen Gruppen:
 
-```gitignore
-# Secrets
-.env
-.env.*
-!.env.example
+| Gruppe | Muster |
+|---|---|
+| Secrets | `.env`, `.env.*` (außer `.env.example`), `*.pem`, `*.key` |
+| Legacy- und interne Daten | `*.xlsx`, `*.xlsm`, `*.xls`, `**/inventory.json`, `**/id_ledger.json`, `**/ebay.json`, `**/mappings/`, `images/master/`, `data/internal/`, `/resources/analysis/` |
+| Sicherungen | `/.backups/`, `skyisles-business-backup-*.json`, `skyisles-platform-backup-*.zip` |
+| Plattformberichte und Datenbankexporte | `*.csv`, `*.tsv`, `*OrdersReport*`, `/resources/ebay/` |
 
-# Node / Next
-node_modules/
-.next/
-out/
-*.tsbuildinfo
+**Automatischer Schutz:** `src/lib/repository-data-hygiene.test.ts` (Teil von `npm test`)
+schlägt fehl, sobald Git eine CSV-/TSV-Datei oder einen eBay-Bericht verfolgt, sobald eine
+verfolgte Textdatei die Kopfzeile eines eBay-Bestellberichts trägt, oder sobald `.gitignore`
+die typischen Export-Namen nicht mehr ignoriert.
 
-# Legacy- und interne Daten — dürfen dieses Repository nie erreichen
-*.xlsx
-*.xlsm
-data/internal/
-**/inventory.json
-**/mappings/
-images/master/
-
-# System
-.DS_Store
-```
+**Vorfall 2026-10-25 / Bereinigung 2026-11-03.** Neun eBay-Bestellberichte für Januar bis
+September 2026 (`resources/ebay/2026/*.csv`) gelangten mit einem Dokumentationscommit in
+`main` und `development/skyisles-v2` und wurden gepusht. Es gab weder eine CSV-Regel noch
+einen Test. Behoben durch: Auslagerung nach `~/SkyIsles-Daten/` (per SHA-256 geprüft), Ende der
+Versionierung, die Regeln und den Test oben sowie eine Bereinigung der Historie mit
+`git filter-repo` in einem getrennten Mirror. Das Repository ist privat und hat genau einen
+Nutzer. Bei GitHub können alte Commits über ihre ID noch eine Weile erreichbar bleiben, bis
+dort aufgeräumt wird.
 
 Weitere Regeln:
 
