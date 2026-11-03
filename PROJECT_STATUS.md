@@ -82,9 +82,11 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-## Verkaufsabgleich — Phase 3 (2026-11-03) — **lokal committet, nichts angewendet**
+## Verkaufsabgleich — Phase 3 (2026-11-03) — **auf Staging angewendet, Production nicht**
 
-Datenbank und Serverschicht des Abgleichs (ADR-0174). **Keine Migration ist irgendwo angewendet.**
+Datenbank und Serverschicht des Abgleichs (ADR-0174). **`0169`–`0174` laufen auf Staging seit dem
+2026-11-03** (ein gemeinsamer Lauf, berechtigter Postflight `9998 = 0` und `9999 = 0`, Akte in
+`supabase/migrations/APPLIED.md`). **Production: nicht angewendet.**
 
 | Teil | Dateien |
 |---|---|
@@ -107,7 +109,9 @@ Rümpfe und Abdrücke unverändert.
 
 **Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0175`).
 
-**Nächster Schritt:** Freigabe der Staging-Migration nach dem Laufzettel.
+**Nächster Schritt:** der synthetische Funktionstest auf Staging
+(`npm run verify:sales-reconciliation:staging`, erst Trockenlauf, dann mit eigener Freigabe
+`-- --apply`). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

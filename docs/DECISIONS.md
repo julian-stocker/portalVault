@@ -17142,9 +17142,10 @@ und `/admin` oder zusätzlich per Mail.
 
 ## ADR-0174 · Der Verkaufsabgleich: Plattformberichte gegen das Verkaufsbuch, Entscheidung je Feld
 
-**Status:** VORBEREITET · 2026-11-03, lokal committet auf `development/skyisles-v2` (`ab8394c`, Korrektur Nr. 15 im Folgecommit).
-Migrationen `0169`–`0174` liegen als Dateien vor und sind **nirgends angewendet** — zuerst nur
-Staging, mit eigener Freigabe. Logik: `src/lib/reconciliation/` (Phase 1/2, `a14a87d`).
+**Status:** AUF STAGING ANGEWENDET · 2026-11-03 (`ab8394c`, Korrektur Nr. 15 in `6a39f03`).
+Migrationen `0169`–`0174` laufen auf Staging seit dem gemeinsamen Lauf vom 2026-11-03, belegt mit
+berechtigtem Postflight (`9998 = 0` und `9999 = 0`, `supabase/migrations/APPLIED.md`).
+**Production: nicht angewendet** — eigene, spätere Freigabe. Logik: `src/lib/reconciliation/` (Phase 1/2, `a14a87d`).
 **Betrifft:** ADR-0077 (Betrieb), ADR-0089 (ein Verkaufsbuch), ADR-0114/0115/0134 (Sicherungen),
 ADR-0116 (externe Holds), ADR-0118 (Erstattung ist Geld), ADR-0137 (Migrationsablauf),
 ADR-0139/0140 (Prüfzugang), `0156` (angezeigte Werte als Konfliktschutz)

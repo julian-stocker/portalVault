@@ -175,12 +175,16 @@ describe("APPLIED.md keeps the six together", () => {
     });
   }
 
-  it("lists all six, each as prepared locally and applied nowhere — one state for one group", () => {
+  /* Applied on Staging together on 2026-11-03 (one transaction): every one
+     of the six sits in the Staging table, marked `gleich`, and none is still
+     listed as prepared locally. The full evidence stands at 0169. */
+  it("lists all six as applied on Staging on the same day — one state for one group", () => {
+    const lines = text.split("\n");
     for (const f of files) {
-      const line = text.split("\n").find((l) => l.startsWith(`| \`${f}\` |`));
-      expect(line, f).toBeDefined();
-      expect(line, f).toContain("lokal vorbereitet");
-      expect(line, f).toContain("nirgends angewendet");
+      const rows = lines.filter((l) => l.startsWith(`| \`${f}\` |`));
+      expect(rows, f).toHaveLength(1);
+      expect(rows[0], f).toMatch(/\| `[0-9a-f]{64}` \| gleich \| \*\*2026-11-03\*\*/);
+      expect(rows[0], f).not.toContain("lokal vorbereitet");
     }
   });
 });
