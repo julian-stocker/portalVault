@@ -145,8 +145,13 @@ der Inhaltsprüfung wiedererkannte (nichts gespeichert). Korrektur `0176` (ADR-0
 angewendet am 2026-11-03**: privilegierter Preflight und Postflight je `9998 = 0` und `9999 = 0`,
 die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unverändert. Production nicht.
 
-**Nächster Schritt:** gezielte Staging-Regressionsprobe der zwei Ablehnungsfälle (als neuer und
-als bekannter Upload), mit eigener Freigabe; danach Phase 4 (Oberfläche). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+**Ablehnungsprobe für `0176`:** `tools/verify-recon-refusals.mts` (`npm run
+verify:recon-refusals:staging`) — lokal gebaut und getestet, Trockenlauf auf Staging am 2026-11-03
+bestanden (5/5, nur lesend: `0176` steht, Testverkauf 362 als Grundlage). Ein schreibender Lauf
+(`--apply`) hinterlässt genau eine verworfene Mini-Sitzung und keinen Verkauf.
+
+**Nächster Schritt:** die Ablehnungsprobe mit `--apply`, mit eigener Freigabe und der Zustandsdatei
+vorher und nachher; danach Phase 4 (Oberfläche). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

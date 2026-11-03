@@ -2061,6 +2061,7 @@ kann.
   Staging-Funktionstest `tools/verify-sales-reconciliation.mts`: er arbeitet als vorhandenes
   Betriebskonto über den öffentlichen Schlüssel, legt kein Konto an und löscht keines
   (`testing/staging-scenario.test.ts`). Zugangsdaten nur lokal (`~/.skyisles/staging-operator.env`).
+  Dasselbe gilt für die Ablehnungsprobe `tools/verify-recon-refusals.mts` (`testing/recon-refusals.test.ts`).
 - **Nur Staging**, bis eine eigene Freigabe vorliegt (`isStagingProjectUrl`, fail-closed).
 - **Kontolöschung trotz Nur-Erweitern (`0175`, ADR-0176).** Entscheidungen und Anwendungen sind
   unveränderlich. Einzige Ausnahme: die Löschung eines Kontos leert `decided_by`/`applied_by` — nur

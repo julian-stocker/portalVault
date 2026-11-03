@@ -17109,6 +17109,12 @@ den Dateisatz der Hauptsitzung.
 - Rückbau `R0176` stellt den Rumpf aus `0172` wieder her und entfernt die Prüffunktion; bei einem
   vollständigen Rückbau des Abgleichs **vor** `R0169_0173`.
 - Die zentrale Sicherung (ADR-0175) beginnt dadurch bei `0177`.
+- **Gezielte Staging-Probe** `tools/verify-recon-refusals.mts` (`npm run
+  verify:recon-refusals:staging`, Trockenlauf liest nur): als vorhandenes Betriebskonto, ohne
+  Service-Role; mit `--apply` genau eine Mini-Sitzung über einen vorhandenen Testverkauf (1 Datei,
+  1 Bestellung, 1 Zuordnung, kein Befund), die zwei verbotenen Inhalte je als neuer und als
+  bekannter Upload, danach Verwerfen als ausdrücklicher Testschritt. Kein Verkauf wird angelegt oder
+  geändert; bei einem Abbruch räumt sie nichts auf. Tests: `testing/recon-refusals.test.ts`.
 
 
 ---
