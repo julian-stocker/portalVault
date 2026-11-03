@@ -14527,7 +14527,7 @@ ausdrückliche Freigabe** entfernt. Drei Dinge gehören davor, rein lesend:
 
 **Favoriten bleiben unberührt** (`0145`, ADR-0136): das Herz ist weiterhin
 eine reine Sammlerfunktion und hat **keinerlei** Einfluss auf
-Benachrichtigungen. Die Lehre aus `df7337c` — eine Einbuchung, die eine
+Benachrichtigungen. Die Lehre aus `8678bff` — eine Einbuchung, die eine
 bestehende Position auffüllt, ist kein Verfügbarkeitsereignis — wandert von
 einem Test in eine **Vorbedingung**: auf einer kaufbaren Figur kann kein
 Alarm existieren. Das ist die bessere Stelle.
@@ -17094,7 +17094,7 @@ Bilder)
    Marktwert und Breitenrechnung sind wie vor diesem Paket. ADR-0148 C-41/UX-01E gilt weiter.
 4. **Die Serien-Navigation bleibt das UX-01F-Raster mit Text-Tabs.** Zwei Logo-Fassungen
    (Logos in den Zellen, dann eine schlanke Logo-Zeile ohne Boxen) wurden nach Sichtprüfung
-   zurückgenommen; `series-grid.tsx` ist wieder der Stand von `8c45089`. Serien-WebP werden
+   zurückgenommen; `series-grid.tsx` ist wieder der Stand von `4de30f4`. Serien-WebP werden
    **nicht ausgeliefert** und nicht versioniert; das Skript erzeugt sie bei Bedarf mit
    `--with-series` für eine spätere Überarbeitung.
 
@@ -17111,8 +17111,8 @@ Bilder)
 
 ## ADR-0172 · Figurensuche ohne Abschneiden, Serie als Darstellungsregel in Kalkulator und Einkauf
 
-**Status:** UMGESETZT, AUF PRODUCTION · 2026-11-02. Commit `95da00b` (Fast-Forward von
-`bdf55a7`), Vercel-Deployment `9kU9id1DMnQnRhgMdUWxqvm1HW5r`, Production-Smoke-Tests vom
+**Status:** UMGESETZT, AUF PRODUCTION · 2026-11-02. Commit `75e4a0a` (Fast-Forward von
+`3da3ce6`), Vercel-Deployment `9kU9id1DMnQnRhgMdUWxqvm1HW5r`, Production-Smoke-Tests vom
 Betreiber bestätigt. Keine Migration, keine Datenänderung, kein Katalog-Publish.
 **Betrifft:** 0064 (gemeinsame Figurensuche), ADR-0131 (Kalkulator), ADR-0088 (Einkaufsorderbuch)
 
@@ -17317,7 +17317,7 @@ dann nach **Kartentyp** (`FAMILY_ORDER`: standard · special · elite · chase �
 prestige); dass eine Variante hinter ihrer Basisfigur stand, war eine Folge gleicher Namen, keine
 Zusage. Auf Staging (2026-11-02, alle sechs Serien, 157 Blöcke) standen dadurch SKY-0370 Gnarly
 Barkley und SKY-0386 Eggsellent Weeruptor **vor** ihrer Basisfigur (Minis, beide `standard`; der
-Tiebreak über den Anzeigenamen entschied). CAT-16 (fe9f185) hatte den Gruppennamen repariert,
+Tiebreak über den Anzeigenamen entschied). CAT-16 (2200959) hatte den Gruppennamen repariert,
 nicht die Regel.
 
 ### Entscheidung

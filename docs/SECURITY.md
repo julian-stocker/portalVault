@@ -1379,6 +1379,22 @@ Versionierung, die Regeln und den Test oben sowie eine Bereinigung der Historie 
 Nutzer. Bei GitHub können alte Commits über ihre ID noch eine Weile erreichbar bleiben, bis
 dort aufgeräumt wird.
 
+**Folge für Commit-IDs.** Jeder Commit ab dem 2026-10-25 hat eine neue ID bekommen (62 von 263;
+Inhalt, Autor und Datum unverändert). Commit-Nachrichten hat `git filter-repo` selbst
+nachgezogen, `PROJECT_STATUS.md` und `docs/DECISIONS.md` wurden von Hand angepasst. Drei
+Dateien bleiben **absichtlich** bei den alten IDs, weil sie eingefroren sind — sie stehen in
+`supabase/SHA256SUMS.txt`, und eine Prüfdatei ist so ausgeführt worden, wie sie im Baum liegt:
+
+| Alte ID | Neue ID | Genannt in |
+|---|---|---|
+| `df7337c` | `8678bff` | `supabase/checks/0150_preflight.sql` |
+| `487270f` | `3be5a79` | `supabase/checks/offer_state_refresh_test.md` |
+| `f9d6060` | `f587d15` | `supabase/checks/offer_state_refresh_test.md` |
+| `213377d` | `561a37b` | `supabase/migrations/APPLIED.md` (Zeile `0168`) |
+
+Die vollständige Zuordnung liegt beim Betreiber unter
+`~/SkyIsles-Daten/backups/portalVault-pre-cleanup-2026-11-03/commit-map-old-to-new.txt`.
+
 Weitere Regeln:
 
 - **Vor dem ersten Commit größerer Datenbestände** wird geprüft, ob sie wirklich öffentlich

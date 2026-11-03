@@ -129,7 +129,7 @@ Plattformarchiv V3 **56** statt 58 Bereiche, und das als „hoch" geführte Verl
 
 **Der alte Blue-Bash-Browsertest entfällt** (Entscheidung D-8): er würde genau die drei
 Mechanismen beweisen, die verschwinden — Spiegel nachziehen, Karenzzeit, `favorites` als
-Empfängerliste. Die Lehre aus `df7337c` geht nicht verloren, sie wandert von einem Test in eine
+Empfängerliste. Die Lehre aus `8678bff` geht nicht verloren, sie wandert von einem Test in eine
 **Vorbedingung**: auf einer kaufbaren Figur kann kein Alarm existieren. **SKY-0009 ist als
 Prüffigur verbraucht** (sie ist kaufbar), der neue Praxistest braucht eine nicht kaufbare Figur.
 
@@ -137,8 +137,8 @@ Prüffigur verbraucht** (sie ist kaufbar), der neue Praxistest braucht eine nich
 
 | Phase | Gegenstand | Stand |
 |---|---|---|
-| **M1** | ADR-0146, ADR-0147 — die Entscheidung | **abgeschlossen** (`dc2caa7`) |
-| **M2** | `0150_availability_alerts.sql` und `0151_offer_state_live.sql` schreiben, prüfen, liegen lassen — samt Preflight, Nachkontrolle, Einfügehülle, Laufzettel, `migration-plans.json` und den Probeläufen **P58**/**P59** | **abgeschlossen** (`7fbb9a5`) |
+| **M1** | ADR-0146, ADR-0147 — die Entscheidung | **abgeschlossen** (`94ebbe5`) |
+| **M2** | `0150_availability_alerts.sql` und `0151_offer_state_live.sql` schreiben, prüfen, liegen lassen — samt Preflight, Nachkontrolle, Einfügehülle, Laufzettel, `migration-plans.json` und den Probeläufen **P58**/**P59** | **abgeschlossen** (`a96990d`) |
 | **M3** | dieselben zwei auf **Staging** anwenden, in der Reihenfolge `0151` dann `0150` (ADR-0147 E-2) | **nicht freigegeben** |
 
 **Beide Migrationen sind nirgends angewendet** — auf Staging stehen `0146`–`0149`
@@ -219,7 +219,7 @@ Listener nach `SIGTERM`.
 ## SkyIsles V2 — UX-Umbau (ab 2026-10-26)
 
 **Der Arbeitszweig ist `development/skyisles-v2`.** Production (`origin/main`) steht seit
-2026-11-02 auf `95da00b` (Calculator- und Orderbuch-Fixes, ADR-0172) und ist damit gleichauf
+2026-11-02 auf `75e4a0a` (Calculator- und Orderbuch-Fixes, ADR-0172) und ist damit gleichauf
 mit dem Arbeitszweig. Nach Production geht nur, was ausdrücklich freigegeben ist.
 
 > **Die Git-Lage ist am 2026-10-26 bereinigt.** Bis dahin hieß der **lokale**
@@ -6538,7 +6538,7 @@ Feldbezeichnungen statt Spaltennamen (`changeFieldLabel`); das Kontaktformular s
 `autoComplete` wie der Checkout.
 
 **2026-11-02, Calculator- und Orderbuch-Fixes (ADR-0172) — auf Production ausgerollt und
-abgenommen.** Commit `95da00b`, per Fast-Forward von `bdf55a7` nach `main`; Vercel-Deployment
+abgenommen.** Commit `75e4a0a`, per Fast-Forward von `3da3ce6` nach `main`; Vercel-Deployment
 `9kU9id1DMnQnRhgMdUWxqvm1HW5r` erfolgreich. Keine Migration, keine Datenänderung, kein
 Katalog-Publish. Vor dem Push: `npm test` 15 525 Tests grün, `npm run check` grün
 (Production-Build, SQL-Planprüfung 73/73), `verify:sums` 525 Dateien. Die sechs
