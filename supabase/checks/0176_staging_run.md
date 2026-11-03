@@ -1,6 +1,6 @@
 # Laufzettel — 0176 (Prüfung vor der Wiedererkennung) auf Staging
 
-**Stand:** **auf Staging angewendet am 2026-11-03**, privilegierter Preflight und Postflight je
+**Stand:** **auf Staging angewendet und vollständig abgenommen am 2026-11-03** (siehe „Abnahme“), privilegierter Preflight und Postflight je
 `9998 = 0` und `9999 = 0` — Nachweis in `supabase/migrations/APPLIED.md`. **Nur Staging** (`qqxcpesbwfxzgytkdsac`). Production ist eine eigene, spätere
 Entscheidung (ADR-0177).
 
@@ -43,6 +43,10 @@ Bewegung ab.
 Der Funktionstest (`verify:sales-reconciliation:staging -- --apply`) prüft seine Ablehnungen jetzt
 als neuen **und** als bekannten Upload. Vor `0176` auf Staging scheitern die zwei Prüfpunkte
 „… (known upload)“ — gewollt; nach `0176` müssen alle bestehen.
+
+## Abnahme (2026-11-03) — vollständig
+
+Gezielte Ablehnungsprobe `tools/verify-recon-refusals.mts`, Lauf `mw15zob3` (2026-11-03, als vorhandenes Betriebskonto, ohne Service-Role): **19/19** — `buyerName` und E-Mail-Adresse je als neuer und als bekannter Upload abgewiesen, keine verbotenen Inhalte gespeichert, die Sitzung durch die Ablehnungen unverändert, der gültige wiederholte Upload idempotent (dieselbe Sitzung), keine Entscheidung, keine Anwendung, kein Verkauf angelegt; Mini-Sitzung 3 über Testverkauf 362 im Abschlussschritt verworfen. Zustandsdatei `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres` vorher und nachher: 101–108 zeichengleich, 201 `12`, 202 `0`, 203 `0|1|1` → `0|1|2` (einzige Änderung: die verworfene Mini-Sitzung), 204 `12`, 205 `6|5`, 206 `0`, 9998 `0`. Damit ist `0176` auf Staging **vollständig abgenommen**. **Production: nicht angewendet.**
 
 ## Rückbau
 

@@ -145,13 +145,9 @@ der Inhaltsprüfung wiedererkannte (nichts gespeichert). Korrektur `0176` (ADR-0
 angewendet am 2026-11-03**: privilegierter Preflight und Postflight je `9998 = 0` und `9999 = 0`,
 die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unverändert. Production nicht.
 
-**Ablehnungsprobe für `0176`:** `tools/verify-recon-refusals.mts` (`npm run
-verify:recon-refusals:staging`) — lokal gebaut und getestet, Trockenlauf auf Staging am 2026-11-03
-bestanden (5/5, nur lesend: `0176` steht, Testverkauf 362 als Grundlage). Ein schreibender Lauf
-(`--apply`) hinterlässt genau eine verworfene Mini-Sitzung und keinen Verkauf.
+**`0176` auf Staging vollständig abgenommen (2026-11-03).** Gezielte Ablehnungsprobe `tools/verify-recon-refusals.mts`, Lauf `mw15zob3` (2026-11-03, als vorhandenes Betriebskonto, ohne Service-Role): **19/19** — `buyerName` und E-Mail-Adresse je als neuer und als bekannter Upload abgewiesen, keine verbotenen Inhalte gespeichert, die Sitzung durch die Ablehnungen unverändert, der gültige wiederholte Upload idempotent (dieselbe Sitzung), keine Entscheidung, keine Anwendung, kein Verkauf angelegt; Mini-Sitzung 3 über Testverkauf 362 im Abschlussschritt verworfen. Zustandsdatei `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres` vorher und nachher: 101–108 zeichengleich, 201 `12`, 202 `0`, 203 `0|1|1` → `0|1|2` (einzige Änderung: die verworfene Mini-Sitzung), 204 `12`, 205 `6|5`, 206 `0`, 9998 `0`. **Production: nicht angewendet.**
 
-**Nächster Schritt:** die Ablehnungsprobe mit `--apply`, mit eigener Freigabe und der Zustandsdatei
-vorher und nachher; danach Phase 4 (Oberfläche). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+**Nächster Schritt:** Phase 4 (Oberfläche). Production für `0169`–`0176` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

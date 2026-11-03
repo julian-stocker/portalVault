@@ -17068,9 +17068,10 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
 
-**Status:** AUF STAGING ANGEWENDET · 2026-11-03 (`0664e6c`). Migration `0176` läuft auf Staging,
-belegt mit privilegiertem Preflight und Postflight (`9998 = 0` und `9999 = 0`,
-`supabase/migrations/APPLIED.md`). **Production: nicht angewendet** — eigene, spätere Freigabe.
+**Status:** AUF STAGING ANGEWENDET UND ABGENOMMEN · 2026-11-03 (`0664e6c`). Migration `0176` läuft
+auf Staging, belegt mit privilegiertem Preflight und Postflight (`9998 = 0` und `9999 = 0`) und
+funktional mit der Ablehnungsprobe `mw15zob3` (19/19, Zustandsdatei vorher und nachher 101–108
+zeichengleich; `supabase/migrations/APPLIED.md`). **Production: nicht angewendet** — eigene, spätere Freigabe.
 **Betrifft:** ADR-0174 Nr. 2 (Käuferdaten dreifach ferngehalten), `0172`
 
 ### Kontext
