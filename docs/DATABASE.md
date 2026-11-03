@@ -5460,7 +5460,7 @@ solange Zeilen in der Tabelle stehen, und verlangt einen Schalter in der Datei.
 Alle sieben: RLS an, keine Policy, kein Clientrecht. Fremdschlüssel auf `sales` sind
 `on delete restrict` — ein Verkauf aus einer Sitzung bleibt als Nachweis stehen.
 
-**Prüfung vor der Wiedererkennung (`0176`, ADR-0177, lokal vorbereitet).** `seller_recon_create` ruft die reine Funktion `sales_recon_validate_payload(jsonb)` (liest keine Tabelle, keine Clientrolle) vor der Suche nach einer offenen Sitzung mit demselben Dateisatz auf; ein bekannter Upload mit verbotenem Inhalt wird abgewiesen.
+**Prüfung vor der Wiedererkennung (`0176`, ADR-0177, auf Staging seit 2026-11-03, Production nicht).** `seller_recon_create` ruft die reine Funktion `sales_recon_validate_payload(jsonb)` (liest keine Tabelle, keine Clientrolle) vor der Suche nach einer offenen Sitzung mit demselben Dateisatz auf; ein bekannter Upload mit verbotenem Inhalt wird abgewiesen.
 
 **Kontolöschung (`0175`, ADR-0176, auf Staging seit 2026-11-03, Production nicht).** Beide Kontoverweise (`decided_by`, `applied_by`) stehen auf `on delete set null`; das ist ein UPDATE, das der Nur-Erweitern-Trigger von `0169` verweigerte — ein Konto mit einer Entscheidung war nicht löschbar. `0175` lässt genau dieses Leeren zu (aus der Fremdschlüsselaktion, Konto schon gelöscht, jede andere Spalte gleich) und sonst nichts.
 

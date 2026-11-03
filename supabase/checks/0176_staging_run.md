@@ -1,7 +1,7 @@
 # Laufzettel — 0176 (Prüfung vor der Wiedererkennung) auf Staging
 
-**Stand:** lokal vorbereitet, **nirgends angewendet**. Ausführen erst nach ausdrücklicher Freigabe
-des Betreibers. **Nur Staging** (`qqxcpesbwfxzgytkdsac`). Production ist eine eigene, spätere
+**Stand:** **auf Staging angewendet am 2026-11-03**, privilegierter Preflight und Postflight je
+`9998 = 0` und `9999 = 0` — Nachweis in `supabase/migrations/APPLIED.md`. **Nur Staging** (`qqxcpesbwfxzgytkdsac`). Production ist eine eigene, spätere
 Entscheidung (ADR-0177).
 
 ## Was 0176 tut

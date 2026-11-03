@@ -141,10 +141,12 @@ Sitzung 2 (Konfliktprobe) verworfen, 11 Entscheidungen (6 angewendet, 5 dokument
 als `postgres` vorher und nachher: 101–108 **zeichengleich**, 201–206 wie erwartet, keine offene
 Sitzung. Die zwei Fehlschläge — Ablehnung von Käuferfeld und E-Mail-Adresse — kamen daher, dass die
 Proben den Dateisatz der Hauptsitzung benutzten und `seller_recon_create` einen bekannten Upload vor
-der Inhaltsprüfung wiedererkannte (nichts gespeichert). Korrektur `0176` (ADR-0177) lokal vorbereitet.
+der Inhaltsprüfung wiedererkannte (nichts gespeichert). Korrektur `0176` (ADR-0177) **auf Staging
+angewendet am 2026-11-03**: privilegierter Preflight und Postflight je `9998 = 0` und `9999 = 0`,
+die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unverändert. Production nicht.
 
-**Nächster Schritt:** `0176` auf Staging (eigene Freigabe), danach ein zweiter Funktionstestlauf, in
-dem alle Ablehnungen als neuer und als bekannter Upload bestehen müssen. Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+**Nächster Schritt:** gezielte Staging-Regressionsprobe der zwei Ablehnungsfälle (als neuer und
+als bekannter Upload), mit eigener Freigabe; danach Phase 4 (Oberfläche). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

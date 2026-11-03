@@ -17068,8 +17068,9 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
 
-**Status:** VORBEREITET · 2026-11-03, lokal, nicht committet. Migration `0176` ist **nirgends
-angewendet** — zuerst nur Staging, mit eigener Freigabe.
+**Status:** AUF STAGING ANGEWENDET · 2026-11-03 (`0664e6c`). Migration `0176` läuft auf Staging,
+belegt mit privilegiertem Preflight und Postflight (`9998 = 0` und `9999 = 0`,
+`supabase/migrations/APPLIED.md`). **Production: nicht angewendet** — eigene, spätere Freigabe.
 **Betrifft:** ADR-0174 Nr. 2 (Käuferdaten dreifach ferngehalten), `0172`
 
 ### Kontext
