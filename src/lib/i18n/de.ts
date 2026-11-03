@@ -2332,7 +2332,136 @@ export const de = {
         rejected: "Diese Angabe ist hier nicht zulässig.",
         duplicateReference: "Diese Bestellnummer ist bereits einem anderen Verkauf zugeordnet.",
         notPossible: "Das ist in diesem Zustand nicht möglich.",
+        /* Ab hier für die Oberfläche (Phase 4); die Zuordnung zu Fehlercodes folgt mit Schritt 5. */
+        shownValuesChanged:
+          "Die angezeigten Werte stimmen nicht mehr mit dem Befund überein. Lade die Seite neu.",
+        sessionNotOpen: "Diese Sitzung ist beendet — hier kann nichts mehr entschieden oder übernommen werden.",
+        alreadyApplied: "Diese Entscheidung wurde bereits übernommen und lässt sich nicht mehr ändern.",
+        discardAfterApply:
+          "Aus dieser Sitzung wurde schon etwas übernommen. Schließe sie ab, statt sie zu verwerfen.",
+        notFound: "Diese Sitzung gibt es nicht.",
+        loadFailed: "Die Sitzung konnte nicht gelesen werden. Lade die Seite neu.",
+        uploadTooLarge:
+          "Die Berichte sind zusammen zu groß für einen Abgleich. Wähle weniger Dateien oder einen kürzeren Zeitraum.",
+        periodTooLong:
+          "Ein Abgleich umfasst höchstens 400 Tage. Wähle Berichte aus einem kürzeren Zeitraum.",
+        fileUnreadable: "Diese Datei konnte nicht gelesen werden.",
+        noFiles: "Wähle mindestens eine Berichtsdatei aus.",
       },
+
+      /*
+       * DIE WÖRTER DES ABGLEICHS. Jede Liste hat genau die Schlüssel, die die
+       * Datenbank kennt (`0169`) — `view.test.ts` prüft beides.
+       */
+      states: { open: "Offen", closed: "Abgeschlossen", discarded: "Verworfen" },
+      categories: {
+        exact: "Stimmt überein",
+        deviating: "Mit Abweichung",
+        probable: "Wahrscheinlich",
+        ambiguous: "Mehrdeutig",
+        external_only: "Nur im Bericht",
+        ledger_only: "Nur in SkyIsles",
+        not_comparable: "Nicht vergleichbar",
+      },
+      categoryHints: {
+        exact: "Sicher zugeordnet, alle Angaben gleich.",
+        deviating: "Sicher zugeordnet, mindestens eine Angabe weicht ab.",
+        probable: "Zugeordnet, aber nur über ähnliche Angaben — bitte prüfen.",
+        ambiguous: "Mehrere Verkäufe kommen infrage; nichts wurde zugeordnet.",
+        external_only: "Diese Bestellung steht im Bericht, aber in SkyIsles fehlt ein passender Verkauf.",
+        ledger_only: "Dieser Verkauf liegt im Berichtszeitraum, steht aber nicht im Bericht.",
+        not_comparable: "Dieser Verkauf lässt sich mit diesen Berichten nicht vergleichen.",
+      },
+      certainties: {
+        deterministic: "Über die Bestellnummer",
+        unique: "Eindeutig",
+        probable: "Wahrscheinlich",
+        ambiguous: "Mehrdeutig",
+      },
+      notComparableReasons: {
+        test: "Testverkauf",
+        no_date: "Verkauf ohne Datum",
+        before_coverage: "Vor dem Berichtszeitraum",
+        after_coverage: "Nach dem Berichtszeitraum",
+        inside_gap: "In einer Lücke der Berichte",
+        no_coverage: "Die Berichte decken keinen Zeitraum ab",
+        edge_day: "Am Rand des Berichtszeitraums",
+      },
+      fields: {
+        sold_on: "Verkaufsdatum",
+        items_net: "Warenwert",
+        shipping: "Versand",
+        pieces: "Stückzahl",
+        figure: "Figur",
+        total: "Gesamtbetrag",
+        external_order_ref: "Bestellnummer",
+      },
+      findingKinds: { deviation: "Abweichung", addition: "Ergänzung" },
+      /* Mögliche Erklärungen, keine Tatsachen — deshalb „vielleicht"-Sätze. */
+      causes: {
+        matches_payment_date: "Das SkyIsles-Datum ist das Zahlungsdatum.",
+        matches_shipping_date: "Das SkyIsles-Datum ist das Versanddatum.",
+        ledger_discount_not_in_report: (amount: string) =>
+          `In SkyIsles ist ein Rabatt von ${amount} erfasst, der im Bericht nicht vorkommt.`,
+        report_total_zero_not_shipped: "Der Bericht zeigt 0 € und keinen Versand — möglicherweise storniert.",
+        report_total_zero_after_shipping: "Der Bericht zeigt 0 € nach dem Versand — möglicherweise voll erstattet.",
+        report_total_reduced: (amount: string) =>
+          `Der Bericht ist um ${amount} gemindert — möglicherweise eine Erstattung.`,
+        report_total_increased: (amount: string) => `Der Bericht liegt um ${amount} höher als Ware und Versand.`,
+        ledger_cancelled: "In SkyIsles ist der Verkauf storniert.",
+        ledger_refund_not_in_report: (amount: string) =>
+          `In SkyIsles ist eine Erstattung von ${amount} erfasst, die der Bericht nicht zeigt.`,
+        follows_from_other_fields: "Ergibt sich aus den Abweichungen bei Warenwert oder Versand.",
+      },
+      unknownCause: "Weiterer möglicher Grund",
+      decisions: {
+        take_external: "Bericht übernehmen",
+        keep_ledger: "SkyIsles behalten",
+        manual: "Manuell korrigieren",
+        defer: "Später entscheiden",
+      },
+      /* Die manuellen Aktionen, die die Datenbank je Feld annimmt (`0172`). */
+      manualActions: {
+        refund: "Erstattung erfassen",
+        cancel: "Verkauf stornieren",
+        none: "Keine Aktion",
+        clarify: "Manuell geklärt",
+      },
+      /* Hinweise des Lesers zu einer Berichtsdatei, vor dem Hochladen. */
+      reportIssues: {
+        ragged_row: "Eine Zeile hat nicht die erwartete Spaltenzahl.",
+        invalid_date: "Ein Datum ist nicht lesbar.",
+        invalid_money: "Ein Betrag ist nicht lesbar.",
+        invalid_quantity: "Eine Stückzahl ist nicht lesbar.",
+        foreign_currency: "Ein Betrag steht nicht in Euro.",
+        line_without_reference: "Eine Position hat keine Transaktionsnummer.",
+        summary_without_lines: "Eine Sammelzeile hat keine Positionen.",
+        several_summaries: "Eine Bestellung hat mehrere Sammelzeilen.",
+        several_lines_without_summary: "Mehrere Positionen stehen ohne Sammelzeile.",
+        items_value_mismatch: "Der angegebene Warenwert passt nicht zur Summe der Positionen.",
+        quantity_mismatch: "Die angegebene Stückzahl passt nicht zu den Positionen.",
+        record_number_differs: "Die Verkaufsprotokollnummer weicht innerhalb einer Bestellung ab.",
+      },
+      parseFailures: {
+        not_this_format: "Diese Datei ist kein bekannter Bestellbericht.",
+        no_header: "In dieser Datei fehlt die Kopfzeile des Berichts.",
+        missing_columns: "In dieser Datei fehlen benötigte Spalten.",
+      },
+      coverage: {
+        chainComplete: "Verkaufsprotokoll lückenlos",
+        chainGaps: "Das Verkaufsprotokoll hat Lücken — dort fehlen vermutlich Bestellungen.",
+        footerMismatch: "Die Zahl unter dem Bericht passt nicht zu den gelesenen Bestellungen.",
+        overlappingFiles: "Zwei Dateien überschneiden sich zeitlich; doppelte Bestellungen werden nur einmal gezählt.",
+        duplicateFile: "Diese Datei wurde bereits gewählt und zählt nur einmal.",
+        ordersWithoutRecordNo: "Einige Bestellungen haben keine Verkaufsprotokollnummer.",
+      },
+      /* Warum eine Entscheidung gerade nicht möglich ist (`view.ts`, `FindingLock`). */
+      locks: {
+        session_not_open: "Die Sitzung ist beendet.",
+        applied: "Bereits übernommen.",
+        stale: "Der Verkauf wurde seit der Analyse geändert.",
+      },
+      snapshotsPurged: "Die Positionslisten dieser Sitzung wurden gelöscht; Befunde und Entscheidungen bleiben erhalten.",
     },
     sales: {
       title: "Verkauf",
