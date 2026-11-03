@@ -17068,8 +17068,9 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ## ADR-0176 · Ein Konto, das im Verkaufsabgleich entschieden hat, bleibt löschbar
 
-**Status:** VORBEREITET · 2026-11-03, lokal, nicht committet. Migration `0175` ist **nirgends
-angewendet** — zuerst nur Staging, mit eigener Freigabe.
+**Status:** AUF STAGING ANGEWENDET · 2026-11-03 (`b052e2a`). Migration `0175` läuft auf Staging,
+belegt mit berechtigtem Postflight (`9998 = 0` und `9999 = 0`, `supabase/migrations/APPLIED.md`).
+**Production: nicht angewendet** — eigene, spätere Freigabe.
 **Betrifft:** ADR-0174 (Verkaufsabgleich, `0169`), ADR-0037 (`inventory_movements`), ADR-0039
 (`catalog_admin_changes`)
 
@@ -17125,8 +17126,10 @@ behoben (ADR-0037, ADR-0039); `0169` hat ihn wiederholt.
    `~/.skyisles/staging-operator.env`, nie ausgegeben), legt kein Konto an und löscht keines,
    entfernt den Service-Role-Schlüssel aus seiner Umgebung und liest nur über die Funktionen des
    Betriebs (`seller_sale`, `seller_sale_audit`, `seller_recon_*`). Jeder Datenbankaufruf wird
-   geprüft; ein abgebrochener Lauf verwirft seine unfertigen Sitzungen und nennt Lauf, Verkäufe
-   und Sitzungen. Was das Betriebskonto nicht sehen darf (Lager, Bewegungen, Legacy, jeder echte
+   geprüft. Ein abgebrochener Lauf **räumt nichts selbst auf** — keine Sitzung wird verworfen oder
+   geschlossen, kein Verkauf entfernt; jede unfertige Sitzung ist ein fehlgeschlagener Prüfpunkt,
+   und der Lauf nennt Lauf-ID (als Erstes), Verkäufe und Sitzungen. Was damit geschieht, entscheidet
+   der Betrieb. Was das Betriebskonto nicht sehen darf (Lager, Bewegungen, Legacy, jeder echte
    Verkauf, Erstattungen, Audit, Holds), misst `supabase/checks/verify_sales_reconciliation_state.sql`
    als `postgres` vorher und nachher — Zeilen 101–108 müssen gleich sein.
 

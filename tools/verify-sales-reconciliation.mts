@@ -40,9 +40,13 @@
  * must be identical. That comparison is part of the acceptance.
  *
  * AN ABORTED RUN. Every database call is checked; the first failure stops
- * the run. On the way out it discards the sessions it opened and could not
- * finish (a session with applications cannot be discarded and is reported),
- * and it names its run id, its sale ids and its session ids. A new run uses
+ * the run. It cleans NOTHING up on its own — no session is discarded or
+ * closed on the way out, no sale removed: what a run wrote is evidence, and
+ * what happens to it is the operator's decision. Instead every session it
+ * left unfinished is a FAILED check, and it names its run id, its sale ids
+ * and its session ids. The run id is printed first, so even a run that dies
+ * without reaching its last line can be traced through the notes of its
+ * sales; the state file (rows 201, 203, 206) shows leftovers. A new run uses
  * a new run id, new order numbers and a new file fingerprint, and compares
  * only its own sales — leftovers of an earlier run cannot enter it.
  *
@@ -390,21 +394,18 @@ async function main(): Promise<void> {
   } catch (error) {
     check("the run completed", false, (error as Error).message);
   } finally {
-    heading("Aufräumen und Nachweis");
+    heading("Nachweis");
     /*
-     * A session this run opened and did not finish is discarded — it would
-     * otherwise stay open forever. One that already has applications cannot
-     * be discarded (evidence, ADR-0174) and is named instead. Every result
-     * is CHECKED; nothing is awaited and dropped.
+     * NOTHING IS CLEANED UP AUTOMATICALLY. A session this run opened and did
+     * not finish stays as it is and fails the run — with what the operator
+     * can do about it. Discarding or closing is a decision, not a reflex of
+     * an error path.
      */
     for (const [id, state] of sessions) {
       if (state === "done") continue;
-      if (state === "applied") {
-        check(`session ${id} has applications and stays open — close it in /business`, false);
-        continue;
-      }
-      const r = await op.rpc("seller_recon_discard", { p_id: id });
-      check(`unfinished session ${id} is discarded`, !r.error, r.error?.message ?? "");
+      check(`session ${id} was left unfinished`, false, state === "applied"
+        ? "hat Anwendungen — nur noch schließbar (/business/orderbuch/abgleich)"
+        : "offen, ohne Anwendung — verwerfen oder schließen ist Entscheidung des Betriebs");
     }
     const out = await op.auth.signOut();
     check("signed out", !out.error, out.error?.message ?? "");

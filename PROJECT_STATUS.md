@@ -111,16 +111,33 @@ Rümpfe und Abdrücke unverändert.
 
 **Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0176`).
 
-**Kontolöschung (`0175`, ADR-0176) — lokal vorbereitet, nirgends angewendet.** Ein Konto, das im
+**Kontolöschung (`0175`, ADR-0176) — auf Staging angewendet am 2026-11-03, Production nicht.** Ein Konto, das im
 Abgleich entschieden oder angewendet hatte, war nicht löschbar (`on delete set null` gegen den
 Nur-Erweitern-Trigger aus `0169`). `0175` lässt genau das Leeren des Kontoverweises durch die
 Löschung zu. Der Verifier meldet einen Aufräumfehler jetzt als fehlgeschlagenen Lauf. Dieselbe
-Bauart steht noch bei `purchase_receipts`, `purchase_receipt_downloads` und `order_messages`
-(eigener Auftrag).
+Bauart steht noch an drei Stellen — siehe den Sicherheitsauftrag unten.
 
-**Nächster Schritt:** `0175` auf Staging (eigene Freigabe), danach der synthetische Funktionstest
+**Sicherheitsauftrag Kontolöschung (offen, eigene Freigabe nötig).** Drei bestätigte Fälle, in
+denen ein Konto nicht löschbar ist, weil ein Kontoverweis `on delete set null` trägt und der
+Trigger der Tabelle **jedes** UPDATE verweigert (auf Staging aus dem Katalog gelesen, Production
+nicht gemessen):
+
+| Spalte | Trigger | betroffene Konten |
+|---|---|---|
+| `purchase_receipts.issued_by` | `purchase_receipt_is_immutable` | Betriebskonten |
+| `purchase_receipt_downloads.delivered_by` | `purchase_receipt_is_immutable` | Betriebskonten |
+| `order_messages.author_user_id` | `order_messages_protect` | **auch Käuferkonten** |
+
+Vorschlag: dieselbe enge Ausnahme wie `0175` (nur der Verweis wird leer, nur aus der
+Fremdschlüsselaktion, nur wenn das Konto nicht mehr existiert), über eine gemeinsame
+Hilfsfunktion; dazu eine lesende Katalogprüfung, die jede solche Kombination findet. Bei
+`order_messages` bleibt der Text als Geschäftskorrespondenz, ohne Kontobezug; seine Löschung nach
+Ablauf der Aufbewahrungsfrist ist eine eigene, rechtliche Frage. **Keine Migration ohne
+separate Freigabe.**
+
+**Nächster Schritt:** der synthetische Funktionstest auf Staging
 (`npm run verify:sales-reconciliation:staging`, Trockenlauf bestanden; `-- --apply` mit eigener
-Freigabe). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+Freigabe, als vorhandenes Betriebskonto, Zustandsdatei vorher und nachher als `postgres`). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 
@@ -4722,8 +4739,10 @@ konstant.
 > andere bleibt verweigert — `DELETE` ohne Ausnahme, jedes gewöhnliche `UPDATE`, und auch eines,
 > das die Anonymisierung mit einer Änderung zusammen schmuggeln will. `order_lines` und
 > `order_addresses` behalten `deny_write()`: beide tragen keine Kontoreferenz und können deshalb
-> keine Löschung blockieren. Damit ist `order_events` die dritte und letzte Tabelle, die diese
-> Ausnahme braucht.
+> keine Löschung blockieren. Damit ist `order_events` die dritte Tabelle, die diese
+> Ausnahme braucht. **Überholt am 2026-11-03:** nicht die letzte — `0169` wiederholte den Fehler
+> (behoben in `0175`, ADR-0176), und drei weitere Fälle sind offen: siehe „Sicherheitsauftrag
+> Kontolöschung“ beim Verkaufsabgleich.
 >
 > Das gestrandete Konto ist entfernt: kein `@staging.invalid`-Konto mehr vorhanden. Sein
 > `order_shipped`-Ereignis auf `SI-2026-001042` steht unverändert in der Historie, jetzt mit

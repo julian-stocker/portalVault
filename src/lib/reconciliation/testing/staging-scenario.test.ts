@@ -108,10 +108,14 @@ describe("the tool's rules, read as source", () => {
     expect(state.toLowerCase()).not.toMatch(/\b(insert|update|delete from|create|drop|alter|grant|truncate)\b/);
   });
 
-  it("discards what it left unfinished, and reports what it cannot discard", () => {
+  it("cleans nothing up on its own: an unfinished session fails the run and is named", () => {
     const cleanup = main.slice(main.indexOf("} finally {"));
-    expect(cleanup).toMatch(/seller_recon_discard[\s\S]*check\(`unfinished session/);
-    expect(cleanup).toContain('state === "applied"');
-    expect(cleanup.indexOf("Aufräumen")).toBeLessThan(cleanup.indexOf("finish()") === -1 ? Infinity : cleanup.indexOf("finish()"));
+    for (const call of ["seller_recon_discard", "seller_recon_close", "seller_delete_sale", ".rpc("]) {
+      expect(cleanup, call).not.toContain(call);
+    }
+    expect(cleanup).toMatch(/check\(`session \$\{id\} was left unfinished`, false/);
+    expect(cleanup).toContain("Lauf ${RUN}");
+    // The run id comes first, before anything is written.
+    expect(main.indexOf("Lauf ${RUN}")).toBeLessThan(main.indexOf("seller_create_sale_with_details"));
   });
 });

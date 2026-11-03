@@ -292,8 +292,10 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        am selben Tag als neununddreissigste, `0168` am 2026-11-02 als
        vierzigste (berechtigter Postflight 9998 = 0, 9999 = 0). `0169`–`0174`
        am 2026-11-03 in einem gemeinsamen Lauf als einundvierzigste bis
-       sechsundvierzigste (ADR-0174, berechtigter Postflight 9998 = 0, 9999 = 0). */
-    expect(zeilen.length).toBe(46);
+       sechsundvierzigste (ADR-0174, berechtigter Postflight 9998 = 0, 9999 = 0),
+       `0175` am selben Tag als siebenundvierzigste (ADR-0176, ebenso). */
+    expect(zeilen.length).toBe(47);
+    expect(zeilen.map((z) => z.datei)).toContain("0175_sales_recon_account_deletion.sql");
     for (const datei of ["0169_sales_reconciliation_schema.sql",
                          "0170_external_sale_cancel.sql",
                          "0171_external_order_ref_per_channel.sql",
@@ -396,7 +398,8 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        fünfunddreißig seit `0164` am 2026-10-29, sechsunddreißig seit `0165`
        am 2026-10-30 und siebenunddreißig seit `0166` und achtunddreißig seit `0167` am
        2026-10-31, neununddreißig seit `0168` am 2026-11-02, fünfundvierzig
-       seit `0169`–`0174` am 2026-11-03 (ein gemeinsamer Lauf). Nur
+       seit `0169`–`0174` am 2026-11-03 (ein gemeinsamer Lauf), sechsundvierzig seit `0175`
+       am selben Tag. Nur
        `0130` weicht ab und
        zeigt auf ihren Nachtrag.
 
@@ -411,7 +414,7 @@ describe("APPLIED.md beschreibt die ausgeführten Fassungen", () => {
        geändert (Regel 1), und `gleich` ist die Behauptung, dass sie es nicht
        wurde. Bei `0147` hat das Gewicht: die Fassung, die lief, ist die mit
        der benannten Triggererwartung — nicht die, die abgebrochen ist. */
-    expect(gleiche.length).toBe(45);
+    expect(gleiche.length).toBe(46);
     for (const z of gleiche) {
       expect(digestOf(`supabase/migrations/${z.datei}`), z.datei).toBe(z.digest);
     }

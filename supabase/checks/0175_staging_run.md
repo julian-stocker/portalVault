@@ -1,7 +1,7 @@
 # Laufzettel — 0175 (Kontolöschung im Verkaufsabgleich) auf Staging
 
-**Stand:** lokal vorbereitet, **nirgends angewendet**. Ausführen erst nach ausdrücklicher Freigabe
-des Betreibers. **Nur Staging** (`qqxcpesbwfxzgytkdsac`). Production ist eine eigene, spätere
+**Stand:** **auf Staging angewendet am 2026-11-03**, berechtigter Postflight `9998 = 0` und
+`9999 = 0` — Nachweis in `supabase/migrations/APPLIED.md`. **Nur Staging** (`qqxcpesbwfxzgytkdsac`). Production ist eine eigene, spätere
 Entscheidung (ADR-0176).
 
 ## Was 0175 tut
