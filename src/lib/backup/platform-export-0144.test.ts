@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import { PLATFORM_FORMAT_VERSION, PLATFORM_SECTIONS, SECTIONS_BY_FORMAT_VERSION }
   from "./platform-manifest";
+import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
 import { columnsOf } from "@/test-support/migrations";
 
 /**
@@ -148,13 +149,22 @@ describe("der neue Rumpf ist der alte plus EIN Bereich", () => {
 });
 
 describe("die Formatversion und die alten Archive", () => {
-  it("das Manifest sagt 2, und die Zuordnung kennt beide Versionen", () => {
-    expect(PLATFORM_FORMAT_VERSION).toBe(2);
-    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54 });
+  /*
+   * SEIT `0174` IST DAS MANIFEST BEI VERSION 3 (61 Bereiche). Diese Datei
+   * prüft `0144`; was sie über Version 2 sagt, gilt weiter — nur ist Version
+   * 2 nicht mehr die neueste. Die Zahl zu Version 2 ist deshalb das Manifest
+   * ohne die sieben Bereiche, die `0174` hinzugefügt hat.
+   */
+  const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
+  const V2 = PLATFORM_SECTIONS.filter((s) => !NEU_0174.has(s.key));
+
+  it("die Zuordnung kennt Version 1 und 2 unverändert — und seit 0174 auch 3", () => {
+    expect(PLATFORM_FORMAT_VERSION).toBe(3);
+    expect(SECTIONS_BY_FORMAT_VERSION).toEqual({ 1: 53, 2: 54, 3: 61 });
   });
 
-  it("die Zahl zu Version 2 ist die Zahl der Bereiche im Manifest", () => {
-    expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(PLATFORM_SECTIONS.length);
+  it("die Zahl zu Version 2 ist die Zahl der Bereiche im Manifest vor 0174", () => {
+    expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(V2.length);
   });
 
   it("und die zu Version 1 ist das Manifest ohne den neuen Bereich", () => {
@@ -163,7 +173,7 @@ describe("die Formatversion und die alten Archive", () => {
      * Zahl, die jemand getippt hat, sondern die heutige minus dem einen
      * Bereich, den `0144` hinzugefügt hat.
      */
-    const ohneNeu = PLATFORM_SECTIONS.filter((s) => s.source !== "purchase_calculations");
+    const ohneNeu = V2.filter((s) => s.source !== "purchase_calculations");
     expect(SECTIONS_BY_FORMAT_VERSION[1]).toBe(ohneNeu.length);
   });
 });

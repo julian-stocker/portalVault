@@ -2438,7 +2438,7 @@ setzt sie auf 0. Decke bei 2000 SKY-IDs je Aufruf.
 (hängt an `user_id`, und fremde Wunschlisten in einem Händlerexport wären ein
 Leck). In der Plattformsicherung heute ebenfalls ausgeschlossen — **aber
 vorübergehend und mit Bedingung**: die Folgemigration nach
-`0144`-auf-Production nimmt sie als Bereich auf (Formatversion 3). Siehe
+`0144`-auf-Production nimmt sie als Bereich auf (Formatversion 4 — die 3 ist seit `0174` durch den Verkaufsabgleich belegt, ADR-0174). Siehe
 ADR-0136 und `supabase/checks/platform_export_gap.md`.
 
 ### 3.5b `offer_state` — der Angebotsspiegel (Migrationen `0146`, `0147`)
@@ -5442,3 +5442,40 @@ Wiederherstellung gibt es nicht und `0144` baut keine.
 
 **Rücknahme:** `supabase/rollback/R0142_drop_purchase_calculations.sql` — sie bricht ab,
 solange Zeilen in der Tabelle stehen, und verlangt einen Schalter in der Datei.
+
+## Verkaufsabgleich — Sitzungen, Befunde, Entscheidungen (Migrationen 0169–0174, ADR-0174)
+
+**Stand: lokal vorbereitet, nirgends angewendet.** Zuerst nur Staging, mit eigener Freigabe.
+
+| Tabelle | Inhalt | Schutz |
+|---|---|---|
+| `sales_recon_sessions` | ein Abgleich: Kanal, Parser, Abdeckung, Zählwerte, Status `open` → `closed` / `discarded` | eine offene Sitzung je Dateisatz (`files_key`, Teilindex) |
+| `sales_recon_files` | Dateiname (nie ein Pfad), SHA-256, Fußzahl, Zeitraum | `unique (session_id, fingerprint)` |
+| `sales_recon_orders` | die normalisierte Bestellung: Referenz, Protokollnummer, Verkaufs-, **Zahlungs-** und Versanddatum, Beträge, Positionen (`lines`, jsonb) | **keine Spalte für Käuferdaten**; `lines` wird bei beendeten Sitzungen löschbar |
+| `sales_recon_matches` | Bestellung ↔ Verkauf, Kategorie, Sicherheit, Konkurrenten, `sale_updated_at` beim Analysieren | je Sitzung jede Bestellung und jeder Verkauf höchstens einmal (Teilindizes) |
+| `sales_recon_findings` | ein Befund eines Feldes: Schlüssel, SkyIsles- und Berichtswert (je ein Skalar), Differenz, Ursachen, erlaubte Entscheidungen | `unique (match_id, finding_key)`; die Entscheidungen setzt die Datenbank |
+| `sales_recon_decisions` | jede Entscheidung, mit den angezeigten Werten | **nur erweiterbar** (Trigger) |
+| `sales_recon_applications` | jede Übernahme: Feld, vorher, nachher, `applied` oder `documented` | **nur erweiterbar**; `unique (decision_id)` |
+
+Alle sieben: RLS an, keine Policy, kein Clientrecht. Fremdschlüssel auf `sales` sind
+`on delete restrict` — ein Verkauf aus einer Sitzung bleibt als Nachweis stehen.
+
+**Funktionen.** Lesen und Protokollieren in `0172` (`seller_recon_candidates`, `_aliases`,
+`_create`, `_sessions`, `_session`, `_decide`, `_close`, `_discard`, `_thin_snapshots`),
+Anwenden in `0173` (`seller_recon_apply`), Storno und Rücknahme in `0170`
+(`seller_cancel_external_sale`, `seller_uncancel_external_sale`). Alle `security definer`, leerer
+`search_path`, Prüfung `can_operate_active_seller()`, EXECUTE nur für `authenticated`. Die
+Hilfsfunktionen (`sales_recon_*`) haben kein Clientrecht.
+
+**Was der Abgleich schreibt.** Nur über `seller_update_sale` (Datum, `items_subtotal` = Ziel +
+vorhandener Rabatt, Versand, Bestellreferenz), `seller_add_sale_refund` und
+`seller_cancel_external_sale` — damit steht jede Änderung in `orderbook_audit`. Nie `sale_items`,
+nie `legacy_stock_events`, nie `inventory_movements`. Ein Storno gibt Reservierungen in
+`order_reservations` frei; der Grund steht im Audit (`field = 'cancel_reason'`), `sales` bekommt
+dafür keine Spalte.
+
+**`0171`:** `sales_external_order_ref_per_channel`, eindeutig `(channel, external_order_ref)` für
+Nicht-Testverkäufe mit gesetzter Referenz.
+
+**Rücknahme:** zuerst `R0174_backups_without_sales_reconciliation.sql`, dann
+`R0169_0173_drop_sales_reconciliation.sql`. Der zweite bricht ab, sobald eine Sitzung existiert.

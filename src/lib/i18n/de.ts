@@ -2311,6 +2311,29 @@ export const de = {
      * „Refund" ist Geld, „Retoure" ist Ware. Der Workbook-Befund: 41 erstattete
      * Bestellungen, 6 mit zurückgekommener Ware.
      */
+    /*
+     * DER VERKAUFSABGLEICH (ADR-0174). Plattformberichte gegen das
+     * Verkaufsbuch; nur auf Staging, bis eine eigene Freigabe vorliegt.
+     */
+    reconciliation: {
+      title: "Verkaufsabgleich",
+      errors: {
+        notAvailable: "Der Verkaufsabgleich ist in dieser Umgebung noch nicht freigegeben.",
+        invalidUpload:
+          "Die Berichtsdaten haben nicht die erwartete Form. Lies die Dateien bitte neu ein.",
+        mixedFormats: "Alle Dateien eines Abgleichs müssen dasselbe Berichtsformat haben.",
+        conflictingOrders:
+          "Dieselbe Bestellung steht in zwei Dateien mit unterschiedlichen Angaben. Prüfe die Exporte.",
+        noOrders: "Die Dateien enthalten keine Bestellung.",
+        stale:
+          "Ein betroffener Verkauf wurde seit der Analyse geändert. Es wurde nichts übernommen — bitte neu analysieren.",
+        countChanged:
+          "Die Zahl der offenen Entscheidungen hat sich geändert. Lade die Seite neu und bestätige erneut.",
+        rejected: "Diese Angabe ist hier nicht zulässig.",
+        duplicateReference: "Diese Bestellnummer ist bereits einem anderen Verkauf zugeordnet.",
+        notPossible: "Das ist in diesem Zustand nicht möglich.",
+      },
+    },
     sales: {
       title: "Verkauf",
       hint: "Verkäufe über SkyIsles und über externe Kanäle.",
@@ -2840,6 +2863,9 @@ export const de = {
         openHint: "Bezahlt und ausgebucht — das Paket ist noch nicht raus.",
       },
       errors: {
+        /* PT409 (0062): der Verkauf wurde inzwischen anderswo geändert. */
+        staleSale:
+          "Dieser Verkauf wurde inzwischen geändert. Lade die Seite neu und prüfe die Werte noch einmal.",
         /* 0065: eine Werkbuch-Position wird weder gelöscht noch umgehängt. */
         historicalItem:
           "Diese Position stammt aus der Excel-Historie und wird nicht verändert.",

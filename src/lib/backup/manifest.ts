@@ -39,6 +39,14 @@ export const BACKUP_FORMAT = "skyisles-business-backup";
  * Erhöht wird sie, sobald sich die BEDEUTUNG eines Feldes ändert oder ein
  * Bereich verschwindet — nicht, wenn ein Feld hinzukommt. Ein späterer
  * Restore liest sie als Erstes und verweigert, was er nicht kennt.
+ *
+ * `0174` FÜGT SIEBEN BEREICHE HINZU (der Verkaufsabgleich, 28 → 35) und lässt
+ * sie trotzdem bei 1 — anders als die Plattformsicherung, die dafür auf 3
+ * steigt. Der Unterschied ist kein Widerspruch: das Plattformarchiv
+ * BESCHEINIGT Vollständigkeit über die Bereichszahl je Version
+ * (`SECTIONS_BY_FORMAT_VERSION`), diese Datei nicht. Hier gilt ADR-0114
+ * unverändert: ein zusätzlicher Bereich ist additiv, und eine Datei von vor
+ * `0174` ist eine vollständige Datei ohne Abgleich.
  */
 export const BACKUP_FORMAT_VERSION = 1;
 
@@ -88,6 +96,10 @@ export const FORBIDDEN_FIELDS: Readonly<Record<string, string>> = {
   issued_by: "Kontoidentität — wer den Eigenbeleg ausgestellt hat",
   delivered_by: "Kontoidentität — wer den Beleg abgerufen hat",
   sandbox_archived_by: "Kontoidentität",
+  closed_by: "Kontoidentität — wer eine Abgleichssitzung abgeschlossen hat (0169)",
+  discarded_by: "Kontoidentität — wer eine Abgleichssitzung verworfen hat (0169)",
+  decided_by: "Kontoidentität — wer eine Abgleichsentscheidung getroffen hat (0169)",
+  applied_by: "Kontoidentität — wer eine Abgleichsentscheidung angewendet hat (0169)",
   avatar_url: "Profildatum der Plattform",
 
   /* Altlast-Provenienz: die Spuren des Excel-Imports */
@@ -361,6 +373,128 @@ export type BackupSection = {
   restoreRelevant: boolean;
 };
 
+/* -------------------------------------------------------------------------
+ * Der Verkaufsabgleich (0169) — in BEIDEN Sicherungen, seit 0174
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Die sieben Tabellen des Verkaufsabgleichs, als Bereiche.
+ *
+ * WARUM ALLE SIEBEN, UND IN BEIDEN SICHERUNGEN. Der Betreiber hat entschieden
+ * (verbindlich): Sitzungen, Entscheidungen und Anwendungen gehören in die
+ * Betriebs- UND in die Plattformsicherung, und nach einer Wiederherstellung
+ * muss der Nachweis vollständig lesbar bleiben. Eine Entscheidung zeigt auf
+ * einen Befund, der Befund auf eine Zuordnung, die Zuordnung auf eine externe
+ * Bestellung und einen Verkauf — ohne die Kette ist eine Entscheidung eine
+ * Zeile ohne Bedeutung. Also alle sieben oder keine.
+ *
+ * GENAU EIN FACHLICHES FELD BLEIBT DRAUSSEN: `sales_recon_orders.lines`, die
+ * Positionsliste (Titel, Varianten). `0169` erlaubt, sie bei abgeschlossenen
+ * Sitzungen zu löschen; was eine Prüfung braucht — beide Werte jeder
+ * Abweichung —, steht in `sales_recon_findings`, und der Kopf der Bestellung
+ * bleibt. Dazu die fünf Kontoidentitäten (`created_by`, `closed_by`,
+ * `discarded_by`, `decided_by`, `applied_by`), wie in jedem Bereich beider
+ * Manifeste. Käuferdaten gibt es in diesen Tabellen nicht (`0169`).
+ *
+ * EINE LISTE, ZWEI MANIFESTE. Beide Sicherungen führen dieselben Felder in
+ * derselben Folge; `platform-manifest.ts` übernimmt diese Konstante, damit
+ * sie nicht auseinanderlaufen können. Die SQL beider Funktionen (`0174`)
+ * hält `backup-sales-reconciliation.test.ts` Feld für Feld dagegen.
+ *
+ * Geld und andere `numeric` gehen als Text hinaus (`items_value`,
+ * `shipping`, `total`, `score`, `delta`), `jsonb` und `text[]` als JSON.
+ */
+export const SALES_RECONCILIATION_SECTIONS: readonly BackupSection[] = [
+  {
+    key: "sales_recon_sessions",
+    source: "sales_recon_sessions",
+    purpose:
+      "Ein Abgleich von Plattformberichten gegen das Orderbuch: Kanal, Parser, " +
+      "abgedeckter Zeitraum, Zustand und die Zählwerte. Wird nie gelöscht — er ist " +
+      "der Nachweis dessen, was entschieden und angewendet wurde.",
+    fields: ["id", "channel", "parser", "parser_version", "state", "files_key",
+             "covered_from", "covered_to", "record_first", "record_last",
+             "chain_complete", "summary", "created_at", "closed_at", "discarded_at",
+             "snapshots_purged_at"],
+    excluded: {
+      created_by: "Kontoidentität",
+      closed_by: "Kontoidentität",
+      discarded_by: "Kontoidentität",
+    },
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_files",
+    source: "sales_recon_files",
+    purpose:
+      "Die hochgeladenen Berichtsdateien einer Sitzung — Dateiname, SHA-256 und " +
+      "Zählwerte. Belegt, welcher Bericht einer Entscheidung zugrunde lag.",
+    fields: ["id", "session_id", "file_name", "fingerprint", "footer_count", "orders",
+             "first_sold_on", "last_sold_on", "record_first", "record_last"],
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_orders",
+    source: "sales_recon_orders",
+    purpose:
+      "Die normalisierten externen Bestellungen, ohne Käuferdaten. Ihr Kopf ist " +
+      "die rechte Seite jedes Befunds; paid_on steht nur hier.",
+    fields: ["id", "session_id", "channel", "order_ref", "record_no", "sold_on",
+             "paid_on", "shipped_on", "items_value", "shipping", "total", "pieces",
+             "combined", "destination_country", "shipping_service", "source_file"],
+    excluded: {
+      lines:
+        "Positionsschnappschuss (Titel, Varianten) — löschbar, sobald eine Sitzung " +
+        "abgeschlossen ist (0169). Jeder Wert, den eine Prüfung braucht, steht in " +
+        "sales_recon_findings; der Kopf der Bestellung bleibt im Archiv.",
+    },
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_matches",
+    source: "sales_recon_matches",
+    purpose:
+      "Welche externe Bestellung zu welchem Verkauf gehört, mit Sicherheit, " +
+      "Konkurrenten und dem Stand des Verkaufs zum Zeitpunkt des Abgleichs.",
+    fields: ["id", "session_id", "order_id", "sale_id", "category", "certainty",
+             "score", "date_delta", "competitors", "reason", "sale_updated_at"],
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_findings",
+    source: "sales_recon_findings",
+    purpose:
+      "Eine Abweichung eines Feldes: beide Werte, die Differenz, die möglichen " +
+      "Ursachen und die zulässigen Entscheidungen. Trägt alles, was eine Prüfung " +
+      "braucht.",
+    fields: ["id", "match_id", "finding_key", "field", "kind", "ledger_value",
+             "external_value", "delta", "causes", "allowed_decisions"],
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_decisions",
+    source: "sales_recon_decisions",
+    purpose:
+      "Jede je getroffene Entscheidung, append-only, samt der Werte, die beim " +
+      "Entscheiden angezeigt wurden.",
+    fields: ["id", "finding_id", "decision", "manual_value", "reason", "shown_ledger",
+             "shown_external", "decided_at"],
+    excluded: { decided_by: "Kontoidentität" },
+    restoreRelevant: true,
+  },
+  {
+    key: "sales_recon_applications",
+    source: "sales_recon_applications",
+    purpose:
+      "Jede je angewendete Änderung aus einer Entscheidung, append-only: Feld, " +
+      "alter und neuer Wert, oder „nur dokumentiert“.",
+    fields: ["id", "decision_id", "session_id", "sale_id", "field", "outcome",
+             "old_value", "new_value", "applied_at"],
+    excluded: { applied_by: "Kontoidentität" },
+    restoreRelevant: true,
+  },
+];
+
 export const BACKUP_SECTIONS: readonly BackupSection[] = [
   /* ---------------------------------------------------------- Lager */
   {
@@ -609,6 +743,11 @@ export const BACKUP_SECTIONS: readonly BackupSection[] = [
     excluded: { created_by: "Kontoidentität" },
     restoreRelevant: true,
   },
+
+  /* -------------------------------------------- Verkaufsabgleich (0174) */
+  /* Zwischen Orderbuch und Bestellungen, genau dort, wo `0174` den Block in
+     den Rumpf aus `0140` einfügt. Begründung an der Konstante. */
+  ...SALES_RECONCILIATION_SECTIONS,
 
   /* ------------------------------------------- SkyIsles-Bestellungen */
   {

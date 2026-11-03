@@ -271,7 +271,11 @@ describe("Geld verliert nichts", () => {
     "items_subtotal", "shipping_charged", "reported_payout_amount",
     "buy_in_factor_snapshot", "amount", "shipping_amount", "total_amount", "unit_price",
     "line_total", "order_value", "merchandise_amount", "market_price", "price_percentage",
-    "base_price", "discount_amount", "free_shipping_threshold"];
+    "base_price", "discount_amount", "free_shipping_threshold",
+    /* Verkaufsabgleich (0174). `delta` fehlt mit Absicht: derselbe Name ist
+       in inventory_movements eine ganze Zahl — bereichsgenau geprüft in
+       backup-sales-reconciliation.test.ts. */
+    "items_value", "shipping", "total", "score"];
 
   it("jeder Betrag wird als Text ausgegeben, nie als JSON-Zahl", () => {
     /*

@@ -110,6 +110,12 @@ export const STAGING_BASELINE: ExportBaseline = {
     "order_legal_snapshots", "invoices", "monthly_reports", "figures",
     "series", "categories", "seller", "shop_settings", "shipping_methods",
   ],
+  /*
+   * 28, gemessen VOR `0174`. Seit `0174` führt die Funktion 35 Bereiche (der
+   * Verkaufsabgleich, sieben Tabellen) — eine Datei danach weicht von dieser
+   * Baseline zwangsläufig ab, und das ist richtig so: nach dem Anwenden von
+   * `0174` wird eine neue Baseline GEMESSEN, nicht diese hochgezählt.
+   */
   areas: 28,
   totalRecords: 5508,
   counts: {

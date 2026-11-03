@@ -138,10 +138,11 @@ describe("der neue Rumpf ist der alte plus EINE Zeile", () => {
   it("die Formatversion bleibt 2, weil kein Bereich dazukommt", () => {
     expect(NEUER_RUMPF).toContain("'format_version', 2,");
     expect(bereiche(NEUER_RUMPF)).toBe(bereiche(ALTER_RUMPF));
-    expect(PLATFORM_FORMAT_VERSION).toBe(2);
     expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(54);
-    /* Und keine dritte Version ist dazugekommen. */
-    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2"]);
+    /* Und keine dritte Version ist mit DIESER Migration dazugekommen — die
+       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs). */
+    expect(PLATFORM_FORMAT_VERSION).toBe(3);
+    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3"]);
   });
 });
 

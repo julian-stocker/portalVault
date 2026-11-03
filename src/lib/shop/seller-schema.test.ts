@@ -161,7 +161,10 @@ describe("this is an identity, not a marketplace", () => {
           !f.startsWith("0144_") &&
           !f.startsWith("0153_") &&
           !f.startsWith("0160_") &&
-          !f.startsWith("0164_"),
+          !f.startsWith("0164_") &&
+          /* `0174`: derselbe Exportrumpf plus sieben Bereiche des
+             Verkaufsabgleichs — dieselbe Kopie, verglichen im Boden unten. */
+          !f.startsWith("0174_"),
       )
       .map((f) => readFileSync(`${MIGRATIONS}/${f}`, "utf8"))
       .join("\n")
@@ -247,7 +250,8 @@ describe("this is an identity, not a marketplace", () => {
     for (const datei of ["0144_platform_export_calculations.sql",
                          "0153_platform_export_catalog_status.sql",
                          "0160_platform_export_base_sky_id.sql",
-                         "0164_platform_export_types.sql"]) {
+                         "0164_platform_export_types.sql",
+                         "0174_backup_sales_reconciliation.sql"]) {
       const sql = roh(datei);
 
       /* Genau eine Nennung, und derselbe Alias wie in 0105. */

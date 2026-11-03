@@ -166,10 +166,11 @@ describe("der neue Rumpf ist der alte plus EINE Zeile", () => {
   it("die Formatversion bleibt 2, weil kein Bereich dazukommt", () => {
     expect(NEUER_RUMPF).toContain("'format_version', 2,");
     expect(bereiche(NEUER_RUMPF)).toBe(bereiche(ALTER_RUMPF));
-    expect(PLATFORM_FORMAT_VERSION).toBe(2);
     expect(SECTIONS_BY_FORMAT_VERSION[2]).toBe(54);
-    /* Und keine dritte Version ist dazugekommen. */
-    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2"]);
+    /* Und keine dritte Version ist mit DIESER Migration dazugekommen — die
+       dritte brachte erst `0174` (sieben Bereiche des Verkaufsabgleichs). */
+    expect(PLATFORM_FORMAT_VERSION).toBe(3);
+    expect(Object.keys(SECTIONS_BY_FORMAT_VERSION)).toEqual(["1", "2", "3"]);
   });
 });
 
@@ -249,7 +250,10 @@ describe("alte Archive bleiben lesbar", () => {
     format_version: 2,
     created_at: "2026-10-26T00:00:00.000Z",
     commerce_mode: "live",
-    data: Object.fromEntries(PLATFORM_SECTIONS.map((s) => [s.source, []])),
+    /* Ein Archiv der Version 2: das Manifest ohne die sieben aus `0174`. */
+    data: Object.fromEntries(PLATFORM_SECTIONS
+      .filter((s) => !s.key.startsWith("sales_recon_"))
+      .map((s) => [s.source, []])),
   };
 
   it("ein Archiv der Version 2 ohne base_sky_id führt trotzdem 54 Bereiche", () => {

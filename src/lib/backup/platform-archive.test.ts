@@ -31,7 +31,11 @@ import {
   SECTIONS_BY_FORMAT_VERSION,
   STORAGE_BUCKETS_INCLUDED,
 } from "./platform-manifest";
+import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
 import { isSafeZipPath } from "../zip/zip-path";
+
+/** Die sieben Bereiche, die `0174` hinzufügt (Formatversion 3). */
+const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
 import { zipBytes, type ZipEntry } from "../zip/zip-writer";
 
 /**
@@ -355,8 +359,9 @@ describe("manifest.json trägt genau die Felder des Vertrags", () => {
 
   it("zählt die Bereiche aus dem fertigen Dokument", () => {
     expect(Object.keys(manifest.counts)).toHaveLength(EXPECTED_SECTION_COUNT);
-    /* 54 seit `0144`: `purchase_calculations` ist dazugekommen. */
-    expect(EXPECTED_SECTION_COUNT).toBe(54);
+    /* 54 seit `0144`: `purchase_calculations` ist dazugekommen. 61 seit
+       `0174`: die sieben Tabellen des Verkaufsabgleichs. */
+    expect(EXPECTED_SECTION_COUNT).toBe(61);
     expect(manifest.counts.skylanders).toBe(4);
     expect(manifest.counts.orders).toBe(1);
   });
@@ -612,7 +617,8 @@ describe("die Messwerte für admin_record_platform_export()", () => {
      * der Konstante, und zugleich, dass ein altes Archiv weiter entsteht.
      */
     const alteBereiche = PLATFORM_SECTIONS
-      .map((x) => x.key).filter((k) => k !== "purchase_calculations");
+      .map((x) => x.key)
+      .filter((k) => k !== "purchase_calculations" && !NEU_0174.has(k));
     expect(alteBereiche).toHaveLength(53);
     const document: PlatformExportDocument = {
       format_version: 1,
@@ -720,7 +726,10 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
   });
 
   const ALLE = PLATFORM_SECTIONS.map((x) => x.key);
-  const OHNE_NEU = ALLE.filter((k) => k !== "purchase_calculations");
+  /* Version 2: das Manifest ohne die sieben aus `0174`. */
+  const V2 = ALLE.filter((k) => !NEU_0174.has(k));
+  /* Version 1: zusätzlich ohne `purchase_calculations` aus `0144`. */
+  const OHNE_NEU = V2.filter((k) => k !== "purchase_calculations");
 
   const lauf = async (document: PlatformExportDocument) => {
     const archive = platformArchive({
@@ -749,18 +758,33 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
     expect(outcome.sectionCount).toBe(53);
     expect(messwerte.format_version).toBe(1);
     expect(messwerte.section_count).toBe(53);
-    /* Und zwar auch, wenn diese Codebasis längst 2 führt. */
-    expect(PLATFORM_FORMAT_VERSION).toBe(2);
+    /* Und zwar auch, wenn diese Codebasis längst 3 führt. */
+    expect(PLATFORM_FORMAT_VERSION).toBe(3);
     expect(messwerte.format_version).not.toBe(PLATFORM_FORMAT_VERSION);
   });
 
   it("Datenbank auf 0144: Version 2, 54 Bereiche — und die Historie sagt 2", async () => {
-    expect(ALLE).toHaveLength(54);
-    const { outcome, messwerte } = await lauf(dokument(2, ALLE));
+    expect(V2).toHaveLength(54);
+    const { outcome, messwerte } = await lauf(dokument(2, V2));
     expect(outcome.manifest.format_version).toBe(2);
     expect(outcome.sectionCount).toBe(54);
     expect(messwerte.format_version).toBe(2);
     expect(messwerte.section_count).toBe(54);
+  });
+
+  it("Datenbank auf 0174: Version 3, 61 Bereiche — und die Historie sagt 3", async () => {
+    expect(ALLE).toHaveLength(61);
+    const { outcome, messwerte } = await lauf(dokument(3, ALLE));
+    expect(outcome.manifest.format_version).toBe(3);
+    expect(outcome.sectionCount).toBe(61);
+    expect(messwerte.format_version).toBe(3);
+    expect(messwerte.section_count).toBe(61);
+  });
+
+  it("ein Archiv, das 3 sagt und den Abgleich nicht führt, wird verweigert", async () => {
+    /* Genau der Fall, für den die Version steigt: 54 Bereiche unter
+       Version 3 wären ein Archiv, dem der Abgleich abhandengekommen ist. */
+    await expect(lauf(dokument(3, V2))).rejects.toThrow(/Formatversion 3/);
   });
 
   it("in JEDEM Fall ist die Version der Historie die des Deckblatts", async () => {
@@ -770,7 +794,7 @@ describe("die Historie behauptet nie eine andere Version als das Archiv", () => 
      * ist damit automatisch mitgeprüft, sobald sie in
      * `SECTIONS_BY_FORMAT_VERSION` steht.
      */
-    for (const [version, bereiche] of [[1, OHNE_NEU], [2, ALLE]] as const) {
+    for (const [version, bereiche] of [[1, OHNE_NEU], [2, V2], [3, ALLE]] as const) {
       const { outcome, messwerte } = await lauf(dokument(version, bereiche));
       expect(messwerte.format_version, `Version ${version}`)
         .toBe(outcome.manifest.format_version);

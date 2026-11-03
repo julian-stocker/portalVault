@@ -428,6 +428,114 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0169": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0169: sieben Tabellen als Nachweis, RLS an, kein Clientrecht — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0170": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0170: Storno und Storno-Ruecknahme externer Verkaeufe — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0171": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0171: eine Bestellnummer je Kanal — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0172": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0172: Kandidaten, Anlegen, Lesen, Entscheiden — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0173": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0173: Anwenden, alles oder nichts — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
+    },
+    "0174": {
+      "zweck": "Gruppe Verkaufsabgleich (ADR-0174), Teil 0174: die sieben Tabellen in Betriebs- und Plattformsicherung — EIN gemeinsamer Lauf fuer 0169 bis 0174, jede der sechs Nummern startet denselben; aendert selbst keine Daten",
+      "preflight": "0169-0170-0171-0172-0173-0174_preflight.sql",
+      "lauf": "staging-0169-0170-0171-0172-0173-0174.sql",
+      "postflight": "0169-0170-0171-0172-0173-0174_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply steht UND die Plattformsicherung ist die Fassung aus 0174. Beides entsteht nur gemeinsam (eine Transaktion); ein halber Stand ist nicht moeglich.",
+        "sql": "select (to_regprocedure('public.seller_recon_apply(bigint,integer)') is not null and coalesce((select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')), '') = '23be72d581589b063d6938a863757b31') as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

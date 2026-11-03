@@ -162,8 +162,11 @@ describe("woher diese Datei liest", () => {
      * spricht über die NEUESTE Fassung in den Migrationen, nicht über die,
      * die auf einer Datenbank steht: welche wo steht, sagt
      * `supabase/migrations/APPLIED.md`.
+     *
+     * Seit `0174` (Verkaufsabgleich, sieben Bereiche, Formatversion 3) ist es
+     * diese Datei — NICHT ANGEWENDET, weder auf Staging noch auf Production.
      */
-    expect(DEFINITION.file).toBe("0164_platform_export_types.sql");
+    expect(DEFINITION.file).toBe("0174_backup_sales_reconciliation.sql");
   });
 
   it("historische Prüfungen bleiben historisch", () => {
@@ -520,7 +523,7 @@ describe("kein jsonb_build_object überschreitet die Argumentgrenze", () => {
     const verkettet = proGruppe.flat();
     expect(verkettet).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
     expect(new Set(verkettet).size, "ein Bereich kommt doppelt vor").toBe(verkettet.length);
-    expect(verkettet).toHaveLength(54);
+    expect(verkettet).toHaveLength(61);
   });
 
   it("die Gruppierung bleibt ein Ausdruck in einer Anweisung", () => {
@@ -559,7 +562,7 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
   it("es sind genau die des Manifests, nicht mehr und nicht weniger", () => {
     const imSql = [...BODY.matchAll(/^\s{8}'([a-z_0-9]+)', coalesce\(\(/gm)].map((m) => m[1]);
     expect(imSql).toEqual(PLATFORM_SECTIONS.map((s) => s.key));
-    expect(imSql).toHaveLength(54);
+    expect(imSql).toHaveLength(61);
   });
 
   for (const section of PLATFORM_SECTIONS) {
@@ -582,8 +585,10 @@ describe(`die ${PLATFORM_SECTIONS.length} Bereiche stimmen mit dem Manifest übe
        (`skylanders.base_sky_id`) und **503** seit `0164` — die drei Felder
        des Type-Systems (`types`, `visible_type`, `visible_type_decided`,
        CAT-10). Drei FELDER und kein Bereich: die Bereichszahl bleibt 54 und
-       `format_version` bleibt 2. */
-    expect(gesamt).toBe(503);
+       `format_version` bleibt 2. **583** seit `0174`: 80 Felder in sieben
+       neuen BEREICHEN (Verkaufsabgleich), deshalb 61 Bereiche und
+       `format_version` 3. */
+    expect(gesamt).toBe(583);
     expect(gebildet).toBe(4);
   });
 
@@ -728,6 +733,12 @@ describe("Geld verliert nichts", () => {
     "buy_in_factor_snapshot", "amount", "shipping_amount", "total_amount", "unit_price",
     "line_total", "order_value", "merchandise_amount", "price_percentage",
     "free_shipping_threshold", "base_price", "catalog_market_boost_percent",
+    /* Der Verkaufsabgleich (0174): drei Beträge einer externen Bestellung
+       und der Zuordnungswert — alle `numeric`. `sales_recon_findings.delta`
+       geht ebenfalls als Text hinaus, steht aber NICHT hier: derselbe Name
+       ist in `inventory_movements` eine ganze Zahl. Geprüft wird er in
+       `backup-sales-reconciliation.test.ts`, bereichsgenau. */
+    "items_value", "shipping", "total", "score",
   ];
 
   it("jeder Betrag wird als Text ausgegeben, nie als JSON-Zahl", () => {

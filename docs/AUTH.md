@@ -817,3 +817,11 @@ Passwort lässt Formular und Recovery-Sitzung stehen, damit ein Tippfehler keine
 Fehlt die Recovery-Sitzung ganz, meldet das Formular `sessionExpired`, statt eine Weiterleitung
 zu zeigen, die nach Erfolg aussieht. Genau ein `redirect()`, ohne `next` und ohne Rückverweis auf
 `/reset-password` — es gibt nichts, wovon eine Schleife entstehen könnte.
+
+## Verkaufsabgleich (ADR-0174)
+
+Nur der **Verkäuferbetrieb** (`seller_operators`, `can_operate_active_seller()`) darf einen
+Abgleich anlegen, lesen, entscheiden und anwenden — und externe Verkäufe stornieren oder das
+Storno zurücknehmen. Ein Plattformadmin darf es nicht (ADR-0077). Die Server Actions in
+`src/lib/reconciliation/server/actions.ts` prüfen `canOperateSeller()` vor jedem Datenbankaufruf;
+die Grenze ist die Prüfung in jeder Funktion.

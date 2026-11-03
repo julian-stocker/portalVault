@@ -54,8 +54,10 @@ describe("der Formatvertrag", () => {
      * 2 seit `0144`. Erhöht, obwohl ein Bereich additiv ist: `counts` nennt
      * nur die Bereiche DIESES Archivs, und ohne die Version könnte ein Leser
      * „älteres Archiv" nicht von „Bereich abhandengekommen" unterscheiden.
+     * 3 seit `0174`, aus demselben Grund: sieben Bereiche des
+     * Verkaufsabgleichs.
      */
-    expect(PLATFORM_FORMAT_VERSION).toBe(2);
+    expect(PLATFORM_FORMAT_VERSION).toBe(3);
     expect(PLATFORM_FORMAT).not.toBe("skyisles-business-backup");
   });
 
@@ -175,7 +177,14 @@ describe("jede Tabelle der Plattform ist entschieden", () => {
     /* Genau die drei bekannten — nicht mehr, und auch nicht weniger: wäre
        die Lücke geschlossen, gehört die Ausnahmeliste gelöscht. */
     expect(luecke.sort()).toEqual(Object.keys(NUR_IM_BUSINESS_EXPORT).sort());
-    expect(platform.size).toBeGreaterThan(business.size * 1.8);
+    /*
+     * 1,8 stand hier bei 54 gegen 28. `0174` hat dieselben sieben Tabellen
+     * in BEIDE Sicherungen gebracht (61 gegen 35), und ein gemeinsamer
+     * Zuwachs verkleinert das Verhältnis, ohne dass das größere Netz kleiner
+     * würde. Deshalb zusätzlich der Abstand, der unverändert bleibt.
+     */
+    expect(platform.size).toBeGreaterThan(business.size * 1.7);
+    expect(platform.size - business.size).toBeGreaterThanOrEqual(26);
   });
 
   it("und jede Ausnahme nennt einen Grund, der auf die Entscheidung zeigt", () => {
@@ -387,7 +396,8 @@ describe("der Business-Export bleibt unberührt", () => {
      * darunter beweist es —, aber die ausgeführte Fassung ist eine andere,
      * und `backup-sql.test.ts` hält jetzt diese Feld für Feld dagegen.
      */
-    expect(BACKUP_SECTIONS).toHaveLength(28);
+    /* 35 seit `0174`: die sieben Tabellen des Verkaufsabgleichs. */
+    expect(BACKUP_SECTIONS).toHaveLength(35);
     for (const key of ["purchase_receipts", "purchase_receipt_downloads",
                        "purchase_receipt_counters"]) {
       expect(BACKUP_SECTIONS.map((s) => s.key)).toContain(key);

@@ -475,6 +475,12 @@ describe("no tool may create a sale that looks like real trade", () => {
      * als Testvorgang markiert und zählt in keiner Geschäftssumme.
      */
     "ui-fixtures-ship-day.mts": "flags-every-sale",
+    /*
+     * Der Verkaufsabgleich (ADR-0174): seine Verkäufe bleiben stehen, weil
+     * eine Abgleichssitzung sie als Nachweis nennt und sie deshalb nicht
+     * löschbar sind — jeder ist als Testvorgang markiert und liegt im Jahr 2001.
+     */
+    "verify-sales-reconciliation.mts": "flags-every-sale",
   };
 
   /** Der Rumpf ohne Prosa: ein Kommentar ist keine Aktion. */

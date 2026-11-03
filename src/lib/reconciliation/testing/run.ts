@@ -5,12 +5,12 @@
  * re-assembling them by hand and drifting apart from each other.
  */
 
-import { type Coverage, coverageOf } from "../coverage";
-import { mergeReports } from "../dedupe";
-import { reconcile, type ReconciliationRow, summarize, type Summary } from "../diff";
-import { matchOrders, type MatchOptions } from "../match";
-import { parseSalesReport } from "../registry";
-import type { ExternalReport, LedgerSale } from "../types";
+import { type Coverage, coverageOf } from "../coverage.ts";
+import { mergeReports } from "../dedupe.ts";
+import { reconcile, type ReconciliationRow, summarize, type Summary } from "../diff.ts";
+import { matchOrders, type MatchOptions } from "../match.ts";
+import { parseSalesReport } from "../registry.ts";
+import type { ExternalReport, LedgerSale } from "../types.ts";
 
 export type Run = { reports: ExternalReport[]; coverage: Coverage; rows: ReconciliationRow[]; summary: Summary };
 

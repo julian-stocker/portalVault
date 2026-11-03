@@ -33,6 +33,7 @@
  * Datenbankzugriff, keine Seiteneffekte.
  */
 import type { BackupSection } from "./manifest";
+import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
 
 export const PLATFORM_FORMAT = "skyisles-platform-backup";
 
@@ -60,13 +61,22 @@ export const PLATFORM_FORMAT = "skyisles-platform-backup";
  * Archiv — keinen Fehler. Umgekehrt ist ein Archiv, das 2 sagt und den
  * Bereich nicht fuehrt, unvollstaendig: `platform-archive.ts` prueft genau
  * das und bricht ab (`PlatformArchiveError`).
+ *
+ * **3 seit `0174`**: der Export fuehrt die sieben Tabellen des
+ * Verkaufsabgleichs (`0169`) als Bereiche, 54 → 61. Derselbe Grund wie bei
+ * `0144`, und dieselbe Zusage: **Archive der Version 2 bleiben gueltig** und
+ * tragen 54 Bereiche, Archive der Version 1 weiterhin 53. Die Version, die
+ * fuer `favorites`, `offer_state` und die Verfuegbarkeitstabellen
+ * vorgesehen war, ist damit die naechste, also **4** (siehe
+ * `PLATFORM_EXCLUDED_TABLES`).
  */
-export const PLATFORM_FORMAT_VERSION = 2;
+export const PLATFORM_FORMAT_VERSION = 3;
 
 /** Welche Bereichszahl zu welcher Formatversion gehoert. */
 export const SECTIONS_BY_FORMAT_VERSION: Readonly<Record<number, number>> = {
   1: 53,
   2: 54,
+  3: 61,
 };
 
 /* -------------------------------------------------------------------------
@@ -509,6 +519,15 @@ export const PLATFORM_SECTIONS: readonly BackupSection[] = [
     excluded: { changed_by: "Kontoidentität" },
     restoreRelevant: false,
   },
+  /*
+   * DER VERKAUFSABGLEICH (0169), seit `0174` — dieselben sieben Bereiche mit
+   * denselben Feldern wie in der Betriebssicherung, aus EINER Konstante
+   * (`manifest.ts`, dort die Begründung). Sie stehen zwischen `orderbook_audit`
+   * und `seller_monthly_reports`, genau dort, wo `0174` den Block in den Rumpf
+   * aus `0164` einfügt. Ein Bereich mehr heißt hier eine neue Formatversion:
+   * 3, mit 61 Bereichen.
+   */
+  ...SALES_RECONCILIATION_SECTIONS,
   {
     key: "seller_monthly_reports",
     source: "seller_monthly_reports",
@@ -821,7 +840,8 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    */
   catalog_removed_sky_ids:
     "Grabstein entfernter SKY-IDs (0167). Wiederherstellbar aus data/catalog/ovp-removal.json "
-    + "und den deleted-Zeilen des Journals; Aufnahme ins Archiv mit der naechsten Exportfassung.",
+    + "und den deleted-Zeilen des Journals; Aufnahme ins Archiv mit einer spaeteren Exportfassung "
+    + "(0174 hat nur den Verkaufsabgleich aufgenommen).",
   /*
    * DRAUSSEN AUF ZEIT, UND ZWAR MIT ABLAUFDATUM (`0145`, ADR-0136).
    *
@@ -844,7 +864,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    *
    *   1. `0144` liegt auf Production (`supabase/migrations/APPLIED.md`).
    *   2. Die Folgemigration nimmt `favorites` als Bereich auf und zählt
-   *      `PLATFORM_FORMAT_VERSION` auf 3 hoch.
+   *      `PLATFORM_FORMAT_VERSION` auf 4 hoch (3 hat `0174` belegt).
    *   3. Dieser Eintrag fällt, und der Wächter unten verlangt dann einen
    *      Bereich — er kann nicht übersehen werden.
    *
@@ -869,7 +889,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * ersetzen, und diese Funktion prüft den `md5` ihrer Vorgängerfassung.
    * `0144` liegt auf Staging, nicht auf Production.
    *
-   * **Die Folgemigration nimmt beide zusammen auf** (Formatversion 3), und
+   * **Die Folgemigration nimmt beide zusammen auf** (Formatversion 4), und
    * das muss vor dem Production-Rollout geschehen — siehe ADR-0136 und
    * `supabase/checks/platform_export_gap.md`.
    */
@@ -880,7 +900,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "sie würde nach einer Wiederherstellung jede Figur neu gemeldet. " +
     "Vorübergehend draußen, weil ein Bereich system_platform_export() " +
     "ersetzen würde und 0144 noch nicht auf Production liegt. Die " +
-    "Folgemigration nimmt sie mit favorites zusammen auf (Formatversion 3); " +
+    "Folgemigration nimmt sie mit favorites zusammen auf (Formatversion 4); " +
     "das muss VOR dem Production-Rollout geschehen (ADR-0136, D-6).",
 
   /*
@@ -892,7 +912,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * vorübergehenden Grund wie `favorites` und `offer_state` draußen: ein
    * Bereich würde `system_platform_export()` ersetzen, und `0144` liegt
    * noch nicht auf Production. Die Folgemigration nimmt alle drei zusammen
-   * auf (Formatversion 3), und das muss VOR dem Production-Rollout
+   * auf (Formatversion 4), und das muss VOR dem Production-Rollout
    * geschehen (ADR-0136, D-6; Betreiberentscheidung vom 2026-10-25: neue
    * persönliche Nutzerdaten dürfen nicht dauerhaft draußen bleiben).
    *
@@ -916,7 +936,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
    * **Sie gehört also ins Archiv**, und sie steht hier aus demselben
    * vorübergehenden Grund draußen: ein Bereich würde
    * `system_platform_export()` ersetzen, und `0144` liegt noch nicht auf
-   * Production. **Die Folgemigration nimmt sie mit auf (Formatversion 3),
+   * Production. **Die Folgemigration nimmt sie mit auf (Formatversion 4),
    * und das muss VOR dem Production-Rollout geschehen** (ADR-0136, D-6;
    * ADR-0147 führt es als Tor M6).
    */
@@ -926,7 +946,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "read_at ist eine Nutzerhandlung. GEHOERT INS ARCHIV; vorübergehend draußen, " +
     "weil ein Bereich system_platform_export() ersetzen würde und 0144 noch " +
     "nicht auf Production liegt. Die Folgemigration nimmt sie mit favorites, " +
-    "offer_state und availability_notifications zusammen auf (Formatversion 3); " +
+    "offer_state und availability_notifications zusammen auf (Formatversion 4); " +
     "das muss VOR dem Production-Rollout geschehen (ADR-0136, D-6).",
 
   availability_notifications:
@@ -935,7 +955,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "was gemeldet wurde, steht nur hier. GEHOERT INS ARCHIV; vorübergehend " +
     "draußen, weil ein Bereich system_platform_export() ersetzen würde und " +
     "0144 noch nicht auf Production liegt. Die Folgemigration nimmt sie mit " +
-    "favorites und offer_state zusammen auf (Formatversion 3); das muss VOR " +
+    "favorites und offer_state zusammen auf (Formatversion 4); das muss VOR " +
     "dem Production-Rollout geschehen (ADR-0136, D-6).",
 
   favorites:
@@ -943,7 +963,7 @@ export const PLATFORM_EXCLUDED_TABLES: Readonly<Record<string, string>> = {
     "GEHOERT INS ARCHIV — vorübergehend draußen, weil ein Bereich " +
     "system_platform_export() ersetzen würde und 0144 noch nicht auf " +
     "Production liegt. Die Folgemigration nach 0144-auf-Production nimmt sie " +
-    "auf (Formatversion 3) und entfernt diesen Eintrag; das muss VOR dem " +
+    "auf (Formatversion 4) und entfernt diesen Eintrag; das muss VOR dem " +
     "Production-Rollout der Favoriten geschehen (ADR-0136).",
 
   /*

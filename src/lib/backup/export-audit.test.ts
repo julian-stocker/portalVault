@@ -15,7 +15,19 @@ import { describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 
-import { BACKUP_SECTIONS } from "./manifest";
+import { BACKUP_SECTIONS, SALES_RECONCILIATION_SECTIONS } from "./manifest";
+
+/**
+ * Die Bereiche, die die beiden Baselines kennen — das Manifest ohne die sieben
+ * aus `0174`.
+ *
+ * Eine Baseline ist die Messung EINER Umgebung zu EINEM Zeitpunkt (siehe
+ * `PRODUCTION_BASELINE`). Beide stammen aus der Zeit vor `0174`, also mit 28
+ * Bereichen. Sie nachträglich auf 35 zu setzen wäre eine erfundene Messung;
+ * nach dem Anwenden von `0174` braucht es eine NEUE, gemessene Baseline.
+ */
+const NEU_0174 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
+const VOR_0174 = BACKUP_SECTIONS.filter((s) => !NEU_0174.has(s.key));
 import {
   auditBackup, baselineForDocument, BASELINE_JE_PROJEKT, buildFieldPlan,
   fieldsFromBackupSql, PRODUCTION_BASELINE, report, STAGING_BASELINE,
@@ -89,7 +101,7 @@ function beleg(over: Record<string, unknown> = {}): Record<string, unknown> {
   });
 }
 
-/** Ein vollständiges Dokument mit allen 28 Bereichen. */
+/** Ein vollständiges Dokument mit allen Bereichen des Manifests (35 seit `0174`). */
 function dokument(over: { receipts?: unknown[]; downloads?: unknown[] } = {}) {
   const belege = over.receipts ?? [
     beleg(),
@@ -190,8 +202,9 @@ describe("ein stimmiges Dokument geht glatt durch", () => {
     expect(ergebnis.failed).toBe(0);
   });
 
-  it("alle 28 Bereiche gezählt", () => {
-    expect(Object.keys(ergebnis.areaCounts)).toHaveLength(28);
+  it("alle Bereiche des Manifests gezählt", () => {
+    expect(Object.keys(ergebnis.areaCounts)).toHaveLength(BACKUP_SECTIONS.length);
+    expect(BACKUP_SECTIONS).toHaveLength(35);
     expect(ergebnis.areaCounts.purchase_receipts).toBe(2);
     expect(ergebnis.areaCounts.purchase_receipt_downloads).toBe(2);
   });
@@ -334,9 +347,9 @@ describe("die Staging-Baseline ist die gemeldete", () => {
    * TypeScript-Lader von Node läuft. Hier wird sie gegen die Quelle gehalten:
    * driftet eines von beidem, fällt dieser Test.
    */
-  it("ihre Bereichsliste ist genau die des Manifests", () => {
+  it("ihre Bereichsliste ist genau die des Manifests vor 0174", () => {
     expect([...STAGING_BASELINE.areaKeys].sort())
-      .toEqual(BACKUP_SECTIONS.map((s) => s.key).sort());
+      .toEqual(VOR_0174.map((s) => s.key).sort());
     expect(STAGING_BASELINE.areaKeys).toHaveLength(STAGING_BASELINE.areas);
   });
 
@@ -438,9 +451,9 @@ describe("das Werkzeug liest eine Datei und sonst nichts", () => {
  * ======================================================================== */
 
 describe("der Feldplan kommt aus Manifest UND SQL-Rumpf", () => {
-  it("der Parser findet alle 28 Bereiche und ihre Felder", () => {
+  it("der Parser findet alle 35 Bereiche und ihre Felder", () => {
     const imSql = fieldsFromBackupSql(LETZTE_FASSUNG.sql);
-    expect(Object.keys(imSql)).toHaveLength(28);
+    expect(Object.keys(imSql)).toHaveLength(35);
     /* Die Bereichszeile selbst ist kein Feld — sie steht auf sechs
        Leerzeichen, Felder auf zehn. */
     expect(imSql.purchases).not.toContain("purchases");
@@ -452,7 +465,7 @@ describe("der Feldplan kommt aus Manifest UND SQL-Rumpf", () => {
 
   it("Manifest und SQL sind sich einig — kein einziger Konflikt", () => {
     expect(PLAN.conflicts).toEqual([]);
-    expect(PLAN.plan).toHaveLength(28);
+    expect(PLAN.plan).toHaveLength(BACKUP_SECTIONS.length);
   });
 
   it("die vier abweichenden JSON-Namen stehen im Plan, nicht die Tabellennamen", () => {
@@ -485,7 +498,7 @@ describe("der Feldplan kommt aus Manifest UND SQL-Rumpf", () => {
 
   it("ein fehlender Bereich im Rumpf auch", () => {
     const { conflicts } = buildFieldPlan(BACKUP_SECTIONS, "-- leer");
-    expect(conflicts).toHaveLength(28);
+    expect(conflicts).toHaveLength(BACKUP_SECTIONS.length);
     expect(conflicts[0]).toContain("im SQL-Rumpf nicht gefunden");
   });
 
@@ -507,10 +520,10 @@ describe("drei Kategorien, strikt getrennt", () => {
   const labels = (doc: ReturnType<typeof dokument>, basis: ExportBaseline) =>
     auditBackup(doc, basis).findings.filter((f) => !f.ok).map((f) => f.label);
 
-  it("ein vollständiges Dokument hat in allen 28 Bereichen keinen Befund", () => {
+  it("ein vollständiges Dokument hat in allen 35 Bereichen keinen Befund", () => {
     const doc = dokument();
     const ergebnis = auditBackup(doc, baselineFuer(doc));
-    expect(ergebnis.fieldReports).toHaveLength(28);
+    expect(ergebnis.fieldReports).toHaveLength(BACKUP_SECTIONS.length);
     for (const r of ergebnis.fieldReports) {
       expect(r.missing, r.key).toEqual([]);
       expect(r.unexpected, r.key).toEqual([]);
@@ -620,7 +633,7 @@ describe("leere Bereiche beweisen keine Vollständigkeit", () => {
       .find((f) => f.label.includes("Bereiche ohne Zeile"))!;
     expect(zeile).toBeDefined();
     const leer = ergebnis.fieldReports.filter((r) => r.observed === 0).length;
-    expect(zeile.detail).toBe(`${leer} von 28`);
+    expect(zeile.detail).toBe(`${leer} von ${BACKUP_SECTIONS.length}`);
     expect(leer).toBeGreaterThan(20);
   });
 
@@ -687,7 +700,7 @@ describe("zwei Umgebungen, zwei Baselines", () => {
        Umgebung. Unterschiedlich sind nur die Zahlen. */
     expect(PRODUCTION_BASELINE.areaKeys).toEqual(STAGING_BASELINE.areaKeys);
     expect([...PRODUCTION_BASELINE.areaKeys].sort())
-      .toEqual(BACKUP_SECTIONS.map((s) => s.key).sort());
+      .toEqual(VOR_0174.map((s) => s.key).sort());
   });
 
   it("die Belegabdrücke der leeren Menge sind md5 über nichts", () => {

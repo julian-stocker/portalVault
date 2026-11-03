@@ -26,7 +26,7 @@
  * the files, so those two days are "edge days".
  */
 
-import type { ExternalOrder, ExternalReport, IsoDay } from "./types";
+import type { ExternalOrder, ExternalReport, IsoDay } from "./types.ts";
 
 /** Record numbers an order consumes. */
 export const recordsConsumed = (order: Pick<ExternalOrder, "combined" | "lines">): number =>

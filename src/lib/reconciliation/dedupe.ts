@@ -15,7 +15,7 @@
  * parameter rather than an import, and this module stays pure.
  */
 
-import type { ExternalOrder, ExternalReport } from "./types";
+import type { ExternalOrder, ExternalReport } from "./types.ts";
 
 export type Sha256 = (text: string) => string | Promise<string>;
 

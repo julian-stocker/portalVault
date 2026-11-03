@@ -412,9 +412,14 @@ describe("0122 legt an, was der Beleg braucht", () => {
     const files = readdirSync(join(process.cwd(), "supabase/migrations"))
       .filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain(FILE);
-    /* `0168` (CAT-19): die Familie folgt der Basisfigur — kein Belegthema. */
-    expect(files[files.length - 1]).toBe("0168_variant_family_inheritance.sql");
-    expect(files[files.length - 2]).toBe("0167_ovp_removal.sql");
+    /*
+     * `0169`–`0174` (ADR-0174): der Verkaufsabgleich — kein Belegthema.
+     * `0174` stellt die Betriebssicherung neu auf und führt die
+     * Belegbereiche darin zeichengleich aus `0140` weiter
+     * (`src/lib/backup/backup-sales-reconciliation.test.ts`).
+     */
+    expect(files[files.length - 1]).toBe("0174_backup_sales_reconciliation.sql");
+    expect(files[files.length - 2]).toBe("0173_sales_reconciliation_apply.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

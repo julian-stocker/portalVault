@@ -925,7 +925,7 @@ Jeder Schritt ist für sich prüfbar und für sich zurücknehmbar.
 |---|---|---|
 | **S1** | **GEBAUT (2026-10-25).** `0146`: `offer_state`, die Sicht `offer_state_live`, `refresh_offer_state()`, `offer_state_window()` — **nur der Spiegel**, keine Meldungen, keine Oberfläche. **Nirgends angewendet.** | Probelauf **P53** (sechzehn Szenarien an echtem PostgreSQL), `src/lib/favorites/offer-state.test.ts` (48 Tests), Preflight und Postflight `0146`. **Noch offen:** eine Woche auf Staging mitlaufen lassen und die Drift gegen `offer_state_live` prüfen |
 | **S2** | `0147`: `favorite_notifications`, die zwei `profiles`-Spalten, `sync_favorite_notifications()` — **ohne Oberfläche** | Probelauf P54, `verify:rls:staging` Abschnitt 11 |
-| **S3** | Exportmigration: `favorites`, `favorite_notifications`, `offer_state` ins Plattformarchiv, Formatversion 3 | `verify:platform-archive`, Bereichszahl, beide Vollständigkeitswächter |
+| **S3** | Exportmigration: `favorites`, `favorite_notifications`, `offer_state` ins Plattformarchiv, Formatversion 4 (die 3 hat `0174` belegt, ADR-0174) | `verify:platform-archive`, Bereichszahl, beide Vollständigkeitswächter |
 | **S4** | Oberfläche: Zahl in der Leiste, Posteingang auf `/favoriten`, Quittieren | DOM-Tests mit echten Klicks (Muster `favorite-interaction.test.tsx`), Browser-Durchlauf |
 | **S5** | Die zwei Schalter unter `/account` | Tests + Browser |
 | **S6** | Production-Rollout in der Reihenfolge aus 6.2 | Preflight/Postflight je Migration, `9999 = 0` |

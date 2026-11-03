@@ -82,7 +82,25 @@ Die vollständige Änderungshistorie liegt in Git.
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
 
-## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, nicht committet**
+## Verkaufsabgleich — Phase 3 (2026-11-03) — **lokal committet, nichts angewendet**
+
+Datenbank und Serverschicht des Abgleichs (ADR-0174). **Keine Migration ist irgendwo angewendet.**
+
+| Teil | Dateien |
+|---|---|
+| Migrationen | `0169` sieben Tabellen · `0170` Storno und Rücknahme · `0171` Bestellnummer je Kanal · `0172` Lesen, Anlegen, Entscheiden · `0173` Anwenden (alles oder nichts) · `0174` beide Sicherungen (Plattform `format_version` 3) |
+| Akte (ADR-0137) | `supabase/checks/0169-0170-0171-0172-0173-0174_{preflight.sql,postflight.sql,staging_run.md}`, `supabase/operations/staging-0169-0170-0171-0172-0173-0174.sql`, Pläne `0169`–`0174`, `APPLIED.md` „lokal vorbereitet“ |
+| Rückbau | `supabase/rollback/R0174_backups_without_sales_reconciliation.sql`, dann `R0169_0173_drop_sales_reconciliation.sql` (verweigert sich, sobald eine Sitzung existiert) |
+| Serverschicht | `src/lib/reconciliation/server/{payload,actions,queries}.ts` — nur Staging, nur Verkäuferbetrieb |
+| Tests | PostgreSQL-Verhaltenstests `src/lib/reconciliation/sql/` (Rechte, Datenschutzsperre, Idempotenz, PT409, Audit, Storno/Rücknahme, Atomarität, Lager unverändert, Rückbau, Gruppenlauf), `server/*.test.ts`, `src/lib/backup/backup-sales-reconciliation.test.ts`, Probelauf P74 mit Sicherungs-Umlauf |
+
+**Staging-Prüfwerkzeug:** `tools/verify-sales-reconciliation.mts` (`npm run
+verify:sales-reconciliation:staging`, Trockenlauf; schreibend nur mit `--apply`) — lokal getestet,
+auf Staging noch nie gefahren.
+
+**Nächster Schritt:** Freigabe der Staging-Migration nach dem Laufzettel.
+
+## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 
 Grundlage für einen dauerhaften Abgleich zwischen Plattformberichten und den externen Verkäufen
 in SkyIsles. Zuerst eBay Seller Hub „Orders Report“ (deutscher CSV-Export). Gebaut ist nur die

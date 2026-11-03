@@ -34,11 +34,11 @@
  * 0 ambiguous among 311 orders.
  */
 
-import { roundMoney } from "@/lib/orderbook/sales-money";
-import { assignMaximum, type Edge } from "./assignment";
-import { type Coverage, judgeDay } from "./coverage";
-import { type AliasIndex, buildAliasIndex, matchPieces, type PieceMatch } from "./names";
-import type { ExternalOrder, IsoDay, LedgerSale } from "./types";
+import { roundMoney } from "../orderbook/sales-money.ts";
+import { assignMaximum, type Edge } from "./assignment.ts";
+import { type Coverage, judgeDay } from "./coverage.ts";
+import { type AliasIndex, buildAliasIndex, matchPieces, type PieceMatch } from "./names.ts";
+import type { ExternalOrder, IsoDay, LedgerSale } from "./types.ts";
 
 export type Certainty = "deterministic" | "unique" | "probable" | "ambiguous";
 
@@ -66,7 +66,17 @@ export type MatchEntry =
   | { kind: "ledger_only"; sale: LedgerSale }
   | { kind: "not_comparable"; sale: LedgerSale; reason: NotComparableReason };
 
-export type MatchOptions = { dateWindowDays?: number; ambiguityMargin?: number };
+export type MatchOptions = {
+  dateWindowDays?: number;
+  ambiguityMargin?: number;
+  /**
+   * Names each SKY-ID was ever sold under, from the WHOLE ledger
+   * (`seller_recon_aliases`). The candidates of one period alone would miss
+   * an alias that was only ever used outside it. Merged with the candidates'
+   * own names.
+   */
+  aliases?: AliasIndex;
+};
 
 /** Goods value after discount — the only SkyIsles amount comparable with eBay's line values. */
 export const ledgerItemsNet = (sale: Pick<LedgerSale, "itemsSubtotal" | "discount">): number =>
@@ -97,6 +107,13 @@ export function scoreCandidate(order: ExternalOrder, sale: LedgerSale, aliases?:
   return { score, pieces, delta, amountEqual };
 }
 
+function mergeAliases(own: AliasIndex, extra?: AliasIndex): AliasIndex {
+  if (!extra) return own;
+  const merged = new Map<string, string[]>();
+  for (const [sky, names] of [...own, ...extra]) merged.set(sky, [...new Set([...(merged.get(sky) ?? []), ...names])]);
+  return merged;
+}
+
 export function matchOrders(
   orders: readonly ExternalOrder[],
   sales: readonly LedgerSale[],
@@ -105,7 +122,7 @@ export function matchOrders(
 ): MatchEntry[] {
   const window = options.dateWindowDays ?? 3;
   const margin = options.ambiguityMargin ?? 10;
-  const aliases = buildAliasIndex(sales);
+  const aliases = mergeAliases(buildAliasIndex(sales), options.aliases);
   const entries: MatchEntry[] = [];
 
   const usableSale = (s: LedgerSale) => !s.isTest && s.soldOn !== null;

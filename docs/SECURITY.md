@@ -2039,3 +2039,20 @@ Bibliothek, die schreiben könnte — und wird ausschließlich von
 `tools/import-legacy-inventory.mts` benutzt. `src/lib/shop/legacy-import.test.ts` prüft das am
 Quelltext. Eine Regel, die sagt „nicht schreiben", ist schwächer als ein Programm, das es nicht
 kann.
+
+### Der Verkaufsabgleich (`0169`–`0174`, ADR-0174)
+
+- **Käuferdaten, dreifach ferngehalten.** Der eBay-Parser liest nur 15 fachliche Spalten
+  (`src/lib/reconciliation/ebay/columns.ts`). `validateUpload` in der Server Action und
+  `seller_recon_create` in der Datenbank lehnen **jedes unbekannte Feld** auf jeder Ebene ab und
+  nennen dabei nur den Feldnamen, nie einen Wert. Die Sitzungszusammenfassung darf nur Zahlen
+  enthalten. Die Tabellen haben für Käuferdaten keine Spalte.
+- **Die Datei verlässt den Browser nicht**; gespeichert werden Dateiname und SHA-256.
+- **Rechte:** RLS an, keine Policy, kein Clientrecht auf die sieben Tabellen; alle Zugänge sind
+  `security definer`-Funktionen hinter `can_operate_active_seller()`. Kein Recht für den
+  Prüfzugang `skyisles_agent`.
+- **Konflikte:** angezeigte Werte und `sales.updated_at` werden bei jeder Entscheidung geprüft,
+  beim Anwenden alle betroffenen Verkäufe gesperrt und verglichen — sonst `PT409`, und nichts
+  geschieht.
+- **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`).
+- **Nur Staging**, bis eine eigene Freigabe vorliegt (`isStagingProjectUrl`, fail-closed).

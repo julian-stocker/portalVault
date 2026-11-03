@@ -17066,6 +17066,86 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0174 · Der Verkaufsabgleich: Plattformberichte gegen das Verkaufsbuch, Entscheidung je Feld
+
+**Status:** VORBEREITET · 2026-11-03, lokal auf `development/skyisles-v2`, nicht committet.
+Migrationen `0169`–`0174` liegen als Dateien vor und sind **nirgends angewendet** — zuerst nur
+Staging, mit eigener Freigabe. Logik: `src/lib/reconciliation/` (Phase 1/2, `a14a87d`).
+**Betrifft:** ADR-0077 (Betrieb), ADR-0089 (ein Verkaufsbuch), ADR-0114/0115/0134 (Sicherungen),
+ADR-0116 (externe Holds), ADR-0118 (Erstattung ist Geld), ADR-0137 (Migrationsablauf),
+ADR-0139/0140 (Prüfzugang), `0156` (angezeigte Werte als Konfliktschutz)
+
+### Kontext
+
+Die Analyse der eBay-Berichte Januar–September 2026 fand 311 Bestellungen, alle in SkyIsles,
+302 exakt, 8 sicher mit Abweichung, 1 wahrscheinlich. Gemeinsame Kennungen gab es keine
+(`external_order_ref` überall leer). Der Betreiber will diese Abweichungen dauerhaft und
+nachvollziehbar auflösen: Berichte hochladen, je Abweichung entscheiden, erst nach einer
+getrennten Endbestätigung übernehmen.
+
+### Entscheidung
+
+1. **Ort und Zugriff.** `/business/orderbuch/abgleich`, nur Verkäuferbetrieb
+   (`can_operate_active_seller()`), kein Plattformadmin. Die Oberfläche folgt in Phase 4.
+2. **Die Datei verlässt den Browser nicht.** Der Browser liest den Bericht und schickt nur das
+   normalisierte Modell. Käuferdaten werden **dreifach** ferngehalten: Spalten-Whitelist im
+   Parser, Schlüssel-Whitelist in der Server Action (`validateUpload`), Schlüssel-Whitelist in
+   der Datenbank (`seller_recon_create` lehnt jedes unbekannte Feld ab). Das Schema hat für
+   Käuferdaten keine Spalte.
+3. **Sieben Tabellen als Nachweis** (`0169`): Sitzung, Dateien, Bestellungen, Zuordnungen,
+   Befunde, Entscheidungen, Anwendungen. Entscheidungen und Anwendungen sind **nur
+   erweiterbar** (Trigger). Eine Meinungsänderung ist eine neue Zeile. 1:1 gilt auch als Index.
+4. **Zahlungsdatum nur in der Sitzung** (`sales_recon_orders.paid_on`), keine Spalte in `sales`.
+   Verglichen wird `sold_at` mit „Verkauft am“.
+5. **Entscheidungen je Feld, von der Datenbank festgelegt** (`sales_recon_allowed`):
+   Datum, Warenwert, Versand: übernehmen / behalten / manuell / später ·
+   Bestellreferenz: übernehmen / nicht / später — **nur einzeln, nie in Masse** ·
+   Gesamtbetrag: nur manuell als Erstattung (Betrag, Grund, Erläuterung) oder Storno (Erläuterung)
+   oder „keine Aktion“ · Stück und Figur: nur „manuell klären“ mit Notiz, **ohne Änderung**.
+6. **Warenwert:** übernommen wird der Nettowert; `items_subtotal = Ziel + vorhandener Rabatt`.
+   Der Rabatt wird nie automatisch geändert.
+7. **Historische Positionen bleiben unberührt.** Der Abgleich ändert in V1 nie `sale_items`,
+   nie `legacy_stock_events` und schreibt nie eine Lagerbewegung.
+8. **Alles oder nichts** (`0173`). Vor dem ersten Schreiben werden alle betroffenen Verkäufe
+   gesperrt und mit dem Stand der Analyse verglichen; weicht einer ab, bricht der ganze Aufruf
+   mit `PT409` ab. Die bestätigte Anzahl muss der Zahl der Datenbank entsprechen. Geschrieben
+   wird nur über `seller_update_sale`, `seller_add_sale_refund` und die neue Stornofunktion,
+   damit `orderbook_audit` jede Änderung festhält. Eine Entscheidung wird höchstens einmal
+   angewendet; eine Sitzung kann in mehreren Runden angewendet werden („später entscheiden“).
+9. **Storno und Rücknahme** (`0170`): eigene Funktionen mit Grund, Konfliktschutz und Audit.
+   Storno gibt Reservierungen frei, Rücknahme versucht sie wie ein neuer Verkauf neu zu setzen;
+   beide schreiben **keine** Lagerbewegung. Abgelehnt werden interne, bereits stornierte,
+   freigegebene historische Verkäufe und jeder Verkauf mit beendeter Position.
+10. **Bestellreferenz eindeutig je Kanal** (`0171`), Testverkäufe ausgenommen; die Migration
+    stoppt, wenn heute schon eine doppelt vorkommt.
+11. **Sicherungen** (`0174`): alle sieben Tabellen in Betriebs- und Plattformsicherung. Ausgenommen
+    sind nur die löschbare Positionsliste `sales_recon_orders.lines` — jeder Wert, den ein Audit
+    braucht, steht im Befund — und, wie überall, die Kontoidentitäten (`*_by`). Betriebssicherung
+    28 → 35 Bereiche, `format_version` bleibt 1 (ADR-0114). Plattformsicherung 54 → 61 Bereiche,
+    `format_version` **2 → 3** wie bei `0144` (ADR-0135); Archive der Versionen 1 und 2 bleiben
+    lesbar. **Die früher für Favoriten, `offer_state` und die Verfügbarkeitstabellen angekündigte
+    „Formatversion 3“ wird damit zur 4**; die Laufzettel `0146`–`0150` nennen noch die 3 und bleiben
+    als ausgeführte Akten unverändert. Der Umlauf (sichern, leeren, aus dem Archiv einspielen,
+    vergleichen) ist Probelauf P74.
+12. **Aufbewahrung:** Sitzungen werden nie gelöscht. Eine beendete Sitzung kann ihre
+    Positionslisten verlieren (`seller_recon_thin_snapshots`); Kopf, Befunde, Entscheidungen
+    und Anwendungen bleiben.
+13. **Ein gemeinsamer Lauf** für alle sechs Migrationen (eine Transaktion, wie ADR-0161):
+    `supabase/operations/staging-0169-0170-0171-0172-0173-0174.sql`, Pre- und Postflight unter
+    demselben Namen. Jede der sechs Nummern hat einen Plan und startet denselben Lauf.
+14. **Nur Staging.** Server Action und Abfragen verweigern sich außerhalb des Staging-Projekts;
+    die eigentliche Grenze ist, dass die Funktionen auf Production nicht existieren. Production
+    ist eine eigene, spätere Entscheidung.
+
+### Konsequenzen
+
+- Der lesende Prüfzugang bekommt **kein** Recht auf die neuen Tabellen; seine Prüfzeilen dazu
+  bleiben offen (9998) und werden als `postgres` im SQL-Editor gemessen.
+- Ein Verkauf, der in einer Sitzung vorkommt, ist nicht mehr löschbar (`on delete restrict`);
+  der Nachweis geht vor.
+- Ein Rückbau (`R0174…`, dann `R0169_0173…`) ist nur möglich, solange keine Sitzung existiert.
+- `sales-actions.ts` meldet einen veralteten Verkauf (`PT409`) jetzt verständlich.
+
 ## ADR-0173 · Elementembleme auf der Figurenseite; Serienlogos vorbereitet, nicht verwendet
 
 **Status:** UMGESETZT · 2026-11-02, lokal auf `development/skyisles-v2`, nicht committet.

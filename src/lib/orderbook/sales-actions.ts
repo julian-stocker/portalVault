@@ -33,6 +33,13 @@ function message(error: { code?: string; message?: string }): string {
   const text = error.message ?? "";
   if (error.code === "42501") return de.admin.notAllowed;
   /*
+   * DER KONFLIKT-TOKEN (0062). `orderbook_guard_stale` meldet einen
+   * inzwischen geänderten Verkauf als `PT409`. Bisher fiel das in die
+   * allgemeine Meldung — der Betreiber erfuhr nicht, dass er nur neu laden
+   * muss. Der Einkauf ordnet denselben Code längst zu (`stalePurchase`).
+   */
+  if (error.code === "PT409") return copy.errors.staleSale;
+  /*
    * DIE ZWEI GRÜNDE, AUS DENEN DAS REGAL EINEN ABGANG ABLEHNT (0093).
    *
    * `apply_inventory_movement` warf bis 0093 für beide denselben Satz. Er

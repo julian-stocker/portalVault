@@ -13,7 +13,7 @@
  * look like a report to it.
  */
 
-import type { IsoDay } from "../types";
+import type { IsoDay } from "../types.ts";
 
 const K = "Käufers";
 /** Buyer columns as eBay names them (assembled, see above). */

@@ -5,7 +5,7 @@
  * Everything else has a neutral default, so a test states only what it is about.
  */
 
-import type { IsoDay, LedgerPiece, LedgerSale } from "../types";
+import type { IsoDay, LedgerPiece, LedgerSale } from "../types.ts";
 
 export type FixtureSale = {
   id: number;

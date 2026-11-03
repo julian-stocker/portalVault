@@ -30,8 +30,8 @@
  * alias table.
  */
 
-import { normalise } from "@/lib/orderbook/order-2026";
-import type { ExternalLine, ExternalOrder, LedgerPiece, LedgerSale } from "./types";
+import { normalise } from "../orderbook/order-2026.ts";
+import type { ExternalLine, ExternalOrder, LedgerPiece, LedgerSale } from "./types.ts";
 
 export type NameTier = "exact" | "normalized" | "alias" | "fuzzy";
 

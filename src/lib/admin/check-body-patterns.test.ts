@@ -33,10 +33,10 @@ import { readFileSync, readdirSync } from "node:fs";
  */
 
 /** Die Rümpfe aller Funktionen aus allen Migrationen — die letzte gilt. */
-function alleRumpfe(): Map<string, string> {
+function alleRumpfe(vor = "9999"): Map<string, string> {
   const rumpfe = new Map<string, string>();
   const dateien = readdirSync("supabase/migrations")
-    .filter((n) => n.endsWith(".sql")).sort();
+    .filter((n) => n.endsWith(".sql") && n.slice(0, 4) < vor).sort();
   for (const datei of dateien) {
     const sql = readFileSync(`supabase/migrations/${datei}`, "utf8");
     const re = /create (?:or replace )?function\s+public\.(\w+)\s*\(([\s\S]*?)\)\s*\n\s*returns/g;
@@ -125,6 +125,31 @@ function zeilenMitRumpfmuster(): Zeile[] {
 }
 
 const RUMPFE = alleRumpfe();
+
+/**
+ * Prüfdateien, die einen Stand VOR `0174` beschreiben — und dagegen gemessen.
+ *
+ * `0174` ersetzt beide Sicherungsfunktionen: der Plattformexport führt 61
+ * Bereiche und `format_version` 3. Zwei bereits GEFAHRENE Nachkontrollen
+ * sagen über den Rumpf ihres Zeitpunkts etwas anderes, und zu Recht:
+ * Die bereits gefahrenen Vor- und Nachkontrollen sagen über den Rumpf ihres
+ * Zeitpunkts etwas anderes, und zu Recht: `0153_postflight.sql` (Zeile 121,
+ * `'format_version', 2`) und die Production-Gruppen G2, G4 und G5 (je 54
+ * Bereichsklammern, `format_version` 2). Sie werden nicht umgeschrieben —
+ * sie sind der Nachweis eines Laufs —, sondern gegen den Rumpf gehalten,
+ * den sie beschreiben: die Faltung aller Migrationen vor `0174`. Jede andere
+ * Prüfdatei misst weiter gegen die neueste Fassung. Die Liste ist genau die
+ * Menge, deren Urteil `0174` ändert — gemessen, nicht geschätzt.
+ */
+const HISTORISCH_VOR_0174 = new Set([
+  "0153_postflight.sql",
+  "g2_preflight.sql", "g2_postflight.sql",
+  "g4_preflight.sql", "g4_postflight.sql",
+  "g5_postflight.sql",
+]);
+const RUMPFE_VOR_0174 = alleRumpfe("0174");
+const rumpfFuer = (datei: string, ziel: string): string | undefined =>
+  (HISTORISCH_VOR_0174.has(datei) ? RUMPFE_VOR_0174 : RUMPFE).get(ziel);
 /* Derselbe Inhalt, eigener Name — der Parser liest ihn, und das soll man an
    der Benutzungsstelle sehen. */
 const RUMPFE_NAMEN = RUMPFE;
@@ -145,6 +170,13 @@ const VOLLSTAENDIG = [
 ];
 
 describe("ein Rumpfmuster muss seinen Rumpf treffen können", () => {
+  it("die historischen Prüfdateien messen wirklich einen anderen Stand", () => {
+    /* Ohne diese Zusage könnte die Ausnahme oben still alles durchwinken. */
+    expect(RUMPFE_VOR_0174.get("system_platform_export/0"))
+      .toContain("'format_version', 2,");
+    expect(RUMPFE.get("system_platform_export/0")).toContain("'format_version', 3,");
+  });
+
   it("die Rümpfe der Migrationen lassen sich überhaupt lesen", () => {
     /* Ohne diese Zusage wäre jede folgende still grün. */
     expect(RUMPFE.size).toBeGreaterThan(100);
@@ -178,7 +210,7 @@ describe("ein Rumpfmuster muss seinen Rumpf treffen können", () => {
     it(`${datei}: jedes bejahende Muster trifft wirklich`, () => {
       for (const z of meine) {
         if (z.negiert) continue;
-        const treffer = z.ziele.filter((ziel) => like(RUMPFE.get(ziel)!, z.muster));
+        const treffer = z.ziele.filter((ziel) => like(rumpfFuer(datei, ziel)!, z.muster));
         /* Bei einer Signatur: genau dieser Rumpf. Bei einem Namen mit
            Überladung: mindestens einer — mehr zählt die Zeile nicht. */
         expect(treffer.length,
@@ -194,7 +226,7 @@ describe("ein Rumpfmuster muss seinen Rumpf treffen können", () => {
       for (const z of meine) {
         if (!z.negiert) continue;
         for (const ziel of z.ziele) {
-          expect(like(RUMPFE.get(ziel)!, z.muster),
+          expect(like(rumpfFuer(datei, ziel)!, z.muster),
                  `${datei} Zeile ${z.nr} verlangt, dass '${z.muster}' NICHT `
                  + `in ${ziel} steht — es steht aber drin.`).toBe(false);
         }
@@ -313,7 +345,7 @@ describe("eine zählende Behauptung muss die Zahl treffen, die wirklich dasteht"
 
   it("und jede zählt, was der echte Rumpf wirklich enthält", () => {
     for (const z of ZAEHLUNGEN) {
-      const body = RUMPFE.get(z.ziel);
+      const body = rumpfFuer(z.datei, z.ziel);
       expect(body, z.ziel).toBeDefined();
       const ist = body!.split(z.muster).length - 1;
       expect(ist,

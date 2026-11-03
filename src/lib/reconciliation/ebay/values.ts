@@ -12,8 +12,8 @@
  * error the caller reports, not a value guessed into shape.
  */
 
-import { roundMoney } from "@/lib/orderbook/sales-money";
-import type { IsoDay } from "../types";
+import { roundMoney } from "../../orderbook/sales-money.ts";
+import type { IsoDay } from "../types.ts";
 
 export type Read<T> = { ok: true; value: T } | { ok: false; reason: "invalid" | "foreign_currency" };
 

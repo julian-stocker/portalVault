@@ -7,8 +7,8 @@
  * platform a report came from beyond `ExternalOrder.channel`.
  */
 
-import { EBAY_PARSER_ID, looksLikeEbayOrdersReport, parseEbayOrdersReport } from "./ebay/parse";
-import type { ParseResult } from "./types";
+import { EBAY_PARSER_ID, looksLikeEbayOrdersReport, parseEbayOrdersReport } from "./ebay/parse.ts";
+import type { ParseResult } from "./types.ts";
 
 export type SalesReportParser = {
   id: string;

@@ -107,6 +107,14 @@ describe("guard 1 — no table carries a seller", () => {
          er minus die drei Zeilen zeichengleich der aus `0160` ist —
          eine Kopie also, und keine neue Verwendung. */
       "0164_platform_export_types.sql",
+      /* `0174` zum sechsten Mal: derselbe Rumpf aus `0164` plus sieben
+         Bereiche des Verkaufsabgleichs (`0169`), weit weg vom Bereich
+         `seller_operators`. Die Nennung `t.seller_id` ist dieselbe Kopie,
+         und `backup-sales-reconciliation.test.ts` beweist, dass der neue
+         Rumpf minus den eingefügten Block und zwei Zeilen zeichengleich der
+         aus `0164` ist. Die Betriebssicherung in derselben Datei nennt
+         `seller_id` nicht. */
+      "0174_backup_sales_reconciliation.sql",
     ];
     for (const file of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && !MEMBERSHIP.includes(f))) {
       const body = readFileSync(`${MIGRATIONS}/${file}`, "utf8")

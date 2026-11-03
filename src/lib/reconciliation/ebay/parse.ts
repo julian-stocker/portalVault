@@ -26,11 +26,11 @@
  * Only the columns in `columns.ts` are ever read. See there for why.
  */
 
-import { roundMoney } from "@/lib/orderbook/sales-money";
-import { isEmptyRecord, parseCsv } from "../csv";
-import type { ExternalLine, ExternalOrder, ParseResult, ReportIssue } from "../types";
-import { COUNTRY_CODES, EBAY_COLUMNS, type EbayColumn, FOOTER_LABEL, REQUIRED_COLUMNS } from "./columns";
-import { parseEbayDate, parseEbayMoney, parseQuantity } from "./values";
+import { roundMoney } from "../../orderbook/sales-money.ts";
+import { isEmptyRecord, parseCsv } from "../csv.ts";
+import type { ExternalLine, ExternalOrder, ParseResult, ReportIssue } from "../types.ts";
+import { COUNTRY_CODES, EBAY_COLUMNS, type EbayColumn, FOOTER_LABEL, REQUIRED_COLUMNS } from "./columns.ts";
+import { parseEbayDate, parseEbayMoney, parseQuantity } from "./values.ts";
 
 export const EBAY_PARSER_ID = "ebay-orders-report-de";
 export const EBAY_PARSER_VERSION = 1;

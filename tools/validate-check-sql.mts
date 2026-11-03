@@ -531,7 +531,20 @@ async function main(): Promise<void> {
    * echtem PostgreSQL tut, und das bleibt ihr Zweck. Welche das sind, liest er aus den Dateien
    * selbst — eine Liste, die niemand pflegen muss.
    */
-  const vorstand = funktionsfaltung(PROBELAUF);
+  /*
+   * UND DIE SPAETEREN ERSETZUNGEN DERSELBEN FUNKTIONEN.
+   *
+   * `0174` ersetzt `seller_business_backup()` (und `system_platform_export()`)
+   * ein weiteres Mal. Eine Faltung, die nur die PROBELAUF-Dateien auslässt,
+   * lieferte deshalb den Rumpf aus `0174` statt den aus `0131` — und `0136`
+   * bräche im Probelauf zu Recht mit „der lebende Rumpf ist nicht der aus
+   * 0131" ab. Ein Befund des Aufbaus, keiner der Migration. Der Vorstand
+   * lässt solche späteren Ersetzungen deshalb ebenfalls aus; sie legen keine
+   * Spalte und keine neue Funktion an, die der Probelauf zurücknehmen müsste.
+   */
+  const SPAETER_ERSETZT = ["0174_backup_sales_reconciliation.sql"] as const;
+  const VORSTAND_AUSSER = [...PROBELAUF, ...SPAETER_ERSETZT] as const;
+  const vorstand = funktionsfaltung(VORSTAND_AUSSER);
   const zurueck: string[] = [];
   for (const datei of PROBELAUF) {
     const sql = readFileSync(join(MIG_DIR, datei), "utf8");
@@ -573,7 +586,7 @@ async function main(): Promise<void> {
    */
   const kommentare: string[] = [];
   for (const datei of readdirSync(MIG_DIR)
-    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && !PROBELAUF.includes(f as never)).sort()) {
+    .filter((f) => /^\d{4}_.*\.sql$/.test(f) && !VORSTAND_AUSSER.includes(f as never)).sort()) {
     for (const roh of anweisungen(readFileSync(join(MIG_DIR, datei), "utf8"))) {
       const s = ohneKopf(roh);
       if (/^comment\s+on\s+function\b/i.test(s)) kommentare.push(s);
@@ -852,7 +865,7 @@ async function main(): Promise<void> {
      danach gegen einen, in dem `0133` steht. Nur wenn der zweite Lauf
      anschlägt, prüft der erste etwas. */
   {
-    const ohne0133 = funktionsfaltung([...PROBELAUF,
+    const ohne0133 = funktionsfaltung([...VORSTAND_AUSSER,
       "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
     const db = new PGlite();
     await stubAnwenden(db);
@@ -1211,7 +1224,7 @@ async function main(): Promise<void> {
 
     /** Stand 0132: die Faltung ohne 0133, 0134, 0135, 0136. */
     const bauen = async (): Promise<InstanceType<typeof PGlite>> => {
-      const fold0132 = funktionsfaltung([...PROBELAUF,
+      const fold0132 = funktionsfaltung([...VORSTAND_AUSSER,
         "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
       const db = new PGlite();
       await stubAnwenden(db);
@@ -1687,7 +1700,7 @@ async function main(): Promise<void> {
 
     /** Der Stand, den Staging fuehrt: 0132, dann 0135 und 0136. */
     const bauen = async (): Promise<InstanceType<typeof PGlite>> => {
-      const fold0132 = funktionsfaltung([...PROBELAUF,
+      const fold0132 = funktionsfaltung([...VORSTAND_AUSSER,
         "0133_paid_total_immutable.sql", "0134_purchase_item_source_row_visible.sql"]);
       const db = new PGlite();
       await stubAnwenden(db);
@@ -12322,6 +12335,235 @@ async function main(): Promise<void> {
         sagt: `0164: ${befund73.join(" · ")}`,
       });
     }
+  }
+
+  /* =====================================================================
+   * P74 — 0174: the sales reconciliation of `0169` in BOTH backups.
+   *
+   * WHAT ONLY THIS RUN CAN SHOW: that PostgreSQL creates both bodies with
+   * exactly the fingerprints the migration promises, that the latches hold
+   * (0169 missing, a foreign body, a second run), that the exported document
+   * carries all seven areas WITHOUT `sales_recon_orders.lines`, and that
+   * `R0174` turns both bodies back while every row of `0169` stays.
+   *
+   * The world is the bare stub schema (every table and column of every
+   * migration, no constraints) plus the two PREVIOUS bodies cut from `0140`
+   * and `0164` — the stub carries hulls, and the latch needs the real
+   * predecessor.
+   * ===================================================================== */
+  {
+    const befund74: string[] = [];
+    let ok74 = true;
+    const sag74 = (was: string, gut: boolean, text: string): void => {
+      befund74.push(`${gut ? "" : "!! "}${was}: ${text}`);
+      if (!gut) ok74 = false;
+    };
+    const M174 = join(MIG_DIR, "0174_backup_sales_reconciliation.sql");
+    const R174 = "supabase/rollback/R0174_backups_without_sales_reconciliation.sql";
+    const B0140 = "a32b148cebe00ee0d0d469f96fd2028e";
+    const B0174 = "3a798f506f5f43e5b1b69dc242a1b16f";
+    const P0164 = "7e9e58e2d84a9f8a7c660262aa21926b";
+    const P0174 = "23be72d581589b063d6938a863757b31";
+
+    const db = new PGlite();
+    await stubAnwenden(db);
+    const w74 = async (sql: string): Promise<string> =>
+      String(((await db.query(sql)) as { rows: Record<string, unknown>[] }).rows[0]?.w ?? "?");
+    const abdruck74 = async (fn: string): Promise<string> => w74(
+      `select md5(p.prosrc) as w from pg_proc p
+        where p.oid = to_regprocedure('public.${fn}()')`);
+    const anweisungVon74 = (datei: string, fn: string): string => {
+      const sql = readFileSync(datei, "utf8");
+      const von = sql.indexOf(`create or replace function public.${fn}()`);
+      const bis = sql.indexOf("\n$$;", von) + "\n$$;".length;
+      return sql.slice(von, bis);
+    };
+    const kurz = (f: string | null): string => (f ?? "DURCHGELAUFEN").slice(0, 70);
+
+    /* ---- The world: both gates open, both previous bodies. */
+    await db.exec(`create or replace function public.is_platform_admin() returns boolean
+                     language sql as $stub$ select true $stub$;
+                   create or replace function public.can_operate_active_seller() returns boolean
+                     language sql as $stub$ select true $stub$;`);
+    await db.exec(anweisungVon74(join(MIG_DIR, "0140_business_backup_sale_release.sql"),
+                                 "seller_business_backup"));
+    await db.exec(anweisungVon74(join(MIG_DIR, "0164_platform_export_types.sql"),
+                                 "system_platform_export"));
+    sag74("Aufbau: the bodies from 0140 and 0164",
+          (await abdruck74("seller_business_backup")) === B0140
+            && (await abdruck74("system_platform_export")) === P0164,
+          `${(await abdruck74("seller_business_backup")).slice(0, 8)}… / `
+            + `${(await abdruck74("system_platform_export")).slice(0, 8)}…`);
+
+    /* ---- A: without a table of 0169 it aborts, and nothing changes. */
+    await db.exec("alter table public.sales_recon_decisions rename to z74_decisions;");
+    const ohne0169 = await fahre(db, M174);
+    await db.exec("alter table public.z74_decisions rename to sales_recon_decisions;");
+    sag74("without 0169 it aborts",
+          ohne0169 !== null && ohne0169.includes("0174 needs 0169")
+            && (await abdruck74("seller_business_backup")) === B0140,
+          kurz(ohne0169));
+
+    /* ---- B: a foreign business body (0136) — neither function is replaced. */
+    await db.exec(anweisungVon74(join(MIG_DIR, "0136_business_backup_item_type.sql"),
+                                 "seller_business_backup"));
+    const fremd = await fahre(db, M174);
+    sag74("against the business body from 0136 it aborts, the platform body stays",
+          fremd !== null && fremd.includes("not the body from 0140")
+            && (await abdruck74("system_platform_export")) === P0164,
+          kurz(fremd));
+    await db.exec(anweisungVon74(join(MIG_DIR, "0140_business_backup_sale_release.sql"),
+                                 "seller_business_backup"));
+
+    /* ---- C: the run, and the promised fingerprints, measured. */
+    const lauf = await fahre(db, M174);
+    const bNeu = await abdruck74("seller_business_backup");
+    const pNeu = await abdruck74("system_platform_export");
+    sag74("0174 runs; both fingerprints are the promised ones",
+          lauf === null && bNeu === B0174 && pNeu === P0174,
+          `${lauf ?? "durch"} · ${bNeu.slice(0, 8)}… / ${pNeu.slice(0, 8)}…`);
+
+    /* ---- D: a second run bounces off its own latch. */
+    const zweiter = await fahre(db, M174);
+    sag74("a second run bounces", zweiter !== null && zweiter.includes("applied here already"),
+          kurz(zweiter));
+
+    /* ---- E: one reconciliation, end to end, through both exports. */
+    await db.exec(`
+      insert into public.sales (id, channel) values (9101, 'ebay');
+      insert into public.sales_recon_sessions (id, channel, parser, parser_version, state,
+          files_key, chain_complete, summary, created_at, created_by)
+        values (1, 'ebay', 'ebay-orders', 1, 'open', repeat('a', 64), true, '{}', now(),
+                gen_random_uuid());
+      insert into public.sales_recon_files (id, session_id, file_name, fingerprint, orders)
+        values (1, 1, 'orders.csv', repeat('a', 64), 1);
+      insert into public.sales_recon_orders (id, session_id, channel, order_ref, sold_on,
+          items_value, shipping, total, pieces, combined, source_file, lines)
+        values (1, 1, 'ebay', '01-23456-78901', date '2026-02-18', 54.30, 6.99, 61.29, 2,
+                false, 'orders.csv', '[{"title": "Spyro, gebraucht"}]');
+      insert into public.sales_recon_matches (id, session_id, order_id, sale_id, category,
+          certainty, score, competitors, sale_updated_at)
+        values (1, 1, 1, 9101, 'deviating', 'deterministic', 0.987, '[]', now());
+      insert into public.sales_recon_findings (id, match_id, finding_key, field, kind,
+          ledger_value, external_value, delta, causes, allowed_decisions)
+        values (1, 1, 'shipping', 'shipping', 'deviation', '4.99', '6.99', 2.00, '[]',
+                array['take_external', 'keep_ledger']);
+      insert into public.sales_recon_decisions (id, finding_id, decision, shown_ledger,
+          shown_external, decided_at, decided_by)
+        values (1, 1, 'take_external', '4.99', '6.99', now(), gen_random_uuid());
+      insert into public.sales_recon_applications (id, decision_id, session_id, sale_id,
+          field, outcome, old_value, new_value, applied_at, applied_by)
+        values (1, 1, 1, 9101, 'shipping', 'applied', '4.99', '6.99', now(),
+                gen_random_uuid());`);
+    const archive74: Record<string, Record<string, Record<string, unknown>[]>> = {};
+    for (const [fn, bereiche, version] of [["seller_business_backup", 35, 1],
+                                           ["system_platform_export", 61, 3]] as const) {
+      const r = (await db.query(`select public.${fn}() as d`)) as
+        { rows: { d: { format_version: number; data: Record<string, Record<string, unknown>[]> } }[] };
+      const d = r.rows[0].d;
+      const daten = d.data;
+      archive74[fn] = daten;
+      const neu = ["sales_recon_sessions", "sales_recon_files", "sales_recon_orders",
+                   "sales_recon_matches", "sales_recon_findings", "sales_recon_decisions",
+                   "sales_recon_applications"];
+      const order = daten.sales_recon_orders?.[0] ?? {};
+      const finding = daten.sales_recon_findings?.[0] ?? {};
+      const konto = neu.flatMap((k) => Object.keys(daten[k]?.[0] ?? {}))
+        .filter((f) => f.endsWith("_by"));
+      sag74(`${fn}: ${bereiche} areas, version ${version}, all seven with their row, `
+            + "orders without lines, money as text, no account identity",
+            Object.keys(daten).length === bereiche && d.format_version === version
+              && neu.every((k) => daten[k]?.length === 1)
+              && !("lines" in order) && order.total === "61.29" && order.items_value === "54.30"
+              && finding.delta === "2.00" && finding.external_value === 6.99
+              && konto.length === 0
+              && daten.sales_recon_decisions[0].finding_id === finding.id
+              && daten.sales_recon_matches[0].sale_id === 9101,
+            `${Object.keys(daten).length} areas · v${d.format_version} · lines `
+              + `${"lines" in order ? "PRESENT" : "absent"} · total ${String(order.total)} · `
+              + `*_by ${konto.length}`);
+    }
+
+    /* ---- E2: THE ROUND TRIP (the P66/P69 pattern, ADR-0174 decision 2).
+     *
+     * There is no restore function (ADR-0114/0115); restorability is shown the
+     * way P66 and P69 show it: export, delete, insert back FROM THE ARCHIVE,
+     * compare. For each backup: the seven tables are emptied (children
+     * first), refilled from that backup's areas in reference order, and then
+     * every exported column must be identical to before — and the evidence
+     * chain decision → finding → match → order → sale must read the same
+     * sentence it read before. `lines` and the account identities come back
+     * empty, by design; nothing an audit needs is among them. */
+    const ketten74 = `select d.decision || '|' || f.field || '|' || f.ledger_value::text || '>'
+          || f.external_value::text || '|' || o.order_ref || '|' || m.sale_id::text || '|'
+          || a.outcome || '|' || a.new_value as w
+        from public.sales_recon_decisions d
+        join public.sales_recon_findings f on f.id = d.finding_id
+        join public.sales_recon_matches m on m.id = f.match_id
+        join public.sales_recon_orders o on o.id = m.order_id
+        join public.sales_recon_applications a on a.decision_id = d.id`;
+    const reihenfolge74 = ["sales_recon_sessions", "sales_recon_files", "sales_recon_orders",
+                           "sales_recon_matches", "sales_recon_findings", "sales_recon_decisions",
+                           "sales_recon_applications"];
+    const abdruckTabellen74 = async (spalten: Record<string, string[]>): Promise<string> => {
+      const teile: string[] = [];
+      for (const tab of reihenfolge74) {
+        teile.push(await w74(`select coalesce(md5(string_agg(x::text, chr(10) order by x::text)), '-') as w
+                                from (select ${spalten[tab].map((c) => `t.${c}`).join(", ")} from public.${tab} t) x`));
+      }
+      return teile.join("/");
+    };
+    const kette74Vorher = await w74(ketten74);
+    for (const fn of ["seller_business_backup", "system_platform_export"] as const) {
+      const daten = archive74[fn];
+      const spalten = Object.fromEntries(reihenfolge74.map((k) => [k, Object.keys(daten[k]?.[0] ?? {})]));
+      const vorher = await abdruckTabellen74(spalten);
+      for (const tab of [...reihenfolge74].reverse()) await db.exec(`delete from public.${tab};`);
+      const leer = await w74(`select (select count(*) from public.sales_recon_sessions)
+                                 + (select count(*) from public.sales_recon_applications) as w`);
+      for (const tab of reihenfolge74) {
+        const cols = spalten[tab].join(", ");
+        // Dollar-quoted: the archive's own JSON, verbatim — the tag cannot occur in it.
+        await db.exec(`insert into public.${tab} (${cols})
+                         select ${cols} from jsonb_populate_recordset(null::public.${tab},
+                           $archiv74$${JSON.stringify(daten[tab] ?? [])}$archiv74$::jsonb);`);
+      }
+      const nachher = await abdruckTabellen74(spalten);
+      const kette = await w74(ketten74);
+      const ohne = await w74(`select (select count(*) from public.sales_recon_orders where lines is not null)
+                                 + (select count(*) from public.sales_recon_decisions where decided_by is not null) as w`);
+      sag74(`${fn}: round trip — emptied, refilled from the archive, every exported column identical, `
+            + "the decision reads the same, lines and account identities back as empty",
+            leer === "0" && vorher === nachher && kette === kette74Vorher && kette.startsWith("take_external|shipping|")
+              && ohne === "0",
+            `geleert ${leer} · Spalten ${vorher === nachher ? "gleich" : "VERSCHIEDEN"} · Kette "${kette}"`);
+    }
+
+    /* ---- F: R0174 refuses a third version, then turns both back. */
+    await db.exec(anweisungVon74(join(MIG_DIR, "0160_platform_export_base_sky_id.sql"),
+                                 "system_platform_export"));
+    const rueckFremd = await fahre(db, R174);
+    sag74("R0174 refuses a third platform body",
+          rueckFremd !== null && rueckFremd.includes("A third version"), kurz(rueckFremd));
+    await db.exec(anweisungVon74(M174, "system_platform_export"));
+    const rueck = await fahre(db, R174);
+    const zeilen = await w74(`select (select count(*) from public.sales_recon_sessions)
+                                 + (select count(*) from public.sales_recon_orders)
+                                 + (select count(*) from public.sales_recon_decisions) as w`);
+    sag74("R0174 restores both previous bodies and leaves every row of 0169",
+          rueck === null && (await abdruck74("seller_business_backup")) === B0140
+            && (await abdruck74("system_platform_export")) === P0164 && zeilen === "3",
+          `${rueck ?? "durch"} · rows ${zeilen}`);
+    const rueck2 = await fahre(db, R174);
+    sag74("a second R0174 changes nothing", rueck2 === null, rueck2 ?? "durch");
+
+    probe.push({
+      name: "P74 0174: the sales reconciliation in BOTH backups — both bodies with "
+        + "the promised fingerprints, the latches (0169 missing, foreign body, second "
+        + "run), all seven areas in each export with lines left out, and R0174",
+      ok: ok74,
+      sagt: `0174: ${befund74.join(" · ")}`,
+    });
   }
 
   for (const p of probe) console.log(`  ${p.ok ? "OK     " : "FEHLER "} ${p.name}\n           ${p.sagt}`);
