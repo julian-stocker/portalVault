@@ -471,6 +471,44 @@ Ein eigener, getrennter Weg neben Katalog- und Charakterimport (ADR-0044). Er sc
 `quantity`, setzt weder Preis noch Listung, liest keine private oder personenbezogene Spalte und
 ist durch den Unique-Index `inventory_movements_one_initial_import` nicht wiederholbar.
 
+### Verkaufsabgleich — Plattformberichte gegen das Verkaufsbuch (Phase 1 und 2)
+
+```
+eBay-Bestellbericht (.csv, im Browser gelesen)
+      →  registry.ts → ebay/parse.ts     Whitelist: nur fachliche Spalten, Käuferdaten verworfen
+      →  dedupe.ts                       gleiche Datei · gleiche Bestellung · Widerspruch
+      →  coverage.ts                     Zeitraum, Fußzahl, Verkaufsprotokoll-Kette (n + 1)
+      →  match.ts                        A: external_order_ref · B: Datum ±3, Warenwert netto,
+                                         Figuren, Stück, Versand → globale 1:1-Zuordnung
+      →  diff.ts                         Befund je Feld · mögliche Ursachen · Hinweise
+```
+
+Alles unter `src/lib/reconciliation/` ist **reines TypeScript ohne Datenbank, ohne
+Server-Aktion und ohne Node-Abhängigkeit**. Es läuft unverändert im Browser und in Vitest.
+Damit verlässt eine Plattformdatei den Rechner des Betreibers nie als Ganzes. Was später an den
+Server geht, ist das normalisierte Modell aus `types.ts`, und das **hat für Käuferdaten kein Feld**.
+
+**Zwei getrennte Fragen.** `match.ts` beantwortet nur die *Identität* — welcher Verkauf ist
+welche Bestellung, und wie sicher (`deterministic`, `unique`, `probable`, `ambiguous`). `diff.ts`
+beantwortet danach, ob beide *übereinstimmen*. Ein Verkauf mit falschem Datum und fehlender Figur
+wird so trotzdem als derselbe Verkauf gefunden, und erst dadurch werden seine Fehler sichtbar.
+
+**Verglichen wird, was dasselbe bedeutet:** `items_subtotal − discount_amount` gegen die Summe
+von Menge × Stückpreis (eBay-Stückpreise liegen schon nach dem Mengenrabatt), der Versand gegen den
+Versand, und das erwartete Ergebnis (Ware + Versand − Erstattungen, 0 bei Storno) gegen den
+eBay-Gesamtbetrag, den eBay bereits um Erstattungen gemindert hat. Eine Abweichung im
+Gesamtbetrag ist ein Befund; *Storno* oder *Erstattung* sind nur mögliche Ursachen. Eine fehlende
+`external_order_ref` ist eine **Ergänzung**, keine Abweichung.
+
+**Figuren** werden stückweise verglichen, in vier Stufen (exakt · normalisiert · bekannter Alias
+aus dem eigenen Verkaufsbuch · unscharf). Zwei Sperren überstimmt keine Stufe: unterschiedliche
+**Modellnummern** (Portale) und ein **Variantenmerkmal** auf nur einer Seite (`Dark`, `Legendary`,
+`LC`, …). Eine Serie, die nur der Angebotstitel nennt, ist ein Hinweis, keine Abweichung.
+
+Erweiterbar für weitere Plattformen: ein weiterer Eintrag in `registry.ts`, der seine Datei in
+dasselbe `ExternalReport` übersetzt. Datenbank, Sitzungen, Oberfläche und das Übernehmen von
+Entscheidungen sind spätere Phasen.
+
 ### Marktpreise
 
 V1: der importierte Wert aus der Excel. Später optional Preisverlauf; die Anwendung liest den

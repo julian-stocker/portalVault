@@ -1,6 +1,6 @@
 # Projektstatus — PortalVault
 
-Stand: 2026-11-02 · beschreibt den **aktuellen** Zustand, nicht die Historie.
+Stand: 2026-11-03 · beschreibt den **aktuellen** Zustand, nicht die Historie.
 Die vollständige Änderungshistorie liegt in Git.
 
 ---
@@ -81,6 +81,33 @@ Die vollständige Änderungshistorie liegt in Git.
 > **Production steht seit 2026-09-21 auf `commerce_mode = live`** — echte Kundschaft kann echt
 > bezahlen. App-Tester zahlen davon unberührt weiter in der Stripe-Sandbox (ADR-0100). Der
 > Schalter ist jederzeit durch dieselbe Einstellung zurücknehmbar.
+
+## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, nicht committet**
+
+Grundlage für einen dauerhaften Abgleich zwischen Plattformberichten und den externen Verkäufen
+in SkyIsles. Zuerst eBay Seller Hub „Orders Report“ (deutscher CSV-Export). Gebaut ist nur die
+Logik: `src/lib/reconciliation/` — CSV-Leser, eBay-Parser mit Spalten-Whitelist, normalisiertes
+Modell, Dubletten, Abdeckung samt Verkaufsprotokoll-Kette, Figurenvergleich mit Aliasen und
+Sperren, globale 1:1-Zuordnung und Befunde je Feld. Aufbau und Regeln: `docs/ARCHITECTURE.md`
+Abschnitt 6, „Verkaufsabgleich“.
+
+**Nicht gebaut:** Migrationen, RPCs, Import-Sitzungen, Oberfläche, Entscheidungen übernehmen,
+Lagerbuchungen. Nichts schreibt in eine Datenbank.
+
+| Prüfung | Ergebnis |
+|---|---|
+| Synthetische Tests (`src/lib/reconciliation/**/*.test.ts`) | 160 Tests in 9 Dateien, darunter die **neun bekannten Abweichungsfälle** und ihre Gegenbeispiele (Rabatt, erfasste Erstattung und Storno, Schreibweise, Serienhinweis, fehlende Referenz) |
+| Lokaler Integrationstest mit den echten Berichten (`real-reports.local.test.ts`, nur mit `SKYISLES_EBAY_REPORTS` / `SKYISLES_SALES_EXPORT`) | 9 Dateien · 311 Bestellungen · 1 258 Positionen · 1 375 Stück · alle Fußzahlen bestätigt · Kette 1061–2518 lückenlos · gegen den Production-Export vom 2026-11-02: **302 exakt · 8 sicher mit Abweichung · 1 wahrscheinlich · 0 mehrdeutig · 0 nur eBay · 0 nur SkyIsles · 23 nicht vergleichbar** (31.12.2025 und 22 Oktober-Verkäufe) |
+| Dieselben Fälle wie die Analyse | ja — dieselben neun Verkäufe, nicht nur dieselben Anzahlen; Geldbefund +56,17 € (zwei Gesamtbeträge), Warenwert und Versand 0,00 € |
+
+Die echten Berichte und Exporte liegen ausschließlich unter `~/SkyIsles-Daten/` und gelangen
+weder in Testdaten noch ins Repository (`docs/SECURITY.md` §2). Reguläre Tests verwenden nur
+synthetische Daten aus `src/lib/reconciliation/testing/`.
+
+**Nächster Schritt:** die offenen fachlichen Entscheidungen des Plans (Ort im Betrieb,
+Datumskonvention, Behandlung historischer Positionen, Storno-Funktion, Speichern der
+Bestellreferenz) und danach Phase 3 — Sitzungstabellen und RPCs, zuerst auf Staging.
+Unabhängig davon steht der Datenvergleich Staging ↔ Production über die zwei neuen Exporte aus.
 
 ## Architekturentscheidung Benachrichtigungen (2026-10-26, ADR-0146, ADR-0147) — **entschieden, nichts gebaut**
 
