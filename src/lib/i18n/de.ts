@@ -2462,6 +2462,45 @@ export const de = {
         stale: "Der Verkauf wurde seit der Analyse geändert.",
       },
       snapshotsPurged: "Die Positionslisten dieser Sitzung wurden gelöscht; Befunde und Entscheidungen bleiben erhalten.",
+
+      /* Der leise Einstieg unter Verkauf → Extern — kein dritter Reiter. */
+      entry: "Abgleich mit Plattformberichten",
+      backToSales: "Zurück zu den Verkäufen",
+      intro:
+        "Plattformberichte gegen die externen Verkäufe in SkyIsles — jede Abweichung wird einzeln entschieden.",
+
+      /*
+       * DIE SITZUNGSLISTE. Sie zeigt, was die Datenbank je Sitzung liefert,
+       * und nichts, was sie daraus schließen müsste: „Befunde mit Entscheidung"
+       * zählt auch „später entscheiden" mit und ist deshalb ausdrücklich KEINE
+       * Zahl offener oder anwendbarer Entscheidungen.
+       */
+      list: {
+        heading: "Abgleichssitzungen",
+        empty: "Noch keine Abgleichssitzung.",
+        session: (id: number) => `Sitzung ${id}`,
+        channels: { ebay: "eBay" } as Record<string, string>,
+        period: "Zeitraum",
+        noPeriod: "ohne Zeitraum",
+        files: "Dateien",
+        createdAt: "Angelegt",
+        closedAt: "Abgeschlossen am",
+        discardedAt: "Verworfen am",
+        chain: "Verkaufsprotokoll",
+        chainComplete: "lückenlos",
+        chainIncomplete: "mit Lücken",
+        decided: "Befunde mit Entscheidung",
+        decidedHint: "einschließlich „später entscheiden“",
+        applied: "Übernommene Entscheidungen",
+        categoriesLabel: "Ergebnis der Analyse",
+        noSummary: "Keine Zusammenfassung gespeichert.",
+        stateHints: {
+          open: "Entscheidungen können getroffen und übernommen werden.",
+          closed: "Beendet — nur noch lesbar.",
+          discarded: "Verworfen — daraus wurde nichts übernommen.",
+        },
+        reload: "Neu laden",
+      },
     },
     sales: {
       title: "Verkauf",

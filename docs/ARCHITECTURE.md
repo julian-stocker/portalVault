@@ -506,8 +506,24 @@ aus dem eigenen Verkaufsbuch · unscharf). Zwei Sperren überstimmt keine Stufe:
 `LC`, …). Eine Serie, die nur der Angebotstitel nennt, ist ein Hinweis, keine Abweichung.
 
 Erweiterbar für weitere Plattformen: ein weiterer Eintrag in `registry.ts`, der seine Datei in
-dasselbe `ExternalReport` übersetzt. Datenbank, Sitzungen, Oberfläche und das Übernehmen von
-Entscheidungen sind spätere Phasen.
+dasselbe `ExternalReport` übersetzt. Datenbank, Sitzungen und das Übernehmen von Entscheidungen
+stehen seit Phase 3 in `0169`–`0176` (ADR-0174), nur auf Staging.
+
+**Oberfläche (Phase 4, im Aufbau).** Die Oberfläche entscheidet nichts selbst:
+
+```
+seller_recon_sessions() / seller_recon_session()      (0172, JSON)
+      →  server/queries.ts      Staging-Sperre + Verkäuferrolle, dann die Funktion
+      →  view.ts                Antwort → UI-Typen; snake_case (Sitzung, Dateien, Bestellung)
+                                und camelCase (Liste, Zuordnung, Verkauf, Befunde);
+                                falsche Form → ViewContractError (Pfad, nie ein Wert)
+      →  /business/orderbuch/abgleich    Sitzungsübersicht, nur lesend
+```
+
+`view.ts` importiert nur Typen — kein Matching, kein Diff, keine Zählung offener Entscheidungen.
+Welche Entscheidungen ein Befund erlaubt, kommt aus der Datenbank (`allowedDecisions`); die
+angezeigten Werte bleiben unverändert für den PT409-Vergleich in `seller_recon_decide`.
+Upload, Sitzungsansicht, Entscheiden und Anwenden folgen.
 
 ### Marktpreise
 

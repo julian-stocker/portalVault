@@ -79,6 +79,13 @@ const pageAnswer = (over: Record<string, unknown> = {}) => ({
 
 const FIRST: PageRequest = { category: null, offset: 0, limit: 50 };
 
+/** A copy of `o` without `key` — for "this field is missing". */
+function without(o: Record<string, unknown>, key: string): Record<string, unknown> {
+  const copyOf = { ...o };
+  delete copyOf[key];
+  return copyOf;
+}
+
 /** Run `fn` and return the contract error's path. */
 function pathOf(fn: () => unknown): string {
   try {
@@ -173,8 +180,7 @@ describe("seller_recon_sessions()", () => {
   it("refuses a non-list, a missing field, an unknown state, a wrong type", () => {
     expect(pathOf(() => sessionListView(null))).toBe("sessions");
     expect(pathOf(() => sessionListView({}))).toBe("sessions");
-    const { applied: _, ...withoutApplied } = listRow();
-    expect(pathOf(() => sessionListView([withoutApplied]))).toBe("sessions[0].applied");
+    expect(pathOf(() => sessionListView([without(listRow(), "applied")]))).toBe("sessions[0].applied");
     expect(pathOf(() => sessionListView([listRow({ state: "archived" })]))).toBe("sessions[0].state");
     expect(pathOf(() => sessionListView([listRow({ chainComplete: "yes" })]))).toBe("sessions[0].chainComplete");
     expect(pathOf(() => sessionListView([listRow({ files: 1.5 })]))).toBe("sessions[0].files");
@@ -270,12 +276,6 @@ describe("seller_recon_session()", () => {
     expect(view.matches[0].competitors).toEqual([{ orderRef: "01-2", saleId: 363, score: 0.8 }]);
   });
 
-  const without = (o: Record<string, unknown>, key: string) => {
-    const copyOf = { ...o };
-    delete copyOf[key];
-    return copyOf;
-  };
-
   it.each([
     ["an unknown category", matchRow({ category: "maybe" }), "matches[0].category"],
     ["an unknown reason", matchRow({ reason: "weather" }), "matches[0].reason"],
@@ -288,10 +288,8 @@ describe("seller_recon_session()", () => {
   });
 
   it("refuses a missing total, session or matches list", () => {
-    const { total: _t, ...noTotal } = pageAnswer();
-    expect(pathOf(() => sessionPageView(noTotal, FIRST))).toBe("page.total");
-    const { session: _s, ...noSession } = pageAnswer();
-    expect(pathOf(() => sessionPageView(noSession, FIRST))).toBe("page.session");
+    expect(pathOf(() => sessionPageView(without(pageAnswer(), "total"), FIRST))).toBe("page.total");
+    expect(pathOf(() => sessionPageView(without(pageAnswer(), "session"), FIRST))).toBe("page.session");
     expect(pathOf(() => sessionPageView(pageAnswer({ matches: null }), FIRST))).toBe("matches");
     expect(pathOf(() => sessionPageView(null, FIRST))).toBe("page");
   });
@@ -346,8 +344,7 @@ describe("findings: decisions, shown values, locks", () => {
   it("refuses a structure as a shown value", () => {
     expect(pathOf(() => finding({ ledger: { value: 1 } }))).toBe("matches[0].findings[0].ledger");
     expect(pathOf(() => finding({ external: [1] }))).toBe("matches[0].findings[0].external");
-    const { ledger: _, ...noLedger } = findingRow();
-    expect(pathOf(() => sessionPageView(pageAnswer({ matches: [matchRow({ findings: [noLedger] })] }), FIRST)))
+    expect(pathOf(() => sessionPageView(pageAnswer({ matches: [matchRow({ findings: [without(findingRow(), "ledger")] })] }), FIRST)))
       .toBe("matches[0].findings[0].ledger");
   });
 

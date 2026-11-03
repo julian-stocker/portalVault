@@ -147,7 +147,37 @@ die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unveränder
 
 **`0176` auf Staging vollständig abgenommen (2026-11-03).** Gezielte Ablehnungsprobe `tools/verify-recon-refusals.mts`, Lauf `mw15zob3` (2026-11-03, als vorhandenes Betriebskonto, ohne Service-Role): **19/19** — `buyerName` und E-Mail-Adresse je als neuer und als bekannter Upload abgewiesen, keine verbotenen Inhalte gespeichert, die Sitzung durch die Ablehnungen unverändert, der gültige wiederholte Upload idempotent (dieselbe Sitzung), keine Entscheidung, keine Anwendung, kein Verkauf angelegt; Mini-Sitzung 3 über Testverkauf 362 im Abschlussschritt verworfen. Zustandsdatei `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres` vorher und nachher: 101–108 zeichengleich, 201 `12`, 202 `0`, 203 `0|1|1` → `0|1|2` (einzige Änderung: die verworfene Mini-Sitzung), 204 `12`, 205 `6|5`, 206 `0`, 9998 `0`. **Production: nicht angewendet.**
 
-**Nächster Schritt:** Phase 4 (Oberfläche). Production für `0169`–`0176` erst mit eigener Freigabe.
+## Verkaufsabgleich — Phase 4, Oberfläche (2026-11-03) — **Schritte 1–2 gebaut, nur Staging**
+
+Die Oberfläche entsteht in einzeln freigegebenen Schritten; nur lesend bisher. Keine Migration,
+kein Schreiben.
+
+| Schritt | Stand |
+|---|---|
+| 1 · Darstellungsschicht `src/lib/reconciliation/view.ts` und Texte (`de.ts`) | committet (`aaf9fb9`) |
+| 2 · Sitzungsübersicht `/business/orderbuch/abgleich` | committet (siehe Git) |
+| 3 · Berichte einlesen · 4 · Sitzungsansicht · 5 · Entscheiden · 6 · Abschließen/Verwerfen | offen |
+| 7 · Lesefunktionen `seller_recon_pending` / `seller_recon_history` (ab `0178`, `0177` ist die zentrale Sicherung) | nur konzipiert |
+
+**Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
+Status in Worten, Zeitraum, Dateien, Verkaufsprotokoll, „Befunde mit Entscheidung" (zählt
+„später" mit — **keine** Zahl offener oder anwendbarer Entscheidungen), übernommene
+Entscheidungen, nicht leere Kategorien der gespeicherten Zusammenfassung. Leer- und Fehlerzustand
+sind getrennt (`fetchReconciliationSessions` liefert `ok` / `unavailable` / `error`). **Keine Links
+auf Sitzungen**, bis die Sitzungsseite (Schritt 4) existiert. Einstieg: leiser Link unter
+Verkauf → Extern, kein dritter Reiter. Außerhalb Staging und ohne Verkäuferrolle: 404.
+**Kein `loading.tsx` im Betriebsbereich:** am lokalen Staging-Server gemessen strömte der
+Lade-Platzhalter an einen nicht angemeldeten Aufruf mit, vor dem 404 des Layouts — er ist
+entfernt und durch einen Test ausgeschlossen. Der Seitentitel im Metadatenstrom einer 404-Antwort
+erscheint auf allen Betriebsseiten (auch `/verkauf`) und ist ein eigener, älterer Befund.
+
+**Sichtprüfung:** **nicht erfolgt.** In dieser Sitzung stand kein Browser zur Verfügung; geprüft
+sind nur die automatisierten Tests (Render, Gate, Zustände) und die anonyme 404-Antwort des
+lokalen Staging-Servers. Desktop/Telefon, Überlauf und Fokus prüft der Betreiber angemeldet unter
+`http://127.0.0.1:3000/business/orderbuch/verkauf` (Extern → „Abgleich mit Plattformberichten").
+
+**Nächster Schritt:** Phase 4, Schritt 3 (Berichte einlesen, Upload bis ca. 900 KiB) nach
+Freigabe. Production für `0169`–`0176` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

@@ -28,6 +28,7 @@ import { parseStatus, rpcStatus, type OrderbookStatus } from "@/lib/orderbook/cl
 import { normaliseSearch, parseYearFilter, UNDATED } from "@/lib/orderbook/ledger";
 import { fetchSaleYears, fetchSales } from "@/lib/orderbook/sales-queries";
 import { parseScope, salesHref, SALE_SCOPES } from "@/lib/orderbook/sales-view";
+import { reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 
 export const metadata: Metadata = { title: de.business.sales.title };
 
@@ -110,6 +111,18 @@ export default async function SalesPage({ searchParams }: {
 
       {scope === "intern" ? (
         <p className="mt-1 text-xs text-muted">{copy.internalNoCreate}</p>
+      ) : null}
+
+      {/*
+        The way into the reconciliation (ADR-0174): under Extern only, because
+        it compares external sales, and only where it exists (Staging). A quiet
+        link, not a third tab — it is a tool over this list, not a second list.
+      */}
+      {scope === "extern" && reconciliationEnvironment() ? (
+        <Link href="/business/orderbuch/abgleich"
+              className="focus-ring mt-1 inline-flex min-h-11 items-center rounded-sky-md text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-8">
+          {de.business.reconciliation.entry}
+        </Link>
       ) : null}
 
       <form method="get" action="/business/orderbuch/verkauf" className="mt-4 flex flex-wrap items-center gap-2">
