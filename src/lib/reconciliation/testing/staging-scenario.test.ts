@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { localPlan } from "@/../tools/verify-sales-reconciliation.mts";
+import { localPlan, OPERATOR_ENV_FILE } from "@/../tools/verify-sales-reconciliation.mts";
 import { EXPECTED_CATEGORIES, SCENARIO, orderRef, ownCandidates, scenarioReport } from "./staging-scenario";
 import { ledgerSale } from "./ledger-fixture";
 
@@ -75,21 +75,43 @@ describe("the tool's rules, read as source", () => {
     expect(main.indexOf("ownCandidates(all, ownIds)")).toBeLessThan(main.indexOf("analyse(plan.report"));
   });
 
-  it("compares stock, movements, legacy events and every real sale before and after", () => {
-    for (const s of ["after.stock === before.stock", "after.movements === before.movements",
-      "after.legacy === before.legacy", "after.realSales === before.realSales"]) expect(TOOL).toContain(s);
+  it("uses no service role and manages no account — it signs in as the existing operator", () => {
+    for (const word of ["SERVICE_ROLE_KEY\")", "auth.admin", "createUser", "deleteUser", "seller_operators", ".from("]) {
+      expect(main, word).not.toContain(word);
+    }
+    // The key .env.staging carries for other tools is dropped before any client exists.
+    expect(main.indexOf("delete process.env.SUPABASE_SERVICE_ROLE_KEY")).toBeLessThan(main.indexOf("createClient("));
+    expect(main).toContain("signInWithPassword({ email: EMAIL, password: PASSWORD })");
+    expect(main).toContain("ladeUmgebung(OPERATOR_ENV_FILE)");
   });
 
-  it("removes its temporary operator in every case", () => {
-    expect(main).toMatch(/finally \{[\s\S]*seller_operators[\s\S]*deleteUser/);
+  it("never prints the credentials", () => {
+    for (const line of main.split("\n").filter((l) => /console\.(log|error)|check\(|throw new Error/.test(l))) {
+      expect(line, line).not.toMatch(/EMAIL|PASSWORD|signIn\.data/);
+    }
+    expect(OPERATOR_ENV_FILE.startsWith(process.cwd())).toBe(false);
   });
 
-  it("fails the run when the cleanup fails — a leftover account is never silent", () => {
-    const cleanup = main.slice(main.indexOf("finally {"));
-    // Neither result may be awaited and dropped: both feed a check.
-    expect(cleanup).not.toMatch(/^\s*await admin\.(from\("seller_operators"\)|auth\.admin\.deleteUser)/m);
-    expect(cleanup).toMatch(/const membership = await admin\.from\("seller_operators"\)\.delete\(\)[\s\S]*check\([^)]*!membership\.error/);
-    expect(cleanup).toMatch(/const removed = await admin\.auth\.admin\.deleteUser\([\s\S]*check\([^)]*!removed\.error/);
-    expect(cleanup.indexOf("deleteUser")).toBeLessThan(cleanup.indexOf("finish()"));
+  it("checks every database call — nothing is awaited and dropped", () => {
+    // A call statement on its own line is a dropped result.
+    expect(main).not.toMatch(/^\s*await op\.(rpc|auth)/m);
+    for (const m of main.matchAll(/await op\.rpc\(/g)) {
+      const before = main.slice(Math.max(0, (m.index ?? 0) - 120), m.index);
+      expect(before, main.slice(m.index, (m.index ?? 0) + 60)).toMatch(/(must\(|=\s*|\()\s*$/);
+    }
+  });
+
+  it("leaves the before/after comparison of what it cannot see to the read-only state file", () => {
+    expect(TOOL).toContain("supabase/checks/verify_sales_reconciliation_state.sql");
+    const state = readFileSync("supabase/checks/verify_sales_reconciliation_state.sql", "utf8");
+    for (const nr of ["(101,", "(102,", "(103,", "(104,", "(105,", "(106,", "(107,", "(108,", "(206,"]) expect(state).toContain(nr);
+    expect(state.toLowerCase()).not.toMatch(/\b(insert|update|delete from|create|drop|alter|grant|truncate)\b/);
+  });
+
+  it("discards what it left unfinished, and reports what it cannot discard", () => {
+    const cleanup = main.slice(main.indexOf("} finally {"));
+    expect(cleanup).toMatch(/seller_recon_discard[\s\S]*check\(`unfinished session/);
+    expect(cleanup).toContain('state === "applied"');
+    expect(cleanup.indexOf("Aufräumen")).toBeLessThan(cleanup.indexOf("finish()") === -1 ? Infinity : cleanup.indexOf("finish()"));
   });
 });

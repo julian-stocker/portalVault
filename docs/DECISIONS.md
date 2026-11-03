@@ -17119,10 +17119,16 @@ behoben (ADR-0037, ADR-0039); `0169` hat ihn wiederholt.
    `postgres` und `service_role`, Supabase-Voreinstellung auf allen Nur-Erweitern-Tabellen; über
    die API ist `TRUNCATE` nicht erreichbar). Das gilt projektweit und schon vor `0175`; ein
    `BEFORE TRUNCATE`-Schutz ist ein eigener Auftrag.
-6. **Der Verifier verwirft keinen Aufräumfehler mehr.** `tools/verify-sales-reconciliation.mts`
-   prüft das Entfernen der Betriebszuordnung und das Löschen des temporären Kontos; ein Fehler ist
-   ein fehlgeschlagener Lauf mit der Kontokennung. Ohne `0175` auf Staging endet `--apply` deshalb
-   rot — gewollt.
+6. **Der Verifier braucht weder Service-Role noch eigenes Konto** (Umbau nach dem Befund, vom
+   Betreiber freigegeben). `tools/verify-sales-reconciliation.mts` meldet sich mit dem öffentlichen
+   Schlüssel als das **vorhandene** Staging-Betriebskonto an (Zugangsdaten nur lokal in
+   `~/.skyisles/staging-operator.env`, nie ausgegeben), legt kein Konto an und löscht keines,
+   entfernt den Service-Role-Schlüssel aus seiner Umgebung und liest nur über die Funktionen des
+   Betriebs (`seller_sale`, `seller_sale_audit`, `seller_recon_*`). Jeder Datenbankaufruf wird
+   geprüft; ein abgebrochener Lauf verwirft seine unfertigen Sitzungen und nennt Lauf, Verkäufe
+   und Sitzungen. Was das Betriebskonto nicht sehen darf (Lager, Bewegungen, Legacy, jeder echte
+   Verkauf, Erstattungen, Audit, Holds), misst `supabase/checks/verify_sales_reconciliation_state.sql`
+   als `postgres` vorher und nachher — Zeilen 101–108 müssen gleich sein.
 
 ### Offen (eigener Auftrag)
 

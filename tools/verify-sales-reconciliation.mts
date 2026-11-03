@@ -13,9 +13,8 @@
  * prints what an `--apply` run would create and expect. Exit 1 if the local
  * expectation does not hold.
  *
- * WITH --apply IT WRITES, and only this:
+ * WITH --apply IT WRITES — AS THE EXISTING STAGING OPERATOR, and only this:
  *
- *   * one temporary seller operator (service role, removed at the end);
  *   * eleven external sales MARKED AS TESTS (`is_test`) for the scenario and
  *     one for the conflict probe, all dated 2001,
  *     each with the note `verify:sales-reconciliation <run> <case>`, pieces as
@@ -24,6 +23,28 @@
  *     and the main one (closed). Sessions are evidence and are never deleted
  *     (ADR-0174); the test sales stay as `Testvorgang`, which counts in no
  *     business total (0063) and cannot be deleted while a session names it.
+ *
+ * NO SERVICE ROLE, NO ACCOUNT MANAGEMENT. The run signs in as the operator
+ * account that already exists on Staging, with the public (anon) key, and
+ * does everything through the functions that operator may call. It creates
+ * no account and deletes none. The credentials come from a local file
+ * outside the repository (`~/.skyisles/staging-operator.env`, two lines:
+ * SKYISLES_STAGING_OPERATOR_EMAIL, SKYISLES_STAGING_OPERATOR_PASSWORD) and
+ * are never printed. `.env.staging` carries the service-role key for other
+ * tools; this one removes it from its own environment before anything else.
+ *
+ * WHAT IT CANNOT SEE, A SEPARATE FILE MEASURES. Stock, movements, legacy
+ * events and every real sale are not readable for an operator account.
+ * `supabase/checks/verify_sales_reconciliation_state.sql` (read-only) is run
+ * as `postgres` in the SQL editor before and after `--apply`; rows 101–108
+ * must be identical. That comparison is part of the acceptance.
+ *
+ * AN ABORTED RUN. Every database call is checked; the first failure stops
+ * the run. On the way out it discards the sessions it opened and could not
+ * finish (a session with applications cannot be discarded and is reported),
+ * and it names its run id, its sale ids and its session ids. A new run uses
+ * a new run id, new order numbers and a new file fingerprint, and compares
+ * only its own sales — leftovers of an earlier run cannot enter it.
  *
  * NO REAL SALE CAN BE TOUCHED. The candidates are filtered to the sale ids
  * this run created (`ownCandidates`) before anything is matched; a session
@@ -34,15 +55,19 @@
  * type, the field rules (a total is never "taken"), PT409 for a stale screen,
  * a changed count and a changed sale (all or nothing), idempotent creation and
  * application, the audit lines written, the refusals for anon and for unknown
- * or contact-data payload fields — and that stock, movements, legacy events
- * and every non-test sale are byte-for-byte what they were.
+ * or contact-data payload fields. That stock, movements, legacy events and
+ * every non-test sale are byte-for-byte what they were is shown by the
+ * state file before and after (see above), not by this tool.
  *
  * LOGS carry counts, ids, categories and field names. No report or buyer data
  * exists in this run, and none is printed.
  */
 import { createHash } from "node:crypto";
-import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
+import { ladeUmgebung } from "./lib/staging-db.mts";
 import { requireStaging } from "./lib/staging-guard.mts";
 import { coverageOf } from "../src/lib/reconciliation/coverage.ts";
 import { mergeReports } from "../src/lib/reconciliation/dedupe.ts";
@@ -129,31 +154,13 @@ function requireEnv(name: string): string {
   return value;
 }
 
-type Snapshot = { stock: string; movements: number; legacy: number; realSales: string; realSalesCount: number };
+/** The local file with the operator's credentials — outside the repository, never printed. */
+export const OPERATOR_ENV_FILE = join(homedir(), ".skyisles", "staging-operator.env");
 
-async function snapshot(admin: SupabaseClient): Promise<Snapshot> {
-  const page = async <T,>(table: string, columns: string, onlyRealSales = false): Promise<T[]> => {
-    const rows: T[] = [];
-    for (let from = 0; ; from += 1000) {
-      const base = admin.from(table).select(columns).order("id").range(from, from + 999);
-      const r = await (onlyRealSales ? base.eq("is_test", false) : base);
-      if (r.error) throw new Error(`${table}: ${r.error.message}`);
-      rows.push(...(r.data as T[]));
-      if ((r.data?.length ?? 0) < 1000) break;
-    }
-    return rows;
-  };
-  const stock = await page<{ id: number; quantity: number; reserved: number }>("shop_inventory", "id, quantity, reserved");
-  const real = await page<{ id: number; updated_at: string }>("sales", "id, updated_at", true);
-  const count = async (table: string) => {
-    const r = await admin.from(table).select("id", { count: "exact", head: true });
-    if (r.error) throw new Error(`${table}: ${r.error.message}`);
-    return r.count ?? -1;
-  };
-  return {
-    stock: sha(JSON.stringify(stock)), movements: await count("inventory_movements"),
-    legacy: await count("legacy_stock_events"), realSales: sha(JSON.stringify(real)), realSalesCount: real.length,
-  };
+/** A database call's result, or the run stops — nothing is awaited and dropped. */
+function must<T>(r: { data: T; error: { message: string; code?: string } | null }, label: string): T {
+  if (r.error) throw new Error(`${label}: ${r.error.message}`);
+  return r.data;
 }
 
 const isConflict = (e: { code?: string; message?: string } | null) =>
@@ -180,6 +187,8 @@ async function readSession(op: SupabaseClient, id: number): Promise<SessionMatch
 async function main(): Promise<void> {
   // FIRST: the target is Staging, or nothing else happens.
   requireStaging("verify:sales-reconciliation");
+  // `.env.staging` carries the service-role key for other tools. This one never needs it.
+  delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   const apply = process.argv.includes("--apply");
   const RUN = Date.now().toString(36);
 
@@ -195,6 +204,8 @@ async function main(): Promise<void> {
     console.log(`  ${SCENARIO.length} Testverkäufe (is_test, 2001, nur Rohnamen — kein Hold, kein Lager)`);
     console.log(`  1 Konfliktprobe (verworfen) und 1 Hauptsitzung (geschlossen, bleibt als Nachweis)`);
     console.log(`  ${plan.decisions} Entscheidungen · erwartet übernommen ${plan.expectedApplied} · dokumentiert ${plan.expectedDocumented}`);
+    console.log("  Als vorhandenes Betriebskonto (Anon-Schlüssel), ohne Service-Role, ohne Kontoanlage.");
+    console.log("  Vorher und nachher: supabase/checks/verify_sales_reconciliation_state.sql als postgres.");
     console.log("  Keine Verbindung aufgebaut, nichts geschrieben.");
     finish();
     return;
@@ -202,36 +213,26 @@ async function main(): Promise<void> {
 
   const URL_ = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
   const ANON = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
-  const anonClient = () => createClient(URL_, ANON, { auth: { persistSession: false } });
-  // The service role is used for setup, read-only checks and removing the operator — nothing else.
-  const admin = createClient(URL_, requireEnv("SUPABASE_SERVICE_ROLE_KEY"), {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  let operator: { client: SupabaseClient; user: User } | null = null;
-  let sellerId: number | null = null;
+  ladeUmgebung(OPERATOR_ENV_FILE);
+  const EMAIL = process.env.SKYISLES_STAGING_OPERATOR_EMAIL;
+  const PASSWORD = process.env.SKYISLES_STAGING_OPERATOR_PASSWORD;
+  if (!EMAIL || !PASSWORD) {
+    console.error(`Die Zugangsdaten des Staging-Betriebskontos fehlen (${OPERATOR_ENV_FILE}).`);
+    process.exit(1);
+  }
+  const anonClient = () => createClient(URL_, ANON, { auth: { persistSession: false, autoRefreshToken: false } });
+  const op = anonClient();
+  const sessions = new Map<number, "open" | "applied" | "done">();
+  const ownSales: number[] = [];
 
   try {
-    heading("Setup");
-    const seller = await admin.from("sellers").select("id").eq("is_active", true).single();
-    if (seller.error) throw new Error(`active seller: ${seller.error.message}`);
-    sellerId = seller.data.id as number;
-    const credentials = {
-      email: `recon-verify-${RUN}@skyisles.invalid`,
-      password: `recon-${RUN}-${Math.random().toString(36).slice(2)}`,
-    };
-    const created = await admin.auth.admin.createUser({ ...credentials, email_confirm: true });
-    if (created.error) throw new Error(`createUser: ${created.error.message}`);
-    const client = anonClient();
-    const signIn = await client.auth.signInWithPassword(credentials);
-    if (signIn.error) throw new Error(`signIn: ${signIn.error.message}`);
-    operator = { client, user: created.data.user };
-    const membership = await admin.from("seller_operators").insert({
-      seller_id: sellerId, user_id: operator.user.id, note: "verify:sales-reconciliation",
-    });
-    if (membership.error) throw new Error(`seller_operators: ${membership.error.message}`);
-    const op = operator.client;
-    const before = await snapshot(admin);
-    console.log(`  temporärer Betrieb angelegt · ${before.realSalesCount} echte Verkäufe gemessen (nicht angefasst)`);
+    heading("Anmeldung");
+    const signIn = await op.auth.signInWithPassword({ email: EMAIL, password: PASSWORD });
+    // The message only — never the address, never the password.
+    if (signIn.error) throw new Error(`sign-in as the Staging operator failed: ${signIn.error.message}`);
+    check("signed in as the existing Staging operator (no account created)", true);
+    must(await op.rpc("seller_recon_candidates", { p_channel: "ebay", p_from: "2001-01-01", p_to: "2001-01-01" }),
+         "the account is not a seller operator");
 
     heading("1. Testverkäufe (is_test, 2001)");
     const own = new Map<string, number>();
@@ -243,26 +244,24 @@ async function main(): Promise<void> {
         p_items: c.sale.pieces.map((raw) => ({ raw_name: raw })), p_fees: [], p_adjustments: [],
         p_payout_amount: null, p_payout_ref: null,
       });
-      if (r.error) throw new Error(`create ${c.key}: ${r.error.message}`);
-      own.set(c.key, Number(r.data));
+      own.set(c.key, Number(must(r, `create ${c.key}`)));
+      ownSales.push(own.get(c.key)!);
     }
     check(`${SCENARIO.length} Testverkäufe angelegt`, own.size === SCENARIO.length, [...own.values()].join(","));
     const ownIds = new Set(own.values());
 
     heading("2. Analyse und Sitzung");
-    const candidates = await op.rpc("seller_recon_candidates", { p_channel: "ebay", p_from: SCENARIO_PERIOD.from, p_to: SCENARIO_PERIOD.to });
-    if (candidates.error) throw new Error(`candidates: ${candidates.error.message}`);
-    const all = ledgerSales(candidates.data);
+    const all = ledgerSales(must(await op.rpc("seller_recon_candidates",
+      { p_channel: "ebay", p_from: SCENARIO_PERIOD.from, p_to: SCENARIO_PERIOD.to }), "candidates"));
     const ledger = ownCandidates(all, ownIds);
     check("only this run's sales enter the comparison", ledger.length === ownIds.size,
           `${ledger.length} eigene von ${all.length} Kandidaten`);
-    const aliases = await op.rpc("seller_recon_aliases", { p_channel: "ebay" });
-    if (aliases.error) throw new Error(`aliases: ${aliases.error.message}`);
+    const aliases = must(await op.rpc("seller_recon_aliases", { p_channel: "ebay" }), "aliases");
 
     const analyse = (report: ExternalReport, fingerprint: string, sales: LedgerSale[]) => {
       const merged = mergeReports([{ report, fingerprint }]);
       const coverage = coverageOf([report], merged.orders);
-      const rows = reconcile(matchOrders(merged.orders, sales, coverage, { aliases: aliasIndex(aliases.data) }));
+      const rows = reconcile(matchOrders(merged.orders, sales, coverage, { aliases: aliasIndex(aliases) }));
       const summary = summarize(rows);
       return { summary, payload: sessionPayload({ parser: report.parser, parserVersion: report.parserVersion,
         files: [{ fingerprint, report }], orders: merged.orders, coverage, rows, summary }) };
@@ -270,11 +269,10 @@ async function main(): Promise<void> {
     const main1 = analyse(plan.report, plan.fingerprint, ledger);
     check("Staging reconciles the nine cases as expected", matchesExpectation(main1.summary.categories),
           JSON.stringify(main1.summary.categories));
-    const created1 = await op.rpc("seller_recon_create", { p_payload: main1.payload });
-    if (created1.error) throw new Error(`create session: ${created1.error.message}`);
-    const session = Number(created1.data);
-    const again = await op.rpc("seller_recon_create", { p_payload: main1.payload });
-    check("the same upload twice is the same session", Number(again.data) === session, `${session}`);
+    const session = Number(must(await op.rpc("seller_recon_create", { p_payload: main1.payload }), "create session"));
+    sessions.set(session, "open");
+    const again = must(await op.rpc("seller_recon_create", { p_payload: main1.payload }), "create session again");
+    check("the same upload twice is the same session", Number(again) === session, `${session}`);
 
     heading("3. Ablehnungen");
     const withField = structuredClone(main1.payload) as unknown as { orders: Record<string, unknown>[] };
@@ -309,8 +307,7 @@ async function main(): Promise<void> {
       if (!m) continue;
       for (const d of c.decide) {
         for (const f of m.findings.filter((x) => x.field === d.field)) {
-          const r = await decide(f, d.decision, d.manual ?? null, d.reason ?? null);
-          if (r.error) throw new Error(`decide ${c.key} ${f.key}: ${r.error.message}`);
+          must(await decide(f, d.decision, d.manual ?? null, d.reason ?? null), `decide ${c.key} ${f.key}`);
           decided += 1;
         }
       }
@@ -319,29 +316,38 @@ async function main(): Promise<void> {
 
     heading("5. Anwenden — alles oder nichts");
     check("a changed count is PT409", isConflict((await op.rpc("seller_recon_apply", { p_session_id: session, p_expected: decided + 1 })).error));
-    const applied = await op.rpc("seller_recon_apply", { p_session_id: session, p_expected: decided });
-    if (applied.error) throw new Error(`apply: ${applied.error.message}`);
-    const result = applied.data as { applied: number; documented: number };
+    sessions.set(session, "applied");
+    const result = must(await op.rpc("seller_recon_apply", { p_session_id: session, p_expected: decided }), "apply") as
+      { applied: number; documented: number };
     check("decisions applied and documented as expected",
           result.applied === plan.expectedApplied && result.documented === plan.expectedDocumented, JSON.stringify(result));
     const twice = await op.rpc("seller_recon_apply", { p_session_id: session, p_expected: 0 });
     check("a second application changes nothing", !twice.error && (twice.data as { applied: number }).applied === 0);
 
     heading("6. Wirkung und Audit");
-    const ids = [...ownIds];
-    const sales = await admin.from("sales").select("id, sold_at, cancelled_at, external_order_ref, is_test").in("id", ids);
-    if (sales.error) throw new Error(`sales: ${sales.error.message}`);
-    const sale = (key: string) => (sales.data ?? []).find((s) => s.id === own.get(key))!;
+    // Read back through the operator's own functions — no table is read directly.
+    const view = new Map<string, { sold_at: string; cancelled_at: string | null; external_order_ref: string | null;
+      is_test: boolean; refunds: { amount: number }[] }>();
+    for (const [key, id] of own) {
+      const d = must(await op.rpc("seller_sale", { p_id: id }), `seller_sale ${key}`) as
+        { sale: { sold_at: string; cancelled_at: string | null; external_order_ref: string | null }; is_test: boolean; refunds: { amount: number }[] };
+      view.set(key, { ...d.sale, is_test: d.is_test, refunds: d.refunds });
+    }
+    const sale = (key: string) => view.get(key)!;
     check("the four dates are the report's",
           [["case-1-date", "2001-02-18"], ["case-2-date", "2001-02-18"], ["case-3-date", "2001-06-05"], ["case-4-paid", "2001-06-26"]]
             .every(([k, d]) => sale(k).sold_at === d));
     check("the cancellation is recorded", sale("case-8-cancel").cancelled_at !== null);
-    check("no order reference was stored without its own decision", (sales.data ?? []).every((s) => s.external_order_ref === null));
-    check("every touched sale is still a test sale", (sales.data ?? []).every((s) => s.is_test === true));
-    const refunds = await admin.from("sale_refunds").select("amount").eq("sale_id", own.get("case-9-refund")!);
-    check("the refund is recorded with its amount", (refunds.data ?? []).length === 1 && Number(refunds.data![0].amount) === 6.99);
-    const audit = await admin.from("orderbook_audit").select("sale_id, entity_type, field").in("sale_id", ids);
-    const fields = (audit.data ?? []).map((a) => `${a.entity_type}:${a.field ?? "-"}`);
+    check("no order reference was stored without its own decision", [...view.values()].every((s) => s.external_order_ref === null));
+    check("every touched sale is still a test sale", [...view.values()].every((s) => s.is_test === true));
+    const refunds = sale("case-9-refund").refunds;
+    check("the refund is recorded with its amount", refunds.length === 1 && Number(refunds[0].amount) === 6.99);
+    const fields: string[] = [];
+    for (const [key, id] of own) {
+      const rows = must(await op.rpc("seller_sale_audit", { p_sale_id: id }), `seller_sale_audit ${key}`) as
+        { entity_type: string; field: string | null }[];
+      fields.push(...rows.map((a) => `${a.entity_type}:${a.field ?? "-"}`));
+    }
     check("the audit holds four date corrections, the cancellation with its reason and the refund",
           fields.filter((f) => f === "sale:sold_at").length === 4 && fields.includes("sale:cancelled_at")
             && fields.includes("sale:cancel_reason") && fields.includes("sale_refund:-"), `${fields.length} Zeilen`);
@@ -354,52 +360,57 @@ async function main(): Promise<void> {
       p_items_subtotal: 9.99, p_shipping_charged: 5.49, p_discount_amount: 0,
       p_items: [{ raw_name: "Eruptor" }], p_fees: [], p_adjustments: [], p_payout_amount: null, p_payout_ref: null,
     });
-    if (probeSale.error) throw new Error(`probe sale: ${probeSale.error.message}`);
-    const probeId = Number(probeSale.data);
+    const probeId = Number(must(probeSale, "probe sale"));
+    ownSales.push(probeId);
     const probeText = ebayReport([{ ref: probeRef, record: 1, sold: "2001-03-11", lines: [{ character: "Eruptor", unit: 9.99 }] }]);
     const probeParsed = parseSalesReport(probeText, `verify-recon-${RUN}-conflict.csv`);
     if (!probeParsed.ok) throw new Error("probe report");
-    const probeCandidates = ownCandidates(ledgerSales((await op.rpc("seller_recon_candidates",
-      { p_channel: "ebay", p_from: "2001-03-01", p_to: "2001-03-31" })).data), new Set([probeId]));
+    const probeCandidates = ownCandidates(ledgerSales(must(await op.rpc("seller_recon_candidates",
+      { p_channel: "ebay", p_from: "2001-03-01", p_to: "2001-03-31" }), "probe candidates")), new Set([probeId]));
     const probe = analyse(probeParsed.report, sha(probeText), probeCandidates);
-    const probeSession = Number((await op.rpc("seller_recon_create", { p_payload: probe.payload })).data);
+    const probeSession = Number(must(await op.rpc("seller_recon_create", { p_payload: probe.payload }), "probe session"));
+    sessions.set(probeSession, "open");
     const probeMatch = (await readSession(op, probeSession)).find((m) => m.sale?.id === probeId)!;
     const probeDate = probeMatch.findings.find((f) => f.field === "sold_on")!;
-    await decide(probeDate, "take_external");
-    await op.rpc("seller_update_sale", { p_id: probeId, p_note: `verify:sales-reconciliation ${RUN} changed elsewhere` });
+    must(await decide(probeDate, "take_external"), "probe decision");
+    must(await op.rpc("seller_update_sale", { p_id: probeId, p_note: `verify:sales-reconciliation ${RUN} changed elsewhere` }),
+         "probe change elsewhere");
     check("applying after the sale changed is PT409",
           isConflict((await op.rpc("seller_recon_apply", { p_session_id: probeSession, p_expected: 1 })).error));
-    const probeAfter = await admin.from("sales").select("sold_at").eq("id", probeId).single();
-    check("and nothing was applied", probeAfter.data?.sold_at === "2001-03-10");
-    check("a session without applications can be discarded",
-          !(await op.rpc("seller_recon_discard", { p_id: probeSession })).error);
+    const probeAfter = must(await op.rpc("seller_sale", { p_id: probeId }), "probe read") as { sale: { sold_at: string } };
+    check("and nothing was applied", probeAfter.sale.sold_at === "2001-03-10");
+    const discarded = await op.rpc("seller_recon_discard", { p_id: probeSession });
+    check("a session without applications can be discarded", !discarded.error, discarded.error?.message ?? "");
+    if (!discarded.error) sessions.set(probeSession, "done");
 
-    heading("8. Bestand und echte Verkäufe");
-    const after = await snapshot(admin);
-    check("stock positions, quantities and reservations are unchanged", after.stock === before.stock);
-    check("no inventory movement and no legacy event was written",
-          after.movements === before.movements && after.legacy === before.legacy,
-          `Bewegungen ${before.movements}→${after.movements} · Legacy ${before.legacy}→${after.legacy}`);
-    check("every non-test sale is exactly as it was", after.realSales === before.realSales && after.realSalesCount === before.realSalesCount);
-
-    check("the main session is closed and stays as evidence", !(await op.rpc("seller_recon_close", { p_id: session })).error, `Sitzung ${session}`);
-    console.log(`\n  Testverkäufe ${[...ownIds, probeId].join(", ")} bleiben als Testvorgang stehen (Notiz „verify:sales-reconciliation ${RUN} …“).`);
+    heading("8. Abschluss");
+    const closed = await op.rpc("seller_recon_close", { p_id: session });
+    check("the main session is closed and stays as evidence", !closed.error, closed.error?.message ?? `Sitzung ${session}`);
+    if (!closed.error) sessions.set(session, "done");
+  } catch (error) {
+    check("the run completed", false, (error as Error).message);
   } finally {
-    heading("Aufräumen");
-    if (operator && sellerId !== null) {
-      /* Both results are CHECKED. The first version awaited them and threw
-         the result away, so a refused deletion (0169's append-only trigger
-         against `on delete set null`, fixed by 0175) left the temporary
-         account behind without a word. Now a leftover is a failed run, with
-         the account id named so it can be removed by hand. */
-      const membership = await admin.from("seller_operators").delete()
-        .eq("seller_id", sellerId).eq("user_id", operator.user.id);
-      check("the temporary operator membership is removed", !membership.error,
-            membership.error?.message ?? "");
-      const removed = await admin.auth.admin.deleteUser(operator.user.id);
-      check("the temporary account is deleted", !removed.error,
-            removed.error ? `${removed.error.message} — Konto ${operator.user.id} bleibt stehen` : "");
+    heading("Aufräumen und Nachweis");
+    /*
+     * A session this run opened and did not finish is discarded — it would
+     * otherwise stay open forever. One that already has applications cannot
+     * be discarded (evidence, ADR-0174) and is named instead. Every result
+     * is CHECKED; nothing is awaited and dropped.
+     */
+    for (const [id, state] of sessions) {
+      if (state === "done") continue;
+      if (state === "applied") {
+        check(`session ${id} has applications and stays open — close it in /business`, false);
+        continue;
+      }
+      const r = await op.rpc("seller_recon_discard", { p_id: id });
+      check(`unfinished session ${id} is discarded`, !r.error, r.error?.message ?? "");
     }
+    const out = await op.auth.signOut();
+    check("signed out", !out.error, out.error?.message ?? "");
+    console.log(`\n  Lauf ${RUN} · Testverkäufe ${ownSales.join(", ") || "keine"} · Sitzungen ${[...sessions.keys()].join(", ") || "keine"}`);
+    console.log("  Die Testverkäufe bleiben als Testvorgang stehen (Notiz „verify:sales-reconciliation " + RUN + " …“).");
+    console.log("  Abnahme: supabase/checks/verify_sales_reconciliation_state.sql als postgres — 101–108 wie vorher.");
   }
   finish();
 }

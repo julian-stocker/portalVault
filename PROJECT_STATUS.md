@@ -98,7 +98,9 @@ Datenbank und Serverschicht des Abgleichs (ADR-0174). **`0169`–`0174` laufen a
 
 **Staging-Prüfwerkzeug:** `tools/verify-sales-reconciliation.mts` (`npm run
 verify:sales-reconciliation:staging`, Trockenlauf; schreibend nur mit `--apply`) — lokal getestet,
-auf Staging noch nie gefahren.
+auf Staging noch nie gefahren. Seit dem Umbau ohne Service-Role und ohne Kontoanlage: es arbeitet
+als vorhandenes Betriebskonto (Zugangsdaten lokal in `~/.skyisles/staging-operator.env`); die
+Vorher/Nachher-Abnahme ist `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres`.
 
 **Korrektur vor der ersten Anwendung (2026-11-03, lokal committet):** die Nachbedingung von `0174`
 verbot das auf Staging vorhandene `service_role`-Recht auf `seller_business_backup()` und hätte

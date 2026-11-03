@@ -36,9 +36,10 @@ beide Belegtabellen vorher und nachher (jede Spalte) und bricht bei der kleinste
 
 ## Danach
 
-Erst mit `0175` auf Staging kann der Funktionstest (`verify:sales-reconciliation:staging --
---apply`) sein temporäres Konto wieder löschen. Ohne `0175` endet er jetzt mit einem
-**fehlgeschlagenen** Aufräumschritt, statt das Konto still stehen zu lassen.
+Der Funktionstest (`verify:sales-reconciliation:staging -- --apply`) legt seit dem Umbau kein
+Konto mehr an; er arbeitet als das vorhandene Betriebskonto. `0175` ist für ihn deshalb keine
+technische Voraussetzung mehr — wohl aber dafür, dass dieses Konto (und jedes andere, das im
+Abgleich entscheidet) später gelöscht werden kann. Reihenfolge trotzdem: `0175`, dann der Test.
 
 ## Rückbau
 
