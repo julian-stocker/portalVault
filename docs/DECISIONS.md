@@ -17066,9 +17066,83 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0175 · Die zentrale Sicherung ist ein eigenes Projekt — admin-verwaltet, extern, verschlüsselt
+
+**Status:** BESCHLOSSEN (Rahmen) · 2026-11-03. **Nicht umgesetzt**, keine Migration, kein Werkzeug,
+kein Speicher. Beginnt frühestens mit `0175`, **nach** der Staging-Anwendung von `0169`–`0174`
+und unabhängig vom Verkaufsabgleich.
+**Betrifft:** ADR-0114/0115 (Betriebs- und Plattformsicherung, kein Service-Role-Pfad, nicht im
+selben Brandabschnitt), ADR-0134/0135 (Formatversionen), ADR-0174 Nr. 11 und 15, ADR-0042
+(exklusive Kontotypen), ADR-0021/0077 (kein Marketplace, ein Verkäufer)
+
+### Kontext
+
+Heute gibt es zwei Browser-Downloads: die Betriebssicherung (`seller_business_backup()`, nur
+Verkäuferbetrieb, `/business/datensicherung`) und die Plattformsicherung
+(`system_platform_export()` + `system_auth_inventory()`, nur Plattformadmin,
+`/admin/datensicherung`). Beide hängen davon ab, dass jemand daran denkt. Supabase Free hat keine
+eigenen Backups und kein PITR. Es gibt genau einen aktiven Verkäufer (`sellers_one_active`).
+Konten sind exklusiv — ein Plattformadmin kann die Betriebssicherung heute nicht aufrufen.
+
+### Entscheidung (verbindlich, vom Betreiber vorgegeben)
+
+1. **Zentral, nur Plattformadmin.** Sicherungen werden zentral verwaltet; nur der Plattformadmin
+   steuert, sieht und lädt sie.
+2. **Der Betrieb sichert langfristig nicht mehr selbst.** `/business/datensicherung` entfällt —
+   aber erst am Ende (Nr. 8).
+3. **Die Formate bleiben lesbar.** Betriebsformat v1 und Plattformformat v1/v2/v3 bleiben gültig
+   und werden von den bestehenden Prüfern weiter gelesen. Die zentrale Sicherung ist ein
+   **Satz aus Teilarchiven** (Plattformarchiv unverändert, je Verkäufer ein Betriebsdokument,
+   ein Satzmanifest mit Hashes), kein neues Gesamtformat.
+4. **Eigener, getrennter Ausführungsweg außerhalb von Supabase und Vercel** (Empfehlung: geplanter
+   GitHub-Actions-Workflow, auch manuell auslösbar). Kein pg_cron in einen Supabase-Bucket
+   (derselbe Brandabschnitt, ADR-0115), kein Vercel-Cron mit privilegiertem Zugang.
+5. **Externer, verschlüsselter Speicher.** Verschlüsselt **vor** dem Hochladen (Empfehlung: age,
+   ein Schlüsselpaar je Umgebung, privater Schlüssel nur offline); Speicher S3-kompatibel in der
+   EU, mit Versionierung, Schreibschlüssel ohne Löschrecht.
+6. **Eigenes Sicherungskonto mit minimalen Rechten.** Kein Service-Role-Schlüssel, kein
+   persönliches Konto; das Konto darf sichern, sonst nichts.
+7. **Keine künstliche Mehrmandantenstruktur.** Kein `seller_id` auf Vorrat. Die Grenze je
+   Verkäufer existiert nur im Archivformat (`sellers/<id>/business.json`); der admin-gesicherte
+   Zugang zum Betriebsdokument prüft heute nur, dass die übergebene ID der aktive Verkäufer ist.
+8. **Kein alter Weg wird abgeschaltet, bevor der Ersatz nachweislich läuft** — auf Staging über
+   mehrere echte Läufe, geprüft durch Entschlüsseln und die bestehenden Prüfer.
+9. **Eigene Freigaben** für: den (kostenpflichtigen) Speicheranbieter samt Datenübertragung nach
+   außen, jede Zugangsdaten- und Schlüsselerzeugung, die Aktivierung des Zeitplans, und
+   Production.
+
+### Vorgeschlagene Phasen (nicht freigegeben)
+
+| Phase | Inhalt |
+|---|---|
+| 1 | `0175`: Rumpf in `business_backup_document(p_seller_id)`; `seller_business_backup()` liefert dasselbe; `system_business_backup(p_seller_id)` nur Plattformadmin; Laufprotokoll; Sicherungskonto-Rolle; Entscheidung über das `service_role`-Recht |
+| 2 | `tools/backup-run.mts` und Workflow: Satz bauen, verschlüsseln, hochladen, zurücklesen, protokollieren |
+| 3 | `verify:backup-set` und eine regelmäßige Restore-Probe in eine Wegwerf-Datenbank |
+| 4 | `/admin/datensicherung` zeigt Verlauf und Alter der letzten erfolgreichen Sicherung |
+| 5 | `/business/datensicherung` entfernen (Nr. 2, erst nach Nr. 8) |
+| 6 | Production mit eigenem Konto, eigenem Schlüssel, eigener Freigabe |
+
+### Offen
+
+Speicheranbieter · Verwahrung des privaten Schlüssels und Zweitschlüssels · Zeitplan und
+Aufbewahrung (inkl. DSGVO-Löschung in alten Sicherungen gegen § 147 AO) · ein vollständiger
+`pg_dump` als zweite Stufe (bräuchte weitreichendes Leserecht) · Fehlermeldung nur über GitHub
+und `/admin` oder zusätzlich per Mail.
+
+### Konsequenzen
+
+- `0174` bleibt ein reiner Formatschritt und ändert keine Rechte (ADR-0174 Nr. 15).
+- Bis Phase 5 bleiben beide Browser-Downloads der einzige Sicherungsweg; vor jeder Migration wird
+  weiter von Hand gesichert.
+- Ein echter Restore bleibt außerhalb dieses Rahmens (ADR-0114/0115); erst die zweite Stufe oder
+  ein eigener Auftrag schließt das.
+
+
+---
+
 ## ADR-0174 · Der Verkaufsabgleich: Plattformberichte gegen das Verkaufsbuch, Entscheidung je Feld
 
-**Status:** VORBEREITET · 2026-11-03, lokal auf `development/skyisles-v2`, nicht committet.
+**Status:** VORBEREITET · 2026-11-03, lokal committet auf `development/skyisles-v2` (`ab8394c`, Korrektur Nr. 15 im Folgecommit).
 Migrationen `0169`–`0174` liegen als Dateien vor und sind **nirgends angewendet** — zuerst nur
 Staging, mit eigener Freigabe. Logik: `src/lib/reconciliation/` (Phase 1/2, `a14a87d`).
 **Betrifft:** ADR-0077 (Betrieb), ADR-0089 (ein Verkaufsbuch), ADR-0114/0115/0134 (Sicherungen),
@@ -17136,6 +17210,19 @@ getrennten Endbestätigung übernehmen.
 14. **Nur Staging.** Server Action und Abfragen verweigern sich außerhalb des Staging-Projekts;
     die eigentliche Grenze ist, dass die Funktionen auf Production nicht existieren. Production
     ist eine eigene, spätere Entscheidung.
+15. **`0174` vergibt und entzieht keine Rechte** (Korrektur vom 2026-11-03, vor jeder Anwendung).
+    Auf Staging hält `seller_business_backup()` neben `postgres` und `authenticated` auch
+    `service_role=X` — Supabases Voreinstellung, die nie entzogen wurde (`0106` tat das nur für
+    die Plattformsicherung). Die erste Nachbedingung von `0174` verbot dieses Recht und hätte den
+    ganzen Gruppenlauf abgebrochen; P74 sah es nicht, weil die Stub-Welt keine Rechte kannte.
+    Jetzt: der Vorblock bricht ab, wenn PUBLIC oder `anon` eine der beiden Funktionen ausführen
+    darf (eine NULL-ACL gilt als PUBLIC), und hält die ACL beider Funktionen fest; die
+    Nachbedingung verlangt dieselbe ACL zeichengleich und weiterhin kein PUBLIC/`anon`. `R0174`
+    folgt demselben Vertrag. Preflight 106/109/110 und Nachkontrolle 244–246 messen dasselbe auf
+    Staging; P74 baut die gemessenen Staging-Rechte nach und prüft Abbruch bei `anon`, bei
+    Voreinstellungs-ACL und bei einer Rechteänderung mitten im Lauf. Ob `service_role` das Recht
+    verliert, entscheidet die zentrale Sicherung (ADR-0175), nicht diese Gruppe. Die Rümpfe und
+    ihre Abdrücke (`3a798f50…`, `23be72d5…`) sind unverändert.
 
 ### Konsequenzen
 

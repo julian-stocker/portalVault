@@ -14,7 +14,8 @@
 --            authenticated, die zehn Hilfsfunktionen fuer keine Clientrolle.
 --   221      0171: der Index fuer Bestellnummern je Kanal.
 --   231-237  WAS SICH NICHT BEWEGT HAT — dieselben Zahlen wie Preflight 131-137.
---   241-244  0174: die Sicherungen fuehren die sieben Tabellen, Rechte unveraendert.
+--   241-246  0174: die Sicherungen fuehren die sieben Tabellen; ohne PUBLIC/anon, die ACL
+--            zeichengleich wie in Preflight 109-110 (service_role auf der Betriebssicherung bleibt).
 --
 -- GESCHUETZTE TABELLEN wie im Preflight hinter `has_table_privilege` +
 -- `query_to_xml`: fuer den Pruefzugang offen (9998), als `postgres` gemessen.
@@ -280,6 +281,13 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
       (select count(*)::text from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
         where p.oid in (to_regprocedure('public.seller_business_backup()'), to_regprocedure('public.system_platform_export()'))
           and a.privilege_type = 'EXECUTE' and (a.grantee = 0 or a.grantee::regrole::text = 'anon')), '0'),
+  -- 245/246: zeichengleich die ACL aus Preflight 109/110 — 0174 vergibt und entzieht nichts.
+  (245, 'Rechte', 'Rechte der Betriebssicherung unveraendert (wie Preflight 109)',
+      (select coalesce(p.proacl::text, '(default)') from pg_proc p where p.oid = to_regprocedure('public.seller_business_backup()')),
+      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+  (246, 'Rechte', 'Rechte der Plattformsicherung unveraendert (wie Preflight 110)',
+      (select coalesce(p.proacl::text, '(default)') from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')),
+      '{postgres=X/postgres,authenticated=X/postgres}'),
 
   (801, 'Basis', 'eine Shop-Baseline ist uebergeben worden',
       (select case when roh is null

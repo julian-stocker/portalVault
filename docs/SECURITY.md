@@ -2056,3 +2056,9 @@ kann.
   geschieht.
 - **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`).
 - **Nur Staging**, bis eine eigene Freigabe vorliegt (`isStagingProjectUrl`, fail-closed).
+- **Die Rechte der Sicherungsfunktionen bewegt `0174` nicht.** Es hält die ACL von
+  `seller_business_backup()` und `system_platform_export()` vor dem Ersetzen fest, verlangt sie
+  danach zeichengleich und bricht ab, sobald PUBLIC (auch über eine NULL-ACL) oder `anon` eine von
+  beiden ausführen darf. Das vorhandene `service_role`-Recht auf der Betriebssicherung (Supabases
+  Voreinstellung, auf Staging gemessen) bleibt bestehen; darüber entscheidet die zentrale
+  Sicherung (ADR-0175).

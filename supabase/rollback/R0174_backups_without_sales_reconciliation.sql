@@ -69,6 +69,16 @@ begin
       '(7e9e58e2d84a9f8a7c660262aa21926b) nor 0174 (23be72d581589b063d6938a863757b31). A third version is not overwritten blindly.',
       coalesce(v_platform, '(none)');
   end if;
+
+  -- The rights as they stand, so the postcondition can prove the rollback did
+  -- not move them (the same contract as 0174 itself; see there for why the
+  -- `service_role` grant on the business backup is left alone).
+  perform set_config('skyisles.acl_r0174_business',
+    coalesce((select p.proacl::text from pg_proc p
+               where p.oid = to_regprocedure('public.seller_business_backup()')), '(default)'), false);
+  perform set_config('skyisles.acl_r0174_platform',
+    coalesce((select p.proacl::text from pg_proc p
+               where p.oid = to_regprocedure('public.system_platform_export()')), '(default)'), false);
 end
 $pre$;
 
@@ -1548,6 +1558,8 @@ do $post$
 declare
   v_fn   text;
   v_open integer;
+  v_acl    text;
+  v_before text;
 begin
   if (select md5(p.prosrc) from pg_proc p
        where p.oid = to_regprocedure('public.seller_business_backup()'))
@@ -1578,16 +1590,30 @@ begin
                   and p.prosrc like '%sales_recon_%') then
       raise exception 'R0174 postcondition: % still reads a sales_recon_* table', v_fn;
     end if;
+    -- Never PUBLIC or anon. A NULL ACL is the default, which grants PUBLIC.
     select count(*) into v_open
-      from pg_proc p, aclexplode(p.proacl) a
+      from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
      where p.oid = to_regprocedure(v_fn)
        and a.privilege_type = 'EXECUTE'
-       and (a.grantee = 0 or a.grantee::regrole::text in ('anon', 'public',
-                                                          'service_role'));
+       and (a.grantee = 0 or a.grantee::regrole::text = 'anon');
     if v_open <> 0 then
       raise exception 'R0174 postcondition: % open EXECUTE rights on %', v_open, v_fn;
     end if;
+    -- And exactly the rights recorded before.
+    select coalesce(p.proacl::text, '(default)') into v_acl from pg_proc p
+     where p.oid = to_regprocedure(v_fn);
+    v_before := current_setting(case v_fn when 'public.seller_business_backup()'
+                                  then 'skyisles.acl_r0174_business'
+                                  else 'skyisles.acl_r0174_platform' end, true);
+    if v_before is null or v_before = '' then
+      raise exception 'R0174 postcondition: the rights of % were not recorded before', v_fn;
+    end if;
+    if v_acl is distinct from v_before then
+      raise exception 'R0174 postcondition: the rights on % changed (% -> %)', v_fn, v_before, v_acl;
+    end if;
   end loop;
+  perform set_config('skyisles.acl_r0174_business', '', false);
+  perform set_config('skyisles.acl_r0174_platform', '', false);
 
   raise notice 'R0174: business backup a32b148cebe00ee0d0d469f96fd2028e (28 areas, version 1), platform export '
     '7e9e58e2d84a9f8a7c660262aa21926b (54 sections, version 2). The sales_recon_* tables are untouched.';

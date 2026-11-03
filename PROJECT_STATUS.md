@@ -98,6 +98,15 @@ Datenbank und Serverschicht des Abgleichs (ADR-0174). **Keine Migration ist irge
 verify:sales-reconciliation:staging`, Trockenlauf; schreibend nur mit `--apply`) — lokal getestet,
 auf Staging noch nie gefahren.
 
+**Korrektur vor der ersten Anwendung (2026-11-03, lokal committet):** die Nachbedingung von `0174`
+verbot das auf Staging vorhandene `service_role`-Recht auf `seller_business_backup()` und hätte
+den Gruppenlauf abgebrochen. Jetzt hält `0174` die ACL beider Sicherungen fest, verlangt sie
+danach zeichengleich und verbietet weiterhin nur PUBLIC und `anon`; `R0174` ebenso. Preflight
+106/109/110, Nachkontrolle 245/246, P74 mit den gemessenen Staging-Rechten (ADR-0174 Nr. 15).
+Rümpfe und Abdrücke unverändert.
+
+**Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0175`).
+
 **Nächster Schritt:** Freigabe der Staging-Migration nach dem Laufzettel.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**

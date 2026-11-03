@@ -1997,6 +1997,43 @@ begin
       'from 0164 (7e9e58e2d84a9f8a7c660262aa21926b). A foreign version is not overwritten blindly.',
       coalesce(v_platform, '(none)');
   end if;
+
+  /*
+   * THE RIGHTS AS THEY STAND — recorded, so the postcondition can prove that
+   * this migration did not move them. `create or replace` keeps the ACL of a
+   * function; 0174 grants nothing and revokes nothing.
+   *
+   * WHAT THE RIGHTS ARE, MEASURED ON STAGING (2026-11-03, read-only):
+   *   seller_business_backup()  {postgres=X, authenticated=X, service_role=X}
+   *   system_platform_export()  {postgres=X, authenticated=X}
+   * The `service_role` grant on the business backup is the Supabase default
+   * privilege; no migration ever revoked it (0106 did, for the platform
+   * export only). Changing that is NOT the business of this migration — the
+   * central backup (ADR-0175 onward) decides it. The first version of this
+   * postcondition forbade it and would have aborted the whole Staging run.
+   *
+   * What stays forbidden, before AND after: EXECUTE for PUBLIC or anon. A
+   * NULL ACL means the PostgreSQL default, which grants PUBLIC — so it is read
+   * through `acldefault`, never as "no rights".
+   *
+   * Session-level `set_config`: 0174 is several statements, and the
+   * postcondition is a separate block. Inside the transaction of the Staging run
+   * a rollback takes the settings back with everything else.
+   */
+  if exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+              where p.oid in (to_regprocedure('public.seller_business_backup()'),
+                              to_regprocedure('public.system_platform_export()'))
+                and a.privilege_type = 'EXECUTE'
+                and (a.grantee = 0 or a.grantee::regrole::text = 'anon')) then
+    raise exception '0174 abort: PUBLIC or anon may already execute a backup function. '
+      'That is a finding of its own and is not carried into a new body.';
+  end if;
+  perform set_config('skyisles.acl_0174_business',
+    coalesce((select p.proacl::text from pg_proc p
+               where p.oid = to_regprocedure('public.seller_business_backup()')), '(default)'), false);
+  perform set_config('skyisles.acl_0174_platform',
+    coalesce((select p.proacl::text from pg_proc p
+               where p.oid = to_regprocedure('public.system_platform_export()')), '(default)'), false);
 end
 $pre$;
 
@@ -3734,6 +3771,8 @@ declare
   v_block   text;
   v_key     text;
   v_open    integer;
+  v_acl     text;
+  v_before  text;
 begin
   select p.prosrc into v_src from pg_proc p
    where p.oid = to_regprocedure('public.seller_business_backup()');
@@ -3790,16 +3829,30 @@ begin
       raise exception '0174 postcondition: % lost security definer, stable or '
         'its search_path', v_fn;
     end if;
+    -- Never PUBLIC or anon. A NULL ACL is the default, which grants PUBLIC.
     select count(*) into v_open
-      from pg_proc p, aclexplode(p.proacl) a
+      from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
      where p.oid = to_regprocedure(v_fn)
        and a.privilege_type = 'EXECUTE'
-       and (a.grantee = 0 or a.grantee::regrole::text in ('anon', 'public',
-                                                          'service_role'));
+       and (a.grantee = 0 or a.grantee::regrole::text = 'anon');
     if v_open <> 0 then
       raise exception '0174 postcondition: % open EXECUTE rights on %', v_open, v_fn;
     end if;
+    -- And exactly the rights recorded before the bodies were replaced.
+    select coalesce(p.proacl::text, '(default)') into v_acl from pg_proc p
+     where p.oid = to_regprocedure(v_fn);
+    v_before := current_setting(case v_fn when 'public.seller_business_backup()'
+                                  then 'skyisles.acl_0174_business'
+                                  else 'skyisles.acl_0174_platform' end, true);
+    if v_before is null or v_before = '' then
+      raise exception '0174 postcondition: the rights of % were not recorded before', v_fn;
+    end if;
+    if v_acl is distinct from v_before then
+      raise exception '0174 postcondition: the rights on % changed (% -> %)', v_fn, v_before, v_acl;
+    end if;
   end loop;
+  perform set_config('skyisles.acl_0174_business', '', false);
+  perform set_config('skyisles.acl_0174_platform', '', false);
 
   raise notice '0174: business backup 3a798f506f5f43e5b1b69dc242a1b16f, 35 areas, format_version 1; '
     'platform export 23be72d581589b063d6938a863757b31, 61 sections, format_version 3. No row touched.';

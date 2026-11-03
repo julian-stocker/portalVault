@@ -12395,6 +12395,56 @@ async function main(): Promise<void> {
           `${(await abdruck74("seller_business_backup")).slice(0, 8)}… / `
             + `${(await abdruck74("system_platform_export")).slice(0, 8)}…`);
 
+    /* ---- THE RIGHTS AS STAGING HAS THEM (measured 2026-11-03, read-only):
+     * the business backup still carries Supabase's default `service_role`
+     * grant, the platform export does not (0106 revoked it). The first
+     * postcondition of 0174 forbade that grant and would have aborted the
+     * whole Staging run; this world reproduces it, so it cannot come back. */
+    const RECHTE_B74 = "{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}";
+    const RECHTE_P74 = "{postgres=X/postgres,authenticated=X/postgres}";
+    const rechte74 = async (fn: string): Promise<string> => w74(
+      `select coalesce(p.proacl::text, '(default)') as w from pg_proc p
+        where p.oid = to_regprocedure('public.${fn}()')`);
+    const stagingRechte74 = async (): Promise<void> => {
+      await db.exec(`
+        revoke all on function public.seller_business_backup() from public, anon, authenticated, service_role;
+        revoke all on function public.system_platform_export() from public, anon, authenticated, service_role;
+        grant execute on function public.seller_business_backup() to authenticated;
+        grant execute on function public.seller_business_backup() to service_role;
+        grant execute on function public.system_platform_export() to authenticated;`);
+    };
+    await stagingRechte74();
+    const rechteVorher74 = `${await rechte74("seller_business_backup")} / ${await rechte74("system_platform_export")}`;
+    sag74("Aufbau: the rights exactly as Staging has them, service_role on the business backup",
+          rechteVorher74 === `${RECHTE_B74} / ${RECHTE_P74}`, rechteVorher74);
+
+    /* ---- A0: PUBLIC or anon may execute a backup already — 0174 refuses to
+     * carry that into a new body. Once with an explicit anon grant, once with
+     * the NULL ACL (PostgreSQL's default, which grants PUBLIC). */
+    await db.exec("grant execute on function public.system_platform_export() to anon;");
+    const mitAnon = await fahre(db, M174);
+    await stagingRechte74();
+    await db.exec("update pg_proc set proacl = null where oid = 'public.seller_business_backup()'::regprocedure;");
+    const mitPublic = await fahre(db, M174);
+    await stagingRechte74();
+    sag74("with EXECUTE for anon, and with the default ACL (PUBLIC), it aborts and nothing changes",
+          mitAnon !== null && mitAnon.includes("PUBLIC or anon may already execute")
+            && mitPublic !== null && mitPublic.includes("PUBLIC or anon may already execute")
+            && (await abdruck74("seller_business_backup")) === B0140
+            && (await abdruck74("system_platform_export")) === P0164,
+          `${kurz(mitAnon)} · ${kurz(mitPublic)}`);
+
+    /* ---- A1: rights that move DURING the run are caught by the
+     * postcondition — injected right before its block. */
+    const vorPost74 = teileVon(M174).findIndex((s) => s.includes("do $post$"));
+    const bewegt = await fahre(db, M174, { klammer: true, zwischen: { vor: vorPost74,
+      sql: "revoke execute on function public.seller_business_backup() from service_role;" } });
+    const nachBewegt = `${await rechte74("seller_business_backup")} / ${await rechte74("system_platform_export")}`;
+    sag74("a right that moves during the run fails the postcondition, and the rollback restores the rights",
+          vorPost74 > 0 && bewegt !== null && bewegt.includes("the rights on public.seller_business_backup() changed")
+            && nachBewegt === rechteVorher74 && (await abdruck74("seller_business_backup")) === B0140,
+          kurz(bewegt));
+
     /* ---- A: without a table of 0169 it aborts, and nothing changes. */
     await db.exec("alter table public.sales_recon_decisions rename to z74_decisions;");
     const ohne0169 = await fahre(db, M174);
@@ -12422,6 +12472,12 @@ async function main(): Promise<void> {
     sag74("0174 runs; both fingerprints are the promised ones",
           lauf === null && bNeu === B0174 && pNeu === P0174,
           `${lauf ?? "durch"} · ${bNeu.slice(0, 8)}… / ${pNeu.slice(0, 8)}…`);
+    const rechteNachher74 = `${await rechte74("seller_business_backup")} / ${await rechte74("system_platform_export")}`;
+    const reste74 = await w74(`select count(*) as w from (values
+        (current_setting('skyisles.acl_0174_business', true)),
+        (current_setting('skyisles.acl_0174_platform', true))) s(v) where coalesce(v, '') <> ''`);
+    sag74("the rights are byte-for-byte those from before, service_role included; no setting left behind",
+          rechteNachher74 === rechteVorher74 && reste74 === "0", rechteNachher74);
 
     /* ---- D: a second run bounces off its own latch. */
     const zweiter = await fahre(db, M174);
@@ -12550,17 +12606,20 @@ async function main(): Promise<void> {
     const zeilen = await w74(`select (select count(*) from public.sales_recon_sessions)
                                  + (select count(*) from public.sales_recon_orders)
                                  + (select count(*) from public.sales_recon_decisions) as w`);
-    sag74("R0174 restores both previous bodies and leaves every row of 0169",
+    const rechteRueck74 = `${await rechte74("seller_business_backup")} / ${await rechte74("system_platform_export")}`;
+    sag74("R0174 restores both previous bodies, leaves every row of 0169 and the rights as they were",
           rueck === null && (await abdruck74("seller_business_backup")) === B0140
-            && (await abdruck74("system_platform_export")) === P0164 && zeilen === "3",
-          `${rueck ?? "durch"} · rows ${zeilen}`);
+            && (await abdruck74("system_platform_export")) === P0164 && zeilen === "3"
+            && rechteRueck74 === rechteVorher74,
+          `${rueck ?? "durch"} · rows ${zeilen} · ${rechteRueck74}`);
     const rueck2 = await fahre(db, R174);
     sag74("a second R0174 changes nothing", rueck2 === null, rueck2 ?? "durch");
 
     probe.push({
       name: "P74 0174: the sales reconciliation in BOTH backups — both bodies with "
         + "the promised fingerprints, the latches (0169 missing, foreign body, second "
-        + "run), all seven areas in each export with lines left out, and R0174",
+        + "run), the Staging rights kept (service_role included, never PUBLIC/anon), "
+        + "all seven areas in each export with lines left out, and R0174",
       ok: ok74,
       sagt: `0174: ${befund74.join(" · ")}`,
     });

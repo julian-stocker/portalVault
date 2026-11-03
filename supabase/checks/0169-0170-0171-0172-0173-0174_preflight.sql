@@ -12,7 +12,9 @@
 -- Datenanweisung: kein Verkauf, keine Position, kein Lager wird angefasst.
 --
 --   101-105  DIE GRUNDLAGE: Verkaufsbuch, Audit, Holds, die aufgerufenen Funktionen.
+--   106      KEINE der beiden Sicherungen ist fuer PUBLIC oder anon ausfuehrbar.
 --   107-108  DIE AUSGANGSRUEMPFE der beiden Sicherungsfunktionen (Riegel von 0174).
+--   109-110  IHRE RECHTE, wie gemessen — die Nachkontrolle erwartet dieselben in 245-246.
 --   111-114  SIE STEHT NOCH NICHT.
 --   121      KEINE Bestellnummer steht heute doppelt in einem Kanal (sonst stoppt 0171).
 --   131-137  AUSKUNFT: was sich durch die Gruppe nicht bewegen darf — die
@@ -138,6 +140,28 @@ pruef (nr, bereich, pruefung, befund, erwartet) as (values
   (108, 'Grundlage', 'Plattformsicherung ist die Fassung aus 0164 (md5 des Rumpfs)',
       (select md5(p.prosrc) from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')),
       '7e9e58e2d84a9f8a7c660262aa21926b'),
+  /*
+   * 109/110 — DIE RECHTE DER BEIDEN SICHERUNGSFUNKTIONEN, so wie sie auf
+   * Staging stehen (gemessen 2026-11-03). `0174` vergibt und entzieht nichts:
+   * es haelt die ACL vor dem Ersetzen fest und bricht ab, wenn sie danach
+   * anders aussieht. Das `service_role`-Recht auf der Betriebssicherung ist
+   * Supabases Voreinstellung und bleibt — darueber entscheidet die zentrale
+   * Sicherung (ab 0175), nicht diese Gruppe. Steht hier etwas anderes, ist
+   * die Umgebung nicht die gemessene: STOPP, nicht anpassen.
+   * 106 — PUBLIC und anon duerfen keine der beiden ausfuehren; sonst bricht
+   * `0174` schon im Vorblock ab. Eine NULL-ACL ist die Voreinstellung und
+   * erlaubt PUBLIC — deshalb `acldefault`.
+   */
+  (106, 'Grundlage', 'keine der beiden Sicherungen ist fuer PUBLIC oder anon ausfuehrbar',
+      (select count(*)::text from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+        where p.oid in (to_regprocedure('public.seller_business_backup()'), to_regprocedure('public.system_platform_export()'))
+          and a.privilege_type = 'EXECUTE' and (a.grantee = 0 or a.grantee::regrole::text = 'anon')), '0'),
+  (109, 'Grundlage', 'Rechte der Betriebssicherung (ACL, bleibt durch 0174 unveraendert)',
+      (select coalesce(p.proacl::text, '(default)') from pg_proc p where p.oid = to_regprocedure('public.seller_business_backup()')),
+      '{postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}'),
+  (110, 'Grundlage', 'Rechte der Plattformsicherung (ACL, bleibt durch 0174 unveraendert)',
+      (select coalesce(p.proacl::text, '(default)') from pg_proc p where p.oid = to_regprocedure('public.system_platform_export()')),
+      '{postgres=X/postgres,authenticated=X/postgres}'),
 
   -- ------------------------------------------------- Sie steht noch nicht
   (111, 'Luecke', 'keine der sieben Abgleichstabellen steht',
