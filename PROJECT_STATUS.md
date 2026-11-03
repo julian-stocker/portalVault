@@ -107,11 +107,18 @@ danach zeichengleich und verbietet weiterhin nur PUBLIC und `anon`; `R0174` eben
 106/109/110, Nachkontrolle 245/246, P74 mit den gemessenen Staging-Rechten (ADR-0174 Nr. 15).
 Rümpfe und Abdrücke unverändert.
 
-**Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0175`).
+**Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0176`).
 
-**Nächster Schritt:** der synthetische Funktionstest auf Staging
-(`npm run verify:sales-reconciliation:staging`, erst Trockenlauf, dann mit eigener Freigabe
-`-- --apply`). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+**Kontolöschung (`0175`, ADR-0176) — lokal vorbereitet, nirgends angewendet.** Ein Konto, das im
+Abgleich entschieden oder angewendet hatte, war nicht löschbar (`on delete set null` gegen den
+Nur-Erweitern-Trigger aus `0169`). `0175` lässt genau das Leeren des Kontoverweises durch die
+Löschung zu. Der Verifier meldet einen Aufräumfehler jetzt als fehlgeschlagenen Lauf. Dieselbe
+Bauart steht noch bei `purchase_receipts`, `purchase_receipt_downloads` und `order_messages`
+(eigener Auftrag).
+
+**Nächster Schritt:** `0175` auf Staging (eigene Freigabe), danach der synthetische Funktionstest
+(`npm run verify:sales-reconciliation:staging`, Trockenlauf bestanden; `-- --apply` mit eigener
+Freigabe). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

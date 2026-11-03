@@ -5460,6 +5460,8 @@ solange Zeilen in der Tabelle stehen, und verlangt einen Schalter in der Datei.
 Alle sieben: RLS an, keine Policy, kein Clientrecht. Fremdschlüssel auf `sales` sind
 `on delete restrict` — ein Verkauf aus einer Sitzung bleibt als Nachweis stehen.
 
+**Kontolöschung (`0175`, ADR-0176, lokal vorbereitet).** Beide Kontoverweise (`decided_by`, `applied_by`) stehen auf `on delete set null`; das ist ein UPDATE, das der Nur-Erweitern-Trigger von `0169` verweigerte — ein Konto mit einer Entscheidung war nicht löschbar. `0175` lässt genau dieses Leeren zu (aus der Fremdschlüsselaktion, Konto schon gelöscht, jede andere Spalte gleich) und sonst nichts.
+
 **Funktionen.** Lesen und Protokollieren in `0172` (`seller_recon_candidates`, `_aliases`,
 `_create`, `_sessions`, `_session`, `_decide`, `_close`, `_discard`, `_thin_snapshots`),
 Anwenden in `0173` (`seller_recon_apply`), Storno und Rücknahme in `0170`

@@ -536,6 +536,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0175": {
+      "zweck": "Kontoloeschung im Verkaufsabgleich (ADR-0176): der Nur-Erweitern-Trigger von sales_recon_decisions/-applications laesst genau das Leeren von decided_by/applied_by durch die Loeschung des Kontos zu — aendert selbst keine Daten",
+      "preflight": "0175_preflight.sql",
+      "lauf": "staging-0175.sql",
+      "postflight": "0175_postflight.sql",
+      "angewendet": {
+        "beschreibung": "sales_recon_evidence_is_append_only() traegt den Rumpf aus 0175 (md5 ee1027ee285c6a31163fa3f123c07c73).",
+        "sql": "select coalesce((select md5(p.prosrc) = 'ee1027ee285c6a31163fa3f123c07c73' from pg_proc p where p.oid = to_regprocedure('public.sales_recon_evidence_is_append_only()')), false) as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

@@ -83,4 +83,13 @@ describe("the tool's rules, read as source", () => {
   it("removes its temporary operator in every case", () => {
     expect(main).toMatch(/finally \{[\s\S]*seller_operators[\s\S]*deleteUser/);
   });
+
+  it("fails the run when the cleanup fails — a leftover account is never silent", () => {
+    const cleanup = main.slice(main.indexOf("finally {"));
+    // Neither result may be awaited and dropped: both feed a check.
+    expect(cleanup).not.toMatch(/^\s*await admin\.(from\("seller_operators"\)|auth\.admin\.deleteUser)/m);
+    expect(cleanup).toMatch(/const membership = await admin\.from\("seller_operators"\)\.delete\(\)[\s\S]*check\([^)]*!membership\.error/);
+    expect(cleanup).toMatch(/const removed = await admin\.auth\.admin\.deleteUser\([\s\S]*check\([^)]*!removed\.error/);
+    expect(cleanup.indexOf("deleteUser")).toBeLessThan(cleanup.indexOf("finish()"));
+  });
 });

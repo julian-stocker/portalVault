@@ -417,9 +417,11 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * `0174` stellt die Betriebssicherung neu auf und führt die
      * Belegbereiche darin zeichengleich aus `0140` weiter
      * (`src/lib/backup/backup-sales-reconciliation.test.ts`).
+     * `0175` (ADR-0176): the account deletion of the reconciliation — a
+     * trigger body of `0169`, no receipt table, no backup area.
      */
-    expect(files[files.length - 1]).toBe("0174_backup_sales_reconciliation.sql");
-    expect(files[files.length - 2]).toBe("0173_sales_reconciliation_apply.sql");
+    expect(files[files.length - 1]).toBe("0175_sales_recon_account_deletion.sql");
+    expect(files[files.length - 2]).toBe("0174_backup_sales_reconciliation.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

@@ -387,9 +387,18 @@ async function main(): Promise<void> {
   } finally {
     heading("Aufräumen");
     if (operator && sellerId !== null) {
-      await admin.from("seller_operators").delete().eq("seller_id", sellerId).eq("user_id", operator.user.id);
-      await admin.auth.admin.deleteUser(operator.user.id);
-      console.log("  temporärer Betrieb entfernt");
+      /* Both results are CHECKED. The first version awaited them and threw
+         the result away, so a refused deletion (0169's append-only trigger
+         against `on delete set null`, fixed by 0175) left the temporary
+         account behind without a word. Now a leftover is a failed run, with
+         the account id named so it can be removed by hand. */
+      const membership = await admin.from("seller_operators").delete()
+        .eq("seller_id", sellerId).eq("user_id", operator.user.id);
+      check("the temporary operator membership is removed", !membership.error,
+            membership.error?.message ?? "");
+      const removed = await admin.auth.admin.deleteUser(operator.user.id);
+      check("the temporary account is deleted", !removed.error,
+            removed.error ? `${removed.error.message} — Konto ${operator.user.id} bleibt stehen` : "");
     }
   }
   finish();

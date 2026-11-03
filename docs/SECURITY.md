@@ -2056,6 +2056,10 @@ kann.
   geschieht.
 - **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`).
 - **Nur Staging**, bis eine eigene Freigabe vorliegt (`isStagingProjectUrl`, fail-closed).
+- **Kontolöschung trotz Nur-Erweitern (`0175`, ADR-0176).** Entscheidungen und Anwendungen sind
+  unveränderlich. Einzige Ausnahme: die Löschung eines Kontos leert `decided_by`/`applied_by` — nur
+  aus der Fremdschlüsselaktion, nur wenn das Konto nicht mehr existiert, jede andere Spalte gleich.
+  Ein direktes UPDATE des Verweises ist auch für den Datenbankeigentümer verboten.
 - **Die Rechte der Sicherungsfunktionen bewegt `0174` nicht.** Es hält die ACL von
   `seller_business_backup()` und `system_platform_export()` vor dem Ersetzen fest, verlangt sie
   danach zeichengleich und bricht ab, sobald PUBLIC (auch über eine NULL-ACL) oder `anon` eine von

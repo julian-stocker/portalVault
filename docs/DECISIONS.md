@@ -17066,10 +17066,85 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0176 · Ein Konto, das im Verkaufsabgleich entschieden hat, bleibt löschbar
+
+**Status:** VORBEREITET · 2026-11-03, lokal, nicht committet. Migration `0175` ist **nirgends
+angewendet** — zuerst nur Staging, mit eigener Freigabe.
+**Betrifft:** ADR-0174 (Verkaufsabgleich, `0169`), ADR-0037 (`inventory_movements`), ADR-0039
+(`catalog_admin_changes`)
+
+### Kontext
+
+`0169` verweist mit `sales_recon_decisions.decided_by` und `sales_recon_applications.applied_by`
+auf `auth.users`, beide `on delete set null`, und schützt beide Tabellen mit einem Trigger, der
+**jedes** UPDATE und DELETE verweigert. PostgreSQL führt `set null` als UPDATE der verweisenden
+Zeile aus. Folge, auf PostgreSQL gemessen: Sobald ein Konto eine Entscheidung getroffen hat,
+scheitert seine Löschung mit „sales_recon_decisions is append-only“ (Supabase: „Database error
+deleting user“). Gefunden bei der Vorbereitung des Funktionstests: dessen temporäres Konto wäre
+stehen geblieben — und der Verifier hat den Fehler verworfen. Derselbe Fehler war schon zweimal
+behoben (ADR-0037, ADR-0039); `0169` hat ihn wiederholt.
+
+### Entscheidung
+
+1. **Neue Migration `0175`, `0169` bleibt unverändert.** Sie ersetzt nur den Rumpf von
+   `sales_recon_evidence_is_append_only()`; Trigger, Fremdschlüssel, Rechte und Zeilen bleiben.
+2. **Genau eine Ausnahme** vom Nur-Erweitern, und nur, wenn **alle** Bedingungen gelten: die Zeile
+   liegt in einer der zwei Tabellen; `decided_by` bzw. `applied_by` wechselt von einem Konto auf
+   NULL; jede andere Spalte ist unverändert (verglichen als ganze Zeile in jsonb-Textform, damit
+   eine später hinzukommende Spalte ohne neue Liste mitgeschützt ist); das UPDATE kommt aus einer
+   Triggerausführung (`pg_trigger_depth() > 1`, also der Fremdschlüsselaktion); und das Konto
+   existiert in `auth.users` **nicht mehr**.
+3. **Enger als ADR-0037/0039.** Dort genügt „Konto → NULL, sonst gleich“; ein direktes UPDATE durch
+   einen Berechtigten käme durch. Hier nicht: solange das Konto existiert, ist ein direktes
+   `update … set decided_by = null` verboten — auch für den Eigentümer der Datenbank und auch aus
+   einem fremden Trigger heraus. Nur die Löschung des Kontos selbst kann den Verweis leeren.
+4. **Verworfene Alternativen.** `on delete restrict` (Konto nie löschbar — Datenschutz),
+   `on delete no action` mit manueller Anonymisierung vorher (Löschung über das Dashboard
+   scheitert weiterhin), Kontoverweis ohne Fremdschlüssel (ein Verweis ins Leere, und der Name
+   eines gelöschten Kontos bliebe als UUID stehen), eine Trigger-Ausnahme über eine Sitzungs-
+   variable (jeder, der die Variable setzt, könnte den Verweis leeren). Die gewählte Lösung hält
+   die Belege vollständig und macht das Konto löschbar.
+5. **Datenschutz und Sicherheit.** Gelöscht wird nur der Verweis auf ein Konto, das es nicht mehr
+   gibt (Datenminimierung). Entscheidung, angezeigte Werte, Begründung, Zeit, Ergebnis, alter und
+   neuer Wert bleiben; ebenso `orderbook_audit` und das Verkaufsbuch. Keine Clientrolle darf die
+   Triggerfunktion ausführen; sie bleibt `security definer` mit leerem `search_path`.
+   **Angegriffen und gehalten** (PostgreSQL, `account-deletion-0175.test.ts` Abschnitt 7): ein
+   Trigger, der in derselben Löschung **vor** der Fremdschlüsselaktion den Verweis leert und dabei
+   ein Fachfeld ändert, die Zeile löscht oder einen Wert nur anders schreibt; das Löschen eines
+   **anderen** Kontos als Hebel; ein verschachteltes UPDATE nach der Löschung; ein UPDATE in der
+   löschenden Transaktion. Jeder Versuch scheitert, und die ganze Löschung mit ihm.
+   **Grenze, nicht Lücke:** Ein Trigger schützt nur vor Zeilenänderungen. `TRUNCATE`, das
+   Abschalten des Triggers und `session_replication_role = replica` umgehen ihn — das können nur
+   der Tabelleneigentümer, ein Superuser oder eine Rolle mit `TRUNCATE`-Recht (auf Staging
+   `postgres` und `service_role`, Supabase-Voreinstellung auf allen Nur-Erweitern-Tabellen; über
+   die API ist `TRUNCATE` nicht erreichbar). Das gilt projektweit und schon vor `0175`; ein
+   `BEFORE TRUNCATE`-Schutz ist ein eigener Auftrag.
+6. **Der Verifier verwirft keinen Aufräumfehler mehr.** `tools/verify-sales-reconciliation.mts`
+   prüft das Entfernen der Betriebszuordnung und das Löschen des temporären Kontos; ein Fehler ist
+   ein fehlgeschlagener Lauf mit der Kontokennung. Ohne `0175` auf Staging endet `--apply` deshalb
+   rot — gewollt.
+
+### Offen (eigener Auftrag)
+
+Dieselbe Bauart steht noch an drei weiteren Stellen, deren Trigger **jede** Änderung verweigern:
+`purchase_receipts.issued_by`, `purchase_receipt_downloads.delivered_by` (Einkaufsbelege, nur
+Betriebskonten) und `order_messages.author_user_id` (Bestellnachrichten — **auch Käuferkonten**).
+Ein Konto mit einer solchen Zeile ist heute nicht löschbar. Auf Staging aus dem Katalog gelesen,
+nicht auf Production gemessen; nicht Teil von `0175`, weil es Shop und Belege betrifft.
+
+### Konsequenzen
+
+- `0175` vor jedem `--apply` des Funktionstests auf Staging.
+- Rückbau `R0175` stellt den Rumpf aus `0169` und damit den Fehler wieder her.
+- Tests: `src/lib/reconciliation/sql/account-deletion-0175.test.ts` (PostgreSQL).
+
+
+---
+
 ## ADR-0175 · Die zentrale Sicherung ist ein eigenes Projekt — admin-verwaltet, extern, verschlüsselt
 
 **Status:** BESCHLOSSEN (Rahmen) · 2026-11-03. **Nicht umgesetzt**, keine Migration, kein Werkzeug,
-kein Speicher. Beginnt frühestens mit `0175`, **nach** der Staging-Anwendung von `0169`–`0174`
+kein Speicher. Beginnt frühestens mit `0176` (`0175` ist die Kontolöschung, ADR-0176), **nach** der Staging-Anwendung von `0169`–`0174`
 und unabhängig vom Verkaufsabgleich.
 **Betrifft:** ADR-0114/0115 (Betriebs- und Plattformsicherung, kein Service-Role-Pfad, nicht im
 selben Brandabschnitt), ADR-0134/0135 (Formatversionen), ADR-0174 Nr. 11 und 15, ADR-0042
@@ -17115,7 +17190,7 @@ Konten sind exklusiv — ein Plattformadmin kann die Betriebssicherung heute nic
 
 | Phase | Inhalt |
 |---|---|
-| 1 | `0175`: Rumpf in `business_backup_document(p_seller_id)`; `seller_business_backup()` liefert dasselbe; `system_business_backup(p_seller_id)` nur Plattformadmin; Laufprotokoll; Sicherungskonto-Rolle; Entscheidung über das `service_role`-Recht |
+| 1 | `0176`: Rumpf in `business_backup_document(p_seller_id)`; `seller_business_backup()` liefert dasselbe; `system_business_backup(p_seller_id)` nur Plattformadmin; Laufprotokoll; Sicherungskonto-Rolle; Entscheidung über das `service_role`-Recht |
 | 2 | `tools/backup-run.mts` und Workflow: Satz bauen, verschlüsseln, hochladen, zurücklesen, protokollieren |
 | 3 | `verify:backup-set` und eine regelmäßige Restore-Probe in eine Wegwerf-Datenbank |
 | 4 | `/admin/datensicherung` zeigt Verlauf und Alter der letzten erfolgreichen Sicherung |
