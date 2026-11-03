@@ -33,7 +33,7 @@
  * Datenbankzugriff, keine Seiteneffekte.
  */
 import type { BackupSection } from "./manifest";
-import { SALES_RECONCILIATION_SECTIONS } from "./manifest";
+import { SALES_RECONCILIATION_SECTIONS } from "./manifest.ts";
 
 export const PLATFORM_FORMAT = "skyisles-platform-backup";
 

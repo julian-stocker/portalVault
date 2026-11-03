@@ -44,6 +44,7 @@ import { relative, resolve } from "node:path";
 
 import { PLATFORM_ARCHIVE_LAYOUT, PLATFORM_SECTIONS, SECTIONS_BY_FORMAT_VERSION }
   from "../src/lib/backup/platform-manifest.ts";
+import { SALES_RECONCILIATION_SECTIONS } from "../src/lib/backup/manifest.ts";
 import { projectRef, readEnvFile, STAGING_ENV_FILE } from "./lib/staging-guard.mts";
 
 /* --------------------------------------------------------------- Aufruf */
@@ -223,7 +224,11 @@ pruef(JSON.stringify(imDokument) === JSON.stringify(imDeckblatt),
  * anderer dazugekommen ist.
  */
 const NEU = "purchase_calculations";
-const alte = PLATFORM_SECTIONS.map((s) => s.key).filter((k) => k !== NEU);
+/* The seven reconciliation areas exist from format_version 3 (0174) on; an
+   older archive cannot carry them and is not short of anything. */
+const abVersion3 = new Set(SALES_RECONCILIATION_SECTIONS.map((s) => s.key));
+const alte = PLATFORM_SECTIONS.map((s) => s.key)
+  .filter((k) => k !== NEU && (ERWARTETE_VERSION >= 3 || !abVersion3.has(k)));
 const fehlendeAlte = alte.filter((k) => !imDokument.includes(k));
 pruef(fehlendeAlte.length === 0, `alle ${alte.length} bisherigen Bereiche sind da`,
       fehlendeAlte.length ? `fehlen: ${fehlendeAlte.join(", ")}` : "");
