@@ -419,9 +419,11 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * (`src/lib/backup/backup-sales-reconciliation.test.ts`).
      * `0175` (ADR-0176): the account deletion of the reconciliation — a
      * trigger body of `0169`, no receipt table, no backup area.
+     * `0176` (ADR-0177): the reconciliation checks a known upload in full —
+     * no receipt table either.
      */
-    expect(files[files.length - 1]).toBe("0175_sales_recon_account_deletion.sql");
-    expect(files[files.length - 2]).toBe("0174_backup_sales_reconciliation.sql");
+    expect(files[files.length - 1]).toBe("0176_sales_recon_validate_before_dedup.sql");
+    expect(files[files.length - 2]).toBe("0175_sales_recon_account_deletion.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(numbers.map((_, i) => i + 1));
   });

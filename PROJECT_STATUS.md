@@ -109,7 +109,7 @@ danach zeichengleich und verbietet weiterhin nur PUBLIC und `anon`; `R0174` eben
 106/109/110, Nachkontrolle 245/246, P74 mit den gemessenen Staging-Rechten (ADR-0174 Nr. 15).
 Rümpfe und Abdrücke unverändert.
 
-**Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0176`).
+**Zentrale Sicherung:** als eigenes Projekt beschlossen, nicht begonnen (ADR-0175, ab `0177`).
 
 **Kontolöschung (`0175`, ADR-0176) — auf Staging angewendet am 2026-11-03, Production nicht.** Ein Konto, das im
 Abgleich entschieden oder angewendet hatte, war nicht löschbar (`on delete set null` gegen den
@@ -135,9 +135,16 @@ Hilfsfunktion; dazu eine lesende Katalogprüfung, die jede solche Kombination fi
 Ablauf der Aufbewahrungsfrist ist eine eigene, rechtliche Frage. **Keine Migration ohne
 separate Freigabe.**
 
-**Nächster Schritt:** der synthetische Funktionstest auf Staging
-(`npm run verify:sales-reconciliation:staging`, Trockenlauf bestanden; `-- --apply` mit eigener
-Freigabe, als vorhandenes Betriebskonto, Zustandsdatei vorher und nachher als `postgres`). Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
+**Funktionstest auf Staging (2026-11-03, Lauf `mw12dxva`) — 25/27.** Einmal mit `--apply` als
+vorhandenes Betriebskonto: 12 Testverkäufe (IDs 362–373, `is_test`, 2001), Sitzung 1 geschlossen,
+Sitzung 2 (Konfliktprobe) verworfen, 11 Entscheidungen (6 angewendet, 5 dokumentiert). Zustandsdatei
+als `postgres` vorher und nachher: 101–108 **zeichengleich**, 201–206 wie erwartet, keine offene
+Sitzung. Die zwei Fehlschläge — Ablehnung von Käuferfeld und E-Mail-Adresse — kamen daher, dass die
+Proben den Dateisatz der Hauptsitzung benutzten und `seller_recon_create` einen bekannten Upload vor
+der Inhaltsprüfung wiedererkannte (nichts gespeichert). Korrektur `0176` (ADR-0177) lokal vorbereitet.
+
+**Nächster Schritt:** `0176` auf Staging (eigene Freigabe), danach ein zweiter Funktionstestlauf, in
+dem alle Ablehnungen als neuer und als bekannter Upload bestehen müssen. Danach Phase 4 (Oberfläche). Production erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

@@ -2047,6 +2047,9 @@ kann.
   `seller_recon_create` in der Datenbank lehnen **jedes unbekannte Feld** auf jeder Ebene ab und
   nennen dabei nur den Feldnamen, nie einen Wert. Die Sitzungszusammenfassung darf nur Zahlen
   enthalten. Die Tabellen haben für Käuferdaten keine Spalte.
+- **Jeder Upload wird ganz geprüft, auch ein bekannter (`0176`, ADR-0177, lokal vorbereitet).**
+  Bis dahin beantwortete `seller_recon_create` einen bereits bekannten Upload mit seiner Sitzung,
+  bevor Bestellungen und Positionen gelesen waren — nichts gespeichert, aber auch nichts abgewiesen.
 - **Die Datei verlässt den Browser nicht**; gespeichert werden Dateiname und SHA-256.
 - **Rechte:** RLS an, keine Policy, kein Clientrecht auf die sieben Tabellen; alle Zugänge sind
   `security definer`-Funktionen hinter `can_operate_active_seller()`. Kein Recht für den

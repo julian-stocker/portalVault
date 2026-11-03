@@ -554,6 +554,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0176": {
+      "zweck": "Verkaufsabgleich (ADR-0177): seller_recon_create prueft den ganzen Upload ueber sales_recon_validate_payload, bevor es einen bekannten Upload wiedererkennt — aendert selbst keine Daten",
+      "preflight": "0176_preflight.sql",
+      "lauf": "staging-0176.sql",
+      "postflight": "0176_postflight.sql",
+      "angewendet": {
+        "beschreibung": "sales_recon_validate_payload(jsonb) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.sales_recon_validate_payload(jsonb)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

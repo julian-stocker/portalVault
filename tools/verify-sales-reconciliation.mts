@@ -279,14 +279,36 @@ async function main(): Promise<void> {
     check("the same upload twice is the same session", Number(again) === session, `${session}`);
 
     heading("3. Ablehnungen");
-    const withField = structuredClone(main1.payload) as unknown as { orders: Record<string, unknown>[] };
-    withField.orders[0].buyerName = "x";
-    check("an unknown payload field is refused",
-          (await op.rpc("seller_recon_create", { p_payload: withField })).error !== null);
-    const withMail = structuredClone(main1.payload);
-    withMail.orders[0].lines[0].title = "Fragen an test@example.invalid";
-    check("contact data in free text is refused",
-          (await op.rpc("seller_recon_create", { p_payload: withMail })).error !== null);
+    /*
+     * BOTH WAYS IN. A refusal probe that reuses the main session's files is a
+     * KNOWN upload — before 0176 the database recognised it and answered with
+     * the session before reading orders and lines (run mw12dxva, 2026-11-03).
+     * So every probe runs twice: as a new upload (its own file fingerprint)
+     * and as the known one. Both must be refused; neither may create or
+     * change anything — the session count is compared before and after.
+     */
+    type Probe = { orders: { buyerName?: string; lines: { title: string }[] }[]; files: { fingerprint: string }[] };
+    const asNew = (p: Probe): Probe => {
+      p.files[0].fingerprint = sha(`${plan.fingerprint}:refusal`);
+      return p;
+    };
+    const spoil: [string, (p: Probe) => void][] = [
+      ["an unknown payload field", (p) => { p.orders[0].buyerName = "x"; }],
+      ["contact data in free text", (p) => { p.orders[0].lines[0].title = "Fragen an test@example.invalid"; }],
+    ];
+    const sessionCount = async () =>
+      (must(await op.rpc("seller_recon_sessions", {}), "sessions") as unknown[]).length;
+    const countBefore = await sessionCount();
+    for (const [what, change] of spoil) {
+      for (const [way, prepare] of [["new upload", asNew], ["known upload", (p: Probe) => p]] as const) {
+        const probe = prepare(structuredClone(main1.payload) as unknown as Probe);
+        change(probe);
+        const r = await op.rpc("seller_recon_create", { p_payload: probe });
+        check(`${what} is refused (${way})`, r.error !== null,
+              r.error ? "" : `angenommen — Sitzung ${String(r.data)} zurückgegeben`);
+      }
+    }
+    check("no refused upload created a session", (await sessionCount()) === countBefore);
     const stranger = anonClient();
     check("anon cannot read candidates",
           (await stranger.rpc("seller_recon_candidates", { p_channel: "ebay", p_from: "2001-01-01", p_to: "2001-12-31" })).error !== null);

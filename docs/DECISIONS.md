@@ -17066,6 +17066,52 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
+
+**Status:** VORBEREITET · 2026-11-03, lokal, nicht committet. Migration `0176` ist **nirgends
+angewendet** — zuerst nur Staging, mit eigener Freigabe.
+**Betrifft:** ADR-0174 Nr. 2 (Käuferdaten dreifach ferngehalten), `0172`
+
+### Kontext
+
+`seller_recon_create` (`0172`) erkennt denselben Upload wieder: eine **offene** Sitzung mit
+demselben Dateisatz wird zurückgegeben statt einer zweiten. Diese Suche lief direkt nach den
+Schlüsseln der obersten Ebene und den Dateieinträgen — **bevor** Bestellungen, Positionen,
+Zuordnungen und Befunde gelesen wurden. Ein bekannter Upload mit `buyerName` oder einer
+E-Mail-Adresse im Titel bekam deshalb die vorhandene Sitzung als **Erfolg** zurück. Gespeichert
+wurde nichts (der Inhalt wurde gar nicht gelesen, auf PostgreSQL nachgewiesen), abgewiesen aber auch
+nicht — der dritte Riegel aus ADR-0174 Nr. 2 galt nicht bei jedem Aufruf. Gefunden im
+Staging-Funktionstest vom 2026-11-03 (Lauf `mw12dxva`, 25/27): seine zwei Ablehnungsproben benutzten
+den Dateisatz der Hauptsitzung.
+
+### Entscheidung
+
+1. **Neue Migration `0176`**, `0172` bleibt unverändert. Neue reine Funktion
+   `sales_recon_validate_payload(jsonb)`: prüft jede Regel von Form und Inhalt — Schlüssel, Typen,
+   Längen, Tage, Zahlen, Kontaktdatensperre — für Upload, Abdeckung, Zusammenfassung, Dateien,
+   Bestellungen, Positionen, Zuordnungen, Konkurrenten, Befunde und Ursachen; sie liest keine
+   Tabelle und ist für keine Clientrolle ausführbar.
+2. **`seller_recon_create` ruft sie direkt nach dem Betriebstor auf**, vor der Wiedererkennung. Der
+   übrige Rumpf ist zeichengleich der aus `0172`; die Prüfungen beim Einfügen bleiben als zweiter
+   Riegel und als einziger Ort für das, was von der Datenbank abhängt (Verkauf existiert, Bestellung
+   in der Sitzung, veralteter Verkauf → PT409).
+3. **Unverändert:** Ein korrekter bekannter Upload liefert weiter seine Sitzung, ohne die Verkäufe
+   erneut zu prüfen. Die Rechte von `seller_recon_create` bleiben (`create or replace`).
+4. **Der Verifier prüft jede Ablehnung zweimal** — als neuen Upload (eigener Dateiabdruck) und als
+   bekannten — und vergleicht die Sitzungszahl davor und danach.
+
+### Konsequenzen
+
+- Tests: `src/lib/reconciliation/sql/validate-before-dedup-0176.test.ts` (PostgreSQL) — 19 Arten
+  verbotenen Inhalts, je als neuer und als bekannter Upload; ohne `0176` scheitern 15 der 19
+  bekannten Fälle (die vier übrigen prüfte `0172` schon vor der Wiedererkennung).
+- Rückbau `R0176` stellt den Rumpf aus `0172` wieder her und entfernt die Prüffunktion; bei einem
+  vollständigen Rückbau des Abgleichs **vor** `R0169_0173`.
+- Die zentrale Sicherung (ADR-0175) beginnt dadurch bei `0177`.
+
+
+---
+
 ## ADR-0176 · Ein Konto, das im Verkaufsabgleich entschieden hat, bleibt löschbar
 
 **Status:** AUF STAGING ANGEWENDET · 2026-11-03 (`b052e2a`). Migration `0175` läuft auf Staging,
@@ -17153,7 +17199,7 @@ nicht auf Production gemessen; nicht Teil von `0175`, weil es Shop und Belege be
 ## ADR-0175 · Die zentrale Sicherung ist ein eigenes Projekt — admin-verwaltet, extern, verschlüsselt
 
 **Status:** BESCHLOSSEN (Rahmen) · 2026-11-03. **Nicht umgesetzt**, keine Migration, kein Werkzeug,
-kein Speicher. Beginnt frühestens mit `0176` (`0175` ist die Kontolöschung, ADR-0176), **nach** der Staging-Anwendung von `0169`–`0174`
+kein Speicher. Beginnt frühestens mit `0177` (`0175` ist die Kontolöschung, ADR-0176; `0176` die Prüfung vor der Wiedererkennung, ADR-0177), **nach** der Staging-Anwendung von `0169`–`0174`
 und unabhängig vom Verkaufsabgleich.
 **Betrifft:** ADR-0114/0115 (Betriebs- und Plattformsicherung, kein Service-Role-Pfad, nicht im
 selben Brandabschnitt), ADR-0134/0135 (Formatversionen), ADR-0174 Nr. 11 und 15, ADR-0042
@@ -17199,7 +17245,7 @@ Konten sind exklusiv — ein Plattformadmin kann die Betriebssicherung heute nic
 
 | Phase | Inhalt |
 |---|---|
-| 1 | `0176`: Rumpf in `business_backup_document(p_seller_id)`; `seller_business_backup()` liefert dasselbe; `system_business_backup(p_seller_id)` nur Plattformadmin; Laufprotokoll; Sicherungskonto-Rolle; Entscheidung über das `service_role`-Recht |
+| 1 | `0177`: Rumpf in `business_backup_document(p_seller_id)`; `seller_business_backup()` liefert dasselbe; `system_business_backup(p_seller_id)` nur Plattformadmin; Laufprotokoll; Sicherungskonto-Rolle; Entscheidung über das `service_role`-Recht |
 | 2 | `tools/backup-run.mts` und Workflow: Satz bauen, verschlüsseln, hochladen, zurücklesen, protokollieren |
 | 3 | `verify:backup-set` und eine regelmäßige Restore-Probe in eine Wegwerf-Datenbank |
 | 4 | `/admin/datensicherung` zeigt Verlauf und Alter der letzten erfolgreichen Sicherung |
