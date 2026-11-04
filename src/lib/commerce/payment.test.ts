@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
+import { expectedMigrationNumbers } from "@/lib/admin/migration-sequence";
 
 import {
   bookedStock,
@@ -78,7 +79,7 @@ describe("the migration stays additive", () => {
     expect(files).toContain("0012_payment_core.sql");
     // Contiguous numbering from 0001, no gaps and no duplicates.
     const numbers = files.map((f) => Number(f.slice(0, 4)));
-    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });
 });
 

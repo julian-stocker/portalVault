@@ -27,6 +27,7 @@ import { join } from "node:path";
 
 import { code, latestFunction } from "@/test-support/migrations";
 import { renderPurchaseReceiptPdf, type ReceiptDocument } from "./purchase-receipt";
+import { expectedMigrationNumbers } from "@/lib/admin/migration-sequence";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FILE = "0122_purchase_receipts.sql";
@@ -421,11 +422,14 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * trigger body of `0169`, no receipt table, no backup area.
      * `0176` (ADR-0177): the reconciliation checks a known upload in full —
      * no receipt table either.
+     * `0178`: comparison values and the pending changes of the
+     * reconciliation, read only — no receipt table. `0177` is reserved for
+     * the central backup (`migration-sequence.ts`).
      */
-    expect(files[files.length - 1]).toBe("0176_sales_recon_validate_before_dedup.sql");
-    expect(files[files.length - 2]).toBe("0175_sales_recon_account_deletion.sql");
+    expect(files[files.length - 1]).toBe("0178_sales_recon_comparison_and_pending.sql");
+    expect(files[files.length - 2]).toBe("0176_sales_recon_validate_before_dedup.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
-    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });
 
   it("und 0122 selbst wurde dabei nicht angefasst", () => {

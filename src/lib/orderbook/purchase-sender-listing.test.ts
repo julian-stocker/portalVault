@@ -24,6 +24,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { code, latestFunction } from "@/test-support/migrations";
+import { expectedMigrationNumbers } from "@/lib/admin/migration-sequence";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const DIR = "supabase/migrations";
@@ -67,7 +68,8 @@ describe("die Migrationsnummer", () => {
      * Grund für die Nummer DIESER Datei nennt.
      */
     const numbers = files.map((f) => Number(f.slice(0, 4)));
-    expect(numbers).toEqual(numbers.map((_, index) => index + 1));
+    // Lückenlos bis auf ausdrücklich reservierte Nummern (`migration-sequence.ts`).
+    expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });
 
   it("diese Migration ist 0121", () => {

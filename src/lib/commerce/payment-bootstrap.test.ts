@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
+import { expectedMigrationNumbers } from "@/lib/admin/migration-sequence";
 
 /**
  * Payment bootstrap and the corrected lifecycle (B2.2b, migration 0015).
@@ -106,7 +107,7 @@ describe("the migration does only what it says", () => {
     const files = readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain("0015_payment_bootstrap.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
-    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });
 });
 

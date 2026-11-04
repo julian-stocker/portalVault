@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
+import { expectedMigrationNumbers } from "@/lib/admin/migration-sequence";
 
 /**
  * `create_order()` after the amount-initialisation fix (migration 0016).
@@ -88,7 +89,7 @@ describe("the migration changes one function and nothing else", () => {
     const files = readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")).sort();
     expect(files).toContain("0016_fix_create_order_amount_initialization.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
-    expect(numbers).toEqual(numbers.map((_, i) => i + 1));
+    expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });
 });
 

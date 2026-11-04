@@ -572,6 +572,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0178": {
+      "zweck": "Verkaufsabgleich (ADR-0174, Phase 4): seller_recon_session liest die SkyIsles-Vergleichswerte (ledger), seller_recon_pending die ausstehenden Aenderungen mit Token — rein lesend, aendert keine Daten; 0177 bleibt fuer die zentrale Sicherung reserviert",
+      "preflight": "0178_preflight.sql",
+      "lauf": "staging-0178.sql",
+      "postflight": "0178_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_pending(bigint) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_recon_pending(bigint)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }
