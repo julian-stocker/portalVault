@@ -21,7 +21,7 @@ import { canOperateSeller } from "@/lib/auth/capabilities";
 import { de } from "@/lib/i18n/de";
 import { createClient } from "@/lib/supabase/server";
 import { coverageOf } from "../coverage";
-import { mergeReports } from "../dedupe";
+import { distinctFiles, mergeReports } from "../dedupe";
 import { reconcile, summarize } from "../diff";
 import { matchOrders } from "../match";
 import { aliasIndex, ledgerSales, PayloadError, sessionPayload, validateUpload } from "./payload";
@@ -77,9 +77,8 @@ export async function analyseReconciliation(input: unknown): Promise<ActionResul
   const merged = mergeReports(upload.files.map((f) => ({ report: f.report, fingerprint: f.fingerprint })));
   if (merged.conflicts.length > 0) return { ok: false, message: copy.errors.conflictingOrders };
   if (merged.orders.length === 0) return { ok: false, message: copy.errors.noOrders };
-  // A file read twice is one file.
-  const skipped = new Set(merged.duplicateFiles.map((d) => d.fileName));
-  const files = upload.files.filter((f) => !skipped.has(f.report.fileName));
+  // A file read twice is one file — by content and position, never by name (`distinctFiles`).
+  const files = distinctFiles(upload.files).kept;
   const reports = files.map((f) => f.report);
   const coverage = coverageOf(reports, merged.orders);
 

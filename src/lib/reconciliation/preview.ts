@@ -21,7 +21,7 @@
  */
 
 import { coverageOf, type Coverage } from "./coverage.ts";
-import { fileFingerprint, mergeReports, type MergedReports, type Sha256 } from "./dedupe.ts";
+import { distinctFiles, fileFingerprint, mergeReports, type MergedReports, type Sha256 } from "./dedupe.ts";
 import { parseSalesReport } from "./registry.ts";
 import { PayloadError, validateUpload, type UploadInput } from "./server/payload.ts";
 import type { ExternalReport, ParseFailure, ReportIssue } from "./types.ts";
@@ -113,20 +113,10 @@ export async function buildPreview(selected: readonly SelectedFile[], sha256: Sh
   }
 
   const merged: MergedReports = mergeReports(readable);
-  /*
-   * Which files are repeats — by POSITION, not by name. `mergeReports` keeps
-   * the first file of each fingerprint and names the rest by file name; two
-   * different exports can share a name (`eBay-OrdersReport.csv` twice), so
-   * the name cannot say which one was skipped. Same rule, first one wins.
-   */
-  const firstOf = new Map<string, number>();
-  const duplicateOf = new Map<number, string>();
-  for (const r of readable) {
-    const first = firstOf.get(r.fingerprint);
-    if (first === undefined) firstOf.set(r.fingerprint, r.index);
-    else duplicateOf.set(r.index, selected[first].name);
-  }
-  const kept = readable.filter((r) => !duplicateOf.has(r.index));
+  // Which files are repeats — by content and position, never by name: the server action's rule.
+  const distinct = distinctFiles(readable);
+  const duplicateOf = new Map(distinct.repeats.map((d) => [readable[d.index].index, selected[readable[d.sameAs].index].name]));
+  const kept = distinct.kept;
   const coverage: Coverage | null = kept.length > 0 ? coverageOf(kept.map((r) => r.report), merged.orders) : null;
 
   for (const { index, report, fingerprint } of readable) {

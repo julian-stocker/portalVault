@@ -527,8 +527,16 @@ Berichtsdateien (CSV, nur im Browser — kein Netzwerkzugriff)
       →  Vorschau               Zahlen, Tage, Codes — kein Titel, keine Bestellnummer
 ```
 
-Die Vorschau überträgt nichts. Dubletten erkennt sie nach Inhalt **und Position**, nicht nach
-Dateiname; die vorgesehene Übertragung bleibt unter **900 KiB** (Next: 1 MB je Server Action).
+Die Vorschau überträgt nichts; die vorgesehene Übertragung bleibt unter **900 KiB** (Next: 1 MB
+je Server Action).
+
+**Eine Deduplizierungsregel für Browser und Server** (`distinctFiles()` in `dedupe.ts`): gleicher
+Fingerabdruck ist eine Datei, gleich wie sie heißt; anderer Inhalt ist eine eigene Datei, auch
+unter demselben Namen. Es bleibt die erste nach Position. Vorschau und `analyseReconciliation`
+rufen dieselbe Funktion; die Server Action prüft vorher **jede** eingehende Datei mit
+`validateUpload`. *Vertrauensgrenze:* der Fingerabdruck stammt aus dem Browser — der Server sieht
+die Datei nie und verifiziert ihn nicht. Er sagt, welche Dateien der Client für gleich hält, nicht
+was in der Datei stand.
 `crypto.subtle` fehlt auf http-Seiten außer `localhost` — also auf dem iPhone über
 `dev:staging:lan`; dort rechnet `sha256.ts` (FIPS 180-4) dasselbe Ergebnis.
 

@@ -156,7 +156,8 @@ nichts geschrieben. Keine Migration.
 |---|---|
 | 1 · Darstellungsschicht `src/lib/reconciliation/view.ts` und Texte (`de.ts`) | committet (`aaf9fb9`) |
 | 2 · Sitzungsübersicht `/business/orderbuch/abgleich` | committet (`532041b`) |
-| 3 · Berichte wählen und lokal prüfen (ohne Übertragung) | committet (siehe Git) |
+| 3 · Berichte wählen und lokal prüfen (ohne Übertragung) | committet (`27e3f60`) |
+| 3A · Deduplizierung der Server Action nach Inhalt und Position (`distinctFiles`) | committet (siehe Git) |
 | Analyse starten (Übertragung an `analyseReconciliation`) · 4 · Sitzungsansicht · 5 · Entscheiden · 6 · Abschließen/Verwerfen | offen |
 | 7 · Lesefunktionen `seller_recon_pending` / `seller_recon_history` (ab `0178`, `0177` ist die zentrale Sicherung) | nur konzipiert |
 
@@ -187,13 +188,28 @@ Sperren: Fremdformat, Widerspruch, mehr als 400 Tage, Kontaktdaten im Titel, Dat
 **Kein aktiver Import:** es gibt keinen Knopf zum Übertragen; „Analyse starten" ist ein eigener,
 später freigegebener Schritt.
 
-**Offener Befund — vor Aktivierung des Imports zu beheben und zu testen.** `analyseReconciliation`
-(`server/actions.ts`) überspringt doppelte Dateien über den **Dateinamen** (`skipped` aus
-`mergeReports().duplicateFiles`). Kommen zwei inhaltsgleiche Dateien mit **demselben Namen** an
-(zweimal `eBay-OrdersReport.csv`), fallen **beide** heraus — die Folge ist „keine Bestellung"
-oder ein falscher Zeitraum. Die Vorschau erkennt Dubletten nach Position und würde nur eine
-schicken, die Server Action selbst muss aber jede Eingabe richtig behandeln (sie ist ein
-öffentlicher Endpunkt). Nicht geändert.
+**Befund Deduplizierung — behoben (Schritt 3A, 2026-11-04).** `analyseReconciliation` übernahm
+die Wiederholungen aus `mergeReports().duplicateFiles` über den **Dateinamen** und filterte dann
+jede Datei dieses Namens heraus — auch das Original. Zwei inhaltsgleiche Dateien namens
+`eBay-OrdersReport.csv` (oder A, B, A unter einem Namen) leerten so die Dateiliste, und
+`reports[0].parser` warf einen **TypeError**: die Server Action stürzte ab. Korrektur: die
+gemeinsame reine Funktion `distinctFiles()` (`dedupe.ts`) behält die erste Datei je Fingerabdruck
+**nach Position**; Server Action und Browser-Vorschau verwenden **dieselbe** Regel. Matching-,
+Diff- und Apply-Regeln unverändert, `mergeReports` unverändert. Regressionstests
+`server/analyse-dedupe.test.ts` (15, gegen die echte Server Action mit nachgebildetem Supabase):
+vor der Korrektur 3 rot (TypeError), danach alle grün — gleicher/anderer Name × gleicher/anderer
+Inhalt, Überlappung, Konflikt, Kontaktdaten und ungültige Form unter gleichem Namen abgewiesen,
+`validateUpload` prüft jede Datei vor der Deduplizierung; Vorschau und Server Action liefern für
+fünf Auswahlen dieselben Dateien, Bestellungen und Zeiträume. Dazu 5 Unit-Tests für
+`distinctFiles`.
+
+**Vertrauensgrenze.** Der Fingerabdruck wird im Browser berechnet; der Server sieht die Rohdatei
+nie (ADR-0174) und kann ihn nicht nachrechnen. Er ist deshalb **keine vom Server verifizierte
+Aussage über den ursprünglichen Dateiinhalt**, sondern eine Angabe des Clients: eine Datei mit
+anderem Inhalt und nachgemachtem Fingerabdruck würde als Wiederholung übergangen. Sie wird vorher
+trotzdem vollständig geprüft (`validateUpload`, danach `sales_recon_validate_payload`), es gelangt
+also nichts Unzulässiges in die Datenbank; verfälschen ließe sich nur die eigene Analyse des
+Betriebskontos.
 
 **Sichtprüfung:** **nicht erfolgt** — weder Desktop noch Telefon, auch nicht der Dateidialog auf
 dem iPhone über `dev:staging:lan`. In den Sitzungen stand kein Browser zur Verfügung; geprüft sind
@@ -201,8 +217,7 @@ die automatisierten Tests (Render, jsdom, Gate, Zustände) und die anonyme 404-A
 Staging-Servers. Der Betreiber prüft angemeldet unter
 `http://127.0.0.1:3000/business/orderbuch/verkauf` (Extern → „Abgleich mit Plattformberichten").
 
-**Nächster Schritt:** nach Freigabe der Befund oben, dann „Analyse starten" mit ausdrücklicher
-Bestätigung. Production für `0169`–`0176` erst mit eigener Freigabe.
+**Nächster Schritt:** nach Freigabe „Analyse starten" mit ausdrücklicher Bestätigung. Production für `0169`–`0176` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

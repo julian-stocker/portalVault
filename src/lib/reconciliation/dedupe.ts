@@ -30,6 +30,34 @@ export async function fileFingerprint(text: string, sha256: Sha256): Promise<str
 
 export type FingerprintedReport = { report: ExternalReport; fingerprint: string };
 
+/**
+ * The files to keep: the first of each fingerprint, by POSITION.
+ *
+ * `mergeReports` names a skipped file by its file name, and a name says
+ * nothing about which file it was — two exports are often both called
+ * `eBay-OrdersReport.csv`. Filtering by that name removed the original as
+ * well. This is the one rule both the browser preview and the server action
+ * use: same content (fingerprint) is one file, whatever it is called; a
+ * different content is its own file, whatever it is called.
+ */
+export function distinctFiles<T extends { fingerprint: string }>(
+  files: readonly T[],
+): { kept: T[]; repeats: { index: number; sameAs: number }[] } {
+  const first = new Map<string, number>();
+  const kept: T[] = [];
+  const repeats: { index: number; sameAs: number }[] = [];
+  files.forEach((file, index) => {
+    const earlier = first.get(file.fingerprint);
+    if (earlier === undefined) {
+      first.set(file.fingerprint, index);
+      kept.push(file);
+    } else {
+      repeats.push({ index, sameAs: earlier });
+    }
+  });
+  return { kept, repeats };
+}
+
 export type OrderConflict = {
   orderRef: string;
   files: string[];

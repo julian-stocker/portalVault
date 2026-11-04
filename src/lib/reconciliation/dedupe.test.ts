@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { fileFingerprint, mergeReports } from "./dedupe";
+import { distinctFiles, fileFingerprint, mergeReports } from "./dedupe";
 import { parseEbayOrdersReport } from "./ebay/parse";
 import { ebayReport, type FixtureOrder } from "./testing/ebay-fixture";
 import type { ExternalReport } from "./types";
@@ -57,5 +57,33 @@ describe("mergeReports", () => {
     expect(merged.conflicts).toEqual([
       { orderRef: "00-0-1", files: ["a.csv", "b.csv"], fields: ["itemsValue", "lines", "total"] },
     ]);
+  });
+});
+
+describe("distinctFiles — repeats by content and position, never by name", () => {
+  const f = (name: string, fingerprint: string) => ({ name, fingerprint });
+
+  it("same name, same content: the first one stays", () => {
+    const a = f("eBay-OrdersReport.csv", "x");
+    expect(distinctFiles([a, { ...a }])).toEqual({ kept: [a], repeats: [{ index: 1, sameAs: 0 }] });
+  });
+
+  it("same name, different content: both stay", () => {
+    const files = [f("eBay-OrdersReport.csv", "x"), f("eBay-OrdersReport.csv", "y")];
+    expect(distinctFiles(files)).toEqual({ kept: files, repeats: [] });
+  });
+
+  it("different name, same content: the first one stays", () => {
+    expect(distinctFiles([f("a.csv", "x"), f("b.csv", "x")]).kept.map((x) => x.name)).toEqual(["a.csv"]);
+  });
+
+  it("a later repeat points at the first of its content, and the order is kept", () => {
+    const r = distinctFiles([f("a", "x"), f("a", "y"), f("a", "x"), f("b", "y")]);
+    expect(r.kept.map((x) => x.fingerprint)).toEqual(["x", "y"]);
+    expect(r.repeats).toEqual([{ index: 2, sameAs: 0 }, { index: 3, sameAs: 1 }]);
+  });
+
+  it("nothing in, nothing out", () => {
+    expect(distinctFiles([])).toEqual({ kept: [], repeats: [] });
   });
 });
