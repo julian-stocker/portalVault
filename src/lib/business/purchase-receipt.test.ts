@@ -425,9 +425,10 @@ describe("0122 legt an, was der Beleg braucht", () => {
      * `0178`: comparison values and the pending changes of the
      * reconciliation, read only — no receipt table. `0177` is reserved for
      * the central backup (`migration-sequence.ts`).
+     * `0179`: a value at analysis only with proof — read only, no receipt table.
      */
-    expect(files[files.length - 1]).toBe("0178_sales_recon_comparison_and_pending.sql");
-    expect(files[files.length - 2]).toBe("0176_sales_recon_validate_before_dedup.sql");
+    expect(files[files.length - 1]).toBe("0179_sales_recon_ledger_proof.sql");
+    expect(files[files.length - 2]).toBe("0178_sales_recon_comparison_and_pending.sql");
     const numbers = files.map((f) => Number(f.slice(0, 4)));
     expect(numbers).toEqual(expectedMigrationNumbers(numbers));
   });

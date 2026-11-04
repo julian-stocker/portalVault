@@ -282,7 +282,31 @@ SHA-256 `ab05e6e08e7f74e842446fc40f0c76e3d9ef6f37c1c73865c94111e5a69e79d2`.
 6. **Rechte:** `npm run db:privileges:staging` — unverändert.
 7. **Akte:** Zeile in `APPLIED.md` in die Staging-Tabelle, `npm run sums:write`.
 
+## Funktionale Leseabnahme (2026-11-04) — 41 von 42, NICHT abgenommen
+
+Als bestehendes Staging-Betriebskonto (öffentlicher Schlüssel, ohne Service-Role, kein Konto
+angelegt), ausschließlich `seller_recon_sessions`, `seller_recon_session` und
+`seller_recon_pending`. Ausgegeben wurden nur Zählungen, Strukturbefunde und Hashes.
+
+**Bestanden (41):** ohne Anmeldung beide Funktionen `42501`; Sitzungen 1 (geschlossen), 2 und 3
+(verworfen) von `view.ts` gelesen; `ledger` vollständig und widerspruchsfrei zu `stale` und
+`version`; Seiten zu je einer Zuordnung in gleicher Reihenfolge; Kategorien summieren sich; `limit`
+0 und 201 sowie `offset` −1 `23514`; `pending` in Form, für nicht offene Sitzungen ohne Token,
+wiederholt identisch; ungültige IDs (0, −1, 999999999) `P0002` ohne Wert; Sitzungsliste, jede
+Sitzungsseite und jedes `pending` vorher/nachher gleich; Prüfzugang vorher/nachher (242, 244,
+251–253, Shop, Sammlung) gleich. Sitzung 1: Kategorien `exact` 2, `deviating` 8, `probable` 1;
+Zustand `unchanged` 5, `applied` 6; Basis `derived` 48, `stored` 7 — jede `unchanged`-Zuordnung
+mit heutigem Wert = Analysewert.
+
+**Abweichung (1):** Sitzung 3, Zuordnung 13 — `state = unchanged`, aber `derived` ≠ heute bei
+Warenwert, Versand und erwartetem Gesamtbetrag. Ursache: der handgebaute Payload der
+Ablehnungsprobe (`miniPayload`, `exact` ohne Befund, 1 / 0 / 1). Behebung: Migration `0179`
+(lokal, nicht angewendet).
+
+**Grenzen:** keine offene Sitzung auf Staging — ein Token über eine nicht leere Menge war ohne
+neue Testdaten nicht prüfbar; ein angemeldetes Konto ohne Verkäuferrolle wurde nicht getestet.
+
 ## Rückbau
 
-`supabase/rollback/R0178_sales_recon_without_comparison.sql` — nur solange `0179` nicht steht
+`supabase/rollback/R0178_sales_recon_without_comparison.sql` — nur solange weder `0179` noch `0180` steht
 (sie verweigert sonst selbst). Production: eigene, spätere Entscheidung.

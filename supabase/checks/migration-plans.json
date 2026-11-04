@@ -590,6 +590,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0179": {
+      "zweck": "Verkaufsabgleich (ADR-0174, Phase 4): ledger.atAnalysis nennt einen Analysewert nur mit Nachweis (stored/derived), sonst unknown — Befund der funktionalen Leseabnahme von 0178; rein lesend, aendert keine Daten",
+      "preflight": "0179_preflight.sql",
+      "lauf": "staging-0179.sql",
+      "postflight": "0179_postflight.sql",
+      "angewendet": {
+        "beschreibung": "sales_recon_ledger(bigint) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.sales_recon_ledger(bigint)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

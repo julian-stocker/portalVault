@@ -162,7 +162,8 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
 | 5 · Vergleichsansicht `/abgleich/<id>` · 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
 | `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
-| `0179` · unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Token — `0177` ist die zentrale Sicherung | nur konzipiert |
+| `0179` · `ledger.atAnalysis` nur mit Nachweis (Befund der Leseabnahme von 0178) — rein lesend, mit Prüfpaket | **lokal fertiggestellt und committet (siehe Git); auf Staging und Production NICHT angewendet** |
+| `0180` · unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Token — `0177` ist die zentrale Sicherung | nur konzipiert |
 
 **Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
 Status in Worten, Zeitraum, Dateien, Verkaufsprotokoll, „Befunde mit Entscheidung" (zählt
@@ -249,12 +250,16 @@ unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 
 - `seller_recon_session` behält Signatur, Rechte und jeden Schlüssel und liefert je Zuordnung `ledger`: `current` (SkyIsles jetzt), `state` (`unchanged` / `applied` / `changed`), `version` und `atAnalysis`. **`atAnalysis` unterscheidet je Feld `stored`** (gespeicherter Befundwert), **`derived`** (rekonstruiert: kein Befund bei einem Paar, also gleich dem Berichtswert) **und `unknown`** (kein Paar — `value` ist `null`, nie ein Ersatzwert).
 - `seller_recon_pending(bigint)` ist **ausschließlich lesend**: die Auswahl, die `seller_recon_apply` übernehmen würde, mit altem und Zielwert (Warenwert nach der bestehenden Rabattregel), Anzahl, veralteten Verkäufen und Token.
-- **Der Token wird erst mit `0179` verbindlich geprüft** — dann rechnet die Übernahme ihn unter Sperre nach. Bis dahin ist er eine Auskunft; `seller_recon_apply` und `seller_recon_decide` sind unverändert (Nachbedingung und Prüfpaket belegen beide Rümpfe).
-- **`R0178` darf nach `0179` nicht ausgeführt werden, ohne `0179` vorher zurückzunehmen** — sie verweigert selbst, solange Apply nicht der Rumpf aus `0173` ist oder eine der vier neuen Funktionen eine spätere Fassung trägt.
+- **Der Token wird erst mit `0180` verbindlich geprüft** — dann rechnet die Übernahme ihn unter Sperre nach. Bis dahin ist er eine Auskunft; `seller_recon_apply` und `seller_recon_decide` sind unverändert (Nachbedingung und Prüfpaket belegen beide Rümpfe).
+- **`R0178` darf nach `0179`/`0180` nicht ausgeführt werden, ohne diese vorher zurückzunehmen** — sie verweigert selbst, solange Apply nicht der Rumpf aus `0173` ist oder eine der vier neuen Funktionen eine spätere Fassung trägt.
 - **Die Oberfläche bietet weiterhin ausschließlich Verkaufsdatum, Warenwert und Versand zur Korrektur an.** Die Datenbank liest auch ältere Entscheidungen zu anderen Feldern (Gesamtbetrag, Stück, Figur, Bestellnummer) mit, weil die Übernahme sie zählt — die Oberfläche bietet sie nicht an.
 - Prüfpaket: `0178_preflight.sql`, `0178_postflight.sql`, `supabase/operations/staging-0178.sql`, Eintrag in `migration-plans.json`; Probelauf `comparison-pending-0178.test.ts` (60 Tests).
 
-**Nächster Schritt:** nach Freigabe `0179` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0178` erst mit eigener Freigabe.
+**Funktionale Leseabnahme von `0178` (2026-11-04): 41 von 42 — NICHT abgenommen.** Als bestehendes Betriebskonto, rein lesend: Schema, `ledger`, Seiten, Kategorien, Grenzen, `pending` samt Token-Wiederholung, ungültige IDs (`P0002`), Zugriff ohne Anmeldung (`42501`), vorher/nachher unverändert. Abweichung: die verworfene Sitzung 3 (handgebauter Payload der Ablehnungsprobe, `exact` ohne Befund, 1 / 0 / 1) erschien als `derived` mit Werten, die der Verkauf nie hatte. Ursache: `derived` vertraute dem Payload.
+
+**Migration `0179` (lokal fertiggestellt, 2026-11-04) — auf Staging und Production NICHT angewendet.** `ledger.atAnalysis` nennt einen Wert nur mit Nachweis aus der Datenbank: bei `unchanged` der heutige Wert (die Version ist die analysierte, `seller_recon_create` erzwang das mit PT409), bei `applied` die unberührten Felder und die alten Werte, die die Übernahmen aufgezeichnet haben (Gesamtbetrag aus nachgewiesenem Netto und Versand, Erstattungen vor der Sitzung, Storno nur wenn vorher), bei `changed` keiner — `stored` bleibt, `derived` wird `unknown`. Widerspruch, fehlender, mehrdeutiger oder nicht lesbarer Nachweis → `unknown` mit `value` null. Schema, Signatur und Rechte bleiben; Pending, Decide und Apply unverändert. Die Token- und Decide-Härtung heißt jetzt `0180`.
+
+**Nächster Schritt:** nach Freigabe der Staging-Preflight für `0179`; danach `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0179` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 
