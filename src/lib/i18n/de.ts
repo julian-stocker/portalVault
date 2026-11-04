@@ -2500,6 +2500,7 @@ export const de = {
           discarded: "Verworfen — daraus wurde nichts übernommen.",
         },
         reload: "Neu laden",
+        justAnalysed: "Gerade analysiert",
       },
 
       /*
@@ -2574,8 +2575,29 @@ export const de = {
           duplicate_files: "Eine Datei wurde doppelt gewählt; sie zählt einmal.",
           repeated_orders: "Einige Bestellungen stehen in mehreren Dateien; sie zählen einmal.",
         },
-        ready: "Diese Auswahl ist vollständig geprüft und könnte analysiert werden.",
-        notYet: "Das Übertragen und Analysieren wird im nächsten Ausbauschritt freigeschaltet.",
+        ready: "Diese Auswahl ist vollständig geprüft.",
+        blockedStart: "Die Analyse lässt sich erst starten, wenn nichts mehr gegen die Auswahl spricht.",
+
+        /*
+         * ANALYSE STARTEN (Schritt 4). Erst nach der Bestätigung im Dialog
+         * gehen die geprüften Daten an den Server. Es entsteht eine Sitzung
+         * — oder die offene zu genau diesen Dateien wird wieder geöffnet.
+         * Kein Verkauf wird dabei geändert.
+         */
+        analyse: {
+          start: "Analyse starten",
+          dialogTitle: "Analyse starten?",
+          dialogIntro: "Übertragen werden nur die geprüften Angaben aus der Vorschau — die Dateien selbst bleiben auf diesem Gerät.",
+          sentFiles: "Übertragene Dateien",
+          note:
+            "SkyIsles legt dafür eine Abgleichssitzung an oder öffnet die vorhandene, wenn genau diese Dateien " +
+            "schon offen analysiert wurden. Verkaufswerte werden dabei nicht geändert.",
+          cancel: "Abbrechen",
+          confirm: "Jetzt analysieren",
+          running: "Analyse läuft …",
+          failed: "Die Analyse konnte nicht gestartet werden. Prüfe die Verbindung und versuche es erneut.",
+          done: (id: number) => `Sitzung ${id} ist bereit.`,
+        },
       },
     },
     sales: {

@@ -19,7 +19,11 @@ vi.mock("@/lib/reconciliation/server/queries", () => ({
   reconciliationEnvironment: () => MOCK.environment,
   fetchReconciliationSessions: async () => { MOCK.fetched += 1; return MOCK.result; },
 }));
-vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("NEXT_NOT_FOUND"); } }));
+vi.mock("next/navigation", () => ({
+  notFound: () => { throw new Error("NEXT_NOT_FOUND"); },
+  useRouter: () => ({ push: () => {} }),
+}));
+vi.mock("@/lib/reconciliation/server/actions", () => ({ analyseReconciliation: async () => ({ ok: false, message: "-" }) }));
 vi.mock("next/link", () => ({
   default: ({ href, children, ...rest }: { href: string; children: ReactNode }) => createElement("a", { href, ...rest }, children),
 }));
@@ -32,7 +36,8 @@ const PAGE = readFileSync("src/app/(business)/business/orderbuch/abgleich/page.t
 const SALES = readFileSync("src/app/(business)/business/orderbuch/verkauf/page.tsx", "utf8");
 const NAV = readFileSync("src/components/business/orderbook-nav.tsx", "utf8");
 
-const render = async () => renderToStaticMarkup(await ReconciliationPage());
+const render = async (sitzung?: string) =>
+  renderToStaticMarkup(await ReconciliationPage({ searchParams: Promise.resolve({ sitzung }) }));
 
 const session = (id: number, state: "open" | "closed" | "discarded") => ({
   id, channel: "ebay", state, coveredFrom: "2026-01-01", coveredTo: "2026-01-31", chainComplete: true,
@@ -113,9 +118,25 @@ describe("the states", () => {
   });
 });
 
+describe("after an analysis (?sitzung=)", () => {
+  it("marks exactly that session — the overview is where an analysis lands until step 5", async () => {
+    MOCK.result = { status: "ok", sessions: [session(3, "open"), session(2, "closed")] };
+    const html = await render("3");
+    expect(html.match(/data-marked="true"/g)?.length).toBe(1);
+    expect(html).toMatch(/data-marked="true"[^>]*>[\s\S]*?Sitzung 3/);
+    expect(html).toContain(copy.list.justAnalysed);
+  });
+
+  it("ignores anything that is not a session id", async () => {
+    MOCK.result = { status: "ok", sessions: [session(3, "open")] };
+    for (const value of ["abc", "-3", "3.5", "", "0"]) expect(await render(value)).not.toContain("data-marked");
+  });
+});
+
 describe("the way in from Verkauf", () => {
   it("is a link under Extern, only where the reconciliation exists", () => {
-    expect(SALES).toMatch(/scope === "extern" && reconciliationEnvironment\(\) \?[\s\S]*href="\/business\/orderbuch\/abgleich"/);
+    expect(SALES).toMatch(/scope === "extern" && reconciliationEnvironment\(\) \?[\s\S]*href=\{RECONCILIATION_PATH\}/);
+    expect(SALES).toContain('import { RECONCILIATION_PATH } from "@/lib/reconciliation/routes"');
     expect(SALES).toContain("de.business.reconciliation.entry");
   });
 

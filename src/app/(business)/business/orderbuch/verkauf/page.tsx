@@ -28,6 +28,7 @@ import { parseStatus, rpcStatus, type OrderbookStatus } from "@/lib/orderbook/cl
 import { normaliseSearch, parseYearFilter, UNDATED } from "@/lib/orderbook/ledger";
 import { fetchSaleYears, fetchSales } from "@/lib/orderbook/sales-queries";
 import { parseScope, salesHref, SALE_SCOPES } from "@/lib/orderbook/sales-view";
+import { RECONCILIATION_PATH } from "@/lib/reconciliation/routes";
 import { reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 
 export const metadata: Metadata = { title: de.business.sales.title };
@@ -119,7 +120,7 @@ export default async function SalesPage({ searchParams }: {
         link, not a third tab — it is a tool over this list, not a second list.
       */}
       {scope === "extern" && reconciliationEnvironment() ? (
-        <Link href="/business/orderbuch/abgleich"
+        <Link href={RECONCILIATION_PATH}
               className="focus-ring mt-1 inline-flex min-h-11 items-center rounded-sky-md text-xs text-muted underline underline-offset-2 hover:text-fg sm:min-h-8">
           {de.business.reconciliation.entry}
         </Link>

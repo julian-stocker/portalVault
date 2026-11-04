@@ -21,15 +21,19 @@ import { notFound } from "next/navigation";
 import { ReportPicker } from "@/components/business/reconciliation/report-picker";
 import { SessionList } from "@/components/business/reconciliation/session-list";
 import { de } from "@/lib/i18n/de";
+import { parseSessionParam, RECONCILIATION_PATH } from "@/lib/reconciliation/routes";
 import { fetchReconciliationSessions, reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
 
 export const metadata: Metadata = { title: de.business.reconciliation.title };
 
 const copy = de.business.reconciliation;
-const PATH = "/business/orderbuch/abgleich";
 
-export default async function ReconciliationPage() {
+export default async function ReconciliationPage({ searchParams }: {
+  searchParams?: Promise<{ sitzung?: string }>;
+} = {}) {
   if (!reconciliationEnvironment()) notFound();
+  // `?sitzung=` marks the session an analysis just opened (`sessionHref`, until step 5).
+  const marked = parseSessionParam((await searchParams)?.sitzung);
 
   const result = await fetchReconciliationSessions();
   // Not the seller operator — the layout already answered 404; this is the second gate.
@@ -52,12 +56,12 @@ export default async function ReconciliationPage() {
         {result.status === "error" ? (
           <div role="alert" className="mt-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">
             <p className="text-danger">{copy.errors.loadFailed}</p>
-            <Link href={PATH} className="focus-ring mt-1 inline-flex min-h-11 items-center underline underline-offset-2 sm:min-h-8">
+            <Link href={RECONCILIATION_PATH} className="focus-ring mt-1 inline-flex min-h-11 items-center underline underline-offset-2 sm:min-h-8">
               {copy.list.reload}
             </Link>
           </div>
         ) : (
-          <SessionList sessions={result.sessions} />
+          <SessionList sessions={result.sessions} marked={marked} />
         )}
       </section>
     </main>

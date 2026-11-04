@@ -1,11 +1,16 @@
 /**
- * Choose report files and see what they would send — nothing is sent
- * (ADR-0174, phase 4 step 3).
+ * Choose report files, see what they would send, and send only after a
+ * confirmation (ADR-0174, phase 4 steps 3 and 4).
  *
  * THE FILES STAY ON THE DEVICE. They are read with `File.text()`, parsed,
- * merged and checked by `buildPreview` in this tab. No server action is
- * imported here, and there is no button that pretends to send: the analysis
- * is step 4 and will be a separate, confirmed action.
+ * merged and checked by `buildPreview` in this tab. Only after a SEPARATE,
+ * confirmed step (step 4) does `analyseReconciliation` receive the checked
+ * upload — `preview.upload`, nothing else. "Analyse starten" is enabled only
+ * when nothing blocks; the dialog says what is sent and that no sale changes.
+ *
+ * ONE REQUEST AT A TIME. A ref guards the call before React has re-rendered,
+ * so a double click cannot start a second analysis; while it runs, the
+ * dialog cannot be closed and the selection cannot change.
  *
  * WHAT CAN GO WRONG WHILE CHOOSING, AND WHAT HAPPENS
  *
@@ -24,12 +29,18 @@
  */
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-import { Spinner } from "@/components/ui/pending";
+import { ACTION_NEUTRAL, ACTION_PRIMARY } from "@/components/ui/action";
+import { Modal } from "@/components/ui/modal";
+import { PendingButton, Spinner } from "@/components/ui/pending";
 import { formatDate, formatNumber } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { buildPreview, MAX_FILE_BYTES, MAX_PAYLOAD_BYTES, type Preview, type SelectedFile } from "@/lib/reconciliation/preview";
+import { shownRefusal } from "@/lib/reconciliation/messages";
+import { sessionHref } from "@/lib/reconciliation/routes";
+import { analyseReconciliation } from "@/lib/reconciliation/server/actions";
 import { sha256 } from "@/lib/reconciliation/sha256";
 import type { ReportIssue } from "@/lib/reconciliation/types";
 
@@ -64,13 +75,20 @@ export async function readFiles(list: readonly File[]): Promise<SelectedFile[]> 
 }
 
 export function ReportPicker() {
+  const router = useRouter();
   const [state, setState] = useState<State>({ kind: "idle" });
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [done, setDone] = useState<string>("");
+  const busy = useRef(false);
   const run = useRef(0);
   const input = useRef<HTMLInputElement>(null);
 
   async function choose(list: FileList | null) {
-    // A cancelled dialog: keep what is on screen.
-    if (!list || list.length === 0) return;
+    // A cancelled dialog: keep what is on screen. During an analysis nothing changes.
+    if (!list || list.length === 0 || busy.current) return;
+    setDone("");
     const files = Array.from(list);
     const mine = ++run.current;
     setState({ kind: "reading", count: files.length });
@@ -89,14 +107,54 @@ export function ReportPicker() {
   }
 
   function reset() {
+    if (busy.current) return;
     run.current += 1;
     setState({ kind: "idle" });
+    setDone("");
     if (input.current) { input.current.value = ""; input.current.focus(); }
+  }
+
+  function openConfirm() {
+    setSendError(null);
+    setConfirming(true);
+  }
+
+  function closeConfirm() {
+    // Not while the request runs: its answer has to land somewhere.
+    if (!busy.current) setConfirming(false);
+  }
+
+  /** The one place that sends — only the checked upload, only once at a time. */
+  async function analyse(preview: Preview) {
+    if (busy.current || preview.upload === null) return;
+    busy.current = true;
+    setSending(true);
+    setSendError(null);
+    try {
+      const result = await analyseReconciliation(preview.upload);
+      if (!result.ok) {
+        // Only a known fixed sentence reaches the screen (`ANALYSE_MESSAGES`).
+        setSendError(shownRefusal(result.message, t.analyse.failed));
+        return;
+      }
+      run.current += 1;
+      setConfirming(false);
+      setState({ kind: "idle" });
+      setDone(t.analyse.done(result.sessionId));
+      router.push(sessionHref(result.sessionId));
+    } catch (error) {
+      // A network failure or a refused body: no detail on screen, only a name in the log.
+      console.error("analyse reconciliation:", error instanceof Error ? error.name : "unknown");
+      setSendError(t.analyse.failed);
+    } finally {
+      busy.current = false;
+      setSending(false);
+    }
   }
 
   const status = state.kind === "reading" ? t.reading(state.count)
     : state.kind === "done" ? t.done(state.preview.files.length)
-    : "";
+    : done;
 
   return (
     <section aria-labelledby="recon-picker" className="mt-6">
@@ -108,6 +166,7 @@ export function ReportPicker() {
         <input
           ref={input} id="recon-files" type="file" multiple accept=".csv,text/csv"
           aria-describedby="recon-picker-status"
+          disabled={sending}
           onChange={(e) => void choose(e.currentTarget.files)}
           className={
             "focus-ring block min-h-11 w-full max-w-full rounded-sky-md text-sm text-muted sm:w-auto " +
@@ -116,7 +175,7 @@ export function ReportPicker() {
           }
         />
         {state.kind === "done" || state.kind === "failed" ? (
-          <button type="button" onClick={reset}
+          <button type="button" onClick={reset} disabled={sending}
                   className="focus-ring min-h-11 rounded-sky-md px-3 text-sm text-muted underline underline-offset-2 hover:text-fg sm:min-h-8">
             {t.reset}
           </button>
@@ -132,8 +191,75 @@ export function ReportPicker() {
         <p role="alert" className="mt-2 rounded-sky-md bg-surface px-3 py-2 text-sm text-danger ring-1 ring-border/70">{t.failed}</p>
       ) : null}
 
-      {state.kind === "done" ? <PreviewView preview={state.preview} /> : null}
+      {state.kind === "done" ? (
+        <>
+          <PreviewView preview={state.preview} />
+          <div className="mt-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+            <button type="button" onClick={openConfirm}
+                    disabled={state.preview.upload === null || sending}
+                    aria-describedby={state.preview.upload === null ? "recon-start-blocked" : undefined}
+                    className={`${ACTION_PRIMARY} disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto`}>
+              {t.analyse.start}
+            </button>
+            {state.preview.upload === null ? (
+              <p id="recon-start-blocked" className="text-xs text-muted">{t.blockedStart}</p>
+            ) : null}
+          </div>
+          <ConfirmAnalysis
+            open={confirming} preview={state.preview} sending={sending} error={sendError}
+            onCancel={closeConfirm} onConfirm={() => void analyse(state.preview)}
+          />
+        </>
+      ) : null}
     </section>
+  );
+}
+
+function periodOf(p: Preview): string {
+  if (!p.firstSoldOn || !p.lastSoldOn) return "–";
+  const days = p.periodDays !== null ? ` (${t.summary.days(p.periodDays + 1)})` : "";
+  return `${formatDate(p.firstSoldOn)} – ${formatDate(p.lastSoldOn)}${days}`;
+}
+
+/** What will be sent — the numbers of the preview, nothing new. */
+export function ConfirmAnalysis({ open, preview: p, sending, error, onCancel, onConfirm }: {
+  open: boolean;
+  preview: Preview;
+  sending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const s = t.summary;
+  const a = t.analyse;
+  return (
+    <Modal open={open} onClose={onCancel} labelledBy="recon-confirm-title">
+      <div className="p-5">
+        <h2 id="recon-confirm-title" className="text-lg font-semibold">{a.dialogTitle}</h2>
+        <p className="mt-1 text-sm text-muted">{a.dialogIntro}</p>
+        <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2">
+          <Fact label={s.platform}>{p.parser ? (t.platforms[p.parser] ?? p.parser) : t.unknownPlatform}</Fact>
+          <Fact label={a.sentFiles}>{formatNumber(p.upload?.files.length ?? 0)}</Fact>
+          <Fact label={s.orders}>{formatNumber(p.orders)}</Fact>
+          <Fact label={s.size}>{s.sizeOf(kib(p.payloadBytes), kib(MAX_PAYLOAD_BYTES))}</Fact>
+          <div className="col-span-2"><Fact label={s.period}>{periodOf(p)}</Fact></div>
+        </dl>
+        <p className="mt-4 text-sm">{a.note}</p>
+        {error ? (
+          <p role="alert" className="mt-3 rounded-sky-md bg-surface px-3 py-2 text-sm text-danger ring-1 ring-border/70">{error}</p>
+        ) : null}
+        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <button type="button" onClick={onCancel} disabled={sending} className={`${ACTION_NEUTRAL} sm:w-auto`}>
+            {a.cancel}
+          </button>
+          <PendingButton type="button" onClick={onConfirm} pending={sending} pendingLabel={a.running}
+                         disabled={p.upload === null}
+                         className={`${ACTION_PRIMARY} gap-2 sm:w-auto`}>
+            {a.confirm}
+          </PendingButton>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -148,9 +274,7 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 
 export function PreviewView({ preview: p }: { preview: Preview }) {
   const s = t.summary;
-  const period = p.firstSoldOn && p.lastSoldOn
-    ? `${formatDate(p.firstSoldOn)} – ${formatDate(p.lastSoldOn)}${p.periodDays !== null ? ` (${s.days(p.periodDays + 1)})` : ""}`
-    : "–";
+  const period = periodOf(p);
 
   return (
     <div className="mt-4 flex flex-col gap-4">
@@ -220,11 +344,7 @@ export function PreviewView({ preview: p }: { preview: Preview }) {
         </ul>
       </div>
 
-      {p.blockers.length === 0 ? (
-        <p className="text-sm">
-          {t.ready} <span className="text-muted">{t.notYet}</span>
-        </p>
-      ) : null}
+      {p.blockers.length === 0 ? <p className="text-sm">{t.ready}</p> : null}
     </div>
   );
 }

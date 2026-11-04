@@ -147,10 +147,11 @@ die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unveränder
 
 **`0176` auf Staging vollständig abgenommen (2026-11-03).** Gezielte Ablehnungsprobe `tools/verify-recon-refusals.mts`, Lauf `mw15zob3` (2026-11-03, als vorhandenes Betriebskonto, ohne Service-Role): **19/19** — `buyerName` und E-Mail-Adresse je als neuer und als bekannter Upload abgewiesen, keine verbotenen Inhalte gespeichert, die Sitzung durch die Ablehnungen unverändert, der gültige wiederholte Upload idempotent (dieselbe Sitzung), keine Entscheidung, keine Anwendung, kein Verkauf angelegt; Mini-Sitzung 3 über Testverkauf 362 im Abschlussschritt verworfen. Zustandsdatei `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres` vorher und nachher: 101–108 zeichengleich, 201 `12`, 202 `0`, 203 `0|1|1` → `0|1|2` (einzige Änderung: die verworfene Mini-Sitzung), 204 `12`, 205 `6|5`, 206 `0`, 9998 `0`. **Production: nicht angewendet.**
 
-## Verkaufsabgleich — Phase 4, Oberfläche (2026-11-04) — **Schritte 1–3 gebaut, nur Staging**
+## Verkaufsabgleich — Phase 4, Oberfläche (2026-11-04) — **Schritte 1–4 gebaut, nur Staging**
 
-Die Oberfläche entsteht in einzeln freigegebenen Schritten; bisher wird nichts übertragen und
-nichts geschrieben. Keine Migration.
+Die Oberfläche entsteht in einzeln freigegebenen Schritten. Seit Schritt 4 kann eine geprüfte
+Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgleichssitzung an oder
+öffnet die vorhandene — **kein Verkaufswert wird geändert**. Keine Migration.
 
 | Schritt | Stand |
 |---|---|
@@ -158,15 +159,16 @@ nichts geschrieben. Keine Migration.
 | 2 · Sitzungsübersicht `/business/orderbuch/abgleich` | committet (`532041b`) |
 | 3 · Berichte wählen und lokal prüfen (ohne Übertragung) | committet (`27e3f60`) |
 | 3A · Deduplizierung der Server Action nach Inhalt und Position (`distinctFiles`) | committet (siehe Git) |
-| Analyse starten (Übertragung an `analyseReconciliation`) · 4 · Sitzungsansicht · 5 · Entscheiden · 6 · Abschließen/Verwerfen | offen |
-| 7 · Lesefunktionen `seller_recon_pending` / `seller_recon_history` (ab `0178`, `0177` ist die zentrale Sicherung) | nur konzipiert |
+| 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
+| 5 · Vergleichsansicht `/abgleich/<id>` · 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
+| Lesefunktionen und Sperren: `0178` (Vergleichswerte, `seller_recon_pending`), `0179` (unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Fingerabdruck) — `0177` ist die zentrale Sicherung | nur konzipiert |
 
 **Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
 Status in Worten, Zeitraum, Dateien, Verkaufsprotokoll, „Befunde mit Entscheidung" (zählt
 „später" mit — **keine** Zahl offener oder anwendbarer Entscheidungen), übernommene
 Entscheidungen, nicht leere Kategorien der gespeicherten Zusammenfassung. Leer- und Fehlerzustand
 sind getrennt (`fetchReconciliationSessions` liefert `ok` / `unavailable` / `error`). **Keine Links
-auf Sitzungen**, bis die Sitzungsseite (Schritt 4) existiert. Einstieg: leiser Link unter
+auf Sitzungen**, bis die Sitzungsseite (Schritt 5) existiert. Einstieg: leiser Link unter
 Verkauf → Extern, kein dritter Reiter. Außerhalb Staging und ohne Verkäuferrolle: 404.
 **Kein `loading.tsx` im Betriebsbereich:** am lokalen Staging-Server gemessen strömte der
 Lade-Platzhalter an einen nicht angemeldeten Aufruf mit, vor dem 404 des Layouts — er ist
@@ -185,8 +187,7 @@ oder, wo es fehlt (iPhone über `dev:staging:lan`, http), über die eigene Berec
 vorgesehene Nutzlast (`bodySizeLimit` unverändert 1 MB); lokal an den echten Berichten gemessen:
 9 Dateien, 311 Bestellungen, **406 KiB** (≈ 1,3 KB je Bestellung, 400 Tage ≈ 600 KiB). Weitere
 Sperren: Fremdformat, Widerspruch, mehr als 400 Tage, Kontaktdaten im Titel, Datei über 10 MB.
-**Kein aktiver Import:** es gibt keinen Knopf zum Übertragen; „Analyse starten" ist ein eigener,
-später freigegebener Schritt.
+Die Vorschau selbst überträgt nichts; das tut erst Schritt 4.
 
 **Befund Deduplizierung — behoben (Schritt 3A, 2026-11-04).** `analyseReconciliation` übernahm
 die Wiederholungen aus `mergeReports().duplicateFiles` über den **Dateinamen** und filterte dann
@@ -217,7 +218,33 @@ die automatisierten Tests (Render, jsdom, Gate, Zustände) und die anonyme 404-A
 Staging-Servers. Der Betreiber prüft angemeldet unter
 `http://127.0.0.1:3000/business/orderbuch/verkauf` (Extern → „Abgleich mit Plattformberichten").
 
-**Nächster Schritt:** nach Freigabe „Analyse starten" mit ausdrücklicher Bestätigung. Production für `0169`–`0176` erst mit eigener Freigabe.
+**Analyse starten (Schritt 4).** „Analyse starten" erscheint mit einer Vorschau und ist nur
+aktiv, wenn nichts sperrt (sonst mit Hinweis per `aria-describedby`). Ein Klick öffnet erst einen
+**Bestätigungsdialog**: Plattform, übertragene Dateien, Bestellungen, Zeitraum, Größe gegen
+900 KiB und der Hinweis, dass eine Sitzung angelegt oder wiederverwendet und kein Verkaufswert
+geändert wird. Erst „Jetzt analysieren" ruft `analyseReconciliation(preview.upload)` — die eine
+Aufrufstelle, nur mit der geprüften Nutzlast. **Doppelte Aufrufe:** eine Ref sperrt vor jedem
+State-Update; während der Anfrage lassen sich Dialog, Dateiauswahl und „Auswahl leeren" nicht
+bedienen. **Fehler:** eine Ablehnung zeigt nur einen der festen Sätze aus `ANALYSE_MESSAGES`
+(`messages.ts`), sonst — wie bei einer geworfenen Ausnahme (Netzwerk, abgewiesener Body) — den
+allgemeinen Satz; ins Browser-Log kommt nur der Fehlername. `analyseReconciliation` selbst baut
+jede Ablehnung aus `de.ts`; Datenbanktexte bleiben im Server-Log (`analyse-messages.test.ts`
+treibt jeden Ablehnungsweg und jeden Fehlercode durch die echte Action). **Navigation** vorläufig
+zu `/business/orderbuch/abgleich?sitzung=<id>`, die Karte ist markiert; Schritt 5 stellt nur
+`sessionHref()` in `routes.ts` um. Der Pfad steht nur noch dort (`RECONCILIATION_PATH`).
+
+**Tatsächliche Body-Größe.** Next kodiert das Argument mit Reacts `encodeReply`: für reine Daten
+ein String, aber nicht reines JSON (`$…` wird `$$…`, `-0` wird `"$-0"`), und begrenzt den rohen
+Body auf 1 048 576 Bytes (`bodySizeLimit` unverändert). `payloadBytes()` misst genau diesen Body
+(`encodedBody()`); `encode-reply.test.ts` vergleicht ihn Byte für Byte mit dem installierten
+`encodeReply`, auch nahe der Grenze. Die Sperre bleibt **900 KiB**, Abstand 124 KiB. Ein
+Next-Upgrade, das das Format ändert, lässt diesen Test scheitern.
+
+**Offen zu Schritt 4:** ein echter Aufruf auf Staging ist **nicht** erfolgt (er legt eine Sitzung
+an und braucht eine eigene Freigabe); Browser-, Fokus- und iPhone-Sichtprüfung offen; die Antwort
+unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
+
+**Nächster Schritt:** nach Freigabe die Lesefunktionen (`0178`) bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0176` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

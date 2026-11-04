@@ -13,11 +13,13 @@
  * number, and nothing of the buyer — the parser never read the buyer columns
  * in the first place (`ebay/columns.ts`).
  *
- * THE SIZE IS MEASURED, NOT ESTIMATED. `payloadBytes` is the UTF-8 length of
- * the upload serialised as JSON — the body a server action carries for a
- * plain object argument, apart from a few bytes of framing. Next refuses an
- * action body above 1 MB (`serverActions.bodySizeLimit`, unchanged); the
- * preview stops at 900 KiB so the framing never matters.
+ * THE SIZE IS THE BODY THE ACTION RECEIVES. Next sends a server action's
+ * arguments through React's `encodeReply`; for plain data that is ONE string
+ * — JSON of the argument list, except that a string starting with `$` is
+ * escaped to `$$…` and `-0` becomes `"$-0"`. `payloadBytes` reproduces exactly
+ * that, in UTF-8, and `encode-reply.test.ts` holds it byte for byte against
+ * the installed `encodeReply`. Next refuses a body above 1 048 576 bytes
+ * (`serverActions.bodySizeLimit`, unchanged); the preview stops at 900 KiB.
  */
 
 import { coverageOf, type Coverage } from "./coverage.ts";
@@ -94,9 +96,23 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
-/** UTF-8 bytes of the upload as the action would receive it. */
+/**
+ * The request body `analyseReconciliation(upload)` sends, as React's
+ * `encodeReply` writes it for plain data: the argument LIST, `$`-strings
+ * escaped, `-0` tagged. Validated uploads hold nothing else that `encodeReply`
+ * would rewrite (no Date, no undefined, no non-finite number, no Map).
+ */
+export function encodedBody(upload: UploadInput): string {
+  return JSON.stringify([upload], (_key, value: unknown) => {
+    if (typeof value === "string" && value.startsWith("$")) return `$${value}`;
+    if (typeof value === "number" && Object.is(value, -0)) return "$-0";
+    return value;
+  });
+}
+
+/** UTF-8 bytes of that body — what Next counts against `bodySizeLimit`. */
 export function payloadBytes(upload: UploadInput): number {
-  return new TextEncoder().encode(JSON.stringify([upload])).length;
+  return new TextEncoder().encode(encodedBody(upload)).length;
 }
 
 export async function buildPreview(selected: readonly SelectedFile[], sha256: Sha256): Promise<Preview> {

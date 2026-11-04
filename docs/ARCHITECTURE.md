@@ -525,10 +525,21 @@ Berichtsdateien (CSV, nur im Browser — kein Netzwerkzugriff)
                                 Bausteine wie die Server Action), Nutzlast gemessen
       →  sha256.ts              Fingerabdruck: crypto.subtle, sonst eigene Berechnung
       →  Vorschau               Zahlen, Tage, Codes — kein Titel, keine Bestellnummer
+      →  Bestätigungsdialog     erst „Jetzt analysieren" sendet; eine Ref verhindert Doppelaufrufe
+      →  analyseReconciliation(preview.upload)   validateUpload → distinctFiles → Matching
+                                → seller_recon_create (Sitzung neu oder wiederverwendet,
+                                kein Verkaufswert geändert)
+      →  ?sitzung=<id>          vorläufiges Ziel (`sessionHref`), ab Schritt 5 /abgleich/<id>
 ```
 
-Die Vorschau überträgt nichts; die vorgesehene Übertragung bleibt unter **900 KiB** (Next: 1 MB
-je Server Action).
+Die Vorschau selbst überträgt nichts. Gemessen wird der **tatsächliche** Body: Next kodiert das
+Argument mit Reacts `encodeReply` (für reine Daten ein String; `$…` → `$$…`, `-0` → `"$-0"`) und
+begrenzt den rohen Body auf 1 MiB; `encodedBody()` bildet ihn nach, gegen den installierten
+Encoder getestet. Sperre **900 KiB**, `bodySizeLimit` unverändert. Die Server Action und danach
+`sales_recon_validate_payload` prüfen trotzdem alles erneut — die Vorschau ist keine Grenze.
+Eine Ablehnung erscheint nur als einer der festen Sätze aus `messages.ts` (`ANALYSE_MESSAGES`),
+alles andere als allgemeiner Satz; Datenbanktexte bleiben im Server-Log. Der Pfad der Oberfläche
+steht einmal in `routes.ts`.
 
 **Eine Deduplizierungsregel für Browser und Server** (`distinctFiles()` in `dedupe.ts`): gleicher
 Fingerabdruck ist eine Datei, gleich wie sie heißt; anderer Inhalt ist eine eigene Datei, auch
@@ -543,7 +554,7 @@ was in der Datei stand.
 `view.ts` importiert nur Typen — kein Matching, kein Diff, keine Zählung offener Entscheidungen.
 Welche Entscheidungen ein Befund erlaubt, kommt aus der Datenbank (`allowedDecisions`); die
 angezeigten Werte bleiben unverändert für den PT409-Vergleich in `seller_recon_decide`.
-Übertragen und Analysieren, Sitzungsansicht, Entscheiden und Anwenden folgen.
+Sitzungsansicht, Entscheiden und Anwenden folgen.
 
 ### Marktpreise
 

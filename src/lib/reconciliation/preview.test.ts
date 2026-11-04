@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { buildPreview, daysBetween, MAX_FILE_BYTES, MAX_PAYLOAD_BYTES, payloadBytes, type SelectedFile } from "./preview";
+import { buildPreview, daysBetween, encodedBody, MAX_FILE_BYTES, MAX_PAYLOAD_BYTES, payloadBytes, type SelectedFile } from "./preview";
 import { validateUpload } from "./server/payload";
 import { sha256Text } from "./sha256";
 import { ebayReport, FAKE_BUYER, type FixtureOrder } from "./testing/ebay-fixture";
@@ -44,7 +44,7 @@ describe("a clean selection", () => {
     expect(() => validateUpload(p.upload)).not.toThrow();
     expect(p.upload?.files[0].fingerprint).toMatch(/^[0-9a-f]{64}$/);
     expect(p.payloadBytes).toBe(payloadBytes(p.upload!));
-    expect(p.payloadBytes).toBe(Buffer.byteLength(JSON.stringify([p.upload]), "utf8"));
+    expect(p.payloadBytes).toBe(Buffer.byteLength(encodedBody(p.upload!), "utf8"));
   });
 
   it("an empty selection is blocked, not an error", async () => {

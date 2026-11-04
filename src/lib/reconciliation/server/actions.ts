@@ -24,10 +24,10 @@ import { coverageOf } from "../coverage";
 import { distinctFiles, mergeReports } from "../dedupe";
 import { reconcile, summarize } from "../diff";
 import { matchOrders } from "../match";
+import { RECONCILIATION_PATH } from "../routes";
 import { aliasIndex, ledgerSales, PayloadError, sessionPayload, validateUpload } from "./payload";
 
 const copy = de.business.reconciliation;
-const PATH = "/business/orderbuch/abgleich";
 
 export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; message: string };
 
@@ -98,7 +98,7 @@ export async function analyseReconciliation(input: unknown): Promise<ActionResul
 
   const created = await supabase.rpc("seller_recon_create", { p_payload: payload });
   if (created.error) return { ok: false, message: message(created.error) };
-  revalidatePath(PATH);
+  revalidatePath(RECONCILIATION_PATH);
   return { ok: true, sessionId: Number(created.data) };
 }
 
@@ -137,7 +137,7 @@ export async function applyReconciliation(
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("seller_recon_apply", { p_session_id: sessionId, p_expected: expected });
   if (error) return { ok: false, message: message(error) };
-  revalidatePath(PATH);
+  revalidatePath(RECONCILIATION_PATH);
   const result = (data ?? {}) as { applied?: number; documented?: number; sales?: number };
   return { ok: true, applied: result.applied ?? 0, documented: result.documented ?? 0, sales: result.sales ?? 0 };
 }
@@ -148,7 +148,7 @@ async function sessionCall(fn: string, sessionId: number): Promise<ActionResult>
   const supabase = await createClient();
   const { error } = await supabase.rpc(fn, { p_id: sessionId });
   if (error) return { ok: false, message: message(error) };
-  revalidatePath(PATH);
+  revalidatePath(RECONCILIATION_PATH);
   return { ok: true };
 }
 

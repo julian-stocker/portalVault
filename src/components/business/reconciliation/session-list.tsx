@@ -8,8 +8,9 @@
  * "open" or "applicable" decisions. That number needs `seller_recon_pending`,
  * which does not exist yet.
  *
- * NO LINK YET. The session page (`/abgleich/[id]`) is step 4; until it exists
- * a card is not a link, rather than a link to a 404.
+ * NO LINK YET. The session page (`/abgleich/[id]`) is step 5; until it exists
+ * a card is not a link, rather than a link to a 404. After an analysis the
+ * page opens with `?sitzung=<id>` and that card is marked (`sessionHref`).
  *
  * ONE LAYOUT FOR BOTH SIZES. A card per session: stacked on a phone, the
  * facts in two columns from `sm:` up. A table would need sideways scrolling
@@ -47,7 +48,7 @@ function Fact({ label, children, hint }: { label: string; children: React.ReactN
   );
 }
 
-export function SessionCard({ session: s }: { session: SessionListItem }) {
+export function SessionCard({ session: s, marked = false }: { session: SessionListItem; marked?: boolean }) {
   const headingId = `recon-session-${s.id}`;
   const ended = s.state === "closed" ? s.closedAt : s.state === "discarded" ? s.discardedAt : null;
   const counts = s.summary
@@ -55,8 +56,8 @@ export function SessionCard({ session: s }: { session: SessionListItem }) {
     : null;
 
   return (
-    <article aria-labelledby={headingId} data-state={s.state}
-             className="rounded-sky-md bg-surface/60 p-4 ring-1 ring-border/70">
+    <article aria-labelledby={headingId} data-state={s.state} data-marked={marked || undefined}
+             className={`rounded-sky-md bg-surface/60 p-4 ring-1 ${marked ? "ring-2 ring-fg/60" : "ring-border/70"}`}>
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h3 id={headingId} className="text-base font-medium">
           {list.session(s.id)}
@@ -65,6 +66,7 @@ export function SessionCard({ session: s }: { session: SessionListItem }) {
         <span data-testid="state" className={`rounded-sky-md px-2 py-0.5 text-xs ring-1 ${STATE_CHIP[s.state]}`}>
           {copy.states[s.state]}
         </span>
+        {marked ? <span className="text-xs font-medium">{list.justAnalysed}</span> : null}
       </header>
       <p className="mt-1 text-xs text-muted">
         {list.stateHints[s.state]}
@@ -102,12 +104,12 @@ export function SessionCard({ session: s }: { session: SessionListItem }) {
   );
 }
 
-export function SessionList({ sessions }: { sessions: readonly SessionListItem[] }) {
+export function SessionList({ sessions, marked = null }: { sessions: readonly SessionListItem[]; marked?: number | null }) {
   if (sessions.length === 0) return <p className="mt-4 text-sm text-muted">{list.empty}</p>;
   return (
     <ul className="mt-4 flex flex-col gap-3" aria-label={list.heading}>
       {sessions.map((s) => (
-        <li key={s.id}><SessionCard session={s} /></li>
+        <li key={s.id}><SessionCard session={s} marked={s.id === marked} /></li>
       ))}
     </ul>
   );
