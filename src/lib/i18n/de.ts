@@ -2501,6 +2501,82 @@ export const de = {
         },
         reload: "Neu laden",
       },
+
+      /*
+       * BERICHTE PRÜFEN (Phase 4, Schritt 3). Alles hier geschieht im Browser;
+       * die Dateien verlassen das Gerät nicht. Gezeigt werden Zahlen, Tage
+       * und Hinweise — nie ein Titel, eine Bestellnummer oder ein Käufer.
+       */
+      picker: {
+        heading: "Berichte prüfen",
+        hint:
+          "Wähle einen oder mehrere eBay-Bestellberichte (CSV). Sie werden nur auf diesem Gerät gelesen; " +
+          "angezeigt werden Zahlen und Zeiträume, keine Käuferdaten.",
+        input: "Berichtsdateien auswählen",
+        reading: (n: number) => (n === 1 ? "1 Datei wird geprüft …" : `${n} Dateien werden geprüft …`),
+        done: (n: number) => (n === 1 ? "1 Datei geprüft." : `${n} Dateien geprüft.`),
+        failed: "Die Auswahl konnte nicht geprüft werden. Wähle die Dateien bitte erneut.",
+        reset: "Auswahl leeren",
+        platforms: { "ebay-orders-report-de": "eBay · Bestellbericht (deutsch)" } as Record<string, string>,
+        unknownPlatform: "nicht eindeutig",
+        summary: {
+          heading: "Was übertragen würde",
+          files: "Dateien",
+          platform: "Plattform",
+          orders: "Bestellungen",
+          positions: "Positionen",
+          pieces: "Stück",
+          period: "Zeitraum",
+          days: (n: number) => (n === 1 ? "1 Tag" : `${n} Tage`),
+          chain: "Verkaufsprotokoll",
+          chainComplete: "lückenlos",
+          chainGaps: (n: number) => (n === 1 ? "1 Lücke" : `${n} Lücken`),
+          size: "Übertragungsgröße",
+          sizeOf: (size: string, max: string) => `${size} von höchstens ${max}`,
+        },
+        fileList: "Gewählte Dateien",
+        file: {
+          orders: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
+          footer: (n: number) => `Fußzeile nennt ${n}`,
+          duplicateOf: (name: string) => `identisch mit „${name}“ — zählt einmal`,
+          issue: (n: number) => (n === 1 ? "1-mal" : `${n}-mal`),
+        },
+        fileFailures: {
+          not_this_format: "Kein bekannter Bestellbericht.",
+          no_header: "Die Kopfzeile des Berichts fehlt.",
+          missing_columns: "Benötigte Spalten fehlen.",
+          too_large: "Die Datei ist zu groß (höchstens 10 MB).",
+          unreadable: "Die Datei konnte nicht gelesen werden.",
+        },
+        blockersHeading: "So kann diese Auswahl nicht analysiert werden",
+        blockers: {
+          no_files: "Es ist keine Datei gewählt.",
+          failed_files: "Mindestens eine Datei ist kein lesbarer Bestellbericht. Wähle die Dateien ohne sie neu.",
+          mixed_formats: "Alle Dateien eines Abgleichs müssen dasselbe Berichtsformat haben.",
+          conflicting_orders:
+            "Dieselbe Bestellung steht in zwei Dateien mit unterschiedlichen Angaben. Prüfe die Exporte.",
+          no_orders: "Die Dateien enthalten keine Bestellung.",
+          period_too_long: "Ein Abgleich umfasst höchstens 400 Tage. Wähle Berichte aus einem kürzeren Zeitraum.",
+          too_large:
+            "Die Berichte sind zusammen zu groß für einen Abgleich. Wähle weniger Dateien oder einen kürzeren Zeitraum.",
+          invalid_upload: "Die gelesenen Berichte haben nicht die erwartete Form.",
+          contact_data:
+            "Ein Angebotstitel oder Versandservice enthält eine E-Mail-Adresse oder Telefonnummer. " +
+            "Solche Angaben werden nicht übertragen — bereinige den Bericht.",
+        },
+        warningsHeading: "Hinweise",
+        warnings: {
+          file_issues: "In einzelnen Zeilen ist etwas aufgefallen — siehe die Dateien.",
+          footer_mismatch: "Die Zahl unter einem Bericht passt nicht zu den gelesenen Bestellungen.",
+          chain_gaps: "Das Verkaufsprotokoll hat Lücken — dort fehlen vermutlich Bestellungen.",
+          orders_without_record_no: "Einige Bestellungen haben keine Verkaufsprotokollnummer.",
+          overlapping_files: "Dateien überschneiden sich zeitlich; doppelte Bestellungen zählen einmal.",
+          duplicate_files: "Eine Datei wurde doppelt gewählt; sie zählt einmal.",
+          repeated_orders: "Einige Bestellungen stehen in mehreren Dateien; sie zählen einmal.",
+        },
+        ready: "Diese Auswahl ist vollständig geprüft und könnte analysiert werden.",
+        notYet: "Das Übertragen und Analysieren wird im nächsten Ausbauschritt freigeschaltet.",
+      },
     },
     sales: {
       title: "Verkauf",

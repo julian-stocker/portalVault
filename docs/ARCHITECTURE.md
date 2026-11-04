@@ -518,12 +518,24 @@ seller_recon_sessions() / seller_recon_session()      (0172, JSON)
                                 und camelCase (Liste, Zuordnung, Verkauf, Befunde);
                                 falsche Form → ViewContractError (Pfad, nie ein Wert)
       →  /business/orderbuch/abgleich    Sitzungsübersicht, nur lesend
+
+Berichtsdateien (CSV, nur im Browser — kein Netzwerkzugriff)
+      →  report-picker.tsx      Auswahl; Datei über 10 MB wird nicht gelesen
+      →  preview.ts             registry → dedupe → coverage → validateUpload (dieselben
+                                Bausteine wie die Server Action), Nutzlast gemessen
+      →  sha256.ts              Fingerabdruck: crypto.subtle, sonst eigene Berechnung
+      →  Vorschau               Zahlen, Tage, Codes — kein Titel, keine Bestellnummer
 ```
+
+Die Vorschau überträgt nichts. Dubletten erkennt sie nach Inhalt **und Position**, nicht nach
+Dateiname; die vorgesehene Übertragung bleibt unter **900 KiB** (Next: 1 MB je Server Action).
+`crypto.subtle` fehlt auf http-Seiten außer `localhost` — also auf dem iPhone über
+`dev:staging:lan`; dort rechnet `sha256.ts` (FIPS 180-4) dasselbe Ergebnis.
 
 `view.ts` importiert nur Typen — kein Matching, kein Diff, keine Zählung offener Entscheidungen.
 Welche Entscheidungen ein Befund erlaubt, kommt aus der Datenbank (`allowedDecisions`); die
 angezeigten Werte bleiben unverändert für den PT409-Vergleich in `seller_recon_decide`.
-Upload, Sitzungsansicht, Entscheiden und Anwenden folgen.
+Übertragen und Analysieren, Sitzungsansicht, Entscheiden und Anwenden folgen.
 
 ### Marktpreise
 

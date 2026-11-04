@@ -1,8 +1,10 @@
 /**
  * Orderbuch — Verkaufsabgleich (ADR-0174, phase 4 step 2).
  *
- * The list of reconciliation sessions. Reading only: no upload, no decision,
- * no session action — those are later steps, each released on its own.
+ * The list of reconciliation sessions, and above it the report check
+ * (`ReportPicker`) — which reads files in the browser and sends nothing. No
+ * upload, no decision, no session action yet: later steps, each released on
+ * its own.
  *
  * TWO GATES BEFORE THE FIRST QUERY.
  *
@@ -16,6 +18,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { ReportPicker } from "@/components/business/reconciliation/report-picker";
 import { SessionList } from "@/components/business/reconciliation/session-list";
 import { de } from "@/lib/i18n/de";
 import { fetchReconciliationSessions, reconciliationEnvironment } from "@/lib/reconciliation/server/queries";
@@ -41,7 +44,10 @@ export default async function ReconciliationPage() {
       <h1 className="mt-1 text-xl font-semibold tracking-tight md:text-2xl">{copy.title}</h1>
       <p className="mt-1 max-w-prose text-sm text-muted">{copy.intro}</p>
 
-      <section aria-labelledby="recon-sessions" className="mt-6">
+      {/* Choosing and checking reports happens in the browser only (step 3). */}
+      <ReportPicker />
+
+      <section aria-labelledby="recon-sessions" className="mt-8">
         <h2 id="recon-sessions" className="text-base font-medium">{copy.list.heading}</h2>
         {result.status === "error" ? (
           <div role="alert" className="mt-4 rounded-sky-md bg-surface px-3 py-2 text-sm ring-1 ring-border/70">

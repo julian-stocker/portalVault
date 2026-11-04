@@ -147,16 +147,17 @@ die fünf Abgleichstabellen vorher und nachher zeichengleich, Rechte unveränder
 
 **`0176` auf Staging vollständig abgenommen (2026-11-03).** Gezielte Ablehnungsprobe `tools/verify-recon-refusals.mts`, Lauf `mw15zob3` (2026-11-03, als vorhandenes Betriebskonto, ohne Service-Role): **19/19** — `buyerName` und E-Mail-Adresse je als neuer und als bekannter Upload abgewiesen, keine verbotenen Inhalte gespeichert, die Sitzung durch die Ablehnungen unverändert, der gültige wiederholte Upload idempotent (dieselbe Sitzung), keine Entscheidung, keine Anwendung, kein Verkauf angelegt; Mini-Sitzung 3 über Testverkauf 362 im Abschlussschritt verworfen. Zustandsdatei `supabase/checks/verify_sales_reconciliation_state.sql` als `postgres` vorher und nachher: 101–108 zeichengleich, 201 `12`, 202 `0`, 203 `0|1|1` → `0|1|2` (einzige Änderung: die verworfene Mini-Sitzung), 204 `12`, 205 `6|5`, 206 `0`, 9998 `0`. **Production: nicht angewendet.**
 
-## Verkaufsabgleich — Phase 4, Oberfläche (2026-11-03) — **Schritte 1–2 gebaut, nur Staging**
+## Verkaufsabgleich — Phase 4, Oberfläche (2026-11-04) — **Schritte 1–3 gebaut, nur Staging**
 
-Die Oberfläche entsteht in einzeln freigegebenen Schritten; nur lesend bisher. Keine Migration,
-kein Schreiben.
+Die Oberfläche entsteht in einzeln freigegebenen Schritten; bisher wird nichts übertragen und
+nichts geschrieben. Keine Migration.
 
 | Schritt | Stand |
 |---|---|
 | 1 · Darstellungsschicht `src/lib/reconciliation/view.ts` und Texte (`de.ts`) | committet (`aaf9fb9`) |
-| 2 · Sitzungsübersicht `/business/orderbuch/abgleich` | committet (siehe Git) |
-| 3 · Berichte einlesen · 4 · Sitzungsansicht · 5 · Entscheiden · 6 · Abschließen/Verwerfen | offen |
+| 2 · Sitzungsübersicht `/business/orderbuch/abgleich` | committet (`532041b`) |
+| 3 · Berichte wählen und lokal prüfen (ohne Übertragung) | committet (siehe Git) |
+| Analyse starten (Übertragung an `analyseReconciliation`) · 4 · Sitzungsansicht · 5 · Entscheiden · 6 · Abschließen/Verwerfen | offen |
 | 7 · Lesefunktionen `seller_recon_pending` / `seller_recon_history` (ab `0178`, `0177` ist die zentrale Sicherung) | nur konzipiert |
 
 **Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
@@ -171,13 +172,37 @@ Lade-Platzhalter an einen nicht angemeldeten Aufruf mit, vor dem 404 des Layouts
 entfernt und durch einen Test ausgeschlossen. Der Seitentitel im Metadatenstrom einer 404-Antwort
 erscheint auf allen Betriebsseiten (auch `/verkauf`) und ist ein eigener, älterer Befund.
 
-**Sichtprüfung:** **nicht erfolgt.** In dieser Sitzung stand kein Browser zur Verfügung; geprüft
-sind nur die automatisierten Tests (Render, Gate, Zustände) und die anonyme 404-Antwort des
-lokalen Staging-Servers. Desktop/Telefon, Überlauf und Fokus prüft der Betreiber angemeldet unter
+**Berichte prüfen (Schritt 3).** `report-picker.tsx` über der Sitzungsliste. Die gewählten
+CSV-Dateien werden **nur im Browser** gelesen und geprüft — kein Netzwerkzugriff, keine Server
+Action: `preview.ts` setzt die vorhandenen Bausteine in der Reihenfolge der Server Action
+zusammen (Parser mit Spalten-Whitelist, Deduplizierung, Abdeckung samt Verkaufsprotokoll-Kette)
+und prüft die vorgesehene Übertragung mit `validateUpload`. Angezeigt werden Dateinamen, Plattform,
+Bestellungen, Positionen, Stück, Zeitraum, Protokoll, Übertragungsgröße und Hinweise als Codes —
+nie ein Titel, eine Bestellnummer oder Käuferdaten. Fingerabdruck SHA-256 über `crypto.subtle`
+oder, wo es fehlt (iPhone über `dev:staging:lan`, http), über die eigene Berechnung in
+`sha256.ts` (gegen NIST-Vektoren und `node:crypto` getestet). **Grenze 900 KiB** für die
+vorgesehene Nutzlast (`bodySizeLimit` unverändert 1 MB); lokal an den echten Berichten gemessen:
+9 Dateien, 311 Bestellungen, **406 KiB** (≈ 1,3 KB je Bestellung, 400 Tage ≈ 600 KiB). Weitere
+Sperren: Fremdformat, Widerspruch, mehr als 400 Tage, Kontaktdaten im Titel, Datei über 10 MB.
+**Kein aktiver Import:** es gibt keinen Knopf zum Übertragen; „Analyse starten" ist ein eigener,
+später freigegebener Schritt.
+
+**Offener Befund — vor Aktivierung des Imports zu beheben und zu testen.** `analyseReconciliation`
+(`server/actions.ts`) überspringt doppelte Dateien über den **Dateinamen** (`skipped` aus
+`mergeReports().duplicateFiles`). Kommen zwei inhaltsgleiche Dateien mit **demselben Namen** an
+(zweimal `eBay-OrdersReport.csv`), fallen **beide** heraus — die Folge ist „keine Bestellung"
+oder ein falscher Zeitraum. Die Vorschau erkennt Dubletten nach Position und würde nur eine
+schicken, die Server Action selbst muss aber jede Eingabe richtig behandeln (sie ist ein
+öffentlicher Endpunkt). Nicht geändert.
+
+**Sichtprüfung:** **nicht erfolgt** — weder Desktop noch Telefon, auch nicht der Dateidialog auf
+dem iPhone über `dev:staging:lan`. In den Sitzungen stand kein Browser zur Verfügung; geprüft sind
+die automatisierten Tests (Render, jsdom, Gate, Zustände) und die anonyme 404-Antwort des lokalen
+Staging-Servers. Der Betreiber prüft angemeldet unter
 `http://127.0.0.1:3000/business/orderbuch/verkauf` (Extern → „Abgleich mit Plattformberichten").
 
-**Nächster Schritt:** Phase 4, Schritt 3 (Berichte einlesen, Upload bis ca. 900 KiB) nach
-Freigabe. Production für `0169`–`0176` erst mit eigener Freigabe.
+**Nächster Schritt:** nach Freigabe der Befund oben, dann „Analyse starten" mit ausdrücklicher
+Bestätigung. Production für `0169`–`0176` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 
