@@ -5462,7 +5462,7 @@ Alle sieben: RLS an, keine Policy, kein Clientrecht. Fremdschlüssel auf `sales`
 
 **Prüfung vor der Wiedererkennung (`0176`, ADR-0177, auf Staging seit 2026-11-03, Production nicht).** `seller_recon_create` ruft die reine Funktion `sales_recon_validate_payload(jsonb)` (liest keine Tabelle, keine Clientrolle) vor der Suche nach einer offenen Sitzung mit demselben Dateisatz auf; ein bekannter Upload mit verbotenem Inhalt wird abgewiesen.
 
-**Vergleichswerte und ausstehende Änderungen (`0178`, ADR-0174 Phase 4, lokal fertiggestellt — auf Staging und Production nicht angewendet).** Rein lesend, keine Datenanweisung; `0177` bleibt für die zentrale Sicherung reserviert. `seller_recon_session` behält Signatur, Rechte und jeden Schlüssel aus `0172`; jede Zuordnung bekommt `ledger` (bei reinen Berichtszeilen `null`):
+**Vergleichswerte und ausstehende Änderungen (`0178`, ADR-0174 Phase 4, auf Staging seit 2026-11-04, Production nicht).** Rein lesend, keine Datenanweisung; `0177` bleibt für die zentrale Sicherung reserviert. `seller_recon_session` behält Signatur, Rechte und jeden Schlüssel aus `0172`; jede Zuordnung bekommt `ledger` (bei reinen Berichtszeilen `null`):
 
 | Schlüssel | Inhalt |
 |---|---|

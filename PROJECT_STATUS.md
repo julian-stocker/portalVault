@@ -161,7 +161,7 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 3A · Deduplizierung der Server Action nach Inhalt und Position (`distinctFiles`) | committet (siehe Git) |
 | 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
 | 5 · Vergleichsansicht `/abgleich/<id>` · 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
-| `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **lokal fertiggestellt und committet (siehe Git); auf Staging und Production NICHT angewendet** |
+| `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
 | `0179` · unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Token — `0177` ist die zentrale Sicherung | nur konzipiert |
 
 **Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
@@ -245,7 +245,7 @@ Next-Upgrade, das das Format ändert, lässt diesen Test scheitern.
 an und braucht eine eigene Freigabe); Browser-, Fokus- und iPhone-Sichtprüfung offen; die Antwort
 unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 
-**Migration `0178` (lokal fertiggestellt, 2026-11-04).** **Auf Staging und Production nicht angewendet.** Rein lesend, keine Datenanweisung; `0177` bleibt für die zentrale Sicherung reserviert (`src/lib/admin/migration-sequence.ts` lässt genau diese eine Lücke zu).
+**Migration `0178` (2026-11-04).** **Auf Staging angewendet und vollständig verifiziert** — privilegierter Preflight und Postflight je `9998 = 0` und `9999 = 0`, keine Zeile, kein Recht, keine Policy bewegt (`supabase/checks/0178_staging_run.md`, `APPLIED.md`). **Production: nicht angewendet.** Rein lesend, keine Datenanweisung; `0177` bleibt für die zentrale Sicherung reserviert (`src/lib/admin/migration-sequence.ts` lässt genau diese eine Lücke zu).
 
 - `seller_recon_session` behält Signatur, Rechte und jeden Schlüssel und liefert je Zuordnung `ledger`: `current` (SkyIsles jetzt), `state` (`unchanged` / `applied` / `changed`), `version` und `atAnalysis`. **`atAnalysis` unterscheidet je Feld `stored`** (gespeicherter Befundwert), **`derived`** (rekonstruiert: kein Befund bei einem Paar, also gleich dem Berichtswert) **und `unknown`** (kein Paar — `value` ist `null`, nie ein Ersatzwert).
 - `seller_recon_pending(bigint)` ist **ausschließlich lesend**: die Auswahl, die `seller_recon_apply` übernehmen würde, mit altem und Zielwert (Warenwert nach der bestehenden Rabattregel), Anzahl, veralteten Verkäufen und Token.
@@ -254,7 +254,7 @@ unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 - **Die Oberfläche bietet weiterhin ausschließlich Verkaufsdatum, Warenwert und Versand zur Korrektur an.** Die Datenbank liest auch ältere Entscheidungen zu anderen Feldern (Gesamtbetrag, Stück, Figur, Bestellnummer) mit, weil die Übernahme sie zählt — die Oberfläche bietet sie nicht an.
 - Prüfpaket: `0178_preflight.sql`, `0178_postflight.sql`, `supabase/operations/staging-0178.sql`, Eintrag in `migration-plans.json`; Probelauf `comparison-pending-0178.test.ts` (60 Tests).
 
-**Nächster Schritt:** nach Freigabe die Staging-Anwendung von `0178` bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0178` erst mit eigener Freigabe.
+**Nächster Schritt:** nach Freigabe `0179` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. die Vergleichsansicht (Schritt 5). Production für `0169`–`0178` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 
