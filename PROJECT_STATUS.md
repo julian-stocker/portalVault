@@ -165,7 +165,7 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
 | `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
 | `0179` · `ledger.atAnalysis` nur mit Nachweis (Befund der Leseabnahme von 0178) — rein lesend, mit Prüfpaket | **auf Staging angewendet, vollständig verifiziert und abgenommen (2026-11-05, Leseabnahme 45/45); Production nicht angewendet** |
-| `0180` · unsichere Zuordnungen in `seller_recon_decide` abweisen, Übernahme mit Token — `0177` ist die zentrale Sicherung | nur konzipiert |
+| `0180` · nur nachgewiesene Berichtswerte, nur ausgewählte Entscheidungen, nur mit Token der Vorschau (ADR-0178) — mit Prüfpaket; `0177` ist die zentrale Sicherung | **lokal vorbereitet und committet (siehe Git); auf Staging und Production nicht angewendet** |
 
 **Sitzungsübersicht (Schritt 2).** Liste aus `seller_recon_sessions()` über `sessionListView`:
 Status in Worten, Zeitraum, Dateien, Verkaufsprotokoll, „Befunde mit Entscheidung" (zählt
@@ -277,7 +277,7 @@ unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 
 - `seller_recon_session` behält Signatur, Rechte und jeden Schlüssel und liefert je Zuordnung `ledger`: `current` (SkyIsles jetzt), `state` (`unchanged` / `applied` / `changed`), `version` und `atAnalysis`. **`atAnalysis` unterscheidet je Feld `stored`** (gespeicherter Befundwert), **`derived`** (rekonstruiert: kein Befund bei einem Paar, also gleich dem Berichtswert) **und `unknown`** (kein Paar — `value` ist `null`, nie ein Ersatzwert).
 - `seller_recon_pending(bigint)` ist **ausschließlich lesend**: die Auswahl, die `seller_recon_apply` übernehmen würde, mit altem und Zielwert (Warenwert nach der bestehenden Rabattregel), Anzahl, veralteten Verkäufen und Token.
-- **Der Token wird erst mit `0180` verbindlich geprüft** — dann rechnet die Übernahme ihn unter Sperre nach. Bis dahin ist er eine Auskunft; `seller_recon_apply` und `seller_recon_decide` sind unverändert (Nachbedingung und Prüfpaket belegen beide Rümpfe).
+- **Der Token von `0178` ist eine Auskunft.** Verbindlich ist erst der Token der Vorschau aus `0180` (lokal vorbereitet, nirgends angewendet), den die neue Übernahme unter Sperre nachrechnet.
 - **`R0178` darf nach `0179`/`0180` nicht ausgeführt werden, ohne diese vorher zurückzunehmen** — sie verweigert selbst, solange Apply nicht der Rumpf aus `0173` ist oder eine der vier neuen Funktionen eine spätere Fassung trägt.
 - **Die Oberfläche bietet weiterhin ausschließlich Verkaufsdatum, Warenwert und Versand zur Korrektur an.** Die Datenbank liest auch ältere Entscheidungen zu anderen Feldern (Gesamtbetrag, Stück, Figur, Bestellnummer) mit, weil die Übernahme sie zählt — die Oberfläche bietet sie nicht an.
 - Prüfpaket: `0178_preflight.sql`, `0178_postflight.sql`, `supabase/operations/staging-0178.sql`, Eintrag in `migration-plans.json`; Probelauf `comparison-pending-0178.test.ts` (60 Tests).
@@ -305,7 +305,16 @@ iPhone-Emulation (390, 375, 320 px) — **keine** angemeldete Prüfung auf Stagi
 echtes iPhone. Ohne seitlichen Überlauf in jeder Breite; Herkunftshinweis per Tastatur und
 Tippen geöffnet.
 
-**Nächster Schritt:** angemeldete Browser- und iPhone-Sichtprüfung der Vergleichsansicht auf Staging; danach `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. Schritt 6. Production für `0169`–`0179` erst mit eigener Freigabe.
+**Migration `0180` (2026-11-05) — lokal vorbereitet und committet, auf Staging und Production NICHT angewendet (ADR-0178).** Nur noch CSV → SkyIsles, und nur, was die Datenbank selbst nachweist:
+
+- **Entscheiden:** `manual` wird abgewiesen; `keep_ledger` ist ein Prüfvermerk (Begründung freiwillig), `defer` lässt offen. `take_external` nur auf `sold_on`, `items_net`, `shipping` und `external_order_ref` und nur mit Nachweis (`sales_recon_take_check`): Paar `exact`/`deviating`, Sicherheit `deterministic`/`unique`, keine Konkurrenten, externer, nicht stornierter Nicht-Testverkauf, unverändert seit der Analyse; Berichtswert = gespeicherte Bestellung, SkyIsles-Wert = Verkauf, beide verschieden. `deterministic` (Verkauf trägt genau die Bestellnummer): alle vier Felder. `unique`: **nur die fehlende Bestellnummer** — innerhalb ±3 Tagen, von keinem anderen Nicht-Testverkauf getragen, ohne ungepaarten Rivalen gleichen Figurennamens; Datum und Beträge erst nach neuer Analyse als `deterministic`. Mit Erstattung keine Beträge, storniert gar nichts.
+- **Vorschau und Übernahme:** `seller_recon_preview(Sitzung, Entscheidungs-IDs)` urteilt je Entscheidung und liefert den Token; `seller_recon_apply(Sitzung, Entscheidungs-IDs, Token)` sperrt Sitzung und alle genannten Verkäufe, urteilt mit derselben Funktion erneut und rechnet den Token nach. Eine unzulässige Entscheidung oder ein anderer Token: nichts wird übernommen, nie still verkleinert. Je Verkauf **ein** `seller_update_sale` gegen die gesperrte Version.
+- **Alte Übernahme** `seller_recon_apply(bigint, integer)`: ohne Clientrecht und weist im Rumpf ab. Alte `manual`- und unsichere Entscheidungen bleiben lesbar, `seller_recon_pending` nennt je Entscheidung den Grund.
+- Keine Tabelle, keine Spalte, keine Zeile; Sicherung (`0174`) und Kontolöschung (`0175`) unberührt. Rücknahme `R0180`; `R0178` verweigert, solange `0180` steht.
+- Prüfpaket: `0180_preflight.sql`, `0180_postflight.sql`, `supabase/operations/staging-0180.sql`, Eintrag in `migration-plans.json`; Probelauf `selected-apply-0180.test.ts` (48 Tests).
+- **Vor einer Staging-Abnahme offen:** der Staging-Funktionstest `tools/verify-sales-reconciliation.mts` und die Server Action `applyReconciliation` benutzen noch die alte Übernahme und `manual` — beide müssen auf Vorschau und Token umgestellt werden (eigener Schritt).
+
+**Nächster Schritt:** Freigabe für `0180` auf Staging (Runner, Preflight, Lauf, Postflight); davor bzw. danach der umgestellte Staging-Funktionstest. Daneben die angemeldete Browser- und iPhone-Sichtprüfung der Vergleichsansicht; danach Schritt 6. Production für `0169`–`0180` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

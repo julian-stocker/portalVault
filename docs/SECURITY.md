@@ -2057,6 +2057,15 @@ kann.
 - **Konflikte:** angezeigte Werte und `sales.updated_at` werden bei jeder Entscheidung geprüft,
   beim Anwenden alle betroffenen Verkäufe gesperrt und verglichen — sonst `PT409`, und nichts
   geschieht.
+- **Nur nachgewiesene Übernahmen (`0180`, ADR-0178 — lokal vorbereitet, nirgends angewendet).**
+  Kategorie, Sicherheit und Berichtswerte des Payloads gelten nicht mehr als Beweis: die
+  Datenbank prüft bei Entscheidung, Vorschau und Übernahme mit derselben Funktion
+  (`sales_recon_take_check`) Paar, Sicherheit, Konkurrenten, Bestellnummer, Berichtswert gegen
+  die gespeicherte Bestellung und SkyIsles-Wert gegen den Verkauf. `manual` ist abgewiesen,
+  Erstattung und Storno laufen nur über das Orderbuch. Übernommen wird nur eine ausdrückliche
+  Auswahl, gebunden an den Token der Vorschau und unter Sperre neu beurteilt; die alte
+  Übernahme ohne Auswahl hat kein Clientrecht mehr und weist im Rumpf ab. Fehlermeldungen
+  nennen Grundcodes, keine Werte. RLS, Policies und Verkäuferrechte bleiben unverändert.
 - **Keine Service-Role** in `src/lib/reconciliation` (Test `server/actions.test.ts`) und im
   Staging-Funktionstest `tools/verify-sales-reconciliation.mts`: er arbeitet als vorhandenes
   Betriebskonto über den öffentlichen Schlüssel, legt kein Konto an und löscht keines

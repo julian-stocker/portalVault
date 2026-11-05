@@ -22,7 +22,13 @@ export type Json = any;
 
 export type Spec = {
   ref: string | null; sold: string; shipping?: number; total?: number; lines: FixtureOrder["lines"];
-  ledger: { sold: string; subtotal: number; discount?: number; shipping?: number; pieces: string[]; refunds?: number[] } | null;
+  ledger: {
+    sold: string; subtotal: number; discount?: number; shipping?: number; pieces: string[]; refunds?: number[];
+    /** The sale already carries the order's number (stage A: a `deterministic` pair). From 0180 on. */
+    carriesRef?: boolean;
+    /** The sale was cancelled before the analysis. From 0180 on. */
+    cancelled?: boolean;
+  } | null;
 };
 
 /** Sales in SkyIsles and the report orders that go with them. */
@@ -39,6 +45,12 @@ export async function seedSales(db: PGlite, specs: readonly Spec[]): Promise<Map
     }
     for (const amount of s.ledger.refunds ?? []) {
       await db.query(`insert into public.sale_refunds (sale_id, amount) values ($1, $2)`, [id, amount]);
+    }
+    if (s.ledger.carriesRef) {
+      await db.query(`update public.sales set external_order_ref = $2 where id = $1`, [id, s.ref]);
+    }
+    if (s.ledger.cancelled) {
+      await db.query(`update public.sales set cancelled_at = $2::date where id = $1`, [id, s.ledger.sold]);
     }
     saleOf.set(s.ref ?? `ledger-${i}`, id);
   }
@@ -106,6 +118,13 @@ export const decideOn = (db: PGlite, f: FindingRow, decision: string, manual: un
 
 export const applySession = (db: PGlite, session: number, expected: number) =>
   one<Json>(db, `select public.seller_recon_apply($1, $2)`, [session, expected]);
+
+/** 0180: the preview of exactly these decisions, and the apply bound to its token. */
+export const previewSelection = (db: PGlite, session: number, ids: readonly number[]) =>
+  one<Json>(db, `select public.seller_recon_preview($1, $2::bigint[])`, [session, ids]);
+
+export const applySelection = (db: PGlite, session: number, ids: readonly number[], token: string | null) =>
+  one<Json>(db, `select public.seller_recon_apply($1, $2::bigint[], $3)`, [session, ids, token]);
 
 export const readSession = (db: PGlite, session: number, category: string | null = null, offset = 0, limit = 200): Promise<Json> =>
   one(db, `select public.seller_recon_session($1, $2, $3, $4)`, [session, category, offset, limit]);

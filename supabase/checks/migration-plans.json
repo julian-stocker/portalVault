@@ -608,6 +608,24 @@
         "skyisles.base",
         "skyisles.coll"
       ]
+    },
+    "0180": {
+      "zweck": "Verkaufsabgleich (ADR-0178): nur nachgewiesene Berichtswerte, nur ausgewaehlte take_external-Entscheidungen, nur mit dem Token der Vorschau; manual abgewiesen, die alte Uebernahme ohne Clientrecht; aendert keine Daten",
+      "preflight": "0180_preflight.sql",
+      "lauf": "staging-0180.sql",
+      "postflight": "0180_postflight.sql",
+      "angewendet": {
+        "beschreibung": "seller_recon_apply(bigint, bigint[], text) steht. Die Migration legt sie an; Preflight-Zeile 111 meldet einen zweiten Lauf.",
+        "sql": "select to_regprocedure('public.seller_recon_apply(bigint,bigint[],text)') is not null as erfuellt"
+      },
+      "liefert": {
+        "skyisles.base": 900,
+        "skyisles.coll": 901
+      },
+      "braucht": [
+        "skyisles.base",
+        "skyisles.coll"
+      ]
     }
   }
 }

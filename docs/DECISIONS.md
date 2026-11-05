@@ -17066,6 +17066,61 @@ Abbruch ist kostenlos**, weil nichts committet ist.
 
 ---
 
+## ADR-0178 · Der Verkaufsabgleich übernimmt nur Nachgewiesenes, nur Ausgewähltes, nur mit Token
+
+**Status:** LOKAL VORBEREITET · 2026-11-05 (siehe Git). Migration `0180` ist auf **Staging und
+Production nicht angewendet**; Staging erst nach eigener Freigabe über `db:migrate:staging`.
+**Betrifft:** ADR-0174 (Entscheidung je Feld, alles oder nichts), `0172`, `0173`, `0178`, `0179`
+
+### Kontext
+
+Die Analyse vom 2026-11-05 fand: Die erlaubten Entscheidungen hingen nur vom Feld ab, sodass auch
+`probable`- und `ambiguous`-Zuordnungen übernommen werden konnten. Kategorie, Sicherheit und
+Berichtswerte waren Behauptungen des Payloads. `manual` schrieb freie Werte, buchte Erstattungen und
+stornierte. Die Übernahme nahm jede offene Entscheidung der Sitzung, gebunden nur an eine Anzahl; der
+Token aus `0178` war Auskunft. Geschrieben wurde mit `p_expected_updated_at => null`.
+
+### Entscheidung (vom Betreiber am 2026-11-05 freigegeben)
+
+1. **Richtung ausschließlich CSV → SkyIsles.** `take_external` ist die einzige schreibende
+   Entscheidung. `keep_ledger` ist ein Prüfvermerk, Begründung freiwillig. `manual` wird abgewiesen;
+   alte `manual`-Entscheidungen bleiben lesbar und werden nie ausgeführt.
+2. **Feldliste:** `sold_on`, `items_net` (Berichtswert + bestehender Rabatt), `shipping`,
+   `external_order_ref` (nur solange leer, nie überschrieben). `total`, `pieces` und `figure` nur
+   `keep_ledger`/`defer`. Erstattung und Storno ausschließlich über das Orderbuch. Verkaufspositionen
+   und Lager werden nie berührt.
+3. **`deterministic`** (der Verkauf trägt genau die Bestellnummer): nachgewiesene Berichtswerte der
+   Feldliste. **`unique`:** zunächst nur die fehlende Bestellnummer; Datum und Beträge erst nach
+   erneuter Analyse als `deterministic`. **`probable`, `ambiguous`:** keine Übernahme.
+4. **Verkäufe mit Erstattung:** keine finanzielle Übernahme. **Stornierte Verkäufe:** keine.
+5. **Der Nachweis liegt in der Datenbank** (`sales_recon_take_check`), bei Entscheidung, Vorschau
+   und Übernahme dieselbe Funktion: Paar und Sicherheit passen zusammen, keine Konkurrenten,
+   externer Nicht-Testverkauf unverändert seit der Analyse, Berichtswert = gespeicherte Bestellung,
+   SkyIsles-Wert = Verkauf, beide verschieden. Für `unique` zusätzlich: ±3 Tage (Entscheidung 10),
+   Nummer von keinem anderen Nicht-Testverkauf getragen, kein ungepaarter Rivale mit gleichem
+   Figurennamen im Fenster.
+6. **Übernahme nur einer ausdrücklichen Auswahl**, gebunden an den Token von
+   `seller_recon_preview` (Sitzung, sortierte Auswahl, Werte, Identitäten, beide Verkaufsversionen),
+   unter Sitzungs- und Verkaufssperre neu beurteilt. Eine unzulässige Entscheidung oder ein anderer
+   Token → nichts; die Auswahl wird nie still verkleinert. Je Verkauf ein Schreibaufruf gegen die
+   gesperrte Version.
+7. **Keine neue Tabelle für Übernahmeläufe** (Entscheidung 8); ein Lauf teilt `applied_at`.
+8. **Alte Übernahme `seller_recon_apply(bigint, integer)`:** Ausführungsrecht entzogen und im Rumpf
+   abgewiesen.
+
+### Konsequenzen
+
+- Die Datenbank beweist den Namensabgleich nicht über exakt gleiche Figurennamen hinaus (Aliase,
+  Schreibvarianten, Stückquote, Punktabstand). Darum darf `unique` nur die Nummer ergänzen, und die
+  Rivalenprüfung ist ein vorsichtiger Ersatz für den Abstand der Konkurrenten, kein Nachbau.
+- Die Bestellzeilen stammen aus dem Browser-Parser; die Datenbank prüft ihre Form, nicht die Datei.
+- Ein abgewiesener Aufruf hinterlässt keine Zeile (Rücknahme der Transaktion).
+- Staging-Funktionstest und Server Action müssen vor einer funktionalen Abnahme auf Vorschau und
+  Token umgestellt werden.
+- `R0180` öffnet die Lücken wieder und ist kein Routineschritt.
+
+---
+
 ## ADR-0177 · Der Verkaufsabgleich prüft jeden Upload ganz — auch einen, den er schon kennt
 
 **Status:** AUF STAGING ANGEWENDET UND ABGENOMMEN · 2026-11-03 (`0664e6c`). Migration `0176` läuft
