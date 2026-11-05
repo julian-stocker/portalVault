@@ -8,8 +8,9 @@
  * is never written as 0 or as a dash that could pass for "nothing".
  *
  * ONE LAYOUT FOR BOTH SIZES. The field table is a list of rows: stacked with
- * its labels on a phone, five columns from `sm:` up — nothing scrolls
- * sideways. The details open with `<details>`, which needs no script.
+ * its labels on a phone, one line of five columns from `lg:` up — nothing
+ * scrolls sideways. The details, and each value's origin hint, open with
+ * `<details>`, which needs no script and no button.
  *
  * Every value is text through React — nothing from a report is rendered as HTML.
  */
@@ -54,23 +55,87 @@ function StatusChip({ status }: { status: FieldStatus }) {
   );
 }
 
-function AtAnalysis({ kind, at }: { kind: ValueKind; at: AtAnalysisValue | null }) {
-  if (at === null) return <span className="text-muted">{t.noValue}</span>;
+type Basis = AtAnalysisValue["basis"];
+const BASES: readonly Basis[] = ["derived", "stored", "unknown"];
+
+/**
+ * The mark of where a value at analysis comes from. Three different SHAPES,
+ * so the difference never rests on colour alone (WCAG 1.4.1):
+ *
+ *   derived   a check in a circle — the database PROVED the value
+ *   stored    a sheet of paper — the value the analysis wrote down; no
+ *             check, because it is not independently proven
+ *   unknown   a question mark — no value, and none is guessed
+ */
+function BasisIcon({ basis }: { basis: Basis }) {
   return (
-    <span data-basis={at.basis}>
-      {at.basis === "unknown"
-        ? <span className="italic text-muted">{t.unknownValue}</span>
-        : <span className="tabular-nums">{valueText(kind, at.value)}</span>}
-      <span className="mt-0.5 block text-xs text-muted" title={t.basisHints[at.basis]}>{t.bases[at.basis]}</span>
-    </span>
+    <svg data-basis-icon={basis} viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false"
+         className="shrink-0 text-muted" fill="none" stroke="currentColor" strokeWidth="1.4"
+         strokeLinecap="round" strokeLinejoin="round">
+      {basis === "derived" ? (
+        <><circle cx="8" cy="8" r="6.2" /><path d="M5.2 8.3l1.9 1.9 3.8-4.2" /></>
+      ) : basis === "stored" ? (
+        <><path d="M4.5 1.8h4.8l2.2 2.2v10.2h-7z" /><path d="M6.4 7.2h3.2M6.4 9.7h3.2M6.4 12.2h2" /></>
+      ) : (
+        <><circle cx="8" cy="8" r="6.2" /><path d="M6.3 6.3a1.8 1.8 0 1 1 2.5 1.6c-.5.3-.8.7-.8 1.2v.3" />
+          <circle cx="8" cy="11.6" r=".5" fill="currentColor" stroke="none" /></>
+      )}
+    </svg>
   );
 }
 
-function Cell({ label, children }: { label: string; children: React.ReactNode }) {
+/**
+ * The value at analysis, its mark next to it on ONE line. The explanation is
+ * the existing hint text, behind a `<summary>`: focusable with the keyboard,
+ * tappable on a phone, no script and no button. `unknown` stays written out.
+ */
+function AtAnalysis({ kind, at }: { kind: ValueKind; at: AtAnalysisValue | null }) {
+  if (at === null) return <span className="text-muted">{t.noValue}</span>;
   return (
-    <div className="flex items-baseline justify-between gap-3 sm:block">
-      <dt className="text-xs text-muted sm:sr-only">{label}</dt>
-      <dd className="text-right text-sm sm:text-left">{children}</dd>
+    <details data-basis={at.basis} className="min-w-0">
+      <summary title={t.bases[at.basis]}
+               className="focus-ring -mx-1 inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sky-md px-1 lg:min-h-6 [&::-webkit-details-marker]:hidden">
+        {at.basis === "unknown"
+          ? <span className="italic text-muted">{t.unknownValue}</span>
+          : <span className="tabular-nums">{valueText(kind, at.value)}</span>}
+        <BasisIcon basis={at.basis} />
+        <span className="sr-only">{t.basisLabel(t.bases[at.basis])}</span>
+      </summary>
+      <p className="mt-1 text-left text-xs text-muted">
+        <span className="font-medium text-fg">{t.bases[at.basis]}:</span> {t.basisHints[at.basis]}
+      </p>
+    </details>
+  );
+}
+
+function BasisLegend() {
+  return (
+    <div className="mt-3 text-xs text-muted">
+      <p>{t.basisLegend}</p>
+      <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+        {BASES.map((b) => (
+          <li key={b} className="inline-flex items-center gap-1"><BasisIcon basis={b} />{t.bases[b]}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/*
+ * ONE LINE PER FIELD FROM `lg:` UP. At 768 px a 14-digit eBay order number
+ * already wraps in a value column; below `lg:` the row stacks with its labels.
+ * The result column is 13.5rem (216 px), so that the longest status
+ * ("Abweichung, Zuordnung unsicher", 207 px) stays on one line.
+ */
+const ROW_GRID = "lg:grid lg:grid-cols-[8rem_repeat(3,minmax(0,1fr))_13.5rem] lg:gap-3";
+
+function Cell({ label, children }: { label: string; children: React.ReactNode }) {
+  // On a phone label and value share a line; an opened origin hint is wider
+  // than the space beside the label, so the value wraps onto its own full line.
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 lg:block lg:min-w-0">
+      <dt className="shrink-0 text-xs text-muted lg:sr-only">{label}</dt>
+      <dd className="ml-auto min-w-0 text-right text-sm break-words lg:ml-0 lg:text-left">{children}</dd>
     </div>
   );
 }
@@ -78,9 +143,9 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
 function FieldRow({ f }: { f: ComparisonField }) {
   return (
     <li data-field={f.field} data-status={f.status}
-        className="border-t border-border/50 py-2 first:border-t-0 sm:grid sm:grid-cols-[8rem_repeat(3,minmax(0,1fr))_10rem] sm:gap-3">
-      <p className="text-sm font-medium sm:font-normal">{copy.fields[f.field]}</p>
-      <dl className="mt-1 flex flex-col gap-1 sm:contents">
+        className={`border-t border-border/50 py-2 first:border-t-0 lg:items-center lg:py-1 ${ROW_GRID}`}>
+      <p className="text-sm font-medium lg:font-normal">{copy.fields[f.field]}</p>
+      <dl className="mt-1 flex flex-col gap-1 lg:contents">
         <Cell label={t.csvValue}><span className="tabular-nums">{valueText(f.kind, f.csv)}</span></Cell>
         <Cell label={t.atAnalysis}><AtAnalysis kind={f.kind} at={f.atAnalysis} /></Cell>
         <Cell label={t.current}><span className="tabular-nums">{valueText(f.kind, f.current)}</span></Cell>
@@ -90,7 +155,7 @@ function FieldRow({ f }: { f: ComparisonField }) {
   );
 }
 
-function Figures({ c }: { c: MatchComparison }) {
+function Figures({ c, hasOrder }: { c: MatchComparison; hasOrder: boolean }) {
   const { lines, findings, status } = c.figures;
   return (
     <div data-field="figure" data-status={status} className="mt-3 border-t border-border/50 pt-2">
@@ -98,7 +163,10 @@ function Figures({ c }: { c: MatchComparison }) {
         <h4 className="text-sm font-medium">{t.figures}</h4>
         <StatusChip status={status} />
       </div>
-      {lines === null ? (
+      {!hasOrder ? (
+        // No order, so no lines to show — not "purged" (that is only true of an order whose lines were thinned).
+        <p className="mt-1 text-xs text-muted">{t.noReportLines}</p>
+      ) : lines === null ? (
         <p className="mt-1 text-xs text-muted">{t.linesPurged}</p>
       ) : lines.length === 0 ? (
         <p className="mt-1 text-xs text-muted">{t.noLines}</p>
@@ -153,8 +221,17 @@ export function MatchCard({ match: m }: { match: Match }) {
         </span>
         {c.deviations > 0 ? <span className="text-xs text-danger">{t.deviationCount(c.deviations)}</span> : null}
         {c.state ? <span className="text-xs text-muted">{t.ledgerStates[c.state]}</span> : null}
+        {/* Why it is not compared — in the head, not only in the details (0169: a reason exists only here). */}
+        {m.category === "not_comparable" && m.reason ? (
+          <span data-reason={m.reason} className="rounded-sky-md px-2 py-0.5 text-xs ring-1 ring-border/70">
+            {copy.notComparableReasons[m.reason]}
+          </span>
+        ) : null}
         {cur?.isTest ? <span className="text-xs text-muted">{t.testSale}</span> : null}
       </header>
+      {m.category === "not_comparable" && m.reason ? (
+        <p className="mt-1 text-xs text-muted">{t.reasonHints[m.reason]}</p>
+      ) : null}
 
       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-4">
         <Side title={t.csv}>
@@ -165,7 +242,10 @@ export function MatchCard({ match: m }: { match: Match }) {
                 {formatDate(m.order.soldOn)} · {formatPrice(m.order.total)}
               </span>
             </>
-          ) : <span className="text-muted">{t.noOrder}</span>}
+          ) : m.category === "not_comparable"
+            // A candidate that cannot be judged is not "missing from the report".
+            ? <span className="text-muted">{t.notCompared}</span>
+            : <span className="text-muted">{t.noOrder}</span>}
         </Side>
         <Side title={t.skyisles}>
           {m.sale && cur ? (
@@ -179,7 +259,7 @@ export function MatchCard({ match: m }: { match: Match }) {
         </Side>
       </div>
 
-      <details className="group mt-2">
+      <details data-match-details="" className="mt-2">
         <summary className="focus-ring -mx-1 inline-flex min-h-11 cursor-pointer items-center rounded-sky-md px-1 text-sm underline underline-offset-2 sm:min-h-8">
           {t.details}
         </summary>
@@ -210,13 +290,14 @@ export function MatchCard({ match: m }: { match: Match }) {
             </div>
           ) : null}
 
-          <div className="mt-3 hidden text-xs text-muted sm:grid sm:grid-cols-[8rem_repeat(3,minmax(0,1fr))_10rem] sm:gap-3" aria-hidden="true">
+          {c.fields.some((f) => f.atAnalysis !== null) ? <BasisLegend /> : null}
+          <div className={`mt-3 hidden text-xs text-muted ${ROW_GRID}`} aria-hidden="true">
             <span>{t.field}</span><span>{t.csvValue}</span><span>{t.atAnalysis}</span><span>{t.current}</span><span>{t.result}</span>
           </div>
           <ul className="mt-1">
             {c.fields.map((f) => <FieldRow key={f.field} f={f} />)}
           </ul>
-          <Figures c={c} />
+          <Figures c={c} hasOrder={m.order !== null} />
         </div>
       </details>
     </article>

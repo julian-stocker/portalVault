@@ -348,23 +348,156 @@ describe("read-only, and nothing private where it does not belong", () => {
 });
 
 describe("one layout for a phone and a desktop", () => {
-  it("no table and no sideways scrolling: rows stack, five columns from sm: up", async () => {
+  it("no table and no sideways scrolling: rows stack, one line of five columns from lg: up", async () => {
     const html = await render();
     expect(html).not.toMatch(/<table|overflow-x-(auto|scroll)/);
-    expect(html).toContain("sm:grid-cols-[8rem_repeat(3,minmax(0,1fr))_10rem]");
+    expect(html).toContain("lg:grid-cols-[8rem_repeat(3,minmax(0,1fr))_13.5rem]");
     expect(html).toContain("sm:grid-cols-2");
     expect(html).toContain("break-words");
+    // No fixed width that could outgrow a 320 px screen, other than the lg: columns.
+    expect(html.replace(/lg:grid-cols-\[[^\]]+\]/g, "")).not.toMatch(/\bw-\[|min-w-\[|\bw-(7[2-9]|[89]\d|\d{3})\b/);
   });
 
   it("the labels of a stacked row are there for a phone and for a screen reader", async () => {
     const row = (await render()).match(/data-field="shipping"[\s\S]*?<\/li>/)?.[0] ?? "";
     for (const label of [t.csvValue, t.atAnalysis, t.current, t.result]) expect(row).toContain(label);
-    expect(row).toContain("sm:sr-only");
+    expect(row).toContain("lg:sr-only");
   });
 
   it("the details open without a script, with a tap target of 44 px on a phone", async () => {
     const html = await render();
-    expect(html.match(/<details/g)?.length).toBe(7);
+    expect(html.match(/<details data-match-details/g)?.length).toBe(7);
     expect(html).toMatch(/<summary class="[^"]*min-h-11/);
+  });
+
+  it("the origin of a value sits next to it, in the same summary — no extra text line under the value", async () => {
+    const html = await render();
+    const soldOn = card(html, "deviating").match(/data-field="sold_on"[\s\S]*?<\/li>/)?.[0] ?? "";
+    const origin = soldOn.match(/<details data-basis="stored"[\s\S]*?<\/details>/)?.[0] ?? "";
+    const summary = origin.match(/<summary[\s\S]*?<\/summary>/)?.[0] ?? "";
+    // value, mark and the spoken origin are one tappable line; the hint follows only when opened
+    expect(summary).toContain("14.01.2026");
+    expect(summary).toContain('data-basis-icon="stored"');
+    expect(summary).toContain(t.basisLabel(t.bases.stored));
+    expect(summary).toMatch(/min-h-11[^"]*lg:min-h-6/);
+    expect(summary).not.toContain(t.basisHints.stored);
+    expect(origin.slice(origin.indexOf("</summary>"))).toContain(t.basisHints.stored);
+    expect(soldOn).not.toContain("mt-0.5 block text-xs");
+  });
+});
+
+describe("the three origins at analysis, each its own mark", () => {
+  const ICON = (html: string, basis: string) => html.match(new RegExp(`<svg data-basis-icon="${basis}"[\\s\\S]*?</svg>`))?.[0] ?? "";
+
+  it("derived, stored and unknown: each says its origin in words, with its own shape and its own hint", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(2, { category: "deviating", certainty: "unique", findings: [finding()],
+      ledger: ledger({}, { soldOn: at("2026-01-14", "stored"), itemsNet: at(12.5, "derived"), shipping: at(null, "unknown") }) })] });
+    const html = await render();
+    for (const basis of ["derived", "stored", "unknown"] as const) {
+      const block = html.match(new RegExp(`<details data-basis="${basis}"[\\s\\S]*?</details>`))?.[0] ?? "";
+      expect(block, basis).toContain(t.basisLabel(t.bases[basis]));
+      expect(block, basis).toContain(t.basisHints[basis]);
+      expect(block, basis).toContain(`data-basis-icon="${basis}"`);
+      expect(block, basis).toContain('aria-hidden="true"');
+    }
+    // The shapes differ, so colour is never the only difference.
+    expect(new Set(["derived", "stored", "unknown"].map((b) => ICON(html, b).replace(/data-basis-icon="\w+"/, ""))).size).toBe(3);
+  });
+
+  it("stored never carries the check mark of derived — it is not independently proven", async () => {
+    const html = await render();
+    const check = ICON(html, "derived").match(/<path d="([^"]+)"/)?.[1] ?? "";
+    expect(check).not.toBe("");
+    expect(ICON(html, "stored")).not.toContain(check);
+    expect(t.basisHints.stored).toContain("kein unabhängig nachgewiesener Wert");
+  });
+
+  it("unknown is written out as unbekannt inside its summary, with no value", async () => {
+    MOCK.result = ok({ total: 1, matches: [match(1, { ledger: ledger({}, { itemsNet: at(null, "unknown") }) })] });
+    const html = await render();
+    const block = html.match(/<details data-basis="unknown"[\s\S]*?<\/summary>/)?.[0] ?? "";
+    expect(block).toContain(t.unknownValue);
+    expect(block).not.toMatch(/\d+,\d{2}/);
+  });
+
+  it("the legend names all three marks once per opened card", async () => {
+    const exact = card(await render(), "exact");
+    expect(exact).toContain(t.basisLegend);
+    for (const basis of ["derived", "stored", "unknown"] as const) expect(exact).toContain(t.bases[basis]);
+  });
+});
+
+describe("the period: pairs, one-sided rows and candidates at the edge", () => {
+  const sessionFive = () => {
+    const summary = { ...SUMMARY, categories: { exact: 30, deviating: 2, probable: 0, ambiguous: 0, external_only: 0, ledger_only: 0, not_comparable: 3 } };
+    const unpaired = (id: number, reason: string, soldOn: string) => match(id, {
+      category: "not_comparable", certainty: null, score: null, dateDelta: null, reason, order: null,
+      sale: sale({ id: 70 + id, soldOn }),
+      ledger: ledger({ current: { ...ledger().current, soldOn } }, { soldOn: at(null, "unknown"), itemsNet: at(null, "unknown"),
+        shipping: at(null, "unknown"), expectedTotal: at(null, "unknown"), pieces: at(null, "unknown") }),
+    });
+    return ok({
+      session: session({ id: 5, covered_from: "2026-02-05", covered_to: "2026-02-28", summary }),
+      total: 35,
+      matches: [match(1), unpaired(7, "after_coverage", "2026-03-01"), unpaired(8, "before_coverage", "2026-02-03"),
+        unpaired(9, "edge_day", "2026-02-28")],
+    });
+  };
+
+  it("32 pairs and 3 unpaired candidates are counted apart; the 35 stored rows are named as such", async () => {
+    MOCK.result = sessionFive();
+    const html = await render("5");
+    expect(html).toContain(`data-count="pairs">32<`);
+    expect(html).toContain(`data-count="unpaired">3<`);
+    expect(html).toContain(`data-count="ledger-only">0<`);
+    expect(html).toContain(`data-count="report-only">0<`);
+    expect(html).toContain(`data-count="records">35<`);
+    for (const label of [t.pairs, t.unpairedCount, t.ledgerOnlyCount, t.reportOnlyCount, t.matchRecords]) expect(html).toContain(label);
+    expect(html).toContain(t.unpairedHint);
+  });
+
+  it("before and after the period are told apart in the head of the card, each with its own sentence", async () => {
+    MOCK.result = sessionFive();
+    const html = await render("5");
+    for (const reason of ["after_coverage", "before_coverage", "edge_day"] as const) {
+      const start = html.indexOf(`data-reason="${reason}"`);
+      expect(start, reason).toBeGreaterThan(-1);
+      const head = html.slice(start, html.indexOf("<details", start));
+      expect(head).toContain(copy.notComparableReasons[reason]);
+      expect(head).toContain(t.reasonHints[reason]);
+    }
+    expect(copy.notComparableReasons.before_coverage).not.toBe(copy.notComparableReasons.after_coverage);
+  });
+
+  it("an edge candidate is never shown as a missing order", async () => {
+    MOCK.result = sessionFive();
+    const html = await render("5");
+    const after = html.slice(html.indexOf('data-reason="after_coverage"'));
+    const cardAfter = after.slice(0, after.indexOf("</article>"));
+    expect(cardAfter).toContain(t.notCompared);
+    expect(cardAfter).not.toContain(t.noOrder);
+    expect(cardAfter).not.toContain(copy.categories.ledger_only);
+    // A real ledger-only sale keeps its wording.
+    MOCK.result = ok({});
+    expect(card(await render(), "ledger_only")).toContain(t.noOrder);
+  });
+
+  it("a sale without an order never claims its lines were purged — there were none", async () => {
+    MOCK.result = sessionFive();
+    const html = await render("5");
+    const after = html.slice(html.indexOf('data-reason="after_coverage"'));
+    const cardAfter = after.slice(0, after.indexOf("</article>"));
+    expect(cardAfter).toContain(t.noReportLines);
+    expect(cardAfter).not.toContain(t.linesPurged);
+    // ...and neither does a SkyIsles-only sale; a purged order still says so.
+    MOCK.result = ok({});
+    expect(card(await render(), "ledger_only")).not.toContain(t.linesPurged);
+    MOCK.result = ok({ total: 1, matches: [match(1, { order: order({ lines: null }) })] });
+    expect(card(await render(), "exact")).toContain(t.linesPurged);
+  });
+
+  it("a session without a hint-worthy candidate shows no hint", async () => {
+    MOCK.result = ok({ session: session({ summary: { ...SUMMARY, categories: { ...SUMMARY.categories, not_comparable: 0 } } }) });
+    expect(await render()).not.toContain(t.unpairedHint);
   });
 });

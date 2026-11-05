@@ -48,6 +48,38 @@ export const CATEGORIES = [
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
+/**
+ * The categories that ARE an order/sale pair — exactly the ones 0169's
+ * `sales_recon_matches_shape` requires an order AND a sale for. Every other
+ * stored match row is one side only: an order (`external_only`) or a sale
+ * (`ledger_only`, `not_comparable`).
+ */
+export const PAIR_CATEGORIES = ["exact", "deviating", "probable", "ambiguous"] as const satisfies readonly Category[];
+
+/**
+ * How the stored match rows of a summary divide — counted, never computed
+ * from anything but the stored per-category numbers.
+ *
+ *   pairs        an order and a sale side by side
+ *   reportOnly   an order with no sale (`external_only`)
+ *   ledgerOnly   a sale INSIDE the covered period with no order — the only
+ *                row that can mean "missing from the report"
+ *   unpaired     a sale loaded as a candidate that cannot be judged
+ *                (`not_comparable`: outside the period but inside the ±3 day
+ *                search window, an edge day, a gap, a test sale) — never a
+ *                missing order
+ *   records      every stored match row, the sum of the above
+ */
+export function pairingCounts(categories: Record<Category, number>): {
+  pairs: number; reportOnly: number; ledgerOnly: number; unpaired: number; records: number;
+} {
+  const pairs = PAIR_CATEGORIES.reduce((n, c) => n + categories[c], 0);
+  const reportOnly = categories.external_only;
+  const ledgerOnly = categories.ledger_only;
+  const unpaired = categories.not_comparable;
+  return { pairs, reportOnly, ledgerOnly, unpaired, records: pairs + reportOnly + ledgerOnly + unpaired };
+}
+
 export const CERTAINTIES = ["deterministic", "unique", "probable", "ambiguous"] as const;
 export type Certainty = (typeof CERTAINTIES)[number];
 

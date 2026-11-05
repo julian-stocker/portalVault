@@ -161,6 +161,20 @@ describe("rights", () => {
   });
 });
 
+describe("the candidates' window (phase 4 step 5B)", () => {
+  it("loads sales from 3 days before to 3 days after the period — and not one day more", async () => {
+    // period 5 to 28 February: the window is 2 February to 3 March
+    const ids: Record<string, number> = {};
+    for (const day of ["2026-02-01", "2026-02-02", "2026-02-05", "2026-02-28", "2026-03-01", "2026-03-03", "2026-03-04"]) {
+      ids[day] = await sale({ sold: day, subtotal: 7.99 });
+    }
+    const loaded = (await one<{ saleId: number }[]>(db,
+      `select public.seller_recon_candidates('ebay', '2026-02-05', '2026-02-28')`)).map((s) => s.saleId);
+    expect(loaded.sort((a, b) => a - b)).toEqual(
+      ["2026-02-02", "2026-02-05", "2026-02-28", "2026-03-01", "2026-03-03"].map((d) => ids[d]).sort((a, b) => a - b));
+  });
+});
+
 describe("recording a session", () => {
   it("stores session, files, orders, matches and findings — and computes the decisions itself", async () => {
     const id = await sale({ sold: "2026-02-17", subtotal: 7.99 });

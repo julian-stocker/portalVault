@@ -161,6 +161,7 @@ Auswahl nach ausdrücklicher Bestätigung analysiert werden; das legt eine Abgle
 | 3A · Deduplizierung der Server Action nach Inhalt und Position (`distinctFiles`) | committet (siehe Git) |
 | 4 · Analyse starten mit Bestätigungsdialog (`analyseReconciliation`) | lokal committet (siehe Git), auf Staging nie aufgerufen |
 | 5 · Vergleichsansicht `/abgleich/<id>` (nur lesend) | lokal committet (siehe Git); Browser- und iPhone-Sichtprüfung offen |
+| 5B · Detailtabelle verdichten, Zeitraumgrenzen klarstellen (nur Oberfläche) | lokal committet (siehe Git); angemeldete Sichtprüfung auf Staging und echter iPhone-Test offen |
 | 6 · Entscheiden (Verkaufsdatum, Warenwert, Versand) · 7 · Prüfen und Übernehmen · 8 · Abschließen/Verwerfen · 9 · Aufräumen | offen |
 | `0178` · Vergleichswerte in `seller_recon_session` (`ledger`) und `seller_recon_pending` — rein lesend, mit Prüfpaket | **auf Staging angewendet und vollständig verifiziert (2026-11-04); Production nicht angewendet** |
 | `0179` · `ledger.atAnalysis` nur mit Nachweis (Befund der Leseabnahme von 0178) — rein lesend, mit Prüfpaket | **auf Staging angewendet, vollständig verifiziert und abgenommen (2026-11-05, Leseabnahme 45/45); Production nicht angewendet** |
@@ -241,12 +242,17 @@ in `routes.ts` (`RECONCILIATION_PATH`).
 Sperren wie die Übersicht (Staging, Verkäuferrolle, sonst 404), dazu 404 für eine Adresse, die
 keine Sitzungsnummer ist, und für eine Sitzung, die es nicht gibt (`P0002`); andere Ablehnungen
 und eine fremde Antwortform erscheinen als Hinweis mit „Neu laden“, im Server-Log nur Code oder
-Vertragspfad. Überblick (Plattform, Status, Zeitraum, Protokollnummern, Dateien, Zuordnungen und
-Abweichungen aus der gespeicherten Zusammenfassung), Filter nach Ergebnis und Seiten sind Links —
+Vertragspfad. Überblick (Plattform, Status, Zeitraum, Protokollnummern, Dateien und die
+gespeicherte Zusammenfassung, aufgeteilt nach `pairingCounts`: Bestell-/Verkaufspaare, nur im
+Bericht, nur in SkyIsles im Berichtszeitraum, ungepaarte Kandidaten, gespeicherte
+Zuordnungsdatensätze insgesamt), Filter nach Ergebnis und Seiten sind Links —
 jede Seite ist eine eigene Antwort von `seller_recon_session` (`?kategorie=`, `?seite=`; in der
 Adresse steht nie ein Berichtswert). Je Zuordnung eine Karte, links Bericht, rechts SkyIsles
 heute; aufklappbar (`<details>`, ohne Skript) je Angabe Bericht, SkyIsles bei der Analyse mit
-Herkunft (`gespeicherter Befundwert` / `belegt` / `nicht belegt`) und SkyIsles heute, dazu
+Herkunftszeichen direkt am Wert (Häkchen im Kreis = `belegt`, Blatt = `gespeicherter
+Befundwert` ohne Häkchen, Fragezeichen = `nicht belegt`, der Wert dann ausgeschrieben
+„unbekannt“; der Erklärungstext öffnet per Tippen oder Tastatur über ein eigenes `<details>`,
+ohne Button) und SkyIsles heute — ab `lg:` eine Zeile je Angabe, darunter gestapelt; dazu
 Positionen, Figurenbefunde, Bestellnummer, Storno und Erstattungen. **Die Farben kommen aus
 `compare.ts`, das nichts selbst vergleicht oder rechnet:** grün nur, wenn die Datenbank den
 Wert belegt hat (`derived`) und kein Befund besteht; rot nur für einen Befund bei sicherer
@@ -280,7 +286,26 @@ unterscheidet nicht zwischen neuer und wiederverwendeter Sitzung.
 
 **Migration `0179` — auf Staging angewendet und abgenommen (2026-11-05), Production NICHT angewendet.** Berechtigter Postflight 9998 = 0, 9999 = 0; funktionale Leseabnahme 45 von 45 (`supabase/checks/0179_staging_run.md`): Sitzung 1 behält jeden nachweisbaren Wert, Sitzung 2 (`changed`) nur noch `stored`, Sitzung 3 meldet die drei widersprüchlichen Beträge als `unknown`. `ledger.atAnalysis` nennt einen Wert nur mit Nachweis aus der Datenbank: bei `unchanged` der heutige Wert (die Version ist die analysierte, `seller_recon_create` erzwang das mit PT409), bei `applied` die unberührten Felder und die alten Werte, die die Übernahmen aufgezeichnet haben (Gesamtbetrag aus nachgewiesenem Netto und Versand, Erstattungen vor der Sitzung, Storno nur wenn vorher), bei `changed` keiner — `stored` bleibt, `derived` wird `unknown`. Widerspruch, fehlender, mehrdeutiger oder nicht lesbarer Nachweis → `unknown` mit `value` null. Schema, Signatur und Rechte bleiben; Pending, Decide und Apply unverändert. Die Token- und Decide-Härtung heißt jetzt `0180`.
 
-**Nächster Schritt:** Browser- und iPhone-Sichtprüfung der Vergleichsansicht auf Staging; danach `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. Schritt 6. Production für `0169`–`0179` erst mit eigener Freigabe.
+**Schritt 5B (2026-11-05, nur Oberfläche, keine Datenbankänderung).** Anlass Sitzung 5 auf
+Staging (Bericht 05.–28.02., Verkauf 77 vom 01.03. unter „Nicht vergleichbar“). **Kein Fehler im
+Abgleich:** `seller_recon_candidates` lädt bewusst ±3 Tage um den Berichtszeitraum, damit ein
+Verkauf mit einem Tag Versatz sein Paar findet; ein geladener Verkauf ohne Paar außerhalb des
+Zeitraums ist `not_comparable` (`before_coverage`/`after_coverage`), am ersten/letzten Tag
+`edge_day` — nie `ledger_only`. Unklar war nur die Darstellung: der Überblick zählte die drei
+Kandidaten als „Zuordnungen“ (35), und der Grund stand erst in den Einzelheiten. Jetzt: Grund
+samt Satz im Kartenkopf, links „Nicht mit dem Bericht verglichen“ statt „Keine Bestellung im
+Bericht“, im Überblick Paare und ungepaarte Kandidaten getrennt. Nebenbei behoben (seit
+`82905cc`): eine Karte ohne Bestellung behauptete „Die Positionsliste dieser Sitzung wurde
+gelöscht“. Regressionstests: `period-edges.test.ts` (Nachbau von Sitzung 5, Folgetag-Paar,
+außerhalb des Fensters, vorher/nachher), das Fenster von `seller_recon_candidates` in PGlite
+(Tag −3/+3 geladen, −4/+4 nicht), Seite (Zählung, Grund, Herkunftszeichen, Layout).
+**Sichtprüfung:** nur an statisch gerendertem HTML mit synthetischen Daten und dem gebauten CSS,
+in Playwright-Chromium (1280, 1024, 768, 390, 375, 320 px) und Playwright-WebKit mit
+iPhone-Emulation (390, 375, 320 px) — **keine** angemeldete Prüfung auf Staging, **kein**
+echtes iPhone. Ohne seitlichen Überlauf in jeder Breite; Herkunftshinweis per Tastatur und
+Tippen geöffnet.
+
+**Nächster Schritt:** angemeldete Browser- und iPhone-Sichtprüfung der Vergleichsansicht auf Staging; danach `0180` (unsichere Zuordnungen abweisen, Übernahme mit Token) bzw. Schritt 6. Production für `0169`–`0179` erst mit eigener Freigabe.
 
 ## Verkaufsabgleich — Phase 1 und 2 (2026-11-03) — **gebaut, committet (`a14a87d`)**
 

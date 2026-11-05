@@ -2620,6 +2620,16 @@ export const de = {
         createdAt: "Analysiert",
         matches: "Zuordnungen",
         deviatingMatches: "Zuordnungen mit Abweichung",
+        /* Wie sich die gespeicherten Zuordnungsdatensätze aufteilen (`pairingCounts`). */
+        pairs: "Bestell-/Verkaufspaare",
+        reportOnlyCount: "Nur im Bericht",
+        ledgerOnlyCount: "Nur in SkyIsles (im Berichtszeitraum)",
+        unpairedCount: "Ungepaarte Kandidaten (nicht vergleichbar)",
+        matchRecords: "Gespeicherte Zuordnungsdatensätze insgesamt",
+        unpairedHint:
+          "Ungepaarte Kandidaten sind keine fehlenden Bestellungen: SkyIsles-Verkäufe, die nur als mögliche " +
+          "Gegenstücke geladen wurden (bis zu 3 Tage vor oder nach dem Berichtszeitraum), am ersten oder " +
+          "letzten Berichtstag liegen oder Testverkäufe sind.",
         deviationsByField: "Abweichungen nach Angabe",
         filesHeading: "Berichtsdateien",
         fileOrders: (n: number) => (n === 1 ? "1 Bestellung" : `${n} Bestellungen`),
@@ -2648,6 +2658,20 @@ export const de = {
         competitors: "Infrage kommende Verkäufe",
         competitor: (id: number) => `Verkauf ${id}`,
         reason: "Grund",
+        /* Im Kartenkopf eines nicht vergleichbaren Verkaufs: warum, in einem Satz. */
+        reasonHints: {
+          test: "Testverkäufe werden nicht mit Berichten verglichen.",
+          no_date: "Ohne Verkaufsdatum lässt sich der Verkauf keinem Berichtstag zuordnen.",
+          before_coverage:
+            "Liegt vor dem ersten Berichtstag. Nur als mögliches Gegenstück geladen — keine fehlende Bestellung.",
+          after_coverage:
+            "Liegt nach dem letzten Berichtstag. Nur als mögliches Gegenstück geladen — keine fehlende Bestellung.",
+          inside_gap: "Liegt in einer Lücke der Verkaufsprotokollnummern; die Berichte sind dort unvollständig.",
+          no_coverage: "Die Berichte decken keinen Zeitraum ab.",
+          edge_day:
+            "Liegt am ersten oder letzten Berichtstag. Die Bestellung kann knapp außerhalb der Dateien liegen — offen, kein Fehlbestand.",
+        },
+        notCompared: "Nicht mit dem Bericht verglichen",
         cancelled: (day: string) => `In SkyIsles storniert am ${day}.`,
         refunds: (amount: string) => `In SkyIsles erfasste Erstattungen: ${amount}.`,
         testSale: "Testverkauf",
@@ -2663,6 +2687,7 @@ export const de = {
         figureLine: (qty: number, name: string) => `${qty} × ${name}`,
         linesPurged: "Die Positionsliste dieser Sitzung wurde gelöscht.",
         noLines: "Keine Positionen im Bericht.",
+        noReportLines: "Ohne Bestellung im Bericht gibt es keine Positionen zum Vergleichen.",
         figureFinding: (ledger: string, external: string) => `SkyIsles: ${ledger} · Bericht: ${external}`,
         figureMissing: "fehlt",
 
@@ -2677,6 +2702,9 @@ export const de = {
           derived: "Die Datenbank hat belegt, dass SkyIsles damals denselben Wert hatte wie der Bericht.",
           unknown: "Für den damaligen SkyIsles-Wert gibt es keinen Beleg. Er wird nicht geschätzt.",
         },
+        /* Über der aufgeklappten Tabelle: was die drei Herkunftszeichen bedeuten. */
+        basisLegend: "Herkunft des Werts bei der Analyse — antippen oder mit der Tastatur öffnen für die Erklärung:",
+        basisLabel: (basis: string) => `Herkunft: ${basis}`,
         statuses: {
           match: "Stimmt überein",
           deviation: "Abweichung",

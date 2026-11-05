@@ -13,7 +13,7 @@ import Link from "next/link";
 import { formatDate, formatNumber } from "@/lib/format";
 import { de } from "@/lib/i18n/de";
 import { sessionPageHref } from "@/lib/reconciliation/routes";
-import { CATEGORIES, type Category, type SessionPage } from "@/lib/reconciliation/view";
+import { CATEGORIES, type Category, pairingCounts, type SessionPage } from "@/lib/reconciliation/view";
 
 import { MatchCard } from "./match-comparison";
 
@@ -34,7 +34,8 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
 export function SessionOverview({ page: p }: { page: SessionPage }) {
   const s = p.session;
   const summary = s.summary;
-  const matches = summary ? CATEGORIES.reduce((n, c) => n + summary.categories[c], 0) : null;
+  // The stored rows, split into real pairs and the one-sided rows (`pairingCounts`).
+  const counts = summary ? pairingCounts(summary.categories) : null;
   return (
     <section aria-labelledby="recon-overview" className="mt-4 rounded-sky-md bg-surface/60 p-4 ring-1 ring-border/70">
       <h2 id="recon-overview" className="sr-only">{t.overview}</h2>
@@ -49,9 +50,20 @@ export function SessionOverview({ page: p }: { page: SessionPage }) {
         {s.recordFirst !== null && s.recordLast !== null ? (
           <Fact label={t.records}>{t.recordRange(String(s.recordFirst), String(s.recordLast))}</Fact>
         ) : null}
-        <Fact label={t.matches}>{matches === null ? copy.list.noSummary : formatNumber(matches)}</Fact>
-        {summary ? <Fact label={t.deviatingMatches}>{formatNumber(summary.categories.deviating)}</Fact> : null}
+        {counts === null ? (
+          <Fact label={t.matches}>{copy.list.noSummary}</Fact>
+        ) : (
+          <>
+            <Fact label={t.pairs}><span data-count="pairs">{formatNumber(counts.pairs)}</span></Fact>
+            {summary ? <Fact label={t.deviatingMatches}>{formatNumber(summary.categories.deviating)}</Fact> : null}
+            <Fact label={t.reportOnlyCount}><span data-count="report-only">{formatNumber(counts.reportOnly)}</span></Fact>
+            <Fact label={t.ledgerOnlyCount}><span data-count="ledger-only">{formatNumber(counts.ledgerOnly)}</span></Fact>
+            <Fact label={t.unpairedCount}><span data-count="unpaired">{formatNumber(counts.unpaired)}</span></Fact>
+            <Fact label={t.matchRecords}><span data-count="records">{formatNumber(counts.records)}</span></Fact>
+          </>
+        )}
       </dl>
+      {counts && counts.unpaired > 0 ? <p className="mt-2 text-xs text-muted">{t.unpairedHint}</p> : null}
       <p className="mt-2 text-xs text-muted">{copy.list.stateHints[s.state]}</p>
 
       {summary ? (
